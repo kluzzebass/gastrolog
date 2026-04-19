@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { systemClient } from "../client";
-import { useSystemMutation } from "./useSystem";
+import { applySettingsMutationEcho } from "./useSystem";
 import { decode } from "../glid";
 
 export function useSettings() {
@@ -155,11 +155,6 @@ function encodeLookupForWire(lookup: PutLookupWire): Record<string, unknown> {
   return out;
 }
 
-function invalidateSettings(qc: ReturnType<typeof useQueryClient>) {
-  qc.invalidateQueries({ queryKey: ["settings"] });
-  qc.invalidateQueries({ queryKey: ["system"] });
-}
-
 export function usePutServiceSettings() {
   const qc = useQueryClient();
   return useMutation({
@@ -172,14 +167,12 @@ export function usePutServiceSettings() {
       if (args.cluster) req.cluster = args.cluster;
       return systemClient.putServiceSettings(req as Parameters<typeof systemClient.putServiceSettings>[0]);
     },
-    onSuccess: () => {
-      invalidateSettings(qc);
-    },
+    onSuccess: (res) => applySettingsMutationEcho(qc, res.echo),
   });
 }
 
-/** Lookup writes rely on WatchSystem (config_version) to refresh caches — no onSuccess invalidation. */
 export function usePutLookupSettings() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: async (lookup: PutLookupWire) => {
       const wire = encodeLookupForWire(lookup);
@@ -187,24 +180,29 @@ export function usePutLookupSettings() {
         lookup: wire as Parameters<typeof systemClient.putLookupSettings>[0]["lookup"],
       });
     },
+    onSuccess: (res) => applySettingsMutationEcho(qc, res.echo),
   });
 }
 
 export function usePutMaxMindSettings() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: async (args: PutMaxMindArgs) => {
       return systemClient.putMaxMindSettings({
         maxmind: buildMaxMindReq(args.maxmind) as Parameters<typeof systemClient.putMaxMindSettings>[0]["maxmind"],
       });
     },
+    onSuccess: (res) => applySettingsMutationEcho(qc, res.echo),
   });
 }
 
 export function usePutSetupSettings() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: async (setupWizardDismissed: boolean) => {
       return systemClient.putSetupSettings({ setupWizardDismissed });
     },
+    onSuccess: (res) => applySettingsMutationEcho(qc, res.echo),
   });
 }
 
@@ -290,15 +288,19 @@ export function usePreviewYAMLLookup() {
 }
 
 export function useDeleteLookup() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: async (name: string) => {
       return systemClient.deleteLookup({ name });
     },
+    onSuccess: (res) => applySettingsMutationEcho(qc, res.echo),
   });
 }
 
 export function useRegenerateJwtSecret() {
-  return useSystemMutation(async () => {
-    return systemClient.regenerateJwtSecret({});
-  }, [["settings"]]);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => systemClient.regenerateJwtSecret({}),
+    onSuccess: (res) => applySettingsMutationEcho(qc, res.echo),
+  });
 }

@@ -33,8 +33,11 @@ export function useEditState<T extends Record<string, any>>(
     (id: string, patch: Partial<T>) => {
       setEdits((prev) => {
         const base = defaults(id);
-        // Only snapshot baseline when creating a NEW edit (no previous entry).
-        if (!prev[id]) {
+        // Snapshot baseline when creating a new edit, or when a prior stale
+        // edit lost its baseline (getEdit invalidation path). Without this,
+        // subsequent typing can be ignored because getEdit keeps treating the
+        // edit as stale forever.
+        if (!prev[id] || !Object.hasOwn(baselineRef.current, id)) {
           baselineRef.current[id] = JSON.stringify(base);
         }
         return {

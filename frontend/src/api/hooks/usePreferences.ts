@@ -16,8 +16,14 @@ export function usePutPreferences() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (args: { theme: string; syntaxHighlight: string; palette: string }) => {
-      await systemClient.putPreferences({ theme: args.theme, syntaxHighlight: args.syntaxHighlight, palette: args.palette });
+      return systemClient.putPreferences({
+        theme: args.theme,
+        syntaxHighlight: args.syntaxHighlight,
+        palette: args.palette,
+      });
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["preferences"] }),
+    onSuccess: (res) => {
+      if (res.preferences) qc.setQueryData(["preferences"], res.preferences);
+    },
   });
 }

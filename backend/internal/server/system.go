@@ -148,9 +148,109 @@ func (s *SystemServer) buildFullSystem(ctx context.Context) (*apiv1.GetSystemRes
 		}
 	}
 	if s.configSignal != nil {
-		resp.SystemVersion = s.configSignal.Version()
+		resp.SystemRaftIndex = s.configSignal.Version()
 	}
 	return resp, nil
+}
+
+// currentSystemRaftIndex returns the committed system Raft log index exposed on GetSystem.
+func (s *SystemServer) currentSystemRaftIndex() uint64 {
+	if s.configSignal == nil {
+		return 0
+	}
+	return s.configSignal.Version()
+}
+
+// buildFullSettingsResponse builds the authenticated GetSettingsResponse payload.
+// includeSecrets mirrors GetSettingsRequest.include_secrets.
+func (s *SystemServer) buildFullSettingsResponse(ctx context.Context, includeSecrets bool) (*apiv1.GetSettingsResponse, error) {
+	ss, err := s.loadServerSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	maxJobs := int32(ss.Scheduler.MaxConcurrentJobs) //nolint:gosec // G115: small config value, always fits in int32
+	if maxJobs == 0 {
+		maxJobs = int32(s.orch.MaxConcurrentJobs()) //nolint:gosec // G115: small config value, always fits in int32
+	}
+
+	mm := &apiv1.MaxMindSettings{
+		AutoDownload:      ss.MaxMind.AutoDownload,
+		LicenseConfigured: ss.MaxMind.AccountID != "" && ss.MaxMind.LicenseKey != "",
+	}
+	if !ss.MaxMind.LastUpdate.IsZero() {
+		mm.LastUpdate = ss.MaxMind.LastUpdate.Format(time.RFC3339)
+	}
+
+	authSettings := &apiv1.AuthSettings{
+		TokenDuration:        ss.Auth.TokenDuration,
+		JwtSecretConfigured:  ss.Auth.JWTSecret != "",
+		RefreshTokenDuration: ss.Auth.RefreshTokenDuration,
+		PasswordPolicy: &apiv1.PasswordPolicySettings{
+			MinLength:             int32(ss.Auth.PasswordPolicy.MinLength),             //nolint:gosec // G115
+			RequireMixedCase:      ss.Auth.PasswordPolicy.RequireMixedCase,
+			RequireDigit:          ss.Auth.PasswordPolicy.RequireDigit,
+			RequireSpecial:        ss.Auth.PasswordPolicy.RequireSpecial,
+			MaxConsecutiveRepeats: int32(ss.Auth.PasswordPolicy.MaxConsecutiveRepeats), //nolint:gosec // G115
+			ForbidAnimalNoise:     ss.Auth.PasswordPolicy.ForbidAnimalNoise,
+		},
+	}
+
+	if includeSecrets {
+		mm.AccountId = []byte(ss.MaxMind.AccountID)
+		mm.LicenseKey = ss.MaxMind.LicenseKey
+	}
+
+	resp := &apiv1.GetSettingsResponse{
+		Auth: authSettings,
+		Query: &apiv1.QuerySettings{
+			Timeout:           ss.Query.Timeout,
+			MaxFollowDuration: ss.Query.MaxFollowDuration,
+			MaxResultCount:    int32(ss.Query.MaxResultCount), //nolint:gosec // G115
+		},
+		Scheduler: &apiv1.SchedulerSettings{
+			MaxConcurrentJobs: maxJobs,
+		},
+		Tls: &apiv1.TLSSettings{
+			DefaultCert:         ss.TLS.DefaultCert,
+			Enabled:             ss.TLS.TLSEnabled,
+			HttpToHttpsRedirect: ss.TLS.HTTPToHTTPSRedirect,
+			HttpsPort:           ss.TLS.HTTPSPort,
+		},
+		Lookup: &apiv1.LookupSettings{
+			HttpLookups:     httpLookupsToProto(ss.Lookup.HTTPLookups),
+			JsonFileLookups: jsonFileLookupsToProto(ss.Lookup.JSONFileLookups),
+			YamlFileLookups: yamlFileLookupsToProto(ss.Lookup.YAMLFileLookups),
+			MmdbLookups:     mmdbLookupsToProto(ss.Lookup.MMDBLookups),
+			CsvLookups:      csvLookupsToProto(ss.Lookup.CSVLookups),
+			StaticLookups:   staticLookupsToProto(ss.Lookup.StaticLookups),
+		},
+		Maxmind: mm,
+		Cluster: &apiv1.ClusterSettings{
+			BroadcastInterval: ss.Cluster.BroadcastInterval,
+		},
+		SetupWizardDismissed: func() bool { v, _ := s.sysStore.GetSetupWizardDismissed(ctx); return v }(),
+		NodeId:               []byte(s.localNodeID),
+	}
+
+	if nodeUUID, err := glid.ParseUUID(s.localNodeID); err == nil {
+		if node, err := s.sysStore.GetNode(ctx, nodeUUID); err == nil && node != nil {
+			resp.NodeName = node.Name
+		}
+	}
+
+	return resp, nil
+}
+
+func (s *SystemServer) newSettingsMutationEcho(ctx context.Context) (*apiv1.SettingsMutationEcho, error) {
+	settings, err := s.buildFullSettingsResponse(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	return &apiv1.SettingsMutationEcho{
+		Settings:        settings,
+		SystemRaftIndex: s.currentSystemRaftIndex(),
+	}, nil
 }
 
 func (s *SystemServer) loadSystemVaults(ctx context.Context, resp *apiv1.GetSystemResponse) error {
@@ -431,76 +531,10 @@ func (s *SystemServer) GetSettings(
 		}), nil
 	}
 
-	maxJobs := int32(ss.Scheduler.MaxConcurrentJobs) //nolint:gosec // G115: small config value, always fits in int32
-	if maxJobs == 0 {
-		maxJobs = int32(s.orch.MaxConcurrentJobs()) //nolint:gosec // G115: small config value, always fits in int32
+	resp, err := s.buildFullSettingsResponse(ctx, req.Msg.IncludeSecrets)
+	if err != nil {
+		return nil, err
 	}
-
-	mm := &apiv1.MaxMindSettings{
-		AutoDownload:      ss.MaxMind.AutoDownload,
-		LicenseConfigured: ss.MaxMind.AccountID != "" && ss.MaxMind.LicenseKey != "",
-	}
-	if !ss.MaxMind.LastUpdate.IsZero() {
-		mm.LastUpdate = ss.MaxMind.LastUpdate.Format(time.RFC3339)
-	}
-
-	authSettings := &apiv1.AuthSettings{
-		TokenDuration:        ss.Auth.TokenDuration,
-		JwtSecretConfigured:  ss.Auth.JWTSecret != "",
-		RefreshTokenDuration: ss.Auth.RefreshTokenDuration,
-		PasswordPolicy: &apiv1.PasswordPolicySettings{
-			MinLength:             int32(ss.Auth.PasswordPolicy.MinLength),             //nolint:gosec // G115
-			RequireMixedCase:      ss.Auth.PasswordPolicy.RequireMixedCase,
-			RequireDigit:          ss.Auth.PasswordPolicy.RequireDigit,
-			RequireSpecial:        ss.Auth.PasswordPolicy.RequireSpecial,
-			MaxConsecutiveRepeats: int32(ss.Auth.PasswordPolicy.MaxConsecutiveRepeats), //nolint:gosec // G115
-			ForbidAnimalNoise:     ss.Auth.PasswordPolicy.ForbidAnimalNoise,
-		},
-	}
-
-	if req.Msg.IncludeSecrets {
-		mm.AccountId = []byte(ss.MaxMind.AccountID)
-		mm.LicenseKey = ss.MaxMind.LicenseKey
-	}
-
-	resp := &apiv1.GetSettingsResponse{
-		Auth: authSettings,
-		Query: &apiv1.QuerySettings{
-			Timeout:           ss.Query.Timeout,
-			MaxFollowDuration: ss.Query.MaxFollowDuration,
-			MaxResultCount:    int32(ss.Query.MaxResultCount), //nolint:gosec // G115
-		},
-		Scheduler: &apiv1.SchedulerSettings{
-			MaxConcurrentJobs: maxJobs,
-		},
-		Tls: &apiv1.TLSSettings{
-			DefaultCert:         ss.TLS.DefaultCert,
-			Enabled:             ss.TLS.TLSEnabled,
-			HttpToHttpsRedirect: ss.TLS.HTTPToHTTPSRedirect,
-			HttpsPort:           ss.TLS.HTTPSPort,
-		},
-		Lookup: &apiv1.LookupSettings{
-			HttpLookups:     httpLookupsToProto(ss.Lookup.HTTPLookups),
-			JsonFileLookups: jsonFileLookupsToProto(ss.Lookup.JSONFileLookups),
-			YamlFileLookups: yamlFileLookupsToProto(ss.Lookup.YAMLFileLookups),
-			MmdbLookups:     mmdbLookupsToProto(ss.Lookup.MMDBLookups),
-			CsvLookups:      csvLookupsToProto(ss.Lookup.CSVLookups),
-			StaticLookups:   staticLookupsToProto(ss.Lookup.StaticLookups),
-		},
-		Maxmind: mm,
-		Cluster: &apiv1.ClusterSettings{
-			BroadcastInterval: ss.Cluster.BroadcastInterval,
-		},
-		SetupWizardDismissed: func() bool { v, _ := s.sysStore.GetSetupWizardDismissed(ctx); return v }(),
-		NodeId:               []byte(s.localNodeID),
-	}
-
-	if nodeUUID, err := glid.ParseUUID(s.localNodeID); err == nil {
-		if node, err := s.sysStore.GetNode(ctx, nodeUUID); err == nil && node != nil {
-			resp.NodeName = node.Name
-		}
-	}
-
 	return connect.NewResponse(resp), nil
 }
 
@@ -527,7 +561,11 @@ func (s *SystemServer) PutServiceSettings(
 	if s.onTLSConfigChange != nil && req.Msg.Tls != nil {
 		s.onTLSConfigChange()
 	}
-	return connect.NewResponse(&apiv1.PutServiceSettingsResponse{}), nil
+	echo, err := s.newSettingsMutationEcho(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&apiv1.PutServiceSettingsResponse{Echo: echo}), nil
 }
 
 // PutLookupSettings replaces lookup table configuration.
@@ -554,7 +592,11 @@ func (s *SystemServer) PutLookupSettings(
 	if s.onLookupConfigChange != nil {
 		s.onLookupConfigChange(ss.Lookup, ss.MaxMind)
 	}
-	return connect.NewResponse(&apiv1.PutLookupSettingsResponse{}), nil
+	echo, err := s.newSettingsMutationEcho(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&apiv1.PutLookupSettingsResponse{Echo: echo}), nil
 }
 
 // PutMaxMindSettings updates MaxMind auto-download configuration.
@@ -578,7 +620,11 @@ func (s *SystemServer) PutMaxMindSettings(
 	if s.onLookupConfigChange != nil {
 		s.onLookupConfigChange(ss.Lookup, ss.MaxMind)
 	}
-	return connect.NewResponse(&apiv1.PutMaxMindSettingsResponse{}), nil
+	echo, err := s.newSettingsMutationEcho(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&apiv1.PutMaxMindSettingsResponse{Echo: echo}), nil
 }
 
 // PutSetupSettings updates setup wizard dismissal state.
@@ -592,7 +638,11 @@ func (s *SystemServer) PutSetupSettings(
 	if err := s.sysStore.SetSetupWizardDismissed(ctx, *req.Msg.SetupWizardDismissed); err != nil {
 		return nil, errInternal(err)
 	}
-	return connect.NewResponse(&apiv1.PutSetupSettingsResponse{}), nil
+	echo, err := s.newSettingsMutationEcho(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&apiv1.PutSetupSettingsResponse{Echo: echo}), nil
 }
 
 // DeleteLookup removes a lookup table by name from whichever type list it
@@ -645,7 +695,11 @@ func (s *SystemServer) DeleteLookup(
 		s.onLookupConfigChange(ss.Lookup, ss.MaxMind)
 	}
 
-	return connect.NewResponse(&apiv1.DeleteLookupResponse{}), nil
+	echo, err := s.newSettingsMutationEcho(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&apiv1.DeleteLookupResponse{Echo: echo}), nil
 }
 
 // slicesDeleteFunc returns a new slice with elements matching f removed.
@@ -701,7 +755,11 @@ func (s *SystemServer) RegenerateJwtSecret(
 
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifySettingPut, Key: system.NotifyKeyServiceSettings})
 
-	return connect.NewResponse(&apiv1.RegenerateJwtSecretResponse{}), nil
+	echo, err := s.newSettingsMutationEcho(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&apiv1.RegenerateJwtSecretResponse{Echo: echo}), nil
 }
 
 // PutNodeConfig creates or updates a node configuration.
@@ -767,7 +825,7 @@ func (s *SystemServer) WatchSystem(
 	if s.configSignal != nil {
 		initialVersion = s.configSignal.Version()
 	}
-	if err := stream.Send(&apiv1.WatchSystemResponse{SystemVersion: initialVersion}); err != nil {
+	if err := stream.Send(&apiv1.WatchSystemResponse{SystemRaftIndex: initialVersion}); err != nil {
 		return err
 	}
 	if s.configSignal == nil {
@@ -782,7 +840,7 @@ func (s *SystemServer) WatchSystem(
 			return nil
 		case <-ch:
 			if err := stream.Send(&apiv1.WatchSystemResponse{
-				SystemVersion: s.configSignal.Version(),
+				SystemRaftIndex: s.configSignal.Version(),
 			}); err != nil {
 				return err
 			}

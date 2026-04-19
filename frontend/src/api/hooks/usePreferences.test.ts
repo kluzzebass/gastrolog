@@ -24,10 +24,11 @@ describe("usePreferences", () => {
 });
 
 describe("usePutPreferences", () => {
-  test("sends preferences and invalidates cache", async () => {
-    m(mocks.systemClient, "putPreferences").mockResolvedValueOnce({});
+  test("sends preferences and writes response into cache", async () => {
+    const prefs = { theme: "dark", syntaxHighlight: "full", palette: "nord" };
+    m(mocks.systemClient, "putPreferences").mockResolvedValueOnce({ preferences: prefs });
     const qc = createTestQueryClient();
-    qc.setQueryData(["preferences"], {});
+    qc.setQueryData(["preferences"], { theme: "light", syntaxHighlight: "off", palette: "default" });
 
     const { result } = renderHook(() => usePutPreferences(), { wrapper: wrapper(qc) });
 
@@ -44,6 +45,7 @@ describe("usePutPreferences", () => {
       syntaxHighlight: "full",
       palette: "nord",
     });
-    expect(qc.getQueryState(["preferences"])?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(["preferences"])?.isInvalidated).toBeFalsy();
+    expect(qc.getQueryData<Record<string, string>>(["preferences"])).toEqual(prefs);
   });
 });

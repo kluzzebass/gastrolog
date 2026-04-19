@@ -1,29 +1,62 @@
+import type { PlainMessage } from "@bufbuild/protobuf";
+import type { QueryClient } from "@tanstack/react-query";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { systemClient } from "../client";
-import { GetSystemResponse } from "../gen/gastrolog/v1/system_pb";
+import { GetSystemResponse, SettingsMutationEcho } from "../gen/gastrolog/v1/system_pb";
 import { protoSharing } from "./protoSharing";
 import { decode } from "../glid";
 
 /**
- * Config version tracking for cache coherence.
- *
- * Every config response (GetConfig, mutations, WatchConfig) carries a
- * monotonically increasing config_version (Raft log index). The frontend
- * tracks the highest version it has seen from authoritative sources
- * (mutation responses and setQueryData). WatchConfig only invalidates
- * the config cache when its version exceeds the cached version — no
- * timers, no races.
+ * Tracks the highest system Raft log index seen from authoritative sources
+ * (GetSystem, mutation responses, setQueryData). useWatchSystem compares the
+ * stream against this to avoid redundant invalidation.
  */
-let cachedSystemVersion = 0n;
+let cachedSystemRaftIndex = 0n;
 
-/** Update the cached version. Only advances forward (max wins). */
-export function setSystemVersion(v: bigint) {
-  if (v > cachedSystemVersion) cachedSystemVersion = v;
+/** Update the cached index. Only advances forward (max wins). */
+export function setSystemRaftIndex(v: unknown) {
+  const n = systemRaftIndexScalarToBigInt(v);
+  if (n > cachedSystemRaftIndex) cachedSystemRaftIndex = n;
 }
 
-/** Read the current cached version for comparison by WatchConfig. */
-export function getSystemVersion(): bigint {
-  return cachedSystemVersion;
+/** Read the cached system raft index for comparison by useWatchSystem. */
+export function getSystemRaftIndex(): bigint {
+  return cachedSystemRaftIndex;
+}
+
+/** Coerce protobuf uint64 scalars to bigint for index comparisons. */
+export function systemRaftIndexScalarToBigInt(v: unknown): bigint {
+  try {
+    if (typeof v === "bigint") return v;
+    if (typeof v === "string") return BigInt(v);
+    if (typeof v === "number") return BigInt(v);
+    return 0n;
+  } catch {
+    return 0n;
+  }
+}
+
+/**
+ * After server-settings mutations, mirror GetSettings and advance system_raft_index without
+ * invalidating (avoids follower-lag refetch races). Patches cached GetSystem when the echo
+ * index is newer than what is already in the React Query cache.
+ */
+export function applySettingsMutationEcho(
+  qc: QueryClient,
+  echo?: PlainMessage<SettingsMutationEcho> | SettingsMutationEcho,
+) {
+  if (!echo?.settings) return;
+  qc.setQueryData(["settings"], echo.settings);
+  const ver = systemRaftIndexScalarToBigInt(echo.systemRaftIndex);
+  if (ver === 0n) return;
+  setSystemRaftIndex(ver);
+  const cached = qc.getQueryData<GetSystemResponse>(["system"]);
+  if (!cached) return;
+  if (ver <= systemRaftIndexScalarToBigInt(cached.systemRaftIndex)) return;
+  const next = cached.clone();
+  next.systemRaftIndex = echo.systemRaftIndex;
+  qc.cancelQueries({ queryKey: ["system"] });
+  qc.setQueryData(["system"], next);
 }
 
 /**
@@ -48,9 +81,18 @@ export function useSystemMutation<TArgs, TResult>(
         ? (result as { system?: GetSystemResponse }).system
         : undefined;
       if (cfg) {
-        setSystemVersion(cfg.systemVersion);
-        qc.cancelQueries({ queryKey: ["system"] });
-        qc.setQueryData(["system"], cfg);
+        const prev = qc.getQueryData<GetSystemResponse>(["system"]);
+        const prevBig = prev
+          ? systemRaftIndexScalarToBigInt(prev.systemRaftIndex)
+          : -1n;
+        const nextBig = systemRaftIndexScalarToBigInt(cfg.systemRaftIndex);
+        // Ignore stale/equal mutation payloads to avoid UI regressing to an
+        // older snapshot and then jumping forward again when WatchSystem refetches.
+        if (nextBig > prevBig) {
+          setSystemRaftIndex(cfg.systemRaftIndex);
+          qc.cancelQueries({ queryKey: ["system"] });
+          qc.setQueryData(["system"], cfg);
+        }
       } else {
         // Only invalidate config when the response didn't carry the full
         // config — otherwise the refetch can hit a stale Raft follower and
@@ -70,18 +112,22 @@ export function useConfig() {
     queryKey: ["system"],
     queryFn: async () => {
       const response = await systemClient.getSystem({});
-      // Reject stale refetches: if a Raft follower returns an older version
+      // Reject stale refetches: if a Raft follower returns an older index
       // than what's already in the cache (from a mutation or earlier fetch),
       // keep the cached data instead of regressing.
       const cached = qc.getQueryData<GetSystemResponse>(["system"]);
-      if (cached && response.systemVersion < cached.systemVersion) {
+      const respBig = systemRaftIndexScalarToBigInt(response.systemRaftIndex);
+      const cacheBig = cached
+        ? systemRaftIndexScalarToBigInt(cached.systemRaftIndex)
+        : 0n;
+      if (cached && respBig <= cacheBig) {
         return cached;
       }
-      setSystemVersion(response.systemVersion);
+      setSystemRaftIndex(response.systemRaftIndex);
       return response;
     },
     structuralSharing: protoSharing(GetSystemResponse.equals),
-    staleTime: 60_000, // safety net only; mutations set data directly, WatchConfig handles push
+    staleTime: 60_000, // safety net only; mutations set data directly, WatchSystem gates invalidation
   });
 }
 

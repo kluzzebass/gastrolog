@@ -99,7 +99,13 @@ func (s *SystemServer) PutPreferences(
 		return nil, errInternal(err)
 	}
 
-	return connect.NewResponse(&apiv1.PutPreferencesResponse{}), nil
+	return connect.NewResponse(&apiv1.PutPreferencesResponse{
+		Preferences: &apiv1.GetPreferencesResponse{
+			Theme:           prefs.Theme,
+			SyntaxHighlight: prefs.SyntaxHighlight,
+			Palette:         prefs.Palette,
+		},
+	}), nil
 }
 
 // GetSavedQueries returns the current user's saved queries.
@@ -117,14 +123,7 @@ func (s *SystemServer) GetSavedQueries(
 		return nil, errInternal(err)
 	}
 
-	resp := &apiv1.GetSavedQueriesResponse{}
-	for _, q := range prefs.SavedQueries {
-		resp.Queries = append(resp.Queries, &apiv1.SavedQuery{
-			Name:  q.Name,
-			Query: q.Query,
-		})
-	}
-	return connect.NewResponse(resp), nil
+	return connect.NewResponse(savedQueriesResponseFromPrefs(prefs)), nil
 }
 
 // PutSavedQuery creates or updates a saved query by name.
@@ -165,7 +164,9 @@ func (s *SystemServer) PutSavedQuery(
 		return nil, errInternal(err)
 	}
 
-	return connect.NewResponse(&apiv1.PutSavedQueryResponse{}), nil
+	return connect.NewResponse(&apiv1.PutSavedQueryResponse{
+		SavedQueries: savedQueriesResponseFromPrefs(prefs),
+	}), nil
 }
 
 // DeleteSavedQuery removes a saved query by name.
@@ -198,5 +199,18 @@ func (s *SystemServer) DeleteSavedQuery(
 		return nil, errInternal(err)
 	}
 
-	return connect.NewResponse(&apiv1.DeleteSavedQueryResponse{}), nil
+	return connect.NewResponse(&apiv1.DeleteSavedQueryResponse{
+		SavedQueries: savedQueriesResponseFromPrefs(prefs),
+	}), nil
+}
+
+func savedQueriesResponseFromPrefs(prefs userPreferences) *apiv1.GetSavedQueriesResponse {
+	resp := &apiv1.GetSavedQueriesResponse{}
+	for _, q := range prefs.SavedQueries {
+		resp.Queries = append(resp.Queries, &apiv1.SavedQuery{
+			Name:  q.Name,
+			Query: q.Query,
+		})
+	}
+	return resp
 }
