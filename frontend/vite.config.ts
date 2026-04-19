@@ -1,8 +1,8 @@
+import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from "node:http";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import http2Proxy from "vite-plugin-http2-proxy";
-import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from "node:http";
 
 // Primary Vite dev server on :3001 → backend :4564.
 // Extra proxy servers on :3002-3004 forward assets/HMR to :3001

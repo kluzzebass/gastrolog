@@ -28,14 +28,15 @@ export function useWatchSystem() {
             // should do that. The queryFn compares against the cached data's
             // version, so a refetch that returns the new version will be accepted.
             qc.invalidateQueries({ queryKey: ["system"] });
+            // Keep dependent caches in the same gate as ["system"]: the stream
+            // only carries a version bump, not which subsystem changed. Running
+            // these on every message (even when the version did not advance)
+            // duplicated refetches after mutations that already invalidated.
+            qc.invalidateQueries({ queryKey: ["settings"] });
+            qc.invalidateQueries({ queryKey: ["vaults"] });
+            qc.invalidateQueries({ queryKey: ["stats"] });
+            qc.invalidateQueries({ queryKey: ["chunks"] });
           }
-
-          // Non-config caches are always invalidated — they don't carry
-          // version info and are cheap to refetch.
-          qc.invalidateQueries({ queryKey: ["settings"] });
-          qc.invalidateQueries({ queryKey: ["vaults"] });
-          qc.invalidateQueries({ queryKey: ["stats"] });
-          qc.invalidateQueries({ queryKey: ["chunks"] });
           nextBackoff = 0; // reset backoff on successful message
         }
       } catch (err) {

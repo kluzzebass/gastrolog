@@ -24,6 +24,14 @@ When talking to **local** GastroLog processes (dev cluster, `just cluster-run`, 
 - To target a specific local node: **`gastrolog --home <path-to-node-home> …`** (still omit `--addr` unless you need TCP), or **`--addr unix://<absolute-path-to>/gastrolog.sock`**.
 - **Cluster dev layout:** keep node state **inside the repo** under **`data/node{N}`** (or another directory already **gitignored**, e.g. root `.gitignore` includes **`data`**). That way agents and scripts have a **stable path** to sockets and stores; relying only on **`/tmp/gastrolog`** is brittle in sandboxes and fresh environments. Align **`GLOG_DATA_DIR`** / **`scripts/cluster.sh --data-dir`** with that layout when you bootstrap the cluster (`backend/justfile` **`cluster-kill`** assumes homes like **`data/node*`**).
 
+### Cursor embedded browser tab
+
+Cursor’s **embedded browser tab** (in the editor, not a separate Chrome/Safari window) can **degrade over a session**: RPCs appear to **hang forever** (no response), as if the backend or proxy died, when the server is actually fine. **Closing the tab and opening a new embedded browser tab** often restores normal behavior immediately.
+
+If that pattern fits ( **`curl`** and a real browser still work), mention it to the user before chasing cluster or Vite theories. This is still a **secondary** hypothesis—most hangs are app, proxy, or auth bugs—so do not treat “close and reopen the embedded browser tab” as the default fix for every networking symptom.
+
+When **`curl`**ing the local Vite dev server, use the hostname (e.g. **`http://localhost:3001`**), not **`http://127.0.0.1:3001`**, so the target matches Vite’s default **`server.host`** (`localhost`, which on many setups binds only the IPv6 loopback `::1`).
+
 ## Do not suggest creating PRs.
 
 ## Always create new branches before picking up issues.

@@ -178,8 +178,8 @@ export function usePutServiceSettings() {
   });
 }
 
+/** Lookup writes rely on WatchSystem (config_version) to refresh caches — no onSuccess invalidation. */
 export function usePutLookupSettings() {
-  const qc = useQueryClient();
   return useMutation({
     mutationFn: async (lookup: PutLookupWire) => {
       const wire = encodeLookupForWire(lookup);
@@ -187,34 +187,23 @@ export function usePutLookupSettings() {
         lookup: wire as Parameters<typeof systemClient.putLookupSettings>[0]["lookup"],
       });
     },
-    onSuccess: () => {
-      invalidateSettings(qc);
-    },
   });
 }
 
 export function usePutMaxMindSettings() {
-  const qc = useQueryClient();
   return useMutation({
     mutationFn: async (args: PutMaxMindArgs) => {
       return systemClient.putMaxMindSettings({
         maxmind: buildMaxMindReq(args.maxmind) as Parameters<typeof systemClient.putMaxMindSettings>[0]["maxmind"],
       });
     },
-    onSuccess: () => {
-      invalidateSettings(qc);
-    },
   });
 }
 
 export function usePutSetupSettings() {
-  const qc = useQueryClient();
   return useMutation({
     mutationFn: async (setupWizardDismissed: boolean) => {
       return systemClient.putSetupSettings({ setupWizardDismissed });
-    },
-    onSuccess: () => {
-      invalidateSettings(qc);
     },
   });
 }
@@ -301,13 +290,9 @@ export function usePreviewYAMLLookup() {
 }
 
 export function useDeleteLookup() {
-  const qc = useQueryClient();
   return useMutation({
     mutationFn: async (name: string) => {
       return systemClient.deleteLookup({ name });
-    },
-    onSuccess: () => {
-      invalidateSettings(qc);
     },
   });
 }
