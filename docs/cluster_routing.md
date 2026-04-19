@@ -37,10 +37,10 @@ flowchart TD
 
 | Strategy | Count | Interceptor action | Example RPCs |
 |----------|------:|-------------------|-------------|
-| **RouteLocal** | 39 | Pass through | Health, GetConfig, ListVaults, GetStats, WatchConfig |
-| **RouteLeader** | 30 | Pass through (Raft Apply handles leader-forwarding) | PutVault, PutIngester, PutSettings, DeleteVault |
-| **RouteTargeted** | 11 | Auto-forward to vault owner via ForwardRPC | ListChunks, GetIndexes, SealVault, ValidateVault |
-| **RouteFanOut** | 6 | Pass through (handler fans out) | Search, Follow, Explain, GetContext, GetFields |
+| **RouteLocal** | 42 | Pass through | Health, GetConfig, ListVaults, GetStats, WatchConfig |
+| **RouteLeader** | 39 | Pass through (Raft Apply handles leader-forwarding) | PutVault, PutIngester, PutServiceSettings, PutLookupSettings, DeleteVault |
+| **RouteTargeted** | 12 | Auto-forward to vault owner via ForwardRPC | ListChunks, GetIndexes, SealVault, ValidateVault |
+| **RouteFanOut** | 7 | Pass through (handler fans out) | Search, Follow, Explain, GetContext, GetFields |
 
 ## How Forwarding Works
 
