@@ -1,0 +1,17 @@
+---
+description: UI audience and design principles for GastroLog frontend
+globs: frontend/**/*
+alwaysApply: false
+---
+
+# Users
+
+SREs under pressure, developers debugging, ops managing pipelines/retention. The UI must serve all three: fast search, clear configuration, readable logs.
+
+# Design principles
+
+1. **Instrument, not dashboard** — each view has a focused purpose; avoid metric clutter.
+2. **Quiet until needed** — calm default; color/motion/emphasis only when meaningful.
+3. **Typography is the interface** — four-level hierarchy (bright → normal → muted → ghost); prefer type over chrome.
+4. **Respect the palette** — semantic colors only; **no raw hex**; use design tokens.
+5. **Crafted details** — scrollbars, resize handles, focus rings, grain, etc. matter.
