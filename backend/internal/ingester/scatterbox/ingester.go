@@ -26,6 +26,7 @@ import (
 // Implements orchestrator.Ingester and orchestrator.Triggerable.
 type Ingester struct {
 	id       string
+	node     string // cluster node ID — embedded in every record body
 	interval time.Duration
 	burst    int
 	trigger  chan struct{} // signaled by Trigger() for one-shot mode
@@ -55,19 +56,24 @@ func (s *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessag
 }
 
 func (s *Ingester) runContinuous(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
-	timer := time.NewTimer(s.interval)
-	defer timer.Stop()
+	// Ticker, not Timer+Reset: keeps cadence on wall-clock phase regardless
+	// of emitBurst duration or pressure-gate waits. A Timer+Reset pattern
+	// drifts by `emitBurst_duration + gate_wait` every cycle, which makes
+	// the "deterministic test signal" not actually deterministic. Missed
+	// ticks coalesce (Ticker.C is a 1-slot channel), so long stalls don't
+	// produce a thundering-herd catch-up.
+	ticker := time.NewTicker(s.interval)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-timer.C:
+		case <-ticker.C:
 		case <-s.trigger:
 		}
 
 		s.emitBurst(ctx, out)
-		timer.Reset(s.interval)
 	}
 }
 
@@ -112,24 +118,36 @@ func (s *Ingester) Trigger() {
 	}
 }
 
-// generate creates a single traceable record.
+// generate creates a single traceable record. The body embeds seq,
+// generation time, ingester id, and cluster node — in a multi-node
+// deployment every node's scatterbox runs the same config, so the node
+// field is the only thing that tells records from different nodes apart
+// (seq is per-instance-monotonic but per-node, so two nodes will produce
+// overlapping seq ranges).
 func (s *Ingester) generate() orchestrator.IngestMessage {
 	seq := s.seq.Add(1)
 	now := time.Now()
 
 	body := fmt.Sprintf(
-		`{"seq":%d,"generated_at":"%s","ingester":"%s"}`,
+		`{"seq":%d,"generated_at":"%s","ingester":"%s","node":"%s"}`,
 		seq,
 		now.Format(time.RFC3339Nano),
 		s.id,
+		s.node,
 	)
 
 	return orchestrator.IngestMessage{
 		Attrs: map[string]string{
 			"ingester_type": "scatterbox",
 			"seq":           strconv.FormatUint(seq, 10),
+			"node":          s.node,
 		},
-		Raw:        []byte(body),
+		Raw: []byte(body),
+		// Scatterbox synthesizes its own logs, so SourceTS and IngestTS
+		// coincide — there's no upstream timestamp to preserve. Setting
+		// SourceTS matches chatterbox's behavior and keeps pipeline
+		// invariants uniform across synthetic ingesters.
+		SourceTS:   now,
 		IngestTS:   now,
 		IngesterID: s.id,
 	}

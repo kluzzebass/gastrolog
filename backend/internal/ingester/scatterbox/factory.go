@@ -25,6 +25,24 @@ func ParamDefaults() map[string]string {
 	}
 }
 
+// NewFactory returns an IngesterFactory that produces scatterbox ingesters
+// tagged with nodeID. The node ID is embedded in every record's body and
+// Attrs ("node" key), which lets a multi-node cluster running the same
+// scatterbox config on every node produce records that are uniquely
+// attributable to the originating node. Without this, the four nodes emit
+// four JSON-identical records every interval and only the backend
+// ingester_id attr tells them apart.
+func NewFactory(nodeID string) orchestrator.IngesterFactory {
+	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
+		ing, err := NewIngester(id, params, logger)
+		if err != nil {
+			return nil, err
+		}
+		ing.(*Ingester).node = nodeID
+		return ing, nil
+	}
+}
+
 // NewIngester creates a scatterbox ingester from configuration parameters.
 //
 // Supported parameters:
@@ -33,6 +51,9 @@ func ParamDefaults() map[string]string {
 //
 // At the default settings, scatterbox emits 10 records/sec.
 // Set interval=1ms burst=1 for 1000 records/sec.
+//
+// The returned ingester's node field is empty. Production code should use
+// NewFactory(nodeID) instead so records embed the cluster node identifier.
 func NewIngester(id glid.GLID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
 	interval := defaultInterval
 	burst := defaultBurst
