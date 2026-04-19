@@ -856,6 +856,15 @@ type PeerBytesStat struct {
 	Peer          string                 `protobuf:"bytes,1,opt,name=peer,proto3" json:"peer,omitempty"`                                         // target node ID
 	BytesSent     int64                  `protobuf:"varint,2,opt,name=bytes_sent,json=bytesSent,proto3" json:"bytes_sent,omitempty"`             // bytes this node has sent to peer
 	BytesReceived int64                  `protobuf:"varint,3,opt,name=bytes_received,json=bytesReceived,proto3" json:"bytes_received,omitempty"` // bytes this node has received from peer
+	// Backend-derived rates (bytes/sec) computed by differencing consecutive
+	// monotonic samples on the node. These exist to avoid UI cold-start and to
+	// make the inspector immediately useful after mount.
+	TxBytesPerSec float64 `protobuf:"fixed64,4,opt,name=tx_bytes_per_sec,json=txBytesPerSec,proto3" json:"tx_bytes_per_sec,omitempty"`
+	RxBytesPerSec float64 `protobuf:"fixed64,5,opt,name=rx_bytes_per_sec,json=rxBytesPerSec,proto3" json:"rx_bytes_per_sec,omitempty"`
+	// Rolling sparkline windows (bytes/sec), oldest → newest.
+	// Kept short (e.g. 20 points) so inspector renders quickly.
+	TxSpark       []float64 `protobuf:"fixed64,6,rep,packed,name=tx_spark,json=txSpark,proto3" json:"tx_spark,omitempty"`
+	RxSpark       []float64 `protobuf:"fixed64,7,rep,packed,name=rx_spark,json=rxSpark,proto3" json:"rx_spark,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -909,6 +918,34 @@ func (x *PeerBytesStat) GetBytesReceived() int64 {
 		return x.BytesReceived
 	}
 	return 0
+}
+
+func (x *PeerBytesStat) GetTxBytesPerSec() float64 {
+	if x != nil {
+		return x.TxBytesPerSec
+	}
+	return 0
+}
+
+func (x *PeerBytesStat) GetRxBytesPerSec() float64 {
+	if x != nil {
+		return x.RxBytesPerSec
+	}
+	return 0
+}
+
+func (x *PeerBytesStat) GetTxSpark() []float64 {
+	if x != nil {
+		return x.TxSpark
+	}
+	return nil
+}
+
+func (x *PeerBytesStat) GetRxSpark() []float64 {
+	if x != nil {
+		return x.RxSpark
+	}
+	return nil
 }
 
 // SystemAlert represents a runtime condition that operators should be aware of.
@@ -3581,12 +3618,16 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x12forwarded_received\x18# \x01(\x03R\x11forwardedReceived\x121\n" +
 	"\x06alerts\x18$ \x03(\v2\x19.gastrolog.v1.SystemAlertR\x06alerts\x12:\n" +
 	"\n" +
-	"peer_bytes\x18% \x03(\v2\x1b.gastrolog.v1.PeerBytesStatR\tpeerBytes\"i\n" +
+	"peer_bytes\x18% \x03(\v2\x1b.gastrolog.v1.PeerBytesStatR\tpeerBytes\"\xf1\x01\n" +
 	"\rPeerBytesStat\x12\x12\n" +
 	"\x04peer\x18\x01 \x01(\tR\x04peer\x12\x1d\n" +
 	"\n" +
 	"bytes_sent\x18\x02 \x01(\x03R\tbytesSent\x12%\n" +
-	"\x0ebytes_received\x18\x03 \x01(\x03R\rbytesReceived\"\xfc\x01\n" +
+	"\x0ebytes_received\x18\x03 \x01(\x03R\rbytesReceived\x12'\n" +
+	"\x10tx_bytes_per_sec\x18\x04 \x01(\x01R\rtxBytesPerSec\x12'\n" +
+	"\x10rx_bytes_per_sec\x18\x05 \x01(\x01R\rrxBytesPerSec\x12\x19\n" +
+	"\btx_spark\x18\x06 \x03(\x01R\atxSpark\x12\x19\n" +
+	"\brx_spark\x18\a \x03(\x01R\arxSpark\"\xfc\x01\n" +
 	"\vSystemAlert\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x127\n" +
 	"\bseverity\x18\x02 \x01(\x0e2\x1b.gastrolog.v1.AlertSeverityR\bseverity\x12\x16\n" +

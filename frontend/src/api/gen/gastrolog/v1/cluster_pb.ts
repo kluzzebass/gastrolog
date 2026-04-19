@@ -693,6 +693,33 @@ export class PeerBytesStat extends Message<PeerBytesStat> {
    */
   bytesReceived = protoInt64.zero;
 
+  /**
+   * Backend-derived rates (bytes/sec) computed by differencing consecutive
+   * monotonic samples on the node. These exist to avoid UI cold-start and to
+   * make the inspector immediately useful after mount.
+   *
+   * @generated from field: double tx_bytes_per_sec = 4;
+   */
+  txBytesPerSec = 0;
+
+  /**
+   * @generated from field: double rx_bytes_per_sec = 5;
+   */
+  rxBytesPerSec = 0;
+
+  /**
+   * Rolling sparkline windows (bytes/sec), oldest → newest.
+   * Kept short (e.g. 20 points) so inspector renders quickly.
+   *
+   * @generated from field: repeated double tx_spark = 6;
+   */
+  txSpark: number[] = [];
+
+  /**
+   * @generated from field: repeated double rx_spark = 7;
+   */
+  rxSpark: number[] = [];
+
   constructor(data?: PartialMessage<PeerBytesStat>) {
     super();
     proto3.util.initPartial(data, this);
@@ -704,6 +731,10 @@ export class PeerBytesStat extends Message<PeerBytesStat> {
     { no: 1, name: "peer", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "bytes_sent", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 3, name: "bytes_received", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 4, name: "tx_bytes_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 5, name: "rx_bytes_per_sec", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 6, name: "tx_spark", kind: "scalar", T: 1 /* ScalarType.DOUBLE */, repeated: true },
+    { no: 7, name: "rx_spark", kind: "scalar", T: 1 /* ScalarType.DOUBLE */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PeerBytesStat {

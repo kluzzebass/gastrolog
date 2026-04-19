@@ -65,7 +65,7 @@ export function useScrollEffects(deps: ScrollEffectDeps) {
       observer.disconnect();
       scrollEl?.removeEventListener("scroll", openGate);
     };
-  }, [hasMore, isSearching]);
+  }, [expressionRef, hasMore, isSearching, loadMoreRef]);
 
   // Follow mode: track scroll position and auto-reset new-record counter.
   useEffect(() => {
@@ -81,7 +81,7 @@ export function useScrollEffects(deps: ScrollEffectDeps) {
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
-  }, [isFollowMode]);
+  }, [isFollowMode, resetFollowNewCountRef]);
 
   // After search completes, scroll the selected row into view.
   useEffect(() => {

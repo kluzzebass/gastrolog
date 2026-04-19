@@ -59,7 +59,7 @@ export function encode(bytes: Uint8Array): string {
 
 /** Decode a 26-char base32hex string to 16 raw bytes. Returns zero bytes for empty/invalid input. */
 export function decode(s: string): Uint8Array<ArrayBuffer> {
-  if (s?.length !== ENCODED_LEN) return new Uint8Array(ZERO);
+  if (s.length !== ENCODED_LEN) return new Uint8Array(ZERO);
 
   const out = new Uint8Array(SIZE);
   let oi = 0;

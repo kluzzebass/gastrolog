@@ -17,7 +17,7 @@ import { useVaults, useStats, useLogout, useCurrentUser } from "../api/hooks";
 import { Record as ProtoRecord } from "../api/client";
 import { TableResult, TableRow } from "../api/gen/gastrolog/v1/query_pb";
 
-import { timeRangeMs, sameRecord } from "../utils";
+import { timeRangeMs } from "../utils";
 import { encode } from "../api/glid";
 import { protoToInstant, instantToISO } from "../utils/temporal";
 import {
@@ -260,7 +260,7 @@ export function useSearchView() {
   // Shared ref for the currently-selected DOM row — used by both navigation and scroll hooks.
   const selectedRowRef = useRef<HTMLElement>(null);
 
-  const { selectedRecord, setSelectedRecord, selectedRecordRef } = useRecordNavigation({
+  const { selectedRecord, setSelectedRecord, selectedRecordRef: _selectedRecordRef } = useRecordNavigation({
     isFollowMode,
     recordsRef,
     followRecordsRef,
