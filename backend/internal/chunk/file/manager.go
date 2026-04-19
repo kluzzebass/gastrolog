@@ -1,13 +1,13 @@
 package file
 
 import (
-	"gastrolog/internal/glid"
 	"bytes"
 	"cmp"
 	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"io"
 	"log/slog"
 	"os"
@@ -137,30 +137,30 @@ type Config struct {
 //   - Logging is intentionally sparse; only lifecycle events are logged
 //   - No logging in hot paths (Append, cursor iteration)
 type Manager struct {
-	mu       sync.Mutex
-	cfg      Config
-	lockFile *os.File // Exclusive lock on vault directory
-	active   *chunkState
-	metas    map[chunk.ChunkID]*chunkMeta // In-memory chunk metadata
-	closed   bool
-	zstdEnc   *zstd.Encoder
-	zstdEncMu sync.Mutex // serializes concurrent CompressChunk calls sharing zstdEnc
-	cloudIdx      *cloudIndex              // local B+ tree cache of cloud chunk metadata (nil if no cloud store)
-	cloudIdxMu    sync.Mutex              // serializes cloudIdx Insert/Delete/Sync (B+ tree is not thread-safe)
+	mu             sync.Mutex
+	cfg            Config
+	lockFile       *os.File // Exclusive lock on vault directory
+	active         *chunkState
+	metas          map[chunk.ChunkID]*chunkMeta // In-memory chunk metadata
+	closed         bool
+	zstdEnc        *zstd.Encoder
+	zstdEncMu      sync.Mutex                // serializes concurrent CompressChunk calls sharing zstdEnc
+	cloudIdx       *cloudIndex               // local B+ tree cache of cloud chunk metadata (nil if no cloud store)
+	cloudIdxMu     sync.Mutex                // serializes cloudIdx Insert/Delete/Sync (B+ tree is not thread-safe)
 	indexBuilders  []chunk.ChunkIndexBuilder // injected post-construction via SetIndexBuilders
-	cloudListCache []chunk.ChunkMeta        // cached List() result for cloud chunks; nil = stale
+	cloudListCache []chunk.ChunkMeta         // cached List() result for cloud chunks; nil = stale
 	storageClasses map[chunk.ChunkID]string  // in-memory cache of cloud storage class per chunk
-	nextChunkID    *chunk.ChunkID           // if set, used instead of NewChunkID() on next open
+	nextChunkID    *chunk.ChunkID            // if set, used instead of NewChunkID() on next open
 
-	postSealActive sync.Map // chunk.ChunkID → chan struct{} — closed when PostSealProcess finishes
+	postSealActive sync.Map       // chunk.ChunkID → chan struct{} — closed when PostSealProcess finishes
 	postSealWg     sync.WaitGroup // tracks in-flight PostSealProcess calls (for Close only)
 
 	// cloudDegraded tracks whether the cloud store is currently unreachable.
 	// Set on any failed cloud operation (init, upload, download, list);
 	// cleared on any successful one. The orchestrator polls this to raise
 	// or clear an operator-visible alert. See gastrolog-68fqk.
-	cloudDegraded     atomic.Bool
-	cloudDegradedErr  atomic.Value // stores the last cloud error (string) for alert messages
+	cloudDegraded    atomic.Bool
+	cloudDegradedErr atomic.Value // stores the last cloud error (string) for alert messages
 
 	// pendingAnnouncements accumulates closures that fire metadata announcer
 	// calls. The fields are protected by mu. Locked code paths (openLocked,
@@ -206,8 +206,8 @@ func runPendingAnnouncements(announces []func()) {
 // No longer persisted to meta.bin.
 type chunkMeta struct {
 	id               chunk.ChunkID
-	writeStart          time.Time // WriteTS of first record
-	writeEnd            time.Time // WriteTS of last record
+	writeStart       time.Time // WriteTS of first record
+	writeEnd         time.Time // WriteTS of last record
 	recordCount      int64     // Number of records in chunk
 	bytes            int64     // Total logical bytes (data + non-data files)
 	logicalDataBytes int64     // Logical data bytes only (raw + attr + idx content)
@@ -236,8 +236,8 @@ type chunkMeta struct {
 func (m *chunkMeta) toChunkMeta() chunk.ChunkMeta {
 	return chunk.ChunkMeta{
 		ID:          m.id,
-		WriteStart:     m.writeStart,
-		WriteEnd:       m.writeEnd,
+		WriteStart:  m.writeStart,
+		WriteEnd:    m.writeEnd,
 		RecordCount: m.recordCount,
 		Bytes:       m.bytes,
 		Sealed:      m.sealed,
@@ -262,12 +262,12 @@ type chunkState struct {
 	dict        *chunk.StringDict
 	ingestBT    *btree.Tree[int64, uint32] // IngestTS → record position
 	sourceBT    *btree.Tree[int64, uint32] // SourceTS → record position
-	rawOffset   uint64    // Current write position in raw.log (after header)
-	attrOffset  uint64    // Current write position in attr.log (after header)
-	recordCount uint64    // Number of records written
-	createdAt   time.Time // Wall-clock time when chunk was opened
-	writeMu     sync.Mutex     // serializes Phase 2 writes to preserve idx ordering on crash
-	inflight    sync.WaitGroup // tracks in-flight Phase 2 writers for safe sealing
+	rawOffset   uint64                     // Current write position in raw.log (after header)
+	attrOffset  uint64                     // Current write position in attr.log (after header)
+	recordCount uint64                     // Number of records written
+	createdAt   time.Time                  // Wall-clock time when chunk was opened
+	writeMu     sync.Mutex                 // serializes Phase 2 writes to preserve idx ordering on crash
+	inflight    sync.WaitGroup             // tracks in-flight Phase 2 writers for safe sealing
 }
 
 const lockFileName = ".lock"
@@ -413,9 +413,9 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 		IngestTS:   record.IngestTS,
 		WriteTS:    record.WriteTS,
 		RawOffset:  uint32(m.active.rawOffset),  //nolint:gosec // G115: offsets bounded by chunk rotation policy
-		RawSize:    uint32(len(record.Raw)),      //nolint:gosec // G115: individual record size bounded by protocol
-		AttrOffset: uint32(m.active.attrOffset),  //nolint:gosec // G115: offsets bounded by chunk rotation policy
-		AttrSize:   uint16(len(attrBytes)),       //nolint:gosec // G115: attribute size bounded by protocol
+		RawSize:    uint32(len(record.Raw)),     //nolint:gosec // G115: individual record size bounded by protocol
+		AttrOffset: uint32(m.active.attrOffset), //nolint:gosec // G115: offsets bounded by chunk rotation policy
+		AttrSize:   uint16(len(attrBytes)),      //nolint:gosec // G115: attribute size bounded by protocol
 		IngestSeq:  record.EventID.IngestSeq,
 		IngesterID: record.EventID.IngesterID,
 		NodeID:     record.EventID.NodeID,
@@ -423,8 +423,8 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 
 	// Snapshot file handles and compute WriteAt positions.
 	active := m.active
-	rawPos := int64(format.HeaderSize) + int64(m.active.rawOffset)    //nolint:gosec // G115: bounded
-	attrPos := int64(format.HeaderSize) + int64(m.active.attrOffset)  //nolint:gosec // G115: bounded
+	rawPos := int64(format.HeaderSize) + int64(m.active.rawOffset)                   //nolint:gosec // G115: bounded
+	attrPos := int64(format.HeaderSize) + int64(m.active.attrOffset)                 //nolint:gosec // G115: bounded
 	idxPos := int64(IdxHeaderSize) + int64(m.active.recordCount)*int64(IdxEntrySize) //nolint:gosec // G115: bounded
 
 	// Reserve space: advance counters while holding the lock.
@@ -523,7 +523,7 @@ func (m *Manager) updateActiveState(record chunk.Record, rawLen, attrLen uint64)
 	m.active.rawOffset += rawLen
 	m.active.attrOffset += attrLen
 	m.active.recordCount++
-	m.active.meta.recordCount = int64(m.active.recordCount) //nolint:gosec // G115: record count bounded by rotation policy
+	m.active.meta.recordCount = int64(m.active.recordCount)                                          //nolint:gosec // G115: record count bounded by rotation policy
 	dataBytes := int64(m.active.rawOffset + m.active.attrOffset + m.active.recordCount*IdxEntrySize) //nolint:gosec // G115: data bytes bounded by rotation policy
 	m.active.meta.logicalDataBytes = dataBytes
 	m.active.meta.bytes = dataBytes
@@ -562,7 +562,7 @@ func (m *Manager) activeChunkState() chunk.ActiveChunkState {
 
 	return chunk.ActiveChunkState{
 		ChunkID:     m.active.meta.id,
-		WriteStart:     m.active.meta.writeStart,
+		WriteStart:  m.active.meta.writeStart,
 		LastWriteTS: m.active.meta.writeEnd,
 		CreatedAt:   m.active.createdAt,
 		Bytes:       totalBytes,
@@ -730,7 +730,6 @@ func (m *Manager) ScanAttrs(id chunk.ChunkID, startPos uint64, fn func(writeTS t
 	// to avoid racing with concurrent Append calls.
 	return scanAttrsActive(idxPath, attrPath, dictPath, startPos, fn)
 }
-
 
 func (m *Manager) loadExisting() error {
 	entries, err := os.ReadDir(m.cfg.Dir)
@@ -1643,7 +1642,12 @@ type importState struct {
 
 // writeRecord writes a single record to the import files and updates offsets/metadata.
 func (s *importState) writeRecord(rec chunk.Record) error {
-	rec.WriteTS = s.now()
+	// Match append path: stamp local write time when the iterator did not
+	// supply one (e.g. ad-hoc imports). Tier replication and other paths
+	// set WriteTS from the source chunk — preserve it for leader/follower parity.
+	if rec.WriteTS.IsZero() {
+		rec.WriteTS = s.now()
+	}
 
 	attrBytes, newKeys, err := chunk.EncodeWithDict(rec.Attrs, s.dict)
 	if err != nil {
@@ -1662,13 +1666,13 @@ func (s *importState) writeRecord(rec chunk.Record) error {
 		SourceTS:   rec.SourceTS,
 		IngestTS:   rec.IngestTS,
 		WriteTS:    rec.WriteTS,
-		RawOffset:  uint32(s.rawOffset),  //nolint:gosec // G115: bounded by rotation policy
-		RawSize:    uint32(len(rec.Raw)),  //nolint:gosec // G115: bounded by chunk size
-		AttrOffset: uint32(s.attrOffset), //nolint:gosec // G115: bounded by rotation policy
+		RawOffset:  uint32(s.rawOffset),    //nolint:gosec // G115: bounded by rotation policy
+		RawSize:    uint32(len(rec.Raw)),   //nolint:gosec // G115: bounded by chunk size
+		AttrOffset: uint32(s.attrOffset),   //nolint:gosec // G115: bounded by rotation policy
 		AttrSize:   uint16(len(attrBytes)), //nolint:gosec // G115: bounded by attr encoding
 	}, idxBuf[:])
 
-	rawPos := int64(format.HeaderSize) + int64(s.rawOffset)  //nolint:gosec // G115: bounded by rotation policy
+	rawPos := int64(format.HeaderSize) + int64(s.rawOffset)   //nolint:gosec // G115: bounded by rotation policy
 	attrPos := int64(format.HeaderSize) + int64(s.attrOffset) //nolint:gosec // G115: bounded by rotation policy
 	idxPos := int64(IdxHeaderSize) + s.count*int64(IdxEntrySize)
 
@@ -1698,9 +1702,10 @@ func (s *importState) writeRecord(rec chunk.Record) error {
 }
 
 // ImportRecords creates a new sealed chunk with the given ID by consuming
-// records from the iterator, preserving each record's WriteTS. The records
-// are written to a new chunk directory separate from the active chunk;
-// concurrent Append calls are not affected.
+// records from the iterator. A non-zero WriteTS on each record is preserved
+// (e.g. tier replication from the leader); if WriteTS is zero, the current
+// time from Now is used. Records are written to a new chunk directory
+// separate from the active chunk; concurrent Append calls are not affected.
 //
 // If id is the zero ChunkID, a new ID is generated. Passing the ID directly
 // rather than via SetNextChunkID avoids a race where a concurrent Append

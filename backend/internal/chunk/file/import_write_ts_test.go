@@ -1,4 +1,4 @@
-package memory
+package file
 
 import (
 	"testing"
@@ -6,38 +6,6 @@ import (
 
 	"gastrolog/internal/chunk"
 )
-
-func TestImportRecordsHonorsExplicitID(t *testing.T) {
-	t.Parallel()
-	mgr := newImportTestManager(t)
-
-	targetID := chunk.NewChunkID()
-
-	i := 0
-	recs := []chunk.Record{
-		{Raw: []byte("rec1"), SourceTS: time.Now()},
-		{Raw: []byte("rec2"), SourceTS: time.Now()},
-	}
-	iter := chunk.RecordIterator(func() (chunk.Record, error) {
-		if i >= len(recs) {
-			return chunk.Record{}, chunk.ErrNoMoreRecords
-		}
-		r := recs[i]
-		i++
-		return r, nil
-	})
-
-	meta, err := mgr.ImportRecords(targetID, iter)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if meta.ID != targetID {
-		t.Errorf("expected chunk ID %s, got %s", targetID, meta.ID)
-	}
-	if meta.RecordCount != 2 {
-		t.Errorf("expected 2 records, got %d", meta.RecordCount)
-	}
-}
 
 func TestImportRecordsPreservesNonZeroWriteTS(t *testing.T) {
 	t.Parallel()
@@ -49,17 +17,17 @@ func TestImportRecordsPreservesNonZeroWriteTS(t *testing.T) {
 	write1 := base.Add(-45 * time.Minute)
 	fixedNow := base
 
-	mgr, err := NewManager(Config{
-		RotationPolicy: chunk.NewRecordCountPolicy(1000),
-		Now:            func() time.Time { return fixedNow },
-		MetaStore:      NewMetaStore(),
+	dir := t.TempDir()
+	cm, err := NewManager(Config{
+		Dir: dir,
+		Now: func() time.Time { return fixedNow },
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = mgr.Close() })
+	defer func() { _ = cm.Close() }()
 
-	targetID := chunk.NewChunkID()
+	cid := chunk.NewChunkID()
 	recs := []chunk.Record{
 		{IngestTS: ingest0, WriteTS: write0, Raw: []byte("a")},
 		{IngestTS: ingest1, WriteTS: write1, Raw: []byte("b")},
@@ -74,18 +42,18 @@ func TestImportRecordsPreservesNonZeroWriteTS(t *testing.T) {
 		return r, nil
 	})
 
-	meta, err := mgr.ImportRecords(targetID, iter)
+	meta, err := cm.ImportRecords(cid, iter)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if meta.ID != targetID {
-		t.Fatalf("chunk id: want %v got %v", targetID, meta.ID)
+	if meta.ID != cid {
+		t.Fatalf("chunk id: want %v got %v", cid, meta.ID)
 	}
 	if !meta.WriteStart.Equal(write0) || !meta.WriteEnd.Equal(write1) {
 		t.Fatalf("chunk write bounds: want [%v,%v] got [%v,%v]", write0, write1, meta.WriteStart, meta.WriteEnd)
 	}
 
-	cur, err := mgr.OpenCursor(targetID)
+	cur, err := cm.OpenCursor(cid)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,17 +77,17 @@ func TestImportRecordsStampsWriteTSWhenZero(t *testing.T) {
 	t.Parallel()
 
 	fixedNow := time.Date(2026, 4, 19, 15, 30, 0, 0, time.UTC)
-	mgr, err := NewManager(Config{
-		RotationPolicy: chunk.NewRecordCountPolicy(1000),
-		Now:            func() time.Time { return fixedNow },
-		MetaStore:      NewMetaStore(),
+	dir := t.TempDir()
+	cm, err := NewManager(Config{
+		Dir: dir,
+		Now: func() time.Time { return fixedNow },
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = mgr.Close() })
+	defer func() { _ = cm.Close() }()
 
-	targetID := chunk.NewChunkID()
+	cid := chunk.NewChunkID()
 	ts := fixedNow.Add(-time.Minute)
 	recs := []chunk.Record{
 		{IngestTS: ts, Raw: []byte("a")},
@@ -135,7 +103,7 @@ func TestImportRecordsStampsWriteTSWhenZero(t *testing.T) {
 		return r, nil
 	})
 
-	meta, err := mgr.ImportRecords(targetID, iter)
+	meta, err := cm.ImportRecords(cid, iter)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +111,7 @@ func TestImportRecordsStampsWriteTSWhenZero(t *testing.T) {
 		t.Fatalf("chunk write bounds: want [%v,%v] got [%v,%v]", fixedNow, fixedNow, meta.WriteStart, meta.WriteEnd)
 	}
 
-	cur, err := mgr.OpenCursor(targetID)
+	cur, err := cm.OpenCursor(cid)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,42 +126,4 @@ func TestImportRecordsStampsWriteTSWhenZero(t *testing.T) {
 			t.Errorf("WriteTS: want %v got %v", fixedNow, rec.WriteTS)
 		}
 	}
-}
-
-func TestImportRecordsWithZeroIDGeneratesNew(t *testing.T) {
-	t.Parallel()
-	mgr := newImportTestManager(t)
-
-	i := 0
-	recs := []chunk.Record{{Raw: []byte("rec1"), SourceTS: time.Now()}}
-	iter := chunk.RecordIterator(func() (chunk.Record, error) {
-		if i >= len(recs) {
-			return chunk.Record{}, chunk.ErrNoMoreRecords
-		}
-		r := recs[i]
-		i++
-		return r, nil
-	})
-
-	meta, err := mgr.ImportRecords(chunk.ChunkID{}, iter)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if meta.ID == (chunk.ChunkID{}) {
-		t.Error("expected non-zero chunk ID")
-	}
-}
-
-func newImportTestManager(t *testing.T) *Manager {
-	t.Helper()
-	mgr, err := NewManager(Config{
-		RotationPolicy: chunk.NewRecordCountPolicy(1000),
-		Now:            time.Now,
-		MetaStore:      NewMetaStore(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = mgr.Close() })
-	return mgr
 }

@@ -140,7 +140,7 @@ func (m *Manager) activeChunkState() chunk.ActiveChunkState {
 	// In practice, memory chunks don't have the same byte-level concerns as file chunks.
 	return chunk.ActiveChunkState{
 		ChunkID:     m.active.meta.ID,
-		WriteStart:     m.active.meta.WriteStart,
+		WriteStart:  m.active.meta.WriteStart,
 		LastWriteTS: m.active.meta.WriteEnd,
 		CreatedAt:   m.active.createdAt,
 		Bytes:       uint64(m.active.size), //nolint:gosec // G115: size is always non-negative
@@ -494,8 +494,9 @@ func (m *Manager) CheckRotation() *string {
 }
 
 // ImportRecords creates a new sealed chunk with the given ID by consuming
-// records from the iterator, preserving each record's WriteTS. The new chunk
-// is independent of the active chunk.
+// records from the iterator. A non-zero WriteTS on each record is preserved;
+// if WriteTS is zero, the current time from Now is used. The new chunk is
+// independent of the active chunk.
 //
 // If id is the zero ChunkID, a new ID is generated. See gastrolog-11rzz for
 // why ID goes via an explicit parameter rather than SetNextChunkID.
@@ -523,7 +524,9 @@ func (m *Manager) ImportRecords(id chunk.ChunkID, next chunk.RecordIterator) (ch
 			return chunk.ChunkMeta{}, iterErr
 		}
 
-		rec.WriteTS = m.cfg.Now()
+		if rec.WriteTS.IsZero() {
+			rec.WriteTS = m.cfg.Now()
+		}
 		state.records = append(state.records, rec)
 
 		recBytes := int64(len(rec.Raw))
@@ -601,6 +604,6 @@ func (m *Manager) Close() error {
 }
 
 var (
-	_ chunk.ChunkManager          = (*Manager)(nil)
+	_ chunk.ChunkManager           = (*Manager)(nil)
 	_ chunk.ChunkPostSealProcessor = (*Manager)(nil)
 )
