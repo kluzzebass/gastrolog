@@ -40,11 +40,11 @@ func (sf *SearchForwarder) Search(ctx context.Context, nodeID string, req *gastr
 		"/gastrolog.v1.ClusterService/ForwardSearch",
 	)
 	if err != nil {
-		sf.peers.Invalidate(nodeID)
+		sf.peers.Invalidate(nodeID, err)
 		return nil, fmt.Errorf("open search stream to %s: %w", nodeID, err)
 	}
 	if err := stream.SendMsg(req); err != nil {
-		sf.peers.Invalidate(nodeID)
+		sf.peers.Invalidate(nodeID, err)
 		return nil, fmt.Errorf("send search request to %s: %w", nodeID, err)
 	}
 	if err := stream.CloseSend(); err != nil {
@@ -59,7 +59,7 @@ func (sf *SearchForwarder) Search(ctx context.Context, nodeID string, req *gastr
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			sf.peers.Invalidate(nodeID)
+			sf.peers.Invalidate(nodeID, err)
 			return nil, fmt.Errorf("search stream from %s: %w", nodeID, err)
 		}
 		merged.Records = append(merged.Records, msg.GetRecords()...)
@@ -106,14 +106,14 @@ func (sf *SearchForwarder) SearchStream(ctx context.Context, nodeID string, req 
 		"/gastrolog.v1.ClusterService/ForwardSearch",
 	)
 	if err != nil {
-		sf.peers.Invalidate(nodeID)
+		sf.peers.Invalidate(nodeID, err)
 		eCh <- fmt.Errorf("open search stream to %s: %w", nodeID, err)
 		close(recCh)
 		close(eCh)
 		return recCh, nil, nil, eCh, getResumeToken
 	}
 	if err := stream.SendMsg(req); err != nil {
-		sf.peers.Invalidate(nodeID)
+		sf.peers.Invalidate(nodeID, err)
 		eCh <- fmt.Errorf("send search request to %s: %w", nodeID, err)
 		close(recCh)
 		close(eCh)
@@ -130,7 +130,7 @@ func (sf *SearchForwarder) SearchStream(ctx context.Context, nodeID string, req 
 	first := &gastrologv1.ForwardSearchResponse{}
 	if err := stream.RecvMsg(first); err != nil {
 		if !errors.Is(err, io.EOF) {
-			sf.peers.Invalidate(nodeID)
+			sf.peers.Invalidate(nodeID, err)
 			eCh <- fmt.Errorf("search stream from %s: %w", nodeID, err)
 		}
 		close(recCh)
@@ -162,7 +162,7 @@ func (sf *SearchForwarder) SearchStream(ctx context.Context, nodeID string, req 
 			msg := &gastrologv1.ForwardSearchResponse{}
 			if err := stream.RecvMsg(msg); err != nil {
 				if !errors.Is(err, io.EOF) {
-					sf.peers.Invalidate(nodeID)
+					sf.peers.Invalidate(nodeID, err)
 					eCh <- fmt.Errorf("search stream from %s: %w", nodeID, err)
 				}
 				return
@@ -192,7 +192,7 @@ func (sf *SearchForwarder) GetContext(ctx context.Context, nodeID string, req *g
 	}
 	resp := &gastrologv1.ForwardGetContextResponse{}
 	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardGetContext", req, resp); err != nil {
-		sf.peers.Invalidate(nodeID)
+		sf.peers.Invalidate(nodeID, err)
 		return nil, fmt.Errorf("forward get context to %s: %w", nodeID, err)
 	}
 	return resp, nil
@@ -206,7 +206,7 @@ func (sf *SearchForwarder) ListChunks(ctx context.Context, nodeID string, req *g
 	}
 	resp := &gastrologv1.ForwardListChunksResponse{}
 	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardListChunks", req, resp); err != nil {
-		sf.peers.Invalidate(nodeID)
+		sf.peers.Invalidate(nodeID, err)
 		return nil, fmt.Errorf("forward list chunks to %s: %w", nodeID, err)
 	}
 	return resp, nil
@@ -220,7 +220,7 @@ func (sf *SearchForwarder) GetChunk(ctx context.Context, nodeID string, req *gas
 	}
 	resp := &gastrologv1.ForwardGetChunkResponse{}
 	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardGetChunk", req, resp); err != nil {
-		sf.peers.Invalidate(nodeID)
+		sf.peers.Invalidate(nodeID, err)
 		return nil, fmt.Errorf("forward get chunk to %s: %w", nodeID, err)
 	}
 	return resp, nil
@@ -234,7 +234,7 @@ func (sf *SearchForwarder) GetIndexes(ctx context.Context, nodeID string, req *g
 	}
 	resp := &gastrologv1.ForwardGetIndexesResponse{}
 	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardGetIndexes", req, resp); err != nil {
-		sf.peers.Invalidate(nodeID)
+		sf.peers.Invalidate(nodeID, err)
 		return nil, fmt.Errorf("forward get indexes to %s: %w", nodeID, err)
 	}
 	return resp, nil
@@ -248,7 +248,7 @@ func (sf *SearchForwarder) AnalyzeChunk(ctx context.Context, nodeID string, req 
 	}
 	resp := &gastrologv1.ForwardAnalyzeChunkResponse{}
 	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardAnalyzeChunk", req, resp); err != nil {
-		sf.peers.Invalidate(nodeID)
+		sf.peers.Invalidate(nodeID, err)
 		return nil, fmt.Errorf("forward analyze chunk to %s: %w", nodeID, err)
 	}
 	return resp, nil
@@ -262,7 +262,7 @@ func (sf *SearchForwarder) ValidateVault(ctx context.Context, nodeID string, req
 	}
 	resp := &gastrologv1.ForwardValidateVaultResponse{}
 	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardValidateVault", req, resp); err != nil {
-		sf.peers.Invalidate(nodeID)
+		sf.peers.Invalidate(nodeID, err)
 		return nil, fmt.Errorf("forward validate vault to %s: %w", nodeID, err)
 	}
 	return resp, nil
@@ -276,7 +276,7 @@ func (sf *SearchForwarder) SealVault(ctx context.Context, nodeID string, req *ga
 	}
 	resp := &gastrologv1.ForwardSealVaultResponse{}
 	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardSealVault", req, resp); err != nil {
-		sf.peers.Invalidate(nodeID)
+		sf.peers.Invalidate(nodeID, err)
 		return nil, fmt.Errorf("forward seal vault to %s: %w", nodeID, err)
 	}
 	return resp, nil
@@ -290,7 +290,7 @@ func (sf *SearchForwarder) ReindexVault(ctx context.Context, nodeID string, req 
 	}
 	resp := &gastrologv1.ForwardReindexVaultResponse{}
 	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardReindexVault", req, resp); err != nil {
-		sf.peers.Invalidate(nodeID)
+		sf.peers.Invalidate(nodeID, err)
 		return nil, fmt.Errorf("forward reindex vault to %s: %w", nodeID, err)
 	}
 	return resp, nil
@@ -304,7 +304,7 @@ func (sf *SearchForwarder) Explain(ctx context.Context, nodeID string, req *gast
 	}
 	resp := &gastrologv1.ForwardExplainResponse{}
 	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardExplain", req, resp); err != nil {
-		sf.peers.Invalidate(nodeID)
+		sf.peers.Invalidate(nodeID, err)
 		return nil, fmt.Errorf("forward explain to %s: %w", nodeID, err)
 	}
 	return resp, nil
@@ -335,12 +335,12 @@ func (sf *SearchForwarder) Follow(ctx context.Context, nodeID string, req *gastr
 			"/gastrolog.v1.ClusterService/ForwardFollow",
 		)
 		if err != nil {
-			sf.peers.Invalidate(nodeID)
+			sf.peers.Invalidate(nodeID, err)
 			errCh <- fmt.Errorf("open follow stream to %s: %w", nodeID, err)
 			return
 		}
 		if err := stream.SendMsg(req); err != nil {
-			sf.peers.Invalidate(nodeID)
+			sf.peers.Invalidate(nodeID, err)
 			errCh <- fmt.Errorf("send follow request to %s: %w", nodeID, err)
 			return
 		}
@@ -378,7 +378,7 @@ func (sf *SearchForwarder) ExportToVault(ctx context.Context, nodeID string, req
 	}
 	resp := &gastrologv1.ForwardExportToVaultResponse{}
 	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardExportToVault", req, resp); err != nil {
-		sf.peers.Invalidate(nodeID)
+		sf.peers.Invalidate(nodeID, err)
 		return nil, fmt.Errorf("forward export to vault to %s: %w", nodeID, err)
 	}
 	return resp, nil

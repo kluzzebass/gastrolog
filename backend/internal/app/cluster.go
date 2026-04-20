@@ -13,10 +13,13 @@ import (
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/cluster/tlsutil"
-	"gastrolog/internal/system"
-	"gastrolog/internal/system/raftfsm"
 	"gastrolog/internal/home"
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/system"
+	"gastrolog/internal/system/raftfsm"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const errFmtSaveClusterTLS = "save cluster TLS file: %w"
@@ -515,7 +518,7 @@ func makeRemoveNodeFunc(
 				} else {
 					logger.Info("eviction notification sent", "node_id", targetNodeID)
 				}
-				peerConns.Invalidate(targetNodeID)
+				peerConns.Invalidate(targetNodeID, status.Error(codes.Unavailable, "node evicted from cluster"))
 			}()
 		}
 

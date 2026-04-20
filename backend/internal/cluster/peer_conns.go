@@ -2,18 +2,46 @@ package cluster
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"runtime"
 	"sync"
 	"time"
 
 	hraft "github.com/hashicorp/raft"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
+
+// shouldInvalidate reports whether err indicates the underlying gRPC
+// connection itself is broken and should be discarded. Application-level
+// status codes (Internal, NotFound, InvalidArgument, …), caller cancellation
+// (Canceled, DeadlineExceeded), and raw io.EOF do NOT signal a dead conn —
+// gRPC's own state machine will move the conn into TRANSIENT_FAILURE if the
+// transport is genuinely broken, and tearing the shared conn down on every
+// app-level RPC error cascades into killing every other consumer's stream.
+//
+// Only Unavailable reliably means "transport unavailable, retry on a fresh
+// conn".
+func shouldInvalidate(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	return status.Code(err) == codes.Unavailable
+}
 
 // invalidateGracePeriod is how long Invalidate/Reset wait before closing a
 // dropped connection. This grace period gives concurrent goroutines that
@@ -83,8 +111,25 @@ func (p *PeerConns) Conn(nodeID string) (*grpc.ClientConn, error) {
 
 	if conn, ok := p.conns[nodeID]; ok {
 		if conn.GetState() != connectivity.Shutdown {
+			// #region agent log
+			debugLog4vz40("cluster/peer_conns.go:Conn",
+				"cache hit",
+				map[string]any{
+					"hypothesisId": "A-conn-churn",
+					"node":         nodeID,
+					"state":        conn.GetState().String(),
+				})
+			// #endregion
 			return conn, nil
 		}
+		// #region agent log
+		debugLog4vz40("cluster/peer_conns.go:Conn",
+			"cache hit but conn is SHUTDOWN — evicting and redialing",
+			map[string]any{
+				"hypothesisId": "A-conn-churn",
+				"node":         nodeID,
+			})
+		// #endregion
 		delete(p.conns, nodeID)
 	}
 
@@ -120,21 +165,59 @@ func (p *PeerConns) Conn(nodeID string) (*grpc.ClientConn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("dial node %s at %s: %w", nodeID, addr, err)
 	}
+	// #region agent log
+	debugLog4vz40("cluster/peer_conns.go:Conn",
+		"fresh dial",
+		map[string]any{
+			"hypothesisId": "A-conn-churn",
+			"node":         nodeID,
+			"addr":         addr,
+		})
+	// #endregion
 	p.conns[nodeID] = conn
 	return conn, nil
 }
 
-// Invalidate removes the cached connection for a node so the next Conn call
-// re-dials. The actual Close() is deferred by invalidateGracePeriod so that
-// concurrent goroutines holding the same *ClientConn can finish their
-// in-flight RPCs before the underlying transport is torn down.
+// Invalidate drops the cached connection for a node so the next Conn call
+// re-dials, but ONLY when err signals an actual transport-level failure
+// (see shouldInvalidate). Application-level RPC errors (Internal, NotFound,
+// InvalidArgument, …), caller cancellations (Canceled, DeadlineExceeded),
+// and raw io.EOF are no-ops — gRPC's own state machine already handles real
+// transport breakdowns, and tearing the shared conn down on every app-level
+// error cascades into killing every other consumer's stream.
 //
-// Synchronously closing a shared conn was the source of "client connection
-// is closing" cascades: per-RPC error handlers across the cluster forwarders
-// (chunk_transferrer, search_forwarder, record_forwarder, …) all call this
-// on any failure, and ~50 such call sites racing against each other meant a
-// single network blip would propagate as a flurry of mid-RPC closures.
-func (p *PeerConns) Invalidate(nodeID string) {
+// The actual Close() is deferred by invalidateGracePeriod so that concurrent
+// goroutines holding the same *ClientConn can finish their in-flight RPCs
+// before the underlying transport is torn down.
+//
+// Synchronously closing a shared conn on any error was the source of
+// "client connection is closing" cascades: per-RPC error handlers across
+// the cluster forwarders (chunk_transferrer, search_forwarder,
+// record_forwarder, …) all called this on any failure, and ~50 such call
+// sites racing against each other meant a single application error would
+// propagate as a flurry of mid-RPC closures.
+func (p *PeerConns) Invalidate(nodeID string, err error) {
+	if !shouldInvalidate(err) {
+		// #region agent log
+		debugLog4vz40("cluster/peer_conns.go:Invalidate",
+			"skipped — err is not a transport failure",
+			map[string]any{
+				"hypothesisId": "HA1-invalidate-storm",
+				"node":         nodeID,
+				"err":          fmt.Sprint(err),
+				"errType":      fmt.Sprintf("%T", err),
+				"grpcCode":     status.Code(err).String(),
+				"runId":        "post-fix",
+			})
+		// #endregion
+		return
+	}
+	// #region agent log
+	var caller string
+	if _, file, line, ok := runtime.Caller(1); ok {
+		caller = fmt.Sprintf("%s:%d", file, line)
+	}
+	// #endregion
 	p.mu.Lock()
 	conn, ok := p.conns[nodeID]
 	if ok {
@@ -142,11 +225,32 @@ func (p *PeerConns) Invalidate(nodeID string) {
 	}
 	p.mu.Unlock()
 
+	// #region agent log
+	debugLog4vz40("cluster/peer_conns.go:Invalidate",
+		"invalidate called",
+		map[string]any{
+			"hypothesisId":  "HA1-invalidate-storm",
+			"node":          nodeID,
+			"caller":        caller,
+			"hadCachedConn": ok,
+			"grpcCode":      status.Code(err).String(),
+			"runId":         "post-fix",
+		})
+	// #endregion
 	if !ok {
 		return
 	}
 	go func() {
 		time.Sleep(invalidateGracePeriod)
+		// #region agent log
+		debugLog4vz40("cluster/peer_conns.go:Invalidate",
+			"deferred close firing — torn conn being closed",
+			map[string]any{
+				"hypothesisId": "HA1-invalidate-storm",
+				"node":         nodeID,
+				"caller":       caller,
+			})
+		// #endregion
 		_ = conn.Close()
 	}()
 }
@@ -187,6 +291,12 @@ func (p *PeerConns) PeerIDs() []string {
 // Components holding a *PeerConns reference (Broadcaster, RecordForwarder,
 // SearchForwarder) automatically use the new Raft instance without recreation.
 func (p *PeerConns) Reset(r *hraft.Raft) {
+	// #region agent log
+	var caller string
+	if _, file, line, ok := runtime.Caller(1); ok {
+		caller = fmt.Sprintf("%s:%d", file, line)
+	}
+	// #endregion
 	p.mu.Lock()
 	p.raft = r
 	dropped := make([]*grpc.ClientConn, 0, len(p.conns))
@@ -196,6 +306,15 @@ func (p *PeerConns) Reset(r *hraft.Raft) {
 	}
 	p.mu.Unlock()
 
+	// #region agent log
+	debugLog4vz40("cluster/peer_conns.go:Reset",
+		"Reset called — all peer conns dropped",
+		map[string]any{
+			"hypothesisId": "HA4-reset-cascade",
+			"caller":       caller,
+			"numDropped":   len(dropped),
+		})
+	// #endregion
 	if len(dropped) == 0 {
 		return
 	}

@@ -62,7 +62,7 @@ func (f *fakePeerSource) Conn(id string) (*grpc.ClientConn, error) {
 	return c, nil
 }
 
-func (f *fakePeerSource) Invalidate(id string) {
+func (f *fakePeerSource) Invalidate(id string, _ error) {
 	f.mu.Lock()
 	f.invalidated[id]++
 	f.mu.Unlock()

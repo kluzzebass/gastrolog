@@ -71,7 +71,7 @@ func (f *TierApplyForwarder) forwardToLeader(data []byte) error {
 	}
 	resp := &gastrologv1.ForwardTierApplyResponse{}
 	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardTierApply", req, resp); err != nil {
-		f.peers.Invalidate(string(leaderID))
+		f.peers.Invalidate(string(leaderID), err)
 		return fmt.Errorf("forward tier apply to %s: %w", leaderID, err)
 	}
 	return nil

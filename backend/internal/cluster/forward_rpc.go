@@ -162,7 +162,7 @@ func ForwardRPC(ctx context.Context, peers *PeerConns, nodeID, procedure string,
 		"/gastrolog.v1.ClusterService/ForwardRPC",
 	)
 	if err != nil {
-		peers.Invalidate(nodeID)
+		peers.Invalidate(nodeID, err)
 		return nil, 14, "", fmt.Errorf("open ForwardRPC stream to %s: %w", nodeID, err)
 	}
 
@@ -172,7 +172,7 @@ func ForwardRPC(ctx context.Context, peers *PeerConns, nodeID, procedure string,
 		Payload:   reqPayload,
 	}
 	if err := stream.SendMsg(frame); err != nil {
-		peers.Invalidate(nodeID)
+		peers.Invalidate(nodeID, err)
 		return nil, 14, "", fmt.Errorf("send request to %s: %w", nodeID, err)
 	}
 	if err := stream.CloseSend(); err != nil {
@@ -182,7 +182,7 @@ func ForwardRPC(ctx context.Context, peers *PeerConns, nodeID, procedure string,
 	// Read the response frame(s) — for unary, just one.
 	resp := &gastrologv1.ForwardRPCFrame{}
 	if err := stream.RecvMsg(resp); err != nil {
-		peers.Invalidate(nodeID)
+		peers.Invalidate(nodeID, err)
 		return nil, 14, "", fmt.Errorf("recv response from %s: %w", nodeID, err)
 	}
 
@@ -206,7 +206,7 @@ func (s *ForwardRPCStreamSender) Recv() (*gastrologv1.ForwardRPCFrame, error) {
 	frame := &gastrologv1.ForwardRPCFrame{}
 	if err := s.stream.RecvMsg(frame); err != nil {
 		if !errors.Is(err, io.EOF) {
-			s.peers.Invalidate(s.nodeID)
+			s.peers.Invalidate(s.nodeID, err)
 		}
 		return nil, err
 	}
@@ -241,7 +241,7 @@ func ForwardRPCStream(ctx context.Context, peers *PeerConns, nodeID, procedure s
 		"/gastrolog.v1.ClusterService/ForwardRPC",
 	)
 	if err != nil {
-		peers.Invalidate(nodeID)
+		peers.Invalidate(nodeID, err)
 		return nil, fmt.Errorf("open ForwardRPC stream to %s: %w", nodeID, err)
 	}
 
@@ -250,7 +250,7 @@ func ForwardRPCStream(ctx context.Context, peers *PeerConns, nodeID, procedure s
 		Payload:   reqPayload,
 	}
 	if err := stream.SendMsg(frame); err != nil {
-		peers.Invalidate(nodeID)
+		peers.Invalidate(nodeID, err)
 		return nil, fmt.Errorf("send request to %s: %w", nodeID, err)
 	}
 	if err := stream.CloseSend(); err != nil {

@@ -76,7 +76,7 @@ func (ct *ChunkTransferrer) TransferRecords(ctx context.Context, nodeID string, 
 	}
 	stream, err := conn.NewStream(ctx, streamDesc, "/gastrolog.v1.ClusterService/ForwardImportRecords")
 	if err != nil {
-		ct.peers.Invalidate(nodeID)
+		ct.peers.Invalidate(nodeID, err)
 		return fmt.Errorf("open import stream to %s: %w", nodeID, err)
 	}
 
@@ -94,19 +94,19 @@ func (ct *ChunkTransferrer) TransferRecords(ctx context.Context, nodeID string, 
 			Record:  convert.RecordToExport(rec),
 		}
 		if err := stream.SendMsg(msg); err != nil {
-			ct.peers.Invalidate(nodeID)
+			ct.peers.Invalidate(nodeID, err)
 			return fmt.Errorf("send record to %s: %w", nodeID, err)
 		}
 	}
 
 	if err := stream.CloseSend(); err != nil {
-		ct.peers.Invalidate(nodeID)
+		ct.peers.Invalidate(nodeID, err)
 		return fmt.Errorf("close send to %s: %w", nodeID, err)
 	}
 
 	resp := &gastrologv1.ForwardRecordsResponse{}
 	if err := stream.RecvMsg(resp); err != nil {
-		ct.peers.Invalidate(nodeID)
+		ct.peers.Invalidate(nodeID, err)
 		return fmt.Errorf("receive response from %s: %w", nodeID, err)
 	}
 	return nil
@@ -136,7 +136,7 @@ func (ct *ChunkTransferrer) ForwardAppend(ctx context.Context, nodeID string, va
 	}
 	resp := &gastrologv1.ForwardRecordsResponse{}
 	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardRecords", req, resp); err != nil {
-		ct.peers.Invalidate(nodeID)
+		ct.peers.Invalidate(nodeID, err)
 		return fmt.Errorf("forward append to %s: %w", nodeID, err)
 	}
 	return nil
@@ -160,7 +160,7 @@ func (ct *ChunkTransferrer) StreamToTier(ctx context.Context, nodeID string, vau
 	}
 	stream, err := conn.NewStream(ctx, streamDesc, "/gastrolog.v1.ClusterService/ForwardImportRecords")
 	if err != nil {
-		ct.peers.Invalidate(nodeID)
+		ct.peers.Invalidate(nodeID, err)
 		return fmt.Errorf("open transition stream to %s: %w", nodeID, err)
 	}
 
@@ -187,20 +187,20 @@ func (ct *ChunkTransferrer) StreamToTier(ctx context.Context, nodeID string, vau
 			Record:  convert.RecordToExport(rec),
 		}
 		if err := stream.SendMsg(msg); err != nil {
-			ct.peers.Invalidate(nodeID)
+			ct.peers.Invalidate(nodeID, err)
 			return fmt.Errorf("send record to %s: %w", nodeID, err)
 		}
 	}
 
 	streamClosed = true
 	if err := stream.CloseSend(); err != nil {
-		ct.peers.Invalidate(nodeID)
+		ct.peers.Invalidate(nodeID, err)
 		return fmt.Errorf("close send to %s: %w", nodeID, err)
 	}
 
 	resp := &gastrologv1.ForwardRecordsResponse{}
 	if err := stream.RecvMsg(resp); err != nil {
-		ct.peers.Invalidate(nodeID)
+		ct.peers.Invalidate(nodeID, err)
 		return fmt.Errorf("receive response from %s: %w", nodeID, err)
 	}
 	return nil

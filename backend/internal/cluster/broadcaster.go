@@ -17,7 +17,7 @@ import (
 type broadcastPeerSource interface {
 	Peers() ([]hraft.Server, error)
 	Conn(nodeID string) (*grpc.ClientConn, error)
-	Invalidate(nodeID string)
+	Invalidate(nodeID string, err error)
 }
 
 // Broadcaster fans out BroadcastMessages to all cluster peers via the
@@ -93,7 +93,7 @@ func (b *Broadcaster) sendToPeer(ctx context.Context, id string, req *gastrologv
 
 	if err := b.sendOne(peerCtx, conn, req); err != nil {
 		b.logPeerError(id, "send", err)
-		b.peers.Invalidate(id)
+		b.peers.Invalidate(id, err)
 		return
 	}
 	b.clearPeerError(id)

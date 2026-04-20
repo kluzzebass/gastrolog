@@ -9,9 +9,16 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
+
+// errTransport is a sentinel error that causes Invalidate to actually drop
+// the connection. We use this in tests that exercise the deferred-close
+// machinery — see shouldInvalidate for the gating logic.
+var errTransport = status.Error(codes.Unavailable, "test transport failure")
 
 // dialLocal stands up a minimal gRPC server on a loopback port and returns a
 // real *grpc.ClientConn to it plus a teardown. We need a real conn (not a
@@ -50,7 +57,7 @@ func TestInvalidateDeferredClose(t *testing.T) {
 
 	p := &PeerConns{conns: map[string]*grpc.ClientConn{"node-x": conn}}
 
-	p.Invalidate("node-x")
+	p.Invalidate("node-x", errTransport)
 
 	// Cache entry must be gone immediately so the next Conn() will re-dial.
 	p.mu.Lock()
@@ -82,7 +89,7 @@ func TestInvalidateDeferredClose(t *testing.T) {
 // Invalidate even on errors that may already have invalidated.
 func TestInvalidateMissingNoOp(t *testing.T) {
 	p := &PeerConns{conns: map[string]*grpc.ClientConn{}}
-	p.Invalidate("does-not-exist") // must not panic
+	p.Invalidate("does-not-exist", errTransport) // must not panic
 }
 
 // TestResetDeferredClose verifies Reset behaves like Invalidate for all
@@ -221,7 +228,7 @@ func TestInvalidateConcurrentUsersNotDisrupted(t *testing.T) {
 
 	close(start)
 	time.Sleep(50 * time.Millisecond)
-	p.Invalidate("node-x")
+	p.Invalidate("node-x", errTransport)
 	wg.Wait()
 
 	if disrupted.Load() > 0 {

@@ -47,17 +47,17 @@ func (lt *ManagedFileTransferrer) PullFile(ctx context.Context, nodeID, fileID, 
 		"/gastrolog.v1.ClusterService/PullManagedFile",
 	)
 	if err != nil {
-		lt.peers.Invalidate(nodeID)
+		lt.peers.Invalidate(nodeID, err)
 		return fmt.Errorf("open pull stream to %s: %w", nodeID, err)
 	}
 
 	// Send the request.
 	if err := stream.SendMsg(&gastrologv1.PullManagedFileRequest{FileId: []byte(fileID)}); err != nil {
-		lt.peers.Invalidate(nodeID)
+		lt.peers.Invalidate(nodeID, err)
 		return fmt.Errorf("send pull request to %s: %w", nodeID, err)
 	}
 	if err := stream.CloseSend(); err != nil {
-		lt.peers.Invalidate(nodeID)
+		lt.peers.Invalidate(nodeID, err)
 		return fmt.Errorf("close send to %s: %w", nodeID, err)
 	}
 
@@ -86,7 +86,7 @@ func (lt *ManagedFileTransferrer) PullFile(ctx context.Context, nodeID, fileID, 
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			lt.peers.Invalidate(nodeID)
+			lt.peers.Invalidate(nodeID, err)
 			return fmt.Errorf("receive chunk from %s: %w", nodeID, err)
 		}
 		// First chunk carries metadata.
@@ -132,7 +132,7 @@ func (lt *ManagedFileTransferrer) ListPeerFiles(ctx context.Context, nodeID stri
 
 	resp := &gastrologv1.ListPeerManagedFilesResponse{}
 	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ListPeerManagedFiles", &gastrologv1.ListPeerManagedFilesRequest{}, resp); err != nil {
-		lt.peers.Invalidate(nodeID)
+		lt.peers.Invalidate(nodeID, err)
 		return nil, fmt.Errorf("list peer files on %s: %w", nodeID, err)
 	}
 

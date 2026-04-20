@@ -1,10 +1,10 @@
 package cluster
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -291,7 +291,7 @@ func (rf *RecordForwarder) openStream(nodeID string) (grpc.ClientStream, error) 
 		"/gastrolog.v1.ClusterService/StreamForwardRecords",
 	)
 	if err != nil {
-		rf.peers.Invalidate(nodeID)
+		rf.peers.Invalidate(nodeID, err)
 		return nil, fmt.Errorf("open stream: %w", err)
 	}
 	return stream, nil
@@ -375,7 +375,7 @@ func (rf *RecordForwarder) sendBurst(nodeID string, nf *nodeForwarder, stream gr
 		if err := stream.SendMsg(msg); err != nil {
 			if !rf.stopping() {
 				rf.bumpBackoff(nodeID, nf, err)
-				rf.peers.Invalidate(nodeID)
+				rf.peers.Invalidate(nodeID, err)
 			}
 			return err
 		}

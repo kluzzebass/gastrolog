@@ -81,7 +81,7 @@ func (tr *TierReplicator) getOrOpen(tierID glid.GLID, nodeID string) (*tierStrea
 		"/gastrolog.v1.ClusterService/TierReplication")
 	if err != nil {
 		cancel()
-		tr.peers.Invalidate(nodeID)
+		tr.peers.Invalidate(nodeID, err)
 		return nil, fmt.Errorf("open tier replication stream to %s: %w", nodeID, err)
 	}
 
