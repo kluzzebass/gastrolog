@@ -125,6 +125,10 @@ func (m *mockOrch) RemoveTierFromVault(vaultID, tierID glid.GLID) bool {
 	m.removeTierCalls = append(m.removeTierCalls, [2]glid.GLID{vaultID, tierID})
 	return true
 }
+func (m *mockOrch) DeleteTierFromVault(vaultID, tierID glid.GLID) bool {
+	m.removeTierCalls = append(m.removeTierCalls, [2]glid.GLID{vaultID, tierID})
+	return true
+}
 func (m *mockOrch) DrainTier(_ context.Context, _, tierID glid.GLID, _ orchestrator.TierDrainMode, _ string) error {
 	m.tierDrainCalls = append(m.tierDrainCalls, tierID)
 	return nil

@@ -297,7 +297,13 @@ func (o *Orchestrator) ForceRemoveVault(id glid.GLID) error {
 						"vault", id, "tier", tier.TierID, "chunk", meta.ID.String(), "error", err)
 				}
 			}
-			if err := cm.Delete(meta.ID); err != nil {
+			// LOCAL cleanup only — see sealAndDeleteAllChunks comment.
+			// Each peer runs its own ForceRemoveVault when the vault
+			// disappears from config; we must not fan a per-chunk
+			// CmdDeleteChunk avalanche across the tier Raft from one
+			// node and have it cascade-delete on the others. Bug
+			// gastrolog-4vz40.
+			if err := chunk.DeleteNoAnnounce(cm, meta.ID); err != nil {
 				return fmt.Errorf("delete chunk %s in tier %s vault %s: %w", meta.ID.String(), tier.TierID, id, err)
 			}
 		}
@@ -329,6 +335,16 @@ func (o *Orchestrator) DeleteTierData(tierID glid.GLID) {
 // sealAndDeleteAllChunks seals the active chunk (if any), then deletes all
 // chunks and their indexes. Returns the number of chunks found. Errors are
 // logged with the given prefix but do not abort the cleanup.
+//
+// CRITICAL: this is a LOCAL cleanup path. It MUST use DeleteNoAnnounce so
+// each chunk delete does not fire AnnounceDelete → CmdDeleteChunk on the
+// tier Raft. The announcement would propagate to every voter and trigger
+// FSM.applyDelete + onDelete on each node, physically wiping the chunk
+// across the entire cluster. The intended cluster-wide effect (when callers
+// like RemoveTierFromVault react to placement loss, or DeleteTierData
+// reacts to an admin teardown) comes from each node independently running
+// its own RemoveTierFromVault as the config change propagates — not from
+// per-chunk delete announcements out of one node. See gastrolog-4vz40.
 func (o *Orchestrator) sealAndDeleteAllChunks(tier *TierInstance, op string, tierID glid.GLID) int {
 	if active := tier.Chunks.Active(); active != nil {
 		if err := tier.Chunks.Seal(); err != nil {
@@ -346,18 +362,45 @@ func (o *Orchestrator) sealAndDeleteAllChunks(tier *TierInstance, op string, tie
 				o.logger.Warn(op+": delete indexes failed", "tier", tierID, "chunk", m.ID, "error", err)
 			}
 		}
-		if err := tier.Chunks.Delete(m.ID); err != nil {
+		if err := chunk.DeleteNoAnnounce(tier.Chunks, m.ID); err != nil {
 			o.logger.Warn(op+": delete chunk failed", "tier", tierID, "chunk", m.ID, "error", err)
 		}
 	}
 	return len(metas)
 }
 
-// RemoveTierFromVault removes a single tier instance from a vault, deletes its
-// data (chunks + indexes), closes its managers, and cleans up retention/rotation
-// jobs. Used when this node loses ownership of a tier (rebalancing, RF reduction).
+// RemoveTierFromVault unregisters a tier instance from this node WITHOUT
+// destroying its on-disk data. Used when placement moves the tier elsewhere
+// (transient — the node may well get the tier back seconds later when
+// placement flaps back). The tier's Chunks/Indexes managers are closed, jobs
+// are cancelled, and the TierInstance is removed from the vault's tier list,
+// but the chunk files and tier directory remain on disk. A subsequent
+// AddTierToVault will re-discover the existing chunks.
+//
+// For actual tier deletion (admin-driven), use DeleteTierFromVault which
+// additionally wipes all chunks and removes the data directory.
+//
 // Returns true if a tier was removed.
+//
+// gastrolog-4vz40: previously this function always wiped chunks, which meant
+// any placement flap (caused by transient peer-conn teardowns from
+// peers.Invalidate) destroyed data cluster-wide. The destructive behaviour is
+// now opt-in via DeleteTierFromVault.
 func (o *Orchestrator) RemoveTierFromVault(vaultID, tierID glid.GLID) bool {
+	return o.removeTierFromVault(vaultID, tierID, false)
+}
+
+// DeleteTierFromVault unregisters a tier instance AND permanently wipes its
+// on-disk data (chunks, indexes, and the tier directory). Used only when a
+// tier is being deliberately deleted (admin action via CmdTierDeleted, or
+// post-drain cleanup).
+//
+// Returns true if a tier was removed.
+func (o *Orchestrator) DeleteTierFromVault(vaultID, tierID glid.GLID) bool {
+	return o.removeTierFromVault(vaultID, tierID, true)
+}
+
+func (o *Orchestrator) removeTierFromVault(vaultID, tierID glid.GLID, deleteData bool) bool {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -385,8 +428,10 @@ func (o *Orchestrator) RemoveTierFromVault(vaultID, tierID glid.GLID) bool {
 	o.scheduler.RemoveJobsByPrefix("compress:" + prefix + ":" + tierID.String())
 	o.scheduler.RemoveJobsByPrefix("index-build:" + prefix + ":" + tierID.String())
 
-	// Delete all chunk data and indexes.
-	o.sealAndDeleteAllChunks(tier, "remove tier", tierID)
+	// Destructive cleanup — only on explicit deletion.
+	if deleteData {
+		o.sealAndDeleteAllChunks(tier, "remove tier", tierID)
+	}
 
 	// Close managers.
 	if err := tier.Chunks.Close(); err != nil {
@@ -396,9 +441,11 @@ func (o *Orchestrator) RemoveTierFromVault(vaultID, tierID glid.GLID) bool {
 	// Remove the tier's data directory entirely — not just its chunk subdirs.
 	// Without this, leftover files (.lock, cloud.idx) and the tier dir itself
 	// accumulate on disk forever. See gastrolog-42j4n.
-	if remover, ok := tier.Chunks.(chunk.DirRemover); ok {
-		if err := remover.RemoveDir(); err != nil {
-			o.logger.Warn("remove tier: remove data directory failed", "vault", vaultID, "tier", tierID, "error", err)
+	if deleteData {
+		if remover, ok := tier.Chunks.(chunk.DirRemover); ok {
+			if err := remover.RemoveDir(); err != nil {
+				o.logger.Warn("remove tier: remove data directory failed", "vault", vaultID, "tier", tierID, "error", err)
+			}
 		}
 	}
 
@@ -412,15 +459,19 @@ func (o *Orchestrator) RemoveTierFromVault(vaultID, tierID glid.GLID) bool {
 	// Remove tier from vault's tier list.
 	vault.Tiers = append(vault.Tiers[:idx], vault.Tiers[idx+1:]...)
 
-	// If the vault has no tiers left, remove it entirely.
-	if len(vault.Tiers) == 0 {
+	// If the vault has no tiers left, remove it entirely. Only do this on
+	// destructive removal — for non-destructive placement-driven removals,
+	// the vault shell must stay so a subsequent AddTierToVault can rehydrate.
+	if deleteData && len(vault.Tiers) == 0 {
 		delete(o.vaults, vaultID)
 		o.rebuildFilterSetLocked()
 		o.logger.Info("vault removed (no remaining tiers)", "vault", vaultID)
 	}
 
 	o.logger.Info("tier removed from vault",
-		"vault", vaultID, "tier", tierID, "remaining_tiers", len(vault.Tiers))
+		"vault", vaultID, "tier", tierID,
+		"remaining_tiers", len(vault.Tiers),
+		"deleteData", deleteData)
 	return true
 }
 

@@ -281,11 +281,19 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		placementReconcileFn = pm.Reconcile
 		if recordForwarder != nil {
 			recordForwarder.SetOnNodeUnreachable(func(nodeID string) {
-				// Instantly expire the dead peer so LivePeers() stops
-				// including it, then trigger placement on this node. If
-				// this node is the config leader, placement runs
-				// immediately and reassigns the tier.
-				peerState.MarkUnreachable(nodeID)
+				// gastrolog-4vz40: a single forwarder EOF is NOT proof that
+				// the peer is dead. Transient conn-level teardowns (e.g.
+				// peers.Invalidate fired by a neighboring subsystem on a
+				// per-RPC error — see peer_conns.go:Invalidate) kill every
+				// persistent stream on the shared grpc.ClientConn, which
+				// the forwarder observes as EOF. Expiring the peer from
+				// LivePeers() on that signal causes placement to evict
+				// the node from its tiers, which in turn triggers
+				// RemoveTierFromVault → sealAndDeleteAllChunks — the
+				// cluster-wide data wipe. Raft heartbeats and PeerState's
+				// stats-broadcast TTL remain the canonical liveness
+				// signals; pm.Trigger() alone is idempotent when inputs
+				// have not changed, so it is harmless to keep.
 				pm.Trigger()
 			})
 		}

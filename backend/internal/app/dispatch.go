@@ -30,6 +30,7 @@ type orchActions interface {
 	EnableVault(id glid.GLID) error
 	ForceRemoveVault(id glid.GLID) error
 	RemoveTierFromVault(vaultID, tierID glid.GLID) bool
+	DeleteTierFromVault(vaultID, tierID glid.GLID) bool
 	AddTierToVault(ctx context.Context, vaultID, tierID glid.GLID, f orchestrator.Factories) error
 	DrainTier(ctx context.Context, vaultID, tierID glid.GLID, mode orchestrator.TierDrainMode, targetNodeID string) error
 	UnregisterVault(id glid.GLID) error
@@ -675,7 +676,7 @@ func (d *configDispatcher) handleTierDeleted(ctx context.Context, tierID glid.GL
 			if err := d.orch.DrainTier(ctx, vaultID, tierID, orchestrator.TierDrainDecommission, ""); err != nil {
 				d.logger.Warn("dispatch: tier drain failed, removing immediately",
 					"vault", vaultID, "tier", tierID, "error", err)
-				d.orch.RemoveTierFromVault(vaultID, tierID)
+				d.orch.DeleteTierFromVault(vaultID, tierID)
 			} else {
 				// Don't destroy Raft group yet — drain needs the tier instance.
 				// finishTierDrain will clean up after completion.
@@ -683,7 +684,9 @@ func (d *configDispatcher) handleTierDeleted(ctx context.Context, tierID glid.GL
 			}
 		} else {
 			// Non-leader or non-drain: remove local instance immediately.
-			d.orch.RemoveTierFromVault(vaultID, tierID)
+			// This path is the genuine tier-deletion case (CmdTierDeleted),
+			// so the destructive wipe is correct here.
+			d.orch.DeleteTierFromVault(vaultID, tierID)
 		}
 	}
 
