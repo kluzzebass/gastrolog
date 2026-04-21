@@ -80,6 +80,12 @@ type Config struct {
 	// before automatic compaction is attempted after DeleteRange writes.
 	// Default: 2.
 	CompactionMinSegments int
+
+	// SegmentSync, if non-nil, is called instead of (*os.File).Sync on the
+	// active WAL segment after a batch is written (and during compaction).
+	// Used by tests for deterministic fsync failure injection. Production code
+	// must leave this nil.
+	SegmentSync func(*os.File) error
 }
 
 func (c Config) withDefaults() Config {
@@ -318,6 +324,17 @@ func (w *WAL) batchWriter() {
 	}
 }
 
+// syncActiveSegment persists the active segment; SegmentSync overrides when set.
+func (w *WAL) syncActiveSegment() error {
+	if w.seg == nil {
+		return nil
+	}
+	if w.cfg.SegmentSync != nil {
+		return w.cfg.SegmentSync(w.seg)
+	}
+	return w.seg.Sync()
+}
+
 // flushBatch writes all ops to the segment, fsyncs once, and notifies callers.
 func (w *WAL) flushBatch(batch []writeOp) {
 	if len(batch) == 0 {
@@ -359,7 +376,7 @@ func (w *WAL) flushBatch(batch []writeOp) {
 	}
 
 	// Single fsync for the entire batch.
-	syncErr := w.seg.Sync()
+	syncErr := w.syncActiveSegment()
 
 	// Notify all callers.
 	for i := range batch {
@@ -573,7 +590,7 @@ func (w *WAL) compactSegmentsLocked() error {
 	}
 
 	if w.seg != nil {
-		if err := w.seg.Sync(); err != nil {
+		if err := w.syncActiveSegment(); err != nil {
 			return err
 		}
 	}
@@ -583,7 +600,7 @@ func (w *WAL) compactSegmentsLocked() error {
 	if err := w.writeCompactedSnapshotLocked(); err != nil {
 		return err
 	}
-	if err := w.seg.Sync(); err != nil {
+	if err := w.syncActiveSegment(); err != nil {
 		return err
 	}
 
