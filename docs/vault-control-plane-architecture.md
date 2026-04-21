@@ -224,4 +224,4 @@ These require explicit product/architecture decisions:
 
 **Normative text:** This file is the readable **source of truth** for k1ej7 scope. Implementation issues should link here; scope changes **MUST** update this document rather than reinterpret informally.
 
-**Tracker:** dcat issue `gastrolog-k1ej7` tracks the planning task and links child issues (`gastrolog-5xxbd`, `gastrolog-554s3`).
+**Tracker:** dcat `gastrolog-k1ej7` (closed when this spec landed in-repo); child work remains on `gastrolog-5xxbd` and `gastrolog-554s3`.
