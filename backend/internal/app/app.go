@@ -113,6 +113,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		Home: hd, NodeID: nodeID, JoinAddr: cfg.JoinAddr,
 		ClusterSrv: clusterSrv, ClusterTLS: clusterTLS,
 		Logger: logger, FSMOpts: []raftfsm.Option{raftfsm.WithOnApply(disp.Handle)},
+		TierRaftSharesWAL: clusterSrv != nil,
 	})
 	if err != nil {
 		return fmt.Errorf("open config store: %w", err)
@@ -927,7 +928,7 @@ type serverDeps struct {
 	SetNodeSuffrageFunc func(ctx context.Context, nodeID string, voter bool) error
 	Dispatcher          *configDispatcher
 	GroupMgr            *raftgroup.GroupManager
-	WAL                 *raftwal.WAL // shared WAL for tier groups; nil = per-group boltdb
+	WAL                 *raftwal.WAL // tier-group WAL (same file as system raft when cluster mode); nil = per-group boltdb
 	ConfigStore         io.Closer    // rawStore — closed before gRPC for clean Raft shutdown
 	PlacementReconcile  func(ctx context.Context)
 }
@@ -1001,22 +1002,25 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 		_ = deps.Broadcaster.Close()
 	}
 
-	// Shutdown order: tier Raft → system Raft → gRPC server.
-	// Raft must shut down WHILE the transport is alive, otherwise the
-	// leader's replication goroutines block on dead gRPC connections.
+	// Shutdown order: tier Raft → system Raft → WAL → gRPC server.
+	// Tier and system raft both use the same raftwal when cluster mode is on;
+	// system raft must stop before WAL.Close. Raft must shut down WHILE the
+	// transport is alive, otherwise the leader's replication goroutines block
+	// on dead gRPC connections.
 	if deps.GroupMgr != nil {
 		deps.Logger.Info("shutting down tier raft groups")
 		deps.GroupMgr.Shutdown()
-	}
-	if deps.WAL != nil {
-		if err := deps.WAL.Close(); err != nil {
-			deps.Logger.Error("raftwal close failed", "error", err)
-		}
 	}
 
 	if deps.ConfigStore != nil {
 		deps.Logger.Info("shutting down system raft")
 		_ = deps.ConfigStore.Close()
+	}
+
+	if deps.WAL != nil {
+		if err := deps.WAL.Close(); err != nil {
+			deps.Logger.Error("raftwal close failed", "error", err)
+		}
 	}
 
 	if deps.ClusterSrv != nil {
@@ -1057,13 +1061,20 @@ func setupMultiRaft(clusterSrv *cluster.Server, rawStore system.Store, nodeID, h
 		return nil, nil, nil
 	}
 
-	// Open the shared WAL for tier Raft groups. All groups write to a
-	// single WAL with coalesced fsync, replacing per-group boltdb.
-	walDir := filepath.Join(homeDir, "raft", "wal")
-	wal, err := raftwal.Open(walDir)
-	if err != nil {
-		logger.Warn("failed to open shared WAL, falling back to per-group boltdb", "error", err)
-		wal = nil
+	// Prefer the system store's WAL (opened first in Run) so we never attach
+	// two raftwal instances to the same on-disk directory.
+	var wal *raftwal.WAL
+	if rcs, ok := rawStore.(*raftSystemStore); ok && !rcs.ownsWAL {
+		wal = rcs.wal
+	}
+	if wal == nil {
+		walDir := filepath.Join(homeDir, "raft", "wal")
+		var err error
+		wal, err = raftwal.Open(walDir)
+		if err != nil {
+			logger.Warn("failed to open shared WAL, falling back to per-group boltdb", "error", err)
+			wal = nil
+		}
 	}
 
 	groupMgr := raftgroup.NewGroupManager(raftgroup.GroupManagerConfig{

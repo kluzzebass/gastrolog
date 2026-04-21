@@ -101,6 +101,12 @@ type raftStoreOpts struct {
 	// when the cluster server has already created a fresh transport).
 	// When nil, a new transport is obtained from ClusterSrv.Transport().
 	transport hraft.Transport
+
+	// TierRaftSharesWAL is set only from the main Run path when cluster mode
+	// is enabled: tier Raft groups use the same raftwal instance as the
+	// system store, and serveAndAwaitShutdown closes it after system raft.
+	// Rejoin / rollback paths omit this so each store owns its WAL again.
+	TierRaftSharesWAL bool
 }
 
 // raftSystemStore wraps a raftstore.Store with cleanup logic for the
@@ -109,7 +115,8 @@ type raftSystemStore struct {
 	system.Store
 	raftStore *raftstore.Store
 	raft      *hraft.Raft
-	boltDB    io.Closer
+	wal       *raftwal.WAL
+	ownsWAL   bool
 	forwarder io.Closer // *cluster.Forwarder; nil for single-node
 }
 
@@ -238,8 +245,10 @@ func (s *raftSystemStore) Close() error {
 	// 4 entries) provide recovery; the log replay on restart is minimal.
 	future := s.raft.Shutdown()
 	err := future.Error()
-	if cerr := s.boltDB.Close(); cerr != nil && err == nil {
-		err = cerr
+	if s.ownsWAL && s.wal != nil {
+		if cerr := s.wal.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
 	}
 	return err
 }
@@ -299,11 +308,13 @@ func openRaftSystemStore(opts raftStoreOpts) (*raftSystemStore, error) {
 	fwd := cluster.NewForwarder(r, opts.ClusterTLS)
 	store.SetForwarder(fwd)
 
+	ownsWAL := !opts.TierRaftSharesWAL
 	return &raftSystemStore{
 		Store:     store,
 		raftStore: store,
 		raft:      r,
-		boltDB:    wal,
+		wal:       wal,
+		ownsWAL:   ownsWAL,
 		forwarder: fwd,
 	}, nil
 }
