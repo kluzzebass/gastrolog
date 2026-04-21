@@ -1,18 +1,18 @@
 package server
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 
 	"connectrpc.com/connect"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/system"
 	"gastrolog/internal/index/analyzer"
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/system"
 )
 
 // ListChunks returns all chunks in a vault from all tiers across all nodes.
@@ -241,29 +241,9 @@ func (s *VaultServer) AnalyzeChunk(
 		return nil, connErr
 	}
 
-	a, err := s.orch.NewAnalyzer(vaultID)
+	analyses, err := s.analyzeChunkPayload(vaultID, req.Msg)
 	if err != nil {
-		return nil, mapVaultError(err)
-	}
-
-	var analyses []analyzer.ChunkAnalysis
-
-	if len(req.Msg.ChunkId) != 0 {
-		chunkID, parseErr := parseProtoChunkID(req.Msg.ChunkId)
-		if parseErr != nil {
-			return nil, connect.NewError(connect.CodeInvalidArgument, parseErr)
-		}
-		analysis, analyzeErr := a.AnalyzeChunk(chunkID)
-		if analyzeErr != nil {
-			return nil, connect.NewError(connect.CodeInternal, analyzeErr)
-		}
-		analyses = []analyzer.ChunkAnalysis{*analysis}
-	} else {
-		agg, err := a.AnalyzeAll()
-		if err != nil {
-			return nil, errInternal(err)
-		}
-		analyses = agg.Chunks
+		return nil, err
 	}
 
 	resp := &apiv1.AnalyzeChunkResponse{
@@ -275,6 +255,42 @@ func (s *VaultServer) AnalyzeChunk(
 	}
 
 	return connect.NewResponse(resp), nil
+}
+
+// analyzeChunkPayload runs index analysis for the whole vault or one chunk.
+func (s *VaultServer) analyzeChunkPayload(vaultID glid.GLID, msg *apiv1.AnalyzeChunkRequest) ([]analyzer.ChunkAnalysis, error) {
+	if len(msg.ChunkId) == 0 {
+		return s.analyzeChunkAll(vaultID)
+	}
+	return s.analyzeChunkSingle(vaultID, msg.ChunkId)
+}
+
+func (s *VaultServer) analyzeChunkAll(vaultID glid.GLID) ([]analyzer.ChunkAnalysis, error) {
+	a, err := s.orch.NewAnalyzer(vaultID)
+	if err != nil {
+		return nil, mapVaultError(err)
+	}
+	agg, err := a.AnalyzeAll()
+	if err != nil {
+		return nil, errInternal(err)
+	}
+	return agg.Chunks, nil
+}
+
+func (s *VaultServer) analyzeChunkSingle(vaultID glid.GLID, chunkProto []byte) ([]analyzer.ChunkAnalysis, error) {
+	chunkID, parseErr := parseProtoChunkID(chunkProto)
+	if parseErr != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, parseErr)
+	}
+	a, err := s.orch.NewAnalyzerForChunk(vaultID, chunkID)
+	if err != nil {
+		return nil, mapVaultError(err)
+	}
+	analysis, err := a.AnalyzeChunk(chunkID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return []analyzer.ChunkAnalysis{*analysis}, nil
 }
 
 // ValidateVault checks chunk and index integrity for a vault.

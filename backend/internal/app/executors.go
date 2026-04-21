@@ -1,10 +1,10 @@
 package app
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"iter"
 	"time"
 
@@ -185,7 +185,6 @@ func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
 	}
 }
 
-
 // newExplainExecutor creates a cluster.ExplainExecutor that runs explain on
 // local vaults for ForwardExplain RPCs received from peer nodes. Scopes the
 // query to the requested vault IDs and sets the node_id on each ChunkPlan.
@@ -353,27 +352,15 @@ func newGetChunkExecutor(o *orchestrator.Orchestrator) cluster.GetChunkExecutor 
 
 func newAnalyzeChunkExecutor(o *orchestrator.Orchestrator) cluster.AnalyzeChunkExecutor {
 	return func(_ context.Context, vaultID glid.GLID, chunkIDStr string) ([]*gastrologv1.ChunkAnalysis, error) {
-		a, err := o.NewAnalyzer(vaultID)
+		var analyses []analyzer.ChunkAnalysis
+		var err error
+		if chunkIDStr == "" {
+			analyses, err = analyzeChunkAllForExecutor(o, vaultID)
+		} else {
+			analyses, err = analyzeChunkOneForExecutor(o, vaultID, chunkIDStr)
+		}
 		if err != nil {
 			return nil, err
-		}
-		var analyses []analyzer.ChunkAnalysis
-		if chunkIDStr != "" {
-			chunkID, parseErr := chunk.ParseChunkID(chunkIDStr)
-			if parseErr != nil {
-				return nil, parseErr
-			}
-			analysis, analyzeErr := a.AnalyzeChunk(chunkID)
-			if analyzeErr != nil {
-				return nil, analyzeErr
-			}
-			analyses = []analyzer.ChunkAnalysis{*analysis}
-		} else {
-			agg, aggErr := a.AnalyzeAll()
-			if aggErr != nil {
-				return nil, aggErr
-			}
-			analyses = agg.Chunks
 		}
 		out := make([]*gastrologv1.ChunkAnalysis, 0, len(analyses))
 		for _, ca := range analyses {
@@ -381,6 +368,34 @@ func newAnalyzeChunkExecutor(o *orchestrator.Orchestrator) cluster.AnalyzeChunkE
 		}
 		return out, nil
 	}
+}
+
+func analyzeChunkAllForExecutor(o *orchestrator.Orchestrator, vaultID glid.GLID) ([]analyzer.ChunkAnalysis, error) {
+	a, err := o.NewAnalyzer(vaultID)
+	if err != nil {
+		return nil, err
+	}
+	agg, err := a.AnalyzeAll()
+	if err != nil {
+		return nil, err
+	}
+	return agg.Chunks, nil
+}
+
+func analyzeChunkOneForExecutor(o *orchestrator.Orchestrator, vaultID glid.GLID, chunkIDStr string) ([]analyzer.ChunkAnalysis, error) {
+	chunkID, err := chunk.ParseChunkID(chunkIDStr)
+	if err != nil {
+		return nil, err
+	}
+	a, err := o.NewAnalyzerForChunk(vaultID, chunkID)
+	if err != nil {
+		return nil, err
+	}
+	analysis, err := a.AnalyzeChunk(chunkID)
+	if err != nil {
+		return nil, err
+	}
+	return []analyzer.ChunkAnalysis{*analysis}, nil
 }
 
 func newSealVaultExecutor(o *orchestrator.Orchestrator) cluster.SealVaultExecutor {

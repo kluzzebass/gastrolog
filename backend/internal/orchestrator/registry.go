@@ -61,24 +61,24 @@ func (o *Orchestrator) UnregisterIngester(id glid.GLID) {
 	delete(o.ingesterMeta, id)
 }
 
-// ChunkManager returns the chunk manager registered under the given key.
-// Returns nil if not found.
+// ChunkManager implements query.VaultRegistry: returns the active (ingest)
+// tier's chunk manager for the vault keyed by key. Returns nil if not found.
 func (o *Orchestrator) ChunkManager(key glid.GLID) chunk.ChunkManager {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	if s := o.vaults[key]; s != nil {
-		return s.ChunkManager()
+		return s.ActiveTierChunkManager()
 	}
 	return nil
 }
 
-// IndexManager returns the index manager registered under the given key.
-// Returns nil if not found.
+// IndexManager implements query.VaultRegistry: returns the active tier's index
+// manager for the vault keyed by key. Returns nil if not found.
 func (o *Orchestrator) IndexManager(key glid.GLID) index.IndexManager {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	if s := o.vaults[key]; s != nil {
-		return s.IndexManager()
+		return s.ActiveTierIndexManager()
 	}
 	return nil
 }
