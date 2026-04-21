@@ -9,8 +9,10 @@
 //	  node_id                          (advisory cache — see app.resolveNodeID; the raft StableStore is canonical)
 //	  node_name                        (human-readable petname, mirrors config store)
 //	  raft/
-//	    wal/                           (raftwal: log + stable store)
-//	    snapshots/                     (raft file snapshot store)
+//	    wal/                           (raftwal: log + stable store; system group + tier groups)
+//	    groups/
+//	      system/                      (system/config raft file snapshots — same layout as tier groups)
+//	      <tier-group-id>/               (tier metadata raft snapshots)
 //	  stores/
 //	    <vault-id>/                    (per-vault chunk + index data)
 //	  managed-files/
@@ -18,8 +20,8 @@
 package home
 
 import (
-	"gastrolog/internal/glid"
 	"fmt"
+	"gastrolog/internal/glid"
 	"os"
 	"path/filepath"
 	"strings"
@@ -76,6 +78,13 @@ func (d Dir) VaultDir(vaultID string) string {
 // RaftDir returns the directory for Raft persistent state (log store, snapshots).
 func (d Dir) RaftDir() string {
 	return filepath.Join(d.root, "raft")
+}
+
+// RaftGroupDir returns the per-group directory under raft/groups/<groupID>/.
+// Used for file snapshot stores: "system" for cluster config raft, tier GLID
+// strings for tier metadata raft (see raftgroup.GroupManager BaseDir).
+func (d Dir) RaftGroupDir(groupID string) string {
+	return filepath.Join(d.RaftDir(), "groups", groupID)
 }
 
 // ClusterTLSPath returns the path to the local cluster TLS material file.

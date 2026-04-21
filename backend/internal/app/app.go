@@ -1067,10 +1067,13 @@ func setupMultiRaft(clusterSrv *cluster.Server, rawStore system.Store, nodeID, h
 	}
 
 	groupMgr := raftgroup.NewGroupManager(raftgroup.GroupManagerConfig{
-		Transport:    mrt,
-		NodeID:       nodeID,
-		BaseDir:      filepath.Join(homeDir, "raft", "groups"),
-		ShutdownLast: "config",
+		Transport: mrt,
+		NodeID:    nodeID,
+		BaseDir:   filepath.Join(homeDir, "raft", "groups"),
+		// System/config raft is not managed by GroupManager; only tier groups
+		// are. Leave ShutdownLast empty so Shutdown does not look for a
+		// non-existent group ID.
+		ShutdownLast: "",
 		WAL:          wal,
 		Logger:       logger,
 	})
