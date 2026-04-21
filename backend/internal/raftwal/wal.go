@@ -61,9 +61,8 @@ const (
 )
 
 var (
-	ErrNotFound   = errors.New("not found")
-	ErrCompacted  = errors.New("log entry compacted")
-	errWALClosed  = errors.New("wal closed")
+	ErrNotFound  = errors.New("not found")
+	errWALClosed = errors.New("wal closed")
 	crc32Table    = crc32.MakeTable(crc32.Castagnoli)
 )
 
@@ -140,10 +139,6 @@ type groupState struct {
 
 	// Stable store: small key-value pairs (CurrentTerm, LastVotedFor).
 	stable map[string][]byte
-
-	// DeleteRange tracking: the lowest index that's been deleted.
-	// Reads below this return ErrCompacted.
-	deletedThrough uint64
 }
 
 // writeOp is a single write submitted to the batch writer.
@@ -664,13 +659,6 @@ func (w *WAL) writeCompactedSnapshotLocked() error {
 		if gs == nil {
 			continue
 		}
-		if gs.deletedThrough > 0 {
-			// Persist compacted horizon using a single-point tombstone marker.
-			tombstone := encodeDeleteRange(gs.deletedThrough, gs.deletedThrough)
-			if err := w.appendCompactedEntryLocked(gid, entryDeleteRange, tombstone); err != nil {
-				return err
-			}
-		}
 
 		stableKeys := make([]string, 0, len(gs.stable))
 		for k := range gs.stable {
@@ -735,18 +723,24 @@ func (w *WAL) replaySegment(path string) error {
 
 func (gs *groupState) applyDeleteRange(payload []byte) {
 	lo, hi := decodeDeleteRange(payload)
+	if hi < lo {
+		return
+	}
 	for i := lo; i <= hi; i++ {
 		delete(gs.logs, i)
 	}
-	if hi >= gs.deletedThrough {
-		gs.deletedThrough = hi
+	// Match hashicorp/raft InmemStore.DeleteRange bound updates so suffix
+	// truncation (AppendEntries conflict) does not erase the surviving prefix
+	// or poison GetLog for indices that still exist.
+	if lo <= gs.firstIndex {
+		gs.firstIndex = hi + 1
 	}
-	if gs.deletedThrough >= gs.firstIndex {
-		gs.firstIndex = gs.deletedThrough + 1
-		if gs.firstIndex > gs.lastIndex {
-			gs.firstIndex = 0
-			gs.lastIndex = 0
-		}
+	if hi >= gs.lastIndex {
+		gs.lastIndex = lo - 1
+	}
+	if gs.firstIndex > gs.lastIndex {
+		gs.firstIndex = 0
+		gs.lastIndex = 0
 	}
 }
 

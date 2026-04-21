@@ -579,6 +579,43 @@ func TestDeleteRangeIdempotent(t *testing.T) {
 	}
 }
 
+// Regression: suffix-style DeleteRange must not poison reads of the surviving
+// prefix (hashicorp/raft appendEntries conflict path). A too-wide "deleted"
+// horizon previously made GetLog panic the Raft node via ErrLogNotFound.
+func TestDeleteRangeSuffixPreservesPrefix(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	w, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+
+	gs := w.GroupStore("tier-1")
+	for i := uint64(1); i <= 10; i++ {
+		_ = gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: []byte("x")})
+	}
+	if err := gs.DeleteRange(5, 10); err != nil {
+		t.Fatal(err)
+	}
+	first, _ := gs.FirstIndex()
+	last, _ := gs.LastIndex()
+	if first != 1 || last != 4 {
+		t.Fatalf("first=%d last=%d, want 1..4", first, last)
+	}
+	var log hraft.Log
+	for _, idx := range []uint64{1, 2, 3, 4} {
+		if err := gs.GetLog(idx, &log); err != nil {
+			t.Fatalf("GetLog(%d): %v", idx, err)
+		}
+	}
+	for _, idx := range []uint64{5, 6, 10} {
+		if err := gs.GetLog(idx, &log); err != hraft.ErrLogNotFound {
+			t.Fatalf("GetLog(%d): want ErrLogNotFound, got %v", idx, err)
+		}
+	}
+}
+
 func TestDeleteRangeBeyondLastIndex(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -593,18 +630,23 @@ func TestDeleteRangeBeyondLastIndex(t *testing.T) {
 		_ = gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: []byte("x")})
 	}
 
-	// Delete range extends beyond the last entry: all indices through hi are
-	// logically compacted; first/last become empty when deletedThrough passes lastIndex.
+	// Delete range extends beyond the last entry: suffix is cleared; prefix
+	// indices below lo remain (same semantics as hashicorp/raft InmemStore).
 	if err := gs.DeleteRange(3, 100); err != nil {
 		t.Fatal(err)
 	}
 	first, _ := gs.FirstIndex()
 	last, _ := gs.LastIndex()
-	if first != 0 || last != 0 {
-		t.Fatalf("first=%d last=%d, want 0/0 after delete past end", first, last)
+	if first != 1 || last != 2 {
+		t.Fatalf("first=%d last=%d, want 1..2 after delete past end", first, last)
 	}
 	var log hraft.Log
-	for _, idx := range []uint64{1, 2, 3, 4, 5} {
+	for _, idx := range []uint64{1, 2} {
+		if err := gs.GetLog(idx, &log); err != nil {
+			t.Fatalf("GetLog(%d): %v", idx, err)
+		}
+	}
+	for _, idx := range []uint64{3, 4, 5} {
 		if err := gs.GetLog(idx, &log); err != hraft.ErrLogNotFound {
 			t.Fatalf("GetLog(%d): want ErrLogNotFound, got %v", idx, err)
 		}
