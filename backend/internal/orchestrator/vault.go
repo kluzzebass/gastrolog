@@ -8,8 +8,9 @@ import (
 )
 
 // Vault bundles tier instances for a single vault.
-// The active tier (Tiers[0]) provides the chunk manager, index manager, and
-// query engine used by the orchestrator for ingest and search.
+// Ingest uses ActiveTierChunkManager / ActiveTierIndexManager (Tiers[0]).
+// Chunk-scoped operations must resolve the owning tier via the orchestrator,
+// not assume Tiers[0].
 type Vault struct {
 	ID             glid.GLID
 	Name           string
@@ -35,16 +36,18 @@ func (v *Vault) ActiveTier() *TierInstance {
 	return v.Tiers[0]
 }
 
-// ChunkManager returns the chunk manager from the active tier, or nil if no tiers.
-func (v *Vault) ChunkManager() chunk.ChunkManager {
+// ActiveTierChunkManager returns the chunk manager for the active (ingest) tier
+// (Tiers[0]), or nil if the vault has no tiers.
+func (v *Vault) ActiveTierChunkManager() chunk.ChunkManager {
 	if len(v.Tiers) == 0 {
 		return nil
 	}
 	return v.Tiers[0].Chunks
 }
 
-// IndexManager returns the index manager from the active tier, or nil if no tiers.
-func (v *Vault) IndexManager() index.IndexManager {
+// ActiveTierIndexManager returns the index manager for the active tier, or nil
+// if the vault has no tiers.
+func (v *Vault) ActiveTierIndexManager() index.IndexManager {
 	if len(v.Tiers) == 0 {
 		return nil
 	}

@@ -29,67 +29,79 @@ type ChunkIndexReport struct {
 	Indexes []IndexInfo
 }
 
-// vaultManagers looks up both managers for a vault under RLock.
-// Returns ErrVaultNotFound if the vault doesn't exist.
-func (o *Orchestrator) vaultManagers(vaultID glid.GLID) (chunk.ChunkManager, index.IndexManager, error) {
+// activeTierManagers returns chunk and index managers for the vault's active
+// (ingest) tier — Tiers[0]. Returns ErrVaultNotFound if the vault doesn't exist
+// or has no tiers.
+func (o *Orchestrator) activeTierManagers(vaultID glid.GLID) (chunk.ChunkManager, index.IndexManager, error) {
 	o.mu.RLock()
 	s := o.vaults[vaultID]
 	o.mu.RUnlock()
 	if s == nil {
 		return nil, nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
-	cm, im := s.ChunkManager(), s.IndexManager()
+	cm, im := s.ActiveTierChunkManager(), s.ActiveTierIndexManager()
 	if cm == nil {
 		return nil, nil, fmt.Errorf("%w: %s (no tiers)", ErrVaultNotFound, vaultID)
 	}
 	return cm, im, nil
 }
 
-// chunkManager looks up the chunk manager for a vault under RLock.
-func (o *Orchestrator) chunkManager(vaultID glid.GLID) (chunk.ChunkManager, error) {
+// activeTierChunkManager returns the chunk manager for the vault's active tier.
+func (o *Orchestrator) activeTierChunkManager(vaultID glid.GLID) (chunk.ChunkManager, error) {
 	o.mu.RLock()
 	s := o.vaults[vaultID]
 	o.mu.RUnlock()
 	if s == nil {
 		return nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
-	cm := s.ChunkManager()
+	cm := s.ActiveTierChunkManager()
 	if cm == nil {
 		return nil, fmt.Errorf("%w: %s (no tiers)", ErrVaultNotFound, vaultID)
 	}
 	return cm, nil
 }
 
-// indexManager looks up the index manager for a vault under RLock.
-func (o *Orchestrator) indexManager(vaultID glid.GLID) (index.IndexManager, error) {
+// activeTierIndexManager returns the index manager for the vault's active tier.
+func (o *Orchestrator) activeTierIndexManager(vaultID glid.GLID) (index.IndexManager, error) {
 	o.mu.RLock()
 	s := o.vaults[vaultID]
 	o.mu.RUnlock()
 	if s == nil {
 		return nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
-	im := s.IndexManager()
+	im := s.ActiveTierIndexManager()
 	if im == nil {
 		return nil, fmt.Errorf("%w: %s (no tiers)", ErrVaultNotFound, vaultID)
 	}
 	return im, nil
 }
 
-// findChunkManagerForChunk searches all tiers in a vault for the chunk manager
-// that owns the given chunk ID.
-func (o *Orchestrator) findChunkManagerForChunk(vaultID glid.GLID, chunkID chunk.ChunkID) (chunk.ChunkManager, error) {
+// findManagersForChunk returns the chunk and index managers for the tier that
+// owns the given chunk (metadata match or active chunk ID). IndexManager may
+// be nil if the tier has no index backend.
+func (o *Orchestrator) findManagersForChunk(vaultID glid.GLID, chunkID chunk.ChunkID) (chunk.ChunkManager, index.IndexManager, error) {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
 	o.mu.RUnlock()
 	if vault == nil {
-		return nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+		return nil, nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 	for _, tier := range vault.Tiers {
 		if _, err := tier.Chunks.Meta(chunkID); err == nil {
-			return tier.Chunks, nil
+			return tier.Chunks, tier.Indexes, nil
+		}
+		if active := tier.Chunks.Active(); active != nil && active.ID == chunkID {
+			return tier.Chunks, tier.Indexes, nil
 		}
 	}
-	return nil, fmt.Errorf("%w: chunk %s in vault %s", chunk.ErrChunkNotFound, chunkID, vaultID)
+	return nil, nil, fmt.Errorf("%w: chunk %s in vault %s", chunk.ErrChunkNotFound, chunkID, vaultID)
+}
+
+// findChunkManagerForChunk searches all tiers in a vault for the chunk manager
+// that owns the given chunk ID.
+func (o *Orchestrator) findChunkManagerForChunk(vaultID glid.GLID, chunkID chunk.ChunkID) (chunk.ChunkManager, error) {
+	cm, _, err := o.findManagersForChunk(vaultID, chunkID)
+	return cm, err
 }
 
 // ArchiveChunk transitions a cloud-backed sealed chunk to an offline storage class.
@@ -130,7 +142,7 @@ type TieredChunkMeta struct {
 // ListChunkMetas returns all chunk metadata for a vault (active tier only).
 // Use ListAllChunkMetas for a multi-tier view.
 func (o *Orchestrator) ListChunkMetas(vaultID glid.GLID) ([]chunk.ChunkMeta, error) {
-	cm, err := o.chunkManager(vaultID)
+	cm, err := o.activeTierChunkManager(vaultID)
 	if err != nil {
 		return nil, err
 	}
@@ -241,9 +253,9 @@ func (o *Orchestrator) GetTieredChunkMeta(vaultID glid.GLID, chunkID chunk.Chunk
 	return TieredChunkMeta{}, chunk.ErrChunkNotFound
 }
 
-// OpenCursor opens a record cursor for the given chunk.
+// OpenCursor opens a record cursor for the given chunk on the tier that owns it.
 func (o *Orchestrator) OpenCursor(vaultID glid.GLID, chunkID chunk.ChunkID) (chunk.RecordCursor, error) {
-	cm, err := o.chunkManager(vaultID)
+	cm, err := o.findChunkManagerForChunk(vaultID, chunkID)
 	if err != nil {
 		return nil, err
 	}
@@ -703,7 +715,7 @@ func (o *Orchestrator) appendRecord(vaultID glid.GLID, rec chunk.Record) (chunk.
 		return chunk.ChunkID{}, 0, nil, nil, fmt.Errorf("%w: %s", ErrVaultDisabled, vaultID)
 	}
 
-	cm := vault.ChunkManager()
+	cm := vault.ActiveTierChunkManager()
 	if cm == nil {
 		return chunk.ChunkID{}, 0, nil, nil, fmt.Errorf("%w: %s (no tiers)", ErrVaultNotFound, vaultID)
 	}
@@ -762,7 +774,7 @@ func (o *Orchestrator) appendRecord(vaultID glid.GLID, rec chunk.Record) (chunk.
 // chunk migrations. Works with any ChunkManager type (file or memory).
 // Compression and index builds are scheduled asynchronously via the scheduler.
 func (o *Orchestrator) ImportChunkRecords(ctx context.Context, vaultID glid.GLID, next chunk.RecordIterator) error {
-	cm, _, err := o.vaultManagers(vaultID)
+	cm, _, err := o.activeTierManagers(vaultID)
 	if err != nil {
 		return err
 	}
@@ -979,36 +991,48 @@ func (o *Orchestrator) SealActive(vaultID glid.GLID, tierID glid.GLID) (int, err
 
 // IndexSizes returns the size in bytes for each index of a chunk.
 func (o *Orchestrator) IndexSizes(vaultID glid.GLID, chunkID chunk.ChunkID) (map[string]int64, error) {
-	im, err := o.indexManager(vaultID)
+	_, im, err := o.findManagersForChunk(vaultID, chunkID)
 	if err != nil {
 		return nil, err
+	}
+	if im == nil {
+		return map[string]int64{}, nil
 	}
 	return im.IndexSizes(chunkID), nil
 }
 
 // IndexesComplete reports whether all indexes exist for the given chunk.
 func (o *Orchestrator) IndexesComplete(vaultID glid.GLID, chunkID chunk.ChunkID) (bool, error) {
-	im, err := o.indexManager(vaultID)
+	_, im, err := o.findManagersForChunk(vaultID, chunkID)
 	if err != nil {
 		return false, err
+	}
+	if im == nil {
+		return false, nil
 	}
 	return im.IndexesComplete(chunkID)
 }
 
 // BuildIndexes builds all indexes for a sealed chunk.
 func (o *Orchestrator) BuildIndexes(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID) error {
-	im, err := o.indexManager(vaultID)
+	_, im, err := o.findManagersForChunk(vaultID, chunkID)
 	if err != nil {
 		return err
+	}
+	if im == nil {
+		return errors.New("no index manager for chunk tier")
 	}
 	return im.BuildIndexes(ctx, chunkID)
 }
 
 // DeleteIndexes removes all indexes for a chunk.
 func (o *Orchestrator) DeleteIndexes(vaultID glid.GLID, chunkID chunk.ChunkID) error {
-	im, err := o.indexManager(vaultID)
+	_, im, err := o.findManagersForChunk(vaultID, chunkID)
 	if err != nil {
 		return err
+	}
+	if im == nil {
+		return nil
 	}
 	return im.DeleteIndexes(chunkID)
 }
@@ -1017,7 +1041,7 @@ func (o *Orchestrator) DeleteIndexes(vaultID glid.GLID, chunkID chunk.ChunkID) e
 
 // ChunkIndexInfos returns seal status and per-index info for a chunk.
 func (o *Orchestrator) ChunkIndexInfos(vaultID glid.GLID, chunkID chunk.ChunkID) (*ChunkIndexReport, error) {
-	cm, im, err := o.vaultManagers(vaultID)
+	cm, im, err := o.findManagersForChunk(vaultID, chunkID)
 	if err != nil {
 		return nil, err
 	}
@@ -1025,6 +1049,9 @@ func (o *Orchestrator) ChunkIndexInfos(vaultID glid.GLID, chunkID chunk.ChunkID)
 	meta, err := cm.Meta(chunkID)
 	if err != nil {
 		return nil, err
+	}
+	if im == nil {
+		return nil, errors.New("no index manager for chunk tier")
 	}
 
 	sizes := im.IndexSizes(chunkID)
@@ -1100,11 +1127,25 @@ func (o *Orchestrator) ChunkIndexInfos(vaultID glid.GLID, chunkID chunk.ChunkID)
 	return report, nil
 }
 
-// NewAnalyzer creates an index analyzer for the given vault.
+// NewAnalyzer returns an index analyzer backed by the vault's active (ingest)
+// tier. For a specific chunk (possibly on a non-active tier), use
+// NewAnalyzerForChunk.
 func (o *Orchestrator) NewAnalyzer(vaultID glid.GLID) (*analyzer.Analyzer, error) {
-	cm, im, err := o.vaultManagers(vaultID)
+	cm, im, err := o.activeTierManagers(vaultID)
 	if err != nil {
 		return nil, err
+	}
+	return analyzer.New(cm, im), nil
+}
+
+// NewAnalyzerForChunk returns an analyzer backed by the tier that owns chunkID.
+func (o *Orchestrator) NewAnalyzerForChunk(vaultID glid.GLID, chunkID chunk.ChunkID) (*analyzer.Analyzer, error) {
+	cm, im, err := o.findManagersForChunk(vaultID, chunkID)
+	if err != nil {
+		return nil, err
+	}
+	if im == nil {
+		return nil, errors.New("no index manager for chunk tier")
 	}
 	return analyzer.New(cm, im), nil
 }
@@ -1118,7 +1159,7 @@ func (o *Orchestrator) SupportsChunkMove(srcID, dstID glid.GLID) bool {
 	if srcVault == nil || dstVault == nil {
 		return false
 	}
-	_, srcOK := srcVault.ChunkManager().(chunk.ChunkMover)
-	_, dstOK := dstVault.ChunkManager().(chunk.ChunkMover)
+	_, srcOK := srcVault.ActiveTierChunkManager().(chunk.ChunkMover)
+	_, dstOK := dstVault.ActiveTierChunkManager().(chunk.ChunkMover)
 	return srcOK && dstOK
 }

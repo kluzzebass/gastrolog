@@ -1,12 +1,11 @@
 package orchestrator_test
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
+	"gastrolog/internal/glid"
 	"testing"
 	"time"
-
 
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
@@ -298,6 +297,37 @@ func TestNewAnalyzer_UnknownVault(t *testing.T) {
 	_, err = orch.NewAnalyzer(glid.New())
 	if !errors.Is(err, orchestrator.ErrVaultNotFound) {
 		t.Fatalf("expected ErrVaultNotFound, got %v", err)
+	}
+}
+
+func TestNewAnalyzerForChunk(t *testing.T) {
+	t.Parallel()
+	orch, id := newFacadeSetup(t)
+	appendRecords(t, orch, id, 6)
+	metas, _ := orch.ListChunkMetas(id)
+	var sealedID chunk.ChunkID
+	for _, m := range metas {
+		if m.Sealed {
+			sealedID = m.ID
+			break
+		}
+	}
+	if sealedID == (chunk.ChunkID{}) {
+		t.Fatal("no sealed chunk")
+	}
+	if err := orch.BuildIndexes(context.Background(), id, sealedID); err != nil {
+		t.Fatalf("BuildIndexes: %v", err)
+	}
+	a, err := orch.NewAnalyzerForChunk(id, sealedID)
+	if err != nil {
+		t.Fatalf("NewAnalyzerForChunk: %v", err)
+	}
+	analysis, err := a.AnalyzeChunk(sealedID)
+	if err != nil {
+		t.Fatalf("AnalyzeChunk: %v", err)
+	}
+	if analysis == nil {
+		t.Fatal("expected analysis")
 	}
 }
 

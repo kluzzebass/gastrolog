@@ -1,15 +1,14 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
 	"gastrolog/internal/index"
-
 )
 
 // --- Single-chunk move ---
@@ -19,7 +18,7 @@ import (
 // Supports filesystem-level moves (local), record-level import (local), and
 // cross-node transfer (remote destination via RemoteTransferrer).
 func (o *Orchestrator) MoveChunk(ctx context.Context, chunkID chunk.ChunkID, srcID, dstID glid.GLID) error {
-	srcCM, err := o.chunkManager(srcID)
+	srcCM, err := o.findChunkManagerForChunk(srcID, chunkID)
 	if err != nil {
 		return err
 	}
@@ -33,7 +32,7 @@ func (o *Orchestrator) MoveChunk(ctx context.Context, chunkID chunk.ChunkID, src
 		return o.moveChunkRemote(ctx, chunkID, srcID, srcCM, dstID, dstNodeID)
 	}
 
-	dstCM, dstIM, err := o.vaultManagers(dstID)
+	dstCM, dstIM, err := o.activeTierManagers(dstID)
 	if err != nil {
 		return err
 	}
@@ -63,7 +62,7 @@ func (o *Orchestrator) MoveChunk(ctx context.Context, chunkID chunk.ChunkID, src
 	}
 
 	// Delete from source after successful import.
-	if err := o.deleteSourceChunk(srcID, srcCM, chunkID); err != nil {
+	if err := o.deleteSourceChunk(srcID, chunkID); err != nil {
 		return err
 	}
 
@@ -89,7 +88,7 @@ func (o *Orchestrator) moveChunkRemote(ctx context.Context, chunkID chunk.ChunkI
 	}
 
 	// Delete from source after successful transfer.
-	if err := o.deleteSourceChunk(srcID, srcCM, chunkID); err != nil {
+	if err := o.deleteSourceChunk(srcID, chunkID); err != nil {
 		return err
 	}
 
@@ -134,18 +133,20 @@ func (o *Orchestrator) isRemoteVault(ctx context.Context, vaultID glid.GLID) (st
 	return nodeID, true, nil
 }
 
-// deleteSourceChunk removes indexes and the chunk from the source vault.
-func (o *Orchestrator) deleteSourceChunk(srcID glid.GLID, srcCM chunk.ChunkManager, chunkID chunk.ChunkID) error {
-	o.mu.RLock()
-	srcVault := o.vaults[srcID]
-	o.mu.RUnlock()
-	if srcVault != nil && srcVault.IndexManager() != nil {
-		if err := srcVault.IndexManager().DeleteIndexes(chunkID); err != nil {
+// deleteSourceChunk removes indexes and the chunk from the source vault on
+// the tier that owns chunkID.
+func (o *Orchestrator) deleteSourceChunk(srcID glid.GLID, chunkID chunk.ChunkID) error {
+	cm, im, err := o.findManagersForChunk(srcID, chunkID)
+	if err != nil {
+		return err
+	}
+	if im != nil {
+		if err := im.DeleteIndexes(chunkID); err != nil {
 			o.logger.Warn("retention migrate: failed to delete source indexes",
 				"chunk", chunkID.String(), "error", err)
 		}
 	}
-	if err := srcCM.Delete(chunkID); err != nil {
+	if err := cm.Delete(chunkID); err != nil {
 		return fmt.Errorf("delete source chunk %s: %w", chunkID, err)
 	}
 	return nil
@@ -248,7 +249,7 @@ func (o *Orchestrator) DrainVault(ctx context.Context, vaultID glid.GLID, target
 
 // drainWorker runs in the scheduler, transferring sealed chunks one by one.
 func (o *Orchestrator) drainWorker(ctx context.Context, vaultID glid.GLID, targetNodeID string, job *JobProgress) {
-	cm, err := o.chunkManager(vaultID)
+	cm, err := o.activeTierChunkManager(vaultID)
 	if err != nil {
 		job.Fail(o.now(), fmt.Sprintf("get chunk manager: %v", err))
 		return
@@ -377,11 +378,11 @@ func (o *Orchestrator) IsDraining(vaultID glid.GLID) bool {
 // CopyRecords copies all records from source to destination, reporting progress via job.
 // After copying, it seals the destination's active chunk and builds indexes.
 func (o *Orchestrator) CopyRecords(ctx context.Context, srcID, dstID glid.GLID, job *JobProgress) error {
-	srcCM, err := o.chunkManager(srcID)
+	srcCM, err := o.activeTierChunkManager(srcID)
 	if err != nil {
 		return err
 	}
-	dstCM, dstIM, err := o.vaultManagers(dstID)
+	dstCM, dstIM, err := o.activeTierManagers(dstID)
 	if err != nil {
 		return err
 	}
@@ -446,11 +447,11 @@ func (o *Orchestrator) CopyRecords(ctx context.Context, srcID, dstID glid.GLID, 
 // MoveChunks moves sealed chunks from source to destination using filesystem-level moves.
 // Both vaults must implement chunk.ChunkMover (caller should verify with SupportsChunkMove).
 func (o *Orchestrator) MoveChunks(ctx context.Context, srcID, dstID glid.GLID, job *JobProgress) error {
-	srcCM, err := o.chunkManager(srcID)
+	srcCM, err := o.activeTierChunkManager(srcID)
 	if err != nil {
 		return err
 	}
-	dstCM, dstIM, err := o.vaultManagers(dstID)
+	dstCM, dstIM, err := o.activeTierManagers(dstID)
 	if err != nil {
 		return err
 	}
