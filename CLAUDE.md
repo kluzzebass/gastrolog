@@ -2,13 +2,49 @@
 
 The role of this file is to describe common mistakes and confusion points that agents might encounter as they work in this project. If you ever encounter something in the project that surprises you, please alert the developer working with you and indicate that this is the case in the CLAUDE.md file to help prevent future agents from having the same issue.
 
-## Scope: touch only what belongs to the task
+## Agent workflow (read first)
+
+These are the highest-impact process rules; follow them before writing code or touching git in ways that affect the whole repo.
+
+### Scope: touch only what belongs to the task
 
 Agents lose this in fresh context; **keep it in this file** so it survives compaction.
 
 - **Do not modify, stage, or “clean up” files that are not part of the change you were asked to make.** No drive-by edits, no opportunistic refactors, no fixing unrelated linter noise in the same commit unless the user asked for that scope.
 - **Do not run git (or other commands) that rewrite the working tree outside the task’s paths** — for example `git restore` / `git checkout` on unrelated files to “fix” staging or status. If something looks wrong outside scope, **tell the user** and wait; do not repair it yourself.
 - Applies to **docs, config, and generated output** as much as code: unrelated moves, renames, and restores are especially harmful because they look intentional in history.
+
+### Issue tracking (dcat)
+
+This project uses **dcat** for issue tracking. Run `dcat prime --opinionated` for instructions, then `dcat list --agent-only` for the issue list. Work on bugs first, high priority first.
+
+**ALWAYS** run `dcat update --status in_progress $issueId` when starting work.
+
+When picking up a child issue, consider whether it can truly be started before the parent is done. If the child genuinely needs the parent first, add a dependency with `dcat dep <child_id> add --depends-on <parent_id>`.
+
+It is okay to work on multiple issues at the same time — just mark all as in_progress, and ask the user which to prioritize if there is a conflict.
+
+If the user brings up a new bug, feature or anything else that warrants code changes, first ask if we should create an issue before starting.
+
+When creating a **question** issue, always draft the title and description first and confirm with the user before running `dcat create`.
+
+### Issue status and branches
+
+`open` → `in_progress` → `in_review` → `closed`
+
+**Always create new branches before picking up issues.** Branch names **must** include the issue ID.
+
+### Closing issues
+
+**NEVER** close issues without explicit user approval:
+
+1. Set status to `in_review`
+2. Ask the user to test
+3. Ask if we can close it
+4. Only run `dcat close` after user confirms
+5. **Upon closing:** commit (including tracker), **merge**, and **push** — in that order after `dcat close`. Do not merge to the default branch or push the merge **before** the issue is closed.
+
+Do not suggest creating PRs.
 
 ## Cluster-First: Every Feature Must Work on Every Node
 
@@ -33,9 +69,11 @@ If that pattern fits ( **`curl`** and a real browser still work), mention it to 
 
 When **`curl`**ing the local Vite dev server, use the hostname (e.g. **`http://localhost:3001`**), not **`http://127.0.0.1:3001`**, so the target matches Vite’s default **`server.host`** (`localhost`, which on many setups binds only the IPv6 loopback `::1`).
 
-## Do not suggest creating PRs.
+## Shared WAL (`raftwal`): prioritize correctness
 
-## Always create new branches before picking up issues.
+The shared write-ahead log (**`backend/internal/raftwal`**) backs Raft log and stable state for multiple groups on each node. Bugs there are cluster-wide (wrong consensus, panics, divergent replay), not local UI glitches.
+
+When choosing what to do next or how deep to test: **favor WAL-related work** (correctness, compaction, replay, `LogStore`/`StableStore` semantics, multi-group isolation, failure injection) over unrelated refactors until the user shifts priority. Prefer issues that touch this layer (e.g. **gastrolog-4b1p7** harness and any redesign children that land on `raftwal` or Raft persistence).
 
 ## React compiler is enabled — never use React.memo, useMemo, or useCallback.
 
@@ -67,36 +105,6 @@ just frontend gen           # TypeScript only
 ## Data Integrity: Facts Before Speculation
 
 Never present derived or approximate data as if it were authoritative. If it comes from the system, show it. If it's reconstructed client-side via heuristics, either don't show it or label it as derived. When in doubt, leave it out.
-
-## Issue tracking
-
-This project uses **dcat** for issue tracking. Run `dcat prime --opinionated` for instructions, then `dcat list --agent-only` for the issue list. Work on bugs first, high priority first.
-
-ALWAYS run `dcat update --status in_progress $issueId` when starting work.
-
-When picking up a child issue, consider whether it can truly be started before the parent is done. If the child genuinely needs the parent first, add a dependency with `dcat dep <child_id> add --depends-on <parent_id>`.
-
-It is okay to work on multiple issues at the same time — just mark all as in_progress, and ask the user which to prioritize if there is a conflict.
-
-If the user brings up a new bug, feature or anything else that warrants code changes, first ask if we should create an issue before starting.
-
-When creating a **question** issue, always draft the title and description first and confirm with the user before running `dcat create`.
-
-### Issue Status Workflow
-
-`open` → `in_progress` → `in_review` → `closed`
-
-Always create issue branches with the issue ID in the branch name.
-
-### Closing Issues
-
-NEVER close issues without explicit user approval:
-
-1. Set status to `in_review`
-2. Ask the user to test
-3. Ask if we can close it
-4. Only run `dcat close` after user confirms
-5. Upon closing, commit, merge and push
 
 ## Design Context
 
