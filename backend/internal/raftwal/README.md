@@ -130,7 +130,7 @@ flowchart TD
     style ROT fill:#5c3d1e,stroke:#a67c52
 ```
 
-Segments are numbered sequentially (`wal-000001.log`, `wal-000002.log`, ...). The target size is 64MB. Old segments remain on disk until explicitly cleaned up (future: automatic GC when all groups have compacted past them).
+Segments are numbered sequentially (`wal-000001.log`, `wal-000002.log`, ...). The target size is 64MB. When there are at least two segment files and a `DeleteRange` write is fsynced, the WAL may run automatic compaction: it appends a compacted snapshot of registrations, stable keys, delete horizons, and surviving log entries to new segments, fsyncs, then removes older `wal-*.log` files. Tune with `Config.CompactionMinSegments` (default 2). Stats from the last run are available via `WAL.LastCompactionStats()`.
 
 ### Group Registration
 
@@ -242,7 +242,7 @@ No lock contention between reads and the batch writer — reads finish quickly (
 ## Limitations
 
 - **In-memory index**: All log entries between `firstIndex` and `lastIndex` for each group are kept in memory. This is bounded by Raft's `TrailingLogs` config (default 64) but requires Raft to take snapshots regularly.
-- **No segment GC**: Old segments are not automatically cleaned up. Future work: track per-group min-index and remove segments where all entries are compacted.
+- **Segment compaction**: Triggered after successful `DeleteRange` batches when multiple segments exist; failures are best-effort ignored so `DeleteRange` success is never masked. There is no separate manual “prune WAL” API yet.
 - **Single writer**: All writes go through one goroutine. This is intentional (serializes fsync) but means write throughput is bounded by single-core speed + disk fsync latency. In practice, the 1ms batch window means this is not a bottleneck — multiple groups' writes are coalesced.
 - **No checksumming of headers**: The CRC covers only the payload. A corrupted header (wrong groupID or length) would cause replay to misparse subsequent entries. Mitigation: the CRC of the next entry would fail, stopping replay.
 
@@ -250,7 +250,7 @@ No lock contention between reads and the batch writer — reads finish quickly (
 
 ## Test Coverage
 
-- 40 unit tests covering happy path, edge cases, isolation, crash recovery, concurrency
+- Unit tests covering happy path, edge cases, isolation, crash recovery, concurrency, and segment compaction after `DeleteRange`
 - 5 fuzz targets for encode/decode round-trips and corrupt segment replay
 - 2 hashicorp/raft integration tests (election + apply, snapshot + restore)
 - 2 benchmarks (WAL vs boltdb at 1/4/16/64 concurrent groups)

@@ -1,6 +1,7 @@
 package raftwal
 
 import (
+	"bytes"
 	"os"
 	"testing"
 
@@ -37,11 +38,11 @@ func FuzzLogEncodeDecode(f *testing.F) {
 		if decoded.Type != hraft.LogType(logType) {
 			t.Errorf("type: got %d want %d", decoded.Type, logType)
 		}
-		if len(decoded.Data) != len(data) {
-			t.Errorf("data len: got %d want %d", len(decoded.Data), len(data))
+		if !bytes.Equal(decoded.Data, data) {
+			t.Errorf("data: bytes differ (len got %d want %d)", len(decoded.Data), len(data))
 		}
-		if len(decoded.Extensions) != len(ext) {
-			t.Errorf("ext len: got %d want %d", len(decoded.Extensions), len(ext))
+		if !bytes.Equal(decoded.Extensions, ext) {
+			t.Errorf("extensions: bytes differ (len got %d want %d)", len(decoded.Extensions), len(ext))
 		}
 	})
 }
@@ -58,8 +59,8 @@ func FuzzStableSetEncodeDecode(f *testing.F) {
 		if gotKey != key {
 			t.Errorf("key: got %q want %q", gotKey, key)
 		}
-		if len(gotVal) != len(val) {
-			t.Errorf("val len: got %d want %d", len(gotVal), len(val))
+		if !bytes.Equal(gotVal, val) {
+			t.Errorf("val: bytes differ (len got %d want %d)", len(gotVal), len(val))
 		}
 	})
 }

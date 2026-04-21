@@ -8,8 +8,9 @@
 // through the shared WAL with coalesced fsync.
 //
 // The WAL is segmented: when a segment exceeds the target size, a new segment
-// is started. Old segments are removed once all groups have advanced past them
-// (via DeleteRange).
+// is started. After DeleteRange batches, when at least CompactionMinSegments
+// files exist, the WAL may compact: rewrite live state into new segments,
+// fsync, then remove older segment files (replay-safe).
 package raftwal
 
 import (
@@ -20,6 +21,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -74,6 +76,11 @@ type Config struct {
 	// SyncBatchWindow is how long the writer waits to collect more writes
 	// before fsyncing. Default: 1ms.
 	SyncBatchWindow time.Duration
+
+	// CompactionMinSegments is the minimum number of WAL segment files required
+	// before automatic compaction is attempted after DeleteRange writes.
+	// Default: 2.
+	CompactionMinSegments int
 }
 
 func (c Config) withDefaults() Config {
@@ -83,7 +90,18 @@ func (c Config) withDefaults() Config {
 	if c.SyncBatchWindow <= 0 {
 		c.SyncBatchWindow = syncBatchWindow
 	}
+	if c.CompactionMinSegments <= 0 {
+		c.CompactionMinSegments = 2
+	}
 	return c
+}
+
+// CompactionStats captures the most recent automatic WAL compaction result.
+type CompactionStats struct {
+	ReclaimedSegments int
+	ReclaimedBytes    int64
+	RetainedSegments  int
+	RetainedBytes     int64
 }
 
 // WAL is the shared write-ahead log. Create one per node; all Raft
@@ -107,6 +125,8 @@ type WAL struct {
 	syncCh  chan chan error // request a sync, get back the result
 	done    chan struct{}
 	wg      sync.WaitGroup
+
+	lastCompaction CompactionStats
 }
 
 // groupState holds per-group in-memory state.
@@ -208,6 +228,14 @@ func (w *WAL) GroupStore(name string) *GroupStore {
 	return &GroupStore{wal: w, groupID: gid}
 }
 
+// LastCompactionStats returns statistics from the most recent automatic
+// compaction run. If no compaction has run yet, fields are zero.
+func (w *WAL) LastCompactionStats() CompactionStats {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.lastCompaction
+}
+
 // Close flushes pending writes and closes the WAL. Safe to call multiple times.
 func (w *WAL) Close() error {
 	w.mu.Lock()
@@ -305,6 +333,7 @@ func (w *WAL) flushBatch(batch []writeOp) {
 	defer w.mu.Unlock()
 
 	var writeErr error
+	sawDeleteRange := false
 
 	for i := range batch {
 		if writeErr != nil {
@@ -329,6 +358,9 @@ func (w *WAL) flushBatch(batch []writeOp) {
 		}
 		// Apply to in-memory state.
 		w.applyToMemory(batch[i].groupID, batch[i].typ, batch[i].payload)
+		if batch[i].typ == entryDeleteRange {
+			sawDeleteRange = true
+		}
 	}
 
 	// Single fsync for the entire batch.
@@ -343,6 +375,12 @@ func (w *WAL) flushBatch(batch []writeOp) {
 				// Already sent an error above.
 			}
 		}
+	}
+
+	if syncErr == nil && writeErr == nil && sawDeleteRange {
+		// Best effort: compaction must never affect caller-visible success
+		// for already-fsynced writes.
+		_ = w.compactSegmentsLocked()
 	}
 }
 
@@ -446,25 +484,214 @@ func (w *WAL) replay() error {
 		return err
 	}
 
-	var segments []string
+	segments := make([]segmentInfo, 0, len(entries))
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), walFilePrefix) && strings.HasSuffix(e.Name(), walFileSuffix) {
-			segments = append(segments, filepath.Join(w.dir, e.Name()))
+		name := e.Name()
+		if !strings.HasPrefix(name, walFilePrefix) || !strings.HasSuffix(name, walFileSuffix) {
+			continue
 		}
+		seq, ok := parseSegmentSeq(name)
+		if !ok {
+			continue
+		}
+		segments = append(segments, segmentInfo{
+			path: filepath.Join(w.dir, name),
+			seq:  seq,
+		})
 	}
-	sort.Strings(segments) // lexicographic = chronological with zero-padded seq
+	sort.Slice(segments, func(i, j int) bool { return segments[i].seq < segments[j].seq })
 
 	for _, seg := range segments {
-		if err := w.replaySegment(seg); err != nil {
-			return fmt.Errorf("replay %s: %w", seg, err)
+		if err := w.replaySegment(seg.path); err != nil {
+			return fmt.Errorf("replay %s: %w", seg.path, err)
 		}
 		// Track the highest segment sequence number.
-		name := filepath.Base(seg)
-		name = strings.TrimPrefix(name, walFilePrefix)
-		name = strings.TrimSuffix(name, walFileSuffix)
-		var seq int
-		if _, err := fmt.Sscanf(name, "%d", &seq); err == nil && seq > w.segSeq {
-			w.segSeq = seq
+		if seg.seq > w.segSeq {
+			w.segSeq = seg.seq
+		}
+	}
+	return nil
+}
+
+type segmentInfo struct {
+	path string
+	seq  int
+	size int64
+}
+
+func parseSegmentSeq(name string) (int, bool) {
+	seqPart := strings.TrimPrefix(name, walFilePrefix)
+	seqPart = strings.TrimSuffix(seqPart, walFileSuffix)
+	var seq int
+	if _, err := fmt.Sscanf(seqPart, "%d", &seq); err != nil {
+		return 0, false
+	}
+	return seq, true
+}
+
+func (w *WAL) listSegments() ([]segmentInfo, error) {
+	entries, err := os.ReadDir(w.dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	segments := make([]segmentInfo, 0, len(entries))
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, walFilePrefix) || !strings.HasSuffix(name, walFileSuffix) {
+			continue
+		}
+		seq, ok := parseSegmentSeq(name)
+		if !ok {
+			continue
+		}
+		path := filepath.Join(w.dir, name)
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, err
+		}
+		segments = append(segments, segmentInfo{
+			path: path,
+			seq:  seq,
+			size: info.Size(),
+		})
+	}
+	sort.Slice(segments, func(i, j int) bool { return segments[i].seq < segments[j].seq })
+	return segments, nil
+}
+
+func (w *WAL) compactSegmentsLocked() error {
+	segments, err := w.listSegments()
+	if err != nil {
+		return err
+	}
+	if len(segments) < w.cfg.CompactionMinSegments {
+		return nil
+	}
+
+	// Capture segment horizon to reclaim only pre-compaction files.
+	oldMaxSeq := w.segSeq
+	if oldMaxSeq <= 0 {
+		return nil
+	}
+
+	if w.seg != nil {
+		if err := w.seg.Sync(); err != nil {
+			return err
+		}
+	}
+	if err := w.rotateSegment(); err != nil {
+		return err
+	}
+	if err := w.writeCompactedSnapshotLocked(); err != nil {
+		return err
+	}
+	if err := w.seg.Sync(); err != nil {
+		return err
+	}
+
+	var reclaimedSegments int
+	var reclaimedBytes int64
+	for _, seg := range segments {
+		if seg.seq > oldMaxSeq {
+			continue
+		}
+		if err := os.Remove(seg.path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		reclaimedSegments++
+		reclaimedBytes += seg.size
+	}
+
+	remaining, err := w.listSegments()
+	if err != nil {
+		return err
+	}
+	var retainedBytes int64
+	for _, seg := range remaining {
+		retainedBytes += seg.size
+	}
+	w.lastCompaction = CompactionStats{
+		ReclaimedSegments: reclaimedSegments,
+		ReclaimedBytes:    reclaimedBytes,
+		RetainedSegments:  len(remaining),
+		RetainedBytes:     retainedBytes,
+	}
+	return nil
+}
+
+func (w *WAL) appendCompactedEntryLocked(groupID uint32, typ entryType, payload []byte) error {
+	entrySize := int64(headerSize + len(payload))
+	if w.segSize > 0 && w.segSize+entrySize > w.cfg.SegmentTargetSize {
+		if err := w.rotateSegment(); err != nil {
+			return err
+		}
+	}
+	return w.appendEntry(groupID, typ, payload)
+}
+
+func (w *WAL) writeCompactedSnapshotLocked() error {
+	type groupRef struct {
+		name string
+		id   uint32
+	}
+	refs := make([]groupRef, 0, len(w.groupIDs))
+	for name, id := range w.groupIDs {
+		refs = append(refs, groupRef{name: name, id: id})
+	}
+	sort.Slice(refs, func(i, j int) bool {
+		if refs[i].id == refs[j].id {
+			return refs[i].name < refs[j].name
+		}
+		return refs[i].id < refs[j].id
+	})
+	for _, ref := range refs {
+		if err := w.appendCompactedEntryLocked(ref.id, entryGroupReg, []byte(ref.name)); err != nil {
+			return err
+		}
+	}
+
+	groupIDs := make([]uint32, 0, len(w.groups))
+	for gid := range w.groups {
+		groupIDs = append(groupIDs, gid)
+	}
+	slices.Sort(groupIDs)
+
+	for _, gid := range groupIDs {
+		gs := w.groups[gid]
+		if gs == nil {
+			continue
+		}
+		if gs.deletedThrough > 0 {
+			// Persist compacted horizon using a single-point tombstone marker.
+			tombstone := encodeDeleteRange(gs.deletedThrough, gs.deletedThrough)
+			if err := w.appendCompactedEntryLocked(gid, entryDeleteRange, tombstone); err != nil {
+				return err
+			}
+		}
+
+		stableKeys := make([]string, 0, len(gs.stable))
+		for k := range gs.stable {
+			stableKeys = append(stableKeys, k)
+		}
+		sort.Strings(stableKeys)
+		for _, key := range stableKeys {
+			if err := w.appendCompactedEntryLocked(gid, entryStableSet, encodeStableSet(key, gs.stable[key])); err != nil {
+				return err
+			}
+		}
+
+		logIndexes := make([]uint64, 0, len(gs.logs))
+		for idx := range gs.logs {
+			logIndexes = append(logIndexes, idx)
+		}
+		slices.Sort(logIndexes)
+		for _, idx := range logIndexes {
+			if err := w.appendCompactedEntryLocked(gid, entryLog, gs.logs[idx]); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
