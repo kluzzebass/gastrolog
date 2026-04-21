@@ -579,6 +579,43 @@ func TestDeleteRangeIdempotent(t *testing.T) {
 	}
 }
 
+// Regression: suffix-style DeleteRange must not poison reads of the surviving
+// prefix (hashicorp/raft appendEntries conflict path). A too-wide "deleted"
+// horizon previously made GetLog panic the Raft node via ErrLogNotFound.
+func TestDeleteRangeSuffixPreservesPrefix(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	w, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+
+	gs := w.GroupStore("tier-1")
+	for i := uint64(1); i <= 10; i++ {
+		_ = gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: []byte("x")})
+	}
+	if err := gs.DeleteRange(5, 10); err != nil {
+		t.Fatal(err)
+	}
+	first, _ := gs.FirstIndex()
+	last, _ := gs.LastIndex()
+	if first != 1 || last != 4 {
+		t.Fatalf("first=%d last=%d, want 1..4", first, last)
+	}
+	var log hraft.Log
+	for _, idx := range []uint64{1, 2, 3, 4} {
+		if err := gs.GetLog(idx, &log); err != nil {
+			t.Fatalf("GetLog(%d): %v", idx, err)
+		}
+	}
+	for _, idx := range []uint64{5, 6, 10} {
+		if err := gs.GetLog(idx, &log); err != hraft.ErrLogNotFound {
+			t.Fatalf("GetLog(%d): want ErrLogNotFound, got %v", idx, err)
+		}
+	}
+}
+
 func TestDeleteRangeBeyondLastIndex(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -593,15 +630,27 @@ func TestDeleteRangeBeyondLastIndex(t *testing.T) {
 		_ = gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: []byte("x")})
 	}
 
-	// Delete range extends beyond the last entry.
-	_ = gs.DeleteRange(3, 100)
+	// Delete range extends beyond the last entry: suffix is cleared; prefix
+	// indices below lo remain (same semantics as hashicorp/raft InmemStore).
+	if err := gs.DeleteRange(3, 100); err != nil {
+		t.Fatal(err)
+	}
 	first, _ := gs.FirstIndex()
 	last, _ := gs.LastIndex()
-	// Everything from 3 onward is gone.
-	if first != 0 && first != 1 {
-		// Either 0 (all gone because firstIndex > lastIndex) or 1-2 survive.
+	if first != 1 || last != 2 {
+		t.Fatalf("first=%d last=%d, want 1..2 after delete past end", first, last)
 	}
-	_ = last // just checking no panic
+	var log hraft.Log
+	for _, idx := range []uint64{1, 2} {
+		if err := gs.GetLog(idx, &log); err != nil {
+			t.Fatalf("GetLog(%d): %v", idx, err)
+		}
+	}
+	for _, idx := range []uint64{3, 4, 5} {
+		if err := gs.GetLog(idx, &log); err != hraft.ErrLogNotFound {
+			t.Fatalf("GetLog(%d): want ErrLogNotFound, got %v", idx, err)
+		}
+	}
 }
 
 func TestStableStoreOverwrite(t *testing.T) {
@@ -953,6 +1002,15 @@ func TestConcurrentReadWrite(t *testing.T) {
 
 	var wg sync.WaitGroup
 	done := make(chan struct{})
+	var errMu sync.Mutex
+	var goroutineErrs []error
+	recordErr := func(err error) {
+		if err != nil {
+			errMu.Lock()
+			goroutineErrs = append(goroutineErrs, err)
+			errMu.Unlock()
+		}
+	}
 
 	// Writer: keeps appending.
 	wg.Add(1)
@@ -964,7 +1022,10 @@ func TestConcurrentReadWrite(t *testing.T) {
 				return
 			default:
 			}
-			_ = gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: []byte("new")})
+			if err := gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: []byte("new")}); err != nil {
+				recordErr(err)
+				return
+			}
 		}
 	}()
 
@@ -979,7 +1040,14 @@ func TestConcurrentReadWrite(t *testing.T) {
 			default:
 			}
 			var log hraft.Log
-			_ = gs.GetLog(50, &log)
+			if err := gs.GetLog(50, &log); err != nil {
+				recordErr(err)
+				return
+			}
+			if string(log.Data) != "init" {
+				recordErr(fmt.Errorf("GetLog(50) data=%q want init", log.Data))
+				return
+			}
 			_, _ = gs.FirstIndex()
 			_, _ = gs.LastIndex()
 			_, _ = gs.Get([]byte("missing"))
@@ -997,7 +1065,10 @@ func TestConcurrentReadWrite(t *testing.T) {
 				return
 			default:
 			}
-			_ = gs.SetUint64([]byte("counter"), i)
+			if err := gs.SetUint64([]byte("counter"), i); err != nil {
+				recordErr(err)
+				return
+			}
 		}
 	}()
 
@@ -1005,6 +1076,35 @@ func TestConcurrentReadWrite(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	close(done)
 	wg.Wait()
+
+	errMu.Lock()
+	errs := append([]error(nil), goroutineErrs...)
+	errMu.Unlock()
+	if len(errs) > 0 {
+		t.Fatalf("goroutine errors: %v", errs)
+	}
+
+	last, err := gs.LastIndex()
+	if err != nil {
+		t.Fatalf("LastIndex: %v", err)
+	}
+	if last <= 100 {
+		t.Fatalf("expected writer to advance LastIndex past 100, got %d", last)
+	}
+	var log hraft.Log
+	if err := gs.GetLog(50, &log); err != nil {
+		t.Fatalf("GetLog(50): %v", err)
+	}
+	if string(log.Data) != "init" {
+		t.Fatalf("GetLog(50) data=%q want init", log.Data)
+	}
+	n, err := gs.GetUint64([]byte("counter"))
+	if err != nil {
+		t.Fatalf("GetUint64(counter): %v", err)
+	}
+	if n == 0 {
+		t.Fatal("expected counter to be written at least once")
+	}
 }
 
 // --- WAL after close ---
@@ -1235,5 +1335,175 @@ func TestReplayWithDeleteRanges(t *testing.T) {
 	if err := gs2.GetLog(75, &log); err != nil {
 		t.Fatalf("GetLog 75: %v", err)
 	}
+}
+
+func TestSegmentCompactionReclaimsOldFilesAndPreservesState(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	w, err := Open(dir, Config{
+		SegmentTargetSize:     1024,
+		CompactionMinSegments: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gsA := w.GroupStore("group-a")
+	gsB := w.GroupStore("group-b")
+
+	payload := make([]byte, 256)
+	for i := uint64(1); i <= 24; i++ {
+		if err := gsA.StoreLog(&hraft.Log{Index: i, Term: 1, Data: payload}); err != nil {
+			t.Fatalf("group-a StoreLog %d: %v", i, err)
+		}
+		if err := gsB.StoreLog(&hraft.Log{Index: i, Term: 2, Data: payload}); err != nil {
+			t.Fatalf("group-b StoreLog %d: %v", i, err)
+		}
+	}
+	if err := gsA.SetUint64([]byte("term"), 7); err != nil {
+		t.Fatal(err)
+	}
+	if err := gsB.Set([]byte("vote"), []byte("n2")); err != nil {
+		t.Fatal(err)
+	}
+
+	segmentsBefore := countWalSegments(t, dir)
+	if segmentsBefore < 2 {
+		t.Fatalf("expected multiple segments before compaction, got %d", segmentsBefore)
+	}
+
+	if err := gsA.DeleteRange(1, 20); err != nil {
+		t.Fatal(err)
+	}
+	if err := gsB.DeleteRange(1, 20); err != nil {
+		t.Fatal(err)
+	}
+
+	stats := w.LastCompactionStats()
+	if stats.ReclaimedSegments == 0 {
+		t.Fatalf("expected reclaimed segments > 0, got %+v", stats)
+	}
+	if stats.ReclaimedBytes <= 0 {
+		t.Fatalf("expected reclaimed bytes > 0, got %+v", stats)
+	}
+
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	segmentsAfter := countWalSegments(t, dir)
+	if segmentsAfter > segmentsBefore {
+		t.Fatalf("expected no segment growth after compaction, before=%d after=%d", segmentsBefore, segmentsAfter)
+	}
+
+	w2, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w2.Close()
+
+	ga := w2.GroupStore("group-a")
+	gb := w2.GroupStore("group-b")
+
+	firstA, _ := ga.FirstIndex()
+	lastA, _ := ga.LastIndex()
+	if firstA != 21 || lastA != 24 {
+		t.Fatalf("group-a first=%d last=%d, want 21..24", firstA, lastA)
+	}
+	firstB, _ := gb.FirstIndex()
+	lastB, _ := gb.LastIndex()
+	if firstB != 21 || lastB != 24 {
+		t.Fatalf("group-b first=%d last=%d, want 21..24", firstB, lastB)
+	}
+
+	var log hraft.Log
+	if err := ga.GetLog(10, &log); err != hraft.ErrLogNotFound {
+		t.Fatalf("expected compacted log miss for group-a index 10, got %v", err)
+	}
+	if err := ga.GetLog(22, &log); err != nil {
+		t.Fatalf("group-a GetLog 22: %v", err)
+	}
+	if err := gb.GetLog(22, &log); err != nil {
+		t.Fatalf("group-b GetLog 22: %v", err)
+	}
+
+	term, _ := ga.GetUint64([]byte("term"))
+	if term != 7 {
+		t.Fatalf("group-a term=%d want 7", term)
+	}
+	vote, _ := gb.Get([]byte("vote"))
+	if string(vote) != "n2" {
+		t.Fatalf("group-b vote=%q want n2", vote)
+	}
+}
+
+func TestSegmentCompactionPreservesSparseIndexAfterRestart(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	w, err := Open(dir, Config{
+		SegmentTargetSize:     1024,
+		CompactionMinSegments: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gs := w.GroupStore("sparse")
+
+	for i := uint64(1); i <= 10; i++ {
+		if err := gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: []byte("old")}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := gs.DeleteRange(1, 10); err != nil {
+		t.Fatal(err)
+	}
+	for i := uint64(100); i <= 104; i++ {
+		if err := gs.StoreLog(&hraft.Log{Index: i, Term: 2, Data: []byte("new")}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := gs.DeleteRange(11, 99); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	w2, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w2.Close()
+
+	gs2 := w2.GroupStore("sparse")
+	first, _ := gs2.FirstIndex()
+	last, _ := gs2.LastIndex()
+	if first != 100 || last != 104 {
+		t.Fatalf("first=%d last=%d, want 100..104", first, last)
+	}
+
+	var log hraft.Log
+	if err := gs2.GetLog(50, &log); err != hraft.ErrLogNotFound {
+		t.Fatalf("expected ErrLogNotFound for compacted sparse gap index 50, got %v", err)
+	}
+	if err := gs2.GetLog(102, &log); err != nil {
+		t.Fatalf("GetLog 102: %v", err)
+	}
+}
+
+func countWalSegments(t *testing.T, dir string) int {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), walFilePrefix) && strings.HasSuffix(e.Name(), walFileSuffix) {
+			count++
+		}
+	}
+	return count
 }
 

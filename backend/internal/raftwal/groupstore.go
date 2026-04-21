@@ -49,9 +49,6 @@ func (g *GroupStore) GetLog(index uint64, log *hraft.Log) error {
 	if gs == nil {
 		return hraft.ErrLogNotFound
 	}
-	if index <= gs.deletedThrough {
-		return hraft.ErrLogNotFound
-	}
 	data, ok := gs.logs[index]
 	if !ok {
 		return hraft.ErrLogNotFound
