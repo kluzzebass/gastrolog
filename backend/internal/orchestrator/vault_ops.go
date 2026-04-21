@@ -1,19 +1,18 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"sync"
 	"time"
 
-
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/cluster"
-	"gastrolog/internal/system"
 	"gastrolog/internal/index"
 	"gastrolog/internal/index/analyzer"
+	"gastrolog/internal/system"
 )
 
 // IndexInfo describes a single index for a chunk.
@@ -417,9 +416,9 @@ func (o *Orchestrator) AppendToTier(vaultID, tierID glid.GLID, primaryChunkID ch
 // remoteForwardTarget captures the parameters for a fire-and-forget forward
 // to a cross-node follower. Collected under o.mu.RLock, executed after release.
 type remoteForwardTarget struct {
-	nodeID       string
-	vaultID      glid.GLID
-	tierID       glid.GLID
+	nodeID        string
+	vaultID       glid.GLID
+	tierID        glid.GLID
 	activeChunkID chunk.ChunkID
 }
 
@@ -800,8 +799,8 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, tierID 
 	// RLock during a network read starves writers (FSM dispatcher) and
 	// deadlocks the entire orchestrator.
 	type tierRef struct {
-		cm          chunk.ChunkManager
-		isFollower bool
+		cm           chunk.ChunkManager
+		isFollower   bool
 		isTombstoned func(chunk.ChunkID) bool
 	}
 	ref := func() *tierRef {

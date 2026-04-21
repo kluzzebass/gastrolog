@@ -1,11 +1,13 @@
 package cluster
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
+	"gastrolog/internal/glid"
 	"io"
 	"iter"
+	"os"
+	"strings"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/convert"
@@ -24,7 +26,6 @@ type RecordAppender func(ctx context.Context, vaultID glid.GLID, rec chunk.Recor
 // RecordTierAppender appends a single record to a specific tier in a local vault.
 // Used by the ForwardRecords handler when tier_id is set (inter-tier transition).
 type RecordTierAppender func(ctx context.Context, vaultID, tierID glid.GLID, primaryChunkID chunk.ChunkID, rec chunk.Record) error
-
 
 // SearchExecutor runs a search on a local vault and returns results.
 // For regular searches, it returns an iterator over records (the caller
@@ -127,7 +128,6 @@ func (s *Server) SetRecordAppender(fn RecordAppender) {
 func (s *Server) SetRecordTierAppender(fn RecordTierAppender) {
 	s.recordTierAppender = fn
 }
-
 
 // SetRecordImporter injects the callback for importing transferred records.
 // Must be called before ForwardImportRecords RPCs.
@@ -290,7 +290,6 @@ func streamForwardRecordsHandler(srv any, stream grpc.ServerStream) error {
 		s.forwardedReceived.Add(int64(len(msg.GetRecords())))
 	}
 }
-
 
 // forwardImportRecordsStreamHandler handles the client-streaming
 // ForwardImportRecords RPC. Each message carries a single record; the server
@@ -457,7 +456,7 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 			// EOF can occur when a chunk is deleted mid-read (e.g., ImportToTier
 			// replacing a forwarded-record chunk on a secondary). Treat as
 			// end-of-results — the data is still available via retry.
-			if errors.Is(iterErr, io.EOF) {
+			if errors.Is(iterErr, io.EOF) || isMissingLocalChunkFileError(iterErr) {
 				break
 			}
 			return status.Errorf(codes.Internal, "search record: %v", iterErr)
@@ -485,6 +484,20 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 		resp.HasMore = len(resp.ResumeToken) > 0
 	}
 	return stream.SendMsg(resp)
+}
+
+func isMissingLocalChunkFileError(err error) bool {
+	if errors.Is(err, os.ErrNotExist) {
+		return true
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "no such file or directory") {
+		return false
+	}
+	return strings.Contains(msg, "open raw.log") ||
+		strings.Contains(msg, "open idx.log") ||
+		strings.Contains(msg, "open attr.log") ||
+		strings.Contains(msg, "open attr_dict")
 }
 
 // forwardGetContext handles the ForwardGetContext RPC. Runs GetContext on a
@@ -520,7 +533,6 @@ func (s *Server) forwardGetContext(ctx context.Context, req *gastrologv1.Forward
 	}
 	return resp, nil
 }
-
 
 // forwardListChunks handles the ForwardListChunks RPC. Lists chunks in a
 // local vault and returns them to the requesting node.
@@ -918,8 +930,8 @@ var clusterServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "TierReplication",
 			Handler:       tierReplicationStreamHandler,
-			ClientStreams:  true,
-			ServerStreams:  true,
+			ClientStreams: true,
+			ServerStreams: true,
 		},
 		{
 			StreamName:    "ForwardImportRecords",

@@ -348,16 +348,16 @@ func (m *Manager) evictCache(chunkID chunk.ChunkID) {
 func (m *Manager) IndexSizes(chunkID chunk.ChunkID) map[string]int64 {
 	sizes := make(map[string]int64)
 	paths := map[string]string{
-		"token":     filetoken.IndexPath(m.dir, chunkID),
-		"attr_key":  fileattr.KeyIndexPath(m.dir, chunkID),
-		"attr_val":  fileattr.ValueIndexPath(m.dir, chunkID),
-		"attr_kv":   fileattr.KVIndexPath(m.dir, chunkID),
-		"ingest":    filetsidx.IngestIndexPath(m.dir, chunkID),
-		"source":    filetsidx.SourceIndexPath(m.dir, chunkID),
-		"kv_key":    filekv.KeyIndexPath(m.dir, chunkID),
-		"kv_val":    filekv.ValueIndexPath(m.dir, chunkID),
-		"kv_kv":     filekv.KVIndexPath(m.dir, chunkID),
-		"json":      filejson.IndexPath(m.dir, chunkID),
+		"token":    filetoken.IndexPath(m.dir, chunkID),
+		"attr_key": fileattr.KeyIndexPath(m.dir, chunkID),
+		"attr_val": fileattr.ValueIndexPath(m.dir, chunkID),
+		"attr_kv":  fileattr.KVIndexPath(m.dir, chunkID),
+		"ingest":   filetsidx.IngestIndexPath(m.dir, chunkID),
+		"source":   filetsidx.SourceIndexPath(m.dir, chunkID),
+		"kv_key":   filekv.KeyIndexPath(m.dir, chunkID),
+		"kv_val":   filekv.ValueIndexPath(m.dir, chunkID),
+		"kv_kv":    filekv.KVIndexPath(m.dir, chunkID),
+		"json":     filejson.IndexPath(m.dir, chunkID),
 	}
 	for name, path := range paths {
 		if info, err := os.Stat(path); err == nil {
@@ -371,25 +371,29 @@ func (m *Manager) IndexSizes(chunkID chunk.ChunkID) map[string]int64 {
 // Also cleans up any orphaned temporary files from interrupted builds.
 func (m *Manager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
 	// Check if all index files exist.
-	indexPaths := []string{
-		filetoken.IndexPath(m.dir, chunkID),
-		fileattr.KeyIndexPath(m.dir, chunkID),
-		fileattr.ValueIndexPath(m.dir, chunkID),
-		fileattr.KVIndexPath(m.dir, chunkID),
-		filetsidx.IngestIndexPath(m.dir, chunkID),
-		filetsidx.SourceIndexPath(m.dir, chunkID),
-		filekv.KeyIndexPath(m.dir, chunkID),
-		filekv.ValueIndexPath(m.dir, chunkID),
-		filekv.KVIndexPath(m.dir, chunkID),
-		filejson.IndexPath(m.dir, chunkID),
+	indexPaths := map[string]string{
+		"token":    filetoken.IndexPath(m.dir, chunkID),
+		"attr_key": fileattr.KeyIndexPath(m.dir, chunkID),
+		"attr_val": fileattr.ValueIndexPath(m.dir, chunkID),
+		"attr_kv":  fileattr.KVIndexPath(m.dir, chunkID),
+		"ingest":   filetsidx.IngestIndexPath(m.dir, chunkID),
+		"source":   filetsidx.SourceIndexPath(m.dir, chunkID),
+		"kv_key":   filekv.KeyIndexPath(m.dir, chunkID),
+		"kv_val":   filekv.ValueIndexPath(m.dir, chunkID),
+		"kv_kv":    filekv.KVIndexPath(m.dir, chunkID),
+		"json":     filejson.IndexPath(m.dir, chunkID),
 	}
 
-	for _, path := range indexPaths {
+	missing := make([]string, 0, len(indexPaths))
+	for name, path := range indexPaths {
 		if _, err := os.Stat(path); os.IsNotExist(err) {
-			return false, nil
+			missing = append(missing, name)
 		} else if err != nil {
 			return false, err
 		}
+	}
+	if len(missing) > 0 {
+		return false, nil
 	}
 
 	// Clean up orphaned temp files.

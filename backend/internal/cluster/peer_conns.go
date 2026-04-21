@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"runtime"
 	"sync"
 	"time"
 
@@ -57,9 +56,9 @@ const invalidateGracePeriod = 5 * time.Second
 // share a single PeerConns so that traffic to each peer is multiplexed
 // over one connection.
 type PeerConns struct {
-	raft       *hraft.Raft
-	clusterTLS *ClusterTLS
-	nodeID     string
+	raft        *hraft.Raft
+	clusterTLS  *ClusterTLS
+	nodeID      string
 	byteMetrics *PeerByteMetrics // optional; nil disables per-peer byte tracking
 
 	mu    sync.Mutex
@@ -111,25 +110,8 @@ func (p *PeerConns) Conn(nodeID string) (*grpc.ClientConn, error) {
 
 	if conn, ok := p.conns[nodeID]; ok {
 		if conn.GetState() != connectivity.Shutdown {
-			// #region agent log
-			debugLog4vz40("cluster/peer_conns.go:Conn",
-				"cache hit",
-				map[string]any{
-					"hypothesisId": "A-conn-churn",
-					"node":         nodeID,
-					"state":        conn.GetState().String(),
-				})
-			// #endregion
 			return conn, nil
 		}
-		// #region agent log
-		debugLog4vz40("cluster/peer_conns.go:Conn",
-			"cache hit but conn is SHUTDOWN — evicting and redialing",
-			map[string]any{
-				"hypothesisId": "A-conn-churn",
-				"node":         nodeID,
-			})
-		// #endregion
 		delete(p.conns, nodeID)
 	}
 
@@ -165,15 +147,6 @@ func (p *PeerConns) Conn(nodeID string) (*grpc.ClientConn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("dial node %s at %s: %w", nodeID, addr, err)
 	}
-	// #region agent log
-	debugLog4vz40("cluster/peer_conns.go:Conn",
-		"fresh dial",
-		map[string]any{
-			"hypothesisId": "A-conn-churn",
-			"node":         nodeID,
-			"addr":         addr,
-		})
-	// #endregion
 	p.conns[nodeID] = conn
 	return conn, nil
 }
@@ -198,26 +171,8 @@ func (p *PeerConns) Conn(nodeID string) (*grpc.ClientConn, error) {
 // propagate as a flurry of mid-RPC closures.
 func (p *PeerConns) Invalidate(nodeID string, err error) {
 	if !shouldInvalidate(err) {
-		// #region agent log
-		debugLog4vz40("cluster/peer_conns.go:Invalidate",
-			"skipped — err is not a transport failure",
-			map[string]any{
-				"hypothesisId": "HA1-invalidate-storm",
-				"node":         nodeID,
-				"err":          fmt.Sprint(err),
-				"errType":      fmt.Sprintf("%T", err),
-				"grpcCode":     status.Code(err).String(),
-				"runId":        "post-fix",
-			})
-		// #endregion
 		return
 	}
-	// #region agent log
-	var caller string
-	if _, file, line, ok := runtime.Caller(1); ok {
-		caller = fmt.Sprintf("%s:%d", file, line)
-	}
-	// #endregion
 	p.mu.Lock()
 	conn, ok := p.conns[nodeID]
 	if ok {
@@ -225,32 +180,11 @@ func (p *PeerConns) Invalidate(nodeID string, err error) {
 	}
 	p.mu.Unlock()
 
-	// #region agent log
-	debugLog4vz40("cluster/peer_conns.go:Invalidate",
-		"invalidate called",
-		map[string]any{
-			"hypothesisId":  "HA1-invalidate-storm",
-			"node":          nodeID,
-			"caller":        caller,
-			"hadCachedConn": ok,
-			"grpcCode":      status.Code(err).String(),
-			"runId":         "post-fix",
-		})
-	// #endregion
 	if !ok {
 		return
 	}
 	go func() {
 		time.Sleep(invalidateGracePeriod)
-		// #region agent log
-		debugLog4vz40("cluster/peer_conns.go:Invalidate",
-			"deferred close firing — torn conn being closed",
-			map[string]any{
-				"hypothesisId": "HA1-invalidate-storm",
-				"node":         nodeID,
-				"caller":       caller,
-			})
-		// #endregion
 		_ = conn.Close()
 	}()
 }
@@ -291,12 +225,6 @@ func (p *PeerConns) PeerIDs() []string {
 // Components holding a *PeerConns reference (Broadcaster, RecordForwarder,
 // SearchForwarder) automatically use the new Raft instance without recreation.
 func (p *PeerConns) Reset(r *hraft.Raft) {
-	// #region agent log
-	var caller string
-	if _, file, line, ok := runtime.Caller(1); ok {
-		caller = fmt.Sprintf("%s:%d", file, line)
-	}
-	// #endregion
 	p.mu.Lock()
 	p.raft = r
 	dropped := make([]*grpc.ClientConn, 0, len(p.conns))
@@ -306,15 +234,6 @@ func (p *PeerConns) Reset(r *hraft.Raft) {
 	}
 	p.mu.Unlock()
 
-	// #region agent log
-	debugLog4vz40("cluster/peer_conns.go:Reset",
-		"Reset called — all peer conns dropped",
-		map[string]any{
-			"hypothesisId": "HA4-reset-cascade",
-			"caller":       caller,
-			"numDropped":   len(dropped),
-		})
-	// #endregion
 	if len(dropped) == 0 {
 		return
 	}

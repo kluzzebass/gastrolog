@@ -1,9 +1,9 @@
 package cluster
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
+	"gastrolog/internal/glid"
 	"io"
 
 	"google.golang.org/grpc"

@@ -59,14 +59,15 @@ func loadDict(dictPath string) (*chunk.StringDict, error) {
 // decompressed. No mmap is needed; memory usage per read is ~one frame (256KB).
 type mmapCursor struct {
 	chunkID  chunk.ChunkID
-	rawData  []byte   // data section (no header); nil if compressed
-	idxData  []byte   // full mmap including header
-	attrData []byte   // data section (no header); nil if compressed
+	rawData  []byte // data section (no header); nil if compressed
+	idxData  []byte // full mmap including header
+	attrData []byte // data section (no header); nil if compressed
+	dictPath string
 	rawMmap  []byte   // full mmap region for Munmap; nil if compressed
 	attrMmap []byte   // full mmap region for Munmap; nil if compressed
 	rawFile  *os.File // underlying file for mmap or seekable source
 	idxFile  *os.File
-	attrFile *os.File // underlying file for mmap or seekable source
+	attrFile *os.File        // underlying file for mmap or seekable source
 	rawSeek  seekable.Reader // seekable reader for compressed raw; nil if mmap'd
 	attrSeek seekable.Reader // seekable reader for compressed attr; nil if mmap'd
 	dict     *chunk.StringDict
@@ -97,7 +98,6 @@ func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath, dictPath s
 	}
 
 	recordCount := RecordCount(idxInfo.Size())
-
 	// Handle empty chunk case.
 	if recordCount == 0 {
 		_ = idxFile.Close()
@@ -142,12 +142,12 @@ func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath, dictPath s
 		cleanupRaw()
 		return nil, fmt.Errorf("open attr.log for chunk %s: %w", chunkID, err)
 	}
-
 	return &mmapCursor{
 		chunkID:     chunkID,
 		rawData:     rawData,
 		idxData:     idxData,
 		attrData:    attrData,
+		dictPath:    dictPath,
 		rawMmap:     rawMmap,
 		attrMmap:    attrMmap,
 		rawFile:     rawFile,
@@ -463,8 +463,8 @@ func (c *stdioCursor) readRecord(index uint64) (chunk.Record, error) {
 	attrs, err := chunk.DecodeWithDict(attrBuf, c.dict)
 	if errors.Is(err, chunk.ErrInvalidAttrsData) {
 		// Dict may be stale — reload from disk and retry once.
-		if reloaded, loadErr := loadDict(c.dictPath); loadErr == nil {
-			c.dict = reloaded
+		if fresh, loadErr := loadDict(c.dictPath); loadErr == nil {
+			c.dict = fresh
 			attrs, err = chunk.DecodeWithDict(attrBuf, c.dict)
 		}
 	}

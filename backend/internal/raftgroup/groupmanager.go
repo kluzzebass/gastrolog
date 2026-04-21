@@ -79,8 +79,8 @@ type GroupManager struct {
 
 	transport    *multiraft.Transport[string]
 	nodeID       string
-	baseDir      string // <home>/raft/groups/
-	shutdownLast string // group ID to shut down last (e.g. config group)
+	baseDir      string       // <home>/raft/groups/
+	shutdownLast string       // group ID to shut down last (e.g. config group)
 	wal          *raftwal.WAL // optional shared WAL; nil = per-group boltdb
 	logger       *slog.Logger
 }
@@ -380,4 +380,3 @@ func (m *GroupManager) seedGroup(r *hraft.Raft, members []hraft.Server) error {
 	}
 	return r.BootstrapCluster(hraft.Configuration{Servers: members}).Error()
 }
-

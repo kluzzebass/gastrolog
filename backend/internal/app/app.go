@@ -4,11 +4,11 @@
 package app
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -21,15 +21,13 @@ import (
 	"gastrolog/internal/alert"
 	"gastrolog/internal/auth"
 	"gastrolog/internal/cert"
+	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
 	chunkcloud "gastrolog/internal/chunk/cloud"
 	chunkfile "gastrolog/internal/chunk/file"
 	chunkjsonl "gastrolog/internal/chunk/jsonl"
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/cluster"
-	"gastrolog/internal/system"
-	sysmem "gastrolog/internal/system/memory"
-	"gastrolog/internal/system/raftfsm"
 	digestlevel "gastrolog/internal/digester/level"
 	digesttimestamp "gastrolog/internal/digester/timestamp"
 	"gastrolog/internal/home"
@@ -41,23 +39,25 @@ import (
 	ingestfluentfwd "gastrolog/internal/ingester/fluentfwd"
 	ingesthttp "gastrolog/internal/ingester/http"
 	ingestkafka "gastrolog/internal/ingester/kafka"
-	ingestmqtt "gastrolog/internal/ingester/mqtt"
 	ingestmetrics "gastrolog/internal/ingester/metrics"
+	ingestmqtt "gastrolog/internal/ingester/mqtt"
 	ingestotlp "gastrolog/internal/ingester/otlp"
 	ingestrelp "gastrolog/internal/ingester/relp"
 	"gastrolog/internal/ingester/scatterbox"
 	ingestself "gastrolog/internal/ingester/self"
 	ingestsyslog "gastrolog/internal/ingester/syslog"
 	ingesttail "gastrolog/internal/ingester/tail"
-	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/lifecycle"
 	"gastrolog/internal/logging"
-	"gastrolog/internal/raftgroup"
-	"gastrolog/internal/raftwal"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/raftgroup"
+	"gastrolog/internal/raftwal"
 	"gastrolog/internal/server"
 	"gastrolog/internal/server/routing"
+	"gastrolog/internal/system"
+	sysmem "gastrolog/internal/system/memory"
+	"gastrolog/internal/system/raftfsm"
 )
 
 // Version is set by the caller (typically from ldflags).
@@ -928,7 +928,7 @@ type serverDeps struct {
 	Dispatcher          *configDispatcher
 	GroupMgr            *raftgroup.GroupManager
 	WAL                 *raftwal.WAL // shared WAL for tier groups; nil = per-group boltdb
-	ConfigStore         io.Closer // rawStore — closed before gRPC for clean Raft shutdown
+	ConfigStore         io.Closer    // rawStore — closed before gRPC for clean Raft shutdown
 	PlacementReconcile  func(ctx context.Context)
 }
 
@@ -942,7 +942,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 			AfterConfigApply: deps.AfterConfigApply, ConfigSignal: deps.ConfigSignal, StatsSignal: deps.StatsSignal,
 			Cluster: deps.ClusterSrv, PeerStats: deps.PeerState,
 			PeerVaultStats: deps.PeerState, PeerIngesterStats: deps.PeerState, PeerRouteStats: deps.PeerState,
-			PeerJobs: deps.PeerJobState,
+			PeerJobs:   deps.PeerJobState,
 			LocalStats: deps.LocalStats, RemoteSearcher: deps.SearchForwarder, RemoteChunkLister: deps.SearchForwarder,
 			RoutingForwarder: deps.RoutingForwarder, ClusterAddress: deps.ClusterAddr,
 			JoinClusterFunc: deps.JoinClusterFunc, RemoveNodeFunc: deps.RemoveNodeFunc,
@@ -990,28 +990,11 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 
 	<-ctx.Done()
 
-	if srv != nil {
-		deps.Logger.Info("stopping server")
-		// The root ctx is already cancelled by the time we get here (that
-		// is how we woke up). Pass srv.Stop a FRESH context with a bounded
-		// drain budget so it can finish in-flight HTTP requests cleanly
-		// instead of returning context.Canceled immediately. See
-		// gastrolog-1e5ke.
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)
-		err := srv.Stop(stopCtx)
-		stopCancel()
-		// context.Canceled / DeadlineExceeded are expected outcomes when a
-		// peer holds a long-running request across shutdown — logged at
-		// Debug, not Error, so the shutdown trail stays clean.
-		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-			deps.Logger.Error("server stop error", "error", err)
-		}
-		serverWg.Wait()
-	}
+	var stopErr error
 
 	deps.Logger.Info("shutting down orchestrator")
 	if err := deps.Orch.Stop(); err != nil {
-		return err
+		stopErr = err
 	}
 
 	if deps.Broadcaster != nil {
@@ -1041,8 +1024,26 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 		deps.ClusterSrv.Stop()
 	}
 
+	if srv != nil {
+		deps.Logger.Info("stopping server")
+		// The root ctx is already cancelled by the time we get here (that
+		// is how we woke up). Pass srv.Stop a FRESH context with a bounded
+		// drain budget so it can finish in-flight HTTP requests cleanly
+		// instead of returning context.Canceled immediately.
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		err := srv.Stop(stopCtx)
+		stopCancel()
+		// context.Canceled / DeadlineExceeded are expected outcomes when a
+		// peer holds a long-running request across shutdown — logged at
+		// Debug, not Error, so the shutdown trail stays clean.
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			deps.Logger.Error("server stop error", "error", err)
+		}
+		serverWg.Wait()
+	}
+
 	deps.Logger.Info("shutdown complete")
-	return nil
+	return stopErr
 }
 
 // setupMultiRaft creates the GroupManager and node address resolver for tier

@@ -267,7 +267,14 @@ type chunkState struct {
 	recordCount uint64                     // Number of records written
 	createdAt   time.Time                  // Wall-clock time when chunk was opened
 	writeMu     sync.Mutex                 // serializes Phase 2 writes to preserve idx ordering on crash
+	writeCond   *sync.Cond                 // orders Phase 2 writes by reserved record index
+	nextWrite   uint64                     // next reserved record index allowed to write
 	inflight    sync.WaitGroup             // tracks in-flight Phase 2 writers for safe sealing
+}
+
+func initWriteOrder(state *chunkState, nextWrite uint64) {
+	state.nextWrite = nextWrite
+	state.writeCond = sync.NewCond(&state.writeMu)
 }
 
 const lockFileName = ".lock"
@@ -371,7 +378,7 @@ func NewManager(cfg Config) (*Manager, error) {
 }
 
 func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
-	// ── Phase 1: lock → encode, reserve space ──
+	// ── Phase 1: lock → optional rotate → encode, reserve space ──
 	m.mu.Lock()
 
 	if m.closed {
@@ -386,13 +393,28 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 		}
 	}
 
-	attrBytes, newKeys, err := chunk.EncodeWithDict(record.Attrs, m.active.dict)
-	if err != nil {
-		m.mu.Unlock()
-		return chunk.ChunkID{}, 0, err
+	// Decide rotation before encoding into the current chunk dict.
+	// Encoding first can mutate the old chunk's in-memory dict, then rotation
+	// seals that chunk without ever persisting those new entries.
+	if trigger := m.cfg.RotationPolicy.ShouldRotate(m.activeChunkState(), record); trigger != nil {
+		m.logger.Debug("rotating chunk",
+			"trigger", *trigger,
+			"chunk", m.active.meta.id.String(),
+			"bytes", m.active.meta.bytes,
+			"records", m.active.recordCount,
+			"age", m.cfg.Now().Sub(m.active.createdAt),
+		)
+		if err := m.sealLocked(); err != nil {
+			m.mu.Unlock()
+			return chunk.ChunkID{}, 0, err
+		}
+		if err := m.openLocked(); err != nil {
+			m.mu.Unlock()
+			return chunk.ChunkID{}, 0, err
+		}
 	}
 
-	attrBytes, newKeys, err = m.rotateIfNeeded(record, attrBytes, newKeys)
+	attrBytes, newKeys, err := chunk.EncodeWithDict(record.Attrs, m.active.dict)
 	if err != nil {
 		m.mu.Unlock()
 		return chunk.ChunkID{}, 0, err
@@ -448,7 +470,14 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 	// reliable indicator of the last fully-written record.
 	defer active.inflight.Done()
 	active.writeMu.Lock()
-	defer active.writeMu.Unlock()
+	for recordIndex != active.nextWrite {
+		active.writeCond.Wait()
+	}
+	defer func() {
+		active.nextWrite++
+		active.writeCond.Broadcast()
+		active.writeMu.Unlock()
+	}()
 
 	if _, err := active.rawFile.WriteAt(record.Raw, rawPos); err != nil {
 		return chunk.ChunkID{}, 0, fmt.Errorf("write raw at offset %d: %w", rawPos, err)
@@ -691,10 +720,12 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	dictPath := m.dictLogPath(id)
 
 	if sealed {
-		return newMmapCursor(id, rawPath, idxPath, attrPath, dictPath)
+		cursor, err := newMmapCursor(id, rawPath, idxPath, attrPath, dictPath)
+		return cursor, err
 	}
 
-	return newStdioCursor(id, rawPath, idxPath, attrPath, dictPath)
+	cursor, err := newStdioCursor(id, rawPath, idxPath, attrPath, dictPath)
+	return cursor, err
 }
 
 // ScanAttrs iterates all records in a chunk reading only idx.log + attr.log,
@@ -771,7 +802,6 @@ func (m *Manager) loadExisting() error {
 			}
 			return fmt.Errorf("load chunk meta for %s: %w", id, err)
 		}
-
 		m.metas[id] = meta
 
 		if !meta.sealed {
@@ -1076,6 +1106,7 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 		recordCount: recordCount,
 		createdAt:   createdAt,
 	}
+	initWriteOrder(m.active, recordCount)
 
 	success = true
 	return nil
@@ -1356,6 +1387,7 @@ func (m *Manager) openLocked() error {
 		recordCount: 0,
 		createdAt:   createdAt,
 	}
+	initWriteOrder(m.active, 0)
 	m.metas[id] = meta
 
 	if m.cfg.Announcer != nil {
@@ -1369,7 +1401,7 @@ func (m *Manager) openLocked() error {
 
 func (m *Manager) createRawFile(id chunk.ChunkID) (*os.File, error) {
 	path := m.rawLogPath(id)
-	file, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_RDWR, m.cfg.FileMode)
+	file, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_RDWR|os.O_TRUNC, m.cfg.FileMode)
 	if err != nil {
 		return nil, err
 	}
@@ -1391,7 +1423,7 @@ func (m *Manager) createRawFile(id chunk.ChunkID) (*os.File, error) {
 
 func (m *Manager) createIdxFile(id chunk.ChunkID, createdAt time.Time) (*os.File, error) {
 	path := m.idxLogPath(id)
-	file, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_RDWR, m.cfg.FileMode)
+	file, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_RDWR|os.O_TRUNC, m.cfg.FileMode)
 	if err != nil {
 		return nil, err
 	}
@@ -1416,7 +1448,7 @@ func (m *Manager) createIdxFile(id chunk.ChunkID, createdAt time.Time) (*os.File
 
 func (m *Manager) createAttrFile(id chunk.ChunkID) (*os.File, error) {
 	path := m.attrLogPath(id)
-	file, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_RDWR, m.cfg.FileMode)
+	file, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_RDWR|os.O_TRUNC, m.cfg.FileMode)
 	if err != nil {
 		return nil, err
 	}
@@ -1453,7 +1485,7 @@ func (m *Manager) openAttrFile(id chunk.ChunkID) (*os.File, error) {
 
 func (m *Manager) createDictFile(id chunk.ChunkID) (*os.File, error) {
 	path := m.dictLogPath(id)
-	file, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_RDWR, m.cfg.FileMode)
+	file, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_RDWR|os.O_TRUNC, m.cfg.FileMode)
 	if err != nil {
 		return nil, err
 	}
@@ -1488,8 +1520,8 @@ func (m *Manager) sealLocked() error {
 	// not hold the mutex, and no new Phase 1 can start while we hold it.
 	m.active.inflight.Wait()
 
-	m.active.meta.sealed = true
 	id := m.active.meta.id
+	m.active.meta.sealed = true
 
 	// Update sealed flag in all file headers.
 	if err := m.setSealedFlag(m.active.rawFile); err != nil {
@@ -1762,7 +1794,6 @@ func (m *Manager) ImportRecords(id chunk.ChunkID, next chunk.RecordIterator) (ch
 	s.meta.recordCount = s.count
 	dataBytes := int64(s.rawOffset + s.attrOffset + uint64(s.count)*IdxEntrySize) //nolint:gosec // G115: count is always non-negative
 	s.meta.logicalDataBytes = dataBytes
-
 	// Seal the files.
 	for _, f := range []*os.File{files.raw, files.idx, files.attr, files.dict} {
 		if err := m.setSealedFlag(f); err != nil {
@@ -2654,6 +2685,9 @@ func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
 	// 2. Build indexes via injected builders.
 	for _, builder := range m.indexBuilders {
 		if err := builder.Build(ctx, id); err != nil {
+			if isMissingLocalChunkFileError(err) {
+				continue
+			}
 			m.logger.Warn("index build failed", "chunk", id, "error", err)
 			// Non-fatal: indexes can be rebuilt later.
 		}
@@ -2674,6 +2708,20 @@ func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
 	}
 
 	return nil
+}
+
+func isMissingLocalChunkFileError(err error) bool {
+	if errors.Is(err, os.ErrNotExist) {
+		return true
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "no such file or directory") {
+		return false
+	}
+	return strings.Contains(msg, "open raw.log") ||
+		strings.Contains(msg, "open idx.log") ||
+		strings.Contains(msg, "open attr.log") ||
+		strings.Contains(msg, "open attr_dict")
 }
 
 // RefreshDiskSizes recomputes bytes and diskBytes for a sealed chunk from the

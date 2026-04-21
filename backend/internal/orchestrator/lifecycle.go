@@ -1,16 +1,15 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"fmt"
+	"gastrolog/internal/glid"
 	"math/rand/v2"
 	"time"
 
 	"gastrolog/internal/alert"
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
-
 )
 
 // digestedRecord is the intermediate type passed from digestLoop to writeLoop.
@@ -499,10 +498,19 @@ func (o *Orchestrator) scheduleIndexRebuildIfNeeded(ctx context.Context, vaultID
 	if err != nil || complete {
 		return
 	}
+	// Followers can host many replicated chunks; eagerly rebuilding every
+	// missing index on each follower at startup causes N-way rebuild storms.
+	// Keep bootstrap rebuilds on leaders only.
+	if tier.IsFollower {
+		return
+	}
 	o.logger.Info("rebuilding missing indexes",
 		"vault", vaultID, "tier", tier.TierID, "chunk", meta.ID.String())
 	name := fmt.Sprintf("index-rebuild:%s:%s:%s", vaultID, tier.TierID, meta.ID)
-	if err := o.scheduler.RunOnce(name, tier.Indexes.BuildIndexes, ctx, meta.ID); err != nil {
+	runBuild := func(runCtx context.Context, chunkID chunk.ChunkID) error {
+		return tier.Indexes.BuildIndexes(runCtx, chunkID)
+	}
+	if err := o.scheduler.RunOnce(name, runBuild, ctx, meta.ID); err != nil {
 		o.logger.Warn("failed to schedule index rebuild", "name", name, "error", err)
 	}
 	o.scheduler.Describe(name, fmt.Sprintf("Rebuild missing indexes for chunk %s", meta.ID))

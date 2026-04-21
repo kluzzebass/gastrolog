@@ -7,7 +7,7 @@ import (
 )
 
 var (
-	ErrDictFull         = errors.New("string dictionary full")
+	ErrDictFull          = errors.New("string dictionary full")
 	ErrDictEntryNotFound = errors.New("entry not found in dictionary")
 )
 
