@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -275,5 +277,127 @@ func TestHarnessSegmentSyncFailurePropagates(t *testing.T) {
 	}
 	if syncCalls < 4 {
 		t.Fatalf("expected at least 4 sync calls, got %d", syncCalls)
+	}
+}
+
+// Concurrency smoke test: multiple groups concurrently append, read, and delete.
+// Intended to be run with `-race` to catch data races, and to exercise batch
+// writer / in-memory map updates under contention.
+func TestHarnessConcurrentChurn(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfg := harnessWalConfig()
+	w, err := Open(dir, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+
+	const groups = 6
+	var stores [groups]*GroupStore
+	for i := 0; i < groups; i++ {
+		stores[i] = w.GroupStore("harness-conc-g" + string(rune('a'+i)))
+	}
+
+	var nextIdx [groups]uint64
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	var errCount atomic.Int64
+
+	// Writers.
+	for g := 0; g < groups; g++ {
+		g := g
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			payload := []byte("p" + string(rune('a'+g)))
+			term := uint64(g + 1)
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				i := atomic.AddUint64(&nextIdx[g], 1)
+				if err := stores[g].StoreLog(&hraft.Log{Index: i, Term: term, Type: hraft.LogCommand, Data: payload}); err != nil {
+					errCount.Add(1)
+					return
+				}
+			}
+		}()
+	}
+
+	// Readers: randomly probe near the head and tail.
+	for g := 0; g < groups; g++ {
+		g := g
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var log hraft.Log
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				hi := atomic.LoadUint64(&nextIdx[g])
+				if hi == 0 {
+					time.Sleep(1 * time.Millisecond)
+					continue
+				}
+				// Probe both an early and late index; tolerate not found due to deletes.
+				for _, idx := range []uint64{1, hi / 2, hi} {
+					if idx == 0 {
+						continue
+					}
+					err := stores[g].GetLog(idx, &log)
+					if err != nil && err != hraft.ErrLogNotFound {
+						errCount.Add(1)
+						return
+					}
+				}
+			}
+		}()
+	}
+
+	// Deleters: issue prefix and suffix deletes to exercise bound updates.
+	for g := 0; g < groups; g++ {
+		g := g
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				hi := atomic.LoadUint64(&nextIdx[g])
+				if hi < 10 {
+					time.Sleep(2 * time.Millisecond)
+					continue
+				}
+				// Prefix compaction-ish: delete 1..k
+				k := hi / 3
+				if k > 0 {
+					_ = stores[g].DeleteRange(1, k)
+				}
+				// Suffix truncate-ish: delete mid..hi
+				lo := (hi / 2) + 1
+				if lo <= hi {
+					_ = stores[g].DeleteRange(lo, hi)
+				}
+				time.Sleep(2 * time.Millisecond)
+			}
+		}()
+	}
+
+	time.Sleep(150 * time.Millisecond)
+	close(stop)
+	wg.Wait()
+
+	if n := errCount.Load(); n != 0 {
+		t.Fatalf("concurrent churn had %d unexpected errors", n)
 	}
 }
