@@ -254,10 +254,10 @@ func (m *GroupManager) RemoveMember(groupID string, serverID hraft.ServerID) err
 	return g.Raft.RemoveServer(serverID, 0, 10*time.Second).Error()
 }
 
-// Shutdown gracefully stops all groups, tier groups first, config last.
-// Tier groups are shut down concurrently to avoid sequential election
-// timeout delays on follower nodes. The shutdownLast group (if set) is
-// shut down after all others complete.
+// Shutdown stops every registered multiraft group (e.g. vault/.../ctl).
+// Groups are shut down concurrently to avoid sequential election timeout
+// delays on follower nodes. If shutdownLast is set, that group is stopped after
+// all others complete.
 func (m *GroupManager) Shutdown() {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -223,7 +223,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		orch.ScheduleCatchupForTier(tierID, followerNodeIDs)
 	}
 
-	orch.OnTierDrainComplete = makeTierDrainCompleteHandler(cfgStore, logger, factories)
+	orch.OnTierDrainComplete = makeTierDrainCompleteHandler(cfgStore, logger)
 
 	if err := startOrchestrator(ctx, logger, orch, appSys, factories); err != nil {
 		return err
@@ -349,23 +349,16 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 }
 
 // makeTierDrainCompleteHandler returns a callback that deletes the drained tier
-// config (removing its vault association) and destroys the tier's Raft group.
-func makeTierDrainCompleteHandler(cfgStore system.Store, logger *slog.Logger, factories orchestrator.Factories) func(context.Context, glid.GLID, glid.GLID) {
-	return func(ctx context.Context, vaultID, tierID glid.GLID) {
+// config (removing its vault association). Vault control-plane Raft is not
+// torn down per tier.
+func makeTierDrainCompleteHandler(cfgStore system.Store, logger *slog.Logger) func(context.Context, glid.GLID, glid.GLID) {
+	return func(ctx context.Context, _, tierID glid.GLID) {
 		// Tier ownership lives on TierConfig.VaultID — deleting the tier
 		// config removes the association. The drain=false flag avoids
 		// re-triggering a drain notification.
 		if err := cfgStore.DeleteTier(ctx, tierID, false); err != nil {
 			logger.Error("tier drain complete: failed to delete tier config",
 				"tier", tierID, "error", err)
-		}
-		// Tear down legacy per-tier metadata Raft group if it exists. Vault
-		// control-plane mode does not create this group — ignore missing.
-		if factories.GroupManager != nil {
-			gid := raftgroup.TierMetadataGroupID(vaultID, tierID)
-			if err := factories.GroupManager.DestroyGroup(gid); err != nil && !errors.Is(err, raftgroup.ErrGroupNotFound) {
-				logger.Debug("tier drain complete: destroy tier metadata raft group", "tier", tierID, "error", err)
-			}
 		}
 	}
 }
@@ -994,13 +987,13 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 		_ = deps.Broadcaster.Close()
 	}
 
-	// Shutdown order: tier Raft → system Raft → WAL → gRPC server.
-	// Tier and system raft both use the same raftwal when cluster mode is on;
+	// Shutdown order: vault multiraft (control-plane) → system Raft → WAL → gRPC server.
+	// Vault multiraft and system raft both use the same raftwal when cluster mode is on;
 	// system raft must stop before WAL.Close. Raft must shut down WHILE the
 	// transport is alive, otherwise the leader's replication goroutines block
 	// on dead gRPC connections.
 	if deps.GroupMgr != nil {
-		deps.Logger.Info("shutting down tier raft groups")
+		deps.Logger.Info("shutting down vault multiraft groups")
 		deps.GroupMgr.Shutdown()
 	}
 
@@ -1042,8 +1035,8 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 	return stopErr
 }
 
-// setupMultiRaft creates the GroupManager and node address resolver for tier
-// Raft groups. Returns (nil, nil) in single-node / non-raft mode.
+// setupMultiRaft creates the GroupManager and node address resolver for vault
+// control-plane multiraft. Returns (nil, nil) in single-node / non-raft mode.
 func setupMultiRaft(clusterSrv *cluster.Server, rawStore system.Store, nodeID, homeDir string, logger *slog.Logger) (*raftgroup.GroupManager, *raftwal.WAL, func(string) (string, bool)) {
 	if clusterSrv == nil {
 		return nil, nil, nil
@@ -1073,8 +1066,8 @@ func setupMultiRaft(clusterSrv *cluster.Server, rawStore system.Store, nodeID, h
 		Transport: mrt,
 		NodeID:    nodeID,
 		BaseDir:   filepath.Join(homeDir, "raft", "groups"),
-		// System/config raft is not managed by GroupManager; only tier groups
-		// are. Leave ShutdownLast empty so Shutdown does not look for a
+		// System/config raft is not managed by GroupManager; only vault/.../ctl
+		// multiraft groups are. Leave ShutdownLast empty so Shutdown does not look for a
 		// non-existent group ID.
 		ShutdownLast: "",
 		WAL:          wal,

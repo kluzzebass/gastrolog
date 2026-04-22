@@ -6,21 +6,24 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 )
 
-// TestDedupChunksCollapsesReplicas verifies that multiple entries for the same
-// chunk ID are collapsed into one, with replica_count tracking the number of
-// distinct copies.
-func TestDedupChunksCollapsesReplicas(t *testing.T) {
+// TestDedupChunkReportsCollapsesReplicas verifies that multiple entries for the
+// same chunk ID from different nodes are collapsed into one, with replica_count
+// tracking the number of distinct nodes.
+func TestDedupChunkReportsCollapsesReplicas(t *testing.T) {
 	t.Parallel()
 
-	input := []*apiv1.ChunkMeta{
-		{Id: []byte("chunk-a"), RecordCount: 100, Sealed: true, Compressed: true},
-		{Id: []byte("chunk-a"), RecordCount: 100, Sealed: true, Compressed: true},
-		{Id: []byte("chunk-a"), RecordCount: 100, Sealed: true, Compressed: true},
-		{Id: []byte("chunk-b"), RecordCount: 50, Sealed: true, Compressed: true},
-		{Id: []byte("chunk-b"), RecordCount: 50, Sealed: true, Compressed: true},
+	meta := func(id string, records int64) *apiv1.ChunkMeta {
+		return &apiv1.ChunkMeta{Id: []byte(id), RecordCount: records, Sealed: true, Compressed: true}
+	}
+	input := []chunkReport{
+		{reportingNode: "n1", chunk: meta("chunk-a", 100)},
+		{reportingNode: "n2", chunk: meta("chunk-a", 100)},
+		{reportingNode: "n3", chunk: meta("chunk-a", 100)},
+		{reportingNode: "n1", chunk: meta("chunk-b", 50)},
+		{reportingNode: "n2", chunk: meta("chunk-b", 50)},
 	}
 
-	out := dedupChunks(input)
+	out := dedupChunkReports(input)
 	if len(out) != 2 {
 		t.Fatalf("expected 2 unique chunks, got %d", len(out))
 	}
@@ -37,20 +40,39 @@ func TestDedupChunksCollapsesReplicas(t *testing.T) {
 	}
 }
 
-// TestDedupChunksPrefersSealedAndCompressed verifies that when multiple
+// TestDedupChunkReportsSameNodeDoesNotInflateReplicas verifies that duplicate
+// list rows for the same chunk from one node (e.g. multiple local tiers) only
+// count as one replica.
+func TestDedupChunkReportsSameNodeDoesNotInflateReplicas(t *testing.T) {
+	t.Parallel()
+
+	input := []chunkReport{
+		{reportingNode: "node-a", chunk: &apiv1.ChunkMeta{Id: []byte("c"), RecordCount: 10, Sealed: true, Compressed: true}},
+		{reportingNode: "node-a", chunk: &apiv1.ChunkMeta{Id: []byte("c"), RecordCount: 10, Sealed: true, Compressed: true}},
+	}
+	out := dedupChunkReports(input)
+	if len(out) != 1 {
+		t.Fatalf("expected 1 chunk, got %d", len(out))
+	}
+	if out[0].ReplicaCount != 1 {
+		t.Errorf("replica count = %d, want 1", out[0].ReplicaCount)
+	}
+}
+
+// TestDedupChunkReportsPrefersSealedAndCompressed verifies that when multiple
 // versions of the same chunk are reported (e.g. a follower's partial view
 // and the leader's sealed/compressed view), the most advanced version wins.
-func TestDedupChunksPrefersSealedAndCompressed(t *testing.T) {
+func TestDedupChunkReportsPrefersSealedAndCompressed(t *testing.T) {
 	t.Parallel()
 
 	// Order matters: put the partial version first to confirm the
 	// authoritative version replaces it.
-	input := []*apiv1.ChunkMeta{
-		{Id: []byte("chunk-x"), RecordCount: 50, Sealed: false, Compressed: false},
-		{Id: []byte("chunk-x"), RecordCount: 100, Sealed: true, Compressed: true},
+	input := []chunkReport{
+		{reportingNode: "follower", chunk: &apiv1.ChunkMeta{Id: []byte("chunk-x"), RecordCount: 50, Sealed: false, Compressed: false}},
+		{reportingNode: "leader", chunk: &apiv1.ChunkMeta{Id: []byte("chunk-x"), RecordCount: 100, Sealed: true, Compressed: true}},
 	}
 
-	out := dedupChunks(input)
+	out := dedupChunkReports(input)
 	if len(out) != 1 {
 		t.Fatalf("expected 1 chunk, got %d", len(out))
 	}
@@ -66,18 +88,17 @@ func TestDedupChunksPrefersSealedAndCompressed(t *testing.T) {
 	}
 }
 
-// TestDedupChunksPrefersSealedOverUnsealed verifies the order-independence
+// TestDedupChunkReportsPrefersSealedOverUnsealed verifies the order-independence
 // of the authoritative check.
-func TestDedupChunksPrefersSealedOverUnsealed(t *testing.T) {
+func TestDedupChunkReportsPrefersSealedOverUnsealed(t *testing.T) {
 	t.Parallel()
 
-	// Put authoritative first — the partial should NOT replace it.
-	input := []*apiv1.ChunkMeta{
-		{Id: []byte("chunk-x"), RecordCount: 100, Sealed: true, Compressed: true},
-		{Id: []byte("chunk-x"), RecordCount: 50, Sealed: false, Compressed: false},
+	input := []chunkReport{
+		{reportingNode: "leader", chunk: &apiv1.ChunkMeta{Id: []byte("chunk-x"), RecordCount: 100, Sealed: true, Compressed: true}},
+		{reportingNode: "follower", chunk: &apiv1.ChunkMeta{Id: []byte("chunk-x"), RecordCount: 50, Sealed: false, Compressed: false}},
 	}
 
-	out := dedupChunks(input)
+	out := dedupChunkReports(input)
 	if len(out) != 1 {
 		t.Fatalf("expected 1 chunk, got %d", len(out))
 	}
@@ -87,23 +108,23 @@ func TestDedupChunksPrefersSealedOverUnsealed(t *testing.T) {
 	}
 }
 
-// TestDedupChunksEmptyInput verifies the empty case.
-func TestDedupChunksEmptyInput(t *testing.T) {
+// TestDedupChunkReportsEmptyInput verifies the empty case.
+func TestDedupChunkReportsEmptyInput(t *testing.T) {
 	t.Parallel()
-	out := dedupChunks(nil)
+	out := dedupChunkReports(nil)
 	if len(out) != 0 {
 		t.Errorf("expected empty output for nil input, got %d entries", len(out))
 	}
 }
 
-// TestDedupChunksSingleEntryReplicaCount verifies that a single-copy chunk
+// TestDedupChunkReportsSingleEntryReplicaCount verifies that a single-copy chunk
 // gets replica_count=1.
-func TestDedupChunksSingleEntryReplicaCount(t *testing.T) {
+func TestDedupChunkReportsSingleEntryReplicaCount(t *testing.T) {
 	t.Parallel()
-	input := []*apiv1.ChunkMeta{
-		{Id: []byte("solo"), RecordCount: 10, Sealed: true},
+	input := []chunkReport{
+		{reportingNode: "solo", chunk: &apiv1.ChunkMeta{Id: []byte("solo"), RecordCount: 10, Sealed: true}},
 	}
-	out := dedupChunks(input)
+	out := dedupChunkReports(input)
 	if len(out) != 1 {
 		t.Fatalf("expected 1 chunk, got %d", len(out))
 	}

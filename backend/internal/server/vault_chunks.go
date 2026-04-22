@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
+	"math"
 
 	"connectrpc.com/connect"
 
@@ -31,7 +32,7 @@ func (s *VaultServer) ListChunks(
 
 	// Collect local chunks, marking any with retention-pending in the tier Raft.
 	pending := s.orch.RetentionPendingChunks(vaultID)
-	var allChunks []*apiv1.ChunkMeta
+	var reports []chunkReport
 	metas, err := s.orch.ListAllChunkMetas(vaultID)
 	if err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
 		return nil, mapVaultError(err)
@@ -44,7 +45,7 @@ func (s *VaultServer) ListChunks(
 		if pending[meta.ID] {
 			pb.RetentionPending = true
 		}
-		allChunks = append(allChunks, pb)
+		reports = append(reports, chunkReport{reportingNode: s.localNodeID, chunk: pb})
 	}
 
 	// Full mode: collect remote chunks from all nodes hosting the vault's
@@ -61,39 +62,79 @@ func (s *VaultServer) ListChunks(
 				s.logger.Warn("ListChunks: remote node failed", "node", nodeID, "vault", vaultID, "error", err)
 				continue // best effort — show what we can
 			}
-			allChunks = append(allChunks, remote.Chunks...)
+			for _, c := range remote.Chunks {
+				reports = append(reports, chunkReport{reportingNode: nodeID, chunk: c})
+			}
 		}
 	}
 
 	// Deduplicate by chunk ID. When a chunk is replicated to multiple nodes,
-	// the same chunk ID appears in the raw fan-out result multiple times.
+	// the same chunk ID appears in the raw merge multiple times.
 	// Keep the most authoritative version (sealed + compressed > not) and
-	// count how many nodes reported each chunk (replica_count).
-	return connect.NewResponse(&apiv1.ListChunksResponse{Chunks: dedupChunks(allChunks)}), nil
+	// set replica_count to how many distinct nodes reported the chunk (not
+	// raw row count — a single node can list the same ID twice when it hosts
+	// multiple local tier instances, e.g. warm + cloud during transitions).
+	return connect.NewResponse(&apiv1.ListChunksResponse{Chunks: dedupChunkReports(reports)}), nil
 }
 
-// dedupChunks collapses multiple entries for the same chunk ID into a single
-// authoritative entry. The most advanced version (sealed+compressed) wins, and
-// replica_count records how many distinct copies reported the chunk.
-func dedupChunks(chunks []*apiv1.ChunkMeta) []*apiv1.ChunkMeta {
-	best := make(map[string]*apiv1.ChunkMeta, len(chunks))
-	replicaCount := make(map[string]int32, len(chunks))
-	for _, c := range chunks {
-		key := string(c.Id)
-		replicaCount[key]++
-		existing, ok := best[key]
-		if !ok {
-			best[key] = c
+// chunkReport pairs a chunk metadata message with the cluster node that
+// produced it. Used so replica_count can mean "distinct nodes" rather than
+// "distinct list rows".
+type chunkReport struct {
+	reportingNode string
+	chunk         *apiv1.ChunkMeta
+}
+
+// dedupChunkReports collapses multiple entries for the same chunk ID into a
+// single authoritative entry. The most advanced version (sealed+compressed)
+// wins, and replica_count is the number of distinct reportingNode values that
+// listed the chunk.
+func dedupChunkReports(reports []chunkReport) []*apiv1.ChunkMeta {
+	if len(reports) == 0 {
+		return nil
+	}
+	type agg struct {
+		nodes map[string]struct{}
+		best  *apiv1.ChunkMeta
+	}
+	byID := make(map[string]*agg, len(reports))
+	anonSeq := 0
+	for _, r := range reports {
+		c := r.chunk
+		if c == nil {
 			continue
 		}
-		// Prefer the more-advanced version: sealed + compressed > sealed > unsealed.
-		if moreAuthoritative(c, existing) {
-			best[key] = c
+		key := string(c.Id)
+		a := byID[key]
+		if a == nil {
+			a = &agg{nodes: make(map[string]struct{})}
+			byID[key] = a
+		}
+		nodeKey := r.reportingNode
+		if nodeKey == "" {
+			// Unit tests (or misconfig): preserve one-replica-per-row semantics.
+			nodeKey = fmt.Sprintf("__anon_%d", anonSeq)
+			anonSeq++
+		}
+		a.nodes[nodeKey] = struct{}{}
+		if a.best == nil {
+			a.best = c
+			continue
+		}
+		if moreAuthoritative(c, a.best) {
+			a.best = c
 		}
 	}
-	out := make([]*apiv1.ChunkMeta, 0, len(best))
-	for _, c := range best {
-		c.ReplicaCount = replicaCount[string(c.Id)]
+	out := make([]*apiv1.ChunkMeta, 0, len(byID))
+	for _, a := range byID {
+		c := a.best
+		replicas := len(a.nodes)
+		if replicas > math.MaxInt32 {
+			c.ReplicaCount = math.MaxInt32
+		} else {
+			// replicas is capped; cluster node counts do not approach MaxInt32.
+			c.ReplicaCount = int32(replicas) //nolint:gosec // G115: bounded by branch above
+		}
 		out = append(out, c)
 	}
 	return out
