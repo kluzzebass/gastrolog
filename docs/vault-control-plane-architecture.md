@@ -6,6 +6,8 @@
 
 **Acceptance criterion (k1ej7):** A **uniform Raft group model** — system/config and vault groups share **lifecycle and on-disk conventions**. Any exception is a **named compatibility shim** with an explicit **sunset** (no undocumented privileged directory layout).
 
+**Terminal state (5xxbd complete):** There are **no** per-tier metadata Raft groups. **One vault-scoped control-plane Raft** (plus system Raft for cluster-global config) owns every cross-node tier/chunk metadata mutation that today goes through `tierfsm` + tier `GroupTransport`. Tier **instances** (chunk/index managers) remain the data plane and **do not** host their own Raft groups.
+
 ---
 
 ## Table of contents
@@ -33,12 +35,13 @@
 | **Transport** | Cluster server transport (not multiraft group-scoped) |
 | **Apply path** | `cluster.SetApplyFn` → `raftstore.Store.ApplyRaw` (config mutations) |
 
-### Tier-scoped metadata Raft (chunk / tier control metadata)
+### Per-tier metadata Raft (**transitional** — removed when 5xxbd is done)
 
 | Aspect | Detail |
 |--------|--------|
+| **Sunset** | Per-tier Raft and `tierfsm` as a **separate** multiraft group **MUST** be deleted once vault control-plane FSM absorbs those commands. Until then this row describes the live shim. |
 | **Entry** | `createTierRaftGroup` in [`backend/internal/orchestrator/reconfig_vaults.go`](../backend/internal/orchestrator/reconfig_vaults.go) |
-| **Group ID** | `tierCfg.ID.String()` (tier GLID string) — **not** vault-scoped |
+| **Group ID** | `raftgroup.TierMetadataGroupID(vaultID, tierID)` → `vault/<vaultGLID>/tier/<tierGLID>` (vault-scoped path only for routing/layout during migration) |
 | **Members** | Built from cluster nodes; creation **deferred** until all cluster nodes are resolvable (in-file rationale: partial member list poisons initial config) |
 | **Persistence** | Same **shared WAL directory** as system — `setupMultiRaft` uses `filepath.Join(homeDir, "raft", "wal")` in [`backend/internal/app/app.go`](../backend/internal/app/app.go) (same subtree as `Home.RaftDir()/wal`). Each tier group is a separate `GroupStore` name in that WAL |
 | **Snapshots** | Per group under `GroupManager.BaseDir` → `filepath.Join(homeDir, "raft", "groups", groupID)` ([`backend/internal/raftgroup/groupmanager.go`](../backend/internal/raftgroup/groupmanager.go)) |
@@ -51,7 +54,7 @@ Vault / tier / chunk operations and routing: [`backend/internal/orchestrator/vau
 
 ### Today vs target (deltas this spec must resolve)
 
-1. **Authority scope:** Tier Raft group ID = **tier**; vault-level authority is not first-class in Raft naming or lifecycle.
+1. **Authority scope:** Replicated tier metadata still uses **per-tier Raft groups** (transitional). Target: **zero** tier Raft groups — vault control-plane Raft only, with tier managers as pure consumers.
 2. **Snapshot layout asymmetry:** System snapshots live under `raftDir`; tier snapshots under `raft/groups/<groupId>/`. That is already a structural split relative to “no privileged special-case structure” — target must either justify a **uniform two-root pattern** or **converge** layouts.
 3. **Shared WAL:** System and all tier groups share one `raftwal` on-disk segment stream; coupling is total. A vault redesign **must not** assume independent tier WALs unless the design explicitly splits them (default stays shared).
 4. **Readiness / partial peers:** Tier group creation is deferred when members are incomplete — rules must generalize to **vault** groups and **vault readiness** predicates.
@@ -100,13 +103,13 @@ Vault / tier / chunk operations and routing: [`backend/internal/orchestrator/vau
 ### Target topology (conceptual)
 
 - **SystemRaft:** Global cluster config / membership (existing role, possibly narrowed as vault scope grows).
-- **VaultRaft (per vault):** Authoritative for vault-scoped control metadata currently split across tier Raft groups / orchestrator shortcuts, per decisions taken in section F.
-- **Tier managers / chunk path:** Consume committed state from VaultRaft + system; **do not** own consensus for vault-wide metadata.
+- **VaultRaft (per vault):** Authoritative for **all** vault/tier/chunk control-plane metadata that is replicated today via per-tier Raft + `tierfsm`. **No separate tier Raft** in the finished design.
+- **Tier managers / chunk path:** Consume committed state from VaultRaft + system; **do not** host Raft; **do not** own consensus for cross-node metadata.
 
 ### Identifiers and routing
 
 - String `GroupID` remains the routing key for `multiraft.GroupTransport` ([`backend/internal/multiraft/transport.go`](../backend/internal/multiraft/transport.go)).
-- Target naming convention **MUST** be explicit. **Vault control-plane Raft** uses `vault/<vaultGLID>/ctl` (`raftgroup.VaultControlPlaneGroupID`). **Tier metadata Raft groups** use `vault/<vaultGLID>/tier/<tierGLID>` (`raftgroup.TierMetadataGroupID`). System config group stays `system` in multiraft transport wiring.
+- Target naming convention **MUST** be explicit. **Vault control-plane Raft** uses `vault/<vaultGLID>/ctl` (`raftgroup.VaultControlPlaneGroupID`) and is the **only** vault-scoped multiraft group class at completion. **`vault/.../tier/...`** group IDs (`raftgroup.TierMetadataGroupID`) are a **transitional** shim until tier commands and transport are folded into VaultRaft; they **MUST NOT** appear in the terminal on-disk layout. System config group stays `system` in multiraft transport wiring.
 
 ### Persistence (target rules)
 
@@ -182,7 +185,7 @@ stateDiagram-v2
 These require explicit product/architecture decisions:
 
 1. **One VaultRaft vs multiple raft groups per vault** (e.g. separate hot/cold metadata): pick one default.
-2. **Cutover** from `GroupID = tierCfg.ID.String()` to vault-scoped IDs — acceptable as a breaking layout change while pre-production (no dual-read window required).
+2. **Cutover** to **no tier Raft**: move `tierfsm` commands and `ForwardTierApply` onto vault control-plane Raft, then remove `createTierRaftGroup`, tier `GroupStore` names, and `SetTierApplyFn` — breaking layout is acceptable pre-production (no dual-read window required).
 3. **System Raft shrink/grow:** Which config moves to vault Raft vs stays global; backward compatibility for existing clusters.
 4. **Snapshot layout convergence:** Single rule for system + vault + tier snapshots (no legacy on-disk compatibility).
 5. **Feature flags:** Whether vault Raft rolls out behind a flag per vault or cluster-wide.
@@ -196,6 +199,7 @@ These require explicit product/architecture decisions:
 - [ ] Implement `GroupID` scheme and `GroupStore` / `CreateGroup` wiring chosen in C/F.
 - [ ] Align snapshot directories with the chosen uniform pattern (greenfield; remove old `raft/` tree if layout changes).
 - [ ] FSM boundary: which commands move from `tierfsm` to vault-scoped FSM; serialization + versioning rules.
+- [ ] **Remove per-tier Raft:** delete `TierMetadataGroupID` groups, `createTierRaftGroup`, `SetTierApplyFn` / `ForwardTierApply`, and tier-specific multiraft wiring once vault FSM owns those applies.
 - [ ] Bootstrap/defer rules from D for partial membership; tests for “no bad initial config”.
 - [ ] WAL: confirm shared `raftwal` grouping and replay order; extend `raftwal` tests if new group naming or churn patterns appear.
 - [ ] Shutdown: preserve `DestroyGroup` ordering vs transport; add vault group to shutdown sequence in `app` if needed.
@@ -204,7 +208,7 @@ These require explicit product/architecture decisions:
 
 - [ ] Replace implicit “find tier raft / chunk manager” shortcuts with APIs that take **vault context** first (`vault_ops.go` and call sites).
 - [ ] Document and enforce: tier managers are **owned** under a vault umbrella; no orphan tier lifetimes.
-- [ ] Forwarding (`TierApplyForwarder`, record/search forwarding) must use stable vault/tier identity keys consistent with C.
+- [ ] Forwarding (vault/tier apply path and record/search forwarding) must use stable vault/tier identity keys consistent with C; drop tier-only apply forwarding when per-tier Raft is removed (5xxbd).
 - [ ] Readiness plumbing: orchestrator checks **Vault_ControlPlaneReady** before operations that require it (per D).
 - [ ] Remove or quarantine legacy paths called out during inventory once vault Raft is live.
 
@@ -215,8 +219,9 @@ These require explicit product/architecture decisions:
 | Area | Paths |
 |------|--------|
 | System Raft | `backend/internal/app/raft.go` |
-| Multi-Raft setup, tier apply | `backend/internal/app/app.go` (`setupMultiRaft`, tier apply wiring) |
-| Tier group creation | `backend/internal/orchestrator/reconfig_vaults.go` (`createTierRaftGroup`) |
+| Multi-Raft setup, tier apply (transitional) | `backend/internal/app/app.go` (`setupMultiRaft`, `SetTierApplyFn`) |
+| Vault control-plane Raft | `backend/internal/orchestrator/reconfig_vaults.go` (`ensureVaultControlPlaneRaftGroup`), `backend/internal/vaultraft/` |
+| Tier group creation (**sunset**) | `backend/internal/orchestrator/reconfig_vaults.go` (`createTierRaftGroup`) |
 | Group manager | `backend/internal/raftgroup/groupmanager.go` |
 | WAL | `backend/internal/raftwal/` |
 | Transport | `backend/internal/multiraft/transport.go` |
