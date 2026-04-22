@@ -242,12 +242,12 @@ func (r *primaryTierRegistry) QueryEngine(_ glid.GLID) *query.Engine { return ni
 // PrimaryTierQueryEngineForVault returns a query engine scoped to leader
 // tiers of a single vault. Used by ForwardSearch — the vault is already
 // selected, no vault_id= filtering needed.
-func (o *Orchestrator) PrimaryTierQueryEngineForVault(vaultID glid.GLID) *query.Engine {
+func (o *Orchestrator) PrimaryTierQueryEngineForVault(vaultID glid.GLID) (*query.Engine, error) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	v := o.vaults[vaultID]
-	if v == nil {
-		return nil
+	if err := vaultReplicationReadinessErr(vaultID, v); err != nil {
+		return nil, err
 	}
 	var primary []*TierInstance
 	for _, t := range v.Tiers {
@@ -256,7 +256,7 @@ func (o *Orchestrator) PrimaryTierQueryEngineForVault(vaultID glid.GLID) *query.
 		}
 	}
 	if len(primary) == 0 {
-		return nil
+		return nil, nil
 	}
-	return query.NewWithRegistry(&tierRegistry{tiers: primary}, o.logger)
+	return query.NewWithRegistry(&tierRegistry{tiers: primary}, o.logger), nil
 }

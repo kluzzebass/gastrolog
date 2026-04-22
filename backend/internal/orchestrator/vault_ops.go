@@ -39,6 +39,9 @@ func (o *Orchestrator) activeTierManagers(vaultID glid.GLID) (chunk.ChunkManager
 	if s == nil {
 		return nil, nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
+	if err := vaultReplicationReadinessErr(vaultID, s); err != nil {
+		return nil, nil, err
+	}
 	cm, im := s.ActiveTierChunkManager(), s.ActiveTierIndexManager()
 	if cm == nil {
 		return nil, nil, fmt.Errorf("%w: %s (no tiers)", ErrVaultNotFound, vaultID)
@@ -54,6 +57,9 @@ func (o *Orchestrator) activeTierChunkManager(vaultID glid.GLID) (chunk.ChunkMan
 	if s == nil {
 		return nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
+	if err := vaultReplicationReadinessErr(vaultID, s); err != nil {
+		return nil, err
+	}
 	cm := s.ActiveTierChunkManager()
 	if cm == nil {
 		return nil, fmt.Errorf("%w: %s (no tiers)", ErrVaultNotFound, vaultID)
@@ -68,6 +74,9 @@ func (o *Orchestrator) activeTierIndexManager(vaultID glid.GLID) (index.IndexMan
 	o.mu.RUnlock()
 	if s == nil {
 		return nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+	}
+	if err := vaultReplicationReadinessErr(vaultID, s); err != nil {
+		return nil, err
 	}
 	im := s.ActiveTierIndexManager()
 	if im == nil {
@@ -85,6 +94,9 @@ func (o *Orchestrator) findManagersForChunk(vaultID glid.GLID, chunkID chunk.Chu
 	o.mu.RUnlock()
 	if vault == nil {
 		return nil, nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+	}
+	if err := vaultReplicationReadinessErr(vaultID, vault); err != nil {
+		return nil, nil, err
 	}
 	for _, tier := range vault.Tiers {
 		if _, err := tier.Chunks.Meta(chunkID); err == nil {
@@ -165,6 +177,9 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]TieredChunkMeta, 
 	if vault == nil {
 		return nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
+	if err := vaultReplicationReadinessErr(vaultID, vault); err != nil {
+		return nil, err
+	}
 
 	// If a tier has both a leader and follower instance on this node, prefer
 	// the leader. Same-node followers exist during tier draining or when
@@ -215,6 +230,9 @@ func (o *Orchestrator) GetChunkMeta(vaultID glid.GLID, chunkID chunk.ChunkID) (c
 	if vault == nil {
 		return chunk.ChunkMeta{}, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
+	if err := vaultReplicationReadinessErr(vaultID, vault); err != nil {
+		return chunk.ChunkMeta{}, err
+	}
 	for _, tier := range vault.Tiers {
 		m, err := tier.Chunks.Meta(chunkID)
 		if err != nil {
@@ -235,6 +253,9 @@ func (o *Orchestrator) GetTieredChunkMeta(vaultID glid.GLID, chunkID chunk.Chunk
 	o.mu.RUnlock()
 	if vault == nil {
 		return TieredChunkMeta{}, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+	}
+	if err := vaultReplicationReadinessErr(vaultID, vault); err != nil {
+		return TieredChunkMeta{}, err
 	}
 	for _, tier := range vault.Tiers {
 		m, err := tier.Chunks.Meta(chunkID)
@@ -713,6 +734,9 @@ func (o *Orchestrator) appendRecord(vaultID glid.GLID, rec chunk.Record) (chunk.
 	}
 	if !vault.Enabled {
 		return chunk.ChunkID{}, 0, nil, nil, fmt.Errorf("%w: %s", ErrVaultDisabled, vaultID)
+	}
+	if err := vaultReplicationReadinessErr(vaultID, vault); err != nil {
+		return chunk.ChunkID{}, 0, nil, nil, err
 	}
 
 	cm := vault.ActiveTierChunkManager()

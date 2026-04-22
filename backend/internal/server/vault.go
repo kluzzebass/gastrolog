@@ -58,10 +58,14 @@ func NewVaultServer(orch *orchestrator.Orchestrator, cfgStore system.Store, fact
 func (s *VaultServer) now() time.Time { return time.Now() }
 
 // mapVaultError converts orchestrator errors to connect errors.
-// ErrVaultNotFound maps to CodeNotFound; everything else to CodeInternal.
+// ErrVaultNotFound maps to CodeNotFound; ErrVaultNotReady to Unavailable;
+// everything else to CodeInternal.
 func mapVaultError(err error) *connect.Error {
 	if errors.Is(err, orchestrator.ErrVaultNotFound) {
 		return errNotFound(err)
+	}
+	if errors.Is(err, orchestrator.ErrVaultNotReady) {
+		return connect.NewError(connect.CodeUnavailable, err)
 	}
 	return errInternal(err)
 }

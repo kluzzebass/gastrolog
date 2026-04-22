@@ -16,6 +16,7 @@ import (
 	"gastrolog/internal/index/analyzer"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
+	"gastrolog/internal/querylang"
 	"gastrolog/internal/server"
 )
 
@@ -121,6 +122,55 @@ func (a *jobBroadcastAdapter) ListJobsProto() []*gastrologv1.Job {
 	return out
 }
 
+// forwardSearchAfterParse runs the ForwardSearch body after query parse and
+// engine resolution (keeps newSearchExecutor's cognitive complexity in budget).
+func forwardSearchAfterParse(
+	ctx context.Context,
+	eng *query.Engine,
+	q query.Query,
+	pipeline *querylang.Pipeline,
+	resumeTokenData []byte,
+) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error) {
+	histogram := server.HistogramToProto(eng.ComputeHistogram(ctx, q, 50))
+
+	if pipeline != nil && len(pipeline.Pipes) > 0 && !query.CanStreamPipeline(pipeline) {
+		result, err := eng.RunPipeline(ctx, q, pipeline)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+		if result.Table != nil {
+			return nil, nil, server.TableResultToBasicProto(result.Table), histogram, nil
+		}
+		records := result.Records
+		return func(yield func(chunk.Record, error) bool) {
+			for _, rec := range records {
+				if !yield(rec, nil) {
+					return
+				}
+			}
+		}, nil, nil, histogram, nil
+	}
+
+	var resume *query.ResumeToken
+	if len(resumeTokenData) > 0 {
+		var err error
+		resume, err = server.ProtoToResumeToken(resumeTokenData)
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("invalid resume token: %w", err)
+		}
+	}
+
+	searchIter, getToken := eng.Search(ctx, q, resume)
+	getTokenBytes := func() []byte {
+		token := getToken()
+		if token == nil {
+			return nil
+		}
+		return server.ResumeTokenToProto(token)
+	}
+	return searchIter, getTokenBytes, nil, histogram, nil
+}
+
 // newSearchExecutor creates a cluster.SearchExecutor that runs local vault
 // searches for ForwardSearch RPCs received from peer nodes. When the query
 // contains a pipeline (stats, timechart), runs RunPipeline and returns the
@@ -136,52 +186,15 @@ func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
 			return nil, nil, nil, nil, fmt.Errorf("parse query: %w", err)
 		}
 
-		eng := o.PrimaryTierQueryEngineForVault(vaultID)
+		eng, err := o.PrimaryTierQueryEngineForVault(vaultID)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
 		if eng == nil {
 			return nil, nil, nil, nil, nil // no primary tiers for this vault
 		}
 
-		// Compute volume histogram across all primary tiers in this vault.
-		histogram := server.HistogramToProto(eng.ComputeHistogram(ctx, q, 50))
-
-		// Pipeline query: run aggregation locally and return table result.
-		if pipeline != nil && len(pipeline.Pipes) > 0 && !query.CanStreamPipeline(pipeline) {
-			result, err := eng.RunPipeline(ctx, q, pipeline)
-			if err != nil {
-				return nil, nil, nil, nil, err
-			}
-			if result.Table != nil {
-				return nil, nil, server.TableResultToBasicProto(result.Table), histogram, nil
-			}
-			records := result.Records
-			return func(yield func(chunk.Record, error) bool) {
-				for _, rec := range records {
-					if !yield(rec, nil) {
-						return
-					}
-				}
-			}, nil, nil, histogram, nil
-		}
-
-		// Parse resume token if present.
-		var resume *query.ResumeToken
-		if len(resumeTokenData) > 0 {
-			resume, err = server.ProtoToResumeToken(resumeTokenData)
-			if err != nil {
-				return nil, nil, nil, nil, fmt.Errorf("invalid resume token: %w", err)
-			}
-		}
-
-		// Regular search path: return the iterator + token generator.
-		searchIter, getToken := eng.Search(ctx, q, resume)
-		getTokenBytes := func() []byte {
-			token := getToken()
-			if token == nil {
-				return nil
-			}
-			return server.ResumeTokenToProto(token)
-		}
-		return searchIter, getTokenBytes, nil, histogram, nil
+		return forwardSearchAfterParse(ctx, eng, q, pipeline, resumeTokenData)
 	}
 }
 
@@ -201,7 +214,10 @@ func newExplainExecutor(o *orchestrator.Orchestrator, localNodeID string) cluste
 		}
 
 		for _, vid := range vaultIDs {
-			eng := o.PrimaryTierQueryEngineForVault(vid)
+			eng, err := o.PrimaryTierQueryEngineForVault(vid)
+			if err != nil {
+				return nil, 0, fmt.Errorf("vault %s: %w", vid, err)
+			}
 			if eng == nil {
 				continue // no primary tiers for this vault
 			}
@@ -278,7 +294,10 @@ func newFollowExecutor(o *orchestrator.Orchestrator) cluster.FollowExecutor {
 
 func newContextExecutor(o *orchestrator.Orchestrator) cluster.ContextExecutor {
 	return func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, pos uint64, before, after int) ([]chunk.Record, chunk.Record, []chunk.Record, error) {
-		eng := o.PrimaryTierQueryEngineForVault(vaultID)
+		eng, err := o.PrimaryTierQueryEngineForVault(vaultID)
+		if err != nil {
+			return nil, chunk.Record{}, nil, err
+		}
 		if eng == nil {
 			return nil, chunk.Record{}, nil, fmt.Errorf("no primary tiers for vault %s", vaultID)
 		}
