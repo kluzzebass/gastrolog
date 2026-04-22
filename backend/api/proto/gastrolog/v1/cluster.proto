@@ -192,6 +192,17 @@ message ForwardTierApplyRequest {
 
 message ForwardTierApplyResponse {}
 
+// ForwardVaultApplyRequest carries a pre-marshaled vault control-plane FSM
+// command for the vault Raft leader. Parallels ForwardTierApply; becomes the
+// primary cross-node apply path as tier metadata Raft is removed (5xxbd).
+message ForwardVaultApplyRequest {
+  // UTF-8 vault control-plane group id: vault/<vaultGLID>/ctl
+  bytes group_id = 1;
+  bytes command = 2;
+}
+
+message ForwardVaultApplyResponse {}
+
 // --- Tier Replication Protocol ---
 //
 // A single ordered bidirectional stream per tier per follower. Replaces

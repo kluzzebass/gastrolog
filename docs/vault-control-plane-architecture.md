@@ -35,6 +35,15 @@
 | **Transport** | Cluster server transport (not multiraft group-scoped) |
 | **Apply path** | `cluster.SetApplyFn` → `raftstore.Store.ApplyRaw` (config mutations) |
 
+### Vault control-plane Raft (per vault, `vault/<id>/ctl`)
+
+| Aspect | Detail |
+|--------|--------|
+| **Entry** | `ensureVaultControlPlaneRaftGroup` in [`backend/internal/orchestrator/reconfig_vaults.go`](../backend/internal/orchestrator/reconfig_vaults.go) |
+| **FSM** | [`backend/internal/vaultraft/`](../backend/internal/vaultraft/) (placeholder; commands land here as tier Raft is retired) |
+| **Cross-node apply** | `ForwardVaultApply` RPC + `cluster.SetVaultApplyFn` → `GroupManager.GetGroup(groupID).Raft.Apply` ([`backend/internal/cluster/forward.go`](../backend/internal/cluster/forward.go), [`backend/internal/app/app.go`](../backend/internal/app/app.go)) |
+| **Client forwarder** | [`backend/internal/cluster/vault_apply_forwarder.go`](../backend/internal/cluster/vault_apply_forwarder.go) (`VaultApplyForwarder`) |
+
 ### Per-tier metadata Raft (**transitional** — removed when 5xxbd is done)
 
 | Aspect | Detail |
@@ -58,7 +67,7 @@ Vault / tier / chunk operations and routing: [`backend/internal/orchestrator/vau
 2. **Snapshot layout asymmetry:** System snapshots live under `raftDir`; tier snapshots under `raft/groups/<groupId>/`. That is already a structural split relative to “no privileged special-case structure” — target must either justify a **uniform two-root pattern** or **converge** layouts.
 3. **Shared WAL:** System and all tier groups share one `raftwal` on-disk segment stream; coupling is total. A vault redesign **must not** assume independent tier WALs unless the design explicitly splits them (default stays shared).
 4. **Readiness / partial peers:** Tier group creation is deferred when members are incomplete — rules must generalize to **vault** groups and **vault readiness** predicates.
-5. **Apply entrypoints:** Two paths (`SetApplyFn` vs `SetTierApplyFn`). Target model must state **who may Apply** to which group class and how forwarding maps to vault authority.
+5. **Apply entrypoints:** Today: `SetApplyFn` (config), `SetTierApplyFn` (tier metadata), `SetVaultApplyFn` (vault ctl). Target: **one** vault-scoped apply path for all vault/tier replicated metadata plus system config path.
 
 ---
 
@@ -219,8 +228,8 @@ These require explicit product/architecture decisions:
 | Area | Paths |
 |------|--------|
 | System Raft | `backend/internal/app/raft.go` |
-| Multi-Raft setup, tier apply (transitional) | `backend/internal/app/app.go` (`setupMultiRaft`, `SetTierApplyFn`) |
-| Vault control-plane Raft | `backend/internal/orchestrator/reconfig_vaults.go` (`ensureVaultControlPlaneRaftGroup`), `backend/internal/vaultraft/` |
+| Multi-Raft setup, tier / vault apply | `backend/internal/app/app.go` (`setupMultiRaft`, `SetTierApplyFn`, `SetVaultApplyFn`) |
+| Vault control-plane Raft | `backend/internal/orchestrator/reconfig_vaults.go` (`ensureVaultControlPlaneRaftGroup`), `backend/internal/vaultraft/`, `backend/internal/cluster/vault_apply_forwarder.go` |
 | Tier group creation (**sunset**) | `backend/internal/orchestrator/reconfig_vaults.go` (`createTierRaftGroup`) |
 | Group manager | `backend/internal/raftgroup/groupmanager.go` |
 | WAL | `backend/internal/raftwal/` |

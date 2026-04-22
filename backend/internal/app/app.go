@@ -236,17 +236,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// Must happen AFTER orch.Start so ListIngesters() reflects reality.
 	clearStaleIngesterAlive(ctx, cfgStore, orch, nodeID, logger)
 
-	// Wire the ForwardTierApply handler so other nodes can forward tier
-	// Raft applies to us when we're the tier Raft leader.
-	if clusterSrv != nil && groupMgr != nil {
-		clusterSrv.SetTierApplyFn(func(ctx context.Context, groupID string, data []byte) error {
-			g := groupMgr.GetGroup(groupID)
-			if g == nil {
-				return fmt.Errorf("tier raft group %s not found", groupID)
-			}
-			return g.Raft.Apply(data, cluster.ReplicationTimeout).Error()
-		})
-	}
+	wireClusterRaftApplies(clusterSrv, groupMgr)
 
 	// Tier Raft group membership is reconciled by per-tier leader loops
 	// (raftgroup.LeaderLoop) wired by reconfig_vaults.go. On snapshot
@@ -1161,6 +1151,21 @@ func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore sys
 		GroupManager:        groupMgr,
 		NodeAddressResolver: nodeAddrResolver,
 	}
+}
+
+func wireClusterRaftApplies(clusterSrv *cluster.Server, groupMgr *raftgroup.GroupManager) {
+	if clusterSrv == nil || groupMgr == nil {
+		return
+	}
+	fn := func(_ context.Context, groupID string, data []byte) error {
+		g := groupMgr.GetGroup(groupID)
+		if g == nil {
+			return fmt.Errorf("raft group %s not found", groupID)
+		}
+		return g.Raft.Apply(data, cluster.ReplicationTimeout).Error()
+	}
+	clusterSrv.SetTierApplyFn(fn)
+	clusterSrv.SetVaultApplyFn(fn)
 }
 
 func resolveHome(flagValue string) (home.Dir, error) {

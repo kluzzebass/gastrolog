@@ -95,6 +95,10 @@ type Server struct {
 	// tier Raft leader. Keyed by group ID (= tier UUID).
 	tierApplyFn func(ctx context.Context, groupID string, data []byte) error
 
+	// vaultApplyFn applies a pre-marshaled vault control-plane FSM command on
+	// this node's vault Raft leader for the given multiraft group ID.
+	vaultApplyFn func(ctx context.Context, groupID string, data []byte) error
+
 	// enrollHandler handles the Enroll RPC for joining nodes.
 	enrollHandler EnrollHandler
 
@@ -417,6 +421,12 @@ func (s *Server) SetApplyFn(fn func(ctx context.Context, data []byte) error) {
 // apply tier FSM commands on the tier Raft leader node.
 func (s *Server) SetTierApplyFn(fn func(ctx context.Context, groupID string, data []byte) error) {
 	s.tierApplyFn = fn
+}
+
+// SetVaultApplyFn sets the function used by the ForwardVaultApply handler to
+// apply vault control-plane FSM commands on the vault Raft leader node.
+func (s *Server) SetVaultApplyFn(fn func(ctx context.Context, groupID string, data []byte) error) {
+	s.vaultApplyFn = fn
 }
 
 // SetEvictionHandler registers the callback invoked when this node receives

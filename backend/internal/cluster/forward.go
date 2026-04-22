@@ -744,6 +744,18 @@ func (s *Server) forwardTierApply(ctx context.Context, req *gastrologv1.ForwardT
 	return &gastrologv1.ForwardTierApplyResponse{}, nil
 }
 
+// forwardVaultApply handles the ForwardVaultApply RPC on the vault control-plane
+// Raft leader.
+func (s *Server) forwardVaultApply(ctx context.Context, req *gastrologv1.ForwardVaultApplyRequest) (*gastrologv1.ForwardVaultApplyResponse, error) {
+	if s.vaultApplyFn == nil {
+		return nil, status.Error(codes.Unavailable, "vault apply function not configured")
+	}
+	if err := s.vaultApplyFn(ctx, string(req.GetGroupId()), req.GetCommand()); err != nil {
+		return nil, status.Errorf(codes.Internal, "vault apply: %v", err)
+	}
+	return &gastrologv1.ForwardVaultApplyResponse{}, nil
+}
+
 // forwardRemoveNode handles the ForwardRemoveNode RPC on the leader.
 // Followers call this to proxy node removal through the leader.
 func (s *Server) forwardRemoveNode(ctx context.Context, req *gastrologv1.ForwardRemoveNodeRequest) (*gastrologv1.ForwardRemoveNodeResponse, error) {
@@ -925,6 +937,10 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			MethodName: "ForwardTierApply",
 			Handler:    forwardTierApplyHandler,
 		},
+		{
+			MethodName: "ForwardVaultApply",
+			Handler:    forwardVaultApplyHandler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -1023,6 +1039,25 @@ func forwardTierApplyHandler(srv any, ctx context.Context, dec func(any) error, 
 	}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return s.forwardTierApply(ctx, req.(*gastrologv1.ForwardTierApplyRequest))
+	}
+	return interceptor(ctx, req, info, handler)
+}
+
+func forwardVaultApplyHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	req := &gastrologv1.ForwardVaultApplyRequest{}
+	if err := dec(req); err != nil {
+		return nil, err
+	}
+	s := srv.(*Server)
+	if interceptor == nil {
+		return s.forwardVaultApply(ctx, req)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gastrolog.v1.ClusterService/ForwardVaultApply",
+	}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return s.forwardVaultApply(ctx, req.(*gastrologv1.ForwardVaultApplyRequest))
 	}
 	return interceptor(ctx, req, info, handler)
 }
