@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"time"
 
@@ -22,69 +21,6 @@ import (
 
 	hraft "github.com/hashicorp/raft"
 )
-
-// Hashicorp raft file snapshots use directories named "<term>-<index>".
-var systemSnapshotDirPattern = regexp.MustCompile(`^\d+-\d+$`)
-
-// migrateLegacySystemRaftSnapshots moves term-index snapshot directories from
-// the pre-uniform layout (snapshots directly under raft/) into
-// raft/groups/system/, matching tier groups. Safe to call on every startup:
-// no-op when already migrated or on fresh installs.
-func migrateLegacySystemRaftSnapshots(raftDir, systemSnapDir string) error {
-	if err := os.MkdirAll(systemSnapDir, 0o750); err != nil {
-		return fmt.Errorf("create system snapshot dir: %w", err)
-	}
-	has, err := dirHasRaftSnapshotChildren(systemSnapDir)
-	if err != nil {
-		return err
-	}
-	if has {
-		return nil
-	}
-	entries, err := os.ReadDir(raftDir)
-	if err != nil {
-		return fmt.Errorf("read raft dir: %w", err)
-	}
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		if name == "wal" || name == "groups" {
-			continue
-		}
-		if !systemSnapshotDirPattern.MatchString(name) {
-			continue
-		}
-		src := filepath.Join(raftDir, name)
-		dst := filepath.Join(systemSnapDir, name)
-		if _, statErr := os.Stat(dst); statErr == nil {
-			continue
-		} else if !os.IsNotExist(statErr) {
-			return fmt.Errorf("stat destination %s: %w", dst, statErr)
-		}
-		if err := os.Rename(src, dst); err != nil {
-			return fmt.Errorf("migrate system snapshot %q: %w", name, err)
-		}
-	}
-	return nil
-}
-
-func dirHasRaftSnapshotChildren(dir string) (bool, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, err
-	}
-	for _, e := range entries {
-		if e.IsDir() && systemSnapshotDirPattern.MatchString(e.Name()) {
-			return true, nil
-		}
-	}
-	return false, nil
-}
 
 // raftStoreOpts groups the parameters needed to open a raft-backed config store.
 type raftStoreOpts struct {
@@ -267,9 +203,9 @@ func openRaftSystemStore(opts raftStoreOpts) (*raftSystemStore, error) {
 	gs := wal.GroupStore("system")
 
 	systemSnapDir := opts.Home.RaftGroupDir("system")
-	if err := migrateLegacySystemRaftSnapshots(raftDir, systemSnapDir); err != nil {
+	if err := os.MkdirAll(systemSnapDir, 0o750); err != nil {
 		_ = wal.Close()
-		return nil, fmt.Errorf("migrate system raft snapshots: %w", err)
+		return nil, fmt.Errorf("create system snapshot dir: %w", err)
 	}
 	snapStore, err := hraft.NewFileSnapshotStore(systemSnapDir, 2, io.Discard)
 	if err != nil {

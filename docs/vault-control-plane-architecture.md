@@ -53,7 +53,7 @@ Vault / tier / chunk operations and routing: [`backend/internal/orchestrator/vau
 
 1. **Authority scope:** Tier Raft group ID = **tier**; vault-level authority is not first-class in Raft naming or lifecycle.
 2. **Snapshot layout asymmetry:** System snapshots live under `raftDir`; tier snapshots under `raft/groups/<groupId>/`. That is already a structural split relative to “no privileged special-case structure” — target must either justify a **uniform two-root pattern** or **converge** layouts.
-3. **Shared WAL:** System and all tier groups share one `raftwal` on-disk segment stream; coupling is total. A vault redesign **must not** assume independent tier WALs without an explicit migration story.
+3. **Shared WAL:** System and all tier groups share one `raftwal` on-disk segment stream; coupling is total. A vault redesign **must not** assume independent tier WALs unless the design explicitly splits them (default stays shared).
 4. **Readiness / partial peers:** Tier group creation is deferred when members are incomplete — rules must generalize to **vault** groups and **vault readiness** predicates.
 5. **Apply entrypoints:** Two paths (`SetApplyFn` vs `SetTierApplyFn`). Target model must state **who may Apply** to which group class and how forwarding maps to vault authority.
 
@@ -95,7 +95,7 @@ Vault / tier / chunk operations and routing: [`backend/internal/orchestrator/vau
 
 ## C) Uniform Raft group model (target)
 
-**Goal:** System and vault groups follow the **same lifecycle and storage conventions**. Any exception is a **named compatibility shim** with a **sunset** (version gate or migration milestone).
+**Goal:** System and vault groups follow the **same lifecycle and storage conventions**. Any exception is a **named compatibility shim** with a **sunset** (version gate or explicit removal deadline).
 
 ### Target topology (conceptual)
 
@@ -111,7 +111,7 @@ Vault / tier / chunk operations and routing: [`backend/internal/orchestrator/vau
 ### Persistence (target rules)
 
 - **WAL:** Either (1) one shared `raftwal` for **all** group stores including system and vault groups with stable `GroupStore` naming, or (2) split WALs with a **documented** reason and identical **semantic** contract per WAL. Default direction: **(1)** unless I/O isolation proves mandatory.
-- **Snapshots:** One directory pattern for all group kinds — e.g. `raft/groups/<groupID>/` **including** a system alias `system` — OR elevate both to a symmetric `{wal, groups}` layout with zero special cases. The spec **MUST** pick one and list migration steps.
+- **Snapshots:** One directory pattern for all group kinds — e.g. `raft/groups/<groupID>/` **including** a system alias `system` — OR elevate both to a symmetric `{wal, groups}` layout with zero special cases. The spec **MUST** pick one. **Greenfield only:** no on-disk upgrade path from older layouts; wipe or replace the raft tree when the layout changes during development.
 
 ### Lifecycle
 
@@ -182,9 +182,9 @@ stateDiagram-v2
 These require explicit product/architecture decisions:
 
 1. **One VaultRaft vs multiple raft groups per vault** (e.g. separate hot/cold metadata): pick one default.
-2. **Migration** from `GroupID = tierCfg.ID.String()` to vault-scoped IDs — online vs stop-the-world; dual-read/dual-write window; snapshot portability.
+2. **Cutover** from `GroupID = tierCfg.ID.String()` to vault-scoped IDs — acceptable as a breaking layout change while pre-production (no dual-read window required).
 3. **System Raft shrink/grow:** Which config moves to vault Raft vs stays global; backward compatibility for existing clusters.
-4. **Snapshot layout convergence:** Single rule for system + vault + (legacy tier) during migration.
+4. **Snapshot layout convergence:** Single rule for system + vault + tier snapshots (no legacy on-disk compatibility).
 5. **Feature flags:** Whether vault Raft rolls out behind a flag per vault or cluster-wide.
 
 ---
@@ -194,7 +194,7 @@ These require explicit product/architecture decisions:
 ### For gastrolog-5xxbd — vault-level Raft groups and FSM namespacing
 
 - [ ] Implement `GroupID` scheme and `GroupStore` / `CreateGroup` wiring chosen in C/F.
-- [ ] Align snapshot directories with the chosen uniform pattern; migration for existing `raft/groups/<tierId>/` paths.
+- [ ] Align snapshot directories with the chosen uniform pattern (greenfield; remove old `raft/` tree if layout changes).
 - [ ] FSM boundary: which commands move from `tierfsm` to vault-scoped FSM; serialization + versioning rules.
 - [ ] Bootstrap/defer rules from D for partial membership; tests for “no bad initial config”.
 - [ ] WAL: confirm shared `raftwal` grouping and replay order; extend `raftwal` tests if new group naming or churn patterns appear.
