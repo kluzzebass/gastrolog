@@ -22,6 +22,7 @@ import (
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/system"
 	tierfsm "gastrolog/internal/tier/raftfsm"
+	"gastrolog/internal/vaultraft"
 
 	hraft "github.com/hashicorp/raft"
 )
@@ -196,6 +197,8 @@ func (o *Orchestrator) removeVaultJobs(id glid.GLID, vault *Vault) {
 // teardownVault performs the common cleanup for all vault removal paths:
 // cancels pending jobs, closes managers, removes from registry, rebuilds filters.
 func (o *Orchestrator) teardownVault(id glid.GLID, vault *Vault) {
+	o.destroyVaultControlPlaneRaftGroup(id)
+
 	// Cancel pending post-seal/compress/index jobs to prevent use-after-close.
 	vaultPrefix := id.String()
 	o.scheduler.RemoveJobsByPrefix("post-seal:" + vaultPrefix)
@@ -519,6 +522,8 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID glid.
 		return fmt.Errorf("vault %s not found in config", vaultID)
 	}
 
+	o.ensureVaultControlPlaneRaftGroup(vaultID, rt.Nodes, factories)
+
 	nscs := rt.NodeStorageConfigs
 	leaderNodeID := system.LeaderNodeID(rt.TierPlacements[tierCfg.ID], nscs)
 	followerNodeIDs := system.FollowerNodeIDs(rt.TierPlacements[tierCfg.ID], nscs)
@@ -607,6 +612,8 @@ func (o *Orchestrator) UnregisterVault(id glid.GLID) error {
 	delete(o.vaults, id)
 	o.rebuildFilterSetLocked()
 
+	o.destroyVaultControlPlaneRaftGroup(id)
+
 	o.logger.Info("vault unregistered (data preserved)", "id", id, "name", vault.Name, "type", vault.Type())
 	return nil
 }
@@ -656,6 +663,8 @@ func (o *Orchestrator) UpdateVaultFilter(id glid.GLID, filter string) error {
 func (o *Orchestrator) buildTierInstances(sys *system.System, vaultCfg system.VaultConfig, factories Factories) ([]*TierInstance, error) {
 	cfg := &sys.Config
 	rt := &sys.Runtime
+	o.ensureVaultControlPlaneRaftGroup(vaultCfg.ID, rt.Nodes, factories)
+
 	tierIDs := system.VaultTierIDs(cfg.Tiers, vaultCfg.ID)
 	if len(tierIDs) == 0 {
 		return nil, nil // vault has no tiers yet — tiers are added incrementally via handleTierPut
@@ -1002,6 +1011,67 @@ func applyRotationPolicy(cm chunk.ChunkManager, policies []system.RotationPolicy
 }
 
 // tierRaftCallbacks holds the callbacks returned by createTierRaftGroup.
+func (o *Orchestrator) destroyVaultControlPlaneRaftGroup(vaultID glid.GLID) {
+	if o.groupMgr == nil {
+		return
+	}
+	gid := raftgroup.VaultControlPlaneGroupID(vaultID)
+	if err := o.groupMgr.DestroyGroup(gid); err != nil && !errors.Is(err, raftgroup.ErrGroupNotFound) {
+		o.logger.Debug("destroy vault control-plane raft group",
+			"vault", vaultID, "error", err)
+	}
+}
+
+// ensureVaultControlPlaneRaftGroup starts the per-vault control-plane Raft group
+// when cluster mode is enabled (shared GroupManager + full member list).
+// Idempotent; safe on every reconfigure sweep.
+func (o *Orchestrator) ensureVaultControlPlaneRaftGroup(vaultID glid.GLID, clusterNodes []system.NodeConfig, factories Factories) {
+	gid := raftgroup.VaultControlPlaneGroupID(vaultID)
+	_, _ = o.tryStartClusterRaftGroup(gid, vaultraft.NewFSM(), clusterNodes, factories)
+}
+
+// tryStartClusterRaftGroup creates or returns an existing cluster-wide Raft group
+// (symmetric seeding across all resolvable cluster nodes). The second return is
+// the resolved member list when the group is (or will be) active on this node;
+// both are nil when creation is deferred or fails.
+func (o *Orchestrator) tryStartClusterRaftGroup(groupID string, fsm hraft.FSM, clusterNodes []system.NodeConfig, factories Factories) (*raftgroup.Group, []hraft.Server) {
+	if factories.GroupManager == nil {
+		return nil, nil
+	}
+	members := o.buildTierRaftMembers(clusterNodes, factories)
+	if len(members) < len(clusterNodes) {
+		o.logger.Debug("cluster raft group: not all cluster nodes resolvable, deferring creation",
+			"group", groupID,
+			"have", len(members),
+			"want", len(clusterNodes))
+		return nil, nil
+	}
+	isMember := false
+	for _, srv := range members {
+		if string(srv.ID) == o.localNodeID {
+			isMember = true
+			break
+		}
+	}
+	if !isMember {
+		return nil, nil
+	}
+	g := factories.GroupManager.GetGroup(groupID)
+	if g != nil {
+		return g, members
+	}
+	g, err := factories.GroupManager.CreateGroup(raftgroup.GroupConfig{
+		GroupID:     groupID,
+		FSM:         fsm,
+		SeedMembers: members,
+	})
+	if err != nil {
+		o.logger.Warn("failed to create cluster raft group", "group", groupID, "error", err)
+		return nil, nil
+	}
+	return g, members
+}
+
 type tierRaftCallbacks struct {
 	hasLeader               func() bool
 	isLeader                func() bool
@@ -1023,60 +1093,10 @@ type tierRaftCallbacks struct {
 // and group manager. Call this BEFORE creating the chunk manager so the Raft
 // group starts elections early (while chunk loading is still in progress).
 func (o *Orchestrator) createTierRaftGroup(tierCfg system.TierConfig, clusterNodes []system.NodeConfig, factories Factories) (*raftgroup.Group, tierfsm.Applier, tierRaftCallbacks) {
-	if factories.GroupManager == nil {
-		return nil, nil, tierRaftCallbacks{}
-	}
-
 	groupID := raftgroup.TierMetadataGroupID(tierCfg.VaultID, tierCfg.ID)
-	members := o.buildTierRaftMembers(clusterNodes, factories)
-	// Do not create the tier Raft group until ALL cluster nodes are
-	// resolvable. A partial member list poisons the group's boltdb with a
-	// wrong-size initial configuration, and we can't recover from that on
-	// restart without losing data.
-	//
-	// Every cluster node participates in every tier Raft group (gastrolog-292yi),
-	// so the expected count is len(clusterNodes). If some nodes aren't
-	// resolvable yet (e.g. not yet announced via peer discovery), defer
-	// creation until the next reconfigure sweep.
-	if len(members) < len(clusterNodes) {
-		o.logger.Debug("tier raft group: not all cluster nodes resolvable, deferring creation",
-			"tier", tierCfg.ID,
-			"have", len(members),
-			"want", len(clusterNodes))
-		return nil, nil, tierRaftCallbacks{}
-	}
-	// Safety net: verify this node is in the member list. With all cluster
-	// nodes as members this should always be true, but guard against edge
-	// cases like a node not yet in the cluster node list.
-	isMember := false
-	for _, srv := range members {
-		if string(srv.ID) == o.localNodeID {
-			isMember = true
-			break
-		}
-	}
-	if !isMember {
-		return nil, nil, tierRaftCallbacks{}
-	}
-
-	g := factories.GroupManager.GetGroup(groupID)
+	g, members := o.tryStartClusterRaftGroup(groupID, tierfsm.New(), clusterNodes, factories)
 	if g == nil {
-		// Symmetric seeding: every assigned node calls CreateGroup with the
-		// same member list. Raft elects a leader through normal election. No
-		// node holds a special "bootstrap" role. The seed list is only used
-		// when the local boltdb log is empty (first start of a brand-new tier);
-		// on restart, the existing log already contains the configuration.
-		var err error
-		g, err = factories.GroupManager.CreateGroup(raftgroup.GroupConfig{
-			GroupID:     groupID,
-			FSM:         tierfsm.New(),
-			SeedMembers: members,
-		})
-		if err != nil {
-			o.logger.Warn("failed to create tier raft group",
-				"tier", tierCfg.ID, "error", err)
-			return nil, nil, tierRaftCallbacks{}
-		}
+		return nil, nil, tierRaftCallbacks{}
 	}
 
 	// Update the desired-members view and ensure a leader loop is running

@@ -1,9 +1,9 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"fmt"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"maps"
 	"slices"
@@ -11,10 +11,9 @@ import (
 	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/cluster"
-	"gastrolog/internal/system"
 	"gastrolog/internal/index"
 	"gastrolog/internal/raftgroup"
-
+	"gastrolog/internal/system"
 )
 
 // Factories holds factory functions for creating components from configuration.
@@ -30,6 +29,7 @@ import (
 //   - Logger is passed to factories that support it
 //   - Factories create child loggers scoped to their component
 //   - If Logger is nil, components use discard loggers
+//
 // ConnectionTester validates connectivity for an ingester configuration
 // without saving or starting it. Returns a human-readable success message
 // or an error describing the failure.
@@ -48,7 +48,7 @@ type ListenAddr struct {
 type IngesterRegistration struct {
 	Factory     IngesterFactory
 	Defaults    func() map[string]string
-	Tester      ConnectionTester                      // nil if not supported
+	Tester      ConnectionTester                            // nil if not supported
 	ListenAddrs func(params map[string]string) []ListenAddr // nil for non-listeners
 
 	// SingletonSupported indicates whether it is meaningful to run this
@@ -116,6 +116,7 @@ func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) erro
 	if factories.NodeAddressResolver != nil {
 		o.nodeAddrResolver = factories.NodeAddressResolver
 	}
+	o.groupMgr = factories.GroupManager
 
 	if err := o.applyVaults(sys, factories); err != nil {
 		return err

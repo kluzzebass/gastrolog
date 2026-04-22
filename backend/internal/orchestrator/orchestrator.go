@@ -4,10 +4,10 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -16,11 +16,11 @@ import (
 	"gastrolog/internal/alert"
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/system"
 	"gastrolog/internal/lifecycle"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/notify"
-
+	"gastrolog/internal/raftgroup"
+	"gastrolog/internal/system"
 )
 
 // IngesterStats tracks per-ingester metrics using atomic counters.
@@ -182,7 +182,7 @@ type Orchestrator struct {
 	ingesters       map[glid.GLID]Ingester
 	ingesterCancels map[glid.GLID]context.CancelFunc // per-ingester cancel functions
 	ingesterStats   map[glid.GLID]*IngesterStats     // per-ingester metrics
-	ingesterMeta    map[glid.GLID]ingesterInfo        // per-ingester name/type for logging
+	ingesterMeta    map[glid.GLID]ingesterInfo       // per-ingester name/type for logging
 
 	// Digesters (message enrichment pipeline).
 	digesters []Digester
@@ -214,19 +214,23 @@ type Orchestrator struct {
 	// placement leader's Raft address for TransferLeadership.
 	nodeAddrResolver func(nodeID string) (string, bool)
 
+	// groupMgr is the shared multi-group Raft manager (tier + vault control-plane).
+	// Set from factories during ApplyConfig; used to tear down vault ctl groups.
+	groupMgr *raftgroup.GroupManager
+
 	// Ingest channel and lifecycle.
-	ingestCh       chan IngestMessage
-	digestedCh     chan digestedRecord
-	ingestSize     int
-	pressureGate   *chanwatch.PressureGate // shared signal for ingester throttling
-	cancel         context.CancelFunc
-	done           chan struct{}
-	running        bool
-	ingesterWg     sync.WaitGroup // tracks ingester goroutines
-	digestWg       sync.WaitGroup // tracks digest goroutine
-	writeWg    sync.WaitGroup // tracks write goroutine
-	ackWg      sync.WaitGroup // tracks in-flight ack-gated replication goroutines
-	auxWg      sync.WaitGroup // tracks auxiliary goroutines (watchdog, etc.)
+	ingestCh     chan IngestMessage
+	digestedCh   chan digestedRecord
+	ingestSize   int
+	pressureGate *chanwatch.PressureGate // shared signal for ingester throttling
+	cancel       context.CancelFunc
+	done         chan struct{}
+	running      bool
+	ingesterWg   sync.WaitGroup // tracks ingester goroutines
+	digestWg     sync.WaitGroup // tracks digest goroutine
+	writeWg      sync.WaitGroup // tracks write goroutine
+	ackWg        sync.WaitGroup // tracks in-flight ack-gated replication goroutines
+	auxWg        sync.WaitGroup // tracks auxiliary goroutines (watchdog, etc.)
 
 	// Per-tier import mutex for serializing SetNextChunkID + ImportRecords.
 	importMu sync.Map // tierID → *sync.Mutex
@@ -449,30 +453,30 @@ func New(cfg Config) (*Orchestrator, error) {
 	}
 
 	o := &Orchestrator{
-		vaults:          make(map[glid.GLID]*Vault),
-		ingesters:       make(map[glid.GLID]Ingester),
-		ingesterCancels: make(map[glid.GLID]context.CancelFunc),
-		ingesterStats:   make(map[glid.GLID]*IngesterStats),
-		ingesterMeta:    make(map[glid.GLID]ingesterInfo),
-		draining:     make(map[glid.GLID]*drainState),
-		tierDraining: make(map[string]*tierDrainState),
-		retention:    make(map[string]*retentionRunner),
-		scheduler:       sched,
-		cronRotation:    newCronRotationManager(sched, logger),
-		ingestSize:      cfg.IngestChannelSize,
-		sysLoader:       cfg.SystemLoader,
-		localNodeID:     cfg.LocalNodeID,
-		localNodeIDGLID: parseNodeGLID(cfg.LocalNodeID),
-		ingestSeqs:      make(map[string]uint32),
-		alerts:          cfg.Alerts,
-		suspects:        newSuspectTracker(),
-		chunkSignal:     notify.NewSignal(),
-		tierLeaders:     newTierLeaderManager(logger),
-		phase:           cfg.Phase,
+		vaults:               make(map[glid.GLID]*Vault),
+		ingesters:            make(map[glid.GLID]Ingester),
+		ingesterCancels:      make(map[glid.GLID]context.CancelFunc),
+		ingesterStats:        make(map[glid.GLID]*IngesterStats),
+		ingesterMeta:         make(map[glid.GLID]ingesterInfo),
+		draining:             make(map[glid.GLID]*drainState),
+		tierDraining:         make(map[string]*tierDrainState),
+		retention:            make(map[string]*retentionRunner),
+		scheduler:            sched,
+		cronRotation:         newCronRotationManager(sched, logger),
+		ingestSize:           cfg.IngestChannelSize,
+		sysLoader:            cfg.SystemLoader,
+		localNodeID:          cfg.LocalNodeID,
+		localNodeIDGLID:      parseNodeGLID(cfg.LocalNodeID),
+		ingestSeqs:           make(map[string]uint32),
+		alerts:               cfg.Alerts,
+		suspects:             newSuspectTracker(),
+		chunkSignal:          notify.NewSignal(),
+		tierLeaders:          newTierLeaderManager(logger),
+		phase:                cfg.Phase,
 		onIngesterAlive:      cfg.OnIngesterAlive,
 		onIngesterCheckpoint: cfg.OnIngesterCheckpoint,
-		now:             cfg.Now,
-		logger:          logger,
+		now:                  cfg.Now,
+		logger:               logger,
 	}
 
 	// Wire up post-seal callback for cron rotation so sealed chunks

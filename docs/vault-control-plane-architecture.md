@@ -106,7 +106,7 @@ Vault / tier / chunk operations and routing: [`backend/internal/orchestrator/vau
 ### Identifiers and routing
 
 - String `GroupID` remains the routing key for `multiraft.GroupTransport` ([`backend/internal/multiraft/transport.go`](../backend/internal/multiraft/transport.go)).
-- Target naming convention **MUST** be explicit. **Tier metadata Raft groups** use `vault/<vaultGLID>/tier/<tierGLID>` (see `raftgroup.TierMetadataGroupID`). System config group stays `system` in multiraft transport wiring.
+- Target naming convention **MUST** be explicit. **Vault control-plane Raft** uses `vault/<vaultGLID>/ctl` (`raftgroup.VaultControlPlaneGroupID`). **Tier metadata Raft groups** use `vault/<vaultGLID>/tier/<tierGLID>` (`raftgroup.TierMetadataGroupID`). System config group stays `system` in multiraft transport wiring.
 
 ### Persistence (target rules)
 
