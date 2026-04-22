@@ -1,24 +1,23 @@
 package app
 
 import (
-	"gastrolog/internal/glid"
 	"context"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"os"
 	"time"
 
 	"gastrolog/internal/cluster"
-	"gastrolog/internal/system"
 	"gastrolog/internal/home"
-
+	"gastrolog/internal/system"
 )
 
 const (
-	pullTimeout            = 2 * time.Minute  // per-peer pull timeout
-	reconcileBaseDelay     = 5 * time.Second  // initial retry delay
-	reconcileMaxDelay      = 2 * time.Minute  // max retry delay
-	reconcileMaxAttempts   = 10               // give up after this many rounds
-	periodicReconcileEvery = 5 * time.Minute  // drift check interval
+	pullTimeout            = 2 * time.Minute // per-peer pull timeout
+	reconcileBaseDelay     = 5 * time.Second // initial retry delay
+	reconcileMaxDelay      = 2 * time.Minute // max retry delay
+	reconcileMaxAttempts   = 10              // give up after this many rounds
+	periodicReconcileEvery = 5 * time.Minute // drift check interval
 )
 
 // managedFileManager handles managed file distribution across cluster nodes.

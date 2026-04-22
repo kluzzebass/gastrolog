@@ -1,17 +1,16 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"fmt"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"testing"
 	"time"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/system"
 	"gastrolog/internal/index"
-
+	"gastrolog/internal/system"
 )
 
 // ---------- fake chunk manager ----------
@@ -137,11 +136,11 @@ func newRetentionRunner(cm chunk.ChunkManager, im index.IndexManager, policy chu
 	}
 	r := &retentionRunner{
 		isLeader: true,
-		vaultID: glid.New(),
-		cm:      cm,
-		im:      im,
-		now:     time.Now,
-		logger:  slog.Default(),
+		vaultID:  glid.New(),
+		cm:       cm,
+		im:       im,
+		now:      time.Now,
+		logger:   slog.Default(),
 	}
 	return r, rules
 }
@@ -312,12 +311,12 @@ func TestExpireChunkAppliesRaftDeleteBeforeLocal(t *testing.T) {
 	var raftApplied bool
 	r := &retentionRunner{
 		isLeader: true,
-		vaultID: glid.New(),
-		tierID:  glid.New(),
-		cm:      cm,
-		im:      im,
-		now:     time.Now,
-		logger:  slog.Default(),
+		vaultID:  glid.New(),
+		tierID:   glid.New(),
+		cm:       cm,
+		im:       im,
+		now:      time.Now,
+		logger:   slog.Default(),
 		applyRaftDelete: func(deleteID chunk.ChunkID) error {
 			if deleteID != id {
 				t.Errorf("unexpected chunk ID: %s", deleteID)
@@ -346,12 +345,12 @@ func TestExpireChunkSkipsLocalOnRaftFailure(t *testing.T) {
 
 	r := &retentionRunner{
 		isLeader: true,
-		vaultID: glid.New(),
-		tierID:  glid.New(),
-		cm:      cm,
-		im:      im,
-		now:     time.Now,
-		logger:  slog.Default(),
+		vaultID:  glid.New(),
+		tierID:   glid.New(),
+		cm:       cm,
+		im:       im,
+		now:      time.Now,
+		logger:   slog.Default(),
 		applyRaftDelete: func(_ chunk.ChunkID) error {
 			return fmt.Errorf("not leader")
 		},
@@ -367,7 +366,10 @@ func TestExpireChunkSkipsLocalOnRaftFailure(t *testing.T) {
 type testSystemLoader struct{ cfg *system.Config }
 
 func (l testSystemLoader) Load(_ context.Context) (*system.System, error) {
-	if l.cfg == nil { return nil, nil }; return &system.System{Config: *l.cfg}, nil
+	if l.cfg == nil {
+		return nil, nil
+	}
+	return &system.System{Config: *l.cfg}, nil
 }
 
 func strPtr(s string) *string { return &s }
@@ -632,9 +634,9 @@ func TestReconcileFollowerSkipsWhenFSMNotReady(t *testing.T) {
 	}
 
 	tier := &TierInstance{
-		TierID:     glid.New(),
-		Chunks:     cm,
-		Indexes:    &retentionFakeIndexManager{},
+		TierID:  glid.New(),
+		Chunks:  cm,
+		Indexes: &retentionFakeIndexManager{},
 		// FSM not ready — manifest incomplete, unsafe to reconcile.
 		IsFSMReady:   func() bool { return false },
 		ListManifest: func() []chunk.ChunkID { return []chunk.ChunkID{manifestID} },
@@ -662,9 +664,9 @@ func TestReconcileFollowerDeletesOrphansWhenLeaderPresent(t *testing.T) {
 
 	cm := &retentionFakeChunkManager{
 		chunks: []chunk.ChunkMeta{
-			{ID: orphanID, Sealed: true},              // sealed, not in manifest → delete
-			{ID: keptID, Sealed: true},                // sealed, in manifest → keep
-			{ID: activeID, Sealed: false},             // unsealed → keep regardless
+			{ID: orphanID, Sealed: true},  // sealed, not in manifest → delete
+			{ID: keptID, Sealed: true},    // sealed, in manifest → keep
+			{ID: activeID, Sealed: false}, // unsealed → keep regardless
 		},
 	}
 	im := &retentionFakeIndexManager{}

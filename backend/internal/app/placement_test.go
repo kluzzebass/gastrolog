@@ -1,8 +1,8 @@
 package app
 
 import (
-	"gastrolog/internal/glid"
 	"context"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"testing"
 	"time"
@@ -12,7 +12,6 @@ import (
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/system"
 	sysmem "gastrolog/internal/system/memory"
-
 )
 
 // primaryPlacement creates a Placements slice with a single primary using a synthetic storage ID.
@@ -98,8 +97,8 @@ func TestPlacementLocalTierRequiresStorageClass(t *testing.T) {
 
 	// Only node-2 has storage class 1.
 	_ = store.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
-		NodeID: "node-2",
-		FileStorages:  []system.FileStorage{{ID: glid.New(), StorageClass: 1, Name: "fast", Path: "/data"}},
+		NodeID:       "node-2",
+		FileStorages: []system.FileStorage{{ID: glid.New(), StorageClass: 1, Name: "fast", Path: "/data"}},
 	})
 
 	pm.reconcile(ctx)
@@ -127,8 +126,8 @@ func TestPlacementCloudTierMatchesActiveChunkClass(t *testing.T) {
 
 	// Only node-2 has storage class 2.
 	_ = store.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
-		NodeID: "node-2",
-		FileStorages:  []system.FileStorage{{ID: glid.New(), StorageClass: 2, Name: "ssd", Path: "/cache"}},
+		NodeID:       "node-2",
+		FileStorages: []system.FileStorage{{ID: glid.New(), StorageClass: 2, Name: "ssd", Path: "/cache"}},
 	})
 
 	pm.reconcile(ctx)
@@ -259,8 +258,8 @@ func TestPlacementReassignLocalTierOnNodeDeath(t *testing.T) {
 	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	_ = store.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
-		NodeID: "node-3",
-		FileStorages:  []system.FileStorage{{ID: glid.New(), StorageClass: 1, Name: "ssd", Path: "/data"}},
+		NodeID:       "node-3",
+		FileStorages: []system.FileStorage{{ID: glid.New(), StorageClass: 1, Name: "ssd", Path: "/data"}},
 	})
 
 	pm.reconcile(ctx)
@@ -282,8 +281,8 @@ func TestPlacementNodeLosesStorageClass(t *testing.T) {
 
 	// node-1 has no file storages. node-2 has the right class.
 	_ = store.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
-		NodeID: "node-2",
-		FileStorages:  []system.FileStorage{{ID: glid.New(), StorageClass: 1, Name: "ssd", Path: "/data"}},
+		NodeID:       "node-2",
+		FileStorages: []system.FileStorage{{ID: glid.New(), StorageClass: 1, Name: "ssd", Path: "/data"}},
 	})
 
 	pm.reconcile(ctx)
@@ -485,8 +484,8 @@ func TestPlacementLocalTierStorageClassZero(t *testing.T) {
 	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	_ = store.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
-		NodeID: "node-1",
-		FileStorages:  []system.FileStorage{{ID: glid.New(), StorageClass: 0, Name: "zero", Path: "/z"}},
+		NodeID:       "node-1",
+		FileStorages: []system.FileStorage{{ID: glid.New(), StorageClass: 0, Name: "zero", Path: "/z"}},
 	})
 
 	pm.reconcile(ctx)
@@ -545,8 +544,8 @@ func TestPlacementAlertClearedWhenPlaced(t *testing.T) {
 
 	// Add matching file storage → now eligible.
 	_ = store.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
-		NodeID: "node-1",
-		FileStorages:  []system.FileStorage{{ID: glid.New(), StorageClass: 1, Name: "ssd", Path: "/data"}},
+		NodeID:       "node-1",
+		FileStorages: []system.FileStorage{{ID: glid.New(), StorageClass: 1, Name: "ssd", Path: "/data"}},
 	})
 
 	pm.reconcile(ctx)
@@ -621,8 +620,8 @@ func TestPlacementMultipleTiersDifferentTypes(t *testing.T) {
 
 	// Only node-2 has the storage class.
 	_ = store.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
-		NodeID: "node-2",
-		FileStorages:  []system.FileStorage{{ID: glid.New(), StorageClass: 1, Name: "ssd", Path: "/data"}},
+		NodeID:       "node-2",
+		FileStorages: []system.FileStorage{{ID: glid.New(), StorageClass: 1, Name: "ssd", Path: "/data"}},
 	})
 
 	pm.reconcile(ctx)
@@ -718,9 +717,9 @@ func TestNodeHasStorageClass(t *testing.T) {
 		{"n1", 2, false},
 		{"n2", 2, true},
 		{"n2", 1, false},
-		{"n3", 1, false},  // unknown node
-		{"n1", 0, false},  // class 0 always false
-		{"", 1, false},    // empty node ID
+		{"n3", 1, false}, // unknown node
+		{"n1", 0, false}, // class 0 always false
+		{"", 1, false},   // empty node ID
 	}
 
 	for _, tt := range tests {
@@ -931,7 +930,7 @@ func TestPlacementSkipsNonSingletonConfig(t *testing.T) {
 	ingID := glid.New()
 	_ = store.PutIngester(ctx, system.IngesterConfig{
 		ID: ingID, Name: "kafka-ing", Type: "kafka", Enabled: true,
-		NodeIDs: []string{"node-1", "node-2"},
+		NodeIDs:   []string{"node-1", "node-2"},
 		Singleton: false,
 	})
 

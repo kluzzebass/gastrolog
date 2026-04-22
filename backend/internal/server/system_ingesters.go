@@ -1,10 +1,10 @@
 package server
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"maps"
 	"net"
 	"slices"
@@ -13,9 +13,9 @@ import (
 	"connectrpc.com/connect"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/system"
 	"gastrolog/internal/system/raftfsm"
-	"gastrolog/internal/orchestrator"
 )
 
 // ListIngesters returns all configured ingesters across the cluster.

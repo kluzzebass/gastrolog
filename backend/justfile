@@ -101,7 +101,7 @@ cluster-kill:
   pkill -INT -f 'gastrolog.*--home data/node' 2>/dev/null || true
   sleep 2
   pkill -KILL -f 'gastrolog.*--home data/node' 2>/dev/null || true
-  pkill -KILL -f 'multirun.*gastrolog' 2>/dev/null || true
+  pkill -KILL -f 'imux.*gastrolog' 2>/dev/null || true
   echo "Cluster processes killed."
 
 # Dumps heap profile for a node and shows top allocators. Usage: just heap-profile 1

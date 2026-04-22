@@ -1,12 +1,11 @@
 package system
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
-
+	"gastrolog/internal/glid"
 )
 
 // DefaultConfig returns the bootstrap configuration for first-run.

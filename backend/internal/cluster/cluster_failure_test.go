@@ -1,8 +1,8 @@
 package cluster_test
 
 import (
-	"gastrolog/internal/glid"
 	"context"
+	"gastrolog/internal/glid"
 	"runtime"
 	"testing"
 	"time"

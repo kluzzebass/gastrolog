@@ -1,12 +1,12 @@
 package server
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/csv"
 	"encoding/json"
+	"gastrolog/internal/glid"
 	"strings"
 
 	"github.com/itchyny/gojq"
@@ -24,11 +24,11 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/auth"
-	"gastrolog/internal/system"
-	"gastrolog/internal/system/raftfsm"
 	"gastrolog/internal/lookup"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/system"
+	"gastrolog/internal/system/raftfsm"
 )
 
 // PeerIngesterStatsProvider looks up ingester stats from cluster peer broadcasts.
@@ -46,40 +46,40 @@ type PeerRouteStatsProvider interface {
 
 // SystemServerConfig holds all dependencies for SystemServer construction.
 type SystemServerConfig struct {
-	Orch               *orchestrator.Orchestrator
-	CfgStore           system.Store
-	Factories          orchestrator.Factories
-	CertManager        CertManager
-	PeerStats          PeerIngesterStatsProvider
-	PeerRouteStats     PeerRouteStatsProvider
-	LocalNodeID        string
-	AfterConfigApply   func(raftfsm.Notification)
-	ConfigSignal       *notify.Signal
-	ResolveManagedFile func(ctx context.Context, fileID string) string
-	OnTLSConfigChange  func()
+	Orch                 *orchestrator.Orchestrator
+	CfgStore             system.Store
+	Factories            orchestrator.Factories
+	CertManager          CertManager
+	PeerStats            PeerIngesterStatsProvider
+	PeerRouteStats       PeerRouteStatsProvider
+	LocalNodeID          string
+	AfterConfigApply     func(raftfsm.Notification)
+	ConfigSignal         *notify.Signal
+	ResolveManagedFile   func(ctx context.Context, fileID string) string
+	OnTLSConfigChange    func()
 	OnLookupConfigChange func(system.LookupConfig, system.MaxMindConfig)
-	CloudTesters       map[string]CloudServiceTester
-	Tokens             *auth.TokenService
-	PlacementReconcile func(ctx context.Context) // synchronous placement for RPC handlers
+	CloudTesters         map[string]CloudServiceTester
+	Tokens               *auth.TokenService
+	PlacementReconcile   func(ctx context.Context) // synchronous placement for RPC handlers
 }
 
 // SystemServer implements the ConfigService.
 type SystemServer struct {
-	orch                  *orchestrator.Orchestrator
-	sysStore              system.Store
-	factories             orchestrator.Factories
-	certManager           CertManager
-	peerStats             PeerIngesterStatsProvider
-	peerRouteStats        PeerRouteStatsProvider
-	localNodeID           string
-	onTLSConfigChange     func()
-	onLookupConfigChange  func(system.LookupConfig, system.MaxMindConfig)
-	afterConfigApply      func(raftfsm.Notification)
-	configSignal          *notify.Signal
-	resolveManagedFile    func(ctx context.Context, fileID string) string
-	cloudTesters          map[string]CloudServiceTester
-	tokens                *auth.TokenService
-	placementReconcile    func(ctx context.Context) // synchronous placement, nil in non-cluster mode
+	orch                 *orchestrator.Orchestrator
+	sysStore             system.Store
+	factories            orchestrator.Factories
+	certManager          CertManager
+	peerStats            PeerIngesterStatsProvider
+	peerRouteStats       PeerRouteStatsProvider
+	localNodeID          string
+	onTLSConfigChange    func()
+	onLookupConfigChange func(system.LookupConfig, system.MaxMindConfig)
+	afterConfigApply     func(raftfsm.Notification)
+	configSignal         *notify.Signal
+	resolveManagedFile   func(ctx context.Context, fileID string) string
+	cloudTesters         map[string]CloudServiceTester
+	tokens               *auth.TokenService
+	placementReconcile   func(ctx context.Context) // synchronous placement, nil in non-cluster mode
 }
 
 var _ gastrologv1connect.SystemServiceHandler = (*SystemServer)(nil)
@@ -187,7 +187,7 @@ func (s *SystemServer) buildFullSettingsResponse(ctx context.Context, includeSec
 		JwtSecretConfigured:  ss.Auth.JWTSecret != "",
 		RefreshTokenDuration: ss.Auth.RefreshTokenDuration,
 		PasswordPolicy: &apiv1.PasswordPolicySettings{
-			MinLength:             int32(ss.Auth.PasswordPolicy.MinLength),             //nolint:gosec // G115
+			MinLength:             int32(ss.Auth.PasswordPolicy.MinLength), //nolint:gosec // G115
 			RequireMixedCase:      ss.Auth.PasswordPolicy.RequireMixedCase,
 			RequireDigit:          ss.Auth.PasswordPolicy.RequireDigit,
 			RequireSpecial:        ss.Auth.PasswordPolicy.RequireSpecial,
@@ -439,7 +439,7 @@ func (s *SystemServer) loadSystemTiers(ctx context.Context, resp *apiv1.GetSyste
 			VaultId:           tier.VaultID.ToProto(),
 			Position:          tier.Position,
 			CacheEviction:     tier.CacheEviction,
-			CacheBudget:  tier.CacheBudget,
+			CacheBudget:       tier.CacheBudget,
 			CacheTtl:          tier.CacheTTL,
 		}
 		if tier.RotationPolicyID != nil {
@@ -495,8 +495,8 @@ func (s *SystemServer) loadConfigNodeStorageConfigs(ctx context.Context, resp *a
 			}
 		}
 		resp.NodeStorageConfigs = append(resp.NodeStorageConfigs, &apiv1.NodeStorageConfig{
-			NodeId: []byte(nsc.NodeID),
-			FileStorages:  storages,
+			NodeId:       []byte(nsc.NodeID),
+			FileStorages: storages,
 		})
 	}
 	return nil
@@ -520,7 +520,7 @@ func (s *SystemServer) GetSettings(
 		return connect.NewResponse(&apiv1.GetSettingsResponse{
 			Auth: &apiv1.AuthSettings{
 				PasswordPolicy: &apiv1.PasswordPolicySettings{
-					MinLength:             int32(pp.MinLength),             //nolint:gosec // G115
+					MinLength:             int32(pp.MinLength), //nolint:gosec // G115
 					RequireMixedCase:      pp.RequireMixedCase,
 					RequireDigit:          pp.RequireDigit,
 					RequireSpecial:        pp.RequireSpecial,
@@ -663,22 +663,46 @@ func (s *SystemServer) DeleteLookup(
 
 	found := false
 	ss.Lookup.HTTPLookups = slicesDeleteFunc(ss.Lookup.HTTPLookups, func(l system.HTTPLookupConfig) bool {
-		if l.Name == name { found = true; return true }; return false
+		if l.Name == name {
+			found = true
+			return true
+		}
+		return false
 	})
 	ss.Lookup.JSONFileLookups = slicesDeleteFunc(ss.Lookup.JSONFileLookups, func(l system.JSONFileLookupConfig) bool {
-		if l.Name == name { found = true; return true }; return false
+		if l.Name == name {
+			found = true
+			return true
+		}
+		return false
 	})
 	ss.Lookup.YAMLFileLookups = slicesDeleteFunc(ss.Lookup.YAMLFileLookups, func(l system.YAMLFileLookupConfig) bool {
-		if l.Name == name { found = true; return true }; return false
+		if l.Name == name {
+			found = true
+			return true
+		}
+		return false
 	})
 	ss.Lookup.MMDBLookups = slicesDeleteFunc(ss.Lookup.MMDBLookups, func(l system.MMDBLookupConfig) bool {
-		if l.Name == name { found = true; return true }; return false
+		if l.Name == name {
+			found = true
+			return true
+		}
+		return false
 	})
 	ss.Lookup.CSVLookups = slicesDeleteFunc(ss.Lookup.CSVLookups, func(l system.CSVLookupConfig) bool {
-		if l.Name == name { found = true; return true }; return false
+		if l.Name == name {
+			found = true
+			return true
+		}
+		return false
 	})
 	ss.Lookup.StaticLookups = slicesDeleteFunc(ss.Lookup.StaticLookups, func(l system.StaticLookupConfig) bool {
-		if l.Name == name { found = true; return true }; return false
+		if l.Name == name {
+			found = true
+			return true
+		}
+		return false
 	})
 
 	if !found {
@@ -1621,4 +1645,3 @@ func checkNameConflict[S ~[]E, E any](entityType string, id glid.GLID, name stri
 	}
 	return nil
 }
-

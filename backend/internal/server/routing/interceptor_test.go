@@ -384,4 +384,3 @@ func TestRoutingInterceptor_UndeclaredRPC(t *testing.T) {
 		t.Error("handler should not be called for undeclared RPC")
 	}
 }
-

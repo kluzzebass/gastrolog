@@ -1,17 +1,17 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"slices"
 	"testing"
 	"time"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/system"
 	"gastrolog/internal/index"
+	"gastrolog/internal/system"
 
 	hraft "github.com/hashicorp/raft"
 )
@@ -177,10 +177,10 @@ func TestApplyConfigVaultWithNoLocalTiers(t *testing.T) {
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{{ID: vaultID, Enabled: true}},
 		Tiers: []system.TierConfig{{
-			ID:         tierID,
-			Name:       "remote-only",
-			Type:       system.TierTypeMemory,
-			VaultID:    vaultID,
+			ID:      tierID,
+			Name:    "remote-only",
+			Type:    system.TierTypeMemory,
+			VaultID: vaultID,
 		}},
 	}
 

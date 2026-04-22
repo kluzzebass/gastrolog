@@ -1,9 +1,9 @@
 package query
 
 import (
-	"gastrolog/internal/glid"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"maps"
 	"slices"
 	"strconv"
@@ -13,7 +13,6 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/querylang"
 	"gastrolog/internal/tokenizer"
-
 )
 
 // MaxGroupCardinality limits the number of distinct groups to prevent memory exhaustion.
@@ -105,8 +104,8 @@ type Aggregator struct {
 	binField string        // timestamp field for bin(); "" means WriteTS
 	binIdx   int           // index within groups where bin() appears (-1 if none)
 
-	state    map[string]*groupState
-	keyOrder []string // insertion order for deterministic output
+	state     map[string]*groupState
+	keyOrder  []string // insertion order for deterministic output
 	truncated bool
 }
 

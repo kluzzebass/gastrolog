@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"gastrolog/internal/querylang"
-
 )
 
 // vaultKey is the reserved key for vault filtering.
@@ -116,4 +115,3 @@ func extractVaultPredicates(expr querylang.Expr, vaults map[string]struct{}) que
 		return expr
 	}
 }
-

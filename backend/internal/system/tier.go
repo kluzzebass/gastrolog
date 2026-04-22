@@ -4,7 +4,6 @@ import (
 	"gastrolog/internal/glid"
 	"slices"
 	"strings"
-
 )
 
 // NodeConfig represents a cluster node configuration with its human-readable name.
@@ -24,7 +23,7 @@ type FileStorage struct {
 
 // NodeStorageConfig defines the file storages for a specific cluster node.
 type NodeStorageConfig struct {
-	NodeID string        `json:"nodeId"`
+	NodeID       string        `json:"nodeId"`
 	FileStorages []FileStorage `json:"fileStorages"`
 }
 
@@ -51,7 +50,7 @@ type CloudService struct {
 
 	// Archival lifecycle.
 	ArchivalMode      string                   `json:"archivalMode,omitempty"`      // "none" or "active"
-	Transitions       []CloudStorageTransition  `json:"transitions,omitempty"`       // ordered by After duration
+	Transitions       []CloudStorageTransition `json:"transitions,omitempty"`       // ordered by After duration
 	RestoreTier       string                   `json:"restoreTier,omitempty"`       // default restore speed
 	RestoreDays       uint32                   `json:"restoreDays,omitempty"`       // S3 restore window
 	SuspectGraceDays  uint32                   `json:"suspectGraceDays,omitempty"`  // default 7
@@ -74,8 +73,8 @@ type TierConfig struct {
 	ID                glid.GLID       `json:"id"`
 	Name              string          `json:"name"`
 	Type              TierType        `json:"type"`
-	VaultID           glid.GLID       `json:"vaultId"`             // owning vault
-	Position          uint32          `json:"position"`            // 0-based order in vault's tier chain
+	VaultID           glid.GLID       `json:"vaultId"`  // owning vault
+	Position          uint32          `json:"position"` // 0-based order in vault's tier chain
 	RotationPolicyID  *glid.GLID      `json:"rotationPolicyId,omitempty"`
 	RetentionRules    []RetentionRule `json:"retentionRules,omitempty"`
 	MemoryBudgetBytes uint64          `json:"memoryBudgetBytes,omitempty"`
@@ -84,17 +83,17 @@ type TierConfig struct {
 	ActiveChunkClass  uint32          `json:"activeChunkClass,omitempty"`
 	CacheClass        uint32          `json:"cacheClass,omitempty"`
 	Path              string          `json:"path,omitempty"`              // direct path for JSONL sinks
-	ReplicationFactor uint32 `json:"replicationFactor,omitempty"` // desired RF (1 = no replication)
-	CacheEviction string `json:"cacheEviction,omitempty"` // "lru" (default) or "ttl"
-	CacheBudget   string `json:"cacheBudget,omitempty"`   // max cache size (e.g. "1GB", "500MB", default: "1GiB")
-	CacheTTL      string `json:"cacheTtl,omitempty"`      // duration for TTL mode (e.g. "1h", "7d")
+	ReplicationFactor uint32          `json:"replicationFactor,omitempty"` // desired RF (1 = no replication)
+	CacheEviction     string          `json:"cacheEviction,omitempty"`     // "lru" (default) or "ttl"
+	CacheBudget       string          `json:"cacheBudget,omitempty"`       // max cache size (e.g. "1GB", "500MB", default: "1GiB")
+	CacheTTL          string          `json:"cacheTtl,omitempty"`          // duration for TTL mode (e.g. "1h", "7d")
 }
 
 // TierPlacement assigns one replica of a tier to a specific file storage.
 // The node is derived from the file storage's NodeStorageConfig.
 type TierPlacement struct {
-	StorageID  string `json:"storageId"`
-	Leader bool   `json:"leader"`
+	StorageID string `json:"storageId"`
+	Leader    bool   `json:"leader"`
 }
 
 // LeaderStorageID returns the storage ID of the leader placement, or empty if unplaced.

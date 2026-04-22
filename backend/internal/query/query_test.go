@@ -33,7 +33,6 @@ func search(eng *query.Engine, ctx context.Context, q query.Query) func(yield fu
 	return seq
 }
 
-
 var (
 	t0 = time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	t1 = t0.Add(1 * time.Second)

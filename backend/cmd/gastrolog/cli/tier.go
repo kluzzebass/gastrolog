@@ -1,10 +1,10 @@
 package cli
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"strconv"
 
 	"connectrpc.com/connect"

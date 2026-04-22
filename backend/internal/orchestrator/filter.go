@@ -1,15 +1,13 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"fmt"
+	"gastrolog/internal/glid"
 	"strings"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/querylang"
-
 )
-
 
 // FilterKind identifies the type of vault filter.
 type FilterKind int
@@ -262,4 +260,3 @@ func (fs *FilterSet) MatchWithNode(attrs chunk.Attributes) []MatchResult {
 
 	return result
 }
-

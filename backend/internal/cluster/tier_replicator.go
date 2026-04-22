@@ -1,9 +1,9 @@
 package cluster
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"fmt"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"sync"
 

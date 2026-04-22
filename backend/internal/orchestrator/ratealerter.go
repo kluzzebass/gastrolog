@@ -1,13 +1,12 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"fmt"
+	"gastrolog/internal/glid"
 	"sync"
 	"time"
 
 	"gastrolog/internal/alert"
-
 )
 
 // RateAlerter tracks per-tier event rates over a sliding window and raises
@@ -34,13 +33,13 @@ type RateAlerter struct {
 	// can decide whether the alert state changed.
 	active map[glid.GLID]alert.Severity
 
-	window     time.Duration
-	kind       string  // e.g. "rotation" or "retention"
-	source     string  // alert "source" field, e.g. "rotation"
-	warningAt  float64 // events/sec to raise Warning
-	errorAt    float64 // events/sec to raise Error (0 disables Error escalation)
-	alerts     AlertCollector
-	tierName   func(glid.GLID) string // best-effort human label, "" if unknown
+	window    time.Duration
+	kind      string  // e.g. "rotation" or "retention"
+	source    string  // alert "source" field, e.g. "rotation"
+	warningAt float64 // events/sec to raise Warning
+	errorAt   float64 // events/sec to raise Error (0 disables Error escalation)
+	alerts    AlertCollector
+	tierName  func(glid.GLID) string // best-effort human label, "" if unknown
 }
 
 // rateAlerterConfig bundles the constructor parameters so RateAlerter

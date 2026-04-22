@@ -1,13 +1,12 @@
 package memory
 
 import (
-	"gastrolog/internal/glid"
 	"context"
+	"gastrolog/internal/glid"
 	"testing"
 
 	"gastrolog/internal/system"
 	"gastrolog/internal/system/storetest"
-
 )
 
 func TestConformance(t *testing.T) {

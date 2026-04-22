@@ -1,13 +1,13 @@
 package server
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"io"
 	"net/http"
 	"os"
@@ -15,13 +15,11 @@ import (
 	"strings"
 	"time"
 
-	"gastrolog/internal/system"
 	"gastrolog/internal/home"
-
+	"gastrolog/internal/system"
 )
 
 const maxUploadSize = 256 << 20 // 256 MB
-
 
 // handleManagedFileUpload handles multipart file uploads for managed files.
 // The file is streamed to disk (never buffered in heap), then metadata is

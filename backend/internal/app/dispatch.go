@@ -12,7 +12,6 @@ import (
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
-	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/system"
 	"gastrolog/internal/system/raftfsm"
 )
@@ -45,8 +44,6 @@ type orchActions interface {
 	UpdateMaxConcurrentJobs(n int) error
 	MaxConcurrentJobs() int
 	FindLocalTierExported(vaultID, tierID glid.GLID) *orchestrator.TierInstance
-	StopTierLeaderLoop(tierID glid.GLID)
-	SetDesiredTierLeader(tierID glid.GLID, leaderNodeID string)
 }
 
 // ManagedFileHandler handles managed file lifecycle events from the FSM.
@@ -504,17 +501,6 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID glid.GLID) 
 	// independent of placement state.
 	d.applyTierMembershipChange(ctx, *v, tierID, leaderNodeID, followerNodeIDs)
 
-	// Update the desired tier Raft leader so TransferLeadership aligns
-	// the Raft leader with the placement leader.
-	d.orch.SetDesiredTierLeader(tierID, leaderNodeID)
-
-	// Tier Raft group membership is handled by the per-group leader loop
-	// (see raftgroup.LeaderLoop). The placement leader does not push
-	// membership changes — the tier Raft leader (whoever currently holds
-	// leadership in the group) does, from inside its leader epoch after
-	// raft.Barrier() returns. This avoids the divergence problem where the
-	// placement leader and the tier Raft leader live on different nodes.
-
 	// Reload filters so ingestion routing picks up the new placement leader
 	// immediately. Without this, records are forwarded to the old (possibly
 	// dead) node until the rotation sweep recompiles filters (up to 15s).
@@ -665,13 +651,11 @@ func (d *configDispatcher) handleTierDeleted(ctx context.Context, tierID glid.GL
 
 	// The tier config is already deleted from the store, so we can't look up
 	// VaultID. Instead, scan locally registered vaults for this tier instance.
-	var tierRaftGroupID string
 	for _, vaultID := range d.orch.ListVaults() {
 		tier := d.orch.FindLocalTierExported(vaultID, tierID)
 		if tier == nil {
 			continue // this node doesn't host the tier in this vault
 		}
-		tierRaftGroupID = raftgroup.TierMetadataGroupID(vaultID, tierID)
 
 		if drain && tier.IsLeader() {
 			// Only the config leader should drain — it owns the data.
@@ -680,7 +664,7 @@ func (d *configDispatcher) handleTierDeleted(ctx context.Context, tierID glid.GL
 					"vault", vaultID, "tier", tierID, "error", err)
 				d.orch.DeleteTierFromVault(vaultID, tierID)
 			} else {
-				// Don't destroy Raft group yet — drain needs the tier instance.
+				// Don't remove the tier instance yet — drain needs it.
 				// finishTierDrain will clean up after completion.
 				return
 			}
@@ -689,20 +673,6 @@ func (d *configDispatcher) handleTierDeleted(ctx context.Context, tierID glid.GL
 			// This path is the genuine tier-deletion case (CmdTierDeleted),
 			// so the destructive wipe is correct here.
 			d.orch.DeleteTierFromVault(vaultID, tierID)
-		}
-	}
-
-	// Stop the leader loop before destroying the group. This is especially
-	// important for non-storage nodes that joined the tier Raft group
-	// (gastrolog-292yi) but have no TierInstance — RemoveTierFromVault
-	// above is a no-op for them, so the leader loop would otherwise leak.
-	d.orch.StopTierLeaderLoop(tierID)
-
-	// Destroy legacy per-tier metadata Raft group when present. With vault
-	// control-plane metadata, this group ID is unused — ErrGroupNotFound is expected.
-	if d.factories.GroupManager != nil && tierRaftGroupID != "" {
-		if err := d.factories.GroupManager.DestroyGroup(tierRaftGroupID); err != nil && !errors.Is(err, raftgroup.ErrGroupNotFound) {
-			d.logger.Debug("dispatch: destroy tier metadata raft group", "tier", tierID, "error", err)
 		}
 	}
 }

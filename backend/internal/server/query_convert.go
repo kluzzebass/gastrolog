@@ -1,8 +1,8 @@
 package server
 
 import (
-	"gastrolog/internal/glid"
 	"fmt"
+	"gastrolog/internal/glid"
 	"maps"
 	"strconv"
 	"strings"

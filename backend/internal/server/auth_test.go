@@ -12,8 +12,8 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/auth"
-	sysmem "gastrolog/internal/system/memory"
 	"gastrolog/internal/server"
+	sysmem "gastrolog/internal/system/memory"
 )
 
 func newAuthTestClient(t *testing.T) (gastrologv1connect.AuthServiceClient, *sysmem.Store) {

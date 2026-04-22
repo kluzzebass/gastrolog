@@ -1,9 +1,9 @@
 package cli
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"fmt"
+	"gastrolog/internal/glid"
 	"strconv"
 	"time"
 

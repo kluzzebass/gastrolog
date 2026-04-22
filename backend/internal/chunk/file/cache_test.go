@@ -1,10 +1,10 @@
 package file
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,7 +14,6 @@ import (
 
 	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
-
 )
 
 // countingStore wraps a blobstore.Store and counts Download/DownloadRange calls.

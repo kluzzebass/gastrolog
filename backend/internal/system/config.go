@@ -1,14 +1,12 @@
 package system
 
 import (
-	"gastrolog/internal/glid"
 	"errors"
+	"gastrolog/internal/glid"
 	"strconv"
 	"strings"
 	"time"
-
 )
-
 
 // ServerSettings groups the server-level settings that are loaded/saved
 // atomically via LoadServerSettings / SaveServerSettings.
@@ -76,8 +74,8 @@ type Config struct {
 
 // AuthConfig holds configuration for user authentication.
 type AuthConfig struct {
-	JWTSecret            string         `json:"jwt_secret,omitempty"` //nolint:gosec // G117: config field, not a hardcoded credential
-	TokenDuration        string         `json:"token_duration,omitempty"`          // Go duration, e.g. "168h"
+	JWTSecret            string         `json:"jwt_secret,omitempty"`             //nolint:gosec // G117: config field, not a hardcoded credential
+	TokenDuration        string         `json:"token_duration,omitempty"`         // Go duration, e.g. "168h"
 	RefreshTokenDuration string         `json:"refresh_token_duration,omitempty"` // Go duration, e.g. "168h"
 	PasswordPolicy       PasswordPolicy `json:"password_policy,omitzero"`
 }
@@ -226,8 +224,8 @@ type User struct {
 	ID                 glid.GLID `json:"id"`
 	Username           string    `json:"username"`
 	PasswordHash       string    `json:"password_hash"`
-	Role               string    `json:"role"` // "admin" or "user"
-	Preferences        string    `json:"preferences,omitempty"`          // opaque JSON blob
+	Role               string    `json:"role"`                          // "admin" or "user"
+	Preferences        string    `json:"preferences,omitempty"`         // opaque JSON blob
 	TokenInvalidatedAt time.Time `json:"token_invalidated_at,omitzero"` // tokens issued before this are invalid
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
@@ -303,4 +301,3 @@ type ManagedFileConfig struct {
 	Size       int64     `json:"size"`       // file size in bytes
 	UploadedAt time.Time `json:"uploadedAt"` // upload timestamp
 }
-

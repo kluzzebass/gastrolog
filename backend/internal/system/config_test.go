@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"gastrolog/internal/chunk"
-
 )
 
 func TestParseBytesValid(t *testing.T) {

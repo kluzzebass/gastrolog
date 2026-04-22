@@ -1,9 +1,9 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
+	"gastrolog/internal/glid"
 	"sync"
 	"testing"
 	"time"
@@ -11,7 +11,6 @@ import (
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/system"
-
 )
 
 // mockForwarder records Forward() and ForwardSync() calls for testing,
@@ -82,7 +81,10 @@ type mockSystemLoader struct {
 }
 
 func (m *mockSystemLoader) Load(_ context.Context) (*system.System, error) {
-	if m.cfg == nil { return nil, nil }; return &system.System{Config: *m.cfg}, nil
+	if m.cfg == nil {
+		return nil, nil
+	}
+	return &system.System{Config: *m.cfg}, nil
 }
 
 func TestIngestForwardsToRemoteVault(t *testing.T) {
@@ -198,21 +200,31 @@ type noopChunkManager struct{}
 func (n *noopChunkManager) Append(chunk.Record) (chunk.ChunkID, uint64, error) {
 	return chunk.ChunkID{}, 0, nil
 }
-func (n *noopChunkManager) Seal() error                                                        { return nil }
-func (n *noopChunkManager) Active() *chunk.ChunkMeta                                           { return &chunk.ChunkMeta{} }
-func (n *noopChunkManager) Meta(chunk.ChunkID) (chunk.ChunkMeta, error)                        { return chunk.ChunkMeta{}, nil }
-func (n *noopChunkManager) List() ([]chunk.ChunkMeta, error)                                   { return nil, nil }
-func (n *noopChunkManager) Delete(chunk.ChunkID) error                                         { return nil }
-func (n *noopChunkManager) OpenCursor(chunk.ChunkID) (chunk.RecordCursor, error)               { return nil, nil }
-func (n *noopChunkManager) FindStartPosition(chunk.ChunkID, time.Time) (uint64, bool, error)        { return 0, false, nil }
-func (n *noopChunkManager) FindIngestStartPosition(chunk.ChunkID, time.Time) (uint64, bool, error) { return 0, false, nil }
-func (n *noopChunkManager) FindSourceStartPosition(chunk.ChunkID, time.Time) (uint64, bool, error) { return 0, false, nil }
-func (n *noopChunkManager) ReadWriteTimestamps(chunk.ChunkID, []uint64) ([]time.Time, error)       { return nil, nil }
+func (n *noopChunkManager) Seal() error              { return nil }
+func (n *noopChunkManager) Active() *chunk.ChunkMeta { return &chunk.ChunkMeta{} }
+func (n *noopChunkManager) Meta(chunk.ChunkID) (chunk.ChunkMeta, error) {
+	return chunk.ChunkMeta{}, nil
+}
+func (n *noopChunkManager) List() ([]chunk.ChunkMeta, error)                     { return nil, nil }
+func (n *noopChunkManager) Delete(chunk.ChunkID) error                           { return nil }
+func (n *noopChunkManager) OpenCursor(chunk.ChunkID) (chunk.RecordCursor, error) { return nil, nil }
+func (n *noopChunkManager) FindStartPosition(chunk.ChunkID, time.Time) (uint64, bool, error) {
+	return 0, false, nil
+}
+func (n *noopChunkManager) FindIngestStartPosition(chunk.ChunkID, time.Time) (uint64, bool, error) {
+	return 0, false, nil
+}
+func (n *noopChunkManager) FindSourceStartPosition(chunk.ChunkID, time.Time) (uint64, bool, error) {
+	return 0, false, nil
+}
+func (n *noopChunkManager) ReadWriteTimestamps(chunk.ChunkID, []uint64) ([]time.Time, error) {
+	return nil, nil
+}
 func (n *noopChunkManager) SetRotationPolicy(chunk.RotationPolicy) {
 	// No-op: forward_test.go uses noopChunkManager as a stand-in for
 	// routing tests that never exercise the rotation policy surface.
 }
-func (n *noopChunkManager) CheckRotation() *string                                             { return nil }
+func (n *noopChunkManager) CheckRotation() *string { return nil }
 func (n *noopChunkManager) ImportRecords(chunk.ChunkID, chunk.RecordIterator) (chunk.ChunkMeta, error) {
 	return chunk.ChunkMeta{}, nil
 }
@@ -223,7 +235,7 @@ func (n *noopChunkManager) SetNextChunkID(_ chunk.ChunkID) {
 	// No-op: routing tests don't replicate chunks, so SetNextChunkID
 	// is never observed.
 }
-func (n *noopChunkManager) Close() error                   { return nil }
+func (n *noopChunkManager) Close() error { return nil }
 
 // --- gastrolog-27zvt: ack-gated cross-node forwarding ---
 
@@ -403,4 +415,3 @@ func TestAckGatedForwardPropagatesError(t *testing.T) {
 		t.Fatal("ack did not fire")
 	}
 }
-

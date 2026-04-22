@@ -210,12 +210,7 @@ type Orchestrator struct {
 	// expires. Prevents log spam when a follower is down.
 	replicaCircuit sync.Map // nodeID (string) → *replicaBackoff
 
-	// nodeAddrResolver maps node IDs to Raft addresses. Set from factories
-	// during ApplyConfig. Used by SetDesiredTierLeader to resolve the
-	// placement leader's Raft address for TransferLeadership.
-	nodeAddrResolver func(nodeID string) (string, bool)
-
-	// groupMgr is the shared multi-group Raft manager (tier + vault control-plane).
+	// groupMgr is the shared multi-group Raft manager (system, vault ctl, …).
 	// Set from factories during ApplyConfig; used to tear down vault ctl groups.
 	groupMgr *raftgroup.GroupManager
 
@@ -296,16 +291,9 @@ type Orchestrator struct {
 	// Suspect tracker for cloud chunks that returned 404.
 	suspects *suspectTracker
 
-	// Per-tier leader loop manager. Each tier Raft group gets a leader
-	// loop whose OnLead callback reconciles membership against the
-	// orchestrator's view of the desired member list. Membership
-	// reconciliation runs ONLY on the tier Raft leader, from inside the
-	// leader epoch (after raft.Barrier returns).
-	tierLeaders *tierLeaderManager
-
-	// Per-vault leader loop for vault control-plane Raft (tier metadata when
-	// multiraft is enabled). Same implementation shape as tierLeaders but
-	// keyed by vault ID.
+	// Per-vault leader loop for vault control-plane Raft (replicated tier
+	// chunk metadata when multiraft is enabled). Membership reconciliation
+	// runs on the vault ctl Raft leader inside its leader epoch.
 	vaultCtlLeaders *tierLeaderManager
 
 	// Shutdown phase (nil in tests / single-node setups without a
@@ -481,7 +469,6 @@ func New(cfg Config) (*Orchestrator, error) {
 		alerts:               cfg.Alerts,
 		suspects:             newSuspectTracker(),
 		chunkSignal:          notify.NewSignal(),
-		tierLeaders:          newTierLeaderManager(logger),
 		vaultCtlLeaders:      newVaultCtlLeaderManager(logger),
 		phase:                cfg.Phase,
 		onIngesterAlive:      cfg.OnIngesterAlive,

@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	pahov3 "github.com/eclipse/paho.mqtt.golang"
 	"github.com/eclipse/paho.golang/autopaho"
 	"github.com/eclipse/paho.golang/paho"
+	pahov3 "github.com/eclipse/paho.mqtt.golang"
 )
 
 // TestConnection creates a temporary MQTT client, connects to the broker,

@@ -1,16 +1,15 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"strings"
 	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/cluster"
-
 )
 
 // ScheduleCatchupForTier finds the vault containing the given tier and

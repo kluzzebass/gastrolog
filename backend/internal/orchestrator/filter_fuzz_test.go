@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"gastrolog/internal/chunk"
-
 )
 
 func FuzzCompileFilter(f *testing.F) {

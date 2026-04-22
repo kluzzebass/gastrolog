@@ -229,4 +229,3 @@ func TestLeaderLoop_ShutdownDuringEpoch(t *testing.T) {
 		t.Fatal("loop did not exit within 5s of cancel")
 	}
 }
-

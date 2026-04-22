@@ -1,21 +1,20 @@
 package orchestrator_test
 
 import (
-	"gastrolog/internal/glid"
 	"context"
+	"gastrolog/internal/glid"
 	"slices"
 	"testing"
 	"time"
 
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
-	"gastrolog/internal/system"
 	"gastrolog/internal/index"
 	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/memtest"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
-
+	"gastrolog/internal/system"
 )
 
 // fakeSystemLoader implements orchestrator.SystemLoader for tests.
@@ -24,7 +23,10 @@ type fakeSystemLoader struct {
 }
 
 func (f *fakeSystemLoader) Load(_ context.Context) (*system.System, error) {
-	if f.cfg == nil { return nil, nil }; return &system.System{Config: *f.cfg}, nil
+	if f.cfg == nil {
+		return nil, nil
+	}
+	return &system.System{Config: *f.cfg}, nil
 }
 
 // memVaultCfg creates a VaultConfig + TierConfig pair for a memory-backed vault.

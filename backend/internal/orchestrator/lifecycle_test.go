@@ -1,18 +1,17 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
+	"gastrolog/internal/glid"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
-	"gastrolog/internal/system"
 	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/query"
-
+	"gastrolog/internal/system"
 )
 
 // slowAckReplicator delays AppendRecords so the ack goroutine is still
@@ -54,11 +53,11 @@ func TestStopWaitsForAckGoroutines(t *testing.T) {
 	im := indexmem.NewManager(nil, nil, nil, nil, nil)
 	qe := query.New(cm, im, nil)
 	tier := &TierInstance{
-		TierID:           tierID,
-		Type:             "memory",
-		Chunks:           cm,
-		Indexes:          im,
-		Query:            qe,
+		TierID:          tierID,
+		Type:            "memory",
+		Chunks:          cm,
+		Indexes:         im,
+		Query:           qe,
 		FollowerTargets: []system.ReplicationTarget{{NodeID: "node-2"}},
 	}
 	vault := NewVault(vaultID, tier)

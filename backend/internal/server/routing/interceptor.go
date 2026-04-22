@@ -17,6 +17,7 @@ import (
 //   - Explicit targeting: honor routing.WithTargetNode(ctx, nodeID).
 //   - Already forwarded: execute locally (loop prevention).
 //   - Everything else (RouteLocal, RouteLeader, RouteFanOut): pass through.
+//
 // UnaryForwarder sends serialized requests to remote nodes.
 type UnaryForwarder interface {
 	ForwardUnary(ctx context.Context, nodeID, procedure string, reqPayload []byte) ([]byte, error)
@@ -157,7 +158,7 @@ func (ri *RoutingInterceptor) forwardUnary(ctx context.Context, target, procedur
 	respPayload, fwdErr := ri.forwarder.ForwardUnary(ctx, target, procedure, payload)
 	if fwdErr != nil {
 		var re *RemoteError
-	if errors.As(fwdErr, &re) {
+		if errors.As(fwdErr, &re) {
 			return nil, connect.NewError(connect.Code(re.Code), fmt.Errorf("%s", re.Message))
 		}
 		return nil, connect.NewError(connect.CodeUnavailable, fwdErr)

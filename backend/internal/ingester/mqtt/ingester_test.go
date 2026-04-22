@@ -3,7 +3,6 @@ package mqtt
 import (
 	"gastrolog/internal/glid"
 	"testing"
-
 )
 
 func TestFactory_RequiredParams(t *testing.T) {
@@ -96,7 +95,6 @@ func TestFactory_VersionValidation(t *testing.T) {
 		}
 	}
 }
-
 
 func TestFactory_TopicSplitting(t *testing.T) {
 	t.Parallel()

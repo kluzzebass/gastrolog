@@ -7,7 +7,7 @@
 #
 # Commands:
 #   init    Bootstrap a fresh cluster (clean, enroll, configure, run)
-#   run     Start an existing cluster via multirun
+#   run     Start an existing cluster via imux TUI (https://github.com/kluzzebass/imux)
 #
 # Options (or environment variables):
 #   --nodes N          Number of nodes (min 1, default: GLOG_NODES or 4)
@@ -57,15 +57,14 @@ fi
 # --- Helpers ---
 
 GLOG="go run ./cmd/gastrolog"
-MULTIRUN="go run ./cmd/multirun"
 
 http_port()    { echo $((BASE_PORT + ($1 - 1) * 10)); }
 cluster_port() { echo $((BASE_PORT + ($1 - 1) * 10 + 2)); }
 node_dir()     { echo "${DATA_DIR}/node${1}"; }
 node_sock()    { echo "${DATA_DIR}/node${1}/gastrolog.sock"; }
 
-# Build the multirun command for running all nodes (no join flags).
-build_multirun_cmd() {
+# Build the imux command for running all nodes (no join flags).
+build_imux_cmd() {
   local names=""
   local cmds=()
   for i in $(seq 1 "$NODES"); do
@@ -77,7 +76,8 @@ build_multirun_cmd() {
     fi
     cmds+=("$GLOG server --home $(node_dir "$i") --listen :$(http_port "$i") --cluster-addr :$(cluster_port "$i")${extra}")
   done
-  echo "$MULTIRUN --no-fail-fast --name ${names} --tee ${DATA_DIR}/cluster.log $(printf ' "%s"' "${cmds[@]}")"
+  # TUI: plain `imux` (flags + commands). `imux run` is non-interactive batch mode.
+  echo "imux --name ${names} --tee ${DATA_DIR}/cluster.log $(printf ' "%s"' "${cmds[@]}")"
 }
 
 # --- Init: enroll nodes ---
@@ -265,7 +265,9 @@ case "$COMMAND" in
     echo "    Run with: $0 run --nodes ${NODES} --data-dir ${DATA_DIR}"
     ;;
   run)
-    eval "$(build_multirun_cmd)"
+    # imux --tee appends. Fresh log each run (truncate) keeps one run per file.
+    rm -f "${DATA_DIR}/cluster.log"
+    eval "$(build_imux_cmd)"
     ;;
   *)
     echo "Unknown command: $COMMAND" >&2

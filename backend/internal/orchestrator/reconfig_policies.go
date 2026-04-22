@@ -1,11 +1,10 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
+	"gastrolog/internal/glid"
 
 	"gastrolog/internal/system"
-
 )
 
 // findRotationPolicy finds a RotationPolicyConfig by ID in a slice.

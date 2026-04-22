@@ -1,10 +1,9 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"fmt"
-
+	"gastrolog/internal/glid"
 )
 
 // AddIngester adds and starts a new ingester. If an ingester with the same ID

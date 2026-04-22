@@ -1,16 +1,15 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"sync"
 	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/system"
-
 )
 
 const (

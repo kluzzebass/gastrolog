@@ -1,16 +1,15 @@
 package file
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
+	"gastrolog/internal/glid"
 	"io"
 	"testing"
 	"time"
 
 	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
-
 )
 
 // blockingStore is a blobstore.Store whose Upload method blocks until the

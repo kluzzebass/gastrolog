@@ -1,9 +1,8 @@
 package query
 
 import (
-	"gastrolog/internal/glid"
 	"gastrolog/internal/chunk"
-
+	"gastrolog/internal/glid"
 )
 
 // cursorEntry represents a cursor with its current record in the merge heap.
@@ -47,9 +46,9 @@ func newTSHeap(orderBy OrderBy, reverse bool, capacity int) *tsHeap {
 	}
 }
 
-func (h *tsHeap) Len() int            { return len(h.entries) }
-func (h *tsHeap) Less(i, j int) bool   { return h.less(h.entries[i], h.entries[j]) }
-func (h *tsHeap) Swap(i, j int)        { h.entries[i], h.entries[j] = h.entries[j], h.entries[i] }
+func (h *tsHeap) Len() int           { return len(h.entries) }
+func (h *tsHeap) Less(i, j int) bool { return h.less(h.entries[i], h.entries[j]) }
+func (h *tsHeap) Swap(i, j int)      { h.entries[i], h.entries[j] = h.entries[j], h.entries[i] }
 
 func (h *tsHeap) Push(x any) {
 	h.entries = append(h.entries, x.(*cursorEntry))

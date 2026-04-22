@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"strings"
 
-
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
 )

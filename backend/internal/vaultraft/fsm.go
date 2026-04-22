@@ -1,6 +1,6 @@
 // Package vaultraft holds the vault control-plane Raft FSM (gastrolog-5xxbd).
-// Tier chunk metadata is namespaced under OpTierFSM (per-tier sub-FSMs) so
-// per-tier Raft groups can be retired without changing the tierfsm wire encoding.
+// Tier chunk metadata is namespaced under OpTierFSM (per-tier sub-FSMs) on that
+// same Raft group, without changing the tierfsm wire encoding.
 package vaultraft
 
 import (

@@ -1,14 +1,13 @@
 package scatterbox
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"encoding/json"
+	"gastrolog/internal/glid"
 	"testing"
 	"time"
 
 	"gastrolog/internal/orchestrator"
-
 )
 
 func TestEmitsSequentialRecords(t *testing.T) {

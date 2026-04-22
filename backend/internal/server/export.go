@@ -1,10 +1,10 @@
 package server
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"maps"
 	"slices"
@@ -15,10 +15,10 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/system"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
 	"gastrolog/internal/querylang"
+	"gastrolog/internal/system"
 )
 
 // ExportToVault materializes search results into a target vault as a

@@ -1,11 +1,10 @@
 package self
 
 import (
-	"gastrolog/internal/glid"
 	"bytes"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"testing"
-
 
 	"gastrolog/internal/logging"
 )

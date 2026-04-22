@@ -1,8 +1,8 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"fmt"
+	"gastrolog/internal/glid"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -10,7 +10,6 @@ import (
 
 	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
-
 )
 
 // mockCloudChunkManager is a minimal ChunkManager that also implements

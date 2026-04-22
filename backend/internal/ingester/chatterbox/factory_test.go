@@ -3,7 +3,6 @@ package chatterbox
 import (
 	"gastrolog/internal/glid"
 	"testing"
-
 )
 
 func TestNewIngesterDefaults(t *testing.T) {

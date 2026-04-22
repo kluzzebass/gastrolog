@@ -1,8 +1,8 @@
 package orchestrator_test
 
 import (
-	"gastrolog/internal/glid"
 	"context"
+	"gastrolog/internal/glid"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -10,7 +10,6 @@ import (
 
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/orchestrator"
-
 )
 
 // pressureAwareIngester is a test ingester that implements

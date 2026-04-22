@@ -44,20 +44,8 @@ type tierLeaderManager struct {
 	logger        *slog.Logger
 }
 
-func newTierLeaderManager(logger *slog.Logger) *tierLeaderManager {
-	ctx, cancel := context.WithCancel(context.Background())
-	return &tierLeaderManager{
-		epochs:        make(map[glid.GLID]context.CancelFunc),
-		desired:       newTierMembershipMap(),
-		desiredLeader: newTierDesiredLeaderMap(),
-		rootCtx:       ctx,
-		rootCxl:       cancel,
-		logger:        logger.With("component", "tier-leader-manager"),
-	}
-}
-
-// newVaultCtlLeaderManager is like newTierLeaderManager but keys epochs and
-// desired membership by vault ID for vault control-plane Raft groups.
+// newVaultCtlLeaderManager supervises per-vault control-plane Raft leader epochs
+// (membership reconcile + optional leadership transfer).
 func newVaultCtlLeaderManager(logger *slog.Logger) *tierLeaderManager {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &tierLeaderManager{

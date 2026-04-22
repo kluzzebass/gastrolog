@@ -12,10 +12,10 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/cluster"
-	"gastrolog/internal/system"
-	"gastrolog/internal/notify"
 	"gastrolog/internal/logging"
+	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/system"
 )
 
 // Version is set at build time.
@@ -36,23 +36,23 @@ type NodeStatsProvider interface {
 
 // LifecycleServer implements the LifecycleService.
 type LifecycleServer struct {
-	orch           *orchestrator.Orchestrator
-	startTime      time.Time
-	shutdown       func(drain bool)
-	cluster        ClusterStatusProvider
-	cfgStore       system.Store
-	nodeID         string
-	clusterAddress string
-	peerStats      NodeStatsProvider
-	localStats     func() *apiv1.NodeStats
-	joinClusterFn  func(ctx context.Context, leaderAddr, joinToken string) error
-	removeNodeFn        func(ctx context.Context, nodeID string) error
-	setNodeSuffrageFn   func(ctx context.Context, nodeID string, voter bool) error
-	statsSignal         *notify.Signal // fired by stats collector on each broadcast tick
-	peerRouteStats      PeerRouteStatsProvider // for aggregating route stats across cluster
-	listVaultsFn        func(ctx context.Context) []*apiv1.VaultInfo
-	getStatsFn          func(ctx context.Context) *apiv1.GetStatsResponse
-	logger              *slog.Logger
+	orch              *orchestrator.Orchestrator
+	startTime         time.Time
+	shutdown          func(drain bool)
+	cluster           ClusterStatusProvider
+	cfgStore          system.Store
+	nodeID            string
+	clusterAddress    string
+	peerStats         NodeStatsProvider
+	localStats        func() *apiv1.NodeStats
+	joinClusterFn     func(ctx context.Context, leaderAddr, joinToken string) error
+	removeNodeFn      func(ctx context.Context, nodeID string) error
+	setNodeSuffrageFn func(ctx context.Context, nodeID string, voter bool) error
+	statsSignal       *notify.Signal         // fired by stats collector on each broadcast tick
+	peerRouteStats    PeerRouteStatsProvider // for aggregating route stats across cluster
+	listVaultsFn      func(ctx context.Context) []*apiv1.VaultInfo
+	getStatsFn        func(ctx context.Context) *apiv1.GetStatsResponse
+	logger            *slog.Logger
 }
 
 var _ gastrologv1connect.LifecycleServiceHandler = (*LifecycleServer)(nil)

@@ -1,10 +1,10 @@
 package server_test
 
 import (
-	"gastrolog/internal/glid"
 	"bytes"
 	"context"
 	"fmt"
+	"gastrolog/internal/glid"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,13 +17,13 @@ import (
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
-	"gastrolog/internal/system"
 	"gastrolog/internal/convert"
-	sysmem "gastrolog/internal/system/memory"
 	"gastrolog/internal/memtest"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
 	"gastrolog/internal/server"
+	"gastrolog/internal/system"
+	sysmem "gastrolog/internal/system/memory"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -44,25 +44,25 @@ import (
 type multinodeTestNode struct {
 	nodeID  string
 	orch    *orchestrator.Orchestrator
-	vaultID glid.GLID    // zero if no vault
+	vaultID glid.GLID     // zero if no vault
 	vault   memtest.Vault // zero value if no vault
 }
 
 // multiNodeHarness holds the cluster of test nodes and the coordinator's
 // server + clients.
 type multiNodeHarness struct {
-	coordinator        string // nodeID of the coordinator
-	nodes              map[string]multinodeTestNode
-	cfgStore           system.Store
-	srv                *server.Server
-	client             gastrologv1connect.QueryServiceClient
-	vaultClient        gastrologv1connect.VaultServiceClient
-	configClient       gastrologv1connect.SystemServiceClient
-	jobSrv             gastrologv1connect.JobServiceClient
-	peerJobs           *mnPeerJobs
-	peerRouteStats     *mnPeerRouteStats
-	peerIngesterStats  *mnPeerIngesterStats
-	peerVaultStats     *mnPeerVaultStats
+	coordinator       string // nodeID of the coordinator
+	nodes             map[string]multinodeTestNode
+	cfgStore          system.Store
+	srv               *server.Server
+	client            gastrologv1connect.QueryServiceClient
+	vaultClient       gastrologv1connect.VaultServiceClient
+	configClient      gastrologv1connect.SystemServiceClient
+	jobSrv            gastrologv1connect.JobServiceClient
+	peerJobs          *mnPeerJobs
+	peerRouteStats    *mnPeerRouteStats
+	peerIngesterStats *mnPeerIngesterStats
+	peerVaultStats    *mnPeerVaultStats
 }
 
 // Node returns the test node by ID, fataling if not found.
@@ -129,9 +129,9 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 			// Create a tier assigned to this node (test-only manual assignment; production uses placement manager).
 			tierID := glid.New()
 			_ = cfgStore.PutTier(ctx, system.TierConfig{
-				ID:   tierID,
-				Name: "tier-" + id,
-				Type: system.TierTypeMemory,
+				ID:      tierID,
+				Name:    "tier-" + id,
+				Type:    system.TierTypeMemory,
 				VaultID: node.vaultID, Position: 0,
 			})
 			_ = cfgStore.SetTierPlacements(ctx, tierID, []system.TierPlacement{

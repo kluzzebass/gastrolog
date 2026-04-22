@@ -1,9 +1,9 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"testing"
 	"time"
@@ -13,11 +13,10 @@ import (
 
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
-	"gastrolog/internal/system"
-	sysmem "gastrolog/internal/system/memory"
 	indexfile "gastrolog/internal/index/file"
 	"gastrolog/internal/query"
-
+	"gastrolog/internal/system"
+	sysmem "gastrolog/internal/system/memory"
 )
 
 // ejectSystemLoader implements SystemLoader for eject tests.
@@ -26,7 +25,10 @@ type ejectSystemLoader struct {
 }
 
 func (f *ejectSystemLoader) Load(_ context.Context) (*system.System, error) {
-	if f.cfg == nil { return nil, nil }; return &system.System{Config: *f.cfg}, nil
+	if f.cfg == nil {
+		return nil, nil
+	}
+	return &system.System{Config: *f.cfg}, nil
 }
 
 // ---------- fake cursor ----------
@@ -234,12 +236,12 @@ func TestEjectChunkLocalDelivery(t *testing.T) {
 
 	r := &retentionRunner{
 		isLeader: true,
-		vaultID: srcVaultID,
-		cm:      cm,
-		im:      &retentionFakeIndexManager{},
-		orch:    orch,
-		now:     time.Now,
-		logger:  slog.Default(),
+		vaultID:  srcVaultID,
+		cm:       cm,
+		im:       &retentionFakeIndexManager{},
+		orch:     orch,
+		now:      time.Now,
+		logger:   slog.Default(),
 	}
 
 	r.ejectChunk(chunkID, []glid.GLID{routeID})
@@ -294,12 +296,12 @@ func TestEjectChunkDeliveryToSeparateVault(t *testing.T) {
 
 	r := &retentionRunner{
 		isLeader: true,
-		vaultID: srcVaultID,
-		cm:      cm,
-		im:      &retentionFakeIndexManager{},
-		orch:    orch,
-		now:     time.Now,
-		logger:  slog.Default(),
+		vaultID:  srcVaultID,
+		cm:       cm,
+		im:       &retentionFakeIndexManager{},
+		orch:     orch,
+		now:      time.Now,
+		logger:   slog.Default(),
 	}
 
 	r.ejectChunk(chunkID, []glid.GLID{routeID})
@@ -365,12 +367,12 @@ func TestEjectChunkFilterMatching(t *testing.T) {
 
 	r := &retentionRunner{
 		isLeader: true,
-		vaultID: srcVaultID,
-		cm:      cm,
-		im:      &retentionFakeIndexManager{},
-		orch:    orch,
-		now:     time.Now,
-		logger:  slog.Default(),
+		vaultID:  srcVaultID,
+		cm:       cm,
+		im:       &retentionFakeIndexManager{},
+		orch:     orch,
+		now:      time.Now,
+		logger:   slog.Default(),
 	}
 
 	r.ejectChunk(chunkID, []glid.GLID{routeID})
@@ -441,12 +443,12 @@ func TestEjectChunkMultiRoutesFanOut(t *testing.T) {
 
 	r := &retentionRunner{
 		isLeader: true,
-		vaultID: srcVaultID,
-		cm:      cm,
-		im:      &retentionFakeIndexManager{},
-		orch:    orch,
-		now:     time.Now,
-		logger:  slog.Default(),
+		vaultID:  srcVaultID,
+		cm:       cm,
+		im:       &retentionFakeIndexManager{},
+		orch:     orch,
+		now:      time.Now,
+		logger:   slog.Default(),
 	}
 
 	r.ejectChunk(chunkID, []glid.GLID{routeA, routeB})
@@ -504,12 +506,12 @@ func TestEjectChunkAbortOnRemoteFailure(t *testing.T) {
 
 	r := &retentionRunner{
 		isLeader: true,
-		vaultID: srcVaultID,
-		cm:      cm,
-		im:      &retentionFakeIndexManager{},
-		orch:    orch,
-		now:     time.Now,
-		logger:  slog.Default(),
+		vaultID:  srcVaultID,
+		cm:       cm,
+		im:       &retentionFakeIndexManager{},
+		orch:     orch,
+		now:      time.Now,
+		logger:   slog.Default(),
 	}
 
 	r.ejectChunk(chunkID, []glid.GLID{routeID})
@@ -560,12 +562,12 @@ func TestEjectChunkDisabledRouteSkipped(t *testing.T) {
 
 	r := &retentionRunner{
 		isLeader: true,
-		vaultID: srcVaultID,
-		cm:      cm,
-		im:      &retentionFakeIndexManager{},
-		orch:    orch,
-		now:     time.Now,
-		logger:  slog.Default(),
+		vaultID:  srcVaultID,
+		cm:       cm,
+		im:       &retentionFakeIndexManager{},
+		orch:     orch,
+		now:      time.Now,
+		logger:   slog.Default(),
 	}
 
 	r.ejectChunk(chunkID, []glid.GLID{routeID})
@@ -616,12 +618,12 @@ func TestEjectChunkNoFilter(t *testing.T) {
 
 	r := &retentionRunner{
 		isLeader: true,
-		vaultID: srcVaultID,
-		cm:      cm,
-		im:      &retentionFakeIndexManager{},
-		orch:    orch,
-		now:     time.Now,
-		logger:  slog.Default(),
+		vaultID:  srcVaultID,
+		cm:       cm,
+		im:       &retentionFakeIndexManager{},
+		orch:     orch,
+		now:      time.Now,
+		logger:   slog.Default(),
 	}
 
 	r.ejectChunk(chunkID, []glid.GLID{routeID})
@@ -692,12 +694,12 @@ func TestEjectChunkSweepIntegration(t *testing.T) {
 	}
 	r := &retentionRunner{
 		isLeader: true,
-		vaultID: srcVaultID,
-		cm:      cm,
-		im:      &retentionFakeIndexManager{},
-		orch:    orch,
-		now:     time.Now,
-		logger:  slog.Default(),
+		vaultID:  srcVaultID,
+		cm:       cm,
+		im:       &retentionFakeIndexManager{},
+		orch:     orch,
+		now:      time.Now,
+		logger:   slog.Default(),
 	}
 
 	r.sweep(rules)
@@ -848,14 +850,14 @@ func TestEjectChunkFileBackedLocalDelivery(t *testing.T) {
 
 	// Eject each sealed chunk.
 	runner := &retentionRunner{
-		isLeader:        true,
-		vaultID:         srcVaultID,
-		tierID:          srcTierID,
-		cm:              srcCM,
-		im:              srcIM,
-		orch:            orch,
-		now:             time.Now,
-		logger:          slog.Default(),
+		isLeader: true,
+		vaultID:  srcVaultID,
+		tierID:   srcTierID,
+		cm:       srcCM,
+		im:       srcIM,
+		orch:     orch,
+		now:      time.Now,
+		logger:   slog.Default(),
 	}
 	for _, m := range metas {
 		runner.ejectChunk(m.ID, []glid.GLID{routeID})

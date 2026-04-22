@@ -1,10 +1,9 @@
 package system
 
 import (
-	"gastrolog/internal/glid"
 	"cmp"
+	"gastrolog/internal/glid"
 	"slices"
-
 )
 
 // VaultConfig describes a storage backend to instantiate.

@@ -82,4 +82,3 @@ func (r *JSONIndexReader) LookupPathValue(path, value string) ([]uint64, bool) {
 func (r *JSONIndexReader) PVStatus() JSONIndexStatus {
 	return r.pvStatus
 }
-

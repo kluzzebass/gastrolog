@@ -1,8 +1,8 @@
 package file
 
 import (
-	"gastrolog/internal/glid"
 	"context"
+	"gastrolog/internal/glid"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,7 +13,6 @@ import (
 	"gastrolog/internal/index"
 	indexfile "gastrolog/internal/index/file"
 	filetoken "gastrolog/internal/index/file/token"
-
 )
 
 // newCloudManagerWithIndexes creates a file-based chunk manager with a cloud

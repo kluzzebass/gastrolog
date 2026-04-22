@@ -1,11 +1,10 @@
 package metrics
 
 import (
-	"gastrolog/internal/glid"
 	"fmt"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"time"
-
 
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"

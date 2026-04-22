@@ -12,8 +12,8 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/auth"
-	sysmem "gastrolog/internal/system/memory"
 	"gastrolog/internal/server"
+	sysmem "gastrolog/internal/system/memory"
 )
 
 // TestIntegration_RegisterThenDenyQuery registers a user via the Register RPC,

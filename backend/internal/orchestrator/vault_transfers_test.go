@@ -1,20 +1,19 @@
 package orchestrator_test
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
+	"gastrolog/internal/glid"
 	"testing"
 	"time"
-
 
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
 	"gastrolog/internal/chunk/memory"
-	"gastrolog/internal/system"
 	indexfile "gastrolog/internal/index/file"
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/system"
 )
 
 // sliceIterator adapts a []chunk.Record into a chunk.RecordIterator.
@@ -33,7 +32,7 @@ func sliceIterator(records []chunk.Record) chunk.RecordIterator {
 // mockTransferrer records calls to TransferRecords.
 type mockTransferrer struct {
 	calls   []transferCall
-	failErr error        // if set, TransferRecords returns this error
+	failErr error         // if set, TransferRecords returns this error
 	gate    chan struct{} // if non-nil, TransferRecords blocks until closed
 }
 
@@ -96,7 +95,10 @@ type staticSystemLoader struct {
 }
 
 func (f *staticSystemLoader) Load(_ context.Context) (*system.System, error) {
-	if f.cfg == nil { return nil, nil }; return &system.System{Config: *f.cfg}, nil
+	if f.cfg == nil {
+		return nil, nil
+	}
+	return &system.System{Config: *f.cfg}, nil
 }
 
 func newFileVault(t *testing.T) (chunk.ChunkManager, *indexfile.Manager) {
@@ -697,4 +699,3 @@ func TestDrainVault_NoTransferrer(t *testing.T) {
 func (m *mockTransferrer) StreamToTier(_ context.Context, _ string, _, _ glid.GLID, _ chunk.RecordIterator) error {
 	return nil
 }
-

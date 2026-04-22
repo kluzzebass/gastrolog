@@ -34,7 +34,6 @@ type exportDoc struct {
 	TLS                  *tlsExport       `json:"tls,omitempty"`
 	MaxMind              *maxmindExport   `json:"maxmind,omitempty"`
 	SetupWizardDismissed bool             `json:"setup_wizard_dismissed,omitempty"`
-
 }
 
 type certExport struct {

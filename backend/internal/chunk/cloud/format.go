@@ -62,7 +62,6 @@ import (
 	"gastrolog/internal/glid"
 	"time"
 
-
 	"gastrolog/internal/chunk"
 )
 
@@ -114,7 +113,7 @@ type BlobMeta struct {
 	ChunkID     chunk.ChunkID
 	VaultID     glid.GLID
 	RecordCount uint32
-	RawBytes    int64     // uncompressed record data size (0 if unknown)
+	RawBytes    int64 // uncompressed record data size (0 if unknown)
 	WriteStart  time.Time
 	WriteEnd    time.Time
 	IngestStart time.Time

@@ -1,12 +1,11 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"fmt"
+	"gastrolog/internal/glid"
 	"log/slog"
 
 	"gastrolog/internal/chunk"
-
 )
 
 // cronJobName returns the scheduler job name for a tier's cron rotation.

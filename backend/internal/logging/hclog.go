@@ -87,7 +87,9 @@ func (h *HclogAdapter) Error(msg string, args ...any) {
 	h.log(slog.LevelError, msg, args...)
 }
 
-func (h *HclogAdapter) IsTrace() bool { return h.logger.Enabled(context.Background(), slog.LevelDebug-4) }
+func (h *HclogAdapter) IsTrace() bool {
+	return h.logger.Enabled(context.Background(), slog.LevelDebug-4)
+}
 func (h *HclogAdapter) IsDebug() bool { return h.logger.Enabled(context.Background(), slog.LevelDebug) }
 func (h *HclogAdapter) IsInfo() bool  { return h.logger.Enabled(context.Background(), slog.LevelInfo) }
 func (h *HclogAdapter) IsWarn() bool  { return h.logger.Enabled(context.Background(), slog.LevelWarn) }
@@ -196,17 +198,21 @@ func (f *filteringHclog) Error(msg string, args ...any) {
 	}
 }
 
-func (f *filteringHclog) IsTrace() bool                          { return f.base.IsTrace() }
-func (f *filteringHclog) IsDebug() bool                          { return f.base.IsDebug() }
-func (f *filteringHclog) IsInfo() bool                           { return f.base.IsInfo() }
-func (f *filteringHclog) IsWarn() bool                           { return f.base.IsWarn() }
-func (f *filteringHclog) IsError() bool                          { return f.base.IsError() }
-func (f *filteringHclog) ImpliedArgs() []any             { return f.base.ImpliedArgs() }
-func (f *filteringHclog) Name() string                           { return f.base.Name() }
-func (f *filteringHclog) SetLevel(level hclog.Level)             { f.base.SetLevel(level) }
-func (f *filteringHclog) GetLevel() hclog.Level                  { return f.base.GetLevel() }
-func (f *filteringHclog) StandardLogger(o *hclog.StandardLoggerOptions) *log.Logger { return f.base.StandardLogger(o) }
-func (f *filteringHclog) StandardWriter(o *hclog.StandardLoggerOptions) io.Writer   { return f.base.StandardWriter(o) }
+func (f *filteringHclog) IsTrace() bool              { return f.base.IsTrace() }
+func (f *filteringHclog) IsDebug() bool              { return f.base.IsDebug() }
+func (f *filteringHclog) IsInfo() bool               { return f.base.IsInfo() }
+func (f *filteringHclog) IsWarn() bool               { return f.base.IsWarn() }
+func (f *filteringHclog) IsError() bool              { return f.base.IsError() }
+func (f *filteringHclog) ImpliedArgs() []any         { return f.base.ImpliedArgs() }
+func (f *filteringHclog) Name() string               { return f.base.Name() }
+func (f *filteringHclog) SetLevel(level hclog.Level) { f.base.SetLevel(level) }
+func (f *filteringHclog) GetLevel() hclog.Level      { return f.base.GetLevel() }
+func (f *filteringHclog) StandardLogger(o *hclog.StandardLoggerOptions) *log.Logger {
+	return f.base.StandardLogger(o)
+}
+func (f *filteringHclog) StandardWriter(o *hclog.StandardLoggerOptions) io.Writer {
+	return f.base.StandardWriter(o)
+}
 
 func (f *filteringHclog) With(args ...any) hclog.Logger {
 	return &filteringHclog{base: f.base.With(args...), suppress: f.suppress}
@@ -271,15 +277,15 @@ func (d *downgradingHclog) Error(msg string, args ...any) {
 	d.base.Error(msg, args...)
 }
 
-func (d *downgradingHclog) IsTrace() bool                          { return d.base.IsTrace() }
-func (d *downgradingHclog) IsDebug() bool                          { return d.base.IsDebug() }
-func (d *downgradingHclog) IsInfo() bool                           { return d.base.IsInfo() }
-func (d *downgradingHclog) IsWarn() bool                           { return d.base.IsWarn() }
-func (d *downgradingHclog) IsError() bool                          { return d.base.IsError() }
-func (d *downgradingHclog) ImpliedArgs() []any                     { return d.base.ImpliedArgs() }
-func (d *downgradingHclog) Name() string                           { return d.base.Name() }
-func (d *downgradingHclog) SetLevel(level hclog.Level)             { d.base.SetLevel(level) }
-func (d *downgradingHclog) GetLevel() hclog.Level                  { return d.base.GetLevel() }
+func (d *downgradingHclog) IsTrace() bool              { return d.base.IsTrace() }
+func (d *downgradingHclog) IsDebug() bool              { return d.base.IsDebug() }
+func (d *downgradingHclog) IsInfo() bool               { return d.base.IsInfo() }
+func (d *downgradingHclog) IsWarn() bool               { return d.base.IsWarn() }
+func (d *downgradingHclog) IsError() bool              { return d.base.IsError() }
+func (d *downgradingHclog) ImpliedArgs() []any         { return d.base.ImpliedArgs() }
+func (d *downgradingHclog) Name() string               { return d.base.Name() }
+func (d *downgradingHclog) SetLevel(level hclog.Level) { d.base.SetLevel(level) }
+func (d *downgradingHclog) GetLevel() hclog.Level      { return d.base.GetLevel() }
 func (d *downgradingHclog) StandardLogger(o *hclog.StandardLoggerOptions) *log.Logger {
 	return d.base.StandardLogger(o)
 }

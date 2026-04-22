@@ -1,16 +1,15 @@
 package query
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"fmt"
+	"gastrolog/internal/glid"
 	"testing"
 	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/lookup"
 	"gastrolog/internal/querylang"
-
 )
 
 func TestApplyRecordEval(t *testing.T) {
@@ -22,8 +21,8 @@ func TestApplyRecordEval(t *testing.T) {
 	op := &querylang.EvalOp{
 		Assignments: []querylang.EvalAssignment{
 			{Field: "duration_s", Expr: &querylang.ArithExpr{
-				Left: &querylang.FieldRef{Name: "duration"},
-				Op:   querylang.ArithDiv,
+				Left:  &querylang.FieldRef{Name: "duration"},
+				Op:    querylang.ArithDiv,
 				Right: &querylang.NumberLit{Value: "1000"},
 			}},
 		},

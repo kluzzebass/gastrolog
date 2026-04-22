@@ -1,8 +1,8 @@
 package server_test
 
 import (
-	"gastrolog/internal/glid"
 	"context"
+	"gastrolog/internal/glid"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -14,14 +14,14 @@ import (
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
 	chunkmem "gastrolog/internal/chunk/memory"
-	"gastrolog/internal/system"
-	sysmem "gastrolog/internal/system/memory"
 	"gastrolog/internal/index"
 	indexfile "gastrolog/internal/index/file"
 	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/memtest"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/server"
+	"gastrolog/internal/system"
+	sysmem "gastrolog/internal/system/memory"
 
 	"connectrpc.com/connect"
 )

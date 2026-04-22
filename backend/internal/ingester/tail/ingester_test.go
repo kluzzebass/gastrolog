@@ -1,13 +1,12 @@
 package tail
 
 import (
-	"gastrolog/internal/glid"
 	"context"
+	"gastrolog/internal/glid"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
-
 
 	"gastrolog/internal/orchestrator"
 )

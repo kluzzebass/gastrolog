@@ -1,10 +1,10 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"slices"
 	"strings"
@@ -13,9 +13,8 @@ import (
 
 	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/system"
 	"gastrolog/internal/index"
-
+	"gastrolog/internal/system"
 )
 
 const (
@@ -42,27 +41,27 @@ type retentionRule struct {
 // Only primaries get runners — secondaries react to the tier Raft manifest
 // via the ChunkFSM.OnDelete callback.
 type retentionRunner struct {
-	mu         sync.Mutex
-	vaultID    glid.GLID
-	tierID     glid.GLID
+	mu      sync.Mutex
+	vaultID glid.GLID
+	tierID  glid.GLID
 	// Cached for job descriptions so the Jobs inspector can tell sweep
 	// sub-jobs (transitions) apart by their vault/tier. Refreshed from
 	// config on every sweep via retentionTargetForTier.
 	vaultName    string
 	tierPosition int
 	tierType     string
-	cm         chunk.ChunkManager
-	im         index.IndexManager
-	inflight   map[chunk.ChunkID]bool // chunks currently being processed
-	unreadable map[chunk.ChunkID]bool // chunks that failed to read — skipped until restart
-	orch       *Orchestrator          // for eject/transition callbacks
+	cm           chunk.ChunkManager
+	im           index.IndexManager
+	inflight     map[chunk.ChunkID]bool // chunks currently being processed
+	unreadable   map[chunk.ChunkID]bool // chunks that failed to read — skipped until restart
+	orch         *Orchestrator          // for eject/transition callbacks
 
 	// applyRaftDelete applies CmdDeleteChunk to the tier Raft before local
 	// deletion, so secondaries learn about it via the manifest. Nil in
 	// single-node / memory mode — local delete proceeds without Raft.
-	applyRaftDelete              func(id chunk.ChunkID) error
-	applyRaftRetentionPending    func(id chunk.ChunkID) error
-	applyRaftTransitionStreamed  func(id chunk.ChunkID) error
+	applyRaftDelete             func(id chunk.ChunkID) error
+	applyRaftRetentionPending   func(id chunk.ChunkID) error
+	applyRaftTransitionStreamed func(id chunk.ChunkID) error
 
 	// isLeader returns true if this node is the config leader for this tier.
 	// Retention (expiry + transitions) only runs on the leader to prevent
@@ -73,8 +72,8 @@ type retentionRunner struct {
 	// chunks. Used to forward chunk deletions after retention expires them.
 	followerTargets []system.ReplicationTarget
 
-	now func() time.Time
-	logger      *slog.Logger
+	now    func() time.Time
+	logger *slog.Logger
 }
 
 type sweepTarget struct {
@@ -399,7 +398,7 @@ func (o *Orchestrator) reconcileFollower(tier *TierInstance) {
 // sweep evaluates retention rules on a primary and applies expire/eject/transition.
 func (r *retentionRunner) sweep(rules []retentionRule) {
 	// Only the config placement leader runs retention. Raft applies are
-	// forwarded transparently to the tier Raft leader via TierApplyForwarder.
+	// forwarded transparently to the Raft leader via TierApplyForwarder.
 	// Config followers must not independently evaluate and transition chunks —
 	// that causes N× duplication.
 	if !r.isLeader {

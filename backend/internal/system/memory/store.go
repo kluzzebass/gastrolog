@@ -3,18 +3,17 @@
 package memory
 
 import (
-	"gastrolog/internal/glid"
 	"bytes"
 	"cmp"
 	"context"
 	"fmt"
+	"gastrolog/internal/glid"
 	"maps"
 	"slices"
 	"sync"
 	"time"
 
 	"gastrolog/internal/system"
-
 )
 
 // cmpUUID compares two UUIDs lexicographically. Since gastrolog uses UUIDv7,
@@ -43,27 +42,27 @@ type serverSettings struct {
 
 // Store is an in-memory ConfigStore implementation.
 type Store struct {
-	mu                sync.RWMutex
-	filters           map[glid.GLID]system.FilterConfig
-	rotationPolicies  map[glid.GLID]system.RotationPolicyConfig
-	retentionPolicies map[glid.GLID]system.RetentionPolicyConfig
-	vaults            map[glid.GLID]system.VaultConfig
-	ingesters         map[glid.GLID]system.IngesterConfig
-	routes            map[glid.GLID]system.RouteConfig
-	ss                serverSettings
-	certs             map[glid.GLID]system.CertPEM
-	users         map[glid.GLID]system.User         // keyed by ID (UUID)
-	refreshTokens map[glid.GLID]system.RefreshToken // keyed by token ID
-	nodes         map[glid.GLID]system.NodeConfig    // keyed by node ID
-	managedFiles       map[glid.GLID]system.ManagedFileConfig
-	cloudServices      map[glid.GLID]system.CloudService
-	tiers              map[glid.GLID]system.TierConfig
-	tierPlacements     map[glid.GLID][]system.TierPlacement    // runtime: system-managed
-	ingesterAlive       map[glid.GLID]map[string]bool          // runtime: system-managed
-	ingesterCheckpoints map[glid.GLID][]byte                  // runtime: system-managed
-	ingesterAssignment  map[glid.GLID]string                  // runtime: system-managed
-	nodeStorageConfigs map[string]system.NodeStorageConfig     // runtime: keyed by nodeID
-	clusterTLS         *system.ClusterTLS                     // runtime: cluster identity
+	mu                   sync.RWMutex
+	filters              map[glid.GLID]system.FilterConfig
+	rotationPolicies     map[glid.GLID]system.RotationPolicyConfig
+	retentionPolicies    map[glid.GLID]system.RetentionPolicyConfig
+	vaults               map[glid.GLID]system.VaultConfig
+	ingesters            map[glid.GLID]system.IngesterConfig
+	routes               map[glid.GLID]system.RouteConfig
+	ss                   serverSettings
+	certs                map[glid.GLID]system.CertPEM
+	users                map[glid.GLID]system.User         // keyed by ID (UUID)
+	refreshTokens        map[glid.GLID]system.RefreshToken // keyed by token ID
+	nodes                map[glid.GLID]system.NodeConfig   // keyed by node ID
+	managedFiles         map[glid.GLID]system.ManagedFileConfig
+	cloudServices        map[glid.GLID]system.CloudService
+	tiers                map[glid.GLID]system.TierConfig
+	tierPlacements       map[glid.GLID][]system.TierPlacement // runtime: system-managed
+	ingesterAlive        map[glid.GLID]map[string]bool        // runtime: system-managed
+	ingesterCheckpoints  map[glid.GLID][]byte                 // runtime: system-managed
+	ingesterAssignment   map[glid.GLID]string                 // runtime: system-managed
+	nodeStorageConfigs   map[string]system.NodeStorageConfig  // runtime: keyed by nodeID
+	clusterTLS           *system.ClusterTLS                   // runtime: cluster identity
 	setupWizardDismissed bool                                 // runtime: UI state
 }
 
@@ -72,24 +71,24 @@ var _ system.Store = (*Store)(nil)
 // NewStore creates a new in-memory ConfigStore.
 func NewStore() *Store {
 	return &Store{
-		filters:           make(map[glid.GLID]system.FilterConfig),
-		rotationPolicies:  make(map[glid.GLID]system.RotationPolicyConfig),
-		retentionPolicies: make(map[glid.GLID]system.RetentionPolicyConfig),
-		vaults:            make(map[glid.GLID]system.VaultConfig),
-		ingesters:         make(map[glid.GLID]system.IngesterConfig),
-		routes:            make(map[glid.GLID]system.RouteConfig),
-		certs:             make(map[glid.GLID]system.CertPEM),
-		users:         make(map[glid.GLID]system.User),
-		refreshTokens: make(map[glid.GLID]system.RefreshToken),
-		nodes:         make(map[glid.GLID]system.NodeConfig),
-		managedFiles:       make(map[glid.GLID]system.ManagedFileConfig),
-		cloudServices:      make(map[glid.GLID]system.CloudService),
-		tiers:              make(map[glid.GLID]system.TierConfig),
-		tierPlacements:     make(map[glid.GLID][]system.TierPlacement),
+		filters:             make(map[glid.GLID]system.FilterConfig),
+		rotationPolicies:    make(map[glid.GLID]system.RotationPolicyConfig),
+		retentionPolicies:   make(map[glid.GLID]system.RetentionPolicyConfig),
+		vaults:              make(map[glid.GLID]system.VaultConfig),
+		ingesters:           make(map[glid.GLID]system.IngesterConfig),
+		routes:              make(map[glid.GLID]system.RouteConfig),
+		certs:               make(map[glid.GLID]system.CertPEM),
+		users:               make(map[glid.GLID]system.User),
+		refreshTokens:       make(map[glid.GLID]system.RefreshToken),
+		nodes:               make(map[glid.GLID]system.NodeConfig),
+		managedFiles:        make(map[glid.GLID]system.ManagedFileConfig),
+		cloudServices:       make(map[glid.GLID]system.CloudService),
+		tiers:               make(map[glid.GLID]system.TierConfig),
+		tierPlacements:      make(map[glid.GLID][]system.TierPlacement),
 		ingesterAlive:       make(map[glid.GLID]map[string]bool),
 		ingesterCheckpoints: make(map[glid.GLID][]byte),
 		ingesterAssignment:  make(map[glid.GLID]string),
-		nodeStorageConfigs: make(map[string]system.NodeStorageConfig),
+		nodeStorageConfigs:  make(map[string]system.NodeStorageConfig),
 	}
 }
 

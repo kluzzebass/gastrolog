@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"gastrolog/internal/chunk"
-
 )
 
 // TestRemoveTierFromVaultPreservesData verifies that RemoveTierFromVault is

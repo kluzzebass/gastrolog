@@ -1,13 +1,12 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"time"
 
 	"gastrolog/internal/chanwatch"
-
 )
 
 // IngestMessage is the data emitted by ingesters for ingestion.

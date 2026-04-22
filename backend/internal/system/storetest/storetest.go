@@ -4,13 +4,12 @@
 package storetest
 
 import (
-	"gastrolog/internal/glid"
 	"context"
+	"gastrolog/internal/glid"
 	"testing"
 	"time"
 
 	"gastrolog/internal/system"
-
 )
 
 func newID() glid.GLID { return glid.New() }
@@ -1573,12 +1572,12 @@ func testCloudServices(t *testing.T, newStore func(t *testing.T) system.Store) {
 
 		id := newID()
 		cs := system.CloudService{
-			ID:               id,
-			Name:             "prod-s3",
-			Provider:         "aws",
-			Bucket:           "my-bucket",
-			Region:           "us-east-1",
-			StorageClass:         1,
+			ID:           id,
+			Name:         "prod-s3",
+			Provider:     "aws",
+			Bucket:       "my-bucket",
+			Region:       "us-east-1",
+			StorageClass: 1,
 		}
 		if err := s.PutCloudService(ctx, cs); err != nil {
 			t.Fatalf("Put: %v", err)
@@ -1936,16 +1935,16 @@ func testNodeStorageConfigs(t *testing.T, newStore func(t *testing.T) system.Sto
 		ctx := context.Background()
 
 		if err := s.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
-			NodeID: "node-1",
-			FileStorages:  []system.FileStorage{{ID: newID(), Name: "old"}},
+			NodeID:       "node-1",
+			FileStorages: []system.FileStorage{{ID: newID(), Name: "old"}},
 		}); err != nil {
 			t.Fatalf("Set: %v", err)
 		}
 
 		newStorageID := newID()
 		if err := s.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
-			NodeID: "node-1",
-			FileStorages:  []system.FileStorage{{ID: newStorageID, Name: "new"}},
+			NodeID:       "node-1",
+			FileStorages: []system.FileStorage{{ID: newStorageID, Name: "new"}},
 		}); err != nil {
 			t.Fatalf("Set update: %v", err)
 		}

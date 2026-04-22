@@ -1,8 +1,9 @@
 // Command gastrolog runs the log aggregation service.
 //
 // Logging:
-//   - Base logger is created here with output format and level
-//   - Logger is passed to all components via dependency injection
+//   - Base logger writes to stderr so stdout stays free for CLI subcommands
+//     that pipe machine-readable output (config -o json, query, export, …).
+//   - Logger is passed into the server via app.Run (not used by thin CLI cmds).
 //   - No global slog configuration (no slog.SetDefault)
 //   - Components scope loggers with their own attributes
 package main

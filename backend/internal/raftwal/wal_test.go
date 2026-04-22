@@ -1506,4 +1506,3 @@ func countWalSegments(t *testing.T, dir string) int {
 	}
 	return count
 }
-

@@ -1,11 +1,11 @@
 package orchestrator
 
 import (
-	"github.com/google/uuid"
-	"gastrolog/internal/glid"
 	"cmp"
 	"context"
 	"fmt"
+	"gastrolog/internal/glid"
+	"github.com/google/uuid"
 	"log/slog"
 	"slices"
 	"strings"
@@ -132,12 +132,12 @@ type cronEntry struct {
 type Scheduler struct {
 	mu            sync.Mutex
 	scheduler     gocron.Scheduler
-	jobs          map[string]gocron.Job    // name → job
-	schedules     map[string]string        // name → cron expression (for ListJobs)
-	descriptions  map[string]string        // name → human-readable description
-	cronEntries   map[string]cronEntry     // name → definition (for rebuild)
-	progress      map[string]*JobProgress  // gocron job ID → progress (one-time jobs)
-	completed     map[string]JobInfo       // gocron job ID → info (retained after gocron removes one-time jobs)
+	jobs          map[string]gocron.Job   // name → job
+	schedules     map[string]string       // name → cron expression (for ListJobs)
+	descriptions  map[string]string       // name → human-readable description
+	cronEntries   map[string]cronEntry    // name → definition (for rebuild)
+	progress      map[string]*JobProgress // gocron job ID → progress (one-time jobs)
+	completed     map[string]JobInfo      // gocron job ID → info (retained after gocron removes one-time jobs)
 	maxConcurrent int
 	now           func() time.Time
 	logger        *slog.Logger

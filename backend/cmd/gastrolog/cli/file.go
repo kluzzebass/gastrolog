@@ -139,4 +139,3 @@ func newFileDeleteCmd() *cobra.Command {
 		},
 	}
 }
-

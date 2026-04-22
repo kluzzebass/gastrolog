@@ -1,9 +1,9 @@
 package cli
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"fmt"
+	"gastrolog/internal/glid"
 	"strconv"
 
 	"connectrpc.com/connect"
@@ -194,4 +194,3 @@ func newVaultDeleteCmd() *cobra.Command {
 	cmd.Flags().Bool("force", false, "force delete even if vault has data")
 	return cmd
 }
-

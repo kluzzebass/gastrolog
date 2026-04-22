@@ -2,10 +2,10 @@
 package server
 
 import (
-	"gastrolog/internal/glid"
 	"cmp"
 	"context"
 	"crypto/tls"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"net"
 	"net/http"
@@ -23,14 +23,14 @@ import (
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/auth"
 	"gastrolog/internal/cert"
-	"gastrolog/internal/system"
-	"gastrolog/internal/system/raftfsm"
 	"gastrolog/internal/frontend"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/lookup"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/server/routing"
+	"gastrolog/internal/system"
+	"gastrolog/internal/system/raftfsm"
 )
 
 // systemLoadTimeout bounds how long background config store reads can take.
@@ -137,7 +137,6 @@ type Config struct {
 	// PlacementReconcile runs synchronous placement so RPC responses include
 	// tier placements. Nil in single-node or non-cluster mode.
 	PlacementReconcile func(ctx context.Context)
-
 }
 
 // CertManager interface for TLS certificate management.
@@ -151,53 +150,53 @@ type CertManager interface {
 // Server is the Connect RPC server for GastroLog.
 // HTTP is always on; HTTPS is added when TLS enabled and default cert exists.
 type Server struct {
-	orch        *orchestrator.Orchestrator
-	cfgStore    system.Store
-	factories   orchestrator.Factories
-	tokens      *auth.TokenService
-	certManager CertManager
-	noAuth      bool
-	logger      *slog.Logger
-	cluster          ClusterStatusProvider
-	peerStats        NodeStatsProvider
-	peerVaultStats      PeerVaultStatsProvider
-	peerIngesterStats   PeerIngesterStatsProvider
-	peerRouteStats      PeerRouteStatsProvider
-	remoteSearcher      RemoteSearcher
-	remoteChunkLister   RemoteChunkLister
-	peerJobs             PeerJobsProvider
-	localStatsFn     func() *apiv1.NodeStats
-	localNodeID      string
-	clusterAddress   string
-	joinClusterFn    func(ctx context.Context, leaderAddr, joinToken string) error
-	removeNodeFn        func(ctx context.Context, nodeID string) error
-	setNodeSuffrageFn   func(ctx context.Context, nodeID string, voter bool) error
-	startTime        time.Time
-	homeDir          string                     // gastrolog home directory; empty for in-memory config
-	afterConfigApply func(raftfsm.Notification) // non-raft dispatch hook
-	configSignal     *notify.Signal             // broadcasts config changes to WatchConfig streams
-	statsSignal      *notify.Signal             // broadcasts stats updates to WatchSystemStatus streams
-	cloudTesters      map[string]CloudServiceTester
-	repairManagedFile  func(fileID string) bool   // on-demand pull from peer; set by app wiring
+	orch               *orchestrator.Orchestrator
+	cfgStore           system.Store
+	factories          orchestrator.Factories
+	tokens             *auth.TokenService
+	certManager        CertManager
+	noAuth             bool
+	logger             *slog.Logger
+	cluster            ClusterStatusProvider
+	peerStats          NodeStatsProvider
+	peerVaultStats     PeerVaultStatsProvider
+	peerIngesterStats  PeerIngesterStatsProvider
+	peerRouteStats     PeerRouteStatsProvider
+	remoteSearcher     RemoteSearcher
+	remoteChunkLister  RemoteChunkLister
+	peerJobs           PeerJobsProvider
+	localStatsFn       func() *apiv1.NodeStats
+	localNodeID        string
+	clusterAddress     string
+	joinClusterFn      func(ctx context.Context, leaderAddr, joinToken string) error
+	removeNodeFn       func(ctx context.Context, nodeID string) error
+	setNodeSuffrageFn  func(ctx context.Context, nodeID string, voter bool) error
+	startTime          time.Time
+	homeDir            string                     // gastrolog home directory; empty for in-memory config
+	afterConfigApply   func(raftfsm.Notification) // non-raft dispatch hook
+	configSignal       *notify.Signal             // broadcasts config changes to WatchConfig streams
+	statsSignal        *notify.Signal             // broadcasts stats updates to WatchSystemStatus streams
+	cloudTesters       map[string]CloudServiceTester
+	repairManagedFile  func(fileID string) bool  // on-demand pull from peer; set by app wiring
 	queryServer        *QueryServer              // stored for ExportToVault executor wiring
-	routingForwarder      routing.UnaryForwarder     // forwards requests to remote nodes; nil in single-node
-	placementReconcile   func(ctx context.Context)  // synchronous placement; nil in non-cluster mode
-	mu       sync.Mutex
-	listener net.Listener
-	server   *http.Server
-	handler  http.Handler // core handler (mux + CORS + tracking), shared by HTTP and HTTPS
-	shutdown chan struct{}
-	inFlight sync.WaitGroup // tracks in-flight requests for graceful drain
-	draining atomic.Bool    // true when server is draining (rejecting new requests)
+	routingForwarder   routing.UnaryForwarder    // forwards requests to remote nodes; nil in single-node
+	placementReconcile func(ctx context.Context) // synchronous placement; nil in non-cluster mode
+	mu                 sync.Mutex
+	listener           net.Listener
+	server             *http.Server
+	handler            http.Handler // core handler (mux + CORS + tracking), shared by HTTP and HTTPS
+	shutdown           chan struct{}
+	inFlight           sync.WaitGroup // tracks in-flight requests for graceful drain
+	draining           atomic.Bool    // true when server is draining (rejecting new requests)
 
-	rl       *rateLimiter   // per-IP rate limiter for auth endpoints
+	rl       *rateLimiter // per-IP rate limiter for auth endpoints
 	rlCancel context.CancelFunc
 	rlWG     sync.WaitGroup
 
 	// Dynamic TLS: HTTPS listener when enabled
-	httpsListener net.Listener
-	httpsServer   *http.Server
-	httpsPort     string
+	httpsListener   net.Listener
+	httpsServer     *http.Server
+	httpsPort       string
 	redirectToHTTPS atomic.Bool
 
 	// Unix socket listener for local CLI access (no auth required)
@@ -210,38 +209,38 @@ type Server struct {
 // New creates a new Server.
 func New(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orchestrator.Factories, tokens *auth.TokenService, cfg Config) *Server {
 	return &Server{
-		orch:        orch,
-		cfgStore:    cfgStore,
-		factories:   factories,
-		tokens:      tokens,
-		certManager: cfg.CertManager,
-		noAuth:      cfg.NoAuth,
-		logger:      logging.Default(cfg.Logger).With("component", "server"),
-		cluster:          cfg.Cluster,
-		peerStats:        cfg.PeerStats,
-		peerVaultStats:    cfg.PeerVaultStats,
-		peerIngesterStats: cfg.PeerIngesterStats,
-		peerRouteStats:    cfg.PeerRouteStats,
-		remoteSearcher:       cfg.RemoteSearcher,
-		remoteChunkLister:   cfg.RemoteChunkLister,
-		peerJobs:             cfg.PeerJobs,
-		localStatsFn:     cfg.LocalStats,
-		localNodeID:      cfg.NodeID,
-		clusterAddress:   cfg.ClusterAddress,
-		joinClusterFn:    cfg.JoinClusterFunc,
-		removeNodeFn:        cfg.RemoveNodeFunc,
-		setNodeSuffrageFn:   cfg.SetNodeSuffrageFunc,
-		startTime:        time.Now(),
-		homeDir:          cfg.HomeDir,
-		unixSocketConfig: cfg.UnixSocket,
-		cloudTesters:      cfg.CloudTesters,
-		afterConfigApply:  cfg.AfterConfigApply,
-		configSignal:      cfg.ConfigSignal,
-		statsSignal:       cfg.StatsSignal,
-		routingForwarder:      cfg.RoutingForwarder,
-		placementReconcile:   cfg.PlacementReconcile,
-		shutdown:              make(chan struct{}),
-		rl:          newRateLimiter(5.0/60.0, 5), // 5 req/min per IP, burst of 5
+		orch:               orch,
+		cfgStore:           cfgStore,
+		factories:          factories,
+		tokens:             tokens,
+		certManager:        cfg.CertManager,
+		noAuth:             cfg.NoAuth,
+		logger:             logging.Default(cfg.Logger).With("component", "server"),
+		cluster:            cfg.Cluster,
+		peerStats:          cfg.PeerStats,
+		peerVaultStats:     cfg.PeerVaultStats,
+		peerIngesterStats:  cfg.PeerIngesterStats,
+		peerRouteStats:     cfg.PeerRouteStats,
+		remoteSearcher:     cfg.RemoteSearcher,
+		remoteChunkLister:  cfg.RemoteChunkLister,
+		peerJobs:           cfg.PeerJobs,
+		localStatsFn:       cfg.LocalStats,
+		localNodeID:        cfg.NodeID,
+		clusterAddress:     cfg.ClusterAddress,
+		joinClusterFn:      cfg.JoinClusterFunc,
+		removeNodeFn:       cfg.RemoveNodeFunc,
+		setNodeSuffrageFn:  cfg.SetNodeSuffrageFunc,
+		startTime:          time.Now(),
+		homeDir:            cfg.HomeDir,
+		unixSocketConfig:   cfg.UnixSocket,
+		cloudTesters:       cfg.CloudTesters,
+		afterConfigApply:   cfg.AfterConfigApply,
+		configSignal:       cfg.ConfigSignal,
+		statsSignal:        cfg.StatsSignal,
+		routingForwarder:   cfg.RoutingForwarder,
+		placementReconcile: cfg.PlacementReconcile,
+		shutdown:           make(chan struct{}),
+		rl:                 newRateLimiter(5.0/60.0, 5), // 5 req/min per IP, burst of 5
 	}
 }
 
@@ -683,4 +682,3 @@ func (s *Server) Handler() http.Handler {
 	handler := h2c.NewHandler(mux, &http2.Server{})
 	return s.trackingMiddleware(handler)
 }
-

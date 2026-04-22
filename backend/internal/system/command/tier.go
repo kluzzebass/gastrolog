@@ -1,11 +1,10 @@
 package command
 
 import (
-	"gastrolog/internal/glid"
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/convert"
+	"gastrolog/internal/glid"
 	"gastrolog/internal/system"
-
 )
 
 func putTierCmd(tier system.TierConfig) *gastrologv1.PutTierCommand {

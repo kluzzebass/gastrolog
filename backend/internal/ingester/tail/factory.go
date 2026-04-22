@@ -1,13 +1,12 @@
 package tail
 
 import (
-	"gastrolog/internal/glid"
 	"encoding/json"
 	"fmt"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"path/filepath"
 	"time"
-
 
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"

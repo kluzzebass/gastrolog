@@ -5,9 +5,9 @@
 package raftfsm
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"fmt"
+	"gastrolog/internal/glid"
 	"io"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"

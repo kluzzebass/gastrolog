@@ -1,10 +1,10 @@
 package file
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"os"
 	"strconv"
@@ -12,7 +12,6 @@ import (
 
 	"gastrolog/internal/chunk"
 	chunkcloud "gastrolog/internal/chunk/cloud"
-
 )
 
 // Factory parameter keys.

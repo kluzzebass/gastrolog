@@ -4,7 +4,6 @@ import (
 	"gastrolog/internal/glid"
 	"log/slog"
 
-
 	"gastrolog/internal/cert"
 	"gastrolog/internal/orchestrator"
 )

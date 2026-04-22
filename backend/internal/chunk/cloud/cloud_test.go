@@ -1,8 +1,8 @@
 package cloud_test
 
 import (
-	"gastrolog/internal/glid"
 	"bytes"
+	"gastrolog/internal/glid"
 	"io"
 	"os"
 	"testing"

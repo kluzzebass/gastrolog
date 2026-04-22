@@ -13,16 +13,12 @@ import (
 	hraft "github.com/hashicorp/raft"
 )
 
-// ErrNoTierRaftLeader is returned when the tier Raft group has no elected leader.
-var ErrNoTierRaftLeader = errors.New("no tier raft leader")
+// ErrNoRaftLeader is returned when the target Raft group has no elected leader.
+var ErrNoRaftLeader = errors.New("no raft leader")
 
-// TierApplyForwarder applies pre-marshaled tier FSM commands to a tier Raft
-// group. If this node is the tier Raft leader, it applies locally. Otherwise,
-// it forwards to the current leader via the ForwardTierApply RPC.
-//
-// This decouples the config placement leader (which runs retention and chunk
-// lifecycle) from the tier Raft leader (which may be on a different node after
-// a cluster restart).
+// TierApplyForwarder applies commands to a Raft group (historically tier-only).
+// If this node is the leader, it applies locally; otherwise it forwards via
+// ForwardTierApply. Use NewVaultCtlTierApplyForwarder for vault ctl + OpTierFSM.
 type TierApplyForwarder struct {
 	raft    *hraft.Raft
 	groupID string
@@ -33,7 +29,7 @@ type TierApplyForwarder struct {
 	xform func([]byte) []byte
 }
 
-// NewTierApplyForwarder creates a forwarder for a specific tier Raft group.
+// NewTierApplyForwarder creates a forwarder for a specific multiraft group (tests and generic forwarding).
 func NewTierApplyForwarder(r *hraft.Raft, groupID string, peers *PeerConns, timeout time.Duration) *TierApplyForwarder {
 	return &TierApplyForwarder{
 		raft:    r,
@@ -66,7 +62,7 @@ func (f *TierApplyForwarder) wirePayload(data []byte) []byte {
 }
 
 // Apply applies a tier FSM command. Tries locally first; forwards to the
-// tier Raft leader on ErrNotLeader.
+// Raft leader on ErrNotLeader.
 func (f *TierApplyForwarder) Apply(data []byte) error {
 	payload := f.wirePayload(data)
 	future := f.raft.Apply(payload, f.timeout)
@@ -82,12 +78,12 @@ func (f *TierApplyForwarder) Apply(data []byte) error {
 func (f *TierApplyForwarder) forwardToLeader(data []byte) error {
 	_, leaderID := f.raft.LeaderWithID()
 	if leaderID == "" {
-		return ErrNoTierRaftLeader
+		return ErrNoRaftLeader
 	}
 
 	conn, err := f.peers.Conn(string(leaderID))
 	if err != nil {
-		return fmt.Errorf("dial tier raft leader %s: %w", leaderID, err)
+		return fmt.Errorf("dial raft leader %s: %w", leaderID, err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), f.timeout)
@@ -100,7 +96,7 @@ func (f *TierApplyForwarder) forwardToLeader(data []byte) error {
 	resp := &gastrologv1.ForwardTierApplyResponse{}
 	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardTierApply", req, resp); err != nil {
 		f.peers.Invalidate(string(leaderID), err)
-		return fmt.Errorf("forward tier apply to %s: %w", leaderID, err)
+		return fmt.Errorf("forward tier apply RPC to %s: %w", leaderID, err)
 	}
 	return nil
 }

@@ -1,16 +1,15 @@
 package chatterbox
 
 import (
-	"gastrolog/internal/glid"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"math/rand/v2"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
-
 
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"

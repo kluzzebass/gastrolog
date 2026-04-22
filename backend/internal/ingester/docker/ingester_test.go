@@ -1,11 +1,11 @@
 package docker
 
 import (
-	"gastrolog/internal/glid"
 	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
+	"gastrolog/internal/glid"
 	"io"
 	"os"
 	"path/filepath"
@@ -15,11 +15,10 @@ import (
 	"testing"
 	"time"
 
-
-	sysmem "gastrolog/internal/system/memory"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/querylang"
+	sysmem "gastrolog/internal/system/memory"
 )
 
 // --- Fake Docker client ---
@@ -1162,4 +1161,3 @@ func TestDockerCheckpointOverwritesPreviousState(t *testing.T) {
 		t.Fatal("container-bbb should be in state after loading data2")
 	}
 }
-

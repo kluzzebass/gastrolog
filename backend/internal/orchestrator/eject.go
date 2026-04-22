@@ -1,14 +1,13 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
+	"gastrolog/internal/glid"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/system"
 	"gastrolog/internal/querylang"
-
+	"gastrolog/internal/system"
 )
 
 // ejectTarget represents a resolved destination for an ejected record.

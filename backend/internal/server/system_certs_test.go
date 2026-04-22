@@ -3,7 +3,6 @@ package server
 import (
 	"gastrolog/internal/glid"
 	"testing"
-
 )
 
 func TestResolveCertID_ExistingID(t *testing.T) {

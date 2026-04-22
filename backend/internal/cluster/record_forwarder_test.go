@@ -1,8 +1,8 @@
 package cluster
 
 import (
-	"gastrolog/internal/glid"
 	"context"
+	"gastrolog/internal/glid"
 	"io"
 	"log/slog"
 	"testing"
@@ -10,7 +10,6 @@ import (
 
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
-
 )
 
 func TestBufferOverflow(t *testing.T) {

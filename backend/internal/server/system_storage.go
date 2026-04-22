@@ -1,17 +1,17 @@
 package server
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 
 	"connectrpc.com/connect"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/convert"
 	"gastrolog/internal/system"
 	"gastrolog/internal/system/raftfsm"
-	"gastrolog/internal/convert"
 )
 
 // --- Cloud Services ---
@@ -308,6 +308,7 @@ func (s *SystemServer) validateReplicationFactor(ctx context.Context, tierType s
 	}
 	return nil
 }
+
 // given type with the given storage class requirements.
 // countEligibleStorages returns how many file storages can host a replica of
 // this tier type. Same-node replication is valid (different file storages on the

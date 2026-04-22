@@ -1,10 +1,10 @@
 package server
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"regexp"
 	"strings"
@@ -16,8 +16,8 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/auth"
-	"gastrolog/internal/system"
 	"gastrolog/internal/logging"
+	"gastrolog/internal/system"
 )
 
 var usernameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{3,64}$`)

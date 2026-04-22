@@ -8,7 +8,6 @@ import (
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/system"
-
 )
 
 // ptr returns a pointer to v.

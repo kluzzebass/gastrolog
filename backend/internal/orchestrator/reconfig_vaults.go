@@ -11,7 +11,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
@@ -456,9 +455,6 @@ func (o *Orchestrator) removeTierFromVault(vaultID, tierID glid.GLID, deleteData
 	delete(o.retention, retentionKey(tier.TierID, tier.StorageID))
 	o.cronRotation.removeAllForVault(vaultID)
 
-	// Stop the per-tier leader loop and clear its desired-members entry.
-	o.tierLeaders.Stop(tier.TierID)
-
 	// Remove tier from vault's tier list.
 	vault.Tiers = append(vault.Tiers[:idx], vault.Tiers[idx+1:]...)
 
@@ -476,14 +472,6 @@ func (o *Orchestrator) removeTierFromVault(vaultID, tierID glid.GLID, deleteData
 		"remaining_tiers", len(vault.Tiers),
 		"deleteData", deleteData)
 	return true
-}
-
-// StopTierLeaderLoop stops the per-tier leader reconciliation loop for a tier.
-// Called by the dispatch handler during tier deletion cleanup so that non-storage
-// nodes (which have no TierInstance but do participate in the tier Raft group)
-// can cleanly stop the leader loop before the group is destroyed.
-func (o *Orchestrator) StopTierLeaderLoop(tierID glid.GLID) {
-	o.tierLeaders.Stop(tierID)
 }
 
 // AddTierToVault builds a single tier instance and adds it to an existing vault
@@ -529,10 +517,9 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID glid.
 	followerNodeIDs := system.FollowerNodeIDs(rt.TierPlacements[tierCfg.ID], nscs)
 	isLeader := leaderNodeID == "" || leaderNodeID == o.localNodeID
 	isFollower := slices.Contains(followerNodeIDs, o.localNodeID)
-	o.setDesiredTierLeader(tierCfg.ID, leaderNodeID, factories)
 	if !isLeader && !isFollower {
-		// No storage placement, but still join the tier Raft group as a
-		// voter. See gastrolog-292yi.
+		// No storage placement, but still join the vault control-plane Raft
+		// group as a voter for this vault's replicated tier metadata.
 		o.createTierRaftGroup(*tierCfg, rt.Nodes, factories)
 		return nil
 	}
@@ -689,16 +676,9 @@ func (o *Orchestrator) buildTierInstances(sys *system.System, vaultCfg system.Va
 		followerNodeIDs := system.FollowerNodeIDs(rt.TierPlacements[tierCfg.ID], nscs)
 		isLeader := leaderNodeID == "" || leaderNodeID == o.localNodeID
 		isFollower := slices.Contains(followerNodeIDs, o.localNodeID)
-		// Tell the tier leader manager which node should be the Raft leader.
-		// Called for ALL paths (non-storage, leader, follower) since every
-		// node runs a leader loop and may need to transfer leadership.
-		o.setDesiredTierLeader(tierCfg.ID, leaderNodeID, factories)
-
 		if !isLeader && !isFollower {
-			// This node has no storage placement for this tier, but still
-			// joins the tier Raft group as a voter. This decouples Raft
-			// membership from storage — every node votes on every tier's
-			// chunk metadata FSM. See gastrolog-292yi.
+			// No storage placement, but still join the vault control-plane Raft
+			// group as a voter for this vault's replicated tier metadata.
 			o.createTierRaftGroup(*tierCfg, rt.Nodes, factories)
 			continue
 		}
@@ -1091,42 +1071,17 @@ type tierRaftCallbacks struct {
 	overlayFromFSM          func(chunk.ChunkMeta) chunk.ChunkMeta
 }
 
-// createTierRaftGroup creates or retrieves the Raft machinery for tier chunk
-// metadata. With a cluster GroupManager, metadata lives on the vault
-// control-plane Raft group (vaultraft + OpTierFSM); otherwise (no multiraft)
-// the legacy per-tier metadata group is used when the manager is absent.
+// createTierRaftGroup joins the vault control-plane Raft group for this vault
+// (when multiraft is configured) and returns the applier/callbacks for this
+// tier's chunk metadata via OpTierFSM. With no GroupManager, returns nils.
 //
 // Call this BEFORE creating the chunk manager so Raft can start elections
 // while chunk loading is still in progress.
 func (o *Orchestrator) createTierRaftGroup(tierCfg system.TierConfig, clusterNodes []system.NodeConfig, factories Factories) (*raftgroup.Group, tierfsm.Applier, tierRaftCallbacks) {
 	if factories.GroupManager == nil {
-		return o.createTierRaftGroupLegacy(tierCfg, clusterNodes, factories)
-	}
-	return o.createTierRaftGroupVaultCtl(tierCfg, clusterNodes, factories)
-}
-
-func (o *Orchestrator) createTierRaftGroupLegacy(tierCfg system.TierConfig, clusterNodes []system.NodeConfig, factories Factories) (*raftgroup.Group, tierfsm.Applier, tierRaftCallbacks) {
-	groupID := raftgroup.TierMetadataGroupID(tierCfg.VaultID, tierCfg.ID)
-	g, members := o.tryStartClusterRaftGroup(groupID, tierfsm.New(), clusterNodes, factories)
-	if g == nil {
 		return nil, nil, tierRaftCallbacks{}
 	}
-
-	o.tierLeaders.SetDesiredMembers(tierCfg.ID, members)
-	o.tierLeaders.Start(tierCfg.ID, g)
-
-	r := g.Raft
-	fsm, _ := g.FSM.(*tierfsm.FSM)
-	timeout := cluster.ReplicationTimeout
-
-	var applier tierfsm.Applier
-	if factories.PeerConns != nil {
-		applier = cluster.NewTierApplyForwarder(r, groupID, factories.PeerConns, timeout)
-	} else {
-		applier = &directApplier{raft: r, timeout: timeout}
-	}
-
-	return g, applier, buildTierRaftCallbacks(r, fsm, applier)
+	return o.createTierRaftGroupVaultCtl(tierCfg, clusterNodes, factories)
 }
 
 func (o *Orchestrator) createTierRaftGroupVaultCtl(tierCfg system.TierConfig, clusterNodes []system.NodeConfig, factories Factories) (*raftgroup.Group, tierfsm.Applier, tierRaftCallbacks) {
@@ -1157,7 +1112,8 @@ func (o *Orchestrator) createTierRaftGroupVaultCtl(tierCfg system.TierConfig, cl
 	return g, applier, buildTierRaftCallbacks(r, tierFSM, applier)
 }
 
-// buildTierRaftCallbacks constructs the callback struct for a tier Raft group.
+// buildTierRaftCallbacks constructs the callback struct for replicated tier
+// chunk metadata (vault control-plane Raft in cluster mode).
 // Extracted from createTierRaftGroup to keep cognitive complexity within lint
 // thresholds.
 func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.Applier) tierRaftCallbacks {
@@ -1237,7 +1193,7 @@ func listFSMByFlag(fsm *tierfsm.FSM, pred func(tierfsm.Entry) bool) func() []chu
 
 // setTierRaftAnnouncer wires the Raft announcer to a chunk manager after both
 // the Raft group and chunk manager have been created. The applier handles
-// routing to the tier Raft leader transparently. The phase parameter lets
+// routing to the vault ctl Raft leader when peers are configured. The phase parameter lets
 // the announcer short-circuit during shutdown so trailing applies don't
 // fire "raft is already shutdown" warnings (see gastrolog-1e5ke).
 func setTierRaftAnnouncer(cm chunk.ChunkManager, applier tierfsm.Applier, phase *lifecycle.Phase, logger *slog.Logger) {
@@ -1358,22 +1314,9 @@ func wireTierFSMOnUpload(g *raftgroup.Group, tierID glid.GLID, cm chunk.ChunkMan
 	})
 }
 
-// directApplier applies tier FSM commands locally via raft.Apply. Used in
-// single-node mode where no forwarding is needed.
-type directApplier struct {
-	raft    *hraft.Raft
-	timeout time.Duration
-}
-
-func (a *directApplier) Apply(data []byte) error {
-	return a.raft.Apply(data, a.timeout).Error()
-}
-
-// buildTierRaftMembers returns ALL cluster nodes as Raft members.
-// Every node participates in every tier Raft group regardless of storage
-// placement. Nodes without storage for a tier vote and replicate the FSM
-// but don't store chunk data. This decouples Raft membership from storage
-// assignment — adding/removing storage never triggers AddVoter/RemoveVoter.
+// buildTierRaftMembers returns ALL cluster nodes as Raft members for a vault
+// control-plane Raft group. Every node participates regardless of which tiers
+// it stores — nodes without local tier data still replicate tier metadata.
 // See gastrolog-292yi.
 func (o *Orchestrator) buildTierRaftMembers(clusterNodes []system.NodeConfig, factories Factories) []hraft.Server {
 	if factories.NodeAddressResolver == nil || len(clusterNodes) == 0 {
@@ -1390,38 +1333,6 @@ func (o *Orchestrator) buildTierRaftMembers(clusterNodes []system.NodeConfig, fa
 		}
 	}
 	return members
-}
-
-// setDesiredTierLeader tells the tier leader manager which node the placement
-// manager assigned as the leader. Uses the factories' resolver.
-func (o *Orchestrator) setDesiredTierLeader(tierID glid.GLID, leaderNodeID string, factories Factories) {
-	if leaderNodeID == "" || factories.NodeAddressResolver == nil {
-		return
-	}
-	addr, ok := factories.NodeAddressResolver(leaderNodeID)
-	if !ok {
-		return
-	}
-	o.tierLeaders.SetDesiredLeader(tierID, &hraft.Server{
-		ID:      hraft.ServerID(leaderNodeID),
-		Address: hraft.ServerAddress(addr),
-	})
-}
-
-// SetDesiredTierLeader is the exported version for use by the dispatch handler.
-// Uses the stored node address resolver from ApplyConfig.
-func (o *Orchestrator) SetDesiredTierLeader(tierID glid.GLID, leaderNodeID string) {
-	if leaderNodeID == "" || o.nodeAddrResolver == nil {
-		return
-	}
-	addr, ok := o.nodeAddrResolver(leaderNodeID)
-	if !ok {
-		return
-	}
-	o.tierLeaders.SetDesiredLeader(tierID, &hraft.Server{
-		ID:      hraft.ServerID(leaderNodeID),
-		Address: hraft.ServerAddress(addr),
-	})
 }
 
 func mapTierTypeToFactory(t system.TierType) string {

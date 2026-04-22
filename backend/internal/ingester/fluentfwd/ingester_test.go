@@ -1,10 +1,10 @@
 package fluentfwd
 
 import (
-	"gastrolog/internal/glid"
 	"bytes"
 	"compress/gzip"
 	"encoding/binary"
+	"gastrolog/internal/glid"
 	"net"
 	"runtime"
 	"testing"

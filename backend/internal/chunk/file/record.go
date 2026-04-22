@@ -1,13 +1,12 @@
 package file
 
 import (
-	"gastrolog/internal/glid"
 	"encoding/binary"
 	"errors"
+	"gastrolog/internal/glid"
 	"time"
 
 	"gastrolog/internal/chunk"
-
 )
 
 // idx.log entry layout (74 bytes):
@@ -25,22 +24,22 @@ import (
 const (
 	IdxEntrySize = 74
 
-	idxSourceTSOffset    = 0
-	idxIngestTSOffset    = 8
-	idxWriteTSOffset     = 16
-	idxRawOffsetOffset   = 24
-	idxRawSizeOffset     = 28
-	idxAttrOffsetOffset  = 32
-	idxAttrSizeOffset    = 36
-	idxIngestSeqOffset   = 38
-	idxIngesterIDOffset  = 42
-	idxNodeIDOffset      = 58
+	idxSourceTSOffset   = 0
+	idxIngestTSOffset   = 8
+	idxWriteTSOffset    = 16
+	idxRawOffsetOffset  = 24
+	idxRawSizeOffset    = 28
+	idxAttrOffsetOffset = 32
+	idxAttrSizeOffset   = 36
+	idxIngestSeqOffset  = 38
+	idxIngesterIDOffset = 42
+	idxNodeIDOffset     = 58
 
 	// File versions.
-	RawLogVersion    = 0x01
-	IdxLogVersion    = 0x01
-	AttrLogVersion   = 0x01
-	AttrDictVersion  = 0x01
+	RawLogVersion   = 0x01
+	IdxLogVersion   = 0x01
+	AttrLogVersion  = 0x01
+	AttrDictVersion = 0x01
 
 	// IdxHeaderSize is the total header size for idx.log.
 	// 4 bytes common header + 8 bytes createdAt (Unix nanoseconds).
@@ -67,7 +66,7 @@ type IdxEntry struct {
 	SourceTS   time.Time // When the log was generated (zero if not available)
 	IngestTS   time.Time
 	WriteTS    time.Time
-	RawOffset  uint32    // Byte offset into raw.log (after header)
+	RawOffset  uint32 // Byte offset into raw.log (after header)
 	RawSize    uint32
 	AttrOffset uint32    // Byte offset into attr.log (after header)
 	AttrSize   uint16    // Length of encoded attributes
@@ -103,8 +102,8 @@ func DecodeIdxEntry(buf []byte) IdxEntry {
 	copy(nodeID[:], buf[idxNodeIDOffset:idxNodeIDOffset+16])
 	return IdxEntry{
 		SourceTS:   sourceTS,
-		IngestTS:   time.Unix(0, int64(binary.LittleEndian.Uint64(buf[idxIngestTSOffset:]))),  //nolint:gosec // G115: nanosecond timestamps fit in int64
-		WriteTS:    time.Unix(0, int64(binary.LittleEndian.Uint64(buf[idxWriteTSOffset:]))),   //nolint:gosec // G115: nanosecond timestamps fit in int64
+		IngestTS:   time.Unix(0, int64(binary.LittleEndian.Uint64(buf[idxIngestTSOffset:]))), //nolint:gosec // G115: nanosecond timestamps fit in int64
+		WriteTS:    time.Unix(0, int64(binary.LittleEndian.Uint64(buf[idxWriteTSOffset:]))),  //nolint:gosec // G115: nanosecond timestamps fit in int64
 		RawOffset:  binary.LittleEndian.Uint32(buf[idxRawOffsetOffset:]),
 		RawSize:    binary.LittleEndian.Uint32(buf[idxRawSizeOffset:]),
 		AttrOffset: binary.LittleEndian.Uint32(buf[idxAttrOffsetOffset:]),

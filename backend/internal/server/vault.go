@@ -1,10 +1,10 @@
 package server
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"time"
 
@@ -13,9 +13,9 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/system"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/system"
 )
 
 // PeerVaultStatsProvider looks up vault stats from cluster peer broadcasts.

@@ -10,8 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/fsnotify/fsnotify"
 	"gastrolog/internal/logging"
+	"github.com/fsnotify/fsnotify"
 )
 
 // CertSource holds certificate content: PEM or file paths. File paths take precedence when set.
@@ -35,7 +35,7 @@ type Manager struct {
 
 	// fileSources: certs loaded from files, for reload on change.
 	fileSources map[string]CertSource
-	watcher    *fsnotify.Watcher
+	watcher     *fsnotify.Watcher
 	watcherStop chan struct{}
 }
 

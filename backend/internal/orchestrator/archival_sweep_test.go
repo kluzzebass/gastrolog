@@ -1,10 +1,10 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,11 +13,10 @@ import (
 	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
-	"gastrolog/internal/system"
-	sysmem "gastrolog/internal/system/memory"
 	indexfile "gastrolog/internal/index/file"
 	"gastrolog/internal/query"
-
+	"gastrolog/internal/system"
+	sysmem "gastrolog/internal/system/memory"
 )
 
 // --- helpers ---
@@ -141,7 +140,7 @@ func TestArchivalSweepArchivesOldChunks(t *testing.T) {
 func TestArchivalSweepDeletesExpiredChunks(t *testing.T) {
 	t.Parallel()
 	orch, _, cm, _, _, _ := archivalTestSetup(t, []system.CloudStorageTransition{
-		{After: "1d", StorageClass: ""},  // delete after 1 day
+		{After: "1d", StorageClass: ""}, // delete after 1 day
 	})
 
 	ids := ingestSealUpload(t, cm, 50)
@@ -450,10 +449,10 @@ func TestCloudServiceArchivalConfigRoundTrip(t *testing.T) {
 	ctx := context.Background()
 
 	cs := system.CloudService{
-		ID:                glid.New(),
-		Name:              "roundtrip-test",
-		Provider:          "memory",
-		ArchivalMode:      "active",
+		ID:           glid.New(),
+		Name:         "roundtrip-test",
+		Provider:     "memory",
+		ArchivalMode: "active",
 		Transitions: []system.CloudStorageTransition{
 			{After: "30d", StorageClass: "cold"},
 			{After: "90d", StorageClass: "deep-freeze"},
@@ -502,7 +501,10 @@ func TestCloudServiceArchivalConfigRoundTrip(t *testing.T) {
 
 // --- helpers ---
 
-func readAll(rc interface{ Read([]byte) (int, error); Close() error }) ([]byte, error) {
+func readAll(rc interface {
+	Read([]byte) (int, error)
+	Close() error
+}) ([]byte, error) {
 	var buf []byte
 	tmp := make([]byte, 4096)
 	for {

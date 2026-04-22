@@ -1,13 +1,12 @@
 package chatterbox
 
 import (
-	"gastrolog/internal/glid"
 	"context"
+	"gastrolog/internal/glid"
 	"strings"
 	"sync"
 	"testing"
 	"time"
-
 
 	"gastrolog/internal/orchestrator"
 )

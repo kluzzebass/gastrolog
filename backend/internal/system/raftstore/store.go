@@ -8,10 +8,10 @@
 package raftstore
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"time"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"

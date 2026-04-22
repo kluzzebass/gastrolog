@@ -1,13 +1,12 @@
 package file
 
 import (
-	"gastrolog/internal/glid"
 	"encoding/binary"
+	"gastrolog/internal/glid"
 	"testing"
 	"time"
 
 	"gastrolog/internal/chunk"
-
 )
 
 // FuzzCloudMetaRoundTrip verifies that encodeCloudMeta/decodeCloudMeta
@@ -25,7 +24,7 @@ func FuzzCloudMetaRoundTrip(f *testing.F) {
 	binary.LittleEndian.PutUint64(realistic[16:24], 1000)  // recordCount
 	binary.LittleEndian.PutUint64(realistic[24:32], 65536) // bytes
 	binary.LittleEndian.PutUint64(realistic[32:40], 32768) // diskBytes
-	realistic[104] = 0x03 // sealed + compressed
+	realistic[104] = 0x03                                  // sealed + compressed
 	f.Add(realistic)
 
 	f.Fuzz(func(t *testing.T, data []byte) {

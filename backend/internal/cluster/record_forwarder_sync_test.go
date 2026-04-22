@@ -1,9 +1,9 @@
 package cluster
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
+	"gastrolog/internal/glid"
 	"io"
 	"log/slog"
 	"sync"
@@ -12,7 +12,6 @@ import (
 
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
-
 )
 
 // newMinimalForwarder constructs a RecordForwarder without calling

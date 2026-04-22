@@ -1,12 +1,11 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"fmt"
+	"gastrolog/internal/glid"
 
 	"gastrolog/internal/system"
-
 )
 
 // resolveFilterExpr looks up a filter ID in the config and returns its expression.

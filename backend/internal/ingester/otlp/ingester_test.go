@@ -1,11 +1,11 @@
 package otlp
 
 import (
-	"gastrolog/internal/glid"
 	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/hex"
+	"gastrolog/internal/glid"
 	"io"
 	"net"
 	"net/http"

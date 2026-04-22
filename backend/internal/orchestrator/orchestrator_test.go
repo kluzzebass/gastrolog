@@ -1,9 +1,9 @@
 package orchestrator_test
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"fmt"
+	"gastrolog/internal/glid"
 	"slices"
 	"sync/atomic"
 	"testing"
@@ -16,7 +16,6 @@ import (
 	"gastrolog/internal/memtest"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
-
 )
 
 // recordCountPolicy creates a rotation policy for testing that rotates at maxRecords.
@@ -70,7 +69,7 @@ func newTestSetup(t *testing.T, maxRecords int64) (*orchestrator.Orchestrator, c
 }
 
 func TestIngestReachesChunkManager(t *testing.T) {
-	orch, cm, _, _ := newTestSetup(t, 1 << 20) // Large chunk, no auto-seal
+	orch, cm, _, _ := newTestSetup(t, 1<<20) // Large chunk, no auto-seal
 
 	rec := chunk.Record{
 		IngestTS: t1,
@@ -100,7 +99,7 @@ func TestIngestReachesChunkManager(t *testing.T) {
 }
 
 func TestIngestMultipleRecords(t *testing.T) {
-	orch, cm, _, _ := newTestSetup(t, 1 << 20)
+	orch, cm, _, _ := newTestSetup(t, 1<<20)
 
 	records := []chunk.Record{
 		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
@@ -215,7 +214,7 @@ func TestSealTriggeredOncePerChunk(t *testing.T) {
 }
 
 func TestSearchViaOrchestrator(t *testing.T) {
-	orch, cm, _, defaultID := newTestSetup(t, 1 << 20)
+	orch, cm, _, defaultID := newTestSetup(t, 1<<20)
 
 	records := []chunk.Record{
 		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
@@ -267,7 +266,7 @@ func TestSearchViaOrchestrator(t *testing.T) {
 }
 
 func TestSearchByUUID(t *testing.T) {
-	orch, _, _, defaultID := newTestSetup(t, 1 << 20)
+	orch, _, _, defaultID := newTestSetup(t, 1<<20)
 
 	rec := chunk.Record{IngestTS: t1, Attrs: attrsA, Raw: []byte("test")}
 	if err := orch.Ingest(rec); err != nil {
@@ -300,7 +299,7 @@ func TestSearchByUUID(t *testing.T) {
 }
 
 func TestSearchUnknownRegistry(t *testing.T) {
-	orch, _, _, _ := newTestSetup(t, 1 << 20)
+	orch, _, _, _ := newTestSetup(t, 1<<20)
 
 	_, _, err := orch.Search(context.Background(), glid.New(), query.Query{}, nil)
 	if err != orchestrator.ErrUnknownRegistry {
@@ -334,7 +333,7 @@ func TestSearchNoQueryEngines(t *testing.T) {
 }
 
 func TestSearchThenFollowViaOrchestrator(t *testing.T) {
-	orch, _, _, defaultID := newTestSetup(t, 1 << 20)
+	orch, _, _, defaultID := newTestSetup(t, 1<<20)
 
 	records := []chunk.Record{
 		{IngestTS: t1, Attrs: attrsA, Raw: []byte("info")},
@@ -373,7 +372,7 @@ func TestSearchThenFollowViaOrchestrator(t *testing.T) {
 }
 
 func TestSearchWithContextViaOrchestrator(t *testing.T) {
-	orch, _, _, defaultID := newTestSetup(t, 1 << 20)
+	orch, _, _, defaultID := newTestSetup(t, 1<<20)
 
 	records := []chunk.Record{
 		{IngestTS: t1, Attrs: attrsA, Raw: []byte("before")},
@@ -829,7 +828,7 @@ func TestHighVolumeIngestion(t *testing.T) {
 // Registry accessor tests
 
 func TestChunkManagerAccessor(t *testing.T) {
-	orch, cm, _, defaultID := newTestSetup(t, 1 << 20)
+	orch, cm, _, defaultID := newTestSetup(t, 1<<20)
 
 	// Get by key.
 	got := orch.ChunkManager(defaultID)
@@ -845,7 +844,7 @@ func TestChunkManagerAccessor(t *testing.T) {
 }
 
 func TestListVaultsAccessor(t *testing.T) {
-	orch, _, _, defaultID := newTestSetup(t, 1 << 20)
+	orch, _, _, defaultID := newTestSetup(t, 1<<20)
 
 	keys := orch.ListVaults()
 	if len(keys) != 1 {
@@ -857,7 +856,7 @@ func TestListVaultsAccessor(t *testing.T) {
 }
 
 func TestIndexManagerAccessor(t *testing.T) {
-	orch, _, tracker, defaultID := newTestSetup(t, 1 << 20)
+	orch, _, tracker, defaultID := newTestSetup(t, 1<<20)
 
 	// Get by key.
 	got := orch.IndexManager(defaultID)
@@ -873,7 +872,7 @@ func TestIndexManagerAccessor(t *testing.T) {
 }
 
 func TestListVaultsReturnsAllKeys(t *testing.T) {
-	orch, _, _, defaultID := newTestSetup(t, 1 << 20)
+	orch, _, _, defaultID := newTestSetup(t, 1<<20)
 
 	keys := orch.ListVaults()
 	if len(keys) != 1 {
@@ -1082,7 +1081,7 @@ func TestRebuildMissingIndexesCloudBackedWithMissingIndexes(t *testing.T) {
 }
 
 func TestSearchThenFollowUnknownRegistry(t *testing.T) {
-	orch, _, _, _ := newTestSetup(t, 1 << 20)
+	orch, _, _, _ := newTestSetup(t, 1<<20)
 
 	_, _, err := orch.SearchThenFollow(context.Background(), glid.New(), query.Query{}, nil)
 	if err != orchestrator.ErrUnknownRegistry {
@@ -1091,7 +1090,7 @@ func TestSearchThenFollowUnknownRegistry(t *testing.T) {
 }
 
 func TestSearchWithContextUnknownRegistry(t *testing.T) {
-	orch, _, _, _ := newTestSetup(t, 1 << 20)
+	orch, _, _, _ := newTestSetup(t, 1<<20)
 
 	_, _, err := orch.SearchWithContext(context.Background(), glid.New(), query.Query{})
 	if err != orchestrator.ErrUnknownRegistry {
@@ -1101,11 +1100,11 @@ func TestSearchWithContextUnknownRegistry(t *testing.T) {
 
 // filteredTestVaults holds the vault IDs and chunk managers for the filtered test setup.
 type filteredTestVaults struct {
-	prod     glid.GLID
-	staging  glid.GLID
-	archive  glid.GLID
+	prod      glid.GLID
+	staging   glid.GLID
+	archive   glid.GLID
 	catchRest glid.GLID
-	cms      map[glid.GLID]chunk.ChunkManager
+	cms       map[glid.GLID]chunk.ChunkManager
 }
 
 // newFilteredTestSetup creates an orchestrator with multiple vaults and a filter set.
@@ -1113,11 +1112,11 @@ func newFilteredTestSetup(t *testing.T) (*orchestrator.Orchestrator, filteredTes
 	t.Helper()
 
 	vaults := filteredTestVaults{
-		prod:     glid.New(),
-		staging:  glid.New(),
-		archive:  glid.New(),
+		prod:      glid.New(),
+		staging:   glid.New(),
+		archive:   glid.New(),
 		catchRest: glid.New(),
-		cms:      make(map[glid.GLID]chunk.ChunkManager),
+		cms:       make(map[glid.GLID]chunk.ChunkManager),
 	}
 
 	orch, err := orchestrator.New(orchestrator.Config{})
@@ -1143,11 +1142,11 @@ func newFilteredTestSetupWithLoader(t *testing.T, loader *fakeSystemLoader) (*or
 	t.Helper()
 
 	vaults := filteredTestVaults{
-		prod:     glid.New(),
-		staging:  glid.New(),
-		archive:  glid.New(),
+		prod:      glid.New(),
+		staging:   glid.New(),
+		archive:   glid.New(),
 		catchRest: glid.New(),
-		cms:      make(map[glid.GLID]chunk.ChunkManager),
+		cms:       make(map[glid.GLID]chunk.ChunkManager),
 	}
 
 	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})

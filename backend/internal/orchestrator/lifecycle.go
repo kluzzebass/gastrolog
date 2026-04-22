@@ -221,7 +221,6 @@ func (o *Orchestrator) Stop() error {
 	// Stop all per-tier leader loops (after the scheduler so reconcile
 	// passes don't fight retention deletes during shutdown).
 	o.vaultCtlLeaders.StopAll()
-	o.tierLeaders.StopAll()
 
 	o.mu.Lock()
 	o.running = false

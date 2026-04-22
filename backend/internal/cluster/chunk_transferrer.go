@@ -1,10 +1,10 @@
 package cluster
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"time"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
@@ -233,4 +233,3 @@ func (ct *ChunkTransferrer) WaitVaultReady(ctx context.Context, nodeID string, v
 		}
 	}
 }
-

@@ -6,9 +6,9 @@
 package command
 
 import (
-	"gastrolog/internal/glid"
 	"encoding/json"
 	"fmt"
+	"gastrolog/internal/glid"
 	"time"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"

@@ -2,8 +2,8 @@ package command
 
 import (
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
-	"gastrolog/internal/system"
 	"gastrolog/internal/convert"
+	"gastrolog/internal/system"
 )
 
 func setNodeStorageConfigCmd(cfg system.NodeStorageConfig) *gastrologv1.SetNodeStorageConfigCommand {

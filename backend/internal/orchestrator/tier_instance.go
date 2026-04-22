@@ -1,12 +1,11 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/system"
+	"gastrolog/internal/glid"
 	"gastrolog/internal/index"
 	"gastrolog/internal/query"
-
+	"gastrolog/internal/system"
 )
 
 // TierInstance is the node-local materialization of a TierConfig.
@@ -18,32 +17,32 @@ import (
 // has a unique StorageID and its own chunk manager pointing to a different
 // directory.
 type TierInstance struct {
-	TierID           glid.GLID
-	StorageID        string // the file storage ID this instance uses (empty for memory/JSONL tiers)
-	Type             string
-	Chunks           chunk.ChunkManager
-	Indexes          index.IndexManager
-	Query            *query.Engine
-	IsFollower      bool                     // true if this node is a follower for this tier
-	LeaderNodeID    string                   // the leader node's ID (empty if this IS the leader)
+	TierID          glid.GLID
+	StorageID       string // the file storage ID this instance uses (empty for memory/JSONL tiers)
+	Type            string
+	Chunks          chunk.ChunkManager
+	Indexes         index.IndexManager
+	Query           *query.Engine
+	IsFollower      bool                       // true if this node is a follower for this tier
+	LeaderNodeID    string                     // the leader node's ID (empty if this IS the leader)
 	FollowerTargets []system.ReplicationTarget // per-storage targets (populated on leader only)
 
-	// HasRaftLeader returns true if the tier's Raft group has an elected leader.
+	// HasRaftLeader returns true if the vault control-plane Raft group has an elected leader (cluster mode).
 	// Nil when no Raft group exists (single-node / memory mode).
 	HasRaftLeader func() bool
 
-	// IsRaftLeader returns true if THIS node is the Raft leader for this tier.
+	// IsRaftLeader returns true if THIS node is the vault ctl Raft leader (cluster mode).
 	// Nil when no Raft group exists (single-node / memory mode — always leader).
 	IsRaftLeader func() bool
 
-	// ApplyRaftRetentionPending marks a chunk as retention-pending in the tier Raft.
+	// ApplyRaftRetentionPending marks a chunk as retention-pending in replicated metadata.
 	ApplyRaftRetentionPending func(id chunk.ChunkID) error
 
 	// ListRetentionPending returns chunk IDs with RetentionPending=true in the FSM.
 	ListRetentionPending func() []chunk.ChunkID
 
 	// ApplyRaftTransitionStreamed marks a chunk as streamed to the next tier
-	// in the tier Raft, so it won't be deleted until the destination confirms
+	// in replicated metadata, so it won't be deleted until the destination confirms
 	// replication. See gastrolog-4913n.
 	ApplyRaftTransitionStreamed func(id chunk.ChunkID) error
 
@@ -61,7 +60,7 @@ type TierInstance struct {
 	HasTransitionReceipt func(sourceChunkID chunk.ChunkID) bool
 
 	// IsTombstoned returns true if the given chunk ID has been deleted from
-	// this tier's Raft FSM and is still within the tombstone retention
+	// this tier's replicated FSM and is still within the tombstone retention
 	// window. Used to reject stale replication commands (ImportSealed,
 	// Append, Seal) that race with retention — without this check, a late
 	// ImportSealed RPC could recreate a chunk the cluster already deleted,
@@ -69,12 +68,12 @@ type TierInstance struct {
 	// Nil when no Raft group exists.
 	IsTombstoned func(id chunk.ChunkID) bool
 
-	// ApplyRaftDelete applies CmdDeleteChunk to the tier Raft group and blocks
+	// ApplyRaftDelete applies CmdDeleteChunk through replicated metadata and blocks
 	// until committed. Returns an error if not leader or timeout. Nil when no
 	// Raft group exists.
 	ApplyRaftDelete func(id chunk.ChunkID) error
 
-	// ListManifest returns all chunk IDs in the tier Raft FSM — the authoritative
+	// ListManifest returns all chunk IDs in the tier FSM view — the authoritative
 	// set of chunks that should exist. Nil when no Raft group exists.
 	ListManifest func() []chunk.ChunkID
 
@@ -84,7 +83,7 @@ type TierInstance struct {
 	IsFSMReady func() bool
 
 	// OverlayFromFSM returns a copy of the given chunk meta with cluster-wide
-	// fields (CloudBacked, Archived, NumFrames) sourced from the tier Raft
+	// fields (CloudBacked, Archived, NumFrames) sourced from replicated metadata
 	// FSM instead of the local chunk manager. The local chunk manager only
 	// reflects this node's view, which is wrong for those fields on follower
 	// nodes: followers strip sealed_backing from their chunk-manager params

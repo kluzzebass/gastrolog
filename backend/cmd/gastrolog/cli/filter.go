@@ -1,9 +1,9 @@
 package cli
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"fmt"
+	"gastrolog/internal/glid"
 
 	"connectrpc.com/connect"
 	"github.com/spf13/cobra"

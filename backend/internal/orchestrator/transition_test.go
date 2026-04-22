@@ -1,8 +1,8 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"testing"
 	"time"
@@ -18,13 +18,12 @@ import (
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
 	chunkmem "gastrolog/internal/chunk/memory"
-	"gastrolog/internal/system"
-	sysmem "gastrolog/internal/system/memory"
 	"gastrolog/internal/index"
 	indexfile "gastrolog/internal/index/file"
 	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/query"
-
+	"gastrolog/internal/system"
+	sysmem "gastrolog/internal/system/memory"
 )
 
 // syntheticPlacements creates a Placements slice with a primary using a synthetic storage ID.
@@ -170,13 +169,13 @@ func setupTwoTierVault(t *testing.T) (*Orchestrator, glid.GLID, glid.GLID, glid.
 func newTestRetentionRunner(orch *Orchestrator, vaultID, tierID glid.GLID, cm chunk.ChunkManager, im index.IndexManager) *retentionRunner {
 	return &retentionRunner{
 		isLeader: true,
-		vaultID: vaultID,
-		tierID:  tierID,
-		cm:      cm,
-		im:      im,
-		orch:    orch,
-		now:     time.Now,
-		logger:  slog.Default(),
+		vaultID:  vaultID,
+		tierID:   tierID,
+		cm:       cm,
+		im:       im,
+		orch:     orch,
+		now:      time.Now,
+		logger:   slog.Default(),
 	}
 }
 
@@ -697,11 +696,11 @@ func TestTransitionSweepDispatch(t *testing.T) {
 		isLeader: true,
 		vaultID:  vaultID,
 		tierID:   tier0ID,
-		cm:      tier0CM,
-		im:      vault.Tiers[0].Indexes,
-		orch:    orch,
-		now:     time.Now,
-		logger:  slog.Default(),
+		cm:       tier0CM,
+		im:       vault.Tiers[0].Indexes,
+		orch:     orch,
+		now:      time.Now,
+		logger:   slog.Default(),
 	}
 
 	runner.sweep(rules)
@@ -787,11 +786,11 @@ func TestTransitionCloudTierTTLSweep(t *testing.T) {
 		isLeader: true,
 		vaultID:  vaultID,
 		tierID:   cloudTierID,
-		cm:      cloudTier.Chunks,
-		im:      cloudTier.Indexes,
-		orch:    orch,
-		now:     func() time.Time { return frozenNow },
-		logger:  slog.Default(),
+		cm:       cloudTier.Chunks,
+		im:       cloudTier.Indexes,
+		orch:     orch,
+		now:      func() time.Time { return frozenNow },
+		logger:   slog.Default(),
 	}
 
 	runner.sweep(rules)
@@ -863,8 +862,8 @@ func TestCloudTierLeaderPreservesCloudBacking(t *testing.T) {
 			Name: "cloud-leader-test",
 		}},
 		Tiers: []system.TierConfig{{
-			VaultID:  vaultID,
-			Position: 0,
+			VaultID:          vaultID,
+			Position:         0,
 			ID:               cloudTierID,
 			Name:             "cloud",
 			Type:             system.TierTypeCloud,
@@ -1150,6 +1149,7 @@ func (m *transitionFakeTransferrer) StreamToTier(_ context.Context, nodeID strin
 	})
 	return nil
 }
+
 // ---------- cloud tier transition test ----------
 
 // newCloudFileTier creates a file-backed TierInstance with cloud storage.
@@ -1361,11 +1361,11 @@ func TestTransitionCloudTierSweepDispatch(t *testing.T) {
 		isLeader: true,
 		vaultID:  vaultID,
 		tierID:   cloudTierID,
-		cm:      cloudTier.Chunks,
-		im:      cloudTier.Indexes,
-		orch:    orch,
-		now:     time.Now,
-		logger:  slog.Default(),
+		cm:       cloudTier.Chunks,
+		im:       cloudTier.Indexes,
+		orch:     orch,
+		now:      time.Now,
+		logger:   slog.Default(),
 	}
 
 	// Run the sweep — this should find the cloud-backed chunk, open a cloud
@@ -1429,7 +1429,6 @@ func newFileTierInstance(t *testing.T, tierID glid.GLID) (*TierInstance, string)
 		Query:   query.New(cm, im, nil),
 	}, dir
 }
-
 
 // assertNoDirsOnDisk verifies no chunk subdirectories remain in a tier directory.
 func assertNoDirsOnDisk(t *testing.T, label, dir string) {
@@ -1763,7 +1762,7 @@ func TestTransitionEventIDPreserved(t *testing.T) {
 	ingesterID := glid.New()
 	const recordCount = 10
 	type eventSnapshot struct {
-		raw       string
+		raw        string
 		ingesterID glid.GLID
 		ingestSeq  uint32
 	}
@@ -2341,6 +2340,7 @@ func (h *clusterHarness) countChunksOnTier(t *testing.T, tierIdx int) map[string
 //   - rotationRecords controls the rotation policy (e.g., 100 = seal every 100 records)
 //   - The leader's tiers have FollowerTargets pointing to all followers
 //   - Every node has a directTransferrer wired to all other nodes
+//
 // newClusterLifecycleLogger returns a slog.Logger that writes ALL levels
 // (including Debug) to /tmp/gastrolog-lifecycle-<testname>-<pid>-<ts>.log.
 // Path is outside t.TempDir() so the log survives test cleanup for
@@ -2388,11 +2388,11 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 			})
 		}
 		tierCfgs[i] = system.TierConfig{
-			ID:         tierIDs[i],
-			Name:       fmt.Sprintf("tier-%d", i),
-			Type:       system.TierTypeFile,
-			VaultID:    vaultID,
-			Position:   uint32(i),
+			ID:       tierIDs[i],
+			Name:     fmt.Sprintf("tier-%d", i),
+			Type:     system.TierTypeFile,
+			VaultID:  vaultID,
+			Position: uint32(i),
 		}
 		_ = store.PutTier(context.Background(), tierCfgs[i])
 		_ = store.SetTierPlacements(context.Background(), tierIDs[i], placements)

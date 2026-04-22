@@ -1,10 +1,9 @@
 package syslog
 
 import (
-	"gastrolog/internal/glid"
 	"errors"
+	"gastrolog/internal/glid"
 	"log/slog"
-
 
 	"gastrolog/internal/orchestrator"
 )

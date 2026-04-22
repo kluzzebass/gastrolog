@@ -1,11 +1,11 @@
 package cli
 
 import (
-	"gastrolog/internal/glid"
 	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"gastrolog/internal/glid"
 	"os"
 	"strings"
 
@@ -408,4 +408,3 @@ func buildMaxMindSettings(mm *maxmindExport) *v1.PutMaxMindSettings {
 	}
 	return pmm
 }
-

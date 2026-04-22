@@ -1,14 +1,13 @@
 package mqtt
 
 import (
-	"gastrolog/internal/glid"
 	"cmp"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"strconv"
 	"strings"
-
 
 	"gastrolog/internal/orchestrator"
 )

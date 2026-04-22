@@ -1,21 +1,20 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"testing"
 	"time"
 
 	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
-	"gastrolog/internal/system"
-	sysmem "gastrolog/internal/system/memory"
 	indexfile "gastrolog/internal/index/file"
 	"gastrolog/internal/query"
-
+	"gastrolog/internal/system"
+	sysmem "gastrolog/internal/system/memory"
 )
 
 // TestArchiveChunkViaRetentionSweep runs the full archival lifecycle:

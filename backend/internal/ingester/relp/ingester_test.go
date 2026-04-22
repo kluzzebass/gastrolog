@@ -1,7 +1,6 @@
 package relp
 
 import (
-	"gastrolog/internal/glid"
 	"bufio"
 	"context"
 	"crypto/ecdsa"
@@ -12,6 +11,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
+	"gastrolog/internal/glid"
 	"math/big"
 	"net"
 	"runtime"
@@ -19,7 +19,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
 
 	"gastrolog/internal/orchestrator"
 )

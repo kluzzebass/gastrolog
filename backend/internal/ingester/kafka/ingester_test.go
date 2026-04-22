@@ -3,7 +3,6 @@ package kafka
 import (
 	"gastrolog/internal/glid"
 	"testing"
-
 )
 
 // --- Factory Tests ---

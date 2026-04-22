@@ -77,7 +77,7 @@ func TestTierLeaderManager_StartStopIdempotent(t *testing.T) {
 	g, _, cleanup := makeSingleNodeTierGroup(t, "node-1")
 	defer cleanup()
 
-	mgr := newTierLeaderManager(discardLogger())
+	mgr := newVaultCtlLeaderManager(discardLogger())
 	defer mgr.StopAll()
 
 	tierID := glid.New()
@@ -109,7 +109,7 @@ func TestTierLeaderManager_ReconcileAddsMissingMember(t *testing.T) {
 	g, _, cleanup := makeSingleNodeTierGroup(t, "leader-add")
 	defer cleanup()
 
-	mgr := newTierLeaderManager(discardLogger())
+	mgr := newVaultCtlLeaderManager(discardLogger())
 	defer mgr.StopAll()
 
 	tierID := glid.New()
@@ -159,7 +159,7 @@ func TestTierLeaderManager_ReconcileRemovesExtras(t *testing.T) {
 		t.Fatalf("seed AddVoter: %v", err)
 	}
 
-	mgr := newTierLeaderManager(discardLogger())
+	mgr := newVaultCtlLeaderManager(discardLogger())
 	defer mgr.StopAll()
 
 	tierID := glid.New()
@@ -281,7 +281,7 @@ func TestTierLeaderManager_ReconcileNoOpWhenStable(t *testing.T) {
 	g, _, cleanup := makeSingleNodeTierGroup(t, "stable-node")
 	defer cleanup()
 
-	mgr := newTierLeaderManager(discardLogger())
+	mgr := newVaultCtlLeaderManager(discardLogger())
 	defer mgr.StopAll()
 
 	tierID := glid.New()

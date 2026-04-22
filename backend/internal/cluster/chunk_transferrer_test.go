@@ -1,9 +1,9 @@
 package cluster
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
+	"gastrolog/internal/glid"
 	"net"
 	"testing"
 	"time"
@@ -116,4 +116,3 @@ func TestStreamToTierTimeoutOnHangingPeer(t *testing.T) {
 			elapsed, streamCallTimeout-time.Second)
 	}
 }
-

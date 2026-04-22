@@ -1,12 +1,11 @@
 package query
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"slices"
-
 
 	"gastrolog/internal/chunk"
 )

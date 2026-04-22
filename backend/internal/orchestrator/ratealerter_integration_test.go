@@ -1,9 +1,9 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"fmt"
+	"gastrolog/internal/glid"
 	"testing"
 	"time"
 
@@ -11,7 +11,6 @@ import (
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/memtest"
-
 )
 
 // TestRotationHookFiresRateAlerter verifies that the cron rotation

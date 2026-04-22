@@ -1,9 +1,9 @@
 package query_test
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"fmt"
+	"gastrolog/internal/glid"
 	"strconv"
 	"testing"
 	"time"
@@ -14,7 +14,6 @@ import (
 	"gastrolog/internal/memtest"
 	"gastrolog/internal/query"
 	"gastrolog/internal/querylang"
-
 )
 
 type testRegistry struct {

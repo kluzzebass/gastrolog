@@ -1,13 +1,12 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
+	"gastrolog/internal/glid"
 	"iter"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/query"
-
 )
 
 // Search delegates to the query engine registered under the given key.

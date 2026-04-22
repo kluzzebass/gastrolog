@@ -1,20 +1,19 @@
 package app
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"strings"
 	"sync"
 	"testing"
 
-
 	"gastrolog/internal/cluster"
-	"gastrolog/internal/system"
-	"gastrolog/internal/system/raftfsm"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/system"
+	"gastrolog/internal/system/raftfsm"
 )
 
 // ---------------------------------------------------------------------------
@@ -37,7 +36,7 @@ func (h *captureHandler) Handle(_ context.Context, r slog.Record) error {
 }
 
 func (h *captureHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
-func (h *captureHandler) WithGroup(string) slog.Handler       { return h }
+func (h *captureHandler) WithGroup(string) slog.Handler      { return h }
 
 func (h *captureHandler) hasMessage(substr string) bool {
 	h.mu.Lock()
@@ -83,18 +82,18 @@ type mockOrch struct {
 	updateMaxJobsErr   error
 	currentMaxJobs     int
 
-	drainCalls          []glid.GLID // IDs passed to DrainVault
-	cancelDrainIDs      []glid.GLID // IDs passed to CancelDrain
-	forceRemoveIDs      []glid.GLID // IDs passed to ForceRemoveVault
-	unregisterIDs       []glid.GLID // IDs passed to UnregisterVault
-	unregisterErr       error
-	removeIngesterIDs   []glid.GLID // IDs passed to RemoveIngester
-	reloadFiltersCalls  int         // number of ReloadFilters calls
+	drainCalls         []glid.GLID // IDs passed to DrainVault
+	cancelDrainIDs     []glid.GLID // IDs passed to CancelDrain
+	forceRemoveIDs     []glid.GLID // IDs passed to ForceRemoveVault
+	unregisterIDs      []glid.GLID // IDs passed to UnregisterVault
+	unregisterErr      error
+	removeIngesterIDs  []glid.GLID // IDs passed to RemoveIngester
+	reloadFiltersCalls int         // number of ReloadFilters calls
 
 	// Tier drain tracking.
-	tierDrainCalls      []glid.GLID                                                  // tier IDs passed to DrainTier
-	removeTierCalls     [][2]glid.GLID                                               // [vaultID, tierID] pairs passed to RemoveTierFromVault
-	localTierExported   func(vaultID, tierID glid.GLID) *orchestrator.TierInstance   // configurable return
+	tierDrainCalls    []glid.GLID                                                // tier IDs passed to DrainTier
+	removeTierCalls   [][2]glid.GLID                                             // [vaultID, tierID] pairs passed to RemoveTierFromVault
+	localTierExported func(vaultID, tierID glid.GLID) *orchestrator.TierInstance // configurable return
 }
 
 func (m *mockOrch) ListVaults() []glid.GLID    { return m.vaults }
@@ -113,10 +112,10 @@ func (m *mockOrch) ReloadFilters(context.Context) error {
 	m.reloadFiltersCalls++
 	return m.reloadFiltersErr
 }
-func (m *mockOrch) ReloadRotationPolicies(context.Context) error { return m.reloadRotationErr }
+func (m *mockOrch) ReloadRotationPolicies(context.Context) error  { return m.reloadRotationErr }
 func (m *mockOrch) ReloadRetentionPolicies(context.Context) error { return m.reloadRetentionErr }
-func (m *mockOrch) DisableVault(glid.GLID) error                 { return m.disableVaultErr }
-func (m *mockOrch) EnableVault(glid.GLID) error                  { return m.enableVaultErr }
+func (m *mockOrch) DisableVault(glid.GLID) error                  { return m.disableVaultErr }
+func (m *mockOrch) EnableVault(glid.GLID) error                   { return m.enableVaultErr }
 func (m *mockOrch) ForceRemoveVault(id glid.GLID) error {
 	m.forceRemoveIDs = append(m.forceRemoveIDs, id)
 	return m.forceRemoveErr
@@ -138,7 +137,7 @@ func (m *mockOrch) UnregisterVault(id glid.GLID) error {
 	return m.unregisterErr
 }
 func (m *mockOrch) HasMissingTiers(_ glid.GLID, _ []glid.GLID) bool { return false }
-func (m *mockOrch) LocalTierIDs(_ glid.GLID) []glid.GLID             { return nil }
+func (m *mockOrch) LocalTierIDs(_ glid.GLID) []glid.GLID            { return nil }
 func (m *mockOrch) AddTierToVault(_ context.Context, _, _ glid.GLID, _ orchestrator.Factories) error {
 	return nil
 }
@@ -146,7 +145,7 @@ func (m *mockOrch) DrainVault(_ context.Context, id glid.GLID, _ string) error {
 	m.drainCalls = append(m.drainCalls, id)
 	return m.drainVaultErr
 }
-func (m *mockOrch) IsDraining(glid.GLID) bool                    { return m.isDraining }
+func (m *mockOrch) IsDraining(glid.GLID) bool { return m.isDraining }
 func (m *mockOrch) CancelDrain(_ context.Context, id glid.GLID) error {
 	m.cancelDrainIDs = append(m.cancelDrainIDs, id)
 	return m.cancelDrainErr
@@ -173,17 +172,17 @@ func (m *mockOrch) AddIngester(glid.GLID, string, string, bool, orchestrator.Ing
 type stubCfgStore struct {
 	system.Store // nil embed — panics on uncalled methods
 
-	vault       *system.VaultConfig
-	vaultErr    error
-	vaultList   []system.VaultConfig
+	vault        *system.VaultConfig
+	vaultErr     error
+	vaultList    []system.VaultConfig
 	vaultListErr error
-	tiers       []system.TierConfig
-	ingester    *system.IngesterConfig
-	ingesterErr error
-	settings    system.ServerSettings
-	settingsErr error
-	cfg         *system.Config
-	loadErr     error
+	tiers        []system.TierConfig
+	ingester     *system.IngesterConfig
+	ingesterErr  error
+	settings     system.ServerSettings
+	settingsErr  error
+	cfg          *system.Config
+	loadErr      error
 
 	ingesterAssignments map[glid.GLID]string // ingester ID → assigned node
 }
@@ -201,7 +200,10 @@ func (s *stubCfgStore) LoadServerSettings(context.Context) (system.ServerSetting
 	return s.settings, s.settingsErr
 }
 func (s *stubCfgStore) Load(context.Context) (*system.System, error) {
-	if s.cfg == nil { return nil, s.loadErr }; return &system.System{Config: *s.cfg}, s.loadErr
+	if s.cfg == nil {
+		return nil, s.loadErr
+	}
+	return &system.System{Config: *s.cfg}, s.loadErr
 }
 func (s *stubCfgStore) ListTiers(context.Context) ([]system.TierConfig, error) {
 	if len(s.tiers) > 0 {
@@ -926,9 +928,6 @@ func (m *mockOrch) FindLocalTierExported(vaultID, tierID glid.GLID) *orchestrato
 	}
 	return nil
 }
-
-func (m *mockOrch) StopTierLeaderLoop(glid.GLID)            {}
-func (m *mockOrch) SetDesiredTierLeader(glid.GLID, string) {}
 
 // TestHandleTierDeleted_DrainOnlyOnLeader verifies that when a tier is deleted
 // with drain=true, only the config leader for that tier initiates a drain.

@@ -17,9 +17,9 @@ var (
 	ErrChunkNotFound  = errors.New("chunk not found")
 	ErrVaultNotFound  = errors.New("vault not found")
 	ErrActiveChunk    = errors.New("cannot delete active chunk")
-	ErrChunkArchived = errors.New("chunk is archived and not immediately readable")
-	ErrChunkSuspect  = errors.New("chunk blob not found in cloud storage — may be transient")
-	ErrNoTSIndex     = errors.New("no TS index available")
+	ErrChunkArchived  = errors.New("chunk is archived and not immediately readable")
+	ErrChunkSuspect   = errors.New("chunk blob not found in cloud storage — may be transient")
+	ErrNoTSIndex      = errors.New("no TS index available")
 )
 
 // TSIndexLoader is an optional interface for chunk managers that can provide
@@ -150,7 +150,6 @@ type ChunkCompressor interface {
 	RefreshDiskSizes(id ChunkID)
 }
 
-
 // ChunkIndexBuilder builds indexes for a sealed chunk.
 // Implementations are injected into the chunk manager at construction time.
 // The chunk manager calls Build after compression completes.
@@ -181,7 +180,6 @@ type ChunkPostSealProcessor interface {
 type ChunkCloudUploader interface {
 	UploadToCloud(id ChunkID) error
 }
-
 
 // ChunkArchiver extends ChunkManager with storage-class lifecycle operations
 // for cloud-backed chunks. Callers should type-assert to check availability.

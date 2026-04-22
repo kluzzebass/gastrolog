@@ -1,11 +1,11 @@
 package server
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 
 	"connectrpc.com/connect"
 

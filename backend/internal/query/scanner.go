@@ -1,10 +1,10 @@
 package query
 
 import (
-	"gastrolog/internal/glid"
 	"bytes"
 	"context"
 	"errors"
+	"gastrolog/internal/glid"
 	"iter"
 	"regexp"
 	"slices"
@@ -17,7 +17,6 @@ import (
 	"gastrolog/internal/index"
 	"gastrolog/internal/querylang"
 	"gastrolog/internal/tokenizer"
-
 )
 
 // kvExtractors is the default set of KV extractors used by runtime filters.

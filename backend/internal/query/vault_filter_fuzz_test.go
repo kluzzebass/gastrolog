@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"gastrolog/internal/querylang"
-
 )
 
 func FuzzExtractVaultFilter(f *testing.F) {

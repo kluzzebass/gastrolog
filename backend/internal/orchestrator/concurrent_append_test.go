@@ -1,10 +1,10 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"io"
 	"sync"
 	"sync/atomic"
@@ -14,11 +14,10 @@ import (
 	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
-	"gastrolog/internal/system"
-	sysmem "gastrolog/internal/system/memory"
 	indexfile "gastrolog/internal/index/file"
 	"gastrolog/internal/query"
-
+	"gastrolog/internal/system"
+	sysmem "gastrolog/internal/system/memory"
 )
 
 // TestConcurrentAppendToTierAttrIntegrity reproduces gastrolog-4dd48:
@@ -98,7 +97,6 @@ func TestConcurrentAppendToTierAttrIntegrity(t *testing.T) {
 	// Wait for background PostSealProcess (compression) to complete.
 	// Jobs run immediately via scheduler; 1s is ample for 20 chunks.
 	time.Sleep(1 * time.Second)
-
 
 	// Read back ALL records via cursor.
 	metas, _ := cm.List()
@@ -769,8 +767,7 @@ func TestReconfigDuringTransitionDoesNotPanic(t *testing.T) {
 	// Simultaneously reconfigure — remove tier 1 from the vault's system.
 	// The transition's resolveNextTierInChain will see the change.
 	// Remove tier1 from vault by clearing its VaultID.
-	_ = store.PutTier(context.Background(), system.TierConfig{
-	})
+	_ = store.PutTier(context.Background(), system.TierConfig{})
 	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "reconfig-race",
 	})

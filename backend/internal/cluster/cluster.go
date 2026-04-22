@@ -418,7 +418,7 @@ func (s *Server) SetApplyFn(fn func(ctx context.Context, data []byte) error) {
 }
 
 // SetTierApplyFn sets the function used by the ForwardTierApply handler to
-// apply tier FSM commands on the tier Raft leader node.
+// apply commands on the vault control-plane Raft leader (group_id + payload).
 func (s *Server) SetTierApplyFn(fn func(ctx context.Context, groupID string, data []byte) error) {
 	s.tierApplyFn = fn
 }

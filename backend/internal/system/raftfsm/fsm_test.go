@@ -1,9 +1,9 @@
 package raftfsm
 
 import (
-	"gastrolog/internal/glid"
 	"bytes"
 	"context"
+	"gastrolog/internal/glid"
 	"io"
 	"testing"
 	"time"

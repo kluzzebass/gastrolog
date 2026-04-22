@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"gastrolog/internal/chunk"
-
 )
 
 func TestCompileFilter(t *testing.T) {

@@ -1,10 +1,10 @@
 package server
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"iter"
 	"slices"
 	"time"
@@ -13,8 +13,8 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/system"
 	"gastrolog/internal/query"
+	"gastrolog/internal/system"
 )
 
 // GetContext returns records surrounding a specific record, searching across

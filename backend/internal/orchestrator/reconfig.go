@@ -40,4 +40,3 @@ func (o *Orchestrator) MaxConcurrentJobs() int {
 func (o *Orchestrator) UpdateMaxConcurrentJobs(n int) error {
 	return o.scheduler.Rebuild(n)
 }
-

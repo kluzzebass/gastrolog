@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"gastrolog/internal/system"
 	"gastrolog/internal/home"
 	"gastrolog/internal/lookup"
+	"gastrolog/internal/system"
 )
 
 // loadInitialLookupConfig loads MMDB, HTTP, and JSON lookup tables from persisted config at startup.

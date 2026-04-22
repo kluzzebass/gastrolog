@@ -1,9 +1,9 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
+	"gastrolog/internal/glid"
 	"strings"
 	"sync"
 	"testing"
@@ -11,11 +11,10 @@ import (
 
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
-	"gastrolog/internal/system"
-	sysmem "gastrolog/internal/system/memory"
 	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/query"
-
+	"gastrolog/internal/system"
+	sysmem "gastrolog/internal/system/memory"
 )
 
 func newMemTier(t *testing.T, tierID glid.GLID, isFollower bool, followers []system.ReplicationTarget) *TierInstance {
@@ -30,11 +29,11 @@ func newMemTier(t *testing.T, tierID glid.GLID, isFollower bool, followers []sys
 	}
 	im, _ := indexmem.NewFactory()(nil, cm, nil)
 	return &TierInstance{
-		TierID:           tierID,
-		Type:             "memory",
-		Chunks:           cm,
-		Indexes:          im,
-		Query:            query.New(cm, im, nil),
+		TierID:          tierID,
+		Type:            "memory",
+		Chunks:          cm,
+		Indexes:         im,
+		Query:           query.New(cm, im, nil),
 		IsFollower:      isFollower,
 		FollowerTargets: followers,
 	}
@@ -722,11 +721,11 @@ func TestAppendToTierSecondarySkipsPostSeal(t *testing.T) {
 	}
 	im, _ := indexmem.NewFactory()(nil, cm, nil)
 	tier := &TierInstance{
-		TierID:      tierID,
-		Type:        "memory",
-		Chunks:      cm,
-		Indexes:     im,
-		Query:       query.New(cm, im, nil),
+		TierID:     tierID,
+		Type:       "memory",
+		Chunks:     cm,
+		Indexes:    im,
+		Query:      query.New(cm, im, nil),
 		IsFollower: true,
 	}
 	vault := NewVault(vaultID, tier)
@@ -1598,4 +1597,3 @@ func TestAppendToTierForwardingDoesNotBlockOnFullChannel(t *testing.T) {
 		t.Errorf("expected at least 2 AppendRecords calls (one per follower), got %d", got)
 	}
 }
-

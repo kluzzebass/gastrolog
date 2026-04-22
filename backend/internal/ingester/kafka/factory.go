@@ -1,13 +1,12 @@
 package kafka
 
 import (
-	"gastrolog/internal/glid"
 	"cmp"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"strings"
-
 
 	"gastrolog/internal/orchestrator"
 )

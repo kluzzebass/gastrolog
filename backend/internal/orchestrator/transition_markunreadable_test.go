@@ -1,10 +1,10 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"testing"
 	"time"
@@ -13,7 +13,6 @@ import (
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/system"
 	sysmem "gastrolog/internal/system/memory"
-
 )
 
 // streamErrTransferrer is a minimal RemoteTransferrer that returns a
@@ -69,11 +68,11 @@ func setupRemoteTransitionRunner(t *testing.T, transferrer RemoteTransferrer) (*
 	_ = store.PutVault(context.Background(), system.VaultConfig{ID: vaultID, Name: "test-vault"})
 	_ = store.PutTier(context.Background(), system.TierConfig{
 		ID: tier0ID, Name: "hot", Type: system.TierTypeMemory,
-		VaultID:    vaultID, Position: 0,
+		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
 		ID: tier1ID, Name: "warm", Type: system.TierTypeMemory,
-		VaultID:    vaultID, Position: 1,
+		VaultID: vaultID, Position: 1,
 	})
 	orch.sysLoader = &transitionSystemLoader{store: store}
 

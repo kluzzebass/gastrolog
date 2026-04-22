@@ -1,9 +1,9 @@
 package system
 
 import (
-	"gastrolog/internal/glid"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"time"
 
 	"gastrolog/internal/chunk"
@@ -196,4 +196,3 @@ type RetentionRule struct {
 	Action            RetentionAction `json:"action"`
 	EjectRouteIDs     []glid.GLID     `json:"ejectRouteIds,omitempty"` // target routes, only for eject
 }
-

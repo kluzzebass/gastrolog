@@ -44,7 +44,6 @@ func (p *PeerJobState) Delete(senderID string) {
 	p.mu.Unlock()
 }
 
-
 // GetAll returns all non-expired peer job lists, keyed by sender node ID.
 func (p *PeerJobState) GetAll() map[string][]*gastrologv1.Job {
 	p.mu.RLock()

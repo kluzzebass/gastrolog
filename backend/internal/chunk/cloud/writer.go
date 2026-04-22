@@ -1,9 +1,9 @@
 package cloud
 
 import (
-	"gastrolog/internal/glid"
 	"encoding/binary"
 	"fmt"
+	"gastrolog/internal/glid"
 	"io"
 	"slices"
 	"time"
@@ -15,7 +15,6 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/format"
 )
-
 
 // tsEntry is a (timestamp, position) pair for the embedded TS index.
 type tsEntry struct {
@@ -293,7 +292,7 @@ func (w *Writer) writeTSIndexes(cw *countWriter) error {
 
 	var tocBuf [tocSize]byte
 	copy(tocBuf[0:4], tocMagic)
-	binary.LittleEndian.PutUint32(tocBuf[4:8], 1) // tocVersion
+	binary.LittleEndian.PutUint32(tocBuf[4:8], 1)                               // tocVersion
 	binary.LittleEndian.PutUint64(tocBuf[8:16], uint64(w.toc.IngestIdxOffset))  //nolint:gosec // G115: offset is always positive
 	binary.LittleEndian.PutUint64(tocBuf[16:24], uint64(w.toc.IngestIdxSize))   //nolint:gosec // G115: size is always positive
 	binary.LittleEndian.PutUint64(tocBuf[24:32], uint64(w.toc.SourceIdxOffset)) //nolint:gosec // G115: offset is always positive

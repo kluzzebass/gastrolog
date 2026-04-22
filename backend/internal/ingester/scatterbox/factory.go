@@ -1,12 +1,11 @@
 package scatterbox
 
 import (
-	"gastrolog/internal/glid"
 	"fmt"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"strconv"
 	"time"
-
 
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"

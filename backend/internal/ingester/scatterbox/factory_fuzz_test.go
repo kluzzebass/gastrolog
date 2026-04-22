@@ -1,11 +1,10 @@
 package scatterbox
 
 import (
-	"gastrolog/internal/glid"
 	"bytes"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"testing"
-
 )
 
 func FuzzNewIngester(f *testing.F) {

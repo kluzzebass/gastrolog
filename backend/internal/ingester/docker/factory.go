@@ -1,20 +1,19 @@
 package docker
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"fmt"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-
-	"gastrolog/internal/system"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/querylang"
+	"gastrolog/internal/system"
 )
 
 // ParamDefaults returns the default parameter values for a Docker ingester.

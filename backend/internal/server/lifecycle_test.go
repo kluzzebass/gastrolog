@@ -1,8 +1,8 @@
 package server_test
 
 import (
-	"gastrolog/internal/glid"
 	"context"
+	"gastrolog/internal/glid"
 	"net/http"
 	"runtime"
 	"strings"
@@ -16,10 +16,10 @@ import (
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/cluster"
-	sysmem "gastrolog/internal/system/memory"
 	"gastrolog/internal/memtest"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/server"
+	sysmem "gastrolog/internal/system/memory"
 
 	"connectrpc.com/connect"
 )
@@ -31,9 +31,9 @@ type mockCluster struct {
 	servers    []cluster.RaftServer
 }
 
-func (m *mockCluster) LeaderInfo() (string, string) { return m.leaderAddr, m.leaderID }
+func (m *mockCluster) LeaderInfo() (string, string)           { return m.leaderAddr, m.leaderID }
 func (m *mockCluster) Servers() ([]cluster.RaftServer, error) { return m.servers, nil }
-func (m *mockCluster) LocalStats() map[string]string { return nil }
+func (m *mockCluster) LocalStats() map[string]string          { return nil }
 
 func TestDrainWaitsForInFlightRequests(t *testing.T) {
 	// Create orchestrator with a vault

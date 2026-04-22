@@ -1,11 +1,11 @@
 package server
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 
 	"connectrpc.com/connect"
 
@@ -15,10 +15,10 @@ import (
 
 // userPreferences is the JSON structure stored in the users.preferences column.
 type userPreferences struct {
-	Theme            string       `json:"theme,omitempty"`
-	SyntaxHighlight  string       `json:"syntax_highlight,omitempty"`
-	Palette          string       `json:"palette,omitempty"`
-	SavedQueries     []savedQuery `json:"saved_queries,omitempty"`
+	Theme           string       `json:"theme,omitempty"`
+	SyntaxHighlight string       `json:"syntax_highlight,omitempty"`
+	Palette         string       `json:"palette,omitempty"`
+	SavedQueries    []savedQuery `json:"saved_queries,omitempty"`
 }
 
 // savedQuery is one entry in the user's saved queries list.

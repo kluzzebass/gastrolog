@@ -1,10 +1,9 @@
 package query
 
 import (
-	"gastrolog/internal/glid"
 	"context"
+	"gastrolog/internal/glid"
 	"time"
-
 )
 
 // HistogramBucket holds the count for a single time bucket in the volume histogram.

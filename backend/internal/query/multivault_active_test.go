@@ -1,9 +1,9 @@
 package query_test
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"fmt"
+	"gastrolog/internal/glid"
 	"testing"
 	"time"
 
@@ -12,7 +12,6 @@ import (
 	"gastrolog/internal/index"
 	"gastrolog/internal/memtest"
 	"gastrolog/internal/query"
-
 )
 
 func TestMultiVaultSearchActiveChunks(t *testing.T) {

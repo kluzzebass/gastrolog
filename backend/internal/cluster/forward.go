@@ -731,9 +731,8 @@ func (s *Server) forwardApply(ctx context.Context, req *gastrologv1.ForwardApply
 	return &gastrologv1.ForwardApplyResponse{}, nil
 }
 
-// forwardTierApply handles the ForwardTierApply RPC on the tier Raft leader.
-// Config placement leaders call this to proxy tier FSM commands when they
-// aren't the tier Raft leader.
+// forwardTierApply handles the ForwardTierApply RPC (vault ctl group_id +
+// marshaled command, typically OpTierFSM-wrapped tierfsm payloads).
 func (s *Server) forwardTierApply(ctx context.Context, req *gastrologv1.ForwardTierApplyRequest) (*gastrologv1.ForwardTierApplyResponse, error) {
 	if s.tierApplyFn == nil {
 		return nil, status.Error(codes.Unavailable, "tier apply function not configured")

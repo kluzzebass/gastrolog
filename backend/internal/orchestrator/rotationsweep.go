@@ -1,12 +1,11 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
+	"gastrolog/internal/glid"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/system"
-
 )
 
 const (
@@ -111,7 +110,7 @@ func (o *Orchestrator) reconcileFilters(sys *system.System) {
 // applyRotationFromConfig resolves the rotation policy for a leader tier
 // from the current config and applies it. Also ensures the cron job exists
 // if configured. Called each tick by rotationSweep.
-func (o *Orchestrator) applyRotationFromConfig(sys *system.System, 
+func (o *Orchestrator) applyRotationFromConfig(sys *system.System,
 	cfg *system.Config,
 	vaultCfg system.VaultConfig,
 	tier *TierInstance,

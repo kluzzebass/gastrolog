@@ -1,9 +1,9 @@
 package server
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
+	"gastrolog/internal/glid"
 	"slices"
 	"time"
 
@@ -12,10 +12,10 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/system"
-	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/index/analyzer"
+	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/sysmetrics"
+	"gastrolog/internal/system"
 )
 
 // vaultName returns the human-readable name for a vault, falling back to the ID.
@@ -392,14 +392,14 @@ func (s *VaultServer) vaultInfoFromLocal(ctx context.Context, id glid.GLID) *api
 
 func ChunkMetaToProto(meta chunk.ChunkMeta) *apiv1.ChunkMeta {
 	pb := &apiv1.ChunkMeta{
-		Id:          glid.GLID(meta.ID).ToProto(),
-		WriteStart:  timestamppb.New(meta.WriteStart),
-		WriteEnd:    timestamppb.New(meta.WriteEnd),
-		Sealed:      meta.Sealed,
-		RecordCount: meta.RecordCount,
-		Bytes:       meta.Bytes,
-		Compressed:  meta.Compressed,
-		DiskBytes:   meta.DiskBytes,
+		Id:           glid.GLID(meta.ID).ToProto(),
+		WriteStart:   timestamppb.New(meta.WriteStart),
+		WriteEnd:     timestamppb.New(meta.WriteEnd),
+		Sealed:       meta.Sealed,
+		RecordCount:  meta.RecordCount,
+		Bytes:        meta.Bytes,
+		Compressed:   meta.Compressed,
+		DiskBytes:    meta.DiskBytes,
 		CloudBacked:  meta.CloudBacked,
 		Archived:     meta.Archived,
 		StorageClass: meta.StorageClass,

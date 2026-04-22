@@ -1,12 +1,11 @@
 package metrics
 
 import (
-	"gastrolog/internal/glid"
 	"context"
+	"gastrolog/internal/glid"
 	"strings"
 	"testing"
 	"time"
-
 
 	"gastrolog/internal/orchestrator"
 )

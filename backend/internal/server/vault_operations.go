@@ -1,10 +1,10 @@
 package server
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"maps"
 	"os"
 
@@ -12,9 +12,9 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/system"
 	"gastrolog/internal/convert"
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/system"
 )
 
 // makeCleanupFunc returns a callback that removes the source vault from the

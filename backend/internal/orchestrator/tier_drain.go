@@ -1,14 +1,13 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/system"
-
 )
 
 // TierDrainMode determines where chunks go during a tier drain.
@@ -26,7 +25,7 @@ type tierDrainState struct {
 	VaultID      glid.GLID
 	TierID       glid.GLID
 	Mode         TierDrainMode
-	TargetNodeID string             // only for rebalance mode
+	TargetNodeID string // only for rebalance mode
 	JobID        string
 	Cancel       context.CancelFunc
 }

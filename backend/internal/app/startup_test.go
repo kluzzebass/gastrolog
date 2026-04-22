@@ -1,14 +1,13 @@
 package app
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"encoding/base64"
 	"errors"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"testing"
 	"time"
-
 
 	"gastrolog/internal/system"
 	"gastrolog/internal/system/memory"

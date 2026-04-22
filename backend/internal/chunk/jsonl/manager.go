@@ -38,11 +38,11 @@ type Manager struct {
 
 // record is the JSON structure written per line.
 type record struct {
-	SourceTS time.Time          `json:"source_ts"`
-	IngestTS time.Time          `json:"ingest_ts"`
-	WriteTS  time.Time          `json:"write_ts"`
-	Attrs    chunk.Attributes   `json:"attrs"`
-	Raw      string             `json:"raw"`
+	SourceTS time.Time        `json:"source_ts"`
+	IngestTS time.Time        `json:"ingest_ts"`
+	WriteTS  time.Time        `json:"write_ts"`
+	Attrs    chunk.Attributes `json:"attrs"`
+	Raw      string           `json:"raw"`
 }
 
 // NewManager creates a JSONL sink manager at the given file path.
@@ -154,15 +154,23 @@ func (m *Manager) List() ([]chunk.ChunkMeta, error) {
 	return []chunk.ChunkMeta{m.meta()}, nil
 }
 
-func (m *Manager) Delete(chunk.ChunkID) error                                         { return nil }
-func (m *Manager) OpenCursor(chunk.ChunkID) (chunk.RecordCursor, error)               { return nil, errors.New("jsonl sink does not support reading") }
-func (m *Manager) FindStartPosition(chunk.ChunkID, time.Time) (uint64, bool, error)        { return 0, false, nil }
-func (m *Manager) FindIngestStartPosition(chunk.ChunkID, time.Time) (uint64, bool, error)  { return 0, false, nil }
-func (m *Manager) FindSourceStartPosition(chunk.ChunkID, time.Time) (uint64, bool, error)  { return 0, false, nil }
-func (m *Manager) ReadWriteTimestamps(chunk.ChunkID, []uint64) ([]time.Time, error)        { return nil, nil }
-func (m *Manager) SetRotationPolicy(chunk.RotationPolicy)                              {}
-func (m *Manager) CheckRotation() *string                                              { return nil }
-func (m *Manager) SetNextChunkID(chunk.ChunkID)                                        {}
+func (m *Manager) Delete(chunk.ChunkID) error { return nil }
+func (m *Manager) OpenCursor(chunk.ChunkID) (chunk.RecordCursor, error) {
+	return nil, errors.New("jsonl sink does not support reading")
+}
+func (m *Manager) FindStartPosition(chunk.ChunkID, time.Time) (uint64, bool, error) {
+	return 0, false, nil
+}
+func (m *Manager) FindIngestStartPosition(chunk.ChunkID, time.Time) (uint64, bool, error) {
+	return 0, false, nil
+}
+func (m *Manager) FindSourceStartPosition(chunk.ChunkID, time.Time) (uint64, bool, error) {
+	return 0, false, nil
+}
+func (m *Manager) ReadWriteTimestamps(chunk.ChunkID, []uint64) ([]time.Time, error) { return nil, nil }
+func (m *Manager) SetRotationPolicy(chunk.RotationPolicy)                           {}
+func (m *Manager) CheckRotation() *string                                           { return nil }
+func (m *Manager) SetNextChunkID(chunk.ChunkID)                                     {}
 func (m *Manager) ScanAttrs(_ chunk.ChunkID, _ uint64, _ func(time.Time, chunk.Attributes) bool) error {
 	return nil
 }

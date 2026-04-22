@@ -1,14 +1,13 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
+	"gastrolog/internal/glid"
 	"sync/atomic"
 	"testing"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/lifecycle"
-
 )
 
 // recordingTierReplicator is a TierReplicator that counts every call. Used

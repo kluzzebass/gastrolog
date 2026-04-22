@@ -1,9 +1,9 @@
 package server
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"fmt"
+	"gastrolog/internal/glid"
 	"time"
 
 	"connectrpc.com/connect"

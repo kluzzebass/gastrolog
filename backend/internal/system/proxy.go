@@ -1,12 +1,11 @@
 package system
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
+	"gastrolog/internal/glid"
 	"sync"
 	"time"
-
 )
 
 // ErrJoining is returned by the proxy when a cluster join is in progress.

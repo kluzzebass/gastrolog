@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"gastrolog/internal/alert"
-
 )
 
 // fakeAlerts captures Set/Clear calls for assertion. Implements

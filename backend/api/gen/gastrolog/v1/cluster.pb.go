@@ -1221,14 +1221,15 @@ func (x *ForwardRecordsResponse) GetRecordsWritten() int64 {
 	return 0
 }
 
-// ForwardTierApplyRequest carries a pre-marshaled tier FSM command for the
-// tier Raft leader to apply. Used when the config placement leader (which
-// runs retention and chunk lifecycle) is not the tier Raft leader.
+// ForwardTierApplyRequest carries bytes for the vault control-plane Raft
+// leader to apply. group_id is the vault ctl group (vault/<vaultGLID>/ctl);
+// command is typically OpTierFSM + tier GLID + tierfsm wire payload (see
+// vaultraft.MarshalTierCommand). RPC name is historical.
 type ForwardTierApplyRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// UTF-8 tier metadata Raft group ID: vault/<vaultGLID>/tier/<tierGLID>
+	// UTF-8 multiraft group id (vault control-plane: vault/<vaultGLID>/ctl)
 	GroupId       []byte `protobuf:"bytes,1,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
-	Command       []byte `protobuf:"bytes,2,opt,name=command,proto3" json:"command,omitempty"` // pre-marshaled tier FSM command
+	Command       []byte `protobuf:"bytes,2,opt,name=command,proto3" json:"command,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1314,8 +1315,8 @@ func (*ForwardTierApplyResponse) Descriptor() ([]byte, []int) {
 }
 
 // ForwardVaultApplyRequest carries a pre-marshaled vault control-plane FSM
-// command for the vault Raft leader. Parallels ForwardTierApply; becomes the
-// primary cross-node apply path as tier metadata Raft is removed (5xxbd).
+// command for the vault Raft leader. Parallels ForwardTierApply (vault-only
+// opcodes such as no-ops); tier chunk metadata uses ForwardTierApply + OpTierFSM.
 type ForwardVaultApplyRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// UTF-8 vault control-plane group id: vault/<vaultGLID>/ctl

@@ -1,11 +1,10 @@
 package fluentfwd
 
 import (
-	"gastrolog/internal/glid"
 	"cmp"
 	"fmt"
+	"gastrolog/internal/glid"
 	"log/slog"
-
 
 	"gastrolog/internal/orchestrator"
 )

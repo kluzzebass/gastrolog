@@ -1,11 +1,10 @@
 package syslog
 
 import (
-	"gastrolog/internal/glid"
 	"bytes"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"testing"
-
 )
 
 func FuzzNewFactory(f *testing.F) {

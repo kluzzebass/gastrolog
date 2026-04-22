@@ -1,8 +1,8 @@
 package self
 
 import (
-	"gastrolog/internal/glid"
 	"context"
+	"gastrolog/internal/glid"
 	"io"
 	"log/slog"
 	"sync"
@@ -12,7 +12,6 @@ import (
 	"gastrolog/internal/alert"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
-
 )
 
 // fakeAlerts is a local mock implementing orchestrator.AlertCollector.
