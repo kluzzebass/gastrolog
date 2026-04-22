@@ -7,6 +7,9 @@ import (
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/raftgroup"
+	"gastrolog/internal/vaultraft"
+
+	tierfsm "gastrolog/internal/tier/raftfsm"
 )
 
 // ErrVaultCtlRaftUnavailable is returned when ApplyVaultControlPlane is called
@@ -31,3 +34,17 @@ func (o *Orchestrator) ApplyVaultControlPlane(vaultID glid.GLID, data []byte) er
 	fwd := cluster.NewVaultApplyForwarder(g.Raft, gid, o.peerConns, cluster.ReplicationTimeout)
 	return fwd.Apply(data)
 }
+
+// vaultCtlTierApplier implements tierfsm.Applier by wrapping tier commands as
+// vault control-plane OpTierFSM entries (see vaultraft.MarshalTierCommand).
+type vaultCtlTierApplier struct {
+	o       *Orchestrator
+	vaultID glid.GLID
+	tierID  glid.GLID
+}
+
+func (a *vaultCtlTierApplier) Apply(data []byte) error {
+	return a.o.ApplyVaultControlPlane(a.vaultID, vaultraft.MarshalTierCommand(a.tierID, data))
+}
+
+var _ tierfsm.Applier = (*vaultCtlTierApplier)(nil)

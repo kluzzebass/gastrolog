@@ -79,6 +79,19 @@ func (f *FSM) TierFSM(tierID glid.GLID) *tierfsm.FSM {
 	return f.tiers[tierID]
 }
 
+// EnsureTierFSM returns the tierfsm sub-state for tierID, creating an empty
+// sub-FSM if none exists yet (for wiring OnDelete/OnUpload before first Apply).
+func (f *FSM) EnsureTierFSM(tierID glid.GLID) *tierfsm.FSM {
+	f.tierMu.Lock()
+	defer f.tierMu.Unlock()
+	t := f.tiers[tierID]
+	if t == nil {
+		t = tierfsm.New()
+		f.tiers[tierID] = t
+	}
+	return t
+}
+
 // Snapshot returns a snapshot of all tier sub-FSMs (versioned wire format).
 func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) {
 	f.tierMu.Lock()

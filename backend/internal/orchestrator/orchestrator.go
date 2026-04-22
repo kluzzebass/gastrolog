@@ -303,6 +303,11 @@ type Orchestrator struct {
 	// leader epoch (after raft.Barrier returns).
 	tierLeaders *tierLeaderManager
 
+	// Per-vault leader loop for vault control-plane Raft (tier metadata when
+	// multiraft is enabled). Same implementation shape as tierLeaders but
+	// keyed by vault ID.
+	vaultCtlLeaders *tierLeaderManager
+
 	// Shutdown phase (nil in tests / single-node setups without a
 	// Phase wired). When non-nil, hot-path replication helpers like
 	// fireAndForgetRemote and sealRemoteFollowers consult
@@ -477,6 +482,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		suspects:             newSuspectTracker(),
 		chunkSignal:          notify.NewSignal(),
 		tierLeaders:          newTierLeaderManager(logger),
+		vaultCtlLeaders:      newVaultCtlLeaderManager(logger),
 		phase:                cfg.Phase,
 		onIngesterAlive:      cfg.OnIngesterAlive,
 		onIngesterCheckpoint: cfg.OnIngesterCheckpoint,

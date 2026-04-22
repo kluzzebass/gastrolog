@@ -7,6 +7,8 @@ import (
 	"time"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/glid"
+	"gastrolog/internal/vaultraft"
 
 	hraft "github.com/hashicorp/raft"
 )
@@ -26,6 +28,9 @@ type TierApplyForwarder struct {
 	groupID string
 	peers   *PeerConns
 	timeout time.Duration
+	// xform, when non-nil, maps a tierfsm wire payload to the bytes passed to
+	// Raft.Apply / ForwardTierApply (e.g. vault OpTierFSM wrapper).
+	xform func([]byte) []byte
 }
 
 // NewTierApplyForwarder creates a forwarder for a specific tier Raft group.
@@ -38,13 +43,36 @@ func NewTierApplyForwarder(r *hraft.Raft, groupID string, peers *PeerConns, time
 	}
 }
 
+// NewVaultCtlTierApplyForwarder creates a forwarder that applies tierfsm commands
+// to the vault control-plane Raft group, wrapping each payload with
+// OpTierFSM + tier ID. ForwardTierApply uses the vault ctl group_id.
+func NewVaultCtlTierApplyForwarder(r *hraft.Raft, vaultCtlGroupID string, tierID glid.GLID, peers *PeerConns, timeout time.Duration) *TierApplyForwarder {
+	return &TierApplyForwarder{
+		raft:    r,
+		groupID: vaultCtlGroupID,
+		peers:   peers,
+		timeout: timeout,
+		xform: func(p []byte) []byte {
+			return vaultraft.MarshalTierCommand(tierID, p)
+		},
+	}
+}
+
+func (f *TierApplyForwarder) wirePayload(data []byte) []byte {
+	if f.xform != nil {
+		return f.xform(data)
+	}
+	return data
+}
+
 // Apply applies a tier FSM command. Tries locally first; forwards to the
 // tier Raft leader on ErrNotLeader.
 func (f *TierApplyForwarder) Apply(data []byte) error {
-	future := f.raft.Apply(data, f.timeout)
+	payload := f.wirePayload(data)
+	future := f.raft.Apply(payload, f.timeout)
 	if err := future.Error(); err != nil {
 		if errors.Is(err, hraft.ErrNotLeader) {
-			return f.forwardToLeader(data)
+			return f.forwardToLeader(payload)
 		}
 		return err
 	}
