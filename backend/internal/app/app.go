@@ -359,11 +359,12 @@ func makeTierDrainCompleteHandler(cfgStore system.Store, logger *slog.Logger, fa
 			logger.Error("tier drain complete: failed to delete tier config",
 				"tier", tierID, "error", err)
 		}
-		// Destroy the tier's Raft group now that the drain is done.
+		// Tear down legacy per-tier metadata Raft group if it exists. Vault
+		// control-plane mode does not create this group — ignore missing.
 		if factories.GroupManager != nil {
 			gid := raftgroup.TierMetadataGroupID(vaultID, tierID)
-			if err := factories.GroupManager.DestroyGroup(gid); err != nil {
-				logger.Debug("tier drain complete: destroy tier raft group", "tier", tierID, "error", err)
+			if err := factories.GroupManager.DestroyGroup(gid); err != nil && !errors.Is(err, raftgroup.ErrGroupNotFound) {
+				logger.Debug("tier drain complete: destroy tier metadata raft group", "tier", tierID, "error", err)
 			}
 		}
 	}

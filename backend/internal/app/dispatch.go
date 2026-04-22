@@ -698,10 +698,11 @@ func (d *configDispatcher) handleTierDeleted(ctx context.Context, tierID glid.GL
 	// above is a no-op for them, so the leader loop would otherwise leak.
 	d.orch.StopTierLeaderLoop(tierID)
 
-	// Destroy the tier's Raft group (safe for non-leader or non-drain paths).
+	// Destroy legacy per-tier metadata Raft group when present. With vault
+	// control-plane metadata, this group ID is unused — ErrGroupNotFound is expected.
 	if d.factories.GroupManager != nil && tierRaftGroupID != "" {
-		if err := d.factories.GroupManager.DestroyGroup(tierRaftGroupID); err != nil {
-			d.logger.Debug("dispatch: destroy tier raft group (may not exist)", "tier", tierID, "error", err)
+		if err := d.factories.GroupManager.DestroyGroup(tierRaftGroupID); err != nil && !errors.Is(err, raftgroup.ErrGroupNotFound) {
+			d.logger.Debug("dispatch: destroy tier metadata raft group", "tier", tierID, "error", err)
 		}
 	}
 }
