@@ -1225,9 +1225,10 @@ func (x *ForwardRecordsResponse) GetRecordsWritten() int64 {
 // tier Raft leader to apply. Used when the config placement leader (which
 // runs retention and chunk lifecycle) is not the tier Raft leader.
 type ForwardTierApplyRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	GroupId       []byte                 `protobuf:"bytes,1,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"` // tier Raft group ID (= tier UUID)
-	Command       []byte                 `protobuf:"bytes,2,opt,name=command,proto3" json:"command,omitempty"`                // pre-marshaled tier FSM command
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// UTF-8 tier metadata Raft group ID: vault/<vaultGLID>/tier/<tierGLID>
+	GroupId       []byte `protobuf:"bytes,1,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
+	Command       []byte `protobuf:"bytes,2,opt,name=command,proto3" json:"command,omitempty"` // pre-marshaled tier FSM command
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

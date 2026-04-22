@@ -361,7 +361,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 // makeTierDrainCompleteHandler returns a callback that deletes the drained tier
 // config (removing its vault association) and destroys the tier's Raft group.
 func makeTierDrainCompleteHandler(cfgStore system.Store, logger *slog.Logger, factories orchestrator.Factories) func(context.Context, glid.GLID, glid.GLID) {
-	return func(ctx context.Context, _, tierID glid.GLID) {
+	return func(ctx context.Context, vaultID, tierID glid.GLID) {
 		// Tier ownership lives on TierConfig.VaultID — deleting the tier
 		// config removes the association. The drain=false flag avoids
 		// re-triggering a drain notification.
@@ -371,7 +371,8 @@ func makeTierDrainCompleteHandler(cfgStore system.Store, logger *slog.Logger, fa
 		}
 		// Destroy the tier's Raft group now that the drain is done.
 		if factories.GroupManager != nil {
-			if err := factories.GroupManager.DestroyGroup(tierID.String()); err != nil {
+			gid := raftgroup.TierMetadataGroupID(vaultID, tierID)
+			if err := factories.GroupManager.DestroyGroup(gid); err != nil {
 				logger.Debug("tier drain complete: destroy tier raft group", "tier", tierID, "error", err)
 			}
 		}

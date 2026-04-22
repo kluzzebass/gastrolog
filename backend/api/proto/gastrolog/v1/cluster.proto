@@ -185,7 +185,8 @@ message ForwardRecordsResponse {
 // tier Raft leader to apply. Used when the config placement leader (which
 // runs retention and chunk lifecycle) is not the tier Raft leader.
 message ForwardTierApplyRequest {
-  bytes group_id = 1; // tier Raft group ID (= tier UUID)
+  // UTF-8 tier metadata Raft group ID: vault/<vaultGLID>/tier/<tierGLID>
+  bytes group_id = 1;
   bytes command = 2;   // pre-marshaled tier FSM command
 }
 

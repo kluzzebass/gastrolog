@@ -1,10 +1,10 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"maps"
 	"path/filepath"
@@ -16,11 +16,11 @@ import (
 	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/cluster"
-	"gastrolog/internal/system"
 	"gastrolog/internal/index"
 	"gastrolog/internal/lifecycle"
 	"gastrolog/internal/query"
 	"gastrolog/internal/raftgroup"
+	"gastrolog/internal/system"
 	tierfsm "gastrolog/internal/tier/raftfsm"
 
 	hraft "github.com/hashicorp/raft"
@@ -1003,19 +1003,19 @@ func applyRotationPolicy(cm chunk.ChunkManager, policies []system.RotationPolicy
 
 // tierRaftCallbacks holds the callbacks returned by createTierRaftGroup.
 type tierRaftCallbacks struct {
-	hasLeader              func() bool
-	isLeader               func() bool
-	isFSMReady             func() bool
-	applyDelete            func(id chunk.ChunkID) error
-	applyRetPending        func(id chunk.ChunkID) error
-	applyTransitionStreamed  func(id chunk.ChunkID) error
+	hasLeader               func() bool
+	isLeader                func() bool
+	isFSMReady              func() bool
+	applyDelete             func(id chunk.ChunkID) error
+	applyRetPending         func(id chunk.ChunkID) error
+	applyTransitionStreamed func(id chunk.ChunkID) error
 	applyTransitionReceived func(sourceChunkID chunk.ChunkID) error
 	hasTransitionReceipt    func(sourceChunkID chunk.ChunkID) bool
 	isTombstoned            func(id chunk.ChunkID) bool
 	listChunks              func() []chunk.ChunkID
-	listRetPending         func() []chunk.ChunkID
+	listRetPending          func() []chunk.ChunkID
 	listTransitionStreamed  func() []chunk.ChunkID
-	overlayFromFSM         func(chunk.ChunkMeta) chunk.ChunkMeta
+	overlayFromFSM          func(chunk.ChunkMeta) chunk.ChunkMeta
 }
 
 // createTierRaftGroup creates or retrieves the tier Raft group for a tier.
@@ -1027,7 +1027,7 @@ func (o *Orchestrator) createTierRaftGroup(tierCfg system.TierConfig, clusterNod
 		return nil, nil, tierRaftCallbacks{}
 	}
 
-	groupID := tierCfg.ID.String()
+	groupID := raftgroup.TierMetadataGroupID(tierCfg.VaultID, tierCfg.ID)
 	members := o.buildTierRaftMembers(clusterNodes, factories)
 	// Do not create the tier Raft group until ALL cluster nodes are
 	// resolvable. A partial member list poisons the group's boltdb with a
@@ -1151,7 +1151,7 @@ func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.App
 			}
 			return ids
 		},
-		listRetPending:        listFSMByFlag(fsm, func(e tierfsm.Entry) bool { return e.RetentionPending }),
+		listRetPending:         listFSMByFlag(fsm, func(e tierfsm.Entry) bool { return e.RetentionPending }),
 		listTransitionStreamed: listFSMByFlag(fsm, func(e tierfsm.Entry) bool { return e.TransitionStreamed }),
 		overlayFromFSM: func(m chunk.ChunkMeta) chunk.ChunkMeta {
 			if fsm == nil {

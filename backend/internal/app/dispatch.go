@@ -1,20 +1,20 @@
 package app
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
+	"gastrolog/internal/glid"
 	"log/slog"
 	"maps"
 	"os"
 	"slices"
 
-
 	"gastrolog/internal/cluster"
-	"gastrolog/internal/system"
-	"gastrolog/internal/system/raftfsm"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/raftgroup"
+	"gastrolog/internal/system"
+	"gastrolog/internal/system/raftfsm"
 )
 
 // orchActions is the subset of orchestrator.Orchestrator methods used by the
@@ -63,17 +63,17 @@ type ManagedFileHandler interface {
 // It is called synchronously from within FSM.Apply, so actions complete before
 // the cfgStore write method returns to the server handler.
 type configDispatcher struct {
-	orch              orchActions
-	cfgStore          system.Store
-	factories         orchestrator.Factories
-	localNodeID       string
-	logger            *slog.Logger
-	clusterTLS        *cluster.ClusterTLS // nil for single-node or memory mode
-	tlsFilePath       string              // path to persist cluster TLS on rotation
-	configSignal      *notify.Signal      // broadcasts config changes to WatchConfig streams
-	managedFileHandler ManagedFileHandler   // nil for single-node or before wiring
+	orch               orchActions
+	cfgStore           system.Store
+	factories          orchestrator.Factories
+	localNodeID        string
+	logger             *slog.Logger
+	clusterTLS         *cluster.ClusterTLS                              // nil for single-node or memory mode
+	tlsFilePath        string                                           // path to persist cluster TLS on rotation
+	configSignal       *notify.Signal                                   // broadcasts config changes to WatchConfig streams
+	managedFileHandler ManagedFileHandler                               // nil for single-node or before wiring
 	catchupScheduler   func(tierID glid.GLID, followerNodeIDs []string) // nil until orch is wired
-	placementTrigger   func() // triggers immediate placement reconcile; nil for single-node
+	placementTrigger   func()                                           // triggers immediate placement reconcile; nil for single-node
 }
 
 // Handle dispatches a single FSM notification to the appropriate orchestrator
@@ -665,11 +665,13 @@ func (d *configDispatcher) handleTierDeleted(ctx context.Context, tierID glid.GL
 
 	// The tier config is already deleted from the store, so we can't look up
 	// VaultID. Instead, scan locally registered vaults for this tier instance.
+	var tierRaftGroupID string
 	for _, vaultID := range d.orch.ListVaults() {
 		tier := d.orch.FindLocalTierExported(vaultID, tierID)
 		if tier == nil {
 			continue // this node doesn't host the tier in this vault
 		}
+		tierRaftGroupID = raftgroup.TierMetadataGroupID(vaultID, tierID)
 
 		if drain && tier.IsLeader() {
 			// Only the config leader should drain — it owns the data.
@@ -697,8 +699,8 @@ func (d *configDispatcher) handleTierDeleted(ctx context.Context, tierID glid.GL
 	d.orch.StopTierLeaderLoop(tierID)
 
 	// Destroy the tier's Raft group (safe for non-leader or non-drain paths).
-	if d.factories.GroupManager != nil {
-		if err := d.factories.GroupManager.DestroyGroup(tierID.String()); err != nil {
+	if d.factories.GroupManager != nil && tierRaftGroupID != "" {
+		if err := d.factories.GroupManager.DestroyGroup(tierRaftGroupID); err != nil {
 			d.logger.Debug("dispatch: destroy tier raft group (may not exist)", "tier", tierID, "error", err)
 		}
 	}
