@@ -41,7 +41,7 @@
 |--------|--------|
 | **Entry** | `ensureVaultControlPlaneRaftGroup` in [`backend/internal/orchestrator/reconfig_vaults.go`](../backend/internal/orchestrator/reconfig_vaults.go) |
 | **FSM** | [`backend/internal/vaultraft/`](../backend/internal/vaultraft/) (placeholder; commands land here as tier Raft is retired) |
-| **Cross-node apply** | `ForwardVaultApply` RPC + `cluster.SetVaultApplyFn` → `GroupManager.GetGroup(groupID).Raft.Apply` ([`backend/internal/cluster/forward.go`](../backend/internal/cluster/forward.go), [`backend/internal/app/app.go`](../backend/internal/app/app.go)) |
+| **Cross-node apply** | `orchestrator.ApplyVaultControlPlane` → `cluster.VaultApplyForwarder` when `PeerConns` is set, else local `Raft.Apply`; RPC path: `ForwardVaultApply` + `cluster.SetVaultApplyFn` ([`backend/internal/orchestrator/vault_ctl_apply.go`](../backend/internal/orchestrator/vault_ctl_apply.go), [`backend/internal/cluster/vault_apply_forwarder.go`](../backend/internal/cluster/vault_apply_forwarder.go), [`backend/internal/cluster/forward.go`](../backend/internal/cluster/forward.go), [`backend/internal/app/app.go`](../backend/internal/app/app.go)) |
 | **Client forwarder** | [`backend/internal/cluster/vault_apply_forwarder.go`](../backend/internal/cluster/vault_apply_forwarder.go) (`VaultApplyForwarder`) |
 
 ### Per-tier metadata Raft (**transitional** — removed when 5xxbd is done)
@@ -229,7 +229,7 @@ These require explicit product/architecture decisions:
 |------|--------|
 | System Raft | `backend/internal/app/raft.go` |
 | Multi-Raft setup, tier / vault apply | `backend/internal/app/app.go` (`setupMultiRaft`, `SetTierApplyFn`, `SetVaultApplyFn`) |
-| Vault control-plane Raft | `backend/internal/orchestrator/reconfig_vaults.go` (`ensureVaultControlPlaneRaftGroup`), `backend/internal/vaultraft/`, `backend/internal/cluster/vault_apply_forwarder.go` |
+| Vault control-plane Raft | `backend/internal/orchestrator/reconfig_vaults.go` (`ensureVaultControlPlaneRaftGroup`), `backend/internal/orchestrator/vault_ctl_apply.go`, `backend/internal/vaultraft/`, `backend/internal/cluster/vault_apply_forwarder.go` |
 | Tier group creation (**sunset**) | `backend/internal/orchestrator/reconfig_vaults.go` (`createTierRaftGroup`) |
 | Group manager | `backend/internal/raftgroup/groupmanager.go` |
 | WAL | `backend/internal/raftwal/` |

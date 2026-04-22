@@ -16,6 +16,7 @@ import (
 	"gastrolog/internal/alert"
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/cluster"
 	"gastrolog/internal/lifecycle"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/notify"
@@ -217,6 +218,10 @@ type Orchestrator struct {
 	// groupMgr is the shared multi-group Raft manager (tier + vault control-plane).
 	// Set from factories during ApplyConfig; used to tear down vault ctl groups.
 	groupMgr *raftgroup.GroupManager
+
+	// peerConns is the shared gRPC pool for cluster peers. Set from factories
+	// during ApplyConfig; used by ApplyVaultControlPlane forwarding.
+	peerConns *cluster.PeerConns
 
 	// Ingest channel and lifecycle.
 	ingestCh     chan IngestMessage

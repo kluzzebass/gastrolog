@@ -4,6 +4,7 @@
 package vaultraft
 
 import (
+	"fmt"
 	"io"
 
 	hraft "github.com/hashicorp/raft"
@@ -15,8 +16,19 @@ type FSM struct{}
 // NewFSM returns a new vault control-plane FSM instance.
 func NewFSM() *FSM { return &FSM{} }
 
-// Apply is a no-op until vault-scoped commands are defined.
-func (f *FSM) Apply(_ *hraft.Log) any { return nil }
+// Apply executes vault control-plane commands. Empty payloads are ignored.
+// The first byte selects the opcode; see OpNoop and future constants in cmd.go.
+func (f *FSM) Apply(l *hraft.Log) any {
+	if l == nil || len(l.Data) == 0 {
+		return nil
+	}
+	switch l.Data[0] {
+	case OpNoop:
+		return nil
+	default:
+		return fmt.Errorf("vaultraft: unknown opcode %d", l.Data[0])
+	}
+}
 
 // Snapshot returns an empty snapshot.
 func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) { return emptySnapshot{}, nil }

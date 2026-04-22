@@ -117,6 +117,7 @@ func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) erro
 		o.nodeAddrResolver = factories.NodeAddressResolver
 	}
 	o.groupMgr = factories.GroupManager
+	o.peerConns = factories.PeerConns
 
 	if err := o.applyVaults(sys, factories); err != nil {
 		return err
