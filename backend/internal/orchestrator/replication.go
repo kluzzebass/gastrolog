@@ -9,6 +9,8 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/system"
+
+	"golang.org/x/sync/errgroup"
 )
 
 // SealActiveTier seals the active chunk for a specific tier.
@@ -40,18 +42,15 @@ func (o *Orchestrator) SealActiveTier(vaultID, tierID glid.GLID, expectedChunkID
 // cross-node forwarding for ack-gated records, then sends the ack.
 // Runs in a goroutine — doesn't block the writeLoop.
 //
-// Two kinds of sync work are processed in sequence:
+// All tier follower AppendRecords and all cross-node ForwardSync calls run
+// concurrently under one deadline (cluster.ReplicationTimeout). The first
+// error wins and is sent to the ack channel; errgroup cancels the shared
+// context so other RPCs stop promptly.
 //
-//  1. Local tier follower replication via TierReplicator. If nil
-//     (single-node mode) the replication step is skipped.
-//  2. Cross-node forwarding via RecordForwarder.ForwardSync for records
-//     that matched filters targeting vaults on other nodes. See
-//     gastrolog-27zvt: before this, ack-gated records routed to remote
-//     vaults were fire-and-forget forwarded, giving a durability
-//     guarantee that could be silently broken by a full forward buffer.
-//
-// The first error from either phase is sent to the ack channel and
-// remaining work is skipped.
+// Cross-node forwarding uses RecordForwarder.ForwardSync for records that
+// matched filters targeting vaults on other nodes. See gastrolog-27zvt:
+// before that fix, ack-gated remote routes were fire-and-forget and could
+// be silently dropped on a full forward buffer.
 func (o *Orchestrator) ackAfterReplication(ack chan<- error, pa *pendingAcks, rec chunk.Record) {
 	if pa == nil {
 		ack <- nil
@@ -60,27 +59,33 @@ func (o *Orchestrator) ackAfterReplication(ack chan<- error, pa *pendingAcks, re
 	ctx, cancel := context.WithTimeout(context.Background(), cluster.ReplicationTimeout)
 	defer cancel()
 
+	g, ctx := errgroup.WithContext(ctx)
+
 	if o.tierReplicator != nil {
 		for _, t := range pa.replication {
 			for _, tgt := range t.targets {
-				if err := o.tierReplicator.AppendRecords(ctx, tgt.NodeID, t.vaultID, t.tierID, t.chunkID, []chunk.Record{rec}); err != nil {
-					ack <- fmt.Errorf("ack-gated replication to %s: %w", tgt.NodeID, err)
-					return
-				}
+				g.Go(func() error {
+					if err := o.tierReplicator.AppendRecords(ctx, tgt.NodeID, t.vaultID, t.tierID, t.chunkID, []chunk.Record{rec}); err != nil {
+						return fmt.Errorf("ack-gated replication to %s: %w", tgt.NodeID, err)
+					}
+					return nil
+				})
 			}
 		}
 	}
 
 	if o.forwarder != nil {
 		for _, f := range pa.forwards {
-			if err := o.forwarder.ForwardSync(ctx, f.nodeID, f.vaultID, []chunk.Record{rec}); err != nil {
-				ack <- fmt.Errorf("ack-gated forward to %s: %w", f.nodeID, err)
-				return
-			}
+			g.Go(func() error {
+				if err := o.forwarder.ForwardSync(ctx, f.nodeID, f.vaultID, []chunk.Record{rec}); err != nil {
+					return fmt.Errorf("ack-gated forward to %s: %w", f.nodeID, err)
+				}
+				return nil
+			})
 		}
 	}
 
-	ack <- nil
+	ack <- g.Wait()
 }
 
 // scheduleReplication schedules a separate job to replicate a sealed chunk.

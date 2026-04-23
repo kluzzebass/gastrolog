@@ -425,3 +425,56 @@ func TestAckGatedForwardPropagatesError(t *testing.T) {
 		t.Fatal("ack did not fire")
 	}
 }
+
+// TestAckAfterReplicationParallelForwardSync verifies every ack-gated
+// cross-node forward runs (concurrent ForwardSync), not only the first.
+func TestAckAfterReplicationParallelForwardSync(t *testing.T) {
+	t.Parallel()
+
+	vaultA := glid.New()
+	vaultB := glid.New()
+	nodeA := "node-A"
+	nodeB := "node-B"
+
+	fwd := &mockForwarder{}
+	o, err := New(Config{LocalNodeID: "node-local"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.SetRecordForwarder(fwd)
+
+	pa := &pendingAcks{
+		forwards: []forwardTask{
+			{nodeID: nodeA, vaultID: vaultA},
+			{nodeID: nodeB, vaultID: vaultB},
+		},
+	}
+	rec := testRecord("parallel-fwd")
+
+	ack := make(chan error, 1)
+	o.ackAfterReplication(ack, pa, rec)
+
+	select {
+	case err := <-ack:
+		if err != nil {
+			t.Fatalf("ack: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ack did not fire")
+	}
+
+	calls := fwd.getCalls()
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 ForwardSync calls, got %d", len(calls))
+	}
+	nodes := map[string]bool{}
+	for _, c := range calls {
+		if !c.Sync {
+			t.Errorf("expected ForwardSync, got async forward for node %q", c.NodeID)
+		}
+		nodes[c.NodeID] = true
+	}
+	if !nodes[nodeA] || !nodes[nodeB] {
+		t.Errorf("expected forwards to %q and %q, got %v", nodeA, nodeB, nodes)
+	}
+}

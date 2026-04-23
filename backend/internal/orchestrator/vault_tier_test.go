@@ -6,6 +6,7 @@ import (
 	"gastrolog/internal/glid"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1034,12 +1035,12 @@ func TestAppendToTierForwardLifecycle(t *testing.T) {
 // ackTestReplicator records AppendRecords calls and returns a configurable error.
 // Implements orchestrator.TierReplicator.
 type ackTestReplicator struct {
-	tierAppendCalls int
+	tierAppendCalls atomic.Int32
 	tierAppendErr   error
 }
 
 func (m *ackTestReplicator) AppendRecords(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
-	m.tierAppendCalls++
+	m.tierAppendCalls.Add(1)
 	return m.tierAppendErr
 }
 func (m *ackTestReplicator) SealTier(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
@@ -1204,8 +1205,49 @@ func TestAckAfterReplicationSuccess(t *testing.T) {
 		t.Fatal("timed out waiting for ack")
 	}
 
-	if mock.tierAppendCalls != 1 {
-		t.Errorf("expected 1 AppendRecords call, got %d", mock.tierAppendCalls)
+	if mock.tierAppendCalls.Load() != 1 {
+		t.Errorf("expected 1 AppendRecords call, got %d", mock.tierAppendCalls.Load())
+	}
+}
+
+func TestAckAfterReplicationInvokesEveryReplicationTarget(t *testing.T) {
+	t.Parallel()
+	mock := &ackTestReplicator{}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
+	orch.SetTierReplicator(mock)
+
+	vaultID := glid.New()
+	tierID := glid.New()
+	chunkID := chunk.NewChunkID()
+	pa := &pendingAcks{
+		replication: []replicationTask{
+			{
+				vaultID: vaultID,
+				tierID:  tierID,
+				chunkID: chunkID,
+				targets: []system.ReplicationTarget{
+					{NodeID: "node-2"},
+					{NodeID: "node-3"},
+					{NodeID: "node-4"},
+				},
+			},
+		},
+	}
+
+	ack := make(chan error, 1)
+	orch.ackAfterReplication(ack, pa, testRecord("fanout"))
+
+	select {
+	case err := <-ack:
+		if err != nil {
+			t.Fatalf("expected nil ack, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for ack")
+	}
+
+	if got := mock.tierAppendCalls.Load(); got != 3 {
+		t.Errorf("expected 3 AppendRecords calls (one per follower), got %d", got)
 	}
 }
 
