@@ -81,18 +81,17 @@ type drainState struct {
 	Cancel       context.CancelFunc
 }
 
-// RecordForwarder ships records to remote cluster nodes. The orchestrator
-// calls Forward() during ingestion for records that match routes targeting
-// vaults on other nodes.
+// RecordForwarder ships records to remote cluster nodes for vault routes
+// that target a vault on another node.
 //
-// Forward is the fire-and-forget path — it must be non-blocking (channel
-// enqueue, drop on full) so it is safe to call under the orchestrator
-// mutex.
+// Forward is a best-effort enqueue (drop on full) — used only for ancillary
+// paths such as placement redirect replays, not the ingestion hot path.
 //
-// ForwardSync is the ack-gated path — it blocks until each record is
-// accepted by the per-node channel or ctx expires. Callers invoke it
-// OUTSIDE any orchestrator lock, from the ack-after-replication goroutine,
-// so the block is scoped to the ack-gated caller only.
+// ForwardSync blocks until each record is accepted by the per-node buffer
+// or ctx / forwarder shutdown fires. Ingestion uses this (outside o.mu) so
+// a full forward buffer applies backpressure through digestedCh instead of
+// dropping records. Ack-gated ingestion also uses ForwardSync from
+// ackAfterReplication.
 //
 // RegisterPressureGate wires the per-node forward channels as probes on
 // the orchestrator's shared pressure gate so ingesters throttle upstream

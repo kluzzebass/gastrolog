@@ -11,10 +11,11 @@ import "time"
 // a follower is down.
 const ReplicationTimeout = 10 * time.Second
 
-// ForwardingTimeout is the deadline for lightweight single-record or
-// single-command operations: record forwarding under the orchestrator lock,
-// seal commands to followers, and fire-and-forget record replication.
-// Kept tight to prevent a slow peer from stalling ingestion.
+// ForwardingTimeout is the deadline for lightweight single-command
+// operations: seal commands to followers, vault/tier apply forwarding,
+// and tier follower append when using bounded waits. Cross-node vault-route
+// ingestion uses RecordForwarder.ForwardSync without this cap so the
+// pipeline can backpressure.
 const ForwardingTimeout = 5 * time.Second
 
 // CatchupTimeout is the deadline for bulk replication of all sealed chunks

@@ -63,6 +63,7 @@ export function usePutIngester() {
         },
       });
     },
+    [["ingesters"]],
   );
 }
 
@@ -71,6 +72,7 @@ export function useDeleteIngester() {
     async (id: string) => {
       return systemClient.deleteIngester({ id: decode(id) });
     },
+    [["ingesters"]],
   );
 }
 

@@ -81,10 +81,9 @@ func isDeadlineExceeded(err error) bool {
 // TestStreamToTierTimeoutOnHangingPeer is the regression test for the silent
 // SIGSTOP wedge (gastrolog-4rp6i). Before the fix, StreamToTier passed the
 // caller's context.Background() straight through to RecvMsg, which would
-// block forever waiting for an ack from a paused remote process. The fix
-// wraps the context with streamCallTimeout. The assertion: the call returns
-// a DeadlineExceeded error within streamCallTimeout + a small margin, never
-// blocks indefinitely.
+// block forever waiting for an ack from a paused remote process. StreamToTier
+// now uses CatchupTimeout for healthy multi-record transitions; this test uses
+// a short parent context so the call still fails fast against a hung peer.
 func TestStreamToTierTimeoutOnHangingPeer(t *testing.T) {
 	t.Parallel()
 	conn, cleanup := hangingGRPCServer(t)
@@ -94,8 +93,12 @@ func TestStreamToTierTimeoutOnHangingPeer(t *testing.T) {
 		peers: &PeerConns{conns: map[string]*grpc.ClientConn{"hung": conn}},
 	}
 
+	const hangBudget = 400 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), hangBudget)
+	defer cancel()
+
 	start := time.Now()
-	err := ct.StreamToTier(context.Background(), "hung", glid.New(), glid.New(), emptyIterator())
+	err := ct.StreamToTier(ctx, "hung", glid.New(), glid.New(), emptyIterator())
 	elapsed := time.Since(start)
 
 	if err == nil {
@@ -104,15 +107,10 @@ func TestStreamToTierTimeoutOnHangingPeer(t *testing.T) {
 	if !isDeadlineExceeded(err) {
 		t.Fatalf("StreamToTier returned %v (%T), want DeadlineExceeded", err, err)
 	}
-	// Allow 2s of margin above streamCallTimeout for goroutine scheduling.
-	if elapsed > streamCallTimeout+2*time.Second {
-		t.Errorf("StreamToTier took %v, expected ≤ %v", elapsed, streamCallTimeout+2*time.Second)
+	if elapsed > hangBudget+1500*time.Millisecond {
+		t.Errorf("StreamToTier took %v, expected ≤ ~%v + margin", elapsed, hangBudget)
 	}
-	// Also require the call took at least streamCallTimeout - it shouldn't
-	// have failed instantly (which would suggest the timeout wasn't applied
-	// and some other error path returned early).
-	if elapsed < streamCallTimeout-time.Second {
-		t.Errorf("StreamToTier returned suspiciously fast in %v (< %v) — was the timeout applied?",
-			elapsed, streamCallTimeout-time.Second)
+	if elapsed < 50*time.Millisecond {
+		t.Errorf("StreamToTier returned suspiciously fast in %v — was the deadline applied?", elapsed)
 	}
 }

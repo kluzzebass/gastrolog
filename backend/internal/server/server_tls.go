@@ -137,7 +137,10 @@ func (s *Server) ListenUnix(path string) error {
 	// Build a separate mux with NoAuthInterceptor so the Connect layer
 	// skips JWT validation entirely. The OS file permissions on the socket
 	// provide the access control.
-	noAuthOpt := connect.WithInterceptors(&auth.NoAuthInterceptor{})
+	noAuthOpt := connect.WithInterceptors(
+		newRPCErrorLogInterceptor(s.logger),
+		&auth.NoAuthInterceptor{},
+	)
 	mux := s.buildMux(noAuthOpt)
 	handler := s.trackingMiddleware(s.corsMiddleware(securityHeadersMiddleware(rateLimitMiddleware(s.rl)(compressMiddleware(mux)))))
 

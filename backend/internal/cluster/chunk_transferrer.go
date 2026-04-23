@@ -25,10 +25,14 @@ import (
 // Tunings:
 //   - Unary RPCs (ForwardAppend, …) are small request/response pairs. 5s is
 //     generous for round-trip + processing.
-//   - Streaming RPCs (TransferRecords, StreamToTier) transfer entire sealed
-//     chunks (typically <10MB). 15s allows for slow networks (1MB/s) plus
-//     margin without leaving the cluster wedged for too long when a peer
-//     becomes unresponsive.
+//   - TransferRecords streams a sealed chunk into ImportRecords on the peer.
+//     15s bounds stalled peers without tying up resources indefinitely.
+//   - StreamToTier streams each record into StreamAppendToTier, and the peer
+//     runs follower replication per record (ForwardingTimeout per follower).
+//     Follower fanout is parallelized on the destination (WaitGroup per record),
+//     but each record still waits for the slowest follower before the next
+//     append — so large chunks can take minutes. CatchupTimeout keeps healthy
+//     transitions from failing as EOF / DeadlineExceeded while work completes.
 const (
 	unaryCallTimeout  = 5 * time.Second
 	streamCallTimeout = 15 * time.Second
@@ -146,7 +150,7 @@ func (ct *ChunkTransferrer) ForwardAppend(ctx context.Context, nodeID string, va
 // iterator to a remote tier's active chunk. The stream close is the ack.
 // Used for remote tier transitions — destination handles its own chunking.
 func (ct *ChunkTransferrer) StreamToTier(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, next chunk.RecordIterator) error {
-	ctx, cancel := context.WithTimeout(ctx, streamCallTimeout)
+	ctx, cancel := context.WithTimeout(ctx, CatchupTimeout)
 	defer cancel()
 
 	conn, err := ct.peers.Conn(nodeID)

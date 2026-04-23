@@ -44,6 +44,10 @@ export function useWatchSystem() {
             // Vaults/stats/chunks are not driven by WatchSystem: WatchSystemStatus
             // pushes vaults+stats snapshots, and WatchChunks covers chunk metadata.
             qc.invalidateQueries({ queryKey: ["settings"] });
+            // ListIngesters carries runtime node_status + enabled; GetSystem only has
+            // IngesterConfig. Without this, Inspector can show stale stopped/0-of-N
+            // while GetIngesterStatus counters still advance.
+            qc.invalidateQueries({ queryKey: ["ingesters"] });
           }
           nextBackoff = 0; // reset backoff on successful message
         }

@@ -402,20 +402,21 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 		// interceptors directly — no routing interceptor to prevent loops.
 		handlerOpts = append(handlerOpts, overrideOpts...)
 	case s.noAuth:
-		interceptors := []connect.Interceptor{&auth.NoAuthInterceptor{}}
+		interceptors := []connect.Interceptor{newRPCErrorLogInterceptor(s.logger), &auth.NoAuthInterceptor{}}
 		interceptors = append(interceptors, s.routingInterceptor()...)
 		handlerOpts = append(handlerOpts, connect.WithInterceptors(interceptors...))
 	case s.tokens != nil:
 		authInterceptor := auth.NewAuthInterceptor(s.tokens, s.cfgStore, &tokenValidator{cfgStore: s.cfgStore})
-		interceptors := []connect.Interceptor{authInterceptor}
+		interceptors := []connect.Interceptor{newRPCErrorLogInterceptor(s.logger), authInterceptor}
 		interceptors = append(interceptors, s.routingInterceptor()...)
 		handlerOpts = append(handlerOpts, connect.WithInterceptors(interceptors...))
 	default:
-		// No auth configured (tests without NoAuth flag). Still need the
-		// routing interceptor for cluster forwarding.
-		if ri := s.routingInterceptor(); len(ri) > 0 {
-			handlerOpts = append(handlerOpts, connect.WithInterceptors(ri...))
-		}
+		// No auth configured (tests without NoAuth flag). Still attach the
+		// RPC error logger; routing interceptor is appended only in cluster mode.
+		ri := s.routingInterceptor()
+		interceptors := []connect.Interceptor{newRPCErrorLogInterceptor(s.logger)}
+		interceptors = append(interceptors, ri...)
+		handlerOpts = append(handlerOpts, connect.WithInterceptors(interceptors...))
 	}
 
 	queryTimeout, maxFollowDuration, maxResultCount := s.loadQueryConfig()
@@ -592,7 +593,10 @@ func (s *Server) redirectMiddleware(next http.Handler) http.Handler {
 // port already authenticated the peer, and the lack of routing interceptor
 // prevents forwarding loops.
 func (s *Server) BuildInternalHandler() http.Handler {
-	noAuthOpt := connect.WithInterceptors(&auth.NoAuthInterceptor{})
+	noAuthOpt := connect.WithInterceptors(
+		newRPCErrorLogInterceptor(s.logger),
+		&auth.NoAuthInterceptor{},
+	)
 	return s.buildMux(noAuthOpt)
 }
 

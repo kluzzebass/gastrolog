@@ -128,8 +128,9 @@ func NewRecordForwarder(peers *PeerConns, logger *slog.Logger, alerts *alert.Col
 
 // Forward enqueues records for delivery to the given node. Non-blocking:
 // if the per-node buffer is full, records are dropped with a warning.
-// This is the fire-and-forget path — callers that require durable
-// delivery must use ForwardSync.
+// Ingestion uses ForwardSync for vault-route records so the pipeline can
+// backpressure; Forward remains for ancillary best-effort paths (e.g.
+// placement redirect replay).
 func (rf *RecordForwarder) Forward(_ context.Context, nodeID string, vaultID glid.GLID, records []chunk.Record) error {
 	nf, err := rf.nodeFor(nodeID)
 	if err != nil {

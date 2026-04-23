@@ -126,6 +126,9 @@ func TestIngestForwardsToRemoteVault(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("expected 1 forward call, got %d", len(calls))
 	}
+	if !calls[0].Sync {
+		t.Error("expected ForwardSync for vault-route forwarding")
+	}
 	if calls[0].NodeID != remoteNodeID {
 		t.Errorf("nodeID = %q, want %q", calls[0].NodeID, remoteNodeID)
 	}
@@ -242,7 +245,7 @@ func (n *noopChunkManager) Close() error { return nil }
 // TestAckGatedRemoteRecordUsesForwardSync verifies the durability fix
 // for ack-gated records routed to remote vaults: when rec.WaitForReplica
 // is true and the filter match points at another node, ingest() must
-// accumulate a forwardTask (not call fire-and-forget forwardRemote), and
+// accumulate a forwardTask in forwards (not syncForwards), and
 // ackAfterReplication must invoke ForwardSync through the RecordForwarder.
 //
 // Before gastrolog-27zvt, this code path was a silent durability hole —
@@ -322,11 +325,11 @@ func TestAckGatedRemoteRecordUsesForwardSync(t *testing.T) {
 	}
 }
 
-// TestFireAndForgetRemoteKeepsOldBehavior verifies that when
-// WaitForReplica is NOT set, remote forwarding still uses the
-// fire-and-forget Forward path. This guards against regressions that
-// would push all cross-node forwards through the slower sync path.
-func TestFireAndForgetRemoteKeepsOldBehavior(t *testing.T) {
+// TestNonAckRemoteVaultDefersForwardSyncUntilFlush verifies that when
+// WaitForReplica is NOT set, cross-node vault routing still uses
+// ForwardSync (for backpressure), but only after ingest returns — ingest
+// accumulates syncForwards and does not call the forwarder under o.mu.
+func TestNonAckRemoteVaultDefersForwardSyncUntilFlush(t *testing.T) {
 	t.Parallel()
 
 	remoteVaultID := glid.New()
@@ -345,26 +348,33 @@ func TestFireAndForgetRemoteKeepsOldBehavior(t *testing.T) {
 
 	rec := chunk.Record{
 		Attrs: chunk.Attributes{"env": "prod"},
-		Raw:   []byte("fire-and-forget"),
-		// WaitForReplica: false
+		Raw:   []byte("non-ack-remote"),
 	}
 
 	pa, err := o.ingest(rec)
 	if err != nil {
 		t.Fatalf("ingest: %v", err)
 	}
+	if pa == nil || len(pa.syncForwards) != 1 {
+		t.Fatalf("expected 1 sync forward task, got %+v", pa)
+	}
 	if !pa.isEmpty() {
-		t.Errorf("expected empty pendingAcks for fire-and-forget, got %+v", pa)
+		t.Fatalf("expected no ack-gated work (isEmpty), got rep=%d fwd=%d",
+			len(pa.replication), len(pa.forwards))
+	}
+	if got := len(fwd.getCalls()); got != 0 {
+		t.Fatalf("expected no forwarder calls during ingest, got %d", got)
 	}
 
-	// The fire-and-forget call happens INLINE in ingest, so it should
-	// already be recorded.
+	if err := o.flushRecordRouteForwards(context.Background(), pa, rec); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
 	calls := fwd.getCalls()
 	if len(calls) != 1 {
-		t.Fatalf("expected 1 forward call, got %d", len(calls))
+		t.Fatalf("expected 1 forward call after flush, got %d", len(calls))
 	}
-	if calls[0].Sync {
-		t.Error("expected fire-and-forget Forward, got ForwardSync")
+	if !calls[0].Sync {
+		t.Error("expected ForwardSync after flush")
 	}
 }
 

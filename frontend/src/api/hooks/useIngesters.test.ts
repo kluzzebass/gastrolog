@@ -87,6 +87,7 @@ describe("useDeleteIngester", () => {
     m(mocks.systemClient, "deleteIngester").mockResolvedValueOnce({});
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], {});
+    qc.setQueryData(["ingesters"], []);
 
     const { result } = renderHook(() => useDeleteIngester(), { wrapper: wrapper(qc) });
 
@@ -96,6 +97,7 @@ describe("useDeleteIngester", () => {
 
     expect(m(mocks.systemClient, "deleteIngester")).toHaveBeenCalledWith({ id: decode("i1") });
     expect(qc.getQueryState(["system"])?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(["ingesters"])?.isInvalidated).toBe(true);
   });
 });
 

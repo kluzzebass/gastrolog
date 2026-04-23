@@ -261,6 +261,11 @@ func (o *Orchestrator) runIngester(id glid.GLID, r Ingester, ctx context.Context
 		o.setIngesterAlive(id, stats, true)
 		err := o.runWithCheckpoints(ctx, id, r, out)
 		o.setIngesterAlive(id, stats, false)
+		// Non-passive ingesters do not retry; without this, a returned error
+		// clears alive in the UI but leaves no log (unlike passive retry path).
+		if err != nil && ctx.Err() == nil && !meta.Passive {
+			o.logger.Warn("ingester exited with error", "id", id, "name", meta.Name, "type", meta.Type, "error", err)
+		}
 		if ctx.Err() != nil || !meta.Passive {
 			return
 		}
@@ -398,6 +403,12 @@ func (o *Orchestrator) writeLoop() {
 	for dr := range o.digestedCh {
 		// Filter to chunk managers (reuses existing Ingest logic).
 		pa, err := o.ingest(dr.rec)
+		if fwErr := o.flushRecordRouteForwards(context.Background(), pa, dr.rec); fwErr != nil {
+			if err == nil {
+				err = fwErr
+			}
+			o.logger.Warn("record route forward failed", "error", fwErr, "ingester", dr.ingesterID)
+		}
 		if err != nil {
 			o.logger.Error("write failed", "error", err, "ingester", dr.ingesterID)
 		}

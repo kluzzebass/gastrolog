@@ -482,6 +482,10 @@ func (o *Orchestrator) forwardToFollowers(vault *Vault, vaultID glid.GLID, tier 
 // sealRemoteFollowers sends seal commands to remote followers through the
 // tier replication stream, ensuring they seal at the same boundary as the
 // leader. Must be called BEFORE the next record's append to maintain ordering.
+// Seal RPCs to distinct followers run in parallel so the leader does not pay
+// sum(latency) per seal boundary (important for remote tier transition streams
+// that append one record at a time). Ordering per follower stream is still
+// sequential because each follower receives at most one in-flight seal here.
 //
 // During shutdown (o.shuttingDown()) this is a silent no-op: the local
 // chunk is already sealed on disk, peers are racing to shut down alongside
@@ -492,18 +496,27 @@ func (o *Orchestrator) sealRemoteFollowers(targets []remoteForwardTarget, chunkI
 	if o.tierReplicator == nil || len(targets) == 0 || o.shuttingDown() {
 		return
 	}
+	var wg sync.WaitGroup
 	for _, tgt := range targets {
-		ctx, cancel := context.WithTimeout(context.Background(), cluster.ForwardingTimeout)
-		if err := o.tierReplicator.SealTier(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, chunkID); err != nil {
-			o.logger.Warn("replication: failed to seal remote follower",
-				"node", tgt.nodeID, "vault", tgt.vaultID, "tier", tgt.tierID,
-				"chunk", chunkID.String(), "error", err)
-		}
-		cancel()
+		wg.Go(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), cluster.ForwardingTimeout)
+			defer cancel()
+			if err := o.tierReplicator.SealTier(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, chunkID); err != nil {
+				o.logger.Warn("replication: failed to seal remote follower",
+					"node", tgt.nodeID, "vault", tgt.vaultID, "tier", tgt.tierID,
+					"chunk", chunkID.String(), "error", err)
+			}
+		})
 	}
+	wg.Wait()
 }
 
 // fireAndForgetRemote sends records to remote followers outside any lock.
+// Appends to distinct followers run in parallel (WaitGroup) so per-record
+// latency is bounded by the slowest follower, not the sum — same ordering
+// guarantee as sealRemoteFollowers: each follower tier stream still processes
+// one RPC at a time, and AppendToTier does not start the next record until
+// this function returns.
 //
 // During shutdown (o.shuttingDown()) this is a silent no-op: the record
 // is already durable on the local leader's disk; peers that are also
@@ -516,21 +529,25 @@ func (o *Orchestrator) fireAndForgetRemote(targets []remoteForwardTarget, rec ch
 	if len(targets) == 0 || o.shuttingDown() || o.tierReplicator == nil {
 		return
 	}
+	var wg sync.WaitGroup
 	for _, tgt := range targets {
 		// Circuit breaker: skip nodes in backoff.
 		if rb := o.getReplicaBackoff(tgt.nodeID); rb != nil && rb.skipUntil.After(o.now()) {
 			continue
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), cluster.ForwardingTimeout)
-		err := o.tierReplicator.AppendRecords(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, tgt.activeChunkID, []chunk.Record{rec})
-		cancel()
-		if err != nil {
-			o.bumpReplicaBackoff(tgt.nodeID, err)
-		} else {
-			o.clearReplicaBackoff(tgt.nodeID)
-		}
+		wg.Go(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), cluster.ForwardingTimeout)
+			defer cancel()
+			err := o.tierReplicator.AppendRecords(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, tgt.activeChunkID, []chunk.Record{rec})
+			if err != nil {
+				o.bumpReplicaBackoff(tgt.nodeID, err)
+			} else {
+				o.clearReplicaBackoff(tgt.nodeID)
+			}
+		})
 	}
+	wg.Wait()
 }
 
 // replicaBackoff tracks consecutive failures and exponential backoff for
@@ -958,8 +975,11 @@ func (o *Orchestrator) finalizeImportedChunk(vaultID, tierID glid.GLID, cm chunk
 func (o *Orchestrator) StreamAppendToTier(ctx context.Context, vaultID, tierID glid.GLID, next chunk.RecordIterator) error {
 	for {
 		rec, iterErr := next()
+		if errors.Is(iterErr, chunk.ErrNoMoreRecords) {
+			return nil
+		}
 		if iterErr != nil {
-			return nil //nolint:nilerr // ErrNoMoreRecords signals normal end of iterator
+			return iterErr
 		}
 		if err := o.AppendToTier(vaultID, tierID, chunk.ChunkID{}, rec); err != nil {
 			return err

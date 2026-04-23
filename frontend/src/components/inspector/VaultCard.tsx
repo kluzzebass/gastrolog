@@ -428,7 +428,13 @@ function ChunkRow({
               <Badge variant="warn" dark={dark}>{chunk.storageClass || "archived"}</Badge>
             )}
             {chunk.retentionPending && (
-              <Badge variant="warn" dark={dark}>exp</Badge>
+              <Badge
+                variant="warn"
+                dark={dark}
+                title="Retention pending — chunk is queued for expire/eject/transition, or mid-stream to the next tier (not the same as TTL elapsed)"
+              >
+                ret
+              </Badge>
             )}
             {rf > 1 && (() => {
               let badgeVariant: "info" | "error" | "warn";
