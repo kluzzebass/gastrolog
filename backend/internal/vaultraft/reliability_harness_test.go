@@ -363,12 +363,17 @@ func vaultFSMFingerprint(f *FSM) string {
 	return sb.String()
 }
 
-// assertAllFSMsConverged polls until every live node's FSM fingerprint
-// matches the leader's. Fails the test if nodes diverge after the deadline.
+// assertAllFSMsConverged polls until every live node (1) has an
+// AppliedIndex at or past the leader's LastIndex (log has been replayed
+// through the FSM) and (2) has an FSM fingerprint matching the leader's.
+//
+// The AppliedIndex check matters after restart: NewRaft returns before the
+// replay goroutine finishes re-applying the WAL to the FSM. Without it, we
+// can observe "all FSMs empty, therefore converged" immediately after a
+// crash+restart, before replay has done its work.
 func (h *reliabilityHarness) assertAllFSMsConverged() {
 	h.t.Helper()
 	deadline := time.Now().Add(harnessConvergeWait)
-	var leaderPrint string
 	var lastPrints map[string]string
 	for time.Now().Before(deadline) {
 		leaderID := h.leaderID()
@@ -376,15 +381,29 @@ func (h *reliabilityHarness) assertAllFSMsConverged() {
 			time.Sleep(20 * time.Millisecond)
 			continue
 		}
-		leaderPrint = vaultFSMFingerprint(h.nodes[leaderID].fsm)
+		leaderNode := h.nodes[leaderID]
+		leaderLast := leaderNode.raft.LastIndex()
+		if leaderNode.raft.AppliedIndex() < leaderLast {
+			time.Sleep(20 * time.Millisecond)
+			continue
+		}
+		leaderPrint := vaultFSMFingerprint(leaderNode.fsm)
 		lastPrints = map[string]string{leaderID: leaderPrint}
+
 		converged := true
 		for _, id := range h.nodeIDs {
 			n := h.nodes[id]
 			n.mu.Lock()
 			fsm := n.fsm
+			r := n.raft
 			n.mu.Unlock()
-			if fsm == nil {
+			if fsm == nil || r == nil {
+				continue
+			}
+			if r.AppliedIndex() < leaderLast {
+				converged = false
+				lastPrints[id] = fmt.Sprintf("<behind: applied=%d leaderLast=%d>",
+					r.AppliedIndex(), leaderLast)
 				continue
 			}
 			p := vaultFSMFingerprint(fsm)

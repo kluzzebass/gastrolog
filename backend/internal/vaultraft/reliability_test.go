@@ -1,6 +1,10 @@
 package vaultraft
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,7 +19,7 @@ import (
 // exercises a failure axis against the full vaultraft.FSM + raftwal + hraft
 // stack. Use the harness defined in reliability_harness_test.go.
 //
-// Scenario coverage today:
+// Scenario coverage:
 //   - FreshCluster_AppliedIndexNonZero     (regression for gastrolog-5j6eu readiness bug)
 //   - FreshCluster_FSMsConvergeEmpty
 //   - LeaderApply_ReplicatesToFollowers
@@ -23,11 +27,9 @@ import (
 //   - Failover_LeaderDown_NewLeaderElected
 //   - Failover_FollowerDown_QuorumHolds
 //   - Partition_MinorityBlocked_HealReconverges
-//
-// Planned (not yet landed; tracked in issue body for gastrolog-5ff7z):
-//   - KillMidApply_WALReplayMatchesFollowers   (needs crash-point injection)
-//   - ConcurrentWrites_NoDivergence             (load + convergence)
-//   - Snapshot_InstallRestoresFollowerFromScratch
+//   - WholeClusterCrash_WALReplayRestoresState (durability: log survives all-nodes-down)
+//   - ConcurrentWrites_NoDivergence             (many-writer load)
+//   - FollowerWipe_CatchupViaSnapshotOrReplay  (new-ish follower catches up)
 
 // On a freshly bootstrapped vault-ctl Raft group — no user commands,
 // no FSM Apply calls — hraft still commits the bootstrap LogConfiguration
@@ -241,7 +243,189 @@ func TestReliability_Partition_MinorityBlocked_HealReconverges(t *testing.T) {
 	h.assertAllFSMsConverged()
 }
 
+// Stop every node simultaneously (simulating a power loss / cluster-wide
+// crash), then restart everyone. All previously-committed entries must
+// reappear via WAL replay. Stronger than the rolling-restart test because
+// there's no surviving replica to catch up from — every node must restore
+// purely from its own WAL.
+func TestReliability_WholeClusterCrash_WALReplayRestoresState(t *testing.T) {
+	t.Parallel()
+	h := newReliabilityHarness(t, 3)
+
+	tierID := glid.New()
+	now := time.Now().Truncate(time.Nanosecond)
+	for i := range byte(5) {
+		h.applyTierCreate(tierID, chunkIDWithPrefix(0x40+i), now)
+	}
+	h.assertAllFSMsConverged()
+
+	expected := vaultFSMFingerprint(h.nodes[h.nodeIDs[0]].fsm)
+
+	// All nodes down at once. stopNode closes the WAL with fsync, so the log
+	// on disk reflects everything that was committed.
+	for _, id := range h.nodeIDs {
+		h.stopNode(id)
+	}
+	// All nodes back up. Each reopens its WAL and replays locally; hraft
+	// then re-establishes consensus from the log state each node has.
+	for _, id := range h.nodeIDs {
+		h.startNode(id)
+	}
+	h.wireTransports()
+	h.waitForLeader()
+	h.assertAllFSMsConverged()
+
+	got := vaultFSMFingerprint(h.nodes[h.leaderID()].fsm)
+	if got != expected {
+		t.Fatalf("post-crash fingerprint differs:\nexpected:\n%s\ngot:\n%s", expected, got)
+	}
+}
+
+// Many concurrent writers pushing to different tiers. All FSMs must
+// converge to a state that contains exactly the total number of commands
+// issued, and every chunk ID shows up on every node.
+//
+// Any state divergence after convergence (duplicate apply, missing apply,
+// reordered apply that changes observable flags) fails the fingerprint
+// check.
+func TestReliability_ConcurrentWrites_NoDivergence(t *testing.T) {
+	t.Parallel()
+	h := newReliabilityHarness(t, 3)
+
+	const (
+		writers          = 4
+		commandsPerWriter = 25
+	)
+
+	tierIDs := make([]glid.GLID, writers)
+	for i := range writers {
+		tierIDs[i] = glid.New()
+	}
+
+	now := time.Now().Truncate(time.Nanosecond)
+	var wg sync.WaitGroup
+	errCh := make(chan error, writers*commandsPerWriter)
+	for w := range writers {
+		wg.Add(1)
+		go func(writerIdx int) {
+			defer wg.Done()
+			tierID := tierIDs[writerIdx]
+			for c := range commandsPerWriter {
+				// Unique chunk ID: writer index in byte 0, command index in byte 1.
+				var cid chunk.ChunkID
+				cid[0] = byte(writerIdx)
+				cid[1] = byte(c)
+				wire := tierfsm.MarshalCreateChunk(cid, now, now, now)
+				cmd := MarshalTierCommand(tierID, wire)
+				// Always route through the leader. Re-resolve each time because
+				// leadership may flap under contention.
+				leaderID := h.waitForLeader()
+				n := h.nodes[leaderID]
+				n.mu.Lock()
+				r := n.raft
+				n.mu.Unlock()
+				if r == nil {
+					errCh <- fmt.Errorf("writer %d: leader disappeared", writerIdx)
+					return
+				}
+				if err := r.Apply(cmd, 3*time.Second).Error(); err != nil {
+					errCh <- fmt.Errorf("writer %d cmd %d: %w", writerIdx, c, err)
+					return
+				}
+			}
+		}(w)
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	h.assertAllFSMsConverged()
+
+	// Cross-check: leader's FSM has exactly writers*commandsPerWriter entries.
+	leader := h.nodes[h.leaderID()]
+	total := 0
+	for _, tid := range tierIDs {
+		if sub := leader.fsm.TierFSM(tid); sub != nil {
+			total += len(sub.List())
+		}
+	}
+	if total != writers*commandsPerWriter {
+		t.Fatalf("expected %d entries in leader FSM, got %d", writers*commandsPerWriter, total)
+	}
+}
+
+// Wipe a follower's WAL while the leader continues to commit, then restart
+// the follower. The follower must rejoin the cluster with empty local state
+// and catch up either via snapshot install (if the leader has taken a
+// snapshot) or log replay from the leader's retained tail. End-state FSM
+// must match the leader.
+//
+// This is the "new voter catches up from scratch" path, exercised on an
+// existing voter via wipe-and-restart. Real cluster operations (node
+// replacement, disk failure recovery) share this path.
+func TestReliability_FollowerWipe_CatchupViaSnapshotOrReplay(t *testing.T) {
+	t.Parallel()
+	h := newReliabilityHarness(t, 3)
+
+	tierID := glid.New()
+	now := time.Now().Truncate(time.Nanosecond)
+
+	// Seed some pre-wipe state.
+	for i := range byte(3) {
+		h.applyTierCreate(tierID, chunkIDWithPrefix(0x50+i), now)
+	}
+	h.assertAllFSMsConverged()
+
+	// Pick a follower.
+	leaderID := h.leaderID()
+	var followerID string
+	for _, id := range h.nodeIDs {
+		if id != leaderID {
+			followerID = id
+			break
+		}
+	}
+
+	// Wipe: stop, delete the WAL dir, start again pointing at the same path
+	// (which startNode will recreate empty).
+	h.stopNode(followerID)
+	if err := removeDirContents(h.nodes[followerID].walDir); err != nil {
+		t.Fatalf("wipe wal dir: %v", err)
+	}
+	h.startNode(followerID)
+	h.wireTransports()
+
+	// Keep applying on the leader while the wiped follower catches up.
+	// This also forces the log past what the wiped follower had before,
+	// proving catch-up includes post-wipe entries.
+	for i := range byte(3) {
+		h.applyTierCreate(tierID, chunkIDWithPrefix(0x60+i), now)
+	}
+
+	h.assertAllFSMsConverged()
+}
+
 // --- Test helpers ---
+
+// removeDirContents deletes every entry inside dir (but keeps dir itself).
+// Used by the follower-wipe scenario to simulate a disk failure / fresh
+// replacement on an existing voter.
+func removeDirContents(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if err := os.RemoveAll(filepath.Join(dir, e.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 func chunkIDWithPrefix(b byte) chunk.ChunkID {
 	var id chunk.ChunkID
@@ -250,8 +434,9 @@ func chunkIDWithPrefix(b byte) chunk.ChunkID {
 }
 
 // assertSubsetConverged polls until every named node's FSM fingerprint
-// matches the first node's, or times out. Used when part of the cluster is
-// stopped and the full-cluster assertion would hang.
+// matches, with AppliedIndex caught up to the leader's LastIndex. Used
+// when part of the cluster is stopped and the full-cluster assertion
+// would hang.
 func assertSubsetConverged(t *testing.T, h *reliabilityHarness, ids []string) {
 	t.Helper()
 	if len(ids) == 0 {
@@ -260,33 +445,58 @@ func assertSubsetConverged(t *testing.T, h *reliabilityHarness, ids []string) {
 	deadline := time.Now().Add(harnessConvergeWait)
 	var lastPrints map[string]string
 	for time.Now().Before(deadline) {
-		lastPrints = map[string]string{}
-		baselineID := ""
+		// Find the leader among the subset.
+		var leaderLast uint64
+		leaderPrint := ""
+		leaderID := ""
 		for _, id := range ids {
 			n := h.nodes[id]
 			n.mu.Lock()
-			fsm := n.fsm
 			r := n.raft
+			fsm := n.fsm
 			n.mu.Unlock()
-			if fsm == nil || r == nil {
+			if r != nil && r.State() == hraft.Leader {
+				leaderID = id
+				leaderLast = r.LastIndex()
+				if r.AppliedIndex() < leaderLast {
+					break // leader not caught up yet
+				}
+				if fsm != nil {
+					leaderPrint = vaultFSMFingerprint(fsm)
+				}
+				break
+			}
+		}
+		if leaderID == "" || leaderPrint == "" && leaderLast > 0 {
+			time.Sleep(20 * time.Millisecond)
+			continue
+		}
+
+		lastPrints = map[string]string{leaderID: leaderPrint}
+		allMatch := true
+		for _, id := range ids {
+			if id == leaderID {
+				continue
+			}
+			n := h.nodes[id]
+			n.mu.Lock()
+			r := n.raft
+			fsm := n.fsm
+			n.mu.Unlock()
+			if r == nil || fsm == nil {
+				allMatch = false
+				continue
+			}
+			if r.AppliedIndex() < leaderLast {
+				allMatch = false
+				lastPrints[id] = fmt.Sprintf("<behind: applied=%d leaderLast=%d>",
+					r.AppliedIndex(), leaderLast)
 				continue
 			}
 			p := vaultFSMFingerprint(fsm)
 			lastPrints[id] = p
-			if baselineID == "" {
-				baselineID = id
-			}
-		}
-		if baselineID == "" {
-			time.Sleep(20 * time.Millisecond)
-			continue
-		}
-		baseline := lastPrints[baselineID]
-		allMatch := true
-		for _, p := range lastPrints {
-			if p != baseline {
+			if p != leaderPrint {
 				allMatch = false
-				break
 			}
 		}
 		if allMatch && len(lastPrints) == len(ids) {
