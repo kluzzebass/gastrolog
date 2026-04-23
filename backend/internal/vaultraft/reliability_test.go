@@ -3,6 +3,7 @@ package vaultraft
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -35,13 +36,22 @@ import (
 //   - PipelinedApplies_SurviveLeaderKill       (pipelined futures + leader loss)
 //   - RapidLeaderRestart_NoDivergence           (stress: repeated restarts)
 //   - MultipleVaults_IsolatedAndConvergent      (two vault FSMs side by side)
+//   - SnapshotCycleUnderLoad_NoCorruption       (Snapshot() races with Apply)
+//   - LargeFSM_SnapshotRestoreRoundtrip          (stress streaming Restore)
 //
-// Future direction: a full orchestrator-backed harness that builds on
-// this layer so scenarios can exercise end-to-end ingest/search across
-// real tier managers. The current harness runs only the vault control-
-// plane Raft — enough to catch metadata-divergence bugs but not
-// orchestrator-layer regressions (like the GetFields UTF-8 bug filed as
-// gastrolog-1uh5h, which lives above this layer).
+// Future direction: a full orchestrator-backed harness that boots N real
+// orchestrators with Raft-backed tiers (GroupManager + raftwal +
+// multiraft.Transport on loopback gRPC). That unlocks end-to-end
+// scenarios — ingest, seal, search across nodes during failover —
+// instead of testing the vault control-plane Raft in isolation. Tracked
+// as a follow-up to gastrolog-5ff7z because the wiring (gRPC servers per
+// node, chunk/index factories, scheduler lifecycle, cross-node
+// forwarders) is substantial and deserves its own branch.
+//
+// The current harness runs only the vault control-plane Raft — enough
+// to catch metadata-divergence bugs but not orchestrator-layer
+// regressions (like the GetFields UTF-8 bug filed as gastrolog-1uh5h,
+// which lives above this layer).
 
 // On a freshly bootstrapped vault-ctl Raft group — no user commands,
 // no FSM Apply calls — hraft still commits the bootstrap LogConfiguration
@@ -648,6 +658,155 @@ func TestReliability_MultipleVaults_IsolatedAndConvergent(t *testing.T) {
 		}
 	}
 }
+
+// Force repeated snapshots on the leader while Apply traffic is in flight.
+// Snapshot() truncates the log past the snapshot point; if that interacts
+// badly with a concurrent StoreLog, the follower's log could end up with a
+// gap or a torn tail and divergence would surface as a fingerprint mismatch.
+//
+// hraft coordinates Snapshot/Apply internally but the raftwal + hraft
+// combination is project-specific, so this scenario is where "somebody
+// else's bug becomes our bug" gets caught.
+func TestReliability_SnapshotCycleUnderLoad_NoCorruption(t *testing.T) {
+	t.Parallel()
+	h := newReliabilityHarness(t, 3)
+
+	tierID := glid.New()
+	now := time.Now().Truncate(time.Nanosecond)
+
+	// Apply workload: 40 commands, with Snapshot() forced every 10 commands.
+	const (
+		totalCommands = 40
+		snapEvery     = 10
+	)
+
+	for i := range byte(totalCommands) {
+		h.applyTierCreate(tierID, chunkIDWithPrefix(i), now)
+		if (i+1)%snapEvery == 0 {
+			if err := h.nodes[h.leaderID()].raft.Snapshot().Error(); err != nil {
+				// ErrNothingNewToSnapshot is benign (snapshot cycle may overlap).
+				if !isBenignSnapshotErr(err) {
+					t.Fatalf("force snapshot after cmd %d: %v", i, err)
+				}
+			}
+		}
+	}
+
+	h.assertAllFSMsConverged()
+
+	leader := h.nodes[h.leaderID()].fsm.TierFSM(tierID)
+	if leader == nil {
+		t.Fatal("tier missing after snapshot cycle")
+	}
+	if got := len(leader.List()); got != totalCommands {
+		t.Errorf("expected %d entries, got %d", totalCommands, got)
+	}
+}
+
+func isBenignSnapshotErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, hraft.ErrNothingNewToSnapshot)
+}
+
+// Build a large FSM (many tiers × many chunks), take a snapshot, Restore
+// into a fresh FSM from the snapshot bytes, compare fingerprints. This
+// is the streaming Restore path from gastrolog-5j6eu under a realistic
+// payload size — the io.ReadFull / io.LimitReader framing must stay
+// aligned across many tier blobs.
+//
+// Runs entirely in-process (no Raft) to isolate the Snapshot+Restore
+// contract from replication concerns.
+func TestReliability_LargeFSM_SnapshotRestoreRoundtrip(t *testing.T) {
+	t.Parallel()
+
+	src := NewFSM()
+	now := time.Now().Truncate(time.Nanosecond)
+
+	const (
+		numTiers         = 20
+		chunksPerTier    = 30
+	)
+	tiers := make([]glid.GLID, numTiers)
+	for i := range numTiers {
+		tiers[i] = glid.New()
+	}
+
+	for ti, tierID := range tiers {
+		for ci := range chunksPerTier {
+			var cid chunk.ChunkID
+			cid[0] = byte(ti)
+			cid[1] = byte(ci)
+			cmd := MarshalTierCommand(tierID, tierfsm.MarshalCreateChunk(cid, now, now, now))
+			if r := src.Apply(&hraft.Log{Data: cmd}); r != nil {
+				t.Fatalf("apply tier=%d chunk=%d: %v", ti, ci, r)
+			}
+		}
+	}
+
+	expected := vaultFSMFingerprint(src)
+
+	// Persist snapshot bytes.
+	snap, err := src.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	var buf fingerprintBuilderBytes
+	sink := &bufSink{Writer: &buf}
+	if err := snap.Persist(sink); err != nil {
+		t.Fatalf("Persist: %v", err)
+	}
+
+	// Restore into a fresh FSM from those bytes.
+	dst := NewFSM()
+	if err := dst.Restore(io.NopCloser(&readBytesCloser{data: buf.Bytes()})); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	if got := vaultFSMFingerprint(dst); got != expected {
+		t.Fatalf("round-trip fingerprint mismatch.\nexpected:\n%s\ngot:\n%s", expected, got)
+	}
+
+	// Sanity: total entry count matches.
+	total := 0
+	for _, tierID := range tiers {
+		if sub := dst.TierFSM(tierID); sub != nil {
+			total += len(sub.List())
+		}
+	}
+	if want := numTiers * chunksPerTier; total != want {
+		t.Errorf("expected %d total entries, got %d", want, total)
+	}
+}
+
+// fingerprintBuilderBytes is a minimal io.Writer-backed byte buffer that
+// does not pull in bytes.Buffer purely for this one test. Satisfies the
+// parts of the interface the snapshot persist path needs.
+type fingerprintBuilderBytes struct {
+	buf []byte
+}
+
+func (b *fingerprintBuilderBytes) Write(p []byte) (int, error) {
+	b.buf = append(b.buf, p...)
+	return len(p), nil
+}
+func (b *fingerprintBuilderBytes) Bytes() []byte { return b.buf }
+
+type readBytesCloser struct {
+	data []byte
+	off  int
+}
+
+func (r *readBytesCloser) Read(p []byte) (int, error) {
+	if r.off >= len(r.data) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.data[r.off:])
+	r.off += n
+	return n, nil
+}
+func (r *readBytesCloser) Close() error { return nil }
 
 // --- Test helpers ---
 
