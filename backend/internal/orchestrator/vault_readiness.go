@@ -29,3 +29,21 @@ func vaultReplicationReadinessErr(vaultID glid.GLID, v *Vault) error {
 	}
 	return nil
 }
+
+// LocalVaultsReplicationReady reports whether every vault that hosts at least
+// one local tier instance has replication metadata ready (tier FSM applied).
+// Vaults registered with zero local tiers are ignored so routing-only shells
+// do not fail load-balancer readiness (gastrolog-4ip1o).
+func (o *Orchestrator) LocalVaultsReplicationReady() bool {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	for id, v := range o.vaults {
+		if len(v.Tiers) == 0 {
+			continue
+		}
+		if err := vaultReplicationReadinessErr(id, v); err != nil {
+			return false
+		}
+	}
+	return true
+}

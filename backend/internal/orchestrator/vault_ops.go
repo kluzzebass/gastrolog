@@ -393,6 +393,10 @@ func (o *Orchestrator) AppendToTier(vaultID, tierID glid.GLID, primaryChunkID ch
 		o.mu.RUnlock()
 		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
+	if err := vaultReplicationReadinessErr(vaultID, vault); err != nil {
+		o.mu.RUnlock()
+		return err
+	}
 
 	// Block appends to tiers that are draining.
 	if _, draining := o.tierDraining[tierDrainKey(vaultID, tierID)]; draining {

@@ -374,3 +374,45 @@ func TestGetClusterStatus_ClusterAddressUsesAdvertised(t *testing.T) {
 		t.Errorf("ClusterAddress %q doesn't contain the node hostname", got)
 	}
 }
+
+func TestReadyz_localVaultReplicationNotReady(t *testing.T) {
+	t.Parallel()
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	vid := glid.New()
+	s, err := memtest.NewVault(chunkmem.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	orch.RegisterVault(orchestrator.NewVault(vid, &orchestrator.TierInstance{
+		TierID:     glid.New(),
+		Type:       "memory",
+		Chunks:     s.CM,
+		Indexes:    s.IM,
+		Query:      s.QE,
+		IsFSMReady: func() bool { return false },
+	}))
+	if err := orch.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer orch.Stop()
+
+	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
+	httpClient := &http.Client{
+		Transport: &embeddedTransport{handler: srv.Handler()},
+	}
+	req, err := http.NewRequest(http.MethodGet, "http://embedded/readyz", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		t.Fatalf("readyz: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("readyz: want 503 while tier FSM not ready, got %d", resp.StatusCode)
+	}
+}

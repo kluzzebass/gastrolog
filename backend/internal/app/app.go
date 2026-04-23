@@ -415,7 +415,11 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 		if err := waitForOrch(ctx); err != nil {
 			return err
 		}
-		return orch.AppendToTier(vaultID, tierID, primaryChunkID, rec)
+		err := orch.AppendToTier(vaultID, tierID, primaryChunkID, rec)
+		if err != nil && errors.Is(err, orchestrator.ErrVaultNotReady) {
+			return errors.Join(cluster.ErrForwardTargetNotReady, err)
+		}
+		return err
 	})
 
 	// Wire cross-node chunk migration and replication.
@@ -443,7 +447,11 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 		if err := waitForOrch(ctx); err != nil {
 			return err
 		}
-		return orch.StreamAppendToTier(ctx, vaultID, tierID, next)
+		err := orch.StreamAppendToTier(ctx, vaultID, tierID, next)
+		if err != nil && errors.Is(err, orchestrator.ErrVaultNotReady) {
+			return errors.Join(cluster.ErrForwardTargetNotReady, err)
+		}
+		return err
 	})
 
 	searchForwarder := cluster.NewSearchForwarder(peerConns)

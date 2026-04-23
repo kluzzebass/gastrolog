@@ -253,7 +253,7 @@ func (s *Server) registerProbes(mux *http.ServeMux) {
 
 	// Readiness probe - returns 200 if ready to accept traffic
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
-		if s.orch.IsRunning() && !s.draining.Load() {
+		if s.orch.IsRunning() && !s.draining.Load() && s.orch.LocalVaultsReplicationReady() {
 			w.WriteHeader(http.StatusOK)
 		} else {
 			w.WriteHeader(http.StatusServiceUnavailable)

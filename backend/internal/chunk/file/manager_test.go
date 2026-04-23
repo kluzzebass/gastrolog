@@ -2,6 +2,7 @@ package file
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
@@ -12,7 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/glid"
 )
 
 func TestFileChunkManagerNanosecondPrecision(t *testing.T) {
@@ -1983,5 +1986,31 @@ func TestOpenActiveChunkDictRecovery(t *testing.T) {
 		if rec.Attrs["host"] == "" {
 			t.Fatalf("record[%d]: missing 'host' attr", i)
 		}
+	}
+}
+
+// Regression: cloud backfill can call UploadToCloud after the file manager is
+// closed during tier removal; must return ErrManagerClosed instead of
+// panicking on a nil zstd encoder (gastrolog: RF churn / node crash).
+func TestUploadToCloudAfterClose(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	dir := t.TempDir()
+	cm, err := NewManager(Config{
+		Dir:            dir,
+		Now:            time.Now,
+		RotationPolicy: chunk.NewRecordCountPolicy(10000),
+		CloudStore:     blobstore.NewMemory(),
+		VaultID:        vaultID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cm.Close(); err != nil {
+		t.Fatal(err)
+	}
+	err = cm.UploadToCloud(chunk.NewChunkID())
+	if !errors.Is(err, ErrManagerClosed) {
+		t.Fatalf("UploadToCloud after Close: got %v, want ErrManagerClosed", err)
 	}
 }

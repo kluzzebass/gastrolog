@@ -3188,6 +3188,17 @@ func (m *Manager) UploadToCloud(id chunk.ChunkID) error {
 func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	key := m.blobKey(id)
 
+	// Close() nils zstdEnc after postSealWg drains; cloud backfill jobs can
+	// still fire from the scheduler while a tier is being torn down (e.g.
+	// replication-factor placement churn). Without this guard, NewWriter
+	// receives a nil *zstd.Encoder and panics inside klauspost/zstd.
+	m.mu.Lock()
+	if m.closed || m.zstdEnc == nil {
+		m.mu.Unlock()
+		return ErrManagerClosed
+	}
+	m.mu.Unlock()
+
 	// If the blob already exists (leader or another replica uploaded first),
 	// skip the upload and adopt the existing blob's size. This prevents
 	// multiple nodes from overwriting each other's uploads with slightly

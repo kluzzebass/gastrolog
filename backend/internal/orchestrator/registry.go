@@ -128,6 +128,9 @@ func (o *Orchestrator) LocalPrimaryTierIDs() map[glid.GLID]bool {
 	defer o.mu.RUnlock()
 	ids := make(map[glid.GLID]bool)
 	for _, v := range o.vaults {
+		if err := vaultReplicationReadinessErr(v.ID, v); err != nil {
+			continue
+		}
 		for _, t := range v.Tiers {
 			if !t.IsFollower {
 				ids[t.TierID] = true
@@ -145,6 +148,9 @@ func (o *Orchestrator) HasLocalQueryEngine(vaultID glid.GLID) bool {
 	defer o.mu.RUnlock()
 	v := o.vaults[vaultID]
 	if v == nil {
+		return false
+	}
+	if err := vaultReplicationReadinessErr(vaultID, v); err != nil {
 		return false
 	}
 	for _, t := range v.Tiers {
@@ -172,16 +178,61 @@ func (o *Orchestrator) ListIngesters() []glid.GLID {
 func (o *Orchestrator) QueryEngine(key glid.GLID) *query.Engine {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	if s := o.vaults[key]; s != nil {
-		return s.QueryEngine()
+	s := o.vaults[key]
+	if s == nil {
+		return nil
 	}
-	return nil
+	if err := vaultReplicationReadinessErr(key, s); err != nil {
+		return nil
+	}
+	return s.QueryEngine()
 }
 
 // MultiVaultQueryEngine returns a query engine that searches across all vaults.
 // Vault predicates in queries (e.g., "vault_id=<uuid>") filter which vaults are searched.
 func (o *Orchestrator) MultiVaultQueryEngine() *query.Engine {
-	return query.NewWithRegistry(o, o.logger)
+	return query.NewWithRegistry(&searchReadyRegistry{o: o}, o.logger)
+}
+
+// searchReadyRegistry implements query.VaultRegistry for multi-vault search,
+// exposing only replication-ready vaults so partially applied tier metadata
+// cannot be queried (gastrolog-4ip1o).
+type searchReadyRegistry struct {
+	o *Orchestrator
+}
+
+func (r *searchReadyRegistry) ListVaults() []glid.GLID {
+	r.o.mu.RLock()
+	defer r.o.mu.RUnlock()
+	keys := make([]glid.GLID, 0, len(r.o.vaults))
+	for k, v := range r.o.vaults {
+		if err := vaultReplicationReadinessErr(k, v); err != nil {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	slices.SortFunc(keys, func(a, b glid.GLID) int { return bytes.Compare(a[:], b[:]) })
+	return keys
+}
+
+func (r *searchReadyRegistry) ChunkManager(key glid.GLID) chunk.ChunkManager {
+	r.o.mu.RLock()
+	defer r.o.mu.RUnlock()
+	v := r.o.vaults[key]
+	if v == nil || vaultReplicationReadinessErr(key, v) != nil {
+		return nil
+	}
+	return v.ActiveTierChunkManager()
+}
+
+func (r *searchReadyRegistry) IndexManager(key glid.GLID) index.IndexManager {
+	r.o.mu.RLock()
+	defer r.o.mu.RUnlock()
+	v := r.o.vaults[key]
+	if v == nil || vaultReplicationReadinessErr(key, v) != nil {
+		return nil
+	}
+	return v.ActiveTierIndexManager()
 }
 
 // PrimaryTierQueryEngine returns a query engine that only searches leader
@@ -202,6 +253,9 @@ func (r *primaryTierRegistry) ListVaults() []glid.GLID {
 	defer r.o.mu.RUnlock()
 	var ids []glid.GLID
 	for _, v := range r.o.vaults {
+		if err := vaultReplicationReadinessErr(v.ID, v); err != nil {
+			continue
+		}
 		for _, t := range v.Tiers {
 			if !t.IsFollower && t.Query != nil {
 				ids = append(ids, t.TierID)
@@ -215,6 +269,9 @@ func (r *primaryTierRegistry) ChunkManager(key glid.GLID) chunk.ChunkManager {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
 	for _, v := range r.o.vaults {
+		if err := vaultReplicationReadinessErr(v.ID, v); err != nil {
+			continue
+		}
 		for _, t := range v.Tiers {
 			if t.TierID == key && !t.IsFollower && t.Query != nil {
 				return t.Chunks
@@ -228,6 +285,9 @@ func (r *primaryTierRegistry) IndexManager(key glid.GLID) index.IndexManager {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
 	for _, v := range r.o.vaults {
+		if err := vaultReplicationReadinessErr(v.ID, v); err != nil {
+			continue
+		}
 		for _, t := range v.Tiers {
 			if t.TierID == key && !t.IsFollower && t.Query != nil {
 				return t.Indexes

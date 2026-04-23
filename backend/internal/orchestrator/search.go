@@ -22,6 +22,9 @@ func (o *Orchestrator) Search(ctx context.Context, key glid.GLID, q query.Query,
 		}
 		return nil, nil, ErrUnknownRegistry
 	}
+	if err := vaultReplicationReadinessErr(key, vault); err != nil {
+		return nil, nil, err
+	}
 
 	qe := vault.QueryEngine()
 	if qe == nil {
@@ -42,6 +45,9 @@ func (o *Orchestrator) SearchThenFollow(ctx context.Context, key glid.GLID, q qu
 			return nil, nil, ErrNoQueryEngines
 		}
 		return nil, nil, ErrUnknownRegistry
+	}
+	if err := vaultReplicationReadinessErr(key, vault); err != nil {
+		return nil, nil, err
 	}
 
 	qe := vault.QueryEngine()
@@ -64,6 +70,9 @@ func (o *Orchestrator) SearchWithContext(ctx context.Context, key glid.GLID, q q
 		}
 		return nil, nil, ErrUnknownRegistry
 	}
+	if err := vaultReplicationReadinessErr(key, vault); err != nil {
+		return nil, nil, err
+	}
 
 	qe := vault.QueryEngine()
 	if qe == nil {
@@ -84,6 +93,9 @@ func (o *Orchestrator) Explain(ctx context.Context, key glid.GLID, q query.Query
 			return nil, ErrNoQueryEngines
 		}
 		return nil, ErrUnknownRegistry
+	}
+	if err := vaultReplicationReadinessErr(key, vault); err != nil {
+		return nil, err
 	}
 
 	qe := vault.QueryEngine()
