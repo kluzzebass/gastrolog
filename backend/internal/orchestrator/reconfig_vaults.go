@@ -1101,18 +1101,26 @@ func (o *Orchestrator) createTierRaftGroupVaultCtl(tierCfg system.TierConfig, cl
 		applier = &vaultCtlTierApplier{o: o, vaultID: tierCfg.VaultID, tierID: tierCfg.ID}
 	}
 
-	return g, applier, buildTierRaftCallbacks(r, tierFSM, applier)
+	return g, applier, buildTierRaftCallbacks(r, vfsm, tierFSM, applier)
 }
 
 // buildTierRaftCallbacks constructs the callback struct for replicated tier
 // chunk metadata (vault control-plane Raft in cluster mode).
 // Extracted from createTierRaftGroup to keep cognitive complexity within lint
 // thresholds.
-func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.Applier) tierRaftCallbacks {
+//
+// Readiness delegates to the VAULT FSM, not the tier sub-FSM. The vault
+// control-plane Raft becomes "ready" on its first Apply (hraft's post-
+// election no-op counts) or Restore. Before 5xxbd, tier FSM was a top-level
+// Raft group whose own Ready flag flipped on every apply; after 5xxbd the
+// tier sub-FSM only sees OpTierFSM commands, which a fresh vault with no
+// chunks never sends — keying readiness on the tier sub-FSM would leave
+// every fresh vault wedged as "not ready" until first ingestion.
+func buildTierRaftCallbacks(r *hraft.Raft, vfsm *vaultraft.FSM, fsm *tierfsm.FSM, applier tierfsm.Applier) tierRaftCallbacks {
 	return tierRaftCallbacks{
 		hasLeader:  func() bool { return r.Leader() != "" },
 		isLeader:   func() bool { return r.State() == hraft.Leader },
-		isFSMReady: func() bool { return fsm != nil && fsm.Ready() },
+		isFSMReady: func() bool { return vfsm != nil && vfsm.Ready() },
 		applyDelete: func(id chunk.ChunkID) error {
 			return applier.Apply(tierfsm.MarshalDeleteChunk(id))
 		},

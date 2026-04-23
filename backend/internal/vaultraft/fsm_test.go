@@ -106,6 +106,85 @@ func TestFSM_SnapshotRestore_twoTiers(t *testing.T) {
 	}
 }
 
+// Fresh FSM is not ready — before any Apply or Restore, tier sub-FSMs are
+// empty and we must not treat the manifest as authoritative.
+func TestFSM_ReadyFalseBeforeAnyApply(t *testing.T) {
+	t.Parallel()
+	f := NewFSM()
+	if f.Ready() {
+		t.Fatal("fresh FSM should not report ready")
+	}
+}
+
+// Readiness flips after an OpNoop Apply — this is the fresh-cluster case
+// where hraft commits the post-election no-op before any tier commands.
+// Without this, vault readiness (see orchestrator/vault_readiness.go) stays
+// false forever on a cluster with no ingestion, blocking search and ingest.
+func TestFSM_ReadyTrueAfterNoopApply(t *testing.T) {
+	t.Parallel()
+	f := NewFSM()
+	if got := f.Apply(&hraft.Log{Data: MarshalNoop()}); got != nil {
+		t.Fatalf("noop apply: %v", got)
+	}
+	if !f.Ready() {
+		t.Fatal("expected Ready=true after OpNoop Apply")
+	}
+}
+
+// Readiness also flips after a tier-scoped Apply.
+func TestFSM_ReadyTrueAfterTierApply(t *testing.T) {
+	t.Parallel()
+	f := NewFSM()
+	tierID := glid.New()
+	now := time.Now().Truncate(time.Nanosecond)
+	wire := tierfsm.MarshalCreateChunk(testChunkID(1), now, now, now)
+	if got := f.Apply(&hraft.Log{Data: MarshalTierCommand(tierID, wire)}); got != nil {
+		t.Fatalf("tier apply: %v", got)
+	}
+	if !f.Ready() {
+		t.Fatal("expected Ready=true after tier Apply")
+	}
+}
+
+// Readiness flips after a snapshot restore (non-empty and legacy-empty
+// forms): the snapshot itself is authoritative even when it contains no
+// tier state.
+func TestFSM_ReadyTrueAfterRestore(t *testing.T) {
+	t.Parallel()
+	// Non-empty snapshot from a source FSM.
+	src := NewFSM()
+	tierID := glid.New()
+	now := time.Now().Truncate(time.Nanosecond)
+	if r := src.Apply(&hraft.Log{Data: MarshalTierCommand(tierID, tierfsm.MarshalCreateChunk(testChunkID(2), now, now, now))}); r != nil {
+		t.Fatalf("src apply: %v", r)
+	}
+	snap, err := src.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := snap.Persist(&bufSink{Writer: &buf}); err != nil {
+		t.Fatalf("Persist: %v", err)
+	}
+
+	dst := NewFSM()
+	if err := dst.Restore(io.NopCloser(bytes.NewReader(buf.Bytes()))); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if !dst.Ready() {
+		t.Fatal("expected Ready=true after non-empty Restore")
+	}
+
+	// Legacy single-byte empty snapshot.
+	legacy := NewFSM()
+	if err := legacy.Restore(io.NopCloser(bytes.NewReader([]byte{1}))); err != nil {
+		t.Fatalf("legacy Restore: %v", err)
+	}
+	if !legacy.Ready() {
+		t.Fatal("expected Ready=true after legacy-empty Restore")
+	}
+}
+
 func TestFSM_Restore_legacyEmptyByte(t *testing.T) {
 	t.Parallel()
 	f := NewFSM()

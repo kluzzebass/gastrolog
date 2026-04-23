@@ -28,6 +28,9 @@ const vaultSnapVersion uint32 = 1
 type FSM struct {
 	tierMu sync.Mutex
 	tiers  map[glid.GLID]*tierfsm.FSM
+
+	readyMu sync.RWMutex
+	ready   bool
 }
 
 // NewFSM returns a new vault control-plane FSM instance.
@@ -37,12 +40,38 @@ func NewFSM() *FSM {
 	}
 }
 
+// Ready reports whether the vault control-plane Raft group has applied at
+// least one log entry (including the hraft post-election no-op) or restored
+// from a snapshot on this node. Before that, the vault-scoped manifest may
+// be incomplete and tier sub-FSM state is not authoritative — callers
+// should treat the vault as not-ready for reads or writes.
+//
+// Tier-level readiness delegates to this check (see
+// reconfig_vaults.go isFSMReady wiring): an empty tier sub-FSM is not
+// "not ready" — it is correctly empty once the vault FSM has applied
+// anything. Before 5xxbd, tier FSM was a top-level Raft group and its own
+// Ready flag flipped on every apply; after 5xxbd, tier sub-FSMs only see
+// OpTierFSM commands (which a fresh vault with no chunks never sends), so
+// authoritative readiness must be tracked here at the vault level.
+func (f *FSM) Ready() bool {
+	f.readyMu.RLock()
+	defer f.readyMu.RUnlock()
+	return f.ready
+}
+
+func (f *FSM) markReady() {
+	f.readyMu.Lock()
+	f.ready = true
+	f.readyMu.Unlock()
+}
+
 // Apply executes vault control-plane commands. Empty payloads are ignored.
 // The first byte selects the opcode; see cmd.go.
 func (f *FSM) Apply(l *hraft.Log) any {
 	if l == nil || len(l.Data) == 0 {
 		return nil
 	}
+	f.markReady()
 	switch l.Data[0] {
 	case OpNoop:
 		return nil
@@ -123,58 +152,85 @@ func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) {
 
 // Restore replaces FSM state from a snapshot produced by Snapshot, or the
 // legacy single-byte empty snapshot ({1}) written by older builds.
+//
+// Streams the snapshot incrementally rather than slurping it into memory —
+// the combined tier-state blob may be large on clusters with many tiers.
 func (f *FSM) Restore(rc io.ReadCloser) error {
 	defer func() { _ = rc.Close() }()
-	data, err := io.ReadAll(rc)
-	if err != nil {
-		return fmt.Errorf("vaultraft restore: read: %w", err)
-	}
-	if len(data) == 0 {
+
+	// Peek the first byte to distinguish the legacy single-byte empty form
+	// from the magic-prefixed format.
+	var first [1]byte
+	n1, err := rc.Read(first[:])
+	if err == io.EOF || n1 == 0 {
 		return nil
 	}
-	if len(data) == 1 && data[0] == 1 {
-		// Legacy empty snapshot from the pre-composite FSM; treat as empty state.
-		f.tierMu.Lock()
-		f.tiers = make(map[glid.GLID]*tierfsm.FSM)
-		f.tierMu.Unlock()
-		return nil
+	if err != nil && err != io.EOF {
+		return fmt.Errorf("vaultraft restore: read first byte: %w", err)
 	}
-	if len(data) < len(vaultSnapMagic)+8 {
-		return fmt.Errorf("vaultraft restore: truncated snapshot (%d bytes)", len(data))
+	if first[0] == 1 {
+		// Legacy empty snapshot from the pre-composite FSM.
+		var probe [1]byte
+		if n, _ := rc.Read(probe[:]); n == 0 {
+			f.tierMu.Lock()
+			f.tiers = make(map[glid.GLID]*tierfsm.FSM)
+			f.tierMu.Unlock()
+			f.markReady()
+			return nil
+		}
+		return errors.New("vaultraft restore: trailing bytes after legacy empty sentinel")
 	}
-	if !bytes.Equal(data[:len(vaultSnapMagic)], vaultSnapMagic[:]) {
+
+	// Read the remainder of the magic and validate.
+	var restMagic [7]byte
+	if _, err := io.ReadFull(rc, restMagic[:]); err != nil {
+		return fmt.Errorf("vaultraft restore: read magic: %w", err)
+	}
+	if first[0] != vaultSnapMagic[0] || !bytes.Equal(restMagic[:], vaultSnapMagic[1:]) {
 		return errors.New("vaultraft restore: bad magic")
 	}
-	ver := binary.BigEndian.Uint32(data[len(vaultSnapMagic) : len(vaultSnapMagic)+4])
+
+	var verBuf [4]byte
+	if _, err := io.ReadFull(rc, verBuf[:]); err != nil {
+		return fmt.Errorf("vaultraft restore: read version: %w", err)
+	}
+	ver := binary.BigEndian.Uint32(verBuf[:])
 	if ver != vaultSnapVersion {
 		return fmt.Errorf("vaultraft restore: unsupported snapshot version %d", ver)
 	}
-	n := int(binary.BigEndian.Uint32(data[len(vaultSnapMagic)+4 : len(vaultSnapMagic)+8]))
-	off := len(vaultSnapMagic) + 8
-	nextTiers := make(map[glid.GLID]*tierfsm.FSM)
-	for range n {
-		if off+glid.Size+4 > len(data) {
-			return errors.New("vaultraft restore: truncated tier header")
-		}
+
+	var countBuf [4]byte
+	if _, err := io.ReadFull(rc, countBuf[:]); err != nil {
+		return fmt.Errorf("vaultraft restore: read tier count: %w", err)
+	}
+	n := int(binary.BigEndian.Uint32(countBuf[:]))
+
+	nextTiers := make(map[glid.GLID]*tierfsm.FSM, n)
+	for i := range n {
 		var tid glid.GLID
-		copy(tid[:], data[off:off+glid.Size])
-		off += glid.Size
-		blen := int(binary.BigEndian.Uint32(data[off : off+4]))
-		off += 4
-		if blen < 0 || off+blen > len(data) {
-			return errors.New("vaultraft restore: invalid tier blob length")
+		if _, err := io.ReadFull(rc, tid[:]); err != nil {
+			return fmt.Errorf("vaultraft restore: read tier[%d] id: %w", i, err)
 		}
-		blob := data[off : off+blen]
-		off += blen
+		var blenBuf [4]byte
+		if _, err := io.ReadFull(rc, blenBuf[:]); err != nil {
+			return fmt.Errorf("vaultraft restore: read tier[%d] blob length: %w", i, err)
+		}
+		blen := int64(binary.BigEndian.Uint32(blenBuf[:]))
+		tierReader := io.LimitReader(rc, blen)
 		t := tierfsm.New()
-		if err := t.Restore(io.NopCloser(bytes.NewReader(blob))); err != nil {
+		if err := t.Restore(io.NopCloser(tierReader)); err != nil {
 			return fmt.Errorf("vaultraft restore tier %x: %w", tid[:], err)
+		}
+		// Drain any unread bytes so the next tier header aligns.
+		if _, err := io.Copy(io.Discard, tierReader); err != nil {
+			return fmt.Errorf("vaultraft restore: drain tier[%d] tail: %w", i, err)
 		}
 		nextTiers[tid] = t
 	}
 	f.tierMu.Lock()
 	f.tiers = nextTiers
 	f.tierMu.Unlock()
+	f.markReady()
 	return nil
 }
 

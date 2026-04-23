@@ -13,6 +13,7 @@ Agents lose this in fresh context; **keep it in this file** so it survives compa
 - **Do not modify, stage, or “clean up” files that are not part of the change you were asked to make.** No drive-by edits, no opportunistic refactors, no fixing unrelated linter noise in the same commit unless the user asked for that scope.
 - **Do not run git (or other commands) that rewrite the working tree outside the task’s paths** — for example `git restore` / `git checkout` on unrelated files to “fix” staging or status. If something looks wrong outside scope, **tell the user** and wait; do not repair it yourself.
 - Applies to **docs, config, and generated output** as much as code: unrelated moves, renames, and restores are especially harmful because they look intentional in history.
+- **Exception: pre-existing issues that block your progress.** If a hook, lint rule, or compile error on unrelated code in the same file stops you from landing your change, fix it — do not punt. Mention the unrelated fix in the commit body so it is not hidden. The rule against drive-by edits is about avoiding noise in history, not about leaving yourself stuck.
 
 ### Issue tracking (dcat)
 
