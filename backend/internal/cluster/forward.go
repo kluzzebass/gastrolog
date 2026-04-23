@@ -231,8 +231,13 @@ func (s *Server) forwardRecords(ctx context.Context, req *gastrologv1.ForwardRec
 	for _, exportRec := range req.GetRecords() {
 		rec := convert.ExportToRecord(exportRec)
 		if appendErr := s.recordAppender(ctx, vaultID, rec); appendErr != nil {
-			s.cfg.Logger.Warn("forward: append failed",
-				"vault", vaultID, "error", appendErr)
+			if errors.Is(appendErr, ErrForwardTargetNotReady) {
+				s.cfg.Logger.Debug("forward: append failed (target not ready)",
+					"vault", vaultID, "error", appendErr)
+			} else {
+				s.cfg.Logger.Warn("forward: append failed",
+					"vault", vaultID, "error", appendErr)
+			}
 			return nil, status.Errorf(codes.Internal, "append record: %v", appendErr)
 		}
 		written++
@@ -281,8 +286,13 @@ func streamForwardRecordsHandler(srv any, stream grpc.ServerStream) error {
 		for _, exportRec := range msg.GetRecords() {
 			rec := convert.ExportToRecord(exportRec)
 			if appendErr := s.recordAppender(stream.Context(), vaultID, rec); appendErr != nil {
-				s.logger.Warn("stream forward: append failed",
-					"vault", vaultID, "error", appendErr)
+				if errors.Is(appendErr, ErrForwardTargetNotReady) {
+					s.logger.Debug("stream forward: append failed (target not ready)",
+						"vault", vaultID, "error", appendErr)
+				} else {
+					s.logger.Warn("stream forward: append failed",
+						"vault", vaultID, "error", appendErr)
+				}
 				continue
 			}
 			written++

@@ -406,6 +406,9 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 			return err
 		}
 		_, _, err := orch.Append(vaultID, rec)
+		if err != nil && errors.Is(err, orchestrator.ErrVaultNotReady) {
+			return errors.Join(cluster.ErrForwardTargetNotReady, err)
+		}
 		return err
 	})
 	clusterSrv.SetRecordTierAppender(func(ctx context.Context, vaultID, tierID glid.GLID, primaryChunkID chunk.ChunkID, rec chunk.Record) error {
