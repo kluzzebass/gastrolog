@@ -317,24 +317,6 @@ func (o *Orchestrator) ForceRemoveVault(id glid.GLID) error {
 	return nil
 }
 
-// DeleteTierData deletes all chunks and indexes for a tier, then removes the
-// data directory. Called when a tier is deleted with delete_data=true.
-func (o *Orchestrator) DeleteTierData(tierID glid.GLID) {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-
-	for _, vault := range o.vaults {
-		for _, tier := range vault.Tiers {
-			if tier.TierID != tierID {
-				continue
-			}
-			n := o.sealAndDeleteAllChunks(tier, "delete tier data", tierID)
-			o.logger.Info("tier data deleted", "tier", tierID, "chunks", n)
-			return
-		}
-	}
-}
-
 // sealAndDeleteAllChunks seals the active chunk (if any), then deletes all
 // chunks and their indexes. Returns the number of chunks found. Errors are
 // logged with the given prefix but do not abort the cleanup.
@@ -343,8 +325,8 @@ func (o *Orchestrator) DeleteTierData(tierID glid.GLID) {
 // each chunk delete does not fire AnnounceDelete → CmdDeleteChunk on the
 // tier Raft. The announcement would propagate to every voter and trigger
 // FSM.applyDelete + onDelete on each node, physically wiping the chunk
-// across the entire cluster. The intended cluster-wide effect (when callers
-// like RemoveTierFromVault react to placement loss, or DeleteTierData
+// across the entire cluster. The intended cluster-wide effect (when
+// RemoveTierFromVault reacts to placement loss, or DeleteTierFromVault
 // reacts to an admin teardown) comes from each node independently running
 // its own RemoveTierFromVault as the config change propagates — not from
 // per-chunk delete announcements out of one node. See gastrolog-4vz40.

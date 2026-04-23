@@ -12,20 +12,28 @@ import (
 	"gastrolog/internal/cluster"
 )
 
-// ScheduleCatchupForTier finds the vault containing the given tier and
-// schedules catchup for the specified followers.
-func (o *Orchestrator) ScheduleCatchupForTier(tierID glid.GLID, followerNodeIDs []string) {
+// ScheduleCatchup schedules catchup replication for newly added followers of
+// a tier within the given vault. Must be called on the node that holds the
+// tier leader replica — no-op if this node is a follower or does not host
+// the tier. The caller owns the (vaultID, tierID) pair; the orchestrator
+// does not reverse-lookup by tierID alone.
+func (o *Orchestrator) ScheduleCatchup(vaultID, tierID glid.GLID, followerNodeIDs []string) {
 	o.mu.RLock()
-	for vaultID, vault := range o.vaults {
+	vault := o.vaults[vaultID]
+	var found *TierInstance
+	if vault != nil {
 		for _, t := range vault.Tiers {
-			if t.TierID == tierID && !t.IsFollower {
-				o.mu.RUnlock()
-				o.scheduleCatchup(vaultID, tierID, followerNodeIDs)
-				return
+			if t.TierID == tierID {
+				found = t
+				break
 			}
 		}
 	}
 	o.mu.RUnlock()
+	if found == nil || found.IsFollower {
+		return
+	}
+	o.scheduleCatchup(vaultID, tierID, followerNodeIDs)
 }
 
 // scheduleCatchup schedules background jobs to replicate existing sealed chunks

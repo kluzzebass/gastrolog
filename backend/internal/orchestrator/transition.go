@@ -284,21 +284,25 @@ func (r *retentionRunner) findTierInstance() *TierInstance {
 	return nil
 }
 
-// TransitionChunk transitions a single sealed chunk from the given tier to the
-// next tier in the vault's chain. Exported for integration tests that need to
-// trigger transitions from outside the package.
-func (o *Orchestrator) TransitionChunk(vaultID, tierID glid.GLID, chunkID chunk.ChunkID) {
+// TransitionChunkForTesting synchronously transitions a single sealed chunk
+// from the given tier to the next tier in the vault's chain. Assumes the
+// caller is the tier leader — no leader check, no readiness gate. Production
+// code goes through the retention sweep's transition path.
+//
+// Only call from tests.
+func (o *Orchestrator) TransitionChunkForTesting(vaultID, tierID glid.GLID, chunkID chunk.ChunkID) {
+	o.mu.RLock()
 	vault := o.vaults[vaultID]
-	if vault == nil {
-		return
-	}
 	var tier *TierInstance
-	for _, t := range vault.Tiers {
-		if t.TierID == tierID {
-			tier = t
-			break
+	if vault != nil {
+		for _, t := range vault.Tiers {
+			if t.TierID == tierID {
+				tier = t
+				break
+			}
 		}
 	}
+	o.mu.RUnlock()
 	if tier == nil {
 		return
 	}

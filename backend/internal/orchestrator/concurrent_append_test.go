@@ -229,7 +229,7 @@ func TestTransitionConcurrentWithAppends(t *testing.T) {
 			metas, _ := cm0.List()
 			for _, m := range metas {
 				if m.Sealed {
-					orch.TransitionChunk(vaultID, tier0ID, m.ID)
+					orch.TransitionChunkForTesting(vaultID, tier0ID, m.ID)
 					transitioned.Add(1)
 				}
 			}
@@ -241,7 +241,7 @@ func TestTransitionConcurrentWithAppends(t *testing.T) {
 				metas, _ = cm0.List()
 				for _, m := range metas {
 					if m.Sealed {
-						orch.TransitionChunk(vaultID, tier0ID, m.ID)
+						orch.TransitionChunkForTesting(vaultID, tier0ID, m.ID)
 						transitioned.Add(1)
 					}
 				}
@@ -760,7 +760,7 @@ func TestReconfigDuringTransitionDoesNotPanic(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for _, m := range metas {
-			orch.TransitionChunk(vaultID, tier0ID, m.ID)
+			orch.TransitionChunkForTesting(vaultID, tier0ID, m.ID)
 		}
 	}()
 

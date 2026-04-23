@@ -13,8 +13,22 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// SealActiveTier seals the active chunk for a specific tier.
-// Used by the TierReplication seal command on follower nodes.
+// SealActiveTier seals the active chunk for a specific tier, on a **follower**
+// node, as the local effect of a tier-leader-originated SealTier replication
+// command. Use SealActive on the leader-triggered path.
+//
+// Role: follower-side. Caller is typically the TierReplicator handler that
+// receives the seal command from the leader. Validates expectedChunkID to
+// avoid sealing the wrong chunk if rotation raced the seal command.
+//
+// Readiness: no Vault.ReadinessErr gate — this call executes a replicated
+// command that the leader already authorized. The follower's own FSM
+// manifest may lag, but the physical seal (flush + close file) is local
+// and safe regardless.
+//
+// Do not merge with SealActive: the two paths run on different nodes with
+// different invariants. SealActive (leader) fans out replication; this
+// function is the target of that fan-out on followers.
 func (o *Orchestrator) SealActiveTier(vaultID, tierID glid.GLID, expectedChunkID chunk.ChunkID) error {
 	tier := o.findLocalTier(vaultID, tierID)
 	if tier == nil {
