@@ -234,7 +234,7 @@ func TestMultiNode_TierTransitionSearchFanOut(t *testing.T) {
 
 	// Transition via orchestrator (uses retentionRunner internally).
 	for _, m := range metas {
-		orchData1.TransitionChunk(vaultID, tier0ID, m.ID)
+		orchData1.TransitionChunkForTesting(vaultID, tier0ID, m.ID)
 	}
 
 	// Search via coordinator AFTER transition — records should still be findable

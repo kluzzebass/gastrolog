@@ -94,11 +94,23 @@ type sweepTarget struct {
 	rules  []retentionRule
 }
 
-// retentionSweepAll is the single scheduled retention job. Each tick:
-//   - Leader: evaluates retention rules, applies CmdDeleteChunk to tier Raft, deletes locally.
-//   - Every tier with a manifest: reconcile local disk against the tier FSM manifest
-//     (leaders and followers) — delete sealed orphans missed by OnDelete (e.g. manager
-//     closed, I/O errors). Stale-only; see orphanReconcileMinAge.
+// retentionSweepAll is the single scheduled retention job. Runs on every node
+// that hosts at least one tier instance.
+//
+// Per-tier role and readiness:
+//   - Rule evaluation runs only when the tier is the leader (tier.IsLeader()).
+//     Followers skip rule evaluation because rule results must be applied via
+//     the vault control-plane Raft, which only the leader writes to.
+//   - Reconcile (disk vs manifest) runs on leaders and followers — it needs
+//     only the FSM manifest. reconcileTierDiskAgainstManifest internally
+//     gates on tier.IsFSMReady() to avoid acting on an incomplete manifest
+//     (nil IsFSMReady is the single-node/memory-tier case, treated as
+//     ready).
+//
+// There is no per-vault Vault.ReadinessErr gate at this level because the
+// per-tier IsLeader / IsFSMReady checks already cover the preconditions for
+// each action. See vault_readiness.go for the canonical vault readiness
+// definition used by ingest/query entry points.
 func (o *Orchestrator) retentionSweepAll() {
 	sys, err := o.loadSystem(context.Background())
 	if err != nil {
@@ -282,6 +294,10 @@ func (o *Orchestrator) drainExcessChunks(vaultID, tierID glid.GLID, cm chunk.Chu
 
 // RetentionPendingChunks returns chunk IDs marked as retention-pending in the
 // tier Raft FSM for a vault. Visible to all nodes via Raft replication.
+//
+// Read-only accessor, callable from any-node. No Vault.ReadinessErr gate —
+// observational use only. Decision-making callers should gate on
+// Vault.ReadinessErr first.
 func (o *Orchestrator) RetentionPendingChunks(vaultID glid.GLID) map[chunk.ChunkID]bool {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
@@ -303,6 +319,11 @@ func (o *Orchestrator) RetentionPendingChunks(vaultID glid.GLID) map[chunk.Chunk
 // TransitionStreamedChunks returns chunk IDs on source tiers where records
 // were streamed to the next tier but the local copy is not yet deleted
 // (awaiting destination receipt). See gastrolog-4913n.
+//
+// Read-only accessor, callable from any-node. No Vault.ReadinessErr gate —
+// results reflect whatever the local FSM has applied, which is acceptable for
+// inspector/observational callers. For any path that makes decisions based
+// on this set, gate on Vault.ReadinessErr first.
 func (o *Orchestrator) TransitionStreamedChunks(vaultID glid.GLID) map[chunk.ChunkID]bool {
 	o.mu.RLock()
 	defer o.mu.RUnlock()

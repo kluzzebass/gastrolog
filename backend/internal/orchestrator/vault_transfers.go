@@ -188,6 +188,17 @@ func (o *Orchestrator) moveChunkFS(ctx context.Context, chunkID chunk.ChunkID, s
 // node. The vault remains registered locally (for search) but the filter set
 // routes new records to the target node via RecordForwarder. Once all sealed
 // chunks are transferred, the vault is unregistered locally.
+//
+// Role: runs on whichever node is losing the vault (source node). Dispatch
+// invokes this after config reassignment via CmdPutVault / routing changes
+// move placement to `targetNodeID`. It does not require tier leadership —
+// local chunks are streamed to the target regardless of leader/follower
+// role; the target decides how to integrate them.
+//
+// Readiness: no explicit Vault.ReadinessErr gate. Drain operates on local
+// chunk files directly, not through the FSM, so an unready FSM does not
+// block transfer. New writes are redirected via the filter rebuild before
+// drain starts, so inbound records cannot race the drain.
 func (o *Orchestrator) DrainVault(ctx context.Context, vaultID glid.GLID, targetNodeID string) error {
 	sys, err := o.loadSystem(ctx)
 	if err != nil {

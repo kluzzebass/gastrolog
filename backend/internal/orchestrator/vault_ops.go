@@ -171,8 +171,9 @@ func (o *Orchestrator) ListChunkMetas(vaultID glid.GLID) ([]chunk.ChunkMeta, err
 //
 // If this node hosts no tier instances for the vault (all placements are on
 // other nodes), this returns (nil, nil) so the server's ListChunks can still
-// fan out to peers. Writes still use vaultReplicationReadinessErr and will
-// reject that case with ErrVaultNotReady.
+// fan out to peers. Writes still gate on Vault.ReadinessErr and will reject
+// that case with ErrVaultNotReady. See vault_readiness.go for the canonical
+// readiness definition.
 //
 // Caller-side deduplication across nodes happens in the server's ListChunks.
 func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]TieredChunkMeta, error) {
@@ -1010,10 +1011,26 @@ func drainIterator(next chunk.RecordIterator) {
 	}
 }
 
-// SealActive seals the active chunk if it has records. No-op if empty or no active chunk.
-// After sealing, schedules compression and index builds (same as ingest-triggered seal).
-// SealActive seals the active chunk on matching tiers in the vault. If tierID
-// is glid.Nil, all tiers are sealed. Returns the number of tiers sealed.
+// SealActive seals the active chunk on matching tiers in the vault, on the
+// **leader** side of the seal flow. If tierID is glid.Nil, all local tiers
+// in the vault are sealed. Returns the number of tiers sealed. No-op if the
+// active chunk is empty or absent.
+//
+// Role: tier leader. Sealing on the leader triggers follower seals via the
+// TierReplicator's SealTier call, which arrives on followers as an invocation
+// of SealActiveTier. Callers that are already on the follower side (seal
+// commands dispatched from the leader's Raft) must use SealActiveTier
+// directly.
+//
+// Readiness: no Vault.ReadinessErr gate — seal operates on the in-memory
+// active chunk, not the FSM. Seal is also a step on the drain path (which
+// runs even with lagging followers), so gating here would create a
+// chicken-and-egg deadlock with readiness recovery.
+//
+// Do not merge with SealActiveTier: the two paths run on different nodes
+// with different invariants. SealActive (leader) fans out replication;
+// SealActiveTier is the target of that fan-out on followers. After sealing,
+// schedules compression and index builds (same as ingest-triggered seal).
 func (o *Orchestrator) SealActive(vaultID glid.GLID, tierID glid.GLID) (int, error) {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]

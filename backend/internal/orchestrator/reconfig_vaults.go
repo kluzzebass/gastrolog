@@ -317,24 +317,6 @@ func (o *Orchestrator) ForceRemoveVault(id glid.GLID) error {
 	return nil
 }
 
-// DeleteTierData deletes all chunks and indexes for a tier, then removes the
-// data directory. Called when a tier is deleted with delete_data=true.
-func (o *Orchestrator) DeleteTierData(tierID glid.GLID) {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-
-	for _, vault := range o.vaults {
-		for _, tier := range vault.Tiers {
-			if tier.TierID != tierID {
-				continue
-			}
-			n := o.sealAndDeleteAllChunks(tier, "delete tier data", tierID)
-			o.logger.Info("tier data deleted", "tier", tierID, "chunks", n)
-			return
-		}
-	}
-}
-
 // sealAndDeleteAllChunks seals the active chunk (if any), then deletes all
 // chunks and their indexes. Returns the number of chunks found. Errors are
 // logged with the given prefix but do not abort the cleanup.
@@ -343,8 +325,8 @@ func (o *Orchestrator) DeleteTierData(tierID glid.GLID) {
 // each chunk delete does not fire AnnounceDelete → CmdDeleteChunk on the
 // tier Raft. The announcement would propagate to every voter and trigger
 // FSM.applyDelete + onDelete on each node, physically wiping the chunk
-// across the entire cluster. The intended cluster-wide effect (when callers
-// like RemoveTierFromVault react to placement loss, or DeleteTierData
+// across the entire cluster. The intended cluster-wide effect (when
+// RemoveTierFromVault reacts to placement loss, or DeleteTierFromVault
 // reacts to an admin teardown) comes from each node independently running
 // its own RemoveTierFromVault as the config change propagates — not from
 // per-chunk delete announcements out of one node. See gastrolog-4vz40.
@@ -1126,11 +1108,28 @@ func (o *Orchestrator) createTierRaftGroupVaultCtl(tierCfg system.TierConfig, cl
 // chunk metadata (vault control-plane Raft in cluster mode).
 // Extracted from createTierRaftGroup to keep cognitive complexity within lint
 // thresholds.
+//
+// Readiness uses the Raft applied index, not the FSM's ready flag. hraft
+// filters LogNoop and LogConfiguration entries before calling FSM.Apply —
+// only LogCommand entries hit the FSM — so a fresh cluster (bootstrap config
+// + post-election no-op) advances r.AppliedIndex but never touches
+// FSM.Apply. The vault FSM's own Ready flag only flips on user-triggered
+// commands, which never fire before the first ingestion. Raft's applied
+// index is the authoritative "this group is live on this node" signal:
+// it advances on bootstrap, elections, snapshot restore, and normal
+// replication alike.
+//
+// Before 5xxbd, tier FSM was a top-level Raft group whose Ready flag
+// flipped on every apply in practice, because `CmdPutTier` was a LogCommand
+// that hit it. After 5xxbd the tier sub-FSM only sees OpTierFSM commands,
+// which a fresh vault with no chunks never sends — keying readiness on any
+// FSM-level signal leaves every fresh vault wedged as "not ready" until
+// first ingestion.
 func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.Applier) tierRaftCallbacks {
 	return tierRaftCallbacks{
 		hasLeader:  func() bool { return r.Leader() != "" },
 		isLeader:   func() bool { return r.State() == hraft.Leader },
-		isFSMReady: func() bool { return fsm != nil && fsm.Ready() },
+		isFSMReady: func() bool { return r.AppliedIndex() > 0 },
 		applyDelete: func(id chunk.ChunkID) error {
 			return applier.Apply(tierfsm.MarshalDeleteChunk(id))
 		},

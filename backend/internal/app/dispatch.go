@@ -69,7 +69,7 @@ type configDispatcher struct {
 	tlsFilePath        string                                           // path to persist cluster TLS on rotation
 	configSignal       *notify.Signal                                   // broadcasts config changes to WatchConfig streams
 	managedFileHandler ManagedFileHandler                               // nil for single-node or before wiring
-	catchupScheduler   func(tierID glid.GLID, followerNodeIDs []string) // nil until orch is wired
+	catchupScheduler   func(vaultID, tierID glid.GLID, followerNodeIDs []string) // nil until orch is wired
 	placementTrigger   func()                                           // triggers immediate placement reconcile; nil for single-node
 }
 
@@ -519,7 +519,7 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID glid.GLID) 
 	if leaderNodeID == d.localNodeID && len(followerNodeIDs) > 0 && d.catchupScheduler != nil {
 		newFollowers := d.newFollowersForTier(v.ID, tierID, followerNodeIDs)
 		if len(newFollowers) > 0 {
-			d.catchupScheduler(tierID, newFollowers)
+			d.catchupScheduler(v.ID, tierID, newFollowers)
 		}
 	}
 

@@ -219,8 +219,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	disp.orch = orch
 	disp.cfgStore = cfgStore
 	disp.factories = factories
-	disp.catchupScheduler = func(tierID glid.GLID, followerNodeIDs []string) {
-		orch.ScheduleCatchupForTier(tierID, followerNodeIDs)
+	disp.catchupScheduler = func(vaultID, tierID glid.GLID, followerNodeIDs []string) {
+		orch.ScheduleCatchup(vaultID, tierID, followerNodeIDs)
 	}
 
 	orch.OnTierDrainComplete = makeTierDrainCompleteHandler(cfgStore, logger)

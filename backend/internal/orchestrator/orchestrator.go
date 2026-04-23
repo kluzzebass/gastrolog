@@ -105,6 +105,22 @@ type RecordForwarder interface {
 
 // TierReplicator sequences all replication commands for a tier on a single
 // ordered stream per follower. Nil in single-node mode.
+//
+// Caller role: always invoked on the tier **leader** node. Each method sends
+// a command to a follower (`nodeID`) that applies it locally. Callers must
+// verify they hold leadership for (`vaultID`, `tierID`) before invoking —
+// the replicator itself does not re-check.
+//
+// Validation: methods assume the (`vaultID`, `tierID`) pair is consistent
+// (tier belongs to vault). The receiver on the remote node rejects mismatches
+// via tier lookup; callers should not rely on the replicator to catch
+// programmer errors.
+//
+// Readiness: the leader's own Vault.ReadinessErr gate fires upstream of
+// these calls — by the time a replication command is sent, the local FSM
+// has applied the commit that authorized it. The follower's readiness is
+// its own concern; transient follower-not-ready errors are retried by
+// higher-level catchup scheduling (see ScheduleCatchup).
 type TierReplicator interface {
 	AppendRecords(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error
 	SealTier(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error

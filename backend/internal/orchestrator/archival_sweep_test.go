@@ -319,7 +319,7 @@ func TestChunkSuspectSkippedInTransition(t *testing.T) {
 	})
 
 	// Transition should skip without panic or index removal.
-	orch.TransitionChunk(vaultID, tierID, ids[0])
+	orch.TransitionChunkForTesting(vaultID, tierID, ids[0])
 
 	// Chunk should still be in the index.
 	_, err := cm.Meta(ids[0])

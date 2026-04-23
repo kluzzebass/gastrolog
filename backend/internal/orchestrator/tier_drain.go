@@ -41,6 +41,16 @@ func tierDrainKey(vaultID, tierID glid.GLID) string {
 // DrainTier starts an async drain of a tier's chunks. In decommission mode,
 // chunks transition to the next tier in the vault chain. In rebalance mode,
 // chunks replicate to the same tier on the target node.
+//
+// Role: **tier leader only**. The drain walks the tier's chunks and applies
+// CmdDeleteChunk / CmdTransitionStreamed to the vault control-plane Raft,
+// which only the leader may write to. Callers must check `tier.IsLeader()`
+// before invoking — callers in dispatch do so explicitly.
+//
+// Readiness: no explicit Vault.ReadinessErr gate. Drain is itself a
+// readiness-affecting state change, so it runs as soon as the tier instance
+// is present. Individual operations inside the drain use the standard tier
+// FSM gates.
 func (o *Orchestrator) DrainTier(ctx context.Context, vaultID, tierID glid.GLID, mode TierDrainMode, targetNodeID string) error {
 	sys, err := o.loadSystem(ctx)
 	if err != nil {
