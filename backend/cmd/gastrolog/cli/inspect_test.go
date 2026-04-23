@@ -44,6 +44,13 @@ func TestChunkBadges(t *testing.T) {
 			chunk:  &v1.ChunkMeta{Sealed: true, RetentionPending: true},
 			expect: "sealed retention-pending",
 		},
+		{
+			name: "transition streamed",
+			chunk: &v1.ChunkMeta{
+				Sealed: true, RetentionPending: true, TransitionStreamed: true,
+			},
+			expect: "sealed retention-pending streamed-await-delete",
+		},
 	}
 
 	for _, tt := range tests {

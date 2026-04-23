@@ -435,6 +435,14 @@ export class ChunkMeta extends Message<ChunkMeta> {
    */
   replicaCount = 0;
 
+  /**
+   * Source tier: records were streamed to the next tier; local copy is kept
+   * until the destination tier commits a receipt, then retention deletes it.
+   *
+   * @generated from field: bool transition_streamed = 19;
+   */
+  transitionStreamed = false;
+
   constructor(data?: PartialMessage<ChunkMeta>) {
     super();
     proto3.util.initPartial(data, this);
@@ -461,6 +469,7 @@ export class ChunkMeta extends Message<ChunkMeta> {
     { no: 16, name: "retention_pending", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 17, name: "storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 18, name: "replica_count", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 19, name: "transition_streamed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkMeta {

@@ -436,6 +436,15 @@ function ChunkRow({
                 ret
               </Badge>
             )}
+            {chunk.transitionStreamed && (
+              <Badge
+                variant="warn"
+                dark={dark}
+                title="Transition complete on this tier — records were streamed to the next tier; this copy is awaiting replicated confirmation before deletion"
+              >
+                del
+              </Badge>
+            )}
             {rf > 1 && (() => {
               let badgeVariant: "info" | "error" | "warn";
               let badgeTitle: string;

@@ -20,6 +20,19 @@ import (
 const (
 	defaultRetentionSchedule = "* * * * *" // every minute
 	retentionJobName         = "retention"
+
+	// orphanReconcileMinAge is how long a sealed chunk must have been closed
+	// for (WriteEnd / WriteStart) before we delete local disk state that is
+	// absent from the tier FSM manifest. Avoids racing a just-sealed chunk
+	// before its Create/Seal entries commit to Raft.
+	orphanReconcileMinAge = 2 * time.Minute
+
+	// maxTransitionStreamedStaleness is how long a source may sit in
+	// TransitionStreamed without a durable destination receipt before we
+	// forcibly expire it. The inter-tier stream already completed; without
+	// this, TTL never revisits streamed chunks and a stuck receipt blocks
+	// the pipeline indefinitely.
+	maxTransitionStreamedStaleness = 30 * time.Minute
 )
 
 // retentionKey returns a unique map key for a tier instance's retention state.
@@ -83,8 +96,9 @@ type sweepTarget struct {
 
 // retentionSweepAll is the single scheduled retention job. Each tick:
 //   - Leader: evaluates retention rules, applies CmdDeleteChunk to tier Raft, deletes locally.
-//   - Followers: reconcile local disk against the tier Raft manifest — delete anything
-//     the leader has removed. No independent rule evaluation.
+//   - Every tier with a manifest: reconcile local disk against the tier FSM manifest
+//     (leaders and followers) — delete sealed orphans missed by OnDelete (e.g. manager
+//     closed, I/O errors). Stale-only; see orphanReconcileMinAge.
 func (o *Orchestrator) retentionSweepAll() {
 	sys, err := o.loadSystem(context.Background())
 	if err != nil {
@@ -107,12 +121,11 @@ func (o *Orchestrator) retentionSweepAll() {
 			continue
 		}
 		for _, tier := range vault.Tiers {
-			// Only the config leader evaluates retention rules.
-			// Followers reconcile against the manifest.
+			if tier.ListManifest != nil {
+				reconcileTiers = append(reconcileTiers, tier)
+			}
+			// Only tier leaders evaluate retention rules.
 			if !tier.IsLeader() {
-				if tier.ListManifest != nil {
-					reconcileTiers = append(reconcileTiers, tier)
-				}
 				continue
 			}
 			if t := o.retentionTargetForTier(cfg, vaultCfg, tier, active); t != nil {
@@ -140,9 +153,10 @@ func (o *Orchestrator) retentionSweepAll() {
 		t.runner.confirmStreamedTransitions(cfg)
 	}
 
-	// Followers: reconcile against the tier Raft manifest.
+	// Disk vs manifest: all tiers (leader + follower) — recovers missed OnDelete.
+	now := o.now()
 	for _, tier := range reconcileTiers {
-		o.reconcileFollower(tier)
+		o.reconcileTierDiskAgainstManifest(tier, now)
 	}
 
 	// Memory budget enforcement: transition oldest chunks when over budget.
@@ -286,6 +300,27 @@ func (o *Orchestrator) RetentionPendingChunks(vaultID glid.GLID) map[chunk.Chunk
 	return result
 }
 
+// TransitionStreamedChunks returns chunk IDs on source tiers where records
+// were streamed to the next tier but the local copy is not yet deleted
+// (awaiting destination receipt). See gastrolog-4913n.
+func (o *Orchestrator) TransitionStreamedChunks(vaultID glid.GLID) map[chunk.ChunkID]bool {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	vault := o.vaults[vaultID]
+	if vault == nil {
+		return nil
+	}
+	result := make(map[chunk.ChunkID]bool)
+	for _, tier := range vault.Tiers {
+		if tier.ListTransitionStreamed != nil {
+			for _, id := range tier.ListTransitionStreamed() {
+				result[id] = true
+			}
+		}
+	}
+	return result
+}
+
 // retentionTargetForTier resolves a single tier instance into a sweep target.
 // Returns nil if the tier should be skipped (no rules, no leader, etc.).
 func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg system.VaultConfig, tier *TierInstance, active map[string]bool) *sweepTarget {
@@ -355,7 +390,16 @@ func tierPositionInVault(cfg *system.Config, vaultID, tierID glid.GLID) int {
 // and deletes any sealed chunks that the primary has removed. This is the
 // fallback for cases where OnDelete didn't fire (snapshot restore, startup,
 // Raft connectivity gaps).
+//
+// Deprecated name: prefer reconcileTierDiskAgainstManifest. Kept for tests.
 func (o *Orchestrator) reconcileFollower(tier *TierInstance) {
+	o.reconcileTierDiskAgainstManifest(tier, o.now())
+}
+
+// reconcileTierDiskAgainstManifest removes sealed local chunks not present in
+// the tier FSM manifest. Runs on leaders and followers — leaders previously
+// had no path if OnDelete failed after Raft removed the entry.
+func (o *Orchestrator) reconcileTierDiskAgainstManifest(tier *TierInstance, now time.Time) {
 	// Don't reconcile until the tier FSM has applied at least one log entry
 	// or restored from a snapshot. Before that, the manifest is incomplete —
 	// deleting chunks against it causes permanent data loss.
@@ -373,8 +417,16 @@ func (o *Orchestrator) reconcileFollower(tier *TierInstance) {
 		return
 	}
 
+	cutoff := now.Add(-orphanReconcileMinAge)
 	for _, meta := range localMetas {
 		if manifest[meta.ID] || !meta.Sealed {
+			continue
+		}
+		end := meta.WriteEnd
+		if end.IsZero() {
+			end = meta.WriteStart
+		}
+		if !end.IsZero() && !end.Before(cutoff) {
 			continue
 		}
 		if tier.Indexes != nil {
@@ -390,7 +442,7 @@ func (o *Orchestrator) reconcileFollower(tier *TierInstance) {
 				"tier", tier.TierID, "chunk", meta.ID, "error", err)
 			continue
 		}
-		o.logger.Info("reconcile: deleted orphaned chunk from follower",
+		o.logger.Info("reconcile: deleted orphaned sealed chunk (disk vs manifest)",
 			"tier", tier.TierID, "chunk", meta.ID)
 	}
 }

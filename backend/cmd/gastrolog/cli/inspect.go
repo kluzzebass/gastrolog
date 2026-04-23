@@ -264,5 +264,9 @@ func chunkBadges(c *v1.ChunkMeta) string {
 	if c.RetentionPending {
 		parts = append(parts, "retention-pending")
 	}
+	if c.TransitionStreamed {
+		// Matches inspector "del" badge: streamed to next tier, awaiting dest receipt / expire.
+		parts = append(parts, "streamed-await-delete")
+	}
 	return strings.Join(parts, " ")
 }

@@ -658,14 +658,17 @@ func TestReconcileFollowerSkipsWhenFSMNotReady(t *testing.T) {
 func TestReconcileFollowerDeletesOrphansWhenLeaderPresent(t *testing.T) {
 	t.Parallel()
 
+	fixed := time.Date(2026, 4, 23, 12, 0, 0, 0, time.UTC)
+	staleEnd := fixed.Add(-5 * time.Minute)
+
 	orphanID := chunk.NewChunkID()
 	keptID := chunk.NewChunkID()
 	activeID := chunk.NewChunkID()
 
 	cm := &retentionFakeChunkManager{
 		chunks: []chunk.ChunkMeta{
-			{ID: orphanID, Sealed: true},  // sealed, not in manifest → delete
-			{ID: keptID, Sealed: true},    // sealed, in manifest → keep
+			{ID: orphanID, Sealed: true, WriteEnd: staleEnd},  // sealed, not in manifest → delete
+			{ID: keptID, Sealed: true, WriteEnd: staleEnd},    // sealed, in manifest → keep
 			{ID: activeID, Sealed: false}, // unsealed → keep regardless
 		},
 	}
@@ -679,7 +682,7 @@ func TestReconcileFollowerDeletesOrphansWhenLeaderPresent(t *testing.T) {
 		ListManifest: func() []chunk.ChunkID { return []chunk.ChunkID{keptID} },
 	}
 
-	orch, err := New(Config{Logger: slog.Default()})
+	orch, err := New(Config{Logger: slog.Default(), Now: func() time.Time { return fixed }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -698,10 +701,13 @@ func TestReconcileFollowerDeletesOrphansWhenLeaderPresent(t *testing.T) {
 func TestReconcileFollowerDeletesAllWhenManifestEmpty(t *testing.T) {
 	t.Parallel()
 
+	fixed := time.Date(2026, 4, 23, 12, 0, 0, 0, time.UTC)
+	staleEnd := fixed.Add(-5 * time.Minute)
+
 	orphanID := chunk.NewChunkID()
 	cm := &retentionFakeChunkManager{
 		chunks: []chunk.ChunkMeta{
-			{ID: orphanID, Sealed: true},
+			{ID: orphanID, Sealed: true, WriteEnd: staleEnd},
 		},
 	}
 	im := &retentionFakeIndexManager{}
@@ -715,7 +721,7 @@ func TestReconcileFollowerDeletesAllWhenManifestEmpty(t *testing.T) {
 		ListManifest: func() []chunk.ChunkID { return nil },
 	}
 
-	orch, err := New(Config{Logger: slog.Default()})
+	orch, err := New(Config{Logger: slog.Default(), Now: func() time.Time { return fixed }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -731,9 +737,14 @@ func TestReconcileFollowerDeletesAllWhenManifestEmpty(t *testing.T) {
 func TestReconcileFollowerSkipsWhenNilCallbacks(t *testing.T) {
 	t.Parallel()
 
+	fixed := time.Date(2026, 4, 23, 12, 0, 0, 0, time.UTC)
+	staleEnd := fixed.Add(-5 * time.Minute)
+	localID := chunk.NewChunkID()
+	otherID := chunk.NewChunkID()
+
 	cm := &retentionFakeChunkManager{
 		chunks: []chunk.ChunkMeta{
-			{ID: chunk.NewChunkID(), Sealed: true},
+			{ID: localID, Sealed: true, WriteEnd: staleEnd},
 		},
 	}
 
@@ -742,10 +753,10 @@ func TestReconcileFollowerSkipsWhenNilCallbacks(t *testing.T) {
 	tier := &TierInstance{
 		TierID:       glid.New(),
 		Chunks:       cm,
-		ListManifest: func() []chunk.ChunkID { return []chunk.ChunkID{chunk.NewChunkID()} },
+		ListManifest: func() []chunk.ChunkID { return []chunk.ChunkID{otherID} },
 	}
 
-	orch, err := New(Config{Logger: slog.Default()})
+	orch, err := New(Config{Logger: slog.Default(), Now: func() time.Time { return fixed }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -755,7 +766,40 @@ func TestReconcileFollowerSkipsWhenNilCallbacks(t *testing.T) {
 
 	// Nil HasRaftLeader means no Raft group — reconciliation should proceed
 	// (single-node mode, manifest is always authoritative).
-	if len(cm.deleted) != 1 {
-		t.Errorf("expected 1 deletion in single-node mode, got %d", len(cm.deleted))
+	if len(cm.deleted) != 1 || cm.deleted[0] != localID {
+		t.Errorf("expected localID deleted in single-node mode, got %v", cm.deleted)
+	}
+}
+
+func TestReconcileTierDiskSkipsFreshOrphans(t *testing.T) {
+	t.Parallel()
+
+	fixed := time.Date(2026, 4, 23, 12, 0, 0, 0, time.UTC)
+	// Too new to reconcile (within orphanReconcileMinAge of fixed).
+	freshEnd := fixed.Add(-30 * time.Second)
+
+	orphanID := chunk.NewChunkID()
+	cm := &retentionFakeChunkManager{
+		chunks: []chunk.ChunkMeta{
+			{ID: orphanID, Sealed: true, WriteEnd: freshEnd},
+		},
+	}
+	tier := &TierInstance{
+		TierID:       glid.New(),
+		Chunks:       cm,
+		IsFSMReady:   func() bool { return true },
+		ListManifest: func() []chunk.ChunkID { return nil },
+	}
+
+	orch, err := New(Config{Logger: slog.Default(), Now: func() time.Time { return fixed }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer orch.Stop()
+
+	orch.reconcileTierDiskAgainstManifest(tier, fixed)
+
+	if len(cm.deleted) != 0 {
+		t.Errorf("expected fresh orphan skipped, got deletions %v", cm.deleted)
 	}
 }

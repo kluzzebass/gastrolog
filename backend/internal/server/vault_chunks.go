@@ -32,6 +32,7 @@ func (s *VaultServer) ListChunks(
 
 	// Collect local chunks, marking any with retention-pending in the tier Raft.
 	pending := s.orch.RetentionPendingChunks(vaultID)
+	streamed := s.orch.TransitionStreamedChunks(vaultID)
 	var reports []chunkReport
 	metas, err := s.orch.ListAllChunkMetas(vaultID)
 	if err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
@@ -44,6 +45,9 @@ func (s *VaultServer) ListChunks(
 		pb := TieredChunkMetaToProto(meta)
 		if pending[meta.ID] {
 			pb.RetentionPending = true
+		}
+		if streamed[meta.ID] {
+			pb.TransitionStreamed = true
 		}
 		reports = append(reports, chunkReport{reportingNode: s.localNodeID, chunk: pb})
 	}
@@ -121,9 +125,13 @@ func dedupChunkReports(reports []chunkReport) []*apiv1.ChunkMeta {
 			a.best = c
 			continue
 		}
+		anyPending := a.best.RetentionPending || c.RetentionPending
+		anyStreamed := a.best.TransitionStreamed || c.TransitionStreamed
 		if moreAuthoritative(c, a.best) {
 			a.best = c
 		}
+		a.best.RetentionPending = anyPending
+		a.best.TransitionStreamed = anyStreamed
 	}
 	out := make([]*apiv1.ChunkMeta, 0, len(byID))
 	for _, a := range byID {

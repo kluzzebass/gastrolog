@@ -130,6 +130,9 @@ message ChunkMeta {
   bool retention_pending = 16; // true = chunk is marked for retention processing
   string storage_class = 17;  // current cloud storage class (e.g. "GLACIER", "cold", "Archive")
   int32 replica_count = 18;   // how many nodes currently have this chunk (leader + followers that have caught up)
+  // Source tier: records were streamed to the next tier; local copy is kept
+  // until the destination tier commits a receipt, then retention deletes it.
+  bool transition_streamed = 19;
 }
 
 message GetChunkRequest {

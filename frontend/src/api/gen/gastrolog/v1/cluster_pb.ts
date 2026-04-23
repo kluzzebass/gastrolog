@@ -985,23 +985,22 @@ export class ForwardRecordsResponse extends Message<ForwardRecordsResponse> {
 }
 
 /**
- * ForwardTierApplyRequest carries a pre-marshaled tier FSM command for the
- * tier Raft leader to apply. Used when the config placement leader (which
- * runs retention and chunk lifecycle) is not the tier Raft leader.
+ * ForwardTierApplyRequest carries bytes for the vault control-plane Raft
+ * leader to apply. group_id is the vault ctl group (vault/<vaultGLID>/ctl);
+ * command is typically OpTierFSM + tier GLID + tierfsm wire payload (see
+ * vaultraft.MarshalTierCommand). RPC name is historical.
  *
  * @generated from message gastrolog.v1.ForwardTierApplyRequest
  */
 export class ForwardTierApplyRequest extends Message<ForwardTierApplyRequest> {
   /**
-   * tier Raft group ID (= tier UUID)
+   * UTF-8 multiraft group id (vault control-plane: vault/<vaultGLID>/ctl)
    *
    * @generated from field: bytes group_id = 1;
    */
   groupId = new Uint8Array(0);
 
   /**
-   * pre-marshaled tier FSM command
-   *
    * @generated from field: bytes command = 2;
    */
   command = new Uint8Array(0);
@@ -1063,6 +1062,86 @@ export class ForwardTierApplyResponse extends Message<ForwardTierApplyResponse> 
 
   static equals(a: ForwardTierApplyResponse | PlainMessage<ForwardTierApplyResponse> | undefined, b: ForwardTierApplyResponse | PlainMessage<ForwardTierApplyResponse> | undefined): boolean {
     return proto3.util.equals(ForwardTierApplyResponse, a, b);
+  }
+}
+
+/**
+ * ForwardVaultApplyRequest carries a pre-marshaled vault control-plane FSM
+ * command for the vault Raft leader. Parallels ForwardTierApply (vault-only
+ * opcodes such as no-ops); tier chunk metadata uses ForwardTierApply + OpTierFSM.
+ *
+ * @generated from message gastrolog.v1.ForwardVaultApplyRequest
+ */
+export class ForwardVaultApplyRequest extends Message<ForwardVaultApplyRequest> {
+  /**
+   * UTF-8 vault control-plane group id: vault/<vaultGLID>/ctl
+   *
+   * @generated from field: bytes group_id = 1;
+   */
+  groupId = new Uint8Array(0);
+
+  /**
+   * @generated from field: bytes command = 2;
+   */
+  command = new Uint8Array(0);
+
+  constructor(data?: PartialMessage<ForwardVaultApplyRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardVaultApplyRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "group_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "command", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardVaultApplyRequest {
+    return new ForwardVaultApplyRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardVaultApplyRequest {
+    return new ForwardVaultApplyRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardVaultApplyRequest {
+    return new ForwardVaultApplyRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardVaultApplyRequest | PlainMessage<ForwardVaultApplyRequest> | undefined, b: ForwardVaultApplyRequest | PlainMessage<ForwardVaultApplyRequest> | undefined): boolean {
+    return proto3.util.equals(ForwardVaultApplyRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ForwardVaultApplyResponse
+ */
+export class ForwardVaultApplyResponse extends Message<ForwardVaultApplyResponse> {
+  constructor(data?: PartialMessage<ForwardVaultApplyResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardVaultApplyResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardVaultApplyResponse {
+    return new ForwardVaultApplyResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardVaultApplyResponse {
+    return new ForwardVaultApplyResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardVaultApplyResponse {
+    return new ForwardVaultApplyResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardVaultApplyResponse | PlainMessage<ForwardVaultApplyResponse> | undefined, b: ForwardVaultApplyResponse | PlainMessage<ForwardVaultApplyResponse> | undefined): boolean {
+    return proto3.util.equals(ForwardVaultApplyResponse, a, b);
   }
 }
 

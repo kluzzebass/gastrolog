@@ -14,6 +14,7 @@ import (
 
 	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
+	chunkfile "gastrolog/internal/chunk/file"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/index"
 	"gastrolog/internal/lifecycle"
@@ -435,6 +436,12 @@ func (o *Orchestrator) removeTierFromVault(vaultID, tierID glid.GLID, deleteData
 		o.sealAndDeleteAllChunks(tier, "remove tier", tierID)
 	}
 
+	// Drop FSM → chunk-manager hooks before Close. Placement can remove this
+	// tier while the vault control-plane Raft group still receives
+	// CmdDeleteChunk for this tier from the leader; without clearing, onDelete
+	// would call DeleteSilent on an already-closed file.Manager.
+	o.clearTierFSMChunkCallbacks(vaultID, tierID)
+
 	// Close managers.
 	if err := tier.Chunks.Close(); err != nil {
 		o.logger.Warn("remove tier: close chunk manager failed", "vault", vaultID, "tier", tierID, "error", err)
@@ -587,6 +594,11 @@ func (o *Orchestrator) UnregisterVault(id glid.GLID) error {
 	o.scheduler.RemoveJobsByPrefix("compress:" + vaultPrefix)
 	o.scheduler.RemoveJobsByPrefix("index-build:" + vaultPrefix)
 
+	// Stop vault control-plane Raft before closing chunk managers — same
+	// ordering as teardownVault. Otherwise trailing CmdDeleteChunk applies can
+	// fire onDelete against a closed Manager.
+	o.destroyVaultControlPlaneRaftGroup(id)
+
 	if err := vault.Close(); err != nil {
 		o.logger.Warn("failed to close vault during unregister",
 			"vault", id, "error", err)
@@ -598,8 +610,6 @@ func (o *Orchestrator) UnregisterVault(id glid.GLID) error {
 	// Remove from registry.
 	delete(o.vaults, id)
 	o.rebuildFilterSetLocked()
-
-	o.destroyVaultControlPlaneRaftGroup(id)
 
 	o.logger.Info("vault unregistered (data preserved)", "id", id, "name", vault.Name, "type", vault.Type())
 	return nil
@@ -1207,6 +1217,35 @@ func setTierRaftAnnouncer(cm chunk.ChunkManager, applier tierfsm.Applier, phase 
 	setter.SetAnnouncer(tierfsm.NewAnnouncer(applier, phase, logger))
 }
 
+// clearTierFSMChunkCallbacks clears OnDelete/OnUpload for a tier's FSM slice
+// in the vault control-plane group. Used before closing that tier's chunk
+// manager when the Raft group may still deliver log entries for this tier
+// (e.g. RemoveTierFromVault while other tiers in the same vault stay open).
+func (o *Orchestrator) clearTierFSMChunkCallbacks(vaultID, tierID glid.GLID) {
+	if o.groupMgr == nil {
+		return
+	}
+	g := o.groupMgr.GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
+	if g == nil {
+		return
+	}
+	var fsm *tierfsm.FSM
+	switch raw := g.FSM.(type) {
+	case *tierfsm.FSM:
+		fsm = raw
+	case *vaultraft.FSM:
+		fsm = raw.EnsureTierFSM(tierID)
+	default:
+		return
+	}
+	fsm.SetOnDelete(nil)
+	fsm.SetOnUpload(nil)
+	if o.logger != nil {
+		o.logger.Debug("cleared tier FSM chunk callbacks before manager close",
+			"vault", vaultID, "tier", tierID)
+	}
+}
+
 // wireTierFSMOnDelete sets up the tier FSM's OnDelete callback so that
 // CmdDeleteChunk applied via Raft on this node deletes the local chunk
 // files (and indexes if available). The callback uses chunk.SilentDeleter
@@ -1256,7 +1295,8 @@ func wireTierFSMOnDelete(g *raftgroup.Group, tierID glid.GLID, cm chunk.ChunkMan
 		// cases (log replay on a node without the chunk, or a forwarded
 		// chunk still being written). Debug-level only.
 		if err := silent.DeleteSilent(id); err != nil && logger != nil {
-			if errors.Is(err, chunk.ErrChunkNotFound) || errors.Is(err, chunk.ErrActiveChunk) {
+			if errors.Is(err, chunk.ErrChunkNotFound) || errors.Is(err, chunk.ErrActiveChunk) ||
+				errors.Is(err, chunkfile.ErrManagerClosed) {
 				logger.Debug("FSM onDelete: DeleteSilent skipped",
 					"chunk", id, "reason", err)
 			} else {

@@ -132,3 +132,38 @@ func TestDedupChunkReportsSingleEntryReplicaCount(t *testing.T) {
 		t.Errorf("replica count = %d, want 1", out[0].ReplicaCount)
 	}
 }
+
+// TestDedupChunkReportsOrsRetentionPending verifies that when the same chunk ID
+// is reported from multiple nodes, retention_pending is true if any replica
+// reported it (e.g. leader enriched vs follower not).
+func TestDedupChunkReportsOrsRetentionPending(t *testing.T) {
+	t.Parallel()
+	input := []chunkReport{
+		{reportingNode: "n1", chunk: &apiv1.ChunkMeta{Id: []byte("c"), Sealed: true, Compressed: true, RetentionPending: false}},
+		{reportingNode: "n2", chunk: &apiv1.ChunkMeta{Id: []byte("c"), Sealed: true, Compressed: true, RetentionPending: true}},
+	}
+	out := dedupChunkReports(input)
+	if len(out) != 1 {
+		t.Fatalf("expected 1 chunk, got %d", len(out))
+	}
+	if !out[0].RetentionPending {
+		t.Fatal("expected RetentionPending OR'd to true across replicas")
+	}
+}
+
+// TestDedupChunkReportsOrsTransitionStreamed mirrors retention_pending OR logic
+// for the post-transition, pre-delete phase on the source tier.
+func TestDedupChunkReportsOrsTransitionStreamed(t *testing.T) {
+	t.Parallel()
+	input := []chunkReport{
+		{reportingNode: "n1", chunk: &apiv1.ChunkMeta{Id: []byte("c"), Sealed: true, Compressed: true, TransitionStreamed: false}},
+		{reportingNode: "n2", chunk: &apiv1.ChunkMeta{Id: []byte("c"), Sealed: true, Compressed: true, TransitionStreamed: true}},
+	}
+	out := dedupChunkReports(input)
+	if len(out) != 1 {
+		t.Fatalf("expected 1 chunk, got %d", len(out))
+	}
+	if !out[0].TransitionStreamed {
+		t.Fatal("expected TransitionStreamed OR'd to true across replicas")
+	}
+}

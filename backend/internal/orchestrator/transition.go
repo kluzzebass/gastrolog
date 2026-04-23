@@ -181,8 +181,14 @@ func resolveNextTierInChain(cfg *system.Config, vaultID, tierID glid.GLID) (glid
 // current node count. See gastrolog-4913n.
 //
 // If the destination tier has no local instance on this node (fully remote
-// tier placement), the check can't be performed locally. In that case, chunks
-// are expired after a grace period to avoid blocking forever.
+// tier placement), isReceiptConfirmed treats the stream as confirmed so the
+// source can expire — there is no local receipt state to consult.
+//
+// When the destination is local, transitionChunk may have failed to apply the
+// receipt once (logged as a warning) while still marking TransitionStreamed.
+// Those chunks would otherwise be excluded from TTL sweeps forever; this pass
+// retries ApplyRaftTransitionReceived until the receipt commits or expireChunk
+// clears the source.
 func (r *retentionRunner) confirmStreamedTransitions(cfg *system.Config) {
 	if r.orch == nil {
 		return
@@ -211,12 +217,39 @@ func (r *retentionRunner) confirmStreamedTransitions(cfg *system.Config) {
 	confirmedCount := 0
 
 	for _, id := range streamed {
+		if destTier != nil && destTier.ApplyRaftTransitionReceived != nil &&
+			!r.isReceiptConfirmed(destTier, id) {
+			if err := destTier.ApplyRaftTransitionReceived(id); err != nil {
+				r.logger.Warn("transition: retry transition receipt on dest tier failed",
+					"vault", r.vaultID, "source_tier", r.tierID, "chunk", id.String(),
+					"dest_tier", nextTierID, "error", err)
+			}
+		}
 		if r.isReceiptConfirmed(destTier, id) {
 			confirmedCount++
 			r.expireChunk(id)
 			r.logger.Debug("transition: receipt confirmed, expired",
 				"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(),
 				"dest_tier", nextTierID)
+			continue
+		}
+		// Recovery: stream finished but receipt never landed (or dest FSM lost
+		// it). Without this, the chunk stays in TransitionStreamed forever and
+		// TTL never revisits it. See maxTransitionStreamedStaleness in retention.go.
+		meta, err := r.cm.Meta(id)
+		if err != nil {
+			continue
+		}
+		end := meta.WriteEnd
+		if end.IsZero() {
+			end = meta.WriteStart
+		}
+		if !end.IsZero() && end.Before(r.now().Add(-maxTransitionStreamedStaleness)) {
+			r.logger.Warn("transition: recovery expire after prolonged TransitionStreamed",
+				"vault", r.vaultID, "source_tier", r.tierID, "chunk", id.String(),
+				"dest_tier", nextTierID, "write_end", end)
+			confirmedCount++
+			r.expireChunk(id)
 		}
 	}
 }
