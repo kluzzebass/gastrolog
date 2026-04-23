@@ -1,6 +1,7 @@
 package vaultraft
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -29,7 +30,18 @@ import (
 //   - Partition_MinorityBlocked_HealReconverges
 //   - WholeClusterCrash_WALReplayRestoresState (durability: log survives all-nodes-down)
 //   - ConcurrentWrites_NoDivergence             (many-writer load)
-//   - FollowerWipe_CatchupViaSnapshotOrReplay  (new-ish follower catches up)
+//   - FollowerWipe_CatchupViaSnapshotOrReplay  (log-replay path)
+//   - SnapshotInstall_CatchesUpWipedFollower   (InstallSnapshot path)
+//   - PipelinedApplies_SurviveLeaderKill       (pipelined futures + leader loss)
+//   - RapidLeaderRestart_NoDivergence           (stress: repeated restarts)
+//   - MultipleVaults_IsolatedAndConvergent      (two vault FSMs side by side)
+//
+// Future direction: a full orchestrator-backed harness that builds on
+// this layer so scenarios can exercise end-to-end ingest/search across
+// real tier managers. The current harness runs only the vault control-
+// plane Raft — enough to catch metadata-divergence bugs but not
+// orchestrator-layer regressions (like the GetFields UTF-8 bug filed as
+// gastrolog-1uh5h, which lives above this layer).
 
 // On a freshly bootstrapped vault-ctl Raft group — no user commands,
 // no FSM Apply calls — hraft still commits the bootstrap LogConfiguration
@@ -317,18 +329,7 @@ func TestReliability_ConcurrentWrites_NoDivergence(t *testing.T) {
 				cid[1] = byte(c)
 				wire := tierfsm.MarshalCreateChunk(cid, now, now, now)
 				cmd := MarshalTierCommand(tierID, wire)
-				// Always route through the leader. Re-resolve each time because
-				// leadership may flap under contention.
-				leaderID := h.waitForLeader()
-				n := h.nodes[leaderID]
-				n.mu.Lock()
-				r := n.raft
-				n.mu.Unlock()
-				if r == nil {
-					errCh <- fmt.Errorf("writer %d: leader disappeared", writerIdx)
-					return
-				}
-				if err := r.Apply(cmd, 3*time.Second).Error(); err != nil {
+				if err := applyWithLeaderRetry(h, cmd, 5, 3*time.Second); err != nil {
 					errCh <- fmt.Errorf("writer %d cmd %d: %w", writerIdx, c, err)
 					return
 				}
@@ -409,7 +410,296 @@ func TestReliability_FollowerWipe_CatchupViaSnapshotOrReplay(t *testing.T) {
 	h.assertAllFSMsConverged()
 }
 
+// Like FollowerWipe, but first forces a snapshot on the leader and
+// truncates the log behind it. The wiped follower then cannot catch up
+// via log replay alone — it must receive an InstallSnapshot RPC and
+// Restore the vault FSM from the snapshot bytes.
+//
+// This exercises vaultraft.FSM.Snapshot + Restore end-to-end through
+// hraft's snapshot-install path. The streaming Restore fix landed in
+// gastrolog-5j6eu lives here too.
+func TestReliability_SnapshotInstall_CatchesUpWipedFollower(t *testing.T) {
+	t.Parallel()
+	h := newReliabilityHarness(t, 3)
+
+	tierID := glid.New()
+	now := time.Now().Truncate(time.Nanosecond)
+
+	// Phase 1: seed many entries so a snapshot has meaningful content.
+	for i := range byte(20) {
+		h.applyTierCreate(tierID, chunkIDWithPrefix(0x70+i), now)
+	}
+	h.assertAllFSMsConverged()
+
+	// Force the leader to take a snapshot. hraft's Snapshot() returns when
+	// the snapshot is persisted AND the log has been truncated past it
+	// (retaining only TrailingLogs entries).
+	leaderID := h.leaderID()
+	if err := h.nodes[leaderID].raft.Snapshot().Error(); err != nil {
+		t.Fatalf("force snapshot: %v", err)
+	}
+
+	// Phase 2: apply more entries after the snapshot so the snapshot is
+	// behind the leader's LastIndex. Catch-up must still work.
+	for i := range byte(5) {
+		h.applyTierCreate(tierID, chunkIDWithPrefix(0x90+i), now)
+	}
+
+	// Wipe a follower.
+	var followerID string
+	for _, id := range h.nodeIDs {
+		if id != leaderID {
+			followerID = id
+			break
+		}
+	}
+	h.stopNode(followerID)
+	if err := removeDirContents(h.nodes[followerID].walDir); err != nil {
+		t.Fatalf("wipe wal dir: %v", err)
+	}
+	h.startNode(followerID)
+	h.wireTransports()
+
+	// The wiped follower's log starts at 0; the leader's earliest log
+	// entry is post-snapshot. hraft must install the snapshot, then
+	// replay the post-snapshot tail.
+	h.assertAllFSMsConverged()
+}
+
+// Pipelined Apply futures — fire many without waiting, then kill the
+// leader mid-burst. Futures that returned success before the kill must
+// be durably applied on the surviving quorum; futures that errored are
+// free to have any state. Surviving nodes' FSMs must converge.
+//
+// This catches torn-commit bugs: cases where a leader acknowledges an
+// Apply locally but the replication to majority hadn't happened before
+// the kill. hraft is supposed to prevent this (Apply returns only after
+// majority commit) — this scenario locks in that contract.
+func TestReliability_PipelinedApplies_SurviveLeaderKill(t *testing.T) {
+	t.Parallel()
+	h := newReliabilityHarness(t, 3)
+
+	tierID := glid.New()
+	now := time.Now().Truncate(time.Nanosecond)
+
+	// Build up a confirmed baseline.
+	h.applyTierCreate(tierID, chunkIDWithPrefix(0xA0), now)
+	h.assertAllFSMsConverged()
+
+	// Pipeline 20 Apply futures on the current leader. Collect success
+	// or error for each; do not block waiting on majority commit.
+	oldLeader := h.leaderID()
+	type result struct {
+		cid chunk.ChunkID
+		err error
+	}
+	resultsCh := make(chan result, 20)
+
+	var wg sync.WaitGroup
+	for i := range byte(20) {
+		cid := chunkIDWithPrefix(0xB0 + i)
+		wg.Add(1)
+		go func(cid chunk.ChunkID) {
+			defer wg.Done()
+			cmd := MarshalTierCommand(tierID, tierfsm.MarshalCreateChunk(cid, now, now, now))
+			n := h.nodes[oldLeader]
+			n.mu.Lock()
+			r := n.raft
+			n.mu.Unlock()
+			if r == nil {
+				resultsCh <- result{cid, fmt.Errorf("leader gone")}
+				return
+			}
+			err := r.Apply(cmd, 2*time.Second).Error()
+			resultsCh <- result{cid, err}
+		}(cid)
+	}
+
+	// Let a few commit, then yank the leader.
+	time.Sleep(50 * time.Millisecond)
+	h.stopNode(oldLeader)
+
+	wg.Wait()
+	close(resultsCh)
+
+	confirmed := make(map[chunk.ChunkID]bool)
+	for r := range resultsCh {
+		if r.err == nil {
+			confirmed[r.cid] = true
+		}
+	}
+
+	// Wait for new leadership on the surviving pair.
+	deadline := time.Now().Add(harnessLeaderWait)
+	var newLeader string
+	for time.Now().Before(deadline) {
+		id := h.leaderID()
+		if id != "" && id != oldLeader {
+			newLeader = id
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if newLeader == "" {
+		t.Fatalf("no new leader after killing %s", oldLeader)
+	}
+
+	liveIDs := []string{}
+	for _, id := range h.nodeIDs {
+		if id != oldLeader {
+			liveIDs = append(liveIDs, id)
+		}
+	}
+	assertSubsetConverged(t, h, liveIDs)
+
+	// Every chunk that Apply confirmed must be in the surviving leader's FSM.
+	surviving := h.nodes[newLeader].fsm.TierFSM(tierID)
+	if surviving == nil {
+		t.Fatal("surviving leader lost tier FSM entirely")
+	}
+	for cid := range confirmed {
+		if surviving.Get(cid) == nil {
+			t.Errorf("confirmed chunk %x missing after leader kill", cid[:4])
+		}
+	}
+}
+
+// Restart the current leader repeatedly (5 times). Each restart forces
+// a re-election; the cluster must converge between each restart and the
+// final FSM state must contain all pre-restart entries.
+//
+// Stresses the interplay between leader election, WAL replay on a
+// restarting leader, and log catch-up from peers.
+func TestReliability_RapidLeaderRestart_NoDivergence(t *testing.T) {
+	t.Parallel()
+	h := newReliabilityHarness(t, 3)
+
+	tierID := glid.New()
+	now := time.Now().Truncate(time.Nanosecond)
+
+	for i := range byte(3) {
+		h.applyTierCreate(tierID, chunkIDWithPrefix(0xC0+i), now)
+	}
+	h.assertAllFSMsConverged()
+
+	for range 5 {
+		leader := h.leaderID()
+		h.restartNode(leader)
+		h.waitForLeader()
+		h.assertAllFSMsConverged()
+	}
+
+	// Drop a final entry and confirm it replicates.
+	h.applyTierCreate(tierID, chunkIDWithPrefix(0xCF), now)
+	h.assertAllFSMsConverged()
+
+	// Leader's FSM should have 3 original + 1 final = 4 entries.
+	leader := h.nodes[h.leaderID()]
+	sub := leader.fsm.TierFSM(tierID)
+	if sub == nil {
+		t.Fatal("tier FSM missing after restarts")
+	}
+	if got := len(sub.List()); got != 4 {
+		t.Errorf("expected 4 chunks, got %d", got)
+	}
+}
+
+// Two independent vault FSMs cohabiting the same cluster must converge
+// independently without cross-contamination. Validates the tier-ID
+// keying inside vaultraft.FSM: commands for tier A must not affect
+// tier B's sub-FSM.
+//
+// This is the "one vault-ctl group per vault" model in miniature — the
+// production deployment runs N vault-ctl groups per node, each with its
+// own tier sub-FSMs.
+func TestReliability_MultipleVaults_IsolatedAndConvergent(t *testing.T) {
+	t.Parallel()
+	h := newReliabilityHarness(t, 3)
+
+	tierA := glid.New()
+	tierB := glid.New()
+	now := time.Now().Truncate(time.Nanosecond)
+
+	h.applyTierCreate(tierA, chunkIDWithPrefix(0xD0), now)
+	h.applyTierCreate(tierA, chunkIDWithPrefix(0xD1), now)
+	h.applyTierCreate(tierB, chunkIDWithPrefix(0xE0), now)
+	h.applyTierCreate(tierB, chunkIDWithPrefix(0xE1), now)
+	h.applyTierCreate(tierB, chunkIDWithPrefix(0xE2), now)
+
+	h.assertAllFSMsConverged()
+
+	leader := h.nodes[h.leaderID()]
+	subA := leader.fsm.TierFSM(tierA)
+	subB := leader.fsm.TierFSM(tierB)
+	if subA == nil || subB == nil {
+		t.Fatal("missing tier sub-FSM")
+	}
+	if got := len(subA.List()); got != 2 {
+		t.Errorf("tier A: expected 2 chunks, got %d", got)
+	}
+	if got := len(subB.List()); got != 3 {
+		t.Errorf("tier B: expected 3 chunks, got %d", got)
+	}
+
+	// Cross-check isolation: tier A must not contain tier B's chunks.
+	for _, e := range subA.List() {
+		if e.ID[0] >= 0xE0 {
+			t.Errorf("tier A leaked tier B chunk: %x", e.ID[:4])
+		}
+	}
+}
+
 // --- Test helpers ---
+
+// applyWithLeaderRetry submits cmd to whichever node is currently leader,
+// re-resolving leadership and retrying on transient failures (hraft
+// returns ErrLeadershipLost / ErrNotLeader / ErrLeadershipTransferInProgress
+// when a command races an election). These errors mean the command did NOT
+// commit — the caller must replay.
+//
+// Used by the concurrent-writes scenario where leader flap under contention
+// is expected; production code has the same retry shape in
+// cluster.VaultCtlTierApplyForwarder.
+func applyWithLeaderRetry(h *reliabilityHarness, cmd []byte, maxAttempts int, timeout time.Duration) error {
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		leaderID := h.waitForLeader()
+		h.nodes[leaderID].mu.Lock()
+		r := h.nodes[leaderID].raft
+		h.nodes[leaderID].mu.Unlock()
+		if r == nil {
+			lastErr = fmt.Errorf("attempt %d: leader %s disappeared", attempt, leaderID)
+			time.Sleep(20 * time.Millisecond)
+			continue
+		}
+		err := r.Apply(cmd, timeout).Error()
+		if err == nil {
+			return nil
+		}
+		if !isTransientLeaderErr(err) {
+			return fmt.Errorf("attempt %d: %w", attempt, err)
+		}
+		lastErr = err
+		time.Sleep(20 * time.Millisecond)
+	}
+	return fmt.Errorf("after %d attempts: %w", maxAttempts, lastErr)
+}
+
+// isTransientLeaderErr reports whether err is one of hraft's retryable
+// leadership-flap conditions. Apply returns these when a command races an
+// election; the command did NOT commit and the caller must retry.
+func isTransientLeaderErr(err error) bool {
+	switch {
+	case err == nil:
+		return false
+	case errors.Is(err, hraft.ErrLeadershipLost),
+		errors.Is(err, hraft.ErrNotLeader),
+		errors.Is(err, hraft.ErrLeadershipTransferInProgress):
+		return true
+	default:
+		return false
+	}
+}
 
 // removeDirContents deletes every entry inside dir (but keeps dir itself).
 // Used by the follower-wipe scenario to simulate a disk failure / fresh
