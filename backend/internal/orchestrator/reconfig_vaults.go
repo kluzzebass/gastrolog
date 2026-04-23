@@ -1101,7 +1101,7 @@ func (o *Orchestrator) createTierRaftGroupVaultCtl(tierCfg system.TierConfig, cl
 		applier = &vaultCtlTierApplier{o: o, vaultID: tierCfg.VaultID, tierID: tierCfg.ID}
 	}
 
-	return g, applier, buildTierRaftCallbacks(r, vfsm, tierFSM, applier)
+	return g, applier, buildTierRaftCallbacks(r, tierFSM, applier)
 }
 
 // buildTierRaftCallbacks constructs the callback struct for replicated tier
@@ -1109,18 +1109,27 @@ func (o *Orchestrator) createTierRaftGroupVaultCtl(tierCfg system.TierConfig, cl
 // Extracted from createTierRaftGroup to keep cognitive complexity within lint
 // thresholds.
 //
-// Readiness delegates to the VAULT FSM, not the tier sub-FSM. The vault
-// control-plane Raft becomes "ready" on its first Apply (hraft's post-
-// election no-op counts) or Restore. Before 5xxbd, tier FSM was a top-level
-// Raft group whose own Ready flag flipped on every apply; after 5xxbd the
-// tier sub-FSM only sees OpTierFSM commands, which a fresh vault with no
-// chunks never sends — keying readiness on the tier sub-FSM would leave
-// every fresh vault wedged as "not ready" until first ingestion.
-func buildTierRaftCallbacks(r *hraft.Raft, vfsm *vaultraft.FSM, fsm *tierfsm.FSM, applier tierfsm.Applier) tierRaftCallbacks {
+// Readiness uses the Raft applied index, not the FSM's ready flag. hraft
+// filters LogNoop and LogConfiguration entries before calling FSM.Apply —
+// only LogCommand entries hit the FSM — so a fresh cluster (bootstrap config
+// + post-election no-op) advances r.AppliedIndex but never touches
+// FSM.Apply. The vault FSM's own Ready flag only flips on user-triggered
+// commands, which never fire before the first ingestion. Raft's applied
+// index is the authoritative "this group is live on this node" signal:
+// it advances on bootstrap, elections, snapshot restore, and normal
+// replication alike.
+//
+// Before 5xxbd, tier FSM was a top-level Raft group whose Ready flag
+// flipped on every apply in practice, because `CmdPutTier` was a LogCommand
+// that hit it. After 5xxbd the tier sub-FSM only sees OpTierFSM commands,
+// which a fresh vault with no chunks never sends — keying readiness on any
+// FSM-level signal leaves every fresh vault wedged as "not ready" until
+// first ingestion.
+func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.Applier) tierRaftCallbacks {
 	return tierRaftCallbacks{
 		hasLeader:  func() bool { return r.Leader() != "" },
 		isLeader:   func() bool { return r.State() == hraft.Leader },
-		isFSMReady: func() bool { return vfsm != nil && vfsm.Ready() },
+		isFSMReady: func() bool { return r.AppliedIndex() > 0 },
 		applyDelete: func(id chunk.ChunkID) error {
 			return applier.Apply(tierfsm.MarshalDeleteChunk(id))
 		},

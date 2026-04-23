@@ -25,12 +25,17 @@ const vaultSnapVersion uint32 = 1
 
 // FSM implements the vault control-plane replicated state machine: no-ops,
 // tier-scoped tierfsm commands, and snapshot/restore across tiers.
+//
+// Readiness for reads/writes is NOT tracked on this FSM — it is tracked at
+// the Raft level via r.AppliedIndex(), which advances for every log entry
+// type (LogCommand, LogConfiguration, LogNoop) whereas FSM.Apply is only
+// called for LogCommand. On a fresh cluster the only log entries are the
+// bootstrap configuration and the leader's post-election no-op, which
+// never reach FSM.Apply. See buildTierRaftCallbacks in
+// orchestrator/reconfig_vaults.go for the readiness wiring.
 type FSM struct {
 	tierMu sync.Mutex
 	tiers  map[glid.GLID]*tierfsm.FSM
-
-	readyMu sync.RWMutex
-	ready   bool
 }
 
 // NewFSM returns a new vault control-plane FSM instance.
@@ -40,38 +45,12 @@ func NewFSM() *FSM {
 	}
 }
 
-// Ready reports whether the vault control-plane Raft group has applied at
-// least one log entry (including the hraft post-election no-op) or restored
-// from a snapshot on this node. Before that, the vault-scoped manifest may
-// be incomplete and tier sub-FSM state is not authoritative — callers
-// should treat the vault as not-ready for reads or writes.
-//
-// Tier-level readiness delegates to this check (see
-// reconfig_vaults.go isFSMReady wiring): an empty tier sub-FSM is not
-// "not ready" — it is correctly empty once the vault FSM has applied
-// anything. Before 5xxbd, tier FSM was a top-level Raft group and its own
-// Ready flag flipped on every apply; after 5xxbd, tier sub-FSMs only see
-// OpTierFSM commands (which a fresh vault with no chunks never sends), so
-// authoritative readiness must be tracked here at the vault level.
-func (f *FSM) Ready() bool {
-	f.readyMu.RLock()
-	defer f.readyMu.RUnlock()
-	return f.ready
-}
-
-func (f *FSM) markReady() {
-	f.readyMu.Lock()
-	f.ready = true
-	f.readyMu.Unlock()
-}
-
 // Apply executes vault control-plane commands. Empty payloads are ignored.
 // The first byte selects the opcode; see cmd.go.
 func (f *FSM) Apply(l *hraft.Log) any {
 	if l == nil || len(l.Data) == 0 {
 		return nil
 	}
-	f.markReady()
 	switch l.Data[0] {
 	case OpNoop:
 		return nil
@@ -175,8 +154,7 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 			f.tierMu.Lock()
 			f.tiers = make(map[glid.GLID]*tierfsm.FSM)
 			f.tierMu.Unlock()
-			f.markReady()
-			return nil
+				return nil
 		}
 		return errors.New("vaultraft restore: trailing bytes after legacy empty sentinel")
 	}
@@ -230,7 +208,6 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 	f.tierMu.Lock()
 	f.tiers = nextTiers
 	f.tierMu.Unlock()
-	f.markReady()
 	return nil
 }
 

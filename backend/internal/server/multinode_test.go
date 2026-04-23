@@ -886,6 +886,22 @@ func tableToMap(t *testing.T, table *gastrologv1.TableResult, keyCol, valCol str
 // Tests — 2-node (coordinator with data + one remote)
 // ---------------------------------------------------------------------------
 
+// Fresh cluster must not reject search before any ingestion. Baseline
+// regression for the "no data yet" case. NOTE: this harness uses
+// TierTypeMemory (IsFSMReady == nil, treated as ready), so it does NOT
+// exercise the Raft-backed readiness gate that fails on a real cluster
+// bootstrap. The full reproduction requires a Raft-backed multi-node
+// harness — tracked as part of gastrolog-5ff7z.
+func TestMultiNode_SearchOnFreshClusterReturnsEmpty(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"node-A", "node-B"})
+
+	records := searchAll(t, h.client, "")
+	if len(records) != 0 {
+		t.Errorf("expected 0 records on fresh cluster, got %d", len(records))
+	}
+}
+
 func TestMultiNode_SearchFanOut(t *testing.T) {
 	t.Parallel()
 	h := setupMultiNode(t, []string{"node-A", "node-B"})
