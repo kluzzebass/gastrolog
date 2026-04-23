@@ -95,3 +95,26 @@ func TestListAllChunkMetas_vaultNotReady(t *testing.T) {
 		t.Fatalf("got %v, want ErrVaultNotReady", err)
 	}
 }
+
+// Regression: ListChunks fans out to remote nodes; a node with the vault
+// registered but no local tier placements must not fail ListAllChunkMetas
+// with ErrVaultNotReady, or the UI sees 503 and empty chunks.
+func TestListAllChunkMetas_noLocalTiersReturnsEmpty(t *testing.T) {
+	t.Parallel()
+	o, err := New(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	vid := glid.New()
+	o.RegisterVault(NewVault(vid))
+	metas, err := o.ListAllChunkMetas(vid)
+	if err != nil {
+		t.Fatalf("ListAllChunkMetas: %v", err)
+	}
+	if metas != nil && len(metas) != 0 {
+		t.Fatalf("expected nil or empty slice, got len=%d", len(metas))
+	}
+	if err := vaultReplicationReadinessErr(vid, o.vaults[vid]); !errors.Is(err, ErrVaultNotReady) {
+		t.Fatalf("writes should still see not-ready, got %v", err)
+	}
+}

@@ -169,6 +169,11 @@ func (o *Orchestrator) ListChunkMetas(vaultID glid.GLID) ([]chunk.ChunkMeta, err
 // to avoid double-counting chunks. Follower-only tiers are still included
 // (the leader node is elsewhere; this node contributes replica presence).
 //
+// If this node hosts no tier instances for the vault (all placements are on
+// other nodes), this returns (nil, nil) so the server's ListChunks can still
+// fan out to peers. Writes still use vaultReplicationReadinessErr and will
+// reject that case with ErrVaultNotReady.
+//
 // Caller-side deduplication across nodes happens in the server's ListChunks.
 func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]TieredChunkMeta, error) {
 	o.mu.RLock()
@@ -176,6 +181,9 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]TieredChunkMeta, 
 	o.mu.RUnlock()
 	if vault == nil {
 		return nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+	}
+	if len(vault.Tiers) == 0 {
+		return nil, nil
 	}
 	if err := vaultReplicationReadinessErr(vaultID, vault); err != nil {
 		return nil, err
