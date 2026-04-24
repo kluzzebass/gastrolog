@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -335,6 +336,30 @@ func (h *orchRelHarness) stopNode(id string) {
 	if n.wal != nil {
 		_ = n.wal.Close()
 		n.wal = nil
+	}
+}
+
+// wipeNode removes all persistent state for a node (WAL + raft groups +
+// chunk directories). The node must be stopped first; call startNode
+// afterwards to bring it back up with an empty state. Simulates a
+// disk-replacement scenario: the node rejoins the cluster and must
+// catch up via replication from its peers. See FollowerWipe scenarios.
+func (h *orchRelHarness) wipeNode(id string) {
+	h.t.Helper()
+	n := h.nodes[id]
+	if n == nil {
+		return
+	}
+	if n.wal != nil || n.orch != nil {
+		h.t.Fatalf("wipeNode: must stopNode(%s) first", id)
+	}
+	raftDir := filepath.Join(n.home, "raft")
+	if err := os.RemoveAll(raftDir); err != nil {
+		h.t.Fatalf("wipeNode %s raft: %v", id, err)
+	}
+	chunkDir := filepath.Join(n.home, "chunks")
+	if err := os.RemoveAll(chunkDir); err != nil {
+		h.t.Fatalf("wipeNode %s chunks: %v", id, err)
 	}
 }
 
