@@ -233,7 +233,7 @@ type CloudChunkInfo struct {
 // CloudChunkRegistrar extends ChunkManager with the ability to register a
 // cloud-backed chunk from metadata alone — no local files, no record streaming.
 // Used by follower nodes to adopt chunks from the shared S3 bucket after the
-// tier Raft FSM propagates the leader's AnnounceUpload.
+// tier FSM propagates the leader's AnnounceUpload.
 type CloudChunkRegistrar interface {
 	RegisterCloudChunk(id ChunkID, info CloudChunkInfo) error
 }

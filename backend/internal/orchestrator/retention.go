@@ -51,7 +51,7 @@ type retentionRule struct {
 }
 
 // retentionRunner holds per-tier-instance state that persists across sweeps.
-// Only primaries get runners — secondaries react to the tier Raft manifest
+// Only primaries get runners — secondaries react to the tier FSM manifest
 // via the ChunkFSM.OnDelete callback.
 type retentionRunner struct {
 	mu      sync.Mutex
@@ -69,7 +69,7 @@ type retentionRunner struct {
 	unreadable   map[chunk.ChunkID]bool // chunks that failed to read — skipped until restart
 	orch         *Orchestrator          // for eject/transition callbacks
 
-	// applyRaftDelete applies CmdDeleteChunk to the tier Raft before local
+	// applyRaftDelete applies CmdDeleteChunk to vault-ctl Raft before local
 	// deletion, so secondaries learn about it via the manifest. Nil in
 	// single-node / memory mode — local delete proceeds without Raft.
 	applyRaftDelete             func(id chunk.ChunkID) error
@@ -293,7 +293,7 @@ func (o *Orchestrator) drainExcessChunks(vaultID, tierID glid.GLID, cm chunk.Chu
 }
 
 // RetentionPendingChunks returns chunk IDs marked as retention-pending in the
-// tier Raft FSM for a vault. Visible to all nodes via Raft replication.
+// tier FSM for a vault. Visible to all nodes via Raft replication.
 //
 // Read-only accessor, callable from any-node. No Vault.ReadinessErr gate —
 // observational use only. Decision-making callers should gate on
@@ -349,8 +349,8 @@ func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg syste
 		return nil
 	}
 	// IsRaftLeader check removed: the tier apply forwarder transparently
-	// routes applies to the tier Raft leader. The config placement leader
-	// always runs retention regardless of tier Raft leadership.
+	// routes applies to the vault-ctl Raft leader. The config placement leader
+	// always runs retention regardless of vault-ctl Raft leadership.
 	tierCfg := findTierConfig(cfg.Tiers, tier.TierID)
 	if tierCfg == nil || len(tierCfg.RetentionRules) == 0 {
 		return nil
@@ -407,7 +407,7 @@ func tierPositionInVault(cfg *system.Config, vaultID, tierID glid.GLID) int {
 	return -1
 }
 
-// reconcileFollower compares on-disk chunks against the tier Raft manifest
+// reconcileFollower compares on-disk chunks against the tier FSM manifest
 // and deletes any sealed chunks that the primary has removed. This is the
 // fallback for cases where OnDelete didn't fire (snapshot restore, startup,
 // Raft connectivity gaps).
@@ -550,7 +550,7 @@ func (r *retentionRunner) tryRetainChunk(id chunk.ChunkID, b retentionRule) {
 	r.inflight[id] = true
 	r.mu.Unlock()
 
-	// Mark as retention-pending in the tier Raft so all nodes see it.
+	// Mark as retention-pending in vault-ctl Raft so all nodes see it.
 	if r.applyRaftRetentionPending != nil {
 		if err := r.applyRaftRetentionPending(id); err != nil {
 			r.logger.Error("retention: failed to apply raft retention-pending",
@@ -644,7 +644,7 @@ func (r *retentionRunner) markUnreadable(id chunk.ChunkID, reason error) {
 	}
 }
 
-// expireChunk commits the deletion to the tier Raft manifest (so followers
+// expireChunk commits the deletion to the tier FSM manifest (so followers
 // learn about it via OnDelete), then runs the legacy direct-delete paths
 // as a belt-and-braces fallback. The Phase 5 FSM OnDelete cascade already
 // deletes the chunk on every node; the direct paths here are redundant in

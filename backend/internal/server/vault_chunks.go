@@ -30,7 +30,7 @@ func (s *VaultServer) ListChunks(
 		return nil, connErr
 	}
 
-	// Collect local chunks, marking any with retention-pending in the tier Raft.
+	// Collect local chunks, marking any with retention-pending in vault-ctl Raft.
 	pending := s.orch.RetentionPendingChunks(vaultID)
 	streamed := s.orch.TransitionStreamedChunks(vaultID)
 	var reports []chunkReport

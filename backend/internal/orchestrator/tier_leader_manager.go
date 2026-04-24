@@ -30,7 +30,7 @@ const (
 // orchestrator's view of the desired state.
 //
 // Membership reconciliation and leadership transfer happen ONLY on the
-// tier Raft leader, from inside its leader epoch (after raft.Barrier
+// vault-ctl Raft leader, from inside its leader epoch (after raft.Barrier
 // returns). If the current Raft leader doesn't match the desired leader
 // (set by the placement manager), TransferLeadership moves Raft
 // leadership to the desired node.
@@ -105,13 +105,13 @@ func (m *tierLeaderManager) StopAll() {
 }
 
 // SetDesiredMembers updates the desired member list for a tier. The next
-// reconcile pass on the tier Raft leader will apply the diff against the
+// reconcile pass on the vault-ctl Raft leader will apply the diff against the
 // current Raft configuration.
 func (m *tierLeaderManager) SetDesiredMembers(tierID glid.GLID, members []hraft.Server) {
 	m.desired.Set(tierID, members)
 }
 
-// SetDesiredLeader sets the node that should be the tier Raft leader.
+// SetDesiredLeader sets the node that should be the vault-ctl Raft leader.
 // If the current Raft leader differs, the leader epoch will call
 // LeadershipTransferToServer to align them. Pass nil to clear.
 func (m *tierLeaderManager) SetDesiredLeader(tierID glid.GLID, server *hraft.Server) {
@@ -202,7 +202,7 @@ func (m *tierLeaderManager) reconcile(tierID glid.GLID, group *raftgroup.Group) 
 	m.transferIfNeeded(tierID, group)
 }
 
-// transferIfNeeded checks whether the tier Raft leader matches the desired
+// transferIfNeeded checks whether the vault-ctl Raft leader matches the desired
 // placement leader. If not, initiates LeadershipTransferToServer so the Raft
 // leader aligns with the node that owns the data. This reduces FSM apply
 // latency (no forwarding hop) and simplifies the operational model.
@@ -219,7 +219,7 @@ func (m *tierLeaderManager) transferIfNeeded(tierID glid.GLID, group *raftgroup.
 		return // no leader elected yet
 	}
 
-	m.logger.Info("transferring tier Raft leadership",
+	m.logger.Info("transferring vault-ctl Raft leadership",
 		"tier", tierID,
 		"from", currentID,
 		"to", want.ID)

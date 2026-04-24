@@ -98,7 +98,7 @@ func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 	// The retention sweep will check whether the destination tier has
 	// the receipt before expiring the source copy. See gastrolog-4913n.
 	//
-	// In single-node mode (no tier Raft), fall back to immediate expire
+	// In single-node mode (no vault-ctl Raft), fall back to immediate expire
 	// since there are no followers to wait for.
 	if r.applyRaftTransitionStreamed != nil {
 		if err := r.applyRaftTransitionStreamed(id); err != nil {
@@ -194,7 +194,7 @@ func (r *retentionRunner) confirmStreamedTransitions(cfg *system.Config) {
 		return
 	}
 
-	// Collect streamed chunk IDs from the tier Raft FSM.
+	// Collect streamed chunk IDs from the tier FSM.
 	r.mu.Lock()
 	tier := r.findTierInstance()
 	r.mu.Unlock()

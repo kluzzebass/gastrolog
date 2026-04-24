@@ -303,7 +303,7 @@ func (o *Orchestrator) ForceRemoveVault(id glid.GLID) error {
 			// LOCAL cleanup only — see sealAndDeleteAllChunks comment.
 			// Each peer runs its own ForceRemoveVault when the vault
 			// disappears from config; we must not fan a per-chunk
-			// CmdDeleteChunk avalanche across the tier Raft from one
+			// CmdDeleteChunk avalanche across vault-ctl Raft from one
 			// node and have it cascade-delete on the others. Bug
 			// gastrolog-4vz40.
 			if err := chunk.DeleteNoAnnounce(cm, meta.ID); err != nil {
@@ -323,7 +323,7 @@ func (o *Orchestrator) ForceRemoveVault(id glid.GLID) error {
 //
 // CRITICAL: this is a LOCAL cleanup path. It MUST use DeleteNoAnnounce so
 // each chunk delete does not fire AnnounceDelete → CmdDeleteChunk on the
-// tier Raft. The announcement would propagate to every voter and trigger
+// vault-ctl Raft. The announcement would propagate to every voter and trigger
 // FSM.applyDelete + onDelete on each node, physically wiping the chunk
 // across the entire cluster. The intended cluster-wide effect (when
 // RemoveTierFromVault reacts to placement loss, or DeleteTierFromVault
@@ -509,7 +509,7 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID glid.
 	if !isLeader && !isFollower {
 		// No storage placement, but still join the vault control-plane Raft
 		// group as a voter for this vault's replicated tier metadata.
-		o.createTierRaftGroup(*tierCfg, rt.Nodes, factories)
+		o.ensureVaultCtlTierMetadata(*tierCfg, rt.Nodes, factories)
 		return nil
 	}
 
@@ -671,7 +671,7 @@ func (o *Orchestrator) buildTierInstances(sys *system.System, vaultCfg system.Va
 		if !isLeader && !isFollower {
 			// No storage placement, but still join the vault control-plane Raft
 			// group as a voter for this vault's replicated tier metadata.
-			o.createTierRaftGroup(*tierCfg, rt.Nodes, factories)
+			o.ensureVaultCtlTierMetadata(*tierCfg, rt.Nodes, factories)
 			continue
 		}
 
@@ -761,18 +761,18 @@ func (o *Orchestrator) buildTierInstance(sys *system.System, vaultCfg system.Vau
 	// Map TierConfig.Type to factory name.
 	factoryName := mapTierTypeToFactory(tierCfg.Type)
 
-	// Create the tier Raft group BEFORE the chunk manager. Group creation is
+	// Create the vault-ctl Raft group BEFORE the chunk manager. Group creation is
 	// fast (Raft log replay). Chunk manager creation is slow (scans disk for
 	// existing chunks). Starting the Raft group early gives it time to elect
 	// a leader and catch up while the chunk manager is loading.
-	tierGroup, applier, raftCB := o.createTierRaftGroup(tierCfg, rt.Nodes, factories)
+	tierGroup, applier, raftCB := o.ensureVaultCtlTierMetadata(tierCfg, rt.Nodes, factories)
 
 	// Build params from tier system.
 	params := buildTierParams(sys, vaultCfg, tierCfg, o.localNodeID)
 
 	// Followers keep cloud store access for reads (queries) but skip uploads.
 	// The leader owns the blob; the follower adopts it via RegisterCloudChunk
-	// when the tier Raft FSM propagates the upload announcement.
+	// when the tier FSM propagates the upload announcement.
 	if isFollower {
 		params["_cloud_read_only"] = "true"
 	}
@@ -872,9 +872,9 @@ func (o *Orchestrator) buildTierInstanceForStorage(sys *system.System, vaultCfg 
 		return nil, fmt.Errorf("file storage %s not found", storageID)
 	}
 
-	// Create the tier Raft group BEFORE the chunk manager — same rationale
+	// Create the vault-ctl Raft group BEFORE the chunk manager — same rationale
 	// as buildTierInstance: start elections while chunk loading is in progress.
-	tierGroup, applier, raftCB := o.createTierRaftGroup(tierCfg, rt.Nodes, factories)
+	tierGroup, applier, raftCB := o.ensureVaultCtlTierMetadata(tierCfg, rt.Nodes, factories)
 
 	// Build params normally, then override the dir with this storage's path.
 	params := buildTierParams(sys, vaultCfg, tierCfg, o.localNodeID)
@@ -982,7 +982,7 @@ func applyRotationPolicy(cm chunk.ChunkManager, policies []system.RotationPolicy
 	return nil
 }
 
-// tierRaftCallbacks holds the callbacks returned by createTierRaftGroup.
+// tierRaftCallbacks holds the callbacks returned by ensureVaultCtlTierMetadata.
 func (o *Orchestrator) destroyVaultControlPlaneRaftGroup(vaultID glid.GLID) {
 	if o.vaultCtlLeaders != nil {
 		o.vaultCtlLeaders.Stop(vaultID)
@@ -1063,20 +1063,23 @@ type tierRaftCallbacks struct {
 	overlayFromFSM          func(chunk.ChunkMeta) chunk.ChunkMeta
 }
 
-// createTierRaftGroup joins the vault control-plane Raft group for this vault
-// (when multiraft is configured) and returns the applier/callbacks for this
-// tier's chunk metadata via OpTierFSM. With no GroupManager, returns nils.
+// ensureVaultCtlTierMetadata joins this node to the vault control-plane
+// Raft group for the tier's vault (creating the group if needed) and
+// returns the applier + callbacks for this tier's chunk metadata. Every
+// tier in the same vault shares the same vault-ctl Raft group; each
+// tier's chunk FSM is a sub-FSM keyed by tier ID (see vaultraft.FSM and
+// tier/raftfsm.FSM). With no GroupManager, returns nils.
 //
-// Call this BEFORE creating the chunk manager so Raft can start elections
-// while chunk loading is still in progress.
-func (o *Orchestrator) createTierRaftGroup(tierCfg system.TierConfig, clusterNodes []system.NodeConfig, factories Factories) (*raftgroup.Group, tierfsm.Applier, tierRaftCallbacks) {
+// Post-gastrolog-5xxbd there is no per-vault-ctl Raft group. The historical
+// function name ensureVaultCtlTierMetadata is preserved as a no-op alias in
+// tests only; production wires through this function.
+//
+// Call this BEFORE creating the chunk manager so Raft can start
+// elections while chunk loading is still in progress.
+func (o *Orchestrator) ensureVaultCtlTierMetadata(tierCfg system.TierConfig, clusterNodes []system.NodeConfig, factories Factories) (*raftgroup.Group, tierfsm.Applier, tierRaftCallbacks) {
 	if factories.GroupManager == nil {
 		return nil, nil, tierRaftCallbacks{}
 	}
-	return o.createTierRaftGroupVaultCtl(tierCfg, clusterNodes, factories)
-}
-
-func (o *Orchestrator) createTierRaftGroupVaultCtl(tierCfg system.TierConfig, clusterNodes []system.NodeConfig, factories Factories) (*raftgroup.Group, tierfsm.Applier, tierRaftCallbacks) {
 	vaultGID := raftgroup.VaultControlPlaneGroupID(tierCfg.VaultID)
 	g, members := o.tryStartClusterRaftGroup(vaultGID, vaultraft.NewFSM(), clusterNodes, factories)
 	if g == nil {
@@ -1106,7 +1109,7 @@ func (o *Orchestrator) createTierRaftGroupVaultCtl(tierCfg system.TierConfig, cl
 
 // buildTierRaftCallbacks constructs the callback struct for replicated tier
 // chunk metadata (vault control-plane Raft in cluster mode).
-// Extracted from createTierRaftGroup to keep cognitive complexity within lint
+// Extracted from ensureVaultCtlTierMetadata to keep cognitive complexity within lint
 // thresholds.
 //
 // Readiness uses the Raft applied index, not the FSM's ready flag. hraft
@@ -1306,7 +1309,7 @@ func wireTierFSMOnDelete(g *raftgroup.Group, tierID glid.GLID, cm chunk.ChunkMan
 	})
 }
 
-// wireTierFSMOnUpload connects the tier Raft FSM's OnUpload callback to the
+// wireTierFSMOnUpload connects the tier FSM's OnUpload callback to the
 // chunk manager's RegisterCloudChunk method. When the FSM applies CmdUploadChunk
 // (from the leader's AnnounceUpload), the follower's chunk manager registers
 // the cloud chunk from metadata alone — no record streaming or S3 download.

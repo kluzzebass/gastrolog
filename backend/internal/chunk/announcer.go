@@ -28,7 +28,7 @@ type AnnouncerGetter interface {
 }
 
 // SilentDeleter is an optional interface for chunk managers that can delete
-// a chunk WITHOUT firing the metadata announcer. This is used by tier Raft
+// a chunk WITHOUT firing the metadata announcer. This is used by vault-ctl Raft
 // FSM apply paths: when CmdDeleteChunk is applied via Raft on this node,
 // we need to delete the local files but must NOT re-announce the delete —
 // the announce already happened (it's what put us into this code path).
@@ -43,7 +43,7 @@ type SilentDeleter interface {
 // DeleteNoAnnounce deletes a chunk from the local store without firing the
 // metadata announcer. Used by LOCAL cleanup paths (e.g. replacing a
 // forwarded-but-not-yet-canonical chunk, cleaning up orphaned follower
-// chunks) that must not propagate the delete via tier Raft.
+// chunks) that must not propagate the delete via vault-ctl Raft.
 //
 // If the manager implements SilentDeleter, this calls DeleteSilent (the
 // common case — file.Manager supports it). Otherwise it falls back to

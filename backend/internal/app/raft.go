@@ -39,7 +39,7 @@ type raftStoreOpts struct {
 	transport hraft.Transport
 
 	// TierRaftSharesWAL is set only from the main Run path when cluster mode
-	// is enabled: tier Raft groups use the same raftwal instance as the
+	// is enabled: vault-ctl Raft groups use the same raftwal instance as the
 	// system store, and serveAndAwaitShutdown closes it after system raft.
 	// Rejoin / rollback paths omit this so each store owns its WAL again.
 	TierRaftSharesWAL bool

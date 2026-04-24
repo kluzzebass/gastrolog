@@ -79,19 +79,19 @@ type Factories struct {
 	// Defaults to HomeDir if not set.
 	VaultsDir string
 
-	// GroupManager, when non-nil, manages tier Raft groups for chunk metadata
+	// GroupManager, when non-nil, manages vault-ctl Raft groups for chunk metadata
 	// replication. buildTierInstance creates a Raft group per tier and wires
 	// a RaftAnnouncer to the chunk manager.
 	GroupManager *raftgroup.GroupManager
 
 	// NodeAddressResolver maps a node ID to its Raft server address.
-	// Used to build tier Raft group membership from tier config's node assignments.
+	// Used to build vault-ctl Raft group membership from tier config's node assignments.
 	// When nil, tier groups bootstrap as single-node (no cross-node replication).
 	NodeAddressResolver func(nodeID string) (string, bool)
 
 	// PeerConns provides cached gRPC connections to cluster peers.
 	// Used by the tier apply forwarder to forward Raft applies when
-	// the config placement leader is not the tier Raft leader.
+	// the config placement leader is not the vault-ctl Raft leader.
 	// Nil in single-node mode.
 	PeerConns *cluster.PeerConns
 

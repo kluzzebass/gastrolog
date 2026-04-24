@@ -229,7 +229,7 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]TieredChunkMeta, 
 }
 
 // GetChunkMeta returns metadata for a specific chunk. The result is overlaid
-// from the tier Raft FSM if the chunk belongs to a tier with a Raft group, so
+// from the tier FSM if the chunk belongs to a tier with a Raft group, so
 // CloudBacked / Archived / NumFrames reflect the cluster-wide truth rather
 // than this node's local chunk-manager view. See gastrolog-asg4l.
 func (o *Orchestrator) GetChunkMeta(vaultID glid.GLID, chunkID chunk.ChunkID) (chunk.ChunkMeta, error) {
@@ -688,7 +688,7 @@ func (o *Orchestrator) deleteChunkFromTierInstance(t *TierInstance, vaultID, tie
 // delete.
 //
 // Uses DeleteNoAnnounce: this is a LOCAL cleanup operation on a single
-// follower. It must NOT propagate the delete via tier Raft — the canonical
+// follower. It must NOT propagate the delete via vault-ctl Raft — the canonical
 // sealed chunk is about to replace it locally via ImportRecords, which will
 // fire its own AnnounceCreate/AnnounceSeal for the replacement.
 func replaceForwardedChunk(cm chunk.ChunkManager, chunkID chunk.ChunkID, isActive bool) error {
@@ -950,7 +950,7 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, tierID 
 	return o.finalizeImportedChunk(vaultID, tierID, cm, meta, ref.isTombstoned)
 }
 
-// finalizeImportedChunk handles the post-import steps: tier Raft
+// finalizeImportedChunk handles the post-import steps: vault-ctl Raft
 // announcement, tombstone re-check, and (if not tombstoned) post-seal
 // work scheduling. See gastrolog-11rzz for the ordering rationale.
 //

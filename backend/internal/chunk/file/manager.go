@@ -169,7 +169,7 @@ type Manager struct {
 	// drain this slice via takePendingAnnouncements AFTER releasing mu, then
 	// invoke each closure outside the lock.
 	//
-	// Why: announcer calls go through the tier Raft via the apply forwarder
+	// Why: announcer calls go through vault-ctl Raft via the apply forwarder
 	// and BLOCK waiting for a Raft commit. The Raft FSM apply path on the
 	// same node fires our OnDelete callback which acquires this manager's
 	// mu. Holding mu while waiting for Raft creates a circular wait → deadlock.
@@ -2463,7 +2463,7 @@ func (m *Manager) Delete(id chunk.ChunkID) error {
 }
 
 // DeleteSilent removes the chunk's local files and metadata without firing
-// the metadata announcer. Used by the tier Raft FSM apply path when a delete
+// the metadata announcer. Used by the tier FSM apply path when a delete
 // originating from any node propagates via Raft — re-announcing would create
 // an infinite feedback loop.
 func (m *Manager) DeleteSilent(id chunk.ChunkID) error {
@@ -2700,7 +2700,7 @@ func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
 
 	// 4. Upload to cloud and delete local if cloud-backed.
 	// CloudReadOnly followers skip upload — they adopt the leader's blob
-	// via RegisterCloudChunk when the tier Raft FSM propagates the upload.
+	// via RegisterCloudChunk when the tier FSM propagates the upload.
 	if m.cfg.CloudStore != nil && !m.cfg.CloudReadOnly {
 		if err := m.uploadToCloud(id); err != nil {
 			m.logger.Warn("cloud upload failed, keeping local", "chunk", id, "error", err)
@@ -3167,7 +3167,7 @@ func (m *Manager) UploadToCloud(id chunk.ChunkID) error {
 		return errors.New("cloud store not configured")
 	}
 
-	// Ensure the chunk exists in the tier Raft FSM. Chunks sealed during
+	// Ensure the chunk exists in the tier FSM. Chunks sealed during
 	// degraded startup (S3 down, Raft not ready) may be missing from the
 	// manifest. Without Create+Seal in the FSM, the subsequent Upload
 	// announce has nothing to update. Idempotent — if already present,
@@ -3367,7 +3367,7 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 		m.mu.Unlock()
 	}
 
-	// Announce to tier Raft so all nodes learn this chunk is cloud-backed.
+	// Announce to vault-ctl Raft so all nodes learn this chunk is cloud-backed.
 	// Without this, the FSM overlay keeps returning CloudBacked=false and
 	// the backfill re-adopts on every cycle. See gastrolog-68fqk.
 	//
@@ -3402,7 +3402,7 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 // RegisterCloudChunk registers a cloud-backed chunk from metadata alone,
 // without streaming any records or downloading from S3. Creates a cloud
 // index entry so the chunk appears in List() and is queryable via
-// openCloudCursor. Used by follower nodes when the tier Raft FSM
+// openCloudCursor. Used by follower nodes when the tier FSM
 // propagates the leader's AnnounceUpload.
 //
 // Idempotent: if the chunk is already registered (in metas or cloudIdx),
@@ -3631,7 +3631,7 @@ func (m *Manager) loadCloudChunksFromStore() error {
 		// Don't add to cloud index if the chunk has local data files —
 		// let the backfill handle it via UploadToCloud → adoptCloudBlob,
 		// which removes local files, updates cloud index, AND announces
-		// to the tier Raft FSM. Setting cloudBacked here would make the
+		// to the tier FSM. Setting cloudBacked here would make the
 		// backfill skip the chunk, leaving the FSM out of date.
 		if _, exists := m.metas[id]; exists {
 			return nil

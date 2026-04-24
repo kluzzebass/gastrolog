@@ -741,25 +741,29 @@ func (s *Server) forwardApply(ctx context.Context, req *gastrologv1.ForwardApply
 	return &gastrologv1.ForwardApplyResponse{}, nil
 }
 
-// forwardTierApply handles the ForwardTierApply RPC (vault ctl group_id +
-// marshaled command, typically OpTierFSM-wrapped tierfsm payloads).
+// forwardTierApply handles the ForwardTierApply RPC. The payload is a
+// tierfsm command wrapped with OpTierFSM + tier ID (see
+// NewVaultCtlTierApplyForwarder), and the group ID is the vault-ctl
+// Raft group ID. Dispatches to the shared groupApplyFn.
 func (s *Server) forwardTierApply(ctx context.Context, req *gastrologv1.ForwardTierApplyRequest) (*gastrologv1.ForwardTierApplyResponse, error) {
-	if s.tierApplyFn == nil {
-		return nil, status.Error(codes.Unavailable, "tier apply function not configured")
+	if s.groupApplyFn == nil {
+		return nil, status.Error(codes.Unavailable, "group apply function not configured")
 	}
-	if err := s.tierApplyFn(ctx, string(req.GetGroupId()), req.GetCommand()); err != nil {
+	if err := s.groupApplyFn(ctx, string(req.GetGroupId()), req.GetCommand()); err != nil {
 		return nil, status.Errorf(codes.Internal, "tier apply: %v", err)
 	}
 	return &gastrologv1.ForwardTierApplyResponse{}, nil
 }
 
-// forwardVaultApply handles the ForwardVaultApply RPC on the vault control-plane
-// Raft leader.
+// forwardVaultApply handles the ForwardVaultApply RPC on the vault
+// control-plane Raft leader. The payload is a native vault-ctl FSM
+// command (no OpTierFSM wrapping); the group ID identifies the vault's
+// control-plane Raft group. Dispatches to the shared groupApplyFn.
 func (s *Server) forwardVaultApply(ctx context.Context, req *gastrologv1.ForwardVaultApplyRequest) (*gastrologv1.ForwardVaultApplyResponse, error) {
-	if s.vaultApplyFn == nil {
-		return nil, status.Error(codes.Unavailable, "vault apply function not configured")
+	if s.groupApplyFn == nil {
+		return nil, status.Error(codes.Unavailable, "group apply function not configured")
 	}
-	if err := s.vaultApplyFn(ctx, string(req.GetGroupId()), req.GetCommand()); err != nil {
+	if err := s.groupApplyFn(ctx, string(req.GetGroupId()), req.GetCommand()); err != nil {
 		return nil, status.Errorf(codes.Internal, "vault apply: %v", err)
 	}
 	return &gastrologv1.ForwardVaultApplyResponse{}, nil

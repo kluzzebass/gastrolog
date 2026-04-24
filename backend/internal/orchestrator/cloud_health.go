@@ -38,7 +38,7 @@ func (o *Orchestrator) evaluateCloudHealth() {
 
 // evaluateTierCloudHealth checks a single cloud tier's health and runs
 // backfill on the tier leader only. Followers skip backfill — they learn
-// about cloud-backed chunks via the tier Raft FSM.
+// about cloud-backed chunks via the tier FSM.
 func (o *Orchestrator) evaluateTierCloudHealth(tier *TierInstance) {
 	chk, ok := tier.Chunks.(cloudHealthChecker)
 	if !ok {
@@ -57,7 +57,7 @@ func (o *Orchestrator) evaluateTierCloudHealth(tier *TierInstance) {
 	}
 }
 
-// backfillCloudUploads reconciles sealed chunks against the tier Raft FSM
+// backfillCloudUploads reconciles sealed chunks against the tier FSM
 // (the single source of truth for CloudBacked). For every sealed chunk
 // where the FSM says CloudBacked=false, it schedules an UploadToCloud job.
 // UploadToCloud does a Head check — if the blob already exists in S3, it
