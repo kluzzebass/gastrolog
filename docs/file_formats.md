@@ -1,12 +1,12 @@
 # GastroLog File Formats
 
-All multi-byte integers are **little-endian**. UUIDs are stored as raw 16-byte values. Timestamps are stored as **int64 Unix nanoseconds**.
+All multi-byte integers are **little-endian**. GLIDs are stored as raw 16-byte values (UUIDv7-shaped; see "IDs: GLID and encoding" below). Timestamps are stored as **int64 Unix nanoseconds**.
 
 ## Directory Layout
 
 ```
 <home>/
-  node_id                   Persistent UUIDv7 node identity
+  node_id                   Persistent GLID (UUIDv7-shaped) node identity
   node_name                 Human-readable petname
   config.json / config.db   Config store (format depends on store type)
   gastrolog.sock            Unix domain socket for local CLI access
@@ -284,7 +284,7 @@ Append-only file containing fixed-size metadata entries for each record. The chu
 | 32     | 4    | attrOffset    | Byte offset into attr.log data section (uint32)|
 | 36     | 2    | attrSize      | Length of encoded attributes in bytes (uint16)|
 | 38     | 4    | ingestSeq     | Per-ingester rolling sequence counter (uint32)|
-| 42     | 16   | ingesterID    | Ingester UUID (raw bytes)                     |
+| 42     | 16   | ingesterID    | Ingester GLID (raw bytes)                     |
 
 ### Position Semantics
 
@@ -389,7 +389,7 @@ Each record is deduplicated: a token appears at most once per record in the post
 | 1      | 1    | type     | `0x6B` (`'k'`)                     |
 | 2      | 1    | version  | `0x01`                             |
 | 3      | 1    | flags    | `0x00` (reserved)                  |
-| 4      | 16   | chunkID  | Chunk UUID (raw bytes)             |
+| 4      | 16   | chunkID  | Chunk GLID (raw bytes)             |
 | 20     | 4    | keyCount | Number of distinct tokens (uint32) |
 
 ### Key Table Entry (variable size)
@@ -522,8 +522,8 @@ TS indexes + TOC:
 | 1      | 1    | type         | `0x67` (`'g'`)                               |
 | 2      | 1    | version      | `0x01`                                       |
 | 3      | 1    | flags        | Reserved (`0x00`)                            |
-| 4      | 16   | chunkID      | Chunk UUID (raw bytes)                       |
-| 20     | 16   | vaultID      | Vault UUID (raw bytes)                       |
+| 4      | 16   | chunkID      | Chunk GLID (raw bytes)                       |
+| 20     | 16   | vaultID      | Vault GLID (raw bytes)                       |
 | 36     | 4    | recordCount  | Total records (uint32)                       |
 | 40     | 8    | writeStart   | Min WriteTS (int64 Unix nanos)               |
 | 48     | 8    | writeEnd     | Max WriteTS (int64 Unix nanos)               |
@@ -564,7 +564,7 @@ Each record is self-framing:
 | 4      | 8           | sourceTS    | Source timestamp (int64 nanos, 0 = none) |
 | 12     | 8           | ingestTS    | Ingest timestamp (int64 nanos)           |
 | 20     | 8           | writeTS     | Write timestamp (int64 nanos)            |
-| 28     | 16          | ingesterID  | Ingester UUID (raw bytes)                |
+| 28     | 16          | ingesterID  | Ingester GLID (raw bytes)                |
 | 44     | 4           | ingestSeq   | Per-ingester sequence counter (uint32)   |
 | 48     | 2           | attrCount   | Number of attribute pairs (uint16)       |
 | 50     | attrCount×8 | attrs       | [keyID:u32][valID:u32] pairs             |
@@ -612,7 +612,7 @@ When uploaded, the following user-defined metadata is set on the cloud object fo
 | Key            | Value                              |
 |----------------|------------------------------------|
 | `chunk_id`     | 26-char base32hex chunk ID         |
-| `vault_id`     | UUID string                        |
+| `vault_id`     | GLID string (26-char base32hex)    |
 | `record_count` | Decimal string                     |
 | `start_ts`     | RFC 3339 timestamp                 |
 | `end_ts`       | RFC 3339 timestamp                 |

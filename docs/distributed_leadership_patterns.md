@@ -1,6 +1,21 @@
 # Distributed Leadership Patterns: Lessons from Production Systems
 
-Research compiled 2026-04-12 for gastrolog-1s3mf (unify tier leadership).
+> **HISTORICAL.** Research compiled 2026-04-12 for gastrolog-1s3mf (unify tier
+> leadership). The dual-leadership problem described below no longer exists
+> in the current architecture — per-tier Raft groups were retired in
+> gastrolog-5xxbd in favor of a single per-vault **vault control-plane
+> Raft** group whose FSM namespaces per-tier state as sub-FSMs. There is
+> only ONE Raft leader per vault now, which also authorizes all tier-level
+> writes. See
+> [`vault-control-plane-architecture.md`](./vault-control-plane-architecture.md)
+> for the current design and
+> [`ubiquitous_language.md`](./ubiquitous_language.md) for canonical
+> vocabulary.
+>
+> This document is preserved because the survey of how other systems
+> (CockroachDB, TiKV, etcd, Consul) solved the dual-leadership problem
+> directly informed the vault-ctl Raft consolidation. Useful for
+> understanding why the current design works.
 
 ## The Core Problem
 

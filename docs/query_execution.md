@@ -77,7 +77,7 @@ flowchart TD
 Unsealed (active) chunks are always included since their WriteEnd is not final.
 
 For **file vaults**, `cm.List()` returns both in-memory metadata (local chunks)
-and B+ tree entries (cloud chunks). For **memory vaults**, all chunks are in-memory.
+and B+ tree entries (cloud-backed chunks). For **memory vaults**, all chunks are in-memory.
 
 ## Merge Heap Priming
 
@@ -94,8 +94,8 @@ flowchart TD
     Prime --> Heap["Push first record onto heap"]
 
     Heap --> Check{"heapLen > 0 AND limit > 0?"}
-    Check -->|Yes| DeferCloud["Skip cloud chunks"]
-    Check -->|No| PrimeCloud["Prime cloud chunks too"]
+    Check -->|Yes| DeferCloud["Skip cloud-backed chunks"]
+    Check -->|No| PrimeCloud["Prime cloud-backed chunks too"]
 
     DeferCloud --> MergeLoop
     PrimeCloud --> MergeLoop
@@ -104,7 +104,7 @@ flowchart TD
 ```
 
 **Cloud deferral**: local chunks are primed first. If any local chunk produces
-a record and the query has a limit, cloud chunks are deferred entirely — they're
+a record and the query has a limit, cloud-backed chunks are deferred entirely — they're
 never downloaded. This is why a `last=5m limit=10` query with an active chunk
 serving data does zero cloud I/O. (The `limit=` directive works in both the UI
 query input and the CLI's `--limit` flag.)
@@ -234,8 +234,8 @@ handful of frames are fetched rather than the full blob.
 
 ## Cloud Index Infrastructure
 
-Cloud chunk metadata lives in a B+ tree on disk (`cloud.idx`), not in the Go
-heap. This keeps memory stable regardless of cloud chunk count.
+Cloud-backed chunk metadata lives in a B+ tree on disk (`cloud.idx`), not in the Go
+heap. This keeps memory stable regardless of cloud-backed chunk count.
 
 ```mermaid
 flowchart LR

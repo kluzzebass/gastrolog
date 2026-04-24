@@ -8,6 +8,8 @@
 
 **Terminal state (5xxbd complete):** There are **no** per-tier metadata Raft groups. **One vault-scoped control-plane Raft** (plus system Raft for cluster-global config) owns every cross-node tier/chunk metadata mutation that today goes through `tierfsm` + tier `GroupTransport`. Tier **instances** (chunk/index managers) remain the data plane and **do not** host their own Raft groups.
 
+**Vocabulary:** canonical terms follow [`ubiquitous_language.md`](./ubiquitous_language.md). In particular, this architecture uses **vault-ctl Raft** (one group per vault, authoritative for tier/chunk metadata) and **tier FSM** (the per-tier sub-state-machine inside the vault-ctl FSM). There is no "tier Raft group" — where this document discusses the pre-5xxbd design, it is describing what's being replaced.
+
 ---
 
 ## Table of contents
