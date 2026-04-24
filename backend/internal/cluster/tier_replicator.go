@@ -99,9 +99,19 @@ func (tr *TierReplicator) getOrOpen(tierID glid.GLID, nodeID string) (*tierStrea
 	return ts, nil
 }
 
-// send sends a command on the stream and waits for the ack. On stream
-// failure, marks the stream as closed so the next call reopens it.
-func (tr *TierReplicator) send(_, tierID glid.GLID, nodeID string, cmd *gastrologv1.TierReplicationCommand) error {
+// send sends a command on the stream and waits for the ack. Respects the
+// caller's context: if ctx is cancelled while waiting for the ack, send
+// closes the stream (so the next call opens a fresh one) and returns the
+// ctx error.
+//
+// The grpc.ClientStream blocking methods (SendMsg, RecvMsg) do NOT
+// natively honor a context different from the one used at stream
+// creation. We enforce the caller deadline by running the blocking calls
+// in a helper goroutine and racing them against ctx.Done().
+//
+// See gastrolog-5oofa: without this, RecvMsg on a paused peer blocks
+// forever, holding ts.mu and cascading into ingest-path stalls.
+func (tr *TierReplicator) send(ctx context.Context, tierID glid.GLID, nodeID string, cmd *gastrologv1.TierReplicationCommand) error {
 	ts, err := tr.getOrOpen(tierID, nodeID)
 	if err != nil {
 		return err
@@ -114,21 +124,40 @@ func (tr *TierReplicator) send(_, tierID glid.GLID, nodeID string, cmd *gastrolo
 		return fmt.Errorf("stream to %s for tier %s is closed", nodeID, tierID)
 	}
 
-	if err := ts.stream.SendMsg(cmd); err != nil {
+	sendErr := tr.runWithCtx(ctx, func() error { return ts.stream.SendMsg(cmd) })
+	if sendErr != nil {
 		tr.closeStream(tierID, nodeID)
-		return fmt.Errorf("send: %w", err)
+		return fmt.Errorf("send: %w", sendErr)
 	}
 
 	ack := &gastrologv1.TierReplicationAck{}
-	if err := ts.stream.RecvMsg(ack); err != nil {
+	recvErr := tr.runWithCtx(ctx, func() error { return ts.stream.RecvMsg(ack) })
+	if recvErr != nil {
 		tr.closeStream(tierID, nodeID)
-		return fmt.Errorf("recv ack: %w", err)
+		return fmt.Errorf("recv ack: %w", recvErr)
 	}
 
 	if !ack.Ok {
 		return fmt.Errorf("follower rejected command: %s", ack.Error)
 	}
 	return nil
+}
+
+// runWithCtx runs fn in a helper goroutine and returns the first of:
+// (a) fn's result, or (b) ctx's error. If ctx fires first, fn continues
+// running in the background and its result is discarded — the caller has
+// already closed the stream so the stuck fn will eventually error out
+// when the stream is cancelled. That cost is bounded; the alternative
+// (block forever on a paused peer) is not.
+func (tr *TierReplicator) runWithCtx(ctx context.Context, fn func() error) error {
+	done := make(chan error, 1)
+	go func() { done <- fn() }()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // closeStream marks a stream as closed and cancels its context.
@@ -150,7 +179,7 @@ func (tr *TierReplicator) AppendRecords(ctx context.Context, nodeID string, vaul
 	for i, rec := range records {
 		exports[i] = convert.RecordToExport(rec)
 	}
-	return tr.send(vaultID, tierID, nodeID, &gastrologv1.TierReplicationCommand{
+	return tr.send(ctx, tierID, nodeID, &gastrologv1.TierReplicationCommand{
 		VaultId: vaultID.ToProto(),
 		TierId:  tierID.ToProto(),
 		Command: &gastrologv1.TierReplicationCommand_Append{
@@ -164,7 +193,7 @@ func (tr *TierReplicator) AppendRecords(ctx context.Context, nodeID string, vaul
 
 // SealTier tells a follower to seal its active chunk.
 func (tr *TierReplicator) SealTier(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
-	return tr.send(vaultID, tierID, nodeID, &gastrologv1.TierReplicationCommand{
+	return tr.send(ctx, tierID, nodeID, &gastrologv1.TierReplicationCommand{
 		VaultId: vaultID.ToProto(),
 		TierId:  tierID.ToProto(),
 		Command: &gastrologv1.TierReplicationCommand_Seal{
@@ -181,7 +210,7 @@ func (tr *TierReplicator) ImportSealedChunk(ctx context.Context, nodeID string, 
 	for i, rec := range records {
 		exports[i] = convert.RecordToExport(rec)
 	}
-	return tr.send(vaultID, tierID, nodeID, &gastrologv1.TierReplicationCommand{
+	return tr.send(ctx, tierID, nodeID, &gastrologv1.TierReplicationCommand{
 		VaultId: vaultID.ToProto(),
 		TierId:  tierID.ToProto(),
 		Command: &gastrologv1.TierReplicationCommand_ImportSealed{
@@ -195,7 +224,7 @@ func (tr *TierReplicator) ImportSealedChunk(ctx context.Context, nodeID string, 
 
 // DeleteChunk tells a follower to delete a sealed chunk.
 func (tr *TierReplicator) DeleteChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
-	return tr.send(vaultID, tierID, nodeID, &gastrologv1.TierReplicationCommand{
+	return tr.send(ctx, tierID, nodeID, &gastrologv1.TierReplicationCommand{
 		VaultId: vaultID.ToProto(),
 		TierId:  tierID.ToProto(),
 		Command: &gastrologv1.TierReplicationCommand_DeleteChunk{

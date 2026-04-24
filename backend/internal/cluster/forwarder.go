@@ -33,11 +33,18 @@ func NewForwarder(r *hraft.Raft, clusterTLS *ClusterTLS) *Forwarder {
 }
 
 // Forward sends a pre-marshaled ConfigCommand to the leader for raft.Apply().
+//
+// Always bounded by ReplicationTimeout even if the caller's ctx has no
+// deadline: auth/login HTTP handlers pass a no-deadline ctx, and without
+// this bound the RPC hangs indefinitely when the leader (or its
+// connection) is frozen. See gastrolog-5oofa.
 func (f *Forwarder) Forward(ctx context.Context, data []byte) error {
 	conn, err := f.leaderConn()
 	if err != nil {
 		return err
 	}
+	ctx, cancel := context.WithTimeout(ctx, ReplicationTimeout)
+	defer cancel()
 	client := NewForwardApplyClient(conn)
 	_, err = client.ForwardApply(ctx, &gastrologv1.ForwardApplyRequest{Command: data})
 	return err

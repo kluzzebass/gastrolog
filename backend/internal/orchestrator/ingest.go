@@ -44,6 +44,21 @@ func (o *Orchestrator) Ingest(rec chunk.Record) error {
 // flushRecordRouteForwards (outside o.mu) so the forward buffer can apply
 // backpressure instead of dropping. See gastrolog-27zvt.
 func (o *Orchestrator) ingest(rec chunk.Record) (*pendingAcks, error) {
+	pa, deferredRemotes, err := o.ingestLocked(rec)
+	// Fire-and-forget remote replication happens OUTSIDE the orchestrator
+	// lock so a slow or paused follower cannot starve writers (retention,
+	// reconfig). See gastrolog-5oofa.
+	for _, remotes := range deferredRemotes {
+		o.fireAndForgetRemote(remotes, rec)
+	}
+	return pa, err
+}
+
+// ingestLocked is the mu-protected portion of ingest. It returns the
+// pendingAcks for ack-gated sync work and a list of remote-target sets
+// (one per local vault append) that the caller must dispatch via
+// fireAndForgetRemote AFTER releasing the lock.
+func (o *Orchestrator) ingestLocked(rec chunk.Record) (*pendingAcks, [][]remoteForwardTarget, error) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
@@ -51,42 +66,46 @@ func (o *Orchestrator) ingest(rec chunk.Record) (*pendingAcks, error) {
 
 	if len(o.vaults) == 0 && o.forwarder == nil {
 		o.routeStats.Dropped.Add(1)
-		return nil, ErrNoChunkManagers
+		return nil, nil, ErrNoChunkManagers
 	}
 
 	if o.filterSet == nil {
 		o.routeStats.Dropped.Add(1)
-		return nil, nil // No routes configured — drop the record.
+		return nil, nil, nil // No routes configured — drop the record.
 	}
 
 	matches := o.filterSet.MatchWithNode(rec.Attrs)
 	if len(matches) == 0 {
 		o.routeStats.Dropped.Add(1)
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	// Write records first, then update stats only on success.
 	routed := false
 	var pa *pendingAcks
+	var deferredRemotes [][]remoteForwardTarget
 	for _, t := range matches {
 		if t.NodeID != "" {
 			var err error
 			pa, err = o.handleRemoteVaultMatch(pa, t, rec)
 			if err != nil {
-				return pa, err
+				return pa, deferredRemotes, err
 			}
 			routed = true
 			continue
 		}
-		task, err := o.appendLocal(t.VaultID, rec)
+		task, remotes, err := o.appendLocal(t.VaultID, rec)
 		if err != nil {
 			if errors.Is(err, ErrVaultDisabled) {
 				continue // Skip disabled vaults during ingestion.
 			}
-			return pa, err
+			return pa, deferredRemotes, err
 		}
 		if task != nil {
 			pa = pa.addReplication(*task)
+		}
+		if len(remotes) > 0 {
+			deferredRemotes = append(deferredRemotes, remotes)
 		}
 		vs := o.getOrCreateVaultRouteStats(t.VaultID)
 		vs.Matched.Add(1)
@@ -99,7 +118,7 @@ func (o *Orchestrator) ingest(rec chunk.Record) (*pendingAcks, error) {
 	if routed {
 		o.routeStats.Routed.Add(1)
 	}
-	return pa, nil
+	return pa, deferredRemotes, nil
 }
 
 // handleRemoteVaultMatch updates route stats and queues cross-node forwarding
@@ -193,17 +212,19 @@ func (o *Orchestrator) getOrCreatePerRouteStats(routeID glid.GLID) *PerRouteStat
 	return v.(*PerRouteStats)
 }
 
-// appendLocal appends a record to a local vault.
-// Returns a replicationTask when the record needs sync forwarding (ack-gated).
-// Remote fire-and-forget forwards are dispatched after the lock is released.
-func (o *Orchestrator) appendLocal(vaultID glid.GLID, rec chunk.Record) (*replicationTask, error) {
+// appendLocal appends a record to a local vault. Returns the task (non-nil
+// when an ack-gated record needs sync forwarding) and the remote targets
+// that must be notified via fireAndForgetRemote.
+//
+// MUST be called with o.mu held. The caller is responsible for dispatching
+// remotes AFTER releasing o.mu (fireAndForgetRemote waits for per-target
+// RPCs to complete and must not starve writers). See gastrolog-5oofa.
+func (o *Orchestrator) appendLocal(vaultID glid.GLID, rec chunk.Record) (*replicationTask, []remoteForwardTarget, error) {
 	_, _, task, remotes, err := o.appendRecord(vaultID, rec)
 	if err != nil {
 		o.logger.Error("append to vault failed", "vault", vaultID, "error", err)
 	}
-	// Remote forwards happen outside the orchestrator lock.
-	o.fireAndForgetRemote(remotes, rec)
-	return task, err
+	return task, remotes, err
 }
 
 // flushRecordRouteForwards delivers non-ack-gated cross-node vault routes

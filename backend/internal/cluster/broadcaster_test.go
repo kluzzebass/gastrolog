@@ -183,6 +183,22 @@ func TestSend_AllPeersReceive(t *testing.T) {
 	b := newBroadcaster(fp, quietLogger(), time.Second)
 	b.Send(context.Background(), testMsg())
 
+	// Send is fire-and-forget (push, not pull — see gastrolog-5oofa).
+	// Poll for delivery with a generous deadline.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		allReceived := true
+		for _, id := range []string{"a", "b", "c"} {
+			if _, ok := received.Load(id); !ok {
+				allReceived = false
+				break
+			}
+		}
+		if allReceived {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	for _, id := range []string{"a", "b", "c"} {
 		v, ok := received.Load(id)
 		if !ok {
@@ -200,10 +216,12 @@ func TestSend_AllPeersReceive(t *testing.T) {
 	}
 }
 
-// TestSend_SlowPeerDoesNotBlockFastPeers verifies the parallel-send
-// behavior: a slow peer no longer stalls delivery to fast peers. The fast
-// peers must receive before the slow peer's timeout elapses.
-func TestSend_SlowPeerDoesNotBlockFastPeers(t *testing.T) {
+// TestSend_ReturnsImmediatelyEvenWithSlowPeer verifies the push-not-pull
+// contract: Send returns immediately regardless of how slow any peer is.
+// Per gastrolog-5oofa, a SIGSTOPed peer must not stall the caller — the
+// fix is to make Send fire-and-forget. Callers (StatsCollector) push
+// their local state; they don't wait for peer acknowledgment.
+func TestSend_ReturnsImmediatelyEvenWithSlowPeer(t *testing.T) {
 	fp := newFakePeerSource()
 
 	fastDone := make(chan string, 3)
@@ -216,7 +234,7 @@ func TestSend_SlowPeerDoesNotBlockFastPeers(t *testing.T) {
 	slowEntered := make(chan struct{})
 	slow := func(ctx context.Context, _ *gastrologv1.BroadcastMessage) error {
 		close(slowEntered)
-		<-ctx.Done() // stay until we hit the per-peer timeout
+		<-ctx.Done()
 		return ctx.Err()
 	}
 
@@ -224,17 +242,19 @@ func TestSend_SlowPeerDoesNotBlockFastPeers(t *testing.T) {
 	fp.addPeer(t, "fast-b", hit("fast-b"))
 	fp.addPeer(t, "slow", slow)
 
-	// 2 s per-peer timeout — long enough to prove fast peers don't wait for it.
 	b := newBroadcaster(fp, quietLogger(), 2*time.Second)
 
 	start := time.Now()
-	done := make(chan struct{})
-	go func() {
-		b.Send(context.Background(), testMsg())
-		close(done)
-	}()
+	b.Send(context.Background(), testMsg())
+	callerElapsed := time.Since(start)
 
-	// Both fast peers should arrive well before the slow peer's 2s timeout.
+	// Send MUST return immediately (push, not pull). 50ms is a generous
+	// upper bound for any in-process dispatch overhead.
+	if callerElapsed > 50*time.Millisecond {
+		t.Fatalf("Send blocked the caller for %v; should return immediately", callerElapsed)
+	}
+
+	// Fast peers complete in the background, well before slow timeout.
 	deadline := time.After(1 * time.Second)
 	seen := map[string]bool{}
 	for len(seen) < 2 {
@@ -242,33 +262,32 @@ func TestSend_SlowPeerDoesNotBlockFastPeers(t *testing.T) {
 		case id := <-fastDone:
 			seen[id] = true
 		case <-deadline:
-			t.Fatalf("fast peers did not complete before slow timeout; seen=%v", seen)
+			t.Fatalf("fast peers did not complete in background; seen=%v", seen)
 		}
 	}
-	if !seen["fast-a"] || !seen["fast-b"] {
-		t.Fatalf("expected both fast peers, got %v", seen)
-	}
 
-	// Make sure the slow peer actually started (confirms parallelism).
+	// Slow peer handler entered (parallelism confirmed).
 	select {
 	case <-slowEntered:
 	case <-time.After(time.Second):
 		t.Fatal("slow peer handler never entered — peers may have been serialized")
 	}
 
-	// Send returns once all peer goroutines finish. Upper bound: slow timeout
-	// + grace. We don't assert tight fast-return semantics because Send waits
-	// for all — just that total runtime is bounded.
-	<-done
-	if elapsed := time.Since(start); elapsed > 5*time.Second {
-		t.Fatalf("Send took too long: %v", elapsed)
+	// Wait for slow peer to time out and be invalidated.
+	invalidDeadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(invalidDeadline) {
+		fp.mu.Lock()
+		got := fp.invalidated["slow"]
+		fp.mu.Unlock()
+		if got > 0 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
-
-	// Slow peer invalidated (it timed out from the caller's perspective).
 	fp.mu.Lock()
 	defer fp.mu.Unlock()
 	if fp.invalidated["slow"] == 0 {
-		t.Error("slow peer should have been invalidated after timeout")
+		t.Error("slow peer should have been invalidated after per-peer timeout")
 	}
 	if fp.invalidated["fast-a"] != 0 || fp.invalidated["fast-b"] != 0 {
 		t.Errorf("fast peers should not be invalidated: %v", fp.invalidated)
@@ -276,8 +295,9 @@ func TestSend_SlowPeerDoesNotBlockFastPeers(t *testing.T) {
 }
 
 // TestSend_CallerDeadlineCancelsInFlight verifies that cancelling the
-// caller's context aborts in-flight peer RPCs instead of letting them run to
-// the per-peer timeout.
+// caller's context aborts in-flight peer RPCs. Send returns immediately
+// (push), but the in-flight goroutine must still observe caller-side
+// cancellation and unblock when the caller's ctx fires.
 func TestSend_CallerDeadlineCancelsInFlight(t *testing.T) {
 	fp := newFakePeerSource()
 	entered := make(chan struct{})
@@ -290,18 +310,13 @@ func TestSend_CallerDeadlineCancelsInFlight(t *testing.T) {
 	}
 	fp.addPeer(t, "slow", slow)
 
-	// Per-peer timeout 5 s. Caller ctx deadline 200ms — caller wins.
 	b := newBroadcaster(fp, quietLogger(), 5*time.Second)
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
-	start := time.Now()
 	b.Send(ctx, testMsg())
-	elapsed := time.Since(start)
+	// Send is fire-and-forget; don't time it.
 
-	if elapsed > 2*time.Second {
-		t.Fatalf("caller deadline ignored: Send took %v, expected <1s", elapsed)
-	}
 	select {
 	case <-entered:
 	case <-time.After(time.Second):
@@ -356,24 +371,37 @@ func TestSend_ErrorSuppressionAndRecovery(t *testing.T) {
 
 	b := newBroadcaster(fp, quietLogger(), time.Second)
 
-	// First send: fails. failed[flap] = true.
+	// First send: fails. failed[flap] = true. Send is async, so poll
+	// for the state transition.
 	b.Send(context.Background(), testMsg())
-	b.mu.Lock()
-	failedNow := b.failed["flap"]
-	b.mu.Unlock()
-	if !failedNow {
-		t.Fatal("peer not marked failed after error")
-	}
+	waitFor(t, time.Second, func() bool {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		return b.failed["flap"]
+	}, "peer not marked failed after error")
 
 	// Recover: next send succeeds, failed flag clears.
 	shouldFail.Store(false)
 	b.Send(context.Background(), testMsg())
-	b.mu.Lock()
-	stillFailed := b.failed["flap"]
-	b.mu.Unlock()
-	if stillFailed {
-		t.Error("peer should be cleared after successful send")
+	waitFor(t, time.Second, func() bool {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		return !b.failed["flap"]
+	}, "peer should be cleared after successful send")
+}
+
+// waitFor polls cond every 10ms until it returns true or the deadline
+// expires. Useful for async assertions after fire-and-forget calls.
+func waitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
+	t.Fatal(msg)
 }
 
 // TestSend_ParallelFanoutRunsConcurrently is a timing test: when every peer
@@ -404,16 +432,20 @@ func TestSend_ParallelFanoutRunsConcurrently(t *testing.T) {
 	}
 
 	b := newBroadcaster(fp, quietLogger(), 2*time.Second)
-	start := time.Now()
 	b.Send(context.Background(), testMsg())
-	elapsed := time.Since(start)
 
-	// Serial would be ~nPeers*handlerBlock (1.2s for 4x300ms). Parallel
-	// should be ~handlerBlock + small overhead. Tolerate 2×handlerBlock.
-	if elapsed > 2*handlerBlock {
-		t.Errorf("Send appears serial: elapsed=%v, expected <%v", elapsed, 2*handlerBlock)
-	}
+	// Send is fire-and-forget. Wait for the background goroutines to all
+	// hit the handler concurrently, then verify max concurrency ≥ 2.
+	waitFor(t, 2*time.Second, func() bool {
+		return atomic.LoadInt32(&maxConcurrent) >= 2
+	}, "peers did not run concurrently")
+
 	if got := atomic.LoadInt32(&maxConcurrent); got < 2 {
 		t.Errorf("expected ≥2 concurrent handlers, got max=%d", got)
 	}
+
+	// Wait for handlers to complete so the test cleanly tears down.
+	waitFor(t, 3*handlerBlock, func() bool {
+		return atomic.LoadInt32(&concurrent) == 0
+	}, "handlers did not complete")
 }

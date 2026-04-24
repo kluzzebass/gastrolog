@@ -538,17 +538,23 @@ func (o *Orchestrator) sealRemoteFollowers(targets []remoteForwardTarget, chunkI
 // record in the drain pipeline tries to reach peers that are gone. This
 // is the single biggest source of shutdown noise before the fix —
 // see gastrolog-1e5ke.
+// fireAndForgetRemote dispatches record replication to each remote follower
+// target in parallel and waits for all of them (bounded by ForwardingTimeout
+// per target). "Fire and forget" in the sense that the caller does not
+// observe per-target errors — failures feed the per-node backoff circuit
+// breaker (bumpReplicaBackoff) which skips unreachable nodes on subsequent
+// calls. Callers MUST invoke this outside the orchestrator mutex: holding
+// o.mu.RLock across this call would starve writers when any follower is
+// slow or paused. See gastrolog-5oofa.
 func (o *Orchestrator) fireAndForgetRemote(targets []remoteForwardTarget, rec chunk.Record) {
 	if len(targets) == 0 || o.shuttingDown() || o.tierReplicator == nil {
 		return
 	}
 	var wg sync.WaitGroup
 	for _, tgt := range targets {
-		// Circuit breaker: skip nodes in backoff.
 		if rb := o.getReplicaBackoff(tgt.nodeID); rb != nil && rb.skipUntil.After(o.now()) {
 			continue
 		}
-
 		wg.Go(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), cluster.ForwardingTimeout)
 			defer cancel()

@@ -541,10 +541,17 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 		}
 	}
 
-	peerState := cluster.NewPeerState(5 * time.Second)
+	// PeerState TTL must be multiple broadcast intervals so jitter on a
+	// single tick doesn't flap a healthy peer to offline. Matching the
+	// interval exactly (5s TTL + 5s interval) was a zero-tolerance config:
+	// any delay > 0 caused the peer to appear offline and the UI to flicker.
+	// 20s = 4× interval tolerates up to 3 missed broadcasts before offline.
+	// PeerJobState already uses the 3× factor (15s TTL); matching that
+	// shape here. See gastrolog-5oofa.
+	peerState := cluster.NewPeerState(20 * time.Second)
 	clusterSrv.Subscribe(peerState.HandleBroadcast)
 
-	peerJobState := cluster.NewPeerJobState(15 * time.Second)
+	peerJobState := cluster.NewPeerJobState(20 * time.Second)
 	clusterSrv.Subscribe(peerJobState.HandleBroadcast)
 
 	// Evict peer-cache entries immediately when a node is removed from the
