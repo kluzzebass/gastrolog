@@ -3,6 +3,7 @@ package server
 import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/query"
+	"gastrolog/internal/safeutf8"
 )
 
 // TableResultToBasicProto converts an internal TableResult to proto without
@@ -11,10 +12,10 @@ import (
 func TableResultToBasicProto(result *query.TableResult) *apiv1.TableResult {
 	rows := make([]*apiv1.TableRow, len(result.Rows))
 	for i, row := range result.Rows {
-		rows[i] = &apiv1.TableRow{Values: row}
+		rows[i] = &apiv1.TableRow{Values: safeutf8.Strings(row)}
 	}
 	return &apiv1.TableResult{
-		Columns:    result.Columns,
+		Columns:    safeutf8.Strings(result.Columns),
 		Rows:       rows,
 		Truncated:  result.Truncated,
 		ResultType: "table",

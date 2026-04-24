@@ -10,6 +10,7 @@ import (
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/safeutf8"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -43,8 +44,14 @@ func RecordToExport(rec chunk.Record) *gastrologv1.ExportRecord {
 		er.WriteTs = timestamppb.New(rec.WriteTS)
 	}
 	if len(rec.Attrs) > 0 {
+		// Attrs are proto3 map<string,string>; invalid UTF-8 would fail
+		// marshal. Ingesters normally produce clean attrs, but raw
+		// message bytes sometimes leak in — sanitize at the wire
+		// boundary. safeutf8.Attrs returns the input unchanged when
+		// already clean; we then copy so the export is detached from
+		// the source record.
 		er.Attrs = make(map[string]string, len(rec.Attrs))
-		maps.Copy(er.Attrs, rec.Attrs)
+		maps.Copy(er.Attrs, safeutf8.Attrs(rec.Attrs))
 	}
 	return er
 }

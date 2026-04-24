@@ -18,6 +18,7 @@ import (
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
 	"gastrolog/internal/querylang"
+	"gastrolog/internal/safeutf8"
 	"gastrolog/internal/system"
 
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
@@ -587,7 +588,7 @@ func (h *streamedHistogramBuilder) add(rec chunk.Record) {
 	}
 	h.counts[idx]++
 	if lvl := rec.Attrs["level"]; lvl != "" {
-		h.groupCounts[idx][lvl]++
+		h.groupCounts[idx][safeutf8.String(lvl)]++
 	}
 	h.uniqueCount++
 }
