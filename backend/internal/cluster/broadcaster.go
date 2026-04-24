@@ -52,11 +52,18 @@ func newBroadcaster(peers broadcastPeerSource, logger *slog.Logger, perPeerTimeo
 	}
 }
 
-// Send broadcasts a message to all peers in parallel. Best-effort: errors
-// are logged but don't block delivery to other peers. A slow or unresponsive
-// peer can no longer stall delivery to healthy peers — each peer's RPC runs
-// in its own goroutine under its own per-peer timeout. Returns once every
-// peer goroutine has finished (succeeded, failed, or timed out).
+// Send pushes a message to every peer and returns immediately. Push,
+// not pull: the caller is notifying peers of local state; it does not
+// need — and should not wait for — per-peer acknowledgment.
+//
+// Each peer's delivery happens on its own goroutine with its own
+// per-peer timeout (ForwardingTimeout by default). Errors are logged
+// and the connection is invalidated, but never surface to the caller.
+//
+// This is why a SIGSTOP on one peer does NOT stall the caller: the
+// paused peer's goroutine runs to its per-peer timeout asynchronously;
+// meanwhile, the caller and other peers are unaffected. See
+// gastrolog-5oofa.
 func (b *Broadcaster) Send(ctx context.Context, msg *gastrologv1.BroadcastMessage) {
 	peers, err := b.peers.Peers()
 	if err != nil {
@@ -68,15 +75,9 @@ func (b *Broadcaster) Send(ctx context.Context, msg *gastrologv1.BroadcastMessag
 	}
 
 	req := &gastrologv1.BroadcastRequest{Message: msg}
-	var wg sync.WaitGroup
-	wg.Add(len(peers))
 	for _, p := range peers {
-		go func(id string) {
-			defer wg.Done()
-			b.sendToPeer(ctx, id, req)
-		}(string(p.ID))
+		go b.sendToPeer(ctx, string(p.ID), req)
 	}
-	wg.Wait()
 }
 
 // sendToPeer handles one peer's delivery: dial → per-peer-timeout context →

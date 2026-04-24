@@ -79,6 +79,25 @@ type multiRaftClient struct {
 
 const servicePath = "/gastrolog.v1.MultiRaftTransportService/"
 
+// Per-RPC deadlines. A paused (SIGSTOPed) peer keeps its TCP socket open
+// but never responds at the application layer; without a deadline, the
+// caller goroutine hangs until OS TCP keepalive (minutes) kicks in. That
+// cascades into leader replication stalls and cluster-wide head-of-line
+// blocking — see gastrolog-5oofa.
+//
+// Values are chosen against hraft's defaults (HeartbeatTimeout=1s,
+// ElectionTimeout=1s, LeaderLeaseTimeout=500ms): tight enough that a
+// slow peer fails fast and hraft retries, generous enough to tolerate
+// normal network jitter and short GC pauses.
+const (
+	appendEntriesRPCTimeout   = 3 * time.Second
+	heartbeatRPCTimeout       = 1 * time.Second
+	requestVoteRPCTimeout     = 2 * time.Second
+	requestPreVoteRPCTimeout  = 2 * time.Second
+	timeoutNowRPCTimeout      = 2 * time.Second
+	installSnapshotRPCTimeout = 5 * time.Minute // bulk transfer; bounded by chunk/snapshot size
+)
+
 func (c *multiRaftClient) AppendEntries(ctx context.Context, req *gastrologv1.MultiRaftAppendEntriesRequest) (*gastrologv1.MultiRaftAppendEntriesResponse, error) {
 	resp := new(gastrologv1.MultiRaftAppendEntriesResponse)
 	if err := c.cc.Invoke(ctx, servicePath+"AppendEntries", req, resp); err != nil {
@@ -310,7 +329,9 @@ func (g *groupTransport[K]) AppendEntries(id raft.ServerID, target raft.ServerAd
 	if err != nil {
 		return err
 	}
-	ret, err := c.AppendEntries(context.TODO(), encodeAppendEntriesRequest(g.parent.encodeKey(g.groupID), args))
+	ctx, cancel := context.WithTimeout(context.Background(), appendEntriesRPCTimeout)
+	defer cancel()
+	ret, err := c.AppendEntries(ctx, encodeAppendEntriesRequest(g.parent.encodeKey(g.groupID), args))
 	if err != nil {
 		return err
 	}
@@ -377,7 +398,9 @@ func (t *Transport[K]) flushHeartbeats(target raft.ServerAddress) {
 		return
 	}
 
-	batchResp, err := c.BatchHeartbeat(context.TODO(), &gastrologv1.MultiRaftBatchHeartbeatRequest{
+	ctx, cancel := context.WithTimeout(context.Background(), heartbeatRPCTimeout)
+	defer cancel()
+	batchResp, err := c.BatchHeartbeat(ctx, &gastrologv1.MultiRaftBatchHeartbeatRequest{
 		Heartbeats: reqs,
 	})
 	if err != nil {
@@ -402,7 +425,9 @@ func (g *groupTransport[K]) RequestVote(id raft.ServerID, target raft.ServerAddr
 	if err != nil {
 		return err
 	}
-	ret, err := c.RequestVote(context.TODO(), encodeRequestVoteRequest(g.parent.encodeKey(g.groupID), args))
+	ctx, cancel := context.WithTimeout(context.Background(), requestVoteRPCTimeout)
+	defer cancel()
+	ret, err := c.RequestVote(ctx, encodeRequestVoteRequest(g.parent.encodeKey(g.groupID), args))
 	if err != nil {
 		return err
 	}
@@ -415,7 +440,9 @@ func (g *groupTransport[K]) RequestPreVote(id raft.ServerID, target raft.ServerA
 	if err != nil {
 		return err
 	}
-	ret, err := c.RequestPreVote(context.TODO(), encodeRequestPreVoteRequest(g.parent.encodeKey(g.groupID), args))
+	ctx, cancel := context.WithTimeout(context.Background(), requestPreVoteRPCTimeout)
+	defer cancel()
+	ret, err := c.RequestPreVote(ctx, encodeRequestPreVoteRequest(g.parent.encodeKey(g.groupID), args))
 	if err != nil {
 		return err
 	}
@@ -428,7 +455,9 @@ func (g *groupTransport[K]) TimeoutNow(id raft.ServerID, target raft.ServerAddre
 	if err != nil {
 		return err
 	}
-	ret, err := c.TimeoutNow(context.TODO(), encodeTimeoutNowRequest(g.parent.encodeKey(g.groupID), args))
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutNowRPCTimeout)
+	defer cancel()
+	ret, err := c.TimeoutNow(ctx, encodeTimeoutNowRequest(g.parent.encodeKey(g.groupID), args))
 	if err != nil {
 		return err
 	}
@@ -441,7 +470,9 @@ func (g *groupTransport[K]) InstallSnapshot(id raft.ServerID, target raft.Server
 	if err != nil {
 		return err
 	}
-	stream, err := c.InstallSnapshot(context.TODO())
+	ctx, cancel := context.WithTimeout(context.Background(), installSnapshotRPCTimeout)
+	defer cancel()
+	stream, err := c.InstallSnapshot(ctx)
 	if err != nil {
 		return err
 	}
@@ -480,7 +511,12 @@ func (g *groupTransport[K]) AppendEntriesPipeline(id raft.ServerID, target raft.
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithCancel(context.TODO())
+	// Pipelined AppendEntries is a long-lived stream; per-RPC deadlines
+	// don't fit. Per-message stalls against a paused peer surface via
+	// stream.SendMsg returning the cancellation from pipelineAPI.Close /
+	// the Raft layer aborting the pipeline on heartbeat timeout. Use
+	// Background explicitly (not TODO) to document intent.
+	ctx, cancel := context.WithCancel(context.Background())
 	stream, err := c.AppendEntriesPipeline(ctx)
 	if err != nil {
 		cancel()
