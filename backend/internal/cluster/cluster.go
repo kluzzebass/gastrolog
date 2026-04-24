@@ -19,6 +19,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -200,6 +201,15 @@ type Server struct {
 	// peerConns is the shared connection pool for all peer communication.
 	// Created in SetRaft once the raft instance is available.
 	peerConns *PeerConns
+
+	// pauseGate, when non-nil, makes every gRPC handler block until the
+	// channel is closed. Used exclusively by reliability tests to simulate
+	// a SIGSTOPed peer: the TCP socket stays accepted and the connection
+	// stays open, but no RPC response ever returns. Production code does
+	// not call Pause/Unpause; the pauseGate stays nil and the interceptor
+	// is a no-op. See gastrolog-5oofa / gastrolog-5ff7z.
+	pauseMu   sync.Mutex
+	pauseGate chan struct{}
 }
 
 // ForwardedReceived returns the number of records received via ForwardRecords RPCs.
@@ -447,6 +457,68 @@ func (s *Server) SetNodeSuffrageFn(fn func(ctx context.Context, nodeID, nodeAddr
 	s.setNodeSuffrageFn = fn
 }
 
+// Pause installs a gate that causes every subsequent gRPC handler on this
+// server to block until Unpause is called. TCP connections remain accepted,
+// streams stay open; only application-level progress halts. Intended for
+// reliability tests that simulate SIGSTOPed peers; production code never
+// calls this. Idempotent — calling Pause while already paused is a no-op.
+// See gastrolog-5oofa / gastrolog-5ff7z.
+func (s *Server) Pause() {
+	s.pauseMu.Lock()
+	defer s.pauseMu.Unlock()
+	if s.pauseGate == nil {
+		s.pauseGate = make(chan struct{})
+	}
+}
+
+// Unpause releases any handlers blocked by a previous Pause and clears the
+// gate. Idempotent — calling when not paused is a no-op.
+func (s *Server) Unpause() {
+	s.pauseMu.Lock()
+	gate := s.pauseGate
+	s.pauseGate = nil
+	s.pauseMu.Unlock()
+	if gate != nil {
+		close(gate)
+	}
+}
+
+// awaitPauseRelease blocks until the pause gate is cleared or ctx is done.
+// Returns nil when released normally or when not paused. Returns ctx.Err if
+// the caller's context fires before Unpause.
+func (s *Server) awaitPauseRelease(ctx context.Context) error {
+	s.pauseMu.Lock()
+	gate := s.pauseGate
+	s.pauseMu.Unlock()
+	if gate == nil {
+		return nil
+	}
+	select {
+	case <-gate:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.stopCtx.Done():
+		return errShuttingDown
+	}
+}
+
+// pauseUnaryInterceptor blocks the handler until Unpause is called.
+func (s *Server) pauseUnaryInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+	if err := s.awaitPauseRelease(ctx); err != nil {
+		return nil, err
+	}
+	return handler(ctx, req)
+}
+
+// pauseStreamInterceptor blocks the handler until Unpause is called.
+func (s *Server) pauseStreamInterceptor(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	if err := s.awaitPauseRelease(ss.Context()); err != nil {
+		return err
+	}
+	return handler(srv, ss)
+}
+
 // Start creates the gRPC server, registers all services, and begins serving.
 // The listener was already bound in New().
 func (s *Server) Start() error {
@@ -457,8 +529,13 @@ func (s *Server) Start() error {
 		tlsCfg := s.cfg.TLS.ServerTLSConfig()
 		opts = append(opts,
 			grpc.Creds(credentials.NewTLS(tlsCfg)),
-			grpc.ChainUnaryInterceptor(s.mTLSUnaryInterceptor),
-			grpc.ChainStreamInterceptor(s.mTLSStreamInterceptor),
+			grpc.ChainUnaryInterceptor(s.pauseUnaryInterceptor, s.mTLSUnaryInterceptor),
+			grpc.ChainStreamInterceptor(s.pauseStreamInterceptor, s.mTLSStreamInterceptor),
+		)
+	} else {
+		opts = append(opts,
+			grpc.ChainUnaryInterceptor(s.pauseUnaryInterceptor),
+			grpc.ChainStreamInterceptor(s.pauseStreamInterceptor),
 		)
 	}
 

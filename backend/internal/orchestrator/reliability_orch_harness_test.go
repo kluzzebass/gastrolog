@@ -338,6 +338,29 @@ func (h *orchRelHarness) stopNode(id string) {
 	}
 }
 
+// pausePeer makes all inbound gRPC handlers on `id` block until unpausePeer
+// is called. Simulates a SIGSTOPed peer: TCP stays up, application-level
+// progress halts. Use to test that the rest of the cluster keeps serving
+// while one peer is frozen. See gastrolog-5oofa.
+func (h *orchRelHarness) pausePeer(id string) {
+	h.t.Helper()
+	n := h.nodes[id]
+	if n == nil || n.clusterSrv == nil {
+		h.t.Fatalf("pausePeer: node %s not running", id)
+	}
+	n.clusterSrv.Pause()
+}
+
+// unpausePeer releases a previously-paused peer so its RPC handlers resume.
+func (h *orchRelHarness) unpausePeer(id string) {
+	h.t.Helper()
+	n := h.nodes[id]
+	if n == nil || n.clusterSrv == nil {
+		return
+	}
+	n.clusterSrv.Unpause()
+}
+
 // waitForAllReady blocks until every live node reports
 // LocalVaultsReplicationReady == true. This is the actual gate search and
 // ingest RPCs use — regressing it is what gastrolog-5j6eu fixed.

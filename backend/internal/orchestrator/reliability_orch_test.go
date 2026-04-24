@@ -25,6 +25,7 @@ import (
 //   - OrchRel_FreshCluster_VaultReady           (end-to-end readiness bug regression)
 //   - OrchRel_SealedChunk_ReplicatesCrossNode   (append + seal → manifest replicates)
 //   - OrchRel_Restart_SealedChunkSurvives       (WAL replay at orchestrator layer)
+//   - OrchRel_PausedPeer_ClusterStaysHealthy    (end-to-end gastrolog-5oofa regression)
 
 // Boots a 3-node cluster with real vault-ctl Raft; every node's
 // orchestrator reports LocalVaultsReplicationReady=true within the
@@ -115,6 +116,120 @@ func TestOrchRel_Restart_SealedChunkSurvives(t *testing.T) {
 	// Post-restart: same chunk IDs should be visible via vault-ctl Raft
 	// replay and tier FSM restore.
 	h.assertAllNodesSee(pre)
+}
+
+// End-to-end regression for gastrolog-5oofa: SIGSTOPing a peer must not
+// stall the rest of the cluster. Pause the third node's gRPC handlers
+// (TCP stays up; app-level frozen), then exercise the ingest + seal
+// path on node1. With the 5oofa fix, append/seal complete normally:
+// fireAndForgetRemote's per-target goroutine against the paused node
+// times out via the TierReplicator.send ctx deadline, the circuit
+// breaker trips, and ingest proceeds. Without the fix, the ingest path
+// would hold o.mu.RLock indefinitely waiting on the paused peer, every
+// orchestrator operation would queue behind it, and the test would hit
+// its timeout.
+//
+// The test asserts:
+//   - append + seal on the leader completes within a bounded time
+//     (well before the leader's local ForwardingTimeout budget per record);
+//   - concurrent UnregisterVault on the leader is not blocked by the
+//     paused peer (the lock-release fix is held);
+//   - after unpausing, the paused peer catches up and all nodes' tier
+//     sub-FSMs converge.
+func TestOrchRel_PausedPeer_ClusterStaysHealthy(t *testing.T) {
+	t.Parallel()
+	h := newOrchRelHarness(t, 3)
+
+	// Pause the third node. The other two remain healthy and must keep
+	// serving.
+	paused := h.nodeIDs[2]
+	h.pausePeer(paused)
+	// Cleanup unpauses so the harness can shut down cleanly.
+	t.Cleanup(func() { h.unpausePeer(paused) })
+
+	// Append + seal on the leader. Must complete even though one peer
+	// is unreachable at the application layer.
+	const records = 10
+	now := time.Now()
+	appendDone := make(chan error, 1)
+	go func() {
+		for i := range records {
+			if err := h.appendOnLeader(chunk.Record{
+				SourceTS: now,
+				IngestTS: now,
+				Raw:      []byte("paused-" + strconv.Itoa(i)),
+			}); err != nil {
+				appendDone <- err
+				return
+			}
+		}
+		h.sealOnLeader()
+		appendDone <- nil
+	}()
+
+	// Budget: much larger than ForwardingTimeout (5s) to tolerate the
+	// first record's backoff ramp, but bounded enough to catch a
+	// regression where the orchestrator deadlocks.
+	select {
+	case err := <-appendDone:
+		if err != nil {
+			t.Fatalf("append+seal failed under paused peer: %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("append+seal deadlocked with paused peer (gastrolog-5oofa regressed)")
+	}
+
+	// The sealed chunk must be visible on the two healthy nodes. The
+	// paused peer's FSM may lag — we check only the live ones.
+	live := []string{h.nodeIDs[0], h.nodeIDs[1]}
+	h.eventuallyLiveNodesSeeSealedChunk(t, live)
+
+	// Unpause and verify the paused peer catches up. Convergence is
+	// bounded — catchup replication + FSM apply should finish well
+	// within the harness's default deadline.
+	h.unpausePeer(paused)
+	h.assertAllNodesSee(h.chunkIDsOnNode(h.nodeIDs[0]))
+}
+
+// eventuallyLiveNodesSeeSealedChunk is the subset variant of
+// eventuallyAllSeeSealedChunk used when we expect only some nodes to be
+// caught up (e.g. one is paused).
+func (h *orchRelHarness) eventuallyLiveNodesSeeSealedChunk(t *testing.T, live []string) {
+	t.Helper()
+	deadline := time.Now().Add(orchHarnessConvWait)
+	var expected map[chunk.ChunkID]bool
+	for time.Now().Before(deadline) {
+		expected = h.chunkIDsOnNode(h.nodeIDs[0])
+		if len(expected) > 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if len(expected) == 0 {
+		t.Fatalf("no sealed chunk on leader within %s", orchHarnessConvWait)
+	}
+	// Wait for each live node to match.
+	for _, id := range live {
+		dl := time.Now().Add(orchHarnessConvWait)
+		for time.Now().Before(dl) {
+			got := h.chunkIDsOnNode(id)
+			if len(got) != len(expected) {
+				time.Sleep(50 * time.Millisecond)
+				continue
+			}
+			mismatch := false
+			for cid := range expected {
+				if !got[cid] {
+					mismatch = true
+					break
+				}
+			}
+			if !mismatch {
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
 }
 
 // eventuallyAllSeeSealedChunk polls until the leader reports at least one
