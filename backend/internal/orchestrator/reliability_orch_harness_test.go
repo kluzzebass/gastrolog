@@ -77,10 +77,49 @@ type orchRelHarness struct {
 	nodes        map[string]*orchRelNode
 	nodeIDs      []string
 	cfgStore     system.Store
-	vaultID      glid.GLID
-	tierID       glid.GLID
+	// vaultID/tierID are the default (first) vault's identifiers; kept as
+	// top-level fields for the single-vault convenience API.
+	vaultID glid.GLID
+	tierID  glid.GLID
+	// vaults holds every configured vault, with the default vault as
+	// vaults[0]. Multi-vault scenarios use addVaultSpec during setup to
+	// add more, each with its own node subset.
+	vaults       []vaultSpec
 	sharedCtx    context.Context
 	sharedCancel context.CancelFunc
+}
+
+// vaultSpec identifies one vault in the harness along with which nodes
+// participate in its tier-Raft group. First node in nodeIdxs is the
+// placement leader. For multi-vault scenarios, use orchRelOptions to
+// register additional vaultSpecs before startup.
+type vaultSpec struct {
+	label    string    // human label for test output ("A", "B", ...)
+	id       glid.GLID // vault GLID
+	tierID   glid.GLID // tier GLID
+	nodeIdxs []int     // indexes into h.nodeIDs; first is tier leader
+}
+
+// orchRelOption configures a harness before it boots. Applied between
+// nodeID assignment and cfgStore seeding, so options can influence what
+// gets written to the config store.
+type orchRelOption func(*orchRelHarness)
+
+// withExtraVault registers an additional vault placed on the given
+// node indexes (into h.nodeIDs). The first index is the tier leader.
+// len(nodeIdxs) must be an odd number >= 1 for valid Raft quorum, and
+// each index must be a valid h.nodeIDs index. The vault is labeled
+// "B" (or "C", "D", ...) based on insertion order.
+func withExtraVault(nodeIdxs []int) orchRelOption {
+	return func(h *orchRelHarness) {
+		label := string(rune('B' + len(h.vaults) - 1))
+		h.vaults = append(h.vaults, vaultSpec{
+			label:    label,
+			id:       glid.New(),
+			tierID:   glid.New(),
+			nodeIdxs: nodeIdxs,
+		})
+	}
 }
 
 const (
@@ -89,10 +128,11 @@ const (
 	orchHarnessLeaderWait = 5 * time.Second
 )
 
-// newOrchRelHarness boots n nodes with a shared config store, a single
-// memory-tier vault placed on every node, and real vault-ctl Raft. Blocks
-// until every node reports LocalVaultsReplicationReady.
-func newOrchRelHarness(t *testing.T, n int) *orchRelHarness {
+// newOrchRelHarness boots n nodes with a shared config store, at least one
+// file-tier vault (the default), and real vault-ctl Raft. Additional vaults
+// can be registered via options (see withExtraVault). Blocks until every
+// node reports LocalVaultsReplicationReady.
+func newOrchRelHarness(t *testing.T, n int, opts ...orchRelOption) *orchRelHarness {
 	t.Helper()
 	if n < 1 {
 		t.Fatal("orch harness requires n >= 1")
@@ -108,6 +148,22 @@ func newOrchRelHarness(t *testing.T, n int) *orchRelHarness {
 		tierID:       glid.New(),
 		sharedCtx:    sharedCtx,
 		sharedCancel: sharedCancel,
+	}
+	// The default vault (vaults[0]) is placed on every node.
+	defaultIdxs := make([]int, n)
+	for i := range n {
+		defaultIdxs[i] = i
+	}
+	h.vaults = []vaultSpec{{
+		label:    "A",
+		id:       h.vaultID,
+		tierID:   h.tierID,
+		nodeIdxs: defaultIdxs,
+	}}
+
+	// Apply options (e.g. additional vaults) before any state is written.
+	for _, opt := range opts {
+		opt(h)
 	}
 
 	// Phase 1: create cluster servers so peer addresses exist before we
@@ -206,34 +262,40 @@ func (h *orchRelHarness) seedSharedConfig() {
 		}
 	}
 
-	if err := h.cfgStore.PutVault(ctx, system.VaultConfig{
-		ID:   h.vaultID,
-		Name: "orch-rel-vault",
-	}); err != nil {
-		h.t.Fatalf("PutVault: %v", err)
-	}
-	if err := h.cfgStore.PutTier(ctx, system.TierConfig{
-		ID:           h.tierID,
-		Name:         "orch-rel-tier",
-		Type:         system.TierTypeFile,
-		VaultID:      h.vaultID,
-		Position:     0,
-		StorageClass: harnessStorageClass,
-	}); err != nil {
-		h.t.Fatalf("PutTier: %v", err)
-	}
-
-	// All nodes are voters for this tier. The first is leader.
-	placements := make([]system.TierPlacement, len(h.nodeIDs))
-	for i, id := range h.nodeIDs {
-		n := h.nodes[id]
-		placements[i] = system.TierPlacement{
-			StorageID: n.fileStorageID.String(),
-			Leader:    i == 0,
+	// Register every vault + tier + placement. vaults[0] is the default;
+	// additional entries come from withExtraVault options.
+	for _, v := range h.vaults {
+		if err := h.cfgStore.PutVault(ctx, system.VaultConfig{
+			ID:   v.id,
+			Name: "orch-rel-vault-" + v.label,
+		}); err != nil {
+			h.t.Fatalf("PutVault %s: %v", v.label, err)
 		}
-	}
-	if err := h.cfgStore.SetTierPlacements(ctx, h.tierID, placements); err != nil {
-		h.t.Fatalf("SetTierPlacements: %v", err)
+		if err := h.cfgStore.PutTier(ctx, system.TierConfig{
+			ID:           v.tierID,
+			Name:         "orch-rel-tier-" + v.label,
+			Type:         system.TierTypeFile,
+			VaultID:      v.id,
+			Position:     0,
+			StorageClass: harnessStorageClass,
+		}); err != nil {
+			h.t.Fatalf("PutTier %s: %v", v.label, err)
+		}
+		// Placements: one per participating node. First listed is leader.
+		placements := make([]system.TierPlacement, 0, len(v.nodeIdxs))
+		for pos, idx := range v.nodeIdxs {
+			if idx < 0 || idx >= len(h.nodeIDs) {
+				h.t.Fatalf("vault %s: invalid node index %d (have %d nodes)", v.label, idx, len(h.nodeIDs))
+			}
+			n := h.nodes[h.nodeIDs[idx]]
+			placements = append(placements, system.TierPlacement{
+				StorageID: n.fileStorageID.String(),
+				Leader:    pos == 0,
+			})
+		}
+		if err := h.cfgStore.SetTierPlacements(ctx, v.tierID, placements); err != nil {
+			h.t.Fatalf("SetTierPlacements %s: %v", v.label, err)
+		}
 	}
 }
 
@@ -425,6 +487,78 @@ func (h *orchRelHarness) waitForAllReady() {
 		time.Sleep(50 * time.Millisecond)
 	}
 	h.t.Fatalf("vaults not ready after %s on: %v", orchHarnessReadyWait, notReady)
+}
+
+// appendOnLeaderForVault appends to a specific vault's tier leader (the
+// vault-ctl Raft leader for that vault, not the placement leader).
+// Parameterized variant of appendOnLeader used by multi-vault tests.
+func (h *orchRelHarness) appendOnLeaderForVault(v vaultSpec, rec chunk.Record) error {
+	h.t.Helper()
+	leader := h.waitForVaultCtlLeaderForVault(v)
+	return leader.orch.AppendToTier(v.id, v.tierID, chunk.ChunkID{}, rec)
+}
+
+// sealOnLeaderForVault seals the active chunk for a specific vault on
+// that vault's vault-ctl Raft leader.
+func (h *orchRelHarness) sealOnLeaderForVault(v vaultSpec) {
+	h.t.Helper()
+	leader := h.waitForVaultCtlLeaderForVault(v)
+	if _, err := leader.orch.SealActive(v.id, glid.Nil); err != nil {
+		h.t.Fatalf("SealActive vault %s: %v", v.label, err)
+	}
+}
+
+// waitForVaultCtlLeaderForVault returns the node that currently holds
+// leadership of the given vault's vault-ctl Raft group.
+func (h *orchRelHarness) waitForVaultCtlLeaderForVault(v vaultSpec) *orchRelNode {
+	h.t.Helper()
+	gid := raftgroup.VaultControlPlaneGroupID(v.id)
+	deadline := time.Now().Add(orchHarnessLeaderWait)
+	for time.Now().Before(deadline) {
+		for _, idx := range v.nodeIdxs {
+			n := h.nodes[h.nodeIDs[idx]]
+			if n == nil || n.groupMgr == nil {
+				continue
+			}
+			g := n.groupMgr.GetGroup(gid)
+			if g == nil {
+				continue
+			}
+			if g.Raft.State() == hraft.Leader {
+				return n
+			}
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	h.t.Fatalf("vault %s: no leader within %s", v.label, orchHarnessLeaderWait)
+	return nil
+}
+
+// chunkIDsOnNodeForVault returns the chunk IDs in the given vault's
+// tier FSM on `id`. Returns nil if the node doesn't host the vault.
+func (h *orchRelHarness) chunkIDsOnNodeForVault(v vaultSpec, id string) map[chunk.ChunkID]bool {
+	n := h.nodes[id]
+	if n == nil || n.groupMgr == nil {
+		return nil
+	}
+	g := n.groupMgr.GetGroup(raftgroup.VaultControlPlaneGroupID(v.id))
+	if g == nil {
+		return nil
+	}
+	vfsm, ok := g.FSM.(*vaultraft.FSM)
+	if !ok || vfsm == nil {
+		return nil
+	}
+	sub := vfsm.TierFSM(v.tierID)
+	if sub == nil {
+		return map[chunk.ChunkID]bool{}
+	}
+	entries := sub.List()
+	out := make(map[chunk.ChunkID]bool, len(entries))
+	for _, e := range entries {
+		out[e.ID] = true
+	}
+	return out
 }
 
 // chunkIDsOnNode returns the chunk IDs present in the vault-ctl tier FSM on
