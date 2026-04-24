@@ -220,7 +220,7 @@ func (m *GroupManager) DestroyGroup(groupID string) error {
 
 // AddMember adds a node to a group. Automatically selects voter or nonvoter
 // based on the resulting group size:
-//   - 2-member: nonvoter (primary is sole voter, always has quorum)
+//   - 2-member: nonvoter (leader is sole voter, always has quorum)
 //   - 3+: voter (proper quorum-based fault tolerance)
 func (m *GroupManager) AddMember(groupID string, serverID hraft.ServerID, serverAddr hraft.ServerAddress) error {
 	g := m.GetGroup(groupID)

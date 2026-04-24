@@ -171,7 +171,7 @@ At configuration time, the system validates that at least one node can serve eac
 
 ### Per-tier leader nodes
 
-Each tier within a vault has an **elected leader node** (via tier Raft groups). The leader is the single authority for that tier — it receives all writes, decides chunk boundaries, and handles rotation. Follower nodes for the same tier receive replicated records with chunk assignment metadata, producing identical chunks (same boundaries, same content, same IDs). No independent chunking decisions on replicas.
+Each tier within a vault has an **elected leader node** (via the vault's vault-ctl Raft group, with a tier FSM per tier). The leader is the single authority for that tier — it receives all writes, decides chunk boundaries, and handles rotation. Follower nodes for the same tier receive replicated records with chunk assignment metadata, producing identical chunks (same boundaries, same content, same IDs). No independent chunking decisions on replicas.
 
 ### Replication
 
@@ -241,7 +241,7 @@ This is effectively a two-phase commit at each tier boundary — the cost is one
 
 ### Resolved: chunk metadata in Raft
 
-Each tier has its own Raft group (tier Raft). The config Raft stores cluster-wide configuration; per-tier Raft groups store the chunk manifest for that tier — which chunks exist, their sealed/deleted state, and replication metadata. This is the hybrid approach: config-plane state in the config Raft, data-plane metadata in per-tier Raft groups. Leaders and followers for each tier are determined by the tier Raft group's election.
+Each vault has its own Raft group (**vault-ctl Raft**), with a **tier FSM** per tier nested inside it. The config Raft stores cluster-wide configuration; each vault-ctl Raft group stores the chunk manifest for every tier in that vault — which chunks exist, their sealed/deleted state, and replication metadata. This is the hybrid approach: config-plane state in the config Raft, data-plane metadata in the vault-ctl Raft. Leaders and followers for each tier are determined by the owning vault's Raft group election (one election per vault, shared across all tier FSMs it hosts).
 
 ### Tier transitions
 
@@ -565,7 +565,7 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 
 | Capability | Status | Notes |
 |---|---|---|
-| Raft consensus | Done | Config Raft + per-tier Raft groups |
+| Raft consensus | Done | Config Raft + per-vault vault-ctl Raft groups (tier FSM per tier) |
 | Cross-node query fan-out | Done | ForwardSearch, collectRemote, GetFields, GetContext |
 | Config push (WatchConfig) | Done | Real-time config propagation via server stream |
 | Chunk push (WatchChunks) | Done | Real-time chunk metadata notifications via server stream |

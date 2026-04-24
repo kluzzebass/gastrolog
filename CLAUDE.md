@@ -53,7 +53,7 @@ Do not suggest creating PRs.
 
 ## Cluster-First: Every Feature Must Work on Every Node
 
-GastroLog is a fully distributed system. There is no primary node. Any node can serve any request. Every feature, handler, and piece of state must work correctly regardless of which node the user is connected to. If a correct implementation requires the user to be connected to a specific node, it is wrong.
+GastroLog is a fully distributed system. No node has cluster-wide authority — tier leaders and Raft leaders are elected per vault/group, not assigned to a single privileged node. Any node can serve any request. Every feature, handler, and piece of state must work correctly regardless of which node the user is connected to. If a correct implementation requires the user to be connected to a specific node, it is wrong.
 
 When implementing anything new, ask: **"Does this work if the user is on a different node than the data?"** If the answer is no, redesign before proceeding.
 

@@ -14,9 +14,9 @@ const (
 )
 
 // rotationSweep is the single scheduled rotation job. Each tick it:
-//  1. Loads current config and applies rotation policies to all primary tiers.
+//  1. Loads current config and applies rotation policies to all leader tiers.
 //  2. Reconciles cron rotation jobs (add new, remove stale).
-//  3. Checks each primary tier's active chunk for time-based rotation triggers.
+//  3. Checks each leader tier's active chunk for time-based rotation triggers.
 //
 // This discovery-based approach replaces the per-tier lifecycle management
 // (applyTierRotation / reloadTierRotation) — no setup, teardown, or hot-swap.

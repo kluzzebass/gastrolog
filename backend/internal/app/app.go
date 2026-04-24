@@ -411,11 +411,11 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 		}
 		return err
 	})
-	clusterSrv.SetRecordTierAppender(func(ctx context.Context, vaultID, tierID glid.GLID, primaryChunkID chunk.ChunkID, rec chunk.Record) error {
+	clusterSrv.SetRecordTierAppender(func(ctx context.Context, vaultID, tierID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error {
 		if err := waitForOrch(ctx); err != nil {
 			return err
 		}
-		err := orch.AppendToTier(vaultID, tierID, primaryChunkID, rec)
+		err := orch.AppendToTier(vaultID, tierID, leaderChunkID, rec)
 		if err != nil && errors.Is(err, orchestrator.ErrVaultNotReady) {
 			return errors.Join(cluster.ErrForwardTargetNotReady, err)
 		}
@@ -637,7 +637,7 @@ func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cf
 		// committed entries (tier placements, NSCs, etc.) only become visible
 		// after either a Barrier on the leader or a few AppendEntries rounds
 		// on a follower. Without this wait, the orchestrator reads stale
-		// state and creates tier Raft groups with incomplete member lists.
+		// state and creates vault-ctl Raft groups with incomplete member lists.
 		if err := waitForQuorum(ctx, cfgStore, logger); err != nil {
 			return nil, false, err
 		}
@@ -1176,8 +1176,7 @@ func wireClusterRaftApplies(clusterSrv *cluster.Server, groupMgr *raftgroup.Grou
 		}
 		return g.Raft.Apply(data, cluster.ReplicationTimeout).Error()
 	}
-	clusterSrv.SetTierApplyFn(fn)
-	clusterSrv.SetVaultApplyFn(fn)
+	clusterSrv.SetGroupApplyFn(fn)
 }
 
 func resolveHome(flagValue string) (home.Dir, error) {

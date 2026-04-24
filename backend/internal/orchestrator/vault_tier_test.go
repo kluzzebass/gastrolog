@@ -401,28 +401,28 @@ func TestListAllChunkMetasIncludesFollowerOnlyTiers(t *testing.T) {
 	}
 }
 
-// --- LocalPrimaryTierIDs ---
+// --- LocalLeaderTierIDs ---
 
-func TestLocalPrimaryTierIDsExcludesFollowers(t *testing.T) {
+func TestLocalLeaderTierIDsExcludesFollowers(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
-	primaryTierID := glid.New()
+	leaderTierID := glid.New()
 	followerTierID := glid.New()
 	vaultID := glid.New()
 
-	primary := newMemTier(t, primaryTierID, false, nil)
+	leader := newMemTier(t, leaderTierID, false, nil)
 	follower := newMemTier(t, followerTierID, true, nil)
-	vault := NewVault(vaultID, primary, follower)
+	vault := NewVault(vaultID, leader, follower)
 	vault.Name = "mixed-roles"
 	orch.RegisterVault(vault)
 
-	ids := orch.LocalPrimaryTierIDs()
-	if !ids[primaryTierID] {
-		t.Error("primary tier should be in LocalPrimaryTierIDs")
+	ids := orch.LocalLeaderTierIDs()
+	if !ids[leaderTierID] {
+		t.Error("leader tier should be in LocalLeaderTierIDs")
 	}
 	if ids[followerTierID] {
-		t.Error("follower tier should NOT be in LocalPrimaryTierIDs")
+		t.Error("follower tier should NOT be in LocalLeaderTierIDs")
 	}
 }
 
@@ -432,20 +432,20 @@ func TestTierReplicationInfoSkipsFollowers(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
-	primaryTierID := glid.New()
+	leaderTierID := glid.New()
 	followerTierID := glid.New()
 	vaultID := glid.New()
 
-	primary := newMemTier(t, primaryTierID, false, []system.ReplicationTarget{{NodeID: "node-2"}})
+	leader := newMemTier(t, leaderTierID, false, []system.ReplicationTarget{{NodeID: "node-2"}})
 	follower := newMemTier(t, followerTierID, true, nil)
-	vault := NewVault(vaultID, primary, follower)
+	vault := NewVault(vaultID, leader, follower)
 	vault.Name = "repl-info"
 	orch.RegisterVault(vault)
 
-	// Primary tier should return replication info.
-	tid, nodes := orch.tierReplicationInfo(vaultID, primary.Chunks)
-	if tid != primaryTierID {
-		t.Errorf("expected tier %s, got %s", primaryTierID, tid)
+	// Leader tier should return replication info.
+	tid, nodes := orch.tierReplicationInfo(vaultID, leader.Chunks)
+	if tid != leaderTierID {
+		t.Errorf("expected tier %s, got %s", leaderTierID, tid)
 	}
 	if len(nodes) != 1 || nodes[0].NodeID != "node-2" {
 		t.Errorf("expected [node-2], got %v", nodes)
@@ -669,8 +669,8 @@ func TestAppendToTierSecondaryDoesNotForward(t *testing.T) {
 	vault.Name = "no-reforward"
 	orch.RegisterVault(vault)
 
-	primaryChunkID := chunk.NewChunkID()
-	if err := orch.AppendToTier(vaultID, tierID, primaryChunkID, testRecord("data")); err != nil {
+	leaderChunkID := chunk.NewChunkID()
+	if err := orch.AppendToTier(vaultID, tierID, leaderChunkID, testRecord("data")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -690,8 +690,8 @@ func TestAppendToTierSecondaryUsesChunkID(t *testing.T) {
 	vault.Name = "id-sync"
 	orch.RegisterVault(vault)
 
-	primaryChunkID := chunk.NewChunkID()
-	if err := orch.AppendToTier(vaultID, tierID, primaryChunkID, testRecord("data")); err != nil {
+	leaderChunkID := chunk.NewChunkID()
+	if err := orch.AppendToTier(vaultID, tierID, leaderChunkID, testRecord("data")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -700,8 +700,8 @@ func TestAppendToTierSecondaryUsesChunkID(t *testing.T) {
 	if active == nil {
 		t.Fatal("expected active chunk on follower")
 	}
-	if active.ID != primaryChunkID {
-		t.Errorf("follower chunk ID = %s, want leader's %s", active.ID, primaryChunkID)
+	if active.ID != leaderChunkID {
+		t.Errorf("follower chunk ID = %s, want leader's %s", active.ID, leaderChunkID)
 	}
 }
 
@@ -733,12 +733,12 @@ func TestAppendToTierSecondarySkipsPostSeal(t *testing.T) {
 	vault.Name = "skip-postseal"
 	orch.RegisterVault(vault)
 
-	primaryChunkID := chunk.NewChunkID()
+	leaderChunkID := chunk.NewChunkID()
 	// First record fills the chunk (policy = 1 record), triggering seal on the second.
-	if err := orch.AppendToTier(vaultID, tierID, primaryChunkID, testRecord("rec-1")); err != nil {
+	if err := orch.AppendToTier(vaultID, tierID, leaderChunkID, testRecord("rec-1")); err != nil {
 		t.Fatal(err)
 	}
-	if err := orch.AppendToTier(vaultID, tierID, primaryChunkID, testRecord("rec-2")); err != nil {
+	if err := orch.AppendToTier(vaultID, tierID, leaderChunkID, testRecord("rec-2")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -773,7 +773,7 @@ func TestImportToTierSecondarySealsActiveAndKeeps(t *testing.T) {
 	chunkID := chunk.NewChunkID()
 
 	// Simulate active record forwarding: follower has an active chunk
-	// with the primary's ID, still receiving records.
+	// with the leader's ID, still receiving records.
 	tier.Chunks.SetNextChunkID(chunkID)
 	for range 3 {
 		if _, _, err := tier.Chunks.Append(testRecord("forwarded")); err != nil {
@@ -782,7 +782,7 @@ func TestImportToTierSecondarySealsActiveAndKeeps(t *testing.T) {
 	}
 	active := tier.Chunks.Active()
 	if active == nil || active.ID != chunkID {
-		t.Fatal("expected active chunk with primary's ID")
+		t.Fatal("expected active chunk with leader's ID")
 	}
 
 	// Primary seals and sends canonical version. ImportToTier should

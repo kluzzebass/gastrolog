@@ -17,7 +17,7 @@ func (s *QueryServer) Explain(
 	ctx context.Context,
 	req *connect.Request[apiv1.ExplainRequest],
 ) (*connect.Response[apiv1.ExplainResponse], error) {
-	eng := s.orch.PrimaryTierQueryEngine()
+	eng := s.orch.LeaderTierQueryEngine()
 
 	q, pipeline, err := protoToQuery(req.Msg.Query)
 	if err != nil {

@@ -25,7 +25,7 @@ type RecordAppender func(ctx context.Context, vaultID glid.GLID, rec chunk.Recor
 
 // RecordTierAppender appends a single record to a specific tier in a local vault.
 // Used by the ForwardRecords handler when tier_id is set (inter-tier transition).
-type RecordTierAppender func(ctx context.Context, vaultID, tierID glid.GLID, primaryChunkID chunk.ChunkID, rec chunk.Record) error
+type RecordTierAppender func(ctx context.Context, vaultID, tierID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error
 
 // SearchExecutor runs a search on a local vault and returns results.
 // For regular searches, it returns an iterator over records (the caller
@@ -452,7 +452,7 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 		})
 	}
 
-	// No results (vault has no primary tiers on this node).
+	// No results (vault has no leader tiers on this node).
 	if searchIter == nil {
 		return stream.SendMsg(&gastrologv1.ForwardSearchResponse{Histogram: histogram})
 	}
@@ -464,7 +464,7 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 	for rec, iterErr := range searchIter {
 		if iterErr != nil {
 			// EOF can occur when a chunk is deleted mid-read (e.g., ImportToTier
-			// replacing a forwarded-record chunk on a secondary). Treat as
+			// replacing a forwarded-record chunk on a follower). Treat as
 			// end-of-results — the data is still available via retry.
 			if errors.Is(iterErr, io.EOF) || isMissingLocalChunkFileError(iterErr) {
 				break
@@ -741,25 +741,29 @@ func (s *Server) forwardApply(ctx context.Context, req *gastrologv1.ForwardApply
 	return &gastrologv1.ForwardApplyResponse{}, nil
 }
 
-// forwardTierApply handles the ForwardTierApply RPC (vault ctl group_id +
-// marshaled command, typically OpTierFSM-wrapped tierfsm payloads).
+// forwardTierApply handles the ForwardTierApply RPC. The payload is a
+// tierfsm command wrapped with OpTierFSM + tier ID (see
+// NewVaultCtlTierApplyForwarder), and the group ID is the vault-ctl
+// Raft group ID. Dispatches to the shared groupApplyFn.
 func (s *Server) forwardTierApply(ctx context.Context, req *gastrologv1.ForwardTierApplyRequest) (*gastrologv1.ForwardTierApplyResponse, error) {
-	if s.tierApplyFn == nil {
-		return nil, status.Error(codes.Unavailable, "tier apply function not configured")
+	if s.groupApplyFn == nil {
+		return nil, status.Error(codes.Unavailable, "group apply function not configured")
 	}
-	if err := s.tierApplyFn(ctx, string(req.GetGroupId()), req.GetCommand()); err != nil {
+	if err := s.groupApplyFn(ctx, string(req.GetGroupId()), req.GetCommand()); err != nil {
 		return nil, status.Errorf(codes.Internal, "tier apply: %v", err)
 	}
 	return &gastrologv1.ForwardTierApplyResponse{}, nil
 }
 
-// forwardVaultApply handles the ForwardVaultApply RPC on the vault control-plane
-// Raft leader.
+// forwardVaultApply handles the ForwardVaultApply RPC on the vault
+// control-plane Raft leader. The payload is a native vault-ctl FSM
+// command (no OpTierFSM wrapping); the group ID identifies the vault's
+// control-plane Raft group. Dispatches to the shared groupApplyFn.
 func (s *Server) forwardVaultApply(ctx context.Context, req *gastrologv1.ForwardVaultApplyRequest) (*gastrologv1.ForwardVaultApplyResponse, error) {
-	if s.vaultApplyFn == nil {
-		return nil, status.Error(codes.Unavailable, "vault apply function not configured")
+	if s.groupApplyFn == nil {
+		return nil, status.Error(codes.Unavailable, "group apply function not configured")
 	}
-	if err := s.vaultApplyFn(ctx, string(req.GetGroupId()), req.GetCommand()); err != nil {
+	if err := s.groupApplyFn(ctx, string(req.GetGroupId()), req.GetCommand()); err != nil {
 		return nil, status.Errorf(codes.Internal, "vault apply: %v", err)
 	}
 	return &gastrologv1.ForwardVaultApplyResponse{}, nil

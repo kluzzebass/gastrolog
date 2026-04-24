@@ -92,13 +92,13 @@ type Server struct {
 	// applyFn applies a pre-marshaled ConfigCommand on the leader.
 	applyFn func(ctx context.Context, data []byte) error
 
-	// tierApplyFn applies a pre-marshaled tier FSM command on this node's
-	// tier Raft leader. Keyed by group ID (= tier UUID).
-	tierApplyFn func(ctx context.Context, groupID string, data []byte) error
-
-	// vaultApplyFn applies a pre-marshaled vault control-plane FSM command on
-	// this node's vault Raft leader for the given multiraft group ID.
-	vaultApplyFn func(ctx context.Context, groupID string, data []byte) error
+	// groupApplyFn applies a pre-marshaled command to the multiraft group
+	// identified by groupID. Used by both ForwardTierApply (groupID = the
+	// vault-ctl group carrying an OpTierFSM-wrapped payload) and
+	// ForwardVaultApply (groupID = the vault-ctl group, payload = native
+	// vault-ctl command). Post-gastrolog-5xxbd there is no separate
+	// tier-Raft path; both RPCs route through this single function.
+	groupApplyFn func(ctx context.Context, groupID string, data []byte) error
 
 	// enrollHandler handles the Enroll RPC for joining nodes.
 	enrollHandler EnrollHandler
@@ -332,7 +332,7 @@ func (s *Server) Transport() hraft.Transport {
 }
 
 // MultiRaftTransport returns the underlying multi-raft transport for creating
-// additional group transports (e.g., tier Raft groups).
+// additional group transports (e.g., vault-ctl Raft groups).
 func (s *Server) MultiRaftTransport() *multiraft.Transport[string] {
 	return s.tm
 }
@@ -435,16 +435,13 @@ func (s *Server) SetApplyFn(fn func(ctx context.Context, data []byte) error) {
 	s.applyFn = fn
 }
 
-// SetTierApplyFn sets the function used by the ForwardTierApply handler to
-// apply commands on the vault control-plane Raft leader (group_id + payload).
-func (s *Server) SetTierApplyFn(fn func(ctx context.Context, groupID string, data []byte) error) {
-	s.tierApplyFn = fn
-}
-
-// SetVaultApplyFn sets the function used by the ForwardVaultApply handler to
-// apply vault control-plane FSM commands on the vault Raft leader node.
-func (s *Server) SetVaultApplyFn(fn func(ctx context.Context, groupID string, data []byte) error) {
-	s.vaultApplyFn = fn
+// SetGroupApplyFn sets the function used by both ForwardTierApply and
+// ForwardVaultApply handlers to apply commands to a multiraft group on
+// this node. Callers typically pass a closure that resolves groupID via
+// the GroupManager and calls Apply on the resulting Raft instance.
+// See wireClusterRaftApplies in app.go for the canonical wiring.
+func (s *Server) SetGroupApplyFn(fn func(ctx context.Context, groupID string, data []byte) error) {
+	s.groupApplyFn = fn
 }
 
 // SetEvictionHandler registers the callback invoked when this node receives

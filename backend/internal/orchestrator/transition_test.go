@@ -26,7 +26,7 @@ import (
 	sysmem "gastrolog/internal/system/memory"
 )
 
-// syntheticPlacements creates a Placements slice with a primary using a synthetic storage ID.
+// syntheticPlacements creates a Placements slice with a leader using a synthetic storage ID.
 func syntheticPlacements(nodeID string) []system.TierPlacement {
 	return []system.TierPlacement{{StorageID: system.SyntheticStorageID(nodeID), Leader: true}}
 }
@@ -831,7 +831,7 @@ func TestTransitionCloudTierTTLSweep(t *testing.T) {
 }
 
 // TestCloudTierLeaderPreservesCloudBacking verifies that a cloud tier leader
-// built through the production code path (buildPrimaryTierInstance →
+// built through the production code path (buildLeaderTierInstance →
 // buildTierInstanceForStorage) retains the sealed_backing parameter so that
 // PostSealProcess uploads chunks to cloud storage.
 //
@@ -983,7 +983,7 @@ func TestTransitionCloudTierFollowerDoesNotOverwriteBlob(t *testing.T) {
 	cloudStore := blobstore.NewMemory()
 
 	// Create leader cloud tier (has cloud backing).
-	primaryTier, _ := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
+	leaderTier, _ := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
 
 	// Create follower cloud tier — should NOT have cloud backing.
 	followerDir := t.TempDir()
@@ -1004,9 +1004,9 @@ func TestTransitionCloudTierFollowerDoesNotOverwriteBlob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	primaryVault := NewVault(vaultID, primaryTier, nextTier)
-	primaryVault.Name = "overwrite-test"
-	leaderOrch.RegisterVault(primaryVault)
+	leaderVault := NewVault(vaultID, leaderTier, nextTier)
+	leaderVault.Name = "overwrite-test"
+	leaderOrch.RegisterVault(leaderVault)
 
 	store := sysmem.NewStore()
 	_ = store.PutVault(context.Background(), system.VaultConfig{
@@ -1025,31 +1025,31 @@ func TestTransitionCloudTierFollowerDoesNotOverwriteBlob(t *testing.T) {
 	// Ingest records on leader, seal, and upload to cloud.
 	const recordCount = 20
 	for range recordCount {
-		if _, _, err := primaryTier.Chunks.Append(makeRecord("primary-rec")); err != nil {
+		if _, _, err := leaderTier.Chunks.Append(makeRecord("leader-rec")); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := primaryTier.Chunks.Seal(); err != nil {
+	if err := leaderTier.Chunks.Seal(); err != nil {
 		t.Fatal(err)
 	}
 
-	metas, _ := primaryTier.Chunks.List()
+	metas, _ := leaderTier.Chunks.List()
 	chunkID := metas[0].ID
 
-	processor := primaryTier.Chunks.(chunk.ChunkPostSealProcessor)
+	processor := leaderTier.Chunks.(chunk.ChunkPostSealProcessor)
 	if err := processor.PostSealProcess(context.Background(), chunkID); err != nil {
-		t.Fatalf("primary PostSealProcess failed: %v", err)
+		t.Fatalf("leader PostSealProcess failed: %v", err)
 	}
 
 	// Verify leader's blob is in cloud.
-	primaryMetas, _ := primaryTier.Chunks.List()
-	var primaryDiskBytes int64
-	for _, m := range primaryMetas {
+	leaderMetas, _ := leaderTier.Chunks.List()
+	var leaderDiskBytes int64
+	for _, m := range leaderMetas {
 		if m.ID == chunkID {
-			primaryDiskBytes = m.DiskBytes
+			leaderDiskBytes = m.DiskBytes
 		}
 	}
-	if primaryDiskBytes == 0 {
+	if leaderDiskBytes == 0 {
 		t.Fatal("expected non-zero diskBytes after cloud upload")
 	}
 
@@ -1057,7 +1057,7 @@ func TestTransitionCloudTierFollowerDoesNotOverwriteBlob(t *testing.T) {
 	// Import the records to the follower's chunk manager.
 	recs := make([]chunk.Record, recordCount)
 	for i := range recs {
-		recs[i] = makeRecord("primary-rec")
+		recs[i] = makeRecord("leader-rec")
 	}
 	_, importErr := followerCM.ImportRecords(chunkID, testIterFromRecords(recs))
 	if importErr != nil {
@@ -1079,7 +1079,7 @@ func TestTransitionCloudTierFollowerDoesNotOverwriteBlob(t *testing.T) {
 	}
 
 	// Verify: leader can still transition from cloud (blob wasn't overwritten).
-	runner := newTestRetentionRunner(leaderOrch, vaultID, cloudTierID, primaryTier.Chunks, primaryTier.Indexes)
+	runner := newTestRetentionRunner(leaderOrch, vaultID, cloudTierID, leaderTier.Chunks, leaderTier.Indexes)
 	runner.transitionChunk(chunkID)
 
 	// Verify: records arrived in next tier.

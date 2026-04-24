@@ -126,7 +126,7 @@ func (o *Orchestrator) scheduleReplication(vaultID, tierID glid.GLID, chunkID ch
 // same node are distinct (different file storages for same-node replication).
 //
 // Cloud-backed chunks are skipped: the data is in shared S3, so followers don't
-// need record streaming. The tier Raft FSM's OnUpload callback registers the
+// need record streaming. The tier FSM's OnUpload callback registers the
 // chunk in each follower's cloud index (see wireTierFSMOnUpload).
 func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, targets []system.ReplicationTarget) {
 	if o.transferrer == nil || len(targets) == 0 {
@@ -153,7 +153,7 @@ func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID
 	}
 
 	// Cloud-backed chunks live in shared object storage (S3/GCS/Azure).
-	// Followers learn about them via the tier Raft FSM's OnUpload callback
+	// Followers learn about them via the tier FSM's OnUpload callback
 	// and read directly from the bucket — no record streaming needed.
 	meta, err := tier.Chunks.Meta(chunkID)
 	if err == nil && meta.CloudBacked {
@@ -248,7 +248,7 @@ func (o *Orchestrator) replicateToFollower(ctx context.Context, vaultID, tierID 
 	// Final tombstone check right before sending: retention may have
 	// deleted this chunk while we were reading records. Without the
 	// recheck, a late ImportSealed would still land on the follower after
-	// the follower has already processed the delete via tier Raft, and
+	// the follower has already processed the delete via vault-ctl Raft, and
 	// the follower's post-import cleanup only catches the case where the
 	// tombstone is on its own FSM. This leader-side recheck short-
 	// circuits the RPC entirely when the leader already knows the chunk

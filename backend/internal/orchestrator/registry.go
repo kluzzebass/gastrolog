@@ -119,11 +119,11 @@ func (o *Orchestrator) ListVaults() []glid.GLID {
 	return keys
 }
 
-// LocalPrimaryTierIDs returns the set of tier IDs where this node is the
+// LocalLeaderTierIDs returns the set of tier IDs where this node is the
 // leader. Used by search fan-out: follower tiers are NOT included because
 // they may be incomplete (missing active chunk, replication lag). The search
 // always fans out to the leader for authoritative results.
-func (o *Orchestrator) LocalPrimaryTierIDs() map[glid.GLID]bool {
+func (o *Orchestrator) LocalLeaderTierIDs() map[glid.GLID]bool {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	ids := make(map[glid.GLID]bool)
@@ -235,20 +235,20 @@ func (r *searchReadyRegistry) IndexManager(key glid.GLID) index.IndexManager {
 	return v.ActiveTierIndexManager()
 }
 
-// PrimaryTierQueryEngine returns a query engine that only searches leader
+// LeaderTierQueryEngine returns a query engine that only searches leader
 // tiers (not follower replicas). Used by ForwardSearch handlers to avoid
 // double-counting when the requesting node already searches its own followers.
-func (o *Orchestrator) PrimaryTierQueryEngine() *query.Engine {
-	return query.NewWithRegistry(&primaryTierRegistry{o: o}, o.logger)
+func (o *Orchestrator) LeaderTierQueryEngine() *query.Engine {
+	return query.NewWithRegistry(&leaderTierRegistry{o: o}, o.logger)
 }
 
-// primaryTierRegistry provides a flat view of all leader tiers across all
+// leaderTierRegistry provides a flat view of all leader tiers across all
 // vaults. Each tier is a searchable unit keyed by its tier ID.
-type primaryTierRegistry struct {
+type leaderTierRegistry struct {
 	o *Orchestrator
 }
 
-func (r *primaryTierRegistry) ListVaults() []glid.GLID {
+func (r *leaderTierRegistry) ListVaults() []glid.GLID {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
 	var ids []glid.GLID
@@ -265,7 +265,7 @@ func (r *primaryTierRegistry) ListVaults() []glid.GLID {
 	return ids
 }
 
-func (r *primaryTierRegistry) ChunkManager(key glid.GLID) chunk.ChunkManager {
+func (r *leaderTierRegistry) ChunkManager(key glid.GLID) chunk.ChunkManager {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
 	for _, v := range r.o.vaults {
@@ -281,7 +281,7 @@ func (r *primaryTierRegistry) ChunkManager(key glid.GLID) chunk.ChunkManager {
 	return nil
 }
 
-func (r *primaryTierRegistry) IndexManager(key glid.GLID) index.IndexManager {
+func (r *leaderTierRegistry) IndexManager(key glid.GLID) index.IndexManager {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
 	for _, v := range r.o.vaults {
@@ -297,26 +297,26 @@ func (r *primaryTierRegistry) IndexManager(key glid.GLID) index.IndexManager {
 	return nil
 }
 
-func (r *primaryTierRegistry) QueryEngine(_ glid.GLID) *query.Engine { return nil }
+func (r *leaderTierRegistry) QueryEngine(_ glid.GLID) *query.Engine { return nil }
 
-// PrimaryTierQueryEngineForVault returns a query engine scoped to leader
+// LeaderTierQueryEngineForVault returns a query engine scoped to leader
 // tiers of a single vault. Used by ForwardSearch — the vault is already
 // selected, no vault_id= filtering needed.
-func (o *Orchestrator) PrimaryTierQueryEngineForVault(vaultID glid.GLID) (*query.Engine, error) {
+func (o *Orchestrator) LeaderTierQueryEngineForVault(vaultID glid.GLID) (*query.Engine, error) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	v := o.vaults[vaultID]
 	if err := vaultReplicationReadinessErr(vaultID, v); err != nil {
 		return nil, err
 	}
-	var primary []*TierInstance
+	var leaders []*TierInstance
 	for _, t := range v.Tiers {
 		if !t.IsFollower && t.Query != nil {
-			primary = append(primary, t)
+			leaders = append(leaders, t)
 		}
 	}
-	if len(primary) == 0 {
+	if len(leaders) == 0 {
 		return nil, nil
 	}
-	return query.NewWithRegistry(&tierRegistry{tiers: primary}, o.logger), nil
+	return query.NewWithRegistry(&tierRegistry{tiers: leaders}, o.logger), nil
 }

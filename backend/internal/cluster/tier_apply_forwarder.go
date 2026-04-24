@@ -16,55 +16,36 @@ import (
 // ErrNoRaftLeader is returned when the target Raft group has no elected leader.
 var ErrNoRaftLeader = errors.New("no raft leader")
 
-// TierApplyForwarder applies commands to a Raft group (historically tier-only).
-// If this node is the leader, it applies locally; otherwise it forwards via
-// ForwardTierApply. Use NewVaultCtlTierApplyForwarder for vault ctl + OpTierFSM.
+// TierApplyForwarder applies tier FSM commands to the vault control-plane
+// Raft group. Every payload is wrapped as a vaultraft OpTierFSM entry
+// keyed by tier ID. If this node is the vault-ctl Raft leader, Apply
+// runs locally; otherwise it forwards via ForwardTierApply RPC to the
+// current leader. Constructed via NewVaultCtlTierApplyForwarder.
 type TierApplyForwarder struct {
-	raft    *hraft.Raft
-	groupID string
-	peers   *PeerConns
-	timeout time.Duration
-	// xform, when non-nil, maps a tierfsm wire payload to the bytes passed to
-	// Raft.Apply / ForwardTierApply (e.g. vault OpTierFSM wrapper).
-	xform func([]byte) []byte
+	raft            *hraft.Raft
+	vaultCtlGroupID string
+	tierID          glid.GLID
+	peers           *PeerConns
+	timeout         time.Duration
 }
 
-// NewTierApplyForwarder creates a forwarder for a specific multiraft group (tests and generic forwarding).
-func NewTierApplyForwarder(r *hraft.Raft, groupID string, peers *PeerConns, timeout time.Duration) *TierApplyForwarder {
-	return &TierApplyForwarder{
-		raft:    r,
-		groupID: groupID,
-		peers:   peers,
-		timeout: timeout,
-	}
-}
-
-// NewVaultCtlTierApplyForwarder creates a forwarder that applies tierfsm commands
-// to the vault control-plane Raft group, wrapping each payload with
-// OpTierFSM + tier ID. ForwardTierApply uses the vault ctl group_id.
+// NewVaultCtlTierApplyForwarder creates a forwarder that applies tierfsm
+// commands to the vault control-plane Raft group, wrapping each payload
+// with OpTierFSM + tier ID. ForwardTierApply uses the vault ctl group_id.
 func NewVaultCtlTierApplyForwarder(r *hraft.Raft, vaultCtlGroupID string, tierID glid.GLID, peers *PeerConns, timeout time.Duration) *TierApplyForwarder {
 	return &TierApplyForwarder{
-		raft:    r,
-		groupID: vaultCtlGroupID,
-		peers:   peers,
-		timeout: timeout,
-		xform: func(p []byte) []byte {
-			return vaultraft.MarshalTierCommand(tierID, p)
-		},
+		raft:            r,
+		vaultCtlGroupID: vaultCtlGroupID,
+		tierID:          tierID,
+		peers:           peers,
+		timeout:         timeout,
 	}
-}
-
-func (f *TierApplyForwarder) wirePayload(data []byte) []byte {
-	if f.xform != nil {
-		return f.xform(data)
-	}
-	return data
 }
 
 // Apply applies a tier FSM command. Tries locally first; forwards to the
-// Raft leader on ErrNotLeader.
+// vault-ctl Raft leader on ErrNotLeader.
 func (f *TierApplyForwarder) Apply(data []byte) error {
-	payload := f.wirePayload(data)
+	payload := vaultraft.MarshalTierCommand(f.tierID, data)
 	future := f.raft.Apply(payload, f.timeout)
 	if err := future.Error(); err != nil {
 		if errors.Is(err, hraft.ErrNotLeader) {
@@ -90,7 +71,7 @@ func (f *TierApplyForwarder) forwardToLeader(data []byte) error {
 	defer cancel()
 
 	req := &gastrologv1.ForwardTierApplyRequest{
-		GroupId: []byte(f.groupID),
+		GroupId: []byte(f.vaultCtlGroupID),
 		Command: data,
 	}
 	resp := &gastrologv1.ForwardTierApplyResponse{}

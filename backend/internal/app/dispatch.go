@@ -494,7 +494,7 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID glid.GLID) 
 	// each firing its own CmdPutTier. Building the tier locally on a partial
 	// placement state is wrong for two reasons: (1) we can't reliably answer
 	// "does this tier belong here" with incomplete placements, and (2) it
-	// would create the chunk manager (and tier Raft group) with a wrong-size
+	// would create the chunk manager (and vault-ctl Raft group) with a wrong-size
 	// member list, which then persists in boltdb.
 	//
 	// Policy reloads (rotation/retention) still run below because they are
@@ -554,7 +554,7 @@ func (d *configDispatcher) applyTierMembershipChange(ctx context.Context, v syst
 		return
 	}
 
-	// Every node participates in every tier Raft group (gastrolog-292yi),
+	// Every node participates in every vault-ctl Raft group (gastrolog-292yi),
 	// whether or not it has a storage placement for this tier. Non-storage
 	// nodes still need to join as voters — without that, a tier with RF
 	// smaller than the cluster size can't reach quorum because most nodes

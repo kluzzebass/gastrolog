@@ -403,9 +403,9 @@ func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *g
 		return nil, fmt.Errorf("invalid vault_id: empty or too short")
 	}
 
-	// Match production behavior: only search primary tiers on this node.
-	// Production ForwardSearch uses PrimaryTierQueryEngineForVault.
-	eng, engErr := orch.PrimaryTierQueryEngineForVault(vaultID)
+	// Match production behavior: only search leader tiers on this node.
+	// Production ForwardSearch uses LeaderTierQueryEngineForVault.
+	eng, engErr := orch.LeaderTierQueryEngineForVault(vaultID)
 	if engErr != nil {
 		return nil, engErr
 	}
@@ -484,8 +484,8 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 		return recCh, nil, nil, errCh, func() []byte { return nil }
 	}
 
-	// Match production behavior: only search primary tiers on this node.
-	eng, engErr := orch.PrimaryTierQueryEngineForVault(vaultID)
+	// Match production behavior: only search leader tiers on this node.
+	eng, engErr := orch.LeaderTierQueryEngineForVault(vaultID)
 	if engErr != nil {
 		errCh <- engErr
 		close(recCh)

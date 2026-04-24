@@ -96,7 +96,7 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, tierID glid
 		return fmt.Errorf("list chunks: %w", err)
 	}
 
-	// Snapshot the tier Raft FSM manifest at the start of the catchup pass.
+	// Snapshot the tier FSM manifest at the start of the catchup pass.
 	// We use it to filter out chunks that have already been retired from the
 	// cluster's view of the data — there's a race window between the FSM
 	// applying a DeleteChunk and the leader's local file actually being

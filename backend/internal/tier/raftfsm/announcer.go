@@ -9,7 +9,7 @@ import (
 )
 
 // Applier applies pre-marshaled tier FSM commands. Implementations handle
-// local application and forwarding to the tier Raft leader as needed.
+// local application and forwarding to the vault-ctl Raft leader as needed.
 type Applier interface {
 	Apply(data []byte) error
 }
@@ -23,7 +23,7 @@ type Applier interface {
 // every apply call before touching the Applier. This prevents the
 // "chunk metadata announce failed: raft is already shutdown" warnings
 // that fire when the orchestrator's drain queues a last-minute chunk
-// event after the local tier Raft has been torn down. The tier FSM's
+// event after the local vault-ctl Raft has been torn down. The tier FSM's
 // reconcile-on-load pass covers any missed announces on the next
 // startup. See gastrolog-1e5ke.
 type Announcer struct {
