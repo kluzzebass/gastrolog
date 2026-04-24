@@ -96,6 +96,15 @@ const (
 	requestPreVoteRPCTimeout  = 2 * time.Second
 	timeoutNowRPCTimeout      = 2 * time.Second
 	installSnapshotRPCTimeout = 5 * time.Minute // bulk transfer; bounded by chunk/snapshot size
+
+	// pipelineIdleTimeout caps the life of a single AppendEntries pipeline
+	// stream. A paused peer can keep its TCP socket open but stop reading;
+	// SendMsg on the leader fills the TCP window, then blocks. Without a
+	// deadline, that stream goroutine hangs until TCP keepalive (minutes).
+	// 30s is long enough that a healthy peer never hits it during normal
+	// operation, short enough that a frozen peer recovers via fallback to
+	// non-pipelined replication quickly.
+	pipelineIdleTimeout = 30 * time.Second
 )
 
 func (c *multiRaftClient) AppendEntries(ctx context.Context, req *gastrologv1.MultiRaftAppendEntriesRequest) (*gastrologv1.MultiRaftAppendEntriesResponse, error) {
@@ -511,12 +520,12 @@ func (g *groupTransport[K]) AppendEntriesPipeline(id raft.ServerID, target raft.
 	if err != nil {
 		return nil, err
 	}
-	// Pipelined AppendEntries is a long-lived stream; per-RPC deadlines
-	// don't fit. Per-message stalls against a paused peer surface via
-	// stream.SendMsg returning the cancellation from pipelineAPI.Close /
-	// the Raft layer aborting the pipeline on heartbeat timeout. Use
-	// Background explicitly (not TODO) to document intent.
-	ctx, cancel := context.WithCancel(context.Background())
+	// Pipelined AppendEntries is a long-lived stream, but we still bound
+	// it so a paused peer (TCP up, application frozen) can't keep the
+	// stream "alive" forever. hraft will open a fresh pipeline after the
+	// deadline expires; the peer just falls back to non-pipelined
+	// replication until it recovers. See gastrolog-5oofa.
+	ctx, cancel := context.WithTimeout(context.Background(), pipelineIdleTimeout)
 	stream, err := c.AppendEntriesPipeline(ctx)
 	if err != nil {
 		cancel()
