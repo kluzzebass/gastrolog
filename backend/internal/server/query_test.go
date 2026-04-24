@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
@@ -438,6 +439,96 @@ func TestGetFieldsClampsMaxSamples(t *testing.T) {
 	}
 	// With only 5 records, we won't hit the default cap — just verify it returns.
 	_ = resp.Msg
+}
+
+// TestGetFields_InvalidUTF8InRaw_Marshals is the regression for
+// gastrolog-1uh5h. Before the fix, any record whose raw body yielded an
+// extractable KV with invalid-UTF-8 bytes caused GetFields to fail with
+// "proto: field gastrolog.v1.FieldValue.value contains invalid UTF-8".
+// After the fix, the value is sanitized (replacement char substituted)
+// and the response marshals cleanly.
+func TestGetFields_InvalidUTF8InRaw_Marshals(t *testing.T) {
+	t.Parallel()
+
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := memtest.MustNewVault(t, chunkmem.Config{
+		RotationPolicy: chunk.NewRecordCountPolicy(1000),
+	})
+
+	t0 := time.Now()
+
+	// Raw body with an invalid UTF-8 byte (0xff is never a valid start
+	// byte) embedded in the logfmt-extractable value. CombinedExtract
+	// will surface `host=\xff\xfe...` as a KV pair, which used to blow
+	// up proto marshal.
+	rawInvalid := append([]byte(`level=error host=`), 0xff, 0xfe, 0xfd)
+	rawInvalid = append(rawInvalid, []byte(` port=5432`)...)
+	s.CM.Append(chunk.Record{
+		IngestTS: t0,
+		Attrs:    chunk.Attributes{"source": "app1"},
+		Raw:      rawInvalid,
+	})
+	// Also a record with invalid UTF-8 in Attrs value — structured
+	// attrs aren't guaranteed clean either.
+	s.CM.Append(chunk.Record{
+		IngestTS: t0.Add(time.Second),
+		Attrs:    chunk.Attributes{"source": "app2", "host": string([]byte{'w', 0xff, 'b'})},
+		Raw:      []byte(`level=info msg="ok"`),
+	})
+
+	defaultID := glid.New()
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
+
+	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
+	handler := srv.Handler()
+
+	httpClient := &http.Client{
+		Transport: &embeddedTransport{handler: handler},
+	}
+	client := gastrologv1connect.NewQueryServiceClient(httpClient, "http://embedded")
+
+	resp, err := client.GetFields(context.Background(), connect.NewRequest(&gastrologv1.GetFieldsRequest{
+		Expression: "reverse=true",
+	}))
+	if err != nil {
+		t.Fatalf("GetFields failed (proto marshal regression?): %v", err)
+	}
+
+	// Find the `host` attr field — its value came from an invalid-byte
+	// Attrs source — and verify it's valid UTF-8 with a replacement
+	// char substituted.
+	var sawHost bool
+	for _, fi := range resp.Msg.AttrFields {
+		if fi.Key != "host" {
+			continue
+		}
+		sawHost = true
+		for _, v := range fi.TopValues {
+			if !utf8.ValidString(v.Value) {
+				t.Errorf("AttrFields[host] value %q is not valid UTF-8", v.Value)
+			}
+		}
+	}
+	if !sawHost {
+		t.Fatal("expected a 'host' attr field from the fixture records")
+	}
+
+	// KV-extracted fields — sanitized at aggregator, so every key and
+	// every top value must be valid UTF-8.
+	for _, fi := range resp.Msg.KvFields {
+		if !utf8.ValidString(fi.Key) {
+			t.Errorf("KvFields key %q is not valid UTF-8", fi.Key)
+		}
+		for _, v := range fi.TopValues {
+			if !utf8.ValidString(v.Value) {
+				t.Errorf("KvFields[%s] value %q is not valid UTF-8", fi.Key, v.Value)
+			}
+		}
+	}
 }
 
 func TestGetFieldsInvalidExpression(t *testing.T) {

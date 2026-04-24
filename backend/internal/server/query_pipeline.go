@@ -11,6 +11,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/query"
 	"gastrolog/internal/querylang"
+	"gastrolog/internal/safeutf8"
 )
 
 // searchPipeline handles pipelines that require full materialization
@@ -323,7 +324,7 @@ func PipelineStepsToProto(steps []query.PipelineStep) []*apiv1.PipelineStep {
 func tableResultToProto(result *query.TableResult, pipeline *querylang.Pipeline) *apiv1.TableResult {
 	rows := make([]*apiv1.TableRow, len(result.Rows))
 	for i, row := range result.Rows {
-		rows[i] = &apiv1.TableRow{Values: row}
+		rows[i] = &apiv1.TableRow{Values: safeutf8.Strings(row)}
 	}
 
 	// Determine result type from pipeline: timeseries if bin() or timechart
@@ -371,7 +372,7 @@ func tableResultToProto(result *query.TableResult, pipeline *querylang.Pipeline)
 	}
 
 	return &apiv1.TableResult{
-		Columns:    result.Columns,
+		Columns:    safeutf8.Strings(result.Columns),
 		Rows:       rows,
 		Truncated:  result.Truncated,
 		ResultType: resultType,

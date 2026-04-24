@@ -7,6 +7,7 @@ import (
 	"connectrpc.com/connect"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/safeutf8"
 	"gastrolog/internal/tokenizer"
 )
 
@@ -103,6 +104,12 @@ func newFieldAggregator() *fieldAggregator {
 }
 
 func (a *fieldAggregator) add(key, value string) {
+	// Sanitize at aggregation time so proto marshal can't fail, and so
+	// records whose raw bodies differ only in an invalid byte sequence
+	// collapse into one entry rather than appearing as N distinct
+	// fields after the replacement character is substituted.
+	key = safeutf8.String(key)
+	value = safeutf8.String(value)
 	e := a.keys[key]
 	if e == nil {
 		e = &fieldEntry{values: make(map[string]int)}

@@ -15,6 +15,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/query"
 	"gastrolog/internal/querylang"
+	"gastrolog/internal/safeutf8"
 )
 
 // protoToQuery converts a proto Query to the internal query.Query type.
@@ -245,7 +246,7 @@ func recordToProto(rec chunk.Record) *apiv1.Record {
 	r := &apiv1.Record{
 		IngestTs:   timestamppb.New(rec.IngestTS),
 		WriteTs:    timestamppb.New(rec.WriteTS),
-		Attrs:      rec.Attrs,
+		Attrs:      safeutf8.Attrs(rec.Attrs),
 		Raw:        rec.Raw,
 		IngestSeq:  rec.EventID.IngestSeq,
 		IngesterId: rec.EventID.IngesterID[:],
