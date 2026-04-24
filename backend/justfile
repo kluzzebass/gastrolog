@@ -59,6 +59,33 @@ gen:
 test *args:
   go test ./... {{args}}
 
+# Runs the reliability-matrix tests: vaultraft FSM scenarios, orchestrator-
+# backed end-to-end scenarios, and the targeted 5oofa regressions. Use
+# before cutting a release or after any change to orchestrator / cluster
+# / multiraft / vaultraft. Each scenario exercises a different failure
+# axis (pause, slow, restart, wipe, partition, leader kill, stress).
+test-reliability *args:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "=== vaultraft reliability matrix ==="
+  go test -run 'TestReliability_' -count=1 -timeout 300s ./internal/vaultraft/ {{args}}
+  echo "=== orchestrator-backed reliability matrix ==="
+  go test -run 'TestOrchRel_' -count=1 -timeout 600s ./internal/orchestrator/ {{args}}
+  echo "=== 5oofa lock + ctx regressions ==="
+  go test -run 'TestReliability_Ingest_|TestRunWithCtx_' -count=1 -timeout 60s ./internal/orchestrator/ ./internal/cluster/ {{args}}
+
+# Runs the reliability-matrix tests multiple times to catch flakes.
+# Count defaults to 5 — override with COUNT=10 etc.
+test-reliability-flake COUNT='5':
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "=== vaultraft reliability matrix ({{COUNT}}x) ==="
+  go test -run 'TestReliability_' -count={{COUNT}} -timeout 600s ./internal/vaultraft/
+  echo "=== orchestrator reliability matrix ({{COUNT}}x) ==="
+  # Budget: ~5s per test × 11 tests × {{COUNT}} iterations × 2x safety = ~110s per iteration.
+  # Default 1800s covers 5x comfortably; bump if COUNT is large.
+  go test -run 'TestOrchRel_' -count={{COUNT}} -timeout 1800s ./internal/orchestrator/ -parallel 4
+
 # Lints Go code (cognitive complexity, cyclomatic complexity, gocritic).
 lint:
   golangci-lint run ./...

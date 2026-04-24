@@ -210,6 +210,14 @@ type Server struct {
 	// is a no-op. See gastrolog-5oofa / gastrolog-5ff7z.
 	pauseMu   sync.Mutex
 	pauseGate chan struct{}
+
+	// slowDown, when > 0, adds an artificial sleep before dispatching
+	// each handler. Distinct from Pause: responses still return, just
+	// slowly. Used by reliability tests to catch perf-sensitive
+	// regressions (backoff tuning, timeout miscalibration) that don't
+	// surface under Pause's full stop. Zero duration = no effect.
+	slowMu  sync.Mutex
+	slowDur time.Duration
 }
 
 // ForwardedReceived returns the number of records received via ForwardRecords RPCs.
@@ -508,6 +516,9 @@ func (s *Server) pauseUnaryInterceptor(ctx context.Context, req any, info *grpc.
 	if err := s.awaitPauseRelease(ctx); err != nil {
 		return nil, err
 	}
+	if err := s.awaitSlowDown(ctx); err != nil {
+		return nil, err
+	}
 	return handler(ctx, req)
 }
 
@@ -516,7 +527,42 @@ func (s *Server) pauseStreamInterceptor(srv any, ss grpc.ServerStream, info *grp
 	if err := s.awaitPauseRelease(ss.Context()); err != nil {
 		return err
 	}
+	if err := s.awaitSlowDown(ss.Context()); err != nil {
+		return err
+	}
 	return handler(srv, ss)
+}
+
+// SlowDown configures a per-handler artificial latency. Every subsequent
+// gRPC call on this server sleeps for d before dispatching to its
+// handler. d=0 disables the effect. Used by reliability tests to catch
+// regressions that surface under slowness but not full stop. Production
+// never calls this.
+func (s *Server) SlowDown(d time.Duration) {
+	s.slowMu.Lock()
+	s.slowDur = d
+	s.slowMu.Unlock()
+}
+
+// awaitSlowDown sleeps for the configured slow-down duration, honoring
+// ctx cancellation. Returns nil if no slow-down is set.
+func (s *Server) awaitSlowDown(ctx context.Context) error {
+	s.slowMu.Lock()
+	d := s.slowDur
+	s.slowMu.Unlock()
+	if d <= 0 {
+		return nil
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.stopCtx.Done():
+		return errShuttingDown
+	}
 }
 
 // Start creates the gRPC server, registers all services, and begins serving.

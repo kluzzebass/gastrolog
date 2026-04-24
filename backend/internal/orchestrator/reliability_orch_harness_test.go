@@ -386,6 +386,19 @@ func (h *orchRelHarness) unpausePeer(id string) {
 	n.clusterSrv.Unpause()
 }
 
+// slowPeer adds per-handler latency to an otherwise-healthy peer.
+// d=0 clears the slow-down. Use for scenarios that need slow-but-not-
+// stopped behavior (e.g. verifying backoff + retry paths when a peer
+// responds but misses the tight deadline).
+func (h *orchRelHarness) slowPeer(id string, d time.Duration) {
+	h.t.Helper()
+	n := h.nodes[id]
+	if n == nil || n.clusterSrv == nil {
+		h.t.Fatalf("slowPeer: node %s not running", id)
+	}
+	n.clusterSrv.SlowDown(d)
+}
+
 // waitForAllReady blocks until every live node reports
 // LocalVaultsReplicationReady == true. This is the actual gate search and
 // ingest RPCs use — regressing it is what gastrolog-5j6eu fixed.
