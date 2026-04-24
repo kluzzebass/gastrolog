@@ -51,7 +51,7 @@ type retentionRule struct {
 }
 
 // retentionRunner holds per-tier-instance state that persists across sweeps.
-// Only primaries get runners — secondaries react to the tier FSM manifest
+// Only leaders get runners — followers react to the tier FSM manifest
 // via the ChunkFSM.OnDelete callback.
 type retentionRunner struct {
 	mu      sync.Mutex
@@ -70,7 +70,7 @@ type retentionRunner struct {
 	orch         *Orchestrator          // for eject/transition callbacks
 
 	// applyRaftDelete applies CmdDeleteChunk to vault-ctl Raft before local
-	// deletion, so secondaries learn about it via the manifest. Nil in
+	// deletion, so followers learn about it via the manifest. Nil in
 	// single-node / memory mode — local delete proceeds without Raft.
 	applyRaftDelete             func(id chunk.ChunkID) error
 	applyRaftRetentionPending   func(id chunk.ChunkID) error
@@ -408,7 +408,7 @@ func tierPositionInVault(cfg *system.Config, vaultID, tierID glid.GLID) int {
 }
 
 // reconcileFollower compares on-disk chunks against the tier FSM manifest
-// and deletes any sealed chunks that the primary has removed. This is the
+// and deletes any sealed chunks that the leader has removed. This is the
 // fallback for cases where OnDelete didn't fire (snapshot restore, startup,
 // Raft connectivity gaps).
 //
@@ -468,7 +468,7 @@ func (o *Orchestrator) reconcileTierDiskAgainstManifest(tier *TierInstance, now 
 	}
 }
 
-// sweep evaluates retention rules on a primary and applies expire/eject/transition.
+// sweep evaluates retention rules on a leader and applies expire/eject/transition.
 func (r *retentionRunner) sweep(rules []retentionRule) {
 	// Only the config placement leader runs retention. Raft applies are
 	// forwarded transparently to the Raft leader via TierApplyForwarder.
@@ -706,7 +706,7 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID) {
 // follower. In cluster mode this is redundant with the FSM OnDelete cascade
 // (which already deleted the chunk everywhere), so "chunk not found" responses
 // are logged at debug only. In single-node / pre-cascade mode the forward is
-// the primary deletion mechanism for followers and any error is a real failure.
+// the only deletion mechanism for followers and any error is a real failure.
 func (r *retentionRunner) forwardDeletionToFollowers(id chunk.ChunkID, _ bool) {
 	for _, target := range r.followerTargets {
 		if target.NodeID == r.orch.localNodeID {

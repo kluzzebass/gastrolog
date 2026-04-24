@@ -14,8 +14,8 @@ import (
 	sysmem "gastrolog/internal/system/memory"
 )
 
-// primaryPlacement creates a Placements slice with a single primary using a synthetic storage ID.
-func primaryPlacement(nodeID string) []system.TierPlacement {
+// leaderPlacement creates a Placements slice with a single leader using a synthetic storage ID.
+func leaderPlacement(nodeID string) []system.TierPlacement {
 	return []system.TierPlacement{{StorageID: system.SyntheticStorageID(nodeID), Leader: true}}
 }
 
@@ -730,7 +730,7 @@ func TestNodeHasStorageClass(t *testing.T) {
 	}
 }
 
-// ---------- Replication / secondary placement ----------
+// ---------- Replication / follower placement ----------
 
 func TestPlacementRF2AssignsSecondary(t *testing.T) {
 	t.Parallel()

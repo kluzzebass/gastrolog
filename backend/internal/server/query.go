@@ -79,7 +79,7 @@ func (s *QueryServer) Search(
 		defer cancel()
 	}
 
-	eng := s.orch.PrimaryTierQueryEngine()
+	eng := s.orch.LeaderTierQueryEngine()
 	if s.lookupResolver != nil {
 		eng.SetLookupResolver(s.lookupResolver)
 	}

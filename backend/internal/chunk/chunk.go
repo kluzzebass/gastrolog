@@ -102,7 +102,7 @@ type ChunkManager interface {
 	ScanAttrs(id ChunkID, startPos uint64, fn func(writeTS time.Time, attrs Attributes) bool) error
 
 	// SetNextChunkID sets the ID for the next active chunk created by openLocked.
-	// Used by secondaries to match the primary's chunk ID during replication.
+	// Used by followers to match the leader's chunk ID during replication.
 	// Consumed on next open — subsequent opens revert to NewChunkID().
 	SetNextChunkID(id ChunkID)
 

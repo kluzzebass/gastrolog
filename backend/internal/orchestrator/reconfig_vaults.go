@@ -515,7 +515,7 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID glid.
 
 	var ti *TierInstance
 	if isLeader {
-		t, err := o.buildPrimaryTierInstance(sys, *vaultCfg, tierCfg, factories)
+		t, err := o.buildLeaderTierInstance(sys, *vaultCfg, tierCfg, factories)
 		if err != nil {
 			return fmt.Errorf("build tier %s: %w", tierID, err)
 		}
@@ -676,7 +676,7 @@ func (o *Orchestrator) buildTierInstances(sys *system.System, vaultCfg system.Va
 		}
 
 		if isLeader {
-			ti, err := o.buildPrimaryTierInstance(sys, vaultCfg, tierCfg, factories)
+			ti, err := o.buildLeaderTierInstance(sys, vaultCfg, tierCfg, factories)
 			if err != nil {
 				o.alertTierInitFailed(tierID, tierCfg.Name, err)
 				continue
@@ -726,10 +726,10 @@ func (o *Orchestrator) alertTierInitFailed(tierID glid.GLID, tierName string, er
 	}
 }
 
-// buildPrimaryTierInstance creates the leader TierInstance using the placement's
+// buildLeaderTierInstance creates the leader TierInstance using the placement's
 // storage ID. This avoids directory collisions with same-node follower placements
 // that would occur if findLocalFileStorage picked a different storage by class.
-func (o *Orchestrator) buildPrimaryTierInstance(sys *system.System, vaultCfg system.VaultConfig, tierCfg *system.TierConfig, factories Factories) (*TierInstance, error) {
+func (o *Orchestrator) buildLeaderTierInstance(sys *system.System, vaultCfg system.VaultConfig, tierCfg *system.TierConfig, factories Factories) (*TierInstance, error) {
 	rt := &sys.Runtime
 	storageID := system.LeaderStorageID(rt.TierPlacements[tierCfg.ID])
 	if storageID != "" && !strings.HasPrefix(storageID, system.SyntheticStoragePrefix) {

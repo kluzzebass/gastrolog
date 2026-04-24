@@ -25,7 +25,7 @@ type RecordAppender func(ctx context.Context, vaultID glid.GLID, rec chunk.Recor
 
 // RecordTierAppender appends a single record to a specific tier in a local vault.
 // Used by the ForwardRecords handler when tier_id is set (inter-tier transition).
-type RecordTierAppender func(ctx context.Context, vaultID, tierID glid.GLID, primaryChunkID chunk.ChunkID, rec chunk.Record) error
+type RecordTierAppender func(ctx context.Context, vaultID, tierID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error
 
 // SearchExecutor runs a search on a local vault and returns results.
 // For regular searches, it returns an iterator over records (the caller
@@ -452,7 +452,7 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 		})
 	}
 
-	// No results (vault has no primary tiers on this node).
+	// No results (vault has no leader tiers on this node).
 	if searchIter == nil {
 		return stream.SendMsg(&gastrologv1.ForwardSearchResponse{Histogram: histogram})
 	}
@@ -464,7 +464,7 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 	for rec, iterErr := range searchIter {
 		if iterErr != nil {
 			// EOF can occur when a chunk is deleted mid-read (e.g., ImportToTier
-			// replacing a forwarded-record chunk on a secondary). Treat as
+			// replacing a forwarded-record chunk on a follower). Treat as
 			// end-of-results — the data is still available via retry.
 			if errors.Is(iterErr, io.EOF) || isMissingLocalChunkFileError(iterErr) {
 				break

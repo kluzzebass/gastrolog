@@ -194,7 +194,7 @@ func TestIngestNoForwarderSkipsRemote(t *testing.T) {
 // TestReloadFiltersIncludesRemoteWhenForwarderSet and
 // TestRebuildFilterSetPreservesRemoteFilters were removed: they tested the
 // concept of NodeID-based remote vault filters which no longer exists.
-// Remote vault routing will be reintroduced via tier primary election.
+// Remote vault routing will be reintroduced via tier leader election.
 
 // noopChunkManager satisfies the ChunkManager interface for tests
 // that only need the ingest path (no actual storage).

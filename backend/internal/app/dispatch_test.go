@@ -289,7 +289,7 @@ func TestHandle_VaultPut(t *testing.T) {
 	// remote_node_reloads_filters and cloud_vault_reassignment_skips_drain
 	// were removed: they tested the concept of NodeID-based remote vault
 	// assignment which no longer exists. Remote vault routing will be
-	// reintroduced via tier primary election in a future issue.
+	// reintroduced via tier leader election in a future issue.
 
 	t.Run("unscoped_node_not_skipped", func(t *testing.T) {
 		h := &captureHandler{}

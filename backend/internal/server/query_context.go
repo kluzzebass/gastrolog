@@ -111,7 +111,7 @@ func (s *QueryServer) readAnchor(ctx context.Context, vaultID glid.GLID, chunkID
 		return exportToRecord(resp.Anchor), nil
 	}
 
-	eng := s.orch.PrimaryTierQueryEngine()
+	eng := s.orch.LeaderTierQueryEngine()
 	anchor, err := eng.ReadRecord(ctx, vaultID, chunkID, pos)
 	if err != nil {
 		// Chunk may have been deleted by retention between search and context read.
@@ -132,7 +132,7 @@ func (s *QueryServer) searchContext(
 	n int,
 	isAnchor func(*apiv1.Record) bool,
 ) ([]*apiv1.Record, error) {
-	eng := s.orch.PrimaryTierQueryEngine()
+	eng := s.orch.LeaderTierQueryEngine()
 	localIter, _ := eng.Search(ctx, q, nil)
 	remoteIter, _, _ := s.collectRemote(ctx, q, nil)
 

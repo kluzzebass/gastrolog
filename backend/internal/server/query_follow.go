@@ -27,7 +27,7 @@ func (s *QueryServer) Follow(
 		defer cancel()
 	}
 
-	eng := s.orch.PrimaryTierQueryEngine()
+	eng := s.orch.LeaderTierQueryEngine()
 
 	q, pipeline, err := protoToQuery(req.Msg.Query)
 	if err != nil {

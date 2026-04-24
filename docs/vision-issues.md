@@ -19,10 +19,10 @@ The foundation that most other epics depend on. Must be built first.
 | 1.7 | GCS tier backend | 1.6 | Tiered Storage: tier types |
 | 1.8 | R2 tier backend | 1.6 | Tiered Storage: tier types |
 | 1.9 | Archival tier backend (Glacier/Archive storage class transitions) | 1.6 | Tiered Storage: tier types |
-| 1.10 | Per-tier primary election | 1.3 | Tiered Storage: per-tier primary nodes |
-| 1.11 | Memory tier replication (write-mirror to secondary) | 1.4, 1.10 | Tiered Storage: replication |
-| 1.12 | Local SSD tier replication (sealed chunk copy to secondary) | 1.5, 1.10 | Tiered Storage: replication |
-| 1.13 | Inter-tier record streaming (primary-to-primary) | 1.10 | Tiered Storage: inter-tier record streaming |
+| 1.10 | Per-tier leader election | 1.3 | Tiered Storage: per-tier leader nodes |
+| 1.11 | Memory tier replication (write-mirror to follower) | 1.4, 1.10 | Tiered Storage: replication |
+| 1.12 | Local SSD tier replication (sealed chunk copy to follower) | 1.5, 1.10 | Tiered Storage: replication |
+| 1.13 | Inter-tier record streaming (leader-to-leader) | 1.10 | Tiered Storage: inter-tier record streaming |
 | 1.14 | Durability handoff protocol (durable ack before source tier drops chunk) | 1.13 | Tiered Storage: durability handoff |
 | 1.15 | Time-based tier transition policy | 1.13 | Tiered Storage: tier transitions |
 | 1.16 | Size-based tier transition policy | 1.13 | Tiered Storage: tier transitions |
@@ -36,9 +36,9 @@ The foundation that most other epics depend on. Must be built first.
 
 **Contradictions / risks:**
 
-- **1.14 + replication timing**: The durability handoff requires waiting for replication ack before the source tier drops a chunk. If the destination tier's secondaries are slow or unreachable, this blocks the source tier's retention from running. Need a policy for what happens when the ack is delayed — does the source tier hold indefinitely, or is there a timeout with data loss acceptance?
-- **1.10 + "no primary node" principle**: Per-tier primaries reintroduce the concept of a node "owning" a responsibility. The CLAUDE.md states "there is no primary node." The distinction is that tier primaries are per-tier-per-vault (fine-grained, dynamic, redistributable), not per-node. But the tension should be acknowledged — this is a deliberate, scoped exception to the general principle.
-- **1.6 active chunk locality**: Cloud tier active chunks live on the tier primary's local disk. If the primary dies before sealing, the active chunk is lost. This is the same risk as the memory tier, but for cloud tiers it's less obvious since the expectation is "my data is in S3." The durability handoff (1.14) mitigates this for data from previous tiers, but records that arrived directly into the cloud tier's active chunk are at risk until sealed and uploaded.
+- **1.14 + replication timing**: The durability handoff requires waiting for replication ack before the source tier drops a chunk. If the destination tier's followers are slow or unreachable, this blocks the source tier's retention from running. Need a policy for what happens when the ack is delayed — does the source tier hold indefinitely, or is there a timeout with data loss acceptance?
+- **1.10 + "no cluster-wide authority" principle**: Per-tier leaders reintroduce the concept of a node "owning" a responsibility. CLAUDE.md states "no node has cluster-wide authority." The distinction is that tier leaders are per-tier-per-vault (fine-grained, dynamic, redistributable), not per-node. But the tension should be acknowledged — this is a deliberate, scoped exception to the general principle.
+- **1.6 active chunk locality**: Cloud tier active chunks live on the tier leader's local disk. If the leader dies before sealing, the active chunk is lost. This is the same risk as the memory tier, but for cloud tiers it's less obvious since the expectation is "my data is in S3." The durability handoff (1.14) mitigates this for data from previous tiers, but records that arrived directly into the cloud tier's active chunk are at risk until sealed and uploaded.
 
 ---
 
@@ -146,7 +146,7 @@ The foundation that most other epics depend on. Must be built first.
 
 **Contradictions / risks:**
 
-- **7.6 + per-tier primaries (1.10)**: If a vault has a data residency constraint (EU only), all tier primaries for that vault must be on EU nodes. The tier primary election (1.10) must be residency-aware. If no EU nodes are available, the vault can't accept writes — need to define this failure mode.
+- **7.6 + per-tier leaders (1.10)**: If a vault has a data residency constraint (EU only), all tier leaders for that vault must be on EU nodes. The tier leader election (1.10) must be residency-aware. If no EU nodes are available, the vault can't accept writes — need to define this failure mode.
 
 ---
 
@@ -186,7 +186,7 @@ The foundation that most other epics depend on. Must be built first.
 
 | # | Issue | Depends on | Vision section |
 |---|-------|-----------|----------------|
-| 10.1 | Automatic tier primary re-election on node failure | 1.10 | Self-Healing: graceful degradation |
+| 10.1 | Automatic tier leader re-election on node failure | 1.10 | Self-Healing: graceful degradation |
 | 10.2 | Automatic vault rebalancing on node join/leave | 1.10 | Self-Healing: automatic vault rebalancing |
 | 10.3 | Storage pressure detection and automatic tier demotion | 1.15, 1.16 | Self-Healing: storage pressure management |
 | 10.4 | Partial-data query response (answer with available data, indicate gaps) | 1.19 | Self-Healing: graceful degradation |
@@ -227,9 +227,9 @@ Key dependencies that span epics:
 | 5.6 (investigation model) | — | **Keystone**: collaboration (6.4, 6.5), CLI shared state (11.4), and handoff all build on this |
 | 7.1 (purge) | 1.3 (tier interface) | Must purge across all tiers |
 | 7.3 (field masking) | 2.13 (route pipeline engine) | Masking/redaction is a pipeline stage |
-| 7.6 (data residency) | 1.10 (per-tier primaries) | Primary election must be residency-aware |
+| 7.6 (data residency) | 1.10 (per-tier leaders) | Leader election must be residency-aware |
 | 9.5 (tenant routing) | 2.8 (route-by-field) | Tenant identification is a routing decision |
-| 10.1–10.3 (self-healing) | 1.10 (per-tier primaries) | Healing requires re-election and rebalancing of tier primaries |
+| 10.1–10.3 (self-healing) | 1.10 (per-tier leaders) | Healing requires re-election and rebalancing of tier leaders |
 
 ## Summary of Contradictions and Open Questions
 

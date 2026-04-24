@@ -156,7 +156,7 @@ func seedAndSeal(t *testing.T, orch *orchestrator.Orchestrator, vaultID glid.GLI
 // TestMoveChunkRemote, TestMoveChunkRemoteMemoryVault, and
 // TestMoveChunkRemoteTransferError were removed: they tested the concept of
 // NodeID-based remote vault assignment which no longer exists. Remote vault
-// transfer will be reintroduced via tier primary election in a future issue.
+// transfer will be reintroduced via tier leader election in a future issue.
 
 func TestMoveChunkRemoteNoTransferrer(t *testing.T) {
 	t.Parallel()

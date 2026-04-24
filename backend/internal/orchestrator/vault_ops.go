@@ -382,10 +382,10 @@ func (o *Orchestrator) findLocalTier(vaultID, tierID glid.GLID) *TierInstance {
 // AppendToTier appends a record to a specific tier's chunk manager.
 // Used by inter-tier transition to target a downstream tier directly,
 // bypassing the vault's active tier. Includes seal detection.
-// AppendToTier appends a record to a specific tier. primaryChunkID, when
-// non-zero on secondaries, syncs the chunk ID with the primary so the
+// AppendToTier appends a record to a specific tier. leaderChunkID, when
+// non-zero on followers, syncs the chunk ID with the leader so the
 // follower has real, queryable, promotable chunks.
-func (o *Orchestrator) AppendToTier(vaultID, tierID glid.GLID, primaryChunkID chunk.ChunkID, rec chunk.Record) error {
+func (o *Orchestrator) AppendToTier(vaultID, tierID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error {
 	o.mu.RLock()
 	// NOTE: manually unlocked below — remote forwards happen outside the lock.
 
@@ -415,19 +415,19 @@ func (o *Orchestrator) AppendToTier(vaultID, tierID glid.GLID, primaryChunkID ch
 		// RPC that would otherwise recreate a chunk the cluster has already
 		// deleted. Caller translates this into a benign ack on the receive
 		// path. See gastrolog-11rzz.
-		if primaryChunkID != (chunk.ChunkID{}) && tier.IsTombstoned != nil && tier.IsTombstoned(primaryChunkID) {
+		if leaderChunkID != (chunk.ChunkID{}) && tier.IsTombstoned != nil && tier.IsTombstoned(leaderChunkID) {
 			o.mu.RUnlock()
-			return fmt.Errorf("%w: append to tombstoned chunk %s", chunk.ErrChunkTombstoned, primaryChunkID)
+			return fmt.Errorf("%w: append to tombstoned chunk %s", chunk.ErrChunkTombstoned, leaderChunkID)
 		}
 
 		// On followers, sync chunk ID with the leader. If the active
 		// chunk has a different ID (left over from a previous leader cycle),
 		// seal it so the next append opens a new chunk with the synced ID.
-		if tier.IsFollower && primaryChunkID != (chunk.ChunkID{}) {
-			if active := cm.Active(); active != nil && active.ID != primaryChunkID {
+		if tier.IsFollower && leaderChunkID != (chunk.ChunkID{}) {
+			if active := cm.Active(); active != nil && active.ID != leaderChunkID {
 				_ = cm.Seal()
 			}
-			cm.SetNextChunkID(primaryChunkID)
+			cm.SetNextChunkID(leaderChunkID)
 		}
 
 		activeBefore := cm.Active()
@@ -606,17 +606,17 @@ func (o *Orchestrator) clearReplicaBackoff(nodeID string) {
 
 // appendToLocalFollower appends a record to a same-node follower tier instance,
 // identified by storageID. Called under o.mu.RLock — vault is already resolved.
-func (o *Orchestrator) appendToLocalFollower(vault *Vault, tierID glid.GLID, storageID string, primaryChunkID chunk.ChunkID, rec chunk.Record) {
+func (o *Orchestrator) appendToLocalFollower(vault *Vault, tierID glid.GLID, storageID string, leaderChunkID chunk.ChunkID, rec chunk.Record) {
 	for _, t := range vault.Tiers {
 		if t.TierID == tierID && t.StorageID == storageID && t.IsFollower { //nolint:nestif // error handling adds nesting
-			if primaryChunkID != (chunk.ChunkID{}) {
-				if active := t.Chunks.Active(); active != nil && active.ID != primaryChunkID {
+			if leaderChunkID != (chunk.ChunkID{}) {
+				if active := t.Chunks.Active(); active != nil && active.ID != leaderChunkID {
 					if err := t.Chunks.Seal(); err != nil {
 						o.logger.Warn("replication: local follower seal failed",
 							"tier", tierID, "storage", storageID, "error", err)
 					}
 				}
-				t.Chunks.SetNextChunkID(primaryChunkID)
+				t.Chunks.SetNextChunkID(leaderChunkID)
 			}
 			if _, _, err := t.Chunks.Append(rec); err != nil {
 				o.logger.Warn("replication: local follower append failed",

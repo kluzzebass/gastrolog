@@ -120,11 +120,11 @@ func (s *QueryServer) remoteVaultsByNode(ctx context.Context, selectedVaults []g
 		selected[id] = true
 	}
 
-	// For each vault, fan out to remote primaries for tiers this node
-	// doesn't have locally. Tiers that exist locally (as primary or
-	// secondary) are searched by the local query engine — don't
-	// double-query their primary remotely.
-	localTierIDs := s.orch.LocalPrimaryTierIDs()
+	// For each vault, fan out to remote leaders for tiers this node
+	// doesn't have locally. Tiers that exist locally (as leader or
+	// follower) are searched by the local query engine — don't
+	// double-query their leader remotely.
+	localTierIDs := s.orch.LocalLeaderTierIDs()
 
 	tierMap := make(map[glid.GLID]*system.TierConfig, len(tiers))
 	for i := range tiers {

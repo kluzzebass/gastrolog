@@ -411,11 +411,11 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 		}
 		return err
 	})
-	clusterSrv.SetRecordTierAppender(func(ctx context.Context, vaultID, tierID glid.GLID, primaryChunkID chunk.ChunkID, rec chunk.Record) error {
+	clusterSrv.SetRecordTierAppender(func(ctx context.Context, vaultID, tierID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error {
 		if err := waitForOrch(ctx); err != nil {
 			return err
 		}
-		err := orch.AppendToTier(vaultID, tierID, primaryChunkID, rec)
+		err := orch.AppendToTier(vaultID, tierID, leaderChunkID, rec)
 		if err != nil && errors.Is(err, orchestrator.ErrVaultNotReady) {
 			return errors.Join(cluster.ErrForwardTargetNotReady, err)
 		}
