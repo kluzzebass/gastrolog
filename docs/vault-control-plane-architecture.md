@@ -42,25 +42,27 @@
 | Aspect | Detail |
 |--------|--------|
 | **Entry** | `ensureVaultControlPlaneRaftGroup` in [`backend/internal/orchestrator/reconfig_vaults.go`](../backend/internal/orchestrator/reconfig_vaults.go) |
-| **FSM** | [`backend/internal/vaultraft/`](../backend/internal/vaultraft/) (placeholder; commands land here as tier Raft is retired) |
-| **Cross-node apply** | `orchestrator.ApplyVaultControlPlane` → `cluster.VaultApplyForwarder` when `PeerConns` is set, else local `Raft.Apply`; RPC path: `ForwardVaultApply` + `cluster.SetVaultApplyFn` ([`backend/internal/orchestrator/vault_ctl_apply.go`](../backend/internal/orchestrator/vault_ctl_apply.go), [`backend/internal/cluster/vault_apply_forwarder.go`](../backend/internal/cluster/vault_apply_forwarder.go), [`backend/internal/cluster/forward.go`](../backend/internal/cluster/forward.go), [`backend/internal/app/app.go`](../backend/internal/app/app.go)) |
+| **FSM** | [`backend/internal/vaultraft/`](../backend/internal/vaultraft/) — holds per-tier sub-FSMs ([`tierfsm.FSM`](../backend/internal/tier/raftfsm/)) namespaced by `OpTierFSM` commands |
+| **Cross-node apply** | `orchestrator.ApplyVaultControlPlane` → `cluster.VaultApplyForwarder` when `PeerConns` is set, else local `Raft.Apply`; RPC path: `ForwardVaultApply` + `cluster.SetGroupApplyFn` ([`backend/internal/orchestrator/vault_ctl_apply.go`](../backend/internal/orchestrator/vault_ctl_apply.go), [`backend/internal/cluster/vault_apply_forwarder.go`](../backend/internal/cluster/vault_apply_forwarder.go), [`backend/internal/cluster/forward.go`](../backend/internal/cluster/forward.go), [`backend/internal/app/app.go`](../backend/internal/app/app.go)) |
 | **Client forwarder** | [`backend/internal/cluster/vault_apply_forwarder.go`](../backend/internal/cluster/vault_apply_forwarder.go) (`VaultApplyForwarder`) |
 
 ### Tier chunk metadata (cluster mode)
 
-Replicated tier chunk metadata uses the **vault control-plane** group only (`OpTierFSM` wrapping `tierfsm` wire payloads). There is **no** separate per-tier multiraft group. Entry: `createTierRaftGroup` in [`backend/internal/orchestrator/reconfig_vaults.go`](../backend/internal/orchestrator/reconfig_vaults.go). Cross-node apply uses `ForwardTierApply` with the vault ctl `group_id` and wrapped command bytes (`cluster.NewVaultCtlTierApplyForwarder`).
+Replicated tier chunk metadata uses the **vault control-plane** group only (`OpTierFSM` wrapping `tierfsm` wire payloads). There is **no** separate per-tier multiraft group. Entry: `ensureVaultCtlTierMetadata` in [`backend/internal/orchestrator/reconfig_vaults.go`](../backend/internal/orchestrator/reconfig_vaults.go). Cross-node apply uses `ForwardTierApply` with the vault ctl `group_id` and wrapped command bytes (`cluster.NewVaultCtlTierApplyForwarder`).
 
 ### Orchestrator
 
-Vault / tier / chunk operations and routing: [`backend/internal/orchestrator/vault_ops.go`](../backend/internal/orchestrator/vault_ops.go) and related orchestrator code; replicated metadata callbacks from `createTierRaftGroup` / `tierRaftCallbacks` read the per-tier sub-FSM inside [`backend/internal/vaultraft/`](../backend/internal/vaultraft/).
+Vault / tier / chunk operations and routing: [`backend/internal/orchestrator/vault_ops.go`](../backend/internal/orchestrator/vault_ops.go) and related orchestrator code; replicated metadata callbacks from `ensureVaultCtlTierMetadata` / `tierRaftCallbacks` read the per-tier sub-FSM inside [`backend/internal/vaultraft/`](../backend/internal/vaultraft/).
 
-### Today vs target (deltas this spec must resolve)
+### Status: target design achieved (gastrolog-5xxbd + gastrolog-2ze8j)
 
-1. **Authority scope:** Replicated tier metadata is on **vault control-plane Raft** (cluster mode). Remaining work: formal **vault readiness** predicates and any straggler code paths that still assume per-tier Raft.
+The deltas below were the original design questions this spec needed to resolve. They have been addressed by the gastrolog-5xxbd (vault-level Raft groups + FSM namespacing) and gastrolog-2ze8j (decommission of legacy tier-Raft code paths) work. Preserved here for historical reference.
+
+1. **Authority scope:** Replicated tier metadata is on **vault control-plane Raft** (cluster mode). Done.
 2. **Snapshot layout asymmetry:** System snapshots live under `raftDir`; group snapshots under `raft/groups/<groupId>/`. Target must either justify a **uniform two-root pattern** or **converge** layouts.
-3. **Shared WAL:** System and vault (and historical tier) groups share one `raftwal` on-disk segment stream; coupling is total. A vault redesign **must not** assume independent WALs unless the design explicitly splits them (default stays shared).
-4. **Readiness / partial peers:** Vault group creation is deferred when members are incomplete — rules must generalize to **vault readiness** predicates.
-5. **Apply entrypoints:** Today: `SetApplyFn` (config), `SetTierApplyFn` (tier metadata), `SetVaultApplyFn` (vault ctl). Target: **one** vault-scoped apply path for all vault/tier replicated metadata plus system config path.
+3. **Shared WAL:** System and vault groups share one `raftwal` on-disk segment stream; coupling is total. A vault redesign **must not** assume independent WALs unless the design explicitly splits them (default stays shared). Done.
+4. **Readiness / partial peers:** Vault readiness predicates landed in gastrolog-4ip1o + gastrolog-5j6eu (`Vault.ReadinessErr`, keyed on `r.AppliedIndex()`). Done.
+5. **Apply entrypoints:** Unified to **one** `cluster.Server.SetGroupApplyFn` (both `ForwardTierApply` and `ForwardVaultApply` RPC handlers dispatch to it). Done in 2ze8j.
 
 ---
 
@@ -187,7 +189,7 @@ stateDiagram-v2
 These require explicit product/architecture decisions:
 
 1. **One VaultRaft vs multiple raft groups per vault** (e.g. separate hot/cold metadata): pick one default.
-2. **Cutover** to **no tier Raft**: move `tierfsm` commands and `ForwardTierApply` onto vault control-plane Raft, then remove `createTierRaftGroup`, tier `GroupStore` names, and `SetTierApplyFn` — breaking layout is acceptable pre-production (no dual-read window required).
+2. **Cutover** to **no tier Raft**: ~~move `tierfsm` commands and `ForwardTierApply` onto vault control-plane Raft, then remove `createTierRaftGroup`, tier `GroupStore` names, and `SetTierApplyFn`~~ — **done** (gastrolog-5xxbd + gastrolog-2ze8j). `ensureVaultCtlTierMetadata` replaces `createTierRaftGroup`; the single `SetGroupApplyFn` replaces the `SetTierApplyFn`/`SetVaultApplyFn` split.
 3. **System Raft shrink/grow:** Which config moves to vault Raft vs stays global; backward compatibility for existing clusters.
 4. **Snapshot layout convergence:** Single rule for system + vault + tier snapshots (no legacy on-disk compatibility).
 5. **Feature flags:** Whether vault Raft rolls out behind a flag per vault or cluster-wide.
@@ -198,21 +200,21 @@ These require explicit product/architecture decisions:
 
 ### For gastrolog-5xxbd — vault-level Raft groups and FSM namespacing
 
-- [ ] Implement `GroupID` scheme and `GroupStore` / `CreateGroup` wiring chosen in C/F.
-- [ ] Align snapshot directories with the chosen uniform pattern (greenfield; remove old `raft/` tree if layout changes).
-- [ ] FSM boundary: which commands move from `tierfsm` to vault-scoped FSM; serialization + versioning rules.
-- [ ] **RPC / naming cleanup:** consolidate apply entrypoints (`SetTierApplyFn` vs `SetVaultApplyFn`, `ForwardTierApply` naming vs payload) now that tier metadata applies are vault-scoped.
-- [ ] Bootstrap/defer rules from D for partial membership; tests for “no bad initial config”.
-- [ ] WAL: confirm shared `raftwal` grouping and replay order; extend `raftwal` tests if new group naming or churn patterns appear.
-- [ ] Shutdown: preserve `DestroyGroup` ordering vs transport; add vault group to shutdown sequence in `app` if needed.
+- [x] Implement `GroupID` scheme and `GroupStore` / `CreateGroup` wiring chosen in C/F. — done (5xxbd).
+- [x] Align snapshot directories with the chosen uniform pattern (greenfield; remove old `raft/` tree if layout changes). — done (5xxbd).
+- [x] FSM boundary: which commands move from `tierfsm` to vault-scoped FSM; serialization + versioning rules. — done (5xxbd): tier FSM runs as a sub-FSM inside `vaultraft.FSM`, commands dispatched via `OpTierFSM` envelopes (`vaultraft.MarshalTierCommand`).
+- [x] **RPC / naming cleanup:** consolidate apply entrypoints — done (2ze8j): `SetTierApplyFn` + `SetVaultApplyFn` collapsed into a single `SetGroupApplyFn`; `ForwardTierApply` and `ForwardVaultApply` both dispatch via `groupApplyFn`.
+- [x] Bootstrap/defer rules from D for partial membership; tests for "no bad initial config". — done (5xxbd).
+- [x] WAL: confirm shared `raftwal` grouping and replay order; extend `raftwal` tests if new group naming or churn patterns appear. — done (5xxbd): vault-ctl groups share the per-node `raftwal` with system/config groups.
+- [x] Shutdown: preserve `DestroyGroup` ordering vs transport; add vault group to shutdown sequence in `app` if needed. — done (5xxbd).
 
 ### For gastrolog-554s3 — explicit vault → tier manager ownership
 
-- [ ] Replace implicit “find tier raft / chunk manager” shortcuts with APIs that take **vault context** first (`vault_ops.go` and call sites).
-- [ ] Document and enforce: tier managers are **owned** under a vault umbrella; no orphan tier lifetimes.
-- [ ] Forwarding (vault/tier apply path and record/search forwarding) must use stable vault/tier identity keys consistent with C; drop tier-only apply forwarding when per-tier Raft is removed (5xxbd).
-- [ ] Readiness plumbing: orchestrator checks **Vault_ControlPlaneReady** before operations that require it (per D).
-- [ ] Remove or quarantine legacy paths called out during inventory once vault Raft is live.
+- [x] Replace implicit "find tier raft / chunk manager" shortcuts with APIs that take **vault context** first (`vault_ops.go` and call sites). — done (554s3 + 2ze8j): orchestrator shortcuts retired in favor of vault-scoped lookups.
+- [x] Document and enforce: tier managers are **owned** under a vault umbrella; no orphan tier lifetimes. — done (554s3).
+- [x] Forwarding (vault/tier apply path and record/search forwarding) must use stable vault/tier identity keys consistent with C; drop tier-only apply forwarding now that there is no per-tier Raft (5xxbd). — done (2ze8j): both `ForwardTierApply` and `ForwardVaultApply` share one `groupApplyFn`.
+- [x] Readiness plumbing: orchestrator checks **Vault_ControlPlaneReady** before operations that require it (per D). — done (5xxbd): `vaultCtlReady` gate drives readiness; `r.AppliedIndex() > 0` semantics in `vaultraft.FSM.Ready()`.
+- [x] Remove or quarantine legacy paths called out during inventory once vault Raft is live. — done (2ze8j): `tier_apply_forwarder.go` simplified, legacy tier-Raft group-id helpers and tests deleted.
 
 ---
 
@@ -221,9 +223,9 @@ These require explicit product/architecture decisions:
 | Area | Paths |
 |------|--------|
 | System Raft | `backend/internal/app/raft.go` |
-| Multi-Raft setup, tier / vault apply | `backend/internal/app/app.go` (`setupMultiRaft`, `SetTierApplyFn`, `SetVaultApplyFn`) |
-| Vault control-plane Raft | `backend/internal/orchestrator/reconfig_vaults.go` (`ensureVaultControlPlaneRaftGroup`), `backend/internal/orchestrator/vault_ctl_apply.go`, `backend/internal/vaultraft/`, `backend/internal/cluster/vault_apply_forwarder.go` |
-| Vault ctl + tier metadata wiring | `backend/internal/orchestrator/reconfig_vaults.go` (`createTierRaftGroup`, `ensureVaultControlPlaneRaftGroup`) |
+| Multi-Raft setup, unified group apply | `backend/internal/app/app.go` (`setupMultiRaft`, `wireClusterRaftApplies`, `SetGroupApplyFn`) |
+| Vault control-plane Raft | `backend/internal/orchestrator/reconfig_vaults.go` (`ensureVaultControlPlaneRaftGroup`), `backend/internal/orchestrator/vault_ctl_apply.go`, `backend/internal/vaultraft/`, `backend/internal/cluster/vault_apply_forwarder.go`, `backend/internal/cluster/tier_apply_forwarder.go` |
+| Vault ctl + tier metadata wiring | `backend/internal/orchestrator/reconfig_vaults.go` (`ensureVaultControlPlaneRaftGroup`, `ensureVaultCtlTierMetadata`) |
 | Group manager | `backend/internal/raftgroup/groupmanager.go` |
 | WAL | `backend/internal/raftwal/` |
 | Transport | `backend/internal/multiraft/transport.go` |
