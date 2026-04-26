@@ -100,15 +100,16 @@ type StatsCollectorConfig struct {
 	PeerBytes    PeerBytesProvider       // optional; nil disables per-peer byte stats
 	Alerts       AlertProvider           // optional; nil if no alert collector
 	Jobs         JobsProvider            // optional; nil in single-node mode
-	NodeID       string
-	NodeNameFn   func() string // lazily resolved node name
-	Version      string
-	StartTime    time.Time
-	Interval     time.Duration
-	ApiAddress   string         // HTTP API listen address (e.g. ":4564")
-	PprofAddress string         // pprof listen address, empty if disabled
-	StatsSignal  *notify.Signal // fired after each broadcast to notify WatchSystemStatus streams
-	Logger       *slog.Logger
+	NodeID            string
+	NodeNameFn        func() string // lazily resolved node name
+	Version           string
+	StartTime         time.Time
+	Interval          time.Duration // heavy NodeStats broadcast cadence (default 5s)
+	HeartbeatInterval time.Duration // lightweight liveness ping cadence (default 1s); 0 disables
+	ApiAddress        string         // HTTP API listen address (e.g. ":4564")
+	PprofAddress      string         // pprof listen address, empty if disabled
+	StatsSignal       *notify.Signal // fired after each broadcast to notify WatchSystemStatus streams
+	Logger            *slog.Logger
 }
 
 // StatsCollector periodically gathers local node statistics and
@@ -135,21 +136,35 @@ func NewStatsCollector(cfg StatsCollectorConfig) *StatsCollector {
 	if cfg.Interval <= 0 {
 		cfg.Interval = 5 * time.Second
 	}
+	if cfg.HeartbeatInterval <= 0 {
+		cfg.HeartbeatInterval = 1 * time.Second
+	}
 	return &StatsCollector{
 		cfg:       cfg,
 		peerBytes: make(map[string]*peerBytesWindow),
 	}
 }
 
-// Run starts the periodic collection loop. Blocks until ctx is cancelled.
+// Run starts the periodic broadcast loops. Blocks until ctx is cancelled.
+//
+// Two cadences run in parallel:
+//   - Stats ticker (cfg.Interval, default 5s): full NodeStats payload.
+//     Heavy — carries vault stats, ingester stats, route stats, peer
+//     bytes, alerts, raft state, etc.
+//   - Heartbeat ticker (cfg.HeartbeatInterval, default 1s): empty
+//     Heartbeat marker. Just refreshes peer last-seen so paused/wedged
+//     peers fall out of LivePeers within a few seconds without making
+//     the heavy payload fly every second. See gastrolog-2kio8.
 func (c *StatsCollector) Run(ctx context.Context) {
-	ticker := time.NewTicker(c.cfg.Interval)
-	defer ticker.Stop()
+	statsTicker := time.NewTicker(c.cfg.Interval)
+	defer statsTicker.Stop()
+	heartbeatTicker := time.NewTicker(c.cfg.HeartbeatInterval)
+	defer heartbeatTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case tickAt := <-ticker.C:
+		case tickAt := <-statsTicker.C:
 			stats := c.CollectLocalTick(tickAt)
 			if c.cfg.Broadcaster != nil {
 				c.cfg.Broadcaster.Send(ctx, &gastrologv1.BroadcastMessage{
@@ -161,6 +176,14 @@ func (c *StatsCollector) Run(ctx context.Context) {
 			}
 			if c.cfg.StatsSignal != nil {
 				c.cfg.StatsSignal.Notify()
+			}
+		case <-heartbeatTicker.C:
+			if c.cfg.Broadcaster != nil {
+				c.cfg.Broadcaster.Send(ctx, &gastrologv1.BroadcastMessage{
+					SenderId:  []byte(c.cfg.NodeID),
+					Timestamp: timestamppb.Now(),
+					Payload:   &gastrologv1.BroadcastMessage_Heartbeat{Heartbeat: &gastrologv1.Heartbeat{}},
+				})
 			}
 		}
 	}

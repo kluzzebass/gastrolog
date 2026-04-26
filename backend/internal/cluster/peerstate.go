@@ -203,13 +203,38 @@ func (p *PeerState) LivePeers() []string {
 }
 
 // HandleBroadcast is a subscriber callback for the cluster broadcast system.
-// It extracts NodeStats from the broadcast message and stores it.
+// Two payload types update peer liveness here:
+//   - NodeStats: full state from the heavy 5s broadcast — replaces both
+//     the cached stats and the last-seen timestamp.
+//   - Heartbeat: empty marker from the lightweight 1s broadcast — only
+//     refreshes last-seen so cached stats from the most recent NodeStats
+//     remain queryable. This is what makes paused-peer detection fast
+//     without making the bulky payload fly every second. See
+//     gastrolog-2kio8.
 func (p *PeerState) HandleBroadcast(msg *gastrologv1.BroadcastMessage) {
-	if ns := msg.GetNodeStats(); ns != nil {
-		received := time.Now()
-		if msg.Timestamp != nil {
-			received = msg.Timestamp.AsTime()
-		}
-		p.Update(string(msg.SenderId), ns, received)
+	received := time.Now()
+	if msg.Timestamp != nil {
+		received = msg.Timestamp.AsTime()
 	}
+	if ns := msg.GetNodeStats(); ns != nil {
+		p.Update(string(msg.SenderId), ns, received)
+		return
+	}
+	if msg.GetHeartbeat() != nil {
+		p.Touch(string(msg.SenderId), received)
+		return
+	}
+}
+
+// Touch refreshes the last-seen timestamp for senderID without changing
+// the cached NodeStats. Used by Heartbeat broadcasts (which don't carry
+// stats) to extend the TTL of an already-known peer. If senderID has no
+// existing entry, a stub entry with nil stats is created so liveness is
+// trackable for new peers before their first NodeStats arrives.
+func (p *PeerState) Touch(senderID string, received time.Time) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	e := p.entries[senderID]
+	e.received = received
+	p.entries[senderID] = e
 }

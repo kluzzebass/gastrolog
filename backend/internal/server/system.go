@@ -228,6 +228,7 @@ func (s *SystemServer) buildFullSettingsResponse(ctx context.Context, includeSec
 		Maxmind: mm,
 		Cluster: &apiv1.ClusterSettings{
 			BroadcastInterval: ss.Cluster.BroadcastInterval,
+			HeartbeatInterval: ss.Cluster.HeartbeatInterval,
 		},
 		SetupWizardDismissed: func() bool { v, _ := s.sysStore.GetSetupWizardDismissed(ctx); return v }(),
 		NodeId:               []byte(s.localNodeID),
@@ -1258,6 +1259,12 @@ func mergeCluster(c *apiv1.PutClusterSettings, cluster *system.ClusterConfig) *c
 			return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid broadcast_interval: %w", err))
 		}
 		cluster.BroadcastInterval = *c.BroadcastInterval
+	}
+	if c.HeartbeatInterval != nil {
+		if _, err := time.ParseDuration(*c.HeartbeatInterval); err != nil {
+			return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid heartbeat_interval: %w", err))
+		}
+		cluster.HeartbeatInterval = *c.HeartbeatInterval
 	}
 	return nil
 }

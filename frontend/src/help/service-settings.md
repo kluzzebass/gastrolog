@@ -16,7 +16,8 @@ Controls how [cluster nodes](settings:nodes) [![icon:help]()](help:clustering-no
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| **Broadcast Interval** | How often each node sends stats to peers. Lower = fresher data, more network traffic | `5s` |
+| **Broadcast Interval** | How often each node sends its full stats payload (vault stats, ingester stats, alerts) to peers | `5s` |
+| **Heartbeat Interval** | How often each node sends a lightweight liveness ping. Detection of frozen or paused peers takes ~4× this interval | `1s` |
 
 ## TLS Configuration
 

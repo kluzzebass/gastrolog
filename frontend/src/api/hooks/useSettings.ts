@@ -47,6 +47,7 @@ type ServiceTLS = {
 
 type ServiceCluster = {
   broadcastInterval?: string;
+  heartbeatInterval?: string;
 };
 
 export type PutServiceSettingsArgs = {
