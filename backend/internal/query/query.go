@@ -394,6 +394,23 @@ func (e *Engine) listVaults() []glid.GLID {
 	return []glid.GLID{glid.Nil}
 }
 
+// transitionStreamedChunks returns the set of chunk IDs in the given
+// vault/tier that are in the post-stream / pre-expire window — their
+// records have already been counted in the destination tier and must
+// not be counted again at the source. Used by every count-based
+// aggregator (histogram fast path, cloud counts, local counts, attr
+// scan groups). Single-vault engines (no registry) return nil because
+// they don't model transitions.
+//
+// See gastrolog-4xusf for the transition-window double-count this
+// filter prevents.
+func (e *Engine) transitionStreamedChunks(vaultID glid.GLID) map[chunk.ChunkID]bool {
+	if e.registry == nil {
+		return nil
+	}
+	return e.registry.TransitionStreamedChunks(vaultID)
+}
+
 // selectChunks filters to chunks that overlap the query time range,
 // sorted by WriteStart (ascending for forward, descending for reverse).
 // Unsealed chunks are always included (their WriteEnd is not final).
