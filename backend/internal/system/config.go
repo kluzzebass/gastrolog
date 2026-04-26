@@ -23,6 +23,7 @@ type ServerSettings struct {
 // ClusterConfig holds cluster-wide settings.
 type ClusterConfig struct {
 	BroadcastInterval string `json:"broadcast_interval,omitempty"` // Go duration string, e.g. "5s"
+	HeartbeatInterval string `json:"heartbeat_interval,omitempty"` // Go duration string, e.g. "1s"; PeerState TTL is 4× this
 }
 
 // ---------------------------------------------------------------------------

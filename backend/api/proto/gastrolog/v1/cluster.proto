@@ -49,8 +49,16 @@ message BroadcastMessage {
   oneof payload {
     NodeStats node_stats = 10;
     NodeJobs node_jobs = 11;
+    Heartbeat heartbeat = 12;
   }
 }
+
+// Heartbeat is a liveness-only payload. Empty by design — the envelope
+// already carries sender_id and timestamp, which are all PeerState
+// needs to update last-seen and run TTL checks. Broadcast at a faster
+// cadence than the heavy NodeStats payload to detect failed peers
+// quickly without making every NodeStats broadcast more frequent.
+message Heartbeat {}
 
 // NodeJobs reports active job state for a single cluster node.
 // Broadcast periodically and immediately on job completion/failure.

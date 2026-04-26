@@ -515,6 +515,7 @@ message StaticLookupRow {
 
 message ClusterSettings {
   string broadcast_interval = 1; // Go duration string, e.g. "5s". Default: "5s".
+  string heartbeat_interval = 2; // Go duration string, e.g. "1s". Default: "1s". Lightweight liveness ping; PeerState TTL is 4× this.
 }
 
 message GetSettingsResponse {
@@ -583,6 +584,7 @@ message PutLookupSettings {
 
 message PutClusterSettings {
   optional string broadcast_interval = 1;
+  optional string heartbeat_interval = 2;
 }
 
 message PutServiceSettingsRequest {

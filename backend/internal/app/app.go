@@ -534,21 +534,30 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 		return nil, nil, nil, nil
 	}
 
-	var broadcastInterval time.Duration
-	if ss, err := cfgStore.LoadServerSettings(ctx); err == nil && ss.Cluster.BroadcastInterval != "" {
-		if d, err := time.ParseDuration(ss.Cluster.BroadcastInterval); err == nil {
-			broadcastInterval = d
+	var broadcastInterval, heartbeatInterval time.Duration
+	if ss, err := cfgStore.LoadServerSettings(ctx); err == nil {
+		if ss.Cluster.BroadcastInterval != "" {
+			if d, err := time.ParseDuration(ss.Cluster.BroadcastInterval); err == nil {
+				broadcastInterval = d
+			}
+		}
+		if ss.Cluster.HeartbeatInterval != "" {
+			if d, err := time.ParseDuration(ss.Cluster.HeartbeatInterval); err == nil {
+				heartbeatInterval = d
+			}
 		}
 	}
+	if heartbeatInterval <= 0 {
+		heartbeatInterval = 1 * time.Second
+	}
 
-	// PeerState TTL must be multiple broadcast intervals so jitter on a
-	// single tick doesn't flap a healthy peer to offline. Matching the
-	// interval exactly (5s TTL + 5s interval) was a zero-tolerance config:
-	// any delay > 0 caused the peer to appear offline and the UI to flicker.
-	// 20s = 4× interval tolerates up to 3 missed broadcasts before offline.
-	// PeerJobState already uses the 3× factor (15s TTL); matching that
-	// shape here. See gastrolog-5oofa.
-	peerState := cluster.NewPeerState(20 * time.Second)
+	// PeerState TTL must be a multiple of the **heartbeat** cadence (not
+	// the heavy NodeStats cadence) so paused-peer detection is fast.
+	// 4× heartbeat: tolerate up to 3 missed heartbeats before offline,
+	// matching the safety factor 5oofa established for the 5s broadcast.
+	// Default: 1s heartbeat × 4 = 4s detection (was 20s when keyed off
+	// the 5s NodeStats broadcast). See gastrolog-2kio8.
+	peerState := cluster.NewPeerState(4 * heartbeatInterval)
 	clusterSrv.Subscribe(peerState.HandleBroadcast)
 
 	peerJobState := cluster.NewPeerJobState(20 * time.Second)
@@ -580,13 +589,14 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 			}
 			return n.Name
 		},
-		Version:      Version,
-		StartTime:    time.Now(),
-		Interval:     broadcastInterval,
-		ApiAddress:   apiAddr,
-		PprofAddress: pprofAddr,
-		StatsSignal:  statsSignal,
-		Logger:       logger.With("component", "stats-collector"),
+		Version:           Version,
+		StartTime:         time.Now(),
+		Interval:          broadcastInterval,
+		HeartbeatInterval: heartbeatInterval,
+		ApiAddress:        apiAddr,
+		PprofAddress:      pprofAddr,
+		StatsSignal:       statsSignal,
+		Logger:            logger.With("component", "stats-collector"),
 	})
 
 	orch.Scheduler().SetOnJobChange(func() {

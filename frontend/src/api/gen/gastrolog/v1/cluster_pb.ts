@@ -313,6 +313,12 @@ export class BroadcastMessage extends Message<BroadcastMessage> {
      */
     value: NodeJobs;
     case: "nodeJobs";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.Heartbeat heartbeat = 12;
+     */
+    value: Heartbeat;
+    case: "heartbeat";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<BroadcastMessage>) {
@@ -327,6 +333,7 @@ export class BroadcastMessage extends Message<BroadcastMessage> {
     { no: 2, name: "timestamp", kind: "message", T: Timestamp },
     { no: 10, name: "node_stats", kind: "message", T: NodeStats, oneof: "payload" },
     { no: 11, name: "node_jobs", kind: "message", T: NodeJobs, oneof: "payload" },
+    { no: 12, name: "heartbeat", kind: "message", T: Heartbeat, oneof: "payload" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): BroadcastMessage {
@@ -343,6 +350,43 @@ export class BroadcastMessage extends Message<BroadcastMessage> {
 
   static equals(a: BroadcastMessage | PlainMessage<BroadcastMessage> | undefined, b: BroadcastMessage | PlainMessage<BroadcastMessage> | undefined): boolean {
     return proto3.util.equals(BroadcastMessage, a, b);
+  }
+}
+
+/**
+ * Heartbeat is a liveness-only payload. Empty by design — the envelope
+ * already carries sender_id and timestamp, which are all PeerState
+ * needs to update last-seen and run TTL checks. Broadcast at a faster
+ * cadence than the heavy NodeStats payload to detect failed peers
+ * quickly without making every NodeStats broadcast more frequent.
+ *
+ * @generated from message gastrolog.v1.Heartbeat
+ */
+export class Heartbeat extends Message<Heartbeat> {
+  constructor(data?: PartialMessage<Heartbeat>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.Heartbeat";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): Heartbeat {
+    return new Heartbeat().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): Heartbeat {
+    return new Heartbeat().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): Heartbeat {
+    return new Heartbeat().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: Heartbeat | PlainMessage<Heartbeat> | undefined, b: Heartbeat | PlainMessage<Heartbeat> | undefined): boolean {
+    return proto3.util.equals(Heartbeat, a, b);
   }
 }
 
