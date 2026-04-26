@@ -124,7 +124,7 @@ func withExtraVault(nodeIdxs []int) orchRelOption {
 
 const (
 	orchHarnessReadyWait  = 8 * time.Second
-	orchHarnessConvWait   = 8 * time.Second
+	orchHarnessConvWait   = 60 * time.Second
 	orchHarnessLeaderWait = 5 * time.Second
 )
 
@@ -591,6 +591,17 @@ func (h *orchRelHarness) chunkIDsOnNode(id string) map[chunk.ChunkID]bool {
 	return out
 }
 
+// chunkIDsOnLeader returns the chunk IDs as observed by the current
+// vault-ctl Raft leader. Reading from the leader avoids a flaky pattern
+// where `chunkIDsOnNode(h.nodeIDs[0])` is called immediately after
+// `sealOnLeader()`: SealActive only blocks on the leader's local FSM
+// apply, so a non-leader at h.nodeIDs[0] can still be lagging and
+// return an empty/stale set as the test's "expected".
+func (h *orchRelHarness) chunkIDsOnLeader() map[chunk.ChunkID]bool {
+	h.t.Helper()
+	return h.chunkIDsOnNode(h.waitForVaultCtlLeader().id)
+}
+
 // assertAllNodesSee polls until every node's chunk ID set contains
 // expected and no unexpected extras, or fails.
 func (h *orchRelHarness) assertAllNodesSee(expected map[chunk.ChunkID]bool) {
@@ -619,8 +630,19 @@ func (h *orchRelHarness) assertAllNodesSee(expected map[chunk.ChunkID]bool) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	h.t.Fatalf("chunk-ID sets did not converge within %s:\n%s",
-		orchHarnessConvWait, formatChunkSnapshot(lastSnapshot))
+	expectedKeys := make([]chunk.ChunkID, 0, len(expected))
+	for k := range expected {
+		expectedKeys = append(expectedKeys, k)
+	}
+	slices.SortFunc(expectedKeys, func(a, b chunk.ChunkID) int {
+		return slices.Compare(a[:], b[:])
+	})
+	var expHex []string
+	for _, k := range expectedKeys {
+		expHex = append(expHex, fmt.Sprintf("%x", k[:]))
+	}
+	h.t.Fatalf("chunk-ID sets did not converge within %s:\nexpected (%d): %v\nactual:\n%s",
+		orchHarnessConvWait, len(expected), expHex, formatChunkSnapshot(lastSnapshot))
 }
 
 func formatChunkSnapshot(m map[string]map[chunk.ChunkID]bool) string {

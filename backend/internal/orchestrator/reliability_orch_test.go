@@ -107,7 +107,7 @@ func TestOrchRel_Restart_SealedChunkSurvives(t *testing.T) {
 	h.eventuallyAllSeeSealedChunk(t)
 
 	// Capture pre-restart chunk ID set from the leader.
-	pre := h.chunkIDsOnNode(h.nodeIDs[0])
+	pre := h.chunkIDsOnLeader()
 	if len(pre) == 0 {
 		t.Fatal("no sealed chunks before restart")
 	}
@@ -197,7 +197,7 @@ func TestOrchRel_PausedPeer_ClusterStaysHealthy(t *testing.T) {
 	// bounded — catchup replication + FSM apply should finish well
 	// within the harness's default deadline.
 	h.unpausePeer(paused)
-	h.assertAllNodesSee(h.chunkIDsOnNode(h.nodeIDs[0]))
+	h.assertAllNodesSee(h.chunkIDsOnLeader())
 }
 
 // Wipe a follower node's entire disk state (WAL + chunk dirs), restart
@@ -225,7 +225,7 @@ func TestOrchRel_FollowerWipe_CatchupRebuilds(t *testing.T) {
 	h.eventuallyAllSeeSealedChunk(t)
 
 	// Capture the baseline for comparison post-catchup.
-	baseline := h.chunkIDsOnNode(h.nodeIDs[0])
+	baseline := h.chunkIDsOnLeader()
 
 	// Pick a non-leader to wipe. Specifically NOT the vault-ctl Raft
 	// leader — wiping the leader forces an election and we want a
@@ -239,6 +239,7 @@ func TestOrchRel_FollowerWipe_CatchupRebuilds(t *testing.T) {
 		}
 	}
 
+	t.Logf("victim=%s leader=%s baseline=%d chunks", victim, leader.id, len(baseline))
 	h.stopNode(victim)
 	h.wipeNode(victim)
 	h.startNode(victim)
@@ -387,7 +388,7 @@ func TestOrchRel_PausedPeer_Restart_Recovers(t *testing.T) {
 	}
 	h.sealOnLeader()
 	h.eventuallyAllSeeSealedChunk(t)
-	baseline := h.chunkIDsOnNode(h.nodeIDs[0])
+	baseline := h.chunkIDsOnLeader()
 
 	// Pause a follower.
 	leader := h.waitForVaultCtlLeader()
@@ -464,7 +465,7 @@ func TestOrchRel_SlowPeer_BackoffAbsorbs(t *testing.T) {
 	// which excludes it). Clear the slowdown first so convergence isn't
 	// additionally handicapped.
 	h.slowPeer(victim, 0)
-	h.assertAllNodesSee(h.chunkIDsOnNode(h.nodeIDs[0]))
+	h.assertAllNodesSee(h.chunkIDsOnLeader())
 }
 
 // Stop the vault-ctl Raft leader mid-append: fire a burst of appends,
@@ -609,7 +610,7 @@ func TestOrchRel_IngestionStressWithPause(t *testing.T) {
 
 	// Unpause the peer, assert full convergence.
 	h.unpausePeer(victim)
-	h.assertAllNodesSee(h.chunkIDsOnNode(h.nodeIDs[0]))
+	h.assertAllNodesSee(h.chunkIDsOnLeader())
 }
 
 // True multi-vault isolation: configure two vaults with non-overlapping
@@ -705,7 +706,7 @@ func (h *orchRelHarness) eventuallyLiveNodesSeeSealedChunk(t *testing.T, live []
 	deadline := time.Now().Add(orchHarnessConvWait)
 	var expected map[chunk.ChunkID]bool
 	for time.Now().Before(deadline) {
-		expected = h.chunkIDsOnNode(h.nodeIDs[0])
+		expected = h.chunkIDsOnLeader()
 		if len(expected) > 0 {
 			break
 		}
@@ -746,7 +747,7 @@ func (h *orchRelHarness) eventuallyAllSeeSealedChunk(t *testing.T) {
 	t.Helper()
 	deadline := time.Now().Add(orchHarnessConvWait)
 	for time.Now().Before(deadline) {
-		leader := h.chunkIDsOnNode(h.nodeIDs[0])
+		leader := h.chunkIDsOnLeader()
 		if len(leader) == 0 {
 			time.Sleep(50 * time.Millisecond)
 			continue
