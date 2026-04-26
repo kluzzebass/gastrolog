@@ -534,22 +534,7 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 		return nil, nil, nil, nil
 	}
 
-	var broadcastInterval, heartbeatInterval time.Duration
-	if ss, err := cfgStore.LoadServerSettings(ctx); err == nil {
-		if ss.Cluster.BroadcastInterval != "" {
-			if d, err := time.ParseDuration(ss.Cluster.BroadcastInterval); err == nil {
-				broadcastInterval = d
-			}
-		}
-		if ss.Cluster.HeartbeatInterval != "" {
-			if d, err := time.ParseDuration(ss.Cluster.HeartbeatInterval); err == nil {
-				heartbeatInterval = d
-			}
-		}
-	}
-	if heartbeatInterval <= 0 {
-		heartbeatInterval = 1 * time.Second
-	}
+	broadcastInterval, heartbeatInterval := loadClusterIntervals(ctx, cfgStore)
 
 	// PeerState TTL must be a multiple of the **heartbeat** cadence (not
 	// the heavy NodeStats cadence) so paused-peer detection is fast.
@@ -878,6 +863,28 @@ func loadMaxConcurrentJobs(ctx context.Context, cfgStore system.Store) int {
 		return 0
 	}
 	return ss.Scheduler.MaxConcurrentJobs
+}
+
+// loadClusterIntervals reads the broadcast and heartbeat intervals from
+// configured server settings. Either may be zero on return — the
+// StatsCollector applies its own defaults (5s broadcast, 1s heartbeat).
+// The heartbeat is forced to a sane minimum here too so the PeerState
+// TTL (4× heartbeat) never collapses to 0.
+func loadClusterIntervals(ctx context.Context, cfgStore system.Store) (broadcast, heartbeat time.Duration) {
+	ss, err := cfgStore.LoadServerSettings(ctx)
+	if err != nil {
+		return 0, 1 * time.Second
+	}
+	if d, err := time.ParseDuration(ss.Cluster.BroadcastInterval); err == nil && d > 0 {
+		broadcast = d
+	}
+	if d, err := time.ParseDuration(ss.Cluster.HeartbeatInterval); err == nil && d > 0 {
+		heartbeat = d
+	}
+	if heartbeat <= 0 {
+		heartbeat = 1 * time.Second
+	}
+	return broadcast, heartbeat
 }
 
 func buildAuthTokens(ctx context.Context, logger *slog.Logger, cfgStore system.Store, noAuth bool) (*auth.TokenService, error) {
