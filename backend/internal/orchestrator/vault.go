@@ -124,6 +124,30 @@ func (r *tierRegistry) IndexManager(id glid.GLID) index.IndexManager {
 	return nil
 }
 
+// TransitionStreamedChunks returns the set of chunk IDs on the given
+// tier that have been streamed to the next tier but not yet expired.
+// The histogram and other count-based aggregations skip these so the
+// records aren't counted twice — once at the source tier and once at
+// the destination — during the receipt-confirmation window. See
+// gastrolog-4xusf.
+func (r *tierRegistry) TransitionStreamedChunks(id glid.GLID) map[chunk.ChunkID]bool {
+	for _, t := range r.tiers {
+		if t.TierID != id || t.ListTransitionStreamed == nil {
+			continue
+		}
+		ids := t.ListTransitionStreamed()
+		if len(ids) == 0 {
+			return nil
+		}
+		out := make(map[chunk.ChunkID]bool, len(ids))
+		for _, cid := range ids {
+			out[cid] = true
+		}
+		return out
+	}
+	return nil
+}
+
 // Close closes all tier instances.
 func (v *Vault) Close() error {
 	var firstErr error

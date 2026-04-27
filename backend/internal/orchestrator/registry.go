@@ -235,6 +235,10 @@ func (r *searchReadyRegistry) IndexManager(key glid.GLID) index.IndexManager {
 	return v.ActiveTierIndexManager()
 }
 
+func (r *searchReadyRegistry) TransitionStreamedChunks(key glid.GLID) map[chunk.ChunkID]bool {
+	return r.o.TransitionStreamedChunks(key)
+}
+
 // LeaderTierQueryEngine returns a query engine that only searches leader
 // tiers (not follower replicas). Used by ForwardSearch handlers to avoid
 // double-counting when the requesting node already searches its own followers.
@@ -298,6 +302,35 @@ func (r *leaderTierRegistry) IndexManager(key glid.GLID) index.IndexManager {
 }
 
 func (r *leaderTierRegistry) QueryEngine(_ glid.GLID) *query.Engine { return nil }
+
+// TransitionStreamedChunks returns the streamed-but-not-yet-expired
+// chunk set for the given tier ID. Resolves the tier instance and reads
+// its ListTransitionStreamed callback (which reads the tier FSM via
+// vaultraft). See gastrolog-4xusf.
+func (r *leaderTierRegistry) TransitionStreamedChunks(key glid.GLID) map[chunk.ChunkID]bool {
+	r.o.mu.RLock()
+	defer r.o.mu.RUnlock()
+	for _, v := range r.o.vaults {
+		if err := vaultReplicationReadinessErr(v.ID, v); err != nil {
+			continue
+		}
+		for _, t := range v.Tiers {
+			if t.TierID != key || t.IsFollower || t.Query == nil || t.ListTransitionStreamed == nil {
+				continue
+			}
+			ids := t.ListTransitionStreamed()
+			if len(ids) == 0 {
+				return nil
+			}
+			out := make(map[chunk.ChunkID]bool, len(ids))
+			for _, cid := range ids {
+				out[cid] = true
+			}
+			return out
+		}
+	}
+	return nil
+}
 
 // LeaderTierQueryEngineForVault returns a query engine scoped to leader
 // tiers of a single vault. Used by ForwardSearch — the vault is already

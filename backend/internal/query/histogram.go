@@ -233,7 +233,11 @@ func (e *Engine) timechartFastPath(selectedVaults []glid.GLID, start time.Time, 
 		if err != nil {
 			continue
 		}
+		streamed := e.transitionStreamedChunks(vaultID)
 		for _, meta := range metas {
+			if streamed[meta.ID] {
+				continue
+			}
 			if meta.RecordCount == 0 {
 				continue
 			}
@@ -262,7 +266,11 @@ func (e *Engine) timechartCloudCounts(selectedVaults []glid.GLID, start, end tim
 		if err != nil {
 			continue
 		}
+		streamed := e.transitionStreamedChunks(vaultID)
 		for _, meta := range metas {
+			if streamed[meta.ID] {
+				continue
+			}
 			if !meta.CloudBacked || meta.RecordCount == 0 {
 				continue
 			}
@@ -291,7 +299,11 @@ func (e *Engine) timechartLocalCounts(selectedVaults []glid.GLID, start, end tim
 		if err != nil {
 			continue
 		}
+		streamed := e.transitionStreamedChunks(vaultID)
 		for _, meta := range metas {
+			if streamed[meta.ID] {
+				continue
+			}
 			if meta.CloudBacked || meta.RecordCount == 0 {
 				continue
 			}
@@ -324,7 +336,11 @@ func (e *Engine) timechartAttrScanGroups(selectedVaults []glid.GLID, start, end 
 		if err != nil {
 			continue
 		}
+		streamed := e.transitionStreamedChunks(vaultID)
 		for _, meta := range metas {
+			if streamed[meta.ID] {
+				continue
+			}
 			if meta.RecordCount == 0 {
 				continue
 			}

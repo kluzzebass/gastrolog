@@ -104,7 +104,7 @@ func (e *Engine) Explain(ctx context.Context, q Query) (*QueryPlan, error) {
 		plan.TotalChunks += len(metas)
 
 		// Select chunks that overlap the query time range.
-		candidates := e.selectChunks(metas, queryForPlan, chunkIDs)
+		candidates := e.selectChunks(vaultID, metas, queryForPlan, chunkIDs)
 
 		for _, meta := range candidates {
 			cp := e.buildChunkPlan(ctx, queryForPlan, meta, vaultID, cm, im)
