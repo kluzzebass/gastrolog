@@ -8,6 +8,14 @@
 
 ---
 
+## Design constraints (load-bearing — not negotiable)
+
+1. **Chunk-local indexing.** Per-chunk artifacts; no global index across chunks. Each sealed chunk must be independently searchable.
+2. **No full decompression to search.** Search runs against the encoded form, or against the smallest decompressible unit (frame, block, page). Decompress-then-grep is a non-starter.
+3. **Memory over throughput, always.** Build-time memory is bounded by intent, not by input size. **Slower indexing is acceptable; unbounded memory is not.** External sort, streaming FST construction, per-column flush — anything that keeps peak heap small wins, even when a faster all-in-memory path exists. This applies to ingest, post-seal index build, and search-time intermediate state alike.
+
+Every recommendation in §1 and every approach in §2 is filtered through these three constraints. An approach that fails any of them is rejected (see §4 for explicit rejections).
+
 ## 1. Executive summary
 
 **Recommended path: a Lucene-style per-chunk codec built on Vellum + Roaring + per-block bloom filters + a Quickwit-style hotcache footer, with optional CLP-derived template extraction layered on top of the raw payload.**
