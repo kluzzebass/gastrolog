@@ -415,12 +415,24 @@ func (e *Engine) transitionStreamedChunks(vaultID glid.GLID) map[chunk.ChunkID]b
 // sorted by WriteStart (ascending for forward, descending for reverse).
 // Unsealed chunks are always included (their WriteEnd is not final).
 // If chunkIDs is non-nil, only chunks with matching IDs are included.
-func (e *Engine) selectChunks(metas []chunk.ChunkMeta, q Query, chunkIDs []chunk.ChunkID) []chunk.ChunkMeta {
+//
+// Chunks marked TransitionStreamed=true in the vault's tier FSM are
+// skipped: their records have already been counted/served from the
+// destination tier, so reading them at the source duplicates the work
+// (and produces double-counted histogram bars during the post-stream /
+// pre-expire window). See gastrolog-4xusf. The vaultID argument lets
+// the engine consult the registry for the streamed set; pass glid.Nil
+// for single-vault engines that don't model transitions.
+func (e *Engine) selectChunks(vaultID glid.GLID, metas []chunk.ChunkMeta, q Query, chunkIDs []chunk.ChunkID) []chunk.ChunkMeta {
 	lower, upper := q.TimeBounds()
 	chunkSet := buildChunkIDSet(chunkIDs)
+	streamed := e.transitionStreamedChunks(vaultID)
 
 	var out []chunk.ChunkMeta
 	for _, m := range metas {
+		if streamed[m.ID] {
+			continue
+		}
 		if chunkMatchesQuery(m, q, lower, upper, chunkSet) {
 			out = append(out, m)
 		}

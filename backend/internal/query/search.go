@@ -145,7 +145,7 @@ func (e *Engine) collectVaultChunks(
 			}
 		}
 
-		candidates := e.selectChunks(metas, q, chunkIDs)
+		candidates := e.selectChunks(vaultID, metas, q, chunkIDs)
 		for _, meta := range candidates {
 			allChunks = append(allChunks, vaultChunk{vaultID: vaultID, meta: meta})
 		}
@@ -1103,7 +1103,9 @@ func (e *Engine) SearchWithContext(ctx context.Context, q Query) (iter.Seq2[chun
 		}
 
 		// Sort all chunks by WriteStart for consistent ordering.
-		allChunks := e.selectChunks(metas, q, chunkIDs)
+		// Single-vault path (no registry) — pass glid.Nil; transition
+		// filtering is a no-op without a registry to consult.
+		allChunks := e.selectChunks(glid.Nil, metas, q, chunkIDs)
 
 		// Also need all chunks sorted ascending for context gathering.
 		allChunksAsc := make([]chunk.ChunkMeta, len(metas))
