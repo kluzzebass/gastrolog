@@ -100,6 +100,34 @@ What this is **not**: it is not Loki's "scan everything" model (only works with 
 
 ---
 
+## 2.6 Build-time resource usage
+
+The current GastroLog KV indexer (`backend/internal/index/file/kv/indexer.go` and the memory equivalent) caps `MaxValuesPerKey = 1000`, `MaxUniqueKeys = 10000`, `MaxTotalEntries = 100000`, and a 10 MB `KVBudget`. These are defensive in-memory caps because the current builder holds candidate `(key,value)` pairs and their position lists in maps during construction. To raise them, the build-time data structure has to change. This section captures what each recommended approach implies for build-time memory.
+
+**FST construction (Vellum) — bounded, streaming.** Vellum's `Builder.Insert(key, value)` is incremental: as keys are inserted in sorted order, the builder finalises (minimises and emits) any state that can no longer share with future input. The only structure that grows during build is a **suffix-sharing register** of recently-finalised states, which is bounded *independent of M* (the number of keys). BurntSushi's reference benchmark builds ~15.7M sorted keys with peak memory in the low double-digit MB regardless of input size; ~18 s wall time. **The sorted-input precondition is the catch** — Vellum panics on out-of-order input. Conventional resolutions:
+
+1. **External merge sort.** Write `(key, value)` pairs to a temp file as records are tokenized; sort runs of N entries in memory, merge-sort the runs, then stream sorted pairs into Vellum. Memory during sort is bounded by the run size; Go's `sort.Slice` plus a heap-merge over file readers is straightforward. This is the path equivalent in spirit to the user's "B+-tree to keep track of things instead of holding it in memory" idea, but cheaper: the on-disk artifact is a temp file, not a persistent B+-tree.
+2. **Per-key value aggregation in-memory while the per-record stream is sorted by key.** If the chunk's records are already in a useful order, this can avoid the external sort entirely.
+3. **Bounded bucketed merge.** When peak distinct keys is known to be modest (tens of thousands), an in-memory map plus one final sort suffices, with memory equal to dictionary size + summary positions.
+
+**Roaring posting-list construction — bounded by output.** Containers split/promote (array → bitset → RLE) as cardinality grows; per-container memory ceiling is ~8 KiB (bitset). Total memory during build for one bitmap equals the size of the artifact you're going to write — you don't pay anything beyond the eventual on-disk output. `RunOptimize()` after build is a single linear pass over the containers. For chunk-local posting lists this is trivially bounded; no B+-tree needed.
+
+**Per-block bloom filters — trivially bounded.** Filter size is fixed at construction (m bits + k hash funcs). Memory equals filter size. Build is `O(N)` set operations on an `m`-bit array.
+
+**Columnar SoA build — the actual memory hot spot.** This is where pressure shows up if not handled. A chunk with 200 fields becomes 200 column buffers held in memory until seal if built naively. **Standard mitigation: per-column streaming with periodic flush** — emit column blocks (e.g. 8K-32K rows per block) to disk during ingest, each block self-contained with its own dictionary/bit-pack metadata. Apache Arrow's IPC streaming format is the canonical reference; the per-column `chunked array` model maps directly onto fixed-row-count blocks. For low-cardinality enum columns, dictionary state is tiny (hundreds of entries); for free-text columns the dictionary is the dominant cost — those are usually NOT good candidates for columnar storage anyway and should go through the FST + posting list path.
+
+**CLP / Drain template extraction — small dictionary.** Logtype dictionary at build time is the set of distinct templates (hundreds for millions of lines on real workloads); per-segment variable dictionary holds string-typed variables (tens of thousands at most). Both fit in memory comfortably for any reasonable chunk size. The variable streams themselves are columnar and follow the columnar build guidance above.
+
+**B+-tree-during-build — possible, but not the right answer here.** A B+-tree would solve the in-memory limit by spilling to disk during build, but it produces a B+-tree as the artifact, which is a heavier, less-compact final structure than an FST and doesn't compose with the recommended search path. **External-sort-then-stream-into-FST is strictly better**: it solves the same memory problem (build-time data structure spills to disk) while producing the recommended search artifact (FST), with smaller peak memory than a B+-tree (sort runs are sequentially flushed, not maintained as a balanced tree on disk) and a more compact final byte slice. If a B+-tree-during-build is already in the codebase for a different purpose (e.g. the active chunk's `btree.Tree[int64, uint32]` for IngestTS lookups, see `chunkfile/manager.go`), reusing that infra for KV index construction is reasonable as a stepping stone — but the destination should still be a streaming-built FST.
+
+**Implication for the existing 1000-keys cap.** If the KV indexer is rewritten on the FST + Roaring + bloom stack, the `MaxValuesPerKey = 1000`, `MaxUniqueKeys = 10000`, `MaxTotalEntries = 100000` defensive caps become obsolete. The natural caps shift to:
+
+- **Sorted-input buffer / sort run size** — memory during external sort. Tunable; default 32 MB or similar gives several minutes of records per run.
+- **FST artifact size** — disk space for the on-disk dictionary. Bounded by the number of *distinct* (key,value) pairs in the chunk × ~average bytes per entry post-suffix-sharing.
+- **Roaring artifact size** — disk space for posting lists. Bounded by the cardinality × encoding density of each posting list.
+
+None of these are "1000". The right caps under the new architecture are **size-based budgets, not count-based caps**, and they should be order(s) of magnitude higher than today.
+
 ## 3. Synergy matrix
 
 Approaches compose well or poorly. The matrix below names the pairs that are explicitly synergistic, redundant, or mutually exclusive.
