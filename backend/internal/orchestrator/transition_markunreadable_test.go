@@ -157,3 +157,44 @@ func TestTransitionChunkSourceReadErrorMarksUnreadable(t *testing.T) {
 		t.Errorf("ErrSourceRead: chunk %s should have been marked unreadable", chunkID)
 	}
 }
+
+// faultingCursor is a minimal RecordCursor that fails Next() with a
+// configured error. Used to exercise the local transition path's
+// error-classification behavior without needing an actually-corrupted
+// chunk on disk.
+type faultingCursor struct{ err error }
+
+func (c *faultingCursor) Next() (chunk.Record, chunk.RecordRef, error) {
+	return chunk.Record{}, chunk.RecordRef{}, c.err
+}
+func (c *faultingCursor) Prev() (chunk.Record, chunk.RecordRef, error) {
+	return chunk.Record{}, chunk.RecordRef{}, c.err
+}
+func (*faultingCursor) Seek(chunk.RecordRef) error { return nil }
+func (*faultingCursor) Close() error               { return nil }
+
+// TestStreamLocalWrapsCursorErrorsAsSourceRead pins gastrolog-3ayz3:
+// read-side errors from the source cursor on the LOCAL transition path
+// must be wrapped in cluster.ErrSourceRead so transitionChunk's classifier
+// calls markUnreadable. Without this, a corrupted chunk's idx.log /
+// attr.log error would loop forever through the retention sweep, flooding
+// the logs with one ERROR per minute per corrupted chunk.
+func TestStreamLocalWrapsCursorErrorsAsSourceRead(t *testing.T) {
+	t.Parallel()
+
+	r := &retentionRunner{
+		vaultID: glid.New(),
+		tierID:  glid.New(),
+	}
+	raw := errors.New("invalid idx.log entry: attr range [3246:3288] exceeds mmap size 3270")
+	err := r.streamLocal(&faultingCursor{err: raw}, glid.New())
+	if err == nil {
+		t.Fatal("streamLocal: expected error from faulting cursor, got nil")
+	}
+	if !errors.Is(err, cluster.ErrSourceRead) {
+		t.Errorf("streamLocal: expected error to wrap cluster.ErrSourceRead, got: %v", err)
+	}
+	if !errors.Is(err, raw) {
+		t.Errorf("streamLocal: expected error chain to preserve underlying cause, got: %v", err)
+	}
+}
