@@ -488,6 +488,16 @@ func (r *TierLifecycleReconciler) deleteLocalCopy(chunkID chunk.ChunkID) error {
 //
 // In single-node / memory mode (no Raft applier wired), deleteChunk
 // falls back to a direct local delete without going through the FSM.
+//
+// Skips proposing CmdRequestDelete when the FSM already has a
+// pendingDeletes entry for this chunk. The FSM-side applyRequestDelete
+// is idempotent (returns no-op for an existing entry), but each
+// redundant proposal still costs a Raft round-trip + apply pump cycle.
+// At scale (hundreds of stuck deletes re-evaluated per retention tick)
+// this was a major contributor to leader-queue saturation. The
+// SweepPendingObligations path retries acks for stalled obligations
+// directly from local FSM state without going through this entry
+// point, so dedup'ing here is safe.
 func (r *TierLifecycleReconciler) deleteChunk(chunkID chunk.ChunkID, reason string, expectedFrom []string) error {
 	if r.tier == nil {
 		return errors.New("deleteChunk: nil tier instance")
@@ -498,6 +508,11 @@ func (r *TierLifecycleReconciler) deleteChunk(chunkID chunk.ChunkID, reason stri
 		r.logger.Debug("deleteChunk: single-node fallback",
 			"chunk", chunkID, "reason", reason)
 		return r.deleteLocalCopy(chunkID)
+	}
+	if r.fsm != nil && r.fsm.PendingDelete(chunkID) != nil {
+		r.logger.Debug("deleteChunk: pendingDelete entry already exists, skipping propose",
+			"chunk", chunkID, "reason", reason)
+		return nil
 	}
 	r.logger.Debug("deleteChunk: proposing CmdRequestDelete",
 		"chunk", chunkID, "reason", reason, "expected_count", len(expectedFrom))

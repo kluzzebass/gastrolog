@@ -480,6 +480,19 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 		}
 	}
 
+	// Build a set of chunks already flagged retention-pending in the FSM.
+	// We pass this down so tryRetainChunk skips the redundant
+	// CmdRetentionPending Apply on chunks where the flag is already set,
+	// which is critical when retention actions stall (transition
+	// unreachable destination, receipt-protocol stuck) and the same
+	// chunk gets re-evaluated every minute. See gastrolog-51gme.
+	pendingFlag := make(map[chunk.ChunkID]bool)
+	if tier != nil && tier.ListRetentionPending != nil {
+		for _, id := range tier.ListRetentionPending() {
+			pendingFlag[id] = true
+		}
+	}
+
 	var sealed []chunk.ChunkMeta
 	for _, meta := range metas {
 		if meta.Sealed && !unreadable[meta.ID] && !streamed[meta.ID] {
@@ -505,15 +518,18 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 				continue
 			}
 			processed[id] = true
-			r.tryRetainChunk(id, b)
+			r.tryRetainChunk(id, b, pendingFlag[id])
 		}
 	}
 }
 
 // tryRetainChunk attempts to apply a retention action to a single chunk.
-// Acquires the inflight lock, marks retention-pending via Raft, and
-// dispatches to the action handler.
-func (r *retentionRunner) tryRetainChunk(id chunk.ChunkID, b retentionRule) {
+// Acquires the inflight lock, marks retention-pending via Raft (only if
+// the FSM doesn't already have the flag — repeated applies waste Raft
+// capacity and were a major contributor to leader-queue saturation
+// when retention actions stalled with hundreds of pending chunks; see
+// gastrolog-51gme), and dispatches to the action handler.
+func (r *retentionRunner) tryRetainChunk(id chunk.ChunkID, b retentionRule, alreadyPending bool) {
 	r.mu.Lock()
 	if r.inflight[id] {
 		r.mu.Unlock()
@@ -522,8 +538,12 @@ func (r *retentionRunner) tryRetainChunk(id chunk.ChunkID, b retentionRule) {
 	r.inflight[id] = true
 	r.mu.Unlock()
 
-	// Mark as retention-pending in vault-ctl Raft so all nodes see it.
-	if r.applyRaftRetentionPending != nil {
+	// Mark as retention-pending in vault-ctl Raft so all nodes see it —
+	// but ONLY if the FSM doesn't already carry the flag. Skipping the
+	// redundant Apply when the action stalls (transition unreachable
+	// destination, receipt protocol stuck) avoids piling up no-op
+	// CmdRetentionPending entries on every sweep tick.
+	if r.applyRaftRetentionPending != nil && !alreadyPending {
 		if err := r.applyRaftRetentionPending(id); err != nil {
 			r.logger.Error("retention: failed to apply raft retention-pending",
 				"vault", r.vaultID, "chunk", id, "error", err)

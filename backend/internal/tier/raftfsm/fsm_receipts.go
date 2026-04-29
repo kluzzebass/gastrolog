@@ -175,18 +175,42 @@ func (f *FSM) applyAckDelete(data []byte) (*chunk.ChunkID, string, error) {
 //	16 bytes  chunk ID
 //
 // The leader proposes this once expectedFrom is empty for an entry.
-// Apply removes the entry from pendingDeletes. Idempotent: if the
-// entry is already gone, the apply is a no-op.
+// Apply removes the entry from pendingDeletes, removes the chunk
+// metadata from the manifest (f.chunks), and records a tombstone —
+// matching the legacy CmdDeleteChunk apply contract. Without the
+// chunks/tombstone updates the manifest carries dead entries forever
+// and stale ImportSealed RPCs could re-create the chunk after the
+// cluster believed it deleted. Idempotent: re-applying for an entry
+// already finalized is a no-op (tombstone update aside).
 func (f *FSM) applyFinalizeDelete(data []byte) (*chunk.ChunkID, error) {
 	if len(data) < 16 {
 		return nil, fmt.Errorf("finalize delete: payload too short (%d bytes)", len(data))
 	}
 	var id chunk.ChunkID
 	copy(id[:], data[:16])
-	if _, ok := f.pendingDeletes[id]; !ok {
+
+	// Tombstone unconditionally so a stale ImportSealed/Append/Seal
+	// command racing the receipt protocol can be rejected even if the
+	// chunk metadata never lived in this FSM. Same rationale as
+	// applyDelete (CmdDeleteChunk) under gastrolog-11rzz.
+	f.tombstones[id] = time.Now()
+
+	_, hadPending := f.pendingDeletes[id]
+	if hadPending {
+		delete(f.pendingDeletes, id)
+	}
+	_, hadEntry := f.chunks[id]
+	if hadEntry {
+		delete(f.chunks, id)
+	}
+
+	// Fire the onFinalizeDelete callback whenever we actually changed
+	// state (either a pending entry was removed OR the manifest entry
+	// was removed). Callers use the callback for audit logging and
+	// post-delete bookkeeping; an idempotent no-op should not fire it.
+	if !hadPending && !hadEntry {
 		return nil, nil
 	}
-	delete(f.pendingDeletes, id)
 	return &id, nil
 }
 
