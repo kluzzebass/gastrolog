@@ -222,6 +222,73 @@ func TestReconcilerDeleteChunkSingleNodeFallback(t *testing.T) {
 	}
 }
 
+// TestReconcilerOnPruneNodeFinalizesEmptiedEntries pins the gastrolog-51gme
+// step 10 invariant: when CmdPruneNode commits and the FSM reports a list
+// of chunks whose ExpectedFrom became empty, the reconciler (leader-only)
+// proposes CmdFinalizeDelete for each. Without this, removing a node from
+// the voter set would orphan its outstanding deletes — onAckDelete only
+// fires for actual CmdAckDelete applies, not for prune-induced empties.
+func TestReconcilerOnPruneNodeFinalizesEmptiedEntries(t *testing.T) {
+	t.Parallel()
+
+	fsm := tierfsm.New()
+	now := time.Now()
+
+	// Three pendingDeletes; pruning node-A empties the second.
+	idStillOwed := chunk.NewChunkID()
+	idEmptied := chunk.NewChunkID()
+	idUntouched := chunk.NewChunkID()
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalRequestDelete(idStillOwed, now, "test", []string{"node-A", "node-B"})})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalRequestDelete(idEmptied, now, "test", []string{"node-A"})})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalRequestDelete(idUntouched, now, "test", []string{"node-B"})})
+
+	var finalized []chunk.ChunkID
+	tier := &TierInstance{
+		TierID:                  glid.New(),
+		Chunks:                  &reconcilerFakeChunkManager{},
+		IsRaftLeader:            func() bool { return true },
+		ApplyRaftFinalizeDelete: func(id chunk.ChunkID) error { finalized = append(finalized, id); return nil },
+	}
+	rec := NewTierLifecycleReconciler(nil, glid.New(), tier.TierID, tier, "node-B", slog.Default())
+	rec.Wire(fsm)
+
+	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalPruneNode("node-A")}); err != nil {
+		t.Fatalf("apply prune: %v", err)
+	}
+
+	if len(finalized) != 1 || finalized[0] != idEmptied {
+		t.Errorf("finalized = %v, want [%s] (idEmptied only)", finalized, idEmptied)
+	}
+}
+
+// TestReconcilerOnPruneNodeSkipsOnFollower pins that a non-leader reconciler
+// observing CmdPruneNode does NOT propose CmdFinalizeDelete — finalization
+// is leader-only, matching onAckDelete.
+func TestReconcilerOnPruneNodeSkipsOnFollower(t *testing.T) {
+	t.Parallel()
+
+	fsm := tierfsm.New()
+	now := time.Now()
+	id := chunk.NewChunkID()
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalRequestDelete(id, now, "test", []string{"node-A"})})
+
+	var finalizeCount atomic.Int32
+	tier := &TierInstance{
+		TierID:                  glid.New(),
+		Chunks:                  &reconcilerFakeChunkManager{},
+		IsRaftLeader:            func() bool { return false },
+		ApplyRaftFinalizeDelete: func(_ chunk.ChunkID) error { finalizeCount.Add(1); return nil },
+	}
+	rec := NewTierLifecycleReconciler(nil, glid.New(), tier.TierID, tier, "node-Z", slog.Default())
+	rec.Wire(fsm)
+
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalPruneNode("node-A")})
+
+	if finalizeCount.Load() != 0 {
+		t.Errorf("follower must not finalize after prune, got %d calls", finalizeCount.Load())
+	}
+}
+
 // TestReconcilerOnSealProjectsToLocalManager pins the gastrolog-51gme step 8
 // invariant: when CmdSealChunk applies, the reconciler asks the local chunk
 // Manager to project the FSM-sealed state via the SealEnsurer interface. The

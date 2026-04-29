@@ -35,6 +35,14 @@ package orchestrator
 //     small allow-list (this file + vault teardown + replaceForwardedChunk
 //     + chunk-package internals). New paths must funnel through
 //     deleteChunk so the receipt protocol stays the single execution API.
+//   step 10 (membership-change cleanup): done. CmdPruneNode (FSM cmd 12)
+//     drops a decommissioned node from every pendingDeletes entry's
+//     ExpectedFrom; the apply returns the chunkIDs whose ExpectedFrom
+//     became empty. The vault-ctl leader manager's onMemberRemoved hook
+//     fans CmdPruneNode out across the vault's tier sub-FSMs after a
+//     successful RemoveServer call; the reconciler's onPruneNode handler
+//     (leader-only) proposes CmdFinalizeDelete for each finalizable
+//     chunk so deletes don't pin pendingDeletes forever.
 
 import (
 	"errors"
@@ -114,6 +122,7 @@ func (r *TierLifecycleReconciler) Wire(fsm *tierfsm.FSM) {
 	fsm.SetOnRequestDelete(r.onRequestDelete)
 	fsm.SetOnAckDelete(r.onAckDelete)
 	fsm.SetOnFinalizeDelete(r.onFinalizeDelete)
+	fsm.SetOnPruneNode(r.onPruneNode)
 	// Note: onDelete and onUpload remain wired by their existing call
 	// sites (file/manager.go). Migrating those into the reconciler
 	// happens during steps 4-7 alongside the path-by-path deletions.
@@ -263,6 +272,34 @@ func (r *TierLifecycleReconciler) onFinalizeDelete(chunkID chunk.ChunkID) {
 	r.logger.Debug("onFinalizeDelete", "chunk", chunkID)
 	// Audit-only. The pending entry was removed inside applyFinalizeDelete
 	// before this callback fired.
+}
+
+// onPruneNode fires on every node when CmdPruneNode commits. Only the
+// vault-ctl Raft leader proposes CmdFinalizeDelete for the chunkIDs
+// whose ExpectedFrom became empty as a result of the prune. Followers
+// observe the event but take no action — finalization is leader-only,
+// matching onAckDelete.
+//
+// Without the post-prune finalize, deletes proposed before the
+// decommissioned node left would stay in pendingDeletes forever: the
+// FSM had already removed the node from ExpectedFrom (the prune did
+// that synchronously), so onAckDelete never re-fires for those chunks.
+// See gastrolog-51gme step 10.
+func (r *TierLifecycleReconciler) onPruneNode(prunedNodeID string, finalizable []chunk.ChunkID) {
+	r.logger.Debug("onPruneNode",
+		"node", prunedNodeID, "finalizable_count", len(finalizable))
+	if r.tier == nil || r.tier.IsRaftLeader == nil || !r.tier.IsRaftLeader() {
+		return
+	}
+	if r.tier.ApplyRaftFinalizeDelete == nil {
+		return
+	}
+	for _, id := range finalizable {
+		if err := r.tier.ApplyRaftFinalizeDelete(id); err != nil {
+			r.logger.Warn("onPruneNode: post-prune finalize failed",
+				"chunk", id, "node", prunedNodeID, "error", err)
+		}
+	}
 }
 
 // fulfillObligation deletes the local copy of a chunk and then proposes

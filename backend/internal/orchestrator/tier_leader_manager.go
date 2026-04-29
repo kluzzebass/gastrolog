@@ -42,6 +42,24 @@ type tierLeaderManager struct {
 	rootCtx       context.Context
 	rootCxl       context.CancelFunc
 	logger        *slog.Logger
+
+	// onMemberRemoved fires after a successful RemoveServer call from
+	// the leader's reconcile pass. The orchestrator wires this to
+	// propose CmdPruneNode on every tier sub-FSM in the vault so
+	// pendingDeletes ExpectedFrom obligations from the decommissioned
+	// node don't block finalization. See gastrolog-51gme step 10.
+	// Nil leaves the prune as a no-op (single-node tests, etc.).
+	onMemberRemoved func(vaultID glid.GLID, removedNodeID string)
+}
+
+// SetOnMemberRemoved registers a callback invoked after the leader
+// reconcile pass successfully removes a server from the vault-ctl Raft
+// group's voter set. Idempotent: replaces any previously-registered
+// callback. See gastrolog-51gme step 10.
+func (m *tierLeaderManager) SetOnMemberRemoved(fn func(vaultID glid.GLID, removedNodeID string)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onMemberRemoved = fn
 }
 
 // newVaultCtlLeaderManager supervises per-vault control-plane Raft leader epochs
@@ -194,6 +212,17 @@ func (m *tierLeaderManager) reconcile(tierID glid.GLID, group *raftgroup.Group) 
 		}
 		m.logger.Info("removed server",
 			"tier", tierID, "node", srv.ID)
+
+		// Snapshot the callback under the lock so a concurrent
+		// SetOnMemberRemoved doesn't race; fire outside the lock.
+		// tierID here is the vault-ctl Raft group ID (== vault ID per
+		// reconfig_vaults.go's Start call site).
+		m.mu.Lock()
+		hook := m.onMemberRemoved
+		m.mu.Unlock()
+		if hook != nil {
+			hook(tierID, string(srv.ID))
+		}
 	}
 
 	// Transfer leadership if the desired leader differs from the current

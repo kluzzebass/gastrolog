@@ -719,6 +719,40 @@ func replaceForwardedChunk(cm chunk.ChunkManager, chunkID chunk.ChunkID, isActiv
 	return nil
 }
 
+// proposePruneNodeForVault fans CmdPruneNode out to every tier sub-FSM
+// in the vault after the vault-ctl Raft leader removed a node from the
+// voter set. Each tier's applier transparently routes the propose to
+// the leader, so this callback can fire from the leader's reconcile
+// pass without needing per-tier leadership checks. See gastrolog-51gme
+// step 10.
+//
+// Errors are logged at warn but do not abort: the next reconcile pass
+// will re-propose CmdPruneNode for any tier where the apply failed
+// (the FSM's applyPruneNode is idempotent — repeated prunes for the
+// same node are no-ops on entries where it's already gone).
+func (o *Orchestrator) proposePruneNodeForVault(vaultID glid.GLID, removedNodeID string) {
+	o.mu.RLock()
+	vault := o.vaults[vaultID]
+	if vault == nil {
+		o.mu.RUnlock()
+		return
+	}
+	tiers := make([]*TierInstance, 0, len(vault.Tiers))
+	tiers = append(tiers, vault.Tiers...)
+	o.mu.RUnlock()
+
+	for _, t := range tiers {
+		if t.ApplyRaftPruneNode == nil {
+			continue
+		}
+		if err := t.ApplyRaftPruneNode(removedNodeID); err != nil {
+			o.logger.Warn("prune-node propose failed",
+				"vault", vaultID, "tier", t.TierID,
+				"removed_node", removedNodeID, "error", err)
+		}
+	}
+}
+
 // placementMembership returns the set of node IDs that participate in a
 // tier's chunk-lifecycle obligations: the local node (always present
 // because callers run on the leader path) plus every follower target's

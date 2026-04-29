@@ -93,6 +93,13 @@ type TierInstance struct {
 	// gastrolog-51gme.
 	ApplyRaftFinalizeDelete func(id chunk.ChunkID) error
 
+	// ApplyRaftPruneNode proposes removal of a node from every pendingDeletes
+	// entry's ExpectedFrom set on this tier sub-FSM. Used by the leader's
+	// membership-change handler after RemoveServer succeeds: a decommissioned
+	// node's outstanding ack obligations would otherwise pin pendingDeletes
+	// entries forever. Nil when no Raft group exists. See gastrolog-51gme step 10.
+	ApplyRaftPruneNode func(nodeID string) error
+
 	// Reconciler owns chunk-lifecycle execution for this tier instance:
 	// FSM-apply event handlers (seal, retention-pending, transition-streamed,
 	// transition-received, request-delete, ack-delete, finalize-delete) plus
@@ -134,6 +141,7 @@ func (t *TierInstance) applyRaftCallbacks(cb tierRaftCallbacks) {
 	t.ApplyRaftRequestDelete = cb.applyRequestDelete
 	t.ApplyRaftAckDelete = cb.applyAckDelete
 	t.ApplyRaftFinalizeDelete = cb.applyFinalizeDelete
+	t.ApplyRaftPruneNode = cb.applyPruneNode
 	t.ListManifest = cb.listChunks
 	t.ApplyRaftRetentionPending = cb.applyRetPending
 	t.ListRetentionPending = cb.listRetPending

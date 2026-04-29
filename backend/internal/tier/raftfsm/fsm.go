@@ -34,6 +34,15 @@ const (
 	CmdRequestDelete  Command = 9  // tier leader proposes a delete; replicates the expected-acks set
 	CmdAckDelete      Command = 10 // each expected node acks after handling its local side
 	CmdFinalizeDelete Command = 11 // leader removes the entry once expectedFrom is empty
+
+	// Membership-change cleanup — gastrolog-51gme step 10. After a node
+	// is removed from this vault-ctl Raft group's voter set (decommissioned
+	// or rebalanced away), the leader proposes CmdPruneNode to drop that
+	// node's slot from every pendingDeletes entry's ExpectedFrom. Without
+	// this, deletes proposed before the node left would never finalize:
+	// the leader would hold the entry forever waiting for an ack from a
+	// node that no longer participates.
+	CmdPruneNode Command = 12
 )
 
 // Entry holds the full metadata for one chunk in the FSM.
@@ -115,6 +124,7 @@ type FSM struct {
 	onRequestDelete  func(PendingDelete) // CmdRequestDelete applied; passes a copy of the new entry
 	onAckDelete      func(chunk.ChunkID, string) // CmdAckDelete applied; (chunkID, ackingNodeID)
 	onFinalizeDelete func(chunk.ChunkID)         // CmdFinalizeDelete applied; expectedFrom was empty
+	onPruneNode      func(string, []chunk.ChunkID) // CmdPruneNode applied; (prunedNodeID, finalizableChunks)
 
 	// transitionReceipts tracks source chunk IDs whose records have been
 	// imported into this tier. The source tier checks this set to confirm
@@ -302,6 +312,19 @@ func (f *FSM) SetOnFinalizeDelete(fn func(chunk.ChunkID)) {
 	f.onFinalizeDelete = fn
 }
 
+// SetOnPruneNode registers a callback invoked (outside the FSM lock)
+// after CmdPruneNode applies. Receives the prunedNodeID and the slice
+// of chunkIDs whose pendingDeletes ExpectedFrom became empty as a
+// result. Leader-side reconcilers should propose CmdFinalizeDelete for
+// each finalizable chunk so the receipt protocol can complete deletes
+// that the decommissioned node would otherwise have blocked. See
+// gastrolog-51gme step 10.
+func (f *FSM) SetOnPruneNode(fn func(prunedNodeID string, finalizable []chunk.ChunkID)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onPruneNode = fn
+}
+
 // ---------- Reads (local, no Raft) ----------
 
 // Get returns a copy of a chunk's metadata, or nil if not found.
@@ -371,6 +394,8 @@ type applyEffects struct {
 	ackedDeleteID        *chunk.ChunkID
 	ackedDeleteNodeID    string
 	finalizedDeleteID    *chunk.ChunkID
+	prunedNode           string
+	prunedFinalizable    []chunk.ChunkID
 
 	onDelete             func(chunk.ChunkID)
 	onUpload             func(Entry)
@@ -381,6 +406,7 @@ type applyEffects struct {
 	onRequestDelete      func(PendingDelete)
 	onAckDelete          func(chunk.ChunkID, string)
 	onFinalizeDelete     func(chunk.ChunkID)
+	onPruneNode          func(string, []chunk.ChunkID)
 }
 
 func (e applyEffects) fire() {
@@ -410,6 +436,9 @@ func (e applyEffects) fire() {
 	}
 	if e.finalizedDeleteID != nil && e.onFinalizeDelete != nil {
 		e.onFinalizeDelete(*e.finalizedDeleteID)
+	}
+	if e.prunedNode != "" && e.onPruneNode != nil {
+		e.onPruneNode(e.prunedNode, e.prunedFinalizable)
 	}
 }
 
@@ -459,6 +488,14 @@ func (f *FSM) applyLocked(cmd Command, payload []byte) (any, applyEffects) {
 		fx.ackedDeleteNodeID = nodeID
 	case CmdFinalizeDelete:
 		fx.finalizedDeleteID, result = f.applyFinalizeDelete(payload)
+	case CmdPruneNode:
+		var (
+			node        string
+			finalizable []chunk.ChunkID
+		)
+		node, finalizable, result = f.applyPruneNode(payload)
+		fx.prunedNode = node
+		fx.prunedFinalizable = finalizable
 	default:
 		result = fmt.Errorf("unknown chunk FSM command: %d", cmd)
 	}
@@ -471,6 +508,7 @@ func (f *FSM) applyLocked(cmd Command, payload []byte) (any, applyEffects) {
 	fx.onRequestDelete = f.onRequestDelete
 	fx.onAckDelete = f.onAckDelete
 	fx.onFinalizeDelete = f.onFinalizeDelete
+	fx.onPruneNode = f.onPruneNode
 	f.mu.Unlock()
 
 	return result, fx

@@ -211,6 +211,108 @@ func TestFinalizeDeleteIdempotent(t *testing.T) {
 	}
 }
 
+// gastrolog-51gme step 10 — CmdPruneNode tests.
+
+func TestPruneNodeRemovesFromExpectedFrom(t *testing.T) {
+	t.Parallel()
+
+	f := New()
+	now := time.Now()
+
+	id1 := chunk.NewChunkID()
+	id2 := chunk.NewChunkID()
+	f.Apply(&hraft.Log{Data: MarshalRequestDelete(id1, now, "test", []string{"node-A", "node-B", "node-C"})})
+	f.Apply(&hraft.Log{Data: MarshalRequestDelete(id2, now, "test", []string{"node-A", "node-C"})})
+
+	if err := f.Apply(&hraft.Log{Data: MarshalPruneNode("node-B")}); err != nil {
+		t.Fatalf("apply prune: %v", err)
+	}
+
+	got1 := f.PendingDelete(id1)
+	if got1 == nil || got1.ExpectedFrom["node-B"] {
+		t.Errorf("id1: expected node-B pruned, got %+v", got1)
+	}
+	if !got1.ExpectedFrom["node-A"] || !got1.ExpectedFrom["node-C"] {
+		t.Errorf("id1: must keep non-pruned nodes, got %v", got1.ExpectedFrom)
+	}
+
+	got2 := f.PendingDelete(id2)
+	if got2 == nil {
+		t.Fatal("id2: expected entry to survive prune (node-B was never expected)")
+	}
+	if !got2.ExpectedFrom["node-A"] || !got2.ExpectedFrom["node-C"] {
+		t.Errorf("id2: untouched expectedFrom, got %v", got2.ExpectedFrom)
+	}
+}
+
+func TestPruneNodeFiresCallbackWithFinalizable(t *testing.T) {
+	t.Parallel()
+
+	f := New()
+	now := time.Now()
+
+	id1 := chunk.NewChunkID() // {A, B} → prune A → still owes B → not finalizable
+	id2 := chunk.NewChunkID() // {A}    → prune A → empty → finalizable
+	id3 := chunk.NewChunkID() // {A, C} → prune A → still owes C → not finalizable
+	f.Apply(&hraft.Log{Data: MarshalRequestDelete(id1, now, "test", []string{"node-A", "node-B"})})
+	f.Apply(&hraft.Log{Data: MarshalRequestDelete(id2, now, "test", []string{"node-A"})})
+	f.Apply(&hraft.Log{Data: MarshalRequestDelete(id3, now, "test", []string{"node-A", "node-C"})})
+
+	var (
+		gotNode        string
+		gotFinalizable []chunk.ChunkID
+	)
+	f.SetOnPruneNode(func(node string, finalizable []chunk.ChunkID) {
+		gotNode = node
+		gotFinalizable = append([]chunk.ChunkID(nil), finalizable...)
+	})
+
+	if err := f.Apply(&hraft.Log{Data: MarshalPruneNode("node-A")}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	if gotNode != "node-A" {
+		t.Errorf("callback node = %q, want node-A", gotNode)
+	}
+	if len(gotFinalizable) != 1 || gotFinalizable[0] != id2 {
+		t.Errorf("finalizable = %v, want [%s] (id2 only)", gotFinalizable, id2)
+	}
+}
+
+func TestPruneNodeIdempotent(t *testing.T) {
+	t.Parallel()
+
+	f := New()
+	now := time.Now()
+
+	id := chunk.NewChunkID()
+	f.Apply(&hraft.Log{Data: MarshalRequestDelete(id, now, "test", []string{"node-A", "node-B"})})
+
+	var fires int32
+	f.SetOnPruneNode(func(_ string, _ []chunk.ChunkID) { fires++ })
+
+	// First prune: node-A removed.
+	f.Apply(&hraft.Log{Data: MarshalPruneNode("node-A")})
+	// Second prune: same node, no entries expect it anymore. Apply succeeds
+	// but no chunk's ExpectedFrom changed. Callback still fires (the apply
+	// happened) but with empty finalizable list.
+	f.Apply(&hraft.Log{Data: MarshalPruneNode("node-A")})
+
+	if fires != 2 {
+		t.Errorf("OnPruneNode fires = %d, want 2 (callback fires per apply, even when no-op)", fires)
+	}
+	got := f.PendingDelete(id)
+	if got == nil {
+		t.Fatal("pending entry should survive idempotent prune")
+	}
+	if got.ExpectedFrom["node-A"] {
+		t.Error("node-A must stay pruned after second apply")
+	}
+	if !got.ExpectedFrom["node-B"] {
+		t.Error("node-B must remain in expectedFrom (only node-A was pruned)")
+	}
+}
+
 func TestIsExpectedToAck(t *testing.T) {
 	t.Parallel()
 

@@ -190,6 +190,42 @@ func (f *FSM) applyFinalizeDelete(data []byte) (*chunk.ChunkID, error) {
 	return &id, nil
 }
 
+// applyPruneNode removes nodeID from every pendingDeletes entry's
+// ExpectedFrom set. Returns the prunedNodeID and the slice of chunkIDs
+// whose ExpectedFrom became empty as a result of the prune (i.e.,
+// chunks that are now ready for the leader to propose CmdFinalizeDelete).
+//
+// Wire format: [1 byte cmd][2 bytes nodeID-len][nodeID-bytes].
+//
+// Idempotent: pruning a node that no entry expected from is a no-op.
+// Pruning twice yields the same final state (the second pass finds
+// nothing to remove and returns an empty finalizable list).
+func (f *FSM) applyPruneNode(data []byte) (string, []chunk.ChunkID, error) {
+	if len(data) < 2 {
+		return "", nil, fmt.Errorf("prune node: payload too short (%d bytes)", len(data))
+	}
+	nodeLen := int(binary.BigEndian.Uint16(data[0:2]))
+	if len(data) < 2+nodeLen {
+		return "", nil, fmt.Errorf("prune node: truncated node ID (%d bytes for %d)", len(data)-2, nodeLen)
+	}
+	nodeID := string(data[2 : 2+nodeLen])
+	if nodeID == "" {
+		return "", nil, errors.New("prune node: empty node ID")
+	}
+
+	var finalizable []chunk.ChunkID
+	for chunkID, p := range f.pendingDeletes {
+		if !p.ExpectedFrom[nodeID] {
+			continue
+		}
+		delete(p.ExpectedFrom, nodeID)
+		if len(p.ExpectedFrom) == 0 {
+			finalizable = append(finalizable, chunkID)
+		}
+	}
+	return nodeID, finalizable, nil
+}
+
 // ---------- Command builders (used by callers before Raft.Apply) ----------
 
 // MarshalRequestDelete builds the Raft log data for CmdRequestDelete.
@@ -243,6 +279,24 @@ func MarshalFinalizeDelete(id chunk.ChunkID) []byte {
 	buf := make([]byte, 1+16)
 	buf[0] = byte(CmdFinalizeDelete)
 	copy(buf[1:17], id[:])
+	return buf
+}
+
+// MarshalPruneNode builds the Raft log data for CmdPruneNode. Wire
+// format: [1 byte cmd][2 bytes nodeID-len][nodeID-bytes]. The leader
+// proposes this after a node is removed from the vault-ctl Raft group
+// (decommissioned or rebalanced away) so its outstanding ack obligations
+// don't pin pendingDeletes entries forever. See gastrolog-51gme step 10.
+func MarshalPruneNode(nodeID string) []byte {
+	if len(nodeID) > 0xFFFF {
+		nodeID = nodeID[:0xFFFF]
+	}
+	buf := make([]byte, 0, 1+2+len(nodeID))
+	buf = append(buf, byte(CmdPruneNode))
+	var nl [2]byte
+	binary.BigEndian.PutUint16(nl[:], uint16(len(nodeID))) //nolint:gosec // G115: node ID strings are <64KB
+	buf = append(buf, nl[:]...)
+	buf = append(buf, nodeID...)
 	return buf
 }
 

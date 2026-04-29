@@ -1079,6 +1079,7 @@ type tierRaftCallbacks struct {
 	applyRequestDelete      func(id chunk.ChunkID, reason string, expectedFrom []string) error
 	applyAckDelete          func(id chunk.ChunkID, nodeID string) error
 	applyFinalizeDelete     func(id chunk.ChunkID) error
+	applyPruneNode          func(nodeID string) error
 	applyRetPending         func(id chunk.ChunkID) error
 	applyTransitionStreamed func(id chunk.ChunkID) error
 	applyTransitionReceived func(sourceChunkID chunk.ChunkID) error
@@ -1171,6 +1172,9 @@ func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.App
 		},
 		applyFinalizeDelete: func(id chunk.ChunkID) error {
 			return applier.Apply(tierfsm.MarshalFinalizeDelete(id))
+		},
+		applyPruneNode: func(nodeID string) error {
+			return applier.Apply(tierfsm.MarshalPruneNode(nodeID))
 		},
 		applyRetPending: func(id chunk.ChunkID) error {
 			return applier.Apply(tierfsm.MarshalRetentionPending(id))
