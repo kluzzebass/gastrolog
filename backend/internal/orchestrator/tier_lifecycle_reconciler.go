@@ -30,6 +30,11 @@ package orchestrator
 //     The "multiple unsealed → seal all but newest" startup heuristic
 //     in file.Manager was deleted; sealed-state divergence (e.g.
 //     gastrolog-uccg6) is now resolved by replaying the FSM truth.
+//   step 9 (lint ban on direct DeleteNoAnnounce / DeleteSilent):
+//     done. The forbidigo linter rejects new direct callers outside a
+//     small allow-list (this file + vault teardown + replaceForwardedChunk
+//     + chunk-package internals). New paths must funnel through
+//     deleteChunk so the receipt protocol stays the single execution API.
 
 import (
 	"errors"
@@ -46,9 +51,10 @@ import (
 // TierInstance. Created during tier wiring (reconfig_vaults.go), wired
 // to the tier's FSM via Wire(), and torn down with the tier instance.
 //
-// The reconciler is the only intended caller of `chunk.DeleteNoAnnounce`
-// and `Manager.Delete` once the migration completes. A linter rule
-// forbidding direct calls outside this file lands in step 9.
+// The reconciler is the canonical caller of `chunk.DeleteNoAnnounce`
+// and the SilentDeleter shortcut. A forbidigo lint rule (step 9)
+// blocks direct calls from anywhere else in the orchestrator package
+// outside a small allow-list (vault teardown, replaceForwardedChunk).
 type TierLifecycleReconciler struct {
 	vaultID     glid.GLID
 	tierID      glid.GLID

@@ -7,6 +7,7 @@ linters:
     - errcheck
     - errorlint
     - exhaustive
+    - forbidigo
     - gocognit
     - gocritic
     - gocyclo
@@ -23,15 +24,52 @@ linters:
     - predeclared
     - staticcheck
     - unconvert
+  settings:
+    # Note: prior to gastrolog-51gme step 9, project-level gocognit /
+    # gocyclo / nestif min-complexity overrides lived under the v1
+    # `linters-settings` key, which golangci-lint v2 silently ignores.
+    # The thresholds below match the v2 defaults (so behavior is the
+    # same as it has actually been); future tightening should migrate
+    # them under this key intentionally.
+    forbidigo:
+      forbid:
+        # gastrolog-51gme step 9: chunk-file deletion must funnel through
+        # TierLifecycleReconciler.deleteChunk so the receipt protocol
+        # (CmdRequestDelete + ack/finalize) is the single execution API.
+        # New direct callers must either route through the reconciler or
+        # justify their inclusion in the path-based exclusion list below.
+        - pattern: "chunk\\.DeleteNoAnnounce"
+          msg: "chunk.DeleteNoAnnounce must only be called from TierLifecycleReconciler. Route deletes through reconciler.deleteChunk so the receipt protocol drives them. See gastrolog-51gme."
+        - pattern: "\\.DeleteSilent\\("
+          msg: "DeleteSilent must only be called from TierLifecycleReconciler / file.Manager internals. Route deletes through reconciler.deleteChunk. See gastrolog-51gme."
   exclusions:
     paths:
       - _test\.go
       - storetest/
-
-linters-settings:
-  gocognit:
-    min-complexity: 15
-  gocyclo:
-    min-complexity: 15
-  nestif:
-    min-complexity: 4
+    rules:
+      # Allow-list for the gastrolog-51gme forbidigo rule above.
+      # tier_lifecycle_reconciler.go: the reconciler itself.
+      # reconfig_vaults.go: vault teardown / drainSweep / wireTierFSMOnDelete
+      #   (legacy CmdDeleteChunk OnDelete cascade, scheduled for removal in
+      #   step 11).
+      # vault_ops.go: replaceForwardedChunk (catchup-replicate cleanup) +
+      #   deleteFromFollowers (legacy fallback, removal alongside CmdDeleteChunk
+      #   in step 11).
+      # internal/chunk: where DeleteNoAnnounce is defined.
+      - linters: [forbidigo]
+        path: "internal/orchestrator/tier_lifecycle_reconciler\\.go"
+      - linters: [forbidigo]
+        path: "internal/orchestrator/reconfig_vaults\\.go"
+      - linters: [forbidigo]
+        path: "internal/orchestrator/vault_ops\\.go"
+      - linters: [forbidigo]
+        path: "internal/chunk/announcer\\.go"
+      - linters: [forbidigo]
+        path: "internal/chunk/file/manager\\.go"
+      # CLI tools intentionally use fmt.Print* for human-facing output;
+      # exempt them from forbidigo's built-in fmt.Print* / println / print
+      # bans. (The receipt-protocol forbid rules don't apply at the cmd
+      # layer either — these are top-level binaries that don't touch
+      # chunk lifecycle.)
+      - linters: [forbidigo]
+        path: "cmd/"
