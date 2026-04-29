@@ -151,11 +151,32 @@ func printTierSection(tier *v1.TierConfig, chunks []*v1.ChunkMeta, nodeNames map
 		if len(short) > 12 {
 			short = short[:12]
 		}
-		fmt.Printf("    %s...  %-40s  %5d records  %s  on %s\n",
+		fmt.Printf("    %s...  %-40s  %5d records  %s  on %s%s\n",
 			short, chunkBadges(c), c.RecordCount, units.FormatBytesDisplay(c.DiskBytes),
-			renderReplicaResidency(c.ReplicaNodeIds, nodeNames))
+			renderReplicaResidency(c.ReplicaNodeIds, nodeNames),
+			renderPendingAcks(c.PendingAckNodeIds, nodeNames))
 	}
 	fmt.Println()
+}
+
+// renderPendingAcks formats the receipt-protocol's still-owed-ack node
+// list as a trailing "  pending-ack: node-2, node-3" suffix. Empty
+// list renders as empty string so chunks without a stuck delete don't
+// get a noisy column. See gastrolog-51gme.
+func renderPendingAcks(nodeIDs []string, nodeNames map[string]string) string {
+	if len(nodeIDs) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(nodeIDs))
+	for _, id := range nodeIDs {
+		if n, ok := nodeNames[id]; ok {
+			names = append(names, n)
+		} else {
+			names = append(names, id)
+		}
+	}
+	sort.Strings(names)
+	return "  pending-ack: " + strings.Join(names, ", ")
 }
 
 // renderReplicaResidency turns a chunk's replica node-ID list into a

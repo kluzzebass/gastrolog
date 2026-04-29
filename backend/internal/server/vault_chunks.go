@@ -35,6 +35,7 @@ func (s *VaultServer) ListChunks(
 	// Collect local chunks, marking any with retention-pending in vault-ctl Raft.
 	pending := s.orch.RetentionPendingChunks(vaultID)
 	streamed := s.orch.TransitionStreamedChunks(vaultID)
+	pendingAcks := s.orch.PendingDeleteAcks(vaultID)
 	var reports []chunkReport
 	metas, err := s.orch.ListAllChunkMetas(vaultID)
 	if err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
@@ -50,6 +51,11 @@ func (s *VaultServer) ListChunks(
 		}
 		if streamed[meta.ID] {
 			pb.TransitionStreamed = true
+		}
+		if owed := pendingAcks[meta.ID]; len(owed) > 0 {
+			sortedOwed := append([]string(nil), owed...)
+			sort.Strings(sortedOwed)
+			pb.PendingAckNodeIds = sortedOwed
 		}
 		reports = append(reports, chunkReport{reportingNode: s.localNodeID, chunk: pb})
 	}

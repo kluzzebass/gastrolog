@@ -341,6 +341,42 @@ func (o *Orchestrator) RetentionPendingChunks(vaultID glid.GLID) map[chunk.Chunk
 	return result
 }
 
+// PendingDeleteAcks returns, for each chunk currently in any tier's
+// receipt-protocol pendingDeletes map within the vault, the set of node
+// IDs that have NOT yet acked the delete. As nodes ack, their entry is
+// removed from ExpectedFrom; what's returned here is the still-owed
+// set. Empty/missing entry means the chunk isn't pending a delete.
+//
+// Lets the inspector show operators which specific node is the laggard
+// holding up a stuck delete (e.g., "pending-ack from: node-3"). The
+// FSM is replicated, so any node's view is authoritative and the
+// caller doesn't need to fan out.
+//
+// Read-only accessor, callable from any node. No readiness gating —
+// observational use only.
+func (o *Orchestrator) PendingDeleteAcks(vaultID glid.GLID) map[chunk.ChunkID][]string {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	vault := o.vaults[vaultID]
+	if vault == nil {
+		return nil
+	}
+	result := make(map[chunk.ChunkID][]string)
+	for _, tier := range vault.Tiers {
+		if tier.Reconciler == nil || tier.Reconciler.fsm == nil {
+			continue
+		}
+		for _, p := range tier.Reconciler.fsm.PendingDeletes() {
+			expected := make([]string, 0, len(p.ExpectedFrom))
+			for nodeID := range p.ExpectedFrom {
+				expected = append(expected, nodeID)
+			}
+			result[p.ChunkID] = expected
+		}
+	}
+	return result
+}
+
 // TransitionStreamedChunks returns chunk IDs on source tiers where records
 // were streamed to the next tier but the local copy is not yet deleted
 // (awaiting destination receipt). See gastrolog-4913n.

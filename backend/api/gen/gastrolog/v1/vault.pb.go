@@ -428,8 +428,15 @@ type ChunkMeta struct {
 	// placement (which says where the chunk SHOULD live, not where it does).
 	// See gastrolog-51gme.
 	ReplicaNodeIds []string `protobuf:"bytes,20,rep,name=replica_node_ids,json=replicaNodeIds,proto3" json:"replica_node_ids,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Receipt-protocol pending acks: when a chunk is in pendingDeletes (i.e. a
+	// CmdRequestDelete has been proposed but the cluster hasn't fully drained
+	// the per-node acks), this is the set of node IDs that still owe an ack.
+	// Empty/absent for chunks not currently in pendingDeletes. Lets the
+	// inspector show which specific node is the laggard holding up a stuck
+	// delete. See gastrolog-51gme.
+	PendingAckNodeIds []string `protobuf:"bytes,21,rep,name=pending_ack_node_ids,json=pendingAckNodeIds,proto3" json:"pending_ack_node_ids,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *ChunkMeta) Reset() {
@@ -598,6 +605,13 @@ func (x *ChunkMeta) GetTransitionStreamed() bool {
 func (x *ChunkMeta) GetReplicaNodeIds() []string {
 	if x != nil {
 		return x.ReplicaNodeIds
+	}
+	return nil
+}
+
+func (x *ChunkMeta) GetPendingAckNodeIds() []string {
+	if x != nil {
+		return x.PendingAckNodeIds
 	}
 	return nil
 }
@@ -2716,7 +2730,7 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\vactive_only\x18\x02 \x01(\bR\n" +
 	"activeOnly\"E\n" +
 	"\x12ListChunksResponse\x12/\n" +
-	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"\x81\x06\n" +
+	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"\xb2\x06\n" +
 	"\tChunkMeta\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12;\n" +
 	"\vwrite_start\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
@@ -2744,7 +2758,8 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\rstorage_class\x18\x11 \x01(\tR\fstorageClass\x12#\n" +
 	"\rreplica_count\x18\x12 \x01(\x05R\freplicaCount\x12/\n" +
 	"\x13transition_streamed\x18\x13 \x01(\bR\x12transitionStreamed\x12(\n" +
-	"\x10replica_node_ids\x18\x14 \x03(\tR\x0ereplicaNodeIds\"B\n" +
+	"\x10replica_node_ids\x18\x14 \x03(\tR\x0ereplicaNodeIds\x12/\n" +
+	"\x14pending_ack_node_ids\x18\x15 \x03(\tR\x11pendingAckNodeIds\"B\n" +
 	"\x0fGetChunkRequest\x12\x14\n" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\x12\x19\n" +
 	"\bchunk_id\x18\x02 \x01(\fR\achunkId\"A\n" +
