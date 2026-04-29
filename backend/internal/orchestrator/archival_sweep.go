@@ -138,14 +138,7 @@ func (o *Orchestrator) archivalSweepTier(tier *TierInstance, cs *system.CloudSer
 		}
 
 		if target.StorageClass == "" {
-			// Delete (expiry).
-			if err := tier.Chunks.Delete(m.ID); err != nil {
-				o.logger.Warn("archival sweep: delete failed",
-					"chunk", m.ID.String(), "error", err)
-			} else {
-				o.logger.Info("archival sweep: expired chunk",
-					"chunk", m.ID.String(), "age", age)
-			}
+			o.archivalExpire(tier, m.ID, age)
 			continue
 		}
 
@@ -162,6 +155,31 @@ func (o *Orchestrator) archivalSweepTier(tier *TierInstance, cs *system.CloudSer
 				"chunk", m.ID.String(), "class", target.StorageClass, "age", age)
 		}
 	}
+}
+
+// archivalExpire deletes a cloud chunk that has aged past its lifecycle's
+// terminal "delete" transition. Routes through the receipt protocol when a
+// reconciler is wired (every node drops its index entry symmetrically);
+// falls back to the local Manager.Delete path for memory-mode tiers without
+// Raft. See gastrolog-51gme step 6.
+func (o *Orchestrator) archivalExpire(tier *TierInstance, id chunk.ChunkID, age time.Duration) {
+	if tier.Reconciler != nil {
+		if err := tier.Reconciler.deleteChunk(id, "archived-to-glacier", o.placementMembership(tier)); err != nil {
+			o.logger.Warn("archival sweep: reconciler delete failed",
+				"chunk", id.String(), "error", err)
+			return
+		}
+		o.logger.Info("archival sweep: expired chunk",
+			"chunk", id.String(), "age", age)
+		return
+	}
+	if err := tier.Chunks.Delete(id); err != nil {
+		o.logger.Warn("archival sweep: delete failed",
+			"chunk", id.String(), "error", err)
+		return
+	}
+	o.logger.Info("archival sweep: expired chunk",
+		"chunk", id.String(), "age", age)
 }
 
 // resolveTransitionTarget finds the highest-matching transition for a chunk's age.
@@ -314,9 +332,18 @@ func (o *Orchestrator) markSuspect(tier *TierInstance, id chunk.ChunkID, now tim
 }
 
 // expireSuspect removes a chunk from the index after its grace period has
-// elapsed without the blob reappearing.
+// elapsed without the blob reappearing. Routes through the receipt protocol
+// when a reconciler is wired (every node drops its index entry symmetrically);
+// falls back to the local Manager.Delete path for memory-mode tiers without
+// Raft. See gastrolog-51gme step 6.
 func (o *Orchestrator) expireSuspect(tier *TierInstance, id chunk.ChunkID, suspectDays uint32) {
-	if err := tier.Chunks.Delete(id); err != nil {
+	if tier.Reconciler != nil {
+		if err := tier.Reconciler.deleteChunk(id, "cloud-blob-missing", o.placementMembership(tier)); err != nil {
+			o.logger.Error("reconcile: reconciler delete failed",
+				"tier", tier.TierID, "chunk", id.String(), "error", err)
+			return
+		}
+	} else if err := tier.Chunks.Delete(id); err != nil {
 		o.logger.Error("reconcile: failed to remove suspect chunk from index",
 			"tier", tier.TierID, "chunk", id.String(), "error", err)
 		return

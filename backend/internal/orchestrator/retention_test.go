@@ -350,7 +350,7 @@ func TestExpireChunkProposesRequestDelete(t *testing.T) {
 		logger:          slog.Default(),
 	}
 
-	r.expireChunk(id)
+	r.expireChunk(id, "retention-ttl")
 
 	if gotChunkID != id {
 		t.Errorf("CmdRequestDelete chunk = %s, want %s", gotChunkID, id)
@@ -408,7 +408,7 @@ func TestExpireChunkSkipsLocalOnRequestDeleteFailure(t *testing.T) {
 		logger: slog.Default(),
 	}
 
-	r.expireChunk(id)
+	r.expireChunk(id, "retention-ttl")
 
 	if len(cm.deleted) != 0 {
 		t.Error("local delete should NOT happen when CmdRequestDelete propose fails")

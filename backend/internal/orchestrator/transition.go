@@ -110,7 +110,7 @@ func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 			"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(),
 			"next_tier", nextTierID, "remote", remote)
 	} else {
-		r.expireChunk(id)
+		r.expireChunk(id, "transition-source-expire")
 		r.logger.Debug("transition: completed (single-node, immediate expire)",
 			"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(),
 			"next_tier", nextTierID)
@@ -187,8 +187,14 @@ func resolveNextTierInChain(cfg *system.Config, vaultID, tierID glid.GLID) (glid
 // When the destination is local, transitionChunk may have failed to apply the
 // receipt once (logged as a warning) while still marking TransitionStreamed.
 // Those chunks would otherwise be excluded from TTL sweeps forever; this pass
-// retries ApplyRaftTransitionReceived until the receipt commits or expireChunk
-// clears the source.
+// retries ApplyRaftTransitionReceived until the receipt commits and the
+// source-expire receipt protocol fires. The receipt-retry covers both the
+// initial-failure case and the longer-tail recovery case where the receipt
+// commit was lost — there is no separate staleness watchdog (the
+// maxTransitionStreamedStaleness watchdog was removed in gastrolog-51gme step 6
+// because the receipt protocol does not benefit from a fallback "delete the
+// source anyway" decision: if the destination never confirmed receipt, deleting
+// the source would risk data loss).
 func (r *retentionRunner) confirmStreamedTransitions(cfg *system.Config) {
 	if r.orch == nil {
 		return
@@ -214,7 +220,6 @@ func (r *retentionRunner) confirmStreamedTransitions(cfg *system.Config) {
 	}
 
 	destTier := r.findDestTierInstance(nextTierID)
-	confirmedCount := 0
 
 	for _, id := range streamed {
 		if destTier != nil && destTier.ApplyRaftTransitionReceived != nil &&
@@ -226,30 +231,10 @@ func (r *retentionRunner) confirmStreamedTransitions(cfg *system.Config) {
 			}
 		}
 		if r.isReceiptConfirmed(destTier, id) {
-			confirmedCount++
-			r.expireChunk(id)
+			r.expireChunk(id, "transition-source-expire")
 			r.logger.Debug("transition: receipt confirmed, expired",
 				"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(),
 				"dest_tier", nextTierID)
-			continue
-		}
-		// Recovery: stream finished but receipt never landed (or dest FSM lost
-		// it). Without this, the chunk stays in TransitionStreamed forever and
-		// TTL never revisits it. See maxTransitionStreamedStaleness in retention.go.
-		meta, err := r.cm.Meta(id)
-		if err != nil {
-			continue
-		}
-		end := meta.WriteEnd
-		if end.IsZero() {
-			end = meta.WriteStart
-		}
-		if !end.IsZero() && end.Before(r.now().Add(-maxTransitionStreamedStaleness)) {
-			r.logger.Warn("transition: recovery expire after prolonged TransitionStreamed",
-				"vault", r.vaultID, "source_tier", r.tierID, "chunk", id.String(),
-				"dest_tier", nextTierID, "write_end", end)
-			confirmedCount++
-			r.expireChunk(id)
 		}
 	}
 }

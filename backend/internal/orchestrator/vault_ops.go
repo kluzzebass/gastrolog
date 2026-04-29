@@ -710,10 +710,40 @@ func replaceForwardedChunk(cm chunk.ChunkManager, chunkID chunk.ChunkID, isActiv
 	return nil
 }
 
+// placementMembership returns the set of node IDs that participate in a
+// tier's chunk-lifecycle obligations: the local node (always present
+// because callers run on the leader path) plus every follower target's
+// node ID, with duplicates collapsed. Suitable for passing as the
+// expectedFrom argument to TierLifecycleReconciler.deleteChunk.
+//
+// Returned in deterministic order (local first, then follower targets in
+// their declared order) so that audit-log output is reproducible across
+// runs even though the FSM-side encoding stores expectedFrom as a map.
+// See gastrolog-51gme.
+func (o *Orchestrator) placementMembership(tier *TierInstance) []string {
+	expected := make([]string, 0, 1+len(tier.FollowerTargets))
+	seen := map[string]bool{}
+	if o.localNodeID != "" {
+		expected = append(expected, o.localNodeID)
+		seen[o.localNodeID] = true
+	}
+	for _, t := range tier.FollowerTargets {
+		if t.NodeID == "" || seen[t.NodeID] {
+			continue
+		}
+		seen[t.NodeID] = true
+		expected = append(expected, t.NodeID)
+	}
+	return expected
+}
+
 // deleteFromFollowers removes a chunk from same-node follower tier instances.
-// Called from retention's expireChunk after applyRaftDelete has already fired
-// the global CmdDeleteChunk. Uses DeleteNoAnnounce to avoid a redundant
-// second Raft-wide announce (the first one already propagated via OnDelete).
+// Called from the reconciler-less fallback in retention's expireChunk after
+// applyRaftDelete has already fired the global CmdDeleteChunk. Uses
+// DeleteNoAnnounce to avoid a redundant second Raft-wide announce (the
+// first one already propagated via OnDelete). The reconciler-driven
+// production path (gastrolog-51gme) walks same-node siblings itself in
+// TierLifecycleReconciler.deleteLocalCopy.
 func (o *Orchestrator) deleteFromFollowers(vaultID glid.GLID, tierID glid.GLID, chunkID chunk.ChunkID) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()

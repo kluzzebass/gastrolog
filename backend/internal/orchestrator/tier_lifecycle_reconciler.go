@@ -8,19 +8,19 @@ package orchestrator
 // single home for "what just happened in the FSM, and what should the
 // local chunk manager do about it?"
 //
-// At step 4 the reconciler drives the receipt-based deletion protocol
-// for retention-ttl. Subsequent steps migrate the remaining cleanup
-// paths onto deleteChunk:
-//
-//   step 6: delete maxTransitionStreamedStaleness; archival sweep
-//   step 7: RPC delete migration
-//   step 8: delete the manager.go startup auto-seal heuristic
-//
-// Step 5 (delete reconcileTierDiskAgainstManifest / reconcileFollower)
-// is done — the disk-vs-manifest sweep was the catchup mechanism for
-// missed OnDelete observations; the receipt protocol's pendingDeletes
-// (preserved across snapshot install + processed by ReconcileFromSnapshot)
-// replaces it.
+// Migration roadmap status:
+//   step 4 (retention-ttl via deleteChunk): done.
+//   step 5 (drop reconcileTierDiskAgainstManifest / reconcileFollower):
+//     done. The receipt protocol's pendingDeletes (preserved across
+//     snapshot install + processed by ReconcileFromSnapshot) replaces
+//     the legacy disk-vs-manifest catchup sweep.
+//   step 6 (archival sweep + drop maxTransitionStreamedStaleness):
+//     done. Archival expiry, archival suspect expiry, and transition
+//     source-expire all route through deleteChunk; the staleness
+//     watchdog was deleted because the receipt protocol does not benefit
+//     from a fallback "delete the source anyway" decision.
+//   step 7: RPC delete migration (manualDelete via CLI/UI).
+//   step 8: delete the manager.go startup auto-seal heuristic.
 
 import (
 	"errors"

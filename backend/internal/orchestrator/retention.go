@@ -20,13 +20,6 @@ import (
 const (
 	defaultRetentionSchedule = "* * * * *" // every minute
 	retentionJobName         = "retention"
-
-	// maxTransitionStreamedStaleness is how long a source may sit in
-	// TransitionStreamed without a durable destination receipt before we
-	// forcibly expire it. The inter-tier stream already completed; without
-	// this, TTL never revisits streamed chunks and a stuck receipt blocks
-	// the pipeline indefinitely.
-	maxTransitionStreamedStaleness = 30 * time.Minute
 )
 
 // retentionKey returns a unique map key for a tier instance's retention state.
@@ -513,7 +506,7 @@ func (r *retentionRunner) tryRetainChunk(id chunk.ChunkID, b retentionRule) {
 	switch b.action {
 	case system.RetentionActionExpire:
 		defer r.clearInflight(id)
-		r.expireChunk(id)
+		r.expireChunk(id, "retention-ttl")
 	case system.RetentionActionEject:
 		defer r.clearInflight(id)
 		r.ejectChunk(id, b.ejectRouteIDs)
@@ -590,9 +583,11 @@ func (r *retentionRunner) markUnreadable(id chunk.ChunkID, reason error) {
 	}
 }
 
-// expireChunk routes a retention-ttl deletion through the lifecycle
-// reconciler's receipt protocol when cluster Raft is wired, and falls
-// back to a direct local delete otherwise.
+// expireChunk routes a chunk deletion through the lifecycle reconciler's
+// receipt protocol when cluster Raft is wired, and falls back to a direct
+// local delete otherwise. reason ends up in the FSM's pendingDeletes
+// entry and in audit logs — see deleteChunk for the canonical reason
+// catalog.
 //
 // Cluster path (gastrolog-51gme step 4):
 //   reconciler.deleteChunk → CmdRequestDelete → onRequestDelete fires on
@@ -605,12 +600,12 @@ func (r *retentionRunner) markUnreadable(id chunk.ChunkID, reason error) {
 // Single-node path:
 //   reconciler.deleteChunk's local-only fallback handles the direct
 //   delete (indexes + chunk + sibling TIs + chunk-change notify).
-func (r *retentionRunner) expireChunk(id chunk.ChunkID) {
+func (r *retentionRunner) expireChunk(id chunk.ChunkID, reason string) {
 	if r.reconciler != nil {
 		expectedFrom := r.expectedFromForExpire()
-		if err := r.reconciler.deleteChunk(id, "retention-ttl", expectedFrom); err != nil {
+		if err := r.reconciler.deleteChunk(id, reason, expectedFrom); err != nil {
 			r.logger.Warn("retention: reconciler deleteChunk failed, will retry",
-				"vault", r.vaultID, "chunk", id.String(), "error", err)
+				"vault", r.vaultID, "chunk", id.String(), "reason", reason, "error", err)
 			return
 		}
 		if r.orch != nil && r.orch.retentionRates != nil {
@@ -621,7 +616,7 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID) {
 			r.orch.retentionRates.Record(r.tierID, r.orch.now())
 		}
 		r.logger.Debug("retention: requested chunk delete via reconciler",
-			"vault", r.vaultID, "chunk", id.String())
+			"vault", r.vaultID, "chunk", id.String(), "reason", reason)
 		return
 	}
 
@@ -668,7 +663,7 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID) {
 }
 
 // expectedFromForExpire returns the placement-membership-at-decision-time
-// for a retention-ttl delete: the local node (always the leader, since
+// for a retention-driven delete: the local node (always the leader, since
 // retention only runs on leaders) plus every follower target's node ID.
 // Duplicate node IDs (same-node follower placements) collapse on the FSM
 // side via the map[string]bool encoding in MarshalRequestDelete.
@@ -693,6 +688,10 @@ func (r *retentionRunner) expectedFromForExpire() []string {
 	}
 	return expected
 }
+
+// (placementMembership lives on Orchestrator in vault_ops.go and serves
+// the cluster paths that aren't routed through a retention runner —
+// archival sweep, the cloud reconciliation suspect-expiry, etc.)
 
 // forwardDeletionToFollowers sends an explicit delete RPC to each remote
 // follower. Used only by the reconciler-less fallback path in expireChunk
