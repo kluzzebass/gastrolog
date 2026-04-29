@@ -660,12 +660,21 @@ func (o *Orchestrator) findTierForDelete(vaultID, tierID glid.GLID) (*TierInstan
 }
 
 // deleteChunkFromTierInstance seals the active chunk if it matches, then
-// deletes the chunk's indexes and data files.
+// deletes the chunk via the lifecycle reconciler's receipt protocol when one
+// is wired (production) or via direct local cleanup otherwise (test harnesses
+// that build TierInstances without going through ApplyConfig).
+//
+// reason="manual-delete-rpc" lands in the FSM's pendingDeletes audit trail so
+// operators can distinguish operator-initiated deletes from retention/transit
+// drivers in chunk-history reviews. See gastrolog-51gme step 7.
 func (o *Orchestrator) deleteChunkFromTierInstance(t *TierInstance, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
 	if active := t.Chunks.Active(); active != nil && active.ID == chunkID {
 		if err := t.Chunks.Seal(); err != nil {
 			return fmt.Errorf("seal active before delete: %w", err)
 		}
+	}
+	if t.Reconciler != nil {
+		return t.Reconciler.deleteChunk(chunkID, "manual-delete-rpc", o.placementMembership(t))
 	}
 	if t.Indexes != nil {
 		if err := t.Indexes.DeleteIndexes(chunkID); err != nil {

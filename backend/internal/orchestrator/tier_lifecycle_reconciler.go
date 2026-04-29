@@ -19,7 +19,11 @@ package orchestrator
 //     source-expire all route through deleteChunk; the staleness
 //     watchdog was deleted because the receipt protocol does not benefit
 //     from a fallback "delete the source anyway" decision.
-//   step 7: RPC delete migration (manualDelete via CLI/UI).
+//   step 7 (manual-delete RPC via deleteChunkFromTierInstance):
+//     done. The CLI/UI delete now routes through the reconciler with
+//     reason "manual-delete-rpc". The active-chunk seal-first behavior
+//     is preserved so deletes targeting the active chunk still seal it
+//     before propagation.
 //   step 8: delete the manager.go startup auto-seal heuristic.
 
 import (
