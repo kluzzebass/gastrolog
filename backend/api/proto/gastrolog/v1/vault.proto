@@ -133,6 +133,19 @@ message ChunkMeta {
   // Source tier: records were streamed to the next tier; local copy is kept
   // until the destination tier commits a receipt, then retention deletes it.
   bool transition_streamed = 19;
+  // Cluster-wide replica residency: the set of node IDs that reported having
+  // this chunk locally during the most recent ListChunks fan-out. Lets the
+  // inspector show which nodes physically hold each replica, distinct from
+  // placement (which says where the chunk SHOULD live, not where it does).
+  // See gastrolog-51gme.
+  repeated string replica_node_ids = 20;
+  // Receipt-protocol pending acks: when a chunk is in pendingDeletes (i.e. a
+  // CmdRequestDelete has been proposed but the cluster hasn't fully drained
+  // the per-node acks), this is the set of node IDs that still owe an ack.
+  // Empty/absent for chunks not currently in pendingDeletes. Lets the
+  // inspector show which specific node is the laggard holding up a stuck
+  // delete. See gastrolog-51gme.
+  repeated string pending_ack_node_ids = 21;
 }
 
 message GetChunkRequest {

@@ -496,6 +496,14 @@ func New(cfg Config) (*Orchestrator, error) {
 	// get compressed and indexed (same pipeline as ingest-triggered seals).
 	o.cronRotation.onSeal = o.postSealWork
 
+	// gastrolog-51gme step 10: when the vault-ctl Raft leader removes a
+	// node from the voter set, propose CmdPruneNode on every tier
+	// sub-FSM in that vault so pendingDeletes ExpectedFrom obligations
+	// from the decommissioned node don't block finalization. The
+	// reconciler's onPruneNode handler will then propose
+	// CmdFinalizeDelete for any chunk whose ExpectedFrom became empty.
+	o.vaultCtlLeaders.SetOnMemberRemoved(o.proposePruneNodeForVault)
+
 	// Per-tier rate alerters. Thresholds are taken from gastrolog-47qyw:
 	//   rotation: warn at >1/sec, error at >5/sec, sustained over 30s
 	//   retention: warn at >10/sec sustained over 30s
@@ -540,6 +548,14 @@ func New(cfg Config) (*Orchestrator, error) {
 
 	if err := o.startReconcileSweep(); err != nil {
 		return nil, fmt.Errorf("reconcile sweep: %w", err)
+	}
+
+	// Receipt-protocol catchup: every node consults its OWN replicated
+	// pendingDeletes every 20s and re-runs any obligations it still
+	// owes. Phase-offset from retention's :00 tick to avoid spikiness.
+	// See gastrolog-51gme.
+	if err := o.startPendingDeleteSweep(); err != nil {
+		return nil, fmt.Errorf("pending-delete sweep: %w", err)
 	}
 
 	return o, nil

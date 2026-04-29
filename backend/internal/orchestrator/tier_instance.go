@@ -68,10 +68,40 @@ type TierInstance struct {
 	// Nil when no Raft group exists.
 	IsTombstoned func(id chunk.ChunkID) bool
 
-	// ApplyRaftDelete applies CmdDeleteChunk through replicated metadata and blocks
-	// until committed. Returns an error if not leader or timeout. Nil when no
-	// Raft group exists.
-	ApplyRaftDelete func(id chunk.ChunkID) error
+	// ApplyRaftRequestDelete proposes the receipt-based delete protocol's
+	// opening command (CmdRequestDelete). The FSM adds a pendingDeletes entry
+	// keyed by chunk ID with the given reason and expectedFrom set; every
+	// node in expectedFrom owes a CmdAckDelete after deleting its local
+	// copy, and the leader proposes CmdFinalizeDelete once expectedFrom is
+	// empty. Nil when no Raft group exists. See gastrolog-51gme.
+	ApplyRaftRequestDelete func(id chunk.ChunkID, reason string, expectedFrom []string) error
+
+	// ApplyRaftAckDelete proposes a node's ack of a pending delete obligation.
+	// Idempotent: duplicate / unknown-node acks are no-ops. Nil when no Raft
+	// group exists. See gastrolog-51gme.
+	ApplyRaftAckDelete func(id chunk.ChunkID, nodeID string) error
+
+	// ApplyRaftFinalizeDelete proposes the leader's finalization of a pending
+	// delete. Removes the pendingDeletes entry; the entry-removal already
+	// happened in the FSM applyFinalizeDelete handler, so this is purely the
+	// distributed-commit signal. Nil when no Raft group exists. See
+	// gastrolog-51gme.
+	ApplyRaftFinalizeDelete func(id chunk.ChunkID) error
+
+	// ApplyRaftPruneNode proposes removal of a node from every pendingDeletes
+	// entry's ExpectedFrom set on this tier sub-FSM. Used by the leader's
+	// membership-change handler after RemoveServer succeeds: a decommissioned
+	// node's outstanding ack obligations would otherwise pin pendingDeletes
+	// entries forever. Nil when no Raft group exists. See gastrolog-51gme step 10.
+	ApplyRaftPruneNode func(nodeID string) error
+
+	// Reconciler owns chunk-lifecycle execution for this tier instance:
+	// FSM-apply event handlers (seal, retention-pending, transition-streamed,
+	// transition-received, request-delete, ack-delete, finalize-delete) plus
+	// the canonical deleteChunk entry point. All cluster-wide deletes route
+	// through here over gastrolog-51gme steps 4-8. Nil for memory-mode tiers
+	// (no FSM, no replication).
+	Reconciler *TierLifecycleReconciler
 
 	// ListManifest returns all chunk IDs in the tier FSM view — the authoritative
 	// set of chunks that should exist. Nil when no Raft group exists.
@@ -102,7 +132,10 @@ type TierInstance struct {
 func (t *TierInstance) applyRaftCallbacks(cb tierRaftCallbacks) {
 	t.HasRaftLeader = cb.hasLeader
 	t.IsRaftLeader = cb.isLeader
-	t.ApplyRaftDelete = cb.applyDelete
+	t.ApplyRaftRequestDelete = cb.applyRequestDelete
+	t.ApplyRaftAckDelete = cb.applyAckDelete
+	t.ApplyRaftFinalizeDelete = cb.applyFinalizeDelete
+	t.ApplyRaftPruneNode = cb.applyPruneNode
 	t.ListManifest = cb.listChunks
 	t.ApplyRaftRetentionPending = cb.applyRetPending
 	t.ListRetentionPending = cb.listRetPending

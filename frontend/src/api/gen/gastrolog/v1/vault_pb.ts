@@ -443,6 +443,29 @@ export class ChunkMeta extends Message<ChunkMeta> {
    */
   transitionStreamed = false;
 
+  /**
+   * Cluster-wide replica residency: the set of node IDs that reported having
+   * this chunk locally during the most recent ListChunks fan-out. Lets the
+   * inspector show which nodes physically hold each replica, distinct from
+   * placement (which says where the chunk SHOULD live, not where it does).
+   * See gastrolog-51gme.
+   *
+   * @generated from field: repeated string replica_node_ids = 20;
+   */
+  replicaNodeIds: string[] = [];
+
+  /**
+   * Receipt-protocol pending acks: when a chunk is in pendingDeletes (i.e. a
+   * CmdRequestDelete has been proposed but the cluster hasn't fully drained
+   * the per-node acks), this is the set of node IDs that still owe an ack.
+   * Empty/absent for chunks not currently in pendingDeletes. Lets the
+   * inspector show which specific node is the laggard holding up a stuck
+   * delete. See gastrolog-51gme.
+   *
+   * @generated from field: repeated string pending_ack_node_ids = 21;
+   */
+  pendingAckNodeIds: string[] = [];
+
   constructor(data?: PartialMessage<ChunkMeta>) {
     super();
     proto3.util.initPartial(data, this);
@@ -470,6 +493,8 @@ export class ChunkMeta extends Message<ChunkMeta> {
     { no: 17, name: "storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 18, name: "replica_count", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
     { no: 19, name: "transition_streamed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 20, name: "replica_node_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 21, name: "pending_ack_node_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkMeta {

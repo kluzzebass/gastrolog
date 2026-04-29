@@ -133,20 +133,27 @@ func (o *Orchestrator) isRemoteVault(ctx context.Context, vaultID glid.GLID) (st
 	return nodeID, true, nil
 }
 
-// deleteSourceChunk removes indexes and the chunk from the source vault on
-// the tier that owns chunkID.
+// deleteSourceChunk removes the chunk from the source vault on the tier
+// that owns it. Routes through the receipt protocol when a reconciler is
+// wired (production) so the source-side delete propagates cluster-wide
+// via CmdRequestDelete. Falls back to a direct local delete for
+// memory-mode tiers without Raft. Reason "vault-migrate-source-expire"
+// lands in pendingDeletes audit. See gastrolog-51gme.
 func (o *Orchestrator) deleteSourceChunk(srcID glid.GLID, chunkID chunk.ChunkID) error {
-	cm, im, err := o.findManagersForChunk(srcID, chunkID)
+	tier, err := o.findTierForChunk(srcID, chunkID)
 	if err != nil {
 		return err
 	}
-	if im != nil {
-		if err := im.DeleteIndexes(chunkID); err != nil {
+	if tier.Reconciler != nil {
+		return tier.Reconciler.deleteChunk(chunkID, "vault-migrate-source-expire", o.placementMembership(tier))
+	}
+	if tier.Indexes != nil {
+		if err := tier.Indexes.DeleteIndexes(chunkID); err != nil {
 			o.logger.Warn("retention migrate: failed to delete source indexes",
 				"chunk", chunkID.String(), "error", err)
 		}
 	}
-	if err := cm.Delete(chunkID); err != nil {
+	if err := tier.Chunks.Delete(chunkID); err != nil {
 		return fmt.Errorf("delete source chunk %s: %w", chunkID, err)
 	}
 	return nil

@@ -116,6 +116,32 @@ func (o *Orchestrator) findChunkManagerForChunk(vaultID glid.GLID, chunkID chunk
 	return cm, err
 }
 
+// findTierForChunk returns the TierInstance that owns the given chunk.
+// Used by paths (vault migrate, tier drain) that need access to the
+// tier's reconciler + placement metadata to drive cluster-wide deletes
+// through the receipt protocol. Errors if the vault is unknown / not
+// ready, or if no tier in the vault has the chunk.
+func (o *Orchestrator) findTierForChunk(vaultID glid.GLID, chunkID chunk.ChunkID) (*TierInstance, error) {
+	o.mu.RLock()
+	vault := o.vaults[vaultID]
+	o.mu.RUnlock()
+	if vault == nil {
+		return nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+	}
+	if err := vaultReplicationReadinessErr(vaultID, vault); err != nil {
+		return nil, err
+	}
+	for _, tier := range vault.Tiers {
+		if _, err := tier.Chunks.Meta(chunkID); err == nil {
+			return tier, nil
+		}
+		if active := tier.Chunks.Active(); active != nil && active.ID == chunkID {
+			return tier, nil
+		}
+	}
+	return nil, fmt.Errorf("%w: chunk %s in vault %s", chunk.ErrChunkNotFound, chunkID, vaultID)
+}
+
 // ArchiveChunk transitions a cloud-backed sealed chunk to an offline storage class.
 func (o *Orchestrator) ArchiveChunk(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, storageClass string) error {
 	cm, err := o.findChunkManagerForChunk(vaultID, chunkID)
@@ -660,12 +686,21 @@ func (o *Orchestrator) findTierForDelete(vaultID, tierID glid.GLID) (*TierInstan
 }
 
 // deleteChunkFromTierInstance seals the active chunk if it matches, then
-// deletes the chunk's indexes and data files.
+// deletes the chunk via the lifecycle reconciler's receipt protocol when one
+// is wired (production) or via direct local cleanup otherwise (test harnesses
+// that build TierInstances without going through ApplyConfig).
+//
+// reason="manual-delete-rpc" lands in the FSM's pendingDeletes audit trail so
+// operators can distinguish operator-initiated deletes from retention/transit
+// drivers in chunk-history reviews. See gastrolog-51gme step 7.
 func (o *Orchestrator) deleteChunkFromTierInstance(t *TierInstance, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
 	if active := t.Chunks.Active(); active != nil && active.ID == chunkID {
 		if err := t.Chunks.Seal(); err != nil {
 			return fmt.Errorf("seal active before delete: %w", err)
 		}
+	}
+	if t.Reconciler != nil {
+		return t.Reconciler.deleteChunk(chunkID, "manual-delete-rpc", o.placementMembership(t))
 	}
 	if t.Indexes != nil {
 		if err := t.Indexes.DeleteIndexes(chunkID); err != nil {
@@ -710,10 +745,120 @@ func replaceForwardedChunk(cm chunk.ChunkManager, chunkID chunk.ChunkID, isActiv
 	return nil
 }
 
+// proposePruneNodeForVault fans CmdPruneNode out to every tier sub-FSM
+// in the vault after the vault-ctl Raft leader removed a node from the
+// voter set. Each tier's applier transparently routes the propose to
+// the leader, so this callback can fire from the leader's reconcile
+// pass without needing per-tier leadership checks. See gastrolog-51gme
+// step 10.
+//
+// afterVaultCtlRestore fires (off the FSM apply pump, on the
+// vaultraft.FSM's after-restore hook goroutine) once the vault-ctl
+// FSM Restore for vaultID has completed. Walks every TierInstance in
+// the vault and runs the receipt protocol's catchup pass: process any
+// pendingDeletes obligations this node owes, and project FSM-sealed
+// state onto the local chunk Manager.
+//
+// Without this hook, the receipt protocol's catchup mechanism is dead
+// code — pendingDeletes silently leak across snapshot install
+// boundaries and FSM-sealed-but-local-active divergences (e.g.
+// gastrolog-uccg6) don't reconcile. Wired from
+// ensureVaultCtlTierMetadata via vfsm.SetOnAfterRestore. See
+// gastrolog-51gme.
+//
+// Snapshot a copy of vault.Tiers under the read lock and walk it
+// without holding the lock — ReconcileFromSnapshot may take the chunk
+// manager mutex and propose Raft applies, neither of which should
+// happen with o.mu held.
+func (o *Orchestrator) afterVaultCtlRestore(vaultID glid.GLID) {
+	o.mu.RLock()
+	vault := o.vaults[vaultID]
+	if vault == nil {
+		o.mu.RUnlock()
+		return
+	}
+	tiers := make([]*TierInstance, len(vault.Tiers))
+	copy(tiers, vault.Tiers)
+	o.mu.RUnlock()
+
+	for _, t := range tiers {
+		if t == nil || t.Reconciler == nil {
+			continue
+		}
+		// Resolve the matching tier sub-FSM via the vault-ctl Raft
+		// group's FSM. The reconciler.fsm cached at Wire time is the
+		// SAME pointer (vaultraft.FSM.EnsureTierFSM is idempotent),
+		// so passing it explicitly here is just defensive.
+		if t.Reconciler.fsm == nil {
+			continue
+		}
+		t.Reconciler.ReconcileFromSnapshot(t.Reconciler.fsm)
+	}
+	o.logger.Info("vault-ctl after-restore reconcile complete",
+		"vault", vaultID, "tiers", len(tiers))
+}
+
+// Errors are logged at warn but do not abort: the next reconcile pass
+// will re-propose CmdPruneNode for any tier where the apply failed
+// (the FSM's applyPruneNode is idempotent — repeated prunes for the
+// same node are no-ops on entries where it's already gone).
+func (o *Orchestrator) proposePruneNodeForVault(vaultID glid.GLID, removedNodeID string) {
+	o.mu.RLock()
+	vault := o.vaults[vaultID]
+	if vault == nil {
+		o.mu.RUnlock()
+		return
+	}
+	tiers := make([]*TierInstance, 0, len(vault.Tiers))
+	tiers = append(tiers, vault.Tiers...)
+	o.mu.RUnlock()
+
+	for _, t := range tiers {
+		if t.ApplyRaftPruneNode == nil {
+			continue
+		}
+		if err := t.ApplyRaftPruneNode(removedNodeID); err != nil {
+			o.logger.Warn("prune-node propose failed",
+				"vault", vaultID, "tier", t.TierID,
+				"removed_node", removedNodeID, "error", err)
+		}
+	}
+}
+
+// placementMembership returns the set of node IDs that participate in a
+// tier's chunk-lifecycle obligations: the local node (always present
+// because callers run on the leader path) plus every follower target's
+// node ID, with duplicates collapsed. Suitable for passing as the
+// expectedFrom argument to TierLifecycleReconciler.deleteChunk.
+//
+// Returned in deterministic order (local first, then follower targets in
+// their declared order) so that audit-log output is reproducible across
+// runs even though the FSM-side encoding stores expectedFrom as a map.
+// See gastrolog-51gme.
+func (o *Orchestrator) placementMembership(tier *TierInstance) []string {
+	expected := make([]string, 0, 1+len(tier.FollowerTargets))
+	seen := map[string]bool{}
+	if o.localNodeID != "" {
+		expected = append(expected, o.localNodeID)
+		seen[o.localNodeID] = true
+	}
+	for _, t := range tier.FollowerTargets {
+		if t.NodeID == "" || seen[t.NodeID] {
+			continue
+		}
+		seen[t.NodeID] = true
+		expected = append(expected, t.NodeID)
+	}
+	return expected
+}
+
 // deleteFromFollowers removes a chunk from same-node follower tier instances.
-// Called from retention's expireChunk after applyRaftDelete has already fired
-// the global CmdDeleteChunk. Uses DeleteNoAnnounce to avoid a redundant
-// second Raft-wide announce (the first one already propagated via OnDelete).
+// Called from the reconciler-less fallback in retention's expireChunk after
+// applyRaftDelete has already fired the global CmdDeleteChunk. Uses
+// DeleteNoAnnounce to avoid a redundant second Raft-wide announce (the
+// first one already propagated via OnDelete). The reconciler-driven
+// production path (gastrolog-51gme) walks same-node siblings itself in
+// TierLifecycleReconciler.deleteLocalCopy.
 func (o *Orchestrator) deleteFromFollowers(vaultID glid.GLID, tierID glid.GLID, chunkID chunk.ChunkID) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"gastrolog/internal/glid"
 	"math"
+	"sort"
+	"strings"
 
 	"connectrpc.com/connect"
 
@@ -33,6 +35,7 @@ func (s *VaultServer) ListChunks(
 	// Collect local chunks, marking any with retention-pending in vault-ctl Raft.
 	pending := s.orch.RetentionPendingChunks(vaultID)
 	streamed := s.orch.TransitionStreamedChunks(vaultID)
+	pendingAcks := s.orch.PendingDeleteAcks(vaultID)
 	var reports []chunkReport
 	metas, err := s.orch.ListAllChunkMetas(vaultID)
 	if err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
@@ -48,6 +51,11 @@ func (s *VaultServer) ListChunks(
 		}
 		if streamed[meta.ID] {
 			pb.TransitionStreamed = true
+		}
+		if owed := pendingAcks[meta.ID]; len(owed) > 0 {
+			sortedOwed := append([]string(nil), owed...)
+			sort.Strings(sortedOwed)
+			pb.PendingAckNodeIds = sortedOwed
 		}
 		reports = append(reports, chunkReport{reportingNode: s.localNodeID, chunk: pb})
 	}
@@ -143,6 +151,19 @@ func dedupChunkReports(reports []chunkReport) []*apiv1.ChunkMeta {
 			// replicas is capped; cluster node counts do not approach MaxInt32.
 			c.ReplicaCount = int32(replicas) //nolint:gosec // G115: bounded by branch above
 		}
+		// Populate the cluster-wide replica residency set so the
+		// inspector can show which nodes physically hold this chunk.
+		// Skip the synthetic "__anon_*" keys used by unit tests where
+		// no reportingNode was set; those carry no operator value.
+		// Sort for deterministic display. See gastrolog-51gme.
+		nodeIDs := make([]string, 0, len(a.nodes))
+		for nid := range a.nodes {
+			if !strings.HasPrefix(nid, "__anon_") {
+				nodeIDs = append(nodeIDs, nid)
+			}
+		}
+		sort.Strings(nodeIDs)
+		c.ReplicaNodeIds = nodeIDs
 		out = append(out, c)
 	}
 	return out

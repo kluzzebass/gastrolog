@@ -40,6 +40,25 @@ type SilentDeleter interface {
 	DeleteSilent(id ChunkID) error
 }
 
+// SealEnsurer is an optional interface for chunk managers that can project
+// the FSM's sealed state onto local files without firing the announcer.
+// Used by the TierLifecycleReconciler's onSeal callback (and the snapshot-
+// restore catchup pass) so that FSM-truth wins when local file state
+// disagrees — closes gastrolog-uccg6 structurally and replaces the
+// "multiple unsealed → seal all but newest" startup heuristic that was
+// removed in gastrolog-51gme step 8.
+//
+// The contract: EnsureSealed sets the sealed flag on the chunk's local
+// file headers if the chunk exists locally and is not already sealed. A
+// chunk that doesn't exist locally is a silent no-op — it just means
+// this node never had it. A chunk that's the local Manager's active
+// chunk is logged but skipped (the divergence is rare and resolves
+// itself on the next sealing rotation; sealing the active chunk silently
+// from outside the regular Seal path would race with in-flight writes).
+type SealEnsurer interface {
+	EnsureSealed(id ChunkID) error
+}
+
 // DeleteNoAnnounce deletes a chunk from the local store without firing the
 // metadata announcer. Used by LOCAL cleanup paths (e.g. replacing a
 // forwarded-but-not-yet-canonical chunk, cleaning up orphaned follower

@@ -83,11 +83,28 @@ func runInspectVault(cmd *cobra.Command, args []string) error {
 	vaultName := resolveVaultName(cfgResp.Msg.Vaults, vaultID, args[0])
 	fmt.Printf("Vault: %s (%s)\n\n", vaultName, vaultID)
 
+	nodeNames := nodeIDToNameMap(cfgResp.Msg.NodeConfigs)
 	for _, tier := range vaultTiers {
-		printTierSection(tier, chunksByTier[glid.FromBytes(tier.Id).String()])
+		printTierSection(tier, chunksByTier[glid.FromBytes(tier.Id).String()], nodeNames)
 	}
 
 	return nil
+}
+
+// nodeIDToNameMap builds a lookup of node ID → human name from the system
+// config, so the inspector can render replica residency as friendly node
+// names ("node-1, node-3") rather than raw GLIDs.
+func nodeIDToNameMap(nodes []*v1.NodeConfig) map[string]string {
+	m := make(map[string]string, len(nodes))
+	for _, n := range nodes {
+		id := glid.FromBytes(n.Id).String()
+		if n.Name != "" {
+			m[id] = n.Name
+		} else {
+			m[id] = id
+		}
+	}
+	return m
 }
 
 func collectVaultTiers(tiers []*v1.TierConfig, vaultID string) []*v1.TierConfig {
@@ -112,7 +129,7 @@ func resolveVaultName(vaults []*v1.VaultConfig, vaultID, fallback string) string
 	return fallback
 }
 
-func printTierSection(tier *v1.TierConfig, chunks []*v1.ChunkMeta) {
+func printTierSection(tier *v1.TierConfig, chunks []*v1.ChunkMeta, nodeNames map[string]string) {
 	tierType := strings.TrimPrefix(tier.Type.String(), "TIER_TYPE_")
 	var totalRecords, totalBytes int64
 	for _, c := range chunks {
@@ -134,10 +151,54 @@ func printTierSection(tier *v1.TierConfig, chunks []*v1.ChunkMeta) {
 		if len(short) > 12 {
 			short = short[:12]
 		}
-		fmt.Printf("    %s...  %-40s  %5d records  %s\n",
-			short, chunkBadges(c), c.RecordCount, units.FormatBytesDisplay(c.DiskBytes))
+		fmt.Printf("    %s...  %-40s  %5d records  %s  on %s%s\n",
+			short, chunkBadges(c), c.RecordCount, units.FormatBytesDisplay(c.DiskBytes),
+			renderReplicaResidency(c.ReplicaNodeIds, nodeNames),
+			renderPendingAcks(c.PendingAckNodeIds, nodeNames))
 	}
 	fmt.Println()
+}
+
+// renderPendingAcks formats the receipt-protocol's still-owed-ack node
+// list as a trailing "  pending-ack: node-2, node-3" suffix. Empty
+// list renders as empty string so chunks without a stuck delete don't
+// get a noisy column. See gastrolog-51gme.
+func renderPendingAcks(nodeIDs []string, nodeNames map[string]string) string {
+	if len(nodeIDs) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(nodeIDs))
+	for _, id := range nodeIDs {
+		if n, ok := nodeNames[id]; ok {
+			names = append(names, n)
+		} else {
+			names = append(names, id)
+		}
+	}
+	sort.Strings(names)
+	return "  pending-ack: " + strings.Join(names, ", ")
+}
+
+// renderReplicaResidency turns a chunk's replica node-ID list into a
+// readable "node-1, node-3" string. Replica IDs come from the merged
+// ListChunks fan-out — the set of nodes that actually reported the
+// chunk locally, which is distinct from placement (where it should
+// live). Empty list renders as "—" so a chunk that nobody holds is
+// visually distinct from one with replicas.
+func renderReplicaResidency(nodeIDs []string, nodeNames map[string]string) string {
+	if len(nodeIDs) == 0 {
+		return "—"
+	}
+	names := make([]string, 0, len(nodeIDs))
+	for _, id := range nodeIDs {
+		if n, ok := nodeNames[id]; ok {
+			names = append(names, n)
+		} else {
+			names = append(names, id)
+		}
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }
 
 func newInspectChunkCmd() *cobra.Command {

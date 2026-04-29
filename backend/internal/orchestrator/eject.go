@@ -74,7 +74,7 @@ func (r *retentionRunner) ejectChunk(id chunk.ChunkID, routeIDs []glid.GLID) {
 	}
 
 	// All records delivered — delete source chunk.
-	r.expireChunk(id)
+	r.expireChunk(id, "ejected")
 	r.logger.Info("retention eject: completed",
 		"vault", r.vaultID, "chunk", id.String(),
 		"records", recordCount, "routes", len(routes))

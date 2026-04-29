@@ -301,65 +301,117 @@ func TestSetBindingsHotSwap(t *testing.T) {
 	}
 }
 
-func TestExpireChunkAppliesRaftDeleteBeforeLocal(t *testing.T) {
+// TestExpireChunkProposesRequestDelete pins the gastrolog-51gme step 4
+// contract: in cluster mode, expireChunk routes through the lifecycle
+// reconciler and proposes CmdRequestDelete (not the legacy CmdDeleteChunk).
+// The local file delete only happens when CmdRequestDelete commits and the
+// FSM dispatches onRequestDelete — so an isolated retentionRunner test that
+// stubs only the applier MUST observe an empty deleted-list, because the
+// FSM apply never fires here.
+func TestExpireChunkProposesRequestDelete(t *testing.T) {
 	id := chunkIDAt(time.Now())
 	cm := &retentionFakeChunkManager{
 		chunks: []chunk.ChunkMeta{{ID: id, Sealed: true}},
 	}
 	im := &retentionFakeIndexManager{}
 
-	var raftApplied bool
-	r := &retentionRunner{
-		isLeader: true,
-		vaultID:  glid.New(),
-		tierID:   glid.New(),
-		cm:       cm,
-		im:       im,
-		now:      time.Now,
-		logger:   slog.Default(),
-		applyRaftDelete: func(deleteID chunk.ChunkID) error {
-			if deleteID != id {
-				t.Errorf("unexpected chunk ID: %s", deleteID)
-			}
-			raftApplied = true
+	vaultID, tierID := glid.New(), glid.New()
+	var (
+		gotChunkID      chunk.ChunkID
+		gotReason       string
+		gotExpectedFrom []string
+	)
+	tier := &TierInstance{
+		TierID: tierID,
+		Chunks: cm,
+		Indexes: im,
+		FollowerTargets: []system.ReplicationTarget{
+			{NodeID: "node-B", StorageID: "s-B"},
+			{NodeID: "node-C", StorageID: "s-C"},
+		},
+		ApplyRaftRequestDelete: func(cid chunk.ChunkID, reason string, expectedFrom []string) error {
+			gotChunkID = cid
+			gotReason = reason
+			gotExpectedFrom = expectedFrom
 			return nil
 		},
 	}
+	rec := NewTierLifecycleReconciler(nil, vaultID, tierID, tier, "node-A", slog.Default())
 
-	r.expireChunk(id)
-
-	if !raftApplied {
-		t.Error("expected Raft delete to be applied before local delete")
+	r := &retentionRunner{
+		isLeader:        true,
+		vaultID:         vaultID,
+		tierID:          tierID,
+		cm:              cm,
+		im:              im,
+		reconciler:      rec,
+		followerTargets: tier.FollowerTargets,
+		now:             time.Now,
+		logger:          slog.Default(),
 	}
-	if len(cm.deleted) != 1 || cm.deleted[0] != id {
-		t.Errorf("expected local chunk deletion, got %v", cm.deleted)
+
+	r.expireChunk(id, "retention-ttl")
+
+	if gotChunkID != id {
+		t.Errorf("CmdRequestDelete chunk = %s, want %s", gotChunkID, id)
+	}
+	if gotReason != "retention-ttl" {
+		t.Errorf("CmdRequestDelete reason = %q, want %q", gotReason, "retention-ttl")
+	}
+	wantExpected := []string{"node-A", "node-B", "node-C"}
+	if len(gotExpectedFrom) != len(wantExpected) {
+		t.Fatalf("expectedFrom = %v, want %v", gotExpectedFrom, wantExpected)
+	}
+	for i, n := range wantExpected {
+		if gotExpectedFrom[i] != n {
+			t.Errorf("expectedFrom[%d] = %s, want %s", i, gotExpectedFrom[i], n)
+		}
+	}
+	// The FSM apply never fires in this isolated unit test, so the local
+	// delete must not have happened — onRequestDelete is what runs it.
+	if len(cm.deleted) != 0 {
+		t.Errorf("local chunk delete must wait for FSM apply, got %v", cm.deleted)
 	}
 }
 
-func TestExpireChunkSkipsLocalOnRaftFailure(t *testing.T) {
+// TestExpireChunkSkipsLocalOnRequestDeleteFailure pins the failure-mode
+// invariant: when CmdRequestDelete cannot be proposed (e.g. not leader,
+// applier rejection), no local delete happens. The FSM apply chain is the
+// only path that touches local files, and a failed propose leaves the
+// chain unfired. See gastrolog-51gme step 4.
+func TestExpireChunkSkipsLocalOnRequestDeleteFailure(t *testing.T) {
 	id := chunkIDAt(time.Now())
 	cm := &retentionFakeChunkManager{
 		chunks: []chunk.ChunkMeta{{ID: id, Sealed: true}},
 	}
 	im := &retentionFakeIndexManager{}
 
-	r := &retentionRunner{
-		isLeader: true,
-		vaultID:  glid.New(),
-		tierID:   glid.New(),
-		cm:       cm,
-		im:       im,
-		now:      time.Now,
-		logger:   slog.Default(),
-		applyRaftDelete: func(_ chunk.ChunkID) error {
+	vaultID, tierID := glid.New(), glid.New()
+	tier := &TierInstance{
+		TierID:  tierID,
+		Chunks:  cm,
+		Indexes: im,
+		ApplyRaftRequestDelete: func(_ chunk.ChunkID, _ string, _ []string) error {
 			return fmt.Errorf("not leader")
 		},
 	}
+	rec := NewTierLifecycleReconciler(nil, vaultID, tierID, tier, "node-A", slog.Default())
 
-	r.expireChunk(id)
+	r := &retentionRunner{
+		isLeader:   true,
+		vaultID:    vaultID,
+		tierID:     tierID,
+		cm:         cm,
+		im:         im,
+		reconciler: rec,
+		now:    time.Now,
+		logger: slog.Default(),
+	}
+
+	r.expireChunk(id, "retention-ttl")
 
 	if len(cm.deleted) != 0 {
-		t.Error("local delete should NOT happen when Raft apply fails")
+		t.Error("local delete should NOT happen when CmdRequestDelete propose fails")
 	}
 }
 
@@ -618,188 +670,13 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 	}
 }
 
-// ---------- reconcileFollower tests ----------
-
-func TestReconcileFollowerSkipsWhenFSMNotReady(t *testing.T) {
-	t.Parallel()
-
-	orphanID := chunk.NewChunkID()
-	manifestID := chunk.NewChunkID()
-
-	cm := &retentionFakeChunkManager{
-		chunks: []chunk.ChunkMeta{
-			{ID: orphanID, Sealed: true},
-			{ID: manifestID, Sealed: true},
-		},
-	}
-
-	tier := &TierInstance{
-		TierID:  glid.New(),
-		Chunks:  cm,
-		Indexes: &retentionFakeIndexManager{},
-		// FSM not ready — manifest incomplete, unsafe to reconcile.
-		IsFSMReady:   func() bool { return false },
-		ListManifest: func() []chunk.ChunkID { return []chunk.ChunkID{manifestID} },
-	}
-
-	orch, err := New(Config{Logger: slog.Default()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer orch.Stop()
-
-	orch.reconcileFollower(tier)
-
-	if len(cm.deleted) != 0 {
-		t.Errorf("expected no deletions when FSM not ready, got %d", len(cm.deleted))
-	}
-}
-
-func TestReconcileFollowerDeletesOrphansWhenLeaderPresent(t *testing.T) {
-	t.Parallel()
-
-	fixed := time.Date(2026, 4, 23, 12, 0, 0, 0, time.UTC)
-	staleEnd := fixed.Add(-5 * time.Minute)
-
-	orphanID := chunk.NewChunkID()
-	keptID := chunk.NewChunkID()
-	activeID := chunk.NewChunkID()
-
-	cm := &retentionFakeChunkManager{
-		chunks: []chunk.ChunkMeta{
-			{ID: orphanID, Sealed: true, WriteEnd: staleEnd},  // sealed, not in manifest → delete
-			{ID: keptID, Sealed: true, WriteEnd: staleEnd},    // sealed, in manifest → keep
-			{ID: activeID, Sealed: false}, // unsealed → keep regardless
-		},
-	}
-	im := &retentionFakeIndexManager{}
-
-	tier := &TierInstance{
-		TierID:       glid.New(),
-		Chunks:       cm,
-		Indexes:      im,
-		IsFSMReady:   func() bool { return true },
-		ListManifest: func() []chunk.ChunkID { return []chunk.ChunkID{keptID} },
-	}
-
-	orch, err := New(Config{Logger: slog.Default(), Now: func() time.Time { return fixed }})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer orch.Stop()
-
-	orch.reconcileFollower(tier)
-
-	if len(cm.deleted) != 1 || cm.deleted[0] != orphanID {
-		t.Errorf("expected orphanID deleted, got %v", cm.deleted)
-	}
-	if len(im.deleted) != 1 || im.deleted[0] != orphanID {
-		t.Errorf("expected orphan indexes deleted, got %v", im.deleted)
-	}
-}
-
-func TestReconcileFollowerDeletesAllWhenManifestEmpty(t *testing.T) {
-	t.Parallel()
-
-	fixed := time.Date(2026, 4, 23, 12, 0, 0, 0, time.UTC)
-	staleEnd := fixed.Add(-5 * time.Minute)
-
-	orphanID := chunk.NewChunkID()
-	cm := &retentionFakeChunkManager{
-		chunks: []chunk.ChunkMeta{
-			{ID: orphanID, Sealed: true, WriteEnd: staleEnd},
-		},
-	}
-	im := &retentionFakeIndexManager{}
-
-	// FSM is ready but manifest is empty — all sealed chunks are orphans.
-	tier := &TierInstance{
-		TierID:       glid.New(),
-		Chunks:       cm,
-		Indexes:      im,
-		IsFSMReady:   func() bool { return true },
-		ListManifest: func() []chunk.ChunkID { return nil },
-	}
-
-	orch, err := New(Config{Logger: slog.Default(), Now: func() time.Time { return fixed }})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer orch.Stop()
-
-	orch.reconcileFollower(tier)
-
-	if len(cm.deleted) != 1 || cm.deleted[0] != orphanID {
-		t.Errorf("expected orphan deleted when manifest empty but FSM ready, got %v", cm.deleted)
-	}
-}
-
-func TestReconcileFollowerSkipsWhenNilCallbacks(t *testing.T) {
-	t.Parallel()
-
-	fixed := time.Date(2026, 4, 23, 12, 0, 0, 0, time.UTC)
-	staleEnd := fixed.Add(-5 * time.Minute)
-	localID := chunk.NewChunkID()
-	otherID := chunk.NewChunkID()
-
-	cm := &retentionFakeChunkManager{
-		chunks: []chunk.ChunkMeta{
-			{ID: localID, Sealed: true, WriteEnd: staleEnd},
-		},
-	}
-
-	// IsFSMReady is nil — single-node/memory mode, no Raft group.
-	// Reconciliation should proceed (manifest is always authoritative locally).
-	tier := &TierInstance{
-		TierID:       glid.New(),
-		Chunks:       cm,
-		ListManifest: func() []chunk.ChunkID { return []chunk.ChunkID{otherID} },
-	}
-
-	orch, err := New(Config{Logger: slog.Default(), Now: func() time.Time { return fixed }})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer orch.Stop()
-
-	orch.reconcileFollower(tier)
-
-	// Nil HasRaftLeader means no Raft group — reconciliation should proceed
-	// (single-node mode, manifest is always authoritative).
-	if len(cm.deleted) != 1 || cm.deleted[0] != localID {
-		t.Errorf("expected localID deleted in single-node mode, got %v", cm.deleted)
-	}
-}
-
-func TestReconcileTierDiskSkipsFreshOrphans(t *testing.T) {
-	t.Parallel()
-
-	fixed := time.Date(2026, 4, 23, 12, 0, 0, 0, time.UTC)
-	// Too new to reconcile (within orphanReconcileMinAge of fixed).
-	freshEnd := fixed.Add(-30 * time.Second)
-
-	orphanID := chunk.NewChunkID()
-	cm := &retentionFakeChunkManager{
-		chunks: []chunk.ChunkMeta{
-			{ID: orphanID, Sealed: true, WriteEnd: freshEnd},
-		},
-	}
-	tier := &TierInstance{
-		TierID:       glid.New(),
-		Chunks:       cm,
-		IsFSMReady:   func() bool { return true },
-		ListManifest: func() []chunk.ChunkID { return nil },
-	}
-
-	orch, err := New(Config{Logger: slog.Default(), Now: func() time.Time { return fixed }})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer orch.Stop()
-
-	orch.reconcileTierDiskAgainstManifest(tier, fixed)
-
-	if len(cm.deleted) != 0 {
-		t.Errorf("expected fresh orphan skipped, got deletions %v", cm.deleted)
-	}
-}
+// (gastrolog-51gme step 5: reconcileFollower / reconcileTierDiskAgainstManifest
+// removed. The five tests that pinned the disk-vs-manifest sweep
+// (TestReconcileFollowerSkipsWhenFSMNotReady,
+//  TestReconcileFollowerDeletesOrphansWhenLeaderPresent,
+//  TestReconcileFollowerDeletesAllWhenManifestEmpty,
+//  TestReconcileFollowerSkipsWhenNilCallbacks,
+//  TestReconcileTierDiskSkipsFreshOrphans) were deleted alongside the
+// production function. The receipt protocol's catchup invariant is now
+// covered by TestReconcileFromSnapshotProcessesPendingObligations in
+// tier_lifecycle_reconciler_test.go.)

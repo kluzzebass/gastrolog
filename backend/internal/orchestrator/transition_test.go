@@ -2247,6 +2247,12 @@ func (d *directTierReplicator) DeleteChunk(_ context.Context, nodeID string, vau
 
 // newClusterRetentionRunner creates a retention runner with follower targets
 // for proper cross-node delete forwarding.
+//
+// Wires the reconciler so retention-ttl flows through the receipt protocol
+// (gastrolog-51gme step 4): CmdRequestDelete → onRequestDelete on every node
+// → CmdAckDelete from each → CmdFinalizeDelete on the leader. Without this,
+// expireChunk falls through to the legacy direct-delete fallback which
+// doesn't replicate, and the cluster retention assertions fail.
 func newClusterRetentionRunner(orch *Orchestrator, vaultID, tierID glid.GLID, tier *TierInstance) *retentionRunner {
 	return &retentionRunner{
 		isLeader:        true,
@@ -2256,7 +2262,7 @@ func newClusterRetentionRunner(orch *Orchestrator, vaultID, tierID glid.GLID, ti
 		im:              tier.Indexes,
 		orch:            orch,
 		followerTargets: tier.FollowerTargets,
-		applyRaftDelete: tier.ApplyRaftDelete,
+		reconciler:      tier.Reconciler,
 		now:             time.Now,
 		logger:          slog.Default(),
 	}
