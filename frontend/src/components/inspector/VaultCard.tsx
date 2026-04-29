@@ -557,13 +557,35 @@ function ChunkRow({
                 del
               </Badge>
             )}
-            {rf > 1 && (
-              <ChunkReplicaBadges
-                placementNodes={placementNodes}
-                residentNodes={residentNodes}
-                pendingAckNodes={pendingAckNodes}
+            {rf > 1 && (() => {
+              // Compact summary in the row: a single replica-count badge.
+              // Per-node detail lives in the expanded pane (see ChunkDetail).
+              let badgeVariant: "info" | "error" | "warn";
+              if (replicas >= rf) {
+                badgeVariant = "info";
+              } else if (placementNodes.length < rf) {
+                badgeVariant = "error";
+              } else {
+                badgeVariant = "warn";
+              }
+              return (
+                <Badge
+                  variant={badgeVariant}
+                  dark={dark}
+                  title="Expand the chunk row for per-node replica status"
+                >
+                  {String(replicas)}
+                </Badge>
+              );
+            })()}
+            {pendingAckNodes.length > 0 && (
+              <Badge
+                variant="error"
                 dark={dark}
-              />
+                title={`Pending delete-ack from: ${pendingAckNodes.join(", ")}`}
+              >
+                pending-ack
+              </Badge>
             )}
           </span>
         </td>
