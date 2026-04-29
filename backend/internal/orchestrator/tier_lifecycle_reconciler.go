@@ -1,6 +1,6 @@
 package orchestrator
 
-// gastrolog-51gme step 3 — TierLifecycleReconciler skeleton.
+// gastrolog-51gme — TierLifecycleReconciler.
 //
 // One reconciler per TierInstance. Owns chunk-lifecycle execution
 // uniformly: every FSM apply event goes through here, and every
@@ -8,26 +8,24 @@ package orchestrator
 // single home for "what just happened in the FSM, and what should the
 // local chunk manager do about it?"
 //
-// At step 3 the reconciler is wired but does not yet do work. Each
-// callback handler is a method that logs and returns. The behavior
-// migrations come in later steps:
+// At step 4 the reconciler drives the receipt-based deletion protocol
+// for retention-ttl. Subsequent steps migrate the remaining cleanup
+// paths onto deleteChunk:
 //
-//   step 4: expireChunk → reconciler.deleteChunk via CmdRequestDelete
 //   step 5: delete reconcileTierDiskAgainstManifest
 //   step 6: delete maxTransitionStreamedStaleness; archival sweep
 //   step 7: RPC delete migration
 //   step 8: delete the manager.go startup auto-seal heuristic
-//
-// The skeleton lands first so subsequent steps just shift bodies into
-// existing methods rather than introducing infrastructure piecemeal.
 
 import (
+	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
-	"gastrolog/internal/tier/raftfsm"
+	tierfsm "gastrolog/internal/tier/raftfsm"
 )
 
 // TierLifecycleReconciler owns chunk-lifecycle execution for a single
@@ -38,25 +36,40 @@ import (
 // and `Manager.Delete` once the migration completes. A linter rule
 // forbidding direct calls outside this file lands in step 9.
 type TierLifecycleReconciler struct {
-	vaultID  glid.GLID
-	tierID   glid.GLID
-	tier     *TierInstance
+	vaultID     glid.GLID
+	tierID      glid.GLID
+	tier        *TierInstance
 	localNodeID string
-	logger   *slog.Logger
+	logger      *slog.Logger
+
+	// orch is the parent orchestrator, kept so the reconciler can fan
+	// local deletes out to same-node sibling TIs (mirrors the legacy
+	// deleteFromFollowers path) and bump WatchChunks subscribers.
+	orch *Orchestrator
+
+	// fsm is the tier sub-FSM this reconciler is bound to. Stored on
+	// Wire() so onAckDelete can read remaining ExpectedFrom without
+	// having to re-resolve the FSM through the Raft group.
+	fsm *tierfsm.FSM
 
 	mu sync.Mutex
 }
 
 // NewTierLifecycleReconciler creates a reconciler for a tier instance.
 // localNodeID is required so the reconciler can recognize when its own
-// node ID appears in a CmdRequestDelete's expectedFrom set (and ack)
+// node ID appears in a CmdRequestDelete's ExpectedFrom set (and ack)
 // or doesn't (and ignore).
-func NewTierLifecycleReconciler(vaultID, tierID glid.GLID, tier *TierInstance, localNodeID string, logger *slog.Logger) *TierLifecycleReconciler {
+//
+// orch may be nil in tests that exercise the reconciler in isolation;
+// when nil, the same-node sibling cleanup path is skipped and chunk-
+// change notifications are dropped.
+func NewTierLifecycleReconciler(orch *Orchestrator, vaultID, tierID glid.GLID, tier *TierInstance, localNodeID string, logger *slog.Logger) *TierLifecycleReconciler {
 	return &TierLifecycleReconciler{
 		vaultID:     vaultID,
 		tierID:      tierID,
 		tier:        tier,
 		localNodeID: localNodeID,
+		orch:        orch,
 		logger:      logger.With("component", "tier-lifecycle-reconciler", "vault", vaultID, "tier", tierID),
 	}
 }
@@ -69,10 +82,11 @@ func NewTierLifecycleReconciler(vaultID, tierID glid.GLID, tier *TierInstance, l
 // into the chunk manager / Raft applier without risking the
 // FSM-mutex / orchestrator-mutex inversion that's been a recurring
 // problem (see gastrolog-5oofa, gastrolog-1s3mf).
-func (r *TierLifecycleReconciler) Wire(fsm *raftfsm.FSM) {
+func (r *TierLifecycleReconciler) Wire(fsm *tierfsm.FSM) {
 	if fsm == nil {
 		return
 	}
+	r.fsm = fsm
 	fsm.SetOnSeal(r.onSeal)
 	fsm.SetOnRetentionPending(r.onRetentionPending)
 	fsm.SetOnTransitionStreamed(r.onTransitionStreamed)
@@ -90,11 +104,7 @@ func (r *TierLifecycleReconciler) Wire(fsm *raftfsm.FSM) {
 // obligations this node owes — same code path as the steady-state
 // onRequestDelete handler. This is the structural fix for the catchup
 // boundary that defeated the old single-shot CmdDeleteChunk path.
-//
-// At step 3 this is a no-op stub. Step 4 fills in the body alongside
-// the expireChunk migration so the same code path serves both
-// steady-state and restore-time obligations.
-func (r *TierLifecycleReconciler) ReconcileFromSnapshot(fsm *raftfsm.FSM) {
+func (r *TierLifecycleReconciler) ReconcileFromSnapshot(fsm *tierfsm.FSM) {
 	if fsm == nil {
 		return
 	}
@@ -104,11 +114,7 @@ func (r *TierLifecycleReconciler) ReconcileFromSnapshot(fsm *raftfsm.FSM) {
 		if !p.ExpectedFrom[r.localNodeID] {
 			continue
 		}
-		// Step 4 will replace this stub with: handle local side
-		// (delete file if present, no-op if absent), then propose
-		// CmdAckDelete via the tier's vault-ctl Raft applier.
-		r.logger.Debug("reconcile-from-snapshot: obligation owed (skeleton no-op)",
-			"chunk", p.ChunkID, "reason", p.Reason)
+		r.fulfillObligation(p.ChunkID, p.Reason, "snapshot-restore")
 	}
 }
 
@@ -119,20 +125,16 @@ func (r *TierLifecycleReconciler) ReconcileFromSnapshot(fsm *raftfsm.FSM) {
 // each other or against ReconcileFromSnapshot, but never hold it across
 // a Raft Apply or a chunk-manager I/O call to avoid the lock-inversion
 // trap.
-//
-// Steps 4-8 fill in the bodies. At step 3 each is a logged no-op so
-// the wiring can be exercised end-to-end before the migrations begin.
 
-func (r *TierLifecycleReconciler) onSeal(e raftfsm.Entry) {
+func (r *TierLifecycleReconciler) onSeal(e tierfsm.Entry) {
 	r.logger.Debug("onSeal (skeleton no-op)", "chunk", e.ID, "records", e.RecordCount)
 	// Step 8 fills this in: project FSM-side seal into the local
 	// chunk manager's chunkMeta. Closes gastrolog-uccg6 structurally.
 }
 
 func (r *TierLifecycleReconciler) onRetentionPending(id chunk.ChunkID) {
-	r.logger.Debug("onRetentionPending (skeleton no-op)", "chunk", id)
-	// Step 4 may use this for log/audit; the actual cleanup goes
-	// through CmdRequestDelete, not through retention-pending.
+	r.logger.Debug("onRetentionPending", "chunk", id)
+	// Audit-only. The actual cleanup goes through CmdRequestDelete.
 }
 
 func (r *TierLifecycleReconciler) onTransitionStreamed(id chunk.ChunkID) {
@@ -148,32 +150,110 @@ func (r *TierLifecycleReconciler) onTransitionReceived(sourceChunkID chunk.Chunk
 	// protocol.
 }
 
-func (r *TierLifecycleReconciler) onRequestDelete(p raftfsm.PendingDelete) {
-	r.logger.Debug("onRequestDelete (skeleton no-op)",
-		"chunk", p.ChunkID, "reason", p.Reason, "expected_count", len(p.ExpectedFrom))
-	// Step 4 fills this in: if r.localNodeID is in p.ExpectedFrom,
-	// handle the local side (delete file if present, no-op if absent),
-	// then propose CmdAckDelete.
+// onRequestDelete fires on every node when CmdRequestDelete commits.
+// Each node in ExpectedFrom owes one ack: delete the local chunk if
+// it exists, then propose CmdAckDelete. Idempotent on the FSM side —
+// duplicate / unknown-node acks are silently dropped, so a partial
+// failure here just means we'll retry on the next ReconcileFromSnapshot
+// (or the next time the obligation is re-observed).
+func (r *TierLifecycleReconciler) onRequestDelete(p tierfsm.PendingDelete) {
+	if !p.ExpectedFrom[r.localNodeID] {
+		r.logger.Debug("onRequestDelete: not in expectedFrom",
+			"chunk", p.ChunkID, "reason", p.Reason)
+		return
+	}
+	r.fulfillObligation(p.ChunkID, p.Reason, "request-delete")
 }
 
+// onAckDelete fires on every node when CmdAckDelete commits. Only the
+// vault-ctl Raft leader proposes CmdFinalizeDelete; followers ignore
+// the event. Reading the remaining ExpectedFrom set is safe because
+// applyAckDelete fires the callback after the set has been mutated
+// inside the FSM lock; the FSM read here just sees the post-state.
 func (r *TierLifecycleReconciler) onAckDelete(chunkID chunk.ChunkID, ackingNodeID string) {
-	r.logger.Debug("onAckDelete (skeleton no-op)", "chunk", chunkID, "node", ackingNodeID)
-	// Step 4 fills this in on the leader: when the FSM's expectedFrom
-	// becomes empty for this chunk, propose CmdFinalizeDelete.
+	r.logger.Debug("onAckDelete", "chunk", chunkID, "node", ackingNodeID)
+	if r.tier == nil || r.tier.IsRaftLeader == nil || !r.tier.IsRaftLeader() {
+		return
+	}
+	if r.fsm == nil || r.tier.ApplyRaftFinalizeDelete == nil {
+		return
+	}
+	p := r.fsm.PendingDelete(chunkID)
+	if p == nil || len(p.ExpectedFrom) > 0 {
+		return // still owed acks, or already finalized
+	}
+	if err := r.tier.ApplyRaftFinalizeDelete(chunkID); err != nil {
+		r.logger.Warn("onAckDelete: finalize failed",
+			"chunk", chunkID, "error", err)
+	}
 }
 
 func (r *TierLifecycleReconciler) onFinalizeDelete(chunkID chunk.ChunkID) {
-	r.logger.Debug("onFinalizeDelete (skeleton no-op)", "chunk", chunkID)
-	// Step 4 fills this in: optional audit log line per finalized
-	// delete. The actual entry-removal already happened in
-	// applyFinalizeDelete; this is just the post-apply notification.
+	r.logger.Debug("onFinalizeDelete", "chunk", chunkID)
+	// Audit-only. The pending entry was removed inside applyFinalizeDelete
+	// before this callback fired.
 }
 
-// ---------- Single deletion entry point (skeleton) ----------
+// fulfillObligation deletes the local copy of a chunk and then proposes
+// CmdAckDelete. Used by both onRequestDelete (steady state) and
+// ReconcileFromSnapshot (catchup after Restore). source is a short
+// label that distinguishes the two for log triage.
+func (r *TierLifecycleReconciler) fulfillObligation(chunkID chunk.ChunkID, reason, source string) {
+	if err := r.deleteLocalCopy(chunkID); err != nil {
+		// Don't ack: the FSM keeps the obligation, and we'll retry on
+		// the next observation. Logging at warn lets retry storms show
+		// up in operator dashboards.
+		r.logger.Warn("delete obligation: local delete failed",
+			"chunk", chunkID, "reason", reason, "source", source, "error", err)
+		return
+	}
+	if r.tier == nil || r.tier.ApplyRaftAckDelete == nil {
+		// No applier wired — nothing to ack against. Single-node mode
+		// uses deleteChunk's local-only fallback and never reaches here.
+		return
+	}
+	if err := r.tier.ApplyRaftAckDelete(chunkID, r.localNodeID); err != nil {
+		r.logger.Warn("delete obligation: ack failed",
+			"chunk", chunkID, "reason", reason, "source", source, "error", err)
+	}
+}
+
+// deleteLocalCopy removes a chunk's local on-disk state from this
+// node. ErrChunkNotFound is treated as success — the chunk was already
+// gone (concurrent OnDelete cascade, or this node never had it). All
+// same-node sibling TIs (rare, only when 1:1:1 placement is violated)
+// are cleaned up too, mirroring the legacy deleteFromFollowers fan-out.
+func (r *TierLifecycleReconciler) deleteLocalCopy(chunkID chunk.ChunkID) error {
+	if r.tier == nil {
+		return nil
+	}
+	if r.tier.Indexes != nil {
+		if err := r.tier.Indexes.DeleteIndexes(chunkID); err != nil && !errors.Is(err, chunk.ErrChunkNotFound) {
+			return fmt.Errorf("delete indexes: %w", err)
+		}
+	}
+	if r.tier.Chunks != nil {
+		if err := chunk.DeleteNoAnnounce(r.tier.Chunks, chunkID); err != nil && !errors.Is(err, chunk.ErrChunkNotFound) {
+			return fmt.Errorf("delete chunk: %w", err)
+		}
+	}
+	if r.orch != nil {
+		// Same-node sibling cleanup. With 1:1:1 placement there are no
+		// siblings, but historically a node could host both a leader
+		// and follower TI for the same tier; deleteFromFollowers handles
+		// that case symmetrically with wireTierFSMOnDelete.
+		r.orch.deleteFromFollowers(r.vaultID, r.tierID, chunkID)
+		// Notify WatchChunks subscribers: a chunk was removed.
+		r.orch.NotifyChunkChange()
+	}
+	return nil
+}
+
+// ---------- Single deletion entry point ----------
 
 // deleteChunk is the canonical entry point for "delete this chunk
-// across the cluster". All eight current cleanup paths converge here
-// over steps 4-8. Reason is a short free-form label that ends up in the
+// across the cluster". All eight legacy cleanup paths converge here
+// over steps 4-8. reason is a short free-form label that ends up in the
 // FSM's pendingDeletes entry and in audit logs:
 //
 //   "retention-ttl"             retention rule fired
@@ -189,10 +269,20 @@ func (r *TierLifecycleReconciler) onFinalizeDelete(chunkID chunk.ChunkID) {
 // reference), pass {localNodeID} so the propagation collapses to
 // "this node only".
 //
-// At step 3 this is a stub. Step 4 fills in the body: propose
-// CmdRequestDelete via the tier's Raft applier.
+// In single-node / memory mode (no Raft applier wired), deleteChunk
+// falls back to a direct local delete without going through the FSM.
 func (r *TierLifecycleReconciler) deleteChunk(chunkID chunk.ChunkID, reason string, expectedFrom []string) error {
-	r.logger.Debug("deleteChunk (skeleton no-op)",
+	if r.tier == nil {
+		return errors.New("deleteChunk: nil tier instance")
+	}
+	if r.tier.ApplyRaftRequestDelete == nil {
+		// Single-node fallback: no Raft, no receipt protocol. Just
+		// delete locally and notify chunk-change subscribers.
+		r.logger.Debug("deleteChunk: single-node fallback",
+			"chunk", chunkID, "reason", reason)
+		return r.deleteLocalCopy(chunkID)
+	}
+	r.logger.Debug("deleteChunk: proposing CmdRequestDelete",
 		"chunk", chunkID, "reason", reason, "expected_count", len(expectedFrom))
-	return nil
+	return r.tier.ApplyRaftRequestDelete(chunkID, reason, expectedFrom)
 }

@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
@@ -818,6 +819,7 @@ func (o *Orchestrator) buildTierInstance(sys *system.System, vaultCfg system.Vau
 			Chunks: cm,
 		}
 		ti.applyRaftCallbacks(raftCB)
+		o.attachLifecycleReconciler(ti, vaultCfg.ID, tierCfg.ID, tierGroup)
 		wireTierFSMOnDelete(tierGroup, tierCfg.ID, cm, nil, o.logger)
 		return ti, nil
 	}
@@ -856,9 +858,30 @@ func (o *Orchestrator) buildTierInstance(sys *system.System, vaultCfg system.Vau
 		Query:   qe,
 	}
 	ti.applyRaftCallbacks(raftCB)
+	o.attachLifecycleReconciler(ti, vaultCfg.ID, tierCfg.ID, tierGroup)
 	wireTierFSMOnDelete(tierGroup, tierCfg.ID, cm, im, o.logger)
 	wireTierFSMOnUpload(tierGroup, tierCfg.ID, cm, o.logger)
 	return ti, nil
+}
+
+// attachLifecycleReconciler constructs a TierLifecycleReconciler for the given
+// tier instance and binds it to the tier sub-FSM in the vault control-plane
+// Raft group. Skipped silently when there is no group (memory-mode tiers
+// without replication) — single-node deletes go straight through the chunk
+// manager via deleteChunk's local-only fallback. See gastrolog-51gme.
+//
+// Multiple TIs on the same node share a tier sub-FSM (1:1:1 placement makes
+// this rare, but possible). Each TI's reconciler.Wire() call rebinds the
+// callback set on the FSM; last-writer-wins matches the existing OnDelete /
+// OnUpload behavior wired alongside.
+func (o *Orchestrator) attachLifecycleReconciler(ti *TierInstance, vaultID, tierID glid.GLID, tierGroup *raftgroup.Group) {
+	ti.Reconciler = NewTierLifecycleReconciler(o, vaultID, tierID, ti, o.localNodeID, o.logger)
+	if tierGroup == nil {
+		return
+	}
+	if vfsm, ok := tierGroup.FSM.(*vaultraft.FSM); ok && vfsm != nil {
+		ti.Reconciler.Wire(vfsm.EnsureTierFSM(tierID))
+	}
 }
 
 // buildTierInstanceForStorage creates a TierInstance whose data directory is
@@ -946,6 +969,7 @@ func (o *Orchestrator) buildTierInstanceForStorage(sys *system.System, vaultCfg 
 		Query:   qe,
 	}
 	ti.applyRaftCallbacks(raftCB)
+	o.attachLifecycleReconciler(ti, vaultCfg.ID, tierCfg.ID, tierGroup)
 	wireTierFSMOnDelete(tierGroup, tierCfg.ID, cm, im, o.logger)
 	wireTierFSMOnUpload(tierGroup, tierCfg.ID, cm, o.logger)
 	return ti, nil
@@ -1052,6 +1076,9 @@ type tierRaftCallbacks struct {
 	isLeader                func() bool
 	isFSMReady              func() bool
 	applyDelete             func(id chunk.ChunkID) error
+	applyRequestDelete      func(id chunk.ChunkID, reason string, expectedFrom []string) error
+	applyAckDelete          func(id chunk.ChunkID, nodeID string) error
+	applyFinalizeDelete     func(id chunk.ChunkID) error
 	applyRetPending         func(id chunk.ChunkID) error
 	applyTransitionStreamed func(id chunk.ChunkID) error
 	applyTransitionReceived func(sourceChunkID chunk.ChunkID) error
@@ -1135,6 +1162,15 @@ func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.App
 		isFSMReady: func() bool { return r.AppliedIndex() > 0 },
 		applyDelete: func(id chunk.ChunkID) error {
 			return applier.Apply(tierfsm.MarshalDeleteChunk(id))
+		},
+		applyRequestDelete: func(id chunk.ChunkID, reason string, expectedFrom []string) error {
+			return applier.Apply(tierfsm.MarshalRequestDelete(id, time.Now(), reason, expectedFrom))
+		},
+		applyAckDelete: func(id chunk.ChunkID, nodeID string) error {
+			return applier.Apply(tierfsm.MarshalAckDelete(id, nodeID))
+		},
+		applyFinalizeDelete: func(id chunk.ChunkID) error {
+			return applier.Apply(tierfsm.MarshalFinalizeDelete(id))
 		},
 		applyRetPending: func(id chunk.ChunkID) error {
 			return applier.Apply(tierfsm.MarshalRetentionPending(id))

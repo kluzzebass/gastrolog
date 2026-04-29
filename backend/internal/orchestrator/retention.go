@@ -76,6 +76,14 @@ type retentionRunner struct {
 	applyRaftRetentionPending   func(id chunk.ChunkID) error
 	applyRaftTransitionStreamed func(id chunk.ChunkID) error
 
+	// reconciler is the tier lifecycle reconciler that owns chunk-lifecycle
+	// execution. Step 4 routes retention-ttl deletes through here via
+	// CmdRequestDelete; the legacy applyRaftDelete path is preserved for
+	// the other cleanup paths until they migrate in steps 5-8. Nil in
+	// single-node / memory mode — local delete proceeds without Raft. See
+	// gastrolog-51gme.
+	reconciler *TierLifecycleReconciler
+
 	// isLeader returns true if this node is the config leader for this tier.
 	// Retention (expiry + transitions) only runs on the leader to prevent
 	// all nodes from independently transitioning the same chunks.
@@ -386,6 +394,7 @@ func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg syste
 	runner.applyRaftDelete = tier.ApplyRaftDelete
 	runner.applyRaftRetentionPending = tier.ApplyRaftRetentionPending
 	runner.applyRaftTransitionStreamed = tier.ApplyRaftTransitionStreamed
+	runner.reconciler = tier.Reconciler
 	runner.isLeader = tier.IsLeader()
 	runner.followerTargets = tier.FollowerTargets
 	runner.vaultName = vaultCfg.Name
@@ -644,17 +653,48 @@ func (r *retentionRunner) markUnreadable(id chunk.ChunkID, reason error) {
 	}
 }
 
-// expireChunk commits the deletion to the tier FSM manifest (so followers
-// learn about it via OnDelete), then runs the legacy direct-delete paths
-// as a belt-and-braces fallback. The Phase 5 FSM OnDelete cascade already
-// deletes the chunk on every node; the direct paths here are redundant in
-// cluster mode but harmless — they just return ErrChunkNotFound for the
-// chunks OnDelete already deleted, which we treat as an expected "nothing
-// to do" signal rather than an error.
+// expireChunk routes a retention-ttl deletion through the lifecycle
+// reconciler's receipt protocol when cluster Raft is wired, and falls
+// back to a direct local delete otherwise.
 //
-// Single-node mode (applyRaftDelete == nil) still requires the direct
-// paths because there's no Raft cascade to rely on.
+// Cluster path (gastrolog-51gme step 4):
+//   reconciler.deleteChunk → CmdRequestDelete → onRequestDelete fires on
+//   every node in expectedFrom (including this leader) and each one
+//   deletes its local copy + acks. Once expectedFrom is empty the leader
+//   proposes CmdFinalizeDelete and the FSM entry is removed. The
+//   reconciler bumps NotifyChunkChange and walks same-node sibling TIs
+//   itself, so retention only owns the rate-alert side-effect here.
+//
+// Single-node path:
+//   reconciler.deleteChunk's local-only fallback handles the direct
+//   delete (indexes + chunk + sibling TIs + chunk-change notify).
 func (r *retentionRunner) expireChunk(id chunk.ChunkID) {
+	if r.reconciler != nil {
+		expectedFrom := r.expectedFromForExpire()
+		if err := r.reconciler.deleteChunk(id, "retention-ttl", expectedFrom); err != nil {
+			r.logger.Warn("retention: reconciler deleteChunk failed, will retry",
+				"vault", r.vaultID, "chunk", id.String(), "error", err)
+			return
+		}
+		if r.orch != nil && r.orch.retentionRates != nil {
+			// Per-tier rate alert (see gastrolog-47qyw). Only counted on
+			// the leader path (this function only runs on tier leaders)
+			// so the rate reflects active expiration decisions, not
+			// follower delete-cascade applications.
+			r.orch.retentionRates.Record(r.tierID, r.orch.now())
+		}
+		r.logger.Debug("retention: requested chunk delete via reconciler",
+			"vault", r.vaultID, "chunk", id.String())
+		return
+	}
+
+	// Reconciler-less fallback: legacy direct-delete path.
+	//
+	// Reached by older test harnesses that build a retentionRunner without
+	// going through buildTierInstance (so tier.Reconciler is nil). They wire
+	// cross-node deletion via tierReplicator.DeleteChunk RPC fan-out instead
+	// of vault-ctl Raft. We preserve that path here so the harness keeps
+	// passing while production runs the receipt protocol.
 	clusterMode := r.applyRaftDelete != nil
 	if clusterMode {
 		if err := r.applyRaftDelete(id); err != nil {
@@ -663,16 +703,12 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID) {
 			return
 		}
 	}
-
 	if err := r.im.DeleteIndexes(id); err != nil {
 		r.logger.Error("retention: failed to delete indexes",
 			"vault", r.vaultID, "chunk", id.String(), "error", err)
 		return
 	}
-
 	if err := r.cm.Delete(id); err != nil {
-		// In cluster mode, the OnDelete cascade may have already deleted
-		// the chunk locally — ErrChunkNotFound is expected, not an error.
 		if clusterMode && errors.Is(err, chunk.ErrChunkNotFound) {
 			r.logger.Debug("retention: chunk already removed by OnDelete cascade",
 				"vault", r.vaultID, "chunk", id.String())
@@ -682,31 +718,51 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID) {
 			return
 		}
 	}
-
 	if r.orch != nil {
-		// Record the successful retention deletion for the per-tier rate
-		// alerter. Only counted on the leader path (this function only
-		// runs on tier leaders) so the rate reflects active expiration
-		// decisions, not follower OnDelete cascades. See gastrolog-47qyw.
-		r.orch.retentionRates.Record(r.tierID, r.orch.now())
-		// Notify WatchChunks subscribers: a chunk has been removed.
+		if r.orch.retentionRates != nil {
+			r.orch.retentionRates.Record(r.tierID, r.orch.now())
+		}
 		r.orch.NotifyChunkChange()
-
-		// Delete from same-node follower instances.
 		r.orch.deleteFromFollowers(r.vaultID, r.tierID, id)
-		// Forward deletion to remote follower nodes.
 		r.forwardDeletionToFollowers(id, clusterMode)
 	}
-
-	r.logger.Debug("retention: deleted chunk",
+	r.logger.Debug("retention: deleted chunk (no-reconciler fallback)",
 		"vault", r.vaultID, "chunk", id.String())
 }
 
+// expectedFromForExpire returns the placement-membership-at-decision-time
+// for a retention-ttl delete: the local node (always the leader, since
+// retention only runs on leaders) plus every follower target's node ID.
+// Duplicate node IDs (same-node follower placements) collapse on the FSM
+// side via the map[string]bool encoding in MarshalRequestDelete.
+//
+// localNodeID is sourced from the reconciler — that is the canonical
+// identity for "who fulfills obligations on this node". Sourcing it
+// from the orchestrator would couple the retention test path to the
+// orchestrator construction; the reconciler is already required for
+// this code path so reusing its localNodeID is strictly tighter.
+func (r *retentionRunner) expectedFromForExpire() []string {
+	if r.reconciler == nil {
+		return nil
+	}
+	localNodeID := r.reconciler.localNodeID
+	expected := make([]string, 0, 1+len(r.followerTargets))
+	expected = append(expected, localNodeID)
+	for _, t := range r.followerTargets {
+		if t.NodeID == "" || t.NodeID == localNodeID {
+			continue
+		}
+		expected = append(expected, t.NodeID)
+	}
+	return expected
+}
+
 // forwardDeletionToFollowers sends an explicit delete RPC to each remote
-// follower. In cluster mode this is redundant with the FSM OnDelete cascade
-// (which already deleted the chunk everywhere), so "chunk not found" responses
-// are logged at debug only. In single-node / pre-cascade mode the forward is
-// the only deletion mechanism for followers and any error is a real failure.
+// follower. Used only by the reconciler-less fallback path in expireChunk
+// (test harnesses without a vault-ctl Raft group / TierLifecycleReconciler).
+// Production runs through the receipt protocol and never reaches here. The
+// RPC delete migration in gastrolog-51gme step 7 retires the underlying
+// tierReplicator.DeleteChunk API and removes this chain entirely.
 func (r *retentionRunner) forwardDeletionToFollowers(id chunk.ChunkID, _ bool) {
 	for _, target := range r.followerTargets {
 		if target.NodeID == r.orch.localNodeID {

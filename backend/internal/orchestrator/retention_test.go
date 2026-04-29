@@ -301,65 +301,117 @@ func TestSetBindingsHotSwap(t *testing.T) {
 	}
 }
 
-func TestExpireChunkAppliesRaftDeleteBeforeLocal(t *testing.T) {
+// TestExpireChunkProposesRequestDelete pins the gastrolog-51gme step 4
+// contract: in cluster mode, expireChunk routes through the lifecycle
+// reconciler and proposes CmdRequestDelete (not the legacy CmdDeleteChunk).
+// The local file delete only happens when CmdRequestDelete commits and the
+// FSM dispatches onRequestDelete — so an isolated retentionRunner test that
+// stubs only the applier MUST observe an empty deleted-list, because the
+// FSM apply never fires here.
+func TestExpireChunkProposesRequestDelete(t *testing.T) {
 	id := chunkIDAt(time.Now())
 	cm := &retentionFakeChunkManager{
 		chunks: []chunk.ChunkMeta{{ID: id, Sealed: true}},
 	}
 	im := &retentionFakeIndexManager{}
 
-	var raftApplied bool
-	r := &retentionRunner{
-		isLeader: true,
-		vaultID:  glid.New(),
-		tierID:   glid.New(),
-		cm:       cm,
-		im:       im,
-		now:      time.Now,
-		logger:   slog.Default(),
-		applyRaftDelete: func(deleteID chunk.ChunkID) error {
-			if deleteID != id {
-				t.Errorf("unexpected chunk ID: %s", deleteID)
-			}
-			raftApplied = true
+	vaultID, tierID := glid.New(), glid.New()
+	var (
+		gotChunkID      chunk.ChunkID
+		gotReason       string
+		gotExpectedFrom []string
+	)
+	tier := &TierInstance{
+		TierID: tierID,
+		Chunks: cm,
+		Indexes: im,
+		FollowerTargets: []system.ReplicationTarget{
+			{NodeID: "node-B", StorageID: "s-B"},
+			{NodeID: "node-C", StorageID: "s-C"},
+		},
+		ApplyRaftRequestDelete: func(cid chunk.ChunkID, reason string, expectedFrom []string) error {
+			gotChunkID = cid
+			gotReason = reason
+			gotExpectedFrom = expectedFrom
 			return nil
 		},
+	}
+	rec := NewTierLifecycleReconciler(nil, vaultID, tierID, tier, "node-A", slog.Default())
+
+	r := &retentionRunner{
+		isLeader:        true,
+		vaultID:         vaultID,
+		tierID:          tierID,
+		cm:              cm,
+		im:              im,
+		reconciler:      rec,
+		followerTargets: tier.FollowerTargets,
+		now:             time.Now,
+		logger:          slog.Default(),
 	}
 
 	r.expireChunk(id)
 
-	if !raftApplied {
-		t.Error("expected Raft delete to be applied before local delete")
+	if gotChunkID != id {
+		t.Errorf("CmdRequestDelete chunk = %s, want %s", gotChunkID, id)
 	}
-	if len(cm.deleted) != 1 || cm.deleted[0] != id {
-		t.Errorf("expected local chunk deletion, got %v", cm.deleted)
+	if gotReason != "retention-ttl" {
+		t.Errorf("CmdRequestDelete reason = %q, want %q", gotReason, "retention-ttl")
+	}
+	wantExpected := []string{"node-A", "node-B", "node-C"}
+	if len(gotExpectedFrom) != len(wantExpected) {
+		t.Fatalf("expectedFrom = %v, want %v", gotExpectedFrom, wantExpected)
+	}
+	for i, n := range wantExpected {
+		if gotExpectedFrom[i] != n {
+			t.Errorf("expectedFrom[%d] = %s, want %s", i, gotExpectedFrom[i], n)
+		}
+	}
+	// The FSM apply never fires in this isolated unit test, so the local
+	// delete must not have happened — onRequestDelete is what runs it.
+	if len(cm.deleted) != 0 {
+		t.Errorf("local chunk delete must wait for FSM apply, got %v", cm.deleted)
 	}
 }
 
-func TestExpireChunkSkipsLocalOnRaftFailure(t *testing.T) {
+// TestExpireChunkSkipsLocalOnRequestDeleteFailure pins the failure-mode
+// invariant: when CmdRequestDelete cannot be proposed (e.g. not leader,
+// applier rejection), no local delete happens. The FSM apply chain is the
+// only path that touches local files, and a failed propose leaves the
+// chain unfired. See gastrolog-51gme step 4.
+func TestExpireChunkSkipsLocalOnRequestDeleteFailure(t *testing.T) {
 	id := chunkIDAt(time.Now())
 	cm := &retentionFakeChunkManager{
 		chunks: []chunk.ChunkMeta{{ID: id, Sealed: true}},
 	}
 	im := &retentionFakeIndexManager{}
 
-	r := &retentionRunner{
-		isLeader: true,
-		vaultID:  glid.New(),
-		tierID:   glid.New(),
-		cm:       cm,
-		im:       im,
-		now:      time.Now,
-		logger:   slog.Default(),
-		applyRaftDelete: func(_ chunk.ChunkID) error {
+	vaultID, tierID := glid.New(), glid.New()
+	tier := &TierInstance{
+		TierID:  tierID,
+		Chunks:  cm,
+		Indexes: im,
+		ApplyRaftRequestDelete: func(_ chunk.ChunkID, _ string, _ []string) error {
 			return fmt.Errorf("not leader")
 		},
+	}
+	rec := NewTierLifecycleReconciler(nil, vaultID, tierID, tier, "node-A", slog.Default())
+
+	r := &retentionRunner{
+		isLeader:   true,
+		vaultID:    vaultID,
+		tierID:     tierID,
+		cm:         cm,
+		im:         im,
+		reconciler: rec,
+		now:    time.Now,
+		logger: slog.Default(),
 	}
 
 	r.expireChunk(id)
 
 	if len(cm.deleted) != 0 {
-		t.Error("local delete should NOT happen when Raft apply fails")
+		t.Error("local delete should NOT happen when CmdRequestDelete propose fails")
 	}
 }
 
