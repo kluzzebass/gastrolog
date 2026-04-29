@@ -248,13 +248,21 @@ func (r *TierLifecycleReconciler) onTransitionReceived(sourceChunkID chunk.Chunk
 // duplicate / unknown-node acks are silently dropped, so a partial
 // failure here just means we'll retry on the next ReconcileFromSnapshot
 // (or the next time the obligation is re-observed).
+//
+// IMPORTANT: this runs on the FSM apply goroutine. The local-delete
+// portion is safe to do inline (no Raft round-trip). The ack itself
+// MUST happen in a separate goroutine — proposing CmdAckDelete on the
+// leader posts to the same Raft apply queue we're currently draining,
+// which would deadlock the leader's apply pump waiting for its own
+// queued ack to apply. See gastrolog-51gme follow-up: apply-pump
+// self-cycle stall observed in the 4-node test cluster.
 func (r *TierLifecycleReconciler) onRequestDelete(p tierfsm.PendingDelete) {
 	if !p.ExpectedFrom[r.localNodeID] {
 		r.logger.Debug("onRequestDelete: not in expectedFrom",
 			"chunk", p.ChunkID, "reason", p.Reason)
 		return
 	}
-	r.fulfillObligation(p.ChunkID, p.Reason, "request-delete")
+	go r.fulfillObligation(p.ChunkID, p.Reason, "request-delete")
 }
 
 // onAckDelete fires on every node when CmdAckDelete commits. Only the
@@ -262,6 +270,11 @@ func (r *TierLifecycleReconciler) onRequestDelete(p tierfsm.PendingDelete) {
 // the event. Reading the remaining ExpectedFrom set is safe because
 // applyAckDelete fires the callback after the set has been mutated
 // inside the FSM lock; the FSM read here just sees the post-state.
+//
+// The finalize Apply MUST happen in a goroutine — same reason as
+// onRequestDelete's ack: posting CmdFinalizeDelete on the leader from
+// inside the FSM apply pump would deadlock waiting for our own queued
+// command to apply.
 func (r *TierLifecycleReconciler) onAckDelete(chunkID chunk.ChunkID, ackingNodeID string) {
 	r.logger.Debug("onAckDelete", "chunk", chunkID, "node", ackingNodeID)
 	if r.tier == nil || r.tier.IsRaftLeader == nil || !r.tier.IsRaftLeader() {
@@ -274,10 +287,12 @@ func (r *TierLifecycleReconciler) onAckDelete(chunkID chunk.ChunkID, ackingNodeI
 	if p == nil || len(p.ExpectedFrom) > 0 {
 		return // still owed acks, or already finalized
 	}
-	if err := r.tier.ApplyRaftFinalizeDelete(chunkID); err != nil {
-		r.logger.Warn("onAckDelete: finalize failed",
-			"chunk", chunkID, "error", err)
-	}
+	go func() {
+		if err := r.tier.ApplyRaftFinalizeDelete(chunkID); err != nil {
+			r.logger.Warn("onAckDelete: finalize failed",
+				"chunk", chunkID, "error", err)
+		}
+	}()
 }
 
 func (r *TierLifecycleReconciler) onFinalizeDelete(chunkID chunk.ChunkID) {
@@ -303,15 +318,21 @@ func (r *TierLifecycleReconciler) onPruneNode(prunedNodeID string, finalizable [
 	if r.tier == nil || r.tier.IsRaftLeader == nil || !r.tier.IsRaftLeader() {
 		return
 	}
-	if r.tier.ApplyRaftFinalizeDelete == nil {
+	if r.tier.ApplyRaftFinalizeDelete == nil || len(finalizable) == 0 {
 		return
 	}
-	for _, id := range finalizable {
-		if err := r.tier.ApplyRaftFinalizeDelete(id); err != nil {
-			r.logger.Warn("onPruneNode: post-prune finalize failed",
-				"chunk", id, "node", prunedNodeID, "error", err)
+	// Finalize Applies MUST run off the FSM apply pump — same reason as
+	// onAckDelete's goroutine. Snapshot the slice so the goroutine doesn't
+	// race with a future re-use of the underlying array.
+	ids := append([]chunk.ChunkID(nil), finalizable...)
+	go func() {
+		for _, id := range ids {
+			if err := r.tier.ApplyRaftFinalizeDelete(id); err != nil {
+				r.logger.Warn("onPruneNode: post-prune finalize failed",
+					"chunk", id, "node", prunedNodeID, "error", err)
+			}
 		}
-	}
+	}()
 }
 
 // fulfillObligation deletes the local copy of a chunk and then proposes

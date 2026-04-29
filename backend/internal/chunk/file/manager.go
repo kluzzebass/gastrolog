@@ -891,7 +891,14 @@ func (m *Manager) EnsureSealed(id chunk.ChunkID) error {
 		return nil
 	}
 	if m.active != nil && m.active.meta.id == id {
-		m.logger.Warn("EnsureSealed: FSM says sealed but chunk is local active; skipping",
+		// Expected on followers during the seal-rotation boundary: the
+		// leader announces CmdSealChunk after sealing locally, so
+		// followers receive the FSM apply for "sealed" while their local
+		// active pointer is still set (record-stream from the leader is
+		// what swaps active to the next chunk). The follower's chunk
+		// will reconcile when its own rotation fires; logging at debug
+		// avoids a per-rotation warning storm. See gastrolog-51gme.
+		m.logger.Debug("EnsureSealed: FSM says sealed but chunk is local active; skipping",
 			"chunk", id.String())
 		return nil
 	}

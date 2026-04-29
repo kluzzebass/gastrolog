@@ -70,11 +70,21 @@ func TestReconcilerOnRequestDeleteDeletesLocalAndAcks(t *testing.T) {
 		t.Fatalf("apply CmdRequestDelete: %v", err)
 	}
 
+	// onRequestDelete dispatches the local delete + ack in a goroutine to
+	// avoid deadlocking the FSM apply pump (CmdAckDelete on the leader
+	// posts to the same Raft apply queue we're currently draining). Wait
+	// for the goroutine to drain before asserting.
+	deadline := time.After(2 * time.Second)
+	for ackCount.Load() < 1 {
+		select {
+		case <-deadline:
+			t.Fatalf("ack did not fire within deadline (count=%d)", ackCount.Load())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
 	if len(cm.deleted) != 1 || cm.deleted[0] != chunkID {
 		t.Errorf("local delete = %v, want [%s]", cm.deleted, chunkID)
-	}
-	if ackCount.Load() != 1 {
-		t.Errorf("ack count = %d, want 1", ackCount.Load())
 	}
 	if ackedID != chunkID || ackedNode != "node-A" {
 		t.Errorf("ack = (%s, %s), want (%s, node-A)", ackedID, ackedNode, chunkID)
@@ -109,6 +119,9 @@ func TestReconcilerOnRequestDeleteIgnoresNotInExpectedFrom(t *testing.T) {
 		Data: tierfsm.MarshalRequestDelete(chunkID, time.Now(), "retention-ttl",
 			[]string{"node-A", "node-B"}),
 	})
+
+	// Give a goroutine a chance to fire if the expectedFrom-skip check fails.
+	time.Sleep(50 * time.Millisecond)
 
 	if len(cm.deleted) != 0 {
 		t.Errorf("non-expected node must not delete locally, got %v", cm.deleted)
@@ -160,9 +173,17 @@ func TestReconcilerOnAckDeleteFinalizesWhenAllAcked(t *testing.T) {
 
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalAckDelete(chunkID, "node-B")})
 
-	if finalizeCount.Load() != 1 {
-		t.Errorf("finalize count = %d, want 1 once expectedFrom empty", finalizeCount.Load())
+	// onAckDelete dispatches the finalize Apply in a goroutine to avoid
+	// deadlocking the FSM apply pump. Wait for the goroutine to drain.
+	deadline := time.After(2 * time.Second)
+	for finalizeCount.Load() < 1 {
+		select {
+		case <-deadline:
+			t.Fatalf("finalize did not fire within deadline (count=%d)", finalizeCount.Load())
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
+
 	if finalizedID != chunkID {
 		t.Errorf("finalize id = %s, want %s", finalizedID, chunkID)
 	}
@@ -242,12 +263,12 @@ func TestReconcilerOnPruneNodeFinalizesEmptiedEntries(t *testing.T) {
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalRequestDelete(idEmptied, now, "test", []string{"node-A"})})
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalRequestDelete(idUntouched, now, "test", []string{"node-B"})})
 
-	var finalized []chunk.ChunkID
+	finalizedCh := make(chan chunk.ChunkID, 4)
 	tier := &TierInstance{
 		TierID:                  glid.New(),
 		Chunks:                  &reconcilerFakeChunkManager{},
 		IsRaftLeader:            func() bool { return true },
-		ApplyRaftFinalizeDelete: func(id chunk.ChunkID) error { finalized = append(finalized, id); return nil },
+		ApplyRaftFinalizeDelete: func(id chunk.ChunkID) error { finalizedCh <- id; return nil },
 	}
 	rec := NewTierLifecycleReconciler(nil, glid.New(), tier.TierID, tier, "node-B", slog.Default())
 	rec.Wire(fsm)
@@ -256,6 +277,24 @@ func TestReconcilerOnPruneNodeFinalizesEmptiedEntries(t *testing.T) {
 		t.Fatalf("apply prune: %v", err)
 	}
 
+	// onPruneNode dispatches finalize Applies in a goroutine to avoid
+	// deadlocking the FSM apply pump (CmdFinalizeDelete on the leader
+	// posts to the same Raft apply queue we're currently draining). The
+	// test must wait for that goroutine to drain before asserting.
+	var finalized []chunk.ChunkID
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case id := <-finalizedCh:
+			finalized = append(finalized, id)
+			if len(finalized) >= 1 {
+				goto done
+			}
+		case <-deadline:
+			goto done
+		}
+	}
+done:
 	if len(finalized) != 1 || finalized[0] != idEmptied {
 		t.Errorf("finalized = %v, want [%s] (idEmptied only)", finalized, idEmptied)
 	}
@@ -283,6 +322,9 @@ func TestReconcilerOnPruneNodeSkipsOnFollower(t *testing.T) {
 	rec.Wire(fsm)
 
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalPruneNode("node-A")})
+
+	// Give a goroutine a chance to fire if the follower-skip check fails.
+	time.Sleep(50 * time.Millisecond)
 
 	if finalizeCount.Load() != 0 {
 		t.Errorf("follower must not finalize after prune, got %d calls", finalizeCount.Load())
