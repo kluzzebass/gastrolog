@@ -110,13 +110,13 @@ type sweepTarget struct {
 // See vault_readiness.go for the canonical vault readiness definition used
 // by ingest/query entry points.
 //
-// Disk-vs-manifest orphan cleanup was removed in gastrolog-51gme step 5:
-// the receipt protocol's pendingDeletes (committed in vault-ctl Raft and
-// preserved across snapshot install via TierLifecycleReconciler.
-// ReconcileFromSnapshot) is now the only catchup path. Any node that
-// missed a delete observation eventually applies the pending entry from
-// the FSM and acks via the canonical onRequestDelete callback chain —
-// no out-of-band disk sweep is needed.
+// Catchup mechanisms (post gastrolog-51gme): pendingDeletes covers
+// nodes that observed CmdRequestDelete (steady-state apply or post-
+// snapshot ReconcileFromSnapshot). SweepLocalOrphans, on the
+// pending-delete sweep cron, covers the snapshot-restore gap where a
+// delete cycle finalized while this node was offline — the rejoining
+// node receives a snapshot whose FSM has only the tombstone, with no
+// pendingDeletes entry to drive cleanup.
 func (o *Orchestrator) retentionSweepAll() {
 	sys, err := o.loadSystem(context.Background())
 	if err != nil {
@@ -167,8 +167,10 @@ func (o *Orchestrator) retentionSweepAll() {
 		t.runner.confirmStreamedTransitions(cfg)
 	}
 
-	// (Disk vs manifest orphan cleanup was removed in gastrolog-51gme step 5;
-	// the receipt protocol's pendingDeletes is the catchup path now.)
+	// (Disk-vs-manifest orphan cleanup is now done out-of-band on the
+	// pending-delete sweep tick — see SweepLocalOrphans, called from
+	// pendingDeleteSweepAll. The retention sweep stays focused on rule
+	// evaluation and confirmStreamedTransitions on leaders only.)
 
 	// Memory budget enforcement: transition oldest chunks when over budget.
 	o.enforceMemoryBudgets(cfg)
@@ -193,13 +195,23 @@ func (o *Orchestrator) retentionSweepAll() {
 // pendingDeleteSweepAll runs every 20 seconds (with a 13/33/53s
 // phase-offset from the retention sweep) on every node. For each
 // (vault, tier) on this node, it asks the lifecycle reconciler to
-// walk its OWN local FSM's pendingDeletes and re-run fulfillObligation
-// for any entry where this node is still in ExpectedFrom. This is the
-// receipt protocol's catchup mechanism for steady-state operation —
-// onRequestDelete fires once at apply time but won't retry if the
-// callback errored or the node was wedged; this sweep ensures
-// eventual convergence purely from local state, without any leader
-// involvement. See gastrolog-51gme.
+// walk its OWN local FSM and run two complementary catchup sweeps:
+//
+//  1. SweepPendingObligations — re-runs fulfillObligation for any
+//     pendingDeletes entry where this node is still in ExpectedFrom.
+//     Covers the case where the steady-state onRequestDelete callback
+//     fired but didn't ack (apply-pump wedge, transient failure, etc.).
+//
+//  2. SweepLocalOrphans — deletes local sealed chunks that the FSM has
+//     positively tombstoned but no longer references in the manifest
+//     or pendingDeletes. Covers the case where a delete cycle ran to
+//     completion while this node was offline; snapshot install brings
+//     the FSM forward to the post-finalize state, leaving the local
+//     file orphaned with no receipt obligation to drive cleanup.
+//
+// Both sweeps are local-only: each node consults its OWN replicated
+// FSM state and decides independently. No leader involvement. See
+// gastrolog-51gme.
 func (o *Orchestrator) pendingDeleteSweepAll() {
 	o.mu.RLock()
 	tiers := make([]*TierInstance, 0)
@@ -213,6 +225,7 @@ func (o *Orchestrator) pendingDeleteSweepAll() {
 	o.mu.RUnlock()
 	for _, t := range tiers {
 		t.Reconciler.SweepPendingObligations()
+		t.Reconciler.SweepLocalOrphans()
 	}
 }
 
@@ -468,13 +481,10 @@ func tierPositionInVault(cfg *system.Config, vaultID, tierID glid.GLID) int {
 	return -1
 }
 
-// (gastrolog-51gme step 5: reconcileFollower and reconcileTierDiskAgainstManifest
-// were removed. The disk-vs-manifest sweep was the legacy catchup mechanism for
-// nodes that missed an OnDelete callback. The receipt protocol replaces it: every
-// delete commits CmdRequestDelete to vault-ctl Raft with a pendingDeletes entry
-// keyed by chunk ID + expectedFrom set. The entry survives snapshot install, and
-// TierLifecycleReconciler.ReconcileFromSnapshot processes any obligations a
-// rejoining node owes — same code path as steady-state onRequestDelete.)
+// (Disk-vs-manifest orphan cleanup lives on TierLifecycleReconciler now —
+// see SweepLocalOrphans. It is tombstone-aware: only chunks the FSM has
+// positively confirmed as finalize-deleted are eligible for cleanup, so
+// freshly-created chunks with announce in flight are never racey-deleted.)
 
 // sweep evaluates retention rules on a leader and applies expire/eject/transition.
 func (r *retentionRunner) sweep(rules []retentionRule) {

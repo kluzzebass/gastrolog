@@ -12,8 +12,15 @@ package orchestrator
 //   step 4 (retention-ttl via deleteChunk): done.
 //   step 5 (drop reconcileTierDiskAgainstManifest / reconcileFollower):
 //     done. The receipt protocol's pendingDeletes (preserved across
-//     snapshot install + processed by ReconcileFromSnapshot) replaces
-//     the legacy disk-vs-manifest catchup sweep.
+//     snapshot install + processed by ReconcileFromSnapshot) is the
+//     primary catchup path. SweepLocalOrphans (added after the initial
+//     step-5 landing) covers the snapshot-restore gap that pendingDeletes
+//     alone misses: a delete that finalized while this node was offline
+//     leaves the FSM with only a tombstone, and the local file is
+//     orphaned with no obligation to drive cleanup. The orphan sweep
+//     uses tombstone presence as positive proof that a finalize was
+//     applied — a freshly-created chunk with announce in flight has no
+//     tombstone and is left alone.
 //   step 6 (archival sweep + drop maxTransitionStreamedStaleness):
 //     done. Archival expiry, archival suspect expiry, and transition
 //     source-expire all route through deleteChunk; the staleness
@@ -174,8 +181,12 @@ func (r *TierLifecycleReconciler) ReconcileFromSnapshot(fsm *tierfsm.FSM) {
 		return
 	}
 	pending := fsm.PendingDeletes()
-	r.logger.Debug("reconcile-from-snapshot: starting",
-		"pending_count", len(pending))
+	if len(pending) > 0 {
+		r.logger.Info("reconcile-from-snapshot: processing pending deletes",
+			"pending_count", len(pending))
+	} else {
+		r.logger.Debug("reconcile-from-snapshot: no pending deletes")
+	}
 
 	// Sealed-state projection acquires the chunk Manager mutex but
 	// does not propose Raft applies, so it is safe to run inline.
@@ -394,8 +405,21 @@ func (r *TierLifecycleReconciler) SweepPendingObligations() {
 		r.sweepInFlight.Store(0)
 		return
 	}
-	r.logger.Debug("pending-delete sweep: candidates",
-		"count", len(pending))
+	// Count obligations this node still owes — the rest are someone
+	// else's problem and shouldn't pollute the per-node sweep log.
+	owed := 0
+	for _, p := range pending {
+		if p.ExpectedFrom[r.localNodeID] {
+			owed++
+		}
+	}
+	if owed > 0 {
+		r.logger.Info("pending-delete sweep: fulfilling obligations",
+			"owed", owed, "total_pending", len(pending))
+	} else {
+		r.logger.Debug("pending-delete sweep: no obligations owed by this node",
+			"total_pending", len(pending))
+	}
 	go func() {
 		defer r.sweepInFlight.Store(0)
 		for _, p := range pending {
@@ -405,6 +429,72 @@ func (r *TierLifecycleReconciler) SweepPendingObligations() {
 			r.fulfillObligation(p.ChunkID, p.Reason, "periodic-sweep")
 		}
 	}()
+}
+
+// SweepLocalOrphans walks local sealed chunks and deletes any whose FSM
+// state proves they were finalize-deleted while this node was offline.
+// This fills the snapshot-restore gap that pendingDeletes alone cannot
+// cover: when a delete cycle ran to completion (CmdRequestDelete →
+// CmdAckDelete from every reachable node → CmdFinalizeDelete) while
+// this node was paused or partitioned, snapshot install brings the
+// FSM forward to the post-finalize state — tombstone present,
+// pendingDeletes entry gone, manifest entry gone. The local file is
+// then orphaned with no receipt obligation to drive cleanup.
+//
+// Safety invariants — ALL must hold before the local file is touched:
+//
+//   - chunk MUST be sealed locally. Active (unsealed) chunks may be
+//     mid-rotation and have no FSM presence yet; never act on those.
+//   - chunk MUST be absent from the FSM manifest (fsm.Get returns nil).
+//     FSM-known live entries stay regardless of replication state.
+//   - chunk MUST be absent from pendingDeletes. Active deletes are
+//     SweepPendingObligations' responsibility — let the receipt
+//     protocol drive them.
+//   - chunk MUST be tombstoned in the FSM. Tombstone presence is
+//     positive proof that an applyFinalizeDelete ran for this chunk.
+//     A freshly-created chunk with announce-in-flight has no tombstone
+//     and would not be touched, so we cannot mistake "not yet known"
+//     for "deleted".
+//
+// Logged at INFO level so the deletion is visible in cluster.log
+// without per-component log-level overrides — the whole point of this
+// sweep is operator-visible recovery.
+func (r *TierLifecycleReconciler) SweepLocalOrphans() {
+	if r.fsm == nil || r.tier == nil || r.tier.Chunks == nil {
+		return
+	}
+	metas, err := r.tier.Chunks.List()
+	if err != nil {
+		r.logger.Warn("local-orphan sweep: list chunks failed", "error", err)
+		return
+	}
+	var deleted int
+	for _, meta := range metas {
+		if !meta.Sealed {
+			continue
+		}
+		if r.fsm.Get(meta.ID) != nil {
+			continue
+		}
+		if r.fsm.PendingDelete(meta.ID) != nil {
+			continue
+		}
+		if !r.fsm.IsTombstoned(meta.ID) {
+			continue
+		}
+		r.logger.Info("local-orphan sweep: deleting tombstoned local chunk",
+			"chunk", meta.ID)
+		if err := r.deleteLocalCopy(meta.ID); err != nil {
+			r.logger.Warn("local-orphan sweep: delete failed",
+				"chunk", meta.ID, "error", err)
+			continue
+		}
+		deleted++
+	}
+	if deleted > 0 {
+		r.logger.Info("local-orphan sweep: cleaned up tombstoned orphans",
+			"deleted", deleted)
+	}
 }
 
 // fulfillObligation deletes the local copy of a chunk and then proposes

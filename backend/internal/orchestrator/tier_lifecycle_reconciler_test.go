@@ -461,3 +461,85 @@ func TestReconcileFromSnapshotProcessesPendingObligations(t *testing.T) {
 		t.Errorf("expected 2 acks from reconcile, got %d (%v)", len(ackedIDs), ackedIDs)
 	}
 }
+
+// TestSweepLocalOrphansDeletesOnlyTombstonedAbsentEntries pins the
+// snapshot-restore catchup invariant: the orphan sweep is the only
+// recovery path when a delete cycle finalized while this node was
+// offline (snapshot install brings the FSM forward to "tombstone
+// present, manifest absent, pendingDeletes absent" but the local
+// file survived).
+//
+// The four safety gates — sealed locally, absent from manifest,
+// absent from pendingDeletes, present in tombstones — each guard a
+// distinct failure mode the sweep must NOT trip into:
+//
+//   - active (unsealed) chunks must be left alone (mid-rotation race)
+//   - manifest-known chunks must be left alone (FSM-known live)
+//   - pendingDeletes-tracked chunks must be left alone (receipt
+//     protocol owns those via SweepPendingObligations)
+//   - chunks WITHOUT a tombstone must be left alone (could be a
+//     fresh chunk with announce in flight; deleting would lose data)
+//
+// The test seeds one chunk for each gate plus a positive case, runs
+// the sweep, and asserts only the positive case is deleted.
+func TestSweepLocalOrphansDeletesOnlyTombstonedAbsentEntries(t *testing.T) {
+	t.Parallel()
+
+	fsm := tierfsm.New()
+	cm := &reconcilerFakeChunkManager{}
+
+	now := time.Now()
+
+	// Case 1 (positive): tombstoned-absent. Drive the full receipt
+	// protocol to commit a tombstone, then leave the local file behind.
+	idTombstoned := chunk.NewChunkID()
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(idTombstoned, now, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idTombstoned, now, 1, 1, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalRequestDelete(idTombstoned, now, "test", []string{"node-A"})})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalAckDelete(idTombstoned, "node-A")})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalFinalizeDelete(idTombstoned)})
+
+	// Case 2 (negative): live in manifest. Created + sealed, no deletes.
+	idLiveSealed := chunk.NewChunkID()
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(idLiveSealed, now, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idLiveSealed, now, 1, 1, now, now)})
+
+	// Case 3 (negative): pendingDeletes — receipt protocol owns it.
+	idPending := chunk.NewChunkID()
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(idPending, now, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idPending, now, 1, 1, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalRequestDelete(idPending, now, "test", []string{"node-A"})})
+
+	// Case 4 (negative): on disk, FSM has nothing about it (no tombstone,
+	// no manifest, no pending). Could be announce-in-flight; must not delete.
+	idUnknown := chunk.NewChunkID()
+
+	// Case 5 (negative): unsealed local file. Even if absent + tombstoned,
+	// active chunks are off-limits — but here we just test the sealed gate.
+	idUnsealed := chunk.NewChunkID()
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(idUnsealed, now, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalRequestDelete(idUnsealed, now, "test", []string{"node-A"})})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalAckDelete(idUnsealed, "node-A")})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalFinalizeDelete(idUnsealed)})
+
+	// Seed the local chunk manager with each case as if the file is
+	// still on disk regardless of FSM state.
+	cm.chunks = []chunk.ChunkMeta{
+		{ID: idTombstoned, Sealed: true},
+		{ID: idLiveSealed, Sealed: true},
+		{ID: idPending, Sealed: true},
+		{ID: idUnknown, Sealed: true},
+		{ID: idUnsealed, Sealed: false},
+	}
+
+	tier := &TierInstance{TierID: glid.New(), Chunks: cm}
+	rec := NewTierLifecycleReconciler(nil, glid.New(), tier.TierID, tier, "node-A", slog.Default())
+	rec.Wire(fsm)
+
+	rec.SweepLocalOrphans()
+
+	if len(cm.deleted) != 1 || cm.deleted[0] != idTombstoned {
+		t.Errorf("orphan sweep deleted = %v, want only [%s] (tombstoned-absent positive case)",
+			cm.deleted, idTombstoned)
+	}
+}
