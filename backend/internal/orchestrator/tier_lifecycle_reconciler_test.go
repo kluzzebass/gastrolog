@@ -22,6 +22,19 @@ type reconcilerFakeChunkManager struct {
 	retentionFakeChunkManager
 }
 
+// reconcilerFakeSealEnsurerChunkManager extends the fake chunk manager
+// with the chunk.SealEnsurer interface so onSeal / ReconcileFromSnapshot
+// projection tests can observe EnsureSealed calls. See gastrolog-51gme step 8.
+type reconcilerFakeSealEnsurerChunkManager struct {
+	retentionFakeChunkManager
+	ensured []chunk.ChunkID
+}
+
+func (f *reconcilerFakeSealEnsurerChunkManager) EnsureSealed(id chunk.ChunkID) error {
+	f.ensured = append(f.ensured, id)
+	return nil
+}
+
 // TestReconcilerOnRequestDeleteDeletesLocalAndAcks pins the receiver-side
 // invariant: when CmdRequestDelete commits and this node is in
 // expectedFrom, the reconciler deletes its local copy and proposes
@@ -206,6 +219,79 @@ func TestReconcilerDeleteChunkSingleNodeFallback(t *testing.T) {
 	}
 	if len(cm.deleted) != 1 || cm.deleted[0] != chunkID {
 		t.Errorf("single-node deleteChunk delete = %v, want [%s]", cm.deleted, chunkID)
+	}
+}
+
+// TestReconcilerOnSealProjectsToLocalManager pins the gastrolog-51gme step 8
+// invariant: when CmdSealChunk applies, the reconciler asks the local chunk
+// Manager to project the FSM-sealed state via the SealEnsurer interface. The
+// Manager's EnsureSealed contract handles the no-op cases internally; the
+// test just asserts the projection method was invoked with the right ID.
+func TestReconcilerOnSealProjectsToLocalManager(t *testing.T) {
+	t.Parallel()
+
+	fsm := tierfsm.New()
+	cm := &reconcilerFakeSealEnsurerChunkManager{}
+	tier := &TierInstance{
+		TierID: glid.New(),
+		Chunks: cm,
+	}
+	rec := NewTierLifecycleReconciler(nil, glid.New(), tier.TierID, tier, "node-A", slog.Default())
+	rec.Wire(fsm)
+
+	id := chunk.NewChunkID()
+	now := time.Now()
+	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(id, now, now, now)}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(id, now, 100, 1234, now, now)}); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	if len(cm.ensured) != 1 || cm.ensured[0] != id {
+		t.Errorf("EnsureSealed = %v, want [%s]", cm.ensured, id)
+	}
+}
+
+// TestReconcileFromSnapshotProjectsAllSealedEntries pins that after FSM
+// Restore, every sealed entry in the FSM is projected to the local
+// Manager. This is the catchup pass that replaces the deleted
+// "multiple unsealed → seal all but newest" startup heuristic. See
+// gastrolog-51gme step 8 / gastrolog-uccg6.
+func TestReconcileFromSnapshotProjectsAllSealedEntries(t *testing.T) {
+	t.Parallel()
+
+	src := tierfsm.New()
+
+	// Seed the source FSM: 3 chunks created, 2 sealed, 1 still active.
+	now := time.Now()
+	idSealed1 := chunk.NewChunkID()
+	idSealed2 := chunk.NewChunkID()
+	idActive := chunk.NewChunkID()
+	for _, id := range []chunk.ChunkID{idSealed1, idSealed2, idActive} {
+		_ = src.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(id, now, now, now)})
+	}
+	_ = src.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idSealed1, now, 1, 1, now, now)})
+	_ = src.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idSealed2, now, 1, 1, now, now)})
+
+	cm := &reconcilerFakeSealEnsurerChunkManager{}
+	tier := &TierInstance{
+		TierID: glid.New(),
+		Chunks: cm,
+	}
+	rec := NewTierLifecycleReconciler(nil, glid.New(), tier.TierID, tier, "node-A", slog.Default())
+
+	rec.ReconcileFromSnapshot(src)
+
+	if len(cm.ensured) != 2 {
+		t.Fatalf("EnsureSealed call count = %d, want 2 (only sealed entries projected)", len(cm.ensured))
+	}
+	got := map[chunk.ChunkID]bool{cm.ensured[0]: true, cm.ensured[1]: true}
+	if !got[idSealed1] || !got[idSealed2] {
+		t.Errorf("EnsureSealed = %v, want both sealed IDs (%s, %s)", cm.ensured, idSealed1, idSealed2)
+	}
+	if got[idActive] {
+		t.Errorf("EnsureSealed must not be called for the still-active chunk %s", idActive)
 	}
 }
 

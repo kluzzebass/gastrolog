@@ -809,27 +809,24 @@ func (m *Manager) loadExisting() error {
 		}
 	}
 
-	// If multiple unsealed chunks, seal all but the newest (by ChunkID, which is time-ordered).
+	// gastrolog-51gme step 8 deleted the "multiple unsealed → seal all
+	// but newest" startup heuristic that lived here. Sealed-state
+	// projection is now FSM-driven via TierLifecycleReconciler.onSeal +
+	// ReconcileFromSnapshot, which call chunk.SealEnsurer.EnsureSealed
+	// on this Manager once the tier sub-FSM has loaded. Until that
+	// projection runs, multiple unsealed chunks are tolerated; the
+	// newest is opened as active and the older ones stay as
+	// unsealed-on-disk until the FSM tells us they were sealed.
 	if len(unsealedIDs) > 1 {
-		// Sort by ChunkID (UUID v7, time-ordered) - newest last.
 		slices.SortFunc(unsealedIDs, func(a, b chunk.ChunkID) int {
 			return cmp.Compare(a.String(), b.String())
 		})
-
-		// Seal all but the last (newest).
-		for _, id := range unsealedIDs[:len(unsealedIDs)-1] {
-			m.logger.Info("sealing orphaned active chunk", "chunk", id.String())
-			if err := m.sealChunkOnDisk(id); err != nil {
-				return fmt.Errorf("seal orphaned chunk %s: %w", id, err)
-			}
-			m.metas[id].sealed = true
-		}
-
-		// Keep only the newest as active candidate.
+		// Open only the newest as active candidate; the others wait
+		// for FSM projection (or for the next post-FSM-restore
+		// rotation to seal them via EnsureSealed).
 		unsealedIDs = unsealedIDs[len(unsealedIDs)-1:]
 	}
 
-	// Open the single remaining unsealed chunk as active.
 	if len(unsealedIDs) == 1 {
 		id := unsealedIDs[0]
 		if err := m.openActiveChunk(id); err != nil {
@@ -862,6 +859,47 @@ func (m *Manager) cleanOrphanTempFiles(chunkDir string) {
 			}
 		}
 	}
+}
+
+// EnsureSealed projects the FSM's sealed state onto local chunk files.
+// Called by TierLifecycleReconciler.onSeal (steady state) and
+// ReconcileFromSnapshot (catchup) when CmdSealChunk applies. Implements
+// chunk.SealEnsurer.
+//
+// Behavior:
+//   - chunk not local        → no-op (this node never had it)
+//   - chunk already sealed   → no-op
+//   - chunk is local active  → logged at warn, skipped (sealing the
+//     active chunk from outside the regular Seal path would race with
+//     in-flight writes and re-fire the announcer; the divergence
+//     resolves on the next rotation)
+//   - chunk is unsealed local → set sealed flag in file headers and
+//     mark m.metas[id].sealed = true
+//
+// See gastrolog-51gme step 8 / gastrolog-uccg6.
+func (m *Manager) EnsureSealed(id chunk.ChunkID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return ErrManagerClosed
+	}
+	meta, ok := m.metas[id]
+	if !ok {
+		return nil
+	}
+	if meta.sealed {
+		return nil
+	}
+	if m.active != nil && m.active.meta.id == id {
+		m.logger.Warn("EnsureSealed: FSM says sealed but chunk is local active; skipping",
+			"chunk", id.String())
+		return nil
+	}
+	if err := m.sealChunkOnDisk(id); err != nil {
+		return err
+	}
+	meta.sealed = true
+	return nil
 }
 
 // sealChunkOnDisk sets the sealed flag in the chunk's file headers without opening it as active.

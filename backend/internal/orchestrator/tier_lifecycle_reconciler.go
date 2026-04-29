@@ -24,7 +24,12 @@ package orchestrator
 //     reason "manual-delete-rpc". The active-chunk seal-first behavior
 //     is preserved so deletes targeting the active chunk still seal it
 //     before propagation.
-//   step 8: delete the manager.go startup auto-seal heuristic.
+//   step 8 (FSM-sealed projection + drop the manager.go heuristic):
+//     done. onSeal and ReconcileFromSnapshot project FSM-sealed state
+//     onto the local chunk Manager via chunk.SealEnsurer.EnsureSealed.
+//     The "multiple unsealed → seal all but newest" startup heuristic
+//     in file.Manager was deleted; sealed-state divergence (e.g.
+//     gastrolog-uccg6) is now resolved by replaying the FSM truth.
 
 import (
 	"errors"
@@ -111,19 +116,55 @@ func (r *TierLifecycleReconciler) Wire(fsm *tierfsm.FSM) {
 // ReconcileFromSnapshot runs once after the FSM has been Restore'd from
 // a snapshot. Walks the FSM's pendingDeletes and processes any
 // obligations this node owes — same code path as the steady-state
-// onRequestDelete handler. This is the structural fix for the catchup
-// boundary that defeated the old single-shot CmdDeleteChunk path.
+// onRequestDelete handler. Also projects the FSM's sealed state onto
+// the local chunk Manager (gastrolog-51gme step 8): when an entry is
+// flagged sealed in the FSM but the local chunk Manager has it as
+// unsealed, EnsureSealed seals it on disk. This replaces the legacy
+// "multiple unsealed → seal all but newest" startup heuristic.
+//
+// Both passes are idempotent. The pending-deletes pass owns the
+// receipt-protocol catchup; the sealed-projection pass owns
+// gastrolog-uccg6 (FSM-sealed but local-still-active divergence).
 func (r *TierLifecycleReconciler) ReconcileFromSnapshot(fsm *tierfsm.FSM) {
 	if fsm == nil {
 		return
 	}
+
 	pending := fsm.PendingDeletes()
-	r.logger.Debug("reconcile-from-snapshot: starting", "pending_count", len(pending))
+	r.logger.Debug("reconcile-from-snapshot: starting",
+		"pending_count", len(pending))
 	for _, p := range pending {
 		if !p.ExpectedFrom[r.localNodeID] {
 			continue
 		}
 		r.fulfillObligation(p.ChunkID, p.Reason, "snapshot-restore")
+	}
+
+	r.projectAllSealedFromFSM(fsm)
+}
+
+// projectAllSealedFromFSM iterates every entry in the FSM and projects
+// the sealed flag onto the local chunk Manager. Used by
+// ReconcileFromSnapshot after Restore — at that point the FSM has been
+// fully reloaded but the local Manager has only the on-disk flag bits,
+// which may have missed CmdSealChunk replays. Idempotent: chunks that
+// are already sealed locally, or that don't exist locally, are no-ops.
+func (r *TierLifecycleReconciler) projectAllSealedFromFSM(fsm *tierfsm.FSM) {
+	if r.tier == nil || r.tier.Chunks == nil {
+		return
+	}
+	ensurer, ok := r.tier.Chunks.(chunk.SealEnsurer)
+	if !ok {
+		return
+	}
+	for _, e := range fsm.List() {
+		if !e.Sealed {
+			continue
+		}
+		if err := ensurer.EnsureSealed(e.ID); err != nil {
+			r.logger.Warn("reconcile-from-snapshot: EnsureSealed failed",
+				"chunk", e.ID, "error", err)
+		}
 	}
 }
 
@@ -135,10 +176,25 @@ func (r *TierLifecycleReconciler) ReconcileFromSnapshot(fsm *tierfsm.FSM) {
 // a Raft Apply or a chunk-manager I/O call to avoid the lock-inversion
 // trap.
 
+// onSeal fires when CmdSealChunk applies on this node. Projects the
+// FSM-sealed state onto the local chunk Manager via the SealEnsurer
+// interface. The Manager's EnsureSealed contract handles the cases
+// where the chunk is already sealed, doesn't exist locally, or is the
+// local active chunk — only the unsealed-on-disk case results in a
+// header rewrite. See gastrolog-51gme step 8 / gastrolog-uccg6.
 func (r *TierLifecycleReconciler) onSeal(e tierfsm.Entry) {
-	r.logger.Debug("onSeal (skeleton no-op)", "chunk", e.ID, "records", e.RecordCount)
-	// Step 8 fills this in: project FSM-side seal into the local
-	// chunk manager's chunkMeta. Closes gastrolog-uccg6 structurally.
+	r.logger.Debug("onSeal", "chunk", e.ID, "records", e.RecordCount)
+	if r.tier == nil || r.tier.Chunks == nil {
+		return
+	}
+	ensurer, ok := r.tier.Chunks.(chunk.SealEnsurer)
+	if !ok {
+		return
+	}
+	if err := ensurer.EnsureSealed(e.ID); err != nil {
+		r.logger.Warn("onSeal: EnsureSealed failed",
+			"chunk", e.ID, "error", err)
+	}
 }
 
 func (r *TierLifecycleReconciler) onRetentionPending(id chunk.ChunkID) {
