@@ -324,6 +324,22 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
                 const isExpanded = expandedChunk === encode(chunk.id);
 
                 const replicas = chunk.replicaCount || 1;
+                // Actual residency from the cluster fan-out: which nodes
+                // physically hold this chunk right now. Distinct from
+                // placement (leader + secondaries from tier config), which
+                // says where the chunk SHOULD live, not where it IS.
+                const residentNodes = chunk.replicaNodeIds.map((id) =>
+                  resolveNodeName(nodeNameMap, id),
+                );
+                const placementNodes = tierCfg
+                  ? [pnId, ...secondaries].filter(Boolean).map((id) => resolveNodeName(nodeNameMap, id))
+                  : [];
+                // Per-node ack laggards for chunks stuck in the receipt
+                // protocol's pendingDeletes — tells operators which node
+                // is holding up a delete.
+                const pendingAckNodes = chunk.pendingAckNodeIds.map((id) =>
+                  resolveNodeName(nodeNameMap, id),
+                );
                 return (
                   <ChunkRow
                     key={encode(chunk.id)}
@@ -337,7 +353,9 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
                     c={c}
                     replicas={replicas}
                     rf={rf}
-                    replicaNodes={tierCfg ? [pnId, ...secondaries].filter(Boolean).map((id) => resolveNodeName(nodeNameMap, id)) : []}
+                    residentNodes={residentNodes}
+                    placementNodes={placementNodes}
+                    pendingAckNodes={pendingAckNodes}
                   />
                 );
               })}
@@ -360,7 +378,9 @@ function ChunkRow({
   c,
   replicas,
   rf,
-  replicaNodes,
+  residentNodes,
+  placementNodes,
+  pendingAckNodes,
 }: Readonly<{
   chunk: ChunkMeta;
   vaultId: string;
@@ -372,7 +392,9 @@ function ChunkRow({
   c: (darkCls: string, lightCls: string) => string;
   replicas: number;
   rf: number;
-  replicaNodes: string[];
+  residentNodes: string[];
+  placementNodes: string[];
+  pendingAckNodes: string[];
 }>) {
   return (
     <>
@@ -448,15 +470,21 @@ function ChunkRow({
             {rf > 1 && (() => {
               let badgeVariant: "info" | "error" | "warn";
               let badgeTitle: string;
+              const onLine = residentNodes.length > 0
+                ? `\nOn: ${residentNodes.join(", ")}`
+                : "\nOn: (no replicas reported)";
+              const placementLine = placementNodes.length > 0
+                ? `\nPlacement: ${placementNodes.join(", ")}`
+                : "";
               if (replicas >= rf) {
                 badgeVariant = "info";
-                badgeTitle = `${String(replicas)} replicas (fully replicated)`;
-              } else if (replicaNodes.length < rf) {
+                badgeTitle = `${String(replicas)} replicas (fully replicated)${onLine}${placementLine}`;
+              } else if (placementNodes.length < rf) {
                 badgeVariant = "error";
-                badgeTitle = `${String(replicas)}/${String(rf)} replicas — insufficient nodes with required storage`;
+                badgeTitle = `${String(replicas)}/${String(rf)} replicas — insufficient nodes with required storage${onLine}${placementLine}`;
               } else {
                 badgeVariant = "warn";
-                badgeTitle = `${String(replicas)}/${String(rf)} replicas — replication in progress`;
+                badgeTitle = `${String(replicas)}/${String(rf)} replicas — replication in progress${onLine}${placementLine}`;
               }
               return (
                 <Badge variant={badgeVariant} dark={dark} title={badgeTitle}>
@@ -464,6 +492,17 @@ function ChunkRow({
                 </Badge>
               );
             })()}
+            {pendingAckNodes.length > 0 && (
+              <Badge
+                variant="error"
+                dark={dark}
+                title={`Pending delete-ack from ${String(pendingAckNodes.length)} ${
+                  pendingAckNodes.length === 1 ? "node" : "nodes"
+                }: ${pendingAckNodes.join(", ")}`}
+              >
+                {`pending-ack: ${pendingAckNodes.join(", ")}`}
+              </Badge>
+            )}
           </span>
         </td>
         <td className={`px-2 py-2 text-right font-mono whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}>
@@ -483,7 +522,16 @@ function ChunkRow({
       {isExpanded && (
         <tr>
           <td colSpan={5} className="p-0">
-            <ChunkDetail vaultId={vaultId} chunk={chunk} dark={dark} replicas={replicas} rf={rf} replicaNodes={replicaNodes} />
+            <ChunkDetail
+              vaultId={vaultId}
+              chunk={chunk}
+              dark={dark}
+              replicas={replicas}
+              rf={rf}
+              residentNodes={residentNodes}
+              placementNodes={placementNodes}
+              pendingAckNodes={pendingAckNodes}
+            />
           </td>
         </tr>
       )}
@@ -497,14 +545,18 @@ function ChunkDetail({
   dark,
   replicas,
   rf,
-  replicaNodes,
+  residentNodes,
+  placementNodes,
+  pendingAckNodes,
 }: Readonly<{
   vaultId: string;
   chunk: ChunkMeta;
   dark: boolean;
   replicas: number;
   rf: number;
-  replicaNodes: string[];
+  residentNodes: string[];
+  placementNodes: string[];
+  pendingAckNodes: string[];
 }>) {
   const c = useThemeClass(dark);
   // Skip index fetch for cloud-backed chunks — they don't have local indexes.
@@ -545,21 +597,52 @@ function ChunkDetail({
             <div className={`flex items-center gap-3 text-[0.85em]`}>
               <span className={`font-mono ${(() => {
                 if (replicas >= rf) return c("text-text-muted", "text-light-text-muted");
-                return replicaNodes.length < rf ? "text-severity-error" : "text-severity-warn";
+                return placementNodes.length < rf ? "text-severity-error" : "text-severity-warn";
               })()}`}>
                 {`${String(replicas)}/${String(rf)}`}
               </span>
-              {replicaNodes.length > 0 && (
-                <span className={c("text-text-muted", "text-light-text-muted")}>
-                  {replicaNodes.join(", ")}
-                </span>
-              )}
+              <div className="flex flex-col gap-0.5">
+                {residentNodes.length > 0 ? (
+                  <span className={c("text-text-muted", "text-light-text-muted")}>
+                    On: {residentNodes.join(", ")}
+                  </span>
+                ) : (
+                  <span className="text-severity-warn">
+                    On: (no replicas reported)
+                  </span>
+                )}
+                {placementNodes.length > 0 && (
+                  <span className={`text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+                    Placement: {placementNodes.join(", ")}
+                  </span>
+                )}
+              </div>
             </div>
-            {replicaNodes.length < rf && (
+            {placementNodes.length < rf && (
               <span className="text-[0.8em] text-severity-error">
                 Not enough nodes with the required storage class to satisfy RF={String(rf)}
               </span>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Pending receipt-protocol delete acks — surfaces which nodes are
+          holding up a stuck delete */}
+      {pendingAckNodes.length > 0 && (
+        <div className="mb-3">
+          <div
+            className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-1.5 ${c("text-text-muted", "text-light-text-muted")}`}
+          >
+            Pending delete acks
+          </div>
+          <div className="flex flex-col gap-1 text-[0.85em]">
+            <span className="text-severity-error">
+              {pendingAckNodes.length === 1 ? "1 node has" : `${String(pendingAckNodes.length)} nodes have`} not yet acked the delete: {pendingAckNodes.join(", ")}
+            </span>
+            <span className={`text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
+              The pending-delete sweep retries every 20s. If a node stays here it usually means its vault-ctl Raft apply pump is wedged or unreachable.
+            </span>
           </div>
         </div>
       )}
