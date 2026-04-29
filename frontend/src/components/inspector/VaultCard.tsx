@@ -610,7 +610,6 @@ function ChunkRow({
               vaultId={vaultId}
               chunk={chunk}
               dark={dark}
-              replicas={replicas}
               rf={rf}
               residentNodes={residentNodes}
               placementNodes={placementNodes}
@@ -627,7 +626,6 @@ function ChunkDetail({
   vaultId,
   chunk,
   dark,
-  replicas,
   rf,
   residentNodes,
   placementNodes,
@@ -636,7 +634,6 @@ function ChunkDetail({
   vaultId: string;
   chunk: ChunkMeta;
   dark: boolean;
-  replicas: number;
   rf: number;
   residentNodes: string[];
   placementNodes: string[];
@@ -677,20 +674,12 @@ function ChunkDetail({
           >
             Replicas
           </div>
-          <div className={`flex items-center gap-3 text-[0.85em]`}>
-            <span className={`font-mono ${(() => {
-              if (replicas >= rf) return c("text-text-muted", "text-light-text-muted");
-              return placementNodes.length < rf ? "text-severity-error" : "text-severity-warn";
-            })()}`}>
-              {`${String(replicas)}/${String(rf)}`}
-            </span>
-            <ChunkReplicaBadges
-              placementNodes={placementNodes}
-              residentNodes={residentNodes}
-              pendingAckNodes={pendingAckNodes}
-              dark={dark}
-            />
-          </div>
+          <ChunkReplicaBadges
+            placementNodes={placementNodes}
+            residentNodes={residentNodes}
+            pendingAckNodes={pendingAckNodes}
+            dark={dark}
+          />
           {placementNodes.length < rf && (
             <div className="mt-1 text-[0.8em] text-severity-error">
               Not enough nodes with the required storage class to satisfy RF={String(rf)}
