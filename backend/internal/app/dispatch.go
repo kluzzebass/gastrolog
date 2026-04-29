@@ -120,7 +120,18 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 		d.handleTierDeleted(ctx, n.ID, n.Drain)
 	case raftfsm.NotifyIngesterAssignmentSet:
 		d.handleIngesterAssignment(ctx, n.ID)
-	case raftfsm.NotifyTierPlacementsSet, raftfsm.NotifyCloudServicePut, raftfsm.NotifyCloudServiceDeleted,
+	case raftfsm.NotifyTierPlacementsSet:
+		// Re-fire handleTierPut so applyTierMembershipChange can pick
+		// up the now-complete placements. handleTierPut's earlier
+		// invocation (from the TierPut notification) may have deferred
+		// with "no leader" because placements arrive in a separate
+		// CmdSetTierPlacements log entry. Without this re-trigger, a
+		// rejoining node that replays TierPut before
+		// CmdSetTierPlacements never builds the missing tiers — the
+		// failure mode that left node3 with only 1 of 3 tiers after
+		// a snapshot/replication catchup. See gastrolog-51gme.
+		d.handleTierPut(ctx, n.ID)
+	case raftfsm.NotifyCloudServicePut, raftfsm.NotifyCloudServiceDeleted,
 		raftfsm.NotifyNodeStorageConfigSet, raftfsm.NotifySetupWizardDismissedSet,
 		raftfsm.NotifyIngesterAliveSet,
 		raftfsm.NotifyIngesterCheckpointSet:

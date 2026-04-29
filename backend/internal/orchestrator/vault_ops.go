@@ -752,6 +752,52 @@ func replaceForwardedChunk(cm chunk.ChunkManager, chunkID chunk.ChunkID, isActiv
 // pass without needing per-tier leadership checks. See gastrolog-51gme
 // step 10.
 //
+// afterVaultCtlRestore fires (off the FSM apply pump, on the
+// vaultraft.FSM's after-restore hook goroutine) once the vault-ctl
+// FSM Restore for vaultID has completed. Walks every TierInstance in
+// the vault and runs the receipt protocol's catchup pass: process any
+// pendingDeletes obligations this node owes, and project FSM-sealed
+// state onto the local chunk Manager.
+//
+// Without this hook, the receipt protocol's catchup mechanism is dead
+// code — pendingDeletes silently leak across snapshot install
+// boundaries and FSM-sealed-but-local-active divergences (e.g.
+// gastrolog-uccg6) don't reconcile. Wired from
+// ensureVaultCtlTierMetadata via vfsm.SetOnAfterRestore. See
+// gastrolog-51gme.
+//
+// Snapshot a copy of vault.Tiers under the read lock and walk it
+// without holding the lock — ReconcileFromSnapshot may take the chunk
+// manager mutex and propose Raft applies, neither of which should
+// happen with o.mu held.
+func (o *Orchestrator) afterVaultCtlRestore(vaultID glid.GLID) {
+	o.mu.RLock()
+	vault := o.vaults[vaultID]
+	if vault == nil {
+		o.mu.RUnlock()
+		return
+	}
+	tiers := make([]*TierInstance, len(vault.Tiers))
+	copy(tiers, vault.Tiers)
+	o.mu.RUnlock()
+
+	for _, t := range tiers {
+		if t == nil || t.Reconciler == nil {
+			continue
+		}
+		// Resolve the matching tier sub-FSM via the vault-ctl Raft
+		// group's FSM. The reconciler.fsm cached at Wire time is the
+		// SAME pointer (vaultraft.FSM.EnsureTierFSM is idempotent),
+		// so passing it explicitly here is just defensive.
+		if t.Reconciler.fsm == nil {
+			continue
+		}
+		t.Reconciler.ReconcileFromSnapshot(t.Reconciler.fsm)
+	}
+	o.logger.Info("vault-ctl after-restore reconcile complete",
+		"vault", vaultID, "tiers", len(tiers))
+}
+
 // Errors are logged at warn but do not abort: the next reconcile pass
 // will re-propose CmdPruneNode for any tier where the apply failed
 // (the FSM's applyPruneNode is idempotent — repeated prunes for the

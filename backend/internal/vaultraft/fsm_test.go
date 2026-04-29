@@ -106,6 +106,62 @@ func TestFSM_SnapshotRestore_twoTiers(t *testing.T) {
 	}
 }
 
+// TestFSM_OnAfterRestoreFires pins the gastrolog-51gme catchup hook:
+// snapshot install must fire SetOnAfterRestore so the orchestrator can
+// run ReconcileFromSnapshot on every tier. Without this, the receipt
+// protocol's pendingDeletes silently leak across snapshot boundaries.
+func TestFSM_OnAfterRestoreFires(t *testing.T) {
+	t.Parallel()
+
+	src := NewFSM()
+	now := time.Now().Truncate(time.Nanosecond)
+	tierA, tierB := glid.New(), glid.New()
+	_ = src.Apply(&hraft.Log{Data: MarshalTierCommand(tierA, tierfsm.MarshalCreateChunk(testChunkID(1), now, now, now))})
+	_ = src.Apply(&hraft.Log{Data: MarshalTierCommand(tierB, tierfsm.MarshalCreateChunk(testChunkID(2), now, now, now))})
+
+	snap, err := src.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := snap.Persist(&bufSink{Writer: &buf}); err != nil {
+		t.Fatalf("Persist: %v", err)
+	}
+
+	dst := NewFSM()
+	var fires int32
+	dst.SetOnAfterRestore(func() { fires++ })
+
+	if err := dst.Restore(io.NopCloser(bytes.NewReader(buf.Bytes()))); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if fires != 1 {
+		t.Errorf("OnAfterRestore fires = %d, want 1", fires)
+	}
+	// Sanity: the hook fires AFTER tiers were swapped in, so the
+	// orchestrator's handler can already iterate Tiers() to find work.
+	if got := dst.Tiers(); len(got) != 2 {
+		t.Errorf("post-restore Tiers() = %d, want 2", len(got))
+	}
+}
+
+// TestFSM_OnAfterRestoreFires_legacyEmpty pins that the legacy
+// single-byte empty-snapshot code path also fires the hook. A node
+// rejoining a freshly-bootstrapped cluster takes this path; the
+// receipt protocol's catchup needs to run there too.
+func TestFSM_OnAfterRestoreFires_legacyEmpty(t *testing.T) {
+	t.Parallel()
+	f := NewFSM()
+	var fires int32
+	f.SetOnAfterRestore(func() { fires++ })
+	if err := f.Restore(io.NopCloser(bytes.NewReader([]byte{1}))); err != nil {
+		t.Fatalf("legacy restore: %v", err)
+	}
+	if fires != 1 {
+		t.Errorf("OnAfterRestore fires = %d on legacy empty snapshot, want 1", fires)
+	}
+}
+
 func TestFSM_Restore_legacyEmptyByte(t *testing.T) {
 	t.Parallel()
 	f := NewFSM()

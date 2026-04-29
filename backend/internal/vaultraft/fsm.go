@@ -36,6 +36,15 @@ const vaultSnapVersion uint32 = 1
 type FSM struct {
 	tierMu sync.Mutex
 	tiers  map[glid.GLID]*tierfsm.FSM
+
+	// onAfterRestore fires (outside tierMu) once Restore() has swapped
+	// the tier-sub-FSM map. The orchestrator uses this to walk each
+	// tier's reconciler and run ReconcileFromSnapshot, which processes
+	// any pendingDeletes obligations the rejoining node owes and
+	// projects FSM-sealed state onto local files. Without this hook
+	// the receipt protocol's catchup mechanism is dead code.
+	// See gastrolog-51gme.
+	onAfterRestore func()
 }
 
 // NewFSM returns a new vault control-plane FSM instance.
@@ -43,6 +52,28 @@ func NewFSM() *FSM {
 	return &FSM{
 		tiers: make(map[glid.GLID]*tierfsm.FSM),
 	}
+}
+
+// SetOnAfterRestore registers a callback fired (outside the FSM
+// mutex) at the tail of every successful Restore. Idempotent;
+// replaces any prior callback. The orchestrator wires this when
+// the vault-ctl Raft group is first ensured so that snapshot install
+// triggers ReconcileFromSnapshot on every tier in the vault.
+func (f *FSM) SetOnAfterRestore(fn func()) {
+	f.tierMu.Lock()
+	defer f.tierMu.Unlock()
+	f.onAfterRestore = fn
+}
+
+// Tiers returns a snapshot of the current (tierID → sub-FSM) map.
+// Safe for the orchestrator's after-restore handler to iterate
+// without holding tierMu.
+func (f *FSM) Tiers() map[glid.GLID]*tierfsm.FSM {
+	f.tierMu.Lock()
+	defer f.tierMu.Unlock()
+	out := make(map[glid.GLID]*tierfsm.FSM, len(f.tiers))
+	maps.Copy(out, f.tiers)
+	return out
 }
 
 // Apply executes vault control-plane commands. Empty payloads are ignored.
@@ -153,8 +184,12 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 		if n, _ := rc.Read(probe[:]); n == 0 {
 			f.tierMu.Lock()
 			f.tiers = make(map[glid.GLID]*tierfsm.FSM)
+			hook := f.onAfterRestore
 			f.tierMu.Unlock()
-				return nil
+			if hook != nil {
+				hook()
+			}
+			return nil
 		}
 		return errors.New("vaultraft restore: trailing bytes after legacy empty sentinel")
 	}
@@ -207,7 +242,13 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 	}
 	f.tierMu.Lock()
 	f.tiers = nextTiers
+	hook := f.onAfterRestore
 	f.tierMu.Unlock()
+	// Fire outside the mutex — the handler walks per-tier reconcilers
+	// which can call back into the FSM (Tiers, PendingDeletes, etc.).
+	if hook != nil {
+		hook()
+	}
 	return nil
 }
 

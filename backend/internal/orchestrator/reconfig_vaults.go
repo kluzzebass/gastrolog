@@ -1120,6 +1120,15 @@ func (o *Orchestrator) ensureVaultCtlTierMetadata(tierCfg system.TierConfig, clu
 	if !ok || vfsm == nil {
 		return nil, nil, tierRaftCallbacks{}
 	}
+	// Wire the after-restore hook so that vault-ctl snapshot install on
+	// this node triggers the receipt protocol's catchup pass on every
+	// tier reconciler in the vault. Idempotent — calling SetOnAfterRestore
+	// on every ensureVaultCtlTierMetadata invocation is fine; later calls
+	// just rebind to the same closure. Without this hook, the receipt
+	// protocol's pendingDeletes silently leak across snapshot install
+	// boundaries (the bug gastrolog-51gme step 3 was supposed to close).
+	vaultID := tierCfg.VaultID
+	vfsm.SetOnAfterRestore(func() { o.afterVaultCtlRestore(vaultID) })
 	tierFSM := vfsm.EnsureTierFSM(tierCfg.ID)
 	r := g.Raft
 	timeout := cluster.ReplicationTimeout

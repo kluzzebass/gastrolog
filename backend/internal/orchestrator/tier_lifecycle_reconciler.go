@@ -152,22 +152,41 @@ func (r *TierLifecycleReconciler) Wire(fsm *tierfsm.FSM) {
 // Both passes are idempotent. The pending-deletes pass owns the
 // receipt-protocol catchup; the sealed-projection pass owns
 // gastrolog-uccg6 (FSM-sealed but local-still-active divergence).
+//
+// IMPORTANT: this is fired from the vault-ctl FSM's after-restore
+// hook, which runs on the Raft apply-pump goroutine (Restore and
+// Apply share the same hraft runFSM goroutine). Each fulfillObligation
+// proposes CmdAckDelete via applier.Apply — on the leader, Apply
+// posts to the queue we are currently draining and would deadlock
+// the apply pump waiting for our own ack to commit. Snapshot the
+// pending list, then dispatch the obligations on a goroutine so the
+// apply pump can drain.
 func (r *TierLifecycleReconciler) ReconcileFromSnapshot(fsm *tierfsm.FSM) {
 	if fsm == nil {
 		return
 	}
-
 	pending := fsm.PendingDeletes()
 	r.logger.Debug("reconcile-from-snapshot: starting",
 		"pending_count", len(pending))
-	for _, p := range pending {
-		if !p.ExpectedFrom[r.localNodeID] {
-			continue
-		}
-		r.fulfillObligation(p.ChunkID, p.Reason, "snapshot-restore")
-	}
 
+	// Sealed-state projection acquires the chunk Manager mutex but
+	// does not propose Raft applies, so it is safe to run inline.
 	r.projectAllSealedFromFSM(fsm)
+
+	if len(pending) == 0 {
+		return
+	}
+	// Snapshot under the FSM read in PendingDeletes() above already
+	// returned copies, so no aliasing concern. Defer ack-side Applies
+	// to a goroutine to avoid the apply-pump self-cycle.
+	go func() {
+		for _, p := range pending {
+			if !p.ExpectedFrom[r.localNodeID] {
+				continue
+			}
+			r.fulfillObligation(p.ChunkID, p.Reason, "snapshot-restore")
+		}
+	}()
 }
 
 // projectAllSealedFromFSM iterates every entry in the FSM and projects

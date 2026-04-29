@@ -425,12 +425,12 @@ func TestReconcileFromSnapshotProcessesPendingObligations(t *testing.T) {
 	})
 
 	cm := &reconcilerFakeChunkManager{}
-	var ackedIDs []chunk.ChunkID
+	ackCh := make(chan chunk.ChunkID, 4)
 	tier := &TierInstance{
 		TierID: glid.New(),
 		Chunks: cm,
 		ApplyRaftAckDelete: func(id chunk.ChunkID, _ string) error {
-			ackedIDs = append(ackedIDs, id)
+			ackCh <- id
 			return nil
 		},
 	}
@@ -438,6 +438,21 @@ func TestReconcileFromSnapshotProcessesPendingObligations(t *testing.T) {
 
 	// Reconcile from the FSM's pending state — does NOT require Wire().
 	rec.ReconcileFromSnapshot(fsm)
+
+	// ReconcileFromSnapshot dispatches the obligations on a goroutine
+	// to avoid deadlocking the Raft apply-pump (which is what fires
+	// the after-restore hook in production). Wait for both acks to
+	// drain before asserting.
+	var ackedIDs []chunk.ChunkID
+	deadline := time.After(2 * time.Second)
+	for len(ackedIDs) < 2 {
+		select {
+		case id := <-ackCh:
+			ackedIDs = append(ackedIDs, id)
+		case <-deadline:
+			t.Fatalf("acks did not drain within deadline (got %d/2)", len(ackedIDs))
+		}
+	}
 
 	if len(cm.deleted) != 2 {
 		t.Errorf("expected 2 local deletes from reconcile, got %d (%v)", len(cm.deleted), cm.deleted)
