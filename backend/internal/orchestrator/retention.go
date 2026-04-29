@@ -21,12 +21,6 @@ const (
 	defaultRetentionSchedule = "* * * * *" // every minute
 	retentionJobName         = "retention"
 
-	// orphanReconcileMinAge is how long a sealed chunk must have been closed
-	// for (WriteEnd / WriteStart) before we delete local disk state that is
-	// absent from the tier FSM manifest. Avoids racing a just-sealed chunk
-	// before its Create/Seal entries commit to Raft.
-	orphanReconcileMinAge = 2 * time.Minute
-
 	// maxTransitionStreamedStaleness is how long a source may sit in
 	// TransitionStreamed without a durable destination receipt before we
 	// forcibly expire it. The inter-tier stream already completed; without
@@ -109,16 +103,19 @@ type sweepTarget struct {
 //   - Rule evaluation runs only when the tier is the leader (tier.IsLeader()).
 //     Followers skip rule evaluation because rule results must be applied via
 //     the vault control-plane Raft, which only the leader writes to.
-//   - Reconcile (disk vs manifest) runs on leaders and followers — it needs
-//     only the FSM manifest. reconcileTierDiskAgainstManifest internally
-//     gates on tier.IsFSMReady() to avoid acting on an incomplete manifest
-//     (nil IsFSMReady is the single-node/memory-tier case, treated as
-//     ready).
 //
 // There is no per-vault Vault.ReadinessErr gate at this level because the
-// per-tier IsLeader / IsFSMReady checks already cover the preconditions for
-// each action. See vault_readiness.go for the canonical vault readiness
-// definition used by ingest/query entry points.
+// per-tier IsLeader checks already cover the preconditions for each action.
+// See vault_readiness.go for the canonical vault readiness definition used
+// by ingest/query entry points.
+//
+// Disk-vs-manifest orphan cleanup was removed in gastrolog-51gme step 5:
+// the receipt protocol's pendingDeletes (committed in vault-ctl Raft and
+// preserved across snapshot install via TierLifecycleReconciler.
+// ReconcileFromSnapshot) is now the only catchup path. Any node that
+// missed a delete observation eventually applies the pending entry from
+// the FSM and acks via the canonical onRequestDelete callback chain —
+// no out-of-band disk sweep is needed.
 func (o *Orchestrator) retentionSweepAll() {
 	sys, err := o.loadSystem(context.Background())
 	if err != nil {
@@ -131,7 +128,6 @@ func (o *Orchestrator) retentionSweepAll() {
 	cfg := &sys.Config
 
 	var targets []sweepTarget
-	var reconcileTiers []*TierInstance
 	active := make(map[string]bool)
 
 	o.mu.Lock()
@@ -141,9 +137,6 @@ func (o *Orchestrator) retentionSweepAll() {
 			continue
 		}
 		for _, tier := range vault.Tiers {
-			if tier.ListManifest != nil {
-				reconcileTiers = append(reconcileTiers, tier)
-			}
 			// Only tier leaders evaluate retention rules.
 			if !tier.IsLeader() {
 				continue
@@ -173,11 +166,8 @@ func (o *Orchestrator) retentionSweepAll() {
 		t.runner.confirmStreamedTransitions(cfg)
 	}
 
-	// Disk vs manifest: all tiers (leader + follower) — recovers missed OnDelete.
-	now := o.now()
-	for _, tier := range reconcileTiers {
-		o.reconcileTierDiskAgainstManifest(tier, now)
-	}
+	// (Disk vs manifest orphan cleanup was removed in gastrolog-51gme step 5;
+	// the receipt protocol's pendingDeletes is the catchup path now.)
 
 	// Memory budget enforcement: transition oldest chunks when over budget.
 	o.enforceMemoryBudgets(cfg)
@@ -416,66 +406,13 @@ func tierPositionInVault(cfg *system.Config, vaultID, tierID glid.GLID) int {
 	return -1
 }
 
-// reconcileFollower compares on-disk chunks against the tier FSM manifest
-// and deletes any sealed chunks that the leader has removed. This is the
-// fallback for cases where OnDelete didn't fire (snapshot restore, startup,
-// Raft connectivity gaps).
-//
-// Deprecated name: prefer reconcileTierDiskAgainstManifest. Kept for tests.
-func (o *Orchestrator) reconcileFollower(tier *TierInstance) {
-	o.reconcileTierDiskAgainstManifest(tier, o.now())
-}
-
-// reconcileTierDiskAgainstManifest removes sealed local chunks not present in
-// the tier FSM manifest. Runs on leaders and followers — leaders previously
-// had no path if OnDelete failed after Raft removed the entry.
-func (o *Orchestrator) reconcileTierDiskAgainstManifest(tier *TierInstance, now time.Time) {
-	// Don't reconcile until the tier FSM has applied at least one log entry
-	// or restored from a snapshot. Before that, the manifest is incomplete —
-	// deleting chunks against it causes permanent data loss.
-	if tier.IsFSMReady != nil && !tier.IsFSMReady() {
-		return
-	}
-	manifestIDs := tier.ListManifest()
-	manifest := make(map[chunk.ChunkID]bool, len(manifestIDs))
-	for _, id := range manifestIDs {
-		manifest[id] = true
-	}
-
-	localMetas, err := tier.Chunks.List()
-	if err != nil {
-		return
-	}
-
-	cutoff := now.Add(-orphanReconcileMinAge)
-	for _, meta := range localMetas {
-		if manifest[meta.ID] || !meta.Sealed {
-			continue
-		}
-		end := meta.WriteEnd
-		if end.IsZero() {
-			end = meta.WriteStart
-		}
-		if !end.IsZero() && !end.Before(cutoff) {
-			continue
-		}
-		if tier.Indexes != nil {
-			if err := tier.Indexes.DeleteIndexes(meta.ID); err != nil {
-				o.logger.Warn("reconcile: delete indexes failed", "tier", tier.TierID, "chunk", meta.ID, "error", err)
-			}
-		}
-		// Local cleanup — do not announce. The authoritative delete already
-		// happened elsewhere (retention on the leader) and we are just
-		// catching up the local store that missed the OnDelete callback.
-		if err := chunk.DeleteNoAnnounce(tier.Chunks, meta.ID); err != nil {
-			o.logger.Warn("reconcile: failed to delete orphaned chunk",
-				"tier", tier.TierID, "chunk", meta.ID, "error", err)
-			continue
-		}
-		o.logger.Info("reconcile: deleted orphaned sealed chunk (disk vs manifest)",
-			"tier", tier.TierID, "chunk", meta.ID)
-	}
-}
+// (gastrolog-51gme step 5: reconcileFollower and reconcileTierDiskAgainstManifest
+// were removed. The disk-vs-manifest sweep was the legacy catchup mechanism for
+// nodes that missed an OnDelete callback. The receipt protocol replaces it: every
+// delete commits CmdRequestDelete to vault-ctl Raft with a pendingDeletes entry
+// keyed by chunk ID + expectedFrom set. The entry survives snapshot install, and
+// TierLifecycleReconciler.ReconcileFromSnapshot processes any obligations a
+// rejoining node owes — same code path as steady-state onRequestDelete.)
 
 // sweep evaluates retention rules on a leader and applies expire/eject/transition.
 func (r *retentionRunner) sweep(rules []retentionRule) {

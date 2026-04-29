@@ -12,10 +12,15 @@ package orchestrator
 // for retention-ttl. Subsequent steps migrate the remaining cleanup
 // paths onto deleteChunk:
 //
-//   step 5: delete reconcileTierDiskAgainstManifest
 //   step 6: delete maxTransitionStreamedStaleness; archival sweep
 //   step 7: RPC delete migration
 //   step 8: delete the manager.go startup auto-seal heuristic
+//
+// Step 5 (delete reconcileTierDiskAgainstManifest / reconcileFollower)
+// is done — the disk-vs-manifest sweep was the catchup mechanism for
+// missed OnDelete observations; the receipt protocol's pendingDeletes
+// (preserved across snapshot install + processed by ReconcileFromSnapshot)
+// replaces it.
 
 import (
 	"errors"
