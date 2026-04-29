@@ -272,18 +272,39 @@ func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, va
 		}
 	}
 
-	// Delete source chunk.
+	// Delete source chunk via the receipt protocol when wired (production)
+	// or via direct local cleanup otherwise (memory-mode tiers without a
+	// reconciler). Reason "tier-drain" lands in pendingDeletes audit. See
+	// gastrolog-51gme.
+	if err := o.deleteDrainSource(tier, vaultID, tierID, chunkID); err != nil {
+		return err
+	}
+
+	o.logger.Info("tier drain: chunk transferred",
+		"vault", vaultID, "tier", tierID, "chunk", chunkID, "mode", drainModeName(mode))
+	return nil
+}
+
+// deleteDrainSource removes a successfully-drained source chunk. Routes
+// through the receipt protocol when a reconciler is wired; falls back to
+// the direct local delete for memory-mode tiers. Extracted from
+// drainOneChunk to keep nestif within lint thresholds.
+func (o *Orchestrator) deleteDrainSource(tier *TierInstance, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
+	if tier.Reconciler != nil {
+		if err := tier.Reconciler.deleteChunk(chunkID, "tier-drain", o.placementMembership(tier)); err != nil {
+			return fmt.Errorf("delete source chunk: %w", err)
+		}
+		return nil
+	}
 	if tier.Indexes != nil {
 		if err := tier.Indexes.DeleteIndexes(chunkID); err != nil {
-			o.logger.Warn("tier drain: delete source indexes failed", "vault", vaultID, "tier", tierID, "chunk", chunkID, "error", err)
+			o.logger.Warn("tier drain: delete source indexes failed",
+				"vault", vaultID, "tier", tierID, "chunk", chunkID, "error", err)
 		}
 	}
 	if err := tier.Chunks.Delete(chunkID); err != nil {
 		return fmt.Errorf("delete source chunk: %w", err)
 	}
-
-	o.logger.Info("tier drain: chunk transferred",
-		"vault", vaultID, "tier", tierID, "chunk", chunkID, "mode", drainModeName(mode))
 	return nil
 }
 

@@ -49,6 +49,14 @@ linters:
         # reconciler.deleteChunk instead.
         - pattern: "tierfsm\\.MarshalDeleteChunk"
           msg: "MarshalDeleteChunk produces a deprecated FSM command. Use reconciler.deleteChunk → CmdRequestDelete instead. See gastrolog-51gme step 11."
+        # The announcing chunk-manager Delete fires AnnounceDelete → the
+        # legacy CmdDeleteChunk path. New callers must route through
+        # reconciler.deleteChunk so the receipt protocol drives cluster-
+        # wide propagation. The path-based exclusion list below allow-
+        # lists the legitimate non-reconciler call sites (memory-mode
+        # fallbacks; the chunk-package definition itself).
+        - pattern: "Chunks\\.Delete$"
+          msg: "tier.Chunks.Delete announces CmdDeleteChunk. Route through tier.Reconciler.deleteChunk so the receipt protocol drives cluster-wide propagation. See gastrolog-51gme."
   exclusions:
     paths:
       - _test\.go
@@ -73,6 +81,20 @@ linters:
         path: "internal/chunk/announcer\\.go"
       - linters: [forbidigo]
         path: "internal/chunk/file/manager\\.go"
+      # Memory-mode reconciler-less fallback paths. Each callsite gates
+      # tier.Chunks.Delete behind `if tier.Reconciler == nil`, so in
+      # production (reconciler always wired) the lint-flagged statement
+      # never executes. Removing these would break test harnesses that
+      # build TIs directly without going through buildTierInstance. See
+      # gastrolog-51gme.
+      - linters: [forbidigo]
+        path: "internal/orchestrator/archival_sweep\\.go"
+      - linters: [forbidigo]
+        path: "internal/orchestrator/tier_drain\\.go"
+      - linters: [forbidigo]
+        path: "internal/orchestrator/vault_transfers\\.go"
+      - linters: [forbidigo]
+        path: "internal/orchestrator/retention\\.go"
       # CLI tools intentionally use fmt.Print* for human-facing output;
       # exempt them from forbidigo's built-in fmt.Print* / println / print
       # bans. (The receipt-protocol forbid rules don't apply at the cmd

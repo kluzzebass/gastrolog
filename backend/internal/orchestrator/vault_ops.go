@@ -116,6 +116,32 @@ func (o *Orchestrator) findChunkManagerForChunk(vaultID glid.GLID, chunkID chunk
 	return cm, err
 }
 
+// findTierForChunk returns the TierInstance that owns the given chunk.
+// Used by paths (vault migrate, tier drain) that need access to the
+// tier's reconciler + placement metadata to drive cluster-wide deletes
+// through the receipt protocol. Errors if the vault is unknown / not
+// ready, or if no tier in the vault has the chunk.
+func (o *Orchestrator) findTierForChunk(vaultID glid.GLID, chunkID chunk.ChunkID) (*TierInstance, error) {
+	o.mu.RLock()
+	vault := o.vaults[vaultID]
+	o.mu.RUnlock()
+	if vault == nil {
+		return nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+	}
+	if err := vaultReplicationReadinessErr(vaultID, vault); err != nil {
+		return nil, err
+	}
+	for _, tier := range vault.Tiers {
+		if _, err := tier.Chunks.Meta(chunkID); err == nil {
+			return tier, nil
+		}
+		if active := tier.Chunks.Active(); active != nil && active.ID == chunkID {
+			return tier, nil
+		}
+	}
+	return nil, fmt.Errorf("%w: chunk %s in vault %s", chunk.ErrChunkNotFound, chunkID, vaultID)
+}
+
 // ArchiveChunk transitions a cloud-backed sealed chunk to an offline storage class.
 func (o *Orchestrator) ArchiveChunk(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, storageClass string) error {
 	cm, err := o.findChunkManagerForChunk(vaultID, chunkID)
