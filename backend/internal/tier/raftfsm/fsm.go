@@ -88,6 +88,16 @@ type FSM struct {
 	onDelete func(chunk.ChunkID)
 	onUpload func(Entry) // called after CmdUploadChunk applies (outside lock)
 
+	// Step-1 reconciler-wiring hooks for gastrolog-51gme. Each fires
+	// outside the FSM mutex after the corresponding Cmd applies, so the
+	// reconciler can project FSM state changes into local Manager state
+	// without polling. No callers wired yet — adding the surface here
+	// unblocks subsequent steps without requiring an FSM API churn.
+	onSeal               func(Entry)         // CmdSealChunk applied; passes the now-sealed entry
+	onRetentionPending   func(chunk.ChunkID) // CmdRetentionPending applied
+	onTransitionStreamed func(chunk.ChunkID) // CmdTransitionStreamed applied (source-tier signal)
+	onTransitionReceived func(chunk.ChunkID) // CmdTransitionReceived applied (destination-tier confirmation, ID is the source chunk's ID)
+
 	// transitionReceipts tracks source chunk IDs whose records have been
 	// imported into this tier. The source tier checks this set to confirm
 	// that the destination (this tier) has durably committed the data
@@ -189,6 +199,57 @@ func (f *FSM) SetOnUpload(fn func(Entry)) {
 	f.onUpload = fn
 }
 
+// SetOnSeal registers a callback invoked (outside the FSM lock) after
+// CmdSealChunk applies. The callback receives a copy of the now-sealed
+// entry. The reconciler (gastrolog-51gme) uses this to project the
+// FSM-side seal into the local Manager's chunk meta — closes the
+// gastrolog-uccg6 active-vs-sealed divergence path that previously
+// relied on a periodic disk-vs-FSM walk.
+//
+// Fires once per actual seal apply. A re-apply (log replay over an
+// already-sealed entry) still fires the callback because the FSM
+// idempotently re-writes the seal fields; the reconciler is expected
+// to be idempotent in turn.
+func (f *FSM) SetOnSeal(fn func(Entry)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onSeal = fn
+}
+
+// SetOnRetentionPending registers a callback invoked (outside the FSM
+// lock) after CmdRetentionPending applies. The callback receives the
+// chunk ID. Used by the reconciler to learn that the cluster has
+// promoted a chunk into the retention-pending state without polling
+// the manifest.
+func (f *FSM) SetOnRetentionPending(fn func(chunk.ChunkID)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onRetentionPending = fn
+}
+
+// SetOnTransitionStreamed registers a callback invoked (outside the FSM
+// lock) after CmdTransitionStreamed applies. The callback receives the
+// source-side chunk ID. Source-tier reconcilers use this to track which
+// chunks are awaiting destination receipt before local expiry.
+func (f *FSM) SetOnTransitionStreamed(fn func(chunk.ChunkID)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onTransitionStreamed = fn
+}
+
+// SetOnTransitionReceived registers a callback invoked (outside the FSM
+// lock) after CmdTransitionReceived applies. The callback receives the
+// SOURCE chunk ID — the destination tier's FSM is recording a receipt
+// for the source. Destination-tier reconcilers don't need this; the
+// source-tier reconciler does (paired with the cross-tier confirmation
+// sweep), and any node hosting both source and destination tiers can
+// register the callback on each tier's FSM.
+func (f *FSM) SetOnTransitionReceived(fn func(chunk.ChunkID)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onTransitionReceived = fn
+}
+
 // ---------- Reads (local, no Raft) ----------
 
 // Get returns a copy of a chunk's metadata, or nil if not found.
@@ -237,11 +298,19 @@ func (f *FSM) Apply(log *hraft.Log) any {
 	payload := log.Data[1:]
 
 	var (
-		result        any
-		deletedID     *chunk.ChunkID
-		uploadedEntry *Entry
-		onDeleteLocal func(chunk.ChunkID)
-		onUploadLocal func(Entry)
+		result                    any
+		deletedID                 *chunk.ChunkID
+		uploadedEntry             *Entry
+		sealedEntry               *Entry
+		retentionPendingID        *chunk.ChunkID
+		transitionStreamedID      *chunk.ChunkID
+		transitionReceivedID      *chunk.ChunkID
+		onDeleteLocal             func(chunk.ChunkID)
+		onUploadLocal             func(Entry)
+		onSealLocal               func(Entry)
+		onRetentionPendingLocal   func(chunk.ChunkID)
+		onTransitionStreamedLocal func(chunk.ChunkID)
+		onTransitionReceivedLocal func(chunk.ChunkID)
 	)
 
 	f.mu.Lock()
@@ -251,6 +320,15 @@ func (f *FSM) Apply(log *hraft.Log) any {
 		result = f.applyCreate(payload)
 	case CmdSealChunk:
 		result = f.applySeal(payload)
+		// Capture the now-sealed entry for the onSeal callback.
+		if result == nil && len(payload) >= 16 {
+			var id chunk.ChunkID
+			copy(id[:], payload[:16])
+			if e := f.chunks[id]; e != nil {
+				eCopy := *e
+				sealedEntry = &eCopy
+			}
+		}
 	case CmdCompressChunk:
 		result = f.applyCompress(payload)
 	case CmdUploadChunk:
@@ -268,15 +346,34 @@ func (f *FSM) Apply(log *hraft.Log) any {
 		deletedID, result = f.applyDelete(payload)
 	case CmdRetentionPending:
 		result = f.applyRetentionPending(payload)
+		if result == nil && len(payload) >= 16 {
+			var id chunk.ChunkID
+			copy(id[:], payload[:16])
+			retentionPendingID = &id
+		}
 	case CmdTransitionStreamed:
 		result = f.applyTransitionStreamed(payload)
+		if result == nil && len(payload) >= 16 {
+			var id chunk.ChunkID
+			copy(id[:], payload[:16])
+			transitionStreamedID = &id
+		}
 	case CmdTransitionReceived:
 		result = f.applyTransitionReceived(payload)
+		if result == nil && len(payload) >= 16 {
+			var id chunk.ChunkID
+			copy(id[:], payload[:16])
+			transitionReceivedID = &id
+		}
 	default:
 		result = fmt.Errorf("unknown chunk FSM command: %d", cmd)
 	}
 	onDeleteLocal = f.onDelete
 	onUploadLocal = f.onUpload
+	onSealLocal = f.onSeal
+	onRetentionPendingLocal = f.onRetentionPending
+	onTransitionStreamedLocal = f.onTransitionStreamed
+	onTransitionReceivedLocal = f.onTransitionReceived
 	f.mu.Unlock()
 
 	if deletedID != nil && onDeleteLocal != nil {
@@ -284,6 +381,18 @@ func (f *FSM) Apply(log *hraft.Log) any {
 	}
 	if uploadedEntry != nil && onUploadLocal != nil {
 		onUploadLocal(*uploadedEntry)
+	}
+	if sealedEntry != nil && onSealLocal != nil {
+		onSealLocal(*sealedEntry)
+	}
+	if retentionPendingID != nil && onRetentionPendingLocal != nil {
+		onRetentionPendingLocal(*retentionPendingID)
+	}
+	if transitionStreamedID != nil && onTransitionStreamedLocal != nil {
+		onTransitionStreamedLocal(*transitionStreamedID)
+	}
+	if transitionReceivedID != nil && onTransitionReceivedLocal != nil {
+		onTransitionReceivedLocal(*transitionReceivedID)
 	}
 
 	return result
