@@ -2262,7 +2262,6 @@ func newClusterRetentionRunner(orch *Orchestrator, vaultID, tierID glid.GLID, ti
 		im:              tier.Indexes,
 		orch:            orch,
 		followerTargets: tier.FollowerTargets,
-		applyRaftDelete: tier.ApplyRaftDelete,
 		reconciler:      tier.Reconciler,
 		now:             time.Now,
 		logger:          slog.Default(),

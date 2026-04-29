@@ -68,11 +68,6 @@ type TierInstance struct {
 	// Nil when no Raft group exists.
 	IsTombstoned func(id chunk.ChunkID) bool
 
-	// ApplyRaftDelete applies CmdDeleteChunk through replicated metadata and blocks
-	// until committed. Returns an error if not leader or timeout. Nil when no
-	// Raft group exists.
-	ApplyRaftDelete func(id chunk.ChunkID) error
-
 	// ApplyRaftRequestDelete proposes the receipt-based delete protocol's
 	// opening command (CmdRequestDelete). The FSM adds a pendingDeletes entry
 	// keyed by chunk ID with the given reason and expectedFrom set; every
@@ -137,7 +132,6 @@ type TierInstance struct {
 func (t *TierInstance) applyRaftCallbacks(cb tierRaftCallbacks) {
 	t.HasRaftLeader = cb.hasLeader
 	t.IsRaftLeader = cb.isLeader
-	t.ApplyRaftDelete = cb.applyDelete
 	t.ApplyRaftRequestDelete = cb.applyRequestDelete
 	t.ApplyRaftAckDelete = cb.applyAckDelete
 	t.ApplyRaftFinalizeDelete = cb.applyFinalizeDelete

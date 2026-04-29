@@ -22,7 +22,17 @@ const (
 	CmdSealChunk     Command = 2
 	CmdCompressChunk Command = 3
 	CmdUploadChunk   Command = 4
-	CmdDeleteChunk      Command = 5
+
+	// CmdDeleteChunk is retained for WAL replay backward-compat only. The
+	// receipt protocol (CmdRequestDelete + acks + CmdFinalizeDelete) is
+	// the canonical delete path; no producer in the current code path
+	// emits new CmdDeleteChunk entries, and a forbidigo lint rule
+	// (.golangci.yml) blocks reintroduction by banning new
+	// MarshalDeleteChunk callers. The FSM continues to apply
+	// CmdDeleteChunk so pre-migration WAL segments still replay
+	// correctly. See gastrolog-51gme step 11.
+	CmdDeleteChunk Command = 5
+
 	CmdRetentionPending    Command = 6
 	CmdTransitionStreamed  Command = 7
 	CmdTransitionReceived Command = 8 // destination tier records receipt of a source chunk

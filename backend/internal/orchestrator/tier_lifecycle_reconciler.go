@@ -43,6 +43,18 @@ package orchestrator
 //     successful RemoveServer call; the reconciler's onPruneNode handler
 //     (leader-only) proposes CmdFinalizeDelete for each finalizable
 //     chunk so deletes don't pin pendingDeletes forever.
+//   step 11 (deprecate CmdDeleteChunk): done. The dead production
+//     plumbing (TierInstance.ApplyRaftDelete, tierRaftCallbacks.applyDelete,
+//     buildTierRaftCallbacks's MarshalDeleteChunk producer,
+//     retentionRunner.applyRaftDelete + clusterMode branch) was removed.
+//     CmdDeleteChunk + applyDeleteChunk + MarshalDeleteChunk stay in the
+//     FSM for WAL replay backward-compat, but a forbidigo rule blocks
+//     new MarshalDeleteChunk callers. The wireTierFSMOnDelete callback
+//     and the legacy forwardDeletionToFollowers RPC chain stay too —
+//     they're reachable only from the older cluster harness in
+//     transition_test.go, which doesn't go through buildTierInstance and
+//     therefore has no reconciler attached. Migrating that harness onto
+//     the reconciler with a fake-FSM-applier is a follow-up refactor.
 
 import (
 	"errors"

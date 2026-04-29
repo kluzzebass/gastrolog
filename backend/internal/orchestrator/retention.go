@@ -56,19 +56,16 @@ type retentionRunner struct {
 	unreadable   map[chunk.ChunkID]bool // chunks that failed to read — skipped until restart
 	orch         *Orchestrator          // for eject/transition callbacks
 
-	// applyRaftDelete applies CmdDeleteChunk to vault-ctl Raft before local
-	// deletion, so followers learn about it via the manifest. Nil in
-	// single-node / memory mode — local delete proceeds without Raft.
-	applyRaftDelete             func(id chunk.ChunkID) error
 	applyRaftRetentionPending   func(id chunk.ChunkID) error
 	applyRaftTransitionStreamed func(id chunk.ChunkID) error
 
 	// reconciler is the tier lifecycle reconciler that owns chunk-lifecycle
-	// execution. Step 4 routes retention-ttl deletes through here via
-	// CmdRequestDelete; the legacy applyRaftDelete path is preserved for
-	// the other cleanup paths until they migrate in steps 5-8. Nil in
-	// single-node / memory mode — local delete proceeds without Raft. See
-	// gastrolog-51gme.
+	// execution. All production deletes route through reconciler.deleteChunk
+	// → CmdRequestDelete (gastrolog-51gme steps 4-7). Nil only in older test
+	// harnesses that build TierInstances directly without going through
+	// buildTierInstance; those harnesses fall through to the legacy
+	// direct-delete path below (for cross-node propagation they wire
+	// directTierReplicator.DeleteChunk RPC fan-out separately).
 	reconciler *TierLifecycleReconciler
 
 	// isLeader returns true if this node is the config leader for this tier.
@@ -374,7 +371,6 @@ func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg syste
 	}
 	runner.cm = tier.Chunks
 	runner.im = tier.Indexes
-	runner.applyRaftDelete = tier.ApplyRaftDelete
 	runner.applyRaftRetentionPending = tier.ApplyRaftRetentionPending
 	runner.applyRaftTransitionStreamed = tier.ApplyRaftTransitionStreamed
 	runner.reconciler = tier.Reconciler
@@ -622,33 +618,21 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID, reason string) {
 
 	// Reconciler-less fallback: legacy direct-delete path.
 	//
-	// Reached by older test harnesses that build a retentionRunner without
-	// going through buildTierInstance (so tier.Reconciler is nil). They wire
-	// cross-node deletion via tierReplicator.DeleteChunk RPC fan-out instead
-	// of vault-ctl Raft. We preserve that path here so the harness keeps
-	// passing while production runs the receipt protocol.
-	clusterMode := r.applyRaftDelete != nil
-	if clusterMode {
-		if err := r.applyRaftDelete(id); err != nil {
-			r.logger.Warn("retention: raft delete failed, will retry",
-				"vault", r.vaultID, "chunk", id.String(), "error", err)
-			return
-		}
-	}
+	// Reached only by older test harnesses that build a retentionRunner
+	// without going through buildTierInstance (so tier.Reconciler is nil).
+	// They wire cross-node propagation via directTierReplicator.DeleteChunk
+	// RPC fan-out (forwardDeletionToFollowers below) instead of vault-ctl
+	// Raft. Production has no path into here after gastrolog-51gme step 11
+	// — ApplyRaftDelete / CmdDeleteChunk producers are gone.
 	if err := r.im.DeleteIndexes(id); err != nil {
 		r.logger.Error("retention: failed to delete indexes",
 			"vault", r.vaultID, "chunk", id.String(), "error", err)
 		return
 	}
-	if err := r.cm.Delete(id); err != nil {
-		if clusterMode && errors.Is(err, chunk.ErrChunkNotFound) {
-			r.logger.Debug("retention: chunk already removed by OnDelete cascade",
-				"vault", r.vaultID, "chunk", id.String())
-		} else {
-			r.logger.Error("retention: failed to delete chunk",
-				"vault", r.vaultID, "chunk", id.String(), "error", err)
-			return
-		}
+	if err := r.cm.Delete(id); err != nil && !errors.Is(err, chunk.ErrChunkNotFound) {
+		r.logger.Error("retention: failed to delete chunk",
+			"vault", r.vaultID, "chunk", id.String(), "error", err)
+		return
 	}
 	if r.orch != nil {
 		if r.orch.retentionRates != nil {
@@ -656,7 +640,7 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID, reason string) {
 		}
 		r.orch.NotifyChunkChange()
 		r.orch.deleteFromFollowers(r.vaultID, r.tierID, id)
-		r.forwardDeletionToFollowers(id, clusterMode)
+		r.forwardDeletionToFollowers(id)
 	}
 	r.logger.Debug("retention: deleted chunk (no-reconciler fallback)",
 		"vault", r.vaultID, "chunk", id.String())
@@ -696,10 +680,11 @@ func (r *retentionRunner) expectedFromForExpire() []string {
 // forwardDeletionToFollowers sends an explicit delete RPC to each remote
 // follower. Used only by the reconciler-less fallback path in expireChunk
 // (test harnesses without a vault-ctl Raft group / TierLifecycleReconciler).
-// Production runs through the receipt protocol and never reaches here. The
-// RPC delete migration in gastrolog-51gme step 7 retires the underlying
-// tierReplicator.DeleteChunk API and removes this chain entirely.
-func (r *retentionRunner) forwardDeletionToFollowers(id chunk.ChunkID, _ bool) {
+// Production runs through the receipt protocol and never reaches here.
+// The directTierReplicator.DeleteChunk RPC chain stays for that harness;
+// removing it requires migrating the harness onto the reconciler with a
+// fake-FSM-applier — a follow-up refactor outside the scope of step 11.
+func (r *retentionRunner) forwardDeletionToFollowers(id chunk.ChunkID) {
 	for _, target := range r.followerTargets {
 		if target.NodeID == r.orch.localNodeID {
 			continue // already handled by deleteFromFollowers

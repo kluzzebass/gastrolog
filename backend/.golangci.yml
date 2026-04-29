@@ -42,6 +42,13 @@ linters:
           msg: "chunk.DeleteNoAnnounce must only be called from TierLifecycleReconciler. Route deletes through reconciler.deleteChunk so the receipt protocol drives them. See gastrolog-51gme."
         - pattern: "\\.DeleteSilent\\("
           msg: "DeleteSilent must only be called from TierLifecycleReconciler / file.Manager internals. Route deletes through reconciler.deleteChunk. See gastrolog-51gme."
+        # gastrolog-51gme step 11: CmdDeleteChunk is deprecated. The
+        # FSM command + apply handler stay for WAL backward-compat
+        # (replaying old log segments must still work), but no new
+        # producer is allowed. Use MarshalRequestDelete +
+        # reconciler.deleteChunk instead.
+        - pattern: "tierfsm\\.MarshalDeleteChunk"
+          msg: "MarshalDeleteChunk produces a deprecated FSM command. Use reconciler.deleteChunk → CmdRequestDelete instead. See gastrolog-51gme step 11."
   exclusions:
     paths:
       - _test\.go

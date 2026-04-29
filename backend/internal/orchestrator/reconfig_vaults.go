@@ -1075,7 +1075,6 @@ type tierRaftCallbacks struct {
 	hasLeader               func() bool
 	isLeader                func() bool
 	isFSMReady              func() bool
-	applyDelete             func(id chunk.ChunkID) error
 	applyRequestDelete      func(id chunk.ChunkID, reason string, expectedFrom []string) error
 	applyAckDelete          func(id chunk.ChunkID, nodeID string) error
 	applyFinalizeDelete     func(id chunk.ChunkID) error
@@ -1161,9 +1160,6 @@ func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.App
 		hasLeader:  func() bool { return r.Leader() != "" },
 		isLeader:   func() bool { return r.State() == hraft.Leader },
 		isFSMReady: func() bool { return r.AppliedIndex() > 0 },
-		applyDelete: func(id chunk.ChunkID) error {
-			return applier.Apply(tierfsm.MarshalDeleteChunk(id))
-		},
 		applyRequestDelete: func(id chunk.ChunkID, reason string, expectedFrom []string) error {
 			return applier.Apply(tierfsm.MarshalRequestDelete(id, time.Now(), reason, expectedFrom))
 		},
