@@ -61,6 +61,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
@@ -93,6 +94,13 @@ type TierLifecycleReconciler struct {
 	fsm *tierfsm.FSM
 
 	mu sync.Mutex
+
+	// sweepInFlight guards against stacking up SweepPendingObligations
+	// goroutines when the leader's apply queue is slow. Atomically set
+	// to 1 when a sweep starts, 0 when it finishes. Subsequent ticks
+	// observe the bit and skip — better to lose a tick than pile up
+	// concurrent goroutines fighting for the same Apply queue.
+	sweepInFlight atomic.Int32
 }
 
 // NewTierLifecycleReconciler creates a reconciler for a tier instance.
@@ -354,10 +362,56 @@ func (r *TierLifecycleReconciler) onPruneNode(prunedNodeID string, finalizable [
 	}()
 }
 
+// SweepPendingObligations walks the FSM's pendingDeletes and runs
+// fulfillObligation for any entry where this node is still in
+// ExpectedFrom. The orchestrator schedules this on a 20s cron tick
+// (offset from the retention sweep) so deletes that the steady-state
+// onRequestDelete callback missed — apply-pump wedge, callback error,
+// node pause, plain restart without snapshot install — eventually
+// converge.
+//
+// Idempotent: pendingDeletes is local FSM state replicated across
+// every node, so each node consults its OWN copy and decides
+// independently. No leader involvement; the FSM's applyAckDelete
+// drops duplicate / already-pruned acks. Snapshot the list under
+// PendingDeletes() (which already returns copies) and fire
+// fulfillObligation in a goroutine to avoid blocking the cron
+// scheduler if the leader's apply queue is slow.
+func (r *TierLifecycleReconciler) SweepPendingObligations() {
+	if r.fsm == nil {
+		return
+	}
+	// Skip if a previous sweep is still in flight. Prevents goroutine
+	// pile-up when the leader's apply queue is slow — better to lose a
+	// tick than have multiple concurrent sweeps fighting for the same
+	// Apply slots and amplifying the saturation.
+	if !r.sweepInFlight.CompareAndSwap(0, 1) {
+		r.logger.Debug("pending-delete sweep: previous sweep still in flight, skipping")
+		return
+	}
+	pending := r.fsm.PendingDeletes()
+	if len(pending) == 0 {
+		r.sweepInFlight.Store(0)
+		return
+	}
+	r.logger.Debug("pending-delete sweep: candidates",
+		"count", len(pending))
+	go func() {
+		defer r.sweepInFlight.Store(0)
+		for _, p := range pending {
+			if !p.ExpectedFrom[r.localNodeID] {
+				continue
+			}
+			r.fulfillObligation(p.ChunkID, p.Reason, "periodic-sweep")
+		}
+	}()
+}
+
 // fulfillObligation deletes the local copy of a chunk and then proposes
-// CmdAckDelete. Used by both onRequestDelete (steady state) and
-// ReconcileFromSnapshot (catchup after Restore). source is a short
-// label that distinguishes the two for log triage.
+// CmdAckDelete. Used by onRequestDelete (steady state),
+// ReconcileFromSnapshot (catchup after Restore), and
+// SweepPendingObligations (periodic local sweep). source is a short
+// label that distinguishes them for log triage.
 func (r *TierLifecycleReconciler) fulfillObligation(chunkID chunk.ChunkID, reason, source string) {
 	if err := r.deleteLocalCopy(chunkID); err != nil {
 		// Don't ack: the FSM keeps the obligation, and we'll retry on

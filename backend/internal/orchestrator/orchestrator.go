@@ -550,6 +550,14 @@ func New(cfg Config) (*Orchestrator, error) {
 		return nil, fmt.Errorf("reconcile sweep: %w", err)
 	}
 
+	// Receipt-protocol catchup: every node consults its OWN replicated
+	// pendingDeletes every 20s and re-runs any obligations it still
+	// owes. Phase-offset from retention's :00 tick to avoid spikiness.
+	// See gastrolog-51gme.
+	if err := o.startPendingDeleteSweep(); err != nil {
+		return nil, fmt.Errorf("pending-delete sweep: %w", err)
+	}
+
 	return o, nil
 }
 

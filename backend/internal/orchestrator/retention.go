@@ -20,6 +20,17 @@ import (
 const (
 	defaultRetentionSchedule = "* * * * *" // every minute
 	retentionJobName         = "retention"
+
+	// Pending-delete sweep — gastrolog-51gme. Every 20 seconds, with a
+	// phase offset that doesn't collide with the retention sweep at
+	// second 0 (cron: 13/33/53s of each minute). Each node consults
+	// its OWN replicated FSM's pendingDeletes — no leader involvement.
+	// 20s is fast enough that operator-visible "stuck delete" symptoms
+	// resolve within a sweep cycle, slow enough that a cluster of N
+	// nodes only generates N applies per cycle even when nothing is
+	// stuck.
+	pendingDeleteSweepJobName  = "pending-delete-sweep"
+	pendingDeleteSweepSchedule = "13,33,53 * * * * *"
 )
 
 // retentionKey returns a unique map key for a tier instance's retention state.
@@ -176,6 +187,32 @@ func (o *Orchestrator) retentionSweepAll() {
 	o.mu.RUnlock()
 	for _, evictor := range evictors {
 		evictor.EvictCache()
+	}
+}
+
+// pendingDeleteSweepAll runs every 20 seconds (with a 13/33/53s
+// phase-offset from the retention sweep) on every node. For each
+// (vault, tier) on this node, it asks the lifecycle reconciler to
+// walk its OWN local FSM's pendingDeletes and re-run fulfillObligation
+// for any entry where this node is still in ExpectedFrom. This is the
+// receipt protocol's catchup mechanism for steady-state operation —
+// onRequestDelete fires once at apply time but won't retry if the
+// callback errored or the node was wedged; this sweep ensures
+// eventual convergence purely from local state, without any leader
+// involvement. See gastrolog-51gme.
+func (o *Orchestrator) pendingDeleteSweepAll() {
+	o.mu.RLock()
+	tiers := make([]*TierInstance, 0)
+	for _, vault := range o.vaults {
+		for _, t := range vault.Tiers {
+			if t.Reconciler != nil {
+				tiers = append(tiers, t)
+			}
+		}
+	}
+	o.mu.RUnlock()
+	for _, t := range tiers {
+		t.Reconciler.SweepPendingObligations()
 	}
 }
 

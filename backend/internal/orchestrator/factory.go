@@ -207,6 +207,21 @@ func (o *Orchestrator) startRetentionSweep() error {
 	return nil
 }
 
+// startPendingDeleteSweep registers the periodic per-node sweep that drives
+// receipt-protocol convergence. Every 20 seconds (phase-offset from the
+// retention sweep at second 0 of each minute) every node walks its OWN
+// vault-ctl FSM's pendingDeletes and runs fulfillObligation for any entry
+// where it is still in ExpectedFrom. Catches deletes that the steady-state
+// onRequestDelete callback missed (apply-pump wedge, callback error, node
+// pause, plain restart without snapshot install). See gastrolog-51gme.
+func (o *Orchestrator) startPendingDeleteSweep() error {
+	if err := o.scheduler.AddJob(pendingDeleteSweepJobName, pendingDeleteSweepSchedule, o.pendingDeleteSweepAll); err != nil {
+		return fmt.Errorf("pending-delete sweep job: %w", err)
+	}
+	o.scheduler.Describe(pendingDeleteSweepJobName, "Pending-delete sweep (receipt protocol catchup)")
+	return nil
+}
+
 // applyIngesters creates and registers ingesters from the system.
 func (o *Orchestrator) applyIngesters(sys *system.System, factories Factories) error {
 	cfg := &sys.Config
