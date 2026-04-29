@@ -361,9 +361,17 @@ func (r *TierLifecycleReconciler) fulfillObligation(chunkID chunk.ChunkID, reaso
 
 // deleteLocalCopy removes a chunk's local on-disk state from this
 // node. ErrChunkNotFound is treated as success — the chunk was already
-// gone (concurrent OnDelete cascade, or this node never had it). All
-// same-node sibling TIs (rare, only when 1:1:1 placement is violated)
-// are cleaned up too, mirroring the legacy deleteFromFollowers fan-out.
+// gone (concurrent OnDelete cascade, or this node never had it).
+//
+// No same-node sibling fan-out: in the receipt protocol every node
+// runs its own per-TI reconciler, so each TI self-cleans via its own
+// r.tier.Chunks. The legacy `deleteFromFollowers` walk only made sense
+// when a single leader-side expireChunk had to clean up sibling
+// follower TIs on the same node; per-TI reconcilers obsolete that, and
+// per 1:1:1 placement there are no sibling TIs anyway. Calling
+// deleteFromFollowers here would re-visit the same TI we just deleted
+// from and log a spurious "chunk not found" warning. See the cluster
+// log storm fixed alongside this change.
 func (r *TierLifecycleReconciler) deleteLocalCopy(chunkID chunk.ChunkID) error {
 	if r.tier == nil {
 		return nil
@@ -379,11 +387,6 @@ func (r *TierLifecycleReconciler) deleteLocalCopy(chunkID chunk.ChunkID) error {
 		}
 	}
 	if r.orch != nil {
-		// Same-node sibling cleanup. With 1:1:1 placement there are no
-		// siblings, but historically a node could host both a leader
-		// and follower TI for the same tier; deleteFromFollowers handles
-		// that case symmetrically with wireTierFSMOnDelete.
-		r.orch.deleteFromFollowers(r.vaultID, r.tierID, chunkID)
 		// Notify WatchChunks subscribers: a chunk was removed.
 		r.orch.NotifyChunkChange()
 	}
