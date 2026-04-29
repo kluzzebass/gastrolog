@@ -274,6 +274,12 @@ func commandName(cmd raftfsm.Command) string {
 		return "CmdTransitionStreamed"
 	case raftfsm.CmdTransitionReceived:
 		return "CmdTransitionReceived"
+	case raftfsm.CmdRequestDelete:
+		return "CmdRequestDelete"
+	case raftfsm.CmdAckDelete:
+		return "CmdAckDelete"
+	case raftfsm.CmdFinalizeDelete:
+		return "CmdFinalizeDelete"
 	default:
 		return fmt.Sprintf("CmdUnknown(%d)", cmd)
 	}
