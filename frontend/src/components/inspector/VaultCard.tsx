@@ -1,6 +1,5 @@
 import { encode } from "../../api/glid";
-import { MiddleTruncate } from "@re-dev/react-truncate";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { clickableProps } from "../../utils";
 import { useChunks, useIndexes, useValidateVault, useConfig, useArchiveChunk, useRestoreChunk } from "../../api/hooks";
@@ -70,6 +69,15 @@ export function VaultCard({
       <ChunkList vaultId={encode(vault.id)} dark={dark} />
     </ExpandableCard>
   );
+}
+
+// Chunk IDs are 26-char base32 strings. Render as <8>…<5> so adjacent
+// rows stay distinguishable while fitting in a stable column width
+// without any layout-measurement library or flex tricks. Full ID is in
+// the title attribute.
+function middleTruncateChunkID(id: string): string {
+  if (id.length <= 16) return id;
+  return id.slice(0, 8) + "…" + id.slice(-5);
 }
 
 function VaultActions({
@@ -198,24 +206,46 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
       return bTime - aTime;
     });
 
+  // One <table> for ALL tiers so column widths align across the vault.
+  // Tier headers are colSpan rows interleaved between chunk groups; remote
+  // (placement-only, no local chunks) tiers render as a single placeholder
+  // header row with no chunk rows underneath. See gastrolog-28yi3.
+  const nscs = config?.nodeStorageConfigs ?? [];
   return (
     <div>
-      {/* Build a unified tier list: local tiers with chunks + remote tiers without */}
-      {vaultTiers.map((vt) => encode(vt.id)).map((tierId) => {
-        const pos = tierPositions.get(tierId) ?? 0;
-        const group = tierGroups.get(tierId);
-        const remote = remoteTierInfo.find((rt) => rt.id === tierId);
+      <table className="w-full border-collapse">
+        <thead>
+          <tr
+            className={`text-left text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c(
+              "text-text-muted border-ink-border-subtle",
+              "text-light-text-muted border-light-border-subtle",
+            )}`}
+          >
+            <th className="px-4 py-2 font-medium">Chunk ID</th>
+            <th className="px-2 py-2 font-medium">Time Range</th>
+            <th className="px-2 py-2 font-medium">Status</th>
+            <th className="px-2 py-2 font-medium text-right">Records</th>
+            <th className="px-4 py-2 font-medium text-right">Size</th>
+          </tr>
+        </thead>
+        <tbody>
+          {vaultTiers.map((vt) => encode(vt.id)).map((tierId) => {
+            const pos = tierPositions.get(tierId) ?? 0;
+            const group = tierGroups.get(tierId);
+            const remote = remoteTierInfo.find((rt) => rt.id === tierId);
 
-        // Remote tier with no local chunks — show as a placeholder.
-        if (!group && remote) {
-          return (
-            <div
-              key={tierId}
-              className={`flex items-center gap-2 px-4 py-1.5 text-[0.75em] font-medium uppercase tracking-[0.12em] border-b ${c(
-                "text-text-muted border-ink-border-subtle bg-ink-base/30",
-                "text-light-text-muted border-light-border-subtle bg-light-base/30",
-              )}`}
-            >
+            // Remote tier with no local chunks — single placeholder row.
+            if (!group && remote) {
+              return (
+                <tr
+                  key={tierId}
+                  className={`text-[0.75em] font-medium uppercase tracking-[0.12em] border-b ${c(
+                    "text-text-muted border-ink-border-subtle bg-ink-base/30",
+                    "text-light-text-muted border-light-border-subtle bg-light-base/30",
+                  )}`}
+                >
+                  <td colSpan={5} className="px-4 py-1.5">
+                    <span className="inline-flex flex-wrap items-center gap-2">
               <Badge variant="muted" dark={dark}>{`Tier ${String(pos)}: ${remote.type}`}</Badge>
               <span>{remote.nodeName ? `on ${remote.nodeName}` : "unplaced"}</span>
               {remote.rf > 1 && <Badge variant="info" dark={dark}>{`RF=${String(remote.rf)}`}</Badge>}
@@ -244,79 +274,68 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
                   })}
                 </span>
               )}
-            </div>
-          );
-        }
+                    </span>
+                  </td>
+                </tr>
+              );
+            }
 
-        if (!group) return null;
+            if (!group) return null;
 
-        const label = `Tier ${String(pos)}: ${group.tierType}`;
-        const tierCfg = config?.tiers.find((t) => encode(t.id) === tierId);
-        const nscs = config?.nodeStorageConfigs ?? [];
-        const rf = tierCfg?.replicationFactor || 1;
-        const secondaries = tierCfg ? followerNodeIds(tierCfg, nscs) : [];
-        const pnId = tierCfg ? leaderNodeId(tierCfg, nscs) : "";
-        const nodeName = pnId ? resolveNodeName(nodeNameMap, pnId) : "";
-        return (
-        <div key={tierId}>
-          <div
-            className={`flex items-center gap-2 px-4 py-1.5 text-[0.75em] font-medium uppercase tracking-[0.12em] border-b ${c(
-              "text-text-muted border-ink-border-subtle bg-ink-base/30",
-              "text-light-text-muted border-light-border-subtle bg-light-base/30",
-            )}`}
-          >
-            <Badge variant="copper" dark={dark}>{label}</Badge>
-            {nodeName && <span>{`on ${nodeName}`}</span>}
-            {group.tierType === "jsonl" && tierCfg?.path && (
-              <span className="font-mono">{tierCfg.path}</span>
-            )}
-            <span>{`${String(group.chunks.length)} ${group.chunks.length === 1 ? "chunk" : "chunks"}`}</span>
-            <span>{`${group.chunks.reduce((sum, ch) => sum + Number(ch.recordCount), 0).toLocaleString()} records`}</span>
-            {rf > 1 && <Badge variant="info" dark={dark}>{`RF=${String(rf)}`}</Badge>}
-            {secondaries.length > 0 && (
-              <span>
-                {"\u2192 "}
-                {secondaries.map((id, si) => {
-                  const name = resolveNodeName(nodeNameMap, id);
-                  const requiredClass = tierCfg?.storageClass ?? 0;
-                  let fallbackClass = 0;
-                  if (requiredClass > 0) {
-                    const nsc = (config?.nodeStorageConfigs ?? []).find((n) => encode(n.nodeId) === id);
-                    const hasExact = nsc?.fileStorages.some((a) => a.storageClass === requiredClass);
-                    if (!hasExact && nsc && nsc.fileStorages.length > 0) {
-                      fallbackClass = nsc.fileStorages[0]!.storageClass;
-                    }
-                  }
-                  return (
-                    <span key={id}>
-                      {si > 0 && ", "}
-                      {name}
-                      {fallbackClass > 0 && (
-                        <span className="text-severity-warn">{` (class ${String(fallbackClass)})`}</span>
+            const label = `Tier ${String(pos)}: ${group.tierType}`;
+            const tierCfg = config?.tiers.find((t) => encode(t.id) === tierId);
+            const rf = tierCfg?.replicationFactor || 1;
+            const secondaries = tierCfg ? followerNodeIds(tierCfg, nscs) : [];
+            const pnId = tierCfg ? leaderNodeId(tierCfg, nscs) : "";
+            const nodeName = pnId ? resolveNodeName(nodeNameMap, pnId) : "";
+            return (
+              <Fragment key={tierId}>
+                <tr
+                  className={`text-[0.75em] font-medium uppercase tracking-[0.12em] border-b ${c(
+                    "text-text-muted border-ink-border-subtle bg-ink-base/30",
+                    "text-light-text-muted border-light-border-subtle bg-light-base/30",
+                  )}`}
+                >
+                  <td colSpan={5} className="px-4 py-1.5">
+                    <span className="inline-flex flex-wrap items-center gap-2">
+                      <Badge variant="copper" dark={dark}>{label}</Badge>
+                      {nodeName && <span>{`on ${nodeName}`}</span>}
+                      {group.tierType === "jsonl" && tierCfg?.path && (
+                        <span className="font-mono">{tierCfg.path}</span>
+                      )}
+                      <span>{`${String(group.chunks.length)} ${group.chunks.length === 1 ? "chunk" : "chunks"}`}</span>
+                      <span>{`${group.chunks.reduce((sum, ch) => sum + Number(ch.recordCount), 0).toLocaleString()} records`}</span>
+                      {rf > 1 && <Badge variant="info" dark={dark}>{`RF=${String(rf)}`}</Badge>}
+                      {secondaries.length > 0 && (
+                        <span>
+                          {"\u2192 "}
+                          {secondaries.map((id, si) => {
+                            const name = resolveNodeName(nodeNameMap, id);
+                            const requiredClass = tierCfg?.storageClass ?? 0;
+                            let fallbackClass = 0;
+                            if (requiredClass > 0) {
+                              const nsc = nscs.find((n) => encode(n.nodeId) === id);
+                              const hasExact = nsc?.fileStorages.some((a) => a.storageClass === requiredClass);
+                              if (!hasExact && nsc && nsc.fileStorages.length > 0) {
+                                fallbackClass = nsc.fileStorages[0]!.storageClass;
+                              }
+                            }
+                            return (
+                              <span key={id}>
+                                {si > 0 && ", "}
+                                {name}
+                                {fallbackClass > 0 && (
+                                  <span className="text-severity-warn">{` (class ${String(fallbackClass)})`}</span>
+                                )}
+                              </span>
+                            );
+                          })}
+                        </span>
                       )}
                     </span>
-                  );
-                })}
-              </span>
-            )}
-          </div>
-          <table className="w-full border-collapse">
-            <thead>
-              <tr
-                className={`text-left text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c(
-                  "text-text-muted border-ink-border-subtle",
-                  "text-light-text-muted border-light-border-subtle",
-                )}`}
-              >
-                <th className="px-4 py-2 font-medium">Chunk ID</th>
-                <th className="px-2 py-2 font-medium">Time Range</th>
-                <th className="px-2 py-2 font-medium">Status</th>
-                <th className="px-2 py-2 font-medium text-right">Records</th>
-                <th className="px-4 py-2 font-medium text-right">Size</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortChunks(group.chunks).map((chunk) => {
+                  </td>
+                </tr>
+                {sortChunks(group.chunks).map((chunk) => {
                 const startTs = chunk.ingestStart ?? chunk.writeStart;
                 const endTs = chunk.ingestEnd ?? chunk.writeEnd;
                 const start = startTs ? instantToDate(protoToInstant(startTs)) : undefined;
@@ -358,11 +377,12 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
                     pendingAckNodes={pendingAckNodes}
                   />
                 );
-              })}
-            </tbody>
-          </table>
-        </div>
-        ); })}
+                })}
+              </Fragment>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -497,19 +517,17 @@ function ChunkRow({
         {...clickableProps(onToggle)}
         aria-expanded={isExpanded}
       >
-        <td className="px-4 py-2">
-          <span className="flex items-center gap-1.5">
-            <span
-              className={`text-[0.6em] transition-transform inline-block ${isExpanded ? "rotate-90" : ""} ${c("text-text-muted", "text-light-text-muted")}`}
-            >
-              {"\u25B6"}
-            </span>
-            <MiddleTruncate
-              className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}
-              title={encode(chunk.id)}
-            >
-              {encode(chunk.id)}
-            </MiddleTruncate>
+        <td className="px-4 py-2 whitespace-nowrap">
+          <span
+            className={`text-[0.6em] transition-transform inline-block mr-1.5 ${isExpanded ? "rotate-90" : ""} ${c("text-text-muted", "text-light-text-muted")}`}
+          >
+            {"\u25B6"}
+          </span>
+          <span
+            className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}
+            title={encode(chunk.id)}
+          >
+            {middleTruncateChunkID(encode(chunk.id))}
           </span>
         </td>
         <td className="px-2 py-2">
