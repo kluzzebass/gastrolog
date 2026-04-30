@@ -228,13 +228,8 @@ func (r *TierLifecycleReconciler) projectAllSealedFromFSM(fsm *tierfsm.FSM) {
 		if !e.Sealed {
 			continue
 		}
-		// Recovery path: no record-stream is coming to swap the active
-		// pointer for chunks sealed during this node's absence, so a
-		// local active matching a now-sealed chunk MUST be force-demoted.
-		// See chunk.SealEnsurer doc for the steady-state vs recovery
-		// split.
-		if err := ensurer.EnsureSealedAndDemote(e.ID); err != nil {
-			r.logger.Warn("reconcile-from-snapshot: EnsureSealedAndDemote failed",
+		if err := ensurer.EnsureSealed(e.ID); err != nil {
+			r.logger.Warn("reconcile-from-snapshot: EnsureSealed failed",
 				"chunk", e.ID, "error", err)
 		}
 	}
@@ -598,7 +593,27 @@ func (r *TierLifecycleReconciler) SweepMissingReplicas() {
 // ReconcileFromSnapshot (catchup after Restore), and
 // SweepPendingObligations (periodic local sweep). source is a short
 // label that distinguishes them for log triage.
+//
+// Force-demotes the chunk first if the local Manager still has it as
+// the active pointer (gastrolog-2yeht). The FSM has authoritatively
+// scheduled this chunk for deletion via the receipt protocol; the
+// local stale active pointer must yield. Without this prelude,
+// downstream-tier followers (no continuous record-stream to swap
+// active naturally) would have fulfillObligation bouncing off
+// ErrActiveChunk on every periodic-sweep tick, blocking finalize
+// indefinitely.
 func (r *TierLifecycleReconciler) fulfillObligation(chunkID chunk.ChunkID, reason, source string) {
+	if r.tier != nil && r.tier.Chunks != nil {
+		if ensurer, ok := r.tier.Chunks.(chunk.SealEnsurer); ok {
+			if err := ensurer.EnsureSealed(chunkID); err != nil {
+				r.logger.Warn("delete obligation: pre-demote failed",
+					"chunk", chunkID, "reason", reason, "source", source, "error", err)
+				// Continue to deleteLocalCopy — if the chunk is in fact
+				// already sealed, that path will succeed; if not, it'll
+				// produce its own diagnostic.
+			}
+		}
+	}
 	if err := r.deleteLocalCopy(chunkID); err != nil {
 		// Don't ack: the FSM keeps the obligation, and we'll retry on
 		// the next observation. Logging at warn lets retry storms show

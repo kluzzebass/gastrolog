@@ -78,17 +78,6 @@ func (f *reconcilerFakeSealEnsurerChunkManager) EnsureSealed(id chunk.ChunkID) e
 	return nil
 }
 
-func (f *reconcilerFakeSealEnsurerChunkManager) EnsureSealedAndDemote(id chunk.ChunkID) error {
-	// Tests that observe EnsureSealedAndDemote call counts: appended to
-	// the same slice so existing assertions about which chunk IDs got
-	// projected still work. The two methods are semantically equivalent
-	// at the test-fake level — they only differ in real-Manager
-	// behavior on the local-active branch (skip vs force-demote), which
-	// the file/Manager unit tests cover separately.
-	f.ensured = append(f.ensured, id)
-	return nil
-}
-
 // TestReconcilerOnRequestDeleteDeletesLocalAndAcks pins the receiver-side
 // invariant: when CmdRequestDelete commits and this node is in
 // expectedFrom, the reconciler deletes its local copy and proposes
@@ -748,5 +737,93 @@ func TestSweepMissingReplicasSkipsWhenLeaderUnknown(t *testing.T) {
 
 	if fake.calls.Load() != 0 {
 		t.Errorf("must not request when leader unknown, got %d call(s)", fake.calls.Load())
+	}
+}
+
+// fakeSealEnsurerThatDemotesActive is a SealEnsurer fake that mimics
+// the real Manager's force-demote semantics: when EnsureSealed is
+// called for the chunk recorded as "active", that chunk transitions
+// to sealed (active cleared) so a subsequent Delete on the same
+// chunk doesn't return ErrActiveChunk. Used to test that
+// fulfillObligation calls EnsureSealed BEFORE deleteLocalCopy so the
+// receipt-protocol delete path handles still-active chunks cleanly.
+type fakeSealEnsurerThatDemotesActive struct {
+	retentionFakeChunkManager
+	activeID         chunk.ChunkID // chunk currently "active"; cleared on EnsureSealed
+	ensureSealedSeen []chunk.ChunkID
+}
+
+func (f *fakeSealEnsurerThatDemotesActive) EnsureSealed(id chunk.ChunkID) error {
+	f.ensureSealedSeen = append(f.ensureSealedSeen, id)
+	if f.activeID == id {
+		// Demote: remove from "active" so subsequent Delete succeeds.
+		f.activeID = chunk.ChunkID{}
+	}
+	return nil
+}
+
+func (f *fakeSealEnsurerThatDemotesActive) Delete(id chunk.ChunkID) error {
+	if f.activeID == id {
+		return chunk.ErrActiveChunk
+	}
+	f.deleted = append(f.deleted, id)
+	return nil
+}
+
+// TestFulfillObligationDemotesLocalActiveBeforeDelete pins
+// gastrolog-2yeht: the receipt-protocol delete obligation MUST call
+// EnsureSealed before deleteLocalCopy so a chunk that's still local
+// active on a follower (downstream tier with no continuous record
+// stream → no natural active swap) gets force-demoted and then
+// deleted, instead of bouncing off ErrActiveChunk every periodic
+// sweep tick.
+//
+// Pre-fix: fulfillObligation called deleteLocalCopy directly;
+// receipt protocol stuck forever on tiers with no record stream
+// because deleteInternal returned ErrActiveChunk.
+//
+// Post-fix: fulfillObligation calls EnsureSealed first; the
+// EnsureSealed contract demotes local-active chunks; deleteLocalCopy
+// then succeeds because the chunk is no longer active; the ack
+// fires; finalize lands; orphan sweep can clean up downstream.
+func TestFulfillObligationDemotesLocalActiveBeforeDelete(t *testing.T) {
+	t.Parallel()
+
+	chunkID := chunk.NewChunkID()
+
+	cm := &fakeSealEnsurerThatDemotesActive{
+		activeID: chunkID, // simulate a stuck-active chunk on a downstream-tier follower
+	}
+
+	var ackedID chunk.ChunkID
+	var ackCount atomic.Int32
+	tier := &TierInstance{
+		TierID: glid.New(),
+		Chunks: cm,
+		ApplyRaftAckDelete: func(id chunk.ChunkID, _ string) error {
+			ackedID = id
+			ackCount.Add(1)
+			return nil
+		},
+	}
+	rec := NewTierLifecycleReconciler(nil, glid.New(), tier.TierID, tier, "node-A", slog.Default())
+
+	rec.fulfillObligation(chunkID, "retention-ttl", "test")
+
+	// Acceptance #1: EnsureSealed was called before Delete (otherwise
+	// Delete would have returned ErrActiveChunk and we'd never get
+	// here).
+	if len(cm.ensureSealedSeen) != 1 || cm.ensureSealedSeen[0] != chunkID {
+		t.Errorf("EnsureSealed calls = %v, want exactly [%s]", cm.ensureSealedSeen, chunkID)
+	}
+
+	// Acceptance #2: Delete succeeded (chunk was demoted; not active anymore).
+	if len(cm.deleted) != 1 || cm.deleted[0] != chunkID {
+		t.Errorf("deleted = %v, want [%s]", cm.deleted, chunkID)
+	}
+
+	// Acceptance #3: Ack fired — the obligation fulfilled cleanly.
+	if ackCount.Load() != 1 || ackedID != chunkID {
+		t.Errorf("ack count = %d, id = %s; want 1, %s", ackCount.Load(), ackedID, chunkID)
 	}
 }
