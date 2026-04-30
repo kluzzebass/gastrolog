@@ -408,7 +408,21 @@ func (e *Engine) transitionStreamedChunks(vaultID glid.GLID) map[chunk.ChunkID]b
 	if e.registry == nil {
 		return nil
 	}
-	return e.registry.TransitionStreamedChunks(vaultID)
+	streamed := e.registry.TransitionStreamedChunks(vaultID)
+	// gastrolog-5qwkw heavy-load diagnostic: log when the filter has
+	// entries so the cluster.log shows which tiers/vaults are
+	// currently mid-transition during a histogram computation. A
+	// missing log line means the filter saw an empty set (no
+	// transitions in flight); a populated log line confirms the
+	// chunk-level filter is firing as designed. Removed once the
+	// heavy-load investigation closes.
+	if len(streamed) > 0 && e.logger != nil {
+		e.logger.Info("histogram-filter: transitionStreamed chunks present",
+			"vault_or_tier", vaultID,
+			"streamed_count", len(streamed),
+		)
+	}
+	return streamed
 }
 
 // selectChunks filters to chunks that overlap the query time range,
