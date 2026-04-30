@@ -48,7 +48,21 @@ func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 		r.markUnreadable(id, err)
 		return
 	}
-	defer func() { _ = cursor.Close() }()
+	// Close-on-return as a safety net; we also Close explicitly post-
+	// stream below so that the per-chunk read lock the cursor holds
+	// (gastrolog-26zu1) is released before any later code path tries
+	// to take the per-chunk write lock on the same chunk. Specifically:
+	// the single-node fallback expires the source chunk via
+	// expireChunk → Delete → deleteInternal, which acquires the write
+	// lock; if the cursor's read lock were still held by this same
+	// goroutine, the RLock→Lock upgrade would deadlock the goroutine
+	// on itself. Close is idempotent (sets fields nil).
+	cursorClosed := false
+	defer func() {
+		if !cursorClosed {
+			_ = cursor.Close()
+		}
+	}()
 
 	nextLeaderNodeID := system.LeaderNodeID(sys.Runtime.TierPlacements[nextTierCfg.ID], sys.Runtime.NodeStorageConfigs)
 	remote := nextLeaderNodeID != "" && nextLeaderNodeID != r.orch.localNodeID
@@ -79,6 +93,13 @@ func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 		}
 		return
 	}
+
+	// Streaming complete — release the source cursor's per-chunk read
+	// lock NOW so the single-node fallback below can take the write
+	// lock via expireChunk → Delete without an RLock→Lock self-deadlock.
+	// See gastrolog-26zu1.
+	_ = cursor.Close()
+	cursorClosed = true
 
 	// Write a receipt to the DESTINATION tier's Raft confirming it has
 	// received the records from this source chunk. The Raft commit gives

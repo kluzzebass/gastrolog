@@ -49,7 +49,16 @@ func (o *Orchestrator) MoveChunk(ctx context.Context, chunkID chunk.ChunkID, src
 	if err != nil {
 		return fmt.Errorf("open chunk %s: %w", chunkID, err)
 	}
-	defer func() { _ = cursor.Close() }()
+	// Close-on-return as a safety net; we Close explicitly post-stream
+	// so the cursor's per-chunk RLock (gastrolog-26zu1) is released
+	// before deleteSourceChunk takes the write lock — otherwise the
+	// same goroutine self-deadlocks on RLock→Lock upgrade.
+	cursorClosed := false
+	defer func() {
+		if !cursorClosed {
+			_ = cursor.Close()
+		}
+	}()
 	imported, err := dstCM.ImportRecords(chunkID, chunk.CursorIterator(cursor))
 	if err != nil {
 		return fmt.Errorf("import records into destination: %w", err)
@@ -60,6 +69,10 @@ func (o *Orchestrator) MoveChunk(ctx context.Context, chunkID chunk.ChunkID, src
 				"chunk", imported.ID.String(), "error", err)
 		}
 	}
+
+	// Release cursor's read lock before deleting the source chunk.
+	_ = cursor.Close()
+	cursorClosed = true
 
 	// Delete from source after successful import.
 	if err := o.deleteSourceChunk(srcID, chunkID); err != nil {
@@ -81,11 +94,22 @@ func (o *Orchestrator) moveChunkRemote(ctx context.Context, chunkID chunk.ChunkI
 	if err != nil {
 		return fmt.Errorf("open chunk %s: %w", chunkID, err)
 	}
-	defer func() { _ = cursor.Close() }()
+	cursorClosed := false
+	defer func() {
+		if !cursorClosed {
+			_ = cursor.Close()
+		}
+	}()
 
 	if err := o.transferrer.TransferRecords(ctx, dstNodeID, dstID, chunk.CursorIterator(cursor)); err != nil {
 		return fmt.Errorf("transfer chunk %s to node %s: %w", chunkID, dstNodeID, err)
 	}
+
+	// Release cursor's read lock before deleting the source chunk
+	// (gastrolog-26zu1: same-goroutine RLock→Lock upgrade would
+	// deadlock).
+	_ = cursor.Close()
+	cursorClosed = true
 
 	// Delete from source after successful transfer.
 	if err := o.deleteSourceChunk(srcID, chunkID); err != nil {

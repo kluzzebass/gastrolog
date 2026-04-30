@@ -155,6 +155,24 @@ type Manager struct {
 	postSealActive sync.Map       // chunk.ChunkID → chan struct{} — closed when PostSealProcess finishes
 	postSealWg     sync.WaitGroup // tracks in-flight PostSealProcess calls (for Close only)
 
+	// chunkLocks protects each chunk's file lifetime against concurrent
+	// mutation: cursor reads (mmap'd raw.log/idx.log/attr.log regions)
+	// take a read lock; compression's atomic rename and retention's
+	// os.RemoveAll take the write lock. Without this, an in-flight
+	// cursor.Next could SIGBUS when the underlying file is unlinked or
+	// renamed out from under its mmap region — the gastrolog-26zu1
+	// node-killing crash. The per-chunk granularity preserves
+	// concurrency between mutators on different chunks.
+	//
+	// Lifecycle: created on first chunkLockFor(id) call, removed only
+	// after the chunk is fully deleted (deleteInternal). Map entries
+	// outlive their chunks for the duration of any in-flight cursor —
+	// cleanup happens after the writer holding the lock releases it,
+	// at which point no new readers can resolve the lock (meta is gone
+	// → ErrChunkNotFound at the meta-lookup step in OpenCursor).
+	chunkLocksMu sync.Mutex
+	chunkLocks   map[chunk.ChunkID]*sync.RWMutex
+
 	// cloudDegraded tracks whether the cloud store is currently unreachable.
 	// Set on any failed cloud operation (init, upload, download, list);
 	// cleared on any successful one. The orchestrator polls this to raise
@@ -333,6 +351,7 @@ func NewManager(cfg Config) (*Manager, error) {
 		metas:          make(map[chunk.ChunkID]*chunkMeta),
 		storageClasses: make(map[chunk.ChunkID]string),
 		zstdEnc:        zstdEnc,
+		chunkLocks:     make(map[chunk.ChunkID]*sync.RWMutex),
 		logger:         logger,
 	}
 	if err := manager.loadExisting(); err != nil {
@@ -724,7 +743,32 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	m.mu.Unlock()
 
 	if cloudBacked {
+		// Cloud-backed cursors don't touch local mmap regions; the
+		// per-chunk lifetime lock is unnecessary for them. Their lifecycle
+		// is handled by the cloud index's own concurrency primitives.
 		return m.openCloudCursor(id)
+	}
+
+	// Acquire the per-chunk read lock BEFORE opening files. CompressChunk
+	// and deleteInternal hold this as a write lock around their atomic
+	// rename / os.RemoveAll, so an in-flight cursor's mmap regions can't
+	// be invalidated under it. The lock release is wired into the
+	// cursor's Close so it tracks the cursor's actual lifetime — the
+	// indexer Build pass (gastrolog-26zu1's SIGBUS site) holds its
+	// cursor across multiple Next() calls and per-record CPU work, so
+	// release-on-Close is the right hook. See gastrolog-26zu1.
+	chunkLock := m.chunkLockFor(id)
+	chunkLock.RLock()
+
+	// Re-check meta under the read lock — a delete that started before
+	// our RLock could have completed during construction. ErrChunkNotFound
+	// is the same outcome whether the meta vanished pre- or mid-OpenCursor.
+	m.mu.Lock()
+	meta = m.lookupMeta(id)
+	m.mu.Unlock()
+	if meta == nil {
+		chunkLock.RUnlock()
+		return nil, chunk.ErrChunkNotFound
 	}
 
 	rawPath := m.rawLogPath(id)
@@ -734,16 +778,46 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 
 	if sealed {
 		cursor, err := newMmapCursor(id, rawPath, idxPath, attrPath, dictPath)
-		return cursor, err
+		if err != nil {
+			chunkLock.RUnlock()
+			return nil, err
+		}
+		cursor.onClose = chunkLock.RUnlock
+		return cursor, nil
 	}
 
 	cursor, err := newStdioCursor(id, rawPath, idxPath, attrPath, dictPath)
-	return cursor, err
+	if err != nil {
+		chunkLock.RUnlock()
+		return nil, err
+	}
+	cursor.onClose = chunkLock.RUnlock
+	return cursor, nil
+}
+
+// chunkLockFor returns the per-chunk RWMutex used to guard the chunk's
+// file lifetime against concurrent mutation. Created on first access;
+// removed in deleteInternal after the chunk's files are gone. See the
+// chunkLocks doc on the Manager struct.
+func (m *Manager) chunkLockFor(id chunk.ChunkID) *sync.RWMutex {
+	m.chunkLocksMu.Lock()
+	defer m.chunkLocksMu.Unlock()
+	if l, ok := m.chunkLocks[id]; ok {
+		return l
+	}
+	l := &sync.RWMutex{}
+	m.chunkLocks[id] = l
+	return l
 }
 
 // ScanAttrs iterates all records in a chunk reading only idx.log + attr.log,
 // skipping raw.log entirely. This enables O(~88 bytes/record) scans for
 // aggregation queries that never inspect message bodies.
+//
+// Holds the per-chunk read lock for the scan duration so concurrent
+// CompressChunk / deleteInternal can't invalidate the mmap regions
+// scanAttrsSealed relies on. Same coordination as OpenCursor; see
+// gastrolog-26zu1.
 func (m *Manager) ScanAttrs(id chunk.ChunkID, startPos uint64, fn func(writeTS time.Time, attrs chunk.Attributes) bool) error {
 	// Snapshot meta flags under the lock — reading them after unlocking
 	// races with CompressChunk/uploadToCloud which mutate them.
@@ -760,6 +834,19 @@ func (m *Manager) ScanAttrs(id chunk.ChunkID, startPos uint64, fn func(writeTS t
 	// Cloud-backed chunks: download and iterate via cursor.
 	if cloudBacked {
 		return m.scanAttrsCloud(id, startPos, fn)
+	}
+
+	chunkLock := m.chunkLockFor(id)
+	chunkLock.RLock()
+	defer chunkLock.RUnlock()
+
+	// Re-check meta under the read lock — a delete that started before
+	// our RLock could have completed during the snapshot above.
+	m.mu.Lock()
+	meta = m.lookupMeta(id)
+	m.mu.Unlock()
+	if meta == nil {
+		return chunk.ErrChunkNotFound
 	}
 
 	idxPath := m.idxLogPath(id)
@@ -2551,6 +2638,34 @@ func (m *Manager) DeleteSilent(id chunk.ChunkID) error {
 }
 
 func (m *Manager) deleteInternal(id chunk.ChunkID) error {
+	// Wait for any in-flight PostSealProcess on this chunk to finish
+	// BEFORE acquiring the per-chunk write lock. PostSealProcess
+	// internally calls CompressChunk (which takes chunkLock) and
+	// the index Build pass (which opens cursors with chunkLock.RLock).
+	// If we held chunkLock here and then waited on postSealActive,
+	// CompressChunk's chunkLock.Lock would block on us, the
+	// postSealActive channel would never close, and we'd deadlock —
+	// observed on TestClusterTransitionBurstNoOrphans.
+	if ch, ok := m.postSealActive.Load(id); ok {
+		<-ch.(chan struct{})
+	}
+
+	// Per-chunk write lock (gastrolog-26zu1): block until in-flight
+	// cursor reads on this chunk drain before unlinking files. Without
+	// this, an indexer cursor mid-Next() could SIGBUS when os.RemoveAll
+	// invalidates its mmap regions.
+	chunkLock := m.chunkLockFor(id)
+	chunkLock.Lock()
+	defer func() {
+		chunkLock.Unlock()
+		// Clean up the map entry once no readers can resolve it (the
+		// chunk's meta is gone after a successful delete, so future
+		// OpenCursors fail at meta-lookup before consulting chunkLocks).
+		m.chunkLocksMu.Lock()
+		delete(m.chunkLocks, id)
+		m.chunkLocksMu.Unlock()
+	}()
+
 	m.mu.Lock()
 
 	if m.closed {
@@ -2586,7 +2701,7 @@ func (m *Manager) deleteInternal(id chunk.ChunkID) error {
 		return chunk.ErrChunkNotFound
 	}
 
-	if meta.cloudBacked { //nolint:nestif // cloud vs local branch is inherently nested
+	if meta.cloudBacked {
 		// Release the lock before the S3 API call — cloud deletes can take
 		// hundreds of milliseconds and would block all Appends. Bound the
 		// call so an unresponsive S3 can't hold the mu re-acquisition
@@ -2608,13 +2723,8 @@ func (m *Manager) deleteInternal(id chunk.ChunkID) error {
 		}
 	} else {
 		dir := m.chunkDir(id)
-		// Wait for this chunk's post-seal work to finish — it may be writing
-		// temporary files into this chunk's directory.
-		m.mu.Unlock()
-		if ch, ok := m.postSealActive.Load(id); ok {
-			<-ch.(chan struct{})
-		}
-		m.mu.Lock()
+		// postSealActive was already drained at the top of deleteInternal
+		// before we acquired chunkLock — no need to wait again here.
 		if err := os.RemoveAll(dir); err != nil {
 			m.mu.Unlock()
 			m.logger.Warn("chunk-lifecycle: RemoveAll failed",
@@ -2633,8 +2743,18 @@ func (m *Manager) deleteInternal(id chunk.ChunkID) error {
 
 // CompressChunk compresses raw.log and attr.log for a sealed chunk using zstd.
 // Returns nil if the chunk is not found or not sealed. No-op if already compressed.
-// Safe to call concurrently with reads (atomic file replacement via rename).
+//
+// Cursor coordination (gastrolog-26zu1): the per-chunk RWMutex is held
+// across the temp-file write and atomic rename so an in-flight cursor's
+// mmap regions can't be invalidated under it. Without this guard, the
+// indexer Build pass1's cursor.Next could SIGBUS when its idx.log mmap
+// page-faults against a now-replaced inode (observed in production on
+// macOS, where mmap'd pages of a renamed file aren't reliably preserved).
 func (m *Manager) CompressChunk(id chunk.ChunkID) error {
+	chunkLock := m.chunkLockFor(id)
+	chunkLock.Lock()
+	defer chunkLock.Unlock()
+
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
