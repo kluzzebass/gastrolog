@@ -820,7 +820,7 @@ func (o *Orchestrator) buildTierInstance(sys *system.System, vaultCfg system.Vau
 		}
 		ti.applyRaftCallbacks(raftCB)
 		o.attachLifecycleReconciler(ti, vaultCfg.ID, tierCfg.ID, tierGroup)
-		wireTierFSMOnDelete(tierGroup, tierCfg.ID, cm, nil, o.logger)
+		wireTierFSMOnDelete(tierGroup, tierCfg.ID, cm, nil, o, o.logger)
 		return ti, nil
 	}
 
@@ -859,8 +859,8 @@ func (o *Orchestrator) buildTierInstance(sys *system.System, vaultCfg system.Vau
 	}
 	ti.applyRaftCallbacks(raftCB)
 	o.attachLifecycleReconciler(ti, vaultCfg.ID, tierCfg.ID, tierGroup)
-	wireTierFSMOnDelete(tierGroup, tierCfg.ID, cm, im, o.logger)
-	wireTierFSMOnUpload(tierGroup, tierCfg.ID, cm, o.logger)
+	wireTierFSMOnDelete(tierGroup, tierCfg.ID, cm, im, o, o.logger)
+	wireTierFSMOnUpload(tierGroup, tierCfg.ID, cm, o, o.logger)
 	return ti, nil
 }
 
@@ -970,8 +970,8 @@ func (o *Orchestrator) buildTierInstanceForStorage(sys *system.System, vaultCfg 
 	}
 	ti.applyRaftCallbacks(raftCB)
 	o.attachLifecycleReconciler(ti, vaultCfg.ID, tierCfg.ID, tierGroup)
-	wireTierFSMOnDelete(tierGroup, tierCfg.ID, cm, im, o.logger)
-	wireTierFSMOnUpload(tierGroup, tierCfg.ID, cm, o.logger)
+	wireTierFSMOnDelete(tierGroup, tierCfg.ID, cm, im, o, o.logger)
+	wireTierFSMOnUpload(tierGroup, tierCfg.ID, cm, o, o.logger)
 	return ti, nil
 }
 
@@ -1310,7 +1310,7 @@ func (o *Orchestrator) clearTierFSMChunkCallbacks(vaultID, tierID glid.GLID) {
 // enforce this by releasing m.mu before calling the announcer; if a new
 // path is added that holds the mutex during an announcer call, this
 // callback will deadlock with it.
-func wireTierFSMOnDelete(g *raftgroup.Group, tierID glid.GLID, cm chunk.ChunkManager, im index.IndexManager, logger *slog.Logger) {
+func wireTierFSMOnDelete(g *raftgroup.Group, tierID glid.GLID, cm chunk.ChunkManager, im index.IndexManager, o *Orchestrator, logger *slog.Logger) {
 	if g == nil || cm == nil {
 		return
 	}
@@ -1328,6 +1328,15 @@ func wireTierFSMOnDelete(g *raftgroup.Group, tierID glid.GLID, cm chunk.ChunkMan
 		return
 	}
 	fsm.SetOnDelete(func(id chunk.ChunkID) {
+		// Notify WatchChunks subscribers regardless of local-delete
+		// outcome: the FSM's authoritative chunks-map entry is gone,
+		// so the inspector's view on this node is stale. Fire on
+		// every node where the apply ran, even ones that never had
+		// the chunk locally (they may still have rendered it via
+		// the cluster-wide ListChunks fan-out). See gastrolog-2ob86.
+		if o != nil {
+			defer o.NotifyChunkChange()
+		}
 		// Delete indexes first (they're metadata about the chunk).
 		// ErrChunkNotFound-equivalent errors are expected during log replay
 		// on a node that doesn't have the chunk locally — log at debug only.
@@ -1358,7 +1367,7 @@ func wireTierFSMOnDelete(g *raftgroup.Group, tierID glid.GLID, cm chunk.ChunkMan
 // chunk manager's RegisterCloudChunk method. When the FSM applies CmdUploadChunk
 // (from the leader's AnnounceUpload), the follower's chunk manager registers
 // the cloud chunk from metadata alone — no record streaming or S3 download.
-func wireTierFSMOnUpload(g *raftgroup.Group, tierID glid.GLID, cm chunk.ChunkManager, logger *slog.Logger) {
+func wireTierFSMOnUpload(g *raftgroup.Group, tierID glid.GLID, cm chunk.ChunkManager, o *Orchestrator, logger *slog.Logger) {
 	if g == nil || cm == nil {
 		return
 	}
@@ -1376,6 +1385,14 @@ func wireTierFSMOnUpload(g *raftgroup.Group, tierID glid.GLID, cm chunk.ChunkMan
 		return
 	}
 	fsm.SetOnUpload(func(e tierfsm.Entry) {
+		// Notify WatchChunks subscribers: the chunk transitioned to
+		// cloud-backed (DiskBytes / NumFrames / CloudBacked changed
+		// in the FSM), which the inspector renders. Fire regardless
+		// of RegisterCloudChunk outcome — FSM state is authoritative.
+		// See gastrolog-2ob86.
+		if o != nil {
+			defer o.NotifyChunkChange()
+		}
 		info := chunk.CloudChunkInfo{
 			WriteStart:      e.WriteStart,
 			WriteEnd:        e.WriteEnd,
