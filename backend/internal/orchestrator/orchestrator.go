@@ -311,6 +311,14 @@ type Orchestrator struct {
 	// connected clients. See gastrolog-1jijm.
 	chunkSignal *notify.Signal
 
+	// progressTrigger coalesces high-rate active-chunk-progress signals
+	// (every record append) into bounded chunkSignal notifications. Hot-
+	// path callers do progressTrigger.Signal(); a single throttle
+	// goroutine fan-outs to chunkSignal at most once per window with
+	// leading-edge fire on the first signal after quiet. See
+	// gastrolog-4y03v.
+	progressTrigger *progressNotifier
+
 	// Suspect tracker for cloud chunks that returned 404.
 	suspects *suspectTracker
 
@@ -492,6 +500,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		alerts:               cfg.Alerts,
 		suspects:             newSuspectTracker(),
 		chunkSignal:          notify.NewSignal(),
+		progressTrigger:      newProgressNotifier(),
 		vaultCtlLeaders:      newVaultCtlLeaderManager(logger),
 		phase:                cfg.Phase,
 		onIngesterAlive:      cfg.OnIngesterAlive,
