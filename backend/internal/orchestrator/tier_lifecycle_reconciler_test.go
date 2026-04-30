@@ -936,6 +936,19 @@ func waitForChunkSignal(ch <-chan struct{}, timeout time.Duration) bool {
 	}
 }
 
+// startThrottleForTest runs the orchestrator's progress-throttle
+// goroutine for the duration of the test. NotifyChunkChange enqueues
+// to progressTrigger; without this goroutine, the chunkSignal never
+// fans out and any test asserting the signal will hang. Uses a tight
+// 10ms window so leading-edge fires land promptly within test
+// timeouts. See gastrolog-4y03v.
+func startThrottleForTest(t *testing.T, orch *Orchestrator) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go orch.runProgressNotifier(ctx, 10*time.Millisecond)
+}
+
 // TestReconcilerOnSealNotifiesChunkChange pins the gastrolog-2ob86 fix:
 // when CmdSealChunk applies on this node (originating from any node in
 // the cluster), the WatchChunks signal must fire so subscribers refetch.
@@ -948,6 +961,7 @@ func TestReconcilerOnSealNotifiesChunkChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("orchestrator.New: %v", err)
 	}
+	startThrottleForTest(t, orch)
 	signalCh := orch.ChunkSignal().C()
 
 	fsm := tierfsm.New()
@@ -999,6 +1013,7 @@ func TestReconcilerOnSealNotifiesEvenWhenEnsureSealedFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("orchestrator.New: %v", err)
 	}
+	startThrottleForTest(t, orch)
 	signalCh := orch.ChunkSignal().C()
 
 	fsm := tierfsm.New()
@@ -1030,6 +1045,7 @@ func TestWireTierFSMOnDeleteFiresNotifyChunkChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("orchestrator.New: %v", err)
 	}
+	startThrottleForTest(t, orch)
 	signalCh := orch.ChunkSignal().C()
 
 	fsm := tierfsm.New()
@@ -1067,6 +1083,7 @@ func TestWireTierFSMOnDeleteNotifiesEvenWhenDeleteSilentFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("orchestrator.New: %v", err)
 	}
+	startThrottleForTest(t, orch)
 	signalCh := orch.ChunkSignal().C()
 
 	fsm := tierfsm.New()
@@ -1097,6 +1114,7 @@ func TestWireTierFSMOnUploadFiresNotifyChunkChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("orchestrator.New: %v", err)
 	}
+	startThrottleForTest(t, orch)
 	signalCh := orch.ChunkSignal().C()
 
 	fsm := tierfsm.New()

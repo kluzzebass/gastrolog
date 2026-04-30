@@ -374,11 +374,20 @@ func (o *Orchestrator) ChunkSignal() *notify.Signal {
 	return o.chunkSignal
 }
 
-// NotifyChunkChange fires the chunk-change signal so that WatchChunks
-// subscribers know to refetch. Called from seal, delete, create,
-// compress, and cloud upload code paths. Safe for concurrent use.
+// NotifyChunkChange records that chunk metadata visible to WatchChunks
+// subscribers has changed on this node. Called from seal, delete,
+// create, compress, cloud upload, retention, FSM apply callbacks, and
+// the per-record append path. Safe for concurrent use.
+//
+// The actual chunkSignal fan-out is throttled (gastrolog-4y03v): a
+// single goroutine consumes the trigger and fires chunkSignal at most
+// twice per window (leading edge on the first signal after quiet,
+// trailing edge if more signals arrived during the window). This
+// caps WatchChunks RPC fan-out under heavy load — chunk rotation
+// cascades (seal + compress + upload + Raft FSM apply on every peer)
+// no longer produce a flood of redundant signals.
 func (o *Orchestrator) NotifyChunkChange() {
-	o.chunkSignal.Notify()
+	o.progressTrigger.Signal()
 }
 
 // tierLabel returns the operator-friendly name for a tier as configured,
