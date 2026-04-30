@@ -962,22 +962,25 @@ func (m *Manager) cleanOrphanTempFiles(chunkDir string) {
 }
 
 // EnsureSealed projects the FSM's sealed state onto local chunk files.
-// Called by TierLifecycleReconciler.onSeal (steady state) and
-// ReconcileFromSnapshot (catchup) when CmdSealChunk applies. Implements
-// chunk.SealEnsurer.
+// Steady-state path: called by TierLifecycleReconciler.onSeal when
+// CmdSealChunk applies. Implements chunk.SealEnsurer.
 //
 // Behavior:
 //   - chunk not local        → no-op (this node never had it)
 //   - chunk already sealed   → no-op
-//   - chunk is local active  → force-demote: close files, remove B+
-//     trees, mark sealed=true, clear m.active. Does NOT fire
-//     AnnounceSeal (the FSM already has CmdSealChunk applied; a second
-//     announce would duplicate the Raft entry). See gastrolog-uccg6
-//     for the offline-during-seal restart scenario this handles.
+//   - chunk is local active  → SKIP (logged at debug). The leader's
+//     record-stream's next TierReplicationAppend for the new active
+//     chunk authoritatively swaps the follower's active pointer
+//     within a few ms; sealing the active here would race with
+//     in-flight Phase 2 writers and double-process the rotation. The
+//     active chunk's local sealed flag will be set by the natural
+//     rotation triggered when the record-stream swaps active.
 //   - chunk is unsealed local (not active) → set sealed flag in file
 //     headers and mark m.metas[id].sealed = true
 //
-// See gastrolog-51gme step 8 / gastrolog-uccg6.
+// For the recovery scenario (post-snapshot install on a follower whose
+// record-stream is gone), use EnsureSealedAndDemote instead. See
+// gastrolog-51gme step 8 / gastrolog-uccg6.
 func (m *Manager) EnsureSealed(id chunk.ChunkID) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -992,16 +995,54 @@ func (m *Manager) EnsureSealed(id chunk.ChunkID) error {
 		return nil
 	}
 	if m.active != nil && m.active.meta.id == id {
-		// FSM says sealed; local active is the same chunk. Force-demote:
-		// the chunk is no longer eligible to receive appends, regardless
-		// of whether the leader's record-stream already moved on or
-		// whether this is a post-restart catchup where no record-stream
-		// boundary will ever fire. This is the gastrolog-uccg6
-		// invariant: the FSM is authoritative; if it says sealed, the
-		// local Manager must stop appending immediately. Logged at INFO
-		// because this fires on the offline-during-seal restart path,
-		// which is operationally interesting.
-		m.logger.Info("EnsureSealed: force-demoting local active to sealed (FSM authoritative)",
+		// Steady-state seal-rotation boundary: the leader's record-stream
+		// will swap active to the new chunk within a few ms; let it do
+		// the seal-on-disk via the natural rotation path.
+		m.logger.Debug("EnsureSealed: chunk is local active; deferring to record-stream rotation",
+			"chunk", id.String())
+		return nil
+	}
+	if err := m.sealChunkOnDisk(id); err != nil {
+		return err
+	}
+	meta.sealed = true
+	return nil
+}
+
+// EnsureSealedAndDemote is the recovery variant of EnsureSealed: when
+// the local active pointer matches a chunk the FSM has marked sealed,
+// force-demote it (close files, remove B+ trees, mark sealed=true,
+// clear m.active) instead of waiting for a record-stream swap that
+// will never come.
+//
+// Used by ReconcileFromSnapshot's projectAllSealedFromFSM walk after a
+// follower restores from a Raft snapshot. The record-stream that would
+// have swapped the active pointer in steady state is gone for any
+// chunk sealed in this node's absence — without force-demote here,
+// subsequent appends keep landing on a chunk the cluster considers
+// immutable (gastrolog-uccg6's 53K-records-on-a-10K-cap incident).
+//
+// Does NOT fire AnnounceSeal (the FSM already has CmdSealChunk
+// applied; a second announce would duplicate the Raft entry).
+//
+// See gastrolog-uccg6.
+func (m *Manager) EnsureSealedAndDemote(id chunk.ChunkID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return ErrManagerClosed
+	}
+	meta, ok := m.metas[id]
+	if !ok {
+		return nil
+	}
+	if meta.sealed {
+		return nil
+	}
+	if m.active != nil && m.active.meta.id == id {
+		// Recovery: no record-stream coming to swap active. Force-demote
+		// so subsequent appends rotate to a fresh active chunk.
+		m.logger.Info("EnsureSealedAndDemote: force-demoting local active to sealed (FSM authoritative)",
 			"chunk", id.String())
 		return m.sealActiveLocked(false)
 	}

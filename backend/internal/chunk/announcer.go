@@ -42,21 +42,37 @@ type SilentDeleter interface {
 
 // SealEnsurer is an optional interface for chunk managers that can project
 // the FSM's sealed state onto local files without firing the announcer.
-// Used by the TierLifecycleReconciler's onSeal callback (and the snapshot-
-// restore catchup pass) so that FSM-truth wins when local file state
-// disagrees — closes gastrolog-uccg6 structurally and replaces the
-// "multiple unsealed → seal all but newest" startup heuristic that was
-// removed in gastrolog-51gme step 8.
+// Two methods cover the two distinct contexts in which the FSM's sealed
+// state needs to be projected; each has different correctness invariants:
 //
-// The contract: EnsureSealed sets the sealed flag on the chunk's local
-// file headers if the chunk exists locally and is not already sealed. A
-// chunk that doesn't exist locally is a silent no-op — it just means
-// this node never had it. A chunk that's the local Manager's active
-// chunk is logged but skipped (the divergence is rare and resolves
-// itself on the next sealing rotation; sealing the active chunk silently
-// from outside the regular Seal path would race with in-flight writes).
+//   - EnsureSealed (steady state): called from the FSM apply path on
+//     every node when CmdSealChunk commits. On followers, the local
+//     active pointer typically still points at the just-sealed chunk
+//     because the leader's per-(tier, follower) record-stream lags the
+//     vault-ctl Raft broadcast by a few ms. The record-stream's next
+//     TierReplicationAppend (for the new active chunk) is what
+//     authoritatively swaps the active pointer; EnsureSealed just sets
+//     the sealed flag on disk if the chunk exists and is not the local
+//     active. Skipping the active case avoids double-sealing the
+//     in-flight active across the natural rotation boundary.
+//
+//   - EnsureSealedAndDemote (recovery): called from
+//     ReconcileFromSnapshot's projectAllSealedFromFSM walk after a
+//     follower restores from a Raft snapshot. The record-stream that
+//     would have swapped the active pointer in steady state is *gone*
+//     for any chunk sealed in this node's absence — there's no
+//     forthcoming TierReplicationAppend to do the swap. So if the
+//     local active matches a now-sealed chunk, we MUST force-demote
+//     it: close files, mark sealed=true, clear m.active. Otherwise
+//     subsequent appends keep landing on a chunk the cluster considers
+//     immutable (gastrolog-uccg6's 53K-records-on-a-10K-cap incident).
+//
+// In both methods, a chunk that doesn't exist locally is a silent no-op
+// (this node never had it), and a chunk that's already locally sealed
+// is also a no-op.
 type SealEnsurer interface {
 	EnsureSealed(id ChunkID) error
+	EnsureSealedAndDemote(id ChunkID) error
 }
 
 // DeleteNoAnnounce deletes a chunk from the local store without firing the

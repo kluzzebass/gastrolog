@@ -228,8 +228,13 @@ func (r *TierLifecycleReconciler) projectAllSealedFromFSM(fsm *tierfsm.FSM) {
 		if !e.Sealed {
 			continue
 		}
-		if err := ensurer.EnsureSealed(e.ID); err != nil {
-			r.logger.Warn("reconcile-from-snapshot: EnsureSealed failed",
+		// Recovery path: no record-stream is coming to swap the active
+		// pointer for chunks sealed during this node's absence, so a
+		// local active matching a now-sealed chunk MUST be force-demoted.
+		// See chunk.SealEnsurer doc for the steady-state vs recovery
+		// split.
+		if err := ensurer.EnsureSealedAndDemote(e.ID); err != nil {
+			r.logger.Warn("reconcile-from-snapshot: EnsureSealedAndDemote failed",
 				"chunk", e.ID, "error", err)
 		}
 	}

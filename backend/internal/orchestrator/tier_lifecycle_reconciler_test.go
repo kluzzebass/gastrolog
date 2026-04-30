@@ -78,6 +78,17 @@ func (f *reconcilerFakeSealEnsurerChunkManager) EnsureSealed(id chunk.ChunkID) e
 	return nil
 }
 
+func (f *reconcilerFakeSealEnsurerChunkManager) EnsureSealedAndDemote(id chunk.ChunkID) error {
+	// Tests that observe EnsureSealedAndDemote call counts: appended to
+	// the same slice so existing assertions about which chunk IDs got
+	// projected still work. The two methods are semantically equivalent
+	// at the test-fake level — they only differ in real-Manager
+	// behavior on the local-active branch (skip vs force-demote), which
+	// the file/Manager unit tests cover separately.
+	f.ensured = append(f.ensured, id)
+	return nil
+}
+
 // TestReconcilerOnRequestDeleteDeletesLocalAndAcks pins the receiver-side
 // invariant: when CmdRequestDelete commits and this node is in
 // expectedFrom, the reconciler deletes its local copy and proposes
