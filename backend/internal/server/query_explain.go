@@ -99,24 +99,44 @@ func (s *QueryServer) Explain(
 
 // collectRemoteExplain fans out ForwardExplain RPCs to remote nodes and
 // merges their chunk plans into the response.
+//
+// Parallel fan-out with per-peer timeout via peerFanOut (gastrolog-csspr):
+// a paused or partitioned peer is elided from the merged plan within
+// peerInspectorTimeout instead of blocking the whole handler.
 func (s *QueryServer) collectRemoteExplain(ctx context.Context, q query.Query, resp *apiv1.ExplainResponse) {
 	if s.remoteSearcher == nil || s.cfgStore == nil {
 		return
 	}
 	selectedVaults, _ := query.ExtractVaultFilter(q.Normalize().BoolExpr, nil)
 	byNode := s.remoteVaultsByNode(ctx, selectedVaults)
+	if len(byNode) == 0 {
+		return
+	}
 	queryExpr := q.String()
-	for nodeID, vaultIDs := range byNode {
-		vaultBytes := make([][]byte, len(vaultIDs))
-		for i, v := range vaultIDs {
-			vaultBytes[i] = v.ToProto()
-		}
-		remote, err := s.remoteSearcher.Explain(ctx, nodeID, &apiv1.ForwardExplainRequest{
-			Query:    queryExpr,
-			VaultIds: vaultBytes,
+
+	// Flatten byNode into parallel slices so peerFanOut can fan out by
+	// node-index. The vaultsByNode lookup is captured per-call by closing
+	// over byNode directly — no O(N) re-scan inside the goroutine.
+	nodes := make([]string, 0, len(byNode))
+	for nodeID := range byNode {
+		nodes = append(nodes, nodeID)
+	}
+
+	results, ok := peerFanOut(ctx, s.logger, "Explain", nodes,
+		func(peerCtx context.Context, nodeID string) (*apiv1.ForwardExplainResponse, error) {
+			vaultIDs := byNode[nodeID]
+			vaultBytes := make([][]byte, len(vaultIDs))
+			for i, v := range vaultIDs {
+				vaultBytes[i] = v.ToProto()
+			}
+			return s.remoteSearcher.Explain(peerCtx, nodeID, &apiv1.ForwardExplainRequest{
+				Query:    queryExpr,
+				VaultIds: vaultBytes,
+			})
 		})
-		if err != nil {
-			s.logger.Warn("explain: remote node failed", "node", nodeID, "err", err)
+
+	for i, remote := range results {
+		if !ok[i] || remote == nil {
 			continue
 		}
 		resp.Chunks = append(resp.Chunks, remote.GetChunks()...)
