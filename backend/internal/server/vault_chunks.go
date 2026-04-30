@@ -64,18 +64,33 @@ func (s *VaultServer) ListChunks(
 	// tiers. Skipped in active_only mode — the caller only needs the
 	// connected node's active chunk stats for the 5-second refresh; the
 	// full cluster-wide picture comes through the stream-driven refetch.
+	//
+	// Parallel fan-out with per-peer timeout (gastrolog-csspr): a paused
+	// or partitioned peer used to block this loop for minutes (gRPC
+	// keepalive being the only natural bound), freezing the entire
+	// inspector UI on every node that hits this handler. Now each peer
+	// gets its own bounded context and they all run concurrently, so
+	// total latency is max(peer RTTs) bounded by peerInspectorTimeout.
+	// A peer that misses the deadline is silently dropped from the merged
+	// view; the UI gets the partial result instead of hanging.
 	if !req.Msg.ActiveOnly && s.remoteChunkLister != nil {
 		remoteNodes := s.remoteTierNodes(ctx, vaultID)
-		for _, nodeID := range remoteNodes {
-			remote, err := s.remoteChunkLister.ListChunks(ctx, nodeID, &apiv1.ForwardListChunksRequest{
-				VaultId: vaultID.ToProto(),
+		results, ok := peerFanOut(ctx, s.logger, "ListChunks", remoteNodes,
+			func(peerCtx context.Context, nodeID string) ([]*apiv1.ChunkMeta, error) {
+				remote, err := s.remoteChunkLister.ListChunks(peerCtx, nodeID, &apiv1.ForwardListChunksRequest{
+					VaultId: vaultID.ToProto(),
+				})
+				if err != nil {
+					return nil, err
+				}
+				return remote.Chunks, nil
 			})
-			if err != nil {
-				s.logger.Warn("ListChunks: remote node failed", "node", nodeID, "vault", vaultID, "error", err)
-				continue // best effort — show what we can
+		for i, chunks := range results {
+			if !ok[i] {
+				continue
 			}
-			for _, c := range remote.Chunks {
-				reports = append(reports, chunkReport{reportingNode: nodeID, chunk: c})
+			for _, c := range chunks {
+				reports = append(reports, chunkReport{reportingNode: remoteNodes[i], chunk: c})
 			}
 		}
 	}

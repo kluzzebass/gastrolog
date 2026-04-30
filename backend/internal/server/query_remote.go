@@ -379,7 +379,14 @@ func (s *QueryServer) collectRemotePipeline(ctx context.Context, q query.Query, 
 	var wg sync.WaitGroup
 	for i, f := range fetches {
 		wg.Go(func() {
-			responses[i], fetchErrors[i] = s.remoteSearcher.Search(ctx, f.nodeID, &apiv1.ForwardSearchRequest{
+			// Per-peer timeout (gastrolog-csspr): a paused peer with the
+			// parent ctx alone would hang this goroutine indefinitely,
+			// and wg.Wait() would block the whole pipeline handler.
+			// Bounding each call independently means total fan-out is
+			// max(peer RTTs) capped by peerInspectorTimeout.
+			peerCtx, cancel := context.WithTimeout(ctx, peerInspectorTimeout)
+			defer cancel()
+			responses[i], fetchErrors[i] = s.remoteSearcher.Search(peerCtx, f.nodeID, &apiv1.ForwardSearchRequest{
 				VaultId: f.vid.ToProto(),
 				Query:   remoteExpr,
 			})
