@@ -454,10 +454,9 @@ func hasMultiNodeVault(byNode map[string][]glid.GLID) bool {
 }
 
 type dedupHistogramStats struct {
-	histTotal        int64
-	uniqueCount      int64
-	dedupedCount     int64
-	zeroEventIDCount int64
+	histTotal    int64
+	uniqueCount  int64
+	dedupedCount int64
 }
 
 func (s *QueryServer) computeDedupHistogram(ctx context.Context, eng *query.Engine, q query.Query, start, end time.Time) ([]*apiv1.HistogramBucket, dedupHistogramStats, error) {
@@ -482,36 +481,10 @@ func (s *QueryServer) computeDedupHistogram(ctx context.Context, eng *query.Engi
 	}
 
 	stats := dedupHistogramStats{
-		histTotal:        builder.totalCount(),
-		uniqueCount:      builder.uniqueCount,
-		dedupedCount:     builder.dedupedCount,
-		zeroEventIDCount: builder.zeroEventIDCount,
+		histTotal:    builder.totalCount(),
+		uniqueCount:  builder.uniqueCount,
+		dedupedCount: builder.dedupedCount,
 	}
-
-	// gastrolog-5qwkw diagnostic: log per-refresh contribution stats
-	// at INFO so cluster.log captures every histogram computation
-	// during the heavy-load investigation. Once the heavy-load
-	// mechanism is identified and fixed, demote to Debug or remove.
-	//
-	// Field semantics:
-	//   hist_total: bucket-summed count returned to the UI
-	//   unique:    distinct records (counted once each by EventID
-	//              dedup; equals hist_total when no zero-EventID
-	//              records present)
-	//   deduped:   records that matched a prior EventID and were
-	//              suppressed (one count per duplicate)
-	//   zero_eid:  records with empty EventID — dedup is skipped
-	//              for them, so they are counted unconditionally.
-	//              ANY non-zero value indicates an upstream path
-	//              is still stripping EventID; investigate what
-	//              path produced those records.
-	s.logger.Info("histogram-dedup: refresh complete",
-		"hist_total", stats.histTotal,
-		"unique", stats.uniqueCount,
-		"deduped", stats.dedupedCount,
-		"zero_eid", stats.zeroEventIDCount,
-		"buckets", len(builder.counts),
-	)
 
 	return builder.toProto(), stats, nil
 }
@@ -576,14 +549,6 @@ type streamedHistogramBuilder struct {
 	seen         map[chunk.EventID]struct{}
 	uniqueCount  int64
 	dedupedCount int64
-	// zeroEventIDCount tracks records that fell through the dedup
-	// branch because rec.EventID is the zero value. Used by the
-	// gastrolog-5qwkw heavy-load diagnostic to identify whether
-	// any path is still stripping EventID after the
-	// importState.writeRecord fix landed. A non-zero value at
-	// runtime is operationally interesting; can be removed once
-	// the heavy-load investigation closes.
-	zeroEventIDCount int64
 }
 
 func newStreamedHistogramBuilder(start, end time.Time, numBuckets int) *streamedHistogramBuilder {
@@ -618,14 +583,6 @@ func (h *streamedHistogramBuilder) add(rec chunk.Record) {
 			return
 		}
 		h.seen[rec.EventID] = struct{}{}
-	} else {
-		// Record arrived with no EventID — dedup is skipped, the
-		// record is counted unconditionally. Track separately so
-		// the gastrolog-5qwkw diagnostic can show whether the
-		// dedup safety net is reaching every record. Non-zero
-		// values mean some upstream path is still stripping
-		// EventID after the importState fix.
-		h.zeroEventIDCount++
 	}
 	idx := int(rec.IngestTS.Sub(h.start) / h.bucketWidth)
 	if idx >= len(h.counts) {
