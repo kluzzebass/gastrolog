@@ -61,7 +61,16 @@ func (r *retentionRunner) ejectChunk(id chunk.ChunkID, routeIDs []glid.GLID) {
 			"vault", r.vaultID, "chunk", id.String(), "error", err)
 		return
 	}
-	defer func() { _ = cursor.Close() }()
+	// Close-on-return as a safety net; we Close explicitly post-stream
+	// before expireChunk so the cursor's per-chunk RLock (gastrolog-26zu1)
+	// is released before Delete tries to take the write lock — otherwise
+	// the same goroutine deadlocks itself on RLock→Lock upgrade.
+	cursorClosed := false
+	defer func() {
+		if !cursorClosed {
+			_ = cursor.Close()
+		}
+	}()
 
 	remoteBuffers := make(map[remoteKey][]chunk.Record)
 	recordCount, ok := r.deliverEjectRecords(id, cursor, routes, remoteBuffers)
@@ -73,7 +82,11 @@ func (r *retentionRunner) ejectChunk(id chunk.ChunkID, routeIDs []glid.GLID) {
 		return
 	}
 
-	// All records delivered — delete source chunk.
+	// All records delivered — release the cursor's read lock before
+	// deleting the source chunk (see comment above).
+	_ = cursor.Close()
+	cursorClosed = true
+
 	r.expireChunk(id, "ejected")
 	r.logger.Info("retention eject: completed",
 		"vault", r.vaultID, "chunk", id.String(),

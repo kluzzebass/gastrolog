@@ -72,6 +72,15 @@ type mmapCursor struct {
 	attrSeek seekable.Reader // seekable reader for compressed attr; nil if mmap'd
 	dict     *chunk.StringDict
 
+	// onClose, when non-nil, is invoked exactly once at the end of
+	// Close() (after munmap + file-close). Used by Manager.OpenCursor
+	// to release the per-chunk RWMutex's read lock at the cursor's
+	// actual end-of-life — the indexer Build path holds the cursor
+	// across many Next() calls and per-record work, and the lock must
+	// stay held for that whole duration to prevent gastrolog-26zu1's
+	// SIGBUS-on-rename mid-read.
+	onClose func()
+
 	recordCount uint64 // Total records in chunk
 	fwdIndex    uint64 // Current forward iteration index
 	revIndex    uint64 // Current reverse iteration index (points to next record to return)
@@ -317,6 +326,11 @@ func (c *mmapCursor) Close() error {
 		c.attrFile = nil
 	}
 
+	if c.onClose != nil {
+		c.onClose()
+		c.onClose = nil
+	}
+
 	return errors.Join(errs...)
 }
 
@@ -331,6 +345,14 @@ type stdioCursor struct {
 	attrFile *os.File
 	dict     *chunk.StringDict
 	dictPath string // path to attr_dict.log for reloading
+
+	// onClose mirrors mmapCursor.onClose — invoked exactly once at the
+	// end of Close to release the per-chunk RWMutex's read lock that
+	// Manager.OpenCursor acquired. Active (unsealed) cursors take the
+	// lock too because compress/delete on an active chunk shouldn't
+	// race with cursor reads either, even though the active rotation
+	// boundary normally serializes them at a higher layer.
+	onClose func()
 
 	fwdIndex uint64 // Current forward iteration index
 	revIndex uint64 // Current reverse iteration index
@@ -497,6 +519,11 @@ func (c *stdioCursor) Close() error {
 			errs = append(errs, err)
 		}
 		c.attrFile = nil
+	}
+
+	if c.onClose != nil {
+		c.onClose()
+		c.onClose = nil
 	}
 
 	return errors.Join(errs...)

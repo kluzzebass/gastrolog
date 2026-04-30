@@ -251,7 +251,17 @@ func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, va
 	if err != nil {
 		return fmt.Errorf("open cursor: %w", err)
 	}
-	defer func() { _ = cursor.Close() }()
+	// Close-on-return is the safety net; we Close explicitly post-stream
+	// before deleteDrainSource so the cursor's per-chunk RLock
+	// (gastrolog-26zu1) is released before Delete tries to take the
+	// write lock — otherwise the same goroutine self-deadlocks on
+	// RLock→Lock upgrade.
+	cursorClosed := false
+	defer func() {
+		if !cursorClosed {
+			_ = cursor.Close()
+		}
+	}()
 
 	switch mode {
 	case TierDrainDecommission:
@@ -271,6 +281,11 @@ func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, va
 			return fmt.Errorf("replicate to target node: %w", err)
 		}
 	}
+
+	// Release the cursor's read lock before deleteDrainSource tries to
+	// take the write lock on the same chunk.
+	_ = cursor.Close()
+	cursorClosed = true
 
 	// Delete source chunk via the receipt protocol when wired (production)
 	// or via direct local cleanup otherwise (memory-mode tiers without a
