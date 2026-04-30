@@ -5,19 +5,21 @@ import (
 	"time"
 )
 
-// progressNotifier coalesces high-rate "active-chunk progressed"
-// signals into bounded NotifyChunkChange calls. Append paths call
-// Signal() per record (cheap, non-blocking). A single throttle goroutine
-// fires NotifyChunkChange:
+// progressNotifier coalesces every chunk-change notification on this
+// node into bounded chunkSignal fan-outs. NotifyChunkChange calls
+// Signal() (cheap, non-blocking). A single throttle goroutine fires
+// chunkSignal.Notify directly:
 //
 //   - Leading edge: immediately on the first signal after a quiet
-//     period — operators see counter movement starting promptly.
+//     period — operators see changes promptly.
 //   - Trailing edge: once at the end of the throttle window if any
 //     more signals arrived during it — captures the final state of
 //     a burst.
 //
 // Idle cluster: zero work (the goroutine blocks on the trigger channel).
-// Busy cluster: at most one fan-out per window per orchestrator. See
+// Busy cluster: at most two fan-outs per window per orchestrator
+// regardless of how many call sites fired (record append, seal,
+// compress, upload, FSM apply across peers, retention sweep). See
 // gastrolog-4y03v.
 type progressNotifier struct {
 	// Buffered=1 so coincident Signal() calls collapse to a single
@@ -31,8 +33,9 @@ func newProgressNotifier() *progressNotifier {
 	return &progressNotifier{trigger: make(chan struct{}, 1)}
 }
 
-// Signal marks that an active-chunk counter has progressed. Safe to
-// call concurrently from any append path; non-blocking.
+// Signal records a chunk-change notification. Safe to call
+// concurrently from any path; non-blocking. The throttle goroutine
+// consumes the trigger and fans out to chunkSignal.
 func (p *progressNotifier) Signal() {
 	if p == nil {
 		return
@@ -59,7 +62,7 @@ func (o *Orchestrator) runProgressNotifier(ctx context.Context, window time.Dura
 		case <-p.trigger:
 		}
 		// Leading edge: fire immediately on first signal after quiet.
-		o.NotifyChunkChange()
+		o.chunkSignal.Notify()
 
 		// Throttle window: collect more signals; emit a trailing-edge
 		// fire if any arrived during the window. Buffered=1 means at
@@ -80,7 +83,7 @@ func (o *Orchestrator) runProgressNotifier(ctx context.Context, window time.Dura
 			}
 		}
 		if moreCame {
-			o.NotifyChunkChange()
+			o.chunkSignal.Notify()
 		}
 		// Don't drain a token that arrived between the trailing fire
 		// and the next loop iteration — that signal kicks off a fresh
