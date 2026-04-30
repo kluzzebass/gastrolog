@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync/atomic"
 	"testing"
@@ -9,6 +10,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/raftgroup"
 	tierfsm "gastrolog/internal/tier/raftfsm"
 
 	hraft "github.com/hashicorp/raft"
@@ -884,5 +886,237 @@ func TestSweepLocalOrphansDemotesActiveTombstonedChunk(t *testing.T) {
 	// Delete was called and succeeded (chunk no longer active after demote).
 	if len(cm.deleted) != 1 || cm.deleted[0] != idTombstoned {
 		t.Errorf("deleted = %v, want [%s]", cm.deleted, idTombstoned)
+	}
+}
+
+// ---------- gastrolog-2ob86: WatchChunks signal on follower-side events ----------
+
+// recordingSilentDeleter implements chunk.SilentDeleter on top of the
+// shared fake chunk manager so the rest of chunk.ChunkManager is
+// satisfied by embedding. Used by gastrolog-2ob86 tests that need to
+// observe wireTierFSMOnDelete's local-delete behavior alongside the
+// orchestrator-level signal.
+type recordingSilentDeleter struct {
+	retentionFakeChunkManager
+	silentDeleted []chunk.ChunkID
+	failNext      error
+}
+
+func (r *recordingSilentDeleter) DeleteSilent(id chunk.ChunkID) error {
+	r.silentDeleted = append(r.silentDeleted, id)
+	if r.failNext != nil {
+		err := r.failNext
+		r.failNext = nil
+		return err
+	}
+	return nil
+}
+
+// recordingCloudRegistrar adds chunk.CloudChunkRegistrar on top of the
+// silent-deleter fake.
+type recordingCloudRegistrar struct {
+	recordingSilentDeleter
+	registered []chunk.ChunkID
+	registerErr error
+}
+
+func (r *recordingCloudRegistrar) RegisterCloudChunk(id chunk.ChunkID, _ chunk.CloudChunkInfo) error {
+	r.registered = append(r.registered, id)
+	return r.registerErr
+}
+
+// waitForChunkSignal blocks until the orchestrator's chunk signal fires
+// or the timeout elapses. Returns true on signal, false on timeout.
+func waitForChunkSignal(ch <-chan struct{}, timeout time.Duration) bool {
+	select {
+	case <-ch:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
+// TestReconcilerOnSealNotifiesChunkChange pins the gastrolog-2ob86 fix:
+// when CmdSealChunk applies on this node (originating from any node in
+// the cluster), the WatchChunks signal must fire so subscribers refetch.
+// Pre-fix the FSM seal projected to the local Manager but the inspector
+// view never knew about the seal, leaving follower caches stale.
+func TestReconcilerOnSealNotifiesChunkChange(t *testing.T) {
+	t.Parallel()
+
+	orch, err := New(Config{LocalNodeID: "node-A"})
+	if err != nil {
+		t.Fatalf("orchestrator.New: %v", err)
+	}
+	signalCh := orch.ChunkSignal().C()
+
+	fsm := tierfsm.New()
+	cm := &reconcilerFakeSealEnsurerChunkManager{}
+	tier := &TierInstance{TierID: glid.New(), Chunks: cm}
+	rec := NewTierLifecycleReconciler(orch, glid.New(), tier.TierID, tier, "node-A", slog.Default())
+	rec.Wire(fsm)
+
+	id := chunk.NewChunkID()
+	now := time.Now()
+	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(id, now, now, now)}); err != nil {
+		t.Fatalf("apply create: %v", err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(id, now, 100, 1234, now, now)}); err != nil {
+		t.Fatalf("apply seal: %v", err)
+	}
+
+	if !waitForChunkSignal(signalCh, time.Second) {
+		t.Fatal("expected chunk signal after CmdSealChunk apply, got timeout")
+	}
+	if len(cm.ensured) != 1 || cm.ensured[0] != id {
+		t.Errorf("EnsureSealed = %v, want [%s] (signal must not gate state projection)", cm.ensured, id)
+	}
+}
+
+// reconcilerFailEnsurerChunkManager forces EnsureSealed to fail so the
+// test can pin the invariant that the WatchChunks signal still fires
+// when the local on-disk projection cannot be applied. The FSM is
+// authoritative about whether the chunk is sealed, not the on-disk
+// header — so the inspector must refetch regardless of local outcome.
+type reconcilerFailEnsurerChunkManager struct {
+	retentionFakeChunkManager
+	ensureErr error
+}
+
+func (f *reconcilerFailEnsurerChunkManager) EnsureSealed(chunk.ChunkID) error {
+	return f.ensureErr
+}
+
+// TestReconcilerOnSealNotifiesEvenWhenEnsureSealedFails pins that the
+// signal fires unconditionally. EnsureSealed errors are logged and the
+// FSM apply moves on; the inspector view must still refresh because the
+// FSM's authoritative seal flag flipped regardless of what the local
+// chunk file looks like. See gastrolog-2ob86.
+func TestReconcilerOnSealNotifiesEvenWhenEnsureSealedFails(t *testing.T) {
+	t.Parallel()
+
+	orch, err := New(Config{LocalNodeID: "node-A"})
+	if err != nil {
+		t.Fatalf("orchestrator.New: %v", err)
+	}
+	signalCh := orch.ChunkSignal().C()
+
+	fsm := tierfsm.New()
+	cm := &reconcilerFailEnsurerChunkManager{ensureErr: errors.New("disk gone")}
+	tier := &TierInstance{TierID: glid.New(), Chunks: cm}
+	rec := NewTierLifecycleReconciler(orch, glid.New(), tier.TierID, tier, "node-A", slog.Default())
+	rec.Wire(fsm)
+
+	id := chunk.NewChunkID()
+	now := time.Now()
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(id, now, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(id, now, 1, 1, now, now)})
+
+	if !waitForChunkSignal(signalCh, time.Second) {
+		t.Fatal("expected chunk signal even when EnsureSealed errors, got timeout")
+	}
+}
+
+// TestWireTierFSMOnDeleteFiresNotifyChunkChange pins that the legacy
+// FSM-driven delete callback (CmdDeleteChunk applied via Raft, not the
+// receipt-protocol path) also fires NotifyChunkChange. Without this,
+// nodes that don't own the chunk locally — but display it via the
+// inspector's cluster-wide ListChunks fan-out — would never refresh
+// after a remote delete. See gastrolog-2ob86.
+func TestWireTierFSMOnDeleteFiresNotifyChunkChange(t *testing.T) {
+	t.Parallel()
+
+	orch, err := New(Config{LocalNodeID: "node-A"})
+	if err != nil {
+		t.Fatalf("orchestrator.New: %v", err)
+	}
+	signalCh := orch.ChunkSignal().C()
+
+	fsm := tierfsm.New()
+	cm := &recordingSilentDeleter{}
+	tierID := glid.New()
+	g := &raftgroup.Group{FSM: fsm}
+	wireTierFSMOnDelete(g, tierID, cm, nil, orch, slog.Default())
+
+	id := chunk.NewChunkID()
+	now := time.Now()
+	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(id, now, now, now)}); err != nil {
+		t.Fatalf("apply create: %v", err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalDeleteChunk(id)}); err != nil {
+		t.Fatalf("apply delete: %v", err)
+	}
+
+	if !waitForChunkSignal(signalCh, time.Second) {
+		t.Fatal("expected chunk signal after CmdDeleteChunk apply, got timeout")
+	}
+	if len(cm.silentDeleted) != 1 || cm.silentDeleted[0] != id {
+		t.Errorf("DeleteSilent = %v, want [%s]", cm.silentDeleted, id)
+	}
+}
+
+// TestWireTierFSMOnDeleteNotifiesEvenWhenDeleteSilentFails pins the
+// FSM-state-is-authoritative principle for the delete callback: a
+// failed local file delete (chunk missing, manager closed, etc.) must
+// not gate the inspector signal. The chunks-map entry was removed from
+// the FSM regardless. See gastrolog-2ob86.
+func TestWireTierFSMOnDeleteNotifiesEvenWhenDeleteSilentFails(t *testing.T) {
+	t.Parallel()
+
+	orch, err := New(Config{LocalNodeID: "node-A"})
+	if err != nil {
+		t.Fatalf("orchestrator.New: %v", err)
+	}
+	signalCh := orch.ChunkSignal().C()
+
+	fsm := tierfsm.New()
+	cm := &recordingSilentDeleter{failNext: chunk.ErrChunkNotFound}
+	tierID := glid.New()
+	g := &raftgroup.Group{FSM: fsm}
+	wireTierFSMOnDelete(g, tierID, cm, nil, orch, slog.Default())
+
+	id := chunk.NewChunkID()
+	now := time.Now()
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(id, now, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalDeleteChunk(id)})
+
+	if !waitForChunkSignal(signalCh, time.Second) {
+		t.Fatal("expected chunk signal even when DeleteSilent fails, got timeout")
+	}
+}
+
+// TestWireTierFSMOnUploadFiresNotifyChunkChange pins that follower
+// nodes, on receiving a CmdUploadChunk via Raft (the leader's
+// AnnounceUpload propagated through), refresh their inspector view.
+// Pre-fix the cloud-backed transition was invisible until manual
+// reload. See gastrolog-2ob86.
+func TestWireTierFSMOnUploadFiresNotifyChunkChange(t *testing.T) {
+	t.Parallel()
+
+	orch, err := New(Config{LocalNodeID: "node-A"})
+	if err != nil {
+		t.Fatalf("orchestrator.New: %v", err)
+	}
+	signalCh := orch.ChunkSignal().C()
+
+	fsm := tierfsm.New()
+	cm := &recordingCloudRegistrar{}
+	tierID := glid.New()
+	g := &raftgroup.Group{FSM: fsm}
+	wireTierFSMOnUpload(g, tierID, cm, orch, slog.Default())
+
+	id := chunk.NewChunkID()
+	now := time.Now()
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(id, now, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(id, now, 1, 1, now, now)})
+	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalUploadChunk(id, 1024, 0, 0, 0, 0, 1)}); err != nil {
+		t.Fatalf("apply upload: %v", err)
+	}
+
+	if !waitForChunkSignal(signalCh, time.Second) {
+		t.Fatal("expected chunk signal after CmdUploadChunk apply, got timeout")
+	}
+	if len(cm.registered) != 1 || cm.registered[0] != id {
+		t.Errorf("RegisterCloudChunk = %v, want [%s]", cm.registered, id)
 	}
 }

@@ -249,8 +249,19 @@ func (r *TierLifecycleReconciler) projectAllSealedFromFSM(fsm *tierfsm.FSM) {
 // where the chunk is already sealed, doesn't exist locally, or is the
 // local active chunk — only the unsealed-on-disk case results in a
 // header rewrite. See gastrolog-51gme step 8 / gastrolog-uccg6.
+//
+// Fires NotifyChunkChange unconditionally: the FSM's authoritative
+// view of this chunk just changed (the seal flag flipped), so the
+// inspector's WatchChunks subscribers on this node need to refresh.
+// Local EnsureSealed failure does not gate the notification — the
+// inspector reflects FSM state, not on-disk state. See gastrolog-2ob86.
 func (r *TierLifecycleReconciler) onSeal(e tierfsm.Entry) {
 	r.logger.Debug("onSeal", "chunk", e.ID, "records", e.RecordCount)
+	defer func() {
+		if r.orch != nil {
+			r.orch.NotifyChunkChange()
+		}
+	}()
 	if r.tier == nil || r.tier.Chunks == nil {
 		return
 	}
