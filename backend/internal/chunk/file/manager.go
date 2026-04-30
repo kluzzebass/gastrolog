@@ -761,14 +761,24 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	chunkLock.RLock()
 
 	// Re-check meta under the read lock — a delete that started before
-	// our RLock could have completed during construction. ErrChunkNotFound
-	// is the same outcome whether the meta vanished pre- or mid-OpenCursor.
+	// our RLock could have completed during construction. Same for a
+	// cloud-upload that flipped cloudBacked false→true between our
+	// initial snapshot and the RLock acquisition: if cloudBacked is
+	// now true the local files are gone and we MUST route to the
+	// cloud cursor instead of constructing an mmap cursor on
+	// already-deleted files (gastrolog-2owzp). ErrChunkNotFound is
+	// the outcome whether the meta vanished pre- or mid-OpenCursor.
 	m.mu.Lock()
 	meta = m.lookupMeta(id)
+	cloudBackedNow := meta != nil && meta.cloudBacked
 	m.mu.Unlock()
 	if meta == nil {
 		chunkLock.RUnlock()
 		return nil, chunk.ErrChunkNotFound
+	}
+	if cloudBackedNow {
+		chunkLock.RUnlock()
+		return m.openCloudCursor(id)
 	}
 
 	rawPath := m.rawLogPath(id)
@@ -3502,6 +3512,19 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		m.writeBlobToCache(id, buf.Bytes())
 	}
 
+	// Take the per-chunk write lock around the file removal AND the
+	// metadata transition so cursors in flight on this chunk drain
+	// before the mmap regions are invalidated. Without this, an
+	// indexer Build pass running concurrently with backfillCloudUploads
+	// SIGBUSes inside DecodeIdxEntry when its idx.log mmap region is
+	// removed mid-Next(). See gastrolog-2owzp (regression of
+	// gastrolog-26zu1's lifecycle lock; the original audit missed this
+	// path because removeLocalDataFiles is buried inside uploadToCloud
+	// rather than gated by a verb that named the chunk).
+	chunkLock := m.chunkLockFor(id)
+	chunkLock.Lock()
+	defer chunkLock.Unlock()
+
 	// Delete local data files but keep index files for fast queries.
 	if err := m.removeLocalDataFiles(id); err != nil {
 		return fmt.Errorf("remove local data files after cloud upload: %w", err)
@@ -3575,6 +3598,15 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 	if err != nil {
 		return fmt.Errorf("parse TOC from existing blob: %w", err)
 	}
+
+	// Per-chunk write lock around the disk + meta transition; same
+	// rationale as uploadToCloud (gastrolog-2owzp). adoptCloudBlob
+	// fires when another node beat us to the upload — we still
+	// transition the local files to cloud-only state, which is the
+	// same mutation any in-flight cursor needs to be drained against.
+	chunkLock := m.chunkLockFor(id)
+	chunkLock.Lock()
+	defer chunkLock.Unlock()
 
 	// Delete local data files but keep index files for fast queries.
 	if err := m.removeLocalDataFiles(id); err != nil {
