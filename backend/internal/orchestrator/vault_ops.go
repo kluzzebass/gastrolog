@@ -460,6 +460,7 @@ func (o *Orchestrator) AppendToTier(vaultID, tierID glid.GLID, leaderChunkID chu
 		if _, _, err := cm.Append(rec); err != nil {
 			return err
 		}
+		o.progressTrigger.Signal()
 
 		// Leader: collect remote forward targets (local appends happen under lock).
 		var remotes []remoteForwardTarget
@@ -647,7 +648,9 @@ func (o *Orchestrator) appendToLocalFollower(vault *Vault, tierID glid.GLID, sto
 			if _, _, err := t.Chunks.Append(rec); err != nil {
 				o.logger.Warn("replication: local follower append failed",
 					"tier", tierID, "storage", storageID, "error", err)
+				return
 			}
+			o.progressTrigger.Signal()
 			return
 		}
 	}
@@ -929,6 +932,7 @@ func (o *Orchestrator) appendRecord(vaultID glid.GLID, rec chunk.Record) (chunk.
 	if err != nil {
 		return cid, pos, nil, nil, err
 	}
+	o.progressTrigger.Signal()
 
 	// Forward record to followers for active-chunk durability.
 	// Followers append to their ChunkManager — real, queryable chunks
