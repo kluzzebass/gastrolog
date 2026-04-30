@@ -64,11 +64,13 @@ package orchestrator
 //     the reconciler with a fake-FSM-applier is a follow-up refactor.
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
@@ -495,6 +497,95 @@ func (r *TierLifecycleReconciler) SweepLocalOrphans() {
 		r.logger.Info("local-orphan sweep: cleaned up tombstoned orphans",
 			"deleted", deleted)
 	}
+}
+
+// SweepMissingReplicas walks the FSM's sealed-chunk manifest and asks
+// the placement leader to re-push any sealed chunks this node should
+// have but doesn't. This is the create-side mirror of SweepLocalOrphans:
+// where SweepLocalOrphans cleans up local files the FSM has tombstoned,
+// SweepMissingReplicas pulls in local files the FSM expects but the
+// disk lacks. Together with SweepPendingObligations these three sweeps
+// give a node "every 20s, reconcile my local store against my replicated
+// FSM in both directions."
+//
+// Failure mode this sweep recovers from: leader sealed a chunk while
+// this node was offline; replicateToFollower's gRPC push to this node
+// failed; no retry queue exists at the leader. Vault-ctl Raft caught
+// our FSM up via snapshot install or log replay on rejoin so the
+// manifest entry is present, but the actual chunk records aren't on
+// disk. SweepMissingReplicas detects the gap and asks the leader to
+// re-push via the existing RequestReplicaCatchup RPC.
+//
+// Only follower TIs perform this sweep. The leader's own local store
+// is, by definition, the source of truth — if a chunk is in its FSM
+// but not on its disk, the chunk has already been lost and no peer
+// catchup will recover it. (That scenario is a leader-side disk
+// failure outside this sweep's scope.) Cloud-backed chunks live in
+// shared object storage and are skipped: they are not a local-replica
+// concern. See gastrolog-2dgvj.
+func (r *TierLifecycleReconciler) SweepMissingReplicas() {
+	if r.fsm == nil || r.tier == nil || r.tier.Chunks == nil {
+		return
+	}
+	if !r.tier.IsFollower {
+		return // leader's own disk is the source of truth
+	}
+	if r.tier.LeaderNodeID == "" {
+		return // no known placement leader; nowhere to send the request
+	}
+	if r.orch == nil || r.orch.tierReplicator == nil {
+		return // no transport wired; cluster mode requires a replicator
+	}
+
+	// Local index of what's on disk so the diff is O(N+M) not O(N×M).
+	localMetas, err := r.tier.Chunks.List()
+	if err != nil {
+		r.logger.Warn("missing-replica sweep: list chunks failed", "error", err)
+		return
+	}
+	have := make(map[chunk.ChunkID]bool, len(localMetas))
+	for _, m := range localMetas {
+		have[m.ID] = true
+	}
+
+	// Walk the FSM manifest and collect the missing-locally subset.
+	var missing []chunk.ChunkID
+	for _, e := range r.fsm.List() {
+		if !e.Sealed {
+			continue
+		}
+		if e.CloudBacked {
+			continue // shared bucket; no local replica needed
+		}
+		if have[e.ID] {
+			continue
+		}
+		missing = append(missing, e.ID)
+	}
+
+	if len(missing) == 0 {
+		return
+	}
+
+	r.logger.Info("missing-replica sweep: requesting catchup",
+		"leader", r.tier.LeaderNodeID, "missing", len(missing))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	scheduled, err := r.orch.tierReplicator.RequestReplicaCatchup(
+		ctx, r.tier.LeaderNodeID, r.vaultID, r.tierID, missing, r.localNodeID)
+	if err != nil {
+		// The next sweep tick will retry. Possible causes: leader changed
+		// after we resolved tier.LeaderNodeID, leader is unreachable, peer
+		// connection still warming up. None of these are terminal — the
+		// FSM diff is local state, so we converge on the next tick.
+		r.logger.Warn("missing-replica sweep: request failed",
+			"leader", r.tier.LeaderNodeID, "missing", len(missing), "error", err)
+		return
+	}
+	r.logger.Info("missing-replica sweep: leader scheduled pushes",
+		"leader", r.tier.LeaderNodeID, "scheduled", scheduled, "requested", len(missing))
 }
 
 // fulfillObligation deletes the local copy of a chunk and then proposes

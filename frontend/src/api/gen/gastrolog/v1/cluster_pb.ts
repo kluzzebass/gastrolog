@@ -1497,6 +1497,118 @@ export class TierReplicationAck extends Message<TierReplicationAck> {
 }
 
 /**
+ * RequestReplicaCatchupRequest is sent follower → placement leader. The
+ * follower computes the local FSM-vs-disk diff in its lifecycle reconciler
+ * (SweepMissingReplicas) and asks the leader to re-push specific sealed
+ * chunks via the existing TierReplication.ImportSealed path. Used to
+ * recover from replication pushes that failed during a follower pause /
+ * partition / rejoin window — see gastrolog-2dgvj.
+ *
+ * @generated from message gastrolog.v1.RequestReplicaCatchupRequest
+ */
+export class RequestReplicaCatchupRequest extends Message<RequestReplicaCatchupRequest> {
+  /**
+   * @generated from field: bytes vault_id = 1;
+   */
+  vaultId = new Uint8Array(0);
+
+  /**
+   * @generated from field: bytes tier_id = 2;
+   */
+  tierId = new Uint8Array(0);
+
+  /**
+   * 16-byte ChunkIDs
+   *
+   * @generated from field: repeated bytes chunk_ids = 3;
+   */
+  chunkIds: Uint8Array[] = [];
+
+  /**
+   * utf-8 node ID of the requesting follower
+   *
+   * @generated from field: bytes requester_node_id = 4;
+   */
+  requesterNodeId = new Uint8Array(0);
+
+  constructor(data?: PartialMessage<RequestReplicaCatchupRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.RequestReplicaCatchupRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "tier_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 3, name: "chunk_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 4, name: "requester_node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RequestReplicaCatchupRequest {
+    return new RequestReplicaCatchupRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RequestReplicaCatchupRequest {
+    return new RequestReplicaCatchupRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RequestReplicaCatchupRequest {
+    return new RequestReplicaCatchupRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RequestReplicaCatchupRequest | PlainMessage<RequestReplicaCatchupRequest> | undefined, b: RequestReplicaCatchupRequest | PlainMessage<RequestReplicaCatchupRequest> | undefined): boolean {
+    return proto3.util.equals(RequestReplicaCatchupRequest, a, b);
+  }
+}
+
+/**
+ * RequestReplicaCatchupResponse acknowledges receipt of the catchup
+ * request. The leader fans the actual pushes out asynchronously via
+ * existing replicateToFollower machinery, so success here means
+ * "request accepted, pushes scheduled" — not "all chunks delivered".
+ * The follower will re-request anything still missing on its next
+ * sweep tick if the leader's pushes fail.
+ *
+ * @generated from message gastrolog.v1.RequestReplicaCatchupResponse
+ */
+export class RequestReplicaCatchupResponse extends Message<RequestReplicaCatchupResponse> {
+  /**
+   * number of chunk pushes scheduled (after leader-side filtering)
+   *
+   * @generated from field: uint32 scheduled = 1;
+   */
+  scheduled = 0;
+
+  constructor(data?: PartialMessage<RequestReplicaCatchupResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.RequestReplicaCatchupResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "scheduled", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RequestReplicaCatchupResponse {
+    return new RequestReplicaCatchupResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RequestReplicaCatchupResponse {
+    return new RequestReplicaCatchupResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RequestReplicaCatchupResponse {
+    return new RequestReplicaCatchupResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RequestReplicaCatchupResponse | PlainMessage<RequestReplicaCatchupResponse> | undefined, b: RequestReplicaCatchupResponse | PlainMessage<RequestReplicaCatchupResponse> | undefined): boolean {
+    return proto3.util.equals(RequestReplicaCatchupResponse, a, b);
+  }
+}
+
+/**
  * ForwardSearchRequest is sent to the node that owns a remote vault,
  * asking it to execute a search locally and return matching records.
  *

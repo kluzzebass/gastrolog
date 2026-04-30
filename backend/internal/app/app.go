@@ -223,6 +223,17 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		orch.ScheduleCatchup(vaultID, tierID, followerNodeIDs)
 	}
 
+	// Wire follower-driven replica catchup (gastrolog-2dgvj). The cluster
+	// server's RequestReplicaCatchup handler delegates here; the orchestrator
+	// validates leadership, filters chunk eligibility, and fans out pushes
+	// asynchronously via the existing replicateToFollower machinery.
+	if clusterSrv != nil {
+		clusterSrv.SetReplicaCatchupFn(func(ctx context.Context, vaultID, tierID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (int, error) {
+			n, err := orch.CatchupSelectedChunks(ctx, vaultID, tierID, requesterNodeID, chunkIDs)
+			return int(n), err
+		})
+	}
+
 	orch.OnTierDrainComplete = makeTierDrainCompleteHandler(cfgStore, logger)
 
 	if err := startOrchestrator(ctx, logger, orch, appSys, factories); err != nil {

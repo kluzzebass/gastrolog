@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"log/slog"
 	"sync/atomic"
 	"testing"
@@ -12,6 +13,48 @@ import (
 
 	hraft "github.com/hashicorp/raft"
 )
+
+// captureCatchupReplicator records the most recent RequestReplicaCatchup
+// call so SweepMissingReplicas tests can assert what the follower asked
+// the leader to push. Other TierReplicator methods are no-ops — the
+// missing-replica sweep only exercises the one inverse method.
+type captureCatchupReplicator struct {
+	calls          atomic.Int32
+	lastLeader     string
+	lastVault      glid.GLID
+	lastTier       glid.GLID
+	lastChunks     []chunk.ChunkID
+	lastRequester  string
+	scheduledRet   uint32
+	failNextWith   error
+}
+
+func (c *captureCatchupReplicator) AppendRecords(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
+	return nil
+}
+func (c *captureCatchupReplicator) SealTier(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
+	return nil
+}
+func (c *captureCatchupReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
+	return nil
+}
+func (c *captureCatchupReplicator) DeleteChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
+	return nil
+}
+func (c *captureCatchupReplicator) RequestReplicaCatchup(_ context.Context, leaderNodeID string, vaultID, tierID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error) {
+	c.calls.Add(1)
+	c.lastLeader = leaderNodeID
+	c.lastVault = vaultID
+	c.lastTier = tierID
+	c.lastChunks = append([]chunk.ChunkID(nil), chunkIDs...)
+	c.lastRequester = requesterNodeID
+	if c.failNextWith != nil {
+		err := c.failNextWith
+		c.failNextWith = nil
+		return 0, err
+	}
+	return c.scheduledRet, nil
+}
 
 // gastrolog-51gme step 4 — receipt protocol integration via reconciler.
 
@@ -541,5 +584,158 @@ func TestSweepLocalOrphansDeletesOnlyTombstonedAbsentEntries(t *testing.T) {
 	if len(cm.deleted) != 1 || cm.deleted[0] != idTombstoned {
 		t.Errorf("orphan sweep deleted = %v, want only [%s] (tombstoned-absent positive case)",
 			cm.deleted, idTombstoned)
+	}
+}
+
+// TestSweepMissingReplicasRequestsOnlySealedAndAbsentEntries pins the
+// invariant that the missing-replica sweep filters the FSM-vs-disk diff
+// to exactly the chunks a follower is allowed to request: sealed, not
+// cloud-backed, present in the FSM, missing locally. Active chunks,
+// cloud-backed chunks, and chunks already on disk must be excluded.
+//
+// Each gate represents a distinct failure mode the sweep must NOT trip:
+//   - active (unsealed) entries lack a stable on-disk identity, so we
+//     must not chase them across the wire mid-rotation
+//   - cloud-backed chunks live in shared object storage; pulling
+//     records to a follower's local disk would defeat the cloud-tier
+//     contract and waste bandwidth
+//   - chunks already present locally are not missing — re-requesting
+//     would create unbounded re-push amplification on every sweep tick
+func TestSweepMissingReplicasRequestsOnlySealedAndAbsentEntries(t *testing.T) {
+	t.Parallel()
+
+	fsm := tierfsm.New()
+	cm := &reconcilerFakeChunkManager{}
+	now := time.Now()
+
+	// Case 1 (positive): sealed in FSM, missing on disk → must be requested.
+	idMissing := chunk.NewChunkID()
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(idMissing, now, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idMissing, now, 1, 1, now, now)})
+
+	// Case 2 (negative): sealed in FSM, present locally → must NOT be requested.
+	idPresent := chunk.NewChunkID()
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(idPresent, now, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idPresent, now, 1, 1, now, now)})
+
+	// Case 3 (negative): in FSM but unsealed (active) → must NOT be requested.
+	idActive := chunk.NewChunkID()
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(idActive, now, now, now)})
+
+	// Case 4 (negative): sealed and cloud-backed → must NOT be requested
+	// (lives in shared bucket; not a local-replica concern).
+	idCloud := chunk.NewChunkID()
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(idCloud, now, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idCloud, now, 1, 1, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalUploadChunk(idCloud, 1, 0, 0, 0, 0, 0)})
+
+	cm.chunks = []chunk.ChunkMeta{
+		{ID: idPresent, Sealed: true},
+	}
+
+	orch := newTestOrch(t, Config{LocalNodeID: "node-A"})
+	fake := &captureCatchupReplicator{scheduledRet: 1}
+	orch.SetTierReplicator(fake)
+
+	tier := &TierInstance{
+		TierID:       glid.New(),
+		Type:         "memory",
+		Chunks:       cm,
+		IsFollower:   true,
+		LeaderNodeID: "node-leader",
+	}
+	rec := NewTierLifecycleReconciler(orch, glid.New(), tier.TierID, tier, "node-A", slog.Default())
+	rec.Wire(fsm)
+
+	rec.SweepMissingReplicas()
+
+	if fake.calls.Load() != 1 {
+		t.Fatalf("RequestReplicaCatchup call count = %d, want 1", fake.calls.Load())
+	}
+	if len(fake.lastChunks) != 1 || fake.lastChunks[0] != idMissing {
+		t.Errorf("requested chunks = %v, want only [%s] (sealed-and-missing positive case)",
+			fake.lastChunks, idMissing)
+	}
+	if fake.lastLeader != "node-leader" {
+		t.Errorf("leader = %q, want %q", fake.lastLeader, "node-leader")
+	}
+	if fake.lastRequester != "node-A" {
+		t.Errorf("requester = %q, want %q", fake.lastRequester, "node-A")
+	}
+}
+
+// TestSweepMissingReplicasSkipsLeaderTier pins that the sweep is a
+// follower-only operation. The leader's local store is by definition
+// the source of truth — if a chunk is in its FSM but not on its disk,
+// the chunk has been lost and no peer catchup will recover it. Running
+// the sweep on the leader would waste an RPC and could mask a real
+// disk-failure incident.
+func TestSweepMissingReplicasSkipsLeaderTier(t *testing.T) {
+	t.Parallel()
+
+	fsm := tierfsm.New()
+	cm := &reconcilerFakeChunkManager{}
+	now := time.Now()
+
+	// Sealed in FSM, missing on disk — the same shape that would trigger
+	// a request on a follower. On a leader, the sweep must skip entirely.
+	idMissing := chunk.NewChunkID()
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(idMissing, now, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idMissing, now, 1, 1, now, now)})
+
+	orch := newTestOrch(t, Config{LocalNodeID: "node-A"})
+	fake := &captureCatchupReplicator{}
+	orch.SetTierReplicator(fake)
+
+	tier := &TierInstance{
+		TierID:     glid.New(),
+		Type:       "memory",
+		Chunks:     cm,
+		IsFollower: false, // this node IS the placement leader
+	}
+	rec := NewTierLifecycleReconciler(orch, glid.New(), tier.TierID, tier, "node-A", slog.Default())
+	rec.Wire(fsm)
+
+	rec.SweepMissingReplicas()
+
+	if fake.calls.Load() != 0 {
+		t.Errorf("leader must not request catchup, got %d call(s)", fake.calls.Load())
+	}
+}
+
+// TestSweepMissingReplicasSkipsWhenLeaderUnknown pins the early-exit
+// when LeaderNodeID is empty. This happens during placement transitions
+// where a follower has lost its leader (election in progress, leader
+// just demoted) — sending a catchup request would land on no one.
+// The next sweep tick runs after the new leader is observed.
+func TestSweepMissingReplicasSkipsWhenLeaderUnknown(t *testing.T) {
+	t.Parallel()
+
+	fsm := tierfsm.New()
+	cm := &reconcilerFakeChunkManager{}
+	now := time.Now()
+
+	idMissing := chunk.NewChunkID()
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(idMissing, now, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idMissing, now, 1, 1, now, now)})
+
+	orch := newTestOrch(t, Config{LocalNodeID: "node-A"})
+	fake := &captureCatchupReplicator{}
+	orch.SetTierReplicator(fake)
+
+	tier := &TierInstance{
+		TierID:       glid.New(),
+		Type:         "memory",
+		Chunks:       cm,
+		IsFollower:   true,
+		LeaderNodeID: "", // unknown — election in progress
+	}
+	rec := NewTierLifecycleReconciler(orch, glid.New(), tier.TierID, tier, "node-A", slog.Default())
+	rec.Wire(fsm)
+
+	rec.SweepMissingReplicas()
+
+	if fake.calls.Load() != 0 {
+		t.Errorf("must not request when leader unknown, got %d call(s)", fake.calls.Load())
 	}
 }

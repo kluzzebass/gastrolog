@@ -2245,6 +2245,14 @@ func (d *directTierReplicator) DeleteChunk(_ context.Context, nodeID string, vau
 	return orch.DeleteChunkFromTier(vaultID, tierID, chunkID)
 }
 
+func (d *directTierReplicator) RequestReplicaCatchup(ctx context.Context, leaderNodeID string, vaultID, tierID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error) {
+	orch, ok := d.nodes[leaderNodeID]
+	if !ok {
+		return 0, fmt.Errorf("directTierReplicator: unknown leader %q", leaderNodeID)
+	}
+	return orch.CatchupSelectedChunks(ctx, vaultID, tierID, requesterNodeID, chunkIDs)
+}
+
 // newClusterRetentionRunner creates a retention runner with follower targets
 // for proper cross-node delete forwarding.
 //

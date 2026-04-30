@@ -606,6 +606,10 @@ func (r *tierTestReplicator) DeleteChunk(_ context.Context, _ string, _, _ glid.
 	return nil
 }
 
+func (r *tierTestReplicator) RequestReplicaCatchup(_ context.Context, _ string, _, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {
+	return 0, nil
+}
+
 func (r *tierTestReplicator) getCalls() []tierForwardCall {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1051,6 +1055,9 @@ func (m *ackTestReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ 
 }
 func (m *ackTestReplicator) DeleteChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
+}
+func (m *ackTestReplicator) RequestReplicaCatchup(_ context.Context, _ string, _, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {
+	return 0, nil
 }
 func TestAppendRecordWaitForReplicaReturnsTask(t *testing.T) {
 	t.Parallel()
@@ -1579,6 +1586,10 @@ func (f *failingForwarder) SealTier(_ context.Context, _ string, _, _ glid.GLID,
 
 func (f *failingForwarder) ImportSealedChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
 	return nil
+}
+
+func (f *failingForwarder) RequestReplicaCatchup(_ context.Context, _ string, _, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {
+	return 0, nil
 }
 
 func (f *failingForwarder) DeleteChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {

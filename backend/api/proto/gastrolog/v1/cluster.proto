@@ -266,6 +266,29 @@ message TierReplicationAck {
   bytes chunk_id = 3; // echoes the chunk_id from the command
 }
 
+// RequestReplicaCatchupRequest is sent follower → placement leader. The
+// follower computes the local FSM-vs-disk diff in its lifecycle reconciler
+// (SweepMissingReplicas) and asks the leader to re-push specific sealed
+// chunks via the existing TierReplication.ImportSealed path. Used to
+// recover from replication pushes that failed during a follower pause /
+// partition / rejoin window — see gastrolog-2dgvj.
+message RequestReplicaCatchupRequest {
+  bytes vault_id = 1;
+  bytes tier_id = 2;
+  repeated bytes chunk_ids = 3;       // 16-byte ChunkIDs
+  bytes requester_node_id = 4;        // utf-8 node ID of the requesting follower
+}
+
+// RequestReplicaCatchupResponse acknowledges receipt of the catchup
+// request. The leader fans the actual pushes out asynchronously via
+// existing replicateToFollower machinery, so success here means
+// "request accepted, pushes scheduled" — not "all chunks delivered".
+// The follower will re-request anything still missing on its next
+// sweep tick if the leader's pushes fail.
+message RequestReplicaCatchupResponse {
+  uint32 scheduled = 1; // number of chunk pushes scheduled (after leader-side filtering)
+}
+
 // ForwardSearchRequest is sent to the node that owns a remote vault,
 // asking it to execute a search locally and return matching records.
 message ForwardSearchRequest {

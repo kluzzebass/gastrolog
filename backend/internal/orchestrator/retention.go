@@ -21,16 +21,27 @@ const (
 	defaultRetentionSchedule = "* * * * *" // every minute
 	retentionJobName         = "retention"
 
-	// Pending-delete sweep — gastrolog-51gme. Every 20 seconds, with a
-	// phase offset that doesn't collide with the retention sweep at
-	// second 0 (cron: 13/33/53s of each minute). Each node consults
-	// its OWN replicated FSM's pendingDeletes — no leader involvement.
-	// 20s is fast enough that operator-visible "stuck delete" symptoms
+	// Tier catchup sweep — runs every 20 seconds (cron: 13/33/53s of
+	// each minute) on every node, with a phase offset that doesn't
+	// collide with the retention sweep at second 0. Each node consults
+	// its OWN replicated FSM and reconciles local disk state in both
+	// directions — no leader involvement. Drives three independent
+	// catchup mechanisms per tier instance:
+	//
+	//   - SweepPendingObligations    receipt-protocol delete acks
+	//                                (gastrolog-51gme)
+	//   - SweepLocalOrphans          tombstone-aware orphan cleanup
+	//                                (gastrolog-51gme)
+	//   - SweepMissingReplicas       create-side catchup for sealed
+	//                                chunks pushed during a follower's
+	//                                pause/partition (gastrolog-2dgvj)
+	//
+	// 20s is fast enough that operator-visible divergence symptoms
 	// resolve within a sweep cycle, slow enough that a cluster of N
 	// nodes only generates N applies per cycle even when nothing is
-	// stuck.
-	pendingDeleteSweepJobName  = "pending-delete-sweep"
-	pendingDeleteSweepSchedule = "13,33,53 * * * * *"
+	// diverged.
+	tierCatchupSweepJobName  = "tier-catchup-sweep"
+	tierCatchupSweepSchedule = "13,33,53 * * * * *"
 )
 
 // retentionKey returns a unique map key for a tier instance's retention state.
@@ -167,9 +178,9 @@ func (o *Orchestrator) retentionSweepAll() {
 		t.runner.confirmStreamedTransitions(cfg)
 	}
 
-	// (Disk-vs-manifest orphan cleanup is now done out-of-band on the
-	// pending-delete sweep tick — see SweepLocalOrphans, called from
-	// pendingDeleteSweepAll. The retention sweep stays focused on rule
+	// (Disk-vs-manifest orphan cleanup and missing-replica catchup are
+	// done out-of-band on the tier-catchup sweep tick — see
+	// tierCatchupSweepAll. The retention sweep stays focused on rule
 	// evaluation and confirmStreamedTransitions on leaders only.)
 
 	// Memory budget enforcement: transition oldest chunks when over budget.
@@ -192,15 +203,16 @@ func (o *Orchestrator) retentionSweepAll() {
 	}
 }
 
-// pendingDeleteSweepAll runs every 20 seconds (with a 13/33/53s
-// phase-offset from the retention sweep) on every node. For each
-// (vault, tier) on this node, it asks the lifecycle reconciler to
-// walk its OWN local FSM and run two complementary catchup sweeps:
+// tierCatchupSweepAll runs every 20 seconds (cron 13/33/53s, phase-
+// offset from the retention sweep) on every node. For each (vault,
+// tier) on this node it asks the lifecycle reconciler to run all
+// three local-state catchup sweeps:
 //
 //  1. SweepPendingObligations — re-runs fulfillObligation for any
 //     pendingDeletes entry where this node is still in ExpectedFrom.
 //     Covers the case where the steady-state onRequestDelete callback
 //     fired but didn't ack (apply-pump wedge, transient failure, etc.).
+//     gastrolog-51gme.
 //
 //  2. SweepLocalOrphans — deletes local sealed chunks that the FSM has
 //     positively tombstoned but no longer references in the manifest
@@ -208,11 +220,20 @@ func (o *Orchestrator) retentionSweepAll() {
 //     completion while this node was offline; snapshot install brings
 //     the FSM forward to the post-finalize state, leaving the local
 //     file orphaned with no receipt obligation to drive cleanup.
+//     gastrolog-51gme.
 //
-// Both sweeps are local-only: each node consults its OWN replicated
-// FSM state and decides independently. No leader involvement. See
-// gastrolog-51gme.
-func (o *Orchestrator) pendingDeleteSweepAll() {
+//  3. SweepMissingReplicas — asks the placement leader to re-push
+//     sealed chunks present in the FSM but missing locally. Covers
+//     the create-side gap where the leader pushed a sealed chunk
+//     during this node's pause/partition window and the gRPC failed
+//     with no retry. gastrolog-2dgvj.
+//
+// All three sweeps are local-only on the originating side: each node
+// consults its OWN replicated FSM state and decides independently.
+// (1) and (2) take no remote actions. (3) sends a unary RPC to the
+// placement leader, but the *decision* to send is local — the leader
+// is just the transport for the response.
+func (o *Orchestrator) tierCatchupSweepAll() {
 	o.mu.RLock()
 	tiers := make([]*TierInstance, 0)
 	for _, vault := range o.vaults {
@@ -226,6 +247,7 @@ func (o *Orchestrator) pendingDeleteSweepAll() {
 	for _, t := range tiers {
 		t.Reconciler.SweepPendingObligations()
 		t.Reconciler.SweepLocalOrphans()
+		t.Reconciler.SweepMissingReplicas()
 	}
 }
 
