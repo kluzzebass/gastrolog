@@ -769,6 +769,48 @@ func (s *Server) forwardVaultApply(ctx context.Context, req *gastrologv1.Forward
 	return &gastrologv1.ForwardVaultApplyResponse{}, nil
 }
 
+// requestReplicaCatchup handles the RequestReplicaCatchup RPC. Sent
+// follower → placement leader: the follower's lifecycle reconciler has
+// computed its FSM-vs-disk diff (SweepMissingReplicas) and is asking
+// the leader to re-push specific sealed chunks via the existing
+// replicateToFollower machinery. The leader-side handler returns the
+// number of chunks for which a push was actually scheduled (after
+// filtering tombstoned / cloud-backed / locally-missing). Pushes
+// happen asynchronously inside the orchestrator handler — this RPC
+// returns as soon as the requests are scheduled, not when delivery
+// completes. See gastrolog-2dgvj.
+func (s *Server) requestReplicaCatchup(ctx context.Context, req *gastrologv1.RequestReplicaCatchupRequest) (*gastrologv1.RequestReplicaCatchupResponse, error) {
+	if s.replicaCatchupFn == nil {
+		return nil, status.Error(codes.Unavailable, "replica catchup function not configured")
+	}
+	if len(req.GetVaultId()) != glid.Size {
+		return nil, status.Errorf(codes.InvalidArgument, "vault_id: expected %d bytes, got %d", glid.Size, len(req.GetVaultId()))
+	}
+	if len(req.GetTierId()) != glid.Size {
+		return nil, status.Errorf(codes.InvalidArgument, "tier_id: expected %d bytes, got %d", glid.Size, len(req.GetTierId()))
+	}
+	vaultID := glid.FromBytes(req.GetVaultId())
+	tierID := glid.FromBytes(req.GetTierId())
+	chunkIDs := make([]chunk.ChunkID, 0, len(req.GetChunkIds()))
+	for i, raw := range req.GetChunkIds() {
+		if len(raw) != 16 {
+			return nil, status.Errorf(codes.InvalidArgument, "chunk_ids[%d]: expected 16 bytes, got %d", i, len(raw))
+		}
+		var id chunk.ChunkID
+		copy(id[:], raw)
+		chunkIDs = append(chunkIDs, id)
+	}
+	requesterNodeID := string(req.GetRequesterNodeId())
+	if requesterNodeID == "" {
+		return nil, status.Error(codes.InvalidArgument, "requester_node_id is required")
+	}
+	scheduled, err := s.replicaCatchupFn(ctx, vaultID, tierID, chunkIDs, requesterNodeID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "replica catchup: %v", err)
+	}
+	return &gastrologv1.RequestReplicaCatchupResponse{Scheduled: uint32(scheduled)}, nil //nolint:gosec // G115: bounded by request slice length
+}
+
 // forwardRemoveNode handles the ForwardRemoveNode RPC on the leader.
 // Followers call this to proxy node removal through the leader.
 func (s *Server) forwardRemoveNode(ctx context.Context, req *gastrologv1.ForwardRemoveNodeRequest) (*gastrologv1.ForwardRemoveNodeResponse, error) {
@@ -953,6 +995,10 @@ var clusterServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ForwardVaultApply",
 			Handler:    forwardVaultApplyHandler,
+		},
+		{
+			MethodName: "RequestReplicaCatchup",
+			Handler:    requestReplicaCatchupHandler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
@@ -1185,6 +1231,25 @@ func forwardRemoveNodeHandler(srv any, ctx context.Context, dec func(any) error,
 	}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return s.forwardRemoveNode(ctx, req.(*gastrologv1.ForwardRemoveNodeRequest))
+	}
+	return interceptor(ctx, req, info, handler)
+}
+
+func requestReplicaCatchupHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	req := &gastrologv1.RequestReplicaCatchupRequest{}
+	if err := dec(req); err != nil {
+		return nil, err
+	}
+	s := srv.(*Server)
+	if interceptor == nil {
+		return s.requestReplicaCatchup(ctx, req)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gastrolog.v1.ClusterService/RequestReplicaCatchup",
+	}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return s.requestReplicaCatchup(ctx, req.(*gastrologv1.RequestReplicaCatchupRequest))
 	}
 	return interceptor(ctx, req, info, handler)
 }

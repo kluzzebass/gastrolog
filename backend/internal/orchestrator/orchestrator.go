@@ -126,6 +126,14 @@ type TierReplicator interface {
 	SealTier(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error
 	ImportSealedChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error
 	DeleteChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error
+
+	// RequestReplicaCatchup is the follower→leader inverse of the other
+	// methods on this interface. Sent by a follower's lifecycle reconciler
+	// after detecting sealed chunks in its FSM that are missing on its
+	// local disk; the placement leader fans pushes out asynchronously via
+	// existing replicateToFollower machinery. Returns the count of
+	// pushes scheduled (after leader-side filtering). See gastrolog-2dgvj.
+	RequestReplicaCatchup(ctx context.Context, leaderNodeID string, vaultID, tierID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error)
 }
 
 // RemoteTransferrer sends records to a remote node for cross-node chunk
@@ -550,12 +558,13 @@ func New(cfg Config) (*Orchestrator, error) {
 		return nil, fmt.Errorf("reconcile sweep: %w", err)
 	}
 
-	// Receipt-protocol catchup: every node consults its OWN replicated
-	// pendingDeletes every 20s and re-runs any obligations it still
-	// owes. Phase-offset from retention's :00 tick to avoid spikiness.
-	// See gastrolog-51gme.
-	if err := o.startPendingDeleteSweep(); err != nil {
-		return nil, fmt.Errorf("pending-delete sweep: %w", err)
+	// Tier catchup sweep: every node consults its OWN replicated FSM
+	// every 20s and runs three independent reconciliation passes per
+	// tier (pending obligations, local orphans, missing replicas).
+	// Phase-offset from retention's :00 tick to avoid spikiness. See
+	// gastrolog-51gme (delete-side) and gastrolog-2dgvj (create-side).
+	if err := o.startTierCatchupSweep(); err != nil {
+		return nil, fmt.Errorf("tier catchup sweep: %w", err)
 	}
 
 	return o, nil

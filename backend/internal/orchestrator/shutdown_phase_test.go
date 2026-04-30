@@ -36,6 +36,10 @@ func (r *recordingTierReplicator) DeleteChunk(_ context.Context, _ string, _, _ 
 	return nil
 }
 
+func (r *recordingTierReplicator) RequestReplicaCatchup(_ context.Context, _ string, _, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {
+	return 0, nil
+}
+
 // TestFireAndForgetRemoteSkipsDuringShutdown is the regression test for the
 // orchestrator half of gastrolog-1e5ke. Before the fix, the orchestrator's
 // Stop() drain would process buffered records and fan out each one to

@@ -55,6 +55,9 @@ func (m *blockingReplicator) ImportSealedChunk(_ context.Context, _ string, _, _
 func (m *blockingReplicator) DeleteChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
 }
+func (m *blockingReplicator) RequestReplicaCatchup(_ context.Context, _ string, _, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {
+	return 0, nil
+}
 
 // TestReliability_Ingest_ReleasesLockBeforeReplication is the regression
 // test for gastrolog-5oofa. Reproduces the exact deadlock: an ingest

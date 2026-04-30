@@ -23,6 +23,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"gastrolog/internal/chunk"
+	"gastrolog/internal/glid"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/multiraft"
 
@@ -116,6 +118,14 @@ type Server struct {
 
 	// setNodeSuffrageFn handles promote/demote on the leader. Set by main.go.
 	setNodeSuffrageFn func(ctx context.Context, nodeID, nodeAddr string, voter bool) error
+
+	// replicaCatchupFn handles RequestReplicaCatchup on the placement leader:
+	// for each requested chunk ID, fan out a sealed-chunk push to the
+	// requesting follower via the existing replicateToFollower machinery.
+	// Returns the count of chunks for which a push was actually scheduled
+	// (after leader-side filtering: tombstoned, cloud-backed, missing-locally).
+	// Set by the composition root in app.go. See gastrolog-2dgvj.
+	replicaCatchupFn func(ctx context.Context, vaultID, tierID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (int, error)
 
 	// recordAppender writes forwarded records into local vaults.
 	// Set after the orchestrator is created, before forwarding starts.
@@ -460,6 +470,16 @@ func (s *Server) SetRemoveNodeFn(fn func(ctx context.Context, nodeID string) err
 // This is called on the leader to execute the Raft suffrage change.
 func (s *Server) SetNodeSuffrageFn(fn func(ctx context.Context, nodeID, nodeAddr string, voter bool) error) {
 	s.setNodeSuffrageFn = fn
+}
+
+// SetReplicaCatchupFn registers the callback for the RequestReplicaCatchup
+// RPC. Called on the placement leader to fan out per-chunk pushes to the
+// requesting follower via the existing replicateToFollower machinery.
+// Returns the count of chunks for which a push was actually scheduled
+// (after leader-side filtering of tombstoned / cloud-backed / locally-
+// missing chunks). See gastrolog-2dgvj.
+func (s *Server) SetReplicaCatchupFn(fn func(ctx context.Context, vaultID, tierID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (int, error)) {
+	s.replicaCatchupFn = fn
 }
 
 // Pause installs a gate that causes every subsequent gRPC handler on this

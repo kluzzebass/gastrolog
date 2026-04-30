@@ -149,6 +149,114 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, tierID glid
 	return nil
 }
 
+// CatchupSelectedChunks is the placement-leader-side handler for the
+// follower-driven RequestReplicaCatchup RPC. The follower's lifecycle
+// reconciler (SweepMissingReplicas) computes its FSM-vs-disk diff and
+// sends the requested chunk IDs to the leader; this method validates
+// each chunk against catchupCandidates' filters (sealed locally,
+// uncompressed-file-tier exclusion, cloud-backed exclusion, FSM
+// manifest membership) and fans pushes out asynchronously via the
+// existing replicateToFollower machinery.
+//
+// Returns the count of pushes scheduled — not delivered. The follower
+// will re-request anything still missing on its next sweep tick if a
+// push fails after this call returns. Asynchronous fan-out is a
+// deliberate choice: the RPC stays cheap, the slow per-chunk transfers
+// run on a single goroutine sequentially per (vault, tier, requester)
+// to avoid storming the bandwidth path. See gastrolog-2dgvj.
+func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID, tierID glid.GLID, requesterNodeID string, chunkIDs []chunk.ChunkID) (uint32, error) {
+	tier := o.findLocalTier(vaultID, tierID)
+	if tier == nil {
+		return 0, fmt.Errorf("tier %s not found in vault %s", tierID, vaultID)
+	}
+	if tier.IsFollower {
+		return 0, fmt.Errorf("not placement leader for tier %s (follower)", tierID)
+	}
+	if o.tierReplicator == nil {
+		return 0, errors.New("no tier replicator configured")
+	}
+
+	metas, err := tier.Chunks.List()
+	if err != nil {
+		return 0, fmt.Errorf("list chunks: %w", err)
+	}
+	bySealedID := make(map[chunk.ChunkID]chunk.ChunkMeta, len(metas))
+	for _, m := range metas {
+		bySealedID[m.ID] = m
+	}
+
+	var manifestSet map[chunk.ChunkID]bool
+	if tier.ListManifest != nil {
+		ids := tier.ListManifest()
+		manifestSet = make(map[chunk.ChunkID]bool, len(ids))
+		for _, id := range ids {
+			manifestSet[id] = true
+		}
+	}
+
+	// Filter requested IDs through the same eligibility rules
+	// catchupFollower's catchupCandidates uses, but indexed by
+	// the caller's set rather than scanned across the leader's
+	// full sealed-chunk list.
+	var eligible []chunk.ChunkMeta
+	isFileTier := tier.Type == "file"
+	for _, id := range chunkIDs {
+		m, ok := bySealedID[id]
+		if !ok {
+			continue // leader doesn't have it locally either
+		}
+		if !m.Sealed {
+			continue
+		}
+		if isFileTier && !m.Compressed {
+			continue
+		}
+		if m.CloudBacked {
+			continue
+		}
+		if manifestSet != nil && !manifestSet[id] {
+			continue
+		}
+		eligible = append(eligible, m)
+	}
+
+	if len(eligible) == 0 {
+		o.logger.Info("replica catchup: no eligible chunks to push",
+			"vault", vaultID, "tier", tierID, "requester", requesterNodeID,
+			"requested", len(chunkIDs))
+		return 0, nil
+	}
+
+	o.logger.Info("replica catchup: scheduling pushes",
+		"vault", vaultID, "tier", tierID, "requester", requesterNodeID,
+		"scheduled", len(eligible), "requested", len(chunkIDs))
+
+	// Run the actual pushes asynchronously so the RPC returns promptly.
+	// Use a fresh background context with the same timeout discipline
+	// as scheduleCatchupForNode — the RPC's caller-supplied ctx ends as
+	// soon as we return, which would abort transfers mid-stream.
+	go func() {
+		ctxBg, cancel := context.WithTimeout(context.Background(), cluster.CatchupTimeout)
+		defer cancel()
+		transferred := 0
+		for _, m := range eligible {
+			if err := o.replicateToFollower(ctxBg, vaultID, tierID, m.ID, tier.Chunks, requesterNodeID); err != nil {
+				o.logger.Warn("replica catchup: push failed",
+					"vault", vaultID, "tier", tierID, "chunk", m.ID.String(),
+					"requester", requesterNodeID, "error", err)
+				continue
+			}
+			transferred++
+		}
+		o.logger.Info("replica catchup: completed",
+			"vault", vaultID, "tier", tierID, "requester", requesterNodeID,
+			"transferred", transferred, "scheduled", len(eligible))
+	}()
+
+	_ = ctx // unused — async path uses its own timeout context
+	return uint32(len(eligible)), nil //nolint:gosec // G115: bounded by chunkIDs slice length
+}
+
 // catchupCandidates filters chunk metas to those eligible for catchup
 // replication. Excludes unsealed, uncompressed file-tier, cloud-backed,
 // and FSM-retired chunks.

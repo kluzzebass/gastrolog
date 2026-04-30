@@ -235,6 +235,42 @@ func (tr *TierReplicator) DeleteChunk(ctx context.Context, nodeID string, vaultI
 	})
 }
 
+// RequestReplicaCatchup is the follower→leader catchup request. Sent
+// by a follower whose lifecycle reconciler has detected sealed chunks
+// in the FSM that are missing on its local disk (e.g. after a pause/
+// resume window where the leader's seal-time push failed). The
+// placement leader's handler fans the actual pushes out asynchronously
+// via the existing replicateToFollower machinery, so success here
+// means "request accepted, pushes scheduled" — not "delivered". The
+// follower will re-request anything still missing on the next sweep
+// tick. See gastrolog-2dgvj.
+//
+// Unary RPC (not on the existing TierReplication bidirectional stream
+// which is exclusively leader→follower commands): the request is
+// follower→leader and small, so a one-shot Invoke is the cleaner
+// match.
+func (tr *TierReplicator) RequestReplicaCatchup(ctx context.Context, leaderNodeID string, vaultID, tierID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error) {
+	conn, err := tr.peers.Conn(leaderNodeID)
+	if err != nil {
+		return 0, fmt.Errorf("dial leader %s: %w", leaderNodeID, err)
+	}
+	rawIDs := make([][]byte, len(chunkIDs))
+	for i := range chunkIDs {
+		rawIDs[i] = chunkIDs[i][:]
+	}
+	req := &gastrologv1.RequestReplicaCatchupRequest{
+		VaultId:         vaultID.ToProto(),
+		TierId:          tierID.ToProto(),
+		ChunkIds:        rawIDs,
+		RequesterNodeId: []byte(requesterNodeID),
+	}
+	resp := &gastrologv1.RequestReplicaCatchupResponse{}
+	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/RequestReplicaCatchup", req, resp); err != nil {
+		return 0, err
+	}
+	return resp.GetScheduled(), nil
+}
+
 // CloseStream closes the stream for a specific tier+follower.
 func (tr *TierReplicator) CloseStream(tierID glid.GLID, nodeID string) {
 	tr.closeStream(tierID, nodeID)

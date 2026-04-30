@@ -60,6 +60,9 @@ func (m *replicationFakeReplicator) ImportSealedChunk(_ context.Context, _ strin
 func (m *replicationFakeReplicator) DeleteChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
 }
+func (m *replicationFakeReplicator) RequestReplicaCatchup(_ context.Context, _ string, _, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {
+	return 0, nil
+}
 
 // ---------- helpers ----------
 
