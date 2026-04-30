@@ -42,37 +42,28 @@ type SilentDeleter interface {
 
 // SealEnsurer is an optional interface for chunk managers that can project
 // the FSM's sealed state onto local files without firing the announcer.
-// Two methods cover the two distinct contexts in which the FSM's sealed
-// state needs to be projected; each has different correctness invariants:
 //
-//   - EnsureSealed (steady state): called from the FSM apply path on
-//     every node when CmdSealChunk commits. On followers, the local
-//     active pointer typically still points at the just-sealed chunk
-//     because the leader's per-(tier, follower) record-stream lags the
-//     vault-ctl Raft broadcast by a few ms. The record-stream's next
-//     TierReplicationAppend (for the new active chunk) is what
-//     authoritatively swaps the active pointer; EnsureSealed just sets
-//     the sealed flag on disk if the chunk exists and is not the local
-//     active. Skipping the active case avoids double-sealing the
-//     in-flight active across the natural rotation boundary.
+// Contract: when EnsureSealed is called for a chunk ID, the local Manager
+// MUST end up with that chunk sealed if it exists locally — including the
+// case where the chunk is the local active pointer (force-demote: close
+// files, mark sealed=true, clear m.active). The FSM is authoritative; if
+// it says sealed, the local Manager's stale active pointer must yield.
 //
-//   - EnsureSealedAndDemote (recovery): called from
-//     ReconcileFromSnapshot's projectAllSealedFromFSM walk after a
-//     follower restores from a Raft snapshot. The record-stream that
-//     would have swapped the active pointer in steady state is *gone*
-//     for any chunk sealed in this node's absence — there's no
-//     forthcoming TierReplicationAppend to do the swap. So if the
-//     local active matches a now-sealed chunk, we MUST force-demote
-//     it: close files, mark sealed=true, clear m.active. Otherwise
-//     subsequent appends keep landing on a chunk the cluster considers
-//     immutable (gastrolog-uccg6's 53K-records-on-a-10K-cap incident).
+// Why force-demote always (not just on recovery): a previous design split
+// this into "steady-state skip-active" + "recovery force-demote" on the
+// theory that the leader's record-stream would swap the follower's active
+// pointer in steady state. That assumption is topology-dependent — true for
+// ingest tiers fed by continuous appends, false for downstream tiers fed
+// only by transitions. The skip-active variant left receipt-protocol delete
+// obligations bouncing off ErrActiveChunk forever on transition-fed tiers
+// (gastrolog-2yeht), and SweepLocalOrphans transitively blocked because no
+// tombstone gets created when finalize never fires. The single-method
+// always-demote contract is correct for every topology.
 //
-// In both methods, a chunk that doesn't exist locally is a silent no-op
-// (this node never had it), and a chunk that's already locally sealed
-// is also a no-op.
+// Idempotent: a chunk that doesn't exist locally is a silent no-op (this
+// node never had it). A chunk that's already locally sealed is a no-op.
 type SealEnsurer interface {
 	EnsureSealed(id ChunkID) error
-	EnsureSealedAndDemote(id ChunkID) error
 }
 
 // DeleteNoAnnounce deletes a chunk from the local store without firing the
