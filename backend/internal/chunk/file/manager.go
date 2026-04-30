@@ -1890,6 +1890,15 @@ func (s *importState) writeRecord(rec chunk.Record) error {
 		RawSize:    uint32(len(rec.Raw)),   //nolint:gosec // G115: bounded by chunk size
 		AttrOffset: uint32(s.attrOffset),   //nolint:gosec // G115: bounded by rotation policy
 		AttrSize:   uint16(len(attrBytes)), //nolint:gosec // G115: bounded by attr encoding
+		// EventID fields preserve cluster-wide record identity through
+		// ImportRecords (cross-node sealed-chunk replication, MoveChunk,
+		// catchup paths). Without these, follower-replicated chunks land
+		// with zero EventIDs and histogram dedup can't match them
+		// against leader-original records → silent double-count. See
+		// gastrolog-5qwkw.
+		IngestSeq:  rec.EventID.IngestSeq,
+		IngesterID: rec.EventID.IngesterID,
+		NodeID:     rec.EventID.NodeID,
 	}, idxBuf[:])
 
 	rawPos := int64(format.HeaderSize) + int64(s.rawOffset)   //nolint:gosec // G115: bounded by rotation policy
