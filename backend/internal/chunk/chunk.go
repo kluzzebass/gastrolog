@@ -20,6 +20,12 @@ var (
 	ErrChunkArchived  = errors.New("chunk is archived and not immediately readable")
 	ErrChunkSuspect   = errors.New("chunk blob not found in cloud storage — may be transient")
 	ErrNoTSIndex      = errors.New("no TS index available")
+	// ErrChunkSealed signals that an Append targeted a chunk the
+	// cluster (via vault-ctl Raft FSM) considers sealed. Returned by
+	// the Manager's append-side gate so the caller can rotate to a
+	// fresh active chunk instead of silently extending a chunk the
+	// cluster has frozen. See gastrolog-uccg6.
+	ErrChunkSealed = errors.New("chunk is sealed; cannot append")
 )
 
 // TSIndexLoader is an optional interface for chunk managers that can provide
