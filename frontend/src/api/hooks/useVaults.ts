@@ -44,10 +44,14 @@ export function useVault(id: string) {
  * See gastrolog-1jijm.
  */
 export function useChunks(vaultId: string) {
-  const qc = useQueryClient();
-
   // Full chunk list: stream-driven invalidation, no polling.
-  const query = useQuery({
+  //
+  // WatchChunks pushes notifications on lifecycle events (seal / create /
+  // delete / compress / upload) AND on mid-chunk growth (a 1 Hz ticker on
+  // the backend fires NotifyChunkChange() when any active chunk's record
+  // count has advanced — see gastrolog-4y03v). The previous separate
+  // 5-second active-chunks poll is no longer needed.
+  return useQuery({
     queryKey: ["chunks", vaultId],
     queryFn: async () => {
       const response = await vaultClient.listChunks({ vault: vaultId });
@@ -56,54 +60,6 @@ export function useChunks(vaultId: string) {
     structuralSharing: protoArraySharing(ChunkMeta.equals),
     enabled: !!vaultId,
   });
-
-  // Lightweight active-chunk poll: local-only, no fan-out. Merges
-  // updated active chunks into the full cache by ID replacement so
-  // the component sees a single unified array.
-  useQuery({
-    queryKey: ["active-chunks", vaultId],
-    queryFn: async () => {
-      const resp = await vaultClient.listChunks({
-        vault: vaultId,
-        activeOnly: true,
-      });
-      qc.setQueryData(
-        ["chunks", vaultId],
-        (old: ChunkMeta[] | undefined) => {
-          if (!old) return old; // full fetch hasn't completed — don't seed cache with active-only data (missing replicaCount)
-          const freshById = new Map(resp.chunks.map((c) => [encode(c.id), c]));
-          // Merge: for chunks in both old and poll, update only the
-          // fields the active-only poll is authoritative for (growing
-          // stats). Preserve everything else (replica_count, compressed,
-          // cloud_backed, etc.) from the full-refetch cache entry,
-          // since those require the fan-out/dedup path to be accurate.
-          const merged = old.map((c) => {
-            const cid = encode(c.id);
-            const fresh = freshById.get(cid);
-            if (!fresh) return c;
-            freshById.delete(cid);
-            const patched = c.clone();
-            patched.recordCount = fresh.recordCount;
-            patched.bytes = fresh.bytes;
-            patched.diskBytes = fresh.diskBytes;
-            return patched;
-          });
-          // Do NOT append chunks from the active-only poll that aren't
-          // in the full cache yet. The active-only path skips remote
-          // fan-out, so these chunks would enter the cache with
-          // replicaCount=0, displaying as "1 replica" in the inspector.
-          // New chunks will appear after the next full refetch
-          // (triggered by WatchChunks stream invalidation).
-          return merged;
-        },
-      );
-      return resp.chunks;
-    },
-    enabled: !!vaultId,
-    refetchInterval: 5_000,
-  });
-
-  return query;
 }
 
 export function useIndexes(vaultId: string, chunkId: string) {
