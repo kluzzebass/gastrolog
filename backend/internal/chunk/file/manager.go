@@ -393,6 +393,19 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 		}
 	}
 
+	// Defense-in-depth (gastrolog-uccg6): refuse to append to an
+	// active chunk whose meta is marked sealed. EnsureSealed clears
+	// m.active when force-demoting, so this branch should be
+	// unreachable in steady state — but if any future path leaves
+	// m.active pointing at a sealed chunk (e.g. a partial demote, a
+	// race with a concurrent SetSealed call), the rejection is the
+	// last line of defense before records silently land on a frozen
+	// chunk and never replicate.
+	if m.active != nil && m.active.meta.sealed {
+		m.mu.Unlock()
+		return chunk.ChunkID{}, 0, chunk.ErrChunkSealed
+	}
+
 	// Decide rotation before encoding into the current chunk dict.
 	// Encoding first can mutate the old chunk's in-memory dict, then rotation
 	// seals that chunk without ever persisting those new entries.
@@ -869,12 +882,13 @@ func (m *Manager) cleanOrphanTempFiles(chunkDir string) {
 // Behavior:
 //   - chunk not local        → no-op (this node never had it)
 //   - chunk already sealed   → no-op
-//   - chunk is local active  → logged at warn, skipped (sealing the
-//     active chunk from outside the regular Seal path would race with
-//     in-flight writes and re-fire the announcer; the divergence
-//     resolves on the next rotation)
-//   - chunk is unsealed local → set sealed flag in file headers and
-//     mark m.metas[id].sealed = true
+//   - chunk is local active  → force-demote: close files, remove B+
+//     trees, mark sealed=true, clear m.active. Does NOT fire
+//     AnnounceSeal (the FSM already has CmdSealChunk applied; a second
+//     announce would duplicate the Raft entry). See gastrolog-uccg6
+//     for the offline-during-seal restart scenario this handles.
+//   - chunk is unsealed local (not active) → set sealed flag in file
+//     headers and mark m.metas[id].sealed = true
 //
 // See gastrolog-51gme step 8 / gastrolog-uccg6.
 func (m *Manager) EnsureSealed(id chunk.ChunkID) error {
@@ -891,16 +905,18 @@ func (m *Manager) EnsureSealed(id chunk.ChunkID) error {
 		return nil
 	}
 	if m.active != nil && m.active.meta.id == id {
-		// Expected on followers during the seal-rotation boundary: the
-		// leader announces CmdSealChunk after sealing locally, so
-		// followers receive the FSM apply for "sealed" while their local
-		// active pointer is still set (record-stream from the leader is
-		// what swaps active to the next chunk). The follower's chunk
-		// will reconcile when its own rotation fires; logging at debug
-		// avoids a per-rotation warning storm. See gastrolog-51gme.
-		m.logger.Debug("EnsureSealed: FSM says sealed but chunk is local active; skipping",
+		// FSM says sealed; local active is the same chunk. Force-demote:
+		// the chunk is no longer eligible to receive appends, regardless
+		// of whether the leader's record-stream already moved on or
+		// whether this is a post-restart catchup where no record-stream
+		// boundary will ever fire. This is the gastrolog-uccg6
+		// invariant: the FSM is authoritative; if it says sealed, the
+		// local Manager must stop appending immediately. Logged at INFO
+		// because this fires on the offline-during-seal restart path,
+		// which is operationally interesting.
+		m.logger.Info("EnsureSealed: force-demoting local active to sealed (FSM authoritative)",
 			"chunk", id.String())
-		return nil
+		return m.sealActiveLocked(false)
 	}
 	if err := m.sealChunkOnDisk(id); err != nil {
 		return err
@@ -1556,6 +1572,25 @@ func (m *Manager) openDictFile(id chunk.ChunkID) (*os.File, error) {
 }
 
 func (m *Manager) sealLocked() error {
+	return m.sealActiveLocked(true)
+}
+
+// sealActiveLocked seals the current active chunk, closes its files,
+// removes its B+ tree files, marks meta.sealed = true, and clears
+// m.active. When announce is true, AnnounceSeal is queued for the
+// caller to fire post-unlock — the rotation path uses this so the
+// rest of the cluster learns about the seal via vault-ctl Raft.
+//
+// When announce is false, the announcer is NOT called: this path is
+// for FSM-driven projection (gastrolog-uccg6 / gastrolog-51gme step 8),
+// where the chunk is already sealed in the FSM and proposing
+// CmdSealChunk again would duplicate the Raft entry. EnsureSealed
+// uses this when projecting an FSM-sealed chunk that happens to be
+// the local active pointer — the offline-during-seal restart case
+// from the original incident.
+//
+// Caller must hold m.mu.
+func (m *Manager) sealActiveLocked(announce bool) error {
 	if m.active == nil {
 		return nil
 	}
@@ -1611,7 +1646,7 @@ func (m *Manager) sealLocked() error {
 	meta.bytes = m.computeTotalLogicalBytes(id, meta.logicalDataBytes)
 	meta.diskBytes = m.computeDiskBytes(id)
 
-	if m.cfg.Announcer != nil {
+	if announce && m.cfg.Announcer != nil {
 		ann := m.cfg.Announcer
 		// Capture the metadata snapshot now (it's mutable; m.active will
 		// be cleared below). The closure runs after the caller releases mu.
