@@ -142,6 +142,12 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	// updates without polling.
 	o.auxWg.Go(func() { o.runActiveChunkProgressTicker(ctx, time.Second) })
 
+	// Job-event slog bridge (gastrolog-5mcqm follow-up). Subscribes to
+	// the scheduler's event broker and emits a structured slog entry
+	// per transition. Captured by the self ingester so job lifecycle
+	// is searchable like any other log.
+	o.auxWg.Go(func() { o.runJobEventLogBridge(ctx) })
+
 	return nil
 }
 
