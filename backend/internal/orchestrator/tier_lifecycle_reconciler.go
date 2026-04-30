@@ -470,11 +470,9 @@ func (r *TierLifecycleReconciler) SweepLocalOrphans() {
 		r.logger.Warn("local-orphan sweep: list chunks failed", "error", err)
 		return
 	}
+	ensurer, _ := r.tier.Chunks.(chunk.SealEnsurer) // optional
 	var deleted int
 	for _, meta := range metas {
-		if !meta.Sealed {
-			continue
-		}
 		if r.fsm.Get(meta.ID) != nil {
 			continue
 		}
@@ -483,6 +481,26 @@ func (r *TierLifecycleReconciler) SweepLocalOrphans() {
 		}
 		if !r.fsm.IsTombstoned(meta.ID) {
 			continue
+		}
+		// Local-active + FSM-tombstoned (gastrolog-533l9): the
+		// chunk was active on this node at crash time; while
+		// offline, the cluster sealed → retention-deleted →
+		// finalized it; no live obligation remains in the FSM
+		// (only the tombstone). Demote local active first so the
+		// subsequent deleteLocalCopy doesn't bounce off
+		// ErrActiveChunk. Same demote-then-delete sequence as
+		// fulfillObligation (gastrolog-2yeht).
+		if !meta.Sealed {
+			if ensurer == nil {
+				r.logger.Warn("local-orphan sweep: chunk is local active but Manager has no SealEnsurer; skipping",
+					"chunk", meta.ID)
+				continue
+			}
+			if err := ensurer.EnsureSealed(meta.ID); err != nil {
+				r.logger.Warn("local-orphan sweep: pre-demote failed",
+					"chunk", meta.ID, "error", err)
+				continue
+			}
 		}
 		r.logger.Info("local-orphan sweep: deleting tombstoned local chunk",
 			"chunk", meta.ID)
