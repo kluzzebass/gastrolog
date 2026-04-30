@@ -557,8 +557,12 @@ func TestSweepLocalOrphansDeletesOnlyTombstonedAbsentEntries(t *testing.T) {
 	// no manifest, no pending). Could be announce-in-flight; must not delete.
 	idUnknown := chunk.NewChunkID()
 
-	// Case 5 (negative): unsealed local file. Even if absent + tombstoned,
-	// active chunks are off-limits — but here we just test the sealed gate.
+	// Case 5 (negative): unsealed local file. The chunk-manager fake
+	// here does NOT implement chunk.SealEnsurer, so the sweep can't
+	// force-demote and falls back to the safe path: log + skip. The
+	// "demote-then-delete" happy path with a real SealEnsurer is
+	// covered by TestSweepLocalOrphansDemotesActiveTombstonedChunk.
+	// See gastrolog-533l9.
 	idUnsealed := chunk.NewChunkID()
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(idUnsealed, now, now, now)})
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalRequestDelete(idUnsealed, now, "test", []string{"node-A"})})
@@ -825,5 +829,60 @@ func TestFulfillObligationDemotesLocalActiveBeforeDelete(t *testing.T) {
 	// Acceptance #3: Ack fired — the obligation fulfilled cleanly.
 	if ackCount.Load() != 1 || ackedID != chunkID {
 		t.Errorf("ack count = %d, id = %s; want 1, %s", ackCount.Load(), ackedID, chunkID)
+	}
+}
+
+// TestSweepLocalOrphansDemotesActiveTombstonedChunk pins
+// gastrolog-533l9: when a chunk is the local Manager's active
+// pointer AND the FSM has only a tombstone for it (no manifest
+// entry, no pendingDeletes entry), SweepLocalOrphans must
+// force-demote the active first via EnsureSealed and then delete
+// the local files. Failure mode: a node SIGBUS-crashes with chunk
+// X active; while offline, the cluster seals → retention-deletes
+// → finalizes X; node restarts; FSM has only the tombstone; pre-
+// fix the orphan sweep skipped X because it was !Sealed locally.
+//
+// The pre-fix orphan sweep only handled sealed-on-disk chunks
+// (the snapshot-restore-after-finalize case). The post-fix sweep
+// also handles the local-active-after-finalize case by demoting
+// first.
+func TestSweepLocalOrphansDemotesActiveTombstonedChunk(t *testing.T) {
+	t.Parallel()
+
+	fsm := tierfsm.New()
+	now := time.Now()
+
+	// Drive the FSM to: chunk fully finalized, leaving only a
+	// tombstone (no manifest entry, no pendingDeletes entry).
+	idTombstoned := chunk.NewChunkID()
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(idTombstoned, now, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idTombstoned, now, 1, 1, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalRequestDelete(idTombstoned, now, "test", []string{"node-A"})})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalAckDelete(idTombstoned, "node-A")})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalFinalizeDelete(idTombstoned)})
+
+	// Local state: chunk is the active pointer (unsealed on disk).
+	// fakeSealEnsurerThatDemotesActive mimics real-Manager
+	// EnsureSealed semantics: demotes the active to sealed.
+	cm := &fakeSealEnsurerThatDemotesActive{
+		activeID: idTombstoned,
+	}
+	cm.chunks = []chunk.ChunkMeta{
+		{ID: idTombstoned, Sealed: false}, // active = unsealed
+	}
+
+	tier := &TierInstance{TierID: glid.New(), Chunks: cm}
+	rec := NewTierLifecycleReconciler(nil, glid.New(), tier.TierID, tier, "node-A", slog.Default())
+	rec.Wire(fsm)
+
+	rec.SweepLocalOrphans()
+
+	// EnsureSealed was called (demote pre-step) before Delete.
+	if len(cm.ensureSealedSeen) != 1 || cm.ensureSealedSeen[0] != idTombstoned {
+		t.Errorf("EnsureSealed calls = %v, want exactly [%s]", cm.ensureSealedSeen, idTombstoned)
+	}
+	// Delete was called and succeeded (chunk no longer active after demote).
+	if len(cm.deleted) != 1 || cm.deleted[0] != idTombstoned {
+		t.Errorf("deleted = %v, want [%s]", cm.deleted, idTombstoned)
 	}
 }
