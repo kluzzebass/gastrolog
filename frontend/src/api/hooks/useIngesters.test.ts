@@ -39,21 +39,22 @@ describe("useIngesters", () => {
 });
 
 describe("useIngesterStatus", () => {
-  test("fetches status when id is provided", async () => {
-    m(mocks.systemClient, "getIngesterStatus").mockResolvedValueOnce({
-      running: true,
-      messagesIngested: BigInt(500),
-    });
+  test("streams status when id is provided", async () => {
+    async function* one() {
+      yield { running: true, messagesIngested: BigInt(500) };
+    }
+    m(mocks.systemClient, "watchIngesterStatus").mockReturnValueOnce(one() as never);
 
     const { result } = renderHook(() => useIngesterStatus("i1"), { wrapper: wrapper() });
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data?.running).toBe(true);
+    await waitFor(() => expect(result.current.data?.running).toBe(true));
+    expect(result.current.isLoading).toBe(false);
   });
 
-  test("does not fetch when id is empty", () => {
+  test("does not subscribe when id is empty", () => {
     const { result } = renderHook(() => useIngesterStatus(""), { wrapper: wrapper() });
-    expect(result.current.fetchStatus).toBe("idle");
+    expect(result.current.data).toBeUndefined();
+    expect(result.current.isLoading).toBe(false);
   });
 });
 

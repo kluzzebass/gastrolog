@@ -441,6 +441,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 		LocalNodeID:        s.localNodeID,
 		AfterConfigApply:   s.afterConfigApply,
 		ConfigSignal:       s.configSignal,
+		StatsSignal:        s.statsSignal,
 		ResolveManagedFile: s.ResolveManagedFileByID,
 		CloudTesters:       s.cloudTesters,
 		Tokens:             s.tokens,
