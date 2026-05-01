@@ -317,12 +317,14 @@ export function useSearchView() {
   // Auto-refresh polling for both pipeline and filter results.
   const [pollInterval, setPollInterval] = useState<number | null>(null);
 
-  // Sync draft and reset poll interval when URL changes (browser back/forward).
+  // Sync draft when URL changes (browser back/forward, time-range picker,
+  // histogram bucket click). Do NOT reset pollInterval — the operator
+  // explicitly selected a refresh cadence and expects it to keep firing
+  // against whatever range is currently shown. See gastrolog-5tl95.
   const [prevQ, setPrevQ] = useState(q);
   if (q !== prevQ) {
     setPrevQ(q);
     setDraft(q);
-    setPollInterval(null);
   }
 
   // Fire search or follow depending on the current route.
@@ -493,6 +495,10 @@ export function useSearchView() {
 
   useEffect(() => {
     if (!pollInterval || isFollowMode) return;
+    // Leading-edge fire on Off→on (and on any cadence change): operator
+    // expects movement immediately when picking a refresh interval, not
+    // after waiting one full tick. See gastrolog-5tl95.
+    searchRef.current(qRef.current, false, false, true);
     const id = setInterval(() => {
       searchRef.current(qRef.current, false, false, true);
     }, pollInterval);
