@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
+	"log/slog"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/cluster"
@@ -183,7 +184,14 @@ func (o *Orchestrator) replicateToTarget(ctx context.Context, vaultID, tierID gl
 		return
 	}
 	if err := o.replicateToFollower(ctx, vaultID, tierID, chunkID, sourceCM, tgt.NodeID); err != nil {
-		o.logger.Warn("replication: sealed chunk failed",
+		// Placement churn (peer evicted the tier instance) is expected
+		// during reconfiguration and gets logged at Debug rather than
+		// WARN-spamming the operator dashboard. See gastrolog-5z607.
+		level := slog.LevelWarn
+		if IsPlacementChurnErr(err) {
+			level = slog.LevelDebug
+		}
+		o.logger.Log(ctx, level, "replication: sealed chunk failed",
 			"node", tgt.NodeID, "vault", vaultID, "tier", tierID,
 			"chunk", chunkID.String(), "error", err)
 	} else {
