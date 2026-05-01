@@ -101,6 +101,12 @@ func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 	_ = cursor.Close()
 	cursorClosed = true
 
+	// Successful retry: a chunk previously flagged unreadable just
+	// streamed cleanly. Clear the backoff entry and the alert so the
+	// chunk doesn't carry a stale "unreadable" badge once the retention
+	// sweep removes it. See gastrolog-25vur.
+	r.clearUnreadable(id)
+
 	// Write a receipt to the DESTINATION tier's Raft confirming it has
 	// received the records from this source chunk. The Raft commit gives
 	// majority-durable confirmation across the destination's nodes.

@@ -52,6 +52,11 @@ service VaultService {
   // SealVault seals the active chunk of a vault.
   rpc SealVault(SealVaultRequest) returns (SealVaultResponse);
 
+  // RetryUnreadableChunks resets every unreadable chunk's retry backoff
+  // for a vault, so the next retention sweep retries them all immediately.
+  // Operator-driven recovery action; see gastrolog-25vur.
+  rpc RetryUnreadableChunks(RetryUnreadableChunksRequest) returns (RetryUnreadableChunksResponse);
+
   // ArchiveChunk transitions a cloud-backed sealed chunk to an offline
   // storage class (Glacier, Deep Archive, Azure Archive). The chunk stays
   // in the tier but becomes unreadable until restored.
@@ -343,6 +348,14 @@ message SealVaultRequest {
 
 message SealVaultResponse {
   int32 sealed_count = 1; // number of tiers whose active chunk was sealed
+}
+
+message RetryUnreadableChunksRequest {
+  string vault = 1;
+}
+
+message RetryUnreadableChunksResponse {
+  int32 retried_count = 1; // number of chunks whose backoff was reset
 }
 
 message ArchiveChunkRequest {

@@ -10,6 +10,7 @@ import {
   useDeleteTier,
   useSealVault,
   useReindexVault,
+  useRetryUnreadableChunks,
   useMigrateVault,
   useMergeVaults,
   usePutTier,
@@ -208,6 +209,7 @@ export function VaultSettingsCard({
   const [confirmRemoveTier, setConfirmRemoveTier] = useState<string | null>(null);
   const seal = useSealVault();
   const reindex = useReindexVault();
+  const retryUnreadable = useRetryUnreadableChunks();
   const migrate = useMigrateVault();
   const merge = useMergeVaults();
   const { addToast } = useToast();
@@ -506,6 +508,26 @@ export function VaultSettingsCard({
             }}
           >
             {activeJob?.label === "Reindexing" ? "Reindexing..." : "Reindex"}
+          </Button>
+          <Button
+            variant="ghost"
+            bordered
+            dark={dark}
+            disabled={retryUnreadable.isPending || !!activeJob}
+            onClick={async () => {
+              try {
+                const result = await retryUnreadable.mutateAsync(encode(vault.id));
+                if (result.retriedCount === 0) {
+                  addToast("No unreadable chunks to retry", "info");
+                } else {
+                  addToast(`Reset backoff on ${String(result.retriedCount)} chunk(s); next retention sweep will retry`, "info");
+                }
+              } catch (err: unknown) {
+                addToast(err instanceof Error ? err.message : "Retry unreadable failed", "error");
+              }
+            }}
+          >
+            {retryUnreadable.isPending ? "Retrying..." : "Retry Unreadable"}
           </Button>
           {vault.enabled && (
             <Button

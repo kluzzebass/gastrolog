@@ -135,7 +135,7 @@ func TestStrategyDistribution(t *testing.T) {
 	want := map[routing.Strategy]int{
 		routing.RouteLocal:    44, // +1: WatchChunks (gastrolog-1jijm), +1: PreviewJSONLookup (gastrolog-4q2b3), +1: PreviewYAMLLookup (gastrolog-l1ywp), +1: WatchIngesterStatus (gastrolog-14ejy), +1: GetIndexes moved here from RouteTargeted (gastrolog-3570f)
 		routing.RouteLeader:   39, // +1: DeleteLookup; PutSettings split into PutService/Lookup/MaxMind/Setup (gastrolog-1uhsr)
-		routing.RouteTargeted: 11,
+		routing.RouteTargeted: 12, // +1: RetryUnreadableChunks (gastrolog-25vur)
 		routing.RouteFanOut:   7,
 	}
 
@@ -151,8 +151,8 @@ func TestStrategyDistribution(t *testing.T) {
 	for _, c := range counts {
 		total += c
 	}
-	if total != 101 {
-		t.Errorf("total procedures: got %d, want 101", total)
+	if total != 102 {
+		t.Errorf("total procedures: got %d, want 102", total)
 	}
 }
 

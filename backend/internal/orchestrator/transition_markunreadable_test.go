@@ -128,9 +128,9 @@ func TestTransitionChunkTransientErrorDoesNotMarkUnreadable(t *testing.T) {
 	// The chunk must NOT be in the unreadable map — it's a transient
 	// destination error, not a source chunk corruption.
 	r.mu.Lock()
-	marked := r.unreadable[chunkID]
+	entry := r.unreadable[chunkID]
 	r.mu.Unlock()
-	if marked {
+	if entry != nil {
 		t.Errorf("transientError: chunk %s marked unreadable, expected retriable", chunkID)
 	}
 }
@@ -151,9 +151,9 @@ func TestTransitionChunkSourceReadErrorMarksUnreadable(t *testing.T) {
 	// The chunk SHOULD be in the unreadable map — the source iterator
 	// failed, meaning the chunk really is corrupt.
 	r.mu.Lock()
-	marked := r.unreadable[chunkID]
+	entry := r.unreadable[chunkID]
 	r.mu.Unlock()
-	if !marked {
+	if entry == nil {
 		t.Errorf("ErrSourceRead: chunk %s should have been marked unreadable", chunkID)
 	}
 }

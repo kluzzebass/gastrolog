@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { AnalyzeChunkRequest, AnalyzeChunkResponse, ArchiveChunkRequest, ArchiveChunkResponse, ExportVaultRequest, ExportVaultResponse, GetChunkRequest, GetChunkResponse, GetIndexesRequest, GetIndexesResponse, GetStatsRequest, GetStatsResponse, GetVaultRequest, GetVaultResponse, ImportRecordsRequest, ImportRecordsResponse, ListChunksRequest, ListChunksResponse, ListVaultsRequest, ListVaultsResponse, MergeVaultsRequest, MergeVaultsResponse, MigrateVaultRequest, MigrateVaultResponse, ReindexVaultRequest, ReindexVaultResponse, RestoreChunkRequest, RestoreChunkResponse, SealVaultRequest, SealVaultResponse, ValidateVaultRequest, ValidateVaultResponse, WatchChunksRequest, WatchChunksResponse } from "./vault_pb.js";
+import { AnalyzeChunkRequest, AnalyzeChunkResponse, ArchiveChunkRequest, ArchiveChunkResponse, ExportVaultRequest, ExportVaultResponse, GetChunkRequest, GetChunkResponse, GetIndexesRequest, GetIndexesResponse, GetStatsRequest, GetStatsResponse, GetVaultRequest, GetVaultResponse, ImportRecordsRequest, ImportRecordsResponse, ListChunksRequest, ListChunksResponse, ListVaultsRequest, ListVaultsResponse, MergeVaultsRequest, MergeVaultsResponse, MigrateVaultRequest, MigrateVaultResponse, ReindexVaultRequest, ReindexVaultResponse, RestoreChunkRequest, RestoreChunkResponse, RetryUnreadableChunksRequest, RetryUnreadableChunksResponse, SealVaultRequest, SealVaultResponse, ValidateVaultRequest, ValidateVaultResponse, WatchChunksRequest, WatchChunksResponse } from "./vault_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -168,6 +168,19 @@ export const VaultService = {
       name: "SealVault",
       I: SealVaultRequest,
       O: SealVaultResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * RetryUnreadableChunks resets every unreadable chunk's retry backoff
+     * for a vault, so the next retention sweep retries them all immediately.
+     * Operator-driven recovery action; see gastrolog-25vur.
+     *
+     * @generated from rpc gastrolog.v1.VaultService.RetryUnreadableChunks
+     */
+    retryUnreadableChunks: {
+      name: "RetryUnreadableChunks",
+      I: RetryUnreadableChunksRequest,
+      O: RetryUnreadableChunksResponse,
       kind: MethodKind.Unary,
     },
     /**

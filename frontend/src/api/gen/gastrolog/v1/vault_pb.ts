@@ -2036,6 +2036,82 @@ export class SealVaultResponse extends Message<SealVaultResponse> {
 }
 
 /**
+ * @generated from message gastrolog.v1.RetryUnreadableChunksRequest
+ */
+export class RetryUnreadableChunksRequest extends Message<RetryUnreadableChunksRequest> {
+  /**
+   * @generated from field: string vault = 1;
+   */
+  vault = "";
+
+  constructor(data?: PartialMessage<RetryUnreadableChunksRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.RetryUnreadableChunksRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RetryUnreadableChunksRequest {
+    return new RetryUnreadableChunksRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RetryUnreadableChunksRequest {
+    return new RetryUnreadableChunksRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RetryUnreadableChunksRequest {
+    return new RetryUnreadableChunksRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RetryUnreadableChunksRequest | PlainMessage<RetryUnreadableChunksRequest> | undefined, b: RetryUnreadableChunksRequest | PlainMessage<RetryUnreadableChunksRequest> | undefined): boolean {
+    return proto3.util.equals(RetryUnreadableChunksRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.RetryUnreadableChunksResponse
+ */
+export class RetryUnreadableChunksResponse extends Message<RetryUnreadableChunksResponse> {
+  /**
+   * number of chunks whose backoff was reset
+   *
+   * @generated from field: int32 retried_count = 1;
+   */
+  retriedCount = 0;
+
+  constructor(data?: PartialMessage<RetryUnreadableChunksResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.RetryUnreadableChunksResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "retried_count", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RetryUnreadableChunksResponse {
+    return new RetryUnreadableChunksResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RetryUnreadableChunksResponse {
+    return new RetryUnreadableChunksResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RetryUnreadableChunksResponse {
+    return new RetryUnreadableChunksResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RetryUnreadableChunksResponse | PlainMessage<RetryUnreadableChunksResponse> | undefined, b: RetryUnreadableChunksResponse | PlainMessage<RetryUnreadableChunksResponse> | undefined): boolean {
+    return proto3.util.equals(RetryUnreadableChunksResponse, a, b);
+  }
+}
+
+/**
  * @generated from message gastrolog.v1.ArchiveChunkRequest
  */
 export class ArchiveChunkRequest extends Message<ArchiveChunkRequest> {

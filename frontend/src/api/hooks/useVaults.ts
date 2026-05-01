@@ -117,6 +117,24 @@ export function useReindexVault() {
   });
 }
 
+// Operator-driven recovery: reset retry backoff for chunks flagged
+// unreadable in this vault so the next retention sweep retries them
+// immediately. Returns the count of chunks whose backoff was reset.
+// See gastrolog-25vur.
+export function useRetryUnreadableChunks() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vault: string) => {
+      const response = await vaultClient.retryUnreadableChunks({ vault });
+      return response;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["chunks"] });
+      qc.invalidateQueries({ queryKey: ["alerts"] });
+    },
+  });
+}
+
 export function useValidateVault() {
   const qc = useQueryClient();
   return useMutation({
