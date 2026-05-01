@@ -5,6 +5,7 @@ export {
   useStats,
   useSealVault,
   useReindexVault,
+  useRetryUnreadableChunks,
   useValidateVault,
   useMigrateVault,
   useMergeVaults,

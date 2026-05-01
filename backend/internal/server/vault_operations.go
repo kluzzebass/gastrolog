@@ -71,6 +71,35 @@ func (s *VaultServer) SealVault(
 	return connect.NewResponse(&apiv1.SealVaultResponse{SealedCount: int32(sealed)}), nil //nolint:gosec // G115: tier count is always small
 }
 
+// RetryUnreadableChunks resets the retry backoff for every chunk
+// currently flagged unreadable in the vault, so the next retention
+// sweep retries them immediately. Operator-driven recovery action;
+// see gastrolog-25vur.
+//
+// Routing: RouteTargeted — the interceptor forwards to the vault-owning
+// node. Per-tier-instance unreadable maps live on the local
+// orchestrator, so the retry-now action only resets the runners that
+// actually hold the entries.
+func (s *VaultServer) RetryUnreadableChunks(
+	ctx context.Context,
+	req *connect.Request[apiv1.RetryUnreadableChunksRequest],
+) (*connect.Response[apiv1.RetryUnreadableChunksResponse], error) {
+	if req.Msg.Vault == "" {
+		return nil, errRequired("vault")
+	}
+	vaultID, connErr := parseUUID(req.Msg.Vault)
+	if connErr != nil {
+		return nil, connErr
+	}
+	if !s.orch.VaultExists(vaultID) {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("vault not found"))
+	}
+	count := s.orch.RetryUnreadableChunks(vaultID)
+	return connect.NewResponse(&apiv1.RetryUnreadableChunksResponse{
+		RetriedCount: int32(count), //nolint:gosec // G115: chunk count bounded by vault size
+	}), nil
+}
+
 // ReindexVault rebuilds all indexes for sealed chunks in a vault.
 // Routing: RouteTargeted — the interceptor forwards to the vault-owning node.
 func (s *VaultServer) ReindexVault(

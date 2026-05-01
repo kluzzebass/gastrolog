@@ -75,7 +75,7 @@ type retentionRunner struct {
 	cm           chunk.ChunkManager
 	im           index.IndexManager
 	inflight     map[chunk.ChunkID]bool // chunks currently being processed
-	unreadable   map[chunk.ChunkID]bool // chunks that failed to read — skipped until restart
+	unreadable   map[chunk.ChunkID]*unreadableEntry // chunks that failed to read — retried with exponential backoff (gastrolog-25vur)
 	orch         *Orchestrator          // for eject/transition callbacks
 
 	applyRaftRetentionPending   func(id chunk.ChunkID) error
@@ -352,6 +352,46 @@ func (o *Orchestrator) drainExcessChunks(vaultID, tierID glid.GLID, cm chunk.Chu
 	}
 }
 
+// UnreadableChunks returns chunk IDs currently flagged as unreadable
+// across all tier-instance retention runners for the vault. Used by
+// the inspector to surface which chunks are in retry-with-backoff and
+// by tests. Read-only accessor; safe to call from any node.
+func (o *Orchestrator) UnreadableChunks(vaultID glid.GLID) []chunk.ChunkID {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	var ids []chunk.ChunkID
+	for _, runner := range o.retention {
+		if runner.vaultID != vaultID {
+			continue
+		}
+		runner.mu.Lock()
+		for id := range runner.unreadable {
+			ids = append(ids, id)
+		}
+		runner.mu.Unlock()
+	}
+	return ids
+}
+
+// RetryUnreadableChunks resets every unreadable chunk's retry backoff
+// across all tier-instance retention runners for the vault, so the
+// next retention sweep retries them all immediately. Returns the total
+// count of entries reset across runners. Operator-driven recovery
+// action exposed via the manual "Retry unreadable" inspector button
+// — see gastrolog-25vur.
+func (o *Orchestrator) RetryUnreadableChunks(vaultID glid.GLID) int {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	total := 0
+	for _, runner := range o.retention {
+		if runner.vaultID != vaultID {
+			continue
+		}
+		total += runner.retryUnreadableChunks()
+	}
+	return total
+}
+
 // RetentionPendingChunks returns chunk IDs marked as retention-pending in the
 // tier FSM for a vault. Visible to all nodes via Raft replication.
 //
@@ -561,11 +601,18 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 		}
 	}
 
+	now := time.Now()
 	var sealed []chunk.ChunkMeta
 	for _, meta := range metas {
-		if meta.Sealed && !unreadable[meta.ID] && !streamed[meta.ID] {
-			sealed = append(sealed, meta)
+		if !meta.Sealed || streamed[meta.ID] {
+			continue
 		}
+		// Skip chunks waiting for their next retry window. nil entry
+		// means never-failed; zero/past nextRetry means retry now.
+		if entry := unreadable[meta.ID]; entry != nil && now.Before(entry.nextRetry) {
+			continue
+		}
+		sealed = append(sealed, meta)
 	}
 
 	if len(sealed) == 0 {
@@ -687,21 +734,94 @@ func (r *retentionRunner) clearInflight(id chunk.ChunkID) {
 	r.mu.Unlock()
 }
 
-// markUnreadable flags a chunk as unreadable so retention skips it on future sweeps.
+// unreadableEntry tracks per-chunk retry scheduling for chunks that
+// failed to read. Each retention sweep checks nextRetry; the chunk is
+// skipped while now is before nextRetry. After the deadline, the next
+// sweep retries via transitionChunk; success clears the entry, failure
+// schedules the next retry further out via exponential backoff (capped
+// at 24h). Replaces the prior boolean "unreadable forever" semantics.
+// See gastrolog-25vur.
+type unreadableEntry struct {
+	failCount int
+	nextRetry time.Time
+}
+
+// unreadableBackoff returns the wait time before the next retry given
+// the current cumulative fail count. Schedule: 5m, 15m, 1h, 6h, 24h
+// (cap). Picked so transient cloud blips clear within minutes while
+// genuine corruption doesn't churn excessive cloud requests.
+func unreadableBackoff(failCount int) time.Duration {
+	schedule := []time.Duration{
+		5 * time.Minute,
+		15 * time.Minute,
+		1 * time.Hour,
+		6 * time.Hour,
+		24 * time.Hour,
+	}
+	if failCount < 1 {
+		return schedule[0]
+	}
+	if failCount-1 >= len(schedule) {
+		return schedule[len(schedule)-1]
+	}
+	return schedule[failCount-1]
+}
+
+// markUnreadable flags a chunk as unreadable and schedules its next
+// retry. Each successive failure pushes the next retry further out
+// per unreadableBackoff. The chunk-unreadable alert is set; it stays
+// up while the entry exists and is cleared by clearUnreadable.
 func (r *retentionRunner) markUnreadable(id chunk.ChunkID, reason error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.unreadable == nil {
-		r.unreadable = make(map[chunk.ChunkID]bool)
+		r.unreadable = make(map[chunk.ChunkID]*unreadableEntry)
 	}
-	r.unreadable[id] = true
+	entry := r.unreadable[id]
+	if entry == nil {
+		entry = &unreadableEntry{}
+		r.unreadable[id] = entry
+	}
+	entry.failCount++
+	entry.nextRetry = time.Now().Add(unreadableBackoff(entry.failCount))
 	if r.orch.alerts != nil {
 		r.orch.alerts.Set(
 			fmt.Sprintf("chunk-unreadable:%s", id),
 			alert.Error, "retention",
-			fmt.Sprintf("Chunk %s unreadable: %v", id, reason),
+			fmt.Sprintf("Chunk %s unreadable: %v (next retry %s)", id, reason, entry.nextRetry.Format(time.RFC3339)),
 		)
 	}
+}
+
+// clearUnreadable removes a chunk's unreadable entry — used either
+// after a successful retry (transition.go) or by an operator-driven
+// "retry now" action (RetryUnreadableChunks). Also clears the alert.
+func (r *retentionRunner) clearUnreadable(id chunk.ChunkID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.unreadable[id]; !ok {
+		return
+	}
+	delete(r.unreadable, id)
+	if r.orch.alerts != nil {
+		r.orch.alerts.Clear(fmt.Sprintf("chunk-unreadable:%s", id))
+	}
+}
+
+// retryUnreadableChunks resets every unreadable entry's nextRetry to
+// now so the next retention sweep retries them all immediately.
+// Returns the count of entries reset. Used by the manual-recovery
+// action operators trigger from the inspector. See gastrolog-25vur.
+func (r *retentionRunner) retryUnreadableChunks() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := time.Now()
+	count := 0
+	for _, entry := range r.unreadable {
+		entry.nextRetry = now
+		count++
+	}
+	return count
 }
 
 // expireChunk routes a chunk deletion through the lifecycle reconciler's
