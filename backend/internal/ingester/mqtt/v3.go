@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"time"
 
 	pahov3 "github.com/eclipse/paho.mqtt.golang"
@@ -49,18 +48,7 @@ func (ing *v3Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMe
 				return
 			}
 		}
-		msg := orchestrator.IngestMessage{
-			Attrs: map[string]string{
-				"ingester_type":   "mqtt",
-				"mqtt_topic":      m.Topic(),
-				"mqtt_qos":        strconv.Itoa(int(m.Qos())),
-				"mqtt_retained":   strconv.FormatBool(m.Retained()),
-				"mqtt_message_id": strconv.Itoa(int(m.MessageID())),
-			},
-			Raw:        m.Payload(),
-			IngestTS:   time.Now(),
-			IngesterID: ing.cfg.ID,
-		}
+		msg := buildMessage(m.Topic(), m.Qos(), m.Retained(), m.MessageID(), m.Payload(), ing.cfg.ID, time.Now())
 
 		select {
 		case out <- msg:

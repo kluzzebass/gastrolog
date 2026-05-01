@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
-	"strconv"
 	"time"
 
 	"github.com/eclipse/paho.golang/autopaho"
@@ -61,18 +60,7 @@ func (ing *v5Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMe
 							return false, ctx.Err()
 						}
 					}
-					msg := orchestrator.IngestMessage{
-						Attrs: map[string]string{
-							"ingester_type":   "mqtt",
-							"mqtt_topic":      pr.Packet.Topic,
-							"mqtt_qos":        strconv.Itoa(int(pr.Packet.QoS)),
-							"mqtt_retained":   strconv.FormatBool(pr.Packet.Retain),
-							"mqtt_message_id": strconv.Itoa(int(pr.Packet.PacketID)),
-						},
-						Raw:        pr.Packet.Payload,
-						IngestTS:   time.Now(),
-						IngesterID: ing.cfg.ID,
-					}
+					msg := buildMessage(pr.Packet.Topic, pr.Packet.QoS, pr.Packet.Retain, pr.Packet.PacketID, pr.Packet.Payload, ing.cfg.ID, time.Now())
 
 					select {
 					case out <- msg:
