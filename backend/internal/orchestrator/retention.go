@@ -392,6 +392,61 @@ func (o *Orchestrator) RetryUnreadableChunks(vaultID glid.GLID) int {
 	return total
 }
 
+// tryEventDrivenExpire is invoked from a source-tier reconciler's
+// onTransitionStreamed callback (run on a goroutine to avoid the
+// apply-pump deadlock). The streamed flag was just committed for
+// chunkID on the (vaultID, tierID) source. If the destination has
+// already acked the receipt, expire the source immediately instead
+// of waiting for the next retention sweep tick. Common case path —
+// streaming and the receipt apply often complete within the same
+// Raft round-trip burst. See gastrolog-1g6br.
+func (o *Orchestrator) tryEventDrivenExpire(vaultID, tierID glid.GLID, chunkID chunk.ChunkID) {
+	o.mu.RLock()
+	var runner *retentionRunner
+	for _, r := range o.retention {
+		if r.vaultID == vaultID && r.tierID == tierID {
+			runner = r
+			break
+		}
+	}
+	o.mu.RUnlock()
+	if runner == nil {
+		return
+	}
+	sys, err := o.loadSystem(context.Background())
+	if err != nil || sys == nil {
+		return
+	}
+	runner.confirmStreamedOne(&sys.Config, chunkID)
+}
+
+// notifyReceiptConfirmed is invoked from a destination-tier
+// reconciler's onTransitionReceived callback. The receipt apply just
+// committed for sourceChunkID. Find every source-tier runner in the
+// same vault and trigger their event-driven confirm-and-expire path —
+// the runner that holds the chunk in transitionStreamed state will
+// expire it; others bail cheaply. See gastrolog-1g6br.
+func (o *Orchestrator) notifyReceiptConfirmed(vaultID glid.GLID, sourceChunkID chunk.ChunkID) {
+	o.mu.RLock()
+	candidates := make([]*retentionRunner, 0)
+	for _, r := range o.retention {
+		if r.vaultID == vaultID {
+			candidates = append(candidates, r)
+		}
+	}
+	o.mu.RUnlock()
+	if len(candidates) == 0 {
+		return
+	}
+	sys, err := o.loadSystem(context.Background())
+	if err != nil || sys == nil {
+		return
+	}
+	for _, r := range candidates {
+		r.confirmStreamedOne(&sys.Config, sourceChunkID)
+	}
+}
+
 // RetentionPendingChunks returns chunk IDs marked as retention-pending in the
 // tier FSM for a vault. Visible to all nodes via Raft replication.
 //
