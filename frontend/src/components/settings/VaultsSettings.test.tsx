@@ -115,8 +115,6 @@ describe("VaultsSettings", () => {
     // Action buttons
     expect(getByText("Rotate")).toBeTruthy();
     expect(getByText("Reindex")).toBeTruthy();
-    expect(getByText("Migrate")).toBeTruthy();
-    expect(getByText("Merge Into...")).toBeTruthy();
     expect(getByText("Save")).toBeTruthy();
   });
 
@@ -165,38 +163,6 @@ describe("VaultsSettings", () => {
     await waitFor(() => {
       expect(m(mocks.vaultClient, "reindexVault")).toHaveBeenCalledTimes(1);
     });
-  });
-
-  test("migrate button toggles migrate form", () => {
-    const qc = createTestQueryClient();
-    qc.setQueryData(["system"], sampleConfig);
-
-    const { getByText } = render(<VaultsSettings dark />, {
-      wrapper: settingsWrapper(qc),
-    });
-
-    fireEvent.click(getByText("vault-alpha"));
-    fireEvent.click(getByText("Migrate"));
-    // Migrate form should appear
-    expect(getByText("Migrate Vault")).toBeTruthy();
-    expect(getByText("Destination Name")).toBeTruthy();
-    expect(getByText("Cancel Migrate")).toBeTruthy();
-  });
-
-  test("merge button toggles merge form", () => {
-    const qc = createTestQueryClient();
-    qc.setQueryData(["system"], sampleConfig);
-
-    const { getByText } = render(<VaultsSettings dark />, {
-      wrapper: settingsWrapper(qc),
-    });
-
-    fireEvent.click(getByText("vault-alpha"));
-    fireEvent.click(getByText("Merge Into..."));
-    // Merge form should appear
-    expect(getByText("Merge Into Another Vault")).toBeTruthy();
-    expect(getByText("Destination")).toBeTruthy();
-    expect(getByText("Cancel Merge")).toBeTruthy();
   });
 
   test("deletes vault via confirm flow", async () => {

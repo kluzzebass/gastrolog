@@ -1382,16 +1382,3 @@ func (o *Orchestrator) NewAnalyzerForChunk(vaultID glid.GLID, chunkID chunk.Chun
 	return analyzer.New(cm, im), nil
 }
 
-// SupportsChunkMove returns true if both vaults support filesystem-level chunk moves.
-func (o *Orchestrator) SupportsChunkMove(srcID, dstID glid.GLID) bool {
-	o.mu.RLock()
-	srcVault := o.vaults[srcID]
-	dstVault := o.vaults[dstID]
-	o.mu.RUnlock()
-	if srcVault == nil || dstVault == nil {
-		return false
-	}
-	_, srcOK := srcVault.ActiveTierChunkManager().(chunk.ChunkMover)
-	_, dstOK := dstVault.ActiveTierChunkManager().(chunk.ChunkMover)
-	return srcOK && dstOK
-}

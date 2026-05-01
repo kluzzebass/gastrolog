@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { AnalyzeChunkRequest, AnalyzeChunkResponse, ArchiveChunkRequest, ArchiveChunkResponse, ExportVaultRequest, ExportVaultResponse, GetChunkRequest, GetChunkResponse, GetIndexesRequest, GetIndexesResponse, GetStatsRequest, GetStatsResponse, GetVaultRequest, GetVaultResponse, ImportRecordsRequest, ImportRecordsResponse, ListChunksRequest, ListChunksResponse, ListVaultsRequest, ListVaultsResponse, MergeVaultsRequest, MergeVaultsResponse, MigrateVaultRequest, MigrateVaultResponse, ReindexVaultRequest, ReindexVaultResponse, RestoreChunkRequest, RestoreChunkResponse, RetryUnreadableChunksRequest, RetryUnreadableChunksResponse, SealVaultRequest, SealVaultResponse, ValidateVaultRequest, ValidateVaultResponse, WatchChunksRequest, WatchChunksResponse } from "./vault_pb.js";
+import { AnalyzeChunkRequest, AnalyzeChunkResponse, ArchiveChunkRequest, ArchiveChunkResponse, ExportVaultRequest, ExportVaultResponse, GetChunkRequest, GetChunkResponse, GetIndexesRequest, GetIndexesResponse, GetStatsRequest, GetStatsResponse, GetVaultRequest, GetVaultResponse, ImportRecordsRequest, ImportRecordsResponse, ListChunksRequest, ListChunksResponse, ListVaultsRequest, ListVaultsResponse, ReindexVaultRequest, ReindexVaultResponse, RestoreChunkRequest, RestoreChunkResponse, RetryUnreadableChunksRequest, RetryUnreadableChunksResponse, SealVaultRequest, SealVaultResponse, ValidateVaultRequest, ValidateVaultResponse, WatchChunksRequest, WatchChunksResponse } from "./vault_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -114,18 +114,6 @@ export const VaultService = {
       kind: MethodKind.Unary,
     },
     /**
-     * MigrateVault moves a vault to a new name, type, and/or location.
-     * Three-phase: create destination, freeze source, async merge+delete.
-     *
-     * @generated from rpc gastrolog.v1.VaultService.MigrateVault
-     */
-    migrateVault: {
-      name: "MigrateVault",
-      I: MigrateVaultRequest,
-      O: MigrateVaultResponse,
-      kind: MethodKind.Unary,
-    },
-    /**
      * ExportVault streams all records from a vault for backup.
      *
      * @generated from rpc gastrolog.v1.VaultService.ExportVault
@@ -145,18 +133,6 @@ export const VaultService = {
       name: "ImportRecords",
       I: ImportRecordsRequest,
       O: ImportRecordsResponse,
-      kind: MethodKind.Unary,
-    },
-    /**
-     * MergeVaults copies all records from a source vault into a destination vault,
-     * then deletes the source.
-     *
-     * @generated from rpc gastrolog.v1.VaultService.MergeVaults
-     */
-    mergeVaults: {
-      name: "MergeVaults",
-      I: MergeVaultsRequest,
-      O: MergeVaultsResponse,
       kind: MethodKind.Unary,
     },
     /**

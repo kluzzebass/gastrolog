@@ -148,49 +148,6 @@ export function useValidateVault() {
   });
 }
 
-export function useMigrateVault() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (args: {
-      source: string;
-      destination: string;
-      destinationType?: string;
-      destinationParams?: Record<string, string>;
-    }) => {
-      const response = await vaultClient.migrateVault({
-        source: args.source,
-        destination: args.destination,
-        destinationType: args.destinationType ?? "",
-        destinationParams: args.destinationParams ?? {},
-      });
-      return response;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["vaults"] });
-      qc.invalidateQueries({ queryKey: ["stats"] });
-      qc.invalidateQueries({ queryKey: ["system"] });
-    },
-  });
-}
-
-export function useMergeVaults() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (args: { source: string; destination: string }) => {
-      const response = await vaultClient.mergeVaults({
-        source: args.source,
-        destination: args.destination,
-      });
-      return response;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["vaults"] });
-      qc.invalidateQueries({ queryKey: ["stats"] });
-      qc.invalidateQueries({ queryKey: ["system"] });
-    },
-  });
-}
-
 export function usePutVault() {
   return useSystemMutation(
     async (args: {

@@ -134,7 +134,6 @@ func main() {
 		cli.NewReindexCommand(),
 		cli.NewPauseCommand(),
 		cli.NewResumeCommand(),
-		cli.NewMigrateCommand(),
 	)
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {

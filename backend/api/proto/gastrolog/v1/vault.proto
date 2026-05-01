@@ -35,19 +35,11 @@ service VaultService {
   // ValidateVault checks chunk and index integrity for a vault.
   rpc ValidateVault(ValidateVaultRequest) returns (ValidateVaultResponse);
 
-  // MigrateVault moves a vault to a new name, type, and/or location.
-  // Three-phase: create destination, freeze source, async merge+delete.
-  rpc MigrateVault(MigrateVaultRequest) returns (MigrateVaultResponse);
-
   // ExportVault streams all records from a vault for backup.
   rpc ExportVault(ExportVaultRequest) returns (stream ExportVaultResponse);
 
   // ImportRecords appends a batch of records to a vault.
   rpc ImportRecords(ImportRecordsRequest) returns (ImportRecordsResponse);
-
-  // MergeVaults copies all records from a source vault into a destination vault,
-  // then deletes the source.
-  rpc MergeVaults(MergeVaultsRequest) returns (MergeVaultsResponse);
 
   // SealVault seals the active chunk of a vault.
   rpc SealVault(SealVaultRequest) returns (SealVaultResponse);
@@ -274,20 +266,6 @@ message ChunkValidation {
   repeated string issues = 3;
 }
 
-// MigrateVault moves a vault to a new name, type, and/or location.
-// Three-phase: create destination, freeze source, async merge+delete.
-message MigrateVaultRequest {
-  string source = 1;
-  string destination = 2;
-  // Optional: if empty, uses the same type as the source vault.
-  string destination_type = 3;
-  map<string, string> destination_params = 4;
-}
-
-message MigrateVaultResponse {
-  bytes job_id = 3;
-}
-
 // ExportVault streams all records from a vault.
 message ExportVaultRequest {
   string vault = 1;
@@ -330,15 +308,6 @@ message ImportRecordsRequest {
 
 message ImportRecordsResponse {
   int64 records_imported = 1;
-}
-
-message MergeVaultsRequest {
-  string source = 1;
-  string destination = 2;
-}
-
-message MergeVaultsResponse {
-  bytes job_id = 3;
 }
 
 message SealVaultRequest {

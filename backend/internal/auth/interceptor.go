@@ -112,10 +112,8 @@ func NewAuthInterceptor(tokens *TokenService, counter UserCounter, validator Tok
 			gastrologv1connect.VaultServiceGetStatsProcedure:      true,
 			gastrologv1connect.VaultServiceReindexVaultProcedure:  true,
 			gastrologv1connect.VaultServiceValidateVaultProcedure: true,
-			gastrologv1connect.VaultServiceMigrateVaultProcedure:  true,
 			gastrologv1connect.VaultServiceExportVaultProcedure:   true,
 			gastrologv1connect.VaultServiceImportRecordsProcedure: true,
-			gastrologv1connect.VaultServiceMergeVaultsProcedure:   true,
 			gastrologv1connect.VaultServiceSealVaultProcedure:     true,
 			// ConfigService — mutations
 			gastrologv1connect.SystemServiceGetSystemProcedure:             true,

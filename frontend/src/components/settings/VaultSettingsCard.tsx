@@ -11,8 +11,6 @@ import {
   useSealVault,
   useReindexVault,
   useRetryUnreadableChunks,
-  useMigrateVault,
-  useMergeVaults,
   usePutTier,
 } from "../../api/hooks";
 import { useToast } from "../Toast";
@@ -25,7 +23,6 @@ import { Checkbox } from "./Checkbox";
 import { PulseIcon } from "../icons";
 import { CrossLinkBadge } from "../inspector/CrossLinkBadge";
 import { JobProgress } from "./VaultHelpers";
-import { MigrateVaultForm, MergeVaultForm } from "./VaultMigrateForms";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { leaderNodeId, followerNodeIds } from "../../utils/tierPlacement";
 import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
@@ -210,16 +207,12 @@ export function VaultSettingsCard({
   const seal = useSealVault();
   const reindex = useReindexVault();
   const retryUnreadable = useRetryUnreadableChunks();
-  const migrate = useMigrateVault();
-  const merge = useMergeVaults();
   const { addToast } = useToast();
 
   // Inline tier creation state.
   const [newTier, setNewTier] = useState<TierEntry | null>(null);
   // Per-vault state — previously Record maps in the parent.
   const [deleteData, setDeleteData] = useState(false);
-  const [migrateTarget, setMigrateTarget] = useState<{ name: string; type: string; dir: string } | null>(null);
-  const [mergeTarget, setMergeTarget] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<{ jobId: string; label: string } | null>(null);
 
   // Derive vault's tiers from the global tier list, sorted by position.
@@ -528,26 +521,6 @@ export function VaultSettingsCard({
             }}
           >
             {retryUnreadable.isPending ? "Retrying..." : "Retry Unreadable"}
-          </Button>
-          {vault.enabled && (
-            <Button
-              variant="ghost"
-              bordered
-              dark={dark}
-              disabled={!!activeJob}
-              onClick={() => setMigrateTarget((prev) => prev ? null : { name: "", type: "", dir: "" })}
-            >
-              {migrateTarget ? "Cancel Migrate" : "Migrate"}
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            bordered
-            dark={dark}
-            disabled={!!activeJob}
-            onClick={() => setMergeTarget((prev) => prev !== null ? null : "")}
-          >
-            {mergeTarget !== null ? "Cancel Merge" : "Merge Into..."}
           </Button>
           {(anyDirty) && (
             <Button
@@ -921,68 +894,6 @@ export function VaultSettingsCard({
             </div>
           )}
         </div>
-        {migrateTarget && (
-          <MigrateVaultForm
-            dark={dark}
-            vault={vault}
-            target={migrateTarget}
-            isPending={migrate.isPending}
-            activeJob={!!activeJob}
-            onTargetChange={(update) =>
-              setMigrateTarget((prev) => prev ? { ...prev, ...update } : prev)
-            }
-            onSubmit={async () => {
-              const trimmedName = migrateTarget.name.trim();
-              if (!trimmedName) return;
-              const srcLabel = vault.name || encode(vault.id);
-              if (!confirm(`Migrate "${srcLabel}" to "${trimmedName}"? This will immediately disable "${srcLabel}" and delete it after all records are moved.`)) return;
-              const destType = migrateTarget.type || undefined;
-              const params: Record<string, string> = {};
-              if (migrateTarget.dir.trim()) {
-                params["dir"] = migrateTarget.dir.trim();
-              }
-              const destParams = Object.keys(params).length > 0 ? params : undefined;
-              try {
-                const result = await migrate.mutateAsync({
-                  source: encode(vault.id),
-                  destination: trimmedName,
-                  destinationType: destType,
-                  destinationParams: destParams,
-                });
-                setActiveJob({ jobId: encode(result.jobId), label: "Migrating" });
-                setMigrateTarget(null);
-              } catch (err: unknown) {
-                addToast(err instanceof Error ? err.message : "Migrate failed", "error");
-              }
-            }}
-          />
-        )}
-        {mergeTarget !== null && (
-          <MergeVaultForm
-            dark={dark}
-            vault={vault}
-            selectedDestination={mergeTarget}
-            vaults={vaults}
-            isPending={merge.isPending}
-            activeJob={!!activeJob}
-            onDestinationChange={setMergeTarget}
-            onSubmit={async () => {
-              if (!mergeTarget) return;
-              const destName = vaults.find((s) => encode(s.id) === mergeTarget)?.name || mergeTarget;
-              if (!confirm(`Merge "${vault.name || encode(vault.id)}" into "${destName}"? This will immediately disable "${vault.name || encode(vault.id)}" and delete it after all records are moved.`)) return;
-              try {
-                const result = await merge.mutateAsync({
-                  source: encode(vault.id),
-                  destination: mergeTarget,
-                });
-                setActiveJob({ jobId: encode(result.jobId), label: "Merging" });
-                setMergeTarget(null);
-              } catch (err: unknown) {
-                addToast(err instanceof Error ? err.message : "Merge failed", "error");
-              }
-            }}
-          />
-        )}
       </div>
     </SettingsCard>
   );
