@@ -35,6 +35,9 @@ func (f *fakeChunkManager) FindStartPosition(id chunk.ChunkID, ts time.Time) (ui
 func (f *fakeChunkManager) FindIngestStartPosition(_ chunk.ChunkID, _ time.Time) (uint64, bool, error) {
 	return 0, false, nil
 }
+func (f *fakeChunkManager) FindIngestEntryIndex(_ chunk.ChunkID, _ time.Time) (uint64, bool, error) {
+	return 0, false, nil
+}
 func (f *fakeChunkManager) ScanActiveByIngestTS(_ chunk.ChunkID, _ func(time.Time, chunk.Attributes) bool) error {
 	return chunk.ErrChunkNotFound
 }

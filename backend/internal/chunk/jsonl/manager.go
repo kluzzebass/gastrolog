@@ -164,6 +164,9 @@ func (m *Manager) FindStartPosition(chunk.ChunkID, time.Time) (uint64, bool, err
 func (m *Manager) FindIngestStartPosition(chunk.ChunkID, time.Time) (uint64, bool, error) {
 	return 0, false, nil
 }
+func (m *Manager) FindIngestEntryIndex(chunk.ChunkID, time.Time) (uint64, bool, error) {
+	return 0, false, nil
+}
 func (m *Manager) ScanActiveByIngestTS(chunk.ChunkID, func(time.Time, chunk.Attributes) bool) error {
 	return chunk.ErrChunkNotFound
 }

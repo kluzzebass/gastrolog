@@ -419,6 +419,14 @@ func (m *Manager) ScanActiveByIngestTS(id chunk.ChunkID, cb func(ingestTS time.T
 
 // FindIngestStartPosition returns the earliest record position with IngestTS >= ts.
 // Uses binary search on the in-memory record slice.
+// FindIngestEntryIndex returns rank for monotonic active chunks (where
+// position == rank); for non-monotonic chunks the in-memory manager
+// doesn't maintain a separate rank index, so callers gating on
+// IngestTSMonotonic should bypass this. See gastrolog-66b7x.
+func (m *Manager) FindIngestEntryIndex(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+	return m.FindIngestStartPosition(id, ts)
+}
+
 func (m *Manager) FindIngestStartPosition(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
 	m.mu.Lock()
 	state := m.findChunkLocked(id)

@@ -50,6 +50,9 @@ func (f *retentionFakeChunkManager) ScanActiveIngestTS(_ chunk.ChunkID, _ func(i
 func (f *retentionFakeChunkManager) FindIngestStartPosition(_ chunk.ChunkID, _ time.Time) (uint64, bool, error) {
 	return 0, false, nil
 }
+func (f *retentionFakeChunkManager) FindIngestEntryIndex(_ chunk.ChunkID, _ time.Time) (uint64, bool, error) {
+	return 0, false, nil
+}
 func (f *retentionFakeChunkManager) FindSourceStartPosition(_ chunk.ChunkID, _ time.Time) (uint64, bool, error) {
 	return 0, false, nil
 }

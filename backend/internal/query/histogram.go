@@ -608,9 +608,14 @@ func findIngestPos(cm chunk.ChunkManager, im index.IndexManager, chunkID chunk.C
 // rank arithmetic (endRank - startRank), not position arithmetic. See
 // gastrolog-66b7x.
 func findIngestRank(cm chunk.ChunkManager, im index.IndexManager, chunkID chunk.ChunkID, ts time.Time) (uint64, bool) {
-	if pos, found, err := cm.FindIngestStartPosition(chunkID, ts); err == nil && found {
-		return pos, true
+	// Cloud-backed chunks and active monotonic chunks: rank comes from
+	// the chunk manager. For active monotonic chunks position == rank.
+	// For cloud chunks the entry index in the sorted cache file is the
+	// correct rank. See gastrolog-66b7x.
+	if rank, found, err := cm.FindIngestEntryIndex(chunkID, ts); err == nil && found {
+		return rank, true
 	}
+	// Sealed local chunks: rank lives on the on-disk TS index file.
 	if im != nil {
 		if rank, found, err := im.FindIngestEntryIndex(chunkID, ts); err == nil && found {
 			return rank, true

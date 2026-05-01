@@ -71,6 +71,17 @@ type ChunkManager interface {
 	// Returns (0, false, nil) if no matching entry exists or the chunk is sealed.
 	FindIngestStartPosition(id ChunkID, ts time.Time) (uint64, bool, error)
 
+	// FindIngestEntryIndex returns the rank (entry index in the IngestTS-
+	// sorted index) of the first entry with IngestTS >= ts. Distinct from
+	// FindIngestStartPosition which returns the physical record position;
+	// the two differ for chunks where physical layout doesn't match
+	// IngestTS order (cloud chunks built via ImportRecords). Histogram
+	// bucket counting must use rank arithmetic. Returns (0, false, nil)
+	// when the chunk has no in-manager TS index (sealed local file
+	// chunks — caller falls through to IndexManager.FindIngestEntryIndex).
+	// See gastrolog-66b7x.
+	FindIngestEntryIndex(id ChunkID, ts time.Time) (uint64, bool, error)
+
 	// ScanActiveIngestTS iterates the active chunk's IngestTS B+ tree in
 	// IngestTS-sorted order. The callback receives IngestTS in nanoseconds
 	// and returns false to stop early. Returns ErrChunkNotFound if id is
@@ -237,20 +248,21 @@ type ChunkCacheEvictor interface {
 // on a follower without streaming any records. All fields come from the tier
 // Raft FSM entry (populated by AnnounceSeal + AnnounceUpload on the leader).
 type CloudChunkInfo struct {
-	WriteStart      time.Time
-	WriteEnd        time.Time
-	IngestStart     time.Time
-	IngestEnd       time.Time
-	SourceStart     time.Time
-	SourceEnd       time.Time
-	RecordCount     int64
-	Bytes           int64
-	DiskBytes       int64
-	IngestIdxOffset int64
-	IngestIdxSize   int64
-	SourceIdxOffset int64
-	SourceIdxSize   int64
-	NumFrames       int32
+	WriteStart        time.Time
+	WriteEnd          time.Time
+	IngestStart       time.Time
+	IngestEnd         time.Time
+	SourceStart       time.Time
+	SourceEnd         time.Time
+	RecordCount       int64
+	Bytes             int64
+	DiskBytes         int64
+	IngestIdxOffset   int64
+	IngestIdxSize     int64
+	SourceIdxOffset   int64
+	SourceIdxSize     int64
+	NumFrames         int32
+	IngestTSMonotonic bool // see ChunkMeta.IngestTSMonotonic
 }
 
 // CloudChunkRegistrar extends ChunkManager with the ability to register a
