@@ -54,18 +54,12 @@ const (
 	// VaultServiceValidateVaultProcedure is the fully-qualified name of the VaultService's
 	// ValidateVault RPC.
 	VaultServiceValidateVaultProcedure = "/gastrolog.v1.VaultService/ValidateVault"
-	// VaultServiceMigrateVaultProcedure is the fully-qualified name of the VaultService's MigrateVault
-	// RPC.
-	VaultServiceMigrateVaultProcedure = "/gastrolog.v1.VaultService/MigrateVault"
 	// VaultServiceExportVaultProcedure is the fully-qualified name of the VaultService's ExportVault
 	// RPC.
 	VaultServiceExportVaultProcedure = "/gastrolog.v1.VaultService/ExportVault"
 	// VaultServiceImportRecordsProcedure is the fully-qualified name of the VaultService's
 	// ImportRecords RPC.
 	VaultServiceImportRecordsProcedure = "/gastrolog.v1.VaultService/ImportRecords"
-	// VaultServiceMergeVaultsProcedure is the fully-qualified name of the VaultService's MergeVaults
-	// RPC.
-	VaultServiceMergeVaultsProcedure = "/gastrolog.v1.VaultService/MergeVaults"
 	// VaultServiceSealVaultProcedure is the fully-qualified name of the VaultService's SealVault RPC.
 	VaultServiceSealVaultProcedure = "/gastrolog.v1.VaultService/SealVault"
 	// VaultServiceRetryUnreadableChunksProcedure is the fully-qualified name of the VaultService's
@@ -102,16 +96,10 @@ type VaultServiceClient interface {
 	ReindexVault(context.Context, *connect.Request[v1.ReindexVaultRequest]) (*connect.Response[v1.ReindexVaultResponse], error)
 	// ValidateVault checks chunk and index integrity for a vault.
 	ValidateVault(context.Context, *connect.Request[v1.ValidateVaultRequest]) (*connect.Response[v1.ValidateVaultResponse], error)
-	// MigrateVault moves a vault to a new name, type, and/or location.
-	// Three-phase: create destination, freeze source, async merge+delete.
-	MigrateVault(context.Context, *connect.Request[v1.MigrateVaultRequest]) (*connect.Response[v1.MigrateVaultResponse], error)
 	// ExportVault streams all records from a vault for backup.
 	ExportVault(context.Context, *connect.Request[v1.ExportVaultRequest]) (*connect.ServerStreamForClient[v1.ExportVaultResponse], error)
 	// ImportRecords appends a batch of records to a vault.
 	ImportRecords(context.Context, *connect.Request[v1.ImportRecordsRequest]) (*connect.Response[v1.ImportRecordsResponse], error)
-	// MergeVaults copies all records from a source vault into a destination vault,
-	// then deletes the source.
-	MergeVaults(context.Context, *connect.Request[v1.MergeVaultsRequest]) (*connect.Response[v1.MergeVaultsResponse], error)
 	// SealVault seals the active chunk of a vault.
 	SealVault(context.Context, *connect.Request[v1.SealVaultRequest]) (*connect.Response[v1.SealVaultResponse], error)
 	// RetryUnreadableChunks resets every unreadable chunk's retry backoff
@@ -199,12 +187,6 @@ func NewVaultServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(vaultServiceMethods.ByName("ValidateVault")),
 			connect.WithClientOptions(opts...),
 		),
-		migrateVault: connect.NewClient[v1.MigrateVaultRequest, v1.MigrateVaultResponse](
-			httpClient,
-			baseURL+VaultServiceMigrateVaultProcedure,
-			connect.WithSchema(vaultServiceMethods.ByName("MigrateVault")),
-			connect.WithClientOptions(opts...),
-		),
 		exportVault: connect.NewClient[v1.ExportVaultRequest, v1.ExportVaultResponse](
 			httpClient,
 			baseURL+VaultServiceExportVaultProcedure,
@@ -215,12 +197,6 @@ func NewVaultServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			httpClient,
 			baseURL+VaultServiceImportRecordsProcedure,
 			connect.WithSchema(vaultServiceMethods.ByName("ImportRecords")),
-			connect.WithClientOptions(opts...),
-		),
-		mergeVaults: connect.NewClient[v1.MergeVaultsRequest, v1.MergeVaultsResponse](
-			httpClient,
-			baseURL+VaultServiceMergeVaultsProcedure,
-			connect.WithSchema(vaultServiceMethods.ByName("MergeVaults")),
 			connect.WithClientOptions(opts...),
 		),
 		sealVault: connect.NewClient[v1.SealVaultRequest, v1.SealVaultResponse](
@@ -267,10 +243,8 @@ type vaultServiceClient struct {
 	getStats              *connect.Client[v1.GetStatsRequest, v1.GetStatsResponse]
 	reindexVault          *connect.Client[v1.ReindexVaultRequest, v1.ReindexVaultResponse]
 	validateVault         *connect.Client[v1.ValidateVaultRequest, v1.ValidateVaultResponse]
-	migrateVault          *connect.Client[v1.MigrateVaultRequest, v1.MigrateVaultResponse]
 	exportVault           *connect.Client[v1.ExportVaultRequest, v1.ExportVaultResponse]
 	importRecords         *connect.Client[v1.ImportRecordsRequest, v1.ImportRecordsResponse]
-	mergeVaults           *connect.Client[v1.MergeVaultsRequest, v1.MergeVaultsResponse]
 	sealVault             *connect.Client[v1.SealVaultRequest, v1.SealVaultResponse]
 	retryUnreadableChunks *connect.Client[v1.RetryUnreadableChunksRequest, v1.RetryUnreadableChunksResponse]
 	archiveChunk          *connect.Client[v1.ArchiveChunkRequest, v1.ArchiveChunkResponse]
@@ -323,11 +297,6 @@ func (c *vaultServiceClient) ValidateVault(ctx context.Context, req *connect.Req
 	return c.validateVault.CallUnary(ctx, req)
 }
 
-// MigrateVault calls gastrolog.v1.VaultService.MigrateVault.
-func (c *vaultServiceClient) MigrateVault(ctx context.Context, req *connect.Request[v1.MigrateVaultRequest]) (*connect.Response[v1.MigrateVaultResponse], error) {
-	return c.migrateVault.CallUnary(ctx, req)
-}
-
 // ExportVault calls gastrolog.v1.VaultService.ExportVault.
 func (c *vaultServiceClient) ExportVault(ctx context.Context, req *connect.Request[v1.ExportVaultRequest]) (*connect.ServerStreamForClient[v1.ExportVaultResponse], error) {
 	return c.exportVault.CallServerStream(ctx, req)
@@ -336,11 +305,6 @@ func (c *vaultServiceClient) ExportVault(ctx context.Context, req *connect.Reque
 // ImportRecords calls gastrolog.v1.VaultService.ImportRecords.
 func (c *vaultServiceClient) ImportRecords(ctx context.Context, req *connect.Request[v1.ImportRecordsRequest]) (*connect.Response[v1.ImportRecordsResponse], error) {
 	return c.importRecords.CallUnary(ctx, req)
-}
-
-// MergeVaults calls gastrolog.v1.VaultService.MergeVaults.
-func (c *vaultServiceClient) MergeVaults(ctx context.Context, req *connect.Request[v1.MergeVaultsRequest]) (*connect.Response[v1.MergeVaultsResponse], error) {
-	return c.mergeVaults.CallUnary(ctx, req)
 }
 
 // SealVault calls gastrolog.v1.VaultService.SealVault.
@@ -388,16 +352,10 @@ type VaultServiceHandler interface {
 	ReindexVault(context.Context, *connect.Request[v1.ReindexVaultRequest]) (*connect.Response[v1.ReindexVaultResponse], error)
 	// ValidateVault checks chunk and index integrity for a vault.
 	ValidateVault(context.Context, *connect.Request[v1.ValidateVaultRequest]) (*connect.Response[v1.ValidateVaultResponse], error)
-	// MigrateVault moves a vault to a new name, type, and/or location.
-	// Three-phase: create destination, freeze source, async merge+delete.
-	MigrateVault(context.Context, *connect.Request[v1.MigrateVaultRequest]) (*connect.Response[v1.MigrateVaultResponse], error)
 	// ExportVault streams all records from a vault for backup.
 	ExportVault(context.Context, *connect.Request[v1.ExportVaultRequest], *connect.ServerStream[v1.ExportVaultResponse]) error
 	// ImportRecords appends a batch of records to a vault.
 	ImportRecords(context.Context, *connect.Request[v1.ImportRecordsRequest]) (*connect.Response[v1.ImportRecordsResponse], error)
-	// MergeVaults copies all records from a source vault into a destination vault,
-	// then deletes the source.
-	MergeVaults(context.Context, *connect.Request[v1.MergeVaultsRequest]) (*connect.Response[v1.MergeVaultsResponse], error)
 	// SealVault seals the active chunk of a vault.
 	SealVault(context.Context, *connect.Request[v1.SealVaultRequest]) (*connect.Response[v1.SealVaultResponse], error)
 	// RetryUnreadableChunks resets every unreadable chunk's retry backoff
@@ -481,12 +439,6 @@ func NewVaultServiceHandler(svc VaultServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(vaultServiceMethods.ByName("ValidateVault")),
 		connect.WithHandlerOptions(opts...),
 	)
-	vaultServiceMigrateVaultHandler := connect.NewUnaryHandler(
-		VaultServiceMigrateVaultProcedure,
-		svc.MigrateVault,
-		connect.WithSchema(vaultServiceMethods.ByName("MigrateVault")),
-		connect.WithHandlerOptions(opts...),
-	)
 	vaultServiceExportVaultHandler := connect.NewServerStreamHandler(
 		VaultServiceExportVaultProcedure,
 		svc.ExportVault,
@@ -497,12 +449,6 @@ func NewVaultServiceHandler(svc VaultServiceHandler, opts ...connect.HandlerOpti
 		VaultServiceImportRecordsProcedure,
 		svc.ImportRecords,
 		connect.WithSchema(vaultServiceMethods.ByName("ImportRecords")),
-		connect.WithHandlerOptions(opts...),
-	)
-	vaultServiceMergeVaultsHandler := connect.NewUnaryHandler(
-		VaultServiceMergeVaultsProcedure,
-		svc.MergeVaults,
-		connect.WithSchema(vaultServiceMethods.ByName("MergeVaults")),
 		connect.WithHandlerOptions(opts...),
 	)
 	vaultServiceSealVaultHandler := connect.NewUnaryHandler(
@@ -555,14 +501,10 @@ func NewVaultServiceHandler(svc VaultServiceHandler, opts ...connect.HandlerOpti
 			vaultServiceReindexVaultHandler.ServeHTTP(w, r)
 		case VaultServiceValidateVaultProcedure:
 			vaultServiceValidateVaultHandler.ServeHTTP(w, r)
-		case VaultServiceMigrateVaultProcedure:
-			vaultServiceMigrateVaultHandler.ServeHTTP(w, r)
 		case VaultServiceExportVaultProcedure:
 			vaultServiceExportVaultHandler.ServeHTTP(w, r)
 		case VaultServiceImportRecordsProcedure:
 			vaultServiceImportRecordsHandler.ServeHTTP(w, r)
-		case VaultServiceMergeVaultsProcedure:
-			vaultServiceMergeVaultsHandler.ServeHTTP(w, r)
 		case VaultServiceSealVaultProcedure:
 			vaultServiceSealVaultHandler.ServeHTTP(w, r)
 		case VaultServiceRetryUnreadableChunksProcedure:
@@ -618,20 +560,12 @@ func (UnimplementedVaultServiceHandler) ValidateVault(context.Context, *connect.
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.VaultService.ValidateVault is not implemented"))
 }
 
-func (UnimplementedVaultServiceHandler) MigrateVault(context.Context, *connect.Request[v1.MigrateVaultRequest]) (*connect.Response[v1.MigrateVaultResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.VaultService.MigrateVault is not implemented"))
-}
-
 func (UnimplementedVaultServiceHandler) ExportVault(context.Context, *connect.Request[v1.ExportVaultRequest], *connect.ServerStream[v1.ExportVaultResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.VaultService.ExportVault is not implemented"))
 }
 
 func (UnimplementedVaultServiceHandler) ImportRecords(context.Context, *connect.Request[v1.ImportRecordsRequest]) (*connect.Response[v1.ImportRecordsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.VaultService.ImportRecords is not implemented"))
-}
-
-func (UnimplementedVaultServiceHandler) MergeVaults(context.Context, *connect.Request[v1.MergeVaultsRequest]) (*connect.Response[v1.MergeVaultsResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.VaultService.MergeVaults is not implemented"))
 }
 
 func (UnimplementedVaultServiceHandler) SealVault(context.Context, *connect.Request[v1.SealVaultRequest]) (*connect.Response[v1.SealVaultResponse], error) {

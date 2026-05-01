@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"gastrolog/internal/glid"
 	"maps"
-	"os"
 
 	"connectrpc.com/connect"
 
@@ -16,24 +15,6 @@ import (
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/system"
 )
-
-// makeCleanupFunc returns a callback that removes the source vault from the
-// config vault and cleans up its vault directory. Safe to call from async jobs.
-func (s *VaultServer) makeCleanupFunc(srcID glid.GLID, srcFileDir string) func(ctx context.Context) error {
-	return func(ctx context.Context) error {
-		if s.cfgStore != nil {
-			if err := s.cfgStore.DeleteVault(ctx, srcID, true); err != nil {
-				s.logger.Warn("cleanup: delete vault config", "vault", srcID, "error", err)
-			}
-		}
-		if srcFileDir != "" {
-			if err := os.RemoveAll(srcFileDir); err != nil {
-				s.logger.Warn("cleanup: remove source directory", "dir", srcFileDir, "error", err)
-			}
-		}
-		return nil
-	}
-}
 
 // SealVault seals the active chunk of a vault.
 // Routing: RouteTargeted — the interceptor forwards to the vault-owning node.
@@ -154,138 +135,6 @@ func (s *VaultServer) ReindexVault(
 	return connect.NewResponse(&apiv1.ReindexVaultResponse{JobId: []byte(jobID)}), nil
 }
 
-// MigrateVault moves a vault to a new name, type, and/or location.
-// Three-phase: create destination, freeze source, async merge+delete.
-func (s *VaultServer) MigrateVault(
-	ctx context.Context,
-	req *connect.Request[apiv1.MigrateVaultRequest],
-) (*connect.Response[apiv1.MigrateVaultResponse], error) {
-	if req.Msg.Source == "" {
-		return nil, errRequired("source")
-	}
-	if req.Msg.Destination == "" {
-		return nil, errRequired("destination")
-	}
-
-	srcID, connErr := parseUUID(req.Msg.Source)
-	if connErr != nil {
-		return nil, connErr
-	}
-
-	// Source must exist.
-	if !s.orch.VaultExists(srcID) {
-		return nil, connect.NewError(connect.CodeNotFound, errors.New("source vault not found"))
-	}
-
-	// Get source config for filter/policy and to resolve destination type.
-	srcCfg, err := s.getFullVaultConfig(ctx, srcID)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("read source config: %w", err))
-	}
-
-	// Phase 1: Clone source tiers to destination vault, then create vault.
-	// Tiers must exist before AddVault so buildTierInstances can find them.
-	dstCfg := system.VaultConfig{
-		ID:      glid.New(),
-		Name:    req.Msg.Destination,
-		Enabled: true,
-	}
-
-	if s.cfgStore != nil {
-		srcTiers, _ := s.cfgStore.ListTiers(ctx)
-		for _, t := range system.VaultTiers(srcTiers, srcID) {
-			t.ID = glid.New()
-			t.VaultID = dstCfg.ID
-			if err := s.cfgStore.PutTier(ctx, t); err != nil {
-				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("clone tier: %w", err))
-			}
-		}
-	}
-
-	if err := s.createVault(ctx, dstCfg); err != nil {
-		return nil, err
-	}
-
-	// Phase 2: Freeze source — disable ingestion and persist.
-	if err := s.orch.DisableVault(srcID); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("disable source: %w", err))
-	}
-	if s.cfgStore != nil {
-		srcCfg.Enabled = false
-		if err := s.cfgStore.PutVault(ctx, srcCfg); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("persist disabled source: %w", err))
-		}
-	}
-
-	// Seal source's active chunk so all data is in sealed chunks.
-	if _, err := s.orch.SealActive(srcID, glid.Nil); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("seal source: %w", err))
-	}
-
-	// Phase 3: Async merge + delete.
-	dstID := dstCfg.ID
-	srcName := s.vaultName(ctx, srcID)
-
-	jobID := s.orch.MigrateVault(ctx, orchestrator.TransferParams{
-		SrcID:       srcID,
-		DstID:       dstID,
-		Description: fmt.Sprintf("Migrate '%s' to '%s'", srcName, s.vaultName(ctx, dstID)),
-		CleanupSrc:  s.makeCleanupFunc(srcID, ""),
-	})
-
-	return connect.NewResponse(&apiv1.MigrateVaultResponse{JobId: []byte(jobID)}), nil
-}
-
-// MergeVaults moves all chunks from a source vault into a destination vault,
-// then deletes the source. Both vaults must support chunk-level moves (ChunkMover).
-func (s *VaultServer) MergeVaults(
-	ctx context.Context,
-	req *connect.Request[apiv1.MergeVaultsRequest],
-) (*connect.Response[apiv1.MergeVaultsResponse], error) {
-	if req.Msg.Source == "" {
-		return nil, errRequired("source")
-	}
-	if req.Msg.Destination == "" {
-		return nil, errRequired("destination")
-	}
-	if req.Msg.Source == req.Msg.Destination {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("source and destination must differ"))
-	}
-
-	srcID, connErr := parseUUID(req.Msg.Source)
-	if connErr != nil {
-		return nil, connErr
-	}
-	dstID, connErr := parseUUID(req.Msg.Destination)
-	if connErr != nil {
-		return nil, connErr
-	}
-
-	// Both vaults must exist.
-	if !s.orch.VaultExists(srcID) {
-		return nil, connect.NewError(connect.CodeNotFound, errors.New("source vault not found"))
-	}
-	if !s.orch.VaultExists(dstID) {
-		return nil, connect.NewError(connect.CodeNotFound, errors.New("destination vault not found"))
-	}
-
-	// Auto-disable source to prevent new data flowing in during merge.
-	if s.orch.IsVaultEnabled(srcID) {
-		if err := s.disableAndPersistVault(ctx, srcID); err != nil {
-			return nil, err
-		}
-	}
-
-	jobID := s.orch.MergeVaults(ctx, orchestrator.TransferParams{
-		SrcID:       srcID,
-		DstID:       dstID,
-		Description: fmt.Sprintf("Merge '%s' into '%s'", s.vaultName(ctx, srcID), s.vaultName(ctx, dstID)),
-		CleanupSrc:  s.makeCleanupFunc(srcID, ""),
-	})
-
-	return connect.NewResponse(&apiv1.MergeVaultsResponse{JobId: []byte(jobID)}), nil
-}
-
 // ExportVault streams all records from a vault.
 func (s *VaultServer) ExportVault(
 	ctx context.Context,
@@ -345,26 +194,6 @@ func (s *VaultServer) exportChunk(vaultID glid.GLID, chunkID chunk.ChunkID, stre
 
 	if len(batch) > 0 {
 		return stream.Send(&apiv1.ExportVaultResponse{Records: batch, HasMore: true})
-	}
-	return nil
-}
-
-func (s *VaultServer) disableAndPersistVault(ctx context.Context, id glid.GLID) error {
-	if err := s.orch.DisableVault(id); err != nil {
-		return connect.NewError(connect.CodeInternal, fmt.Errorf("disable source: %w", err))
-	}
-	if s.cfgStore == nil {
-		return nil
-	}
-	srcCfg, err := s.getFullVaultConfig(ctx, id)
-	if err != nil {
-		// Vault is already disabled in memory; best-effort config persistence.
-		s.logger.Warn("get vault config for persist", "vault", id, "error", err)
-		return nil
-	}
-	srcCfg.Enabled = false
-	if err := s.cfgStore.PutVault(ctx, srcCfg); err != nil {
-		s.logger.Warn("persist disabled source config", "vault", id, "error", err)
 	}
 	return nil
 }
