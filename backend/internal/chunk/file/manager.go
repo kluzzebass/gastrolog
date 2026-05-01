@@ -239,6 +239,15 @@ type chunkMeta struct {
 	sourceStart time.Time
 	sourceEnd   time.Time
 
+	// IngestTSMonotonic starts true and flips to false the first time an
+	// Append delivers a record with IngestTS earlier than the running max.
+	// Determined dynamically per chunk — never assumed by tier — because
+	// tier 1 ingesters (RELP, Syslog, Fluent, etc.) routinely stamp
+	// arbitrary IngestTS values or deliver out of order, and tier 2+
+	// destinations may happen to receive records in IngestTS order.
+	// See gastrolog-66b7x.
+	ingestTSMonotonic bool
+
 	cloudBacked bool // true = chunk lives in cloud, not on local disk
 	archived    bool // true = chunk is in offline storage tier (Glacier, Azure Archive)
 
@@ -261,11 +270,12 @@ func (m *chunkMeta) toChunkMeta() chunk.ChunkMeta {
 		Sealed:      m.sealed,
 		Compressed:  m.compressed || m.cloudBacked, // GLCB blobs are always zstd-compressed
 		DiskBytes:   m.diskBytes,
-		IngestStart: m.ingestStart,
-		IngestEnd:   m.ingestEnd,
-		SourceStart: m.sourceStart,
-		SourceEnd:   m.sourceEnd,
-		CloudBacked: m.cloudBacked,
+		IngestStart:       m.ingestStart,
+		IngestEnd:         m.ingestEnd,
+		SourceStart:       m.sourceStart,
+		SourceEnd:         m.sourceEnd,
+		IngestTSMonotonic: m.ingestTSMonotonic,
+		CloudBacked:       m.cloudBacked,
 		Archived:    m.archived,
 		NumFrames:   m.numFrames,
 	}
@@ -594,6 +604,16 @@ func (m *Manager) updateActiveState(record chunk.Record, rawLen, attrLen uint64)
 	}
 	m.active.meta.writeEnd = record.WriteTS
 
+	// Track IngestTS monotonicity. The first Append seeds the flag (true)
+	// and the running max equals IngestTS. Each subsequent Append flips
+	// the flag to false if the record's IngestTS predates the current max
+	// (i.e. records are no longer in IngestTS-monotonic order). The flag
+	// only flips one direction (true → false). See gastrolog-66b7x.
+	if m.active.meta.ingestStart.IsZero() {
+		m.active.meta.ingestTSMonotonic = true
+	} else if m.active.meta.ingestTSMonotonic && record.IngestTS.Before(m.active.meta.ingestEnd) {
+		m.active.meta.ingestTSMonotonic = false
+	}
 	expandBounds(&m.active.meta.ingestStart, &m.active.meta.ingestEnd, record.IngestTS)
 	if !record.SourceTS.IsZero() {
 		expandBounds(&m.active.meta.sourceStart, &m.active.meta.sourceEnd, record.SourceTS)
@@ -1382,8 +1402,18 @@ func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
 
 	meta.writeStart = firstEntry.WriteTS
 	meta.writeEnd = lastEntry.WriteTS
-	computeIngestBounds(meta, firstEntry, lastEntry)
-	computeSourceBounds(meta, firstEntry, lastEntry)
+	// IngestTS and SourceTS bounds cannot be derived from first+last
+	// physical records on chunks built via ImportRecords (or any chunk
+	// where physical write order doesn't match Ingest/Source TS order).
+	// Such chunks are produced by tier transitions: streamLocal /
+	// StreamAppendToTier preserves each record's IngestTS/SourceTS but
+	// appends in source-WriteTS order, so the physical first/last
+	// records are not the IngestTS extrema. Scanning all idx entries is
+	// O(records) but the idx file is small (12 bytes/entry) and only
+	// loaded once per chunk on manager startup. See gastrolog-66b7x.
+	if err := scanTSBounds(idxFile, recordCount, meta); err != nil {
+		return nil, fmt.Errorf("scan TS bounds for chunk %s: %w", id, err)
+	}
 
 	rawEnd := int64(lastEntry.RawOffset) + int64(lastEntry.RawSize)
 	attrEnd := int64(lastEntry.AttrOffset) + int64(lastEntry.AttrSize)
@@ -1435,6 +1465,56 @@ func (m *Manager) readFirstLastEntries(idxFile *os.File, recordCount uint64) (Id
 	lastEntry := DecodeIdxEntry(entryBuf[:])
 
 	return firstEntry, lastEntry, nil
+}
+
+// scanTSBounds reads every idx entry and records the min/max IngestTS,
+// min/max SourceTS, and IngestTS monotonicity into meta. Required for chunks
+// built via ImportRecords / streamed Append, where physical record order does
+// not match Ingest/Source TS order (so first+last physical entries are not
+// the TS extrema). The monotonicity flag is also derived here — true if and
+// only if every entry's IngestTS is >= its predecessor in physical order.
+// See gastrolog-66b7x.
+func scanTSBounds(idxFile *os.File, recordCount uint64, meta *chunkMeta) error {
+	if recordCount == 0 {
+		return nil
+	}
+	if _, err := idxFile.Seek(IdxHeaderSize, io.SeekStart); err != nil {
+		return fmt.Errorf("seek idx start: %w", err)
+	}
+	var entryBuf [IdxEntrySize]byte
+	var minIngest, maxIngest, minSource, maxSource time.Time
+	monotonic := true
+	var prevIngest time.Time
+	for i := range recordCount {
+		if _, err := io.ReadFull(idxFile, entryBuf[:]); err != nil {
+			return fmt.Errorf("read idx entry %d: %w", i, err)
+		}
+		e := DecodeIdxEntry(entryBuf[:])
+		if i == 0 || e.IngestTS.Before(minIngest) {
+			minIngest = e.IngestTS
+		}
+		if i == 0 || e.IngestTS.After(maxIngest) {
+			maxIngest = e.IngestTS
+		}
+		if i > 0 && e.IngestTS.Before(prevIngest) {
+			monotonic = false
+		}
+		prevIngest = e.IngestTS
+		if !e.SourceTS.IsZero() {
+			if minSource.IsZero() || e.SourceTS.Before(minSource) {
+				minSource = e.SourceTS
+			}
+			if maxSource.IsZero() || e.SourceTS.After(maxSource) {
+				maxSource = e.SourceTS
+			}
+		}
+	}
+	meta.ingestStart = minIngest
+	meta.ingestEnd = maxIngest
+	meta.sourceStart = minSource
+	meta.sourceEnd = maxSource
+	meta.ingestTSMonotonic = monotonic
+	return nil
 }
 
 func computeIngestBounds(meta *chunkMeta, first, last IdxEntry) {
@@ -1923,6 +2003,11 @@ func (s *importState) writeRecord(rec chunk.Record) error {
 		s.meta.writeStart = rec.WriteTS
 	}
 	s.meta.writeEnd = rec.WriteTS
+	if s.meta.ingestStart.IsZero() {
+		s.meta.ingestTSMonotonic = true
+	} else if s.meta.ingestTSMonotonic && rec.IngestTS.Before(s.meta.ingestEnd) {
+		s.meta.ingestTSMonotonic = false
+	}
 	expandBounds(&s.meta.ingestStart, &s.meta.ingestEnd, rec.IngestTS)
 	if !rec.SourceTS.IsZero() {
 		expandBounds(&s.meta.sourceStart, &s.meta.sourceEnd, rec.SourceTS)
@@ -2334,6 +2419,47 @@ func (m *Manager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, boo
 	}
 
 	return lo - 1, true, nil
+}
+
+// ScanActiveIngestTS iterates the active chunk's IngestTS B+ tree, calling
+// cb for each entry's IngestTS in IngestTS-sorted order. No attr or raw
+// reads. Returns ErrChunkNotFound if id is not the current active chunk.
+// See gastrolog-66b7x.
+func (m *Manager) ScanActiveIngestTS(id chunk.ChunkID, cb func(tsNanos int64) bool) error {
+	m.mu.Lock()
+	active := m.active
+	m.mu.Unlock()
+	if active == nil || active.meta.id != id {
+		return chunk.ErrChunkNotFound
+	}
+	it, err := active.ingestBT.Scan()
+	if err != nil {
+		return fmt.Errorf("btree scan: %w", err)
+	}
+	for it.Valid() {
+		if !cb(it.Key()) {
+			return nil
+		}
+		it.Next()
+	}
+	return nil
+}
+
+// ScanActiveByIngestTS iterates the active chunk's records in physical order,
+// exposing IngestTS + Attributes per record. Single pass over idx + attr; the
+// dict is loaded once at the start. Returns ErrChunkNotFound if id is not the
+// current active chunk. See gastrolog-66b7x.
+func (m *Manager) ScanActiveByIngestTS(id chunk.ChunkID, cb func(ingestTS time.Time, attrs chunk.Attributes) bool) error {
+	m.mu.Lock()
+	active := m.active
+	m.mu.Unlock()
+	if active == nil || active.meta.id != id {
+		return chunk.ErrChunkNotFound
+	}
+	idxPath := m.idxLogPath(id)
+	attrPath := m.attrLogPath(id)
+	dictPath := m.dictLogPath(id)
+	return scanIngestAttrsActive(idxPath, attrPath, dictPath, cb)
 }
 
 // FindIngestStartPosition returns the earliest record position with IngestTS >= ts

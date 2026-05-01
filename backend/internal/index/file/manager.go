@@ -2,6 +2,7 @@ package file
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -260,28 +261,87 @@ func (m *Manager) OpenJSONPVIndex(chunkID chunk.ChunkID) (*index.Index[index.JSO
 	return idx, status, nil
 }
 
+// loadIngestTSMmap returns a mmap'd view of the chunk's ingest TS index
+// file, caching the mapping so repeated histogram lookups don't re-mmap.
+// Sealed index files are immutable. The cached mmap is released on
+// DeleteIndexes via evictTSMmap. NO heap-allocated decoded entries —
+// callers binary-search directly on the mapped bytes. See gastrolog-66b7x.
+func (m *Manager) loadIngestTSMmap(chunkID chunk.ChunkID) (filetsidx.MmapView, error) {
+	key := chunkID.String() + ":tsidx_ingest_mmap"
+	if v, ok := m.cache.Load(key); ok {
+		return v.(filetsidx.MmapView), nil
+	}
+	mv, err := filetsidx.OpenIngestMmap(m.dir, chunkID)
+	if err != nil {
+		return filetsidx.MmapView{}, err
+	}
+	m.cache.Store(key, mv)
+	return mv, nil
+}
+
+func (m *Manager) loadSourceTSMmap(chunkID chunk.ChunkID) (filetsidx.MmapView, error) {
+	key := chunkID.String() + ":tsidx_source_mmap"
+	if v, ok := m.cache.Load(key); ok {
+		return v.(filetsidx.MmapView), nil
+	}
+	mv, err := filetsidx.OpenSourceMmap(m.dir, chunkID)
+	if err != nil {
+		return filetsidx.MmapView{}, err
+	}
+	m.cache.Store(key, mv)
+	return mv, nil
+}
+
 // FindIngestStartPosition implements index.IndexManager.
 func (m *Manager) FindIngestStartPosition(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error) {
-	pos, found, err := filetsidx.SearchIngestFile(m.dir, chunkID, ts.UnixNano())
+	mv, err := m.loadIngestTSMmap(chunkID)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if os.IsNotExist(err) || errors.Is(err, filetsidx.ErrIndexTooSmall) {
 			return 0, false, index.ErrIndexNotFound
 		}
 		return 0, false, err
 	}
-	return pos, found, nil
+	_, pos, ok := mv.SearchTS(ts.UnixNano())
+	return uint64(pos), ok, nil
+}
+
+// FindIngestEntryIndex implements index.IndexManager.
+func (m *Manager) FindIngestEntryIndex(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+	mv, err := m.loadIngestTSMmap(chunkID)
+	if err != nil {
+		if os.IsNotExist(err) || errors.Is(err, filetsidx.ErrIndexTooSmall) {
+			return 0, false, index.ErrIndexNotFound
+		}
+		return 0, false, err
+	}
+	rank, _, ok := mv.SearchTS(ts.UnixNano())
+	return uint64(rank), ok, nil
 }
 
 // FindSourceStartPosition implements index.IndexManager.
 func (m *Manager) FindSourceStartPosition(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error) {
-	pos, found, err := filetsidx.SearchSourceFile(m.dir, chunkID, ts.UnixNano())
+	mv, err := m.loadSourceTSMmap(chunkID)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if os.IsNotExist(err) || errors.Is(err, filetsidx.ErrIndexTooSmall) {
 			return 0, false, index.ErrIndexNotFound
 		}
 		return 0, false, err
 	}
-	return pos, found, nil
+	_, pos, ok := mv.SearchTS(ts.UnixNano())
+	return uint64(pos), ok, nil
+}
+
+// FindSourceEntryIndex implements index.IndexManager.
+func (m *Manager) FindSourceEntryIndex(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+	mv, err := m.loadSourceTSMmap(chunkID)
+	if err != nil {
+		if os.IsNotExist(err) || errors.Is(err, filetsidx.ErrIndexTooSmall) {
+			return 0, false, index.ErrIndexNotFound
+		}
+		return 0, false, err
+	}
+	rank, _, ok := mv.SearchTS(ts.UnixNano())
+	return uint64(rank), ok, nil
 }
 
 // LoadIngestEntries implements index.IndexManager.

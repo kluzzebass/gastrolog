@@ -71,6 +71,23 @@ type ChunkManager interface {
 	// Returns (0, false, nil) if no matching entry exists or the chunk is sealed.
 	FindIngestStartPosition(id ChunkID, ts time.Time) (uint64, bool, error)
 
+	// ScanActiveIngestTS iterates the active chunk's IngestTS B+ tree in
+	// IngestTS-sorted order. The callback receives IngestTS in nanoseconds
+	// and returns false to stop early. Returns ErrChunkNotFound if id is
+	// not the active chunk. No attr or raw reads — cheap. Used by the
+	// histogram counts path on non-monotonic active chunks (tier 2+
+	// destinations) where position-as-rank assumptions break.
+	// See gastrolog-66b7x.
+	ScanActiveIngestTS(id ChunkID, cb func(tsNanos int64) bool) error
+
+	// ScanActiveByIngestTS iterates the active chunk's records in physical
+	// (append) order, exposing both IngestTS and Attributes per record.
+	// Returns ErrChunkNotFound if id is not the active chunk. Used by the
+	// histogram level-breakdown path on non-monotonic active chunks where
+	// per-bucket position-based sampling via ScanAttrs is unsafe. See
+	// gastrolog-66b7x.
+	ScanActiveByIngestTS(id ChunkID, cb func(ingestTS time.Time, attrs Attributes) bool) error
+
 	// FindSourceStartPosition returns the earliest record position with SourceTS >= ts.
 	// For active chunks backed by a B+ tree, this does a tree lookup.
 	// Returns (0, false, nil) if no matching entry exists or the chunk is sealed.

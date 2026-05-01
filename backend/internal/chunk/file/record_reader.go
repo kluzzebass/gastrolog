@@ -616,6 +616,61 @@ func scanAttrsSealed(idxPath, attrPath, dictPath string, startPos uint64, fn fun
 // scanAttrsActive iterates all records in the active (unsealed) chunk using
 // stdio reads of idx.log and attr.log, skipping raw.log. Loads the dict from
 // disk to avoid racing with concurrent Append calls on the live dict.
+// scanIngestAttrsActive iterates an active chunk's idx + attr files,
+// invoking fn with each record's IngestTS and Attributes. Reads the entire
+// idx.log in one syscall (small: 12 bytes/record), then a contiguous attr
+// region per record range. Used by the histogram path on non-monotonic
+// active chunks. See gastrolog-66b7x.
+func scanIngestAttrsActive(idxPath, attrPath, dictPath string, fn func(ingestTS time.Time, attrs chunk.Attributes) bool) error {
+	dict, err := loadDict(dictPath)
+	if err != nil {
+		return err
+	}
+	idxFile, err := os.Open(filepath.Clean(idxPath))
+	if err != nil {
+		return fmt.Errorf("open idx.log %s: %w", idxPath, err)
+	}
+	defer func() { _ = idxFile.Close() }()
+	idxInfo, err := idxFile.Stat()
+	if err != nil {
+		return fmt.Errorf("stat idx.log %s: %w", idxPath, err)
+	}
+	recordCount := RecordCount(idxInfo.Size())
+	if recordCount == 0 {
+		return nil
+	}
+	idxBuf := make([]byte, recordCount*IdxEntrySize)
+	if _, err := idxFile.ReadAt(idxBuf, IdxHeaderSize); err != nil {
+		return fmt.Errorf("read idx.log: %w", err)
+	}
+	attrFile, err := os.Open(filepath.Clean(attrPath))
+	if err != nil {
+		return fmt.Errorf("open attr.log %s: %w", attrPath, err)
+	}
+	defer func() { _ = attrFile.Close() }()
+	attrInfo, err := attrFile.Stat()
+	if err != nil {
+		return fmt.Errorf("stat attr.log %s: %w", attrPath, err)
+	}
+	attrSize := attrInfo.Size() - int64(format.HeaderSize)
+	attrAll := make([]byte, attrSize)
+	if _, err := attrFile.ReadAt(attrAll, int64(format.HeaderSize)); err != nil {
+		return fmt.Errorf("read attr.log: %w", err)
+	}
+	for i := range recordCount {
+		entry := DecodeIdxEntry(idxBuf[i*IdxEntrySize : (i+1)*IdxEntrySize])
+		attrEnd := int64(entry.AttrOffset) + int64(entry.AttrSize)
+		attrs, err := chunk.DecodeWithDict(attrAll[entry.AttrOffset:attrEnd], dict)
+		if err != nil {
+			return fmt.Errorf("decode attrs at record %d: %w", i, err)
+		}
+		if !fn(entry.IngestTS, attrs) {
+			return nil
+		}
+	}
+	return nil
+}
+
 func scanAttrsActive(idxPath, attrPath, dictPath string, startPos uint64, fn func(writeTS time.Time, attrs chunk.Attributes) bool) error {
 	dict, err := loadDict(dictPath)
 	if err != nil {

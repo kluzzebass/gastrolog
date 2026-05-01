@@ -138,6 +138,7 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
           : null;
         let hasMore = false;
         let histogram: HistogramBucket[] | null = null;
+        let serverElapsedMs: number | null = null;
 
         // Stream results
         for await (const response of queryClient.search(
@@ -150,6 +151,9 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
           // Capture histogram from whichever response carries it.
           if (response.histogram.length > 0) {
             histogram = response.histogram;
+          }
+          if (response.serverElapsedMs > BigInt(0)) {
+            serverElapsedMs = Number(response.serverElapsedMs);
           }
 
           // Pipeline queries return a single response with tableResult.
@@ -186,7 +190,13 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
         }
 
         abortRef.current = null;
-        const elapsed = Math.round(performance.now() - searchStartRef.current);
+        // Prefer the server-reported processing time so the UI displays
+        // "what the server actually did", not the round-trip including
+        // network/transport overhead. Fall back to client-side wall-clock
+        // for legacy servers that don't set the field. See gastrolog-66b7x.
+        const elapsed =
+          serverElapsedMs ??
+          Math.round(performance.now() - searchStartRef.current);
         setState((prev) => ({
           ...prev,
           // In silent mode, this is the single atomic swap.

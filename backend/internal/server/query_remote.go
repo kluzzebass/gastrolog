@@ -102,6 +102,19 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, remoteTo
 //
 // Uses tier-level NodeID (set by the placement manager) for node assignment.
 func (s *QueryServer) remoteVaultsByNode(ctx context.Context, selectedVaults []glid.GLID) map[string][]glid.GLID {
+	return s.remoteVaultsByNodeFiltered(ctx, selectedVaults, s.orch.LocalLeaderTierIDs())
+}
+
+// remoteHistogramVaultsByNode is the histogram-specific variant: it skips
+// vaults whose every tier has a local REPLICA (leader or follower) on this
+// node. Used by the histogram path so we don't fan out across the cluster
+// when chunks are already replicated locally — approximate counts from a
+// local follower are acceptable. See gastrolog-66b7x.
+func (s *QueryServer) remoteHistogramVaultsByNode(ctx context.Context, selectedVaults []glid.GLID) map[string][]glid.GLID {
+	return s.remoteVaultsByNodeFiltered(ctx, selectedVaults, s.orch.LocalReplicaTierIDs())
+}
+
+func (s *QueryServer) remoteVaultsByNodeFiltered(ctx context.Context, selectedVaults []glid.GLID, localTierIDs map[glid.GLID]bool) map[string][]glid.GLID {
 	vaults, err := s.cfgStore.ListVaults(ctx)
 	if err != nil {
 		return nil
@@ -119,12 +132,6 @@ func (s *QueryServer) remoteVaultsByNode(ctx context.Context, selectedVaults []g
 	for _, id := range selectedVaults {
 		selected[id] = true
 	}
-
-	// For each vault, fan out to remote leaders for tiers this node
-	// doesn't have locally. Tiers that exist locally (as leader or
-	// follower) are searched by the local query engine — don't
-	// double-query their leader remotely.
-	localTierIDs := s.orch.LocalLeaderTierIDs()
 
 	tierMap := make(map[glid.GLID]*system.TierConfig, len(tiers))
 	for i := range tiers {

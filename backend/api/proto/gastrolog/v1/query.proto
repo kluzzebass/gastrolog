@@ -68,6 +68,12 @@ message SearchResponse {
   // Number of chunks skipped because they are in an offline storage tier
   // (S3 Glacier, Azure Archive). Set on the first response message.
   int32 archived_chunks = 6;
+
+  // Server-side processing time in milliseconds, measured from the start of
+  // request handling to the moment this message is sent. Set on the first
+  // response message only. Excludes network/transport time so the UI can
+  // distinguish server work from round-trip cost. See gastrolog-66b7x.
+  int64 server_elapsed_ms = 7;
 }
 
 // HistogramBucket holds the count for a single time bucket in the volume histogram.

@@ -41,6 +41,12 @@ func (f *retentionFakeChunkManager) OpenCursor(id chunk.ChunkID) (chunk.RecordCu
 func (f *retentionFakeChunkManager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
 	return 0, false, nil
 }
+func (f *retentionFakeChunkManager) ScanActiveByIngestTS(_ chunk.ChunkID, _ func(time.Time, chunk.Attributes) bool) error {
+	return chunk.ErrChunkNotFound
+}
+func (f *retentionFakeChunkManager) ScanActiveIngestTS(_ chunk.ChunkID, _ func(int64) bool) error {
+	return chunk.ErrChunkNotFound
+}
 func (f *retentionFakeChunkManager) FindIngestStartPosition(_ chunk.ChunkID, _ time.Time) (uint64, bool, error) {
 	return 0, false, nil
 }
@@ -102,6 +108,12 @@ func (f *retentionFakeIndexManager) FindIngestStartPosition(chunkID chunk.ChunkI
 	return 0, false, index.ErrIndexNotFound
 }
 func (f *retentionFakeIndexManager) FindSourceStartPosition(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+	return 0, false, index.ErrIndexNotFound
+}
+func (f *retentionFakeIndexManager) FindIngestEntryIndex(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+	return 0, false, index.ErrIndexNotFound
+}
+func (f *retentionFakeIndexManager) FindSourceEntryIndex(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error) {
 	return 0, false, index.ErrIndexNotFound
 }
 func (f *retentionFakeIndexManager) OpenJSONPathIndex(chunkID chunk.ChunkID) (*index.Index[index.JSONPathIndexEntry], index.JSONIndexStatus, error) {
