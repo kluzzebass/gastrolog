@@ -280,17 +280,41 @@ func (r *TierLifecycleReconciler) onRetentionPending(id chunk.ChunkID) {
 	// Audit-only. The actual cleanup goes through CmdRequestDelete.
 }
 
+// onTransitionStreamed fires on the source tier when the
+// CmdTransitionStreamed apply commits. The chunk has finished
+// streaming to the destination and is now eligible for expiration —
+// pending the destination's transition receipt. Trigger an immediate
+// confirm-and-expire pass on this chunk instead of waiting for the
+// next retention sweep tick.
+//
+// If the destination's receipt hasn't committed yet (common — the
+// receipt apply may still be propagating), confirmStreamedOne no-ops
+// and the matching onTransitionReceived callback (or the periodic
+// sweep, as a safety net) will retry. See gastrolog-1g6br.
+//
+// Must run in a goroutine: this is the FSM apply pump, and the path
+// proposes CmdRequestDelete via reconciler.deleteChunk → posting on
+// the same Raft we are draining would deadlock.
 func (r *TierLifecycleReconciler) onTransitionStreamed(id chunk.ChunkID) {
-	r.logger.Debug("onTransitionStreamed (skeleton no-op)", "chunk", id)
-	// Step 6 fills this in: trigger CmdRequestDelete on the source
-	// once the destination has acked CmdTransitionReceived.
+	r.logger.Debug("onTransitionStreamed", "chunk", id)
+	if r.orch == nil {
+		return
+	}
+	go r.orch.tryEventDrivenExpire(r.vaultID, r.tierID, id)
 }
 
+// onTransitionReceived fires on the destination tier when the
+// CmdTransitionReceived apply commits. The receipt is now visible to
+// every node hosting this tier. Notify the source-tier runner in the
+// same vault to confirm and expire its copy immediately. Must run in
+// a goroutine for the same reason as onTransitionStreamed (apply-pump
+// deadlock avoidance). See gastrolog-1g6br.
 func (r *TierLifecycleReconciler) onTransitionReceived(sourceChunkID chunk.ChunkID) {
-	r.logger.Debug("onTransitionReceived (skeleton no-op)", "source_chunk", sourceChunkID)
-	// Step 6 uses this on source-tier reconcilers paired with
-	// onTransitionStreamed to drive the source delete via the receipt
-	// protocol.
+	r.logger.Debug("onTransitionReceived", "source_chunk", sourceChunkID)
+	if r.orch == nil {
+		return
+	}
+	go r.orch.notifyReceiptConfirmed(r.vaultID, sourceChunkID)
 }
 
 // onRequestDelete fires on every node when CmdRequestDelete commits.

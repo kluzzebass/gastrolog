@@ -266,6 +266,54 @@ func (r *retentionRunner) confirmStreamedTransitions(cfg *system.Config) {
 	}
 }
 
+// confirmStreamedOne is the single-chunk version of
+// confirmStreamedTransitions, called from the event-driven path
+// (gastrolog-1g6br) so the source-side expire happens within
+// milliseconds of the destination committing the receipt instead of
+// waiting up to a full retention sweep tick.
+//
+// No-ops if this runner does not currently hold the chunk in
+// transitionStreamed state — every cross-tier callback fan-out runs
+// confirmStreamedOne on every source-tier candidate in the vault, so
+// the runner that doesn't hold the chunk just bails cheaply.
+//
+// Idempotent against the periodic confirmStreamedTransitions sweep:
+// if the sweep already expired the chunk, the second pass becomes a
+// no-op (transitionStreamed list no longer contains the ID).
+func (r *retentionRunner) confirmStreamedOne(cfg *system.Config, id chunk.ChunkID) {
+	if r.orch == nil {
+		return
+	}
+	r.mu.Lock()
+	tier := r.findTierInstance()
+	r.mu.Unlock()
+	if tier == nil || tier.ListTransitionStreamed == nil {
+		return
+	}
+	if !slices.Contains(tier.ListTransitionStreamed(), id) {
+		return
+	}
+	nextTierID, _ := r.resolveNextTier(cfg)
+	if nextTierID == glid.Nil {
+		return
+	}
+	destTier := r.findDestTierInstance(nextTierID)
+	if destTier != nil && destTier.ApplyRaftTransitionReceived != nil &&
+		!r.isReceiptConfirmed(destTier, id) {
+		if err := destTier.ApplyRaftTransitionReceived(id); err != nil {
+			r.logger.Warn("transition: retry transition receipt failed (event-driven)",
+				"vault", r.vaultID, "source_tier", r.tierID, "chunk", id.String(),
+				"dest_tier", nextTierID, "error", err)
+		}
+	}
+	if r.isReceiptConfirmed(destTier, id) {
+		r.expireChunk(id, "transition-source-expire")
+		r.logger.Debug("transition: receipt confirmed (event-driven), expired",
+			"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(),
+			"dest_tier", nextTierID)
+	}
+}
+
 // isReceiptConfirmed checks whether the destination tier has committed a
 // transition receipt for the given source chunk ID. If the destination has
 // no local tier instance or no Raft, falls back to true — the stream
