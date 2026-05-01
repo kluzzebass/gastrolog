@@ -928,6 +928,38 @@ func TestAppendToTierTierNotFound(t *testing.T) {
 	}
 }
 
+// TestImportToTierTierNotLocal pins gastrolog-2t48z: when ImportToTier
+// is invoked against a (vault, tier) pair where the tier instance has
+// been evicted from this node by placement reconfiguration, the error
+// must be ErrTierNotLocal — not ErrVaultNotFound — so log lines don't
+// suggest the vault was deleted.
+func TestImportToTierTierNotLocal(t *testing.T) {
+	t.Parallel()
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
+
+	tierID := glid.New()
+	vaultID := glid.New()
+	tier := newMemTier(t, tierID, false, nil)
+	vault := NewVault(vaultID, tier)
+	orch.RegisterVault(vault)
+
+	// Vault exists, but ask for a tier that doesn't live here.
+	bogusTierID := glid.New()
+	iter := func() (chunk.Record, error) {
+		return chunk.Record{}, chunk.ErrNoMoreRecords
+	}
+	err := orch.ImportToTier(context.Background(), vaultID, bogusTierID, chunk.NewChunkID(), iter)
+	if err == nil {
+		t.Fatal("expected error for non-resident tier")
+	}
+	if !errors.Is(err, ErrTierNotLocal) {
+		t.Errorf("expected ErrTierNotLocal, got %v", err)
+	}
+	if errors.Is(err, ErrVaultNotFound) {
+		t.Errorf("must NOT be ErrVaultNotFound — vault is registered, only tier instance is missing: %v", err)
+	}
+}
+
 func TestImportToTierDrainsIteratorOnSkip(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})

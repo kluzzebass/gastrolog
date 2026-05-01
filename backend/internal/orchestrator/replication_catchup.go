@@ -129,8 +129,13 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, tierID glid
 		if err := o.replicateToFollower(ctx, vaultID, tierID, meta.ID, tier.Chunks, nodeID); err != nil {
 			// If the follower rejected because its tier isn't built yet
 			// (recovering node still in startup), return a retryable error.
-			// The scheduler will re-run the job.
-			if strings.Contains(err.Error(), "vault not found") {
+			// The scheduler will re-run the job. Sentinel sentinels don't
+			// survive the cluster RPC boundary (the handler concatenates
+			// strings) so we substring-match both error wordings — the
+			// legacy "vault not found" and the new "tier not registered on
+			// this node" (gastrolog-2t48z).
+			msg := err.Error()
+			if strings.Contains(msg, "vault not found") || strings.Contains(msg, "tier not registered on this node") {
 				return fmt.Errorf("follower %s not ready for tier %s (still building): %w", nodeID, tierID, err)
 			}
 			o.logger.Warn("replication catchup: transfer failed",

@@ -32,7 +32,7 @@ import (
 func (o *Orchestrator) SealActiveTier(vaultID, tierID glid.GLID, expectedChunkID chunk.ChunkID) error {
 	tier := o.findLocalTier(vaultID, tierID)
 	if tier == nil {
-		return ErrVaultNotFound
+		return fmt.Errorf("%w: tier %s in vault %s", ErrTierNotLocal, tierID, vaultID)
 	}
 	active := tier.Chunks.Active()
 	if active == nil {
