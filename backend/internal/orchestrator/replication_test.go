@@ -176,8 +176,14 @@ func TestSealActiveTierTierNotFound(t *testing.T) {
 
 	wrongTierID := glid.New()
 	err := orch.SealActiveTier(vaultID, wrongTierID, chunk.ChunkID{})
-	if !errors.Is(err, ErrVaultNotFound) {
-		t.Errorf("expected ErrVaultNotFound, got %v", err)
+	// gastrolog-2t48z: this path is "tier not registered on this node",
+	// not "vault not found" — the vault itself is registered. Assert
+	// the new sentinel and the old wording is gone from the message.
+	if !errors.Is(err, ErrTierNotLocal) {
+		t.Errorf("expected ErrTierNotLocal, got %v", err)
+	}
+	if errors.Is(err, ErrVaultNotFound) {
+		t.Errorf("must NOT be ErrVaultNotFound — vault exists, only tier instance is missing: %v", err)
 	}
 }
 

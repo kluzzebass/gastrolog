@@ -1039,7 +1039,11 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, tierID 
 		return nil
 	}()
 	if ref == nil {
-		return fmt.Errorf("%w: tier %s in vault %s", ErrVaultNotFound, tierID, vaultID)
+		// "tier not registered on this node" rather than "vault not found":
+		// the vault almost always still exists cluster-wide; only the tier
+		// instance was evicted from this node by placement churn (or never
+		// landed here in the first place). See gastrolog-2t48z.
+		return fmt.Errorf("%w: tier %s in vault %s", ErrTierNotLocal, tierID, vaultID)
 	}
 	// Reject stale ImportSealed RPCs for chunks the cluster already deleted.
 	// The race is: leader schedules replication, retention fires, delete is
