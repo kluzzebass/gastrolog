@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"gastrolog/internal/orchestrator"
 )
 
 // peerInspectorTimeout caps how long a single peer's inspector RPC may
@@ -53,7 +55,15 @@ func peerFanOut[T any](
 			defer cancel()
 			val, err := fn(peerCtx, nodeID)
 			if err != nil {
-				logger.Warn(op+": remote node failed",
+				// Demote benign placement-churn errors (peer no longer
+				// owns the vault/tier) to Debug — these fire during
+				// reconfiguration and aren't operational failures. See
+				// gastrolog-5z607.
+				level := slog.LevelWarn
+				if orchestrator.IsPlacementChurnErr(err) {
+					level = slog.LevelDebug
+				}
+				logger.Log(peerCtx, level, op+": remote node failed",
 					"node", nodeID, "error", err)
 				return
 			}
