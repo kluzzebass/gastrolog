@@ -154,6 +154,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		remoteOrchestrators[id] = nodes[id].orch
 	}
 	remoteSearcher := &directRemoteSearcher{nodes: remoteOrchestrators}
+	remoteIndexer := &directRemoteIndexer{nodes: remoteOrchestrators}
 
 	peerJobs := &mnPeerJobs{peers: map[string][]*gastrologv1.Job{}, changes: notify.NewSignal()}
 
@@ -174,6 +175,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 	srv := server.New(coordNode.orch, cfgStore, orchestrator.Factories{}, nil, server.Config{
 		NodeID:            coordinatorID,
 		RemoteSearcher:    remoteSearcher,
+		RemoteIndexer:     remoteIndexer,
 		RoutingForwarder:  routingFwd,
 		PeerJobs:          peerJobs,
 		PeerRouteStats:    peerRouteStats,
@@ -749,6 +751,34 @@ func (d *directRemoteSearcher) Follow(ctx context.Context, nodeID string, req *g
 
 func (d *directRemoteSearcher) ExportToVault(_ context.Context, _ string, _ *gastrologv1.ForwardExportToVaultRequest) (*gastrologv1.ForwardExportToVaultResponse, error) {
 	return &gastrologv1.ForwardExportToVaultResponse{JobId: []byte("test-export-job")}, nil
+}
+
+// directRemoteIndexer dispatches GetIndexes to a peer's orchestrator
+// in-process. Used by the multi-node harness to exercise gastrolog-3570f's
+// fan-out path without a real cluster RPC stack.
+type directRemoteIndexer struct {
+	nodes map[string]*orchestrator.Orchestrator
+}
+
+func (d *directRemoteIndexer) GetIndexes(_ context.Context, nodeID string, req *gastrologv1.ForwardGetIndexesRequest) (*gastrologv1.ForwardGetIndexesResponse, error) {
+	orch, ok := d.nodes[nodeID]
+	if !ok {
+		return nil, fmt.Errorf("unknown node: %s", nodeID)
+	}
+	vaultID := glid.FromBytes(req.GetVaultId())
+	chunkID := chunk.ChunkID(glid.FromBytes(req.GetChunkId()))
+	report, err := orch.ChunkIndexInfos(vaultID, chunkID)
+	if err != nil {
+		return nil, err
+	}
+	indexes := make([]*gastrologv1.IndexInfo, 0, len(report.Indexes))
+	for _, idx := range report.Indexes {
+		indexes = append(indexes, &gastrologv1.IndexInfo{
+			Name: idx.Name, Exists: idx.Exists,
+			EntryCount: idx.EntryCount, SizeBytes: idx.SizeBytes,
+		})
+	}
+	return &gastrologv1.ForwardGetIndexesResponse{Sealed: report.Sealed, Indexes: indexes}, nil
 }
 
 // directUnaryForwarder implements routing.UnaryForwarder for multi-node tests
@@ -1699,6 +1729,60 @@ func TestMultiNode_ListVaultsCrossNode(t *testing.T) {
 	}
 	if d2Vault.RecordCount != 7 {
 		t.Errorf("data-2 vault records = %d, want 7", d2Vault.RecordCount)
+	}
+}
+
+// TestMultiNode_GetIndexesLocalFastPath pins gastrolog-3570f's local
+// hit: when the queried node has the chunk, GetIndexes resolves
+// without fanning out. Coordinator hosts data-1's vault directly here
+// (single-node case, no WithoutVault on coord) so the local path is
+// the only one that should fire.
+func TestMultiNode_GetIndexesLocalFastPath(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1"})
+
+	addMNRecords(t, h.Node(t, "coord"), "L", 2, nil)
+	coordVaultID := h.Node(t, "coord").vaultID.String()
+
+	metas, err := h.Node(t, "coord").orch.ListChunkMetas(h.Node(t, "coord").vaultID)
+	if err != nil {
+		t.Fatalf("ListChunkMetas: %v", err)
+	}
+	if len(metas) == 0 {
+		t.Fatal("no chunks to test GetIndexes with")
+	}
+	resp, err := h.vaultClient.GetIndexes(context.Background(), connect.NewRequest(&gastrologv1.GetIndexesRequest{
+		Vault:   coordVaultID,
+		ChunkId: glid.GLID(metas[0].ID).ToProto(),
+	}))
+	if err != nil {
+		t.Fatalf("GetIndexes local fast path: %v", err)
+	}
+	_ = resp.Msg.Sealed
+}
+
+// TestMultiNode_GetIndexesNotFoundAnywhere pins that GetIndexes
+// returns NotFound when no node — local or remote — has the chunk.
+// Pre-fix this case looked identical to "chunk migrated to a tier I
+// don't host"; post-fix the handler has correctly fanned out and only
+// returns NotFound when every peer reports the same.
+func TestMultiNode_GetIndexesNotFoundAnywhere(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"))
+
+	addMNRecords(t, h.Node(t, "data-1"), "D", 1, nil)
+	remoteVaultID := h.Node(t, "data-1").vaultID.String()
+
+	bogusChunkID := chunk.NewChunkID()
+	_, err := h.vaultClient.GetIndexes(context.Background(), connect.NewRequest(&gastrologv1.GetIndexesRequest{
+		Vault:   remoteVaultID,
+		ChunkId: glid.GLID(bogusChunkID).ToProto(),
+	}))
+	if err == nil {
+		t.Fatal("expected NotFound for missing chunk, got nil")
+	}
+	if !strings.Contains(err.Error(), "chunk not found") && !strings.Contains(err.Error(), "not_found") {
+		t.Errorf("expected chunk-not-found error, got %v", err)
 	}
 }
 

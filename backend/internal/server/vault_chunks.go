@@ -272,7 +272,13 @@ func (s *VaultServer) GetChunk(
 }
 
 // GetIndexes returns index status for a chunk.
-// Routing: RouteTargeted — the interceptor forwards to the vault-owning node.
+//
+// Routing: RouteLocal — the handler tries the local node first, then
+// fans out to remote tier-hosting nodes if the chunk has migrated to a
+// tier this node doesn't host. Cross-tier migration (warm → cloud, etc.)
+// shifts a chunk's owning node, so a single RouteTargeted hop would
+// frequently miss and produce ErrChunkNotFound log spam. See
+// gastrolog-3570f.
 func (s *VaultServer) GetIndexes(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetIndexesRequest],
@@ -290,16 +296,55 @@ func (s *VaultServer) GetIndexes(
 		return nil, errInvalidArg(err)
 	}
 
-	report, err := s.orch.ChunkIndexInfos(vaultID, chunkID)
-	if err != nil {
+	// Local first: cheap path when this node hosts the tier.
+	if report, err := s.orch.ChunkIndexInfos(vaultID, chunkID); err == nil {
+		return connect.NewResponse(reportToProto(report)), nil
+	} else if !errors.Is(err, chunk.ErrChunkNotFound) && !errors.Is(err, orchestrator.ErrVaultNotFound) {
 		return nil, mapVaultError(err)
 	}
 
+	// Local doesn't have it — chunk has migrated to a tier on another
+	// node. Fan out to all peers hosting tiers for this vault; the one
+	// that has the chunk responds with index info, others say
+	// ErrChunkNotFound and are silently elided.
+	if s.remoteIndexer == nil {
+		return nil, mapVaultError(chunk.ErrChunkNotFound)
+	}
+	remoteNodes := s.remoteTierNodes(ctx, vaultID)
+	if len(remoteNodes) == 0 {
+		return nil, mapVaultError(chunk.ErrChunkNotFound)
+	}
+	results, ok := peerFanOut(ctx, s.logger, "GetIndexes", remoteNodes,
+		func(peerCtx context.Context, nodeID string) (*apiv1.GetIndexesResponse, error) {
+			remote, err := s.remoteIndexer.GetIndexes(peerCtx, nodeID, &apiv1.ForwardGetIndexesRequest{
+				VaultId: vaultID.ToProto(),
+				ChunkId: chunkID[:],
+			})
+			if err != nil {
+				return nil, err
+			}
+			return &apiv1.GetIndexesResponse{
+				Sealed:  remote.Sealed,
+				Indexes: remote.Indexes,
+			}, nil
+		})
+	for i, resp := range results {
+		if !ok[i] || resp == nil || len(resp.Indexes) == 0 {
+			continue
+		}
+		return connect.NewResponse(resp), nil
+	}
+	return nil, mapVaultError(chunk.ErrChunkNotFound)
+}
+
+// reportToProto converts an orchestrator chunk-index report into the
+// proto response shape. Extracted from the original GetIndexes body so
+// the local-first path and the (future) all-results merge can share it.
+func reportToProto(report *orchestrator.ChunkIndexReport) *apiv1.GetIndexesResponse {
 	resp := &apiv1.GetIndexesResponse{
 		Sealed:  report.Sealed,
 		Indexes: make([]*apiv1.IndexInfo, 0, len(report.Indexes)),
 	}
-
 	for _, idx := range report.Indexes {
 		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{
 			Name:       idx.Name,
@@ -308,8 +353,7 @@ func (s *VaultServer) GetIndexes(
 			SizeBytes:  idx.SizeBytes,
 		})
 	}
-
-	return connect.NewResponse(resp), nil
+	return resp
 }
 
 // AnalyzeChunk returns detailed index analysis for a chunk.

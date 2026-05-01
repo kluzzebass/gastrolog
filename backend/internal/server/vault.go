@@ -29,6 +29,13 @@ type RemoteChunkLister interface {
 	ListChunks(ctx context.Context, nodeID string, req *apiv1.ForwardListChunksRequest) (*apiv1.ForwardListChunksResponse, error)
 }
 
+// RemoteIndexer queries chunk index information on a remote node.
+// Used by GetIndexes when the chunk has migrated to a tier this node
+// doesn't host. See gastrolog-3570f.
+type RemoteIndexer interface {
+	GetIndexes(ctx context.Context, nodeID string, req *apiv1.ForwardGetIndexesRequest) (*apiv1.ForwardGetIndexesResponse, error)
+}
+
 // VaultServer implements the VaultService.
 type VaultServer struct {
 	orch              *orchestrator.Orchestrator
@@ -36,6 +43,7 @@ type VaultServer struct {
 	factories         orchestrator.Factories
 	peerStats         PeerVaultStatsProvider
 	remoteChunkLister RemoteChunkLister
+	remoteIndexer     RemoteIndexer
 	localNodeID       string
 	logger            *slog.Logger
 }
@@ -43,13 +51,14 @@ type VaultServer struct {
 var _ gastrologv1connect.VaultServiceHandler = (*VaultServer)(nil)
 
 // NewVaultServer creates a new VaultServer.
-func NewVaultServer(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orchestrator.Factories, peerStats PeerVaultStatsProvider, remoteChunkLister RemoteChunkLister, localNodeID string, logger *slog.Logger) *VaultServer {
+func NewVaultServer(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orchestrator.Factories, peerStats PeerVaultStatsProvider, remoteChunkLister RemoteChunkLister, remoteIndexer RemoteIndexer, localNodeID string, logger *slog.Logger) *VaultServer {
 	return &VaultServer{
 		orch:              orch,
 		cfgStore:          cfgStore,
 		factories:         factories,
 		peerStats:         peerStats,
 		remoteChunkLister: remoteChunkLister,
+		remoteIndexer:     remoteIndexer,
 		localNodeID:       localNodeID,
 		logger:            logging.Default(logger).With("component", "vault-server"),
 	}
