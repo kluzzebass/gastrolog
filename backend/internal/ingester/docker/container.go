@@ -134,12 +134,7 @@ func streamOnce(
 			maps.Copy(msgAttrs, attrs)
 			msgAttrs["stream"] = entry.Stream
 
-			msg := orchestrator.IngestMessage{
-				Attrs:      msgAttrs,
-				Raw:        entry.Line,
-				IngestTS:   time.Now(),
-				IngesterID: ingesterID,
-			}
+			msg := buildMessage(msgAttrs, entry.Line, ingesterID, time.Now())
 			if !entry.Timestamp.IsZero() {
 				msg.SourceTS = entry.Timestamp
 				*lastTS = entry.Timestamp
