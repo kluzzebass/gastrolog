@@ -133,9 +133,9 @@ func TestStrategyDistribution(t *testing.T) {
 	}
 
 	want := map[routing.Strategy]int{
-		routing.RouteLocal:    43, // +1: WatchChunks (gastrolog-1jijm), +1: PreviewJSONLookup (gastrolog-4q2b3), +1: PreviewYAMLLookup (gastrolog-l1ywp), +1: WatchIngesterStatus (gastrolog-14ejy)
+		routing.RouteLocal:    44, // +1: WatchChunks (gastrolog-1jijm), +1: PreviewJSONLookup (gastrolog-4q2b3), +1: PreviewYAMLLookup (gastrolog-l1ywp), +1: WatchIngesterStatus (gastrolog-14ejy), +1: GetIndexes moved here from RouteTargeted (gastrolog-3570f)
 		routing.RouteLeader:   39, // +1: DeleteLookup; PutSettings split into PutService/Lookup/MaxMind/Setup (gastrolog-1uhsr)
-		routing.RouteTargeted: 12,
+		routing.RouteTargeted: 11,
 		routing.RouteFanOut:   7,
 	}
 
