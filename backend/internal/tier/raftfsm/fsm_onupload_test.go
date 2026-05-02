@@ -18,8 +18,8 @@ func TestOnUploadCallbackFires(t *testing.T) {
 	now := time.Now()
 
 	var mu sync.Mutex
-	var captured *Entry
-	fsm.SetOnUpload(func(e Entry) {
+	var captured *ManifestEntry
+	fsm.SetOnUpload(func(e ManifestEntry) {
 		mu.Lock()
 		captured = &e
 		mu.Unlock()
@@ -59,7 +59,7 @@ func TestOnUploadCallbackNotCalledOnError(t *testing.T) {
 
 	fsm := New()
 	called := false
-	fsm.SetOnUpload(func(e Entry) { called = true })
+	fsm.SetOnUpload(func(e ManifestEntry) { called = true })
 
 	// Upload for a non-existent chunk — should error, not fire callback.
 	id := chunk.NewChunkID()

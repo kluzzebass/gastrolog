@@ -55,9 +55,14 @@ const (
 	CmdPruneNode Command = 12
 )
 
-// Entry holds the full metadata for one chunk in the FSM.
-// This is the Raft-replicated equivalent of file.Manager.chunkMeta + cloudIdx entries.
-type Entry struct {
+// ManifestEntry holds the full metadata for one chunk in this tier's
+// manifest (the FSM's set of chunks for one tier — see Manifest in
+// docs/ubiquitous_language.md). Every chunk in the cluster is described by
+// exactly one ManifestEntry, mutated only by the Cmd* applies. This is the
+// Raft-replicated equivalent of file.Manager.chunkMeta + cloudIdx entries
+// — and the source of truth they project from after the chunk redesign
+// (gastrolog-2pw28).
+type ManifestEntry struct {
 	ID          chunk.ChunkID
 	WriteStart  time.Time
 	WriteEnd    time.Time
@@ -86,7 +91,7 @@ type Entry struct {
 }
 
 // ToChunkMeta converts to the public chunk.ChunkMeta type.
-func (e *Entry) ToChunkMeta() chunk.ChunkMeta {
+func (e *ManifestEntry) ToChunkMeta() chunk.ChunkMeta {
 	return chunk.ChunkMeta{
 		ID:          e.ID,
 		WriteStart:  e.WriteStart,
@@ -110,17 +115,17 @@ func (e *Entry) ToChunkMeta() chunk.ChunkMeta {
 // All reads are local (no Raft round-trip). Writes go through Raft.Apply().
 type FSM struct {
 	mu       sync.RWMutex
-	chunks   map[chunk.ChunkID]*Entry
+	chunks   map[chunk.ChunkID]*ManifestEntry
 	ready    bool // true after first Apply or Restore
 	onDelete func(chunk.ChunkID)
-	onUpload func(Entry) // called after CmdUploadChunk applies (outside lock)
+	onUpload func(ManifestEntry) // called after CmdUploadChunk applies (outside lock)
 
 	// Step-1 reconciler-wiring hooks for gastrolog-51gme. Each fires
 	// outside the FSM mutex after the corresponding Cmd applies, so the
 	// reconciler can project FSM state changes into local Manager state
 	// without polling. No callers wired yet — adding the surface here
 	// unblocks subsequent steps without requiring an FSM API churn.
-	onSeal               func(Entry)         // CmdSealChunk applied; passes the now-sealed entry
+	onSeal               func(ManifestEntry)         // CmdSealChunk applied; passes the now-sealed entry
 	onRetentionPending   func(chunk.ChunkID) // CmdRetentionPending applied
 	onTransitionStreamed func(chunk.ChunkID) // CmdTransitionStreamed applied (source-tier signal)
 	onTransitionReceived func(chunk.ChunkID) // CmdTransitionReceived applied (destination-tier confirmation, ID is the source chunk's ID)
@@ -160,7 +165,7 @@ type FSM struct {
 // New creates an empty chunk metadata FSM.
 func New() *FSM {
 	return &FSM{
-		chunks:             make(map[chunk.ChunkID]*Entry),
+		chunks:             make(map[chunk.ChunkID]*ManifestEntry),
 		transitionReceipts: make(map[chunk.ChunkID]bool),
 		tombstones:         make(map[chunk.ChunkID]time.Time),
 		pendingDeletes:     make(map[chunk.ChunkID]*PendingDelete),
@@ -232,7 +237,7 @@ func (f *FSM) SetOnDelete(fn func(chunk.ChunkID)) {
 // CmdUploadChunk applies. The callback receives a copy of the uploaded
 // entry. Follower nodes use this to register cloud chunks in their local
 // chunk manager without streaming any records.
-func (f *FSM) SetOnUpload(fn func(Entry)) {
+func (f *FSM) SetOnUpload(fn func(ManifestEntry)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.onUpload = fn
@@ -249,7 +254,7 @@ func (f *FSM) SetOnUpload(fn func(Entry)) {
 // already-sealed entry) still fires the callback because the FSM
 // idempotently re-writes the seal fields; the reconciler is expected
 // to be idempotent in turn.
-func (f *FSM) SetOnSeal(fn func(Entry)) {
+func (f *FSM) SetOnSeal(fn func(ManifestEntry)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.onSeal = fn
@@ -338,7 +343,7 @@ func (f *FSM) SetOnPruneNode(fn func(prunedNodeID string, finalizable []chunk.Ch
 // ---------- Reads (local, no Raft) ----------
 
 // Get returns a copy of a chunk's metadata, or nil if not found.
-func (f *FSM) Get(id chunk.ChunkID) *Entry {
+func (f *FSM) Get(id chunk.ChunkID) *ManifestEntry {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	e := f.chunks[id]
@@ -350,10 +355,10 @@ func (f *FSM) Get(id chunk.ChunkID) *Entry {
 }
 
 // List returns all chunk metadata, sorted by WriteStart ascending.
-func (f *FSM) List() []Entry {
+func (f *FSM) List() []ManifestEntry {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	out := make([]Entry, 0, len(f.chunks))
+	out := make([]ManifestEntry, 0, len(f.chunks))
 	for _, e := range f.chunks {
 		out = append(out, *e)
 	}
@@ -395,8 +400,8 @@ func (f *FSM) Apply(log *hraft.Log) any {
 // returns can never observe a stale binding.
 type applyEffects struct {
 	deletedID            *chunk.ChunkID
-	uploadedEntry        *Entry
-	sealedEntry          *Entry
+	uploadedEntry        *ManifestEntry
+	sealedEntry          *ManifestEntry
 	retentionPendingID   *chunk.ChunkID
 	transitionStreamedID *chunk.ChunkID
 	transitionReceivedID *chunk.ChunkID
@@ -408,8 +413,8 @@ type applyEffects struct {
 	prunedFinalizable    []chunk.ChunkID
 
 	onDelete             func(chunk.ChunkID)
-	onUpload             func(Entry)
-	onSeal               func(Entry)
+	onUpload             func(ManifestEntry)
+	onSeal               func(ManifestEntry)
 	onRetentionPending   func(chunk.ChunkID)
 	onTransitionStreamed func(chunk.ChunkID)
 	onTransitionReceived func(chunk.ChunkID)
@@ -527,7 +532,7 @@ func (f *FSM) applyLocked(cmd Command, payload []byte) (any, applyEffects) {
 // captureEntry returns a copy of the chunk entry whose ID is the first
 // 16 bytes of payload, or nil if the apply errored or the entry is
 // absent. Caller MUST hold f.mu.
-func (f *FSM) captureEntry(applyResult any, payload []byte) *Entry {
+func (f *FSM) captureEntry(applyResult any, payload []byte) *ManifestEntry {
 	if applyResult != nil || len(payload) < 16 {
 		return nil
 	}
@@ -556,7 +561,7 @@ func captureID(applyResult any, payload []byte) *chunk.ChunkID {
 func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	entries := make([]Entry, 0, len(f.chunks))
+	entries := make([]ManifestEntry, 0, len(f.chunks))
 	for _, e := range f.chunks {
 		entries = append(entries, *e)
 	}
@@ -589,7 +594,7 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.chunks = make(map[chunk.ChunkID]*Entry, len(snap.entries))
+	f.chunks = make(map[chunk.ChunkID]*ManifestEntry, len(snap.entries))
 	for i := range snap.entries {
 		f.chunks[snap.entries[i].ID] = &snap.entries[i]
 	}
@@ -632,7 +637,7 @@ func (f *FSM) applyCreate(data []byte) error {
 		return nil
 	}
 
-	f.chunks[id] = &Entry{
+	f.chunks[id] = &ManifestEntry{
 		ID:          id,
 		WriteStart:  writeStart,
 		IngestStart: ingestStart,
@@ -891,7 +896,7 @@ const (
 )
 
 type fsmSnapshot struct {
-	entries        []Entry
+	entries        []ManifestEntry
 	receipts       []chunk.ChunkID
 	tombstones     map[chunk.ChunkID]time.Time
 	pendingDeletes []PendingDelete // gastrolog-51gme step 2
@@ -1020,7 +1025,7 @@ func (s *fsmSnapshot) Release() {}
 
 const entrySize = 126
 
-func encodeEntry(w io.Writer, e *Entry) error {
+func encodeEntry(w io.Writer, e *ManifestEntry) error {
 	var buf [entrySize]byte
 	copy(buf[0:16], e.ID[:])
 	binary.BigEndian.PutUint64(buf[16:24], uint64(e.WriteStart.UnixNano()))
@@ -1065,7 +1070,7 @@ func encodeEntry(w io.Writer, e *Entry) error {
 // produce. New sections add a field here rather than churning the
 // decodeSnapshot return signature.
 type decodedSnapshot struct {
-	entries        []Entry
+	entries        []ManifestEntry
 	receipts       []chunk.ChunkID
 	tombstones     map[chunk.ChunkID]time.Time
 	pendingDeletes map[chunk.ChunkID]*PendingDelete // gastrolog-51gme step 2
@@ -1142,12 +1147,12 @@ func readSnapshotHeader(r io.Reader) error {
 	return nil
 }
 
-func readEntriesSection(r io.Reader, payloadLen uint32) ([]Entry, error) {
+func readEntriesSection(r io.Reader, payloadLen uint32) ([]ManifestEntry, error) {
 	if payloadLen%entrySize != 0 {
 		return nil, fmt.Errorf("entries payload %d bytes not a multiple of %d", payloadLen, entrySize)
 	}
 	count := payloadLen / entrySize
-	entries := make([]Entry, 0, count)
+	entries := make([]ManifestEntry, 0, count)
 	var buf [entrySize]byte
 	for i := range count {
 		if _, err := io.ReadFull(r, buf[:]); err != nil {
@@ -1156,7 +1161,7 @@ func readEntriesSection(r io.Reader, payloadLen uint32) ([]Entry, error) {
 		var id chunk.ChunkID
 		copy(id[:], buf[0:16])
 		flags := binary.BigEndian.Uint16(buf[124:126])
-		entries = append(entries, Entry{
+		entries = append(entries, ManifestEntry{
 			ID:              id,
 			WriteStart:      time.Unix(0, int64(binary.BigEndian.Uint64(buf[16:24]))),  //nolint:gosec // G115: round-trip
 			WriteEnd:        time.Unix(0, int64(binary.BigEndian.Uint64(buf[24:32]))),  //nolint:gosec // G115: round-trip

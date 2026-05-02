@@ -22,8 +22,8 @@ func TestOnSealCallbackFires(t *testing.T) {
 	now := time.Now()
 
 	var mu sync.Mutex
-	var captured *Entry
-	fsm.SetOnSeal(func(e Entry) {
+	var captured *ManifestEntry
+	fsm.SetOnSeal(func(e ManifestEntry) {
 		mu.Lock()
 		captured = &e
 		mu.Unlock()
@@ -61,7 +61,7 @@ func TestOnSealCallbackNotCalledWhenChunkUnknown(t *testing.T) {
 	var fired sync.WaitGroup
 	fired.Add(1)
 	called := false
-	fsm.SetOnSeal(func(Entry) {
+	fsm.SetOnSeal(func(ManifestEntry) {
 		called = true
 		fired.Done()
 	})

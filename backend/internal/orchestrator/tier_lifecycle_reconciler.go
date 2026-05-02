@@ -255,7 +255,7 @@ func (r *TierLifecycleReconciler) projectAllSealedFromFSM(fsm *tierfsm.FSM) {
 // inspector's WatchChunks subscribers on this node need to refresh.
 // Local EnsureSealed failure does not gate the notification — the
 // inspector reflects FSM state, not on-disk state. See gastrolog-2ob86.
-func (r *TierLifecycleReconciler) onSeal(e tierfsm.Entry) {
+func (r *TierLifecycleReconciler) onSeal(e tierfsm.ManifestEntry) {
 	r.logger.Debug("onSeal", "chunk", e.ID, "records", e.RecordCount)
 	defer func() {
 		if r.orch != nil {

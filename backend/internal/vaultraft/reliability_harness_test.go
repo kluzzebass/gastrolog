@@ -317,7 +317,7 @@ func (h *reliabilityHarness) shutdown() {
 func tierFSMFingerprint(t *tierfsm.FSM) string {
 	entries := t.List()
 	ids := make([]chunk.ChunkID, len(entries))
-	byID := make(map[chunk.ChunkID]tierfsm.Entry, len(entries))
+	byID := make(map[chunk.ChunkID]tierfsm.ManifestEntry, len(entries))
 	for i, e := range entries {
 		ids[i] = e.ID
 		byID[e.ID] = e

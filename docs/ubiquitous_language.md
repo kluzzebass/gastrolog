@@ -321,7 +321,7 @@ gRPC transport:
 ### Raft primitives (hashicorp/raft vocabulary)
 
 - **Term** — logical clock; increments on every election.
-- **Log** — ordered sequence of entries. Entry types: `LogCommand` (goes
+- **Log** — ordered sequence of entries. ManifestEntry types: `LogCommand` (goes
   through FSM.Apply), `LogConfiguration` (membership change), `LogNoop`
   (post-election commit), `LogBarrier`.
 - **Commit index** — highest log index a quorum has ack'd; entries up to

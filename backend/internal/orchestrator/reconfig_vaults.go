@@ -1213,8 +1213,8 @@ func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.App
 			}
 			return ids
 		},
-		listRetPending:         listFSMByFlag(fsm, func(e tierfsm.Entry) bool { return e.RetentionPending }),
-		listTransitionStreamed: listFSMByFlag(fsm, func(e tierfsm.Entry) bool { return e.TransitionStreamed }),
+		listRetPending:         listFSMByFlag(fsm, func(e tierfsm.ManifestEntry) bool { return e.RetentionPending }),
+		listTransitionStreamed: listFSMByFlag(fsm, func(e tierfsm.ManifestEntry) bool { return e.TransitionStreamed }),
 		overlayFromFSM: func(m chunk.ChunkMeta) chunk.ChunkMeta {
 			if fsm == nil {
 				return m
@@ -1233,7 +1233,7 @@ func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.App
 
 // listFSMByFlag returns a function that filters the FSM's entries by a
 // boolean predicate (e.g., RetentionPending or TransitionStreamed).
-func listFSMByFlag(fsm *tierfsm.FSM, pred func(tierfsm.Entry) bool) func() []chunk.ChunkID {
+func listFSMByFlag(fsm *tierfsm.FSM, pred func(tierfsm.ManifestEntry) bool) func() []chunk.ChunkID {
 	return func() []chunk.ChunkID {
 		if fsm == nil {
 			return nil
@@ -1384,7 +1384,7 @@ func wireTierFSMOnUpload(g *raftgroup.Group, tierID glid.GLID, cm chunk.ChunkMan
 	if !ok {
 		return
 	}
-	fsm.SetOnUpload(func(e tierfsm.Entry) {
+	fsm.SetOnUpload(func(e tierfsm.ManifestEntry) {
 		// Notify WatchChunks subscribers: the chunk transitioned to
 		// cloud-backed (DiskBytes / NumFrames / CloudBacked changed
 		// in the FSM), which the inspector renders. Fire regardless
