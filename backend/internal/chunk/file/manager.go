@@ -3203,36 +3203,28 @@ func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
 		m.postSealWg.Done()
 	}()
 
-	// 1. Compress data files.
-	if err := m.CompressChunk(id); err != nil {
-		return err
+	// 1. Package the sealed chunk as a single data.glcb blob — the
+	// canonical sealed-chunk artifact under gastrolog-24m1t. Failure is
+	// fatal; there is no longer a multi-file fallback.
+	if _, _, err := m.sealToGLCB(id); err != nil {
+		return fmt.Errorf("seal chunk %s to GLCB: %w", id, err)
 	}
 
-	// 2. Build indexes via injected builders.
+	// 2. Build indexes. Now reads through OpenCursor → GLCB cursor.
 	for _, builder := range m.indexBuilders {
 		if err := builder.Build(ctx, id); err != nil {
 			if isMissingLocalChunkFileError(err) {
 				continue
 			}
 			m.logger.Warn("index build failed", "chunk", id, "error", err)
-			// Non-fatal: indexes can be rebuilt later.
 		}
 	}
 
-	// 3. Package the sealed chunk as a single data.glcb blob alongside
-	// the existing multi-file artifacts. Transitional during the chunk
-	// redesign (gastrolog-24m1t step 7c): data.glcb becomes the canonical
-	// sealed-chunk shape, and being byte-identical to what uploadToCloud
-	// would PUT to S3 is what enables binary chunk replication. Until
-	// stage 3b fully retires multi-file generation (test migration
-	// pending), data.glcb is produced for parity-checking and to give
-	// the upload path a ready-made blob to ship.
-	//
-	// Failure here is non-fatal: existing read paths keep working off
-	// multi-file. The next seal cycle (or a manual re-seal) reproduces
-	// the file.
-	if _, _, err := m.sealToGLCB(id); err != nil {
-		m.logger.Warn("sealToGLCB failed; multi-file path still functional", "chunk", id, "error", err)
+	// 3. Remove the multi-file artifacts (raw.log, idx.log, attr.log,
+	// attr_dict.log, ingest.bt, source.bt). data.glcb is the only
+	// sealed artifact from here on.
+	if err := m.removeLocalDataFiles(id); err != nil {
+		m.logger.Warn("post-seal multi-file cleanup failed; chunk still readable via data.glcb", "chunk", id, "error", err)
 	}
 
 	// 4. Refresh disk sizes after index + GLCB files are written.
