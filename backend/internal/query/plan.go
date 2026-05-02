@@ -96,10 +96,7 @@ func (e *Engine) Explain(ctx context.Context, q Query) (*QueryPlan, error) {
 			continue
 		}
 
-		metas, err := cm.List()
-		if err != nil {
-			return nil, err
-		}
+		metas := e.vaultChunkMetas(vaultID)
 
 		plan.TotalChunks += len(metas)
 

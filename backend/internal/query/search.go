@@ -134,10 +134,7 @@ func (e *Engine) collectVaultChunks(
 			continue
 		}
 
-		metas, err := cm.List()
-		if err != nil {
-			return nil, 0, err
-		}
+		metas := e.vaultChunkMetas(vaultID)
 
 		for _, meta := range metas {
 			if meta.Archived {
@@ -859,11 +856,7 @@ func (fs *followState) initVaultPositions(vaultID glid.GLID) {
 	if cm == nil {
 		return
 	}
-	metas, err := cm.List()
-	if err != nil {
-		return
-	}
-	for _, meta := range metas {
+	for _, meta := range fs.engine.vaultChunkMetas(vaultID) {
 		key := mergeKey{vaultID: vaultID, chunkID: meta.ID}
 		if meta.Sealed {
 			fs.lastPositions[key] = positionExhausted
@@ -928,11 +921,7 @@ func (fs *followState) pollLoop(ctx context.Context, yield func(chunk.Record, er
 
 		selectedVaults := fs.resolveVaults()
 
-		pending := fs.collectNewRecords(selectedVaults, yield)
-		if pending == nil {
-			// yield returned false during error handling; caller wants to stop.
-			return
-		}
+		pending := fs.collectNewRecords(selectedVaults)
 
 		slices.SortFunc(pending, func(a, b pendingRecord) int {
 			return a.rec.WriteTS.Compare(b.rec.WriteTS)
@@ -951,28 +940,15 @@ func (fs *followState) pollLoop(ctx context.Context, yield func(chunk.Record, er
 }
 
 // collectNewRecords scans all selected vaults for records newer than
-// the last seen positions. Returns nil if yield returned false (caller stop).
-func (fs *followState) collectNewRecords(
-	selectedVaults []glid.GLID,
-	yield func(chunk.Record, error) bool,
-) []pendingRecord {
-	pending := []pendingRecord{} // non-nil empty; nil is reserved for yield-returned-false
-
+// the last seen positions and returns the accumulated pending records.
+func (fs *followState) collectNewRecords(selectedVaults []glid.GLID) []pendingRecord {
+	var pending []pendingRecord
 	for _, vaultID := range selectedVaults {
 		cm, _ := fs.engine.getVaultManagers(vaultID)
 		if cm == nil {
 			continue
 		}
-
-		metas, err := cm.List()
-		if err != nil {
-			if !yield(chunk.Record{}, err) {
-				return nil
-			}
-			continue
-		}
-
-		for _, meta := range metas {
+		for _, meta := range fs.engine.vaultChunkMetas(vaultID) {
 			fs.collectChunkRecords(cm, vaultID, meta, &pending)
 		}
 	}
