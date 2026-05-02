@@ -778,6 +778,20 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 		return m.openCloudCursor(id)
 	}
 
+	// Prefer data.glcb when present. After PostSealProcess (post-seal
+	// pipeline stage 7c stage 2a), every sealed chunk has a data.glcb
+	// alongside the multi-file artifacts; the GLCB cursor reads through
+	// chunkcloud's seekable-zstd path with no per-chunk mmap lock needed
+	// (the file is immutable post-rename). Multi-file remains the
+	// fallback until step 7c stage 3 deletes that path. See
+	// gastrolog-24m1t.
+	if sealed && m.hasLocalGLCB(id) {
+		if cursor, err := m.openLocalGLCBCursor(id); err == nil {
+			return cursor, nil
+		}
+		// Corrupt or partial data.glcb — fall through to multi-file.
+	}
+
 	// Acquire the per-chunk read lock BEFORE opening files. CompressChunk
 	// and deleteInternal hold this as a write lock around their atomic
 	// rename / os.RemoveAll, so an in-flight cursor's mmap regions can't
@@ -3213,6 +3227,32 @@ func (m *Manager) openCachedCursor(id chunk.ChunkID) (chunk.RecordCursor, error)
 		return nil, err
 	}
 	return chunkcloud.NewSeekableCursor(rd, id), nil
+}
+
+// openLocalGLCBCursor opens a sealed chunk's data.glcb file via the
+// chunkcloud reader pipeline. Returns the cache-miss-style error when
+// data.glcb is absent so callers can fall back to the multi-file path.
+// Used during the chunk redesign (gastrolog-24m1t) once sealToGLCB has
+// produced a data.glcb alongside the multi-file artifacts.
+func (m *Manager) openLocalGLCBCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
+	path := filepath.Join(m.chunkDir(id), dataGLCBFileName)
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return nil, err
+	}
+	rd, err := chunkcloud.NewCacheReader(f)
+	if err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return chunkcloud.NewSeekableCursor(rd, id), nil
+}
+
+// hasLocalGLCB reports whether the chunk directory contains a data.glcb.
+// Used by read-path dispatch to prefer the GLCB cursor when available.
+func (m *Manager) hasLocalGLCB(id chunk.ChunkID) bool {
+	_, err := os.Stat(filepath.Join(m.chunkDir(id), dataGLCBFileName))
+	return err == nil
 }
 
 // downloadAndCacheCursor downloads the entire GLCB blob from cloud, writes it
