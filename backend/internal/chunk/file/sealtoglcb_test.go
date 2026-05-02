@@ -89,6 +89,50 @@ func TestSealToGLCB_ProducesValidBlob(t *testing.T) {
 	}
 }
 
+// TestPostSealProcess_ProducesGLCB verifies that after PostSealProcess
+// runs, the chunk directory contains a data.glcb file alongside the
+// multi-file artifacts. Stage 2a of gastrolog-24m1t step 7c — sealToGLCB
+// is now wired in but read paths still consume multi-file.
+func TestPostSealProcess_ProducesGLCB(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	m, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	defer func() { _ = m.Close() }()
+
+	now := time.Now().Truncate(time.Microsecond)
+	const recordCount = 10
+	var chunkID chunk.ChunkID
+	for i := range recordCount {
+		id, _, err := m.Append(chunk.Record{
+			IngestTS: now.Add(time.Duration(i) * time.Millisecond),
+			Attrs:    chunk.Attributes{"level": "info"},
+			Raw:      []byte("payload"),
+		})
+		if err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+		chunkID = id
+	}
+	if err := m.Seal(); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	if err := m.PostSealProcess(t.Context(), chunkID); err != nil {
+		t.Fatalf("PostSealProcess: %v", err)
+	}
+
+	glcbPath := filepath.Join(m.chunkDir(chunkID), dataGLCBFileName)
+	if _, err := os.Stat(glcbPath); err != nil {
+		t.Fatalf("data.glcb missing after PostSealProcess: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(m.chunkDir(chunkID), dataGLCBTmpFileName)); !os.IsNotExist(err) {
+		t.Fatalf("data.glcb.tmp should be gone after rename, got err=%v", err)
+	}
+}
+
 // TestSealToGLCB_RefusesUnsealedChunk verifies that sealToGLCB on an
 // unsealed (still-active) chunk does not silently produce a bogus
 // blob — the OpenCursor call should fail because cursors against the

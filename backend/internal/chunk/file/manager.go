@@ -3103,12 +3103,28 @@ func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
 		}
 	}
 
-	// 3. Refresh disk sizes after index files are written.
+	// 3. Package the sealed chunk as a single data.glcb blob alongside
+	// the existing multi-file artifacts. Transitional during the chunk
+	// redesign (gastrolog-24m1t step 7c): data.glcb becomes the canonical
+	// sealed-chunk shape, and being byte-identical to what uploadToCloud
+	// would PUT to S3 is what enables binary chunk replication. Until
+	// stage 2b / stage 3 lands, read paths still consume multi-file;
+	// data.glcb is produced for parity-checking and to give the upload
+	// path a ready-made blob to ship.
+	//
+	// Failure here is non-fatal: existing read paths keep working off
+	// multi-file. The next seal cycle (or a manual re-seal) reproduces
+	// the file.
+	if _, _, err := m.sealToGLCB(id); err != nil {
+		m.logger.Warn("sealToGLCB failed; multi-file path still functional", "chunk", id, "error", err)
+	}
+
+	// 4. Refresh disk sizes after index + GLCB files are written.
 	if len(m.indexBuilders) > 0 {
 		m.RefreshDiskSizes(id)
 	}
 
-	// 4. Upload to cloud and delete local if cloud-backed.
+	// 5. Upload to cloud and delete local if cloud-backed.
 	// CloudReadOnly followers skip upload — they adopt the leader's blob
 	// via RegisterCloudChunk when the tier FSM propagates the upload.
 	if m.cfg.CloudStore != nil && !m.cfg.CloudReadOnly {
