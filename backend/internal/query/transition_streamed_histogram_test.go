@@ -22,8 +22,8 @@ import (
 // the histogram (which counts via chunk manifest record counts) would
 // double the bucket totals.
 //
-// The fix surfaces the per-vault TransitionStreamed set on the query
-// VaultRegistry interface and skips those chunks in every histogram
+// The fix surfaces the per-vault TransitionStreamed set on the
+// manifest.VaultRegistry interface and skips those chunks in every histogram
 // enumeration path. This test models a transition mid-flight: vault A
 // (the "source" tier in our two-vault setup) holds a chunk that has
 // been marked TransitionStreamed; vault B (the "destination") holds an

@@ -61,7 +61,7 @@ func (o *Orchestrator) UnregisterIngester(id glid.GLID) {
 	delete(o.ingesterMeta, id)
 }
 
-// ChunkManager implements query.VaultRegistry: returns the active (ingest)
+// ChunkManager implements manifest.VaultRegistry: returns the active (ingest)
 // tier's chunk manager for the vault keyed by key. Returns nil if not found.
 func (o *Orchestrator) ChunkManager(key glid.GLID) chunk.ChunkManager {
 	o.mu.RLock()
@@ -72,7 +72,7 @@ func (o *Orchestrator) ChunkManager(key glid.GLID) chunk.ChunkManager {
 	return nil
 }
 
-// IndexManager implements query.VaultRegistry: returns the active tier's index
+// IndexManager implements manifest.VaultRegistry: returns the active tier's index
 // manager for the vault keyed by key. Returns nil if not found.
 func (o *Orchestrator) IndexManager(key glid.GLID) index.IndexManager {
 	o.mu.RLock()
@@ -216,7 +216,7 @@ func (o *Orchestrator) MultiVaultQueryEngine() *query.Engine {
 	return query.NewWithRegistry(&searchReadyRegistry{o: o}, o.logger)
 }
 
-// searchReadyRegistry implements query.VaultRegistry for multi-vault search,
+// searchReadyRegistry implements manifest.VaultRegistry for multi-vault search,
 // exposing only replication-ready vaults so partially applied tier metadata
 // cannot be queried (gastrolog-4ip1o).
 type searchReadyRegistry struct {

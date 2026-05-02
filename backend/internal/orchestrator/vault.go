@@ -92,7 +92,7 @@ func NewVaultFromComponents(id glid.GLID, cm chunk.ChunkManager, im index.IndexM
 	})
 }
 
-// tierRegistry adapts a vault's tiers to the query.VaultRegistry interface,
+// tierRegistry adapts a vault's tiers to the manifest.VaultRegistry interface,
 // allowing the query engine to fan out across all tiers as if they were vaults.
 type tierRegistry struct {
 	tiers []*TierInstance

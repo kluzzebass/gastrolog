@@ -20,6 +20,7 @@ import (
 	"gastrolog/internal/index"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/lookup"
+	"gastrolog/internal/manifest"
 	"gastrolog/internal/querylang"
 )
 
@@ -335,7 +336,7 @@ type Engine struct {
 	indexes index.IndexManager
 
 	// Multi-vault mode
-	registry VaultRegistry
+	registry manifest.VaultRegistry
 
 	// Lookup enrichment resolver (optional). Set via SetLookupResolver.
 	lookupResolver lookup.Resolver
@@ -360,7 +361,7 @@ func New(chunks chunk.ChunkManager, indexes index.IndexManager, logger *slog.Log
 // Vault predicates in queries (e.g., "vault_id=<uuid>") filter which vaults are searched.
 // If no vault predicate is present, all vaults are searched.
 // If logger is nil, logging is disabled.
-func NewWithRegistry(registry VaultRegistry, logger *slog.Logger) *Engine {
+func NewWithRegistry(registry manifest.VaultRegistry, logger *slog.Logger) *Engine {
 	return &Engine{
 		registry: registry,
 		logger:   logging.Default(logger).With("component", "query-engine"),
