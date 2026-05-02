@@ -46,6 +46,11 @@ type VaultRegistry interface {
 	// or when the registry's source-of-truth for this state isn't
 	// available (e.g. unit-test registries that don't model transitions).
 	TransitionStreamedChunks(vaultID glid.GLID) map[chunk.ChunkID]bool
+
+	// Reader returns the manifest Reader for FSM-projected sealed-chunk
+	// metadata. Memory-mode and test registries can return a projecting
+	// fallback (NewProjectingReader) when no FSM is wired.
+	Reader() Reader
 }
 
 // Reader exposes the FSM-projected view of chunk manifests. Every caller

@@ -198,6 +198,37 @@ func clampBuckets(n int) int {
 	return n
 }
 
+// vaultChunkMetas returns every chunk's metadata for the given vault:
+// sealed-chunk entries projected from the manifest Reader (FSM truth),
+// plus the active chunk taken directly from the chunk manager (the active
+// chunk is the documented exception to manifest-as-source-of-truth — its
+// running maxima would balloon the Raft log if replicated). Falls back
+// to cm.List() in single-vault legacy mode where no registry is wired.
+//
+// Returns nil if the vault has no chunk manager.
+func (e *Engine) vaultChunkMetas(vaultID glid.GLID) []chunk.ChunkMeta {
+	cm := e.chunks
+	if e.registry != nil {
+		cm = e.registry.ChunkManager(vaultID)
+	}
+	if cm == nil {
+		return nil
+	}
+	if e.registry == nil {
+		metas, _ := cm.List()
+		return metas
+	}
+	entries := e.registry.Reader().EntriesForVault(vaultID)
+	out := make([]chunk.ChunkMeta, 0, len(entries)+1)
+	for i := range entries {
+		out = append(out, entries[i].ToChunkMeta())
+	}
+	if active := cm.Active(); active != nil {
+		out = append(out, *active)
+	}
+	return out
+}
+
 // timechartVaults returns the vaults to query for a timechart, applying any vault filter.
 func (e *Engine) timechartVaults(q Query) []glid.GLID {
 	allVaults := e.listVaults()
@@ -216,10 +247,7 @@ func (e *Engine) deriveTimeRange(q *Query, selectedVaults []glid.GLID) {
 		if cm == nil {
 			continue
 		}
-		metas, err := cm.List()
-		if err != nil {
-			continue
-		}
+		metas := e.vaultChunkMetas(vaultID)
 		for _, meta := range metas {
 			if meta.RecordCount == 0 {
 				continue
@@ -243,10 +271,7 @@ func (e *Engine) timechartFastPath(selectedVaults []glid.GLID, start time.Time, 
 		if cm == nil {
 			continue
 		}
-		metas, err := cm.List()
-		if err != nil {
-			continue
-		}
+		metas := e.vaultChunkMetas(vaultID)
 		streamed := e.transitionStreamedChunks(vaultID)
 		for _, meta := range metas {
 			if streamed[meta.ID] {
@@ -276,10 +301,7 @@ func (e *Engine) timechartCloudCounts(selectedVaults []glid.GLID, start, end tim
 		if cm == nil {
 			continue
 		}
-		metas, err := cm.List()
-		if err != nil {
-			continue
-		}
+		metas := e.vaultChunkMetas(vaultID)
 		streamed := e.transitionStreamedChunks(vaultID)
 		for _, meta := range metas {
 			if streamed[meta.ID] {
@@ -312,10 +334,7 @@ func (e *Engine) timechartLocalCounts(selectedVaults []glid.GLID, start, end tim
 		if cm == nil {
 			continue
 		}
-		metas, err := cm.List()
-		if err != nil {
-			continue
-		}
+		metas := e.vaultChunkMetas(vaultID)
 		streamed := e.transitionStreamedChunks(vaultID)
 		for _, meta := range metas {
 			if streamed[meta.ID] {
@@ -356,10 +375,7 @@ func (e *Engine) timechartActiveNonMonotonic(selectedVaults []glid.GLID, start, 
 		if cm == nil {
 			continue
 		}
-		metas, err := cm.List()
-		if err != nil {
-			continue
-		}
+		metas := e.vaultChunkMetas(vaultID)
 		streamed := e.transitionStreamedChunks(vaultID)
 		for _, meta := range metas {
 			if !activeNonMonoEligible(meta, streamed, start, end) {
@@ -442,10 +458,7 @@ func (e *Engine) timechartAttrScanGroups(selectedVaults []glid.GLID, start, end 
 		if cm == nil {
 			continue
 		}
-		metas, err := cm.List()
-		if err != nil {
-			continue
-		}
+		metas := e.vaultChunkMetas(vaultID)
 		streamed := e.transitionStreamedChunks(vaultID)
 		for _, meta := range metas {
 			if streamed[meta.ID] {

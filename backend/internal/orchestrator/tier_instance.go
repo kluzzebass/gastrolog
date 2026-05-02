@@ -160,6 +160,8 @@ func (t *TierInstance) applyRaftCallbacks(cb tierRaftCallbacks) {
 	t.IsTombstoned = cb.isTombstoned
 	t.IsFSMReady = cb.isFSMReady
 	t.OverlayFromFSM = cb.overlayFromFSM
+	t.ManifestEntries = cb.manifestEntries
+	t.ManifestEntry = cb.manifestEntry
 }
 
 // IsLeader returns true if this node is the leader for this tier.

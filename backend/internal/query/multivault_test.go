@@ -11,6 +11,7 @@ import (
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/index"
+	"gastrolog/internal/manifest"
 	"gastrolog/internal/memtest"
 	"gastrolog/internal/query"
 	"gastrolog/internal/querylang"
@@ -58,6 +59,11 @@ func (r *testRegistry) TransitionStreamedChunks(vaultID glid.GLID) map[chunk.Chu
 	}
 	return r.streamed[vaultID]
 }
+
+// Reader returns a projecting Reader so test fakes that don't model an FSM
+// still satisfy the manifest.VaultRegistry contract. The projection reads
+// each vault's chunk manager List() / Meta() to synthesize ManifestEntries.
+func (r *testRegistry) Reader() manifest.Reader { return manifest.NewProjectingReader(r) }
 
 func TestMultiVaultSearch(t *testing.T) {
 	reg := &testRegistry{
