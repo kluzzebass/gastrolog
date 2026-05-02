@@ -266,6 +266,49 @@ message TierReplicationAck {
   bytes chunk_id = 3; // echoes the chunk_id from the command
 }
 
+// ImportBlobRequest streams the bytes of a sealed `data.glcb` from leader
+// to follower. The first message MUST carry a header; subsequent messages
+// carry body chunks. The follower reassembles the bytes into a temp file,
+// verifies the TOC's whole-blob digest + per-section hashes against the
+// FSM-replicated truth, and atomically renames into place.
+//
+// Replaces the record-by-record ImportSealed path (which rebuilt the blob
+// from scratch on every replica). See gastrolog-3o5b4.
+message ImportBlobRequest {
+  oneof message {
+    ImportBlobHeader header = 1;
+    ImportBlobBody body = 2;
+  }
+}
+
+// ImportBlobHeader is the first message on the ImportBlob stream. It
+// identifies the destination chunk and provides the total blob size so
+// the follower can pre-allocate / fail fast on size mismatch.
+message ImportBlobHeader {
+  bytes vault_id = 1;
+  bytes tier_id = 2;
+  bytes chunk_id = 3;        // 16-byte ChunkID
+  int64 total_size = 4;      // total bytes of data.glcb that will follow
+}
+
+// ImportBlobBody carries one chunk of the blob's raw bytes. Multiple
+// body messages follow a single header. The leader chooses chunk size;
+// followers must not assume any specific size.
+message ImportBlobBody {
+  bytes data = 1;
+}
+
+// ImportBlobAck is the single response after the client closes its
+// send half. blob_digest is the SHA-256 the follower computed over
+// the received bytes; it should match the GLCB's whole-blob digest in
+// the TOC footer (and the FSM-replicated truth) if the import succeeded.
+message ImportBlobAck {
+  bool ok = 1;
+  string error = 2;
+  bytes chunk_id = 3;
+  bytes blob_digest = 4;
+}
+
 // RequestReplicaCatchupRequest is sent follower → placement leader. The
 // follower computes the local FSM-vs-disk diff in its lifecycle reconciler
 // (SweepMissingReplicas) and asks the leader to re-push specific sealed

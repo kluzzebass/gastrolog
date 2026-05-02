@@ -2,8 +2,10 @@ package cluster
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
+	"io"
 	"log/slog"
 	"sync"
 
@@ -13,6 +15,19 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/convert"
 )
+
+// importBlobChunkSize is how many bytes each ImportBlobBody message
+// carries. Matches the GLCB seekable-zstd frame size (256 KiB) so the
+// network framing aligns with the on-disk frame boundaries — receivers
+// could in principle stream into seekable zstd's writer directly, though
+// today they just reassemble bytes. Tunable; not part of the wire spec.
+const importBlobChunkSize = 256 << 10
+
+// importBlobStreamDesc describes the client-streaming ImportBlob RPC.
+var importBlobStreamDesc = &grpc.StreamDesc{
+	StreamName:    "ImportBlob",
+	ClientStreams: true,
+}
 
 // streamKey identifies a replication stream to a specific follower for a
 // specific tier. One stream per key.
@@ -202,6 +217,93 @@ func (tr *TierReplicator) SealTier(ctx context.Context, nodeID string, vaultID, 
 			},
 		},
 	})
+}
+
+// ImportBlob streams a sealed `data.glcb` blob to a follower via the
+// ImportBlob client-streaming RPC. body provides the bytes; totalSize is
+// the expected total in bytes (sent in the header so the follower can
+// fail fast on size mismatch). Returns the SHA-256 digest the follower
+// computed over the received bytes.
+//
+// Replaces the per-record ImportSealedChunk path: instead of decoding
+// records and re-encoding the GLCB on the follower, the leader's
+// already-sealed bytes are copied verbatim. See gastrolog-3o5b4.
+func (tr *TierReplicator) ImportBlob(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, totalSize int64, body io.Reader) ([32]byte, error) {
+	var zero [32]byte
+
+	conn, err := tr.peers.Conn(nodeID)
+	if err != nil {
+		return zero, fmt.Errorf("dial node %s: %w", nodeID, err)
+	}
+
+	streamCtx, cancel := context.WithCancel(ctx)
+	stream, err := conn.NewStream(streamCtx, importBlobStreamDesc,
+		"/gastrolog.v1.ClusterService/ImportBlob")
+	if err != nil {
+		cancel()
+		tr.peers.Invalidate(nodeID, err)
+		return zero, fmt.Errorf("open ImportBlob stream to %s: %w", nodeID, err)
+	}
+	defer cancel()
+
+	// Header first.
+	header := &gastrologv1.ImportBlobRequest{
+		Message: &gastrologv1.ImportBlobRequest_Header{
+			Header: &gastrologv1.ImportBlobHeader{
+				VaultId:   vaultID.ToProto(),
+				TierId:    tierID.ToProto(),
+				ChunkId:   glid.GLID(chunkID).ToProto(),
+				TotalSize: totalSize,
+			},
+		},
+	}
+	if err := stream.SendMsg(header); err != nil {
+		return zero, fmt.Errorf("send header: %w", err)
+	}
+
+	// Stream body in fixed-size chunks. Per "memory over throughput", we
+	// keep one chunk in memory at a time; the leader's source io.Reader
+	// is responsible for its own buffering (typically an *os.File, which
+	// reads via the OS page cache).
+	buf := make([]byte, importBlobChunkSize)
+	for {
+		n, readErr := io.ReadFull(body, buf)
+		if n > 0 {
+			body := &gastrologv1.ImportBlobRequest{
+				Message: &gastrologv1.ImportBlobRequest_Body{
+					Body: &gastrologv1.ImportBlobBody{Data: buf[:n]},
+				},
+			}
+			if err := stream.SendMsg(body); err != nil {
+				return zero, fmt.Errorf("send body: %w", err)
+			}
+		}
+		if readErr == nil {
+			continue
+		}
+		if errors.Is(readErr, io.EOF) || errors.Is(readErr, io.ErrUnexpectedEOF) {
+			break
+		}
+		return zero, fmt.Errorf("read body: %w", readErr)
+	}
+
+	if err := stream.CloseSend(); err != nil {
+		return zero, fmt.Errorf("close send: %w", err)
+	}
+
+	ack := &gastrologv1.ImportBlobAck{}
+	if err := stream.RecvMsg(ack); err != nil {
+		return zero, fmt.Errorf("recv ack: %w", err)
+	}
+	if !ack.Ok {
+		return zero, fmt.Errorf("follower rejected blob: %s", ack.Error)
+	}
+	if len(ack.BlobDigest) != 32 {
+		return zero, fmt.Errorf("invalid digest length %d", len(ack.BlobDigest))
+	}
+	var digest [32]byte
+	copy(digest[:], ack.BlobDigest)
+	return digest, nil
 }
 
 // ImportSealedChunk sends a canonical sealed chunk to a follower.

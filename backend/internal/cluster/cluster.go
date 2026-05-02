@@ -155,6 +155,11 @@ type Server struct {
 	// Used for tier transitions (records flow like normal ingestion).
 	tierStreamAppender TierStreamAppender
 
+	// blobImporter installs a sealed data.glcb blob received over the
+	// ImportBlob RPC. Replaces the per-record tierRecordImporter path
+	// for sealed-chunk replication. See gastrolog-3o5b4.
+	blobImporter BlobImporter
+
 	// searchExecutor runs a search on a local vault for remote search requests.
 	// Set after the orchestrator is created, before search forwarding starts.
 	searchExecutor SearchExecutor

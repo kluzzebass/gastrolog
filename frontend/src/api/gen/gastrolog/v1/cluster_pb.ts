@@ -1497,6 +1497,229 @@ export class TierReplicationAck extends Message<TierReplicationAck> {
 }
 
 /**
+ * ImportBlobRequest streams the bytes of a sealed `data.glcb` from leader
+ * to follower. The first message MUST carry a header; subsequent messages
+ * carry body chunks. The follower reassembles the bytes into a temp file,
+ * verifies the TOC's whole-blob digest + per-section hashes against the
+ * FSM-replicated truth, and atomically renames into place.
+ *
+ * Replaces the record-by-record ImportSealed path (which rebuilt the blob
+ * from scratch on every replica). See gastrolog-3o5b4.
+ *
+ * @generated from message gastrolog.v1.ImportBlobRequest
+ */
+export class ImportBlobRequest extends Message<ImportBlobRequest> {
+  /**
+   * @generated from oneof gastrolog.v1.ImportBlobRequest.message
+   */
+  message: {
+    /**
+     * @generated from field: gastrolog.v1.ImportBlobHeader header = 1;
+     */
+    value: ImportBlobHeader;
+    case: "header";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.ImportBlobBody body = 2;
+     */
+    value: ImportBlobBody;
+    case: "body";
+  } | { case: undefined; value?: undefined } = { case: undefined };
+
+  constructor(data?: PartialMessage<ImportBlobRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ImportBlobRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "header", kind: "message", T: ImportBlobHeader, oneof: "message" },
+    { no: 2, name: "body", kind: "message", T: ImportBlobBody, oneof: "message" },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ImportBlobRequest {
+    return new ImportBlobRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ImportBlobRequest {
+    return new ImportBlobRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ImportBlobRequest {
+    return new ImportBlobRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ImportBlobRequest | PlainMessage<ImportBlobRequest> | undefined, b: ImportBlobRequest | PlainMessage<ImportBlobRequest> | undefined): boolean {
+    return proto3.util.equals(ImportBlobRequest, a, b);
+  }
+}
+
+/**
+ * ImportBlobHeader is the first message on the ImportBlob stream. It
+ * identifies the destination chunk and provides the total blob size so
+ * the follower can pre-allocate / fail fast on size mismatch.
+ *
+ * @generated from message gastrolog.v1.ImportBlobHeader
+ */
+export class ImportBlobHeader extends Message<ImportBlobHeader> {
+  /**
+   * @generated from field: bytes vault_id = 1;
+   */
+  vaultId = new Uint8Array(0);
+
+  /**
+   * @generated from field: bytes tier_id = 2;
+   */
+  tierId = new Uint8Array(0);
+
+  /**
+   * 16-byte ChunkID
+   *
+   * @generated from field: bytes chunk_id = 3;
+   */
+  chunkId = new Uint8Array(0);
+
+  /**
+   * total bytes of data.glcb that will follow
+   *
+   * @generated from field: int64 total_size = 4;
+   */
+  totalSize = protoInt64.zero;
+
+  constructor(data?: PartialMessage<ImportBlobHeader>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ImportBlobHeader";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "tier_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 3, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 4, name: "total_size", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ImportBlobHeader {
+    return new ImportBlobHeader().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ImportBlobHeader {
+    return new ImportBlobHeader().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ImportBlobHeader {
+    return new ImportBlobHeader().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ImportBlobHeader | PlainMessage<ImportBlobHeader> | undefined, b: ImportBlobHeader | PlainMessage<ImportBlobHeader> | undefined): boolean {
+    return proto3.util.equals(ImportBlobHeader, a, b);
+  }
+}
+
+/**
+ * ImportBlobBody carries one chunk of the blob's raw bytes. Multiple
+ * body messages follow a single header. The leader chooses chunk size;
+ * followers must not assume any specific size.
+ *
+ * @generated from message gastrolog.v1.ImportBlobBody
+ */
+export class ImportBlobBody extends Message<ImportBlobBody> {
+  /**
+   * @generated from field: bytes data = 1;
+   */
+  data = new Uint8Array(0);
+
+  constructor(data?: PartialMessage<ImportBlobBody>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ImportBlobBody";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "data", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ImportBlobBody {
+    return new ImportBlobBody().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ImportBlobBody {
+    return new ImportBlobBody().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ImportBlobBody {
+    return new ImportBlobBody().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ImportBlobBody | PlainMessage<ImportBlobBody> | undefined, b: ImportBlobBody | PlainMessage<ImportBlobBody> | undefined): boolean {
+    return proto3.util.equals(ImportBlobBody, a, b);
+  }
+}
+
+/**
+ * ImportBlobAck is the single response after the client closes its
+ * send half. blob_digest is the SHA-256 the follower computed over
+ * the received bytes; it should match the GLCB's whole-blob digest in
+ * the TOC footer (and the FSM-replicated truth) if the import succeeded.
+ *
+ * @generated from message gastrolog.v1.ImportBlobAck
+ */
+export class ImportBlobAck extends Message<ImportBlobAck> {
+  /**
+   * @generated from field: bool ok = 1;
+   */
+  ok = false;
+
+  /**
+   * @generated from field: string error = 2;
+   */
+  error = "";
+
+  /**
+   * @generated from field: bytes chunk_id = 3;
+   */
+  chunkId = new Uint8Array(0);
+
+  /**
+   * @generated from field: bytes blob_digest = 4;
+   */
+  blobDigest = new Uint8Array(0);
+
+  constructor(data?: PartialMessage<ImportBlobAck>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ImportBlobAck";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "ok", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 2, name: "error", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 4, name: "blob_digest", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ImportBlobAck {
+    return new ImportBlobAck().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ImportBlobAck {
+    return new ImportBlobAck().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ImportBlobAck {
+    return new ImportBlobAck().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ImportBlobAck | PlainMessage<ImportBlobAck> | undefined, b: ImportBlobAck | PlainMessage<ImportBlobAck> | undefined): boolean {
+    return proto3.util.equals(ImportBlobAck, a, b);
+  }
+}
+
+/**
  * RequestReplicaCatchupRequest is sent follower → placement leader. The
  * follower computes the local FSM-vs-disk diff in its lifecycle reconciler
  * (SweepMissingReplicas) and asks the leader to re-push specific sealed

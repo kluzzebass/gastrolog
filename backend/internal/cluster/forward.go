@@ -88,6 +88,18 @@ type TierRecordImporter func(ctx context.Context, vaultID, tierID glid.GLID, chu
 // normal ingestion. The tier's rotation policy handles sealing.
 type TierStreamAppender func(ctx context.Context, vaultID, tierID glid.GLID, next chunk.RecordIterator) error
 
+// BlobImporter installs a sealed `data.glcb` blob received over the
+// ImportBlob RPC into a specific tier's chunk dir on the local node.
+// body streams the blob bytes as they arrive on the wire; the importer
+// is responsible for atomic write (.tmp + rename), TOC verification, and
+// computing the SHA-256 over the bytes for the ack. Returns the digest
+// the importer computed and any error encountered.
+//
+// Replaces the per-record TierRecordImporter path (gastrolog-3o5b4):
+// instead of decoding records and re-encoding the GLCB on the follower,
+// the leader's already-sealed bytes are copied verbatim.
+type BlobImporter func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, totalSize int64, body io.Reader) (digest [32]byte, err error)
+
 // ManagedFileReader opens a managed file for streaming to a peer.
 // Returns the original filename, a ReadCloser for the content, and the SHA256 hex hash.
 type ManagedFileReader func(fileID string) (name string, rc io.ReadCloser, sha256hex string, err error)
@@ -143,6 +155,13 @@ func (s *Server) SetTierRecordImporter(fn TierRecordImporter) {
 // SetTierStreamAppender injects the callback for streaming records to a tier's active chunk.
 func (s *Server) SetTierStreamAppender(fn TierStreamAppender) {
 	s.tierStreamAppender = fn
+}
+
+// SetBlobImporter injects the callback for ImportBlob RPC handling.
+// Must be called before the cluster server starts receiving ImportBlob
+// streams. See gastrolog-3o5b4.
+func (s *Server) SetBlobImporter(fn BlobImporter) {
+	s.blobImporter = fn
 }
 
 // SetSearchExecutor injects the callback for handling remote search requests.
@@ -299,6 +318,113 @@ func streamForwardRecordsHandler(srv any, stream grpc.ServerStream) error {
 		}
 		s.forwardedReceived.Add(int64(len(msg.GetRecords())))
 	}
+}
+
+// importBlobStreamReader adapts a gRPC client-streaming RPC into an
+// io.Reader. Each ImportBlobBody message contributes one chunk of bytes;
+// the reader serves them sequentially so the importer never holds more
+// than the current message's worth of bytes in memory.
+type importBlobStreamReader struct {
+	stream  grpc.ServerStream
+	pending []byte // bytes left over from the most recently received body
+	done    bool   // true once the client has half-closed the stream
+}
+
+func (r *importBlobStreamReader) Read(p []byte) (int, error) {
+	for len(r.pending) == 0 {
+		if r.done {
+			return 0, io.EOF
+		}
+		if err := r.fillPending(); err != nil {
+			return 0, err
+		}
+	}
+	n := copy(p, r.pending)
+	r.pending = r.pending[n:]
+	return n, nil
+}
+
+// fillPending reads one Body message from the stream into r.pending.
+// EOF on the stream sets r.done; an empty Body leaves r.pending empty
+// so Read's loop pulls the next message. Header mid-stream is a
+// protocol violation.
+func (r *importBlobStreamReader) fillPending() error {
+	req := &gastrologv1.ImportBlobRequest{}
+	if err := r.stream.RecvMsg(req); err != nil {
+		if errors.Is(err, io.EOF) {
+			r.done = true
+		}
+		return err
+	}
+	body := req.GetBody()
+	if body == nil {
+		return status.Error(codes.InvalidArgument, "ImportBlob: expected body, got header mid-stream")
+	}
+	r.pending = body.GetData()
+	return nil
+}
+
+// importBlobStreamHandler handles the client-streaming ImportBlob RPC.
+// First message MUST be a header; subsequent messages carry body chunks.
+// The server adapts the stream as an io.Reader and hands it to the
+// configured BlobImporter, which writes the bytes to data.glcb.tmp,
+// verifies TOC integrity, and atomically renames into place.
+//
+// On success the ack carries the SHA-256 digest the importer computed
+// over the received bytes (matches the GLCB's whole-blob digest if the
+// import succeeded).
+func importBlobStreamHandler(srv any, stream grpc.ServerStream) error {
+	s := srv.(*Server)
+	if s.blobImporter == nil {
+		return status.Error(codes.Unavailable, "blob importer not configured")
+	}
+
+	first := &gastrologv1.ImportBlobRequest{}
+	if err := s.recvOrShutdown(stream, first); err != nil {
+		if errors.Is(err, io.EOF) {
+			return status.Error(codes.InvalidArgument, "ImportBlob: empty stream")
+		}
+		if errors.Is(err, errShuttingDown) {
+			return nil
+		}
+		return status.Errorf(codes.InvalidArgument, "receive header: %v", err)
+	}
+	header := first.GetHeader()
+	if header == nil {
+		return status.Error(codes.InvalidArgument, "ImportBlob: first message must be header")
+	}
+
+	vaultID, err := parseVaultID(header.GetVaultId())
+	if err != nil {
+		return err
+	}
+	tierID, err := parseTierID(header.GetTierId())
+	if err != nil {
+		return err
+	}
+	chunkID, err := parseChunkID(header.GetChunkId())
+	if err != nil {
+		return err
+	}
+	totalSize := header.GetTotalSize()
+	if totalSize <= 0 {
+		return status.Errorf(codes.InvalidArgument, "ImportBlob: invalid total_size %d", totalSize)
+	}
+
+	body := &importBlobStreamReader{stream: stream}
+	digest, err := s.blobImporter(stream.Context(), vaultID, tierID, chunkID, totalSize, body)
+	if err != nil {
+		return stream.SendMsg(&gastrologv1.ImportBlobAck{
+			Ok:      false,
+			Error:   err.Error(),
+			ChunkId: header.GetChunkId(),
+		})
+	}
+	return stream.SendMsg(&gastrologv1.ImportBlobAck{
+		Ok:         true,
+		ChunkId:    header.GetChunkId(),
+		BlobDigest: digest[:],
+	})
 }
 
 // forwardImportRecordsStreamHandler handles the client-streaming
@@ -1011,6 +1137,11 @@ var clusterServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "ForwardImportRecords",
 			Handler:       forwardImportRecordsStreamHandler,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "ImportBlob",
+			Handler:       importBlobStreamHandler,
 			ClientStreams: true,
 		},
 		{
