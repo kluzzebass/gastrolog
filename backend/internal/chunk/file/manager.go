@@ -979,20 +979,13 @@ func (m *Manager) loadExisting() error {
 
 		meta, err := m.loadChunkMeta(id)
 		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				// No idx.log — this directory has no chunk data files.
-				// Two cases:
-				// 1. Cloud-backed chunk with preserved index files: keep it.
-				// 2. Truly empty leftover directory: safe to remove.
-				if chunkDirHasFiles(filepath.Join(m.cfg.Dir, entry.Name())) {
-					m.logger.Debug("skipping cloud-backed chunk index directory", "chunk", id)
-					continue
-				}
-				m.logger.Info("removing empty leftover chunk directory", "chunk", id)
-				_ = os.RemoveAll(filepath.Join(m.cfg.Dir, entry.Name()))
-				continue
+			if !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("load chunk meta for %s: %w", id, err)
 			}
-			return fmt.Errorf("load chunk meta for %s: %w", id, err)
+			if recovered := m.recoverChunkWithoutIdxLog(id, entry.Name()); recovered != nil {
+				m.metas[id] = recovered
+			}
+			continue
 		}
 		m.metas[id] = meta
 
@@ -1462,6 +1455,33 @@ func (m *Manager) loadChunkMetaFromGLCB(id chunk.ChunkID) (*chunkMeta, error) {
 		sourceIdxSize:    bm.SourceIdxSize,
 		logicalDataBytes: bm.RawBytes,
 	}, nil
+}
+
+// recoverChunkWithoutIdxLog handles a chunk directory whose idx.log is
+// missing — three cases:
+//
+//   - data.glcb is present: stage-3b layout (sealed chunk lives as a
+//     single GLCB blob); loadChunkMetaFromGLCB reconstructs the meta.
+//   - The directory has other files (e.g. an index sidecar): cloud-backed
+//     chunk where the cloud blob is the source of truth and only the
+//     locally-built TS index files survived. Skip — the cloud-index
+//     wiring will re-attach.
+//   - The directory is empty: leftover from an aborted seal or a delete
+//     race. Remove it.
+//
+// Returns the loaded chunkMeta (case 1) or nil (cases 2 and 3).
+func (m *Manager) recoverChunkWithoutIdxLog(id chunk.ChunkID, entryName string) *chunkMeta {
+	if glcbMeta, err := m.loadChunkMetaFromGLCB(id); err == nil {
+		return glcbMeta
+	}
+	dir := filepath.Join(m.cfg.Dir, entryName)
+	if chunkDirHasFiles(dir) {
+		m.logger.Debug("skipping cloud-backed chunk index directory", "chunk", id)
+		return nil
+	}
+	m.logger.Info("removing empty leftover chunk directory", "chunk", id)
+	_ = os.RemoveAll(dir)
+	return nil
 }
 
 func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {

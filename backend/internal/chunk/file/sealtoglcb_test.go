@@ -185,6 +185,101 @@ func TestLoadChunkMetaFromGLCB(t *testing.T) {
 	}
 }
 
+// TestLoadExisting_GLCBOnlyChunk simulates the future state where
+// sealed chunks live as data.glcb only (no multi-file artifacts). The
+// test seals a chunk via the normal pipeline, then deletes the
+// multi-file artifacts manually, restarts the manager, and verifies
+// the sealed chunk is loaded from data.glcb. Regression-protection for
+// gastrolog-24m1t step 7c stage 3b — once multi-file generation goes
+// away, this is the steady-state load path.
+func TestLoadExisting_GLCBOnlyChunk(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	m, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+
+	now := time.Now().Truncate(time.Microsecond)
+	const recordCount = 5
+	var chunkID chunk.ChunkID
+	for i := range recordCount {
+		id, _, err := m.Append(chunk.Record{
+			IngestTS: now.Add(time.Duration(i) * time.Millisecond),
+			Attrs:    chunk.Attributes{"level": "info"},
+			Raw:      []byte("payload"),
+		})
+		if err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+		chunkID = id
+	}
+	if err := m.Seal(); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	if err := m.PostSealProcess(t.Context(), chunkID); err != nil {
+		t.Fatalf("PostSealProcess: %v", err)
+	}
+	chunkDirPath := m.chunkDir(chunkID)
+	_ = m.Close()
+
+	// Delete the multi-file artifacts; leave only data.glcb.
+	for _, name := range dataFileNames {
+		_ = os.Remove(filepath.Join(chunkDirPath, name))
+	}
+	if _, err := os.Stat(filepath.Join(chunkDirPath, dataGLCBFileName)); err != nil {
+		t.Fatalf("data.glcb missing after manual cleanup: %v", err)
+	}
+
+	// Re-open the manager. loadExisting should pick up the chunk via
+	// the GLCB fallback rather than treating it as cloud-backed-only.
+	m2, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("re-open manager: %v", err)
+	}
+	defer func() { _ = m2.Close() }()
+
+	metas, err := m2.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	var found *chunk.ChunkMeta
+	for i := range metas {
+		if metas[i].ID == chunkID {
+			found = &metas[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("chunk %v not found after restart with GLCB-only layout", chunkID)
+	}
+	if !found.Sealed {
+		t.Errorf("expected sealed=true, got %+v", found)
+	}
+	if found.RecordCount != recordCount {
+		t.Errorf("recordCount: got %d want %d", found.RecordCount, recordCount)
+	}
+
+	// And the GLCB cursor must read records back correctly.
+	cursor, err := m2.OpenCursor(chunkID)
+	if err != nil {
+		t.Fatalf("OpenCursor after restart: %v", err)
+	}
+	defer func() { _ = cursor.Close() }()
+	var got int
+	for {
+		_, _, err := cursor.Next()
+		if err != nil {
+			break
+		}
+		got++
+	}
+	if got != recordCount {
+		t.Errorf("read %d records via GLCB cursor, want %d", got, recordCount)
+	}
+}
+
 // TestSealToGLCB_RefusesUnsealedChunk verifies that sealToGLCB on an
 // unsealed (still-active) chunk does not silently produce a bogus
 // blob — the OpenCursor call should fail because cursors against the
