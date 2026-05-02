@@ -757,9 +757,13 @@ func findIngestRank(cm chunk.ChunkManager, im index.IndexManager, chunkID chunk.
 // Sealed chunks: index manager's FindIngestStartPosition (on-disk binary search).
 // Both are O(buckets × log(n)) with no heap allocation beyond stack buffers.
 //
-// For chunks without an ingest index (e.g., cloud-backed chunks), falls back to
-// linear interpolation: assumes records are evenly distributed across the chunk's
-// IngestStart → IngestEnd range.
+// Active non-monotonic chunks fall through to bucketizeActiveChunk, which
+// scans the in-memory B+ tree (rank arithmetic isn't available there). All
+// other chunks — sealed local, sealed cloud-backed, monotonic active — go
+// through timechartChunkByIndex against the IngestTS index. With FSM-as-
+// source-of-truth (gastrolog-2pw28) the index is guaranteed to exist for
+// any chunk the FSM exposes; transient lookup failures are real errors,
+// not histogram artifacts.
 func timechartChunkByIngestTS(
 	cm chunk.ChunkManager,
 	im index.IndexManager,
@@ -808,26 +812,11 @@ func timechartChunkByIngestTS(
 		return
 	}
 
-	// Try index-based counting (works for local and cloud sealed chunks —
-	// cloud TS indexes are cached locally after first S3 fetch — and for
-	// monotonic active chunks via the in-memory B+ tree).
-	if _, ok := findIngestPos(cm, im, meta.ID, start); ok {
-		timechartChunkByIndex(cm, im, meta, start, bucketWidth, firstBucket, lastBucket, counts)
-		return
-	}
-
-	// No ingest index available — contribute zero. Even-distribution
-	// interpolation over RecordCount overshoots buckets where the chunk's
-	// actual records are sparse and underwhelms where they're dense, which
-	// (combined with other chunks' real contributions) produces visible
-	// spikes mid-window. A brief zero-contribution gap during the chunk's
-	// upload race is preferable: it self-heals on the next query once the
-	// cloud TS index is wired. See gastrolog-66b7x.
-	if cloudFlags != nil {
-		for b := firstBucket; b <= lastBucket; b++ {
-			cloudFlags[b] = true
-		}
-	}
+	// Index-based counting: rank arithmetic on the IngestTS-sorted index
+	// (on-disk for sealed chunks, B+ tree for monotonic active chunks,
+	// cached local file for cloud-backed sealed chunks). The FSM has
+	// already promised an index exists for this chunk.
+	timechartChunkByIndex(cm, im, meta, start, bucketWidth, firstBucket, lastBucket, counts)
 }
 
 // bucketizeActiveChunk iterates the active chunk's records once and
@@ -945,11 +934,7 @@ func chunkBucketTotals(
 	for b := firstBucket; b <= lastBucket; b++ {
 		bStart := start.Add(bucketWidth * time.Duration(b))
 		bEnd := start.Add(bucketWidth * time.Duration(b+1))
-		// Per-bucket guard: same rationale as timechartChunkByIndex.
-		startRank, ok := findIngestRank(cm, im, meta.ID, bStart)
-		if !ok {
-			continue
-		}
+		startRank, _ := findIngestRank(cm, im, meta.ID, bStart)
 		var endRank uint64
 		if !meta.IngestEnd.IsZero() && !bEnd.Before(meta.IngestEnd) {
 			endRank = uint64(meta.RecordCount) //nolint:gosec // G115: RecordCount is non-negative
@@ -968,11 +953,6 @@ func chunkBucketTotals(
 // — endRank - startRank — because physical record positions in chunks built
 // via ImportRecords are scattered relative to IngestTS order. See
 // gastrolog-66b7x.
-//
-// When findIngestRank fails for a bucket's bStart (TS index briefly
-// unavailable, e.g. sealed-local → cloud-backed upload race), that bucket
-// contributes zero from this chunk. Same fallback applies to chunkBucketTotals
-// so counts and groupCounts stay numerically consistent.
 func timechartChunkByIndex(
 	cm chunk.ChunkManager,
 	im index.IndexManager,
@@ -986,10 +966,7 @@ func timechartChunkByIndex(
 		bStart := start.Add(bucketWidth * time.Duration(b))
 		bEnd := start.Add(bucketWidth * time.Duration(b+1))
 
-		startRank, ok := findIngestRank(cm, im, meta.ID, bStart)
-		if !ok {
-			continue
-		}
+		startRank, _ := findIngestRank(cm, im, meta.ID, bStart)
 
 		var endRank uint64
 		if !meta.IngestEnd.IsZero() && !bEnd.Before(meta.IngestEnd) {
