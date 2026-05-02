@@ -311,23 +311,45 @@ func decodeDictFromBuf(buf []byte, dictEntries uint32) (*chunk.StringDict, error
 }
 
 // decodeFrame decodes a record frame into a Record using the given dictionary.
+// Every field read is bounds-checked at its own site so the layout and the
+// guard never drift. No upstream magic-number length check.
 func decodeFrame(frame []byte, dict *chunk.StringDict) (chunk.Record, error) {
-	if len(frame) < minFrameSize {
-		return chunk.Record{}, fmt.Errorf("frame too small: %d < %d", len(frame), minFrameSize)
-	}
 	off := 0
 	var rec chunk.Record
 
+	if off+8 > len(frame) {
+		return chunk.Record{}, errors.New("truncated sourceTS")
+	}
 	rec.SourceTS = tsFromNanos(binary.LittleEndian.Uint64(frame[off:]))
 	off += 8
+
+	if off+8 > len(frame) {
+		return chunk.Record{}, errors.New("truncated ingestTS")
+	}
 	rec.IngestTS = tsFromNanos(binary.LittleEndian.Uint64(frame[off:]))
 	off += 8
+
+	if off+8 > len(frame) {
+		return chunk.Record{}, errors.New("truncated writeTS")
+	}
 	rec.WriteTS = tsFromNanos(binary.LittleEndian.Uint64(frame[off:]))
 	off += 8
+
+	if off+16 > len(frame) {
+		return chunk.Record{}, errors.New("truncated ingesterID")
+	}
 	copy(rec.EventID.IngesterID[:], frame[off:off+16])
 	off += 16
+
+	if off+16 > len(frame) {
+		return chunk.Record{}, errors.New("truncated nodeID")
+	}
 	copy(rec.EventID.NodeID[:], frame[off:off+16])
 	off += 16
+
+	if off+4 > len(frame) {
+		return chunk.Record{}, errors.New("truncated ingestSeq")
+	}
 	rec.EventID.IngestSeq = binary.LittleEndian.Uint32(frame[off:])
 	off += 4
 	rec.EventID.IngestTS = rec.IngestTS

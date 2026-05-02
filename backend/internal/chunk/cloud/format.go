@@ -90,14 +90,6 @@ const (
 	// enabling random access at frame granularity. Matches the file vault.
 	seekableFrameSize = 256 << 10 // 256 KB
 
-	// Minimum record frame: 3×8 (timestamps) + 16 (ingesterID) + 16
-	// (nodeID) + 4 (ingestSeq) + 2 (attrCount) + 4 (rawLen) = 66 bytes,
-	// before any attrs (0×8) and raw payload (0). The previous constant
-	// was off-by-8 and rejected valid small-record frames; latent because
-	// no read path ever decoded a multi-file-sealed chunk through the
-	// chunkcloud reader until step 7c stage 2b (gastrolog-24m1t).
-	minFrameSize = 66
-
 	// TS index entry: [tsNano:i64][pos:u32] = 12 bytes, sorted by TS.
 	tsIndexEntrySize = 12
 
