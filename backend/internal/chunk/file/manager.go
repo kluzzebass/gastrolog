@@ -3567,22 +3567,6 @@ func (m *Manager) UploadToCloud(id chunk.ChunkID) error {
 	if m.cfg.CloudStore == nil {
 		return errors.New("cloud store not configured")
 	}
-
-	// Ensure the chunk exists in the tier FSM. Chunks sealed during
-	// degraded startup (S3 down, Raft not ready) may be missing from the
-	// manifest. Without Create+Seal in the FSM, the subsequent Upload
-	// announce has nothing to update. Idempotent — if already present,
-	// the FSM ignores the duplicate. See gastrolog-68fqk.
-	if m.cfg.Announcer != nil {
-		m.mu.Lock()
-		meta := m.metas[id]
-		m.mu.Unlock()
-		if meta != nil && meta.sealed {
-			m.cfg.Announcer.AnnounceCreate(id, meta.writeStart, meta.ingestStart, meta.sourceStart)
-			m.cfg.Announcer.AnnounceSeal(id, meta.writeEnd, meta.recordCount, meta.bytes, meta.ingestEnd, meta.sourceEnd)
-		}
-	}
-
 	return m.uploadToCloud(id)
 }
 
@@ -3778,21 +3762,13 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 	}
 
 	// FSM-first: announce before any local mutation. Applier.Apply blocks on
-	// quorum + local FSM apply, so once the announces return the FSM is
+	// quorum + local FSM apply, so once the announce returns the FSM is
 	// authoritative for "this chunk is cloud-backed". Without this, the FSM
 	// overlay keeps returning CloudBacked=false and the backfill re-adopts on
-	// every cycle (gastrolog-68fqk); also the readers landing between
-	// removeLocalDataFiles and the announce would have observed
-	// "FSM says local, files gone", producing histogram artifacts
-	// (gastrolog-35l6a).
-	//
-	// AnnounceCreate+AnnounceSeal are idempotent fallbacks for the case where
-	// the FSM never saw the create/seal (e.g. follower came up after the
-	// leader had already uploaded). They are scheduled for deletion in
-	// gastrolog-2qaou once we are confident the FSM always has them.
+	// every cycle (gastrolog-68fqk); readers landing between removeLocalDataFiles
+	// and the announce would have observed "FSM says local, files gone",
+	// producing histogram artifacts (gastrolog-35l6a).
 	if m.cfg.Announcer != nil && am != nil {
-		m.cfg.Announcer.AnnounceCreate(id, am.writeStart, am.ingestStart, am.sourceStart)
-		m.cfg.Announcer.AnnounceSeal(id, am.writeEnd, am.recordCount, am.bytes, am.ingestEnd, am.sourceEnd)
 		m.cfg.Announcer.AnnounceUpload(id, blobSize,
 			toc.IngestIdxOffset, toc.IngestIdxSize,
 			toc.SourceIdxOffset, toc.SourceIdxSize,
