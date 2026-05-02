@@ -1526,36 +1526,6 @@ func scanTSBounds(idxFile *os.File, recordCount uint64, meta *chunkMeta) error {
 	return nil
 }
 
-func computeIngestBounds(meta *chunkMeta, first, last IdxEntry) {
-	if first.IngestTS.Before(last.IngestTS) {
-		meta.ingestStart = first.IngestTS
-		meta.ingestEnd = last.IngestTS
-	} else {
-		meta.ingestStart = last.IngestTS
-		meta.ingestEnd = first.IngestTS
-	}
-}
-
-func computeSourceBounds(meta *chunkMeta, first, last IdxEntry) {
-	if first.SourceTS.IsZero() && last.SourceTS.IsZero() {
-		return
-	}
-	var minSrc, maxSrc time.Time
-	for _, ts := range []time.Time{first.SourceTS, last.SourceTS} {
-		if ts.IsZero() {
-			continue
-		}
-		if minSrc.IsZero() || ts.Before(minSrc) {
-			minSrc = ts
-		}
-		if maxSrc.IsZero() || ts.After(maxSrc) {
-			maxSrc = ts
-		}
-	}
-	meta.sourceStart = minSrc
-	meta.sourceEnd = maxSrc
-}
-
 func (m *Manager) SetNextChunkID(id chunk.ChunkID) {
 	m.mu.Lock()
 	m.nextChunkID = &id
