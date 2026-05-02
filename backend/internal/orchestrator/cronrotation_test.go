@@ -42,6 +42,7 @@ func (f *cronFakeChunkManager) FindIngestStartPosition(_ chunk.ChunkID, _ time.T
 func (f *cronFakeChunkManager) FindIngestEntryIndex(_ chunk.ChunkID, _ time.Time) (uint64, bool, error) {
 	return 0, false, nil
 }
+func (f *cronFakeChunkManager) HasLocalContent(_ chunk.ChunkID) bool { return true }
 func (f *cronFakeChunkManager) ScanActiveByIngestTS(_ chunk.ChunkID, _ func(time.Time, chunk.Attributes) bool) error {
 	return chunk.ErrChunkNotFound
 }

@@ -53,6 +53,7 @@ func (f *retentionFakeChunkManager) FindIngestStartPosition(_ chunk.ChunkID, _ t
 func (f *retentionFakeChunkManager) FindIngestEntryIndex(_ chunk.ChunkID, _ time.Time) (uint64, bool, error) {
 	return 0, false, nil
 }
+func (f *retentionFakeChunkManager) HasLocalContent(_ chunk.ChunkID) bool { return true }
 func (f *retentionFakeChunkManager) FindSourceStartPosition(_ chunk.ChunkID, _ time.Time) (uint64, bool, error) {
 	return 0, false, nil
 }

@@ -220,6 +220,7 @@ func (n *noopChunkManager) FindIngestStartPosition(chunk.ChunkID, time.Time) (ui
 func (n *noopChunkManager) FindIngestEntryIndex(chunk.ChunkID, time.Time) (uint64, bool, error) {
 	return 0, false, nil
 }
+func (n *noopChunkManager) HasLocalContent(chunk.ChunkID) bool { return true }
 func (n *noopChunkManager) ScanActiveByIngestTS(chunk.ChunkID, func(time.Time, chunk.Attributes) bool) error {
 	return chunk.ErrChunkNotFound
 }

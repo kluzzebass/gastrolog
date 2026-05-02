@@ -82,6 +82,15 @@ type ChunkManager interface {
 	// See gastrolog-66b7x.
 	FindIngestEntryIndex(id ChunkID, ts time.Time) (uint64, bool, error)
 
+	// HasLocalContent reports whether the chunk's record content is fully
+	// available on local disk — true for sealed local file chunks and for
+	// cloud chunks whose GLCB blob is already in the warm cache. False for
+	// cloud chunks that would require an S3 download. Callers that perform
+	// content-bearing reads purely as a side-effect (notably histogram
+	// level breakdowns) gate on this so that a histogram refresh never
+	// triggers cloud blob downloads. See gastrolog-66b7x.
+	HasLocalContent(id ChunkID) bool
+
 	// ScanActiveIngestTS iterates the active chunk's IngestTS B+ tree in
 	// IngestTS-sorted order. The callback receives IngestTS in nanoseconds
 	// and returns false to stop early. Returns ErrChunkNotFound if id is

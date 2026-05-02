@@ -427,6 +427,9 @@ func (m *Manager) FindIngestEntryIndex(id chunk.ChunkID, ts time.Time) (uint64, 
 	return m.FindIngestStartPosition(id, ts)
 }
 
+// HasLocalContent always true: memory chunks are entirely in-memory.
+func (m *Manager) HasLocalContent(_ chunk.ChunkID) bool { return true }
+
 func (m *Manager) FindIngestStartPosition(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
 	m.mu.Lock()
 	state := m.findChunkLocked(id)

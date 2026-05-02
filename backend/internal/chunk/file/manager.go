@@ -2533,6 +2533,25 @@ func (m *Manager) FindIngestEntryIndex(id chunk.ChunkID, ts time.Time) (uint64, 
 	return 0, false, nil
 }
 
+// HasLocalContent reports whether the chunk's content is locally readable
+// without triggering an S3 fetch. See ChunkManager.HasLocalContent.
+func (m *Manager) HasLocalContent(id chunk.ChunkID) bool {
+	m.mu.Lock()
+	meta := m.lookupMeta(id)
+	m.mu.Unlock()
+	if meta == nil {
+		return false
+	}
+	if !meta.cloudBacked {
+		return true
+	}
+	if m.cfg.CacheDir == "" {
+		return false
+	}
+	_, err := os.Stat(m.cachePath(id))
+	return err == nil
+}
+
 // FindSourceStartPosition returns the earliest record position with SourceTS >= ts.
 // Supports active chunks (B+ tree) and cloud chunks (embedded TS index via range request).
 func (m *Manager) FindSourceStartPosition(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
@@ -2651,6 +2670,26 @@ func (m *Manager) findCloudTSPosition(id chunk.ChunkID, ts time.Time, offset, si
 	return uint64(pos), ok, err
 }
 
+// validateTSExtents returns true if (first, last) look like a plausible
+// (min, max) TS pair from a sorted TS index: both non-zero, last >= first,
+// and within a reasonable real-world range (post-2000, pre-2200). Used to
+// guard repairCloudBounds against garbage reads from a corrupt or
+// partially-downloaded cache file. See gastrolog-66b7x.
+func validateTSExtents(first, last time.Time) bool {
+	if first.IsZero() || last.IsZero() {
+		return false
+	}
+	if last.Before(first) {
+		return false
+	}
+	minTS := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	maxTS := time.Date(2200, 1, 1, 0, 0, 0, 0, time.UTC)
+	if first.Before(minTS) || last.After(maxTS) {
+		return false
+	}
+	return true
+}
+
 // cloudTSExtents returns the min and max IngestTS in a cloud chunk's TS
 // index by reading the first and last entries of the cached cache file.
 // On cache miss, downloads the index from S3 first (one range request).
@@ -2687,7 +2726,12 @@ func (m *Manager) cloudTSExtents(id chunk.ChunkID, offset, size int64) (time.Tim
 		return time.Time{}, time.Time{}, err
 	}
 	lastTS := int64(binary.LittleEndian.Uint64(buf[:8])) //nolint:gosec // G115
-	return time.Unix(0, firstTS), time.Unix(0, lastTS), nil
+	first := time.Unix(0, firstTS)
+	last := time.Unix(0, lastTS)
+	if !validateTSExtents(first, last) {
+		return time.Time{}, time.Time{}, fmt.Errorf("cloud TS index for %s returned implausible extents (first=%s last=%s)", id, first, last)
+	}
+	return first, last, nil
 }
 
 // findCloudTSRank is the rank counterpart to findCloudTSPosition. Returns
@@ -3575,9 +3619,26 @@ func (m *Manager) repairCloudBounds() {
 	}
 	for _, p := range todo {
 		first, last, err := m.cloudTSExtents(p.id, p.meta.ingestIdxOffset, p.meta.ingestIdxSize)
-		if err != nil {
-			m.logger.Debug("repairCloudBounds: skip chunk (TS index fetch failed)",
-				"chunk", p.id, "error", err)
+		recomputed := err == nil && validateTSExtents(first, last)
+		existingValid := validateTSExtents(p.meta.ingestStart, p.meta.ingestEnd)
+		if !recomputed {
+			if err != nil {
+				m.logger.Debug("repairCloudBounds: TS index fetch failed",
+					"chunk", p.id, "error", err)
+			}
+			if !existingValid {
+				// We have nothing trustworthy to display for this chunk
+				// and could trigger nonsense-bucket spikes if we leave
+				// it in cloudIdx. Drop the entry; if the blob comes back
+				// online, RegisterCloudChunk will re-add it cleanly.
+				m.logger.Warn("repairCloudBounds: evicting cloud chunk with invalid bounds and unrecoverable TS index",
+					"chunk", p.id,
+					"stored_start", p.meta.ingestStart,
+					"stored_end", p.meta.ingestEnd)
+				m.cloudIdxMu.Lock()
+				_, _ = m.cloudIdx.Delete(p.id)
+				m.cloudIdxMu.Unlock()
+			}
 			continue
 		}
 		if first.Equal(p.meta.ingestStart) && last.Equal(p.meta.ingestEnd) {
