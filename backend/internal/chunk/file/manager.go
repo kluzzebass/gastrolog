@@ -889,6 +889,14 @@ func (m *Manager) ScanAttrs(id chunk.ChunkID, startPos uint64, fn func(writeTS t
 		return m.scanAttrsCloud(id, startPos, fn)
 	}
 
+	// Sealed chunks with data.glcb: route through the GLCB cursor so the
+	// per-chunk artifact is the source of truth (gastrolog-24m1t step 7c
+	// stage 3). Multi-file fallback below stays in place until step 7d
+	// retires the multi-file generation entirely.
+	if sealed && m.hasLocalGLCB(id) {
+		return scanAttrsViaGLCB(m, id, startPos, fn)
+	}
+
 	chunkLock := m.chunkLockFor(id)
 	chunkLock.RLock()
 	defer chunkLock.RUnlock()
@@ -913,6 +921,37 @@ func (m *Manager) ScanAttrs(id chunk.ChunkID, startPos uint64, fn func(writeTS t
 	// Active chunk: load dict from disk (not the live in-memory dict)
 	// to avoid racing with concurrent Append calls.
 	return scanAttrsActive(idxPath, attrPath, dictPath, startPos, fn)
+}
+
+// scanAttrsViaGLCB iterates a sealed chunk's records via its data.glcb,
+// projecting each one to (writeTS, attrs) for the caller. Used by the
+// histogram's level-breakdown path; the chunkcloud cursor decodes full
+// records, but per-record CPU is bounded by the seekable-zstd frame
+// granularity (256 KB).
+func scanAttrsViaGLCB(m *Manager, id chunk.ChunkID, startPos uint64, fn func(writeTS time.Time, attrs chunk.Attributes) bool) error {
+	cursor, err := m.openLocalGLCBCursor(id)
+	if err != nil {
+		return fmt.Errorf("open data.glcb cursor for %s: %w", id, err)
+	}
+	defer func() { _ = cursor.Close() }()
+
+	if startPos > 0 {
+		if err := cursor.Seek(chunk.RecordRef{ChunkID: id, Pos: startPos}); err != nil {
+			return fmt.Errorf("seek to %d: %w", startPos, err)
+		}
+	}
+	for {
+		rec, _, err := cursor.Next()
+		if errors.Is(err, chunk.ErrNoMoreRecords) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if !fn(rec.WriteTS, rec.Attrs) {
+			return nil
+		}
+	}
 }
 
 func (m *Manager) loadExisting() error {
