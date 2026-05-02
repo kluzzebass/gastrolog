@@ -37,6 +37,15 @@ const (
 	attrDictFileName = "attr_dict.log"
 	ingestBTFileName = "ingest.bt"
 	sourceBTFileName = "source.bt"
+
+	// dataGLCBFileName is the canonical sealed-chunk artifact under the
+	// chunk redesign (gastrolog-2pw28): a single self-contained, byte-
+	// identical-across-replicas, integrity-checked GLCB blob. Sibling
+	// files in the chunk directory may exist for node-local artifacts
+	// (custom indexes, build-time ledgers) but only data.glcb is the
+	// replicable / cloud-uploadable shape.
+	dataGLCBFileName    = "data.glcb"
+	dataGLCBTmpFileName = "data.glcb.tmp"
 )
 
 // Per-call timeouts on cloud storage operations that run on the post-seal
@@ -3568,6 +3577,103 @@ func (m *Manager) UploadToCloud(id chunk.ChunkID) error {
 		return errors.New("cloud store not configured")
 	}
 	return m.uploadToCloud(id)
+}
+
+// sealToGLCB packages a sealed multi-file chunk into a single
+// `<chunkdir>/data.glcb` blob atomically: write to data.glcb.tmp, fsync,
+// rename. Same encoding as uploadToCloud (the cloud blob and the local
+// sealed file are byte-identical by construction, which is what unlocks
+// binary chunk replication later — gastrolog-3o5b4).
+//
+// Capability-only: not yet wired into the seal pipeline. Subsequent
+// commits flip PostSealProcess to call this in place of CompressChunk
+// and switch read paths to consume data.glcb. See gastrolog-24m1t.
+//
+// On success returns the GLCB writer so callers can read TOC offsets
+// and NumFrames without a second pass over the file.
+func (m *Manager) sealToGLCB(id chunk.ChunkID) (*chunkcloud.Writer, int64, error) {
+	m.mu.Lock()
+	if m.closed || m.zstdEnc == nil {
+		m.mu.Unlock()
+		return nil, 0, ErrManagerClosed
+	}
+	meta, ok := m.metas[id]
+	if !ok {
+		m.mu.Unlock()
+		return nil, 0, chunk.ErrChunkNotFound
+	}
+	if !meta.sealed {
+		m.mu.Unlock()
+		return nil, 0, chunk.ErrChunkNotSealed
+	}
+	m.mu.Unlock()
+
+	cursor, err := m.OpenCursor(id)
+	if err != nil {
+		return nil, 0, fmt.Errorf("open cursor for GLCB seal: %w", err)
+	}
+
+	w := chunkcloud.NewWriter(id, m.cfg.VaultID, m.zstdEnc)
+	for {
+		rec, _, recErr := cursor.Next()
+		if errors.Is(recErr, chunk.ErrNoMoreRecords) {
+			break
+		}
+		if recErr != nil {
+			_ = cursor.Close()
+			return nil, 0, fmt.Errorf("read record for GLCB seal: %w", recErr)
+		}
+		if err := w.Add(rec); err != nil {
+			_ = cursor.Close()
+			return nil, 0, fmt.Errorf("add record to GLCB writer: %w", err)
+		}
+	}
+	_ = cursor.Close()
+
+	dir := m.chunkDir(id)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return nil, 0, fmt.Errorf("ensure chunk dir: %w", err)
+	}
+	tmpPath := filepath.Join(dir, dataGLCBTmpFileName)
+	finalPath := filepath.Join(dir, dataGLCBFileName)
+
+	// Open the tmp with O_EXCL so a stale tmp from a prior aborted seal
+	// surfaces as a clear error rather than getting clobbered. The
+	// cleanOrphanTempFiles sweep at startup is responsible for tmp removal
+	// on crash recovery.
+	f, err := os.OpenFile(filepath.Clean(tmpPath), os.O_RDWR|os.O_CREATE|os.O_EXCL, m.cfg.FileMode)
+	if err != nil {
+		return nil, 0, fmt.Errorf("create %s: %w", dataGLCBTmpFileName, err)
+	}
+	cleanup := func() {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+	}
+
+	// Serialize zstd encoder access — chunkcloud.Writer reuses the shared
+	// m.zstdEnc, which klauspost/zstd's seekable writer is not safe for
+	// concurrent use against. Same rationale as CompressChunk's
+	// zstdEncMu serialization.
+	m.zstdEncMu.Lock()
+	written, werr := w.WriteTo(f)
+	m.zstdEncMu.Unlock()
+	if werr != nil {
+		cleanup()
+		return nil, 0, fmt.Errorf("write GLCB: %w", werr)
+	}
+	if err := f.Sync(); err != nil {
+		cleanup()
+		return nil, 0, fmt.Errorf("fsync %s: %w", dataGLCBTmpFileName, err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return nil, 0, fmt.Errorf("close %s: %w", dataGLCBTmpFileName, err)
+	}
+	if err := os.Rename(tmpPath, finalPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return nil, 0, fmt.Errorf("rename %s → %s: %w", dataGLCBTmpFileName, dataGLCBFileName, err)
+	}
+	return w, written, nil
 }
 
 func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
