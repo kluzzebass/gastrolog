@@ -6,6 +6,7 @@ import (
 	"gastrolog/internal/index"
 	"gastrolog/internal/query"
 	"gastrolog/internal/system"
+	"gastrolog/internal/vaultraft/tierfsm"
 )
 
 // TierInstance is the node-local materialization of a TierConfig.
@@ -106,6 +107,19 @@ type TierInstance struct {
 	// ListManifest returns all chunk IDs in the tier FSM view — the authoritative
 	// set of chunks that should exist. Nil when no Raft group exists.
 	ListManifest func() []chunk.ChunkID
+
+	// ManifestEntries returns every chunk's full manifest entry for this
+	// tier (sealed and active alike — callers filter on Sealed when they
+	// want only sealed chunks, e.g. the manifest.Reader implementation
+	// honoring the active-chunk exception). Nil for memory-mode tiers
+	// (no FSM); the orchestrator falls back to the chunk manager in
+	// that case.
+	ManifestEntries func() []tierfsm.ManifestEntry
+
+	// ManifestEntry returns the manifest entry for one chunk on this tier,
+	// or false if this tier doesn't hold the chunk. Nil for memory-mode
+	// tiers; the orchestrator falls back to the chunk manager.
+	ManifestEntry func(id chunk.ChunkID) (tierfsm.ManifestEntry, bool)
 
 	// IsFSMReady returns true after the tier FSM has applied at least one log
 	// entry or restored from a snapshot. Before that, the manifest is incomplete

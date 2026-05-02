@@ -1,4 +1,4 @@
-package raftfsm
+package tierfsm
 
 import (
 	"sync"

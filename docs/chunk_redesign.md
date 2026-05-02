@@ -80,7 +80,7 @@ file/cloud machinery into one shape parameterised by a single property.
 
 Every persistent fact about a *sealed* chunk lives in exactly one place:
 its `ManifestEntry` in the tier sub-FSM
-([backend/internal/tier/raftfsm/fsm.go](../backend/internal/tier/raftfsm/fsm.go)).
+([backend/internal/vaultraft/tierfsm/fsm.go](../backend/internal/vaultraft/tierfsm/fsm.go)).
 
 That `ManifestEntry` is mutated only by the sanctioned `Cmd*` applies. Outside
 those write points, **nothing computes, recomputes, validates, repairs, or
@@ -146,9 +146,9 @@ is about *sealed* chunks, where the rule holds without exception.
 The exception isn't a redesign decision. It is how the system already
 works:
 
-- `applyCreate` ([fsm.go:615](../backend/internal/tier/raftfsm/fsm.go#L615))
+- `applyCreate` ([fsm.go:615](../backend/internal/vaultraft/tierfsm/fsm.go#L615))
   writes only `ID` + the three `*Start` placeholders.
-- `applySeal` ([fsm.go:645](../backend/internal/tier/raftfsm/fsm.go#L645))
+- `applySeal` ([fsm.go:645](../backend/internal/vaultraft/tierfsm/fsm.go#L645))
   is the only command that overwrites Start/End/Count/Bytes with real
   values.
 - There is no `CmdAppend` or `CmdGrowChunk`. Per-record updates never
@@ -645,9 +645,9 @@ storage layouts that never had to be different.
 These parts of the existing code are consistent with the rule and stay:
 
 - The set of FSM commands and their `apply*` handlers in
-  [tier/raftfsm/fsm.go](../backend/internal/tier/raftfsm/fsm.go).
+  [vaultraft/tierfsm/fsm.go](../backend/internal/vaultraft/tierfsm/fsm.go).
 - The `Announcer`
-  ([tier/raftfsm/announcer.go](../backend/internal/tier/raftfsm/announcer.go)),
+  ([vaultraft/tierfsm/announcer.go](../backend/internal/vaultraft/tierfsm/announcer.go)),
   which is the only allowed proposer of `Create/Seal/Compress/Upload/Delete`.
 - `expandBounds` (running min/max applied per record at Append-time and
   inside `ImportRecords.writeRecord`) — produces correct

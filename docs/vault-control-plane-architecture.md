@@ -42,7 +42,7 @@
 | Aspect | Detail |
 |--------|--------|
 | **Entry** | `ensureVaultControlPlaneRaftGroup` in [`backend/internal/orchestrator/reconfig_vaults.go`](../backend/internal/orchestrator/reconfig_vaults.go) |
-| **FSM** | [`backend/internal/vaultraft/`](../backend/internal/vaultraft/) — holds per-tier sub-FSMs ([`tierfsm.FSM`](../backend/internal/tier/raftfsm/)) namespaced by `OpTierFSM` commands |
+| **FSM** | [`backend/internal/vaultraft/`](../backend/internal/vaultraft/) — holds per-tier sub-FSMs ([`tierfsm.FSM`](../backend/internal/vaultraft/tierfsm/)) namespaced by `OpTierFSM` commands |
 | **Cross-node apply** | `orchestrator.ApplyVaultControlPlane` → `cluster.VaultApplyForwarder` when `PeerConns` is set, else local `Raft.Apply`; RPC path: `ForwardVaultApply` + `cluster.SetGroupApplyFn` ([`backend/internal/orchestrator/vault_ctl_apply.go`](../backend/internal/orchestrator/vault_ctl_apply.go), [`backend/internal/cluster/vault_apply_forwarder.go`](../backend/internal/cluster/vault_apply_forwarder.go), [`backend/internal/cluster/forward.go`](../backend/internal/cluster/forward.go), [`backend/internal/app/app.go`](../backend/internal/app/app.go)) |
 | **Client forwarder** | [`backend/internal/cluster/vault_apply_forwarder.go`](../backend/internal/cluster/vault_apply_forwarder.go) (`VaultApplyForwarder`) |
 

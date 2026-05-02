@@ -22,7 +22,7 @@ import (
 	"gastrolog/internal/query"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/system"
-	tierfsm "gastrolog/internal/tier/raftfsm"
+	"gastrolog/internal/vaultraft/tierfsm"
 	"gastrolog/internal/vaultraft"
 
 	hraft "github.com/hashicorp/raft"
@@ -1088,6 +1088,8 @@ type tierRaftCallbacks struct {
 	listRetPending          func() []chunk.ChunkID
 	listTransitionStreamed  func() []chunk.ChunkID
 	overlayFromFSM          func(chunk.ChunkMeta) chunk.ChunkMeta
+	manifestEntries         func() []tierfsm.ManifestEntry
+	manifestEntry           func(id chunk.ChunkID) (tierfsm.ManifestEntry, bool)
 }
 
 // ensureVaultCtlTierMetadata joins this node to the vault control-plane
@@ -1095,7 +1097,7 @@ type tierRaftCallbacks struct {
 // returns the applier + callbacks for this tier's chunk metadata. Every
 // tier in the same vault shares the same vault-ctl Raft group; each
 // tier's chunk FSM is a sub-FSM keyed by tier ID (see vaultraft.FSM and
-// tier/raftfsm.FSM). With no GroupManager, returns nils.
+// vaultraft/tierfsm.FSM). With no GroupManager, returns nils.
 //
 // Post-gastrolog-5xxbd there is no per-vault-ctl Raft group. The historical
 // function name ensureVaultCtlTierMetadata is preserved as a no-op alias in
@@ -1227,6 +1229,22 @@ func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.App
 			m.Archived = e.Archived
 			m.NumFrames = e.NumFrames
 			return m
+		},
+		manifestEntries: func() []tierfsm.ManifestEntry {
+			if fsm == nil {
+				return nil
+			}
+			return fsm.List()
+		},
+		manifestEntry: func(id chunk.ChunkID) (tierfsm.ManifestEntry, bool) {
+			if fsm == nil {
+				return tierfsm.ManifestEntry{}, false
+			}
+			e := fsm.Get(id)
+			if e == nil {
+				return tierfsm.ManifestEntry{}, false
+			}
+			return *e, true
 		},
 	}
 }

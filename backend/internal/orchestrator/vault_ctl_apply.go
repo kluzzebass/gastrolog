@@ -9,7 +9,7 @@ import (
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/vaultraft"
 
-	tierfsm "gastrolog/internal/tier/raftfsm"
+	"gastrolog/internal/vaultraft/tierfsm"
 )
 
 // ErrVaultCtlRaftUnavailable is returned when ApplyVaultControlPlane is called

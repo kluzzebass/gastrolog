@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"gastrolog/internal/raftgroup"
-	tierfsm "gastrolog/internal/tier/raftfsm"
+	"gastrolog/internal/vaultraft/tierfsm"
 
 	hraft "github.com/hashicorp/raft"
 )

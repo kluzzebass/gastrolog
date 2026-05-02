@@ -14,7 +14,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/index"
-	tierfsm "gastrolog/internal/tier/raftfsm"
+	"gastrolog/internal/vaultraft/tierfsm"
 )
 
 // VaultRegistry provides access to all vaults' chunk and index managers and
@@ -48,25 +48,27 @@ type VaultRegistry interface {
 	TransitionStreamedChunks(vaultID glid.GLID) map[chunk.ChunkID]bool
 }
 
-// Reader exposes the FSM-projected view of a vault's chunk manifest. Every
-// caller that needs sealed-chunk metadata routes through this interface
-// instead of reaching into chunk.Manager.metas / cloudIdx / chunkMeta —
-// the FSM is the source of truth, and Reader is the only sanctioned read
-// path. The active chunk is *not* covered here (its running maxima live in
-// chunk.Manager and don't round-trip through Raft); callers ask the chunk
-// manager directly for that.
+// Reader exposes the FSM-projected view of chunk manifests. Every caller
+// that needs sealed-chunk metadata routes through this interface instead
+// of reaching into chunk.Manager.metas / cloudIdx / chunkMeta — the FSM
+// is the source of truth, and Reader is the only sanctioned read path.
+// The active chunk is *not* covered here (its running maxima live in
+// chunk.Manager and don't round-trip through Raft); callers ask the
+// chunk manager directly for that.
 //
 // See docs/chunk_redesign.md for the rule and the active-chunk exception.
 type Reader interface {
-	// SealedEntries returns the manifest entries for every sealed chunk in
-	// the given vault, regardless of tier. The returned slice is a snapshot;
-	// callers may mutate or sort it.
+	// Entry returns the manifest entry for the chunk with this ID. The
+	// bool is false if no manifest holds the chunk, or if the chunk is
+	// active (active chunks are not part of the manifest read surface —
+	// see chunk.Manager for those). ChunkIDs are globally unique GLIDs,
+	// so no vault qualifier is needed.
+	Entry(chunkID chunk.ChunkID) (tierfsm.ManifestEntry, bool)
+
+	// EntriesForVault returns the manifest entries for every sealed chunk
+	// in the given vault, regardless of tier. The returned slice is a
+	// snapshot; callers may mutate or sort it.
 	//
 	// Returns nil if the vault is unknown.
-	SealedEntries(vaultID glid.GLID) []tierfsm.ManifestEntry
-
-	// Entry returns the manifest entry for one chunk in a vault. The bool
-	// is false if the chunk is unknown, sealed=false (active chunks are
-	// not part of the manifest read surface), or the vault is unknown.
-	Entry(vaultID glid.GLID, chunkID chunk.ChunkID) (tierfsm.ManifestEntry, bool)
+	EntriesForVault(vaultID glid.GLID) []tierfsm.ManifestEntry
 }

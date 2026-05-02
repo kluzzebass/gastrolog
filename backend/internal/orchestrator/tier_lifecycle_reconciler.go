@@ -74,7 +74,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
-	tierfsm "gastrolog/internal/tier/raftfsm"
+	"gastrolog/internal/vaultraft/tierfsm"
 )
 
 // TierLifecycleReconciler owns chunk-lifecycle execution for a single

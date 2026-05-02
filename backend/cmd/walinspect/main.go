@@ -20,7 +20,7 @@ import (
 	"strings"
 
 	"gastrolog/internal/glid"
-	"gastrolog/internal/tier/raftfsm"
+	"gastrolog/internal/vaultraft/tierfsm"
 
 	hraft "github.com/hashicorp/raft"
 )
@@ -248,7 +248,7 @@ func decodeFSMCmd(data []byte, logType hraft.LogType) (string, string) {
 	if logType != hraft.LogCommand || len(data) < 1 {
 		return "", ""
 	}
-	cmd := raftfsm.Command(data[0])
+	cmd := tierfsm.Command(data[0])
 	cmdName := commandName(cmd)
 	if len(data) < 1+glid.Size {
 		return cmdName, ""
@@ -256,31 +256,31 @@ func decodeFSMCmd(data []byte, logType hraft.LogType) (string, string) {
 	return cmdName, glid.FromBytes(data[1 : 1+glid.Size]).String()
 }
 
-func commandName(cmd raftfsm.Command) string {
+func commandName(cmd tierfsm.Command) string {
 	switch cmd {
-	case raftfsm.CmdCreateChunk:
+	case tierfsm.CmdCreateChunk:
 		return "CmdCreateChunk"
-	case raftfsm.CmdSealChunk:
+	case tierfsm.CmdSealChunk:
 		return "CmdSealChunk"
-	case raftfsm.CmdCompressChunk:
+	case tierfsm.CmdCompressChunk:
 		return "CmdCompressChunk"
-	case raftfsm.CmdUploadChunk:
+	case tierfsm.CmdUploadChunk:
 		return "CmdUploadChunk"
-	case raftfsm.CmdDeleteChunk:
+	case tierfsm.CmdDeleteChunk:
 		return "CmdDeleteChunk"
-	case raftfsm.CmdRetentionPending:
+	case tierfsm.CmdRetentionPending:
 		return "CmdRetentionPending"
-	case raftfsm.CmdTransitionStreamed:
+	case tierfsm.CmdTransitionStreamed:
 		return "CmdTransitionStreamed"
-	case raftfsm.CmdTransitionReceived:
+	case tierfsm.CmdTransitionReceived:
 		return "CmdTransitionReceived"
-	case raftfsm.CmdRequestDelete:
+	case tierfsm.CmdRequestDelete:
 		return "CmdRequestDelete"
-	case raftfsm.CmdAckDelete:
+	case tierfsm.CmdAckDelete:
 		return "CmdAckDelete"
-	case raftfsm.CmdFinalizeDelete:
+	case tierfsm.CmdFinalizeDelete:
 		return "CmdFinalizeDelete"
-	case raftfsm.CmdPruneNode:
+	case tierfsm.CmdPruneNode:
 		return "CmdPruneNode"
 	default:
 		return fmt.Sprintf("CmdUnknown(%d)", cmd)
