@@ -656,19 +656,10 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 		}
 	}
 
+	manifest, manifestKnown := buildManifestSet(tier)
+
 	now := time.Now()
-	var sealed []chunk.ChunkMeta
-	for _, meta := range metas {
-		if !meta.Sealed || streamed[meta.ID] {
-			continue
-		}
-		// Skip chunks waiting for their next retry window. nil entry
-		// means never-failed; zero/past nextRetry means retry now.
-		if entry := unreadable[meta.ID]; entry != nil && now.Before(entry.nextRetry) {
-			continue
-		}
-		sealed = append(sealed, meta)
-	}
+	sealed := selectRetentionCandidates(metas, streamed, manifest, manifestKnown, unreadable, now)
 
 	if len(sealed) == 0 {
 		return
@@ -691,6 +682,55 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 			r.tryRetainChunk(id, b, pendingFlag[id])
 		}
 	}
+}
+
+// buildManifestSet returns the FSM-known chunk IDs for the given tier and a
+// flag indicating whether the manifest is queryable. Any chunk on disk whose
+// ID is NOT in the manifest is a ghost — its FSM entry was finalize-deleted
+// but the disk file was never reaped. Filtering ghosts out of the retention
+// sweep prevents repeated no-op transitions (the apply silently no-ops when
+// f.chunks[id] is nil, the flag never sticks, and we re-stream the chunk's
+// records to the next tier on every sweep). See gastrolog-66b7x.
+func buildManifestSet(tier *TierInstance) (map[chunk.ChunkID]bool, bool) {
+	manifest := make(map[chunk.ChunkID]bool)
+	if tier == nil || tier.ListManifest == nil {
+		return manifest, false
+	}
+	ids := tier.ListManifest()
+	if ids == nil {
+		return manifest, false
+	}
+	for _, id := range ids {
+		manifest[id] = true
+	}
+	return manifest, true
+}
+
+// selectRetentionCandidates filters chunk metas to the set retention can act
+// on right now: sealed, not currently being streamed, recognized by the FSM
+// manifest (when available), and past any unreadable-retry backoff window.
+func selectRetentionCandidates(
+	metas []chunk.ChunkMeta,
+	streamed map[chunk.ChunkID]bool,
+	manifest map[chunk.ChunkID]bool,
+	manifestKnown bool,
+	unreadable map[chunk.ChunkID]*unreadableEntry,
+	now time.Time,
+) []chunk.ChunkMeta {
+	var sealed []chunk.ChunkMeta
+	for _, meta := range metas {
+		if !meta.Sealed || streamed[meta.ID] {
+			continue
+		}
+		if manifestKnown && !manifest[meta.ID] {
+			continue // ghost chunk: on disk but no FSM entry
+		}
+		if entry := unreadable[meta.ID]; entry != nil && now.Before(entry.nextRetry) {
+			continue
+		}
+		sealed = append(sealed, meta)
+	}
+	return sealed
 }
 
 // tryRetainChunk attempts to apply a retention action to a single chunk.

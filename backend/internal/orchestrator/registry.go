@@ -140,6 +140,28 @@ func (o *Orchestrator) LocalLeaderTierIDs() map[glid.GLID]bool {
 	return ids
 }
 
+// LocalReplicaTierIDs returns the set of tier IDs this node has any local
+// replica of (leader OR follower). Used by histogram fan-out: an approximate
+// count from a follower replica is acceptable, so any tier with local data
+// can be served locally and skip the cross-node forward. Authoritative
+// record reads still use LocalLeaderTierIDs. See gastrolog-66b7x.
+func (o *Orchestrator) LocalReplicaTierIDs() map[glid.GLID]bool {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	ids := make(map[glid.GLID]bool)
+	for _, v := range o.vaults {
+		if err := vaultReplicationReadinessErr(v.ID, v); err != nil {
+			continue
+		}
+		for _, t := range v.Tiers {
+			if t.Query != nil {
+				ids[t.TierID] = true
+			}
+		}
+	}
+	return ids
+}
+
 // HasLocalQueryEngine returns true if the vault has at least one tier with
 // a query engine on this node (i.e., actual searchable data, not just a
 // routing entry). Used by search fan-out to decide local vs. remote.
@@ -244,6 +266,104 @@ func (r *searchReadyRegistry) TransitionStreamedChunks(key glid.GLID) map[chunk.
 // double-counting when the requesting node already searches its own followers.
 func (o *Orchestrator) LeaderTierQueryEngine() *query.Engine {
 	return query.NewWithRegistry(&leaderTierRegistry{o: o}, o.logger)
+}
+
+// LocalTierQueryEngine returns a query engine that searches every locally
+// available tier — leader OR follower. Suitable for approximate aggregations
+// (notably histogram bucket counts) where consistency with leader is not
+// required and follower-replica data is "good enough." Avoids cross-node
+// gRPC fan-out when chunks are already replicated locally (RF > 1). Records
+// must NOT use this engine — use LeaderTierQueryEngine for authoritative
+// reads. See gastrolog-66b7x.
+func (o *Orchestrator) LocalTierQueryEngine() *query.Engine {
+	return query.NewWithRegistry(&localTierRegistry{o: o}, o.logger)
+}
+
+// localTierRegistry exposes every tier this node holds (as leader or
+// follower) as a searchable unit keyed by tier ID. See LocalTierQueryEngine.
+type localTierRegistry struct {
+	o *Orchestrator
+}
+
+func (r *localTierRegistry) ListVaults() []glid.GLID {
+	r.o.mu.RLock()
+	defer r.o.mu.RUnlock()
+	var ids []glid.GLID
+	for _, v := range r.o.vaults {
+		if err := vaultReplicationReadinessErr(v.ID, v); err != nil {
+			continue
+		}
+		for _, t := range v.Tiers {
+			if t.Query != nil {
+				ids = append(ids, t.TierID)
+			}
+		}
+	}
+	return ids
+}
+
+func (r *localTierRegistry) ChunkManager(key glid.GLID) chunk.ChunkManager {
+	r.o.mu.RLock()
+	defer r.o.mu.RUnlock()
+	for _, v := range r.o.vaults {
+		if err := vaultReplicationReadinessErr(v.ID, v); err != nil {
+			continue
+		}
+		for _, t := range v.Tiers {
+			if t.TierID == key && t.Query != nil {
+				return t.Chunks
+			}
+		}
+	}
+	return nil
+}
+
+func (r *localTierRegistry) IndexManager(key glid.GLID) index.IndexManager {
+	r.o.mu.RLock()
+	defer r.o.mu.RUnlock()
+	for _, v := range r.o.vaults {
+		if err := vaultReplicationReadinessErr(v.ID, v); err != nil {
+			continue
+		}
+		for _, t := range v.Tiers {
+			if t.TierID == key && t.Query != nil {
+				return t.Indexes
+			}
+		}
+	}
+	return nil
+}
+
+func (r *localTierRegistry) QueryEngine(_ glid.GLID) *query.Engine { return nil }
+
+// TransitionStreamedChunks returns the streamed-but-not-yet-expired set for
+// any tier on this node (leader or follower). Followers don't apply the
+// flag locally; their callbacks will return empty, which is fine — the
+// flag set is read primarily to filter source chunks during transitions
+// on the leader. See gastrolog-66b7x.
+func (r *localTierRegistry) TransitionStreamedChunks(key glid.GLID) map[chunk.ChunkID]bool {
+	r.o.mu.RLock()
+	defer r.o.mu.RUnlock()
+	for _, v := range r.o.vaults {
+		if err := vaultReplicationReadinessErr(v.ID, v); err != nil {
+			continue
+		}
+		for _, t := range v.Tiers {
+			if t.TierID != key || t.Query == nil || t.ListTransitionStreamed == nil {
+				continue
+			}
+			ids := t.ListTransitionStreamed()
+			if len(ids) == 0 {
+				return nil
+			}
+			out := make(map[chunk.ChunkID]bool, len(ids))
+			for _, cid := range ids {
+				out[cid] = true
+			}
+			return out
+		}
+	}
+	return nil
 }
 
 // leaderTierRegistry provides a flat view of all leader tiers across all

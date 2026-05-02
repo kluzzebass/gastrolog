@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -275,6 +276,12 @@ func (m *Manager) updateMetaLocked(record chunk.Record, recordCount int64) {
 	m.active.meta.WriteEnd = record.WriteTS
 	m.active.meta.RecordCount = recordCount
 
+	// Track IngestTS monotonicity. See gastrolog-66b7x.
+	if m.active.meta.IngestStart.IsZero() {
+		m.active.meta.IngestTSMonotonic = true
+	} else if m.active.meta.IngestTSMonotonic && record.IngestTS.Before(m.active.meta.IngestEnd) {
+		m.active.meta.IngestTSMonotonic = false
+	}
 	// Update IngestTS and SourceTS bounds.
 	if m.active.meta.IngestStart.IsZero() || record.IngestTS.Before(m.active.meta.IngestStart) {
 		m.active.meta.IngestStart = record.IngestTS
@@ -338,8 +345,91 @@ func (m *Manager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, boo
 	return uint64(lo - 1), true, nil //nolint:gosec // G115: lo is always > 0 here (checked above)
 }
 
+// updateImportMetaBounds folds one imported record's TS values into the
+// chunk's meta — IngestTS/SourceTS extents and IngestTS monotonicity.
+// Extracted from ImportRecords to keep its complexity bounded.
+// See gastrolog-66b7x.
+func updateImportMetaBounds(meta *chunk.ChunkMeta, rec chunk.Record) {
+	if meta.WriteStart.IsZero() {
+		meta.WriteStart = rec.WriteTS
+	}
+	meta.WriteEnd = rec.WriteTS
+	if meta.IngestStart.IsZero() {
+		meta.IngestTSMonotonic = true
+	} else if meta.IngestTSMonotonic && rec.IngestTS.Before(meta.IngestEnd) {
+		meta.IngestTSMonotonic = false
+	}
+	if meta.IngestStart.IsZero() || rec.IngestTS.Before(meta.IngestStart) {
+		meta.IngestStart = rec.IngestTS
+	}
+	if meta.IngestEnd.IsZero() || rec.IngestTS.After(meta.IngestEnd) {
+		meta.IngestEnd = rec.IngestTS
+	}
+	if rec.SourceTS.IsZero() {
+		return
+	}
+	if meta.SourceStart.IsZero() || rec.SourceTS.Before(meta.SourceStart) {
+		meta.SourceStart = rec.SourceTS
+	}
+	if meta.SourceEnd.IsZero() || rec.SourceTS.After(meta.SourceEnd) {
+		meta.SourceEnd = rec.SourceTS
+	}
+}
+
+// ScanActiveIngestTS iterates the active chunk's records in IngestTS-sorted
+// order, calling cb with each IngestTS in nanoseconds. Returns
+// ErrChunkNotFound if id isn't the active chunk.
+func (m *Manager) ScanActiveIngestTS(id chunk.ChunkID, cb func(tsNanos int64) bool) error {
+	m.mu.Lock()
+	state := m.findChunkLocked(id)
+	m.mu.Unlock()
+	if state == nil || state.meta.Sealed {
+		return chunk.ErrChunkNotFound
+	}
+	tss := make([]int64, len(state.records))
+	for i, r := range state.records {
+		tss[i] = r.IngestTS.UnixNano()
+	}
+	slices.Sort(tss)
+	for _, ts := range tss {
+		if !cb(ts) {
+			return nil
+		}
+	}
+	return nil
+}
+
+// ScanActiveByIngestTS iterates the active chunk's records in physical
+// (append) order, exposing IngestTS + Attributes per record. Returns
+// ErrChunkNotFound if id isn't the active chunk.
+func (m *Manager) ScanActiveByIngestTS(id chunk.ChunkID, cb func(ingestTS time.Time, attrs chunk.Attributes) bool) error {
+	m.mu.Lock()
+	state := m.findChunkLocked(id)
+	m.mu.Unlock()
+	if state == nil || state.meta.Sealed {
+		return chunk.ErrChunkNotFound
+	}
+	for _, r := range state.records {
+		if !cb(r.IngestTS, r.Attrs) {
+			return nil
+		}
+	}
+	return nil
+}
+
 // FindIngestStartPosition returns the earliest record position with IngestTS >= ts.
 // Uses binary search on the in-memory record slice.
+// FindIngestEntryIndex returns rank for monotonic active chunks (where
+// position == rank); for non-monotonic chunks the in-memory manager
+// doesn't maintain a separate rank index, so callers gating on
+// IngestTSMonotonic should bypass this. See gastrolog-66b7x.
+func (m *Manager) FindIngestEntryIndex(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+	return m.FindIngestStartPosition(id, ts)
+}
+
+// HasLocalContent always true: memory chunks are entirely in-memory.
+func (m *Manager) HasLocalContent(_ chunk.ChunkID) bool { return true }
+
 func (m *Manager) FindIngestStartPosition(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
 	m.mu.Lock()
 	state := m.findChunkLocked(id)
@@ -541,21 +631,7 @@ func (m *Manager) ImportRecords(id chunk.ChunkID, next chunk.RecordIterator) (ch
 		}
 		state.meta.WriteEnd = rec.WriteTS
 
-		// Compute IngestTS and SourceTS bounds inline.
-		if state.meta.IngestStart.IsZero() || rec.IngestTS.Before(state.meta.IngestStart) {
-			state.meta.IngestStart = rec.IngestTS
-		}
-		if state.meta.IngestEnd.IsZero() || rec.IngestTS.After(state.meta.IngestEnd) {
-			state.meta.IngestEnd = rec.IngestTS
-		}
-		if !rec.SourceTS.IsZero() {
-			if state.meta.SourceStart.IsZero() || rec.SourceTS.Before(state.meta.SourceStart) {
-				state.meta.SourceStart = rec.SourceTS
-			}
-			if state.meta.SourceEnd.IsZero() || rec.SourceTS.After(state.meta.SourceEnd) {
-				state.meta.SourceEnd = rec.SourceTS
-			}
-		}
+		updateImportMetaBounds(&state.meta, rec)
 	}
 
 	if len(state.records) == 0 {

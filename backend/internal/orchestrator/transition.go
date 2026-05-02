@@ -67,6 +67,33 @@ func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 	nextLeaderNodeID := system.LeaderNodeID(sys.Runtime.TierPlacements[nextTierCfg.ID], sys.Runtime.NodeStorageConfigs)
 	remote := nextLeaderNodeID != "" && nextLeaderNodeID != r.orch.localNodeID
 
+	// Mark the source chunk as TransitionStreamed BEFORE streaming starts.
+	// This is the load-bearing change for histogram correctness: with the
+	// flag in place, the source is filtered out of every count-based
+	// aggregator the moment streaming begins, so the records appearing
+	// on the destination as the stream progresses never get double-counted.
+	// The previous "stream then mark" order left the entire streaming
+	// window (which can be seconds for large chunks) double-counted on the
+	// histogram. See gastrolog-66b7x.
+	//
+	// Crash safety: if streaming fails after this flag commits, retention
+	// is gated on the destination receipt (see gastrolog-4913n) so the
+	// source copy stays put. The next retention sweep retries the whole
+	// transition (re-stream from disk, re-apply receipt). The flag is
+	// idempotent — re-applying TransitionStreamed on an already-flagged
+	// chunk is a no-op.
+	//
+	// Single-node mode (no vault-ctl Raft) keeps the post-stream expire
+	// path because there's no replicated flag to set; the bump doesn't
+	// apply because there are no replicas observing the source.
+	if r.applyRaftTransitionStreamed != nil {
+		if err := r.applyRaftTransitionStreamed(id); err != nil {
+			r.logger.Error("transition: failed to mark as streamed (pre-stream)",
+				"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(), "error", err)
+			return
+		}
+	}
+
 	var streamErr error
 	if remote {
 		if r.orch.transferrer == nil {
@@ -110,33 +137,25 @@ func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 	// Write a receipt to the DESTINATION tier's Raft confirming it has
 	// received the records from this source chunk. The Raft commit gives
 	// majority-durable confirmation across the destination's nodes.
+	// Retention on the source is gated on this receipt being committed.
 	destTier := r.findDestTierInstance(nextTierID)
 	if destTier != nil && destTier.ApplyRaftTransitionReceived != nil {
 		if err := destTier.ApplyRaftTransitionReceived(id); err != nil {
 			r.logger.Warn("transition: failed to write receipt to destination",
 				"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(),
 				"dest_tier", nextTierID, "error", err)
-			// Fall through — mark as streamed and let the confirmation
-			// sweep retry the receipt check.
+			// Fall through — the confirmation sweep retries the receipt
+			// check until it commits.
 		}
 	}
 
-	// Mark the chunk as streamed rather than deleting it immediately.
-	// The retention sweep will check whether the destination tier has
-	// the receipt before expiring the source copy. See gastrolog-4913n.
-	//
-	// In single-node mode (no vault-ctl Raft), fall back to immediate expire
-	// since there are no followers to wait for.
 	if r.applyRaftTransitionStreamed != nil {
-		if err := r.applyRaftTransitionStreamed(id); err != nil {
-			r.logger.Error("transition: failed to mark as streamed",
-				"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(), "error", err)
-			return
-		}
 		r.logger.Debug("transition: streamed, awaiting destination receipt",
 			"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(),
 			"next_tier", nextTierID, "remote", remote)
 	} else {
+		// Single-node fallback: no vault-ctl Raft to coordinate retention,
+		// so expire the source immediately.
 		r.expireChunk(id, "transition-source-expire")
 		r.logger.Debug("transition: completed (single-node, immediate expire)",
 			"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(),

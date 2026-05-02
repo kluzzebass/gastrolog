@@ -239,6 +239,15 @@ type chunkMeta struct {
 	sourceStart time.Time
 	sourceEnd   time.Time
 
+	// IngestTSMonotonic starts true and flips to false the first time an
+	// Append delivers a record with IngestTS earlier than the running max.
+	// Determined dynamically per chunk — never assumed by tier — because
+	// tier 1 ingesters (RELP, Syslog, Fluent, etc.) routinely stamp
+	// arbitrary IngestTS values or deliver out of order, and tier 2+
+	// destinations may happen to receive records in IngestTS order.
+	// See gastrolog-66b7x.
+	ingestTSMonotonic bool
+
 	cloudBacked bool // true = chunk lives in cloud, not on local disk
 	archived    bool // true = chunk is in offline storage tier (Glacier, Azure Archive)
 
@@ -261,11 +270,12 @@ func (m *chunkMeta) toChunkMeta() chunk.ChunkMeta {
 		Sealed:      m.sealed,
 		Compressed:  m.compressed || m.cloudBacked, // GLCB blobs are always zstd-compressed
 		DiskBytes:   m.diskBytes,
-		IngestStart: m.ingestStart,
-		IngestEnd:   m.ingestEnd,
-		SourceStart: m.sourceStart,
-		SourceEnd:   m.sourceEnd,
-		CloudBacked: m.cloudBacked,
+		IngestStart:       m.ingestStart,
+		IngestEnd:         m.ingestEnd,
+		SourceStart:       m.sourceStart,
+		SourceEnd:         m.sourceEnd,
+		IngestTSMonotonic: m.ingestTSMonotonic,
+		CloudBacked:       m.cloudBacked,
 		Archived:    m.archived,
 		NumFrames:   m.numFrames,
 	}
@@ -378,6 +388,15 @@ func NewManager(cfg Config) (*Manager, error) {
 				"error", err)
 			manager.cloudDegraded.Store(true)
 		}
+		// Recompute IngestStart/IngestEnd from the embedded TS index for
+		// every cloud chunk. Chunks uploaded before the scanTSBounds fix
+		// have stale bounds derived from first/last physical records,
+		// which on non-monotonic chunks aren't the IngestTS extrema. The
+		// TS index is sorted by IngestTS, so first/last entries are the
+		// authoritative min/max. Cheap once the local cache is warm —
+		// only the first call per chunk per host pays the S3 range fetch.
+		// See gastrolog-66b7x.
+		manager.repairCloudBounds()
 	}
 
 	if cfg.CacheDir != "" {
@@ -594,6 +613,16 @@ func (m *Manager) updateActiveState(record chunk.Record, rawLen, attrLen uint64)
 	}
 	m.active.meta.writeEnd = record.WriteTS
 
+	// Track IngestTS monotonicity. The first Append seeds the flag (true)
+	// and the running max equals IngestTS. Each subsequent Append flips
+	// the flag to false if the record's IngestTS predates the current max
+	// (i.e. records are no longer in IngestTS-monotonic order). The flag
+	// only flips one direction (true → false). See gastrolog-66b7x.
+	if m.active.meta.ingestStart.IsZero() {
+		m.active.meta.ingestTSMonotonic = true
+	} else if m.active.meta.ingestTSMonotonic && record.IngestTS.Before(m.active.meta.ingestEnd) {
+		m.active.meta.ingestTSMonotonic = false
+	}
 	expandBounds(&m.active.meta.ingestStart, &m.active.meta.ingestEnd, record.IngestTS)
 	if !record.SourceTS.IsZero() {
 		expandBounds(&m.active.meta.sourceStart, &m.active.meta.sourceEnd, record.SourceTS)
@@ -1382,8 +1411,18 @@ func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
 
 	meta.writeStart = firstEntry.WriteTS
 	meta.writeEnd = lastEntry.WriteTS
-	computeIngestBounds(meta, firstEntry, lastEntry)
-	computeSourceBounds(meta, firstEntry, lastEntry)
+	// IngestTS and SourceTS bounds cannot be derived from first+last
+	// physical records on chunks built via ImportRecords (or any chunk
+	// where physical write order doesn't match Ingest/Source TS order).
+	// Such chunks are produced by tier transitions: streamLocal /
+	// StreamAppendToTier preserves each record's IngestTS/SourceTS but
+	// appends in source-WriteTS order, so the physical first/last
+	// records are not the IngestTS extrema. Scanning all idx entries is
+	// O(records) but the idx file is small (12 bytes/entry) and only
+	// loaded once per chunk on manager startup. See gastrolog-66b7x.
+	if err := scanTSBounds(idxFile, recordCount, meta); err != nil {
+		return nil, fmt.Errorf("scan TS bounds for chunk %s: %w", id, err)
+	}
 
 	rawEnd := int64(lastEntry.RawOffset) + int64(lastEntry.RawSize)
 	attrEnd := int64(lastEntry.AttrOffset) + int64(lastEntry.AttrSize)
@@ -1435,6 +1474,56 @@ func (m *Manager) readFirstLastEntries(idxFile *os.File, recordCount uint64) (Id
 	lastEntry := DecodeIdxEntry(entryBuf[:])
 
 	return firstEntry, lastEntry, nil
+}
+
+// scanTSBounds reads every idx entry and records the min/max IngestTS,
+// min/max SourceTS, and IngestTS monotonicity into meta. Required for chunks
+// built via ImportRecords / streamed Append, where physical record order does
+// not match Ingest/Source TS order (so first+last physical entries are not
+// the TS extrema). The monotonicity flag is also derived here — true if and
+// only if every entry's IngestTS is >= its predecessor in physical order.
+// See gastrolog-66b7x.
+func scanTSBounds(idxFile *os.File, recordCount uint64, meta *chunkMeta) error {
+	if recordCount == 0 {
+		return nil
+	}
+	if _, err := idxFile.Seek(IdxHeaderSize, io.SeekStart); err != nil {
+		return fmt.Errorf("seek idx start: %w", err)
+	}
+	var entryBuf [IdxEntrySize]byte
+	var minIngest, maxIngest, minSource, maxSource time.Time
+	monotonic := true
+	var prevIngest time.Time
+	for i := range recordCount {
+		if _, err := io.ReadFull(idxFile, entryBuf[:]); err != nil {
+			return fmt.Errorf("read idx entry %d: %w", i, err)
+		}
+		e := DecodeIdxEntry(entryBuf[:])
+		if i == 0 || e.IngestTS.Before(minIngest) {
+			minIngest = e.IngestTS
+		}
+		if i == 0 || e.IngestTS.After(maxIngest) {
+			maxIngest = e.IngestTS
+		}
+		if i > 0 && e.IngestTS.Before(prevIngest) {
+			monotonic = false
+		}
+		prevIngest = e.IngestTS
+		if !e.SourceTS.IsZero() {
+			if minSource.IsZero() || e.SourceTS.Before(minSource) {
+				minSource = e.SourceTS
+			}
+			if maxSource.IsZero() || e.SourceTS.After(maxSource) {
+				maxSource = e.SourceTS
+			}
+		}
+	}
+	meta.ingestStart = minIngest
+	meta.ingestEnd = maxIngest
+	meta.sourceStart = minSource
+	meta.sourceEnd = maxSource
+	meta.ingestTSMonotonic = monotonic
+	return nil
 }
 
 func computeIngestBounds(meta *chunkMeta, first, last IdxEntry) {
@@ -1923,6 +2012,11 @@ func (s *importState) writeRecord(rec chunk.Record) error {
 		s.meta.writeStart = rec.WriteTS
 	}
 	s.meta.writeEnd = rec.WriteTS
+	if s.meta.ingestStart.IsZero() {
+		s.meta.ingestTSMonotonic = true
+	} else if s.meta.ingestTSMonotonic && rec.IngestTS.Before(s.meta.ingestEnd) {
+		s.meta.ingestTSMonotonic = false
+	}
 	expandBounds(&s.meta.ingestStart, &s.meta.ingestEnd, rec.IngestTS)
 	if !rec.SourceTS.IsZero() {
 		expandBounds(&s.meta.sourceStart, &s.meta.sourceEnd, rec.SourceTS)
@@ -2336,6 +2430,47 @@ func (m *Manager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, boo
 	return lo - 1, true, nil
 }
 
+// ScanActiveIngestTS iterates the active chunk's IngestTS B+ tree, calling
+// cb for each entry's IngestTS in IngestTS-sorted order. No attr or raw
+// reads. Returns ErrChunkNotFound if id is not the current active chunk.
+// See gastrolog-66b7x.
+func (m *Manager) ScanActiveIngestTS(id chunk.ChunkID, cb func(tsNanos int64) bool) error {
+	m.mu.Lock()
+	active := m.active
+	m.mu.Unlock()
+	if active == nil || active.meta.id != id {
+		return chunk.ErrChunkNotFound
+	}
+	it, err := active.ingestBT.Scan()
+	if err != nil {
+		return fmt.Errorf("btree scan: %w", err)
+	}
+	for it.Valid() {
+		if !cb(it.Key()) {
+			return nil
+		}
+		it.Next()
+	}
+	return nil
+}
+
+// ScanActiveByIngestTS iterates the active chunk's records in physical order,
+// exposing IngestTS + Attributes per record. Single pass over idx + attr; the
+// dict is loaded once at the start. Returns ErrChunkNotFound if id is not the
+// current active chunk. See gastrolog-66b7x.
+func (m *Manager) ScanActiveByIngestTS(id chunk.ChunkID, cb func(ingestTS time.Time, attrs chunk.Attributes) bool) error {
+	m.mu.Lock()
+	active := m.active
+	m.mu.Unlock()
+	if active == nil || active.meta.id != id {
+		return chunk.ErrChunkNotFound
+	}
+	idxPath := m.idxLogPath(id)
+	attrPath := m.attrLogPath(id)
+	dictPath := m.dictLogPath(id)
+	return scanIngestAttrsActive(idxPath, attrPath, dictPath, cb)
+}
+
 // FindIngestStartPosition returns the earliest record position with IngestTS >= ts
 // for the active chunk. Returns (0, false, nil) for sealed chunks (use the index manager).
 func (m *Manager) FindIngestStartPosition(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
@@ -2362,6 +2497,59 @@ func (m *Manager) FindIngestStartPosition(id chunk.ChunkID, ts time.Time) (uint6
 	}
 
 	return 0, false, nil
+}
+
+// FindIngestEntryIndex returns the IngestTS-rank of the first entry with
+// IngestTS >= ts. For active chunks the B+ tree returns position; that's
+// only equal to rank for monotonic chunks (callers gate on
+// meta.IngestTSMonotonic). For cloud-backed chunks, returns the entry's
+// index in the (sorted) cache file. Returns (0, false, nil) for sealed
+// local chunks — caller falls through to IndexManager.
+// See gastrolog-66b7x.
+func (m *Manager) FindIngestEntryIndex(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+	m.mu.Lock()
+	active := m.active
+	meta := m.lookupMeta(id)
+	m.mu.Unlock()
+
+	if active != nil && active.meta.id == id {
+		it, err := active.ingestBT.FindGE(ts.UnixNano())
+		if err != nil {
+			return 0, false, fmt.Errorf("btree ingest FindGE: %w", err)
+		}
+		if !it.Valid() {
+			return 0, false, nil
+		}
+		// For monotonic active chunks, B+ tree position == rank, so this
+		// is correct. For non-monotonic active chunks, the histogram
+		// dispatch in query/histogram.go avoids this path entirely.
+		return uint64(it.Value()), true, nil
+	}
+
+	if meta != nil && meta.cloudBacked && meta.ingestIdxSize > 0 {
+		return m.findCloudTSRank(id, ts, meta.ingestIdxOffset, meta.ingestIdxSize)
+	}
+
+	return 0, false, nil
+}
+
+// HasLocalContent reports whether the chunk's content is locally readable
+// without triggering an S3 fetch. See ChunkManager.HasLocalContent.
+func (m *Manager) HasLocalContent(id chunk.ChunkID) bool {
+	m.mu.Lock()
+	meta := m.lookupMeta(id)
+	m.mu.Unlock()
+	if meta == nil {
+		return false
+	}
+	if !meta.cloudBacked {
+		return true
+	}
+	if m.cfg.CacheDir == "" {
+		return false
+	}
+	_, err := os.Stat(m.cachePath(id))
+	return err == nil
 }
 
 // FindSourceStartPosition returns the earliest record position with SourceTS >= ts.
@@ -2478,7 +2666,87 @@ func (m *Manager) findCloudTSPosition(id chunk.ChunkID, ts time.Time, offset, si
 	}
 
 	// O(log n) binary search via pread — no heap allocation.
-	return searchTSCacheFile(cachePath, ts.UnixNano())
+	_, pos, ok, err := searchTSCacheFile(cachePath, ts.UnixNano())
+	return uint64(pos), ok, err
+}
+
+// validateTSExtents returns true if (first, last) look like a plausible
+// (min, max) TS pair from a sorted TS index: both non-zero, last >= first,
+// and within a reasonable real-world range (post-2000, pre-2200). Used to
+// guard repairCloudBounds against garbage reads from a corrupt or
+// partially-downloaded cache file. See gastrolog-66b7x.
+func validateTSExtents(first, last time.Time) bool {
+	if first.IsZero() || last.IsZero() {
+		return false
+	}
+	if last.Before(first) {
+		return false
+	}
+	minTS := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	maxTS := time.Date(2200, 1, 1, 0, 0, 0, 0, time.UTC)
+	if first.Before(minTS) || last.After(maxTS) {
+		return false
+	}
+	return true
+}
+
+// cloudTSExtents returns the min and max IngestTS in a cloud chunk's TS
+// index by reading the first and last entries of the cached cache file.
+// On cache miss, downloads the index from S3 first (one range request).
+// Used by RegisterCloudChunk to recompute IngestStart/IngestEnd for chunks
+// uploaded with the pre-fix first/last-physical-record bounds. See
+// gastrolog-66b7x.
+func (m *Manager) cloudTSExtents(id chunk.ChunkID, offset, size int64) (time.Time, time.Time, error) {
+	cachePath := m.tsCachePath(id, offset)
+	if _, err := os.Stat(cachePath); err != nil {
+		if err := m.downloadTSIndex(id, offset, size, cachePath); err != nil {
+			return time.Time{}, time.Time{}, err
+		}
+	}
+	f, err := os.Open(filepath.Clean(cachePath))
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	const entrySize = 12
+	n := info.Size() / entrySize
+	if n == 0 {
+		return time.Time{}, time.Time{}, fmt.Errorf("empty cloud TS index for %s", id)
+	}
+	var buf [entrySize]byte
+	if _, err := f.ReadAt(buf[:], 0); err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	firstTS := int64(binary.LittleEndian.Uint64(buf[:8])) //nolint:gosec // G115
+	if _, err := f.ReadAt(buf[:], (n-1)*entrySize); err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	lastTS := int64(binary.LittleEndian.Uint64(buf[:8])) //nolint:gosec // G115
+	first := time.Unix(0, firstTS)
+	last := time.Unix(0, lastTS)
+	if !validateTSExtents(first, last) {
+		return time.Time{}, time.Time{}, fmt.Errorf("cloud TS index for %s returned implausible extents (first=%s last=%s)", id, first, last)
+	}
+	return first, last, nil
+}
+
+// findCloudTSRank is the rank counterpart to findCloudTSPosition. Returns
+// the entry's index in the IngestTS-sorted cache file (i.e. its rank), not
+// the physical record position. Required for histogram bucket counting on
+// non-monotonic cloud chunks where pos ≠ rank. See gastrolog-66b7x.
+func (m *Manager) findCloudTSRank(id chunk.ChunkID, ts time.Time, offset, size int64) (uint64, bool, error) {
+	cachePath := m.tsCachePath(id, offset)
+	if _, err := os.Stat(cachePath); err != nil {
+		if err := m.downloadTSIndex(id, offset, size, cachePath); err != nil {
+			return 0, false, err
+		}
+	}
+	rank, _, ok, err := searchTSCacheFile(cachePath, ts.UnixNano())
+	return uint64(rank), ok, err
 }
 
 // downloadTSIndex fetches a TS index section from S3 and writes it to a local
@@ -2516,22 +2784,28 @@ func (m *Manager) downloadTSIndex(id chunk.ChunkID, offset, size int64, cachePat
 // searchTSCacheFile does O(log n) binary search on a local TS index cache file
 // using pread. Each entry is 12 bytes: [tsNano:i64][pos:u32]. No heap allocation
 // beyond a single 12-byte buffer.
-func searchTSCacheFile(path string, tsNano int64) (uint64, bool, error) {
-	f, err := os.Open(filepath.Clean(path))
-	if err != nil {
-		return 0, false, err
+// searchTSCacheFile binary-searches a cloud-chunk TS index cache file for
+// the first entry with TS >= tsNano. Returns (rank, pos, ok, err): rank is
+// the entry's index in the IngestTS-sorted cache (correct for histogram
+// bucket counting), pos is the physical record position (correct for
+// cursor positioning). The two diverge for non-monotonic cloud chunks
+// (built via ImportRecords). See gastrolog-66b7x.
+func searchTSCacheFile(path string, tsNano int64) (rank, pos uint32, ok bool, err error) {
+	f, ferr := os.Open(filepath.Clean(path))
+	if ferr != nil {
+		return 0, 0, false, ferr
 	}
 	defer func() { _ = f.Close() }()
 
-	info, err := f.Stat()
-	if err != nil {
-		return 0, false, err
+	info, ferr := f.Stat()
+	if ferr != nil {
+		return 0, 0, false, ferr
 	}
 
 	const entrySize = 12
 	n := int(info.Size()) / entrySize
 	if n == 0 {
-		return 0, false, nil
+		return 0, 0, false, nil
 	}
 
 	var buf [entrySize]byte
@@ -2541,26 +2815,26 @@ func searchTSCacheFile(path string, tsNano int64) (uint64, bool, error) {
 			return 0, 0, err
 		}
 		ts := int64(binary.LittleEndian.Uint64(buf[:8])) //nolint:gosec // G115: nanosecond timestamps fit in int64
-		pos := binary.LittleEndian.Uint32(buf[8:])
-		return ts, pos, nil
+		p := binary.LittleEndian.Uint32(buf[8:])
+		return ts, p, nil
 	}
 
 	// Quick bounds check.
-	lastTS, _, err := readEntry(n - 1)
-	if err != nil {
-		return 0, false, err
+	lastTS, _, ferr := readEntry(n - 1)
+	if ferr != nil {
+		return 0, 0, false, ferr
 	}
 	if tsNano > lastTS {
-		return 0, false, nil
+		return 0, 0, false, nil
 	}
 
 	// Binary search: first i where TS[i] >= tsNano.
 	lo, hi := 0, n
 	for lo < hi {
 		mid := lo + (hi-lo)/2
-		midTS, _, err := readEntry(mid)
-		if err != nil {
-			return 0, false, err
+		midTS, _, mErr := readEntry(mid)
+		if mErr != nil {
+			return 0, 0, false, mErr
 		}
 		if midTS < tsNano {
 			lo = mid + 1
@@ -2569,11 +2843,11 @@ func searchTSCacheFile(path string, tsNano int64) (uint64, bool, error) {
 		}
 	}
 
-	_, pos, err := readEntry(lo)
-	if err != nil {
-		return 0, false, err
+	_, p, rerr := readEntry(lo)
+	if rerr != nil {
+		return 0, 0, false, rerr
 	}
-	return uint64(pos), true, nil
+	return uint32(lo), p, true, nil
 }
 
 func (m *Manager) tsCachePath(id chunk.ChunkID, offset int64) string {
@@ -3320,6 +3594,85 @@ func (m *Manager) removeFromCloudIndex(id chunk.ChunkID) {
 	}
 }
 
+// repairCloudBounds iterates every cloud chunk in cloudIdx, recomputes
+// IngestStart/IngestEnd from the embedded TS index, and updates the entry
+// when the stored bounds are stale. Fixes pre-scanTSBounds uploads whose
+// bounds came from first/last physical records (wrong on non-monotonic
+// chunks). See gastrolog-66b7x.
+func (m *Manager) repairCloudBounds() {
+	if m.cloudIdx == nil {
+		return
+	}
+	type pending struct {
+		id   chunk.ChunkID
+		meta *chunkMeta
+	}
+	var todo []pending
+	if err := m.cloudIdx.ForEach(func(id chunk.ChunkID, meta *chunkMeta) bool {
+		if meta.ingestIdxSize > 0 {
+			todo = append(todo, pending{id: id, meta: meta})
+		}
+		return true
+	}); err != nil {
+		m.logger.Warn("repairCloudBounds: ForEach failed", "error", err)
+		return
+	}
+	for _, p := range todo {
+		first, last, err := m.cloudTSExtents(p.id, p.meta.ingestIdxOffset, p.meta.ingestIdxSize)
+		recomputed := err == nil && validateTSExtents(first, last)
+		existingValid := validateTSExtents(p.meta.ingestStart, p.meta.ingestEnd)
+		if !recomputed {
+			if err != nil {
+				m.logger.Debug("repairCloudBounds: TS index fetch failed",
+					"chunk", p.id, "error", err)
+			}
+			if !existingValid {
+				// We have nothing trustworthy to display for this chunk
+				// and could trigger nonsense-bucket spikes if we leave
+				// it in cloudIdx. Drop the entry; if the blob comes back
+				// online, RegisterCloudChunk will re-add it cleanly.
+				m.logger.Warn("repairCloudBounds: evicting cloud chunk with invalid bounds and unrecoverable TS index",
+					"chunk", p.id,
+					"stored_start", p.meta.ingestStart,
+					"stored_end", p.meta.ingestEnd)
+				m.cloudIdxMu.Lock()
+				_, _ = m.cloudIdx.Delete(p.id)
+				m.cloudIdxMu.Unlock()
+			}
+			continue
+		}
+		if first.Equal(p.meta.ingestStart) && last.Equal(p.meta.ingestEnd) {
+			continue // already correct
+		}
+		updated := *p.meta
+		updated.ingestStart = first
+		updated.ingestEnd = last
+		m.cloudIdxMu.Lock()
+		_, _ = m.cloudIdx.Delete(p.id)
+		if err := m.cloudIdx.Insert(p.id, &updated); err != nil {
+			m.cloudIdxMu.Unlock()
+			m.logger.Warn("repairCloudBounds: insert failed",
+				"chunk", p.id, "error", err)
+			continue
+		}
+		m.cloudIdxMu.Unlock()
+		m.logger.Info("repaired cloud chunk bounds",
+			"chunk", p.id,
+			"old_start", p.meta.ingestStart, "old_end", p.meta.ingestEnd,
+			"new_start", first, "new_end", last)
+	}
+	if len(todo) > 0 {
+		m.cloudIdxMu.Lock()
+		_ = m.cloudIdx.Sync()
+		m.cloudIdxMu.Unlock()
+	}
+	// Force the list cache to rebuild on next List() so callers see the
+	// updated bounds.
+	m.mu.Lock()
+	m.cloudListCache = nil
+	m.mu.Unlock()
+}
+
 // rebuildCloudListCache scans the cloud B+ tree index and caches the result.
 // Must be called with m.mu held.
 func (m *Manager) rebuildCloudListCache() {
@@ -3678,25 +4031,43 @@ func (m *Manager) RegisterCloudChunk(id chunk.ChunkID, info chunk.CloudChunkInfo
 		return nil // already in cloud index
 	}
 
+	// Recompute IngestStart/IngestEnd from the cloud TS index entries.
+	// CloudChunkInfo carries values from the FSM Entry; for chunks
+	// uploaded BEFORE the scanTSBounds fix (gastrolog-66b7x), these
+	// were derived from the first/last PHYSICAL records, which on a
+	// non-monotonic chunk are not the IngestTS extrema. Using those
+	// stale bounds makes the histogram cap-branch attribute all
+	// RecordCount records to the wrong bucket. The TS index is
+	// authoritative (sorted by IngestTS), so first/last entries give
+	// the true min/max. Done lazily — pulls the local cache or one
+	// S3 range fetch per chunk, then never again.
+	if info.IngestIdxSize > 0 {
+		if first, last, err := m.cloudTSExtents(id, info.IngestIdxOffset, info.IngestIdxSize); err == nil {
+			info.IngestStart = first
+			info.IngestEnd = last
+		}
+	}
+
 	meta := &chunkMeta{
-		id:              id,
-		writeStart:      info.WriteStart,
-		writeEnd:        info.WriteEnd,
-		ingestStart:     info.IngestStart,
-		ingestEnd:       info.IngestEnd,
-		sourceStart:     info.SourceStart,
-		sourceEnd:       info.SourceEnd,
-		recordCount:     info.RecordCount,
-		bytes:           info.Bytes,
-		sealed:          true,
-		compressed:      true,
-		cloudBacked:     true,
-		diskBytes:       info.DiskBytes,
-		ingestIdxOffset: info.IngestIdxOffset,
-		ingestIdxSize:   info.IngestIdxSize,
-		sourceIdxOffset: info.SourceIdxOffset,
-		sourceIdxSize:   info.SourceIdxSize,
-		numFrames:       info.NumFrames,
+		id:                id,
+		writeStart:        info.WriteStart,
+		writeEnd:          info.WriteEnd,
+		ingestStart:       info.IngestStart,
+		ingestEnd:         info.IngestEnd,
+		sourceStart:       info.SourceStart,
+		sourceEnd:         info.SourceEnd,
+		ingestTSMonotonic: info.IngestTSMonotonic,
+		recordCount:       info.RecordCount,
+		bytes:             info.Bytes,
+		sealed:            true,
+		compressed:        true,
+		cloudBacked:       true,
+		diskBytes:         info.DiskBytes,
+		ingestIdxOffset:   info.IngestIdxOffset,
+		ingestIdxSize:     info.IngestIdxSize,
+		sourceIdxOffset:   info.SourceIdxOffset,
+		sourceIdxSize:     info.SourceIdxSize,
+		numFrames:         info.NumFrames,
 	}
 
 	m.cloudIdxMu.Lock()

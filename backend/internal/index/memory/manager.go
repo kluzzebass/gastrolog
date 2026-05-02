@@ -225,6 +225,18 @@ func (m *Manager) FindSourceStartPosition(chunkID chunk.ChunkID, ts time.Time) (
 	return 0, false, index.ErrIndexNotFound
 }
 
+// FindIngestEntryIndex returns ErrIndexNotFound; memory index manager does not
+// maintain ingest timestamp indexes.
+func (m *Manager) FindIngestEntryIndex(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+	return 0, false, index.ErrIndexNotFound
+}
+
+// FindSourceEntryIndex returns ErrIndexNotFound; memory index manager does not
+// maintain source timestamp indexes.
+func (m *Manager) FindSourceEntryIndex(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+	return 0, false, index.ErrIndexNotFound
+}
+
 // LoadIngestEntries returns ErrIndexNotFound; memory index manager does not
 // maintain timestamp indexes.
 func (m *Manager) LoadIngestEntries(chunkID chunk.ChunkID) ([]index.TSEntry, error) {

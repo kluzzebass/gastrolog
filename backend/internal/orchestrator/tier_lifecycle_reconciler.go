@@ -506,6 +506,14 @@ func (r *TierLifecycleReconciler) SweepLocalOrphans() {
 		return
 	}
 	ensurer, _ := r.tier.Chunks.(chunk.SealEnsurer) // optional
+	// Chunks freshly created on this node but whose CmdCreateChunk hasn't
+	// applied yet would also fail fsm.Get / IsTombstoned. We don't want to
+	// race-delete them. Use seal age as a coarse "old enough that announce
+	// would have applied by now" guard for the no-tombstone branch — if a
+	// chunk has been sealed for longer than this, the Create-then-Delete
+	// pair on the FSM has had ample time to converge.
+	const ghostAgeThreshold = 5 * time.Minute
+	now := time.Now()
 	var deleted int
 	for _, meta := range metas {
 		if r.fsm.Get(meta.ID) != nil {
@@ -514,7 +522,18 @@ func (r *TierLifecycleReconciler) SweepLocalOrphans() {
 		if r.fsm.PendingDelete(meta.ID) != nil {
 			continue
 		}
-		if !r.fsm.IsTombstoned(meta.ID) {
+		// Two paths to deletion eligibility:
+		//  - Tombstoned: FSM positively recorded a finalize-delete. Always safe.
+		//  - Ghost: FSM has no entry AND no tombstone — the receipt protocol
+		//    never finalized this chunk, but the FSM also doesn't recognize
+		//    it. Sealed long enough ago that a pending Create can't still be
+		//    in-flight. The retention sweep otherwise re-transitions these
+		//    ghosts every minute and pollutes downstream tiers. See
+		//    gastrolog-66b7x.
+		tombstoned := r.fsm.IsTombstoned(meta.ID)
+		ghost := !tombstoned && meta.Sealed && !meta.WriteEnd.IsZero() &&
+			now.Sub(meta.WriteEnd) > ghostAgeThreshold
+		if !tombstoned && !ghost {
 			continue
 		}
 		// Local-active + FSM-tombstoned (gastrolog-533l9): the

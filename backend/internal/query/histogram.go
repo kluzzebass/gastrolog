@@ -132,16 +132,30 @@ func (e *Engine) runTimechartStrategy(
 	// Exact total counts via IngestTS binary search — O(buckets × log(n)), instant.
 	// Cloud counts are computed separately first so cloudCounts[] captures the split.
 	e.timechartCloudCounts(selectedVaults, start, end, bucketWidth, numBuckets, cloudCounts, cloudFlags)
-	e.timechartLocalCounts(selectedVaults, start, end, bucketWidth, numBuckets, counts)
+	// Sealed-only counts here: active non-monotonic chunks are handled by
+	// the unified pass below (which keeps counts and groupCounts on the same
+	// B+ tree snapshot). For !hasGroupBy queries we still need their counts,
+	// so the unified pass updates counts even when there's no level breakdown.
+	e.timechartLocalCounts(selectedVaults, start, end, bucketWidth, numBuckets, counts, true /*sealedOnly*/)
 	for b := range numBuckets {
 		counts[b] += cloudCounts[b]
 	}
+
+	// Active non-monotonic chunks: single pass that computes both counts
+	// and (when grouping) groupCounts from the SAME B+ tree snapshot.
+	// Without this, counts and groupCounts come from two separate B+ tree
+	// iterations at different times, and on a fast-growing active chunk
+	// the second pass sees thousands more records — making groupCounts
+	// exceed counts and breaking the "other" remainder. See gastrolog-66b7x.
+	e.timechartActiveNonMonotonic(selectedVaults, start, end, bucketWidth, numBuckets, hasGroupBy, groupField, counts, groupCounts)
 
 	if !hasGroupBy {
 		return false, nil
 	}
 
-	// Group breakdown via per-bucket sampling — O(buckets × 1000).
+	// Group breakdown for sealed local + cached cloud chunks via per-bucket
+	// sampling — O(buckets × 1000). Active non-monotonic chunks already
+	// contributed via the unified pass above and are skipped here.
 	e.timechartAttrScanGroups(selectedVaults, start, end, bucketWidth, numBuckets, groupField, groupCounts)
 	return false, nil
 }
@@ -150,7 +164,7 @@ func (e *Engine) runTimechartStrategy(
 // Computes filteredLocal/localTotal ratio and scales cloud counts by that factor.
 func (e *Engine) applyCloudSelectivity(selectedVaults []glid.GLID, start, end time.Time, bucketWidth time.Duration, numBuckets int, counts, cloudCounts []int64) {
 	localTotals := make([]int64, numBuckets)
-	e.timechartLocalCounts(selectedVaults, start, end, bucketWidth, numBuckets, localTotals)
+	e.timechartLocalCounts(selectedVaults, start, end, bucketWidth, numBuckets, localTotals, false)
 
 	var localTotal, filteredLocal int64
 	for b := range numBuckets {
@@ -288,8 +302,11 @@ func (e *Engine) timechartCloudCounts(selectedVaults []glid.GLID, start, end tim
 }
 
 // timechartLocalCounts fills counts with unfiltered record counts from
-// local (non-cloud) chunks only.
-func (e *Engine) timechartLocalCounts(selectedVaults []glid.GLID, start, end time.Time, bucketWidth time.Duration, numBuckets int, counts []int64) {
+// local (non-cloud) chunks only. When sealedOnly is true, active
+// non-monotonic chunks are skipped — they're handled by the unified
+// timechartActiveNonMonotonic pass that keeps counts and groupCounts on
+// the same B+ tree snapshot. See gastrolog-66b7x.
+func (e *Engine) timechartLocalCounts(selectedVaults []glid.GLID, start, end time.Time, bucketWidth time.Duration, numBuckets int, counts []int64, sealedOnly bool) {
 	for _, vaultID := range selectedVaults {
 		cm, im := e.getVaultManagers(vaultID)
 		if cm == nil {
@@ -313,9 +330,102 @@ func (e *Engine) timechartLocalCounts(selectedVaults []glid.GLID, start, end tim
 			if !meta.IngestStart.IsZero() && !meta.IngestStart.Before(end) {
 				continue
 			}
+			if sealedOnly && !meta.Sealed && !meta.IngestTSMonotonic {
+				continue
+			}
 			timechartChunkByIngestTS(cm, im, meta, start, bucketWidth, numBuckets, counts, nil)
 		}
 	}
+}
+
+// timechartActiveNonMonotonic iterates each active non-monotonic chunk's
+// B+ tree once, populating both counts and (when hasGroupBy) groupCounts
+// from the SAME snapshot. Active chunks grow during the histogram compute,
+// so a two-pass approach (counts via bucketizeActiveChunk, then groupCounts
+// via chunkBucketTotals) sees inconsistent record-count snapshots across
+// the passes — making leveled sums exceed bucket totals and zeroing the
+// "other" remainder. See gastrolog-66b7x.
+func (e *Engine) timechartActiveNonMonotonic(selectedVaults []glid.GLID, start, end time.Time, bucketWidth time.Duration, numBuckets int, hasGroupBy bool, groupField string, counts []int64, groupCounts []map[string]int64) {
+	startNanos := start.UnixNano()
+	bucketNanos := bucketWidth.Nanoseconds()
+	if bucketNanos <= 0 {
+		return
+	}
+	for _, vaultID := range selectedVaults {
+		cm, _ := e.getVaultManagers(vaultID)
+		if cm == nil {
+			continue
+		}
+		metas, err := cm.List()
+		if err != nil {
+			continue
+		}
+		streamed := e.transitionStreamedChunks(vaultID)
+		for _, meta := range metas {
+			if !activeNonMonoEligible(meta, streamed, start, end) {
+				continue
+			}
+			scanActiveNonMono(cm, meta, startNanos, bucketNanos, numBuckets, hasGroupBy, groupField, counts, groupCounts)
+		}
+	}
+}
+
+func activeNonMonoEligible(meta chunk.ChunkMeta, streamed map[chunk.ChunkID]bool, start, end time.Time) bool {
+	if streamed[meta.ID] {
+		return false
+	}
+	if meta.CloudBacked || meta.RecordCount == 0 {
+		return false
+	}
+	if meta.Sealed || meta.IngestTSMonotonic {
+		return false
+	}
+	if !meta.IngestEnd.IsZero() && meta.IngestEnd.Before(start) {
+		return false
+	}
+	if !meta.IngestStart.IsZero() && !meta.IngestStart.Before(end) {
+		return false
+	}
+	return true
+}
+
+func scanActiveNonMono(cm chunk.ChunkManager, meta chunk.ChunkMeta, startNanos, bucketNanos int64, numBuckets int, hasGroupBy bool, groupField string, counts []int64, groupCounts []map[string]int64) {
+	if hasGroupBy {
+		_ = cm.ScanActiveByIngestTS(meta.ID, func(ingestTS time.Time, attrs chunk.Attributes) bool {
+			b, ok := bucketForTS(ingestTS.UnixNano(), startNanos, bucketNanos, numBuckets)
+			if !ok {
+				return b >= 0 // skip-this-record vs stop-iteration
+			}
+			counts[b]++
+			if v := attrs[groupField]; v != "" {
+				groupCounts[b][v]++
+			}
+			return true
+		})
+		return
+	}
+	_ = cm.ScanActiveIngestTS(meta.ID, func(tsNanos int64) bool {
+		b, ok := bucketForTS(tsNanos, startNanos, bucketNanos, numBuckets)
+		if !ok {
+			return b >= 0
+		}
+		counts[b]++
+		return true
+	})
+}
+
+// bucketForTS returns (bucketIdx, true) for an in-range TS. For out-of-range
+// TS it returns (sentinel, false): -1 = past-end (caller should stop iteration),
+// numBuckets = pre-start (caller should skip this record but keep iterating).
+func bucketForTS(tsNanos, startNanos, bucketNanos int64, numBuckets int) (int, bool) {
+	if tsNanos < startNanos {
+		return numBuckets, false // pre-start: skip but keep going
+	}
+	b := int((tsNanos - startNanos) / bucketNanos)
+	if b >= numBuckets {
+		return -1, false // past end: stop
+	}
+	return b, true
 }
 
 // timechartAttrScanGroups populates group breakdown counts using per-bucket
@@ -350,10 +460,25 @@ func (e *Engine) timechartAttrScanGroups(selectedVaults []glid.GLID, start, end 
 			if !meta.IngestStart.IsZero() && !meta.IngestStart.Before(end) {
 				continue
 			}
-			// Skip cloud chunks — ScanAttrs would download the entire blob
-			// from S3 just for level breakdown sampling. Cloud chunks get
-			// accurate total counts via TS index but no group breakdown.
-			if meta.CloudBacked {
+			// Skip chunks whose content isn't locally readable — for cloud
+			// chunks that means "blob is not in the warm cache." We never
+			// trigger an S3 download just to compute the level breakdown;
+			// histogram refreshes that span 30d would otherwise pull
+			// hundreds of cloud blobs. Cloud chunks still contribute
+			// accurate counts via the TS index, and the bucket renders as
+			// a hatched "data here, breakdown not loaded" ghost via the
+			// cloudFlags overlay. If the same chunk gets cached later
+			// (because a real search needs its records) it'll
+			// automatically pick up a real level breakdown on the next
+			// histogram refresh. See gastrolog-66b7x and gastrolog-20z6h.
+			if !cm.HasLocalContent(meta.ID) {
+				continue
+			}
+			// Active non-monotonic chunks: handled by the unified pass in
+			// runTimechartStrategy (timechartActiveNonMonotonic) so counts
+			// and groupCounts come from the same B+ tree snapshot. See
+			// gastrolog-66b7x.
+			if !meta.Sealed && !meta.IngestTSMonotonic {
 				continue
 			}
 			timechartChunkGroups(cm, im, meta, start, bucketWidth, numBuckets, samplePerBucket, groupField, groupCounts)
@@ -393,6 +518,17 @@ func timechartChunkGroups(
 		}
 	}
 
+	// Non-monotonic chunks (active or sealed): the per-bucket sampler below
+	// reads records in physical (append) order, which is unrelated to the
+	// IngestTS bucket they belong to. Running it for every bucket the chunk
+	// overlaps just multiplies cost without improving accuracy — the sample
+	// is effectively a random slice of the chunk regardless. See
+	// gastrolog-66b7x.
+	if !meta.IngestTSMonotonic {
+		nonMonotonicChunkGroups(cm, im, meta, start, bucketWidth, firstBucket, lastBucket, groupField, groupCounts)
+		return
+	}
+
 	for b := firstBucket; b <= lastBucket; b++ {
 		bStart := start.Add(bucketWidth * time.Duration(b))
 		bEnd := start.Add(bucketWidth * time.Duration(b+1))
@@ -402,17 +538,26 @@ func timechartChunkGroups(
 			continue
 		}
 
-		var endPos uint64
-		if !meta.IngestEnd.IsZero() && !bEnd.Before(meta.IngestEnd) {
-			endPos = uint64(meta.RecordCount) //nolint:gosec // G115: RecordCount is always non-negative
-		} else if pos, ok := findIngestPos(cm, im, meta.ID, bEnd); ok {
-			endPos = pos
-		}
-
-		bucketRecords := endPos - startPos
-		if bucketRecords == 0 {
+		// Use rank arithmetic for the bucket count (correct on
+		// non-monotonic chunks); use position for ScanAttrs offset
+		// (the cursor needs a physical record position). See
+		// gastrolog-66b7x.
+		startRank, rankOK := findIngestRank(cm, im, meta.ID, bStart)
+		if !rankOK {
 			continue
 		}
+
+		var endRank uint64
+		if !meta.IngestEnd.IsZero() && !bEnd.Before(meta.IngestEnd) {
+			endRank = uint64(meta.RecordCount) //nolint:gosec // G115: RecordCount is always non-negative
+		} else if rank, ok := findIngestRank(cm, im, meta.ID, bEnd); ok {
+			endRank = rank
+		}
+
+		if endRank <= startRank {
+			continue
+		}
+		bucketRecords := endRank - startRank
 
 		// Sample attrs from this bucket range.
 		localCounts := make(map[string]int64)
@@ -567,6 +712,10 @@ func timechartToTable(groupField string, start time.Time, bucketWidth time.Durat
 // findIngestPos returns the earliest record position with IngestTS >= ts.
 // Tries chunk manager first (active chunk B-tree), then index manager
 // (sealed chunk on-disk binary search). Both are O(log n).
+//
+// Returns the *physical record position* — correct for cursor positioning
+// (e.g. ScanAttrs from this offset). NOT correct for histogram counting on
+// non-monotonic chunks; use findIngestRank for bucket counts. See gastrolog-66b7x.
 func findIngestPos(cm chunk.ChunkManager, im index.IndexManager, chunkID chunk.ChunkID, ts time.Time) (uint64, bool) {
 	if pos, found, err := cm.FindIngestStartPosition(chunkID, ts); err == nil && found {
 		return pos, true
@@ -574,6 +723,30 @@ func findIngestPos(cm chunk.ChunkManager, im index.IndexManager, chunkID chunk.C
 	if im != nil {
 		if pos, found, err := im.FindIngestStartPosition(chunkID, ts); err == nil && found {
 			return pos, true
+		}
+	}
+	return 0, false
+}
+
+// findIngestRank returns the entry index (rank) in the IngestTS-sorted index
+// of the first entry with IngestTS >= ts. For active chunks (monotonic
+// IngestTS via Append), rank == physical position. For sealed chunks built
+// via ImportRecords, rank differs from position because physical layout
+// follows source-WriteTS, not IngestTS — histogram bucket counts must use
+// rank arithmetic (endRank - startRank), not position arithmetic. See
+// gastrolog-66b7x.
+func findIngestRank(cm chunk.ChunkManager, im index.IndexManager, chunkID chunk.ChunkID, ts time.Time) (uint64, bool) {
+	// Cloud-backed chunks and active monotonic chunks: rank comes from
+	// the chunk manager. For active monotonic chunks position == rank.
+	// For cloud chunks the entry index in the sorted cache file is the
+	// correct rank. See gastrolog-66b7x.
+	if rank, found, err := cm.FindIngestEntryIndex(chunkID, ts); err == nil && found {
+		return rank, true
+	}
+	// Sealed local chunks: rank lives on the on-disk TS index file.
+	if im != nil {
+		if rank, found, err := im.FindIngestEntryIndex(chunkID, ts); err == nil && found {
+			return rank, true
 		}
 	}
 	return 0, false
@@ -623,22 +796,183 @@ func timechartChunkByIngestTS(
 		}
 	}
 
-	// Try index-based counting (works for local and cloud chunks —
-	// cloud TS indexes are cached locally after first S3 fetch).
+	// Non-monotonic ACTIVE chunks need a full B+ tree iteration: physical
+	// position doesn't match IngestTS-sorted rank, and we can't get rank
+	// from the in-memory B+ tree without iterating. Sealed non-monotonic
+	// chunks have a sorted on-disk TS index — rank arithmetic works there
+	// via FindIngestEntryIndex. Monotonic chunks (active or sealed) keep
+	// the fast O(buckets × log N) path because position == rank. See
+	// gastrolog-66b7x.
+	if !meta.Sealed && !meta.IngestTSMonotonic {
+		bucketizeActiveChunk(cm, meta, start, bucketWidth, firstBucket, lastBucket, counts)
+		return
+	}
+
+	// Try index-based counting (works for local and cloud sealed chunks —
+	// cloud TS indexes are cached locally after first S3 fetch — and for
+	// monotonic active chunks via the in-memory B+ tree).
 	if _, ok := findIngestPos(cm, im, meta.ID, start); ok {
 		timechartChunkByIndex(cm, im, meta, start, bucketWidth, firstBucket, lastBucket, counts)
 		return
 	}
 
-	// No ingest index available — interpolate across buckets.
-	for b := firstBucket; b <= lastBucket; b++ {
-		if cloudFlags != nil {
+	// No ingest index available — contribute zero. Even-distribution
+	// interpolation over RecordCount overshoots buckets where the chunk's
+	// actual records are sparse and underwhelms where they're dense, which
+	// (combined with other chunks' real contributions) produces visible
+	// spikes mid-window. A brief zero-contribution gap during the chunk's
+	// upload race is preferable: it self-heals on the next query once the
+	// cloud TS index is wired. See gastrolog-66b7x.
+	if cloudFlags != nil {
+		for b := firstBucket; b <= lastBucket; b++ {
 			cloudFlags[b] = true
 		}
 	}
 }
 
-// timechartChunkByIndex counts records per bucket using binary search on the ingest index.
+// bucketizeActiveChunk iterates the active chunk's records once and
+// increments the corresponding bucket for each record. Required for
+// non-monotonic active chunks (tier 2+ destinations receiving streamed
+// records out of IngestTS order); the rank-arithmetic path is unsafe
+// there because cm.FindIngestStartPosition returns physical position,
+// not rank. See gastrolog-66b7x.
+func bucketizeActiveChunk(
+	cm chunk.ChunkManager,
+	meta chunk.ChunkMeta,
+	start time.Time,
+	bucketWidth time.Duration,
+	firstBucket, lastBucket int,
+	counts []int64,
+) {
+	startNanos := start.UnixNano()
+	bucketNanos := bucketWidth.Nanoseconds()
+	if bucketNanos <= 0 {
+		return
+	}
+	_ = cm.ScanActiveIngestTS(meta.ID, func(tsNanos int64) bool {
+		if tsNanos < startNanos {
+			return true
+		}
+		b := int((tsNanos - startNanos) / bucketNanos)
+		if b < firstBucket {
+			return true
+		}
+		if b > lastBucket {
+			return false // entries are sorted, no further match
+		}
+		counts[b]++
+		return true
+	})
+}
+
+// nonMonotonicChunkGroups computes the level breakdown for a non-monotonic
+// chunk by sampling once at the chunk level (capped at sampleCap records),
+// computing per-bucket totals from the IngestTS index (B+ tree for active,
+// on-disk index for sealed), and applying the chunk-level level
+// proportions to each bucket. Cost: O(sampleCap + buckets × log N) instead
+// of O(buckets × sampleCap). See gastrolog-66b7x.
+func nonMonotonicChunkGroups(
+	cm chunk.ChunkManager,
+	im index.IndexManager,
+	meta chunk.ChunkMeta,
+	start time.Time,
+	bucketWidth time.Duration,
+	firstBucket, lastBucket int,
+	groupField string,
+	groupCounts []map[string]int64,
+) {
+	const sampleCap = 1000
+	levelCounts := make(map[string]int64)
+	sampled := 0
+	_ = cm.ScanAttrs(meta.ID, 0, func(_ time.Time, attrs chunk.Attributes) bool {
+		if v := attrs[groupField]; v != "" {
+			levelCounts[v]++
+		}
+		sampled++
+		return sampled < sampleCap
+	})
+	if sampled == 0 {
+		return
+	}
+	ratios := make(map[string]float64, len(levelCounts))
+	for k, v := range levelCounts {
+		ratios[k] = float64(v) / float64(sampled)
+	}
+	bucketTotals := chunkBucketTotals(cm, im, meta, start, bucketWidth, firstBucket, lastBucket)
+	for b := firstBucket; b <= lastBucket; b++ {
+		total := bucketTotals[b-firstBucket]
+		if total == 0 {
+			continue
+		}
+		for k, r := range ratios {
+			groupCounts[b][k] += int64(float64(total) * r)
+		}
+	}
+}
+
+// chunkBucketTotals returns per-bucket record counts for a chunk over the
+// requested bucket range. Uses B+ tree iteration for active chunks (where
+// rank cannot be computed via random access) and rank arithmetic on the
+// on-disk TS index for sealed chunks. See gastrolog-66b7x.
+func chunkBucketTotals(
+	cm chunk.ChunkManager,
+	im index.IndexManager,
+	meta chunk.ChunkMeta,
+	start time.Time,
+	bucketWidth time.Duration,
+	firstBucket, lastBucket int,
+) []int64 {
+	totals := make([]int64, lastBucket-firstBucket+1)
+	if !meta.Sealed {
+		startNanos := start.UnixNano()
+		bucketNanos := bucketWidth.Nanoseconds()
+		_ = cm.ScanActiveIngestTS(meta.ID, func(tsNanos int64) bool {
+			if tsNanos < startNanos {
+				return true
+			}
+			b := int((tsNanos - startNanos) / bucketNanos)
+			if b < firstBucket {
+				return true
+			}
+			if b > lastBucket {
+				return false
+			}
+			totals[b-firstBucket]++
+			return true
+		})
+		return totals
+	}
+	for b := firstBucket; b <= lastBucket; b++ {
+		bStart := start.Add(bucketWidth * time.Duration(b))
+		bEnd := start.Add(bucketWidth * time.Duration(b+1))
+		// Per-bucket guard: same rationale as timechartChunkByIndex.
+		startRank, ok := findIngestRank(cm, im, meta.ID, bStart)
+		if !ok {
+			continue
+		}
+		var endRank uint64
+		if !meta.IngestEnd.IsZero() && !bEnd.Before(meta.IngestEnd) {
+			endRank = uint64(meta.RecordCount) //nolint:gosec // G115: RecordCount is non-negative
+		} else if rank, ok := findIngestRank(cm, im, meta.ID, bEnd); ok {
+			endRank = rank
+		}
+		if endRank > startRank {
+			totals[b-firstBucket] = int64(endRank - startRank)
+		}
+	}
+	return totals
+}
+
+// timechartChunkByIndex counts records per bucket using binary search on the
+// ingest index. Counts come from rank arithmetic in the IngestTS-sorted index
+// — endRank - startRank — because physical record positions in chunks built
+// via ImportRecords are scattered relative to IngestTS order. See
+// gastrolog-66b7x.
+//
+// When findIngestRank fails for a bucket's bStart (TS index briefly
+// unavailable, e.g. sealed-local → cloud-backed upload race), that bucket
+// contributes zero from this chunk. Same fallback applies to chunkBucketTotals
+// so counts and groupCounts stay numerically consistent.
 func timechartChunkByIndex(
 	cm chunk.ChunkManager,
 	im index.IndexManager,
@@ -652,17 +986,20 @@ func timechartChunkByIndex(
 		bStart := start.Add(bucketWidth * time.Duration(b))
 		bEnd := start.Add(bucketWidth * time.Duration(b+1))
 
-		startPos, _ := findIngestPos(cm, im, meta.ID, bStart)
-
-		var endPos uint64
-		if !meta.IngestEnd.IsZero() && !bEnd.Before(meta.IngestEnd) {
-			endPos = uint64(meta.RecordCount) //nolint:gosec // G115: RecordCount is always non-negative
-		} else if pos, ok := findIngestPos(cm, im, meta.ID, bEnd); ok {
-			endPos = pos
+		startRank, ok := findIngestRank(cm, im, meta.ID, bStart)
+		if !ok {
+			continue
 		}
 
-		if endPos > startPos {
-			counts[b] += int64(endPos - startPos)
+		var endRank uint64
+		if !meta.IngestEnd.IsZero() && !bEnd.Before(meta.IngestEnd) {
+			endRank = uint64(meta.RecordCount) //nolint:gosec // G115: RecordCount is always non-negative
+		} else if rank, ok := findIngestRank(cm, im, meta.ID, bEnd); ok {
+			endRank = rank
+		}
+
+		if endRank > startRank {
+			counts[b] += int64(endRank - startRank)
 		}
 	}
 }

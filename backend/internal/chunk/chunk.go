@@ -71,6 +71,43 @@ type ChunkManager interface {
 	// Returns (0, false, nil) if no matching entry exists or the chunk is sealed.
 	FindIngestStartPosition(id ChunkID, ts time.Time) (uint64, bool, error)
 
+	// FindIngestEntryIndex returns the rank (entry index in the IngestTS-
+	// sorted index) of the first entry with IngestTS >= ts. Distinct from
+	// FindIngestStartPosition which returns the physical record position;
+	// the two differ for chunks where physical layout doesn't match
+	// IngestTS order (cloud chunks built via ImportRecords). Histogram
+	// bucket counting must use rank arithmetic. Returns (0, false, nil)
+	// when the chunk has no in-manager TS index (sealed local file
+	// chunks — caller falls through to IndexManager.FindIngestEntryIndex).
+	// See gastrolog-66b7x.
+	FindIngestEntryIndex(id ChunkID, ts time.Time) (uint64, bool, error)
+
+	// HasLocalContent reports whether the chunk's record content is fully
+	// available on local disk — true for sealed local file chunks and for
+	// cloud chunks whose GLCB blob is already in the warm cache. False for
+	// cloud chunks that would require an S3 download. Callers that perform
+	// content-bearing reads purely as a side-effect (notably histogram
+	// level breakdowns) gate on this so that a histogram refresh never
+	// triggers cloud blob downloads. See gastrolog-66b7x.
+	HasLocalContent(id ChunkID) bool
+
+	// ScanActiveIngestTS iterates the active chunk's IngestTS B+ tree in
+	// IngestTS-sorted order. The callback receives IngestTS in nanoseconds
+	// and returns false to stop early. Returns ErrChunkNotFound if id is
+	// not the active chunk. No attr or raw reads — cheap. Used by the
+	// histogram counts path on non-monotonic active chunks (tier 2+
+	// destinations) where position-as-rank assumptions break.
+	// See gastrolog-66b7x.
+	ScanActiveIngestTS(id ChunkID, cb func(tsNanos int64) bool) error
+
+	// ScanActiveByIngestTS iterates the active chunk's records in physical
+	// (append) order, exposing both IngestTS and Attributes per record.
+	// Returns ErrChunkNotFound if id is not the active chunk. Used by the
+	// histogram level-breakdown path on non-monotonic active chunks where
+	// per-bucket position-based sampling via ScanAttrs is unsafe. See
+	// gastrolog-66b7x.
+	ScanActiveByIngestTS(id ChunkID, cb func(ingestTS time.Time, attrs Attributes) bool) error
+
 	// FindSourceStartPosition returns the earliest record position with SourceTS >= ts.
 	// For active chunks backed by a B+ tree, this does a tree lookup.
 	// Returns (0, false, nil) if no matching entry exists or the chunk is sealed.
@@ -220,20 +257,21 @@ type ChunkCacheEvictor interface {
 // on a follower without streaming any records. All fields come from the tier
 // Raft FSM entry (populated by AnnounceSeal + AnnounceUpload on the leader).
 type CloudChunkInfo struct {
-	WriteStart      time.Time
-	WriteEnd        time.Time
-	IngestStart     time.Time
-	IngestEnd       time.Time
-	SourceStart     time.Time
-	SourceEnd       time.Time
-	RecordCount     int64
-	Bytes           int64
-	DiskBytes       int64
-	IngestIdxOffset int64
-	IngestIdxSize   int64
-	SourceIdxOffset int64
-	SourceIdxSize   int64
-	NumFrames       int32
+	WriteStart        time.Time
+	WriteEnd          time.Time
+	IngestStart       time.Time
+	IngestEnd         time.Time
+	SourceStart       time.Time
+	SourceEnd         time.Time
+	RecordCount       int64
+	Bytes             int64
+	DiskBytes         int64
+	IngestIdxOffset   int64
+	IngestIdxSize     int64
+	SourceIdxOffset   int64
+	SourceIdxSize     int64
+	NumFrames         int32
+	IngestTSMonotonic bool // see ChunkMeta.IngestTSMonotonic
 }
 
 // CloudChunkRegistrar extends ChunkManager with the ability to register a

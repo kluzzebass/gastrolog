@@ -96,6 +96,16 @@ export class SearchResponse extends Message<SearchResponse> {
    */
   archivedChunks = 0;
 
+  /**
+   * Server-side processing time in milliseconds, measured from the start of
+   * request handling to the moment this message is sent. Set on the first
+   * response message only. Excludes network/transport time so the UI can
+   * distinguish server work from round-trip cost. See gastrolog-66b7x.
+   *
+   * @generated from field: int64 server_elapsed_ms = 7;
+   */
+  serverElapsedMs = protoInt64.zero;
+
   constructor(data?: PartialMessage<SearchResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -110,6 +120,7 @@ export class SearchResponse extends Message<SearchResponse> {
     { no: 4, name: "table_result", kind: "message", T: TableResult },
     { no: 5, name: "histogram", kind: "message", T: HistogramBucket, repeated: true },
     { no: 6, name: "archived_chunks", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 7, name: "server_elapsed_ms", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SearchResponse {

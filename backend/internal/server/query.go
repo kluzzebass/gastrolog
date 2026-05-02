@@ -74,6 +74,7 @@ func (s *QueryServer) Search(
 	req *connect.Request[apiv1.SearchRequest],
 	stream *connect.ServerStream[apiv1.SearchResponse],
 ) error {
+	serverStart := time.Now()
 	if s.queryTimeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, s.queryTimeout)
@@ -101,14 +102,14 @@ func (s *QueryServer) Search(
 			// Streamable pipeline: apply ops per-record on top of the
 			// normal search iterator with full resume-token support.
 			transform := query.NewRecordTransform(pipeline.Pipes, s.lookupResolver)
-			return s.searchDirect(ctx, eng, q, req.Msg.ResumeToken, transform, stream)
+			return s.searchDirect(ctx, eng, q, req.Msg.ResumeToken, transform, serverStart, stream)
 		}
 		// Aggregating / full-materialization pipeline (stats, timechart,
 		// sort, tail, slice, raw).
 		return s.searchPipeline(ctx, eng, q, pipeline, stream)
 	}
 
-	return s.searchDirect(ctx, eng, q, req.Msg.ResumeToken, nil, stream)
+	return s.searchDirect(ctx, eng, q, req.Msg.ResumeToken, nil, serverStart, stream)
 }
 
 // searchDirect streams search results, merging local and remote vault results
@@ -120,6 +121,7 @@ func (s *QueryServer) searchDirect(
 	q query.Query,
 	resumeTokenData []byte,
 	transform *query.RecordTransform,
+	serverStart time.Time,
 	stream *connect.ServerStream[apiv1.SearchResponse],
 ) error {
 	if s.maxResultCount > 0 && (q.Limit == 0 || int64(q.Limit) > s.maxResultCount) {
@@ -156,9 +158,25 @@ func (s *QueryServer) searchDirect(
 	// Collect remote results as a streaming iterator.
 	remoteIter, remoteHist, getRemoteTokens := s.collectRemote(ctx, q, remoteTokens)
 
-	// Compute local histogram and merge with remote.
-	localHist := HistogramToProto(eng.ComputeHistogram(ctx, q, 50))
-	histogram := mergeHistogramBuckets(localHist, remoteHist)
+	// Histogram routing: if the queried vaults are fully replicated to
+	// this node (every tier has a local leader OR follower), compute the
+	// histogram from local data only and skip the cross-node fan-out.
+	// Otherwise, fall back to the leader-engine + remote-merge path so
+	// chunks living on nodes without a local replica still contribute.
+	// Approximate counts from follower replicas are acceptable; records
+	// still use the leader engine for authoritative reads. See
+	// gastrolog-66b7x.
+	var histogram []*apiv1.HistogramBucket
+	if s.histogramFullyLocal(ctx, q) {
+		localEng := s.orch.LocalTierQueryEngine()
+		if s.lookupResolver != nil {
+			localEng.SetLookupResolver(s.lookupResolver)
+		}
+		histogram = HistogramToProto(localEng.ComputeHistogram(ctx, q, 50))
+	} else {
+		localHist := HistogramToProto(eng.ComputeHistogram(ctx, q, 50))
+		histogram = mergeHistogramBuckets(localHist, remoteHist)
+	}
 
 	localIter, getLocalToken := eng.Search(ctx, q, localResume)
 
@@ -184,22 +202,15 @@ func (s *QueryServer) searchDirect(
 		return token
 	}
 
+	// computeDedupHistogram (record-iterating EventID dedup) is no longer
+	// needed for cross-tier transition double-counting — that's handled at
+	// the index level via per-chunk IngestTSMonotonic dispatch +
+	// ScanTSBounds + on-disk TS index rank arithmetic. The local histogram
+	// path above computes correct counts directly. Skipping the dedup
+	// avoids iterating ALL records per histogram query. See gastrolog-66b7x.
 	var streamedHistogram *streamedHistogramBuilder
-	multiNodeVault := false
-	if s.cfgStore != nil && s.remoteSearcher != nil {
-		selectedVaults, _ := query.ExtractVaultFilter(q.Normalize().BoolExpr, nil)
-		byNodeForBuilder := s.remoteVaultsByNode(ctx, selectedVaults)
-		multiNodeVault = hasMultiNodeVault(byNodeForBuilder)
-	}
-	start, end, hasRange := normalizedRange(q.Start, q.End)
-	if transform == nil && multiNodeVault && hasRange {
-		hist, _, err := s.computeDedupHistogram(ctx, eng, q, start, end)
-		if err == nil {
-			histogram = hist
-		}
-	}
 
-	return s.mergeAndStream(ctx, localIter, getToken, remoteIter, q.OrderBy, q.Reverse(), transform, histogram, streamedHistogram, stream)
+	return s.mergeAndStream(ctx, localIter, getToken, remoteIter, q.OrderBy, q.Reverse(), transform, histogram, streamedHistogram, serverStart, stream)
 }
 
 // splitResumeToken separates a unified resume token into local positions
@@ -261,6 +272,7 @@ func (s *QueryServer) mergeAndStream(
 	transform *query.RecordTransform,
 	histogram []*apiv1.HistogramBucket,
 	streamedHistogram *streamedHistogramBuilder,
+	serverStart time.Time,
 	stream *connect.ServerStream[apiv1.SearchResponse],
 ) error {
 	sb := newStreamBatcher(stream, 100)
@@ -291,10 +303,11 @@ func (s *QueryServer) mergeAndStream(
 	}
 
 	return stream.Send(&apiv1.SearchResponse{
-		Records:     sb.pending(),
-		ResumeToken: tokenBytes,
-		HasMore:     len(tokenBytes) > 0,
-		Histogram:   finalHistogram,
+		Records:         sb.pending(),
+		ResumeToken:     tokenBytes,
+		HasMore:         len(tokenBytes) > 0,
+		Histogram:       finalHistogram,
+		ServerElapsedMs: time.Since(serverStart).Milliseconds(),
 	})
 }
 
@@ -435,6 +448,45 @@ func normalizedRange(start, end time.Time) (time.Time, time.Time, bool) {
 		return time.Time{}, time.Time{}, false
 	}
 	return start, end, true
+}
+
+// histogramFullyLocal returns true when every tier of every queried vault
+// has a local replica (leader or follower) on this node. When true, the
+// histogram can be computed entirely from local chunks without any
+// cross-node fan-out. Falls back conservatively to false on any config
+// store error or when the local replica set is empty (e.g. coordinator
+// nodes with no vaults). See gastrolog-66b7x.
+func (s *QueryServer) histogramFullyLocal(ctx context.Context, q query.Query) bool {
+	if s.cfgStore == nil {
+		return false
+	}
+	tiers, err := s.cfgStore.ListTiers(ctx)
+	if err != nil {
+		return false
+	}
+	localReplicas := s.orch.LocalReplicaTierIDs()
+	if len(localReplicas) == 0 {
+		return false
+	}
+	selectedVaults, _ := query.ExtractVaultFilter(q.Normalize().BoolExpr, nil)
+	if len(selectedVaults) == 0 {
+		// No vault filter — consider every vault we know about.
+		vaults, err := s.cfgStore.ListVaults(ctx)
+		if err != nil {
+			return false
+		}
+		for _, v := range vaults {
+			selectedVaults = append(selectedVaults, v.ID)
+		}
+	}
+	for _, vid := range selectedVaults {
+		for _, tierID := range system.VaultTierIDs(tiers, vid) {
+			if !localReplicas[tierID] {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func hasMultiNodeVault(byNode map[string][]glid.GLID) bool {

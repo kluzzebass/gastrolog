@@ -225,10 +225,22 @@ type IndexManager interface {
 	// Returns ErrIndexNotFound if the ingest index does not exist.
 	FindIngestStartPosition(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error)
 
+	// FindIngestEntryIndex returns the rank (entry index in the IngestTS-sorted
+	// index) of the first entry with IngestTS >= ts. Distinct from
+	// FindIngestStartPosition which returns the physical record position; the
+	// two differ for chunks where physical layout doesn't match IngestTS order
+	// (notably chunks built via ImportRecords). Histogram bucket counts must
+	// use rank arithmetic (endIdx - startIdx) — position arithmetic is wrong
+	// on non-monotonic chunks. See gastrolog-66b7x.
+	FindIngestEntryIndex(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error)
+
 	// FindSourceStartPosition returns the earliest record position with SourceTS >= ts.
 	// Returns (pos, true, nil) if found, (0, false, nil) if ts is after all records.
 	// Returns ErrIndexNotFound if the source index does not exist.
 	FindSourceStartPosition(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error)
+
+	// FindSourceEntryIndex is the SourceTS equivalent of FindIngestEntryIndex.
+	FindSourceEntryIndex(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error)
 
 	// LoadIngestEntries returns all (IngestTS, position) entries from the ingest index,
 	// sorted by IngestTS. Used for TS-ordered scanning.
