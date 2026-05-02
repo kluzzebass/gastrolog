@@ -1,12 +1,17 @@
 package tsidx
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/format"
+	"gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/glid"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 func TestFindStartPosition(t *testing.T) {
@@ -20,8 +25,8 @@ func TestFindStartPosition(t *testing.T) {
 	}
 
 	tests := []struct {
-		ts       int64
-		wantPos  uint64
+		ts        int64
+		wantPos   uint64
 		wantFound bool
 	}{
 		{50, 0, true},
@@ -40,128 +45,126 @@ func TestFindStartPosition(t *testing.T) {
 	}
 }
 
-func TestEncodeDecodeRoundTrip(t *testing.T) {
+// TestDecodeRawEntries pins the embedded ITSI/STSI section format —
+// raw `[ts:i64][pos:u32]` × N with no header, count derived from
+// section size. The writer in chunk/cloud emits this exact layout.
+func TestDecodeRawEntries(t *testing.T) {
 	t.Parallel()
-	entries := []Entry{
-		{TS: 300, Pos: 2},
-		{TS: 100, Pos: 0},
-		{TS: 200, Pos: 1},
+	// Three entries: (ts=100, pos=5), (ts=200, pos=2), (ts=300, pos=9).
+	// Little-endian: ts as u64, pos as u32, no separator, no header.
+	raw := []byte{
+		100, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0,
+		200, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0,
+		44, 1, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, // 300 = 0x012C → 44, 1
 	}
-	data := encodeIndex(entries, format.TypeIngestIndex)
-	decoded, err := decodeIndex(data, format.TypeIngestIndex)
+	entries, err := decodeRawEntries(raw)
 	if err != nil {
-		t.Fatalf("decode: %v", err)
+		t.Fatalf("decodeRawEntries: %v", err)
 	}
-	// Should be sorted by ts.
-	if len(decoded) != 3 {
-		t.Fatalf("len: got %d, want 3", len(decoded))
+	want := []Entry{
+		{TS: 100, Pos: 5},
+		{TS: 200, Pos: 2},
+		{TS: 300, Pos: 9},
 	}
-	if decoded[0].TS != 100 || decoded[0].Pos != 0 {
-		t.Errorf("entry 0: got (%d, %d), want (100, 0)", decoded[0].TS, decoded[0].Pos)
+	if len(entries) != len(want) {
+		t.Fatalf("len = %d, want %d", len(entries), len(want))
 	}
-	if decoded[1].TS != 200 || decoded[1].Pos != 1 {
-		t.Errorf("entry 1: got (%d, %d), want (200, 1)", decoded[1].TS, decoded[1].Pos)
-	}
-	if decoded[2].TS != 300 || decoded[2].Pos != 2 {
-		t.Errorf("entry 2: got (%d, %d), want (300, 2)", decoded[2].TS, decoded[2].Pos)
+	for i := range want {
+		if entries[i] != want[i] {
+			t.Errorf("entry %d = %+v, want %+v", i, entries[i], want[i])
+		}
 	}
 }
 
-// TestSearchIngestFileRankVsPos exercises the rank-vs-position distinction on
-// a non-monotonic chunk: physical record positions are scattered relative to
-// IngestTS-sorted order, so the rank value is the only correct one for
-// histogram-style bucket counting. See gastrolog-66b7x.
-func TestSearchIngestFileRankVsPos(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	chunkID := chunk.NewChunkID()
+// writeTestGLCB writes a 3-record GLCB blob to a tempfile under dir/<chunkID>/
+// at the canonical data.glcb location. Used by the GLCB-read tests below.
+func writeTestGLCB(t *testing.T, dir string, chunkID chunk.ChunkID) {
+	t.Helper()
+
 	chunkDir := filepath.Join(dir, chunkID.String())
 	if err := os.MkdirAll(chunkDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	// Simulate an ImportRecords-built chunk: records were written in
-	// source-WriteTS order, so physical positions don't match IngestTS rank.
-	// Sorted-by-TS order: TS=100 (pos=4), 200 (pos=2), 300 (pos=0), 400 (pos=3), 500 (pos=1)
-	entries := []Entry{
-		{TS: 300, Pos: 0},
-		{TS: 500, Pos: 1},
-		{TS: 200, Pos: 2},
-		{TS: 400, Pos: 3},
-		{TS: 100, Pos: 4},
+	enc, _ := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
+	defer enc.Close()
+
+	w := cloud.NewWriter(chunkID, glid.New(), enc)
+	now := time.Unix(0, 0)
+	for i, ts := range []time.Duration{100, 200, 300} {
+		rec := chunk.Record{
+			WriteTS:  now.Add(ts),
+			IngestTS: now.Add(ts),
+			SourceTS: now.Add(ts),
+			Raw:      []byte{byte(i)},
+		}
+		if err := w.Add(rec); err != nil {
+			t.Fatalf("Add: %v", err)
+		}
 	}
-	data := encodeIndex(entries, format.TypeIngestIndex)
-	if err := os.WriteFile(IngestIndexPath(dir, chunkID), data, 0o644); err != nil {
-		t.Fatalf("write: %v", err)
+
+	var buf bytes.Buffer
+	if _, err := w.WriteTo(&buf); err != nil {
+		t.Fatalf("WriteTo: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(chunkDir, cloud.BlobFilename), buf.Bytes(), 0o644); err != nil {
+		t.Fatalf("write blob: %v", err)
+	}
+}
+
+func TestLoadIngestIndexFromGLCB(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	chunkID := chunk.NewChunkID()
+	writeTestGLCB(t, dir, chunkID)
+
+	entries, err := LoadIngestIndex(dir, chunkID)
+	if err != nil {
+		t.Fatalf("LoadIngestIndex: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("len = %d, want 3", len(entries))
+	}
+	// Sorted by TS ascending; positions match insertion order (0,1,2).
+	for i, want := range []int64{100, 200, 300} {
+		if entries[i].TS != want {
+			t.Errorf("entry %d TS = %d, want %d", i, entries[i].TS, want)
+		}
+		if entries[i].Pos != uint32(i) {
+			t.Errorf("entry %d Pos = %d, want %d", i, entries[i].Pos, i)
+		}
+	}
+}
+
+func TestOpenIngestMmapSearchTS(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	chunkID := chunk.NewChunkID()
+	writeTestGLCB(t, dir, chunkID)
+
+	mv, err := OpenIngestMmap(dir, chunkID)
+	if err != nil {
+		t.Fatalf("OpenIngestMmap: %v", err)
+	}
+	defer func() { _ = mv.Close() }()
 
 	tests := []struct {
-		ts       int64
-		wantRank uint64
-		wantPos  uint64
+		ts        int64
+		wantRank  uint32
+		wantPos   uint32
 		wantFound bool
 	}{
-		{50, 0, 4, true},   // before all → first entry: rank 0, pos=4 (TS=100 lives at physical 4)
-		{100, 0, 4, true},  // exact first
-		{150, 1, 2, true},  // → TS=200 at rank 1, pos=2
-		{250, 2, 0, true},  // → TS=300 at rank 2, pos=0
-		{500, 4, 1, true},  // exact last: rank 4, pos=1
-		{600, 0, 0, false}, // past end
+		{50, 0, 0, true},
+		{100, 0, 0, true},
+		{150, 1, 1, true},
+		{300, 2, 2, true},
+		{500, 0, 0, false},
 	}
 	for _, tt := range tests {
-		gotRank, found, err := SearchIngestFileRank(dir, chunkID, tt.ts)
-		if err != nil {
-			t.Fatalf("SearchIngestFileRank(%d): %v", tt.ts, err)
+		rank, pos, ok := mv.SearchTS(tt.ts)
+		if ok != tt.wantFound || rank != tt.wantRank || pos != tt.wantPos {
+			t.Errorf("SearchTS(%d) = (rank=%d, pos=%d, ok=%v), want (rank=%d, pos=%d, ok=%v)",
+				tt.ts, rank, pos, ok, tt.wantRank, tt.wantPos, tt.wantFound)
 		}
-		if found != tt.wantFound || gotRank != tt.wantRank {
-			t.Errorf("SearchIngestFileRank(%d): got (%d, %v), want (%d, %v)", tt.ts, gotRank, found, tt.wantRank, tt.wantFound)
-		}
-		gotPos, foundPos, err := SearchIngestFile(dir, chunkID, tt.ts)
-		if err != nil {
-			t.Fatalf("SearchIngestFile(%d): %v", tt.ts, err)
-		}
-		if foundPos != tt.wantFound || gotPos != tt.wantPos {
-			t.Errorf("SearchIngestFile(%d): got (%d, %v), want (%d, %v)", tt.ts, gotPos, foundPos, tt.wantPos, tt.wantFound)
-		}
-	}
-
-	// Bucket-count sanity: counting via rank gives correct cardinalities,
-	// counting via pos does not. Range [200, 500) covers ranks [1, 4).
-	startRank, _, _ := SearchIngestFileRank(dir, chunkID, 200)
-	endRank, _, _ := SearchIngestFileRank(dir, chunkID, 500)
-	if got := endRank - startRank; got != 3 {
-		t.Errorf("rank delta for [200,500): got %d, want 3 (TS=200,300,400)", got)
-	}
-	// pos arithmetic — wrong on this chunk:
-	startPos, _, _ := SearchIngestFile(dir, chunkID, 200)
-	endPos, _, _ := SearchIngestFile(dir, chunkID, 500)
-	if int64(endPos)-int64(startPos) == 3 {
-		t.Errorf("pos arithmetic accidentally correct on non-monotonic chunk; rank fix not actually exercised")
-	}
-}
-
-func TestLoadIngestIndex(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	chunkID := chunk.NewChunkID()
-	chunkDir := filepath.Join(dir, chunkID.String())
-	if err := os.MkdirAll(chunkDir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-
-	// Write a minimal index.
-	entries := []Entry{{TS: 1000, Pos: 0}}
-	data := encodeIndex(entries, format.TypeIngestIndex)
-	path := IngestIndexPath(dir, chunkID)
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-
-	loaded, err := LoadIngestIndex(dir, chunkID)
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	if len(loaded) != 1 || loaded[0].TS != 1000 || loaded[0].Pos != 0 {
-		t.Errorf("loaded: got %v, want [{1000, 0}]", loaded)
 	}
 }

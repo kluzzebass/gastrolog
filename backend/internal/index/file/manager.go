@@ -75,14 +75,14 @@ func (m *Manager) BuildAdapter() chunk.ChunkIndexBuilder {
 func (m *Manager) DeleteIndexes(chunkID chunk.ChunkID) error {
 	m.evictCache(chunkID)
 
-	// Remove final index files.
+	// Remove final index files. tsidx ingest/source no longer have
+	// sidecars — their content lives in the GLCB blob's ITSI/STSI
+	// sections, removed when data.glcb is removed by the chunk manager.
 	paths := []string{
 		filetoken.IndexPath(m.dir, chunkID),
 		fileattr.KeyIndexPath(m.dir, chunkID),
 		fileattr.ValueIndexPath(m.dir, chunkID),
 		fileattr.KVIndexPath(m.dir, chunkID),
-		filetsidx.IngestIndexPath(m.dir, chunkID),
-		filetsidx.SourceIndexPath(m.dir, chunkID),
 		filekv.KeyIndexPath(m.dir, chunkID),
 		filekv.ValueIndexPath(m.dir, chunkID),
 		filekv.KVIndexPath(m.dir, chunkID),
@@ -101,8 +101,6 @@ func (m *Manager) DeleteIndexes(chunkID chunk.ChunkID) error {
 		fileattr.KeyTempFilePattern(m.dir, chunkID),
 		fileattr.ValueTempFilePattern(m.dir, chunkID),
 		fileattr.KVTempFilePattern(m.dir, chunkID),
-		filetsidx.IngestTempFilePattern(m.dir, chunkID),
-		filetsidx.SourceTempFilePattern(m.dir, chunkID),
 		filekv.KeyTempFilePattern(m.dir, chunkID),
 		filekv.ValueTempFilePattern(m.dir, chunkID),
 		filekv.KVTempFilePattern(m.dir, chunkID),
@@ -407,13 +405,13 @@ func (m *Manager) evictCache(chunkID chunk.ChunkID) {
 // IndexSizes returns the on-disk file size for each index.
 func (m *Manager) IndexSizes(chunkID chunk.ChunkID) map[string]int64 {
 	sizes := make(map[string]int64)
+	// tsidx ingest/source no longer have sidecars — sizes for ITSI/STSI
+	// roll into data.glcb's reported size.
 	paths := map[string]string{
 		"token":    filetoken.IndexPath(m.dir, chunkID),
 		"attr_key": fileattr.KeyIndexPath(m.dir, chunkID),
 		"attr_val": fileattr.ValueIndexPath(m.dir, chunkID),
 		"attr_kv":  fileattr.KVIndexPath(m.dir, chunkID),
-		"ingest":   filetsidx.IngestIndexPath(m.dir, chunkID),
-		"source":   filetsidx.SourceIndexPath(m.dir, chunkID),
 		"kv_key":   filekv.KeyIndexPath(m.dir, chunkID),
 		"kv_val":   filekv.ValueIndexPath(m.dir, chunkID),
 		"kv_kv":    filekv.KVIndexPath(m.dir, chunkID),
@@ -431,13 +429,14 @@ func (m *Manager) IndexSizes(chunkID chunk.ChunkID) map[string]int64 {
 // Also cleans up any orphaned temporary files from interrupted builds.
 func (m *Manager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
 	// Check if all index files exist.
+	// tsidx ingest/source completeness is implicit: if data.glcb is on
+	// disk for a sealed chunk, ITSI/STSI are inside it (writer always
+	// emits both sections during seal).
 	indexPaths := map[string]string{
 		"token":    filetoken.IndexPath(m.dir, chunkID),
 		"attr_key": fileattr.KeyIndexPath(m.dir, chunkID),
 		"attr_val": fileattr.ValueIndexPath(m.dir, chunkID),
 		"attr_kv":  fileattr.KVIndexPath(m.dir, chunkID),
-		"ingest":   filetsidx.IngestIndexPath(m.dir, chunkID),
-		"source":   filetsidx.SourceIndexPath(m.dir, chunkID),
 		"kv_key":   filekv.KeyIndexPath(m.dir, chunkID),
 		"kv_val":   filekv.ValueIndexPath(m.dir, chunkID),
 		"kv_kv":    filekv.KVIndexPath(m.dir, chunkID),
@@ -462,8 +461,6 @@ func (m *Manager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
 		fileattr.KeyTempFilePattern(m.dir, chunkID),
 		fileattr.ValueTempFilePattern(m.dir, chunkID),
 		fileattr.KVTempFilePattern(m.dir, chunkID),
-		filetsidx.IngestTempFilePattern(m.dir, chunkID),
-		filetsidx.SourceTempFilePattern(m.dir, chunkID),
 		filekv.KeyTempFilePattern(m.dir, chunkID),
 		filekv.ValueTempFilePattern(m.dir, chunkID),
 		filekv.KVTempFilePattern(m.dir, chunkID),

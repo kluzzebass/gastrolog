@@ -81,6 +81,10 @@ import (
 	"gastrolog/internal/format"
 )
 
+// BlobFilename is the on-disk filename of a sealed chunk's GLCB blob,
+// always located at <chunkDir>/data.glcb.
+const BlobFilename = "data.glcb"
+
 const (
 	formatVersion = 0x01
 	headerSize    = 96 // fixed header before dictionary
