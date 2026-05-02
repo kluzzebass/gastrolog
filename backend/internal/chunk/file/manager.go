@@ -388,15 +388,6 @@ func NewManager(cfg Config) (*Manager, error) {
 				"error", err)
 			manager.cloudDegraded.Store(true)
 		}
-		// Recompute IngestStart/IngestEnd from the embedded TS index for
-		// every cloud chunk. Chunks uploaded before the scanTSBounds fix
-		// have stale bounds derived from first/last physical records,
-		// which on non-monotonic chunks aren't the IngestTS extrema. The
-		// TS index is sorted by IngestTS, so first/last entries are the
-		// authoritative min/max. Cheap once the local cache is warm —
-		// only the first call per chunk per host pays the S3 range fetch.
-		// See gastrolog-66b7x.
-		manager.repairCloudBounds()
 	}
 
 	if cfg.CacheDir != "" {
@@ -2640,70 +2631,6 @@ func (m *Manager) findCloudTSPosition(id chunk.ChunkID, ts time.Time, offset, si
 	return uint64(pos), ok, err
 }
 
-// validateTSExtents returns true if (first, last) look like a plausible
-// (min, max) TS pair from a sorted TS index: both non-zero, last >= first,
-// and within a reasonable real-world range (post-2000, pre-2200). Used to
-// guard repairCloudBounds against garbage reads from a corrupt or
-// partially-downloaded cache file. See gastrolog-66b7x.
-func validateTSExtents(first, last time.Time) bool {
-	if first.IsZero() || last.IsZero() {
-		return false
-	}
-	if last.Before(first) {
-		return false
-	}
-	minTS := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
-	maxTS := time.Date(2200, 1, 1, 0, 0, 0, 0, time.UTC)
-	if first.Before(minTS) || last.After(maxTS) {
-		return false
-	}
-	return true
-}
-
-// cloudTSExtents returns the min and max IngestTS in a cloud chunk's TS
-// index by reading the first and last entries of the cached cache file.
-// On cache miss, downloads the index from S3 first (one range request).
-// Used by RegisterCloudChunk to recompute IngestStart/IngestEnd for chunks
-// uploaded with the pre-fix first/last-physical-record bounds. See
-// gastrolog-66b7x.
-func (m *Manager) cloudTSExtents(id chunk.ChunkID, offset, size int64) (time.Time, time.Time, error) {
-	cachePath := m.tsCachePath(id, offset)
-	if _, err := os.Stat(cachePath); err != nil {
-		if err := m.downloadTSIndex(id, offset, size, cachePath); err != nil {
-			return time.Time{}, time.Time{}, err
-		}
-	}
-	f, err := os.Open(filepath.Clean(cachePath))
-	if err != nil {
-		return time.Time{}, time.Time{}, err
-	}
-	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
-	if err != nil {
-		return time.Time{}, time.Time{}, err
-	}
-	const entrySize = 12
-	n := info.Size() / entrySize
-	if n == 0 {
-		return time.Time{}, time.Time{}, fmt.Errorf("empty cloud TS index for %s", id)
-	}
-	var buf [entrySize]byte
-	if _, err := f.ReadAt(buf[:], 0); err != nil {
-		return time.Time{}, time.Time{}, err
-	}
-	firstTS := int64(binary.LittleEndian.Uint64(buf[:8])) //nolint:gosec // G115
-	if _, err := f.ReadAt(buf[:], (n-1)*entrySize); err != nil {
-		return time.Time{}, time.Time{}, err
-	}
-	lastTS := int64(binary.LittleEndian.Uint64(buf[:8])) //nolint:gosec // G115
-	first := time.Unix(0, firstTS)
-	last := time.Unix(0, lastTS)
-	if !validateTSExtents(first, last) {
-		return time.Time{}, time.Time{}, fmt.Errorf("cloud TS index for %s returned implausible extents (first=%s last=%s)", id, first, last)
-	}
-	return first, last, nil
-}
-
 // findCloudTSRank is the rank counterpart to findCloudTSPosition. Returns
 // the entry's index in the IngestTS-sorted cache file (i.e. its rank), not
 // the physical record position. Required for histogram bucket counting on
@@ -3564,85 +3491,6 @@ func (m *Manager) removeFromCloudIndex(id chunk.ChunkID) {
 	}
 }
 
-// repairCloudBounds iterates every cloud chunk in cloudIdx, recomputes
-// IngestStart/IngestEnd from the embedded TS index, and updates the entry
-// when the stored bounds are stale. Fixes pre-scanTSBounds uploads whose
-// bounds came from first/last physical records (wrong on non-monotonic
-// chunks). See gastrolog-66b7x.
-func (m *Manager) repairCloudBounds() {
-	if m.cloudIdx == nil {
-		return
-	}
-	type pending struct {
-		id   chunk.ChunkID
-		meta *chunkMeta
-	}
-	var todo []pending
-	if err := m.cloudIdx.ForEach(func(id chunk.ChunkID, meta *chunkMeta) bool {
-		if meta.ingestIdxSize > 0 {
-			todo = append(todo, pending{id: id, meta: meta})
-		}
-		return true
-	}); err != nil {
-		m.logger.Warn("repairCloudBounds: ForEach failed", "error", err)
-		return
-	}
-	for _, p := range todo {
-		first, last, err := m.cloudTSExtents(p.id, p.meta.ingestIdxOffset, p.meta.ingestIdxSize)
-		recomputed := err == nil && validateTSExtents(first, last)
-		existingValid := validateTSExtents(p.meta.ingestStart, p.meta.ingestEnd)
-		if !recomputed {
-			if err != nil {
-				m.logger.Debug("repairCloudBounds: TS index fetch failed",
-					"chunk", p.id, "error", err)
-			}
-			if !existingValid {
-				// We have nothing trustworthy to display for this chunk
-				// and could trigger nonsense-bucket spikes if we leave
-				// it in cloudIdx. Drop the entry; if the blob comes back
-				// online, RegisterCloudChunk will re-add it cleanly.
-				m.logger.Warn("repairCloudBounds: evicting cloud chunk with invalid bounds and unrecoverable TS index",
-					"chunk", p.id,
-					"stored_start", p.meta.ingestStart,
-					"stored_end", p.meta.ingestEnd)
-				m.cloudIdxMu.Lock()
-				_, _ = m.cloudIdx.Delete(p.id)
-				m.cloudIdxMu.Unlock()
-			}
-			continue
-		}
-		if first.Equal(p.meta.ingestStart) && last.Equal(p.meta.ingestEnd) {
-			continue // already correct
-		}
-		updated := *p.meta
-		updated.ingestStart = first
-		updated.ingestEnd = last
-		m.cloudIdxMu.Lock()
-		_, _ = m.cloudIdx.Delete(p.id)
-		if err := m.cloudIdx.Insert(p.id, &updated); err != nil {
-			m.cloudIdxMu.Unlock()
-			m.logger.Warn("repairCloudBounds: insert failed",
-				"chunk", p.id, "error", err)
-			continue
-		}
-		m.cloudIdxMu.Unlock()
-		m.logger.Info("repaired cloud chunk bounds",
-			"chunk", p.id,
-			"old_start", p.meta.ingestStart, "old_end", p.meta.ingestEnd,
-			"new_start", first, "new_end", last)
-	}
-	if len(todo) > 0 {
-		m.cloudIdxMu.Lock()
-		_ = m.cloudIdx.Sync()
-		m.cloudIdxMu.Unlock()
-	}
-	// Force the list cache to rebuild on next List() so callers see the
-	// updated bounds.
-	m.mu.Lock()
-	m.cloudListCache = nil
-	m.mu.Unlock()
-}
-
 // rebuildCloudListCache scans the cloud B+ tree index and caches the result.
 // Must be called with m.mu held.
 func (m *Manager) rebuildCloudListCache() {
@@ -4015,23 +3863,6 @@ func (m *Manager) RegisterCloudChunk(id chunk.ChunkID, info chunk.CloudChunkInfo
 	m.cloudIdxMu.Unlock()
 	if existing != nil {
 		return nil // already in cloud index
-	}
-
-	// Recompute IngestStart/IngestEnd from the cloud TS index entries.
-	// CloudChunkInfo carries values from the FSM Entry; for chunks
-	// uploaded BEFORE the scanTSBounds fix (gastrolog-66b7x), these
-	// were derived from the first/last PHYSICAL records, which on a
-	// non-monotonic chunk are not the IngestTS extrema. Using those
-	// stale bounds makes the histogram cap-branch attribute all
-	// RecordCount records to the wrong bucket. The TS index is
-	// authoritative (sorted by IngestTS), so first/last entries give
-	// the true min/max. Done lazily — pulls the local cache or one
-	// S3 range fetch per chunk, then never again.
-	if info.IngestIdxSize > 0 {
-		if first, last, err := m.cloudTSExtents(id, info.IngestIdxOffset, info.IngestIdxSize); err == nil {
-			info.IngestStart = first
-			info.IngestEnd = last
-		}
 	}
 
 	meta := &chunkMeta{
