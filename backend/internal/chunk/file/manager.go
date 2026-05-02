@@ -1421,6 +1421,49 @@ func (m *Manager) rebuildBTrees(id chunk.ChunkID, idxFile *os.File, recordCount 
 	return ingestBT, sourceBT, nil
 }
 
+// loadChunkMetaFromGLCB reads a sealed chunk's metadata directly from its
+// data.glcb file via the chunkcloud reader. Used at startup for chunks
+// that have only data.glcb in the directory (no multi-file artifacts) —
+// once stage 3b retires multi-file generation, this becomes the primary
+// load path. See gastrolog-24m1t.
+//
+// Capability-only: not yet wired into loadExisting. The current load
+// path still goes through loadChunkMeta (idx.log-based).
+func (m *Manager) loadChunkMetaFromGLCB(id chunk.ChunkID) (*chunkMeta, error) {
+	path := filepath.Join(m.chunkDir(id), dataGLCBFileName)
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+
+	rd, err := chunkcloud.NewCacheReader(f)
+	if err != nil {
+		return nil, fmt.Errorf("open data.glcb for %s: %w", id, err)
+	}
+	defer func() { _ = rd.Close() }()
+	bm := rd.Meta()
+
+	return &chunkMeta{
+		id:               id,
+		recordCount:      int64(bm.RecordCount),
+		bytes:            bm.RawBytes,
+		sealed:           true,
+		compressed:       true, // data.glcb embeds zstd-compressed record data
+		writeStart:       bm.WriteStart,
+		writeEnd:         bm.WriteEnd,
+		ingestStart:      bm.IngestStart,
+		ingestEnd:        bm.IngestEnd,
+		sourceStart:      bm.SourceStart,
+		sourceEnd:        bm.SourceEnd,
+		ingestIdxOffset:  bm.IngestIdxOffset,
+		ingestIdxSize:    bm.IngestIdxSize,
+		sourceIdxOffset:  bm.SourceIdxOffset,
+		sourceIdxSize:    bm.SourceIdxSize,
+		logicalDataBytes: bm.RawBytes,
+	}, nil
+}
+
 func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
 	idxPath := m.idxLogPath(id)
 

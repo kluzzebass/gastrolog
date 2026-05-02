@@ -133,6 +133,58 @@ func TestPostSealProcess_ProducesGLCB(t *testing.T) {
 	}
 }
 
+// TestLoadChunkMetaFromGLCB verifies that a sealed chunk's metadata can
+// be reconstructed from its data.glcb file alone, without reading
+// idx.log. Capability test for the loadExisting migration in stage 3b
+// of gastrolog-24m1t step 7c.
+func TestLoadChunkMetaFromGLCB(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	m, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	defer func() { _ = m.Close() }()
+
+	now := time.Now().Truncate(time.Microsecond)
+	const recordCount = 7
+	var chunkID chunk.ChunkID
+	for i := range recordCount {
+		id, _, err := m.Append(chunk.Record{
+			IngestTS: now.Add(time.Duration(i) * time.Millisecond),
+			Attrs:    chunk.Attributes{"level": "info"},
+			Raw:      []byte("payload"),
+		})
+		if err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+		chunkID = id
+	}
+	if err := m.Seal(); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	if err := m.PostSealProcess(t.Context(), chunkID); err != nil {
+		t.Fatalf("PostSealProcess: %v", err)
+	}
+
+	got, err := m.loadChunkMetaFromGLCB(chunkID)
+	if err != nil {
+		t.Fatalf("loadChunkMetaFromGLCB: %v", err)
+	}
+	if got.id != chunkID {
+		t.Errorf("id: got %v want %v", got.id, chunkID)
+	}
+	if got.recordCount != recordCount {
+		t.Errorf("recordCount: got %d want %d", got.recordCount, recordCount)
+	}
+	if !got.sealed {
+		t.Error("expected sealed=true")
+	}
+	if got.ingestIdxSize <= 0 {
+		t.Errorf("expected non-zero ingestIdxSize, got %d", got.ingestIdxSize)
+	}
+}
+
 // TestSealToGLCB_RefusesUnsealedChunk verifies that sealToGLCB on an
 // unsealed (still-active) chunk does not silently produce a bogus
 // blob — the OpenCursor call should fail because cursors against the
