@@ -36,13 +36,26 @@
 //	TS indexes + TOC (after seekable zstd):
 //	  IngestTS Index: [tsNano:i64][pos:u32] × recordCount, sorted by ts
 //	  SourceTS Index: [tsNano:i64][pos:u32] × N (excludes zero-TS records), sorted by ts
-//	  TOC (48 bytes):
+//
+//	TOC entries (56 bytes each, one per section pointed to from the TOC):
+//	    [magic:4]           section type (e.g. "ITSI" for ingest TS index)
+//	    [version:u32]       per-section version
+//	    [offset:u64]        byte offset from blob start
+//	    [size:u64]          byte count
+//	    [hash:32]           SHA-256 of the section's bytes
+//
+//	TOC footer (44 bytes, at the very end of the blob):
+//	    [entryCount:u32]    number of entries above
+//	    [blobDigest:32]     SHA-256 of bytes [0, fileSize - footerSize)
+//	                        — every byte of the blob except this footer
+//	    [footerVersion:u32] footer schema version
 //	    [magic:4]           "GTOC"
-//	    [tocVersion:u32]    1
-//	    [ingestIdxOff:u64]  byte offset from blob start
-//	    [ingestIdxSize:u64] byte count
-//	    [sourceIdxOff:u64]  byte offset from blob start
-//	    [sourceIdxSize:u64] byte count
+//
+//	Read protocol: read the last 44 bytes as the footer, validate the
+//	magic, then read entryCount × 56 bytes immediately preceding the
+//	footer to recover all section pointers + hashes. The blob digest
+//	covers everything from the start of the file through the last
+//	entry — readers verifying integrity hash that range and compare.
 //
 // Record frame encoding:
 //
@@ -59,6 +72,7 @@
 package cloud
 
 import (
+	"crypto/sha256"
 	"gastrolog/internal/glid"
 	"time"
 
@@ -83,10 +97,23 @@ const (
 	// TS index entry: [tsNano:i64][pos:u32] = 12 bytes, sorted by TS.
 	tsIndexEntrySize = 12
 
-	// TOC (Table of Contents) footer: identifies embedded TS index sections.
-	tocSize  = 48
-	TOCSize  = tocSize // exported for backfill
-	tocMagic = "GTOC"
+	// TOC entry: [magic:4][version:u32][offset:u64][size:u64][hash:32].
+	tocEntrySize = 56
+
+	// TOC footer: [entryCount:u32][blobDigest:32][footerVersion:u32][magic:4].
+	tocFooterSize = 44
+	TOCFooterSize = tocFooterSize // exported for byte-range readers
+
+	tocFooterMagic   = "GTOC"
+	tocFooterVersion = uint32(1)
+)
+
+// Section magics for entries in the TOC. Each magic identifies a kind of
+// section the blob can carry; readers look up entries by magic to find
+// the section's offset+size+hash without caring about positional order.
+const (
+	SectionIngestTSIndex = "ITSI"
+	SectionSourceTSIndex = "STSI"
 )
 
 // tsNanos converts a time.Time to nanoseconds, using 0 for the zero value.
@@ -128,12 +155,54 @@ type BlobMeta struct {
 	SourceIdxSize   int64
 }
 
-// BlobTOC holds section offsets for embedded TS indexes.
+// BlobTOC holds section pointers, per-section hashes, and a whole-blob
+// digest decoded from the blob's TOC footer + entries.
+//
+// Convenience fields (IngestIdxOffset / SourceIdxSize / etc.) are populated
+// from Entries during parse for the common section magics (ITSI, STSI).
+// Callers that need to read sections introduced after this commit should
+// look them up via Entries directly.
 type BlobTOC struct {
+	Entries    []TOCEntry
+	BlobDigest [32]byte
+	Version    uint32
+
+	// Convenience accessors for the well-known sections; zero-valued
+	// when the section isn't present.
 	IngestIdxOffset int64
 	IngestIdxSize   int64
+	IngestIdxHash   [32]byte
 	SourceIdxOffset int64
 	SourceIdxSize   int64
+	SourceIdxHash   [32]byte
+}
+
+// TOCEntry describes one section within a GLCB blob: its type (Magic),
+// per-section version, byte range (Offset, Size), and content hash.
+type TOCEntry struct {
+	Magic   [4]byte
+	Version uint32
+	Offset  int64
+	Size    int64
+	Hash    [32]byte
+}
+
+// VerifyHash reports whether the given bytes hash to this entry's
+// recorded SHA-256. Used by callers (cache fills, byte-range downloads)
+// to detect corruption against the FSM-replicated truth.
+func (e *TOCEntry) VerifyHash(data []byte) bool {
+	return sha256.Sum256(data) == e.Hash
+}
+
+// Find returns the entry with the given section magic, or false if no
+// entry of that kind is present.
+func (t *BlobTOC) Find(magic string) (TOCEntry, bool) {
+	for _, e := range t.Entries {
+		if string(e.Magic[:]) == magic {
+			return e, true
+		}
+	}
+	return TOCEntry{}, false
 }
 
 // recordIndex is one entry in the record offset index.

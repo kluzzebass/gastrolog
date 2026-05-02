@@ -122,39 +122,112 @@ func NewReader(f *os.File) (*Reader, error) {
 	}, nil
 }
 
-// readTOC reads the 48-byte TOC footer from the end of the blob file.
+// readTOC reads the TOC footer + entries from the tail of an open blob file.
+// The footer is a fixed 44 bytes at the very end; it announces how many
+// entries precede it. Each entry is 56 bytes.
 func readTOC(f *os.File, fileSize int64) (BlobTOC, error) {
-	var buf [tocSize]byte
-	if _, err := f.ReadAt(buf[:], fileSize-tocSize); err != nil {
+	if fileSize < int64(tocFooterSize) {
+		return BlobTOC{}, errors.New("blob too small for TOC footer")
+	}
+	var footer [tocFooterSize]byte
+	if _, err := f.ReadAt(footer[:], fileSize-int64(tocFooterSize)); err != nil {
+		return BlobTOC{}, fmt.Errorf("read TOC footer: %w", err)
+	}
+	count, _, err := parseTOCFooter(footer[:])
+	if err != nil {
 		return BlobTOC{}, err
 	}
-	if string(buf[0:4]) != tocMagic {
-		return BlobTOC{}, errors.New("TOC magic mismatch")
+	entriesEnd := fileSize - int64(tocFooterSize)
+	entriesStart := entriesEnd - int64(count)*int64(tocEntrySize)
+	if entriesStart < 0 {
+		return BlobTOC{}, errors.New("blob too small for TOC entries")
 	}
-	// tocVersion at buf[4:8] — reserved for future use
-	return BlobTOC{
-		IngestIdxOffset: int64(binary.LittleEndian.Uint64(buf[8:16])),  //nolint:gosec // round-trip
-		IngestIdxSize:   int64(binary.LittleEndian.Uint64(buf[16:24])), //nolint:gosec // round-trip
-		SourceIdxOffset: int64(binary.LittleEndian.Uint64(buf[24:32])), //nolint:gosec // round-trip
-		SourceIdxSize:   int64(binary.LittleEndian.Uint64(buf[32:40])), //nolint:gosec // round-trip
-	}, nil
+	entryBuf := make([]byte, entriesEnd-entriesStart)
+	if _, err := f.ReadAt(entryBuf, entriesStart); err != nil {
+		return BlobTOC{}, fmt.Errorf("read TOC entries: %w", err)
+	}
+	return parseTOCRegion(entryBuf, footer[:])
 }
 
-// ParseTOC parses a 48-byte TOC buffer. Exported for use by the chunk manager
-// during backfill of pre-existing blobs.
+// ParseTOC parses a contiguous tail buffer that includes both the TOC
+// entries and the 44-byte footer. Exported for use by remote readers that
+// download the blob's tail by byte range. The buffer must be exactly
+// `entryCount × 56 + 44` bytes long; the entry count is read from the
+// footer.
 func ParseTOC(buf []byte) (BlobTOC, error) {
-	if len(buf) < tocSize {
-		return BlobTOC{}, errors.New("TOC buffer too small")
+	if len(buf) < tocFooterSize {
+		return BlobTOC{}, errors.New("TOC buffer too small for footer")
 	}
-	if string(buf[0:4]) != tocMagic {
-		return BlobTOC{}, errors.New("TOC magic mismatch")
+	footer := buf[len(buf)-tocFooterSize:]
+	count, _, err := parseTOCFooter(footer)
+	if err != nil {
+		return BlobTOC{}, err
 	}
-	return BlobTOC{
-		IngestIdxOffset: int64(binary.LittleEndian.Uint64(buf[8:16])),  //nolint:gosec // round-trip
-		IngestIdxSize:   int64(binary.LittleEndian.Uint64(buf[16:24])), //nolint:gosec // round-trip
-		SourceIdxOffset: int64(binary.LittleEndian.Uint64(buf[24:32])), //nolint:gosec // round-trip
-		SourceIdxSize:   int64(binary.LittleEndian.Uint64(buf[32:40])), //nolint:gosec // round-trip
-	}, nil
+	entryBytes := int64(count) * int64(tocEntrySize)
+	if int64(len(buf)) < entryBytes+int64(tocFooterSize) {
+		return BlobTOC{}, errors.New("TOC buffer too small for declared entry count")
+	}
+	entries := buf[len(buf)-int(entryBytes)-tocFooterSize : len(buf)-tocFooterSize]
+	return parseTOCRegion(entries, footer)
+}
+
+// parseTOCFooter validates the magic + version and returns the entry count
+// and blob digest from a 44-byte footer.
+func parseTOCFooter(buf []byte) (count uint32, digest [32]byte, err error) {
+	if len(buf) < tocFooterSize {
+		return 0, digest, errors.New("TOC footer buffer too small")
+	}
+	if string(buf[40:44]) != tocFooterMagic {
+		return 0, digest, errors.New("TOC magic mismatch")
+	}
+	footerVersion := binary.LittleEndian.Uint32(buf[36:40])
+	if footerVersion != tocFooterVersion {
+		return 0, digest, fmt.Errorf("unsupported TOC footer version %d (want %d)", footerVersion, tocFooterVersion)
+	}
+	count = binary.LittleEndian.Uint32(buf[0:4])
+	copy(digest[:], buf[4:36])
+	return count, digest, nil
+}
+
+// parseTOCRegion decodes the entry array + footer into a BlobTOC, populating
+// both the structured Entries slice and the convenience fields for the
+// well-known section magics.
+func parseTOCRegion(entryBuf, footerBuf []byte) (BlobTOC, error) {
+	count, digest, err := parseTOCFooter(footerBuf)
+	if err != nil {
+		return BlobTOC{}, err
+	}
+	if int64(len(entryBuf)) != int64(count)*int64(tocEntrySize) {
+		return BlobTOC{}, fmt.Errorf("TOC entry buffer is %d bytes, expected %d", len(entryBuf), int64(count)*int64(tocEntrySize))
+	}
+	entries := make([]TOCEntry, count)
+	for i := range entries {
+		off := i * tocEntrySize
+		raw := entryBuf[off : off+tocEntrySize]
+		var e TOCEntry
+		copy(e.Magic[:], raw[0:4])
+		e.Version = binary.LittleEndian.Uint32(raw[4:8])
+		e.Offset = int64(binary.LittleEndian.Uint64(raw[8:16]))  //nolint:gosec // round-trip
+		e.Size = int64(binary.LittleEndian.Uint64(raw[16:24]))   //nolint:gosec // round-trip
+		copy(e.Hash[:], raw[24:56])
+		entries[i] = e
+	}
+	toc := BlobTOC{
+		Entries:    entries,
+		BlobDigest: digest,
+		Version:    tocFooterVersion,
+	}
+	if e, ok := toc.Find(SectionIngestTSIndex); ok {
+		toc.IngestIdxOffset = e.Offset
+		toc.IngestIdxSize = e.Size
+		toc.IngestIdxHash = e.Hash
+	}
+	if e, ok := toc.Find(SectionSourceTSIndex); ok {
+		toc.SourceIdxOffset = e.Offset
+		toc.SourceIdxSize = e.Size
+		toc.SourceIdxHash = e.Hash
+	}
+	return toc, nil
 }
 
 // Meta returns the blob metadata.

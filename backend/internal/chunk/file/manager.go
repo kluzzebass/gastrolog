@@ -3724,20 +3724,10 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 
 	// Read TOC from end of blob to get TS index offsets.
 	tocCtx, tocCancel := context.WithTimeout(context.Background(), cloudDownloadTimeout)
-	tocBuf, err := m.cfg.CloudStore.DownloadRange(
-		tocCtx, key, blobSize-chunkcloud.TOCSize, chunkcloud.TOCSize)
+	toc, err := chunkcloud.DownloadTOC(tocCtx, m.cfg.CloudStore, key, blobSize)
 	tocCancel()
 	if err != nil {
 		return fmt.Errorf("read TOC from existing blob: %w", err)
-	}
-	defer func() { _ = tocBuf.Close() }()
-	tocData := make([]byte, chunkcloud.TOCSize)
-	if _, err := io.ReadFull(tocBuf, tocData); err != nil {
-		return fmt.Errorf("read TOC bytes: %w", err)
-	}
-	toc, err := chunkcloud.ParseTOC(tocData)
-	if err != nil {
-		return fmt.Errorf("parse TOC from existing blob: %w", err)
 	}
 
 	// Per-chunk write lock around the FSM announce, the disk transition,
@@ -3996,24 +3986,14 @@ func (m *Manager) backfillTSOffsets() {
 		if meta.ingestIdxSize > 0 {
 			return true // already has offsets
 		}
-		// Read the last 48 bytes (TOC) from the blob.
+		// Pull the TOC from the tail of the blob.
 		info, err := m.cfg.CloudStore.Head(context.Background(), m.blobKey(id))
-		if err != nil || info.Size < chunkcloud.TOCSize {
+		if err != nil || info.Size < int64(chunkcloud.TOCFooterSize) {
 			return true
 		}
-		rc, err := m.cfg.CloudStore.DownloadRange(context.Background(), m.blobKey(id), info.Size-chunkcloud.TOCSize, chunkcloud.TOCSize)
-		if err != nil {
-			return true
-		}
-		var buf [chunkcloud.TOCSize]byte
-		_, err = io.ReadFull(rc, buf[:])
-		_ = rc.Close()
-		if err != nil {
-			return true
-		}
-		toc, err := chunkcloud.ParseTOC(buf[:])
+		toc, err := chunkcloud.DownloadTOC(context.Background(), m.cfg.CloudStore, m.blobKey(id), info.Size)
 		if err != nil || toc.IngestIdxOffset == 0 {
-			return true // v1 blob without embedded TS indexes
+			return true
 		}
 		meta.ingestIdxOffset = toc.IngestIdxOffset
 		meta.ingestIdxSize = toc.IngestIdxSize

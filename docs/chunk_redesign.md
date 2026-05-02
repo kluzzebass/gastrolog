@@ -45,6 +45,7 @@ file/cloud machinery into one shape parameterised by a single property.
   - [Sealing semantics](#sealing-semantics)
   - [Indexer / seal / upload coordination](#indexer--seal--upload-coordination)
   - [Read performance](#read-performance)
+  - [Replication via binary copy](#replication-via-binary-copy)
 - [The unified Manager type](#the-unified-manager-type)
   - [The whole interface in one shape](#the-whole-interface-in-one-shape)
   - [Cache vs permanent: just `CloudBacked` on the FSM](#cache-vs-permanent-just-cloudbacked-on-the-fsm)
@@ -351,6 +352,53 @@ GLCB random-access reads use `pread`/`mmap` against fixed offsets in
 uncompressed; record-data section is seekable-zstd). No worse than the
 multi-file layout — the multi-file layout has the same offsets, just
 spread across more file handles.
+
+### Replication via binary copy
+
+A side-effect of GLCB-everywhere worth calling out explicitly: chunk
+replication stops being a record-streaming protocol and becomes a
+byte-stream copy.
+
+Today (multi-file world): the leader opens a cursor, iterates
+records, RPCs them to each follower, and the follower runs
+`ImportRecords` to rebuild idx, attr, dict, and B+ trees from
+scratch. That's because the multi-file layout has per-node-internal
+state (mmap pages, B+ tree node layout) that can't be copied
+verbatim, and because there's no single artifact to copy.
+
+After the redesign: the leader has a `data.glcb` byte sequence that
+is, by construction:
+
+1. **Self-contained.** Header + dict + record-index + zstd body + TS
+   indexes + TOC, all addressable by byte offset. No external state.
+2. **Byte-identical across nodes.** GLCB is a deterministic encoding
+   of the record set. The sealing path takes the same input and
+   produces the same bytes.
+3. **Format-versioned with integrity.** Per-section hashes + the
+   whole-blob digest in the TOC let a follower assert "the bytes I
+   have match what the leader has" without per-record checksum
+   machinery.
+
+So replication becomes:
+
+| Today | After GLCB-everywhere |
+|---|---|
+| Leader: open cursor, iterate, send N RPCs | Leader: open `data.glcb`, send one byte stream |
+| Follower: `ImportRecords` rebuilds indexes — minutes for a 50k chunk | Follower: write to `data.glcb.tmp`, fsync, verify TOC hashes, rename — seconds |
+| RF=N: leader does N × (open + serialize) | Leader does 1 × (open + range-serve), N followers consume the same bytes |
+| Bandwidth: serialized record protobuf | Bandwidth: zstd-compressed on-disk bytes |
+| Indexes: each follower rebuilds locally | Indexes are *part of* the blob — copied verbatim |
+| Failure mode: partial record stream, follower has half-state | Failure mode: tmp file present or not; rename is atomic |
+
+The cloud-upload path is the same operation: cloud-upload PUTs the
+bytes to S3; replication sends the bytes over RPC. Two consumers of
+one primitive. The `ImportSealed` / `ImportRecords` pair gets
+deleted; a single `ImportBlob` RPC replaces them.
+
+This depends on the format work (per-section hash in 7a, atomic
+GLCB seal in 7c, deletion of cloud-only read path in 7d) but is
+orthogonal to the rest of step 7. Tracked separately as a follow-up
+issue.
 
 ## The unified Manager type
 

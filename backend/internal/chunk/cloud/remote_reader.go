@@ -13,6 +13,47 @@ import (
 	"gastrolog/internal/chunk"
 )
 
+// DownloadTOC downloads + parses the TOC tail of a blob via range requests.
+// Two-step: pull the 44-byte footer first to learn the entry count, then
+// pull the entries region. Used by adoptCloudBlob and any caller that
+// only needs the TOC (no record reads). Closes nothing — the underlying
+// store handles its own connections.
+func DownloadTOC(ctx context.Context, store blobstore.Store, key string, blobSize int64) (BlobTOC, error) {
+	if blobSize < int64(tocFooterSize) {
+		return BlobTOC{}, fmt.Errorf("blob size %d smaller than TOC footer (%d)", blobSize, tocFooterSize)
+	}
+	footerBuf, err := readRangeFully(ctx, store, key, blobSize-int64(tocFooterSize), int64(tocFooterSize))
+	if err != nil {
+		return BlobTOC{}, fmt.Errorf("read TOC footer: %w", err)
+	}
+	count, _, err := parseTOCFooter(footerBuf)
+	if err != nil {
+		return BlobTOC{}, fmt.Errorf("parse TOC footer: %w", err)
+	}
+	regionSize := int64(count)*int64(tocEntrySize) + int64(tocFooterSize)
+	if regionSize > blobSize {
+		return BlobTOC{}, fmt.Errorf("TOC region %d exceeds blob size %d", regionSize, blobSize)
+	}
+	regionBuf, err := readRangeFully(ctx, store, key, blobSize-regionSize, regionSize)
+	if err != nil {
+		return BlobTOC{}, fmt.Errorf("read TOC region: %w", err)
+	}
+	return ParseTOC(regionBuf)
+}
+
+func readRangeFully(ctx context.Context, store blobstore.Store, key string, offset, size int64) ([]byte, error) {
+	rc, err := store.DownloadRange(ctx, key, offset, size)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rc.Close() }()
+	buf := make([]byte, size)
+	if _, err := io.ReadFull(rc, buf); err != nil {
+		return nil, err
+	}
+	return buf, nil
+}
+
 // rangeReaderAt implements io.ReaderAt using blobstore range requests.
 // Each ReadAt call is one DownloadRange — the OS/CDN/S3 caches handle
 // repeated reads to the same region.
@@ -48,8 +89,8 @@ type RemoteReader struct {
 // Only downloads the header/dict/record index at creation time (small, contiguous).
 // Record data is fetched on demand via seekable zstd + range requests.
 func NewRemoteReader(store blobstore.Store, key string, blobSize int64) (*RemoteReader, error) {
-	if blobSize < headerSize+tocSize {
-		return nil, fmt.Errorf("blob too small (%d bytes, need at least %d)", blobSize, headerSize+tocSize)
+	if blobSize < int64(headerSize+tocFooterSize) {
+		return nil, fmt.Errorf("blob too small (%d bytes, need at least %d)", blobSize, headerSize+tocFooterSize)
 	}
 
 	// --- Read header (96 bytes) via range request ---
@@ -84,13 +125,9 @@ func NewRemoteReader(store blobstore.Store, key string, blobSize int64) (*Remote
 	}
 
 	// --- Read TOC to find zstd section bounds ---
-	tocBuf, err := downloadBytes(store, key, blobSize-tocSize, tocSize)
+	toc, err := DownloadTOC(context.Background(), store, key, blobSize)
 	if err != nil {
-		return nil, fmt.Errorf("read TOC: %w", err)
-	}
-	toc, err := ParseTOC(tocBuf)
-	if err != nil {
-		return nil, fmt.Errorf("parse TOC: %w", err)
+		return nil, err
 	}
 	meta.IngestIdxOffset = toc.IngestIdxOffset
 	meta.IngestIdxSize = toc.IngestIdxSize
