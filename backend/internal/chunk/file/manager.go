@@ -239,8 +239,7 @@ type chunkMeta struct {
 	bytes            int64     // Total logical bytes (data + non-data files)
 	logicalDataBytes int64     // Logical data bytes only (raw + attr + idx content)
 	sealed           bool
-	compressed       bool  // true if raw.log/attr.log are compressed
-	diskBytes        int64 // actual on-disk size (sum of all files)
+	diskBytes        int64 // actual on-disk size of data.glcb
 
 	// IngestTS and SourceTS bounds (zero = unknown).
 	ingestStart time.Time
@@ -277,7 +276,6 @@ func (m *chunkMeta) toChunkMeta() chunk.ChunkMeta {
 		RecordCount: m.recordCount,
 		Bytes:       m.bytes,
 		Sealed:      m.sealed,
-		Compressed:  m.compressed || m.cloudBacked, // GLCB blobs are always zstd-compressed
 		DiskBytes:   m.diskBytes,
 		IngestStart:       m.ingestStart,
 		IngestEnd:         m.ingestEnd,
@@ -1442,7 +1440,6 @@ func (m *Manager) loadChunkMetaFromGLCB(id chunk.ChunkID) (*chunkMeta, error) {
 		recordCount:      int64(bm.RecordCount),
 		bytes:            bm.RawBytes,
 		sealed:           true,
-		compressed:       true, // data.glcb embeds zstd-compressed record data
 		writeStart:       bm.WriteStart,
 		writeEnd:         bm.WriteEnd,
 		ingestStart:      bm.IngestStart,
@@ -1513,7 +1510,6 @@ func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
 		id:          id,
 		recordCount: int64(recordCount), //nolint:gosec // G115: record count fits in int64
 		sealed:      sealed,
-		compressed:  sealed && m.checkCompressionFlag(id),
 	}
 
 	if recordCount == 0 {
@@ -1552,25 +1548,6 @@ func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
 	}
 
 	return meta, nil
-}
-
-func (m *Manager) checkCompressionFlag(id chunk.ChunkID) bool {
-	rawPath := m.rawLogPath(id)
-	rawFile, err := os.Open(filepath.Clean(rawPath))
-	if err != nil {
-		return false
-	}
-	defer func() { _ = rawFile.Close() }()
-
-	var rawHeader [format.HeaderSize]byte
-	if _, err := io.ReadFull(rawFile, rawHeader[:]); err != nil {
-		return false
-	}
-	h, err := format.Decode(rawHeader[:])
-	if err != nil {
-		return false
-	}
-	return h.Flags&format.FlagCompressed != 0
 }
 
 func (m *Manager) readFirstLastEntries(idxFile *os.File, recordCount uint64) (IdxEntry, IdxEntry, error) {
@@ -3745,7 +3722,6 @@ func (m *Manager) sealToGLCB(id chunk.ChunkID) (*chunkcloud.Writer, int64, error
 	numFrames := w.NumFrames()
 	m.mu.Lock()
 	if meta := m.metas[id]; meta != nil {
-		meta.compressed = true
 		meta.ingestIdxOffset = toc.IngestIdxOffset
 		meta.ingestIdxSize = toc.IngestIdxSize
 		meta.sourceIdxOffset = toc.SourceIdxOffset
@@ -3969,7 +3945,6 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 	meta := m.metas[id]
 	if meta != nil {
 		meta.cloudBacked = true
-		meta.compressed = true // GLCB blobs are always zstd-compressed
 		meta.diskBytes = blobSize
 		meta.ingestIdxOffset = toc.IngestIdxOffset
 		meta.ingestIdxSize = toc.IngestIdxSize
@@ -4038,7 +4013,6 @@ func (m *Manager) RegisterCloudChunk(id chunk.ChunkID, info chunk.CloudChunkInfo
 		recordCount:       info.RecordCount,
 		bytes:             info.Bytes,
 		sealed:            true,
-		compressed:        true,
 		cloudBacked:       true,
 		diskBytes:         info.DiskBytes,
 		ingestIdxOffset:   info.IngestIdxOffset,
@@ -4241,7 +4215,6 @@ func (m *Manager) loadCloudChunksFromStore() error {
 			bytes:       cm.Bytes,
 			diskBytes:   cm.DiskBytes,
 			sealed:      true,
-			compressed:  true,
 			ingestStart: cm.IngestStart,
 			ingestEnd:   cm.IngestEnd,
 			sourceStart: cm.SourceStart,

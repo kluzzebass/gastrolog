@@ -1746,10 +1746,7 @@ func TestDeleteDuringPostSealOtherChunk(t *testing.T) {
 		t.Fatalf("chunk B meta: %v", err)
 	}
 	if !metaB.Sealed {
-		t.Fatal("chunk B should be sealed")
-	}
-	if !metaB.Compressed {
-		t.Fatal("chunk B should be compressed after PostSealProcess")
+		t.Fatal("chunk B should be sealed (gastrolog-24m1t: sealed = data.glcb on disk)")
 	}
 	chunkBDir := filepath.Join(dir, chunkB.String())
 	if _, err := os.Stat(chunkBDir); err != nil {

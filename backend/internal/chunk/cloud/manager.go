@@ -12,11 +12,10 @@ import (
 // Used by the file vault's sealed backing integration.
 func BlobMetaToChunkMeta(id chunk.ChunkID, bm blobstore.BlobInfo) chunk.ChunkMeta {
 	meta := chunk.ChunkMeta{
-		ID:         id,
-		Sealed:     true,
-		Compressed: true,
-		DiskBytes:  bm.Size,
-		Bytes:      bm.Size, // overwritten below if raw_bytes is known
+		ID:        id,
+		Sealed:    true,
+		DiskBytes: bm.Size,
+		Bytes:     bm.Size, // overwritten below if raw_bytes is known
 	}
 	if v, ok := bm.Metadata["raw_bytes"]; ok {
 		n, _ := strconv.ParseInt(v, 10, 64)

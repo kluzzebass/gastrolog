@@ -128,7 +128,6 @@ func chunkMetaToManifestEntry(m chunk.ChunkMeta) tierfsm.ManifestEntry {
 		RecordCount: m.RecordCount,
 		Bytes:       m.Bytes,
 		Sealed:      m.Sealed,
-		Compressed:  m.Compressed,
 		DiskBytes:   m.DiskBytes,
 		IngestStart: m.IngestStart,
 		IngestEnd:   m.IngestEnd,

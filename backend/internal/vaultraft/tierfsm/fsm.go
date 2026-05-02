@@ -69,7 +69,6 @@ type ManifestEntry struct {
 	RecordCount int64
 	Bytes       int64
 	Sealed      bool
-	Compressed  bool
 	DiskBytes   int64
 
 	IngestStart time.Time
@@ -99,7 +98,6 @@ func (e *ManifestEntry) ToChunkMeta() chunk.ChunkMeta {
 		RecordCount: e.RecordCount,
 		Bytes:       e.Bytes,
 		Sealed:      e.Sealed,
-		Compressed:  e.Compressed,
 		DiskBytes:   e.DiskBytes,
 		IngestStart: e.IngestStart,
 		IngestEnd:   e.IngestEnd,
@@ -679,8 +677,11 @@ func (f *FSM) applyCompress(data []byte) error {
 	if e == nil {
 		return fmt.Errorf("compress chunk: %s not found", id)
 	}
+	// Compressed flag is gone (gastrolog-24m1t step 7f) — sealed chunks
+	// are GLCB which is zstd-compressed by construction. CmdCompressChunk
+	// stays as a no-op apply* handler for WAL-replay backward compat;
+	// only DiskBytes still carries useful information.
 	e.DiskBytes = int64(binary.BigEndian.Uint64(data[16:24])) //nolint:gosec // G115: round-trip
-	e.Compressed = true
 	return nil
 }
 
@@ -1046,9 +1047,9 @@ func encodeEntry(w io.Writer, e *ManifestEntry) error {
 	if e.Sealed {
 		flags |= 1 << 0
 	}
-	if e.Compressed {
-		flags |= 1 << 1
-	}
+	// flag bit 1 (formerly Compressed) is reserved — see gastrolog-24m1t
+	// step 7f. Sealed chunks are GLCB which is zstd-compressed by
+	// construction, so the bit is implicit in Sealed.
 	if e.CloudBacked {
 		flags |= 1 << 2
 	}
@@ -1177,9 +1178,9 @@ func readEntriesSection(r io.Reader, payloadLen uint32) ([]ManifestEntry, error)
 			SourceIdxOffset: int64(binary.BigEndian.Uint64(buf[104:112])),              //nolint:gosec // G115: round-trip
 			SourceIdxSize:   int64(binary.BigEndian.Uint64(buf[112:120])),              //nolint:gosec // G115: round-trip
 			NumFrames:       int32(binary.BigEndian.Uint32(buf[120:124])),              //nolint:gosec // G115: round-trip
-			Sealed:             flags&(1<<0) != 0,
-			Compressed:         flags&(1<<1) != 0,
-			CloudBacked:        flags&(1<<2) != 0,
+			Sealed: flags & (1 << 0) != 0,
+			// flag bit 1 reserved (formerly Compressed) — see gastrolog-24m1t step 7f.
+			CloudBacked: flags & (1 << 2) != 0,
 			Archived:           flags&(1<<3) != 0,
 			RetentionPending:   flags&(1<<4) != 0,
 			TransitionStreamed: flags&(1<<5) != 0,

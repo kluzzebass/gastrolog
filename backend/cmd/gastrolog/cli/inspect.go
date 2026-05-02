@@ -313,9 +313,8 @@ func chunkBadges(c *v1.ChunkMeta) string {
 	} else {
 		parts = append(parts, "active")
 	}
-	if c.Compressed {
-		parts = append(parts, "compressed")
-	}
+	// "compressed" badge dropped — sealed chunks are GLCB which is
+	// zstd-compressed by construction (gastrolog-24m1t step 7f).
 	if c.CloudBacked {
 		parts = append(parts, "cloud")
 	}

@@ -46,9 +46,10 @@ func encodeCloudMeta(m *chunkMeta) cloudMetaValue {
 	if m.sealed {
 		flags |= flagSealed
 	}
-	if m.compressed {
-		flags |= flagCompressed
-	}
+	// flagCompressed is reserved (formerly carried the in-place-compressed
+	// state). Sealed chunks are GLCB which is zstd-compressed by
+	// construction, so the bit is implicit in flagSealed. See
+	// gastrolog-24m1t step 7f.
 	if m.archived {
 		flags |= flagArchived
 	}
@@ -74,9 +75,9 @@ func decodeCloudMeta(id chunk.ChunkID, v cloudMetaValue) *chunkMeta {
 		ingestEnd:       time.Unix(0, int64(binary.LittleEndian.Uint64(v[48:56]))),  //nolint:gosec // round-trip
 		sourceStart:     time.Unix(0, int64(binary.LittleEndian.Uint64(v[56:64]))),  //nolint:gosec // round-trip
 		sourceEnd:       time.Unix(0, int64(binary.LittleEndian.Uint64(v[64:72]))),  //nolint:gosec // round-trip
-		sealed:          flags&flagSealed != 0,
-		compressed:      flags&flagCompressed != 0,
-		archived:        flags&flagArchived != 0,
+		sealed: flags&flagSealed != 0,
+		// flagCompressed (1<<1) reserved — see gastrolog-24m1t step 7f.
+		archived: flags&flagArchived != 0,
 		cloudBacked:     true,
 		ingestIdxOffset: int64(binary.LittleEndian.Uint64(v[74:82])),  //nolint:gosec // round-trip
 		ingestIdxSize:   int64(binary.LittleEndian.Uint64(v[82:90])),  //nolint:gosec // round-trip

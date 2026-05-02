@@ -185,18 +185,11 @@ func dedupChunkReports(reports []chunkReport) []*apiv1.ChunkMeta {
 }
 
 // moreAuthoritative reports whether a is a more-advanced view of the same
-// chunk than b. Higher authority = later in the chunk lifecycle.
+// chunk than b. Higher authority = later in the chunk lifecycle. With the
+// Compressed flag merged into Sealed (gastrolog-24m1t step 7f), the only
+// lifecycle transition relevant here is unsealed → sealed.
 func moreAuthoritative(a, b *apiv1.ChunkMeta) bool {
-	if a.Sealed && !b.Sealed {
-		return true
-	}
-	if !a.Sealed && b.Sealed {
-		return false
-	}
-	if a.Compressed && !b.Compressed {
-		return true
-	}
-	return false
+	return a.Sealed && !b.Sealed
 }
 
 // remoteTierNodes returns node IDs of ALL remote nodes that host tiers for a
