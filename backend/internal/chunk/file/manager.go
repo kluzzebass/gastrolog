@@ -3814,18 +3814,33 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		m.writeBlobToCache(id, buf.Bytes())
 	}
 
-	// Take the per-chunk write lock around the file removal AND the
-	// metadata transition so cursors in flight on this chunk drain
-	// before the mmap regions are invalidated. Without this, an
-	// indexer Build pass running concurrently with backfillCloudUploads
-	// SIGBUSes inside DecodeIdxEntry when its idx.log mmap region is
-	// removed mid-Next(). See gastrolog-2owzp (regression of
-	// gastrolog-26zu1's lifecycle lock; the original audit missed this
-	// path because removeLocalDataFiles is buried inside uploadToCloud
-	// rather than gated by a verb that named the chunk).
+	// Take the per-chunk write lock around the FSM announce, the file
+	// removal, AND the metadata transition. Cursors in flight on this
+	// chunk must drain before mmap regions are invalidated. Without
+	// this, an indexer Build pass running concurrently with
+	// backfillCloudUploads SIGBUSes inside DecodeIdxEntry when its
+	// idx.log mmap region is removed mid-Next(). See gastrolog-2owzp.
 	chunkLock := m.chunkLockFor(id)
 	chunkLock.Lock()
 	defer chunkLock.Unlock()
+
+	toc := w.TOC()
+	numFrames := w.NumFrames()
+
+	// FSM-first: announce the upload before any local mutation. Applier.Apply
+	// blocks on quorum + local FSM apply, so once this returns the FSM is
+	// authoritative for "this chunk is cloud-backed". Readers landing between
+	// the announce and the file removal still see consistent state — the FSM
+	// CloudBacked flag flips first, then the local files go. The previous
+	// order had a window where files were gone but the FSM still said local,
+	// producing the L>>count / gap / dip artifacts in histogram.
+	// See gastrolog-35l6a.
+	if m.cfg.Announcer != nil {
+		m.cfg.Announcer.AnnounceUpload(id, blobSize,
+			toc.IngestIdxOffset, toc.IngestIdxSize,
+			toc.SourceIdxOffset, toc.SourceIdxSize,
+			numFrames)
+	}
 
 	// Delete local data files but keep index files for fast queries.
 	if err := m.removeLocalDataFiles(id); err != nil {
@@ -3834,7 +3849,6 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 
 	// Move metadata from in-memory map to cloud B+ tree index.
 	// The chunk is now cloud-only — remove from Go heap.
-	toc := w.TOC()
 	m.mu.Lock()
 	meta := m.metas[id]
 	if meta != nil {
@@ -3844,7 +3858,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		meta.ingestIdxSize = toc.IngestIdxSize
 		meta.sourceIdxOffset = toc.SourceIdxOffset
 		meta.sourceIdxSize = toc.SourceIdxSize
-		meta.numFrames = w.NumFrames()
+		meta.numFrames = numFrames
 		delete(m.metas, id)
 	}
 	m.mu.Unlock()
@@ -3860,13 +3874,6 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		m.mu.Lock()
 		m.cloudListCache = nil // invalidate
 		m.mu.Unlock()
-	}
-
-	if m.cfg.Announcer != nil && meta != nil {
-		m.cfg.Announcer.AnnounceUpload(id, meta.diskBytes,
-			meta.ingestIdxOffset, meta.ingestIdxSize,
-			meta.sourceIdxOffset, meta.sourceIdxSize,
-			meta.numFrames)
 	}
 
 	m.logger.Debug("chunk uploaded to cloud",
@@ -3901,14 +3908,48 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 		return fmt.Errorf("parse TOC from existing blob: %w", err)
 	}
 
-	// Per-chunk write lock around the disk + meta transition; same
-	// rationale as uploadToCloud (gastrolog-2owzp). adoptCloudBlob
-	// fires when another node beat us to the upload — we still
-	// transition the local files to cloud-only state, which is the
-	// same mutation any in-flight cursor needs to be drained against.
+	// Per-chunk write lock around the FSM announce, the disk transition,
+	// and the meta mutation; same rationale as uploadToCloud
+	// (gastrolog-2owzp). adoptCloudBlob fires when another node beat us
+	// to the upload — we still transition local files to cloud-only state,
+	// which is the same mutation any in-flight cursor needs to drain
+	// against.
 	chunkLock := m.chunkLockFor(id)
 	chunkLock.Lock()
 	defer chunkLock.Unlock()
+
+	// Snapshot meta for the announce. If the chunk was already adopted in a
+	// prior cycle (no longer in m.metas), fall back to the cloud index.
+	m.mu.Lock()
+	am := m.metas[id]
+	m.mu.Unlock()
+	if am == nil && m.cloudIdx != nil {
+		m.cloudIdxMu.Lock()
+		am, _ = m.cloudIdx.Lookup(id)
+		m.cloudIdxMu.Unlock()
+	}
+
+	// FSM-first: announce before any local mutation. Applier.Apply blocks on
+	// quorum + local FSM apply, so once the announces return the FSM is
+	// authoritative for "this chunk is cloud-backed". Without this, the FSM
+	// overlay keeps returning CloudBacked=false and the backfill re-adopts on
+	// every cycle (gastrolog-68fqk); also the readers landing between
+	// removeLocalDataFiles and the announce would have observed
+	// "FSM says local, files gone", producing histogram artifacts
+	// (gastrolog-35l6a).
+	//
+	// AnnounceCreate+AnnounceSeal are idempotent fallbacks for the case where
+	// the FSM never saw the create/seal (e.g. follower came up after the
+	// leader had already uploaded). They are scheduled for deletion in
+	// gastrolog-2qaou once we are confident the FSM always has them.
+	if m.cfg.Announcer != nil && am != nil {
+		m.cfg.Announcer.AnnounceCreate(id, am.writeStart, am.ingestStart, am.sourceStart)
+		m.cfg.Announcer.AnnounceSeal(id, am.writeEnd, am.recordCount, am.bytes, am.ingestEnd, am.sourceEnd)
+		m.cfg.Announcer.AnnounceUpload(id, blobSize,
+			toc.IngestIdxOffset, toc.IngestIdxSize,
+			toc.SourceIdxOffset, toc.SourceIdxSize,
+			am.numFrames)
+	}
 
 	// Delete local data files but keep index files for fast queries.
 	if err := m.removeLocalDataFiles(id); err != nil {
@@ -3940,31 +3981,6 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 		m.mu.Lock()
 		m.cloudListCache = nil
 		m.mu.Unlock()
-	}
-
-	// Announce to vault-ctl Raft so all nodes learn this chunk is cloud-backed.
-	// Without this, the FSM overlay keeps returning CloudBacked=false and
-	// the backfill re-adopts on every cycle. See gastrolog-68fqk.
-	//
-	// When meta is nil (chunk already adopted in a prior cycle — no longer
-	// in metas), fall back to the cloud index. The FSM requires a Create
-	// entry before Upload can set CloudBacked, so announce Create+Seal
-	// first (idempotent if already present).
-	if m.cfg.Announcer != nil {
-		am := meta
-		if am == nil && m.cloudIdx != nil {
-			m.cloudIdxMu.Lock()
-			am, _ = m.cloudIdx.Lookup(id)
-			m.cloudIdxMu.Unlock()
-		}
-		if am != nil {
-			m.cfg.Announcer.AnnounceCreate(id, am.writeStart, am.ingestStart, am.sourceStart)
-			m.cfg.Announcer.AnnounceSeal(id, am.writeEnd, am.recordCount, am.bytes, am.ingestEnd, am.sourceEnd)
-			m.cfg.Announcer.AnnounceUpload(id, blobSize,
-				toc.IngestIdxOffset, toc.IngestIdxSize,
-				toc.SourceIdxOffset, toc.SourceIdxSize,
-				am.numFrames)
-		}
 	}
 
 	m.logger.Debug("chunk adopted from cloud",
