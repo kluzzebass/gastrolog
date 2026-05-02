@@ -531,6 +531,13 @@ func timechartChunkGroups(
 		}
 	}
 
+	// Defensive: chunk meta can be transiently inconsistent during a seal /
+	// transition (IngestStart vs IngestEnd applied in separate Raft entries).
+	// A negative-length bucket range would crash makeslice downstream.
+	if firstBucket > lastBucket {
+		return
+	}
+
 	// Non-monotonic chunks (active or sealed): the per-bucket sampler below
 	// reads records in physical (append) order, which is unrelated to the
 	// IngestTS bucket they belong to. Running it for every bucket the chunk
@@ -924,6 +931,9 @@ func chunkBucketTotals(
 	bucketWidth time.Duration,
 	firstBucket, lastBucket int,
 ) []int64 {
+	if lastBucket < firstBucket {
+		return nil
+	}
 	totals := make([]int64, lastBucket-firstBucket+1)
 	if !meta.Sealed {
 		startNanos := start.UnixNano()
