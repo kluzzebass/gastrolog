@@ -37,11 +37,12 @@
 //	  IngestTS Index: [tsNano:i64][pos:u32] × recordCount, sorted by ts
 //	  SourceTS Index: [tsNano:i64][pos:u32] × N (excludes zero-TS records), sorted by ts
 //
-//	TOC entries (56 bytes each, one per section pointed to from the TOC):
-//	    [magic:4]           section type (e.g. "ITSI" for ingest TS index)
-//	    [version:u32]       per-section version
-//	    [offset:u64]        byte offset from blob start
-//	    [size:u64]          byte count
+//	TOC entries (42 bytes each, one per section pointed to from the TOC):
+//	    [type:u8]           section type byte from format.Type
+//	                        (e.g. format.TypeIngestIndex = 'I')
+//	    [version:u8]        per-section version
+//	    [offset:u32]        byte offset from blob start
+//	    [size:u32]          byte count
 //	    [hash:32]           SHA-256 of the section's bytes
 //
 //	TOC footer (44 bytes, at the very end of the blob):
@@ -77,6 +78,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/format"
 )
 
 const (
@@ -93,8 +95,8 @@ const (
 	// TS index entry: [tsNano:i64][pos:u32] = 12 bytes, sorted by TS.
 	tsIndexEntrySize = 12
 
-	// TOC entry: [magic:4][version:u32][offset:u64][size:u64][hash:32].
-	tocEntrySize = 56
+	// TOC entry: [type:u8][version:u8][offset:u32][size:u32][hash:32].
+	tocEntrySize = 42
 
 	// TOC footer: [entryCount:u32][blobDigest:32][footerVersion:u32][magic:4].
 	tocFooterSize = 44
@@ -104,12 +106,22 @@ const (
 	tocFooterVersion = uint32(1)
 )
 
-// Section magics for entries in the TOC. Each magic identifies a kind of
-// section the blob can carry; readers look up entries by magic to find
+// Section type bytes for entries in the TOC. Each type identifies a kind
+// of section the blob can carry; readers look up entries by type to find
 // the section's offset+size+hash without caring about positional order.
+// Reuses format.Type so a section's type byte matches the type byte that
+// would appear in the same kind of standalone file.
 const (
-	SectionIngestTSIndex = "ITSI"
-	SectionSourceTSIndex = "STSI"
+	SectionIngestTSIndex = format.TypeIngestIndex
+	SectionSourceTSIndex = format.TypeSourceIndex
+	SectionTokenIndex    = format.TypeTokenIndex
+	SectionJSONIndex     = format.TypeJSONIndex
+	SectionKVKeyIndex    = format.TypeKVKeyIndex
+	SectionKVValueIndex  = format.TypeKVValueIndex
+	SectionKVKVIndex     = format.TypeKVIndex
+	SectionAttrKeyIndex  = format.TypeAttrKeyIndex
+	SectionAttrValueIndex = format.TypeAttrValueIndex
+	SectionAttrKVIndex   = format.TypeAttrKVIndex
 )
 
 // tsNanos converts a time.Time to nanoseconds, using 0 for the zero value.
@@ -173,11 +185,17 @@ type BlobTOC struct {
 	SourceIdxHash   [32]byte
 }
 
-// TOCEntry describes one section within a GLCB blob: its type (Magic),
-// per-section version, byte range (Offset, Size), and content hash.
+// TOCEntry describes one section within a GLCB blob: its type byte
+// (from format.Type), per-section version, byte range (Offset, Size),
+// and content hash.
+//
+// On disk, Offset and Size are encoded as u32 (a single GLCB blob is
+// bounded well below 4 GB by chunk policy). In memory we keep them as
+// int64 so callers can pass them directly to io.NewSectionReader,
+// f.ReadAt, etc., without per-call conversions.
 type TOCEntry struct {
-	Magic   [4]byte
-	Version uint32
+	Type    byte
+	Version uint8
 	Offset  int64
 	Size    int64
 	Hash    [32]byte
@@ -190,11 +208,11 @@ func (e *TOCEntry) VerifyHash(data []byte) bool {
 	return sha256.Sum256(data) == e.Hash
 }
 
-// Find returns the entry with the given section magic, or false if no
+// Find returns the entry with the given section type, or false if no
 // entry of that kind is present.
-func (t *BlobTOC) Find(magic string) (TOCEntry, bool) {
+func (t *BlobTOC) Find(sectionType byte) (TOCEntry, bool) {
 	for _, e := range t.Entries {
-		if string(e.Magic[:]) == magic {
+		if e.Type == sectionType {
 			return e, true
 		}
 	}

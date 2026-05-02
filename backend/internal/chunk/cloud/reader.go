@@ -205,11 +205,11 @@ func parseTOCRegion(entryBuf, footerBuf []byte) (BlobTOC, error) {
 		off := i * tocEntrySize
 		raw := entryBuf[off : off+tocEntrySize]
 		var e TOCEntry
-		copy(e.Magic[:], raw[0:4])
-		e.Version = binary.LittleEndian.Uint32(raw[4:8])
-		e.Offset = int64(binary.LittleEndian.Uint64(raw[8:16]))  //nolint:gosec // round-trip
-		e.Size = int64(binary.LittleEndian.Uint64(raw[16:24]))   //nolint:gosec // round-trip
-		copy(e.Hash[:], raw[24:56])
+		e.Type = raw[0]
+		e.Version = raw[1]
+		e.Offset = int64(binary.LittleEndian.Uint32(raw[2:6]))
+		e.Size = int64(binary.LittleEndian.Uint32(raw[6:10]))
+		copy(e.Hash[:], raw[10:42])
 		entries[i] = e
 	}
 	toc := BlobTOC{
