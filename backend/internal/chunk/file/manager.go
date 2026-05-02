@@ -3729,6 +3729,23 @@ func (m *Manager) sealToGLCB(id chunk.ChunkID) (*chunkcloud.Writer, int64, error
 		_ = os.Remove(tmpPath)
 		return nil, 0, fmt.Errorf("rename %s → %s: %w", dataGLCBTmpFileName, dataGLCBFileName, err)
 	}
+
+	// Cache the TOC, frame count, and blob size on the chunkMeta so
+	// downstream consumers (uploadToCloud streaming the file directly,
+	// future binary-replication serve path) don't have to re-parse the
+	// blob tail.
+	toc := w.TOC()
+	numFrames := w.NumFrames()
+	m.mu.Lock()
+	if meta := m.metas[id]; meta != nil {
+		meta.ingestIdxOffset = toc.IngestIdxOffset
+		meta.ingestIdxSize = toc.IngestIdxSize
+		meta.sourceIdxOffset = toc.SourceIdxOffset
+		meta.sourceIdxSize = toc.SourceIdxSize
+		meta.numFrames = numFrames
+	}
+	m.mu.Unlock()
+
 	return w, written, nil
 }
 
