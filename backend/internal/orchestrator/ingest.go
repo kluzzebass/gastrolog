@@ -287,25 +287,10 @@ func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager
 		return
 	}
 
-	// Fallback for non-file managers (e.g. memory) — compress only, then replicate.
-	compressor, ok := cm.(chunk.ChunkCompressor)
-	if ok {
-		name := fmt.Sprintf("compress:%s:%s", vaultID, chunkID)
-		wrappedFn := func(id chunk.ChunkID) error {
-			if err := compressor.CompressChunk(id); err != nil {
-				return err
-			}
-			o.NotifyChunkChange()
-			o.scheduleReplication(vaultID, tierID, id, followerTargets)
-			return nil
-		}
-		if err := o.scheduler.RunOnce(name, wrappedFn, chunkID); err != nil {
-			o.logger.Warn("failed to schedule compression", "name", name, "error", err)
-		}
-		return
-	}
-
-	// No post-processing — schedule replication directly.
+	// No post-processing — schedule replication directly. The legacy
+	// ChunkCompressor fallback is gone (gastrolog-24m1t step 7e); only
+	// chunkfile.Manager implemented it, and it now goes through the
+	// PostSealProcess branch above.
 	o.scheduleReplication(vaultID, tierID, chunkID, followerTargets)
 }
 

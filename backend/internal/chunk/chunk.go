@@ -179,20 +179,6 @@ type DirRemover interface {
 	RemoveDir() error
 }
 
-// ChunkCompressor extends ChunkManager with post-seal compression.
-// Not all ChunkManager implementations support this (e.g. memory-based ones
-// have nothing to compress). Callers should type-assert to check availability.
-type ChunkCompressor interface {
-	// CompressChunk compresses the data files of a sealed chunk.
-	// No-op if the chunk is already compressed.
-	CompressChunk(id ChunkID) error
-
-	// RefreshDiskSizes recomputes Bytes and DiskBytes for a sealed chunk
-	// from the actual directory contents. Call after index builds or other
-	// operations that add/remove files in the chunk directory.
-	RefreshDiskSizes(id ChunkID)
-}
-
 // ChunkIndexBuilder builds indexes for a sealed chunk.
 // Implementations are injected into the chunk manager at construction time.
 // The chunk manager calls Build after compression completes.

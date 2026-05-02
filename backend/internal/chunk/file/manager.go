@@ -3067,94 +3067,6 @@ func (m *Manager) deleteInternal(id chunk.ChunkID) error {
 	return nil
 }
 
-// CompressChunk compresses raw.log and attr.log for a sealed chunk using zstd.
-// Returns nil if the chunk is not found or not sealed. No-op if already compressed.
-//
-// Cursor coordination (gastrolog-26zu1): the per-chunk RWMutex is held
-// across the temp-file write and atomic rename so an in-flight cursor's
-// mmap regions can't be invalidated under it. Without this guard, the
-// indexer Build pass1's cursor.Next could SIGBUS when its idx.log mmap
-// page-faults against a now-replaced inode (observed in production on
-// macOS, where mmap'd pages of a renamed file aren't reliably preserved).
-func (m *Manager) CompressChunk(id chunk.ChunkID) error {
-	chunkLock := m.chunkLockFor(id)
-	chunkLock.Lock()
-	defer chunkLock.Unlock()
-
-	m.mu.Lock()
-	if m.closed {
-		m.mu.Unlock()
-		return nil
-	}
-	meta, ok := m.metas[id]
-	if !ok {
-		m.mu.Unlock()
-		return chunk.ErrChunkNotFound
-	}
-	if !meta.sealed || meta.compressed {
-		m.mu.Unlock()
-		return nil
-	}
-	// Mark as compressed BEFORE releasing the lock to prevent a second
-	// concurrent CompressChunk from double-compressing the same files.
-	// If compression fails below, we clear the flag.
-	meta.compressed = true
-	rawPath := m.rawLogPath(id)
-	attrPath := m.attrLogPath(id)
-	mode := m.cfg.FileMode
-	m.mu.Unlock()
-
-	// Serialize encoder access — zstd.Encoder is not safe for concurrent use
-	// via seekable.NewWriter. Multiple PostSealProcess jobs can run concurrently
-	// for different chunks, all sharing m.zstdEnc.
-	m.zstdEncMu.Lock()
-	if err := compressFile(rawPath, m.zstdEnc, mode); err != nil {
-		m.zstdEncMu.Unlock()
-		m.rollbackCompressed(id)
-		return fmt.Errorf("compress raw.log: %w", err)
-	}
-	if err := compressFile(attrPath, m.zstdEnc, mode); err != nil {
-		m.zstdEncMu.Unlock()
-		m.rollbackCompressed(id)
-		return fmt.Errorf("compress attr.log: %w", err)
-	}
-	m.zstdEncMu.Unlock()
-
-	// Update in-memory meta to reflect compressed state and refresh sizes.
-	// Capture the announcement data under the lock, but fire AnnounceCompress
-	// AFTER releasing — same deadlock-avoidance reasoning as Seal/Append.
-	var (
-		ann       chunk.MetadataAnnouncer
-		diskBytes int64
-		announce  bool
-	)
-	m.mu.Lock()
-	if meta := m.metas[id]; meta != nil {
-		// meta.compressed already set above; refresh disk sizes.
-		meta.diskBytes = m.computeDiskBytes(id)
-		if m.cfg.Announcer != nil {
-			ann = m.cfg.Announcer
-			diskBytes = meta.diskBytes
-			announce = true
-		}
-	}
-	m.mu.Unlock()
-
-	if announce {
-		ann.AnnounceCompress(id, diskBytes)
-	}
-	return nil
-}
-
-// rollbackCompressed clears the compressed flag if compression fails partway.
-func (m *Manager) rollbackCompressed(id chunk.ChunkID) {
-	m.mu.Lock()
-	if meta := m.metas[id]; meta != nil {
-		meta.compressed = false
-	}
-	m.mu.Unlock()
-}
-
 // SetIndexBuilders injects index builders into the post-seal pipeline.
 // Must be called before PostSealProcess. Passing nil disables index building.
 func (m *Manager) SetIndexBuilders(builders []chunk.ChunkIndexBuilder) {
@@ -3559,7 +3471,6 @@ func (m *Manager) CheckRotation() *string {
 
 var _ chunk.ChunkManager = (*Manager)(nil)
 var _ chunk.ChunkMover = (*Manager)(nil)
-var _ chunk.ChunkCompressor = (*Manager)(nil)
 
 // ChunkDir returns the filesystem path for a chunk's directory.
 func (m *Manager) ChunkDir(id chunk.ChunkID) string {
