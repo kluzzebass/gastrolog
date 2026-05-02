@@ -1,6 +1,8 @@
 package file
 
 import (
+	"crypto/sha256"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -306,4 +308,185 @@ func TestSealToGLCB_RefusesUnsealedChunk(t *testing.T) {
 	if _, _, err := m.sealToGLCB(id); err == nil {
 		t.Fatal("expected sealToGLCB to fail on unsealed chunk")
 	}
+}
+
+// TestAdoptSealedBlob_RoundTrip writes a real GLCB on a "leader" manager,
+// reads its bytes back as if they came over the wire, hands them to a
+// "follower" manager's AdoptSealedBlob, and verifies the follower ends
+// up with an equivalent sealed chunk and the digests match end to end.
+func TestAdoptSealedBlob_RoundTrip(t *testing.T) {
+	t.Parallel()
+
+	// --- Leader: build a sealed chunk + a real data.glcb file. ---
+	leaderDir := t.TempDir()
+	leader, err := NewManager(Config{Dir: leaderDir})
+	if err != nil {
+		t.Fatalf("new leader: %v", err)
+	}
+	defer func() { _ = leader.Close() }()
+
+	now := time.Now().Truncate(time.Microsecond)
+	const recordCount = 50
+	var chunkID chunk.ChunkID
+	for i := range recordCount {
+		id, _, err := leader.Append(chunk.Record{
+			IngestTS: now.Add(time.Duration(i) * time.Millisecond),
+			Attrs:    chunk.Attributes{"level": "info"},
+			Raw:      []byte("payload"),
+		})
+		if err != nil {
+			t.Fatalf("append: %v", err)
+		}
+		chunkID = id
+	}
+	if err := leader.Seal(); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	if _, _, err := leader.sealToGLCB(chunkID); err != nil {
+		t.Fatalf("sealToGLCB: %v", err)
+	}
+
+	leaderBlobPath := filepath.Join(leader.chunkDir(chunkID), dataGLCBFileName)
+	blobBytes, err := os.ReadFile(filepath.Clean(leaderBlobPath))
+	if err != nil {
+		t.Fatalf("read leader's data.glcb: %v", err)
+	}
+	leaderDigest := sha256Bytes(blobBytes)
+
+	// --- Follower: install the blob via AdoptSealedBlob. ---
+	followerDir := t.TempDir()
+	follower, err := NewManager(Config{Dir: followerDir})
+	if err != nil {
+		t.Fatalf("new follower: %v", err)
+	}
+	defer func() { _ = follower.Close() }()
+
+	digest, err := follower.AdoptSealedBlob(chunkID, int64(len(blobBytes)), bytesReader(blobBytes))
+	if err != nil {
+		t.Fatalf("AdoptSealedBlob: %v", err)
+	}
+	if digest != leaderDigest {
+		t.Errorf("digest mismatch:\n got %x\nwant %x", digest[:], leaderDigest[:])
+	}
+
+	// data.glcb should exist at the canonical path; .tmp should not.
+	followerBlobPath := filepath.Join(follower.chunkDir(chunkID), dataGLCBFileName)
+	if _, err := os.Stat(followerBlobPath); err != nil {
+		t.Fatalf("follower data.glcb missing: %v", err)
+	}
+	if _, err := os.Stat(followerBlobPath + ".tmp"); !os.IsNotExist(err) {
+		t.Errorf("follower data.glcb.tmp should be gone after rename, got err=%v", err)
+	}
+
+	// Bytes on disk must be byte-identical to what the leader had.
+	got, err := os.ReadFile(filepath.Clean(followerBlobPath))
+	if err != nil {
+		t.Fatalf("read follower data.glcb: %v", err)
+	}
+	if sha256Bytes(got) != leaderDigest {
+		t.Errorf("follower's on-disk digest differs from leader's")
+	}
+
+	// Chunk should be queryable on the follower.
+	metas, err := follower.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	var found *chunk.ChunkMeta
+	for i := range metas {
+		if metas[i].ID == chunkID {
+			found = &metas[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("chunk %s not in follower's List", chunkID)
+	}
+	if !found.Sealed {
+		t.Errorf("expected chunk to be sealed on follower")
+	}
+	if found.RecordCount != recordCount {
+		t.Errorf("RecordCount: got %d want %d", found.RecordCount, recordCount)
+	}
+}
+
+// TestAdoptSealedBlob_RejectsDuplicateLocalChunk pins the precondition
+// that AdoptSealedBlob refuses to overwrite an existing local chunk.
+func TestAdoptSealedBlob_RejectsDuplicateLocalChunk(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	m, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	defer func() { _ = m.Close() }()
+
+	id, _, err := m.Append(chunk.Record{
+		IngestTS: time.Now(),
+		Raw:      []byte("p"),
+	})
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := m.Seal(); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	// Pretend a peer is trying to push the same chunk.
+	if _, err := m.AdoptSealedBlob(id, 100, bytesReader([]byte("not used"))); err == nil {
+		t.Fatal("expected error when chunk is already present locally")
+	}
+}
+
+// TestAdoptSealedBlob_RejectsCorruptBlob pins behaviour on bad input:
+// random bytes should fail TOC validation, the .tmp file should be
+// removed, no meta entry should appear.
+func TestAdoptSealedBlob_RejectsCorruptBlob(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	m, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	defer func() { _ = m.Close() }()
+
+	garbage := make([]byte, 1024)
+	for i := range garbage {
+		garbage[i] = byte(i % 256)
+	}
+
+	var id chunk.ChunkID
+	if _, err := m.AdoptSealedBlob(id, int64(len(garbage)), bytesReader(garbage)); err == nil {
+		t.Fatal("expected AdoptSealedBlob to reject random bytes")
+	}
+
+	// .tmp must be cleaned up.
+	tmpPath := filepath.Join(m.chunkDir(id), dataGLCBTmpFileName)
+	if _, err := os.Stat(tmpPath); !os.IsNotExist(err) {
+		t.Errorf("data.glcb.tmp should be removed on failed adopt, got err=%v", err)
+	}
+}
+
+// sha256Bytes is a tiny helper — local to keep the test file self-contained
+// rather than reaching into another package's helper.
+func sha256Bytes(b []byte) [32]byte {
+	return sha256.Sum256(b)
+}
+
+func bytesReader(b []byte) io.Reader {
+	return &slicedReader{p: b}
+}
+
+type slicedReader struct {
+	p   []byte
+	off int
+}
+
+func (r *slicedReader) Read(p []byte) (int, error) {
+	if r.off >= len(r.p) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.p[r.off:])
+	r.off += n
+	return n, nil
 }

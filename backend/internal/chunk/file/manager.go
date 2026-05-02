@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -3731,6 +3732,134 @@ func (m *Manager) sealToGLCB(id chunk.ChunkID) (*chunkcloud.Writer, int64, error
 	m.mu.Unlock()
 
 	return w, written, nil
+}
+
+// AdoptSealedBlob installs a sealed `data.glcb` blob received over the
+// wire (from a peer's ImportBlob RPC) into this manager's chunk dir,
+// then registers the chunk in m.metas so it becomes queryable.
+//
+// Steps:
+//   1. Reject if the manager is closed or the chunk already exists.
+//   2. Write streamed bytes to <chunkDir>/data.glcb.tmp, hashing through
+//      a tee'd SHA-256 for the ack digest.
+//   3. fsync + close. Verify the byte count matches totalSize.
+//   4. Re-open the tmp file via chunkcloud.NewCacheReader to validate
+//      the GLCB structure (header, dict, record index, TOC). Any
+//      structural error here means the leader sent a corrupt or
+//      incomplete blob — remove the tmp and bail.
+//   5. Atomic rename to data.glcb.
+//   6. Register chunkMeta from the GLCB header.
+//
+// Returns the SHA-256 digest computed over all received bytes. The
+// caller (cluster server) round-trips this back to the leader as the
+// ack so end-to-end transmission integrity is verifiable. See
+// gastrolog-3o5b4.
+//
+// On any error after the tmp is created the tmp is removed; the caller
+// can retry without explicit cleanup.
+func (m *Manager) AdoptSealedBlob(id chunk.ChunkID, totalSize int64, body io.Reader) ([32]byte, error) {
+	var zero [32]byte
+
+	if totalSize <= 0 {
+		return zero, fmt.Errorf("AdoptSealedBlob: invalid totalSize %d", totalSize)
+	}
+
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return zero, ErrManagerClosed
+	}
+	if _, exists := m.metas[id]; exists {
+		m.mu.Unlock()
+		return zero, fmt.Errorf("AdoptSealedBlob: chunk %s already present locally", id)
+	}
+	m.mu.Unlock()
+
+	dir := m.chunkDir(id)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return zero, fmt.Errorf("ensure chunk dir: %w", err)
+	}
+	tmpPath := filepath.Join(dir, dataGLCBTmpFileName)
+	finalPath := filepath.Join(dir, dataGLCBFileName)
+
+	// O_EXCL: stale tmp from a prior aborted import surfaces clearly
+	// instead of being silently clobbered.
+	f, err := os.OpenFile(filepath.Clean(tmpPath), os.O_RDWR|os.O_CREATE|os.O_EXCL, m.cfg.FileMode)
+	if err != nil {
+		return zero, fmt.Errorf("create %s: %w", dataGLCBTmpFileName, err)
+	}
+	cleanup := func() {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+	}
+
+	hasher := sha256.New()
+	written, err := io.Copy(io.MultiWriter(f, hasher), body)
+	if err != nil {
+		cleanup()
+		return zero, fmt.Errorf("write blob: %w", err)
+	}
+	if written != totalSize {
+		cleanup()
+		return zero, fmt.Errorf("blob size mismatch: wrote %d bytes, header declared %d", written, totalSize)
+	}
+	if err := f.Sync(); err != nil {
+		cleanup()
+		return zero, fmt.Errorf("fsync: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return zero, fmt.Errorf("close: %w", err)
+	}
+
+	var digest [32]byte
+	copy(digest[:], hasher.Sum(nil))
+
+	// Validate GLCB structure on the tmp file before renaming. NewCacheReader
+	// parses header + dict + recordIndex + TOC; any failure means the bytes
+	// the leader sent aren't a valid GLCB.
+	verifyFile, err := os.Open(filepath.Clean(tmpPath))
+	if err != nil {
+		_ = os.Remove(tmpPath)
+		return zero, fmt.Errorf("reopen for verify: %w", err)
+	}
+	rd, rderr := chunkcloud.NewCacheReader(verifyFile)
+	if rderr != nil {
+		_ = verifyFile.Close()
+		_ = os.Remove(tmpPath)
+		return zero, fmt.Errorf("verify GLCB: %w", rderr)
+	}
+	bm := rd.Meta()
+	_ = rd.Close() // NewCacheReader's Close does NOT remove the file
+
+	if bm.ChunkID != id {
+		_ = os.Remove(tmpPath)
+		return zero, fmt.Errorf("verify GLCB: header chunk_id %s does not match expected %s", bm.ChunkID, id)
+	}
+
+	if err := os.Rename(tmpPath, finalPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return zero, fmt.Errorf("rename %s → %s: %w", dataGLCBTmpFileName, dataGLCBFileName, err)
+	}
+
+	// Register chunk meta. After rename, loadChunkMetaFromGLCB reads
+	// straight off the canonical path.
+	cmeta, err := m.loadChunkMetaFromGLCB(id)
+	if err != nil {
+		// File is on disk under the canonical name but we couldn't load meta —
+		// surface the error; the next startup will pick it up via loadExisting.
+		return digest, fmt.Errorf("load meta after rename: %w", err)
+	}
+	cmeta.diskBytes = totalSize
+
+	m.mu.Lock()
+	m.metas[id] = cmeta
+	m.mu.Unlock()
+
+	m.logger.Debug("AdoptSealedBlob: installed",
+		"chunk", id, "bytes", totalSize, "records", bm.RecordCount)
+
+	return digest, nil
 }
 
 func (m *Manager) uploadToCloud(id chunk.ChunkID) error {

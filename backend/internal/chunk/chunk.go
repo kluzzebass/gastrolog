@@ -7,6 +7,7 @@ package chunk
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"time"
 )
@@ -208,6 +209,23 @@ type ChunkPostSealProcessor interface {
 // uploads that failed when S3 was unreachable. See gastrolog-68fqk.
 type ChunkCloudUploader interface {
 	UploadToCloud(id ChunkID) error
+}
+
+// ChunkBlobImporter extends ChunkManager with the ability to install a
+// sealed `data.glcb` blob received over the wire. Replaces the per-record
+// ImportRecords path for sealed-chunk replication. See gastrolog-3o5b4.
+//
+// AdoptSealedBlob streams body bytes into <chunkDir>/data.glcb.tmp,
+// computes SHA-256 over the bytes, parses the TOC tail to verify the
+// recorded whole-blob digest matches, then atomically renames into
+// place and registers chunk meta from the GLCB header so the chunk
+// becomes queryable on this node.
+//
+// Returns the SHA-256 digest the importer computed (used by the cluster
+// server's ack to round-trip integrity to the leader). On any error the
+// .tmp file is removed; the caller can retry without cleanup steps.
+type ChunkBlobImporter interface {
+	AdoptSealedBlob(id ChunkID, totalSize int64, body io.Reader) ([32]byte, error)
 }
 
 // ChunkArchiver extends ChunkManager with storage-class lifecycle operations
