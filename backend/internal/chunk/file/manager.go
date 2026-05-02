@@ -3224,9 +3224,9 @@ func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
 	// redesign (gastrolog-24m1t step 7c): data.glcb becomes the canonical
 	// sealed-chunk shape, and being byte-identical to what uploadToCloud
 	// would PUT to S3 is what enables binary chunk replication. Until
-	// stage 2b / stage 3 lands, read paths still consume multi-file;
-	// data.glcb is produced for parity-checking and to give the upload
-	// path a ready-made blob to ship.
+	// stage 3b fully retires multi-file generation (test migration
+	// pending), data.glcb is produced for parity-checking and to give
+	// the upload path a ready-made blob to ship.
 	//
 	// Failure here is non-fatal: existing read paths keep working off
 	// multi-file. The next seal cycle (or a manual re-seal) reproduces
@@ -3832,14 +3832,17 @@ func (m *Manager) sealToGLCB(id chunk.ChunkID) (*chunkcloud.Writer, int64, error
 		return nil, 0, fmt.Errorf("rename %s → %s: %w", dataGLCBTmpFileName, dataGLCBFileName, err)
 	}
 
-	// Cache the TOC, frame count, and blob size on the chunkMeta so
-	// downstream consumers (uploadToCloud streaming the file directly,
-	// future binary-replication serve path) don't have to re-parse the
-	// blob tail.
+	// Cache the TOC, frame count, blob size, and compressed flag on the
+	// chunkMeta so downstream consumers don't have to re-parse the blob
+	// tail. data.glcb's record-data section is zstd-compressed by
+	// construction, so compressed=true is semantically correct (the same
+	// flag CompressChunk used to set in the multi-file pipeline; it
+	// drops out entirely in step 7f).
 	toc := w.TOC()
 	numFrames := w.NumFrames()
 	m.mu.Lock()
 	if meta := m.metas[id]; meta != nil {
+		meta.compressed = true
 		meta.ingestIdxOffset = toc.IngestIdxOffset
 		meta.ingestIdxSize = toc.IngestIdxSize
 		meta.sourceIdxOffset = toc.SourceIdxOffset
@@ -3955,10 +3958,16 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 			numFrames)
 	}
 
-	// Delete local data files but keep index files for fast queries.
+	// Delete local data files (multi-file artifacts AND the local data.glcb)
+	// — the cloud blob is now the authoritative copy. Index files are kept
+	// for fast local queries; the optional CacheDir holds the cloud cache.
+	// Without removing data.glcb, the next restart's loadChunkMetaFromGLCB
+	// would re-create a local sealed meta and shadow the cloud-backed
+	// state (lost archived flag, gastrolog-24m1t step 7c stage 3b).
 	if err := m.removeLocalDataFiles(id); err != nil {
 		return fmt.Errorf("remove local data files after cloud upload: %w", err)
 	}
+	_ = os.Remove(filepath.Join(m.chunkDir(id), dataGLCBFileName))
 
 	// Move metadata from in-memory map to cloud B+ tree index.
 	// The chunk is now cloud-only — remove from Go heap.
@@ -4046,10 +4055,12 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 			am.numFrames)
 	}
 
-	// Delete local data files but keep index files for fast queries.
+	// Delete local data files (multi-file + data.glcb) — the cloud blob is
+	// authoritative. See uploadToCloud for the data.glcb-removal rationale.
 	if err := m.removeLocalDataFiles(id); err != nil {
 		return fmt.Errorf("remove local data files after cloud adopt: %w", err)
 	}
+	_ = os.Remove(filepath.Join(m.chunkDir(id), dataGLCBFileName))
 
 	m.mu.Lock()
 	meta := m.metas[id]
