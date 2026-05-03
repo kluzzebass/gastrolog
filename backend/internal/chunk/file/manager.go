@@ -3918,19 +3918,12 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 
 // adoptCloudBlob transitions a local chunk to cloud-backed using an existing
 // S3 blob. Used when another node (typically the leader) already uploaded the
-// same chunk. Reads the GLCB header from S3 to get TOC offsets, then deletes
-// the local copy.
+// same chunk while we were preparing our own upload. The local data.glcb is
+// byte-identical to the cloud blob by construction (sealToGLCB and the cloud
+// writer share the encoder, and the input record set is the same), so the
+// TOC cached on chunkMeta during sealToGLCB matches what's in S3 — no range
+// request needed to read it back. See gastrolog-24m1t step 7i.
 func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
-	key := m.blobKey(id)
-
-	// Read TOC from end of blob to get TS index offsets.
-	tocCtx, tocCancel := context.WithTimeout(context.Background(), cloudDownloadTimeout)
-	toc, err := chunkcloud.DownloadTOC(tocCtx, m.cfg.CloudStore, key, blobSize)
-	tocCancel()
-	if err != nil {
-		return fmt.Errorf("read TOC from existing blob: %w", err)
-	}
-
 	// Per-chunk write lock around the FSM announce, the disk transition,
 	// and the meta mutation; same rationale as uploadToCloud
 	// (gastrolog-2owzp). adoptCloudBlob fires when another node beat us
@@ -3941,8 +3934,9 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 	chunkLock.Lock()
 	defer chunkLock.Unlock()
 
-	// Snapshot meta for the announce. If the chunk was already adopted in a
-	// prior cycle (no longer in m.metas), fall back to the cloud index.
+	// Snapshot the cached TOC + numFrames from the local sealed chunk. If
+	// the chunk was already adopted in a prior cycle (no longer in m.metas),
+	// fall back to the cloud index entry.
 	m.mu.Lock()
 	am := m.metas[id]
 	m.mu.Unlock()
@@ -3951,6 +3945,14 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 		am, _ = m.cloudIdx.Lookup(id)
 		m.cloudIdxMu.Unlock()
 	}
+	if am == nil {
+		return fmt.Errorf("adopt cloud blob: no local meta for %s", id)
+	}
+	ingestIdxOff := am.ingestIdxOffset
+	ingestIdxSize := am.ingestIdxSize
+	sourceIdxOff := am.sourceIdxOffset
+	sourceIdxSize := am.sourceIdxSize
+	numFrames := am.numFrames
 
 	// FSM-first: announce before any local mutation. Applier.Apply blocks on
 	// quorum + local FSM apply, so once the announce returns the FSM is
@@ -3959,11 +3961,11 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 	// every cycle (gastrolog-68fqk); readers landing between removeLocalDataFiles
 	// and the announce would have observed "FSM says local, files gone",
 	// producing histogram artifacts (gastrolog-35l6a).
-	if m.cfg.Announcer != nil && am != nil {
+	if m.cfg.Announcer != nil {
 		m.cfg.Announcer.AnnounceUpload(id, blobSize,
-			toc.IngestIdxOffset, toc.IngestIdxSize,
-			toc.SourceIdxOffset, toc.SourceIdxSize,
-			am.numFrames)
+			ingestIdxOff, ingestIdxSize,
+			sourceIdxOff, sourceIdxSize,
+			numFrames)
 	}
 
 	// Delete local data files (multi-file + data.glcb) — the cloud blob is
@@ -3978,10 +3980,10 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 	if meta != nil {
 		meta.cloudBacked = true
 		meta.diskBytes = blobSize
-		meta.ingestIdxOffset = toc.IngestIdxOffset
-		meta.ingestIdxSize = toc.IngestIdxSize
-		meta.sourceIdxOffset = toc.SourceIdxOffset
-		meta.sourceIdxSize = toc.SourceIdxSize
+		meta.ingestIdxOffset = ingestIdxOff
+		meta.ingestIdxSize = ingestIdxSize
+		meta.sourceIdxOffset = sourceIdxOff
+		meta.sourceIdxSize = sourceIdxSize
 		delete(m.metas, id)
 	}
 	m.mu.Unlock()
