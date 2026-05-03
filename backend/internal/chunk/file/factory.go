@@ -12,6 +12,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	chunkcloud "gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/system"
 )
 
 // Factory parameter keys.
@@ -89,9 +90,25 @@ func NewFactory() chunk.ManagerFactory {
 			cfg.CloudServiceID = csID
 		}
 
-		// cache_dir / cache_eviction / cache_budget / cache_ttl: silently
-		// ignored. Step 7k collapsed the separate CacheDir into <chunkDir>/
-		// data.glcb. Eviction lives on its own follow-up issue.
+		// cache_dir is silently ignored — step 7k made <chunkDir>/data.glcb
+		// the warm cache so a separate cache directory is no longer
+		// meaningful.
+		// cache_eviction is silently ignored — both policies (LRU + TTL)
+		// are always available and configured by their value fields below.
+		if v := params["cache_budget"]; v != "" {
+			parsed, err := system.ParseSize(v)
+			if err != nil {
+				return nil, fmt.Errorf("invalid cache_budget: %w", err)
+			}
+			cfg.CacheBudgetBytes = parsed
+		}
+		if v := params["cache_ttl"]; v != "" {
+			parsed, err := system.ParseDuration(v)
+			if err != nil {
+				return nil, fmt.Errorf("invalid cache_ttl: %w", err)
+			}
+			cfg.CacheTTL = parsed
+		}
 
 		return NewManager(cfg)
 	}

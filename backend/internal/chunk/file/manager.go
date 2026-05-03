@@ -126,6 +126,17 @@ type Config struct {
 	// share the leader's S3 bucket for reads without owning the blobs.
 	CloudReadOnly bool
 
+	// CacheBudgetBytes is the soft cap on total bytes occupied by warm-cache
+	// copies of cloud-backed chunks (<chunkDir>/data.glcb). Zero disables
+	// LRU-by-budget eviction. Enforced by EvictCacheLRU which the
+	// orchestrator runs on a schedule. See gastrolog-2idw8.
+	CacheBudgetBytes uint64
+
+	// CacheTTL is the maximum age (since last OpenCursor) of a warm-cache
+	// entry before it gets evicted. Zero disables TTL eviction. Local-only
+	// sealed chunks are never affected — their data.glcb is authoritative.
+	CacheTTL time.Duration
+
 	// Announcer, when non-nil, is called after each metadata state change
 	// (create, seal, compress, upload, delete) for cluster-wide visibility.
 	Announcer chunk.MetadataAnnouncer
@@ -189,6 +200,15 @@ type Manager struct {
 	// → ErrChunkNotFound at the meta-lookup step in OpenCursor).
 	chunkLocksMu sync.Mutex
 	chunkLocks   map[chunk.ChunkID]*sync.RWMutex
+
+	// lastAccess records the most recent OpenCursor time for each
+	// cloud-backed chunk's local data.glcb cache. Used by EvictCacheLRU to
+	// pick the coldest entries when the cache exceeds its budget. In-memory
+	// only — never persisted; eviction signals don't outlive the process,
+	// per the chunk-redesign doc's "cache eviction signals are node-local,
+	// not FSM state" rule. See gastrolog-2idw8.
+	lastAccessMu sync.Mutex
+	lastAccess   map[chunk.ChunkID]time.Time
 
 	// cloudDegraded tracks whether the cloud store is currently unreachable.
 	// Set on any failed cloud operation (init, upload, download, list);
@@ -391,6 +411,7 @@ func NewManager(cfg Config) (*Manager, error) {
 		storageClasses: make(map[chunk.ChunkID]string),
 		zstdEnc:        zstdEnc,
 		chunkLocks:     make(map[chunk.ChunkID]*sync.RWMutex),
+		lastAccess:     make(map[chunk.ChunkID]time.Time),
 		logger:         logger,
 	}
 	if err := manager.loadExisting(); err != nil {
@@ -800,13 +821,21 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 		// surfaces ErrChunkArchived from the backing store.
 		if !archived && m.hasLocalGLCB(id) {
 			if cursor, err := m.openLocalGLCBCursor(id); err == nil {
+				m.touchLastAccess(id)
 				return cursor, nil
 			}
 		}
 		// Cloud-backed cursors don't touch local mmap regions; the
 		// per-chunk lifetime lock is unnecessary for them. Their lifecycle
 		// is handled by the cloud index's own concurrency primitives.
-		return m.openCloudCursor(id)
+		// downloadCloudBlobToChunkDir populates the warm cache as a
+		// side-effect; touch lastAccess once the cursor returns so the
+		// freshly-cached chunk doesn't immediately register as cold.
+		cursor, err := m.openCloudCursor(id)
+		if err == nil && m.hasLocalGLCB(id) {
+			m.touchLastAccess(id)
+		}
+		return cursor, err
 	}
 
 	// Prefer data.glcb when present. After PostSealProcess (post-seal
@@ -3074,6 +3103,166 @@ func (m *Manager) openLocalGLCBCursor(id chunk.ChunkID) (chunk.RecordCursor, err
 func (m *Manager) hasLocalGLCB(id chunk.ChunkID) bool {
 	_, err := os.Stat(filepath.Join(m.chunkDir(id), dataGLCBFileName))
 	return err == nil
+}
+
+// touchLastAccess records that the warm cache for this chunk was just hit
+// (or just populated). The lastAccess map is consulted by EvictCacheLRU to
+// pick the coldest entries when the cache exceeds its budget. Map is
+// in-memory only — never persisted; eviction signals don't outlive the
+// process. See gastrolog-2idw8.
+func (m *Manager) touchLastAccess(id chunk.ChunkID) {
+	m.lastAccessMu.Lock()
+	m.lastAccess[id] = m.cfg.Now()
+	m.lastAccessMu.Unlock()
+}
+
+// EvictCacheLRU deletes warm-cache copies (<chunkDir>/data.glcb) of
+// cloud-backed chunks until the total cache size is at or below
+// budgetBytes. Coldest-first: chunks with the oldest lastAccess timestamp
+// (or no recorded access since startup) are evicted first. Local-only
+// sealed chunks are never touched — their data.glcb is the authoritative
+// copy, not a cache.
+//
+// Returns the number of chunks evicted and the total bytes freed.
+// gastrolog-2idw8.
+func (m *Manager) EvictCacheLRU(budgetBytes uint64) (int, int64) {
+	candidates := m.cacheCandidates()
+	if len(candidates) == 0 {
+		return 0, 0
+	}
+
+	var total int64
+	for _, c := range candidates {
+		total += c.size
+	}
+	if total <= int64(budgetBytes) { //nolint:gosec // G115: budget round-trip
+		return 0, 0
+	}
+
+	// Sort coldest-first so the oldest accesses go first. A zero/missing
+	// lastAccess (chunk seen on disk but never opened in this process) ranks
+	// as oldest possible — those are the most evictable.
+	slices.SortFunc(candidates, func(a, b cacheEntry) int {
+		return a.lastAccess.Compare(b.lastAccess)
+	})
+
+	var evicted int
+	var freed int64
+	for _, c := range candidates {
+		if total <= int64(budgetBytes) { //nolint:gosec // G115
+			break
+		}
+		if err := os.Remove(c.path); err != nil {
+			m.logger.Debug("cache eviction: remove failed", "chunk", c.id, "error", err)
+			continue
+		}
+		m.lastAccessMu.Lock()
+		delete(m.lastAccess, c.id)
+		m.lastAccessMu.Unlock()
+		total -= c.size
+		freed += c.size
+		evicted++
+	}
+	if evicted > 0 {
+		m.logger.Info("cache eviction (LRU)",
+			"evicted", evicted, "freed_bytes", freed, "budget", budgetBytes)
+	}
+	return evicted, freed
+}
+
+// EvictCacheTTL deletes warm-cache copies whose lastAccess is older than
+// the given TTL. Local-only sealed chunks are never touched. Use alongside
+// EvictCacheLRU when the operator wants both age- and size-based eviction.
+// gastrolog-2idw8.
+func (m *Manager) EvictCacheTTL(ttl time.Duration) (int, int64) {
+	if ttl <= 0 {
+		return 0, 0
+	}
+	candidates := m.cacheCandidates()
+	cutoff := m.cfg.Now().Add(-ttl)
+
+	var evicted int
+	var freed int64
+	for _, c := range candidates {
+		if c.lastAccess.After(cutoff) {
+			continue
+		}
+		if err := os.Remove(c.path); err != nil {
+			m.logger.Debug("cache eviction: remove failed", "chunk", c.id, "error", err)
+			continue
+		}
+		m.lastAccessMu.Lock()
+		delete(m.lastAccess, c.id)
+		m.lastAccessMu.Unlock()
+		freed += c.size
+		evicted++
+	}
+	if evicted > 0 {
+		m.logger.Info("cache eviction (TTL)",
+			"evicted", evicted, "freed_bytes", freed, "ttl", ttl)
+	}
+	return evicted, freed
+}
+
+// EvictCache runs whichever eviction policies are configured: TTL first
+// (drops anything older than CacheTTL), then LRU (caps total cache bytes
+// at CacheBudgetBytes). Safe to call at any cadence — eviction is
+// node-local and never persisted, so missing a sweep just means the cache
+// runs slightly hotter until the next call. Both zero values are no-ops.
+func (m *Manager) EvictCache() (int, int64) {
+	var totalEvicted int
+	var totalFreed int64
+	if m.cfg.CacheTTL > 0 {
+		ev, fr := m.EvictCacheTTL(m.cfg.CacheTTL)
+		totalEvicted += ev
+		totalFreed += fr
+	}
+	if m.cfg.CacheBudgetBytes > 0 {
+		ev, fr := m.EvictCacheLRU(m.cfg.CacheBudgetBytes)
+		totalEvicted += ev
+		totalFreed += fr
+	}
+	return totalEvicted, totalFreed
+}
+
+// cacheEntry is one row in the eviction-candidate set: a chunk whose
+// data.glcb is local-but-not-authoritative (cloud-backed).
+type cacheEntry struct {
+	id         chunk.ChunkID
+	path       string
+	size       int64
+	lastAccess time.Time
+}
+
+// cacheCandidates walks the cloud index and returns one entry per
+// cloud-backed chunk whose <chunkDir>/data.glcb still exists locally.
+// Local-only sealed chunks are NOT eviction candidates — their data.glcb
+// is the authoritative copy and removing it would lose data.
+func (m *Manager) cacheCandidates() []cacheEntry {
+	if m.cloudIdx == nil {
+		return nil
+	}
+	var out []cacheEntry
+	m.cloudIdxMu.Lock()
+	_ = m.cloudIdx.ForEach(func(id chunk.ChunkID, _ *chunkMeta) bool {
+		path := filepath.Join(m.chunkDir(id), dataGLCBFileName)
+		info, err := os.Stat(path)
+		if err != nil {
+			return true
+		}
+		m.lastAccessMu.Lock()
+		la := m.lastAccess[id]
+		m.lastAccessMu.Unlock()
+		out = append(out, cacheEntry{
+			id:         id,
+			path:       path,
+			size:       info.Size(),
+			lastAccess: la,
+		})
+		return true
+	})
+	m.cloudIdxMu.Unlock()
+	return out
 }
 
 // downloadCloudBlobToChunkDir streams the cloud blob for a chunk into

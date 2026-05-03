@@ -585,6 +585,14 @@ func New(cfg Config) (*Orchestrator, error) {
 		return nil, fmt.Errorf("tier catchup sweep: %w", err)
 	}
 
+	// Warm-cache eviction sweep: every minute (second 23, phase-offset
+	// from the other sweeps) walk every leader tier and apply whatever
+	// LRU + TTL policies its chunk manager was configured with. No-op for
+	// managers without an eviction policy. See gastrolog-2idw8.
+	if err := o.startCacheEvictionSweep(); err != nil {
+		return nil, fmt.Errorf("cache eviction sweep: %w", err)
+	}
+
 	return o, nil
 }
 
