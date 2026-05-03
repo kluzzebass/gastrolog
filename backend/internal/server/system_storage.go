@@ -162,11 +162,14 @@ func (s *SystemServer) PutTier(
 	// Validate tier type.
 	tierType := convert.TierTypeFromProto(req.Msg.Config.Type)
 	if tierType == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("type must be memory, file, cloud, or jsonl"))
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("type must be memory, file, or jsonl"))
 	}
 
-	// For cloud tiers, validate required fields.
-	if tierType == system.TierTypeCloud {
+	// Cloud-backed tiers (file tier with cloud_service_id set) need extra
+	// validation. The legacy TIER_TYPE_CLOUD wire value is normalized to
+	// TIER_TYPE_FILE by TierTypeFromProto; cloud-ness is signaled by the
+	// presence of cloud_service_id (gastrolog-4k5mg).
+	if tierType == system.TierTypeFile && len(req.Msg.Config.CloudServiceId) > 0 {
 		if connErr := s.validateCloudTierFields(ctx, req.Msg.Config); connErr != nil {
 			return nil, connErr
 		}
@@ -329,20 +332,17 @@ func (s *SystemServer) countEligibleStorages(ctx context.Context, tierType syste
 	case system.TierTypeJSONL:
 		return 1, nil // JSONL tiers are pinned to a single node
 	case system.TierTypeFile:
-		count := 0
-		for _, nsc := range nscs {
-			for _, fs := range nsc.FileStorages {
-				if fs.StorageClass == p.StorageClass {
-					count++
-				}
-			}
+		// Cloud-backed file tiers (cloud_service_id set) match
+		// active_chunk_class; plain file tiers match storage_class.
+		// gastrolog-4k5mg.
+		requiredClass := p.GetStorageClass()
+		if len(p.GetCloudServiceId()) > 0 {
+			requiredClass = p.GetActiveChunkClass()
 		}
-		return count, nil
-	case system.TierTypeCloud:
 		count := 0
 		for _, nsc := range nscs {
 			for _, fs := range nsc.FileStorages {
-				if fs.StorageClass == p.ActiveChunkClass {
+				if fs.StorageClass == requiredClass {
 					count++
 				}
 			}

@@ -473,8 +473,6 @@ func tierTypeToProto(t system.TierType) apiv1.TierType {
 		return apiv1.TierType_TIER_TYPE_MEMORY
 	case system.TierTypeFile:
 		return apiv1.TierType_TIER_TYPE_FILE
-	case system.TierTypeCloud:
-		return apiv1.TierType_TIER_TYPE_CLOUD
 	case system.TierTypeJSONL:
 		return apiv1.TierType_TIER_TYPE_JSONL
 	default:
