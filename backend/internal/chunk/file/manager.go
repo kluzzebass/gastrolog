@@ -1,7 +1,6 @@
 package file
 
 import (
-	"bytes"
 	"cmp"
 	"context"
 	"encoding/binary"
@@ -266,6 +265,13 @@ type chunkMeta struct {
 	sourceIdxSize   int64
 
 	numFrames int32 // seekable zstd frame count (cloud chunks only)
+
+	// rawBytes is the uncompressed record-data size (sum of frame lengths)
+	// captured at sealToGLCB time. Distinct from logicalDataBytes which on
+	// the legacy multi-file path summed raw + attr + idx — different meaning.
+	// Used by uploadToCloud to populate cloud BlobMeta.RawBytes without
+	// re-parsing the seekable record body. See gastrolog-24m1t step 7h.
+	rawBytes int64
 }
 
 func (m *chunkMeta) toChunkMeta() chunk.ChunkMeta {
@@ -3167,9 +3173,11 @@ func (m *Manager) cachePath(id chunk.ChunkID) string {
 	return filepath.Join(m.cfg.CacheDir, id.String()+".glcb")
 }
 
-// writeBlobToCache atomically writes a GLCB blob to the cache directory.
-// Errors are logged and swallowed — cache writes are best-effort.
-func (m *Manager) writeBlobToCache(id chunk.ChunkID, data []byte) {
+// writeBlobToCache streams a GLCB blob into the cache directory atomically.
+// Errors are logged and swallowed — cache writes are best-effort. Streaming
+// avoids slurping the entire blob into the heap; the caller owns src and is
+// responsible for closing it.
+func (m *Manager) writeBlobToCache(id chunk.ChunkID, src io.Reader) {
 	if err := os.MkdirAll(m.cfg.CacheDir, 0o750); err != nil {
 		m.logger.Warn("cache: failed to create dir", "error", err)
 		return
@@ -3180,7 +3188,8 @@ func (m *Manager) writeBlobToCache(id chunk.ChunkID, data []byte) {
 		return
 	}
 	tmpPath := filepath.Clean(tmp.Name())
-	if _, err := tmp.Write(data); err != nil {
+	n, err := io.Copy(tmp, src)
+	if err != nil {
 		_ = tmp.Close()
 		_ = os.Remove(tmpPath) //nolint:gosec // G703: tmpPath is from os.CreateTemp in CacheDir
 		m.logger.Warn("cache: failed to write blob", "chunk", id, "error", err)
@@ -3192,7 +3201,7 @@ func (m *Manager) writeBlobToCache(id chunk.ChunkID, data []byte) {
 		m.logger.Warn("cache: failed to rename blob", "chunk", id, "error", err)
 		return
 	}
-	m.logger.Debug("cache: wrote GLCB blob", "chunk", id, "bytes", len(data))
+	m.logger.Debug("cache: wrote GLCB blob", "chunk", id, "bytes", n)
 }
 
 // openCachedCursor opens a cloud chunk from the local cache directory.
@@ -3720,6 +3729,7 @@ func (m *Manager) sealToGLCB(id chunk.ChunkID) (*chunkcloud.Writer, int64, error
 	// drops out entirely in step 7f).
 	toc := w.TOC()
 	numFrames := w.NumFrames()
+	bm := w.Meta()
 	m.mu.Lock()
 	if meta := m.metas[id]; meta != nil {
 		meta.ingestIdxOffset = toc.IngestIdxOffset
@@ -3727,6 +3737,7 @@ func (m *Manager) sealToGLCB(id chunk.ChunkID) (*chunkcloud.Writer, int64, error
 		meta.sourceIdxOffset = toc.SourceIdxOffset
 		meta.sourceIdxSize = toc.SourceIdxSize
 		meta.numFrames = numFrames
+		meta.rawBytes = bm.RawBytes
 	}
 	m.mu.Unlock()
 
@@ -3736,15 +3747,49 @@ func (m *Manager) sealToGLCB(id chunk.ChunkID) (*chunkcloud.Writer, int64, error
 func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	key := m.blobKey(id)
 
-	// Close() nils zstdEnc after postSealWg drains; cloud backfill jobs can
-	// still fire from the scheduler while a tier is being torn down (e.g.
-	// replication-factor placement churn). Without this guard, NewWriter
-	// receives a nil *zstd.Encoder and panics inside klauspost/zstd.
+	// Snapshot the BlobMeta + cached TOC under the manager lock. After step
+	// 7c the local data.glcb is byte-identical to what NewWriter would emit
+	// (sealToGLCB and the cloud writer share the encoder), so streaming the
+	// file straight to S3 replaces the legacy cursor → NewWriter → buf →
+	// upload dance — saving one full encode pass and keeping the compressed
+	// bytes off the heap. See gastrolog-24m1t step 7h.
 	m.mu.Lock()
-	if m.closed || m.zstdEnc == nil {
+	if m.closed {
 		m.mu.Unlock()
 		return ErrManagerClosed
 	}
+	meta := m.metas[id]
+	if meta == nil {
+		m.mu.Unlock()
+		return chunk.ErrChunkNotFound
+	}
+	if !meta.sealed {
+		m.mu.Unlock()
+		return chunk.ErrChunkNotSealed
+	}
+	bm := chunkcloud.BlobMeta{
+		ChunkID:         id,
+		VaultID:         m.cfg.VaultID,
+		RecordCount:     uint32(meta.recordCount), //nolint:gosec // G115: sealed chunk record count fits in uint32 by rotation policy
+		RawBytes:        meta.rawBytes,
+		WriteStart:      meta.writeStart,
+		WriteEnd:        meta.writeEnd,
+		IngestStart:     meta.ingestStart,
+		IngestEnd:       meta.ingestEnd,
+		SourceStart:     meta.sourceStart,
+		SourceEnd:       meta.sourceEnd,
+		IngestIdxOffset: meta.ingestIdxOffset,
+		IngestIdxSize:   meta.ingestIdxSize,
+		SourceIdxOffset: meta.sourceIdxOffset,
+		SourceIdxSize:   meta.sourceIdxSize,
+	}
+	toc := chunkcloud.BlobTOC{
+		IngestIdxOffset: meta.ingestIdxOffset,
+		IngestIdxSize:   meta.ingestIdxSize,
+		SourceIdxOffset: meta.sourceIdxOffset,
+		SourceIdxSize:   meta.sourceIdxSize,
+	}
+	numFrames := meta.numFrames
 	m.mu.Unlock()
 
 	// If the blob already exists (leader or another replica uploaded first),
@@ -3760,53 +3805,43 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		return m.adoptCloudBlob(id, existing.Size)
 	}
 
-	// Open a cursor on the local sealed chunk to read all records.
-	cursor, err := m.OpenCursor(id)
+	glcbPath := filepath.Join(m.chunkDir(id), dataGLCBFileName)
+
+	statInfo, err := os.Stat(filepath.Clean(glcbPath))
 	if err != nil {
-		return fmt.Errorf("open cursor for cloud upload: %w", err)
+		return fmt.Errorf("stat data.glcb: %w", err)
 	}
+	blobSize := statInfo.Size()
 
-	w := chunkcloud.NewWriter(id, m.cfg.VaultID, m.zstdEnc)
-	for {
-		rec, _, recErr := cursor.Next()
-		if errors.Is(recErr, chunk.ErrNoMoreRecords) {
-			break
-		}
-		if recErr != nil {
-			_ = cursor.Close()
-			return fmt.Errorf("read record for cloud upload: %w", recErr)
-		}
-		if err := w.Add(rec); err != nil {
-			_ = cursor.Close()
-			return fmt.Errorf("add record to GLCB writer: %w", err)
-		}
+	uploadFile, err := os.Open(filepath.Clean(glcbPath))
+	if err != nil {
+		return fmt.Errorf("open data.glcb for upload: %w", err)
 	}
-	_ = cursor.Close()
-
-	var buf bytes.Buffer
-	if _, err := w.WriteTo(&buf); err != nil {
-		return fmt.Errorf("compress GLCB: %w", err)
-	}
-
-	bm := w.Meta()
 	uploadCtx, uploadCancel := context.WithTimeout(context.Background(), cloudUploadTimeout)
 	err = m.cfg.CloudStore.Upload(
 		uploadCtx,
 		key,
-		bytes.NewReader(buf.Bytes()),
+		uploadFile,
 		chunkcloud.ObjectMetadata(bm),
 	)
 	uploadCancel()
+	_ = uploadFile.Close()
 	m.trackCloudResult(err)
 	if err != nil {
 		return fmt.Errorf("upload GLCB: %w", err)
 	}
 
-	blobSize := int64(buf.Len())
-
-	// Write GLCB blob to local cache (best-effort).
+	// Mirror the just-uploaded blob into the warm cache (best-effort).
+	// Streamed from disk so we never materialize the compressed bytes on
+	// the heap. The whole CacheDir machinery dies in step 7j when the local
+	// data.glcb itself becomes the cache.
 	if m.cfg.CacheDir != "" {
-		m.writeBlobToCache(id, buf.Bytes())
+		if cacheSrc, cerr := os.Open(filepath.Clean(glcbPath)); cerr == nil {
+			m.writeBlobToCache(id, cacheSrc)
+			_ = cacheSrc.Close()
+		} else {
+			m.logger.Warn("cache: failed to reopen blob for cache copy", "chunk", id, "error", cerr)
+		}
 	}
 
 	// Take the per-chunk write lock around the FSM announce, the file
@@ -3818,9 +3853,6 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	chunkLock := m.chunkLockFor(id)
 	chunkLock.Lock()
 	defer chunkLock.Unlock()
-
-	toc := w.TOC()
-	numFrames := w.NumFrames()
 
 	// FSM-first: announce the upload before any local mutation. Applier.Apply
 	// blocks on quorum + local FSM apply, so once this returns the FSM is
@@ -3851,7 +3883,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	// Move metadata from in-memory map to cloud B+ tree index.
 	// The chunk is now cloud-only — remove from Go heap.
 	m.mu.Lock()
-	meta := m.metas[id]
+	meta = m.metas[id]
 	if meta != nil {
 		meta.cloudBacked = true
 		meta.diskBytes = blobSize
