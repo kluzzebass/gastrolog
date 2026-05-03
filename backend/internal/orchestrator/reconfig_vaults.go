@@ -1463,8 +1463,6 @@ func mapTierTypeToFactory(t system.TierType) string {
 		return "memory"
 	case system.TierTypeFile:
 		return "file"
-	case system.TierTypeCloud:
-		return "file"
 	case system.TierTypeJSONL:
 		return "jsonl"
 	default:
@@ -1473,8 +1471,7 @@ func mapTierTypeToFactory(t system.TierType) string {
 }
 
 // buildTierParams builds a params map from a TierConfig suitable for factory consumption.
-func buildTierParams(sys *system.System, vaultCfg system.VaultConfig, tierCfg system.TierConfig, localNodeID string) map[string]string { //nolint:gocognit // flat type-switch mapping
-	cfg := &sys.Config
+func buildTierParams(sys *system.System, vaultCfg system.VaultConfig, tierCfg system.TierConfig, localNodeID string) map[string]string {
 	rt := &sys.Runtime
 	params := make(map[string]string)
 
@@ -1485,7 +1482,12 @@ func buildTierParams(sys *system.System, vaultCfg system.VaultConfig, tierCfg sy
 		}
 
 	case system.TierTypeFile:
-		if fs := findLocalFileStorage(rt, localNodeID, tierCfg.StorageClass); fs != nil {
+		dirClass := tierCfg.StorageClass
+		if tierCfg.IsCloud() {
+			dirClass = tierCfg.ActiveChunkClass
+			addCloudParams(params, &sys.Config, tierCfg)
+		}
+		if fs := findLocalFileStorage(rt, localNodeID, dirClass); fs != nil {
 			params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), tierCfg.ID.String())
 		}
 
@@ -1496,47 +1498,33 @@ func buildTierParams(sys *system.System, vaultCfg system.VaultConfig, tierCfg sy
 			// Default: jsonl/<vault-id>/<tier-id>.jsonl
 			params["path"] = filepath.Join("jsonl", vaultCfg.ID.String(), tierCfg.ID.String()+".jsonl")
 		}
-
-	case system.TierTypeCloud:
-		if tierCfg.CloudServiceID != nil { //nolint:nestif // cloud params resolution
-			cs := findCloudService(cfg, *tierCfg.CloudServiceID)
-			if cs != nil {
-				params["sealed_backing"] = cs.Provider
-				params["bucket"] = cs.Bucket
-				if cs.Region != "" {
-					params["region"] = cs.Region
-				}
-				if cs.Endpoint != "" {
-					params["endpoint"] = cs.Endpoint
-				}
-				if cs.AccessKey != "" {
-					params["access_key"] = cs.AccessKey
-				}
-				if cs.SecretKey != "" {
-					params["secret_key"] = cs.SecretKey
-				}
-			}
-		}
-		// Cloud tiers also need a local file storage for active chunks.
-		if fs := findLocalFileStorage(rt, localNodeID, tierCfg.ActiveChunkClass); fs != nil {
-			params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), tierCfg.ID.String())
-		}
-		// Cache directory for locally-cached GLCB blobs (avoids cloud range requests).
-		if fs := findLocalFileStorage(rt, localNodeID, tierCfg.CacheClass); fs != nil {
-			params["cache_dir"] = filepath.Join(fs.Path, "cache", vaultCfg.ID.String(), tierCfg.ID.String())
-		}
-		if tierCfg.CacheEviction != "" {
-			params["cache_eviction"] = tierCfg.CacheEviction
-		}
-		if tierCfg.CacheBudget != "" {
-			params["cache_budget"] = tierCfg.CacheBudget
-		}
-		if tierCfg.CacheTTL != "" {
-			params["cache_ttl"] = tierCfg.CacheTTL
-		}
 	}
 
 	return params
+}
+
+// addCloudParams writes cloud-store credentials + bucket info into params
+// for a cloud-backed file tier. No-op if the referenced cloud service is
+// missing — the chunk manager will start without a CloudStore wired.
+func addCloudParams(params map[string]string, cfg *system.Config, tierCfg system.TierConfig) {
+	cs := findCloudService(cfg, *tierCfg.CloudServiceID)
+	if cs == nil {
+		return
+	}
+	params["sealed_backing"] = cs.Provider
+	params["bucket"] = cs.Bucket
+	if cs.Region != "" {
+		params["region"] = cs.Region
+	}
+	if cs.Endpoint != "" {
+		params["endpoint"] = cs.Endpoint
+	}
+	if cs.AccessKey != "" {
+		params["access_key"] = cs.AccessKey
+	}
+	if cs.SecretKey != "" {
+		params["secret_key"] = cs.SecretKey
+	}
 }
 
 // findLocalFileStorage finds a FileStorage on the given node with the given storage class.

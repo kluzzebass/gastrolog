@@ -461,7 +461,7 @@ func (pm *placementManager) eligibleStorages(tier system.TierConfig, alive map[s
 	}
 
 	sc := tier.StorageClass
-	if tier.Type == system.TierTypeCloud {
+	if tier.IsCloud() {
 		sc = tier.ActiveChunkClass
 	}
 	for _, nsc := range nscs {
@@ -483,7 +483,7 @@ func (pm *placementManager) storageEligible(storageID string, tier system.TierCo
 		return strings.HasPrefix(storageID, system.SyntheticStoragePrefix)
 	}
 	sc := tier.StorageClass
-	if tier.Type == system.TierTypeCloud {
+	if tier.IsCloud() {
 		sc = tier.ActiveChunkClass
 	}
 	for _, nsc := range nscs {
@@ -559,9 +559,10 @@ func (pm *placementManager) nodeEligible(tier system.TierConfig, nodeID string, 
 	case system.TierTypeMemory:
 		return true // any node can serve memory tiers
 	case system.TierTypeFile:
+		if tier.IsCloud() {
+			return nodeHasStorageClass(nscs, nodeID, tier.ActiveChunkClass)
+		}
 		return nodeHasStorageClass(nscs, nodeID, tier.StorageClass)
-	case system.TierTypeCloud:
-		return nodeHasStorageClass(nscs, nodeID, tier.ActiveChunkClass)
 	case system.TierTypeJSONL:
 		// JSONL tiers have explicit node assignment via Path.
 		leaderNodeID := system.LeaderNodeID(func() []system.TierPlacement {

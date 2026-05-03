@@ -866,7 +866,7 @@ func TestCloudTierLeaderPreservesCloudBacking(t *testing.T) {
 			Position:         0,
 			ID:               cloudTierID,
 			Name:             "cloud",
-			Type:             system.TierTypeCloud,
+			Type:             system.TierTypeFile,
 			CloudServiceID:   &csID,
 			ActiveChunkClass: 1,
 		}},
@@ -1013,7 +1013,7 @@ func TestTransitionCloudTierFollowerDoesNotOverwriteBlob(t *testing.T) {
 		ID: vaultID, Name: "overwrite-test",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: cloudTierID, Name: "cloud", Type: system.TierTypeCloud,
+		ID: cloudTierID, Name: "cloud", Type: system.TierTypeFile,
 		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
@@ -2005,7 +2005,7 @@ func TestTransitionCloudSearchAfterTransition(t *testing.T) {
 		ID: tier0ID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: cloudTierID, Name: "cloud", Type: system.TierTypeCloud, VaultID: vaultID, Position: 1,
+		ID: cloudTierID, Name: "cloud", Type: system.TierTypeFile, VaultID: vaultID, Position: 1,
 	})
 	orch.sysLoader = &transitionSystemLoader{store: store}
 

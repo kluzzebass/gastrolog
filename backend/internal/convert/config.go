@@ -229,8 +229,6 @@ func TierTypeToProto(t system.TierType) gastrologv1.TierType {
 		return gastrologv1.TierType_TIER_TYPE_MEMORY
 	case system.TierTypeFile:
 		return gastrologv1.TierType_TIER_TYPE_FILE
-	case system.TierTypeCloud:
-		return gastrologv1.TierType_TIER_TYPE_CLOUD
 	case system.TierTypeJSONL:
 		return gastrologv1.TierType_TIER_TYPE_JSONL
 	default:
@@ -245,7 +243,10 @@ func TierTypeFromProto(t gastrologv1.TierType) system.TierType {
 	case gastrologv1.TierType_TIER_TYPE_FILE:
 		return system.TierTypeFile
 	case gastrologv1.TierType_TIER_TYPE_CLOUD:
-		return system.TierTypeCloud
+		// Legacy proto value: a cloud tier is now a file tier with
+		// CloudServiceID set (gastrolog-4k5mg). Normalize on the way in
+		// so server-side dispatch only ever sees TierTypeFile + IsCloud().
+		return system.TierTypeFile
 	case gastrologv1.TierType_TIER_TYPE_JSONL:
 		return system.TierTypeJSONL
 	case gastrologv1.TierType_TIER_TYPE_UNSPECIFIED:

@@ -58,12 +58,17 @@ type CloudService struct {
 }
 
 // TierType identifies the storage medium for a tier.
+//
+// "cloud" is no longer a distinct type: a cloud-backed tier is a file tier
+// with CloudServiceID set, exposed via TierConfig.IsCloud(). Step 8 of the
+// chunk redesign collapsed the parallel cloud/file dispatch into a single
+// file path that flips behavior based on whether a cloud store is wired.
+// See gastrolog-4k5mg.
 type TierType string
 
 const (
 	TierTypeMemory TierType = "memory"
 	TierTypeFile   TierType = "file"
-	TierTypeCloud  TierType = "cloud"
 	TierTypeJSONL  TierType = "jsonl"
 )
 
@@ -87,6 +92,14 @@ type TierConfig struct {
 	CacheEviction     string          `json:"cacheEviction,omitempty"`     // "lru" (default) or "ttl"
 	CacheBudget       string          `json:"cacheBudget,omitempty"`       // max cache size (e.g. "1GB", "500MB", default: "1GiB")
 	CacheTTL          string          `json:"cacheTtl,omitempty"`          // duration for TTL mode (e.g. "1h", "7d")
+}
+
+// IsCloud reports whether this tier is cloud-backed. A cloud-backed tier is
+// a file tier that has CloudServiceID set; the chunk manager flips on cloud
+// upload + cache-as-source semantics for those. There is no separate
+// TierTypeCloud — see gastrolog-4k5mg.
+func (t TierConfig) IsCloud() bool {
+	return t.CloudServiceID != nil
 }
 
 // TierPlacement assigns one replica of a tier to a specific file storage.
@@ -168,9 +181,11 @@ func StorageIDForNode(nodeID string, tier TierConfig, nscs []NodeStorageConfig) 
 	var requiredClass uint32
 	switch tier.Type {
 	case TierTypeFile:
-		requiredClass = tier.StorageClass
-	case TierTypeCloud:
-		requiredClass = tier.ActiveChunkClass
+		if tier.IsCloud() {
+			requiredClass = tier.ActiveChunkClass
+		} else {
+			requiredClass = tier.StorageClass
+		}
 	case TierTypeMemory, TierTypeJSONL:
 		// No storage class — pick any storage, or synthetic if none.
 		if len(nsc.FileStorages) > 0 {

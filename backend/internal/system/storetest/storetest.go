@@ -1803,7 +1803,7 @@ func testTiers(t *testing.T, newStore func(t *testing.T) system.Store) {
 			t.Fatalf("Put: %v", err)
 		}
 
-		if err := s.PutTier(ctx, system.TierConfig{ID: id, Name: "tier-updated", Type: system.TierTypeCloud}); err != nil {
+		if err := s.PutTier(ctx, system.TierConfig{ID: id, Name: "tier-updated", Type: system.TierTypeJSONL}); err != nil {
 			t.Fatalf("Put upsert: %v", err)
 		}
 
@@ -1811,8 +1811,8 @@ func testTiers(t *testing.T, newStore func(t *testing.T) system.Store) {
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		if got.Name != "tier-updated" || got.Type != system.TierTypeCloud {
-			t.Errorf("expected name=tier-updated type=cloud, got name=%s type=%s", got.Name, got.Type)
+		if got.Name != "tier-updated" || got.Type != system.TierTypeJSONL {
+			t.Errorf("expected name=tier-updated type=jsonl, got name=%s type=%s", got.Name, got.Type)
 		}
 
 		all, err := s.ListTiers(ctx)
