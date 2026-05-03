@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"gastrolog/internal/glid"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,6 +13,7 @@ import (
 
 	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/glid"
 )
 
 // countingStore wraps a blobstore.Store and counts Download/DownloadRange calls.
@@ -33,28 +33,24 @@ func (s *countingStore) DownloadRange(ctx context.Context, key string, offset, l
 	return s.Store.DownloadRange(ctx, key, offset, length)
 }
 
-func newCacheTestManager(t *testing.T) (*Manager, *countingStore, string) {
+func newCacheTestManager(t *testing.T) (*Manager, *countingStore) {
 	t.Helper()
 	vaultID := glid.New()
 	inner := blobstore.NewMemory()
 	store := &countingStore{Store: inner}
 
-	dir := t.TempDir()
-	cacheDir := t.TempDir()
-
 	cm, err := NewManager(Config{
-		Dir:            dir,
+		Dir:            t.TempDir(),
 		Now:            time.Now,
 		RotationPolicy: chunk.NewRecordCountPolicy(10000),
 		CloudStore:     store,
 		VaultID:        vaultID,
-		CacheDir:       cacheDir,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = cm.Close() })
-	return cm, store, cacheDir
+	return cm, store
 }
 
 func ingestAndUpload(t *testing.T, cm *Manager, n int) chunk.ChunkID {
@@ -84,79 +80,34 @@ func ingestAndUpload(t *testing.T, cm *Manager, n int) chunk.ChunkID {
 	return chunk.ChunkID{}
 }
 
-func TestCacheWriteThroughAfterUpload(t *testing.T) {
+// TestUploadKeepsLocalGLCB asserts the post-step-7k contract: after a chunk
+// is sealed and uploaded to the cloud, its local data.glcb file remains in
+// place inside <chunkDir> as the warm cache. Step 7j stopped removing it;
+// step 7k removed the parallel CacheDir copy.
+func TestUploadKeepsLocalGLCB(t *testing.T) {
 	t.Parallel()
-	cm, _, cacheDir := newCacheTestManager(t)
+	cm, _ := newCacheTestManager(t)
 
 	chunkID := ingestAndUpload(t, cm, 200)
 
-	// GLCB file should exist in cache dir.
-	cachePath := filepath.Join(cacheDir, chunkID.String()+".glcb")
-	info, err := os.Stat(cachePath)
+	path := filepath.Join(cm.chunkDir(chunkID), dataGLCBFileName)
+	info, err := os.Stat(path)
 	if err != nil {
-		t.Fatalf("expected cache file at %s: %v", cachePath, err)
+		t.Fatalf("expected in-tree warm cache at %s: %v", path, err)
 	}
 	if info.Size() == 0 {
-		t.Error("cache file is empty")
+		t.Error("warm cache file is empty")
 	}
-	t.Logf("cache file: %s (%d bytes)", cachePath, info.Size())
 }
 
+// TestCacheHitAvoidsCloudDownload covers the steady-state read: the chunk
+// has just been uploaded, the local data.glcb is the warm cache, and reads
+// must not touch the cloud at all.
 func TestCacheHitAvoidsCloudDownload(t *testing.T) {
 	t.Parallel()
-	cm, store, _ := newCacheTestManager(t)
+	cm, store := newCacheTestManager(t)
 
 	chunkID := ingestAndUpload(t, cm, 200)
-
-	// Reset counters after upload.
-	store.downloads.Store(0)
-	store.downloadRanges.Store(0)
-
-	// Open cursor — should hit cache, no cloud calls.
-	cursor, err := cm.OpenCursor(chunkID)
-	if err != nil {
-		t.Fatalf("OpenCursor: %v", err)
-	}
-	var count int
-	for {
-		_, _, err := cursor.Next()
-		if errors.Is(err, chunk.ErrNoMoreRecords) {
-			break
-		}
-		if err != nil {
-			_ = cursor.Close()
-			t.Fatalf("cursor.Next at %d: %v", count, err)
-		}
-		count++
-	}
-	_ = cursor.Close()
-
-	if count != 200 {
-		t.Errorf("read %d records, expected 200", count)
-	}
-
-	downloads := store.downloads.Load()
-	ranges := store.downloadRanges.Load()
-	if downloads > 0 || ranges > 0 {
-		t.Errorf("cache hit should not trigger cloud calls: downloads=%d ranges=%d", downloads, ranges)
-	}
-}
-
-// TestLocalGLCBServesAfterCacheDirEvicted verifies the warm cache that
-// matters post step 7j: the chunk's own data.glcb in <chunkDir>. Wiping
-// the legacy <CacheDir>/<id>.glcb does not cause a download because the
-// in-tree data.glcb still serves the read locally.
-func TestLocalGLCBServesAfterCacheDirEvicted(t *testing.T) {
-	t.Parallel()
-	cm, store, cacheDir := newCacheTestManager(t)
-
-	chunkID := ingestAndUpload(t, cm, 200)
-
-	// Wipe the CacheDir cache copy to prove the in-tree data.glcb is what
-	// serves reads now.
-	if err := os.Remove(filepath.Join(cacheDir, chunkID.String()+".glcb")); err != nil {
-		t.Fatal(err)
-	}
 
 	store.downloads.Store(0)
 	store.downloadRanges.Store(0)
@@ -183,112 +134,138 @@ func TestLocalGLCBServesAfterCacheDirEvicted(t *testing.T) {
 		t.Errorf("read %d records, expected 200", count)
 	}
 	if total := store.downloads.Load() + store.downloadRanges.Load(); total != 0 {
-		t.Errorf("expected zero cloud calls (local data.glcb is the cache), got %d", total)
+		t.Errorf("warm-cache hit should not trigger cloud calls, got %d", total)
 	}
 }
 
-func TestDeleteCleansCacheFile(t *testing.T) {
+// TestColdCacheDownloadsToChunkDir simulates an evicted / never-cached
+// cloud chunk: deleting the in-tree data.glcb forces openCloudCursor to
+// download the blob fresh, which post step 7k lands at <chunkDir>/data.glcb
+// so the next read goes through the warm-cache fast path.
+func TestColdCacheDownloadsToChunkDir(t *testing.T) {
 	t.Parallel()
-	cm, _, cacheDir := newCacheTestManager(t)
+	cm, store := newCacheTestManager(t)
 
 	chunkID := ingestAndUpload(t, cm, 200)
-
-	cachePath := filepath.Join(cacheDir, chunkID.String()+".glcb")
-	if _, err := os.Stat(cachePath); err != nil {
-		t.Fatal("cache file should exist before delete")
-	}
-
-	if err := cm.Delete(chunkID); err != nil {
+	glcbPath := filepath.Join(cm.chunkDir(chunkID), dataGLCBFileName)
+	if err := os.Remove(glcbPath); err != nil {
 		t.Fatal(err)
 	}
-
-	if _, err := os.Stat(cachePath); !os.IsNotExist(err) {
-		t.Error("cache file should be removed after chunk delete")
-	}
-}
-
-// TestRangeRequestFallsBackWhenLocalGLCBMissing covers the cold-cache
-// case: a cloud-backed chunk with no local data.glcb (e.g. evicted under
-// disk pressure, or a follower that adopted via FSM without ever sealing
-// locally) must still serve reads via cloud range requests. Simulated
-// here by deleting both local data.glcb and the legacy CacheDir copy.
-func TestRangeRequestFallsBackWhenLocalGLCBMissing(t *testing.T) {
-	t.Parallel()
-	cm, store, cacheDir := newCacheTestManager(t)
-
-	chunkID := ingestAndUpload(t, cm, 200)
-
-	// Wipe both caches: <chunkDir>/data.glcb (the new warm cache) AND
-	// <CacheDir>/<id>.glcb (legacy CacheDir copy). The chunk should still
-	// be readable via cloud range requests against the authoritative blob.
-	if err := os.Remove(filepath.Join(cm.chunkDir(chunkID), dataGLCBFileName)); err != nil {
-		t.Fatal(err)
-	}
-	_ = os.Remove(filepath.Join(cacheDir, chunkID.String()+".glcb"))
 
 	store.downloads.Store(0)
-	store.downloadRanges.Store(0)
 
 	cursor, err := cm.OpenCursor(chunkID)
 	if err != nil {
 		t.Fatalf("OpenCursor: %v", err)
 	}
-	var count int
-	for {
-		_, _, err := cursor.Next()
-		if errors.Is(err, chunk.ErrNoMoreRecords) {
-			break
-		}
-		if err != nil {
-			_ = cursor.Close()
-			t.Fatalf("cursor.Next at %d: %v", count, err)
-		}
-		count++
-	}
-	_ = cursor.Close()
-
+	count := drainCursor(t, cursor)
 	if count != 200 {
 		t.Errorf("read %d records, expected 200", count)
 	}
-	if total := store.downloads.Load() + store.downloadRanges.Load(); total == 0 {
-		t.Error("expected cloud calls when both local data.glcb and CacheDir cache are missing")
+	if downloads := store.downloads.Load(); downloads != 1 {
+		t.Errorf("expected 1 cloud download after cold cache, got %d", downloads)
+	}
+	if _, err := os.Stat(glcbPath); err != nil {
+		t.Errorf("downloaded blob should land at %s: %v", glcbPath, err)
 	}
 }
 
-func TestNoCacheDirSkipsCaching(t *testing.T) {
+// TestRangeRequestFallsBackWhenDownloadFails covers the case where the
+// chunk has no in-tree warm cache AND the full blob download fails — we
+// fall back to range-request reads via the remote reader. Uses a faulty
+// blobstore wrapper to break Download but keep DownloadRange working.
+func TestRangeRequestFallsBackWhenDownloadFails(t *testing.T) {
 	t.Parallel()
-	// Manager without CacheDir — original behavior.
 	vaultID := glid.New()
-	store := blobstore.NewMemory()
-	dir := t.TempDir()
+	wrap := &downloadOnlyFaultStore{Store: blobstore.NewMemory()}
+	store := &countingStore{Store: wrap}
 
 	cm, err := NewManager(Config{
-		Dir:            dir,
+		Dir:            t.TempDir(),
 		Now:            time.Now,
 		RotationPolicy: chunk.NewRecordCountPolicy(10000),
 		CloudStore:     store,
 		VaultID:        vaultID,
-		// No CacheDir
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer cm.Close()
 
-	chunkID := ingestAndUpload(t, cm, 50)
-
-	// No cache files anywhere in the dir.
-	entries, _ := os.ReadDir(dir)
-	for _, e := range entries {
-		if filepath.Ext(e.Name()) == ".glcb" {
-			t.Errorf("unexpected .glcb file without CacheDir: %s", e.Name())
-		}
+	chunkID := ingestAndUpload(t, cm, 200)
+	if err := os.Remove(filepath.Join(cm.chunkDir(chunkID), dataGLCBFileName)); err != nil {
+		t.Fatal(err)
 	}
 
-	// Cursor should still work (via range requests).
+	wrap.failDownload = true
+	store.downloads.Store(0)
+	store.downloadRanges.Store(0)
+
 	cursor, err := cm.OpenCursor(chunkID)
 	if err != nil {
-		t.Fatalf("OpenCursor: %v", err)
+		t.Fatalf("OpenCursor should succeed via range fallback: %v", err)
 	}
-	_ = cursor.Close()
+	count := drainCursor(t, cursor)
+	if count != 200 {
+		t.Errorf("read %d records, expected 200", count)
+	}
+	if ranges := store.downloadRanges.Load(); ranges == 0 {
+		t.Error("expected at least one DownloadRange call after Download failed")
+	}
+}
+
+// TestDeleteRemovesWarmCache covers the chunk-delete path: deleting a
+// cloud-backed chunk should remove the in-tree warm cache copy too so
+// retention/disk-pressure semantics keep working without the legacy
+// CacheDir.
+func TestDeleteRemovesWarmCache(t *testing.T) {
+	t.Parallel()
+	cm, _ := newCacheTestManager(t)
+
+	chunkID := ingestAndUpload(t, cm, 200)
+	chunkDir := cm.chunkDir(chunkID)
+	if _, err := os.Stat(filepath.Join(chunkDir, dataGLCBFileName)); err != nil {
+		t.Fatal("warm cache should exist before delete")
+	}
+
+	if err := cm.Delete(chunkID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(chunkDir); !os.IsNotExist(err) {
+		t.Errorf("chunk dir should be gone after delete: stat err=%v", err)
+	}
+}
+
+// drainCursor reads until ErrNoMoreRecords and returns the count, failing
+// the test on any other error.
+func drainCursor(t *testing.T, cursor chunk.RecordCursor) int {
+	t.Helper()
+	defer func() { _ = cursor.Close() }()
+	var count int
+	for {
+		_, _, err := cursor.Next()
+		if errors.Is(err, chunk.ErrNoMoreRecords) {
+			return count
+		}
+		if err != nil {
+			t.Fatalf("cursor.Next at %d: %v", count, err)
+		}
+		count++
+	}
+}
+
+// downloadOnlyFaultStore returns ErrSimulated for full-blob Download calls
+// while letting DownloadRange go through. Used to force the range-request
+// fallback path.
+type downloadOnlyFaultStore struct {
+	blobstore.Store
+	failDownload bool
+}
+
+func (s *downloadOnlyFaultStore) Download(ctx context.Context, key string) (io.ReadCloser, error) {
+	if s.failDownload {
+		return nil, errors.New("simulated full-blob download failure")
+	}
+	return s.Store.Download(ctx, key)
 }

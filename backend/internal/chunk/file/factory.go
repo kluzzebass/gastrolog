@@ -76,18 +76,9 @@ func NewFactory() chunk.ManagerFactory {
 			cfg.CloudReadOnly = true
 		}
 
-		if v := params["cache_dir"]; v != "" {
-			cfg.CacheDir = v
-		}
-		if v := params["cache_eviction"]; v != "" {
-			cfg.CacheEviction = v
-		}
-		if v := params["cache_budget"]; v != "" {
-			cfg.CacheBudget = v
-		}
-		if v := params["cache_ttl"]; v != "" {
-			cfg.CacheTTL = v
-		}
+		// cache_dir / cache_eviction / cache_budget / cache_ttl: silently
+		// ignored. Step 7k collapsed the separate CacheDir into <chunkDir>/
+		// data.glcb. Eviction lives on its own follow-up issue.
 
 		return NewManager(cfg)
 	}

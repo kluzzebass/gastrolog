@@ -107,19 +107,6 @@ type Config struct {
 	// VaultID is required when CloudStore is set (used for blob key prefix).
 	VaultID glid.GLID
 
-	// CacheDir, when non-empty, enables local caching of cloud GLCB blobs.
-	// Cloud chunks are cached after upload and on first read, avoiding
-	// range-request round-trips.
-	CacheDir string
-
-	// CacheEviction selects the eviction policy: "lru" (default) or "ttl".
-	CacheEviction string
-	// CacheBudget is the max cache size as a human-readable string (e.g. "1GB", "500MB").
-	// Parsed via system.ParseSize. Default 1 GiB.
-	CacheBudget string
-	// CacheTTL is the max age of cached blobs (TTL mode only). Parsed via system.ParseDuration.
-	CacheTTL string
-
 	// CloudReadOnly, when true, enables cloud store reads (cursor, cache)
 	// but skips uploads in PostSealProcess. Used by follower nodes that
 	// share the leader's S3 bucket for reads without owning the blobs.
@@ -401,14 +388,6 @@ func NewManager(cfg Config) (*Manager, error) {
 				"error", err)
 			manager.cloudDegraded.Store(true)
 		}
-	}
-
-	if cfg.CacheDir != "" {
-		if err := os.MkdirAll(cfg.CacheDir, 0o750); err != nil {
-			_ = lockFile.Close()
-			return nil, fmt.Errorf("create cache dir: %w", err)
-		}
-		logger.Info("warm cache enabled", "cache_dir", cfg.CacheDir)
 	}
 
 	if cfg.ExpectExisting && !dirExisted {
@@ -2633,16 +2612,9 @@ func (m *Manager) HasLocalContent(id chunk.ChunkID) bool {
 	if !meta.cloudBacked {
 		return true
 	}
-	// In-tree warm cache (gastrolog-24m1t step 7j) — preferred over the
-	// legacy CacheDir copy.
-	if m.hasLocalGLCB(id) {
-		return true
-	}
-	if m.cfg.CacheDir == "" {
-		return false
-	}
-	_, err := os.Stat(m.cachePath(id))
-	return err == nil
+	// In-tree warm cache (gastrolog-24m1t step 7j): the local data.glcb is
+	// the chunk's authoritative cache for cloud-backed reads.
+	return m.hasLocalGLCB(id)
 }
 
 // HeadCloudBlob probes the chunk's cloud blob via a HEAD request, ignoring
@@ -3075,10 +3047,10 @@ func (m *Manager) deleteInternal(id chunk.ChunkID) error {
 			return fmt.Errorf("delete cloud chunk %s: %w", id, err)
 		}
 		m.removeFromCloudIndex(id)
-		// Remove cached GLCB blob (best-effort).
-		if m.cfg.CacheDir != "" {
-			_ = os.Remove(m.cachePath(id))
-		}
+		// Remove the in-tree warm cache copy of the cloud blob — the
+		// chunk dir is the cache post step 7j, so blowing it away on
+		// delete keeps disk usage bounded by retention.
+		_ = os.RemoveAll(m.chunkDir(id))
 	} else {
 		dir := m.chunkDir(id)
 		// postSealActive was already drained at the top of deleteInternal
@@ -3217,64 +3189,9 @@ func (m *Manager) RefreshDiskSizes(id chunk.ChunkID) {
 
 // --- Warm cache helpers ---
 
-// cachePath returns the local cache file path for a cloud chunk's GLCB blob.
-func (m *Manager) cachePath(id chunk.ChunkID) string {
-	return filepath.Join(m.cfg.CacheDir, id.String()+".glcb")
-}
-
-// writeBlobToCache streams a GLCB blob into the cache directory atomically.
-// Errors are logged and swallowed — cache writes are best-effort. Streaming
-// avoids slurping the entire blob into the heap; the caller owns src and is
-// responsible for closing it.
-func (m *Manager) writeBlobToCache(id chunk.ChunkID, src io.Reader) {
-	if err := os.MkdirAll(m.cfg.CacheDir, 0o750); err != nil {
-		m.logger.Warn("cache: failed to create dir", "error", err)
-		return
-	}
-	tmp, err := os.CreateTemp(m.cfg.CacheDir, ".glcb-*.tmp")
-	if err != nil {
-		m.logger.Warn("cache: failed to create temp file", "error", err)
-		return
-	}
-	tmpPath := filepath.Clean(tmp.Name())
-	n, err := io.Copy(tmp, src)
-	if err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath) //nolint:gosec // G703: tmpPath is from os.CreateTemp in CacheDir
-		m.logger.Warn("cache: failed to write blob", "chunk", id, "error", err)
-		return
-	}
-	_ = tmp.Close()
-	if err := os.Rename(tmpPath, m.cachePath(id)); err != nil { //nolint:gosec // G703: tmpPath is from os.CreateTemp
-		_ = os.Remove(tmpPath) //nolint:gosec // G703: tmpPath is from os.CreateTemp
-		m.logger.Warn("cache: failed to rename blob", "chunk", id, "error", err)
-		return
-	}
-	m.logger.Debug("cache: wrote GLCB blob", "chunk", id, "bytes", n)
-}
-
-// openCachedCursor opens a cloud chunk from the local cache directory.
-// Returns an error if the cache file doesn't exist or is corrupt.
-func (m *Manager) openCachedCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
-	path := m.cachePath(id)
-	f, err := os.Open(filepath.Clean(path))
-	if err != nil {
-		return nil, err // cache miss
-	}
-	rd, err := chunkcloud.NewCacheReader(f)
-	if err != nil {
-		_ = f.Close()
-		_ = os.Remove(path) // corrupt — remove so next access re-downloads
-		return nil, err
-	}
-	return chunkcloud.NewSeekableCursor(rd, id), nil
-}
-
-// openLocalGLCBCursor opens a sealed chunk's data.glcb file via the
-// chunkcloud reader pipeline. Returns the cache-miss-style error when
-// data.glcb is absent so callers can fall back to the multi-file path.
-// Used during the chunk redesign (gastrolog-24m1t) once sealToGLCB has
-// produced a data.glcb alongside the multi-file artifacts.
+// openLocalGLCBCursor opens a sealed chunk's data.glcb file via the chunkcloud
+// reader pipeline. Returns the underlying os error (typically ENOENT) when
+// data.glcb is absent so callers can fall back to a remote read.
 func (m *Manager) openLocalGLCBCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	path := filepath.Join(m.chunkDir(id), dataGLCBFileName)
 	f, err := os.Open(filepath.Clean(path))
@@ -3296,38 +3213,53 @@ func (m *Manager) hasLocalGLCB(id chunk.ChunkID) bool {
 	return err == nil
 }
 
-// downloadAndCacheCursor downloads the entire GLCB blob from cloud, writes it
-// to the cache directory, and opens a local cursor. Blocking on first access.
-func (m *Manager) downloadAndCacheCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
+// downloadCloudBlobToChunkDir streams the cloud blob for a chunk into
+// <chunkDir>/data.glcb atomically and opens a local cursor. The chunk dir
+// becomes the warm cache, structurally identical to a freshly-sealed local
+// chunk — subsequent reads go through the local-GLCB fast path. See
+// gastrolog-24m1t step 7k.
+func (m *Manager) downloadCloudBlobToChunkDir(id chunk.ChunkID) (chunk.RecordCursor, error) {
+	dir := m.chunkDir(id)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return nil, fmt.Errorf("ensure chunk dir for cache: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, dataGLCBFileName+".tmp.*")
+	if err != nil {
+		return nil, fmt.Errorf("create tmp for cache: %w", err)
+	}
+	tmpPath := filepath.Clean(tmp.Name())
+
 	rc, err := m.cfg.CloudStore.Download(context.Background(), m.blobKey(id))
 	m.trackCloudResult(err)
 	if err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath) //nolint:gosec // G703: tmpPath from CreateTemp in chunkDir
 		return nil, err
 	}
 	defer func() { _ = rc.Close() }()
 
-	if err := os.MkdirAll(m.cfg.CacheDir, 0o750); err != nil {
-		return nil, err
-	}
-	tmp, err := os.CreateTemp(m.cfg.CacheDir, ".glcb-*.tmp")
-	if err != nil {
-		return nil, err
-	}
-	tmpPath := filepath.Clean(tmp.Name())
 	if _, err := io.Copy(tmp, rc); err != nil {
 		_ = tmp.Close()
-		_ = os.Remove(tmpPath) //nolint:gosec // G703: tmpPath is from os.CreateTemp in CacheDir
+		_ = os.Remove(tmpPath) //nolint:gosec // G703
 		return nil, err
 	}
-	_ = tmp.Close()
-
-	finalPath := m.cachePath(id)
-	if err := os.Rename(tmpPath, finalPath); err != nil { //nolint:gosec // G703: tmpPath is from os.CreateTemp
-		_ = os.Remove(tmpPath) //nolint:gosec // G703: tmpPath is from os.CreateTemp
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath) //nolint:gosec // G703
+		return nil, err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath) //nolint:gosec // G703
 		return nil, err
 	}
 
-	return m.openCachedCursor(id)
+	finalPath := filepath.Join(dir, dataGLCBFileName)
+	if err := os.Rename(tmpPath, finalPath); err != nil { //nolint:gosec // G304: tmpPath is from os.CreateTemp inside chunkDir
+		_ = os.Remove(tmpPath) //nolint:gosec // G703
+		return nil, err
+	}
+
+	return m.openLocalGLCBCursor(id)
 }
 
 // SetRotationPolicy updates the rotation policy for future appends.
@@ -3880,18 +3812,8 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		return fmt.Errorf("upload GLCB: %w", err)
 	}
 
-	// Mirror the just-uploaded blob into the warm cache (best-effort).
-	// Streamed from disk so we never materialize the compressed bytes on
-	// the heap. The whole CacheDir machinery dies in step 7j when the local
-	// data.glcb itself becomes the cache.
-	if m.cfg.CacheDir != "" {
-		if cacheSrc, cerr := os.Open(filepath.Clean(glcbPath)); cerr == nil {
-			m.writeBlobToCache(id, cacheSrc)
-			_ = cacheSrc.Close()
-		} else {
-			m.logger.Warn("cache: failed to reopen blob for cache copy", "chunk", id, "error", cerr)
-		}
-	}
+	// No separate CacheDir mirror — the local data.glcb that we just
+	// uploaded stays in <chunkDir> and IS the warm cache (step 7k).
 
 	// Take the per-chunk write lock around the FSM announce, the file
 	// removal, AND the metadata transition. Cursors in flight on this
@@ -4148,15 +4070,17 @@ func (m *Manager) scanAttrsCloud(id chunk.ChunkID, startPos uint64, fn func(writ
 	}
 }
 
-// openCloudCursor opens a cloud-backed chunk for random-access record reads
-// via range requests. Downloads only the header, dictionary, record index, and
-// TOC at init (~few KB). Individual records are fetched on demand — each read
-// triggers a range request for the seekable zstd frame containing that record.
+// openCloudCursor opens a cloud-backed chunk for record reads when the
+// in-tree warm cache (<chunkDir>/data.glcb) is absent. The fast path lives
+// in OpenCursor — by the time we get here either the cache was evicted or
+// the chunk was never sealed locally (follower that adopted via FSM).
 //
-// This is efficient because cloud cursors are rarely opened: bounded queries
-// defer cloud chunks entirely when local chunks can serve the limit. When a
-// cloud cursor IS opened, the TS index narrows access to specific positions,
-// so only a few frames are fetched rather than the full blob.
+// Strategy: try a one-shot full download into the chunk dir first so the
+// next read goes through the local-GLCB fast path. On download failure
+// fall back to range-request reads via NewRemoteReader. The remote reader
+// pulls header/dict/index/TOC at init (~few KB) and fetches individual
+// frames on demand, so it stays cheap when the per-query touch count is
+// low (notably histograms that read the TS index only).
 func (m *Manager) openCloudCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	m.mu.Lock()
 	meta := m.lookupMeta(id)
@@ -4166,31 +4090,18 @@ func (m *Manager) openCloudCursor(id chunk.ChunkID) (chunk.RecordCursor, error) 
 		return nil, chunk.ErrChunkNotFound
 	}
 
-	// Cache hit: open from local GLCB file.
-	if m.cfg.CacheDir != "" {
-		if cursor, err := m.openCachedCursor(id); err == nil {
-			return cursor, nil
-		}
+	if cursor, err := m.downloadCloudBlobToChunkDir(id); err == nil {
+		return cursor, nil
+	} else {
+		// Debug, not Warn: this fires on every cloud cursor that races
+		// with retention-driven blob deletion. The range-request
+		// fallback below propagates the real error to callers that
+		// genuinely need it; raising WARN here would flood operator
+		// logs during every retention sweep. See gastrolog-2c96i.
+		m.logger.Debug("cache: cloud blob download failed, falling back to range requests",
+			"chunk", id, "error", err)
 	}
 
-	// Cache miss: download entire blob to cache, then open locally.
-	if m.cfg.CacheDir != "" {
-		if cursor, err := m.downloadAndCacheCursor(id); err == nil {
-			return cursor, nil
-		} else {
-			// Debug, not Warn: this fires on every cloud cursor that
-			// races with retention-driven blob deletion. The range-
-			// request fallback handles genuinely missing blobs the
-			// same way — callers that need a real error see the
-			// bubbled-up failure from there. Raising WARN here meant
-			// operator log noise + UI alert-panel floods during every
-			// retention sweep. See gastrolog-2c96i.
-			m.logger.Debug("cache: download-and-cache failed, falling back to range requests",
-				"chunk", id, "error", err)
-		}
-	}
-
-	// Fallback: remote reader with range requests.
 	rd, err := chunkcloud.NewRemoteReader(m.cfg.CloudStore, m.blobKey(id), meta.diskBytes)
 	if err != nil {
 		return nil, fmt.Errorf("open remote reader %s: %w", id, err)
