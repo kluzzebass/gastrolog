@@ -140,28 +140,6 @@ func (o *Orchestrator) LocalLeaderTierIDs() map[glid.GLID]bool {
 	return ids
 }
 
-// LocalReplicaTierIDs returns the set of tier IDs this node has any local
-// replica of (leader OR follower). Used by histogram fan-out: an approximate
-// count from a follower replica is acceptable, so any tier with local data
-// can be served locally and skip the cross-node forward. Authoritative
-// record reads still use LocalLeaderTierIDs. See gastrolog-66b7x.
-func (o *Orchestrator) LocalReplicaTierIDs() map[glid.GLID]bool {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	ids := make(map[glid.GLID]bool)
-	for _, v := range o.vaults {
-		if err := vaultReplicationReadinessErr(v.ID, v); err != nil {
-			continue
-		}
-		for _, t := range v.Tiers {
-			if t.Query != nil {
-				ids[t.TierID] = true
-			}
-		}
-	}
-	return ids
-}
-
 // HasLocalQueryEngine returns true if the vault has at least one tier with
 // a query engine on this node (i.e., actual searchable data, not just a
 // routing entry). Used by search fan-out to decide local vs. remote.
