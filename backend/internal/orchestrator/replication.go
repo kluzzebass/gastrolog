@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"gastrolog/internal/glid"
 	"log/slog"
+	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/cluster"
@@ -169,19 +170,17 @@ func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID
 	}
 }
 
-// replicateToTarget sends a sealed chunk to one target. Same-node targets
-// use local ImportToTierStorage; cross-node targets use gRPC.
+// replicateToTarget sends a sealed chunk to one cross-node follower
+// target. Same-node targets are no longer a thing: the cluster runs
+// 1:1:1 tier/node/storage (per docs/architecture), so a target whose
+// NodeID equals the local node would be a no-op duplicate of the
+// local copy and is treated as a configuration error.
 func (o *Orchestrator) replicateToTarget(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, sourceCM chunk.ChunkManager, tgt system.ReplicationTarget) {
+	start := time.Now()
 	if tgt.NodeID == o.localNodeID {
-		if err := o.replicateLocally(ctx, vaultID, tierID, tgt.StorageID, chunkID, sourceCM); err != nil {
-			o.logger.Warn("replication: local copy failed",
-				"vault", vaultID, "tier", tierID, "storage", tgt.StorageID,
-				"chunk", chunkID.String(), "error", err)
-		} else {
-			o.logger.Debug("replication: local copy done",
-				"vault", vaultID, "tier", tierID, "storage", tgt.StorageID,
-				"chunk", chunkID.String())
-		}
+		o.logger.Warn("replication: same-node target ignored (multi-storage-per-node retired)",
+			"vault", vaultID, "tier", tierID, "storage", tgt.StorageID,
+			"chunk", chunkID.String(), "node", tgt.NodeID)
 		return
 	}
 	if err := o.replicateToFollower(ctx, vaultID, tierID, chunkID, sourceCM, tgt.NodeID); err != nil {
@@ -194,26 +193,12 @@ func (o *Orchestrator) replicateToTarget(ctx context.Context, vaultID, tierID gl
 		}
 		o.logger.Log(ctx, level, "replication: sealed chunk failed",
 			"node", tgt.NodeID, "vault", vaultID, "tier", tierID,
-			"chunk", chunkID.String(), "error", err)
+			"chunk", chunkID.String(), "elapsed", time.Since(start), "error", err)
 	} else {
 		o.logger.Debug("replication: sealed chunk sent",
 			"node", tgt.NodeID, "vault", vaultID, "tier", tierID,
-			"chunk", chunkID.String())
+			"chunk", chunkID.String(), "elapsed", time.Since(start))
 	}
-}
-
-// replicateLocally copies a sealed chunk to a different storage-specific
-// tier instance on the same node. Opens a cursor on the source, then
-// imports into the target via ImportToTierStorage.
-func (o *Orchestrator) replicateLocally(ctx context.Context, vaultID, tierID glid.GLID, storageID string, chunkID chunk.ChunkID, sourceCM chunk.ChunkManager) error {
-	cursor, err := sourceCM.OpenCursor(chunkID)
-	if err != nil {
-		return fmt.Errorf("open cursor: %w", err)
-	}
-	defer func() { _ = cursor.Close() }()
-
-	iter := chunk.CursorIterator(cursor)
-	return o.ImportToTierStorage(ctx, vaultID, tierID, storageID, chunkID, iter)
 }
 
 // replicateToFollower streams a single sealed chunk to one follower node.
@@ -223,6 +208,8 @@ func (o *Orchestrator) replicateToFollower(ctx context.Context, vaultID, tierID 
 	if o.tierReplicator == nil {
 		return errors.New("replicateToFollower: tier replicator not configured")
 	}
+	start := time.Now()
+
 	// Pre-flight: open and read the first record to confirm the chunk is intact.
 	// Corrupted compressed data fails here instantly — no network round-trip.
 	probe, err := cm.OpenCursor(chunkID)
@@ -262,12 +249,16 @@ func (o *Orchestrator) replicateToFollower(ctx context.Context, vaultID, tierID 
 		return nil
 	}
 
+	wireStart := time.Now()
 	digest, err := o.tierReplicator.ImportBlob(ctx, nodeID, vaultID, tierID, chunkID, size, body)
 	if err != nil {
 		return fmt.Errorf("ImportBlob to %s: %w", nodeID, err)
 	}
+	wireElapsed := time.Since(wireStart)
+	totalElapsed := time.Since(start)
 	o.logger.Debug("replication: ImportBlob ack",
 		"vault", vaultID, "tier", tierID, "chunk", chunkID.String(), "node", nodeID,
-		"size", size, "digest", hex.EncodeToString(digest[:8]))
+		"size", size, "digest", hex.EncodeToString(digest[:8]),
+		"wire_elapsed", wireElapsed, "total_elapsed", totalElapsed)
 	return nil
 }
