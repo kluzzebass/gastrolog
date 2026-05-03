@@ -149,6 +149,15 @@ func applyDirective(q *query.Query, k, v string) (bool, error) {
 		q.End = t
 		return true, nil
 	case "last":
+		// "last=all" is the sentinel for an explicit unbounded range —
+		// the query touches every record, regardless of timestamp. Distinct
+		// from "no last= directive at all" which the search-effect
+		// detector treats as "inject the default range." See gastrolog-2zdsc.
+		if v == "all" {
+			q.Start = time.Time{}
+			q.End = time.Time{}
+			return true, nil
+		}
 		d, err := parseDuration(v)
 		if err != nil {
 			return false, fmt.Errorf("invalid last duration: %w", err)
