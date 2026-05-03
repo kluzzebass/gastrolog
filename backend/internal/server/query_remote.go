@@ -105,15 +105,6 @@ func (s *QueryServer) remoteVaultsByNode(ctx context.Context, selectedVaults []g
 	return s.remoteVaultsByNodeFiltered(ctx, selectedVaults, s.orch.LocalLeaderTierIDs())
 }
 
-// remoteHistogramVaultsByNode is the histogram-specific variant: it skips
-// vaults whose every tier has a local REPLICA (leader or follower) on this
-// node. Used by the histogram path so we don't fan out across the cluster
-// when chunks are already replicated locally — approximate counts from a
-// local follower are acceptable. See gastrolog-66b7x.
-func (s *QueryServer) remoteHistogramVaultsByNode(ctx context.Context, selectedVaults []glid.GLID) map[string][]glid.GLID {
-	return s.remoteVaultsByNodeFiltered(ctx, selectedVaults, s.orch.LocalReplicaTierIDs())
-}
-
 func (s *QueryServer) remoteVaultsByNodeFiltered(ctx context.Context, selectedVaults []glid.GLID, localTierIDs map[glid.GLID]bool) map[string][]glid.GLID {
 	vaults, err := s.cfgStore.ListVaults(ctx)
 	if err != nil {
