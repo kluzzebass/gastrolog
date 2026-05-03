@@ -1,6 +1,10 @@
 package chunk
 
-import "time"
+import (
+	"time"
+
+	"gastrolog/internal/glid"
+)
 
 // MetadataAnnouncer is called by chunk managers after each metadata state
 // change. The implementation typically applies the change to a Raft group
@@ -26,7 +30,12 @@ type MetadataAnnouncer interface {
 	// sealed-but-not-yet-uploaded chunks invisible to the histogram's
 	// GLCB section-reader path.
 	AnnounceAttachOffsets(id ChunkID, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, numFrames int32)
-	AnnounceUpload(id ChunkID, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, numFrames int32)
+	// AnnounceUpload publishes a successful cloud upload. hash is the GLCB
+	// whole-blob digest (32 bytes) read from the TOC footer; cloudServiceID
+	// is the cloud service the chunk was actually uploaded to (snapshot,
+	// survives later tier reconfiguration); keyScheme selects the
+	// blobKey() derivation function (only scheme 0 today). See gastrolog-grnc3.
+	AnnounceUpload(id ChunkID, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, numFrames int32, hash [32]byte, cloudServiceID glid.GLID, keyScheme uint8)
 	AnnounceDelete(id ChunkID)
 }
 
@@ -34,6 +43,25 @@ type MetadataAnnouncer interface {
 // metadata announcements. Callers should type-assert to check availability.
 type AnnouncerSetter interface {
 	SetAnnouncer(MetadataAnnouncer)
+}
+
+// IntegrityVerifier reports the expected GLCB whole-blob digest for a chunk
+// (the value the FSM stamped onto CmdUploadChunk via gastrolog-grnc3). The
+// chunk manager calls ExpectedDigest after every cold-cache cloud download
+// and rejects any blob whose actual digest doesn't match. The (zero, false)
+// return path means "no expectation on file" — used during the migration
+// from pre-grnc3 entries that have no recorded hash; a nil verifier on the
+// Manager Config disables verification entirely (single-node tests).
+type IntegrityVerifier interface {
+	ExpectedDigest(id ChunkID) ([32]byte, bool)
+}
+
+// IntegrityVerifierSetter is an optional interface for chunk managers that
+// support post-construction injection of an IntegrityVerifier. Mirrors
+// AnnouncerSetter — the orchestrator wires the manifest-backed verifier
+// after the chunk Manager is built.
+type IntegrityVerifierSetter interface {
+	SetIntegrityVerifier(IntegrityVerifier)
 }
 
 // AnnouncerGetter retrieves the current announcer from a chunk manager.

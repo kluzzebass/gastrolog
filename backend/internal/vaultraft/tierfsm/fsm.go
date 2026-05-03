@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/glid"
 
 	hraft "github.com/hashicorp/raft"
 )
@@ -104,6 +105,25 @@ type ManifestEntry struct {
 	IngestIdxSize   int64
 	SourceIdxOffset int64
 	SourceIdxSize   int64
+
+	// Integrity fields populated at upload time, verified on every cache
+	// re-fetch. See gastrolog-grnc3.
+	//
+	// Hash is the GLCB whole-blob digest from the TOC footer:
+	// sha256(header ‖ section_hashes_in_TOC_order ‖ TOC_bytes). Re-fetch
+	// verification re-derives this from the on-disk file's footer + TOC
+	// section hashes — O(1) work regardless of blob size — and rejects on
+	// mismatch.
+	Hash [32]byte
+	// CloudServiceID pins the chunk to the cloud store it was actually
+	// uploaded to, surviving any future tier reconfiguration that points
+	// the tier at a different cloud service.
+	CloudServiceID glid.GLID
+	// KeyScheme selects from the table of blobKey() derivation functions.
+	// Today only scheme 0 exists ("vault-<vault>/<chunk>.glcb"); future
+	// schemes (date-prefixed, hash-sharded, multi-bucket) won't render
+	// existing entries ambiguous.
+	KeyScheme uint8
 }
 
 // ToChunkMeta converts to the public chunk.ChunkMeta type.
@@ -749,6 +769,11 @@ func (f *FSM) applyAttachOffsets(data []byte) error {
 
 // UploadChunk: [16 ChunkID][8 DiskBytes][8 IngestIdxOff][8 IngestIdxSize][8 SourceIdxOff][8 SourceIdxSize][4 NumFrames]
 func (f *FSM) applyUpload(data []byte) error {
+	// Legacy entries (pre-grnc3) wrote 60 bytes after the chunk ID; the
+	// grnc3-extended payload writes 109 (60 + 32 hash + 16 cloud service ID
+	// + 1 key scheme byte). Accept the short form for replay of historical
+	// log entries — the integrity fields stay zero, which is what readers
+	// see on chunks uploaded before this change.
 	if len(data) < 60 {
 		return fmt.Errorf("upload chunk: payload too short (%d bytes)", len(data))
 	}
@@ -764,8 +789,16 @@ func (f *FSM) applyUpload(data []byte) error {
 	e.IngestIdxSize = int64(binary.BigEndian.Uint64(data[32:40]))   //nolint:gosec // G115: round-trip
 	e.SourceIdxOffset = int64(binary.BigEndian.Uint64(data[40:48])) //nolint:gosec // G115: round-trip
 	e.SourceIdxSize = int64(binary.BigEndian.Uint64(data[48:56]))   //nolint:gosec // G115: round-trip
-	e.NumFrames = int32(binary.BigEndian.Uint32(data[56:60])) //nolint:gosec // G115: safe round-trip from uint32 frame count
+	e.NumFrames = int32(binary.BigEndian.Uint32(data[56:60]))       //nolint:gosec // G115: safe round-trip from uint32 frame count
 	e.CloudBacked = true
+
+	// Integrity fields landed in gastrolog-grnc3 — present only on the
+	// extended payload. Older entries leave these at zero values.
+	if len(data) >= 109 {
+		copy(e.Hash[:], data[60:92])
+		copy(e.CloudServiceID[:], data[92:108])
+		e.KeyScheme = data[108]
+	}
 	return nil
 }
 
@@ -859,16 +892,35 @@ func MarshalCompressChunk(id chunk.ChunkID, diskBytes int64) []byte {
 }
 
 // MarshalUploadChunk builds the Raft log data for an UploadChunk command.
-func MarshalUploadChunk(id chunk.ChunkID, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, numFrames int32) []byte {
-	buf := make([]byte, 1+60)
+//
+// Payload layout:
+//
+//	[0]      command byte
+//	[1:17]   chunk ID (16 bytes)
+//	[17:25]  disk bytes (uint64 BE)
+//	[25:33]  ingest index offset (uint64 BE)
+//	[33:41]  ingest index size (uint64 BE)
+//	[41:49]  source index offset (uint64 BE)
+//	[49:57]  source index size (uint64 BE)
+//	[57:61]  num frames (uint32 BE)
+//	[61:93]  GLCB whole-blob digest (32 bytes)             // gastrolog-grnc3
+//	[93:109] cloud service ID snapshot (16 bytes)          // gastrolog-grnc3
+//	[109]    key scheme byte                                // gastrolog-grnc3
+//
+// Total: 110 bytes payload (1 cmd + 109 fields).
+func MarshalUploadChunk(id chunk.ChunkID, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, numFrames int32, hash [32]byte, cloudServiceID glid.GLID, keyScheme uint8) []byte {
+	buf := make([]byte, 1+109)
 	buf[0] = byte(CmdUploadChunk)
 	copy(buf[1:17], id[:])
-	binary.BigEndian.PutUint64(buf[17:25], uint64(diskBytes))    //nolint:gosec // G115: round-trip
+	binary.BigEndian.PutUint64(buf[17:25], uint64(diskBytes))     //nolint:gosec // G115: round-trip
 	binary.BigEndian.PutUint64(buf[25:33], uint64(ingestIdxOff))  //nolint:gosec // G115: round-trip
 	binary.BigEndian.PutUint64(buf[33:41], uint64(ingestIdxSize)) //nolint:gosec // G115: round-trip
 	binary.BigEndian.PutUint64(buf[41:49], uint64(sourceIdxOff))  //nolint:gosec // G115: round-trip
 	binary.BigEndian.PutUint64(buf[49:57], uint64(sourceIdxSize)) //nolint:gosec // G115: round-trip
-	binary.BigEndian.PutUint32(buf[57:61], uint32(numFrames)) //nolint:gosec // G115: safe round-trip for frame count
+	binary.BigEndian.PutUint32(buf[57:61], uint32(numFrames))     //nolint:gosec // G115: safe round-trip for frame count
+	copy(buf[61:93], hash[:])
+	copy(buf[93:109], cloudServiceID[:])
+	buf[109] = keyScheme
 	return buf
 }
 

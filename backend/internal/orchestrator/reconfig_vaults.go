@@ -810,6 +810,10 @@ func (o *Orchestrator) buildTierInstance(sys *system.System, vaultCfg system.Vau
 
 	// Wire the Raft announcer now that both the group and chunk manager exist.
 	setTierRaftAnnouncer(cm, applier, o.phase, o.logger)
+	// Wire the FSM-backed integrity verifier so cold-cache cloud downloads
+	// reject blobs whose digest doesn't match what the leader stamped at
+	// upload time. gastrolog-grnc3.
+	setIntegrityVerifier(cm, o.IntegrityVerifier())
 
 	// JSONL sinks are write-only — no query engine, no indexes.
 	if tierCfg.Type == system.TierTypeJSONL {
@@ -1266,6 +1270,20 @@ func listFSMByFlag(fsm *tierfsm.FSM, pred func(tierfsm.ManifestEntry) bool) func
 	}
 }
 
+// setIntegrityVerifier wires the manifest-backed digest verifier into a chunk
+// manager that supports it. Cold-cache cloud downloads consult the FSM-recorded
+// hash and reject blobs whose actual digest doesn't match. See gastrolog-grnc3.
+func setIntegrityVerifier(cm chunk.ChunkManager, v chunk.IntegrityVerifier) {
+	if v == nil {
+		return
+	}
+	setter, ok := cm.(chunk.IntegrityVerifierSetter)
+	if !ok {
+		return
+	}
+	setter.SetIntegrityVerifier(v)
+}
+
 // setTierRaftAnnouncer wires the Raft announcer to a chunk manager after both
 // the Raft group and chunk manager have been created. The applier handles
 // routing to the vault ctl Raft leader when peers are configured. The phase parameter lets
@@ -1504,9 +1522,12 @@ func buildTierParams(sys *system.System, vaultCfg system.VaultConfig, tierCfg sy
 }
 
 // addCloudParams writes cloud-store credentials + bucket info into params
-// for a cloud-backed file tier. No-op if the referenced cloud service is
-// missing — the chunk manager will start without a CloudStore wired.
+// for a cloud-backed file tier. Always records the cloud_service_id (snapshot
+// onto every CmdUploadChunk via gastrolog-grnc3); no-op for the rest if the
+// referenced cloud service entry is missing — the chunk manager will start
+// without a CloudStore wired but still knows which service it would pin to.
 func addCloudParams(params map[string]string, cfg *system.Config, tierCfg system.TierConfig) {
+	params["cloud_service_id"] = tierCfg.CloudServiceID.String()
 	cs := findCloudService(cfg, *tierCfg.CloudServiceID)
 	if cs == nil {
 		return

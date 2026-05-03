@@ -76,6 +76,19 @@ func NewFactory() chunk.ManagerFactory {
 			cfg.CloudReadOnly = true
 		}
 
+		// CloudServiceID: snapshot of the cloud service this Manager is
+		// currently wired to. Stamped onto every CmdUploadChunk so the
+		// chunk's authoritative store survives a future tier reconfiguration
+		// that repoints CloudStore. Optional in tests; required in the
+		// orchestrator dispatch path. See gastrolog-grnc3.
+		if v := params["cloud_service_id"]; v != "" {
+			csID, err := glid.ParseUUID(v)
+			if err != nil {
+				return nil, fmt.Errorf("invalid cloud_service_id: %w", err)
+			}
+			cfg.CloudServiceID = csID
+		}
+
 		// cache_dir / cache_eviction / cache_budget / cache_ttl: silently
 		// ignored. Step 7k collapsed the separate CacheDir into <chunkDir>/
 		// data.glcb. Eviction lives on its own follow-up issue.

@@ -37,7 +37,7 @@ func MapSection(blobPath string, sectionType byte) ([]byte, func() error, error)
 		_ = f.Close()
 		return nil, nil, fmt.Errorf("stat %s: %w", blobPath, err)
 	}
-	toc, err := readTOC(f, info.Size())
+	toc, err := ReadTOC(f, info.Size())
 	if err != nil {
 		_ = f.Close()
 		return nil, nil, fmt.Errorf("read TOC of %s: %w", blobPath, err)
@@ -95,7 +95,7 @@ func LoadSection[T any](blobPath string, sectionType byte, decode func(data []by
 		return zero, fmt.Errorf("stat %s: %w", blobPath, err)
 	}
 
-	toc, err := readTOC(f, info.Size())
+	toc, err := ReadTOC(f, info.Size())
 	if err != nil {
 		return zero, fmt.Errorf("read TOC of %s: %w", blobPath, err)
 	}

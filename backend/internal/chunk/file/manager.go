@@ -45,6 +45,13 @@ const (
 	// replicable / cloud-uploadable shape.
 	dataGLCBFileName    = "data.glcb"
 	dataGLCBTmpFileName = "data.glcb.tmp"
+
+	// currentKeyScheme selects the blobKey() derivation function recorded
+	// onto every CmdUploadChunk. Only scheme 0 ("vault-<vault>/<chunk>.glcb")
+	// exists today; future schemes (date-prefixed, hash-sharded,
+	// multi-bucket) get new values without rendering existing FSM entries
+	// ambiguous. See gastrolog-grnc3.
+	currentKeyScheme uint8 = 0
 )
 
 // Per-call timeouts on cloud storage operations that run on the post-seal
@@ -107,6 +114,13 @@ type Config struct {
 	// VaultID is required when CloudStore is set (used for blob key prefix).
 	VaultID glid.GLID
 
+	// CloudServiceID is the FSM-snapshot identifier for the cloud service
+	// this Manager is currently wired to. Recorded onto every CmdUploadChunk
+	// so a chunk's authoritative store survives a tier reconfiguration that
+	// repoints CloudStore. Zero value when CloudStore is nil. See
+	// gastrolog-grnc3.
+	CloudServiceID glid.GLID
+
 	// CloudReadOnly, when true, enables cloud store reads (cursor, cache)
 	// but skips uploads in PostSealProcess. Used by follower nodes that
 	// share the leader's S3 bucket for reads without owning the blobs.
@@ -115,6 +129,14 @@ type Config struct {
 	// Announcer, when non-nil, is called after each metadata state change
 	// (create, seal, compress, upload, delete) for cluster-wide visibility.
 	Announcer chunk.MetadataAnnouncer
+
+	// IntegrityVerifier, when non-nil, is consulted on every cold-cache
+	// cloud download to verify the GLCB whole-blob digest matches the
+	// FSM-recorded value (gastrolog-grnc3). A mismatch causes the
+	// downloaded file to be deleted and the read to error — the next
+	// retry re-fetches. nil disables verification (acceptable in
+	// single-node tests; required in production cluster setups).
+	IntegrityVerifier chunk.IntegrityVerifier
 }
 
 // Manager manages file-based chunk storage with split raw.log and idx.log files.
@@ -259,6 +281,13 @@ type chunkMeta struct {
 	// Used by uploadToCloud to populate cloud BlobMeta.RawBytes without
 	// re-parsing the seekable record body. See gastrolog-24m1t step 7h.
 	rawBytes int64
+
+	// blobDigest is the GLCB whole-blob hash from the TOC footer:
+	// sha256(header ‖ section_hashes_in_TOC_order ‖ TOC_bytes). Captured
+	// at sealToGLCB time so AnnounceUpload can publish it onto the FSM
+	// entry without re-reading the local file. Verified on every cache
+	// re-fetch (gastrolog-grnc3).
+	blobDigest [32]byte
 }
 
 func (m *chunkMeta) toChunkMeta() chunk.ChunkMeta {
@@ -3087,6 +3116,17 @@ func (m *Manager) downloadCloudBlobToChunkDir(id chunk.ChunkID) (chunk.RecordCur
 		return nil, err
 	}
 
+	// Integrity check (gastrolog-grnc3): before promoting tmp → final,
+	// read the TOC footer and verify the recorded BlobDigest matches what
+	// the FSM stamped at upload time. A mismatch means the bytes we just
+	// pulled are not the bytes the leader uploaded — corruption in flight,
+	// a clobbered S3 object, or a retention race. Reject so we don't seed
+	// the warm cache with bad bytes that would be re-served forever.
+	if err := m.verifyDownloadedBlob(id, tmpPath); err != nil {
+		_ = os.Remove(tmpPath) //nolint:gosec // G703
+		return nil, err
+	}
+
 	finalPath := filepath.Join(dir, dataGLCBFileName)
 	if err := os.Rename(tmpPath, finalPath); err != nil { //nolint:gosec // G304: tmpPath is from os.CreateTemp inside chunkDir
 		_ = os.Remove(tmpPath) //nolint:gosec // G703
@@ -3094,6 +3134,41 @@ func (m *Manager) downloadCloudBlobToChunkDir(id chunk.ChunkID) (chunk.RecordCur
 	}
 
 	return m.openLocalGLCBCursor(id)
+}
+
+// verifyDownloadedBlob compares the GLCB whole-blob digest read from the
+// just-downloaded tmp file's TOC footer against the FSM-recorded digest
+// for this chunk. Returns nil when verification is skipped (no verifier
+// configured, or no FSM record yet for this chunk). Returns an error on
+// genuine mismatch so the caller can discard the tmp and re-fetch.
+func (m *Manager) verifyDownloadedBlob(id chunk.ChunkID, path string) error {
+	if m.cfg.IntegrityVerifier == nil {
+		return nil
+	}
+	expected, ok := m.cfg.IntegrityVerifier.ExpectedDigest(id)
+	if !ok {
+		// No FSM expectation on file (pre-grnc3 entry, or the upload's
+		// CmdUploadChunk hasn't applied locally yet). Skip; a later read
+		// will re-verify once the FSM catches up.
+		return nil
+	}
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return fmt.Errorf("open downloaded blob for verify: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("stat downloaded blob for verify: %w", err)
+	}
+	toc, err := chunkcloud.ReadTOC(f, info.Size())
+	if err != nil {
+		return fmt.Errorf("read TOC for digest verify: %w", err)
+	}
+	if toc.BlobDigest != expected {
+		return fmt.Errorf("downloaded blob digest mismatch for %s: rejecting cache populate (FSM=%x, blob=%x)", id, expected[:8], toc.BlobDigest[:8])
+	}
+	return nil
 }
 
 // SetRotationPolicy updates the rotation policy for future appends.
@@ -3227,6 +3302,15 @@ func (m *Manager) GetAnnouncer() chunk.MetadataAnnouncer {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.cfg.Announcer
+}
+
+// SetIntegrityVerifier injects the verifier consulted on every cold-cache
+// cloud download (gastrolog-grnc3). Safe to pass nil to disable
+// verification entirely.
+func (m *Manager) SetIntegrityVerifier(v chunk.IntegrityVerifier) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.cfg.IntegrityVerifier = v
 }
 
 func (m *Manager) CheckRotation() *string {
@@ -3547,6 +3631,7 @@ func (m *Manager) sealToGLCB(id chunk.ChunkID) (*chunkcloud.Writer, int64, error
 		meta.sourceIdxSize = toc.SourceIdxSize
 		meta.numFrames = numFrames
 		meta.rawBytes = bm.RawBytes
+		meta.blobDigest = toc.BlobDigest
 	}
 	m.mu.Unlock()
 
@@ -3665,7 +3750,8 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		m.cfg.Announcer.AnnounceUpload(id, blobSize,
 			toc.IngestIdxOffset, toc.IngestIdxSize,
 			toc.SourceIdxOffset, toc.SourceIdxSize,
-			numFrames)
+			numFrames,
+			meta.blobDigest, m.cfg.CloudServiceID, currentKeyScheme)
 	}
 
 	// Delete the multi-file data artifacts (raw.log/idx.log/etc.) — they
@@ -3751,6 +3837,7 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 	sourceIdxOff := am.sourceIdxOffset
 	sourceIdxSize := am.sourceIdxSize
 	numFrames := am.numFrames
+	blobDigest := am.blobDigest
 
 	// FSM-first: announce before any local mutation. Applier.Apply blocks on
 	// quorum + local FSM apply, so once the announce returns the FSM is
@@ -3763,7 +3850,8 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 		m.cfg.Announcer.AnnounceUpload(id, blobSize,
 			ingestIdxOff, ingestIdxSize,
 			sourceIdxOff, sourceIdxSize,
-			numFrames)
+			numFrames,
+			blobDigest, m.cfg.CloudServiceID, currentKeyScheme)
 	}
 
 	// Delete the multi-file data artifacts (raw.log/idx.log/etc.) — same

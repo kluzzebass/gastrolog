@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/glid"
 	"gastrolog/internal/lifecycle"
 )
 
@@ -58,8 +59,8 @@ func (a *Announcer) AnnounceAttachOffsets(id chunk.ChunkID, ingestIdxOff, ingest
 	a.apply("attach-offsets", id, MarshalAttachOffsets(id, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize, numFrames))
 }
 
-func (a *Announcer) AnnounceUpload(id chunk.ChunkID, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, numFrames int32) {
-	a.apply("upload", id, MarshalUploadChunk(id, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize, numFrames))
+func (a *Announcer) AnnounceUpload(id chunk.ChunkID, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, numFrames int32, hash [32]byte, cloudServiceID glid.GLID, keyScheme uint8) {
+	a.apply("upload", id, MarshalUploadChunk(id, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize, numFrames, hash, cloudServiceID, keyScheme))
 }
 
 func (a *Announcer) AnnounceDelete(id chunk.ChunkID) {

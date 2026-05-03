@@ -633,7 +633,7 @@ func TestSweepMissingReplicasRequestsOnlySealedAndAbsentEntries(t *testing.T) {
 	idCloud := chunk.NewChunkID()
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(idCloud, now, now, now)})
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idCloud, now, 1, 1, now, now, now, false)})
-	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalUploadChunk(idCloud, 1, 0, 0, 0, 0, 0)})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalUploadChunk(idCloud, 1, 0, 0, 0, 0, 0, [32]byte{}, glid.GLID{}, 0)})
 
 	cm.chunks = []chunk.ChunkMeta{
 		{ID: idPresent, Sealed: true},
@@ -1127,7 +1127,7 @@ func TestWireTierFSMOnUploadFiresNotifyChunkChange(t *testing.T) {
 	now := time.Now()
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(id, now, now, now)})
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(id, now, 1, 1, now, now, now, false)})
-	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalUploadChunk(id, 1024, 0, 0, 0, 0, 1)}); err != nil {
+	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalUploadChunk(id, 1024, 0, 0, 0, 0, 1, [32]byte{}, glid.GLID{}, 0)}); err != nil {
 		t.Fatalf("apply upload: %v", err)
 	}
 
