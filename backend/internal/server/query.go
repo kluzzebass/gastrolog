@@ -91,6 +91,16 @@ func (s *QueryServer) Search(
 		return errInvalidArg(err)
 	}
 
+	// Resolve unbounded queries (last=all, no time directive) to concrete
+	// bounds on the coordinator before fan-out. Without this, every node
+	// independently calls deriveTimeRange against its own local chunk view
+	// and produces non-overlapping bucket grids that mergeHistogramBuckets
+	// cannot reconcile — the histogram ends up split between two unrelated
+	// time ranges. last=5m / last=1h already pre-resolve via applyDirective
+	// (using the coordinator's clock), so they get aligned grids for free;
+	// this closes the gap for the unbounded case.
+	q = s.resolveUnboundedQuery(ctx, q)
+
 	if pipeline != nil && len(pipeline.Pipes) > 0 {
 		// Reject queries with export operator — must route through ExportToVault RPC.
 		if _, hasExport := querylang.HasExportOp(pipeline); hasExport {
@@ -448,6 +458,111 @@ func normalizedRange(start, end time.Time) (time.Time, time.Time, bool) {
 		return time.Time{}, time.Time{}, false
 	}
 	return start, end, true
+}
+
+// resolveUnboundedQuery fills in zero q.Start / q.End from the replicated
+// vault-ctl Raft FSM so all nodes (coordinator + remotes) bucket histograms
+// on the same grid.
+//
+// Each node's ComputeHistogram independently calls deriveTimeRange when q.Start
+// or q.End is zero, walking its LOCAL chunk view to pick min(IngestStart) and
+// max(IngestEnd). With remotes seeing different chunk sets, the resulting
+// bucket grids don't align and mergeHistogramBuckets — which matches by
+// exact TimestampMs — emits a fragmented histogram split across unrelated
+// time ranges. Resolving here, before q.String() is forwarded, makes the
+// remotes parse concrete start=/end= directives and skip deriveTimeRange.
+//
+// Bounded queries (last=5m, explicit start=/end=) are no-ops.
+//
+// Reads from VaultManifestEntriesFromCtlFSM, which goes directly through the
+// vault-ctl Raft group's FSM rather than per-tier-instance state. Every node
+// is a voter of every vault-ctl group (gastrolog-292yi), so the FSM is
+// authoritative cluster-wide regardless of which node hosts the tier — a
+// coordinator that runs no tier replicas still sees the full sealed manifest.
+// Falls back to ListChunkMetas for the legacy memory-mode path (no GroupManager,
+// no FSM); that path also picks up the active chunk for vaults that have not
+// yet sealed any data.
+func (s *QueryServer) resolveUnboundedQuery(ctx context.Context, q query.Query) query.Query {
+	if !q.Start.IsZero() && !q.End.IsZero() {
+		return q
+	}
+	selectedVaults := s.selectedOrAllVaults(ctx, q)
+	earliest, latest := s.aggregateVaultBounds(selectedVaults)
+	if earliest.IsZero() {
+		// No visible chunks anywhere. Leave bounds zero so per-node
+		// derivation runs — bucketing may still be misaligned in that
+		// degenerate setup, but we have no better anchor.
+		return q
+	}
+	// Bump latest to coordinator-now so the active chunk's tail is captured
+	// even when its IngestEnd lags real time.
+	if now := time.Now(); latest.Before(now) {
+		latest = now
+	}
+	if q.Start.IsZero() {
+		q.Start = earliest
+	}
+	if q.End.IsZero() {
+		q.End = latest
+	}
+	return q
+}
+
+// selectedOrAllVaults returns vaults from the query's vault_id= filter, or
+// every known vault when the filter is absent. Used by resolveUnboundedQuery
+// to know which vaults' chunks contribute to the unbounded-query bound
+// derivation.
+func (s *QueryServer) selectedOrAllVaults(ctx context.Context, q query.Query) []glid.GLID {
+	selected, _ := query.ExtractVaultFilter(q.Normalize().BoolExpr, nil)
+	if len(selected) > 0 || s.cfgStore == nil {
+		return selected
+	}
+	vaults, err := s.cfgStore.ListVaults(ctx)
+	if err != nil {
+		return nil
+	}
+	out := make([]glid.GLID, 0, len(vaults))
+	for _, v := range vaults {
+		out = append(out, v.ID)
+	}
+	return out
+}
+
+// aggregateVaultBounds returns (min IngestStart, max IngestEnd) across every
+// chunk visible for the given vaults. Walks both the cluster-replicated
+// vault-ctl FSM (sealed manifest, visible on every voter) and the local
+// chunk manager (active + memory-mode tiers). Either source contributing
+// nothing is fine — the function only collapses to (zero, zero) when neither
+// has anything to say.
+func (s *QueryServer) aggregateVaultBounds(vaults []glid.GLID) (time.Time, time.Time) {
+	var earliest, latest time.Time
+	track := func(start, end time.Time) {
+		if !start.IsZero() && (earliest.IsZero() || start.Before(earliest)) {
+			earliest = start
+		}
+		if !end.IsZero() && (latest.IsZero() || end.After(latest)) {
+			latest = end
+		}
+	}
+	for _, vid := range vaults {
+		for _, e := range s.orch.VaultManifestEntriesFromCtlFSM(vid) {
+			if e.RecordCount == 0 {
+				continue
+			}
+			track(e.IngestStart, e.IngestEnd)
+		}
+		metas, err := s.orch.ListChunkMetas(vid)
+		if err != nil {
+			continue
+		}
+		for _, m := range metas {
+			if m.RecordCount == 0 {
+				continue
+			}
+			track(m.IngestStart, m.IngestEnd)
+		}
+	}
+	return earliest, latest
 }
 
 // histogramFullyLocal returns true when this node is the leader of every

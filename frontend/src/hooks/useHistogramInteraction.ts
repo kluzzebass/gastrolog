@@ -216,7 +216,13 @@ export function useHistogramInteraction(deps: HistogramInteractionDeps): Histogr
   };
 
   const labelCount = Math.min(5, buckets.length);
-  const labelStep = Math.max(1, Math.floor(buckets.length / labelCount));
+  // Span the full bucket range so the first AND last bucket anchor the axis.
+  // floor(buckets.length / labelCount) lands the last tick well short of the
+  // right edge — with 50 buckets and labelCount=5 the rightmost tick was
+  // bucket 40, so a span ending at bucket 49 looked truncated even though
+  // the data went all the way to it.
+  const labelStep =
+    labelCount > 1 ? (buckets.length - 1) / (labelCount - 1) : 0;
 
   const windowMs =
     buckets.length > 1 ? lastBucket!.ts.getTime() - firstBucket!.ts.getTime() : 0;

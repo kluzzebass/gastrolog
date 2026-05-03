@@ -796,16 +796,30 @@ func timechartChunkByIngestTS(
 ) {
 	end := start.Add(bucketWidth * time.Duration(numBuckets))
 
+	// IngestStart / IngestEnd track the FIRST and LAST *appended* records'
+	// IngestTS, NOT min/max of IngestTS within the chunk. For non-monotonic
+	// chunks (records appended out of TS order — common for cloud-backed
+	// chunks built via ImportRecords or for tier-2+ destinations receiving
+	// streamed records), IngestEnd can be earlier than IngestStart, and the
+	// chunk's true TS range can extend beyond [IngestStart, IngestEnd] in
+	// either direction. Clamp by min/max instead of treating Start/End
+	// literally, and widen the search range to cover everything the chunk
+	// could plausibly hold.
+	clampLo, clampHi := meta.IngestStart, meta.IngestEnd
+	if !clampLo.IsZero() && !clampHi.IsZero() && clampLo.After(clampHi) {
+		clampLo, clampHi = clampHi, clampLo
+	}
+
 	firstBucket := 0
-	if !meta.IngestStart.IsZero() && meta.IngestStart.After(start) {
-		firstBucket = int(meta.IngestStart.Sub(start) / bucketWidth)
+	if !clampLo.IsZero() && clampLo.After(start) {
+		firstBucket = int(clampLo.Sub(start) / bucketWidth)
 		if firstBucket >= numBuckets {
 			return
 		}
 	}
 	lastBucket := numBuckets - 1
-	if !meta.IngestEnd.IsZero() && meta.IngestEnd.Before(end) {
-		lastBucket = int(meta.IngestEnd.Sub(start) / bucketWidth)
+	if !clampHi.IsZero() && clampHi.Before(end) {
+		lastBucket = int(clampHi.Sub(start) / bucketWidth)
 		if lastBucket >= numBuckets {
 			lastBucket = numBuckets - 1
 		}
@@ -976,6 +990,22 @@ func chunkBucketTotals(
 // — endRank - startRank — because physical record positions in chunks built
 // via ImportRecords are scattered relative to IngestTS order. See
 // gastrolog-66b7x.
+//
+// Cloud chunks whose local IngestTS index isn't cached fall through to a
+// proportional FSM-based estimate: distribute meta.RecordCount across the
+// buckets the chunk overlaps in proportion to (bucket overlap / chunk span).
+// Without this fallback, cloud chunks on follower nodes that haven't pulled
+// the index file silently contribute zero to the histogram even though the
+// search itself can stream the records — the vault inspector reports N
+// records but the histogram shows N/2 because every cloud chunk drops out.
+//
+// We can't probe the index up front: findIngestRank at the chunk's
+// IngestStart returns (0, true) for a healthy index AND for a missing
+// index (rank zero is the natural answer at the chunk's earliest record),
+// so a single probe can't distinguish the two. Instead, run rank arithmetic
+// across all buckets first; if the total contribution is zero despite the
+// chunk having records, the index isn't actually serving lookups and we
+// fall back to overlap-based distribution.
 func timechartChunkByIndex(
 	cm chunk.ChunkManager,
 	im index.IndexManager,
@@ -985,6 +1015,40 @@ func timechartChunkByIndex(
 	firstBucket, lastBucket int,
 	counts []int64,
 ) {
+	if firstBucket > lastBucket {
+		return
+	}
+	// IngestStart/IngestEnd track first/last appended records, not
+	// min/max IngestTS. For non-monotonic chunks the IngestEnd-fallthrough
+	// shortcut needs to compare against max(IngestStart, IngestEnd) to fire
+	// at the chunk's actual upper TS bound.
+	clampHi := meta.IngestEnd
+	if !meta.IngestStart.IsZero() && (clampHi.IsZero() || meta.IngestStart.After(clampHi)) {
+		clampHi = meta.IngestStart
+	}
+
+	// Fast path: probe once before the per-bucket loop. If neither cm nor
+	// im can resolve the chunk's index at any TS, the rank-arithmetic loop
+	// would do 50×2 failed lookups per chunk — at ~50µs per failed
+	// loadIngestTSMmap open() syscall, that's ~5ms per chunk × ~1900 chunks
+	// = ~10s of pure syscall overhead on a `last=12h` query. The probe
+	// distinguishes "working index that returns rank 0" (ok=true) from
+	// "no index reachable" (ok=false) cleanly via the boolean — only the
+	// rank value is ambiguous, not ok. On a miss we skip straight to
+	// FSM-based distribution.
+	probeTS := meta.IngestStart
+	if probeTS.IsZero() {
+		probeTS = clampHi
+	}
+	if !probeTS.IsZero() {
+		if _, ok := findIngestRank(cm, im, meta.ID, probeTS); !ok {
+			distributeChunkRecordsByOverlap(meta, start, bucketWidth, firstBucket, lastBucket, counts)
+			return
+		}
+	}
+
+	rankCounts := make([]int64, lastBucket-firstBucket+1)
+	var rankTotal int64
 	for b := firstBucket; b <= lastBucket; b++ {
 		bStart := start.Add(bucketWidth * time.Duration(b))
 		bEnd := start.Add(bucketWidth * time.Duration(b+1))
@@ -992,14 +1056,90 @@ func timechartChunkByIndex(
 		startRank, _ := findIngestRank(cm, im, meta.ID, bStart)
 
 		var endRank uint64
-		if !meta.IngestEnd.IsZero() && !bEnd.Before(meta.IngestEnd) {
+		if !clampHi.IsZero() && !bEnd.Before(clampHi) {
 			endRank = uint64(meta.RecordCount) //nolint:gosec // G115: RecordCount is always non-negative
 		} else if rank, ok := findIngestRank(cm, im, meta.ID, bEnd); ok {
 			endRank = rank
 		}
 
 		if endRank > startRank {
-			counts[b] += int64(endRank - startRank)
+			delta := int64(endRank - startRank)
+			rankCounts[b-firstBucket] = delta
+			rankTotal += delta
 		}
+	}
+	if rankTotal < meta.RecordCount {
+		// Rank arithmetic under-counted the chunk. Three known causes:
+		//   1. Local index unreachable (cloud chunk whose index file
+		//      isn't cached on this node) — every per-bucket lookup
+		//      returns (0, false).
+		//   2. lastBucket was clamped at numBuckets-1 because the chunk
+		//      extends past the histogram window — the upper-bound
+		//      fallthrough gate fails for every bucket.
+		//   3. Non-monotonic chunk where IngestStart/IngestEnd are
+		//      first/last *appended* records' TS rather than min/max,
+		//      so the bucket clamping in timechartChunkByIngestTS lands
+		//      a range that doesn't fully cover the chunk's records.
+		// In all three the FSM still tells us how many records the
+		// chunk holds — fall back to overlap-based distribution so they
+		// show up in the histogram. Was the production gap "vault
+		// inspector reports N, histogram shows ~N/2".
+		distributeChunkRecordsByOverlap(meta, start, bucketWidth, firstBucket, lastBucket, counts)
+		return
+	}
+	for i, c := range rankCounts {
+		counts[firstBucket+i] += c
+	}
+}
+
+// distributeChunkRecordsByOverlap spreads meta.RecordCount across the
+// histogram buckets the chunk overlaps, in proportion to the time overlap
+// between each bucket and [meta.IngestStart, meta.IngestEnd]. Used when the
+// IngestTS rank index isn't locally resolvable (typically cloud chunks on
+// followers without a cached index file) — without this, the chunk silently
+// contributes zero, breaking the invariant "histogram total ≈ vault total".
+func distributeChunkRecordsByOverlap(
+	meta chunk.ChunkMeta,
+	start time.Time,
+	bucketWidth time.Duration,
+	firstBucket, lastBucket int,
+	counts []int64,
+) {
+	if meta.RecordCount == 0 || meta.IngestStart.IsZero() || meta.IngestEnd.IsZero() {
+		return
+	}
+	span := meta.IngestEnd.Sub(meta.IngestStart)
+	if span <= 0 {
+		// Degenerate single-instant chunk: dump the count into the bucket
+		// containing IngestStart, if it falls in range.
+		offset := meta.IngestStart.Sub(start)
+		if offset < 0 {
+			return
+		}
+		b := int(offset / bucketWidth)
+		if b < firstBucket || b > lastBucket {
+			return
+		}
+		counts[b] += meta.RecordCount
+		return
+	}
+	for b := firstBucket; b <= lastBucket; b++ {
+		bStart := start.Add(bucketWidth * time.Duration(b))
+		bEnd := start.Add(bucketWidth * time.Duration(b+1))
+		ovStart := bStart
+		if meta.IngestStart.After(ovStart) {
+			ovStart = meta.IngestStart
+		}
+		ovEnd := bEnd
+		if meta.IngestEnd.Before(ovEnd) {
+			ovEnd = meta.IngestEnd
+		}
+		overlap := ovEnd.Sub(ovStart)
+		if overlap <= 0 {
+			continue
+		}
+		// int64 arithmetic preserves rounding sanity; floor is fine because
+		// any rounding loss is bounded by O(buckets).
+		counts[b] += meta.RecordCount * int64(overlap) / int64(span)
 	}
 }

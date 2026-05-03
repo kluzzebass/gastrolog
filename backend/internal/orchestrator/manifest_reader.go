@@ -4,6 +4,8 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/manifest"
+	"gastrolog/internal/raftgroup"
+	"gastrolog/internal/vaultraft"
 	"gastrolog/internal/vaultraft/tierfsm"
 )
 
@@ -64,6 +66,34 @@ func (r *orchestratorManifestReader) EntriesForVault(key glid.GLID) []tierfsm.Ma
 		}
 	}
 	return nil
+}
+
+// VaultManifestEntriesFromCtlFSM returns every manifest entry (sealed and
+// active) for the given vault, read directly from the replicated vault-ctl
+// Raft FSM rather than from local TierInstances. Every node participates as
+// a voter in every vault-ctl Raft group (gastrolog-292yi), so the FSM is
+// authoritative cluster-wide and visible on nodes that don't host any tier
+// instance for the vault — the case where ManifestReader().EntriesForVault
+// returns nil because o.vaults has no entry. Returns nil when there is no
+// GroupManager (single-node / memory mode) or when this node hasn't joined
+// the vault-ctl group yet.
+func (o *Orchestrator) VaultManifestEntriesFromCtlFSM(vaultID glid.GLID) []tierfsm.ManifestEntry {
+	if o.groupMgr == nil {
+		return nil
+	}
+	g := o.groupMgr.GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
+	if g == nil {
+		return nil
+	}
+	vfsm, ok := g.FSM.(*vaultraft.FSM)
+	if !ok || vfsm == nil {
+		return nil
+	}
+	var out []tierfsm.ManifestEntry
+	for _, t := range vfsm.Tiers() {
+		out = append(out, t.List()...)
+	}
+	return out
 }
 
 func collectSealedEntries(tiers []*TierInstance) []tierfsm.ManifestEntry {

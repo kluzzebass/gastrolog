@@ -43,30 +43,6 @@ describe("useCrudHandlers", () => {
     });
   });
 
-  test("handleSave calls clearEdit on success", async () => {
-    const mutation = makeMutation();
-    const deleteMutation = makeMutation();
-    const clearEdit = mock(() => {});
-
-    const { result } = renderHook(
-      () =>
-        useCrudHandlers({
-          mutation,
-          deleteMutation,
-          label: "Item",
-          onSaveTransform: (id, edit: { value: string }) => ({ id, ...edit }),
-          clearEdit,
-        }),
-      { wrapper },
-    );
-
-    await act(async () => {
-      await result.current.handleSave("item1", { value: "hello" });
-    });
-
-    expect(clearEdit).toHaveBeenCalledWith("item1");
-  });
-
   test("handleSave catches errors from onSaveTransform", async () => {
     const mutation = makeMutation();
     const deleteMutation = makeMutation();

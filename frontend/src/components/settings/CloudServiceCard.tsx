@@ -124,7 +124,6 @@ export function CloudServiceCard({
       reconcileSchedule: e.reconcileSchedule,
     }),
     onDeleteTransform: (id) => ({ id }),
-    clearEdit,
   });
 
   return (

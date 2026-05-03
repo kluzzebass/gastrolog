@@ -106,7 +106,6 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
       enabled: edit.enabled,
       ejectOnly: edit.ejectOnly,
     }),
-    clearEdit,
   });
 
   const handleSave = (id: string) => saveRoute(id, getEdit(id));

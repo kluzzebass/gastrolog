@@ -843,7 +843,16 @@ func (d *directUnaryForwarder) ForwardUnary(ctx context.Context, nodeID, procedu
 
 func addMNRecords(t *testing.T, node multinodeTestNode, prefix string, count int, attrs map[string]string) {
 	t.Helper()
-	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	addMNRecordsFromTime(t, node, prefix, count, time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC), attrs)
+}
+
+func addMNRecordsAt(t *testing.T, node multinodeTestNode, prefix string, count int, t0 time.Time) {
+	t.Helper()
+	addMNRecordsFromTime(t, node, prefix, count, t0, nil)
+}
+
+func addMNRecordsFromTime(t *testing.T, node multinodeTestNode, prefix string, count int, t0 time.Time, attrs map[string]string) {
+	t.Helper()
 	for i := range count {
 		ts := t0.Add(time.Duration(i) * time.Second)
 		node.vault.CM.Append(chunk.Record{
@@ -1927,6 +1936,61 @@ func TestMultiNode_ListJobsCrossNode(t *testing.T) {
 	}
 	if !peerJobIDs["remote-retain"] {
 		t.Error("expected remote-retain from data-1 in ListJobs")
+	}
+}
+
+// TestMultiNode_UnboundedHistogramAlignsBuckets verifies that an unbounded
+// query (last=all, no time directive) produces a single 50-bucket histogram
+// aligned to the same time grid across every node, instead of N×50 buckets
+// fragmented across mismatched per-node grids. Each node's ComputeHistogram
+// independently calls deriveTimeRange when q.Start/q.End are zero, walking
+// only its LOCAL chunk view; without coordinator-side resolution every node
+// picks a different (start, end) pair and mergeHistogramBuckets — which
+// matches by exact TimestampMs — emits buckets across N disjoint ranges.
+// See gastrolog-2zdsc.
+func TestMultiNode_UnboundedHistogramAlignsBuckets(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1", "data-2"})
+
+	// Each node holds records in a distinct hour-wide time window. The
+	// coordinator's window spans the union, so coord-side bounds derivation
+	// captures every record regardless of which node they land on.
+	addMNRecordsAt(t, h.Node(t, "coord"), "C", 10, time.Date(2025, 6, 15, 9, 0, 0, 0, time.UTC))
+	addMNRecordsAt(t, h.Node(t, "data-1"), "D1", 10, time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC))
+	addMNRecordsAt(t, h.Node(t, "data-2"), "D2", 10, time.Date(2025, 6, 15, 11, 0, 0, 0, time.UTC))
+
+	stream, err := h.client.Search(context.Background(), connect.NewRequest(&gastrologv1.SearchRequest{
+		Query: &gastrologv1.Query{Expression: "last=all"},
+	}))
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+
+	var histogram []*gastrologv1.HistogramBucket
+	var totalRecords int
+	for stream.Receive() {
+		if len(stream.Msg().Histogram) > 0 {
+			histogram = stream.Msg().Histogram
+		}
+		totalRecords += len(stream.Msg().Records)
+	}
+	if err := stream.Err(); err != nil && err != io.EOF {
+		t.Fatalf("stream error: %v", err)
+	}
+
+	if totalRecords != 30 {
+		t.Errorf("expected 30 records (10 per node), got %d", totalRecords)
+	}
+	if len(histogram) != 50 {
+		t.Errorf("expected exactly 50 aligned buckets, got %d (per-node deriveTimeRange likely produced disjoint grids)", len(histogram))
+	}
+
+	var histTotal int64
+	for _, b := range histogram {
+		histTotal += b.Count
+	}
+	if histTotal != int64(totalRecords) {
+		t.Errorf("histogram total %d != record count %d", histTotal, totalRecords)
 	}
 }
 
