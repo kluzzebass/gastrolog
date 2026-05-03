@@ -490,3 +490,91 @@ func (r *slicedReader) Read(p []byte) (int, error) {
 	r.off += n
 	return n, nil
 }
+
+// TestAdoptSealedBlob_TruncatedBodyRejected pins the partial-RPC path:
+// the leader said `totalSize=N` in the header but the stream EOFs early.
+// AdoptSealedBlob must reject without leaving half-state on disk.
+func TestAdoptSealedBlob_TruncatedBodyRejected(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	m, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	defer func() { _ = m.Close() }()
+
+	// Build a real GLCB to know what valid bytes look like, then truncate.
+	leaderDir := t.TempDir()
+	leader, err := NewManager(Config{Dir: leaderDir})
+	if err != nil {
+		t.Fatalf("new leader: %v", err)
+	}
+	defer func() { _ = leader.Close() }()
+
+	id, _, err := leader.Append(chunk.Record{
+		IngestTS: time.Now(), Raw: []byte("rec"),
+	})
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := leader.Seal(); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	if _, _, err := leader.sealToGLCB(id); err != nil {
+		t.Fatalf("sealToGLCB: %v", err)
+	}
+	blobBytes, err := os.ReadFile(filepath.Clean(filepath.Join(leader.chunkDir(id), dataGLCBFileName)))
+	if err != nil {
+		t.Fatalf("read blob: %v", err)
+	}
+
+	// Lie about totalSize: declare full length but only feed half.
+	half := len(blobBytes) / 2
+	if _, err := m.AdoptSealedBlob(id, int64(len(blobBytes)), bytesReader(blobBytes[:half])); err == nil {
+		t.Fatal("expected AdoptSealedBlob to reject truncated body")
+	}
+
+	// .tmp must be cleaned up.
+	tmpPath := filepath.Join(m.chunkDir(id), dataGLCBTmpFileName)
+	if _, err := os.Stat(tmpPath); !os.IsNotExist(err) {
+		t.Errorf("data.glcb.tmp should be removed on size mismatch, got err=%v", err)
+	}
+	// data.glcb must NOT exist (the rename never happened).
+	finalPath := filepath.Join(m.chunkDir(id), dataGLCBFileName)
+	if _, err := os.Stat(finalPath); !os.IsNotExist(err) {
+		t.Errorf("data.glcb should not exist after a rejected adopt, got err=%v", err)
+	}
+}
+
+// TestAdoptSealedBlob_StaleTmpRejected pins the follower-restart-
+// mid-receive path: a prior AdoptSealedBlob aborted, leaving a
+// data.glcb.tmp on disk. A retry by the leader must surface the stale
+// tmp clearly (O_EXCL fails) instead of silently clobbering it.
+//
+// The cleanup of stale .tmp on startup is loadExisting's job (existing
+// behaviour for the seal pipeline's tmp files); within a single
+// process AdoptSealedBlob refusing to overwrite is the correct local
+// invariant.
+func TestAdoptSealedBlob_StaleTmpRejected(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	m, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	defer func() { _ = m.Close() }()
+
+	id := chunk.ChunkID{1, 2, 3}
+	chunkDir := m.chunkDir(id)
+	if err := os.MkdirAll(chunkDir, 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	tmpPath := filepath.Join(chunkDir, dataGLCBTmpFileName)
+	if err := os.WriteFile(tmpPath, []byte("stale-prior-attempt"), 0o644); err != nil {
+		t.Fatalf("write stale tmp: %v", err)
+	}
+
+	if _, err := m.AdoptSealedBlob(id, 100, bytesReader([]byte("doesn't matter"))); err == nil {
+		t.Fatal("expected AdoptSealedBlob to refuse a stale data.glcb.tmp")
+	}
+}

@@ -1,16 +1,17 @@
 package orchestrator
 
 import (
-	"io"
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"gastrolog/internal/glid"
+	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
-
-	"fmt"
-	"os"
 
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
@@ -754,4 +755,79 @@ func TestClusterReplicationDeletePropagation(t *testing.T) {
 
 	// ---- Verify: no chunk directories on disk on ANY node ----
 	h.assertTierDirEmpty(t, 0)
+}
+
+// TestClusterReplicationDataGLCBByteIdenticalAcrossReplicas pins the
+// load-bearing acceptance bullet of gastrolog-3o5b4: after binary chunk
+// replication runs, every follower's data.glcb must be byte-identical
+// to the leader's. This is what unblocks the "treat replicas as a
+// single source of truth" semantics — leader-only encoding plus
+// byte-copy distribution means cross-replica integrity is a
+// self-evident property, not a determinism audit.
+func TestClusterReplicationDataGLCBByteIdenticalAcrossReplicas(t *testing.T) {
+	t.Parallel()
+	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 1, 100)
+
+	leaderNode := h.nodes["leader"]
+	tier0 := leaderNode.tiers[0]
+
+	// Three sealed chunks at 100 records each, deterministic in shape so
+	// cross-run comparison is meaningful (no flake on byte-identical).
+	const totalRecords = 300
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	for i := range totalRecords {
+		ts := t0.Add(time.Duration(i) * time.Microsecond)
+		if err := leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+			IngestTS: ts,
+			WriteTS:  ts,
+			Raw:      fmt.Appendf(nil, "byteid-%d", i),
+		}); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+	if active := tier0.Chunks.Active(); active != nil && active.RecordCount > 0 {
+		_ = tier0.Chunks.Seal()
+	}
+
+	metas, _ := tier0.Chunks.List()
+	if len(metas) < 2 {
+		t.Fatalf("expected ≥ 2 sealed chunks, got %d", len(metas))
+	}
+
+	processor := tier0.Chunks.(chunk.ChunkPostSealProcessor)
+	for _, m := range metas {
+		if err := processor.PostSealProcess(context.Background(), m.ID); err != nil {
+			t.Fatalf("PostSealProcess(%s): %v", m.ID, err)
+		}
+	}
+
+	for _, m := range metas {
+		leaderNode.orch.replicateSealedChunk(context.Background(),
+			h.vaultID, h.tierIDs[0], m.ID, tier0.FollowerTargets)
+	}
+
+	// For each replicated chunk, hash the leader's data.glcb and compare
+	// against each follower's data.glcb. All four hashes must match exactly.
+	for _, m := range metas {
+		leaderHash := blobSHA256(t, leaderNode.tierDirs[0], m.ID)
+		for _, fid := range []string{"f1", "f2", "f3"} {
+			followerHash := blobSHA256(t, h.nodes[fid].tierDirs[0], m.ID)
+			if followerHash != leaderHash {
+				t.Errorf("chunk %s: follower %s sha256 differs\n  leader=  %x\n  follower=%x",
+					m.ID, fid, leaderHash[:], followerHash[:])
+			}
+		}
+	}
+}
+
+// blobSHA256 computes the SHA-256 of <tierDir>/<chunkID>/data.glcb.
+// Test helper for cross-replica byte-identity assertions.
+func blobSHA256(t *testing.T, tierDir string, chunkID chunk.ChunkID) [32]byte {
+	t.Helper()
+	path := filepath.Join(tierDir, chunkID.String(), "data.glcb")
+	data, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return sha256.Sum256(data)
 }
