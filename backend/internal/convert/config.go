@@ -167,6 +167,13 @@ func TierConfigToProto(t system.TierConfig, placements []system.TierPlacement) *
 		CacheBudget:       t.CacheBudget,
 		CacheTtl:          t.CacheTTL,
 	}
+	// Cloud-backed tiers go on the wire as TIER_TYPE_CLOUD for client UI
+	// back-compat (the frontend uses the type discriminator to dispatch
+	// cloud-specific form fields). Server-side dispatch ignores the wire
+	// type and uses TierConfig.IsCloud(). See gastrolog-4k5mg.
+	if t.IsCloud() {
+		pb.Type = gastrologv1.TierType_TIER_TYPE_CLOUD
+	}
 	pb.RotationPolicyId = glid.OptionalToProto(t.RotationPolicyID)
 	pb.CloudServiceId = glid.OptionalToProto(t.CloudServiceID)
 	return pb
