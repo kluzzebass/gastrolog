@@ -14,7 +14,7 @@ import (
 	"sync"
 
 	"gastrolog/internal/glid"
-	tierfsm "gastrolog/internal/tier/raftfsm"
+	"gastrolog/internal/vaultraft/tierfsm"
 
 	hraft "github.com/hashicorp/raft"
 )

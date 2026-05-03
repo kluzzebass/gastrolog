@@ -8,6 +8,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
+	"gastrolog/internal/manifest"
 	"gastrolog/internal/query"
 )
 
@@ -61,7 +62,7 @@ func (o *Orchestrator) UnregisterIngester(id glid.GLID) {
 	delete(o.ingesterMeta, id)
 }
 
-// ChunkManager implements query.VaultRegistry: returns the active (ingest)
+// ChunkManager implements manifest.VaultRegistry: returns the active (ingest)
 // tier's chunk manager for the vault keyed by key. Returns nil if not found.
 func (o *Orchestrator) ChunkManager(key glid.GLID) chunk.ChunkManager {
 	o.mu.RLock()
@@ -72,7 +73,7 @@ func (o *Orchestrator) ChunkManager(key glid.GLID) chunk.ChunkManager {
 	return nil
 }
 
-// IndexManager implements query.VaultRegistry: returns the active tier's index
+// IndexManager implements manifest.VaultRegistry: returns the active tier's index
 // manager for the vault keyed by key. Returns nil if not found.
 func (o *Orchestrator) IndexManager(key glid.GLID) index.IndexManager {
 	o.mu.RLock()
@@ -194,7 +195,7 @@ func (o *Orchestrator) MultiVaultQueryEngine() *query.Engine {
 	return query.NewWithRegistry(&searchReadyRegistry{o: o}, o.logger)
 }
 
-// searchReadyRegistry implements query.VaultRegistry for multi-vault search,
+// searchReadyRegistry implements manifest.VaultRegistry for multi-vault search,
 // exposing only replication-ready vaults so partially applied tier metadata
 // cannot be queried (gastrolog-4ip1o).
 type searchReadyRegistry struct {
@@ -238,6 +239,8 @@ func (r *searchReadyRegistry) IndexManager(key glid.GLID) index.IndexManager {
 func (r *searchReadyRegistry) TransitionStreamedChunks(key glid.GLID) map[chunk.ChunkID]bool {
 	return r.o.TransitionStreamedChunks(key)
 }
+
+func (r *searchReadyRegistry) Reader() manifest.Reader { return r.o.ManifestReader() }
 
 // LeaderTierQueryEngine returns a query engine that only searches leader
 // tiers (not follower replicas). Used by ForwardSearch handlers to avoid
@@ -319,6 +322,8 @@ func (r *localTierRegistry) QueryEngine(_ glid.GLID) *query.Engine { return nil 
 // flag locally; their callbacks will return empty, which is fine — the
 // flag set is read primarily to filter source chunks during transitions
 // on the leader. See gastrolog-66b7x.
+func (r *localTierRegistry) Reader() manifest.Reader { return r.o.ManifestReader() }
+
 func (r *localTierRegistry) TransitionStreamedChunks(key glid.GLID) map[chunk.ChunkID]bool {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
@@ -405,6 +410,8 @@ func (r *leaderTierRegistry) QueryEngine(_ glid.GLID) *query.Engine { return nil
 // chunk set for the given tier ID. Resolves the tier instance and reads
 // its ListTransitionStreamed callback (which reads the tier FSM via
 // vaultraft). See gastrolog-4xusf.
+func (r *leaderTierRegistry) Reader() manifest.Reader { return r.o.ManifestReader() }
+
 func (r *leaderTierRegistry) TransitionStreamedChunks(key glid.GLID) map[chunk.ChunkID]bool {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()

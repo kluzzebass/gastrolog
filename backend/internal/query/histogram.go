@@ -198,6 +198,37 @@ func clampBuckets(n int) int {
 	return n
 }
 
+// vaultChunkMetas returns every chunk's metadata for the given vault:
+// sealed-chunk entries projected from the manifest Reader (FSM truth),
+// plus the active chunk taken directly from the chunk manager (the active
+// chunk is the documented exception to manifest-as-source-of-truth — its
+// running maxima would balloon the Raft log if replicated). Falls back
+// to cm.List() in single-vault legacy mode where no registry is wired.
+//
+// Returns nil if the vault has no chunk manager.
+func (e *Engine) vaultChunkMetas(vaultID glid.GLID) []chunk.ChunkMeta {
+	cm := e.chunks
+	if e.registry != nil {
+		cm = e.registry.ChunkManager(vaultID)
+	}
+	if cm == nil {
+		return nil
+	}
+	if e.registry == nil {
+		metas, _ := cm.List()
+		return metas
+	}
+	entries := e.registry.Reader().EntriesForVault(vaultID)
+	out := make([]chunk.ChunkMeta, 0, len(entries)+1)
+	for i := range entries {
+		out = append(out, entries[i].ToChunkMeta())
+	}
+	if active := cm.Active(); active != nil {
+		out = append(out, *active)
+	}
+	return out
+}
+
 // timechartVaults returns the vaults to query for a timechart, applying any vault filter.
 func (e *Engine) timechartVaults(q Query) []glid.GLID {
 	allVaults := e.listVaults()
@@ -216,10 +247,7 @@ func (e *Engine) deriveTimeRange(q *Query, selectedVaults []glid.GLID) {
 		if cm == nil {
 			continue
 		}
-		metas, err := cm.List()
-		if err != nil {
-			continue
-		}
+		metas := e.vaultChunkMetas(vaultID)
 		for _, meta := range metas {
 			if meta.RecordCount == 0 {
 				continue
@@ -243,10 +271,7 @@ func (e *Engine) timechartFastPath(selectedVaults []glid.GLID, start time.Time, 
 		if cm == nil {
 			continue
 		}
-		metas, err := cm.List()
-		if err != nil {
-			continue
-		}
+		metas := e.vaultChunkMetas(vaultID)
 		streamed := e.transitionStreamedChunks(vaultID)
 		for _, meta := range metas {
 			if streamed[meta.ID] {
@@ -276,10 +301,7 @@ func (e *Engine) timechartCloudCounts(selectedVaults []glid.GLID, start, end tim
 		if cm == nil {
 			continue
 		}
-		metas, err := cm.List()
-		if err != nil {
-			continue
-		}
+		metas := e.vaultChunkMetas(vaultID)
 		streamed := e.transitionStreamedChunks(vaultID)
 		for _, meta := range metas {
 			if streamed[meta.ID] {
@@ -312,10 +334,7 @@ func (e *Engine) timechartLocalCounts(selectedVaults []glid.GLID, start, end tim
 		if cm == nil {
 			continue
 		}
-		metas, err := cm.List()
-		if err != nil {
-			continue
-		}
+		metas := e.vaultChunkMetas(vaultID)
 		streamed := e.transitionStreamedChunks(vaultID)
 		for _, meta := range metas {
 			if streamed[meta.ID] {
@@ -356,10 +375,7 @@ func (e *Engine) timechartActiveNonMonotonic(selectedVaults []glid.GLID, start, 
 		if cm == nil {
 			continue
 		}
-		metas, err := cm.List()
-		if err != nil {
-			continue
-		}
+		metas := e.vaultChunkMetas(vaultID)
 		streamed := e.transitionStreamedChunks(vaultID)
 		for _, meta := range metas {
 			if !activeNonMonoEligible(meta, streamed, start, end) {
@@ -442,10 +458,7 @@ func (e *Engine) timechartAttrScanGroups(selectedVaults []glid.GLID, start, end 
 		if cm == nil {
 			continue
 		}
-		metas, err := cm.List()
-		if err != nil {
-			continue
-		}
+		metas := e.vaultChunkMetas(vaultID)
 		streamed := e.transitionStreamedChunks(vaultID)
 		for _, meta := range metas {
 			if streamed[meta.ID] {
@@ -516,6 +529,13 @@ func timechartChunkGroups(
 		if lastBucket >= numBuckets {
 			lastBucket = numBuckets - 1
 		}
+	}
+
+	// Defensive: chunk meta can be transiently inconsistent during a seal /
+	// transition (IngestStart vs IngestEnd applied in separate Raft entries).
+	// A negative-length bucket range would crash makeslice downstream.
+	if firstBucket > lastBucket {
+		return
 	}
 
 	// Non-monotonic chunks (active or sealed): the per-bucket sampler below
@@ -757,9 +777,13 @@ func findIngestRank(cm chunk.ChunkManager, im index.IndexManager, chunkID chunk.
 // Sealed chunks: index manager's FindIngestStartPosition (on-disk binary search).
 // Both are O(buckets × log(n)) with no heap allocation beyond stack buffers.
 //
-// For chunks without an ingest index (e.g., cloud-backed chunks), falls back to
-// linear interpolation: assumes records are evenly distributed across the chunk's
-// IngestStart → IngestEnd range.
+// Active non-monotonic chunks fall through to bucketizeActiveChunk, which
+// scans the in-memory B+ tree (rank arithmetic isn't available there). All
+// other chunks — sealed local, sealed cloud-backed, monotonic active — go
+// through timechartChunkByIndex against the IngestTS index. With FSM-as-
+// source-of-truth (gastrolog-2pw28) the index is guaranteed to exist for
+// any chunk the FSM exposes; transient lookup failures are real errors,
+// not histogram artifacts.
 func timechartChunkByIngestTS(
 	cm chunk.ChunkManager,
 	im index.IndexManager,
@@ -808,26 +832,11 @@ func timechartChunkByIngestTS(
 		return
 	}
 
-	// Try index-based counting (works for local and cloud sealed chunks —
-	// cloud TS indexes are cached locally after first S3 fetch — and for
-	// monotonic active chunks via the in-memory B+ tree).
-	if _, ok := findIngestPos(cm, im, meta.ID, start); ok {
-		timechartChunkByIndex(cm, im, meta, start, bucketWidth, firstBucket, lastBucket, counts)
-		return
-	}
-
-	// No ingest index available — contribute zero. Even-distribution
-	// interpolation over RecordCount overshoots buckets where the chunk's
-	// actual records are sparse and underwhelms where they're dense, which
-	// (combined with other chunks' real contributions) produces visible
-	// spikes mid-window. A brief zero-contribution gap during the chunk's
-	// upload race is preferable: it self-heals on the next query once the
-	// cloud TS index is wired. See gastrolog-66b7x.
-	if cloudFlags != nil {
-		for b := firstBucket; b <= lastBucket; b++ {
-			cloudFlags[b] = true
-		}
-	}
+	// Index-based counting: rank arithmetic on the IngestTS-sorted index
+	// (on-disk for sealed chunks, B+ tree for monotonic active chunks,
+	// cached local file for cloud-backed sealed chunks). The FSM has
+	// already promised an index exists for this chunk.
+	timechartChunkByIndex(cm, im, meta, start, bucketWidth, firstBucket, lastBucket, counts)
 }
 
 // bucketizeActiveChunk iterates the active chunk's records once and
@@ -922,6 +931,9 @@ func chunkBucketTotals(
 	bucketWidth time.Duration,
 	firstBucket, lastBucket int,
 ) []int64 {
+	if lastBucket < firstBucket {
+		return nil
+	}
 	totals := make([]int64, lastBucket-firstBucket+1)
 	if !meta.Sealed {
 		startNanos := start.UnixNano()
@@ -945,11 +957,7 @@ func chunkBucketTotals(
 	for b := firstBucket; b <= lastBucket; b++ {
 		bStart := start.Add(bucketWidth * time.Duration(b))
 		bEnd := start.Add(bucketWidth * time.Duration(b+1))
-		// Per-bucket guard: same rationale as timechartChunkByIndex.
-		startRank, ok := findIngestRank(cm, im, meta.ID, bStart)
-		if !ok {
-			continue
-		}
+		startRank, _ := findIngestRank(cm, im, meta.ID, bStart)
 		var endRank uint64
 		if !meta.IngestEnd.IsZero() && !bEnd.Before(meta.IngestEnd) {
 			endRank = uint64(meta.RecordCount) //nolint:gosec // G115: RecordCount is non-negative
@@ -968,11 +976,6 @@ func chunkBucketTotals(
 // — endRank - startRank — because physical record positions in chunks built
 // via ImportRecords are scattered relative to IngestTS order. See
 // gastrolog-66b7x.
-//
-// When findIngestRank fails for a bucket's bStart (TS index briefly
-// unavailable, e.g. sealed-local → cloud-backed upload race), that bucket
-// contributes zero from this chunk. Same fallback applies to chunkBucketTotals
-// so counts and groupCounts stay numerically consistent.
 func timechartChunkByIndex(
 	cm chunk.ChunkManager,
 	im index.IndexManager,
@@ -986,10 +989,7 @@ func timechartChunkByIndex(
 		bStart := start.Add(bucketWidth * time.Duration(b))
 		bEnd := start.Add(bucketWidth * time.Duration(b+1))
 
-		startRank, ok := findIngestRank(cm, im, meta.ID, bStart)
-		if !ok {
-			continue
-		}
+		startRank, _ := findIngestRank(cm, im, meta.ID, bStart)
 
 		var endRank uint64
 		if !meta.IngestEnd.IsZero() && !bEnd.Before(meta.IngestEnd) {

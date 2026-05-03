@@ -12,7 +12,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/raftwal"
-	tierfsm "gastrolog/internal/tier/raftfsm"
+	"gastrolog/internal/vaultraft/tierfsm"
 
 	hraft "github.com/hashicorp/raft"
 )
@@ -317,7 +317,7 @@ func (h *reliabilityHarness) shutdown() {
 func tierFSMFingerprint(t *tierfsm.FSM) string {
 	entries := t.List()
 	ids := make([]chunk.ChunkID, len(entries))
-	byID := make(map[chunk.ChunkID]tierfsm.Entry, len(entries))
+	byID := make(map[chunk.ChunkID]tierfsm.ManifestEntry, len(entries))
 	for i, e := range entries {
 		ids[i] = e.ID
 		byID[e.ID] = e
@@ -333,8 +333,8 @@ func tierFSMFingerprint(t *tierfsm.FSM) string {
 	var sb fingerprintBuilder
 	for _, id := range ids {
 		e := byID[id]
-		sb.writef("chunk=%x sealed=%t compressed=%t ret=%t stream=%t archived=%t\n",
-			id[:], e.Sealed, e.Compressed, e.RetentionPending, e.TransitionStreamed, e.Archived)
+		sb.writef("chunk=%x sealed=%t ret=%t stream=%t archived=%t\n",
+			id[:], e.Sealed, e.RetentionPending, e.TransitionStreamed, e.Archived)
 	}
 	return sb.String()
 }

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"gastrolog/internal/glid"
 	"io"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -678,6 +680,16 @@ func TestCloudDownloadFailureDuringTransition(t *testing.T) {
 	metas, _ := cloudTier.Chunks.List()
 	processor := cloudTier.Chunks.(chunk.ChunkPostSealProcessor)
 	_ = processor.PostSealProcess(context.Background(), metas[0].ID)
+
+	// Evict the in-tree warm cache so the transition is forced to read from
+	// the cloud. Post step 7j the leader keeps a local data.glcb after
+	// upload as a cache; without this eviction the cursor would read locally
+	// and the transition would succeed even with broken downloads. The
+	// scenario under test is "follower or post-eviction state where the
+	// only authoritative copy lives in S3 and S3 is unreachable."
+	if mover, ok := cloudTier.Chunks.(chunk.ChunkMover); ok {
+		_ = os.Remove(filepath.Join(mover.ChunkDir(metas[0].ID), "data.glcb"))
+	}
 
 	// Now break downloads.
 	faulty.failDownload = true

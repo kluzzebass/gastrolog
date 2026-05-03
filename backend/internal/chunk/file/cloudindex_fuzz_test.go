@@ -51,7 +51,6 @@ func FuzzCloudMetaRoundTrip(f *testing.F) {
 			sourceStart:     time.Unix(0, readI64(56)),
 			sourceEnd:       time.Unix(0, readI64(64)),
 			sealed:          flags&0x01 != 0,
-			compressed:      flags&0x02 != 0,
 			ingestIdxOffset: readI64(72),
 			ingestIdxSize:   readI64(80),
 			sourceIdxOffset: readI64(88),
@@ -92,9 +91,6 @@ func FuzzCloudMetaRoundTrip(f *testing.F) {
 		}
 		if decoded.sealed != m.sealed {
 			t.Fatalf("sealed: got %v, want %v", decoded.sealed, m.sealed)
-		}
-		if decoded.compressed != m.compressed {
-			t.Fatalf("compressed: got %v, want %v", decoded.compressed, m.compressed)
 		}
 		if !decoded.cloudBacked {
 			t.Fatalf("cloudBacked: got false, want true")

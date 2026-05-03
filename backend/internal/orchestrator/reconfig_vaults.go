@@ -22,7 +22,7 @@ import (
 	"gastrolog/internal/query"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/system"
-	tierfsm "gastrolog/internal/tier/raftfsm"
+	"gastrolog/internal/vaultraft/tierfsm"
 	"gastrolog/internal/vaultraft"
 
 	hraft "github.com/hashicorp/raft"
@@ -1088,6 +1088,8 @@ type tierRaftCallbacks struct {
 	listRetPending          func() []chunk.ChunkID
 	listTransitionStreamed  func() []chunk.ChunkID
 	overlayFromFSM          func(chunk.ChunkMeta) chunk.ChunkMeta
+	manifestEntries         func() []tierfsm.ManifestEntry
+	manifestEntry           func(id chunk.ChunkID) (tierfsm.ManifestEntry, bool)
 }
 
 // ensureVaultCtlTierMetadata joins this node to the vault control-plane
@@ -1095,7 +1097,7 @@ type tierRaftCallbacks struct {
 // returns the applier + callbacks for this tier's chunk metadata. Every
 // tier in the same vault shares the same vault-ctl Raft group; each
 // tier's chunk FSM is a sub-FSM keyed by tier ID (see vaultraft.FSM and
-// tier/raftfsm.FSM). With no GroupManager, returns nils.
+// vaultraft/tierfsm.FSM). With no GroupManager, returns nils.
 //
 // Post-gastrolog-5xxbd there is no per-vault-ctl Raft group. The historical
 // function name ensureVaultCtlTierMetadata is preserved as a no-op alias in
@@ -1213,8 +1215,8 @@ func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.App
 			}
 			return ids
 		},
-		listRetPending:         listFSMByFlag(fsm, func(e tierfsm.Entry) bool { return e.RetentionPending }),
-		listTransitionStreamed: listFSMByFlag(fsm, func(e tierfsm.Entry) bool { return e.TransitionStreamed }),
+		listRetPending:         listFSMByFlag(fsm, func(e tierfsm.ManifestEntry) bool { return e.RetentionPending }),
+		listTransitionStreamed: listFSMByFlag(fsm, func(e tierfsm.ManifestEntry) bool { return e.TransitionStreamed }),
 		overlayFromFSM: func(m chunk.ChunkMeta) chunk.ChunkMeta {
 			if fsm == nil {
 				return m
@@ -1228,12 +1230,28 @@ func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.App
 			m.NumFrames = e.NumFrames
 			return m
 		},
+		manifestEntries: func() []tierfsm.ManifestEntry {
+			if fsm == nil {
+				return nil
+			}
+			return fsm.List()
+		},
+		manifestEntry: func(id chunk.ChunkID) (tierfsm.ManifestEntry, bool) {
+			if fsm == nil {
+				return tierfsm.ManifestEntry{}, false
+			}
+			e := fsm.Get(id)
+			if e == nil {
+				return tierfsm.ManifestEntry{}, false
+			}
+			return *e, true
+		},
 	}
 }
 
 // listFSMByFlag returns a function that filters the FSM's entries by a
 // boolean predicate (e.g., RetentionPending or TransitionStreamed).
-func listFSMByFlag(fsm *tierfsm.FSM, pred func(tierfsm.Entry) bool) func() []chunk.ChunkID {
+func listFSMByFlag(fsm *tierfsm.FSM, pred func(tierfsm.ManifestEntry) bool) func() []chunk.ChunkID {
 	return func() []chunk.ChunkID {
 		if fsm == nil {
 			return nil
@@ -1384,7 +1402,7 @@ func wireTierFSMOnUpload(g *raftgroup.Group, tierID glid.GLID, cm chunk.ChunkMan
 	if !ok {
 		return
 	}
-	fsm.SetOnUpload(func(e tierfsm.Entry) {
+	fsm.SetOnUpload(func(e tierfsm.ManifestEntry) {
 		// Notify WatchChunks subscribers: the chunk transitioned to
 		// cloud-backed (DiskBytes / NumFrames / CloudBacked changed
 		// in the FSM), which the inspector renders. Fire regardless

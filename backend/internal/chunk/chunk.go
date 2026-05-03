@@ -179,25 +179,21 @@ type DirRemover interface {
 	RemoveDir() error
 }
 
-// ChunkCompressor extends ChunkManager with post-seal compression.
-// Not all ChunkManager implementations support this (e.g. memory-based ones
-// have nothing to compress). Callers should type-assert to check availability.
-type ChunkCompressor interface {
-	// CompressChunk compresses the data files of a sealed chunk.
-	// No-op if the chunk is already compressed.
-	CompressChunk(id ChunkID) error
-
-	// RefreshDiskSizes recomputes Bytes and DiskBytes for a sealed chunk
-	// from the actual directory contents. Call after index builds or other
-	// operations that add/remove files in the chunk directory.
-	RefreshDiskSizes(id ChunkID)
-}
-
 // ChunkIndexBuilder builds indexes for a sealed chunk.
 // Implementations are injected into the chunk manager at construction time.
 // The chunk manager calls Build after compression completes.
 type ChunkIndexBuilder interface {
 	Build(ctx context.Context, chunkID ChunkID) error
+}
+
+// CloudBlobChecker probes a chunk's authoritative cloud blob (independent of
+// any local cache copy). Implemented by managers backed by a cloud store; the
+// reconcile sweep uses it to detect blobs deleted out-of-band by lifecycle
+// rules without being misled by a still-present warm cache. Returns nil if
+// the blob is reachable, ErrChunkSuspect if it's missing, or another error
+// for transient problems. See gastrolog-24m1t step 7j.
+type CloudBlobChecker interface {
+	HeadCloudBlob(id ChunkID) error
 }
 
 // ChunkPostSealProcessor extends ChunkManager with a unified post-seal pipeline.

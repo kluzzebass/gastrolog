@@ -398,7 +398,7 @@ func ChunkMetaToProto(meta chunk.ChunkMeta) *apiv1.ChunkMeta {
 		Sealed:       meta.Sealed,
 		RecordCount:  meta.RecordCount,
 		Bytes:        meta.Bytes,
-		Compressed:   meta.Compressed,
+		Compressed:   meta.Sealed, // sealed chunks are GLCB which is zstd-compressed (gastrolog-24m1t step 7f)
 		DiskBytes:    meta.DiskBytes,
 		CloudBacked:  meta.CloudBacked,
 		Archived:     meta.Archived,

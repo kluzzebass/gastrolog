@@ -724,20 +724,10 @@ func scanAttrsActive(idxPath, attrPath, dictPath string, startPos uint64, fn fun
 }
 
 func openDataFile(path string) (data []byte, mmapRegion []byte, file *os.File, seek seekable.Reader, err error) {
-	// Open the file ONCE up front. The compression-vs-mmap decision below is
-	// derived from the header read off this file descriptor, which pins us
-	// to a specific inode. If a concurrent post-seal compression atomically
-	// swaps the path with a new (compressed) inode after this open, our
-	// existing fd still refers to the original (uncompressed) inode and our
-	// mmap reflects the bytes that match the index entries written for it.
-	//
-	// Previously this function called isCompressed(path) and then os.Open(path)
-	// as two separate operations, leaving a race window in which the path
-	// could be replaced between the compression check and the second open.
-	// That manifested as cursor errors of the form "raw range [N:M] exceeds
-	// mmap size K" where K was the compressed size and [N:M] was the
-	// uncompressed-offset index entry — i.e. the cursor was mmapping
-	// compressed bytes as if they were uncompressed. See gastrolog-2mnv8.
+	// Multi-file path is now exclusively the unsealed-active fallback
+	// (sealed chunks live as data.glcb — gastrolog-24m1t). Active raw.log
+	// is always uncompressed, so there's no FlagCompressed branch
+	// anymore: open, header-read for validation, then mmap.
 	file, err = os.Open(filepath.Clean(path))
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("open %s: %w", path, err)
@@ -748,28 +738,13 @@ func openDataFile(path string) (data []byte, mmapRegion []byte, file *os.File, s
 		_ = file.Close()
 		return nil, nil, nil, nil, fmt.Errorf("read header for %s: %w", path, err)
 	}
-	h, err := format.Decode(hdr[:])
-	if err != nil {
+	if _, err := format.Decode(hdr[:]); err != nil {
 		_ = file.Close()
 		return nil, nil, nil, nil, fmt.Errorf("decode header for %s: %w", path, err)
 	}
 
-	if h.Flags&format.FlagCompressed != 0 {
-		// Compressed: hand off to openSeekableReader. Once a chunk is
-		// compressed it stays compressed for the rest of its lifetime, so
-		// re-opening the path here cannot race with another compression
-		// pass — only the post-seal pipeline ever touches this file and it
-		// runs exactly once per chunk.
-		_ = file.Close()
-		seek, file, err = openSeekableReader(path)
-		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("open seekable %s: %w", path, err)
-		}
-		return nil, nil, file, seek, nil
-	}
-
-	// Uncompressed: stat and mmap the file we already have open. Our fd
-	// pins us to this inode regardless of any subsequent path swap.
+	// stat and mmap the file we already have open. Our fd pins us to
+	// this inode regardless of any subsequent path swap.
 	info, err := file.Stat()
 	if err != nil {
 		_ = file.Close()

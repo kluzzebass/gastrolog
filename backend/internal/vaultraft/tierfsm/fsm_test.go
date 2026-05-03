@@ -1,4 +1,4 @@
-package raftfsm
+package tierfsm
 
 import (
 	"bytes"
@@ -89,9 +89,6 @@ func TestFSMCompress(t *testing.T) {
 	applyCmd(t, fsm, MarshalCompressChunk(id, 12000))
 
 	e := fsm.Get(id)
-	if !e.Compressed {
-		t.Error("should be compressed")
-	}
 	if e.DiskBytes != 12000 {
 		t.Errorf("DiskBytes: got %d, want 12000", e.DiskBytes)
 	}

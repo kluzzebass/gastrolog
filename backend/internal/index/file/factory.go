@@ -12,7 +12,6 @@ import (
 	filejson "gastrolog/internal/index/file/json"
 	filekv "gastrolog/internal/index/file/kv"
 	filetoken "gastrolog/internal/index/file/token"
-	filetsidx "gastrolog/internal/index/file/tsidx"
 	"gastrolog/internal/tokenizer"
 )
 
@@ -46,11 +45,15 @@ func NewFactory() index.ManagerFactory {
 			kvBudget = n
 		}
 
+		// tsidx (ingest/source) no longer has its own indexer: the
+		// embedded ITSI/STSI sections inside data.glcb are written by
+		// chunk/cloud.Writer.writeTSIndexes during seal, and read via
+		// tsidx.OpenIngestMmap / OpenSourceMmap which point at those
+		// embedded sections. The sidecar ingest.idx / source.idx files
+		// are gone.
 		indexers := []index.Indexer{
 			filetoken.NewIndexer(dir, chunkManager, logger),
 			fileattr.NewIndexer(dir, chunkManager, logger),
-			filetsidx.NewIngestIndexer(dir, chunkManager, logger),
-			filetsidx.NewSourceIndexer(dir, chunkManager, logger),
 			filekv.NewIndexerWithConfig(dir, chunkManager, logger, filekv.Config{
 				KVBudget:   kvBudget,
 				Extractors: tokenizer.DefaultExtractors(),

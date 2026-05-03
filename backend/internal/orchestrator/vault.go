@@ -4,7 +4,9 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/index"
+	"gastrolog/internal/manifest"
 	"gastrolog/internal/query"
+	"gastrolog/internal/vaultraft/tierfsm"
 )
 
 // Vault bundles tier instances for a single vault.
@@ -92,7 +94,7 @@ func NewVaultFromComponents(id glid.GLID, cm chunk.ChunkManager, im index.IndexM
 	})
 }
 
-// tierRegistry adapts a vault's tiers to the query.VaultRegistry interface,
+// tierRegistry adapts a vault's tiers to the manifest.VaultRegistry interface,
 // allowing the query engine to fan out across all tiers as if they were vaults.
 type tierRegistry struct {
 	tiers []*TierInstance
@@ -119,6 +121,31 @@ func (r *tierRegistry) IndexManager(id glid.GLID) index.IndexManager {
 	for _, t := range r.tiers {
 		if t.TierID == id {
 			return t.Indexes
+		}
+	}
+	return nil
+}
+
+// Reader returns a manifest.Reader scoped to this registry's tier set.
+// EntriesForVault interprets its key as a tier ID; Entry walks every
+// tier looking for the chunk.
+func (r *tierRegistry) Reader() manifest.Reader { return &tierRegistryReader{r: r} }
+
+type tierRegistryReader struct{ r *tierRegistry }
+
+func (rr *tierRegistryReader) Entry(id chunk.ChunkID) (tierfsm.ManifestEntry, bool) {
+	for _, t := range rr.r.tiers {
+		if e, ok := tierManifestEntry(t, id); ok && e.Sealed {
+			return e, true
+		}
+	}
+	return tierfsm.ManifestEntry{}, false
+}
+
+func (rr *tierRegistryReader) EntriesForVault(tierID glid.GLID) []tierfsm.ManifestEntry {
+	for _, t := range rr.r.tiers {
+		if t.TierID == tierID {
+			return collectSealedEntries([]*TierInstance{t})
 		}
 	}
 	return nil

@@ -28,7 +28,6 @@ func TestCloudIndexRoundTrip(t *testing.T) {
 			bytes:       int64(1024 * (i + 1)),
 			diskBytes:   int64(512 * (i + 1)),
 			sealed:      true,
-			compressed:  i%2 == 0,
 			ingestStart: time.Now().Add(-2 * time.Hour),
 			ingestEnd:   time.Now().Add(-time.Hour),
 			sourceStart: time.Now().Add(-3 * time.Hour),
@@ -81,9 +80,6 @@ func TestCloudIndexRoundTrip(t *testing.T) {
 		}
 		if got.sealed != want.sealed {
 			t.Errorf("chunk %s: sealed = %v, want %v", id, got.sealed, want.sealed)
-		}
-		if got.compressed != want.compressed {
-			t.Errorf("chunk %s: compressed = %v, want %v", id, got.compressed, want.compressed)
 		}
 		if !got.cloudBacked {
 			t.Errorf("chunk %s: cloudBacked should be true", id)

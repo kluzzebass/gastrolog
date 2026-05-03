@@ -5,7 +5,6 @@ import (
 	"errors"
 	"gastrolog/internal/glid"
 	"log/slog"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -13,7 +12,6 @@ import (
 	"os"
 
 	"gastrolog/internal/chunk"
-	chunkfile "gastrolog/internal/chunk/file"
 	chunkmem "gastrolog/internal/chunk/memory"
 	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/query"
@@ -545,23 +543,15 @@ func TestClusterReplicationSealedIdxWriteTSMatchesLeader(t *testing.T) {
 	ctx := context.Background()
 	leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, h.tierIDs[0], sealedID, leaderTier.FollowerTargets)
 
-	leaderIdx := filepath.Join(leaderNode.tierDirs[0], sealedID.String(), "idx.log")
-	leaderEntries, err := chunkfile.ReadIdxLogEntries(leaderIdx)
-	if err != nil {
-		t.Fatalf("read leader idx: %v", err)
-	}
+	leaderEntries := chunkRecordTimestamps(t, leaderTier.Chunks, sealedID)
 	if len(leaderEntries) != totalRecords {
-		t.Fatalf("leader idx entries: want %d got %d", totalRecords, len(leaderEntries))
+		t.Fatalf("leader entries: want %d got %d", totalRecords, len(leaderEntries))
 	}
 
 	for _, fid := range []string{"f1", "f2"} {
-		followIdx := filepath.Join(h.nodes[fid].tierDirs[0], sealedID.String(), "idx.log")
-		got, err := chunkfile.ReadIdxLogEntries(followIdx)
-		if err != nil {
-			t.Fatalf("follower %s read idx: %v", fid, err)
-		}
+		got := chunkRecordTimestamps(t, h.nodes[fid].tiers[0].Chunks, sealedID)
 		if len(got) != len(leaderEntries) {
-			t.Fatalf("follower %s: idx len %d, leader %d", fid, len(got), len(leaderEntries))
+			t.Fatalf("follower %s: entries %d, leader %d", fid, len(got), len(leaderEntries))
 		}
 		for i := range leaderEntries {
 			if !got[i].WriteTS.Equal(leaderEntries[i].WriteTS) {
@@ -574,6 +564,37 @@ func TestClusterReplicationSealedIdxWriteTSMatchesLeader(t *testing.T) {
 			}
 		}
 	}
+}
+
+// chunkRecordTimestamps opens a cursor on the given chunk and collects each
+// record's IngestTS / WriteTS pair. Routes through cm.OpenCursor so the
+// helper works regardless of whether the sealed chunk is multi-file or
+// data.glcb on disk — the chunk redesign (gastrolog-24m1t) flips this
+// over time, and tests that assert per-record timestamp invariants
+// shouldn't be coupled to the on-disk format.
+func chunkRecordTimestamps(t *testing.T, cm chunk.ChunkManager, id chunk.ChunkID) []recordTimestamps {
+	t.Helper()
+	cursor, err := cm.OpenCursor(id)
+	if err != nil {
+		t.Fatalf("open cursor for %s: %v", id, err)
+	}
+	defer func() { _ = cursor.Close() }()
+	var out []recordTimestamps
+	for {
+		rec, _, err := cursor.Next()
+		if errors.Is(err, chunk.ErrNoMoreRecords) {
+			return out
+		}
+		if err != nil {
+			t.Fatalf("cursor next on %s: %v", id, err)
+		}
+		out = append(out, recordTimestamps{IngestTS: rec.IngestTS, WriteTS: rec.WriteTS})
+	}
+}
+
+type recordTimestamps struct {
+	IngestTS time.Time
+	WriteTS  time.Time
 }
 
 // TestClusterReplicationSealSync verifies that TierReplicator.SealTier causes

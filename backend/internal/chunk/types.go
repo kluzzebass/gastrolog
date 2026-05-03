@@ -146,8 +146,7 @@ type ChunkMeta struct {
 	RecordCount int64
 	Bytes       int64 // Total logical bytes (raw + attr + idx)
 	Sealed      bool
-	Compressed  bool  // true if raw.log/attr.log are compressed
-	DiskBytes   int64 // actual on-disk size (may differ from Bytes if compressed)
+	DiskBytes   int64 // actual on-disk size of the chunk's data.glcb
 
 	// IngestTS and SourceTS bounds (zero = unknown).
 	// Used to filter chunks by ingest_start/ingest_end and source_start/source_end

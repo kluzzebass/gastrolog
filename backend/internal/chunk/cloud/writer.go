@@ -1,10 +1,13 @@
 package cloud
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"gastrolog/internal/glid"
+	"hash"
 	"io"
+	"math"
 	"slices"
 	"time"
 
@@ -111,15 +114,21 @@ func (w *Writer) Add(rec chunk.Record) error {
 	return nil
 }
 
-// countWriter wraps an io.Writer and tracks total bytes written,
-// including bytes written by wrapped writers (e.g., seekable zstd's Close).
+// countWriter wraps an io.Writer, tracks total bytes written, and tees
+// every byte through a SHA-256 hash so the whole-blob digest in the TOC
+// footer covers everything before the footer itself. Bytes written by
+// nested writers (seekable zstd's Close, etc.) flow through here too.
 type countWriter struct {
-	w io.Writer
-	n int64
+	w    io.Writer
+	hash hash.Hash
+	n    int64
 }
 
 func (cw *countWriter) Write(p []byte) (int, error) {
 	n, err := cw.w.Write(p)
+	if n > 0 {
+		_, _ = cw.hash.Write(p[:n])
+	}
 	cw.n += int64(n)
 	return n, err
 }
@@ -135,7 +144,9 @@ func (cw *countWriter) Write(p []byte) (int, error) {
 func (w *Writer) WriteTo(dst io.Writer) (int64, error) {
 	// countWriter tracks total bytes written to dst, including bytes
 	// written by the seekable zstd writer during Close() (seek table).
-	cw := &countWriter{w: dst}
+	// The teed SHA-256 builds up the whole-blob digest written into the
+	// TOC footer.
+	cw := &countWriter{w: dst, hash: sha256.New()}
 
 	// --- Encode dictionary to compute dictSize ---
 	var dictBuf []byte
@@ -239,9 +250,68 @@ func (w *Writer) WriteTo(dst io.Writer) (int64, error) {
 	return cw.n, nil
 }
 
-// writeTSIndexes sorts and writes the ingest + source TS index sections and TOC.
+// writeSection appends a section to cw: writes the body bytes, hashes
+// them, and returns a TOCEntry pinned to the body's offset within the
+// blob. Callers append the returned entry to their entry list and pass
+// the list to finalizeTOC when all sections are written.
+//
+// This is the single primitive every section type goes through — TS
+// indexes, built-in chunk indexes, anything future. Centralising it
+// means hash + offset + entry construction can never drift between
+// callers.
+func (w *Writer) writeSection(cw *countWriter, sectionType, version uint8, body []byte) (TOCEntry, error) {
+	offset := cw.n
+	if _, err := cw.Write(body); err != nil {
+		return TOCEntry{}, err
+	}
+	return makeTOCEntry(sectionType, version, offset, int64(len(body)), sha256.Sum256(body)), nil
+}
+
+// finalizeTOC writes the encoded TOC entries followed by the 44-byte
+// footer (whole-blob digest snapshot + entry count + magic). Populates
+// w.toc with the entries, digest, and convenience fields for the
+// well-known section types.
+func (w *Writer) finalizeTOC(cw *countWriter, entries []TOCEntry) error {
+	for _, e := range entries {
+		if _, err := cw.Write(encodeTOCEntry(e)); err != nil {
+			return err
+		}
+	}
+
+	// Snapshot the running blob digest BEFORE writing the footer so it
+	// covers exactly the bytes preceding it.
+	var blobDigest [32]byte
+	copy(blobDigest[:], cw.hash.Sum(nil))
+
+	footer := encodeTOCFooter(uint32(len(entries)), blobDigest) //nolint:gosec // G115: entry count fits in u32
+	if _, err := cw.Write(footer); err != nil {
+		return err
+	}
+
+	w.toc = BlobTOC{
+		Entries:    entries,
+		BlobDigest: blobDigest,
+		Version:    tocFooterVersion,
+	}
+	if e, ok := w.toc.Find(SectionIngestTSIndex); ok {
+		w.toc.IngestIdxOffset = e.Offset
+		w.toc.IngestIdxSize = e.Size
+		w.toc.IngestIdxHash = e.Hash
+	}
+	if e, ok := w.toc.Find(SectionSourceTSIndex); ok {
+		w.toc.SourceIdxOffset = e.Offset
+		w.toc.SourceIdxSize = e.Size
+		w.toc.SourceIdxHash = e.Hash
+	}
+	return nil
+}
+
+// writeTSIndexes sorts the ingest + source TS entries, writes them as
+// sections via writeSection, and finalises the TOC. ITSI and STSI are
+// the only sections this writer emits today; built-in chunk indexes
+// land in the same TOC via additional writeSection calls in step 6
+// (PostSealProcess restructure).
 func (w *Writer) writeTSIndexes(cw *countWriter) error {
-	// Sort entries by timestamp (stable to preserve position order for equal timestamps).
 	sortEntries := func(entries []tsEntry) {
 		slices.SortStableFunc(entries, func(a, b tsEntry) int {
 			if a.ts != b.ts {
@@ -264,43 +334,64 @@ func (w *Writer) writeTSIndexes(cw *countWriter) error {
 		return buf
 	}
 
-	// --- Ingest TS Index ---
 	sortEntries(w.ingestEntries)
-	ingestBuf := encodeEntries(w.ingestEntries)
-	ingestOffset := cw.n
-
-	if _, err := cw.Write(ingestBuf); err != nil {
+	ingestEntry, err := w.writeSection(cw, SectionIngestTSIndex, 1, encodeEntries(w.ingestEntries))
+	if err != nil {
 		return err
 	}
 
-	// --- Source TS Index ---
 	sortEntries(w.sourceEntries)
-	sourceBuf := encodeEntries(w.sourceEntries)
-	sourceOffset := cw.n
-
-	if _, err := cw.Write(sourceBuf); err != nil {
+	sourceEntry, err := w.writeSection(cw, SectionSourceTSIndex, 1, encodeEntries(w.sourceEntries))
+	if err != nil {
 		return err
 	}
 
-	// --- TOC (48 bytes) ---
-	w.toc = BlobTOC{
-		IngestIdxOffset: ingestOffset,
-		IngestIdxSize:   int64(len(ingestBuf)),
-		SourceIdxOffset: sourceOffset,
-		SourceIdxSize:   int64(len(sourceBuf)),
+	return w.finalizeTOC(cw, []TOCEntry{ingestEntry, sourceEntry})
+}
+
+// makeTOCEntry builds a TOCEntry from a section type byte and metadata.
+func makeTOCEntry(sectionType, version uint8, offset, size int64, hash [32]byte) TOCEntry {
+	return TOCEntry{
+		Type:    sectionType,
+		Version: version,
+		Offset:  offset,
+		Size:    size,
+		Hash:    hash,
 	}
+}
 
-	var tocBuf [tocSize]byte
-	copy(tocBuf[0:4], tocMagic)
-	binary.LittleEndian.PutUint32(tocBuf[4:8], 1)                               // tocVersion
-	binary.LittleEndian.PutUint64(tocBuf[8:16], uint64(w.toc.IngestIdxOffset))  //nolint:gosec // G115: offset is always positive
-	binary.LittleEndian.PutUint64(tocBuf[16:24], uint64(w.toc.IngestIdxSize))   //nolint:gosec // G115: size is always positive
-	binary.LittleEndian.PutUint64(tocBuf[24:32], uint64(w.toc.SourceIdxOffset)) //nolint:gosec // G115: offset is always positive
-	binary.LittleEndian.PutUint64(tocBuf[32:40], uint64(w.toc.SourceIdxSize))   //nolint:gosec // G115: size is always positive
-	// bytes 40-47: reserved (zero)
+// encodeTOCEntry serializes a TOCEntry to its 42-byte on-disk form.
+// Layout: [type:u8][version:u8][offset:u32][size:u32][hash:32].
+//
+// Offset and Size are stored on disk as u32; chunk policy bounds blobs
+// well below 4 GB so the narrowing is safe. The MaxUint32 guards exist
+// to fail loudly if a future change blows past that.
+func encodeTOCEntry(e TOCEntry) []byte {
+	if e.Offset < 0 || e.Offset > math.MaxUint32 {
+		panic(fmt.Sprintf("TOC offset %d outside u32 range", e.Offset))
+	}
+	if e.Size < 0 || e.Size > math.MaxUint32 {
+		panic(fmt.Sprintf("TOC size %d outside u32 range", e.Size))
+	}
+	buf := make([]byte, tocEntrySize)
+	buf[0] = e.Type
+	buf[1] = e.Version
+	binary.LittleEndian.PutUint32(buf[2:6], uint32(e.Offset))
+	binary.LittleEndian.PutUint32(buf[6:10], uint32(e.Size))
+	copy(buf[10:42], e.Hash[:])
+	return buf
+}
 
-	_, err := cw.Write(tocBuf[:])
-	return err
+// encodeTOCFooter serializes the 44-byte footer that lives at the end of
+// the blob. Layout: entryCount (u32) + blobDigest (32) + footerVersion
+// (u32) + magic (4).
+func encodeTOCFooter(entryCount uint32, blobDigest [32]byte) []byte {
+	buf := make([]byte, tocFooterSize)
+	binary.LittleEndian.PutUint32(buf[0:4], entryCount)
+	copy(buf[4:36], blobDigest[:])
+	binary.LittleEndian.PutUint32(buf[36:40], tocFooterVersion)
+	copy(buf[40:44], tocFooterMagic)
+	return buf
 }
 
 // TOC returns the section offsets for the embedded TS indexes.

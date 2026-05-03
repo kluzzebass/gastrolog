@@ -1,4 +1,4 @@
-package raftfsm
+package tierfsm
 
 // Receipt-based deletion protocol — gastrolog-51gme step 2.
 //

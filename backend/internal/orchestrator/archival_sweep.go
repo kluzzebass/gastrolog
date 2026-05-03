@@ -274,11 +274,23 @@ func (o *Orchestrator) reconcileTier(tier *TierInstance, cs *system.CloudService
 }
 
 // reconcileCloudChunk probes one cloud chunk against the blob store and
-// advances its suspect-tracking state.
+// advances its suspect-tracking state. Uses HeadCloudBlob so the probe hits
+// the authoritative copy in S3 — OpenCursor would happily serve from the
+// in-tree warm cache (gastrolog-24m1t step 7j) and miss out-of-band lifecycle
+// deletions. Falls back to OpenCursor for managers that don't implement
+// CloudBlobChecker (no cloud store configured / non-file backends).
 func (o *Orchestrator) reconcileCloudChunk(tier *TierInstance, id chunk.ChunkID, graceDays uint32, now time.Time) {
-	cursor, readErr := tier.Chunks.OpenCursor(id)
+	var readErr error
+	if checker, ok := tier.Chunks.(chunk.CloudBlobChecker); ok {
+		readErr = checker.HeadCloudBlob(id)
+	} else {
+		cursor, err := tier.Chunks.OpenCursor(id)
+		if err == nil {
+			_ = cursor.Close()
+		}
+		readErr = err
+	}
 	if readErr == nil {
-		_ = cursor.Close()
 		o.clearSuspect(id)
 		return
 	}

@@ -204,16 +204,12 @@ func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID, tierI
 	// the caller's set rather than scanned across the leader's
 	// full sealed-chunk list.
 	var eligible []chunk.ChunkMeta
-	isFileTier := tier.Type == "file"
 	for _, id := range chunkIDs {
 		m, ok := bySealedID[id]
 		if !ok {
 			continue // leader doesn't have it locally either
 		}
 		if !m.Sealed {
-			continue
-		}
-		if isFileTier && !m.Compressed {
 			continue
 		}
 		if m.CloudBacked {
@@ -265,15 +261,11 @@ func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID, tierI
 // catchupCandidates filters chunk metas to those eligible for catchup
 // replication. Excludes unsealed, uncompressed file-tier, cloud-backed,
 // and FSM-retired chunks.
-func catchupCandidates(metas []chunk.ChunkMeta, tierType string, manifestSet map[chunk.ChunkID]bool) []chunk.ChunkMeta {
+func catchupCandidates(metas []chunk.ChunkMeta, _ string, manifestSet map[chunk.ChunkID]bool) []chunk.ChunkMeta {
 	var out []chunk.ChunkMeta
-	isFileTier := tierType == "file"
 	for _, m := range metas {
 		if !m.Sealed {
 			continue
-		}
-		if isFileTier && !m.Compressed {
-			continue // post-seal pipeline will replicate after compression
 		}
 		if m.CloudBacked {
 			continue // cloud-backed chunks replicate via FSM (RegisterCloudChunk), not record streaming

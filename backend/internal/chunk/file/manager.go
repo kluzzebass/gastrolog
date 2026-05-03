@@ -1,7 +1,6 @@
 package file
 
 import (
-	"bytes"
 	"cmp"
 	"context"
 	"encoding/binary"
@@ -37,6 +36,15 @@ const (
 	attrDictFileName = "attr_dict.log"
 	ingestBTFileName = "ingest.bt"
 	sourceBTFileName = "source.bt"
+
+	// dataGLCBFileName is the canonical sealed-chunk artifact under the
+	// chunk redesign (gastrolog-2pw28): a single self-contained, byte-
+	// identical-across-replicas, integrity-checked GLCB blob. Sibling
+	// files in the chunk directory may exist for node-local artifacts
+	// (custom indexes, build-time ledgers) but only data.glcb is the
+	// replicable / cloud-uploadable shape.
+	dataGLCBFileName    = "data.glcb"
+	dataGLCBTmpFileName = "data.glcb.tmp"
 )
 
 // Per-call timeouts on cloud storage operations that run on the post-seal
@@ -98,19 +106,6 @@ type Config struct {
 
 	// VaultID is required when CloudStore is set (used for blob key prefix).
 	VaultID glid.GLID
-
-	// CacheDir, when non-empty, enables local caching of cloud GLCB blobs.
-	// Cloud chunks are cached after upload and on first read, avoiding
-	// range-request round-trips.
-	CacheDir string
-
-	// CacheEviction selects the eviction policy: "lru" (default) or "ttl".
-	CacheEviction string
-	// CacheBudget is the max cache size as a human-readable string (e.g. "1GB", "500MB").
-	// Parsed via system.ParseSize. Default 1 GiB.
-	CacheBudget string
-	// CacheTTL is the max age of cached blobs (TTL mode only). Parsed via system.ParseDuration.
-	CacheTTL string
 
 	// CloudReadOnly, when true, enables cloud store reads (cursor, cache)
 	// but skips uploads in PostSealProcess. Used by follower nodes that
@@ -230,8 +225,7 @@ type chunkMeta struct {
 	bytes            int64     // Total logical bytes (data + non-data files)
 	logicalDataBytes int64     // Logical data bytes only (raw + attr + idx content)
 	sealed           bool
-	compressed       bool  // true if raw.log/attr.log are compressed
-	diskBytes        int64 // actual on-disk size (sum of all files)
+	diskBytes        int64 // actual on-disk size of data.glcb
 
 	// IngestTS and SourceTS bounds (zero = unknown).
 	ingestStart time.Time
@@ -258,6 +252,13 @@ type chunkMeta struct {
 	sourceIdxSize   int64
 
 	numFrames int32 // seekable zstd frame count (cloud chunks only)
+
+	// rawBytes is the uncompressed record-data size (sum of frame lengths)
+	// captured at sealToGLCB time. Distinct from logicalDataBytes which on
+	// the legacy multi-file path summed raw + attr + idx — different meaning.
+	// Used by uploadToCloud to populate cloud BlobMeta.RawBytes without
+	// re-parsing the seekable record body. See gastrolog-24m1t step 7h.
+	rawBytes int64
 }
 
 func (m *chunkMeta) toChunkMeta() chunk.ChunkMeta {
@@ -268,7 +269,6 @@ func (m *chunkMeta) toChunkMeta() chunk.ChunkMeta {
 		RecordCount: m.recordCount,
 		Bytes:       m.bytes,
 		Sealed:      m.sealed,
-		Compressed:  m.compressed || m.cloudBacked, // GLCB blobs are always zstd-compressed
 		DiskBytes:   m.diskBytes,
 		IngestStart:       m.ingestStart,
 		IngestEnd:         m.ingestEnd,
@@ -388,23 +388,6 @@ func NewManager(cfg Config) (*Manager, error) {
 				"error", err)
 			manager.cloudDegraded.Store(true)
 		}
-		// Recompute IngestStart/IngestEnd from the embedded TS index for
-		// every cloud chunk. Chunks uploaded before the scanTSBounds fix
-		// have stale bounds derived from first/last physical records,
-		// which on non-monotonic chunks aren't the IngestTS extrema. The
-		// TS index is sorted by IngestTS, so first/last entries are the
-		// authoritative min/max. Cheap once the local cache is warm —
-		// only the first call per chunk per host pays the S3 range fetch.
-		// See gastrolog-66b7x.
-		manager.repairCloudBounds()
-	}
-
-	if cfg.CacheDir != "" {
-		if err := os.MkdirAll(cfg.CacheDir, 0o750); err != nil {
-			_ = lockFile.Close()
-			return nil, fmt.Errorf("create cache dir: %w", err)
-		}
-		logger.Info("warm cache enabled", "cache_dir", cfg.CacheDir)
 	}
 
 	if cfg.ExpectExisting && !dirExisted {
@@ -768,14 +751,47 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 		return nil, chunk.ErrChunkNotFound
 	}
 	cloudBacked := meta.cloudBacked
+	archived := meta.archived
 	sealed := meta.sealed
 	m.mu.Unlock()
 
 	if cloudBacked {
+		// Local data.glcb is the warm cache for cloud-backed chunks: when
+		// the leader uploads or any node downloads, the same file lives at
+		// <chunkDir>/data.glcb and the read goes through the sealed-local
+		// path with no S3 round-trip. Falls back to range-request reads
+		// when the local copy was evicted under disk pressure or never
+		// existed (follower that hasn't seen this chunk yet). See
+		// gastrolog-24m1t step 7j.
+		//
+		// Archived chunks deliberately bypass the local cache: archive
+		// semantics require an explicit Restore before reads, and serving
+		// from a stale local copy would let queries silently succeed on
+		// data the operator has nominally moved offline. The cloud cursor
+		// surfaces ErrChunkArchived from the backing store.
+		if !archived && m.hasLocalGLCB(id) {
+			if cursor, err := m.openLocalGLCBCursor(id); err == nil {
+				return cursor, nil
+			}
+		}
 		// Cloud-backed cursors don't touch local mmap regions; the
 		// per-chunk lifetime lock is unnecessary for them. Their lifecycle
 		// is handled by the cloud index's own concurrency primitives.
 		return m.openCloudCursor(id)
+	}
+
+	// Prefer data.glcb when present. After PostSealProcess (post-seal
+	// pipeline stage 7c stage 2a), every sealed chunk has a data.glcb
+	// alongside the multi-file artifacts; the GLCB cursor reads through
+	// chunkcloud's seekable-zstd path with no per-chunk mmap lock needed
+	// (the file is immutable post-rename). Multi-file remains the
+	// fallback until step 7c stage 3 deletes that path. See
+	// gastrolog-24m1t.
+	if sealed && m.hasLocalGLCB(id) {
+		if cursor, err := m.openLocalGLCBCursor(id); err == nil {
+			return cursor, nil
+		}
+		// Corrupt or partial data.glcb — fall through to multi-file.
 	}
 
 	// Acquire the per-chunk read lock BEFORE opening files. CompressChunk
@@ -875,6 +891,14 @@ func (m *Manager) ScanAttrs(id chunk.ChunkID, startPos uint64, fn func(writeTS t
 		return m.scanAttrsCloud(id, startPos, fn)
 	}
 
+	// Sealed chunks with data.glcb: route through the GLCB cursor so the
+	// per-chunk artifact is the source of truth (gastrolog-24m1t step 7c
+	// stage 3). Multi-file fallback below stays in place until step 7d
+	// retires the multi-file generation entirely.
+	if sealed && m.hasLocalGLCB(id) {
+		return scanAttrsViaGLCB(m, id, startPos, fn)
+	}
+
 	chunkLock := m.chunkLockFor(id)
 	chunkLock.RLock()
 	defer chunkLock.RUnlock()
@@ -899,6 +923,37 @@ func (m *Manager) ScanAttrs(id chunk.ChunkID, startPos uint64, fn func(writeTS t
 	// Active chunk: load dict from disk (not the live in-memory dict)
 	// to avoid racing with concurrent Append calls.
 	return scanAttrsActive(idxPath, attrPath, dictPath, startPos, fn)
+}
+
+// scanAttrsViaGLCB iterates a sealed chunk's records via its data.glcb,
+// projecting each one to (writeTS, attrs) for the caller. Used by the
+// histogram's level-breakdown path; the chunkcloud cursor decodes full
+// records, but per-record CPU is bounded by the seekable-zstd frame
+// granularity (256 KB).
+func scanAttrsViaGLCB(m *Manager, id chunk.ChunkID, startPos uint64, fn func(writeTS time.Time, attrs chunk.Attributes) bool) error {
+	cursor, err := m.openLocalGLCBCursor(id)
+	if err != nil {
+		return fmt.Errorf("open data.glcb cursor for %s: %w", id, err)
+	}
+	defer func() { _ = cursor.Close() }()
+
+	if startPos > 0 {
+		if err := cursor.Seek(chunk.RecordRef{ChunkID: id, Pos: startPos}); err != nil {
+			return fmt.Errorf("seek to %d: %w", startPos, err)
+		}
+	}
+	for {
+		rec, _, err := cursor.Next()
+		if errors.Is(err, chunk.ErrNoMoreRecords) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if !fn(rec.WriteTS, rec.Attrs) {
+			return nil
+		}
+	}
 }
 
 func (m *Manager) loadExisting() error {
@@ -926,20 +981,13 @@ func (m *Manager) loadExisting() error {
 
 		meta, err := m.loadChunkMeta(id)
 		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				// No idx.log — this directory has no chunk data files.
-				// Two cases:
-				// 1. Cloud-backed chunk with preserved index files: keep it.
-				// 2. Truly empty leftover directory: safe to remove.
-				if chunkDirHasFiles(filepath.Join(m.cfg.Dir, entry.Name())) {
-					m.logger.Debug("skipping cloud-backed chunk index directory", "chunk", id)
-					continue
-				}
-				m.logger.Info("removing empty leftover chunk directory", "chunk", id)
-				_ = os.RemoveAll(filepath.Join(m.cfg.Dir, entry.Name()))
-				continue
+			if !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("load chunk meta for %s: %w", id, err)
 			}
-			return fmt.Errorf("load chunk meta for %s: %w", id, err)
+			if recovered := m.recoverChunkWithoutIdxLog(id, entry.Name()); recovered != nil {
+				m.metas[id] = recovered
+			}
+			continue
 		}
 		m.metas[id] = meta
 
@@ -1368,6 +1416,75 @@ func (m *Manager) rebuildBTrees(id chunk.ChunkID, idxFile *os.File, recordCount 
 	return ingestBT, sourceBT, nil
 }
 
+// loadChunkMetaFromGLCB reads a sealed chunk's metadata directly from its
+// data.glcb file via the chunkcloud reader. Used at startup for chunks
+// that have only data.glcb in the directory (no multi-file artifacts) —
+// once stage 3b retires multi-file generation, this becomes the primary
+// load path. See gastrolog-24m1t.
+//
+// Capability-only: not yet wired into loadExisting. The current load
+// path still goes through loadChunkMeta (idx.log-based).
+func (m *Manager) loadChunkMetaFromGLCB(id chunk.ChunkID) (*chunkMeta, error) {
+	path := filepath.Join(m.chunkDir(id), dataGLCBFileName)
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+
+	rd, err := chunkcloud.NewCacheReader(f)
+	if err != nil {
+		return nil, fmt.Errorf("open data.glcb for %s: %w", id, err)
+	}
+	defer func() { _ = rd.Close() }()
+	bm := rd.Meta()
+
+	return &chunkMeta{
+		id:               id,
+		recordCount:      int64(bm.RecordCount),
+		bytes:            bm.RawBytes,
+		sealed:           true,
+		writeStart:       bm.WriteStart,
+		writeEnd:         bm.WriteEnd,
+		ingestStart:      bm.IngestStart,
+		ingestEnd:        bm.IngestEnd,
+		sourceStart:      bm.SourceStart,
+		sourceEnd:        bm.SourceEnd,
+		ingestIdxOffset:  bm.IngestIdxOffset,
+		ingestIdxSize:    bm.IngestIdxSize,
+		sourceIdxOffset:  bm.SourceIdxOffset,
+		sourceIdxSize:    bm.SourceIdxSize,
+		logicalDataBytes: bm.RawBytes,
+	}, nil
+}
+
+// recoverChunkWithoutIdxLog handles a chunk directory whose idx.log is
+// missing — three cases:
+//
+//   - data.glcb is present: stage-3b layout (sealed chunk lives as a
+//     single GLCB blob); loadChunkMetaFromGLCB reconstructs the meta.
+//   - The directory has other files (e.g. an index sidecar): cloud-backed
+//     chunk where the cloud blob is the source of truth and only the
+//     locally-built TS index files survived. Skip — the cloud-index
+//     wiring will re-attach.
+//   - The directory is empty: leftover from an aborted seal or a delete
+//     race. Remove it.
+//
+// Returns the loaded chunkMeta (case 1) or nil (cases 2 and 3).
+func (m *Manager) recoverChunkWithoutIdxLog(id chunk.ChunkID, entryName string) *chunkMeta {
+	if glcbMeta, err := m.loadChunkMetaFromGLCB(id); err == nil {
+		return glcbMeta
+	}
+	dir := filepath.Join(m.cfg.Dir, entryName)
+	if chunkDirHasFiles(dir) {
+		m.logger.Debug("skipping cloud-backed chunk index directory", "chunk", id)
+		return nil
+	}
+	m.logger.Info("removing empty leftover chunk directory", "chunk", id)
+	_ = os.RemoveAll(dir)
+	return nil
+}
+
 func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
 	idxPath := m.idxLogPath(id)
 
@@ -1397,7 +1514,6 @@ func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
 		id:          id,
 		recordCount: int64(recordCount), //nolint:gosec // G115: record count fits in int64
 		sealed:      sealed,
-		compressed:  sealed && m.checkCompressionFlag(id),
 	}
 
 	if recordCount == 0 {
@@ -1436,25 +1552,6 @@ func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
 	}
 
 	return meta, nil
-}
-
-func (m *Manager) checkCompressionFlag(id chunk.ChunkID) bool {
-	rawPath := m.rawLogPath(id)
-	rawFile, err := os.Open(filepath.Clean(rawPath))
-	if err != nil {
-		return false
-	}
-	defer func() { _ = rawFile.Close() }()
-
-	var rawHeader [format.HeaderSize]byte
-	if _, err := io.ReadFull(rawFile, rawHeader[:]); err != nil {
-		return false
-	}
-	h, err := format.Decode(rawHeader[:])
-	if err != nil {
-		return false
-	}
-	return h.Flags&format.FlagCompressed != 0
 }
 
 func (m *Manager) readFirstLastEntries(idxFile *os.File, recordCount uint64) (IdxEntry, IdxEntry, error) {
@@ -1524,36 +1621,6 @@ func scanTSBounds(idxFile *os.File, recordCount uint64, meta *chunkMeta) error {
 	meta.sourceEnd = maxSource
 	meta.ingestTSMonotonic = monotonic
 	return nil
-}
-
-func computeIngestBounds(meta *chunkMeta, first, last IdxEntry) {
-	if first.IngestTS.Before(last.IngestTS) {
-		meta.ingestStart = first.IngestTS
-		meta.ingestEnd = last.IngestTS
-	} else {
-		meta.ingestStart = last.IngestTS
-		meta.ingestEnd = first.IngestTS
-	}
-}
-
-func computeSourceBounds(meta *chunkMeta, first, last IdxEntry) {
-	if first.SourceTS.IsZero() && last.SourceTS.IsZero() {
-		return
-	}
-	var minSrc, maxSrc time.Time
-	for _, ts := range []time.Time{first.SourceTS, last.SourceTS} {
-		if ts.IsZero() {
-			continue
-		}
-		if minSrc.IsZero() || ts.Before(minSrc) {
-			minSrc = ts
-		}
-		if maxSrc.IsZero() || ts.After(maxSrc) {
-			maxSrc = ts
-		}
-	}
-	meta.sourceStart = minSrc
-	meta.sourceEnd = maxSrc
 }
 
 func (m *Manager) SetNextChunkID(id chunk.ChunkID) {
@@ -2545,11 +2612,34 @@ func (m *Manager) HasLocalContent(id chunk.ChunkID) bool {
 	if !meta.cloudBacked {
 		return true
 	}
-	if m.cfg.CacheDir == "" {
-		return false
+	// In-tree warm cache (gastrolog-24m1t step 7j): the local data.glcb is
+	// the chunk's authoritative cache for cloud-backed reads.
+	return m.hasLocalGLCB(id)
+}
+
+// HeadCloudBlob probes the chunk's cloud blob via a HEAD request, ignoring
+// any local cache. Used by the reconcile sweep to detect blobs deleted
+// out-of-band by a lifecycle rule — OpenCursor would silently serve from
+// the warm cache and miss the gap. Returns chunk.ErrChunkSuspect for
+// missing blobs (the tracker uses that to start the grace window) and
+// nil when the blob is present. Implements chunk.CloudBlobChecker.
+func (m *Manager) HeadCloudBlob(id chunk.ChunkID) error {
+	if m.cfg.CloudStore == nil {
+		return errors.New("cloud store not configured")
 	}
-	_, err := os.Stat(m.cachePath(id))
-	return err == nil
+	ctx, cancel := context.WithTimeout(context.Background(), cloudHeadTimeout)
+	defer cancel()
+	info, err := m.cfg.CloudStore.Head(ctx, m.blobKey(id))
+	if err != nil {
+		if errors.Is(err, blobstore.ErrBlobNotFound) {
+			return chunk.ErrChunkSuspect
+		}
+		return err
+	}
+	if info.Size == 0 {
+		return chunk.ErrChunkSuspect
+	}
+	return nil
 }
 
 // FindSourceStartPosition returns the earliest record position with SourceTS >= ts.
@@ -2668,70 +2758,6 @@ func (m *Manager) findCloudTSPosition(id chunk.ChunkID, ts time.Time, offset, si
 	// O(log n) binary search via pread — no heap allocation.
 	_, pos, ok, err := searchTSCacheFile(cachePath, ts.UnixNano())
 	return uint64(pos), ok, err
-}
-
-// validateTSExtents returns true if (first, last) look like a plausible
-// (min, max) TS pair from a sorted TS index: both non-zero, last >= first,
-// and within a reasonable real-world range (post-2000, pre-2200). Used to
-// guard repairCloudBounds against garbage reads from a corrupt or
-// partially-downloaded cache file. See gastrolog-66b7x.
-func validateTSExtents(first, last time.Time) bool {
-	if first.IsZero() || last.IsZero() {
-		return false
-	}
-	if last.Before(first) {
-		return false
-	}
-	minTS := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
-	maxTS := time.Date(2200, 1, 1, 0, 0, 0, 0, time.UTC)
-	if first.Before(minTS) || last.After(maxTS) {
-		return false
-	}
-	return true
-}
-
-// cloudTSExtents returns the min and max IngestTS in a cloud chunk's TS
-// index by reading the first and last entries of the cached cache file.
-// On cache miss, downloads the index from S3 first (one range request).
-// Used by RegisterCloudChunk to recompute IngestStart/IngestEnd for chunks
-// uploaded with the pre-fix first/last-physical-record bounds. See
-// gastrolog-66b7x.
-func (m *Manager) cloudTSExtents(id chunk.ChunkID, offset, size int64) (time.Time, time.Time, error) {
-	cachePath := m.tsCachePath(id, offset)
-	if _, err := os.Stat(cachePath); err != nil {
-		if err := m.downloadTSIndex(id, offset, size, cachePath); err != nil {
-			return time.Time{}, time.Time{}, err
-		}
-	}
-	f, err := os.Open(filepath.Clean(cachePath))
-	if err != nil {
-		return time.Time{}, time.Time{}, err
-	}
-	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
-	if err != nil {
-		return time.Time{}, time.Time{}, err
-	}
-	const entrySize = 12
-	n := info.Size() / entrySize
-	if n == 0 {
-		return time.Time{}, time.Time{}, fmt.Errorf("empty cloud TS index for %s", id)
-	}
-	var buf [entrySize]byte
-	if _, err := f.ReadAt(buf[:], 0); err != nil {
-		return time.Time{}, time.Time{}, err
-	}
-	firstTS := int64(binary.LittleEndian.Uint64(buf[:8])) //nolint:gosec // G115
-	if _, err := f.ReadAt(buf[:], (n-1)*entrySize); err != nil {
-		return time.Time{}, time.Time{}, err
-	}
-	lastTS := int64(binary.LittleEndian.Uint64(buf[:8])) //nolint:gosec // G115
-	first := time.Unix(0, firstTS)
-	last := time.Unix(0, lastTS)
-	if !validateTSExtents(first, last) {
-		return time.Time{}, time.Time{}, fmt.Errorf("cloud TS index for %s returned implausible extents (first=%s last=%s)", id, first, last)
-	}
-	return first, last, nil
 }
 
 // findCloudTSRank is the rank counterpart to findCloudTSPosition. Returns
@@ -3021,10 +3047,10 @@ func (m *Manager) deleteInternal(id chunk.ChunkID) error {
 			return fmt.Errorf("delete cloud chunk %s: %w", id, err)
 		}
 		m.removeFromCloudIndex(id)
-		// Remove cached GLCB blob (best-effort).
-		if m.cfg.CacheDir != "" {
-			_ = os.Remove(m.cachePath(id))
-		}
+		// Remove the in-tree warm cache copy of the cloud blob — the
+		// chunk dir is the cache post step 7j, so blowing it away on
+		// delete keeps disk usage bounded by retention.
+		_ = os.RemoveAll(m.chunkDir(id))
 	} else {
 		dir := m.chunkDir(id)
 		// postSealActive was already drained at the top of deleteInternal
@@ -3043,94 +3069,6 @@ func (m *Manager) deleteInternal(id chunk.ChunkID) error {
 	delete(m.storageClasses, id) // clean up storage class cache
 	m.mu.Unlock()
 	return nil
-}
-
-// CompressChunk compresses raw.log and attr.log for a sealed chunk using zstd.
-// Returns nil if the chunk is not found or not sealed. No-op if already compressed.
-//
-// Cursor coordination (gastrolog-26zu1): the per-chunk RWMutex is held
-// across the temp-file write and atomic rename so an in-flight cursor's
-// mmap regions can't be invalidated under it. Without this guard, the
-// indexer Build pass1's cursor.Next could SIGBUS when its idx.log mmap
-// page-faults against a now-replaced inode (observed in production on
-// macOS, where mmap'd pages of a renamed file aren't reliably preserved).
-func (m *Manager) CompressChunk(id chunk.ChunkID) error {
-	chunkLock := m.chunkLockFor(id)
-	chunkLock.Lock()
-	defer chunkLock.Unlock()
-
-	m.mu.Lock()
-	if m.closed {
-		m.mu.Unlock()
-		return nil
-	}
-	meta, ok := m.metas[id]
-	if !ok {
-		m.mu.Unlock()
-		return chunk.ErrChunkNotFound
-	}
-	if !meta.sealed || meta.compressed {
-		m.mu.Unlock()
-		return nil
-	}
-	// Mark as compressed BEFORE releasing the lock to prevent a second
-	// concurrent CompressChunk from double-compressing the same files.
-	// If compression fails below, we clear the flag.
-	meta.compressed = true
-	rawPath := m.rawLogPath(id)
-	attrPath := m.attrLogPath(id)
-	mode := m.cfg.FileMode
-	m.mu.Unlock()
-
-	// Serialize encoder access — zstd.Encoder is not safe for concurrent use
-	// via seekable.NewWriter. Multiple PostSealProcess jobs can run concurrently
-	// for different chunks, all sharing m.zstdEnc.
-	m.zstdEncMu.Lock()
-	if err := compressFile(rawPath, m.zstdEnc, mode); err != nil {
-		m.zstdEncMu.Unlock()
-		m.rollbackCompressed(id)
-		return fmt.Errorf("compress raw.log: %w", err)
-	}
-	if err := compressFile(attrPath, m.zstdEnc, mode); err != nil {
-		m.zstdEncMu.Unlock()
-		m.rollbackCompressed(id)
-		return fmt.Errorf("compress attr.log: %w", err)
-	}
-	m.zstdEncMu.Unlock()
-
-	// Update in-memory meta to reflect compressed state and refresh sizes.
-	// Capture the announcement data under the lock, but fire AnnounceCompress
-	// AFTER releasing — same deadlock-avoidance reasoning as Seal/Append.
-	var (
-		ann       chunk.MetadataAnnouncer
-		diskBytes int64
-		announce  bool
-	)
-	m.mu.Lock()
-	if meta := m.metas[id]; meta != nil {
-		// meta.compressed already set above; refresh disk sizes.
-		meta.diskBytes = m.computeDiskBytes(id)
-		if m.cfg.Announcer != nil {
-			ann = m.cfg.Announcer
-			diskBytes = meta.diskBytes
-			announce = true
-		}
-	}
-	m.mu.Unlock()
-
-	if announce {
-		ann.AnnounceCompress(id, diskBytes)
-	}
-	return nil
-}
-
-// rollbackCompressed clears the compressed flag if compression fails partway.
-func (m *Manager) rollbackCompressed(id chunk.ChunkID) {
-	m.mu.Lock()
-	if meta := m.metas[id]; meta != nil {
-		meta.compressed = false
-	}
-	m.mu.Unlock()
 }
 
 // SetIndexBuilders injects index builders into the post-seal pipeline.
@@ -3181,28 +3119,36 @@ func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
 		m.postSealWg.Done()
 	}()
 
-	// 1. Compress data files.
-	if err := m.CompressChunk(id); err != nil {
-		return err
+	// 1. Package the sealed chunk as a single data.glcb blob — the
+	// canonical sealed-chunk artifact under gastrolog-24m1t. Failure is
+	// fatal; there is no longer a multi-file fallback.
+	if _, _, err := m.sealToGLCB(id); err != nil {
+		return fmt.Errorf("seal chunk %s to GLCB: %w", id, err)
 	}
 
-	// 2. Build indexes via injected builders.
+	// 2. Build indexes. Now reads through OpenCursor → GLCB cursor.
 	for _, builder := range m.indexBuilders {
 		if err := builder.Build(ctx, id); err != nil {
 			if isMissingLocalChunkFileError(err) {
 				continue
 			}
 			m.logger.Warn("index build failed", "chunk", id, "error", err)
-			// Non-fatal: indexes can be rebuilt later.
 		}
 	}
 
-	// 3. Refresh disk sizes after index files are written.
+	// 3. Remove the multi-file artifacts (raw.log, idx.log, attr.log,
+	// attr_dict.log, ingest.bt, source.bt). data.glcb is the only
+	// sealed artifact from here on.
+	if err := m.removeLocalDataFiles(id); err != nil {
+		m.logger.Warn("post-seal multi-file cleanup failed; chunk still readable via data.glcb", "chunk", id, "error", err)
+	}
+
+	// 4. Refresh disk sizes after index + GLCB files are written.
 	if len(m.indexBuilders) > 0 {
 		m.RefreshDiskSizes(id)
 	}
 
-	// 4. Upload to cloud and delete local if cloud-backed.
+	// 5. Upload to cloud and delete local if cloud-backed.
 	// CloudReadOnly followers skip upload — they adopt the leader's blob
 	// via RegisterCloudChunk when the tier FSM propagates the upload.
 	if m.cfg.CloudStore != nil && !m.cfg.CloudReadOnly {
@@ -3243,88 +3189,77 @@ func (m *Manager) RefreshDiskSizes(id chunk.ChunkID) {
 
 // --- Warm cache helpers ---
 
-// cachePath returns the local cache file path for a cloud chunk's GLCB blob.
-func (m *Manager) cachePath(id chunk.ChunkID) string {
-	return filepath.Join(m.cfg.CacheDir, id.String()+".glcb")
-}
-
-// writeBlobToCache atomically writes a GLCB blob to the cache directory.
-// Errors are logged and swallowed — cache writes are best-effort.
-func (m *Manager) writeBlobToCache(id chunk.ChunkID, data []byte) {
-	if err := os.MkdirAll(m.cfg.CacheDir, 0o750); err != nil {
-		m.logger.Warn("cache: failed to create dir", "error", err)
-		return
-	}
-	tmp, err := os.CreateTemp(m.cfg.CacheDir, ".glcb-*.tmp")
-	if err != nil {
-		m.logger.Warn("cache: failed to create temp file", "error", err)
-		return
-	}
-	tmpPath := filepath.Clean(tmp.Name())
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath) //nolint:gosec // G703: tmpPath is from os.CreateTemp in CacheDir
-		m.logger.Warn("cache: failed to write blob", "chunk", id, "error", err)
-		return
-	}
-	_ = tmp.Close()
-	if err := os.Rename(tmpPath, m.cachePath(id)); err != nil { //nolint:gosec // G703: tmpPath is from os.CreateTemp
-		_ = os.Remove(tmpPath) //nolint:gosec // G703: tmpPath is from os.CreateTemp
-		m.logger.Warn("cache: failed to rename blob", "chunk", id, "error", err)
-		return
-	}
-	m.logger.Debug("cache: wrote GLCB blob", "chunk", id, "bytes", len(data))
-}
-
-// openCachedCursor opens a cloud chunk from the local cache directory.
-// Returns an error if the cache file doesn't exist or is corrupt.
-func (m *Manager) openCachedCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
-	path := m.cachePath(id)
+// openLocalGLCBCursor opens a sealed chunk's data.glcb file via the chunkcloud
+// reader pipeline. Returns the underlying os error (typically ENOENT) when
+// data.glcb is absent so callers can fall back to a remote read.
+func (m *Manager) openLocalGLCBCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
+	path := filepath.Join(m.chunkDir(id), dataGLCBFileName)
 	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
-		return nil, err // cache miss
+		return nil, err
 	}
 	rd, err := chunkcloud.NewCacheReader(f)
 	if err != nil {
 		_ = f.Close()
-		_ = os.Remove(path) // corrupt — remove so next access re-downloads
 		return nil, err
 	}
 	return chunkcloud.NewSeekableCursor(rd, id), nil
 }
 
-// downloadAndCacheCursor downloads the entire GLCB blob from cloud, writes it
-// to the cache directory, and opens a local cursor. Blocking on first access.
-func (m *Manager) downloadAndCacheCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
+// hasLocalGLCB reports whether the chunk directory contains a data.glcb.
+// Used by read-path dispatch to prefer the GLCB cursor when available.
+func (m *Manager) hasLocalGLCB(id chunk.ChunkID) bool {
+	_, err := os.Stat(filepath.Join(m.chunkDir(id), dataGLCBFileName))
+	return err == nil
+}
+
+// downloadCloudBlobToChunkDir streams the cloud blob for a chunk into
+// <chunkDir>/data.glcb atomically and opens a local cursor. The chunk dir
+// becomes the warm cache, structurally identical to a freshly-sealed local
+// chunk — subsequent reads go through the local-GLCB fast path. See
+// gastrolog-24m1t step 7k.
+func (m *Manager) downloadCloudBlobToChunkDir(id chunk.ChunkID) (chunk.RecordCursor, error) {
+	dir := m.chunkDir(id)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return nil, fmt.Errorf("ensure chunk dir for cache: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, dataGLCBFileName+".tmp.*")
+	if err != nil {
+		return nil, fmt.Errorf("create tmp for cache: %w", err)
+	}
+	tmpPath := filepath.Clean(tmp.Name())
+
 	rc, err := m.cfg.CloudStore.Download(context.Background(), m.blobKey(id))
 	m.trackCloudResult(err)
 	if err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath) //nolint:gosec // G703: tmpPath from CreateTemp in chunkDir
 		return nil, err
 	}
 	defer func() { _ = rc.Close() }()
 
-	if err := os.MkdirAll(m.cfg.CacheDir, 0o750); err != nil {
-		return nil, err
-	}
-	tmp, err := os.CreateTemp(m.cfg.CacheDir, ".glcb-*.tmp")
-	if err != nil {
-		return nil, err
-	}
-	tmpPath := filepath.Clean(tmp.Name())
 	if _, err := io.Copy(tmp, rc); err != nil {
 		_ = tmp.Close()
-		_ = os.Remove(tmpPath) //nolint:gosec // G703: tmpPath is from os.CreateTemp in CacheDir
+		_ = os.Remove(tmpPath) //nolint:gosec // G703
 		return nil, err
 	}
-	_ = tmp.Close()
-
-	finalPath := m.cachePath(id)
-	if err := os.Rename(tmpPath, finalPath); err != nil { //nolint:gosec // G703: tmpPath is from os.CreateTemp
-		_ = os.Remove(tmpPath) //nolint:gosec // G703: tmpPath is from os.CreateTemp
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath) //nolint:gosec // G703
+		return nil, err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath) //nolint:gosec // G703
 		return nil, err
 	}
 
-	return m.openCachedCursor(id)
+	finalPath := filepath.Join(dir, dataGLCBFileName)
+	if err := os.Rename(tmpPath, finalPath); err != nil { //nolint:gosec // G304: tmpPath is from os.CreateTemp inside chunkDir
+		_ = os.Remove(tmpPath) //nolint:gosec // G703
+		return nil, err
+	}
+
+	return m.openLocalGLCBCursor(id)
 }
 
 // SetRotationPolicy updates the rotation policy for future appends.
@@ -3503,7 +3438,6 @@ func (m *Manager) CheckRotation() *string {
 
 var _ chunk.ChunkManager = (*Manager)(nil)
 var _ chunk.ChunkMover = (*Manager)(nil)
-var _ chunk.ChunkCompressor = (*Manager)(nil)
 
 // ChunkDir returns the filesystem path for a chunk's directory.
 func (m *Manager) ChunkDir(id chunk.ChunkID) string {
@@ -3594,85 +3528,6 @@ func (m *Manager) removeFromCloudIndex(id chunk.ChunkID) {
 	}
 }
 
-// repairCloudBounds iterates every cloud chunk in cloudIdx, recomputes
-// IngestStart/IngestEnd from the embedded TS index, and updates the entry
-// when the stored bounds are stale. Fixes pre-scanTSBounds uploads whose
-// bounds came from first/last physical records (wrong on non-monotonic
-// chunks). See gastrolog-66b7x.
-func (m *Manager) repairCloudBounds() {
-	if m.cloudIdx == nil {
-		return
-	}
-	type pending struct {
-		id   chunk.ChunkID
-		meta *chunkMeta
-	}
-	var todo []pending
-	if err := m.cloudIdx.ForEach(func(id chunk.ChunkID, meta *chunkMeta) bool {
-		if meta.ingestIdxSize > 0 {
-			todo = append(todo, pending{id: id, meta: meta})
-		}
-		return true
-	}); err != nil {
-		m.logger.Warn("repairCloudBounds: ForEach failed", "error", err)
-		return
-	}
-	for _, p := range todo {
-		first, last, err := m.cloudTSExtents(p.id, p.meta.ingestIdxOffset, p.meta.ingestIdxSize)
-		recomputed := err == nil && validateTSExtents(first, last)
-		existingValid := validateTSExtents(p.meta.ingestStart, p.meta.ingestEnd)
-		if !recomputed {
-			if err != nil {
-				m.logger.Debug("repairCloudBounds: TS index fetch failed",
-					"chunk", p.id, "error", err)
-			}
-			if !existingValid {
-				// We have nothing trustworthy to display for this chunk
-				// and could trigger nonsense-bucket spikes if we leave
-				// it in cloudIdx. Drop the entry; if the blob comes back
-				// online, RegisterCloudChunk will re-add it cleanly.
-				m.logger.Warn("repairCloudBounds: evicting cloud chunk with invalid bounds and unrecoverable TS index",
-					"chunk", p.id,
-					"stored_start", p.meta.ingestStart,
-					"stored_end", p.meta.ingestEnd)
-				m.cloudIdxMu.Lock()
-				_, _ = m.cloudIdx.Delete(p.id)
-				m.cloudIdxMu.Unlock()
-			}
-			continue
-		}
-		if first.Equal(p.meta.ingestStart) && last.Equal(p.meta.ingestEnd) {
-			continue // already correct
-		}
-		updated := *p.meta
-		updated.ingestStart = first
-		updated.ingestEnd = last
-		m.cloudIdxMu.Lock()
-		_, _ = m.cloudIdx.Delete(p.id)
-		if err := m.cloudIdx.Insert(p.id, &updated); err != nil {
-			m.cloudIdxMu.Unlock()
-			m.logger.Warn("repairCloudBounds: insert failed",
-				"chunk", p.id, "error", err)
-			continue
-		}
-		m.cloudIdxMu.Unlock()
-		m.logger.Info("repaired cloud chunk bounds",
-			"chunk", p.id,
-			"old_start", p.meta.ingestStart, "old_end", p.meta.ingestEnd,
-			"new_start", first, "new_end", last)
-	}
-	if len(todo) > 0 {
-		m.cloudIdxMu.Lock()
-		_ = m.cloudIdx.Sync()
-		m.cloudIdxMu.Unlock()
-	}
-	// Force the list cache to rebuild on next List() so callers see the
-	// updated bounds.
-	m.mu.Lock()
-	m.cloudListCache = nil
-	m.mu.Unlock()
-}
-
 // rebuildCloudListCache scans the cloud B+ tree index and caches the result.
 // Must be called with m.mu held.
 func (m *Manager) rebuildCloudListCache() {
@@ -3749,37 +3604,173 @@ func (m *Manager) UploadToCloud(id chunk.ChunkID) error {
 	if m.cfg.CloudStore == nil {
 		return errors.New("cloud store not configured")
 	}
+	return m.uploadToCloud(id)
+}
 
-	// Ensure the chunk exists in the tier FSM. Chunks sealed during
-	// degraded startup (S3 down, Raft not ready) may be missing from the
-	// manifest. Without Create+Seal in the FSM, the subsequent Upload
-	// announce has nothing to update. Idempotent — if already present,
-	// the FSM ignores the duplicate. See gastrolog-68fqk.
-	if m.cfg.Announcer != nil {
-		m.mu.Lock()
-		meta := m.metas[id]
+// sealToGLCB packages a sealed multi-file chunk into a single
+// `<chunkdir>/data.glcb` blob atomically: write to data.glcb.tmp, fsync,
+// rename. Same encoding as uploadToCloud (the cloud blob and the local
+// sealed file are byte-identical by construction, which is what unlocks
+// binary chunk replication later — gastrolog-3o5b4).
+//
+// Capability-only: not yet wired into the seal pipeline. Subsequent
+// commits flip PostSealProcess to call this in place of CompressChunk
+// and switch read paths to consume data.glcb. See gastrolog-24m1t.
+//
+// On success returns the GLCB writer so callers can read TOC offsets
+// and NumFrames without a second pass over the file.
+func (m *Manager) sealToGLCB(id chunk.ChunkID) (*chunkcloud.Writer, int64, error) {
+	m.mu.Lock()
+	if m.closed || m.zstdEnc == nil {
 		m.mu.Unlock()
-		if meta != nil && meta.sealed {
-			m.cfg.Announcer.AnnounceCreate(id, meta.writeStart, meta.ingestStart, meta.sourceStart)
-			m.cfg.Announcer.AnnounceSeal(id, meta.writeEnd, meta.recordCount, meta.bytes, meta.ingestEnd, meta.sourceEnd)
-		}
+		return nil, 0, ErrManagerClosed
+	}
+	meta, ok := m.metas[id]
+	if !ok {
+		m.mu.Unlock()
+		return nil, 0, chunk.ErrChunkNotFound
+	}
+	if !meta.sealed {
+		m.mu.Unlock()
+		return nil, 0, chunk.ErrChunkNotSealed
+	}
+	m.mu.Unlock()
+
+	cursor, err := m.OpenCursor(id)
+	if err != nil {
+		return nil, 0, fmt.Errorf("open cursor for GLCB seal: %w", err)
 	}
 
-	return m.uploadToCloud(id)
+	w := chunkcloud.NewWriter(id, m.cfg.VaultID, m.zstdEnc)
+	for {
+		rec, _, recErr := cursor.Next()
+		if errors.Is(recErr, chunk.ErrNoMoreRecords) {
+			break
+		}
+		if recErr != nil {
+			_ = cursor.Close()
+			return nil, 0, fmt.Errorf("read record for GLCB seal: %w", recErr)
+		}
+		if err := w.Add(rec); err != nil {
+			_ = cursor.Close()
+			return nil, 0, fmt.Errorf("add record to GLCB writer: %w", err)
+		}
+	}
+	_ = cursor.Close()
+
+	dir := m.chunkDir(id)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return nil, 0, fmt.Errorf("ensure chunk dir: %w", err)
+	}
+	tmpPath := filepath.Join(dir, dataGLCBTmpFileName)
+	finalPath := filepath.Join(dir, dataGLCBFileName)
+
+	// Open the tmp with O_EXCL so a stale tmp from a prior aborted seal
+	// surfaces as a clear error rather than getting clobbered. The
+	// cleanOrphanTempFiles sweep at startup is responsible for tmp removal
+	// on crash recovery.
+	f, err := os.OpenFile(filepath.Clean(tmpPath), os.O_RDWR|os.O_CREATE|os.O_EXCL, m.cfg.FileMode)
+	if err != nil {
+		return nil, 0, fmt.Errorf("create %s: %w", dataGLCBTmpFileName, err)
+	}
+	cleanup := func() {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+	}
+
+	// Serialize zstd encoder access — chunkcloud.Writer reuses the shared
+	// m.zstdEnc, which klauspost/zstd's seekable writer is not safe for
+	// concurrent use against. Same rationale as CompressChunk's
+	// zstdEncMu serialization.
+	m.zstdEncMu.Lock()
+	written, werr := w.WriteTo(f)
+	m.zstdEncMu.Unlock()
+	if werr != nil {
+		cleanup()
+		return nil, 0, fmt.Errorf("write GLCB: %w", werr)
+	}
+	if err := f.Sync(); err != nil {
+		cleanup()
+		return nil, 0, fmt.Errorf("fsync %s: %w", dataGLCBTmpFileName, err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return nil, 0, fmt.Errorf("close %s: %w", dataGLCBTmpFileName, err)
+	}
+	if err := os.Rename(tmpPath, finalPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return nil, 0, fmt.Errorf("rename %s → %s: %w", dataGLCBTmpFileName, dataGLCBFileName, err)
+	}
+
+	// Cache the TOC, frame count, blob size, and compressed flag on the
+	// chunkMeta so downstream consumers don't have to re-parse the blob
+	// tail. data.glcb's record-data section is zstd-compressed by
+	// construction, so compressed=true is semantically correct (the same
+	// flag CompressChunk used to set in the multi-file pipeline; it
+	// drops out entirely in step 7f).
+	toc := w.TOC()
+	numFrames := w.NumFrames()
+	bm := w.Meta()
+	m.mu.Lock()
+	if meta := m.metas[id]; meta != nil {
+		meta.ingestIdxOffset = toc.IngestIdxOffset
+		meta.ingestIdxSize = toc.IngestIdxSize
+		meta.sourceIdxOffset = toc.SourceIdxOffset
+		meta.sourceIdxSize = toc.SourceIdxSize
+		meta.numFrames = numFrames
+		meta.rawBytes = bm.RawBytes
+	}
+	m.mu.Unlock()
+
+	return w, written, nil
 }
 
 func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	key := m.blobKey(id)
 
-	// Close() nils zstdEnc after postSealWg drains; cloud backfill jobs can
-	// still fire from the scheduler while a tier is being torn down (e.g.
-	// replication-factor placement churn). Without this guard, NewWriter
-	// receives a nil *zstd.Encoder and panics inside klauspost/zstd.
+	// Snapshot the BlobMeta + cached TOC under the manager lock. After step
+	// 7c the local data.glcb is byte-identical to what NewWriter would emit
+	// (sealToGLCB and the cloud writer share the encoder), so streaming the
+	// file straight to S3 replaces the legacy cursor → NewWriter → buf →
+	// upload dance — saving one full encode pass and keeping the compressed
+	// bytes off the heap. See gastrolog-24m1t step 7h.
 	m.mu.Lock()
-	if m.closed || m.zstdEnc == nil {
+	if m.closed {
 		m.mu.Unlock()
 		return ErrManagerClosed
 	}
+	meta := m.metas[id]
+	if meta == nil {
+		m.mu.Unlock()
+		return chunk.ErrChunkNotFound
+	}
+	if !meta.sealed {
+		m.mu.Unlock()
+		return chunk.ErrChunkNotSealed
+	}
+	bm := chunkcloud.BlobMeta{
+		ChunkID:         id,
+		VaultID:         m.cfg.VaultID,
+		RecordCount:     uint32(meta.recordCount), //nolint:gosec // G115: sealed chunk record count fits in uint32 by rotation policy
+		RawBytes:        meta.rawBytes,
+		WriteStart:      meta.writeStart,
+		WriteEnd:        meta.writeEnd,
+		IngestStart:     meta.ingestStart,
+		IngestEnd:       meta.ingestEnd,
+		SourceStart:     meta.sourceStart,
+		SourceEnd:       meta.sourceEnd,
+		IngestIdxOffset: meta.ingestIdxOffset,
+		IngestIdxSize:   meta.ingestIdxSize,
+		SourceIdxOffset: meta.sourceIdxOffset,
+		SourceIdxSize:   meta.sourceIdxSize,
+	}
+	toc := chunkcloud.BlobTOC{
+		IngestIdxOffset: meta.ingestIdxOffset,
+		IngestIdxSize:   meta.ingestIdxSize,
+		SourceIdxOffset: meta.sourceIdxOffset,
+		SourceIdxSize:   meta.sourceIdxSize,
+	}
+	numFrames := meta.numFrames
 	m.mu.Unlock()
 
 	// If the blob already exists (leader or another replica uploaded first),
@@ -3795,78 +3786,74 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		return m.adoptCloudBlob(id, existing.Size)
 	}
 
-	// Open a cursor on the local sealed chunk to read all records.
-	cursor, err := m.OpenCursor(id)
+	glcbPath := filepath.Join(m.chunkDir(id), dataGLCBFileName)
+
+	statInfo, err := os.Stat(filepath.Clean(glcbPath))
 	if err != nil {
-		return fmt.Errorf("open cursor for cloud upload: %w", err)
+		return fmt.Errorf("stat data.glcb: %w", err)
 	}
+	blobSize := statInfo.Size()
 
-	w := chunkcloud.NewWriter(id, m.cfg.VaultID, m.zstdEnc)
-	for {
-		rec, _, recErr := cursor.Next()
-		if errors.Is(recErr, chunk.ErrNoMoreRecords) {
-			break
-		}
-		if recErr != nil {
-			_ = cursor.Close()
-			return fmt.Errorf("read record for cloud upload: %w", recErr)
-		}
-		if err := w.Add(rec); err != nil {
-			_ = cursor.Close()
-			return fmt.Errorf("add record to GLCB writer: %w", err)
-		}
+	uploadFile, err := os.Open(filepath.Clean(glcbPath))
+	if err != nil {
+		return fmt.Errorf("open data.glcb for upload: %w", err)
 	}
-	_ = cursor.Close()
-
-	var buf bytes.Buffer
-	if _, err := w.WriteTo(&buf); err != nil {
-		return fmt.Errorf("compress GLCB: %w", err)
-	}
-
-	bm := w.Meta()
 	uploadCtx, uploadCancel := context.WithTimeout(context.Background(), cloudUploadTimeout)
 	err = m.cfg.CloudStore.Upload(
 		uploadCtx,
 		key,
-		bytes.NewReader(buf.Bytes()),
+		uploadFile,
 		chunkcloud.ObjectMetadata(bm),
 	)
 	uploadCancel()
+	_ = uploadFile.Close()
 	m.trackCloudResult(err)
 	if err != nil {
 		return fmt.Errorf("upload GLCB: %w", err)
 	}
 
-	blobSize := int64(buf.Len())
+	// No separate CacheDir mirror — the local data.glcb that we just
+	// uploaded stays in <chunkDir> and IS the warm cache (step 7k).
 
-	// Write GLCB blob to local cache (best-effort).
-	if m.cfg.CacheDir != "" {
-		m.writeBlobToCache(id, buf.Bytes())
-	}
-
-	// Take the per-chunk write lock around the file removal AND the
-	// metadata transition so cursors in flight on this chunk drain
-	// before the mmap regions are invalidated. Without this, an
-	// indexer Build pass running concurrently with backfillCloudUploads
-	// SIGBUSes inside DecodeIdxEntry when its idx.log mmap region is
-	// removed mid-Next(). See gastrolog-2owzp (regression of
-	// gastrolog-26zu1's lifecycle lock; the original audit missed this
-	// path because removeLocalDataFiles is buried inside uploadToCloud
-	// rather than gated by a verb that named the chunk).
+	// Take the per-chunk write lock around the FSM announce, the file
+	// removal, AND the metadata transition. Cursors in flight on this
+	// chunk must drain before mmap regions are invalidated. Without
+	// this, an indexer Build pass running concurrently with
+	// backfillCloudUploads SIGBUSes inside DecodeIdxEntry when its
+	// idx.log mmap region is removed mid-Next(). See gastrolog-2owzp.
 	chunkLock := m.chunkLockFor(id)
 	chunkLock.Lock()
 	defer chunkLock.Unlock()
 
-	// Delete local data files but keep index files for fast queries.
+	// FSM-first: announce the upload before any local mutation. Applier.Apply
+	// blocks on quorum + local FSM apply, so once this returns the FSM is
+	// authoritative for "this chunk is cloud-backed". Readers landing between
+	// the announce and the file removal still see consistent state — the FSM
+	// CloudBacked flag flips first, then the local files go. The previous
+	// order had a window where files were gone but the FSM still said local,
+	// producing the L>>count / gap / dip artifacts in histogram.
+	// See gastrolog-35l6a.
+	if m.cfg.Announcer != nil {
+		m.cfg.Announcer.AnnounceUpload(id, blobSize,
+			toc.IngestIdxOffset, toc.IngestIdxSize,
+			toc.SourceIdxOffset, toc.SourceIdxSize,
+			numFrames)
+	}
+
+	// Delete the multi-file data artifacts (raw.log/idx.log/etc.) — they
+	// are redundant with data.glcb and remain only on chunks sealed before
+	// step 7c stage 3b landed. Keep the local data.glcb itself: post step
+	// 7j it is the warm cache for the now-cloud-backed chunk, read
+	// transparently via OpenCursor's local-GLCB fast path. Eviction under
+	// disk pressure can delete it later; the cloud blob is authoritative.
 	if err := m.removeLocalDataFiles(id); err != nil {
 		return fmt.Errorf("remove local data files after cloud upload: %w", err)
 	}
 
 	// Move metadata from in-memory map to cloud B+ tree index.
 	// The chunk is now cloud-only — remove from Go heap.
-	toc := w.TOC()
 	m.mu.Lock()
-	meta := m.metas[id]
+	meta = m.metas[id]
 	if meta != nil {
 		meta.cloudBacked = true
 		meta.diskBytes = blobSize
@@ -3874,7 +3861,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		meta.ingestIdxSize = toc.IngestIdxSize
 		meta.sourceIdxOffset = toc.SourceIdxOffset
 		meta.sourceIdxSize = toc.SourceIdxSize
-		meta.numFrames = w.NumFrames()
+		meta.numFrames = numFrames
 		delete(m.metas, id)
 	}
 	m.mu.Unlock()
@@ -3892,13 +3879,6 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		m.mu.Unlock()
 	}
 
-	if m.cfg.Announcer != nil && meta != nil {
-		m.cfg.Announcer.AnnounceUpload(id, meta.diskBytes,
-			meta.ingestIdxOffset, meta.ingestIdxSize,
-			meta.sourceIdxOffset, meta.sourceIdxSize,
-			meta.numFrames)
-	}
-
 	m.logger.Debug("chunk uploaded to cloud",
 		"chunk", id,
 		"bytes", blobSize,
@@ -3908,39 +3888,59 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 
 // adoptCloudBlob transitions a local chunk to cloud-backed using an existing
 // S3 blob. Used when another node (typically the leader) already uploaded the
-// same chunk. Reads the GLCB header from S3 to get TOC offsets, then deletes
-// the local copy.
+// same chunk while we were preparing our own upload. The local data.glcb is
+// byte-identical to the cloud blob by construction (sealToGLCB and the cloud
+// writer share the encoder, and the input record set is the same), so the
+// TOC cached on chunkMeta during sealToGLCB matches what's in S3 — no range
+// request needed to read it back. See gastrolog-24m1t step 7i.
 func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
-	key := m.blobKey(id)
-
-	// Read TOC from end of blob to get TS index offsets.
-	tocCtx, tocCancel := context.WithTimeout(context.Background(), cloudDownloadTimeout)
-	tocBuf, err := m.cfg.CloudStore.DownloadRange(
-		tocCtx, key, blobSize-chunkcloud.TOCSize, chunkcloud.TOCSize)
-	tocCancel()
-	if err != nil {
-		return fmt.Errorf("read TOC from existing blob: %w", err)
-	}
-	defer func() { _ = tocBuf.Close() }()
-	tocData := make([]byte, chunkcloud.TOCSize)
-	if _, err := io.ReadFull(tocBuf, tocData); err != nil {
-		return fmt.Errorf("read TOC bytes: %w", err)
-	}
-	toc, err := chunkcloud.ParseTOC(tocData)
-	if err != nil {
-		return fmt.Errorf("parse TOC from existing blob: %w", err)
-	}
-
-	// Per-chunk write lock around the disk + meta transition; same
-	// rationale as uploadToCloud (gastrolog-2owzp). adoptCloudBlob
-	// fires when another node beat us to the upload — we still
-	// transition the local files to cloud-only state, which is the
-	// same mutation any in-flight cursor needs to be drained against.
+	// Per-chunk write lock around the FSM announce, the disk transition,
+	// and the meta mutation; same rationale as uploadToCloud
+	// (gastrolog-2owzp). adoptCloudBlob fires when another node beat us
+	// to the upload — we still transition local files to cloud-only state,
+	// which is the same mutation any in-flight cursor needs to drain
+	// against.
 	chunkLock := m.chunkLockFor(id)
 	chunkLock.Lock()
 	defer chunkLock.Unlock()
 
-	// Delete local data files but keep index files for fast queries.
+	// Snapshot the cached TOC + numFrames from the local sealed chunk. If
+	// the chunk was already adopted in a prior cycle (no longer in m.metas),
+	// fall back to the cloud index entry.
+	m.mu.Lock()
+	am := m.metas[id]
+	m.mu.Unlock()
+	if am == nil && m.cloudIdx != nil {
+		m.cloudIdxMu.Lock()
+		am, _ = m.cloudIdx.Lookup(id)
+		m.cloudIdxMu.Unlock()
+	}
+	if am == nil {
+		return fmt.Errorf("adopt cloud blob: no local meta for %s", id)
+	}
+	ingestIdxOff := am.ingestIdxOffset
+	ingestIdxSize := am.ingestIdxSize
+	sourceIdxOff := am.sourceIdxOffset
+	sourceIdxSize := am.sourceIdxSize
+	numFrames := am.numFrames
+
+	// FSM-first: announce before any local mutation. Applier.Apply blocks on
+	// quorum + local FSM apply, so once the announce returns the FSM is
+	// authoritative for "this chunk is cloud-backed". Without this, the FSM
+	// overlay keeps returning CloudBacked=false and the backfill re-adopts on
+	// every cycle (gastrolog-68fqk); readers landing between removeLocalDataFiles
+	// and the announce would have observed "FSM says local, files gone",
+	// producing histogram artifacts (gastrolog-35l6a).
+	if m.cfg.Announcer != nil {
+		m.cfg.Announcer.AnnounceUpload(id, blobSize,
+			ingestIdxOff, ingestIdxSize,
+			sourceIdxOff, sourceIdxSize,
+			numFrames)
+	}
+
+	// Delete the multi-file data artifacts (raw.log/idx.log/etc.) — same
+	// rationale as uploadToCloud: data.glcb itself stays as the warm cache
+	// for the now-cloud-backed chunk (gastrolog-24m1t step 7j).
 	if err := m.removeLocalDataFiles(id); err != nil {
 		return fmt.Errorf("remove local data files after cloud adopt: %w", err)
 	}
@@ -3949,12 +3949,11 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 	meta := m.metas[id]
 	if meta != nil {
 		meta.cloudBacked = true
-		meta.compressed = true // GLCB blobs are always zstd-compressed
 		meta.diskBytes = blobSize
-		meta.ingestIdxOffset = toc.IngestIdxOffset
-		meta.ingestIdxSize = toc.IngestIdxSize
-		meta.sourceIdxOffset = toc.SourceIdxOffset
-		meta.sourceIdxSize = toc.SourceIdxSize
+		meta.ingestIdxOffset = ingestIdxOff
+		meta.ingestIdxSize = ingestIdxSize
+		meta.sourceIdxOffset = sourceIdxOff
+		meta.sourceIdxSize = sourceIdxSize
 		delete(m.metas, id)
 	}
 	m.mu.Unlock()
@@ -3970,31 +3969,6 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 		m.mu.Lock()
 		m.cloudListCache = nil
 		m.mu.Unlock()
-	}
-
-	// Announce to vault-ctl Raft so all nodes learn this chunk is cloud-backed.
-	// Without this, the FSM overlay keeps returning CloudBacked=false and
-	// the backfill re-adopts on every cycle. See gastrolog-68fqk.
-	//
-	// When meta is nil (chunk already adopted in a prior cycle — no longer
-	// in metas), fall back to the cloud index. The FSM requires a Create
-	// entry before Upload can set CloudBacked, so announce Create+Seal
-	// first (idempotent if already present).
-	if m.cfg.Announcer != nil {
-		am := meta
-		if am == nil && m.cloudIdx != nil {
-			m.cloudIdxMu.Lock()
-			am, _ = m.cloudIdx.Lookup(id)
-			m.cloudIdxMu.Unlock()
-		}
-		if am != nil {
-			m.cfg.Announcer.AnnounceCreate(id, am.writeStart, am.ingestStart, am.sourceStart)
-			m.cfg.Announcer.AnnounceSeal(id, am.writeEnd, am.recordCount, am.bytes, am.ingestEnd, am.sourceEnd)
-			m.cfg.Announcer.AnnounceUpload(id, blobSize,
-				toc.IngestIdxOffset, toc.IngestIdxSize,
-				toc.SourceIdxOffset, toc.SourceIdxSize,
-				am.numFrames)
-		}
 	}
 
 	m.logger.Debug("chunk adopted from cloud",
@@ -4031,23 +4005,6 @@ func (m *Manager) RegisterCloudChunk(id chunk.ChunkID, info chunk.CloudChunkInfo
 		return nil // already in cloud index
 	}
 
-	// Recompute IngestStart/IngestEnd from the cloud TS index entries.
-	// CloudChunkInfo carries values from the FSM Entry; for chunks
-	// uploaded BEFORE the scanTSBounds fix (gastrolog-66b7x), these
-	// were derived from the first/last PHYSICAL records, which on a
-	// non-monotonic chunk are not the IngestTS extrema. Using those
-	// stale bounds makes the histogram cap-branch attribute all
-	// RecordCount records to the wrong bucket. The TS index is
-	// authoritative (sorted by IngestTS), so first/last entries give
-	// the true min/max. Done lazily — pulls the local cache or one
-	// S3 range fetch per chunk, then never again.
-	if info.IngestIdxSize > 0 {
-		if first, last, err := m.cloudTSExtents(id, info.IngestIdxOffset, info.IngestIdxSize); err == nil {
-			info.IngestStart = first
-			info.IngestEnd = last
-		}
-	}
-
 	meta := &chunkMeta{
 		id:                id,
 		writeStart:        info.WriteStart,
@@ -4060,7 +4017,6 @@ func (m *Manager) RegisterCloudChunk(id chunk.ChunkID, info chunk.CloudChunkInfo
 		recordCount:       info.RecordCount,
 		bytes:             info.Bytes,
 		sealed:            true,
-		compressed:        true,
 		cloudBacked:       true,
 		diskBytes:         info.DiskBytes,
 		ingestIdxOffset:   info.IngestIdxOffset,
@@ -4114,15 +4070,17 @@ func (m *Manager) scanAttrsCloud(id chunk.ChunkID, startPos uint64, fn func(writ
 	}
 }
 
-// openCloudCursor opens a cloud-backed chunk for random-access record reads
-// via range requests. Downloads only the header, dictionary, record index, and
-// TOC at init (~few KB). Individual records are fetched on demand — each read
-// triggers a range request for the seekable zstd frame containing that record.
+// openCloudCursor opens a cloud-backed chunk for record reads when the
+// in-tree warm cache (<chunkDir>/data.glcb) is absent. The fast path lives
+// in OpenCursor — by the time we get here either the cache was evicted or
+// the chunk was never sealed locally (follower that adopted via FSM).
 //
-// This is efficient because cloud cursors are rarely opened: bounded queries
-// defer cloud chunks entirely when local chunks can serve the limit. When a
-// cloud cursor IS opened, the TS index narrows access to specific positions,
-// so only a few frames are fetched rather than the full blob.
+// Strategy: try a one-shot full download into the chunk dir first so the
+// next read goes through the local-GLCB fast path. On download failure
+// fall back to range-request reads via NewRemoteReader. The remote reader
+// pulls header/dict/index/TOC at init (~few KB) and fetches individual
+// frames on demand, so it stays cheap when the per-query touch count is
+// low (notably histograms that read the TS index only).
 func (m *Manager) openCloudCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	m.mu.Lock()
 	meta := m.lookupMeta(id)
@@ -4132,31 +4090,18 @@ func (m *Manager) openCloudCursor(id chunk.ChunkID) (chunk.RecordCursor, error) 
 		return nil, chunk.ErrChunkNotFound
 	}
 
-	// Cache hit: open from local GLCB file.
-	if m.cfg.CacheDir != "" {
-		if cursor, err := m.openCachedCursor(id); err == nil {
-			return cursor, nil
-		}
+	if cursor, err := m.downloadCloudBlobToChunkDir(id); err == nil {
+		return cursor, nil
+	} else {
+		// Debug, not Warn: this fires on every cloud cursor that races
+		// with retention-driven blob deletion. The range-request
+		// fallback below propagates the real error to callers that
+		// genuinely need it; raising WARN here would flood operator
+		// logs during every retention sweep. See gastrolog-2c96i.
+		m.logger.Debug("cache: cloud blob download failed, falling back to range requests",
+			"chunk", id, "error", err)
 	}
 
-	// Cache miss: download entire blob to cache, then open locally.
-	if m.cfg.CacheDir != "" {
-		if cursor, err := m.downloadAndCacheCursor(id); err == nil {
-			return cursor, nil
-		} else {
-			// Debug, not Warn: this fires on every cloud cursor that
-			// races with retention-driven blob deletion. The range-
-			// request fallback handles genuinely missing blobs the
-			// same way — callers that need a real error see the
-			// bubbled-up failure from there. Raising WARN here meant
-			// operator log noise + UI alert-panel floods during every
-			// retention sweep. See gastrolog-2c96i.
-			m.logger.Debug("cache: download-and-cache failed, falling back to range requests",
-				"chunk", id, "error", err)
-		}
-	}
-
-	// Fallback: remote reader with range requests.
 	rd, err := chunkcloud.NewRemoteReader(m.cfg.CloudStore, m.blobKey(id), meta.diskBytes)
 	if err != nil {
 		return nil, fmt.Errorf("open remote reader %s: %w", id, err)
@@ -4186,9 +4131,40 @@ func (m *Manager) loadCloudChunks() error {
 		} else {
 			m.logger.Info("cloud index ready", "count", newCount)
 		}
+		// Drop local m.metas entries for chunks that the cloud index also
+		// holds — post step 7j the local data.glcb sticks around as warm
+		// cache after upload, but the authoritative meta (with archived /
+		// numFrames / TOC offsets) is the cloud index entry. Without this
+		// reconciliation a restart resurrects a stale local-sealed meta
+		// that masks the cloud-recorded archived flag. The data.glcb file
+		// itself stays put — OpenCursor's local-GLCB fast path picks it
+		// up via hasLocalGLCB. See gastrolog-24m1t step 7j.
+		m.dropLocalMetaForCloudChunks()
 	}
 	m.backfillTSOffsets()
 	return nil
+}
+
+// dropLocalMetaForCloudChunks removes m.metas entries for any chunk also
+// present in the cloud index. The on-disk data.glcb is preserved as warm
+// cache; only the duplicated in-memory meta goes.
+func (m *Manager) dropLocalMetaForCloudChunks() {
+	if m.cloudIdx == nil {
+		return
+	}
+	m.cloudIdxMu.Lock()
+	cloudIDs := make([]chunk.ChunkID, 0, m.cloudIdx.Count())
+	_ = m.cloudIdx.ForEach(func(id chunk.ChunkID, _ *chunkMeta) bool {
+		cloudIDs = append(cloudIDs, id)
+		return true
+	})
+	m.cloudIdxMu.Unlock()
+
+	m.mu.Lock()
+	for _, id := range cloudIDs {
+		delete(m.metas, id)
+	}
+	m.mu.Unlock()
 }
 
 // backfillTSOffsets reads the GLCB TOC footer for cloud chunks that have zero
@@ -4203,24 +4179,14 @@ func (m *Manager) backfillTSOffsets() {
 		if meta.ingestIdxSize > 0 {
 			return true // already has offsets
 		}
-		// Read the last 48 bytes (TOC) from the blob.
+		// Pull the TOC from the tail of the blob.
 		info, err := m.cfg.CloudStore.Head(context.Background(), m.blobKey(id))
-		if err != nil || info.Size < chunkcloud.TOCSize {
+		if err != nil || info.Size < int64(chunkcloud.TOCFooterSize) {
 			return true
 		}
-		rc, err := m.cfg.CloudStore.DownloadRange(context.Background(), m.blobKey(id), info.Size-chunkcloud.TOCSize, chunkcloud.TOCSize)
-		if err != nil {
-			return true
-		}
-		var buf [chunkcloud.TOCSize]byte
-		_, err = io.ReadFull(rc, buf[:])
-		_ = rc.Close()
-		if err != nil {
-			return true
-		}
-		toc, err := chunkcloud.ParseTOC(buf[:])
+		toc, err := chunkcloud.DownloadTOC(context.Background(), m.cfg.CloudStore, m.blobKey(id), info.Size)
 		if err != nil || toc.IngestIdxOffset == 0 {
-			return true // v1 blob without embedded TS indexes
+			return true
 		}
 		meta.ingestIdxOffset = toc.IngestIdxOffset
 		meta.ingestIdxSize = toc.IngestIdxSize
@@ -4251,19 +4217,18 @@ func (m *Manager) loadCloudChunksFromStore() error {
 		if !ok {
 			return nil
 		}
-		// Don't add to cloud index if the chunk has local data files —
-		// let the backfill handle it via UploadToCloud → adoptCloudBlob,
-		// which removes local files, updates cloud index, AND announces
-		// to the tier FSM. Setting cloudBacked here would make the
-		// backfill skip the chunk, leaving the FSM out of date.
-		if _, exists := m.metas[id]; exists {
-			return nil
-		}
 		// Skip if already in the cloud index (preserves richer metadata
 		// like TS index offsets from previous backfills).
 		if m.cloudIdx != nil && m.cloudIdxHas(id) {
 			return nil
 		}
+		// If we also have a local entry, the local data.glcb is now the
+		// warm cache for an already-uploaded chunk. Drop the local meta
+		// in favor of the authoritative cloud entry that's about to be
+		// inserted into cloudIdx — the local data.glcb file stays in
+		// place as cache and will be picked up by OpenCursor's local-GLCB
+		// fast path. See gastrolog-24m1t step 7j.
+		delete(m.metas, id)
 		cm := chunkcloud.BlobMetaToChunkMeta(id, blob)
 		meta := &chunkMeta{
 			id:          id,
@@ -4273,7 +4238,6 @@ func (m *Manager) loadCloudChunksFromStore() error {
 			bytes:       cm.Bytes,
 			diskBytes:   cm.DiskBytes,
 			sealed:      true,
-			compressed:  true,
 			ingestStart: cm.IngestStart,
 			ingestEnd:   cm.IngestEnd,
 			sourceStart: cm.SourceStart,

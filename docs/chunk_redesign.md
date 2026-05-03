@@ -14,7 +14,7 @@ lifecycle should flow through the system. The scope is **all sealed
 chunks** (file-tier, cloud-tier, cached or not) plus the metadata
 boundary between active and sealed chunks. The previous "cloud-only"
 framing has been retired; the cloud-vs-file distinction collapses to a
-single bit on the FSM Entry under this redesign.
+single bit on the FSM ManifestEntry under this redesign.
 
 It exists because the existing implementation grew several layers of
 "compensate for bad data" code that violated our most important
@@ -45,6 +45,7 @@ file/cloud machinery into one shape parameterised by a single property.
   - [Sealing semantics](#sealing-semantics)
   - [Indexer / seal / upload coordination](#indexer--seal--upload-coordination)
   - [Read performance](#read-performance)
+  - [Replication via binary copy](#replication-via-binary-copy)
 - [The unified Manager type](#the-unified-manager-type)
   - [The whole interface in one shape](#the-whole-interface-in-one-shape)
   - [Cache vs permanent: just `CloudBacked` on the FSM](#cache-vs-permanent-just-cloudbacked-on-the-fsm)
@@ -53,11 +54,11 @@ file/cloud machinery into one shape parameterised by a single property.
   - [Read flow](#read-flow)
   - [Partial-blob caching](#partial-blob-caching)
   - [Write flow](#write-flow)
-- [What the FSM Entry needs](#what-the-fsm-entry-needs)
-  - [Already on the Entry today](#already-on-the-entry-today)
+- [What the FSM ManifestEntry needs](#what-the-fsm-manifestentry-needs)
+  - [Already on the ManifestEntry today](#already-on-the-manifestentry-today)
   - [Resolved one Raft hop sideways via the tier config](#resolved-one-raft-hop-sideways-via-the-tier-config)
-  - [Should be on the Entry but isn't](#should-be-on-the-entry-but-isnt)
-  - [Not needed on the Entry](#not-needed-on-the-entry)
+  - [Should be on the ManifestEntry but isn't](#should-be-on-the-manifestentry-but-isnt)
+  - [Not needed on the ManifestEntry](#not-needed-on-the-manifestentry)
   - [Minimum viable change to the FSM](#minimum-viable-change-to-the-fsm)
 - [The collapse: file vs cloud is one bit](#the-collapse-file-vs-cloud-is-one-bit)
 
@@ -79,12 +80,12 @@ file/cloud machinery into one shape parameterised by a single property.
 ## The rule: FSM as source of truth
 
 Every persistent fact about a *sealed* chunk lives in exactly one place:
-its `Entry` in the tier sub-FSM
-([backend/internal/tier/raftfsm/fsm.go](../backend/internal/tier/raftfsm/fsm.go)).
+its `ManifestEntry` in the tier sub-FSM
+([backend/internal/vaultraft/tierfsm/fsm.go](../backend/internal/vaultraft/tierfsm/fsm.go)).
 
-That `Entry` is mutated only by the sanctioned `Cmd*` applies. Outside
+That `ManifestEntry` is mutated only by the sanctioned `Cmd*` applies. Outside
 those write points, **nothing computes, recomputes, validates, repairs, or
-second-guesses any field of the Entry.** All read paths trust the FSM
+second-guesses any field of the ManifestEntry.** All read paths trust the FSM
 unconditionally.
 
 If two stored values disagree, the FSM wins by definition. Other stores
@@ -110,9 +111,9 @@ For an active chunk, the in-memory `chunkMeta` (and the live B+ trees
 the manager maintains as records are appended) *is* the source of
 truth. The FSM only knows the chunk exists (via `CmdCreateChunk` at open
 time, with bounds set to chunk-creation wall-clock as a placeholder)
-and the immutable per-Entry flags. The act of sealing — `AnnounceSeal`
+and the immutable per-ManifestEntry flags. The act of sealing — `AnnounceSeal`
 → `CmdSealChunk` — is the handover: the manager's running maxima get
-committed to the Entry as final values, the FSM's placeholder Start
+committed to the ManifestEntry as final values, the FSM's placeholder Start
 fields get overwritten with the real ones it didn't know about until
 now, and from that instant onward the chunk obeys the rule like any
 sealed chunk.
@@ -146,14 +147,14 @@ is about *sealed* chunks, where the rule holds without exception.
 The exception isn't a redesign decision. It is how the system already
 works:
 
-- `applyCreate` ([fsm.go:615](../backend/internal/tier/raftfsm/fsm.go#L615))
+- `applyCreate` ([fsm.go:615](../backend/internal/vaultraft/tierfsm/fsm.go#L615))
   writes only `ID` + the three `*Start` placeholders.
-- `applySeal` ([fsm.go:645](../backend/internal/tier/raftfsm/fsm.go#L645))
+- `applySeal` ([fsm.go:645](../backend/internal/vaultraft/tierfsm/fsm.go#L645))
   is the only command that overwrites Start/End/Count/Bytes with real
   values.
 - There is no `CmdAppend` or `CmdGrowChunk`. Per-record updates never
   touch Raft. By construction, the FSM cannot be the source of truth
-  for any of the eight running fields on an unsealed Entry — only the
+  for any of the eight running fields on an unsealed ManifestEntry — only the
   manager can be.
 
 The redesign therefore doesn't need to introduce or carve out anything
@@ -224,7 +225,7 @@ multi-file artifacts are removed atomically.
 - **`CompressChunk` and the "compressed local" path disappear.**
   Sealing converts multi-file → GLCB directly. There is no
   uncompressed-sealed intermediate state. The `Compressed` flag on the
-  FSM Entry stops being meaningful (sealed = GLCB = compressed by
+  FSM ManifestEntry stops being meaningful (sealed = GLCB = compressed by
   definition) — drop it, or treat it as a synonym for `Sealed`.
 - **`uploadToCloud` becomes "PUT the local `data.glcb` to S3" plus
   `AnnounceUpload`.** No format conversion. No `chunkcloud.NewWriter`
@@ -258,7 +259,7 @@ What stays:
 - `RegisterCloudChunk` (follower nodes that learn about a cloud-backed
   chunk via FSM propagation but haven't downloaded `data.glcb` yet) —
   same lifecycle, just no separate cache layout.
-- The FSM `Entry` shape — `IngestIdxOffset/Size`, `SourceIdxOffset/Size`,
+- The FSM `ManifestEntry` shape — `IngestIdxOffset/Size`, `SourceIdxOffset/Size`,
   `NumFrames` are still recorded for the GLCB structure, regardless of
   whether the local copy is present.
 - **The GLCB TOC is explicitly extensible.** This redesign uses only
@@ -274,7 +275,7 @@ What stays:
   load-bearing for byte-range cache verification — see the integrity
   story under [Partial-blob caching](#partial-blob-caching) and the
   whole-blob digest under
-  [Should be on the Entry but isn't](#should-be-on-the-entry-but-isnt).
+  [Should be on the ManifestEntry but isn't](#should-be-on-the-manifestentry-but-isnt).
 - The IM-built indexes (token/attr/kv/json) stay IM-rooted in this
   pass, but their final destination is *inside the GLCB footer* per the
   indexing redesign. The redesign therefore must not introduce any
@@ -352,6 +353,53 @@ uncompressed; record-data section is seekable-zstd). No worse than the
 multi-file layout — the multi-file layout has the same offsets, just
 spread across more file handles.
 
+### Replication via binary copy
+
+A side-effect of GLCB-everywhere worth calling out explicitly: chunk
+replication stops being a record-streaming protocol and becomes a
+byte-stream copy.
+
+Today (multi-file world): the leader opens a cursor, iterates
+records, RPCs them to each follower, and the follower runs
+`ImportRecords` to rebuild idx, attr, dict, and B+ trees from
+scratch. That's because the multi-file layout has per-node-internal
+state (mmap pages, B+ tree node layout) that can't be copied
+verbatim, and because there's no single artifact to copy.
+
+After the redesign: the leader has a `data.glcb` byte sequence that
+is, by construction:
+
+1. **Self-contained.** Header + dict + record-index + zstd body + TS
+   indexes + TOC, all addressable by byte offset. No external state.
+2. **Byte-identical across nodes.** GLCB is a deterministic encoding
+   of the record set. The sealing path takes the same input and
+   produces the same bytes.
+3. **Format-versioned with integrity.** Per-section hashes + the
+   whole-blob digest in the TOC let a follower assert "the bytes I
+   have match what the leader has" without per-record checksum
+   machinery.
+
+So replication becomes:
+
+| Today | After GLCB-everywhere |
+|---|---|
+| Leader: open cursor, iterate, send N RPCs | Leader: open `data.glcb`, send one byte stream |
+| Follower: `ImportRecords` rebuilds indexes — minutes for a 50k chunk | Follower: write to `data.glcb.tmp`, fsync, verify TOC hashes, rename — seconds |
+| RF=N: leader does N × (open + serialize) | Leader does 1 × (open + range-serve), N followers consume the same bytes |
+| Bandwidth: serialized record protobuf | Bandwidth: zstd-compressed on-disk bytes |
+| Indexes: each follower rebuilds locally | Indexes are *part of* the blob — copied verbatim |
+| Failure mode: partial record stream, follower has half-state | Failure mode: tmp file present or not; rename is atomic |
+
+The cloud-upload path is the same operation: cloud-upload PUTs the
+bytes to S3; replication sends the bytes over RPC. Two consumers of
+one primitive. The `ImportSealed` / `ImportRecords` pair gets
+deleted; a single `ImportBlob` RPC replaces them.
+
+This depends on the format work (per-section hash in 7a, atomic
+GLCB seal in 7c, deletion of cloud-only read path in 7d) but is
+orthogonal to the rest of step 7. Tracked separately as a follow-up
+issue.
+
 ## The unified Manager type
 
 The `chunk.file.Manager` / `chunk.cloud.Manager` split also goes away.
@@ -384,33 +432,33 @@ type Manager struct {
 
 - Sealing produces `<tier>/<chunkID>/data.glcb` and is done. No upload
   step, no cache eviction, retention rules are the only deletion path.
-- A missing `data.glcb` for a non-tombstoned Entry is a hard error
+- A missing `data.glcb` for a non-tombstoned ManifestEntry is a hard error
   (permanent data loss).
 
 `cloudStore != nil` ⇒ cloud-capable tier:
 
 - Sealing produces `data.glcb` locally; an asynchronous upload pass
   promotes it to cloud, lands `CmdUploadChunk` (which sets
-  `Entry.CloudBacked=true` and records hash + key scheme + cloud-service
+  `ManifestEntry.CloudBacked=true` and records hash + key scheme + cloud-service
   snapshot), then leaves the local copy in place as warm cache.
 - Eviction policies (LRU under disk budget, TTL, etc.) may remove the
-  local `data.glcb` for `Entry.CloudBacked=true` chunks. The Entry
+  local `data.glcb` for `ManifestEntry.CloudBacked=true` chunks. The ManifestEntry
   stays. Next reader re-fetches.
-- Retention deletion still applies: `AnnounceDelete` removes the Entry,
+- Retention deletion still applies: `AnnounceDelete` removes the ManifestEntry,
   removes the cloud blob (if `CloudBacked`), removes the local file.
 
 ### Cache vs permanent: just `CloudBacked` on the FSM
 
-That single bit on the FSM `Entry` is the entire cluster-wide
+That single bit on the FSM `ManifestEntry` is the entire cluster-wide
 distinction:
 
-| Entry.CloudBacked | Meaning | Local file missing means | Eviction policies that apply |
+| ManifestEntry.CloudBacked | Meaning | Local file missing means | Eviction policies that apply |
 |---|---|---|---|
 | `false` | local `data.glcb` is the only copy | permanent data loss | retention only |
-| `true` | local `data.glcb` is a cache; durable copy on S3 | re-fetch on next read using `blobKey(Entry)` + integrity hash | retention *and* cache-eviction |
+| `true` | local `data.glcb` is a cache; durable copy on S3 | re-fetch on next read using `blobKey(ManifestEntry)` + integrity hash | retention *and* cache-eviction |
 
 No other per-chunk metadata is needed *on the FSM* to drive cache-vs-
-permanent behavior. All the other Entry fields the reader uses
+permanent behavior. All the other ManifestEntry fields the reader uses
 (`DiskBytes`, `IngestIdxOffset/Size`, `SourceIdxOffset/Size`,
 `NumFrames`, hash, key scheme, cloud-service-ID snapshot) are about
 *reading the GLCB and verifying its integrity* — they're populated
@@ -420,7 +468,7 @@ gets the upload-time fields filled, because no upload happened).
 ### Cache-eviction signals are node-local, not FSM state
 
 Eviction policies need additional information that **does not belong
-on the FSM Entry**: each node decides independently when to drop its
+on the FSM ManifestEntry**: each node decides independently when to drop its
 local cache copy, and the cluster doesn't care that node A evicted
 chunk X at 02:13 while node B keeps it warm. Putting "last accessed
 at" on the FSM would force a Raft apply per read — even worse than the
@@ -446,7 +494,7 @@ Equivalently: anything the FSM stores about a chunk persists across
 node restart and replicates across the cluster. Anything the Manager
 maintains in memory or via filesystem stats is local-only and
 ephemeral. Cache-eviction signals belong squarely in the second
-category. The Entry stays minimal; cache state stays node-local.
+category. The ManifestEntry stays minimal; cache state stays node-local.
 
 ### Tier `type` field can go away
 
@@ -461,13 +509,13 @@ collapse but lands cleanly alongside it.
 
 For any sealed chunk:
 
-1. Ask the FSM (via `MetadataReader`) for the Entry.
+1. Ask the FSM (via `MetadataReader`) for the ManifestEntry.
 2. Check `<tier>/<chunkID>/data.glcb` on disk:
    - present and complete → open it, read. Done.
-   - missing or partial → branch on `Entry.CloudBacked`:
+   - missing or partial → branch on `ManifestEntry.CloudBacked`:
      - `true`: fetch the bytes the read needs from `cloudStore` using
-       `blobKey(Entry)`, validate against `Entry.DiskBytes` /
-       `Entry.Hash` (full-blob case) or per-section integrity
+       `blobKey(ManifestEntry)`, validate against `ManifestEntry.DiskBytes` /
+       `ManifestEntry.Hash` (full-blob case) or per-section integrity
        (range-GET case), populate the local cache. The simplest
        implementation is a full-blob GET into `data.glcb.tmp` →
        `fsync` → `rename`; the format also permits range-GETs that
@@ -508,7 +556,7 @@ based, not whole-file based**:
   policies remove ranges (or sections) rather than whole files.
   Simplest first implementation may treat the file as atomic
   (full-blob fetch, full-blob evict); a later iteration can add
-  partial-range tracking without changing the FSM Entry shape.
+  partial-range tracking without changing the FSM ManifestEntry shape.
 - The integrity guarantees stay coherent through three layers of
   hash:
   - **Per-section hash** in every TOC row. A range GET that fetched
@@ -516,10 +564,10 @@ based, not whole-file based**:
     entry. The section is verified without touching any other bytes.
     Trusted because the TOC itself is included in the whole-blob
     digest below.
-  - **Whole-blob digest** on the FSM Entry (`Entry.Hash`). Derived
+  - **Whole-blob digest** on the FSM ManifestEntry (`ManifestEntry.Hash`). Derived
     from per-section hashes: `sha256(header ‖ section_hashes_in_TOC_order ‖ TOC_bytes)`.
     On any cache populate (full or partial), recompute from the
-    footer alone and compare to `Entry.Hash`. Detects substitution
+    footer alone and compare to `ManifestEntry.Hash`. Detects substitution
     (wrong blob in S3 with self-consistent contents) and any
     tampering with header, TOC, or section hashes. O(1) work
     regardless of blob size.
@@ -544,24 +592,24 @@ implementation without an FSM-shape change or a manager-API rewrite.
 | Step | What happens | FSM command | Local effect |
 |---|---|---|---|
 | Append | record written to active multi-file | none | running maxima updated in `m.active.meta` |
-| Seal | active multi-file → `data.glcb.tmp` → fsync → rename → cleanup | `CmdSealChunk` | `data.glcb` exists; `Entry.Sealed=true` |
-| (cloud tier only) Upload | PUT `data.glcb` to S3, computing hash during PUT | `CmdUploadChunk` | local file untouched; `Entry.CloudBacked=true`; hash, key scheme, cloud-service-ID snapshot land on Entry |
-| Cache eviction (cloud tier only) | `os.Remove(data.glcb)` | none | local file gone; Entry unchanged |
-| Retention | `Entry.RetentionPending=true` → action runs → `AnnounceDelete` | `CmdRetentionPending` then `CmdDeleteChunk` | local file gone, cloud blob gone (if CloudBacked), Entry tombstoned |
+| Seal | active multi-file → `data.glcb.tmp` → fsync → rename → cleanup | `CmdSealChunk` | `data.glcb` exists; `ManifestEntry.Sealed=true` |
+| (cloud tier only) Upload | PUT `data.glcb` to S3, computing hash during PUT | `CmdUploadChunk` | local file untouched; `ManifestEntry.CloudBacked=true`; hash, key scheme, cloud-service-ID snapshot land on ManifestEntry |
+| Cache eviction (cloud tier only) | `os.Remove(data.glcb)` | none | local file gone; ManifestEntry unchanged |
+| Retention | `ManifestEntry.RetentionPending=true` → action runs → `AnnounceDelete` | `CmdRetentionPending` then `CmdDeleteChunk` | local file gone, cloud blob gone (if CloudBacked), ManifestEntry tombstoned |
 
 The only structural code change relative to today's `file.Manager` is
 the upload pass, which moves from "convert to GLCB and upload" to
 "upload the existing GLCB." Everything else simplifies or disappears.
 
-## What the FSM Entry needs
+## What the FSM ManifestEntry needs
 
 If `data.glcb` is locally absent (cold cache or evicted) and the FSM
 says `CloudBacked=true`, every reader must be able to fetch the blob
-back from S3 *using only what's on the Entry plus the tier config*. No
+back from S3 *using only what's on the ManifestEntry plus the tier config*. No
 GLCB inspection, no `cloudIdx` lookup, no compensating "find the blob"
 heuristics.
 
-### Already on the Entry today
+### Already on the ManifestEntry today
 
 | Field | Use in retrieval |
 |---|---|
@@ -574,19 +622,19 @@ heuristics.
 
 ### Resolved one Raft hop sideways via the tier config
 
-| Field | Why not on the Entry |
+| Field | Why not on the ManifestEntry |
 |---|---|
 | `cloud_service_id` (which bucket / endpoint / credentials) | All chunks in a tier share the same store; per-chunk duplication is wasteful — *unless* a tier ever changes its cloud service after chunks are uploaded (see below). |
 
-### Should be on the Entry but isn't
+### Should be on the ManifestEntry but isn't
 
 | Field | Why it matters | Where it would land |
 |---|---|---|
-| **Content hash** (whole-blob digest, *derived* from per-section hashes) | Integrity — once the local copy is a cache, every re-fetch implicitly trusts whatever S3 returns. Without a hash on the Entry, a corrupt download, a partial PUT, or another node racing an overwrite is silently fed through every reader. The GLCB header self-identifies chunkID/vaultID but that catches almost no corruption mode. The Entry hash is **derived from the section hashes**, not computed over the body bytes: `sha256(header ‖ section_hashes_in_TOC_order ‖ TOC_bytes)`. Computing it costs hundreds of bytes of input regardless of blob size, validates substitution and tampering at the whole-blob level in O(1) work, and stays consistent with the per-section hashes that range GETs verify against. | `CmdUploadChunk` payload, computed at upload time. |
+| **Content hash** (whole-blob digest, *derived* from per-section hashes) | Integrity — once the local copy is a cache, every re-fetch implicitly trusts whatever S3 returns. Without a hash on the ManifestEntry, a corrupt download, a partial PUT, or another node racing an overwrite is silently fed through every reader. The GLCB header self-identifies chunkID/vaultID but that catches almost no corruption mode. The ManifestEntry hash is **derived from the section hashes**, not computed over the body bytes: `sha256(header ‖ section_hashes_in_TOC_order ‖ TOC_bytes)`. Computing it costs hundreds of bytes of input regardless of blob size, validates substitution and tampering at the whole-blob level in O(1) work, and stays consistent with the per-section hashes that range GETs verify against. | `CmdUploadChunk` payload, computed at upload time. |
 | **Cloud-service-ID snapshot at upload time** | Pins the chunk to the store it actually went to. Today this is read from the *current* tier config; if the tier is ever reconfigured to a different cloud service, blobs uploaded to the old store become unreachable. | `CmdUploadChunk` payload — snapshot of the tier's `cloud_service_id` as of the upload. |
-| **Key scheme / version** (a one-byte enum, or the resolved key as a string) | Future-proofs `blobKey()`. Today the derivation is hard-coded `vault-<id>/<chunkID>.glcb`. If we ever want date-prefixed / hash-sharded / multi-bucket keys, every existing FSM Entry that just stores the chunk ID becomes ambiguous. | `CmdUploadChunk` payload — at minimum a `KeyScheme uint8` that selects from a table of derivation functions. |
+| **Key scheme / version** (a one-byte enum, or the resolved key as a string) | Future-proofs `blobKey()`. Today the derivation is hard-coded `vault-<id>/<chunkID>.glcb`. If we ever want date-prefixed / hash-sharded / multi-bucket keys, every existing FSM ManifestEntry that just stores the chunk ID becomes ambiguous. | `CmdUploadChunk` payload — at minimum a `KeyScheme uint8` that selects from a table of derivation functions. |
 
-### Not needed on the Entry
+### Not needed on the ManifestEntry
 
 - Region, endpoint, credentials — tier-level config; chunk-level isn't where these belong.
 - Compression level, frame size — GLCB format-level; the reader infers from the bytes.
@@ -605,7 +653,7 @@ Concretely, what's blocking and what's optional:
   rewritten anyway):** cloud-service-ID snapshot, key scheme byte.
   Cheap to add now, painful to retrofit later.
 - **Defer:** any further packing of derived data (e.g. levels histogram
-  for the chunk, IM-built index offsets) into the Entry. Decide that
+  for the chunk, IM-built index offsets) into the ManifestEntry. Decide that
   separately once the histogram redesign settles on what it actually
   needs.
 
@@ -620,12 +668,12 @@ single property: **durability authority**.
   may delete it, and deletion is permanent.
 - **Cloud-backed sealed chunk**: the local `data.glcb` is a cache; the
   durable copy lives on S3. Eviction is safe — the next reader does a
-  GET to repopulate. Retention rules acting on the FSM Entry still
+  GET to repopulate. Retention rules acting on the FSM ManifestEntry still
   delete from S3 + locally; cache-eviction policies act on the local
   copy only.
 
 Same file. Same format. Same byte layout. Same on-disk path. Same
-readers. Same FSM `Entry` shape. The `CloudBacked` flag is the entire
+readers. Same FSM `ManifestEntry` shape. The `CloudBacked` flag is the entire
 difference, and it picks between two eviction policies operating on
 the same byte sequence in the same place.
 
@@ -645,9 +693,9 @@ storage layouts that never had to be different.
 These parts of the existing code are consistent with the rule and stay:
 
 - The set of FSM commands and their `apply*` handlers in
-  [tier/raftfsm/fsm.go](../backend/internal/tier/raftfsm/fsm.go).
+  [vaultraft/tierfsm/fsm.go](../backend/internal/vaultraft/tierfsm/fsm.go).
 - The `Announcer`
-  ([tier/raftfsm/announcer.go](../backend/internal/tier/raftfsm/announcer.go)),
+  ([vaultraft/tierfsm/announcer.go](../backend/internal/vaultraft/tierfsm/announcer.go)),
   which is the only allowed proposer of `Create/Seal/Compress/Upload/Delete`.
 - `expandBounds` (running min/max applied per record at Append-time and
   inside `ImportRecords.writeRecord`) — produces correct
@@ -707,7 +755,7 @@ No callers. Pure dead code, leftover from the bug they introduced.
 fallbacks: chunk-manager-active-BTree, chunk-manager-cloud-TS-index, and
 index-manager-on-disk-TS-mmap. None of those is the FSM. The bounds the
 histogram needs (`IngestStart`, `IngestEnd`, `RecordCount`,
-`IngestTSMonotonic`) all live in the FSM Entry. The histogram should
+`IngestTSMonotonic`) all live in the FSM ManifestEntry. The histogram should
 read them from there and stop dispatching across three different stores
 that can disagree with each other and with the FSM.
 
@@ -800,7 +848,7 @@ collapses every one of those forks.
   `<tier>/<chunkID>/data.glcb`.
 - `CompressChunk` and the compressed-multi-file format. Sealing
   produces a GLCB directly.
-- The `Compressed` flag on the FSM Entry (or treat it as a synonym for
+- The `Compressed` flag on the FSM ManifestEntry (or treat it as a synonym for
   `Sealed`).
 - The `chunk.cloud.Manager` type. Folded into the unified
   `chunk.Manager`.
@@ -818,7 +866,7 @@ Most of the redesign is removal. The substantive additions:
 - The reordered upload sequence in `uploadToCloud` /
   `adoptCloudBlob` (and the GLCB-as-canonical seal path).
 - Three new fields on `CmdUploadChunk` (and the corresponding FSM
-  Entry): content hash, cloud-service-ID snapshot, key-scheme byte.
+  ManifestEntry): content hash, cloud-service-ID snapshot, key-scheme byte.
 - A per-Manager in-memory `lastAccess map[ChunkID]time.Time` for LRU
   cache eviction. Ephemeral, no persistence.
 - A wipe-and-restart note in the gastrolog-66b7x close-out: any existing
@@ -847,7 +895,7 @@ following invariants up front.
 | TOC at end-of-blob with `(magic, version, offset, size)` slots | Generalizes the TOC for additional sections (FST roots, posting-list directory, blooms, column metadata) | Yes — TOC format is extensible by design; old readers ignore unknown section kinds |
 | 96-byte GLCB header with `version` byte | Codec dispatch on `version` (versioned codec interface) | Yes — same dispatch point |
 | Active-chunk B+ trees stay as the live-write index | Indexer builds sealed-chunk indexes; active-chunk path unchanged | Yes — different lifecycle stages |
-| FSM Entry stays minimal (no per-chunk index metadata fields beyond what's needed for retrieval/integrity) | Index metadata lives in the GLCB footer, not the FSM | Yes — FSM doesn't grow |
+| FSM ManifestEntry stays minimal (no per-chunk index metadata fields beyond what's needed for retrieval/integrity) | Index metadata lives in the GLCB footer, not the FSM | Yes — FSM doesn't grow |
 
 ### Constraints the indexing redesign imposes on this work
 
@@ -940,12 +988,12 @@ These are the things to nail down before writing code:
   rendered as ghost. Option (a) costs a bit at write, option (b) loses
   intra-chunk resolution for cold data. Both are consistent with the
   rule.
-- Do we want `Entry` to gain an explicit `Tier` field? Today tier is
-  implicit (which `Entry` you are looking at depends on which tier's FSM
+- Do we want `ManifestEntry` to gain an explicit `Tier` field? Today tier is
+  implicit (which `ManifestEntry` you are looking at depends on which tier's FSM
   you queried). For the histogram that's fine — it iterates per tier
   anyway. Other callers might want it; deferring.
-- Do we collapse `chunkMeta` and the FSM `Entry` shape? They duplicate a
+- Do we collapse `chunkMeta` and the FSM `ManifestEntry` shape? They duplicate a
   lot. Probably not in this pass — keep `chunkMeta` as a private
-  Manager cache and let the FSM Entry be the wire/persistence shape.
+  Manager cache and let the FSM ManifestEntry be the wire/persistence shape.
 - Receipt-protocol cleanup is out of scope for this document; the
   receipts already obey the rule.

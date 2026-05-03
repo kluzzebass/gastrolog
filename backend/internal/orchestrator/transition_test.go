@@ -955,8 +955,8 @@ func TestCloudTierLeaderPreservesCloudBacking(t *testing.T) {
 			if !m.CloudBacked {
 				t.Fatal("chunk is NOT cloud-backed after PostSealProcess — sealed_backing was incorrectly stripped for the leader")
 			}
-			if !m.Compressed {
-				t.Fatal("chunk was not compressed")
+			if !m.Sealed {
+				t.Fatal("chunk was not sealed (gastrolog-24m1t: sealed = data.glcb on disk)")
 			}
 			break
 		}

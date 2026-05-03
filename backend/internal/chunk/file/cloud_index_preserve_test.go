@@ -22,7 +22,6 @@ import (
 func newCloudManagerWithIndexes(t *testing.T) (*Manager, string, *blobstore.Memory) {
 	t.Helper()
 	dir := t.TempDir()
-	cacheDir := t.TempDir()
 	vaultID := glid.New()
 	store := blobstore.NewMemory()
 
@@ -32,7 +31,6 @@ func newCloudManagerWithIndexes(t *testing.T) (*Manager, string, *blobstore.Memo
 		RotationPolicy: chunk.NewRecordCountPolicy(10000),
 		CloudStore:     store,
 		VaultID:        vaultID,
-		CacheDir:       cacheDir,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -270,7 +268,6 @@ func TestRestartPreservesCloudIndexes(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	cacheDir := t.TempDir()
 	vaultID := glid.New()
 	store := blobstore.NewMemory()
 
@@ -281,7 +278,6 @@ func TestRestartPreservesCloudIndexes(t *testing.T) {
 		RotationPolicy: chunk.NewRecordCountPolicy(10000),
 		CloudStore:     store,
 		VaultID:        vaultID,
-		CacheDir:       cacheDir,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -308,7 +304,6 @@ func TestRestartPreservesCloudIndexes(t *testing.T) {
 		RotationPolicy: chunk.NewRecordCountPolicy(10000),
 		CloudStore:     store,
 		VaultID:        vaultID,
-		CacheDir:       cacheDir,
 	})
 	if err != nil {
 		t.Fatalf("reopen manager: %v", err)
@@ -409,7 +404,6 @@ func TestCloudReadOnlySkipsUpload(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	cacheDir := t.TempDir()
 	vaultID := glid.New()
 	store := blobstore.NewMemory()
 
@@ -419,7 +413,6 @@ func TestCloudReadOnlySkipsUpload(t *testing.T) {
 		RotationPolicy: chunk.NewRecordCountPolicy(10000),
 		CloudStore:     store,
 		VaultID:        vaultID,
-		CacheDir:       cacheDir,
 		CloudReadOnly:  true,
 	})
 	if err != nil {
