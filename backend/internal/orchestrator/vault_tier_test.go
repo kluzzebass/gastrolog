@@ -599,9 +599,6 @@ func (r *tierTestReplicator) SealTier(_ context.Context, _ string, _, _ glid.GLI
 	return nil
 }
 
-func (r *tierTestReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
-	return nil
-}
 func (m *tierTestReplicator) ImportBlob(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ int64, _ io.Reader) ([32]byte, error) {
 	return [32]byte{}, nil
 }
@@ -1084,9 +1081,6 @@ func (m *ackTestReplicator) AppendRecords(_ context.Context, _ string, _, _ glid
 	return m.tierAppendErr
 }
 func (m *ackTestReplicator) SealTier(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
-	return nil
-}
-func (m *ackTestReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
 	return nil
 }
 func (m *ackTestReplicator) ImportBlob(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ int64, _ io.Reader) ([32]byte, error) {
@@ -1623,9 +1617,6 @@ func (f *failingForwarder) SealTier(_ context.Context, _ string, _, _ glid.GLID,
 	return nil
 }
 
-func (f *failingForwarder) ImportSealedChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
-	return nil
-}
 
 func (f *failingForwarder) ImportBlob(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ int64, _ io.Reader) ([32]byte, error) {
 	return [32]byte{}, nil

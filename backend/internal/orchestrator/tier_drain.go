@@ -273,11 +273,24 @@ func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, va
 		if o.tierReplicator == nil {
 			return errors.New("tier drain rebalance: tier replicator not configured")
 		}
-		records, err := drainCursorToRecords(cursor)
-		if err != nil {
-			return fmt.Errorf("read chunk for rebalance: %w", err)
+		// Binary chunk replication: open the sealed chunk's data.glcb
+		// and stream it to the target node. The cursor we opened above
+		// for the cross-tier drain branch isn't usable here (we need
+		// the raw blob bytes, not records); the chunk manager exposes
+		// ChunkBlobReader for this.
+		_ = cursor.Close()
+		cursorClosed = true
+		blobReader, ok := tier.Chunks.(chunk.ChunkBlobReader)
+		if !ok {
+			return errors.New("tier drain rebalance: chunk manager does not implement ChunkBlobReader")
 		}
-		if err := o.tierReplicator.ImportSealedChunk(ctx, targetNodeID, vaultID, tierID, chunkID, records); err != nil {
+		body, size, err := blobReader.OpenSealedBlob(chunkID)
+		if err != nil {
+			return fmt.Errorf("open sealed blob for rebalance: %w", err)
+		}
+		_, err = o.tierReplicator.ImportBlob(ctx, targetNodeID, vaultID, tierID, chunkID, size, body)
+		_ = body.Close()
+		if err != nil {
 			return fmt.Errorf("replicate to target node: %w", err)
 		}
 	}

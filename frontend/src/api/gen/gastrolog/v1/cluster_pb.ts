@@ -1224,12 +1224,6 @@ export class TierReplicationCommand extends Message<TierReplicationCommand> {
     case: "seal";
   } | {
     /**
-     * @generated from field: gastrolog.v1.TierReplicationImport import_sealed = 12;
-     */
-    value: TierReplicationImport;
-    case: "importSealed";
-  } | {
-    /**
      * @generated from field: gastrolog.v1.TierReplicationDelete delete_chunk = 13;
      */
     value: TierReplicationDelete;
@@ -1248,7 +1242,6 @@ export class TierReplicationCommand extends Message<TierReplicationCommand> {
     { no: 2, name: "tier_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 10, name: "append", kind: "message", T: TierReplicationAppend, oneof: "command" },
     { no: 11, name: "seal", kind: "message", T: TierReplicationSeal, oneof: "command" },
-    { no: 12, name: "import_sealed", kind: "message", T: TierReplicationImport, oneof: "command" },
     { no: 13, name: "delete_chunk", kind: "message", T: TierReplicationDelete, oneof: "command" },
   ]);
 
@@ -1354,52 +1347,6 @@ export class TierReplicationSeal extends Message<TierReplicationSeal> {
 
   static equals(a: TierReplicationSeal | PlainMessage<TierReplicationSeal> | undefined, b: TierReplicationSeal | PlainMessage<TierReplicationSeal> | undefined): boolean {
     return proto3.util.equals(TierReplicationSeal, a, b);
-  }
-}
-
-/**
- * TierReplicationImport sends the canonical sealed chunk. The follower
- * replaces any forwarded version with this authoritative copy.
- *
- * @generated from message gastrolog.v1.TierReplicationImport
- */
-export class TierReplicationImport extends Message<TierReplicationImport> {
-  /**
-   * @generated from field: bytes chunk_id = 1;
-   */
-  chunkId = new Uint8Array(0);
-
-  /**
-   * @generated from field: repeated gastrolog.v1.ExportRecord records = 2;
-   */
-  records: ExportRecord[] = [];
-
-  constructor(data?: PartialMessage<TierReplicationImport>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.TierReplicationImport";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 2, name: "records", kind: "message", T: ExportRecord, repeated: true },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TierReplicationImport {
-    return new TierReplicationImport().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TierReplicationImport {
-    return new TierReplicationImport().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TierReplicationImport {
-    return new TierReplicationImport().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: TierReplicationImport | PlainMessage<TierReplicationImport> | undefined, b: TierReplicationImport | PlainMessage<TierReplicationImport> | undefined): boolean {
-    return proto3.util.equals(TierReplicationImport, a, b);
   }
 }
 

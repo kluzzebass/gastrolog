@@ -53,11 +53,12 @@ func (m *replicationFakeReplicator) SealTier(_ context.Context, nodeID string, v
 	m.sealCalls = append(m.sealCalls, sealCall{nodeID: nodeID, vaultID: vaultID, tierID: tierID, chunkID: chunkID})
 	return nil
 }
-func (m *replicationFakeReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ glid.GLID, chunkID chunk.ChunkID, _ []chunk.Record) error {
+func (m *replicationFakeReplicator) ImportBlob(_ context.Context, _ string, _, _ glid.GLID, chunkID chunk.ChunkID, _ int64, body io.Reader) ([32]byte, error) {
+	// Drain the body so the leader's deferred body.Close() doesn't trip
+	// on a half-read pipe when the test exits, and record the chunk so
+	// the test can assert on which chunks made the transfer.
+	_, _ = io.Copy(io.Discard, body)
 	m.replicatedChunks = append(m.replicatedChunks, chunkID)
-	return nil
-}
-func (m *replicationFakeReplicator) ImportBlob(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ int64, _ io.Reader) ([32]byte, error) {
 	return [32]byte{}, nil
 }
 func (m *replicationFakeReplicator) DeleteChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {

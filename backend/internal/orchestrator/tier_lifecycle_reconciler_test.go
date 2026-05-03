@@ -38,9 +38,6 @@ func (c *captureCatchupReplicator) AppendRecords(_ context.Context, _ string, _,
 func (c *captureCatchupReplicator) SealTier(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
 }
-func (c *captureCatchupReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
-	return nil
-}
 func (m *captureCatchupReplicator) ImportBlob(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ int64, _ io.Reader) ([32]byte, error) {
 	return [32]byte{}, nil
 }

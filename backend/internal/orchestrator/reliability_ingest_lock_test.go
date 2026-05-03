@@ -50,9 +50,6 @@ func (m *blockingReplicator) AppendRecords(ctx context.Context, _ string, _, _ g
 func (m *blockingReplicator) SealTier(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
 }
-func (m *blockingReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
-	return nil
-}
 func (m *blockingReplicator) ImportBlob(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ int64, _ io.Reader) ([32]byte, error) {
 	return [32]byte{}, nil
 }

@@ -147,17 +147,13 @@ type Server struct {
 	// Set after the orchestrator is created, before chunk transfer starts.
 	recordImporter RecordImporter
 
-	// tierRecordImporter imports records as a sealed chunk in a specific tier,
-	// preserving the original chunk ID. Used for sealed-chunk replication.
-	tierRecordImporter TierRecordImporter
-
 	// tierStreamAppender appends streamed records to a tier's active chunk.
 	// Used for tier transitions (records flow like normal ingestion).
 	tierStreamAppender TierStreamAppender
 
 	// blobImporter installs a sealed data.glcb blob received over the
-	// ImportBlob RPC. Replaces the per-record tierRecordImporter path
-	// for sealed-chunk replication. See gastrolog-3o5b4.
+	// ImportBlob RPC — the production sealed-chunk replication path.
+	// See gastrolog-3o5b4.
 	blobImporter BlobImporter
 
 	// searchExecutor runs a search on a local vault for remote search requests.

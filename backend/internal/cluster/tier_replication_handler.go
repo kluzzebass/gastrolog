@@ -51,8 +51,6 @@ func (s *Server) handleReplicationCommand(ctx context.Context, msg *gastrologv1.
 		return s.handleReplicationAppend(ctx, vaultID, tierID, cmd.Append)
 	case *gastrologv1.TierReplicationCommand_Seal:
 		return s.handleReplicationSeal(ctx, vaultID, tierID, cmd.Seal)
-	case *gastrologv1.TierReplicationCommand_ImportSealed:
-		return s.handleReplicationImport(ctx, vaultID, tierID, cmd.ImportSealed)
 	case *gastrologv1.TierReplicationCommand_DeleteChunk:
 		return s.handleReplicationDelete(ctx, vaultID, tierID, cmd.DeleteChunk)
 	default:
@@ -120,45 +118,6 @@ func (s *Server) handleReplicationSeal(ctx context.Context, vaultID, tierID glid
 // goal (chunk absent on this node) is already achieved.
 func isTombstonedErr(err error) bool {
 	return errors.Is(err, chunk.ErrChunkTombstoned)
-}
-
-func (s *Server) handleReplicationImport(ctx context.Context, vaultID, tierID glid.GLID, cmd *gastrologv1.TierReplicationImport) *gastrologv1.TierReplicationAck {
-	if s.tierRecordImporter == nil {
-		return &gastrologv1.TierReplicationAck{Ok: false, Error: "tier importer not configured"}
-	}
-
-	chunkID := chunk.ChunkID(glid.FromBytes(cmd.GetChunkId()))
-
-	records := make([]chunk.Record, 0, len(cmd.GetRecords()))
-	for _, er := range cmd.GetRecords() {
-		records = append(records, convert.ExportToRecord(er))
-	}
-
-	idx := 0
-	iter := func() (chunk.Record, error) {
-		if idx >= len(records) {
-			return chunk.Record{}, chunk.ErrNoMoreRecords
-		}
-		rec := records[idx]
-		idx++
-		return rec, nil
-	}
-
-	if err := s.tierRecordImporter(ctx, vaultID, tierID, chunkID, iter); err != nil {
-		if isTombstonedErr(err) {
-			// Chunk was deleted between leader scheduling ImportSealed
-			// and its arrival here. Ack as success — the cluster's
-			// desired state (chunk absent) already holds.
-			return &gastrologv1.TierReplicationAck{Ok: true, ChunkId: cmd.GetChunkId()}
-		}
-		return &gastrologv1.TierReplicationAck{
-			Ok:      false,
-			Error:   "import failed: " + err.Error(),
-			ChunkId: cmd.GetChunkId(),
-		}
-	}
-
-	return &gastrologv1.TierReplicationAck{Ok: true, ChunkId: cmd.GetChunkId()}
 }
 
 func (s *Server) handleReplicationDelete(ctx context.Context, vaultID, tierID glid.GLID, cmd *gastrologv1.TierReplicationDelete) *gastrologv1.TierReplicationAck {

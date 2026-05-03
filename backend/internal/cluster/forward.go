@@ -79,10 +79,6 @@ type ExportToVaultExecutor func(ctx context.Context, expression string, targetVa
 // Used by the ForwardImportRecords handler for cross-node chunk migration.
 type RecordImporter func(ctx context.Context, vaultID glid.GLID, next chunk.RecordIterator) error
 
-// TierRecordImporter imports records as a sealed chunk in a specific tier,
-// preserving the original chunk ID. Used for sealed-chunk replication.
-type TierRecordImporter func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error
-
 // TierStreamAppender appends streamed records to a tier's active chunk.
 // Used for tier transitions — records flow into the destination tier like
 // normal ingestion. The tier's rotation policy handles sealing.
@@ -145,11 +141,6 @@ func (s *Server) SetRecordTierAppender(fn RecordTierAppender) {
 // Must be called before ForwardImportRecords RPCs.
 func (s *Server) SetRecordImporter(fn RecordImporter) {
 	s.recordImporter = fn
-}
-
-// SetTierRecordImporter injects the callback for tier-targeted sealed-chunk imports.
-func (s *Server) SetTierRecordImporter(fn TierRecordImporter) {
-	s.tierRecordImporter = fn
 }
 
 // SetTierStreamAppender injects the callback for streaming records to a tier's active chunk.

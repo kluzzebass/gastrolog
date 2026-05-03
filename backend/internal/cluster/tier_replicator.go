@@ -306,24 +306,6 @@ func (tr *TierReplicator) ImportBlob(ctx context.Context, nodeID string, vaultID
 	return digest, nil
 }
 
-// ImportSealedChunk sends a canonical sealed chunk to a follower.
-func (tr *TierReplicator) ImportSealedChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
-	exports := make([]*gastrologv1.ExportRecord, len(records))
-	for i, rec := range records {
-		exports[i] = convert.RecordToExport(rec)
-	}
-	return tr.send(ctx, tierID, nodeID, &gastrologv1.TierReplicationCommand{
-		VaultId: vaultID.ToProto(),
-		TierId:  tierID.ToProto(),
-		Command: &gastrologv1.TierReplicationCommand_ImportSealed{
-			ImportSealed: &gastrologv1.TierReplicationImport{
-				ChunkId: glid.GLID(chunkID).ToProto(),
-				Records: exports,
-			},
-		},
-	})
-}
-
 // DeleteChunk tells a follower to delete a sealed chunk.
 func (tr *TierReplicator) DeleteChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
 	return tr.send(ctx, tierID, nodeID, &gastrologv1.TierReplicationCommand{

@@ -1,15 +1,23 @@
 package memory
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"os"
 	"slices"
 	"sync"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
+
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/glid"
 	"gastrolog/internal/logging"
 )
 
@@ -647,6 +655,124 @@ func (m *Manager) ImportRecords(id chunk.ChunkID, next chunk.RecordIterator) (ch
 	m.chunks = append(m.chunks, state)
 
 	return state.meta, nil
+}
+
+// OpenSealedBlob encodes the named sealed chunk's records into a GLCB
+// byte stream on demand and returns it as an io.ReadCloser plus size.
+// memory.Manager has no on-disk artifact; this synthesises one via
+// chunk/cloud.Writer so test harnesses (catchup, replication mocks)
+// can exercise the binary-replication path without a file backend.
+//
+// Implements chunk.ChunkBlobReader.
+func (m *Manager) OpenSealedBlob(id chunk.ChunkID) (io.ReadCloser, int64, error) {
+	m.mu.Lock()
+	var found *chunkState
+	for _, c := range m.chunks {
+		if c.meta.ID == id {
+			found = c
+			break
+		}
+	}
+	m.mu.Unlock()
+	if found == nil {
+		return nil, 0, chunk.ErrChunkNotFound
+	}
+	if !found.meta.Sealed {
+		return nil, 0, chunk.ErrChunkNotSealed
+	}
+
+	enc, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
+	if err != nil {
+		return nil, 0, fmt.Errorf("create zstd encoder: %w", err)
+	}
+	defer func() { _ = enc.Close() }()
+
+	w := cloud.NewWriter(id, glid.GLID{}, enc)
+	for _, rec := range found.records {
+		if err := w.Add(rec); err != nil {
+			return nil, 0, fmt.Errorf("encode record into GLCB: %w", err)
+		}
+	}
+	var buf bytes.Buffer
+	if _, err := w.WriteTo(&buf); err != nil {
+		return nil, 0, fmt.Errorf("write GLCB: %w", err)
+	}
+	return io.NopCloser(bytes.NewReader(buf.Bytes())), int64(buf.Len()), nil
+}
+
+// AdoptSealedBlob decodes a GLCB byte stream into records and stores
+// them as a sealed chunk. Counterpart of OpenSealedBlob; together they
+// let memory.Manager participate in binary chunk replication scenarios
+// in tests. Implements chunk.ChunkBlobImporter.
+func (m *Manager) AdoptSealedBlob(id chunk.ChunkID, totalSize int64, body io.Reader) ([32]byte, error) {
+	var zero [32]byte
+
+	hasher := sha256.New()
+	bodyTee := io.TeeReader(body, hasher)
+	tmp, err := os.CreateTemp("", "memmgr-glcb-*.tmp")
+	if err != nil {
+		return zero, fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+	}()
+	written, err := io.Copy(tmp, bodyTee)
+	if err != nil {
+		return zero, fmt.Errorf("write blob: %w", err)
+	}
+	if written != totalSize {
+		return zero, fmt.Errorf("blob size mismatch: wrote %d, expected %d", written, totalSize)
+	}
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		return zero, fmt.Errorf("seek temp: %w", err)
+	}
+	rd, err := cloud.NewCacheReader(tmp)
+	if err != nil {
+		return zero, fmt.Errorf("open GLCB reader: %w", err)
+	}
+	defer func() { _ = rd.Close() }()
+
+	bm := rd.Meta()
+	if bm.ChunkID != id {
+		return zero, fmt.Errorf("GLCB chunk_id %s does not match expected %s", bm.ChunkID, id)
+	}
+
+	state := &chunkState{
+		meta: chunk.ChunkMeta{
+			ID:          id,
+			Sealed:      true,
+			RecordCount: int64(bm.RecordCount),
+			Bytes:       bm.RawBytes,
+			WriteStart:  bm.WriteStart,
+			WriteEnd:    bm.WriteEnd,
+			IngestStart: bm.IngestStart,
+			IngestEnd:   bm.IngestEnd,
+			SourceStart: bm.SourceStart,
+			SourceEnd:   bm.SourceEnd,
+		},
+		createdAt: m.cfg.Now(),
+	}
+	for i := range bm.RecordCount {
+		rec, err := rd.ReadRecord(i)
+		if err != nil {
+			return zero, fmt.Errorf("decode record %d: %w", i, err)
+		}
+		state.records = append(state.records, rec)
+	}
+	state.size = bm.RawBytes
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.cfg.MetaStore.Save(state.meta); err != nil {
+		return zero, fmt.Errorf("save meta: %w", err)
+	}
+	m.chunks = append(m.chunks, state)
+
+	var digest [32]byte
+	copy(digest[:], hasher.Sum(nil))
+	return digest, nil
 }
 
 // SetIndexBuilders injects index builders into the post-seal pipeline.

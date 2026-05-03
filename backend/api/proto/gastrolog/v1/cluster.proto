@@ -227,10 +227,16 @@ message TierReplicationCommand {
   bytes vault_id = 1;
   bytes tier_id = 2;
 
+  // Field 12 (import_sealed: TierReplicationImport) was removed in
+  // gastrolog-3o5b4 — sealed-chunk replication moved to the binary
+  // ImportBlob streaming RPC. Reserved at message level so the tag
+  // can't be reused inside the oneof.
+  reserved 12;
+  reserved "import_sealed";
+
   oneof command {
     TierReplicationAppend append = 10;
     TierReplicationSeal seal = 11;
-    TierReplicationImport import_sealed = 12;
     TierReplicationDelete delete_chunk = 13;
   }
 }
@@ -244,13 +250,6 @@ message TierReplicationAppend {
 // TierReplicationSeal tells the follower to seal its active chunk.
 message TierReplicationSeal {
   bytes chunk_id = 1; // expected active chunk ID
-}
-
-// TierReplicationImport sends the canonical sealed chunk. The follower
-// replaces any forwarded version with this authoritative copy.
-message TierReplicationImport {
-  bytes chunk_id = 1;
-  repeated ExportRecord records = 2;
 }
 
 // TierReplicationDelete tells the follower to delete a sealed chunk

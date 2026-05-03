@@ -235,69 +235,39 @@ func (o *Orchestrator) replicateToFollower(ctx context.Context, vaultID, tierID 
 		return fmt.Errorf("chunk unreadable: %w", probeErr)
 	}
 
-	// Binary replication path (gastrolog-3o5b4): if the chunk manager has
-	// a sealed `data.glcb` blob to copy, stream it directly via ImportBlob.
-	// Production (chunk/file.Manager) takes this path. Memory-backed test
-	// harnesses don't implement ChunkBlobReader and fall back to the
-	// legacy per-record ImportSealedChunk path below.
-	if blobReader, ok := cm.(chunk.ChunkBlobReader); ok {
-		body, size, err := blobReader.OpenSealedBlob(chunkID)
-		if err != nil {
-			return fmt.Errorf("open sealed blob: %w", err)
-		}
-		defer func() { _ = body.Close() }()
-
-		// Final tombstone check right before sending: retention may have
-		// deleted this chunk while we were opening the blob. The
-		// follower's tombstone check (in AdoptSealedBlobToTier) is the
-		// second line of defence; this leader-side recheck short-circuits
-		// the RPC entirely when the leader already knows the chunk is gone.
-		// See gastrolog-11rzz.
-		tier := o.findLocalTier(vaultID, tierID)
-		if tier != nil && tier.IsTombstoned != nil && tier.IsTombstoned(chunkID) {
-			o.logger.Debug("replication: chunk tombstoned after blob open, aborting send",
-				"vault", vaultID, "tier", tierID, "chunk", chunkID.String(), "node", nodeID)
-			return nil
-		}
-
-		digest, err := o.tierReplicator.ImportBlob(ctx, nodeID, vaultID, tierID, chunkID, size, body)
-		if err != nil {
-			return fmt.Errorf("ImportBlob to %s: %w", nodeID, err)
-		}
-		o.logger.Debug("replication: ImportBlob ack",
-			"vault", vaultID, "tier", tierID, "chunk", chunkID.String(), "node", nodeID,
-			"size", size, "digest", hex.EncodeToString(digest[:8]))
-		return nil
+	// Binary replication: open the sealed chunk's data.glcb and stream
+	// the bytes via ImportBlob (gastrolog-3o5b4). The chunk manager MUST
+	// implement ChunkBlobReader — file.Manager does. Memory-backed
+	// managers (test harness) don't, and the cluster never schedules
+	// cross-node replication against a memory-backed tier in production.
+	blobReader, ok := cm.(chunk.ChunkBlobReader)
+	if !ok {
+		return fmt.Errorf("replicateToFollower: chunk manager %T does not implement ChunkBlobReader", cm)
 	}
-
-	// Legacy per-record path. Reached only by memory-backed test harnesses
-	// (no on-disk data.glcb to copy). Production replication never lands
-	// here. Will be removed alongside ImportSealedChunk once the test
-	// harness is migrated.
-	cursor, err := cm.OpenCursor(chunkID)
+	body, size, err := blobReader.OpenSealedBlob(chunkID)
 	if err != nil {
-		return fmt.Errorf("open cursor: %w", err)
+		return fmt.Errorf("open sealed blob: %w", err)
 	}
-	defer func() { _ = cursor.Close() }()
+	defer func() { _ = body.Close() }()
 
-	var records []chunk.Record
-	for {
-		rec, _, recErr := cursor.Next()
-		if errors.Is(recErr, chunk.ErrNoMoreRecords) {
-			break
-		}
-		if recErr != nil {
-			return fmt.Errorf("read chunk: %w", recErr)
-		}
-		records = append(records, rec)
-	}
-
+	// Final tombstone check right before sending: retention may have
+	// deleted this chunk while we were opening the blob. The follower's
+	// tombstone check (in AdoptSealedBlobToTier) is the second line of
+	// defence; this leader-side recheck short-circuits the RPC entirely
+	// when the leader already knows the chunk is gone. See gastrolog-11rzz.
 	tier := o.findLocalTier(vaultID, tierID)
 	if tier != nil && tier.IsTombstoned != nil && tier.IsTombstoned(chunkID) {
-		o.logger.Debug("replication: chunk tombstoned after cursor read, aborting send",
+		o.logger.Debug("replication: chunk tombstoned after blob open, aborting send",
 			"vault", vaultID, "tier", tierID, "chunk", chunkID.String(), "node", nodeID)
 		return nil
 	}
 
-	return o.tierReplicator.ImportSealedChunk(ctx, nodeID, vaultID, tierID, chunkID, records)
+	digest, err := o.tierReplicator.ImportBlob(ctx, nodeID, vaultID, tierID, chunkID, size, body)
+	if err != nil {
+		return fmt.Errorf("ImportBlob to %s: %w", nodeID, err)
+	}
+	o.logger.Debug("replication: ImportBlob ack",
+		"vault", vaultID, "tier", tierID, "chunk", chunkID.String(), "node", nodeID,
+		"size", size, "digest", hex.EncodeToString(digest[:8]))
+	return nil
 }
