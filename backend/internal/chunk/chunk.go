@@ -186,6 +186,16 @@ type ChunkIndexBuilder interface {
 	Build(ctx context.Context, chunkID ChunkID) error
 }
 
+// CloudBlobChecker probes a chunk's authoritative cloud blob (independent of
+// any local cache copy). Implemented by managers backed by a cloud store; the
+// reconcile sweep uses it to detect blobs deleted out-of-band by lifecycle
+// rules without being misled by a still-present warm cache. Returns nil if
+// the blob is reachable, ErrChunkSuspect if it's missing, or another error
+// for transient problems. See gastrolog-24m1t step 7j.
+type CloudBlobChecker interface {
+	HeadCloudBlob(id ChunkID) error
+}
+
 // ChunkPostSealProcessor extends ChunkManager with a unified post-seal pipeline.
 // The pipeline handles compression, index building, and cloud upload in order.
 // Callers should type-assert to check availability.

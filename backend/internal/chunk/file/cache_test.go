@@ -142,22 +142,25 @@ func TestCacheHitAvoidsCloudDownload(t *testing.T) {
 	}
 }
 
-func TestCacheMissDownloadsAndCaches(t *testing.T) {
+// TestLocalGLCBServesAfterCacheDirEvicted verifies the warm cache that
+// matters post step 7j: the chunk's own data.glcb in <chunkDir>. Wiping
+// the legacy <CacheDir>/<id>.glcb does not cause a download because the
+// in-tree data.glcb still serves the read locally.
+func TestLocalGLCBServesAfterCacheDirEvicted(t *testing.T) {
 	t.Parallel()
 	cm, store, cacheDir := newCacheTestManager(t)
 
 	chunkID := ingestAndUpload(t, cm, 200)
 
-	// Remove cache file to force a miss.
-	cachePath := filepath.Join(cacheDir, chunkID.String()+".glcb")
-	if err := os.Remove(cachePath); err != nil {
+	// Wipe the CacheDir cache copy to prove the in-tree data.glcb is what
+	// serves reads now.
+	if err := os.Remove(filepath.Join(cacheDir, chunkID.String()+".glcb")); err != nil {
 		t.Fatal(err)
 	}
 
 	store.downloads.Store(0)
 	store.downloadRanges.Store(0)
 
-	// Open cursor — should download from cloud and re-cache.
 	cursor, err := cm.OpenCursor(chunkID)
 	if err != nil {
 		t.Fatalf("OpenCursor: %v", err)
@@ -179,62 +182,8 @@ func TestCacheMissDownloadsAndCaches(t *testing.T) {
 	if count != 200 {
 		t.Errorf("read %d records, expected 200", count)
 	}
-
-	// Should have called Download exactly once.
-	if downloads := store.downloads.Load(); downloads != 1 {
-		t.Errorf("expected 1 Download call (cache miss), got %d", downloads)
-	}
-
-	// Cache file should be recreated.
-	if _, err := os.Stat(cachePath); err != nil {
-		t.Errorf("cache file should be recreated after miss: %v", err)
-	}
-}
-
-func TestCorruptCacheFallsBackToDownload(t *testing.T) {
-	t.Parallel()
-	cm, store, cacheDir := newCacheTestManager(t)
-
-	chunkID := ingestAndUpload(t, cm, 200)
-
-	// Corrupt the cache file.
-	cachePath := filepath.Join(cacheDir, chunkID.String()+".glcb")
-	if err := os.WriteFile(cachePath, []byte("garbage"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	store.downloads.Store(0)
-
-	// Open cursor — corrupt cache should be deleted, blob re-downloaded.
-	cursor, err := cm.OpenCursor(chunkID)
-	if err != nil {
-		t.Fatalf("OpenCursor: %v", err)
-	}
-	var count int
-	for {
-		_, _, err := cursor.Next()
-		if errors.Is(err, chunk.ErrNoMoreRecords) {
-			break
-		}
-		if err != nil {
-			_ = cursor.Close()
-			t.Fatalf("cursor.Next at %d: %v", count, err)
-		}
-		count++
-	}
-	_ = cursor.Close()
-
-	if count != 200 {
-		t.Errorf("read %d records, expected 200", count)
-	}
-	if downloads := store.downloads.Load(); downloads != 1 {
-		t.Errorf("expected 1 Download after corrupt cache, got %d", downloads)
-	}
-
-	// Cache should be replaced with valid file.
-	info, _ := os.Stat(cachePath)
-	if info == nil || info.Size() < 100 {
-		t.Error("cache file should be replaced with valid GLCB")
+	if total := store.downloads.Load() + store.downloadRanges.Load(); total != 0 {
+		t.Errorf("expected zero cloud calls (local data.glcb is the cache), got %d", total)
 	}
 }
 
@@ -258,97 +207,31 @@ func TestDeleteCleansCacheFile(t *testing.T) {
 	}
 }
 
-func TestCacheConcurrentDownloadSafe(t *testing.T) {
+// TestRangeRequestFallsBackWhenLocalGLCBMissing covers the cold-cache
+// case: a cloud-backed chunk with no local data.glcb (e.g. evicted under
+// disk pressure, or a follower that adopted via FSM without ever sealing
+// locally) must still serve reads via cloud range requests. Simulated
+// here by deleting both local data.glcb and the legacy CacheDir copy.
+func TestRangeRequestFallsBackWhenLocalGLCBMissing(t *testing.T) {
 	t.Parallel()
 	cm, store, cacheDir := newCacheTestManager(t)
 
 	chunkID := ingestAndUpload(t, cm, 200)
 
-	// Remove cache file.
-	_ = os.Remove(filepath.Join(cacheDir, chunkID.String()+".glcb"))
-	store.downloads.Store(0)
-
-	// Two goroutines open cursors simultaneously — both should succeed.
-	errs := make(chan error, 2)
-	for range 2 {
-		go func() {
-			cursor, err := cm.OpenCursor(chunkID)
-			if err != nil {
-				errs <- err
-				return
-			}
-			var count int
-			for {
-				_, _, err := cursor.Next()
-				if errors.Is(err, chunk.ErrNoMoreRecords) {
-					break
-				}
-				if err != nil {
-					_ = cursor.Close()
-					errs <- err
-					return
-				}
-				count++
-			}
-			_ = cursor.Close()
-			if count != 200 {
-				errs <- fmt.Errorf("read %d records, expected 200", count)
-				return
-			}
-			errs <- nil
-		}()
-	}
-
-	for range 2 {
-		if err := <-errs; err != nil {
-			t.Errorf("concurrent cache-on-read: %v", err)
-		}
-	}
-
-	// Cache file should exist (one of them won the rename).
-	cachePath := filepath.Join(cacheDir, chunkID.String()+".glcb")
-	if _, err := os.Stat(cachePath); err != nil {
-		t.Errorf("cache file should exist after concurrent downloads: %v", err)
-	}
-}
-
-func TestCacheReadOnlyDirFallsBackToRangeRequests(t *testing.T) {
-	t.Parallel()
-	vaultID := glid.New()
-	inner := blobstore.NewMemory()
-	store := &countingStore{Store: inner}
-
-	dir := t.TempDir()
-	cacheDir := t.TempDir()
-
-	cm, err := NewManager(Config{
-		Dir:            dir,
-		Now:            time.Now,
-		RotationPolicy: chunk.NewRecordCountPolicy(10000),
-		CloudStore:     store,
-		VaultID:        vaultID,
-		CacheDir:       cacheDir,
-	})
-	if err != nil {
+	// Wipe both caches: <chunkDir>/data.glcb (the new warm cache) AND
+	// <CacheDir>/<id>.glcb (legacy CacheDir copy). The chunk should still
+	// be readable via cloud range requests against the authoritative blob.
+	if err := os.Remove(filepath.Join(cm.chunkDir(chunkID), dataGLCBFileName)); err != nil {
 		t.Fatal(err)
 	}
-	defer cm.Close()
-
-	chunkID := ingestAndUpload(t, cm, 200)
-
-	// Remove cache file and make cache dir read-only.
-	cachePath := filepath.Join(cacheDir, chunkID.String()+".glcb")
-	_ = os.Remove(cachePath)
-	_ = os.Chmod(cacheDir, 0o444)
-	defer os.Chmod(cacheDir, 0o755) //nolint:errcheck // cleanup
+	_ = os.Remove(filepath.Join(cacheDir, chunkID.String()+".glcb"))
 
 	store.downloads.Store(0)
 	store.downloadRanges.Store(0)
 
-	// Open cursor — cache write should fail, fall back to range requests.
 	cursor, err := cm.OpenCursor(chunkID)
 	if err != nil {
-		t.Fatalf("OpenCursor should succeed via fallback: %v", err)
+		t.Fatalf("OpenCursor: %v", err)
 	}
 	var count int
 	for {
@@ -367,11 +250,8 @@ func TestCacheReadOnlyDirFallsBackToRangeRequests(t *testing.T) {
 	if count != 200 {
 		t.Errorf("read %d records, expected 200", count)
 	}
-
-	// Should have used range requests (download or downloadRange).
-	totalCalls := store.downloads.Load() + store.downloadRanges.Load()
-	if totalCalls == 0 {
-		t.Error("expected cloud calls after cache write failure")
+	if total := store.downloads.Load() + store.downloadRanges.Load(); total == 0 {
+		t.Error("expected cloud calls when both local data.glcb and CacheDir cache are missing")
 	}
 }
 

@@ -772,10 +772,29 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 		return nil, chunk.ErrChunkNotFound
 	}
 	cloudBacked := meta.cloudBacked
+	archived := meta.archived
 	sealed := meta.sealed
 	m.mu.Unlock()
 
 	if cloudBacked {
+		// Local data.glcb is the warm cache for cloud-backed chunks: when
+		// the leader uploads or any node downloads, the same file lives at
+		// <chunkDir>/data.glcb and the read goes through the sealed-local
+		// path with no S3 round-trip. Falls back to range-request reads
+		// when the local copy was evicted under disk pressure or never
+		// existed (follower that hasn't seen this chunk yet). See
+		// gastrolog-24m1t step 7j.
+		//
+		// Archived chunks deliberately bypass the local cache: archive
+		// semantics require an explicit Restore before reads, and serving
+		// from a stale local copy would let queries silently succeed on
+		// data the operator has nominally moved offline. The cloud cursor
+		// surfaces ErrChunkArchived from the backing store.
+		if !archived && m.hasLocalGLCB(id) {
+			if cursor, err := m.openLocalGLCBCursor(id); err == nil {
+				return cursor, nil
+			}
+		}
 		// Cloud-backed cursors don't touch local mmap regions; the
 		// per-chunk lifetime lock is unnecessary for them. Their lifecycle
 		// is handled by the cloud index's own concurrency primitives.
@@ -2614,11 +2633,41 @@ func (m *Manager) HasLocalContent(id chunk.ChunkID) bool {
 	if !meta.cloudBacked {
 		return true
 	}
+	// In-tree warm cache (gastrolog-24m1t step 7j) — preferred over the
+	// legacy CacheDir copy.
+	if m.hasLocalGLCB(id) {
+		return true
+	}
 	if m.cfg.CacheDir == "" {
 		return false
 	}
 	_, err := os.Stat(m.cachePath(id))
 	return err == nil
+}
+
+// HeadCloudBlob probes the chunk's cloud blob via a HEAD request, ignoring
+// any local cache. Used by the reconcile sweep to detect blobs deleted
+// out-of-band by a lifecycle rule — OpenCursor would silently serve from
+// the warm cache and miss the gap. Returns chunk.ErrChunkSuspect for
+// missing blobs (the tracker uses that to start the grace window) and
+// nil when the blob is present. Implements chunk.CloudBlobChecker.
+func (m *Manager) HeadCloudBlob(id chunk.ChunkID) error {
+	if m.cfg.CloudStore == nil {
+		return errors.New("cloud store not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), cloudHeadTimeout)
+	defer cancel()
+	info, err := m.cfg.CloudStore.Head(ctx, m.blobKey(id))
+	if err != nil {
+		if errors.Is(err, blobstore.ErrBlobNotFound) {
+			return chunk.ErrChunkSuspect
+		}
+		return err
+	}
+	if info.Size == 0 {
+		return chunk.ErrChunkSuspect
+	}
+	return nil
 }
 
 // FindSourceStartPosition returns the earliest record position with SourceTS >= ts.
@@ -3869,16 +3918,15 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 			numFrames)
 	}
 
-	// Delete local data files (multi-file artifacts AND the local data.glcb)
-	// — the cloud blob is now the authoritative copy. Index files are kept
-	// for fast local queries; the optional CacheDir holds the cloud cache.
-	// Without removing data.glcb, the next restart's loadChunkMetaFromGLCB
-	// would re-create a local sealed meta and shadow the cloud-backed
-	// state (lost archived flag, gastrolog-24m1t step 7c stage 3b).
+	// Delete the multi-file data artifacts (raw.log/idx.log/etc.) — they
+	// are redundant with data.glcb and remain only on chunks sealed before
+	// step 7c stage 3b landed. Keep the local data.glcb itself: post step
+	// 7j it is the warm cache for the now-cloud-backed chunk, read
+	// transparently via OpenCursor's local-GLCB fast path. Eviction under
+	// disk pressure can delete it later; the cloud blob is authoritative.
 	if err := m.removeLocalDataFiles(id); err != nil {
 		return fmt.Errorf("remove local data files after cloud upload: %w", err)
 	}
-	_ = os.Remove(filepath.Join(m.chunkDir(id), dataGLCBFileName))
 
 	// Move metadata from in-memory map to cloud B+ tree index.
 	// The chunk is now cloud-only — remove from Go heap.
@@ -3968,12 +4016,12 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 			numFrames)
 	}
 
-	// Delete local data files (multi-file + data.glcb) — the cloud blob is
-	// authoritative. See uploadToCloud for the data.glcb-removal rationale.
+	// Delete the multi-file data artifacts (raw.log/idx.log/etc.) — same
+	// rationale as uploadToCloud: data.glcb itself stays as the warm cache
+	// for the now-cloud-backed chunk (gastrolog-24m1t step 7j).
 	if err := m.removeLocalDataFiles(id); err != nil {
 		return fmt.Errorf("remove local data files after cloud adopt: %w", err)
 	}
-	_ = os.Remove(filepath.Join(m.chunkDir(id), dataGLCBFileName))
 
 	m.mu.Lock()
 	meta := m.metas[id]
@@ -4172,9 +4220,40 @@ func (m *Manager) loadCloudChunks() error {
 		} else {
 			m.logger.Info("cloud index ready", "count", newCount)
 		}
+		// Drop local m.metas entries for chunks that the cloud index also
+		// holds — post step 7j the local data.glcb sticks around as warm
+		// cache after upload, but the authoritative meta (with archived /
+		// numFrames / TOC offsets) is the cloud index entry. Without this
+		// reconciliation a restart resurrects a stale local-sealed meta
+		// that masks the cloud-recorded archived flag. The data.glcb file
+		// itself stays put — OpenCursor's local-GLCB fast path picks it
+		// up via hasLocalGLCB. See gastrolog-24m1t step 7j.
+		m.dropLocalMetaForCloudChunks()
 	}
 	m.backfillTSOffsets()
 	return nil
+}
+
+// dropLocalMetaForCloudChunks removes m.metas entries for any chunk also
+// present in the cloud index. The on-disk data.glcb is preserved as warm
+// cache; only the duplicated in-memory meta goes.
+func (m *Manager) dropLocalMetaForCloudChunks() {
+	if m.cloudIdx == nil {
+		return
+	}
+	m.cloudIdxMu.Lock()
+	cloudIDs := make([]chunk.ChunkID, 0, m.cloudIdx.Count())
+	_ = m.cloudIdx.ForEach(func(id chunk.ChunkID, _ *chunkMeta) bool {
+		cloudIDs = append(cloudIDs, id)
+		return true
+	})
+	m.cloudIdxMu.Unlock()
+
+	m.mu.Lock()
+	for _, id := range cloudIDs {
+		delete(m.metas, id)
+	}
+	m.mu.Unlock()
 }
 
 // backfillTSOffsets reads the GLCB TOC footer for cloud chunks that have zero
@@ -4227,19 +4306,18 @@ func (m *Manager) loadCloudChunksFromStore() error {
 		if !ok {
 			return nil
 		}
-		// Don't add to cloud index if the chunk has local data files —
-		// let the backfill handle it via UploadToCloud → adoptCloudBlob,
-		// which removes local files, updates cloud index, AND announces
-		// to the tier FSM. Setting cloudBacked here would make the
-		// backfill skip the chunk, leaving the FSM out of date.
-		if _, exists := m.metas[id]; exists {
-			return nil
-		}
 		// Skip if already in the cloud index (preserves richer metadata
 		// like TS index offsets from previous backfills).
 		if m.cloudIdx != nil && m.cloudIdxHas(id) {
 			return nil
 		}
+		// If we also have a local entry, the local data.glcb is now the
+		// warm cache for an already-uploaded chunk. Drop the local meta
+		// in favor of the authoritative cloud entry that's about to be
+		// inserted into cloudIdx — the local data.glcb file stays in
+		// place as cache and will be picked up by OpenCursor's local-GLCB
+		// fast path. See gastrolog-24m1t step 7j.
+		delete(m.metas, id)
 		cm := chunkcloud.BlobMetaToChunkMeta(id, blob)
 		meta := &chunkMeta{
 			id:          id,
