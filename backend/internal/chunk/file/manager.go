@@ -3123,130 +3123,178 @@ func (m *Manager) touchLastAccess(id chunk.ChunkID) {
 	m.lastAccessMu.Unlock()
 }
 
-// EvictCacheLRU deletes warm-cache copies (<chunkDir>/data.glcb) of
-// cloud-backed chunks until the total cache size is at or below
-// budgetBytes. Coldest-first: chunks with the oldest lastAccess timestamp
-// (or no recorded access since startup) are evicted first. Local-only
-// sealed chunks are never touched — their data.glcb is the authoritative
-// copy, not a cache.
+// evictionRule decides per-candidate whether a warm-cache entry should be
+// evicted. Implementations are stateless given the candidate + the
+// running totalRemaining (the bytes still cached after prior evictions in
+// this sweep).
 //
-// Returns the number of chunks evicted and the total bytes freed.
+// EvictCache builds a list of rules and walks coldest-first; a candidate
+// is evicted when ANY rule returns true. This is the composition surface
+// for future restrictions: the base policy (LRU or TTL) contributes one
+// rule, and additional restrictions (storage-pressure, corrupt-blob,
+// pin-list, …) drop in alongside without touching the policy branches.
+// LRU and TTL remain mutually exclusive with each other; everything
+// outside that pair composes with whichever base policy was picked. See
 // gastrolog-2idw8.
+type evictionRule struct {
+	name        string
+	shouldEvict func(c cacheEntry, totalRemaining int64) bool
+}
+
+// EvictCacheLRU is the coldest-first-by-budget rule on its own. Kept as a
+// public surface so tests + future callers can pin down LRU semantics
+// without going through the policy dispatch in EvictCache.
 func (m *Manager) EvictCacheLRU(budgetBytes uint64) (int, int64) {
-	candidates := m.cacheCandidates()
-	if len(candidates) == 0 {
+	rule := lruRule(budgetBytes)
+	if rule == nil {
 		return 0, 0
 	}
-
-	var total int64
-	for _, c := range candidates {
-		total += c.size
-	}
-	if total <= int64(budgetBytes) { //nolint:gosec // G115: budget round-trip
-		return 0, 0
-	}
-
-	// Sort coldest-first so the oldest accesses go first. A zero/missing
-	// lastAccess (chunk seen on disk but never opened in this process) ranks
-	// as oldest possible — those are the most evictable.
-	slices.SortFunc(candidates, func(a, b cacheEntry) int {
-		return a.lastAccess.Compare(b.lastAccess)
-	})
-
-	var evicted int
-	var freed int64
-	for _, c := range candidates {
-		if total <= int64(budgetBytes) { //nolint:gosec // G115
-			break
-		}
-		if err := os.Remove(c.path); err != nil {
-			m.logger.Debug("cache eviction: remove failed", "chunk", c.id, "error", err)
-			continue
-		}
-		m.lastAccessMu.Lock()
-		delete(m.lastAccess, c.id)
-		m.lastAccessMu.Unlock()
-		total -= c.size
-		freed += c.size
-		evicted++
-	}
-	if evicted > 0 {
-		m.logger.Info("cache eviction (LRU)",
-			"evicted", evicted, "freed_bytes", freed, "budget", budgetBytes)
-	}
-	return evicted, freed
+	return m.runEvictionSweep("LRU", []evictionRule{*rule})
 }
 
-// EvictCacheTTL deletes warm-cache copies whose lastAccess is older than
-// the given TTL. Local-only sealed chunks are never touched. Use alongside
-// EvictCacheLRU when the operator wants both age- and size-based eviction.
-// gastrolog-2idw8.
+// EvictCacheTTL is the older-than-cutoff rule on its own. Same role as
+// EvictCacheLRU.
 func (m *Manager) EvictCacheTTL(ttl time.Duration) (int, int64) {
-	if ttl <= 0 {
+	rule := ttlRule(ttl, m.cfg.Now())
+	if rule == nil {
 		return 0, 0
 	}
-	candidates := m.cacheCandidates()
-	cutoff := m.cfg.Now().Add(-ttl)
-
-	var evicted int
-	var freed int64
-	for _, c := range candidates {
-		if c.lastAccess.After(cutoff) {
-			continue
-		}
-		if err := os.Remove(c.path); err != nil {
-			m.logger.Debug("cache eviction: remove failed", "chunk", c.id, "error", err)
-			continue
-		}
-		m.lastAccessMu.Lock()
-		delete(m.lastAccess, c.id)
-		m.lastAccessMu.Unlock()
-		freed += c.size
-		evicted++
-	}
-	if evicted > 0 {
-		m.logger.Info("cache eviction (TTL)",
-			"evicted", evicted, "freed_bytes", freed, "ttl", ttl)
-	}
-	return evicted, freed
+	return m.runEvictionSweep("TTL", []evictionRule{*rule})
 }
 
-// EvictCache runs the configured warm-cache eviction policy. CacheEviction
-// picks the mode — "lru" or "ttl" — and the two are mutually exclusive:
-// LRU is budget-bounded, TTL is age-bounded, and they decide eviction by
-// fundamentally different criteria. Other orthogonal policies (e.g. a
-// storage-pressure trigger that fires regardless of mode) are layered on
-// top by their own callers, not blended in here. See gastrolog-2idw8.
-//
-// Empty CacheEviction defaults to "lru" so a tier with a budget but no
-// explicit policy still gets eviction. Unknown policies are a no-op
-// after a one-shot warning.
+// EvictCache assembles the rule set from the configured base policy plus
+// any orthogonal restrictions and runs one sweep over the candidates.
+// LRU and TTL are mutually exclusive choices for the BASE policy;
+// orthogonal restrictions (added to `restrictions` below as new ones
+// land) compose with whichever base mode is selected. Empty
+// CacheEviction defaults to "lru". Unknown policies log + no-op.
 func (m *Manager) EvictCache() (int, int64) {
 	policy := m.cfg.CacheEviction
 	if policy == "" {
 		policy = "lru"
 	}
+
+	var rules []evictionRule
 	switch policy {
+	case "lru":
+		// LRU mode ignores CacheTTL — recency is the only criterion the
+		// base policy cares about.
+		if r := lruRule(m.cfg.CacheBudgetBytes); r != nil {
+			rules = append(rules, *r)
+		}
 	case "ttl":
 		// TTL mode ignores CacheBudgetBytes — age is the only criterion.
-		// Setting both "ttl" and a budget is an operator-config nudge to
-		// take stricter action than either alone, but mixing the two
-		// here would silently change the contract from "evict by age"
-		// to "evict by age plus a hidden LRU pass."
-		if m.cfg.CacheTTL <= 0 {
-			return 0, 0
+		if r := ttlRule(m.cfg.CacheTTL, m.cfg.Now()); r != nil {
+			rules = append(rules, *r)
 		}
-		return m.EvictCacheTTL(m.cfg.CacheTTL)
-	case "lru":
-		// LRU mode ignores CacheTTL — recency is the only criterion.
-		if m.cfg.CacheBudgetBytes == 0 {
-			return 0, 0
-		}
-		return m.EvictCacheLRU(m.cfg.CacheBudgetBytes)
 	default:
 		m.logger.Warn("cache eviction: unknown policy", "policy", policy)
 		return 0, 0
 	}
+
+	// Hook for orthogonal restrictions that compose with EITHER base mode.
+	// None today; future entries (e.g. nodeDiskPressureRule()) append here
+	// once and apply to both LRU and TTL sweeps. Nothing about LRU/TTL
+	// dispatch needs to change as restrictions accrue.
+	rules = append(rules, m.additionalEvictionRules()...)
+
+	if len(rules) == 0 {
+		return 0, 0
+	}
+	return m.runEvictionSweep(policy, rules)
+}
+
+// additionalEvictionRules returns rules that fire regardless of the base
+// LRU/TTL choice. Empty today — placeholder for storage-pressure, blob
+// integrity, pin-list, etc. as they're added.
+func (m *Manager) additionalEvictionRules() []evictionRule {
+	return nil
+}
+
+// lruRule produces the rule "evict while total cached bytes exceed
+// budgetBytes." Returns nil when budgetBytes is zero (operator hasn't
+// set one) so the rule list stays empty rather than carrying a
+// never-fires entry.
+func lruRule(budgetBytes uint64) *evictionRule {
+	if budgetBytes == 0 {
+		return nil
+	}
+	budget := int64(budgetBytes) //nolint:gosec // G115: round-trip
+	return &evictionRule{
+		name: "lru-budget",
+		shouldEvict: func(_ cacheEntry, totalRemaining int64) bool {
+			return totalRemaining > budget
+		},
+	}
+}
+
+// ttlRule produces the rule "evict any candidate whose lastAccess is
+// older than now-ttl." Returns nil for non-positive ttl.
+func ttlRule(ttl time.Duration, now time.Time) *evictionRule {
+	if ttl <= 0 {
+		return nil
+	}
+	cutoff := now.Add(-ttl)
+	return &evictionRule{
+		name: "ttl-age",
+		shouldEvict: func(c cacheEntry, _ int64) bool {
+			return !c.lastAccess.After(cutoff)
+		},
+	}
+}
+
+// runEvictionSweep walks candidates coldest-first and applies the rule
+// set to each. A candidate is evicted when ANY rule matches; the loop
+// continues until every candidate has been examined (rules that need
+// to stop early — e.g. LRU's budget cap — handle that themselves via
+// the totalRemaining argument).
+func (m *Manager) runEvictionSweep(label string, rules []evictionRule) (int, int64) {
+	candidates := m.cacheCandidates()
+	if len(candidates) == 0 {
+		return 0, 0
+	}
+
+	// Coldest-first: oldest lastAccess first. Zero/missing lastAccess
+	// (chunk seen on disk but never opened in this process) ranks as
+	// oldest possible.
+	slices.SortFunc(candidates, func(a, b cacheEntry) int {
+		return a.lastAccess.Compare(b.lastAccess)
+	})
+
+	var totalRemaining int64
+	for _, c := range candidates {
+		totalRemaining += c.size
+	}
+
+	var evicted int
+	var freed int64
+	for _, c := range candidates {
+		matched := ""
+		for _, r := range rules {
+			if r.shouldEvict(c, totalRemaining) {
+				matched = r.name
+				break
+			}
+		}
+		if matched == "" {
+			continue
+		}
+		if err := os.Remove(c.path); err != nil {
+			m.logger.Debug("cache eviction: remove failed", "chunk", c.id, "error", err)
+			continue
+		}
+		m.lastAccessMu.Lock()
+		delete(m.lastAccess, c.id)
+		m.lastAccessMu.Unlock()
+		totalRemaining -= c.size
+		freed += c.size
+		evicted++
+	}
+	if evicted > 0 {
+		m.logger.Info("cache eviction",
+			"policy", label, "evicted", evicted, "freed_bytes", freed)
+	}
+	return evicted, freed
 }
 
 // cacheEntry is one row in the eviction-candidate set: a chunk whose
