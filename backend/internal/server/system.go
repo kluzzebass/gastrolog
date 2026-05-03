@@ -452,6 +452,12 @@ func (s *SystemServer) loadSystemTiers(ctx context.Context, resp *apiv1.GetSyste
 		if tier.CloudServiceID != nil {
 			tc.CloudServiceId = tier.CloudServiceID.ToProto()
 		}
+		// Cloud-backed tiers go on the wire as TIER_TYPE_CLOUD for client
+		// UI back-compat; server-side dispatch uses TierConfig.IsCloud().
+		// See gastrolog-4k5mg.
+		if tier.IsCloud() {
+			tc.Type = apiv1.TierType_TIER_TYPE_CLOUD
+		}
 		for _, r := range tier.RetentionRules {
 			pb := &apiv1.RetentionRule{
 				RetentionPolicyId: r.RetentionPolicyID.ToProto(),
