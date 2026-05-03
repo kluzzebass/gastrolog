@@ -14,10 +14,11 @@ import (
 	"gastrolog/internal/glid"
 )
 
-// newEvictionTestManager builds a Manager with the given budget + TTL
-// configured, plus a controllable now() so tests can advance time without
-// real-clock waits.
-func newEvictionTestManager(t *testing.T, budget uint64, ttl time.Duration, nowFn func() time.Time) *Manager {
+// newEvictionTestManager builds a Manager with the given policy + budget +
+// TTL configured, plus a controllable now() so tests can advance time
+// without real-clock waits. Empty policy defaults to "lru" inside
+// EvictCache, matching production semantics.
+func newEvictionTestManager(t *testing.T, policy string, budget uint64, ttl time.Duration, nowFn func() time.Time) *Manager {
 	t.Helper()
 	vaultID := glid.New()
 	store := blobstore.NewMemory()
@@ -27,6 +28,7 @@ func newEvictionTestManager(t *testing.T, budget uint64, ttl time.Duration, nowF
 		RotationPolicy:   chunk.NewRecordCountPolicy(10000),
 		CloudStore:       store,
 		VaultID:          vaultID,
+		CacheEviction:    policy,
 		CacheBudgetBytes: budget,
 		CacheTTL:         ttl,
 	})
@@ -75,7 +77,7 @@ func TestEvictCacheLRU(t *testing.T) {
 	t.Parallel()
 	now := time.Now()
 	clock := &mutableClock{t: now}
-	cm := newEvictionTestManager(t, 1, 0, clock.now) // tiny budget forces every entry to evict
+	cm := newEvictionTestManager(t, "lru", 1, 0, clock.now) // tiny budget forces every entry to evict
 
 	ids := uploadN(t, cm, 3, 100)
 	if len(ids) != 3 {
@@ -111,7 +113,7 @@ func TestEvictCacheLRU_Order(t *testing.T) {
 	t.Parallel()
 	now := time.Now()
 	clock := &mutableClock{t: now}
-	cm := newEvictionTestManager(t, 0, 0, clock.now) // configure budget per-call below
+	cm := newEvictionTestManager(t, "lru", 0, 0, clock.now) // configure budget per-call below
 
 	ids := uploadN(t, cm, 3, 100)
 	if len(ids) != 3 {
@@ -159,7 +161,7 @@ func TestEvictCacheTTL(t *testing.T) {
 	t.Parallel()
 	now := time.Now()
 	clock := &mutableClock{t: now}
-	cm := newEvictionTestManager(t, 0, time.Hour, clock.now)
+	cm := newEvictionTestManager(t, "ttl", 0, time.Hour, clock.now)
 
 	ids := uploadN(t, cm, 2, 100)
 	if len(ids) != 2 {
@@ -183,12 +185,63 @@ func TestEvictCacheTTL(t *testing.T) {
 	}
 }
 
+// TestEvictCache_LRUIgnoresTTL pins down the mutual-exclusion contract:
+// in LRU mode, CacheTTL is ignored — even if every entry is past TTL, no
+// eviction happens unless the budget would force it. Pairs with
+// TestEvictCache_TTLIgnoresBudget below.
+func TestEvictCache_LRUIgnoresTTL(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	clock := &mutableClock{t: now}
+	// Policy=lru, no budget, very short TTL. Real world: operator picked
+	// LRU; the TTL field is left over from a previous tier config or a
+	// confused operator. EvictCache must NOT silently apply TTL.
+	cm := newEvictionTestManager(t, "lru", 0, time.Millisecond, clock.now)
+	ids := uploadN(t, cm, 2, 100)
+
+	// Advance clock well past TTL; in TTL mode this would evict everything.
+	clock.t = clock.t.Add(time.Hour)
+
+	evicted, _ := cm.EvictCache()
+	if evicted != 0 {
+		t.Errorf("LRU mode with no budget must ignore TTL, evicted=%d", evicted)
+	}
+	for _, id := range ids {
+		if _, err := os.Stat(filepath.Join(cm.chunkDir(id), dataGLCBFileName)); err != nil {
+			t.Errorf("chunk %s should still be cached: %v", id, err)
+		}
+	}
+}
+
+// TestEvictCache_TTLIgnoresBudget covers the inverse: in TTL mode, the
+// budget is irrelevant. A TTL-mode tier with a tiny budget but every
+// entry fresh must NOT evict anything.
+func TestEvictCache_TTLIgnoresBudget(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	clock := &mutableClock{t: now}
+	// Policy=ttl, tiny budget that would force LRU to evict everything,
+	// long TTL so nothing has aged out.
+	cm := newEvictionTestManager(t, "ttl", 1, time.Hour, clock.now)
+	ids := uploadN(t, cm, 2, 100)
+
+	evicted, _ := cm.EvictCache()
+	if evicted != 0 {
+		t.Errorf("TTL mode must ignore budget, evicted=%d (would be 2 if budget applied)", evicted)
+	}
+	for _, id := range ids {
+		if _, err := os.Stat(filepath.Join(cm.chunkDir(id), dataGLCBFileName)); err != nil {
+			t.Errorf("chunk %s should still be cached: %v", id, err)
+		}
+	}
+}
+
 // TestEvictCacheLRU_NoBudget is a no-op when CacheBudgetBytes is zero.
 func TestEvictCacheLRU_NoBudget(t *testing.T) {
 	t.Parallel()
 	now := time.Now()
 	clock := &mutableClock{t: now}
-	cm := newEvictionTestManager(t, 0, 0, clock.now)
+	cm := newEvictionTestManager(t, "lru", 0, 0, clock.now)
 
 	ids := uploadN(t, cm, 2, 100)
 

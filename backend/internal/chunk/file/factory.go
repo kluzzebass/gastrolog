@@ -93,8 +93,9 @@ func NewFactory() chunk.ManagerFactory {
 		// cache_dir is silently ignored — step 7k made <chunkDir>/data.glcb
 		// the warm cache so a separate cache directory is no longer
 		// meaningful.
-		// cache_eviction is silently ignored — both policies (LRU + TTL)
-		// are always available and configured by their value fields below.
+		if v := params["cache_eviction"]; v != "" {
+			cfg.CacheEviction = v
+		}
 		if v := params["cache_budget"]; v != "" {
 			parsed, err := system.ParseSize(v)
 			if err != nil {

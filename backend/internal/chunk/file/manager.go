@@ -126,15 +126,22 @@ type Config struct {
 	// share the leader's S3 bucket for reads without owning the blobs.
 	CloudReadOnly bool
 
+	// CacheEviction selects the warm-cache eviction policy: "lru" (default)
+	// or "ttl". The two are mutually exclusive — operators pick one mode,
+	// not both. Empty string is treated as "lru" so a tier with a budget
+	// but no explicit policy still gets eviction. See gastrolog-2idw8.
+	CacheEviction string
+
 	// CacheBudgetBytes is the soft cap on total bytes occupied by warm-cache
 	// copies of cloud-backed chunks (<chunkDir>/data.glcb). Zero disables
-	// LRU-by-budget eviction. Enforced by EvictCacheLRU which the
-	// orchestrator runs on a schedule. See gastrolog-2idw8.
+	// budget enforcement. Used by both LRU mode (primary cap) and TTL
+	// mode (secondary cap applied after age-based eviction).
 	CacheBudgetBytes uint64
 
 	// CacheTTL is the maximum age (since last OpenCursor) of a warm-cache
-	// entry before it gets evicted. Zero disables TTL eviction. Local-only
-	// sealed chunks are never affected — their data.glcb is authoritative.
+	// entry before it gets evicted. Only consulted in TTL mode; LRU mode
+	// ignores this field. Local-only sealed chunks are never affected —
+	// their data.glcb is authoritative.
 	CacheTTL time.Duration
 
 	// Announcer, when non-nil, is called after each metadata state change
@@ -3204,25 +3211,42 @@ func (m *Manager) EvictCacheTTL(ttl time.Duration) (int, int64) {
 	return evicted, freed
 }
 
-// EvictCache runs whichever eviction policies are configured: TTL first
-// (drops anything older than CacheTTL), then LRU (caps total cache bytes
-// at CacheBudgetBytes). Safe to call at any cadence — eviction is
-// node-local and never persisted, so missing a sweep just means the cache
-// runs slightly hotter until the next call. Both zero values are no-ops.
+// EvictCache runs the configured warm-cache eviction policy. CacheEviction
+// picks the mode — "lru" or "ttl" — and the two are mutually exclusive:
+// LRU is budget-bounded, TTL is age-bounded, and they decide eviction by
+// fundamentally different criteria. Other orthogonal policies (e.g. a
+// storage-pressure trigger that fires regardless of mode) are layered on
+// top by their own callers, not blended in here. See gastrolog-2idw8.
+//
+// Empty CacheEviction defaults to "lru" so a tier with a budget but no
+// explicit policy still gets eviction. Unknown policies are a no-op
+// after a one-shot warning.
 func (m *Manager) EvictCache() (int, int64) {
-	var totalEvicted int
-	var totalFreed int64
-	if m.cfg.CacheTTL > 0 {
-		ev, fr := m.EvictCacheTTL(m.cfg.CacheTTL)
-		totalEvicted += ev
-		totalFreed += fr
+	policy := m.cfg.CacheEviction
+	if policy == "" {
+		policy = "lru"
 	}
-	if m.cfg.CacheBudgetBytes > 0 {
-		ev, fr := m.EvictCacheLRU(m.cfg.CacheBudgetBytes)
-		totalEvicted += ev
-		totalFreed += fr
+	switch policy {
+	case "ttl":
+		// TTL mode ignores CacheBudgetBytes — age is the only criterion.
+		// Setting both "ttl" and a budget is an operator-config nudge to
+		// take stricter action than either alone, but mixing the two
+		// here would silently change the contract from "evict by age"
+		// to "evict by age plus a hidden LRU pass."
+		if m.cfg.CacheTTL <= 0 {
+			return 0, 0
+		}
+		return m.EvictCacheTTL(m.cfg.CacheTTL)
+	case "lru":
+		// LRU mode ignores CacheTTL — recency is the only criterion.
+		if m.cfg.CacheBudgetBytes == 0 {
+			return 0, 0
+		}
+		return m.EvictCacheLRU(m.cfg.CacheBudgetBytes)
+	default:
+		m.logger.Warn("cache eviction: unknown policy", "policy", policy)
+		return 0, 0
 	}
-	return totalEvicted, totalFreed
 }
 
 // cacheEntry is one row in the eviction-candidate set: a chunk whose
@@ -3953,6 +3977,12 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		return fmt.Errorf("remove local data files after cloud upload: %w", err)
 	}
 
+	// Treat the upload itself as an access for eviction purposes — without
+	// this the just-uploaded warm cache has zero lastAccess and the next
+	// TTL sweep would immediately evict a chunk no reader has had a chance
+	// to touch. See gastrolog-2idw8.
+	m.touchLastAccess(id)
+
 	// Move metadata from in-memory map to cloud B+ tree index.
 	// The chunk is now cloud-only — remove from Go heap.
 	m.mu.Lock()
@@ -4049,6 +4079,11 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 	if err := m.removeLocalDataFiles(id); err != nil {
 		return fmt.Errorf("remove local data files after cloud adopt: %w", err)
 	}
+
+	// Treat the adoption as an access — same rationale as uploadToCloud
+	// (gastrolog-2idw8): without this the warm cache has zero lastAccess
+	// and the next TTL sweep would immediately evict it.
+	m.touchLastAccess(id)
 
 	m.mu.Lock()
 	meta := m.metas[id]
