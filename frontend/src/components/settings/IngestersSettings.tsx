@@ -149,7 +149,6 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
       nodeIds: edit.nodeIds,
       singleton: edit.singleton,
     }),
-    clearEdit,
   });
 
   const handleCreate = async () => {

@@ -361,12 +361,20 @@ export function useSearchView() {
         const lastMatch = /\blast=(\S+)/.exec(q);
         if (lastMatch?.[1]) {
           const key = lastMatch[1];
-          const ms = timeRangeMs[key];
-          if (ms) {
-            setTimeRange(key);
-            const now = new Date();
-            setRangeStart(new Date(now.getTime() - ms));
-            setRangeEnd(now);
+          if (key === "all") {
+            // Explicit unbounded range — distinct from "no last= directive
+            // at all" which gets default-injected. See gastrolog-2zdsc.
+            setTimeRange("All");
+            setRangeStart(null);
+            setRangeEnd(null);
+          } else {
+            const ms = timeRangeMs[key];
+            if (ms) {
+              setTimeRange(key);
+              const now = new Date();
+              setRangeStart(new Date(now.getTime() - ms));
+              setRangeEnd(now);
+            }
           }
         } else if (q.includes("start=")) {
           setTimeRange("custom");

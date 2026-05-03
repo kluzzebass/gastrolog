@@ -98,7 +98,6 @@ export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean
         ? `Filter "${id}" is referenced by route(s): ${refs.join(", ")}`
         : null;
     },
-    clearEdit,
   });
 
   const handleSave = (id: string) => saveFilter(id, getEdit(id));

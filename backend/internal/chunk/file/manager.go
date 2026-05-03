@@ -886,9 +886,24 @@ func (m *Manager) ScanAttrs(id chunk.ChunkID, startPos uint64, fn func(writeTS t
 	sealed := meta.sealed
 	m.mu.Unlock()
 
-	// Cloud-backed chunks: download and iterate via cursor.
+	// Cloud-backed chunks: ScanAttrs is "best-effort, no-fetch". Today the
+	// only callers are the histogram level-breakdown samplers (timechart
+	// per-bucket and non-monotonic chunk-level), and the bucket renders as
+	// a hatched "cloud data, breakdown not loaded" ghost when the breakdown
+	// is missing — so a network fetch here would burn S3 bandwidth and
+	// seconds of wall time to compute a result the user never sees.
+	//
+	// If the warm cache holds the blob (data.glcb on disk), route through
+	// the local GLCB cursor. If not, return nil with zero records scanned;
+	// the caller treats sampled==0 as "no breakdown available" and the
+	// bucket stays hatched. Callers that genuinely need bytes regardless
+	// of cache state should use OpenCursor (which still permits the
+	// download path) — not ScanAttrs.
 	if cloudBacked {
-		return m.scanAttrsCloud(id, startPos, fn)
+		if m.hasLocalGLCB(id) {
+			return scanAttrsViaGLCB(m, id, startPos, fn)
+		}
+		return nil
 	}
 
 	// Sealed chunks with data.glcb: route through the GLCB cursor so the

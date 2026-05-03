@@ -51,7 +51,11 @@ export const stripAllDirectives = (q: string): string =>
 
 export const buildTimeTokens = (range: string, reverse: boolean): string => {
   const rev = `reverse=${reverse}`;
-  if (range === "All") return rev;
+  // "All" emits the explicit `last=all` sentinel so the search-effect
+  // detector distinguishes "user picked unbounded" from "no time range
+  // chosen, inject the default." Without the sentinel a user-picked
+  // "All" gets clobbered by the default-range injection. See gastrolog-2zdsc.
+  if (range === "All") return `last=all ${rev}`;
   if (range in timeRangeMs) return `last=${range} ${rev}`;
   return rev;
 };

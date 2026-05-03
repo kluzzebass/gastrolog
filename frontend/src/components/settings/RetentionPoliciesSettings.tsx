@@ -141,7 +141,6 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
         addToast(`Retention policy "${id}" deleted`, "info");
       }
     },
-    clearEdit,
   });
 
   const handleSave = (id: string) => savePolicy(id, getEdit(id));

@@ -11,7 +11,6 @@ interface CrudOptions<TEdit, TSaveArgs, TDeleteArgs = string> {
   onDeleteTransform?: (id: string) => TDeleteArgs;
   onDeleteCheck?: (id: string) => string | null;
   onDeleteSuccess?: (id: string) => void;
-  clearEdit?: (id: string) => void;
 }
 
 export function useCrudHandlers<TEdit, TSaveArgs, TDeleteArgs = string>({
@@ -22,7 +21,6 @@ export function useCrudHandlers<TEdit, TSaveArgs, TDeleteArgs = string>({
   onDeleteTransform,
   onDeleteCheck,
   onDeleteSuccess,
-  clearEdit,
 }: CrudOptions<TEdit, TSaveArgs, TDeleteArgs>) {
   const { addToast } = useToast();
 

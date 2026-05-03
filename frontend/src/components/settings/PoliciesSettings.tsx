@@ -198,7 +198,6 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
         addToast(`Policy "${id}" deleted`, "info");
       }
     },
-    clearEdit,
   });
 
   const handleSave = (id: string) => savePolicy(id, getEdit(id));

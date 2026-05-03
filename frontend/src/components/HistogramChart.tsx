@@ -63,6 +63,26 @@ function formatElapsed(ms: number): string {
   return `${ms}ms`;
 }
 
+// formatApproxCount rounds to 2 significant figures so the imprecision of
+// an estimate is visible in the digits themselves — "188,093" reads like a
+// ground-truth count, "190K" reads like an approximation.
+function formatApproxCount(n: number): string {
+  if (n < 100) return n.toString();
+  const magnitude = 10 ** (Math.floor(Math.log10(n)) - 1);
+  const rounded = Math.round(n / magnitude) * magnitude;
+  if (rounded < 1000) return rounded.toString();
+  if (rounded < 1_000_000) {
+    const k = rounded / 1000;
+    return k < 10 ? `${k.toFixed(1)}K` : `${Math.round(k)}K`;
+  }
+  if (rounded < 1_000_000_000) {
+    const m = rounded / 1_000_000;
+    return m < 10 ? `${m.toFixed(1)}M` : `${Math.round(m)}M`;
+  }
+  const b = rounded / 1_000_000_000;
+  return b < 10 ? `${b.toFixed(1)}B` : `${Math.round(b)}B`;
+}
+
 export function HistogramChart({
   data,
   dark,
@@ -194,7 +214,7 @@ export function HistogramChart({
             className={`font-mono text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}
             title={countTitle}
           >
-            {truncated ? "~" : ""}{totalCount.toLocaleString()} records{elapsedMs != null ? ` in ${formatElapsed(elapsedMs)}` : ""}
+            {truncated || hasCloud ? `~${formatApproxCount(totalCount)}` : totalCount.toLocaleString()} records{elapsedMs != null ? ` in ${formatElapsed(elapsedMs)}` : ""}
           </span>
         </div>
       ) : (
@@ -275,7 +295,10 @@ export function HistogramChart({
           }
         >
           {Array.from({ length: labelCount }, (_, labelIdx) => {
-            const bucketIdx = Math.min(labelIdx * labelStep, buckets.length - 1);
+            const bucketIdx = Math.min(
+              Math.round(labelIdx * labelStep),
+              buckets.length - 1,
+            );
             const ts = buckets[bucketIdx]!.ts;
             return (
               <span
