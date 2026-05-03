@@ -74,8 +74,13 @@ func Default(logger *slog.Logger) *slog.Logger {
 //	// Later, enable debug for specific component:
 //	filter.SetLevel("orchestrator", slog.LevelDebug)
 type ComponentFilterHandler struct {
-	next         slog.Handler
-	defaultLevel slog.Level
+	next slog.Handler
+
+	// defaultLevel is the threshold for components without an explicit
+	// override. Pointer-to-atomic so handlers derived via WithAttrs /
+	// WithGroup share the same value, making runtime SetDefaultLevel
+	// changes visible everywhere.
+	defaultLevel *atomic.Int64
 
 	// preAttrs holds attributes added via WithAttrs before any group context.
 	// These are checked for "component" in Handle().
@@ -103,9 +108,12 @@ func NewComponentFilterHandler(next slog.Handler, defaultLevel slog.Level) *Comp
 	empty := make(map[string]slog.Level)
 	snapshot.Store(&empty)
 
+	def := &atomic.Int64{}
+	def.Store(int64(defaultLevel))
+
 	return &ComponentFilterHandler{
 		next:          next,
-		defaultLevel:  defaultLevel,
+		defaultLevel:  def,
 		levelSnapshot: snapshot,
 	}
 }
@@ -128,7 +136,7 @@ func (h *ComponentFilterHandler) Handle(ctx context.Context, r slog.Record) erro
 	component := h.findComponent(r)
 
 	// Determine minimum level for this component.
-	minLevel := h.defaultLevel
+	minLevel := slog.Level(h.defaultLevel.Load())
 	if component != "" {
 		if level, ok := levels[component]; ok {
 			minLevel = level
@@ -245,10 +253,27 @@ func (h *ComponentFilterHandler) Level(component string) slog.Level {
 	if level, ok := levels[component]; ok {
 		return level
 	}
-	return h.defaultLevel
+	return slog.Level(h.defaultLevel.Load())
 }
 
 // DefaultLevel returns the default minimum level for components without explicit configuration.
 func (h *ComponentFilterHandler) DefaultLevel() slog.Level {
-	return h.defaultLevel
+	return slog.Level(h.defaultLevel.Load())
+}
+
+// SetDefaultLevel updates the default level applied to components without
+// an explicit override. Thread-safe via the underlying atomic; visible
+// immediately to all derived handlers via the shared pointer. See
+// gastrolog-3flfp.
+func (h *ComponentFilterHandler) SetDefaultLevel(level slog.Level) {
+	h.defaultLevel.Store(int64(level))
+}
+
+// Overrides returns a snapshot of the current per-component level
+// overrides. The map is a copy — callers may mutate it. See gastrolog-3flfp.
+func (h *ComponentFilterHandler) Overrides() map[string]slog.Level {
+	current := *h.levelSnapshot.Load()
+	out := make(map[string]slog.Level, len(current))
+	maps.Copy(out, current)
+	return out
 }

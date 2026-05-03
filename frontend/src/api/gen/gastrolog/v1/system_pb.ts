@@ -80,6 +80,47 @@ proto3.util.setEnumType(TierType, "gastrolog.v1.TierType", [
 ]);
 
 /**
+ * LogLevel is the slog severity passed across the wire. Mirrors the slog
+ * package: -4 = debug, 0 = info, 4 = warn, 8 = error.
+ *
+ * @generated from enum gastrolog.v1.LogLevel
+ */
+export enum LogLevel {
+  /**
+   * @generated from enum value: LOG_LEVEL_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: LOG_LEVEL_DEBUG = 1;
+   */
+  DEBUG = 1,
+
+  /**
+   * @generated from enum value: LOG_LEVEL_INFO = 2;
+   */
+  INFO = 2,
+
+  /**
+   * @generated from enum value: LOG_LEVEL_WARN = 3;
+   */
+  WARN = 3,
+
+  /**
+   * @generated from enum value: LOG_LEVEL_ERROR = 4;
+   */
+  ERROR = 4,
+}
+// Retrieve enum metadata with: proto3.getEnumType(LogLevel)
+proto3.util.setEnumType(LogLevel, "gastrolog.v1.LogLevel", [
+  { no: 0, name: "LOG_LEVEL_UNSPECIFIED" },
+  { no: 1, name: "LOG_LEVEL_DEBUG" },
+  { no: 2, name: "LOG_LEVEL_INFO" },
+  { no: 3, name: "LOG_LEVEL_WARN" },
+  { no: 4, name: "LOG_LEVEL_ERROR" },
+]);
+
+/**
  * @generated from message gastrolog.v1.GetSystemRequest
  */
 export class GetSystemRequest extends Message<GetSystemRequest> {
@@ -7328,6 +7369,288 @@ export class DeleteLookupResponse extends Message<DeleteLookupResponse> {
 
   static equals(a: DeleteLookupResponse | PlainMessage<DeleteLookupResponse> | undefined, b: DeleteLookupResponse | PlainMessage<DeleteLookupResponse> | undefined): boolean {
     return proto3.util.equals(DeleteLookupResponse, a, b);
+  }
+}
+
+/**
+ * LogLevelEntry is one row in GetLogLevelsResponse: the component name
+ * (the slog "component" attribute) and its currently-configured level.
+ *
+ * @generated from message gastrolog.v1.LogLevelEntry
+ */
+export class LogLevelEntry extends Message<LogLevelEntry> {
+  /**
+   * @generated from field: string component = 1;
+   */
+  component = "";
+
+  /**
+   * @generated from field: gastrolog.v1.LogLevel level = 2;
+   */
+  level = LogLevel.UNSPECIFIED;
+
+  constructor(data?: PartialMessage<LogLevelEntry>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.LogLevelEntry";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "component", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "level", kind: "enum", T: proto3.getEnumType(LogLevel) },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): LogLevelEntry {
+    return new LogLevelEntry().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): LogLevelEntry {
+    return new LogLevelEntry().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): LogLevelEntry {
+    return new LogLevelEntry().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: LogLevelEntry | PlainMessage<LogLevelEntry> | undefined, b: LogLevelEntry | PlainMessage<LogLevelEntry> | undefined): boolean {
+    return proto3.util.equals(LogLevelEntry, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.GetLogLevelsRequest
+ */
+export class GetLogLevelsRequest extends Message<GetLogLevelsRequest> {
+  constructor(data?: PartialMessage<GetLogLevelsRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.GetLogLevelsRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetLogLevelsRequest {
+    return new GetLogLevelsRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetLogLevelsRequest {
+    return new GetLogLevelsRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetLogLevelsRequest {
+    return new GetLogLevelsRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetLogLevelsRequest | PlainMessage<GetLogLevelsRequest> | undefined, b: GetLogLevelsRequest | PlainMessage<GetLogLevelsRequest> | undefined): boolean {
+    return proto3.util.equals(GetLogLevelsRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.GetLogLevelsResponse
+ */
+export class GetLogLevelsResponse extends Message<GetLogLevelsResponse> {
+  /**
+   * The default minimum level for components without an explicit override.
+   *
+   * @generated from field: gastrolog.v1.LogLevel default_level = 1;
+   */
+  defaultLevel = LogLevel.UNSPECIFIED;
+
+  /**
+   * Per-component overrides currently in force on this node. Empty when
+   * every component falls through to default_level.
+   *
+   * @generated from field: repeated gastrolog.v1.LogLevelEntry overrides = 2;
+   */
+  overrides: LogLevelEntry[] = [];
+
+  constructor(data?: PartialMessage<GetLogLevelsResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.GetLogLevelsResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "default_level", kind: "enum", T: proto3.getEnumType(LogLevel) },
+    { no: 2, name: "overrides", kind: "message", T: LogLevelEntry, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetLogLevelsResponse {
+    return new GetLogLevelsResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetLogLevelsResponse {
+    return new GetLogLevelsResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetLogLevelsResponse {
+    return new GetLogLevelsResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetLogLevelsResponse | PlainMessage<GetLogLevelsResponse> | undefined, b: GetLogLevelsResponse | PlainMessage<GetLogLevelsResponse> | undefined): boolean {
+    return proto3.util.equals(GetLogLevelsResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.SetLogLevelRequest
+ */
+export class SetLogLevelRequest extends Message<SetLogLevelRequest> {
+  /**
+   * Empty component sets the node's default level. Otherwise sets the
+   * override for that component name.
+   *
+   * @generated from field: string component = 1;
+   */
+  component = "";
+
+  /**
+   * @generated from field: gastrolog.v1.LogLevel level = 2;
+   */
+  level = LogLevel.UNSPECIFIED;
+
+  constructor(data?: PartialMessage<SetLogLevelRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.SetLogLevelRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "component", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "level", kind: "enum", T: proto3.getEnumType(LogLevel) },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SetLogLevelRequest {
+    return new SetLogLevelRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SetLogLevelRequest {
+    return new SetLogLevelRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SetLogLevelRequest {
+    return new SetLogLevelRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SetLogLevelRequest | PlainMessage<SetLogLevelRequest> | undefined, b: SetLogLevelRequest | PlainMessage<SetLogLevelRequest> | undefined): boolean {
+    return proto3.util.equals(SetLogLevelRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.SetLogLevelResponse
+ */
+export class SetLogLevelResponse extends Message<SetLogLevelResponse> {
+  /**
+   * @generated from field: gastrolog.v1.GetLogLevelsResponse current = 1;
+   */
+  current?: GetLogLevelsResponse;
+
+  constructor(data?: PartialMessage<SetLogLevelResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.SetLogLevelResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "current", kind: "message", T: GetLogLevelsResponse },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SetLogLevelResponse {
+    return new SetLogLevelResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SetLogLevelResponse {
+    return new SetLogLevelResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SetLogLevelResponse {
+    return new SetLogLevelResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SetLogLevelResponse | PlainMessage<SetLogLevelResponse> | undefined, b: SetLogLevelResponse | PlainMessage<SetLogLevelResponse> | undefined): boolean {
+    return proto3.util.equals(SetLogLevelResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ClearLogLevelRequest
+ */
+export class ClearLogLevelRequest extends Message<ClearLogLevelRequest> {
+  /**
+   * @generated from field: string component = 1;
+   */
+  component = "";
+
+  constructor(data?: PartialMessage<ClearLogLevelRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ClearLogLevelRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "component", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ClearLogLevelRequest {
+    return new ClearLogLevelRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ClearLogLevelRequest {
+    return new ClearLogLevelRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ClearLogLevelRequest {
+    return new ClearLogLevelRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ClearLogLevelRequest | PlainMessage<ClearLogLevelRequest> | undefined, b: ClearLogLevelRequest | PlainMessage<ClearLogLevelRequest> | undefined): boolean {
+    return proto3.util.equals(ClearLogLevelRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ClearLogLevelResponse
+ */
+export class ClearLogLevelResponse extends Message<ClearLogLevelResponse> {
+  /**
+   * @generated from field: gastrolog.v1.GetLogLevelsResponse current = 1;
+   */
+  current?: GetLogLevelsResponse;
+
+  constructor(data?: PartialMessage<ClearLogLevelResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ClearLogLevelResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "current", kind: "message", T: GetLogLevelsResponse },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ClearLogLevelResponse {
+    return new ClearLogLevelResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ClearLogLevelResponse {
+    return new ClearLogLevelResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ClearLogLevelResponse {
+    return new ClearLogLevelResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ClearLogLevelResponse | PlainMessage<ClearLogLevelResponse> | undefined, b: ClearLogLevelResponse | PlainMessage<ClearLogLevelResponse> | undefined): boolean {
+    return proto3.util.equals(ClearLogLevelResponse, a, b);
   }
 }
 

@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { DeleteCertificateRequest, DeleteCertificateResponse, DeleteCloudServiceRequest, DeleteCloudServiceResponse, DeleteFilterRequest, DeleteFilterResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteLookupRequest, DeleteLookupResponse, DeleteManagedFileRequest, DeleteManagedFileResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteRouteRequest, DeleteRouteResponse, DeleteSavedQueryRequest, DeleteSavedQueryResponse, DeleteTierRequest, DeleteTierResponse, DeleteVaultRequest, DeleteVaultResponse, GenerateNameRequest, GenerateNameResponse, GetCertificateRequest, GetCertificateResponse, GetIngesterDefaultsRequest, GetIngesterDefaultsResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetPreferencesRequest, GetPreferencesResponse, GetRouteStatsRequest, GetRouteStatsResponse, GetSavedQueriesRequest, GetSavedQueriesResponse, GetSettingsRequest, GetSettingsResponse, GetSystemRequest, GetSystemResponse, ListCertificatesRequest, ListCertificatesResponse, ListIngestersRequest, ListIngestersResponse, ListManagedFilesRequest, ListManagedFilesResponse, PauseVaultRequest, PauseVaultResponse, PreviewCSVLookupRequest, PreviewCSVLookupResponse, PreviewJSONLookupRequest, PreviewJSONLookupResponse, PreviewYAMLLookupRequest, PreviewYAMLLookupResponse, PutCertificateRequest, PutCertificateResponse, PutCloudServiceRequest, PutCloudServiceResponse, PutFilterRequest, PutFilterResponse, PutIngesterRequest, PutIngesterResponse, PutLookupSettingsRequest, PutLookupSettingsResponse, PutMaxMindSettingsRequest, PutMaxMindSettingsResponse, PutNodeConfigRequest, PutNodeConfigResponse, PutPreferencesRequest, PutPreferencesResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutRouteRequest, PutRouteResponse, PutSavedQueryRequest, PutSavedQueryResponse, PutServiceSettingsRequest, PutServiceSettingsResponse, PutSetupSettingsRequest, PutSetupSettingsResponse, PutTierRequest, PutTierResponse, PutVaultRequest, PutVaultResponse, RegenerateJwtSecretRequest, RegenerateJwtSecretResponse, ResumeVaultRequest, ResumeVaultResponse, SetNodeStorageConfigRequest, SetNodeStorageConfigResponse, TestCloudServiceRequest, TestCloudServiceResponse, TestHTTPLookupRequest, TestHTTPLookupResponse, TestIngesterRequest, TestIngesterResponse, TriggerIngesterRequest, TriggerIngesterResponse, WatchIngesterStatusRequest, WatchIngesterStatusResponse, WatchSystemRequest, WatchSystemResponse } from "./system_pb.js";
+import { ClearLogLevelRequest, ClearLogLevelResponse, DeleteCertificateRequest, DeleteCertificateResponse, DeleteCloudServiceRequest, DeleteCloudServiceResponse, DeleteFilterRequest, DeleteFilterResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteLookupRequest, DeleteLookupResponse, DeleteManagedFileRequest, DeleteManagedFileResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteRouteRequest, DeleteRouteResponse, DeleteSavedQueryRequest, DeleteSavedQueryResponse, DeleteTierRequest, DeleteTierResponse, DeleteVaultRequest, DeleteVaultResponse, GenerateNameRequest, GenerateNameResponse, GetCertificateRequest, GetCertificateResponse, GetIngesterDefaultsRequest, GetIngesterDefaultsResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetLogLevelsRequest, GetLogLevelsResponse, GetPreferencesRequest, GetPreferencesResponse, GetRouteStatsRequest, GetRouteStatsResponse, GetSavedQueriesRequest, GetSavedQueriesResponse, GetSettingsRequest, GetSettingsResponse, GetSystemRequest, GetSystemResponse, ListCertificatesRequest, ListCertificatesResponse, ListIngestersRequest, ListIngestersResponse, ListManagedFilesRequest, ListManagedFilesResponse, PauseVaultRequest, PauseVaultResponse, PreviewCSVLookupRequest, PreviewCSVLookupResponse, PreviewJSONLookupRequest, PreviewJSONLookupResponse, PreviewYAMLLookupRequest, PreviewYAMLLookupResponse, PutCertificateRequest, PutCertificateResponse, PutCloudServiceRequest, PutCloudServiceResponse, PutFilterRequest, PutFilterResponse, PutIngesterRequest, PutIngesterResponse, PutLookupSettingsRequest, PutLookupSettingsResponse, PutMaxMindSettingsRequest, PutMaxMindSettingsResponse, PutNodeConfigRequest, PutNodeConfigResponse, PutPreferencesRequest, PutPreferencesResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutRouteRequest, PutRouteResponse, PutSavedQueryRequest, PutSavedQueryResponse, PutServiceSettingsRequest, PutServiceSettingsResponse, PutSetupSettingsRequest, PutSetupSettingsResponse, PutTierRequest, PutTierResponse, PutVaultRequest, PutVaultResponse, RegenerateJwtSecretRequest, RegenerateJwtSecretResponse, ResumeVaultRequest, ResumeVaultResponse, SetLogLevelRequest, SetLogLevelResponse, SetNodeStorageConfigRequest, SetNodeStorageConfigResponse, TestCloudServiceRequest, TestCloudServiceResponse, TestHTTPLookupRequest, TestHTTPLookupResponse, TestIngesterRequest, TestIngesterResponse, TriggerIngesterRequest, TriggerIngesterResponse, WatchIngesterStatusRequest, WatchIngesterStatusResponse, WatchSystemRequest, WatchSystemResponse } from "./system_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -596,6 +596,46 @@ export const SystemService = {
       name: "DeleteLookup",
       I: DeleteLookupRequest,
       O: DeleteLookupResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * GetLogLevels returns the current per-component log levels for this
+     * node, plus the default level for components without an explicit
+     * setting. See gastrolog-3flfp.
+     *
+     * @generated from rpc gastrolog.v1.SystemService.GetLogLevels
+     */
+    getLogLevels: {
+      name: "GetLogLevels",
+      I: GetLogLevelsRequest,
+      O: GetLogLevelsResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * SetLogLevel sets the minimum log level for a component on this node
+     * at runtime — no restart needed. The change is local to the node that
+     * serves the RPC; operators wanting cluster-wide changes apply per-node.
+     * Empty component_name targets the default level. See gastrolog-3flfp.
+     *
+     * @generated from rpc gastrolog.v1.SystemService.SetLogLevel
+     */
+    setLogLevel: {
+      name: "SetLogLevel",
+      I: SetLogLevelRequest,
+      O: SetLogLevelResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * ClearLogLevel removes the per-component override, reverting that
+     * component to the default level. No-op if no override is set.
+     * See gastrolog-3flfp.
+     *
+     * @generated from rpc gastrolog.v1.SystemService.ClearLogLevel
+     */
+    clearLogLevel: {
+      name: "ClearLogLevel",
+      I: ClearLogLevelRequest,
+      O: ClearLogLevelResponse,
       kind: MethodKind.Unary,
     },
   }

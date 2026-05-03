@@ -112,6 +112,12 @@ type Config struct {
 	// Fired by the stats collector on each broadcast tick. May be nil in tests.
 	StatsSignal *notify.Signal
 
+	// LogLevels is the runtime log-level filter handler installed in main().
+	// When non-nil, the SystemServer exposes GetLogLevels / SetLogLevel /
+	// ClearLogLevel for runtime control. Nil disables those RPCs (returns
+	// Unimplemented). See gastrolog-3flfp.
+	LogLevels *logging.ComponentFilterHandler
+
 	// ClusterAddress is the cluster gRPC listen address (e.g., ":4566").
 	// Exposed in GetClusterStatus for join info. Empty for non-raft mode.
 	ClusterAddress string
@@ -178,6 +184,7 @@ type Server struct {
 	afterConfigApply   func(raftfsm.Notification) // non-raft dispatch hook
 	configSignal       *notify.Signal             // broadcasts config changes to WatchConfig streams
 	statsSignal        *notify.Signal             // broadcasts stats updates to WatchSystemStatus streams
+	logLevels          *logging.ComponentFilterHandler // runtime log-level handle (gastrolog-3flfp)
 	cloudTesters       map[string]CloudServiceTester
 	repairManagedFile  func(fileID string) bool  // on-demand pull from peer; set by app wiring
 	queryServer        *QueryServer              // stored for ExportToVault executor wiring
@@ -240,6 +247,7 @@ func New(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orche
 		afterConfigApply:   cfg.AfterConfigApply,
 		configSignal:       cfg.ConfigSignal,
 		statsSignal:        cfg.StatsSignal,
+		logLevels:          cfg.LogLevels,
 		routingForwarder:   cfg.RoutingForwarder,
 		placementReconcile: cfg.PlacementReconcile,
 		shutdown:           make(chan struct{}),
@@ -445,6 +453,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 		AfterConfigApply:   s.afterConfigApply,
 		ConfigSignal:       s.configSignal,
 		StatsSignal:        s.statsSignal,
+		LogLevels:          s.logLevels,
 		ResolveManagedFile: s.ResolveManagedFileByID,
 		CloudTesters:       s.cloudTesters,
 		Tokens:             s.tokens,

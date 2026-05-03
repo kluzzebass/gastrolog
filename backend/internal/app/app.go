@@ -86,6 +86,12 @@ type RunConfig struct {
 	// SlogCaptureHandler is the CaptureHandler that tees slog records.
 	// Passed to the self ingester factory so it can apply the min_level param.
 	SlogCaptureHandler *logging.CaptureHandler
+
+	// LogLevels is the runtime log-level handler installed in main(). The
+	// SystemServer reads + writes through it for GetLogLevels / SetLogLevel
+	// / ClearLogLevel RPCs. Nil disables those RPCs (single-node tests).
+	// See gastrolog-3flfp.
+	LogLevels *logging.ComponentFilterHandler
 }
 
 // Run starts the gastrolog server. It wires all components, starts the
@@ -356,6 +362,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		WAL:                 tierWAL,
 		ConfigStore:         proxy,
 		PlacementReconcile:  placementReconcileFn,
+		LogLevels:           cfg.LogLevels,
 	})
 }
 
@@ -962,6 +969,7 @@ type serverDeps struct {
 	WAL                 *raftwal.WAL // tier-group WAL (same file as system raft when cluster mode); nil = per-group boltdb
 	ConfigStore         io.Closer    // rawStore — closed before gRPC for clean Raft shutdown
 	PlacementReconcile  func(ctx context.Context)
+	LogLevels           *logging.ComponentFilterHandler
 }
 
 func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
@@ -984,6 +992,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 				"file": chunkcloud.NewConnectionTester(),
 			},
 			PlacementReconcile: deps.PlacementReconcile,
+			LogLevels:          deps.LogLevels,
 		})
 		// Provide the cluster's ForwardRPC handler with the internal mux.
 		// NoAuthInterceptor + no routing interceptor prevents loops.

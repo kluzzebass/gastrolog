@@ -16,6 +16,7 @@ import (
 	_ "net/http/pprof" //nolint:gosec // G108: pprof is intentionally available when --pprof flag is set
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -71,12 +72,18 @@ func main() {
 	rootCmd.PersistentFlags().String("home", "", "home directory (default: platform config dir)")
 	rootCmd.PersistentFlags().String("config-type", "raft", "config store type: raft or memory")
 	rootCmd.PersistentFlags().String("pprof", "", "pprof HTTP server address (e.g. localhost:6060)")
+	rootCmd.PersistentFlags().String("log-level", "", "per-component log levels (e.g. \"default=info,chunk=debug,replication=warn\"). Can be changed at runtime via the SetLogLevel RPC.")
 	cli.AddClientFlags(rootCmd)
 
 	serverCmd := &cobra.Command{
 		Use:   "server",
 		Short: "Start the gastrolog service",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if logLevels := mustString(cmd, "log-level"); logLevels != "" {
+				if err := applyLogLevelSpec(filterHandler, logLevels); err != nil {
+					return fmt.Errorf("--log-level: %w", err)
+				}
+			}
 			cfg := app.RunConfig{
 				HomeFlag:    mustString(cmd, "home"),
 				VaultsFlag:  mustString(cmd, "vaults"),
@@ -90,6 +97,7 @@ func main() {
 				PprofAddr:   mustString(cmd, "pprof"),
 				SlogCapture:        slogCaptureCh,
 				SlogCaptureHandler: captureHandler,
+				LogLevels:          filterHandler,
 			}
 
 			err := app.Run(cmd.Context(), logger, cfg)
@@ -153,4 +161,48 @@ func mustString(cmd *cobra.Command, name string) string {
 func mustBool(cmd *cobra.Command, name string) bool {
 	v, _ := cmd.Flags().GetBool(name)
 	return v
+}
+
+// applyLogLevelSpec parses comma-separated key=value pairs of the form
+// "component=level" and applies them to the filter handler. The pseudo-key
+// "default" sets the handler's fallback level for components without an
+// explicit override. Unknown levels are rejected. See gastrolog-3flfp.
+func applyLogLevelSpec(h *logging.ComponentFilterHandler, spec string) error {
+	for pair := range strings.SplitSeq(spec, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		left, right, ok := strings.Cut(pair, "=")
+		if !ok {
+			return fmt.Errorf("expected component=level, got %q", pair)
+		}
+		component := strings.TrimSpace(left)
+		level, err := parseLevelName(strings.TrimSpace(right))
+		if err != nil {
+			return fmt.Errorf("level for %q: %w", component, err)
+		}
+		if component == "default" {
+			h.SetDefaultLevel(level)
+			continue
+		}
+		h.SetLevel(component, level)
+	}
+	return nil
+}
+
+// parseLevelName accepts the standard slog level names (case-insensitive).
+func parseLevelName(s string) (slog.Level, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "debug":
+		return slog.LevelDebug, nil
+	case "info":
+		return slog.LevelInfo, nil
+	case "warn", "warning":
+		return slog.LevelWarn, nil
+	case "error":
+		return slog.LevelError, nil
+	default:
+		return 0, fmt.Errorf("unknown level %q (want debug, info, warn, or error)", s)
+	}
 }

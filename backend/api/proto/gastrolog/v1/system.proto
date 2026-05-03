@@ -167,6 +167,22 @@ service SystemService {
 
   // DeleteLookup removes a lookup table by name (any type).
   rpc DeleteLookup(DeleteLookupRequest) returns (DeleteLookupResponse);
+
+  // GetLogLevels returns the current per-component log levels for this
+  // node, plus the default level for components without an explicit
+  // setting. See gastrolog-3flfp.
+  rpc GetLogLevels(GetLogLevelsRequest) returns (GetLogLevelsResponse);
+
+  // SetLogLevel sets the minimum log level for a component on this node
+  // at runtime — no restart needed. The change is local to the node that
+  // serves the RPC; operators wanting cluster-wide changes apply per-node.
+  // Empty component_name targets the default level. See gastrolog-3flfp.
+  rpc SetLogLevel(SetLogLevelRequest) returns (SetLogLevelResponse);
+
+  // ClearLogLevel removes the per-component override, reverting that
+  // component to the default level. No-op if no override is set.
+  // See gastrolog-3flfp.
+  rpc ClearLogLevel(ClearLogLevelRequest) returns (ClearLogLevelResponse);
 }
 
 message GetSystemRequest {}
@@ -1054,4 +1070,50 @@ message DeleteLookupRequest {
 
 message DeleteLookupResponse {
   SettingsMutationEcho echo = 1;
+}
+
+// LogLevel is the slog severity passed across the wire. Mirrors the slog
+// package: -4 = debug, 0 = info, 4 = warn, 8 = error.
+enum LogLevel {
+  LOG_LEVEL_UNSPECIFIED = 0;
+  LOG_LEVEL_DEBUG = 1;
+  LOG_LEVEL_INFO = 2;
+  LOG_LEVEL_WARN = 3;
+  LOG_LEVEL_ERROR = 4;
+}
+
+// LogLevelEntry is one row in GetLogLevelsResponse: the component name
+// (the slog "component" attribute) and its currently-configured level.
+message LogLevelEntry {
+  string component = 1;
+  LogLevel level = 2;
+}
+
+message GetLogLevelsRequest {}
+
+message GetLogLevelsResponse {
+  // The default minimum level for components without an explicit override.
+  LogLevel default_level = 1;
+  // Per-component overrides currently in force on this node. Empty when
+  // every component falls through to default_level.
+  repeated LogLevelEntry overrides = 2;
+}
+
+message SetLogLevelRequest {
+  // Empty component sets the node's default level. Otherwise sets the
+  // override for that component name.
+  string component = 1;
+  LogLevel level = 2;
+}
+
+message SetLogLevelResponse {
+  GetLogLevelsResponse current = 1;
+}
+
+message ClearLogLevelRequest {
+  string component = 1;
+}
+
+message ClearLogLevelResponse {
+  GetLogLevelsResponse current = 1;
 }

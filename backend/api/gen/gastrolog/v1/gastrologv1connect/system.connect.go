@@ -187,6 +187,15 @@ const (
 	// SystemServiceDeleteLookupProcedure is the fully-qualified name of the SystemService's
 	// DeleteLookup RPC.
 	SystemServiceDeleteLookupProcedure = "/gastrolog.v1.SystemService/DeleteLookup"
+	// SystemServiceGetLogLevelsProcedure is the fully-qualified name of the SystemService's
+	// GetLogLevels RPC.
+	SystemServiceGetLogLevelsProcedure = "/gastrolog.v1.SystemService/GetLogLevels"
+	// SystemServiceSetLogLevelProcedure is the fully-qualified name of the SystemService's SetLogLevel
+	// RPC.
+	SystemServiceSetLogLevelProcedure = "/gastrolog.v1.SystemService/SetLogLevel"
+	// SystemServiceClearLogLevelProcedure is the fully-qualified name of the SystemService's
+	// ClearLogLevel RPC.
+	SystemServiceClearLogLevelProcedure = "/gastrolog.v1.SystemService/ClearLogLevel"
 )
 
 // SystemServiceClient is a client for the gastrolog.v1.SystemService service.
@@ -300,6 +309,19 @@ type SystemServiceClient interface {
 	DeleteTier(context.Context, *connect.Request[v1.DeleteTierRequest]) (*connect.Response[v1.DeleteTierResponse], error)
 	// DeleteLookup removes a lookup table by name (any type).
 	DeleteLookup(context.Context, *connect.Request[v1.DeleteLookupRequest]) (*connect.Response[v1.DeleteLookupResponse], error)
+	// GetLogLevels returns the current per-component log levels for this
+	// node, plus the default level for components without an explicit
+	// setting. See gastrolog-3flfp.
+	GetLogLevels(context.Context, *connect.Request[v1.GetLogLevelsRequest]) (*connect.Response[v1.GetLogLevelsResponse], error)
+	// SetLogLevel sets the minimum log level for a component on this node
+	// at runtime — no restart needed. The change is local to the node that
+	// serves the RPC; operators wanting cluster-wide changes apply per-node.
+	// Empty component_name targets the default level. See gastrolog-3flfp.
+	SetLogLevel(context.Context, *connect.Request[v1.SetLogLevelRequest]) (*connect.Response[v1.SetLogLevelResponse], error)
+	// ClearLogLevel removes the per-component override, reverting that
+	// component to the default level. No-op if no override is set.
+	// See gastrolog-3flfp.
+	ClearLogLevel(context.Context, *connect.Request[v1.ClearLogLevelRequest]) (*connect.Response[v1.ClearLogLevelResponse], error)
 }
 
 // NewSystemServiceClient constructs a client for the gastrolog.v1.SystemService service. By
@@ -631,6 +653,24 @@ func NewSystemServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(systemServiceMethods.ByName("DeleteLookup")),
 			connect.WithClientOptions(opts...),
 		),
+		getLogLevels: connect.NewClient[v1.GetLogLevelsRequest, v1.GetLogLevelsResponse](
+			httpClient,
+			baseURL+SystemServiceGetLogLevelsProcedure,
+			connect.WithSchema(systemServiceMethods.ByName("GetLogLevels")),
+			connect.WithClientOptions(opts...),
+		),
+		setLogLevel: connect.NewClient[v1.SetLogLevelRequest, v1.SetLogLevelResponse](
+			httpClient,
+			baseURL+SystemServiceSetLogLevelProcedure,
+			connect.WithSchema(systemServiceMethods.ByName("SetLogLevel")),
+			connect.WithClientOptions(opts...),
+		),
+		clearLogLevel: connect.NewClient[v1.ClearLogLevelRequest, v1.ClearLogLevelResponse](
+			httpClient,
+			baseURL+SystemServiceClearLogLevelProcedure,
+			connect.WithSchema(systemServiceMethods.ByName("ClearLogLevel")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -689,6 +729,9 @@ type systemServiceClient struct {
 	putTier               *connect.Client[v1.PutTierRequest, v1.PutTierResponse]
 	deleteTier            *connect.Client[v1.DeleteTierRequest, v1.DeleteTierResponse]
 	deleteLookup          *connect.Client[v1.DeleteLookupRequest, v1.DeleteLookupResponse]
+	getLogLevels          *connect.Client[v1.GetLogLevelsRequest, v1.GetLogLevelsResponse]
+	setLogLevel           *connect.Client[v1.SetLogLevelRequest, v1.SetLogLevelResponse]
+	clearLogLevel         *connect.Client[v1.ClearLogLevelRequest, v1.ClearLogLevelResponse]
 }
 
 // GetSystem calls gastrolog.v1.SystemService.GetSystem.
@@ -956,6 +999,21 @@ func (c *systemServiceClient) DeleteLookup(ctx context.Context, req *connect.Req
 	return c.deleteLookup.CallUnary(ctx, req)
 }
 
+// GetLogLevels calls gastrolog.v1.SystemService.GetLogLevels.
+func (c *systemServiceClient) GetLogLevels(ctx context.Context, req *connect.Request[v1.GetLogLevelsRequest]) (*connect.Response[v1.GetLogLevelsResponse], error) {
+	return c.getLogLevels.CallUnary(ctx, req)
+}
+
+// SetLogLevel calls gastrolog.v1.SystemService.SetLogLevel.
+func (c *systemServiceClient) SetLogLevel(ctx context.Context, req *connect.Request[v1.SetLogLevelRequest]) (*connect.Response[v1.SetLogLevelResponse], error) {
+	return c.setLogLevel.CallUnary(ctx, req)
+}
+
+// ClearLogLevel calls gastrolog.v1.SystemService.ClearLogLevel.
+func (c *systemServiceClient) ClearLogLevel(ctx context.Context, req *connect.Request[v1.ClearLogLevelRequest]) (*connect.Response[v1.ClearLogLevelResponse], error) {
+	return c.clearLogLevel.CallUnary(ctx, req)
+}
+
 // SystemServiceHandler is an implementation of the gastrolog.v1.SystemService service.
 type SystemServiceHandler interface {
 	// GetConfig returns the current configuration.
@@ -1067,6 +1125,19 @@ type SystemServiceHandler interface {
 	DeleteTier(context.Context, *connect.Request[v1.DeleteTierRequest]) (*connect.Response[v1.DeleteTierResponse], error)
 	// DeleteLookup removes a lookup table by name (any type).
 	DeleteLookup(context.Context, *connect.Request[v1.DeleteLookupRequest]) (*connect.Response[v1.DeleteLookupResponse], error)
+	// GetLogLevels returns the current per-component log levels for this
+	// node, plus the default level for components without an explicit
+	// setting. See gastrolog-3flfp.
+	GetLogLevels(context.Context, *connect.Request[v1.GetLogLevelsRequest]) (*connect.Response[v1.GetLogLevelsResponse], error)
+	// SetLogLevel sets the minimum log level for a component on this node
+	// at runtime — no restart needed. The change is local to the node that
+	// serves the RPC; operators wanting cluster-wide changes apply per-node.
+	// Empty component_name targets the default level. See gastrolog-3flfp.
+	SetLogLevel(context.Context, *connect.Request[v1.SetLogLevelRequest]) (*connect.Response[v1.SetLogLevelResponse], error)
+	// ClearLogLevel removes the per-component override, reverting that
+	// component to the default level. No-op if no override is set.
+	// See gastrolog-3flfp.
+	ClearLogLevel(context.Context, *connect.Request[v1.ClearLogLevelRequest]) (*connect.Response[v1.ClearLogLevelResponse], error)
 }
 
 // NewSystemServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -1394,6 +1465,24 @@ func NewSystemServiceHandler(svc SystemServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(systemServiceMethods.ByName("DeleteLookup")),
 		connect.WithHandlerOptions(opts...),
 	)
+	systemServiceGetLogLevelsHandler := connect.NewUnaryHandler(
+		SystemServiceGetLogLevelsProcedure,
+		svc.GetLogLevels,
+		connect.WithSchema(systemServiceMethods.ByName("GetLogLevels")),
+		connect.WithHandlerOptions(opts...),
+	)
+	systemServiceSetLogLevelHandler := connect.NewUnaryHandler(
+		SystemServiceSetLogLevelProcedure,
+		svc.SetLogLevel,
+		connect.WithSchema(systemServiceMethods.ByName("SetLogLevel")),
+		connect.WithHandlerOptions(opts...),
+	)
+	systemServiceClearLogLevelHandler := connect.NewUnaryHandler(
+		SystemServiceClearLogLevelProcedure,
+		svc.ClearLogLevel,
+		connect.WithSchema(systemServiceMethods.ByName("ClearLogLevel")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.SystemService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case SystemServiceGetSystemProcedure:
@@ -1502,6 +1591,12 @@ func NewSystemServiceHandler(svc SystemServiceHandler, opts ...connect.HandlerOp
 			systemServiceDeleteTierHandler.ServeHTTP(w, r)
 		case SystemServiceDeleteLookupProcedure:
 			systemServiceDeleteLookupHandler.ServeHTTP(w, r)
+		case SystemServiceGetLogLevelsProcedure:
+			systemServiceGetLogLevelsHandler.ServeHTTP(w, r)
+		case SystemServiceSetLogLevelProcedure:
+			systemServiceSetLogLevelHandler.ServeHTTP(w, r)
+		case SystemServiceClearLogLevelProcedure:
+			systemServiceClearLogLevelHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -1721,4 +1816,16 @@ func (UnimplementedSystemServiceHandler) DeleteTier(context.Context, *connect.Re
 
 func (UnimplementedSystemServiceHandler) DeleteLookup(context.Context, *connect.Request[v1.DeleteLookupRequest]) (*connect.Response[v1.DeleteLookupResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.DeleteLookup is not implemented"))
+}
+
+func (UnimplementedSystemServiceHandler) GetLogLevels(context.Context, *connect.Request[v1.GetLogLevelsRequest]) (*connect.Response[v1.GetLogLevelsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.GetLogLevels is not implemented"))
+}
+
+func (UnimplementedSystemServiceHandler) SetLogLevel(context.Context, *connect.Request[v1.SetLogLevelRequest]) (*connect.Response[v1.SetLogLevelResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.SetLogLevel is not implemented"))
+}
+
+func (UnimplementedSystemServiceHandler) ClearLogLevel(context.Context, *connect.Request[v1.ClearLogLevelRequest]) (*connect.Response[v1.ClearLogLevelResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.ClearLogLevel is not implemented"))
 }

@@ -24,6 +24,7 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/auth"
+	"gastrolog/internal/logging"
 	"gastrolog/internal/lookup"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
@@ -62,6 +63,11 @@ type SystemServerConfig struct {
 	CloudTesters         map[string]CloudServiceTester
 	Tokens               *auth.TokenService
 	PlacementReconcile   func(ctx context.Context) // synchronous placement for RPC handlers
+
+	// LogLevels, when non-nil, exposes the runtime log-level surface used
+	// by GetLogLevels / SetLogLevel / ClearLogLevel. nil disables those
+	// RPCs (they return Unimplemented). See gastrolog-3flfp.
+	LogLevels *logging.ComponentFilterHandler
 }
 
 // SystemServer implements the ConfigService.
@@ -69,6 +75,7 @@ type SystemServer struct {
 	orch                 *orchestrator.Orchestrator
 	sysStore             system.Store
 	factories            orchestrator.Factories
+	logLevels            *logging.ComponentFilterHandler
 	certManager          CertManager
 	peerStats            PeerIngesterStatsProvider
 	peerRouteStats       PeerRouteStatsProvider
@@ -92,6 +99,7 @@ func NewSystemServer(cfg SystemServerConfig) *SystemServer {
 		orch:                 cfg.Orch,
 		sysStore:             cfg.CfgStore,
 		factories:            cfg.Factories,
+		logLevels:            cfg.LogLevels,
 		certManager:          cfg.CertManager,
 		peerStats:            cfg.PeerStats,
 		peerRouteStats:       cfg.PeerRouteStats,

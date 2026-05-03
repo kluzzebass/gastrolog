@@ -91,6 +91,12 @@ func DefaultRoutes() map[string]RPCRoute {
 		gastrologv1connect.SystemServiceDeleteTierProcedure:           {Strategy: RouteLeader},
 		gastrologv1connect.SystemServiceDeleteLookupProcedure:         {Strategy: RouteLeader},
 
+		// Log-level RPCs are node-local: each operator decides per-node what
+		// verbosity to capture, no cluster-wide coordination needed.
+		gastrologv1connect.SystemServiceGetLogLevelsProcedure:  {Strategy: RouteLocal},
+		gastrologv1connect.SystemServiceSetLogLevelProcedure:   {Strategy: RouteLocal},
+		gastrologv1connect.SystemServiceClearLogLevelProcedure: {Strategy: RouteLocal},
+
 		// ── JobService ───────────────────────────────────────────────────
 		gastrologv1connect.JobServiceGetJobProcedure:    {Strategy: RouteLocal},
 		gastrologv1connect.JobServiceListJobsProcedure:  {Strategy: RouteLocal},
