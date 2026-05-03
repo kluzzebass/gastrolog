@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
+	"io"
 	"sync"
 	"time"
 
@@ -1009,6 +1010,98 @@ func (o *Orchestrator) ImportChunkRecords(ctx context.Context, vaultID glid.GLID
 // but won't trigger further replication (gated by !IsFollower in tierReplicationInfo).
 func (o *Orchestrator) ImportToTier(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
 	return o.ImportToTierStorage(ctx, vaultID, tierID, "", chunkID, next)
+}
+
+// AdoptSealedBlobToTier installs a sealed `data.glcb` blob (received over
+// the ImportBlob RPC) into a specific tier on this node. Returns the
+// SHA-256 the local manager computed over the bytes — round-tripped to
+// the leader as the ImportBlob ack so wire integrity is verifiable.
+//
+// Tombstone-checks before the install: a delete that committed via
+// vault-ctl Raft after the leader scheduled replication must NOT
+// recreate the chunk on this node. See gastrolog-11rzz; the same race
+// applies to ImportBlob as it did to the legacy ImportSealed path.
+//
+// Returns ErrTierNotLocal if the tier isn't placed on this node.
+// Replaces the per-record ImportToTier path for sealed-chunk replication.
+// See gastrolog-3o5b4.
+func (o *Orchestrator) AdoptSealedBlobToTier(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, totalSize int64, body io.Reader) ([32]byte, error) {
+	var zero [32]byte
+
+	type tierRef struct {
+		cm           chunk.ChunkManager
+		isTombstoned func(chunk.ChunkID) bool
+	}
+	ref := func() *tierRef {
+		o.mu.RLock()
+		defer o.mu.RUnlock()
+		vault := o.vaults[vaultID]
+		if vault == nil {
+			return nil
+		}
+		for _, t := range vault.Tiers {
+			if t.TierID == tierID {
+				return &tierRef{cm: t.Chunks, isTombstoned: t.IsTombstoned}
+			}
+		}
+		return nil
+	}()
+	if ref == nil {
+		return zero, fmt.Errorf("%w: tier %s in vault %s", ErrTierNotLocal, tierID, vaultID)
+	}
+	if ref.isTombstoned != nil && ref.isTombstoned(chunkID) {
+		return zero, fmt.Errorf("%w: adopt sealed blob %s into tier %s", chunk.ErrChunkTombstoned, chunkID, tierID)
+	}
+
+	importer, ok := ref.cm.(chunk.ChunkBlobImporter)
+	if !ok {
+		return zero, fmt.Errorf("tier %s manager does not implement ChunkBlobImporter", tierID)
+	}
+
+	// Per-tier serialization to prevent two concurrent ImportBlob RPCs for
+	// the same tier from racing on the same chunk. AdoptSealedBlob's
+	// own duplicate-rejection check is the second line of defence.
+	importKey := tierID.String()
+	muVal, _ := o.importMu.LoadOrStore(importKey, &sync.Mutex{})
+	tierMu := muVal.(*sync.Mutex)
+	tierMu.Lock()
+	defer tierMu.Unlock()
+
+	// Final tombstone check after acquiring the lock — a delete may have
+	// committed while we waited.
+	if ref.isTombstoned != nil && ref.isTombstoned(chunkID) {
+		return zero, fmt.Errorf("%w: adopt sealed blob %s into tier %s (raced with delete)", chunk.ErrChunkTombstoned, chunkID, tierID)
+	}
+
+	// Drop any pre-existing copy of this chunk before installing the
+	// authoritative bytes. The chunk may already exist locally because:
+	//   - Streamed Append-replication built an active chunk on this
+	//     follower, or
+	//   - A prior ImportBlob landed for this ID (e.g. on retry after a
+	//     transient network error).
+	// replaceForwardedChunk seals an active chunk before deletion —
+	// DeleteNoAnnounce on its own refuses to delete an active chunk.
+	_, metaErr := ref.cm.Meta(chunkID)
+	activeIsChunk := false
+	if active := ref.cm.Active(); active != nil && active.ID == chunkID {
+		activeIsChunk = true
+	}
+	if metaErr == nil || activeIsChunk {
+		if err := replaceForwardedChunk(ref.cm, chunkID, activeIsChunk); err != nil {
+			return zero, fmt.Errorf("drop pre-existing chunk %s before adopt: %w", chunkID, err)
+		}
+		o.logger.Debug("AdoptSealedBlobToTier: dropped pre-existing chunk before adopt",
+			"vault", vaultID, "tier", tierID, "chunk", chunkID)
+	}
+
+	digest, err := importer.AdoptSealedBlob(chunkID, totalSize, body)
+	if err != nil {
+		return zero, fmt.Errorf("AdoptSealedBlob on tier %s: %w", tierID, err)
+	}
+
+	o.NotifyChunkChange()
+	_ = ctx // reserved for future cancellation hookup; AdoptSealedBlob is currently context-unaware.
+	return digest, nil
 }
 
 // ImportToTierStorage imports a sealed chunk to a specific storage-targeted tier

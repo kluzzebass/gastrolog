@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"io"
 	"context"
 	"gastrolog/internal/glid"
 	"sync/atomic"
@@ -31,6 +32,9 @@ func (m *slowAckReplicator) SealTier(_ context.Context, _ string, _, _ glid.GLID
 }
 func (m *slowAckReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
 	return nil
+}
+func (m *slowAckReplicator) ImportBlob(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ int64, _ io.Reader) ([32]byte, error) {
+	return [32]byte{}, nil
 }
 func (m *slowAckReplicator) DeleteChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil

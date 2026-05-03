@@ -3734,6 +3734,42 @@ func (m *Manager) sealToGLCB(id chunk.ChunkID) (*chunkcloud.Writer, int64, error
 	return w, written, nil
 }
 
+// OpenSealedBlob opens a sealed chunk's `data.glcb` for streaming and
+// returns the file size. Caller MUST Close the returned reader.
+//
+// Used by the leader side of binary chunk replication (gastrolog-3o5b4)
+// to feed bytes into TierReplicator.ImportBlob without loading the blob
+// into heap.
+func (m *Manager) OpenSealedBlob(id chunk.ChunkID) (io.ReadCloser, int64, error) {
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return nil, 0, ErrManagerClosed
+	}
+	meta, ok := m.metas[id]
+	if !ok {
+		m.mu.Unlock()
+		return nil, 0, chunk.ErrChunkNotFound
+	}
+	if !meta.sealed {
+		m.mu.Unlock()
+		return nil, 0, chunk.ErrChunkNotSealed
+	}
+	m.mu.Unlock()
+
+	path := filepath.Join(m.chunkDir(id), dataGLCBFileName)
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return nil, 0, fmt.Errorf("open data.glcb for %s: %w", id, err)
+	}
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, 0, fmt.Errorf("stat data.glcb for %s: %w", id, err)
+	}
+	return f, info.Size(), nil
+}
+
 // AdoptSealedBlob installs a sealed `data.glcb` blob received over the
 // wire (from a peer's ImportBlob RPC) into this manager's chunk dir,
 // then registers the chunk in m.metas so it becomes queryable.

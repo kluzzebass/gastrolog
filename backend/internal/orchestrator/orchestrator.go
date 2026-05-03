@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
+	"io"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -124,7 +125,15 @@ type RecordForwarder interface {
 type TierReplicator interface {
 	AppendRecords(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error
 	SealTier(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error
+	// ImportSealedChunk is the legacy per-record sealed-chunk replication
+	// path. Kept on the interface for now; production callers route through
+	// ImportBlob (gastrolog-3o5b4). Will be removed in a follow-up commit
+	// once the test harness is migrated.
 	ImportSealedChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error
+	// ImportBlob streams a sealed data.glcb byte sequence to a follower
+	// (see gastrolog-3o5b4). Returns the SHA-256 digest the follower
+	// computed over the received bytes.
+	ImportBlob(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, totalSize int64, body io.Reader) ([32]byte, error)
 	DeleteChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error
 
 	// RequestReplicaCatchup is the follower→leader inverse of the other

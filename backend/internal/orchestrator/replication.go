@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
@@ -234,7 +235,45 @@ func (o *Orchestrator) replicateToFollower(ctx context.Context, vaultID, tierID 
 		return fmt.Errorf("chunk unreadable: %w", probeErr)
 	}
 
-	// Chunk is readable — open a fresh cursor for the actual transfer.
+	// Binary replication path (gastrolog-3o5b4): if the chunk manager has
+	// a sealed `data.glcb` blob to copy, stream it directly via ImportBlob.
+	// Production (chunk/file.Manager) takes this path. Memory-backed test
+	// harnesses don't implement ChunkBlobReader and fall back to the
+	// legacy per-record ImportSealedChunk path below.
+	if blobReader, ok := cm.(chunk.ChunkBlobReader); ok {
+		body, size, err := blobReader.OpenSealedBlob(chunkID)
+		if err != nil {
+			return fmt.Errorf("open sealed blob: %w", err)
+		}
+		defer func() { _ = body.Close() }()
+
+		// Final tombstone check right before sending: retention may have
+		// deleted this chunk while we were opening the blob. The
+		// follower's tombstone check (in AdoptSealedBlobToTier) is the
+		// second line of defence; this leader-side recheck short-circuits
+		// the RPC entirely when the leader already knows the chunk is gone.
+		// See gastrolog-11rzz.
+		tier := o.findLocalTier(vaultID, tierID)
+		if tier != nil && tier.IsTombstoned != nil && tier.IsTombstoned(chunkID) {
+			o.logger.Debug("replication: chunk tombstoned after blob open, aborting send",
+				"vault", vaultID, "tier", tierID, "chunk", chunkID.String(), "node", nodeID)
+			return nil
+		}
+
+		digest, err := o.tierReplicator.ImportBlob(ctx, nodeID, vaultID, tierID, chunkID, size, body)
+		if err != nil {
+			return fmt.Errorf("ImportBlob to %s: %w", nodeID, err)
+		}
+		o.logger.Debug("replication: ImportBlob ack",
+			"vault", vaultID, "tier", tierID, "chunk", chunkID.String(), "node", nodeID,
+			"size", size, "digest", hex.EncodeToString(digest[:8]))
+		return nil
+	}
+
+	// Legacy per-record path. Reached only by memory-backed test harnesses
+	// (no on-disk data.glcb to copy). Production replication never lands
+	// here. Will be removed alongside ImportSealedChunk once the test
+	// harness is migrated.
 	cursor, err := cm.OpenCursor(chunkID)
 	if err != nil {
 		return fmt.Errorf("open cursor: %w", err)
@@ -253,14 +292,6 @@ func (o *Orchestrator) replicateToFollower(ctx context.Context, vaultID, tierID 
 		records = append(records, rec)
 	}
 
-	// Final tombstone check right before sending: retention may have
-	// deleted this chunk while we were reading records. Without the
-	// recheck, a late ImportSealed would still land on the follower after
-	// the follower has already processed the delete via vault-ctl Raft, and
-	// the follower's post-import cleanup only catches the case where the
-	// tombstone is on its own FSM. This leader-side recheck short-
-	// circuits the RPC entirely when the leader already knows the chunk
-	// is gone. See gastrolog-11rzz.
 	tier := o.findLocalTier(vaultID, tierID)
 	if tier != nil && tier.IsTombstoned != nil && tier.IsTombstoned(chunkID) {
 		o.logger.Debug("replication: chunk tombstoned after cursor read, aborting send",

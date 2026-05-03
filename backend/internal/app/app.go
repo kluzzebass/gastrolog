@@ -454,6 +454,12 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 		}
 		return orch.ImportToTier(ctx, vaultID, tierID, chunkID, next)
 	})
+	clusterSrv.SetBlobImporter(func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, totalSize int64, body io.Reader) ([32]byte, error) {
+		if err := waitForOrch(ctx); err != nil {
+			return [32]byte{}, err
+		}
+		return orch.AdoptSealedBlobToTier(ctx, vaultID, tierID, chunkID, totalSize, body)
+	})
 	clusterSrv.SetTierStreamAppender(func(ctx context.Context, vaultID, tierID glid.GLID, next chunk.RecordIterator) error {
 		if err := waitForOrch(ctx); err != nil {
 			return err

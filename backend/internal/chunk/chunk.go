@@ -228,6 +228,14 @@ type ChunkBlobImporter interface {
 	AdoptSealedBlob(id ChunkID, totalSize int64, body io.Reader) ([32]byte, error)
 }
 
+// ChunkBlobReader extends ChunkManager with the ability to open a sealed
+// chunk's `data.glcb` blob as an io.ReadCloser plus byte size — used by
+// the leader side of binary chunk replication to stream a sealed chunk
+// to a follower. Counterpart of ChunkBlobImporter.
+type ChunkBlobReader interface {
+	OpenSealedBlob(id ChunkID) (rc io.ReadCloser, size int64, err error)
+}
+
 // ChunkArchiver extends ChunkManager with storage-class lifecycle operations
 // for cloud-backed chunks. Callers should type-assert to check availability.
 type ChunkArchiver interface {

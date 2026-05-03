@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"io"
 	"context"
 	"errors"
 	"log/slog"
@@ -39,6 +40,9 @@ func (c *captureCatchupReplicator) SealTier(_ context.Context, _ string, _, _ gl
 }
 func (c *captureCatchupReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
 	return nil
+}
+func (m *captureCatchupReplicator) ImportBlob(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ int64, _ io.Reader) ([32]byte, error) {
+	return [32]byte{}, nil
 }
 func (c *captureCatchupReplicator) DeleteChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil

@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"io"
 	"context"
 	"errors"
 	"gastrolog/internal/glid"
@@ -601,6 +602,9 @@ func (r *tierTestReplicator) SealTier(_ context.Context, _ string, _, _ glid.GLI
 func (r *tierTestReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
 	return nil
 }
+func (m *tierTestReplicator) ImportBlob(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ int64, _ io.Reader) ([32]byte, error) {
+	return [32]byte{}, nil
+}
 
 func (r *tierTestReplicator) DeleteChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
@@ -1084,6 +1088,9 @@ func (m *ackTestReplicator) SealTier(_ context.Context, _ string, _, _ glid.GLID
 }
 func (m *ackTestReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
 	return nil
+}
+func (m *ackTestReplicator) ImportBlob(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ int64, _ io.Reader) ([32]byte, error) {
+	return [32]byte{}, nil
 }
 func (m *ackTestReplicator) DeleteChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
@@ -1618,6 +1625,10 @@ func (f *failingForwarder) SealTier(_ context.Context, _ string, _, _ glid.GLID,
 
 func (f *failingForwarder) ImportSealedChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
 	return nil
+}
+
+func (f *failingForwarder) ImportBlob(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ int64, _ io.Reader) ([32]byte, error) {
+	return [32]byte{}, nil
 }
 
 func (f *failingForwarder) RequestReplicaCatchup(_ context.Context, _ string, _, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {

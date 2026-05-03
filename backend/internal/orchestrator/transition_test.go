@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"io"
 	"context"
 	"gastrolog/internal/glid"
 	"log/slog"
@@ -2235,6 +2236,14 @@ func (d *directTierReplicator) ImportSealedChunk(ctx context.Context, nodeID str
 		return rec, nil
 	}
 	return orch.ImportToTier(ctx, vaultID, tierID, chunkID, iter)
+}
+
+func (d *directTierReplicator) ImportBlob(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, totalSize int64, body io.Reader) ([32]byte, error) {
+	orch, ok := d.nodes[nodeID]
+	if !ok {
+		return [32]byte{}, fmt.Errorf("directTierReplicator: unknown node %q", nodeID)
+	}
+	return orch.AdoptSealedBlobToTier(ctx, vaultID, tierID, chunkID, totalSize, body)
 }
 
 func (d *directTierReplicator) DeleteChunk(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {

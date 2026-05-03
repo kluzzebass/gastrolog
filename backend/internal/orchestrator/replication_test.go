@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"io"
 	"context"
 	"errors"
 	"gastrolog/internal/glid"
@@ -54,6 +55,9 @@ func (m *replicationFakeReplicator) SealTier(_ context.Context, nodeID string, v
 func (m *replicationFakeReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ glid.GLID, chunkID chunk.ChunkID, _ []chunk.Record) error {
 	m.replicatedChunks = append(m.replicatedChunks, chunkID)
 	return nil
+}
+func (m *replicationFakeReplicator) ImportBlob(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ int64, _ io.Reader) ([32]byte, error) {
+	return [32]byte{}, nil
 }
 func (m *replicationFakeReplicator) DeleteChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
