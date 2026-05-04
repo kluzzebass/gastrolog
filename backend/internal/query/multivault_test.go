@@ -65,6 +65,55 @@ func (r *testRegistry) TransitionStreamedChunks(vaultID glid.GLID) map[chunk.Chu
 // each vault's chunk manager List() / Meta() to synthesize ManifestEntries.
 func (r *testRegistry) Reader() manifest.Reader { return manifest.NewProjectingReader(r) }
 
+// IndexReader returns a tier-walking IndexReader that dispatches to each
+// vault's chunk/index manager. testRegistry's "vault" map is effectively
+// flat (no tier hierarchy), so the lookup is just a linear walk.
+func (r *testRegistry) IndexReader() manifest.IndexReader { return &testIndexReader{r: r} }
+
+type testIndexReader struct{ r *testRegistry }
+
+func (ir *testIndexReader) FindIngestRank(id chunk.ChunkID, ts time.Time) (uint64, bool) {
+	cm, im := ir.r.lookupManagers(id)
+	if cm != nil {
+		if rank, found, err := cm.FindIngestEntryIndex(id, ts); err == nil && found {
+			return rank, true
+		}
+	}
+	if im != nil {
+		if rank, found, err := im.FindIngestEntryIndex(id, ts); err == nil && found {
+			return rank, true
+		}
+	}
+	return 0, false
+}
+
+func (ir *testIndexReader) FindIngestPos(id chunk.ChunkID, ts time.Time) (uint64, bool) {
+	cm, im := ir.r.lookupManagers(id)
+	if cm != nil {
+		if pos, found, err := cm.FindIngestStartPosition(id, ts); err == nil && found {
+			return pos, true
+		}
+	}
+	if im != nil {
+		if pos, found, err := im.FindIngestStartPosition(id, ts); err == nil && found {
+			return pos, true
+		}
+	}
+	return 0, false
+}
+
+func (r *testRegistry) lookupManagers(id chunk.ChunkID) (chunk.ChunkManager, index.IndexManager) {
+	for _, s := range r.vaults {
+		if s.cm == nil {
+			continue
+		}
+		if _, err := s.cm.Meta(id); err == nil {
+			return s.cm, s.im
+		}
+	}
+	return nil, nil
+}
+
 func TestMultiVaultSearch(t *testing.T) {
 	reg := &testRegistry{
 		vaults: make(map[glid.GLID]struct {

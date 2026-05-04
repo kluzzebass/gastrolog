@@ -11,6 +11,8 @@
 package manifest
 
 import (
+	"time"
+
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/index"
@@ -51,6 +53,13 @@ type VaultRegistry interface {
 	// metadata. Memory-mode and test registries can return a projecting
 	// fallback (NewProjectingReader) when no FSM is wired.
 	Reader() Reader
+
+	// IndexReader returns the FSM-grounded IngestTS-rank lookup interface.
+	// Returns nil when the registry's tier instances aren't wired to a
+	// chunk/index manager (e.g. a metadata-only test registry); callers
+	// should treat nil as "no index access" and fall through to other
+	// strategies (FSM-based proportional distribution).
+	IndexReader() IndexReader
 }
 
 // Reader exposes the FSM-projected view of chunk manifests. Every caller
@@ -76,4 +85,39 @@ type Reader interface {
 	//
 	// Returns nil if the vault is unknown.
 	EntriesForVault(vaultID glid.GLID) []tierfsm.ManifestEntry
+}
+
+// IndexReader is the FSM-grounded read path for the IngestTS rank index
+// stored inside each sealed chunk's GLCB blob. Separate from Reader
+// (metadata-only) because index lookup involves file I/O — keeping the
+// interfaces narrow lets test mocks for metadata stay simple. Composes
+// with Reader: typical implementations look up an Entry via Reader, then
+// use Entry.IngestIdxOffset/Size to read the section from a chunk-local
+// byte stream.
+//
+// The histogram and other rank-arithmetic consumers route through this
+// instead of reaching into chunk.Manager.FindIngestEntryIndex /
+// index.Manager.FindIngestEntryIndex directly. The implementation is
+// responsible for dispatching to the right tier's chunk Manager and
+// using FSM-derived offsets — never trusting projected meta when the
+// FSM has the authoritative offsets.
+type IndexReader interface {
+	// FindIngestRank returns the rank of the first IngestTS-sorted entry
+	// with TS >= ts in the given chunk's IngestTS index. ok=false when the
+	// chunk's index isn't locally resolvable (uncached cloud chunk, missing
+	// GLCB, or FSM unaware of chunk).
+	FindIngestRank(chunkID chunk.ChunkID, ts time.Time) (rank uint64, ok bool)
+
+	// FindIngestPos returns the physical record position (in append order)
+	// for the same query. Equal to rank for monotonic chunks, divergent for
+	// non-monotonic chunks built via ImportRecords. Used by cursor
+	// positioning, not bucket counting.
+	FindIngestPos(chunkID chunk.ChunkID, ts time.Time) (pos uint64, ok bool)
+}
+
+// IndexReaderProvider is the subset of VaultRegistry needed by query-side
+// callers that want an IndexReader. Letting them depend on this narrow
+// surface keeps test mocks small.
+type IndexReaderProvider interface {
+	IndexReader() IndexReader
 }

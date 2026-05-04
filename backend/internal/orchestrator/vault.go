@@ -1,6 +1,8 @@
 package orchestrator
 
 import (
+	"time"
+
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/index"
@@ -130,6 +132,55 @@ func (r *tierRegistry) IndexManager(id glid.GLID) index.IndexManager {
 // EntriesForVault interprets its key as a tier ID; Entry walks every
 // tier looking for the chunk.
 func (r *tierRegistry) Reader() manifest.Reader { return &tierRegistryReader{r: r} }
+
+// IndexReader returns a manifest.IndexReader scoped to this registry's
+// tier set — same shape as the orchestrator-wide implementation but
+// dispatching only across the tiers this registry was constructed with.
+func (r *tierRegistry) IndexReader() manifest.IndexReader { return &tierRegistryIndexReader{r: r} }
+
+type tierRegistryIndexReader struct{ r *tierRegistry }
+
+func (ir *tierRegistryIndexReader) FindIngestRank(id chunk.ChunkID, ts time.Time) (uint64, bool) {
+	cm, im := ir.r.lookupManagers(id)
+	if cm != nil {
+		if rank, found, err := cm.FindIngestEntryIndex(id, ts); err == nil && found {
+			return rank, true
+		}
+	}
+	if im != nil {
+		if rank, found, err := im.FindIngestEntryIndex(id, ts); err == nil && found {
+			return rank, true
+		}
+	}
+	return 0, false
+}
+
+func (ir *tierRegistryIndexReader) FindIngestPos(id chunk.ChunkID, ts time.Time) (uint64, bool) {
+	cm, im := ir.r.lookupManagers(id)
+	if cm != nil {
+		if pos, found, err := cm.FindIngestStartPosition(id, ts); err == nil && found {
+			return pos, true
+		}
+	}
+	if im != nil {
+		if pos, found, err := im.FindIngestStartPosition(id, ts); err == nil && found {
+			return pos, true
+		}
+	}
+	return 0, false
+}
+
+func (r *tierRegistry) lookupManagers(id chunk.ChunkID) (chunk.ChunkManager, index.IndexManager) {
+	for _, t := range r.tiers {
+		if t.Chunks == nil {
+			continue
+		}
+		if _, err := t.Chunks.Meta(id); err == nil {
+			return t.Chunks, t.Indexes
+		}
+	}
+	return nil, nil
+}
 
 type tierRegistryReader struct{ r *tierRegistry }
 

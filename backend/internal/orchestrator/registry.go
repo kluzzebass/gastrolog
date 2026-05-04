@@ -242,6 +242,8 @@ func (r *searchReadyRegistry) TransitionStreamedChunks(key glid.GLID) map[chunk.
 
 func (r *searchReadyRegistry) Reader() manifest.Reader { return r.o.ManifestReader() }
 
+func (r *searchReadyRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }
+
 // LeaderTierQueryEngine returns a query engine that only searches leader
 // tiers (not follower replicas). Used by ForwardSearch handlers to avoid
 // double-counting when the requesting node already searches its own followers.
@@ -323,6 +325,8 @@ func (r *localTierRegistry) QueryEngine(_ glid.GLID) *query.Engine { return nil 
 // flag set is read primarily to filter source chunks during transitions
 // on the leader. See gastrolog-66b7x.
 func (r *localTierRegistry) Reader() manifest.Reader { return r.o.ManifestReader() }
+
+func (r *localTierRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }
 
 func (r *localTierRegistry) TransitionStreamedChunks(key glid.GLID) map[chunk.ChunkID]bool {
 	r.o.mu.RLock()
@@ -411,6 +415,8 @@ func (r *leaderTierRegistry) QueryEngine(_ glid.GLID) *query.Engine { return nil
 // its ListTransitionStreamed callback (which reads the tier FSM via
 // vaultraft). See gastrolog-4xusf.
 func (r *leaderTierRegistry) Reader() manifest.Reader { return r.o.ManifestReader() }
+
+func (r *leaderTierRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }
 
 func (r *leaderTierRegistry) TransitionStreamedChunks(key glid.GLID) map[chunk.ChunkID]bool {
 	r.o.mu.RLock()

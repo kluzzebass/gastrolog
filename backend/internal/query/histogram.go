@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/index"
 	"gastrolog/internal/lookup"
+	"gastrolog/internal/manifest"
 	"gastrolog/internal/querylang"
 )
 
@@ -266,8 +266,9 @@ func (e *Engine) deriveTimeRange(q *Query, selectedVaults []glid.GLID) {
 // For the active chunk, uses the in-memory B-tree (FindIngestStartPosition).
 // For sealed chunks, uses the persisted IngestTS index (LoadIngestEntries).
 func (e *Engine) timechartFastPath(selectedVaults []glid.GLID, start time.Time, end time.Time, bucketWidth time.Duration, numBuckets int, counts []int64, cloudFlags []bool) {
+	ir := e.indexReader()
 	for _, vaultID := range selectedVaults {
-		cm, im := e.getVaultManagers(vaultID)
+		cm, _ := e.getVaultManagers(vaultID)
 		if cm == nil {
 			continue
 		}
@@ -286,7 +287,7 @@ func (e *Engine) timechartFastPath(selectedVaults []glid.GLID, start time.Time, 
 			if !meta.IngestStart.IsZero() && !meta.IngestStart.Before(end) {
 				continue
 			}
-			timechartChunkByIngestTS(cm, im, meta, start, bucketWidth, numBuckets, counts, cloudFlags)
+			timechartChunkByIngestTS(cm, ir, meta, start, bucketWidth, numBuckets, counts, cloudFlags)
 		}
 	}
 }
@@ -295,9 +296,10 @@ func (e *Engine) timechartFastPath(selectedVaults []glid.GLID, start time.Time, 
 // cloud-backed chunks only (via TS index binary search). Sets cloudFlags for
 // buckets with cloud data. Returns true if any cloud chunks were found.
 func (e *Engine) timechartCloudCounts(selectedVaults []glid.GLID, start, end time.Time, bucketWidth time.Duration, numBuckets int, cloudCounts []int64, cloudFlags []bool) bool {
+	ir := e.indexReader()
 	found := false
 	for _, vaultID := range selectedVaults {
-		cm, im := e.getVaultManagers(vaultID)
+		cm, _ := e.getVaultManagers(vaultID)
 		if cm == nil {
 			continue
 		}
@@ -317,7 +319,7 @@ func (e *Engine) timechartCloudCounts(selectedVaults []glid.GLID, start, end tim
 				continue
 			}
 			found = true
-			timechartChunkByIngestTS(cm, im, meta, start, bucketWidth, numBuckets, cloudCounts, cloudFlags)
+			timechartChunkByIngestTS(cm, ir, meta, start, bucketWidth, numBuckets, cloudCounts, cloudFlags)
 		}
 	}
 	return found
@@ -329,8 +331,9 @@ func (e *Engine) timechartCloudCounts(selectedVaults []glid.GLID, start, end tim
 // timechartActiveNonMonotonic pass that keeps counts and groupCounts on
 // the same B+ tree snapshot. See gastrolog-66b7x.
 func (e *Engine) timechartLocalCounts(selectedVaults []glid.GLID, start, end time.Time, bucketWidth time.Duration, numBuckets int, counts []int64, sealedOnly bool) {
+	ir := e.indexReader()
 	for _, vaultID := range selectedVaults {
-		cm, im := e.getVaultManagers(vaultID)
+		cm, _ := e.getVaultManagers(vaultID)
 		if cm == nil {
 			continue
 		}
@@ -352,7 +355,7 @@ func (e *Engine) timechartLocalCounts(selectedVaults []glid.GLID, start, end tim
 			if sealedOnly && !meta.Sealed && !meta.IngestTSMonotonic {
 				continue
 			}
-			timechartChunkByIngestTS(cm, im, meta, start, bucketWidth, numBuckets, counts, nil)
+			timechartChunkByIngestTS(cm, ir, meta, start, bucketWidth, numBuckets, counts, nil)
 		}
 	}
 }
@@ -452,9 +455,9 @@ func bucketForTS(tsNanos, startNanos, bucketNanos int64, numBuckets int) (int, b
 // Does NOT update total counts — those come from timechartFastPath.
 func (e *Engine) timechartAttrScanGroups(selectedVaults []glid.GLID, start, end time.Time, bucketWidth time.Duration, numBuckets int, groupField string, groupCounts []map[string]int64) {
 	const samplePerBucket = 1000
-
+	ir := e.indexReader()
 	for _, vaultID := range selectedVaults {
-		cm, im := e.getVaultManagers(vaultID)
+		cm, _ := e.getVaultManagers(vaultID)
 		if cm == nil {
 			continue
 		}
@@ -494,7 +497,7 @@ func (e *Engine) timechartAttrScanGroups(selectedVaults []glid.GLID, start, end 
 			if !meta.Sealed && !meta.IngestTSMonotonic {
 				continue
 			}
-			timechartChunkGroups(cm, im, meta, start, bucketWidth, numBuckets, samplePerBucket, groupField, groupCounts)
+			timechartChunkGroups(cm, ir, meta, start, bucketWidth, numBuckets, samplePerBucket, groupField, groupCounts)
 		}
 	}
 }
@@ -505,7 +508,7 @@ func (e *Engine) timechartAttrScanGroups(selectedVaults []glid.GLID, start, end 
 // group proportions to the exact bucket count (from binary search).
 func timechartChunkGroups(
 	cm chunk.ChunkManager,
-	im index.IndexManager,
+	ir manifest.IndexReader,
 	meta chunk.ChunkMeta,
 	start time.Time,
 	bucketWidth time.Duration,
@@ -545,7 +548,7 @@ func timechartChunkGroups(
 	// is effectively a random slice of the chunk regardless. See
 	// gastrolog-66b7x.
 	if !meta.IngestTSMonotonic {
-		nonMonotonicChunkGroups(cm, im, meta, start, bucketWidth, firstBucket, lastBucket, groupField, groupCounts)
+		nonMonotonicChunkGroups(cm, ir, meta, start, bucketWidth, firstBucket, lastBucket, groupField, groupCounts)
 		return
 	}
 
@@ -553,7 +556,7 @@ func timechartChunkGroups(
 		bStart := start.Add(bucketWidth * time.Duration(b))
 		bEnd := start.Add(bucketWidth * time.Duration(b+1))
 
-		startPos, startOK := findIngestPos(cm, im, meta.ID, bStart)
+		startPos, startOK := ir.FindIngestPos(meta.ID, bStart)
 		if !startOK {
 			continue
 		}
@@ -562,7 +565,7 @@ func timechartChunkGroups(
 		// non-monotonic chunks); use position for ScanAttrs offset
 		// (the cursor needs a physical record position). See
 		// gastrolog-66b7x.
-		startRank, rankOK := findIngestRank(cm, im, meta.ID, bStart)
+		startRank, rankOK := ir.FindIngestRank(meta.ID, bStart)
 		if !rankOK {
 			continue
 		}
@@ -570,7 +573,7 @@ func timechartChunkGroups(
 		var endRank uint64
 		if !meta.IngestEnd.IsZero() && !bEnd.Before(meta.IngestEnd) {
 			endRank = uint64(meta.RecordCount) //nolint:gosec // G115: RecordCount is always non-negative
-		} else if rank, ok := findIngestRank(cm, im, meta.ID, bEnd); ok {
+		} else if rank, ok := ir.FindIngestRank(meta.ID, bEnd); ok {
 			endRank = rank
 		}
 
@@ -729,49 +732,6 @@ func timechartToTable(groupField string, start time.Time, bucketWidth time.Durat
 	return &TableResult{Columns: columns, Rows: rows}
 }
 
-// findIngestPos returns the earliest record position with IngestTS >= ts.
-// Tries chunk manager first (active chunk B-tree), then index manager
-// (sealed chunk on-disk binary search). Both are O(log n).
-//
-// Returns the *physical record position* — correct for cursor positioning
-// (e.g. ScanAttrs from this offset). NOT correct for histogram counting on
-// non-monotonic chunks; use findIngestRank for bucket counts. See gastrolog-66b7x.
-func findIngestPos(cm chunk.ChunkManager, im index.IndexManager, chunkID chunk.ChunkID, ts time.Time) (uint64, bool) {
-	if pos, found, err := cm.FindIngestStartPosition(chunkID, ts); err == nil && found {
-		return pos, true
-	}
-	if im != nil {
-		if pos, found, err := im.FindIngestStartPosition(chunkID, ts); err == nil && found {
-			return pos, true
-		}
-	}
-	return 0, false
-}
-
-// findIngestRank returns the entry index (rank) in the IngestTS-sorted index
-// of the first entry with IngestTS >= ts. For active chunks (monotonic
-// IngestTS via Append), rank == physical position. For sealed chunks built
-// via ImportRecords, rank differs from position because physical layout
-// follows source-WriteTS, not IngestTS — histogram bucket counts must use
-// rank arithmetic (endRank - startRank), not position arithmetic. See
-// gastrolog-66b7x.
-func findIngestRank(cm chunk.ChunkManager, im index.IndexManager, chunkID chunk.ChunkID, ts time.Time) (uint64, bool) {
-	// Cloud-backed chunks and active monotonic chunks: rank comes from
-	// the chunk manager. For active monotonic chunks position == rank.
-	// For cloud chunks the entry index in the sorted cache file is the
-	// correct rank. See gastrolog-66b7x.
-	if rank, found, err := cm.FindIngestEntryIndex(chunkID, ts); err == nil && found {
-		return rank, true
-	}
-	// Sealed local chunks: rank lives on the on-disk TS index file.
-	if im != nil {
-		if rank, found, err := im.FindIngestEntryIndex(chunkID, ts); err == nil && found {
-			return rank, true
-		}
-	}
-	return 0, false
-}
-
 // timechartChunkByIngestTS counts records per bucket using IngestTS binary search.
 // Active chunks: chunk manager's FindIngestStartPosition (in-memory B-tree).
 // Sealed chunks: index manager's FindIngestStartPosition (on-disk binary search).
@@ -786,7 +746,7 @@ func findIngestRank(cm chunk.ChunkManager, im index.IndexManager, chunkID chunk.
 // not histogram artifacts.
 func timechartChunkByIngestTS(
 	cm chunk.ChunkManager,
-	im index.IndexManager,
+	ir manifest.IndexReader,
 	meta chunk.ChunkMeta,
 	start time.Time,
 	bucketWidth time.Duration,
@@ -850,7 +810,7 @@ func timechartChunkByIngestTS(
 	// (on-disk for sealed chunks, B+ tree for monotonic active chunks,
 	// cached local file for cloud-backed sealed chunks). The FSM has
 	// already promised an index exists for this chunk.
-	timechartChunkByIndex(cm, im, meta, start, bucketWidth, firstBucket, lastBucket, counts)
+	timechartChunkByIndex(ir, meta, start, bucketWidth, firstBucket, lastBucket, counts)
 }
 
 // bucketizeActiveChunk iterates the active chunk's records once and
@@ -896,7 +856,7 @@ func bucketizeActiveChunk(
 // of O(buckets × sampleCap). See gastrolog-66b7x.
 func nonMonotonicChunkGroups(
 	cm chunk.ChunkManager,
-	im index.IndexManager,
+	ir manifest.IndexReader,
 	meta chunk.ChunkMeta,
 	start time.Time,
 	bucketWidth time.Duration,
@@ -921,7 +881,7 @@ func nonMonotonicChunkGroups(
 	for k, v := range levelCounts {
 		ratios[k] = float64(v) / float64(sampled)
 	}
-	bucketTotals := chunkBucketTotals(cm, im, meta, start, bucketWidth, firstBucket, lastBucket)
+	bucketTotals := chunkBucketTotals(cm, ir, meta, start, bucketWidth, firstBucket, lastBucket)
 	for b := firstBucket; b <= lastBucket; b++ {
 		total := bucketTotals[b-firstBucket]
 		if total == 0 {
@@ -939,7 +899,7 @@ func nonMonotonicChunkGroups(
 // on-disk TS index for sealed chunks. See gastrolog-66b7x.
 func chunkBucketTotals(
 	cm chunk.ChunkManager,
-	im index.IndexManager,
+	ir manifest.IndexReader,
 	meta chunk.ChunkMeta,
 	start time.Time,
 	bucketWidth time.Duration,
@@ -971,11 +931,11 @@ func chunkBucketTotals(
 	for b := firstBucket; b <= lastBucket; b++ {
 		bStart := start.Add(bucketWidth * time.Duration(b))
 		bEnd := start.Add(bucketWidth * time.Duration(b+1))
-		startRank, _ := findIngestRank(cm, im, meta.ID, bStart)
+		startRank, _ := ir.FindIngestRank(meta.ID, bStart)
 		var endRank uint64
 		if !meta.IngestEnd.IsZero() && !bEnd.Before(meta.IngestEnd) {
 			endRank = uint64(meta.RecordCount) //nolint:gosec // G115: RecordCount is non-negative
-		} else if rank, ok := findIngestRank(cm, im, meta.ID, bEnd); ok {
+		} else if rank, ok := ir.FindIngestRank(meta.ID, bEnd); ok {
 			endRank = rank
 		}
 		if endRank > startRank {
@@ -1007,8 +967,7 @@ func chunkBucketTotals(
 // chunk having records, the index isn't actually serving lookups and we
 // fall back to overlap-based distribution.
 func timechartChunkByIndex(
-	cm chunk.ChunkManager,
-	im index.IndexManager,
+	ir manifest.IndexReader,
 	meta chunk.ChunkMeta,
 	start time.Time,
 	bucketWidth time.Duration,
@@ -1027,21 +986,20 @@ func timechartChunkByIndex(
 		clampHi = meta.IngestStart
 	}
 
-	// Fast path: probe once before the per-bucket loop. If neither cm nor
-	// im can resolve the chunk's index at any TS, the rank-arithmetic loop
-	// would do 50×2 failed lookups per chunk — at ~50µs per failed
-	// loadIngestTSMmap open() syscall, that's ~5ms per chunk × ~1900 chunks
-	// = ~10s of pure syscall overhead on a `last=12h` query. The probe
-	// distinguishes "working index that returns rank 0" (ok=true) from
-	// "no index reachable" (ok=false) cleanly via the boolean — only the
-	// rank value is ambiguous, not ok. On a miss we skip straight to
-	// FSM-based distribution.
+	// Fast path: probe once before the per-bucket loop. If the IndexReader
+	// can't resolve the chunk's index at any TS, the rank-arithmetic loop
+	// would do 50×2 failed lookups per chunk — non-trivial overhead on a
+	// `last=12h` query touching ~1900 chunks. The probe distinguishes
+	// "working index that returns rank 0" (ok=true) from "no index
+	// reachable" (ok=false) cleanly via the boolean — only the rank value
+	// is ambiguous, not ok. On a miss we skip straight to FSM-based
+	// distribution.
 	probeTS := meta.IngestStart
 	if probeTS.IsZero() {
 		probeTS = clampHi
 	}
 	if !probeTS.IsZero() {
-		if _, ok := findIngestRank(cm, im, meta.ID, probeTS); !ok {
+		if _, ok := ir.FindIngestRank(meta.ID, probeTS); !ok {
 			distributeChunkRecordsByOverlap(meta, start, bucketWidth, firstBucket, lastBucket, counts)
 			return
 		}
@@ -1053,12 +1011,12 @@ func timechartChunkByIndex(
 		bStart := start.Add(bucketWidth * time.Duration(b))
 		bEnd := start.Add(bucketWidth * time.Duration(b+1))
 
-		startRank, _ := findIngestRank(cm, im, meta.ID, bStart)
+		startRank, _ := ir.FindIngestRank(meta.ID, bStart)
 
 		var endRank uint64
 		if !clampHi.IsZero() && !bEnd.Before(clampHi) {
 			endRank = uint64(meta.RecordCount) //nolint:gosec // G115: RecordCount is always non-negative
-		} else if rank, ok := findIngestRank(cm, im, meta.ID, bEnd); ok {
+		} else if rank, ok := ir.FindIngestRank(meta.ID, bEnd); ok {
 			endRank = rank
 		}
 

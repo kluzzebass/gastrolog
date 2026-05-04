@@ -373,6 +373,59 @@ func (e *Engine) SetLookupResolver(r lookup.Resolver) {
 	e.lookupResolver = r
 }
 
+// indexReader returns the engine's IngestTS-rank/pos lookup interface,
+// preferring the registry-provided IndexReader (multi-vault mode) and
+// falling back to a single-vault adapter over e.chunks/e.indexes when
+// no registry is wired. Returns nil only when the engine has neither —
+// callers should treat nil as "no index access" and fall through to
+// FSM-based proportional distribution or other non-rank strategies.
+func (e *Engine) indexReader() manifest.IndexReader {
+	if e.registry != nil {
+		return e.registry.IndexReader()
+	}
+	if e.chunks == nil {
+		return nil
+	}
+	return &singleVaultIndexReader{cm: e.chunks, im: e.indexes}
+}
+
+// singleVaultIndexReader adapts the legacy chunk/index manager pair to
+// manifest.IndexReader for single-vault engines (those constructed via
+// New rather than NewWithRegistry). Same layered fallback as the
+// orchestrator-backed IndexReader.
+type singleVaultIndexReader struct {
+	cm chunk.ChunkManager
+	im index.IndexManager
+}
+
+func (ir *singleVaultIndexReader) FindIngestRank(id chunk.ChunkID, ts time.Time) (uint64, bool) {
+	if ir.cm != nil {
+		if rank, found, err := ir.cm.FindIngestEntryIndex(id, ts); err == nil && found {
+			return rank, true
+		}
+	}
+	if ir.im != nil {
+		if rank, found, err := ir.im.FindIngestEntryIndex(id, ts); err == nil && found {
+			return rank, true
+		}
+	}
+	return 0, false
+}
+
+func (ir *singleVaultIndexReader) FindIngestPos(id chunk.ChunkID, ts time.Time) (uint64, bool) {
+	if ir.cm != nil {
+		if pos, found, err := ir.cm.FindIngestStartPosition(id, ts); err == nil && found {
+			return pos, true
+		}
+	}
+	if ir.im != nil {
+		if pos, found, err := ir.im.FindIngestStartPosition(id, ts); err == nil && found {
+			return pos, true
+		}
+	}
+	return 0, false
+}
+
 // isMultiVault returns true if this engine operates in multi-vault mode.
 func (e *Engine) isMultiVault() bool {
 	return e.registry != nil

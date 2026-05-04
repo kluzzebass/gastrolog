@@ -1,8 +1,11 @@
 package orchestrator
 
 import (
+	"time"
+
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/index"
 	"gastrolog/internal/manifest"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/vaultraft"
@@ -143,6 +146,85 @@ func tierManifestEntries(t *TierInstance) []tierfsm.ManifestEntry {
 		out[i] = chunkMetaToManifestEntry(m)
 	}
 	return out
+}
+
+// IndexReader returns a manifest.IndexReader that resolves IngestTS rank /
+// position lookups against this orchestrator's locally-hosted tiers. Phase 1
+// implementation delegates to the existing layered fallback
+// (chunk.ChunkManager.FindIngestEntryIndex → index.IndexManager.FindIngestEntryIndex).
+// A future pass will collapse those two file-access paths onto a single
+// FSM-grounded GLCB section reader; the interface boundary is in place
+// either way so callers (notably the histogram) don't have to know.
+func (o *Orchestrator) IndexReader() manifest.IndexReader {
+	return &orchestratorIndexReader{o: o}
+}
+
+// orchestratorIndexReader implements manifest.IndexReader by walking the
+// orchestrator's local tier instances to find the chunk's owning tier,
+// then dispatching to that tier's chunk manager (and index manager) for
+// the actual rank/pos lookup. Same fallback logic as the legacy
+// findIngestRank/findIngestPos helpers in internal/query/histogram.go,
+// just behind the manifest.IndexReader interface.
+type orchestratorIndexReader struct {
+	o *Orchestrator
+}
+
+var _ manifest.IndexReader = (*orchestratorIndexReader)(nil)
+
+// FindIngestRank returns the rank of the first IngestTS-sorted entry with
+// TS >= ts. Tries the chunk manager (active chunk B+ tree, cloud chunk
+// cached index) first; falls back to the index manager (sealed local
+// chunk sidecar). Returns (0, false) when neither serves the lookup.
+func (r *orchestratorIndexReader) FindIngestRank(chunkID chunk.ChunkID, ts time.Time) (uint64, bool) {
+	cm, im := r.lookupTierManagers(chunkID)
+	if cm != nil {
+		if rank, found, err := cm.FindIngestEntryIndex(chunkID, ts); err == nil && found {
+			return rank, true
+		}
+	}
+	if im != nil {
+		if rank, found, err := im.FindIngestEntryIndex(chunkID, ts); err == nil && found {
+			return rank, true
+		}
+	}
+	return 0, false
+}
+
+// FindIngestPos returns the physical record position for the same query.
+// Same dispatch shape as FindIngestRank.
+func (r *orchestratorIndexReader) FindIngestPos(chunkID chunk.ChunkID, ts time.Time) (uint64, bool) {
+	cm, im := r.lookupTierManagers(chunkID)
+	if cm != nil {
+		if pos, found, err := cm.FindIngestStartPosition(chunkID, ts); err == nil && found {
+			return pos, true
+		}
+	}
+	if im != nil {
+		if pos, found, err := im.FindIngestStartPosition(chunkID, ts); err == nil && found {
+			return pos, true
+		}
+	}
+	return 0, false
+}
+
+// lookupTierManagers walks the orchestrator's local tiers to find the
+// (chunk, index) manager pair owning the given chunk. Returns (nil, nil)
+// when the chunk isn't on any local tier — a signal that the histogram
+// caller should fall back to FSM-based proportional distribution.
+func (r *orchestratorIndexReader) lookupTierManagers(chunkID chunk.ChunkID) (chunk.ChunkManager, index.IndexManager) {
+	r.o.mu.RLock()
+	defer r.o.mu.RUnlock()
+	for _, v := range r.o.vaults {
+		for _, t := range v.Tiers {
+			if t.Chunks == nil {
+				continue
+			}
+			if _, err := t.Chunks.Meta(chunkID); err == nil {
+				return t.Chunks, t.Indexes
+			}
+		}
+	}
+	return nil, nil
 }
 
 // chunkMetaToManifestEntry projects a chunk.ChunkMeta into the FSM-shaped
