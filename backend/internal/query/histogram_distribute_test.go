@@ -25,7 +25,7 @@ func TestDistributeChunkRecordsByOverlap(t *testing.T) {
 			IngestStart: t0.Add(2*time.Minute + 10*time.Second),
 			IngestEnd:   t0.Add(2*time.Minute + 50*time.Second),
 		}
-		distributeChunkRecordsByOverlap(meta, t0, bucketWidth, 0, numBuckets-1, counts)
+		distributeChunkRecordsByOverlap(meta, t0, bucketWidth, 0, numBuckets-1, counts, nil, false)
 		if counts[2] != 100 {
 			t.Errorf("bucket 2 got %d, want 100", counts[2])
 		}
@@ -43,7 +43,7 @@ func TestDistributeChunkRecordsByOverlap(t *testing.T) {
 			IngestStart: t0.Add(3 * time.Minute),
 			IngestEnd:   t0.Add(5 * time.Minute),
 		}
-		distributeChunkRecordsByOverlap(meta, t0, bucketWidth, 0, numBuckets-1, counts)
+		distributeChunkRecordsByOverlap(meta, t0, bucketWidth, 0, numBuckets-1, counts, nil, false)
 		if counts[3] != 50 || counts[4] != 50 {
 			t.Errorf("bucket [3]=%d [4]=%d, want 50/50", counts[3], counts[4])
 		}
@@ -56,7 +56,7 @@ func TestDistributeChunkRecordsByOverlap(t *testing.T) {
 			IngestStart: t0.Add(2 * time.Minute),
 			IngestEnd:   t0.Add(6 * time.Minute),
 		}
-		distributeChunkRecordsByOverlap(meta, t0, bucketWidth, 0, numBuckets-1, counts)
+		distributeChunkRecordsByOverlap(meta, t0, bucketWidth, 0, numBuckets-1, counts, nil, false)
 		var total int64
 		for _, c := range counts {
 			total += c
@@ -82,7 +82,7 @@ func TestDistributeChunkRecordsByOverlap(t *testing.T) {
 		}
 		// firstBucket=0 so out-of-range portion (the 1 min before t0) is
 		// dropped; only the in-range overlap (1 min, half the chunk) counts.
-		distributeChunkRecordsByOverlap(meta, t0, bucketWidth, 0, numBuckets-1, counts)
+		distributeChunkRecordsByOverlap(meta, t0, bucketWidth, 0, numBuckets-1, counts, nil, false)
 		if counts[0] != 100 {
 			t.Errorf("bucket 0 got %d, want 100 (half the chunk)", counts[0])
 		}
@@ -102,7 +102,7 @@ func TestDistributeChunkRecordsByOverlap(t *testing.T) {
 			IngestStart: t0,
 			IngestEnd:   t0.Add(5 * time.Minute),
 		}
-		distributeChunkRecordsByOverlap(meta, t0, bucketWidth, 0, numBuckets-1, counts)
+		distributeChunkRecordsByOverlap(meta, t0, bucketWidth, 0, numBuckets-1, counts, nil, false)
 		for i, c := range counts {
 			if c != 0 {
 				t.Errorf("bucket %d got %d, want 0", i, c)
@@ -117,9 +117,67 @@ func TestDistributeChunkRecordsByOverlap(t *testing.T) {
 			IngestStart: t0.Add(3 * time.Minute),
 			IngestEnd:   t0.Add(3 * time.Minute), // identical
 		}
-		distributeChunkRecordsByOverlap(meta, t0, bucketWidth, 0, numBuckets-1, counts)
+		distributeChunkRecordsByOverlap(meta, t0, bucketWidth, 0, numBuckets-1, counts, nil, false)
 		if counts[3] != 100 {
 			t.Errorf("bucket 3 got %d, want 100", counts[3])
+		}
+	})
+
+	// Regression: non-monotonic cloud chunks (IngestEnd < IngestStart) used
+	// to mark the *entire* clamped [firstBucket, lastBucket] range as
+	// cloudFlags=true even though distribute's span≤0 branch only attributes
+	// records to the IngestStart bucket. Result: histogram showed cloud
+	// hatching on buckets where no cloud chunks actually contributed —
+	// recent buckets within the file-tier window got falsely flagged. The
+	// fix marks cloudFlags only where records actually land.
+	t.Run("non-monotonic cloud chunk marks cloudFlags only in IngestStart bucket", func(t *testing.T) {
+		counts := make([]int64, numBuckets)
+		cloudFlags := make([]bool, numBuckets)
+		// Reversed: IngestStart later than IngestEnd. firstBucket/lastBucket
+		// would clamp the swap range to buckets 2..7 — but only bucket 7
+		// (the IngestStart bucket) should get cloudFlags=true.
+		meta := chunk.ChunkMeta{
+			RecordCount: 100,
+			IngestStart: t0.Add(7 * time.Minute),
+			IngestEnd:   t0.Add(2 * time.Minute), // earlier than IngestStart
+			CloudBacked: true,
+		}
+		distributeChunkRecordsByOverlap(meta, t0, bucketWidth, 2, 7, counts, cloudFlags, true)
+		if counts[7] != 100 {
+			t.Errorf("bucket 7 got %d, want 100", counts[7])
+		}
+		if !cloudFlags[7] {
+			t.Error("bucket 7 should be cloud-flagged (records landed here)")
+		}
+		for i := range numBuckets {
+			if i == 7 {
+				continue
+			}
+			if cloudFlags[i] {
+				t.Errorf("bucket %d cloud-flagged but should not be (no records landed here)", i)
+			}
+		}
+	})
+
+	t.Run("monotonic cloud chunk marks cloudFlags only on overlapping buckets", func(t *testing.T) {
+		counts := make([]int64, numBuckets)
+		cloudFlags := make([]bool, numBuckets)
+		// Chunk spans bucket 3 + bucket 4 only; firstBucket/lastBucket of
+		// 0..9 covers a wider scan window (typical histogram bucket range).
+		meta := chunk.ChunkMeta{
+			RecordCount: 100,
+			IngestStart: t0.Add(3 * time.Minute),
+			IngestEnd:   t0.Add(5 * time.Minute),
+			CloudBacked: true,
+		}
+		distributeChunkRecordsByOverlap(meta, t0, bucketWidth, 0, 9, counts, cloudFlags, true)
+		// Buckets 3 and 4 should be cloud-flagged (records overlap).
+		// All other buckets (no overlap → no records) should not be flagged.
+		for i := range numBuckets {
+			expectedFlag := (i == 3 || i == 4)
+			if cloudFlags[i] != expectedFlag {
+				t.Errorf("bucket %d cloudFlags=%v, want %v", i, cloudFlags[i], expectedFlag)
+			}
 		}
 	})
 }

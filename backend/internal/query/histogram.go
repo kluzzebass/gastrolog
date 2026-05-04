@@ -785,14 +785,16 @@ func timechartChunkByIngestTS(
 		}
 	}
 
-	// Mark cloud buckets regardless of TS index availability —
-	// the flag means "this bucket includes cloud data" (for hatching),
-	// not "counts are unknown."
-	if meta.CloudBacked && cloudFlags != nil {
-		for b := firstBucket; b <= lastBucket; b++ {
-			cloudFlags[b] = true
-		}
-	}
+	// cloudFlags marking is deferred to the leaf functions (timechartChunkByIndex /
+	// distributeChunkRecordsByOverlap / bucketizeActiveChunk) so the flag
+	// only lands on buckets that actually receive records. Marking the
+	// whole [firstBucket, lastBucket] range upfront over-flags
+	// non-monotonic chunks: for a chunk with IngestStart=11:16, IngestEnd=11:08
+	// the swap above gives a range covering ~28 buckets, but the records may
+	// only land in one of them (degenerate single-instant case in
+	// distributeChunkRecordsByOverlap). The other 27 buckets would carry a
+	// "cloud data here" flag without any cloud data — exactly the false
+	// positive that surfaced after the non-monotonic clamp landed.
 
 	// Non-monotonic ACTIVE chunks need a full B+ tree iteration: physical
 	// position doesn't match IngestTS-sorted rank, and we can't get rank
@@ -802,7 +804,7 @@ func timechartChunkByIngestTS(
 	// the fast O(buckets × log N) path because position == rank. See
 	// gastrolog-66b7x.
 	if !meta.Sealed && !meta.IngestTSMonotonic {
-		bucketizeActiveChunk(cm, meta, start, bucketWidth, firstBucket, lastBucket, counts)
+		bucketizeActiveChunk(cm, meta, start, bucketWidth, firstBucket, lastBucket, counts, cloudFlags, meta.CloudBacked)
 		return
 	}
 
@@ -810,7 +812,7 @@ func timechartChunkByIngestTS(
 	// (on-disk for sealed chunks, B+ tree for monotonic active chunks,
 	// cached local file for cloud-backed sealed chunks). The FSM has
 	// already promised an index exists for this chunk.
-	timechartChunkByIndex(ir, meta, start, bucketWidth, firstBucket, lastBucket, counts)
+	timechartChunkByIndex(ir, meta, start, bucketWidth, firstBucket, lastBucket, counts, cloudFlags)
 }
 
 // bucketizeActiveChunk iterates the active chunk's records once and
@@ -826,6 +828,8 @@ func bucketizeActiveChunk(
 	bucketWidth time.Duration,
 	firstBucket, lastBucket int,
 	counts []int64,
+	cloudFlags []bool,
+	cloudBacked bool,
 ) {
 	startNanos := start.UnixNano()
 	bucketNanos := bucketWidth.Nanoseconds()
@@ -844,6 +848,9 @@ func bucketizeActiveChunk(
 			return false // entries are sorted, no further match
 		}
 		counts[b]++
+		if cloudBacked && cloudFlags != nil {
+			cloudFlags[b] = true
+		}
 		return true
 	})
 }
@@ -973,6 +980,7 @@ func timechartChunkByIndex(
 	bucketWidth time.Duration,
 	firstBucket, lastBucket int,
 	counts []int64,
+	cloudFlags []bool,
 ) {
 	if firstBucket > lastBucket {
 		return
@@ -1000,7 +1008,7 @@ func timechartChunkByIndex(
 	}
 	if !probeTS.IsZero() {
 		if _, ok := ir.FindIngestRank(meta.ID, probeTS); !ok {
-			distributeChunkRecordsByOverlap(meta, start, bucketWidth, firstBucket, lastBucket, counts)
+			distributeChunkRecordsByOverlap(meta, start, bucketWidth, firstBucket, lastBucket, counts, cloudFlags, meta.CloudBacked)
 			return
 		}
 	}
@@ -1042,11 +1050,14 @@ func timechartChunkByIndex(
 		// chunk holds — fall back to overlap-based distribution so they
 		// show up in the histogram. Was the production gap "vault
 		// inspector reports N, histogram shows ~N/2".
-		distributeChunkRecordsByOverlap(meta, start, bucketWidth, firstBucket, lastBucket, counts)
+		distributeChunkRecordsByOverlap(meta, start, bucketWidth, firstBucket, lastBucket, counts, cloudFlags, meta.CloudBacked)
 		return
 	}
 	for i, c := range rankCounts {
 		counts[firstBucket+i] += c
+		if c > 0 && meta.CloudBacked && cloudFlags != nil {
+			cloudFlags[firstBucket+i] = true
+		}
 	}
 }
 
@@ -1062,14 +1073,20 @@ func distributeChunkRecordsByOverlap(
 	bucketWidth time.Duration,
 	firstBucket, lastBucket int,
 	counts []int64,
+	cloudFlags []bool,
+	cloudBacked bool,
 ) {
 	if meta.RecordCount == 0 || meta.IngestStart.IsZero() || meta.IngestEnd.IsZero() {
 		return
 	}
 	span := meta.IngestEnd.Sub(meta.IngestStart)
 	if span <= 0 {
-		// Degenerate single-instant chunk: dump the count into the bucket
-		// containing IngestStart, if it falls in range.
+		// Degenerate single-instant chunk (includes non-monotonic chunks
+		// where IngestEnd < IngestStart): dump the count into the bucket
+		// containing IngestStart, if it falls in range. The cloudFlag is
+		// set on that single bucket only — older code over-flagged the
+		// full [firstBucket, lastBucket] range here, marking buckets that
+		// received no records from this chunk as "includes cloud data".
 		offset := meta.IngestStart.Sub(start)
 		if offset < 0 {
 			return
@@ -1079,6 +1096,9 @@ func distributeChunkRecordsByOverlap(
 			return
 		}
 		counts[b] += meta.RecordCount
+		if cloudBacked && cloudFlags != nil {
+			cloudFlags[b] = true
+		}
 		return
 	}
 	for b := firstBucket; b <= lastBucket; b++ {
@@ -1099,5 +1119,8 @@ func distributeChunkRecordsByOverlap(
 		// int64 arithmetic preserves rounding sanity; floor is fine because
 		// any rounding loss is bounded by O(buckets).
 		counts[b] += meta.RecordCount * int64(overlap) / int64(span)
+		if cloudBacked && cloudFlags != nil {
+			cloudFlags[b] = true
+		}
 	}
 }
