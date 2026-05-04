@@ -2202,8 +2202,14 @@ func (m *Manager) ImportRecords(id chunk.ChunkID, next chunk.RecordIterator) (ch
 // trackCloudResult updates the degraded flag based on a cloud operation result.
 // Every cloud operation (upload, download, list, archive, restore) should call
 // this after completion. Failed → set degraded + store error. Succeeded → clear.
+//
+// blobstore.ErrBlobNotFound is treated as a logical (non-degraded) outcome:
+// the cloud store IS reachable, the blob just isn't there. This happens
+// routinely when an FSM-listed chunk's data was never uploaded (or was
+// already deleted) and we hit it via search fan-out. Without this carve-out
+// every such miss would raise the cloud-unreachable alert (gastrolog-3ukgz).
 func (m *Manager) trackCloudResult(err error) {
-	if err != nil {
+	if err != nil && !errors.Is(err, blobstore.ErrBlobNotFound) {
 		m.cloudDegraded.Store(true)
 		m.cloudDegradedErr.Store(err.Error())
 	} else {
