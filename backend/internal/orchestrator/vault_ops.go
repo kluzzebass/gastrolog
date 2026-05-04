@@ -1124,6 +1124,10 @@ func (o *Orchestrator) finalizeImportedChunk(vaultID, tierID glid.GLID, cm chunk
 		if a := ann.GetAnnouncer(); a != nil {
 			a.AnnounceCreate(meta.ID, meta.WriteStart, meta.IngestStart, meta.SourceStart)
 			a.AnnounceSeal(meta.ID, meta.WriteEnd, meta.RecordCount, meta.Bytes, meta.IngestStart, meta.IngestEnd, meta.SourceEnd, meta.IngestTSMonotonic)
+			// Section offsets (CmdAttachOffsets) already replicated from
+			// the original sealing leader via Raft; followers inherit
+			// them through the FSM and don't need to re-announce. See
+			// gastrolog-1dg3i.
 		}
 	}
 

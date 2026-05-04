@@ -53,6 +53,17 @@ const (
 	// the leader would hold the entry forever waiting for an ack from a
 	// node that no longer participates.
 	CmdPruneNode Command = 12
+
+	// CmdAttachOffsets carries the GLCB blob's section-offset/size pairs
+	// (IngestTS index, SourceTS index, NumFrames) once sealToGLCB has
+	// produced data.glcb on the leader. Replaces the original "offsets
+	// only land in the FSM via CmdUploadChunk" gap that left
+	// sealed-but-not-yet-uploaded chunks with zero offsets in the
+	// manifest, breaking the histogram's GLCB section-reader path. Fires
+	// from chunk/file.Manager after sealToGLCB and from the import path
+	// (orchestrator/vault_ops.finalizeImportedChunk) for replicated
+	// chunks. See gastrolog-1dg3i.
+	CmdAttachOffsets Command = 13
 )
 
 // ManifestEntry holds the full metadata for one chunk in this tier's
@@ -516,6 +527,8 @@ func (f *FSM) applyLocked(cmd Command, payload []byte) (any, applyEffects) {
 		node, finalizable, result = f.applyPruneNode(payload)
 		fx.prunedNode = node
 		fx.prunedFinalizable = finalizable
+	case CmdAttachOffsets:
+		result = f.applyAttachOffsets(payload)
 	default:
 		result = fmt.Errorf("unknown chunk FSM command: %d", cmd)
 	}
@@ -708,6 +721,32 @@ func (f *FSM) applyCompress(data []byte) error {
 	return nil
 }
 
+// AttachOffsets: [16 ChunkID][8 IngestIdxOff][8 IngestIdxSize][8 SourceIdxOff][8 SourceIdxSize][4 NumFrames]
+//
+// Fired after sealToGLCB on the leader (and after finalizeImportedChunk
+// on import paths) so every sealed chunk's section-offset metadata
+// reaches the FSM, not just cloud-uploaded ones. The histogram's GLCB
+// section-reader uses these offsets to mmap the IngestTS index out of
+// data.glcb directly, eliminating the .ts-cache download path.
+func (f *FSM) applyAttachOffsets(data []byte) error {
+	if len(data) < 52 {
+		return fmt.Errorf("attach offsets: payload too short (%d bytes)", len(data))
+	}
+	var id chunk.ChunkID
+	copy(id[:], data[:16])
+
+	e := f.chunks[id]
+	if e == nil {
+		return fmt.Errorf("attach offsets: %s not found", id)
+	}
+	e.IngestIdxOffset = int64(binary.BigEndian.Uint64(data[16:24])) //nolint:gosec // G115: round-trip
+	e.IngestIdxSize = int64(binary.BigEndian.Uint64(data[24:32]))   //nolint:gosec // G115: round-trip
+	e.SourceIdxOffset = int64(binary.BigEndian.Uint64(data[32:40])) //nolint:gosec // G115: round-trip
+	e.SourceIdxSize = int64(binary.BigEndian.Uint64(data[40:48]))   //nolint:gosec // G115: round-trip
+	e.NumFrames = int32(binary.BigEndian.Uint32(data[48:52]))       //nolint:gosec // G115: safe round-trip from uint32 frame count
+	return nil
+}
+
 // UploadChunk: [16 ChunkID][8 DiskBytes][8 IngestIdxOff][8 IngestIdxSize][8 SourceIdxOff][8 SourceIdxSize][4 NumFrames]
 func (f *FSM) applyUpload(data []byte) error {
 	if len(data) < 60 {
@@ -830,6 +869,20 @@ func MarshalUploadChunk(id chunk.ChunkID, diskBytes, ingestIdxOff, ingestIdxSize
 	binary.BigEndian.PutUint64(buf[41:49], uint64(sourceIdxOff))  //nolint:gosec // G115: round-trip
 	binary.BigEndian.PutUint64(buf[49:57], uint64(sourceIdxSize)) //nolint:gosec // G115: round-trip
 	binary.BigEndian.PutUint32(buf[57:61], uint32(numFrames)) //nolint:gosec // G115: safe round-trip for frame count
+	return buf
+}
+
+// MarshalAttachOffsets builds the Raft log data for a CmdAttachOffsets
+// command. See applyAttachOffsets for layout.
+func MarshalAttachOffsets(id chunk.ChunkID, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, numFrames int32) []byte {
+	buf := make([]byte, 1+52)
+	buf[0] = byte(CmdAttachOffsets)
+	copy(buf[1:17], id[:])
+	binary.BigEndian.PutUint64(buf[17:25], uint64(ingestIdxOff))  //nolint:gosec // G115: round-trip
+	binary.BigEndian.PutUint64(buf[25:33], uint64(ingestIdxSize)) //nolint:gosec // G115: round-trip
+	binary.BigEndian.PutUint64(buf[33:41], uint64(sourceIdxOff))  //nolint:gosec // G115: round-trip
+	binary.BigEndian.PutUint64(buf[41:49], uint64(sourceIdxSize)) //nolint:gosec // G115: round-trip
+	binary.BigEndian.PutUint32(buf[49:53], uint32(numFrames))     //nolint:gosec // G115: safe round-trip for frame count
 	return buf
 }
 

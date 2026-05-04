@@ -54,6 +54,10 @@ func (a *Announcer) AnnounceCompress(id chunk.ChunkID, diskBytes int64) {
 	a.apply("compress", id, MarshalCompressChunk(id, diskBytes))
 }
 
+func (a *Announcer) AnnounceAttachOffsets(id chunk.ChunkID, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, numFrames int32) {
+	a.apply("attach-offsets", id, MarshalAttachOffsets(id, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize, numFrames))
+}
+
 func (a *Announcer) AnnounceUpload(id chunk.ChunkID, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, numFrames int32) {
 	a.apply("upload", id, MarshalUploadChunk(id, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize, numFrames))
 }

@@ -282,6 +282,8 @@ func commandName(cmd tierfsm.Command) string {
 		return "CmdFinalizeDelete"
 	case tierfsm.CmdPruneNode:
 		return "CmdPruneNode"
+	case tierfsm.CmdAttachOffsets:
+		return "CmdAttachOffsets"
 	default:
 		return fmt.Sprintf("CmdUnknown(%d)", cmd)
 	}

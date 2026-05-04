@@ -690,18 +690,16 @@ func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.Reco
 // back to buffering and sorting.
 func (e *Engine) buildTSOrderedScanner(ctx context.Context, cursor chunk.RecordCursor, q Query, b *scannerBuilder, meta chunk.ChunkMeta, startPos *uint64, cm chunk.ChunkManager, im index.IndexManager) (iter.Seq2[recordWithRef, error], error) {
 	if meta.Sealed {
-		// Try to load the TS index for this ordering.
-		// The index manager handles local sealed chunks; the chunk manager
-		// handles cloud chunks (via locally-cached TS index files).
+		// IndexManager handles all sealed chunks — local and cloud-warm-cached
+		// alike — by mmapping the embedded ITSI/STSI section out of data.glcb.
+		// When the cloud blob isn't in the warm cache we fall through to the
+		// reorder buffer rather than fetching the index from S3 (gastrolog-1dg3i).
 		tsEntries, err := loadTSEntries(im, meta.ID, q.OrderBy)
-		if err != nil && meta.CloudBacked {
-			tsEntries, err = loadCloudTSEntries(cm, meta.ID, q.OrderBy)
-		}
 		if err == nil {
 			e.logger.Debug("✅ TS index scanner activated", "chunk", meta.ID, "entries", len(tsEntries), "cloud", meta.CloudBacked)
 			return buildTSIndexScanner(ctx, cursor, q, b, meta, tsEntries)
 		}
-		e.logger.Debug("❌ TS index unavailable, falling back to reorder buffer", "chunk", meta.ID, "cloud", meta.CloudBacked, "error", err, "isNotFound", errors.Is(err, index.ErrIndexNotFound), "isNoTS", errors.Is(err, chunk.ErrNoTSIndex))
+		e.logger.Debug("❌ TS index unavailable, falling back to reorder buffer", "chunk", meta.ID, "cloud", meta.CloudBacked, "error", err, "isNotFound", errors.Is(err, index.ErrIndexNotFound))
 		// Fall through to buffer-and-sort if index unavailable.
 	}
 
@@ -733,33 +731,6 @@ func (e *Engine) buildTSOrderedScanner(ctx context.Context, cursor chunk.RecordC
 		return reorderByTSWithBounds(inner, q.OrderBy, q.Reverse(), lower, upper, q.ResumeTS), nil
 	}
 	return reorderByTS(inner, q.OrderBy, q.Reverse()), nil
-}
-
-// loadCloudTSEntries loads TS index entries from the chunk manager's cloud
-// TS cache via the TSIndexLoader interface. Returns index.ErrIndexNotFound
-// if the chunk manager doesn't support it.
-func loadCloudTSEntries(cm chunk.ChunkManager, chunkID chunk.ChunkID, orderBy OrderBy) ([]index.TSEntry, error) {
-	loader, ok := cm.(chunk.TSIndexLoader)
-	if !ok {
-		return nil, index.ErrIndexNotFound
-	}
-	var entries []chunk.TSEntry
-	var err error
-	switch orderBy { //nolint:exhaustive // IngestTS is the default
-	case OrderBySourceTS:
-		entries, err = loader.LoadSourceEntries(chunkID)
-	default:
-		entries, err = loader.LoadIngestEntries(chunkID)
-	}
-	if err != nil {
-		return nil, err
-	}
-	// Convert chunk.TSEntry → index.TSEntry (same layout, different packages).
-	out := make([]index.TSEntry, len(entries))
-	for i, e := range entries {
-		out[i] = index.TSEntry{TS: e.TS, Pos: e.Pos}
-	}
-	return out, nil
 }
 
 // loadTSEntries loads the appropriate TS index entries based on OrderBy.

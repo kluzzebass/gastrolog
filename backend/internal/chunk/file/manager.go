@@ -2556,65 +2556,55 @@ func (m *Manager) ScanActiveByIngestTS(id chunk.ChunkID, cb func(ingestTS time.T
 }
 
 // FindIngestStartPosition returns the earliest record position with IngestTS >= ts
-// for the active chunk. Returns (0, false, nil) for sealed chunks (use the index manager).
+// for the active chunk. Returns (0, false, nil) for sealed chunks (cloud or
+// local) — the index manager owns those via OpenIngestMmap, which reads the
+// embedded ITSI section out of data.glcb regardless of cloud-backed status
+// (the warm cache makes both look identical). See gastrolog-1dg3i.
 func (m *Manager) FindIngestStartPosition(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
 	m.mu.Lock()
 	active := m.active
-	meta := m.lookupMeta(id)
 	m.mu.Unlock()
 
-	// Active chunk: B+ tree lookup.
-	if active != nil && active.meta.id == id {
-		it, err := active.ingestBT.FindGE(ts.UnixNano())
-		if err != nil {
-			return 0, false, fmt.Errorf("btree ingest FindGE: %w", err)
-		}
-		if !it.Valid() {
-			return 0, false, nil
-		}
-		return uint64(it.Value()), true, nil
+	if active == nil || active.meta.id != id {
+		return 0, false, nil
 	}
-
-	// Cloud-backed chunk with embedded TS index: range-request binary search.
-	if meta != nil && meta.cloudBacked && meta.ingestIdxSize > 0 {
-		return m.findCloudTSPosition(id, ts, meta.ingestIdxOffset, meta.ingestIdxSize)
+	it, err := active.ingestBT.FindGE(ts.UnixNano())
+	if err != nil {
+		return 0, false, fmt.Errorf("btree ingest FindGE: %w", err)
 	}
-
-	return 0, false, nil
+	if !it.Valid() {
+		return 0, false, nil
+	}
+	return uint64(it.Value()), true, nil
 }
 
 // FindIngestEntryIndex returns the IngestTS-rank of the first entry with
 // IngestTS >= ts. For active chunks the B+ tree returns position; that's
 // only equal to rank for monotonic chunks (callers gate on
-// meta.IngestTSMonotonic). For cloud-backed chunks, returns the entry's
-// index in the (sorted) cache file. Returns (0, false, nil) for sealed
-// local chunks — caller falls through to IndexManager.
+// meta.IngestTSMonotonic). Returns (0, false, nil) for sealed chunks —
+// caller falls through to IndexManager.FindIngestEntryIndex which mmaps
+// the ITSI section directly from data.glcb (cloud or local — same path
+// post-gastrolog-24m1t step 7j warm cache; see gastrolog-1dg3i).
 // See gastrolog-66b7x.
 func (m *Manager) FindIngestEntryIndex(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
 	m.mu.Lock()
 	active := m.active
-	meta := m.lookupMeta(id)
 	m.mu.Unlock()
 
-	if active != nil && active.meta.id == id {
-		it, err := active.ingestBT.FindGE(ts.UnixNano())
-		if err != nil {
-			return 0, false, fmt.Errorf("btree ingest FindGE: %w", err)
-		}
-		if !it.Valid() {
-			return 0, false, nil
-		}
-		// For monotonic active chunks, B+ tree position == rank, so this
-		// is correct. For non-monotonic active chunks, the histogram
-		// dispatch in query/histogram.go avoids this path entirely.
-		return uint64(it.Value()), true, nil
+	if active == nil || active.meta.id != id {
+		return 0, false, nil
 	}
-
-	if meta != nil && meta.cloudBacked && meta.ingestIdxSize > 0 {
-		return m.findCloudTSRank(id, ts, meta.ingestIdxOffset, meta.ingestIdxSize)
+	it, err := active.ingestBT.FindGE(ts.UnixNano())
+	if err != nil {
+		return 0, false, fmt.Errorf("btree ingest FindGE: %w", err)
 	}
-
-	return 0, false, nil
+	if !it.Valid() {
+		return 0, false, nil
+	}
+	// For monotonic active chunks, B+ tree position == rank, so this
+	// is correct. For non-monotonic active chunks, the histogram
+	// dispatch in query/histogram.go avoids this path entirely.
+	return uint64(it.Value()), true, nil
 }
 
 // HasLocalContent reports whether the chunk's content is locally readable
@@ -2660,242 +2650,37 @@ func (m *Manager) HeadCloudBlob(id chunk.ChunkID) error {
 }
 
 // FindSourceStartPosition returns the earliest record position with SourceTS >= ts.
-// Supports active chunks (B+ tree) and cloud chunks (embedded TS index via range request).
+// Active chunks: B+ tree lookup. Sealed (local or cloud-warm-cached): caller
+// falls through to IndexManager.FindSourceStartPosition (which mmaps the
+// embedded STSI section out of data.glcb). See gastrolog-1dg3i.
 func (m *Manager) FindSourceStartPosition(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
 	m.mu.Lock()
 	active := m.active
-	meta := m.lookupMeta(id)
 	m.mu.Unlock()
 
-	// Active chunk: B+ tree lookup.
-	if active != nil && active.meta.id == id {
-		it, err := active.sourceBT.FindGE(ts.UnixNano())
-		if err != nil {
-			return 0, false, fmt.Errorf("btree source FindGE: %w", err)
-		}
-		if !it.Valid() {
-			return 0, false, nil
-		}
-		return uint64(it.Value()), true, nil
+	if active == nil || active.meta.id != id {
+		return 0, false, nil
 	}
-
-	// Cloud-backed chunk with embedded TS index.
-	if meta != nil && meta.cloudBacked && meta.sourceIdxSize > 0 {
-		return m.findCloudTSPosition(id, ts, meta.sourceIdxOffset, meta.sourceIdxSize)
-	}
-
-	return 0, false, nil
-}
-
-const tsCacheDir = ".ts-cache"
-
-// LoadIngestEntries reads the locally-cached ingest TS index for a cloud chunk
-// and returns all entries sorted by IngestTS. Downloads the index from S3 on
-// first access.
-func (m *Manager) LoadIngestEntries(id chunk.ChunkID) ([]chunk.TSEntry, error) {
-	m.mu.Lock()
-	meta := m.lookupMeta(id)
-	m.mu.Unlock()
-	if meta == nil || !meta.cloudBacked || meta.ingestIdxSize == 0 {
-		return nil, chunk.ErrNoTSIndex
-	}
-	return m.loadTSEntries(id, meta.ingestIdxOffset, meta.ingestIdxSize)
-}
-
-// LoadSourceEntries reads the locally-cached source TS index for a cloud chunk.
-func (m *Manager) LoadSourceEntries(id chunk.ChunkID) ([]chunk.TSEntry, error) {
-	m.mu.Lock()
-	meta := m.lookupMeta(id)
-	m.mu.Unlock()
-	if meta == nil || !meta.cloudBacked || meta.sourceIdxSize == 0 {
-		return nil, chunk.ErrNoTSIndex
-	}
-	return m.loadTSEntries(id, meta.sourceIdxOffset, meta.sourceIdxSize)
-}
-
-// loadTSEntries reads a TS index cache file and returns all entries.
-// Downloads from S3 on cache miss.
-func (m *Manager) loadTSEntries(id chunk.ChunkID, offset, size int64) ([]chunk.TSEntry, error) {
-	cachePath := m.tsCachePath(id, offset)
-
-	if _, err := os.Stat(cachePath); err != nil {
-		if err := m.downloadTSIndex(id, offset, size, cachePath); err != nil {
-			return nil, err
-		}
-	}
-
-	return readTSEntriesFromFile(cachePath)
-}
-
-// readTSEntriesFromFile reads all TS index entries from a local file.
-// Each entry is 12 bytes: [tsNano:i64][pos:u32].
-func readTSEntriesFromFile(path string) ([]chunk.TSEntry, error) {
-	f, err := os.Open(filepath.Clean(path))
+	it, err := active.sourceBT.FindGE(ts.UnixNano())
 	if err != nil {
-		return nil, err
+		return 0, false, fmt.Errorf("btree source FindGE: %w", err)
 	}
-	defer func() { _ = f.Close() }()
-
-	info, err := f.Stat()
-	if err != nil {
-		return nil, err
+	if !it.Valid() {
+		return 0, false, nil
 	}
-
-	const entrySize = 12
-	n := int(info.Size()) / entrySize
-	entries := make([]chunk.TSEntry, n)
-
-	var buf [entrySize]byte
-	for i := range n {
-		if _, err := f.ReadAt(buf[:], int64(i)*entrySize); err != nil {
-			return entries[:i], nil // return what we have
-		}
-		entries[i] = chunk.TSEntry{
-			TS:  int64(binary.LittleEndian.Uint64(buf[:8])), //nolint:gosec // G115
-			Pos: binary.LittleEndian.Uint32(buf[8:]),
-		}
-	}
-	return entries, nil
+	return uint64(it.Value()), true, nil
 }
 
-// findCloudTSPosition looks up the TS index for a cloud chunk via pread-based
-// binary search on the local cache file. On cache miss, downloads the TS index
-// from S3 and persists it. Subsequent calls do O(log n) pread calls — no heap
-// allocation beyond a 12-byte buffer, no mmap, no leak.
-func (m *Manager) findCloudTSPosition(id chunk.ChunkID, ts time.Time, offset, size int64) (uint64, bool, error) {
-	cachePath := m.tsCachePath(id, offset)
-
-	// Ensure the cache file exists.
-	if _, err := os.Stat(cachePath); err != nil {
-		if err := m.downloadTSIndex(id, offset, size, cachePath); err != nil {
-			return 0, false, err
-		}
-	}
-
-	// O(log n) binary search via pread — no heap allocation.
-	_, pos, ok, err := searchTSCacheFile(cachePath, ts.UnixNano())
-	return uint64(pos), ok, err
-}
-
-// findCloudTSRank is the rank counterpart to findCloudTSPosition. Returns
-// the entry's index in the IngestTS-sorted cache file (i.e. its rank), not
-// the physical record position. Required for histogram bucket counting on
-// non-monotonic cloud chunks where pos ≠ rank. See gastrolog-66b7x.
-func (m *Manager) findCloudTSRank(id chunk.ChunkID, ts time.Time, offset, size int64) (uint64, bool, error) {
-	cachePath := m.tsCachePath(id, offset)
-	if _, err := os.Stat(cachePath); err != nil {
-		if err := m.downloadTSIndex(id, offset, size, cachePath); err != nil {
-			return 0, false, err
-		}
-	}
-	rank, _, ok, err := searchTSCacheFile(cachePath, ts.UnixNano())
-	return uint64(rank), ok, err
-}
-
-// downloadTSIndex fetches a TS index section from S3 and writes it to a local
-// cache file. Streams directly to disk — no heap buffering.
-func (m *Manager) downloadTSIndex(id chunk.ChunkID, offset, size int64, cachePath string) error {
-	rc, err := m.cfg.CloudStore.DownloadRange(context.Background(), m.blobKey(id), offset, size)
-	if err != nil {
-		return fmt.Errorf("download cloud TS index for %s: %w", id, err)
-	}
-	defer func() { _ = rc.Close() }()
-
-	cacheDir := filepath.Join(m.cfg.Dir, tsCacheDir)
-	_ = os.MkdirAll(cacheDir, 0o750)
-
-	f, err := os.CreateTemp(cacheDir, "ts-*.tmp")
-	if err != nil {
-		return fmt.Errorf("create temp file for TS index: %w", err)
-	}
-	tmpPath := f.Name()
-
-	if _, err := io.Copy(f, rc); err != nil {
-		_ = f.Close()
-		_ = os.Remove(tmpPath) //nolint:gosec // G703: tmpPath from os.CreateTemp
-		return fmt.Errorf("write cloud TS index for %s: %w", id, err)
-	}
-	_ = f.Close()
-
-	if err := os.Rename(tmpPath, cachePath); err != nil { //nolint:gosec // G703: tmpPath from os.CreateTemp
-		_ = os.Remove(tmpPath) //nolint:gosec // G703: cleanup
-		return fmt.Errorf("rename TS cache file: %w", err)
-	}
-	return nil
-}
-
-// searchTSCacheFile does O(log n) binary search on a local TS index cache file
-// using pread. Each entry is 12 bytes: [tsNano:i64][pos:u32]. No heap allocation
-// beyond a single 12-byte buffer.
-// searchTSCacheFile binary-searches a cloud-chunk TS index cache file for
-// the first entry with TS >= tsNano. Returns (rank, pos, ok, err): rank is
-// the entry's index in the IngestTS-sorted cache (correct for histogram
-// bucket counting), pos is the physical record position (correct for
-// cursor positioning). The two diverge for non-monotonic cloud chunks
-// (built via ImportRecords). See gastrolog-66b7x.
-func searchTSCacheFile(path string, tsNano int64) (rank, pos uint32, ok bool, err error) {
-	f, ferr := os.Open(filepath.Clean(path))
-	if ferr != nil {
-		return 0, 0, false, ferr
-	}
-	defer func() { _ = f.Close() }()
-
-	info, ferr := f.Stat()
-	if ferr != nil {
-		return 0, 0, false, ferr
-	}
-
-	const entrySize = 12
-	n := int(info.Size()) / entrySize
-	if n == 0 {
-		return 0, 0, false, nil
-	}
-
-	var buf [entrySize]byte
-	readEntry := func(i int) (int64, uint32, error) {
-		off := int64(i) * entrySize
-		if _, err := f.ReadAt(buf[:], off); err != nil {
-			return 0, 0, err
-		}
-		ts := int64(binary.LittleEndian.Uint64(buf[:8])) //nolint:gosec // G115: nanosecond timestamps fit in int64
-		p := binary.LittleEndian.Uint32(buf[8:])
-		return ts, p, nil
-	}
-
-	// Quick bounds check.
-	lastTS, _, ferr := readEntry(n - 1)
-	if ferr != nil {
-		return 0, 0, false, ferr
-	}
-	if tsNano > lastTS {
-		return 0, 0, false, nil
-	}
-
-	// Binary search: first i where TS[i] >= tsNano.
-	lo, hi := 0, n
-	for lo < hi {
-		mid := lo + (hi-lo)/2
-		midTS, _, mErr := readEntry(mid)
-		if mErr != nil {
-			return 0, 0, false, mErr
-		}
-		if midTS < tsNano {
-			lo = mid + 1
-		} else {
-			hi = mid
-		}
-	}
-
-	_, p, rerr := readEntry(lo)
-	if rerr != nil {
-		return 0, 0, false, rerr
-	}
-	return uint32(lo), p, true, nil
-}
-
-func (m *Manager) tsCachePath(id chunk.ChunkID, offset int64) string {
-	return filepath.Join(m.cfg.Dir, tsCacheDir, fmt.Sprintf("%s.%d", id, offset))
-}
+// LoadIngestEntries / LoadSourceEntries / .ts-cache plumbing was retired
+// in gastrolog-1dg3i: the histogram and search-side TS-ordered scanners
+// now read the embedded ITSI/STSI sections directly from data.glcb via
+// filetsidx.OpenIngestMmap / OpenSourceMmap (handled by the IndexManager).
+// Cloud chunks reach the same path through their warm-cache data.glcb;
+// when the warm cache is cold the histogram falls back to FSM-proportional
+// distribution rather than fetching the index section from S3. Removed:
+// tsCacheDir / tsCachePath / searchTSCacheFile / downloadTSIndex /
+// readTSEntriesFromFile / findCloudTSRank / findCloudTSPosition /
+// loadTSEntries.
 
 // ReadWriteTimestamps reads the WriteTS for each given record position in a chunk.
 // Opens idx.log once and reads only the 8-byte WriteTS field for each position.
@@ -3141,6 +2926,32 @@ func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
 	// fatal; there is no longer a multi-file fallback.
 	if _, _, err := m.sealToGLCB(id); err != nil {
 		return fmt.Errorf("seal chunk %s to GLCB: %w", id, err)
+	}
+
+	// 1a. Attach the freshly-computed GLCB section offsets to the FSM
+	// manifest entry so the histogram's GLCB section-reader can find
+	// the IngestTS index without reading the blob's TOC. Replicates
+	// to every node via Raft like the other manifest mutations. See
+	// gastrolog-1dg3i.
+	if m.cfg.Announcer != nil {
+		m.mu.Lock()
+		meta := m.lookupMeta(id)
+		var (
+			ingestOff, ingestSize int64
+			sourceOff, sourceSize int64
+			numFrames             int32
+		)
+		if meta != nil {
+			ingestOff = meta.ingestIdxOffset
+			ingestSize = meta.ingestIdxSize
+			sourceOff = meta.sourceIdxOffset
+			sourceSize = meta.sourceIdxSize
+			numFrames = meta.numFrames
+		}
+		m.mu.Unlock()
+		if meta != nil {
+			m.cfg.Announcer.AnnounceAttachOffsets(id, ingestOff, ingestSize, sourceOff, sourceSize, numFrames)
+		}
 	}
 
 	// 2. Build indexes. Now reads through OpenCursor → GLCB cursor.
@@ -3537,12 +3348,6 @@ func (m *Manager) removeFromCloudIndex(id chunk.ChunkID) {
 	}
 	m.cloudIdxMu.Unlock()
 	m.cloudListCache = nil // invalidate
-	// Clean up cached TS index files.
-	cacheDir := filepath.Join(m.cfg.Dir, tsCacheDir)
-	matches, _ := filepath.Glob(filepath.Join(cacheDir, id.String()+".*"))
-	for _, f := range matches {
-		_ = os.Remove(f)
-	}
 }
 
 // rebuildCloudListCache scans the cloud B+ tree index and caches the result.
