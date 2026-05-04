@@ -398,7 +398,7 @@ func TestReconcilerOnSealProjectsToLocalManager(t *testing.T) {
 	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(id, now, now, now)}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(id, now, 100, 1234, now, now)}); err != nil {
+	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(id, now, 100, 1234, now, now, now, false)}); err != nil {
 		t.Fatalf("seal: %v", err)
 	}
 
@@ -425,8 +425,8 @@ func TestReconcileFromSnapshotProjectsAllSealedEntries(t *testing.T) {
 	for _, id := range []chunk.ChunkID{idSealed1, idSealed2, idActive} {
 		_ = src.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(id, now, now, now)})
 	}
-	_ = src.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idSealed1, now, 1, 1, now, now)})
-	_ = src.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idSealed2, now, 1, 1, now, now)})
+	_ = src.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idSealed1, now, 1, 1, now, now, now, false)})
+	_ = src.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idSealed2, now, 1, 1, now, now, now, false)})
 
 	cm := &reconcilerFakeSealEnsurerChunkManager{}
 	tier := &TierInstance{
@@ -539,7 +539,7 @@ func TestSweepLocalOrphansDeletesOnlyTombstonedAbsentEntries(t *testing.T) {
 	// protocol to commit a tombstone, then leave the local file behind.
 	idTombstoned := chunk.NewChunkID()
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(idTombstoned, now, now, now)})
-	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idTombstoned, now, 1, 1, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idTombstoned, now, 1, 1, now, now, now, false)})
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalRequestDelete(idTombstoned, now, "test", []string{"node-A"})})
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalAckDelete(idTombstoned, "node-A")})
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalFinalizeDelete(idTombstoned)})
@@ -547,12 +547,12 @@ func TestSweepLocalOrphansDeletesOnlyTombstonedAbsentEntries(t *testing.T) {
 	// Case 2 (negative): live in manifest. Created + sealed, no deletes.
 	idLiveSealed := chunk.NewChunkID()
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(idLiveSealed, now, now, now)})
-	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idLiveSealed, now, 1, 1, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idLiveSealed, now, 1, 1, now, now, now, false)})
 
 	// Case 3 (negative): pendingDeletes — receipt protocol owns it.
 	idPending := chunk.NewChunkID()
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(idPending, now, now, now)})
-	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idPending, now, 1, 1, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idPending, now, 1, 1, now, now, now, false)})
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalRequestDelete(idPending, now, "test", []string{"node-A"})})
 
 	// Case 4 (negative): on disk, FSM has nothing about it (no tombstone,
@@ -617,12 +617,12 @@ func TestSweepMissingReplicasRequestsOnlySealedAndAbsentEntries(t *testing.T) {
 	// Case 1 (positive): sealed in FSM, missing on disk → must be requested.
 	idMissing := chunk.NewChunkID()
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(idMissing, now, now, now)})
-	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idMissing, now, 1, 1, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idMissing, now, 1, 1, now, now, now, false)})
 
 	// Case 2 (negative): sealed in FSM, present locally → must NOT be requested.
 	idPresent := chunk.NewChunkID()
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(idPresent, now, now, now)})
-	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idPresent, now, 1, 1, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idPresent, now, 1, 1, now, now, now, false)})
 
 	// Case 3 (negative): in FSM but unsealed (active) → must NOT be requested.
 	idActive := chunk.NewChunkID()
@@ -632,7 +632,7 @@ func TestSweepMissingReplicasRequestsOnlySealedAndAbsentEntries(t *testing.T) {
 	// (lives in shared bucket; not a local-replica concern).
 	idCloud := chunk.NewChunkID()
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(idCloud, now, now, now)})
-	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idCloud, now, 1, 1, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idCloud, now, 1, 1, now, now, now, false)})
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalUploadChunk(idCloud, 1, 0, 0, 0, 0, 0)})
 
 	cm.chunks = []chunk.ChunkMeta{
@@ -687,7 +687,7 @@ func TestSweepMissingReplicasSkipsLeaderTier(t *testing.T) {
 	// a request on a follower. On a leader, the sweep must skip entirely.
 	idMissing := chunk.NewChunkID()
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(idMissing, now, now, now)})
-	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idMissing, now, 1, 1, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idMissing, now, 1, 1, now, now, now, false)})
 
 	orch := newTestOrch(t, Config{LocalNodeID: "node-A"})
 	fake := &captureCatchupReplicator{}
@@ -723,7 +723,7 @@ func TestSweepMissingReplicasSkipsWhenLeaderUnknown(t *testing.T) {
 
 	idMissing := chunk.NewChunkID()
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(idMissing, now, now, now)})
-	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idMissing, now, 1, 1, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idMissing, now, 1, 1, now, now, now, false)})
 
 	orch := newTestOrch(t, Config{LocalNodeID: "node-A"})
 	fake := &captureCatchupReplicator{}
@@ -858,7 +858,7 @@ func TestSweepLocalOrphansDemotesActiveTombstonedChunk(t *testing.T) {
 	// tombstone (no manifest entry, no pendingDeletes entry).
 	idTombstoned := chunk.NewChunkID()
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(idTombstoned, now, now, now)})
-	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idTombstoned, now, 1, 1, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idTombstoned, now, 1, 1, now, now, now, false)})
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalRequestDelete(idTombstoned, now, "test", []string{"node-A"})})
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalAckDelete(idTombstoned, "node-A")})
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalFinalizeDelete(idTombstoned)})
@@ -975,7 +975,7 @@ func TestReconcilerOnSealNotifiesChunkChange(t *testing.T) {
 	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(id, now, now, now)}); err != nil {
 		t.Fatalf("apply create: %v", err)
 	}
-	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(id, now, 100, 1234, now, now)}); err != nil {
+	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(id, now, 100, 1234, now, now, now, false)}); err != nil {
 		t.Fatalf("apply seal: %v", err)
 	}
 
@@ -1025,7 +1025,7 @@ func TestReconcilerOnSealNotifiesEvenWhenEnsureSealedFails(t *testing.T) {
 	id := chunk.NewChunkID()
 	now := time.Now()
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(id, now, now, now)})
-	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(id, now, 1, 1, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(id, now, 1, 1, now, now, now, false)})
 
 	if !waitForChunkSignal(signalCh, time.Second) {
 		t.Fatal("expected chunk signal even when EnsureSealed errors, got timeout")
@@ -1126,7 +1126,7 @@ func TestWireTierFSMOnUploadFiresNotifyChunkChange(t *testing.T) {
 	id := chunk.NewChunkID()
 	now := time.Now()
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(id, now, now, now)})
-	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(id, now, 1, 1, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(id, now, 1, 1, now, now, now, false)})
 	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalUploadChunk(id, 1024, 0, 0, 0, 0, 1)}); err != nil {
 		t.Fatalf("apply upload: %v", err)
 	}

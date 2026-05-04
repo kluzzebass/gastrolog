@@ -10,7 +10,14 @@ import "time"
 // When nil, no announcements are made (single-node mode, tests).
 type MetadataAnnouncer interface {
 	AnnounceCreate(id ChunkID, writeStart, ingestStart, sourceStart time.Time)
-	AnnounceSeal(id ChunkID, writeEnd time.Time, recordCount, bytes int64, ingestEnd, sourceEnd time.Time)
+	// AnnounceSeal carries the chunk manager's running min IngestTS
+	// (ingestStart) and IngestTSMonotonic flag in addition to the seal
+	// finalization fields. Both must reach the FSM at seal time: createdAt
+	// (which CmdCreateChunk seeded into IngestStart) is wall-clock and
+	// can lag the actual record TSs by a tier-transition delay; the
+	// monotonic flag is the chunk manager's running observation that's
+	// not preserved in the FSM otherwise.
+	AnnounceSeal(id ChunkID, writeEnd time.Time, recordCount, bytes int64, ingestStart, ingestEnd, sourceEnd time.Time, ingestTSMonotonic bool)
 	AnnounceCompress(id ChunkID, diskBytes int64)
 	AnnounceUpload(id ChunkID, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, numFrames int32)
 	AnnounceDelete(id ChunkID)

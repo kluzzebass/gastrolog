@@ -46,8 +46,8 @@ func (a *Announcer) AnnounceCreate(id chunk.ChunkID, writeStart, ingestStart, so
 	a.apply("create", id, MarshalCreateChunk(id, writeStart, ingestStart, sourceStart))
 }
 
-func (a *Announcer) AnnounceSeal(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64, ingestEnd, sourceEnd time.Time) {
-	a.apply("seal", id, MarshalSealChunk(id, writeEnd, recordCount, bytes, ingestEnd, sourceEnd))
+func (a *Announcer) AnnounceSeal(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64, ingestStart, ingestEnd, sourceEnd time.Time, ingestTSMonotonic bool) {
+	a.apply("seal", id, MarshalSealChunk(id, writeEnd, recordCount, bytes, ingestStart, ingestEnd, sourceEnd, ingestTSMonotonic))
 }
 
 func (a *Announcer) AnnounceCompress(id chunk.ChunkID, diskBytes int64) {

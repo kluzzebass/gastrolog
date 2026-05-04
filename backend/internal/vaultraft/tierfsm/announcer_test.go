@@ -279,7 +279,7 @@ func TestAnnouncerShortCircuitsDuringShutdown(t *testing.T) {
 	// Flip phase. Now every announce should be a silent no-op.
 	phase.BeginShutdown("test: draining")
 
-	ann.AnnounceSeal(id, time.Now(), 10, 512, time.Now(), time.Now())
+	ann.AnnounceSeal(id, time.Now(), 10, 512, time.Now(), time.Now(), time.Now(), false)
 	ann.AnnounceDelete(id)
 	if applier.calls != 1 {
 		t.Errorf("post-shutdown: calls = %d, want 1 (expected zero new calls)", applier.calls)

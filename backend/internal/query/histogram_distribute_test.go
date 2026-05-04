@@ -124,18 +124,21 @@ func TestDistributeChunkRecordsByOverlap(t *testing.T) {
 	})
 
 	// Regression: non-monotonic cloud chunks (IngestEnd < IngestStart) used
-	// to mark the *entire* clamped [firstBucket, lastBucket] range as
-	// cloudFlags=true even though distribute's span≤0 branch only attributes
-	// records to the IngestStart bucket. Result: histogram showed cloud
-	// hatching on buckets where no cloud chunks actually contributed —
-	// recent buckets within the file-tier window got falsely flagged. The
-	// fix marks cloudFlags only where records actually land.
-	t.Run("non-monotonic cloud chunk marks cloudFlags only in IngestStart bucket", func(t *testing.T) {
+	// to dump RecordCount into the IngestStart bucket via the span≤0
+	// branch — but for a cloud chunk built from out-of-order records,
+	// IngestStart is the last-APPENDED record's TS (which can be recent),
+	// not the chunk's actual TS upper bound. Result: histogram attributed
+	// records to file-tier-only recent buckets every ~rotation interval.
+	// The fix sorts the bounds before computing span/overlap so records
+	// distribute across the chunk's actual [min, max] TS envelope.
+	t.Run("non-monotonic cloud chunk distributes across sorted [min,max] envelope", func(t *testing.T) {
 		counts := make([]int64, numBuckets)
 		cloudFlags := make([]bool, numBuckets)
-		// Reversed: IngestStart later than IngestEnd. firstBucket/lastBucket
-		// would clamp the swap range to buckets 2..7 — but only bucket 7
-		// (the IngestStart bucket) should get cloudFlags=true.
+		// Reversed: IngestStart later than IngestEnd. After sorting, the
+		// envelope is [t0+2m, t0+7m], spanning 5 buckets — records should
+		// distribute across buckets 2..6 (each 1m bucket overlaps by 1m
+		// of the 5m span = 20% × 100 = 20 records). Bucket 7 should NOT
+		// receive records.
 		meta := chunk.ChunkMeta{
 			RecordCount: 100,
 			IngestStart: t0.Add(7 * time.Minute),
@@ -143,18 +146,29 @@ func TestDistributeChunkRecordsByOverlap(t *testing.T) {
 			CloudBacked: true,
 		}
 		distributeChunkRecordsByOverlap(meta, t0, bucketWidth, 2, 7, counts, cloudFlags, true)
-		if counts[7] != 100 {
-			t.Errorf("bucket 7 got %d, want 100", counts[7])
+		var total int64
+		for _, c := range counts {
+			total += c
 		}
-		if !cloudFlags[7] {
-			t.Error("bucket 7 should be cloud-flagged (records landed here)")
+		if total != 100 {
+			t.Errorf("total = %d, want 100", total)
 		}
-		for i := range numBuckets {
-			if i == 7 {
-				continue
+		// Bucket 7 should NOT receive records (TS=t0+7m is the boundary;
+		// overlap with [t0+7m, t0+8m] is 0). Recent-bucket false-positive
+		// regression check.
+		if counts[7] != 0 {
+			t.Errorf("bucket 7 got %d, want 0 (was the false-positive recent bucket)", counts[7])
+		}
+		if cloudFlags[7] {
+			t.Error("bucket 7 should not be cloud-flagged (no records landed here)")
+		}
+		// Each of buckets 2..6 should have 20 records (uniform distribution).
+		for i := 2; i <= 6; i++ {
+			if counts[i] != 20 {
+				t.Errorf("bucket %d got %d, want 20", i, counts[i])
 			}
-			if cloudFlags[i] {
-				t.Errorf("bucket %d cloud-flagged but should not be (no records landed here)", i)
+			if !cloudFlags[i] {
+				t.Errorf("bucket %d should be cloud-flagged", i)
 			}
 		}
 	})

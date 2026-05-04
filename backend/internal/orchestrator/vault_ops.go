@@ -1123,7 +1123,7 @@ func (o *Orchestrator) finalizeImportedChunk(vaultID, tierID glid.GLID, cm chunk
 	if ann, ok := cm.(chunk.AnnouncerGetter); ok {
 		if a := ann.GetAnnouncer(); a != nil {
 			a.AnnounceCreate(meta.ID, meta.WriteStart, meta.IngestStart, meta.SourceStart)
-			a.AnnounceSeal(meta.ID, meta.WriteEnd, meta.RecordCount, meta.Bytes, meta.IngestEnd, meta.SourceEnd)
+			a.AnnounceSeal(meta.ID, meta.WriteEnd, meta.RecordCount, meta.Bytes, meta.IngestStart, meta.IngestEnd, meta.SourceEnd, meta.IngestTSMonotonic)
 		}
 	}
 

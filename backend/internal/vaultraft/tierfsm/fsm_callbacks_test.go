@@ -30,7 +30,7 @@ func TestOnSealCallbackFires(t *testing.T) {
 	})
 
 	fsm.Apply(&hraft.Log{Data: MarshalCreateChunk(id, now, now, now)})
-	fsm.Apply(&hraft.Log{Data: MarshalSealChunk(id, now, 100, 12345, now, now)})
+	fsm.Apply(&hraft.Log{Data: MarshalSealChunk(id, now, 100, 12345, now, now, now, false)})
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -68,7 +68,7 @@ func TestOnSealCallbackNotCalledWhenChunkUnknown(t *testing.T) {
 
 	// Seal a chunk that was never created — applySeal returns an error,
 	// so the callback must not fire.
-	res := fsm.Apply(&hraft.Log{Data: MarshalSealChunk(id, now, 1, 1, now, now)})
+	res := fsm.Apply(&hraft.Log{Data: MarshalSealChunk(id, now, 1, 1, now, now, now, false)})
 	if res == nil {
 		t.Fatal("expected error sealing unknown chunk, got nil")
 	}
@@ -172,7 +172,7 @@ func TestNewCallbacksNoPanicWhenUnregistered(t *testing.T) {
 	// None of the new callbacks are set. Applying each command must
 	// not panic and must not regress existing apply behavior.
 	fsm.Apply(&hraft.Log{Data: MarshalCreateChunk(id, now, now, now)})
-	if err := fsm.Apply(&hraft.Log{Data: MarshalSealChunk(id, now, 1, 1, now, now)}); err != nil {
+	if err := fsm.Apply(&hraft.Log{Data: MarshalSealChunk(id, now, 1, 1, now, now, now, false)}); err != nil {
 		t.Errorf("seal apply unexpected error: %v", err)
 	}
 	if err := fsm.Apply(&hraft.Log{Data: MarshalRetentionPending(id)}); err != nil {

@@ -418,6 +418,11 @@ func scanActiveNonMono(cm chunk.ChunkManager, meta chunk.ChunkMeta, startNanos, 
 			counts[b]++
 			if v := attrs[groupField]; v != "" {
 				groupCounts[b][v]++
+			} else {
+				// Level-less records get an explicit "other" bucket
+				// rather than landing as leftover. See timechartChunkGroups
+				// for rationale.
+				groupCounts[b]["other"]++
 			}
 			return true
 		})
@@ -590,6 +595,15 @@ func timechartChunkGroups(
 		_ = cm.ScanAttrs(meta.ID, startPos, func(_ time.Time, attrs chunk.Attributes) bool {
 			if v := attrs[groupField]; v != "" {
 				localCounts[v]++
+			} else {
+				// Records without the group attr are a real category
+				// ("level not extractable" for chatterbox plain/access/
+				// weird formats), not unsampled-cloud leftover. Attribute
+				// them to "other" here so buildHistogramBuckets'
+				// global-ratio distribution only kicks in for buckets
+				// that genuinely have no local samples (cloud blobs not
+				// in the warm cache).
+				localCounts["other"]++
 			}
 			sampled++
 			return sampled < limit
@@ -877,6 +891,10 @@ func nonMonotonicChunkGroups(
 	_ = cm.ScanAttrs(meta.ID, 0, func(_ time.Time, attrs chunk.Attributes) bool {
 		if v := attrs[groupField]; v != "" {
 			levelCounts[v]++
+		} else {
+			// Level-less records belong in "other", not leftover. See
+			// timechartChunkGroups for the rationale.
+			levelCounts["other"]++
 		}
 		sampled++
 		return sampled < sampleCap
@@ -1079,15 +1097,25 @@ func distributeChunkRecordsByOverlap(
 	if meta.RecordCount == 0 || meta.IngestStart.IsZero() || meta.IngestEnd.IsZero() {
 		return
 	}
-	span := meta.IngestEnd.Sub(meta.IngestStart)
+	// Sort bounds so non-monotonic chunks (IngestEnd < IngestStart, common
+	// for cloud chunks built via ImportRecords) distribute records across
+	// their actual TS envelope rather than collapsing to a single bucket.
+	// Without the sort, a non-monotonic chunk hits the span≤0 branch and
+	// dumps RecordCount into the IngestStart bucket — which can be RECENT
+	// (last-appended record's TS) even when the chunk's actual records are
+	// all old. That produced false cloudCount on file-tier-only buckets at
+	// chunk-rotation cadence (every ~rotation interval). See
+	// gastrolog-2zdsc follow-up.
+	loBound, hiBound := meta.IngestStart, meta.IngestEnd
+	if loBound.After(hiBound) {
+		loBound, hiBound = hiBound, loBound
+	}
+	span := hiBound.Sub(loBound)
 	if span <= 0 {
-		// Degenerate single-instant chunk (includes non-monotonic chunks
-		// where IngestEnd < IngestStart): dump the count into the bucket
-		// containing IngestStart, if it falls in range. The cloudFlag is
-		// set on that single bucket only — older code over-flagged the
-		// full [firstBucket, lastBucket] range here, marking buckets that
-		// received no records from this chunk as "includes cloud data".
-		offset := meta.IngestStart.Sub(start)
+		// Truly degenerate (single-instant chunk): dump the count into the
+		// bucket containing the single TS, if it falls in range. The
+		// cloudFlag is set on that single bucket only.
+		offset := loBound.Sub(start)
 		if offset < 0 {
 			return
 		}
@@ -1105,12 +1133,12 @@ func distributeChunkRecordsByOverlap(
 		bStart := start.Add(bucketWidth * time.Duration(b))
 		bEnd := start.Add(bucketWidth * time.Duration(b+1))
 		ovStart := bStart
-		if meta.IngestStart.After(ovStart) {
-			ovStart = meta.IngestStart
+		if loBound.After(ovStart) {
+			ovStart = loBound
 		}
 		ovEnd := bEnd
-		if meta.IngestEnd.Before(ovEnd) {
-			ovEnd = meta.IngestEnd
+		if hiBound.Before(ovEnd) {
+			ovEnd = hiBound
 		}
 		overlap := ovEnd.Sub(ovStart)
 		if overlap <= 0 {

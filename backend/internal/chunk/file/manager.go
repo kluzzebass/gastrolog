@@ -1932,10 +1932,12 @@ func (m *Manager) sealActiveLocked(announce bool) error {
 		writeEnd := meta.writeEnd
 		recordCount := meta.recordCount
 		bytes := meta.bytes
+		ingestStart := meta.ingestStart
 		ingestEnd := meta.ingestEnd
 		sourceEnd := meta.sourceEnd
+		ingestTSMonotonic := meta.ingestTSMonotonic
 		m.pendingAnnouncements = append(m.pendingAnnouncements, func() {
-			ann.AnnounceSeal(id, writeEnd, recordCount, bytes, ingestEnd, sourceEnd)
+			ann.AnnounceSeal(id, writeEnd, recordCount, bytes, ingestStart, ingestEnd, sourceEnd, ingestTSMonotonic)
 		})
 	}
 

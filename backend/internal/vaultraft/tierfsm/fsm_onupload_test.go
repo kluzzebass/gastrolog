@@ -27,7 +27,7 @@ func TestOnUploadCallbackFires(t *testing.T) {
 
 	// Create and seal the chunk first.
 	fsm.Apply(&hraft.Log{Data: MarshalCreateChunk(id, now, now, now)})
-	fsm.Apply(&hraft.Log{Data: MarshalSealChunk(id, now, 42, 1024, now, now)})
+	fsm.Apply(&hraft.Log{Data: MarshalSealChunk(id, now, 42, 1024, now, now, now, false)})
 
 	// Upload.
 	fsm.Apply(&hraft.Log{Data: MarshalUploadChunk(id, 512, 100, 50, 200, 75, 3)})

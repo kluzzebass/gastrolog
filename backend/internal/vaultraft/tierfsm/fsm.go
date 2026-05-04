@@ -76,6 +76,12 @@ type ManifestEntry struct {
 	SourceStart time.Time
 	SourceEnd   time.Time
 
+	// IngestTSMonotonic is true when records were appended in IngestTS-
+	// ascending order; the histogram fast path uses position-as-rank only
+	// when this is true. Set by CmdSealChunk from the chunk manager's
+	// running flag (which only flips one direction, true → false).
+	IngestTSMonotonic bool
+
 	CloudBacked      bool
 	Archived         bool
 	RetentionPending    bool
@@ -92,20 +98,21 @@ type ManifestEntry struct {
 // ToChunkMeta converts to the public chunk.ChunkMeta type.
 func (e *ManifestEntry) ToChunkMeta() chunk.ChunkMeta {
 	return chunk.ChunkMeta{
-		ID:          e.ID,
-		WriteStart:  e.WriteStart,
-		WriteEnd:    e.WriteEnd,
-		RecordCount: e.RecordCount,
-		Bytes:       e.Bytes,
-		Sealed:      e.Sealed,
-		DiskBytes:   e.DiskBytes,
-		IngestStart: e.IngestStart,
-		IngestEnd:   e.IngestEnd,
-		SourceStart: e.SourceStart,
-		SourceEnd:   e.SourceEnd,
-		CloudBacked: e.CloudBacked,
-		Archived:    e.Archived,
-		NumFrames:   e.NumFrames,
+		ID:                e.ID,
+		WriteStart:        e.WriteStart,
+		WriteEnd:          e.WriteEnd,
+		RecordCount:       e.RecordCount,
+		Bytes:             e.Bytes,
+		Sealed:            e.Sealed,
+		DiskBytes:         e.DiskBytes,
+		IngestStart:       e.IngestStart,
+		IngestEnd:         e.IngestEnd,
+		SourceStart:       e.SourceStart,
+		SourceEnd:         e.SourceEnd,
+		IngestTSMonotonic: e.IngestTSMonotonic,
+		CloudBacked:       e.CloudBacked,
+		Archived:          e.Archived,
+		NumFrames:         e.NumFrames,
 	}
 }
 
@@ -644,7 +651,19 @@ func (f *FSM) applyCreate(data []byte) error {
 	return nil
 }
 
-// SealChunk: [16 bytes ChunkID][8 WriteEnd][8 RecordCount][8 Bytes][8 IngestEnd][8 SourceEnd]
+// SealChunk: [16 bytes ChunkID][8 WriteEnd][8 RecordCount][8 Bytes][8 IngestEnd][8 SourceEnd][8 IngestStart][1 flags]
+//
+// IngestStart and the flags byte are SealChunk additions: the chunk
+// manager tracks the actual min IngestTS as records are appended (vs.
+// the wall-clock createdAt that CmdCreateChunk seeded), and only the
+// chunk manager knows whether the appended sequence stayed in
+// IngestTS-ascending order. Both must reach the FSM at seal time so
+// the manifest carries authoritative TS bounds and monotonicity for
+// every reader (notably the histogram bucket math, which mis-renders
+// non-monotonic chunks if it gets either field wrong).
+//
+// Flag bit 0 = IngestTSMonotonic. Older 56-byte payloads still apply
+// (the trailing fields default to zero / false).
 func (f *FSM) applySeal(data []byte) error {
 	if len(data) < 56 {
 		return fmt.Errorf("seal chunk: payload too short (%d bytes)", len(data))
@@ -661,6 +680,10 @@ func (f *FSM) applySeal(data []byte) error {
 	e.Bytes = int64(binary.BigEndian.Uint64(data[32:40]))                   //nolint:gosec // G115: byte count round-trip
 	e.IngestEnd = time.Unix(0, int64(binary.BigEndian.Uint64(data[40:48]))) //nolint:gosec // G115: nano timestamp round-trip
 	e.SourceEnd = time.Unix(0, int64(binary.BigEndian.Uint64(data[48:56]))) //nolint:gosec // G115: nano timestamp round-trip
+	if len(data) >= 65 {
+		e.IngestStart = time.Unix(0, int64(binary.BigEndian.Uint64(data[56:64]))) //nolint:gosec // G115: nano timestamp round-trip
+		e.IngestTSMonotonic = data[64]&1 != 0
+	}
 	e.Sealed = true
 	return nil
 }
@@ -771,8 +794,8 @@ func MarshalCreateChunk(id chunk.ChunkID, writeStart, ingestStart, sourceStart t
 }
 
 // MarshalSealChunk builds the Raft log data for a SealChunk command.
-func MarshalSealChunk(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64, ingestEnd, sourceEnd time.Time) []byte {
-	buf := make([]byte, 1+56)
+func MarshalSealChunk(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64, ingestStart, ingestEnd, sourceEnd time.Time, ingestTSMonotonic bool) []byte {
+	buf := make([]byte, 1+65)
 	buf[0] = byte(CmdSealChunk)
 	copy(buf[1:17], id[:])
 	binary.BigEndian.PutUint64(buf[17:25], uint64(writeEnd.UnixNano()))
@@ -780,6 +803,10 @@ func MarshalSealChunk(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes i
 	binary.BigEndian.PutUint64(buf[33:41], uint64(bytes))     //nolint:gosec // G115: safe round-trip for byte count
 	binary.BigEndian.PutUint64(buf[41:49], uint64(ingestEnd.UnixNano()))
 	binary.BigEndian.PutUint64(buf[49:57], uint64(sourceEnd.UnixNano()))
+	binary.BigEndian.PutUint64(buf[57:65], uint64(ingestStart.UnixNano()))
+	if ingestTSMonotonic {
+		buf[65] = 1
+	}
 	return buf
 }
 
@@ -1062,6 +1089,9 @@ func encodeEntry(w io.Writer, e *ManifestEntry) error {
 	if e.TransitionStreamed {
 		flags |= 1 << 5
 	}
+	if e.IngestTSMonotonic {
+		flags |= 1 << 6
+	}
 	binary.BigEndian.PutUint16(buf[124:126], flags)
 	_, err := w.Write(buf[:])
 	return err
@@ -1180,10 +1210,11 @@ func readEntriesSection(r io.Reader, payloadLen uint32) ([]ManifestEntry, error)
 			NumFrames:       int32(binary.BigEndian.Uint32(buf[120:124])),              //nolint:gosec // G115: round-trip
 			Sealed: flags & (1 << 0) != 0,
 			// flag bit 1 reserved (formerly Compressed) — see gastrolog-24m1t step 7f.
-			CloudBacked: flags & (1 << 2) != 0,
+			CloudBacked:        flags&(1<<2) != 0,
 			Archived:           flags&(1<<3) != 0,
 			RetentionPending:   flags&(1<<4) != 0,
 			TransitionStreamed: flags&(1<<5) != 0,
+			IngestTSMonotonic:  flags&(1<<6) != 0,
 		})
 	}
 	return entries, nil
