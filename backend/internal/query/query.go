@@ -579,18 +579,6 @@ func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, vaultID glid.G
 
 		cursor, err := cm.OpenCursor(meta.ID)
 		if err != nil {
-			// FSM-vs-local-state can be transiently inconsistent: a chunk
-			// just deleted (CmdFinalizeDelete) or freshly replicated but
-			// not yet locally materialized appears in vaultChunkMetas
-			// (FSM-projected) while cm.OpenCursor returns ErrChunkNotFound.
-			// The cluster's fan-out fetches records from peers that hold
-			// the chunk, so silently dropping it on this node is correct —
-			// we surface neither stale records nor a stream-killing error.
-			// initActiveChunkPosition (search.go) and Follow's per-chunk
-			// loop already do the same. See gastrolog-1dg3i.
-			if errors.Is(err, chunk.ErrChunkNotFound) {
-				return
-			}
 			yield(recordWithRef{}, err)
 			return
 		}
