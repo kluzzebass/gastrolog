@@ -193,6 +193,7 @@ func (r *TierLifecycleReconciler) ReconcileFromSnapshot(fsm *tierfsm.FSM) {
 	// Sealed-state projection acquires the chunk Manager mutex but
 	// does not propose Raft applies, so it is safe to run inline.
 	r.projectAllSealedFromFSM(fsm)
+	r.projectAllCloudBackedFromFSM(fsm)
 
 	if len(pending) == 0 {
 		return
@@ -230,6 +231,54 @@ func (r *TierLifecycleReconciler) projectAllSealedFromFSM(fsm *tierfsm.FSM) {
 		}
 		if err := ensurer.EnsureSealed(e.ID); err != nil {
 			r.logger.Warn("reconcile-from-snapshot: EnsureSealed failed",
+				"chunk", e.ID, "error", err)
+		}
+	}
+}
+
+// projectAllCloudBackedFromFSM iterates every cloud-backed entry in the
+// FSM and registers the chunk in the local chunk Manager's cloud index
+// via RegisterCloudChunk. Used by ReconcileFromSnapshot after Restore —
+// the per-apply onUpload effect (which fires the same RegisterCloudChunk
+// for live CmdUploadChunk replication) does NOT fire during snapshot
+// install (Restore replaces f.chunks wholesale, no per-entry effects),
+// so cloud chunks that arrived during snapshot install would otherwise
+// be present in the FSM but absent from cm.cloudIdx — making
+// cm.OpenCursor return ErrChunkNotFound and aborting search streams.
+// RegisterCloudChunk is idempotent (skips if already in m.metas or
+// m.cloudIdx), so calling it for every cloud-backed entry is safe.
+// See gastrolog-3ukgz.
+func (r *TierLifecycleReconciler) projectAllCloudBackedFromFSM(fsm *tierfsm.FSM) {
+	if r.tier == nil || r.tier.Chunks == nil {
+		return
+	}
+	registrar, ok := r.tier.Chunks.(chunk.CloudChunkRegistrar)
+	if !ok {
+		return
+	}
+	for _, e := range fsm.List() {
+		if !e.CloudBacked {
+			continue
+		}
+		info := chunk.CloudChunkInfo{
+			WriteStart:        e.WriteStart,
+			WriteEnd:          e.WriteEnd,
+			IngestStart:       e.IngestStart,
+			IngestEnd:         e.IngestEnd,
+			SourceStart:       e.SourceStart,
+			SourceEnd:         e.SourceEnd,
+			RecordCount:       e.RecordCount,
+			Bytes:             e.Bytes,
+			DiskBytes:         e.DiskBytes,
+			IngestIdxOffset:   e.IngestIdxOffset,
+			IngestIdxSize:     e.IngestIdxSize,
+			SourceIdxOffset:   e.SourceIdxOffset,
+			SourceIdxSize:     e.SourceIdxSize,
+			NumFrames:         e.NumFrames,
+			IngestTSMonotonic: e.IngestTSMonotonic,
+		}
+		if err := registrar.RegisterCloudChunk(e.ID, info); err != nil {
+			r.logger.Warn("reconcile-from-snapshot: RegisterCloudChunk failed",
 				"chunk", e.ID, "error", err)
 		}
 	}
