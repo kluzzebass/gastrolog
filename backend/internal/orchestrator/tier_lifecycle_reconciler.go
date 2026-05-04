@@ -709,6 +709,117 @@ func (r *TierLifecycleReconciler) SweepMissingReplicas() {
 		"leader", r.tier.LeaderNodeID, "scheduled", scheduled, "requested", len(missing))
 }
 
+// staleLeaderFSMGracePeriod is how long a sealed-but-not-on-disk-locally
+// FSM entry stays around before SweepStaleLeaderFSMEntries proposes
+// CmdRequestDelete to remove it. The grace lets followers replicate or
+// leadership transfer to a node that DOES have the chunk before we
+// declare it unrecoverable. One hour is well past every transient
+// failure mode (gRPC retry, leader election, warm-cache fault) and
+// matches the cluster's coarse-grained reconciliation cadence.
+const staleLeaderFSMGracePeriod = 1 * time.Hour
+
+// SweepStaleLeaderFSMEntries walks the FSM manifest on the leader of a
+// non-cloud tier and proposes CmdRequestDelete for any sealed entry
+// missing from the leader's local chunk manager AND past the grace
+// period. The leader is the source of truth for non-cloud tiers
+// (per SweepMissingReplicas's invariant); if the leader doesn't have
+// the chunk and the chunk isn't recoverable from peers (the
+// missing-replica catchup mechanism only works leader→follower, so a
+// leader hole is unrecoverable in the current architecture), the FSM
+// should reflect that the chunk is gone instead of letting search
+// fan-out hit ErrChunkNotFound forever.
+//
+// Skips cloud-backed chunks: those live in shared object storage and
+// have separate health logic (cloud_health.go). Skips chunks fresher
+// than the grace period: a transient disk fault or in-flight seal
+// shouldn't trigger delete. Skips chunks already in pendingDeletes:
+// the receipt protocol is already running.
+//
+// See gastrolog-5nhwe.
+func (r *TierLifecycleReconciler) SweepStaleLeaderFSMEntries() {
+	if r.fsm == nil || r.tier == nil || r.tier.Chunks == nil {
+		return
+	}
+	if r.tier.IsFollower {
+		return // followers use SweepMissingReplicas to pull from leader
+	}
+	if r.tier.ApplyRaftRequestDelete == nil {
+		return // single-node / no Raft; no receipt protocol
+	}
+
+	localMetas, err := r.tier.Chunks.List()
+	if err != nil {
+		r.logger.Warn("stale-fsm sweep: list chunks failed", "error", err)
+		return
+	}
+	have := make(map[chunk.ChunkID]bool, len(localMetas))
+	for _, m := range localMetas {
+		have[m.ID] = true
+	}
+
+	now := time.Now()
+	expectedFrom := r.placementMembership()
+	stale := 0
+	for _, e := range r.fsm.List() {
+		if !e.Sealed {
+			continue
+		}
+		if e.CloudBacked {
+			continue
+		}
+		if have[e.ID] {
+			continue
+		}
+		// Grace period anchored on WriteEnd (the seal completion time)
+		// rather than IngestEnd (record TS, can be much earlier than
+		// real-world clock for backfilled streams).
+		if !e.WriteEnd.IsZero() && now.Sub(e.WriteEnd) < staleLeaderFSMGracePeriod {
+			continue
+		}
+		// PendingDelete check inside deleteChunk dedups but logs each
+		// proposal; check up front to keep the log quiet for the
+		// already-in-flight case.
+		if r.fsm.PendingDelete(e.ID) != nil {
+			continue
+		}
+		r.logger.Warn("stale-fsm sweep: proposing delete for unrecoverable chunk",
+			"chunk", e.ID, "tier", r.tierID, "vault", r.vaultID,
+			"write_end", e.WriteEnd, "age", now.Sub(e.WriteEnd))
+		if err := r.deleteChunk(e.ID, "stale-fsm-leader-missing", expectedFrom); err != nil {
+			r.logger.Warn("stale-fsm sweep: deleteChunk failed",
+				"chunk", e.ID, "error", err)
+			continue
+		}
+		stale++
+	}
+	if stale > 0 {
+		r.logger.Info("stale-fsm sweep: deletes proposed",
+			"tier", r.tierID, "vault", r.vaultID, "count", stale)
+	}
+}
+
+// placementMembership returns the expectedFrom set for delete
+// proposals: the local node plus every replication target. Mirrored
+// from orchestrator.placementMembership which takes a tier as input
+// and is wired through r.tier directly here so the reconciler doesn't
+// need an orchestrator back-pointer for this.
+func (r *TierLifecycleReconciler) placementMembership() []string {
+	expected := make([]string, 0, 1+len(r.tier.FollowerTargets))
+	seen := map[string]bool{}
+	if r.localNodeID != "" {
+		expected = append(expected, r.localNodeID)
+		seen[r.localNodeID] = true
+	}
+	for _, t := range r.tier.FollowerTargets {
+		if t.NodeID == "" || seen[t.NodeID] {
+			continue
+		}
+		expected = append(expected, t.NodeID)
+		seen[t.NodeID] = true
+	}
+	return expected
+}
+
 // fulfillObligation deletes the local copy of a chunk and then proposes
 // CmdAckDelete. Used by onRequestDelete (steady state),
 // ReconcileFromSnapshot (catchup after Restore), and

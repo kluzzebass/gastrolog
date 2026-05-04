@@ -248,6 +248,7 @@ func (o *Orchestrator) tierCatchupSweepAll() {
 		t.Reconciler.SweepPendingObligations()
 		t.Reconciler.SweepLocalOrphans()
 		t.Reconciler.SweepMissingReplicas()
+		t.Reconciler.SweepStaleLeaderFSMEntries()
 	}
 }
 
