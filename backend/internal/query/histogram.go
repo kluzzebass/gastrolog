@@ -1129,6 +1129,19 @@ func distributeChunkRecordsByOverlap(
 		}
 		return
 	}
+	// Distribute records via running-cumulative integer arithmetic so
+	// fractional contributions accumulate to whole records across buckets.
+	// The naive per-bucket form `RecordCount * overlap / span` floors to
+	// zero when bucketWidth ≪ span/RecordCount (e.g. zoomed-in 21s
+	// window over 50 buckets vs a 47s/100-record chunk: 100*436ms/47s
+	// = 0.93 → 0 per bucket → entire chunk silently drops out of the
+	// histogram). The running form computes cumulative records up to
+	// each bucket boundary and emits the delta, which preserves the
+	// invariant that distributed counts sum to the chunk's contribution
+	// in the queried range and never round individual buckets to zero
+	// when there's overlap. See gastrolog-3ukgz follow-up.
+	spanNanos := int64(span)
+	var runningOverlapNanos, prevCum int64
 	for b := firstBucket; b <= lastBucket; b++ {
 		bStart := start.Add(bucketWidth * time.Duration(b))
 		bEnd := start.Add(bucketWidth * time.Duration(b+1))
@@ -1141,14 +1154,17 @@ func distributeChunkRecordsByOverlap(
 			ovEnd = hiBound
 		}
 		overlap := ovEnd.Sub(ovStart)
-		if overlap <= 0 {
-			continue
+		if overlap > 0 {
+			runningOverlapNanos += int64(overlap)
 		}
-		// int64 arithmetic preserves rounding sanity; floor is fine because
-		// any rounding loss is bounded by O(buckets).
-		counts[b] += meta.RecordCount * int64(overlap) / int64(span)
-		if cloudBacked && cloudFlags != nil {
-			cloudFlags[b] = true
+		cum := meta.RecordCount * runningOverlapNanos / spanNanos
+		delta := cum - prevCum
+		if delta > 0 {
+			counts[b] += delta
+			if cloudBacked && cloudFlags != nil {
+				cloudFlags[b] = true
+			}
 		}
+		prevCum = cum
 	}
 }
