@@ -1029,25 +1029,112 @@ func TestSearchNoResultsNoToken(t *testing.T) {
 	}
 }
 
-func TestSearchInvalidResumeToken(t *testing.T) {
+// TestSearchFullyStaleResumeTokenContinues verifies that when every
+// active resume position references a vanished chunk, the engine does
+// NOT error — the highwater TS bound (applied by the server before
+// reaching the engine) is what prevents duplicate emissions, so the
+// engine's job is simply to run the available chunks against the
+// already-narrowed time window. Erroring instead would surface as a
+// mid-scroll error in the UI; running silently is the correct contract
+// because the time bound makes correctness independent of position
+// staleness.
+func TestSearchFullyStaleResumeTokenContinues(t *testing.T) {
 	records := []chunk.Record{
 		{IngestTS: t1, Attrs: attrsA, Raw: []byte("hello")},
 	}
 
 	eng := setup(t, records)
 
-	// Create a token with a non-existent chunk ID
-	badToken := &query.ResumeToken{
+	staleToken := &query.ResumeToken{
 		Next: chunk.RecordRef{
-			ChunkID: chunk.NewChunkID(), // random, doesn't exist
+			ChunkID: chunk.NewChunkID(),
 			Pos:     0,
 		},
 	}
 
-	seq, _ := eng.Search(context.Background(), query.Query{}, badToken)
+	seq, _ := eng.Search(context.Background(), query.Query{}, staleToken)
 	_, err := collect(seq)
-	if !errors.Is(err, query.ErrInvalidResumeToken) {
-		t.Fatalf("expected ErrInvalidResumeToken, got %v", err)
+	if err != nil {
+		t.Fatalf("expected no error from stale token (highwater bound carries pagination), got %v", err)
+	}
+}
+
+// TestSearchEmitsHighwaterTS verifies that the engine populates
+// HighwaterTS on resume tokens with the IngestTS of the last emitted
+// record. The server applies this as an exclusive time bound on the
+// next page so pagination survives chunk lifecycle even when per-chunk
+// Positions become stale.
+func TestSearchEmitsHighwaterTS(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("a")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("b")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("c")},
+	}
+
+	eng := setup(t, records)
+
+	seq, nextToken := eng.Search(context.Background(), query.Query{Limit: 2}, nil)
+	results, err := collect(seq)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 records (limit), got %d", len(results))
+	}
+	tok := nextToken()
+	if tok == nil {
+		t.Fatalf("expected non-nil token after limit-bound page")
+	}
+	if tok.HighwaterTS.IsZero() {
+		t.Fatal("expected HighwaterTS to be populated")
+	}
+	last := results[len(results)-1].IngestTS
+	if !tok.HighwaterTS.Equal(last) {
+		t.Fatalf("HighwaterTS=%v should equal last emitted IngestTS=%v", tok.HighwaterTS, last)
+	}
+}
+
+// TestSearchPartiallyStaleResumeTokenContinues verifies that when SOME
+// resume positions reference a vanished chunk but others remain valid,
+// the engine drops the stale entries and continues with the surviving
+// positions. Mid-pagination chunk transitions during normal cluster
+// operation produce exactly this case; it must not error.
+func TestSearchPartiallyStaleResumeTokenContinues(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("two")},
+	}
+
+	eng := setup(t, records)
+
+	// First page: pull one record so the engine emits a real resume position
+	// against the actual chunk.
+	seq, nextToken := eng.Search(context.Background(), query.Query{Limit: 1}, nil)
+	_, err := collect(seq)
+	if err != nil {
+		t.Fatalf("page 1 search: %v", err)
+	}
+	tok := nextToken()
+	if tok == nil || len(tok.Positions) == 0 {
+		t.Fatalf("expected non-empty resume token after page 1, got %+v", tok)
+	}
+
+	// Inject a stale position alongside the valid one.
+	tok.Positions = append(tok.Positions, query.MultiVaultPosition{
+		VaultID:  tok.Positions[0].VaultID,
+		ChunkID:  chunk.NewChunkID(), // doesn't exist
+		Position: 0,
+	})
+
+	// Page 2: must succeed despite the stale entry, returning the remaining
+	// records via the surviving valid position.
+	seq2, _ := eng.Search(context.Background(), query.Query{Limit: 10}, tok)
+	results, err := collect(seq2)
+	if err != nil {
+		t.Fatalf("page 2 search must not error on partial staleness: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatalf("expected at least 1 record from page 2 (valid position should resume), got 0")
 	}
 }
 

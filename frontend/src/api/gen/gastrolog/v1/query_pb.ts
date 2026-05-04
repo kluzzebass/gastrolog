@@ -888,6 +888,17 @@ export class ResumeToken extends Message<ResumeToken> {
    */
   frozenEnd?: Timestamp;
 
+  /**
+   * Highwater TS from the last emitted record. Acts as an exclusive
+   * boundary on the next page (reverse: upper bound; forward: lower
+   * bound) so pagination survives mid-scroll chunk lifecycle (seal,
+   * transition, retention) without re-emitting already-seen records,
+   * even when per-chunk positions become stale and unusable.
+   *
+   * @generated from field: google.protobuf.Timestamp highwater_ts = 5;
+   */
+  highwaterTs?: Timestamp;
+
   constructor(data?: PartialMessage<ResumeToken>) {
     super();
     proto3.util.initPartial(data, this);
@@ -899,6 +910,7 @@ export class ResumeToken extends Message<ResumeToken> {
     { no: 2, name: "vault_tokens", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 12 /* ScalarType.BYTES */} },
     { no: 3, name: "frozen_start", kind: "message", T: Timestamp },
     { no: 4, name: "frozen_end", kind: "message", T: Timestamp },
+    { no: 5, name: "highwater_ts", kind: "message", T: Timestamp },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ResumeToken {

@@ -325,6 +325,41 @@ func ProtoToResumeToken(data []byte) (*query.ResumeToken, error) {
 	if protoToken.FrozenEnd != nil {
 		token.FrozenEnd = protoToken.FrozenEnd.AsTime()
 	}
+	if protoToken.HighwaterTs != nil {
+		token.HighwaterTS = protoToken.HighwaterTs.AsTime()
+	}
+	return token, nil
+}
+
+// ProtoToLocalResumeToken parses a proto resume token and expands its
+// VaultTokens entries into a flat Positions slice — the form eng.Search
+// consumes. Used by ForwardSearch handlers (and equivalent test doubles)
+// where the receiving node only owns local tiers and never re-forwards,
+// so every VaultTokens entry is expected to be a tier-keyed
+// InnerVaultToken. Entries that fail to deserialize as InnerVaultToken
+// are skipped — this protects upstream callers from a malformed remote
+// fragment poisoning the entire resume.
+//
+// For the upstream QueryServer path (where VaultTokens may carry a mix
+// of tier-keyed local InnerVaultTokens and vault-keyed full remote
+// ResumeToken protos), use ProtoToResumeToken + splitResumeToken
+// instead — that flow routes remote-keyed entries back to the remote
+// node rather than trying to interpret them locally.
+func ProtoToLocalResumeToken(data []byte) (*query.ResumeToken, error) {
+	token, err := ProtoToResumeToken(data)
+	if err != nil {
+		return nil, err
+	}
+	if token == nil {
+		return nil, nil
+	}
+	for _, tokenData := range token.VaultTokens {
+		positions, err := VaultTokenToPositions(tokenData)
+		if err != nil {
+			continue
+		}
+		token.Positions = append(token.Positions, positions...)
+	}
 	return token, nil
 }
 
@@ -415,6 +450,9 @@ func ResumeTokenToProto(token *query.ResumeToken) []byte {
 	}
 	if !token.FrozenEnd.IsZero() {
 		protoToken.FrozenEnd = timestamppb.New(token.FrozenEnd)
+	}
+	if !token.HighwaterTS.IsZero() {
+		protoToken.HighwaterTs = timestamppb.New(token.HighwaterTS)
 	}
 
 	data, err := proto.Marshal(protoToken)

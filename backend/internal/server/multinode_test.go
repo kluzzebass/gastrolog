@@ -27,6 +27,7 @@ import (
 	sysmem "gastrolog/internal/system/memory"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -544,12 +545,35 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 		})
 	}
 
+	// Decode the resume token (if any) so the mock honors paginated requests
+	// the same way the production ForwardSearch handler does. Without this,
+	// every page from a remote node restarts at the window edge.
+	var resume *query.ResumeToken
+	if rt := req.GetResumeToken(); len(rt) > 0 {
+		if r, err := server.ProtoToLocalResumeToken(rt); err == nil {
+			resume = r
+		} else {
+			errCh <- fmt.Errorf("invalid resume token: %w", err)
+			close(recCh)
+			close(errCh)
+			return recCh, nil, nil, errCh, func() []byte { return nil }
+		}
+	}
+
+	searchIter, getToken := eng.Search(ctx, q, resume)
+	getTokenBytes := func() []byte {
+		token := getToken()
+		if token == nil {
+			return nil
+		}
+		return server.ResumeTokenToProto(token)
+	}
+
 	// Stream records in batches.
 	go func() {
 		defer close(recCh)
 		defer close(errCh)
 
-		searchIter, _ := eng.Search(ctx, q, nil)
 		const batchSize = 200
 		batch := make([]*gastrologv1.ExportRecord, 0, batchSize)
 		for rec, iterErr := range searchIter {
@@ -575,7 +599,7 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 		}
 	}()
 
-	return recCh, histProto, nil, errCh, func() []byte { return nil }
+	return recCh, histProto, nil, errCh, getTokenBytes
 }
 
 func (d *directRemoteSearcher) GetContext(ctx context.Context, nodeID string, req *gastrologv1.ForwardGetContextRequest) (*gastrologv1.ForwardGetContextResponse, error) {
@@ -976,6 +1000,225 @@ func TestMultiNode_SearchFanOut(t *testing.T) {
 	}
 	if bCount != 5 {
 		t.Errorf("expected 5 B-records, got %d", bCount)
+	}
+}
+
+// TestMultiNode_PaginatedReverseSearch exercises resume-token routing across
+// the local/remote boundary. Records are interleaved in time across two nodes
+// so that any contiguous descending page MUST draw from both. With limit=N,
+// each page should:
+//   - return strictly descending IngestTS,
+//   - have its first ts strictly less than the previous page's last ts,
+//   - terminate (HasMore=false) once the full set is drained.
+//
+// Regression coverage for the splitResumeToken bug where:
+//   - tier-ID-keyed local tokens were misrouted as remote (local engine
+//     restarted from window edge each page),
+//   - real-vault-ID-keyed remote tokens were misrouted as local on nodes
+//     that held a follower replica (remote restarted from window edge each
+//     page).
+func TestMultiNode_PaginatedReverseSearch(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"node-A", "node-B"})
+
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	const total = 60
+	const pageLimit = 25
+
+	// Interleave: even-indexed records on node-A, odd on node-B.
+	// Both nodes contribute records spanning the full time range, so any
+	// correct descending page must merge both sources.
+	for i := range total {
+		ts := t0.Add(time.Duration(i) * time.Second)
+		nodeID := "node-A"
+		if i%2 == 1 {
+			nodeID = "node-B"
+		}
+		h.Node(t, nodeID).vault.CM.Append(chunk.Record{
+			IngestTS: ts,
+			WriteTS:  ts,
+			Raw:      fmt.Appendf(nil, "rec-%02d", i),
+		})
+	}
+
+	expr := fmt.Sprintf("start=%s end=%s reverse=true limit=%d",
+		t0.Format(time.RFC3339Nano),
+		t0.Add((total+1)*time.Second).Format(time.RFC3339Nano),
+		pageLimit)
+
+	var allTS []time.Time
+	var resumeToken []byte
+	for page := 1; page <= 10; page++ {
+		req := &gastrologv1.SearchRequest{Query: &gastrologv1.Query{Expression: expr}}
+		if resumeToken != nil {
+			req.ResumeToken = resumeToken
+		}
+		stream, err := h.client.Search(context.Background(), connect.NewRequest(req))
+		if err != nil {
+			t.Fatalf("page %d Search: %v", page, err)
+		}
+		var pageTS []time.Time
+		var nextToken []byte
+		var hasMore bool
+		for stream.Receive() {
+			msg := stream.Msg()
+			for _, r := range msg.Records {
+				pageTS = append(pageTS, r.IngestTs.AsTime())
+			}
+			if msg.HasMore {
+				nextToken = msg.ResumeToken
+				hasMore = true
+			}
+		}
+		if err := stream.Err(); err != nil && err != io.EOF {
+			t.Fatalf("page %d stream error: %v", page, err)
+		}
+
+		// Every page (including the last) must be strictly descending.
+		for i := 1; i < len(pageTS); i++ {
+			if !pageTS[i].Before(pageTS[i-1]) {
+				t.Fatalf("page %d not descending: pageTS[%d]=%v >= pageTS[%d]=%v",
+					page, i, pageTS[i], i-1, pageTS[i-1])
+			}
+		}
+		// Pages must not overlap with prior pages.
+		if len(allTS) > 0 && len(pageTS) > 0 {
+			lastPrev := allTS[len(allTS)-1]
+			if !pageTS[0].Before(lastPrev) {
+				t.Fatalf("page %d overlap: first=%v >= prev last=%v",
+					page, pageTS[0], lastPrev)
+			}
+		}
+		allTS = append(allTS, pageTS...)
+
+		if !hasMore {
+			break
+		}
+		if len(pageTS) == 0 {
+			t.Fatalf("page %d: hasMore=true but 0 records — pagination is stuck", page)
+		}
+		resumeToken = nextToken
+	}
+
+	if len(allTS) != total {
+		t.Fatalf("expected %d total records across all pages, got %d", total, len(allTS))
+	}
+}
+
+// TestMultiNode_PaginatedReverseSearchRemoteOnly is the regression test
+// for the merge-level highwater bug: when EVERY record on a paginated
+// page comes from a remote iterator (local engine emits zero records),
+// the local engine's internal highwaterTS stays zero. The combined
+// resume token would then carry no time bound for the next page, and
+// chunk-lifecycle staleness on a subsequent page restarts pagination
+// from the window edge — surfacing in the UI as page boundaries jumping
+// backward in time mid-scroll.
+//
+// Setup: coordinator is node-A with NO vault; all records on node-B.
+// Search via the coordinator MUST cross the local/remote boundary for
+// every record, exercising the path where the engine highwater is
+// always zero and only the server merge-level highwater is meaningful.
+func TestMultiNode_PaginatedReverseSearchRemoteOnly(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"node-A", "node-B"}, WithoutVault("node-A"))
+
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	const total = 50
+	const pageLimit = 20
+
+	for i := range total {
+		ts := t0.Add(time.Duration(i) * time.Second)
+		h.Node(t, "node-B").vault.CM.Append(chunk.Record{
+			IngestTS: ts,
+			WriteTS:  ts,
+			Raw:      fmt.Appendf(nil, "rec-%02d", i),
+		})
+	}
+
+	expr := fmt.Sprintf("start=%s end=%s reverse=true limit=%d",
+		t0.Format(time.RFC3339Nano),
+		t0.Add((total+1)*time.Second).Format(time.RFC3339Nano),
+		pageLimit)
+
+	var allTS []time.Time
+	var resumeToken []byte
+	for page := 1; page <= 10; page++ {
+		req := &gastrologv1.SearchRequest{Query: &gastrologv1.Query{Expression: expr}}
+		if resumeToken != nil {
+			req.ResumeToken = resumeToken
+		}
+		stream, err := h.client.Search(context.Background(), connect.NewRequest(req))
+		if err != nil {
+			t.Fatalf("page %d Search: %v", page, err)
+		}
+		var pageTS []time.Time
+		var nextToken []byte
+		var hasMore bool
+		for stream.Receive() {
+			msg := stream.Msg()
+			for _, r := range msg.Records {
+				pageTS = append(pageTS, r.IngestTs.AsTime())
+			}
+			if msg.HasMore {
+				nextToken = msg.ResumeToken
+				hasMore = true
+			}
+		}
+		if err := stream.Err(); err != nil && err != io.EOF {
+			t.Fatalf("page %d stream error: %v", page, err)
+		}
+
+		for i := 1; i < len(pageTS); i++ {
+			if !pageTS[i].Before(pageTS[i-1]) {
+				t.Fatalf("page %d not descending: pageTS[%d]=%v >= pageTS[%d]=%v",
+					page, i, pageTS[i], i-1, pageTS[i-1])
+			}
+		}
+		// Page must not overlap the previous one.
+		if len(allTS) > 0 && len(pageTS) > 0 {
+			lastPrev := allTS[len(allTS)-1]
+			if !pageTS[0].Before(lastPrev) {
+				t.Fatalf("page %d overlap: first=%v >= prev last=%v",
+					page, pageTS[0], lastPrev)
+			}
+		}
+		// Critical assertion for the regression: the resume token MUST
+		// carry a non-zero HighwaterTS that matches the last emitted
+		// record. With remote-only records, the upstream's local engine
+		// emits zero records, so its internal highwater stays zero — only
+		// the merge-level tracker observes the stream and writes the
+		// correct value. If this asserts fails, the merge-level highwater
+		// has stopped propagating into the resume token, and the next
+		// page's q.End will not be narrowed for the upstream-narrowed
+		// q.String() forwarded to the remote, eventually surfacing as the
+		// "scroll jumps backward in time" symptom under chunk staleness.
+		if hasMore {
+			var pt gastrologv1.ResumeToken
+			if perr := proto.Unmarshal(nextToken, &pt); perr != nil {
+				t.Fatalf("page %d unmarshal token: %v", page, perr)
+			}
+			if pt.HighwaterTs == nil || pt.HighwaterTs.AsTime().IsZero() {
+				t.Fatalf("page %d: resume token missing HighwaterTs (merge-level highwater regression)", page)
+			}
+			lastEmitted := pageTS[len(pageTS)-1]
+			if !pt.HighwaterTs.AsTime().Equal(lastEmitted) {
+				t.Fatalf("page %d: HighwaterTs=%v should equal last emitted=%v",
+					page, pt.HighwaterTs.AsTime(), lastEmitted)
+			}
+		}
+		allTS = append(allTS, pageTS...)
+
+		if !hasMore {
+			break
+		}
+		if len(pageTS) == 0 {
+			t.Fatalf("page %d: hasMore=true but 0 records — pagination is stuck", page)
+		}
+		resumeToken = nextToken
+	}
+
+	if len(allTS) != total {
+		t.Fatalf("expected %d total records across all pages, got %d", total, len(allTS))
 	}
 }
 

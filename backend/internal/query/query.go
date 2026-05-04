@@ -261,6 +261,13 @@ type ResumeToken struct {
 	FrozenStart time.Time
 	FrozenEnd   time.Time
 
+	// HighwaterTS is the IngestTS of the last record emitted by the previous
+	// page. The server applies it as an exclusive bound on the next page —
+	// reverse=true narrows q.End to HighwaterTS, forward narrows q.Start —
+	// so pagination survives mid-scroll chunk lifecycle without re-emitting
+	// records, even when per-chunk Positions become stale and unusable.
+	HighwaterTS time.Time
+
 	// Positions contains the last yielded position for each vault/chunk combination.
 	// This is the internal representation used by eng.Search() for local vaults.
 	// Populated by deserializing the relevant VaultTokens entry.
