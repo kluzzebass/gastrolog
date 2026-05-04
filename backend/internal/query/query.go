@@ -579,6 +579,22 @@ func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, vaultID glid.G
 
 		cursor, err := cm.OpenCursor(meta.ID)
 		if err != nil {
+			// FSM-vs-local-cm divergence is a real consistency issue
+			// (gastrolog-3ukgz) but not a per-query failure: the cluster
+			// fan-out asks every node, so peers that DO have the chunk
+			// fill in the records. Streaming a stream-fatal error from
+			// one node would abort the whole client query (records +
+			// histogram), which is worse than missing records from
+			// chunks no node has. Log every skip so operators see the
+			// stale FSM state accumulating, and surface it via metrics
+			// rather than killing the user's query.
+			if errors.Is(err, chunk.ErrChunkNotFound) {
+				if e.logger != nil {
+					e.logger.Warn("chunk in FSM but missing from local cm — skipping (gastrolog-3ukgz)",
+						"vault", vaultID, "chunk", meta.ID, "sealed", meta.Sealed, "cloud_backed", meta.CloudBacked)
+				}
+				return
+			}
 			yield(recordWithRef{}, err)
 			return
 		}
