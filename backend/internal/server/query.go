@@ -159,33 +159,54 @@ func (s *QueryServer) searchDirect(
 		}
 	}
 
-	// The frozen bounds are now in q.Start/q.End (either from the original
-	// query or restored from the resume token above).
+	// Capture the frozen bounds BEFORE applying the highwater. The frozen
+	// window is what gets written back to the next page's resume token; if
+	// we captured after narrowing, each page would tighten the window
+	// cumulatively until it collapses. The histogram also uses the frozen
+	// bounds — narrowing them per page makes the histogram report fewer
+	// records as the user scrolls.
 	frozenStart, frozenEnd := q.Start, q.End
+
+	// Apply the highwater TS as an exclusive boundary for this page's
+	// search ONLY (not the histogram). With reverse=true narrow q.End to
+	// the highwater (records strictly older); with forward narrow q.Start
+	// (records strictly newer). This is what makes pagination survive
+	// chunk-lifecycle transitions during a scroll: even if every per-chunk
+	// position references a chunk that vanished, the time bound prevents
+	// re-emitting records the client already saw.
+	histogramQ := q
+	if resume != nil {
+		narrowQueryByHighwater(&q, resume.HighwaterTS)
+	}
 
 	localResume, remoteTokens := s.splitResumeToken(resume)
 
-	// Collect remote results as a streaming iterator.
+	// Collect remote results as a streaming iterator. The remote also
+	// computes a histogram inside its forwardSearchAfterParse, but on
+	// resume pages we discard it — the histogram is computed once on
+	// page 1 and the client keeps it across pagination.
 	remoteIter, remoteHist, getRemoteTokens := s.collectRemote(ctx, q, remoteTokens)
 
-	// Histogram routing: if the queried vaults are fully replicated to
-	// this node (every tier has a local leader OR follower), compute the
-	// histogram from local data only and skip the cross-node fan-out.
-	// Otherwise, fall back to the leader-engine + remote-merge path so
-	// chunks living on nodes without a local replica still contribute.
-	// Approximate counts from follower replicas are acceptable; records
-	// still use the leader engine for authoritative reads. See
-	// gastrolog-66b7x.
+	// Histogram is computed only on the FIRST page of a paginated search.
+	// Subsequent pages return an empty histogram; the client keeps the
+	// page-1 histogram unchanged for the lifetime of the scroll. This is
+	// correct (the histogram is a function of the frozen window, which
+	// doesn't change between pages) and avoids two thorny problems:
+	//   1. Recomputing on every page burns CPU on large windows.
+	//   2. The narrowed search window would otherwise leak into the
+	//      histogram, making it report fewer records as the user scrolls.
 	var histogram []*apiv1.HistogramBucket
-	if s.histogramFullyLocal(ctx, q) {
-		localEng := s.orch.LocalTierQueryEngine()
-		if s.lookupResolver != nil {
-			localEng.SetLookupResolver(s.lookupResolver)
+	if resume == nil {
+		if s.histogramFullyLocal(ctx, histogramQ) {
+			localEng := s.orch.LocalTierQueryEngine()
+			if s.lookupResolver != nil {
+				localEng.SetLookupResolver(s.lookupResolver)
+			}
+			histogram = HistogramToProto(localEng.ComputeHistogram(ctx, histogramQ, 50))
+		} else {
+			localHist := HistogramToProto(eng.ComputeHistogram(ctx, histogramQ, 50))
+			histogram = mergeHistogramBuckets(localHist, remoteHist)
 		}
-		histogram = HistogramToProto(localEng.ComputeHistogram(ctx, q, 50))
-	} else {
-		localHist := HistogramToProto(eng.ComputeHistogram(ctx, q, 50))
-		histogram = mergeHistogramBuckets(localHist, remoteHist)
 	}
 
 	localIter, getLocalToken := eng.Search(ctx, q, localResume)
@@ -204,7 +225,7 @@ func (s *QueryServer) searchDirect(
 		}
 		hasPositions := len(token.Positions) > 0
 		hasVaultTokens := len(token.VaultTokens) > 0
-		if !hasPositions && !hasVaultTokens {
+		if !hasPositions && !hasVaultTokens && token.HighwaterTS.IsZero() {
 			return nil
 		}
 		token.FrozenStart = frozenStart
@@ -230,14 +251,21 @@ func (s *QueryServer) splitResumeToken(resume *query.ResumeToken) (*query.Resume
 		return nil, nil
 	}
 
-	// No local-vault skip — a vault may have some tiers local and others
-	// remote. Both need to be searched. The ForwardSearch handler on the
-	// remote node only searches its LOCAL tiers, so no double-counting.
+	// VaultTokens has two disjoint key spaces with different value formats:
+	//   - tier IDs → InnerVaultToken bytes (positions emitted by the local
+	//     LeaderTierQueryEngine, which tags positions with tier IDs)
+	//   - real vault IDs → fully serialized remote ResumeToken proto bytes
+	//     (returned by collectRemote.getRemoteTokens, keyed by real vault ID)
+	// Routing must dispatch tier-ID keys to the local engine and vault-ID
+	// keys to the remote fan-out — and no other way around. Misdirecting a
+	// remote token to the local deserializer loses the remote's progress
+	// and causes the next page to restart from the window edge.
+	localTiers := s.orch.LocalLeaderTierIDs()
 
 	remoteTokens := make(map[glid.GLID][]byte)
 	var localPositions []query.MultiVaultPosition
 	for vid, tokenData := range resume.VaultTokens {
-		if s.orch.HasLocalQueryEngine(vid) {
+		if localTiers[vid] {
 			positions, err := VaultTokenToPositions(tokenData)
 			if err != nil {
 				continue
@@ -253,6 +281,51 @@ func (s *QueryServer) splitResumeToken(resume *query.ResumeToken) (*query.Resume
 		localResume = &query.ResumeToken{Positions: localPositions}
 	}
 	return localResume, remoteTokens
+}
+
+// narrowQueryByHighwater applies a resume-token highwater as an exclusive
+// time bound on q. With reverse=true the highwater becomes the upper bound
+// (records strictly older); with forward it becomes the lower bound
+// (records strictly newer). No-op when highwater is zero or already
+// outside the existing bound.
+func narrowQueryByHighwater(q *query.Query, highwater time.Time) {
+	if highwater.IsZero() {
+		return
+	}
+	if q.Reverse() {
+		if q.End.IsZero() || highwater.Before(q.End) {
+			q.End = highwater
+		}
+		return
+	}
+	if q.Start.IsZero() || highwater.After(q.Start) {
+		q.Start = highwater
+	}
+}
+
+// buildResumeTokenBytes serializes the resume token for the response,
+// overriding the engine-derived highwater with the merge-level one when
+// the merge advanced strictly further. The merge-level highwater is the
+// only value that observes records emitted from BOTH local and remote
+// iterators — the engine alone cannot see remote-sourced records.
+func buildResumeTokenBytes(transform *query.RecordTransform, getToken func() *query.ResumeToken, mergeHighwater time.Time, reverse bool) []byte {
+	if transform != nil && transform.Done() {
+		return nil
+	}
+	token := getToken()
+	if token == nil {
+		return nil
+	}
+	if !mergeHighwater.IsZero() {
+		if reverse {
+			if token.HighwaterTS.IsZero() || mergeHighwater.Before(token.HighwaterTS) {
+				token.HighwaterTS = mergeHighwater
+			}
+		} else if token.HighwaterTS.IsZero() || mergeHighwater.After(token.HighwaterTS) {
+			token.HighwaterTS = mergeHighwater
+		}
+	}
+	return ResumeTokenToProto(token)
 }
 
 func mapSearchError(err error) error {
@@ -286,27 +359,27 @@ func (s *QueryServer) mergeAndStream(
 	stream *connect.ServerStream[apiv1.SearchResponse],
 ) error {
 	sb := newStreamBatcher(stream, 100)
+	// Track the IngestTS of the last record actually emitted by this server
+	// (across both local and remote sources). Used to override the engine's
+	// own highwater on the resume token — the engine only sees its local
+	// emissions, so when records come from a remote iterator the engine's
+	// highwater stays zero and the bound on the next page would be lost.
+	var mergeHighwater time.Time
 
 	if remoteIter != nil {
 		// Two-way sorted merge of local and remote iterators.
-		if err := mergeIterators(ctx, sb, localIter, remoteIter, orderBy, reverse, transform, streamedHistogram); err != nil {
+		if err := mergeIterators(ctx, sb, localIter, remoteIter, orderBy, reverse, transform, streamedHistogram, &mergeHighwater); err != nil {
 			return err
 		}
 	} else {
 		// Fast path: no remote results, just stream local.
-		if err := streamLocal(ctx, sb, localIter, transform, streamedHistogram); err != nil {
+		if err := streamLocal(ctx, sb, localIter, transform, streamedHistogram, &mergeHighwater); err != nil {
 			return err
 		}
 	}
 
 	// Build resume token from local state only (remote is fully streamed).
-	var tokenBytes []byte
-	if transform == nil || !transform.Done() {
-		token := getToken()
-		if token != nil {
-			tokenBytes = ResumeTokenToProto(token)
-		}
-	}
+	tokenBytes := buildResumeTokenBytes(transform, getToken, mergeHighwater, reverse)
 	finalHistogram := histogram
 	if streamedHistogram != nil {
 		finalHistogram = streamedHistogram.toProto()
@@ -322,12 +395,12 @@ func (s *QueryServer) mergeAndStream(
 }
 
 // streamLocal streams local iterator results through the batcher.
-func streamLocal(ctx context.Context, sb *streamBatcher, localIter iter.Seq2[chunk.Record, error], transform *query.RecordTransform, streamedHistogram *streamedHistogramBuilder) error {
+func streamLocal(ctx context.Context, sb *streamBatcher, localIter iter.Seq2[chunk.Record, error], transform *query.RecordTransform, streamedHistogram *streamedHistogramBuilder, highwater *time.Time) error {
 	for rec, err := range localIter {
 		if err != nil {
 			return mapSearchError(err)
 		}
-		done, emitErr := emitRecord(ctx, sb, rec, transform, streamedHistogram)
+		done, emitErr := emitRecord(ctx, sb, rec, transform, streamedHistogram, highwater)
 		if emitErr != nil {
 			return emitErr
 		}
@@ -348,6 +421,7 @@ func mergeIterators(
 	reverse bool,
 	transform *query.RecordTransform,
 	streamedHistogram *streamedHistogramBuilder,
+	highwater *time.Time,
 ) error {
 	isBefore := func(a, b time.Time) bool {
 		if reverse {
@@ -420,7 +494,7 @@ func mergeIterators(
 			}
 		}
 
-		done, err := emitRecord(ctx, sb, rec, transform, streamedHistogram)
+		done, err := emitRecord(ctx, sb, rec, transform, streamedHistogram, highwater)
 		if err != nil {
 			return err
 		}
@@ -433,7 +507,14 @@ func mergeIterators(
 
 // emitRecord applies an optional transform to a record and writes it to the
 // batcher. Returns (done, err) where done=true means the transform is exhausted.
-func emitRecord(ctx context.Context, sb *streamBatcher, rec chunk.Record, transform *query.RecordTransform, streamedHistogram *streamedHistogramBuilder) (bool, error) {
+//
+// When highwater is non-nil, every successfully-emitted record's IngestTS is
+// recorded into *highwater. The merge stream emits monotonically (descending
+// for reverse=true, ascending for forward), so the final value is the
+// boundary the client should resume after on the next page — even when the
+// emitted record came from a remote iterator (where the local engine's own
+// highwater is unaware of the merge).
+func emitRecord(ctx context.Context, sb *streamBatcher, rec chunk.Record, transform *query.RecordTransform, streamedHistogram *streamedHistogramBuilder, highwater *time.Time) (bool, error) {
 	if streamedHistogram != nil {
 		streamedHistogram.add(rec)
 	}
@@ -445,9 +526,18 @@ func emitRecord(ctx context.Context, sb *streamBatcher, rec chunk.Record, transf
 		if err := sb.add(recordToProto(rec)); err != nil {
 			return false, err
 		}
+		if highwater != nil {
+			*highwater = rec.IngestTS
+		}
 		return transform.Done(), nil
 	}
-	return false, sb.add(recordToProto(rec))
+	if err := sb.add(recordToProto(rec)); err != nil {
+		return false, err
+	}
+	if highwater != nil {
+		*highwater = rec.IngestTS
+	}
+	return false, nil
 }
 
 func normalizedRange(start, end time.Time) (time.Time, time.Time, bool) {

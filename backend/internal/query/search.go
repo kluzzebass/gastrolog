@@ -6,6 +6,7 @@ import (
 	"errors"
 	"gastrolog/internal/glid"
 	"iter"
+	"log/slog"
 	"math"
 	"slices"
 	"time"
@@ -150,11 +151,22 @@ func (e *Engine) collectVaultChunks(
 	return allChunks, archivedCount, nil
 }
 
-// validateResumeToken checks that all non-exhausted positions in the resume
-// token reference chunks that still exist.
-func validateResumeToken(resume *ResumeToken, allChunks []vaultChunk) error {
+// pruneStaleResumePositions drops positions that reference chunks no longer
+// present in allChunks. Chunks transition (seal → upload → retention) during
+// normal operation, so a position written on page 1 may legitimately point
+// at a chunk that no longer matches the current vault scope by page 2.
+//
+// The server applies the resume token's HighwaterTS as an exclusive time
+// bound before reaching here, so even when every position is stale the
+// search cannot re-emit records the client has already seen — the time
+// bound carries the pagination forward. Pruning therefore never errors
+// on staleness; it just drops the dead entries (with a warn log) and
+// lets the search proceed. Records that lay past the resume position in
+// a vanished chunk are lost — that's the unavoidable cost of
+// mid-pagination chunk lifecycle.
+func pruneStaleResumePositions(logger *slog.Logger, resume *ResumeToken, allChunks []vaultChunk) {
 	if resume == nil || len(resume.Positions) == 0 {
-		return nil
+		return
 	}
 
 	available := make(map[chunk.ChunkID]bool, len(allChunks))
@@ -162,15 +174,27 @@ func validateResumeToken(resume *ResumeToken, allChunks []vaultChunk) error {
 		available[sc.meta.ID] = true
 	}
 
+	kept := resume.Positions[:0]
+	droppedActive, droppedExhausted := 0, 0
 	for _, pos := range resume.Positions {
-		if pos.Position == positionExhausted {
+		isExhausted := pos.Position == positionExhausted
+		if isExhausted || available[pos.ChunkID] {
+			kept = append(kept, pos)
 			continue
 		}
-		if !available[pos.ChunkID] {
-			return ErrInvalidResumeToken
+		if isExhausted {
+			droppedExhausted++
+		} else {
+			droppedActive++
 		}
 	}
-	return nil
+	if (droppedActive+droppedExhausted) > 0 && logger != nil {
+		logger.Warn("search: resume positions referenced missing chunks",
+			"dropped_active", droppedActive,
+			"dropped_exhausted", droppedExhausted,
+			"kept", len(kept))
+	}
+	resume.Positions = kept
 }
 
 // buildResumePositionMap converts a resume token into a nested map for
@@ -535,17 +559,30 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 
 	// Track state for resume token generation.
 	var lastRefs []MultiVaultPosition
+	var highwaterTS time.Time
 	completed := false
 
 	seq := func(yield func(chunk.Record, error) bool) {
+		// Wrap yield so every successful emission updates the highwater
+		// timestamp. Highwater is included in the resume token and used by
+		// the server as an exclusive time bound on the next page — this is
+		// what makes pagination survive mid-scroll chunk lifecycle when
+		// per-chunk Positions become stale and unusable.
+		wrappedYield := func(rec chunk.Record, err error) bool {
+			if err == nil {
+				highwaterTS = q.OrderBy.RecordTS(rec)
+			}
+			return yield(rec, err)
+		}
+
 		if err := ctx.Err(); err != nil {
-			yield(chunk.Record{}, err)
+			wrappedYield(chunk.Record{}, err)
 			return
 		}
 
 		allChunks, _, err := e.collectVaultChunks(selectedVaults, q, chunkIDs)
 		if err != nil {
-			yield(chunk.Record{}, err)
+			wrappedYield(chunk.Record{}, err)
 			return
 		}
 
@@ -554,15 +591,15 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 			return
 		}
 
-		// Validate resume token: all referenced chunks must exist.
-		if err := validateResumeToken(resume, allChunks); err != nil {
-			yield(chunk.Record{}, err)
-			return
-		}
+		// Drop resume positions referencing chunks that vanished mid-pagination
+		// (typical when a chunk seals or transitions between pages). The
+		// server-applied highwater time bound prevents duplicates even
+		// when every position is stale, so pruning is purely permissive.
+		pruneStaleResumePositions(e.logger, resume, allChunks)
 
 		// For single chunk, use simple iteration (no heap needed).
 		if len(allChunks) == 1 {
-			completed = e.searchSingleChunk(ctx, q, allChunks[0], resume, &lastRefs, yield)
+			completed = e.searchSingleChunk(ctx, q, allChunks[0], resume, &lastRefs, wrappedYield)
 			return
 		}
 
@@ -578,21 +615,21 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 		defer ms.cleanup()
 
 		if err := e.primeHeapWithResume(ctx, q, allChunks, resumePositions, ms); err != nil {
-			yield(chunk.Record{}, err)
+			wrappedYield(chunk.Record{}, err)
 			return
 		}
 
-		_, result := runMergeLoop(ctx, q, ms, 0, yield)
+		_, result := runMergeLoop(ctx, q, ms, 0, wrappedYield)
 		if result == mergeCompleted {
 			completed = true
 		}
 	}
 
 	nextToken := func() *ResumeToken {
-		if completed || len(lastRefs) == 0 {
+		if completed || (len(lastRefs) == 0 && highwaterTS.IsZero()) {
 			return nil
 		}
-		return &ResumeToken{Positions: lastRefs}
+		return &ResumeToken{Positions: lastRefs, HighwaterTS: highwaterTS}
 	}
 
 	return seq, nextToken

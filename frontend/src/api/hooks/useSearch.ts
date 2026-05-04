@@ -137,7 +137,11 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
           ? (cur.resumeToken as Uint8Array<ArrayBuffer> | null)
           : null;
         let hasMore = false;
-        let histogram: HistogramBucket[] | null = null;
+        // On pagination (append), the server only sends the histogram on
+        // page 1 — pages 2+ return an empty histogram so we keep the
+        // page-1 view stable across the scroll. Default to the existing
+        // histogram on append so it survives a page that doesn't carry one.
+        let histogram: HistogramBucket[] | null = append ? cur.histogram : null;
         let serverElapsedMs: number | null = null;
 
         // Stream results

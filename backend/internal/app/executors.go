@@ -154,7 +154,7 @@ func forwardSearchAfterParse(
 	var resume *query.ResumeToken
 	if len(resumeTokenData) > 0 {
 		var err error
-		resume, err = server.ProtoToResumeToken(resumeTokenData)
+		resume, err = server.ProtoToLocalResumeToken(resumeTokenData)
 		if err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("invalid resume token: %w", err)
 		}
