@@ -96,7 +96,7 @@ func NewReader(f *os.File) (*Reader, error) {
 		return nil, fmt.Errorf("stat blob file: %w", err)
 	}
 
-	toc, err := readTOC(f, fileInfo.Size())
+	toc, err := ReadTOC(f, fileInfo.Size())
 	if err != nil {
 		return nil, fmt.Errorf("read TOC: %w", err)
 	}
@@ -122,10 +122,13 @@ func NewReader(f *os.File) (*Reader, error) {
 	}, nil
 }
 
-// readTOC reads the TOC footer + entries from the tail of an open blob file.
-// The footer is a fixed 44 bytes at the very end; it announces how many
-// entries precede it. Each entry is 56 bytes.
-func readTOC(f *os.File, fileSize int64) (BlobTOC, error) {
+// ReadTOC reads the TOC footer + entries from the tail of an open blob
+// file. The footer is a fixed 44 bytes at the very end; it announces how
+// many entries precede it. Each entry is 56 bytes. Exported for callers
+// that need to verify a downloaded blob's whole-blob digest without
+// constructing a full Reader (e.g. cache-populate integrity checks —
+// gastrolog-grnc3).
+func ReadTOC(f *os.File, fileSize int64) (BlobTOC, error) {
 	if fileSize < int64(tocFooterSize) {
 		return BlobTOC{}, errors.New("blob too small for TOC footer")
 	}

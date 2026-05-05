@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/glid"
 
 	hraft "github.com/hashicorp/raft"
 )
@@ -104,7 +105,7 @@ func TestFSMUpload(t *testing.T) {
 	applyCmd(t, fsm, MarshalCreateChunk(id, now, now, now))
 	applyCmd(t, fsm, MarshalSealChunk(id, now, 200, 80000, now, now, now, false))
 	applyCmd(t, fsm, MarshalCompressChunk(id, 30000))
-	applyCmd(t, fsm, MarshalUploadChunk(id, 25000, 1000, 2000, 3000, 4000, 16))
+	applyCmd(t, fsm, MarshalUploadChunk(id, 25000, 1000, 2000, 3000, 4000, 16, [32]byte{}, glid.GLID{}, 0))
 
 	e := fsm.Get(id)
 	if !e.CloudBacked {
@@ -166,7 +167,7 @@ func TestFSMSnapshotRestore(t *testing.T) {
 	applyCmd(t, fsm, MarshalCreateChunk(id2, now, now, now))
 	applyCmd(t, fsm, MarshalSealChunk(id2, now.Add(2*time.Second), 200, 80000, now.Add(2*time.Second), now.Add(2*time.Second), now.Add(2*time.Second), false))
 	applyCmd(t, fsm, MarshalCompressChunk(id2, 30000))
-	applyCmd(t, fsm, MarshalUploadChunk(id2, 25000, 100, 200, 300, 400, 8))
+	applyCmd(t, fsm, MarshalUploadChunk(id2, 25000, 100, 200, 300, 400, 8, [32]byte{}, glid.GLID{}, 0))
 
 	id3 := testChunkID(30)
 	applyCmd(t, fsm, MarshalCreateChunk(id3, now, now, now))

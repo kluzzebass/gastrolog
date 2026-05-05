@@ -24,6 +24,14 @@ func (o *Orchestrator) ManifestReader() manifest.Reader {
 	return &orchestratorManifestReader{o: o}
 }
 
+// IntegrityVerifier returns a chunk.IntegrityVerifier backed by the same
+// FSM-projected manifest as ManifestReader. The chunk manager wires this
+// in to verify cold-cache cloud downloads against the FSM-recorded digest.
+// See gastrolog-grnc3.
+func (o *Orchestrator) IntegrityVerifier() chunk.IntegrityVerifier {
+	return &orchestratorManifestReader{o: o}
+}
+
 // orchestratorManifestReader implements manifest.Reader by walking the
 // orchestrator's vaults and their tiers. Sealed entries from the tier FSM
 // are returned verbatim; memory-mode tiers project from chunk.ChunkManager
@@ -33,6 +41,24 @@ type orchestratorManifestReader struct {
 }
 
 var _ manifest.Reader = (*orchestratorManifestReader)(nil)
+var _ chunk.IntegrityVerifier = (*orchestratorManifestReader)(nil)
+
+// ExpectedDigest implements chunk.IntegrityVerifier. Returns the FSM-recorded
+// GLCB whole-blob digest for a chunk; (zero, false) when the chunk isn't
+// in the manifest yet (pre-upload race) or was uploaded before the
+// gastrolog-grnc3 hash field was added (zero Hash on the entry, treated as
+// "no expectation"). Cold-cache downloads consult this to reject blobs
+// whose actual digest doesn't match what the leader stamped at upload time.
+func (r *orchestratorManifestReader) ExpectedDigest(id chunk.ChunkID) ([32]byte, bool) {
+	e, ok := r.Entry(id)
+	if !ok {
+		return [32]byte{}, false
+	}
+	if e.Hash == ([32]byte{}) {
+		return [32]byte{}, false
+	}
+	return e.Hash, true
+}
 
 // Entry returns the sealed manifest entry for the given chunk ID. ChunkIDs
 // are globally unique, so this fans out across every vault and tier until

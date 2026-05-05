@@ -167,6 +167,13 @@ func TierConfigToProto(t system.TierConfig, placements []system.TierPlacement) *
 		CacheBudget:       t.CacheBudget,
 		CacheTtl:          t.CacheTTL,
 	}
+	// Cloud-backed tiers go on the wire as TIER_TYPE_CLOUD for client UI
+	// back-compat (the frontend uses the type discriminator to dispatch
+	// cloud-specific form fields). Server-side dispatch ignores the wire
+	// type and uses TierConfig.IsCloud(). See gastrolog-4k5mg.
+	if t.IsCloud() {
+		pb.Type = gastrologv1.TierType_TIER_TYPE_CLOUD
+	}
 	pb.RotationPolicyId = glid.OptionalToProto(t.RotationPolicyID)
 	pb.CloudServiceId = glid.OptionalToProto(t.CloudServiceID)
 	return pb
@@ -229,8 +236,6 @@ func TierTypeToProto(t system.TierType) gastrologv1.TierType {
 		return gastrologv1.TierType_TIER_TYPE_MEMORY
 	case system.TierTypeFile:
 		return gastrologv1.TierType_TIER_TYPE_FILE
-	case system.TierTypeCloud:
-		return gastrologv1.TierType_TIER_TYPE_CLOUD
 	case system.TierTypeJSONL:
 		return gastrologv1.TierType_TIER_TYPE_JSONL
 	default:
@@ -245,7 +250,10 @@ func TierTypeFromProto(t gastrologv1.TierType) system.TierType {
 	case gastrologv1.TierType_TIER_TYPE_FILE:
 		return system.TierTypeFile
 	case gastrologv1.TierType_TIER_TYPE_CLOUD:
-		return system.TierTypeCloud
+		// Legacy proto value: a cloud tier is now a file tier with
+		// CloudServiceID set (gastrolog-4k5mg). Normalize on the way in
+		// so server-side dispatch only ever sees TierTypeFile + IsCloud().
+		return system.TierTypeFile
 	case gastrologv1.TierType_TIER_TYPE_JSONL:
 		return system.TierTypeJSONL
 	case gastrologv1.TierType_TIER_TYPE_UNSPECIFIED:

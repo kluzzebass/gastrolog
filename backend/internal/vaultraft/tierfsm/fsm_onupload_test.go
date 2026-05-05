@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/glid"
 
 	hraft "github.com/hashicorp/raft"
 )
@@ -30,7 +31,7 @@ func TestOnUploadCallbackFires(t *testing.T) {
 	fsm.Apply(&hraft.Log{Data: MarshalSealChunk(id, now, 42, 1024, now, now, now, false)})
 
 	// Upload.
-	fsm.Apply(&hraft.Log{Data: MarshalUploadChunk(id, 512, 100, 50, 200, 75, 3)})
+	fsm.Apply(&hraft.Log{Data: MarshalUploadChunk(id, 512, 100, 50, 200, 75, 3, [32]byte{}, glid.GLID{}, 0)})
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -63,7 +64,7 @@ func TestOnUploadCallbackNotCalledOnError(t *testing.T) {
 
 	// Upload for a non-existent chunk — should error, not fire callback.
 	id := chunk.NewChunkID()
-	fsm.Apply(&hraft.Log{Data: MarshalUploadChunk(id, 512, 0, 0, 0, 0, 1)})
+	fsm.Apply(&hraft.Log{Data: MarshalUploadChunk(id, 512, 0, 0, 0, 0, 1, [32]byte{}, glid.GLID{}, 0)})
 
 	if called {
 		t.Error("OnUpload should not fire when applyUpload fails")

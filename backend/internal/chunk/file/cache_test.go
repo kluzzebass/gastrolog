@@ -13,6 +13,7 @@ import (
 
 	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
+	chunkcloud "gastrolog/internal/chunk/cloud"
 	"gastrolog/internal/glid"
 )
 
@@ -268,4 +269,108 @@ func (s *downloadOnlyFaultStore) Download(ctx context.Context, key string) (io.R
 		return nil, errors.New("simulated full-blob download failure")
 	}
 	return s.Store.Download(ctx, key)
+}
+
+// staticVerifier returns a fixed expected digest for any chunk. (zero, false)
+// means "no expectation on file" → verification is skipped.
+type staticVerifier struct {
+	digest [32]byte
+	have   bool
+}
+
+func (v *staticVerifier) ExpectedDigest(chunk.ChunkID) ([32]byte, bool) {
+	return v.digest, v.have
+}
+
+// TestColdCacheVerifiesBlobDigest covers the integrity check landed in
+// gastrolog-grnc3: a cold-cache cloud download is rejected when the GLCB
+// whole-blob digest read from the TOC footer doesn't match what the FSM
+// stamped at upload time. Without verification the warm cache would
+// happily seed itself with corrupted bytes and re-serve them forever.
+func TestColdCacheVerifiesBlobDigest(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	inner := blobstore.NewMemory()
+	store := &countingStore{Store: inner}
+	verifier := &staticVerifier{}
+
+	cm, err := NewManager(Config{
+		Dir:               t.TempDir(),
+		Now:               time.Now,
+		RotationPolicy:    chunk.NewRecordCountPolicy(10000),
+		CloudStore:        store,
+		VaultID:           vaultID,
+		IntegrityVerifier: verifier,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cm.Close() })
+
+	chunkID := ingestAndUpload(t, cm, 50)
+	glcbPath := filepath.Join(cm.chunkDir(chunkID), dataGLCBFileName)
+
+	// Pull the actual digest off the just-uploaded blob so we can drive the
+	// verifier's "match" / "mismatch" cases against real data.
+	actualDigest := readBlobDigest(t, glcbPath)
+
+	// Cold-cache + matching digest: download should succeed and the chunk
+	// should read normally.
+	if err := os.Remove(glcbPath); err != nil {
+		t.Fatal(err)
+	}
+	verifier.digest = actualDigest
+	verifier.have = true
+	cursor, err := cm.OpenCursor(chunkID)
+	if err != nil {
+		t.Fatalf("OpenCursor (matching digest): %v", err)
+	}
+	if got := drainCursor(t, cursor); got != 50 {
+		t.Errorf("matching digest: read %d records, expected 50", got)
+	}
+
+	// Cold-cache + wrong expected digest: the download must be rejected, the
+	// tmp file must be cleaned up, and OpenCursor must fall back to the
+	// range-request reader (which doesn't go through verification — it
+	// streams from the authoritative cloud copy directly).
+	if err := os.Remove(glcbPath); err != nil {
+		t.Fatal(err)
+	}
+	var bogus [32]byte
+	for i := range bogus {
+		bogus[i] = 0xAB
+	}
+	verifier.digest = bogus
+	verifier.have = true
+
+	cursor, err = cm.OpenCursor(chunkID)
+	if err != nil {
+		t.Fatalf("OpenCursor (mismatched digest, range fallback): %v", err)
+	}
+	if got := drainCursor(t, cursor); got != 50 {
+		t.Errorf("range fallback: read %d records, expected 50", got)
+	}
+	if _, err := os.Stat(glcbPath); !os.IsNotExist(err) {
+		t.Errorf("rejected blob should not be promoted to data.glcb (stat err=%v)", err)
+	}
+}
+
+// readBlobDigest pulls the GLCB whole-blob digest out of a local data.glcb
+// file's TOC footer.
+func readBlobDigest(t *testing.T, path string) [32]byte {
+	t.Helper()
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		t.Fatalf("open data.glcb: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		t.Fatalf("stat data.glcb: %v", err)
+	}
+	toc, err := chunkcloud.ReadTOC(f, info.Size())
+	if err != nil {
+		t.Fatalf("read TOC: %v", err)
+	}
+	return toc.BlobDigest
 }
