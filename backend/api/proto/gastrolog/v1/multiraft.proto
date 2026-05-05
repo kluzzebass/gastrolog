@@ -45,11 +45,10 @@ message MultiRaftAppendEntriesRequest {
   bytes group_id = 1;
   RPCHeader rpc_header = 2;
   uint64 term = 3;
-  reserved 4; // leader — redundant with rpc_header.addr
-  uint64 prev_log_entry = 5;
-  uint64 prev_log_term = 6;
-  repeated Log entries = 7;
-  uint64 leader_commit_index = 8;
+  uint64 prev_log_entry = 4;
+  uint64 prev_log_term = 5;
+  repeated Log entries = 6;
+  uint64 leader_commit_index = 7;
 }
 
 message MultiRaftAppendEntriesResponse {
@@ -64,10 +63,9 @@ message MultiRaftRequestVoteRequest {
   bytes group_id = 1;
   RPCHeader rpc_header = 2;
   uint64 term = 3;
-  reserved 4; // candidate — redundant with rpc_header.addr
-  uint64 last_log_index = 5;
-  uint64 last_log_term = 6;
-  bool leadership_transfer = 7;
+  uint64 last_log_index = 4;
+  uint64 last_log_term = 5;
+  bool leadership_transfer = 6;
 }
 
 message MultiRaftRequestVoteResponse {
@@ -105,14 +103,13 @@ message MultiRaftInstallSnapshotRequest {
   RPCHeader rpc_header = 2;
   int64 snapshot_version = 3;
   uint64 term = 4;
-  reserved 5; // leader — redundant with rpc_header.addr
-  uint64 last_log_index = 6;
-  uint64 last_log_term = 7;
-  bytes peers = 8;
-  bytes configuration = 9;
-  uint64 configuration_index = 10;
-  int64 size = 11;
-  bytes data = 12;
+  uint64 last_log_index = 5;
+  uint64 last_log_term = 6;
+  bytes peers = 7;
+  bytes configuration = 8;
+  uint64 configuration_index = 9;
+  int64 size = 10;
+  bytes data = 11;
 }
 
 message MultiRaftInstallSnapshotResponse {

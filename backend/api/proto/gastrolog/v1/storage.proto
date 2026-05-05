@@ -13,8 +13,7 @@ message FileStorage {
   uint32 storage_class = 2;
   string name = 3;
   string path = 4;
-  reserved 5;
-  uint64 memory_budget_bytes = 6;
+  uint64 memory_budget_bytes = 5;
 }
 
 // NodeStorageConfig declares all locally-attached storage available on a node.
@@ -46,17 +45,15 @@ message CloudService {
   string container = 9;
   string connection_string = 10;
   string credentials_json = 11;
-  reserved 12; // was storage_class (string) — replaced by uint32 field 15
-  reserved 13, 14; // active_chunk_class, cache_class — moved to TierConfig
-  uint32 storage_class = 15;
+  uint32 storage_class = 12;
 
   // Archival lifecycle configuration.
   // "none" = bucket-level lifecycle handles it (or no archival).
   // "active" = GastroLog manages transitions via the sweep job.
-  string archival_mode = 20;
-  repeated CloudStorageTransition transitions = 21; // ordered by after_days
-  string restore_tier = 22;                         // default restore speed (S3: Expedited/Standard/Bulk, Azure: High/Standard)
-  uint32 restore_days = 23;                         // S3: how long restored copy stays readable (days)
-  uint32 suspect_grace_days = 24;                   // days before suspect chunk removed from index (default 7)
-  string reconcile_schedule = 25;                   // cron for reconciliation sweep (default "0 3 * * *")
+  string archival_mode = 13;
+  repeated CloudStorageTransition transitions = 14; // ordered by after_days
+  string restore_tier = 15;                         // default restore speed (S3: Expedited/Standard/Bulk, Azure: High/Standard)
+  uint32 restore_days = 16;                         // S3: how long restored copy stays readable (days)
+  uint32 suspect_grace_days = 17;                   // days before suspect chunk removed from index (default 7)
+  string reconcile_schedule = 18;                   // cron for reconciliation sweep (default "0 3 * * *")
 }

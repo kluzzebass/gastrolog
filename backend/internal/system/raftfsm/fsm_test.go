@@ -512,8 +512,6 @@ func TestApplyPutTier(t *testing.T) {
 		MemoryBudgetBytes: 512 * 1024 * 1024,
 		StorageClass:      1,
 		CloudServiceID:    &csID,
-		ActiveChunkClass:  2,
-		CacheClass:        3,
 	}))
 
 	got, err := fsm.Store().GetTier(context.Background(), id)
@@ -529,8 +527,8 @@ func TestApplyPutTier(t *testing.T) {
 	if got.CloudServiceID == nil || *got.CloudServiceID != csID {
 		t.Fatalf("unexpected cloud service: %v", got.CloudServiceID)
 	}
-	if got.ActiveChunkClass != 2 || got.CacheClass != 3 {
-		t.Fatalf("unexpected classes: active=%d cache=%d", got.ActiveChunkClass, got.CacheClass)
+	if got.StorageClass != 1 {
+		t.Fatalf("unexpected storage class: %d", got.StorageClass)
 	}
 }
 

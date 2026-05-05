@@ -432,7 +432,6 @@ message AuthSettings {
   bool jwt_secret_configured = 2; // read-only: true when a JWT secret exists
   string refresh_token_duration = 3;
   PasswordPolicySettings password_policy = 4;
-  reserved 5; // was jwt_secret (removed: secret is never exposed over the API)
 }
 
 message QuerySettings {
@@ -453,13 +452,12 @@ message TLSSettings {
 }
 
 message LookupSettings {
-  reserved 1, 2, 3;  // 1: geoip_db_path, 2: asn_db_path, 3: maxmind (moved to GetSettingsResponse)
-  repeated HTTPLookupEntry http_lookups = 4;
-  repeated JSONFileLookupEntry json_file_lookups = 5;
-  repeated MMDBLookupEntry mmdb_lookups = 6;
-  repeated CSVLookupEntry csv_lookups = 7;
-  repeated StaticLookupEntry static_lookups = 8;
-  repeated YAMLFileLookupEntry yaml_file_lookups = 9;
+  repeated HTTPLookupEntry http_lookups = 1;
+  repeated JSONFileLookupEntry json_file_lookups = 2;
+  repeated MMDBLookupEntry mmdb_lookups = 3;
+  repeated CSVLookupEntry csv_lookups = 4;
+  repeated StaticLookupEntry static_lookups = 5;
+  repeated YAMLFileLookupEntry yaml_file_lookups = 6;
 }
 
 // MMDBLookupEntry defines a named MMDB-backed lookup table (GeoIP City or ASN).
@@ -495,9 +493,8 @@ message JSONFileLookupEntry {
   string name = 1;                            // registry name (e.g. "hosts")
   bytes file_id = 2;                          // managed file ID
   string query = 3;                           // jq expression that produces an array of objects (the lookup table)
-  reserved 4;                                 // was: parameters (lookup key is determined by key_column)
-  string key_column = 5;                      // column used as the lookup key; empty = first column
-  repeated string value_columns = 6;          // columns to include in output; empty = all non-key
+  string key_column = 4;                      // column used as the lookup key; empty = first column
+  repeated string value_columns = 5;          // columns to include in output; empty = all non-key
 }
 
 // YAMLFileLookupEntry defines a YAML file-backed lookup table. YAML parses
@@ -565,9 +562,8 @@ message PutPasswordPolicySettings {
 
 message PutAuthSettings {
   optional string token_duration = 1;
-  reserved 2; // was jwt_secret (removed: use RegenerateJwtSecret RPC instead)
-  optional string refresh_token_duration = 3;
-  PutPasswordPolicySettings password_policy = 4;
+  optional string refresh_token_duration = 2;
+  PutPasswordPolicySettings password_policy = 3;
 }
 
 message PutQuerySettings {
@@ -594,13 +590,12 @@ message PutMaxMindSettings {
 }
 
 message PutLookupSettings {
-  reserved 1, 2, 3;  // 1: geoip_db_path, 2: asn_db_path, 3: maxmind (moved to PutMaxMindSettingsRequest)
-  repeated HTTPLookupEntry http_lookups = 4; // replaces the full list when present
-  repeated JSONFileLookupEntry json_file_lookups = 5; // replaces the full list when present
-  repeated MMDBLookupEntry mmdb_lookups = 6; // replaces the full list when present
-  repeated CSVLookupEntry csv_lookups = 7; // replaces the full list when present
-  repeated StaticLookupEntry static_lookups = 8; // replaces the full list when present
-  repeated YAMLFileLookupEntry yaml_file_lookups = 9; // replaces the full list when present
+  repeated HTTPLookupEntry http_lookups = 1; // replaces the full list when present
+  repeated JSONFileLookupEntry json_file_lookups = 2; // replaces the full list when present
+  repeated MMDBLookupEntry mmdb_lookups = 3; // replaces the full list when present
+  repeated CSVLookupEntry csv_lookups = 4; // replaces the full list when present
+  repeated StaticLookupEntry static_lookups = 5; // replaces the full list when present
+  repeated YAMLFileLookupEntry yaml_file_lookups = 6; // replaces the full list when present
 }
 
 message PutClusterSettings {
@@ -821,12 +816,15 @@ message NodeConfig {
 }
 
 // TierType identifies the storage medium for a tier.
+//
+// A cloud-backed tier is a TIER_TYPE_FILE tier with cloud_service_id set;
+// the server flips behavior on the cloud-store binding rather than the
+// type enum. See gastrolog-4k5mg.
 enum TierType {
   TIER_TYPE_UNSPECIFIED = 0;
   TIER_TYPE_MEMORY = 1;
   TIER_TYPE_FILE = 2;
-  TIER_TYPE_CLOUD = 3;
-  TIER_TYPE_JSONL = 4;
+  TIER_TYPE_JSONL = 3;
 }
 
 // TierConfig defines a storage tier owned by exactly one vault. Tiers are
@@ -840,16 +838,14 @@ message TierConfig {
   uint64 memory_budget_bytes = 6;
   uint32 storage_class = 7;
   bytes cloud_service_id = 8;
-  uint32 active_chunk_class = 9;
-  uint32 cache_class = 10;
-  uint32 replication_factor = 12;   // desired RF (1 = no replication, default)
-  string path = 14;                       // direct path for JSONL sinks
-  repeated TierPlacement placements = 15; // system-managed: file storage assignments by placement manager
-  bytes vault_id = 16;                   // owning vault — exactly one vault per tier
-  uint32 position = 17;                   // 0-based order within the vault's tier chain
-  string cache_eviction = 18;             // "lru" (default) or "ttl"
-  string cache_budget = 19;              // max cache size (e.g. "1GB", "500MB"; default: "1GiB")
-  string cache_ttl = 20;                  // eviction TTL duration (e.g. "1h", "7d"); only for ttl mode
+  uint32 replication_factor = 9;          // desired RF (1 = no replication, default)
+  string path = 10;                       // direct path for JSONL sinks
+  repeated TierPlacement placements = 11; // system-managed: file storage assignments by placement manager
+  bytes vault_id = 12;                    // owning vault — exactly one vault per tier
+  uint32 position = 13;                   // 0-based order within the vault's tier chain
+  string cache_eviction = 14;             // "lru" (default) or "ttl"
+  string cache_budget = 15;               // max cache size (e.g. "1GB", "500MB"; default: "1GiB")
+  string cache_ttl = 16;                  // eviction TTL duration (e.g. "1h", "7d"); only for ttl mode
 }
 
 // TierPlacement assigns one replica of a tier to a specific file storage.
@@ -1040,8 +1036,7 @@ message PutTierResponse {
 
 message DeleteTierRequest {
   bytes id = 1;
-  reserved 2;       // was delete_data
-  bool drain = 3;   // When true, drain chunks to the next tier before deleting.
+  bool drain = 2;   // When true, drain chunks to the next tier before deleting.
 }
 
 message DeleteTierResponse {

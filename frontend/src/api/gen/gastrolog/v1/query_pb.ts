@@ -11,14 +11,14 @@ import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
  */
 export class SearchRequest extends Message<SearchRequest> {
   /**
-   * @generated from field: gastrolog.v1.Query query = 2;
+   * @generated from field: gastrolog.v1.Query query = 1;
    */
   query?: Query;
 
   /**
    * Opaque token for pagination
    *
-   * @generated from field: bytes resume_token = 3;
+   * @generated from field: bytes resume_token = 2;
    */
   resumeToken = new Uint8Array(0);
 
@@ -30,8 +30,8 @@ export class SearchRequest extends Message<SearchRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.SearchRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 2, name: "query", kind: "message", T: Query },
-    { no: 3, name: "resume_token", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 1, name: "query", kind: "message", T: Query },
+    { no: 2, name: "resume_token", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SearchRequest {
@@ -321,7 +321,7 @@ export class TableRow extends Message<TableRow> {
  */
 export class FollowRequest extends Message<FollowRequest> {
   /**
-   * @generated from field: gastrolog.v1.Query query = 2;
+   * @generated from field: gastrolog.v1.Query query = 1;
    */
   query?: Query;
 
@@ -333,7 +333,7 @@ export class FollowRequest extends Message<FollowRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.FollowRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 2, name: "query", kind: "message", T: Query },
+    { no: 1, name: "query", kind: "message", T: Query },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): FollowRequest {
@@ -395,7 +395,7 @@ export class FollowResponse extends Message<FollowResponse> {
  */
 export class ExplainRequest extends Message<ExplainRequest> {
   /**
-   * @generated from field: gastrolog.v1.Query query = 2;
+   * @generated from field: gastrolog.v1.Query query = 1;
    */
   query?: Query;
 
@@ -407,7 +407,7 @@ export class ExplainRequest extends Message<ExplainRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ExplainRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 2, name: "query", kind: "message", T: Query },
+    { no: 1, name: "query", kind: "message", T: Query },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ExplainRequest {
@@ -871,7 +871,7 @@ export class RecordRef extends Message<RecordRef> {
  */
 export class ResumeToken extends Message<ResumeToken> {
   /**
-   * @generated from field: map<string, bytes> vault_tokens = 2;
+   * @generated from field: map<string, bytes> vault_tokens = 1;
    */
   vaultTokens: { [key: string]: Uint8Array } = {};
 
@@ -879,12 +879,12 @@ export class ResumeToken extends Message<ResumeToken> {
    * Frozen time bounds from the first page — prevents "last-5m" from
    * shifting between pages.
    *
-   * @generated from field: google.protobuf.Timestamp frozen_start = 3;
+   * @generated from field: google.protobuf.Timestamp frozen_start = 2;
    */
   frozenStart?: Timestamp;
 
   /**
-   * @generated from field: google.protobuf.Timestamp frozen_end = 4;
+   * @generated from field: google.protobuf.Timestamp frozen_end = 3;
    */
   frozenEnd?: Timestamp;
 
@@ -895,7 +895,7 @@ export class ResumeToken extends Message<ResumeToken> {
    * transition, retention) without re-emitting already-seen records,
    * even when per-chunk positions become stale and unusable.
    *
-   * @generated from field: google.protobuf.Timestamp highwater_ts = 5;
+   * @generated from field: google.protobuf.Timestamp highwater_ts = 4;
    */
   highwaterTs?: Timestamp;
 
@@ -907,10 +907,10 @@ export class ResumeToken extends Message<ResumeToken> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ResumeToken";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 2, name: "vault_tokens", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 12 /* ScalarType.BYTES */} },
-    { no: 3, name: "frozen_start", kind: "message", T: Timestamp },
-    { no: 4, name: "frozen_end", kind: "message", T: Timestamp },
-    { no: 5, name: "highwater_ts", kind: "message", T: Timestamp },
+    { no: 1, name: "vault_tokens", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 12 /* ScalarType.BYTES */} },
+    { no: 2, name: "frozen_start", kind: "message", T: Timestamp },
+    { no: 3, name: "frozen_end", kind: "message", T: Timestamp },
+    { no: 4, name: "highwater_ts", kind: "message", T: Timestamp },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ResumeToken {

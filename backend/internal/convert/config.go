@@ -156,8 +156,6 @@ func TierConfigToProto(t system.TierConfig, placements []system.TierPlacement) *
 		RetentionRules:    rules,
 		MemoryBudgetBytes: t.MemoryBudgetBytes,
 		StorageClass:      t.StorageClass,
-		ActiveChunkClass:  t.ActiveChunkClass,
-		CacheClass:        t.CacheClass,
 		ReplicationFactor: t.ReplicationFactor,
 		Path:              t.Path,
 		Placements:        pbPlacements,
@@ -166,13 +164,6 @@ func TierConfigToProto(t system.TierConfig, placements []system.TierPlacement) *
 		CacheEviction:     t.CacheEviction,
 		CacheBudget:       t.CacheBudget,
 		CacheTtl:          t.CacheTTL,
-	}
-	// Cloud-backed tiers go on the wire as TIER_TYPE_CLOUD for client UI
-	// back-compat (the frontend uses the type discriminator to dispatch
-	// cloud-specific form fields). Server-side dispatch ignores the wire
-	// type and uses TierConfig.IsCloud(). See gastrolog-4k5mg.
-	if t.IsCloud() {
-		pb.Type = gastrologv1.TierType_TIER_TYPE_CLOUD
 	}
 	pb.RotationPolicyId = glid.OptionalToProto(t.RotationPolicyID)
 	pb.CloudServiceId = glid.OptionalToProto(t.CloudServiceID)
@@ -190,8 +181,6 @@ func TierConfigFromProto(p *gastrologv1.TierConfig) (system.TierConfig, error) {
 		Type:              TierTypeFromProto(p.GetType()),
 		MemoryBudgetBytes: p.GetMemoryBudgetBytes(),
 		StorageClass:      p.GetStorageClass(),
-		ActiveChunkClass:  p.GetActiveChunkClass(),
-		CacheClass:        p.GetCacheClass(),
 		ReplicationFactor: p.GetReplicationFactor(),
 		Path:              p.GetPath(),
 		Position:          p.GetPosition(),
@@ -248,11 +237,6 @@ func TierTypeFromProto(t gastrologv1.TierType) system.TierType {
 	case gastrologv1.TierType_TIER_TYPE_MEMORY:
 		return system.TierTypeMemory
 	case gastrologv1.TierType_TIER_TYPE_FILE:
-		return system.TierTypeFile
-	case gastrologv1.TierType_TIER_TYPE_CLOUD:
-		// Legacy proto value: a cloud tier is now a file tier with
-		// CloudServiceID set (gastrolog-4k5mg). Normalize on the way in
-		// so server-side dispatch only ever sees TierTypeFile + IsCloud().
 		return system.TierTypeFile
 	case gastrologv1.TierType_TIER_TYPE_JSONL:
 		return system.TierTypeJSONL

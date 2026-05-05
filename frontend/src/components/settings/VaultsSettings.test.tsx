@@ -28,7 +28,7 @@ const sampleConfig = {
     },
   ],
   tiers: [
-    { id: testId(10), name: "local-tier", type: 2 /* FILE */, vaultId: testId(1), position: 0, rotationPolicyId: testId(20), retentionRules: [{ retentionPolicyId: testId(30) }], placements: [], replicationFactor: 1 },
+    { id: testId(10), name: "local-tier", type: 2 /* FILE */, vaultId: testId(1), position: 0, rotationPolicyId: testId(20), retentionRules: [{ retentionPolicyId: testId(30) }], placements: [], replicationFactor: 1, cloudServiceId: new Uint8Array(0) },
   ],
   rotationPolicies: [{ id: testId(20), name: "daily" }],
   retentionPolicies: [{ id: testId(30), name: "30-day" }],

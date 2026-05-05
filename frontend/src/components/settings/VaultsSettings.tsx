@@ -24,15 +24,21 @@ import { VaultSettingsCard } from "./VaultSettingsCard";
 // Tier entry types
 // ---------------------------------------------------------------------------
 
-export type TierTypeLabel = "memory" | "file" | "cloud" | "jsonl";
+// "cloud" is no longer a distinct tier kind. A cloud-backed tier is a file
+// tier with cloudServiceId set; cloud-ness is derived via isCloudBacked()
+// rather than checking the type discriminator. See gastrolog-4k5mg.
+export type TierTypeLabel = "memory" | "file" | "jsonl";
+
+/** Returns true if this tier is cloud-backed (file tier with a cloud service binding). */
+export function isCloudBacked(tier: { type: TierTypeLabel; cloudServiceId: string }): boolean {
+  return tier.type === "file" && tier.cloudServiceId !== "";
+}
 
 export interface TierEntry {
   key: string;
   type: TierTypeLabel;
   storageClass: string;
   cloudServiceId: string;
-  activeChunkClass: string;
-  cacheClass: string;
   cacheEviction: string;
   cacheBudget: string;
   cacheTTL: string;
@@ -50,8 +56,6 @@ export function emptyTierEntry(type: TierTypeLabel): TierEntry {
     type,
     storageClass: "",
     cloudServiceId: "",
-    activeChunkClass: "",
-    cacheClass: "",
     cacheEviction: "lru",
     cacheBudget: "",
     cacheTTL: "",
@@ -102,8 +106,6 @@ export function tierTypeEnum(t: TierTypeLabel): TierType {
       return TierType.MEMORY;
     case "file":
       return TierType.FILE;
-    case "cloud":
-      return TierType.CLOUD;
     case "jsonl":
       return TierType.JSONL;
   }
@@ -114,7 +116,6 @@ export function tierTypeLabel(type: TierType): string {
   switch (type) {
     case TierType.MEMORY: return "memory";
     case TierType.FILE: return "file";
-    case TierType.CLOUD: return "cloud";
     case TierType.JSONL: return "jsonl";
     default: return "unknown";
   }
@@ -143,16 +144,15 @@ function extractErrorMessage(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
 }
 
-export function isTierComplete(tier: TierEntry, hasCloudServices: boolean): boolean {
+export function isTierComplete(tier: TierEntry, _hasCloudServices: boolean): boolean {
   switch (tier.type) {
     case "memory":
       return true;
     case "file":
+      // Single storage class for both local-only and cloud-backed file
+      // tiers — the active chunk and warm cache live at the same chunkDir
+      // path, so no separate "active" or "cache" class is meaningful.
       return tier.storageClass !== "";
-    case "cloud":
-      return (tier.cloudServiceId !== "" || !hasCloudServices)
-        && tier.activeChunkClass !== "" && tier.activeChunkClass !== "0"
-        && tier.cacheClass !== "" && tier.cacheClass !== "0";
     case "jsonl":
       return tier.nodeId !== "";
   }
@@ -299,90 +299,52 @@ export function TierEntryCard({
       )}
 
       {tier.type === "file" && (
-        <FormField label="Storage Class" dark={dark}>
-          {storageClassOptions.length > 0 ? (
+        <>
+          {/* Cloud Storage selector — when set, the file tier becomes
+              cloud-backed (sealed chunks upload to S3/etc; the active
+              chunk and a warm cache stay on local disk). The storage
+              class governs the local placement either way. */}
+          <FormField
+            label="Cloud Storage"
+            dark={dark}
+            description={cloudServiceOptions.length === 0 ? "No cloud services configured — leave empty for local-only" : "Optional — select to make this tier cloud-backed"}
+          >
             <SelectInput
-              value={tier.storageClass}
-              onChange={(v) => onUpdate({ storageClass: v })}
+              value={tier.cloudServiceId}
+              onChange={(v) => onUpdate({ cloudServiceId: v })}
               options={[
-                { value: "", label: "Select storage class..." },
-                ...storageClassOptions,
+                { value: "", label: "Local-only" },
+                ...cloudServiceOptions,
               ]}
               dark={dark}
             />
-          ) : (
-            <SpinnerInput
-              value={tier.storageClass}
-              onChange={(v) => onUpdate({ storageClass: v })}
-              dark={dark}
-              min={0}
-            />
-          )}
-        </FormField>
-      )}
+          </FormField>
 
-      {tier.type === "cloud" && (
-        <>
-          <FormField label="Cloud Storage" dark={dark}>
-            {cloudServiceOptions.length > 0 ? (
+          <FormField label="Storage Class" dark={dark}>
+            {storageClassOptions.length > 0 ? (
               <SelectInput
-                value={tier.cloudServiceId}
-                onChange={(v) => onUpdate({ cloudServiceId: v })}
+                value={tier.storageClass}
+                onChange={(v) => onUpdate({ storageClass: v })}
                 options={[
-                  { value: "", label: "Select cloud storage..." },
-                  ...cloudServiceOptions,
+                  { value: "", label: "Select storage class..." },
+                  ...storageClassOptions,
                 ]}
                 dark={dark}
               />
             ) : (
-              <TextInput
-                value={tier.cloudServiceId}
-                onChange={(v) => onUpdate({ cloudServiceId: v })}
-                placeholder="Cloud storage ID"
+              <SpinnerInput
+                value={tier.storageClass}
+                onChange={(v) => onUpdate({ storageClass: v })}
                 dark={dark}
-                mono
+                min={0}
               />
             )}
           </FormField>
-          <div className="grid grid-cols-2 gap-2">
-            <FormField label="Active Chunk Class" dark={dark}>
-              {storageClassOptions.length > 0 ? (
-                <SelectInput
-                  value={tier.activeChunkClass}
-                  onChange={(v) => onUpdate({ activeChunkClass: v })}
-                  options={[{ value: "", label: "Select..." }, ...storageClassOptions]}
-                  dark={dark}
-                />
-              ) : (
-                <NumberInput
-                  value={tier.activeChunkClass}
-                  onChange={(v) => onUpdate({ activeChunkClass: v })}
-                  placeholder="0"
-                  dark={dark}
-                  min={0}
-                />
-              )}
-            </FormField>
-            <FormField label="Cache Class" dark={dark}>
-              {storageClassOptions.length > 0 ? (
-                <SelectInput
-                  value={tier.cacheClass}
-                  onChange={(v) => onUpdate({ cacheClass: v })}
-                  options={[{ value: "", label: "Select..." }, ...storageClassOptions]}
-                  dark={dark}
-                />
-              ) : (
-                <NumberInput
-                  value={tier.cacheClass}
-                  onChange={(v) => onUpdate({ cacheClass: v })}
-                  placeholder="0"
-                  dark={dark}
-                  min={0}
-                />
-              )}
-            </FormField>
-          </div>
-          {tier.cacheClass !== "" && tier.cacheClass !== "0" && (
+
+          {/* Cache eviction tuning is only meaningful on cloud-backed
+              tiers — local-only tiers have nothing to evict (sealed
+              chunks ARE the data, not a cache). */}
+          {tier.cloudServiceId !== "" && (
             <>
               <FormField label="Cache Eviction" dark={dark}>
                 <SelectInput
@@ -549,10 +511,11 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
     }
   }
   const totalNodes = config?.nodeConfigs.length ?? 1;
-  const maxRFForTier = (tier: { type: string; storageClass: string; activeChunkClass?: string }) => {
+  const maxRFForTier = (tier: { type: string; storageClass: string }) => {
     if (tier.type === "memory") return totalNodes;
     if (tier.type === "jsonl") return 1;
-    const sc = parseInt(tier.type === "cloud" ? (tier.activeChunkClass ?? "0") : tier.storageClass, 10) || 0;
+    // Single storage class for all file tiers (local-only and cloud-backed).
+    const sc = parseInt(tier.storageClass, 10) || 0;
     if (sc === 0) return 1; // no class selected yet
     return classStorageCount.get(sc) ?? 1;
   };
@@ -598,18 +561,21 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
     // Build tier configs outside try/catch (React Compiler can't optimize
     // conditional expressions inside try/catch).
     const tierConfigs = addForm.tiers.map((tier, i) => {
+      // Cloud-backed-ness is derived from cloudServiceId presence, not the
+      // type discriminator — file tiers can be either local-only or
+      // cloud-backed depending on whether a cloud service is bound.
+      // Storage class governs placement either way.
+      const cloudBacked = isCloudBacked(tier);
       return new TierConfig({
         name: tier.type,
         type: tierTypeEnum(tier.type),
         vaultId: decode(vaultId),
         position: i,
         storageClass: tier.type === "file" ? parseInt(tier.storageClass, 10) || 0 : 0,
-        cloudServiceId: tier.type === "cloud" && tier.cloudServiceId ? decode(tier.cloudServiceId) : new Uint8Array(0),
-        activeChunkClass: tier.type === "cloud" ? parseInt(tier.activeChunkClass, 10) || 0 : 0,
-        cacheClass: tier.type === "cloud" ? parseInt(tier.cacheClass, 10) || 0 : 0,
-        cacheEviction: tier.type === "cloud" ? (tier.cacheEviction || "lru") : "",
-        cacheBudget: tier.type === "cloud" ? (tier.cacheBudget || "") : "",
-        cacheTtl: tier.type === "cloud" ? (tier.cacheTTL || "") : "",
+        cloudServiceId: cloudBacked ? decode(tier.cloudServiceId) : new Uint8Array(0),
+        cacheEviction: cloudBacked ? (tier.cacheEviction || "lru") : "",
+        cacheBudget: cloudBacked ? (tier.cacheBudget || "") : "",
+        cacheTtl: cloudBacked ? (tier.cacheTTL || "") : "",
         memoryBudgetBytes: tier.type === "memory" ? parseMemoryBudget(tier.memoryBudget) : protoInt64.zero,
         rotationPolicyId: tier.rotationPolicyId ? decode(tier.rotationPolicyId) : new Uint8Array(0),
         retentionRules: tier.retentionPolicyId
@@ -688,7 +654,6 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
                 items={[
                   { value: "memory", label: "Memory" },
                   { value: "file", label: "File" },
-                  { value: "cloud", label: "Cloud" },
                 ]}
                 onSelect={(v) => dispatchAdd({ type: "addTier", tierType: v as TierTypeLabel })}
                 dark={dark}

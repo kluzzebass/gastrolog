@@ -229,10 +229,10 @@ type MultiRaftAppendEntriesRequest struct {
 	GroupId           []byte                 `protobuf:"bytes,1,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
 	RpcHeader         *RPCHeader             `protobuf:"bytes,2,opt,name=rpc_header,json=rpcHeader,proto3" json:"rpc_header,omitempty"`
 	Term              uint64                 `protobuf:"varint,3,opt,name=term,proto3" json:"term,omitempty"`
-	PrevLogEntry      uint64                 `protobuf:"varint,5,opt,name=prev_log_entry,json=prevLogEntry,proto3" json:"prev_log_entry,omitempty"`
-	PrevLogTerm       uint64                 `protobuf:"varint,6,opt,name=prev_log_term,json=prevLogTerm,proto3" json:"prev_log_term,omitempty"`
-	Entries           []*Log                 `protobuf:"bytes,7,rep,name=entries,proto3" json:"entries,omitempty"`
-	LeaderCommitIndex uint64                 `protobuf:"varint,8,opt,name=leader_commit_index,json=leaderCommitIndex,proto3" json:"leader_commit_index,omitempty"`
+	PrevLogEntry      uint64                 `protobuf:"varint,4,opt,name=prev_log_entry,json=prevLogEntry,proto3" json:"prev_log_entry,omitempty"`
+	PrevLogTerm       uint64                 `protobuf:"varint,5,opt,name=prev_log_term,json=prevLogTerm,proto3" json:"prev_log_term,omitempty"`
+	Entries           []*Log                 `protobuf:"bytes,6,rep,name=entries,proto3" json:"entries,omitempty"`
+	LeaderCommitIndex uint64                 `protobuf:"varint,7,opt,name=leader_commit_index,json=leaderCommitIndex,proto3" json:"leader_commit_index,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -397,9 +397,9 @@ type MultiRaftRequestVoteRequest struct {
 	GroupId            []byte                 `protobuf:"bytes,1,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
 	RpcHeader          *RPCHeader             `protobuf:"bytes,2,opt,name=rpc_header,json=rpcHeader,proto3" json:"rpc_header,omitempty"`
 	Term               uint64                 `protobuf:"varint,3,opt,name=term,proto3" json:"term,omitempty"`
-	LastLogIndex       uint64                 `protobuf:"varint,5,opt,name=last_log_index,json=lastLogIndex,proto3" json:"last_log_index,omitempty"`
-	LastLogTerm        uint64                 `protobuf:"varint,6,opt,name=last_log_term,json=lastLogTerm,proto3" json:"last_log_term,omitempty"`
-	LeadershipTransfer bool                   `protobuf:"varint,7,opt,name=leadership_transfer,json=leadershipTransfer,proto3" json:"leadership_transfer,omitempty"`
+	LastLogIndex       uint64                 `protobuf:"varint,4,opt,name=last_log_index,json=lastLogIndex,proto3" json:"last_log_index,omitempty"`
+	LastLogTerm        uint64                 `protobuf:"varint,5,opt,name=last_log_term,json=lastLogTerm,proto3" json:"last_log_term,omitempty"`
+	LeadershipTransfer bool                   `protobuf:"varint,6,opt,name=leadership_transfer,json=leadershipTransfer,proto3" json:"leadership_transfer,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -782,13 +782,13 @@ type MultiRaftInstallSnapshotRequest struct {
 	RpcHeader          *RPCHeader             `protobuf:"bytes,2,opt,name=rpc_header,json=rpcHeader,proto3" json:"rpc_header,omitempty"`
 	SnapshotVersion    int64                  `protobuf:"varint,3,opt,name=snapshot_version,json=snapshotVersion,proto3" json:"snapshot_version,omitempty"`
 	Term               uint64                 `protobuf:"varint,4,opt,name=term,proto3" json:"term,omitempty"`
-	LastLogIndex       uint64                 `protobuf:"varint,6,opt,name=last_log_index,json=lastLogIndex,proto3" json:"last_log_index,omitempty"`
-	LastLogTerm        uint64                 `protobuf:"varint,7,opt,name=last_log_term,json=lastLogTerm,proto3" json:"last_log_term,omitempty"`
-	Peers              []byte                 `protobuf:"bytes,8,opt,name=peers,proto3" json:"peers,omitempty"`
-	Configuration      []byte                 `protobuf:"bytes,9,opt,name=configuration,proto3" json:"configuration,omitempty"`
-	ConfigurationIndex uint64                 `protobuf:"varint,10,opt,name=configuration_index,json=configurationIndex,proto3" json:"configuration_index,omitempty"`
-	Size               int64                  `protobuf:"varint,11,opt,name=size,proto3" json:"size,omitempty"`
-	Data               []byte                 `protobuf:"bytes,12,opt,name=data,proto3" json:"data,omitempty"`
+	LastLogIndex       uint64                 `protobuf:"varint,5,opt,name=last_log_index,json=lastLogIndex,proto3" json:"last_log_index,omitempty"`
+	LastLogTerm        uint64                 `protobuf:"varint,6,opt,name=last_log_term,json=lastLogTerm,proto3" json:"last_log_term,omitempty"`
+	Peers              []byte                 `protobuf:"bytes,7,opt,name=peers,proto3" json:"peers,omitempty"`
+	Configuration      []byte                 `protobuf:"bytes,8,opt,name=configuration,proto3" json:"configuration,omitempty"`
+	ConfigurationIndex uint64                 `protobuf:"varint,9,opt,name=configuration_index,json=configurationIndex,proto3" json:"configuration_index,omitempty"`
+	Size               int64                  `protobuf:"varint,10,opt,name=size,proto3" json:"size,omitempty"`
+	Data               []byte                 `protobuf:"bytes,11,opt,name=data,proto3" json:"data,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -1077,31 +1077,31 @@ const file_gastrolog_v1_multiraft_proto_rawDesc = "" +
 	"\x17LOG_ADD_PEER_DEPRECATED\x10\x02\x12\x1e\n" +
 	"\x1aLOG_REMOVE_PEER_DEPRECATED\x10\x03\x12\x0f\n" +
 	"\vLOG_BARRIER\x10\x04\x12\x15\n" +
-	"\x11LOG_CONFIGURATION\x10\x05\"\xb3\x02\n" +
+	"\x11LOG_CONFIGURATION\x10\x05\"\xad\x02\n" +
 	"\x1dMultiRaftAppendEntriesRequest\x12\x19\n" +
 	"\bgroup_id\x18\x01 \x01(\fR\agroupId\x126\n" +
 	"\n" +
 	"rpc_header\x18\x02 \x01(\v2\x17.gastrolog.v1.RPCHeaderR\trpcHeader\x12\x12\n" +
 	"\x04term\x18\x03 \x01(\x04R\x04term\x12$\n" +
-	"\x0eprev_log_entry\x18\x05 \x01(\x04R\fprevLogEntry\x12\"\n" +
-	"\rprev_log_term\x18\x06 \x01(\x04R\vprevLogTerm\x12+\n" +
-	"\aentries\x18\a \x03(\v2\x11.gastrolog.v1.LogR\aentries\x12.\n" +
-	"\x13leader_commit_index\x18\b \x01(\x04R\x11leaderCommitIndexJ\x04\b\x04\x10\x05\"\xcb\x01\n" +
+	"\x0eprev_log_entry\x18\x04 \x01(\x04R\fprevLogEntry\x12\"\n" +
+	"\rprev_log_term\x18\x05 \x01(\x04R\vprevLogTerm\x12+\n" +
+	"\aentries\x18\x06 \x03(\v2\x11.gastrolog.v1.LogR\aentries\x12.\n" +
+	"\x13leader_commit_index\x18\a \x01(\x04R\x11leaderCommitIndex\"\xcb\x01\n" +
 	"\x1eMultiRaftAppendEntriesResponse\x126\n" +
 	"\n" +
 	"rpc_header\x18\x01 \x01(\v2\x17.gastrolog.v1.RPCHeaderR\trpcHeader\x12\x12\n" +
 	"\x04term\x18\x02 \x01(\x04R\x04term\x12\x19\n" +
 	"\blast_log\x18\x03 \x01(\x04R\alastLog\x12\x18\n" +
 	"\asuccess\x18\x04 \x01(\bR\asuccess\x12(\n" +
-	"\x10no_retry_backoff\x18\x05 \x01(\bR\x0enoRetryBackoff\"\x85\x02\n" +
+	"\x10no_retry_backoff\x18\x05 \x01(\bR\x0enoRetryBackoff\"\xff\x01\n" +
 	"\x1bMultiRaftRequestVoteRequest\x12\x19\n" +
 	"\bgroup_id\x18\x01 \x01(\fR\agroupId\x126\n" +
 	"\n" +
 	"rpc_header\x18\x02 \x01(\v2\x17.gastrolog.v1.RPCHeaderR\trpcHeader\x12\x12\n" +
 	"\x04term\x18\x03 \x01(\x04R\x04term\x12$\n" +
-	"\x0elast_log_index\x18\x05 \x01(\x04R\flastLogIndex\x12\"\n" +
-	"\rlast_log_term\x18\x06 \x01(\x04R\vlastLogTerm\x12/\n" +
-	"\x13leadership_transfer\x18\a \x01(\bR\x12leadershipTransferJ\x04\b\x04\x10\x05\"\x9a\x01\n" +
+	"\x0elast_log_index\x18\x04 \x01(\x04R\flastLogIndex\x12\"\n" +
+	"\rlast_log_term\x18\x05 \x01(\x04R\vlastLogTerm\x12/\n" +
+	"\x13leadership_transfer\x18\x06 \x01(\bR\x12leadershipTransfer\"\x9a\x01\n" +
 	"\x1cMultiRaftRequestVoteResponse\x126\n" +
 	"\n" +
 	"rpc_header\x18\x01 \x01(\v2\x17.gastrolog.v1.RPCHeaderR\trpcHeader\x12\x12\n" +
@@ -1126,21 +1126,21 @@ const file_gastrolog_v1_multiraft_proto_rawDesc = "" +
 	"rpc_header\x18\x02 \x01(\v2\x17.gastrolog.v1.RPCHeaderR\trpcHeader\"U\n" +
 	"\x1bMultiRaftTimeoutNowResponse\x126\n" +
 	"\n" +
-	"rpc_header\x18\x01 \x01(\v2\x17.gastrolog.v1.RPCHeaderR\trpcHeader\"\x98\x03\n" +
+	"rpc_header\x18\x01 \x01(\v2\x17.gastrolog.v1.RPCHeaderR\trpcHeader\"\x92\x03\n" +
 	"\x1fMultiRaftInstallSnapshotRequest\x12\x19\n" +
 	"\bgroup_id\x18\x01 \x01(\fR\agroupId\x126\n" +
 	"\n" +
 	"rpc_header\x18\x02 \x01(\v2\x17.gastrolog.v1.RPCHeaderR\trpcHeader\x12)\n" +
 	"\x10snapshot_version\x18\x03 \x01(\x03R\x0fsnapshotVersion\x12\x12\n" +
 	"\x04term\x18\x04 \x01(\x04R\x04term\x12$\n" +
-	"\x0elast_log_index\x18\x06 \x01(\x04R\flastLogIndex\x12\"\n" +
-	"\rlast_log_term\x18\a \x01(\x04R\vlastLogTerm\x12\x14\n" +
-	"\x05peers\x18\b \x01(\fR\x05peers\x12$\n" +
-	"\rconfiguration\x18\t \x01(\fR\rconfiguration\x12/\n" +
-	"\x13configuration_index\x18\n" +
-	" \x01(\x04R\x12configurationIndex\x12\x12\n" +
-	"\x04size\x18\v \x01(\x03R\x04size\x12\x12\n" +
-	"\x04data\x18\f \x01(\fR\x04dataJ\x04\b\x05\x10\x06\"\x88\x01\n" +
+	"\x0elast_log_index\x18\x05 \x01(\x04R\flastLogIndex\x12\"\n" +
+	"\rlast_log_term\x18\x06 \x01(\x04R\vlastLogTerm\x12\x14\n" +
+	"\x05peers\x18\a \x01(\fR\x05peers\x12$\n" +
+	"\rconfiguration\x18\b \x01(\fR\rconfiguration\x12/\n" +
+	"\x13configuration_index\x18\t \x01(\x04R\x12configurationIndex\x12\x12\n" +
+	"\x04size\x18\n" +
+	" \x01(\x03R\x04size\x12\x12\n" +
+	"\x04data\x18\v \x01(\fR\x04data\"\x88\x01\n" +
 	" MultiRaftInstallSnapshotResponse\x126\n" +
 	"\n" +
 	"rpc_header\x18\x01 \x01(\v2\x17.gastrolog.v1.RPCHeaderR\trpcHeader\x12\x12\n" +

@@ -120,7 +120,7 @@ func TestPlacementCloudTierMatchesActiveChunkClass(t *testing.T) {
 	vaultID := glid.New()
 	_ = store.PutTier(ctx, system.TierConfig{
 		ID: tierID, Name: "cloud", Type: system.TierTypeFile,
-		CloudServiceID: &csID, ActiveChunkClass: 2, VaultID: vaultID, Position: 0,
+		CloudServiceID: &csID, StorageClass: 2, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
@@ -510,7 +510,7 @@ func TestPlacementCloudTierActiveChunkClassZero(t *testing.T) {
 	vaultID := glid.New()
 	_ = store.PutTier(ctx, system.TierConfig{
 		ID: tierID, Name: "cloud", Type: system.TierTypeFile,
-		CloudServiceID: &csID, ActiveChunkClass: 0, VaultID: vaultID, Position: 0,
+		CloudServiceID: &csID, StorageClass: 0, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 

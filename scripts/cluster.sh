@@ -85,12 +85,21 @@ build_imux_cmd() {
 enroll_nodes() {
   local PIDS=()
 
+  # Cleanup nukes both the go-run wrapper PIDs we spawned AND any
+  # gastrolog binary processes rooted at this cluster's data dir
+  # (go run forks a compiled child that survives a SIGINT to the
+  # wrapper alone). Wired to EXIT/INT/TERM so any failure path —
+  # not just the timeout — leaves a clean process slate.
   cleanup() {
     for pid in "${PIDS[@]}"; do
       kill -INT "$pid" 2>/dev/null || true
     done
+    pkill -INT -f "gastrolog.*--home ${DATA_DIR}/node" 2>/dev/null || true
     wait "${PIDS[@]}" 2>/dev/null || true
+    sleep 1
+    pkill -KILL -f "gastrolog.*--home ${DATA_DIR}/node" 2>/dev/null || true
   }
+  trap 'cleanup; trap - EXIT INT TERM' EXIT INT TERM
 
   echo ">>> Cleaning ${DATA_DIR}..."
   for i in $(seq 1 "$NODES"); do
@@ -213,8 +222,8 @@ configure() {
     --name "warm" --type file --rotation-policy "100-rows" --retention-policy "3m-retain" \
     --replication-factor "$NODES" --storage-class 1 2>&1 | sed 's/^/  /'
   $GLOG config tier create --addr "$S" --vault "default-vault" \
-    --name "cold" --type cloud --rotation-policy "100-rows" \
-    --cloud-service "S3" --active-chunk-class 1 --cache-class 1 \
+    --name "cold" --type file --rotation-policy "100-rows" \
+    --cloud-service "S3" --storage-class 1 \
     --replication-factor "$NODES" 2>&1 | sed 's/^/  /'
 
   echo ">>> Creating route..."

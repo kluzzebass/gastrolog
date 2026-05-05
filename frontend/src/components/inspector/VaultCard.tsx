@@ -179,7 +179,14 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
   const remoteTierInfo = (() => {
     if (vaultTiers.length === 0) return [];
     const localTierIds = new Set(tierGroups.keys());
-    const tierTypeMap: Record<number, string> = { 1: "memory", 2: "file", 3: "cloud", 4: "jsonl" };
+    // type enum 3 was the former TIER_TYPE_CLOUD; cloud-backed tiers now
+    // wire as TIER_TYPE_FILE with cloud_service_id set, so derive the
+    // display label from cloudServiceId presence rather than the raw enum.
+    const tierTypeMap: Record<number, string> = { 1: "memory", 2: "file", 4: "jsonl" };
+    const tierTypeLabel = (tc: { type: number; cloudServiceId: Uint8Array }): string => {
+      const base = tierTypeMap[tc.type] ?? "unknown";
+      return base === "file" && tc.cloudServiceId.length > 0 ? "cloud" : base;
+    };
     const nscs = config?.nodeStorageConfigs ?? [];
     return vaultTiers
       .filter((tc) => !localTierIds.has(encode(tc.id)))
@@ -188,7 +195,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
         return {
           id: encode(tc.id),
           pos: tierPositions.get(encode(tc.id)) ?? 0,
-          type: tierTypeMap[tc.type] ?? "unknown",
+          type: tierTypeLabel(tc),
           nodeName: pnId ? resolveNodeName(nodeNameMap, pnId) : "",
           rf: tc.replicationFactor || 1,
           followerNodeIds: followerNodeIds(tc, nscs),

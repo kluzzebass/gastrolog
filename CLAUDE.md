@@ -108,6 +108,16 @@ just backend gen            # Go only
 just frontend gen           # TypeScript only
 ```
 
+## Proto cleanup: remove and renumber, never `reserved`
+
+When removing a proto field, message, oneof case, or enum value, **delete it entirely and renumber the remaining tags**. Do NOT leave `reserved 5;` declarations or `reserved "old_field_name";` annotations behind.
+
+**Why:** GastroLog has zero production deployments. There is no compatibility window with old wire formats. `reserved` exists to prevent tag collisions across deployed versions of a schema; with a single coordinated change against `main`, that collision risk doesn't exist. Reserved declarations accumulate as visual debt that never pays off.
+
+**This is the opposite of the protobuf community's general advice.** Standard advice ("always reserve removed tags") assumes long-lived deployed schemas. GastroLog's atomic-refactor model invalidates that assumption. Apply project-specific rule, not the generic one.
+
+Precedent: gastrolog-4k5mg (cloud/file tier collapse) removed all `reserved` declarations from prior cleanup passes and renumbered the remaining tags. That is the standard pattern; follow it.
+
 ## Data Integrity: Facts Before Speculation
 
 Never present derived or approximate data as if it were authoritative. If it comes from the system, show it. If it's reconstructed client-side via heuristics, either don't show it or label it as derived. When in doubt, leave it out.

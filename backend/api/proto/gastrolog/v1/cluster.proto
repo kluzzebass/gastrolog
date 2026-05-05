@@ -182,7 +182,6 @@ message IngesterNodeStats {
 message ForwardRecordsRequest {
   bytes vault_id = 1;
   repeated ExportRecord records = 2;
-  reserved 3, 4; // was tier_id, chunk_id (gastrolog-572d7)
 }
 
 message ForwardRecordsResponse {
@@ -462,7 +461,6 @@ message ImportRecordMessage {
   bytes vault_id = 1;
   ExportRecord record = 2;
   bytes tier_id = 3;   // optional: route to a specific tier's active chunk (StreamToTier)
-  reserved 4;           // was chunk_id (gastrolog-63rnl)
 }
 
 // --- Managed file distribution ---

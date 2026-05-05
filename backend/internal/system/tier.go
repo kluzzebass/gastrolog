@@ -85,8 +85,6 @@ type TierConfig struct {
 	MemoryBudgetBytes uint64          `json:"memoryBudgetBytes,omitempty"`
 	StorageClass      uint32          `json:"storageClass,omitempty"`
 	CloudServiceID    *glid.GLID      `json:"cloudServiceId,omitempty"`
-	ActiveChunkClass  uint32          `json:"activeChunkClass,omitempty"`
-	CacheClass        uint32          `json:"cacheClass,omitempty"`
 	Path              string          `json:"path,omitempty"`              // direct path for JSONL sinks
 	ReplicationFactor uint32          `json:"replicationFactor,omitempty"` // desired RF (1 = no replication)
 	CacheEviction     string          `json:"cacheEviction,omitempty"`     // "lru" (default) or "ttl"
@@ -181,11 +179,12 @@ func StorageIDForNode(nodeID string, tier TierConfig, nscs []NodeStorageConfig) 
 	var requiredClass uint32
 	switch tier.Type {
 	case TierTypeFile:
-		if tier.IsCloud() {
-			requiredClass = tier.ActiveChunkClass
-		} else {
-			requiredClass = tier.StorageClass
-		}
+		// Single storage class for all file tiers (local-only and
+		// cloud-backed alike). After step 7k, the active chunk and
+		// the warm cache live at the same path under chunkDir, so
+		// distinguishing "active" and "cache" classes serves no
+		// purpose. See gastrolog-4k5mg.
+		requiredClass = tier.StorageClass
 	case TierTypeMemory, TierTypeJSONL:
 		// No storage class — pick any storage, or synthetic if none.
 		if len(nsc.FileStorages) > 0 {

@@ -15,9 +15,10 @@ Each tier has a **type** that determines how it stores data:
 | Type | Description |
 |------|-------------|
 | Memory | RAM-only. Fast, but lost on restart. |
-| File | Local disk. The most common choice for durable storage. |
-| Cloud | Sealed chunks in S3/GCS/Azure, active chunk on local disk. |
+| File | Local disk. Optionally cloud-backed by selecting a Cloud Storage. |
 | JSONL | Append-only JSON lines file. Write-only — cannot be searched or queried. Useful for debugging tier chains or exporting raw records to external tools. |
+
+A **File** tier is local-only by default. Selecting a Cloud Storage on it makes the tier *cloud-backed* — sealed chunks upload to S3/GCS/Azure while the active chunk and a warm cache stay on local disk. There is no separate "Cloud" tier kind; the binding is what makes the difference.
 
 ### Common Settings
 
@@ -27,13 +28,12 @@ Each tier has a **type** that determines how it stores data:
 
 ### File Tier Settings
 
-- **Storage Class** — which [file storages](help:storage-config) this tier uses. The placement manager assigns one file storage per replica.
+- **Cloud Storage** — optional. Select a [cloud service](help:storage-config) to make the tier cloud-backed; leave as "Local-only" to keep all data on disk. Fixed at tier creation — to change, create a new tier and migrate data via retention rules.
+- **Storage Class** — which [file storages](help:storage-config) this tier uses. For local-only tiers this hosts all chunks; for cloud-backed tiers it hosts the active chunk and warm cache (sealed chunks live in the cloud). The placement manager assigns one file storage per replica.
 
-### Cloud Tier Settings
+Cloud-backed tiers also have:
 
-- **Cloud Storage** — which [cloud service](help:storage-config) to use for sealed chunks.
-- **Active Chunk Class** — the [file storage](help:storage-config) class for the active chunk (before upload). Use fast storage.
-- **Cache Class** — the [file storage](help:storage-config) class for cached cloud chunks during queries. Can be slower.
+- **Cache Eviction**, **Cache Budget**, **Cache TTL** — how the warm cache (the local copy of cloud-uploaded chunks) gets reclaimed when disk pressure or age limits are reached.
 
 ### Memory Tier Settings
 
