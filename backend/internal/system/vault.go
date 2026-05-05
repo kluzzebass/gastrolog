@@ -6,7 +6,15 @@ import (
 	"slices"
 )
 
-// VaultConfig describes a storage backend to instantiate.
+// VaultConfig describes a vault — the unit of independent storage and the
+// only abstraction over the chunk layer (post-tier model).
+//
+// Pre-refactor, the storage/lifecycle fields lived on TierConfig and a vault
+// owned 1..N tiers. During the vault refactor (gastrolog-257l7), VaultConfig
+// absorbs every tier field; once consumers migrate, TierConfig is deleted.
+//
+// All new fields are JSON-omitempty so existing serialized data
+// (which only has id/name/enabled) still deserializes cleanly.
 type VaultConfig struct {
 	// ID is the unique identifier (UUIDv7).
 	ID glid.GLID `json:"id"`
@@ -17,6 +25,43 @@ type VaultConfig struct {
 	// Enabled indicates whether ingestion is enabled for this vault.
 	// When false, the vault will not receive new records from the ingest pipeline.
 	Enabled bool `json:"enabled,omitempty"`
+
+	// Type is the storage shape (memory / file / jsonl). Cloud-backed vaults
+	// are file vaults with CloudServiceID set; there is no "cloud" type.
+	Type TierType `json:"type,omitempty"`
+
+	// RotationPolicyID references a RotationPolicyConfig.
+	RotationPolicyID *glid.GLID `json:"rotationPolicyId,omitempty"`
+
+	// RetentionRules are evaluated in order on chunk-age events.
+	RetentionRules []RetentionRule `json:"retentionRules,omitempty"`
+
+	// MemoryBudgetBytes caps in-memory storage for memory-typed vaults.
+	MemoryBudgetBytes uint64 `json:"memoryBudgetBytes,omitempty"`
+
+	// StorageClass selects which file storage class on a node hosts this vault.
+	StorageClass uint32 `json:"storageClass,omitempty"`
+
+	// CloudServiceID, when non-nil, marks this vault as cloud-backed.
+	CloudServiceID *glid.GLID `json:"cloudServiceId,omitempty"`
+
+	// ReplicationFactor is the desired RF (1 = no replication, default).
+	ReplicationFactor uint32 `json:"replicationFactor,omitempty"`
+
+	// Path is the direct path for JSONL sinks.
+	Path string `json:"path,omitempty"`
+
+	// Placements are system-managed file storage assignments.
+	Placements []TierPlacement `json:"placements,omitempty"`
+
+	// CacheEviction is "lru" (default) or "ttl" — only meaningful for cloud-backed.
+	CacheEviction string `json:"cacheEviction,omitempty"`
+
+	// CacheBudget caps the local cache size (e.g. "1GB", "500MB", default: "1GiB").
+	CacheBudget string `json:"cacheBudget,omitempty"`
+
+	// CacheTTL is the eviction TTL duration (e.g. "1h", "7d") for ttl mode.
+	CacheTTL string `json:"cacheTtl,omitempty"`
 }
 
 // VaultTierIDs returns the ordered tier IDs for a vault by filtering tiers
