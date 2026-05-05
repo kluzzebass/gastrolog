@@ -99,12 +99,13 @@ message DeleteRetentionPolicyCommand {
 
 // --- Vaults ---
 
-// RetentionRule for vault commands. Separate from config.proto's RetentionRule
-// to avoid naming collisions and to match Go types exactly.
+// PutVaultCommand carries the full vault config from system.proto. Embedded
+// (rather than flattened) so the conversion layer is shared between the
+// API and the FSM — matches PutCloudServiceCommand and
+// SetNodeStorageConfigCommand pattern. Wire format break vs the previous
+// flat {id, name, enabled} shape; acceptable per redesign decision 11.
 message PutVaultCommand {
-  bytes id = 1;
-  string name = 2;
-  bool enabled = 7;
+  VaultConfig vault = 1;
 }
 
 message DeleteVaultCommand {

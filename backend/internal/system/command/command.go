@@ -12,6 +12,7 @@ import (
 	"time"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/convert"
 	"gastrolog/internal/system"
 
 	"google.golang.org/protobuf/proto"
@@ -196,9 +197,7 @@ func ExtractDeleteRetentionPolicy(cmd *gastrologv1.DeleteRetentionPolicyCommand)
 
 func putVaultCmd(cfg system.VaultConfig) *gastrologv1.PutVaultCommand {
 	return &gastrologv1.PutVaultCommand{
-		Id:      cfg.ID.ToProto(),
-		Name:    cfg.Name,
-		Enabled: cfg.Enabled,
+		Vault: convert.VaultConfigToProto(cfg),
 	}
 }
 
@@ -220,11 +219,7 @@ func NewDeleteVault(id glid.GLID, deleteData bool) *gastrologv1.SystemCommand {
 
 // ExtractPutVault converts a PutVaultCommand back to a VaultConfig.
 func ExtractPutVault(cmd *gastrologv1.PutVaultCommand) (system.VaultConfig, error) {
-	return system.VaultConfig{
-		ID:      glid.FromBytes(cmd.GetId()),
-		Name:    cmd.GetName(),
-		Enabled: cmd.GetEnabled(),
-	}, nil
+	return convert.VaultConfigFromProto(cmd.GetVault())
 }
 
 // ExtractDeleteVault extracts the UUID from a DeleteVaultCommand.

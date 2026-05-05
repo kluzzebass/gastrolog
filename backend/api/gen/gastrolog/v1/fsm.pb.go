@@ -1082,13 +1082,14 @@ func (x *DeleteRetentionPolicyCommand) GetId() []byte {
 	return nil
 }
 
-// RetentionRule for vault commands. Separate from config.proto's RetentionRule
-// to avoid naming collisions and to match Go types exactly.
+// PutVaultCommand carries the full vault config from system.proto. Embedded
+// (rather than flattened) so the conversion layer is shared between the
+// API and the FSM — matches PutCloudServiceCommand and
+// SetNodeStorageConfigCommand pattern. Wire format break vs the previous
+// flat {id, name, enabled} shape; acceptable per redesign decision 11.
 type PutVaultCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Enabled       bool                   `protobuf:"varint,7,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Vault         *VaultConfig           `protobuf:"bytes,1,opt,name=vault,proto3" json:"vault,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1123,25 +1124,11 @@ func (*PutVaultCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *PutVaultCommand) GetId() []byte {
+func (x *PutVaultCommand) GetVault() *VaultConfig {
 	if x != nil {
-		return x.Id
+		return x.Vault
 	}
 	return nil
-}
-
-func (x *PutVaultCommand) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-func (x *PutVaultCommand) GetEnabled() bool {
-	if x != nil {
-		return x.Enabled
-	}
-	return false
 }
 
 type DeleteVaultCommand struct {
@@ -3364,11 +3351,9 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"_max_bytesB\r\n" +
 	"\v_max_chunks\".\n" +
 	"\x1cDeleteRetentionPolicyCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\fR\x02id\"O\n" +
-	"\x0fPutVaultCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
-	"\aenabled\x18\a \x01(\bR\aenabled\"E\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\"B\n" +
+	"\x0fPutVaultCommand\x12/\n" +
+	"\x05vault\x18\x01 \x01(\v2\x19.gastrolog.v1.VaultConfigR\x05vault\"E\n" +
 	"\x12DeleteVaultCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x1f\n" +
 	"\vdelete_data\x18\x02 \x01(\bR\n" +
@@ -3596,11 +3581,12 @@ var file_gastrolog_v1_fsm_proto_goTypes = []any{
 	(*SystemSnapshot)(nil),                 // 42: gastrolog.v1.SystemSnapshot
 	nil,                                    // 43: gastrolog.v1.PutIngesterCommand.ParamsEntry
 	nil,                                    // 44: gastrolog.v1.SystemSnapshot.SettingsEntry
-	(*timestamppb.Timestamp)(nil),          // 45: google.protobuf.Timestamp
-	(*CloudService)(nil),                   // 46: gastrolog.v1.CloudService
-	(*NodeStorageConfig)(nil),              // 47: gastrolog.v1.NodeStorageConfig
-	(*TierConfig)(nil),                     // 48: gastrolog.v1.TierConfig
-	(*TierPlacement)(nil),                  // 49: gastrolog.v1.TierPlacement
+	(*VaultConfig)(nil),                    // 45: gastrolog.v1.VaultConfig
+	(*timestamppb.Timestamp)(nil),          // 46: google.protobuf.Timestamp
+	(*CloudService)(nil),                   // 47: gastrolog.v1.CloudService
+	(*NodeStorageConfig)(nil),              // 48: gastrolog.v1.NodeStorageConfig
+	(*TierConfig)(nil),                     // 49: gastrolog.v1.TierConfig
+	(*TierPlacement)(nil),                  // 50: gastrolog.v1.TierPlacement
 }
 var file_gastrolog_v1_fsm_proto_depIdxs = []int32{
 	1,  // 0: gastrolog.v1.SystemCommand.put_filter:type_name -> gastrolog.v1.PutFilterCommand
@@ -3644,42 +3630,43 @@ var file_gastrolog_v1_fsm_proto_depIdxs = []int32{
 	39, // 38: gastrolog.v1.SystemCommand.set_ingester_alive:type_name -> gastrolog.v1.SetIngesterAliveCommand
 	40, // 39: gastrolog.v1.SystemCommand.set_ingester_assignment:type_name -> gastrolog.v1.SetIngesterAssignmentCommand
 	41, // 40: gastrolog.v1.SystemCommand.set_ingester_checkpoint:type_name -> gastrolog.v1.SetIngesterCheckpointCommand
-	43, // 41: gastrolog.v1.PutIngesterCommand.params:type_name -> gastrolog.v1.PutIngesterCommand.ParamsEntry
-	45, // 42: gastrolog.v1.CreateUserCommand.token_invalidated_at:type_name -> google.protobuf.Timestamp
-	45, // 43: gastrolog.v1.CreateUserCommand.created_at:type_name -> google.protobuf.Timestamp
-	45, // 44: gastrolog.v1.CreateUserCommand.updated_at:type_name -> google.protobuf.Timestamp
-	45, // 45: gastrolog.v1.InvalidateTokensCommand.at:type_name -> google.protobuf.Timestamp
-	45, // 46: gastrolog.v1.CreateRefreshTokenCommand.expires_at:type_name -> google.protobuf.Timestamp
-	45, // 47: gastrolog.v1.CreateRefreshTokenCommand.created_at:type_name -> google.protobuf.Timestamp
-	46, // 48: gastrolog.v1.PutCloudServiceCommand.cloud_service:type_name -> gastrolog.v1.CloudService
-	47, // 49: gastrolog.v1.SetNodeStorageConfigCommand.node_storage:type_name -> gastrolog.v1.NodeStorageConfig
-	48, // 50: gastrolog.v1.PutTierCommand.tier:type_name -> gastrolog.v1.TierConfig
-	49, // 51: gastrolog.v1.SetTierPlacementsCommand.placements:type_name -> gastrolog.v1.TierPlacement
-	1,  // 52: gastrolog.v1.SystemSnapshot.filters:type_name -> gastrolog.v1.PutFilterCommand
-	3,  // 53: gastrolog.v1.SystemSnapshot.rotation_policies:type_name -> gastrolog.v1.PutRotationPolicyCommand
-	5,  // 54: gastrolog.v1.SystemSnapshot.retention_policies:type_name -> gastrolog.v1.PutRetentionPolicyCommand
-	7,  // 55: gastrolog.v1.SystemSnapshot.vaults:type_name -> gastrolog.v1.PutVaultCommand
-	9,  // 56: gastrolog.v1.SystemSnapshot.ingesters:type_name -> gastrolog.v1.PutIngesterCommand
-	44, // 57: gastrolog.v1.SystemSnapshot.settings:type_name -> gastrolog.v1.SystemSnapshot.SettingsEntry
-	13, // 58: gastrolog.v1.SystemSnapshot.certificates:type_name -> gastrolog.v1.PutCertificateCommand
-	15, // 59: gastrolog.v1.SystemSnapshot.users:type_name -> gastrolog.v1.CreateUserCommand
-	22, // 60: gastrolog.v1.SystemSnapshot.refresh_tokens:type_name -> gastrolog.v1.CreateRefreshTokenCommand
-	25, // 61: gastrolog.v1.SystemSnapshot.node_configs:type_name -> gastrolog.v1.PutNodeConfigCommand
-	27, // 62: gastrolog.v1.SystemSnapshot.cluster_tls:type_name -> gastrolog.v1.PutClusterTLSCommand
-	28, // 63: gastrolog.v1.SystemSnapshot.routes:type_name -> gastrolog.v1.PutRouteCommand
-	30, // 64: gastrolog.v1.SystemSnapshot.managed_files:type_name -> gastrolog.v1.PutManagedFileCommand
-	32, // 65: gastrolog.v1.SystemSnapshot.cloud_services:type_name -> gastrolog.v1.PutCloudServiceCommand
-	34, // 66: gastrolog.v1.SystemSnapshot.node_storage_configs:type_name -> gastrolog.v1.SetNodeStorageConfigCommand
-	35, // 67: gastrolog.v1.SystemSnapshot.tiers:type_name -> gastrolog.v1.PutTierCommand
-	37, // 68: gastrolog.v1.SystemSnapshot.tier_placements:type_name -> gastrolog.v1.SetTierPlacementsCommand
-	39, // 69: gastrolog.v1.SystemSnapshot.ingester_alive:type_name -> gastrolog.v1.SetIngesterAliveCommand
-	40, // 70: gastrolog.v1.SystemSnapshot.ingester_assignments:type_name -> gastrolog.v1.SetIngesterAssignmentCommand
-	41, // 71: gastrolog.v1.SystemSnapshot.ingester_checkpoints:type_name -> gastrolog.v1.SetIngesterCheckpointCommand
-	72, // [72:72] is the sub-list for method output_type
-	72, // [72:72] is the sub-list for method input_type
-	72, // [72:72] is the sub-list for extension type_name
-	72, // [72:72] is the sub-list for extension extendee
-	0,  // [0:72] is the sub-list for field type_name
+	45, // 41: gastrolog.v1.PutVaultCommand.vault:type_name -> gastrolog.v1.VaultConfig
+	43, // 42: gastrolog.v1.PutIngesterCommand.params:type_name -> gastrolog.v1.PutIngesterCommand.ParamsEntry
+	46, // 43: gastrolog.v1.CreateUserCommand.token_invalidated_at:type_name -> google.protobuf.Timestamp
+	46, // 44: gastrolog.v1.CreateUserCommand.created_at:type_name -> google.protobuf.Timestamp
+	46, // 45: gastrolog.v1.CreateUserCommand.updated_at:type_name -> google.protobuf.Timestamp
+	46, // 46: gastrolog.v1.InvalidateTokensCommand.at:type_name -> google.protobuf.Timestamp
+	46, // 47: gastrolog.v1.CreateRefreshTokenCommand.expires_at:type_name -> google.protobuf.Timestamp
+	46, // 48: gastrolog.v1.CreateRefreshTokenCommand.created_at:type_name -> google.protobuf.Timestamp
+	47, // 49: gastrolog.v1.PutCloudServiceCommand.cloud_service:type_name -> gastrolog.v1.CloudService
+	48, // 50: gastrolog.v1.SetNodeStorageConfigCommand.node_storage:type_name -> gastrolog.v1.NodeStorageConfig
+	49, // 51: gastrolog.v1.PutTierCommand.tier:type_name -> gastrolog.v1.TierConfig
+	50, // 52: gastrolog.v1.SetTierPlacementsCommand.placements:type_name -> gastrolog.v1.TierPlacement
+	1,  // 53: gastrolog.v1.SystemSnapshot.filters:type_name -> gastrolog.v1.PutFilterCommand
+	3,  // 54: gastrolog.v1.SystemSnapshot.rotation_policies:type_name -> gastrolog.v1.PutRotationPolicyCommand
+	5,  // 55: gastrolog.v1.SystemSnapshot.retention_policies:type_name -> gastrolog.v1.PutRetentionPolicyCommand
+	7,  // 56: gastrolog.v1.SystemSnapshot.vaults:type_name -> gastrolog.v1.PutVaultCommand
+	9,  // 57: gastrolog.v1.SystemSnapshot.ingesters:type_name -> gastrolog.v1.PutIngesterCommand
+	44, // 58: gastrolog.v1.SystemSnapshot.settings:type_name -> gastrolog.v1.SystemSnapshot.SettingsEntry
+	13, // 59: gastrolog.v1.SystemSnapshot.certificates:type_name -> gastrolog.v1.PutCertificateCommand
+	15, // 60: gastrolog.v1.SystemSnapshot.users:type_name -> gastrolog.v1.CreateUserCommand
+	22, // 61: gastrolog.v1.SystemSnapshot.refresh_tokens:type_name -> gastrolog.v1.CreateRefreshTokenCommand
+	25, // 62: gastrolog.v1.SystemSnapshot.node_configs:type_name -> gastrolog.v1.PutNodeConfigCommand
+	27, // 63: gastrolog.v1.SystemSnapshot.cluster_tls:type_name -> gastrolog.v1.PutClusterTLSCommand
+	28, // 64: gastrolog.v1.SystemSnapshot.routes:type_name -> gastrolog.v1.PutRouteCommand
+	30, // 65: gastrolog.v1.SystemSnapshot.managed_files:type_name -> gastrolog.v1.PutManagedFileCommand
+	32, // 66: gastrolog.v1.SystemSnapshot.cloud_services:type_name -> gastrolog.v1.PutCloudServiceCommand
+	34, // 67: gastrolog.v1.SystemSnapshot.node_storage_configs:type_name -> gastrolog.v1.SetNodeStorageConfigCommand
+	35, // 68: gastrolog.v1.SystemSnapshot.tiers:type_name -> gastrolog.v1.PutTierCommand
+	37, // 69: gastrolog.v1.SystemSnapshot.tier_placements:type_name -> gastrolog.v1.SetTierPlacementsCommand
+	39, // 70: gastrolog.v1.SystemSnapshot.ingester_alive:type_name -> gastrolog.v1.SetIngesterAliveCommand
+	40, // 71: gastrolog.v1.SystemSnapshot.ingester_assignments:type_name -> gastrolog.v1.SetIngesterAssignmentCommand
+	41, // 72: gastrolog.v1.SystemSnapshot.ingester_checkpoints:type_name -> gastrolog.v1.SetIngesterCheckpointCommand
+	73, // [73:73] is the sub-list for method output_type
+	73, // [73:73] is the sub-list for method input_type
+	73, // [73:73] is the sub-list for extension type_name
+	73, // [73:73] is the sub-list for extension extendee
+	0,  // [0:73] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_fsm_proto_init() }
