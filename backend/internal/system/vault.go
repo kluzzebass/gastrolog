@@ -102,6 +102,67 @@ func VaultTiers(tiers []TierConfig, vaultID glid.GLID) []TierConfig {
 	return matched
 }
 
+// MergeVaultFromTiers populates v's merged storage/lifecycle fields from
+// its (single) tier in tiers, returning the merged copy. Used during the
+// vault refactor (gastrolog-257l7) to ensure VaultConfig values written
+// to the store carry the post-tier shape, even when the source data still
+// comes from a separate TierConfig list. The original v is not mutated.
+//
+// If the vault has no tiers, returns v unchanged. If the vault has multiple
+// tiers, the lowest-position tier's fields win (matches the eventual
+// "one storage shape per vault" model). Fields explicitly set on v are
+// not overwritten.
+func MergeVaultFromTiers(v VaultConfig, tiers []TierConfig) VaultConfig {
+	matched := VaultTiers(tiers, v.ID)
+	if len(matched) == 0 {
+		return v
+	}
+	t := matched[0]
+	if v.Type == "" {
+		v.Type = t.Type
+	}
+	if v.RotationPolicyID == nil && t.RotationPolicyID != nil {
+		id := *t.RotationPolicyID
+		v.RotationPolicyID = &id
+	}
+	if len(v.RetentionRules) == 0 && len(t.RetentionRules) > 0 {
+		v.RetentionRules = make([]RetentionRule, len(t.RetentionRules))
+		for i, r := range t.RetentionRules {
+			v.RetentionRules[i] = RetentionRule{
+				RetentionPolicyID: r.RetentionPolicyID,
+				Action:            r.Action,
+				EjectRouteIDs:     append([]glid.GLID(nil), r.EjectRouteIDs...),
+			}
+		}
+	}
+	if v.MemoryBudgetBytes == 0 {
+		v.MemoryBudgetBytes = t.MemoryBudgetBytes
+	}
+	if v.StorageClass == 0 {
+		v.StorageClass = t.StorageClass
+	}
+	if v.CloudServiceID == nil && t.CloudServiceID != nil {
+		id := *t.CloudServiceID
+		v.CloudServiceID = &id
+	}
+	if v.ReplicationFactor == 0 {
+		v.ReplicationFactor = t.ReplicationFactor
+	}
+	if v.Path == "" {
+		v.Path = t.Path
+	}
+	if v.CacheEviction == "" {
+		v.CacheEviction = t.CacheEviction
+	}
+	if v.CacheBudget == "" {
+		v.CacheBudget = t.CacheBudget
+	}
+	if v.CacheTTL == "" {
+		v.CacheTTL = t.CacheTTL
+	}
+	return v
+}
+
 // VaultPlacements returns the placements for a vault by looking up its
 // (single) tier and returning that tier's placements. Bridge helper used
 // during the vault refactor (gastrolog-257l7) so callers can express

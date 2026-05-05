@@ -102,7 +102,12 @@ func Bootstrap(ctx context.Context, store Store) error {
 			return err
 		}
 	}
+	// Populate the merged storage/lifecycle fields on each VaultConfig from
+	// its (single) tier in cfg.Tiers, so vaults written to the store carry
+	// the post-tier shape. The tier list is still seeded above for consumers
+	// that haven't migrated yet (gastrolog-257l7 — vault refactor in progress).
 	for _, v := range cfg.Vaults {
+		v = MergeVaultFromTiers(v, cfg.Tiers)
 		if err := store.PutVault(ctx, v); err != nil {
 			return err
 		}
