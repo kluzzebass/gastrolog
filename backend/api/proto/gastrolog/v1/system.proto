@@ -196,10 +196,55 @@ message RetentionRule {
   string archive_storage_class = 5;    // target class for archive (e.g. "GLACIER", "DEEP_ARCHIVE")
 }
 
+// VaultType identifies the storage shape of a vault.
+//
+// A cloud-backed vault is a VAULT_TYPE_FILE vault with cloud_service_id
+// set; the server flips behavior on the cloud-store binding rather than
+// the type enum.
+//
+// Mirrors TierType during the vault refactor (gastrolog-257l7); once
+// every consumer migrates to VaultConfig, TierType is deleted.
+enum VaultType {
+  VAULT_TYPE_UNSPECIFIED = 0;
+  VAULT_TYPE_MEMORY = 1;
+  VAULT_TYPE_FILE = 2;
+  VAULT_TYPE_JSONL = 3;
+}
+
+// VaultPlacement assigns one replica of a vault to a specific file
+// storage. The node is derived from the file storage's NodeStorageConfig.
+//
+// Mirrors TierPlacement during the vault refactor (gastrolog-257l7);
+// once every consumer migrates to VaultConfig, TierPlacement is deleted.
+message VaultPlacement {
+  bytes storage_id = 1;   // references FileStorage.id
+  bool leader = 2;         // true = this storage bootstraps the Raft group (initial leader)
+}
+
+// VaultConfig defines a vault — the unit of independent storage and the
+// only abstraction over the chunk layer.
+//
+// Tags 1, 7, 8 are the original VaultConfig shape (id, enabled, name).
+// Tags 2-6 and 9-15 are added during the vault refactor (gastrolog-257l7)
+// to absorb the fields that lived on TierConfig before tiers went away.
+// Once consumers migrate, this message becomes the only vault-shape proto;
+// TierConfig and friends are deleted.
 message VaultConfig {
   bytes id = 1;
-  bool enabled = 7;
-  string name = 8;
+  string name = 2;
+  bool enabled = 3;
+  VaultType type = 4;
+  bytes rotation_policy_id = 5;
+  repeated RetentionRule retention_rules = 6;
+  uint64 memory_budget_bytes = 7;
+  uint32 storage_class = 8;
+  bytes cloud_service_id = 9;
+  uint32 replication_factor = 10;          // desired RF (1 = no replication, default)
+  string path = 11;                         // direct path for JSONL sinks
+  repeated VaultPlacement placements = 12;  // system-managed: file storage assignments by placement manager
+  string cache_eviction = 13;               // "lru" (default) or "ttl"
+  string cache_budget = 14;                  // max cache size (e.g. "1GB", "500MB"; default: "1GiB")
+  string cache_ttl = 15;                     // eviction TTL duration (e.g. "1h", "7d"); only for ttl mode
 }
 
 message RouteDestination {
