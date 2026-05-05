@@ -165,6 +165,33 @@ func (s *SystemServer) PutTier(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("type must be memory, file, or jsonl"))
 	}
 
+	// cloud_service_id is part of the tier's *shape*, not runtime tuning.
+	// Mutating it on an existing tier would orphan cloud blobs in the
+	// cloud→local direction and trigger an implicit cloud upload of all
+	// existing local chunks in the local→cloud direction — neither is
+	// safe to do silently. Reject any change to cloud_service_id on an
+	// existing tier; users wanting to migrate must create a new tier and
+	// route data via retention rules. Runs before the cloud-service
+	// existence check so the user gets the right diagnostic. See
+	// gastrolog-4k5mg.
+	existing, err := s.sysStore.GetTier(ctx, id)
+	if err != nil {
+		return nil, errInternal(err)
+	}
+	if existing != nil {
+		var existingCSID, incomingCSID string
+		if existing.CloudServiceID != nil {
+			existingCSID = existing.CloudServiceID.String()
+		}
+		if len(req.Msg.Config.CloudServiceId) > 0 {
+			incomingCSID = glid.FromBytes(req.Msg.Config.CloudServiceId).String()
+		}
+		if existingCSID != incomingCSID {
+			return nil, connect.NewError(connect.CodeFailedPrecondition,
+				errors.New("cannot change cloud_service_id on an existing tier; create a new tier and migrate data via retention rules instead"))
+		}
+	}
+
 	// Cloud-backed tiers (file tier with cloud_service_id set) need extra
 	// validation. The legacy TIER_TYPE_CLOUD wire value is normalized to
 	// TIER_TYPE_FILE by TierTypeFromProto; cloud-ness is signaled by the
@@ -275,12 +302,6 @@ func (s *SystemServer) validateCloudTierFields(ctx context.Context, cfg *apiv1.T
 	if len(cfg.CloudServiceId) == 0 {
 		return connect.NewError(connect.CodeInvalidArgument, errors.New("cloud_service_id required for cloud tiers"))
 	}
-	if cfg.ActiveChunkClass == 0 {
-		return connect.NewError(connect.CodeInvalidArgument, errors.New("active_chunk_class required for cloud tiers"))
-	}
-	if cfg.CacheClass == 0 {
-		return connect.NewError(connect.CodeInvalidArgument, errors.New("cache_class required for cloud tiers"))
-	}
 	csID, connErr := parseProtoID(cfg.CloudServiceId)
 	if connErr != nil {
 		return connErr
@@ -332,13 +353,9 @@ func (s *SystemServer) countEligibleStorages(ctx context.Context, tierType syste
 	case system.TierTypeJSONL:
 		return 1, nil // JSONL tiers are pinned to a single node
 	case system.TierTypeFile:
-		// Cloud-backed file tiers (cloud_service_id set) match
-		// active_chunk_class; plain file tiers match storage_class.
-		// gastrolog-4k5mg.
+		// Single storage class for both local-only and cloud-backed
+		// file tiers. See gastrolog-4k5mg.
 		requiredClass := p.GetStorageClass()
-		if len(p.GetCloudServiceId()) > 0 {
-			requiredClass = p.GetActiveChunkClass()
-		}
 		count := 0
 		for _, nsc := range nscs {
 			for _, fs := range nsc.FileStorages {

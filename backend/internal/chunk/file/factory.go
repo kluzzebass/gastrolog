@@ -77,42 +77,43 @@ func NewFactory() chunk.ManagerFactory {
 			cfg.CloudReadOnly = true
 		}
 
-		// CloudServiceID: snapshot of the cloud service this Manager is
-		// currently wired to. Stamped onto every CmdUploadChunk so the
-		// chunk's authoritative store survives a future tier reconfiguration
-		// that repoints CloudStore. Optional in tests; required in the
-		// orchestrator dispatch path. See gastrolog-grnc3.
-		if v := params["cloud_service_id"]; v != "" {
-			csID, err := glid.ParseUUID(v)
-			if err != nil {
-				return nil, fmt.Errorf("invalid cloud_service_id: %w", err)
-			}
-			cfg.CloudServiceID = csID
-		}
-
-		// cache_dir is silently ignored — step 7k made <chunkDir>/data.glcb
-		// the warm cache so a separate cache directory is no longer
-		// meaningful.
-		if v := params["cache_eviction"]; v != "" {
-			cfg.CacheEviction = v
-		}
-		if v := params["cache_budget"]; v != "" {
-			parsed, err := system.ParseSize(v)
-			if err != nil {
-				return nil, fmt.Errorf("invalid cache_budget: %w", err)
-			}
-			cfg.CacheBudgetBytes = parsed
-		}
-		if v := params["cache_ttl"]; v != "" {
-			parsed, err := system.ParseDuration(v)
-			if err != nil {
-				return nil, fmt.Errorf("invalid cache_ttl: %w", err)
-			}
-			cfg.CacheTTL = parsed
+		if err := applyCloudAndCacheParams(&cfg, params); err != nil {
+			return nil, err
 		}
 
 		return NewManager(cfg)
 	}
+}
+
+// applyCloudAndCacheParams parses the optional cloud_service_id and
+// cache_* params and applies them to cfg. Extracted from NewFactory to
+// keep its cognitive complexity in budget.
+func applyCloudAndCacheParams(cfg *Config, params map[string]string) error {
+	if v := params["cloud_service_id"]; v != "" {
+		csID, err := glid.ParseUUID(v)
+		if err != nil {
+			return fmt.Errorf("invalid cloud_service_id: %w", err)
+		}
+		cfg.CloudServiceID = csID
+	}
+	if v := params["cache_eviction"]; v != "" {
+		cfg.CacheEviction = v
+	}
+	if v := params["cache_budget"]; v != "" {
+		parsed, err := system.ParseSize(v)
+		if err != nil {
+			return fmt.Errorf("invalid cache_budget: %w", err)
+		}
+		cfg.CacheBudgetBytes = parsed
+	}
+	if v := params["cache_ttl"]; v != "" {
+		parsed, err := system.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("invalid cache_ttl: %w", err)
+		}
+		cfg.CacheTTL = parsed
+	}
+	return nil
 }
 
 // configureSealedBacking sets up cloud store configuration when a sealed

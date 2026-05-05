@@ -435,8 +435,6 @@ func (s *SystemServer) loadSystemTiers(ctx context.Context, resp *apiv1.GetSyste
 			Type:              tierTypeToProto(tier.Type),
 			MemoryBudgetBytes: tier.MemoryBudgetBytes,
 			StorageClass:      tier.StorageClass,
-			ActiveChunkClass:  tier.ActiveChunkClass,
-			CacheClass:        tier.CacheClass,
 			ReplicationFactor: tier.ReplicationFactor,
 			Path:              tier.Path,
 			Placements:        placements,
@@ -452,12 +450,8 @@ func (s *SystemServer) loadSystemTiers(ctx context.Context, resp *apiv1.GetSyste
 		if tier.CloudServiceID != nil {
 			tc.CloudServiceId = tier.CloudServiceID.ToProto()
 		}
-		// Cloud-backed tiers go on the wire as TIER_TYPE_CLOUD for client
-		// UI back-compat; server-side dispatch uses TierConfig.IsCloud().
-		// See gastrolog-4k5mg.
-		if tier.IsCloud() {
-			tc.Type = apiv1.TierType_TIER_TYPE_CLOUD
-		}
+		// Cloud-backed tiers wire as TIER_TYPE_FILE; cloud-ness travels via
+		// cloud_service_id, not the type enum. See gastrolog-4k5mg.
 		for _, r := range tier.RetentionRules {
 			pb := &apiv1.RetentionRule{
 				RetentionPolicyId: r.RetentionPolicyID.ToProto(),

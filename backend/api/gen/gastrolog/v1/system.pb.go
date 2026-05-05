@@ -72,14 +72,17 @@ func (IngesterMode) EnumDescriptor() ([]byte, []int) {
 }
 
 // TierType identifies the storage medium for a tier.
+//
+// A cloud-backed tier is a TIER_TYPE_FILE tier with cloud_service_id set;
+// the server flips behavior on the cloud-store binding rather than the
+// type enum. See gastrolog-4k5mg.
 type TierType int32
 
 const (
 	TierType_TIER_TYPE_UNSPECIFIED TierType = 0
 	TierType_TIER_TYPE_MEMORY      TierType = 1
 	TierType_TIER_TYPE_FILE        TierType = 2
-	TierType_TIER_TYPE_CLOUD       TierType = 3
-	TierType_TIER_TYPE_JSONL       TierType = 4
+	TierType_TIER_TYPE_JSONL       TierType = 3
 )
 
 // Enum value maps for TierType.
@@ -88,15 +91,13 @@ var (
 		0: "TIER_TYPE_UNSPECIFIED",
 		1: "TIER_TYPE_MEMORY",
 		2: "TIER_TYPE_FILE",
-		3: "TIER_TYPE_CLOUD",
-		4: "TIER_TYPE_JSONL",
+		3: "TIER_TYPE_JSONL",
 	}
 	TierType_value = map[string]int32{
 		"TIER_TYPE_UNSPECIFIED": 0,
 		"TIER_TYPE_MEMORY":      1,
 		"TIER_TYPE_FILE":        2,
-		"TIER_TYPE_CLOUD":       3,
-		"TIER_TYPE_JSONL":       4,
+		"TIER_TYPE_JSONL":       3,
 	}
 )
 
@@ -2860,12 +2861,12 @@ func (x *TLSSettings) GetHttpsPort() string {
 
 type LookupSettings struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
-	HttpLookups     []*HTTPLookupEntry     `protobuf:"bytes,4,rep,name=http_lookups,json=httpLookups,proto3" json:"http_lookups,omitempty"`
-	JsonFileLookups []*JSONFileLookupEntry `protobuf:"bytes,5,rep,name=json_file_lookups,json=jsonFileLookups,proto3" json:"json_file_lookups,omitempty"`
-	MmdbLookups     []*MMDBLookupEntry     `protobuf:"bytes,6,rep,name=mmdb_lookups,json=mmdbLookups,proto3" json:"mmdb_lookups,omitempty"`
-	CsvLookups      []*CSVLookupEntry      `protobuf:"bytes,7,rep,name=csv_lookups,json=csvLookups,proto3" json:"csv_lookups,omitempty"`
-	StaticLookups   []*StaticLookupEntry   `protobuf:"bytes,8,rep,name=static_lookups,json=staticLookups,proto3" json:"static_lookups,omitempty"`
-	YamlFileLookups []*YAMLFileLookupEntry `protobuf:"bytes,9,rep,name=yaml_file_lookups,json=yamlFileLookups,proto3" json:"yaml_file_lookups,omitempty"`
+	HttpLookups     []*HTTPLookupEntry     `protobuf:"bytes,1,rep,name=http_lookups,json=httpLookups,proto3" json:"http_lookups,omitempty"`
+	JsonFileLookups []*JSONFileLookupEntry `protobuf:"bytes,2,rep,name=json_file_lookups,json=jsonFileLookups,proto3" json:"json_file_lookups,omitempty"`
+	MmdbLookups     []*MMDBLookupEntry     `protobuf:"bytes,3,rep,name=mmdb_lookups,json=mmdbLookups,proto3" json:"mmdb_lookups,omitempty"`
+	CsvLookups      []*CSVLookupEntry      `protobuf:"bytes,4,rep,name=csv_lookups,json=csvLookups,proto3" json:"csv_lookups,omitempty"`
+	StaticLookups   []*StaticLookupEntry   `protobuf:"bytes,5,rep,name=static_lookups,json=staticLookups,proto3" json:"static_lookups,omitempty"`
+	YamlFileLookups []*YAMLFileLookupEntry `protobuf:"bytes,6,rep,name=yaml_file_lookups,json=yamlFileLookups,proto3" json:"yaml_file_lookups,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -3166,8 +3167,8 @@ type JSONFileLookupEntry struct {
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                                     // registry name (e.g. "hosts")
 	FileId        []byte                 `protobuf:"bytes,2,opt,name=file_id,json=fileId,proto3" json:"file_id,omitempty"`                   // managed file ID
 	Query         string                 `protobuf:"bytes,3,opt,name=query,proto3" json:"query,omitempty"`                                   // jq expression that produces an array of objects (the lookup table)
-	KeyColumn     string                 `protobuf:"bytes,5,opt,name=key_column,json=keyColumn,proto3" json:"key_column,omitempty"`          // column used as the lookup key; empty = first column
-	ValueColumns  []string               `protobuf:"bytes,6,rep,name=value_columns,json=valueColumns,proto3" json:"value_columns,omitempty"` // columns to include in output; empty = all non-key
+	KeyColumn     string                 `protobuf:"bytes,4,opt,name=key_column,json=keyColumn,proto3" json:"key_column,omitempty"`          // column used as the lookup key; empty = first column
+	ValueColumns  []string               `protobuf:"bytes,5,rep,name=value_columns,json=valueColumns,proto3" json:"value_columns,omitempty"` // columns to include in output; empty = all non-key
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3756,8 +3757,8 @@ func (x *PutPasswordPolicySettings) GetForbidAnimalNoise() bool {
 type PutAuthSettings struct {
 	state                protoimpl.MessageState     `protogen:"open.v1"`
 	TokenDuration        *string                    `protobuf:"bytes,1,opt,name=token_duration,json=tokenDuration,proto3,oneof" json:"token_duration,omitempty"`
-	RefreshTokenDuration *string                    `protobuf:"bytes,3,opt,name=refresh_token_duration,json=refreshTokenDuration,proto3,oneof" json:"refresh_token_duration,omitempty"`
-	PasswordPolicy       *PutPasswordPolicySettings `protobuf:"bytes,4,opt,name=password_policy,json=passwordPolicy,proto3" json:"password_policy,omitempty"`
+	RefreshTokenDuration *string                    `protobuf:"bytes,2,opt,name=refresh_token_duration,json=refreshTokenDuration,proto3,oneof" json:"refresh_token_duration,omitempty"`
+	PasswordPolicy       *PutPasswordPolicySettings `protobuf:"bytes,3,opt,name=password_policy,json=passwordPolicy,proto3" json:"password_policy,omitempty"`
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
 }
@@ -4047,12 +4048,12 @@ func (x *PutMaxMindSettings) GetLicenseKey() string {
 
 type PutLookupSettings struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
-	HttpLookups     []*HTTPLookupEntry     `protobuf:"bytes,4,rep,name=http_lookups,json=httpLookups,proto3" json:"http_lookups,omitempty"`               // replaces the full list when present
-	JsonFileLookups []*JSONFileLookupEntry `protobuf:"bytes,5,rep,name=json_file_lookups,json=jsonFileLookups,proto3" json:"json_file_lookups,omitempty"` // replaces the full list when present
-	MmdbLookups     []*MMDBLookupEntry     `protobuf:"bytes,6,rep,name=mmdb_lookups,json=mmdbLookups,proto3" json:"mmdb_lookups,omitempty"`               // replaces the full list when present
-	CsvLookups      []*CSVLookupEntry      `protobuf:"bytes,7,rep,name=csv_lookups,json=csvLookups,proto3" json:"csv_lookups,omitempty"`                  // replaces the full list when present
-	StaticLookups   []*StaticLookupEntry   `protobuf:"bytes,8,rep,name=static_lookups,json=staticLookups,proto3" json:"static_lookups,omitempty"`         // replaces the full list when present
-	YamlFileLookups []*YAMLFileLookupEntry `protobuf:"bytes,9,rep,name=yaml_file_lookups,json=yamlFileLookups,proto3" json:"yaml_file_lookups,omitempty"` // replaces the full list when present
+	HttpLookups     []*HTTPLookupEntry     `protobuf:"bytes,1,rep,name=http_lookups,json=httpLookups,proto3" json:"http_lookups,omitempty"`               // replaces the full list when present
+	JsonFileLookups []*JSONFileLookupEntry `protobuf:"bytes,2,rep,name=json_file_lookups,json=jsonFileLookups,proto3" json:"json_file_lookups,omitempty"` // replaces the full list when present
+	MmdbLookups     []*MMDBLookupEntry     `protobuf:"bytes,3,rep,name=mmdb_lookups,json=mmdbLookups,proto3" json:"mmdb_lookups,omitempty"`               // replaces the full list when present
+	CsvLookups      []*CSVLookupEntry      `protobuf:"bytes,4,rep,name=csv_lookups,json=csvLookups,proto3" json:"csv_lookups,omitempty"`                  // replaces the full list when present
+	StaticLookups   []*StaticLookupEntry   `protobuf:"bytes,5,rep,name=static_lookups,json=staticLookups,proto3" json:"static_lookups,omitempty"`         // replaces the full list when present
+	YamlFileLookups []*YAMLFileLookupEntry `protobuf:"bytes,6,rep,name=yaml_file_lookups,json=yamlFileLookups,proto3" json:"yaml_file_lookups,omitempty"` // replaces the full list when present
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -6448,16 +6449,14 @@ type TierConfig struct {
 	MemoryBudgetBytes uint64                 `protobuf:"varint,6,opt,name=memory_budget_bytes,json=memoryBudgetBytes,proto3" json:"memory_budget_bytes,omitempty"`
 	StorageClass      uint32                 `protobuf:"varint,7,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`
 	CloudServiceId    []byte                 `protobuf:"bytes,8,opt,name=cloud_service_id,json=cloudServiceId,proto3" json:"cloud_service_id,omitempty"`
-	ActiveChunkClass  uint32                 `protobuf:"varint,9,opt,name=active_chunk_class,json=activeChunkClass,proto3" json:"active_chunk_class,omitempty"`
-	CacheClass        uint32                 `protobuf:"varint,10,opt,name=cache_class,json=cacheClass,proto3" json:"cache_class,omitempty"`
-	ReplicationFactor uint32                 `protobuf:"varint,12,opt,name=replication_factor,json=replicationFactor,proto3" json:"replication_factor,omitempty"` // desired RF (1 = no replication, default)
-	Path              string                 `protobuf:"bytes,14,opt,name=path,proto3" json:"path,omitempty"`                                                     // direct path for JSONL sinks
-	Placements        []*TierPlacement       `protobuf:"bytes,15,rep,name=placements,proto3" json:"placements,omitempty"`                                         // system-managed: file storage assignments by placement manager
-	VaultId           []byte                 `protobuf:"bytes,16,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`                                // owning vault — exactly one vault per tier
-	Position          uint32                 `protobuf:"varint,17,opt,name=position,proto3" json:"position,omitempty"`                                            // 0-based order within the vault's tier chain
-	CacheEviction     string                 `protobuf:"bytes,18,opt,name=cache_eviction,json=cacheEviction,proto3" json:"cache_eviction,omitempty"`              // "lru" (default) or "ttl"
-	CacheBudget       string                 `protobuf:"bytes,19,opt,name=cache_budget,json=cacheBudget,proto3" json:"cache_budget,omitempty"`                    // max cache size (e.g. "1GB", "500MB"; default: "1GiB")
-	CacheTtl          string                 `protobuf:"bytes,20,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`                             // eviction TTL duration (e.g. "1h", "7d"); only for ttl mode
+	ReplicationFactor uint32                 `protobuf:"varint,9,opt,name=replication_factor,json=replicationFactor,proto3" json:"replication_factor,omitempty"` // desired RF (1 = no replication, default)
+	Path              string                 `protobuf:"bytes,10,opt,name=path,proto3" json:"path,omitempty"`                                                    // direct path for JSONL sinks
+	Placements        []*TierPlacement       `protobuf:"bytes,11,rep,name=placements,proto3" json:"placements,omitempty"`                                        // system-managed: file storage assignments by placement manager
+	VaultId           []byte                 `protobuf:"bytes,12,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`                               // owning vault — exactly one vault per tier
+	Position          uint32                 `protobuf:"varint,13,opt,name=position,proto3" json:"position,omitempty"`                                           // 0-based order within the vault's tier chain
+	CacheEviction     string                 `protobuf:"bytes,14,opt,name=cache_eviction,json=cacheEviction,proto3" json:"cache_eviction,omitempty"`             // "lru" (default) or "ttl"
+	CacheBudget       string                 `protobuf:"bytes,15,opt,name=cache_budget,json=cacheBudget,proto3" json:"cache_budget,omitempty"`                   // max cache size (e.g. "1GB", "500MB"; default: "1GiB")
+	CacheTtl          string                 `protobuf:"bytes,16,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`                            // eviction TTL duration (e.g. "1h", "7d"); only for ttl mode
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -6546,20 +6545,6 @@ func (x *TierConfig) GetCloudServiceId() []byte {
 		return x.CloudServiceId
 	}
 	return nil
-}
-
-func (x *TierConfig) GetActiveChunkClass() uint32 {
-	if x != nil {
-		return x.ActiveChunkClass
-	}
-	return 0
-}
-
-func (x *TierConfig) GetCacheClass() uint32 {
-	if x != nil {
-		return x.CacheClass
-	}
-	return 0
 }
 
 func (x *TierConfig) GetReplicationFactor() uint32 {
@@ -8421,7 +8406,7 @@ func (x *PutTierResponse) GetSystem() *GetSystemResponse {
 type DeleteTierRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Drain         bool                   `protobuf:"varint,3,opt,name=drain,proto3" json:"drain,omitempty"` // When true, drain chunks to the next tier before deleting.
+	Drain         bool                   `protobuf:"varint,2,opt,name=drain,proto3" json:"drain,omitempty"` // When true, drain chunks to the next tier before deleting.
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -8781,12 +8766,12 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\n" +
 	"account_id\x18\x04 \x01(\fR\taccountId\x12\x1f\n" +
 	"\vlicense_key\x18\x05 \x01(\tR\n" +
-	"licenseKey\"\xf4\x01\n" +
+	"licenseKey\"\xee\x01\n" +
 	"\fAuthSettings\x12%\n" +
 	"\x0etoken_duration\x18\x01 \x01(\tR\rtokenDuration\x122\n" +
 	"\x15jwt_secret_configured\x18\x02 \x01(\bR\x13jwtSecretConfigured\x124\n" +
 	"\x16refresh_token_duration\x18\x03 \x01(\tR\x14refreshTokenDuration\x12M\n" +
-	"\x0fpassword_policy\x18\x04 \x01(\v2$.gastrolog.v1.PasswordPolicySettingsR\x0epasswordPolicyJ\x04\b\x05\x10\x06\"\x83\x01\n" +
+	"\x0fpassword_policy\x18\x04 \x01(\v2$.gastrolog.v1.PasswordPolicySettingsR\x0epasswordPolicy\"\x83\x01\n" +
 	"\rQuerySettings\x12\x18\n" +
 	"\atimeout\x18\x01 \x01(\tR\atimeout\x12.\n" +
 	"\x13max_follow_duration\x18\x02 \x01(\tR\x11maxFollowDuration\x12(\n" +
@@ -8798,15 +8783,15 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\aenabled\x18\x02 \x01(\bR\aenabled\x123\n" +
 	"\x16http_to_https_redirect\x18\x03 \x01(\bR\x13httpToHttpsRedirect\x12\x1d\n" +
 	"\n" +
-	"https_port\x18\x04 \x01(\tR\thttpsPort\"\xcb\x03\n" +
+	"https_port\x18\x04 \x01(\tR\thttpsPort\"\xb9\x03\n" +
 	"\x0eLookupSettings\x12@\n" +
-	"\fhttp_lookups\x18\x04 \x03(\v2\x1d.gastrolog.v1.HTTPLookupEntryR\vhttpLookups\x12M\n" +
-	"\x11json_file_lookups\x18\x05 \x03(\v2!.gastrolog.v1.JSONFileLookupEntryR\x0fjsonFileLookups\x12@\n" +
-	"\fmmdb_lookups\x18\x06 \x03(\v2\x1d.gastrolog.v1.MMDBLookupEntryR\vmmdbLookups\x12=\n" +
-	"\vcsv_lookups\x18\a \x03(\v2\x1c.gastrolog.v1.CSVLookupEntryR\n" +
+	"\fhttp_lookups\x18\x01 \x03(\v2\x1d.gastrolog.v1.HTTPLookupEntryR\vhttpLookups\x12M\n" +
+	"\x11json_file_lookups\x18\x02 \x03(\v2!.gastrolog.v1.JSONFileLookupEntryR\x0fjsonFileLookups\x12@\n" +
+	"\fmmdb_lookups\x18\x03 \x03(\v2\x1d.gastrolog.v1.MMDBLookupEntryR\vmmdbLookups\x12=\n" +
+	"\vcsv_lookups\x18\x04 \x03(\v2\x1c.gastrolog.v1.CSVLookupEntryR\n" +
 	"csvLookups\x12F\n" +
-	"\x0estatic_lookups\x18\b \x03(\v2\x1f.gastrolog.v1.StaticLookupEntryR\rstaticLookups\x12M\n" +
-	"\x11yaml_file_lookups\x18\t \x03(\v2!.gastrolog.v1.YAMLFileLookupEntryR\x0fyamlFileLookupsJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03J\x04\b\x03\x10\x04\"W\n" +
+	"\x0estatic_lookups\x18\x05 \x03(\v2\x1f.gastrolog.v1.StaticLookupEntryR\rstaticLookups\x12M\n" +
+	"\x11yaml_file_lookups\x18\x06 \x03(\v2!.gastrolog.v1.YAMLFileLookupEntryR\x0fyamlFileLookups\"W\n" +
 	"\x0fMMDBLookupEntry\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x17\n" +
 	"\adb_type\x18\x02 \x01(\tR\x06dbType\x12\x17\n" +
@@ -8828,14 +8813,14 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"parameters\x1a:\n" +
 	"\fHeadersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xa2\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x9c\x01\n" +
 	"\x13JSONFileLookupEntry\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x17\n" +
 	"\afile_id\x18\x02 \x01(\fR\x06fileId\x12\x14\n" +
 	"\x05query\x18\x03 \x01(\tR\x05query\x12\x1d\n" +
 	"\n" +
-	"key_column\x18\x05 \x01(\tR\tkeyColumn\x12#\n" +
-	"\rvalue_columns\x18\x06 \x03(\tR\fvalueColumnsJ\x04\b\x04\x10\x05\"\x9c\x01\n" +
+	"key_column\x18\x04 \x01(\tR\tkeyColumn\x12#\n" +
+	"\rvalue_columns\x18\x05 \x03(\tR\fvalueColumns\"\x9c\x01\n" +
 	"\x13YAMLFileLookupEntry\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x17\n" +
 	"\afile_id\x18\x02 \x01(\fR\x06fileId\x12\x14\n" +
@@ -8888,13 +8873,13 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x0e_require_digitB\x12\n" +
 	"\x10_require_specialB\x1a\n" +
 	"\x18_max_consecutive_repeatsB\x16\n" +
-	"\x14_forbid_animal_noise\"\xfe\x01\n" +
+	"\x14_forbid_animal_noise\"\xf8\x01\n" +
 	"\x0fPutAuthSettings\x12*\n" +
 	"\x0etoken_duration\x18\x01 \x01(\tH\x00R\rtokenDuration\x88\x01\x01\x129\n" +
-	"\x16refresh_token_duration\x18\x03 \x01(\tH\x01R\x14refreshTokenDuration\x88\x01\x01\x12P\n" +
-	"\x0fpassword_policy\x18\x04 \x01(\v2'.gastrolog.v1.PutPasswordPolicySettingsR\x0epasswordPolicyB\x11\n" +
+	"\x16refresh_token_duration\x18\x02 \x01(\tH\x01R\x14refreshTokenDuration\x88\x01\x01\x12P\n" +
+	"\x0fpassword_policy\x18\x03 \x01(\v2'.gastrolog.v1.PutPasswordPolicySettingsR\x0epasswordPolicyB\x11\n" +
 	"\x0f_token_durationB\x19\n" +
-	"\x17_refresh_token_durationJ\x04\b\x02\x10\x03\"\xce\x01\n" +
+	"\x17_refresh_token_duration\"\xce\x01\n" +
 	"\x10PutQuerySettings\x12\x1d\n" +
 	"\atimeout\x18\x01 \x01(\tH\x00R\atimeout\x88\x01\x01\x123\n" +
 	"\x13max_follow_duration\x18\x02 \x01(\tH\x01R\x11maxFollowDuration\x88\x01\x01\x12-\n" +
@@ -8925,15 +8910,15 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"licenseKey\x88\x01\x01B\x10\n" +
 	"\x0e_auto_downloadB\r\n" +
 	"\v_account_idB\x0e\n" +
-	"\f_license_key\"\xce\x03\n" +
+	"\f_license_key\"\xbc\x03\n" +
 	"\x11PutLookupSettings\x12@\n" +
-	"\fhttp_lookups\x18\x04 \x03(\v2\x1d.gastrolog.v1.HTTPLookupEntryR\vhttpLookups\x12M\n" +
-	"\x11json_file_lookups\x18\x05 \x03(\v2!.gastrolog.v1.JSONFileLookupEntryR\x0fjsonFileLookups\x12@\n" +
-	"\fmmdb_lookups\x18\x06 \x03(\v2\x1d.gastrolog.v1.MMDBLookupEntryR\vmmdbLookups\x12=\n" +
-	"\vcsv_lookups\x18\a \x03(\v2\x1c.gastrolog.v1.CSVLookupEntryR\n" +
+	"\fhttp_lookups\x18\x01 \x03(\v2\x1d.gastrolog.v1.HTTPLookupEntryR\vhttpLookups\x12M\n" +
+	"\x11json_file_lookups\x18\x02 \x03(\v2!.gastrolog.v1.JSONFileLookupEntryR\x0fjsonFileLookups\x12@\n" +
+	"\fmmdb_lookups\x18\x03 \x03(\v2\x1d.gastrolog.v1.MMDBLookupEntryR\vmmdbLookups\x12=\n" +
+	"\vcsv_lookups\x18\x04 \x03(\v2\x1c.gastrolog.v1.CSVLookupEntryR\n" +
 	"csvLookups\x12F\n" +
-	"\x0estatic_lookups\x18\b \x03(\v2\x1f.gastrolog.v1.StaticLookupEntryR\rstaticLookups\x12M\n" +
-	"\x11yaml_file_lookups\x18\t \x03(\v2!.gastrolog.v1.YAMLFileLookupEntryR\x0fyamlFileLookupsJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03J\x04\b\x03\x10\x04\"\xaa\x01\n" +
+	"\x0estatic_lookups\x18\x05 \x03(\v2\x1f.gastrolog.v1.StaticLookupEntryR\rstaticLookups\x12M\n" +
+	"\x11yaml_file_lookups\x18\x06 \x03(\v2!.gastrolog.v1.YAMLFileLookupEntryR\x0fyamlFileLookups\"\xaa\x01\n" +
 	"\x12PutClusterSettings\x122\n" +
 	"\x12broadcast_interval\x18\x01 \x01(\tH\x00R\x11broadcastInterval\x88\x01\x01\x122\n" +
 	"\x12heartbeat_interval\x18\x02 \x01(\tH\x01R\x11heartbeatInterval\x88\x01\x01B\x15\n" +
@@ -9076,7 +9061,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\n" +
 	"NodeConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\"\xbc\x05\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\"\xed\x04\n" +
 	"\n" +
 	"TierConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
@@ -9086,21 +9071,18 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x0fretention_rules\x18\x05 \x03(\v2\x1b.gastrolog.v1.RetentionRuleR\x0eretentionRules\x12.\n" +
 	"\x13memory_budget_bytes\x18\x06 \x01(\x04R\x11memoryBudgetBytes\x12#\n" +
 	"\rstorage_class\x18\a \x01(\rR\fstorageClass\x12(\n" +
-	"\x10cloud_service_id\x18\b \x01(\fR\x0ecloudServiceId\x12,\n" +
-	"\x12active_chunk_class\x18\t \x01(\rR\x10activeChunkClass\x12\x1f\n" +
-	"\vcache_class\x18\n" +
-	" \x01(\rR\n" +
-	"cacheClass\x12-\n" +
-	"\x12replication_factor\x18\f \x01(\rR\x11replicationFactor\x12\x12\n" +
-	"\x04path\x18\x0e \x01(\tR\x04path\x12;\n" +
+	"\x10cloud_service_id\x18\b \x01(\fR\x0ecloudServiceId\x12-\n" +
+	"\x12replication_factor\x18\t \x01(\rR\x11replicationFactor\x12\x12\n" +
+	"\x04path\x18\n" +
+	" \x01(\tR\x04path\x12;\n" +
 	"\n" +
-	"placements\x18\x0f \x03(\v2\x1b.gastrolog.v1.TierPlacementR\n" +
+	"placements\x18\v \x03(\v2\x1b.gastrolog.v1.TierPlacementR\n" +
 	"placements\x12\x19\n" +
-	"\bvault_id\x18\x10 \x01(\fR\avaultId\x12\x1a\n" +
-	"\bposition\x18\x11 \x01(\rR\bposition\x12%\n" +
-	"\x0ecache_eviction\x18\x12 \x01(\tR\rcacheEviction\x12!\n" +
-	"\fcache_budget\x18\x13 \x01(\tR\vcacheBudget\x12\x1b\n" +
-	"\tcache_ttl\x18\x14 \x01(\tR\bcacheTtl\"F\n" +
+	"\bvault_id\x18\f \x01(\fR\avaultId\x12\x1a\n" +
+	"\bposition\x18\r \x01(\rR\bposition\x12%\n" +
+	"\x0ecache_eviction\x18\x0e \x01(\tR\rcacheEviction\x12!\n" +
+	"\fcache_budget\x18\x0f \x01(\tR\vcacheBudget\x12\x1b\n" +
+	"\tcache_ttl\x18\x10 \x01(\tR\bcacheTtl\"F\n" +
 	"\rTierPlacement\x12\x1d\n" +
 	"\n" +
 	"storage_id\x18\x01 \x01(\fR\tstorageId\x12\x16\n" +
@@ -9232,10 +9214,10 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x0ePutTierRequest\x120\n" +
 	"\x06config\x18\x01 \x01(\v2\x18.gastrolog.v1.TierConfigR\x06config\"J\n" +
 	"\x0fPutTierResponse\x127\n" +
-	"\x06system\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetSystemResponseR\x06system\"?\n" +
+	"\x06system\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetSystemResponseR\x06system\"9\n" +
 	"\x11DeleteTierRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x14\n" +
-	"\x05drain\x18\x03 \x01(\bR\x05drainJ\x04\b\x02\x10\x03\"M\n" +
+	"\x05drain\x18\x02 \x01(\bR\x05drain\"M\n" +
 	"\x12DeleteTierResponse\x127\n" +
 	"\x06system\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetSystemResponseR\x06system\")\n" +
 	"\x13DeleteLookupRequest\x12\x12\n" +
@@ -9245,13 +9227,12 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\fIngesterMode\x12\x1d\n" +
 	"\x19INGESTER_MODE_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15INGESTER_MODE_PASSIVE\x10\x01\x12\x18\n" +
-	"\x14INGESTER_MODE_ACTIVE\x10\x02*y\n" +
+	"\x14INGESTER_MODE_ACTIVE\x10\x02*d\n" +
 	"\bTierType\x12\x19\n" +
 	"\x15TIER_TYPE_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10TIER_TYPE_MEMORY\x10\x01\x12\x12\n" +
 	"\x0eTIER_TYPE_FILE\x10\x02\x12\x13\n" +
-	"\x0fTIER_TYPE_CLOUD\x10\x03\x12\x13\n" +
-	"\x0fTIER_TYPE_JSONL\x10\x042\x8d'\n" +
+	"\x0fTIER_TYPE_JSONL\x10\x032\x8d'\n" +
 	"\rSystemService\x12L\n" +
 	"\tGetSystem\x12\x1e.gastrolog.v1.GetSystemRequest\x1a\x1f.gastrolog.v1.GetSystemResponse\x12X\n" +
 	"\rListIngesters\x12\".gastrolog.v1.ListIngestersRequest\x1a#.gastrolog.v1.ListIngestersResponse\x12d\n" +

@@ -1500,12 +1500,13 @@ func buildTierParams(sys *system.System, vaultCfg system.VaultConfig, tierCfg sy
 		}
 
 	case system.TierTypeFile:
-		dirClass := tierCfg.StorageClass
+		// Single storage class for all file tiers — local-only and
+		// cloud-backed alike. The active chunk and warm cache live at
+		// the same chunkDir path post-step-7k. See gastrolog-4k5mg.
 		if tierCfg.IsCloud() {
-			dirClass = tierCfg.ActiveChunkClass
 			addCloudParams(params, &sys.Config, tierCfg)
 		}
-		if fs := findLocalFileStorage(rt, localNodeID, dirClass); fs != nil {
+		if fs := findLocalFileStorage(rt, localNodeID, tierCfg.StorageClass); fs != nil {
 			params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), tierCfg.ID.String())
 		}
 

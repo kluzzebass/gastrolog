@@ -35,7 +35,7 @@ export class FileStorage extends Message<FileStorage> {
   path = "";
 
   /**
-   * @generated from field: uint64 memory_budget_bytes = 6;
+   * @generated from field: uint64 memory_budget_bytes = 5;
    */
   memoryBudgetBytes = protoInt64.zero;
 
@@ -51,7 +51,7 @@ export class FileStorage extends Message<FileStorage> {
     { no: 2, name: "storage_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 3, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 6, name: "memory_budget_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 5, name: "memory_budget_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): FileStorage {
@@ -231,7 +231,7 @@ export class CloudService extends Message<CloudService> {
   credentialsJson = "";
 
   /**
-   * @generated from field: uint32 storage_class = 15;
+   * @generated from field: uint32 storage_class = 12;
    */
   storageClass = 0;
 
@@ -240,42 +240,42 @@ export class CloudService extends Message<CloudService> {
    * "none" = bucket-level lifecycle handles it (or no archival).
    * "active" = GastroLog manages transitions via the sweep job.
    *
-   * @generated from field: string archival_mode = 20;
+   * @generated from field: string archival_mode = 13;
    */
   archivalMode = "";
 
   /**
    * ordered by after_days
    *
-   * @generated from field: repeated gastrolog.v1.CloudStorageTransition transitions = 21;
+   * @generated from field: repeated gastrolog.v1.CloudStorageTransition transitions = 14;
    */
   transitions: CloudStorageTransition[] = [];
 
   /**
    * default restore speed (S3: Expedited/Standard/Bulk, Azure: High/Standard)
    *
-   * @generated from field: string restore_tier = 22;
+   * @generated from field: string restore_tier = 15;
    */
   restoreTier = "";
 
   /**
    * S3: how long restored copy stays readable (days)
    *
-   * @generated from field: uint32 restore_days = 23;
+   * @generated from field: uint32 restore_days = 16;
    */
   restoreDays = 0;
 
   /**
    * days before suspect chunk removed from index (default 7)
    *
-   * @generated from field: uint32 suspect_grace_days = 24;
+   * @generated from field: uint32 suspect_grace_days = 17;
    */
   suspectGraceDays = 0;
 
   /**
    * cron for reconciliation sweep (default "0 3 * * *")
    *
-   * @generated from field: string reconcile_schedule = 25;
+   * @generated from field: string reconcile_schedule = 18;
    */
   reconcileSchedule = "";
 
@@ -298,13 +298,13 @@ export class CloudService extends Message<CloudService> {
     { no: 9, name: "container", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 10, name: "connection_string", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 11, name: "credentials_json", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 15, name: "storage_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-    { no: 20, name: "archival_mode", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 21, name: "transitions", kind: "message", T: CloudStorageTransition, repeated: true },
-    { no: 22, name: "restore_tier", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 23, name: "restore_days", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-    { no: 24, name: "suspect_grace_days", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-    { no: 25, name: "reconcile_schedule", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 12, name: "storage_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 13, name: "archival_mode", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 14, name: "transitions", kind: "message", T: CloudStorageTransition, repeated: true },
+    { no: 15, name: "restore_tier", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 16, name: "restore_days", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 17, name: "suspect_grace_days", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 18, name: "reconcile_schedule", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CloudService {

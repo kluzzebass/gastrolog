@@ -45,11 +45,8 @@ service QueryService {
 }
 
 message SearchRequest {
-  // store field removed - use vault_id=X in query expression instead
-  reserved 1;
-  reserved "store";
-  Query query = 2;
-  bytes resume_token = 3; // Opaque token for pagination
+  Query query = 1;
+  bytes resume_token = 2; // Opaque token for pagination
 }
 
 message SearchResponse {
@@ -99,10 +96,7 @@ message TableRow {
 }
 
 message FollowRequest {
-  // store field removed - use vault_id=X in query expression instead
-  reserved 1;
-  reserved "store";
-  Query query = 2;
+  Query query = 1;
 }
 
 message FollowResponse {
@@ -110,10 +104,7 @@ message FollowResponse {
 }
 
 message ExplainRequest {
-  // store field removed - use vault_id=X in query expression instead
-  reserved 1;
-  reserved "store";
-  Query query = 2;
+  Query query = 1;
 }
 
 message ExplainResponse {
@@ -182,18 +173,17 @@ message RecordRef {
 // Each vault — local or remote — gets an opaque token keyed by vault UUID.
 // The API node routes each token to wherever the vault lives.
 message ResumeToken {
-  reserved 1; // was repeated VaultPosition positions
-  map<string, bytes> vault_tokens = 2;
+  map<string, bytes> vault_tokens = 1;
   // Frozen time bounds from the first page — prevents "last-5m" from
   // shifting between pages.
-  google.protobuf.Timestamp frozen_start = 3;
-  google.protobuf.Timestamp frozen_end = 4;
+  google.protobuf.Timestamp frozen_start = 2;
+  google.protobuf.Timestamp frozen_end = 3;
   // Highwater TS from the last emitted record. Acts as an exclusive
   // boundary on the next page (reverse: upper bound; forward: lower
   // bound) so pagination survives mid-scroll chunk lifecycle (seal,
   // transition, retention) without re-emitting already-seen records,
   // even when per-chunk positions become stale and unusable.
-  google.protobuf.Timestamp highwater_ts = 5;
+  google.protobuf.Timestamp highwater_ts = 4;
 }
 
 // InnerVaultToken is the serialized per-vault resume state.

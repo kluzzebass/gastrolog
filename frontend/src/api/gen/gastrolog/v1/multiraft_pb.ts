@@ -186,22 +186,22 @@ export class MultiRaftAppendEntriesRequest extends Message<MultiRaftAppendEntrie
   term = protoInt64.zero;
 
   /**
-   * @generated from field: uint64 prev_log_entry = 5;
+   * @generated from field: uint64 prev_log_entry = 4;
    */
   prevLogEntry = protoInt64.zero;
 
   /**
-   * @generated from field: uint64 prev_log_term = 6;
+   * @generated from field: uint64 prev_log_term = 5;
    */
   prevLogTerm = protoInt64.zero;
 
   /**
-   * @generated from field: repeated gastrolog.v1.Log entries = 7;
+   * @generated from field: repeated gastrolog.v1.Log entries = 6;
    */
   entries: Log[] = [];
 
   /**
-   * @generated from field: uint64 leader_commit_index = 8;
+   * @generated from field: uint64 leader_commit_index = 7;
    */
   leaderCommitIndex = protoInt64.zero;
 
@@ -216,10 +216,10 @@ export class MultiRaftAppendEntriesRequest extends Message<MultiRaftAppendEntrie
     { no: 1, name: "group_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "rpc_header", kind: "message", T: RPCHeader },
     { no: 3, name: "term", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
-    { no: 5, name: "prev_log_entry", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
-    { no: 6, name: "prev_log_term", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
-    { no: 7, name: "entries", kind: "message", T: Log, repeated: true },
-    { no: 8, name: "leader_commit_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 4, name: "prev_log_entry", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 5, name: "prev_log_term", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 6, name: "entries", kind: "message", T: Log, repeated: true },
+    { no: 7, name: "leader_commit_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): MultiRaftAppendEntriesRequest {
@@ -320,17 +320,17 @@ export class MultiRaftRequestVoteRequest extends Message<MultiRaftRequestVoteReq
   term = protoInt64.zero;
 
   /**
-   * @generated from field: uint64 last_log_index = 5;
+   * @generated from field: uint64 last_log_index = 4;
    */
   lastLogIndex = protoInt64.zero;
 
   /**
-   * @generated from field: uint64 last_log_term = 6;
+   * @generated from field: uint64 last_log_term = 5;
    */
   lastLogTerm = protoInt64.zero;
 
   /**
-   * @generated from field: bool leadership_transfer = 7;
+   * @generated from field: bool leadership_transfer = 6;
    */
   leadershipTransfer = false;
 
@@ -345,9 +345,9 @@ export class MultiRaftRequestVoteRequest extends Message<MultiRaftRequestVoteReq
     { no: 1, name: "group_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "rpc_header", kind: "message", T: RPCHeader },
     { no: 3, name: "term", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
-    { no: 5, name: "last_log_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
-    { no: 6, name: "last_log_term", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
-    { no: 7, name: "leadership_transfer", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 4, name: "last_log_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 5, name: "last_log_term", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 6, name: "leadership_transfer", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): MultiRaftRequestVoteRequest {
@@ -637,37 +637,37 @@ export class MultiRaftInstallSnapshotRequest extends Message<MultiRaftInstallSna
   term = protoInt64.zero;
 
   /**
-   * @generated from field: uint64 last_log_index = 6;
+   * @generated from field: uint64 last_log_index = 5;
    */
   lastLogIndex = protoInt64.zero;
 
   /**
-   * @generated from field: uint64 last_log_term = 7;
+   * @generated from field: uint64 last_log_term = 6;
    */
   lastLogTerm = protoInt64.zero;
 
   /**
-   * @generated from field: bytes peers = 8;
+   * @generated from field: bytes peers = 7;
    */
   peers = new Uint8Array(0);
 
   /**
-   * @generated from field: bytes configuration = 9;
+   * @generated from field: bytes configuration = 8;
    */
   configuration = new Uint8Array(0);
 
   /**
-   * @generated from field: uint64 configuration_index = 10;
+   * @generated from field: uint64 configuration_index = 9;
    */
   configurationIndex = protoInt64.zero;
 
   /**
-   * @generated from field: int64 size = 11;
+   * @generated from field: int64 size = 10;
    */
   size = protoInt64.zero;
 
   /**
-   * @generated from field: bytes data = 12;
+   * @generated from field: bytes data = 11;
    */
   data = new Uint8Array(0);
 
@@ -683,13 +683,13 @@ export class MultiRaftInstallSnapshotRequest extends Message<MultiRaftInstallSna
     { no: 2, name: "rpc_header", kind: "message", T: RPCHeader },
     { no: 3, name: "snapshot_version", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 4, name: "term", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
-    { no: 6, name: "last_log_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
-    { no: 7, name: "last_log_term", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
-    { no: 8, name: "peers", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 9, name: "configuration", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 10, name: "configuration_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
-    { no: 11, name: "size", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 12, name: "data", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 5, name: "last_log_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 6, name: "last_log_term", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 7, name: "peers", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 8, name: "configuration", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 9, name: "configuration_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 10, name: "size", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 11, name: "data", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): MultiRaftInstallSnapshotRequest {

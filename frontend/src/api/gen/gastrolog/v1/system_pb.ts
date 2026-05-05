@@ -42,6 +42,10 @@ proto3.util.setEnumType(IngesterMode, "gastrolog.v1.IngesterMode", [
 /**
  * TierType identifies the storage medium for a tier.
  *
+ * A cloud-backed tier is a TIER_TYPE_FILE tier with cloud_service_id set;
+ * the server flips behavior on the cloud-store binding rather than the
+ * type enum. See gastrolog-4k5mg.
+ *
  * @generated from enum gastrolog.v1.TierType
  */
 export enum TierType {
@@ -61,22 +65,16 @@ export enum TierType {
   FILE = 2,
 
   /**
-   * @generated from enum value: TIER_TYPE_CLOUD = 3;
+   * @generated from enum value: TIER_TYPE_JSONL = 3;
    */
-  CLOUD = 3,
-
-  /**
-   * @generated from enum value: TIER_TYPE_JSONL = 4;
-   */
-  JSONL = 4,
+  JSONL = 3,
 }
 // Retrieve enum metadata with: proto3.getEnumType(TierType)
 proto3.util.setEnumType(TierType, "gastrolog.v1.TierType", [
   { no: 0, name: "TIER_TYPE_UNSPECIFIED" },
   { no: 1, name: "TIER_TYPE_MEMORY" },
   { no: 2, name: "TIER_TYPE_FILE" },
-  { no: 3, name: "TIER_TYPE_CLOUD" },
-  { no: 4, name: "TIER_TYPE_JSONL" },
+  { no: 3, name: "TIER_TYPE_JSONL" },
 ]);
 
 /**
@@ -2373,32 +2371,32 @@ export class TLSSettings extends Message<TLSSettings> {
  */
 export class LookupSettings extends Message<LookupSettings> {
   /**
-   * @generated from field: repeated gastrolog.v1.HTTPLookupEntry http_lookups = 4;
+   * @generated from field: repeated gastrolog.v1.HTTPLookupEntry http_lookups = 1;
    */
   httpLookups: HTTPLookupEntry[] = [];
 
   /**
-   * @generated from field: repeated gastrolog.v1.JSONFileLookupEntry json_file_lookups = 5;
+   * @generated from field: repeated gastrolog.v1.JSONFileLookupEntry json_file_lookups = 2;
    */
   jsonFileLookups: JSONFileLookupEntry[] = [];
 
   /**
-   * @generated from field: repeated gastrolog.v1.MMDBLookupEntry mmdb_lookups = 6;
+   * @generated from field: repeated gastrolog.v1.MMDBLookupEntry mmdb_lookups = 3;
    */
   mmdbLookups: MMDBLookupEntry[] = [];
 
   /**
-   * @generated from field: repeated gastrolog.v1.CSVLookupEntry csv_lookups = 7;
+   * @generated from field: repeated gastrolog.v1.CSVLookupEntry csv_lookups = 4;
    */
   csvLookups: CSVLookupEntry[] = [];
 
   /**
-   * @generated from field: repeated gastrolog.v1.StaticLookupEntry static_lookups = 8;
+   * @generated from field: repeated gastrolog.v1.StaticLookupEntry static_lookups = 5;
    */
   staticLookups: StaticLookupEntry[] = [];
 
   /**
-   * @generated from field: repeated gastrolog.v1.YAMLFileLookupEntry yaml_file_lookups = 9;
+   * @generated from field: repeated gastrolog.v1.YAMLFileLookupEntry yaml_file_lookups = 6;
    */
   yamlFileLookups: YAMLFileLookupEntry[] = [];
 
@@ -2410,12 +2408,12 @@ export class LookupSettings extends Message<LookupSettings> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.LookupSettings";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 4, name: "http_lookups", kind: "message", T: HTTPLookupEntry, repeated: true },
-    { no: 5, name: "json_file_lookups", kind: "message", T: JSONFileLookupEntry, repeated: true },
-    { no: 6, name: "mmdb_lookups", kind: "message", T: MMDBLookupEntry, repeated: true },
-    { no: 7, name: "csv_lookups", kind: "message", T: CSVLookupEntry, repeated: true },
-    { no: 8, name: "static_lookups", kind: "message", T: StaticLookupEntry, repeated: true },
-    { no: 9, name: "yaml_file_lookups", kind: "message", T: YAMLFileLookupEntry, repeated: true },
+    { no: 1, name: "http_lookups", kind: "message", T: HTTPLookupEntry, repeated: true },
+    { no: 2, name: "json_file_lookups", kind: "message", T: JSONFileLookupEntry, repeated: true },
+    { no: 3, name: "mmdb_lookups", kind: "message", T: MMDBLookupEntry, repeated: true },
+    { no: 4, name: "csv_lookups", kind: "message", T: CSVLookupEntry, repeated: true },
+    { no: 5, name: "static_lookups", kind: "message", T: StaticLookupEntry, repeated: true },
+    { no: 6, name: "yaml_file_lookups", kind: "message", T: YAMLFileLookupEntry, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): LookupSettings {
@@ -2671,14 +2669,14 @@ export class JSONFileLookupEntry extends Message<JSONFileLookupEntry> {
   /**
    * column used as the lookup key; empty = first column
    *
-   * @generated from field: string key_column = 5;
+   * @generated from field: string key_column = 4;
    */
   keyColumn = "";
 
   /**
    * columns to include in output; empty = all non-key
    *
-   * @generated from field: repeated string value_columns = 6;
+   * @generated from field: repeated string value_columns = 5;
    */
   valueColumns: string[] = [];
 
@@ -2693,8 +2691,8 @@ export class JSONFileLookupEntry extends Message<JSONFileLookupEntry> {
     { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "file_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 3, name: "query", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 5, name: "key_column", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 6, name: "value_columns", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 4, name: "key_column", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 5, name: "value_columns", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): JSONFileLookupEntry {
@@ -3176,12 +3174,12 @@ export class PutAuthSettings extends Message<PutAuthSettings> {
   tokenDuration?: string;
 
   /**
-   * @generated from field: optional string refresh_token_duration = 3;
+   * @generated from field: optional string refresh_token_duration = 2;
    */
   refreshTokenDuration?: string;
 
   /**
-   * @generated from field: gastrolog.v1.PutPasswordPolicySettings password_policy = 4;
+   * @generated from field: gastrolog.v1.PutPasswordPolicySettings password_policy = 3;
    */
   passwordPolicy?: PutPasswordPolicySettings;
 
@@ -3194,8 +3192,8 @@ export class PutAuthSettings extends Message<PutAuthSettings> {
   static readonly typeName = "gastrolog.v1.PutAuthSettings";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "token_duration", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
-    { no: 3, name: "refresh_token_duration", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
-    { no: 4, name: "password_policy", kind: "message", T: PutPasswordPolicySettings },
+    { no: 2, name: "refresh_token_duration", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 3, name: "password_policy", kind: "message", T: PutPasswordPolicySettings },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutAuthSettings {
@@ -3412,42 +3410,42 @@ export class PutLookupSettings extends Message<PutLookupSettings> {
   /**
    * replaces the full list when present
    *
-   * @generated from field: repeated gastrolog.v1.HTTPLookupEntry http_lookups = 4;
+   * @generated from field: repeated gastrolog.v1.HTTPLookupEntry http_lookups = 1;
    */
   httpLookups: HTTPLookupEntry[] = [];
 
   /**
    * replaces the full list when present
    *
-   * @generated from field: repeated gastrolog.v1.JSONFileLookupEntry json_file_lookups = 5;
+   * @generated from field: repeated gastrolog.v1.JSONFileLookupEntry json_file_lookups = 2;
    */
   jsonFileLookups: JSONFileLookupEntry[] = [];
 
   /**
    * replaces the full list when present
    *
-   * @generated from field: repeated gastrolog.v1.MMDBLookupEntry mmdb_lookups = 6;
+   * @generated from field: repeated gastrolog.v1.MMDBLookupEntry mmdb_lookups = 3;
    */
   mmdbLookups: MMDBLookupEntry[] = [];
 
   /**
    * replaces the full list when present
    *
-   * @generated from field: repeated gastrolog.v1.CSVLookupEntry csv_lookups = 7;
+   * @generated from field: repeated gastrolog.v1.CSVLookupEntry csv_lookups = 4;
    */
   csvLookups: CSVLookupEntry[] = [];
 
   /**
    * replaces the full list when present
    *
-   * @generated from field: repeated gastrolog.v1.StaticLookupEntry static_lookups = 8;
+   * @generated from field: repeated gastrolog.v1.StaticLookupEntry static_lookups = 5;
    */
   staticLookups: StaticLookupEntry[] = [];
 
   /**
    * replaces the full list when present
    *
-   * @generated from field: repeated gastrolog.v1.YAMLFileLookupEntry yaml_file_lookups = 9;
+   * @generated from field: repeated gastrolog.v1.YAMLFileLookupEntry yaml_file_lookups = 6;
    */
   yamlFileLookups: YAMLFileLookupEntry[] = [];
 
@@ -3459,12 +3457,12 @@ export class PutLookupSettings extends Message<PutLookupSettings> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutLookupSettings";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 4, name: "http_lookups", kind: "message", T: HTTPLookupEntry, repeated: true },
-    { no: 5, name: "json_file_lookups", kind: "message", T: JSONFileLookupEntry, repeated: true },
-    { no: 6, name: "mmdb_lookups", kind: "message", T: MMDBLookupEntry, repeated: true },
-    { no: 7, name: "csv_lookups", kind: "message", T: CSVLookupEntry, repeated: true },
-    { no: 8, name: "static_lookups", kind: "message", T: StaticLookupEntry, repeated: true },
-    { no: 9, name: "yaml_file_lookups", kind: "message", T: YAMLFileLookupEntry, repeated: true },
+    { no: 1, name: "http_lookups", kind: "message", T: HTTPLookupEntry, repeated: true },
+    { no: 2, name: "json_file_lookups", kind: "message", T: JSONFileLookupEntry, repeated: true },
+    { no: 3, name: "mmdb_lookups", kind: "message", T: MMDBLookupEntry, repeated: true },
+    { no: 4, name: "csv_lookups", kind: "message", T: CSVLookupEntry, repeated: true },
+    { no: 5, name: "static_lookups", kind: "message", T: StaticLookupEntry, repeated: true },
+    { no: 6, name: "yaml_file_lookups", kind: "message", T: YAMLFileLookupEntry, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutLookupSettings {
@@ -5468,68 +5466,58 @@ export class TierConfig extends Message<TierConfig> {
   cloudServiceId = new Uint8Array(0);
 
   /**
-   * @generated from field: uint32 active_chunk_class = 9;
-   */
-  activeChunkClass = 0;
-
-  /**
-   * @generated from field: uint32 cache_class = 10;
-   */
-  cacheClass = 0;
-
-  /**
    * desired RF (1 = no replication, default)
    *
-   * @generated from field: uint32 replication_factor = 12;
+   * @generated from field: uint32 replication_factor = 9;
    */
   replicationFactor = 0;
 
   /**
    * direct path for JSONL sinks
    *
-   * @generated from field: string path = 14;
+   * @generated from field: string path = 10;
    */
   path = "";
 
   /**
    * system-managed: file storage assignments by placement manager
    *
-   * @generated from field: repeated gastrolog.v1.TierPlacement placements = 15;
+   * @generated from field: repeated gastrolog.v1.TierPlacement placements = 11;
    */
   placements: TierPlacement[] = [];
 
   /**
    * owning vault — exactly one vault per tier
    *
-   * @generated from field: bytes vault_id = 16;
+   * @generated from field: bytes vault_id = 12;
    */
   vaultId = new Uint8Array(0);
 
   /**
    * 0-based order within the vault's tier chain
    *
-   * @generated from field: uint32 position = 17;
+   * @generated from field: uint32 position = 13;
    */
   position = 0;
 
   /**
    * "lru" (default) or "ttl"
    *
-   * @generated from field: string cache_eviction = 18;
+   * @generated from field: string cache_eviction = 14;
    */
   cacheEviction = "";
 
   /**
    * max cache size (e.g. "1GB", "500MB"; default: "1GiB")
    *
-   * @generated from field: string cache_budget = 19;
+   * @generated from field: string cache_budget = 15;
    */
   cacheBudget = "";
 
   /**
    * eviction TTL duration (e.g. "1h", "7d"); only for ttl mode
    *
-   * @generated from field: string cache_ttl = 20;
+   * @generated from field: string cache_ttl = 16;
    */
   cacheTtl = "";
 
@@ -5549,16 +5537,14 @@ export class TierConfig extends Message<TierConfig> {
     { no: 6, name: "memory_budget_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 7, name: "storage_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 8, name: "cloud_service_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 9, name: "active_chunk_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-    { no: 10, name: "cache_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-    { no: 12, name: "replication_factor", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-    { no: 14, name: "path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 15, name: "placements", kind: "message", T: TierPlacement, repeated: true },
-    { no: 16, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 17, name: "position", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-    { no: 18, name: "cache_eviction", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 19, name: "cache_budget", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 20, name: "cache_ttl", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 9, name: "replication_factor", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 10, name: "path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 11, name: "placements", kind: "message", T: TierPlacement, repeated: true },
+    { no: 12, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 13, name: "position", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 14, name: "cache_eviction", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 15, name: "cache_budget", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 16, name: "cache_ttl", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TierConfig {
@@ -7185,7 +7171,7 @@ export class DeleteTierRequest extends Message<DeleteTierRequest> {
   /**
    * When true, drain chunks to the next tier before deleting.
    *
-   * @generated from field: bool drain = 3;
+   * @generated from field: bool drain = 2;
    */
   drain = false;
 
@@ -7198,7 +7184,7 @@ export class DeleteTierRequest extends Message<DeleteTierRequest> {
   static readonly typeName = "gastrolog.v1.DeleteTierRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 3, name: "drain", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 2, name: "drain", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteTierRequest {

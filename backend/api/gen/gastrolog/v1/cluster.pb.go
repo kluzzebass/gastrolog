@@ -3919,10 +3919,10 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x0ebytes_ingested\x18\x03 \x01(\x04R\rbytesIngested\x12\x16\n" +
 	"\x06errors\x18\x04 \x01(\x04R\x06errors\x12\x18\n" +
 	"\arunning\x18\x05 \x01(\bR\arunning\x12\x12\n" +
-	"\x04name\x18\x06 \x01(\tR\x04name\"t\n" +
+	"\x04name\x18\x06 \x01(\tR\x04name\"h\n" +
 	"\x15ForwardRecordsRequest\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x124\n" +
-	"\arecords\x18\x02 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecordsJ\x04\b\x03\x10\x04J\x04\b\x04\x10\x05\"A\n" +
+	"\arecords\x18\x02 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\"A\n" +
 	"\x16ForwardRecordsResponse\x12'\n" +
 	"\x0frecords_written\x18\x01 \x01(\x03R\x0erecordsWritten\"N\n" +
 	"\x17ForwardTierApplyRequest\x12\x19\n" +
@@ -4043,11 +4043,11 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\tvault_ids\x18\x01 \x03(\fR\bvaultIds\x12\x14\n" +
 	"\x05query\x18\x02 \x01(\tR\x05query\"M\n" +
 	"\x15ForwardFollowResponse\x124\n" +
-	"\arecords\x18\x01 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\"\x83\x01\n" +
+	"\arecords\x18\x01 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\"}\n" +
 	"\x13ImportRecordMessage\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x122\n" +
 	"\x06record\x18\x02 \x01(\v2\x1a.gastrolog.v1.ExportRecordR\x06record\x12\x17\n" +
-	"\atier_id\x18\x03 \x01(\fR\x06tierIdJ\x04\b\x04\x10\x05\"1\n" +
+	"\atier_id\x18\x03 \x01(\fR\x06tierId\"1\n" +
 	"\x16PullManagedFileRequest\x12\x17\n" +
 	"\afile_id\x18\x01 \x01(\fR\x06fileId\"V\n" +
 	"\x14PullManagedFileChunk\x12\x12\n" +

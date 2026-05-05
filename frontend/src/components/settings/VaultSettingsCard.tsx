@@ -36,6 +36,7 @@ import {
   tierTypeLabel,
   parseMemoryBudget,
   isTierComplete,
+  isCloudBacked,
   type TierEntry,
   type TierTypeLabel,
   retentionActionForPosition,
@@ -66,21 +67,19 @@ function buildNewTierConfig(
 ): TierConfig {
   // TierConfig fields use Uint8Array<ArrayBuffer>; proto bytes may be ArrayBufferLike.
   const normalizedVaultId = new Uint8Array(vaultId);
+  // Cloud-backed-ness is derived from cloudServiceId presence on a file
+  // tier. Storage class governs placement either way.
+  const cloudBacked = isCloudBacked(newTier);
   return new TierConfig({
     name: newTier.type,
     type: tierTypeEnum(newTier.type),
     vaultId: normalizedVaultId,
     position,
     storageClass: newTier.type === "file" ? parseInt(newTier.storageClass, 10) || 0 : 0,
-    cloudServiceId:
-      newTier.type === "cloud" && newTier.cloudServiceId
-        ? decode(newTier.cloudServiceId)
-        : new Uint8Array(0),
-    activeChunkClass: newTier.type === "cloud" ? parseInt(newTier.activeChunkClass, 10) || 0 : 0,
-    cacheClass: newTier.type === "cloud" ? parseInt(newTier.cacheClass, 10) || 0 : 0,
-    cacheEviction: newTier.type === "cloud" ? (newTier.cacheEviction || "lru") : "",
-    cacheBudget: newTier.type === "cloud" ? (newTier.cacheBudget || "") : "",
-    cacheTtl: newTier.type === "cloud" ? (newTier.cacheTTL || "") : "",
+    cloudServiceId: cloudBacked ? decode(newTier.cloudServiceId) : new Uint8Array(0),
+    cacheEviction: cloudBacked ? (newTier.cacheEviction || "lru") : "",
+    cacheBudget: cloudBacked ? (newTier.cacheBudget || "") : "",
+    cacheTtl: cloudBacked ? (newTier.cacheTTL || "") : "",
     memoryBudgetBytes: newTier.type === "memory" ? parseMemoryBudget(newTier.memoryBudget) : protoInt64.zero,
     rotationPolicyId: newTier.rotationPolicyId ? decode(newTier.rotationPolicyId) : new Uint8Array(0),
     retentionRules: newTier.retentionPolicyId
@@ -106,8 +105,7 @@ function maybeUpdatedTier(
     retentionPolicyId: string;
     replicationFactor: string;
     storageClass: string;
-    activeChunkClass: string;
-    cacheClass: string;
+    cloudServiceId: string;
     cacheEviction: string;
     cacheBudget: string;
     cacheTTL: string;
@@ -119,16 +117,15 @@ function maybeUpdatedTier(
     (tier.retentionRules[0] ? encode(tier.retentionRules[0].retentionPolicyId) : "");
   const rfStr = edit.replicationFactor ?? String(tier.replicationFactor || 1);
   const scStr = edit.storageClass ?? String(tier.storageClass || 0);
-  const accStr = edit.activeChunkClass ?? String(tier.activeChunkClass || 0);
-  const ccStr = edit.cacheClass ?? String(tier.cacheClass || 0);
+  const csIdStr = edit.cloudServiceId ?? (tier.cloudServiceId.length > 0 ? encode(tier.cloudServiceId) : "");
   const ceStr = edit.cacheEviction ?? (tier.cacheEviction || "lru");
   const cbStr = edit.cacheBudget ?? (tier.cacheBudget || "");
   const ctStr = edit.cacheTTL ?? (tier.cacheTtl || "");
 
   const rf = parseInt(rfStr, 10) || 1;
   const sc = parseInt(scStr, 10) || 0;
-  const acc = parseInt(accStr, 10) || 0;
-  const cc = parseInt(ccStr, 10) || 0;
+  const csIdBytes = csIdStr ? decode(csIdStr) : new Uint8Array(0);
+  const csIdChanged = encode(tier.cloudServiceId) !== encode(csIdBytes);
 
   const expectedAction = retentionActionForPosition(tierIndex, tierCount);
   const currentAction = tier.retentionRules[0]?.action;
@@ -140,8 +137,7 @@ function maybeUpdatedTier(
     (!!retPolicyId && currentAction !== expectedAction) ||
     rf !== (tier.replicationFactor || 1) ||
     sc !== (tier.storageClass || 0) ||
-    acc !== (tier.activeChunkClass || 0) ||
-    cc !== (tier.cacheClass || 0) ||
+    csIdChanged ||
     ceStr !== (tier.cacheEviction || "lru") ||
     cbStr !== (tier.cacheBudget || "") ||
     ctStr !== (tier.cacheTtl || "") ||
@@ -152,12 +148,18 @@ function maybeUpdatedTier(
   const updated = tier.clone();
   updated.rotationPolicyId = rpId ? decode(rpId) : new Uint8Array(0);
   updated.replicationFactor = rf;
+  updated.cloudServiceId = csIdBytes;
   updated.storageClass = sc;
-  updated.activeChunkClass = acc;
-  updated.cacheClass = cc;
-  updated.cacheEviction = ceStr;
-  updated.cacheBudget = cbStr || "";
-  updated.cacheTtl = ctStr;
+  // Cache tuning fields only meaningful on cloud-backed tiers.
+  if (csIdBytes.length > 0) {
+    updated.cacheEviction = ceStr;
+    updated.cacheBudget = cbStr || "";
+    updated.cacheTtl = ctStr;
+  } else {
+    updated.cacheEviction = "";
+    updated.cacheBudget = "";
+    updated.cacheTtl = "";
+  }
   updated.vaultId = new Uint8Array(vaultId);
   updated.position = tierIndex;
   updated.retentionRules = retPolicyId
@@ -191,12 +193,12 @@ export function VaultSettingsCard({
     }
   }
   const totalNodes = nodeConfigs.length || 1;
-  const maxRFForTier = (t: { type: TierType; storageClass: number; activeChunkClass: number }) => {
+  const maxRFForTier = (t: { type: TierType; storageClass: number }) => {
     if (t.type === TierType.MEMORY) return totalNodes;
     if (t.type === TierType.JSONL) return 1;
-    const sc = t.type === TierType.CLOUD ? t.activeChunkClass : t.storageClass;
-    if (sc === 0) return 1; // no class selected yet
-    return classStorageCount.get(sc) ?? 1;
+    // Single storage class for all file tiers (local-only and cloud-backed).
+    if (t.storageClass === 0) return 1; // no class selected yet
+    return classStorageCount.get(t.storageClass) ?? 1;
   };
   const c = useThemeClass(dark);
   const putVault = usePutVault();
@@ -233,8 +235,7 @@ export function VaultSettingsCard({
     retentionPolicyId: string;
     replicationFactor: string;
     storageClass: string;
-    activeChunkClass: string;
-    cacheClass: string;
+    cloudServiceId: string;
     cacheEviction: string;
     cacheBudget: string;
     cacheTTL: string;
@@ -245,8 +246,7 @@ export function VaultSettingsCard({
     retentionPolicyId: "",
     replicationFactor: "1",
     storageClass: "0",
-    activeChunkClass: "0",
-    cacheClass: "0",
+    cloudServiceId: "",
     cacheEviction: "lru",
     cacheBudget: "",
     cacheTTL: "",
@@ -273,8 +273,7 @@ export function VaultSettingsCard({
         retentionPolicyId: t.retentionRules[0] ? encode(t.retentionRules[0].retentionPolicyId) : "",
         replicationFactor: String(t.replicationFactor || 1),
         storageClass: String(t.storageClass || 0),
-        activeChunkClass: String(t.activeChunkClass || 0),
-        cacheClass: String(t.cacheClass || 0),
+        cloudServiceId: t.cloudServiceId.length > 0 ? encode(t.cloudServiceId) : "",
         cacheEviction: t.cacheEviction || "lru",
         cacheBudget: t.cacheBudget || "",
         cacheTTL: t.cacheTtl || "",
@@ -710,9 +709,9 @@ export function VaultSettingsCard({
                       {tier.type === TierType.MEMORY && tier.memoryBudgetBytes > 0 && (
                         <span className="font-mono">{formatBytes(tier.memoryBudgetBytes)}</span>
                       )}
-                      {tier.type === TierType.CLOUD && csName && <span>{csName}</span>}
-                      {tier.type === TierType.CLOUD && tier.activeChunkClass > 0 && (
-                        <span className="font-mono">{`chunk class ${String(tier.activeChunkClass)}`}</span>
+                      {/* Cloud-backed file tier: cloud service name + ☁ icon. */}
+                      {tier.type === TierType.FILE && tier.cloudServiceId.length > 0 && csName && (
+                        <span title="Cloud-backed">{`☁ ${csName}`}</span>
                       )}
                       {tier.type !== TierType.JSONL && (
                         <span>{`RF=${String(tier.replicationFactor || 1)}`}</span>
@@ -770,6 +769,34 @@ export function VaultSettingsCard({
                           </FormField>
                         </>
                       )}
+                      {/* Cloud Storage selector — read-only for existing
+                          tiers. Cloud-binding is part of the tier shape, not
+                          runtime tuning: changing it would either orphan
+                          cloud blobs (cloud→local) or trigger an implicit
+                          mass-upload (local→cloud). To migrate, create a
+                          new tier and route data via retention rules.
+                          Backend rejects cloud_service_id changes on
+                          existing tiers (gastrolog-4k5mg). */}
+                      {tier.type === TierType.FILE && (
+                        <FormField
+                          label="Cloud Storage"
+                          dark={dark}
+                          description="Cloud binding is fixed at tier creation. To change it, create a new tier and migrate data via retention rules."
+                        >
+                          <SelectInput
+                            value={tier.cloudServiceId.length > 0 ? encode(tier.cloudServiceId) : ""}
+                            onChange={() => {/* read-only on existing tiers */}}
+                            disabled
+                            options={[
+                              { value: "", label: "Local-only" },
+                              ...cloudServiceOptions,
+                            ]}
+                            dark={dark}
+                          />
+                        </FormField>
+                      )}
+                      {/* Storage class — single field for both local-only
+                          and cloud-backed file tiers. */}
                       {tier.type === TierType.FILE && storageClassOptions.length > 0 && (
                         <FormField label="Storage Class" dark={dark}>
                           <SelectInput
@@ -780,27 +807,10 @@ export function VaultSettingsCard({
                           />
                         </FormField>
                       )}
-                      {tier.type === TierType.CLOUD && storageClassOptions.length > 0 && (
-                        <div className="grid grid-cols-2 gap-2">
-                          <FormField label="Active Chunk Class" dark={dark}>
-                            <SelectInput
-                              value={edit.tierEdits[encode(tier.id)]?.activeChunkClass ?? String(tier.activeChunkClass || 0)}
-                              onChange={(v) => setTierField(encode(tier.id), "activeChunkClass", v)}
-                              options={[{ value: "0", label: "None" }, ...storageClassOptions]}
-                              dark={dark}
-                            />
-                          </FormField>
-                          <FormField label="Cache Class" dark={dark}>
-                            <SelectInput
-                              value={edit.tierEdits[encode(tier.id)]?.cacheClass ?? String(tier.cacheClass || 0)}
-                              onChange={(v) => setTierField(encode(tier.id), "cacheClass", v)}
-                              options={[{ value: "0", label: "None" }, ...storageClassOptions]}
-                              dark={dark}
-                            />
-                          </FormField>
-                        </div>
-                      )}
-                      {tier.type === TierType.CLOUD && parseInt(edit.tierEdits[encode(tier.id)]?.cacheClass ?? String(tier.cacheClass || 0), 10) > 0 && (
+                      {/* Cache eviction tuning — only meaningful on
+                          cloud-backed tiers (local-only tiers don't have
+                          a cache to evict). */}
+                      {tier.type === TierType.FILE && tier.cloudServiceId.length > 0 && (
                         <>
                           <FormField label="Cache Eviction" dark={dark}>
                             <SelectInput
@@ -847,7 +857,6 @@ export function VaultSettingsCard({
                             max={maxRFForTier({
                               type: tier.type,
                               storageClass: parseInt(edit.tierEdits[encode(tier.id)]?.storageClass ?? String(tier.storageClass || 0), 10) || 0,
-                              activeChunkClass: parseInt(edit.tierEdits[encode(tier.id)]?.activeChunkClass ?? String(tier.activeChunkClass || 0), 10) || 0,
                             })}
                           />
                         </FormField>
@@ -872,7 +881,6 @@ export function VaultSettingsCard({
               maxRF={maxRFForTier({
                 type: tierTypeEnum(newTier.type),
                 storageClass: parseInt(newTier.storageClass, 10) || 0,
-                activeChunkClass: parseInt(newTier.activeChunkClass, 10) || 0,
               })}
               onUpdate={(patch) => setNewTier((t) => t ? { ...t, ...patch } : t)}
               onRemove={() => setNewTier(null)}
@@ -884,7 +892,6 @@ export function VaultSettingsCard({
                 items={[
                   { value: "memory", label: "Memory" },
                   { value: "file", label: "File" },
-                  { value: "cloud", label: "Cloud" },
                   { value: "jsonl", label: "JSONL" },
                 ]}
                 onSelect={(v) => setNewTier(emptyTierEntry(v as TierTypeLabel))}

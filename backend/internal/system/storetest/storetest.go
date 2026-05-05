@@ -1716,8 +1716,6 @@ func testTiers(t *testing.T, newStore func(t *testing.T) system.Store) {
 			MemoryBudgetBytes: 256 * 1024 * 1024,
 			StorageClass:      1,
 			CloudServiceID:    &csID,
-			ActiveChunkClass:  2,
-			CacheClass:        3,
 		}
 		if err := s.PutTier(ctx, tier); err != nil {
 			t.Fatalf("Put: %v", err)
@@ -1747,12 +1745,6 @@ func testTiers(t *testing.T, newStore func(t *testing.T) system.Store) {
 		}
 		if got.CloudServiceID == nil || *got.CloudServiceID != csID {
 			t.Errorf("CloudServiceID: expected %s, got %v", csID, got.CloudServiceID)
-		}
-		if got.ActiveChunkClass != 2 {
-			t.Errorf("ActiveChunkClass: expected 2, got %d", got.ActiveChunkClass)
-		}
-		if got.CacheClass != 3 {
-			t.Errorf("CacheClass: expected 3, got %d", got.CacheClass)
 		}
 	})
 

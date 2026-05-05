@@ -1418,3 +1418,95 @@ func TestDeleteLookupIdempotentSecondCallFails(t *testing.T) {
 		t.Fatalf("expected NotFound on second delete, got %v", connect.CodeOf(err))
 	}
 }
+
+// TestPutTierRejectsCloudServiceIDChange pins the tier-shape immutability
+// rule: cloud_service_id is fixed at tier creation. Mutating it would
+// either orphan cloud blobs (cloud→local) or trigger an implicit
+// mass-upload (local→cloud); neither is safe to do silently. To migrate,
+// users must create a new tier and route data via retention rules. See
+// gastrolog-4k5mg.
+func TestPutTierRejectsCloudServiceIDChange(t *testing.T) {
+	client, cfgStore, _ := newConfigTestSetup(t)
+	ctx := context.Background()
+
+	vaultID := glid.New()
+	if err := cfgStore.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v", Enabled: true}); err != nil {
+		t.Fatalf("PutVault: %v", err)
+	}
+
+	// Create a local-only file tier first.
+	tierID := glid.New()
+	if _, err := client.PutTier(ctx, connect.NewRequest(&gastrologv1.PutTierRequest{
+		Config: &gastrologv1.TierConfig{
+			Id:                tierID.ToProto(),
+			Name:              "tier",
+			Type:              gastrologv1.TierType_TIER_TYPE_FILE,
+			VaultId:           vaultID.ToProto(),
+			Position:          0,
+			StorageClass:      1,
+			ReplicationFactor: 1,
+		},
+	})); err != nil {
+		t.Fatalf("PutTier (initial local-only): %v", err)
+	}
+
+	// Attempt to flip the same tier to cloud-backed by setting
+	// cloud_service_id. Must reject — even though the cloud service may
+	// be valid, the binding cannot be added in-place.
+	csID := glid.New()
+	_, err := client.PutTier(ctx, connect.NewRequest(&gastrologv1.PutTierRequest{
+		Config: &gastrologv1.TierConfig{
+			Id:                tierID.ToProto(),
+			Name:              "tier",
+			Type:              gastrologv1.TierType_TIER_TYPE_FILE,
+			VaultId:           vaultID.ToProto(),
+			Position:          0,
+			CloudServiceId:    csID.ToProto(),
+			StorageClass:      1,
+			ReplicationFactor: 1,
+		},
+	}))
+	if err == nil {
+		t.Fatal("expected PutTier to reject cloud_service_id change on existing tier")
+	}
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Fatalf("expected FailedPrecondition, got %v: %v", connect.CodeOf(err), err)
+	}
+}
+
+// TestPutTierAcceptsUnchangedCloudServiceID verifies the immutability
+// guard doesn't fire on no-op updates: re-putting a tier with the same
+// (or no) cloud_service_id must succeed, so users can edit other tier
+// fields without triggering false positives.
+func TestPutTierAcceptsUnchangedCloudServiceID(t *testing.T) {
+	client, cfgStore, _ := newConfigTestSetup(t)
+	ctx := context.Background()
+
+	vaultID := glid.New()
+	if err := cfgStore.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v", Enabled: true}); err != nil {
+		t.Fatalf("PutVault: %v", err)
+	}
+
+	tierID := glid.New()
+	mk := func(name string) *gastrologv1.PutTierRequest {
+		return &gastrologv1.PutTierRequest{
+			Config: &gastrologv1.TierConfig{
+				Id:                tierID.ToProto(),
+				Name:              name,
+				Type:              gastrologv1.TierType_TIER_TYPE_FILE,
+				VaultId:           vaultID.ToProto(),
+				Position:          0,
+				StorageClass:      1,
+				ReplicationFactor: 1,
+			},
+		}
+	}
+	if _, err := client.PutTier(ctx, connect.NewRequest(mk("first"))); err != nil {
+		t.Fatalf("PutTier (initial): %v", err)
+	}
+	// Re-put with a different name but unchanged cloud_service_id (still
+	// empty). Must succeed.
+	if _, err := client.PutTier(ctx, connect.NewRequest(mk("renamed"))); err != nil {
+		t.Fatalf("PutTier (rename, no cloud_service_id change): %v", err)
+	}
+}

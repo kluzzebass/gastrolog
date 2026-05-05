@@ -24,8 +24,8 @@ const (
 
 type SearchRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Query         *Query                 `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`
-	ResumeToken   []byte                 `protobuf:"bytes,3,opt,name=resume_token,json=resumeToken,proto3" json:"resume_token,omitempty"` // Opaque token for pagination
+	Query         *Query                 `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
+	ResumeToken   []byte                 `protobuf:"bytes,2,opt,name=resume_token,json=resumeToken,proto3" json:"resume_token,omitempty"` // Opaque token for pagination
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -369,7 +369,7 @@ func (x *TableRow) GetValues() []string {
 
 type FollowRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Query         *Query                 `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`
+	Query         *Query                 `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -457,7 +457,7 @@ func (x *FollowResponse) GetRecords() []*Record {
 
 type ExplainRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Query         *Query                 `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`
+	Query         *Query                 `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1001,17 +1001,17 @@ func (x *RecordRef) GetVaultId() []byte {
 // The API node routes each token to wherever the vault lives.
 type ResumeToken struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
-	VaultTokens map[string][]byte      `protobuf:"bytes,2,rep,name=vault_tokens,json=vaultTokens,proto3" json:"vault_tokens,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	VaultTokens map[string][]byte      `protobuf:"bytes,1,rep,name=vault_tokens,json=vaultTokens,proto3" json:"vault_tokens,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Frozen time bounds from the first page — prevents "last-5m" from
 	// shifting between pages.
-	FrozenStart *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=frozen_start,json=frozenStart,proto3" json:"frozen_start,omitempty"`
-	FrozenEnd   *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=frozen_end,json=frozenEnd,proto3" json:"frozen_end,omitempty"`
+	FrozenStart *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=frozen_start,json=frozenStart,proto3" json:"frozen_start,omitempty"`
+	FrozenEnd   *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=frozen_end,json=frozenEnd,proto3" json:"frozen_end,omitempty"`
 	// Highwater TS from the last emitted record. Acts as an exclusive
 	// boundary on the next page (reverse: upper bound; forward: lower
 	// bound) so pagination survives mid-scroll chunk lifecycle (seal,
 	// transition, retention) without re-emitting already-seen records,
 	// even when per-chunk positions become stale and unusable.
-	HighwaterTs   *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=highwater_ts,json=highwaterTs,proto3" json:"highwater_ts,omitempty"`
+	HighwaterTs   *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=highwater_ts,json=highwaterTs,proto3" json:"highwater_ts,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2347,10 +2347,10 @@ var File_gastrolog_v1_query_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\n" +
-	"\x18gastrolog/v1/query.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"j\n" +
+	"\x18gastrolog/v1/query.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"]\n" +
 	"\rSearchRequest\x12)\n" +
-	"\x05query\x18\x02 \x01(\v2\x13.gastrolog.v1.QueryR\x05query\x12!\n" +
-	"\fresume_token\x18\x03 \x01(\fR\vresumeTokenJ\x04\b\x01\x10\x02R\x05store\"\xce\x02\n" +
+	"\x05query\x18\x01 \x01(\v2\x13.gastrolog.v1.QueryR\x05query\x12!\n" +
+	"\fresume_token\x18\x02 \x01(\fR\vresumeToken\"\xce\x02\n" +
 	"\x0eSearchResponse\x12.\n" +
 	"\arecords\x18\x01 \x03(\v2\x14.gastrolog.v1.RecordR\arecords\x12!\n" +
 	"\fresume_token\x18\x02 \x01(\fR\vresumeToken\x12\x19\n" +
@@ -2376,13 +2376,13 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\vresult_type\x18\x04 \x01(\tR\n" +
 	"resultType\"\"\n" +
 	"\bTableRow\x12\x16\n" +
-	"\x06values\x18\x01 \x03(\tR\x06values\"G\n" +
+	"\x06values\x18\x01 \x03(\tR\x06values\":\n" +
 	"\rFollowRequest\x12)\n" +
-	"\x05query\x18\x02 \x01(\v2\x13.gastrolog.v1.QueryR\x05queryJ\x04\b\x01\x10\x02R\x05store\"@\n" +
+	"\x05query\x18\x01 \x01(\v2\x13.gastrolog.v1.QueryR\x05query\"@\n" +
 	"\x0eFollowResponse\x12.\n" +
-	"\arecords\x18\x01 \x03(\v2\x14.gastrolog.v1.RecordR\arecords\"H\n" +
+	"\arecords\x18\x01 \x03(\v2\x14.gastrolog.v1.RecordR\arecords\";\n" +
 	"\x0eExplainRequest\x12)\n" +
-	"\x05query\x18\x02 \x01(\v2\x13.gastrolog.v1.QueryR\x05queryJ\x04\b\x01\x10\x02R\x05store\"\xe4\x02\n" +
+	"\x05query\x18\x01 \x01(\v2\x13.gastrolog.v1.QueryR\x05query\"\xe4\x02\n" +
 	"\x0fExplainResponse\x12/\n" +
 	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkPlanR\x06chunks\x12\x1c\n" +
 	"\tdirection\x18\x02 \x01(\tR\tdirection\x12!\n" +
@@ -2433,16 +2433,16 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\tRecordRef\x12\x19\n" +
 	"\bchunk_id\x18\x01 \x01(\fR\achunkId\x12\x10\n" +
 	"\x03pos\x18\x02 \x01(\x04R\x03pos\x12\x19\n" +
-	"\bvault_id\x18\x03 \x01(\fR\avaultId\"\xdb\x02\n" +
+	"\bvault_id\x18\x03 \x01(\fR\avaultId\"\xd5\x02\n" +
 	"\vResumeToken\x12M\n" +
-	"\fvault_tokens\x18\x02 \x03(\v2*.gastrolog.v1.ResumeToken.VaultTokensEntryR\vvaultTokens\x12=\n" +
-	"\ffrozen_start\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\vfrozenStart\x129\n" +
+	"\fvault_tokens\x18\x01 \x03(\v2*.gastrolog.v1.ResumeToken.VaultTokensEntryR\vvaultTokens\x12=\n" +
+	"\ffrozen_start\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vfrozenStart\x129\n" +
 	"\n" +
-	"frozen_end\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tfrozenEnd\x12=\n" +
-	"\fhighwater_ts\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\vhighwaterTs\x1a>\n" +
+	"frozen_end\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\tfrozenEnd\x12=\n" +
+	"\fhighwater_ts\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\vhighwaterTs\x1a>\n" +
 	"\x10VaultTokensEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\fR\x05value:\x028\x01J\x04\b\x01\x10\x02\"L\n" +
+	"\x05value\x18\x02 \x01(\fR\x05value:\x028\x01\"L\n" +
 	"\x0fInnerVaultToken\x129\n" +
 	"\tpositions\x18\x01 \x03(\v2\x1b.gastrolog.v1.VaultPositionR\tpositions\"\x9a\x01\n" +
 	"\rVaultPosition\x12\x19\n" +

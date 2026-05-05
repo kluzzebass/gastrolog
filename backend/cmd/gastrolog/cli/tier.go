@@ -122,10 +122,8 @@ func newTierCreateCmd() *cobra.Command {
 	cmd.Flags().Uint32("replication-factor", 1, "replication factor")
 	cmd.Flags().String("rotation-policy", "", "rotation policy name or ID")
 	cmd.Flags().String("retention-policy", "", "retention policy name or ID")
-	cmd.Flags().Uint32("storage-class", 1, "storage class for file/cloud tiers")
-	cmd.Flags().String("cloud-service", "", "cloud service name or ID (required for cloud tiers)")
-	cmd.Flags().Uint32("active-chunk-class", 0, "storage class for cloud tier active chunks")
-	cmd.Flags().Uint32("cache-class", 0, "storage class for cloud tier read cache")
+	cmd.Flags().Uint32("storage-class", 1, "storage class for file tiers (cloud-backed or not)")
+	cmd.Flags().String("cloud-service", "", "cloud service name or ID — sets cloud_service_id, making the tier cloud-backed")
 	cmd.Flags().String("cache-eviction", "lru", "cache eviction strategy: lru or ttl")
 	cmd.Flags().String("cache-budget", "", "max cache size (e.g. 1GB, 500MB, 1GiB)")
 	cmd.Flags().String("cache-ttl", "", "cache TTL duration for ttl eviction mode (e.g. 1h, 7d)")
@@ -148,12 +146,6 @@ func applyTierFlags(ctx context.Context, cmd *cobra.Command, client *server.Clie
 	}
 	if cmd.Flags().Changed("storage-class") {
 		cfg.StorageClass, _ = cmd.Flags().GetUint32("storage-class")
-	}
-	if cmd.Flags().Changed("active-chunk-class") {
-		cfg.ActiveChunkClass, _ = cmd.Flags().GetUint32("active-chunk-class")
-	}
-	if cmd.Flags().Changed("cache-class") {
-		cfg.CacheClass, _ = cmd.Flags().GetUint32("cache-class")
 	}
 	if cmd.Flags().Changed("cache-eviction") {
 		cfg.CacheEviction, _ = cmd.Flags().GetString("cache-eviction")
@@ -327,10 +319,10 @@ func parseTierType(s string) (v1.TierType, bool) {
 	switch s {
 	case "memory":
 		return v1.TierType_TIER_TYPE_MEMORY, true
-	case "file":
+	case "file", "cloud":
+		// "cloud" is accepted as an alias for "file" — a cloud-backed tier
+		// is a file tier with --cloud-service-id set. See gastrolog-4k5mg.
 		return v1.TierType_TIER_TYPE_FILE, true
-	case "cloud":
-		return v1.TierType_TIER_TYPE_CLOUD, true
 	case "jsonl":
 		return v1.TierType_TIER_TYPE_JSONL, true
 	default:
@@ -344,8 +336,6 @@ func tierTypeName(t v1.TierType) string {
 		return "memory"
 	case v1.TierType_TIER_TYPE_FILE:
 		return "file"
-	case v1.TierType_TIER_TYPE_CLOUD:
-		return "cloud"
 	case v1.TierType_TIER_TYPE_JSONL:
 		return "jsonl"
 	case v1.TierType_TIER_TYPE_UNSPECIFIED:
