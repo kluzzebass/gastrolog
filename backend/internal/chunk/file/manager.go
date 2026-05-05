@@ -126,6 +126,24 @@ type Config struct {
 	// share the leader's S3 bucket for reads without owning the blobs.
 	CloudReadOnly bool
 
+	// CacheEviction selects the warm-cache eviction policy: "lru" (default)
+	// or "ttl". The two are mutually exclusive — operators pick one mode,
+	// not both. Empty string is treated as "lru" so a tier with a budget
+	// but no explicit policy still gets eviction. See gastrolog-2idw8.
+	CacheEviction string
+
+	// CacheBudgetBytes is the soft cap on total bytes occupied by warm-cache
+	// copies of cloud-backed chunks (<chunkDir>/data.glcb). Zero disables
+	// budget enforcement. Used by both LRU mode (primary cap) and TTL
+	// mode (secondary cap applied after age-based eviction).
+	CacheBudgetBytes uint64
+
+	// CacheTTL is the maximum age (since last OpenCursor) of a warm-cache
+	// entry before it gets evicted. Only consulted in TTL mode; LRU mode
+	// ignores this field. Local-only sealed chunks are never affected —
+	// their data.glcb is authoritative.
+	CacheTTL time.Duration
+
 	// Announcer, when non-nil, is called after each metadata state change
 	// (create, seal, compress, upload, delete) for cluster-wide visibility.
 	Announcer chunk.MetadataAnnouncer
@@ -189,6 +207,15 @@ type Manager struct {
 	// → ErrChunkNotFound at the meta-lookup step in OpenCursor).
 	chunkLocksMu sync.Mutex
 	chunkLocks   map[chunk.ChunkID]*sync.RWMutex
+
+	// lastAccess records the most recent OpenCursor time for each
+	// cloud-backed chunk's local data.glcb cache. Used by EvictCacheLRU to
+	// pick the coldest entries when the cache exceeds its budget. In-memory
+	// only — never persisted; eviction signals don't outlive the process,
+	// per the chunk-redesign doc's "cache eviction signals are node-local,
+	// not FSM state" rule. See gastrolog-2idw8.
+	lastAccessMu sync.Mutex
+	lastAccess   map[chunk.ChunkID]time.Time
 
 	// cloudDegraded tracks whether the cloud store is currently unreachable.
 	// Set on any failed cloud operation (init, upload, download, list);
@@ -391,6 +418,7 @@ func NewManager(cfg Config) (*Manager, error) {
 		storageClasses: make(map[chunk.ChunkID]string),
 		zstdEnc:        zstdEnc,
 		chunkLocks:     make(map[chunk.ChunkID]*sync.RWMutex),
+		lastAccess:     make(map[chunk.ChunkID]time.Time),
 		logger:         logger,
 	}
 	if err := manager.loadExisting(); err != nil {
@@ -800,13 +828,21 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 		// surfaces ErrChunkArchived from the backing store.
 		if !archived && m.hasLocalGLCB(id) {
 			if cursor, err := m.openLocalGLCBCursor(id); err == nil {
+				m.touchLastAccess(id)
 				return cursor, nil
 			}
 		}
 		// Cloud-backed cursors don't touch local mmap regions; the
 		// per-chunk lifetime lock is unnecessary for them. Their lifecycle
 		// is handled by the cloud index's own concurrency primitives.
-		return m.openCloudCursor(id)
+		// downloadCloudBlobToChunkDir populates the warm cache as a
+		// side-effect; touch lastAccess once the cursor returns so the
+		// freshly-cached chunk doesn't immediately register as cold.
+		cursor, err := m.openCloudCursor(id)
+		if err == nil && m.hasLocalGLCB(id) {
+			m.touchLastAccess(id)
+		}
+		return cursor, err
 	}
 
 	// Prefer data.glcb when present. After PostSealProcess (post-seal
@@ -3076,6 +3112,231 @@ func (m *Manager) hasLocalGLCB(id chunk.ChunkID) bool {
 	return err == nil
 }
 
+// touchLastAccess records that the warm cache for this chunk was just hit
+// (or just populated). The lastAccess map is consulted by EvictCacheLRU to
+// pick the coldest entries when the cache exceeds its budget. Map is
+// in-memory only — never persisted; eviction signals don't outlive the
+// process. See gastrolog-2idw8.
+func (m *Manager) touchLastAccess(id chunk.ChunkID) {
+	m.lastAccessMu.Lock()
+	m.lastAccess[id] = m.cfg.Now()
+	m.lastAccessMu.Unlock()
+}
+
+// evictionRule decides per-candidate whether a warm-cache entry should be
+// evicted. Implementations are stateless given the candidate + the
+// running totalRemaining (the bytes still cached after prior evictions in
+// this sweep).
+//
+// EvictCache builds a list of rules and walks coldest-first; a candidate
+// is evicted when ANY rule returns true. This is the composition surface
+// for future restrictions: the base policy (LRU or TTL) contributes one
+// rule, and additional restrictions (storage-pressure, corrupt-blob,
+// pin-list, …) drop in alongside without touching the policy branches.
+// LRU and TTL remain mutually exclusive with each other; everything
+// outside that pair composes with whichever base policy was picked. See
+// gastrolog-2idw8.
+type evictionRule struct {
+	name        string
+	shouldEvict func(c cacheEntry, totalRemaining int64) bool
+}
+
+// EvictCacheLRU is the coldest-first-by-budget rule on its own. Kept as a
+// public surface so tests + future callers can pin down LRU semantics
+// without going through the policy dispatch in EvictCache.
+func (m *Manager) EvictCacheLRU(budgetBytes uint64) (int, int64) {
+	rule := lruRule(budgetBytes)
+	if rule == nil {
+		return 0, 0
+	}
+	return m.runEvictionSweep("LRU", []evictionRule{*rule})
+}
+
+// EvictCacheTTL is the older-than-cutoff rule on its own. Same role as
+// EvictCacheLRU.
+func (m *Manager) EvictCacheTTL(ttl time.Duration) (int, int64) {
+	rule := ttlRule(ttl, m.cfg.Now())
+	if rule == nil {
+		return 0, 0
+	}
+	return m.runEvictionSweep("TTL", []evictionRule{*rule})
+}
+
+// EvictCache assembles the rule set from the configured base policy plus
+// any orthogonal restrictions and runs one sweep over the candidates.
+// LRU and TTL are mutually exclusive choices for the BASE policy;
+// orthogonal restrictions (added to `restrictions` below as new ones
+// land) compose with whichever base mode is selected. Empty
+// CacheEviction defaults to "lru". Unknown policies log + no-op.
+func (m *Manager) EvictCache() (int, int64) {
+	policy := m.cfg.CacheEviction
+	if policy == "" {
+		policy = "lru"
+	}
+
+	var rules []evictionRule
+	switch policy {
+	case "lru":
+		// LRU mode ignores CacheTTL — recency is the only criterion the
+		// base policy cares about.
+		if r := lruRule(m.cfg.CacheBudgetBytes); r != nil {
+			rules = append(rules, *r)
+		}
+	case "ttl":
+		// TTL mode ignores CacheBudgetBytes — age is the only criterion.
+		if r := ttlRule(m.cfg.CacheTTL, m.cfg.Now()); r != nil {
+			rules = append(rules, *r)
+		}
+	default:
+		m.logger.Warn("cache eviction: unknown policy", "policy", policy)
+		return 0, 0
+	}
+
+	// Hook for orthogonal restrictions that compose with EITHER base mode.
+	// None today; future entries (e.g. nodeDiskPressureRule()) append here
+	// once and apply to both LRU and TTL sweeps. Nothing about LRU/TTL
+	// dispatch needs to change as restrictions accrue.
+	rules = append(rules, m.additionalEvictionRules()...)
+
+	if len(rules) == 0 {
+		return 0, 0
+	}
+	return m.runEvictionSweep(policy, rules)
+}
+
+// additionalEvictionRules returns rules that fire regardless of the base
+// LRU/TTL choice. Empty today — placeholder for storage-pressure, blob
+// integrity, pin-list, etc. as they're added.
+func (m *Manager) additionalEvictionRules() []evictionRule {
+	return nil
+}
+
+// lruRule produces the rule "evict while total cached bytes exceed
+// budgetBytes." Returns nil when budgetBytes is zero (operator hasn't
+// set one) so the rule list stays empty rather than carrying a
+// never-fires entry.
+func lruRule(budgetBytes uint64) *evictionRule {
+	if budgetBytes == 0 {
+		return nil
+	}
+	budget := int64(budgetBytes) //nolint:gosec // G115: round-trip
+	return &evictionRule{
+		name: "lru-budget",
+		shouldEvict: func(_ cacheEntry, totalRemaining int64) bool {
+			return totalRemaining > budget
+		},
+	}
+}
+
+// ttlRule produces the rule "evict any candidate whose lastAccess is
+// older than now-ttl." Returns nil for non-positive ttl.
+func ttlRule(ttl time.Duration, now time.Time) *evictionRule {
+	if ttl <= 0 {
+		return nil
+	}
+	cutoff := now.Add(-ttl)
+	return &evictionRule{
+		name: "ttl-age",
+		shouldEvict: func(c cacheEntry, _ int64) bool {
+			return !c.lastAccess.After(cutoff)
+		},
+	}
+}
+
+// runEvictionSweep walks candidates coldest-first and applies the rule
+// set to each. A candidate is evicted when ANY rule matches; the loop
+// continues until every candidate has been examined (rules that need
+// to stop early — e.g. LRU's budget cap — handle that themselves via
+// the totalRemaining argument).
+func (m *Manager) runEvictionSweep(label string, rules []evictionRule) (int, int64) {
+	candidates := m.cacheCandidates()
+	if len(candidates) == 0 {
+		return 0, 0
+	}
+
+	// Coldest-first: oldest lastAccess first. Zero/missing lastAccess
+	// (chunk seen on disk but never opened in this process) ranks as
+	// oldest possible.
+	slices.SortFunc(candidates, func(a, b cacheEntry) int {
+		return a.lastAccess.Compare(b.lastAccess)
+	})
+
+	var totalRemaining int64
+	for _, c := range candidates {
+		totalRemaining += c.size
+	}
+
+	var evicted int
+	var freed int64
+	for _, c := range candidates {
+		matched := ""
+		for _, r := range rules {
+			if r.shouldEvict(c, totalRemaining) {
+				matched = r.name
+				break
+			}
+		}
+		if matched == "" {
+			continue
+		}
+		if err := os.Remove(c.path); err != nil {
+			m.logger.Debug("cache eviction: remove failed", "chunk", c.id, "error", err)
+			continue
+		}
+		m.lastAccessMu.Lock()
+		delete(m.lastAccess, c.id)
+		m.lastAccessMu.Unlock()
+		totalRemaining -= c.size
+		freed += c.size
+		evicted++
+	}
+	if evicted > 0 {
+		m.logger.Info("cache eviction",
+			"policy", label, "evicted", evicted, "freed_bytes", freed)
+	}
+	return evicted, freed
+}
+
+// cacheEntry is one row in the eviction-candidate set: a chunk whose
+// data.glcb is local-but-not-authoritative (cloud-backed).
+type cacheEntry struct {
+	id         chunk.ChunkID
+	path       string
+	size       int64
+	lastAccess time.Time
+}
+
+// cacheCandidates walks the cloud index and returns one entry per
+// cloud-backed chunk whose <chunkDir>/data.glcb still exists locally.
+// Local-only sealed chunks are NOT eviction candidates — their data.glcb
+// is the authoritative copy and removing it would lose data.
+func (m *Manager) cacheCandidates() []cacheEntry {
+	if m.cloudIdx == nil {
+		return nil
+	}
+	var out []cacheEntry
+	m.cloudIdxMu.Lock()
+	_ = m.cloudIdx.ForEach(func(id chunk.ChunkID, _ *chunkMeta) bool {
+		path := filepath.Join(m.chunkDir(id), dataGLCBFileName)
+		info, err := os.Stat(path)
+		if err != nil {
+			return true
+		}
+		m.lastAccessMu.Lock()
+		la := m.lastAccess[id]
+		m.lastAccessMu.Unlock()
+		out = append(out, cacheEntry{
+			id:         id,
+			path:       path,
+			size:       info.Size(),
+			lastAccess: la,
+		})
+		return true
+	})
+	m.cloudIdxMu.Unlock()
+	return out
+}
+
 // downloadCloudBlobToChunkDir streams the cloud blob for a chunk into
 // <chunkDir>/data.glcb atomically and opens a local cursor. The chunk dir
 // becomes the warm cache, structurally identical to a freshly-sealed local
@@ -3764,6 +4025,12 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		return fmt.Errorf("remove local data files after cloud upload: %w", err)
 	}
 
+	// Treat the upload itself as an access for eviction purposes — without
+	// this the just-uploaded warm cache has zero lastAccess and the next
+	// TTL sweep would immediately evict a chunk no reader has had a chance
+	// to touch. See gastrolog-2idw8.
+	m.touchLastAccess(id)
+
 	// Move metadata from in-memory map to cloud B+ tree index.
 	// The chunk is now cloud-only — remove from Go heap.
 	m.mu.Lock()
@@ -3860,6 +4127,11 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 	if err := m.removeLocalDataFiles(id); err != nil {
 		return fmt.Errorf("remove local data files after cloud adopt: %w", err)
 	}
+
+	// Treat the adoption as an access — same rationale as uploadToCloud
+	// (gastrolog-2idw8): without this the warm cache has zero lastAccess
+	// and the next TTL sweep would immediately evict it.
+	m.touchLastAccess(id)
 
 	m.mu.Lock()
 	meta := m.metas[id]
