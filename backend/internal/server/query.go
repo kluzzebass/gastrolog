@@ -656,24 +656,20 @@ func (s *QueryServer) aggregateVaultBounds(vaults []glid.GLID) (time.Time, time.
 }
 
 // histogramFullyLocal returns true when this node is the leader of every
-// tier in every queried vault. When true, the histogram can be computed
-// entirely from local chunks without any cross-node fan-out. Follower
-// replicas are NOT sufficient: the active (un-sealed) chunk lives only on
-// the leader and is never replicated, so a follower-only view drops every
-// record currently in the active chunk and produces an empty right edge
-// on the histogram (last bars cut off at the last-sealed-chunk boundary
-// instead of running up to "now"). Falls back conservatively to false on
-// any config store error or when this node holds no leader tiers. See
-// gastrolog-2g334 (regression of the gastrolog-66b7x optimization).
+// queried vault. When true, the histogram can be computed entirely from
+// local chunks without any cross-node fan-out. Follower replicas are NOT
+// sufficient: the active (un-sealed) chunk lives only on the leader and
+// is never replicated, so a follower-only view drops every record currently
+// in the active chunk and produces an empty right edge on the histogram
+// (last bars cut off at the last-sealed-chunk boundary instead of running
+// up to "now"). Falls back conservatively to false on any config store
+// error or when this node holds no leader vaults. See gastrolog-2g334
+// (regression of the gastrolog-66b7x optimization).
 func (s *QueryServer) histogramFullyLocal(ctx context.Context, q query.Query) bool {
 	if s.cfgStore == nil {
 		return false
 	}
-	tiers, err := s.cfgStore.ListTiers(ctx)
-	if err != nil {
-		return false
-	}
-	localLeaders := s.orch.LocalLeaderTierIDs()
+	localLeaders := s.orch.LocalLeaderVaultIDs()
 	if len(localLeaders) == 0 {
 		return false
 	}
@@ -689,10 +685,8 @@ func (s *QueryServer) histogramFullyLocal(ctx context.Context, q query.Query) bo
 		}
 	}
 	for _, vid := range selectedVaults {
-		for _, tierID := range system.VaultTierIDs(tiers, vid) {
-			if !localLeaders[tierID] {
-				return false
-			}
+		if !localLeaders[vid] {
+			return false
 		}
 	}
 	return true

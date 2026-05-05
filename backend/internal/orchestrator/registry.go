@@ -141,6 +141,33 @@ func (o *Orchestrator) LocalLeaderTierIDs() map[glid.GLID]bool {
 	return ids
 }
 
+// LocalLeaderVaultIDs returns the set of vault IDs where this node is
+// the leader for at least one of the vault's tiers. Vault-keyed
+// equivalent of LocalLeaderTierIDs — search fan-out and remote-vault
+// resolution can use this directly without translating from tier IDs.
+//
+// During the vault refactor (gastrolog-257l7) this iterates the same
+// data as LocalLeaderTierIDs; once the 1:1 vault/tier model is enforced
+// and tiers go away, the inner loop collapses to "is leader" without
+// the per-tier walk.
+func (o *Orchestrator) LocalLeaderVaultIDs() map[glid.GLID]bool {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	ids := make(map[glid.GLID]bool)
+	for _, v := range o.vaults {
+		if err := vaultReplicationReadinessErr(v.ID, v); err != nil {
+			continue
+		}
+		for _, t := range v.Tiers {
+			if !t.IsFollower {
+				ids[v.ID] = true
+				break
+			}
+		}
+	}
+	return ids
+}
+
 // HasLocalQueryEngine returns true if the vault has at least one tier with
 // a query engine on this node (i.e., actual searchable data, not just a
 // routing entry). Used by search fan-out to decide local vs. remote.
