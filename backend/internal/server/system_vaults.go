@@ -9,6 +9,7 @@ import (
 	"connectrpc.com/connect"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/convert"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/system"
 	"gastrolog/internal/system/raftfsm"
@@ -225,14 +226,10 @@ func (s *SystemServer) ResumeVault(
 }
 
 // protoToVaultConfig converts a proto VaultConfig to a system.VaultConfig.
+// Delegates to convert.VaultConfigFromProto so the field mapping has one
+// source of truth (shared with the FSM command path).
 func protoToVaultConfig(p *apiv1.VaultConfig) (system.VaultConfig, error) {
-	id := glid.FromBytes(p.Id)
-	cfg := system.VaultConfig{
-		ID:      id,
-		Name:    p.Name,
-		Enabled: p.Enabled,
-	}
-	return cfg, nil
+	return convert.VaultConfigFromProto(p)
 }
 
 // CloudServiceTester validates connectivity for a cloud storage configuration.
