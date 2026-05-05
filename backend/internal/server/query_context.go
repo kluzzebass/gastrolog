@@ -206,7 +206,8 @@ func drainIterToProto(it iter.Seq2[chunk.Record, error]) []*apiv1.Record {
 // remoteNodeForVault returns the owning node ID if the vault is remote,
 // or "" if the vault is local or lookup fails.
 //
-// Uses tier-level NodeID (set by the placement manager) for node assignment.
+// Reads VaultConfig.Placements directly (mirrored from tier placements via
+// the FSM bridge — gastrolog-257l7).
 func (s *QueryServer) remoteNodeForVault(ctx context.Context, vaultID glid.GLID) string {
 	// If the vault is registered locally, it's not remote.
 	if slices.Contains(s.orch.ListVaults(), vaultID) {
@@ -221,32 +222,16 @@ func (s *QueryServer) remoteNodeForVault(ctx context.Context, vaultID glid.GLID)
 	if err != nil || vaultCfg == nil {
 		return ""
 	}
-
-	tiers, err := s.cfgStore.ListTiers(ctx)
-	if err != nil {
+	if len(vaultCfg.Placements) == 0 {
 		return ""
 	}
 	nscs, err := s.cfgStore.ListNodeStorageConfigs(ctx)
 	if err != nil {
 		return ""
 	}
-
-	tierMap := make(map[glid.GLID]*system.TierConfig, len(tiers))
-	for i := range tiers {
-		tierMap[tiers[i].ID] = &tiers[i]
+	leaderNodeID := system.LeaderNodeID(vaultCfg.Placements, nscs)
+	if leaderNodeID == "" || leaderNodeID == s.localNodeID {
+		return ""
 	}
-
-	// temporary: find the tier's leader node to determine the owning node (until tier election).
-	for _, tierID := range system.VaultTierIDs(tiers, vaultCfg.ID) {
-		tc := tierMap[tierID]
-		if tc == nil {
-			continue
-		}
-		placements, _ := s.cfgStore.GetTierPlacements(ctx, tc.ID)
-		leaderNodeID := system.LeaderNodeID(placements, nscs)
-		if leaderNodeID != "" && leaderNodeID != s.localNodeID {
-			return leaderNodeID
-		}
-	}
-	return ""
+	return leaderNodeID
 }
