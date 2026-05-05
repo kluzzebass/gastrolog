@@ -282,7 +282,13 @@ type configVaultOwner struct {
 	localNodeID string
 }
 
-// temporary: uses tier-level NodeID for node assignment until tier election.
+// ResolveVaultOwner returns the node ID of the vault leader, or "" when
+// the vault is owned locally / has no placement / cannot be resolved.
+//
+// Reads VaultConfig.Placements directly (mirrored from tier placements on
+// every SetTierPlacements via the FSM bridge — gastrolog-257l7). When the
+// tier list is removed in a later commit, this code path stays correct
+// because the placement data flows from the same source.
 func (c *configVaultOwner) ResolveVaultOwner(ctx context.Context, vaultID string) string {
 	if c.cfgStore == nil {
 		return ""
@@ -295,34 +301,18 @@ func (c *configVaultOwner) ResolveVaultOwner(ctx context.Context, vaultID string
 	if err != nil || vaultCfg == nil {
 		return ""
 	}
-
-	tiers, err := c.cfgStore.ListTiers(ctx)
-	if err != nil {
+	if len(vaultCfg.Placements) == 0 {
 		return ""
 	}
 	nscs, err := c.cfgStore.ListNodeStorageConfigs(ctx)
 	if err != nil {
 		return ""
 	}
-
-	tierMap := make(map[glid.GLID]*system.TierConfig, len(tiers))
-	for i := range tiers {
-		tierMap[tiers[i].ID] = &tiers[i]
+	leaderNodeID := system.LeaderNodeID(vaultCfg.Placements, nscs)
+	if leaderNodeID == "" || leaderNodeID == c.localNodeID {
+		return ""
 	}
-
-	// temporary: find the tier's leader node to determine the owning node (until tier election).
-	for _, tierID := range system.VaultTierIDs(tiers, vaultCfg.ID) {
-		tc := tierMap[tierID]
-		if tc == nil {
-			continue
-		}
-		placements, _ := c.cfgStore.GetTierPlacements(ctx, tc.ID)
-		leaderNodeID := system.LeaderNodeID(placements, nscs)
-		if leaderNodeID != "" && leaderNodeID != c.localNodeID {
-			return leaderNodeID
-		}
-	}
-	return ""
+	return leaderNodeID
 }
 
 // isLoopback returns true if host is a loopback address (localhost, 127.0.0.1, ::1).
