@@ -979,11 +979,42 @@ func copyRetentionPolicy(rp system.RetentionPolicyConfig) system.RetentionPolicy
 }
 
 func copyVaultConfig(st system.VaultConfig) system.VaultConfig {
-	return system.VaultConfig{
-		ID:      st.ID,
-		Name:    st.Name,
-		Enabled: st.Enabled,
+	cp := system.VaultConfig{
+		ID:                st.ID,
+		Name:              st.Name,
+		Enabled:           st.Enabled,
+		Type:              st.Type,
+		MemoryBudgetBytes: st.MemoryBudgetBytes,
+		StorageClass:      st.StorageClass,
+		ReplicationFactor: st.ReplicationFactor,
+		Path:              st.Path,
+		CacheEviction:     st.CacheEviction,
+		CacheBudget:       st.CacheBudget,
+		CacheTTL:          st.CacheTTL,
 	}
+	if st.RotationPolicyID != nil {
+		id := *st.RotationPolicyID
+		cp.RotationPolicyID = &id
+	}
+	if st.CloudServiceID != nil {
+		id := *st.CloudServiceID
+		cp.CloudServiceID = &id
+	}
+	if len(st.RetentionRules) > 0 {
+		cp.RetentionRules = make([]system.RetentionRule, len(st.RetentionRules))
+		for i, r := range st.RetentionRules {
+			cp.RetentionRules[i] = system.RetentionRule{
+				RetentionPolicyID: r.RetentionPolicyID,
+				Action:            r.Action,
+				EjectRouteIDs:     append([]glid.GLID(nil), r.EjectRouteIDs...),
+			}
+		}
+	}
+	if len(st.Placements) > 0 {
+		cp.Placements = make([]system.TierPlacement, len(st.Placements))
+		copy(cp.Placements, st.Placements)
+	}
+	return cp
 }
 
 func copyIngesterConfig(ing system.IngesterConfig) system.IngesterConfig {
