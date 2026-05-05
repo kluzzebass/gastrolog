@@ -573,7 +573,36 @@ func (f *FSM) applySetTierPlacements(ctx context.Context, pb *gastrologv1.SetTie
 	if err := f.store.SetTierPlacements(ctx, tierID, placements); err != nil {
 		return nil, err
 	}
+	// Vault refactor (gastrolog-257l7): mirror placements onto the owning
+	// vault's VaultConfig.Placements so consumers reading from VaultConfig
+	// see the same placement set as the tier-keyed map. Bridge until tiers
+	// are gone and placements are stored vault-keyed directly.
+	if err := f.refreshVaultPlacements(ctx, tierID, placements); err != nil {
+		return nil, err
+	}
 	return &Notification{Kind: NotifyTierPlacementsSet, ID: tierID}, nil
+}
+
+// refreshVaultPlacements writes the given placement set onto the
+// VaultConfig owning the given tier. Bridge during the vault refactor
+// (gastrolog-257l7).
+func (f *FSM) refreshVaultPlacements(ctx context.Context, tierID glid.GLID, placements []system.TierPlacement) error {
+	tier, err := f.store.GetTier(ctx, tierID)
+	if err != nil || tier == nil {
+		return nil //nolint:nilerr // tier might be transient; not worth failing the placement write
+	}
+	v, err := f.store.GetVault(ctx, tier.VaultID)
+	if err != nil || v == nil {
+		return nil //nolint:nilerr // vault not yet present; will pick up on PutVault
+	}
+	merged := *v
+	if len(placements) > 0 {
+		merged.Placements = make([]system.TierPlacement, len(placements))
+		copy(merged.Placements, placements)
+	} else {
+		merged.Placements = nil
+	}
+	return f.store.PutVault(ctx, merged)
 }
 
 func (f *FSM) applySetIngesterAlive(ctx context.Context, cmd *gastrologv1.SetIngesterAliveCommand) (*Notification, error) {
