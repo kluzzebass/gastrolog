@@ -24,6 +24,7 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/auth"
+	"gastrolog/internal/convert"
 	"gastrolog/internal/lookup"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
@@ -263,17 +264,9 @@ func (s *SystemServer) loadSystemVaults(ctx context.Context, resp *apiv1.GetSyst
 		return fmt.Errorf("list vaults: %w", err)
 	}
 	for _, vaultCfg := range cfgStores {
-		resp.Vaults = append(resp.Vaults, vaultConfigToProto(vaultCfg))
+		resp.Vaults = append(resp.Vaults, convert.VaultConfigToProto(vaultCfg))
 	}
 	return nil
-}
-
-func vaultConfigToProto(vaultCfg system.VaultConfig) *apiv1.VaultConfig {
-	return &apiv1.VaultConfig{
-		Id:      vaultCfg.ID.ToProto(),
-		Name:    vaultCfg.Name,
-		Enabled: vaultCfg.Enabled,
-	}
 }
 
 func (s *SystemServer) loadSystemIngesters(ctx context.Context, resp *apiv1.GetSystemResponse) error {
