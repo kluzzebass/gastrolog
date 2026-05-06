@@ -638,8 +638,8 @@ func TestCompoundDeleteRetentionPolicy(t *testing.T) {
 	applyCmd(t, fsm, command.NewPutTier(system.TierConfig{
 		ID: tierID, Name: "tier", Type: system.VaultTypeMemory,
 		RetentionRules: []system.RetentionRule{
-			{RetentionPolicyID: policyID, Action: system.RetentionActionExpire},
-			{RetentionPolicyID: otherPolicyID, Action: system.RetentionActionExpire},
+			{RetentionPolicyID: policyID},
+			{RetentionPolicyID: otherPolicyID},
 		},
 	}))
 
@@ -688,7 +688,7 @@ func TestSnapshotRestore(t *testing.T) {
 		VaultID: vaultID, Position: 0,
 		RotationPolicyID: &rpID,
 		RetentionRules: []system.RetentionRule{
-			{RetentionPolicyID: retID, Action: system.RetentionActionExpire},
+			{RetentionPolicyID: retID},
 		},
 	}))
 

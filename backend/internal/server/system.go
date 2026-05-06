@@ -342,7 +342,7 @@ func (s *SystemServer) loadConfigRoutes(ctx context.Context, resp *apiv1.GetSyst
 			Name:         rt.Name,
 			Distribution: string(rt.Distribution),
 			Enabled:      rt.Enabled,
-			EjectOnly:    rt.EjectOnly,
+			Source:       convert.RouteSourceToProto(rt.Source),
 		}
 		if rt.FilterID != nil {
 			prt.FilterId = rt.FilterID.ToProto()
@@ -446,14 +446,9 @@ func (s *SystemServer) loadSystemTiers(ctx context.Context, resp *apiv1.GetSyste
 		// Cloud-backed tiers wire as TIER_TYPE_FILE; cloud-ness travels via
 		// cloud_service_id, not the type enum. See gastrolog-4k5mg.
 		for _, r := range tier.RetentionRules {
-			pb := &apiv1.RetentionRule{
+			tc.RetentionRules = append(tc.RetentionRules, &apiv1.RetentionRule{
 				RetentionPolicyId: r.RetentionPolicyID.ToProto(),
-				Action:            string(r.Action),
-			}
-			for _, eid := range r.EjectRouteIDs {
-				pb.EjectRouteIds = append(pb.EjectRouteIds, eid.ToProto())
-			}
-			tc.RetentionRules = append(tc.RetentionRules, pb)
+			})
 		}
 		resp.Tiers = append(resp.Tiers, tc)
 	}

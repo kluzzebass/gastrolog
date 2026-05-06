@@ -52,11 +52,14 @@ func retentionKey(tierID glid.GLID, storageID string) string {
 	return tierID.String() + ":" + storageID
 }
 
-// retentionRule is a resolved rule: a compiled policy paired with an action.
+// retentionRule is a resolved retention trigger: a compiled policy that
+// decides WHEN a chunk fires a retention event. Phase 4 (gastrolog-42f9z)
+// removed the action enum and route-target list — the routing engine now
+// owns the WHAT, with the chunk's records streamed through it under
+// `source = retention-trigger(vault_id)` and the original chunk
+// unconditionally destroyed.
 type retentionRule struct {
-	policy        chunk.RetentionPolicy
-	action        system.RetentionAction
-	ejectRouteIDs []glid.GLID // target route IDs, only for eject
+	policy chunk.RetentionPolicy
 }
 
 // retentionRunner holds per-tier-instance state that persists across sweeps.
@@ -167,18 +170,16 @@ func (o *Orchestrator) retentionSweepAll() {
 		t.runner.sweep(t.rules)
 	}
 
-	// Leader: confirm streamed transitions. Chunks marked as
-	// transitionStreamed have been streamed to the next tier but not yet
-	// deleted — we wait for the destination to have adequate replicas
-	// before expiring the source. See gastrolog-4913n.
-	for _, t := range targets {
-		t.runner.confirmStreamedTransitions(cfg)
-	}
-
+	// Phase 4 (gastrolog-42f9z): confirmStreamedTransitions / the
+	// transition-receipt protocol is gone. Retention firing routes
+	// records through the routing engine which delivers them
+	// immediately; there is no asynchronous "wait for destination
+	// receipt" stage anymore.
+	//
 	// (Disk-vs-manifest orphan cleanup and missing-replica catchup are
 	// done out-of-band on the tier-catchup sweep tick — see
 	// tierCatchupSweepAll. The retention sweep stays focused on rule
-	// evaluation and confirmStreamedTransitions on leaders only.)
+	// evaluation.)
 
 	// Memory budget enforcement: transition oldest chunks when over budget.
 	o.enforceMemoryBudgets(cfg)
@@ -291,8 +292,11 @@ func (o *Orchestrator) enforceMemoryBudgets(cfg *system.Config) {
 	}
 }
 
-// drainExcessChunks transitions the oldest sealed chunks from a memory tier
-// until the excess bytes are reclaimed (or no more sealed chunks remain).
+// drainExcessChunks fires retention events on the oldest sealed chunks
+// of a memory vault until the excess bytes are reclaimed (or no more
+// sealed chunks remain). Phase 4 (gastrolog-42f9z): these used to be
+// "transitioned to the next tier"; now they're just retention events
+// like any other, with the routing engine deciding their fate.
 func (o *Orchestrator) drainExcessChunks(vaultID, tierID glid.GLID, cm chunk.ChunkManager, excess int64) {
 	metas, err := cm.List()
 	if err != nil {
@@ -333,12 +337,13 @@ func (o *Orchestrator) drainExcessChunks(vaultID, tierID glid.GLID, cm chunk.Chu
 			now:      o.now,
 			logger:   o.logger,
 		}
-		runner.transitionChunk(m.ID)
+		runner.fireRetentionEvent(m.ID)
+		runner.expireChunk(m.ID, "memory-budget-enforcement")
 		reclaimed += m.Bytes
 	}
 
 	if reclaimed > 0 {
-		o.logger.Info("memory budget enforcement: transitioned chunks",
+		o.logger.Info("memory budget enforcement: retention events fired",
 			"vault", vaultID, "tier", tierID,
 			"excess", excess, "reclaimed", reclaimed)
 	}
@@ -392,24 +397,15 @@ func (o *Orchestrator) RetryUnreadableChunks(vaultID glid.GLID) int {
 // of waiting for the next retention sweep tick. Common case path —
 // streaming and the receipt apply often complete within the same
 // Raft round-trip burst. See gastrolog-1g6br.
-func (o *Orchestrator) tryEventDrivenExpire(vaultID, tierID glid.GLID, chunkID chunk.ChunkID) {
-	o.mu.RLock()
-	var runner *retentionRunner
-	for _, r := range o.retention {
-		if r.vaultID == vaultID && r.tierID == tierID {
-			runner = r
-			break
-		}
-	}
-	o.mu.RUnlock()
-	if runner == nil {
-		return
-	}
-	sys, err := o.loadSystem(context.Background())
-	if err != nil || sys == nil {
-		return
-	}
-	runner.confirmStreamedOne(&sys.Config, chunkID)
+func (o *Orchestrator) tryEventDrivenExpire(_, _ glid.GLID, _ chunk.ChunkID) {
+	// Phase 4 (gastrolog-42f9z): the transition-receipt protocol is gone.
+	// Retention firing routes records through the routing engine
+	// synchronously; there's no asynchronous "wait for destination
+	// receipt" stage anymore. The CmdTransitionStreamed FSM command
+	// still exists but never fires, so this hook is unreachable in
+	// practice. Kept as a no-op for the lifecycle-reconciler callback
+	// shape; the FSM-command + callback chain gets ripped out as a
+	// follow-up cleanup pass.
 }
 
 // notifyReceiptConfirmed is invoked from a destination-tier
@@ -418,25 +414,8 @@ func (o *Orchestrator) tryEventDrivenExpire(vaultID, tierID glid.GLID, chunkID c
 // same vault and trigger their event-driven confirm-and-expire path —
 // the runner that holds the chunk in transitionStreamed state will
 // expire it; others bail cheaply. See gastrolog-1g6br.
-func (o *Orchestrator) notifyReceiptConfirmed(vaultID glid.GLID, sourceChunkID chunk.ChunkID) {
-	o.mu.RLock()
-	candidates := make([]*retentionRunner, 0)
-	for _, r := range o.retention {
-		if r.vaultID == vaultID {
-			candidates = append(candidates, r)
-		}
-	}
-	o.mu.RUnlock()
-	if len(candidates) == 0 {
-		return
-	}
-	sys, err := o.loadSystem(context.Background())
-	if err != nil || sys == nil {
-		return
-	}
-	for _, r := range candidates {
-		r.confirmStreamedOne(&sys.Config, sourceChunkID)
-	}
+func (o *Orchestrator) notifyReceiptConfirmed(_ glid.GLID, _ chunk.ChunkID) {
+	// Phase 4 (gastrolog-42f9z): no-op — see tryEventDrivenExpire.
 }
 
 // RetentionPendingChunks returns chunk IDs marked as retention-pending in the
@@ -761,60 +740,46 @@ func (r *retentionRunner) tryRetainChunk(id chunk.ChunkID, b retentionRule, alre
 		}
 	}
 
-	switch b.action {
-	case system.RetentionActionExpire:
-		defer r.clearInflight(id)
-		r.expireChunk(id, "retention-ttl")
-	case system.RetentionActionEject:
-		defer r.clearInflight(id)
-		r.ejectChunk(id, b.ejectRouteIDs)
-	case system.RetentionActionTransition:
-		// Transitions can be slow (streaming large chunks to slow tiers).
-		// Run as a one-shot scheduler job so the sweep isn't blocked.
-		// The inflight guard stays set until the job completes — the
-		// sweep won't re-schedule the same chunk.
-		r.scheduleTransition(id)
-	default:
-		r.clearInflight(id)
-		r.logger.Error("retention: unknown action", "vault", r.vaultID, "action", b.action)
-	}
+	// Phase 4 (gastrolog-42f9z): retention has no decision layer. The
+	// chunk's records are streamed through the routing engine with
+	// `source = retention-trigger(vault_id)` and the original chunk is
+	// always destroyed regardless of routing outcome. Today the routing
+	// table has no routes that match retention-trigger sources, so all
+	// records drop on the floor — the same observable behavior as the
+	// legacy expire action. Phase 5 extends the routing table.
+	defer r.clearInflight(id)
+	r.fireRetentionEvent(id)
+	r.expireChunk(id, "retention-trigger")
 }
 
-// scheduleTransition dispatches a tier transition as a one-shot scheduler job
-// so that slow transitions don't block the retention sweep from processing
-// other chunks. The inflight guard is cleared when the job completes.
-func (r *retentionRunner) scheduleTransition(id chunk.ChunkID) {
+// fireRetentionEvent streams the chunk's records through the routing
+// engine with `source = retention-trigger(vault_id)`. Phase 4
+// (gastrolog-42f9z) lands this with a stub: the engine is consulted but
+// has no routes matching retention-trigger sources, so all records drop
+// silently. Phase 5 wires real per-record routing fan-out to destination
+// vaults. The original chunk is destroyed in the caller regardless.
+func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) {
+	r.logger.Debug("retention: firing retention-trigger event",
+		"vault", r.vaultID, "chunk", id)
+	// Stub: real routing-engine consultation lands in Phase 5
+	// (gastrolog-4kkoo). Until then, fired events have no effect on
+	// downstream vaults — the chunk's records are just dropped when the
+	// chunk is destroyed below.
+}
+
+// findTierInstance looks up this runner's tier in the orchestrator's vault registry.
+func (r *retentionRunner) findTierInstance() *VaultInstance {
 	if r.orch == nil {
-		// No orchestrator (test mode) — run inline.
-		defer r.clearInflight(id)
-		r.transitionChunk(id)
-		return
+		return nil
 	}
-	name := fmt.Sprintf("transition:%s:%s:%s", r.vaultID, r.tierID, id)
-	if err := r.orch.scheduler.RunOnce(name, func() {
-		defer r.clearInflight(id)
-		r.transitionChunk(id)
-	}); err != nil {
-		r.clearInflight(id)
-		r.logger.Warn("retention: failed to schedule transition",
-			"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(), "error", err)
+	vault := r.orch.vaults[r.vaultID]
+	if vault == nil || vault.Instance == nil {
+		return nil
 	}
-	r.orch.scheduler.Describe(name, r.transitionJobDescription(id))
-}
-
-// transitionJobDescription formats a transition job's description for the
-// Jobs inspector, including vault name and tier position/type so concurrent
-// transitions from different vaults or tiers are distinguishable.
-func (r *retentionRunner) transitionJobDescription(id chunk.ChunkID) string {
-	vaultName := r.vaultName
-	if vaultName == "" {
-		vaultName = r.vaultID.String()
+	if vault.Instance.VaultID != r.tierID {
+		return nil
 	}
-	if r.tierPosition < 0 || r.tierType == "" {
-		return fmt.Sprintf("Transition chunk %s in %q to next tier", id, vaultName)
-	}
-	return fmt.Sprintf("Transition chunk %s in %q tier %d (%s) to next tier",
-		id, vaultName, r.tierPosition, r.tierType)
+	return vault.Instance
 }
 
 // clearInflight removes a chunk from the in-flight set.

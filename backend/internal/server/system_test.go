@@ -1192,22 +1192,22 @@ func TestPutRouteEjectOnly(t *testing.T) {
 
 	resp, err := client.PutRoute(ctx, connect.NewRequest(&gastrologv1.PutRouteRequest{
 		Config: &gastrologv1.RouteConfig{
-			Name:      "eject-route",
-			EjectOnly: true,
-			Enabled:   true,
+			Name:    "retention-trigger-route",
+			Source:  gastrologv1.RouteSource_ROUTE_SOURCE_RETENTION_TRIGGER,
+			Enabled: true,
 		},
 	}))
 	if err != nil {
 		t.Fatalf("PutRoute: %v", err)
 	}
 
-	// Verify route is in config and marked eject_only.
+	// Verify route is in config and marked with the retention-trigger source.
 	var found bool
 	for _, r := range resp.Msg.System.Routes {
-		if r.Name == "eject-route" {
+		if r.Name == "retention-trigger-route" {
 			found = true
-			if !r.EjectOnly {
-				t.Error("route should be eject_only=true")
+			if r.Source != gastrologv1.RouteSource_ROUTE_SOURCE_RETENTION_TRIGGER {
+				t.Errorf("route Source = %v, want ROUTE_SOURCE_RETENTION_TRIGGER", r.Source)
 			}
 		}
 	}

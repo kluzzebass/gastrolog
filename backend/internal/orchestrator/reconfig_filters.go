@@ -89,8 +89,12 @@ func (o *Orchestrator) reloadFiltersFromRoutes(sys *system.System) error {
 		if !route.Enabled {
 			continue
 		}
-		if route.EjectOnly {
-			continue // eject-only routes excluded from live FilterSet
+		// Phase 4 (gastrolog-42f9z): only ingest-source routes belong on
+		// the live FilterSet. Retention-trigger routes are consulted
+		// separately when retention events fire — including them here
+		// would let live ingester traffic match retention-only routes.
+		if route.Source == system.RouteSourceRetentionTrigger {
+			continue
 		}
 
 		var filterExpr string

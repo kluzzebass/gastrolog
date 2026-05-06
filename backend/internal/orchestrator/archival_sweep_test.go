@@ -302,29 +302,11 @@ func TestReconcileSweepClearsSuspectWhenBlobReturns(t *testing.T) {
 	}
 }
 
-// --- ErrChunkSuspect flow tests ---
-
-func TestChunkSuspectSkippedInTransition(t *testing.T) {
-	t.Parallel()
-	orch, cloudStore, cm, vaultID, tierID, _ := archivalTestSetup(t, nil)
-
-	ids := ingestSealUpload(t, cm, 50)
-
-	// Delete blobs to make cursor return ErrChunkSuspect.
-	_ = cloudStore.List(context.Background(), "", func(info blobstore.BlobInfo) error {
-		_ = cloudStore.Delete(context.Background(), info.Key)
-		return nil
-	})
-
-	// Transition should skip without panic or index removal.
-	orch.TransitionChunkForTesting(vaultID, tierID, ids[0])
-
-	// Chunk should still be in the index.
-	_, err := cm.Meta(ids[0])
-	if errors.Is(err, chunk.ErrChunkNotFound) {
-		t.Error("transition should NOT remove suspect chunk from index")
-	}
-}
+// Phase 4 (gastrolog-42f9z) deleted TestChunkSuspectSkippedInTransition:
+// the transition action is gone, so the "transition should skip suspect
+// chunk" test no longer exists. The reconcile-sweep tests above still
+// pin the suspect-marking and grace-period behavior, which is the part
+// of the suspect protocol that survived Phase 4.
 
 // --- full lifecycle test ---
 

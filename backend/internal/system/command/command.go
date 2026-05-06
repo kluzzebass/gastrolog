@@ -302,7 +302,7 @@ func putRouteCmd(cfg system.RouteConfig) *gastrologv1.PutRouteCommand {
 		DestinationIds: glid.SliceToProto(cfg.Destinations),
 		Distribution:   string(cfg.Distribution),
 		Enabled:        cfg.Enabled,
-		EjectOnly:      cfg.EjectOnly,
+		Source:         convert.RouteSourceToProto(cfg.Source),
 	}
 }
 
@@ -331,7 +331,7 @@ func ExtractPutRoute(cmd *gastrologv1.PutRouteCommand) (system.RouteConfig, erro
 		Destinations: glid.SliceFromProto(cmd.GetDestinationIds()),
 		Distribution: system.DistributionMode(cmd.GetDistribution()),
 		Enabled:      cmd.GetEnabled(),
-		EjectOnly:    cmd.GetEjectOnly(),
+		Source:       convert.RouteSourceFromProto(cmd.GetSource()),
 	}, nil
 }
 

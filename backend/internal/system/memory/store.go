@@ -1005,8 +1005,6 @@ func copyVaultConfig(st system.VaultConfig) system.VaultConfig {
 		for i, r := range st.RetentionRules {
 			cp.RetentionRules[i] = system.RetentionRule{
 				RetentionPolicyID: r.RetentionPolicyID,
-				Action:            r.Action,
-				EjectRouteIDs:     append([]glid.GLID(nil), r.EjectRouteIDs...),
 			}
 		}
 	}
@@ -1035,7 +1033,7 @@ func copyRouteConfig(rt system.RouteConfig) system.RouteConfig {
 		Name:         rt.Name,
 		Distribution: rt.Distribution,
 		Enabled:      rt.Enabled,
-		EjectOnly:    rt.EjectOnly,
+		Source:       rt.Source,
 	}
 	if rt.FilterID != nil {
 		c.FilterID = new(*rt.FilterID)
