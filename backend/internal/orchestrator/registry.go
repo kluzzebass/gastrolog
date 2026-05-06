@@ -257,19 +257,19 @@ func (o *Orchestrator) LeaderVaultQueryEngine() *query.Engine {
 	return query.NewWithRegistry(&leaderVaultRegistry{o: o}, o.logger)
 }
 
-// LocalTierQueryEngine returns a query engine that searches every locally
+// LocalVaultQueryEngine returns a query engine that searches every locally
 // available tier — leader OR follower. Suitable for approximate aggregations
 // (notably histogram bucket counts) where consistency with leader is not
 // required and follower-replica data is "good enough." Avoids cross-node
 // gRPC fan-out when chunks are already replicated locally (RF > 1). Records
 // must NOT use this engine — use LeaderVaultQueryEngine for authoritative
 // reads. See gastrolog-66b7x.
-func (o *Orchestrator) LocalTierQueryEngine() *query.Engine {
+func (o *Orchestrator) LocalVaultQueryEngine() *query.Engine {
 	return query.NewWithRegistry(&localVaultRegistry{o: o}, o.logger)
 }
 
 // localVaultRegistry exposes every tier this node holds (as leader or
-// follower) as a searchable unit keyed by tier ID. See LocalTierQueryEngine.
+// follower) as a searchable unit keyed by tier ID. See LocalVaultQueryEngine.
 type localVaultRegistry struct {
 	o *Orchestrator
 }

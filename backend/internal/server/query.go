@@ -198,7 +198,7 @@ func (s *QueryServer) searchDirect(
 	var histogram []*apiv1.HistogramBucket
 	if resume == nil {
 		if s.histogramFullyLocal(ctx, histogramQ) {
-			localEng := s.orch.LocalTierQueryEngine()
+			localEng := s.orch.LocalVaultQueryEngine()
 			if s.lookupResolver != nil {
 				localEng.SetLookupResolver(s.lookupResolver)
 			}
