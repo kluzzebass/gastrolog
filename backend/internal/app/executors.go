@@ -287,7 +287,7 @@ func newFollowExecutor(o *orchestrator.Orchestrator) cluster.FollowExecutor {
 			return nil, fmt.Errorf("parse query: %w", err)
 		}
 
-		eng := o.LeaderTierQueryEngine()
+		eng := o.LeaderVaultQueryEngine()
 		return eng.Follow(ctx, q), nil
 	}
 }

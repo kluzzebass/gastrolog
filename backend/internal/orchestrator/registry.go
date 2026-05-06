@@ -271,10 +271,10 @@ func (r *searchReadyRegistry) Reader() manifest.Reader { return r.o.ManifestRead
 
 func (r *searchReadyRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }
 
-// LeaderTierQueryEngine returns a query engine that only searches leader
+// LeaderVaultQueryEngine returns a query engine that only searches leader
 // tiers (not follower replicas). Used by ForwardSearch handlers to avoid
 // double-counting when the requesting node already searches its own followers.
-func (o *Orchestrator) LeaderTierQueryEngine() *query.Engine {
+func (o *Orchestrator) LeaderVaultQueryEngine() *query.Engine {
 	return query.NewWithRegistry(&leaderTierRegistry{o: o}, o.logger)
 }
 
@@ -283,7 +283,7 @@ func (o *Orchestrator) LeaderTierQueryEngine() *query.Engine {
 // (notably histogram bucket counts) where consistency with leader is not
 // required and follower-replica data is "good enough." Avoids cross-node
 // gRPC fan-out when chunks are already replicated locally (RF > 1). Records
-// must NOT use this engine — use LeaderTierQueryEngine for authoritative
+// must NOT use this engine — use LeaderVaultQueryEngine for authoritative
 // reads. See gastrolog-66b7x.
 func (o *Orchestrator) LocalTierQueryEngine() *query.Engine {
 	return query.NewWithRegistry(&localTierRegistry{o: o}, o.logger)
