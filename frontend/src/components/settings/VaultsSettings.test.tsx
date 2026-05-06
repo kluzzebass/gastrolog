@@ -216,42 +216,34 @@ describe("VaultsSettings", () => {
     expect(createBtn.disabled).toBe(true);
   });
 
-  test("create vault with memory tier calls putVault then putTier", async () => {
+  test("create memory vault calls PutVault with the storage shape inline", async () => {
     m(mocks.systemClient, "generateName").mockResolvedValueOnce({ name: "happy-fox" });
     m(mocks.systemClient, "putVault").mockResolvedValueOnce({});
-    m(mocks.systemClient, "putTier").mockResolvedValueOnce({
-      config: {
-        ...sampleConfig,
-        tiers: [
-          ...sampleConfig.tiers,
-          { id: "t-new", name: "happy-fox-tier-0", type: 1 },
-        ],
-      },
-    });
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], { ...sampleConfig, vaults: [] });
 
-    const { getByText } = render(<VaultsSettings dark />, {
+    const { getByText, getByLabelText } = render(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
     fireEvent.click(getByText("Add Vault"));
     await waitFor(() => expect(getByText("Create")).toBeTruthy());
 
-    // Add a memory tier via the dropdown
-    fireEvent.click(getByText("+ Add Tier"));
-    fireEvent.click(getByText("Memory"));
+    // Phase 2 (gastrolog-3iy5l): a vault has one storage shape — the form
+    // exposes a single "Storage Type" select inline, no add-tier dropdown.
+    fireEvent.change(getByLabelText("Storage Type"), { target: { value: "memory" } });
 
-    // Create button should now be enabled
     const createBtn = getByText("Create").closest("button")!;
     expect(createBtn.disabled).toBe(false);
 
     fireEvent.click(createBtn);
 
     await waitFor(() => {
-      expect(m(mocks.systemClient, "putTier")).toHaveBeenCalledTimes(1);
       expect(m(mocks.systemClient, "putVault")).toHaveBeenCalledTimes(1);
     });
+    // PutTier is no longer the public write surface — vault create routes
+    // through PutVault only; the FSM auto-syncs the matching tier.
+    expect(m(mocks.systemClient, "putTier")).toHaveBeenCalledTimes(0);
   });
 });
 

@@ -1,7 +1,7 @@
 /**
- * Resolves tier placement information from TierConfig.placements and
- * NodeStorageConfig arrays. Replaces the removed TierConfig.nodeId and
- * TierConfig.followerNodeIds fields.
+ * Placement helpers: resolve leader / follower node IDs from a placement
+ * list (VaultConfig.placements or TierConfig.placements — same shape)
+ * and the cluster's NodeStorageConfig array.
  */
 
 import { encode } from "../api/glid";

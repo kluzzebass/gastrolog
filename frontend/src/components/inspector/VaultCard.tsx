@@ -8,7 +8,7 @@ import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
 import type { VaultInfo, ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
 import { protoToInstant, instantToMs, instantToDate, formatDateTimeShort } from "../../utils/temporal";
 import { formatBytes } from "../../utils/units";
-import { leaderNodeId, followerNodeIds } from "../../utils/tierPlacement";
+import { leaderNodeId, followerNodeIds } from "../../utils/placement";
 import { Badge } from "../Badge";
 import { CogIcon } from "../icons";
 import { ExpandableCard } from "../settings/ExpandableCard";
