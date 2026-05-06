@@ -3337,11 +3337,13 @@ func (m *Manager) cacheCandidates() []cacheEntry {
 	return out
 }
 
-// downloadCloudBlobToChunkDir streams the cloud blob for a chunk into
-// <chunkDir>/data.glcb atomically and opens a local cursor. The chunk dir
-// becomes the warm cache, structurally identical to a freshly-sealed local
-// chunk — subsequent reads go through the local-GLCB fast path. See
-// gastrolog-24m1t step 7k.
+// downloadCloudBlobToChunkDir streams the zstd-wrapped cloud blob for a
+// chunk into <chunkDir>/data.glcb atomically and opens a local cursor.
+// The cloud blob is `chunk.glcb.zst` — a zstd-wrapped GLCB; this function
+// fetches it, decompresses the wrapper into the local data.glcb, and
+// hands the resulting plain GLCB to the local-cursor fast path. The
+// chunk dir becomes the warm cache, structurally identical to a freshly-
+// sealed local chunk. See docs/vault_redesign.md decisions 6 and 9.
 func (m *Manager) downloadCloudBlobToChunkDir(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	dir := m.chunkDir(id)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
@@ -3353,20 +3355,15 @@ func (m *Manager) downloadCloudBlobToChunkDir(id chunk.ChunkID) (chunk.RecordCur
 	}
 	tmpPath := filepath.Clean(tmp.Name())
 
-	rc, err := m.cfg.CloudStore.Download(context.Background(), m.blobKey(id))
-	m.trackCloudResult(err)
-	if err != nil {
+	// Download the zstd-wrapped blob and decompress in one streaming pass
+	// into the tmp file. The unwrap happens inside DownloadAndUnwrap.
+	if err := chunkcloud.DownloadAndUnwrap(context.Background(), m.cfg.CloudStore, m.blobKey(id), tmp); err != nil {
+		m.trackCloudResult(err)
 		_ = tmp.Close()
 		_ = os.Remove(tmpPath) //nolint:gosec // G703: tmpPath from CreateTemp in chunkDir
 		return nil, err
 	}
-	defer func() { _ = rc.Close() }()
-
-	if _, err := io.Copy(tmp, rc); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath) //nolint:gosec // G703
-		return nil, err
-	}
+	m.trackCloudResult(nil)
 	if err := tmp.Sync(); err != nil {
 		_ = tmp.Close()
 		_ = os.Remove(tmpPath) //nolint:gosec // G703
@@ -3794,7 +3791,7 @@ func (m *Manager) UploadToCloud(id chunk.ChunkID) error {
 // and NumFrames without a second pass over the file.
 func (m *Manager) sealToGLCB(id chunk.ChunkID) (*chunkcloud.Writer, int64, error) {
 	m.mu.Lock()
-	if m.closed || m.zstdEnc == nil {
+	if m.closed {
 		m.mu.Unlock()
 		return nil, 0, ErrManagerClosed
 	}
@@ -3814,7 +3811,7 @@ func (m *Manager) sealToGLCB(id chunk.ChunkID) (*chunkcloud.Writer, int64, error
 		return nil, 0, fmt.Errorf("open cursor for GLCB seal: %w", err)
 	}
 
-	w := chunkcloud.NewWriter(id, m.cfg.VaultID, m.zstdEnc)
+	w := chunkcloud.NewWriter(id, m.cfg.VaultID)
 	for {
 		rec, _, recErr := cursor.Next()
 		if errors.Is(recErr, chunk.ErrNoMoreRecords) {
@@ -3851,13 +3848,9 @@ func (m *Manager) sealToGLCB(id chunk.ChunkID) (*chunkcloud.Writer, int64, error
 		_ = os.Remove(tmpPath)
 	}
 
-	// Serialize zstd encoder access — chunkcloud.Writer reuses the shared
-	// m.zstdEnc, which klauspost/zstd's seekable writer is not safe for
-	// concurrent use against. Same rationale as CompressChunk's
-	// zstdEncMu serialization.
-	m.zstdEncMu.Lock()
+	// The format is unconditionally uncompressed at the file layer
+	// (gastrolog-69fd5); WriteTo no longer needs a shared zstd encoder.
 	written, werr := w.WriteTo(f)
-	m.zstdEncMu.Unlock()
 	if werr != nil {
 		cleanup()
 		return nil, 0, fmt.Errorf("write GLCB: %w", werr)
@@ -3875,14 +3868,9 @@ func (m *Manager) sealToGLCB(id chunk.ChunkID) (*chunkcloud.Writer, int64, error
 		return nil, 0, fmt.Errorf("rename %s → %s: %w", dataGLCBTmpFileName, dataGLCBFileName, err)
 	}
 
-	// Cache the TOC, frame count, blob size, and compressed flag on the
-	// chunkMeta so downstream consumers don't have to re-parse the blob
-	// tail. data.glcb's record-data section is zstd-compressed by
-	// construction, so compressed=true is semantically correct (the same
-	// flag CompressChunk used to set in the multi-file pipeline; it
-	// drops out entirely in step 7f).
+	// Cache the TOC and blob digest on the chunkMeta so downstream
+	// consumers don't have to re-parse the blob tail.
 	toc := w.TOC()
-	numFrames := w.NumFrames()
 	bm := w.Meta()
 	m.mu.Lock()
 	if meta := m.metas[id]; meta != nil {
@@ -3890,7 +3878,6 @@ func (m *Manager) sealToGLCB(id chunk.ChunkID) (*chunkcloud.Writer, int64, error
 		meta.ingestIdxSize = toc.IngestIdxSize
 		meta.sourceIdxOffset = toc.SourceIdxOffset
 		meta.sourceIdxSize = toc.SourceIdxSize
-		meta.numFrames = numFrames
 		meta.rawBytes = bm.RawBytes
 		meta.blobDigest = toc.BlobDigest
 	}
@@ -3962,28 +3949,62 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 
 	glcbPath := filepath.Join(m.chunkDir(id), dataGLCBFileName)
 
-	statInfo, err := os.Stat(filepath.Clean(glcbPath))
-	if err != nil {
-		return fmt.Errorf("stat data.glcb: %w", err)
-	}
-	blobSize := statInfo.Size()
-
 	uploadFile, err := os.Open(filepath.Clean(glcbPath))
 	if err != nil {
 		return fmt.Errorf("open data.glcb for upload: %w", err)
 	}
+
+	// Wrap the uncompressed GLCB with zstd as a transport-only layer
+	// (gastrolog-69fd5 / docs/vault_redesign.md decisions 6 and 9).
+	// The format itself stays uncompressed on local disk; cloud transport
+	// applies the wrapper here and DownloadAndUnwrap removes it on read.
+	pr, pw := io.Pipe()
+	go func() {
+		defer func() { _ = uploadFile.Close() }()
+		zw, zerr := zstd.NewWriter(pw)
+		if zerr != nil {
+			_ = pw.CloseWithError(fmt.Errorf("zstd writer: %w", zerr))
+			return
+		}
+		if _, copyErr := io.Copy(zw, uploadFile); copyErr != nil {
+			_ = zw.Close()
+			_ = pw.CloseWithError(copyErr)
+			return
+		}
+		if closeErr := zw.Close(); closeErr != nil {
+			_ = pw.CloseWithError(closeErr)
+			return
+		}
+		_ = pw.Close()
+	}()
+
 	uploadCtx, uploadCancel := context.WithTimeout(context.Background(), cloudUploadTimeout)
 	err = m.cfg.CloudStore.Upload(
 		uploadCtx,
 		key,
-		uploadFile,
+		pr,
 		chunkcloud.ObjectMetadata(bm),
 	)
 	uploadCancel()
-	_ = uploadFile.Close()
+	_ = pr.Close()
 	m.trackCloudResult(err)
 	if err != nil {
 		return fmt.Errorf("upload GLCB: %w", err)
+	}
+
+	// Re-stat after upload to capture the wire-size of the wrapped blob.
+	headCtx2, headCancel2 := context.WithTimeout(context.Background(), cloudHeadTimeout)
+	headInfo, headErr := m.cfg.CloudStore.Head(headCtx2, key)
+	headCancel2()
+	var blobSize int64
+	if headErr == nil && headInfo.Size > 0 {
+		blobSize = headInfo.Size
+	} else {
+		// Fall back to the local uncompressed size — better than zero,
+		// even if the FSM record will slightly overestimate.
+		if statInfo, sErr := os.Stat(filepath.Clean(glcbPath)); sErr == nil {
+			blobSize = statInfo.Size()
+		}
 	}
 
 	// No separate CacheDir mirror — the local data.glcb that we just
@@ -4263,12 +4284,12 @@ func (m *Manager) scanAttrsCloud(id chunk.ChunkID, startPos uint64, fn func(writ
 // in OpenCursor — by the time we get here either the cache was evicted or
 // the chunk was never sealed locally (follower that adopted via FSM).
 //
-// Strategy: try a one-shot full download into the chunk dir first so the
-// next read goes through the local-GLCB fast path. On download failure
-// fall back to range-request reads via NewRemoteReader. The remote reader
-// pulls header/dict/index/TOC at init (~few KB) and fetches individual
-// frames on demand, so it stays cheap when the per-query touch count is
-// low (notably histograms that read the TS index only).
+// Strategy: download the zstd-wrapped cloud blob, unwrap into the local
+// chunk dir, and open a normal local-GLCB cursor against it. There is
+// no range-fetch fallback in the post-Phase-6 model (gastrolog-69fd5):
+// the format itself is uncompressed and the cloud wrapper covers the
+// whole blob, so partial fetches don't gain anything over a one-shot
+// streaming download.
 func (m *Manager) openCloudCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	m.mu.Lock()
 	meta := m.lookupMeta(id)
@@ -4278,24 +4299,7 @@ func (m *Manager) openCloudCursor(id chunk.ChunkID) (chunk.RecordCursor, error) 
 		return nil, chunk.ErrChunkNotFound
 	}
 
-	if cursor, err := m.downloadCloudBlobToChunkDir(id); err == nil {
-		return cursor, nil
-	} else {
-		// Debug, not Warn: this fires on every cloud cursor that races
-		// with retention-driven blob deletion. The range-request
-		// fallback below propagates the real error to callers that
-		// genuinely need it; raising WARN here would flood operator
-		// logs during every retention sweep. See gastrolog-2c96i.
-		m.logger.Debug("cache: cloud blob download failed, falling back to range requests",
-			"chunk", id, "error", err)
-	}
-
-	rd, err := chunkcloud.NewRemoteReader(m.cfg.CloudStore, m.blobKey(id), meta.diskBytes)
-	if err != nil {
-		return nil, fmt.Errorf("open remote reader %s: %w", id, err)
-	}
-
-	return chunkcloud.NewRemoteSeekableCursor(rd, id), nil
+	return m.downloadCloudBlobToChunkDir(id)
 }
 
 // loadCloudChunks verifies the cloud index is readable and populates it from
@@ -4355,45 +4359,18 @@ func (m *Manager) dropLocalMetaForCloudChunks() {
 	m.mu.Unlock()
 }
 
-// backfillTSOffsets reads the GLCB TOC footer for cloud chunks that have zero
-// TS index offsets (pre-existing blobs from before the TS index feature).
-// Updates the cloud.idx B+ tree so subsequent startups skip this.
+// backfillTSOffsets is a no-op in the post-Phase-6 model
+// (gastrolog-69fd5). The pre-Phase-6 implementation pulled the GLCB TOC
+// footer via byte-range requests for cloud chunks missing TS index
+// offsets. With the cloud blob now zstd-wrapped end to end, byte-range
+// fetches don't decode anything useful (you'd be reading compressed
+// bytes), so the backfill path needs a different strategy if it's ever
+// resurrected — most likely "download the whole blob, unwrap, read TOC".
+// In practice the TS offsets are populated at upload time
+// (sealToGLCB → applyPutTier mirror, gastrolog-257l7), so the
+// backfill becomes redundant for chunks created after the refactor.
 func (m *Manager) backfillTSOffsets() {
-	if m.cloudIdx == nil || m.cfg.CloudStore == nil {
-		return
-	}
-	var updated int
-	if err := m.cloudIdx.ForEach(func(id chunk.ChunkID, meta *chunkMeta) bool {
-		if meta.ingestIdxSize > 0 {
-			return true // already has offsets
-		}
-		// Pull the TOC from the tail of the blob.
-		info, err := m.cfg.CloudStore.Head(context.Background(), m.blobKey(id))
-		if err != nil || info.Size < int64(chunkcloud.TOCFooterSize) {
-			return true
-		}
-		toc, err := chunkcloud.DownloadTOC(context.Background(), m.cfg.CloudStore, m.blobKey(id), info.Size)
-		if err != nil || toc.IngestIdxOffset == 0 {
-			return true
-		}
-		meta.ingestIdxOffset = toc.IngestIdxOffset
-		meta.ingestIdxSize = toc.IngestIdxSize
-		meta.sourceIdxOffset = toc.SourceIdxOffset
-		meta.sourceIdxSize = toc.SourceIdxSize
-		if err := m.cloudIdx.Insert(id, meta); err == nil {
-			updated++
-		}
-		return true
-	}); err != nil {
-		m.logger.Warn("cloud index: ForEach failed during TS offset backfill", "error", err)
-	}
-	if updated > 0 {
-		if err := m.cloudIdx.Sync(); err != nil {
-			m.logger.Warn("cloud index: sync failed after TS offset backfill", "error", err)
-		}
-		m.cloudListCache = nil // invalidate
-		m.logger.Info("backfilled TS index offsets", "updated", updated)
-	}
+	// Intentionally empty — see godoc above.
 }
 
 // loadCloudChunksFromStore iterates blobs from the cloud store and populates

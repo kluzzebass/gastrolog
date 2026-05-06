@@ -11,10 +11,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/klauspost/compress/zstd"
-
-	seekable "github.com/SaveTheRbtz/zstd-seekable-format-go/pkg"
-
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/format"
 )
@@ -25,17 +21,21 @@ type tsEntry struct {
 	pos uint32 // 0-based record position
 }
 
-// Writer encodes records into the cloud blob format.
-// Records are buffered in memory, then flushed with an uncompressed
-// header/dict/index prefix followed by seekable zstd record data,
-// and finally the embedded TS indexes + TOC footer (v2).
+// Writer encodes records into the GLCB on-disk format.
+// Records are buffered in memory, then flushed with the layout described
+// in this package's docstring (header, dictionary, record index,
+// uncompressed records section, TS indexes, TOC entries, footer).
+//
+// The format is unconditionally uncompressed at the file layer.
+// Compression, when applicable, is applied as a generic file-level
+// wrapper produced by the cloud-upload pipeline (see
+// docs/vault_redesign.md decisions 6 and 9).
 type Writer struct {
 	chunkID chunk.ChunkID
 	vaultID glid.GLID
 	dict    *chunk.StringDict
-	enc     *zstd.Encoder // caller-provided, reused across uploads
 
-	frames [][]byte // pre-encoded record frames
+	frames [][]byte // pre-encoded record frame bodies (without the u32 frameLen prefix)
 	count  uint32
 
 	writeStart  time.Time
@@ -49,17 +49,15 @@ type Writer struct {
 	ingestEntries []tsEntry
 	sourceEntries []tsEntry
 
-	toc       BlobTOC // populated by WriteTo
-	numFrames int32   // seekable zstd frame count, populated by WriteTo
+	toc BlobTOC // populated by WriteTo
 }
 
 // NewWriter creates a writer for the given chunk and vault.
-func NewWriter(chunkID chunk.ChunkID, vaultID glid.GLID, enc *zstd.Encoder) *Writer {
+func NewWriter(chunkID chunk.ChunkID, vaultID glid.GLID) *Writer {
 	return &Writer{
 		chunkID: chunkID,
 		vaultID: vaultID,
 		dict:    chunk.NewStringDict(),
-		enc:     enc,
 	}
 }
 
@@ -133,19 +131,22 @@ func (cw *countWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-// WriteTo writes the cloud blob to dst:
-//   - Uncompressed header (96 bytes)
-//   - Uncompressed dictionary
-//   - Uncompressed record index (12 bytes per record)
-//   - Seekable zstd compressed record data (256KB frames)
+// WriteTo writes the GLCB to dst:
+//   - Header (96 bytes)
+//   - Dictionary (dictSize bytes)
+//   - Record index (recordCount × 12 bytes)
+//   - Records section (uncompressed: [frameLen:u32][frame] × recordCount)
 //   - IngestTS index (sorted entries)
 //   - SourceTS index (sorted entries)
-//   - TOC footer (48 bytes)
+//   - TOC entries
+//   - TOC footer (44 bytes)
+//
+// The format is unconditionally uncompressed at the file layer; cloud
+// transport applies a separate zstd wrapper above this stream (see
+// docs/vault_redesign.md decisions 6 and 9).
 func (w *Writer) WriteTo(dst io.Writer) (int64, error) {
-	// countWriter tracks total bytes written to dst, including bytes
-	// written by the seekable zstd writer during Close() (seek table).
-	// The teed SHA-256 builds up the whole-blob digest written into the
-	// TOC footer.
+	// countWriter tracks total bytes written to dst and tees them through
+	// SHA-256 to build the whole-blob digest written into the TOC footer.
 	cw := &countWriter{w: dst, hash: sha256.New()}
 
 	// --- Encode dictionary to compute dictSize ---
@@ -155,15 +156,19 @@ func (w *Writer) WriteTo(dst io.Writer) (int64, error) {
 		dictBuf = append(dictBuf, chunk.EncodeDictEntry(s)...)
 	}
 
-	// --- Build record index and compute decompressed offsets ---
+	// --- Build record index ---
+	// Offsets are relative to the start of the records section.
+	// Each on-disk frame is [frameLen:u32][frame body]; the recorded Offset
+	// points past the frameLen prefix to the frame body, and Size is the
+	// body length.
 	index := make([]recordIndex, w.count)
-	var decompressedOff uint64
+	var sectionOff uint64
 	for i, frame := range w.frames {
 		index[i] = recordIndex{
-			Offset: decompressedOff + 4, // past the u32 frameLen prefix
-			Size:   uint32(len(frame)),  //nolint:gosec // G115: frame size bounded by record limits
+			Offset: sectionOff + 4,            // past the u32 frameLen prefix
+			Size:   uint32(len(frame)),        //nolint:gosec // G115: frame size bounded by record limits
 		}
-		decompressedOff += 4 + uint64(len(frame))
+		sectionOff += 4 + uint64(len(frame))
 	}
 
 	// --- Header (96 bytes) ---
@@ -201,49 +206,21 @@ func (w *Writer) WriteTo(dst io.Writer) (int64, error) {
 		return cw.n, err
 	}
 
-	// --- Seekable Zstd Record Data ---
-	// The seekable writer wraps cw so that sw.Close() (which writes the
-	// seek table) is also tracked in cw.n.
-	// The encoder is caller-provided to avoid allocating ~144 MB per call.
-	sw, err := seekable.NewWriter(cw, w.enc)
-	if err != nil {
-		return cw.n, fmt.Errorf("create seekable writer: %w", err)
-	}
-
-	// Write record frames in ~256KB batches. Each batch becomes one
-	// independently-decompressible zstd frame in the seekable stream.
-	var batch []byte
+	// --- Records Section (uncompressed) ---
+	// Frame layout on disk: [frameLen:u32][frame body]. ReadAt at
+	// idx.Offset for idx.Size bytes returns the frame body directly.
 	var frameLenBuf [4]byte
-	var frameCount int32
 	for _, frame := range w.frames {
-		binary.LittleEndian.PutUint32(frameLenBuf[:], uint32(len(frame))) //nolint:gosec // G115: frame size bounded
-		batch = append(batch, frameLenBuf[:]...)
-		batch = append(batch, frame...)
-
-		if len(batch) >= seekableFrameSize {
-			if _, werr := sw.Write(batch); werr != nil {
-				_ = sw.Close()
-				return cw.n, werr
-			}
-			batch = batch[:0]
-			frameCount++
+		binary.LittleEndian.PutUint32(frameLenBuf[:], uint32(len(frame))) //nolint:gosec // G115: frame size bounded by record limits
+		if _, err := cw.Write(frameLenBuf[:]); err != nil {
+			return cw.n, err
+		}
+		if _, err := cw.Write(frame); err != nil {
+			return cw.n, err
 		}
 	}
-	if len(batch) > 0 {
-		if _, werr := sw.Write(batch); werr != nil {
-			_ = sw.Close()
-			return cw.n, werr
-		}
-		frameCount++
-	}
-	w.numFrames = frameCount
 
-	if err := sw.Close(); err != nil {
-		return cw.n, fmt.Errorf("close seekable writer: %w", err)
-	}
-
-	// --- Embedded TS Indexes + TOC ---
-	// cw.n now includes all bytes from the seekable writer (data + seek table).
+	// --- TS Indexes + TOC ---
 	if err := w.writeTSIndexes(cw); err != nil {
 		return cw.n, err
 	}
@@ -398,12 +375,6 @@ func encodeTOCFooter(entryCount uint32, blobDigest [32]byte) []byte {
 // Only valid after WriteTo has been called.
 func (w *Writer) TOC() BlobTOC {
 	return w.toc
-}
-
-// NumFrames returns the number of seekable zstd frames written.
-// Only valid after WriteTo has been called.
-func (w *Writer) NumFrames() int32 {
-	return w.numFrames
 }
 
 func (w *Writer) updateBounds(rec chunk.Record) {

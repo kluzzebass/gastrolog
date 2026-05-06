@@ -1,13 +1,21 @@
-// Package cloud defines the single-blob format for cloud-archived chunks.
+// Package cloud defines the GLCB (GastroLog Chunk Blob) on-disk format —
+// a self-describing single-file representation of a sealed chunk.
 //
-// Header, dictionary, and record index are stored uncompressed.
-// Record data uses seekable zstd (256KB independent frames), enabling
-// O(1) random access to any record via the offset index.
+// GLCB is used universally — local-only vaults store a `data.glcb` file
+// per sealed chunk; cloud-backed vaults upload the same file (zstd-wrapped
+// for transport) to object storage and keep a local cache copy with the
+// same `data.glcb` name. The format itself is silent on compression: it
+// defines only the on-disk layout, and every section is directly
+// readable without a decompression step. Compression, when applied, is
+// a generic file-level wrapper produced by the cloud-upload pipeline
+// (see ../../chunk/file/manager.go's uploadToCloud). See
+// docs/vault_redesign.md decisions 6 and 9.
 //
-//	Uncompressed prefix:
+//	Layout (offsets are absolute from the start of the file):
+//
 //	  Header (96 bytes):
 //	    [signature:1]      0x69 ('i') — common header
-//	    [type:1]           0x67 ('g') — cloud blob
+//	    [type:1]           0x67 ('g') — chunk blob
 //	    [version:1]        format version (0x01)
 //	    [flags:1]          reserved
 //	    [chunkID:16]       raw UUIDv7 bytes
@@ -26,14 +34,15 @@
 //	    [len:u16][bytes] × dictEntries
 //
 //	  Record Index (recordCount × 12 bytes):
-//	    [offset:u64]       byte offset into decompressed record data
-//	    [size:u32]         frame size (excluding the u32 frameLen prefix)
+//	    [offset:u64]       byte offset into the records section
+//	                       (relative to the records section start)
+//	    [size:u32]         frame body size (excluding the u32 frameLen
+//	                       prefix that precedes it on disk)
 //
-//	Seekable zstd section:
-//	  Record data compressed in ~256KB independent frames with an appended
-//	  seek table for random access via ReadAt.
+//	  Records section (uncompressed, frame-after-frame):
+//	    [frameLen:u32][frame bytes] × recordCount
 //
-//	TS indexes + TOC (after seekable zstd):
+//	TS indexes (after the records section):
 //	  IngestTS Index: [tsNano:i64][pos:u32] × recordCount, sorted by ts
 //	  SourceTS Index: [tsNano:i64][pos:u32] × N (excludes zero-TS records), sorted by ts
 //
@@ -53,23 +62,28 @@
 //	    [magic:4]           "GTOC"
 //
 //	Read protocol: read the last 44 bytes as the footer, validate the
-//	magic, then read entryCount × 56 bytes immediately preceding the
+//	magic, then read entryCount × 42 bytes immediately preceding the
 //	footer to recover all section pointers + hashes. The blob digest
 //	covers everything from the start of the file through the last
 //	entry — readers verifying integrity hash that range and compare.
 //
-// Record frame encoding:
+// Record frame encoding (each frame's bytes, NOT including the u32
+// frameLen prefix that precedes it in the records section):
 //
-//	[frameLen:u32]     frame size excluding this field
 //	[sourceTS:i64]
 //	[ingestTS:i64]
 //	[writeTS:i64]
 //	[ingesterID:16]
+//	[nodeID:16]
 //	[ingestSeq:u32]
 //	[attrCount:u16]
 //	[keyID:u32][valID:u32] × attrCount
 //	[rawLen:u32]
 //	[raw bytes]
+//
+// Random access: ReadRecord(pos) is one ReadAt against the file at
+// recordsSectionOffset + recordIndex[pos].Offset for recordIndex[pos].Size
+// bytes. No decompression step.
 package cloud
 
 import (
@@ -92,10 +106,6 @@ const (
 	// Record index entry: byte offset (u64) + frame size (u32).
 	indexEntrySize = 12
 
-	// Seekable zstd frame size — each frame is independently compressed,
-	// enabling random access at frame granularity. Matches the file vault.
-	seekableFrameSize = 256 << 10 // 256 KB
-
 	// TS index entry: [tsNano:i64][pos:u32] = 12 bytes, sorted by TS.
 	tsIndexEntrySize = 12
 
@@ -104,7 +114,6 @@ const (
 
 	// TOC footer: [entryCount:u32][blobDigest:32][footerVersion:u32][magic:4].
 	tocFooterSize = 44
-	TOCFooterSize = tocFooterSize // exported for byte-range readers
 
 	tocFooterMagic   = "GTOC"
 	tocFooterVersion = uint32(1)

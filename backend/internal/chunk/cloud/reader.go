@@ -8,36 +8,22 @@ import (
 	"math"
 	"os"
 
-	seekable "github.com/SaveTheRbtz/zstd-seekable-format-go/pkg"
-	"github.com/klauspost/compress/zstd"
-
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/format"
 )
 
-// zstdDec is a package-level decoder, concurrent-safe, always available for reads.
-var zstdDec *zstd.Decoder
-
-func init() {
-	var err error
-	zstdDec, err = zstd.NewReader(nil, zstd.WithDecoderConcurrency(0))
-	if err != nil {
-		panic("zstd: init decoder: " + err.Error())
-	}
-}
-
-// Reader provides random-access record reads from a cloud blob.
-// The blob must be on local disk (temp file) so seekable zstd can use ReadAt.
+// Reader provides random-access record reads from a GLCB on local disk.
+// Records are read directly via file.ReadAt — no decompression step.
 type Reader struct {
-	meta     BlobMeta
-	dict     *chunk.StringDict
-	index    []recordIndex
-	seek     seekable.Reader
-	file     *os.File // temp file; closed and removed on Close()
-	keepFile bool     // if true, Close() does not remove the file (cache)
+	meta            BlobMeta
+	dict            *chunk.StringDict
+	index           []recordIndex
+	recordsBaseOff  int64    // absolute offset of the records section in the file
+	file            *os.File // GLCB file; closed (and removed unless keepFile) on Close()
+	keepFile        bool     // if true, Close() does not remove the file (local cache)
 }
 
-// NewCacheReader opens a cloud blob from a local cache file.
+// NewCacheReader opens a GLCB from a local cache file.
 // Unlike NewReader, Close() does NOT remove the file — the cache
 // manages the file's lifecycle.
 func NewCacheReader(f *os.File) (*Reader, error) {
@@ -49,9 +35,10 @@ func NewCacheReader(f *os.File) (*Reader, error) {
 	return rd, nil
 }
 
-// NewReader opens a cloud blob from a local file.
-// The file is typically a temp file created from an S3 download.
-// Accepts both v1 (no TS indexes) and v2 (embedded TS indexes + TOC).
+// NewReader opens a GLCB from a local file. Used for local-only vaults
+// (the file is the canonical sealed chunk on disk) and for cloud-backed
+// vaults after a cloud download has unwrapped the zstd transport layer
+// and produced a plain GLCB.
 func NewReader(f *os.File) (*Reader, error) {
 	// --- Header ---
 	var hdr [headerSize]byte
@@ -59,7 +46,7 @@ func NewReader(f *os.File) (*Reader, error) {
 		return nil, fmt.Errorf("read header: %w", err)
 	}
 	if _, err := format.DecodeAndValidate(hdr[:format.HeaderSize], format.TypeCloudBlob, formatVersion); err != nil {
-		return nil, fmt.Errorf("cloud blob header: %w", err)
+		return nil, fmt.Errorf("GLCB header: %w", err)
 	}
 
 	meta, dictEntries := decodeHeaderCommon(hdr[:])
@@ -89,11 +76,11 @@ func NewReader(f *os.File) (*Reader, error) {
 		}
 	}
 
-	// --- Read TOC from end of blob to get TS index section boundaries ---
-	dataOffset := int64(headerSize) + int64(dictSize) + int64(meta.RecordCount)*int64(indexEntrySize)
+	// --- Read TOC from end of blob to populate convenience offsets ---
+	recordsBaseOff := int64(headerSize) + int64(dictSize) + int64(meta.RecordCount)*int64(indexEntrySize)
 	fileInfo, err := f.Stat()
 	if err != nil {
-		return nil, fmt.Errorf("stat blob file: %w", err)
+		return nil, fmt.Errorf("stat GLCB: %w", err)
 	}
 
 	toc, err := ReadTOC(f, fileInfo.Size())
@@ -105,20 +92,12 @@ func NewReader(f *os.File) (*Reader, error) {
 	meta.SourceIdxOffset = toc.SourceIdxOffset
 	meta.SourceIdxSize = toc.SourceIdxSize
 
-	// Seekable zstd ends where the ingest TS index section starts.
-	dataEnd := toc.IngestIdxOffset
-	section := io.NewSectionReader(f, dataOffset, dataEnd-dataOffset)
-	seek, err := seekable.NewReader(section, zstdDec)
-	if err != nil {
-		return nil, fmt.Errorf("open seekable reader: %w", err)
-	}
-
 	return &Reader{
-		meta:  meta,
-		dict:  dict,
-		index: index,
-		seek:  seek,
-		file:  f,
+		meta:           meta,
+		dict:           dict,
+		index:          index,
+		recordsBaseOff: recordsBaseOff,
+		file:           f,
 	}, nil
 }
 
@@ -237,6 +216,7 @@ func parseTOCRegion(entryBuf, footerBuf []byte) (BlobTOC, error) {
 func (rd *Reader) Meta() BlobMeta { return rd.meta }
 
 // ReadRecord reads a single record by position (0-based).
+// One file.ReadAt — no decompression step.
 func (rd *Reader) ReadRecord(pos uint32) (chunk.Record, error) {
 	if pos >= rd.meta.RecordCount {
 		return chunk.Record{}, chunk.ErrNoMoreRecords
@@ -247,21 +227,16 @@ func (rd *Reader) ReadRecord(pos uint32) (chunk.Record, error) {
 		return chunk.Record{}, fmt.Errorf("record %d: offset %d overflows int64", pos, idx.Offset)
 	}
 	buf := make([]byte, idx.Size)
-	if _, err := rd.seek.ReadAt(buf, int64(idx.Offset)); err != nil {
+	if _, err := rd.file.ReadAt(buf, rd.recordsBaseOff+int64(idx.Offset)); err != nil {
 		return chunk.Record{}, fmt.Errorf("read record %d: %w", pos, err)
 	}
 
 	return decodeFrame(buf, rd.dict)
 }
 
-// Close releases the seekable reader and removes the temp file.
+// Close closes the file and (unless keepFile is set) removes it.
 func (rd *Reader) Close() error {
 	var errs []error
-	if rd.seek != nil {
-		if err := rd.seek.Close(); err != nil {
-			errs = append(errs, err)
-		}
-	}
 	if rd.file != nil {
 		name := rd.file.Name()
 		if err := rd.file.Close(); err != nil {
