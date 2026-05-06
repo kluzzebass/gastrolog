@@ -349,6 +349,11 @@ func VaultTypeToProto(t system.TierType) gastrologv1.VaultType {
 }
 
 // VaultTypeFromProto maps proto VaultType back to the Go-side TierType.
+// Round-trips empty: VAULT_TYPE_UNSPECIFIED maps to the empty TierType so
+// "type was never set" is distinguishable from "type is file". (TierTypeFromProto
+// defaults UNSPECIFIED to file because the legacy tier path always wrote a
+// non-empty type; the vault path doesn't have that guarantee yet during
+// the refactor.)
 func VaultTypeFromProto(t gastrologv1.VaultType) system.TierType {
 	switch t {
 	case gastrologv1.VaultType_VAULT_TYPE_MEMORY:
@@ -358,8 +363,8 @@ func VaultTypeFromProto(t gastrologv1.VaultType) system.TierType {
 	case gastrologv1.VaultType_VAULT_TYPE_JSONL:
 		return system.TierTypeJSONL
 	case gastrologv1.VaultType_VAULT_TYPE_UNSPECIFIED:
-		return system.TierTypeFile
+		return ""
 	default:
-		return system.TierTypeFile
+		return ""
 	}
 }
