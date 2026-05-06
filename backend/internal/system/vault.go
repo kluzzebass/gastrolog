@@ -109,6 +109,18 @@ func (v VaultConfig) IsCloud() bool {
 	return v.CloudServiceID != nil
 }
 
+// VaultType is the new canonical name for the storage-shape enum during
+// the vault refactor (gastrolog-257l7). Alias of TierType for now —
+// once consumers migrate, TierType and its constants are deleted and
+// this becomes the only name.
+type VaultType = TierType
+
+const (
+	VaultTypeMemory = TierTypeMemory
+	VaultTypeFile   = TierTypeFile
+	VaultTypeJSONL  = TierTypeJSONL
+)
+
 // MergeVaultFromTiers populates v's merged storage/lifecycle fields from
 // its (single) tier in tiers, returning the merged copy. Used during the
 // vault refactor (gastrolog-257l7) to ensure VaultConfig values written
