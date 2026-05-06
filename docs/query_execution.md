@@ -190,8 +190,11 @@ flowchart TD
 | Chunk State | Cursor Type | I/O Method |
 |-------------|------------|------------|
 | Active (unsealed) | `stdioCursor` | `pread` on raw.log, idx.log, attr.log |
+| Sealing (local) | `stdioCursor` (no GLCB yet) or `mmapCursor` (GLCB committed) | Read path adapts to whichever artifacts are present; `OpenCursor` prefers `data.glcb` when it exists |
 | Sealed (local) | `mmapCursor` | Memory-mapped GLCB, random access via record-index offsets |
 | Cloud-backed | `glcbCursor` (after warm-cache fill) | One whole-blob download → unwrap zstd → mmap GLCB; reads are local from then on |
+
+For Phase 3 (gastrolog-1huz5) Sealing chunks, the query engine branches on the **local** `meta.Sealed` (active-form closed?) rather than the cluster `State == Sealed` (GLCB committed?). This is the one place where local truth is the right truth — the chunk is locally readable as soon as the active-form files are closed; whether the cluster has finished publishing its GLCB digest is irrelevant to the read path. TS-index loads gracefully fall back to the reorder-buffer scanner if `PostSealProcess` hasn't built the indexes yet.
 
 ### Memory Vault Cursors
 

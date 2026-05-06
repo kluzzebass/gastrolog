@@ -70,7 +70,7 @@ func (r *orchestratorManifestReader) Entry(id chunk.ChunkID) (tierfsm.ManifestEn
 		if v.Instance == nil {
 			continue
 		}
-		if e, ok := vaultManifestEntry(v.Instance, id); ok && e.Sealed {
+		if e, ok := vaultManifestEntry(v.Instance, id); ok && e.IsSealed() {
 			return e, true
 		}
 	}
@@ -122,7 +122,7 @@ func collectSealedEntries(inst *VaultInstance) []tierfsm.ManifestEntry {
 	}
 	var out []tierfsm.ManifestEntry
 	for _, e := range vaultManifestEntries(inst) {
-		if e.Sealed {
+		if e.IsSealed() {
 			out = append(out, e)
 		}
 	}
@@ -251,13 +251,24 @@ func (r *orchestratorIndexReader) lookupVaultManagers(chunkID chunk.ChunkID) (ch
 // there. RetentionPending / TransitionStreamed / IngestIdx*/SourceIdx*
 // fields stay zero (memory-mode tiers don't track them).
 func chunkMetaToManifestEntry(m chunk.ChunkMeta) tierfsm.ManifestEntry {
+	state := m.State
+	if state == chunk.ChunkStateUnknown {
+		// Memory-mode tiers don't carry FSM state. Derive from the
+		// local Sealed bool — there's no Sealing intermediate without
+		// an FSM driving the announce protocol.
+		if m.Sealed {
+			state = chunk.ChunkStateSealed
+		} else {
+			state = chunk.ChunkStateActive
+		}
+	}
 	return tierfsm.ManifestEntry{
 		ID:          m.ID,
 		WriteStart:  m.WriteStart,
 		WriteEnd:    m.WriteEnd,
 		RecordCount: m.RecordCount,
 		Bytes:       m.Bytes,
-		Sealed:      m.Sealed,
+		State:       state,
 		DiskBytes:   m.DiskBytes,
 		IngestStart: m.IngestStart,
 		IngestEnd:   m.IngestEnd,

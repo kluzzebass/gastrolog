@@ -167,7 +167,37 @@ Predicate names are illustrative; exact symbols belong in implementation.
 
 Chunk/tier substates (delete pending, transition streamed, tombstone, etc.) **MUST** be mapped in implementation to: **vault-committed**, **tier-local**, or **system-committed**.
 
-### Compact diagram (refine during 5xxbd)
+### Chunk lifecycle (Phase 3, gastrolog-1huz5)
+
+A chunk traverses three FSM-tracked states. The state is `vault-committed` (replicated through the per-vault control-plane Raft).
+
+```mermaid
+stateDiagram-v2
+  direction LR
+  [*] --> Active: CmdCreateChunk
+  Active --> Sealing: CmdBeginSeal (rotation policy fired)
+  Sealing --> Sealed: CmdSealChunk (sealToGLCB committed data.glcb)
+  Sealed --> [*]: CmdDeleteChunk
+```
+
+| State    | Producer trigger                          | Files on the leader                          | Followers                              |
+|----------|-------------------------------------------|----------------------------------------------|----------------------------------------|
+| Active   | `CmdCreateChunk`                          | `raw.log`+`idx.log`+`attr.log`+`dict.log` open for append; B+ trees in use | Best-effort active-form mirror via record streaming |
+| Sealing  | `CmdBeginSeal` (in `sealActiveLocked`)    | active-form files closed but readable; B+ trees removed; `data.glcb` not yet on disk | Mirror frozen — no further append; not yet a promotion candidate |
+| Sealed   | `CmdSealChunk` (in `PostSealProcess` after `sealToGLCB`) | `data.glcb` on disk; FSM carries the GLCB whole-blob digest | Eligible for sealed-form GLCB byte replication from leader |
+
+**Authority during Sealing.** Only the leader's bytes are authoritative. `OverlayFromFSM` projects the FSM state onto `chunk.ChunkMeta`, so retention / archival sweep / cloud backfill / replication catchup / vault drain gate on `State == Sealed` rather than the local `Sealed` bool. The local bool flips at `sealActiveLocked` time; the cluster-wide signal flips when `sealToGLCB` commits the GLCB.
+
+**Local vs cluster `Sealed` semantics.** The two bits answer different questions and must not be conflated:
+
+- **Local `meta.Sealed`** (returned by `cm.List()` and `ListChunkMetas`): "is this chunk's active form closed on this node?" Used by query / index / read paths to decide between sealed-cursor and active-cursor strategies. Robust to transient mid-`PostSealProcess` state because `OpenCursor` reads from active-form files when `data.glcb` isn't yet present.
+- **Cluster `State == Sealed`** (via `OverlayFromFSM`): "has the GLCB been committed cluster-wide?" Used by every producer-side gate that ships, retires, or otherwise irreversibly acts on a chunk. Conservative: a Sealing chunk reads as not-yet-Sealed so producers wait for the assembly to complete.
+
+A blanket overlay on `ListChunkMetas` would conflate them — the query path would see Sealing chunks as not-Sealed and try the active-chunk fast path, which can no longer access the chunk via `ScanActive*`. Each caller chooses explicitly.
+
+**Crash recovery.** A leader that dies between `CmdBeginSeal` (`Active → Sealing`) and `CmdSealChunk` (`Sealing → Sealed`) leaves the FSM holding a `Sealing` entry indefinitely. `VaultLifecycleReconciler.ReconcileFromSnapshot` runs `resumeSealingFromFSM` after every Restore: for each `State == Sealing` entry whose chunk the local Manager still holds (sealed bit set on disk), it re-schedules `PostSealProcess`. `sealToGLCB` is idempotent (writes via `data.glcb.tmp` + atomic rename), so re-running after a partial pass is safe. Followers-turned-leaders that never had the active-form files cannot resume; their Sealing entries fall to `SweepStaleLeaderFSMEntries`' grace-period cleanup.
+
+### Vault state diagram
 
 ```mermaid
 stateDiagram-v2

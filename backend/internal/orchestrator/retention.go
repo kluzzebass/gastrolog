@@ -619,6 +619,16 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	tier := r.findTierInstance()
 	r.mu.Unlock()
 
+	// Phase 3 (gastrolog-1huz5): overlay each meta with FSM state so
+	// selectRetentionCandidates' meta.Sealed gate reflects cluster
+	// truth — Sealing chunks (active-form files closed locally but
+	// GLCB not yet committed) must not be eligible.
+	if tier != nil && tier.OverlayFromFSM != nil {
+		for i := range metas {
+			metas[i] = tier.OverlayFromFSM(metas[i])
+		}
+	}
+
 	// Build a set of chunks awaiting destination replication confirmation
 	// so we don't re-stream them on every sweep. See gastrolog-4913n.
 	streamed := make(map[chunk.ChunkID]bool)

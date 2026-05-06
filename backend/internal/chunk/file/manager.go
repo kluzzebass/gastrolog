@@ -1991,17 +1991,15 @@ func (m *Manager) sealActiveLocked(announce bool) error {
 
 	if announce && m.cfg.Announcer != nil {
 		ann := m.cfg.Announcer
-		// Capture the metadata snapshot now (it's mutable; m.active will
-		// be cleared below). The closure runs after the caller releases mu.
-		writeEnd := meta.writeEnd
-		recordCount := meta.recordCount
-		bytes := meta.bytes
-		ingestStart := meta.ingestStart
-		ingestEnd := meta.ingestEnd
-		sourceEnd := meta.sourceEnd
-		ingestTSMonotonic := meta.ingestTSMonotonic
+		// Phase 3 (gastrolog-1huz5): emit BeginSeal here only; the chunk
+		// is now Sealing on the FSM. The matching AnnounceSeal fires
+		// from PostSealProcess after sealToGLCB has committed the GLCB,
+		// so the Sealing window covers real assembly time. Local files
+		// stay readable through the window — m.active is cleared but
+		// the on-disk raw.log/idx.log/attr.log/dict.log remain, and
+		// m.metas[id].sealed is true so OpenCursor uses the mmap path.
 		m.pendingAnnouncements = append(m.pendingAnnouncements, func() {
-			ann.AnnounceSeal(id, writeEnd, recordCount, bytes, ingestStart, ingestEnd, sourceEnd, ingestTSMonotonic)
+			ann.AnnounceBeginSeal(id)
 		})
 	}
 
@@ -2998,19 +2996,30 @@ func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
 		return fmt.Errorf("seal chunk %s to GLCB: %w", id, err)
 	}
 
-	// 1a. Attach the freshly-computed GLCB section offsets to the FSM
-	// manifest entry so the histogram's GLCB section-reader can find
-	// the IngestTS index without reading the blob's TOC. Replicates
-	// to every node via Raft like the other manifest mutations. See
-	// gastrolog-1dg3i.
+	// 1a. Phase 3 (gastrolog-1huz5): GLCB committed locally — fire the
+	// Sealing → Sealed transition on the FSM now. Reads the seal
+	// metadata from the local meta (captured at sealActiveLocked
+	// time). Followed by AnnounceAttachOffsets so consumers learning
+	// about the seal also see the section offsets.
 	if m.cfg.Announcer != nil {
 		m.mu.Lock()
 		meta := m.lookupMeta(id)
 		var (
-			ingestOff, ingestSize int64
-			sourceOff, sourceSize int64
+			writeEnd                          time.Time
+			recordCount, bytes                int64
+			ingestStart, ingestEnd, sourceEnd time.Time
+			ingestTSMonotonic                 bool
+			ingestOff, ingestSize             int64
+			sourceOff, sourceSize             int64
 		)
 		if meta != nil {
+			writeEnd = meta.writeEnd
+			recordCount = meta.recordCount
+			bytes = meta.bytes
+			ingestStart = meta.ingestStart
+			ingestEnd = meta.ingestEnd
+			sourceEnd = meta.sourceEnd
+			ingestTSMonotonic = meta.ingestTSMonotonic
 			ingestOff = meta.ingestIdxOffset
 			ingestSize = meta.ingestIdxSize
 			sourceOff = meta.sourceIdxOffset
@@ -3018,6 +3027,7 @@ func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
 		}
 		m.mu.Unlock()
 		if meta != nil {
+			m.cfg.Announcer.AnnounceSeal(id, writeEnd, recordCount, bytes, ingestStart, ingestEnd, sourceEnd, ingestTSMonotonic)
 			m.cfg.Announcer.AnnounceAttachOffsets(id, ingestOff, ingestSize, sourceOff, sourceSize)
 		}
 	}

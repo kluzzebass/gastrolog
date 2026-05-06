@@ -284,6 +284,8 @@ func commandName(cmd tierfsm.Command) string {
 		return "CmdPruneNode"
 	case tierfsm.CmdAttachOffsets:
 		return "CmdAttachOffsets"
+	case tierfsm.CmdBeginSeal:
+		return "CmdBeginSeal"
 	default:
 		return fmt.Sprintf("CmdUnknown(%d)", cmd)
 	}

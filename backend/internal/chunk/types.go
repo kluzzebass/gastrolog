@@ -138,6 +138,44 @@ type RecordRef struct {
 	Pos     uint64
 }
 
+// ChunkState is the explicit lifecycle stage of a chunk on the vault-ctl
+// FSM. Active → Sealing → Sealed. The Sealing window is the period
+// between rotation (leader stops accepting appends) and FSM commit of
+// the sealed-form GLCB. See gastrolog-1huz5.
+type ChunkState uint8
+
+const (
+	// ChunkStateUnknown is the zero value. Treated as Active by callers
+	// that haven't migrated off the legacy Sealed bool yet.
+	ChunkStateUnknown ChunkState = 0
+	// ChunkStateActive — accepting appends; only the leader's bytes are
+	// authoritative; followers maintain a best-effort active-form mirror.
+	ChunkStateActive ChunkState = 1
+	// ChunkStateSealing — leader is assembling the sealed-form GLCB. The
+	// active-form layout is still readable for queries; sealed-form is
+	// in flight but not yet committed.
+	ChunkStateSealing ChunkState = 2
+	// ChunkStateSealed — sealed-form GLCB is committed. Followers may
+	// replicate it byte-for-byte.
+	ChunkStateSealed ChunkState = 3
+)
+
+// String renders the state as the lowercase name used in logs, error
+// messages, and the wire-format inspector view.
+func (s ChunkState) String() string {
+	switch s {
+	case ChunkStateActive:
+		return "active"
+	case ChunkStateSealing:
+		return "sealing"
+	case ChunkStateSealed:
+		return "sealed"
+	case ChunkStateUnknown:
+		return "unknown"
+	}
+	return "unknown"
+}
+
 // ChunkMeta contains metadata about a chunk.
 type ChunkMeta struct {
 	ID          ChunkID
@@ -145,8 +183,16 @@ type ChunkMeta struct {
 	WriteEnd    time.Time // max WriteTS in chunk
 	RecordCount int64
 	Bytes       int64 // Total logical bytes (raw + attr + idx)
-	Sealed      bool
-	DiskBytes   int64 // actual on-disk size of the chunk's data.glcb
+	// Sealed is the legacy two-state flag. Equivalent to State == Sealed
+	// for new code paths; transitionally also true for Sealing chunks
+	// during the migration so consumers that haven't audited yet see
+	// the safe "treat as sealed" branch. New code should branch on State.
+	Sealed bool
+	// State is the explicit three-state lifecycle. See gastrolog-1huz5.
+	// Zero value (ChunkStateUnknown) round-trips legacy entries that
+	// pre-date the field — callers fall back to Sealed in that case.
+	State     ChunkState
+	DiskBytes int64 // actual on-disk size of the chunk's data.glcb
 
 	// IngestTS and SourceTS bounds (zero = unknown).
 	// Used to filter chunks by ingest_start/ingest_end and source_start/source_end

@@ -204,6 +204,13 @@ func (o *Orchestrator) drainTierChunks(ctx context.Context, sys *system.System, 
 	}
 
 	for _, meta := range metas {
+		// Phase 3 (gastrolog-1huz5): overlay through FSM so Sealing
+		// chunks (active-form sealed locally but GLCB not yet committed)
+		// are skipped. Drain ships sealed-form GLCBs; a Sealing chunk
+		// would race with concurrent PostSealProcess.
+		if tier.OverlayFromFSM != nil {
+			meta = tier.OverlayFromFSM(meta)
+		}
 		if !meta.Sealed {
 			continue
 		}

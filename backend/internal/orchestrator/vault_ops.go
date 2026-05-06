@@ -1077,6 +1077,11 @@ func (o *Orchestrator) finalizeImportedChunk(vaultID, tierID glid.GLID, cm chunk
 	if ann, ok := cm.(chunk.AnnouncerGetter); ok {
 		if a := ann.GetAnnouncer(); a != nil {
 			a.AnnounceCreate(meta.ID, meta.WriteStart, meta.IngestStart, meta.SourceStart)
+			// Phase 3 (gastrolog-1huz5): Active → Sealing → Sealed in
+			// quick succession. The imported chunk is already sealed on
+			// the source; we're projecting that final state onto the
+			// destination's FSM.
+			a.AnnounceBeginSeal(meta.ID)
 			a.AnnounceSeal(meta.ID, meta.WriteEnd, meta.RecordCount, meta.Bytes, meta.IngestStart, meta.IngestEnd, meta.SourceEnd, meta.IngestTSMonotonic)
 			// Section offsets (CmdAttachOffsets) already replicated from
 			// the original sealing leader via Raft; followers inherit

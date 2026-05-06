@@ -47,7 +47,7 @@ func TestFSMCreateAndGet(t *testing.T) {
 	if !e.IngestStart.Equal(now.Add(time.Millisecond)) {
 		t.Errorf("IngestStart mismatch")
 	}
-	if e.Sealed {
+	if e.IsSealed() {
 		t.Error("should not be sealed")
 	}
 }
@@ -64,7 +64,7 @@ func TestFSMSeal(t *testing.T) {
 	applyCmd(t, fsm, MarshalSealChunk(id, end, 500, 1024*1024, end, end, end, false))
 
 	e := fsm.Get(id)
-	if !e.Sealed {
+	if !e.IsSealed() {
 		t.Error("should be sealed")
 	}
 	if e.RecordCount != 500 {
@@ -75,6 +75,123 @@ func TestFSMSeal(t *testing.T) {
 	}
 	if !e.WriteEnd.Equal(end) {
 		t.Errorf("WriteEnd mismatch")
+	}
+}
+
+// TestFSMChunkStateTransitions exercises Phase 3's three-state lifecycle:
+// CmdCreateChunk → Active, CmdBeginSeal → Sealing, CmdSealChunk → Sealed.
+// gastrolog-1huz5.
+func TestFSMChunkStateTransitions(t *testing.T) {
+	fsm := New()
+	id := testChunkID(99)
+	now := time.Now().Truncate(time.Nanosecond)
+	end := now.Add(time.Second)
+
+	// Active after create.
+	applyCmd(t, fsm, MarshalCreateChunk(id, now, now, now))
+	e := fsm.Get(id)
+	if got := e.State; got != chunk.ChunkStateActive {
+		t.Fatalf("after create: state = %s, want active", got)
+	}
+	if e.IsSealed() {
+		t.Fatal("after create: Sealed should be false")
+	}
+
+	// Sealing after begin-seal.
+	applyCmd(t, fsm, MarshalBeginSeal(id))
+	e = fsm.Get(id)
+	if got := e.State; got != chunk.ChunkStateSealing {
+		t.Fatalf("after begin-seal: state = %s, want sealing", got)
+	}
+	if e.IsSealed() {
+		t.Fatal("after begin-seal: Sealed should still be false (active-form is still authoritative)")
+	}
+
+	// Sealed after seal.
+	applyCmd(t, fsm, MarshalSealChunk(id, end, 100, 1024, end, end, end, true))
+	e = fsm.Get(id)
+	if got := e.State; got != chunk.ChunkStateSealed {
+		t.Fatalf("after seal: state = %s, want sealed", got)
+	}
+	if !e.IsSealed() {
+		t.Fatal("after seal: Sealed should be true")
+	}
+}
+
+// TestFSMBeginSealIdempotent verifies that a stale BeginSeal replay
+// does not regress a Sealed chunk back to Sealing. Important for
+// snapshot replay and Raft log catchup. gastrolog-1huz5.
+func TestFSMBeginSealIdempotent(t *testing.T) {
+	fsm := New()
+	id := testChunkID(98)
+	now := time.Now().Truncate(time.Nanosecond)
+	end := now.Add(time.Second)
+
+	applyCmd(t, fsm, MarshalCreateChunk(id, now, now, now))
+	applyCmd(t, fsm, MarshalBeginSeal(id))
+	applyCmd(t, fsm, MarshalSealChunk(id, end, 1, 1, end, end, end, false))
+	// Replay an older BeginSeal — must not regress.
+	applyCmd(t, fsm, MarshalBeginSeal(id))
+
+	e := fsm.Get(id)
+	if got := e.State; got != chunk.ChunkStateSealed {
+		t.Fatalf("state after stale begin-seal replay: got %s, want sealed", got)
+	}
+	if !e.IsSealed() {
+		t.Fatal("Sealed flag must survive stale begin-seal")
+	}
+}
+
+// TestFSMSnapshotPreservesState verifies the State field round-trips
+// through the snapshot encoder/decoder for each lifecycle stage.
+// gastrolog-1huz5.
+func TestFSMSnapshotPreservesState(t *testing.T) {
+	fsm := New()
+	now := time.Now().Truncate(time.Nanosecond)
+	end := now.Add(time.Second)
+
+	idActive := testChunkID(50)
+	idSealing := testChunkID(51)
+	idSealed := testChunkID(52)
+
+	applyCmd(t, fsm, MarshalCreateChunk(idActive, now, now, now))
+
+	applyCmd(t, fsm, MarshalCreateChunk(idSealing, now, now, now))
+	applyCmd(t, fsm, MarshalBeginSeal(idSealing))
+
+	applyCmd(t, fsm, MarshalCreateChunk(idSealed, now, now, now))
+	applyCmd(t, fsm, MarshalBeginSeal(idSealed))
+	applyCmd(t, fsm, MarshalSealChunk(idSealed, end, 1, 1, end, end, end, false))
+
+	snap, err := fsm.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := snap.Persist(&bufSink{Writer: &buf}); err != nil {
+		t.Fatalf("Persist: %v", err)
+	}
+	fsm2 := New()
+	if err := fsm2.Restore(io.NopCloser(&buf)); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	cases := []struct {
+		id   chunk.ChunkID
+		want chunk.ChunkState
+	}{
+		{idActive, chunk.ChunkStateActive},
+		{idSealing, chunk.ChunkStateSealing},
+		{idSealed, chunk.ChunkStateSealed},
+	}
+	for _, tc := range cases {
+		e := fsm2.Get(tc.id)
+		if e == nil {
+			t.Errorf("%s missing after restore", tc.id)
+			continue
+		}
+		if e.State != tc.want {
+			t.Errorf("%s: state = %s, want %s", tc.id, e.State, tc.want)
+		}
 	}
 }
 
@@ -191,8 +308,8 @@ func TestFSMSnapshotRestore(t *testing.T) {
 
 	// Verify sealed chunk.
 	e1 := fsm2.Get(id1)
-	if e1 == nil || !e1.Sealed || e1.RecordCount != 100 {
-		t.Errorf("chunk 1: sealed=%v, records=%d", e1 != nil && e1.Sealed, e1.RecordCount)
+	if e1 == nil || !e1.IsSealed() || e1.RecordCount != 100 {
+		t.Errorf("chunk 1: sealed=%v, records=%d", e1 != nil && e1.IsSealed(), e1.RecordCount)
 	}
 
 	// Verify cloud-backed chunk.
@@ -207,7 +324,7 @@ func TestFSMSnapshotRestore(t *testing.T) {
 
 	// Verify unsealed chunk.
 	e3 := fsm2.Get(id3)
-	if e3 == nil || e3.Sealed {
+	if e3 == nil || e3.IsSealed() {
 		t.Error("chunk 3: should exist and be unsealed")
 	}
 }
