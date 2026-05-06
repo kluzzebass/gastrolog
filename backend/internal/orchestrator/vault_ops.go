@@ -405,13 +405,13 @@ func (o *Orchestrator) findLocalTier(vaultID, tierID glid.GLID) *TierInstance {
 	return nil
 }
 
-// AppendToTier appends a record to a specific tier's chunk manager.
+// AppendToVault appends a record to a specific tier's chunk manager.
 // Used by inter-tier transition to target a downstream tier directly,
 // bypassing the vault's active tier. Includes seal detection.
-// AppendToTier appends a record to a specific tier. leaderChunkID, when
+// AppendToVault appends a record to a specific tier. leaderChunkID, when
 // non-zero on followers, syncs the chunk ID with the leader so the
 // follower has real, queryable, promotable chunks.
-func (o *Orchestrator) AppendToTier(vaultID, tierID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error {
+func (o *Orchestrator) AppendToVault(vaultID, tierID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error {
 	o.mu.RLock()
 	// NOTE: manually unlocked below — remote forwards happen outside the lock.
 
@@ -555,7 +555,7 @@ func (o *Orchestrator) sealRemoteFollowers(targets []remoteForwardTarget, chunkI
 // Appends to distinct followers run in parallel (WaitGroup) so per-record
 // latency is bounded by the slowest follower, not the sum — same ordering
 // guarantee as sealRemoteFollowers: each follower tier stream still processes
-// one RPC at a time, and AppendToTier does not start the next record until
+// one RPC at a time, and AppendToVault does not start the next record until
 // this function returns.
 //
 // During shutdown (o.shuttingDown()) this is a silent no-op: the record
@@ -1157,7 +1157,7 @@ func (o *Orchestrator) StreamAppendToTier(ctx context.Context, vaultID, tierID g
 		if iterErr != nil {
 			return iterErr
 		}
-		if err := o.AppendToTier(vaultID, tierID, chunk.ChunkID{}, rec); err != nil {
+		if err := o.AppendToVault(vaultID, tierID, chunk.ChunkID{}, rec); err != nil {
 			return err
 		}
 	}

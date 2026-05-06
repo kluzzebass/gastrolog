@@ -399,12 +399,12 @@ func (o *Orchestrator) TransitionChunkForTesting(vaultID, tierID glid.GLID, chun
 	r.transitionChunk(chunkID)
 }
 
-// streamLocal appends records from a cursor to a local tier via AppendToTier.
+// streamLocal appends records from a cursor to a local tier via AppendToVault.
 //
 // Read-side errors from the source cursor are wrapped in
 // cluster.ErrSourceRead so transitionChunk's classifier can retire the
 // chunk as unreadable instead of looping forever on the same corruption
-// (see gastrolog-3ayz3). AppendToTier errors on the destination stay
+// (see gastrolog-3ayz3). AppendToVault errors on the destination stay
 // plain — those are retryable per the comment in transitionChunk.
 func (r *retentionRunner) streamLocal(cursor chunk.RecordCursor, nextTierID glid.GLID) error {
 	for {
@@ -415,7 +415,7 @@ func (r *retentionRunner) streamLocal(cursor chunk.RecordCursor, nextTierID glid
 		if err != nil {
 			return fmt.Errorf("%w: read source chunk: %w", cluster.ErrSourceRead, err)
 		}
-		if err := r.orch.AppendToTier(r.vaultID, nextTierID, chunk.ChunkID{}, rec); err != nil {
+		if err := r.orch.AppendToVault(r.vaultID, nextTierID, chunk.ChunkID{}, rec); err != nil {
 			return err
 		}
 	}

@@ -567,7 +567,7 @@ func TestImportToTierIdempotent(t *testing.T) {
 	}
 }
 
-// --- AppendToTier ---
+// --- AppendToVault ---
 
 // tierTestReplicator records AppendRecords calls on the ChunkReplicator interface.
 // Satisfies orchestrator.ChunkReplicator.
@@ -630,7 +630,7 @@ func TestAppendToTierLeaderForwardsToFollowers(t *testing.T) {
 	orch.RegisterVault(vault)
 
 	rec := testRecord("hello")
-	if err := orch.AppendToTier(vaultID, tierID, chunk.ChunkID{}, rec); err != nil {
+	if err := orch.AppendToVault(vaultID, tierID, chunk.ChunkID{}, rec); err != nil {
 		t.Fatal(err)
 	}
 
@@ -674,7 +674,7 @@ func TestAppendToTierSecondaryDoesNotForward(t *testing.T) {
 	orch.RegisterVault(vault)
 
 	leaderChunkID := chunk.NewChunkID()
-	if err := orch.AppendToTier(vaultID, tierID, leaderChunkID, testRecord("data")); err != nil {
+	if err := orch.AppendToVault(vaultID, tierID, leaderChunkID, testRecord("data")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -695,7 +695,7 @@ func TestAppendToTierSecondaryUsesChunkID(t *testing.T) {
 	orch.RegisterVault(vault)
 
 	leaderChunkID := chunk.NewChunkID()
-	if err := orch.AppendToTier(vaultID, tierID, leaderChunkID, testRecord("data")); err != nil {
+	if err := orch.AppendToVault(vaultID, tierID, leaderChunkID, testRecord("data")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -739,10 +739,10 @@ func TestAppendToTierSecondarySkipsPostSeal(t *testing.T) {
 
 	leaderChunkID := chunk.NewChunkID()
 	// First record fills the chunk (policy = 1 record), triggering seal on the second.
-	if err := orch.AppendToTier(vaultID, tierID, leaderChunkID, testRecord("rec-1")); err != nil {
+	if err := orch.AppendToVault(vaultID, tierID, leaderChunkID, testRecord("rec-1")); err != nil {
 		t.Fatal(err)
 	}
-	if err := orch.AppendToTier(vaultID, tierID, leaderChunkID, testRecord("rec-2")); err != nil {
+	if err := orch.AppendToVault(vaultID, tierID, leaderChunkID, testRecord("rec-2")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -877,7 +877,7 @@ func TestAppendToTierNoForwarderSingleNode(t *testing.T) {
 	orch.RegisterVault(vault)
 
 	rec := testRecord("single-node")
-	if err := orch.AppendToTier(vaultID, tierID, chunk.ChunkID{}, rec); err != nil {
+	if err := orch.AppendToVault(vaultID, tierID, chunk.ChunkID{}, rec); err != nil {
 		t.Fatal(err)
 	}
 
@@ -898,7 +898,7 @@ func TestAppendToTierVaultNotFound(t *testing.T) {
 	bogusVaultID := glid.New()
 	tierID := glid.New()
 
-	err := orch.AppendToTier(bogusVaultID, tierID, chunk.ChunkID{}, testRecord("data"))
+	err := orch.AppendToVault(bogusVaultID, tierID, chunk.ChunkID{}, testRecord("data"))
 	if err == nil {
 		t.Fatal("expected error for non-existent vault")
 	}
@@ -919,7 +919,7 @@ func TestAppendToTierTierNotFound(t *testing.T) {
 	orch.RegisterVault(vault)
 
 	bogusTierID := glid.New()
-	err := orch.AppendToTier(vaultID, bogusTierID, chunk.ChunkID{}, testRecord("data"))
+	err := orch.AppendToVault(vaultID, bogusTierID, chunk.ChunkID{}, testRecord("data"))
 	if err == nil {
 		t.Fatal("expected error for non-existent tier")
 	}
@@ -1023,7 +1023,7 @@ func TestAppendToTierForwardLifecycle(t *testing.T) {
 	// Append 3 records.
 	for i := range 3 {
 		rec := testRecord("rec-" + string(rune('a'+i)))
-		if err := orch.AppendToTier(vaultID, tierID, chunk.ChunkID{}, rec); err != nil {
+		if err := orch.AppendToVault(vaultID, tierID, chunk.ChunkID{}, rec); err != nil {
 			t.Fatalf("append %d: %v", i, err)
 		}
 	}
@@ -1635,7 +1635,7 @@ func (f *failingForwarder) callCount() int {
 }
 
 // TestAppendToTierForwardingDoesNotBlockOnFullChannel verifies fire-and-forget
-// semantics: AppendToTier commits the record locally and succeeds even when
+// semantics: AppendToVault commits the record locally and succeeds even when
 // the forwarder returns errors. The local append must not be rolled back, and
 // high-volume ingestion (exceeding typical queue capacity) must complete
 // without error regardless of forwarder failures.
@@ -1657,11 +1657,11 @@ func TestAppendToTierForwardingDoesNotBlockOnFullChannel(t *testing.T) {
 	orch.RegisterVault(vault)
 
 	// Append 200 records — well above typical queue capacity.
-	// Every forwarder call fails, but AppendToTier must still succeed.
+	// Every forwarder call fails, but AppendToVault must still succeed.
 	const total = 200
 	for i := 0; i < total; i++ {
-		if err := orch.AppendToTier(vaultID, tierID, chunk.ChunkID{}, testRecord("burst")); err != nil {
-			t.Fatalf("AppendToTier %d: %v", i, err)
+		if err := orch.AppendToVault(vaultID, tierID, chunk.ChunkID{}, testRecord("burst")); err != nil {
+			t.Fatalf("AppendToVault %d: %v", i, err)
 		}
 	}
 

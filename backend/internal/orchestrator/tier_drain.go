@@ -430,7 +430,7 @@ func (o *Orchestrator) drainChunkToNextTier(ctx context.Context, sys *system.Sys
 		if iterErr != nil {
 			return fmt.Errorf("read chunk: %w", iterErr)
 		}
-		if err := o.AppendToTier(vaultID, nextTierID, chunk.ChunkID{}, rec); err != nil {
+		if err := o.AppendToVault(vaultID, nextTierID, chunk.ChunkID{}, rec); err != nil {
 			return fmt.Errorf("append to next tier: %w", err)
 		}
 	}

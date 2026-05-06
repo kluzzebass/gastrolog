@@ -23,7 +23,7 @@ import (
 )
 
 // TestConcurrentAppendToTierAttrIntegrity reproduces gastrolog-4dd48:
-// concurrent AppendToTier calls through the orchestrator corrupt attr.log.
+// concurrent AppendToVault calls through the orchestrator corrupt attr.log.
 func TestConcurrentAppendToTierAttrIntegrity(t *testing.T) {
 	t.Parallel()
 
@@ -71,7 +71,7 @@ func TestConcurrentAppendToTierAttrIntegrity(t *testing.T) {
 			base := gIdx * perGoroutine
 			for i := range perGoroutine {
 				ts := t0.Add(time.Duration(base+i) * time.Microsecond)
-				err := orch.AppendToTier(vaultID, tierID, chunk.ChunkID{}, chunk.Record{
+				err := orch.AppendToVault(vaultID, tierID, chunk.ChunkID{}, chunk.Record{
 					IngestTS: ts,
 					WriteTS:  ts,
 					Raw:      fmt.Appendf(nil, "orch-concurrent-%d-%d", gIdx, i),
@@ -215,7 +215,7 @@ func TestTransitionConcurrentWithAppends(t *testing.T) {
 		t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 		for i := range totalRecords {
 			ts := t0.Add(time.Duration(i) * time.Microsecond)
-			_ = orch.AppendToTier(vaultID, tier0ID, chunk.ChunkID{}, chunk.Record{
+			_ = orch.AppendToVault(vaultID, tier0ID, chunk.ChunkID{}, chunk.Record{
 				IngestTS: ts, WriteTS: ts,
 				Raw: fmt.Appendf(nil, "concurrent-tx-%d", i),
 			})
@@ -900,7 +900,7 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 		defer wg.Done()
 		for i := range 200 {
 			ts := t0.Add(time.Duration(500+i) * time.Microsecond)
-			err := orchA.AppendToTier(vaultID, tierID, chunk.ChunkID{}, chunk.Record{
+			err := orchA.AppendToVault(vaultID, tierID, chunk.ChunkID{}, chunk.Record{
 				IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "during-drain-%d", i),
 			})
 			if err != nil {

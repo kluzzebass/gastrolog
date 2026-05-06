@@ -814,7 +814,7 @@ func TestEjectChunkFileBackedLocalDelivery(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range totalRecords {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		if err := orch.AppendToTier(srcVaultID, srcTierID, chunk.ChunkID{}, chunk.Record{
+		if err := orch.AppendToVault(srcVaultID, srcTierID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts,
 			WriteTS:  ts,
 			Raw:      fmt.Appendf(nil, "eject-%d", i),
@@ -981,7 +981,7 @@ func TestEjectChunkFileBackedRemoteDelivery(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range totalRecords {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		if err := orchA.AppendToTier(srcVaultID, srcTierID, chunk.ChunkID{}, chunk.Record{
+		if err := orchA.AppendToVault(srcVaultID, srcTierID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts, WriteTS: ts,
 			Raw:   fmt.Appendf(nil, "remote-eject-%d", i),
 			Attrs: chunk.Attributes{"level": "error"},

@@ -426,7 +426,7 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 		if err := waitForOrch(ctx); err != nil {
 			return err
 		}
-		err := orch.AppendToTier(vaultID, tierID, leaderChunkID, rec)
+		err := orch.AppendToVault(vaultID, tierID, leaderChunkID, rec)
 		if err != nil && errors.Is(err, orchestrator.ErrVaultNotReady) {
 			return errors.Join(cluster.ErrForwardTargetNotReady, err)
 		}

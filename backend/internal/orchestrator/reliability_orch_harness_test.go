@@ -63,7 +63,7 @@ type orchRelNode struct {
 // orchRelHarness boots N in-process nodes, each running a real orchestrator
 // with a vault-ctl Raft group replicated across all nodes. Unlike the
 // lower-level reliability harness in backend/internal/vaultraft, this one
-// exercises the full orchestrator wiring: ApplyConfig, AppendToTier,
+// exercises the full orchestrator wiring: ApplyConfig, AppendToVault,
 // ListAllChunkMetas, the scheduler, vault readiness gating, and the
 // vault-ctl Raft group built via createTierRaftGroupVaultCtl.
 //
@@ -495,7 +495,7 @@ func (h *orchRelHarness) waitForAllReady() {
 func (h *orchRelHarness) appendOnLeaderForVault(v vaultSpec, rec chunk.Record) error {
 	h.t.Helper()
 	leader := h.waitForVaultCtlLeaderForVault(v)
-	return leader.orch.AppendToTier(v.id, v.tierID, chunk.ChunkID{}, rec)
+	return leader.orch.AppendToVault(v.id, v.tierID, chunk.ChunkID{}, rec)
 }
 
 // sealOnLeaderForVault seals the active chunk for a specific vault on
@@ -676,12 +676,12 @@ func formatChunkSnapshot(m map[string]map[chunk.ChunkID]bool) string {
 // appendOnLeader appends a single record through the **vault-ctl Raft
 // leader** (not the placement leader). The vault-ctl Raft group elects its
 // own leader via normal Raft election; appending elsewhere would succeed
-// at AppendToTier but the announcer's vault-ctl Apply would fail with
+// at AppendToVault but the announcer's vault-ctl Apply would fail with
 // ErrNotLeader (peerConns is nil in this harness, so no forwarder).
 func (h *orchRelHarness) appendOnLeader(rec chunk.Record) error {
 	h.t.Helper()
 	leader := h.waitForVaultCtlLeader()
-	return leader.orch.AppendToTier(h.vaultID, h.tierID, chunk.ChunkID{}, rec)
+	return leader.orch.AppendToVault(h.vaultID, h.tierID, chunk.ChunkID{}, rec)
 }
 
 // sealOnLeader seals the active chunk on every tier of the vault, on the

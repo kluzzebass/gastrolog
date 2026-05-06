@@ -206,7 +206,7 @@ func TestMultiNode_TierTransitionSearchFanOut(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range totalRecords {
 		ts := t0.Add(time.Duration(i) * time.Second)
-		if err := orchData1.AppendToTier(vaultID, tier0ID, chunk.ChunkID{}, chunk.Record{
+		if err := orchData1.AppendToVault(vaultID, tier0ID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts, WriteTS: ts,
 			Raw: fmt.Appendf(nil, "tiered-%d", i),
 		}); err != nil {

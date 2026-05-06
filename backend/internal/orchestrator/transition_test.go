@@ -2205,7 +2205,7 @@ func (d *directChunkReplicator) AppendRecords(_ context.Context, nodeID string, 
 		return fmt.Errorf("directChunkReplicator: unknown node %q", nodeID)
 	}
 	for _, rec := range records {
-		if err := orch.AppendToTier(vaultID, tierID, chunkID, rec); err != nil {
+		if err := orch.AppendToVault(vaultID, tierID, chunkID, rec); err != nil {
 			return err
 		}
 	}
@@ -2666,8 +2666,8 @@ func TestClusterTransitionBurstNoOrphans(t *testing.T) {
 			WriteTS:  ts,
 			Raw:      fmt.Appendf(nil, "burst-%d", i),
 		}
-		if err := leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, rec); err != nil {
-			t.Fatalf("AppendToTier failed at record %d: %v", i, err)
+		if err := leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, rec); err != nil {
+			t.Fatalf("AppendToVault failed at record %d: %v", i, err)
 		}
 	}
 
@@ -2738,7 +2738,7 @@ func TestClusterTransitionThreeTierChainBurst(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range totalRecords {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		if err := leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+		if err := leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts,
 			WriteTS:  ts,
 			Raw:      fmt.Appendf(nil, "chain3-%d", i),
@@ -2835,7 +2835,7 @@ func TestClusterTransitionEventIDPreservedAcrossNodes(t *testing.T) {
 				IngestSeq:  uint32(i),
 			},
 		}
-		if err := leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, rec); err != nil {
+		if err := leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, rec); err != nil {
 			t.Fatalf("append record %d: %v", i, err)
 		}
 	}
@@ -2873,7 +2873,7 @@ func TestClusterTransitionEventIDPreservedAcrossNodes(t *testing.T) {
 }
 
 // TestClusterTransitionLargeBurst ingests a large burst (10K records) through
-// the serialized AppendToTier path and verifies no data loss after transition.
+// the serialized AppendToVault path and verifies no data loss after transition.
 // The burst creates ~100 sealed chunks via the 100-record rotation policy.
 //
 // NOTE: concurrent Append through the file chunk manager's attr.log writer
@@ -2896,7 +2896,7 @@ func TestClusterTransitionLargeBurst(t *testing.T) {
 			WriteTS:  ts,
 			Raw:      fmt.Appendf(nil, "burst-%d", i),
 		}
-		if err := leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, rec); err != nil {
+		if err := leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, rec); err != nil {
 			t.Fatalf("append %d: %v", i, err)
 		}
 	}
@@ -2951,7 +2951,7 @@ func TestClusterTransitionNoChunksLeftBehindOnFollowers(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range totalRecords {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		if err := leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+		if err := leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts,
 			WriteTS:  ts,
 			Raw:      fmt.Appendf(nil, "follower-cleanup-%d", i),
@@ -3223,7 +3223,7 @@ func TestMemoryBudgetEnforcementTransitionsChunks(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 50 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		_ = orch.AppendToTier(vaultID, tier0ID, chunk.ChunkID{}, chunk.Record{
+		_ = orch.AppendToVault(vaultID, tier0ID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts, WriteTS: ts, Raw: make([]byte, 100),
 		})
 	}
@@ -3295,7 +3295,7 @@ func TestMemoryBudgetEnforcementTerminalTierNoTransition(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 20 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		_ = orch.AppendToTier(vaultID, tierID, chunk.ChunkID{}, chunk.Record{
+		_ = orch.AppendToVault(vaultID, tierID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts, WriteTS: ts, Raw: make([]byte, 50),
 		})
 	}
@@ -3387,8 +3387,8 @@ func TestMemoryBudgetEnforcementOnlyRunsOnLeader(t *testing.T) {
 	for i := range 20 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
 		rec := chunk.Record{IngestTS: ts, WriteTS: ts, Raw: make([]byte, 50)}
-		_ = orchLeader.AppendToTier(vaultID, tier0ID, chunk.ChunkID{}, rec)
-		_ = orchFollower.AppendToTier(vaultID, tier0ID, chunk.ChunkID{}, rec)
+		_ = orchLeader.AppendToVault(vaultID, tier0ID, chunk.ChunkID{}, rec)
+		_ = orchFollower.AppendToVault(vaultID, tier0ID, chunk.ChunkID{}, rec)
 	}
 	if active := memCMLeader.Active(); active != nil && active.RecordCount > 0 {
 		_ = memCMLeader.Seal()
