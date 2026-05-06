@@ -28,7 +28,7 @@ type VaultConfig struct {
 
 	// Type is the storage shape (memory / file / jsonl). Cloud-backed vaults
 	// are file vaults with CloudServiceID set; there is no "cloud" type.
-	Type TierType `json:"type,omitempty"`
+	Type VaultType `json:"type,omitempty"`
 
 	// RotationPolicyID references a RotationPolicyConfig.
 	RotationPolicyID *glid.GLID `json:"rotationPolicyId,omitempty"`
