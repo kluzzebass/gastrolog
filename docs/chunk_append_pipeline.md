@@ -94,6 +94,14 @@ the single in-flight record is lost.
 ## Seal Safety
 
 Sealing (rotation or explicit `Seal()`) closes the chunk's file handles.
+The cluster lifecycle (gastrolog-1huz5) treats this as **Active → Sealing**
+on the FSM — `CmdBeginSeal` fires after the in-flight wait completes
+and the active-form files are closed. The chunk does not become
+cluster-wide **Sealed** until `PostSealProcess` runs `sealToGLCB`,
+commits `data.glcb` to disk, and fires `CmdSealChunk`. Anything that
+gates on Sealed (cloud upload, retention, replication catchup) waits
+for that final transition.
+
 If in-flight Phase 2 writes were still running, those handles would become
 invalid. The `chunkState` carries a `sync.WaitGroup` to prevent this:
 

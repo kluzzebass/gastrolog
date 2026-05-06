@@ -167,7 +167,28 @@ Predicate names are illustrative; exact symbols belong in implementation.
 
 Chunk/tier substates (delete pending, transition streamed, tombstone, etc.) **MUST** be mapped in implementation to: **vault-committed**, **tier-local**, or **system-committed**.
 
-### Compact diagram (refine during 5xxbd)
+### Chunk lifecycle (Phase 3, gastrolog-1huz5)
+
+A chunk traverses three FSM-tracked states. The state is `vault-committed` (replicated through the per-vault control-plane Raft).
+
+```mermaid
+stateDiagram-v2
+  direction LR
+  [*] --> Active: CmdCreateChunk
+  Active --> Sealing: CmdBeginSeal (rotation policy fired)
+  Sealing --> Sealed: CmdSealChunk (sealToGLCB committed data.glcb)
+  Sealed --> [*]: CmdDeleteChunk
+```
+
+| State    | Producer trigger                          | Files on the leader                          | Followers                              |
+|----------|-------------------------------------------|----------------------------------------------|----------------------------------------|
+| Active   | `CmdCreateChunk`                          | `raw.log`+`idx.log`+`attr.log`+`dict.log` open for append; B+ trees in use | Best-effort active-form mirror via record streaming |
+| Sealing  | `CmdBeginSeal` (in `sealActiveLocked`)    | active-form files closed but readable; B+ trees removed; `data.glcb` not yet on disk | Mirror frozen — no further append; not yet a promotion candidate |
+| Sealed   | `CmdSealChunk` (in `PostSealProcess` after `sealToGLCB`) | `data.glcb` on disk; FSM carries the GLCB whole-blob digest | Eligible for sealed-form GLCB byte replication from leader |
+
+**Authority during Sealing.** Only the leader's bytes are authoritative. `OverlayFromFSM` projects the FSM state onto `chunk.ChunkMeta`, so retention / archival sweep / cloud backfill / replication catchup gate on `State == Sealed` rather than the local `Sealed` bool. The local bool flips at `sealActiveLocked` time; the cluster-wide signal flips when `sealToGLCB` commits the GLCB.
+
+### Vault state diagram
 
 ```mermaid
 stateDiagram-v2
