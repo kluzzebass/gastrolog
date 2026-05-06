@@ -401,28 +401,35 @@ func TestListAllChunkMetasIncludesFollowerOnlyTiers(t *testing.T) {
 	}
 }
 
-// --- LocalLeaderTierIDs ---
+// --- LocalLeaderVaultIDs ---
 
-func TestLocalLeaderTierIDsExcludesFollowers(t *testing.T) {
+func TestLocalLeaderVaultIDsExcludesFollowerOnlyVaults(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
 	leaderTierID := glid.New()
 	followerTierID := glid.New()
-	vaultID := glid.New()
+	leaderVaultID := glid.New()
+	followerVaultID := glid.New()
 
+	// Vault with a leader tier on this node — should be in the result.
 	leader := newMemTier(t, leaderTierID, false, nil)
-	follower := newMemTier(t, followerTierID, true, nil)
-	vault := NewVault(vaultID, leader, follower)
-	vault.Name = "mixed-roles"
-	orch.RegisterVault(vault)
+	leaderVault := NewVault(leaderVaultID, leader)
+	leaderVault.Name = "leader-vault"
+	orch.RegisterVault(leaderVault)
 
-	ids := orch.LocalLeaderTierIDs()
-	if !ids[leaderTierID] {
-		t.Error("leader tier should be in LocalLeaderTierIDs")
+	// Vault with only a follower tier on this node — should NOT be in result.
+	follower := newMemTier(t, followerTierID, true, nil)
+	followerVault := NewVault(followerVaultID, follower)
+	followerVault.Name = "follower-vault"
+	orch.RegisterVault(followerVault)
+
+	ids := orch.LocalLeaderVaultIDs()
+	if !ids[leaderVaultID] {
+		t.Error("vault with a leader tier should be in LocalLeaderVaultIDs")
 	}
-	if ids[followerTierID] {
-		t.Error("follower tier should NOT be in LocalLeaderTierIDs")
+	if ids[followerVaultID] {
+		t.Error("vault with only follower tiers should NOT be in LocalLeaderVaultIDs")
 	}
 }
 
