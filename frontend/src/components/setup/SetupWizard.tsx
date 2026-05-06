@@ -4,6 +4,7 @@ import { useThemeSync } from "../../hooks/useThemeSync";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useToast } from "../Toast";
 import { systemClient } from "../../api/client";
+import { VaultType } from "../../api/gen/gastrolog/v1/system_pb";
 import { usePutSetupSettings } from "../../api/hooks/useSettings";
 import { useGenerateName } from "../../api/hooks/useSystem";
 import { useQueryClient } from "@tanstack/react-query";
@@ -143,9 +144,9 @@ export function SetupWizard() {
     const rotationIdBytes = hasRotation ? crypto.getRandomValues(new Uint8Array(16)) : new Uint8Array(16);
     const retentionIdBytes = hasRetention ? crypto.getRandomValues(new Uint8Array(16)) : new Uint8Array(16);
 
-    // Setup wizard should create a TierConfig with the rotation/retention
-    // policies and vault type, with vaultId pointing to this vault.
-    // For now, policies are created but not linked to tiers (gastrolog-e0s05).
+    // Phase 2 (gastrolog-3iy5l): the vault carries its own storage shape
+    // and policy bindings — no separate TierConfig write. The FSM
+    // auto-syncs the matching tier on PutVault.
 
     // Build policy promises outside try so the compiler can optimize conditionals.
     const policyPromises: Promise<unknown>[] = [
@@ -185,12 +186,19 @@ export function SetupWizard() {
       // 1. Create independent policies in parallel.
       await Promise.all(policyPromises);
 
-      // 2. Create vault (tier assignment will be handled in a follow-up).
+      // 2. Create vault with the storage shape inline.
       await systemClient.putVault({
         config: {
           id: vaultIdBytes,
           name: vaultName,
           enabled: true,
+          type: VaultType.FILE,
+          storageClass: 1,
+          replicationFactor: 1,
+          rotationPolicyId: hasRotation ? rotationIdBytes : new Uint8Array(0),
+          retentionRules: hasRetention
+            ? [{ retentionPolicyId: retentionIdBytes, action: "expire", ejectRouteIds: [] }]
+            : [],
         },
       });
 

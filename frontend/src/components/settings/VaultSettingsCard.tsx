@@ -345,17 +345,26 @@ export function VaultSettingsCard({
         enabled: boolean;
       },
     ) => ({
-      // Phase 2: PutVault takes the full VaultConfig. Clone the vault
-      // (preserving all existing fields) and just overlay name/enabled
-      // from the edit form. clone() is the proto-safe equivalent of a
-      // spread copy on a class instance.
-      config: (() => {
-        const c = vault.clone();
-        c.id = decode(id);
-        c.name = e.name;
-        c.enabled = e.enabled;
-        return c;
-      })(),
+      // Phase 2: PutVault takes the full VaultConfig. Build a fresh
+      // proto carrying every field from the existing vault, with
+      // name/enabled overlaid from the edit form.
+      config: new VaultConfig({
+        id: decode(id),
+        name: e.name,
+        enabled: e.enabled,
+        type: vault.type,
+        storageClass: vault.storageClass,
+        cloudServiceId: vault.cloudServiceId,
+        replicationFactor: vault.replicationFactor,
+        path: vault.path,
+        rotationPolicyId: vault.rotationPolicyId,
+        retentionRules: vault.retentionRules,
+        memoryBudgetBytes: vault.memoryBudgetBytes,
+        cacheEviction: vault.cacheEviction,
+        cacheBudget: vault.cacheBudget,
+        cacheTtl: vault.cacheTtl,
+        placements: vault.placements,
+      }),
     }),
     onDeleteTransform: (id) => ({ id, force: true, deleteData }),
     // Don't reset edit state eagerly — props are stale inside the async
