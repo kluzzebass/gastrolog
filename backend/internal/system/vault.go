@@ -187,23 +187,6 @@ func MergeVaultFromTiers(v VaultConfig, tiers []TierConfig) VaultConfig {
 	return v
 }
 
-// VaultPlacements returns the placements for a vault by looking up its
-// (single) tier and returning that tier's placements. Bridge helper used
-// during the vault refactor (gastrolog-257l7) so callers can express
-// placement queries by vaultID instead of tierID. Once tiers go away,
-// placements will be stored vault-keyed and this helper collapses to a
-// direct lookup.
-//
-// In the 1:N tier-vault model that still exists during the migration,
-// VaultPlacements returns the placements of the vault's first tier
-// (lowest Position). If the vault has no tiers, returns nil.
-func VaultPlacements(tiers []TierConfig, placementsByTier map[glid.GLID][]TierPlacement, vaultID glid.GLID) []TierPlacement {
-	tierIDs := VaultTierIDs(tiers, vaultID)
-	if len(tierIDs) == 0 {
-		return nil
-	}
-	return placementsByTier[tierIDs[0]]
-}
 
 // DistributionMode controls how messages are distributed across route destinations.
 type DistributionMode string
