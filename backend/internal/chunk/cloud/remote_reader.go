@@ -10,6 +10,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 
 	"gastrolog/internal/blobstore"
+	"gastrolog/internal/chunk"
 )
 
 // DownloadAndUnwrap fetches a zstd-wrapped GLCB from the blob store,
@@ -29,11 +30,14 @@ import (
 func DownloadAndUnwrap(ctx context.Context, store blobstore.Store, key string, dst *os.File) error {
 	rc, err := store.Download(ctx, key)
 	if err != nil {
+		// Translate blob-store sentinels into chunk-level sentinels so
+		// callers (cursor open, query path) can reason about archival
+		// state and missing chunks without reaching into blobstore.
 		if errors.Is(err, blobstore.ErrBlobArchived) {
-			return fmt.Errorf("download cloud blob %s: %w (archived)", key, err)
+			return fmt.Errorf("%w: %s: %w", chunk.ErrChunkArchived, key, err)
 		}
 		if errors.Is(err, blobstore.ErrBlobNotFound) {
-			return fmt.Errorf("download cloud blob %s: %w (not found)", key, err)
+			return fmt.Errorf("%w: %s: %w", chunk.ErrChunkSuspect, key, err)
 		}
 		return fmt.Errorf("download cloud blob %s: %w", key, err)
 	}

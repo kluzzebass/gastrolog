@@ -75,6 +75,5 @@ func projectChunkMeta(m chunk.ChunkMeta) tierfsm.ManifestEntry {
 		SourceEnd:   m.SourceEnd,
 		CloudBacked: m.CloudBacked,
 		Archived:    m.Archived,
-		NumFrames:   m.NumFrames,
 	}
 }

@@ -171,50 +171,6 @@ func TestColdCacheDownloadsToChunkDir(t *testing.T) {
 	}
 }
 
-// TestRangeRequestFallsBackWhenDownloadFails covers the case where the
-// chunk has no in-tree warm cache AND the full blob download fails — we
-// fall back to range-request reads via the remote reader. Uses a faulty
-// blobstore wrapper to break Download but keep DownloadRange working.
-func TestRangeRequestFallsBackWhenDownloadFails(t *testing.T) {
-	t.Parallel()
-	vaultID := glid.New()
-	wrap := &downloadOnlyFaultStore{Store: blobstore.NewMemory()}
-	store := &countingStore{Store: wrap}
-
-	cm, err := NewManager(Config{
-		Dir:            t.TempDir(),
-		Now:            time.Now,
-		RotationPolicy: chunk.NewRecordCountPolicy(10000),
-		CloudStore:     store,
-		VaultID:        vaultID,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer cm.Close()
-
-	chunkID := ingestAndUpload(t, cm, 200)
-	if err := os.Remove(filepath.Join(cm.chunkDir(chunkID), dataGLCBFileName)); err != nil {
-		t.Fatal(err)
-	}
-
-	wrap.failDownload = true
-	store.downloads.Store(0)
-	store.downloadRanges.Store(0)
-
-	cursor, err := cm.OpenCursor(chunkID)
-	if err != nil {
-		t.Fatalf("OpenCursor should succeed via range fallback: %v", err)
-	}
-	count := drainCursor(t, cursor)
-	if count != 200 {
-		t.Errorf("read %d records, expected 200", count)
-	}
-	if ranges := store.downloadRanges.Load(); ranges == 0 {
-		t.Error("expected at least one DownloadRange call after Download failed")
-	}
-}
-
 // TestDeleteRemovesWarmCache covers the chunk-delete path: deleting a
 // cloud-backed chunk should remove the in-tree warm cache copy too so
 // retention/disk-pressure semantics keep working without the legacy
@@ -254,21 +210,6 @@ func drainCursor(t *testing.T, cursor chunk.RecordCursor) int {
 		}
 		count++
 	}
-}
-
-// downloadOnlyFaultStore returns ErrSimulated for full-blob Download calls
-// while letting DownloadRange go through. Used to force the range-request
-// fallback path.
-type downloadOnlyFaultStore struct {
-	blobstore.Store
-	failDownload bool
-}
-
-func (s *downloadOnlyFaultStore) Download(ctx context.Context, key string) (io.ReadCloser, error) {
-	if s.failDownload {
-		return nil, errors.New("simulated full-blob download failure")
-	}
-	return s.Store.Download(ctx, key)
 }
 
 // staticVerifier returns a fixed expected digest for any chunk. (zero, false)
@@ -329,10 +270,10 @@ func TestColdCacheVerifiesBlobDigest(t *testing.T) {
 		t.Errorf("matching digest: read %d records, expected 50", got)
 	}
 
-	// Cold-cache + wrong expected digest: the download must be rejected, the
-	// tmp file must be cleaned up, and OpenCursor must fall back to the
-	// range-request reader (which doesn't go through verification — it
-	// streams from the authoritative cloud copy directly).
+	// Cold-cache + wrong expected digest: the download must be rejected and
+	// the tmp file cleaned up. Phase 6 (gastrolog-69fd5) removed the
+	// range-request fallback — a digest mismatch now surfaces an error
+	// rather than silently switching to per-frame range reads.
 	if err := os.Remove(glcbPath); err != nil {
 		t.Fatal(err)
 	}
@@ -343,12 +284,8 @@ func TestColdCacheVerifiesBlobDigest(t *testing.T) {
 	verifier.digest = bogus
 	verifier.have = true
 
-	cursor, err = cm.OpenCursor(chunkID)
-	if err != nil {
-		t.Fatalf("OpenCursor (mismatched digest, range fallback): %v", err)
-	}
-	if got := drainCursor(t, cursor); got != 50 {
-		t.Errorf("range fallback: read %d records, expected 50", got)
+	if _, err = cm.OpenCursor(chunkID); err == nil {
+		t.Fatal("OpenCursor (mismatched digest): expected error, got nil")
 	}
 	if _, err := os.Stat(glcbPath); !os.IsNotExist(err) {
 		t.Errorf("rejected blob should not be promoted to data.glcb (stat err=%v)", err)

@@ -105,7 +105,7 @@ func TestFSMUpload(t *testing.T) {
 	applyCmd(t, fsm, MarshalCreateChunk(id, now, now, now))
 	applyCmd(t, fsm, MarshalSealChunk(id, now, 200, 80000, now, now, now, false))
 	applyCmd(t, fsm, MarshalCompressChunk(id, 30000))
-	applyCmd(t, fsm, MarshalUploadChunk(id, 25000, 1000, 2000, 3000, 4000, 16, [32]byte{}, glid.GLID{}, 0))
+	applyCmd(t, fsm, MarshalUploadChunk(id, 25000, 1000, 2000, 3000, 4000, [32]byte{}, glid.GLID{}, 0))
 
 	e := fsm.Get(id)
 	if !e.CloudBacked {
@@ -125,9 +125,6 @@ func TestFSMUpload(t *testing.T) {
 	}
 	if e.SourceIdxSize != 4000 {
 		t.Errorf("SourceIdxSize: got %d, want 4000", e.SourceIdxSize)
-	}
-	if e.NumFrames != 16 {
-		t.Errorf("NumFrames: got %d, want 16", e.NumFrames)
 	}
 }
 
@@ -167,7 +164,7 @@ func TestFSMSnapshotRestore(t *testing.T) {
 	applyCmd(t, fsm, MarshalCreateChunk(id2, now, now, now))
 	applyCmd(t, fsm, MarshalSealChunk(id2, now.Add(2*time.Second), 200, 80000, now.Add(2*time.Second), now.Add(2*time.Second), now.Add(2*time.Second), false))
 	applyCmd(t, fsm, MarshalCompressChunk(id2, 30000))
-	applyCmd(t, fsm, MarshalUploadChunk(id2, 25000, 100, 200, 300, 400, 8, [32]byte{}, glid.GLID{}, 0))
+	applyCmd(t, fsm, MarshalUploadChunk(id2, 25000, 100, 200, 300, 400, [32]byte{}, glid.GLID{}, 0))
 
 	id3 := testChunkID(30)
 	applyCmd(t, fsm, MarshalCreateChunk(id3, now, now, now))
@@ -200,9 +197,9 @@ func TestFSMSnapshotRestore(t *testing.T) {
 
 	// Verify cloud-backed chunk.
 	e2 := fsm2.Get(id2)
-	if e2 == nil || !e2.CloudBacked || e2.NumFrames != 8 || e2.DiskBytes != 25000 {
-		t.Errorf("chunk 2: cloud=%v, frames=%d, diskBytes=%d",
-			e2 != nil && e2.CloudBacked, e2.NumFrames, e2.DiskBytes)
+	if e2 == nil || !e2.CloudBacked || e2.DiskBytes != 25000 {
+		t.Errorf("chunk 2: cloud=%v, diskBytes=%d",
+			e2 != nil && e2.CloudBacked, e2.DiskBytes)
 	}
 	if e2.IngestIdxOffset != 100 || e2.SourceIdxSize != 400 {
 		t.Errorf("chunk 2: TOC offsets wrong")

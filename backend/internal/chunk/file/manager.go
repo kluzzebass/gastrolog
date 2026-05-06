@@ -300,7 +300,7 @@ type chunkMeta struct {
 	sourceIdxOffset int64
 	sourceIdxSize   int64
 
-	numFrames int32 // seekable zstd frame count (cloud chunks only)
+
 
 	// rawBytes is the uncompressed record-data size (sum of frame lengths)
 	// captured at sealToGLCB time. Distinct from logicalDataBytes which on
@@ -333,7 +333,6 @@ func (m *chunkMeta) toChunkMeta() chunk.ChunkMeta {
 		IngestTSMonotonic: m.ingestTSMonotonic,
 		CloudBacked:       m.cloudBacked,
 		Archived:    m.archived,
-		NumFrames:   m.numFrames,
 	}
 }
 
@@ -3010,18 +3009,16 @@ func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
 		var (
 			ingestOff, ingestSize int64
 			sourceOff, sourceSize int64
-			numFrames             int32
 		)
 		if meta != nil {
 			ingestOff = meta.ingestIdxOffset
 			ingestSize = meta.ingestIdxSize
 			sourceOff = meta.sourceIdxOffset
 			sourceSize = meta.sourceIdxSize
-			numFrames = meta.numFrames
 		}
 		m.mu.Unlock()
 		if meta != nil {
-			m.cfg.Announcer.AnnounceAttachOffsets(id, ingestOff, ingestSize, sourceOff, sourceSize, numFrames)
+			m.cfg.Announcer.AnnounceAttachOffsets(id, ingestOff, ingestSize, sourceOff, sourceSize)
 		}
 	}
 
@@ -3931,7 +3928,6 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		SourceIdxOffset: meta.sourceIdxOffset,
 		SourceIdxSize:   meta.sourceIdxSize,
 	}
-	numFrames := meta.numFrames
 	m.mu.Unlock()
 
 	// If the blob already exists (leader or another replica uploaded first),
@@ -4032,8 +4028,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		m.cfg.Announcer.AnnounceUpload(id, blobSize,
 			toc.IngestIdxOffset, toc.IngestIdxSize,
 			toc.SourceIdxOffset, toc.SourceIdxSize,
-			numFrames,
-			meta.blobDigest, m.cfg.CloudServiceID, currentKeyScheme)
+						meta.blobDigest, m.cfg.CloudServiceID, currentKeyScheme)
 	}
 
 	// Delete the multi-file data artifacts (raw.log/idx.log/etc.) — they
@@ -4063,7 +4058,6 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		meta.ingestIdxSize = toc.IngestIdxSize
 		meta.sourceIdxOffset = toc.SourceIdxOffset
 		meta.sourceIdxSize = toc.SourceIdxSize
-		meta.numFrames = numFrames
 		delete(m.metas, id)
 	}
 	m.mu.Unlock()
@@ -4124,7 +4118,6 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 	ingestIdxSize := am.ingestIdxSize
 	sourceIdxOff := am.sourceIdxOffset
 	sourceIdxSize := am.sourceIdxSize
-	numFrames := am.numFrames
 	blobDigest := am.blobDigest
 
 	// FSM-first: announce before any local mutation. Applier.Apply blocks on
@@ -4138,8 +4131,7 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 		m.cfg.Announcer.AnnounceUpload(id, blobSize,
 			ingestIdxOff, ingestIdxSize,
 			sourceIdxOff, sourceIdxSize,
-			numFrames,
-			blobDigest, m.cfg.CloudServiceID, currentKeyScheme)
+						blobDigest, m.cfg.CloudServiceID, currentKeyScheme)
 	}
 
 	// Delete the multi-file data artifacts (raw.log/idx.log/etc.) — same
@@ -4232,7 +4224,6 @@ func (m *Manager) RegisterCloudChunk(id chunk.ChunkID, info chunk.CloudChunkInfo
 		ingestIdxSize:     info.IngestIdxSize,
 		sourceIdxOffset:   info.SourceIdxOffset,
 		sourceIdxSize:     info.SourceIdxSize,
-		numFrames:         info.NumFrames,
 	}
 
 	m.cloudIdxMu.Lock()
@@ -4326,7 +4317,7 @@ func (m *Manager) loadCloudChunks() error {
 		// Drop local m.metas entries for chunks that the cloud index also
 		// holds — post step 7j the local data.glcb sticks around as warm
 		// cache after upload, but the authoritative meta (with archived /
-		// numFrames / TOC offsets) is the cloud index entry. Without this
+		// TOC offsets) is the cloud index entry. Without this
 		// reconciliation a restart resurrects a stale local-sealed meta
 		// that masks the cloud-recorded archived flag. The data.glcb file
 		// itself stays put — OpenCursor's local-GLCB fast path picks it

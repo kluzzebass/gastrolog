@@ -276,8 +276,8 @@ func buildChunkKV(c *v1.ChunkMeta, tierName string) [][2]string {
 		{"Replicas", strconv.Itoa(int(c.ReplicaCount))},
 	}
 
-	if c.CloudBacked && c.NumFrames > 0 {
-		pairs = append(pairs, [2]string{"Cloud", fmt.Sprintf("GLCB, %d seekable zstd frame(s)", c.NumFrames)})
+	if c.CloudBacked {
+		pairs = append(pairs, [2]string{"Cloud", "GLCB (zstd-wrapped on transport)"})
 	}
 	if c.StorageClass != "" {
 		pairs = append(pairs, [2]string{"Storage Class", c.StorageClass})

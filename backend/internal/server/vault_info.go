@@ -398,12 +398,16 @@ func ChunkMetaToProto(meta chunk.ChunkMeta) *apiv1.ChunkMeta {
 		Sealed:       meta.Sealed,
 		RecordCount:  meta.RecordCount,
 		Bytes:        meta.Bytes,
-		Compressed:   meta.Sealed, // sealed chunks are GLCB which is zstd-compressed (gastrolog-24m1t step 7f)
+		// Compressed historically meant "raw.log/attr.log are zstd-compressed",
+		// then "GLCB seekable-zstd" after step 7f. Post-Phase-6 the GLCB is
+		// uncompressed locally and zstd-wrapped only on the cloud transport,
+		// so the flag means "the on-disk bytes carry compression" and is
+		// always false for sealed chunks now (gastrolog-69fd5).
+		Compressed:   false,
 		DiskBytes:    meta.DiskBytes,
 		CloudBacked:  meta.CloudBacked,
 		Archived:     meta.Archived,
 		StorageClass: meta.StorageClass,
-		NumFrames:    meta.NumFrames,
 	}
 	if !meta.IngestStart.IsZero() {
 		pb.IngestStart = timestamppb.New(meta.IngestStart)

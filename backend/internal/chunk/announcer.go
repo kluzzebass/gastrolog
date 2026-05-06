@@ -29,13 +29,13 @@ type MetadataAnnouncer interface {
 	// section-offset fields stayed zero until AnnounceUpload — leaving
 	// sealed-but-not-yet-uploaded chunks invisible to the histogram's
 	// GLCB section-reader path.
-	AnnounceAttachOffsets(id ChunkID, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, numFrames int32)
+	AnnounceAttachOffsets(id ChunkID, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64)
 	// AnnounceUpload publishes a successful cloud upload. hash is the GLCB
 	// whole-blob digest (32 bytes) read from the TOC footer; cloudServiceID
 	// is the cloud service the chunk was actually uploaded to (snapshot,
 	// survives later tier reconfiguration); keyScheme selects the
 	// blobKey() derivation function (only scheme 0 today). See gastrolog-grnc3.
-	AnnounceUpload(id ChunkID, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, numFrames int32, hash [32]byte, cloudServiceID glid.GLID, keyScheme uint8)
+	AnnounceUpload(id ChunkID, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, hash [32]byte, cloudServiceID glid.GLID, keyScheme uint8)
 	AnnounceDelete(id ChunkID)
 }
 

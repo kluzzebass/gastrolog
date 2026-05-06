@@ -190,8 +190,8 @@ flowchart TD
 | Chunk State | Cursor Type | I/O Method |
 |-------------|------------|------------|
 | Active (unsealed) | `stdioCursor` | `pread` on raw.log, idx.log, attr.log |
-| Sealed (local) | `mmapCursor` | Memory-mapped files, random access via offsets |
-| Cloud-backed | `seekableCursor` | Range requests per zstd frame via `RemoteReader` (rare — deferred for bounded queries) |
+| Sealed (local) | `mmapCursor` | Memory-mapped GLCB, random access via record-index offsets |
+| Cloud-backed | `glcbCursor` (after warm-cache fill) | One whole-blob download → unwrap zstd → mmap GLCB; reads are local from then on |
 
 ### Memory Vault Cursors
 
@@ -205,32 +205,35 @@ query's limit, cloud cursors are never opened and zero cloud I/O occurs.
 Cloud cursors are opened when the query needs more records than local
 chunks can provide — typically for longer time ranges or unbounded queries.
 
-When a cloud cursor is opened, `RemoteReader` fetches only what's needed via
-range requests:
+Phase 6 (gastrolog-69fd5) replaced the per-record range-request path with
+a whole-blob download + warm-cache fill. The first cursor pays one
+download; every subsequent read on the same chunk goes through the local
+mmap fast path:
 
 ```mermaid
 sequenceDiagram
     participant QE as Query Engine
     participant CM as Chunk Manager
     participant S3 as Cloud Store
+    participant Cache as Local data.glcb
 
     QE->>CM: OpenCursor(chunkID)
-    CM->>S3: DownloadRange(header + dict + index)
-    S3-->>CM: ~few KB
-    CM->>S3: DownloadRange(TOC, last 48 bytes)
-    S3-->>CM: TS index offsets
-    CM-->>QE: RemoteReader cursor
+    CM->>S3: Download(chunk.glcb.zst)
+    S3-->>CM: zstd-wrapped GLCB stream
+    CM->>Cache: DownloadAndUnwrap → data.glcb
+    CM->>CM: VerifyDownloadedBlob (TOC digest vs FSM)
+    CM-->>QE: glcbCursor over mmap'd data.glcb
 
-    loop Per record (TS-index-narrowed positions)
+    loop Per record
         QE->>CM: ReadRecord(pos)
-        CM->>S3: DownloadRange(zstd frame)
-        S3-->>CM: ~256KB compressed frame
-        CM-->>QE: decompressed record
+        CM->>Cache: ReadAt(recordsBaseOff + index[pos].Offset, size)
+        CM-->>QE: record
     end
 ```
 
-The TS index narrows access to specific positions, so typically only a
-handful of frames are fetched rather than the full blob.
+The local cache is byte-for-byte equivalent to a freshly-sealed local
+chunk. Subsequent queries reuse the cache; eviction policy reclaims
+disk space under pressure (`gastrolog-2idw8`).
 
 ## Cloud Index Infrastructure
 
@@ -241,22 +244,24 @@ heap. This keeps memory stable regardless of cloud-backed chunk count.
 flowchart LR
     subgraph "Per-Vault Disk"
         BTree["cloud.idx (B+ tree)"]
-        TSCache["TS cache files"]
+        WarmCache["data.glcb warm cache"]
     end
 
     subgraph "Cloud Store"
-        Blobs["*.glcb blobs"]
+        Blobs["chunk.glcb.zst blobs"]
     end
 
     BTree -->|"ChunkID → metadata"| Meta["ChunkMeta"]
-
-    Blobs -->|"Range read (TS index section)"| TSCache
-    TSCache -->|"pread binary search"| Positions["Start position for time bounds"]
+    Blobs -->|"DownloadAndUnwrap"| WarmCache
+    WarmCache -->|"mmap GLCB sections"| Positions["Records / TS indexes / TOC"]
 ```
 
-**TS index cache**: on first query, the TS index section (~840KB for 70K records)
-is downloaded via a single range request and cached as a local file. Subsequent
-queries use `pread`-based binary search on the cache file — no cloud I/O.
+**Warm cache.** First read of a cloud-backed chunk pulls the
+zstd-wrapped blob, decompresses it into a local `data.glcb`, and verifies
+the TOC's blob digest against the FSM-stamped value (gastrolog-grnc3).
+The TS index, record index, and records all live in the same file from
+that point on — `pread`-based binary search runs against the local mmap
+with no further cloud I/O.
 
 ## Multi-Node Cluster Query
 

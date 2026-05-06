@@ -1242,7 +1242,6 @@ func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.App
 			}
 			m.CloudBacked = e.CloudBacked
 			m.Archived = e.Archived
-			m.NumFrames = e.NumFrames
 			return m
 		},
 		manifestEntries: func() []tierfsm.ManifestEntry {
@@ -1433,7 +1432,7 @@ func wireTierFSMOnUpload(g *raftgroup.Group, tierID glid.GLID, cm chunk.ChunkMan
 	}
 	fsm.SetOnUpload(func(e tierfsm.ManifestEntry) {
 		// Notify WatchChunks subscribers: the chunk transitioned to
-		// cloud-backed (DiskBytes / NumFrames / CloudBacked changed
+		// cloud-backed (DiskBytes / CloudBacked changed
 		// in the FSM), which the inspector renders. Fire regardless
 		// of RegisterCloudChunk outcome — FSM state is authoritative.
 		// See gastrolog-2ob86.
@@ -1454,7 +1453,6 @@ func wireTierFSMOnUpload(g *raftgroup.Group, tierID glid.GLID, cm chunk.ChunkMan
 			IngestIdxSize:   e.IngestIdxSize,
 			SourceIdxOffset: e.SourceIdxOffset,
 			SourceIdxSize:   e.SourceIdxSize,
-			NumFrames:       e.NumFrames,
 		}
 		if err := registrar.RegisterCloudChunk(e.ID, info); err != nil {
 			if logger != nil {

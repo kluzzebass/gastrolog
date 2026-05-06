@@ -177,7 +177,6 @@ func TestListAllChunkMetasOverlaysFromFSM(t *testing.T) {
 	tier.OverlayFromFSM = func(m chunk.ChunkMeta) chunk.ChunkMeta {
 		m.CloudBacked = true
 		m.Archived = true
-		m.NumFrames = 7
 		return m
 	}
 
@@ -206,8 +205,8 @@ func TestListAllChunkMetasOverlaysFromFSM(t *testing.T) {
 		t.Fatal("test setup wrong: raw meta should have CloudBacked=false")
 	}
 
-	// The overlaid view from ListAllChunkMetas should have CloudBacked=true,
-	// Archived=true, NumFrames=7 — the cluster-wide truth from the FSM.
+	// The overlaid view from ListAllChunkMetas should have CloudBacked=true
+	// and Archived=true — the cluster-wide truth from the FSM.
 	metas, err := orch.ListAllChunkMetas(vaultID)
 	if err != nil {
 		t.Fatal(err)
@@ -222,9 +221,6 @@ func TestListAllChunkMetasOverlaysFromFSM(t *testing.T) {
 	if !got.Archived {
 		t.Errorf("Archived not overlaid from FSM: got %+v", got)
 	}
-	if got.NumFrames != 7 {
-		t.Errorf("NumFrames not overlaid from FSM: got %d, want 7", got.NumFrames)
-	}
 
 	// GetChunkMeta should also apply the overlay.
 	chunkID := got.ID
@@ -232,7 +228,7 @@ func TestListAllChunkMetasOverlaysFromFSM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetChunkMeta: %v", err)
 	}
-	if !single.CloudBacked || !single.Archived || single.NumFrames != 7 {
+	if !single.CloudBacked || !single.Archived {
 		t.Errorf("GetChunkMeta did not apply overlay: %+v", single)
 	}
 }
