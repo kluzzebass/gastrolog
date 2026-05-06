@@ -108,6 +108,13 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, tierID glid
 		}
 	}
 
+	// Phase 3 (gastrolog-1huz5): overlay through FSM so catchupCandidates'
+	// .Sealed gate excludes Sealing chunks (GLCB not yet committed).
+	if tier.OverlayFromFSM != nil {
+		for i := range metas {
+			metas[i] = tier.OverlayFromFSM(metas[i])
+		}
+	}
 	sealed := catchupCandidates(metas, tier.Type, manifestSet)
 
 	if len(sealed) == 0 {
@@ -203,6 +210,13 @@ func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID, tierI
 		m, ok := bySealedID[id]
 		if !ok {
 			continue // leader doesn't have it locally either
+		}
+		// Phase 3 (gastrolog-1huz5): catchup ships sealed-form GLCBs
+		// only. Sealing chunks have no GLCB yet — overlay through the
+		// FSM so we don't queue a push for a chunk that's still in
+		// assembly.
+		if tier.OverlayFromFSM != nil {
+			m = tier.OverlayFromFSM(m)
 		}
 		if !m.Sealed {
 			continue

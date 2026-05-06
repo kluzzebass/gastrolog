@@ -504,6 +504,12 @@ func (o *Orchestrator) rebuildTierIndexes(ctx context.Context, vaultID glid.GLID
 	}
 
 	for _, meta := range metas {
+		// Phase 3 (gastrolog-1huz5): rebuild indexes only for chunks
+		// the FSM considers Sealed — Sealing chunks have no GLCB yet,
+		// so the index builder would fail to read records.
+		if tier.OverlayFromFSM != nil {
+			meta = tier.OverlayFromFSM(meta)
+		}
 		if !meta.Sealed {
 			continue
 		}
