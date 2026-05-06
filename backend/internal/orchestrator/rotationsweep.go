@@ -120,8 +120,10 @@ func (o *Orchestrator) applyRotationFromConfig(sys *system.System,
 	if tierCfg == nil {
 		return
 	}
-	// Refresh replication targets from current system.
-	tier.FollowerTargets = system.FollowerTargets(sys.Runtime.TierPlacements[tierCfg.ID], sys.Runtime.NodeStorageConfigs)
+	// Refresh replication targets from current system. Reads placements
+	// from VaultConfig (mirrored from tier placements via the FSM bridge —
+	// gastrolog-257l7).
+	tier.FollowerTargets = system.FollowerTargets(vaultCfg.Placements, sys.Runtime.NodeStorageConfigs)
 
 	if tierCfg.RotationPolicyID == nil {
 		return
