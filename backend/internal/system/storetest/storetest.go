@@ -397,10 +397,10 @@ func testRetentionPolicies(t *testing.T, newStore func(t *testing.T) system.Stor
 		if err := s.PutVault(ctx, v); err != nil {
 			t.Fatalf("PutVault: %v", err)
 		}
-		if err := s.PutTier(ctx, system.TierConfig{ID: tierID1, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0}); err != nil {
+		if err := s.PutTier(ctx, system.TierConfig{ID: tierID1, Name: "t1", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0}); err != nil {
 			t.Fatalf("PutTier t1: %v", err)
 		}
-		if err := s.PutTier(ctx, system.TierConfig{ID: tierID2, Name: "t2", Type: system.TierTypeFile, VaultID: vaultID, Position: 1}); err != nil {
+		if err := s.PutTier(ctx, system.TierConfig{ID: tierID2, Name: "t2", Type: system.VaultTypeFile, VaultID: vaultID, Position: 1}); err != nil {
 			t.Fatalf("PutTier t2: %v", err)
 		}
 
@@ -1709,7 +1709,7 @@ func testTiers(t *testing.T, newStore func(t *testing.T) system.Store) {
 		tier := system.TierConfig{
 			ID:                id,
 			Name:              "hot",
-			Type:              system.TierTypeFile,
+			Type:              system.VaultTypeFile,
 			VaultID:           vaultID,
 			Position:          1,
 			RotationPolicyID:  &rpID,
@@ -1731,8 +1731,8 @@ func testTiers(t *testing.T, newStore func(t *testing.T) system.Store) {
 		if got.Name != "hot" {
 			t.Errorf("Name: expected %q, got %q", "hot", got.Name)
 		}
-		if got.Type != system.TierTypeFile {
-			t.Errorf("Type: expected %q, got %q", system.TierTypeFile, got.Type)
+		if got.Type != system.VaultTypeFile {
+			t.Errorf("Type: expected %q, got %q", system.VaultTypeFile, got.Type)
 		}
 		if got.VaultID != vaultID {
 			t.Errorf("VaultID: expected %s, got %s", vaultID, got.VaultID)
@@ -1762,10 +1762,10 @@ func testTiers(t *testing.T, newStore func(t *testing.T) system.Store) {
 
 		idA := newID()
 		idB := newID()
-		if err := s.PutTier(ctx, system.TierConfig{ID: idA, Name: "alpha", Type: system.TierTypeMemory}); err != nil {
+		if err := s.PutTier(ctx, system.TierConfig{ID: idA, Name: "alpha", Type: system.VaultTypeMemory}); err != nil {
 			t.Fatalf("Put a: %v", err)
 		}
-		if err := s.PutTier(ctx, system.TierConfig{ID: idB, Name: "beta", Type: system.TierTypeFile}); err != nil {
+		if err := s.PutTier(ctx, system.TierConfig{ID: idB, Name: "beta", Type: system.VaultTypeFile}); err != nil {
 			t.Fatalf("Put b: %v", err)
 		}
 
@@ -1791,11 +1791,11 @@ func testTiers(t *testing.T, newStore func(t *testing.T) system.Store) {
 		ctx := context.Background()
 
 		id := newID()
-		if err := s.PutTier(ctx, system.TierConfig{ID: id, Name: "tier", Type: system.TierTypeFile}); err != nil {
+		if err := s.PutTier(ctx, system.TierConfig{ID: id, Name: "tier", Type: system.VaultTypeFile}); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
-		if err := s.PutTier(ctx, system.TierConfig{ID: id, Name: "tier-updated", Type: system.TierTypeJSONL}); err != nil {
+		if err := s.PutTier(ctx, system.TierConfig{ID: id, Name: "tier-updated", Type: system.VaultTypeJSONL}); err != nil {
 			t.Fatalf("Put upsert: %v", err)
 		}
 
@@ -1803,7 +1803,7 @@ func testTiers(t *testing.T, newStore func(t *testing.T) system.Store) {
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		if got.Name != "tier-updated" || got.Type != system.TierTypeJSONL {
+		if got.Name != "tier-updated" || got.Type != system.VaultTypeJSONL {
 			t.Errorf("expected name=tier-updated type=jsonl, got name=%s type=%s", got.Name, got.Type)
 		}
 
@@ -1821,7 +1821,7 @@ func testTiers(t *testing.T, newStore func(t *testing.T) system.Store) {
 		ctx := context.Background()
 
 		id := newID()
-		if err := s.PutTier(ctx, system.TierConfig{ID: id, Name: "del", Type: system.TierTypeMemory}); err != nil {
+		if err := s.PutTier(ctx, system.TierConfig{ID: id, Name: "del", Type: system.VaultTypeMemory}); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 

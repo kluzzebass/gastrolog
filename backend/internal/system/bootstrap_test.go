@@ -32,7 +32,7 @@ func TestDefaultConfig(t *testing.T) {
 	if len(cfg.Tiers) != 1 {
 		t.Fatalf("expected 1 tier, got %d", len(cfg.Tiers))
 	}
-	if cfg.Tiers[0].Type != system.TierTypeMemory {
+	if cfg.Tiers[0].Type != system.VaultTypeMemory {
 		t.Errorf("expected tier type 'memory', got %q", cfg.Tiers[0].Type)
 	}
 	if cfg.Tiers[0].VaultID != cfg.Vaults[0].ID {

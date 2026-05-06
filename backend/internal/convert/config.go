@@ -221,11 +221,11 @@ func TierPlacementsFromProto(p *gastrologv1.TierConfig) []system.TierPlacement {
 
 func TierTypeToProto(t system.TierType) gastrologv1.TierType {
 	switch t {
-	case system.TierTypeMemory:
+	case system.VaultTypeMemory:
 		return gastrologv1.TierType_TIER_TYPE_MEMORY
-	case system.TierTypeFile:
+	case system.VaultTypeFile:
 		return gastrologv1.TierType_TIER_TYPE_FILE
-	case system.TierTypeJSONL:
+	case system.VaultTypeJSONL:
 		return gastrologv1.TierType_TIER_TYPE_JSONL
 	default:
 		return gastrologv1.TierType_TIER_TYPE_UNSPECIFIED
@@ -235,15 +235,15 @@ func TierTypeToProto(t system.TierType) gastrologv1.TierType {
 func TierTypeFromProto(t gastrologv1.TierType) system.TierType {
 	switch t {
 	case gastrologv1.TierType_TIER_TYPE_MEMORY:
-		return system.TierTypeMemory
+		return system.VaultTypeMemory
 	case gastrologv1.TierType_TIER_TYPE_FILE:
-		return system.TierTypeFile
+		return system.VaultTypeFile
 	case gastrologv1.TierType_TIER_TYPE_JSONL:
-		return system.TierTypeJSONL
+		return system.VaultTypeJSONL
 	case gastrologv1.TierType_TIER_TYPE_UNSPECIFIED:
-		return system.TierTypeFile
+		return system.VaultTypeFile
 	default:
-		return system.TierTypeFile
+		return system.VaultTypeFile
 	}
 }
 
@@ -337,11 +337,11 @@ func VaultConfigFromProto(p *gastrologv1.VaultConfig) (system.VaultConfig, error
 // string enum during the refactor) to the new proto VaultType.
 func VaultTypeToProto(t system.TierType) gastrologv1.VaultType {
 	switch t {
-	case system.TierTypeMemory:
+	case system.VaultTypeMemory:
 		return gastrologv1.VaultType_VAULT_TYPE_MEMORY
-	case system.TierTypeFile:
+	case system.VaultTypeFile:
 		return gastrologv1.VaultType_VAULT_TYPE_FILE
-	case system.TierTypeJSONL:
+	case system.VaultTypeJSONL:
 		return gastrologv1.VaultType_VAULT_TYPE_JSONL
 	default:
 		return gastrologv1.VaultType_VAULT_TYPE_UNSPECIFIED
@@ -357,11 +357,11 @@ func VaultTypeToProto(t system.TierType) gastrologv1.VaultType {
 func VaultTypeFromProto(t gastrologv1.VaultType) system.TierType {
 	switch t {
 	case gastrologv1.VaultType_VAULT_TYPE_MEMORY:
-		return system.TierTypeMemory
+		return system.VaultTypeMemory
 	case gastrologv1.VaultType_VAULT_TYPE_FILE:
-		return system.TierTypeFile
+		return system.VaultTypeFile
 	case gastrologv1.VaultType_VAULT_TYPE_JSONL:
-		return system.TierTypeJSONL
+		return system.VaultTypeJSONL
 	case gastrologv1.VaultType_VAULT_TYPE_UNSPECIFIED:
 		return ""
 	default:

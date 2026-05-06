@@ -119,14 +119,14 @@ func TestMultiNode_TierTransitionSearchFanOut(t *testing.T) {
 	ctx := context.Background()
 
 	_ = cfgStore.PutTier(ctx, system.TierConfig{
-		ID: tier0ID, Name: "hot", Type: system.TierTypeFile,
+		ID: tier0ID, Name: "hot", Type: system.VaultTypeFile,
 		VaultID: vaultID, Position: 0,
 	})
 	_ = cfgStore.SetTierPlacements(ctx, tier0ID, []system.TierPlacement{
 		{StorageID: system.SyntheticStorageID("data-1"), Leader: true},
 	})
 	_ = cfgStore.PutTier(ctx, system.TierConfig{
-		ID: tier1ID, Name: "warm", Type: system.TierTypeFile,
+		ID: tier1ID, Name: "warm", Type: system.VaultTypeFile,
 		VaultID: vaultID, Position: 1,
 	})
 	_ = cfgStore.SetTierPlacements(ctx, tier1ID, []system.TierPlacement{

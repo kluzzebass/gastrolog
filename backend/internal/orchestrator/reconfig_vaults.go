@@ -824,7 +824,7 @@ func (o *Orchestrator) buildTierInstance(sys *system.System, vaultCfg system.Vau
 	setIntegrityVerifier(cm, o.IntegrityVerifier())
 
 	// JSONL sinks are write-only — no query engine, no indexes.
-	if tierCfg.Type == system.TierTypeJSONL {
+	if tierCfg.Type == system.VaultTypeJSONL {
 		ti := &VaultInstance{
 			TierID:  tierCfg.ID,
 			VaultID: vaultCfg.ID,
@@ -1488,11 +1488,11 @@ func (o *Orchestrator) buildTierRaftMembers(clusterNodes []system.NodeConfig, fa
 
 func mapTierTypeToFactory(t system.TierType) string {
 	switch t {
-	case system.TierTypeMemory:
+	case system.VaultTypeMemory:
 		return "memory"
-	case system.TierTypeFile:
+	case system.VaultTypeFile:
 		return "file"
-	case system.TierTypeJSONL:
+	case system.VaultTypeJSONL:
 		return "jsonl"
 	default:
 		return string(t)
@@ -1505,12 +1505,12 @@ func buildTierParams(sys *system.System, vaultCfg system.VaultConfig, tierCfg sy
 	params := make(map[string]string)
 
 	switch tierCfg.Type {
-	case system.TierTypeMemory:
+	case system.VaultTypeMemory:
 		if tierCfg.MemoryBudgetBytes > 0 {
 			params["budgetBytes"] = strconv.FormatUint(tierCfg.MemoryBudgetBytes, 10)
 		}
 
-	case system.TierTypeFile:
+	case system.VaultTypeFile:
 		// Single storage class for all file tiers — local-only and
 		// cloud-backed alike. The active chunk and warm cache live at
 		// the same chunkDir path post-step-7k. See gastrolog-4k5mg.
@@ -1521,7 +1521,7 @@ func buildTierParams(sys *system.System, vaultCfg system.VaultConfig, tierCfg sy
 			params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), tierCfg.ID.String())
 		}
 
-	case system.TierTypeJSONL:
+	case system.VaultTypeJSONL:
 		if tierCfg.Path != "" {
 			params["path"] = tierCfg.Path
 		} else {

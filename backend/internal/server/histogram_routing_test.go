@@ -62,7 +62,7 @@ func TestHistogramFullyLocal_RequiresLeadership(t *testing.T) {
 		{followerTierID, followerVaultID},
 	} {
 		if err := store.PutTier(ctx, system.TierConfig{
-			ID: tc.tierID, Name: "tier-" + tc.tierID.String(), Type: system.TierTypeMemory,
+			ID: tc.tierID, Name: "tier-" + tc.tierID.String(), Type: system.VaultTypeMemory,
 			VaultID: tc.vaultID, Position: 0,
 		}); err != nil {
 			t.Fatalf("PutTier: %v", err)

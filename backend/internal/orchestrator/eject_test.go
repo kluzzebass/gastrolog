@@ -751,11 +751,11 @@ func TestEjectChunkFileBackedLocalDelivery(t *testing.T) {
 		ID: dstVaultID, Name: "dst",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: srcTierID, Name: "src-hot", Type: system.TierTypeFile,
+		ID: srcTierID, Name: "src-hot", Type: system.VaultTypeFile,
 		VaultID: srcVaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: dstTierID, Name: "dst-hot", Type: system.TierTypeFile,
+		ID: dstTierID, Name: "dst-hot", Type: system.VaultTypeFile,
 		VaultID: dstVaultID, Position: 0,
 	})
 	_ = store.SetTierPlacements(context.Background(), srcTierID, []system.TierPlacement{{StorageID: system.SyntheticStorageID("node-A"), Leader: true}})
@@ -909,11 +909,11 @@ func TestEjectChunkFileBackedRemoteDelivery(t *testing.T) {
 		ID: dstVaultID, Name: "dst",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: srcTierID, Name: "src-hot", Type: system.TierTypeFile,
+		ID: srcTierID, Name: "src-hot", Type: system.VaultTypeFile,
 		VaultID: srcVaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: dstTierID, Name: "dst-hot", Type: system.TierTypeFile,
+		ID: dstTierID, Name: "dst-hot", Type: system.VaultTypeFile,
 		VaultID: dstVaultID, Position: 0,
 	})
 	_ = store.SetTierPlacements(context.Background(), srcTierID, []system.TierPlacement{{StorageID: system.SyntheticStorageID("node-A"), Leader: true}})

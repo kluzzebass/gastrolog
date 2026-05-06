@@ -450,7 +450,7 @@ type eligibleStorage struct {
 func (pm *placementManager) eligibleStorages(tier system.TierConfig, alive map[string]bool, nscs []system.NodeStorageConfig) []eligibleStorage {
 	var result []eligibleStorage
 
-	if tier.Type == system.TierTypeMemory {
+	if tier.Type == system.VaultTypeMemory {
 		for nodeID := range alive {
 			result = append(result, eligibleStorage{
 				storageID: system.SyntheticStorageID(nodeID),
@@ -476,7 +476,7 @@ func (pm *placementManager) eligibleStorages(tier system.TierConfig, alive map[s
 
 // storageEligible checks if a specific storage still matches the tier's requirements.
 func (pm *placementManager) storageEligible(storageID string, tier system.TierConfig, nscs []system.NodeStorageConfig) bool {
-	if tier.Type == system.TierTypeMemory {
+	if tier.Type == system.VaultTypeMemory {
 		return strings.HasPrefix(storageID, system.SyntheticStoragePrefix)
 	}
 	sc := tier.StorageClass
@@ -550,11 +550,11 @@ func (pm *placementManager) handleUnplaceable(ctx context.Context, tier system.T
 // nodeEligible checks whether a specific node can serve a tier.
 func (pm *placementManager) nodeEligible(tier system.TierConfig, nodeID string, nscs []system.NodeStorageConfig) bool {
 	switch tier.Type {
-	case system.TierTypeMemory:
+	case system.VaultTypeMemory:
 		return true // any node can serve memory tiers
-	case system.TierTypeFile:
+	case system.VaultTypeFile:
 		return nodeHasStorageClass(nscs, nodeID, tier.StorageClass)
-	case system.TierTypeJSONL:
+	case system.VaultTypeJSONL:
 		// JSONL tiers have explicit node assignment via Path.
 		leaderNodeID := system.LeaderNodeID(func() []system.TierPlacement {
 			p, _ := pm.cfgStore.GetTierPlacements(context.Background(), tier.ID)

@@ -507,7 +507,7 @@ func TestApplyPutTier(t *testing.T) {
 	rpID := newID()
 	csID := newID()
 	applyCmd(t, fsm, command.NewPutTier(system.TierConfig{
-		ID: id, Name: "hot-tier", Type: system.TierTypeFile,
+		ID: id, Name: "hot-tier", Type: system.VaultTypeFile,
 		RotationPolicyID:  &rpID,
 		MemoryBudgetBytes: 512 * 1024 * 1024,
 		StorageClass:      1,
@@ -518,7 +518,7 @@ func TestApplyPutTier(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got == nil || got.Name != "hot-tier" || got.Type != system.TierTypeFile {
+	if got == nil || got.Name != "hot-tier" || got.Type != system.VaultTypeFile {
 		t.Fatalf("unexpected tier: %+v", got)
 	}
 	if got.RotationPolicyID == nil || *got.RotationPolicyID != rpID {
@@ -537,7 +537,7 @@ func TestApplyDeleteTier(t *testing.T) {
 	fsm := New()
 	id := newID()
 	applyCmd(t, fsm, command.NewPutTier(system.TierConfig{
-		ID: id, Name: "tier", Type: system.TierTypeMemory,
+		ID: id, Name: "tier", Type: system.VaultTypeMemory,
 	}))
 	applyCmd(t, fsm, command.NewDeleteTier(id, false))
 
@@ -590,9 +590,9 @@ func TestCompoundDeleteRotationPolicy(t *testing.T) {
 	applyCmd(t, fsm, command.NewPutRotationPolicy(system.RotationPolicyConfig{ID: otherPolicyID, Name: "other"}))
 
 	// Create tiers: tier1 and tier2 reference the target policy, tier3 references the other.
-	applyCmd(t, fsm, command.NewPutTier(system.TierConfig{ID: tier1, Name: "t1", Type: system.TierTypeMemory, RotationPolicyID: &policyID}))
-	applyCmd(t, fsm, command.NewPutTier(system.TierConfig{ID: tier2, Name: "t2", Type: system.TierTypeMemory, RotationPolicyID: &policyID}))
-	applyCmd(t, fsm, command.NewPutTier(system.TierConfig{ID: tier3, Name: "t3", Type: system.TierTypeMemory, RotationPolicyID: &otherPolicyID}))
+	applyCmd(t, fsm, command.NewPutTier(system.TierConfig{ID: tier1, Name: "t1", Type: system.VaultTypeMemory, RotationPolicyID: &policyID}))
+	applyCmd(t, fsm, command.NewPutTier(system.TierConfig{ID: tier2, Name: "t2", Type: system.VaultTypeMemory, RotationPolicyID: &policyID}))
+	applyCmd(t, fsm, command.NewPutTier(system.TierConfig{ID: tier3, Name: "t3", Type: system.VaultTypeMemory, RotationPolicyID: &otherPolicyID}))
 
 	// Delete the target policy.
 	applyCmd(t, fsm, command.NewDeleteRotationPolicy(policyID))
@@ -636,7 +636,7 @@ func TestCompoundDeleteRetentionPolicy(t *testing.T) {
 
 	// Create tier with two retention rules: one referencing each policy.
 	applyCmd(t, fsm, command.NewPutTier(system.TierConfig{
-		ID: tierID, Name: "tier", Type: system.TierTypeMemory,
+		ID: tierID, Name: "tier", Type: system.VaultTypeMemory,
 		RetentionRules: []system.RetentionRule{
 			{RetentionPolicyID: policyID, Action: system.RetentionActionExpire},
 			{RetentionPolicyID: otherPolicyID, Action: system.RetentionActionExpire},
@@ -684,7 +684,7 @@ func TestSnapshotRestore(t *testing.T) {
 	vaultID := newID()
 	tierID := newID()
 	applyCmd(t, fsm1, command.NewPutTier(system.TierConfig{
-		ID: tierID, Name: "tier1", Type: system.TierTypeMemory,
+		ID: tierID, Name: "tier1", Type: system.VaultTypeMemory,
 		VaultID: vaultID, Position: 0,
 		RotationPolicyID: &rpID,
 		RetentionRules: []system.RetentionRule{

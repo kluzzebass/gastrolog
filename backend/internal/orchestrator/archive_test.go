@@ -43,7 +43,7 @@ func TestArchiveChunkViaRetentionSweep(t *testing.T) {
 		ID: vaultID, Name: "archive-test",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tierID, Name: "cloud", Type: system.TierTypeFile,
+		ID: tierID, Name: "cloud", Type: system.VaultTypeFile,
 		VaultID: vaultID, Position: 0,
 	})
 

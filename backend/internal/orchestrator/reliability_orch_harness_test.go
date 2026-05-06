@@ -31,7 +31,7 @@ import (
 // only the file-tier chunk Manager implements SetAnnouncer — the pathway
 // that propagates chunk metadata events through vault-ctl Raft to
 // followers. Without announcements, replication tests are vacuous.
-const tierTypeKey = string(system.TierTypeFile)
+const tierTypeKey = string(system.VaultTypeFile)
 
 // harnessStorageClass is a non-zero storage class so findLocalFileStorage
 // matches the NodeStorageConfig we seed. Value is arbitrary; zero is
@@ -274,7 +274,7 @@ func (h *orchRelHarness) seedSharedConfig() {
 		if err := h.cfgStore.PutTier(ctx, system.TierConfig{
 			ID:           v.tierID,
 			Name:         "orch-rel-tier-" + v.label,
-			Type:         system.TierTypeFile,
+			Type:         system.VaultTypeFile,
 			VaultID:      v.id,
 			Position:     0,
 			StorageClass: harnessStorageClass,

@@ -37,7 +37,7 @@ func memVaultCfg(vaultID glid.GLID, loader *fakeSystemLoader) system.VaultConfig
 	tc := system.TierConfig{
 		ID:      tierID,
 		Name:    "tier-" + vaultID.String()[:8],
-		Type:    system.TierTypeMemory,
+		Type:    system.VaultTypeMemory,
 		VaultID: vaultID,
 	}
 	if loader != nil && loader.cfg != nil {
@@ -1053,7 +1053,7 @@ func TestRetentionSingleJobRegistered(t *testing.T) {
 			{ID: retPolicyID, Name: "age-2m", MaxAge: strPtr("2m")},
 		},
 		Tiers: []system.TierConfig{
-			{ID: tierID, Name: "tier", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0, RetentionRules: []system.RetentionRule{{
+			{ID: tierID, Name: "tier", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0, RetentionRules: []system.RetentionRule{{
 				RetentionPolicyID: retPolicyID,
 				Action:            system.RetentionActionExpire,
 			}}},

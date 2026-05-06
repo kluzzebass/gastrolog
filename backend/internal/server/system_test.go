@@ -100,7 +100,7 @@ func ensureMemoryTier(t *testing.T, cfgStore system.Store, vaultID glid.GLID) st
 	t.Helper()
 	tierID := glid.New()
 	if err := cfgStore.PutTier(context.Background(), system.TierConfig{
-		ID: tierID, Name: "test-tier-" + tierID.String()[:8], Type: system.TierTypeMemory,
+		ID: tierID, Name: "test-tier-" + tierID.String()[:8], Type: system.VaultTypeMemory,
 		VaultID: vaultID, Position: 0,
 	}); err != nil {
 		t.Fatalf("ensureMemoryTier: %v", err)

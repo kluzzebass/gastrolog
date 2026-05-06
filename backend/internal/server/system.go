@@ -469,11 +469,11 @@ func (s *SystemServer) loadSystemTiers(ctx context.Context, resp *apiv1.GetSyste
 
 func tierTypeToProto(t system.TierType) apiv1.TierType {
 	switch t {
-	case system.TierTypeMemory:
+	case system.VaultTypeMemory:
 		return apiv1.TierType_TIER_TYPE_MEMORY
-	case system.TierTypeFile:
+	case system.VaultTypeFile:
 		return apiv1.TierType_TIER_TYPE_FILE
-	case system.TierTypeJSONL:
+	case system.VaultTypeJSONL:
 		return apiv1.TierType_TIER_TYPE_JSONL
 	default:
 		return apiv1.TierType_TIER_TYPE_UNSPECIFIED
