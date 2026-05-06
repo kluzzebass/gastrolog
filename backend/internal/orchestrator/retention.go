@@ -87,8 +87,8 @@ type retentionRunner struct {
 	// harnesses that build TierInstances directly without going through
 	// buildTierInstance; those harnesses fall through to the legacy
 	// direct-delete path below (for cross-node propagation they wire
-	// directTierReplicator.DeleteChunk RPC fan-out separately).
-	reconciler *TierLifecycleReconciler
+	// directChunkReplicator.DeleteChunk RPC fan-out separately).
+	reconciler *VaultLifecycleReconciler
 
 	// isLeader returns true if this node is the config leader for this tier.
 	// Retention (expiry + transitions) only runs on the leader to prevent
@@ -235,7 +235,7 @@ func (o *Orchestrator) retentionSweepAll() {
 // is just the transport for the response.
 func (o *Orchestrator) tierCatchupSweepAll() {
 	o.mu.RLock()
-	tiers := make([]*TierInstance, 0)
+	tiers := make([]*VaultInstance, 0)
 	for _, vault := range o.vaults {
 		for _, t := range vault.Tiers {
 			if t.Reconciler != nil {
@@ -536,7 +536,7 @@ func (o *Orchestrator) TransitionStreamedChunks(vaultID glid.GLID) map[chunk.Chu
 
 // retentionTargetForTier resolves a single tier instance into a sweep target.
 // Returns nil if the tier should be skipped (no rules, no leader, etc.).
-func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg system.VaultConfig, tier *TierInstance, active map[string]bool) *sweepTarget {
+func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg system.VaultConfig, tier *VaultInstance, active map[string]bool) *sweepTarget {
 	if tier.HasRaftLeader != nil && !tier.HasRaftLeader() {
 		return nil
 	}
@@ -599,7 +599,7 @@ func tierPositionInVault(cfg *system.Config, vaultID, tierID glid.GLID) int {
 	return -1
 }
 
-// (Disk-vs-manifest orphan cleanup lives on TierLifecycleReconciler now —
+// (Disk-vs-manifest orphan cleanup lives on VaultLifecycleReconciler now —
 // see SweepLocalOrphans. It is tombstone-aware: only chunks the FSM has
 // positively confirmed as finalize-deleted are eligible for cleanup, so
 // freshly-created chunks with announce in flight are never racey-deleted.)
@@ -692,7 +692,7 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 // sweep prevents repeated no-op transitions (the apply silently no-ops when
 // f.chunks[id] is nil, the flag never sticks, and we re-stream the chunk's
 // records to the next tier on every sweep). See gastrolog-66b7x.
-func buildManifestSet(tier *TierInstance) (map[chunk.ChunkID]bool, bool) {
+func buildManifestSet(tier *VaultInstance) (map[chunk.ChunkID]bool, bool) {
 	manifest := make(map[chunk.ChunkID]bool)
 	if tier == nil || tier.ListManifest == nil {
 		return manifest, false
@@ -961,7 +961,7 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID, reason string) {
 	//
 	// Reached only by older test harnesses that build a retentionRunner
 	// without going through buildTierInstance (so tier.Reconciler is nil).
-	// They wire cross-node propagation via directTierReplicator.DeleteChunk
+	// They wire cross-node propagation via directChunkReplicator.DeleteChunk
 	// RPC fan-out (forwardDeletionToFollowers below) instead of vault-ctl
 	// Raft. Production has no path into here after gastrolog-51gme step 11
 	// — ApplyRaftDelete / CmdDeleteChunk producers are gone.
@@ -1020,9 +1020,9 @@ func (r *retentionRunner) expectedFromForExpire() []string {
 
 // forwardDeletionToFollowers sends an explicit delete RPC to each remote
 // follower. Used only by the reconciler-less fallback path in expireChunk
-// (test harnesses without a vault-ctl Raft group / TierLifecycleReconciler).
+// (test harnesses without a vault-ctl Raft group / VaultLifecycleReconciler).
 // Production runs through the receipt protocol and never reaches here.
-// The directTierReplicator.DeleteChunk RPC chain stays for that harness;
+// The directChunkReplicator.DeleteChunk RPC chain stays for that harness;
 // removing it requires migrating the harness onto the reconciler with a
 // fake-FSM-applier — a follow-up refactor outside the scope of step 11.
 func (r *retentionRunner) forwardDeletionToFollowers(id chunk.ChunkID) {
@@ -1062,10 +1062,10 @@ func (r *retentionRunner) forwardDeleteWithRetry(nodeID string, id chunk.ChunkID
 // sendDeleteToFollower issues a single chunk-delete RPC via the tier
 // replicator. Returns nil when no replicator is configured (single-node mode).
 func (r *retentionRunner) sendDeleteToFollower(followerID string, id chunk.ChunkID) error {
-	if r.orch.tierReplicator == nil {
+	if r.orch.chunkReplicator == nil {
 		return nil
 	}
-	return r.orch.tierReplicator.DeleteChunk(
+	return r.orch.chunkReplicator.DeleteChunk(
 		context.Background(), followerID, r.vaultID, r.tierID, id,
 	)
 }

@@ -82,7 +82,9 @@ func (s *SystemServer) DeleteCloudService(
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("cloud service not found"))
 	}
 
-	// Referential integrity: reject if any tier references this cloud service.
+	// Referential integrity: reject if any tier or vault references this
+	// cloud service. VaultConfig.CloudServiceID is mirrored from TierConfig
+	// (gastrolog-257l7); post-tier the vault check is the only one.
 	tiers, err := s.sysStore.ListTiers(ctx)
 	if err != nil {
 		return nil, errInternal(err)
@@ -91,6 +93,16 @@ func (s *SystemServer) DeleteCloudService(
 		if t.CloudServiceID != nil && *t.CloudServiceID == id {
 			return nil, connect.NewError(connect.CodeFailedPrecondition,
 				fmt.Errorf("cloud service %q is referenced by tier %q", req.Msg.Id, t.ID))
+		}
+	}
+	vaults, err := s.sysStore.ListVaults(ctx)
+	if err != nil {
+		return nil, errInternal(err)
+	}
+	for _, v := range vaults {
+		if v.CloudServiceID != nil && *v.CloudServiceID == id {
+			return nil, connect.NewError(connect.CodeFailedPrecondition,
+				fmt.Errorf("cloud service %q is referenced by vault %q", req.Msg.Id, v.ID))
 		}
 	}
 
@@ -196,7 +208,7 @@ func (s *SystemServer) PutTier(
 	// validation. The legacy TIER_TYPE_CLOUD wire value is normalized to
 	// TIER_TYPE_FILE by TierTypeFromProto; cloud-ness is signaled by the
 	// presence of cloud_service_id (gastrolog-4k5mg).
-	if tierType == system.TierTypeFile && len(req.Msg.Config.CloudServiceId) > 0 {
+	if tierType == system.VaultTypeFile && len(req.Msg.Config.CloudServiceId) > 0 {
 		if connErr := s.validateCloudTierFields(ctx, req.Msg.Config); connErr != nil {
 			return nil, connErr
 		}
@@ -348,11 +360,11 @@ func (s *SystemServer) countEligibleStorages(ctx context.Context, tierType syste
 	}
 
 	switch tierType {
-	case system.TierTypeMemory:
+	case system.VaultTypeMemory:
 		return len(nodes), nil // memory tiers: one per node (no disk storage)
-	case system.TierTypeJSONL:
+	case system.VaultTypeJSONL:
 		return 1, nil // JSONL tiers are pinned to a single node
-	case system.TierTypeFile:
+	case system.VaultTypeFile:
 		// Single storage class for both local-only and cloud-backed
 		// file tiers. See gastrolog-4k5mg.
 		requiredClass := p.GetStorageClass()

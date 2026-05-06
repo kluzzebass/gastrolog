@@ -19,12 +19,13 @@ type Vault struct {
 	ID             glid.GLID
 	Name           string
 	Enabled        bool
-	Tiers          []*TierInstance
+	StorageType    string // mirrored from VaultConfig.Type — survives the eventual deletion of VaultInstance.Type
+	Tiers          []*VaultInstance
 	multiTierQuery *query.Engine // lazy; created on first QueryEngine() call for multi-tier vaults
 }
 
 // NewVault creates a Vault with the given tier instances.
-func NewVault(id glid.GLID, tiers ...*TierInstance) *Vault {
+func NewVault(id glid.GLID, tiers ...*VaultInstance) *Vault {
 	return &Vault{
 		ID:      id,
 		Enabled: true,
@@ -33,7 +34,7 @@ func NewVault(id glid.GLID, tiers ...*TierInstance) *Vault {
 }
 
 // ActiveTier returns the first (hot) tier, or nil if the vault has no tiers yet.
-func (v *Vault) ActiveTier() *TierInstance {
+func (v *Vault) ActiveTier() *VaultInstance {
 	if len(v.Tiers) == 0 {
 		return nil
 	}
@@ -75,8 +76,14 @@ func (v *Vault) QueryEngine() *query.Engine {
 	return v.multiTierQuery
 }
 
-// Type returns the storage type of the active tier, or "" if no tiers.
+// Type returns the storage type of the vault. Reads StorageType (mirrored
+// from VaultConfig.Type at construction). Falls back to the active tier's
+// Type for legacy callers that constructed Vault before StorageType was a
+// field (notably NewVaultFromComponents and other test paths).
 func (v *Vault) Type() string {
+	if v.StorageType != "" {
+		return v.StorageType
+	}
 	if len(v.Tiers) == 0 {
 		return ""
 	}
@@ -85,10 +92,11 @@ func (v *Vault) Type() string {
 
 // NewVaultFromComponents creates a Vault from raw components (chunk manager,
 // index manager, query engine). This wraps the components in a single
-// TierInstance with type "memory". Intended for test code.
+// VaultInstance with type "memory". Intended for test code.
 func NewVaultFromComponents(id glid.GLID, cm chunk.ChunkManager, im index.IndexManager, qe *query.Engine) *Vault {
-	return NewVault(id, &TierInstance{
+	return NewVault(id, &VaultInstance{
 		TierID:  id, // reuse vault ID as tier ID for simplicity
+		VaultID: id,
 		Type:    "memory",
 		Chunks:  cm,
 		Indexes: im,
@@ -99,7 +107,7 @@ func NewVaultFromComponents(id glid.GLID, cm chunk.ChunkManager, im index.IndexM
 // tierRegistry adapts a vault's tiers to the manifest.VaultRegistry interface,
 // allowing the query engine to fan out across all tiers as if they were vaults.
 type tierRegistry struct {
-	tiers []*TierInstance
+	tiers []*VaultInstance
 }
 
 func (r *tierRegistry) ListVaults() []glid.GLID {
@@ -196,7 +204,7 @@ func (rr *tierRegistryReader) Entry(id chunk.ChunkID) (tierfsm.ManifestEntry, bo
 func (rr *tierRegistryReader) EntriesForVault(tierID glid.GLID) []tierfsm.ManifestEntry {
 	for _, t := range rr.r.tiers {
 		if t.TierID == tierID {
-			return collectSealedEntries([]*TierInstance{t})
+			return collectSealedEntries([]*VaultInstance{t})
 		}
 	}
 	return nil

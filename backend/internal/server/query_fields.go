@@ -38,7 +38,7 @@ func (s *QueryServer) GetFields(
 	}
 	q.Limit = maxSamples
 
-	eng := s.orch.LeaderTierQueryEngine()
+	eng := s.orch.LeaderVaultQueryEngine()
 	searchIter, _ := eng.Search(ctx, q, nil)
 
 	attrAgg := newFieldAggregator()

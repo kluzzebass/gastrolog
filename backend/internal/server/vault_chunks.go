@@ -74,7 +74,7 @@ func (s *VaultServer) ListChunks(
 	// A peer that misses the deadline is silently dropped from the merged
 	// view; the UI gets the partial result instead of hanging.
 	if !req.Msg.ActiveOnly && s.remoteChunkLister != nil {
-		remoteNodes := s.remoteTierNodes(ctx, vaultID)
+		remoteNodes := s.remoteVaultNodes(ctx, vaultID)
 		results, ok := peerFanOut(ctx, s.logger, "ListChunks", remoteNodes,
 			func(peerCtx context.Context, nodeID string) ([]*apiv1.ChunkMeta, error) {
 				remote, err := s.remoteChunkLister.ListChunks(peerCtx, nodeID, &apiv1.ForwardListChunksRequest{
@@ -192,44 +192,35 @@ func moreAuthoritative(a, b *apiv1.ChunkMeta) bool {
 	return a.Sealed && !b.Sealed
 }
 
-// remoteTierNodes returns node IDs of ALL remote nodes that host tiers for a
-// vault — both leaders and followers. Leaders provide authoritative chunk
+// remoteVaultNodes returns node IDs of ALL remote nodes that host this
+// vault — both leader and followers. Leader provides authoritative chunk
 // metadata; followers are queried to verify replica presence for the UI.
-func (s *VaultServer) remoteTierNodes(ctx context.Context, vaultID glid.GLID) []string {
+//
+// Reads VaultConfig.Placements directly (mirrored from tier placements
+// via the FSM bridge — gastrolog-257l7).
+func (s *VaultServer) remoteVaultNodes(ctx context.Context, vaultID glid.GLID) []string {
 	vaultCfg, err := s.cfgStore.GetVault(ctx, vaultID)
 	if err != nil || vaultCfg == nil {
 		return nil
 	}
-	tiers, err := s.cfgStore.ListTiers(ctx)
-	if err != nil {
+	if len(vaultCfg.Placements) == 0 {
 		return nil
 	}
 	nscs, err := s.cfgStore.ListNodeStorageConfigs(ctx)
 	if err != nil {
 		return nil
 	}
-	vaultTierIDs := system.VaultTierIDs(tiers, vaultID)
-	tierIDs := make(map[glid.GLID]bool, len(vaultTierIDs))
-	for _, tid := range vaultTierIDs {
-		tierIDs[tid] = true
-	}
 	seen := make(map[string]bool)
 	var nodes []string
-	for _, t := range tiers {
-		if !tierIDs[t.ID] {
-			continue
-		}
-		ps, _ := s.cfgStore.GetTierPlacements(ctx, t.ID)
-		leaderNodeID := system.LeaderNodeID(ps, nscs)
-		if leaderNodeID != "" && leaderNodeID != s.localNodeID && !seen[leaderNodeID] {
-			seen[leaderNodeID] = true
-			nodes = append(nodes, leaderNodeID)
-		}
-		for _, sid := range system.FollowerNodeIDs(ps, nscs) {
-			if sid != s.localNodeID && !seen[sid] {
-				seen[sid] = true
-				nodes = append(nodes, sid)
-			}
+	leaderNodeID := system.LeaderNodeID(vaultCfg.Placements, nscs)
+	if leaderNodeID != "" && leaderNodeID != s.localNodeID {
+		seen[leaderNodeID] = true
+		nodes = append(nodes, leaderNodeID)
+	}
+	for _, sid := range system.FollowerNodeIDs(vaultCfg.Placements, nscs) {
+		if sid != s.localNodeID && !seen[sid] {
+			seen[sid] = true
+			nodes = append(nodes, sid)
 		}
 	}
 	return nodes
@@ -303,7 +294,7 @@ func (s *VaultServer) GetIndexes(
 	if s.remoteIndexer == nil {
 		return nil, mapVaultError(chunk.ErrChunkNotFound)
 	}
-	remoteNodes := s.remoteTierNodes(ctx, vaultID)
+	remoteNodes := s.remoteVaultNodes(ctx, vaultID)
 	if len(remoteNodes) == 0 {
 		return nil, mapVaultError(chunk.ErrChunkNotFound)
 	}

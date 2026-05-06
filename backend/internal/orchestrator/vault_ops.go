@@ -116,12 +116,12 @@ func (o *Orchestrator) findChunkManagerForChunk(vaultID glid.GLID, chunkID chunk
 	return cm, err
 }
 
-// findTierForChunk returns the TierInstance that owns the given chunk.
+// findTierForChunk returns the VaultInstance that owns the given chunk.
 // Used by paths (vault migrate, tier drain) that need access to the
 // tier's reconciler + placement metadata to drive cluster-wide deletes
 // through the receipt protocol. Errors if the vault is unknown / not
 // ready, or if no tier in the vault has the chunk.
-func (o *Orchestrator) findTierForChunk(vaultID glid.GLID, chunkID chunk.ChunkID) (*TierInstance, error) {
+func (o *Orchestrator) findTierForChunk(vaultID glid.GLID, chunkID chunk.ChunkID) (*VaultInstance, error) {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
 	o.mu.RUnlock()
@@ -384,13 +384,13 @@ func (o *Orchestrator) LocalTierIDs(vaultID glid.GLID) []glid.GLID {
 	return ids
 }
 
-func (o *Orchestrator) FindLocalTierExported(vaultID, tierID glid.GLID) *TierInstance {
+func (o *Orchestrator) FindLocalTierExported(vaultID, tierID glid.GLID) *VaultInstance {
 	return o.findLocalTier(vaultID, tierID)
 }
 
-// findLocalTier returns the TierInstance for a specific tier in a vault,
+// findLocalTier returns the VaultInstance for a specific tier in a vault,
 // or nil if the tier is not local.
-func (o *Orchestrator) findLocalTier(vaultID, tierID glid.GLID) *TierInstance {
+func (o *Orchestrator) findLocalTier(vaultID, tierID glid.GLID) *VaultInstance {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
 	o.mu.RUnlock()
@@ -405,13 +405,13 @@ func (o *Orchestrator) findLocalTier(vaultID, tierID glid.GLID) *TierInstance {
 	return nil
 }
 
-// AppendToTier appends a record to a specific tier's chunk manager.
+// AppendToVault appends a record to a specific tier's chunk manager.
 // Used by inter-tier transition to target a downstream tier directly,
 // bypassing the vault's active tier. Includes seal detection.
-// AppendToTier appends a record to a specific tier. leaderChunkID, when
+// AppendToVault appends a record to a specific tier. leaderChunkID, when
 // non-zero on followers, syncs the chunk ID with the leader so the
 // follower has real, queryable, promotable chunks.
-func (o *Orchestrator) AppendToTier(vaultID, tierID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error {
+func (o *Orchestrator) AppendToVault(vaultID, tierID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error {
 	o.mu.RLock()
 	// NOTE: manually unlocked below — remote forwards happen outside the lock.
 
@@ -499,7 +499,7 @@ type remoteForwardTarget struct {
 // durability. Same-node targets use direct append (under lock); cross-node targets
 // are collected and returned for the caller to forward AFTER releasing the lock.
 // Called under o.mu.RLock.
-func (o *Orchestrator) forwardToFollowers(vault *Vault, vaultID glid.GLID, tier *TierInstance, cm chunk.ChunkManager, rec chunk.Record) []remoteForwardTarget {
+func (o *Orchestrator) forwardToFollowers(vault *Vault, vaultID glid.GLID, tier *VaultInstance, cm chunk.ChunkManager, rec chunk.Record) []remoteForwardTarget {
 	activeNow := cm.Active()
 	var activeChunkID chunk.ChunkID
 	if activeNow != nil {
@@ -533,7 +533,7 @@ func (o *Orchestrator) forwardToFollowers(vault *Vault, vaultID glid.GLID, tier 
 // same boundary. Trying to push the seal command now would just add noise
 // from peers that are unreachable. See gastrolog-1e5ke.
 func (o *Orchestrator) sealRemoteFollowers(targets []remoteForwardTarget, chunkID chunk.ChunkID) {
-	if o.tierReplicator == nil || len(targets) == 0 || o.shuttingDown() {
+	if o.chunkReplicator == nil || len(targets) == 0 || o.shuttingDown() {
 		return
 	}
 	var wg sync.WaitGroup
@@ -541,7 +541,7 @@ func (o *Orchestrator) sealRemoteFollowers(targets []remoteForwardTarget, chunkI
 		wg.Go(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), cluster.ForwardingTimeout)
 			defer cancel()
-			if err := o.tierReplicator.SealTier(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, chunkID); err != nil {
+			if err := o.chunkReplicator.SealVault(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, chunkID); err != nil {
 				o.logger.Warn("replication: failed to seal remote follower",
 					"node", tgt.nodeID, "vault", tgt.vaultID, "tier", tgt.tierID,
 					"chunk", chunkID.String(), "error", err)
@@ -555,7 +555,7 @@ func (o *Orchestrator) sealRemoteFollowers(targets []remoteForwardTarget, chunkI
 // Appends to distinct followers run in parallel (WaitGroup) so per-record
 // latency is bounded by the slowest follower, not the sum — same ordering
 // guarantee as sealRemoteFollowers: each follower tier stream still processes
-// one RPC at a time, and AppendToTier does not start the next record until
+// one RPC at a time, and AppendToVault does not start the next record until
 // this function returns.
 //
 // During shutdown (o.shuttingDown()) this is a silent no-op: the record
@@ -574,7 +574,7 @@ func (o *Orchestrator) sealRemoteFollowers(targets []remoteForwardTarget, chunkI
 // o.mu.RLock across this call would starve writers when any follower is
 // slow or paused. See gastrolog-5oofa.
 func (o *Orchestrator) fireAndForgetRemote(targets []remoteForwardTarget, rec chunk.Record) {
-	if len(targets) == 0 || o.shuttingDown() || o.tierReplicator == nil {
+	if len(targets) == 0 || o.shuttingDown() || o.chunkReplicator == nil {
 		return
 	}
 	var wg sync.WaitGroup
@@ -585,7 +585,7 @@ func (o *Orchestrator) fireAndForgetRemote(targets []remoteForwardTarget, rec ch
 		wg.Go(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), cluster.ForwardingTimeout)
 			defer cancel()
-			err := o.tierReplicator.AppendRecords(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, tgt.activeChunkID, []chunk.Record{rec})
+			err := o.chunkReplicator.AppendRecords(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, tgt.activeChunkID, []chunk.Record{rec})
 			if err != nil {
 				o.bumpReplicaBackoff(tgt.nodeID, err)
 			} else {
@@ -662,7 +662,7 @@ func (o *Orchestrator) appendToLocalFollower(vault *Vault, tierID glid.GLID, sto
 // currently the tier's active chunk, it is sealed first so the delete can
 // proceed. This handles the follower case where the leader has moved on to a
 // new active chunk but the follower still has the old ID as active (records
-// sync via TierReplicator.AppendRecords preserves the leader's chunk ID).
+// sync via ChunkReplicator.AppendRecords preserves the leader's chunk ID).
 func (o *Orchestrator) DeleteChunkFromTier(vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
 	tier, err := o.findTierForDelete(vaultID, tierID)
 	if err != nil {
@@ -673,7 +673,7 @@ func (o *Orchestrator) DeleteChunkFromTier(vaultID, tierID glid.GLID, chunkID ch
 
 // findTierForDelete returns the matching tier instance or an error, releasing
 // the orchestrator read lock before returning.
-func (o *Orchestrator) findTierForDelete(vaultID, tierID glid.GLID) (*TierInstance, error) {
+func (o *Orchestrator) findTierForDelete(vaultID, tierID glid.GLID) (*VaultInstance, error) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	vault := o.vaults[vaultID]
@@ -696,7 +696,7 @@ func (o *Orchestrator) findTierForDelete(vaultID, tierID glid.GLID) (*TierInstan
 // reason="manual-delete-rpc" lands in the FSM's pendingDeletes audit trail so
 // operators can distinguish operator-initiated deletes from retention/transit
 // drivers in chunk-history reviews. See gastrolog-51gme step 7.
-func (o *Orchestrator) deleteChunkFromTierInstance(t *TierInstance, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
+func (o *Orchestrator) deleteChunkFromTierInstance(t *VaultInstance, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
 	if active := t.Chunks.Active(); active != nil && active.ID == chunkID {
 		if err := t.Chunks.Seal(); err != nil {
 			return fmt.Errorf("seal active before delete: %w", err)
@@ -717,7 +717,7 @@ func (o *Orchestrator) deleteChunkFromTierInstance(t *TierInstance, vaultID, tie
 // replaceForwardedChunk seals (if active) and deletes a pre-existing chunk
 // on a follower to make room for the canonical sealed version from the leader.
 // The pre-existing chunk may come from:
-//   - TierReplicator.AppendRecords syncing records as the leader's active
+//   - ChunkReplicator.AppendRecords syncing records as the leader's active
 //     chunk fills up (and the follower may have missed some due to a brief
 //     network disruption, leaving its copy slightly behind the leader's)
 //   - a catchup path that fills follower state from scratch
@@ -757,7 +757,7 @@ func replaceForwardedChunk(cm chunk.ChunkManager, chunkID chunk.ChunkID, isActiv
 //
 // afterVaultCtlRestore fires (off the FSM apply pump, on the
 // vaultraft.FSM's after-restore hook goroutine) once the vault-ctl
-// FSM Restore for vaultID has completed. Walks every TierInstance in
+// FSM Restore for vaultID has completed. Walks every VaultInstance in
 // the vault and runs the receipt protocol's catchup pass: process any
 // pendingDeletes obligations this node owes, and project FSM-sealed
 // state onto the local chunk Manager.
@@ -780,7 +780,7 @@ func (o *Orchestrator) afterVaultCtlRestore(vaultID glid.GLID) {
 		o.mu.RUnlock()
 		return
 	}
-	tiers := make([]*TierInstance, len(vault.Tiers))
+	tiers := make([]*VaultInstance, len(vault.Tiers))
 	copy(tiers, vault.Tiers)
 	o.mu.RUnlock()
 
@@ -812,7 +812,7 @@ func (o *Orchestrator) proposePruneNodeForVault(vaultID glid.GLID, removedNodeID
 		o.mu.RUnlock()
 		return
 	}
-	tiers := make([]*TierInstance, 0, len(vault.Tiers))
+	tiers := make([]*VaultInstance, 0, len(vault.Tiers))
 	tiers = append(tiers, vault.Tiers...)
 	o.mu.RUnlock()
 
@@ -832,13 +832,13 @@ func (o *Orchestrator) proposePruneNodeForVault(vaultID glid.GLID, removedNodeID
 // tier's chunk-lifecycle obligations: the local node (always present
 // because callers run on the leader path) plus every follower target's
 // node ID, with duplicates collapsed. Suitable for passing as the
-// expectedFrom argument to TierLifecycleReconciler.deleteChunk.
+// expectedFrom argument to VaultLifecycleReconciler.deleteChunk.
 //
 // Returned in deterministic order (local first, then follower targets in
 // their declared order) so that audit-log output is reproducible across
 // runs even though the FSM-side encoding stores expectedFrom as a map.
 // See gastrolog-51gme.
-func (o *Orchestrator) placementMembership(tier *TierInstance) []string {
+func (o *Orchestrator) placementMembership(tier *VaultInstance) []string {
 	expected := make([]string, 0, 1+len(tier.FollowerTargets))
 	seen := map[string]bool{}
 	if o.localNodeID != "" {
@@ -861,7 +861,7 @@ func (o *Orchestrator) placementMembership(tier *TierInstance) []string {
 // DeleteNoAnnounce to avoid a redundant second Raft-wide announce (the
 // first one already propagated via OnDelete). The reconciler-driven
 // production path (gastrolog-51gme) walks same-node siblings itself in
-// TierLifecycleReconciler.deleteLocalCopy.
+// VaultLifecycleReconciler.deleteLocalCopy.
 func (o *Orchestrator) deleteFromFollowers(vaultID glid.GLID, tierID glid.GLID, chunkID chunk.ChunkID) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
@@ -1002,12 +1002,12 @@ func (o *Orchestrator) ImportChunkRecords(ctx context.Context, vaultID glid.GLID
 	return nil
 }
 
-// ImportToTier imports records as a sealed chunk into a specific tier,
+// ImportToVault imports records as a sealed chunk into a specific tier,
 // preserving the given chunk ID. Used by sealed-chunk replication —
 // the follower receives a sealed chunk from the leader with the same ID.
 // Schedules postSealWork for local indexing (secondaries need indexes for queries)
 // but won't trigger further replication (gated by !IsFollower in tierReplicationInfo).
-func (o *Orchestrator) ImportToTier(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
+func (o *Orchestrator) ImportToVault(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
 	return o.ImportToTierStorage(ctx, vaultID, tierID, "", chunkID, next)
 }
 
@@ -1157,7 +1157,7 @@ func (o *Orchestrator) StreamAppendToTier(ctx context.Context, vaultID, tierID g
 		if iterErr != nil {
 			return iterErr
 		}
-		if err := o.AppendToTier(vaultID, tierID, chunk.ChunkID{}, rec); err != nil {
+		if err := o.AppendToVault(vaultID, tierID, chunk.ChunkID{}, rec); err != nil {
 			return err
 		}
 	}
@@ -1180,7 +1180,7 @@ func drainIterator(next chunk.RecordIterator) {
 // active chunk is empty or absent.
 //
 // Role: tier leader. Sealing on the leader triggers follower seals via the
-// TierReplicator's SealTier call, which arrives on followers as an invocation
+// ChunkReplicator's SealVault call, which arrives on followers as an invocation
 // of SealActiveTier. Callers that are already on the follower side (seal
 // commands dispatched from the leader's Raft) must use SealActiveTier
 // directly.

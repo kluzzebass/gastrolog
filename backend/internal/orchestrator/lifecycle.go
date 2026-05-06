@@ -492,7 +492,7 @@ func (o *Orchestrator) RebuildMissingIndexes(ctx context.Context) error {
 }
 
 // rebuildTierIndexes checks a single tier for sealed chunks with incomplete indexes.
-func (o *Orchestrator) rebuildTierIndexes(ctx context.Context, vaultID glid.GLID, tier *TierInstance) error {
+func (o *Orchestrator) rebuildTierIndexes(ctx context.Context, vaultID glid.GLID, tier *VaultInstance) error {
 	// Skip tiers where the post-seal pipeline handles indexes.
 	if proc, ok := tier.Chunks.(chunk.ChunkPostSealProcessor); ok {
 		if !proc.HasIndexBuilders() {
@@ -517,7 +517,7 @@ func (o *Orchestrator) rebuildTierIndexes(ctx context.Context, vaultID glid.GLID
 	return nil
 }
 
-func (o *Orchestrator) scheduleIndexRebuildIfNeeded(ctx context.Context, vaultID glid.GLID, tier *TierInstance, meta chunk.ChunkMeta) {
+func (o *Orchestrator) scheduleIndexRebuildIfNeeded(ctx context.Context, vaultID glid.GLID, tier *VaultInstance, meta chunk.ChunkMeta) {
 	complete, err := tier.Indexes.IndexesComplete(meta.ID)
 	if err != nil || complete {
 		return

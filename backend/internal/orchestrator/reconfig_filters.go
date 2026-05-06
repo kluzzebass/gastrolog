@@ -31,20 +31,22 @@ func findFilter(filters []system.FilterConfig, id glid.GLID) *system.FilterConfi
 	return nil
 }
 
-// resolveVaultNodeID finds the node that owns the vault's first (active) tier.
-// Returns empty string if the vault has no tiers or the active tier is unassigned.
+// resolveVaultNodeID finds the node that owns the vault. Returns empty
+// string if the vault has no placements (unassigned).
+//
+// Reads VaultConfig.Placements directly (mirrored from tier placements
+// via the FSM bridge — gastrolog-257l7).
 func resolveVaultNodeID(sys *system.System, vaultID glid.GLID) string {
 	cfg := &sys.Config
 	rt := &sys.Runtime
 	for _, v := range cfg.Vaults {
-		tierIDs := system.VaultTierIDs(cfg.Tiers, v.ID)
-		if v.ID != vaultID || len(tierIDs) == 0 {
+		if v.ID != vaultID {
 			continue
 		}
-		tier := findTierConfig(cfg.Tiers, tierIDs[0])
-		if tier != nil {
-			return system.LeaderNodeID(rt.TierPlacements[tier.ID], rt.NodeStorageConfigs)
+		if len(v.Placements) == 0 {
+			return ""
 		}
+		return system.LeaderNodeID(v.Placements, rt.NodeStorageConfigs)
 	}
 	return ""
 }

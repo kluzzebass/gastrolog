@@ -8,6 +8,47 @@ import { Message, proto3, protoInt64 } from "@bufbuild/protobuf";
 import { CloudService, NodeStorageConfig } from "./storage_pb.js";
 
 /**
+ * VaultType identifies the storage shape of a vault.
+ *
+ * A cloud-backed vault is a VAULT_TYPE_FILE vault with cloud_service_id
+ * set; the server flips behavior on the cloud-store binding rather than
+ * the type enum.
+ *
+ * Mirrors TierType during the vault refactor (gastrolog-257l7); once
+ * every consumer migrates to VaultConfig, TierType is deleted.
+ *
+ * @generated from enum gastrolog.v1.VaultType
+ */
+export enum VaultType {
+  /**
+   * @generated from enum value: VAULT_TYPE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: VAULT_TYPE_MEMORY = 1;
+   */
+  MEMORY = 1,
+
+  /**
+   * @generated from enum value: VAULT_TYPE_FILE = 2;
+   */
+  FILE = 2,
+
+  /**
+   * @generated from enum value: VAULT_TYPE_JSONL = 3;
+   */
+  JSONL = 3,
+}
+// Retrieve enum metadata with: proto3.getEnumType(VaultType)
+proto3.util.setEnumType(VaultType, "gastrolog.v1.VaultType", [
+  { no: 0, name: "VAULT_TYPE_UNSPECIFIED" },
+  { no: 1, name: "VAULT_TYPE_MEMORY" },
+  { no: 2, name: "VAULT_TYPE_FILE" },
+  { no: 3, name: "VAULT_TYPE_JSONL" },
+]);
+
+/**
  * IngesterMode classifies how an ingester acquires data.
  *
  * @generated from enum gastrolog.v1.IngesterMode
@@ -284,6 +325,68 @@ export class RetentionRule extends Message<RetentionRule> {
 }
 
 /**
+ * VaultPlacement assigns one replica of a vault to a specific file
+ * storage. The node is derived from the file storage's NodeStorageConfig.
+ *
+ * Mirrors TierPlacement during the vault refactor (gastrolog-257l7);
+ * once every consumer migrates to VaultConfig, TierPlacement is deleted.
+ *
+ * @generated from message gastrolog.v1.VaultPlacement
+ */
+export class VaultPlacement extends Message<VaultPlacement> {
+  /**
+   * references FileStorage.id
+   *
+   * @generated from field: bytes storage_id = 1;
+   */
+  storageId = new Uint8Array(0);
+
+  /**
+   * true = this storage bootstraps the Raft group (initial leader)
+   *
+   * @generated from field: bool leader = 2;
+   */
+  leader = false;
+
+  constructor(data?: PartialMessage<VaultPlacement>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.VaultPlacement";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "storage_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "leader", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultPlacement {
+    return new VaultPlacement().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): VaultPlacement {
+    return new VaultPlacement().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): VaultPlacement {
+    return new VaultPlacement().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: VaultPlacement | PlainMessage<VaultPlacement> | undefined, b: VaultPlacement | PlainMessage<VaultPlacement> | undefined): boolean {
+    return proto3.util.equals(VaultPlacement, a, b);
+  }
+}
+
+/**
+ * VaultConfig defines a vault — the unit of independent storage and the
+ * only abstraction over the chunk layer.
+ *
+ * Tags 1, 7, 8 are the original VaultConfig shape (id, enabled, name).
+ * Tags 2-6 and 9-15 are added during the vault refactor (gastrolog-257l7)
+ * to absorb the fields that lived on TierConfig before tiers went away.
+ * Once consumers migrate, this message becomes the only vault-shape proto;
+ * TierConfig and friends are deleted.
+ *
  * @generated from message gastrolog.v1.VaultConfig
  */
 export class VaultConfig extends Message<VaultConfig> {
@@ -293,14 +396,86 @@ export class VaultConfig extends Message<VaultConfig> {
   id = new Uint8Array(0);
 
   /**
-   * @generated from field: bool enabled = 7;
+   * @generated from field: string name = 2;
+   */
+  name = "";
+
+  /**
+   * @generated from field: bool enabled = 3;
    */
   enabled = false;
 
   /**
-   * @generated from field: string name = 8;
+   * @generated from field: gastrolog.v1.VaultType type = 4;
    */
-  name = "";
+  type = VaultType.UNSPECIFIED;
+
+  /**
+   * @generated from field: bytes rotation_policy_id = 5;
+   */
+  rotationPolicyId = new Uint8Array(0);
+
+  /**
+   * @generated from field: repeated gastrolog.v1.RetentionRule retention_rules = 6;
+   */
+  retentionRules: RetentionRule[] = [];
+
+  /**
+   * @generated from field: uint64 memory_budget_bytes = 7;
+   */
+  memoryBudgetBytes = protoInt64.zero;
+
+  /**
+   * @generated from field: uint32 storage_class = 8;
+   */
+  storageClass = 0;
+
+  /**
+   * @generated from field: bytes cloud_service_id = 9;
+   */
+  cloudServiceId = new Uint8Array(0);
+
+  /**
+   * desired RF (1 = no replication, default)
+   *
+   * @generated from field: uint32 replication_factor = 10;
+   */
+  replicationFactor = 0;
+
+  /**
+   * direct path for JSONL sinks
+   *
+   * @generated from field: string path = 11;
+   */
+  path = "";
+
+  /**
+   * system-managed: file storage assignments by placement manager
+   *
+   * @generated from field: repeated gastrolog.v1.VaultPlacement placements = 12;
+   */
+  placements: VaultPlacement[] = [];
+
+  /**
+   * "lru" (default) or "ttl"
+   *
+   * @generated from field: string cache_eviction = 13;
+   */
+  cacheEviction = "";
+
+  /**
+   * max cache size (e.g. "1GB", "500MB"; default: "1GiB")
+   *
+   * @generated from field: string cache_budget = 14;
+   */
+  cacheBudget = "";
+
+  /**
+   * eviction TTL duration (e.g. "1h", "7d"); only for ttl mode
+   *
+   * @generated from field: string cache_ttl = 15;
+   */
+  cacheTtl = "";
 
   constructor(data?: PartialMessage<VaultConfig>) {
     super();
@@ -311,8 +486,20 @@ export class VaultConfig extends Message<VaultConfig> {
   static readonly typeName = "gastrolog.v1.VaultConfig";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 7, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 8, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 4, name: "type", kind: "enum", T: proto3.getEnumType(VaultType) },
+    { no: 5, name: "rotation_policy_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 6, name: "retention_rules", kind: "message", T: RetentionRule, repeated: true },
+    { no: 7, name: "memory_budget_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 8, name: "storage_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 9, name: "cloud_service_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 10, name: "replication_factor", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 11, name: "path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 12, name: "placements", kind: "message", T: VaultPlacement, repeated: true },
+    { no: 13, name: "cache_eviction", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 14, name: "cache_budget", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 15, name: "cache_ttl", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultConfig {

@@ -43,7 +43,7 @@ type orchActions interface {
 	RemoveIngester(id glid.GLID) error
 	UpdateMaxConcurrentJobs(n int) error
 	MaxConcurrentJobs() int
-	FindLocalTierExported(vaultID, tierID glid.GLID) *orchestrator.TierInstance
+	FindLocalTierExported(vaultID, tierID glid.GLID) *orchestrator.VaultInstance
 }
 
 // ManagedFileHandler handles managed file lifecycle events from the FSM.
@@ -570,7 +570,7 @@ func (d *configDispatcher) applyTierMembershipChange(ctx context.Context, v syst
 	// nodes still need to join as voters — without that, a tier with RF
 	// smaller than the cluster size can't reach quorum because most nodes
 	// never registered the group. AddTierToVault handles both cases: storage
-	// nodes get a TierInstance, non-storage nodes only get a Raft group.
+	// nodes get a VaultInstance, non-storage nodes only get a Raft group.
 	tierBelongsHere := leaderNodeID == d.localNodeID || slices.Contains(followerNodeIDs, d.localNodeID)
 	if !tierBelongsHere {
 		if existing := d.orch.FindLocalTierExported(v.ID, tierID); existing != nil {
@@ -604,7 +604,7 @@ func (d *configDispatcher) rebuildVaultIfTierMissing(ctx context.Context, v syst
 
 // updateTierRoleIfNeeded checks whether a tier's role (leader ↔ follower) has changed
 // and updates it in place — avoiding a full vault rebuild and file lock churn.
-func (d *configDispatcher) updateTierRoleIfNeeded(ctx context.Context, vaultID, tierID glid.GLID, existing *orchestrator.TierInstance) {
+func (d *configDispatcher) updateTierRoleIfNeeded(ctx context.Context, vaultID, tierID glid.GLID, existing *orchestrator.VaultInstance) {
 	tierCfg, err := d.cfgStore.GetTier(ctx, tierID)
 	if err != nil || tierCfg == nil {
 		return

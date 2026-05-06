@@ -119,14 +119,14 @@ func TestMultiNode_TierTransitionSearchFanOut(t *testing.T) {
 	ctx := context.Background()
 
 	_ = cfgStore.PutTier(ctx, system.TierConfig{
-		ID: tier0ID, Name: "hot", Type: system.TierTypeFile,
+		ID: tier0ID, Name: "hot", Type: system.VaultTypeFile,
 		VaultID: vaultID, Position: 0,
 	})
 	_ = cfgStore.SetTierPlacements(ctx, tier0ID, []system.TierPlacement{
 		{StorageID: system.SyntheticStorageID("data-1"), Leader: true},
 	})
 	_ = cfgStore.PutTier(ctx, system.TierConfig{
-		ID: tier1ID, Name: "warm", Type: system.TierTypeFile,
+		ID: tier1ID, Name: "warm", Type: system.VaultTypeFile,
 		VaultID: vaultID, Position: 1,
 	})
 	_ = cfgStore.SetTierPlacements(ctx, tier1ID, []system.TierPlacement{
@@ -163,11 +163,11 @@ func TestMultiNode_TierTransitionSearchFanOut(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tierInst0 := &orchestrator.TierInstance{
+	tierInst0 := &orchestrator.VaultInstance{
 		TierID: tier0ID, Type: "file", Chunks: cm0, Indexes: im0,
 		Query: query.New(cm0, im0, nil),
 	}
-	tierInst1 := &orchestrator.TierInstance{
+	tierInst1 := &orchestrator.VaultInstance{
 		TierID: tier1ID, Type: "file", Chunks: cm1, Indexes: im1,
 		Query: query.New(cm1, im1, nil),
 	}
@@ -206,7 +206,7 @@ func TestMultiNode_TierTransitionSearchFanOut(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range totalRecords {
 		ts := t0.Add(time.Duration(i) * time.Second)
-		if err := orchData1.AppendToTier(vaultID, tier0ID, chunk.ChunkID{}, chunk.Record{
+		if err := orchData1.AppendToVault(vaultID, tier0ID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts, WriteTS: ts,
 			Raw: fmt.Appendf(nil, "tiered-%d", i),
 		}); err != nil {

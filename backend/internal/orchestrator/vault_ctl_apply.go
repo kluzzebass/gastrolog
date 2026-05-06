@@ -36,7 +36,7 @@ func (o *Orchestrator) ApplyVaultControlPlane(vaultID glid.GLID, data []byte) er
 }
 
 // vaultCtlTierApplier implements tierfsm.Applier by wrapping tier commands as
-// vault control-plane OpTierFSM entries (see vaultraft.MarshalTierCommand).
+// vault control-plane OpVaultChunkFSM entries (see vaultraft.MarshalVaultChunkCommand).
 type vaultCtlTierApplier struct {
 	o       *Orchestrator
 	vaultID glid.GLID
@@ -44,7 +44,7 @@ type vaultCtlTierApplier struct {
 }
 
 func (a *vaultCtlTierApplier) Apply(data []byte) error {
-	return a.o.ApplyVaultControlPlane(a.vaultID, vaultraft.MarshalTierCommand(a.tierID, data))
+	return a.o.ApplyVaultControlPlane(a.vaultID, vaultraft.MarshalVaultChunkCommand(a.tierID, data))
 }
 
 var _ tierfsm.Applier = (*vaultCtlTierApplier)(nil)

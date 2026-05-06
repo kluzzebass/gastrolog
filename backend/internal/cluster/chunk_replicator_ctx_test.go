@@ -8,7 +8,7 @@ import (
 )
 
 // Regression test for gastrolog-5oofa: the runWithCtx helper is what
-// prevents TierReplicator.send from blocking forever on a paused peer.
+// prevents ChunkReplicator.send from blocking forever on a paused peer.
 // Before this helper was added, send called stream.SendMsg / RecvMsg
 // directly with no ctx handling — a SIGSTOPed follower's stream would
 // block RecvMsg indefinitely, cascading into an orchestrator-wide
@@ -20,7 +20,7 @@ import (
 func TestRunWithCtx_ReturnsOnCtxCancel(t *testing.T) {
 	t.Parallel()
 
-	tr := &TierReplicator{}
+	tr := &ChunkReplicator{}
 
 	// fn that would run for a "very long time" — model of SendMsg /
 	// RecvMsg against a paused peer.
@@ -52,7 +52,7 @@ func TestRunWithCtx_ReturnsOnCtxCancel(t *testing.T) {
 func TestRunWithCtx_ReturnsFnResult(t *testing.T) {
 	t.Parallel()
 
-	tr := &TierReplicator{}
+	tr := &ChunkReplicator{}
 
 	// fn returns a specific sentinel error immediately.
 	sentinel := errors.New("fn-specific")
@@ -73,7 +73,7 @@ func TestRunWithCtx_ReturnsFnResult(t *testing.T) {
 func TestRunWithCtx_ZeroDeadline(t *testing.T) {
 	t.Parallel()
 
-	tr := &TierReplicator{}
+	tr := &ChunkReplicator{}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancelled before call
 

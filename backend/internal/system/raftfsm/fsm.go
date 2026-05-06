@@ -5,6 +5,7 @@
 package raftfsm
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"gastrolog/internal/glid"
@@ -516,7 +517,41 @@ func (f *FSM) applyPutTier(ctx context.Context, pb *gastrologv1.PutTierCommand) 
 	if err := f.store.PutTier(ctx, tier); err != nil {
 		return nil, err
 	}
+	// Vault refactor (gastrolog-257l7): re-merge the owning vault so its
+	// VaultConfig stays in sync with the tier. Once consumers migrate to
+	// reading storage/lifecycle data from VaultConfig directly, the merge
+	// path becomes the only source of truth for that data and the tier
+	// list is dropped.
+	if err := f.refreshVaultFromTiers(ctx, tier.VaultID); err != nil {
+		return nil, err
+	}
 	return &Notification{Kind: NotifyTierPut, ID: tier.ID}, nil
+}
+
+// refreshVaultFromTiers re-reads the tier list and the vault, runs
+// MergeVaultFromTiers, and writes the merged VaultConfig back to the
+// store. Called after applyPutTier / applySetTierPlacements so the
+// vault's merged fields stay in sync with its tier(s) at runtime.
+//
+// Bridge during the vault refactor — once the tier list is dropped
+// (final commit), this and its callers go away because the merged
+// fields will be the only source of truth, written directly via PutVault.
+func (f *FSM) refreshVaultFromTiers(ctx context.Context, vaultID glid.GLID) error {
+	if vaultID == (glid.GLID{}) {
+		return nil
+	}
+	v, err := f.store.GetVault(ctx, vaultID)
+	if err != nil || v == nil {
+		// Vault might not exist yet (tier created before vault). The
+		// bootstrap or PutVault path will pick up the merge instead.
+		return nil //nolint:nilerr // intentional: tier-before-vault is normal during bootstrap
+	}
+	tiers, err := f.store.ListTiers(ctx)
+	if err != nil {
+		return err
+	}
+	merged := system.MergeVaultFromTiers(*v, tiers)
+	return f.store.PutVault(ctx, merged)
 }
 
 func (f *FSM) applyDeleteTier(ctx context.Context, pb *gastrologv1.DeleteTierCommand) (*Notification, error) {
@@ -538,7 +573,36 @@ func (f *FSM) applySetTierPlacements(ctx context.Context, pb *gastrologv1.SetTie
 	if err := f.store.SetTierPlacements(ctx, tierID, placements); err != nil {
 		return nil, err
 	}
+	// Vault refactor (gastrolog-257l7): mirror placements onto the owning
+	// vault's VaultConfig.Placements so consumers reading from VaultConfig
+	// see the same placement set as the tier-keyed map. Bridge until tiers
+	// are gone and placements are stored vault-keyed directly.
+	if err := f.refreshVaultPlacements(ctx, tierID, placements); err != nil {
+		return nil, err
+	}
 	return &Notification{Kind: NotifyTierPlacementsSet, ID: tierID}, nil
+}
+
+// refreshVaultPlacements writes the given placement set onto the
+// VaultConfig owning the given tier. Bridge during the vault refactor
+// (gastrolog-257l7).
+func (f *FSM) refreshVaultPlacements(ctx context.Context, tierID glid.GLID, placements []system.TierPlacement) error {
+	tier, err := f.store.GetTier(ctx, tierID)
+	if err != nil || tier == nil {
+		return nil //nolint:nilerr // tier might be transient; not worth failing the placement write
+	}
+	v, err := f.store.GetVault(ctx, tier.VaultID)
+	if err != nil || v == nil {
+		return nil //nolint:nilerr // vault not yet present; will pick up on PutVault
+	}
+	merged := *v
+	if len(placements) > 0 {
+		merged.Placements = make([]system.TierPlacement, len(placements))
+		copy(merged.Placements, placements)
+	} else {
+		merged.Placements = nil
+	}
+	return f.store.PutVault(ctx, merged)
 }
 
 func (f *FSM) applySetIngesterAlive(ctx context.Context, cmd *gastrologv1.SetIngesterAliveCommand) (*Notification, error) {
@@ -726,15 +790,28 @@ func (f *FSM) Snapshot() (raft.FSMSnapshot, error) {
 	return &fsmSnapshot{data: data}, nil
 }
 
+// maxSnapshotBytes caps the size of a Raft snapshot the FSM will accept on
+// restore. The snapshot is a marshaled SystemSnapshot proto containing the
+// full cluster config (vaults, tiers, ingesters, routes, users, certs, etc.)
+// — the realistic ceiling is at most a few hundred MB even for very large
+// clusters. The cap rejects pathological / corrupted snapshots without
+// pulling unbounded bytes into the heap.
+const maxSnapshotBytes = 1 << 30 // 1 GB
+
 // Restore replaces the FSM's state with a snapshot.
 // Raft guarantees this is never called concurrently with Apply or Snapshot.
 func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit,gocyclo // snapshot restore is inherently complex
 	defer func() { _ = rc.Close() }()
 
-	data, err := io.ReadAll(rc)
+	var buf bytes.Buffer
+	n, err := io.Copy(&buf, io.LimitReader(rc, maxSnapshotBytes+1))
 	if err != nil {
 		return fmt.Errorf("read snapshot: %w", err)
 	}
+	if n > maxSnapshotBytes {
+		return fmt.Errorf("snapshot exceeds %d bytes (cap to prevent unbounded heap)", maxSnapshotBytes)
+	}
+	data := buf.Bytes()
 
 	snap, err := command.UnmarshalSnapshot(data)
 	if err != nil {

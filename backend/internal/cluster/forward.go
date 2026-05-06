@@ -282,7 +282,7 @@ func streamForwardRecordsHandler(srv any, stream grpc.ServerStream) error {
 
 		// StreamForwardRecords is exclusively the cross-node vault routing
 		// path since gastrolog-5c6fp — tier-targeted replication goes through
-		// TierReplication instead. Always append as a regular vault record.
+		// ChunkReplication instead. Always append as a regular vault record.
 		for _, exportRec := range msg.GetRecords() {
 			rec := convert.ExportToRecord(exportRec)
 			if appendErr := s.recordAppender(stream.Context(), vaultID, rec); appendErr != nil {
@@ -463,7 +463,7 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 	first := true
 	for rec, iterErr := range searchIter {
 		if iterErr != nil {
-			// EOF can occur when a chunk is deleted mid-read (e.g., ImportToTier
+			// EOF can occur when a chunk is deleted mid-read (e.g., ImportToVault
 			// replacing a forwarded-record chunk on a follower). Treat as
 			// end-of-results — the data is still available via retry.
 			if errors.Is(iterErr, io.EOF) || isMissingLocalChunkFileError(iterErr) {
@@ -660,19 +660,19 @@ func (s *Server) forwardSealVault(ctx context.Context, req *gastrologv1.ForwardS
 }
 
 // SealTierExecutor seals a specific tier's active chunk on this node.
-// Invoked by the TierReplication stream handler.
+// Invoked by the ChunkReplication stream handler.
 type SealTierExecutor func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error
 
-// SetSealTierExecutor injects the callback for handling TierReplicationSeal commands.
+// SetSealTierExecutor injects the callback for handling ChunkReplicationSeal commands.
 func (s *Server) SetSealTierExecutor(fn SealTierExecutor) {
 	s.sealTierExecutor = fn
 }
 
 // DeleteChunkExecutor deletes a specific sealed chunk from a tier on this node.
-// Invoked by the TierReplication stream handler.
+// Invoked by the ChunkReplication stream handler.
 type DeleteChunkExecutor func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error
 
-// SetDeleteChunkExecutor injects the callback for handling TierReplicationDelete commands.
+// SetDeleteChunkExecutor injects the callback for handling ChunkReplicationDelete commands.
 func (s *Server) SetDeleteChunkExecutor(fn DeleteChunkExecutor) {
 	s.deleteChunkExecutor = fn
 }
@@ -741,24 +741,14 @@ func (s *Server) forwardApply(ctx context.Context, req *gastrologv1.ForwardApply
 	return &gastrologv1.ForwardApplyResponse{}, nil
 }
 
-// forwardTierApply handles the ForwardTierApply RPC. The payload is a
-// tierfsm command wrapped with OpTierFSM + tier ID (see
-// NewVaultCtlTierApplyForwarder), and the group ID is the vault-ctl
-// Raft group ID. Dispatches to the shared groupApplyFn.
-func (s *Server) forwardTierApply(ctx context.Context, req *gastrologv1.ForwardTierApplyRequest) (*gastrologv1.ForwardTierApplyResponse, error) {
-	if s.groupApplyFn == nil {
-		return nil, status.Error(codes.Unavailable, "group apply function not configured")
-	}
-	if err := s.groupApplyFn(ctx, string(req.GetGroupId()), req.GetCommand()); err != nil {
-		return nil, status.Errorf(codes.Internal, "tier apply: %v", err)
-	}
-	return &gastrologv1.ForwardTierApplyResponse{}, nil
-}
-
-// forwardVaultApply handles the ForwardVaultApply RPC on the vault
-// control-plane Raft leader. The payload is a native vault-ctl FSM
-// command (no OpTierFSM wrapping); the group ID identifies the vault's
-// control-plane Raft group. Dispatches to the shared groupApplyFn.
+// forwardVaultApply handles the ForwardVaultApply RPC. The payload is a
+// vault-ctl Raft FSM command — either an OpVaultChunkFSM-wrapped tierfsm
+// command (see NewVaultCtlChunkApplyForwarder) or a native vault-ctl
+// command. The group ID is the vault-ctl Raft group ID. Dispatches to
+// the shared groupApplyFn.
+//
+// Replaces the historical forwardTierApply path during the vault refactor
+// (gastrolog-257l7); the two had identical schema and semantics.
 func (s *Server) forwardVaultApply(ctx context.Context, req *gastrologv1.ForwardVaultApplyRequest) (*gastrologv1.ForwardVaultApplyResponse, error) {
 	if s.groupApplyFn == nil {
 		return nil, status.Error(codes.Unavailable, "group apply function not configured")
@@ -989,10 +979,6 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			Handler:    listPeerManagedFilesHandler,
 		},
 		{
-			MethodName: "ForwardTierApply",
-			Handler:    forwardTierApplyHandler,
-		},
-		{
 			MethodName: "ForwardVaultApply",
 			Handler:    forwardVaultApplyHandler,
 		},
@@ -1003,8 +989,8 @@ var clusterServiceDesc = grpc.ServiceDesc{
 	},
 	Streams: []grpc.StreamDesc{
 		{
-			StreamName:    "TierReplication",
-			Handler:       tierReplicationStreamHandler,
+			StreamName:    "ChunkReplication",
+			Handler:       chunkReplicationStreamHandler,
 			ClientStreams: true,
 			ServerStreams: true,
 		},
@@ -1079,25 +1065,6 @@ func forwardApplyHandler(srv any, ctx context.Context, dec func(any) error, inte
 	}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return s.forwardApply(ctx, req.(*gastrologv1.ForwardApplyRequest))
-	}
-	return interceptor(ctx, req, info, handler)
-}
-
-func forwardTierApplyHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	req := &gastrologv1.ForwardTierApplyRequest{}
-	if err := dec(req); err != nil {
-		return nil, err
-	}
-	s := srv.(*Server)
-	if interceptor == nil {
-		return s.forwardTierApply(ctx, req)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/gastrolog.v1.ClusterService/ForwardTierApply",
-	}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return s.forwardTierApply(ctx, req.(*gastrologv1.ForwardTierApplyRequest))
 	}
 	return interceptor(ctx, req, info, handler)
 }

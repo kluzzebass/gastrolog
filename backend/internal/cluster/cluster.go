@@ -96,7 +96,7 @@ type Server struct {
 
 	// groupApplyFn applies a pre-marshaled command to the multiraft group
 	// identified by groupID. Used by both ForwardTierApply (groupID = the
-	// vault-ctl group carrying an OpTierFSM-wrapped payload) and
+	// vault-ctl group carrying an OpVaultChunkFSM-wrapped payload) and
 	// ForwardVaultApply (groupID = the vault-ctl group, payload = native
 	// vault-ctl command). Post-gastrolog-5xxbd there is no separate
 	// tier-Raft path; both RPCs route through this single function.
@@ -136,11 +136,11 @@ type Server struct {
 	recordTierAppender RecordTierAppender
 
 	// sealTierExecutor seals a specific tier's active chunk on this node.
-	// Invoked by the TierReplication stream handler.
+	// Invoked by the ChunkReplication stream handler.
 	sealTierExecutor SealTierExecutor
 
 	// deleteChunkExecutor deletes a sealed chunk from a tier on this node.
-	// Invoked by the TierReplication stream handler.
+	// Invoked by the ChunkReplication stream handler.
 	deleteChunkExecutor DeleteChunkExecutor
 
 	// recordImporter imports records as a sealed chunk in a local vault.

@@ -337,7 +337,7 @@ func TestExpireChunkProposesRequestDelete(t *testing.T) {
 		gotReason       string
 		gotExpectedFrom []string
 	)
-	tier := &TierInstance{
+	tier := &VaultInstance{
 		TierID: tierID,
 		Chunks: cm,
 		Indexes: im,
@@ -403,7 +403,7 @@ func TestExpireChunkSkipsLocalOnRequestDeleteFailure(t *testing.T) {
 	im := &retentionFakeIndexManager{}
 
 	vaultID, tierID := glid.New(), glid.New()
-	tier := &TierInstance{
+	tier := &VaultInstance{
 		TierID:  tierID,
 		Chunks:  cm,
 		Indexes: im,
@@ -471,7 +471,7 @@ func TestClusterRetentionSweepDeletesOnAllNodes(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range totalRecords {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		if err := leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+		if err := leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts,
 			WriteTS:  ts,
 			Raw:      fmt.Appendf(nil, "retention-%d", i),
@@ -563,7 +563,7 @@ func TestClusterRetentionSweepWithTTLOnAllNodes(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 500 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		if err := leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+		if err := leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts,
 			WriteTS:  ts,
 			Raw:      fmt.Appendf(nil, "ttl-%d", i),
@@ -648,7 +648,7 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 	defer orch.Stop()
 
 	// First call: creates a new runner with cm1/im1.
-	tier1 := &TierInstance{
+	tier1 := &VaultInstance{
 		TierID:  tierID,
 		Chunks:  cm1,
 		Indexes: im1,
@@ -667,7 +667,7 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 	}
 
 	// Second call with different chunk manager: runner is reused, cm/im refreshed.
-	tier2 := &TierInstance{
+	tier2 := &VaultInstance{
 		TierID:  tierID,
 		Chunks:  cm2,
 		Indexes: im2,

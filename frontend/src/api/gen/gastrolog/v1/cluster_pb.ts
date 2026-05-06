@@ -1190,91 +1190,85 @@ export class ForwardVaultApplyResponse extends Message<ForwardVaultApplyResponse
 }
 
 /**
- * TierReplicationCommand is sent leader → follower. The vault_id and
- * tier_id identify the target tier; the oneof command determines the
+ * ChunkReplicationCommand is sent leader → follower. The vault_id
+ * identifies the target vault; the oneof command determines the
  * operation. New command types can be added without changing framing.
  *
- * @generated from message gastrolog.v1.TierReplicationCommand
+ * @generated from message gastrolog.v1.ChunkReplicationCommand
  */
-export class TierReplicationCommand extends Message<TierReplicationCommand> {
+export class ChunkReplicationCommand extends Message<ChunkReplicationCommand> {
   /**
    * @generated from field: bytes vault_id = 1;
    */
   vaultId = new Uint8Array(0);
 
   /**
-   * @generated from field: bytes tier_id = 2;
-   */
-  tierId = new Uint8Array(0);
-
-  /**
-   * @generated from oneof gastrolog.v1.TierReplicationCommand.command
+   * @generated from oneof gastrolog.v1.ChunkReplicationCommand.command
    */
   command: {
     /**
-     * @generated from field: gastrolog.v1.TierReplicationAppend append = 10;
+     * @generated from field: gastrolog.v1.ChunkReplicationAppend append = 10;
      */
-    value: TierReplicationAppend;
+    value: ChunkReplicationAppend;
     case: "append";
   } | {
     /**
-     * @generated from field: gastrolog.v1.TierReplicationSeal seal = 11;
+     * @generated from field: gastrolog.v1.ChunkReplicationSeal seal = 11;
      */
-    value: TierReplicationSeal;
+    value: ChunkReplicationSeal;
     case: "seal";
   } | {
     /**
-     * @generated from field: gastrolog.v1.TierReplicationImport import_sealed = 12;
+     * @generated from field: gastrolog.v1.ChunkReplicationImport import_sealed = 12;
      */
-    value: TierReplicationImport;
+    value: ChunkReplicationImport;
     case: "importSealed";
   } | {
     /**
-     * @generated from field: gastrolog.v1.TierReplicationDelete delete_chunk = 13;
+     * @generated from field: gastrolog.v1.ChunkReplicationDelete delete_chunk = 13;
      */
-    value: TierReplicationDelete;
+    value: ChunkReplicationDelete;
     case: "deleteChunk";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
-  constructor(data?: PartialMessage<TierReplicationCommand>) {
+  constructor(data?: PartialMessage<ChunkReplicationCommand>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.TierReplicationCommand";
+  static readonly typeName = "gastrolog.v1.ChunkReplicationCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 2, name: "tier_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 10, name: "append", kind: "message", T: TierReplicationAppend, oneof: "command" },
-    { no: 11, name: "seal", kind: "message", T: TierReplicationSeal, oneof: "command" },
-    { no: 12, name: "import_sealed", kind: "message", T: TierReplicationImport, oneof: "command" },
-    { no: 13, name: "delete_chunk", kind: "message", T: TierReplicationDelete, oneof: "command" },
+    { no: 10, name: "append", kind: "message", T: ChunkReplicationAppend, oneof: "command" },
+    { no: 11, name: "seal", kind: "message", T: ChunkReplicationSeal, oneof: "command" },
+    { no: 12, name: "import_sealed", kind: "message", T: ChunkReplicationImport, oneof: "command" },
+    { no: 13, name: "delete_chunk", kind: "message", T: ChunkReplicationDelete, oneof: "command" },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TierReplicationCommand {
-    return new TierReplicationCommand().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkReplicationCommand {
+    return new ChunkReplicationCommand().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TierReplicationCommand {
-    return new TierReplicationCommand().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ChunkReplicationCommand {
+    return new ChunkReplicationCommand().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TierReplicationCommand {
-    return new TierReplicationCommand().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ChunkReplicationCommand {
+    return new ChunkReplicationCommand().fromJsonString(jsonString, options);
   }
 
-  static equals(a: TierReplicationCommand | PlainMessage<TierReplicationCommand> | undefined, b: TierReplicationCommand | PlainMessage<TierReplicationCommand> | undefined): boolean {
-    return proto3.util.equals(TierReplicationCommand, a, b);
+  static equals(a: ChunkReplicationCommand | PlainMessage<ChunkReplicationCommand> | undefined, b: ChunkReplicationCommand | PlainMessage<ChunkReplicationCommand> | undefined): boolean {
+    return proto3.util.equals(ChunkReplicationCommand, a, b);
   }
 }
 
 /**
- * TierReplicationAppend forwards records to the follower's active chunk.
+ * ChunkReplicationAppend forwards records to the follower's active chunk.
  *
- * @generated from message gastrolog.v1.TierReplicationAppend
+ * @generated from message gastrolog.v1.ChunkReplicationAppend
  */
-export class TierReplicationAppend extends Message<TierReplicationAppend> {
+export class ChunkReplicationAppend extends Message<ChunkReplicationAppend> {
   /**
    * leader's active chunk ID
    *
@@ -1287,41 +1281,41 @@ export class TierReplicationAppend extends Message<TierReplicationAppend> {
    */
   records: ExportRecord[] = [];
 
-  constructor(data?: PartialMessage<TierReplicationAppend>) {
+  constructor(data?: PartialMessage<ChunkReplicationAppend>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.TierReplicationAppend";
+  static readonly typeName = "gastrolog.v1.ChunkReplicationAppend";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "records", kind: "message", T: ExportRecord, repeated: true },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TierReplicationAppend {
-    return new TierReplicationAppend().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkReplicationAppend {
+    return new ChunkReplicationAppend().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TierReplicationAppend {
-    return new TierReplicationAppend().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ChunkReplicationAppend {
+    return new ChunkReplicationAppend().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TierReplicationAppend {
-    return new TierReplicationAppend().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ChunkReplicationAppend {
+    return new ChunkReplicationAppend().fromJsonString(jsonString, options);
   }
 
-  static equals(a: TierReplicationAppend | PlainMessage<TierReplicationAppend> | undefined, b: TierReplicationAppend | PlainMessage<TierReplicationAppend> | undefined): boolean {
-    return proto3.util.equals(TierReplicationAppend, a, b);
+  static equals(a: ChunkReplicationAppend | PlainMessage<ChunkReplicationAppend> | undefined, b: ChunkReplicationAppend | PlainMessage<ChunkReplicationAppend> | undefined): boolean {
+    return proto3.util.equals(ChunkReplicationAppend, a, b);
   }
 }
 
 /**
- * TierReplicationSeal tells the follower to seal its active chunk.
+ * ChunkReplicationSeal tells the follower to seal its active chunk.
  *
- * @generated from message gastrolog.v1.TierReplicationSeal
+ * @generated from message gastrolog.v1.ChunkReplicationSeal
  */
-export class TierReplicationSeal extends Message<TierReplicationSeal> {
+export class ChunkReplicationSeal extends Message<ChunkReplicationSeal> {
   /**
    * expected active chunk ID
    *
@@ -1329,41 +1323,41 @@ export class TierReplicationSeal extends Message<TierReplicationSeal> {
    */
   chunkId = new Uint8Array(0);
 
-  constructor(data?: PartialMessage<TierReplicationSeal>) {
+  constructor(data?: PartialMessage<ChunkReplicationSeal>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.TierReplicationSeal";
+  static readonly typeName = "gastrolog.v1.ChunkReplicationSeal";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TierReplicationSeal {
-    return new TierReplicationSeal().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkReplicationSeal {
+    return new ChunkReplicationSeal().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TierReplicationSeal {
-    return new TierReplicationSeal().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ChunkReplicationSeal {
+    return new ChunkReplicationSeal().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TierReplicationSeal {
-    return new TierReplicationSeal().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ChunkReplicationSeal {
+    return new ChunkReplicationSeal().fromJsonString(jsonString, options);
   }
 
-  static equals(a: TierReplicationSeal | PlainMessage<TierReplicationSeal> | undefined, b: TierReplicationSeal | PlainMessage<TierReplicationSeal> | undefined): boolean {
-    return proto3.util.equals(TierReplicationSeal, a, b);
+  static equals(a: ChunkReplicationSeal | PlainMessage<ChunkReplicationSeal> | undefined, b: ChunkReplicationSeal | PlainMessage<ChunkReplicationSeal> | undefined): boolean {
+    return proto3.util.equals(ChunkReplicationSeal, a, b);
   }
 }
 
 /**
- * TierReplicationImport sends the canonical sealed chunk. The follower
+ * ChunkReplicationImport sends the canonical sealed chunk. The follower
  * replaces any forwarded version with this authoritative copy.
  *
- * @generated from message gastrolog.v1.TierReplicationImport
+ * @generated from message gastrolog.v1.ChunkReplicationImport
  */
-export class TierReplicationImport extends Message<TierReplicationImport> {
+export class ChunkReplicationImport extends Message<ChunkReplicationImport> {
   /**
    * @generated from field: bytes chunk_id = 1;
    */
@@ -1374,81 +1368,81 @@ export class TierReplicationImport extends Message<TierReplicationImport> {
    */
   records: ExportRecord[] = [];
 
-  constructor(data?: PartialMessage<TierReplicationImport>) {
+  constructor(data?: PartialMessage<ChunkReplicationImport>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.TierReplicationImport";
+  static readonly typeName = "gastrolog.v1.ChunkReplicationImport";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "records", kind: "message", T: ExportRecord, repeated: true },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TierReplicationImport {
-    return new TierReplicationImport().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkReplicationImport {
+    return new ChunkReplicationImport().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TierReplicationImport {
-    return new TierReplicationImport().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ChunkReplicationImport {
+    return new ChunkReplicationImport().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TierReplicationImport {
-    return new TierReplicationImport().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ChunkReplicationImport {
+    return new ChunkReplicationImport().fromJsonString(jsonString, options);
   }
 
-  static equals(a: TierReplicationImport | PlainMessage<TierReplicationImport> | undefined, b: TierReplicationImport | PlainMessage<TierReplicationImport> | undefined): boolean {
-    return proto3.util.equals(TierReplicationImport, a, b);
+  static equals(a: ChunkReplicationImport | PlainMessage<ChunkReplicationImport> | undefined, b: ChunkReplicationImport | PlainMessage<ChunkReplicationImport> | undefined): boolean {
+    return proto3.util.equals(ChunkReplicationImport, a, b);
   }
 }
 
 /**
- * TierReplicationDelete tells the follower to delete a sealed chunk
- * (e.g. after retention expiry or tier transition on the leader).
+ * ChunkReplicationDelete tells the follower to delete a sealed chunk
+ * (after retention expiry on the leader).
  *
- * @generated from message gastrolog.v1.TierReplicationDelete
+ * @generated from message gastrolog.v1.ChunkReplicationDelete
  */
-export class TierReplicationDelete extends Message<TierReplicationDelete> {
+export class ChunkReplicationDelete extends Message<ChunkReplicationDelete> {
   /**
    * @generated from field: bytes chunk_id = 1;
    */
   chunkId = new Uint8Array(0);
 
-  constructor(data?: PartialMessage<TierReplicationDelete>) {
+  constructor(data?: PartialMessage<ChunkReplicationDelete>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.TierReplicationDelete";
+  static readonly typeName = "gastrolog.v1.ChunkReplicationDelete";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TierReplicationDelete {
-    return new TierReplicationDelete().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkReplicationDelete {
+    return new ChunkReplicationDelete().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TierReplicationDelete {
-    return new TierReplicationDelete().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ChunkReplicationDelete {
+    return new ChunkReplicationDelete().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TierReplicationDelete {
-    return new TierReplicationDelete().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ChunkReplicationDelete {
+    return new ChunkReplicationDelete().fromJsonString(jsonString, options);
   }
 
-  static equals(a: TierReplicationDelete | PlainMessage<TierReplicationDelete> | undefined, b: TierReplicationDelete | PlainMessage<TierReplicationDelete> | undefined): boolean {
-    return proto3.util.equals(TierReplicationDelete, a, b);
+  static equals(a: ChunkReplicationDelete | PlainMessage<ChunkReplicationDelete> | undefined, b: ChunkReplicationDelete | PlainMessage<ChunkReplicationDelete> | undefined): boolean {
+    return proto3.util.equals(ChunkReplicationDelete, a, b);
   }
 }
 
 /**
- * TierReplicationAck is sent follower → leader after each command.
+ * ChunkReplicationAck is sent follower → leader after each command.
  *
- * @generated from message gastrolog.v1.TierReplicationAck
+ * @generated from message gastrolog.v1.ChunkReplicationAck
  */
-export class TierReplicationAck extends Message<TierReplicationAck> {
+export class ChunkReplicationAck extends Message<ChunkReplicationAck> {
   /**
    * @generated from field: bool ok = 1;
    */
@@ -1466,33 +1460,33 @@ export class TierReplicationAck extends Message<TierReplicationAck> {
    */
   chunkId = new Uint8Array(0);
 
-  constructor(data?: PartialMessage<TierReplicationAck>) {
+  constructor(data?: PartialMessage<ChunkReplicationAck>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.TierReplicationAck";
+  static readonly typeName = "gastrolog.v1.ChunkReplicationAck";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "ok", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 2, name: "error", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TierReplicationAck {
-    return new TierReplicationAck().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkReplicationAck {
+    return new ChunkReplicationAck().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TierReplicationAck {
-    return new TierReplicationAck().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ChunkReplicationAck {
+    return new ChunkReplicationAck().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TierReplicationAck {
-    return new TierReplicationAck().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ChunkReplicationAck {
+    return new ChunkReplicationAck().fromJsonString(jsonString, options);
   }
 
-  static equals(a: TierReplicationAck | PlainMessage<TierReplicationAck> | undefined, b: TierReplicationAck | PlainMessage<TierReplicationAck> | undefined): boolean {
-    return proto3.util.equals(TierReplicationAck, a, b);
+  static equals(a: ChunkReplicationAck | PlainMessage<ChunkReplicationAck> | undefined, b: ChunkReplicationAck | PlainMessage<ChunkReplicationAck> | undefined): boolean {
+    return proto3.util.equals(ChunkReplicationAck, a, b);
   }
 }
 
@@ -1500,7 +1494,7 @@ export class TierReplicationAck extends Message<TierReplicationAck> {
  * RequestReplicaCatchupRequest is sent follower → placement leader. The
  * follower computes the local FSM-vs-disk diff in its lifecycle reconciler
  * (SweepMissingReplicas) and asks the leader to re-push specific sealed
- * chunks via the existing TierReplication.ImportSealed path. Used to
+ * chunks via the existing ChunkReplication.ImportSealed path. Used to
  * recover from replication pushes that failed during a follower pause /
  * partition / rejoin window — see gastrolog-2dgvj.
  *
@@ -1513,21 +1507,16 @@ export class RequestReplicaCatchupRequest extends Message<RequestReplicaCatchupR
   vaultId = new Uint8Array(0);
 
   /**
-   * @generated from field: bytes tier_id = 2;
-   */
-  tierId = new Uint8Array(0);
-
-  /**
    * 16-byte ChunkIDs
    *
-   * @generated from field: repeated bytes chunk_ids = 3;
+   * @generated from field: repeated bytes chunk_ids = 2;
    */
   chunkIds: Uint8Array[] = [];
 
   /**
    * utf-8 node ID of the requesting follower
    *
-   * @generated from field: bytes requester_node_id = 4;
+   * @generated from field: bytes requester_node_id = 3;
    */
   requesterNodeId = new Uint8Array(0);
 
@@ -1540,9 +1529,8 @@ export class RequestReplicaCatchupRequest extends Message<RequestReplicaCatchupR
   static readonly typeName = "gastrolog.v1.RequestReplicaCatchupRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 2, name: "tier_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 3, name: "chunk_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
-    { no: 4, name: "requester_node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "chunk_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 3, name: "requester_node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RequestReplicaCatchupRequest {

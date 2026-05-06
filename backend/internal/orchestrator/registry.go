@@ -120,11 +120,16 @@ func (o *Orchestrator) ListVaults() []glid.GLID {
 	return keys
 }
 
-// LocalLeaderTierIDs returns the set of tier IDs where this node is the
-// leader. Used by search fan-out: follower tiers are NOT included because
-// they may be incomplete (missing active chunk, replication lag). The search
-// always fans out to the leader for authoritative results.
-func (o *Orchestrator) LocalLeaderTierIDs() map[glid.GLID]bool {
+// LocalLeaderVaultIDs returns the set of vault IDs where this node is
+// the leader for at least one of the vault's tiers. Used by search
+// fan-out and remote-vault resolution: follower-only vaults are NOT
+// included because their replicas may be incomplete (missing active
+// chunk, replication lag); search always fans out to the leader for
+// authoritative results.
+//
+// Once the 1:1 vault/tier model is enforced and tiers go away, the
+// inner loop collapses to "is leader" without the per-tier walk.
+func (o *Orchestrator) LocalLeaderVaultIDs() map[glid.GLID]bool {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	ids := make(map[glid.GLID]bool)
@@ -134,7 +139,8 @@ func (o *Orchestrator) LocalLeaderTierIDs() map[glid.GLID]bool {
 		}
 		for _, t := range v.Tiers {
 			if !t.IsFollower {
-				ids[t.TierID] = true
+				ids[v.ID] = true
+				break
 			}
 		}
 	}
@@ -244,203 +250,209 @@ func (r *searchReadyRegistry) Reader() manifest.Reader { return r.o.ManifestRead
 
 func (r *searchReadyRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }
 
-// LeaderTierQueryEngine returns a query engine that only searches leader
+// LeaderVaultQueryEngine returns a query engine that only searches leader
 // tiers (not follower replicas). Used by ForwardSearch handlers to avoid
 // double-counting when the requesting node already searches its own followers.
-func (o *Orchestrator) LeaderTierQueryEngine() *query.Engine {
-	return query.NewWithRegistry(&leaderTierRegistry{o: o}, o.logger)
+func (o *Orchestrator) LeaderVaultQueryEngine() *query.Engine {
+	return query.NewWithRegistry(&leaderVaultRegistry{o: o}, o.logger)
 }
 
-// LocalTierQueryEngine returns a query engine that searches every locally
+// LocalVaultQueryEngine returns a query engine that searches every locally
 // available tier — leader OR follower. Suitable for approximate aggregations
 // (notably histogram bucket counts) where consistency with leader is not
 // required and follower-replica data is "good enough." Avoids cross-node
 // gRPC fan-out when chunks are already replicated locally (RF > 1). Records
-// must NOT use this engine — use LeaderTierQueryEngine for authoritative
+// must NOT use this engine — use LeaderVaultQueryEngine for authoritative
 // reads. See gastrolog-66b7x.
-func (o *Orchestrator) LocalTierQueryEngine() *query.Engine {
-	return query.NewWithRegistry(&localTierRegistry{o: o}, o.logger)
+func (o *Orchestrator) LocalVaultQueryEngine() *query.Engine {
+	return query.NewWithRegistry(&localVaultRegistry{o: o}, o.logger)
 }
 
-// localTierRegistry exposes every tier this node holds (as leader or
-// follower) as a searchable unit keyed by tier ID. See LocalTierQueryEngine.
-type localTierRegistry struct {
+// localVaultRegistry exposes every vault this node holds (as leader or
+// follower) as a searchable unit keyed by VAULT ID. Mirrors
+// leaderVaultRegistry's vault-keyed dispatch (commit 39).
+// See LocalVaultQueryEngine.
+type localVaultRegistry struct {
 	o *Orchestrator
 }
 
-func (r *localTierRegistry) ListVaults() []glid.GLID {
+// findLocalTier returns any local TierInstance for the given vault that
+// has a query engine wired (leader OR follower). Locked-context helper.
+func (r *localVaultRegistry) findLocalTier(vaultID glid.GLID) *VaultInstance {
+	v := r.o.vaults[vaultID]
+	if v == nil {
+		return nil
+	}
+	if err := vaultReplicationReadinessErr(vaultID, v); err != nil {
+		return nil
+	}
+	for _, t := range v.Tiers {
+		if t.Query != nil {
+			return t
+		}
+	}
+	return nil
+}
+
+func (r *localVaultRegistry) ListVaults() []glid.GLID {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
 	var ids []glid.GLID
-	for _, v := range r.o.vaults {
-		if err := vaultReplicationReadinessErr(v.ID, v); err != nil {
+	for vid, v := range r.o.vaults {
+		if err := vaultReplicationReadinessErr(vid, v); err != nil {
 			continue
 		}
 		for _, t := range v.Tiers {
 			if t.Query != nil {
-				ids = append(ids, t.TierID)
+				ids = append(ids, vid)
+				break
 			}
 		}
 	}
 	return ids
 }
 
-func (r *localTierRegistry) ChunkManager(key glid.GLID) chunk.ChunkManager {
+func (r *localVaultRegistry) ChunkManager(vaultID glid.GLID) chunk.ChunkManager {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
-	for _, v := range r.o.vaults {
-		if err := vaultReplicationReadinessErr(v.ID, v); err != nil {
-			continue
-		}
-		for _, t := range v.Tiers {
-			if t.TierID == key && t.Query != nil {
-				return t.Chunks
-			}
-		}
+	if t := r.findLocalTier(vaultID); t != nil {
+		return t.Chunks
 	}
 	return nil
 }
 
-func (r *localTierRegistry) IndexManager(key glid.GLID) index.IndexManager {
+func (r *localVaultRegistry) IndexManager(vaultID glid.GLID) index.IndexManager {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
-	for _, v := range r.o.vaults {
-		if err := vaultReplicationReadinessErr(v.ID, v); err != nil {
-			continue
-		}
-		for _, t := range v.Tiers {
-			if t.TierID == key && t.Query != nil {
-				return t.Indexes
-			}
-		}
+	if t := r.findLocalTier(vaultID); t != nil {
+		return t.Indexes
 	}
 	return nil
 }
 
-func (r *localTierRegistry) QueryEngine(_ glid.GLID) *query.Engine { return nil }
+func (r *localVaultRegistry) QueryEngine(_ glid.GLID) *query.Engine { return nil }
 
-// TransitionStreamedChunks returns the streamed-but-not-yet-expired set for
-// any tier on this node (leader or follower). Followers don't apply the
-// flag locally; their callbacks will return empty, which is fine — the
-// flag set is read primarily to filter source chunks during transitions
-// on the leader. See gastrolog-66b7x.
-func (r *localTierRegistry) Reader() manifest.Reader { return r.o.ManifestReader() }
+func (r *localVaultRegistry) Reader() manifest.Reader { return r.o.ManifestReader() }
 
-func (r *localTierRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }
+func (r *localVaultRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }
 
-func (r *localTierRegistry) TransitionStreamedChunks(key glid.GLID) map[chunk.ChunkID]bool {
+// TransitionStreamedChunks returns the streamed-but-not-yet-expired set
+// for the given vault. Followers don't apply the flag locally (their
+// callbacks return empty), which is fine — the flag set is read primarily
+// to filter source chunks during transitions on the leader.
+// See gastrolog-66b7x.
+func (r *localVaultRegistry) TransitionStreamedChunks(vaultID glid.GLID) map[chunk.ChunkID]bool {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
-	for _, v := range r.o.vaults {
-		if err := vaultReplicationReadinessErr(v.ID, v); err != nil {
-			continue
-		}
-		for _, t := range v.Tiers {
-			if t.TierID != key || t.Query == nil || t.ListTransitionStreamed == nil {
-				continue
-			}
-			ids := t.ListTransitionStreamed()
-			if len(ids) == 0 {
-				return nil
-			}
-			out := make(map[chunk.ChunkID]bool, len(ids))
-			for _, cid := range ids {
-				out[cid] = true
-			}
-			return out
-		}
+	t := r.findLocalTier(vaultID)
+	if t == nil || t.ListTransitionStreamed == nil {
+		return nil
 	}
-	return nil
+	ids := t.ListTransitionStreamed()
+	if len(ids) == 0 {
+		return nil
+	}
+	out := make(map[chunk.ChunkID]bool, len(ids))
+	for _, cid := range ids {
+		out[cid] = true
+	}
+	return out
 }
 
-// leaderTierRegistry provides a flat view of all leader tiers across all
-// vaults. Each tier is a searchable unit keyed by its tier ID.
-type leaderTierRegistry struct {
+// leaderVaultRegistry provides a flat view of all leader vaults. Each
+// vault is a searchable unit keyed by VAULT ID (post-tier model — the
+// 1:1 vault/tier collapse means tier ID and vault ID are equivalent
+// for query routing). Resume tokens emitted from this registry tag
+// positions with vault IDs, so the local-vs-remote split in
+// QueryServer.splitResumeToken collapses to a single vault-keyed
+// dispatch.
+//
+// Renamed for clarity in a later commit; still leaderVaultRegistry
+// during the refactor (gastrolog-257l7).
+type leaderVaultRegistry struct {
 	o *Orchestrator
 }
 
-func (r *leaderTierRegistry) ListVaults() []glid.GLID {
+// findLeaderTier returns the leader VaultInstance for the given vault ID,
+// or nil if the vault is unknown / unready / has no leader tier.
+func (r *leaderVaultRegistry) findLeaderTier(vaultID glid.GLID) *VaultInstance {
+	v := r.o.vaults[vaultID]
+	if v == nil {
+		return nil
+	}
+	if err := vaultReplicationReadinessErr(vaultID, v); err != nil {
+		return nil
+	}
+	for _, t := range v.Tiers {
+		if !t.IsFollower && t.Query != nil {
+			return t
+		}
+	}
+	return nil
+}
+
+func (r *leaderVaultRegistry) ListVaults() []glid.GLID {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
 	var ids []glid.GLID
-	for _, v := range r.o.vaults {
-		if err := vaultReplicationReadinessErr(v.ID, v); err != nil {
+	for vid, v := range r.o.vaults {
+		if err := vaultReplicationReadinessErr(vid, v); err != nil {
 			continue
 		}
 		for _, t := range v.Tiers {
 			if !t.IsFollower && t.Query != nil {
-				ids = append(ids, t.TierID)
+				ids = append(ids, vid)
+				break
 			}
 		}
 	}
 	return ids
 }
 
-func (r *leaderTierRegistry) ChunkManager(key glid.GLID) chunk.ChunkManager {
+func (r *leaderVaultRegistry) ChunkManager(vaultID glid.GLID) chunk.ChunkManager {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
-	for _, v := range r.o.vaults {
-		if err := vaultReplicationReadinessErr(v.ID, v); err != nil {
-			continue
-		}
-		for _, t := range v.Tiers {
-			if t.TierID == key && !t.IsFollower && t.Query != nil {
-				return t.Chunks
-			}
-		}
+	if t := r.findLeaderTier(vaultID); t != nil {
+		return t.Chunks
 	}
 	return nil
 }
 
-func (r *leaderTierRegistry) IndexManager(key glid.GLID) index.IndexManager {
+func (r *leaderVaultRegistry) IndexManager(vaultID glid.GLID) index.IndexManager {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
-	for _, v := range r.o.vaults {
-		if err := vaultReplicationReadinessErr(v.ID, v); err != nil {
-			continue
-		}
-		for _, t := range v.Tiers {
-			if t.TierID == key && !t.IsFollower && t.Query != nil {
-				return t.Indexes
-			}
-		}
+	if t := r.findLeaderTier(vaultID); t != nil {
+		return t.Indexes
 	}
 	return nil
 }
 
-func (r *leaderTierRegistry) QueryEngine(_ glid.GLID) *query.Engine { return nil }
+func (r *leaderVaultRegistry) QueryEngine(_ glid.GLID) *query.Engine { return nil }
+
+func (r *leaderVaultRegistry) Reader() manifest.Reader { return r.o.ManifestReader() }
+
+func (r *leaderVaultRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }
 
 // TransitionStreamedChunks returns the streamed-but-not-yet-expired
-// chunk set for the given tier ID. Resolves the tier instance and reads
-// its ListTransitionStreamed callback (which reads the tier FSM via
-// vaultraft). See gastrolog-4xusf.
-func (r *leaderTierRegistry) Reader() manifest.Reader { return r.o.ManifestReader() }
-
-func (r *leaderTierRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }
-
-func (r *leaderTierRegistry) TransitionStreamedChunks(key glid.GLID) map[chunk.ChunkID]bool {
+// chunk set for the given vault. Resolves the leader tier instance and
+// reads its ListTransitionStreamed callback (which reads the per-vault
+// FSM). See gastrolog-4xusf.
+func (r *leaderVaultRegistry) TransitionStreamedChunks(vaultID glid.GLID) map[chunk.ChunkID]bool {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
-	for _, v := range r.o.vaults {
-		if err := vaultReplicationReadinessErr(v.ID, v); err != nil {
-			continue
-		}
-		for _, t := range v.Tiers {
-			if t.TierID != key || t.IsFollower || t.Query == nil || t.ListTransitionStreamed == nil {
-				continue
-			}
-			ids := t.ListTransitionStreamed()
-			if len(ids) == 0 {
-				return nil
-			}
-			out := make(map[chunk.ChunkID]bool, len(ids))
-			for _, cid := range ids {
-				out[cid] = true
-			}
-			return out
-		}
+	t := r.findLeaderTier(vaultID)
+	if t == nil || t.ListTransitionStreamed == nil {
+		return nil
 	}
-	return nil
+	ids := t.ListTransitionStreamed()
+	if len(ids) == 0 {
+		return nil
+	}
+	out := make(map[chunk.ChunkID]bool, len(ids))
+	for _, cid := range ids {
+		out[cid] = true
+	}
+	return out
 }
 
 // LeaderTierQueryEngineForVault returns a query engine scoped to leader
@@ -453,7 +465,7 @@ func (o *Orchestrator) LeaderTierQueryEngineForVault(vaultID glid.GLID) (*query.
 	if err := vaultReplicationReadinessErr(vaultID, v); err != nil {
 		return nil, err
 	}
-	var leaders []*TierInstance
+	var leaders []*VaultInstance
 	for _, t := range v.Tiers {
 		if !t.IsFollower && t.Query != nil {
 			leaders = append(leaders, t)

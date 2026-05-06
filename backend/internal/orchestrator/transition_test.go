@@ -106,7 +106,7 @@ func newTestOrch(t *testing.T, cfg Config) *Orchestrator {
 	return orch
 }
 
-func newMemoryTierInstance(t *testing.T, tierID glid.GLID) *TierInstance {
+func newMemoryTierInstance(t *testing.T, tierID glid.GLID) *VaultInstance {
 	t.Helper()
 	cm, err := chunkmem.NewFactory()(nil, nil)
 	if err != nil {
@@ -116,7 +116,7 @@ func newMemoryTierInstance(t *testing.T, tierID glid.GLID) *TierInstance {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &TierInstance{
+	return &VaultInstance{
 		TierID:  tierID,
 		Type:    "memory",
 		Chunks:  cm,
@@ -158,8 +158,8 @@ func setupTwoTierVault(t *testing.T) (*Orchestrator, glid.GLID, glid.GLID, glid.
 			{ID: vaultID, Name: "test-vault"},
 		},
 		Tiers: []system.TierConfig{
-			{ID: tier0ID, Name: "hot", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0},
-			{ID: tier1ID, Name: "warm", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1},
+			{ID: tier0ID, Name: "hot", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0},
+			{ID: tier1ID, Name: "warm", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 1},
 		},
 	}
 
@@ -314,7 +314,7 @@ func TestTransitionTerminalTier(t *testing.T) {
 		ID: vaultID, Name: "terminal",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tierID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
+		ID: tierID, Name: "t0", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
@@ -516,13 +516,13 @@ func TestTransitionCrossNode(t *testing.T) {
 		ID: vaultID, Name: "cross-node",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier0ID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
+		ID: tier0ID, Name: "t0", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.SetTierPlacements(context.Background(), tier0ID, []system.TierPlacement{
 		{StorageID: system.SyntheticStorageID(localNode), Leader: true},
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier1ID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
+		ID: tier1ID, Name: "t1", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 1,
 	})
 	_ = store.SetTierPlacements(context.Background(), tier1ID, []system.TierPlacement{
 		{StorageID: system.SyntheticStorageID(remoteNode), Leader: true},
@@ -592,10 +592,10 @@ func TestTransitionCrossNodeFailure(t *testing.T) {
 		ID: vaultID, Name: "fail",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier0ID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
+		ID: tier0ID, Name: "t0", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier1ID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
+		ID: tier1ID, Name: "t1", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 1,
 	})
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
@@ -645,10 +645,10 @@ func TestTransitionNoTransferrer(t *testing.T) {
 		ID: vaultID, Name: "no-xfer",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier0ID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
+		ID: tier0ID, Name: "t0", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier1ID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
+		ID: tier1ID, Name: "t1", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 1,
 	})
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
@@ -745,10 +745,10 @@ func TestTransitionCloudTierTTLSweep(t *testing.T) {
 		ID: vaultID, Name: "ttl-cloud",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: cloudTierID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
+		ID: cloudTierID, Name: "t0", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: nextTierID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
+		ID: nextTierID, Name: "t1", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 1,
 	})
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
@@ -866,7 +866,7 @@ func TestCloudTierLeaderPreservesCloudBacking(t *testing.T) {
 			Position:       0,
 			ID:             cloudTierID,
 			Name:           "cloud",
-			Type:           system.TierTypeFile,
+			Type:           system.VaultTypeFile,
 			CloudServiceID: &csID,
 			StorageClass:   1,
 		}},
@@ -1013,11 +1013,11 @@ func TestTransitionCloudTierFollowerDoesNotOverwriteBlob(t *testing.T) {
 		ID: vaultID, Name: "overwrite-test",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: cloudTierID, Name: "cloud", Type: system.TierTypeFile,
+		ID: cloudTierID, Name: "cloud", Type: system.VaultTypeFile,
 		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: nextTierID, Name: "local", Type: system.TierTypeFile,
+		ID: nextTierID, Name: "local", Type: system.VaultTypeFile,
 		VaultID: vaultID, Position: 1,
 	})
 	leaderOrch.sysLoader = &transitionSystemLoader{store: store, nodeID: leaderNode}
@@ -1152,10 +1152,10 @@ func (m *transitionFakeTransferrer) StreamToTier(_ context.Context, nodeID strin
 
 // ---------- cloud tier transition test ----------
 
-// newCloudFileTier creates a file-backed TierInstance with cloud storage.
+// newCloudFileTier creates a file-backed VaultInstance with cloud storage.
 // Sealed chunks are uploaded to the in-memory blobstore and local files deleted,
 // matching production cloud tier behavior.
-func newCloudFileTier(t *testing.T, tierID glid.GLID, vaultID glid.GLID, store blobstore.Store) (*TierInstance, string) {
+func newCloudFileTier(t *testing.T, tierID glid.GLID, vaultID glid.GLID, store blobstore.Store) (*VaultInstance, string) {
 	t.Helper()
 	dir := t.TempDir()
 	cm, err := chunkfile.NewManager(chunkfile.Config{
@@ -1169,7 +1169,7 @@ func newCloudFileTier(t *testing.T, tierID glid.GLID, vaultID glid.GLID, store b
 		t.Fatal(err)
 	}
 	im := indexfile.NewManager(dir, nil, nil)
-	return &TierInstance{
+	return &VaultInstance{
 		TierID:  tierID,
 		Type:    "cloud",
 		Chunks:  cm,
@@ -1204,10 +1204,10 @@ func TestTransitionCloudTierToNextTier(t *testing.T) {
 		ID: vaultID, Name: "cloud-transition",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: cloudTierID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
+		ID: cloudTierID, Name: "t0", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: nextTierID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
+		ID: nextTierID, Name: "t1", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 1,
 	})
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
@@ -1314,10 +1314,10 @@ func TestTransitionCloudTierSweepDispatch(t *testing.T) {
 		ID: vaultID, Name: "cloud-sweep",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: cloudTierID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
+		ID: cloudTierID, Name: "t0", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: nextTierID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
+		ID: nextTierID, Name: "t1", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 1,
 	})
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
@@ -1407,9 +1407,9 @@ func TestTransitionCloudTierSweepDispatch(t *testing.T) {
 
 // ---------- helpers for new tests ----------
 
-// newFileTierInstance creates a file-backed TierInstance without cloud storage.
+// newFileTierInstance creates a file-backed VaultInstance without cloud storage.
 // Returns the tier instance and its filesystem directory for post-test verification.
-func newFileTierInstance(t *testing.T, tierID glid.GLID) (*TierInstance, string) {
+func newFileTierInstance(t *testing.T, tierID glid.GLID) (*VaultInstance, string) {
 	t.Helper()
 	dir := t.TempDir()
 	cm, err := chunkfile.NewManager(chunkfile.Config{
@@ -1421,7 +1421,7 @@ func newFileTierInstance(t *testing.T, tierID glid.GLID) (*TierInstance, string)
 		t.Fatal(err)
 	}
 	im := indexfile.NewManager(dir, nil, nil)
-	return &TierInstance{
+	return &VaultInstance{
 		TierID:  tierID,
 		Type:    "file",
 		Chunks:  cm,
@@ -1558,13 +1558,13 @@ func TestTransitionThreeTierChainMemory(t *testing.T) {
 		ID: vaultID, Name: "three-tier",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier0ID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
+		ID: tier0ID, Name: "t0", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier1ID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
+		ID: tier1ID, Name: "t1", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 1,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier2ID, Name: "t2", Type: system.TierTypeMemory, VaultID: vaultID, Position: 2,
+		ID: tier2ID, Name: "t2", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 2,
 	})
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
@@ -1645,13 +1645,13 @@ func TestTransitionThreeTierChainFileFileCloud(t *testing.T) {
 		ID: vaultID, Name: "file-file-cloud",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier0ID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
+		ID: tier0ID, Name: "t0", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier1ID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
+		ID: tier1ID, Name: "t1", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 1,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier2ID, Name: "t2", Type: system.TierTypeMemory, VaultID: vaultID, Position: 2,
+		ID: tier2ID, Name: "t2", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 2,
 	})
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
@@ -1831,10 +1831,10 @@ func TestTransitionEventIDPreservedThroughCloudTier(t *testing.T) {
 		ID: vaultID, Name: "eventid-cloud",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: cloudTierID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
+		ID: cloudTierID, Name: "t0", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: nextTierID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
+		ID: nextTierID, Name: "t1", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 1,
 	})
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
@@ -1914,10 +1914,10 @@ func TestTransitionRecordCountAccuracy(t *testing.T) {
 		ID: vaultID, Name: "count-accuracy",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier0ID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
+		ID: tier0ID, Name: "t0", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier1ID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
+		ID: tier1ID, Name: "t1", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 1,
 	})
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
@@ -2002,10 +2002,10 @@ func TestTransitionCloudSearchAfterTransition(t *testing.T) {
 		ID: vaultID, Name: "cloud-search",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier0ID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
+		ID: tier0ID, Name: "t0", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: cloudTierID, Name: "cloud", Type: system.TierTypeFile, VaultID: vaultID, Position: 1,
+		ID: cloudTierID, Name: "cloud", Type: system.VaultTypeFile, VaultID: vaultID, Position: 1,
 	})
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
@@ -2193,37 +2193,37 @@ func (d *directTransferrer) WaitVaultReady(_ context.Context, _ string, _ glid.G
 	return nil
 }
 
-// directTierReplicator implements TierReplicator by calling directly into the
-// target orchestrator. In-process equivalent of the gRPC TierReplicator.
-type directTierReplicator struct {
+// directChunkReplicator implements ChunkReplicator by calling directly into the
+// target orchestrator. In-process equivalent of the gRPC ChunkReplicator.
+type directChunkReplicator struct {
 	nodes map[string]*Orchestrator
 }
 
-func (d *directTierReplicator) AppendRecords(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
+func (d *directChunkReplicator) AppendRecords(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
-		return fmt.Errorf("directTierReplicator: unknown node %q", nodeID)
+		return fmt.Errorf("directChunkReplicator: unknown node %q", nodeID)
 	}
 	for _, rec := range records {
-		if err := orch.AppendToTier(vaultID, tierID, chunkID, rec); err != nil {
+		if err := orch.AppendToVault(vaultID, tierID, chunkID, rec); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (d *directTierReplicator) SealTier(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
+func (d *directChunkReplicator) SealVault(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
-		return fmt.Errorf("directTierReplicator: unknown node %q", nodeID)
+		return fmt.Errorf("directChunkReplicator: unknown node %q", nodeID)
 	}
 	return orch.SealActiveTier(vaultID, tierID, chunkID)
 }
 
-func (d *directTierReplicator) ImportSealedChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
+func (d *directChunkReplicator) ImportSealedChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
-		return fmt.Errorf("directTierReplicator: unknown node %q", nodeID)
+		return fmt.Errorf("directChunkReplicator: unknown node %q", nodeID)
 	}
 	i := 0
 	iter := func() (chunk.Record, error) {
@@ -2234,21 +2234,21 @@ func (d *directTierReplicator) ImportSealedChunk(ctx context.Context, nodeID str
 		i++
 		return rec, nil
 	}
-	return orch.ImportToTier(ctx, vaultID, tierID, chunkID, iter)
+	return orch.ImportToVault(ctx, vaultID, tierID, chunkID, iter)
 }
 
-func (d *directTierReplicator) DeleteChunk(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
+func (d *directChunkReplicator) DeleteChunk(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
-		return fmt.Errorf("directTierReplicator: unknown node %q", nodeID)
+		return fmt.Errorf("directChunkReplicator: unknown node %q", nodeID)
 	}
 	return orch.DeleteChunkFromTier(vaultID, tierID, chunkID)
 }
 
-func (d *directTierReplicator) RequestReplicaCatchup(ctx context.Context, leaderNodeID string, vaultID, tierID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error) {
+func (d *directChunkReplicator) RequestReplicaCatchup(ctx context.Context, leaderNodeID string, vaultID, tierID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error) {
 	orch, ok := d.nodes[leaderNodeID]
 	if !ok {
-		return 0, fmt.Errorf("directTierReplicator: unknown leader %q", leaderNodeID)
+		return 0, fmt.Errorf("directChunkReplicator: unknown leader %q", leaderNodeID)
 	}
 	return orch.CatchupSelectedChunks(ctx, vaultID, tierID, requesterNodeID, chunkIDs)
 }
@@ -2261,7 +2261,7 @@ func (d *directTierReplicator) RequestReplicaCatchup(ctx context.Context, leader
 // → CmdAckDelete from each → CmdFinalizeDelete on the leader. Without this,
 // expireChunk falls through to the legacy direct-delete fallback which
 // doesn't replicate, and the cluster retention assertions fail.
-func newClusterRetentionRunner(orch *Orchestrator, vaultID, tierID glid.GLID, tier *TierInstance) *retentionRunner {
+func newClusterRetentionRunner(orch *Orchestrator, vaultID, tierID glid.GLID, tier *VaultInstance) *retentionRunner {
 	return &retentionRunner{
 		isLeader:        true,
 		vaultID:         vaultID,
@@ -2280,7 +2280,7 @@ func newClusterRetentionRunner(orch *Orchestrator, vaultID, tierID glid.GLID, ti
 type clusterTestNode struct {
 	nodeID   string
 	orch     *Orchestrator
-	tiers    []*TierInstance // all tier instances on this node
+	tiers    []*VaultInstance // all tier instances on this node
 	tierDirs []string        // filesystem directories, one per tier
 }
 
@@ -2404,7 +2404,7 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 		tierCfgs[i] = system.TierConfig{
 			ID:       tierIDs[i],
 			Name:     fmt.Sprintf("tier-%d", i),
-			Type:     system.TierTypeFile,
+			Type:     system.VaultTypeFile,
 			VaultID:  vaultID,
 			Position: uint32(i),
 		}
@@ -2434,7 +2434,7 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 		orchs[nid] = orch
 
 		isLeader := nid == leaderID
-		tiers := make([]*TierInstance, tierCount)
+		tiers := make([]*VaultInstance, tierCount)
 		tierDirs := make([]string, tierCount)
 		for i := range tierCount {
 			dir := t.TempDir()
@@ -2449,7 +2449,7 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 				t.Fatal(cmErr)
 			}
 			im := indexfile.NewManager(dir, nil, nil)
-			tier := &TierInstance{
+			tier := &VaultInstance{
 				TierID:  tierIDs[i],
 				Type:    "file",
 				Chunks:  cm,
@@ -2476,7 +2476,7 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 		}
 	}
 
-	// Wire directTransferrer and directTierReplicator: each node can reach all other nodes.
+	// Wire directTransferrer and directChunkReplicator: each node can reach all other nodes.
 	for _, nid := range nodeIDs {
 		remotes := make(map[string]*Orchestrator)
 		for _, other := range nodeIDs {
@@ -2485,7 +2485,7 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 			}
 		}
 		orchs[nid].SetRemoteTransferrer(&directTransferrer{nodes: remotes})
-		orchs[nid].SetTierReplicator(&directTierReplicator{nodes: remotes})
+		orchs[nid].SetChunkReplicator(&directChunkReplicator{nodes: remotes})
 	}
 
 	t.Cleanup(func() {
@@ -2666,8 +2666,8 @@ func TestClusterTransitionBurstNoOrphans(t *testing.T) {
 			WriteTS:  ts,
 			Raw:      fmt.Appendf(nil, "burst-%d", i),
 		}
-		if err := leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, rec); err != nil {
-			t.Fatalf("AppendToTier failed at record %d: %v", i, err)
+		if err := leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, rec); err != nil {
+			t.Fatalf("AppendToVault failed at record %d: %v", i, err)
 		}
 	}
 
@@ -2738,7 +2738,7 @@ func TestClusterTransitionThreeTierChainBurst(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range totalRecords {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		if err := leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+		if err := leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts,
 			WriteTS:  ts,
 			Raw:      fmt.Appendf(nil, "chain3-%d", i),
@@ -2835,7 +2835,7 @@ func TestClusterTransitionEventIDPreservedAcrossNodes(t *testing.T) {
 				IngestSeq:  uint32(i),
 			},
 		}
-		if err := leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, rec); err != nil {
+		if err := leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, rec); err != nil {
 			t.Fatalf("append record %d: %v", i, err)
 		}
 	}
@@ -2873,7 +2873,7 @@ func TestClusterTransitionEventIDPreservedAcrossNodes(t *testing.T) {
 }
 
 // TestClusterTransitionLargeBurst ingests a large burst (10K records) through
-// the serialized AppendToTier path and verifies no data loss after transition.
+// the serialized AppendToVault path and verifies no data loss after transition.
 // The burst creates ~100 sealed chunks via the 100-record rotation policy.
 //
 // NOTE: concurrent Append through the file chunk manager's attr.log writer
@@ -2896,7 +2896,7 @@ func TestClusterTransitionLargeBurst(t *testing.T) {
 			WriteTS:  ts,
 			Raw:      fmt.Appendf(nil, "burst-%d", i),
 		}
-		if err := leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, rec); err != nil {
+		if err := leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, rec); err != nil {
 			t.Fatalf("append %d: %v", i, err)
 		}
 	}
@@ -2951,7 +2951,7 @@ func TestClusterTransitionNoChunksLeftBehindOnFollowers(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range totalRecords {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		if err := leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+		if err := leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts,
 			WriteTS:  ts,
 			Raw:      fmt.Appendf(nil, "follower-cleanup-%d", i),
@@ -3051,7 +3051,7 @@ func TestClusterDrainVaultRecordsArriveOnDestination(t *testing.T) {
 	// Config store — both nodes share the same vault/tier system.
 	store := sysmem.NewStore()
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tierID, Name: "hot", Type: system.TierTypeFile,
+		ID: tierID, Name: "hot", Type: system.VaultTypeFile,
 		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutVault(context.Background(), system.VaultConfig{
@@ -3079,7 +3079,7 @@ func TestClusterDrainVaultRecordsArriveOnDestination(t *testing.T) {
 		t.Fatal(err)
 	}
 	imA := indexfile.NewManager(dirA, nil, nil)
-	tierA := &TierInstance{TierID: tierID, Type: "file", Chunks: cmA, Indexes: imA, Query: query.New(cmA, imA, nil)}
+	tierA := &VaultInstance{TierID: tierID, Type: "file", Chunks: cmA, Indexes: imA, Query: query.New(cmA, imA, nil)}
 	orchA.RegisterVault(NewVault(vaultID, tierA))
 
 	// Create node-B (destination) with file-backed tier.
@@ -3100,7 +3100,7 @@ func TestClusterDrainVaultRecordsArriveOnDestination(t *testing.T) {
 		t.Fatal(err)
 	}
 	imB := indexfile.NewManager(dirB, nil, nil)
-	tierB := &TierInstance{TierID: tierID, Type: "file", Chunks: cmB, Indexes: imB, Query: query.New(cmB, imB, nil)}
+	tierB := &VaultInstance{TierID: tierID, Type: "file", Chunks: cmB, Indexes: imB, Query: query.New(cmB, imB, nil)}
 	orchB.RegisterVault(NewVault(vaultID, tierB))
 
 	// Wire directTransferrer between the two nodes.
@@ -3193,11 +3193,11 @@ func TestMemoryBudgetEnforcementTransitionsChunks(t *testing.T) {
 
 	store := sysmem.NewStore()
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier0ID, Name: "mem", Type: system.TierTypeMemory,
+		ID: tier0ID, Name: "mem", Type: system.VaultTypeMemory,
 		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier1ID, Name: "file", Type: system.TierTypeFile,
+		ID: tier1ID, Name: "file", Type: system.VaultTypeFile,
 		VaultID: vaultID, Position: 1,
 	})
 	_ = store.PutVault(context.Background(), system.VaultConfig{
@@ -3209,11 +3209,11 @@ func TestMemoryBudgetEnforcementTransitionsChunks(t *testing.T) {
 		SystemLoader: &transitionSystemLoader{store: store},
 	})
 
-	memTier := &TierInstance{
+	memTier := &VaultInstance{
 		TierID: tier0ID, Type: "memory",
 		Chunks: memCM, Indexes: memIM, Query: query.New(memCM, memIM, nil),
 	}
-	fileTier := &TierInstance{
+	fileTier := &VaultInstance{
 		TierID: tier1ID, Type: "file",
 		Chunks: fileCM, Indexes: fileIM, Query: query.New(fileCM, fileIM, nil),
 	}
@@ -3223,7 +3223,7 @@ func TestMemoryBudgetEnforcementTransitionsChunks(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 50 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		_ = orch.AppendToTier(vaultID, tier0ID, chunk.ChunkID{}, chunk.Record{
+		_ = orch.AppendToVault(vaultID, tier0ID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts, WriteTS: ts, Raw: make([]byte, 100),
 		})
 	}
@@ -3274,7 +3274,7 @@ func TestMemoryBudgetEnforcementTerminalTierNoTransition(t *testing.T) {
 
 	store := sysmem.NewStore()
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tierID, Name: "mem-terminal", Type: system.TierTypeMemory,
+		ID: tierID, Name: "mem-terminal", Type: system.VaultTypeMemory,
 		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutVault(context.Background(), system.VaultConfig{
@@ -3286,7 +3286,7 @@ func TestMemoryBudgetEnforcementTerminalTierNoTransition(t *testing.T) {
 		SystemLoader: &transitionSystemLoader{store: store},
 	})
 
-	tier := &TierInstance{
+	tier := &VaultInstance{
 		TierID: tierID, Type: "memory",
 		Chunks: memCM, Indexes: memIM, Query: query.New(memCM, memIM, nil),
 	}
@@ -3295,7 +3295,7 @@ func TestMemoryBudgetEnforcementTerminalTierNoTransition(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 20 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		_ = orch.AppendToTier(vaultID, tierID, chunk.ChunkID{}, chunk.Record{
+		_ = orch.AppendToVault(vaultID, tierID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts, WriteTS: ts, Raw: make([]byte, 50),
 		})
 	}
@@ -3342,11 +3342,11 @@ func TestMemoryBudgetEnforcementOnlyRunsOnLeader(t *testing.T) {
 
 	store := sysmem.NewStore()
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier0ID, Name: "mem", Type: system.TierTypeMemory,
+		ID: tier0ID, Name: "mem", Type: system.VaultTypeMemory,
 		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier1ID, Name: "file", Type: system.TierTypeFile,
+		ID: tier1ID, Name: "file", Type: system.VaultTypeFile,
 		VaultID: vaultID, Position: 1,
 	})
 	_ = store.PutVault(context.Background(), system.VaultConfig{
@@ -3362,21 +3362,21 @@ func TestMemoryBudgetEnforcementOnlyRunsOnLeader(t *testing.T) {
 		SystemLoader: &transitionSystemLoader{store: store, nodeID: followerNode},
 	})
 
-	leaderMemTier := &TierInstance{
+	leaderMemTier := &VaultInstance{
 		TierID: tier0ID, Type: "memory",
 		Chunks: memCMLeader, Indexes: memIMLeader, Query: query.New(memCMLeader, memIMLeader, nil),
 	}
-	leaderFileTier := &TierInstance{
+	leaderFileTier := &VaultInstance{
 		TierID: tier1ID, Type: "file",
 		Chunks: fileCMLeader, Indexes: fileIMLeader, Query: query.New(fileCMLeader, fileIMLeader, nil),
 	}
 	orchLeader.RegisterVault(NewVault(vaultID, leaderMemTier, leaderFileTier))
 
-	followerMemTier := &TierInstance{
+	followerMemTier := &VaultInstance{
 		TierID: tier0ID, Type: "memory", IsFollower: true,
 		Chunks: memCMFollower, Indexes: memIMFollower, Query: query.New(memCMFollower, memIMFollower, nil),
 	}
-	followerFileTier := &TierInstance{
+	followerFileTier := &VaultInstance{
 		TierID: tier1ID, Type: "file", IsFollower: true,
 		Chunks: fileCMFollower, Indexes: fileIMFollower, Query: query.New(fileCMFollower, fileIMFollower, nil),
 	}
@@ -3387,8 +3387,8 @@ func TestMemoryBudgetEnforcementOnlyRunsOnLeader(t *testing.T) {
 	for i := range 20 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
 		rec := chunk.Record{IngestTS: ts, WriteTS: ts, Raw: make([]byte, 50)}
-		_ = orchLeader.AppendToTier(vaultID, tier0ID, chunk.ChunkID{}, rec)
-		_ = orchFollower.AppendToTier(vaultID, tier0ID, chunk.ChunkID{}, rec)
+		_ = orchLeader.AppendToVault(vaultID, tier0ID, chunk.ChunkID{}, rec)
+		_ = orchFollower.AppendToVault(vaultID, tier0ID, chunk.ChunkID{}, rec)
 	}
 	if active := memCMLeader.Active(); active != nil && active.RecordCount > 0 {
 		_ = memCMLeader.Seal()
@@ -3446,7 +3446,7 @@ func TestExplicitStorageLeaderGetsRotationPolicy(t *testing.T) {
 			Position:         0,
 			ID:               tierID,
 			Name:             "file",
-			Type:             system.TierTypeFile,
+			Type:             system.VaultTypeFile,
 			RotationPolicyID: &policyID,
 		}},
 		RotationPolicies: []system.RotationPolicyConfig{{

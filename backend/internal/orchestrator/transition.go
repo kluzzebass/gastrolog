@@ -164,7 +164,7 @@ func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 }
 
 // findDestTierInstance looks up the destination tier in the orchestrator's vault registry.
-func (r *retentionRunner) findDestTierInstance(destTierID glid.GLID) *TierInstance {
+func (r *retentionRunner) findDestTierInstance(destTierID glid.GLID) *VaultInstance {
 	if r.orch == nil {
 		return nil
 	}
@@ -337,7 +337,7 @@ func (r *retentionRunner) confirmStreamedOne(cfg *system.Config, id chunk.ChunkI
 // transition receipt for the given source chunk ID. If the destination has
 // no local tier instance or no Raft, falls back to true — the stream
 // succeeded and we can't check further from this node.
-func (r *retentionRunner) isReceiptConfirmed(destTier *TierInstance, sourceChunkID chunk.ChunkID) bool {
+func (r *retentionRunner) isReceiptConfirmed(destTier *VaultInstance, sourceChunkID chunk.ChunkID) bool {
 	if destTier == nil || destTier.HasTransitionReceipt == nil {
 		// No local destination instance or no Raft — accept stream
 		// success as confirmation (remote-only destination).
@@ -347,7 +347,7 @@ func (r *retentionRunner) isReceiptConfirmed(destTier *TierInstance, sourceChunk
 }
 
 // findTierInstance looks up this runner's tier in the orchestrator's vault registry.
-func (r *retentionRunner) findTierInstance() *TierInstance {
+func (r *retentionRunner) findTierInstance() *VaultInstance {
 	if r.orch == nil {
 		return nil
 	}
@@ -372,7 +372,7 @@ func (r *retentionRunner) findTierInstance() *TierInstance {
 func (o *Orchestrator) TransitionChunkForTesting(vaultID, tierID glid.GLID, chunkID chunk.ChunkID) {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
-	var tier *TierInstance
+	var tier *VaultInstance
 	if vault != nil {
 		for _, t := range vault.Tiers {
 			if t.TierID == tierID {
@@ -399,12 +399,12 @@ func (o *Orchestrator) TransitionChunkForTesting(vaultID, tierID glid.GLID, chun
 	r.transitionChunk(chunkID)
 }
 
-// streamLocal appends records from a cursor to a local tier via AppendToTier.
+// streamLocal appends records from a cursor to a local tier via AppendToVault.
 //
 // Read-side errors from the source cursor are wrapped in
 // cluster.ErrSourceRead so transitionChunk's classifier can retire the
 // chunk as unreadable instead of looping forever on the same corruption
-// (see gastrolog-3ayz3). AppendToTier errors on the destination stay
+// (see gastrolog-3ayz3). AppendToVault errors on the destination stay
 // plain — those are retryable per the comment in transitionChunk.
 func (r *retentionRunner) streamLocal(cursor chunk.RecordCursor, nextTierID glid.GLID) error {
 	for {
@@ -415,7 +415,7 @@ func (r *retentionRunner) streamLocal(cursor chunk.RecordCursor, nextTierID glid
 		if err != nil {
 			return fmt.Errorf("%w: read source chunk: %w", cluster.ErrSourceRead, err)
 		}
-		if err := r.orch.AppendToTier(r.vaultID, nextTierID, chunk.ChunkID{}, rec); err != nil {
+		if err := r.orch.AppendToVault(r.vaultID, nextTierID, chunk.ChunkID{}, rec); err != nil {
 			return err
 		}
 	}

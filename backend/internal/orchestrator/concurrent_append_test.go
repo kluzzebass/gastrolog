@@ -23,7 +23,7 @@ import (
 )
 
 // TestConcurrentAppendToTierAttrIntegrity reproduces gastrolog-4dd48:
-// concurrent AppendToTier calls through the orchestrator corrupt attr.log.
+// concurrent AppendToVault calls through the orchestrator corrupt attr.log.
 func TestConcurrentAppendToTierAttrIntegrity(t *testing.T) {
 	t.Parallel()
 
@@ -44,7 +44,7 @@ func TestConcurrentAppendToTierAttrIntegrity(t *testing.T) {
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 
-	tier := &TierInstance{
+	tier := &VaultInstance{
 		TierID: tierID, Type: "file",
 		Chunks: cm, Indexes: im, Query: query.New(cm, im, nil),
 	}
@@ -71,7 +71,7 @@ func TestConcurrentAppendToTierAttrIntegrity(t *testing.T) {
 			base := gIdx * perGoroutine
 			for i := range perGoroutine {
 				ts := t0.Add(time.Duration(base+i) * time.Microsecond)
-				err := orch.AppendToTier(vaultID, tierID, chunk.ChunkID{}, chunk.Record{
+				err := orch.AppendToVault(vaultID, tierID, chunk.ChunkID{}, chunk.Record{
 					IngestTS: ts,
 					WriteTS:  ts,
 					Raw:      fmt.Appendf(nil, "orch-concurrent-%d-%d", gIdx, i),
@@ -183,18 +183,18 @@ func TestTransitionConcurrentWithAppends(t *testing.T) {
 		ID: vaultID, Name: "concurrent-transition",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier0ID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
+		ID: tier0ID, Name: "t0", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier1ID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
+		ID: tier1ID, Name: "t1", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 1,
 	})
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID, SystemLoader: &transitionSystemLoader{store: store}})
 	// Stop scheduler — we drive transitions manually.
 	_ = orch.Scheduler().Stop()
 
-	tier0 := &TierInstance{TierID: tier0ID, Type: "file", Chunks: cm0, Indexes: im0, Query: query.New(cm0, im0, nil)}
-	tier1 := &TierInstance{TierID: tier1ID, Type: "file", Chunks: cm1, Indexes: im1, Query: query.New(cm1, im1, nil)}
+	tier0 := &VaultInstance{TierID: tier0ID, Type: "file", Chunks: cm0, Indexes: im0, Query: query.New(cm0, im0, nil)}
+	tier1 := &VaultInstance{TierID: tier1ID, Type: "file", Chunks: cm1, Indexes: im1, Query: query.New(cm1, im1, nil)}
 	orch.RegisterVault(NewVault(vaultID, tier0, tier1))
 
 	t.Cleanup(func() {
@@ -215,7 +215,7 @@ func TestTransitionConcurrentWithAppends(t *testing.T) {
 		t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 		for i := range totalRecords {
 			ts := t0.Add(time.Duration(i) * time.Microsecond)
-			_ = orch.AppendToTier(vaultID, tier0ID, chunk.ChunkID{}, chunk.Record{
+			_ = orch.AppendToVault(vaultID, tier0ID, chunk.ChunkID{}, chunk.Record{
 				IngestTS: ts, WriteTS: ts,
 				Raw: fmt.Appendf(nil, "concurrent-tx-%d", i),
 			})
@@ -352,7 +352,7 @@ func TestCursorOpenDuringSeal(t *testing.T) {
 }
 
 // ==========================================================================
-// gastrolog-3p8zh: ImportToTier cursor verification
+// gastrolog-3p8zh: ImportToVault cursor verification
 // ==========================================================================
 
 // TestImportToTierCursorVerified imports records to a file-backed tier and
@@ -375,7 +375,7 @@ func TestImportToTierCursorVerified(t *testing.T) {
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 
-	tier := &TierInstance{TierID: tierID, Type: "file", Chunks: cm, Indexes: im, Query: query.New(cm, im, nil)}
+	tier := &VaultInstance{TierID: tierID, Type: "file", Chunks: cm, Indexes: im, Query: query.New(cm, im, nil)}
 	orch.RegisterVault(NewVault(vaultID, tier))
 	t.Cleanup(func() {
 		orch.Stop()
@@ -401,8 +401,8 @@ func TestImportToTierCursorVerified(t *testing.T) {
 
 	// Import via orchestrator.
 	iter := testIterFromSlice(records)
-	if err := orch.ImportToTier(context.Background(), vaultID, tierID, chunkID, iter); err != nil {
-		t.Fatalf("ImportToTier: %v", err)
+	if err := orch.ImportToVault(context.Background(), vaultID, tierID, chunkID, iter); err != nil {
+		t.Fatalf("ImportToVault: %v", err)
 	}
 
 	// Check metadata.
@@ -481,10 +481,10 @@ func TestTransitionSourceDeleteFailsAfterImport(t *testing.T) {
 		ID: vaultID, Name: "delete-fail",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier0ID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
+		ID: tier0ID, Name: "t0", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier1ID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
+		ID: tier1ID, Name: "t1", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 1,
 	})
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID, SystemLoader: &transitionSystemLoader{store: store}})
@@ -655,10 +655,10 @@ func TestCloudDownloadFailureDuringTransition(t *testing.T) {
 		ID: vaultID, Name: "download-fail",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: cloudTierID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
+		ID: cloudTierID, Name: "t0", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: nextTierID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
+		ID: nextTierID, Name: "t1", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 1,
 	})
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID, SystemLoader: &transitionSystemLoader{store: store}})
@@ -740,10 +740,10 @@ func TestReconfigDuringTransitionDoesNotPanic(t *testing.T) {
 		ID: vaultID, Name: "reconfig-race",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier0ID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
+		ID: tier0ID, Name: "t0", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier1ID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
+		ID: tier1ID, Name: "t1", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 1,
 	})
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID, SystemLoader: &transitionSystemLoader{store: store}})
@@ -819,7 +819,7 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 		ID: vaultID, Name: "drain-concurrent",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tierID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
+		ID: tierID, Name: "t0", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutFilter(context.Background(), system.FilterConfig{
 		ID: filterID, Name: "all", Expression: "*",
@@ -847,7 +847,7 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	srcTier := &TierInstance{TierID: tierID, Type: "file", Chunks: srcCM, Indexes: srcIM, Query: query.New(srcCM, srcIM, nil)}
+	srcTier := &VaultInstance{TierID: tierID, Type: "file", Chunks: srcCM, Indexes: srcIM, Query: query.New(srcCM, srcIM, nil)}
 	orchA.RegisterVault(NewVault(vaultID, srcTier))
 
 	// Destination node.
@@ -867,7 +867,7 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dstTier := &TierInstance{TierID: tierID, Type: "file", Chunks: dstCM, Indexes: dstIM, Query: query.New(dstCM, dstIM, nil)}
+	dstTier := &VaultInstance{TierID: tierID, Type: "file", Chunks: dstCM, Indexes: dstIM, Query: query.New(dstCM, dstIM, nil)}
 	orchB.RegisterVault(NewVault(vaultID, dstTier))
 
 	orchA.SetRemoteTransferrer(&directTransferrer{nodes: map[string]*Orchestrator{"node-B": orchB}})
@@ -900,7 +900,7 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 		defer wg.Done()
 		for i := range 200 {
 			ts := t0.Add(time.Duration(500+i) * time.Microsecond)
-			err := orchA.AppendToTier(vaultID, tierID, chunk.ChunkID{}, chunk.Record{
+			err := orchA.AppendToVault(vaultID, tierID, chunk.ChunkID{}, chunk.Record{
 				IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "during-drain-%d", i),
 			})
 			if err != nil {

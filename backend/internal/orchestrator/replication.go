@@ -15,10 +15,10 @@ import (
 )
 
 // SealActiveTier seals the active chunk for a specific tier, on a **follower**
-// node, as the local effect of a tier-leader-originated SealTier replication
+// node, as the local effect of a tier-leader-originated SealVault replication
 // command. Use SealActive on the leader-triggered path.
 //
-// Role: follower-side. Caller is typically the TierReplicator handler that
+// Role: follower-side. Caller is typically the ChunkReplicator handler that
 // receives the seal command from the leader. Validates expectedChunkID to
 // avoid sealing the wrong chunk if rotation raced the seal command.
 //
@@ -76,11 +76,11 @@ func (o *Orchestrator) ackAfterReplication(ack chan<- error, pa *pendingAcks, re
 
 	g, ctx := errgroup.WithContext(ctx)
 
-	if o.tierReplicator != nil {
+	if o.chunkReplicator != nil {
 		for _, t := range pa.replication {
 			for _, tgt := range t.targets {
 				g.Go(func() error {
-					if err := o.tierReplicator.AppendRecords(ctx, tgt.NodeID, t.vaultID, t.tierID, t.chunkID, []chunk.Record{rec}); err != nil {
+					if err := o.chunkReplicator.AppendRecords(ctx, tgt.NodeID, t.vaultID, t.tierID, t.chunkID, []chunk.Record{rec}); err != nil {
 						return fmt.Errorf("ack-gated replication to %s: %w", tgt.NodeID, err)
 					}
 					return nil
@@ -219,7 +219,7 @@ func (o *Orchestrator) replicateLocally(ctx context.Context, vaultID, tierID gli
 // Validates that the chunk is readable before opening the network stream —
 // corrupted chunks fail fast without touching the wire.
 func (o *Orchestrator) replicateToFollower(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, cm chunk.ChunkManager, nodeID string) error {
-	if o.tierReplicator == nil {
+	if o.chunkReplicator == nil {
 		return errors.New("replicateToFollower: tier replicator not configured")
 	}
 	// Pre-flight: open and read the first record to confirm the chunk is intact.
@@ -268,5 +268,5 @@ func (o *Orchestrator) replicateToFollower(ctx context.Context, vaultID, tierID 
 		return nil
 	}
 
-	return o.tierReplicator.ImportSealedChunk(ctx, nodeID, vaultID, tierID, chunkID, records)
+	return o.chunkReplicator.ImportSealedChunk(ctx, nodeID, vaultID, tierID, chunkID, records)
 }

@@ -23,8 +23,8 @@ import (
 // Catches regressions in seal latency, transition streaming, and record count
 // accuracy under burst load.
 
-// benchFileTier creates a file-backed TierInstance for benchmarks.
-func benchFileTier(b *testing.B, tierID glid.GLID) *TierInstance {
+// benchFileTier creates a file-backed VaultInstance for benchmarks.
+func benchFileTier(b *testing.B, tierID glid.GLID) *VaultInstance {
 	b.Helper()
 	dir := b.TempDir()
 	cm, err := chunkfile.NewManager(chunkfile.Config{
@@ -36,7 +36,7 @@ func benchFileTier(b *testing.B, tierID glid.GLID) *TierInstance {
 		b.Fatal(err)
 	}
 	im := indexfile.NewManager(dir, nil, nil)
-	return &TierInstance{
+	return &VaultInstance{
 		TierID:  tierID,
 		Type:    "file",
 		Chunks:  cm,
@@ -45,9 +45,9 @@ func benchFileTier(b *testing.B, tierID glid.GLID) *TierInstance {
 	}
 }
 
-// benchCloudFileTier creates a file-backed TierInstance with cloud storage.
+// benchCloudFileTier creates a file-backed VaultInstance with cloud storage.
 // Uses a 200K rotation policy to avoid auto-rotation within benchmark bursts.
-func benchCloudFileTier(b *testing.B, tierID, vaultID glid.GLID, store blobstore.Store) *TierInstance {
+func benchCloudFileTier(b *testing.B, tierID, vaultID glid.GLID, store blobstore.Store) *VaultInstance {
 	b.Helper()
 	dir := b.TempDir()
 	cm, err := chunkfile.NewManager(chunkfile.Config{
@@ -60,7 +60,7 @@ func benchCloudFileTier(b *testing.B, tierID, vaultID glid.GLID, store blobstore
 	if err != nil {
 		b.Fatal(err)
 	}
-	return &TierInstance{
+	return &VaultInstance{
 		TierID: tierID,
 		Type:   "cloud",
 		Chunks: cm,
@@ -68,7 +68,7 @@ func benchCloudFileTier(b *testing.B, tierID, vaultID glid.GLID, store blobstore
 }
 
 // benchRetentionRunner creates a retention runner for benchmarks.
-func benchRetentionRunner(orch *Orchestrator, vaultID, tierID glid.GLID, tier *TierInstance) *retentionRunner {
+func benchRetentionRunner(orch *Orchestrator, vaultID, tierID glid.GLID, tier *VaultInstance) *retentionRunner {
 	return &retentionRunner{
 		isLeader: true,
 		vaultID:  vaultID,
@@ -83,13 +83,13 @@ func benchRetentionRunner(orch *Orchestrator, vaultID, tierID glid.GLID, tier *T
 
 // benchTransitionSetup creates an N-tier chain and returns the orchestrator,
 // IDs (vaultID + tierIDs), and tier instances.
-func benchTransitionSetup(b *testing.B, tierCount int, withCloud bool) (*Orchestrator, []glid.GLID, []*TierInstance) {
+func benchTransitionSetup(b *testing.B, tierCount int, withCloud bool) (*Orchestrator, []glid.GLID, []*VaultInstance) {
 	b.Helper()
 	nodeID := "bench-node"
 	vaultID := glid.New()
 
 	tierIDs := make([]glid.GLID, tierCount)
-	tiers := make([]*TierInstance, tierCount)
+	tiers := make([]*VaultInstance, tierCount)
 	tierCfgs := make([]system.TierConfig, tierCount)
 
 	for i := range tierCount {

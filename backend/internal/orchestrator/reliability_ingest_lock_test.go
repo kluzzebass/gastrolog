@@ -46,7 +46,7 @@ func (m *blockingReplicator) AppendRecords(ctx context.Context, _ string, _, _ g
 		return ctx.Err()
 	}
 }
-func (m *blockingReplicator) SealTier(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
+func (m *blockingReplicator) SealVault(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
 }
 func (m *blockingReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
@@ -68,7 +68,7 @@ func (m *blockingReplicator) RequestReplicaCatchup(_ context.Context, _ string, 
 // would queue behind the stuck ingest.
 //
 // The test sets up a vault with a cross-node follower target, wires a
-// blocking TierReplicator that never acks, ingests a record via the
+// blocking ChunkReplicator that never acks, ingests a record via the
 // single-threaded writeLoop path, and then races a concurrent
 // UnregisterVault (write lock). With the fix, UnregisterVault succeeds
 // promptly. Without it, UnregisterVault blocks until the ingest call
@@ -84,14 +84,14 @@ func TestReliability_Ingest_ReleasesLockBeforeReplication(t *testing.T) {
 	defer replicator.Unblock() // always release at test end
 
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetTierReplicator(replicator)
+	orch.SetChunkReplicator(replicator)
 
 	tierID := glid.New()
 	vaultID := glid.New()
 	cm, _ := chunkmem.NewManager(chunkmem.Config{})
 	im := indexmem.NewManager(nil, nil, nil, nil, nil)
 	qe := query.New(cm, im, nil)
-	tier := &TierInstance{
+	tier := &VaultInstance{
 		TierID:          tierID,
 		Type:            "memory",
 		Chunks:          cm,

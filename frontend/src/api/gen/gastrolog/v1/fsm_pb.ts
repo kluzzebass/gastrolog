@@ -5,8 +5,8 @@
 
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
+import { TierConfig, TierPlacement, VaultConfig } from "./system_pb.js";
 import { CloudService, NodeStorageConfig } from "./storage_pb.js";
-import { TierConfig, TierPlacement } from "./system_pb.js";
 
 /**
  * SystemCommand is a single mutation applied to the system store via Raft.
@@ -623,26 +623,19 @@ export class DeleteRetentionPolicyCommand extends Message<DeleteRetentionPolicyC
 }
 
 /**
- * RetentionRule for vault commands. Separate from config.proto's RetentionRule
- * to avoid naming collisions and to match Go types exactly.
+ * PutVaultCommand carries the full vault config from system.proto. Embedded
+ * (rather than flattened) so the conversion layer is shared between the
+ * API and the FSM — matches PutCloudServiceCommand and
+ * SetNodeStorageConfigCommand pattern. Wire format break vs the previous
+ * flat {id, name, enabled} shape; acceptable per redesign decision 11.
  *
  * @generated from message gastrolog.v1.PutVaultCommand
  */
 export class PutVaultCommand extends Message<PutVaultCommand> {
   /**
-   * @generated from field: bytes id = 1;
+   * @generated from field: gastrolog.v1.VaultConfig vault = 1;
    */
-  id = new Uint8Array(0);
-
-  /**
-   * @generated from field: string name = 2;
-   */
-  name = "";
-
-  /**
-   * @generated from field: bool enabled = 7;
-   */
-  enabled = false;
+  vault?: VaultConfig;
 
   constructor(data?: PartialMessage<PutVaultCommand>) {
     super();
@@ -652,9 +645,7 @@ export class PutVaultCommand extends Message<PutVaultCommand> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutVaultCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 7, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 1, name: "vault", kind: "message", T: VaultConfig },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutVaultCommand {

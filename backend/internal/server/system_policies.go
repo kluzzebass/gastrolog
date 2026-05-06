@@ -94,6 +94,20 @@ func (s *SystemServer) DeleteRotationPolicy(
 			}
 		}
 	}
+	// Mirror: clear policy reference on any vaults that use it
+	// (VaultConfig.RotationPolicyID is mirrored from TierConfig — gastrolog-257l7).
+	vaults, err := s.sysStore.ListVaults(ctx)
+	if err != nil {
+		return nil, errInternal(err)
+	}
+	for _, v := range vaults {
+		if v.RotationPolicyID != nil && *v.RotationPolicyID == id {
+			v.RotationPolicyID = nil
+			if err := s.sysStore.PutVault(ctx, v); err != nil {
+				return nil, errInternal(err)
+			}
+		}
+	}
 
 	if err := s.sysStore.DeleteRotationPolicy(ctx, id); err != nil {
 		return nil, errInternal(err)
@@ -188,6 +202,29 @@ func (s *SystemServer) DeleteRetentionPolicy(
 		if changed {
 			t.RetentionRules = kept
 			if err := s.sysStore.PutTier(ctx, t); err != nil {
+				return nil, errInternal(err)
+			}
+		}
+	}
+	// Mirror: clear retention rules from any vault that references the policy
+	// (VaultConfig.RetentionRules is mirrored from TierConfig — gastrolog-257l7).
+	vaults, err := s.sysStore.ListVaults(ctx)
+	if err != nil {
+		return nil, errInternal(err)
+	}
+	for _, v := range vaults {
+		changed := false
+		var kept []system.RetentionRule
+		for _, b := range v.RetentionRules {
+			if b.RetentionPolicyID == id {
+				changed = true
+				continue
+			}
+			kept = append(kept, b)
+		}
+		if changed {
+			v.RetentionRules = kept
+			if err := s.sysStore.PutVault(ctx, v); err != nil {
 				return nil, errInternal(err)
 			}
 		}

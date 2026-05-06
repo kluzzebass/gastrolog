@@ -71,7 +71,7 @@ func (o *Orchestrator) DrainTier(ctx context.Context, vaultID, tierID glid.GLID,
 	}
 
 	// Find the tier instance.
-	var tier *TierInstance
+	var tier *VaultInstance
 	for _, t := range vault.Tiers {
 		if t.TierID == tierID {
 			tier = t
@@ -172,7 +172,7 @@ func (o *Orchestrator) tierDrainWorker(ctx context.Context, vaultID, tierID glid
 		o.mu.RUnlock()
 		return
 	}
-	var tier *TierInstance
+	var tier *VaultInstance
 	for _, t := range vault.Tiers {
 		if t.TierID == tierID {
 			tier = t
@@ -202,7 +202,7 @@ func (o *Orchestrator) tierDrainWorker(ctx context.Context, vaultID, tierID glid
 }
 
 // drainTierChunks transfers all sealed chunks from the tier. Returns false if cancelled.
-func (o *Orchestrator) drainTierChunks(ctx context.Context, sys *system.System, vaultID, tierID glid.GLID, tier *TierInstance, mode TierDrainMode, targetNodeID string) bool {
+func (o *Orchestrator) drainTierChunks(ctx context.Context, sys *system.System, vaultID, tierID glid.GLID, tier *VaultInstance, mode TierDrainMode, targetNodeID string) bool {
 	metas, err := tier.Chunks.List()
 	if err != nil {
 		o.logger.Error("tier drain: list chunks failed", "vault", vaultID, "tier", tierID, "error", err)
@@ -230,7 +230,7 @@ func (o *Orchestrator) drainTierChunks(ctx context.Context, sys *system.System, 
 
 // drainCursorToRecords consumes all records from a cursor into a slice.
 // Used to convert a chunk cursor to the record slice expected by
-// TierReplicator.ImportSealedChunk.
+// ChunkReplicator.ImportSealedChunk.
 func drainCursorToRecords(cursor chunk.RecordCursor) ([]chunk.Record, error) {
 	var records []chunk.Record
 	for {
@@ -246,7 +246,7 @@ func drainCursorToRecords(cursor chunk.RecordCursor) ([]chunk.Record, error) {
 }
 
 // drainOneChunk transfers a single chunk and deletes the source.
-func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, vaultID, tierID glid.GLID, tier *TierInstance, chunkID chunk.ChunkID, mode TierDrainMode, targetNodeID string) error {
+func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, vaultID, tierID glid.GLID, tier *VaultInstance, chunkID chunk.ChunkID, mode TierDrainMode, targetNodeID string) error {
 	cursor, err := tier.Chunks.OpenCursor(chunkID)
 	if err != nil {
 		return fmt.Errorf("open cursor: %w", err)
@@ -270,14 +270,14 @@ func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, va
 		}
 
 	case TierDrainRebalance:
-		if o.tierReplicator == nil {
+		if o.chunkReplicator == nil {
 			return errors.New("tier drain rebalance: tier replicator not configured")
 		}
 		records, err := drainCursorToRecords(cursor)
 		if err != nil {
 			return fmt.Errorf("read chunk for rebalance: %w", err)
 		}
-		if err := o.tierReplicator.ImportSealedChunk(ctx, targetNodeID, vaultID, tierID, chunkID, records); err != nil {
+		if err := o.chunkReplicator.ImportSealedChunk(ctx, targetNodeID, vaultID, tierID, chunkID, records); err != nil {
 			return fmt.Errorf("replicate to target node: %w", err)
 		}
 	}
@@ -304,7 +304,7 @@ func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, va
 // through the receipt protocol when a reconciler is wired; falls back to
 // the direct local delete for memory-mode tiers. Extracted from
 // drainOneChunk to keep nestif within lint thresholds.
-func (o *Orchestrator) deleteDrainSource(tier *TierInstance, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
+func (o *Orchestrator) deleteDrainSource(tier *VaultInstance, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
 	if tier.Reconciler != nil {
 		if err := tier.Reconciler.deleteChunk(chunkID, "tier-drain", o.placementMembership(tier)); err != nil {
 			return fmt.Errorf("delete source chunk: %w", err)
@@ -430,7 +430,7 @@ func (o *Orchestrator) drainChunkToNextTier(ctx context.Context, sys *system.Sys
 		if iterErr != nil {
 			return fmt.Errorf("read chunk: %w", iterErr)
 		}
-		if err := o.AppendToTier(vaultID, nextTierID, chunk.ChunkID{}, rec); err != nil {
+		if err := o.AppendToVault(vaultID, nextTierID, chunk.ChunkID{}, rec); err != nil {
 			return fmt.Errorf("append to next tier: %w", err)
 		}
 	}

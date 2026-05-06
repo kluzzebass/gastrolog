@@ -44,7 +44,7 @@ func TestConcurrentAppendAttrIntegrity(t *testing.T) {
 			base := gIdx * perGoroutine
 			for i := range perGoroutine {
 				ts := t0.Add(time.Duration(base+i) * time.Microsecond)
-				// Simulate AppendToTier: call Active() before and after Append,
+				// Simulate AppendToVault: call Active() before and after Append,
 				// just like the orchestrator does.
 				_ = cm.Active()
 				_, _, err := cm.Append(chunk.Record{

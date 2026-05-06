@@ -113,21 +113,26 @@ func (o *Orchestrator) reconcileFilters(sys *system.System) {
 func (o *Orchestrator) applyRotationFromConfig(sys *system.System,
 	cfg *system.Config,
 	vaultCfg system.VaultConfig,
-	tier *TierInstance,
+	tier *VaultInstance,
 	tierCfg *system.TierConfig,
 	activeCronJobs map[string]bool,
 ) {
 	if tierCfg == nil {
 		return
 	}
-	// Refresh replication targets from current system.
-	tier.FollowerTargets = system.FollowerTargets(sys.Runtime.TierPlacements[tierCfg.ID], sys.Runtime.NodeStorageConfigs)
+	// Refresh replication targets from current system. Reads placements
+	// from VaultConfig (mirrored from tier placements via the FSM bridge —
+	// gastrolog-257l7).
+	tier.FollowerTargets = system.FollowerTargets(vaultCfg.Placements, sys.Runtime.NodeStorageConfigs)
 
-	if tierCfg.RotationPolicyID == nil {
+	// Rotation policy is mirrored from TierConfig onto VaultConfig at PutTier
+	// time. Reading from vaultCfg keeps this code path stable when TierConfig
+	// goes away.
+	if vaultCfg.RotationPolicyID == nil {
 		return
 	}
 
-	policyCfg := findRotationPolicy(cfg.RotationPolicies, *tierCfg.RotationPolicyID)
+	policyCfg := findRotationPolicy(cfg.RotationPolicies, *vaultCfg.RotationPolicyID)
 	if policyCfg == nil {
 		return
 	}

@@ -100,17 +100,14 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, remoteTo
 // When selectedVaults is non-nil, only vaults in that set are included
 // (used when the query contains a vault_id=X filter).
 //
-// Uses tier-level NodeID (set by the placement manager) for node assignment.
+// Reads VaultConfig.Placements directly (mirrored from tier placements
+// via the FSM bridge — gastrolog-257l7).
 func (s *QueryServer) remoteVaultsByNode(ctx context.Context, selectedVaults []glid.GLID) map[string][]glid.GLID {
-	return s.remoteVaultsByNodeFiltered(ctx, selectedVaults, s.orch.LocalLeaderTierIDs())
+	return s.remoteVaultsByNodeFiltered(ctx, selectedVaults, s.orch.LocalLeaderVaultIDs())
 }
 
-func (s *QueryServer) remoteVaultsByNodeFiltered(ctx context.Context, selectedVaults []glid.GLID, localTierIDs map[glid.GLID]bool) map[string][]glid.GLID {
+func (s *QueryServer) remoteVaultsByNodeFiltered(ctx context.Context, selectedVaults []glid.GLID, localVaultIDs map[glid.GLID]bool) map[string][]glid.GLID {
 	vaults, err := s.cfgStore.ListVaults(ctx)
-	if err != nil {
-		return nil
-	}
-	tiers, err := s.cfgStore.ListTiers(ctx)
 	if err != nil {
 		return nil
 	}
@@ -124,35 +121,22 @@ func (s *QueryServer) remoteVaultsByNodeFiltered(ctx context.Context, selectedVa
 		selected[id] = true
 	}
 
-	tierMap := make(map[glid.GLID]*system.TierConfig, len(tiers))
-	for i := range tiers {
-		tierMap[tiers[i].ID] = &tiers[i]
-	}
-
 	byNode := make(map[string][]glid.GLID)
 	for _, v := range vaults {
 		if len(selected) > 0 && !selected[v.ID] {
 			continue
 		}
-		seen := make(map[string]bool)
-		for _, tierID := range system.VaultTierIDs(tiers, v.ID) {
-			if localTierIDs[tierID] {
-				continue // searched locally, skip remote
-			}
-			tc := tierMap[tierID]
-			if tc == nil {
-				continue
-			}
-			placements, _ := s.cfgStore.GetTierPlacements(ctx, tc.ID)
-			leaderNodeID := system.LeaderNodeID(placements, nscs)
-			if leaderNodeID == "" || leaderNodeID == s.localNodeID {
-				continue
-			}
-			if !seen[leaderNodeID] {
-				seen[leaderNodeID] = true
-				byNode[leaderNodeID] = append(byNode[leaderNodeID], v.ID)
-			}
+		if localVaultIDs[v.ID] {
+			continue // searched locally, skip remote
 		}
+		if len(v.Placements) == 0 {
+			continue
+		}
+		leaderNodeID := system.LeaderNodeID(v.Placements, nscs)
+		if leaderNodeID == "" || leaderNodeID == s.localNodeID {
+			continue
+		}
+		byNode[leaderNodeID] = append(byNode[leaderNodeID], v.ID)
 	}
 	return byNode
 }

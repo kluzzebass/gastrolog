@@ -751,11 +751,11 @@ func TestEjectChunkFileBackedLocalDelivery(t *testing.T) {
 		ID: dstVaultID, Name: "dst",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: srcTierID, Name: "src-hot", Type: system.TierTypeFile,
+		ID: srcTierID, Name: "src-hot", Type: system.VaultTypeFile,
 		VaultID: srcVaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: dstTierID, Name: "dst-hot", Type: system.TierTypeFile,
+		ID: dstTierID, Name: "dst-hot", Type: system.VaultTypeFile,
 		VaultID: dstVaultID, Position: 0,
 	})
 	_ = store.SetTierPlacements(context.Background(), srcTierID, []system.TierPlacement{{StorageID: system.SyntheticStorageID("node-A"), Leader: true}})
@@ -797,8 +797,8 @@ func TestEjectChunkFileBackedLocalDelivery(t *testing.T) {
 		LocalNodeID:  nodeID,
 	})
 
-	srcTier := &TierInstance{TierID: srcTierID, Type: "file", Chunks: srcCM, Indexes: srcIM, Query: query.New(srcCM, srcIM, nil)}
-	dstTier := &TierInstance{TierID: dstTierID, Type: "file", Chunks: dstCM, Indexes: dstIM, Query: query.New(dstCM, dstIM, nil)}
+	srcTier := &VaultInstance{TierID: srcTierID, Type: "file", Chunks: srcCM, Indexes: srcIM, Query: query.New(srcCM, srcIM, nil)}
+	dstTier := &VaultInstance{TierID: dstTierID, Type: "file", Chunks: dstCM, Indexes: dstIM, Query: query.New(dstCM, dstIM, nil)}
 
 	orch.RegisterVault(NewVault(srcVaultID, srcTier))
 	orch.RegisterVault(NewVault(dstVaultID, dstTier))
@@ -814,7 +814,7 @@ func TestEjectChunkFileBackedLocalDelivery(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range totalRecords {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		if err := orch.AppendToTier(srcVaultID, srcTierID, chunk.ChunkID{}, chunk.Record{
+		if err := orch.AppendToVault(srcVaultID, srcTierID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts,
 			WriteTS:  ts,
 			Raw:      fmt.Appendf(nil, "eject-%d", i),
@@ -909,11 +909,11 @@ func TestEjectChunkFileBackedRemoteDelivery(t *testing.T) {
 		ID: dstVaultID, Name: "dst",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: srcTierID, Name: "src-hot", Type: system.TierTypeFile,
+		ID: srcTierID, Name: "src-hot", Type: system.VaultTypeFile,
 		VaultID: srcVaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: dstTierID, Name: "dst-hot", Type: system.TierTypeFile,
+		ID: dstTierID, Name: "dst-hot", Type: system.VaultTypeFile,
 		VaultID: dstVaultID, Position: 0,
 	})
 	_ = store.SetTierPlacements(context.Background(), srcTierID, []system.TierPlacement{{StorageID: system.SyntheticStorageID("node-A"), Leader: true}})
@@ -943,7 +943,7 @@ func TestEjectChunkFileBackedRemoteDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srcTier := &TierInstance{TierID: srcTierID, Type: "file", Chunks: srcCM, Indexes: srcIM, Query: query.New(srcCM, srcIM, nil)}
+	srcTier := &VaultInstance{TierID: srcTierID, Type: "file", Chunks: srcCM, Indexes: srcIM, Query: query.New(srcCM, srcIM, nil)}
 	orchA.RegisterVault(NewVault(srcVaultID, srcTier))
 
 	// Node-B (destination).
@@ -963,7 +963,7 @@ func TestEjectChunkFileBackedRemoteDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dstTier := &TierInstance{TierID: dstTierID, Type: "file", Chunks: dstCM, Indexes: dstIM, Query: query.New(dstCM, dstIM, nil)}
+	dstTier := &VaultInstance{TierID: dstTierID, Type: "file", Chunks: dstCM, Indexes: dstIM, Query: query.New(dstCM, dstIM, nil)}
 	orchB.RegisterVault(NewVault(dstVaultID, dstTier))
 
 	// Wire transferrer.
@@ -981,7 +981,7 @@ func TestEjectChunkFileBackedRemoteDelivery(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range totalRecords {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		if err := orchA.AppendToTier(srcVaultID, srcTierID, chunk.ChunkID{}, chunk.Record{
+		if err := orchA.AppendToVault(srcVaultID, srcTierID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts, WriteTS: ts,
 			Raw:   fmt.Appendf(nil, "remote-eject-%d", i),
 			Attrs: chunk.Attributes{"level": "error"},

@@ -81,7 +81,7 @@ func (s *QueryServer) Search(
 		defer cancel()
 	}
 
-	eng := s.orch.LeaderTierQueryEngine()
+	eng := s.orch.LeaderVaultQueryEngine()
 	if s.lookupResolver != nil {
 		eng.SetLookupResolver(s.lookupResolver)
 	}
@@ -198,7 +198,7 @@ func (s *QueryServer) searchDirect(
 	var histogram []*apiv1.HistogramBucket
 	if resume == nil {
 		if s.histogramFullyLocal(ctx, histogramQ) {
-			localEng := s.orch.LocalTierQueryEngine()
+			localEng := s.orch.LocalVaultQueryEngine()
 			if s.lookupResolver != nil {
 				localEng.SetLookupResolver(s.lookupResolver)
 			}
@@ -246,26 +246,23 @@ func (s *QueryServer) searchDirect(
 
 // splitResumeToken separates a unified resume token into local positions
 // (for eng.Search) and remote opaque blobs (for collectRemote).
+//
+// Post-vault-refactor (gastrolog-257l7): all keys in VaultTokens are
+// vault IDs — the local query engine's leaderTierRegistry now emits
+// positions tagged by vault ID instead of tier ID. The split is a
+// straight membership check against the local-leader vault set; no more
+// dual-ID-space dispatch.
 func (s *QueryServer) splitResumeToken(resume *query.ResumeToken) (*query.ResumeToken, map[glid.GLID][]byte) {
 	if resume == nil || len(resume.VaultTokens) == 0 {
 		return nil, nil
 	}
 
-	// VaultTokens has two disjoint key spaces with different value formats:
-	//   - tier IDs → InnerVaultToken bytes (positions emitted by the local
-	//     LeaderTierQueryEngine, which tags positions with tier IDs)
-	//   - real vault IDs → fully serialized remote ResumeToken proto bytes
-	//     (returned by collectRemote.getRemoteTokens, keyed by real vault ID)
-	// Routing must dispatch tier-ID keys to the local engine and vault-ID
-	// keys to the remote fan-out — and no other way around. Misdirecting a
-	// remote token to the local deserializer loses the remote's progress
-	// and causes the next page to restart from the window edge.
-	localTiers := s.orch.LocalLeaderTierIDs()
+	localVaults := s.orch.LocalLeaderVaultIDs()
 
 	remoteTokens := make(map[glid.GLID][]byte)
 	var localPositions []query.MultiVaultPosition
 	for vid, tokenData := range resume.VaultTokens {
-		if localTiers[vid] {
+		if localVaults[vid] {
 			positions, err := VaultTokenToPositions(tokenData)
 			if err != nil {
 				continue
@@ -656,24 +653,20 @@ func (s *QueryServer) aggregateVaultBounds(vaults []glid.GLID) (time.Time, time.
 }
 
 // histogramFullyLocal returns true when this node is the leader of every
-// tier in every queried vault. When true, the histogram can be computed
-// entirely from local chunks without any cross-node fan-out. Follower
-// replicas are NOT sufficient: the active (un-sealed) chunk lives only on
-// the leader and is never replicated, so a follower-only view drops every
-// record currently in the active chunk and produces an empty right edge
-// on the histogram (last bars cut off at the last-sealed-chunk boundary
-// instead of running up to "now"). Falls back conservatively to false on
-// any config store error or when this node holds no leader tiers. See
-// gastrolog-2g334 (regression of the gastrolog-66b7x optimization).
+// queried vault. When true, the histogram can be computed entirely from
+// local chunks without any cross-node fan-out. Follower replicas are NOT
+// sufficient: the active (un-sealed) chunk lives only on the leader and
+// is never replicated, so a follower-only view drops every record currently
+// in the active chunk and produces an empty right edge on the histogram
+// (last bars cut off at the last-sealed-chunk boundary instead of running
+// up to "now"). Falls back conservatively to false on any config store
+// error or when this node holds no leader vaults. See gastrolog-2g334
+// (regression of the gastrolog-66b7x optimization).
 func (s *QueryServer) histogramFullyLocal(ctx context.Context, q query.Query) bool {
 	if s.cfgStore == nil {
 		return false
 	}
-	tiers, err := s.cfgStore.ListTiers(ctx)
-	if err != nil {
-		return false
-	}
-	localLeaders := s.orch.LocalLeaderTierIDs()
+	localLeaders := s.orch.LocalLeaderVaultIDs()
 	if len(localLeaders) == 0 {
 		return false
 	}
@@ -689,10 +682,8 @@ func (s *QueryServer) histogramFullyLocal(ctx context.Context, q query.Query) bo
 		}
 	}
 	for _, vid := range selectedVaults {
-		for _, tierID := range system.VaultTierIDs(tiers, vid) {
-			if !localLeaders[tierID] {
-				return false
-			}
+		if !localLeaders[vid] {
+			return false
 		}
 	}
 	return true

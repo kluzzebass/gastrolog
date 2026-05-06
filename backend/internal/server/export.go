@@ -132,7 +132,7 @@ func (s *QueryServer) runExportJob(
 	pipeline *querylang.Pipeline,
 	targetVaultID glid.GLID,
 ) {
-	eng := s.orch.LeaderTierQueryEngine()
+	eng := s.orch.LeaderVaultQueryEngine()
 	if s.lookupResolver != nil {
 		eng.SetLookupResolver(s.lookupResolver)
 	}

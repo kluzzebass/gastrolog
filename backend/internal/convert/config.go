@@ -221,11 +221,11 @@ func TierPlacementsFromProto(p *gastrologv1.TierConfig) []system.TierPlacement {
 
 func TierTypeToProto(t system.TierType) gastrologv1.TierType {
 	switch t {
-	case system.TierTypeMemory:
+	case system.VaultTypeMemory:
 		return gastrologv1.TierType_TIER_TYPE_MEMORY
-	case system.TierTypeFile:
+	case system.VaultTypeFile:
 		return gastrologv1.TierType_TIER_TYPE_FILE
-	case system.TierTypeJSONL:
+	case system.VaultTypeJSONL:
 		return gastrologv1.TierType_TIER_TYPE_JSONL
 	default:
 		return gastrologv1.TierType_TIER_TYPE_UNSPECIFIED
@@ -235,14 +235,136 @@ func TierTypeToProto(t system.TierType) gastrologv1.TierType {
 func TierTypeFromProto(t gastrologv1.TierType) system.TierType {
 	switch t {
 	case gastrologv1.TierType_TIER_TYPE_MEMORY:
-		return system.TierTypeMemory
+		return system.VaultTypeMemory
 	case gastrologv1.TierType_TIER_TYPE_FILE:
-		return system.TierTypeFile
+		return system.VaultTypeFile
 	case gastrologv1.TierType_TIER_TYPE_JSONL:
-		return system.TierTypeJSONL
+		return system.VaultTypeJSONL
 	case gastrologv1.TierType_TIER_TYPE_UNSPECIFIED:
-		return system.TierTypeFile
+		return system.VaultTypeFile
 	default:
-		return system.TierTypeFile
+		return system.VaultTypeFile
+	}
+}
+
+// ---------------------------------------------------------------------------
+// VaultConfig (post-tier shape)
+// ---------------------------------------------------------------------------
+//
+// Mirrors the TierConfig converters during the vault refactor
+// (gastrolog-257l7). Once consumers migrate from TierConfig to VaultConfig,
+// the tier converters above are deleted.
+
+// VaultConfigToProto converts a system.VaultConfig to its proto representation.
+func VaultConfigToProto(v system.VaultConfig) *gastrologv1.VaultConfig {
+	pbPlacements := make([]*gastrologv1.VaultPlacement, len(v.Placements))
+	for i, p := range v.Placements {
+		pbPlacements[i] = &gastrologv1.VaultPlacement{
+			StorageId: []byte(p.StorageID),
+			Leader:    p.Leader,
+		}
+	}
+	rules := make([]*gastrologv1.RetentionRule, len(v.RetentionRules))
+	for i, r := range v.RetentionRules {
+		rules[i] = &gastrologv1.RetentionRule{
+			RetentionPolicyId: r.RetentionPolicyID.ToProto(),
+			Action:            string(r.Action),
+			EjectRouteIds:     glid.SliceToProto(r.EjectRouteIDs),
+		}
+	}
+
+	pb := &gastrologv1.VaultConfig{
+		Id:                v.ID.ToProto(),
+		Name:              v.Name,
+		Enabled:           v.Enabled,
+		Type:              VaultTypeToProto(v.Type),
+		RetentionRules:    rules,
+		MemoryBudgetBytes: v.MemoryBudgetBytes,
+		StorageClass:      v.StorageClass,
+		ReplicationFactor: v.ReplicationFactor,
+		Path:              v.Path,
+		Placements:        pbPlacements,
+		CacheEviction:     v.CacheEviction,
+		CacheBudget:       v.CacheBudget,
+		CacheTtl:          v.CacheTTL,
+	}
+	pb.RotationPolicyId = glid.OptionalToProto(v.RotationPolicyID)
+	pb.CloudServiceId = glid.OptionalToProto(v.CloudServiceID)
+	return pb
+}
+
+// VaultConfigFromProto converts a proto VaultConfig to system.VaultConfig.
+func VaultConfigFromProto(p *gastrologv1.VaultConfig) (system.VaultConfig, error) {
+	if p == nil {
+		return system.VaultConfig{}, nil
+	}
+	cfg := system.VaultConfig{
+		ID:                glid.FromBytes(p.GetId()),
+		Name:              p.GetName(),
+		Enabled:           p.GetEnabled(),
+		Type:              VaultTypeFromProto(p.GetType()),
+		MemoryBudgetBytes: p.GetMemoryBudgetBytes(),
+		StorageClass:      p.GetStorageClass(),
+		ReplicationFactor: p.GetReplicationFactor(),
+		Path:              p.GetPath(),
+		CacheEviction:     p.GetCacheEviction(),
+		CacheBudget:       p.GetCacheBudget(),
+		CacheTTL:          p.GetCacheTtl(),
+		RotationPolicyID:  glid.OptionalFromProto(p.GetRotationPolicyId()),
+		CloudServiceID:    glid.OptionalFromProto(p.GetCloudServiceId()),
+	}
+
+	for _, r := range p.GetRetentionRules() {
+		rule := system.RetentionRule{
+			RetentionPolicyID: glid.FromBytes(r.GetRetentionPolicyId()),
+			Action:            system.RetentionAction(r.GetAction()),
+			EjectRouteIDs:     glid.SliceFromProto(r.GetEjectRouteIds()),
+		}
+		cfg.RetentionRules = append(cfg.RetentionRules, rule)
+	}
+
+	for _, pp := range p.GetPlacements() {
+		cfg.Placements = append(cfg.Placements, system.TierPlacement{
+			StorageID: string(pp.GetStorageId()),
+			Leader:    pp.GetLeader(),
+		})
+	}
+
+	return cfg, nil
+}
+
+// VaultTypeToProto maps the Go-side TierType (still used as the underlying
+// string enum during the refactor) to the new proto VaultType.
+func VaultTypeToProto(t system.TierType) gastrologv1.VaultType {
+	switch t {
+	case system.VaultTypeMemory:
+		return gastrologv1.VaultType_VAULT_TYPE_MEMORY
+	case system.VaultTypeFile:
+		return gastrologv1.VaultType_VAULT_TYPE_FILE
+	case system.VaultTypeJSONL:
+		return gastrologv1.VaultType_VAULT_TYPE_JSONL
+	default:
+		return gastrologv1.VaultType_VAULT_TYPE_UNSPECIFIED
+	}
+}
+
+// VaultTypeFromProto maps proto VaultType back to the Go-side TierType.
+// Round-trips empty: VAULT_TYPE_UNSPECIFIED maps to the empty TierType so
+// "type was never set" is distinguishable from "type is file". (TierTypeFromProto
+// defaults UNSPECIFIED to file because the legacy tier path always wrote a
+// non-empty type; the vault path doesn't have that guarantee yet during
+// the refactor.)
+func VaultTypeFromProto(t gastrologv1.VaultType) system.TierType {
+	switch t {
+	case gastrologv1.VaultType_VAULT_TYPE_MEMORY:
+		return system.VaultTypeMemory
+	case gastrologv1.VaultType_VAULT_TYPE_FILE:
+		return system.VaultTypeFile
+	case gastrologv1.VaultType_VAULT_TYPE_JSONL:
+		return system.VaultTypeJSONL
+	case gastrologv1.VaultType_VAULT_TYPE_UNSPECIFIED:
+		return ""
+	default:
+		return ""
 	}
 }

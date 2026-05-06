@@ -90,7 +90,7 @@ func (r *orchestratorManifestReader) EntriesForVault(key glid.GLID) []tierfsm.Ma
 	for _, v := range r.o.vaults {
 		for _, t := range v.Tiers {
 			if t.TierID == key {
-				return collectSealedEntries([]*TierInstance{t})
+				return collectSealedEntries([]*VaultInstance{t})
 			}
 		}
 	}
@@ -125,7 +125,7 @@ func (o *Orchestrator) VaultManifestEntriesFromCtlFSM(vaultID glid.GLID) []tierf
 	return out
 }
 
-func collectSealedEntries(tiers []*TierInstance) []tierfsm.ManifestEntry {
+func collectSealedEntries(tiers []*VaultInstance) []tierfsm.ManifestEntry {
 	var out []tierfsm.ManifestEntry
 	for _, t := range tiers {
 		for _, e := range tierManifestEntries(t) {
@@ -140,7 +140,7 @@ func collectSealedEntries(tiers []*TierInstance) []tierfsm.ManifestEntry {
 // tierManifestEntry returns the manifest entry for a chunk on this tier.
 // Prefers the FSM callback (cluster-replicated truth) and falls back to
 // projecting from the local chunk manager for memory-mode tiers.
-func tierManifestEntry(t *TierInstance, id chunk.ChunkID) (tierfsm.ManifestEntry, bool) {
+func tierManifestEntry(t *VaultInstance, id chunk.ChunkID) (tierfsm.ManifestEntry, bool) {
 	if t.ManifestEntry != nil {
 		return t.ManifestEntry(id)
 	}
@@ -156,7 +156,7 @@ func tierManifestEntry(t *TierInstance, id chunk.ChunkID) (tierfsm.ManifestEntry
 
 // tierManifestEntries returns every manifest entry on this tier. FSM-backed
 // tiers go through the callback; memory-mode tiers project from List().
-func tierManifestEntries(t *TierInstance) []tierfsm.ManifestEntry {
+func tierManifestEntries(t *VaultInstance) []tierfsm.ManifestEntry {
 	if t.ManifestEntries != nil {
 		return t.ManifestEntries()
 	}

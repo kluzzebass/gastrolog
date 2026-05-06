@@ -10,40 +10,40 @@ import (
 	"gastrolog/internal/lifecycle"
 )
 
-// recordingTierReplicator is a TierReplicator that counts every call. Used
+// recordingChunkReplicator is a ChunkReplicator that counts every call. Used
 // to assert that the orchestrator's shutdown-aware replication helpers
 // actually skip remote work during drain.
-type recordingTierReplicator struct {
+type recordingChunkReplicator struct {
 	appendCalls atomic.Int32
 	sealCalls   atomic.Int32
 }
 
-func (r *recordingTierReplicator) AppendRecords(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
+func (r *recordingChunkReplicator) AppendRecords(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
 	r.appendCalls.Add(1)
 	return nil
 }
 
-func (r *recordingTierReplicator) SealTier(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
+func (r *recordingChunkReplicator) SealVault(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
 	r.sealCalls.Add(1)
 	return nil
 }
 
-func (r *recordingTierReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
+func (r *recordingChunkReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
 	return nil
 }
 
-func (r *recordingTierReplicator) DeleteChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
+func (r *recordingChunkReplicator) DeleteChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
 }
 
-func (r *recordingTierReplicator) RequestReplicaCatchup(_ context.Context, _ string, _, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {
+func (r *recordingChunkReplicator) RequestReplicaCatchup(_ context.Context, _ string, _, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {
 	return 0, nil
 }
 
 // TestFireAndForgetRemoteSkipsDuringShutdown is the regression test for the
 // orchestrator half of gastrolog-1e5ke. Before the fix, the orchestrator's
 // Stop() drain would process buffered records and fan out each one to
-// remote followers via fireAndForgetRemote → tierReplicator.AppendRecords.
+// remote followers via fireAndForgetRemote → chunkReplicator.AppendRecords.
 // Every fanout attempt against a dead or dying peer produced a WARN log
 // ("replication: failed to forward record to follower"), flooding the
 // shutdown trail with 127 noise lines on a ~six-second drain.
@@ -64,8 +64,8 @@ func TestFireAndForgetRemoteSkipsDuringShutdown(t *testing.T) {
 	phase := lifecycle.New()
 	orch := newTestOrch(t, Config{LocalNodeID: "local", Phase: phase})
 
-	replicator := &recordingTierReplicator{}
-	orch.SetTierReplicator(replicator)
+	replicator := &recordingChunkReplicator{}
+	orch.SetChunkReplicator(replicator)
 
 	targets := []remoteForwardTarget{
 		{nodeID: "remote-a", vaultID: glid.New(), tierID: glid.New()},
@@ -102,8 +102,8 @@ func TestSealRemoteFollowersSkipsDuringShutdown(t *testing.T) {
 	phase := lifecycle.New()
 	orch := newTestOrch(t, Config{LocalNodeID: "local", Phase: phase})
 
-	replicator := &recordingTierReplicator{}
-	orch.SetTierReplicator(replicator)
+	replicator := &recordingChunkReplicator{}
+	orch.SetChunkReplicator(replicator)
 
 	targets := []remoteForwardTarget{
 		{nodeID: "remote-a", vaultID: glid.New(), tierID: glid.New()},
@@ -133,8 +133,8 @@ func TestFireAndForgetRemoteNilPhaseDoesNotPanic(t *testing.T) {
 	t.Parallel()
 
 	orch := newTestOrch(t, Config{LocalNodeID: "local"}) // no Phase
-	replicator := &recordingTierReplicator{}
-	orch.SetTierReplicator(replicator)
+	replicator := &recordingChunkReplicator{}
+	orch.SetChunkReplicator(replicator)
 
 	targets := []remoteForwardTarget{
 		{nodeID: "remote-a", vaultID: glid.New(), tierID: glid.New()},

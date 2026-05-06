@@ -15,7 +15,7 @@ import (
 )
 
 // slowAckReplicator delays AppendRecords so the ack goroutine is still
-// running when Stop() is called. Implements orchestrator.TierReplicator.
+// running when Stop() is called. Implements orchestrator.ChunkReplicator.
 type slowAckReplicator struct {
 	calls atomic.Int32
 	delay time.Duration
@@ -26,7 +26,7 @@ func (m *slowAckReplicator) AppendRecords(_ context.Context, _ string, _, _ glid
 	m.calls.Add(1)
 	return nil
 }
-func (m *slowAckReplicator) SealTier(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
+func (m *slowAckReplicator) SealVault(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
 }
 func (m *slowAckReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
@@ -47,7 +47,7 @@ func TestStopWaitsForAckGoroutines(t *testing.T) {
 	// Slow replicator: AppendRecords takes 200ms.
 	replicator := &slowAckReplicator{delay: 200 * time.Millisecond}
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetTierReplicator(replicator)
+	orch.SetChunkReplicator(replicator)
 
 	// Create a vault with a follower target so ack-gated records trigger replication.
 	tierID := glid.New()
@@ -55,7 +55,7 @@ func TestStopWaitsForAckGoroutines(t *testing.T) {
 	cm, _ := chunkmem.NewManager(chunkmem.Config{})
 	im := indexmem.NewManager(nil, nil, nil, nil, nil)
 	qe := query.New(cm, im, nil)
-	tier := &TierInstance{
+	tier := &VaultInstance{
 		TierID:          tierID,
 		Type:            "memory",
 		Chunks:          cm,

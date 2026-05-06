@@ -426,7 +426,7 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 		if err := waitForOrch(ctx); err != nil {
 			return err
 		}
-		err := orch.AppendToTier(vaultID, tierID, leaderChunkID, rec)
+		err := orch.AppendToVault(vaultID, tierID, leaderChunkID, rec)
 		if err != nil && errors.Is(err, orchestrator.ErrVaultNotReady) {
 			return errors.Join(cluster.ErrForwardTargetNotReady, err)
 		}
@@ -438,8 +438,8 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	orch.SetRemoteTransferrer(chunkTransferrer)
 
 	// Tier replication: unified ordered stream per tier per follower.
-	tierReplicator := cluster.NewTierReplicator(peerConns, logger.With("component", "tier-replicator"))
-	orch.SetTierReplicator(tierReplicator)
+	chunkReplicator := cluster.NewChunkReplicator(peerConns, logger.With("component", "tier-replicator"))
+	orch.SetChunkReplicator(chunkReplicator)
 
 	// Same readiness gate for bulk chunk imports.
 	clusterSrv.SetRecordImporter(func(ctx context.Context, vaultID glid.GLID, next chunk.RecordIterator) error {
@@ -452,7 +452,7 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 		if err := waitForOrch(ctx); err != nil {
 			return err
 		}
-		return orch.ImportToTier(ctx, vaultID, tierID, chunkID, next)
+		return orch.ImportToVault(ctx, vaultID, tierID, chunkID, next)
 	})
 	clusterSrv.SetTierStreamAppender(func(ctx context.Context, vaultID, tierID glid.GLID, next chunk.RecordIterator) error {
 		if err := waitForOrch(ctx); err != nil {
