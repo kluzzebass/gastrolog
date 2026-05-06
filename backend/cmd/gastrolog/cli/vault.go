@@ -298,6 +298,10 @@ func resolveVaultRetentionPolicy(ctx context.Context, cmd *cobra.Command, client
 	}
 	cfg.RetentionRules = []*v1.RetentionRule{{
 		RetentionPolicyId: retIDBytes,
+		// Phase 2 (gastrolog-3iy5l): single instance per vault; the only
+		// terminal action is expire. Cross-vault forwarding lands in
+		// Phase 4 (gastrolog-42f9z).
+		Action: "expire",
 	}}
 	return nil
 }
