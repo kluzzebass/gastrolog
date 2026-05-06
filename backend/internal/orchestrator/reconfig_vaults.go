@@ -503,8 +503,12 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID glid.
 	o.ensureVaultControlPlaneRaftGroup(vaultID, rt.Nodes, factories)
 
 	nscs := rt.NodeStorageConfigs
-	leaderNodeID := system.LeaderNodeID(rt.TierPlacements[tierCfg.ID], nscs)
-	followerNodeIDs := system.FollowerNodeIDs(rt.TierPlacements[tierCfg.ID], nscs)
+	// VaultConfig.Placements is mirrored from tier placements via the FSM
+	// bridge (gastrolog-257l7). Read from the vault directly so the lookup
+	// survives the eventual deletion of rt.TierPlacements.
+	placements := vaultCfg.Placements
+	leaderNodeID := system.LeaderNodeID(placements, nscs)
+	followerNodeIDs := system.FollowerNodeIDs(placements, nscs)
 	isLeader := leaderNodeID == "" || leaderNodeID == o.localNodeID
 	isFollower := slices.Contains(followerNodeIDs, o.localNodeID)
 	if !isLeader && !isFollower {
@@ -520,10 +524,10 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID glid.
 		if err != nil {
 			return fmt.Errorf("build tier %s: %w", tierID, err)
 		}
-		t.FollowerTargets = system.FollowerTargets(rt.TierPlacements[tierCfg.ID], nscs)
+		t.FollowerTargets = system.FollowerTargets(placements, nscs)
 		ti = t
 	} else {
-		for _, tgt := range system.FollowerTargets(rt.TierPlacements[tierCfg.ID], nscs) {
+		for _, tgt := range system.FollowerTargets(placements, nscs) {
 			if tgt.NodeID != o.localNodeID {
 				continue
 			}
@@ -665,8 +669,10 @@ func (o *Orchestrator) buildTierInstances(sys *system.System, vaultCfg system.Va
 		}
 
 		// Determine if this node hosts this tier (as leader or follower).
-		leaderNodeID := system.LeaderNodeID(rt.TierPlacements[tierCfg.ID], nscs)
-		followerNodeIDs := system.FollowerNodeIDs(rt.TierPlacements[tierCfg.ID], nscs)
+		// VaultConfig.Placements is the mirrored source of truth (gastrolog-257l7).
+		placements := vaultCfg.Placements
+		leaderNodeID := system.LeaderNodeID(placements, nscs)
+		followerNodeIDs := system.FollowerNodeIDs(placements, nscs)
 		isLeader := leaderNodeID == "" || leaderNodeID == o.localNodeID
 		isFollower := slices.Contains(followerNodeIDs, o.localNodeID)
 		if !isLeader && !isFollower {
@@ -682,14 +688,14 @@ func (o *Orchestrator) buildTierInstances(sys *system.System, vaultCfg system.Va
 				o.alertTierInitFailed(tierID, tierCfg.Name, err)
 				continue
 			}
-			ti.FollowerTargets = system.FollowerTargets(rt.TierPlacements[tierCfg.ID], nscs)
+			ti.FollowerTargets = system.FollowerTargets(placements, nscs)
 			tiers = append(tiers, ti)
 		}
 
 		// Follower: build one instance for this node's placement.
 		// 1:1:1 constraint: at most one store per tier per node.
 		if isFollower {
-			localTargets := system.FollowerTargets(rt.TierPlacements[tierCfg.ID], nscs)
+			localTargets := system.FollowerTargets(placements, nscs)
 			for _, tgt := range localTargets {
 				if tgt.NodeID != o.localNodeID {
 					continue
@@ -731,8 +737,9 @@ func (o *Orchestrator) alertTierInitFailed(tierID glid.GLID, tierName string, er
 // storage ID. This avoids directory collisions with same-node follower placements
 // that would occur if findLocalFileStorage picked a different storage by class.
 func (o *Orchestrator) buildLeaderTierInstance(sys *system.System, vaultCfg system.VaultConfig, tierCfg *system.TierConfig, factories Factories) (*TierInstance, error) {
-	rt := &sys.Runtime
-	storageID := system.LeaderStorageID(rt.TierPlacements[tierCfg.ID])
+	// Read placements from VaultConfig (mirrored from tier placements via
+	// the FSM bridge — gastrolog-257l7).
+	storageID := system.LeaderStorageID(vaultCfg.Placements)
 	if storageID != "" && !strings.HasPrefix(storageID, system.SyntheticStoragePrefix) {
 		ti, err := o.buildTierInstanceForStorage(sys, vaultCfg, *tierCfg, factories, storageID, false)
 		if err != nil {
