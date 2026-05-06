@@ -38,7 +38,6 @@ func NewConfigCommand() *cobra.Command {
 		newFilterCmd(),
 		newRotationPolicyCmd(),
 		newRetentionPolicyCmd(),
-		newTierCmd(),
 		newVaultCmd(),
 		newIngesterCmd(),
 		newRouteCmd(),
