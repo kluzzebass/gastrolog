@@ -2000,7 +2000,14 @@ func (m *Manager) sealActiveLocked(announce bool) error {
 		ingestEnd := meta.ingestEnd
 		sourceEnd := meta.sourceEnd
 		ingestTSMonotonic := meta.ingestTSMonotonic
+		// Phase 3 (gastrolog-1huz5): emit BeginSeal then Seal so the FSM
+		// observes Active → Sealing → Sealed explicitly. The two
+		// transitions land in the Raft log back-to-back at this stage —
+		// a follow-up commit will hold AnnounceSeal until sealToGLCB
+		// has actually committed the GLCB so the Sealing window covers
+		// real assembly time.
 		m.pendingAnnouncements = append(m.pendingAnnouncements, func() {
+			ann.AnnounceBeginSeal(id)
 			ann.AnnounceSeal(id, writeEnd, recordCount, bytes, ingestStart, ingestEnd, sourceEnd, ingestTSMonotonic)
 		})
 	}

@@ -47,6 +47,14 @@ func (a *Announcer) AnnounceCreate(id chunk.ChunkID, writeStart, ingestStart, so
 	a.apply("create", id, MarshalCreateChunk(id, writeStart, ingestStart, sourceStart))
 }
 
+// AnnounceBeginSeal fires the Active → Sealing transition before the
+// leader starts assembling the sealed-form GLCB. Lets followers and
+// retention/upload code observe the in-flight assembly window
+// explicitly. gastrolog-1huz5.
+func (a *Announcer) AnnounceBeginSeal(id chunk.ChunkID) {
+	a.apply("begin-seal", id, MarshalBeginSeal(id))
+}
+
 func (a *Announcer) AnnounceSeal(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64, ingestStart, ingestEnd, sourceEnd time.Time, ingestTSMonotonic bool) {
 	a.apply("seal", id, MarshalSealChunk(id, writeEnd, recordCount, bytes, ingestStart, ingestEnd, sourceEnd, ingestTSMonotonic))
 }

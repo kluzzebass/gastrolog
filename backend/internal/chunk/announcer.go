@@ -14,6 +14,11 @@ import (
 // When nil, no announcements are made (single-node mode, tests).
 type MetadataAnnouncer interface {
 	AnnounceCreate(id ChunkID, writeStart, ingestStart, sourceStart time.Time)
+	// AnnounceBeginSeal fires the Active → Sealing transition before
+	// the chunk manager's sealToGLCB runs. Lets followers and
+	// retention/upload code observe the in-flight assembly window.
+	// gastrolog-1huz5.
+	AnnounceBeginSeal(id ChunkID)
 	// AnnounceSeal carries the chunk manager's running min IngestTS
 	// (ingestStart) and IngestTSMonotonic flag in addition to the seal
 	// finalization fields. Both must reach the FSM at seal time: createdAt
