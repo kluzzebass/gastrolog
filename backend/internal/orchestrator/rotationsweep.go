@@ -125,11 +125,14 @@ func (o *Orchestrator) applyRotationFromConfig(sys *system.System,
 	// gastrolog-257l7).
 	tier.FollowerTargets = system.FollowerTargets(vaultCfg.Placements, sys.Runtime.NodeStorageConfigs)
 
-	if tierCfg.RotationPolicyID == nil {
+	// Rotation policy is mirrored from TierConfig onto VaultConfig at PutTier
+	// time. Reading from vaultCfg keeps this code path stable when TierConfig
+	// goes away.
+	if vaultCfg.RotationPolicyID == nil {
 		return
 	}
 
-	policyCfg := findRotationPolicy(cfg.RotationPolicies, *tierCfg.RotationPolicyID)
+	policyCfg := findRotationPolicy(cfg.RotationPolicies, *vaultCfg.RotationPolicyID)
 	if policyCfg == nil {
 		return
 	}
