@@ -302,10 +302,8 @@ func (o *Orchestrator) tierReplicationInfo(vaultID glid.GLID, cm chunk.ChunkMana
 	if vault == nil {
 		return glid.GLID{}, nil
 	}
-	for _, tier := range vault.Tiers {
-		if tier.Chunks == cm && tier.ShouldForwardToFollowers() {
-			return tier.TierID, tier.FollowerTargets
-		}
+	if tier := vault.Instance; tier != nil && tier.Chunks == cm && tier.ShouldForwardToFollowers() {
+		return tier.TierID, tier.FollowerTargets
 	}
 	return glid.GLID{}, nil
 }

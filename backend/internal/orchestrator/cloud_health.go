@@ -27,12 +27,11 @@ func (o *Orchestrator) evaluateCloudHealth() {
 	defer o.mu.RUnlock()
 
 	for _, vault := range o.vaults {
-		for _, tier := range vault.Tiers {
-			if tier.Type != "cloud" {
-				continue
-			}
-			o.evaluateTierCloudHealth(tier)
+		tier := vault.Instance
+		if tier == nil || tier.Type != "cloud" {
+			continue
 		}
+		o.evaluateTierCloudHealth(tier)
 	}
 }
 

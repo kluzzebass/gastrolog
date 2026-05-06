@@ -167,7 +167,7 @@ func (o *Orchestrator) applyVaults(sys *system.System, factories Factories) erro
 func (o *Orchestrator) initVault(sys *system.System, vaultCfg system.VaultConfig, factories Factories) error {
 	alertKey := fmt.Sprintf("vault-init:%s", vaultCfg.ID)
 
-	tiers, err := o.buildTierInstances(sys, vaultCfg, factories)
+	instance, err := o.buildVaultInstance(sys, vaultCfg, factories)
 	if err != nil {
 		o.logger.Error("vault failed to initialize, skipping",
 			"id", vaultCfg.ID, "name", vaultCfg.Name, "error", err)
@@ -178,15 +178,13 @@ func (o *Orchestrator) initVault(sys *system.System, vaultCfg system.VaultConfig
 		return nil
 	}
 
-	// Register the vault even when it has zero local tiers, matching
-	// AddVault's runtime behaviour (see reconfig_vaults.go:65). Tiers arrive
-	// incrementally via handleTierPut, which requires the vault to already
-	// be in the orchestrator so AddTierToVault can find it. On a cluster
-	// restart from a snapshot no NotifyVaultPut fires for bulk-loaded state,
-	// so without this initVault must do the registration itself or the
-	// subsequent handleTierPut fires "vault not found" in an unrecoverable
-	// loop. See gastrolog-264pk.
-	vault := NewVault(vaultCfg.ID, tiers...)
+	// Register the vault even when no instance is built locally (this node
+	// has no placement). Matches AddVault's runtime behaviour: the vault
+	// shell is registered so a later placement-driven AddTierToVault can
+	// hydrate it. On cluster snapshot restore there's no NotifyVaultPut for
+	// bulk-loaded state, so initVault must register here or subsequent
+	// AddTierToVault fires "vault not found" in a loop. See gastrolog-264pk.
+	vault := NewVault(vaultCfg.ID, instance)
 	vault.Name = vaultCfg.Name
 	vault.Enabled = vaultCfg.Enabled
 	vault.StorageType = string(vaultCfg.Type)

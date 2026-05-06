@@ -113,7 +113,7 @@ func TestSealActiveTier(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	active := vault.Tiers[0].Chunks.Active()
+	active := vault.Instance.Chunks.Active()
 	if active == nil {
 		t.Fatal("expected active chunk")
 	}
@@ -123,7 +123,7 @@ func TestSealActiveTier(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	newActive := vault.Tiers[0].Chunks.Active()
+	newActive := vault.Instance.Chunks.Active()
 	if newActive != nil && newActive.ID == chunkID {
 		t.Error("expected active chunk to change after seal")
 	}
@@ -151,7 +151,7 @@ func TestSealActiveTierMismatchSkipsSeal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	metas, _ := vault.Tiers[0].Chunks.List()
+	metas, _ := vault.Instance.Chunks.List()
 	sealed := 0
 	for _, m := range metas {
 		if m.Sealed {

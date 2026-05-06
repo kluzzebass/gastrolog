@@ -66,13 +66,14 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg system.VaultConfig
 		return fmt.Errorf("%w: %s", ErrDuplicateID, vaultCfg.ID)
 	}
 
-	tiers, err := o.buildTierInstances(sys, vaultCfg, factories)
+	instance, err := o.buildVaultInstance(sys, vaultCfg, factories)
 	if err != nil {
-		return fmt.Errorf("build tier instances for vault %s: %w", vaultCfg.ID, err)
+		return fmt.Errorf("build vault instance for %s: %w", vaultCfg.ID, err)
 	}
 
-	// Register vault (even with zero tiers — tiers arrive incrementally via handleTierPut).
-	vault := NewVault(vaultCfg.ID, tiers...)
+	// Register vault (even when no instance exists locally — placements may
+	// land on this node later via handleVaultPut).
+	vault := NewVault(vaultCfg.ID, instance)
 	vault.Name = vaultCfg.Name
 	vault.StorageType = string(vaultCfg.Type)
 	o.vaults[vaultCfg.ID] = vault
@@ -86,7 +87,7 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg system.VaultConfig
 	// Rotation and retention are reconciled by the discovery-based sweep
 	// jobs on their next tick.
 
-	o.logger.Info("vault added", "id", vaultCfg.ID, "name", vaultCfg.Name, "tiers", len(tiers))
+	o.logger.Info("vault added", "id", vaultCfg.ID, "name", vaultCfg.Name, "has_instance", instance != nil)
 	return nil
 }
 
@@ -166,19 +167,18 @@ func (o *Orchestrator) RemoveVault(id glid.GLID) error {
 	if !exists {
 		return fmt.Errorf("%w: %s", ErrVaultNotFound, id)
 	}
-	// Check ALL tiers for data before allowing removal.
-	for _, tier := range vault.Tiers {
-		metas, err := tier.Chunks.List()
+	if inst := vault.Instance; inst != nil {
+		metas, err := inst.Chunks.List()
 		if err != nil {
-			return fmt.Errorf("list chunks for tier %s: %w", tier.TierID, err)
+			return fmt.Errorf("list chunks for vault %s: %w", id, err)
 		}
 		for _, m := range metas {
 			if m.RecordCount > 0 || !m.Sealed {
-				return fmt.Errorf("%w: tier %s has data", ErrVaultNotEmpty, tier.TierID)
+				return fmt.Errorf("%w: vault %s has data", ErrVaultNotEmpty, id)
 			}
 		}
-		if active := tier.Chunks.Active(); active != nil {
-			return fmt.Errorf("%w: tier %s has active chunk", ErrVaultNotEmpty, tier.TierID)
+		if active := inst.Chunks.Active(); active != nil {
+			return fmt.Errorf("%w: vault %s has active chunk", ErrVaultNotEmpty, id)
 		}
 	}
 
@@ -190,8 +190,8 @@ func (o *Orchestrator) RemoveVault(id glid.GLID) error {
 // removeVaultJobs removes retention runners and cron rotation jobs for a vault
 // without closing managers or unregistering. Used by UnregisterVault and drain.
 func (o *Orchestrator) removeVaultJobs(id glid.GLID, vault *Vault) {
-	for _, tier := range vault.Tiers {
-		delete(o.retention, retentionKey(tier.TierID, tier.StorageID))
+	if inst := vault.Instance; inst != nil {
+		delete(o.retention, retentionKey(inst.TierID, inst.StorageID))
 	}
 	o.cronRotation.removeAllForVault(id)
 }
@@ -207,9 +207,9 @@ func (o *Orchestrator) teardownVault(id glid.GLID, vault *Vault) {
 	o.scheduler.RemoveJobsByPrefix("compress:" + vaultPrefix)
 	o.scheduler.RemoveJobsByPrefix("index-build:" + vaultPrefix)
 
-	// Remove per-tier retention runners and cron rotation jobs.
-	for _, tier := range vault.Tiers {
-		delete(o.retention, retentionKey(tier.TierID, tier.StorageID))
+	// Remove per-instance retention runner and cron rotation jobs.
+	if inst := vault.Instance; inst != nil {
+		delete(o.retention, retentionKey(inst.TierID, inst.StorageID))
 	}
 	o.cronRotation.removeAllForVault(id)
 
@@ -277,45 +277,48 @@ func (o *Orchestrator) ForceRemoveVault(id glid.GLID) error {
 	if !exists {
 		return fmt.Errorf("%w: %s", ErrVaultNotFound, id)
 	}
-	// Seal active chunks and delete all data across ALL tiers.
-	for _, tier := range vault.Tiers {
-		cm := tier.Chunks
-		im := tier.Indexes
-
-		// Seal active chunk if present.
-		if active := cm.Active(); active != nil {
-			if err := cm.Seal(); err != nil {
-				return fmt.Errorf("seal active chunk for tier %s in vault %s: %w", tier.TierID, id, err)
-			}
-		}
-
-		// Delete all indexes and chunks.
-		metas, err := cm.List()
-		if err != nil {
-			return fmt.Errorf("list chunks for tier %s in vault %s: %w", tier.TierID, id, err)
-		}
-		for _, meta := range metas {
-			if im != nil {
-				// Best-effort index deletion; log and continue on error.
-				if err := im.DeleteIndexes(meta.ID); err != nil {
-					o.logger.Warn("failed to delete indexes during force remove",
-						"vault", id, "tier", tier.TierID, "chunk", meta.ID.String(), "error", err)
-				}
-			}
-			// LOCAL cleanup only — see sealAndDeleteAllChunks comment.
-			// Each peer runs its own ForceRemoveVault when the vault
-			// disappears from config; we must not fan a per-chunk
-			// CmdDeleteChunk avalanche across vault-ctl Raft from one
-			// node and have it cascade-delete on the others. Bug
-			// gastrolog-4vz40.
-			if err := chunk.DeleteNoAnnounce(cm, meta.ID); err != nil {
-				return fmt.Errorf("delete chunk %s in tier %s vault %s: %w", meta.ID.String(), tier.TierID, id, err)
-			}
-		}
+	// Seal active chunk and delete all data on this node's instance.
+	if err := o.forceRemoveVaultData(id, vault.Instance); err != nil {
+		return err
 	}
 
 	o.teardownVault(id, vault)
 	o.logger.Info("vault force-removed", "id", id, "name", vault.Name, "type", vault.Type())
+	return nil
+}
+
+// forceRemoveVaultData seals the active chunk (if any), deletes all
+// indexes, and locally drops every chunk on the given instance. LOCAL
+// cleanup only — uses chunk.DeleteNoAnnounce so per-chunk deletes do not
+// fan across vault-ctl Raft. See gastrolog-4vz40 / sealAndDeleteAllChunks.
+func (o *Orchestrator) forceRemoveVaultData(id glid.GLID, inst *VaultInstance) error {
+	if inst == nil {
+		return nil
+	}
+	cm := inst.Chunks
+	im := inst.Indexes
+
+	if active := cm.Active(); active != nil {
+		if err := cm.Seal(); err != nil {
+			return fmt.Errorf("seal active chunk for vault %s: %w", id, err)
+		}
+	}
+
+	metas, err := cm.List()
+	if err != nil {
+		return fmt.Errorf("list chunks for vault %s: %w", id, err)
+	}
+	for _, meta := range metas {
+		if im != nil {
+			if err := im.DeleteIndexes(meta.ID); err != nil {
+				o.logger.Warn("failed to delete indexes during force remove",
+					"vault", id, "chunk", meta.ID.String(), "error", err)
+			}
+		}
+		if err := chunk.DeleteNoAnnounce(cm, meta.ID); err != nil {
+			return fmt.Errorf("delete chunk %s in vault %s: %w", meta.ID.String(), id, err)
+		}
+	}
 	return nil
 }
 
@@ -396,20 +399,12 @@ func (o *Orchestrator) removeTierFromVault(vaultID, tierID glid.GLID, deleteData
 		return false
 	}
 
-	idx := -1
-	for i, t := range vault.Tiers {
-		if t.TierID == tierID {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
+	inst := vault.Instance
+	if inst == nil || inst.TierID != tierID {
 		return false
 	}
 
-	tier := vault.Tiers[idx]
-
-	// Cancel pending jobs for this tier.
+	// Cancel pending jobs for this vault.
 	prefix := vaultID.String()
 	o.scheduler.RemoveJobsByPrefix("post-seal:" + prefix + ":" + tierID.String())
 	o.scheduler.RemoveJobsByPrefix("compress:" + prefix + ":" + tierID.String())
@@ -417,51 +412,49 @@ func (o *Orchestrator) removeTierFromVault(vaultID, tierID glid.GLID, deleteData
 
 	// Destructive cleanup — only on explicit deletion.
 	if deleteData {
-		o.sealAndDeleteAllChunks(tier, "remove tier", tierID)
+		o.sealAndDeleteAllChunks(inst, "remove vault placement", tierID)
 	}
 
-	// Drop FSM → chunk-manager hooks before Close. Placement can remove this
-	// tier while the vault control-plane Raft group still receives
-	// CmdDeleteChunk for this tier from the leader; without clearing, onDelete
-	// would call DeleteSilent on an already-closed file.Manager.
+	// Drop FSM → chunk-manager hooks before Close. Placement can remove the
+	// instance while the vault control-plane Raft group still receives
+	// CmdDeleteChunk from the leader; without clearing, onDelete would call
+	// DeleteSilent on an already-closed file.Manager.
 	o.clearTierFSMChunkCallbacks(vaultID, tierID)
 
 	// Close managers.
-	if err := tier.Chunks.Close(); err != nil {
-		o.logger.Warn("remove tier: close chunk manager failed", "vault", vaultID, "tier", tierID, "error", err)
+	if err := inst.Chunks.Close(); err != nil {
+		o.logger.Warn("remove vault placement: close chunk manager failed", "vault", vaultID, "error", err)
 	}
 
-	// Remove the tier's data directory entirely — not just its chunk subdirs.
-	// Without this, leftover files (.lock, cloud.idx) and the tier dir itself
+	// Remove the vault's data directory entirely — not just its chunk subdirs.
+	// Without this, leftover files (.lock, cloud.idx) and the directory itself
 	// accumulate on disk forever. See gastrolog-42j4n.
 	if deleteData {
-		if remover, ok := tier.Chunks.(chunk.DirRemover); ok {
+		if remover, ok := inst.Chunks.(chunk.DirRemover); ok {
 			if err := remover.RemoveDir(); err != nil {
-				o.logger.Warn("remove tier: remove data directory failed", "vault", vaultID, "tier", tierID, "error", err)
+				o.logger.Warn("remove vault placement: remove data directory failed", "vault", vaultID, "error", err)
 			}
 		}
 	}
 
-	// Remove retention runner and cron rotation for this tier.
-	delete(o.retention, retentionKey(tier.TierID, tier.StorageID))
+	// Remove retention runner and cron rotation for this vault.
+	delete(o.retention, retentionKey(inst.TierID, inst.StorageID))
 	o.cronRotation.removeAllForVault(vaultID)
 
-	// Remove tier from vault's tier list.
-	vault.Tiers = append(vault.Tiers[:idx], vault.Tiers[idx+1:]...)
+	// Drop the instance from the vault.
+	vault.Instance = nil
 
-	// If the vault has no tiers left, remove it entirely. Only do this on
-	// destructive removal — for non-destructive placement-driven removals,
-	// the vault shell must stay so a subsequent AddTierToVault can rehydrate.
-	if deleteData && len(vault.Tiers) == 0 {
+	// On destructive removal, drop the vault entry entirely. For
+	// non-destructive placement-driven removals, the vault shell stays so a
+	// subsequent AddTierToVault can rehydrate.
+	if deleteData {
 		delete(o.vaults, vaultID)
 		o.rebuildFilterSetLocked()
-		o.logger.Info("vault removed (no remaining tiers)", "vault", vaultID)
+		o.logger.Info("vault removed", "vault", vaultID)
 	}
 
-	o.logger.Info("tier removed from vault",
-		"vault", vaultID, "tier", tierID,
-		"remaining_tiers", len(vault.Tiers),
-		"deleteData", deleteData)
+	o.logger.Info("vault placement removed",
+		"vault", vaultID, "deleteData", deleteData)
 	return true
 }
 
@@ -481,11 +474,9 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID glid.
 		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 	// Already present?
-	for _, t := range vault.Tiers {
-		if t.TierID == tierID {
-			o.mu.Unlock()
-			return nil
-		}
+	if vault.Instance != nil && vault.Instance.TierID == tierID {
+		o.mu.Unlock()
+		return nil
 	}
 	o.mu.Unlock()
 
@@ -556,9 +547,14 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID glid.
 		_ = ti.Chunks.Close()
 		return fmt.Errorf("%w: %s (disappeared during build)", ErrVaultNotFound, vaultID)
 	}
-	vault.Tiers = append(vault.Tiers, ti)
-	o.logger.Info("tier added to vault",
-		"vault", vaultID, "tier", tierID, "total_tiers", len(vault.Tiers))
+	if vault.Instance != nil {
+		// Race: someone built the instance ahead of us. Discard the
+		// duplicate so we don't leak managers / file handles.
+		_ = ti.Chunks.Close()
+		return nil
+	}
+	vault.Instance = ti
+	o.logger.Info("vault placement added", "vault", vaultID)
 	return nil
 }
 
@@ -645,77 +641,70 @@ func (o *Orchestrator) UpdateVaultFilter(id glid.GLID, filter string) error {
 // Every node joins every tier's Raft group regardless of storage placement
 // (gastrolog-292yi). Nodes with storage placements also get a VaultInstance with
 // a chunk manager; nodes without storage only participate in the Raft group.
-func (o *Orchestrator) buildTierInstances(sys *system.System, vaultCfg system.VaultConfig, factories Factories) ([]*VaultInstance, error) {
+func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.VaultConfig, factories Factories) (*VaultInstance, error) {
 	cfg := &sys.Config
 	rt := &sys.Runtime
 	o.ensureVaultControlPlaneRaftGroup(vaultCfg.ID, rt.Nodes, factories)
 
 	tierIDs := system.VaultTierIDs(cfg.Tiers, vaultCfg.ID)
 	if len(tierIDs) == 0 {
-		return nil, nil // vault has no tiers yet — tiers are added incrementally via handleTierPut
+		// No tier yet — placement / config arrives incrementally via
+		// AddTierToVault.
+		return nil, nil
 	}
 
+	// 1:1 vault:tier post-Phase-1 — there's only ever a single TierConfig
+	// for any given vault.
+	tierID := tierIDs[0]
+	tierCfg := findTierConfig(cfg.Tiers, tierID)
+	if tierCfg == nil {
+		o.logger.Warn("buildVaultInstance: tier not in config, skipping",
+			"vault", vaultCfg.ID, "tier", tierID)
+		return nil, nil
+	}
+
+	// Determine this node's role for this vault. With one-replica-per-node
+	// (Phase 2 invariant) the node is at most one of: leader, follower, neither.
 	nscs := rt.NodeStorageConfigs
-
-	tiers := make([]*VaultInstance, 0, len(tierIDs))
-	for _, tierID := range tierIDs {
-		tierCfg := findTierConfig(cfg.Tiers, tierID)
-		if tierCfg == nil {
-			// Tier config was deleted (e.g. drain-delete) but the vault still
-			// references it. Skip gracefully — the vault tier list will be
-			// cleaned up when the drain completes or on next reconciliation.
-			o.logger.Warn("buildTierInstances: tier not in config, skipping",
-				"vault", vaultCfg.ID, "tier", tierID)
-			continue
-		}
-
-		// Determine if this node hosts this tier (as leader or follower).
-		// VaultConfig.Placements is the mirrored source of truth (gastrolog-257l7).
-		placements := vaultCfg.Placements
-		leaderNodeID := system.LeaderNodeID(placements, nscs)
-		followerNodeIDs := system.FollowerNodeIDs(placements, nscs)
-		isLeader := leaderNodeID == "" || leaderNodeID == o.localNodeID
-		isFollower := slices.Contains(followerNodeIDs, o.localNodeID)
-		if !isLeader && !isFollower {
-			// No storage placement, but still join the vault control-plane Raft
-			// group as a voter for this vault's replicated tier metadata.
-			o.ensureVaultCtlTierMetadata(*tierCfg, rt.Nodes, factories)
-			continue
-		}
-
-		if isLeader {
-			ti, err := o.buildLeaderTierInstance(sys, vaultCfg, tierCfg, factories)
-			if err != nil {
-				o.alertTierInitFailed(tierID, tierCfg.Name, err)
-				continue
-			}
-			ti.FollowerTargets = system.FollowerTargets(placements, nscs)
-			tiers = append(tiers, ti)
-		}
-
-		// Follower: build one instance for this node's placement.
-		// 1:1:1 constraint: at most one store per tier per node.
-		if isFollower {
-			localTargets := system.FollowerTargets(placements, nscs)
-			for _, tgt := range localTargets {
-				if tgt.NodeID != o.localNodeID {
-					continue
-				}
-				sti, err := o.buildTierInstanceForStorage(sys, vaultCfg, *tierCfg, factories, tgt.StorageID, true)
-				if err != nil {
-					o.alertTierInitFailed(tierID, tierCfg.Name, err)
-					break
-				}
-				sti.IsFollower = true
-				sti.LeaderNodeID = leaderNodeID
-				sti.StorageID = tgt.StorageID
-				sti.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
-				tiers = append(tiers, sti)
-				break // 1:1:1: one store per tier per node
-			}
-		}
+	placements := vaultCfg.Placements
+	leaderNodeID := system.LeaderNodeID(placements, nscs)
+	followerNodeIDs := system.FollowerNodeIDs(placements, nscs)
+	isLeader := leaderNodeID == "" || leaderNodeID == o.localNodeID
+	isFollower := slices.Contains(followerNodeIDs, o.localNodeID)
+	if !isLeader && !isFollower {
+		// No storage placement on this node, but still join the vault
+		// control-plane Raft group as a voter for replicated tier metadata.
+		o.ensureVaultCtlTierMetadata(*tierCfg, rt.Nodes, factories)
+		return nil, nil
 	}
-	return tiers, nil
+
+	if isLeader {
+		ti, err := o.buildLeaderTierInstance(sys, vaultCfg, tierCfg, factories)
+		if err != nil {
+			o.alertTierInitFailed(tierID, tierCfg.Name, err)
+			return nil, nil
+		}
+		ti.FollowerTargets = system.FollowerTargets(placements, nscs)
+		return ti, nil
+	}
+
+	// Follower: build the instance for this node's placement.
+	for _, tgt := range system.FollowerTargets(placements, nscs) {
+		if tgt.NodeID != o.localNodeID {
+			continue
+		}
+		sti, err := o.buildTierInstanceForStorage(sys, vaultCfg, *tierCfg, factories, tgt.StorageID, true)
+		if err != nil {
+			o.alertTierInitFailed(tierID, tierCfg.Name, err)
+			return nil, nil
+		}
+		sti.IsFollower = true
+		sti.LeaderNodeID = leaderNodeID
+		sti.StorageID = tgt.StorageID
+		sti.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
+		return sti, nil
+	}
+	return nil, nil
 }
 
 // alertTierInitFailed logs a warning and raises an alert for a tier that

@@ -478,13 +478,11 @@ func (o *Orchestrator) RebuildMissingIndexes(ctx context.Context) error {
 	defer o.mu.RUnlock()
 
 	for vaultID, vault := range o.vaults {
-		if vault == nil {
+		if vault == nil || vault.Instance == nil {
 			continue
 		}
-		for _, tier := range vault.Tiers {
-			if err := o.rebuildTierIndexes(ctx, vaultID, tier); err != nil {
-				return err
-			}
+		if err := o.rebuildTierIndexes(ctx, vaultID, vault.Instance); err != nil {
+			return err
 		}
 	}
 

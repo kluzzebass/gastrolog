@@ -92,20 +92,19 @@ func (o *Orchestrator) archivalSweepAll() {
 		if vault == nil {
 			continue
 		}
-		for _, tier := range vault.Tiers {
-			if !tier.IsLeader() {
-				continue
-			}
-			tierCfg := findTierConfig(sys.Config.Tiers, tier.TierID)
-			if tierCfg == nil || tierCfg.CloudServiceID == nil {
-				continue
-			}
-			cs, ok := activeCS[*tierCfg.CloudServiceID]
-			if !ok {
-				continue
-			}
-			o.archivalSweepTier(tier, cs, now)
+		tier := vault.Instance
+		if tier == nil || !tier.IsLeader() {
+			continue
 		}
+		tierCfg := findTierConfig(sys.Config.Tiers, tier.TierID)
+		if tierCfg == nil || tierCfg.CloudServiceID == nil {
+			continue
+		}
+		cs, ok := activeCS[*tierCfg.CloudServiceID]
+		if !ok {
+			continue
+		}
+		o.archivalSweepTier(tier, cs, now)
 	}
 }
 
@@ -227,20 +226,19 @@ func (o *Orchestrator) reconcileSweepAll() {
 		if vault == nil {
 			continue
 		}
-		for _, tier := range vault.Tiers {
-			if !tier.IsLeader() {
-				continue
-			}
-			tierCfg := findTierConfig(sys.Config.Tiers, tier.TierID)
-			if tierCfg == nil || tierCfg.CloudServiceID == nil {
-				continue
-			}
-			cs := findCloudService(&sys.Config, *tierCfg.CloudServiceID)
-			if cs == nil {
-				continue
-			}
-			o.reconcileTier(tier, cs, now)
+		tier := vault.Instance
+		if tier == nil || !tier.IsLeader() {
+			continue
 		}
+		tierCfg := findTierConfig(sys.Config.Tiers, tier.TierID)
+		if tierCfg == nil || tierCfg.CloudServiceID == nil {
+			continue
+		}
+		cs := findCloudService(&sys.Config, *tierCfg.CloudServiceID)
+		if cs == nil {
+			continue
+		}
+		o.reconcileTier(tier, cs, now)
 	}
 }
 
