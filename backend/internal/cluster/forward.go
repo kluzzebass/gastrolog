@@ -282,7 +282,7 @@ func streamForwardRecordsHandler(srv any, stream grpc.ServerStream) error {
 
 		// StreamForwardRecords is exclusively the cross-node vault routing
 		// path since gastrolog-5c6fp — tier-targeted replication goes through
-		// TierReplication instead. Always append as a regular vault record.
+		// ChunkReplication instead. Always append as a regular vault record.
 		for _, exportRec := range msg.GetRecords() {
 			rec := convert.ExportToRecord(exportRec)
 			if appendErr := s.recordAppender(stream.Context(), vaultID, rec); appendErr != nil {
@@ -660,19 +660,19 @@ func (s *Server) forwardSealVault(ctx context.Context, req *gastrologv1.ForwardS
 }
 
 // SealTierExecutor seals a specific tier's active chunk on this node.
-// Invoked by the TierReplication stream handler.
+// Invoked by the ChunkReplication stream handler.
 type SealTierExecutor func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error
 
-// SetSealTierExecutor injects the callback for handling TierReplicationSeal commands.
+// SetSealTierExecutor injects the callback for handling ChunkReplicationSeal commands.
 func (s *Server) SetSealTierExecutor(fn SealTierExecutor) {
 	s.sealTierExecutor = fn
 }
 
 // DeleteChunkExecutor deletes a specific sealed chunk from a tier on this node.
-// Invoked by the TierReplication stream handler.
+// Invoked by the ChunkReplication stream handler.
 type DeleteChunkExecutor func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error
 
-// SetDeleteChunkExecutor injects the callback for handling TierReplicationDelete commands.
+// SetDeleteChunkExecutor injects the callback for handling ChunkReplicationDelete commands.
 func (s *Server) SetDeleteChunkExecutor(fn DeleteChunkExecutor) {
 	s.deleteChunkExecutor = fn
 }
@@ -1003,8 +1003,8 @@ var clusterServiceDesc = grpc.ServiceDesc{
 	},
 	Streams: []grpc.StreamDesc{
 		{
-			StreamName:    "TierReplication",
-			Handler:       tierReplicationStreamHandler,
+			StreamName:    "ChunkReplication",
+			Handler:       chunkReplicationStreamHandler,
 			ClientStreams: true,
 			ServerStreams: true,
 		},

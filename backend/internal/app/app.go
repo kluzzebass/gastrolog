@@ -438,8 +438,8 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	orch.SetRemoteTransferrer(chunkTransferrer)
 
 	// Tier replication: unified ordered stream per tier per follower.
-	tierReplicator := cluster.NewTierReplicator(peerConns, logger.With("component", "tier-replicator"))
-	orch.SetTierReplicator(tierReplicator)
+	chunkReplicator := cluster.NewChunkReplicator(peerConns, logger.With("component", "tier-replicator"))
+	orch.SetChunkReplicator(chunkReplicator)
 
 	// Same readiness gate for bulk chunk imports.
 	clusterSrv.SetRecordImporter(func(ctx context.Context, vaultID glid.GLID, next chunk.RecordIterator) error {

@@ -15,7 +15,7 @@ import (
 )
 
 // slowAckReplicator delays AppendRecords so the ack goroutine is still
-// running when Stop() is called. Implements orchestrator.TierReplicator.
+// running when Stop() is called. Implements orchestrator.ChunkReplicator.
 type slowAckReplicator struct {
 	calls atomic.Int32
 	delay time.Duration
@@ -47,7 +47,7 @@ func TestStopWaitsForAckGoroutines(t *testing.T) {
 	// Slow replicator: AppendRecords takes 200ms.
 	replicator := &slowAckReplicator{delay: 200 * time.Millisecond}
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetTierReplicator(replicator)
+	orch.SetChunkReplicator(replicator)
 
 	// Create a vault with a follower target so ack-gated records trigger replication.
 	tierID := glid.New()

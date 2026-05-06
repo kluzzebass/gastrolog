@@ -68,7 +68,7 @@ func (m *blockingReplicator) RequestReplicaCatchup(_ context.Context, _ string, 
 // would queue behind the stuck ingest.
 //
 // The test sets up a vault with a cross-node follower target, wires a
-// blocking TierReplicator that never acks, ingests a record via the
+// blocking ChunkReplicator that never acks, ingests a record via the
 // single-threaded writeLoop path, and then races a concurrent
 // UnregisterVault (write lock). With the fix, UnregisterVault succeeds
 // promptly. Without it, UnregisterVault blocks until the ingest call
@@ -84,7 +84,7 @@ func TestReliability_Ingest_ReleasesLockBeforeReplication(t *testing.T) {
 	defer replicator.Unblock() // always release at test end
 
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetTierReplicator(replicator)
+	orch.SetChunkReplicator(replicator)
 
 	tierID := glid.New()
 	vaultID := glid.New()

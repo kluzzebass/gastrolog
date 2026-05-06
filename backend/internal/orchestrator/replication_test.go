@@ -216,7 +216,7 @@ func TestCatchupSecondaryNoSealedChunks(t *testing.T) {
 	orch.RegisterVault(vault)
 
 	mock := &replicationFakeReplicator{}
-	orch.SetTierReplicator(mock)
+	orch.SetChunkReplicator(mock)
 
 	// No sealed chunks — catchup should be a no-op.
 	err := orch.catchupFollower(context.Background(), vaultID, tierID, "node-2")
@@ -282,7 +282,7 @@ func TestCatchupSkipsFSMRetiredChunks(t *testing.T) {
 	orch.RegisterVault(vault)
 
 	mock := &replicationFakeReplicator{}
-	orch.SetTierReplicator(mock)
+	orch.SetChunkReplicator(mock)
 
 	// Append + seal three chunks, capturing each chunk ID.
 	var ids []chunk.ChunkID
@@ -368,7 +368,7 @@ func TestCatchupNilManifestUsesAllChunks(t *testing.T) {
 	orch.RegisterVault(vault)
 
 	mock := &replicationFakeReplicator{}
-	orch.SetTierReplicator(mock)
+	orch.SetChunkReplicator(mock)
 
 	// Append + seal two chunks.
 	for i := 0; i < 2; i++ {
@@ -597,7 +597,7 @@ type recordTimestamps struct {
 	WriteTS  time.Time
 }
 
-// TestClusterReplicationSealSync verifies that TierReplicator.SealTier causes
+// TestClusterReplicationSealSync verifies that ChunkReplicator.SealTier causes
 // the follower to seal its active chunk at the same boundary as the leader.
 func TestClusterReplicationSealSync(t *testing.T) {
 	t.Parallel()
@@ -606,7 +606,7 @@ func TestClusterReplicationSealSync(t *testing.T) {
 	leaderNode := h.nodes["leader"]
 	leaderTier := leaderNode.tiers[0]
 
-	// Ingest 50 records on leader. With tierReplicator wired, AppendToTier
+	// Ingest 50 records on leader. With chunkReplicator wired, AppendToTier
 	// auto-forwards to followers via AppendRecords, so the followers end up
 	// with synchronized active chunk IDs and record counts.
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
@@ -643,7 +643,7 @@ func TestClusterReplicationSealSync(t *testing.T) {
 	// Forward seal to followers via the tier replicator (uses SealActiveTier
 	// which checks the expected chunk ID matches the follower's active chunk).
 	for _, fid := range []string{"f1", "f2"} {
-		if err := leaderNode.orch.tierReplicator.SealTier(
+		if err := leaderNode.orch.chunkReplicator.SealTier(
 			context.Background(), fid, h.vaultID, h.tierIDs[0], leaderChunkID,
 		); err != nil {
 			t.Fatalf("SealTier to %s: %v", fid, err)
@@ -672,7 +672,7 @@ func TestClusterReplicationSealSync(t *testing.T) {
 	}
 }
 
-// TestClusterReplicationDeletePropagation verifies that TierReplicator.DeleteChunk
+// TestClusterReplicationDeletePropagation verifies that ChunkReplicator.DeleteChunk
 // removes the chunk from the follower's chunk manager AND its filesystem
 // directory.
 func TestClusterReplicationDeletePropagation(t *testing.T) {
@@ -732,7 +732,7 @@ func TestClusterReplicationDeletePropagation(t *testing.T) {
 		}
 		// Forward delete to each follower.
 		for _, fid := range []string{"f1", "f2", "f3"} {
-			if err := leaderNode.orch.tierReplicator.DeleteChunk(
+			if err := leaderNode.orch.chunkReplicator.DeleteChunk(
 				ctx, fid, h.vaultID, h.tierIDs[0], m.ID,
 			); err != nil {
 				t.Errorf("DeleteChunk(%s, %s): %v", fid, m.ID, err)

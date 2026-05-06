@@ -211,55 +211,64 @@ message ForwardVaultApplyRequest {
 
 message ForwardVaultApplyResponse {}
 
-// --- Tier Replication Protocol ---
+// --- Chunk Replication Protocol ---
 //
-// A single ordered bidirectional stream per tier per follower. Replaces
-// the separate ForwardRecords (fire-and-forget) and ReplicateSealedChunk
-// (one-shot) streams with a unified protocol where all operations for a
-// tier are sequenced on one stream. This eliminates the race between
-// record forwarding and sealed chunk replacement.
+// A single ordered bidirectional stream per vault per follower. Unifies
+// record forwarding (fire-and-forget) and sealed chunk replacement
+// (one-shot) so all chunk operations for a vault are sequenced on one
+// stream, eliminating the race between record forwarding and sealed
+// chunk replacement.
+//
+// Renamed from TierReplication* during the vault refactor (gastrolog-257l7).
+// The wire format drops the tier_id field on the envelope — chunks are
+// vault-keyed in the post-tier model.
 
-// TierReplicationCommand is sent leader → follower. The vault_id and
-// tier_id identify the target tier; the oneof command determines the
+// ChunkReplicationCommand is sent leader → follower. The vault_id
+// identifies the target vault; the oneof command determines the
 // operation. New command types can be added without changing framing.
-message TierReplicationCommand {
+//
+// tier_id is retained transitionally during the vault refactor
+// (gastrolog-257l7) so the orchestrator's existing tier-keyed routing
+// continues to work. It is removed once the orchestrator's runtime
+// dispatch is vault-keyed.
+message ChunkReplicationCommand {
   bytes vault_id = 1;
   bytes tier_id = 2;
 
   oneof command {
-    TierReplicationAppend append = 10;
-    TierReplicationSeal seal = 11;
-    TierReplicationImport import_sealed = 12;
-    TierReplicationDelete delete_chunk = 13;
+    ChunkReplicationAppend append = 10;
+    ChunkReplicationSeal seal = 11;
+    ChunkReplicationImport import_sealed = 12;
+    ChunkReplicationDelete delete_chunk = 13;
   }
 }
 
-// TierReplicationAppend forwards records to the follower's active chunk.
-message TierReplicationAppend {
+// ChunkReplicationAppend forwards records to the follower's active chunk.
+message ChunkReplicationAppend {
   bytes chunk_id = 1;               // leader's active chunk ID
   repeated ExportRecord records = 2;
 }
 
-// TierReplicationSeal tells the follower to seal its active chunk.
-message TierReplicationSeal {
+// ChunkReplicationSeal tells the follower to seal its active chunk.
+message ChunkReplicationSeal {
   bytes chunk_id = 1; // expected active chunk ID
 }
 
-// TierReplicationImport sends the canonical sealed chunk. The follower
+// ChunkReplicationImport sends the canonical sealed chunk. The follower
 // replaces any forwarded version with this authoritative copy.
-message TierReplicationImport {
+message ChunkReplicationImport {
   bytes chunk_id = 1;
   repeated ExportRecord records = 2;
 }
 
-// TierReplicationDelete tells the follower to delete a sealed chunk
-// (e.g. after retention expiry or tier transition on the leader).
-message TierReplicationDelete {
+// ChunkReplicationDelete tells the follower to delete a sealed chunk
+// (after retention expiry on the leader).
+message ChunkReplicationDelete {
   bytes chunk_id = 1;
 }
 
-// TierReplicationAck is sent follower → leader after each command.
-message TierReplicationAck {
+// ChunkReplicationAck is sent follower → leader after each command.
+message ChunkReplicationAck {
   bool ok = 1;
   string error = 2;
   bytes chunk_id = 3; // echoes the chunk_id from the command
@@ -268,14 +277,14 @@ message TierReplicationAck {
 // RequestReplicaCatchupRequest is sent follower → placement leader. The
 // follower computes the local FSM-vs-disk diff in its lifecycle reconciler
 // (SweepMissingReplicas) and asks the leader to re-push specific sealed
-// chunks via the existing TierReplication.ImportSealed path. Used to
+// chunks via the existing ChunkReplication.ImportSealed path. Used to
 // recover from replication pushes that failed during a follower pause /
 // partition / rejoin window — see gastrolog-2dgvj.
 message RequestReplicaCatchupRequest {
   bytes vault_id = 1;
-  bytes tier_id = 2;
-  repeated bytes chunk_ids = 3;       // 16-byte ChunkIDs
-  bytes requester_node_id = 4;        // utf-8 node ID of the requesting follower
+  bytes tier_id = 2;                   // retained transitionally during the vault refactor (gastrolog-257l7)
+  repeated bytes chunk_ids = 3;        // 16-byte ChunkIDs
+  bytes requester_node_id = 4;         // utf-8 node ID of the requesting follower
 }
 
 // RequestReplicaCatchupResponse acknowledges receipt of the catchup

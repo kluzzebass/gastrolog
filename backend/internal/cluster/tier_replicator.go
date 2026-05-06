@@ -31,10 +31,10 @@ type tierStream struct {
 	closed bool
 }
 
-// TierReplicator manages ordered replication streams from a tier leader to
+// ChunkReplicator manages ordered replication streams from a tier leader to
 // its followers. All operations for a given (tierID, followerNodeID) are
 // serialized on a single bidirectional gRPC stream.
-type TierReplicator struct {
+type ChunkReplicator struct {
 	peers  *PeerConns
 	logger *slog.Logger
 
@@ -42,15 +42,15 @@ type TierReplicator struct {
 	streams map[streamKey]*tierStream
 }
 
-var tierReplicationStreamDesc = &grpc.StreamDesc{
-	StreamName:    "TierReplication",
+var chunkReplicationStreamDesc = &grpc.StreamDesc{
+	StreamName:    "ChunkReplication",
 	ClientStreams: true,
 	ServerStreams: true,
 }
 
-// NewTierReplicator creates a replicator using the given peer connections.
-func NewTierReplicator(peers *PeerConns, logger *slog.Logger) *TierReplicator {
-	return &TierReplicator{
+// NewChunkReplicator creates a replicator using the given peer connections.
+func NewChunkReplicator(peers *PeerConns, logger *slog.Logger) *ChunkReplicator {
+	return &ChunkReplicator{
 		peers:   peers,
 		logger:  logger,
 		streams: make(map[streamKey]*tierStream),
@@ -59,7 +59,7 @@ func NewTierReplicator(peers *PeerConns, logger *slog.Logger) *TierReplicator {
 
 // getOrOpen returns the stream for the given tier+node, opening a new one
 // if needed. The caller must NOT hold tr.mu.
-func (tr *TierReplicator) getOrOpen(tierID glid.GLID, nodeID string) (*tierStream, error) {
+func (tr *ChunkReplicator) getOrOpen(tierID glid.GLID, nodeID string) (*tierStream, error) {
 	key := streamKey{tierID: tierID, nodeID: nodeID}
 
 	tr.mu.Lock()
@@ -77,8 +77,8 @@ func (tr *TierReplicator) getOrOpen(tierID glid.GLID, nodeID string) (*tierStrea
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	stream, err := conn.NewStream(ctx, tierReplicationStreamDesc,
-		"/gastrolog.v1.ClusterService/TierReplication")
+	stream, err := conn.NewStream(ctx, chunkReplicationStreamDesc,
+		"/gastrolog.v1.ClusterService/ChunkReplication")
 	if err != nil {
 		cancel()
 		tr.peers.Invalidate(nodeID, err)
@@ -111,7 +111,7 @@ func (tr *TierReplicator) getOrOpen(tierID glid.GLID, nodeID string) (*tierStrea
 //
 // See gastrolog-5oofa: without this, RecvMsg on a paused peer blocks
 // forever, holding ts.mu and cascading into ingest-path stalls.
-func (tr *TierReplicator) send(ctx context.Context, tierID glid.GLID, nodeID string, cmd *gastrologv1.TierReplicationCommand) error {
+func (tr *ChunkReplicator) send(ctx context.Context, tierID glid.GLID, nodeID string, cmd *gastrologv1.ChunkReplicationCommand) error {
 	ts, err := tr.getOrOpen(tierID, nodeID)
 	if err != nil {
 		return err
@@ -130,7 +130,7 @@ func (tr *TierReplicator) send(ctx context.Context, tierID glid.GLID, nodeID str
 		return fmt.Errorf("send: %w", sendErr)
 	}
 
-	ack := &gastrologv1.TierReplicationAck{}
+	ack := &gastrologv1.ChunkReplicationAck{}
 	recvErr := tr.runWithCtx(ctx, func() error { return ts.stream.RecvMsg(ack) })
 	if recvErr != nil {
 		tr.closeStream(tierID, nodeID)
@@ -149,7 +149,7 @@ func (tr *TierReplicator) send(ctx context.Context, tierID glid.GLID, nodeID str
 // already closed the stream so the stuck fn will eventually error out
 // when the stream is cancelled. That cost is bounded; the alternative
 // (block forever on a paused peer) is not.
-func (tr *TierReplicator) runWithCtx(ctx context.Context, fn func() error) error {
+func (tr *ChunkReplicator) runWithCtx(ctx context.Context, fn func() error) error {
 	done := make(chan error, 1)
 	go func() { done <- fn() }()
 	select {
@@ -161,7 +161,7 @@ func (tr *TierReplicator) runWithCtx(ctx context.Context, fn func() error) error
 }
 
 // closeStream marks a stream as closed and cancels its context.
-func (tr *TierReplicator) closeStream(tierID glid.GLID, nodeID string) {
+func (tr *ChunkReplicator) closeStream(tierID glid.GLID, nodeID string) {
 	key := streamKey{tierID: tierID, nodeID: nodeID}
 	tr.mu.Lock()
 	ts := tr.streams[key]
@@ -174,16 +174,16 @@ func (tr *TierReplicator) closeStream(tierID glid.GLID, nodeID string) {
 }
 
 // AppendRecords forwards records to a follower's active chunk.
-func (tr *TierReplicator) AppendRecords(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
+func (tr *ChunkReplicator) AppendRecords(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
 	exports := make([]*gastrologv1.ExportRecord, len(records))
 	for i, rec := range records {
 		exports[i] = convert.RecordToExport(rec)
 	}
-	return tr.send(ctx, tierID, nodeID, &gastrologv1.TierReplicationCommand{
+	return tr.send(ctx, tierID, nodeID, &gastrologv1.ChunkReplicationCommand{
 		VaultId: vaultID.ToProto(),
 		TierId:  tierID.ToProto(),
-		Command: &gastrologv1.TierReplicationCommand_Append{
-			Append: &gastrologv1.TierReplicationAppend{
+		Command: &gastrologv1.ChunkReplicationCommand_Append{
+			Append: &gastrologv1.ChunkReplicationAppend{
 				ChunkId: glid.GLID(chunkID).ToProto(),
 				Records: exports,
 			},
@@ -192,12 +192,12 @@ func (tr *TierReplicator) AppendRecords(ctx context.Context, nodeID string, vaul
 }
 
 // SealTier tells a follower to seal its active chunk.
-func (tr *TierReplicator) SealTier(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
-	return tr.send(ctx, tierID, nodeID, &gastrologv1.TierReplicationCommand{
+func (tr *ChunkReplicator) SealTier(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
+	return tr.send(ctx, tierID, nodeID, &gastrologv1.ChunkReplicationCommand{
 		VaultId: vaultID.ToProto(),
 		TierId:  tierID.ToProto(),
-		Command: &gastrologv1.TierReplicationCommand_Seal{
-			Seal: &gastrologv1.TierReplicationSeal{
+		Command: &gastrologv1.ChunkReplicationCommand_Seal{
+			Seal: &gastrologv1.ChunkReplicationSeal{
 				ChunkId: glid.GLID(chunkID).ToProto(),
 			},
 		},
@@ -205,16 +205,16 @@ func (tr *TierReplicator) SealTier(ctx context.Context, nodeID string, vaultID, 
 }
 
 // ImportSealedChunk sends a canonical sealed chunk to a follower.
-func (tr *TierReplicator) ImportSealedChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
+func (tr *ChunkReplicator) ImportSealedChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
 	exports := make([]*gastrologv1.ExportRecord, len(records))
 	for i, rec := range records {
 		exports[i] = convert.RecordToExport(rec)
 	}
-	return tr.send(ctx, tierID, nodeID, &gastrologv1.TierReplicationCommand{
+	return tr.send(ctx, tierID, nodeID, &gastrologv1.ChunkReplicationCommand{
 		VaultId: vaultID.ToProto(),
 		TierId:  tierID.ToProto(),
-		Command: &gastrologv1.TierReplicationCommand_ImportSealed{
-			ImportSealed: &gastrologv1.TierReplicationImport{
+		Command: &gastrologv1.ChunkReplicationCommand_ImportSealed{
+			ImportSealed: &gastrologv1.ChunkReplicationImport{
 				ChunkId: glid.GLID(chunkID).ToProto(),
 				Records: exports,
 			},
@@ -223,12 +223,12 @@ func (tr *TierReplicator) ImportSealedChunk(ctx context.Context, nodeID string, 
 }
 
 // DeleteChunk tells a follower to delete a sealed chunk.
-func (tr *TierReplicator) DeleteChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
-	return tr.send(ctx, tierID, nodeID, &gastrologv1.TierReplicationCommand{
+func (tr *ChunkReplicator) DeleteChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
+	return tr.send(ctx, tierID, nodeID, &gastrologv1.ChunkReplicationCommand{
 		VaultId: vaultID.ToProto(),
 		TierId:  tierID.ToProto(),
-		Command: &gastrologv1.TierReplicationCommand_DeleteChunk{
-			DeleteChunk: &gastrologv1.TierReplicationDelete{
+		Command: &gastrologv1.ChunkReplicationCommand_DeleteChunk{
+			DeleteChunk: &gastrologv1.ChunkReplicationDelete{
 				ChunkId: glid.GLID(chunkID).ToProto(),
 			},
 		},
@@ -245,11 +245,11 @@ func (tr *TierReplicator) DeleteChunk(ctx context.Context, nodeID string, vaultI
 // follower will re-request anything still missing on the next sweep
 // tick. See gastrolog-2dgvj.
 //
-// Unary RPC (not on the existing TierReplication bidirectional stream
+// Unary RPC (not on the existing ChunkReplication bidirectional stream
 // which is exclusively leader→follower commands): the request is
 // follower→leader and small, so a one-shot Invoke is the cleaner
 // match.
-func (tr *TierReplicator) RequestReplicaCatchup(ctx context.Context, leaderNodeID string, vaultID, tierID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error) {
+func (tr *ChunkReplicator) RequestReplicaCatchup(ctx context.Context, leaderNodeID string, vaultID, tierID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error) {
 	conn, err := tr.peers.Conn(leaderNodeID)
 	if err != nil {
 		return 0, fmt.Errorf("dial leader %s: %w", leaderNodeID, err)
@@ -260,7 +260,6 @@ func (tr *TierReplicator) RequestReplicaCatchup(ctx context.Context, leaderNodeI
 	}
 	req := &gastrologv1.RequestReplicaCatchupRequest{
 		VaultId:         vaultID.ToProto(),
-		TierId:          tierID.ToProto(),
 		ChunkIds:        rawIDs,
 		RequesterNodeId: []byte(requesterNodeID),
 	}
@@ -272,12 +271,12 @@ func (tr *TierReplicator) RequestReplicaCatchup(ctx context.Context, leaderNodeI
 }
 
 // CloseStream closes the stream for a specific tier+follower.
-func (tr *TierReplicator) CloseStream(tierID glid.GLID, nodeID string) {
+func (tr *ChunkReplicator) CloseStream(tierID glid.GLID, nodeID string) {
 	tr.closeStream(tierID, nodeID)
 }
 
 // Close closes all open streams.
-func (tr *TierReplicator) Close() {
+func (tr *ChunkReplicator) Close() {
 	tr.mu.Lock()
 	defer tr.mu.Unlock()
 	for _, ts := range tr.streams {

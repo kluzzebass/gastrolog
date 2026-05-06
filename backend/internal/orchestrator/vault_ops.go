@@ -533,7 +533,7 @@ func (o *Orchestrator) forwardToFollowers(vault *Vault, vaultID glid.GLID, tier 
 // same boundary. Trying to push the seal command now would just add noise
 // from peers that are unreachable. See gastrolog-1e5ke.
 func (o *Orchestrator) sealRemoteFollowers(targets []remoteForwardTarget, chunkID chunk.ChunkID) {
-	if o.tierReplicator == nil || len(targets) == 0 || o.shuttingDown() {
+	if o.chunkReplicator == nil || len(targets) == 0 || o.shuttingDown() {
 		return
 	}
 	var wg sync.WaitGroup
@@ -541,7 +541,7 @@ func (o *Orchestrator) sealRemoteFollowers(targets []remoteForwardTarget, chunkI
 		wg.Go(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), cluster.ForwardingTimeout)
 			defer cancel()
-			if err := o.tierReplicator.SealTier(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, chunkID); err != nil {
+			if err := o.chunkReplicator.SealTier(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, chunkID); err != nil {
 				o.logger.Warn("replication: failed to seal remote follower",
 					"node", tgt.nodeID, "vault", tgt.vaultID, "tier", tgt.tierID,
 					"chunk", chunkID.String(), "error", err)
@@ -574,7 +574,7 @@ func (o *Orchestrator) sealRemoteFollowers(targets []remoteForwardTarget, chunkI
 // o.mu.RLock across this call would starve writers when any follower is
 // slow or paused. See gastrolog-5oofa.
 func (o *Orchestrator) fireAndForgetRemote(targets []remoteForwardTarget, rec chunk.Record) {
-	if len(targets) == 0 || o.shuttingDown() || o.tierReplicator == nil {
+	if len(targets) == 0 || o.shuttingDown() || o.chunkReplicator == nil {
 		return
 	}
 	var wg sync.WaitGroup
@@ -585,7 +585,7 @@ func (o *Orchestrator) fireAndForgetRemote(targets []remoteForwardTarget, rec ch
 		wg.Go(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), cluster.ForwardingTimeout)
 			defer cancel()
-			err := o.tierReplicator.AppendRecords(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, tgt.activeChunkID, []chunk.Record{rec})
+			err := o.chunkReplicator.AppendRecords(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, tgt.activeChunkID, []chunk.Record{rec})
 			if err != nil {
 				o.bumpReplicaBackoff(tgt.nodeID, err)
 			} else {
@@ -662,7 +662,7 @@ func (o *Orchestrator) appendToLocalFollower(vault *Vault, tierID glid.GLID, sto
 // currently the tier's active chunk, it is sealed first so the delete can
 // proceed. This handles the follower case where the leader has moved on to a
 // new active chunk but the follower still has the old ID as active (records
-// sync via TierReplicator.AppendRecords preserves the leader's chunk ID).
+// sync via ChunkReplicator.AppendRecords preserves the leader's chunk ID).
 func (o *Orchestrator) DeleteChunkFromTier(vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
 	tier, err := o.findTierForDelete(vaultID, tierID)
 	if err != nil {
@@ -717,7 +717,7 @@ func (o *Orchestrator) deleteChunkFromTierInstance(t *TierInstance, vaultID, tie
 // replaceForwardedChunk seals (if active) and deletes a pre-existing chunk
 // on a follower to make room for the canonical sealed version from the leader.
 // The pre-existing chunk may come from:
-//   - TierReplicator.AppendRecords syncing records as the leader's active
+//   - ChunkReplicator.AppendRecords syncing records as the leader's active
 //     chunk fills up (and the follower may have missed some due to a brief
 //     network disruption, leaving its copy slightly behind the leader's)
 //   - a catchup path that fills follower state from scratch
@@ -1180,7 +1180,7 @@ func drainIterator(next chunk.RecordIterator) {
 // active chunk is empty or absent.
 //
 // Role: tier leader. Sealing on the leader triggers follower seals via the
-// TierReplicator's SealTier call, which arrives on followers as an invocation
+// ChunkReplicator's SealTier call, which arrives on followers as an invocation
 // of SealActiveTier. Callers that are already on the follower side (seal
 // commands dispatched from the leader's Raft) must use SealActiveTier
 // directly.

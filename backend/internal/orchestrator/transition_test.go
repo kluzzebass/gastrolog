@@ -2193,16 +2193,16 @@ func (d *directTransferrer) WaitVaultReady(_ context.Context, _ string, _ glid.G
 	return nil
 }
 
-// directTierReplicator implements TierReplicator by calling directly into the
-// target orchestrator. In-process equivalent of the gRPC TierReplicator.
-type directTierReplicator struct {
+// directChunkReplicator implements ChunkReplicator by calling directly into the
+// target orchestrator. In-process equivalent of the gRPC ChunkReplicator.
+type directChunkReplicator struct {
 	nodes map[string]*Orchestrator
 }
 
-func (d *directTierReplicator) AppendRecords(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
+func (d *directChunkReplicator) AppendRecords(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
-		return fmt.Errorf("directTierReplicator: unknown node %q", nodeID)
+		return fmt.Errorf("directChunkReplicator: unknown node %q", nodeID)
 	}
 	for _, rec := range records {
 		if err := orch.AppendToTier(vaultID, tierID, chunkID, rec); err != nil {
@@ -2212,18 +2212,18 @@ func (d *directTierReplicator) AppendRecords(_ context.Context, nodeID string, v
 	return nil
 }
 
-func (d *directTierReplicator) SealTier(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
+func (d *directChunkReplicator) SealTier(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
-		return fmt.Errorf("directTierReplicator: unknown node %q", nodeID)
+		return fmt.Errorf("directChunkReplicator: unknown node %q", nodeID)
 	}
 	return orch.SealActiveTier(vaultID, tierID, chunkID)
 }
 
-func (d *directTierReplicator) ImportSealedChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
+func (d *directChunkReplicator) ImportSealedChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
-		return fmt.Errorf("directTierReplicator: unknown node %q", nodeID)
+		return fmt.Errorf("directChunkReplicator: unknown node %q", nodeID)
 	}
 	i := 0
 	iter := func() (chunk.Record, error) {
@@ -2237,18 +2237,18 @@ func (d *directTierReplicator) ImportSealedChunk(ctx context.Context, nodeID str
 	return orch.ImportToTier(ctx, vaultID, tierID, chunkID, iter)
 }
 
-func (d *directTierReplicator) DeleteChunk(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
+func (d *directChunkReplicator) DeleteChunk(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
-		return fmt.Errorf("directTierReplicator: unknown node %q", nodeID)
+		return fmt.Errorf("directChunkReplicator: unknown node %q", nodeID)
 	}
 	return orch.DeleteChunkFromTier(vaultID, tierID, chunkID)
 }
 
-func (d *directTierReplicator) RequestReplicaCatchup(ctx context.Context, leaderNodeID string, vaultID, tierID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error) {
+func (d *directChunkReplicator) RequestReplicaCatchup(ctx context.Context, leaderNodeID string, vaultID, tierID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error) {
 	orch, ok := d.nodes[leaderNodeID]
 	if !ok {
-		return 0, fmt.Errorf("directTierReplicator: unknown leader %q", leaderNodeID)
+		return 0, fmt.Errorf("directChunkReplicator: unknown leader %q", leaderNodeID)
 	}
 	return orch.CatchupSelectedChunks(ctx, vaultID, tierID, requesterNodeID, chunkIDs)
 }
@@ -2476,7 +2476,7 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 		}
 	}
 
-	// Wire directTransferrer and directTierReplicator: each node can reach all other nodes.
+	// Wire directTransferrer and directChunkReplicator: each node can reach all other nodes.
 	for _, nid := range nodeIDs {
 		remotes := make(map[string]*Orchestrator)
 		for _, other := range nodeIDs {
@@ -2485,7 +2485,7 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 			}
 		}
 		orchs[nid].SetRemoteTransferrer(&directTransferrer{nodes: remotes})
-		orchs[nid].SetTierReplicator(&directTierReplicator{nodes: remotes})
+		orchs[nid].SetChunkReplicator(&directChunkReplicator{nodes: remotes})
 	}
 
 	t.Cleanup(func() {

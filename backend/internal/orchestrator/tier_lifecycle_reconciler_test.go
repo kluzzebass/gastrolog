@@ -18,7 +18,7 @@ import (
 
 // captureCatchupReplicator records the most recent RequestReplicaCatchup
 // call so SweepMissingReplicas tests can assert what the follower asked
-// the leader to push. Other TierReplicator methods are no-ops — the
+// the leader to push. Other ChunkReplicator methods are no-ops — the
 // missing-replica sweep only exercises the one inverse method.
 type captureCatchupReplicator struct {
 	calls          atomic.Int32
@@ -641,7 +641,7 @@ func TestSweepMissingReplicasRequestsOnlySealedAndAbsentEntries(t *testing.T) {
 
 	orch := newTestOrch(t, Config{LocalNodeID: "node-A"})
 	fake := &captureCatchupReplicator{scheduledRet: 1}
-	orch.SetTierReplicator(fake)
+	orch.SetChunkReplicator(fake)
 
 	tier := &TierInstance{
 		TierID:       glid.New(),
@@ -691,7 +691,7 @@ func TestSweepMissingReplicasSkipsLeaderTier(t *testing.T) {
 
 	orch := newTestOrch(t, Config{LocalNodeID: "node-A"})
 	fake := &captureCatchupReplicator{}
-	orch.SetTierReplicator(fake)
+	orch.SetChunkReplicator(fake)
 
 	tier := &TierInstance{
 		TierID:     glid.New(),
@@ -727,7 +727,7 @@ func TestSweepMissingReplicasSkipsWhenLeaderUnknown(t *testing.T) {
 
 	orch := newTestOrch(t, Config{LocalNodeID: "node-A"})
 	fake := &captureCatchupReplicator{}
-	orch.SetTierReplicator(fake)
+	orch.SetChunkReplicator(fake)
 
 	tier := &TierInstance{
 		TierID:       glid.New(),

@@ -1463,38 +1463,43 @@ func (*ForwardVaultApplyResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{18}
 }
 
-// TierReplicationCommand is sent leader → follower. The vault_id and
-// tier_id identify the target tier; the oneof command determines the
+// ChunkReplicationCommand is sent leader → follower. The vault_id
+// identifies the target vault; the oneof command determines the
 // operation. New command types can be added without changing framing.
-type TierReplicationCommand struct {
+//
+// tier_id is retained transitionally during the vault refactor
+// (gastrolog-257l7) so the orchestrator's existing tier-keyed routing
+// continues to work. It is removed once the orchestrator's runtime
+// dispatch is vault-keyed.
+type ChunkReplicationCommand struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	VaultId []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
 	TierId  []byte                 `protobuf:"bytes,2,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"`
 	// Types that are valid to be assigned to Command:
 	//
-	//	*TierReplicationCommand_Append
-	//	*TierReplicationCommand_Seal
-	//	*TierReplicationCommand_ImportSealed
-	//	*TierReplicationCommand_DeleteChunk
-	Command       isTierReplicationCommand_Command `protobuf_oneof:"command"`
+	//	*ChunkReplicationCommand_Append
+	//	*ChunkReplicationCommand_Seal
+	//	*ChunkReplicationCommand_ImportSealed
+	//	*ChunkReplicationCommand_DeleteChunk
+	Command       isChunkReplicationCommand_Command `protobuf_oneof:"command"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *TierReplicationCommand) Reset() {
-	*x = TierReplicationCommand{}
+func (x *ChunkReplicationCommand) Reset() {
+	*x = ChunkReplicationCommand{}
 	mi := &file_gastrolog_v1_cluster_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *TierReplicationCommand) String() string {
+func (x *ChunkReplicationCommand) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*TierReplicationCommand) ProtoMessage() {}
+func (*ChunkReplicationCommand) ProtoMessage() {}
 
-func (x *TierReplicationCommand) ProtoReflect() protoreflect.Message {
+func (x *ChunkReplicationCommand) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_cluster_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1506,98 +1511,98 @@ func (x *TierReplicationCommand) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TierReplicationCommand.ProtoReflect.Descriptor instead.
-func (*TierReplicationCommand) Descriptor() ([]byte, []int) {
+// Deprecated: Use ChunkReplicationCommand.ProtoReflect.Descriptor instead.
+func (*ChunkReplicationCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{19}
 }
 
-func (x *TierReplicationCommand) GetVaultId() []byte {
+func (x *ChunkReplicationCommand) GetVaultId() []byte {
 	if x != nil {
 		return x.VaultId
 	}
 	return nil
 }
 
-func (x *TierReplicationCommand) GetTierId() []byte {
+func (x *ChunkReplicationCommand) GetTierId() []byte {
 	if x != nil {
 		return x.TierId
 	}
 	return nil
 }
 
-func (x *TierReplicationCommand) GetCommand() isTierReplicationCommand_Command {
+func (x *ChunkReplicationCommand) GetCommand() isChunkReplicationCommand_Command {
 	if x != nil {
 		return x.Command
 	}
 	return nil
 }
 
-func (x *TierReplicationCommand) GetAppend() *TierReplicationAppend {
+func (x *ChunkReplicationCommand) GetAppend() *ChunkReplicationAppend {
 	if x != nil {
-		if x, ok := x.Command.(*TierReplicationCommand_Append); ok {
+		if x, ok := x.Command.(*ChunkReplicationCommand_Append); ok {
 			return x.Append
 		}
 	}
 	return nil
 }
 
-func (x *TierReplicationCommand) GetSeal() *TierReplicationSeal {
+func (x *ChunkReplicationCommand) GetSeal() *ChunkReplicationSeal {
 	if x != nil {
-		if x, ok := x.Command.(*TierReplicationCommand_Seal); ok {
+		if x, ok := x.Command.(*ChunkReplicationCommand_Seal); ok {
 			return x.Seal
 		}
 	}
 	return nil
 }
 
-func (x *TierReplicationCommand) GetImportSealed() *TierReplicationImport {
+func (x *ChunkReplicationCommand) GetImportSealed() *ChunkReplicationImport {
 	if x != nil {
-		if x, ok := x.Command.(*TierReplicationCommand_ImportSealed); ok {
+		if x, ok := x.Command.(*ChunkReplicationCommand_ImportSealed); ok {
 			return x.ImportSealed
 		}
 	}
 	return nil
 }
 
-func (x *TierReplicationCommand) GetDeleteChunk() *TierReplicationDelete {
+func (x *ChunkReplicationCommand) GetDeleteChunk() *ChunkReplicationDelete {
 	if x != nil {
-		if x, ok := x.Command.(*TierReplicationCommand_DeleteChunk); ok {
+		if x, ok := x.Command.(*ChunkReplicationCommand_DeleteChunk); ok {
 			return x.DeleteChunk
 		}
 	}
 	return nil
 }
 
-type isTierReplicationCommand_Command interface {
-	isTierReplicationCommand_Command()
+type isChunkReplicationCommand_Command interface {
+	isChunkReplicationCommand_Command()
 }
 
-type TierReplicationCommand_Append struct {
-	Append *TierReplicationAppend `protobuf:"bytes,10,opt,name=append,proto3,oneof"`
+type ChunkReplicationCommand_Append struct {
+	Append *ChunkReplicationAppend `protobuf:"bytes,10,opt,name=append,proto3,oneof"`
 }
 
-type TierReplicationCommand_Seal struct {
-	Seal *TierReplicationSeal `protobuf:"bytes,11,opt,name=seal,proto3,oneof"`
+type ChunkReplicationCommand_Seal struct {
+	Seal *ChunkReplicationSeal `protobuf:"bytes,11,opt,name=seal,proto3,oneof"`
 }
 
-type TierReplicationCommand_ImportSealed struct {
-	ImportSealed *TierReplicationImport `protobuf:"bytes,12,opt,name=import_sealed,json=importSealed,proto3,oneof"`
+type ChunkReplicationCommand_ImportSealed struct {
+	ImportSealed *ChunkReplicationImport `protobuf:"bytes,12,opt,name=import_sealed,json=importSealed,proto3,oneof"`
 }
 
-type TierReplicationCommand_DeleteChunk struct {
-	DeleteChunk *TierReplicationDelete `protobuf:"bytes,13,opt,name=delete_chunk,json=deleteChunk,proto3,oneof"`
+type ChunkReplicationCommand_DeleteChunk struct {
+	DeleteChunk *ChunkReplicationDelete `protobuf:"bytes,13,opt,name=delete_chunk,json=deleteChunk,proto3,oneof"`
 }
 
-func (*TierReplicationCommand_Append) isTierReplicationCommand_Command() {}
+func (*ChunkReplicationCommand_Append) isChunkReplicationCommand_Command() {}
 
-func (*TierReplicationCommand_Seal) isTierReplicationCommand_Command() {}
+func (*ChunkReplicationCommand_Seal) isChunkReplicationCommand_Command() {}
 
-func (*TierReplicationCommand_ImportSealed) isTierReplicationCommand_Command() {}
+func (*ChunkReplicationCommand_ImportSealed) isChunkReplicationCommand_Command() {}
 
-func (*TierReplicationCommand_DeleteChunk) isTierReplicationCommand_Command() {}
+func (*ChunkReplicationCommand_DeleteChunk) isChunkReplicationCommand_Command() {}
 
-// TierReplicationAppend forwards records to the follower's active chunk.
-type TierReplicationAppend struct {
+// ChunkReplicationAppend forwards records to the follower's active chunk.
+type ChunkReplicationAppend struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ChunkId       []byte                 `protobuf:"bytes,1,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"` // leader's active chunk ID
 	Records       []*ExportRecord        `protobuf:"bytes,2,rep,name=records,proto3" json:"records,omitempty"`
@@ -1605,20 +1610,20 @@ type TierReplicationAppend struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *TierReplicationAppend) Reset() {
-	*x = TierReplicationAppend{}
+func (x *ChunkReplicationAppend) Reset() {
+	*x = ChunkReplicationAppend{}
 	mi := &file_gastrolog_v1_cluster_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *TierReplicationAppend) String() string {
+func (x *ChunkReplicationAppend) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*TierReplicationAppend) ProtoMessage() {}
+func (*ChunkReplicationAppend) ProtoMessage() {}
 
-func (x *TierReplicationAppend) ProtoReflect() protoreflect.Message {
+func (x *ChunkReplicationAppend) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_cluster_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1630,47 +1635,47 @@ func (x *TierReplicationAppend) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TierReplicationAppend.ProtoReflect.Descriptor instead.
-func (*TierReplicationAppend) Descriptor() ([]byte, []int) {
+// Deprecated: Use ChunkReplicationAppend.ProtoReflect.Descriptor instead.
+func (*ChunkReplicationAppend) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{20}
 }
 
-func (x *TierReplicationAppend) GetChunkId() []byte {
+func (x *ChunkReplicationAppend) GetChunkId() []byte {
 	if x != nil {
 		return x.ChunkId
 	}
 	return nil
 }
 
-func (x *TierReplicationAppend) GetRecords() []*ExportRecord {
+func (x *ChunkReplicationAppend) GetRecords() []*ExportRecord {
 	if x != nil {
 		return x.Records
 	}
 	return nil
 }
 
-// TierReplicationSeal tells the follower to seal its active chunk.
-type TierReplicationSeal struct {
+// ChunkReplicationSeal tells the follower to seal its active chunk.
+type ChunkReplicationSeal struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ChunkId       []byte                 `protobuf:"bytes,1,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"` // expected active chunk ID
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *TierReplicationSeal) Reset() {
-	*x = TierReplicationSeal{}
+func (x *ChunkReplicationSeal) Reset() {
+	*x = ChunkReplicationSeal{}
 	mi := &file_gastrolog_v1_cluster_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *TierReplicationSeal) String() string {
+func (x *ChunkReplicationSeal) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*TierReplicationSeal) ProtoMessage() {}
+func (*ChunkReplicationSeal) ProtoMessage() {}
 
-func (x *TierReplicationSeal) ProtoReflect() protoreflect.Message {
+func (x *ChunkReplicationSeal) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_cluster_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1682,21 +1687,21 @@ func (x *TierReplicationSeal) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TierReplicationSeal.ProtoReflect.Descriptor instead.
-func (*TierReplicationSeal) Descriptor() ([]byte, []int) {
+// Deprecated: Use ChunkReplicationSeal.ProtoReflect.Descriptor instead.
+func (*ChunkReplicationSeal) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{21}
 }
 
-func (x *TierReplicationSeal) GetChunkId() []byte {
+func (x *ChunkReplicationSeal) GetChunkId() []byte {
 	if x != nil {
 		return x.ChunkId
 	}
 	return nil
 }
 
-// TierReplicationImport sends the canonical sealed chunk. The follower
+// ChunkReplicationImport sends the canonical sealed chunk. The follower
 // replaces any forwarded version with this authoritative copy.
-type TierReplicationImport struct {
+type ChunkReplicationImport struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ChunkId       []byte                 `protobuf:"bytes,1,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
 	Records       []*ExportRecord        `protobuf:"bytes,2,rep,name=records,proto3" json:"records,omitempty"`
@@ -1704,20 +1709,20 @@ type TierReplicationImport struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *TierReplicationImport) Reset() {
-	*x = TierReplicationImport{}
+func (x *ChunkReplicationImport) Reset() {
+	*x = ChunkReplicationImport{}
 	mi := &file_gastrolog_v1_cluster_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *TierReplicationImport) String() string {
+func (x *ChunkReplicationImport) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*TierReplicationImport) ProtoMessage() {}
+func (*ChunkReplicationImport) ProtoMessage() {}
 
-func (x *TierReplicationImport) ProtoReflect() protoreflect.Message {
+func (x *ChunkReplicationImport) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_cluster_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1729,48 +1734,48 @@ func (x *TierReplicationImport) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TierReplicationImport.ProtoReflect.Descriptor instead.
-func (*TierReplicationImport) Descriptor() ([]byte, []int) {
+// Deprecated: Use ChunkReplicationImport.ProtoReflect.Descriptor instead.
+func (*ChunkReplicationImport) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{22}
 }
 
-func (x *TierReplicationImport) GetChunkId() []byte {
+func (x *ChunkReplicationImport) GetChunkId() []byte {
 	if x != nil {
 		return x.ChunkId
 	}
 	return nil
 }
 
-func (x *TierReplicationImport) GetRecords() []*ExportRecord {
+func (x *ChunkReplicationImport) GetRecords() []*ExportRecord {
 	if x != nil {
 		return x.Records
 	}
 	return nil
 }
 
-// TierReplicationDelete tells the follower to delete a sealed chunk
-// (e.g. after retention expiry or tier transition on the leader).
-type TierReplicationDelete struct {
+// ChunkReplicationDelete tells the follower to delete a sealed chunk
+// (after retention expiry on the leader).
+type ChunkReplicationDelete struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ChunkId       []byte                 `protobuf:"bytes,1,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *TierReplicationDelete) Reset() {
-	*x = TierReplicationDelete{}
+func (x *ChunkReplicationDelete) Reset() {
+	*x = ChunkReplicationDelete{}
 	mi := &file_gastrolog_v1_cluster_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *TierReplicationDelete) String() string {
+func (x *ChunkReplicationDelete) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*TierReplicationDelete) ProtoMessage() {}
+func (*ChunkReplicationDelete) ProtoMessage() {}
 
-func (x *TierReplicationDelete) ProtoReflect() protoreflect.Message {
+func (x *ChunkReplicationDelete) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_cluster_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1782,20 +1787,20 @@ func (x *TierReplicationDelete) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TierReplicationDelete.ProtoReflect.Descriptor instead.
-func (*TierReplicationDelete) Descriptor() ([]byte, []int) {
+// Deprecated: Use ChunkReplicationDelete.ProtoReflect.Descriptor instead.
+func (*ChunkReplicationDelete) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{23}
 }
 
-func (x *TierReplicationDelete) GetChunkId() []byte {
+func (x *ChunkReplicationDelete) GetChunkId() []byte {
 	if x != nil {
 		return x.ChunkId
 	}
 	return nil
 }
 
-// TierReplicationAck is sent follower → leader after each command.
-type TierReplicationAck struct {
+// ChunkReplicationAck is sent follower → leader after each command.
+type ChunkReplicationAck struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
 	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
@@ -1804,20 +1809,20 @@ type TierReplicationAck struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *TierReplicationAck) Reset() {
-	*x = TierReplicationAck{}
+func (x *ChunkReplicationAck) Reset() {
+	*x = ChunkReplicationAck{}
 	mi := &file_gastrolog_v1_cluster_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *TierReplicationAck) String() string {
+func (x *ChunkReplicationAck) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*TierReplicationAck) ProtoMessage() {}
+func (*ChunkReplicationAck) ProtoMessage() {}
 
-func (x *TierReplicationAck) ProtoReflect() protoreflect.Message {
+func (x *ChunkReplicationAck) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_cluster_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1829,26 +1834,26 @@ func (x *TierReplicationAck) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TierReplicationAck.ProtoReflect.Descriptor instead.
-func (*TierReplicationAck) Descriptor() ([]byte, []int) {
+// Deprecated: Use ChunkReplicationAck.ProtoReflect.Descriptor instead.
+func (*ChunkReplicationAck) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{24}
 }
 
-func (x *TierReplicationAck) GetOk() bool {
+func (x *ChunkReplicationAck) GetOk() bool {
 	if x != nil {
 		return x.Ok
 	}
 	return false
 }
 
-func (x *TierReplicationAck) GetError() string {
+func (x *ChunkReplicationAck) GetError() string {
 	if x != nil {
 		return x.Error
 	}
 	return ""
 }
 
-func (x *TierReplicationAck) GetChunkId() []byte {
+func (x *ChunkReplicationAck) GetChunkId() []byte {
 	if x != nil {
 		return x.ChunkId
 	}
@@ -1858,13 +1863,13 @@ func (x *TierReplicationAck) GetChunkId() []byte {
 // RequestReplicaCatchupRequest is sent follower → placement leader. The
 // follower computes the local FSM-vs-disk diff in its lifecycle reconciler
 // (SweepMissingReplicas) and asks the leader to re-push specific sealed
-// chunks via the existing TierReplication.ImportSealed path. Used to
+// chunks via the existing ChunkReplication.ImportSealed path. Used to
 // recover from replication pushes that failed during a follower pause /
 // partition / rejoin window — see gastrolog-2dgvj.
 type RequestReplicaCatchupRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	VaultId         []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
-	TierId          []byte                 `protobuf:"bytes,2,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"`
+	TierId          []byte                 `protobuf:"bytes,2,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"`                              // retained transitionally during the vault refactor (gastrolog-257l7)
 	ChunkIds        [][]byte               `protobuf:"bytes,3,rep,name=chunk_ids,json=chunkIds,proto3" json:"chunk_ids,omitempty"`                        // 16-byte ChunkIDs
 	RequesterNodeId []byte                 `protobuf:"bytes,4,opt,name=requester_node_id,json=requesterNodeId,proto3" json:"requester_node_id,omitempty"` // utf-8 node ID of the requesting follower
 	unknownFields   protoimpl.UnknownFields
@@ -3932,27 +3937,27 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x18ForwardVaultApplyRequest\x12\x19\n" +
 	"\bgroup_id\x18\x01 \x01(\fR\agroupId\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\fR\acommand\"\x1b\n" +
-	"\x19ForwardVaultApplyResponse\"\xe5\x02\n" +
-	"\x16TierReplicationCommand\x12\x19\n" +
+	"\x19ForwardVaultApplyResponse\"\xea\x02\n" +
+	"\x17ChunkReplicationCommand\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12\x17\n" +
-	"\atier_id\x18\x02 \x01(\fR\x06tierId\x12=\n" +
+	"\atier_id\x18\x02 \x01(\fR\x06tierId\x12>\n" +
 	"\x06append\x18\n" +
-	" \x01(\v2#.gastrolog.v1.TierReplicationAppendH\x00R\x06append\x127\n" +
-	"\x04seal\x18\v \x01(\v2!.gastrolog.v1.TierReplicationSealH\x00R\x04seal\x12J\n" +
-	"\rimport_sealed\x18\f \x01(\v2#.gastrolog.v1.TierReplicationImportH\x00R\fimportSealed\x12H\n" +
-	"\fdelete_chunk\x18\r \x01(\v2#.gastrolog.v1.TierReplicationDeleteH\x00R\vdeleteChunkB\t\n" +
-	"\acommand\"h\n" +
-	"\x15TierReplicationAppend\x12\x19\n" +
+	" \x01(\v2$.gastrolog.v1.ChunkReplicationAppendH\x00R\x06append\x128\n" +
+	"\x04seal\x18\v \x01(\v2\".gastrolog.v1.ChunkReplicationSealH\x00R\x04seal\x12K\n" +
+	"\rimport_sealed\x18\f \x01(\v2$.gastrolog.v1.ChunkReplicationImportH\x00R\fimportSealed\x12I\n" +
+	"\fdelete_chunk\x18\r \x01(\v2$.gastrolog.v1.ChunkReplicationDeleteH\x00R\vdeleteChunkB\t\n" +
+	"\acommand\"i\n" +
+	"\x16ChunkReplicationAppend\x12\x19\n" +
 	"\bchunk_id\x18\x01 \x01(\fR\achunkId\x124\n" +
-	"\arecords\x18\x02 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\"0\n" +
-	"\x13TierReplicationSeal\x12\x19\n" +
-	"\bchunk_id\x18\x01 \x01(\fR\achunkId\"h\n" +
-	"\x15TierReplicationImport\x12\x19\n" +
+	"\arecords\x18\x02 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\"1\n" +
+	"\x14ChunkReplicationSeal\x12\x19\n" +
+	"\bchunk_id\x18\x01 \x01(\fR\achunkId\"i\n" +
+	"\x16ChunkReplicationImport\x12\x19\n" +
 	"\bchunk_id\x18\x01 \x01(\fR\achunkId\x124\n" +
-	"\arecords\x18\x02 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\"2\n" +
-	"\x15TierReplicationDelete\x12\x19\n" +
-	"\bchunk_id\x18\x01 \x01(\fR\achunkId\"U\n" +
-	"\x12TierReplicationAck\x12\x0e\n" +
+	"\arecords\x18\x02 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\"3\n" +
+	"\x16ChunkReplicationDelete\x12\x19\n" +
+	"\bchunk_id\x18\x01 \x01(\fR\achunkId\"V\n" +
+	"\x13ChunkReplicationAck\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12\x19\n" +
 	"\bchunk_id\x18\x03 \x01(\fR\achunkId\"\x9b\x01\n" +
@@ -4105,12 +4110,12 @@ var file_gastrolog_v1_cluster_proto_goTypes = []any{
 	(*ForwardTierApplyResponse)(nil),       // 17: gastrolog.v1.ForwardTierApplyResponse
 	(*ForwardVaultApplyRequest)(nil),       // 18: gastrolog.v1.ForwardVaultApplyRequest
 	(*ForwardVaultApplyResponse)(nil),      // 19: gastrolog.v1.ForwardVaultApplyResponse
-	(*TierReplicationCommand)(nil),         // 20: gastrolog.v1.TierReplicationCommand
-	(*TierReplicationAppend)(nil),          // 21: gastrolog.v1.TierReplicationAppend
-	(*TierReplicationSeal)(nil),            // 22: gastrolog.v1.TierReplicationSeal
-	(*TierReplicationImport)(nil),          // 23: gastrolog.v1.TierReplicationImport
-	(*TierReplicationDelete)(nil),          // 24: gastrolog.v1.TierReplicationDelete
-	(*TierReplicationAck)(nil),             // 25: gastrolog.v1.TierReplicationAck
+	(*ChunkReplicationCommand)(nil),        // 20: gastrolog.v1.ChunkReplicationCommand
+	(*ChunkReplicationAppend)(nil),         // 21: gastrolog.v1.ChunkReplicationAppend
+	(*ChunkReplicationSeal)(nil),           // 22: gastrolog.v1.ChunkReplicationSeal
+	(*ChunkReplicationImport)(nil),         // 23: gastrolog.v1.ChunkReplicationImport
+	(*ChunkReplicationDelete)(nil),         // 24: gastrolog.v1.ChunkReplicationDelete
+	(*ChunkReplicationAck)(nil),            // 25: gastrolog.v1.ChunkReplicationAck
 	(*RequestReplicaCatchupRequest)(nil),   // 26: gastrolog.v1.RequestReplicaCatchupRequest
 	(*RequestReplicaCatchupResponse)(nil),  // 27: gastrolog.v1.RequestReplicaCatchupResponse
 	(*ForwardSearchRequest)(nil),           // 28: gastrolog.v1.ForwardSearchRequest
@@ -4180,12 +4185,12 @@ var file_gastrolog_v1_cluster_proto_depIdxs = []int32{
 	64, // 13: gastrolog.v1.SystemAlert.first_seen:type_name -> google.protobuf.Timestamp
 	64, // 14: gastrolog.v1.SystemAlert.last_seen:type_name -> google.protobuf.Timestamp
 	69, // 15: gastrolog.v1.ForwardRecordsRequest.records:type_name -> gastrolog.v1.ExportRecord
-	21, // 16: gastrolog.v1.TierReplicationCommand.append:type_name -> gastrolog.v1.TierReplicationAppend
-	22, // 17: gastrolog.v1.TierReplicationCommand.seal:type_name -> gastrolog.v1.TierReplicationSeal
-	23, // 18: gastrolog.v1.TierReplicationCommand.import_sealed:type_name -> gastrolog.v1.TierReplicationImport
-	24, // 19: gastrolog.v1.TierReplicationCommand.delete_chunk:type_name -> gastrolog.v1.TierReplicationDelete
-	69, // 20: gastrolog.v1.TierReplicationAppend.records:type_name -> gastrolog.v1.ExportRecord
-	69, // 21: gastrolog.v1.TierReplicationImport.records:type_name -> gastrolog.v1.ExportRecord
+	21, // 16: gastrolog.v1.ChunkReplicationCommand.append:type_name -> gastrolog.v1.ChunkReplicationAppend
+	22, // 17: gastrolog.v1.ChunkReplicationCommand.seal:type_name -> gastrolog.v1.ChunkReplicationSeal
+	23, // 18: gastrolog.v1.ChunkReplicationCommand.import_sealed:type_name -> gastrolog.v1.ChunkReplicationImport
+	24, // 19: gastrolog.v1.ChunkReplicationCommand.delete_chunk:type_name -> gastrolog.v1.ChunkReplicationDelete
+	69, // 20: gastrolog.v1.ChunkReplicationAppend.records:type_name -> gastrolog.v1.ExportRecord
+	69, // 21: gastrolog.v1.ChunkReplicationImport.records:type_name -> gastrolog.v1.ExportRecord
 	69, // 22: gastrolog.v1.ForwardSearchResponse.records:type_name -> gastrolog.v1.ExportRecord
 	70, // 23: gastrolog.v1.ForwardSearchResponse.table_result:type_name -> gastrolog.v1.TableResult
 	71, // 24: gastrolog.v1.ForwardSearchResponse.histogram:type_name -> gastrolog.v1.HistogramBucket
@@ -4222,10 +4227,10 @@ func file_gastrolog_v1_cluster_proto_init() {
 		(*BroadcastMessage_Heartbeat)(nil),
 	}
 	file_gastrolog_v1_cluster_proto_msgTypes[19].OneofWrappers = []any{
-		(*TierReplicationCommand_Append)(nil),
-		(*TierReplicationCommand_Seal)(nil),
-		(*TierReplicationCommand_ImportSealed)(nil),
-		(*TierReplicationCommand_DeleteChunk)(nil),
+		(*ChunkReplicationCommand_Append)(nil),
+		(*ChunkReplicationCommand_Seal)(nil),
+		(*ChunkReplicationCommand_ImportSealed)(nil),
+		(*ChunkReplicationCommand_DeleteChunk)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

@@ -87,7 +87,7 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, tierID glid
 	if tier.IsFollower {
 		return nil // only leader initiates catchup
 	}
-	if o.tierReplicator == nil {
+	if o.chunkReplicator == nil {
 		return errors.New("no tier replicator configured")
 	}
 
@@ -177,7 +177,7 @@ func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID, tierI
 	if tier.IsFollower {
 		return 0, fmt.Errorf("not placement leader for tier %s (follower)", tierID)
 	}
-	if o.tierReplicator == nil {
+	if o.chunkReplicator == nil {
 		return 0, errors.New("no tier replicator configured")
 	}
 

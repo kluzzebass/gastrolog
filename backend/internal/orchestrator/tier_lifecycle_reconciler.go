@@ -654,7 +654,7 @@ func (r *TierLifecycleReconciler) SweepMissingReplicas() {
 	if r.tier.LeaderNodeID == "" {
 		return // no known placement leader; nowhere to send the request
 	}
-	if r.orch == nil || r.orch.tierReplicator == nil {
+	if r.orch == nil || r.orch.chunkReplicator == nil {
 		return // no transport wired; cluster mode requires a replicator
 	}
 
@@ -694,7 +694,7 @@ func (r *TierLifecycleReconciler) SweepMissingReplicas() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	scheduled, err := r.orch.tierReplicator.RequestReplicaCatchup(
+	scheduled, err := r.orch.chunkReplicator.RequestReplicaCatchup(
 		ctx, r.tier.LeaderNodeID, r.vaultID, r.tierID, missing, r.localNodeID)
 	if err != nil {
 		// The next sweep tick will retry. Possible causes: leader changed

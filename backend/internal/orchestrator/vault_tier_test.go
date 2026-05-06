@@ -569,8 +569,8 @@ func TestImportToTierIdempotent(t *testing.T) {
 
 // --- AppendToTier ---
 
-// tierTestReplicator records AppendRecords calls on the TierReplicator interface.
-// Satisfies orchestrator.TierReplicator.
+// tierTestReplicator records AppendRecords calls on the ChunkReplicator interface.
+// Satisfies orchestrator.ChunkReplicator.
 type tierTestReplicator struct {
 	mu    sync.Mutex
 	calls []tierForwardCall
@@ -620,7 +620,7 @@ func TestAppendToTierLeaderForwardsToFollowers(t *testing.T) {
 	t.Parallel()
 	fwd := &tierTestReplicator{}
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetTierReplicator(fwd)
+	orch.SetChunkReplicator(fwd)
 
 	tierID := glid.New()
 	vaultID := glid.New()
@@ -663,7 +663,7 @@ func TestAppendToTierSecondaryDoesNotForward(t *testing.T) {
 	t.Parallel()
 	fwd := &tierTestReplicator{}
 	orch := newTestOrch(t, Config{LocalNodeID: "node-2"})
-	orch.SetTierReplicator(fwd)
+	orch.SetChunkReplicator(fwd)
 
 	tierID := glid.New()
 	vaultID := glid.New()
@@ -1011,7 +1011,7 @@ func TestAppendToTierForwardLifecycle(t *testing.T) {
 	t.Parallel()
 	fwd := &tierTestReplicator{}
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetTierReplicator(fwd)
+	orch.SetChunkReplicator(fwd)
 
 	tierID := glid.New()
 	vaultID := glid.New()
@@ -1069,7 +1069,7 @@ func TestAppendToTierForwardLifecycle(t *testing.T) {
 // ================================================================
 
 // ackTestReplicator records AppendRecords calls and returns a configurable error.
-// Implements orchestrator.TierReplicator.
+// Implements orchestrator.ChunkReplicator.
 type ackTestReplicator struct {
 	tierAppendCalls atomic.Int32
 	tierAppendErr   error
@@ -1095,7 +1095,7 @@ func TestAppendRecordWaitForReplicaReturnsTask(t *testing.T) {
 	t.Parallel()
 	fwd := &tierTestReplicator{}
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetTierReplicator(fwd)
+	orch.SetChunkReplicator(fwd)
 
 	tierID := glid.New()
 	vaultID := glid.New()
@@ -1138,7 +1138,7 @@ func TestAppendRecordNoWaitForReplicaFiresAndForgets(t *testing.T) {
 	t.Parallel()
 	fwd := &tierTestReplicator{}
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetTierReplicator(fwd)
+	orch.SetChunkReplicator(fwd)
 
 	tierID := glid.New()
 	vaultID := glid.New()
@@ -1181,7 +1181,7 @@ func TestIngestReturnsReplicationTasks(t *testing.T) {
 	t.Parallel()
 	fwd := &tierTestReplicator{}
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetTierReplicator(fwd)
+	orch.SetChunkReplicator(fwd)
 
 	tierID := glid.New()
 	vaultID := glid.New()
@@ -1219,7 +1219,7 @@ func TestAckAfterReplicationSuccess(t *testing.T) {
 	t.Parallel()
 	mock := &ackTestReplicator{}
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetTierReplicator(mock)
+	orch.SetChunkReplicator(mock)
 
 	pa := &pendingAcks{
 		replication: []replicationTask{
@@ -1253,7 +1253,7 @@ func TestAckAfterReplicationInvokesEveryReplicationTarget(t *testing.T) {
 	t.Parallel()
 	mock := &ackTestReplicator{}
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetTierReplicator(mock)
+	orch.SetChunkReplicator(mock)
 
 	vaultID := glid.New()
 	tierID := glid.New()
@@ -1296,7 +1296,7 @@ func TestAckAfterReplicationFailure(t *testing.T) {
 		tierAppendErr: errors.New("replication failed"),
 	}
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetTierReplicator(mock)
+	orch.SetChunkReplicator(mock)
 
 	pa := &pendingAcks{
 		replication: []replicationTask{
@@ -1596,7 +1596,7 @@ func TestTransitionLocalCursorErrorRetainsSource(t *testing.T) {
 	}
 }
 
-// failingForwarder is a TierReplicator that records AppendRecords calls and
+// failingForwarder is a ChunkReplicator that records AppendRecords calls and
 // returns configurable errors. Used to verify fire-and-forget error handling
 // on the replication path.
 type failingForwarder struct {
@@ -1647,7 +1647,7 @@ func TestAppendToTierForwardingDoesNotBlockOnFullChannel(t *testing.T) {
 	}
 
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetTierReplicator(fwd)
+	orch.SetChunkReplicator(fwd)
 
 	tierID := glid.New()
 	vaultID := glid.New()

@@ -103,7 +103,7 @@ type RecordForwarder interface {
 	RedirectNode(fromNodeID, toNodeID string)
 }
 
-// TierReplicator sequences all replication commands for a tier on a single
+// ChunkReplicator sequences all replication commands for a tier on a single
 // ordered stream per follower. Nil in single-node mode.
 //
 // Caller role: always invoked on the tier **leader** node. Each method sends
@@ -121,7 +121,7 @@ type RecordForwarder interface {
 // has applied the commit that authorized it. The follower's readiness is
 // its own concern; transient follower-not-ready errors are retried by
 // higher-level catchup scheduling (see ScheduleCatchup).
-type TierReplicator interface {
+type ChunkReplicator interface {
 	AppendRecords(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error
 	SealTier(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error
 	ImportSealedChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error
@@ -226,7 +226,7 @@ type Orchestrator struct {
 	transferrer RemoteTransferrer
 
 	// Tier replicator: ordered stream per tier per follower (nil in single-node mode).
-	tierReplicator TierReplicator
+	chunkReplicator ChunkReplicator
 
 	// replicaCircuit tracks per-node backoff for follower replication.
 	// After consecutive failures, the node is skipped until the backoff
@@ -608,9 +608,9 @@ func (o *Orchestrator) SetRemoteTransferrer(t RemoteTransferrer) {
 	o.transferrer = t
 }
 
-// SetTierReplicator injects the ordered tier replication client.
-func (o *Orchestrator) SetTierReplicator(tr TierReplicator) {
-	o.tierReplicator = tr
+// SetChunkReplicator injects the ordered tier replication client.
+func (o *Orchestrator) SetChunkReplicator(tr ChunkReplicator) {
+	o.chunkReplicator = tr
 }
 
 // Logger returns a child logger scoped for a subcomponent.

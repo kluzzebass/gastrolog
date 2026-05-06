@@ -68,7 +68,7 @@ type orchRelNode struct {
 // vault-ctl Raft group built via createTierRaftGroupVaultCtl.
 //
 // Cross-node cluster RPCs (RecordForwarder, RemoteTransferrer,
-// TierReplicator) are left nil — scenarios that need them should stub via
+// ChunkReplicator) are left nil — scenarios that need them should stub via
 // direct in-process shims. The default harness exercises replication
 // through vault-ctl Raft only, which is the primary target for
 // metadata-divergence tests.

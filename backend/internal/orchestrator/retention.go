@@ -87,7 +87,7 @@ type retentionRunner struct {
 	// harnesses that build TierInstances directly without going through
 	// buildTierInstance; those harnesses fall through to the legacy
 	// direct-delete path below (for cross-node propagation they wire
-	// directTierReplicator.DeleteChunk RPC fan-out separately).
+	// directChunkReplicator.DeleteChunk RPC fan-out separately).
 	reconciler *TierLifecycleReconciler
 
 	// isLeader returns true if this node is the config leader for this tier.
@@ -961,7 +961,7 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID, reason string) {
 	//
 	// Reached only by older test harnesses that build a retentionRunner
 	// without going through buildTierInstance (so tier.Reconciler is nil).
-	// They wire cross-node propagation via directTierReplicator.DeleteChunk
+	// They wire cross-node propagation via directChunkReplicator.DeleteChunk
 	// RPC fan-out (forwardDeletionToFollowers below) instead of vault-ctl
 	// Raft. Production has no path into here after gastrolog-51gme step 11
 	// — ApplyRaftDelete / CmdDeleteChunk producers are gone.
@@ -1022,7 +1022,7 @@ func (r *retentionRunner) expectedFromForExpire() []string {
 // follower. Used only by the reconciler-less fallback path in expireChunk
 // (test harnesses without a vault-ctl Raft group / TierLifecycleReconciler).
 // Production runs through the receipt protocol and never reaches here.
-// The directTierReplicator.DeleteChunk RPC chain stays for that harness;
+// The directChunkReplicator.DeleteChunk RPC chain stays for that harness;
 // removing it requires migrating the harness onto the reconciler with a
 // fake-FSM-applier — a follow-up refactor outside the scope of step 11.
 func (r *retentionRunner) forwardDeletionToFollowers(id chunk.ChunkID) {
@@ -1062,10 +1062,10 @@ func (r *retentionRunner) forwardDeleteWithRetry(nodeID string, id chunk.ChunkID
 // sendDeleteToFollower issues a single chunk-delete RPC via the tier
 // replicator. Returns nil when no replicator is configured (single-node mode).
 func (r *retentionRunner) sendDeleteToFollower(followerID string, id chunk.ChunkID) error {
-	if r.orch.tierReplicator == nil {
+	if r.orch.chunkReplicator == nil {
 		return nil
 	}
-	return r.orch.tierReplicator.DeleteChunk(
+	return r.orch.chunkReplicator.DeleteChunk(
 		context.Background(), followerID, r.vaultID, r.tierID, id,
 	)
 }

@@ -132,7 +132,7 @@ func TestOrchRel_Restart_SealedChunkSurvives(t *testing.T) {
 // (TCP stays up; app-level frozen), then exercise the ingest + seal
 // path on node1. With the 5oofa fix, append/seal complete normally:
 // fireAndForgetRemote's per-target goroutine against the paused node
-// times out via the TierReplicator.send ctx deadline, the circuit
+// times out via the ChunkReplicator.send ctx deadline, the circuit
 // breaker trips, and ingest proceeds. Without the fix, the ingest path
 // would hold o.mu.RLock indefinitely waiting on the paused peer, every
 // orchestrator operation would queue behind it, and the test would hit

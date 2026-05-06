@@ -136,11 +136,11 @@ type Server struct {
 	recordTierAppender RecordTierAppender
 
 	// sealTierExecutor seals a specific tier's active chunk on this node.
-	// Invoked by the TierReplication stream handler.
+	// Invoked by the ChunkReplication stream handler.
 	sealTierExecutor SealTierExecutor
 
 	// deleteChunkExecutor deletes a sealed chunk from a tier on this node.
-	// Invoked by the TierReplication stream handler.
+	// Invoked by the ChunkReplication stream handler.
 	deleteChunkExecutor DeleteChunkExecutor
 
 	// recordImporter imports records as a sealed chunk in a local vault.
