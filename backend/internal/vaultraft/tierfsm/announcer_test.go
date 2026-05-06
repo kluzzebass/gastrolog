@@ -155,7 +155,11 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 		t.Fatalf("Seal: %v", err)
 	}
 
-	// Get the chunk ID.
+	// Get the chunk ID. Phase 3 (gastrolog-1huz5): AnnounceSeal now
+	// fires from PostSealProcess after sealToGLCB completes; tests that
+	// drive the manager directly (no orchestrator scheduler) must invoke
+	// PostSealProcess explicitly to walk the chunk through Sealing →
+	// Sealed.
 	metas, err := mgr.List()
 	if err != nil {
 		t.Fatal(err)
@@ -164,6 +168,10 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 		t.Fatal("expected at least one chunk")
 	}
 	chunkID := metas[0].ID
+
+	if err := mgr.PostSealProcess(t.Context(), chunkID); err != nil {
+		t.Fatalf("PostSealProcess: %v", err)
+	}
 
 	// Wait for full replication: chunk must be sealed on all nodes.
 	deadline := time.Now().Add(5 * time.Second)
