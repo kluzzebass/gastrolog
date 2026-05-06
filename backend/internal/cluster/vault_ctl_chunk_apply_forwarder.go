@@ -45,7 +45,7 @@ func NewVaultCtlChunkApplyForwarder(r *hraft.Raft, vaultCtlGroupID string, tierI
 // Apply applies a tier FSM command. Tries locally first; forwards to the
 // vault-ctl Raft leader on ErrNotLeader.
 func (f *VaultCtlChunkApplyForwarder) Apply(data []byte) error {
-	payload := vaultraft.MarshalTierCommand(f.tierID, data)
+	payload := vaultraft.MarshalVaultChunkCommand(f.tierID, data)
 	future := f.raft.Apply(payload, f.timeout)
 	if err := future.Error(); err != nil {
 		if errors.Is(err, hraft.ErrNotLeader) {

@@ -175,7 +175,7 @@ func TestReliability_Failover_LeaderDown_NewLeaderElected(t *testing.T) {
 
 	// New leader accepts writes.
 	leader := h.nodes[newLeader]
-	cmd := MarshalTierCommand(tierID, tierfsm.MarshalCreateChunk(chunkIDWithPrefix(0x11), now, now, now))
+	cmd := MarshalVaultChunkCommand(tierID, tierfsm.MarshalCreateChunk(chunkIDWithPrefix(0x11), now, now, now))
 	if err := leader.raft.Apply(cmd, 2*time.Second).Error(); err != nil {
 		t.Fatalf("apply under new leader: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestReliability_ConcurrentWrites_NoDivergence(t *testing.T) {
 				cid[0] = byte(writerIdx)
 				cid[1] = byte(c)
 				wire := tierfsm.MarshalCreateChunk(cid, now, now, now)
-				cmd := MarshalTierCommand(tierID, wire)
+				cmd := MarshalVaultChunkCommand(tierID, wire)
 				if err := applyWithLeaderRetry(h, cmd, 5, 3*time.Second); err != nil {
 					errCh <- fmt.Errorf("writer %d cmd %d: %w", writerIdx, c, err)
 					return
@@ -511,7 +511,7 @@ func TestReliability_PipelinedApplies_SurviveLeaderKill(t *testing.T) {
 		wg.Add(1)
 		go func(cid chunk.ChunkID) {
 			defer wg.Done()
-			cmd := MarshalTierCommand(tierID, tierfsm.MarshalCreateChunk(cid, now, now, now))
+			cmd := MarshalVaultChunkCommand(tierID, tierfsm.MarshalCreateChunk(cid, now, now, now))
 			n := h.nodes[oldLeader]
 			n.mu.Lock()
 			r := n.raft
@@ -738,7 +738,7 @@ func TestReliability_LargeFSM_SnapshotRestoreRoundtrip(t *testing.T) {
 			var cid chunk.ChunkID
 			cid[0] = byte(ti)
 			cid[1] = byte(ci)
-			cmd := MarshalTierCommand(tierID, tierfsm.MarshalCreateChunk(cid, now, now, now))
+			cmd := MarshalVaultChunkCommand(tierID, tierfsm.MarshalCreateChunk(cid, now, now, now))
 			if r := src.Apply(&hraft.Log{Data: cmd}); r != nil {
 				t.Fatalf("apply tier=%d chunk=%d: %v", ti, ci, r)
 			}

@@ -220,7 +220,7 @@ func (h *reliabilityHarness) applyTierCreate(tierID glid.GLID, chunkID chunk.Chu
 	h.t.Helper()
 	leader := h.leader()
 	wire := tierfsm.MarshalCreateChunk(chunkID, at, at, at)
-	cmd := MarshalTierCommand(tierID, wire)
+	cmd := MarshalVaultChunkCommand(tierID, wire)
 	fut := leader.raft.Apply(cmd, 2*time.Second)
 	if err := fut.Error(); err != nil {
 		h.t.Fatalf("apply tier create: %v", err)

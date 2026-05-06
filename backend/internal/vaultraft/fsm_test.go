@@ -37,7 +37,7 @@ func TestFSM_OpVaultChunkFSM_delegate(t *testing.T) {
 	cid := testChunkID(7)
 	now := time.Now().Truncate(time.Nanosecond)
 	wire := tierfsm.MarshalCreateChunk(cid, now, now, now)
-	cmd := MarshalTierCommand(tierID, wire)
+	cmd := MarshalVaultChunkCommand(tierID, wire)
 	if got := f.Apply(&hraft.Log{Data: cmd}); got != nil {
 		t.Fatalf("apply: %v", got)
 	}
@@ -80,10 +80,10 @@ func TestFSM_SnapshotRestore_twoTiers(t *testing.T) {
 	now := time.Now().Truncate(time.Nanosecond)
 	a := testChunkID(1)
 	b := testChunkID(2)
-	if r := f.Apply(&hraft.Log{Data: MarshalTierCommand(tierA, tierfsm.MarshalCreateChunk(a, now, now, now))}); r != nil {
+	if r := f.Apply(&hraft.Log{Data: MarshalVaultChunkCommand(tierA, tierfsm.MarshalCreateChunk(a, now, now, now))}); r != nil {
 		t.Fatalf("tier A: %v", r)
 	}
-	if r := f.Apply(&hraft.Log{Data: MarshalTierCommand(tierB, tierfsm.MarshalCreateChunk(b, now, now, now))}); r != nil {
+	if r := f.Apply(&hraft.Log{Data: MarshalVaultChunkCommand(tierB, tierfsm.MarshalCreateChunk(b, now, now, now))}); r != nil {
 		t.Fatalf("tier B: %v", r)
 	}
 	snap, err := f.Snapshot()
@@ -116,8 +116,8 @@ func TestFSM_OnAfterRestoreFires(t *testing.T) {
 	src := NewFSM()
 	now := time.Now().Truncate(time.Nanosecond)
 	tierA, tierB := glid.New(), glid.New()
-	_ = src.Apply(&hraft.Log{Data: MarshalTierCommand(tierA, tierfsm.MarshalCreateChunk(testChunkID(1), now, now, now))})
-	_ = src.Apply(&hraft.Log{Data: MarshalTierCommand(tierB, tierfsm.MarshalCreateChunk(testChunkID(2), now, now, now))})
+	_ = src.Apply(&hraft.Log{Data: MarshalVaultChunkCommand(tierA, tierfsm.MarshalCreateChunk(testChunkID(1), now, now, now))})
+	_ = src.Apply(&hraft.Log{Data: MarshalVaultChunkCommand(tierB, tierfsm.MarshalCreateChunk(testChunkID(2), now, now, now))})
 
 	snap, err := src.Snapshot()
 	if err != nil {
@@ -167,7 +167,7 @@ func TestFSM_Restore_legacyEmptyByte(t *testing.T) {
 	f := NewFSM()
 	tierID := glid.New()
 	now := time.Now().Truncate(time.Nanosecond)
-	if r := f.Apply(&hraft.Log{Data: MarshalTierCommand(tierID, tierfsm.MarshalCreateChunk(testChunkID(9), now, now, now))}); r != nil {
+	if r := f.Apply(&hraft.Log{Data: MarshalVaultChunkCommand(tierID, tierfsm.MarshalCreateChunk(testChunkID(9), now, now, now))}); r != nil {
 		t.Fatalf("apply: %v", r)
 	}
 	if f.TierFSM(tierID) == nil {
