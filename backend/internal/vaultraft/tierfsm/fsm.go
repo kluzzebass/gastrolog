@@ -89,9 +89,13 @@ type ManifestEntry struct {
 	WriteEnd    time.Time
 	RecordCount int64
 	Bytes       int64
-	// Sealed is the legacy two-state flag. State carries the full
-	// three-state lifecycle (Active|Sealing|Sealed). gastrolog-1huz5.
-	Sealed    bool
+	// State is the chunk's lifecycle state (Active|Sealing|Sealed).
+	// Phase 3 (gastrolog-1huz5) replaced the legacy Sealed bool with
+	// this three-state field; consumers that just want "is the cluster
+	// done sealing this chunk?" check `State == chunk.ChunkStateSealed`.
+	// ChunkMeta still carries a separate `Sealed` bool because its
+	// semantics differ — ChunkMeta.Sealed is the LOCAL active-form-closed
+	// signal, distinct from this cluster-wide lifecycle state.
 	State     chunk.ChunkState
 	DiskBytes int64
 
@@ -138,16 +142,28 @@ type ManifestEntry struct {
 	KeyScheme uint8
 }
 
+// IsSealed reports whether the chunk has reached the cluster-wide
+// Sealed state (GLCB committed). Replaces the legacy Sealed bool
+// after Phase 3 (gastrolog-1huz5). For ChunkMeta produced from this
+// entry, ChunkMeta.Sealed carries the same answer for downstream
+// consumers — but those consumers must remember that ChunkMeta from
+// the local chunk Manager (un-overlaid) has DIFFERENT semantics:
+// it's the local active-form-closed signal, which flips earlier.
+func (e *ManifestEntry) IsSealed() bool {
+	return e.State == chunk.ChunkStateSealed
+}
+
 // ToChunkMeta converts to the public chunk.ChunkMeta type.
 func (e *ManifestEntry) ToChunkMeta() chunk.ChunkMeta {
+	state := e.State
 	return chunk.ChunkMeta{
 		ID:                e.ID,
 		WriteStart:        e.WriteStart,
 		WriteEnd:          e.WriteEnd,
 		RecordCount:       e.RecordCount,
 		Bytes:             e.Bytes,
-		Sealed:            e.Sealed,
-		State:             e.effectiveState(),
+		Sealed:            state == chunk.ChunkStateSealed,
+		State:             state,
 		DiskBytes:         e.DiskBytes,
 		IngestStart:       e.IngestStart,
 		IngestEnd:         e.IngestEnd,
@@ -157,21 +173,6 @@ func (e *ManifestEntry) ToChunkMeta() chunk.ChunkMeta {
 		CloudBacked:       e.CloudBacked,
 		Archived:          e.Archived,
 	}
-}
-
-// effectiveState returns the lifecycle state for this entry, falling
-// back to the legacy Sealed bool when State is the zero value (i.e.
-// the entry pre-dates Phase 3 and was loaded from a snapshot whose
-// schema didn't carry State). New writes always set State explicitly.
-// gastrolog-1huz5.
-func (e *ManifestEntry) effectiveState() chunk.ChunkState {
-	if e.State != chunk.ChunkStateUnknown {
-		return e.State
-	}
-	if e.Sealed {
-		return chunk.ChunkStateSealed
-	}
-	return chunk.ChunkStateActive
 }
 
 // FSM is a Raft FSM that maintains chunk metadata for a single tier.
@@ -747,7 +748,6 @@ func (f *FSM) applySeal(data []byte) error {
 		e.IngestStart = time.Unix(0, int64(binary.BigEndian.Uint64(data[56:64]))) //nolint:gosec // G115: nano timestamp round-trip
 		e.IngestTSMonotonic = data[64]&1 != 0
 	}
-	e.Sealed = true
 	e.State = chunk.ChunkStateSealed
 	return nil
 }
@@ -771,7 +771,7 @@ func (f *FSM) applyBeginSeal(data []byte) error {
 		return fmt.Errorf("begin seal: %s not found", id)
 	}
 	// Don't drop back from Sealed to Sealing on a stale replay.
-	if e.State == chunk.ChunkStateSealed || e.Sealed {
+	if e.State == chunk.ChunkStateSealed {
 		return nil
 	}
 	e.State = chunk.ChunkStateSealing
@@ -1213,8 +1213,11 @@ func (s *fsmSnapshot) Release() {}
 //   8   IngestIdxSize
 //   8   SourceIdxOffset
 //   8   SourceIdxSize
-//   2   Flags (bit 0=sealed, 1=reserved, 2=cloudBacked, 3=archived,
-//                4=retentionPending, 5=transitionStreamed, 6=ingestTSMonotonic)
+//   2   Flags (bit 0=reserved (formerly Sealed; replaced by State byte
+//                in Phase 3, gastrolog-1huz5),
+//              1=reserved (formerly Compressed),
+//              2=cloudBacked, 3=archived,
+//              4=retentionPending, 5=transitionStreamed, 6=ingestTSMonotonic)
 //   1   State (chunk.ChunkState — Active/Sealing/Sealed). gastrolog-1huz5.
 // Total: 123 bytes.
 
@@ -1237,12 +1240,10 @@ func encodeEntry(w io.Writer, e *ManifestEntry) error {
 	binary.BigEndian.PutUint64(buf[104:112], uint64(e.SourceIdxOffset)) //nolint:gosec // G115: round-trip
 	binary.BigEndian.PutUint64(buf[112:120], uint64(e.SourceIdxSize))   //nolint:gosec // G115: round-trip
 	var flags uint16
-	if e.Sealed {
-		flags |= 1 << 0
-	}
+	// flag bit 0 (formerly Sealed) is reserved — replaced by the State
+	// byte in Phase 3 (gastrolog-1huz5).
 	// flag bit 1 (formerly Compressed) is reserved — see gastrolog-24m1t
-	// step 7f. Sealed chunks are GLCB which is zstd-compressed only on
-	// cloud transport (gastrolog-69fd5).
+	// step 7f.
 	if e.CloudBacked {
 		flags |= 1 << 2
 	}
@@ -1259,7 +1260,7 @@ func encodeEntry(w io.Writer, e *ManifestEntry) error {
 		flags |= 1 << 6
 	}
 	binary.BigEndian.PutUint16(buf[120:122], flags)
-	buf[122] = byte(e.effectiveState())
+	buf[122] = byte(e.State)
 	_, err := w.Write(buf[:])
 	return err
 }
@@ -1374,7 +1375,8 @@ func readEntriesSection(r io.Reader, payloadLen uint32) ([]ManifestEntry, error)
 			IngestIdxSize:   int64(binary.BigEndian.Uint64(buf[96:104])),               //nolint:gosec // G115: round-trip
 			SourceIdxOffset: int64(binary.BigEndian.Uint64(buf[104:112])),              //nolint:gosec // G115: round-trip
 			SourceIdxSize:   int64(binary.BigEndian.Uint64(buf[112:120])),              //nolint:gosec // G115: round-trip
-			Sealed: flags & (1 << 0) != 0,
+			// flag bit 0 reserved (formerly Sealed) — replaced by State byte in
+			// Phase 3 (gastrolog-1huz5).
 			// flag bit 1 reserved (formerly Compressed) — see gastrolog-24m1t step 7f.
 			CloudBacked:        flags&(1<<2) != 0,
 			Archived:           flags&(1<<3) != 0,

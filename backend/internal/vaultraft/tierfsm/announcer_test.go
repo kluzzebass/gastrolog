@@ -179,7 +179,7 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 		allSealed := true
 		for _, n := range nodes {
 			e := n.fsm.Get(chunkID)
-			if e == nil || !e.Sealed {
+			if e == nil || !e.IsSealed() {
 				allSealed = false
 				break
 			}
@@ -196,7 +196,7 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 		if entry == nil {
 			t.Fatalf("node %d: chunk not found in FSM", i)
 		}
-		if !entry.Sealed {
+		if !entry.IsSealed() {
 			t.Errorf("node %d: expected sealed", i)
 		}
 		if entry.RecordCount != 10 {
@@ -253,6 +253,217 @@ type recordingApplier struct {
 func (a *recordingApplier) Apply(_ []byte) error {
 	a.calls++
 	return a.err
+}
+
+// TestAnnouncerSealingStateVisibleAcrossReplicas pins the Phase 3
+// (gastrolog-1huz5) three-state lifecycle invariant under real Raft
+// replication: between `mgr.Seal()` (which fires AnnounceBeginSeal)
+// and `mgr.PostSealProcess()` (which fires AnnounceSeal after
+// sealToGLCB completes), every node's FSM must observe State=Sealing.
+// After PostSealProcess, every node must observe State=Sealed and
+// Sealed=true. This is what unblocks downstream gates (cloud upload,
+// retention, replication catchup) — they consult the FSM, not the
+// local on-disk seal flag.
+//
+// Without the BeginSeal command, the only signal followers receive is
+// the post-GLCB Seal — meaning a long sealToGLCB pass would leave
+// followers thinking the chunk is still Active, and any catchup
+// replication of the chunk would be misclassified.
+func TestAnnouncerSealingStateVisibleAcrossReplicas(t *testing.T) {
+	// Not parallel — same Raft sequencing constraints as the sibling
+	// TestAnnouncerReplicatesMetadata above.
+
+	const nodeCount = 3
+	nodeIDs := []string{"node-1", "node-2", "node-3"}
+
+	type testNode struct {
+		transport *multiraft.Transport[string]
+		server    *grpc.Server
+		lis       *bufconn.Listener
+		manager   *raftgroup.GroupManager
+		fsm       *FSM
+	}
+	nodes := make([]testNode, nodeCount)
+
+	for i := range nodeCount {
+		lis := bufconn.Listen(bufSize)
+		srv := grpc.NewServer()
+		tp := multiraft.New(
+			hraft.ServerAddress(nodeIDs[i]),
+			[]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
+			func(s string) []byte { return []byte(s) },
+			func(b []byte) string { return string(b) },
+		)
+		tp.Register(srv)
+		go func() { _ = srv.Serve(lis) }()
+		nodes[i] = testNode{transport: tp, server: srv, lis: lis}
+	}
+
+	dialers := make(map[string]func() (net.Conn, error))
+	for i, n := range nodes {
+		l := n.lis
+		dialers[nodeIDs[i]] = func() (net.Conn, error) { return l.Dial() }
+	}
+	for i := range nodes {
+		nodes[i].transport.SetDialOptions([]grpc.DialOption{
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithContextDialer(func(_ context.Context, addr string) (net.Conn, error) {
+				return dialers[addr]()
+			}),
+		})
+	}
+
+	members := make([]hraft.Server, nodeCount)
+	for i := range nodeCount {
+		members[i] = hraft.Server{
+			ID:      hraft.ServerID(nodeIDs[i]),
+			Address: hraft.ServerAddress(nodeIDs[i]),
+		}
+	}
+
+	for i := range nodeCount {
+		baseDir := t.TempDir()
+		wal, err := raftwal.Open(filepath.Join(baseDir, "wal"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = wal.Close() })
+		nodes[i].manager = raftgroup.NewGroupManager(raftgroup.GroupManagerConfig{
+			Transport: nodes[i].transport,
+			NodeID:    nodeIDs[i],
+			BaseDir:   baseDir,
+			WAL:       wal,
+		})
+		nodes[i].fsm = New()
+		_, err = nodes[i].manager.CreateGroup(raftgroup.GroupConfig{
+			GroupID:     "tier-test",
+			FSM:         nodes[i].fsm,
+			SeedMembers: members,
+		})
+		if err != nil {
+			t.Fatalf("node %d CreateGroup: %v", i, err)
+		}
+	}
+
+	t.Cleanup(func() {
+		for _, n := range nodes {
+			n.manager.Shutdown()
+			n.server.Stop()
+			_ = n.transport.Close()
+		}
+	})
+
+	var leaderGroup *raftgroup.Group
+	for _, n := range nodes {
+		g := n.manager.GetGroup("tier-test")
+		waitForLeader(t, g, 5*time.Second)
+		if g.Raft.State() == hraft.Leader {
+			leaderGroup = g
+		}
+	}
+	if leaderGroup == nil {
+		t.Fatal("no leader found")
+	}
+
+	applier := &testApplier{raft: leaderGroup.Raft, timeout: 5 * time.Second}
+	announcer := NewAnnouncer(applier, nil, nil)
+	dir := t.TempDir()
+	mgr, err := chunkfile.NewManager(chunkfile.Config{
+		Dir:       dir,
+		Now:       time.Now,
+		Announcer: announcer,
+	})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer func() { _ = mgr.Close() }()
+
+	for range 5 {
+		rec := chunk.Record{
+			SourceTS: time.Now(),
+			IngestTS: time.Now(),
+			Raw:      []byte("test-record"),
+			Attrs:    chunk.Attributes{"key": "val"},
+		}
+		if _, _, err := mgr.Append(rec); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+
+	// Seal — fires AnnounceBeginSeal across the cluster, but NOT
+	// AnnounceSeal yet (that waits for PostSealProcess to commit the
+	// GLCB).
+	if err := mgr.Seal(); err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
+
+	metas, err := mgr.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(metas) == 0 {
+		t.Fatal("expected at least one chunk")
+	}
+	chunkID := metas[0].ID
+
+	// Wait for State=Sealing to land on every replica.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		allSealing := true
+		for _, n := range nodes {
+			e := n.fsm.Get(chunkID)
+			if e == nil || e.State != chunk.ChunkStateSealing {
+				allSealing = false
+				break
+			}
+		}
+		if allSealing {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	for i, n := range nodes {
+		entry := n.fsm.Get(chunkID)
+		if entry == nil {
+			t.Fatalf("node %d: chunk not found in FSM after Seal", i)
+		}
+		if entry.State != chunk.ChunkStateSealing {
+			t.Errorf("node %d: pre-PostSealProcess State = %s, want Sealing", i, entry.State)
+		}
+	}
+
+	// Run PostSealProcess — fires AnnounceSeal after sealToGLCB
+	// completes, advancing every replica to State=Sealed.
+	if err := mgr.PostSealProcess(t.Context(), chunkID); err != nil {
+		t.Fatalf("PostSealProcess: %v", err)
+	}
+
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		allSealed := true
+		for _, n := range nodes {
+			e := n.fsm.Get(chunkID)
+			if e == nil || e.State != chunk.ChunkStateSealed {
+				allSealed = false
+				break
+			}
+		}
+		if allSealed {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	for i, n := range nodes {
+		entry := n.fsm.Get(chunkID)
+		if entry == nil {
+			t.Fatalf("node %d: chunk not found in FSM after PostSealProcess", i)
+		}
+		if entry.State != chunk.ChunkStateSealed {
+			t.Errorf("node %d: post-PostSealProcess State = %s, want Sealed", i, entry.State)
+		}
+	}
 }
 
 // TestAnnouncerShortCircuitsDuringShutdown is the regression test for the

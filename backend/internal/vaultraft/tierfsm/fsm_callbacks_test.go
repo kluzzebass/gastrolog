@@ -40,7 +40,7 @@ func TestOnSealCallbackFires(t *testing.T) {
 	if captured.ID != id {
 		t.Errorf("ID = %s, want %s", captured.ID, id)
 	}
-	if !captured.Sealed {
+	if !captured.IsSealed() {
 		t.Error("Sealed should be true")
 	}
 	if captured.RecordCount != 100 {

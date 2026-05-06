@@ -47,7 +47,7 @@ func TestFSMCreateAndGet(t *testing.T) {
 	if !e.IngestStart.Equal(now.Add(time.Millisecond)) {
 		t.Errorf("IngestStart mismatch")
 	}
-	if e.Sealed {
+	if e.IsSealed() {
 		t.Error("should not be sealed")
 	}
 }
@@ -64,7 +64,7 @@ func TestFSMSeal(t *testing.T) {
 	applyCmd(t, fsm, MarshalSealChunk(id, end, 500, 1024*1024, end, end, end, false))
 
 	e := fsm.Get(id)
-	if !e.Sealed {
+	if !e.IsSealed() {
 		t.Error("should be sealed")
 	}
 	if e.RecordCount != 500 {
@@ -93,7 +93,7 @@ func TestFSMChunkStateTransitions(t *testing.T) {
 	if got := e.State; got != chunk.ChunkStateActive {
 		t.Fatalf("after create: state = %s, want active", got)
 	}
-	if e.Sealed {
+	if e.IsSealed() {
 		t.Fatal("after create: Sealed should be false")
 	}
 
@@ -103,7 +103,7 @@ func TestFSMChunkStateTransitions(t *testing.T) {
 	if got := e.State; got != chunk.ChunkStateSealing {
 		t.Fatalf("after begin-seal: state = %s, want sealing", got)
 	}
-	if e.Sealed {
+	if e.IsSealed() {
 		t.Fatal("after begin-seal: Sealed should still be false (active-form is still authoritative)")
 	}
 
@@ -113,7 +113,7 @@ func TestFSMChunkStateTransitions(t *testing.T) {
 	if got := e.State; got != chunk.ChunkStateSealed {
 		t.Fatalf("after seal: state = %s, want sealed", got)
 	}
-	if !e.Sealed {
+	if !e.IsSealed() {
 		t.Fatal("after seal: Sealed should be true")
 	}
 }
@@ -137,7 +137,7 @@ func TestFSMBeginSealIdempotent(t *testing.T) {
 	if got := e.State; got != chunk.ChunkStateSealed {
 		t.Fatalf("state after stale begin-seal replay: got %s, want sealed", got)
 	}
-	if !e.Sealed {
+	if !e.IsSealed() {
 		t.Fatal("Sealed flag must survive stale begin-seal")
 	}
 }
@@ -308,8 +308,8 @@ func TestFSMSnapshotRestore(t *testing.T) {
 
 	// Verify sealed chunk.
 	e1 := fsm2.Get(id1)
-	if e1 == nil || !e1.Sealed || e1.RecordCount != 100 {
-		t.Errorf("chunk 1: sealed=%v, records=%d", e1 != nil && e1.Sealed, e1.RecordCount)
+	if e1 == nil || !e1.IsSealed() || e1.RecordCount != 100 {
+		t.Errorf("chunk 1: sealed=%v, records=%d", e1 != nil && e1.IsSealed(), e1.RecordCount)
 	}
 
 	// Verify cloud-backed chunk.
@@ -324,7 +324,7 @@ func TestFSMSnapshotRestore(t *testing.T) {
 
 	// Verify unsealed chunk.
 	e3 := fsm2.Get(id3)
-	if e3 == nil || e3.Sealed {
+	if e3 == nil || e3.IsSealed() {
 		t.Error("chunk 3: should exist and be unsealed")
 	}
 }

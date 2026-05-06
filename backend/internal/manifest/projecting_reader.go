@@ -61,13 +61,25 @@ func (p *projectingReader) EntriesForVault(vaultID glid.GLID) []tierfsm.Manifest
 }
 
 func projectChunkMeta(m chunk.ChunkMeta) tierfsm.ManifestEntry {
+	state := m.State
+	if state == chunk.ChunkStateUnknown {
+		// projecting_reader runs in single-node / memory-mode where the
+		// FSM doesn't populate State. Derive from the local Sealed bool
+		// — m.Sealed=true on a memory-mode chunk means "fully sealed"
+		// (no Sealing intermediate exists without an FSM).
+		if m.Sealed {
+			state = chunk.ChunkStateSealed
+		} else {
+			state = chunk.ChunkStateActive
+		}
+	}
 	return tierfsm.ManifestEntry{
 		ID:          m.ID,
 		WriteStart:  m.WriteStart,
 		WriteEnd:    m.WriteEnd,
 		RecordCount: m.RecordCount,
 		Bytes:       m.Bytes,
-		Sealed:      m.Sealed,
+		State:       state,
 		DiskBytes:   m.DiskBytes,
 		IngestStart: m.IngestStart,
 		IngestEnd:   m.IngestEnd,

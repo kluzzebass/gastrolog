@@ -1238,19 +1238,12 @@ func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.App
 			// State so producer-side iteration (retention, upload,
 			// archival sweep) can branch on cluster state without
 			// jumping the gun on Sealing chunks.
-			s := e.State
-			if s == chunk.ChunkStateUnknown {
-				if e.Sealed {
-					s = chunk.ChunkStateSealed
-				} else {
-					s = chunk.ChunkStateActive
-				}
-			}
-			m.State = s
+			m.State = e.State
 			// Keep the legacy bool synced with State so the unaudited
-			// read sites (the bulk of the 79 .Sealed checks) still
-			// behave correctly: Sealing reads as not-yet-sealed.
-			m.Sealed = s == chunk.ChunkStateSealed
+			// read sites (the bulk of the .Sealed checks across the
+			// codebase) still behave correctly: Sealing reads as
+			// not-yet-sealed.
+			m.Sealed = e.State == chunk.ChunkStateSealed
 			return m
 		},
 		manifestEntries: func() []tierfsm.ManifestEntry {

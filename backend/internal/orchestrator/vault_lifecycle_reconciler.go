@@ -110,6 +110,12 @@ type VaultLifecycleReconciler struct {
 	// observe the bit and skip — better to lose a tick than pile up
 	// concurrent goroutines fighting for the same Apply queue.
 	sweepInFlight atomic.Int32
+
+	// postSealHook overrides the production schedule path used by
+	// resumeSealingFromFSM. Defaults nil; tests inject a recorder to
+	// observe what would have been scheduled without spinning up the
+	// full orchestrator scheduler. Phase 3 (gastrolog-1huz5).
+	postSealHook func(vaultID glid.GLID, cm chunk.ChunkManager, id chunk.ChunkID)
 }
 
 // NewTierLifecycleReconciler creates a reconciler for a tier instance.
@@ -194,6 +200,11 @@ func (r *VaultLifecycleReconciler) ReconcileFromSnapshot(fsm *tierfsm.FSM) {
 	// does not propose Raft applies, so it is safe to run inline.
 	r.projectAllSealedFromFSM(fsm)
 	r.projectAllCloudBackedFromFSM(fsm)
+	// Phase 3 (gastrolog-1huz5): chunks left in Sealing state on the
+	// FSM after a leader crash mid-PostSealProcess need their assembly
+	// resumed. Re-runs the post-seal pipeline so sealToGLCB completes
+	// and AnnounceSeal fires.
+	r.resumeSealingFromFSM(fsm)
 
 	if len(pending) == 0 {
 		return
@@ -226,13 +237,101 @@ func (r *VaultLifecycleReconciler) projectAllSealedFromFSM(fsm *tierfsm.FSM) {
 		return
 	}
 	for _, e := range fsm.List() {
-		if !e.Sealed {
+		if !e.IsSealed() {
 			continue
 		}
 		if err := ensurer.EnsureSealed(e.ID); err != nil {
 			r.logger.Warn("reconcile-from-snapshot: EnsureSealed failed",
 				"chunk", e.ID, "error", err)
 		}
+	}
+}
+
+// resumeSealingFromFSM iterates every Sealing entry in the FSM and
+// re-runs the post-seal pipeline so sealToGLCB completes and the
+// Sealing → Sealed transition (CmdSealChunk + AnnounceSeal) fires.
+//
+// Phase 3 (gastrolog-1huz5) splits the seal lifecycle: sealActiveLocked
+// fires CmdBeginSeal (Active → Sealing), then PostSealProcess runs
+// sealToGLCB and only on success fires CmdSealChunk (Sealing → Sealed).
+// If the leader crashes between CmdBeginSeal applying and PostSealProcess
+// completing, the FSM is left with State=Sealing entries while the local
+// chunk Manager has the active-form files closed and sealed but no
+// data.glcb. Anything gating on Sealed (cloud upload, retention,
+// replication catchup) waits forever for the second announcement that
+// won't come without help.
+//
+// Recovery: schedule PostSealProcess for each Sealing entry whose chunk
+// the local Manager still holds. PostSealProcess is idempotent —
+// sealToGLCB writes via .tmp + atomic rename, so a partial GLCB from
+// the prior crashed run gets cleanly replaced. The post-seal scheduler
+// chains into AnnounceSeal once the GLCB lands.
+//
+// Skipped silently when the chunk isn't in the local Manager (a
+// follower-turned-leader that never had the active-form files cannot
+// re-derive a GLCB; the chunk in that case is unrecoverable through
+// this path and must come in via SweepMissingReplicas — but with 1:1:1
+// placement the leader holding the FSM Sealing entry is the only node
+// that ever held the chunk locally, so this is the right place).
+func (r *VaultLifecycleReconciler) resumeSealingFromFSM(fsm *tierfsm.FSM) {
+	if r.tier == nil || r.tier.Chunks == nil {
+		return
+	}
+	schedule := r.postSealHook
+	if schedule == nil {
+		if r.orch == nil {
+			return
+		}
+		schedule = r.orch.schedulePostSeal
+	}
+	// Build a local-chunk index so we don't repeatedly walk the Manager
+	// for each FSM entry — the seal-resume pass should be cheap.
+	localMetas, err := r.tier.Chunks.List()
+	if err != nil {
+		r.logger.Warn("reconcile-from-snapshot: list chunks failed for sealing-resume",
+			"error", err)
+		return
+	}
+	localByID := make(map[chunk.ChunkID]chunk.ChunkMeta, len(localMetas))
+	for _, m := range localMetas {
+		localByID[m.ID] = m
+	}
+
+	resumed := 0
+	for _, e := range fsm.List() {
+		if e.State != chunk.ChunkStateSealing {
+			continue
+		}
+		local, ok := localByID[e.ID]
+		if !ok {
+			// No local active-form files to assemble from. Either a
+			// follower-turned-leader (unreachable in 1:1:1) or the
+			// chunk has been retired without a Sealed transition. Log
+			// and move on — operator-visible because this is genuinely
+			// unrecoverable through this path.
+			r.logger.Warn("reconcile-from-snapshot: Sealing entry has no local chunk; cannot resume",
+				"chunk", e.ID)
+			continue
+		}
+		if !local.Sealed {
+			// Active-form files weren't sealed at crash time. The seal
+			// flag is only flipped after sealActiveLocked closes the
+			// files, so this state is a deeper bug — the FSM advanced
+			// past CmdBeginSeal but the local sealed-flag write was
+			// lost. Log loudly; the next ingest+rotate cycle will
+			// re-run the full path on a different chunk.
+			r.logger.Warn("reconcile-from-snapshot: Sealing entry but local chunk not sealed on disk",
+				"chunk", e.ID)
+			continue
+		}
+		r.logger.Info("reconcile-from-snapshot: resuming PostSealProcess for Sealing chunk",
+			"chunk", e.ID)
+		schedule(r.vaultID, r.tier.Chunks, e.ID)
+		resumed++
+	}
+	if resumed > 0 {
+		r.logger.Info("reconcile-from-snapshot: scheduled seal resumption",
+			"count", resumed)
 	}
 }
 
@@ -671,7 +770,7 @@ func (r *VaultLifecycleReconciler) SweepMissingReplicas() {
 	// Walk the FSM manifest and collect the missing-locally subset.
 	var missing []chunk.ChunkID
 	for _, e := range r.fsm.List() {
-		if !e.Sealed {
+		if !e.IsSealed() {
 			continue
 		}
 		if e.CloudBacked {
@@ -760,7 +859,16 @@ func (r *VaultLifecycleReconciler) SweepStaleLeaderFSMEntries() {
 	expectedFrom := r.placementMembership()
 	stale := 0
 	for _, e := range r.fsm.List() {
-		if !e.Sealed {
+		// Sealed and Sealing chunks are both candidates here. A Sealing
+		// entry whose chunk this leader doesn't have locally is the
+		// classic "leader transferred mid-PostSealProcess and the new
+		// leader never had the active-form files" case (gastrolog-1huz5):
+		// no recovery path in 1:1:1 placement, so the entry must be
+		// retired after grace period or it stays in Sealing forever.
+		// Active entries are skipped — they're too transient to confuse
+		// with stranded state, and a missing Active is properly handled
+		// by other paths (vault readiness, ingest reroute).
+		if e.State != chunk.ChunkStateSealed && e.State != chunk.ChunkStateSealing {
 			continue
 		}
 		if e.CloudBacked {
@@ -770,9 +878,15 @@ func (r *VaultLifecycleReconciler) SweepStaleLeaderFSMEntries() {
 			continue
 		}
 		// Grace period anchored on WriteEnd (the seal completion time)
-		// rather than IngestEnd (record TS, can be much earlier than
-		// real-world clock for backfilled streams).
-		if !e.WriteEnd.IsZero() && now.Sub(e.WriteEnd) < staleLeaderFSMGracePeriod {
+		// for Sealed entries. Sealing entries don't have a WriteEnd yet
+		// (CmdSealChunk never applied), so anchor on WriteStart instead
+		// — the only timestamp the FSM has — to give the same "is this
+		// genuinely stuck?" signal.
+		anchor := e.WriteEnd
+		if anchor.IsZero() {
+			anchor = e.WriteStart
+		}
+		if !anchor.IsZero() && now.Sub(anchor) < staleLeaderFSMGracePeriod {
 			continue
 		}
 		// PendingDelete check inside deleteChunk dedups but logs each
@@ -783,7 +897,7 @@ func (r *VaultLifecycleReconciler) SweepStaleLeaderFSMEntries() {
 		}
 		r.logger.Warn("stale-fsm sweep: proposing delete for unrecoverable chunk",
 			"chunk", e.ID, "tier", r.tierID, "vault", r.vaultID,
-			"write_end", e.WriteEnd, "age", now.Sub(e.WriteEnd))
+			"state", e.State, "anchor", anchor, "age", now.Sub(anchor))
 		if err := r.deleteChunk(e.ID, "stale-fsm-leader-missing", expectedFrom); err != nil {
 			r.logger.Warn("stale-fsm sweep: deleteChunk failed",
 				"chunk", e.ID, "error", err)

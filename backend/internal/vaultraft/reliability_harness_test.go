@@ -334,7 +334,7 @@ func tierFSMFingerprint(t *tierfsm.FSM) string {
 	for _, id := range ids {
 		e := byID[id]
 		sb.writef("chunk=%x sealed=%t ret=%t stream=%t archived=%t\n",
-			id[:], e.Sealed, e.RetentionPending, e.TransitionStreamed, e.Archived)
+			id[:], e.IsSealed(), e.RetentionPending, e.TransitionStreamed, e.Archived)
 	}
 	return sb.String()
 }

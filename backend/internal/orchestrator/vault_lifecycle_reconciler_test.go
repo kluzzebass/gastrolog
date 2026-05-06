@@ -1138,3 +1138,257 @@ func TestWireTierFSMOnUploadFiresNotifyChunkChange(t *testing.T) {
 		t.Errorf("RegisterCloudChunk = %v, want [%s]", cm.registered, id)
 	}
 }
+
+// TestReconcileFromSnapshotResumesSealingChunks pins the Phase 3
+// crash-recovery invariant: when a leader crashes between CmdBeginSeal
+// (Active → Sealing) and CmdSealChunk (Sealing → Sealed), the FSM is
+// left holding a Sealing entry. After restore, the reconciler must
+// re-schedule PostSealProcess so sealToGLCB completes, AnnounceSeal
+// fires, and downstream steps that gate on Sealed (cloud upload,
+// retention, replication catchup) can proceed.
+//
+// Setup: seed the FSM with three chunks — one Active (BeginSeal NOT
+// applied), one Sealing (Created + BeginSeal, no SealChunk), one
+// Sealed (full lifecycle). The local Manager pretends to hold all
+// three with on-disk sealed flags matching the real flow:
+// sealActiveLocked closes the files (sealed bit set) BEFORE the
+// post-seal pipeline runs, so the Sealing chunk has Sealed=true on
+// disk despite still being mid-Sealing on the FSM.
+//
+// Asserts: only the Sealing chunk's ID is scheduled. Active is too
+// early (no GLCB to assemble); Sealed is too late (already done).
+// gastrolog-1huz5.
+func TestReconcileFromSnapshotResumesSealingChunks(t *testing.T) {
+	t.Parallel()
+
+	fsm := tierfsm.New()
+	now := time.Now()
+
+	idActive := chunk.NewChunkID()
+	idSealing := chunk.NewChunkID()
+	idSealed := chunk.NewChunkID()
+	for _, id := range []chunk.ChunkID{idActive, idSealing, idSealed} {
+		if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(id, now, now, now)}); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+	}
+	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalBeginSeal(idSealing)}); err != nil {
+		t.Fatalf("begin-seal sealing: %v", err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalBeginSeal(idSealed)}); err != nil {
+		t.Fatalf("begin-seal sealed: %v", err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idSealed, now, 1, 1, now, now, now, false)}); err != nil {
+		t.Fatalf("seal-chunk sealed: %v", err)
+	}
+
+	cm := &reconcilerFakeChunkManager{}
+	cm.chunks = []chunk.ChunkMeta{
+		{ID: idActive, Sealed: false},
+		{ID: idSealing, Sealed: true},
+		{ID: idSealed, Sealed: true},
+	}
+
+	tier := &VaultInstance{
+		TierID: glid.New(),
+		Chunks: cm,
+	}
+	rec := NewTierLifecycleReconciler(nil, glid.New(), tier.TierID, tier, "node-A", slog.Default())
+
+	var scheduled []chunk.ChunkID
+	rec.postSealHook = func(_ glid.GLID, _ chunk.ChunkManager, id chunk.ChunkID) {
+		scheduled = append(scheduled, id)
+	}
+
+	rec.ReconcileFromSnapshot(fsm)
+
+	if len(scheduled) != 1 {
+		t.Fatalf("postSealHook calls = %d (%v), want 1 (only the Sealing chunk)", len(scheduled), scheduled)
+	}
+	if scheduled[0] != idSealing {
+		t.Errorf("postSealHook called with %s, want %s (Sealing chunk)", scheduled[0], idSealing)
+	}
+}
+
+// TestReconcileFromSnapshotSkipsSealingWithNoLocalChunk pins the
+// follower-or-stranded-leader case: when the FSM has a Sealing entry
+// but the local Manager doesn't hold the chunk, the reconciler must
+// NOT schedule PostSealProcess — there are no active-form files to
+// assemble from. Dispatching would just hand the chunk Manager an
+// ID it can't find. The Sealing entry stays in the FSM until either
+// a peer with the local files becomes leader and resumes it, or
+// stale-fsm cleanup retires it.
+func TestReconcileFromSnapshotSkipsSealingWithNoLocalChunk(t *testing.T) {
+	t.Parallel()
+
+	fsm := tierfsm.New()
+	now := time.Now()
+	idSealing := chunk.NewChunkID()
+	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(idSealing, now, now, now)}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalBeginSeal(idSealing)}); err != nil {
+		t.Fatalf("begin-seal: %v", err)
+	}
+
+	cm := &reconcilerFakeChunkManager{}
+	tier := &VaultInstance{
+		TierID: glid.New(),
+		Chunks: cm,
+	}
+	rec := NewTierLifecycleReconciler(nil, glid.New(), tier.TierID, tier, "node-A", slog.Default())
+
+	var calls int
+	rec.postSealHook = func(_ glid.GLID, _ chunk.ChunkManager, _ chunk.ChunkID) {
+		calls++
+	}
+
+	rec.ReconcileFromSnapshot(fsm)
+
+	if calls != 0 {
+		t.Errorf("postSealHook called %d times, want 0 (no local chunk to resume from)", calls)
+	}
+}
+
+// TestReconcileFromSnapshotSkipsSealingWithUnsealedLocalChunk pins
+// the deeper-bug case: a Sealing FSM entry whose local on-disk chunk
+// hasn't actually been sealed (active-form flush didn't complete or
+// the seal flag rewrite was lost). PostSealProcess would error with
+// ErrChunkNotSealed — silently skip rather than fire a confusing
+// pipeline failure. Logged at warn so the inconsistency is visible.
+func TestReconcileFromSnapshotSkipsSealingWithUnsealedLocalChunk(t *testing.T) {
+	t.Parallel()
+
+	fsm := tierfsm.New()
+	now := time.Now()
+	idSealing := chunk.NewChunkID()
+	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(idSealing, now, now, now)}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalBeginSeal(idSealing)}); err != nil {
+		t.Fatalf("begin-seal: %v", err)
+	}
+
+	cm := &reconcilerFakeChunkManager{}
+	cm.chunks = []chunk.ChunkMeta{{ID: idSealing, Sealed: false}}
+	tier := &VaultInstance{
+		TierID: glid.New(),
+		Chunks: cm,
+	}
+	rec := NewTierLifecycleReconciler(nil, glid.New(), tier.TierID, tier, "node-A", slog.Default())
+
+	var calls int
+	rec.postSealHook = func(_ glid.GLID, _ chunk.ChunkManager, _ chunk.ChunkID) {
+		calls++
+	}
+
+	rec.ReconcileFromSnapshot(fsm)
+
+	if calls != 0 {
+		t.Errorf("postSealHook called %d times, want 0 (local chunk unsealed)", calls)
+	}
+}
+
+// TestSweepStaleLeaderFSMEntriesProposesDeleteForStrandedSealingChunk pins
+// the Phase 3 (gastrolog-1huz5) follow-on for SweepStaleLeaderFSMEntries:
+// when the FSM holds a Sealing entry whose chunk this leader does not have
+// locally — the classic "leader transferred mid-PostSealProcess" case in
+// 1:1:1 placement — the sweep must propose CmdRequestDelete after grace
+// period, not skip it. Without this, a stranded Sealing entry would sit in
+// the FSM forever, blocking nothing useful but accumulating as garbage.
+//
+// Setup seeds three chunks with carefully aged WriteStarts so the grace
+// period anchors are easy to reason about:
+//   - sealedFresh: Sealed, just sealed → must skip (within grace period)
+//   - sealedStale: Sealed, past grace → must propose delete (positive control)
+//   - sealingStranded: Sealing, past grace, no local files → must propose delete
+//   - activeStranded: Active, past grace, no local files → must skip (Active
+//     is not the sweep's responsibility; ingest reroute handles it)
+func TestSweepStaleLeaderFSMEntriesProposesDeleteForStrandedSealingChunk(t *testing.T) {
+	t.Parallel()
+
+	fsm := tierfsm.New()
+	now := time.Now()
+	old := now.Add(-2 * time.Hour) // well past the 1h grace period
+
+	idSealedFresh := chunk.NewChunkID()
+	idSealedStale := chunk.NewChunkID()
+	idSealingStranded := chunk.NewChunkID()
+	idActiveStranded := chunk.NewChunkID()
+
+	// Fresh Sealed: created and sealed now.
+	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(idSealedFresh, now, now, now)}); err != nil {
+		t.Fatalf("create fresh sealed: %v", err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idSealedFresh, now, 1, 1, now, now, now, false)}); err != nil {
+		t.Fatalf("seal fresh: %v", err)
+	}
+
+	// Stale Sealed: created and sealed 2h ago.
+	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(idSealedStale, old, old, old)}); err != nil {
+		t.Fatalf("create stale sealed: %v", err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idSealedStale, old, 1, 1, old, old, old, false)}); err != nil {
+		t.Fatalf("seal stale: %v", err)
+	}
+
+	// Stranded Sealing: created 2h ago, BeginSeal applied, no SealChunk
+	// (PostSealProcess never finished — leader transferred away).
+	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(idSealingStranded, old, old, old)}); err != nil {
+		t.Fatalf("create stranded sealing: %v", err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalBeginSeal(idSealingStranded)}); err != nil {
+		t.Fatalf("begin-seal stranded: %v", err)
+	}
+
+	// Stranded Active: created 2h ago, no BeginSeal yet.
+	if err := fsm.Apply(&hraft.Log{Data: tierfsm.MarshalCreateChunk(idActiveStranded, old, old, old)}); err != nil {
+		t.Fatalf("create stranded active: %v", err)
+	}
+
+	// Local chunk Manager has only the fresh Sealed chunk (the leader
+	// for that chunk is this node and the seal recently completed).
+	cm := &reconcilerFakeChunkManager{}
+	cm.chunks = []chunk.ChunkMeta{{ID: idSealedFresh, Sealed: true}}
+
+	var deletedRequests []chunk.ChunkID
+	var deleteReasons []string
+	tier := &VaultInstance{
+		TierID:     glid.New(),
+		Chunks:     cm,
+		IsFollower: false, // leader-only sweep
+		ApplyRaftRequestDelete: func(id chunk.ChunkID, reason string, _ []string) error {
+			deletedRequests = append(deletedRequests, id)
+			deleteReasons = append(deleteReasons, reason)
+			return nil
+		},
+	}
+
+	rec := NewTierLifecycleReconciler(nil, glid.New(), tier.TierID, tier, "node-A", slog.Default())
+	rec.fsm = fsm
+
+	rec.SweepStaleLeaderFSMEntries()
+
+	if len(deletedRequests) != 2 {
+		t.Fatalf("delete proposals = %d (%v), want 2 (sealedStale + sealingStranded)",
+			len(deletedRequests), deletedRequests)
+	}
+	got := map[chunk.ChunkID]bool{deletedRequests[0]: true, deletedRequests[1]: true}
+	if !got[idSealedStale] {
+		t.Errorf("expected delete proposal for stale Sealed chunk %s; got %v", idSealedStale, deletedRequests)
+	}
+	if !got[idSealingStranded] {
+		t.Errorf("expected delete proposal for stranded Sealing chunk %s; got %v", idSealingStranded, deletedRequests)
+	}
+	if got[idSealedFresh] {
+		t.Errorf("must NOT propose delete for fresh Sealed chunk %s (within grace period)", idSealedFresh)
+	}
+	if got[idActiveStranded] {
+		t.Errorf("must NOT propose delete for stranded Active chunk %s (Active is out of scope)", idActiveStranded)
+	}
+	for _, reason := range deleteReasons {
+		if reason != "stale-fsm-leader-missing" {
+			t.Errorf("delete reason = %q, want stale-fsm-leader-missing", reason)
+		}
+	}
+}
