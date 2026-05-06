@@ -102,6 +102,13 @@ func VaultTiers(tiers []TierConfig, vaultID glid.GLID) []TierConfig {
 	return matched
 }
 
+// IsCloud reports whether this vault is cloud-backed (CloudServiceID set).
+// Mirrors TierConfig.IsCloud() now that VaultConfig absorbs the storage
+// fields. Once TierConfig is deleted, IsCloud lives only here.
+func (v VaultConfig) IsCloud() bool {
+	return v.CloudServiceID != nil
+}
+
 // MergeVaultFromTiers populates v's merged storage/lifecycle fields from
 // its (single) tier in tiers, returning the merged copy. Used during the
 // vault refactor (gastrolog-257l7) to ensure VaultConfig values written
