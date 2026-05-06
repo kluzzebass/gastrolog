@@ -128,7 +128,7 @@ type VaultInstance struct {
 	IsFSMReady func() bool
 
 	// OverlayFromFSM returns a copy of the given chunk meta with cluster-wide
-	// fields (CloudBacked, Archived, NumFrames) sourced from replicated metadata
+	// fields (CloudBacked, Archived) sourced from replicated metadata
 	// FSM instead of the local chunk manager. The local chunk manager only
 	// reflects this node's view, which is wrong for those fields on follower
 	// nodes: followers strip sealed_backing from their chunk-manager params

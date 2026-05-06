@@ -84,17 +84,15 @@ func ObjectMetadata(bm BlobMeta) map[string]string {
 	return md
 }
 
-// recordReader is the common interface for both local and remote GLCB readers.
-type recordReader interface {
-	Meta() BlobMeta
-	ReadRecord(pos uint32) (chunk.Record, error)
-	Close() error
-}
+// --- glcbCursor: random-access cursor backed by direct ReadAt on a GLCB ---
+//
+// Used for both local-only and cloud-backed paths. Cloud-backed callers
+// download + unwrap the GLCB into a local file (see DownloadAndUnwrap)
+// and then construct the cursor against that local file. There is no
+// "remote" mode — every read is a direct file.ReadAt.
 
-// --- seekableCursor: random-access cursor backed by seekable zstd ---
-
-type seekableCursor struct {
-	reader      recordReader
+type glcbCursor struct {
+	reader      *Reader
 	id          chunk.ChunkID
 	recordCount uint64
 	fwdIndex    uint64
@@ -103,19 +101,11 @@ type seekableCursor struct {
 	revDone     bool
 }
 
-// NewSeekableCursor creates a seekable cursor from a local Reader.
+// NewSeekableCursor creates a cursor over a local GLCB Reader.
+// Renamed from "seekable" — the cursor seeks via direct ReadAt now,
+// no zstd seekable-frame machinery involved (gastrolog-69fd5).
 func NewSeekableCursor(rd *Reader, id chunk.ChunkID) chunk.RecordCursor {
-	return newCursor(rd, id)
-}
-
-// NewRemoteSeekableCursor creates a seekable cursor from a RemoteReader.
-// Record reads are backed by range requests — no full blob download.
-func NewRemoteSeekableCursor(rd *RemoteReader, id chunk.ChunkID) chunk.RecordCursor {
-	return newCursor(rd, id)
-}
-
-func newCursor(rd recordReader, id chunk.ChunkID) chunk.RecordCursor {
-	return &seekableCursor{
+	return &glcbCursor{
 		reader:      rd,
 		id:          id,
 		recordCount: uint64(rd.Meta().RecordCount),
@@ -124,7 +114,7 @@ func newCursor(rd recordReader, id chunk.ChunkID) chunk.RecordCursor {
 	}
 }
 
-func (c *seekableCursor) Next() (chunk.Record, chunk.RecordRef, error) {
+func (c *glcbCursor) Next() (chunk.Record, chunk.RecordRef, error) {
 	if c.fwdDone || c.fwdIndex >= c.recordCount {
 		c.fwdDone = true
 		return chunk.Record{}, chunk.RecordRef{}, chunk.ErrNoMoreRecords
@@ -140,7 +130,7 @@ func (c *seekableCursor) Next() (chunk.Record, chunk.RecordRef, error) {
 	return rec, ref, nil
 }
 
-func (c *seekableCursor) Prev() (chunk.Record, chunk.RecordRef, error) {
+func (c *glcbCursor) Prev() (chunk.Record, chunk.RecordRef, error) {
 	if c.revDone || c.revIndex == 0 {
 		c.revDone = true
 		return chunk.Record{}, chunk.RecordRef{}, chunk.ErrNoMoreRecords
@@ -156,7 +146,7 @@ func (c *seekableCursor) Prev() (chunk.Record, chunk.RecordRef, error) {
 	return rec, chunk.RecordRef{ChunkID: c.id, Pos: c.revIndex}, nil
 }
 
-func (c *seekableCursor) Seek(ref chunk.RecordRef) error {
+func (c *glcbCursor) Seek(ref chunk.RecordRef) error {
 	c.fwdIndex = ref.Pos
 	c.revIndex = ref.Pos
 	c.fwdDone = false
@@ -164,7 +154,7 @@ func (c *seekableCursor) Seek(ref chunk.RecordRef) error {
 	return nil
 }
 
-func (c *seekableCursor) Close() error {
+func (c *glcbCursor) Close() error {
 	if c.reader != nil {
 		return c.reader.Close()
 	}

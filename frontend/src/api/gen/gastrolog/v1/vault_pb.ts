@@ -387,51 +387,44 @@ export class ChunkMeta extends Message<ChunkMeta> {
   cloudBacked = false;
 
   /**
-   * true = chunk is in offline storage tier (Glacier, etc.)
+   * true = chunk is in offline storage class (Glacier, Azure Archive)
    *
    * @generated from field: bool archived = 12;
    */
   archived = false;
 
   /**
-   * seekable zstd frame count (cloud chunks, 0 = unknown)
+   * which tier this chunk belongs to (transitional during gastrolog-55dej)
    *
-   * @generated from field: int32 num_frames = 13;
-   */
-  numFrames = 0;
-
-  /**
-   * which tier this chunk belongs to
-   *
-   * @generated from field: bytes tier_id = 14;
+   * @generated from field: bytes tier_id = 13;
    */
   tierId = new Uint8Array(0);
 
   /**
-   * tier type: "memory", "file", "cloud"
+   * tier type: "memory", "file", "cloud" (transitional)
    *
-   * @generated from field: string tier_type = 15;
+   * @generated from field: string tier_type = 14;
    */
   tierType = "";
 
   /**
    * true = chunk is marked for retention processing
    *
-   * @generated from field: bool retention_pending = 16;
+   * @generated from field: bool retention_pending = 15;
    */
   retentionPending = false;
 
   /**
    * current cloud storage class (e.g. "GLACIER", "cold", "Archive")
    *
-   * @generated from field: string storage_class = 17;
+   * @generated from field: string storage_class = 16;
    */
   storageClass = "";
 
   /**
    * how many nodes currently have this chunk (leader + followers that have caught up)
    *
-   * @generated from field: int32 replica_count = 18;
+   * @generated from field: int32 replica_count = 17;
    */
   replicaCount = 0;
 
@@ -439,7 +432,7 @@ export class ChunkMeta extends Message<ChunkMeta> {
    * Source tier: records were streamed to the next tier; local copy is kept
    * until the destination tier commits a receipt, then retention deletes it.
    *
-   * @generated from field: bool transition_streamed = 19;
+   * @generated from field: bool transition_streamed = 18;
    */
   transitionStreamed = false;
 
@@ -450,7 +443,7 @@ export class ChunkMeta extends Message<ChunkMeta> {
    * placement (which says where the chunk SHOULD live, not where it does).
    * See gastrolog-51gme.
    *
-   * @generated from field: repeated string replica_node_ids = 20;
+   * @generated from field: repeated string replica_node_ids = 19;
    */
   replicaNodeIds: string[] = [];
 
@@ -462,7 +455,7 @@ export class ChunkMeta extends Message<ChunkMeta> {
    * inspector show which specific node is the laggard holding up a stuck
    * delete. See gastrolog-51gme.
    *
-   * @generated from field: repeated string pending_ack_node_ids = 21;
+   * @generated from field: repeated string pending_ack_node_ids = 20;
    */
   pendingAckNodeIds: string[] = [];
 
@@ -486,15 +479,14 @@ export class ChunkMeta extends Message<ChunkMeta> {
     { no: 10, name: "ingest_end", kind: "message", T: Timestamp },
     { no: 11, name: "cloud_backed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 12, name: "archived", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 13, name: "num_frames", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
-    { no: 14, name: "tier_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 15, name: "tier_type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 16, name: "retention_pending", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 17, name: "storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 18, name: "replica_count", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
-    { no: 19, name: "transition_streamed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 20, name: "replica_node_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
-    { no: 21, name: "pending_ack_node_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 13, name: "tier_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 14, name: "tier_type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 15, name: "retention_pending", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 16, name: "storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 17, name: "replica_count", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 18, name: "transition_streamed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 19, name: "replica_node_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 20, name: "pending_ack_node_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkMeta {

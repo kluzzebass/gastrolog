@@ -85,7 +85,7 @@ func writeBlobToTempFile(t *testing.T, chunkID chunk.ChunkID, vaultID glid.GLID,
 
 	enc, _ := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
 	defer enc.Close()
-	w := cloud.NewWriter(chunkID, vaultID, enc)
+	w := cloud.NewWriter(chunkID, vaultID)
 	for _, rec := range records {
 		if err := w.Add(rec); err != nil {
 			t.Fatalf("Add: %v", err)
@@ -116,7 +116,7 @@ func TestRoundTrip(t *testing.T) {
 
 	enc, _ := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
 	defer enc.Close()
-	w := cloud.NewWriter(chunkID, vaultID, enc)
+	w := cloud.NewWriter(chunkID, vaultID)
 	for _, rec := range records {
 		if err := w.Add(rec); err != nil {
 			t.Fatalf("Add: %v", err)

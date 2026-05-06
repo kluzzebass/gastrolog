@@ -412,29 +412,28 @@ type ChunkMeta struct {
 	IngestStart      *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=ingest_start,json=ingestStart,proto3" json:"ingest_start,omitempty"`
 	IngestEnd        *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=ingest_end,json=ingestEnd,proto3" json:"ingest_end,omitempty"`
 	CloudBacked      bool                   `protobuf:"varint,11,opt,name=cloud_backed,json=cloudBacked,proto3" json:"cloud_backed,omitempty"`                // true = chunk lives in cloud storage (S3/Azure/GCS)
-	Archived         bool                   `protobuf:"varint,12,opt,name=archived,proto3" json:"archived,omitempty"`                                         // true = chunk is in offline storage tier (Glacier, etc.)
-	NumFrames        int32                  `protobuf:"varint,13,opt,name=num_frames,json=numFrames,proto3" json:"num_frames,omitempty"`                      // seekable zstd frame count (cloud chunks, 0 = unknown)
-	TierId           []byte                 `protobuf:"bytes,14,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"`                                // which tier this chunk belongs to
-	TierType         string                 `protobuf:"bytes,15,opt,name=tier_type,json=tierType,proto3" json:"tier_type,omitempty"`                          // tier type: "memory", "file", "cloud"
-	RetentionPending bool                   `protobuf:"varint,16,opt,name=retention_pending,json=retentionPending,proto3" json:"retention_pending,omitempty"` // true = chunk is marked for retention processing
-	StorageClass     string                 `protobuf:"bytes,17,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`              // current cloud storage class (e.g. "GLACIER", "cold", "Archive")
-	ReplicaCount     int32                  `protobuf:"varint,18,opt,name=replica_count,json=replicaCount,proto3" json:"replica_count,omitempty"`             // how many nodes currently have this chunk (leader + followers that have caught up)
+	Archived         bool                   `protobuf:"varint,12,opt,name=archived,proto3" json:"archived,omitempty"`                                         // true = chunk is in offline storage class (Glacier, Azure Archive)
+	TierId           []byte                 `protobuf:"bytes,13,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"`                                // which tier this chunk belongs to (transitional during gastrolog-55dej)
+	TierType         string                 `protobuf:"bytes,14,opt,name=tier_type,json=tierType,proto3" json:"tier_type,omitempty"`                          // tier type: "memory", "file", "cloud" (transitional)
+	RetentionPending bool                   `protobuf:"varint,15,opt,name=retention_pending,json=retentionPending,proto3" json:"retention_pending,omitempty"` // true = chunk is marked for retention processing
+	StorageClass     string                 `protobuf:"bytes,16,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`              // current cloud storage class (e.g. "GLACIER", "cold", "Archive")
+	ReplicaCount     int32                  `protobuf:"varint,17,opt,name=replica_count,json=replicaCount,proto3" json:"replica_count,omitempty"`             // how many nodes currently have this chunk (leader + followers that have caught up)
 	// Source tier: records were streamed to the next tier; local copy is kept
 	// until the destination tier commits a receipt, then retention deletes it.
-	TransitionStreamed bool `protobuf:"varint,19,opt,name=transition_streamed,json=transitionStreamed,proto3" json:"transition_streamed,omitempty"`
+	TransitionStreamed bool `protobuf:"varint,18,opt,name=transition_streamed,json=transitionStreamed,proto3" json:"transition_streamed,omitempty"`
 	// Cluster-wide replica residency: the set of node IDs that reported having
 	// this chunk locally during the most recent ListChunks fan-out. Lets the
 	// inspector show which nodes physically hold each replica, distinct from
 	// placement (which says where the chunk SHOULD live, not where it does).
 	// See gastrolog-51gme.
-	ReplicaNodeIds []string `protobuf:"bytes,20,rep,name=replica_node_ids,json=replicaNodeIds,proto3" json:"replica_node_ids,omitempty"`
+	ReplicaNodeIds []string `protobuf:"bytes,19,rep,name=replica_node_ids,json=replicaNodeIds,proto3" json:"replica_node_ids,omitempty"`
 	// Receipt-protocol pending acks: when a chunk is in pendingDeletes (i.e. a
 	// CmdRequestDelete has been proposed but the cluster hasn't fully drained
 	// the per-node acks), this is the set of node IDs that still owe an ack.
 	// Empty/absent for chunks not currently in pendingDeletes. Lets the
 	// inspector show which specific node is the laggard holding up a stuck
 	// delete. See gastrolog-51gme.
-	PendingAckNodeIds []string `protobuf:"bytes,21,rep,name=pending_ack_node_ids,json=pendingAckNodeIds,proto3" json:"pending_ack_node_ids,omitempty"`
+	PendingAckNodeIds []string `protobuf:"bytes,20,rep,name=pending_ack_node_ids,json=pendingAckNodeIds,proto3" json:"pending_ack_node_ids,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -551,13 +550,6 @@ func (x *ChunkMeta) GetArchived() bool {
 		return x.Archived
 	}
 	return false
-}
-
-func (x *ChunkMeta) GetNumFrames() int32 {
-	if x != nil {
-		return x.NumFrames
-	}
-	return 0
 }
 
 func (x *ChunkMeta) GetTierId() []byte {
@@ -2607,7 +2599,7 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\vactive_only\x18\x02 \x01(\bR\n" +
 	"activeOnly\"E\n" +
 	"\x12ListChunksResponse\x12/\n" +
-	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"\xb2\x06\n" +
+	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"\x93\x06\n" +
 	"\tChunkMeta\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12;\n" +
 	"\vwrite_start\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
@@ -2626,17 +2618,15 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"ingest_end\x18\n" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\tingestEnd\x12!\n" +
 	"\fcloud_backed\x18\v \x01(\bR\vcloudBacked\x12\x1a\n" +
-	"\barchived\x18\f \x01(\bR\barchived\x12\x1d\n" +
-	"\n" +
-	"num_frames\x18\r \x01(\x05R\tnumFrames\x12\x17\n" +
-	"\atier_id\x18\x0e \x01(\fR\x06tierId\x12\x1b\n" +
-	"\ttier_type\x18\x0f \x01(\tR\btierType\x12+\n" +
-	"\x11retention_pending\x18\x10 \x01(\bR\x10retentionPending\x12#\n" +
-	"\rstorage_class\x18\x11 \x01(\tR\fstorageClass\x12#\n" +
-	"\rreplica_count\x18\x12 \x01(\x05R\freplicaCount\x12/\n" +
-	"\x13transition_streamed\x18\x13 \x01(\bR\x12transitionStreamed\x12(\n" +
-	"\x10replica_node_ids\x18\x14 \x03(\tR\x0ereplicaNodeIds\x12/\n" +
-	"\x14pending_ack_node_ids\x18\x15 \x03(\tR\x11pendingAckNodeIds\"B\n" +
+	"\barchived\x18\f \x01(\bR\barchived\x12\x17\n" +
+	"\atier_id\x18\r \x01(\fR\x06tierId\x12\x1b\n" +
+	"\ttier_type\x18\x0e \x01(\tR\btierType\x12+\n" +
+	"\x11retention_pending\x18\x0f \x01(\bR\x10retentionPending\x12#\n" +
+	"\rstorage_class\x18\x10 \x01(\tR\fstorageClass\x12#\n" +
+	"\rreplica_count\x18\x11 \x01(\x05R\freplicaCount\x12/\n" +
+	"\x13transition_streamed\x18\x12 \x01(\bR\x12transitionStreamed\x12(\n" +
+	"\x10replica_node_ids\x18\x13 \x03(\tR\x0ereplicaNodeIds\x12/\n" +
+	"\x14pending_ack_node_ids\x18\x14 \x03(\tR\x11pendingAckNodeIds\"B\n" +
 	"\x0fGetChunkRequest\x12\x14\n" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\x12\x19\n" +
 	"\bchunk_id\x18\x02 \x01(\fR\achunkId\"A\n" +

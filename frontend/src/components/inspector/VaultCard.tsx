@@ -758,7 +758,7 @@ function ChunkDetail({
                 {formatBytes(Number(chunk.diskBytes))}
               </span>
               <span className={c("text-text-muted", "text-light-text-muted")}>
-                GLCB{chunk.numFrames > 0 ? `, ${chunk.numFrames} seekable zstd frames` : ", seekable zstd"}
+                GLCB{chunk.cloudBacked ? " (zstd-wrapped on transport)" : ""}
               </span>
             </div>
             <div className={`flex items-center gap-3 text-[0.85em]`}>

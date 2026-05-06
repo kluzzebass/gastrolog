@@ -274,7 +274,6 @@ func (r *VaultLifecycleReconciler) projectAllCloudBackedFromFSM(fsm *tierfsm.FSM
 			IngestIdxSize:     e.IngestIdxSize,
 			SourceIdxOffset:   e.SourceIdxOffset,
 			SourceIdxSize:     e.SourceIdxSize,
-			NumFrames:         e.NumFrames,
 			IngestTSMonotonic: e.IngestTSMonotonic,
 		}
 		if err := registrar.RegisterCloudChunk(e.ID, info); err != nil {

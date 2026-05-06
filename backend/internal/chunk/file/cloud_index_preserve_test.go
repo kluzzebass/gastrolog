@@ -332,7 +332,6 @@ func TestRegisterCloudChunk(t *testing.T) {
 		RecordCount: 100,
 		Bytes:       50000,
 		DiskBytes:   30000,
-		NumFrames:   2,
 	}
 
 	if err := cm.RegisterCloudChunk(id, info); err != nil {

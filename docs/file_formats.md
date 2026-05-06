@@ -478,16 +478,23 @@ Duplicate keys are allowed; entries with equal keys are secondarily ordered by v
 
 ---
 
-## Cloud Blob -- Archived Chunk
+## GLCB -- GastroLog Chunk Blob
 
-Single-object format for cloud-archived (sealed) chunks. Each chunk becomes one blob in S3/Azure/GCS with an uncompressed header/dictionary/index prefix followed by seekable zstd record data, enabling O(1) random access to any record.
+Single-file, self-describing format for sealed chunks. Used universally:
+local-only vaults store one `data.glcb` per sealed chunk; cloud-backed
+vaults upload the same bytes to object storage (zstd-wrapped only as a
+transport layer) and keep a local cache copy with the same `data.glcb`
+name (gastrolog-69fd5; see [`docs/vault_redesign.md`](./vault_redesign.md)
+decisions 6 and 9). The on-disk format is unconditionally **uncompressed**:
+every section is directly readable without a decompression step.
 
-Sorted IngestTS and SourceTS indexes are embedded after the seekable zstd section, with a TOC footer. This enables time-range seeking via S3 range requests without downloading the full blob.
+Sorted IngestTS and SourceTS indexes are embedded after the records
+section, with a TOC footer. This enables time-range seeking against the
+local file (or against a downloaded cache copy) without rescanning records.
 
 ### Layout
 
 ```
-Uncompressed prefix:
 +---------------------------+
 |     Header (96 bytes)     |
 +---------------------------+
@@ -495,22 +502,22 @@ Uncompressed prefix:
 |   (dictEntries entries)   |
 +---------------------------+
 |     Record Index          |
-|   (recordCount × 12)     |
+|   (recordCount × 12)      |
 +---------------------------+
-Seekable zstd section:
-+---------------------------+
-|     Compressed Record     |
-|     Frames + Seek Table   |
-+---------------------------+
-TS indexes + TOC:
+|     Records section       |
+|  [frameLen:u32][frame] ×  |
+|     recordCount           |
 +---------------------------+
 |   IngestTS Index          |
-|   (recordCount × 12)     |
+|   (recordCount × 12)      |
 +---------------------------+
 |   SourceTS Index          |
-|   (N × 12, N ≤ records)  |
+|   (N × 12, N ≤ records)   |
 +---------------------------+
-|     TOC (48 bytes)        |
+|   TOC entries             |
+|   (entryCount × 42)       |
++---------------------------+
+|   TOC footer (44 bytes)   |
 +---------------------------+
 ```
 
@@ -551,33 +558,37 @@ Flat array of offset/size pairs enabling O(1) random access to any record:
 
 | Offset | Size | Field         | Description                                         |
 |--------|------|---------------|-----------------------------------------------------|
-| 0      | 8    | offset        | Byte offset into decompressed record data (uint64)  |
+| 0      | 8    | offset        | Byte offset into the records section (uint64)       |
 | 8      | 4    | size          | Frame size excluding the u32 frameLen prefix (uint32)|
+
+### Records Section (uncompressed)
+
+Each record is written as `[frameLen:u32][frame body]`, frame after frame, with no compression layer. The frame body has the encoding below.
 
 ### Record Frame (variable size)
 
-Each record is self-framing:
-
 | Offset | Size        | Field       | Description                              |
 |--------|-------------|-------------|------------------------------------------|
-| 0      | 4           | frameLen    | Frame size excluding this field (uint32) |
-| 4      | 8           | sourceTS    | Source timestamp (int64 nanos, 0 = none) |
-| 12     | 8           | ingestTS    | Ingest timestamp (int64 nanos)           |
-| 20     | 8           | writeTS     | Write timestamp (int64 nanos)            |
-| 28     | 16          | ingesterID  | Ingester GLID (raw bytes)                |
-| 44     | 4           | ingestSeq   | Per-ingester sequence counter (uint32)   |
-| 48     | 2           | attrCount   | Number of attribute pairs (uint16)       |
-| 50     | attrCount×8 | attrs       | [keyID:u32][valID:u32] pairs             |
+| 0      | 8           | sourceTS    | Source timestamp (int64 nanos, 0 = none) |
+| 8      | 8           | ingestTS    | Ingest timestamp (int64 nanos)           |
+| 16     | 8           | writeTS     | Write timestamp (int64 nanos)            |
+| 24     | 16          | ingesterID  | Ingester GLID (raw bytes)                |
+| 40     | 16          | nodeID      | Originating node GLID (raw bytes)        |
+| 56     | 4           | ingestSeq   | Per-ingester sequence counter (uint32)   |
+| 60     | 2           | attrCount   | Number of attribute pairs (uint16)       |
+| 62     | attrCount×8 | attrs       | [keyID:u32][valID:u32] pairs             |
 | varies | 4           | rawLen      | Length of raw log body (uint32)          |
 | varies | rawLen      | raw         | Raw log message bytes                    |
 
 ### Compression
 
-Record data is compressed with seekable zstd (~256KB independent frames). The uncompressed prefix (header, dictionary, record index) is stored in the clear so metadata can be read without decompression. The seekable format enables random-access reads: each frame can be independently decompressed, so reading a single record only fetches the frame(s) containing it.
+The on-disk format is uncompressed. Cloud-backed vaults wrap the entire blob with a single zstd stream **only on transport** (uploaded as `chunk.glcb.zst`); the local cache, after `DownloadAndUnwrap`, is a plain `data.glcb` byte-for-byte equivalent to a freshly-sealed local chunk. See [`docs/vault_redesign.md`](./vault_redesign.md) decisions 6 and 9.
+
+Pre-Phase-6 layouts used per-record seekable zstd (~256 KiB frames) for byte-range S3 fetches. That mechanism is gone (gastrolog-69fd5): cloud reads now download the whole blob (decompressed once), populate the warm cache, and serve subsequent reads via the local-cursor fast path.
 
 ### Embedded TS Indexes
 
-Two sorted timestamp indexes are appended after the seekable zstd section. Each index uses the same 12-byte entry format as `ingest.idx`/`source.idx`:
+Two sorted timestamp indexes are appended after the records section. Each index uses the same 12-byte entry format as `ingest.idx`/`source.idx`:
 
 | Offset | Size | Field     | Description                          |
 |--------|------|-----------|--------------------------------------|
@@ -589,21 +600,33 @@ Two sorted timestamp indexes are appended after the seekable zstd section. Each 
 
 No header — the TOC provides section offsets and sizes. Entry count is derived from `sectionSize / 12`.
 
-### TOC Footer (48 bytes)
+### TOC Entries (entryCount × 42 bytes)
 
-The Table of Contents identifies embedded TS index sections for range-request access:
+Each TOC entry describes one section in the blob (e.g. IngestTS index, SourceTS index). Readers look up entries by section type to find offset + size + content hash.
 
-| Offset | Size | Field           | Description                                  |
-|--------|------|-----------------|----------------------------------------------|
-| 0      | 4    | magic           | `"GTOC"` (ASCII)                             |
-| 4      | 4    | tocVersion      | `1` (uint32)                                 |
-| 8      | 8    | ingestIdxOffset | Byte offset of IngestTS index (uint64)       |
-| 16     | 8    | ingestIdxSize   | Byte size of IngestTS index (uint64)         |
-| 24     | 8    | sourceIdxOffset | Byte offset of SourceTS index (uint64)       |
-| 32     | 8    | sourceIdxSize   | Byte size of SourceTS index (uint64)         |
-| 40     | 8    | reserved        | Reserved (zero)                              |
+| Offset | Size | Field    | Description                                       |
+|--------|------|----------|---------------------------------------------------|
+| 0      | 1    | type     | Section type byte (e.g. `'I'` = IngestTS index)   |
+| 1      | 1    | version  | Per-section format version                        |
+| 2      | 4    | offset   | Byte offset from blob start (uint32 LE)           |
+| 6      | 4    | size     | Byte count (uint32 LE)                            |
+| 10     | 32   | hash     | SHA-256 of the section's bytes                    |
 
-The TOC is always the last 48 bytes of the blob. Offsets are absolute (from blob start), enabling direct S3/GCS range requests to fetch individual index sections.
+### TOC Footer (44 bytes, last 44 bytes of the file)
+
+| Offset | Size | Field         | Description                                                         |
+|--------|------|---------------|---------------------------------------------------------------------|
+| 0      | 4    | entryCount    | Number of TOC entries above (uint32 LE)                             |
+| 4      | 32   | blobDigest    | SHA-256 of bytes `[0, fileSize - 44)` — every byte except this footer |
+| 36     | 4    | footerVersion | Footer schema version (`1`, uint32 LE)                              |
+| 40     | 4    | magic         | `"GTOC"` (ASCII)                                                    |
+
+**Read protocol.** Read the last 44 bytes as the footer, validate the
+magic, then read `entryCount × 42` bytes immediately preceding the footer
+to recover all section pointers + hashes. The blob digest covers
+everything from the start of the file through the last entry — readers
+verifying integrity hash that range and compare against the FSM-stamped
+digest. See gastrolog-grnc3.
 
 ### Blob Object Metadata
 
@@ -616,6 +639,8 @@ When uploaded, the following user-defined metadata is set on the cloud object fo
 | `record_count` | Decimal string                     |
 | `start_ts`     | RFC 3339 timestamp                 |
 | `end_ts`       | RFC 3339 timestamp                 |
+
+The cloud object key is `vault-<vault>/<chunk>.glcb`; the bytes are zstd-wrapped on transport and unwrapped into a plain `data.glcb` on download.
 
 ---
 
@@ -725,5 +750,5 @@ All file formats include validation checks on decode:
 | json.idx       | Min size, signature+type, version, complete flag, status byte  |
 | attr_*.idx     | Min size, signature+type, version, complete flag               |
 | kv_*.idx       | Min size, signature+type, version, complete flag, status byte  |
-| cloud blob     | Signature+type, version, seekable zstd, TOC magic              |
+| data.glcb (GLCB) | Signature+type, version, TOC footer magic + entry hashes     |
 | lookup table   | Min size (20), signature+type, version, complete flag          |

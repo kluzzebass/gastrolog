@@ -56,8 +56,8 @@ const (
 	CmdPruneNode Command = 12
 
 	// CmdAttachOffsets carries the GLCB blob's section-offset/size pairs
-	// (IngestTS index, SourceTS index, NumFrames) once sealToGLCB has
-	// produced data.glcb on the leader. Replaces the original "offsets
+	// (IngestTS index, SourceTS index) once sealToGLCB has produced
+	// data.glcb on the leader. Replaces the original "offsets
 	// only land in the FSM via CmdUploadChunk" gap that left
 	// sealed-but-not-yet-uploaded chunks with zero offsets in the
 	// manifest, breaking the histogram's GLCB section-reader path. Fires
@@ -98,7 +98,7 @@ type ManifestEntry struct {
 	Archived         bool
 	RetentionPending    bool
 	TransitionStreamed  bool // chunk records have been streamed to the next tier but deletion awaits destination replication confirmation
-	NumFrames           int32
+
 
 	// Cloud-specific TOC offsets (GLCB format).
 	IngestIdxOffset int64
@@ -143,7 +143,6 @@ func (e *ManifestEntry) ToChunkMeta() chunk.ChunkMeta {
 		IngestTSMonotonic: e.IngestTSMonotonic,
 		CloudBacked:       e.CloudBacked,
 		Archived:          e.Archived,
-		NumFrames:         e.NumFrames,
 	}
 }
 
@@ -741,7 +740,7 @@ func (f *FSM) applyCompress(data []byte) error {
 	return nil
 }
 
-// AttachOffsets: [16 ChunkID][8 IngestIdxOff][8 IngestIdxSize][8 SourceIdxOff][8 SourceIdxSize][4 NumFrames]
+// AttachOffsets: [16 ChunkID][8 IngestIdxOff][8 IngestIdxSize][8 SourceIdxOff][8 SourceIdxSize]
 //
 // Fired after sealToGLCB on the leader (and after finalizeImportedChunk
 // on import paths) so every sealed chunk's section-offset metadata
@@ -749,7 +748,7 @@ func (f *FSM) applyCompress(data []byte) error {
 // section-reader uses these offsets to mmap the IngestTS index out of
 // data.glcb directly, eliminating the .ts-cache download path.
 func (f *FSM) applyAttachOffsets(data []byte) error {
-	if len(data) < 52 {
+	if len(data) < 48 {
 		return fmt.Errorf("attach offsets: payload too short (%d bytes)", len(data))
 	}
 	var id chunk.ChunkID
@@ -763,18 +762,17 @@ func (f *FSM) applyAttachOffsets(data []byte) error {
 	e.IngestIdxSize = int64(binary.BigEndian.Uint64(data[24:32]))   //nolint:gosec // G115: round-trip
 	e.SourceIdxOffset = int64(binary.BigEndian.Uint64(data[32:40])) //nolint:gosec // G115: round-trip
 	e.SourceIdxSize = int64(binary.BigEndian.Uint64(data[40:48]))   //nolint:gosec // G115: round-trip
-	e.NumFrames = int32(binary.BigEndian.Uint32(data[48:52]))       //nolint:gosec // G115: safe round-trip from uint32 frame count
 	return nil
 }
 
-// UploadChunk: [16 ChunkID][8 DiskBytes][8 IngestIdxOff][8 IngestIdxSize][8 SourceIdxOff][8 SourceIdxSize][4 NumFrames]
+// UploadChunk: [16 ChunkID][8 DiskBytes][8 IngestIdxOff][8 IngestIdxSize][8 SourceIdxOff][8 SourceIdxSize]
+//                                                                                                          [32 Hash][16 CloudServiceID][1 KeyScheme]
 func (f *FSM) applyUpload(data []byte) error {
-	// Legacy entries (pre-grnc3) wrote 60 bytes after the chunk ID; the
-	// grnc3-extended payload writes 109 (60 + 32 hash + 16 cloud service ID
-	// + 1 key scheme byte). Accept the short form for replay of historical
-	// log entries — the integrity fields stay zero, which is what readers
-	// see on chunks uploaded before this change.
-	if len(data) < 60 {
+	// Phase-6 (gastrolog-69fd5) drops NumFrames; payload is now 56 bytes
+	// for the base form and 105 bytes for the grnc3-extended form
+	// (56 + 32 hash + 16 cloud service ID + 1 key scheme byte). Wire format
+	// breaks acceptable per redesign decision 11 (atomic refactor).
+	if len(data) < 56 {
 		return fmt.Errorf("upload chunk: payload too short (%d bytes)", len(data))
 	}
 	var id chunk.ChunkID
@@ -789,15 +787,13 @@ func (f *FSM) applyUpload(data []byte) error {
 	e.IngestIdxSize = int64(binary.BigEndian.Uint64(data[32:40]))   //nolint:gosec // G115: round-trip
 	e.SourceIdxOffset = int64(binary.BigEndian.Uint64(data[40:48])) //nolint:gosec // G115: round-trip
 	e.SourceIdxSize = int64(binary.BigEndian.Uint64(data[48:56]))   //nolint:gosec // G115: round-trip
-	e.NumFrames = int32(binary.BigEndian.Uint32(data[56:60]))       //nolint:gosec // G115: safe round-trip from uint32 frame count
 	e.CloudBacked = true
 
-	// Integrity fields landed in gastrolog-grnc3 — present only on the
-	// extended payload. Older entries leave these at zero values.
-	if len(data) >= 109 {
-		copy(e.Hash[:], data[60:92])
-		copy(e.CloudServiceID[:], data[92:108])
-		e.KeyScheme = data[108]
+	// Integrity fields (gastrolog-grnc3) — present only on the extended payload.
+	if len(data) >= 105 {
+		copy(e.Hash[:], data[56:88])
+		copy(e.CloudServiceID[:], data[88:104])
+		e.KeyScheme = data[104]
 	}
 	return nil
 }
@@ -902,14 +898,14 @@ func MarshalCompressChunk(id chunk.ChunkID, diskBytes int64) []byte {
 //	[33:41]  ingest index size (uint64 BE)
 //	[41:49]  source index offset (uint64 BE)
 //	[49:57]  source index size (uint64 BE)
-//	[57:61]  num frames (uint32 BE)
-//	[61:93]  GLCB whole-blob digest (32 bytes)             // gastrolog-grnc3
-//	[93:109] cloud service ID snapshot (16 bytes)          // gastrolog-grnc3
-//	[109]    key scheme byte                                // gastrolog-grnc3
+//	[57:89]  GLCB whole-blob digest (32 bytes)             // gastrolog-grnc3
+//	[89:105] cloud service ID snapshot (16 bytes)          // gastrolog-grnc3
+//	[105]    key scheme byte                                // gastrolog-grnc3
 //
-// Total: 110 bytes payload (1 cmd + 109 fields).
-func MarshalUploadChunk(id chunk.ChunkID, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, numFrames int32, hash [32]byte, cloudServiceID glid.GLID, keyScheme uint8) []byte {
-	buf := make([]byte, 1+109)
+// Total: 106 bytes payload (1 cmd + 105 fields). Phase-6 (gastrolog-69fd5)
+// dropped the legacy num_frames slot.
+func MarshalUploadChunk(id chunk.ChunkID, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, hash [32]byte, cloudServiceID glid.GLID, keyScheme uint8) []byte {
+	buf := make([]byte, 1+105)
 	buf[0] = byte(CmdUploadChunk)
 	copy(buf[1:17], id[:])
 	binary.BigEndian.PutUint64(buf[17:25], uint64(diskBytes))     //nolint:gosec // G115: round-trip
@@ -917,24 +913,22 @@ func MarshalUploadChunk(id chunk.ChunkID, diskBytes, ingestIdxOff, ingestIdxSize
 	binary.BigEndian.PutUint64(buf[33:41], uint64(ingestIdxSize)) //nolint:gosec // G115: round-trip
 	binary.BigEndian.PutUint64(buf[41:49], uint64(sourceIdxOff))  //nolint:gosec // G115: round-trip
 	binary.BigEndian.PutUint64(buf[49:57], uint64(sourceIdxSize)) //nolint:gosec // G115: round-trip
-	binary.BigEndian.PutUint32(buf[57:61], uint32(numFrames))     //nolint:gosec // G115: safe round-trip for frame count
-	copy(buf[61:93], hash[:])
-	copy(buf[93:109], cloudServiceID[:])
-	buf[109] = keyScheme
+	copy(buf[57:89], hash[:])
+	copy(buf[89:105], cloudServiceID[:])
+	buf[105] = keyScheme
 	return buf
 }
 
 // MarshalAttachOffsets builds the Raft log data for a CmdAttachOffsets
 // command. See applyAttachOffsets for layout.
-func MarshalAttachOffsets(id chunk.ChunkID, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, numFrames int32) []byte {
-	buf := make([]byte, 1+52)
+func MarshalAttachOffsets(id chunk.ChunkID, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64) []byte {
+	buf := make([]byte, 1+48)
 	buf[0] = byte(CmdAttachOffsets)
 	copy(buf[1:17], id[:])
 	binary.BigEndian.PutUint64(buf[17:25], uint64(ingestIdxOff))  //nolint:gosec // G115: round-trip
 	binary.BigEndian.PutUint64(buf[25:33], uint64(ingestIdxSize)) //nolint:gosec // G115: round-trip
 	binary.BigEndian.PutUint64(buf[33:41], uint64(sourceIdxOff))  //nolint:gosec // G115: round-trip
 	binary.BigEndian.PutUint64(buf[41:49], uint64(sourceIdxSize)) //nolint:gosec // G115: round-trip
-	binary.BigEndian.PutUint32(buf[49:53], uint32(numFrames))     //nolint:gosec // G115: safe round-trip for frame count
 	return buf
 }
 
@@ -1137,7 +1131,7 @@ func writeSectionHeader(w io.Writer, kind sectionKind, payloadLen uint32) error 
 func (s *fsmSnapshot) Release() {}
 
 // Snapshot encoding: each entry is a fixed-size binary record.
-// Layout per entry (168 bytes):
+// Layout per entry (122 bytes):
 //   16  ChunkID
 //   8   WriteStart (nanos)
 //   8   WriteEnd (nanos)
@@ -1152,11 +1146,11 @@ func (s *fsmSnapshot) Release() {}
 //   8   IngestIdxSize
 //   8   SourceIdxOffset
 //   8   SourceIdxSize
-//   4   NumFrames
-//   2   Flags (bit 0=sealed, 1=compressed, 2=cloudBacked, 3=archived)
-// Total: 126 bytes (keeping it compact)
+//   2   Flags (bit 0=sealed, 1=reserved, 2=cloudBacked, 3=archived,
+//                4=retentionPending, 5=transitionStreamed, 6=ingestTSMonotonic)
+// Total: 122 bytes. Phase-6 (gastrolog-69fd5) dropped NumFrames.
 
-const entrySize = 126
+const entrySize = 122
 
 func encodeEntry(w io.Writer, e *ManifestEntry) error {
 	var buf [entrySize]byte
@@ -1170,18 +1164,17 @@ func encodeEntry(w io.Writer, e *ManifestEntry) error {
 	binary.BigEndian.PutUint64(buf[64:72], uint64(e.IngestEnd.UnixNano()))
 	binary.BigEndian.PutUint64(buf[72:80], uint64(e.SourceStart.UnixNano()))
 	binary.BigEndian.PutUint64(buf[80:88], uint64(e.SourceEnd.UnixNano()))
-	binary.BigEndian.PutUint64(buf[88:96], uint64(e.IngestIdxOffset)) //nolint:gosec // G115: round-trip
-	binary.BigEndian.PutUint64(buf[96:104], uint64(e.IngestIdxSize))   //nolint:gosec // G115: round-trip
+	binary.BigEndian.PutUint64(buf[88:96], uint64(e.IngestIdxOffset))   //nolint:gosec // G115: round-trip
+	binary.BigEndian.PutUint64(buf[96:104], uint64(e.IngestIdxSize))    //nolint:gosec // G115: round-trip
 	binary.BigEndian.PutUint64(buf[104:112], uint64(e.SourceIdxOffset)) //nolint:gosec // G115: round-trip
 	binary.BigEndian.PutUint64(buf[112:120], uint64(e.SourceIdxSize))   //nolint:gosec // G115: round-trip
-	binary.BigEndian.PutUint32(buf[120:124], uint32(e.NumFrames)) //nolint:gosec // G115: safe round-trip for frame count
 	var flags uint16
 	if e.Sealed {
 		flags |= 1 << 0
 	}
 	// flag bit 1 (formerly Compressed) is reserved — see gastrolog-24m1t
-	// step 7f. Sealed chunks are GLCB which is zstd-compressed by
-	// construction, so the bit is implicit in Sealed.
+	// step 7f. Sealed chunks are GLCB which is zstd-compressed only on
+	// cloud transport (gastrolog-69fd5).
 	if e.CloudBacked {
 		flags |= 1 << 2
 	}
@@ -1197,7 +1190,7 @@ func encodeEntry(w io.Writer, e *ManifestEntry) error {
 	if e.IngestTSMonotonic {
 		flags |= 1 << 6
 	}
-	binary.BigEndian.PutUint16(buf[124:126], flags)
+	binary.BigEndian.PutUint16(buf[120:122], flags)
 	_, err := w.Write(buf[:])
 	return err
 }
@@ -1296,7 +1289,7 @@ func readEntriesSection(r io.Reader, payloadLen uint32) ([]ManifestEntry, error)
 		}
 		var id chunk.ChunkID
 		copy(id[:], buf[0:16])
-		flags := binary.BigEndian.Uint16(buf[124:126])
+		flags := binary.BigEndian.Uint16(buf[120:122])
 		entries = append(entries, ManifestEntry{
 			ID:              id,
 			WriteStart:      time.Unix(0, int64(binary.BigEndian.Uint64(buf[16:24]))),  //nolint:gosec // G115: round-trip
@@ -1312,7 +1305,6 @@ func readEntriesSection(r io.Reader, payloadLen uint32) ([]ManifestEntry, error)
 			IngestIdxSize:   int64(binary.BigEndian.Uint64(buf[96:104])),               //nolint:gosec // G115: round-trip
 			SourceIdxOffset: int64(binary.BigEndian.Uint64(buf[104:112])),              //nolint:gosec // G115: round-trip
 			SourceIdxSize:   int64(binary.BigEndian.Uint64(buf[112:120])),              //nolint:gosec // G115: round-trip
-			NumFrames:       int32(binary.BigEndian.Uint32(buf[120:124])),              //nolint:gosec // G115: round-trip
 			Sealed: flags & (1 << 0) != 0,
 			// flag bit 1 reserved (formerly Compressed) — see gastrolog-24m1t step 7f.
 			CloudBacked:        flags&(1<<2) != 0,

@@ -120,29 +120,28 @@ message ChunkMeta {
   google.protobuf.Timestamp ingest_start = 9;
   google.protobuf.Timestamp ingest_end = 10;
   bool cloud_backed = 11; // true = chunk lives in cloud storage (S3/Azure/GCS)
-  bool archived = 12;     // true = chunk is in offline storage tier (Glacier, etc.)
-  int32 num_frames = 13;  // seekable zstd frame count (cloud chunks, 0 = unknown)
-  bytes tier_id = 14;    // which tier this chunk belongs to
-  string tier_type = 15;  // tier type: "memory", "file", "cloud"
-  bool retention_pending = 16; // true = chunk is marked for retention processing
-  string storage_class = 17;  // current cloud storage class (e.g. "GLACIER", "cold", "Archive")
-  int32 replica_count = 18;   // how many nodes currently have this chunk (leader + followers that have caught up)
+  bool archived = 12;     // true = chunk is in offline storage class (Glacier, Azure Archive)
+  bytes tier_id = 13;     // which tier this chunk belongs to (transitional during gastrolog-55dej)
+  string tier_type = 14;  // tier type: "memory", "file", "cloud" (transitional)
+  bool retention_pending = 15; // true = chunk is marked for retention processing
+  string storage_class = 16;   // current cloud storage class (e.g. "GLACIER", "cold", "Archive")
+  int32 replica_count = 17;    // how many nodes currently have this chunk (leader + followers that have caught up)
   // Source tier: records were streamed to the next tier; local copy is kept
   // until the destination tier commits a receipt, then retention deletes it.
-  bool transition_streamed = 19;
+  bool transition_streamed = 18;
   // Cluster-wide replica residency: the set of node IDs that reported having
   // this chunk locally during the most recent ListChunks fan-out. Lets the
   // inspector show which nodes physically hold each replica, distinct from
   // placement (which says where the chunk SHOULD live, not where it does).
   // See gastrolog-51gme.
-  repeated string replica_node_ids = 20;
+  repeated string replica_node_ids = 19;
   // Receipt-protocol pending acks: when a chunk is in pendingDeletes (i.e. a
   // CmdRequestDelete has been proposed but the cluster hasn't fully drained
   // the per-node acks), this is the set of node IDs that still owe an ack.
   // Empty/absent for chunks not currently in pendingDeletes. Lets the
   // inspector show which specific node is the laggard holding up a stuck
   // delete. See gastrolog-51gme.
-  repeated string pending_ack_node_ids = 21;
+  repeated string pending_ack_node_ids = 20;
 }
 
 message GetChunkRequest {

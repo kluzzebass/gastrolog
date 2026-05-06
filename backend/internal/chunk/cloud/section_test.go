@@ -26,7 +26,7 @@ func TestLoadSection_ReadsITSIAndSTSI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat: %v", err)
 	}
-	tailLen := int64(2)*42 + cloud.TOCFooterSize // 2 entries × 42 bytes + footer
+	tailLen := int64(2)*42 + 44 // 2 entries × 42 bytes + footer
 	tail := make([]byte, tailLen)
 	if _, err := tmp.ReadAt(tail, stat.Size()-tailLen); err != nil {
 		t.Fatalf("read TOC tail: %v", err)

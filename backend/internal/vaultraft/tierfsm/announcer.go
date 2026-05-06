@@ -55,12 +55,12 @@ func (a *Announcer) AnnounceCompress(id chunk.ChunkID, diskBytes int64) {
 	a.apply("compress", id, MarshalCompressChunk(id, diskBytes))
 }
 
-func (a *Announcer) AnnounceAttachOffsets(id chunk.ChunkID, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, numFrames int32) {
-	a.apply("attach-offsets", id, MarshalAttachOffsets(id, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize, numFrames))
+func (a *Announcer) AnnounceAttachOffsets(id chunk.ChunkID, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64) {
+	a.apply("attach-offsets", id, MarshalAttachOffsets(id, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize))
 }
 
-func (a *Announcer) AnnounceUpload(id chunk.ChunkID, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, numFrames int32, hash [32]byte, cloudServiceID glid.GLID, keyScheme uint8) {
-	a.apply("upload", id, MarshalUploadChunk(id, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize, numFrames, hash, cloudServiceID, keyScheme))
+func (a *Announcer) AnnounceUpload(id chunk.ChunkID, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, hash [32]byte, cloudServiceID glid.GLID, keyScheme uint8) {
+	a.apply("upload", id, MarshalUploadChunk(id, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize, hash, cloudServiceID, keyScheme))
 }
 
 func (a *Announcer) AnnounceDelete(id chunk.ChunkID) {

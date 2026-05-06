@@ -237,7 +237,7 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]TieredChunkMeta, 
 			return nil, fmt.Errorf("list chunks for tier %s: %w", tier.TierID, err)
 		}
 		for _, m := range metas {
-			// Override CloudBacked / Archived / NumFrames from the tier
+			// Override CloudBacked / Archived from the tier
 			// Raft FSM (the cluster-wide source of truth). Without this,
 			// follower nodes always report CloudBacked=false because their
 			// local chunk manager has CloudStore=nil. See gastrolog-asg4l.
@@ -256,8 +256,8 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]TieredChunkMeta, 
 
 // GetChunkMeta returns metadata for a specific chunk. The result is overlaid
 // from the tier FSM if the chunk belongs to a tier with a Raft group, so
-// CloudBacked / Archived / NumFrames reflect the cluster-wide truth rather
-// than this node's local chunk-manager view. See gastrolog-asg4l.
+// CloudBacked / Archived reflect the cluster-wide truth rather than this
+// node's local chunk-manager view. See gastrolog-asg4l.
 func (o *Orchestrator) GetChunkMeta(vaultID glid.GLID, chunkID chunk.ChunkID) (chunk.ChunkMeta, error) {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]

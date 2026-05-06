@@ -258,7 +258,7 @@ type CloudChunkInfo struct {
 	IngestIdxSize     int64
 	SourceIdxOffset   int64
 	SourceIdxSize     int64
-	NumFrames         int32
+
 	IngestTSMonotonic bool // see ChunkMeta.IngestTSMonotonic
 }
 
