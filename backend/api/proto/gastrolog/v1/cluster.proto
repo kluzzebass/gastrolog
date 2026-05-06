@@ -188,21 +188,15 @@ message ForwardRecordsResponse {
   int64 records_written = 1;
 }
 
-// ForwardTierApplyRequest carries bytes for the vault control-plane Raft
-// leader to apply. group_id is the vault ctl group (vault/<vaultGLID>/ctl);
-// command is typically OpTierFSM + tier GLID + tierfsm wire payload (see
-// vaultraft.MarshalTierCommand). RPC name is historical.
-message ForwardTierApplyRequest {
-  // UTF-8 multiraft group id (vault control-plane: vault/<vaultGLID>/ctl)
-  bytes group_id = 1;
-  bytes command = 2;
-}
-
-message ForwardTierApplyResponse {}
-
-// ForwardVaultApplyRequest carries a pre-marshaled vault control-plane FSM
-// command for the vault Raft leader. Parallels ForwardTierApply (vault-only
-// opcodes such as no-ops); tier chunk metadata uses ForwardTierApply + OpTierFSM.
+// ForwardVaultApplyRequest carries a pre-marshaled vault control-plane Raft
+// command for the leader to apply. group_id is the vault ctl group
+// (vault/<vaultGLID>/ctl); command is the marshaled FSM command bytes
+// (typically OpVaultChunkFSM + tier GLID + tierfsm wire payload, see
+// vaultraft.MarshalVaultChunkCommand).
+//
+// Replaces the historical ForwardTierApply RPC during the vault refactor
+// (gastrolog-257l7) — the two had identical schema and RPC behavior;
+// merged into one.
 message ForwardVaultApplyRequest {
   // UTF-8 vault control-plane group id: vault/<vaultGLID>/ctl
   bytes group_id = 1;

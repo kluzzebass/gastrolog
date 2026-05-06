@@ -741,24 +741,14 @@ func (s *Server) forwardApply(ctx context.Context, req *gastrologv1.ForwardApply
 	return &gastrologv1.ForwardApplyResponse{}, nil
 }
 
-// forwardTierApply handles the ForwardTierApply RPC. The payload is a
-// tierfsm command wrapped with OpVaultChunkFSM + tier ID (see
-// NewVaultCtlChunkApplyForwarder), and the group ID is the vault-ctl
-// Raft group ID. Dispatches to the shared groupApplyFn.
-func (s *Server) forwardTierApply(ctx context.Context, req *gastrologv1.ForwardTierApplyRequest) (*gastrologv1.ForwardTierApplyResponse, error) {
-	if s.groupApplyFn == nil {
-		return nil, status.Error(codes.Unavailable, "group apply function not configured")
-	}
-	if err := s.groupApplyFn(ctx, string(req.GetGroupId()), req.GetCommand()); err != nil {
-		return nil, status.Errorf(codes.Internal, "tier apply: %v", err)
-	}
-	return &gastrologv1.ForwardTierApplyResponse{}, nil
-}
-
-// forwardVaultApply handles the ForwardVaultApply RPC on the vault
-// control-plane Raft leader. The payload is a native vault-ctl FSM
-// command (no OpVaultChunkFSM wrapping); the group ID identifies the vault's
-// control-plane Raft group. Dispatches to the shared groupApplyFn.
+// forwardVaultApply handles the ForwardVaultApply RPC. The payload is a
+// vault-ctl Raft FSM command — either an OpVaultChunkFSM-wrapped tierfsm
+// command (see NewVaultCtlChunkApplyForwarder) or a native vault-ctl
+// command. The group ID is the vault-ctl Raft group ID. Dispatches to
+// the shared groupApplyFn.
+//
+// Replaces the historical forwardTierApply path during the vault refactor
+// (gastrolog-257l7); the two had identical schema and semantics.
 func (s *Server) forwardVaultApply(ctx context.Context, req *gastrologv1.ForwardVaultApplyRequest) (*gastrologv1.ForwardVaultApplyResponse, error) {
 	if s.groupApplyFn == nil {
 		return nil, status.Error(codes.Unavailable, "group apply function not configured")
@@ -989,10 +979,6 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			Handler:    listPeerManagedFilesHandler,
 		},
 		{
-			MethodName: "ForwardTierApply",
-			Handler:    forwardTierApplyHandler,
-		},
-		{
 			MethodName: "ForwardVaultApply",
 			Handler:    forwardVaultApplyHandler,
 		},
@@ -1079,25 +1065,6 @@ func forwardApplyHandler(srv any, ctx context.Context, dec func(any) error, inte
 	}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return s.forwardApply(ctx, req.(*gastrologv1.ForwardApplyRequest))
-	}
-	return interceptor(ctx, req, info, handler)
-}
-
-func forwardTierApplyHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	req := &gastrologv1.ForwardTierApplyRequest{}
-	if err := dec(req); err != nil {
-		return nil, err
-	}
-	s := srv.(*Server)
-	if interceptor == nil {
-		return s.forwardTierApply(ctx, req)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/gastrolog.v1.ClusterService/ForwardTierApply",
-	}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return s.forwardTierApply(ctx, req.(*gastrologv1.ForwardTierApplyRequest))
 	}
 	return interceptor(ctx, req, info, handler)
 }

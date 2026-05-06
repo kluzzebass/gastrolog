@@ -19,7 +19,7 @@ var ErrNoRaftLeader = errors.New("no raft leader")
 // VaultCtlChunkApplyForwarder applies tier FSM commands to the vault control-plane
 // Raft group. Every payload is wrapped as a vaultraft OpVaultChunkFSM entry
 // keyed by tier ID. If this node is the vault-ctl Raft leader, Apply
-// runs locally; otherwise it forwards via ForwardTierApply RPC to the
+// runs locally; otherwise it forwards via ForwardVaultApply RPC to the
 // current leader. Constructed via NewVaultCtlChunkApplyForwarder.
 type VaultCtlChunkApplyForwarder struct {
 	raft            *hraft.Raft
@@ -31,7 +31,7 @@ type VaultCtlChunkApplyForwarder struct {
 
 // NewVaultCtlChunkApplyForwarder creates a forwarder that applies tierfsm
 // commands to the vault control-plane Raft group, wrapping each payload
-// with OpVaultChunkFSM + tier ID. ForwardTierApply uses the vault ctl group_id.
+// with OpVaultChunkFSM + tier ID. ForwardVaultApply uses the vault ctl group_id.
 func NewVaultCtlChunkApplyForwarder(r *hraft.Raft, vaultCtlGroupID string, tierID glid.GLID, peers *PeerConns, timeout time.Duration) *VaultCtlChunkApplyForwarder {
 	return &VaultCtlChunkApplyForwarder{
 		raft:            r,
@@ -70,12 +70,12 @@ func (f *VaultCtlChunkApplyForwarder) forwardToLeader(data []byte) error {
 	ctx, cancel := context.WithTimeout(context.Background(), f.timeout)
 	defer cancel()
 
-	req := &gastrologv1.ForwardTierApplyRequest{
+	req := &gastrologv1.ForwardVaultApplyRequest{
 		GroupId: []byte(f.vaultCtlGroupID),
 		Command: data,
 	}
-	resp := &gastrologv1.ForwardTierApplyResponse{}
-	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardTierApply", req, resp); err != nil {
+	resp := &gastrologv1.ForwardVaultApplyResponse{}
+	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardVaultApply", req, resp); err != nil {
 		f.peers.Invalidate(string(leaderID), err)
 		return fmt.Errorf("forward tier apply RPC to %s: %w", leaderID, err)
 	}
