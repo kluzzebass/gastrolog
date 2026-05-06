@@ -74,6 +74,7 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg system.VaultConfig
 	// Register vault (even with zero tiers — tiers arrive incrementally via handleTierPut).
 	vault := NewVault(vaultCfg.ID, tiers...)
 	vault.Name = vaultCfg.Name
+	vault.StorageType = string(vaultCfg.Type)
 	o.vaults[vaultCfg.ID] = vault
 
 	// Compile filters immediately so the vault can receive records right away.

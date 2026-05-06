@@ -76,8 +76,14 @@ func (v *Vault) QueryEngine() *query.Engine {
 	return v.multiTierQuery
 }
 
-// Type returns the storage type of the active tier, or "" if no tiers.
+// Type returns the storage type of the vault. Reads StorageType (mirrored
+// from VaultConfig.Type at construction). Falls back to the active tier's
+// Type for legacy callers that constructed Vault before StorageType was a
+// field (notably NewVaultFromComponents and other test paths).
 func (v *Vault) Type() string {
+	if v.StorageType != "" {
+		return v.StorageType
+	}
 	if len(v.Tiers) == 0 {
 		return ""
 	}
