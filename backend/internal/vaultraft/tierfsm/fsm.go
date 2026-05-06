@@ -65,6 +65,15 @@ const (
 	// (orchestrator/vault_ops.finalizeImportedChunk) for replicated
 	// chunks. See gastrolog-1dg3i.
 	CmdAttachOffsets Command = 13
+
+	// CmdBeginSeal carries the Active → Sealing transition: the leader
+	// has stopped accepting appends on the chunk and is starting
+	// sealed-form assembly. Distinct from CmdSealChunk so the cluster
+	// observes the in-flight assembly window explicitly — uploads,
+	// retention triggers, and replication-completeness checks gate on
+	// State == Sealed; the Sealing entry is not yet a finished chunk
+	// even though it's no longer accepting writes. See gastrolog-1huz5.
+	CmdBeginSeal Command = 14
 )
 
 // ManifestEntry holds the full metadata for one chunk in this tier's
@@ -80,8 +89,11 @@ type ManifestEntry struct {
 	WriteEnd    time.Time
 	RecordCount int64
 	Bytes       int64
-	Sealed      bool
-	DiskBytes   int64
+	// Sealed is the legacy two-state flag. State carries the full
+	// three-state lifecycle (Active|Sealing|Sealed). gastrolog-1huz5.
+	Sealed    bool
+	State     chunk.ChunkState
+	DiskBytes int64
 
 	IngestStart time.Time
 	IngestEnd   time.Time
@@ -135,6 +147,7 @@ func (e *ManifestEntry) ToChunkMeta() chunk.ChunkMeta {
 		RecordCount:       e.RecordCount,
 		Bytes:             e.Bytes,
 		Sealed:            e.Sealed,
+		State:             e.effectiveState(),
 		DiskBytes:         e.DiskBytes,
 		IngestStart:       e.IngestStart,
 		IngestEnd:         e.IngestEnd,
@@ -144,6 +157,21 @@ func (e *ManifestEntry) ToChunkMeta() chunk.ChunkMeta {
 		CloudBacked:       e.CloudBacked,
 		Archived:          e.Archived,
 	}
+}
+
+// effectiveState returns the lifecycle state for this entry, falling
+// back to the legacy Sealed bool when State is the zero value (i.e.
+// the entry pre-dates Phase 3 and was loaded from a snapshot whose
+// schema didn't carry State). New writes always set State explicitly.
+// gastrolog-1huz5.
+func (e *ManifestEntry) effectiveState() chunk.ChunkState {
+	if e.State != chunk.ChunkStateUnknown {
+		return e.State
+	}
+	if e.Sealed {
+		return chunk.ChunkStateSealed
+	}
+	return chunk.ChunkStateActive
 }
 
 // FSM is a Raft FSM that maintains chunk metadata for a single tier.
@@ -548,6 +576,8 @@ func (f *FSM) applyLocked(cmd Command, payload []byte) (any, applyEffects) {
 		fx.prunedFinalizable = finalizable
 	case CmdAttachOffsets:
 		result = f.applyAttachOffsets(payload)
+	case CmdBeginSeal:
+		result = f.applyBeginSeal(payload)
 	default:
 		result = fmt.Errorf("unknown chunk FSM command: %d", cmd)
 	}
@@ -679,6 +709,7 @@ func (f *FSM) applyCreate(data []byte) error {
 		WriteStart:  writeStart,
 		IngestStart: ingestStart,
 		SourceStart: sourceStart,
+		State:       chunk.ChunkStateActive,
 	}
 	return nil
 }
@@ -717,6 +748,33 @@ func (f *FSM) applySeal(data []byte) error {
 		e.IngestTSMonotonic = data[64]&1 != 0
 	}
 	e.Sealed = true
+	e.State = chunk.ChunkStateSealed
+	return nil
+}
+
+// BeginSeal: [16 bytes ChunkID]
+//
+// Active → Sealing transition. The leader proposes this when its
+// rotation policy fires and before sealed-form assembly begins. The
+// chunk's metadata still reflects active-form bookkeeping (no WriteEnd
+// / final RecordCount yet — those come in CmdSealChunk). Idempotent:
+// repeated BeginSeals on the same chunk are harmless. See gastrolog-1huz5.
+func (f *FSM) applyBeginSeal(data []byte) error {
+	if len(data) < 16 {
+		return fmt.Errorf("begin seal: payload too short (%d bytes)", len(data))
+	}
+	var id chunk.ChunkID
+	copy(id[:], data[:16])
+
+	e := f.chunks[id]
+	if e == nil {
+		return fmt.Errorf("begin seal: %s not found", id)
+	}
+	// Don't drop back from Sealed to Sealing on a stale replay.
+	if e.State == chunk.ChunkStateSealed || e.Sealed {
+		return nil
+	}
+	e.State = chunk.ChunkStateSealing
 	return nil
 }
 
@@ -875,6 +933,15 @@ func MarshalSealChunk(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes i
 	if ingestTSMonotonic {
 		buf[65] = 1
 	}
+	return buf
+}
+
+// MarshalBeginSeal builds the Raft log data for a BeginSeal command.
+// gastrolog-1huz5.
+func MarshalBeginSeal(id chunk.ChunkID) []byte {
+	buf := make([]byte, 1+16)
+	buf[0] = byte(CmdBeginSeal)
+	copy(buf[1:17], id[:])
 	return buf
 }
 
@@ -1131,7 +1198,7 @@ func writeSectionHeader(w io.Writer, kind sectionKind, payloadLen uint32) error 
 func (s *fsmSnapshot) Release() {}
 
 // Snapshot encoding: each entry is a fixed-size binary record.
-// Layout per entry (122 bytes):
+// Layout per entry (123 bytes):
 //   16  ChunkID
 //   8   WriteStart (nanos)
 //   8   WriteEnd (nanos)
@@ -1148,9 +1215,10 @@ func (s *fsmSnapshot) Release() {}
 //   8   SourceIdxSize
 //   2   Flags (bit 0=sealed, 1=reserved, 2=cloudBacked, 3=archived,
 //                4=retentionPending, 5=transitionStreamed, 6=ingestTSMonotonic)
-// Total: 122 bytes. Phase-6 (gastrolog-69fd5) dropped NumFrames.
+//   1   State (chunk.ChunkState — Active/Sealing/Sealed). gastrolog-1huz5.
+// Total: 123 bytes.
 
-const entrySize = 122
+const entrySize = 123
 
 func encodeEntry(w io.Writer, e *ManifestEntry) error {
 	var buf [entrySize]byte
@@ -1191,6 +1259,7 @@ func encodeEntry(w io.Writer, e *ManifestEntry) error {
 		flags |= 1 << 6
 	}
 	binary.BigEndian.PutUint16(buf[120:122], flags)
+	buf[122] = byte(e.effectiveState())
 	_, err := w.Write(buf[:])
 	return err
 }
@@ -1312,6 +1381,7 @@ func readEntriesSection(r io.Reader, payloadLen uint32) ([]ManifestEntry, error)
 			RetentionPending:   flags&(1<<4) != 0,
 			TransitionStreamed: flags&(1<<5) != 0,
 			IngestTSMonotonic:  flags&(1<<6) != 0,
+			State:              chunk.ChunkState(buf[122]),
 		})
 	}
 	return entries, nil

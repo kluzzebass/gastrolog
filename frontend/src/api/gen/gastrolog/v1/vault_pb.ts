@@ -7,6 +7,54 @@ import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialM
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
 
 /**
+ * ChunkState is the lifecycle stage of a chunk on the vault-ctl FSM.
+ *
+ * Active   — accepting appends; only the leader's bytes are authoritative;
+ *            followers maintain a best-effort active-form mirror via
+ *            record streaming as a leadership-transfer safety net.
+ * Sealing  — leader has stopped accepting appends and is assembling the
+ *            sealed-form GLCB (writing data.glcb, building indexes,
+ *            computing the integrity digest). Cluster reads are still
+ *            served from the active-form layout — the sealed-form is in
+ *            flight but not yet committed.
+ * Sealed   — the leader has committed the sealed-form GLCB and the FSM
+ *            entry carries the integrity digest. Followers may now
+ *            replicate the sealed form byte-for-byte from the leader.
+ *
+ * gastrolog-1huz5.
+ *
+ * @generated from enum gastrolog.v1.ChunkState
+ */
+export enum ChunkState {
+  /**
+   * @generated from enum value: CHUNK_STATE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: CHUNK_STATE_ACTIVE = 1;
+   */
+  ACTIVE = 1,
+
+  /**
+   * @generated from enum value: CHUNK_STATE_SEALING = 2;
+   */
+  SEALING = 2,
+
+  /**
+   * @generated from enum value: CHUNK_STATE_SEALED = 3;
+   */
+  SEALED = 3,
+}
+// Retrieve enum metadata with: proto3.getEnumType(ChunkState)
+proto3.util.setEnumType(ChunkState, "gastrolog.v1.ChunkState", [
+  { no: 0, name: "CHUNK_STATE_UNSPECIFIED" },
+  { no: 1, name: "CHUNK_STATE_ACTIVE" },
+  { no: 2, name: "CHUNK_STATE_SEALING" },
+  { no: 3, name: "CHUNK_STATE_SEALED" },
+]);
+
+/**
  * @generated from message gastrolog.v1.ListVaultsRequest
  */
 export class ListVaultsRequest extends Message<ListVaultsRequest> {
@@ -341,6 +389,10 @@ export class ChunkMeta extends Message<ChunkMeta> {
   writeEnd?: Timestamp;
 
   /**
+   * sealed is the legacy two-state flag; transitionally true when state
+   * == CHUNK_STATE_SEALED. New consumers should read state directly so
+   * they can branch on Sealing explicitly. gastrolog-1huz5.
+   *
    * @generated from field: bool sealed = 4;
    */
   sealed = false;
@@ -459,6 +511,15 @@ export class ChunkMeta extends Message<ChunkMeta> {
    */
   pendingAckNodeIds: string[] = [];
 
+  /**
+   * Three-state lifecycle (gastrolog-1huz5). When unset for replay of
+   * pre-Phase-3 entries, callers derive the state from the legacy
+   * sealed bool: state == SEALED iff sealed == true.
+   *
+   * @generated from field: gastrolog.v1.ChunkState state = 21;
+   */
+  state = ChunkState.UNSPECIFIED;
+
   constructor(data?: PartialMessage<ChunkMeta>) {
     super();
     proto3.util.initPartial(data, this);
@@ -487,6 +548,7 @@ export class ChunkMeta extends Message<ChunkMeta> {
     { no: 18, name: "transition_streamed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 19, name: "replica_node_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
     { no: 20, name: "pending_ack_node_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 21, name: "state", kind: "enum", T: proto3.getEnumType(ChunkState) },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkMeta {

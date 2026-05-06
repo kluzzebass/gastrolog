@@ -108,10 +108,35 @@ message ListChunksResponse {
   repeated ChunkMeta chunks = 1;
 }
 
+// ChunkState is the lifecycle stage of a chunk on the vault-ctl FSM.
+//
+// Active   — accepting appends; only the leader's bytes are authoritative;
+//            followers maintain a best-effort active-form mirror via
+//            record streaming as a leadership-transfer safety net.
+// Sealing  — leader has stopped accepting appends and is assembling the
+//            sealed-form GLCB (writing data.glcb, building indexes,
+//            computing the integrity digest). Cluster reads are still
+//            served from the active-form layout — the sealed-form is in
+//            flight but not yet committed.
+// Sealed   — the leader has committed the sealed-form GLCB and the FSM
+//            entry carries the integrity digest. Followers may now
+//            replicate the sealed form byte-for-byte from the leader.
+//
+// gastrolog-1huz5.
+enum ChunkState {
+  CHUNK_STATE_UNSPECIFIED = 0;
+  CHUNK_STATE_ACTIVE = 1;
+  CHUNK_STATE_SEALING = 2;
+  CHUNK_STATE_SEALED = 3;
+}
+
 message ChunkMeta {
   bytes id = 1;
   google.protobuf.Timestamp write_start = 2;
   google.protobuf.Timestamp write_end = 3;
+  // sealed is the legacy two-state flag; transitionally true when state
+  // == CHUNK_STATE_SEALED. New consumers should read state directly so
+  // they can branch on Sealing explicitly. gastrolog-1huz5.
   bool sealed = 4;
   int64 record_count = 5;
   int64 bytes = 6;
@@ -142,6 +167,10 @@ message ChunkMeta {
   // inspector show which specific node is the laggard holding up a stuck
   // delete. See gastrolog-51gme.
   repeated string pending_ack_node_ids = 20;
+  // Three-state lifecycle (gastrolog-1huz5). When unset for replay of
+  // pre-Phase-3 entries, callers derive the state from the legacy
+  // sealed bool: state == SEALED iff sealed == true.
+  ChunkState state = 21;
 }
 
 message GetChunkRequest {
