@@ -343,6 +343,10 @@ func (s *Store) PutVault(ctx context.Context, cfg system.VaultConfig) error {
 	defer s.mu.Unlock()
 
 	s.vaults[cfg.ID] = copyVaultConfig(cfg)
+	// Vault refactor (gastrolog-257l7): if tiers and placements exist for
+	// this vault from earlier writes, merge them in now. Handles the
+	// PutTier + SetTierPlacements + PutVault ordering used by tests.
+	s.refreshVaultFromTiersLocked(cfg.ID)
 	return nil
 }
 
@@ -626,7 +630,54 @@ func (s *Store) PutTier(ctx context.Context, tier system.TierConfig) error {
 	defer s.mu.Unlock()
 
 	s.tiers[tier.ID] = tier
+	// Vault refactor (gastrolog-257l7): mirror the merged storage/lifecycle
+	// fields onto the owning vault so consumers reading from VaultConfig see
+	// the same data as the tier-keyed map.
+	s.refreshVaultFromTiersLocked(tier.VaultID)
 	return nil
+}
+
+// refreshVaultFromTiersLocked re-runs MergeVaultFromTiers for the given
+// vaultID and rewrites the vault entry. Called inside the store mutex,
+// so it must use the locked accessors only. Bridge during the vault
+// refactor (gastrolog-257l7) — once tiers go away, the merged fields
+// become the only source of truth and this helper disappears.
+func (s *Store) refreshVaultFromTiersLocked(vaultID glid.GLID) {
+	if vaultID == (glid.GLID{}) {
+		return
+	}
+	v, ok := s.vaults[vaultID]
+	if !ok {
+		// Tier created before vault — vault PutVault path will pick up the
+		// merge instead.
+		return
+	}
+	tiers := make([]system.TierConfig, 0, len(s.tiers))
+	for _, t := range s.tiers {
+		tiers = append(tiers, t)
+	}
+	merged := system.MergeVaultFromTiers(v, tiers)
+	// Mirror placements onto VaultConfig.Placements as well so the FSM
+	// bridge's invariant holds for the memory store too.
+	if placements, ok := s.tierPlacements[tierIDForVault(tiers, vaultID)]; ok {
+		if len(placements) > 0 {
+			merged.Placements = make([]system.TierPlacement, len(placements))
+			copy(merged.Placements, placements)
+		} else {
+			merged.Placements = nil
+		}
+	}
+	s.vaults[vaultID] = copyVaultConfig(merged)
+}
+
+// tierIDForVault returns the first tier ID owned by the given vault, or
+// zero if none. Locked-context helper used by refreshVaultFromTiersLocked.
+func tierIDForVault(tiers []system.TierConfig, vaultID glid.GLID) glid.GLID {
+	ids := system.VaultTierIDs(tiers, vaultID)
+	if len(ids) == 0 {
+		return glid.GLID{}
+	}
+	return ids[0]
 }
 
 func (s *Store) DeleteTier(ctx context.Context, id glid.GLID, _ bool) error {
@@ -1121,6 +1172,12 @@ func (s *Store) SetTierPlacements(_ context.Context, tierID glid.GLID, placement
 	cp := make([]system.TierPlacement, len(placements))
 	copy(cp, placements)
 	s.tierPlacements[tierID] = cp
+	// Vault refactor (gastrolog-257l7): mirror placements onto the owning
+	// vault's VaultConfig so consumers reading from VaultConfig see the
+	// same set as Runtime.TierPlacements.
+	if tier, ok := s.tiers[tierID]; ok {
+		s.refreshVaultFromTiersLocked(tier.VaultID)
+	}
 	return nil
 }
 
