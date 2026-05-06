@@ -72,11 +72,8 @@ func (o *Orchestrator) DrainTier(ctx context.Context, vaultID, tierID glid.GLID,
 
 	// Find the tier instance.
 	var tier *VaultInstance
-	for _, t := range vault.Tiers {
-		if t.TierID == tierID {
-			tier = t
-			break
-		}
+	if vault.Instance != nil && vault.Instance.TierID == tierID {
+		tier = vault.Instance
 	}
 	if tier == nil {
 		o.mu.Unlock()
@@ -173,11 +170,8 @@ func (o *Orchestrator) tierDrainWorker(ctx context.Context, vaultID, tierID glid
 		return
 	}
 	var tier *VaultInstance
-	for _, t := range vault.Tiers {
-		if t.TierID == tierID {
-			tier = t
-			break
-		}
+	if vault.Instance != nil && vault.Instance.TierID == tierID {
+		tier = vault.Instance
 	}
 	o.mu.RUnlock()
 

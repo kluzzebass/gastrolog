@@ -7,16 +7,14 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import {
   useConfig,
   usePutVault,
-  usePutTier,
   useGenerateName,
 } from "../../api/hooks";
-import { TierConfig, TierType, RetentionRule } from "../../api/gen/gastrolog/v1/system_pb";
+import { TierType, VaultType, RetentionRule, VaultConfig } from "../../api/gen/gastrolog/v1/system_pb";
 import { useToast } from "../Toast";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
-import { FormField, TextInput, SelectInput, NumberInput, SpinnerInput } from "./FormField";
+import { FormField, TextInput, SelectInput, SpinnerInput } from "./FormField";
 import { Checkbox } from "./Checkbox";
-import { DropdownButton } from "./Buttons";
 import { sortByName } from "../../lib/sort";
 import { VaultSettingsCard } from "./VaultSettingsCard";
 
@@ -111,6 +109,17 @@ export function tierTypeEnum(t: TierTypeLabel): TierType {
   }
 }
 
+export function vaultTypeEnum(t: TierTypeLabel): VaultType {
+  switch (t) {
+    case "memory":
+      return VaultType.MEMORY;
+    case "file":
+      return VaultType.FILE;
+    case "jsonl":
+      return VaultType.JSONL;
+  }
+}
+
 /** Map a TierType proto enum to its display label. */
 export function tierTypeLabel(type: TierType): string {
   switch (type) {
@@ -125,21 +134,6 @@ export function tierTypeLabel(type: TierType): string {
 // Tier completeness check
 // ---------------------------------------------------------------------------
 
-// Extracted outside component so try/catch doesn't block the React Compiler.
-async function createVaultWithTiers(
-  vaultId: string,
-  name: string,
-  enabled: boolean,
-  putVault: { mutateAsync: (args: { id: string; name: string; enabled?: boolean }) => Promise<unknown> },
-  configs: TierConfig[],
-  putTier: { mutateAsync: (args: { config: TierConfig }) => Promise<unknown> },
-): Promise<void> {
-  await putVault.mutateAsync({ id: vaultId, name, enabled });
-  for (const config of configs) {
-    await putTier.mutateAsync({ config });
-  }
-}
-
 function extractErrorMessage(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
 }
@@ -150,7 +144,7 @@ export function isTierComplete(tier: TierEntry, _hasCloudServices: boolean): boo
       return true;
     case "file":
       // Single storage class for both local-only and cloud-backed file
-      // tiers — the active chunk and warm cache live at the same chunkDir
+      // vaults — the active chunk and warm cache live at the same chunkDir
       // path, so no separate "active" or "cache" class is meaningful.
       return tier.storageClass !== "";
     case "jsonl":
@@ -159,7 +153,7 @@ export function isTierComplete(tier: TierEntry, _hasCloudServices: boolean): boo
 }
 
 // ---------------------------------------------------------------------------
-// Add-form reducer
+// Add-form reducer (single-instance shape per gastrolog-3iy5l)
 // ---------------------------------------------------------------------------
 
 interface AddFormState {
@@ -167,7 +161,7 @@ interface AddFormState {
   name: string;
   namePlaceholder: string;
   enabled: boolean;
-  tiers: TierEntry[];
+  storage: TierEntry;
 }
 
 const addFormInitial: AddFormState = {
@@ -175,17 +169,16 @@ const addFormInitial: AddFormState = {
   name: "",
   namePlaceholder: "",
   enabled: true,
-  tiers: [],
+  storage: emptyTierEntry("file"),
 };
 
 type AddFormAction =
   | { type: "open" }
   | { type: "close" }
   | { type: "reset" }
-  | { type: "set"; patch: Partial<AddFormState> }
-  | { type: "addTier"; tierType: TierTypeLabel }
-  | { type: "removeTier"; key: string }
-  | { type: "updateTier"; key: string; patch: Partial<TierEntry> };
+  | { type: "set"; patch: Partial<Omit<AddFormState, "storage">> }
+  | { type: "setType"; tierType: TierTypeLabel }
+  | { type: "updateStorage"; patch: Partial<TierEntry> };
 
 function addFormReducer(state: AddFormState, action: AddFormAction): AddFormState {
   switch (action.type) {
@@ -196,17 +189,10 @@ function addFormReducer(state: AddFormState, action: AddFormAction): AddFormStat
       return addFormInitial;
     case "set":
       return { ...state, ...action.patch };
-    case "addTier":
-      return { ...state, tiers: [...state.tiers, emptyTierEntry(action.tierType)] };
-    case "removeTier":
-      return { ...state, tiers: state.tiers.filter((t) => t.key !== action.key) };
-    case "updateTier":
-      return {
-        ...state,
-        tiers: state.tiers.map((t) =>
-          t.key === action.key ? { ...t, ...action.patch } : t,
-        ),
-      };
+    case "setType":
+      return { ...state, storage: emptyTierEntry(action.tierType) };
+    case "updateStorage":
+      return { ...state, storage: { ...state.storage, ...action.patch } };
   }
 }
 
@@ -215,9 +201,8 @@ function addFormReducer(state: AddFormState, action: AddFormAction): AddFormStat
 // Tier entry card
 // ---------------------------------------------------------------------------
 
-export function TierEntryCard({
+export function VaultStorageForm({
   tier,
-  index,
   dark,
   storageClassOptions,
   cloudServiceOptions,
@@ -226,11 +211,10 @@ export function TierEntryCard({
   nodeOptions,
   vaultName,
   maxRF,
+  onTypeChange,
   onUpdate,
-  onRemove,
 }: Readonly<{
   tier: TierEntry;
-  index: number;
   dark: boolean;
   storageClassOptions: { value: string; label: string }[];
   cloudServiceOptions: { value: string; label: string }[];
@@ -239,8 +223,8 @@ export function TierEntryCard({
   nodeOptions: { value: string; label: string }[];
   vaultName: string;
   maxRF?: number;
+  onTypeChange?: (t: TierTypeLabel) => void;
   onUpdate: (patch: Partial<TierEntry>) => void;
-  onRemove: () => void;
 }>) {
   const c = useThemeClass(dark);
   return (
@@ -250,41 +234,20 @@ export function TierEntryCard({
         "border-light-border/60 bg-light-base/40",
       )}`}
     >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span
-            className={`text-[0.7em] font-mono tabular-nums ${c("text-text-muted", "text-light-text-muted")}`}
-          >
-            {index + 1}
-          </span>
-          <span
-            className={`px-2 py-0.5 text-[0.7em] font-mono rounded ${c(
-              "bg-copper/15 text-copper",
-              "bg-copper/15 text-copper",
-            )}`}
-          >
-            {tierTypeLabel(tierTypeEnum(tier.type))}
-          </span>
-          {index === 0 && (
-            <span
-              className={`text-[0.7em] ${c("text-text-muted", "text-light-text-muted")}`}
-            >
-              hottest
-            </span>
-          )}
-        </div>
-        <button
-          type="button"
-          onClick={onRemove}
-          className={`px-1.5 py-0.5 text-[0.8em] rounded transition-colors ${c(
-            "text-text-muted hover:text-severity-error hover:bg-ink-hover",
-            "text-light-text-muted hover:text-severity-error hover:bg-light-hover",
-          )}`}
-          aria-label="Remove tier"
-        >
-          &times;
-        </button>
-      </div>
+      {onTypeChange && (
+        <FormField label="Storage Type" dark={dark}>
+          <SelectInput
+            value={tier.type}
+            onChange={(v) => onTypeChange(v as TierTypeLabel)}
+            options={[
+              { value: "memory", label: "Memory" },
+              { value: "file", label: "File" },
+              { value: "jsonl", label: "JSONL sink" },
+            ]}
+            dark={dark}
+          />
+        </FormField>
+      )}
 
       {tier.type === "memory" && (
         <FormField label="Budget" dark={dark} description="Leave empty for system default">
@@ -401,7 +364,7 @@ export function TierEntryCard({
             <TextInput
               value={tier.path}
               onChange={(v) => onUpdate({ path: v })}
-              placeholder={`jsonl/${vaultName || "vault"}/sink_${String(index + 1)}.jsonl`}
+              placeholder={`jsonl/${vaultName || "vault"}.jsonl`}
               dark={dark}
               mono
             />
@@ -457,10 +420,8 @@ export function TierEntryCard({
 // ---------------------------------------------------------------------------
 
 export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onOpenInspector }: Readonly<{ dark: boolean; expandTarget?: string | null; onExpandTargetConsumed?: () => void; onOpenInspector?: (inspectorParam: string) => void }>) {
-  const c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
   const putVault = usePutVault();
-  const putTier = usePutTier();
   const { addToast } = useToast();
 
   const { isExpanded, toggle: toggleCard, setExpandedCards } = useExpandedCards();
@@ -538,9 +499,9 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
     .sort((a, b) => (a.name || encode(a.id)).localeCompare(b.name || encode(b.id)))
     .map((rp) => ({ value: encode(rp.id), label: rp.name || encode(rp.id) }));
 
-  // Validation: at least one tier, all tiers complete, no name conflict
-  const allTiersComplete = addForm.tiers.length > 0 && addForm.tiers.every((t) => isTierComplete(t, cloudServiceOptions.length > 0));
-  const createDisabled = nameConflict || !allTiersComplete;
+  // Validation: storage shape complete, no name conflict.
+  const storageComplete = isTierComplete(addForm.storage, cloudServiceOptions.length > 0);
+  const createDisabled = nameConflict || !storageComplete;
 
   // Auto-expand a vault when navigated to from another view.
   const [consumedExpandTarget, setConsumedExpandTarget] = useState<string | null>(null);
@@ -556,43 +517,39 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
   const handleCreate = () => {
     const name = addForm.name.trim() || addForm.namePlaceholder || "vault";
     const vaultIdBytes = crypto.getRandomValues(new Uint8Array(16));
-    const vaultId = encode(vaultIdBytes);
+    const storage = addForm.storage;
+    const cloudBacked = isCloudBacked(storage);
 
-    // Build tier configs outside try/catch (React Compiler can't optimize
-    // conditional expressions inside try/catch).
-    const tierConfigs = addForm.tiers.map((tier, i) => {
-      // Cloud-backed-ness is derived from cloudServiceId presence, not the
-      // type discriminator — file tiers can be either local-only or
-      // cloud-backed depending on whether a cloud service is bound.
-      // Storage class governs placement either way.
-      const cloudBacked = isCloudBacked(tier);
-      return new TierConfig({
-        name: tier.type,
-        type: tierTypeEnum(tier.type),
-        vaultId: decode(vaultId),
-        position: i,
-        storageClass: tier.type === "file" ? parseInt(tier.storageClass, 10) || 0 : 0,
-        cloudServiceId: cloudBacked ? decode(tier.cloudServiceId) : new Uint8Array(0),
-        cacheEviction: cloudBacked ? (tier.cacheEviction || "lru") : "",
-        cacheBudget: cloudBacked ? (tier.cacheBudget || "") : "",
-        cacheTtl: cloudBacked ? (tier.cacheTTL || "") : "",
-        memoryBudgetBytes: tier.type === "memory" ? parseMemoryBudget(tier.memoryBudget) : protoInt64.zero,
-        rotationPolicyId: tier.rotationPolicyId ? decode(tier.rotationPolicyId) : new Uint8Array(0),
-        retentionRules: tier.retentionPolicyId
-          ? [new RetentionRule({ retentionPolicyId: decode(tier.retentionPolicyId), action: retentionActionForPosition(i, addForm.tiers.length) })]
-          : [],
-        replicationFactor: parseInt(tier.replicationFactor, 10) || 1,
-      });
+    // Phase 2 (gastrolog-3iy5l): a vault carries its own storage shape;
+    // PutVault is sufficient on its own — the FSM auto-synthesizes the
+    // matching TierConfig until that field set lives only on the vault.
+    const vaultCfg = new VaultConfig({
+      id: vaultIdBytes,
+      name,
+      enabled: addForm.enabled,
+      type: vaultTypeEnum(storage.type),
+      storageClass: storage.type === "file" ? parseInt(storage.storageClass, 10) || 0 : 0,
+      cloudServiceId: cloudBacked ? decode(storage.cloudServiceId) : new Uint8Array(0),
+      cacheEviction: cloudBacked ? (storage.cacheEviction || "lru") : "",
+      cacheBudget: cloudBacked ? (storage.cacheBudget || "") : "",
+      cacheTtl: cloudBacked ? (storage.cacheTTL || "") : "",
+      memoryBudgetBytes: storage.type === "memory" ? parseMemoryBudget(storage.memoryBudget) : protoInt64.zero,
+      rotationPolicyId: storage.rotationPolicyId ? decode(storage.rotationPolicyId) : new Uint8Array(0),
+      retentionRules: storage.retentionPolicyId
+        ? [new RetentionRule({ retentionPolicyId: decode(storage.retentionPolicyId), action: "expire" })]
+        : [],
+      replicationFactor: parseInt(storage.replicationFactor, 10) || 1,
+      path: storage.type === "jsonl" ? storage.path : "",
     });
 
     setIsCreating(true);
-    createVaultWithTiers(vaultId, name, addForm.enabled, putVault, tierConfigs, putTier).then(
+    putVault.mutateAsync({ config: vaultCfg }).then(
       () => { setIsCreating(false); addToast(`Vault "${name}" created`, "info"); dispatchAdd({ type: "reset" }); },
       (err: unknown) => { setIsCreating(false); addToast(extractErrorMessage(err, "Failed to create vault"), "error"); },
     );
   };
 
-  const isPending = isCreating || putVault.isPending || putTier.isPending;
+  const isPending = isCreating || putVault.isPending;
 
   return (
     <SettingsSection
@@ -634,62 +591,19 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
             dark={dark}
           />
 
-          {/* Tiers section */}
-          <div className="flex flex-col gap-2 pt-1">
-            <div className="flex items-center justify-between">
-              <span
-                className={`text-[0.8em] font-medium ${c("text-text-muted", "text-light-text-muted")}`}
-              >
-                Tiers
-                {addForm.tiers.length === 0 && (
-                  <span
-                    className={`ml-2 text-[0.9em] font-normal ${c("text-text-muted", "text-light-text-muted")}`}
-                  >
-                    at least one required
-                  </span>
-                )}
-              </span>
-              <DropdownButton
-                label="+ Add Tier"
-                items={[
-                  { value: "memory", label: "Memory" },
-                  { value: "file", label: "File" },
-                ]}
-                onSelect={(v) => dispatchAdd({ type: "addTier", tierType: v as TierTypeLabel })}
-                dark={dark}
-              />
-            </div>
-
-            {addForm.tiers.length > 0 && (
-              <p
-                className={`text-[0.75em] leading-snug ${c("text-text-muted", "text-light-text-muted")}`}
-              >
-                First tier is hottest. Data migrates down the list as it ages.
-              </p>
-            )}
-
-            <div className="flex flex-col gap-2">
-              {addForm.tiers.map((tier, i) => (
-                <TierEntryCard
-                  key={tier.key}
-                  tier={tier}
-                  index={i}
-                  dark={dark}
-                  storageClassOptions={storageClassOptions}
-                  cloudServiceOptions={cloudServiceOptions}
-                  rotationPolicyOptions={rotationPolicyOptions}
-                  retentionPolicyOptions={retentionPolicyOptions}
-                  nodeOptions={(config?.nodeConfigs ?? []).map((n) => ({ value: encode(n.id), label: n.name || encode(n.id) })).sort((a, b) => a.label.localeCompare(b.label))}
-                  vaultName={addForm.name || addForm.namePlaceholder || ""}
-                  maxRF={maxRFForTier(tier)}
-                  onUpdate={(patch) =>
-                    dispatchAdd({ type: "updateTier", key: tier.key, patch })
-                  }
-                  onRemove={() => dispatchAdd({ type: "removeTier", key: tier.key })}
-                />
-              ))}
-            </div>
-          </div>
+          <VaultStorageForm
+            tier={addForm.storage}
+            dark={dark}
+            storageClassOptions={storageClassOptions}
+            cloudServiceOptions={cloudServiceOptions}
+            rotationPolicyOptions={rotationPolicyOptions}
+            retentionPolicyOptions={retentionPolicyOptions}
+            nodeOptions={(config?.nodeConfigs ?? []).map((n) => ({ value: encode(n.id), label: n.name || encode(n.id) })).sort((a, b) => a.label.localeCompare(b.label))}
+            vaultName={addForm.name || addForm.namePlaceholder || ""}
+            maxRF={maxRFForTier(addForm.storage)}
+            onTypeChange={(t) => dispatchAdd({ type: "setType", tierType: t })}
+            onUpdate={(patch) => dispatchAdd({ type: "updateStorage", patch })}
+          />
         </AddFormCard>
       )}
 

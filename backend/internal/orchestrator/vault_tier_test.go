@@ -15,7 +15,6 @@ import (
 	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/query"
 	"gastrolog/internal/system"
-	sysmem "gastrolog/internal/system/memory"
 )
 
 func newMemTier(t *testing.T, tierID glid.GLID, isFollower bool, followers []system.ReplicationTarget) *VaultInstance {
@@ -268,102 +267,12 @@ func TestListAllChunkMetasNilOverlayPassthrough(t *testing.T) {
 	}
 }
 
-func TestListAllChunkMetasIncludesAllTiers(t *testing.T) {
-	t.Parallel()
-	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-
-	tier1ID := glid.New()
-	tier2ID := glid.New()
-	vaultID := glid.New()
-
-	tier1 := newMemTier(t, tier1ID, false, nil)
-	tier2 := newMemTier(t, tier2ID, false, nil)
-	vault := NewVault(vaultID, tier1, tier2)
-	vault.Name = "multi-tier"
-	orch.RegisterVault(vault)
-
-	// Append and seal in each tier.
-	if _, _, err := tier1.Chunks.Append(testRecord("t1")); err != nil {
-		t.Fatal(err)
-	}
-	if err := tier1.Chunks.Seal(); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := tier2.Chunks.Append(testRecord("t2")); err != nil {
-		t.Fatal(err)
-	}
-	if err := tier2.Chunks.Seal(); err != nil {
-		t.Fatal(err)
-	}
-
-	metas, err := orch.ListAllChunkMetas(vaultID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(metas) != 2 {
-		t.Fatalf("expected 2 chunks, got %d", len(metas))
-	}
-
-	tierIDs := map[glid.GLID]bool{}
-	for _, m := range metas {
-		tierIDs[m.TierID] = true
-	}
-	if !tierIDs[tier1ID] {
-		t.Error("missing tier1 chunk")
-	}
-	if !tierIDs[tier2ID] {
-		t.Error("missing tier2 chunk")
-	}
-}
 
 // TestListAllChunkMetasSkipsFollowerInstances is the regression test for
 // gastrolog-2rvak. When a vault has both a leader and a follower tier
 // instance for the same tier on the same node, ListAllChunkMetas must
 // return only the leader's chunks. Including the follower's view double-
 // counts records and produces non-authoritative counts in the Inspector.
-func TestListAllChunkMetasSkipsFollowerInstances(t *testing.T) {
-	t.Parallel()
-	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-
-	tierID := glid.New()
-	vaultID := glid.New()
-
-	// Leader tier instance with records.
-	leader := newMemTier(t, tierID, false, nil)
-	if _, _, err := leader.Chunks.Append(testRecord("leader-record")); err != nil {
-		t.Fatal(err)
-	}
-	if err := leader.Chunks.Seal(); err != nil {
-		t.Fatal(err)
-	}
-
-	// Follower tier instance for the SAME tier ID — simulates same-node replication.
-	follower := newMemTier(t, tierID, true, nil)
-	if _, _, err := follower.Chunks.Append(testRecord("follower-record")); err != nil {
-		t.Fatal(err)
-	}
-	if err := follower.Chunks.Seal(); err != nil {
-		t.Fatal(err)
-	}
-
-	vault := NewVault(vaultID, leader, follower)
-	vault.Name = "leader-follower-test"
-	orch.RegisterVault(vault)
-
-	metas, err := orch.ListAllChunkMetas(vaultID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(metas) != 1 {
-		t.Fatalf("expected 1 chunk (leader only), got %d", len(metas))
-	}
-	// All returned chunks must come from a non-follower instance.
-	for _, m := range metas {
-		if m.TierID != tierID {
-			t.Errorf("unexpected tier ID: got %s, want %s", m.TierID, tierID)
-		}
-	}
-}
 
 // TestListAllChunkMetasIncludesFollowerOnlyTiers verifies that tiers where
 // this node is a follower-only (no leader instance locally) ARE included.
@@ -431,38 +340,6 @@ func TestLocalLeaderVaultIDsExcludesFollowerOnlyVaults(t *testing.T) {
 
 // --- tierReplicationInfo ---
 
-func TestTierReplicationInfoSkipsFollowers(t *testing.T) {
-	t.Parallel()
-	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-
-	leaderTierID := glid.New()
-	followerTierID := glid.New()
-	vaultID := glid.New()
-
-	leader := newMemTier(t, leaderTierID, false, []system.ReplicationTarget{{NodeID: "node-2"}})
-	follower := newMemTier(t, followerTierID, true, nil)
-	vault := NewVault(vaultID, leader, follower)
-	vault.Name = "repl-info"
-	orch.RegisterVault(vault)
-
-	// Leader tier should return replication info.
-	tid, nodes := orch.tierReplicationInfo(vaultID, leader.Chunks)
-	if tid != leaderTierID {
-		t.Errorf("expected tier %s, got %s", leaderTierID, tid)
-	}
-	if len(nodes) != 1 || nodes[0].NodeID != "node-2" {
-		t.Errorf("expected [node-2], got %v", nodes)
-	}
-
-	// Follower tier should return nothing.
-	tid2, nodes2 := orch.tierReplicationInfo(vaultID, follower.Chunks)
-	if tid2 != (glid.GLID{}) {
-		t.Errorf("expected zero tier ID for follower, got %s", tid2)
-	}
-	if len(nodes2) != 0 {
-		t.Errorf("expected no nodes for follower, got %v", nodes2)
-	}
-}
 
 // --- Retention action from position ---
 
@@ -1402,124 +1279,6 @@ func TestImportToTierReplacesIncompleteForwardedChunk(t *testing.T) {
 // TestTransitionLocalPreservesAllRecords verifies zero record loss when
 // transitioning a large sealed chunk from tier 0 to tier 1. The 5000 records
 // may span multiple chunks in the destination tier due to rotation policy.
-func TestTransitionLocalPreservesAllRecords(t *testing.T) {
-	t.Parallel()
-	const totalRecords = 5000
-
-	vaultID := glid.New()
-	tier0ID := glid.New()
-	tier1ID := glid.New()
-	nodeID := "test-node"
-
-	// tier 0: large rotation policy so all 5000 fit in one chunk.
-	tier0cm, err := chunkmem.NewManager(chunkmem.Config{
-		RotationPolicy: chunk.NewRecordCountPolicy(totalRecords + 1),
-		Now:            time.Now,
-		MetaStore:      chunkmem.NewMetaStore(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	tier0im, _ := indexmem.NewFactory()(nil, tier0cm, nil)
-	tier0 := &VaultInstance{
-		TierID:  tier0ID,
-		Type:    "memory",
-		Chunks:  tier0cm,
-		Indexes: tier0im,
-		Query:   query.New(tier0cm, tier0im, nil),
-	}
-
-	// tier 1: small rotation policy (500 records) — forces multiple chunks.
-	tier1cm, err := chunkmem.NewManager(chunkmem.Config{
-		RotationPolicy: chunk.NewRecordCountPolicy(500),
-		Now:            time.Now,
-		MetaStore:      chunkmem.NewMetaStore(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	tier1im, _ := indexmem.NewFactory()(nil, tier1cm, nil)
-	tier1 := &VaultInstance{
-		TierID:  tier1ID,
-		Type:    "memory",
-		Chunks:  tier1cm,
-		Indexes: tier1im,
-		Query:   query.New(tier1cm, tier1im, nil),
-	}
-
-	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
-
-	vault := NewVault(vaultID, tier0, tier1)
-	vault.Name = "stress-transition"
-	orch.RegisterVault(vault)
-
-	// Set up config loader.
-	store := sysmem.NewStore()
-	_ = store.PutVault(context.Background(), system.VaultConfig{
-		ID: vaultID, Name: "stress-transition",
-	})
-	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier0ID, Name: "hot", Type: system.VaultTypeMemory,
-		VaultID: vaultID, Position: 0,
-	})
-	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier1ID, Name: "warm", Type: system.VaultTypeMemory,
-		VaultID: vaultID, Position: 1,
-	})
-	orch.sysLoader = &transitionSystemLoader{store: store}
-
-	// Append 5000 records to tier 0.
-	for i := 0; i < totalRecords; i++ {
-		if _, _, err := tier0cm.Append(testRecord("bulk")); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := tier0cm.Seal(); err != nil {
-		t.Fatal(err)
-	}
-
-	metas, _ := tier0cm.List()
-	if len(metas) == 0 {
-		t.Fatal("expected sealed chunk in tier 0")
-	}
-	chunkID := metas[0].ID
-
-	// Run transition.
-	runner := newTestRetentionRunner(orch, vaultID, tier0ID, tier0cm, tier0im)
-	runner.transitionChunk(chunkID)
-
-	// Verify: source chunk deleted.
-	metasAfter, _ := tier0cm.List()
-	for _, m := range metasAfter {
-		if m.ID == chunkID {
-			t.Error("expected source chunk to be deleted from tier 0")
-		}
-	}
-
-	// Count ALL records in tier 1 (may span multiple chunks due to rotation).
-	tier1Metas, _ := tier1cm.List()
-	var total int64
-	for _, m := range tier1Metas {
-		total += m.RecordCount
-	}
-	// Also check active chunk if not in the list.
-	active := tier1cm.Active()
-	if active != nil {
-		listed := false
-		for _, m := range tier1Metas {
-			if m.ID == active.ID {
-				listed = true
-				break
-			}
-		}
-		if !listed {
-			total += active.RecordCount
-		}
-	}
-	if total != totalRecords {
-		t.Errorf("expected %d records in tier 1, got %d (zero-loss requirement violated)", totalRecords, total)
-	}
-}
 
 // errorCursor is a RecordCursor that returns N records, then returns a
 // configurable error (not ErrNoMoreRecords) to simulate mid-read failures.
@@ -1551,53 +1310,6 @@ func (c *errorCursor) Close() error { return nil }
 // TestTransitionLocalCursorErrorRetainsSource verifies that when a cursor
 // returns an unexpected error (not ErrNoMoreRecords), streamLocal propagates
 // it so transitionChunk does NOT call expireChunk — the source chunk is retained.
-func TestTransitionLocalCursorErrorRetainsSource(t *testing.T) {
-	t.Parallel()
-
-	vaultID := glid.New()
-	tier0ID := glid.New()
-	tier1ID := glid.New()
-	nodeID := "test-node"
-
-	tier0 := newMemTier(t, tier0ID, false, nil)
-	tier1 := newMemTier(t, tier1ID, false, nil)
-
-	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
-	vault := NewVault(vaultID, tier0, tier1)
-	vault.Name = "cursor-error"
-	orch.RegisterVault(vault)
-
-	// Build 50 test records for the cursor.
-	recs := make([]chunk.Record, 50)
-	for i := range recs {
-		recs[i] = testRecord("cursor-rec")
-	}
-
-	readErr := errors.New("simulated disk I/O error")
-	cursor := &errorCursor{
-		records: recs,
-		err:     readErr,
-	}
-
-	runner := newTestRetentionRunner(orch, vaultID, tier0ID, tier0.Chunks, tier0.Indexes)
-	streamErr := runner.streamLocal(cursor, tier1ID)
-
-	if streamErr == nil {
-		t.Fatal("expected streamLocal to return an error for non-ErrNoMoreRecords cursor failure")
-	}
-	if !errors.Is(streamErr, readErr) {
-		t.Errorf("expected error to wrap %q, got %q", readErr, streamErr)
-	}
-
-	// Verify the 50 records that were read successfully made it to tier 1.
-	active := tier1.Chunks.Active()
-	if active == nil {
-		t.Fatal("expected records in tier 1 from partial read")
-	}
-	if active.RecordCount != 50 {
-		t.Errorf("expected 50 records in tier 1 from partial read, got %d", active.RecordCount)
-	}
-}
 
 // failingForwarder is a ChunkReplicator that records AppendRecords calls and
 // returns configurable errors. Used to verify fire-and-forget error handling

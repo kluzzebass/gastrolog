@@ -40,16 +40,12 @@ var ErrVaultNotReady = errors.New("vault not ready")
 // this node. Returns nil when ready, ErrVaultNotReady with detail otherwise.
 // See the package-level canonical definition in vault_readiness.go.
 func (v *Vault) ReadinessErr() error {
-	if len(v.Tiers) == 0 {
-		return fmt.Errorf("%w: %s (no tiers)", ErrVaultNotReady, v.ID)
+	t := v.Instance
+	if t == nil {
+		return fmt.Errorf("%w: %s (no instance)", ErrVaultNotReady, v.ID)
 	}
-	for _, t := range v.Tiers {
-		if t.IsFSMReady == nil {
-			continue
-		}
-		if !t.IsFSMReady() {
-			return fmt.Errorf("%w: vault %s tier %s metadata not ready", ErrVaultNotReady, v.ID, t.TierID)
-		}
+	if t.IsFSMReady != nil && !t.IsFSMReady() {
+		return fmt.Errorf("%w: vault %s metadata not ready", ErrVaultNotReady, v.ID)
 	}
 	return nil
 }
@@ -72,7 +68,7 @@ func (o *Orchestrator) LocalVaultsReplicationReady() bool {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	for _, v := range o.vaults {
-		if len(v.Tiers) == 0 {
+		if v.Instance == nil {
 			continue
 		}
 		if err := v.ReadinessErr(); err != nil {

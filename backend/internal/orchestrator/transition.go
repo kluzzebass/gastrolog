@@ -163,19 +163,19 @@ func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 	}
 }
 
-// findDestTierInstance looks up the destination tier in the orchestrator's vault registry.
+// findDestTierInstance looks up the destination tier in the orchestrator's
+// vault registry. With the 1:1 vault:tier collapse, the destination tier
+// always lives on a different vault, so this resolves through the vault
+// keyed by destTierID (which equals its single VaultID).
 func (r *retentionRunner) findDestTierInstance(destTierID glid.GLID) *VaultInstance {
 	if r.orch == nil {
 		return nil
 	}
-	vault := r.orch.vaults[r.vaultID]
-	if vault == nil {
-		return nil
+	if v := r.orch.vaults[destTierID]; v != nil && v.Instance != nil && v.Instance.VaultID == destTierID {
+		return v.Instance
 	}
-	for _, t := range vault.Tiers {
-		if t.TierID == destTierID {
-			return t
-		}
+	if vault := r.orch.vaults[r.vaultID]; vault != nil && vault.Instance != nil && vault.Instance.VaultID == destTierID {
+		return vault.Instance
 	}
 	return nil
 }
@@ -352,15 +352,13 @@ func (r *retentionRunner) findTierInstance() *VaultInstance {
 		return nil
 	}
 	vault := r.orch.vaults[r.vaultID]
-	if vault == nil {
+	if vault == nil || vault.Instance == nil {
 		return nil
 	}
-	for _, t := range vault.Tiers {
-		if t.TierID == r.tierID {
-			return t
-		}
+	if vault.Instance.VaultID != r.tierID {
+		return nil
 	}
-	return nil
+	return vault.Instance
 }
 
 // TransitionChunkForTesting synchronously transitions a single sealed chunk
@@ -373,13 +371,8 @@ func (o *Orchestrator) TransitionChunkForTesting(vaultID, tierID glid.GLID, chun
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
 	var tier *VaultInstance
-	if vault != nil {
-		for _, t := range vault.Tiers {
-			if t.TierID == tierID {
-				tier = t
-				break
-			}
-		}
+	if vault != nil && vault.Instance != nil && vault.Instance.TierID == tierID {
+		tier = vault.Instance
 	}
 	o.mu.RUnlock()
 	if tier == nil {

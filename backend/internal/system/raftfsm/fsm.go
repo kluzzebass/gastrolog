@@ -364,7 +364,54 @@ func (f *FSM) applyPutVault(ctx context.Context, pb *gastrologv1.PutVaultCommand
 	if err := f.store.PutVault(ctx, cfg); err != nil {
 		return nil, err
 	}
+	// Phase 2 (gastrolog-3iy5l): synthesize a TierConfig that mirrors the
+	// VaultConfig so the orchestrator's existing tier-keyed read paths
+	// keep working while VaultConfig is the authoritative input. The tier
+	// shares the vault's ID — single instance per vault. PutTier is no
+	// longer the public write surface; this is the bridge in the
+	// vault→tier direction, replacing the legacy tier→vault merge.
+	if err := f.syncTierFromVault(ctx, cfg); err != nil {
+		return nil, err
+	}
 	return &Notification{Kind: NotifyVaultPut, ID: cfg.ID}, nil
+}
+
+// syncTierFromVault writes a TierConfig + placements that mirror the given
+// VaultConfig. Called from applyPutVault to keep the orchestrator's
+// tier-keyed reads working until they migrate to VaultConfig directly.
+func (f *FSM) syncTierFromVault(ctx context.Context, v system.VaultConfig) error {
+	tierType := v.Type
+	if tierType == "" {
+		tierType = system.TierTypeFile
+	}
+	tier := system.TierConfig{
+		ID:                v.ID, // 1:1 vault:tier — share the ID
+		Name:              v.Name,
+		Type:              tierType,
+		VaultID:           v.ID,
+		Position:          0,
+		StorageClass:      v.StorageClass,
+		CloudServiceID:    v.CloudServiceID,
+		ReplicationFactor: v.ReplicationFactor,
+		Path:              v.Path,
+		MemoryBudgetBytes: v.MemoryBudgetBytes,
+		RotationPolicyID:  v.RotationPolicyID,
+		RetentionRules:    append([]system.RetentionRule(nil), v.RetentionRules...),
+		CacheEviction:     v.CacheEviction,
+		CacheBudget:       v.CacheBudget,
+		CacheTTL:          v.CacheTTL,
+	}
+	if err := f.store.PutTier(ctx, tier); err != nil {
+		return err
+	}
+	if len(v.Placements) > 0 {
+		placements := make([]system.TierPlacement, len(v.Placements))
+		copy(placements, v.Placements)
+		if err := f.store.SetTierPlacements(ctx, tier.ID, placements); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (f *FSM) applyDeleteVault(ctx context.Context, pb *gastrologv1.DeleteVaultCommand) (*Notification, error) {
@@ -517,41 +564,11 @@ func (f *FSM) applyPutTier(ctx context.Context, pb *gastrologv1.PutTierCommand) 
 	if err := f.store.PutTier(ctx, tier); err != nil {
 		return nil, err
 	}
-	// Vault refactor (gastrolog-257l7): re-merge the owning vault so its
-	// VaultConfig stays in sync with the tier. Once consumers migrate to
-	// reading storage/lifecycle data from VaultConfig directly, the merge
-	// path becomes the only source of truth for that data and the tier
-	// list is dropped.
-	if err := f.refreshVaultFromTiers(ctx, tier.VaultID); err != nil {
-		return nil, err
-	}
+	// Phase 2 (gastrolog-3iy5l): the legacy tier→vault merge is gone.
+	// PutTier is retained for replay of historical Raft log entries; new
+	// writes flow through PutVault, which carries the canonical fields and
+	// synthesizes the matching TierConfig in applyPutVault.
 	return &Notification{Kind: NotifyTierPut, ID: tier.ID}, nil
-}
-
-// refreshVaultFromTiers re-reads the tier list and the vault, runs
-// MergeVaultFromTiers, and writes the merged VaultConfig back to the
-// store. Called after applyPutTier / applySetTierPlacements so the
-// vault's merged fields stay in sync with its tier(s) at runtime.
-//
-// Bridge during the vault refactor — once the tier list is dropped
-// (final commit), this and its callers go away because the merged
-// fields will be the only source of truth, written directly via PutVault.
-func (f *FSM) refreshVaultFromTiers(ctx context.Context, vaultID glid.GLID) error {
-	if vaultID == (glid.GLID{}) {
-		return nil
-	}
-	v, err := f.store.GetVault(ctx, vaultID)
-	if err != nil || v == nil {
-		// Vault might not exist yet (tier created before vault). The
-		// bootstrap or PutVault path will pick up the merge instead.
-		return nil //nolint:nilerr // intentional: tier-before-vault is normal during bootstrap
-	}
-	tiers, err := f.store.ListTiers(ctx)
-	if err != nil {
-		return err
-	}
-	merged := system.MergeVaultFromTiers(*v, tiers)
-	return f.store.PutVault(ctx, merged)
 }
 
 func (f *FSM) applyDeleteTier(ctx context.Context, pb *gastrologv1.DeleteTierCommand) (*Notification, error) {
@@ -573,20 +590,21 @@ func (f *FSM) applySetTierPlacements(ctx context.Context, pb *gastrologv1.SetTie
 	if err := f.store.SetTierPlacements(ctx, tierID, placements); err != nil {
 		return nil, err
 	}
-	// Vault refactor (gastrolog-257l7): mirror placements onto the owning
-	// vault's VaultConfig.Placements so consumers reading from VaultConfig
-	// see the same placement set as the tier-keyed map. Bridge until tiers
-	// are gone and placements are stored vault-keyed directly.
-	if err := f.refreshVaultPlacements(ctx, tierID, placements); err != nil {
+	// Phase 2 (gastrolog-3iy5l): mirror placements back onto the matching
+	// VaultConfig (1:1 vault:tier — the vault shares the tier's ID for new
+	// vault-driven writes; older log entries may use distinct IDs).
+	// Placement-driven write path; PutVault is the user-facing surface.
+	if err := f.mirrorPlacementsToVault(ctx, tierID, placements); err != nil {
 		return nil, err
 	}
 	return &Notification{Kind: NotifyTierPlacementsSet, ID: tierID}, nil
 }
 
-// refreshVaultPlacements writes the given placement set onto the
-// VaultConfig owning the given tier. Bridge during the vault refactor
-// (gastrolog-257l7).
-func (f *FSM) refreshVaultPlacements(ctx context.Context, tierID glid.GLID, placements []system.TierPlacement) error {
+// mirrorPlacementsToVault writes the placement set to the owning vault's
+// VaultConfig.Placements. Used by the placement manager (which still
+// operates on tier IDs) until placement state migrates to vault-keyed
+// in Phase 5.
+func (f *FSM) mirrorPlacementsToVault(ctx context.Context, tierID glid.GLID, placements []system.TierPlacement) error {
 	tier, err := f.store.GetTier(ctx, tierID)
 	if err != nil || tier == nil {
 		return nil //nolint:nilerr // tier might be transient; not worth failing the placement write

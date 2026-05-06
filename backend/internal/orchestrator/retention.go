@@ -148,11 +148,8 @@ func (o *Orchestrator) retentionSweepAll() {
 		if vault == nil {
 			continue
 		}
-		for _, tier := range vault.Tiers {
-			// Only tier leaders evaluate retention rules.
-			if !tier.IsLeader() {
-				continue
-			}
+		tier := vault.Instance
+		if tier != nil && tier.IsLeader() {
 			if t := o.retentionTargetForTier(cfg, vaultCfg, tier, active); t != nil {
 				targets = append(targets, *t)
 			}
@@ -191,7 +188,7 @@ func (o *Orchestrator) retentionSweepAll() {
 	var evictors []chunk.ChunkCacheEvictor
 	o.mu.RLock()
 	for _, vault := range o.vaults {
-		for _, tier := range vault.Tiers {
+		if tier := vault.Instance; tier != nil {
 			if evictor, ok := tier.Chunks.(chunk.ChunkCacheEvictor); ok {
 				evictors = append(evictors, evictor)
 			}
@@ -237,10 +234,8 @@ func (o *Orchestrator) tierCatchupSweepAll() {
 	o.mu.RLock()
 	tiers := make([]*VaultInstance, 0)
 	for _, vault := range o.vaults {
-		for _, t := range vault.Tiers {
-			if t.Reconciler != nil {
-				tiers = append(tiers, t)
-			}
+		if t := vault.Instance; t != nil && t.Reconciler != nil {
+			tiers = append(tiers, t)
 		}
 	}
 	o.mu.RUnlock()
@@ -272,22 +267,21 @@ func (o *Orchestrator) enforceMemoryBudgets(cfg *system.Config) {
 		if vault == nil {
 			continue
 		}
-		for _, tier := range vault.Tiers {
-			if !tier.IsLeader() {
-				continue
-			}
-			monitor, ok := tier.Chunks.(chunk.ChunkBudgetMonitor)
-			if !ok {
-				continue
-			}
-			if excess := monitor.BudgetExceeded(); excess > 0 {
-				targets = append(targets, budgetTarget{
-					vaultID: vaultCfg.ID,
-					tierID:  tier.TierID,
-					cm:      tier.Chunks,
-					excess:  excess,
-				})
-			}
+		tier := vault.Instance
+		if tier == nil || !tier.IsLeader() {
+			continue
+		}
+		monitor, ok := tier.Chunks.(chunk.ChunkBudgetMonitor)
+		if !ok {
+			continue
+		}
+		if excess := monitor.BudgetExceeded(); excess > 0 {
+			targets = append(targets, budgetTarget{
+				vaultID: vaultCfg.ID,
+				tierID:  tier.TierID,
+				cm:      tier.Chunks,
+				excess:  excess,
+			})
 		}
 	}
 	o.mu.RUnlock()
@@ -314,11 +308,8 @@ func (o *Orchestrator) drainExcessChunks(vaultID, tierID glid.GLID, cm chunk.Chu
 	var im index.IndexManager
 	o.mu.RLock()
 	if vault := o.vaults[vaultID]; vault != nil {
-		for _, tier := range vault.Tiers {
-			if tier.TierID == tierID {
-				im = tier.Indexes
-				break
-			}
+		if tier := vault.Instance; tier != nil && tier.TierID == tierID {
+			im = tier.Indexes
 		}
 	}
 	o.mu.RUnlock()
@@ -462,11 +453,9 @@ func (o *Orchestrator) RetentionPendingChunks(vaultID glid.GLID) map[chunk.Chunk
 		return nil
 	}
 	result := make(map[chunk.ChunkID]bool)
-	for _, tier := range vault.Tiers {
-		if tier.ListRetentionPending != nil {
-			for _, id := range tier.ListRetentionPending() {
-				result[id] = true
-			}
+	if tier := vault.Instance; tier != nil && tier.ListRetentionPending != nil {
+		for _, id := range tier.ListRetentionPending() {
+			result[id] = true
 		}
 	}
 	return result
@@ -493,10 +482,7 @@ func (o *Orchestrator) PendingDeleteAcks(vaultID glid.GLID) map[chunk.ChunkID][]
 		return nil
 	}
 	result := make(map[chunk.ChunkID][]string)
-	for _, tier := range vault.Tiers {
-		if tier.Reconciler == nil || tier.Reconciler.fsm == nil {
-			continue
-		}
+	if tier := vault.Instance; tier != nil && tier.Reconciler != nil && tier.Reconciler.fsm != nil {
 		for _, p := range tier.Reconciler.fsm.PendingDeletes() {
 			expected := make([]string, 0, len(p.ExpectedFrom))
 			for nodeID := range p.ExpectedFrom {
@@ -524,11 +510,9 @@ func (o *Orchestrator) TransitionStreamedChunks(vaultID glid.GLID) map[chunk.Chu
 		return nil
 	}
 	result := make(map[chunk.ChunkID]bool)
-	for _, tier := range vault.Tiers {
-		if tier.ListTransitionStreamed != nil {
-			for _, id := range tier.ListTransitionStreamed() {
-				result[id] = true
-			}
+	if tier := vault.Instance; tier != nil && tier.ListTransitionStreamed != nil {
+		for _, id := range tier.ListTransitionStreamed() {
+			result[id] = true
 		}
 	}
 	return result

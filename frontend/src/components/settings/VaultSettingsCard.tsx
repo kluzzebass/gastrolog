@@ -1,9 +1,9 @@
 import { encode, decode } from "../../api/glid";
 import { useState } from "react";
 import { protoInt64 } from "@bufbuild/protobuf";
-import type { VaultConfig, RouteConfig, NodeConfig } from "../../api/gen/gastrolog/v1/system_pb";
+import type { RouteConfig, NodeConfig } from "../../api/gen/gastrolog/v1/system_pb";
 import type { NodeStorageConfig } from "../../api/gen/gastrolog/v1/storage_pb";
-import { TierConfig, TierType, RetentionRule } from "../../api/gen/gastrolog/v1/system_pb";
+import { TierConfig, TierType, RetentionRule, VaultConfig } from "../../api/gen/gastrolog/v1/system_pb";
 import {
   usePutVault,
   useDeleteVault,
@@ -24,13 +24,13 @@ import { PulseIcon } from "../icons";
 import { CrossLinkBadge } from "../inspector/CrossLinkBadge";
 import { JobProgress } from "./VaultHelpers";
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { leaderNodeId, followerNodeIds } from "../../utils/tierPlacement";
+import { leaderNodeId, followerNodeIds } from "../../utils/placement";
 import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
 import { formatBytes } from "../../utils/units";
 
 
 import {
-  TierEntryCard,
+  VaultStorageForm,
   emptyTierEntry,
   tierTypeEnum,
   tierTypeLabel,
@@ -39,7 +39,6 @@ import {
   isCloudBacked,
   type TierEntry,
   type TierTypeLabel,
-  retentionActionForPosition,
 } from "./VaultsSettings";
 
 interface VaultSettingsCardProps {
@@ -86,7 +85,7 @@ function buildNewTierConfig(
       ? [
           new RetentionRule({
             retentionPolicyId: decode(newTier.retentionPolicyId),
-            action: retentionActionForPosition(existingTierCount, existingTierCount + 1),
+            action: "expire",
           }),
         ]
       : [],
@@ -127,7 +126,10 @@ function maybeUpdatedTier(
   const csIdBytes = csIdStr ? decode(csIdStr) : new Uint8Array(0);
   const csIdChanged = encode(tier.cloudServiceId) !== encode(csIdBytes);
 
-  const expectedAction = retentionActionForPosition(tierIndex, tierCount);
+  // Phase 2 (gastrolog-3iy5l): single instance per vault, retention action
+  // is always "expire" (multi-tier transitions return as inter-vault routes
+  // in Phase 4).
+  const expectedAction = "expire";
   const currentAction = tier.retentionRules[0]?.action;
   const currentRetId = tier.retentionRules[0] ? encode(tier.retentionRules[0].retentionPolicyId) : "";
 
@@ -343,9 +345,26 @@ export function VaultSettingsCard({
         enabled: boolean;
       },
     ) => ({
-      id,
-      name: e.name,
-      enabled: e.enabled,
+      // Phase 2: PutVault takes the full VaultConfig. Build a fresh
+      // proto carrying every field from the existing vault, with
+      // name/enabled overlaid from the edit form.
+      config: new VaultConfig({
+        id: decode(id),
+        name: e.name,
+        enabled: e.enabled,
+        type: vault.type,
+        storageClass: vault.storageClass,
+        cloudServiceId: vault.cloudServiceId,
+        replicationFactor: vault.replicationFactor,
+        path: vault.path,
+        rotationPolicyId: vault.rotationPolicyId,
+        retentionRules: vault.retentionRules,
+        memoryBudgetBytes: vault.memoryBudgetBytes,
+        cacheEviction: vault.cacheEviction,
+        cacheBudget: vault.cacheBudget,
+        cacheTtl: vault.cacheTtl,
+        placements: vault.placements,
+      }),
     }),
     onDeleteTransform: (id) => ({ id, force: true, deleteData }),
     // Don't reset edit state eagerly — props are stale inside the async
@@ -868,9 +887,8 @@ export function VaultSettingsCard({
             </div>
           )}
           {newTier ? (
-            <TierEntryCard
+            <VaultStorageForm
               tier={newTier}
-              index={vaultTiers.length}
               dark={dark}
               storageClassOptions={storageClassOptions}
               cloudServiceOptions={cloudServiceOptions}
@@ -882,8 +900,7 @@ export function VaultSettingsCard({
                 type: tierTypeEnum(newTier.type),
                 storageClass: parseInt(newTier.storageClass, 10) || 0,
               })}
-              onUpdate={(patch) => setNewTier((t) => t ? { ...t, ...patch } : t)}
-              onRemove={() => setNewTier(null)}
+              onUpdate={(patch: Partial<TierEntry>) => setNewTier((t) => t ? { ...t, ...patch } : t)}
             />
           ) : (
             <div className="flex justify-end">

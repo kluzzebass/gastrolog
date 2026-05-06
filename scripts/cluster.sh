@@ -212,19 +212,12 @@ configure() {
   $GLOG config filter create --addr "$S" --name "catch-all" --expression "*" 2>&1 | sed 's/^/  /'
 
   echo ">>> Creating vault..."
-  $GLOG config vault create --addr "$S" --name "default-vault" 2>&1 | sed 's/^/  /'
-
-  echo ">>> Creating tiers..."
-  $GLOG config tier create --addr "$S" --vault "default-vault" \
-    --name "hot" --type file --rotation-policy "100-rows" --retention-policy "3m-retain" \
-    --replication-factor "$NODES" --storage-class 1 2>&1 | sed 's/^/  /'
-  $GLOG config tier create --addr "$S" --vault "default-vault" \
-    --name "warm" --type file --rotation-policy "100-rows" --retention-policy "3m-retain" \
-    --replication-factor "$NODES" --storage-class 1 2>&1 | sed 's/^/  /'
-  $GLOG config tier create --addr "$S" --vault "default-vault" \
-    --name "cold" --type file --rotation-policy "100-rows" \
-    --cloud-service "S3" --storage-class 1 \
-    --replication-factor "$NODES" 2>&1 | sed 's/^/  /'
+  # Phase 2 (gastrolog-3iy5l): a vault has a single storage shape. The legacy
+  # multi-tier hot/warm/cold chain has been collapsed; transitions across
+  # storage shapes will return as inter-vault routing in Phase 4.
+  $GLOG config vault create --addr "$S" --name "default-vault" \
+    --type file --storage-class 1 --replication-factor "$NODES" \
+    --rotation-policy "100-rows" --retention-policy "3m-retain" 2>&1 | sed 's/^/  /'
 
   echo ">>> Creating route..."
   $GLOG config route create --addr "$S" \

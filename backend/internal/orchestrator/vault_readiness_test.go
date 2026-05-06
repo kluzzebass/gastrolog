@@ -21,10 +21,10 @@ func TestVaultReplicationReadinessErr_nilVault(t *testing.T) {
 	}
 }
 
-func TestVaultReplicationReadinessErr_noTiers(t *testing.T) {
+func TestVaultReplicationReadinessErr_noInstance(t *testing.T) {
 	t.Parallel()
 	vid := glid.New()
-	v := &Vault{ID: vid, Tiers: nil}
+	v := &Vault{ID: vid, Instance: nil}
 	err := vaultReplicationReadinessErr(vid, v)
 	if !errors.Is(err, ErrVaultNotReady) {
 		t.Fatalf("got %v, want ErrVaultNotReady", err)
@@ -109,7 +109,7 @@ func TestListAllChunkMetas_noLocalTiersReturnsEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 	vid := glid.New()
-	o.RegisterVault(NewVault(vid))
+	o.RegisterVault(NewVault(vid, nil))
 	metas, err := o.ListAllChunkMetas(vid)
 	if err != nil {
 		t.Fatalf("ListAllChunkMetas: %v", err)
@@ -185,7 +185,7 @@ func TestLocalVaultsReplicationReady(t *testing.T) {
 		t.Fatal("empty orchestrator should be replication-ready")
 	}
 	vid := glid.New()
-	o.RegisterVault(NewVault(vid))
+	o.RegisterVault(NewVault(vid, nil))
 	if !o.LocalVaultsReplicationReady() {
 		t.Fatal("routing-only vault (no tiers) should not block readiness")
 	}

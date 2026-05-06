@@ -128,20 +128,25 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 			nodes[id] = setupMNNodeNoVault(t, id)
 		} else {
 			node := setupMNNode(t, id)
-			// Create a tier assigned to this node (test-only manual assignment; production uses placement manager).
-			tierID := glid.New()
+			// Phase 2 (gastrolog-3iy5l): tier and vault are 1:1 with shared
+			// IDs. Write VaultConfig directly with all storage fields, plus
+			// a synthetic placement for this node, plus the matching tier.
+			placements := []system.TierPlacement{
+				{StorageID: system.SyntheticStorageID(id), Leader: true},
+			}
+			_ = cfgStore.PutVault(ctx, system.VaultConfig{
+				ID:         node.vaultID,
+				Name:       "vault-" + id,
+				Type:       system.VaultTypeMemory,
+				Placements: placements,
+			})
 			_ = cfgStore.PutTier(ctx, system.TierConfig{
-				ID:      tierID,
+				ID:      node.vaultID, // 1:1 with vault
 				Name:    "tier-" + id,
 				Type:    system.VaultTypeMemory,
-				VaultID: node.vaultID, Position: 0,
+				VaultID: node.vaultID,
 			})
-			_ = cfgStore.SetTierPlacements(ctx, tierID, []system.TierPlacement{
-				{StorageID: system.SyntheticStorageID(id), Leader: true},
-			})
-			_ = cfgStore.PutVault(ctx, system.VaultConfig{
-				ID: node.vaultID, Name: "vault-" + id,
-			})
+			_ = cfgStore.SetTierPlacements(ctx, node.vaultID, placements)
 			nodes[id] = node
 		}
 	}

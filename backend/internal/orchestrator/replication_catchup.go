@@ -21,13 +21,8 @@ func (o *Orchestrator) ScheduleCatchup(vaultID, tierID glid.GLID, followerNodeID
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
 	var found *VaultInstance
-	if vault != nil {
-		for _, t := range vault.Tiers {
-			if t.TierID == tierID {
-				found = t
-				break
-			}
-		}
+	if vault != nil && vault.Instance != nil && vault.Instance.TierID == tierID {
+		found = vault.Instance
 	}
 	o.mu.RUnlock()
 	if found == nil || found.IsFollower {

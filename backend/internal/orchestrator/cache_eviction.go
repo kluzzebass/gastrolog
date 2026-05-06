@@ -31,20 +31,19 @@ func (o *Orchestrator) cacheEvictionSweepAll() {
 	}
 	var targets []evictTarget
 	for _, v := range o.vaults {
-		for _, t := range v.Tiers {
-			if !t.IsLeader() {
-				continue
-			}
-			ev, ok := t.Chunks.(CacheEvictor)
-			if !ok {
-				continue
-			}
-			targets = append(targets, evictTarget{
-				evictor: ev,
-				vaultID: v.ID.String(),
-				tierID:  t.TierID.String(),
-			})
+		t := v.Instance
+		if t == nil || !t.IsLeader() {
+			continue
 		}
+		ev, ok := t.Chunks.(CacheEvictor)
+		if !ok {
+			continue
+		}
+		targets = append(targets, evictTarget{
+			evictor: ev,
+			vaultID: v.ID.String(),
+			tierID:  t.TierID.String(),
+		})
 	}
 	o.mu.RUnlock()
 

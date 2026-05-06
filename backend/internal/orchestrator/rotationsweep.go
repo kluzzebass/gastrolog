@@ -47,35 +47,37 @@ func (o *Orchestrator) rotationSweep() {
 			vaultCfg = findVaultConfig(cfg.Vaults, vaultID)
 		}
 
-		for _, tier := range vault.Tiers {
-			if tier.IsFollower {
-				tier.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
-				continue
-			}
+		tier := vault.Instance
+		if tier == nil {
+			continue
+		}
+		if tier.IsFollower {
+			tier.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
+			continue
+		}
 
-			// Apply rotation policy + reconcile cron job + refresh replication targets.
-			if cfg != nil && vaultCfg != nil {
-				tierCfg := findTierConfig(cfg.Tiers, tier.TierID)
-				o.applyRotationFromConfig(sys, cfg, *vaultCfg, tier, tierCfg, activeCronJobs)
-			}
+		// Apply rotation policy + reconcile cron job + refresh replication targets.
+		if cfg != nil && vaultCfg != nil {
+			tierCfg := findTierConfig(cfg.Tiers, tier.TierID)
+			o.applyRotationFromConfig(sys, cfg, *vaultCfg, tier, tierCfg, activeCronJobs)
+		}
 
-			// Check for time-based rotation triggers.
-			activeBefore := tier.Chunks.Active()
-			if trigger := tier.Chunks.CheckRotation(); trigger != nil {
-				o.logger.Debug("rotation triggered",
-					"vault", vaultID,
-					"name", vault.Name,
-					"tier", tier.TierID,
-					"trigger", *trigger,
-				)
-				if activeBefore != nil {
-					seals = append(seals, sealEvent{vaultID: vaultID, cm: tier.Chunks, chunkID: activeBefore.ID})
-					// Record the rotation event for the per-tier rate
-					// alerter. We do this here (under the read lock) so
-					// the count reflects every triggered rotation, not
-					// only those whose post-seal pipeline is scheduled.
-					o.rotationRates.Record(tier.TierID, o.now())
-				}
+		// Check for time-based rotation triggers.
+		activeBefore := tier.Chunks.Active()
+		if trigger := tier.Chunks.CheckRotation(); trigger != nil {
+			o.logger.Debug("rotation triggered",
+				"vault", vaultID,
+				"name", vault.Name,
+				"tier", tier.TierID,
+				"trigger", *trigger,
+			)
+			if activeBefore != nil {
+				seals = append(seals, sealEvent{vaultID: vaultID, cm: tier.Chunks, chunkID: activeBefore.ID})
+				// Record the rotation event for the per-instance rate
+				// alerter. We do this here (under the read lock) so
+				// the count reflects every triggered rotation, not
+				// only those whose post-seal pipeline is scheduled.
+				o.rotationRates.Record(tier.TierID, o.now())
 			}
 		}
 	}

@@ -61,38 +61,29 @@ func (r *orchestratorManifestReader) ExpectedDigest(id chunk.ChunkID) ([32]byte,
 }
 
 // Entry returns the sealed manifest entry for the given chunk ID. ChunkIDs
-// are globally unique, so this fans out across every vault and tier until
-// it finds the chunk; it does NOT return active chunks (Sealed=false).
+// are globally unique, so this fans out across every vault until it finds
+// the chunk; it does NOT return active chunks (Sealed=false).
 func (r *orchestratorManifestReader) Entry(id chunk.ChunkID) (tierfsm.ManifestEntry, bool) {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
 	for _, v := range r.o.vaults {
-		for _, t := range v.Tiers {
-			if e, ok := tierManifestEntry(t, id); ok && e.Sealed {
-				return e, true
-			}
+		if v.Instance == nil {
+			continue
+		}
+		if e, ok := vaultManifestEntry(v.Instance, id); ok && e.Sealed {
+			return e, true
 		}
 	}
 	return tierfsm.ManifestEntry{}, false
 }
 
-// EntriesForVault returns every sealed manifest entry under the given key.
-// Resolves the key as a vault ID first; if no vault matches, falls back
-// to interpreting the key as a tier ID (used by leader/local tier
-// registries that present tiers as searchable units). Returns nil if no
-// vault or tier matches.
+// EntriesForVault returns every sealed manifest entry for the given vault.
+// Returns nil when the vault isn't registered on this node.
 func (r *orchestratorManifestReader) EntriesForVault(key glid.GLID) []tierfsm.ManifestEntry {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
-	if v := r.o.vaults[key]; v != nil {
-		return collectSealedEntries(v.Tiers)
-	}
-	for _, v := range r.o.vaults {
-		for _, t := range v.Tiers {
-			if t.TierID == key {
-				return collectSealedEntries([]*VaultInstance{t})
-			}
-		}
+	if v := r.o.vaults[key]; v != nil && v.Instance != nil {
+		return collectSealedEntries(v.Instance)
 	}
 	return nil
 }
@@ -125,22 +116,23 @@ func (o *Orchestrator) VaultManifestEntriesFromCtlFSM(vaultID glid.GLID) []tierf
 	return out
 }
 
-func collectSealedEntries(tiers []*VaultInstance) []tierfsm.ManifestEntry {
+func collectSealedEntries(inst *VaultInstance) []tierfsm.ManifestEntry {
+	if inst == nil {
+		return nil
+	}
 	var out []tierfsm.ManifestEntry
-	for _, t := range tiers {
-		for _, e := range tierManifestEntries(t) {
-			if e.Sealed {
-				out = append(out, e)
-			}
+	for _, e := range vaultManifestEntries(inst) {
+		if e.Sealed {
+			out = append(out, e)
 		}
 	}
 	return out
 }
 
-// tierManifestEntry returns the manifest entry for a chunk on this tier.
+// vaultManifestEntry returns the manifest entry for a chunk on this instance.
 // Prefers the FSM callback (cluster-replicated truth) and falls back to
-// projecting from the local chunk manager for memory-mode tiers.
-func tierManifestEntry(t *VaultInstance, id chunk.ChunkID) (tierfsm.ManifestEntry, bool) {
+// projecting from the local chunk manager for memory-mode vaults.
+func vaultManifestEntry(t *VaultInstance, id chunk.ChunkID) (tierfsm.ManifestEntry, bool) {
 	if t.ManifestEntry != nil {
 		return t.ManifestEntry(id)
 	}
@@ -154,9 +146,10 @@ func tierManifestEntry(t *VaultInstance, id chunk.ChunkID) (tierfsm.ManifestEntr
 	return chunkMetaToManifestEntry(meta), true
 }
 
-// tierManifestEntries returns every manifest entry on this tier. FSM-backed
-// tiers go through the callback; memory-mode tiers project from List().
-func tierManifestEntries(t *VaultInstance) []tierfsm.ManifestEntry {
+// vaultManifestEntries returns every manifest entry on this instance.
+// FSM-backed instances go through the callback; memory-mode vaults
+// project from List().
+func vaultManifestEntries(t *VaultInstance) []tierfsm.ManifestEntry {
 	if t.ManifestEntries != nil {
 		return t.ManifestEntries()
 	}
@@ -202,7 +195,7 @@ var _ manifest.IndexReader = (*orchestratorIndexReader)(nil)
 // cached index) first; falls back to the index manager (sealed local
 // chunk sidecar). Returns (0, false) when neither serves the lookup.
 func (r *orchestratorIndexReader) FindIngestRank(chunkID chunk.ChunkID, ts time.Time) (uint64, bool) {
-	cm, im := r.lookupTierManagers(chunkID)
+	cm, im := r.lookupVaultManagers(chunkID)
 	if cm != nil {
 		if rank, found, err := cm.FindIngestEntryIndex(chunkID, ts); err == nil && found {
 			return rank, true
@@ -219,7 +212,7 @@ func (r *orchestratorIndexReader) FindIngestRank(chunkID chunk.ChunkID, ts time.
 // FindIngestPos returns the physical record position for the same query.
 // Same dispatch shape as FindIngestRank.
 func (r *orchestratorIndexReader) FindIngestPos(chunkID chunk.ChunkID, ts time.Time) (uint64, bool) {
-	cm, im := r.lookupTierManagers(chunkID)
+	cm, im := r.lookupVaultManagers(chunkID)
 	if cm != nil {
 		if pos, found, err := cm.FindIngestStartPosition(chunkID, ts); err == nil && found {
 			return pos, true
@@ -233,21 +226,20 @@ func (r *orchestratorIndexReader) FindIngestPos(chunkID chunk.ChunkID, ts time.T
 	return 0, false
 }
 
-// lookupTierManagers walks the orchestrator's local tiers to find the
-// (chunk, index) manager pair owning the given chunk. Returns (nil, nil)
-// when the chunk isn't on any local tier — a signal that the histogram
+// lookupVaultManagers walks the orchestrator's local vault instances to
+// find the (chunk, index) manager pair owning the given chunk. Returns
+// (nil, nil) when the chunk isn't local — a signal that the histogram
 // caller should fall back to FSM-based proportional distribution.
-func (r *orchestratorIndexReader) lookupTierManagers(chunkID chunk.ChunkID) (chunk.ChunkManager, index.IndexManager) {
+func (r *orchestratorIndexReader) lookupVaultManagers(chunkID chunk.ChunkID) (chunk.ChunkManager, index.IndexManager) {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
 	for _, v := range r.o.vaults {
-		for _, t := range v.Tiers {
-			if t.Chunks == nil {
-				continue
-			}
-			if _, err := t.Chunks.Meta(chunkID); err == nil {
-				return t.Chunks, t.Indexes
-			}
+		t := v.Instance
+		if t == nil || t.Chunks == nil {
+			continue
+		}
+		if _, err := t.Chunks.Meta(chunkID); err == nil {
+			return t.Chunks, t.Indexes
 		}
 	}
 	return nil, nil

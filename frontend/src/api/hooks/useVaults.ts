@@ -1,9 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { vaultClient, systemClient } from "../client";
 import { VaultInfo, ChunkMeta, GetStatsResponse } from "../gen/gastrolog/v1/vault_pb";
+import { VaultConfig } from "../gen/gastrolog/v1/system_pb";
 import { protoSharing, protoArraySharing } from "./protoSharing";
 import { useSystemMutation } from "./useSystem";
-import { decode, encode } from "../glid";
+import { decode } from "../glid";
 
 export function useVaults() {
   return useQuery({
@@ -151,17 +152,9 @@ export function useValidateVault() {
 export function usePutVault() {
   return useSystemMutation(
     async (args: {
-      id: string;
-      name: string;
-      enabled?: boolean;
+      config: VaultConfig;
     }) => {
-      return systemClient.putVault({
-        config: {
-          id: decode(args.id),
-          name: args.name,
-          enabled: args.enabled ?? true,
-        },
-      });
+      return systemClient.putVault({ config: args.config });
     },
     [["vaults"], ["stats"]],
   );
