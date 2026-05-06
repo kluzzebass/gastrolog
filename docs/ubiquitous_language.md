@@ -13,6 +13,30 @@ term used inconsistently in the code, open an issue or fix it in-place.
 
 ---
 
+## Refactor in progress: tiers go away
+
+The vault refactor (gastrolog-55dej / docs/vault_redesign.md) is removing
+the **tier** abstraction entirely. Every place this document still says
+"tier" is a transition note, not a stable definition. Going forward:
+
+- **Vault** is the only storage unit. There is no tier-within-vault chain.
+- Storage shape (memory / file / jsonl) lives directly on `VaultConfig.Type`,
+  not on a separate `TierConfig`.
+- `TierConfig`, `TierType`, `TierPlacement` collapse into `VaultConfig`,
+  `VaultType`, `VaultPlacement`. During the refactor, the new names are
+  Go aliases of the old; once consumers migrate, the old names are deleted.
+- `TierReplicator`, `TierApplyForwarder`, `OpTierFSM`, `LeaderTierQueryEngine`,
+  `tier_id` on ChunkMeta, `transition_streamed` — all phase out.
+- "Tier transitions" disappear. Retention becomes a chunk-age event that
+  feeds records back through the routing engine (post-Phase 4).
+
+When this refactor lands, the entries below currently using "tier" get
+rewritten to use the post-tier vocabulary. Until then, **prefer the
+new names in new code** (`Vault*` instead of `Tier*`) and treat tier
+vocabulary as legacy.
+
+---
+
 ## Reading map
 
 GastroLog is split into **eight bounded contexts**. The boundaries are not arbitrary;
