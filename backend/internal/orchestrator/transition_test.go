@@ -2212,7 +2212,7 @@ func (d *directChunkReplicator) AppendRecords(_ context.Context, nodeID string, 
 	return nil
 }
 
-func (d *directChunkReplicator) SealTier(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
+func (d *directChunkReplicator) SealVault(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
 		return fmt.Errorf("directChunkReplicator: unknown node %q", nodeID)

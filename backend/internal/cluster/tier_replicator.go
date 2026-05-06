@@ -191,8 +191,9 @@ func (tr *ChunkReplicator) AppendRecords(ctx context.Context, nodeID string, vau
 	})
 }
 
-// SealTier tells a follower to seal its active chunk.
-func (tr *ChunkReplicator) SealTier(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
+// SealVault tells a follower to seal its active chunk for the vault.
+// The tier-keyed routing is internal — the operation is per-vault now.
+func (tr *ChunkReplicator) SealVault(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
 	return tr.send(ctx, tierID, nodeID, &gastrologv1.ChunkReplicationCommand{
 		VaultId: vaultID.ToProto(),
 		TierId:  tierID.ToProto(),

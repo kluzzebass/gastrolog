@@ -44,7 +44,7 @@ type sealCall struct {
 func (m *replicationFakeReplicator) AppendRecords(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
 	return nil
 }
-func (m *replicationFakeReplicator) SealTier(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
+func (m *replicationFakeReplicator) SealVault(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
 	if m.sealErr != nil {
 		return m.sealErr
 	}
@@ -597,7 +597,7 @@ type recordTimestamps struct {
 	WriteTS  time.Time
 }
 
-// TestClusterReplicationSealSync verifies that ChunkReplicator.SealTier causes
+// TestClusterReplicationSealSync verifies that ChunkReplicator.SealVault causes
 // the follower to seal its active chunk at the same boundary as the leader.
 func TestClusterReplicationSealSync(t *testing.T) {
 	t.Parallel()
@@ -643,10 +643,10 @@ func TestClusterReplicationSealSync(t *testing.T) {
 	// Forward seal to followers via the tier replicator (uses SealActiveTier
 	// which checks the expected chunk ID matches the follower's active chunk).
 	for _, fid := range []string{"f1", "f2"} {
-		if err := leaderNode.orch.chunkReplicator.SealTier(
+		if err := leaderNode.orch.chunkReplicator.SealVault(
 			context.Background(), fid, h.vaultID, h.tierIDs[0], leaderChunkID,
 		); err != nil {
-			t.Fatalf("SealTier to %s: %v", fid, err)
+			t.Fatalf("SealVault to %s: %v", fid, err)
 		}
 	}
 
@@ -661,7 +661,7 @@ func TestClusterReplicationSealSync(t *testing.T) {
 			}
 		}
 		if sealed == 0 {
-			t.Errorf("follower %s: expected at least 1 sealed chunk after SealTier, got 0", fid)
+			t.Errorf("follower %s: expected at least 1 sealed chunk after SealVault, got 0", fid)
 		}
 
 		// Verify follower records via cursor.

@@ -46,7 +46,7 @@ func (m *blockingReplicator) AppendRecords(ctx context.Context, _ string, _, _ g
 		return ctx.Err()
 	}
 }
-func (m *blockingReplicator) SealTier(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
+func (m *blockingReplicator) SealVault(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
 }
 func (m *blockingReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {

@@ -594,7 +594,7 @@ func (r *tierTestReplicator) AppendRecords(_ context.Context, nodeID string, vau
 	return nil
 }
 
-func (r *tierTestReplicator) SealTier(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
+func (r *tierTestReplicator) SealVault(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
 }
 
@@ -1079,7 +1079,7 @@ func (m *ackTestReplicator) AppendRecords(_ context.Context, _ string, _, _ glid
 	m.tierAppendCalls.Add(1)
 	return m.tierAppendErr
 }
-func (m *ackTestReplicator) SealTier(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
+func (m *ackTestReplicator) SealVault(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
 }
 func (m *ackTestReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
@@ -1612,7 +1612,7 @@ func (f *failingForwarder) AppendRecords(_ context.Context, _ string, _, _ glid.
 	return f.returnErr
 }
 
-func (f *failingForwarder) SealTier(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
+func (f *failingForwarder) SealVault(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
 }
 

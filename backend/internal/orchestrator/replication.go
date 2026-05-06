@@ -15,7 +15,7 @@ import (
 )
 
 // SealActiveTier seals the active chunk for a specific tier, on a **follower**
-// node, as the local effect of a tier-leader-originated SealTier replication
+// node, as the local effect of a tier-leader-originated SealVault replication
 // command. Use SealActive on the leader-triggered path.
 //
 // Role: follower-side. Caller is typically the ChunkReplicator handler that

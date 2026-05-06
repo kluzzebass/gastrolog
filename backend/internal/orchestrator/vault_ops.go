@@ -541,7 +541,7 @@ func (o *Orchestrator) sealRemoteFollowers(targets []remoteForwardTarget, chunkI
 		wg.Go(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), cluster.ForwardingTimeout)
 			defer cancel()
-			if err := o.chunkReplicator.SealTier(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, chunkID); err != nil {
+			if err := o.chunkReplicator.SealVault(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, chunkID); err != nil {
 				o.logger.Warn("replication: failed to seal remote follower",
 					"node", tgt.nodeID, "vault", tgt.vaultID, "tier", tgt.tierID,
 					"chunk", chunkID.String(), "error", err)
@@ -1180,7 +1180,7 @@ func drainIterator(next chunk.RecordIterator) {
 // active chunk is empty or absent.
 //
 // Role: tier leader. Sealing on the leader triggers follower seals via the
-// ChunkReplicator's SealTier call, which arrives on followers as an invocation
+// ChunkReplicator's SealVault call, which arrives on followers as an invocation
 // of SealActiveTier. Callers that are already on the follower side (seal
 // commands dispatched from the leader's Raft) must use SealActiveTier
 // directly.

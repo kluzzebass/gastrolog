@@ -23,7 +23,7 @@ func (r *recordingChunkReplicator) AppendRecords(_ context.Context, _ string, _,
 	return nil
 }
 
-func (r *recordingChunkReplicator) SealTier(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
+func (r *recordingChunkReplicator) SealVault(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
 	r.sealCalls.Add(1)
 	return nil
 }
