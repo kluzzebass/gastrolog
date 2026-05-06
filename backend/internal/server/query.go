@@ -246,26 +246,23 @@ func (s *QueryServer) searchDirect(
 
 // splitResumeToken separates a unified resume token into local positions
 // (for eng.Search) and remote opaque blobs (for collectRemote).
+//
+// Post-vault-refactor (gastrolog-257l7): all keys in VaultTokens are
+// vault IDs — the local query engine's leaderTierRegistry now emits
+// positions tagged by vault ID instead of tier ID. The split is a
+// straight membership check against the local-leader vault set; no more
+// dual-ID-space dispatch.
 func (s *QueryServer) splitResumeToken(resume *query.ResumeToken) (*query.ResumeToken, map[glid.GLID][]byte) {
 	if resume == nil || len(resume.VaultTokens) == 0 {
 		return nil, nil
 	}
 
-	// VaultTokens has two disjoint key spaces with different value formats:
-	//   - tier IDs → InnerVaultToken bytes (positions emitted by the local
-	//     LeaderTierQueryEngine, which tags positions with tier IDs)
-	//   - real vault IDs → fully serialized remote ResumeToken proto bytes
-	//     (returned by collectRemote.getRemoteTokens, keyed by real vault ID)
-	// Routing must dispatch tier-ID keys to the local engine and vault-ID
-	// keys to the remote fan-out — and no other way around. Misdirecting a
-	// remote token to the local deserializer loses the remote's progress
-	// and causes the next page to restart from the window edge.
-	localTiers := s.orch.LocalLeaderTierIDs()
+	localVaults := s.orch.LocalLeaderVaultIDs()
 
 	remoteTokens := make(map[glid.GLID][]byte)
 	var localPositions []query.MultiVaultPosition
 	for vid, tokenData := range resume.VaultTokens {
-		if localTiers[vid] {
+		if localVaults[vid] {
 			positions, err := VaultTokenToPositions(tokenData)
 			if err != nil {
 				continue
