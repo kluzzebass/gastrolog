@@ -52,7 +52,7 @@ type VaultConfig struct {
 	Path string `json:"path,omitempty"`
 
 	// Placements are system-managed file storage assignments.
-	Placements []TierPlacement `json:"placements,omitempty"`
+	Placements []VaultPlacement `json:"placements,omitempty"`
 
 	// CacheEviction is "lru" (default) or "ttl" — only meaningful for cloud-backed.
 	CacheEviction string `json:"cacheEviction,omitempty"`
@@ -120,6 +120,11 @@ const (
 	VaultTypeFile   = TierTypeFile
 	VaultTypeJSONL  = TierTypeJSONL
 )
+
+// VaultPlacement is the new canonical name for storage assignments
+// during the refactor. Alias of TierPlacement; once consumers migrate,
+// TierPlacement is deleted and this becomes the only name.
+type VaultPlacement = TierPlacement
 
 // MergeVaultFromTiers populates v's merged storage/lifecycle fields from
 // its (single) tier in tiers, returning the merged copy. Used during the
