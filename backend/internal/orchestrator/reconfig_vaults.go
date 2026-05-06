@@ -1231,6 +1231,26 @@ func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.App
 			}
 			m.CloudBacked = e.CloudBacked
 			m.Archived = e.Archived
+			// Phase 3 (gastrolog-1huz5): the FSM is the cluster-wide
+			// source of truth for the lifecycle state. Local meta.Sealed
+			// flips at sealActiveLocked time but the cluster doesn't see
+			// the chunk as Sealed until sealToGLCB commits. Overlay
+			// State so producer-side iteration (retention, upload,
+			// archival sweep) can branch on cluster state without
+			// jumping the gun on Sealing chunks.
+			s := e.State
+			if s == chunk.ChunkStateUnknown {
+				if e.Sealed {
+					s = chunk.ChunkStateSealed
+				} else {
+					s = chunk.ChunkStateActive
+				}
+			}
+			m.State = s
+			// Keep the legacy bool synced with State so the unaudited
+			// read sites (the bulk of the 79 .Sealed checks) still
+			// behave correctly: Sealing reads as not-yet-sealed.
+			m.Sealed = s == chunk.ChunkStateSealed
 			return m
 		},
 		manifestEntries: func() []tierfsm.ManifestEntry {
