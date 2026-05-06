@@ -89,6 +89,7 @@ func (v *Vault) Type() string {
 func NewVaultFromComponents(id glid.GLID, cm chunk.ChunkManager, im index.IndexManager, qe *query.Engine) *Vault {
 	return NewVault(id, &TierInstance{
 		TierID:  id, // reuse vault ID as tier ID for simplicity
+		VaultID: id,
 		Type:    "memory",
 		Chunks:  cm,
 		Indexes: im,

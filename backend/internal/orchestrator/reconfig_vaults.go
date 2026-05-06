@@ -818,9 +818,10 @@ func (o *Orchestrator) buildTierInstance(sys *system.System, vaultCfg system.Vau
 	// JSONL sinks are write-only — no query engine, no indexes.
 	if tierCfg.Type == system.TierTypeJSONL {
 		ti := &TierInstance{
-			TierID: tierCfg.ID,
-			Type:   string(tierCfg.Type),
-			Chunks: cm,
+			TierID:  tierCfg.ID,
+			VaultID: vaultCfg.ID,
+			Type:    string(tierCfg.Type),
+			Chunks:  cm,
 		}
 		ti.applyRaftCallbacks(raftCB)
 		o.attachLifecycleReconciler(ti, vaultCfg.ID, tierCfg.ID, tierGroup)
@@ -856,6 +857,7 @@ func (o *Orchestrator) buildTierInstance(sys *system.System, vaultCfg system.Vau
 
 	ti := &TierInstance{
 		TierID:  tierCfg.ID,
+		VaultID: vaultCfg.ID,
 		Type:    string(tierCfg.Type),
 		Chunks:  cm,
 		Indexes: im,
@@ -967,6 +969,7 @@ func (o *Orchestrator) buildTierInstanceForStorage(sys *system.System, vaultCfg 
 
 	ti := &TierInstance{
 		TierID:  tierCfg.ID,
+		VaultID: vaultCfg.ID,
 		Type:    string(tierCfg.Type),
 		Chunks:  cm,
 		Indexes: im,

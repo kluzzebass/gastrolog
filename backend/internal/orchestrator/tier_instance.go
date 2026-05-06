@@ -19,7 +19,8 @@ import (
 // directory.
 type TierInstance struct {
 	TierID          glid.GLID
-	StorageID       string // the file storage ID this instance uses (empty for memory/JSONL tiers)
+	VaultID         glid.GLID // owning vault — set during construction; with 1:1 vault/tier this is the natural ID
+	StorageID       string    // the file storage ID this instance uses (empty for memory/JSONL tiers)
 	Type            string
 	Chunks          chunk.ChunkManager
 	Indexes         index.IndexManager
