@@ -17,7 +17,7 @@ var ErrNoVaultRaftLeader = errors.New("no vault raft leader")
 
 // VaultApplyForwarder applies pre-marshaled vault control-plane FSM commands.
 // If this node is the Raft leader, it applies locally; otherwise it forwards
-// via ForwardVaultApply (same pattern as TierApplyForwarder).
+// via ForwardVaultApply (same pattern as VaultCtlChunkApplyForwarder).
 type VaultApplyForwarder struct {
 	raft    *hraft.Raft
 	groupID string

@@ -16,12 +16,12 @@ import (
 // ErrNoRaftLeader is returned when the target Raft group has no elected leader.
 var ErrNoRaftLeader = errors.New("no raft leader")
 
-// TierApplyForwarder applies tier FSM commands to the vault control-plane
+// VaultCtlChunkApplyForwarder applies tier FSM commands to the vault control-plane
 // Raft group. Every payload is wrapped as a vaultraft OpVaultChunkFSM entry
 // keyed by tier ID. If this node is the vault-ctl Raft leader, Apply
 // runs locally; otherwise it forwards via ForwardTierApply RPC to the
-// current leader. Constructed via NewVaultCtlTierApplyForwarder.
-type TierApplyForwarder struct {
+// current leader. Constructed via NewVaultCtlChunkApplyForwarder.
+type VaultCtlChunkApplyForwarder struct {
 	raft            *hraft.Raft
 	vaultCtlGroupID string
 	tierID          glid.GLID
@@ -29,11 +29,11 @@ type TierApplyForwarder struct {
 	timeout         time.Duration
 }
 
-// NewVaultCtlTierApplyForwarder creates a forwarder that applies tierfsm
+// NewVaultCtlChunkApplyForwarder creates a forwarder that applies tierfsm
 // commands to the vault control-plane Raft group, wrapping each payload
 // with OpVaultChunkFSM + tier ID. ForwardTierApply uses the vault ctl group_id.
-func NewVaultCtlTierApplyForwarder(r *hraft.Raft, vaultCtlGroupID string, tierID glid.GLID, peers *PeerConns, timeout time.Duration) *TierApplyForwarder {
-	return &TierApplyForwarder{
+func NewVaultCtlChunkApplyForwarder(r *hraft.Raft, vaultCtlGroupID string, tierID glid.GLID, peers *PeerConns, timeout time.Duration) *VaultCtlChunkApplyForwarder {
+	return &VaultCtlChunkApplyForwarder{
 		raft:            r,
 		vaultCtlGroupID: vaultCtlGroupID,
 		tierID:          tierID,
@@ -44,7 +44,7 @@ func NewVaultCtlTierApplyForwarder(r *hraft.Raft, vaultCtlGroupID string, tierID
 
 // Apply applies a tier FSM command. Tries locally first; forwards to the
 // vault-ctl Raft leader on ErrNotLeader.
-func (f *TierApplyForwarder) Apply(data []byte) error {
+func (f *VaultCtlChunkApplyForwarder) Apply(data []byte) error {
 	payload := vaultraft.MarshalTierCommand(f.tierID, data)
 	future := f.raft.Apply(payload, f.timeout)
 	if err := future.Error(); err != nil {
@@ -56,7 +56,7 @@ func (f *TierApplyForwarder) Apply(data []byte) error {
 	return nil
 }
 
-func (f *TierApplyForwarder) forwardToLeader(data []byte) error {
+func (f *VaultCtlChunkApplyForwarder) forwardToLeader(data []byte) error {
 	_, leaderID := f.raft.LeaderWithID()
 	if leaderID == "" {
 		return ErrNoRaftLeader

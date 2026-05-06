@@ -1152,7 +1152,7 @@ func (o *Orchestrator) ensureVaultCtlTierMetadata(tierCfg system.TierConfig, clu
 
 	var applier tierfsm.Applier
 	if factories.PeerConns != nil {
-		applier = cluster.NewVaultCtlTierApplyForwarder(r, vaultGID, tierCfg.ID, factories.PeerConns, timeout)
+		applier = cluster.NewVaultCtlChunkApplyForwarder(r, vaultGID, tierCfg.ID, factories.PeerConns, timeout)
 	} else {
 		applier = &vaultCtlTierApplier{o: o, vaultID: tierCfg.VaultID, tierID: tierCfg.ID}
 	}
