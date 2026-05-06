@@ -254,7 +254,7 @@ func (r *searchReadyRegistry) IndexReader() manifest.IndexReader { return r.o.In
 // tiers (not follower replicas). Used by ForwardSearch handlers to avoid
 // double-counting when the requesting node already searches its own followers.
 func (o *Orchestrator) LeaderVaultQueryEngine() *query.Engine {
-	return query.NewWithRegistry(&leaderTierRegistry{o: o}, o.logger)
+	return query.NewWithRegistry(&leaderVaultRegistry{o: o}, o.logger)
 }
 
 // LocalTierQueryEngine returns a query engine that searches every locally
@@ -265,16 +265,16 @@ func (o *Orchestrator) LeaderVaultQueryEngine() *query.Engine {
 // must NOT use this engine — use LeaderVaultQueryEngine for authoritative
 // reads. See gastrolog-66b7x.
 func (o *Orchestrator) LocalTierQueryEngine() *query.Engine {
-	return query.NewWithRegistry(&localTierRegistry{o: o}, o.logger)
+	return query.NewWithRegistry(&localVaultRegistry{o: o}, o.logger)
 }
 
-// localTierRegistry exposes every tier this node holds (as leader or
+// localVaultRegistry exposes every tier this node holds (as leader or
 // follower) as a searchable unit keyed by tier ID. See LocalTierQueryEngine.
-type localTierRegistry struct {
+type localVaultRegistry struct {
 	o *Orchestrator
 }
 
-func (r *localTierRegistry) ListVaults() []glid.GLID {
+func (r *localVaultRegistry) ListVaults() []glid.GLID {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
 	var ids []glid.GLID
@@ -291,7 +291,7 @@ func (r *localTierRegistry) ListVaults() []glid.GLID {
 	return ids
 }
 
-func (r *localTierRegistry) ChunkManager(key glid.GLID) chunk.ChunkManager {
+func (r *localVaultRegistry) ChunkManager(key glid.GLID) chunk.ChunkManager {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
 	for _, v := range r.o.vaults {
@@ -307,7 +307,7 @@ func (r *localTierRegistry) ChunkManager(key glid.GLID) chunk.ChunkManager {
 	return nil
 }
 
-func (r *localTierRegistry) IndexManager(key glid.GLID) index.IndexManager {
+func (r *localVaultRegistry) IndexManager(key glid.GLID) index.IndexManager {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
 	for _, v := range r.o.vaults {
@@ -323,18 +323,18 @@ func (r *localTierRegistry) IndexManager(key glid.GLID) index.IndexManager {
 	return nil
 }
 
-func (r *localTierRegistry) QueryEngine(_ glid.GLID) *query.Engine { return nil }
+func (r *localVaultRegistry) QueryEngine(_ glid.GLID) *query.Engine { return nil }
 
 // TransitionStreamedChunks returns the streamed-but-not-yet-expired set for
 // any tier on this node (leader or follower). Followers don't apply the
 // flag locally; their callbacks will return empty, which is fine — the
 // flag set is read primarily to filter source chunks during transitions
 // on the leader. See gastrolog-66b7x.
-func (r *localTierRegistry) Reader() manifest.Reader { return r.o.ManifestReader() }
+func (r *localVaultRegistry) Reader() manifest.Reader { return r.o.ManifestReader() }
 
-func (r *localTierRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }
+func (r *localVaultRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }
 
-func (r *localTierRegistry) TransitionStreamedChunks(key glid.GLID) map[chunk.ChunkID]bool {
+func (r *localVaultRegistry) TransitionStreamedChunks(key glid.GLID) map[chunk.ChunkID]bool {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
 	for _, v := range r.o.vaults {
@@ -359,7 +359,7 @@ func (r *localTierRegistry) TransitionStreamedChunks(key glid.GLID) map[chunk.Ch
 	return nil
 }
 
-// leaderTierRegistry provides a flat view of all leader vaults. Each
+// leaderVaultRegistry provides a flat view of all leader vaults. Each
 // vault is a searchable unit keyed by VAULT ID (post-tier model — the
 // 1:1 vault/tier collapse means tier ID and vault ID are equivalent
 // for query routing). Resume tokens emitted from this registry tag
@@ -367,15 +367,15 @@ func (r *localTierRegistry) TransitionStreamedChunks(key glid.GLID) map[chunk.Ch
 // QueryServer.splitResumeToken collapses to a single vault-keyed
 // dispatch.
 //
-// Renamed for clarity in a later commit; still leaderTierRegistry
+// Renamed for clarity in a later commit; still leaderVaultRegistry
 // during the refactor (gastrolog-257l7).
-type leaderTierRegistry struct {
+type leaderVaultRegistry struct {
 	o *Orchestrator
 }
 
 // findLeaderTier returns the leader VaultInstance for the given vault ID,
 // or nil if the vault is unknown / unready / has no leader tier.
-func (r *leaderTierRegistry) findLeaderTier(vaultID glid.GLID) *VaultInstance {
+func (r *leaderVaultRegistry) findLeaderTier(vaultID glid.GLID) *VaultInstance {
 	v := r.o.vaults[vaultID]
 	if v == nil {
 		return nil
@@ -391,7 +391,7 @@ func (r *leaderTierRegistry) findLeaderTier(vaultID glid.GLID) *VaultInstance {
 	return nil
 }
 
-func (r *leaderTierRegistry) ListVaults() []glid.GLID {
+func (r *leaderVaultRegistry) ListVaults() []glid.GLID {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
 	var ids []glid.GLID
@@ -409,7 +409,7 @@ func (r *leaderTierRegistry) ListVaults() []glid.GLID {
 	return ids
 }
 
-func (r *leaderTierRegistry) ChunkManager(vaultID glid.GLID) chunk.ChunkManager {
+func (r *leaderVaultRegistry) ChunkManager(vaultID glid.GLID) chunk.ChunkManager {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
 	if t := r.findLeaderTier(vaultID); t != nil {
@@ -418,7 +418,7 @@ func (r *leaderTierRegistry) ChunkManager(vaultID glid.GLID) chunk.ChunkManager 
 	return nil
 }
 
-func (r *leaderTierRegistry) IndexManager(vaultID glid.GLID) index.IndexManager {
+func (r *leaderVaultRegistry) IndexManager(vaultID glid.GLID) index.IndexManager {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
 	if t := r.findLeaderTier(vaultID); t != nil {
@@ -427,17 +427,17 @@ func (r *leaderTierRegistry) IndexManager(vaultID glid.GLID) index.IndexManager 
 	return nil
 }
 
-func (r *leaderTierRegistry) QueryEngine(_ glid.GLID) *query.Engine { return nil }
+func (r *leaderVaultRegistry) QueryEngine(_ glid.GLID) *query.Engine { return nil }
 
-func (r *leaderTierRegistry) Reader() manifest.Reader { return r.o.ManifestReader() }
+func (r *leaderVaultRegistry) Reader() manifest.Reader { return r.o.ManifestReader() }
 
-func (r *leaderTierRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }
+func (r *leaderVaultRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }
 
 // TransitionStreamedChunks returns the streamed-but-not-yet-expired
 // chunk set for the given vault. Resolves the leader tier instance and
 // reads its ListTransitionStreamed callback (which reads the per-vault
 // FSM). See gastrolog-4xusf.
-func (r *leaderTierRegistry) TransitionStreamedChunks(vaultID glid.GLID) map[chunk.ChunkID]bool {
+func (r *leaderVaultRegistry) TransitionStreamedChunks(vaultID glid.GLID) map[chunk.ChunkID]bool {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
 	t := r.findLeaderTier(vaultID)
