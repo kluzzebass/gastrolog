@@ -1177,7 +1177,7 @@ func (o *Orchestrator) ensureVaultCtlTierMetadata(tierCfg system.TierConfig, clu
 //
 // Before 5xxbd, tier FSM was a top-level Raft group whose Ready flag
 // flipped on every apply in practice, because `CmdPutTier` was a LogCommand
-// that hit it. After 5xxbd the tier sub-FSM only sees OpTierFSM commands,
+// that hit it. After 5xxbd the tier sub-FSM only sees OpVaultChunkFSM commands,
 // which a fresh vault with no chunks never sends — keying readiness on any
 // FSM-level signal leaves every fresh vault wedged as "not ready" until
 // first ingestion.

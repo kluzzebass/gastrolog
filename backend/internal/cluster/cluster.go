@@ -96,7 +96,7 @@ type Server struct {
 
 	// groupApplyFn applies a pre-marshaled command to the multiraft group
 	// identified by groupID. Used by both ForwardTierApply (groupID = the
-	// vault-ctl group carrying an OpTierFSM-wrapped payload) and
+	// vault-ctl group carrying an OpVaultChunkFSM-wrapped payload) and
 	// ForwardVaultApply (groupID = the vault-ctl group, payload = native
 	// vault-ctl command). Post-gastrolog-5xxbd there is no separate
 	// tier-Raft path; both RPCs route through this single function.

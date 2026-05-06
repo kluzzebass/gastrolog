@@ -742,7 +742,7 @@ func (s *Server) forwardApply(ctx context.Context, req *gastrologv1.ForwardApply
 }
 
 // forwardTierApply handles the ForwardTierApply RPC. The payload is a
-// tierfsm command wrapped with OpTierFSM + tier ID (see
+// tierfsm command wrapped with OpVaultChunkFSM + tier ID (see
 // NewVaultCtlTierApplyForwarder), and the group ID is the vault-ctl
 // Raft group ID. Dispatches to the shared groupApplyFn.
 func (s *Server) forwardTierApply(ctx context.Context, req *gastrologv1.ForwardTierApplyRequest) (*gastrologv1.ForwardTierApplyResponse, error) {
@@ -757,7 +757,7 @@ func (s *Server) forwardTierApply(ctx context.Context, req *gastrologv1.ForwardT
 
 // forwardVaultApply handles the ForwardVaultApply RPC on the vault
 // control-plane Raft leader. The payload is a native vault-ctl FSM
-// command (no OpTierFSM wrapping); the group ID identifies the vault's
+// command (no OpVaultChunkFSM wrapping); the group ID identifies the vault's
 // control-plane Raft group. Dispatches to the shared groupApplyFn.
 func (s *Server) forwardVaultApply(ctx context.Context, req *gastrologv1.ForwardVaultApplyRequest) (*gastrologv1.ForwardVaultApplyResponse, error) {
 	if s.groupApplyFn == nil {

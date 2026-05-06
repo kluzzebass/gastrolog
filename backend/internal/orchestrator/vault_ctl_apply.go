@@ -36,7 +36,7 @@ func (o *Orchestrator) ApplyVaultControlPlane(vaultID glid.GLID, data []byte) er
 }
 
 // vaultCtlTierApplier implements tierfsm.Applier by wrapping tier commands as
-// vault control-plane OpTierFSM entries (see vaultraft.MarshalTierCommand).
+// vault control-plane OpVaultChunkFSM entries (see vaultraft.MarshalTierCommand).
 type vaultCtlTierApplier struct {
 	o       *Orchestrator
 	vaultID glid.GLID

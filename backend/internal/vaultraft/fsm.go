@@ -1,5 +1,5 @@
 // Package vaultraft holds the vault control-plane Raft FSM (gastrolog-5xxbd).
-// Tier chunk metadata is namespaced under OpTierFSM (per-tier sub-FSMs) on that
+// Tier chunk metadata is namespaced under OpVaultChunkFSM (per-tier sub-FSMs) on that
 // same Raft group, without changing the tierfsm wire encoding.
 package vaultraft
 
@@ -85,15 +85,15 @@ func (f *FSM) Apply(l *hraft.Log) any {
 	switch l.Data[0] {
 	case OpNoop:
 		return nil
-	case OpTierFSM:
+	case OpVaultChunkFSM:
 		if len(l.Data) < 1+glid.Size {
-			return fmt.Errorf("vaultraft: OpTierFSM payload too short (%d bytes)", len(l.Data))
+			return fmt.Errorf("vaultraft: OpVaultChunkFSM payload too short (%d bytes)", len(l.Data))
 		}
 		var tierID glid.GLID
 		copy(tierID[:], l.Data[1:1+glid.Size])
 		sub := l.Data[1+glid.Size:]
 		if len(sub) == 0 {
-			return errors.New("vaultraft: OpTierFSM missing tier command body")
+			return errors.New("vaultraft: OpVaultChunkFSM missing tier command body")
 		}
 		f.tierMu.Lock()
 		t := f.tiers[tierID]

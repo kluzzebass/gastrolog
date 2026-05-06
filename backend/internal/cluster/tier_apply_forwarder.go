@@ -17,7 +17,7 @@ import (
 var ErrNoRaftLeader = errors.New("no raft leader")
 
 // TierApplyForwarder applies tier FSM commands to the vault control-plane
-// Raft group. Every payload is wrapped as a vaultraft OpTierFSM entry
+// Raft group. Every payload is wrapped as a vaultraft OpVaultChunkFSM entry
 // keyed by tier ID. If this node is the vault-ctl Raft leader, Apply
 // runs locally; otherwise it forwards via ForwardTierApply RPC to the
 // current leader. Constructed via NewVaultCtlTierApplyForwarder.
@@ -31,7 +31,7 @@ type TierApplyForwarder struct {
 
 // NewVaultCtlTierApplyForwarder creates a forwarder that applies tierfsm
 // commands to the vault control-plane Raft group, wrapping each payload
-// with OpTierFSM + tier ID. ForwardTierApply uses the vault ctl group_id.
+// with OpVaultChunkFSM + tier ID. ForwardTierApply uses the vault ctl group_id.
 func NewVaultCtlTierApplyForwarder(r *hraft.Raft, vaultCtlGroupID string, tierID glid.GLID, peers *PeerConns, timeout time.Duration) *TierApplyForwarder {
 	return &TierApplyForwarder{
 		raft:            r,

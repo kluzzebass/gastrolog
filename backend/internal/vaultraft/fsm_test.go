@@ -30,7 +30,7 @@ func TestFSM_ApplyNoopAndUnknown(t *testing.T) {
 	}
 }
 
-func TestFSM_OpTierFSM_delegate(t *testing.T) {
+func TestFSM_OpVaultChunkFSM_delegate(t *testing.T) {
 	t.Parallel()
 	f := NewFSM()
 	tierID := glid.New()
