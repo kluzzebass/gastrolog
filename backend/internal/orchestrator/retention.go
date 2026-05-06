@@ -88,7 +88,7 @@ type retentionRunner struct {
 	// buildTierInstance; those harnesses fall through to the legacy
 	// direct-delete path below (for cross-node propagation they wire
 	// directChunkReplicator.DeleteChunk RPC fan-out separately).
-	reconciler *TierLifecycleReconciler
+	reconciler *VaultLifecycleReconciler
 
 	// isLeader returns true if this node is the config leader for this tier.
 	// Retention (expiry + transitions) only runs on the leader to prevent
@@ -599,7 +599,7 @@ func tierPositionInVault(cfg *system.Config, vaultID, tierID glid.GLID) int {
 	return -1
 }
 
-// (Disk-vs-manifest orphan cleanup lives on TierLifecycleReconciler now —
+// (Disk-vs-manifest orphan cleanup lives on VaultLifecycleReconciler now —
 // see SweepLocalOrphans. It is tombstone-aware: only chunks the FSM has
 // positively confirmed as finalize-deleted are eligible for cleanup, so
 // freshly-created chunks with announce in flight are never racey-deleted.)
@@ -1020,7 +1020,7 @@ func (r *retentionRunner) expectedFromForExpire() []string {
 
 // forwardDeletionToFollowers sends an explicit delete RPC to each remote
 // follower. Used only by the reconciler-less fallback path in expireChunk
-// (test harnesses without a vault-ctl Raft group / TierLifecycleReconciler).
+// (test harnesses without a vault-ctl Raft group / VaultLifecycleReconciler).
 // Production runs through the receipt protocol and never reaches here.
 // The directChunkReplicator.DeleteChunk RPC chain stays for that harness;
 // removing it requires migrating the harness onto the reconciler with a

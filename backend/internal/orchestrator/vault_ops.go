@@ -832,7 +832,7 @@ func (o *Orchestrator) proposePruneNodeForVault(vaultID glid.GLID, removedNodeID
 // tier's chunk-lifecycle obligations: the local node (always present
 // because callers run on the leader path) plus every follower target's
 // node ID, with duplicates collapsed. Suitable for passing as the
-// expectedFrom argument to TierLifecycleReconciler.deleteChunk.
+// expectedFrom argument to VaultLifecycleReconciler.deleteChunk.
 //
 // Returned in deterministic order (local first, then follower targets in
 // their declared order) so that audit-log output is reproducible across
@@ -861,7 +861,7 @@ func (o *Orchestrator) placementMembership(tier *VaultInstance) []string {
 // DeleteNoAnnounce to avoid a redundant second Raft-wide announce (the
 // first one already propagated via OnDelete). The reconciler-driven
 // production path (gastrolog-51gme) walks same-node siblings itself in
-// TierLifecycleReconciler.deleteLocalCopy.
+// VaultLifecycleReconciler.deleteLocalCopy.
 func (o *Orchestrator) deleteFromFollowers(vaultID glid.GLID, tierID glid.GLID, chunkID chunk.ChunkID) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()

@@ -1078,7 +1078,7 @@ func (m *Manager) loadExisting() error {
 
 	// gastrolog-51gme step 8 deleted the "multiple unsealed → seal all
 	// but newest" startup heuristic that lived here. Sealed-state
-	// projection is now FSM-driven via TierLifecycleReconciler.onSeal +
+	// projection is now FSM-driven via VaultLifecycleReconciler.onSeal +
 	// ReconcileFromSnapshot, which call chunk.SealEnsurer.EnsureSealed
 	// on this Manager once the tier sub-FSM has loaded. Until that
 	// projection runs, multiple unsealed chunks are tolerated; the
@@ -1129,7 +1129,7 @@ func (m *Manager) cleanOrphanTempFiles(chunkDir string) {
 }
 
 // EnsureSealed projects the FSM's sealed state onto local chunk files.
-// Implements chunk.SealEnsurer. Called from TierLifecycleReconciler's
+// Implements chunk.SealEnsurer. Called from VaultLifecycleReconciler's
 // onSeal callback when CmdSealChunk applies (steady state) and from
 // ReconcileFromSnapshot's projectAllSealedFromFSM walk (recovery
 // catchup after Raft snapshot install).

@@ -878,7 +878,7 @@ func (o *Orchestrator) buildTierInstance(sys *system.System, vaultCfg system.Vau
 	return ti, nil
 }
 
-// attachLifecycleReconciler constructs a TierLifecycleReconciler for the given
+// attachLifecycleReconciler constructs a VaultLifecycleReconciler for the given
 // tier instance and binds it to the tier sub-FSM in the vault control-plane
 // Raft group. Skipped silently when there is no group (memory-mode tiers
 // without replication) — single-node deletes go straight through the chunk

@@ -1,6 +1,6 @@
 package orchestrator
 
-// gastrolog-51gme — TierLifecycleReconciler.
+// gastrolog-51gme — VaultLifecycleReconciler.
 //
 // One reconciler per VaultInstance. Owns chunk-lifecycle execution
 // uniformly: every FSM apply event goes through here, and every
@@ -77,7 +77,7 @@ import (
 	"gastrolog/internal/vaultraft/tierfsm"
 )
 
-// TierLifecycleReconciler owns chunk-lifecycle execution for a single
+// VaultLifecycleReconciler owns chunk-lifecycle execution for a single
 // VaultInstance. Created during tier wiring (reconfig_vaults.go), wired
 // to the tier's FSM via Wire(), and torn down with the tier instance.
 //
@@ -85,7 +85,7 @@ import (
 // and the SilentDeleter shortcut. A forbidigo lint rule (step 9)
 // blocks direct calls from anywhere else in the orchestrator package
 // outside a small allow-list (vault teardown, replaceForwardedChunk).
-type TierLifecycleReconciler struct {
+type VaultLifecycleReconciler struct {
 	vaultID     glid.GLID
 	tierID      glid.GLID
 	tier        *VaultInstance
@@ -120,8 +120,8 @@ type TierLifecycleReconciler struct {
 // orch may be nil in tests that exercise the reconciler in isolation;
 // when nil, the same-node sibling cleanup path is skipped and chunk-
 // change notifications are dropped.
-func NewTierLifecycleReconciler(orch *Orchestrator, vaultID, tierID glid.GLID, tier *VaultInstance, localNodeID string, logger *slog.Logger) *TierLifecycleReconciler {
-	return &TierLifecycleReconciler{
+func NewTierLifecycleReconciler(orch *Orchestrator, vaultID, tierID glid.GLID, tier *VaultInstance, localNodeID string, logger *slog.Logger) *VaultLifecycleReconciler {
+	return &VaultLifecycleReconciler{
 		vaultID:     vaultID,
 		tierID:      tierID,
 		tier:        tier,
@@ -139,7 +139,7 @@ func NewTierLifecycleReconciler(orch *Orchestrator, vaultID, tierID glid.GLID, t
 // into the chunk manager / Raft applier without risking the
 // FSM-mutex / orchestrator-mutex inversion that's been a recurring
 // problem (see gastrolog-5oofa, gastrolog-1s3mf).
-func (r *TierLifecycleReconciler) Wire(fsm *tierfsm.FSM) {
+func (r *VaultLifecycleReconciler) Wire(fsm *tierfsm.FSM) {
 	if fsm == nil {
 		return
 	}
@@ -178,7 +178,7 @@ func (r *TierLifecycleReconciler) Wire(fsm *tierfsm.FSM) {
 // the apply pump waiting for our own ack to commit. Snapshot the
 // pending list, then dispatch the obligations on a goroutine so the
 // apply pump can drain.
-func (r *TierLifecycleReconciler) ReconcileFromSnapshot(fsm *tierfsm.FSM) {
+func (r *VaultLifecycleReconciler) ReconcileFromSnapshot(fsm *tierfsm.FSM) {
 	if fsm == nil {
 		return
 	}
@@ -217,7 +217,7 @@ func (r *TierLifecycleReconciler) ReconcileFromSnapshot(fsm *tierfsm.FSM) {
 // fully reloaded but the local Manager has only the on-disk flag bits,
 // which may have missed CmdSealChunk replays. Idempotent: chunks that
 // are already sealed locally, or that don't exist locally, are no-ops.
-func (r *TierLifecycleReconciler) projectAllSealedFromFSM(fsm *tierfsm.FSM) {
+func (r *VaultLifecycleReconciler) projectAllSealedFromFSM(fsm *tierfsm.FSM) {
 	if r.tier == nil || r.tier.Chunks == nil {
 		return
 	}
@@ -248,7 +248,7 @@ func (r *TierLifecycleReconciler) projectAllSealedFromFSM(fsm *tierfsm.FSM) {
 // RegisterCloudChunk is idempotent (skips if already in m.metas or
 // m.cloudIdx), so calling it for every cloud-backed entry is safe.
 // See gastrolog-3ukgz.
-func (r *TierLifecycleReconciler) projectAllCloudBackedFromFSM(fsm *tierfsm.FSM) {
+func (r *VaultLifecycleReconciler) projectAllCloudBackedFromFSM(fsm *tierfsm.FSM) {
 	if r.tier == nil || r.tier.Chunks == nil {
 		return
 	}
@@ -304,7 +304,7 @@ func (r *TierLifecycleReconciler) projectAllCloudBackedFromFSM(fsm *tierfsm.FSM)
 // inspector's WatchChunks subscribers on this node need to refresh.
 // Local EnsureSealed failure does not gate the notification — the
 // inspector reflects FSM state, not on-disk state. See gastrolog-2ob86.
-func (r *TierLifecycleReconciler) onSeal(e tierfsm.ManifestEntry) {
+func (r *VaultLifecycleReconciler) onSeal(e tierfsm.ManifestEntry) {
 	r.logger.Debug("onSeal", "chunk", e.ID, "records", e.RecordCount)
 	defer func() {
 		if r.orch != nil {
@@ -324,7 +324,7 @@ func (r *TierLifecycleReconciler) onSeal(e tierfsm.ManifestEntry) {
 	}
 }
 
-func (r *TierLifecycleReconciler) onRetentionPending(id chunk.ChunkID) {
+func (r *VaultLifecycleReconciler) onRetentionPending(id chunk.ChunkID) {
 	r.logger.Debug("onRetentionPending", "chunk", id)
 	// Audit-only. The actual cleanup goes through CmdRequestDelete.
 }
@@ -344,7 +344,7 @@ func (r *TierLifecycleReconciler) onRetentionPending(id chunk.ChunkID) {
 // Must run in a goroutine: this is the FSM apply pump, and the path
 // proposes CmdRequestDelete via reconciler.deleteChunk → posting on
 // the same Raft we are draining would deadlock.
-func (r *TierLifecycleReconciler) onTransitionStreamed(id chunk.ChunkID) {
+func (r *VaultLifecycleReconciler) onTransitionStreamed(id chunk.ChunkID) {
 	r.logger.Debug("onTransitionStreamed", "chunk", id)
 	if r.orch == nil {
 		return
@@ -358,7 +358,7 @@ func (r *TierLifecycleReconciler) onTransitionStreamed(id chunk.ChunkID) {
 // same vault to confirm and expire its copy immediately. Must run in
 // a goroutine for the same reason as onTransitionStreamed (apply-pump
 // deadlock avoidance). See gastrolog-1g6br.
-func (r *TierLifecycleReconciler) onTransitionReceived(sourceChunkID chunk.ChunkID) {
+func (r *VaultLifecycleReconciler) onTransitionReceived(sourceChunkID chunk.ChunkID) {
 	r.logger.Debug("onTransitionReceived", "source_chunk", sourceChunkID)
 	if r.orch == nil {
 		return
@@ -380,7 +380,7 @@ func (r *TierLifecycleReconciler) onTransitionReceived(sourceChunkID chunk.Chunk
 // which would deadlock the leader's apply pump waiting for its own
 // queued ack to apply. See gastrolog-51gme follow-up: apply-pump
 // self-cycle stall observed in the 4-node test cluster.
-func (r *TierLifecycleReconciler) onRequestDelete(p tierfsm.PendingDelete) {
+func (r *VaultLifecycleReconciler) onRequestDelete(p tierfsm.PendingDelete) {
 	if !p.ExpectedFrom[r.localNodeID] {
 		r.logger.Debug("onRequestDelete: not in expectedFrom",
 			"chunk", p.ChunkID, "reason", p.Reason)
@@ -399,7 +399,7 @@ func (r *TierLifecycleReconciler) onRequestDelete(p tierfsm.PendingDelete) {
 // onRequestDelete's ack: posting CmdFinalizeDelete on the leader from
 // inside the FSM apply pump would deadlock waiting for our own queued
 // command to apply.
-func (r *TierLifecycleReconciler) onAckDelete(chunkID chunk.ChunkID, ackingNodeID string) {
+func (r *VaultLifecycleReconciler) onAckDelete(chunkID chunk.ChunkID, ackingNodeID string) {
 	r.logger.Debug("onAckDelete", "chunk", chunkID, "node", ackingNodeID)
 	if r.tier == nil || r.tier.IsRaftLeader == nil || !r.tier.IsRaftLeader() {
 		return
@@ -419,7 +419,7 @@ func (r *TierLifecycleReconciler) onAckDelete(chunkID chunk.ChunkID, ackingNodeI
 	}()
 }
 
-func (r *TierLifecycleReconciler) onFinalizeDelete(chunkID chunk.ChunkID) {
+func (r *VaultLifecycleReconciler) onFinalizeDelete(chunkID chunk.ChunkID) {
 	r.logger.Debug("onFinalizeDelete", "chunk", chunkID)
 	// Audit-only. The pending entry was removed inside applyFinalizeDelete
 	// before this callback fired.
@@ -436,7 +436,7 @@ func (r *TierLifecycleReconciler) onFinalizeDelete(chunkID chunk.ChunkID) {
 // FSM had already removed the node from ExpectedFrom (the prune did
 // that synchronously), so onAckDelete never re-fires for those chunks.
 // See gastrolog-51gme step 10.
-func (r *TierLifecycleReconciler) onPruneNode(prunedNodeID string, finalizable []chunk.ChunkID) {
+func (r *VaultLifecycleReconciler) onPruneNode(prunedNodeID string, finalizable []chunk.ChunkID) {
 	r.logger.Debug("onPruneNode",
 		"node", prunedNodeID, "finalizable_count", len(finalizable))
 	if r.tier == nil || r.tier.IsRaftLeader == nil || !r.tier.IsRaftLeader() {
@@ -474,7 +474,7 @@ func (r *TierLifecycleReconciler) onPruneNode(prunedNodeID string, finalizable [
 // PendingDeletes() (which already returns copies) and fire
 // fulfillObligation in a goroutine to avoid blocking the cron
 // scheduler if the leader's apply queue is slow.
-func (r *TierLifecycleReconciler) SweepPendingObligations() {
+func (r *VaultLifecycleReconciler) SweepPendingObligations() {
 	if r.fsm == nil {
 		return
 	}
@@ -545,7 +545,7 @@ func (r *TierLifecycleReconciler) SweepPendingObligations() {
 // Logged at INFO level so the deletion is visible in cluster.log
 // without per-component log-level overrides — the whole point of this
 // sweep is operator-visible recovery.
-func (r *TierLifecycleReconciler) SweepLocalOrphans() {
+func (r *VaultLifecycleReconciler) SweepLocalOrphans() {
 	if r.fsm == nil || r.tier == nil || r.tier.Chunks == nil {
 		return
 	}
@@ -644,7 +644,7 @@ func (r *TierLifecycleReconciler) SweepLocalOrphans() {
 // failure outside this sweep's scope.) Cloud-backed chunks live in
 // shared object storage and are skipped: they are not a local-replica
 // concern. See gastrolog-2dgvj.
-func (r *TierLifecycleReconciler) SweepMissingReplicas() {
+func (r *VaultLifecycleReconciler) SweepMissingReplicas() {
 	if r.fsm == nil || r.tier == nil || r.tier.Chunks == nil {
 		return
 	}
@@ -736,7 +736,7 @@ const staleLeaderFSMGracePeriod = 1 * time.Hour
 // the receipt protocol is already running.
 //
 // See gastrolog-5nhwe.
-func (r *TierLifecycleReconciler) SweepStaleLeaderFSMEntries() {
+func (r *VaultLifecycleReconciler) SweepStaleLeaderFSMEntries() {
 	if r.fsm == nil || r.tier == nil || r.tier.Chunks == nil {
 		return
 	}
@@ -803,7 +803,7 @@ func (r *TierLifecycleReconciler) SweepStaleLeaderFSMEntries() {
 // from orchestrator.placementMembership which takes a tier as input
 // and is wired through r.tier directly here so the reconciler doesn't
 // need an orchestrator back-pointer for this.
-func (r *TierLifecycleReconciler) placementMembership() []string {
+func (r *VaultLifecycleReconciler) placementMembership() []string {
 	expected := make([]string, 0, 1+len(r.tier.FollowerTargets))
 	seen := map[string]bool{}
 	if r.localNodeID != "" {
@@ -834,7 +834,7 @@ func (r *TierLifecycleReconciler) placementMembership() []string {
 // active naturally) would have fulfillObligation bouncing off
 // ErrActiveChunk on every periodic-sweep tick, blocking finalize
 // indefinitely.
-func (r *TierLifecycleReconciler) fulfillObligation(chunkID chunk.ChunkID, reason, source string) {
+func (r *VaultLifecycleReconciler) fulfillObligation(chunkID chunk.ChunkID, reason, source string) {
 	if r.tier != nil && r.tier.Chunks != nil {
 		if ensurer, ok := r.tier.Chunks.(chunk.SealEnsurer); ok {
 			if err := ensurer.EnsureSealed(chunkID); err != nil {
@@ -878,7 +878,7 @@ func (r *TierLifecycleReconciler) fulfillObligation(chunkID chunk.ChunkID, reaso
 // deleteFromFollowers here would re-visit the same TI we just deleted
 // from and log a spurious "chunk not found" warning. See the cluster
 // log storm fixed alongside this change.
-func (r *TierLifecycleReconciler) deleteLocalCopy(chunkID chunk.ChunkID) error {
+func (r *VaultLifecycleReconciler) deleteLocalCopy(chunkID chunk.ChunkID) error {
 	if r.tier == nil {
 		return nil
 	}
@@ -931,7 +931,7 @@ func (r *TierLifecycleReconciler) deleteLocalCopy(chunkID chunk.ChunkID) error {
 // SweepPendingObligations path retries acks for stalled obligations
 // directly from local FSM state without going through this entry
 // point, so dedup'ing here is safe.
-func (r *TierLifecycleReconciler) deleteChunk(chunkID chunk.ChunkID, reason string, expectedFrom []string) error {
+func (r *VaultLifecycleReconciler) deleteChunk(chunkID chunk.ChunkID, reason string, expectedFrom []string) error {
 	if r.tier == nil {
 		return errors.New("deleteChunk: nil tier instance")
 	}

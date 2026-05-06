@@ -103,7 +103,7 @@ type VaultInstance struct {
 	// the canonical deleteChunk entry point. All cluster-wide deletes route
 	// through here over gastrolog-51gme steps 4-8. Nil for memory-mode tiers
 	// (no FSM, no replication).
-	Reconciler *TierLifecycleReconciler
+	Reconciler *VaultLifecycleReconciler
 
 	// ListManifest returns all chunk IDs in the tier FSM view — the authoritative
 	// set of chunks that should exist. Nil when no Raft group exists.
