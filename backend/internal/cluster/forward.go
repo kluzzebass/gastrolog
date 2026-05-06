@@ -463,7 +463,7 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 	first := true
 	for rec, iterErr := range searchIter {
 		if iterErr != nil {
-			// EOF can occur when a chunk is deleted mid-read (e.g., ImportToTier
+			// EOF can occur when a chunk is deleted mid-read (e.g., ImportToVault
 			// replacing a forwarded-record chunk on a follower). Treat as
 			// end-of-results — the data is still available via retry.
 			if errors.Is(iterErr, io.EOF) || isMissingLocalChunkFileError(iterErr) {

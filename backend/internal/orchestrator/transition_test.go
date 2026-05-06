@@ -2234,7 +2234,7 @@ func (d *directChunkReplicator) ImportSealedChunk(ctx context.Context, nodeID st
 		i++
 		return rec, nil
 	}
-	return orch.ImportToTier(ctx, vaultID, tierID, chunkID, iter)
+	return orch.ImportToVault(ctx, vaultID, tierID, chunkID, iter)
 }
 
 func (d *directChunkReplicator) DeleteChunk(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {

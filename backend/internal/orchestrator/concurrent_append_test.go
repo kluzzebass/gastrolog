@@ -352,7 +352,7 @@ func TestCursorOpenDuringSeal(t *testing.T) {
 }
 
 // ==========================================================================
-// gastrolog-3p8zh: ImportToTier cursor verification
+// gastrolog-3p8zh: ImportToVault cursor verification
 // ==========================================================================
 
 // TestImportToTierCursorVerified imports records to a file-backed tier and
@@ -401,8 +401,8 @@ func TestImportToTierCursorVerified(t *testing.T) {
 
 	// Import via orchestrator.
 	iter := testIterFromSlice(records)
-	if err := orch.ImportToTier(context.Background(), vaultID, tierID, chunkID, iter); err != nil {
-		t.Fatalf("ImportToTier: %v", err)
+	if err := orch.ImportToVault(context.Background(), vaultID, tierID, chunkID, iter); err != nil {
+		t.Fatalf("ImportToVault: %v", err)
 	}
 
 	// Check metadata.

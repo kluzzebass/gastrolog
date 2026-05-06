@@ -64,7 +64,7 @@ func smallRecords(n int) []chunk.Record {
 	return recs
 }
 
-// --- ImportToTier ---
+// --- ImportToVault ---
 
 func TestImportToTierPreservesChunkID(t *testing.T) {
 	t.Parallel()
@@ -78,7 +78,7 @@ func TestImportToTierPreservesChunkID(t *testing.T) {
 	orch.RegisterVault(vault)
 
 	targetID := chunk.NewChunkID()
-	err := orch.ImportToTier(context.Background(), vaultID, tierID, targetID, testIter(smallRecords(5)))
+	err := orch.ImportToVault(context.Background(), vaultID, tierID, targetID, testIter(smallRecords(5)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestImportToTierConcurrentSafe(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			errs[idx] = orch.ImportToTier(context.Background(), vaultID, tierID, ids[idx], testIter(smallRecords(3)))
+			errs[idx] = orch.ImportToVault(context.Background(), vaultID, tierID, ids[idx], testIter(smallRecords(3)))
 		}(i)
 	}
 	wg.Wait()
@@ -547,13 +547,13 @@ func TestImportToTierIdempotent(t *testing.T) {
 	chunkID := chunk.NewChunkID()
 
 	// First import — should succeed.
-	err := orch.ImportToTier(context.Background(), vaultID, tierID, chunkID, testIter(smallRecords(5)))
+	err := orch.ImportToVault(context.Background(), vaultID, tierID, chunkID, testIter(smallRecords(5)))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Second import with same chunk ID — idempotent skip (chunk already exists).
-	err = orch.ImportToTier(context.Background(), vaultID, tierID, chunkID, testIter(smallRecords(3)))
+	err = orch.ImportToVault(context.Background(), vaultID, tierID, chunkID, testIter(smallRecords(3)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -754,7 +754,7 @@ func TestAppendToTierSecondarySkipsPostSeal(t *testing.T) {
 	}
 
 	// If post-seal were scheduled on a follower, it would queue compression
-	// work that races with ImportToTier's delete-and-replace. The test just
+	// work that races with ImportToVault's delete-and-replace. The test just
 	// verifies no panic occurred and the seal happened cleanly.
 	metas, _ := cm.List()
 	sealed := 0
@@ -796,11 +796,11 @@ func TestImportToTierSecondarySealsActiveAndKeeps(t *testing.T) {
 		t.Fatal("expected active chunk with leader's ID")
 	}
 
-	// Primary seals and sends canonical version. ImportToTier should
+	// Primary seals and sends canonical version. ImportToVault should
 	// seal the active chunk and keep it (no delete-and-replace).
-	err := orch.ImportToTier(context.Background(), vaultID, tierID, chunkID, testIter(smallRecords(5)))
+	err := orch.ImportToVault(context.Background(), vaultID, tierID, chunkID, testIter(smallRecords(5)))
 	if err != nil {
-		t.Fatalf("ImportToTier: %v", err)
+		t.Fatalf("ImportToVault: %v", err)
 	}
 
 	// Forwarded version was replaced by canonical (5 records).
@@ -841,10 +841,10 @@ func TestImportToTierSecondaryKeepsSealedForwarded(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// ImportToTier should replace the forwarded version with canonical.
-	err := orch.ImportToTier(context.Background(), vaultID, tierID, chunkID, testIter(smallRecords(5)))
+	// ImportToVault should replace the forwarded version with canonical.
+	err := orch.ImportToVault(context.Background(), vaultID, tierID, chunkID, testIter(smallRecords(5)))
 	if err != nil {
-		t.Fatalf("ImportToTier: %v", err)
+		t.Fatalf("ImportToVault: %v", err)
 	}
 
 	// Canonical version replaces forwarded (5 records, not 3).
@@ -935,7 +935,7 @@ func TestAppendToTierTierNotFound(t *testing.T) {
 	}
 }
 
-// TestImportToTierTierNotLocal pins gastrolog-2t48z: when ImportToTier
+// TestImportToTierTierNotLocal pins gastrolog-2t48z: when ImportToVault
 // is invoked against a (vault, tier) pair where the tier instance has
 // been evicted from this node by placement reconfiguration, the error
 // must be ErrTierNotLocal — not ErrVaultNotFound — so log lines don't
@@ -955,7 +955,7 @@ func TestImportToTierTierNotLocal(t *testing.T) {
 	iter := func() (chunk.Record, error) {
 		return chunk.Record{}, chunk.ErrNoMoreRecords
 	}
-	err := orch.ImportToTier(context.Background(), vaultID, bogusTierID, chunk.NewChunkID(), iter)
+	err := orch.ImportToVault(context.Background(), vaultID, bogusTierID, chunk.NewChunkID(), iter)
 	if err == nil {
 		t.Fatal("expected error for non-resident tier")
 	}
@@ -980,7 +980,7 @@ func TestImportToTierDrainsIteratorOnSkip(t *testing.T) {
 
 	chunkID := chunk.NewChunkID()
 
-	// Pre-populate a sealed chunk with this ID so ImportToTier will skip.
+	// Pre-populate a sealed chunk with this ID so ImportToVault will skip.
 	tier.Chunks.SetNextChunkID(chunkID)
 	if _, _, err := tier.Chunks.Append(testRecord("existing")); err != nil {
 		t.Fatal(err)
@@ -1004,9 +1004,9 @@ func TestImportToTierDrainsIteratorOnSkip(t *testing.T) {
 		}, nil
 	}
 
-	err := orch.ImportToTier(context.Background(), vaultID, tierID, chunkID, trackingIter)
+	err := orch.ImportToVault(context.Background(), vaultID, tierID, chunkID, trackingIter)
 	if err != nil {
-		t.Fatalf("ImportToTier: %v", err)
+		t.Fatalf("ImportToVault: %v", err)
 	}
 
 	if consumed != totalRecords {
@@ -1336,7 +1336,7 @@ func TestAckAfterReplicationFailure(t *testing.T) {
 // HIGH-VOLUME STRESS TESTS
 // ================================================================
 
-// TestImportToTierReplacesIncompleteForwardedChunk verifies that ImportToTier
+// TestImportToTierReplacesIncompleteForwardedChunk verifies that ImportToVault
 // replaces a forwarded chunk that has fewer records (simulating fire-and-forget
 // drops) with the canonical version containing all records.
 func TestImportToTierReplacesIncompleteForwardedChunk(t *testing.T) {
@@ -1372,10 +1372,10 @@ func TestImportToTierReplacesIncompleteForwardedChunk(t *testing.T) {
 		t.Fatalf("expected 70 forwarded records, got %d", meta.RecordCount)
 	}
 
-	// ImportToTier with canonical version: all 100 records.
-	err = orch.ImportToTier(context.Background(), vaultID, tierID, chunkID, testIter(smallRecords(100)))
+	// ImportToVault with canonical version: all 100 records.
+	err = orch.ImportToVault(context.Background(), vaultID, tierID, chunkID, testIter(smallRecords(100)))
 	if err != nil {
-		t.Fatalf("ImportToTier: %v", err)
+		t.Fatalf("ImportToVault: %v", err)
 	}
 
 	// Verify: chunk now has 100 records (canonical replaced incomplete).

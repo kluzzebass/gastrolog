@@ -1002,12 +1002,12 @@ func (o *Orchestrator) ImportChunkRecords(ctx context.Context, vaultID glid.GLID
 	return nil
 }
 
-// ImportToTier imports records as a sealed chunk into a specific tier,
+// ImportToVault imports records as a sealed chunk into a specific tier,
 // preserving the given chunk ID. Used by sealed-chunk replication —
 // the follower receives a sealed chunk from the leader with the same ID.
 // Schedules postSealWork for local indexing (secondaries need indexes for queries)
 // but won't trigger further replication (gated by !IsFollower in tierReplicationInfo).
-func (o *Orchestrator) ImportToTier(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
+func (o *Orchestrator) ImportToVault(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
 	return o.ImportToTierStorage(ctx, vaultID, tierID, "", chunkID, next)
 }
 
