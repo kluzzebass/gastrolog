@@ -237,7 +237,6 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
         </thead>
         <tbody>
           {vaultTiers.map((vt) => encode(vt.id)).map((tierId) => {
-            const pos = tierPositions.get(tierId) ?? 0;
             const group = tierGroups.get(tierId);
             const remote = remoteTierInfo.find((rt) => rt.id === tierId);
 
@@ -253,7 +252,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
                 >
                   <td colSpan={5} className="px-4 py-1.5">
                     <span className="inline-flex flex-wrap items-center gap-2">
-              <Badge variant="muted" dark={dark}>{`Tier ${String(pos)}: ${remote.type}`}</Badge>
+              <Badge variant="muted" dark={dark}>{remote.type.toUpperCase()}</Badge>
               <span>{remote.nodeName ? `on ${remote.nodeName}` : "unplaced"}</span>
               {remote.rf > 1 && <Badge variant="info" dark={dark}>{`RF=${String(remote.rf)}`}</Badge>}
               {remote.followerNodeIds.length > 0 && (
@@ -289,7 +288,9 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
 
             if (!group) return null;
 
-            const label = `Tier ${String(pos)}: ${group.tierType}`;
+            // Phase 2 (gastrolog-3iy5l): single instance per vault — drop
+            // the "Tier N" prefix, just show the storage type.
+            const label = group.tierType.toUpperCase();
             const tierCfg = config?.tiers.find((t) => encode(t.id) === tierId);
             const rf = tierCfg?.replicationFactor || 1;
             const secondaries = tierCfg ? followerNodeIds(tierCfg, nscs) : [];
