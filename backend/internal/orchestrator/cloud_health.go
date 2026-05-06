@@ -77,6 +77,14 @@ func (o *Orchestrator) backfillCloudUploads(tier *VaultInstance) {
 
 	var backfilled int
 	for _, m := range metas {
+		// Phase 3 (gastrolog-1huz5): gate on FSM-Sealed, not local.
+		// During the Sealing window the leader has closed active-form
+		// files but data.glcb does not exist yet — uploading would
+		// fail with no-such-file. Overlaying through the FSM makes us
+		// wait for AnnounceSeal in PostSealProcess.
+		if tier.OverlayFromFSM != nil {
+			m = tier.OverlayFromFSM(m)
+		}
 		if !m.Sealed || chunkIsCloudBacked(tier, m) {
 			continue
 		}

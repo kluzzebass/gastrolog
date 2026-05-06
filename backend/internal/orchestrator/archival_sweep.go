@@ -122,6 +122,12 @@ func (o *Orchestrator) archivalSweepTier(tier *VaultInstance, cs *system.CloudSe
 	}
 
 	for _, m := range metas {
+		// Phase 3 (gastrolog-1huz5): gate on FSM-Sealed; archive only
+		// chunks whose GLCB has been committed. Sealing chunks have
+		// closed active-form files but no GLCB yet.
+		if tier.OverlayFromFSM != nil {
+			m = tier.OverlayFromFSM(m)
+		}
 		if !m.Sealed || !m.CloudBacked {
 			continue
 		}
