@@ -373,9 +373,9 @@ type leaderTierRegistry struct {
 	o *Orchestrator
 }
 
-// findLeaderTier returns the leader TierInstance for the given vault ID,
+// findLeaderTier returns the leader VaultInstance for the given vault ID,
 // or nil if the vault is unknown / unready / has no leader tier.
-func (r *leaderTierRegistry) findLeaderTier(vaultID glid.GLID) *TierInstance {
+func (r *leaderTierRegistry) findLeaderTier(vaultID glid.GLID) *VaultInstance {
 	v := r.o.vaults[vaultID]
 	if v == nil {
 		return nil
@@ -465,7 +465,7 @@ func (o *Orchestrator) LeaderTierQueryEngineForVault(vaultID glid.GLID) (*query.
 	if err := vaultReplicationReadinessErr(vaultID, v); err != nil {
 		return nil, err
 	}
-	var leaders []*TierInstance
+	var leaders []*VaultInstance
 	for _, t := range v.Tiers {
 		if !t.IsFollower && t.Query != nil {
 			leaders = append(leaders, t)

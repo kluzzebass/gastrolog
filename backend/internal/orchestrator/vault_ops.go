@@ -116,12 +116,12 @@ func (o *Orchestrator) findChunkManagerForChunk(vaultID glid.GLID, chunkID chunk
 	return cm, err
 }
 
-// findTierForChunk returns the TierInstance that owns the given chunk.
+// findTierForChunk returns the VaultInstance that owns the given chunk.
 // Used by paths (vault migrate, tier drain) that need access to the
 // tier's reconciler + placement metadata to drive cluster-wide deletes
 // through the receipt protocol. Errors if the vault is unknown / not
 // ready, or if no tier in the vault has the chunk.
-func (o *Orchestrator) findTierForChunk(vaultID glid.GLID, chunkID chunk.ChunkID) (*TierInstance, error) {
+func (o *Orchestrator) findTierForChunk(vaultID glid.GLID, chunkID chunk.ChunkID) (*VaultInstance, error) {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
 	o.mu.RUnlock()
@@ -384,13 +384,13 @@ func (o *Orchestrator) LocalTierIDs(vaultID glid.GLID) []glid.GLID {
 	return ids
 }
 
-func (o *Orchestrator) FindLocalTierExported(vaultID, tierID glid.GLID) *TierInstance {
+func (o *Orchestrator) FindLocalTierExported(vaultID, tierID glid.GLID) *VaultInstance {
 	return o.findLocalTier(vaultID, tierID)
 }
 
-// findLocalTier returns the TierInstance for a specific tier in a vault,
+// findLocalTier returns the VaultInstance for a specific tier in a vault,
 // or nil if the tier is not local.
-func (o *Orchestrator) findLocalTier(vaultID, tierID glid.GLID) *TierInstance {
+func (o *Orchestrator) findLocalTier(vaultID, tierID glid.GLID) *VaultInstance {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
 	o.mu.RUnlock()
@@ -499,7 +499,7 @@ type remoteForwardTarget struct {
 // durability. Same-node targets use direct append (under lock); cross-node targets
 // are collected and returned for the caller to forward AFTER releasing the lock.
 // Called under o.mu.RLock.
-func (o *Orchestrator) forwardToFollowers(vault *Vault, vaultID glid.GLID, tier *TierInstance, cm chunk.ChunkManager, rec chunk.Record) []remoteForwardTarget {
+func (o *Orchestrator) forwardToFollowers(vault *Vault, vaultID glid.GLID, tier *VaultInstance, cm chunk.ChunkManager, rec chunk.Record) []remoteForwardTarget {
 	activeNow := cm.Active()
 	var activeChunkID chunk.ChunkID
 	if activeNow != nil {
@@ -673,7 +673,7 @@ func (o *Orchestrator) DeleteChunkFromTier(vaultID, tierID glid.GLID, chunkID ch
 
 // findTierForDelete returns the matching tier instance or an error, releasing
 // the orchestrator read lock before returning.
-func (o *Orchestrator) findTierForDelete(vaultID, tierID glid.GLID) (*TierInstance, error) {
+func (o *Orchestrator) findTierForDelete(vaultID, tierID glid.GLID) (*VaultInstance, error) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	vault := o.vaults[vaultID]
@@ -696,7 +696,7 @@ func (o *Orchestrator) findTierForDelete(vaultID, tierID glid.GLID) (*TierInstan
 // reason="manual-delete-rpc" lands in the FSM's pendingDeletes audit trail so
 // operators can distinguish operator-initiated deletes from retention/transit
 // drivers in chunk-history reviews. See gastrolog-51gme step 7.
-func (o *Orchestrator) deleteChunkFromTierInstance(t *TierInstance, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
+func (o *Orchestrator) deleteChunkFromTierInstance(t *VaultInstance, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
 	if active := t.Chunks.Active(); active != nil && active.ID == chunkID {
 		if err := t.Chunks.Seal(); err != nil {
 			return fmt.Errorf("seal active before delete: %w", err)
@@ -757,7 +757,7 @@ func replaceForwardedChunk(cm chunk.ChunkManager, chunkID chunk.ChunkID, isActiv
 //
 // afterVaultCtlRestore fires (off the FSM apply pump, on the
 // vaultraft.FSM's after-restore hook goroutine) once the vault-ctl
-// FSM Restore for vaultID has completed. Walks every TierInstance in
+// FSM Restore for vaultID has completed. Walks every VaultInstance in
 // the vault and runs the receipt protocol's catchup pass: process any
 // pendingDeletes obligations this node owes, and project FSM-sealed
 // state onto the local chunk Manager.
@@ -780,7 +780,7 @@ func (o *Orchestrator) afterVaultCtlRestore(vaultID glid.GLID) {
 		o.mu.RUnlock()
 		return
 	}
-	tiers := make([]*TierInstance, len(vault.Tiers))
+	tiers := make([]*VaultInstance, len(vault.Tiers))
 	copy(tiers, vault.Tiers)
 	o.mu.RUnlock()
 
@@ -812,7 +812,7 @@ func (o *Orchestrator) proposePruneNodeForVault(vaultID glid.GLID, removedNodeID
 		o.mu.RUnlock()
 		return
 	}
-	tiers := make([]*TierInstance, 0, len(vault.Tiers))
+	tiers := make([]*VaultInstance, 0, len(vault.Tiers))
 	tiers = append(tiers, vault.Tiers...)
 	o.mu.RUnlock()
 
@@ -838,7 +838,7 @@ func (o *Orchestrator) proposePruneNodeForVault(vaultID glid.GLID, removedNodeID
 // their declared order) so that audit-log output is reproducible across
 // runs even though the FSM-side encoding stores expectedFrom as a map.
 // See gastrolog-51gme.
-func (o *Orchestrator) placementMembership(tier *TierInstance) []string {
+func (o *Orchestrator) placementMembership(tier *VaultInstance) []string {
 	expected := make([]string, 0, 1+len(tier.FollowerTargets))
 	seen := map[string]bool{}
 	if o.localNodeID != "" {

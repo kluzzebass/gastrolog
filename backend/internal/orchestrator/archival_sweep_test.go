@@ -67,7 +67,7 @@ func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition
 	})
 	_ = orch.Scheduler().Stop()
 
-	tier := &TierInstance{
+	tier := &VaultInstance{
 		TierID: tierID, Type: "cloud",
 		Chunks: cm, Indexes: im, Query: query.New(cm, im, nil),
 	}
@@ -619,7 +619,7 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 		}
 		im := indexfile.NewManager(dir, nil, nil)
 
-		tier := &TierInstance{
+		tier := &VaultInstance{
 			TierID: tierID, Type: "cloud",
 			Chunks: cm, Indexes: im, Query: query.New(cm, im, nil),
 		}
@@ -633,7 +633,7 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 		nodes[nid] = &clusterTestNode{
 			nodeID:   nid,
 			orch:     orch,
-			tiers:    []*TierInstance{tier},
+			tiers:    []*VaultInstance{tier},
 			tierDirs: []string{dir},
 		}
 	}

@@ -44,7 +44,7 @@ func TestConcurrentAppendToTierAttrIntegrity(t *testing.T) {
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 
-	tier := &TierInstance{
+	tier := &VaultInstance{
 		TierID: tierID, Type: "file",
 		Chunks: cm, Indexes: im, Query: query.New(cm, im, nil),
 	}
@@ -193,8 +193,8 @@ func TestTransitionConcurrentWithAppends(t *testing.T) {
 	// Stop scheduler — we drive transitions manually.
 	_ = orch.Scheduler().Stop()
 
-	tier0 := &TierInstance{TierID: tier0ID, Type: "file", Chunks: cm0, Indexes: im0, Query: query.New(cm0, im0, nil)}
-	tier1 := &TierInstance{TierID: tier1ID, Type: "file", Chunks: cm1, Indexes: im1, Query: query.New(cm1, im1, nil)}
+	tier0 := &VaultInstance{TierID: tier0ID, Type: "file", Chunks: cm0, Indexes: im0, Query: query.New(cm0, im0, nil)}
+	tier1 := &VaultInstance{TierID: tier1ID, Type: "file", Chunks: cm1, Indexes: im1, Query: query.New(cm1, im1, nil)}
 	orch.RegisterVault(NewVault(vaultID, tier0, tier1))
 
 	t.Cleanup(func() {
@@ -375,7 +375,7 @@ func TestImportToTierCursorVerified(t *testing.T) {
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 
-	tier := &TierInstance{TierID: tierID, Type: "file", Chunks: cm, Indexes: im, Query: query.New(cm, im, nil)}
+	tier := &VaultInstance{TierID: tierID, Type: "file", Chunks: cm, Indexes: im, Query: query.New(cm, im, nil)}
 	orch.RegisterVault(NewVault(vaultID, tier))
 	t.Cleanup(func() {
 		orch.Stop()
@@ -847,7 +847,7 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	srcTier := &TierInstance{TierID: tierID, Type: "file", Chunks: srcCM, Indexes: srcIM, Query: query.New(srcCM, srcIM, nil)}
+	srcTier := &VaultInstance{TierID: tierID, Type: "file", Chunks: srcCM, Indexes: srcIM, Query: query.New(srcCM, srcIM, nil)}
 	orchA.RegisterVault(NewVault(vaultID, srcTier))
 
 	// Destination node.
@@ -867,7 +867,7 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dstTier := &TierInstance{TierID: tierID, Type: "file", Chunks: dstCM, Indexes: dstIM, Query: query.New(dstCM, dstIM, nil)}
+	dstTier := &VaultInstance{TierID: tierID, Type: "file", Chunks: dstCM, Indexes: dstIM, Query: query.New(dstCM, dstIM, nil)}
 	orchB.RegisterVault(NewVault(vaultID, dstTier))
 
 	orchA.SetRemoteTransferrer(&directTransferrer{nodes: map[string]*Orchestrator{"node-B": orchB}})

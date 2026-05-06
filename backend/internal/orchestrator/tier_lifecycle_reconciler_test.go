@@ -94,7 +94,7 @@ func TestReconcilerOnRequestDeleteDeletesLocalAndAcks(t *testing.T) {
 	var ackedID chunk.ChunkID
 	var ackedNode string
 	var ackCount atomic.Int32
-	tier := &TierInstance{
+	tier := &VaultInstance{
 		TierID: glid.New(),
 		Chunks: cm,
 		ApplyRaftAckDelete: func(id chunk.ChunkID, nodeID string) error {
@@ -148,7 +148,7 @@ func TestReconcilerOnRequestDeleteIgnoresNotInExpectedFrom(t *testing.T) {
 	cm := &reconcilerFakeChunkManager{}
 
 	var ackCount atomic.Int32
-	tier := &TierInstance{
+	tier := &VaultInstance{
 		TierID: glid.New(),
 		Chunks: cm,
 		ApplyRaftAckDelete: func(_ chunk.ChunkID, _ string) error {
@@ -189,7 +189,7 @@ func TestReconcilerOnAckDeleteFinalizesWhenAllAcked(t *testing.T) {
 
 	var finalizeCount atomic.Int32
 	var finalizedID chunk.ChunkID
-	tier := &TierInstance{
+	tier := &VaultInstance{
 		TierID: glid.New(),
 		Chunks: cm,
 		IsRaftLeader: func() bool { return true },
@@ -242,7 +242,7 @@ func TestReconcilerOnAckDeleteSkipsOnFollower(t *testing.T) {
 
 	fsm := tierfsm.New()
 	var finalizeCount atomic.Int32
-	tier := &TierInstance{
+	tier := &VaultInstance{
 		TierID:                  glid.New(),
 		Chunks:                  &reconcilerFakeChunkManager{},
 		IsRaftLeader:            func() bool { return false },
@@ -272,7 +272,7 @@ func TestReconcilerDeleteChunkSingleNodeFallback(t *testing.T) {
 	t.Parallel()
 
 	cm := &reconcilerFakeChunkManager{}
-	tier := &TierInstance{
+	tier := &VaultInstance{
 		TierID: glid.New(),
 		Chunks: cm,
 		// ApplyRaftRequestDelete deliberately nil — single-node mode.
@@ -309,7 +309,7 @@ func TestReconcilerOnPruneNodeFinalizesEmptiedEntries(t *testing.T) {
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalRequestDelete(idUntouched, now, "test", []string{"node-B"})})
 
 	finalizedCh := make(chan chunk.ChunkID, 4)
-	tier := &TierInstance{
+	tier := &VaultInstance{
 		TierID:                  glid.New(),
 		Chunks:                  &reconcilerFakeChunkManager{},
 		IsRaftLeader:            func() bool { return true },
@@ -357,7 +357,7 @@ func TestReconcilerOnPruneNodeSkipsOnFollower(t *testing.T) {
 	_ = fsm.Apply(&hraft.Log{Data: tierfsm.MarshalRequestDelete(id, now, "test", []string{"node-A"})})
 
 	var finalizeCount atomic.Int32
-	tier := &TierInstance{
+	tier := &VaultInstance{
 		TierID:                  glid.New(),
 		Chunks:                  &reconcilerFakeChunkManager{},
 		IsRaftLeader:            func() bool { return false },
@@ -386,7 +386,7 @@ func TestReconcilerOnSealProjectsToLocalManager(t *testing.T) {
 
 	fsm := tierfsm.New()
 	cm := &reconcilerFakeSealEnsurerChunkManager{}
-	tier := &TierInstance{
+	tier := &VaultInstance{
 		TierID: glid.New(),
 		Chunks: cm,
 	}
@@ -429,7 +429,7 @@ func TestReconcileFromSnapshotProjectsAllSealedEntries(t *testing.T) {
 	_ = src.Apply(&hraft.Log{Data: tierfsm.MarshalSealChunk(idSealed2, now, 1, 1, now, now, now, false)})
 
 	cm := &reconcilerFakeSealEnsurerChunkManager{}
-	tier := &TierInstance{
+	tier := &VaultInstance{
 		TierID: glid.New(),
 		Chunks: cm,
 	}
@@ -471,7 +471,7 @@ func TestReconcileFromSnapshotProcessesPendingObligations(t *testing.T) {
 
 	cm := &reconcilerFakeChunkManager{}
 	ackCh := make(chan chunk.ChunkID, 4)
-	tier := &TierInstance{
+	tier := &VaultInstance{
 		TierID: glid.New(),
 		Chunks: cm,
 		ApplyRaftAckDelete: func(id chunk.ChunkID, _ string) error {
@@ -581,7 +581,7 @@ func TestSweepLocalOrphansDeletesOnlyTombstonedAbsentEntries(t *testing.T) {
 		{ID: idUnsealed, Sealed: false},
 	}
 
-	tier := &TierInstance{TierID: glid.New(), Chunks: cm}
+	tier := &VaultInstance{TierID: glid.New(), Chunks: cm}
 	rec := NewTierLifecycleReconciler(nil, glid.New(), tier.TierID, tier, "node-A", slog.Default())
 	rec.Wire(fsm)
 
@@ -643,7 +643,7 @@ func TestSweepMissingReplicasRequestsOnlySealedAndAbsentEntries(t *testing.T) {
 	fake := &captureCatchupReplicator{scheduledRet: 1}
 	orch.SetChunkReplicator(fake)
 
-	tier := &TierInstance{
+	tier := &VaultInstance{
 		TierID:       glid.New(),
 		Type:         "memory",
 		Chunks:       cm,
@@ -693,7 +693,7 @@ func TestSweepMissingReplicasSkipsLeaderTier(t *testing.T) {
 	fake := &captureCatchupReplicator{}
 	orch.SetChunkReplicator(fake)
 
-	tier := &TierInstance{
+	tier := &VaultInstance{
 		TierID:     glid.New(),
 		Type:       "memory",
 		Chunks:     cm,
@@ -729,7 +729,7 @@ func TestSweepMissingReplicasSkipsWhenLeaderUnknown(t *testing.T) {
 	fake := &captureCatchupReplicator{}
 	orch.SetChunkReplicator(fake)
 
-	tier := &TierInstance{
+	tier := &VaultInstance{
 		TierID:       glid.New(),
 		Type:         "memory",
 		Chunks:       cm,
@@ -803,7 +803,7 @@ func TestFulfillObligationDemotesLocalActiveBeforeDelete(t *testing.T) {
 
 	var ackedID chunk.ChunkID
 	var ackCount atomic.Int32
-	tier := &TierInstance{
+	tier := &VaultInstance{
 		TierID: glid.New(),
 		Chunks: cm,
 		ApplyRaftAckDelete: func(id chunk.ChunkID, _ string) error {
@@ -873,7 +873,7 @@ func TestSweepLocalOrphansDemotesActiveTombstonedChunk(t *testing.T) {
 		{ID: idTombstoned, Sealed: false}, // active = unsealed
 	}
 
-	tier := &TierInstance{TierID: glid.New(), Chunks: cm}
+	tier := &VaultInstance{TierID: glid.New(), Chunks: cm}
 	rec := NewTierLifecycleReconciler(nil, glid.New(), tier.TierID, tier, "node-A", slog.Default())
 	rec.Wire(fsm)
 
@@ -966,7 +966,7 @@ func TestReconcilerOnSealNotifiesChunkChange(t *testing.T) {
 
 	fsm := tierfsm.New()
 	cm := &reconcilerFakeSealEnsurerChunkManager{}
-	tier := &TierInstance{TierID: glid.New(), Chunks: cm}
+	tier := &VaultInstance{TierID: glid.New(), Chunks: cm}
 	rec := NewTierLifecycleReconciler(orch, glid.New(), tier.TierID, tier, "node-A", slog.Default())
 	rec.Wire(fsm)
 
@@ -1018,7 +1018,7 @@ func TestReconcilerOnSealNotifiesEvenWhenEnsureSealedFails(t *testing.T) {
 
 	fsm := tierfsm.New()
 	cm := &reconcilerFailEnsurerChunkManager{ensureErr: errors.New("disk gone")}
-	tier := &TierInstance{TierID: glid.New(), Chunks: cm}
+	tier := &VaultInstance{TierID: glid.New(), Chunks: cm}
 	rec := NewTierLifecycleReconciler(orch, glid.New(), tier.TierID, tier, "node-A", slog.Default())
 	rec.Wire(fsm)
 

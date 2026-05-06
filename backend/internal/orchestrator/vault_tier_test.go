@@ -18,7 +18,7 @@ import (
 	sysmem "gastrolog/internal/system/memory"
 )
 
-func newMemTier(t *testing.T, tierID glid.GLID, isFollower bool, followers []system.ReplicationTarget) *TierInstance {
+func newMemTier(t *testing.T, tierID glid.GLID, isFollower bool, followers []system.ReplicationTarget) *VaultInstance {
 	t.Helper()
 	cm, err := chunkmem.NewManager(chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
@@ -29,7 +29,7 @@ func newMemTier(t *testing.T, tierID glid.GLID, isFollower bool, followers []sys
 		t.Fatal(err)
 	}
 	im, _ := indexmem.NewFactory()(nil, cm, nil)
-	return &TierInstance{
+	return &VaultInstance{
 		TierID:          tierID,
 		Type:            "memory",
 		Chunks:          cm,
@@ -732,7 +732,7 @@ func TestAppendToTierSecondarySkipsPostSeal(t *testing.T) {
 		t.Fatal(cErr)
 	}
 	im, _ := indexmem.NewFactory()(nil, cm, nil)
-	tier := &TierInstance{
+	tier := &VaultInstance{
 		TierID:     tierID,
 		Type:       "memory",
 		Chunks:     cm,
@@ -1425,7 +1425,7 @@ func TestTransitionLocalPreservesAllRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	tier0im, _ := indexmem.NewFactory()(nil, tier0cm, nil)
-	tier0 := &TierInstance{
+	tier0 := &VaultInstance{
 		TierID:  tier0ID,
 		Type:    "memory",
 		Chunks:  tier0cm,
@@ -1443,7 +1443,7 @@ func TestTransitionLocalPreservesAllRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	tier1im, _ := indexmem.NewFactory()(nil, tier1cm, nil)
-	tier1 := &TierInstance{
+	tier1 := &VaultInstance{
 		TierID:  tier1ID,
 		Type:    "memory",
 		Chunks:  tier1cm,

@@ -235,7 +235,7 @@ func (o *Orchestrator) retentionSweepAll() {
 // is just the transport for the response.
 func (o *Orchestrator) tierCatchupSweepAll() {
 	o.mu.RLock()
-	tiers := make([]*TierInstance, 0)
+	tiers := make([]*VaultInstance, 0)
 	for _, vault := range o.vaults {
 		for _, t := range vault.Tiers {
 			if t.Reconciler != nil {
@@ -536,7 +536,7 @@ func (o *Orchestrator) TransitionStreamedChunks(vaultID glid.GLID) map[chunk.Chu
 
 // retentionTargetForTier resolves a single tier instance into a sweep target.
 // Returns nil if the tier should be skipped (no rules, no leader, etc.).
-func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg system.VaultConfig, tier *TierInstance, active map[string]bool) *sweepTarget {
+func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg system.VaultConfig, tier *VaultInstance, active map[string]bool) *sweepTarget {
 	if tier.HasRaftLeader != nil && !tier.HasRaftLeader() {
 		return nil
 	}
@@ -692,7 +692,7 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 // sweep prevents repeated no-op transitions (the apply silently no-ops when
 // f.chunks[id] is nil, the flag never sticks, and we re-stream the chunk's
 // records to the next tier on every sweep). See gastrolog-66b7x.
-func buildManifestSet(tier *TierInstance) (map[chunk.ChunkID]bool, bool) {
+func buildManifestSet(tier *VaultInstance) (map[chunk.ChunkID]bool, bool) {
 	manifest := make(map[chunk.ChunkID]bool)
 	if tier == nil || tier.ListManifest == nil {
 		return manifest, false

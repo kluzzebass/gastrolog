@@ -93,7 +93,7 @@ type mockOrch struct {
 	// Tier drain tracking.
 	tierDrainCalls    []glid.GLID                                                // tier IDs passed to DrainTier
 	removeTierCalls   [][2]glid.GLID                                             // [vaultID, tierID] pairs passed to RemoveTierFromVault
-	localTierExported func(vaultID, tierID glid.GLID) *orchestrator.TierInstance // configurable return
+	localTierExported func(vaultID, tierID glid.GLID) *orchestrator.VaultInstance // configurable return
 }
 
 func (m *mockOrch) ListVaults() []glid.GLID    { return m.vaults }
@@ -922,7 +922,7 @@ func TestHandle_VaultDrain(t *testing.T) {
 	})
 }
 
-func (m *mockOrch) FindLocalTierExported(vaultID, tierID glid.GLID) *orchestrator.TierInstance {
+func (m *mockOrch) FindLocalTierExported(vaultID, tierID glid.GLID) *orchestrator.VaultInstance {
 	if m.localTierExported != nil {
 		return m.localTierExported(vaultID, tierID)
 	}
@@ -940,8 +940,8 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{
 			vaults: []glid.GLID{vaultID},
-			localTierExported: func(_, _ glid.GLID) *orchestrator.TierInstance {
-				return &orchestrator.TierInstance{
+			localTierExported: func(_, _ glid.GLID) *orchestrator.VaultInstance {
+				return &orchestrator.VaultInstance{
 					TierID:     tierID,
 					IsFollower: false, // this node is the leader
 				}
@@ -968,8 +968,8 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{
 			vaults: []glid.GLID{vaultID},
-			localTierExported: func(_, _ glid.GLID) *orchestrator.TierInstance {
-				return &orchestrator.TierInstance{
+			localTierExported: func(_, _ glid.GLID) *orchestrator.VaultInstance {
+				return &orchestrator.VaultInstance{
 					TierID:       tierID,
 					IsFollower:   true,
 					LeaderNodeID: "other-node",
@@ -994,7 +994,7 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{
 			vaults: []glid.GLID{vaultID},
-			localTierExported: func(_, _ glid.GLID) *orchestrator.TierInstance {
+			localTierExported: func(_, _ glid.GLID) *orchestrator.VaultInstance {
 				return nil // this node doesn't host the tier
 			},
 		}
@@ -1016,8 +1016,8 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{
 			vaults: []glid.GLID{vaultID},
-			localTierExported: func(_, _ glid.GLID) *orchestrator.TierInstance {
-				return &orchestrator.TierInstance{
+			localTierExported: func(_, _ glid.GLID) *orchestrator.VaultInstance {
+				return &orchestrator.VaultInstance{
 					TierID:     tierID,
 					IsFollower: false,
 				}

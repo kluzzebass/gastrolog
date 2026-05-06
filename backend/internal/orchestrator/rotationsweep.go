@@ -113,7 +113,7 @@ func (o *Orchestrator) reconcileFilters(sys *system.System) {
 func (o *Orchestrator) applyRotationFromConfig(sys *system.System,
 	cfg *system.Config,
 	vaultCfg system.VaultConfig,
-	tier *TierInstance,
+	tier *VaultInstance,
 	tierCfg *system.TierConfig,
 	activeCronJobs map[string]bool,
 ) {

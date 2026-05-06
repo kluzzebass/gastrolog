@@ -64,7 +64,7 @@ func (m *replicationFakeReplicator) RequestReplicaCatchup(_ context.Context, _ s
 
 // ---------- helpers ----------
 
-func newReplicationTier(t *testing.T, tierID glid.GLID, followers []system.ReplicationTarget, isFollower bool, leaderNodeID string) *TierInstance {
+func newReplicationTier(t *testing.T, tierID glid.GLID, followers []system.ReplicationTarget, isFollower bool, leaderNodeID string) *VaultInstance {
 	t.Helper()
 	cm, err := chunkmem.NewFactory()(nil, nil)
 	if err != nil {
@@ -74,7 +74,7 @@ func newReplicationTier(t *testing.T, tierID glid.GLID, followers []system.Repli
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &TierInstance{
+	return &VaultInstance{
 		TierID:          tierID,
 		Type:            "memory",
 		Chunks:          cm,

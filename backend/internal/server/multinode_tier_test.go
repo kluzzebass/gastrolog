@@ -163,11 +163,11 @@ func TestMultiNode_TierTransitionSearchFanOut(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tierInst0 := &orchestrator.TierInstance{
+	tierInst0 := &orchestrator.VaultInstance{
 		TierID: tier0ID, Type: "file", Chunks: cm0, Indexes: im0,
 		Query: query.New(cm0, im0, nil),
 	}
-	tierInst1 := &orchestrator.TierInstance{
+	tierInst1 := &orchestrator.VaultInstance{
 		TierID: tier1ID, Type: "file", Chunks: cm1, Indexes: im1,
 		Query: query.New(cm1, im1, nil),
 	}

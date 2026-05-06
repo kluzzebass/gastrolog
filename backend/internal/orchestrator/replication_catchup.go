@@ -20,7 +20,7 @@ import (
 func (o *Orchestrator) ScheduleCatchup(vaultID, tierID glid.GLID, followerNodeIDs []string) {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
-	var found *TierInstance
+	var found *VaultInstance
 	if vault != nil {
 		for _, t := range vault.Tiers {
 			if t.TierID == tierID {

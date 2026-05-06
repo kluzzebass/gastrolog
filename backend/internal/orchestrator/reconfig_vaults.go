@@ -332,7 +332,7 @@ func (o *Orchestrator) ForceRemoveVault(id glid.GLID) error {
 // reacts to an admin teardown) comes from each node independently running
 // its own RemoveTierFromVault as the config change propagates — not from
 // per-chunk delete announcements out of one node. See gastrolog-4vz40.
-func (o *Orchestrator) sealAndDeleteAllChunks(tier *TierInstance, op string, tierID glid.GLID) int {
+func (o *Orchestrator) sealAndDeleteAllChunks(tier *VaultInstance, op string, tierID glid.GLID) int {
 	if active := tier.Chunks.Active(); active != nil {
 		if err := tier.Chunks.Seal(); err != nil {
 			o.logger.Warn(op+": seal failed", "tier", tierID, "error", err)
@@ -360,7 +360,7 @@ func (o *Orchestrator) sealAndDeleteAllChunks(tier *TierInstance, op string, tie
 // destroying its on-disk data. Used when placement moves the tier elsewhere
 // (transient — the node may well get the tier back seconds later when
 // placement flaps back). The tier's Chunks/Indexes managers are closed, jobs
-// are cancelled, and the TierInstance is removed from the vault's tier list,
+// are cancelled, and the VaultInstance is removed from the vault's tier list,
 // but the chunk files and tier directory remain on disk. A subsequent
 // AddTierToVault will re-discover the existing chunks.
 //
@@ -519,7 +519,7 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID glid.
 		return nil
 	}
 
-	var ti *TierInstance
+	var ti *VaultInstance
 	if isLeader {
 		t, err := o.buildLeaderTierInstance(sys, *vaultCfg, tierCfg, factories)
 		if err != nil {
@@ -641,11 +641,11 @@ func (o *Orchestrator) UpdateVaultFilter(id glid.GLID, filter string) error {
 	return nil
 }
 
-// buildTierInstances creates TierInstance objects for each tier in the vault config.
+// buildTierInstances creates VaultInstance objects for each tier in the vault config.
 // Every node joins every tier's Raft group regardless of storage placement
-// (gastrolog-292yi). Nodes with storage placements also get a TierInstance with
+// (gastrolog-292yi). Nodes with storage placements also get a VaultInstance with
 // a chunk manager; nodes without storage only participate in the Raft group.
-func (o *Orchestrator) buildTierInstances(sys *system.System, vaultCfg system.VaultConfig, factories Factories) ([]*TierInstance, error) {
+func (o *Orchestrator) buildTierInstances(sys *system.System, vaultCfg system.VaultConfig, factories Factories) ([]*VaultInstance, error) {
 	cfg := &sys.Config
 	rt := &sys.Runtime
 	o.ensureVaultControlPlaneRaftGroup(vaultCfg.ID, rt.Nodes, factories)
@@ -657,7 +657,7 @@ func (o *Orchestrator) buildTierInstances(sys *system.System, vaultCfg system.Va
 
 	nscs := rt.NodeStorageConfigs
 
-	tiers := make([]*TierInstance, 0, len(tierIDs))
+	tiers := make([]*VaultInstance, 0, len(tierIDs))
 	for _, tierID := range tierIDs {
 		tierCfg := findTierConfig(cfg.Tiers, tierID)
 		if tierCfg == nil {
@@ -734,10 +734,10 @@ func (o *Orchestrator) alertTierInitFailed(tierID glid.GLID, tierName string, er
 	}
 }
 
-// buildLeaderTierInstance creates the leader TierInstance using the placement's
+// buildLeaderTierInstance creates the leader VaultInstance using the placement's
 // storage ID. This avoids directory collisions with same-node follower placements
 // that would occur if findLocalFileStorage picked a different storage by class.
-func (o *Orchestrator) buildLeaderTierInstance(sys *system.System, vaultCfg system.VaultConfig, tierCfg *system.TierConfig, factories Factories) (*TierInstance, error) {
+func (o *Orchestrator) buildLeaderTierInstance(sys *system.System, vaultCfg system.VaultConfig, tierCfg *system.TierConfig, factories Factories) (*VaultInstance, error) {
 	// Read placements from VaultConfig (mirrored from tier placements via
 	// the FSM bridge — gastrolog-257l7).
 	storageID := system.LeaderStorageID(vaultCfg.Placements)
@@ -758,13 +758,13 @@ func (o *Orchestrator) buildLeaderTierInstance(sys *system.System, vaultCfg syst
 	return ti, nil
 }
 
-// buildTierInstance creates a single TierInstance from a TierConfig.
+// buildTierInstance creates a single VaultInstance from a TierConfig.
 // When isFollower is true, cloud backing params are stripped so the follower's
 // PostSealProcess only runs compress + index without uploading to cloud storage.
 // Cloud tiers use a shared blob key (vault-ID/chunk-ID.glcb) — if the follower
 // also uploads, it overwrites the leader's blob with a different-sized version,
 // corrupting the leader's stored diskBytes and breaking all future cloud reads.
-func (o *Orchestrator) buildTierInstance(sys *system.System, vaultCfg system.VaultConfig, tierCfg system.TierConfig, factories Factories, isFollower bool) (*TierInstance, error) {
+func (o *Orchestrator) buildTierInstance(sys *system.System, vaultCfg system.VaultConfig, tierCfg system.TierConfig, factories Factories, isFollower bool) (*VaultInstance, error) {
 	cfg := &sys.Config
 	rt := &sys.Runtime
 	// Map TierConfig.Type to factory name.
@@ -825,7 +825,7 @@ func (o *Orchestrator) buildTierInstance(sys *system.System, vaultCfg system.Vau
 
 	// JSONL sinks are write-only — no query engine, no indexes.
 	if tierCfg.Type == system.TierTypeJSONL {
-		ti := &TierInstance{
+		ti := &VaultInstance{
 			TierID:  tierCfg.ID,
 			VaultID: vaultCfg.ID,
 			Type:    string(tierCfg.Type),
@@ -863,7 +863,7 @@ func (o *Orchestrator) buildTierInstance(sys *system.System, vaultCfg system.Vau
 		processor.SetIndexBuilders([]chunk.ChunkIndexBuilder{im.BuildAdapter()})
 	}
 
-	ti := &TierInstance{
+	ti := &VaultInstance{
 		TierID:  tierCfg.ID,
 		VaultID: vaultCfg.ID,
 		Type:    string(tierCfg.Type),
@@ -888,7 +888,7 @@ func (o *Orchestrator) buildTierInstance(sys *system.System, vaultCfg system.Vau
 // this rare, but possible). Each TI's reconciler.Wire() call rebinds the
 // callback set on the FSM; last-writer-wins matches the existing OnDelete /
 // OnUpload behavior wired alongside.
-func (o *Orchestrator) attachLifecycleReconciler(ti *TierInstance, vaultID, tierID glid.GLID, tierGroup *raftgroup.Group) {
+func (o *Orchestrator) attachLifecycleReconciler(ti *VaultInstance, vaultID, tierID glid.GLID, tierGroup *raftgroup.Group) {
 	ti.Reconciler = NewTierLifecycleReconciler(o, vaultID, tierID, ti, o.localNodeID, o.logger)
 	if tierGroup == nil {
 		return
@@ -898,10 +898,10 @@ func (o *Orchestrator) attachLifecycleReconciler(ti *TierInstance, vaultID, tier
 	}
 }
 
-// buildTierInstanceForStorage creates a TierInstance whose data directory is
+// buildTierInstanceForStorage creates a VaultInstance whose data directory is
 // resolved from a specific file storage ID. Used for both leaders with
 // explicit storage placements and followers (one per node per tier).
-func (o *Orchestrator) buildTierInstanceForStorage(sys *system.System, vaultCfg system.VaultConfig, tierCfg system.TierConfig, factories Factories, storageID string, isFollower bool) (*TierInstance, error) {
+func (o *Orchestrator) buildTierInstanceForStorage(sys *system.System, vaultCfg system.VaultConfig, tierCfg system.TierConfig, factories Factories, storageID string, isFollower bool) (*VaultInstance, error) {
 	cfg := &sys.Config
 	rt := &sys.Runtime
 	fs := findFileStorageByID(rt, storageID)
@@ -975,7 +975,7 @@ func (o *Orchestrator) buildTierInstanceForStorage(sys *system.System, vaultCfg 
 		processor.SetIndexBuilders([]chunk.ChunkIndexBuilder{im.BuildAdapter()})
 	}
 
-	ti := &TierInstance{
+	ti := &VaultInstance{
 		TierID:  tierCfg.ID,
 		VaultID: vaultCfg.ID,
 		Type:    string(tierCfg.Type),

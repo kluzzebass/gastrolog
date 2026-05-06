@@ -797,8 +797,8 @@ func TestEjectChunkFileBackedLocalDelivery(t *testing.T) {
 		LocalNodeID:  nodeID,
 	})
 
-	srcTier := &TierInstance{TierID: srcTierID, Type: "file", Chunks: srcCM, Indexes: srcIM, Query: query.New(srcCM, srcIM, nil)}
-	dstTier := &TierInstance{TierID: dstTierID, Type: "file", Chunks: dstCM, Indexes: dstIM, Query: query.New(dstCM, dstIM, nil)}
+	srcTier := &VaultInstance{TierID: srcTierID, Type: "file", Chunks: srcCM, Indexes: srcIM, Query: query.New(srcCM, srcIM, nil)}
+	dstTier := &VaultInstance{TierID: dstTierID, Type: "file", Chunks: dstCM, Indexes: dstIM, Query: query.New(dstCM, dstIM, nil)}
 
 	orch.RegisterVault(NewVault(srcVaultID, srcTier))
 	orch.RegisterVault(NewVault(dstVaultID, dstTier))
@@ -943,7 +943,7 @@ func TestEjectChunkFileBackedRemoteDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srcTier := &TierInstance{TierID: srcTierID, Type: "file", Chunks: srcCM, Indexes: srcIM, Query: query.New(srcCM, srcIM, nil)}
+	srcTier := &VaultInstance{TierID: srcTierID, Type: "file", Chunks: srcCM, Indexes: srcIM, Query: query.New(srcCM, srcIM, nil)}
 	orchA.RegisterVault(NewVault(srcVaultID, srcTier))
 
 	// Node-B (destination).
@@ -963,7 +963,7 @@ func TestEjectChunkFileBackedRemoteDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dstTier := &TierInstance{TierID: dstTierID, Type: "file", Chunks: dstCM, Indexes: dstIM, Query: query.New(dstCM, dstIM, nil)}
+	dstTier := &VaultInstance{TierID: dstTierID, Type: "file", Chunks: dstCM, Indexes: dstIM, Query: query.New(dstCM, dstIM, nil)}
 	orchB.RegisterVault(NewVault(dstVaultID, dstTier))
 
 	// Wire transferrer.

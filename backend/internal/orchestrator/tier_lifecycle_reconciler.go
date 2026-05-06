@@ -2,7 +2,7 @@ package orchestrator
 
 // gastrolog-51gme — TierLifecycleReconciler.
 //
-// One reconciler per TierInstance. Owns chunk-lifecycle execution
+// One reconciler per VaultInstance. Owns chunk-lifecycle execution
 // uniformly: every FSM apply event goes through here, and every
 // chunk-file deletion in steady state ends here. This file is the
 // single home for "what just happened in the FSM, and what should the
@@ -51,7 +51,7 @@ package orchestrator
 //     (leader-only) proposes CmdFinalizeDelete for each finalizable
 //     chunk so deletes don't pin pendingDeletes forever.
 //   step 11 (deprecate CmdDeleteChunk): done. The dead production
-//     plumbing (TierInstance.ApplyRaftDelete, tierRaftCallbacks.applyDelete,
+//     plumbing (VaultInstance.ApplyRaftDelete, tierRaftCallbacks.applyDelete,
 //     buildTierRaftCallbacks's MarshalDeleteChunk producer,
 //     retentionRunner.applyRaftDelete + clusterMode branch) was removed.
 //     CmdDeleteChunk + applyDeleteChunk + MarshalDeleteChunk stay in the
@@ -78,7 +78,7 @@ import (
 )
 
 // TierLifecycleReconciler owns chunk-lifecycle execution for a single
-// TierInstance. Created during tier wiring (reconfig_vaults.go), wired
+// VaultInstance. Created during tier wiring (reconfig_vaults.go), wired
 // to the tier's FSM via Wire(), and torn down with the tier instance.
 //
 // The reconciler is the canonical caller of `chunk.DeleteNoAnnounce`
@@ -88,7 +88,7 @@ import (
 type TierLifecycleReconciler struct {
 	vaultID     glid.GLID
 	tierID      glid.GLID
-	tier        *TierInstance
+	tier        *VaultInstance
 	localNodeID string
 	logger      *slog.Logger
 
@@ -120,7 +120,7 @@ type TierLifecycleReconciler struct {
 // orch may be nil in tests that exercise the reconciler in isolation;
 // when nil, the same-node sibling cleanup path is skipped and chunk-
 // change notifications are dropped.
-func NewTierLifecycleReconciler(orch *Orchestrator, vaultID, tierID glid.GLID, tier *TierInstance, localNodeID string, logger *slog.Logger) *TierLifecycleReconciler {
+func NewTierLifecycleReconciler(orch *Orchestrator, vaultID, tierID glid.GLID, tier *VaultInstance, localNodeID string, logger *slog.Logger) *TierLifecycleReconciler {
 	return &TierLifecycleReconciler{
 		vaultID:     vaultID,
 		tierID:      tierID,

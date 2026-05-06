@@ -110,7 +110,7 @@ func (o *Orchestrator) archivalSweepAll() {
 }
 
 // archivalSweepTier evaluates one tier's cloud chunks against the transition chain.
-func (o *Orchestrator) archivalSweepTier(tier *TierInstance, cs *system.CloudService, now time.Time) {
+func (o *Orchestrator) archivalSweepTier(tier *VaultInstance, cs *system.CloudService, now time.Time) {
 	metas, err := tier.Chunks.List()
 	if err != nil {
 		o.logger.Warn("archival sweep: list chunks failed", "tier", tier.TierID, "error", err)
@@ -162,7 +162,7 @@ func (o *Orchestrator) archivalSweepTier(tier *TierInstance, cs *system.CloudSer
 // reconciler is wired (every node drops its index entry symmetrically);
 // falls back to the local Manager.Delete path for memory-mode tiers without
 // Raft. See gastrolog-51gme step 6.
-func (o *Orchestrator) archivalExpire(tier *TierInstance, id chunk.ChunkID, age time.Duration) {
+func (o *Orchestrator) archivalExpire(tier *VaultInstance, id chunk.ChunkID, age time.Duration) {
 	if tier.Reconciler != nil {
 		if err := tier.Reconciler.deleteChunk(id, "archived-to-glacier", o.placementMembership(tier)); err != nil {
 			o.logger.Warn("archival sweep: reconciler delete failed",
@@ -245,7 +245,7 @@ func (o *Orchestrator) reconcileSweepAll() {
 }
 
 // reconcileTier checks one tier's cloud chunks against the blob store.
-func (o *Orchestrator) reconcileTier(tier *TierInstance, cs *system.CloudService, now time.Time) {
+func (o *Orchestrator) reconcileTier(tier *VaultInstance, cs *system.CloudService, now time.Time) {
 	metas, err := tier.Chunks.List()
 	if err != nil {
 		return
@@ -279,7 +279,7 @@ func (o *Orchestrator) reconcileTier(tier *TierInstance, cs *system.CloudService
 // in-tree warm cache (gastrolog-24m1t step 7j) and miss out-of-band lifecycle
 // deletions. Falls back to OpenCursor for managers that don't implement
 // CloudBlobChecker (no cloud store configured / non-file backends).
-func (o *Orchestrator) reconcileCloudChunk(tier *TierInstance, id chunk.ChunkID, graceDays uint32, now time.Time) {
+func (o *Orchestrator) reconcileCloudChunk(tier *VaultInstance, id chunk.ChunkID, graceDays uint32, now time.Time) {
 	var readErr error
 	if checker, ok := tier.Chunks.(chunk.CloudBlobChecker); ok {
 		readErr = checker.HeadCloudBlob(id)
@@ -329,7 +329,7 @@ func (o *Orchestrator) clearSuspect(id chunk.ChunkID) {
 }
 
 // markSuspect records a first-time missing-blob observation.
-func (o *Orchestrator) markSuspect(tier *TierInstance, id chunk.ChunkID, now time.Time) {
+func (o *Orchestrator) markSuspect(tier *VaultInstance, id chunk.ChunkID, now time.Time) {
 	o.suspects.mark(id, now)
 	if o.alerts != nil {
 		o.alerts.Set(
@@ -348,7 +348,7 @@ func (o *Orchestrator) markSuspect(tier *TierInstance, id chunk.ChunkID, now tim
 // when a reconciler is wired (every node drops its index entry symmetrically);
 // falls back to the local Manager.Delete path for memory-mode tiers without
 // Raft. See gastrolog-51gme step 6.
-func (o *Orchestrator) expireSuspect(tier *TierInstance, id chunk.ChunkID, suspectDays uint32) {
+func (o *Orchestrator) expireSuspect(tier *VaultInstance, id chunk.ChunkID, suspectDays uint32) {
 	if tier.Reconciler != nil {
 		if err := tier.Reconciler.deleteChunk(id, "cloud-blob-missing", o.placementMembership(tier)); err != nil {
 			o.logger.Error("reconcile: reconciler delete failed",

@@ -9,15 +9,15 @@ import (
 	"gastrolog/internal/vaultraft/tierfsm"
 )
 
-// TierInstance is the node-local materialization of a TierConfig.
+// VaultInstance is the node-local materialization of a TierConfig.
 // TierConfig (in Raft config) is the logical definition.
-// TierInstance is the physical runtime: chunk manager + index manager + query engine.
+// VaultInstance is the physical runtime: chunk manager + index manager + query engine.
 //
 // A single node may host multiple TierInstances for the same tier when
 // same-node replication is active (different file storages). Each instance
 // has a unique StorageID and its own chunk manager pointing to a different
 // directory.
-type TierInstance struct {
+type VaultInstance struct {
 	TierID          glid.GLID
 	VaultID         glid.GLID // owning vault — set during construction; with 1:1 vault/tier this is the natural ID
 	StorageID       string    // the file storage ID this instance uses (empty for memory/JSONL tiers)
@@ -144,7 +144,7 @@ type TierInstance struct {
 }
 
 // applyRaftCallbacks wires raft-backed metadata operations from a tierRaftCallbacks.
-func (t *TierInstance) applyRaftCallbacks(cb tierRaftCallbacks) {
+func (t *VaultInstance) applyRaftCallbacks(cb tierRaftCallbacks) {
 	t.HasRaftLeader = cb.hasLeader
 	t.IsRaftLeader = cb.isLeader
 	t.ApplyRaftRequestDelete = cb.applyRequestDelete
@@ -166,9 +166,9 @@ func (t *TierInstance) applyRaftCallbacks(cb tierRaftCallbacks) {
 }
 
 // IsLeader returns true if this node is the leader for this tier.
-func (t *TierInstance) IsLeader() bool { return !t.IsFollower }
+func (t *VaultInstance) IsLeader() bool { return !t.IsFollower }
 
 // ShouldForwardToFollowers returns true if this leader tier has replication targets.
-func (t *TierInstance) ShouldForwardToFollowers() bool {
+func (t *VaultInstance) ShouldForwardToFollowers() bool {
 	return t.IsLeader() && len(t.FollowerTargets) > 0
 }

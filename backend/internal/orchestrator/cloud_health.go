@@ -39,7 +39,7 @@ func (o *Orchestrator) evaluateCloudHealth() {
 // evaluateTierCloudHealth checks a single cloud tier's health and runs
 // backfill on the tier leader only. Followers skip backfill — they learn
 // about cloud-backed chunks via the tier FSM.
-func (o *Orchestrator) evaluateTierCloudHealth(tier *TierInstance) {
+func (o *Orchestrator) evaluateTierCloudHealth(tier *VaultInstance) {
 	chk, ok := tier.Chunks.(cloudHealthChecker)
 	if !ok {
 		return
@@ -65,7 +65,7 @@ func (o *Orchestrator) evaluateTierCloudHealth(tier *TierInstance) {
 //
 // The local CloudBacked flag from List() is intentionally ignored — only
 // the FSM decides whether a chunk needs work. See gastrolog-68fqk.
-func (o *Orchestrator) backfillCloudUploads(tier *TierInstance) {
+func (o *Orchestrator) backfillCloudUploads(tier *VaultInstance) {
 	uploader, ok := tier.Chunks.(chunk.ChunkCloudUploader)
 	if !ok {
 		return
@@ -100,7 +100,7 @@ func (o *Orchestrator) backfillCloudUploads(tier *TierInstance) {
 
 // chunkIsCloudBacked checks the FSM (single source of truth) for CloudBacked.
 // Falls back to local state when no FSM exists (single-node / memory mode).
-func chunkIsCloudBacked(tier *TierInstance, m chunk.ChunkMeta) bool {
+func chunkIsCloudBacked(tier *VaultInstance, m chunk.ChunkMeta) bool {
 	if tier.OverlayFromFSM != nil {
 		return tier.OverlayFromFSM(m).CloudBacked
 	}

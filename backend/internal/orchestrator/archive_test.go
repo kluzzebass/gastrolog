@@ -50,7 +50,7 @@ func TestArchiveChunkViaRetentionSweep(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID, SystemLoader: &transitionSystemLoader{store: store}})
 	_ = orch.Scheduler().Stop()
 
-	tier := &TierInstance{TierID: tierID, Type: "cloud", Chunks: cm, Indexes: im, Query: query.New(cm, im, nil)}
+	tier := &VaultInstance{TierID: tierID, Type: "cloud", Chunks: cm, Indexes: im, Query: query.New(cm, im, nil)}
 	orch.RegisterVault(NewVault(vaultID, tier))
 	t.Cleanup(func() { _ = cm.Close() })
 

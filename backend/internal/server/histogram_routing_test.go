@@ -92,7 +92,7 @@ func TestHistogramFullyLocal_RequiresLeadership(t *testing.T) {
 	}
 }
 
-func mustTierInstance(t *testing.T, tierID glid.GLID, isFollower bool) *orchestrator.TierInstance {
+func mustTierInstance(t *testing.T, tierID glid.GLID, isFollower bool) *orchestrator.VaultInstance {
 	t.Helper()
 	cm, err := chunkmem.NewManager(chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
@@ -106,7 +106,7 @@ func mustTierInstance(t *testing.T, tierID glid.GLID, isFollower bool) *orchestr
 	if err != nil {
 		t.Fatalf("indexmem factory: %v", err)
 	}
-	return &orchestrator.TierInstance{
+	return &orchestrator.VaultInstance{
 		TierID:     tierID,
 		Type:       "memory",
 		Chunks:     cm,

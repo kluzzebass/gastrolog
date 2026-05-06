@@ -106,7 +106,7 @@ func newTestOrch(t *testing.T, cfg Config) *Orchestrator {
 	return orch
 }
 
-func newMemoryTierInstance(t *testing.T, tierID glid.GLID) *TierInstance {
+func newMemoryTierInstance(t *testing.T, tierID glid.GLID) *VaultInstance {
 	t.Helper()
 	cm, err := chunkmem.NewFactory()(nil, nil)
 	if err != nil {
@@ -116,7 +116,7 @@ func newMemoryTierInstance(t *testing.T, tierID glid.GLID) *TierInstance {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &TierInstance{
+	return &VaultInstance{
 		TierID:  tierID,
 		Type:    "memory",
 		Chunks:  cm,
@@ -1152,10 +1152,10 @@ func (m *transitionFakeTransferrer) StreamToTier(_ context.Context, nodeID strin
 
 // ---------- cloud tier transition test ----------
 
-// newCloudFileTier creates a file-backed TierInstance with cloud storage.
+// newCloudFileTier creates a file-backed VaultInstance with cloud storage.
 // Sealed chunks are uploaded to the in-memory blobstore and local files deleted,
 // matching production cloud tier behavior.
-func newCloudFileTier(t *testing.T, tierID glid.GLID, vaultID glid.GLID, store blobstore.Store) (*TierInstance, string) {
+func newCloudFileTier(t *testing.T, tierID glid.GLID, vaultID glid.GLID, store blobstore.Store) (*VaultInstance, string) {
 	t.Helper()
 	dir := t.TempDir()
 	cm, err := chunkfile.NewManager(chunkfile.Config{
@@ -1169,7 +1169,7 @@ func newCloudFileTier(t *testing.T, tierID glid.GLID, vaultID glid.GLID, store b
 		t.Fatal(err)
 	}
 	im := indexfile.NewManager(dir, nil, nil)
-	return &TierInstance{
+	return &VaultInstance{
 		TierID:  tierID,
 		Type:    "cloud",
 		Chunks:  cm,
@@ -1407,9 +1407,9 @@ func TestTransitionCloudTierSweepDispatch(t *testing.T) {
 
 // ---------- helpers for new tests ----------
 
-// newFileTierInstance creates a file-backed TierInstance without cloud storage.
+// newFileTierInstance creates a file-backed VaultInstance without cloud storage.
 // Returns the tier instance and its filesystem directory for post-test verification.
-func newFileTierInstance(t *testing.T, tierID glid.GLID) (*TierInstance, string) {
+func newFileTierInstance(t *testing.T, tierID glid.GLID) (*VaultInstance, string) {
 	t.Helper()
 	dir := t.TempDir()
 	cm, err := chunkfile.NewManager(chunkfile.Config{
@@ -1421,7 +1421,7 @@ func newFileTierInstance(t *testing.T, tierID glid.GLID) (*TierInstance, string)
 		t.Fatal(err)
 	}
 	im := indexfile.NewManager(dir, nil, nil)
-	return &TierInstance{
+	return &VaultInstance{
 		TierID:  tierID,
 		Type:    "file",
 		Chunks:  cm,
@@ -2261,7 +2261,7 @@ func (d *directChunkReplicator) RequestReplicaCatchup(ctx context.Context, leade
 // → CmdAckDelete from each → CmdFinalizeDelete on the leader. Without this,
 // expireChunk falls through to the legacy direct-delete fallback which
 // doesn't replicate, and the cluster retention assertions fail.
-func newClusterRetentionRunner(orch *Orchestrator, vaultID, tierID glid.GLID, tier *TierInstance) *retentionRunner {
+func newClusterRetentionRunner(orch *Orchestrator, vaultID, tierID glid.GLID, tier *VaultInstance) *retentionRunner {
 	return &retentionRunner{
 		isLeader:        true,
 		vaultID:         vaultID,
@@ -2280,7 +2280,7 @@ func newClusterRetentionRunner(orch *Orchestrator, vaultID, tierID glid.GLID, ti
 type clusterTestNode struct {
 	nodeID   string
 	orch     *Orchestrator
-	tiers    []*TierInstance // all tier instances on this node
+	tiers    []*VaultInstance // all tier instances on this node
 	tierDirs []string        // filesystem directories, one per tier
 }
 
@@ -2434,7 +2434,7 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 		orchs[nid] = orch
 
 		isLeader := nid == leaderID
-		tiers := make([]*TierInstance, tierCount)
+		tiers := make([]*VaultInstance, tierCount)
 		tierDirs := make([]string, tierCount)
 		for i := range tierCount {
 			dir := t.TempDir()
@@ -2449,7 +2449,7 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 				t.Fatal(cmErr)
 			}
 			im := indexfile.NewManager(dir, nil, nil)
-			tier := &TierInstance{
+			tier := &VaultInstance{
 				TierID:  tierIDs[i],
 				Type:    "file",
 				Chunks:  cm,
@@ -3079,7 +3079,7 @@ func TestClusterDrainVaultRecordsArriveOnDestination(t *testing.T) {
 		t.Fatal(err)
 	}
 	imA := indexfile.NewManager(dirA, nil, nil)
-	tierA := &TierInstance{TierID: tierID, Type: "file", Chunks: cmA, Indexes: imA, Query: query.New(cmA, imA, nil)}
+	tierA := &VaultInstance{TierID: tierID, Type: "file", Chunks: cmA, Indexes: imA, Query: query.New(cmA, imA, nil)}
 	orchA.RegisterVault(NewVault(vaultID, tierA))
 
 	// Create node-B (destination) with file-backed tier.
@@ -3100,7 +3100,7 @@ func TestClusterDrainVaultRecordsArriveOnDestination(t *testing.T) {
 		t.Fatal(err)
 	}
 	imB := indexfile.NewManager(dirB, nil, nil)
-	tierB := &TierInstance{TierID: tierID, Type: "file", Chunks: cmB, Indexes: imB, Query: query.New(cmB, imB, nil)}
+	tierB := &VaultInstance{TierID: tierID, Type: "file", Chunks: cmB, Indexes: imB, Query: query.New(cmB, imB, nil)}
 	orchB.RegisterVault(NewVault(vaultID, tierB))
 
 	// Wire directTransferrer between the two nodes.
@@ -3209,11 +3209,11 @@ func TestMemoryBudgetEnforcementTransitionsChunks(t *testing.T) {
 		SystemLoader: &transitionSystemLoader{store: store},
 	})
 
-	memTier := &TierInstance{
+	memTier := &VaultInstance{
 		TierID: tier0ID, Type: "memory",
 		Chunks: memCM, Indexes: memIM, Query: query.New(memCM, memIM, nil),
 	}
-	fileTier := &TierInstance{
+	fileTier := &VaultInstance{
 		TierID: tier1ID, Type: "file",
 		Chunks: fileCM, Indexes: fileIM, Query: query.New(fileCM, fileIM, nil),
 	}
@@ -3286,7 +3286,7 @@ func TestMemoryBudgetEnforcementTerminalTierNoTransition(t *testing.T) {
 		SystemLoader: &transitionSystemLoader{store: store},
 	})
 
-	tier := &TierInstance{
+	tier := &VaultInstance{
 		TierID: tierID, Type: "memory",
 		Chunks: memCM, Indexes: memIM, Query: query.New(memCM, memIM, nil),
 	}
@@ -3362,21 +3362,21 @@ func TestMemoryBudgetEnforcementOnlyRunsOnLeader(t *testing.T) {
 		SystemLoader: &transitionSystemLoader{store: store, nodeID: followerNode},
 	})
 
-	leaderMemTier := &TierInstance{
+	leaderMemTier := &VaultInstance{
 		TierID: tier0ID, Type: "memory",
 		Chunks: memCMLeader, Indexes: memIMLeader, Query: query.New(memCMLeader, memIMLeader, nil),
 	}
-	leaderFileTier := &TierInstance{
+	leaderFileTier := &VaultInstance{
 		TierID: tier1ID, Type: "file",
 		Chunks: fileCMLeader, Indexes: fileIMLeader, Query: query.New(fileCMLeader, fileIMLeader, nil),
 	}
 	orchLeader.RegisterVault(NewVault(vaultID, leaderMemTier, leaderFileTier))
 
-	followerMemTier := &TierInstance{
+	followerMemTier := &VaultInstance{
 		TierID: tier0ID, Type: "memory", IsFollower: true,
 		Chunks: memCMFollower, Indexes: memIMFollower, Query: query.New(memCMFollower, memIMFollower, nil),
 	}
-	followerFileTier := &TierInstance{
+	followerFileTier := &VaultInstance{
 		TierID: tier1ID, Type: "file", IsFollower: true,
 		Chunks: fileCMFollower, Indexes: fileIMFollower, Query: query.New(fileCMFollower, fileIMFollower, nil),
 	}
