@@ -19,6 +19,7 @@ type Vault struct {
 	ID             glid.GLID
 	Name           string
 	Enabled        bool
+	StorageType    string // mirrored from VaultConfig.Type — survives the eventual deletion of TierInstance.Type
 	Tiers          []*TierInstance
 	multiTierQuery *query.Engine // lazy; created on first QueryEngine() call for multi-tier vaults
 }
