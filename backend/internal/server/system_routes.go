@@ -124,7 +124,10 @@ func (s *SystemServer) DeleteRoute(
 		return nil, connErr
 	}
 
-	// Referential integrity: reject if any tier references this route as an eject target.
+	// Referential integrity: reject if any tier references this route as an
+	// eject target. Also check vaults — VaultConfig.RetentionRules is
+	// mirrored from TierConfig (gastrolog-257l7) and post-tier this becomes
+	// the only check.
 	tiers, err := s.sysStore.ListTiers(ctx)
 	if err != nil {
 		return nil, errInternal(err)
@@ -135,6 +138,20 @@ func (s *SystemServer) DeleteRoute(
 				if slices.Contains(rule.EjectRouteIDs, id) {
 					return nil, connect.NewError(connect.CodeFailedPrecondition,
 						fmt.Errorf("route %q is referenced as eject target by tier %q", req.Msg.Id, t.ID))
+				}
+			}
+		}
+	}
+	vaults, err := s.sysStore.ListVaults(ctx)
+	if err != nil {
+		return nil, errInternal(err)
+	}
+	for _, v := range vaults {
+		for _, rule := range v.RetentionRules {
+			if rule.Action == system.RetentionActionEject {
+				if slices.Contains(rule.EjectRouteIDs, id) {
+					return nil, connect.NewError(connect.CodeFailedPrecondition,
+						fmt.Errorf("route %q is referenced as eject target by vault %q", req.Msg.Id, v.ID))
 				}
 			}
 		}
