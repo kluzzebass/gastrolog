@@ -272,7 +272,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
             expanded={isExpanded(id)}
             onToggle={() => toggleCard(id)}
             onDelete={() => handleDelete(id)}
-            typeBadge={route.distribution || "fanout"}
+            typeBadge={route.destinations.length > 1 ? route.distribution || "fanout" : undefined}
             status={
               <span className={`text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
                 {filterName || "no filter"}
