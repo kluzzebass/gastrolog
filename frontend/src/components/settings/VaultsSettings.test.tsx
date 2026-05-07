@@ -256,7 +256,7 @@ import { TierConfig, RetentionRule, TierType } from "../../api/gen/gastrolog/v1/
 const twoTierConfig = {
   vaults: [{ id: testId(1), name: "vault-alpha", enabled: true }],
   tiers: [
-    new TierConfig({ id: testId(10), name: "memory", type: TierType.MEMORY, vaultId: testId(1), position: 0, rotationPolicyId: testId(20), retentionRules: [new RetentionRule({ retentionPolicyId: testId(30), action: "transition" })], replicationFactor: 1 }),
+    new TierConfig({ id: testId(10), name: "memory", type: TierType.MEMORY, vaultId: testId(1), position: 0, rotationPolicyId: testId(20), retentionRules: [new RetentionRule({ retentionPolicyId: testId(30) })], replicationFactor: 1 }),
     new TierConfig({ id: testId(11), name: "file", type: TierType.FILE, vaultId: testId(1), position: 1, retentionRules: [], replicationFactor: 1, storageClass: 1 }),
   ],
   rotationPolicies: [{ id: testId(20), name: "daily" }],

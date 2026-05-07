@@ -5,7 +5,7 @@
 
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
-import { TierConfig, TierPlacement, VaultConfig } from "./system_pb.js";
+import { RouteSource, TierConfig, TierPlacement, VaultConfig } from "./system_pb.js";
 import { CloudService, NodeStorageConfig } from "./storage_pb.js";
 
 /**
@@ -1668,9 +1668,11 @@ export class PutRouteCommand extends Message<PutRouteCommand> {
   enabled = false;
 
   /**
-   * @generated from field: bool eject_only = 7;
+   * gastrolog-42f9z (Phase 4); replaces eject_only
+   *
+   * @generated from field: gastrolog.v1.RouteSource source = 7;
    */
-  ejectOnly = false;
+  source = RouteSource.UNSPECIFIED;
 
   constructor(data?: PartialMessage<PutRouteCommand>) {
     super();
@@ -1686,7 +1688,7 @@ export class PutRouteCommand extends Message<PutRouteCommand> {
     { no: 4, name: "destination_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
     { no: 5, name: "distribution", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 6, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 7, name: "eject_only", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 7, name: "source", kind: "enum", T: proto3.getEnumType(RouteSource) },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutRouteCommand {

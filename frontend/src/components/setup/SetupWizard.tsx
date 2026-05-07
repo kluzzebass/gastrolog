@@ -197,7 +197,7 @@ export function SetupWizard() {
           replicationFactor: 1,
           rotationPolicyId: hasRotation ? rotationIdBytes : new Uint8Array(0),
           retentionRules: hasRetention
-            ? [{ retentionPolicyId: retentionIdBytes, action: "expire", ejectRouteIds: [] }]
+            ? [{ retentionPolicyId: retentionIdBytes }]
             : [],
         },
       });

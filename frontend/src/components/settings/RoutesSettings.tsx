@@ -14,6 +14,24 @@ import { Button } from "./Buttons";
 import { Checkbox } from "./Checkbox";
 import type { SettingsTab } from "./SettingsDialog";
 import { sortByName } from "../../lib/sort";
+import { RouteSource } from "../../api/gen/gastrolog/v1/system_pb";
+
+// Phase 4 (gastrolog-42f9z): RouteSource selector.
+// ROUTE_SOURCE_UNSPECIFIED collapses to ingest server-side, so the UI
+// only exposes the two real choices.
+const sourceOptions = [
+  { value: String(RouteSource.INGEST), label: "Ingest (live traffic)" },
+  { value: String(RouteSource.RETENTION_TRIGGER), label: "Retention trigger" },
+];
+
+// normalizeSource maps any incoming RouteSource value (including
+// UNSPECIFIED from pre-Phase-4 routes) to one of the two real values
+// the form exposes.
+function normalizeSource(s: RouteSource | undefined): RouteSource {
+  return s === RouteSource.RETENTION_TRIGGER
+    ? RouteSource.RETENTION_TRIGGER
+    : RouteSource.INGEST;
+}
 
 type NavigateTo = (tab: SettingsTab, entityName?: string) => void;
 
@@ -38,7 +56,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
   const [newDestinations, setNewDestinations] = useState<DestinationEdit[]>([]);
   const [newDistribution, setNewDistribution] = useState("fanout");
   const [newEnabled, setNewEnabled] = useState(true);
-  const [newEjectOnly, setNewEjectOnly] = useState(false);
+  const [newSource, setNewSource] = useState<RouteSource>(RouteSource.INGEST);
 
   const routes = config?.routes ?? [];
   const filters = config?.filters ?? [];
@@ -69,7 +87,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
         destinations: [] as DestinationEdit[],
         distribution: "fanout",
         enabled: true,
-        ejectOnly: false,
+        source: RouteSource.INGEST,
       };
     return {
       name: route.name,
@@ -77,7 +95,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
       destinations: route.destinations.map((d) => ({ vaultId: encode(d.vaultId) })),
       distribution: route.distribution || "fanout",
       enabled: route.enabled,
-      ejectOnly: route.ejectOnly,
+      source: normalizeSource(route.source),
     };
   };
 
@@ -95,7 +113,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
         destinations: DestinationEdit[];
         distribution: string;
         enabled: boolean;
-        ejectOnly: boolean;
+        source: RouteSource;
       },
     ) => ({
       id,
@@ -104,7 +122,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
       destinations: edit.destinations.map((d) => d.vaultId),
       distribution: edit.distribution,
       enabled: edit.enabled,
-      ejectOnly: edit.ejectOnly,
+      source: edit.source,
     }),
   });
 
@@ -120,7 +138,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
         destinations: newDestinations.map((d) => d.vaultId),
         distribution: newDistribution,
         enabled: newEnabled,
-        ejectOnly: newEjectOnly,
+        source: newSource,
       });
       addToast(`Route "${name}" created`, "info");
       setAdding(false);
@@ -129,7 +147,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
       setNewDestinations([]);
       setNewDistribution("fanout");
       setNewEnabled(true);
-      setNewEjectOnly(false);
+      setNewSource(RouteSource.INGEST);
     } catch (err: unknown) {
       addToast(err instanceof Error ? err.message : "Failed to create route", "error");
     }
@@ -150,7 +168,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
         setNewDestinations([]);
         setNewDistribution("fanout");
         setNewEnabled(true);
-        setNewEjectOnly(false);
+        setNewSource(RouteSource.INGEST);
         setAdding(!adding);
       }}
       isLoading={isLoading}
@@ -206,12 +224,18 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
             vaults={vaults.map((v) => ({ id: encode(v.id), name: v.name }))}
             dark={dark}
           />
-          <Checkbox
-            checked={newEjectOnly}
-            onChange={setNewEjectOnly}
-            label="Eject Only"
+          <FormField
+            label="Source"
+            description="Ingest routes participate in live ingestion. Retention-trigger routes are consulted only when retention events fire on a vault, receiving the chunk's records as the chunk is destroyed."
             dark={dark}
-          />
+          >
+            <SelectInput
+              value={String(newSource)}
+              onChange={(v) => setNewSource(Number(v) as RouteSource)}
+              options={sourceOptions}
+              dark={dark}
+            />
+          </FormField>
         </AddFormCard>
       )}
 
@@ -236,7 +260,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
                 {filterName || "no filter"}
                 {destNames ? ` \u2192 ${destNames}` : ""}
                 {!route.enabled && " (disabled)"}
-                {route.ejectOnly && " (eject only)"}
+                {route.source === RouteSource.RETENTION_TRIGGER && " (retention)"}
               </span>
             }
             footer={
@@ -288,12 +312,18 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
                 vaults={vaults.map((v) => ({ id: encode(v.id), name: v.name }))}
                 dark={dark}
               />
-              <Checkbox
-                checked={edit.ejectOnly}
-                onChange={(v) => setEdit(id, { ejectOnly: v })}
-                label="Eject Only"
+              <FormField
+                label="Source"
+                description="Ingest routes participate in live ingestion. Retention-trigger routes are consulted only when retention events fire on a vault, receiving the chunk's records as the chunk is destroyed."
                 dark={dark}
-              />
+              >
+                <SelectInput
+                  value={String(edit.source)}
+                  onChange={(v) => setEdit(id, { source: Number(v) as RouteSource })}
+                  options={sourceOptions}
+                  dark={dark}
+                />
+              </FormField>
             </div>
           </SettingsCard>
         );

@@ -212,9 +212,15 @@ a tier's active chunk".
   - `round-robin` — rotate through vaults (load-balance).
   - `failover` — try first; on failure, try next.
 
-- **EjectOnly route** — a route that is never used for live ingestion. Exists
-  purely as a retention destination when a tier's retention rule says "eject
-  to vault X" instead of deleting.
+- **Route source predicate** — keys a route to one of two source streams:
+  - `ingest` (default) — the route participates in the live ingestion
+    `FilterSet` and matches records arriving from ingesters.
+  - `retention-trigger` — the route is consulted only when a vault's
+    retention event fires; the chunk's records are streamed through every
+    matching retention-trigger route, and the chunk is destroyed afterward
+    regardless. Excluded from the live `FilterSet` so re-routed records
+    can't loop back through ingestion. Phase 4 (gastrolog-42f9z) replaced
+    the old `EjectOnly route` concept.
 
 - **FilterSet** — the compiled, optimized set of all active filters on a node,
   plus precomputed node routing ("which nodes hold which vaults"). Reloaded
@@ -459,12 +465,19 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
   chunk. Shapes: `MaxBytes`, `MaxAge`, `MaxRecords`, `Cron`, or a
   composite. Per-tier: `tier.RotationPolicyID` points at a policy.
 
-- **Retention rule** (`RetentionRule`) — per-tier, per-policy: "when to
-  expire sealed chunks". An expire can be a **delete** (drop the chunk)
-  or an **eject** (forward records to another route before deleting).
+- **Retention rule** (`RetentionRule`) — per-vault, per-policy: "when do
+  sealed chunks fire retention events". Phase 4 (gastrolog-42f9z) collapsed
+  the prior expire/eject/transition action enum: a fired event always
+  streams the chunk's records through the routing engine and always
+  destroys the chunk. The routing engine's verdict (which retention-trigger
+  routes match) drives placement. Without matching routes, the records drop.
 
 - **Retention policy** (`RetentionPolicyConfig`) — named, reusable
   policy referenced by `RetentionRule`.
+
+- **Retention event** — the cluster-visible signal that a chunk has aged
+  out. Fires unconditionally on policy match; consumed by the routing
+  engine with `source = retention-trigger(vault_id)`.
 
 ### Core state transitions (verbs)
 
@@ -473,13 +486,12 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 
 - **Rotate** — open a new active chunk after sealing the old one.
 
-- **Transition** — move a sealed chunk's records from one tier to the
-  next in the vault chain. Driven by retention rules with the `eject`
-  action. Uses a receipt protocol so the destination durably replicates
-  the records before the source deletes its copy. See
-  [`gastrolog-4913n`](https://... — closed).
-
-- **Expire** — delete a chunk that has aged out according to retention.
+- **Expire** — destroy a chunk that has aged out according to retention.
+  Phase 4 (gastrolog-42f9z) collapsed transition / eject / expire into a
+  single retention event: the chunk's records are always streamed through
+  the routing engine before the chunk is destroyed. If a retention-trigger
+  route directs records to another vault, that's the new "transition"
+  semantics; if no route matches, the records drop (legacy expire).
 
 - **Reconcile** — compare the tier FSM manifest against local disk;
   delete sealed chunks on disk that aren't in the manifest (orphan
@@ -713,6 +725,8 @@ Live on `Config` directly (not as entities):
 | applied index    | committed-and-applied | Precision: commit = quorum-persisted; applied = FSM-processed.  |
 | node             | server, host      | "Node" is the cluster-member canonical. Reserve "server" for `cluster.Server` (the gRPC server component). |
 | peer             | remote node       | "Peer" is relative; there is no absolute "remote".                 |
+| retention event  | retention action, expire/eject/transition | Phase 4 (gastrolog-42f9z) collapsed the action enum: a fired retention event always streams records through the routing engine and destroys the chunk. The "what" lives on routes, not on the rule. |
+| retention-trigger route | eject-only route, retention destination | Phase 4 (gastrolog-42f9z): routes carry a source predicate (`ingest` vs `retention-trigger`). The legacy `EjectOnly` boolean is gone. |
 
 ### Timestamp conventions
 

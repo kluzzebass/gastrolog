@@ -1,12 +1,15 @@
 # Routes & Filtering
 
-Routes connect the ingestion pipeline to vaults. Each route binds a **filter** to one or more **destination vaults**, controlling which records end up where. Routes are configured in [Settings → Routes](settings:routes).
+Routes connect data sources to vaults. Each route binds a **filter** to one or more **destination vaults** and is keyed by a **source predicate** that says where the records come from. Routes are configured in [Settings → Routes](settings:routes).
 
 ## How It Works
 
-When a record arrives from an ingester and passes through [digestion](help:digesters), every enabled route's filter is evaluated against it. If the filter matches, the record is sent to the route's destination vaults — including vaults on other [cluster nodes](help:clustering), where the record is forwarded automatically.
+Two source predicates exist:
 
-A single record can match multiple routes and be written to multiple vaults. This is by design — you might want production errors in both a short-retention debugging vault and a long-retention compliance vault.
+- **Ingest** (default): the route participates in live ingestion. When records arrive from an ingester and pass through [digestion](help:digesters), every enabled ingest-source route's filter is evaluated against each record.
+- **Retention trigger**: the route is consulted only when a [retention event](help:policy-retention) fires on a vault. The chunk's records are streamed through every retention-trigger route whose filter matches.
+
+A single record can match multiple routes (of the same source type) and be written to multiple vaults. This is by design — you might want production errors in both a short-retention debugging vault and a long-retention compliance vault.
 
 ## Route Components
 
@@ -15,7 +18,7 @@ A single record can match multiple routes and be written to multiple vaults. Thi
 | **Filter** | A named filter expression (configured in [Settings → Filters](settings:filters)). Determines which records match this route. |
 | **Destinations** | One or more vaults that receive matching records. |
 | **Distribution** | How records are distributed across destinations: **fanout** (all destinations, default), **round-robin**, or **failover**. |
-| **Eject Only** | When enabled, the route is excluded from live ingestion and can only be used as an eject target (see below). |
+| **Source** | **Ingest** (default; live traffic) or **Retention trigger** (consulted on vault retention events only). |
 
 ## Filter Types
 
@@ -27,21 +30,21 @@ Filters are reusable expressions assigned to routes:
 
 Filters are evaluated after [digestion](help:digesters), so attributes added by digesters (like `level`) are available for filtering.
 
-## Eject-Only Routes
+## Source Predicates
 
-Routes have an **Eject Only** toggle:
+The source predicate keeps live ingestion traffic separate from retention re-routing:
 
-- **Ingestion routes** (default): Participate in live ingestion. When records arrive from ingesters, these routes' filters determine which vaults receive the records.
-- **Eject-only routes**: Excluded from live ingestion entirely. They exist solely as targets for the [eject retention action](help:policy-retention). This prevents loops — ejected records cannot re-match ingestion routes and bounce back.
+- **Ingest** routes are matched only against records arriving from ingesters. They never receive records produced by retention events.
+- **Retention trigger** routes are matched only against records released by a vault's retention. They never receive live ingester traffic. This prevents loops — re-routed records cannot bounce back through the ingestion pipeline.
 
-A route cannot be both. Use eject-only routes when you need to move records from one vault to another based on retention rules, with per-record filtering applied during the move.
+A route has exactly one source predicate. Use retention-trigger routes when you need to move records from one vault to another as part of retention, with per-record filtering applied during the move.
 
 ## Common Patterns
 
-**Separate by environment:** Create filters for `env=prod`, `env=staging`, `env=dev` and route each to its own vault with different retention.
+**Separate by environment:** Create ingest routes with filters for `env=prod`, `env=staging`, `env=dev` and route each to its own vault with different retention.
 
 **Duplicate critical logs:** Route `level=error` to both a fast-expiring local vault (for debugging) and a cloud-backed vault with long retention (for compliance).
 
-**Catch-rest safety net:** Always have at least one route with a `+` filter pointing to a catch-all vault. This ensures no record is silently dropped if it doesn't match any other route.
+**Catch-rest safety net:** Always have at least one ingest route with a `+` filter pointing to a catch-all vault. This ensures no record is silently dropped if it doesn't match any other route.
 
-**Cold storage via eject:** Route live logs to a fast local vault, then use a retention policy with eject to move aged records through an eject-only route into a cloud-backed vault. See [Retention Policies](help:policy-retention) and [Sealed Backing](help:storage-cloud).
+**Cold storage via retention re-routing:** Route live logs to a fast local vault, then add a retention-trigger route that re-sends aged records into a cloud-backed cold vault. See [Retention Policies](help:policy-retention) and [Sealed Backing](help:storage-cloud).

@@ -66,11 +66,6 @@ export function emptyTierEntry(type: TierTypeLabel): TierEntry {
   };
 }
 
-// Retention action is determined by position: last tier = expire, others = transition.
-export function retentionActionForPosition(index: number, totalTiers: number): string {
-  return index === totalTiers - 1 ? "expire" : "transition";
-}
-
 // ---------------------------------------------------------------------------
 // Memory budget parser — "4GB" -> bigint bytes
 // ---------------------------------------------------------------------------
@@ -536,7 +531,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
       memoryBudgetBytes: storage.type === "memory" ? parseMemoryBudget(storage.memoryBudget) : protoInt64.zero,
       rotationPolicyId: storage.rotationPolicyId ? decode(storage.rotationPolicyId) : new Uint8Array(0),
       retentionRules: storage.retentionPolicyId
-        ? [new RetentionRule({ retentionPolicyId: decode(storage.retentionPolicyId), action: "expire" })]
+        ? [new RetentionRule({ retentionPolicyId: decode(storage.retentionPolicyId) })]
         : [],
       replicationFactor: parseInt(storage.replicationFactor, 10) || 1,
       path: storage.type === "jsonl" ? storage.path : "",

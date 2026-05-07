@@ -581,7 +581,7 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 
 | Capability | Status | Notes |
 |---|---|---|
-| Retention policies | Done | Per-tier time/count/size-based with expire, eject, transition, or archive actions |
+| Retention policies | Done | Time / count / size-based; fired events stream records through the routing engine and destroy the source chunk. Re-routing to other vaults is configured via routes with `Source = Retention trigger`. |
 | Right to erasure | Not started | No purge command |
 | Sensitive field masking | Not started | Role-based display masking, not encryption. Redact stage for irreversible removal |
 | Access auditing | Not started | No audit vault |

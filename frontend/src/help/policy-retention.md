@@ -1,21 +1,23 @@
 # Retention Policies
 
-A retention policy defines when sealed chunks should be deleted or moved. Multiple conditions can be combined — a chunk is acted on if **any** condition says so (union semantics).
+A retention policy defines **when** sealed chunks fire a retention event. Multiple conditions can be combined — a chunk fires the event if **any** condition says so (union semantics).
 
 ## Conditions
 
 | Condition | Config field | Description | Example |
 |-----------|-------------|-------------|---------|
-| **TTL** | `maxAge` | Act on chunks older than this duration | `720h` (30 days) |
-| **Total size** | `maxBytes` | Keep total vault size under this limit, acting on oldest chunks first | `10GB` |
-| **Chunk count** | `maxChunks` | Keep at most this many sealed chunks, acting on oldest excess | `100` |
+| **TTL** | `maxAge` | Fire when chunks age past this duration | `720h` (30 days) |
+| **Total size** | `maxBytes` | Keep total vault size under this limit, firing on oldest chunks first | `10GB` |
+| **Chunk count** | `maxChunks` | Keep at most this many sealed chunks, firing on oldest excess | `100` |
 
-## Actions
+## What Happens When a Retention Event Fires
 
-Each retention rule pairs a policy with an action:
+A retention event always does the same thing:
 
-- **Expire**: Deletes matching chunks permanently. Indexes are removed first, then the chunk data.
-- **Eject**: Streams matching chunks' records through one or more [eject-only routes](help:routing). Each route's filter is evaluated per-record, so only matching records reach each route's destination vaults. After all records are delivered, the source chunk is deleted. This enables fan-out, per-record filtering, and multi-destination routing during retention — the same flexibility that live ingestion routes provide.
+1. The chunk's records are streamed through the routing engine with `source = retention-trigger(vault)`.
+2. The original chunk is **destroyed** — indexes first, then the chunk data.
+
+The routing engine's verdict drives placement: if any [retention-trigger route](help:routing) matches, the records are re-appended to that route's destination vaults (per-record filtering applies). If no route matches, the records are dropped — the chunk just goes away. Either way, the source chunk is gone.
 
 ## How Retention Runs
 
@@ -25,27 +27,27 @@ Retention policies are evaluated periodically by a [background scheduler](help:i
 2. **TTL**: Flags any chunk whose **EndTS** (the WriteTS of its last record) is older than the configured duration
 3. **Total size**: Walks chunks from newest to oldest, keeping those that fit within the byte budget. Everything beyond the budget is flagged.
 4. **Chunk count**: Keeps the newest N chunks, flags the rest
-5. The union of all flagged chunks is processed according to the action (expire or eject)
+5. The union of all flagged chunks fires retention events.
 
 In a [cluster](help:clustering), retention runs independently on the [node](help:clustering-nodes) hosting each vault. A [vault](help:storage) with no retention policy keeps chunks indefinitely. See also [Rotation](help:policy-rotation) for when chunks are sealed.
 
-## Eject Configuration
+## Re-routing Aged Chunks
 
-To use eject:
+To keep records (in another vault) instead of dropping them on retention:
 
-1. Create one or more routes with **Eject Only** enabled in [Settings → Routes](settings:routes)
-2. Configure filters and destinations on those routes as needed
-3. In the vault's retention rule, select action **eject** and pick the target routes
+1. Create a route with **Source = Retention trigger** in [Settings → Routes](settings:routes).
+2. Configure its filter and destinations as needed — the destinations receive the routed records.
+3. Routes with `Source = Retention trigger` are excluded from live ingestion automatically, so re-routed records can't loop back through the ingestion pipeline.
 
-Eject-only routes are excluded from live ingestion, so ejected records won't loop back through the ingestion pipeline.
+The vault's retention rule itself just specifies the trigger policy. The "what happens to the records" decision lives entirely on the routing table.
 
 ## Example
 
-A retention policy with `maxAge: "720h"` and `maxBytes: "50GB"` will act on chunks older than 30 days **and** also act on the oldest chunks if total vault size exceeds 50 GB.
+A retention policy with `maxAge: "720h"` and `maxBytes: "50GB"` will fire on chunks older than 30 days **and** also fire on the oldest chunks if total vault size exceeds 50 GB.
 
 ## Choosing a Strategy
 
-Conditions use union semantics — a chunk is acted on if **any** condition matches. This means conditions work together to enforce the most restrictive limit.
+Conditions use union semantics — a chunk fires if **any** condition matches. This means conditions work together to enforce the most restrictive limit.
 
 **Common patterns:**
 
@@ -58,12 +60,12 @@ Conditions use union semantics — a chunk is acted on if **any** condition matc
 
 **Combining TTL with size budget:** Use TTL as the primary control and size budget as a guardrail. Under normal load, TTL governs what gets deleted. During traffic spikes, the size budget prevents the vault from consuming all available disk before chunks age out.
 
-**Tiered storage with eject:** Instead of expiring old data, eject it to a cloud-backed vault for long-term archival:
+**Tiered storage via retention-trigger routes:** Instead of dropping old data, re-route it to a cloud-backed vault for long-term archival:
 
-1. Create a file vault with [sealed backing](help:storage-cloud) (e.g. S3) — this is your cold tier
-2. Create an eject-only route with a `*` filter pointing to the cold vault
-3. On your hot vault, set a retention rule with action **eject** targeting that route
+1. Create a file vault with [sealed backing](help:storage-cloud) (e.g. S3) — this is your cold tier.
+2. Create a route with `Source = Retention trigger`, a `*` filter, and the cold vault as destination.
+3. On your hot vault, set a retention rule (no action selector — every fired event consults the routing engine).
 
-Records flow: hot vault → eject → cold vault (cloud-backed). The hot vault stays small and fast; the cold vault accumulates history in cheap cloud storage. Queries automatically search both.
+Records flow: hot vault retention fires → routing engine matches the retention-trigger route → cold vault (cloud-backed). The hot vault stays small and fast; the cold vault accumulates history in cheap cloud storage. Queries automatically search both.
 
 **No retention:** Omitting a retention policy means chunks accumulate forever. This is fine for testing but will eventually fill the disk in production. Always configure retention for production vaults.
