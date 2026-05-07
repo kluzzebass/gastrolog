@@ -29,11 +29,6 @@ function sourcesIncludeRetention(sources: RouteSource[]): boolean {
   return sources.includes(RouteSource.RETENTION_TRIGGER);
 }
 
-function toggleSource(sources: RouteSource[], kind: RouteSource): RouteSource[] {
-  if (sources.includes(kind)) return sources.filter((s) => s !== kind);
-  return [...sources, kind];
-}
-
 type NavigateTo = (tab: SettingsTab, entityName?: string) => void;
 
 interface DestinationEdit {
@@ -217,32 +212,6 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
             label="Enabled"
             dark={dark}
           />
-          <FormField label="Filter" dark={dark}>
-            <SelectInput
-              value={newFilterId}
-              onChange={setNewFilterId}
-              options={filterOptions}
-              dark={dark}
-            />
-          </FormField>
-          <FormField
-            label="Distribution"
-            description="Fanout sends to all destinations. Round Robin distributes evenly. Failover sends to the first available destination."
-            dark={dark}
-          >
-            <SelectInput
-              value={newDistribution}
-              onChange={setNewDistribution}
-              options={distributionOptions}
-              dark={dark}
-            />
-          </FormField>
-          <DestinationsEditor
-            destinations={newDestinations}
-            onChange={setNewDestinations}
-            vaults={vaults.map((v) => ({ id: encode(v.id), name: v.name }))}
-            dark={dark}
-          />
           <SourceEditor
             sources={newSources}
             onSourcesChange={setNewSources}
@@ -254,6 +223,37 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
             ingesters={ingesters.map((i) => ({ id: encode(i.id), name: i.name }))}
             dark={dark}
           />
+          <FormField label="Filter" dark={dark}>
+            <SelectInput
+              value={newFilterId}
+              onChange={setNewFilterId}
+              options={filterOptions}
+              dark={dark}
+            />
+          </FormField>
+          <DestinationsEditor
+            destinations={newDestinations}
+            onChange={setNewDestinations}
+            vaults={vaults.map((v) => ({ id: encode(v.id), name: v.name }))}
+            dark={dark}
+          />
+          <FormField
+            label="Distribution"
+            description={
+              newDestinations.length <= 1
+                ? "Only takes effect with two or more destinations."
+                : "Fanout sends to all destinations. Round Robin distributes evenly. Failover sends to the first available destination."
+            }
+            dark={dark}
+          >
+            <SelectInput
+              value={newDistribution}
+              onChange={setNewDistribution}
+              options={distributionOptions}
+              dark={dark}
+              disabled={newDestinations.length <= 1}
+            />
+          </FormField>
         </AddFormCard>
       )}
 
@@ -305,32 +305,6 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
                 label="Enabled"
                 dark={dark}
               />
-              <FormField label="Filter" dark={dark}>
-                <SelectInput
-                  value={edit.filterId}
-                  onChange={(v) => setEdit(id, { filterId: v })}
-                  options={filterOptions}
-                  dark={dark}
-                />
-              </FormField>
-              <FormField
-                label="Distribution"
-                description="Fanout sends to all destinations. Round Robin distributes evenly. Failover sends to the first available destination."
-                dark={dark}
-              >
-                <SelectInput
-                  value={edit.distribution}
-                  onChange={(v) => setEdit(id, { distribution: v })}
-                  options={distributionOptions}
-                  dark={dark}
-                />
-              </FormField>
-              <DestinationsEditor
-                destinations={edit.destinations}
-                onChange={(dests) => setEdit(id, { destinations: dests })}
-                vaults={vaults.map((v) => ({ id: encode(v.id), name: v.name }))}
-                dark={dark}
-              />
               <SourceEditor
                 sources={edit.sources}
                 onSourcesChange={(s) => setEdit(id, { sources: s })}
@@ -342,6 +316,37 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
                 ingesters={ingesters.map((i) => ({ id: encode(i.id), name: i.name }))}
                 dark={dark}
               />
+              <FormField label="Filter" dark={dark}>
+                <SelectInput
+                  value={edit.filterId}
+                  onChange={(v) => setEdit(id, { filterId: v })}
+                  options={filterOptions}
+                  dark={dark}
+                />
+              </FormField>
+              <DestinationsEditor
+                destinations={edit.destinations}
+                onChange={(dests) => setEdit(id, { destinations: dests })}
+                vaults={vaults.map((v) => ({ id: encode(v.id), name: v.name }))}
+                dark={dark}
+              />
+              <FormField
+                label="Distribution"
+                description={
+                  edit.destinations.length <= 1
+                    ? "Only takes effect with two or more destinations."
+                    : "Fanout sends to all destinations. Round Robin distributes evenly. Failover sends to the first available destination."
+                }
+                dark={dark}
+              >
+                <SelectInput
+                  value={edit.distribution}
+                  onChange={(v) => setEdit(id, { distribution: v })}
+                  options={distributionOptions}
+                  dark={dark}
+                  disabled={edit.destinations.length <= 1}
+                />
+              </FormField>
             </div>
           </SettingsCard>
         );
@@ -350,6 +355,18 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
   );
 }
 
+// SourceEditor renders one flat list of checkboxes covering every
+// possible source predicate the route can match: a per-section "Any"
+// row, then one row per concrete ingester / vault. The wire shape
+// (sources set + sourceVaultIds + sourceIngesterIds, with empty
+// narrower = "any") is reconstructed from the checked rows on save.
+//
+// "Any" within a kind is mutually exclusive with that kind's specific
+// rows — checking a specific ingester clears "Any ingester", and
+// vice versa. Across kinds the boxes are independent: a route can
+// match "Any ingester" AND "retention from vault-alpha" at once.
+//
+// Phase 4 (gastrolog-42f9z).
 function SourceEditor({
   sources,
   onSourcesChange,
@@ -371,135 +388,129 @@ function SourceEditor({
   ingesters: { id: string; name: string }[];
   dark: boolean;
 }>) {
-  const ingest = sourcesIncludeIngest(sources);
-  const retention = sourcesIncludeRetention(sources);
+  const c = useThemeClass(dark);
+  const ingestChecked = sourcesIncludeIngest(sources);
+  const retentionChecked = sourcesIncludeRetention(sources);
+
+  // "Any X" is checked when the kind is in `sources` AND the narrower
+  // list for that kind is empty.
+  const anyIngester = ingestChecked && sourceIngesterIds.length === 0;
+  const anyVault = retentionChecked && sourceVaultIds.length === 0;
+
+  // Toggling "Any ingester" / "Any vault":
+  //  - check: ensure the kind is in `sources` and clear the narrower list.
+  //  - uncheck (with no specific rows): drop the kind from `sources`.
+  const enableAnyIngester = () => {
+    if (!ingestChecked) onSourcesChange([...sources, RouteSource.INGEST]);
+    if (sourceIngesterIds.length > 0) onSourceIngesterIdsChange([]);
+  };
+  const disableAnyIngester = () => {
+    if (sourceIngesterIds.length === 0) {
+      onSourcesChange(sources.filter((s) => s !== RouteSource.INGEST));
+    }
+  };
+  const enableAnyVault = () => {
+    if (!retentionChecked) onSourcesChange([...sources, RouteSource.RETENTION_TRIGGER]);
+    if (sourceVaultIds.length > 0) onSourceVaultIdsChange([]);
+  };
+  const disableAnyVault = () => {
+    if (sourceVaultIds.length === 0) {
+      onSourcesChange(sources.filter((s) => s !== RouteSource.RETENTION_TRIGGER));
+    }
+  };
+
+  // Toggle a specific ingester / vault row. Checking a specific row
+  // implicitly enables the kind and clears the "Any" implication.
+  // Unchecking the last specific row (with "Any" off) drops the kind.
+  const toggleIngester = (id: string) => {
+    const has = sourceIngesterIds.includes(id);
+    const nextIds = has
+      ? sourceIngesterIds.filter((x) => x !== id)
+      : [...sourceIngesterIds, id];
+    onSourceIngesterIdsChange(nextIds);
+    if (!has && !ingestChecked) {
+      onSourcesChange([...sources, RouteSource.INGEST]);
+    } else if (has && nextIds.length === 0 && ingestChecked && !anyIngester) {
+      // Was the last specific ingester and "Any" wasn't holding the kind on.
+      onSourcesChange(sources.filter((s) => s !== RouteSource.INGEST));
+    }
+  };
+  const toggleVault = (id: string) => {
+    const has = sourceVaultIds.includes(id);
+    const nextIds = has
+      ? sourceVaultIds.filter((x) => x !== id)
+      : [...sourceVaultIds, id];
+    onSourceVaultIdsChange(nextIds);
+    if (!has && !retentionChecked) {
+      onSourcesChange([...sources, RouteSource.RETENTION_TRIGGER]);
+    } else if (has && nextIds.length === 0 && retentionChecked && !anyVault) {
+      onSourcesChange(sources.filter((s) => s !== RouteSource.RETENTION_TRIGGER));
+    }
+  };
+
+  const sortedIngesters = [...ingesters].sort((a, b) => a.name.localeCompare(b.name));
+  const sortedVaults = [...vaults].sort((a, b) => a.name.localeCompare(b.name));
+
+  const sectionHeader = (text: string) => (
+    <div
+      className={`text-[0.7em] uppercase tracking-wide font-medium pt-1 ${c(
+        "text-text-muted",
+        "text-light-text-muted",
+      )}`}
+    >
+      {text}
+    </div>
+  );
 
   return (
     <FormField
       label="Sources"
-      description="A route is consulted whenever ANY of its checked sources is active for the record at hand. Optionally narrow each source to specific ingesters or vaults; leaving the picker empty matches any."
+      description="Tick every source this route should match. Across kinds (live ingest / retention) the boxes are independent. Within a kind, 'Any' is mutually exclusive with the specific rows."
       dark={dark}
     >
-      <div className="flex flex-col gap-2">
-        <Checkbox
-          checked={ingest}
-          onChange={() => onSourcesChange(toggleSource(sources, RouteSource.INGEST))}
-          label="Match live ingest"
-          dark={dark}
-        />
-        {ingest && (
-          <div className="ml-6">
-            <IdMultiPicker
-              label="Limit to ingesters"
-              emptyLabel="All ingesters"
-              addLabel="Add ingester…"
-              selectedIds={sourceIngesterIds}
-              onChange={onSourceIngesterIdsChange}
-              items={ingesters}
-              dark={dark}
-            />
-          </div>
-        )}
-        <Checkbox
-          checked={retention}
-          onChange={() =>
-            onSourcesChange(toggleSource(sources, RouteSource.RETENTION_TRIGGER))
-          }
-          label="Match retention events"
-          dark={dark}
-        />
-        {retention && (
-          <div className="ml-6">
-            <IdMultiPicker
-              label="Limit to source vaults"
-              emptyLabel="Any vault"
-              addLabel="Add vault…"
-              selectedIds={sourceVaultIds}
-              onChange={onSourceVaultIdsChange}
-              items={vaults}
-              dark={dark}
-            />
-          </div>
-        )}
-      </div>
-    </FormField>
-  );
-}
-
-// IdMultiPicker is a generic multi-select picker used for the
-// retention-vault and ingest-ingester narrower lists. Empty selection
-// is meaningful — represents "match any". gastrolog-42f9z (Phase 4).
-function IdMultiPicker({
-  label,
-  emptyLabel,
-  addLabel,
-  selectedIds,
-  onChange,
-  items,
-  dark,
-}: Readonly<{
-  label: string;
-  emptyLabel: string;
-  addLabel: string;
-  selectedIds: string[];
-  onChange: (ids: string[]) => void;
-  items: { id: string; name: string }[];
-  dark: boolean;
-}>) {
-  const c = useThemeClass(dark);
-  const usedIds = new Set(selectedIds);
-  const available = items.filter((it) => !usedIds.has(it.id));
-
-  return (
-    <FormField label={label} dark={dark}>
       <div className="flex flex-col gap-1.5">
-        {selectedIds.length === 0 && (
-          <span className={`text-[0.8em] italic ${c("text-text-muted", "text-light-text-muted")}`}>
-            {emptyLabel}
-          </span>
-        )}
-        {selectedIds.map((id) => {
-          const item = items.find((it) => it.id === id);
-          return (
-            <div key={id} className="flex items-center gap-2">
-              <span
-                className={`flex-1 text-[0.85em] px-2.5 py-1.5 border rounded ${c(
-                  "bg-ink-surface border-ink-border text-text-bright",
-                  "bg-light-surface border-light-border text-light-text-bright",
-                )}`}
-              >
-                {item?.name || id}
-              </span>
-              <Button
-                variant="ghost"
-                onClick={() => onChange(selectedIds.filter((sid) => sid !== id))}
-                dark={dark}
-              >
-                Remove
-              </Button>
-            </div>
-          );
-        })}
-        {available.length > 0 && (
-          <SelectInput
-            value=""
-            onChange={(v) => {
-              if (v) onChange([...selectedIds, v]);
-            }}
-            options={[
-              { value: "", label: addLabel },
-              ...available
-                .map((it) => ({ value: it.id, label: it.name || it.id }))
-                .sort((a, b) => a.label.localeCompare(b.label)),
-            ]}
+        {sectionHeader("Live ingest")}
+        <Checkbox
+          checked={anyIngester}
+          onChange={(checked) => (checked ? enableAnyIngester() : disableAnyIngester())}
+          label="Any ingester"
+          dark={dark}
+        />
+        {sortedIngesters.map((ing) => (
+          <Checkbox
+            key={ing.id}
+            checked={sourceIngesterIds.includes(ing.id)}
+            onChange={() => toggleIngester(ing.id)}
+            label={`Ingester: ${ing.name || ing.id}`}
             dark={dark}
           />
-        )}
+        ))}
+        {sectionHeader("Retention events")}
+        <Checkbox
+          checked={anyVault}
+          onChange={(checked) => (checked ? enableAnyVault() : disableAnyVault())}
+          label="Any vault"
+          dark={dark}
+        />
+        {sortedVaults.map((v) => (
+          <Checkbox
+            key={v.id}
+            checked={sourceVaultIds.includes(v.id)}
+            onChange={() => toggleVault(v.id)}
+            label={`Retention from: ${v.name || v.id}`}
+            dark={dark}
+          />
+        ))}
       </div>
     </FormField>
   );
 }
 
+// DestinationsEditor renders a flat checkbox list \u2014 same mechanism as
+// SourceEditor's per-kind list, just without the "Any" row (every
+// destination is explicit). The wire shape is a list of {vaultId};
+// this component keeps that contract by reconstructing it from the
+// checked vault IDs.
 function DestinationsEditor({
   destinations,
   onChange,
@@ -512,53 +523,34 @@ function DestinationsEditor({
   dark: boolean;
 }>) {
   const c = useThemeClass(dark);
-  const usedIds = new Set(destinations.map((d) => d.vaultId));
-  const availableVaults = vaults.filter((v) => !usedIds.has(v.id));
+  const sortedVaults = [...vaults].sort((a, b) => a.name.localeCompare(b.name));
+  const selected = new Set(destinations.map((d) => d.vaultId));
+
+  const toggle = (id: string) => {
+    if (selected.has(id)) {
+      onChange(destinations.filter((d) => d.vaultId !== id));
+    } else {
+      onChange([...destinations, { vaultId: id }]);
+    }
+  };
 
   return (
     <FormField label="Destinations" dark={dark}>
       <div className="flex flex-col gap-1.5">
-        {destinations.map((dest, idx) => {
-          const vault = vaults.find((v) => v.id === dest.vaultId);
-          return (
-            <div key={dest.vaultId} className="flex items-center gap-2">
-              <span
-                className={`flex-1 text-[0.85em] px-2.5 py-1.5 border rounded ${c(
-                  "bg-ink-surface border-ink-border text-text-bright",
-                  "bg-light-surface border-light-border text-light-text-bright",
-                )}`}
-              >
-                {vault?.name || dest.vaultId}
-              </span>
-              <Button variant="ghost"
-                onClick={() => onChange(destinations.filter((_, i) => i !== idx))}
-                dark={dark}
-              >
-                Remove
-              </Button>
-            </div>
-          );
-        })}
-        {availableVaults.length > 0 && (
-          <SelectInput
-            value=""
-            onChange={(v) => {
-              if (v) onChange([...destinations, { vaultId: v }]);
-            }}
-            options={[
-              { value: "", label: "Add destination\u2026" },
-              ...availableVaults
-                .map((v) => ({ value: v.id, label: v.name || v.id }))
-                .sort((a, b) => a.label.localeCompare(b.label)),
-            ]}
-            dark={dark}
-          />
-        )}
-        {destinations.length === 0 && availableVaults.length === 0 && (
+        {sortedVaults.length === 0 && (
           <p className={`text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
             No vaults available
           </p>
         )}
+        {sortedVaults.map((v) => (
+          <Checkbox
+            key={v.id}
+            checked={selected.has(v.id)}
+            onChange={() => toggle(v.id)}
+            label={v.name || v.id}
+            dark={dark}
+          />
+        ))}
       </div>
     </FormField>
   );
