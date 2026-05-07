@@ -1033,10 +1033,18 @@ func copyRouteConfig(rt system.RouteConfig) system.RouteConfig {
 		Name:         rt.Name,
 		Distribution: rt.Distribution,
 		Enabled:      rt.Enabled,
-		Source:       rt.Source,
 	}
 	if rt.FilterID != nil {
 		c.FilterID = new(*rt.FilterID)
+	}
+	if len(rt.Sources) > 0 {
+		c.Sources = append([]system.RouteSource(nil), rt.Sources...)
+	}
+	if len(rt.SourceVaultIDs) > 0 {
+		c.SourceVaultIDs = append([]glid.GLID(nil), rt.SourceVaultIDs...)
+	}
+	if len(rt.SourceIngesterIDs) > 0 {
+		c.SourceIngesterIDs = append([]glid.GLID(nil), rt.SourceIngesterIDs...)
 	}
 	if len(rt.Destinations) > 0 {
 		c.Destinations = make([]glid.GLID, len(rt.Destinations))

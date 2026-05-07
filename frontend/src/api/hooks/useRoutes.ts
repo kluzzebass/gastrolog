@@ -12,7 +12,9 @@ export function usePutRoute() {
       destinations: string[];
       distribution: string;
       enabled: boolean;
-      source: RouteSource;
+      sources: RouteSource[];
+      sourceVaultIds: string[];
+      sourceIngesterIds: string[];
     }) => {
       return systemClient.putRoute({
         config: {
@@ -22,7 +24,9 @@ export function usePutRoute() {
           destinations: args.destinations.map((vaultId) => ({ vaultId: decode(vaultId) })),
           distribution: args.distribution,
           enabled: args.enabled,
-          source: args.source,
+          sources: args.sources,
+          sourceVaultIds: args.sourceVaultIds.map(decode),
+          sourceIngesterIds: args.sourceIngesterIds.map(decode),
         },
       });
     },

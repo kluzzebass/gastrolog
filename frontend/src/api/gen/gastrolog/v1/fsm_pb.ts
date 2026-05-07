@@ -1668,11 +1668,25 @@ export class PutRouteCommand extends Message<PutRouteCommand> {
   enabled = false;
 
   /**
-   * gastrolog-42f9z (Phase 4); replaces eject_only
+   * gastrolog-42f9z (Phase 4); replaces eject_only. Empty = INGEST.
    *
-   * @generated from field: gastrolog.v1.RouteSource source = 7;
+   * @generated from field: repeated gastrolog.v1.RouteSource sources = 7;
    */
-  source = RouteSource.UNSPECIFIED;
+  sources: RouteSource[] = [];
+
+  /**
+   * optional narrower for sources containing RETENTION_TRIGGER
+   *
+   * @generated from field: repeated bytes source_vault_ids = 8;
+   */
+  sourceVaultIds: Uint8Array[] = [];
+
+  /**
+   * optional narrower for sources containing INGEST
+   *
+   * @generated from field: repeated bytes source_ingester_ids = 9;
+   */
+  sourceIngesterIds: Uint8Array[] = [];
 
   constructor(data?: PartialMessage<PutRouteCommand>) {
     super();
@@ -1688,7 +1702,9 @@ export class PutRouteCommand extends Message<PutRouteCommand> {
     { no: 4, name: "destination_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
     { no: 5, name: "distribution", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 6, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 7, name: "source", kind: "enum", T: proto3.getEnumType(RouteSource) },
+    { no: 7, name: "sources", kind: "enum", T: proto3.getEnumType(RouteSource), repeated: true },
+    { no: 8, name: "source_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 9, name: "source_ingester_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutRouteCommand {

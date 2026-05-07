@@ -338,11 +338,13 @@ func (s *SystemServer) loadConfigRoutes(ctx context.Context, resp *apiv1.GetSyst
 	}
 	for _, rt := range routes {
 		prt := &apiv1.RouteConfig{
-			Id:           rt.ID.ToProto(),
-			Name:         rt.Name,
-			Distribution: string(rt.Distribution),
-			Enabled:      rt.Enabled,
-			Source:       convert.RouteSourceToProto(rt.Source),
+			Id:                rt.ID.ToProto(),
+			Name:              rt.Name,
+			Distribution:      string(rt.Distribution),
+			Enabled:           rt.Enabled,
+			Sources:           convert.RouteSourcesToProto(rt.Sources),
+			SourceVaultIds:    glid.SliceToProto(rt.SourceVaultIDs),
+			SourceIngesterIds: glid.SliceToProto(rt.SourceIngesterIDs),
 		}
 		if rt.FilterID != nil {
 			prt.FilterId = rt.FilterID.ToProto()

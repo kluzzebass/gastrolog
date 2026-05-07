@@ -91,13 +91,15 @@ func (s *SystemServer) PutRoute(
 	}
 
 	cfg := system.RouteConfig{
-		ID:           id,
-		Name:         req.Msg.Config.Name,
-		FilterID:     filterID,
-		Destinations: destinations,
-		Distribution: system.DistributionMode(distribution),
-		Enabled:      req.Msg.Config.Enabled,
-		Source:       convert.RouteSourceFromProto(req.Msg.Config.GetSource()),
+		ID:                id,
+		Name:              req.Msg.Config.Name,
+		FilterID:          filterID,
+		Destinations:      destinations,
+		Distribution:      system.DistributionMode(distribution),
+		Enabled:           req.Msg.Config.Enabled,
+		Sources:           convert.RouteSourcesFromProto(req.Msg.Config.GetSources()),
+		SourceVaultIDs:    glid.SliceFromProto(req.Msg.Config.GetSourceVaultIds()),
+		SourceIngesterIDs: glid.SliceFromProto(req.Msg.Config.GetSourceIngesterIds()),
 	}
 	if err := s.sysStore.PutRoute(ctx, cfg); err != nil {
 		return nil, errInternal(err)

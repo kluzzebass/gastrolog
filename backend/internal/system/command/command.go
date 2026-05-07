@@ -296,13 +296,15 @@ func ExtractDeleteIngester(cmd *gastrologv1.DeleteIngesterCommand) (glid.GLID, e
 
 func putRouteCmd(cfg system.RouteConfig) *gastrologv1.PutRouteCommand {
 	return &gastrologv1.PutRouteCommand{
-		Id:             cfg.ID.ToProto(),
-		Name:           cfg.Name,
-		FilterId:       glid.OptionalToProto(cfg.FilterID),
-		DestinationIds: glid.SliceToProto(cfg.Destinations),
-		Distribution:   string(cfg.Distribution),
-		Enabled:        cfg.Enabled,
-		Source:         convert.RouteSourceToProto(cfg.Source),
+		Id:                cfg.ID.ToProto(),
+		Name:              cfg.Name,
+		FilterId:          glid.OptionalToProto(cfg.FilterID),
+		DestinationIds:    glid.SliceToProto(cfg.Destinations),
+		Distribution:      string(cfg.Distribution),
+		Enabled:           cfg.Enabled,
+		Sources:           convert.RouteSourcesToProto(cfg.Sources),
+		SourceVaultIds:    glid.SliceToProto(cfg.SourceVaultIDs),
+		SourceIngesterIds: glid.SliceToProto(cfg.SourceIngesterIDs),
 	}
 }
 
@@ -325,13 +327,15 @@ func NewDeleteRoute(id glid.GLID) *gastrologv1.SystemCommand {
 // ExtractPutRoute converts a PutRouteCommand back to a RouteConfig.
 func ExtractPutRoute(cmd *gastrologv1.PutRouteCommand) (system.RouteConfig, error) {
 	return system.RouteConfig{
-		ID:           glid.FromBytes(cmd.GetId()),
-		Name:         cmd.GetName(),
-		FilterID:     glid.OptionalFromProto(cmd.GetFilterId()),
-		Destinations: glid.SliceFromProto(cmd.GetDestinationIds()),
-		Distribution: system.DistributionMode(cmd.GetDistribution()),
-		Enabled:      cmd.GetEnabled(),
-		Source:       convert.RouteSourceFromProto(cmd.GetSource()),
+		ID:                glid.FromBytes(cmd.GetId()),
+		Name:              cmd.GetName(),
+		FilterID:          glid.OptionalFromProto(cmd.GetFilterId()),
+		Destinations:      glid.SliceFromProto(cmd.GetDestinationIds()),
+		Distribution:      system.DistributionMode(cmd.GetDistribution()),
+		Enabled:           cmd.GetEnabled(),
+		Sources:           convert.RouteSourcesFromProto(cmd.GetSources()),
+		SourceVaultIDs:    glid.SliceFromProto(cmd.GetSourceVaultIds()),
+		SourceIngesterIDs: glid.SliceFromProto(cmd.GetSourceIngesterIds()),
 	}, nil
 }
 

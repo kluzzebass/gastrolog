@@ -16,21 +16,22 @@ import type { SettingsTab } from "./SettingsDialog";
 import { sortByName } from "../../lib/sort";
 import { RouteSource } from "../../api/gen/gastrolog/v1/system_pb";
 
-// Phase 4 (gastrolog-42f9z): RouteSource selector.
-// ROUTE_SOURCE_UNSPECIFIED collapses to ingest server-side, so the UI
-// only exposes the two real choices.
-const sourceOptions = [
-  { value: String(RouteSource.INGEST), label: "Ingest (live traffic)" },
-  { value: String(RouteSource.RETENTION_TRIGGER), label: "Retention trigger" },
-];
+// Phase 4 (gastrolog-42f9z): RouteSource is a multi-select set of
+// source-predicate kinds. Empty = INGEST default for back-compat.
+function sourcesIncludeIngest(sources: RouteSource[]): boolean {
+  if (sources.length === 0) return true; // empty defaults to INGEST
+  return sources.some(
+    (s) => s === RouteSource.INGEST || s === RouteSource.UNSPECIFIED,
+  );
+}
 
-// normalizeSource maps any incoming RouteSource value (including
-// UNSPECIFIED from pre-Phase-4 routes) to one of the two real values
-// the form exposes.
-function normalizeSource(s: RouteSource | undefined): RouteSource {
-  return s === RouteSource.RETENTION_TRIGGER
-    ? RouteSource.RETENTION_TRIGGER
-    : RouteSource.INGEST;
+function sourcesIncludeRetention(sources: RouteSource[]): boolean {
+  return sources.includes(RouteSource.RETENTION_TRIGGER);
+}
+
+function toggleSource(sources: RouteSource[], kind: RouteSource): RouteSource[] {
+  if (sources.includes(kind)) return sources.filter((s) => s !== kind);
+  return [...sources, kind];
 }
 
 type NavigateTo = (tab: SettingsTab, entityName?: string) => void;
@@ -56,11 +57,14 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
   const [newDestinations, setNewDestinations] = useState<DestinationEdit[]>([]);
   const [newDistribution, setNewDistribution] = useState("fanout");
   const [newEnabled, setNewEnabled] = useState(true);
-  const [newSource, setNewSource] = useState<RouteSource>(RouteSource.INGEST);
+  const [newSources, setNewSources] = useState<RouteSource[]>([RouteSource.INGEST]);
+  const [newSourceVaultIds, setNewSourceVaultIds] = useState<string[]>([]);
+  const [newSourceIngesterIds, setNewSourceIngesterIds] = useState<string[]>([]);
 
   const routes = config?.routes ?? [];
   const filters = config?.filters ?? [];
   const vaults = config?.vaults ?? [];
+  const ingesters = config?.ingesters ?? [];
   const existingNames = new Set(routes.map((r) => r.name));
   const effectiveName = newName.trim() || namePlaceholder || "route";
   const nameConflict = existingNames.has(effectiveName);
@@ -87,7 +91,9 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
         destinations: [] as DestinationEdit[],
         distribution: "fanout",
         enabled: true,
-        source: RouteSource.INGEST,
+        sources: [RouteSource.INGEST] as RouteSource[],
+        sourceVaultIds: [] as string[],
+        sourceIngesterIds: [] as string[],
       };
     return {
       name: route.name,
@@ -95,7 +101,10 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
       destinations: route.destinations.map((d) => ({ vaultId: encode(d.vaultId) })),
       distribution: route.distribution || "fanout",
       enabled: route.enabled,
-      source: normalizeSource(route.source),
+      sources:
+        route.sources.length > 0 ? [...route.sources] : [RouteSource.INGEST],
+      sourceVaultIds: route.sourceVaultIds.map(encode),
+      sourceIngesterIds: route.sourceIngesterIds.map(encode),
     };
   };
 
@@ -113,7 +122,9 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
         destinations: DestinationEdit[];
         distribution: string;
         enabled: boolean;
-        source: RouteSource;
+        sources: RouteSource[];
+        sourceVaultIds: string[];
+        sourceIngesterIds: string[];
       },
     ) => ({
       id,
@@ -122,7 +133,9 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
       destinations: edit.destinations.map((d) => d.vaultId),
       distribution: edit.distribution,
       enabled: edit.enabled,
-      source: edit.source,
+      sources: edit.sources,
+      sourceVaultIds: sourcesIncludeRetention(edit.sources) ? edit.sourceVaultIds : [],
+      sourceIngesterIds: sourcesIncludeIngest(edit.sources) ? edit.sourceIngesterIds : [],
     }),
   });
 
@@ -138,7 +151,9 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
         destinations: newDestinations.map((d) => d.vaultId),
         distribution: newDistribution,
         enabled: newEnabled,
-        source: newSource,
+        sources: newSources,
+        sourceVaultIds: sourcesIncludeRetention(newSources) ? newSourceVaultIds : [],
+        sourceIngesterIds: sourcesIncludeIngest(newSources) ? newSourceIngesterIds : [],
       });
       addToast(`Route "${name}" created`, "info");
       setAdding(false);
@@ -147,7 +162,9 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
       setNewDestinations([]);
       setNewDistribution("fanout");
       setNewEnabled(true);
-      setNewSource(RouteSource.INGEST);
+      setNewSources([RouteSource.INGEST]);
+      setNewSourceVaultIds([]);
+      setNewSourceIngesterIds([]);
     } catch (err: unknown) {
       addToast(err instanceof Error ? err.message : "Failed to create route", "error");
     }
@@ -168,7 +185,9 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
         setNewDestinations([]);
         setNewDistribution("fanout");
         setNewEnabled(true);
-        setNewSource(RouteSource.INGEST);
+        setNewSources([RouteSource.INGEST]);
+        setNewSourceVaultIds([]);
+        setNewSourceIngesterIds([]);
         setAdding(!adding);
       }}
       isLoading={isLoading}
@@ -224,18 +243,17 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
             vaults={vaults.map((v) => ({ id: encode(v.id), name: v.name }))}
             dark={dark}
           />
-          <FormField
-            label="Source"
-            description="Ingest routes participate in live ingestion. Retention-trigger routes are consulted only when retention events fire on a vault, receiving the chunk's records as the chunk is destroyed."
+          <SourceEditor
+            sources={newSources}
+            onSourcesChange={setNewSources}
+            sourceVaultIds={newSourceVaultIds}
+            onSourceVaultIdsChange={setNewSourceVaultIds}
+            sourceIngesterIds={newSourceIngesterIds}
+            onSourceIngesterIdsChange={setNewSourceIngesterIds}
+            vaults={vaults.map((v) => ({ id: encode(v.id), name: v.name }))}
+            ingesters={ingesters.map((i) => ({ id: encode(i.id), name: i.name }))}
             dark={dark}
-          >
-            <SelectInput
-              value={String(newSource)}
-              onChange={(v) => setNewSource(Number(v) as RouteSource)}
-              options={sourceOptions}
-              dark={dark}
-            />
-          </FormField>
+          />
         </AddFormCard>
       )}
 
@@ -260,7 +278,8 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
                 {filterName || "no filter"}
                 {destNames ? ` \u2192 ${destNames}` : ""}
                 {!route.enabled && " (disabled)"}
-                {route.source === RouteSource.RETENTION_TRIGGER && " (retention)"}
+                {sourcesIncludeIngest([...route.sources]) && " (ingest)"}
+                {sourcesIncludeRetention([...route.sources]) && " (retention)"}
               </span>
             }
             footer={
@@ -312,23 +331,172 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
                 vaults={vaults.map((v) => ({ id: encode(v.id), name: v.name }))}
                 dark={dark}
               />
-              <FormField
-                label="Source"
-                description="Ingest routes participate in live ingestion. Retention-trigger routes are consulted only when retention events fire on a vault, receiving the chunk's records as the chunk is destroyed."
+              <SourceEditor
+                sources={edit.sources}
+                onSourcesChange={(s) => setEdit(id, { sources: s })}
+                sourceVaultIds={edit.sourceVaultIds}
+                onSourceVaultIdsChange={(ids) => setEdit(id, { sourceVaultIds: ids })}
+                sourceIngesterIds={edit.sourceIngesterIds}
+                onSourceIngesterIdsChange={(ids) => setEdit(id, { sourceIngesterIds: ids })}
+                vaults={vaults.map((v) => ({ id: encode(v.id), name: v.name }))}
+                ingesters={ingesters.map((i) => ({ id: encode(i.id), name: i.name }))}
                 dark={dark}
-              >
-                <SelectInput
-                  value={String(edit.source)}
-                  onChange={(v) => setEdit(id, { source: Number(v) as RouteSource })}
-                  options={sourceOptions}
-                  dark={dark}
-                />
-              </FormField>
+              />
             </div>
           </SettingsCard>
         );
       })}
     </SettingsSection>
+  );
+}
+
+function SourceEditor({
+  sources,
+  onSourcesChange,
+  sourceVaultIds,
+  onSourceVaultIdsChange,
+  sourceIngesterIds,
+  onSourceIngesterIdsChange,
+  vaults,
+  ingesters,
+  dark,
+}: Readonly<{
+  sources: RouteSource[];
+  onSourcesChange: (s: RouteSource[]) => void;
+  sourceVaultIds: string[];
+  onSourceVaultIdsChange: (ids: string[]) => void;
+  sourceIngesterIds: string[];
+  onSourceIngesterIdsChange: (ids: string[]) => void;
+  vaults: { id: string; name: string }[];
+  ingesters: { id: string; name: string }[];
+  dark: boolean;
+}>) {
+  const ingest = sourcesIncludeIngest(sources);
+  const retention = sourcesIncludeRetention(sources);
+
+  return (
+    <FormField
+      label="Sources"
+      description="A route is consulted whenever ANY of its checked sources is active for the record at hand. Optionally narrow each source to specific ingesters or vaults; leaving the picker empty matches any."
+      dark={dark}
+    >
+      <div className="flex flex-col gap-2">
+        <Checkbox
+          checked={ingest}
+          onChange={() => onSourcesChange(toggleSource(sources, RouteSource.INGEST))}
+          label="Match live ingest"
+          dark={dark}
+        />
+        {ingest && (
+          <div className="ml-6">
+            <IdMultiPicker
+              label="Limit to ingesters"
+              emptyLabel="All ingesters"
+              addLabel="Add ingester…"
+              selectedIds={sourceIngesterIds}
+              onChange={onSourceIngesterIdsChange}
+              items={ingesters}
+              dark={dark}
+            />
+          </div>
+        )}
+        <Checkbox
+          checked={retention}
+          onChange={() =>
+            onSourcesChange(toggleSource(sources, RouteSource.RETENTION_TRIGGER))
+          }
+          label="Match retention events"
+          dark={dark}
+        />
+        {retention && (
+          <div className="ml-6">
+            <IdMultiPicker
+              label="Limit to source vaults"
+              emptyLabel="Any vault"
+              addLabel="Add vault…"
+              selectedIds={sourceVaultIds}
+              onChange={onSourceVaultIdsChange}
+              items={vaults}
+              dark={dark}
+            />
+          </div>
+        )}
+      </div>
+    </FormField>
+  );
+}
+
+// IdMultiPicker is a generic multi-select picker used for the
+// retention-vault and ingest-ingester narrower lists. Empty selection
+// is meaningful — represents "match any". gastrolog-42f9z (Phase 4).
+function IdMultiPicker({
+  label,
+  emptyLabel,
+  addLabel,
+  selectedIds,
+  onChange,
+  items,
+  dark,
+}: Readonly<{
+  label: string;
+  emptyLabel: string;
+  addLabel: string;
+  selectedIds: string[];
+  onChange: (ids: string[]) => void;
+  items: { id: string; name: string }[];
+  dark: boolean;
+}>) {
+  const c = useThemeClass(dark);
+  const usedIds = new Set(selectedIds);
+  const available = items.filter((it) => !usedIds.has(it.id));
+
+  return (
+    <FormField label={label} dark={dark}>
+      <div className="flex flex-col gap-1.5">
+        {selectedIds.length === 0 && (
+          <span className={`text-[0.8em] italic ${c("text-text-muted", "text-light-text-muted")}`}>
+            {emptyLabel}
+          </span>
+        )}
+        {selectedIds.map((id) => {
+          const item = items.find((it) => it.id === id);
+          return (
+            <div key={id} className="flex items-center gap-2">
+              <span
+                className={`flex-1 text-[0.85em] px-2.5 py-1.5 border rounded ${c(
+                  "bg-ink-surface border-ink-border text-text-bright",
+                  "bg-light-surface border-light-border text-light-text-bright",
+                )}`}
+              >
+                {item?.name || id}
+              </span>
+              <Button
+                variant="ghost"
+                onClick={() => onChange(selectedIds.filter((sid) => sid !== id))}
+                dark={dark}
+              >
+                Remove
+              </Button>
+            </div>
+          );
+        })}
+        {available.length > 0 && (
+          <SelectInput
+            value=""
+            onChange={(v) => {
+              if (v) onChange([...selectedIds, v]);
+            }}
+            options={[
+              { value: "", label: addLabel },
+              ...available
+                .map((it) => ({ value: it.id, label: it.name || it.id }))
+                .sort((a, b) => a.label.localeCompare(b.label)),
+            ]}
+            dark={dark}
+          />
+        )}
+      </div>
+    </FormField>
   );
 }
 

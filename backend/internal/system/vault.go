@@ -246,10 +246,21 @@ type RouteConfig struct {
 	// Enabled controls whether this route is active.
 	Enabled bool `json:"enabled,omitempty"`
 
-	// Source is the source-predicate. Empty / "ingest" routes participate
-	// in the live FilterSet; "retention-trigger" routes are consulted only
-	// during retention firing. See gastrolog-42f9z (Phase 4).
-	Source RouteSource `json:"source,omitempty"`
+	// Sources is the set of source-predicate kinds the route participates
+	// in. Empty defaults to {Ingest} for back-compat with pre-Phase-4
+	// routes. A route with multiple kinds is consulted whenever ANY of
+	// its kinds matches the record at hand. gastrolog-42f9z (Phase 4).
+	Sources []RouteSource `json:"sources,omitempty"`
+
+	// SourceVaultIDs optionally narrows the RetentionTrigger source to a
+	// specific set of source vaults. Empty = match retention events from
+	// any vault. Ignored when Sources doesn't contain RetentionTrigger.
+	SourceVaultIDs []glid.GLID `json:"sourceVaultIds,omitempty"`
+
+	// SourceIngesterIDs optionally narrows the Ingest source to a
+	// specific set of ingesters. Empty = match any ingester. Ignored
+	// when Sources doesn't contain Ingest.
+	SourceIngesterIDs []glid.GLID `json:"sourceIngesterIds,omitempty"`
 }
 
 // IngesterConfig describes a ingester to instantiate.

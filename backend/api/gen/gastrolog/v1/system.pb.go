@@ -81,15 +81,31 @@ func (VaultType) EnumDescriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{0}
 }
 
-// RouteSource is the source-predicate on a route. Phase 4 (gastrolog-42f9z)
-// introduces this as a minimal disambiguator between live ingest traffic
-// and retention-driven re-routing events; Phase 5 extends to richer
-// composition (per-vault retention sources, ingester-id matching, etc.).
+// RouteSource is a source-predicate kind on a route. Phase 4
+// (gastrolog-42f9z) disambiguates live ingest traffic from
+// retention-driven re-routing events.
 //
-// Routes with source=ROUTE_SOURCE_INGEST participate in the live FilterSet
-// for incoming ingester traffic. Routes with source=ROUTE_SOURCE_RETENTION_TRIGGER
-// are consulted only when a retention event fires; they're excluded from
-// the live FilterSet so they cannot accidentally match live ingestion.
+// A route's `sources` list says which kinds of source streams the route
+// participates in. The route is consulted whenever ANY of its listed
+// sources is active for the record at hand:
+//   - ROUTE_SOURCE_INGEST: live ingester traffic. Routes carrying this
+//     source participate in the live FilterSet.
+//   - ROUTE_SOURCE_RETENTION_TRIGGER: retention events fired by a vault.
+//     Routes carrying this source are consulted only when retention
+//     fires. (They're still excluded from the live FilterSet unless they
+//     also carry INGEST.)
+//
+// Each source kind can optionally narrow further via the repeated
+// source-id fields. Empty lists mean "match any":
+//   - INGEST + source_ingester_ids empty: match any ingester.
+//   - INGEST + source_ingester_ids set: match only those ingesters.
+//   - RETENTION_TRIGGER + source_vault_ids empty: match any vault.
+//   - RETENTION_TRIGGER + source_vault_ids set: match only those vaults.
+//
+// The narrower lists are independent and only consulted for the matching
+// source kind. A route with `sources=[INGEST, RETENTION_TRIGGER]`,
+// `source_ingester_ids=[a]`, and `source_vault_ids=[v]` matches traffic
+// from ingester a OR retention events from vault v.
 type RouteSource int32
 
 const (
@@ -734,16 +750,18 @@ func (x *RouteDestination) GetVaultId() []byte {
 }
 
 type RouteConfig struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	FilterId      []byte                 `protobuf:"bytes,3,opt,name=filter_id,json=filterId,proto3" json:"filter_id,omitempty"` // references FilterConfig.id
-	Destinations  []*RouteDestination    `protobuf:"bytes,4,rep,name=destinations,proto3" json:"destinations,omitempty"`
-	Distribution  string                 `protobuf:"bytes,5,opt,name=distribution,proto3" json:"distribution,omitempty"` // "fanout" (default), "round-robin", or "failover"
-	Enabled       bool                   `protobuf:"varint,6,opt,name=enabled,proto3" json:"enabled,omitempty"`
-	Source        RouteSource            `protobuf:"varint,7,opt,name=source,proto3,enum=gastrolog.v1.RouteSource" json:"source,omitempty"` // source-predicate; ingest (default) or retention-trigger
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Id                []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name              string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	FilterId          []byte                 `protobuf:"bytes,3,opt,name=filter_id,json=filterId,proto3" json:"filter_id,omitempty"` // references FilterConfig.id
+	Destinations      []*RouteDestination    `protobuf:"bytes,4,rep,name=destinations,proto3" json:"destinations,omitempty"`
+	Distribution      string                 `protobuf:"bytes,5,opt,name=distribution,proto3" json:"distribution,omitempty"` // "fanout" (default), "round-robin", or "failover"
+	Enabled           bool                   `protobuf:"varint,6,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Sources           []RouteSource          `protobuf:"varint,7,rep,packed,name=sources,proto3,enum=gastrolog.v1.RouteSource" json:"sources,omitempty"`          // source-predicate kinds; empty = INGEST default
+	SourceVaultIds    [][]byte               `protobuf:"bytes,8,rep,name=source_vault_ids,json=sourceVaultIds,proto3" json:"source_vault_ids,omitempty"`          // optional narrower for sources containing RETENTION_TRIGGER. Empty = any vault.
+	SourceIngesterIds [][]byte               `protobuf:"bytes,9,rep,name=source_ingester_ids,json=sourceIngesterIds,proto3" json:"source_ingester_ids,omitempty"` // optional narrower for sources containing INGEST. Empty = any ingester.
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *RouteConfig) Reset() {
@@ -818,11 +836,25 @@ func (x *RouteConfig) GetEnabled() bool {
 	return false
 }
 
-func (x *RouteConfig) GetSource() RouteSource {
+func (x *RouteConfig) GetSources() []RouteSource {
 	if x != nil {
-		return x.Source
+		return x.Sources
 	}
-	return RouteSource_ROUTE_SOURCE_UNSPECIFIED
+	return nil
+}
+
+func (x *RouteConfig) GetSourceVaultIds() [][]byte {
+	if x != nil {
+		return x.SourceVaultIds
+	}
+	return nil
+}
+
+func (x *RouteConfig) GetSourceIngesterIds() [][]byte {
+	if x != nil {
+		return x.SourceIngesterIds
+	}
+	return nil
 }
 
 type IngesterConfig struct {
@@ -8888,15 +8920,17 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\fcache_budget\x18\x0e \x01(\tR\vcacheBudget\x12\x1b\n" +
 	"\tcache_ttl\x18\x0f \x01(\tR\bcacheTtl\"-\n" +
 	"\x10RouteDestination\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\fR\avaultId\"\x83\x02\n" +
+	"\bvault_id\x18\x01 \x01(\fR\avaultId\"\xdf\x02\n" +
 	"\vRouteConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1b\n" +
 	"\tfilter_id\x18\x03 \x01(\fR\bfilterId\x12B\n" +
 	"\fdestinations\x18\x04 \x03(\v2\x1e.gastrolog.v1.RouteDestinationR\fdestinations\x12\"\n" +
 	"\fdistribution\x18\x05 \x01(\tR\fdistribution\x12\x18\n" +
-	"\aenabled\x18\x06 \x01(\bR\aenabled\x121\n" +
-	"\x06source\x18\a \x01(\x0e2\x19.gastrolog.v1.RouteSourceR\x06source\"\xb5\x02\n" +
+	"\aenabled\x18\x06 \x01(\bR\aenabled\x123\n" +
+	"\asources\x18\a \x03(\x0e2\x19.gastrolog.v1.RouteSourceR\asources\x12(\n" +
+	"\x10source_vault_ids\x18\b \x03(\fR\x0esourceVaultIds\x12.\n" +
+	"\x13source_ingester_ids\x18\t \x03(\fR\x11sourceIngesterIds\"\xb5\x02\n" +
 	"\x0eIngesterConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12@\n" +
@@ -9771,7 +9805,7 @@ var file_gastrolog_v1_system_proto_depIdxs = []int32{
 	6,   // 12: gastrolog.v1.VaultConfig.retention_rules:type_name -> gastrolog.v1.RetentionRule
 	7,   // 13: gastrolog.v1.VaultConfig.placements:type_name -> gastrolog.v1.VaultPlacement
 	9,   // 14: gastrolog.v1.RouteConfig.destinations:type_name -> gastrolog.v1.RouteDestination
-	1,   // 15: gastrolog.v1.RouteConfig.source:type_name -> gastrolog.v1.RouteSource
+	1,   // 15: gastrolog.v1.RouteConfig.sources:type_name -> gastrolog.v1.RouteSource
 	157, // 16: gastrolog.v1.IngesterConfig.params:type_name -> gastrolog.v1.IngesterConfig.ParamsEntry
 	17,  // 17: gastrolog.v1.ListIngestersResponse.ingesters:type_name -> gastrolog.v1.IngesterInfo
 	158, // 18: gastrolog.v1.IngesterInfo.node_status:type_name -> gastrolog.v1.IngesterInfo.NodeStatusEntry

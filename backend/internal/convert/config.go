@@ -368,6 +368,33 @@ func RouteSourceFromProto(s gastrologv1.RouteSource) system.RouteSource {
 	}
 }
 
+// RouteSourcesToProto maps a Go-side RouteSource slice to the proto
+// RouteSource slice. Empty input → empty output; the matching engine
+// applies the "default to Ingest" interpretation when the list is empty.
+func RouteSourcesToProto(ss []system.RouteSource) []gastrologv1.RouteSource {
+	if len(ss) == 0 {
+		return nil
+	}
+	out := make([]gastrologv1.RouteSource, len(ss))
+	for i, s := range ss {
+		out[i] = RouteSourceToProto(s)
+	}
+	return out
+}
+
+// RouteSourcesFromProto maps a proto RouteSource slice back to the
+// Go-side string enum slice.
+func RouteSourcesFromProto(ss []gastrologv1.RouteSource) []system.RouteSource {
+	if len(ss) == 0 {
+		return nil
+	}
+	out := make([]system.RouteSource, len(ss))
+	for i, s := range ss {
+		out[i] = RouteSourceFromProto(s)
+	}
+	return out
+}
+
 // VaultTypeFromProto maps proto VaultType back to the Go-side TierType.
 // Round-trips empty: VAULT_TYPE_UNSPECIFIED maps to the empty TierType so
 // "type was never set" is distinguishable from "type is file". (TierTypeFromProto

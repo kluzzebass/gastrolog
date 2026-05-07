@@ -49,15 +49,31 @@ proto3.util.setEnumType(VaultType, "gastrolog.v1.VaultType", [
 ]);
 
 /**
- * RouteSource is the source-predicate on a route. Phase 4 (gastrolog-42f9z)
- * introduces this as a minimal disambiguator between live ingest traffic
- * and retention-driven re-routing events; Phase 5 extends to richer
- * composition (per-vault retention sources, ingester-id matching, etc.).
+ * RouteSource is a source-predicate kind on a route. Phase 4
+ * (gastrolog-42f9z) disambiguates live ingest traffic from
+ * retention-driven re-routing events.
  *
- * Routes with source=ROUTE_SOURCE_INGEST participate in the live FilterSet
- * for incoming ingester traffic. Routes with source=ROUTE_SOURCE_RETENTION_TRIGGER
- * are consulted only when a retention event fires; they're excluded from
- * the live FilterSet so they cannot accidentally match live ingestion.
+ * A route's `sources` list says which kinds of source streams the route
+ * participates in. The route is consulted whenever ANY of its listed
+ * sources is active for the record at hand:
+ *   - ROUTE_SOURCE_INGEST: live ingester traffic. Routes carrying this
+ *     source participate in the live FilterSet.
+ *   - ROUTE_SOURCE_RETENTION_TRIGGER: retention events fired by a vault.
+ *     Routes carrying this source are consulted only when retention
+ *     fires. (They're still excluded from the live FilterSet unless they
+ *     also carry INGEST.)
+ *
+ * Each source kind can optionally narrow further via the repeated
+ * source-id fields. Empty lists mean "match any":
+ *   - INGEST + source_ingester_ids empty: match any ingester.
+ *   - INGEST + source_ingester_ids set: match only those ingesters.
+ *   - RETENTION_TRIGGER + source_vault_ids empty: match any vault.
+ *   - RETENTION_TRIGGER + source_vault_ids set: match only those vaults.
+ *
+ * The narrower lists are independent and only consulted for the matching
+ * source kind. A route with `sources=[INGEST, RETENTION_TRIGGER]`,
+ * `source_ingester_ids=[a]`, and `source_vault_ids=[v]` matches traffic
+ * from ingester a OR retention events from vault v.
  *
  * @generated from enum gastrolog.v1.RouteSource
  */
@@ -608,11 +624,25 @@ export class RouteConfig extends Message<RouteConfig> {
   enabled = false;
 
   /**
-   * source-predicate; ingest (default) or retention-trigger
+   * source-predicate kinds; empty = INGEST default
    *
-   * @generated from field: gastrolog.v1.RouteSource source = 7;
+   * @generated from field: repeated gastrolog.v1.RouteSource sources = 7;
    */
-  source = RouteSource.UNSPECIFIED;
+  sources: RouteSource[] = [];
+
+  /**
+   * optional narrower for sources containing RETENTION_TRIGGER. Empty = any vault.
+   *
+   * @generated from field: repeated bytes source_vault_ids = 8;
+   */
+  sourceVaultIds: Uint8Array[] = [];
+
+  /**
+   * optional narrower for sources containing INGEST. Empty = any ingester.
+   *
+   * @generated from field: repeated bytes source_ingester_ids = 9;
+   */
+  sourceIngesterIds: Uint8Array[] = [];
 
   constructor(data?: PartialMessage<RouteConfig>) {
     super();
@@ -628,7 +658,9 @@ export class RouteConfig extends Message<RouteConfig> {
     { no: 4, name: "destinations", kind: "message", T: RouteDestination, repeated: true },
     { no: 5, name: "distribution", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 6, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 7, name: "source", kind: "enum", T: proto3.getEnumType(RouteSource) },
+    { no: 7, name: "sources", kind: "enum", T: proto3.getEnumType(RouteSource), repeated: true },
+    { no: 8, name: "source_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 9, name: "source_ingester_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RouteConfig {

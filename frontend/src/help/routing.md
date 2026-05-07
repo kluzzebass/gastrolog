@@ -4,12 +4,19 @@ Routes connect data sources to vaults. Each route binds a **filter** to one or m
 
 ## How It Works
 
-Two source predicates exist:
+Routes carry a **set** of source-predicate kinds, telling the routing engine which kinds of input streams the route participates in. Two kinds exist today:
 
-- **Ingest** (default): the route participates in live ingestion. When records arrive from an ingester and pass through [digestion](help:digesters), every enabled ingest-source route's filter is evaluated against each record.
+- **Ingest**: the route participates in live ingestion. When records arrive from an ingester and pass through [digestion](help:digesters), every enabled ingest-source route's filter is evaluated against each record.
 - **Retention trigger**: the route is consulted only when a [retention event](help:policy-retention) fires on a vault. The chunk's records are streamed through every retention-trigger route whose filter matches.
 
-A single record can match multiple routes (of the same source type) and be written to multiple vaults. This is by design — you might want production errors in both a short-retention debugging vault and a long-retention compliance vault.
+A route may carry both kinds at once — useful if you want the same destination + filter to apply to both live traffic AND retired chunks from a vault.
+
+Each source kind can optionally narrow further:
+
+- **Ingest** can list specific ingester IDs. Empty list = match any ingester.
+- **Retention trigger** can list specific source vault IDs. Empty list = match retention events from any vault.
+
+A single record can match multiple routes and be written to multiple vaults. This is by design — you might want production errors in both a short-retention debugging vault and a long-retention compliance vault.
 
 ## Route Components
 
@@ -18,7 +25,7 @@ A single record can match multiple routes (of the same source type) and be writt
 | **Filter** | A named filter expression (configured in [Settings → Filters](settings:filters)). Determines which records match this route. |
 | **Destinations** | One or more vaults that receive matching records. |
 | **Distribution** | How records are distributed across destinations: **fanout** (all destinations, default), **round-robin**, or **failover**. |
-| **Source** | **Ingest** (default; live traffic) or **Retention trigger** (consulted on vault retention events only). |
+| **Sources** | A multi-select set of source-predicate kinds. **Match live ingest** (default) keeps the route on the live FilterSet; **Match retention events** has the route consulted when retention fires on a vault. Both can be on at once. Each kind has an optional narrower list (specific ingesters / specific source vaults; empty = any). |
 
 ## Filter Types
 
@@ -32,12 +39,12 @@ Filters are evaluated after [digestion](help:digesters), so attributes added by 
 
 ## Source Predicates
 
-The source predicate keeps live ingestion traffic separate from retention re-routing:
+Source predicates keep different input streams separate:
 
-- **Ingest** routes are matched only against records arriving from ingesters. They never receive records produced by retention events.
-- **Retention trigger** routes are matched only against records released by a vault's retention. They never receive live ingester traffic. This prevents loops — re-routed records cannot bounce back through the ingestion pipeline.
+- A route with **Match live ingest** is consulted for records from ingesters. The optional ingester picker narrows to specific ingesters; empty matches any.
+- A route with **Match retention events** is consulted only when retention fires on a vault. The optional source-vault picker narrows to specific vaults; empty matches any. This prevents loops — re-routed records cannot bounce back through the ingestion pipeline unless the route also has **Match live ingest** checked.
 
-A route has exactly one source predicate. Use retention-trigger routes when you need to move records from one vault to another as part of retention, with per-record filtering applied during the move.
+A route can have both checked. The narrowers are independent — only the one matching the active source kind is consulted at evaluation time.
 
 ## Common Patterns
 

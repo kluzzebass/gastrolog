@@ -250,7 +250,9 @@ message PutRouteCommand {
   repeated bytes destination_ids = 4;
   string distribution = 5;
   bool enabled = 6;
-  RouteSource source = 7;  // gastrolog-42f9z (Phase 4); replaces eject_only
+  repeated RouteSource sources = 7;        // gastrolog-42f9z (Phase 4); replaces eject_only. Empty = INGEST.
+  repeated bytes source_vault_ids = 8;     // optional narrower for sources containing RETENTION_TRIGGER
+  repeated bytes source_ingester_ids = 9;  // optional narrower for sources containing INGEST
 }
 
 message DeleteRouteCommand {

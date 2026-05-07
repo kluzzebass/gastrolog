@@ -212,15 +212,22 @@ a tier's active chunk".
   - `round-robin` — rotate through vaults (load-balance).
   - `failover` — try first; on failure, try next.
 
-- **Route source predicate** — keys a route to one of two source streams:
-  - `ingest` (default) — the route participates in the live ingestion
-    `FilterSet` and matches records arriving from ingesters.
+- **Route source predicate** — a route carries a SET of source-predicate
+  kinds (`RouteConfig.Sources`). Empty defaults to `ingest` for back-compat.
+  - `ingest` — the route participates in the live ingestion `FilterSet`
+    and matches records arriving from ingesters. Optional narrower:
+    `RouteConfig.SourceIngesterIDs` lists specific ingesters; empty = any.
   - `retention-trigger` — the route is consulted only when a vault's
     retention event fires; the chunk's records are streamed through every
     matching retention-trigger route, and the chunk is destroyed afterward
-    regardless. Excluded from the live `FilterSet` so re-routed records
-    can't loop back through ingestion. Phase 4 (gastrolog-42f9z) replaced
-    the old `EjectOnly route` concept.
+    regardless. Excluded from the live `FilterSet` (unless the route also
+    carries `ingest`) so re-routed records can't loop back through
+    ingestion. Optional narrower: `RouteConfig.SourceVaultIDs` lists
+    specific source vaults; empty = any.
+
+  A route can carry both kinds at once. The narrower lists are independent;
+  only the list matching the active source kind is consulted. Phase 4
+  (gastrolog-42f9z) replaced the old `EjectOnly route` concept.
 
 - **FilterSet** — the compiled, optimized set of all active filters on a node,
   plus precomputed node routing ("which nodes hold which vaults"). Reloaded
