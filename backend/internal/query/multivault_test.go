@@ -22,10 +22,6 @@ type testRegistry struct {
 		cm chunk.ChunkManager
 		im index.IndexManager
 	}
-	// streamed lets a test mark specific chunks as TransitionStreamed for a
-	// given vault. Empty map / nil means "no streamed chunks", which is the
-	// default for the bulk of the test suite.
-	streamed map[glid.GLID]map[chunk.ChunkID]bool
 }
 
 func (r *testRegistry) ListVaults() []glid.GLID {
@@ -48,16 +44,6 @@ func (r *testRegistry) IndexManager(vaultID glid.GLID) index.IndexManager {
 		return s.im
 	}
 	return nil
-}
-
-// TransitionStreamedChunks: tests that don't model transitions can leave
-// the streamed map nil. Tests exercising the transition-window filter
-// populate r.streamed[vaultID].
-func (r *testRegistry) TransitionStreamedChunks(vaultID glid.GLID) map[chunk.ChunkID]bool {
-	if r.streamed == nil {
-		return nil
-	}
-	return r.streamed[vaultID]
 }
 
 // Reader returns a projecting Reader so test fakes that don't model an FSM

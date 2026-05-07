@@ -270,10 +270,6 @@ func commandName(cmd tierfsm.Command) string {
 		return "CmdDeleteChunk"
 	case tierfsm.CmdRetentionPending:
 		return "CmdRetentionPending"
-	case tierfsm.CmdTransitionStreamed:
-		return "CmdTransitionStreamed"
-	case tierfsm.CmdTransitionReceived:
-		return "CmdTransitionReceived"
 	case tierfsm.CmdRequestDelete:
 		return "CmdRequestDelete"
 	case tierfsm.CmdAckDelete:

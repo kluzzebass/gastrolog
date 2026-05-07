@@ -273,11 +273,7 @@ func (e *Engine) timechartFastPath(selectedVaults []glid.GLID, start time.Time, 
 			continue
 		}
 		metas := e.vaultChunkMetas(vaultID)
-		streamed := e.transitionStreamedChunks(vaultID)
 		for _, meta := range metas {
-			if streamed[meta.ID] {
-				continue
-			}
 			if meta.RecordCount == 0 {
 				continue
 			}
@@ -304,11 +300,7 @@ func (e *Engine) timechartCloudCounts(selectedVaults []glid.GLID, start, end tim
 			continue
 		}
 		metas := e.vaultChunkMetas(vaultID)
-		streamed := e.transitionStreamedChunks(vaultID)
 		for _, meta := range metas {
-			if streamed[meta.ID] {
-				continue
-			}
 			if !meta.CloudBacked || meta.RecordCount == 0 {
 				continue
 			}
@@ -338,11 +330,7 @@ func (e *Engine) timechartLocalCounts(selectedVaults []glid.GLID, start, end tim
 			continue
 		}
 		metas := e.vaultChunkMetas(vaultID)
-		streamed := e.transitionStreamedChunks(vaultID)
 		for _, meta := range metas {
-			if streamed[meta.ID] {
-				continue
-			}
 			if meta.CloudBacked || meta.RecordCount == 0 {
 				continue
 			}
@@ -379,9 +367,8 @@ func (e *Engine) timechartActiveNonMonotonic(selectedVaults []glid.GLID, start, 
 			continue
 		}
 		metas := e.vaultChunkMetas(vaultID)
-		streamed := e.transitionStreamedChunks(vaultID)
 		for _, meta := range metas {
-			if !activeNonMonoEligible(meta, streamed, start, end) {
+			if !activeNonMonoEligible(meta, start, end) {
 				continue
 			}
 			scanActiveNonMono(cm, meta, startNanos, bucketNanos, numBuckets, hasGroupBy, groupField, counts, groupCounts)
@@ -389,10 +376,7 @@ func (e *Engine) timechartActiveNonMonotonic(selectedVaults []glid.GLID, start, 
 	}
 }
 
-func activeNonMonoEligible(meta chunk.ChunkMeta, streamed map[chunk.ChunkID]bool, start, end time.Time) bool {
-	if streamed[meta.ID] {
-		return false
-	}
+func activeNonMonoEligible(meta chunk.ChunkMeta, start, end time.Time) bool {
 	if meta.CloudBacked || meta.RecordCount == 0 {
 		return false
 	}
@@ -467,11 +451,7 @@ func (e *Engine) timechartAttrScanGroups(selectedVaults []glid.GLID, start, end 
 			continue
 		}
 		metas := e.vaultChunkMetas(vaultID)
-		streamed := e.transitionStreamedChunks(vaultID)
 		for _, meta := range metas {
-			if streamed[meta.ID] {
-				continue
-			}
 			if meta.RecordCount == 0 {
 				continue
 			}

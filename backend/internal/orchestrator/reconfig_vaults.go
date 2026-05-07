@@ -1065,24 +1065,20 @@ func (o *Orchestrator) tryStartClusterRaftGroup(groupID string, fsm hraft.FSM, c
 }
 
 type tierRaftCallbacks struct {
-	hasLeader               func() bool
-	isLeader                func() bool
-	isFSMReady              func() bool
-	applyRequestDelete      func(id chunk.ChunkID, reason string, expectedFrom []string) error
-	applyAckDelete          func(id chunk.ChunkID, nodeID string) error
-	applyFinalizeDelete     func(id chunk.ChunkID) error
-	applyPruneNode          func(nodeID string) error
-	applyRetPending         func(id chunk.ChunkID) error
-	applyTransitionStreamed func(id chunk.ChunkID) error
-	applyTransitionReceived func(sourceChunkID chunk.ChunkID) error
-	hasTransitionReceipt    func(sourceChunkID chunk.ChunkID) bool
-	isTombstoned            func(id chunk.ChunkID) bool
-	listChunks              func() []chunk.ChunkID
-	listRetPending          func() []chunk.ChunkID
-	listTransitionStreamed  func() []chunk.ChunkID
-	overlayFromFSM          func(chunk.ChunkMeta) chunk.ChunkMeta
-	manifestEntries         func() []tierfsm.ManifestEntry
-	manifestEntry           func(id chunk.ChunkID) (tierfsm.ManifestEntry, bool)
+	hasLeader           func() bool
+	isLeader            func() bool
+	isFSMReady          func() bool
+	applyRequestDelete  func(id chunk.ChunkID, reason string, expectedFrom []string) error
+	applyAckDelete      func(id chunk.ChunkID, nodeID string) error
+	applyFinalizeDelete func(id chunk.ChunkID) error
+	applyPruneNode      func(nodeID string) error
+	applyRetPending     func(id chunk.ChunkID) error
+	isTombstoned        func(id chunk.ChunkID) bool
+	listChunks          func() []chunk.ChunkID
+	listRetPending      func() []chunk.ChunkID
+	overlayFromFSM      func(chunk.ChunkMeta) chunk.ChunkMeta
+	manifestEntries     func() []tierfsm.ManifestEntry
+	manifestEntry       func(id chunk.ChunkID) (tierfsm.ManifestEntry, bool)
 }
 
 // ensureVaultCtlTierMetadata joins this node to the vault control-plane
@@ -1179,18 +1175,6 @@ func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.App
 		applyRetPending: func(id chunk.ChunkID) error {
 			return applier.Apply(tierfsm.MarshalRetentionPending(id))
 		},
-		applyTransitionStreamed: func(id chunk.ChunkID) error {
-			return applier.Apply(tierfsm.MarshalTransitionStreamed(id))
-		},
-		applyTransitionReceived: func(sourceChunkID chunk.ChunkID) error {
-			return applier.Apply(tierfsm.MarshalTransitionReceived(sourceChunkID))
-		},
-		hasTransitionReceipt: func(sourceChunkID chunk.ChunkID) bool {
-			if fsm == nil {
-				return false
-			}
-			return fsm.HasTransitionReceipt(sourceChunkID)
-		},
 		isTombstoned: func(id chunk.ChunkID) bool {
 			if fsm == nil {
 				return false
@@ -1208,8 +1192,7 @@ func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.App
 			}
 			return ids
 		},
-		listRetPending:         listFSMByFlag(fsm, func(e tierfsm.ManifestEntry) bool { return e.RetentionPending }),
-		listTransitionStreamed: listFSMByFlag(fsm, func(e tierfsm.ManifestEntry) bool { return e.TransitionStreamed }),
+		listRetPending: listFSMByFlag(fsm, func(e tierfsm.ManifestEntry) bool { return e.RetentionPending }),
 		overlayFromFSM: func(m chunk.ChunkMeta) chunk.ChunkMeta {
 			if fsm == nil {
 				return m
