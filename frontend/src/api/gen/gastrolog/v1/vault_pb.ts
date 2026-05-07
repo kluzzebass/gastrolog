@@ -1589,11 +1589,6 @@ export class ExportVaultResponse extends Message<ExportVaultResponse> {
    */
   records: ExportRecord[] = [];
 
-  /**
-   * @generated from field: bool has_more = 2;
-   */
-  hasMore = false;
-
   constructor(data?: PartialMessage<ExportVaultResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1603,7 +1598,6 @@ export class ExportVaultResponse extends Message<ExportVaultResponse> {
   static readonly typeName = "gastrolog.v1.ExportVaultResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "records", kind: "message", T: ExportRecord, repeated: true },
-    { no: 2, name: "has_more", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ExportVaultResponse {

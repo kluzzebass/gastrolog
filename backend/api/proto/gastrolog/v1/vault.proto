@@ -298,7 +298,6 @@ message ExportVaultRequest {
 
 message ExportVaultResponse {
   repeated ExportRecord records = 1;
-  bool has_more = 2;
 }
 
 // ExportRecord is a portable record representation for export/import and

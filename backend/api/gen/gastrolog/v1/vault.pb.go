@@ -1902,7 +1902,6 @@ func (x *ExportVaultRequest) GetVault() string {
 type ExportVaultResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Records       []*ExportRecord        `protobuf:"bytes,1,rep,name=records,proto3" json:"records,omitempty"`
-	HasMore       bool                   `protobuf:"varint,2,opt,name=has_more,json=hasMore,proto3" json:"has_more,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1942,13 +1941,6 @@ func (x *ExportVaultResponse) GetRecords() []*ExportRecord {
 		return x.Records
 	}
 	return nil
-}
-
-func (x *ExportVaultResponse) GetHasMore() bool {
-	if x != nil {
-		return x.HasMore
-	}
-	return false
 }
 
 // ExportRecord is a portable record representation for export/import and
@@ -2801,10 +2793,9 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x05valid\x18\x02 \x01(\bR\x05valid\x12\x16\n" +
 	"\x06issues\x18\x03 \x03(\tR\x06issues\"*\n" +
 	"\x12ExportVaultRequest\x12\x14\n" +
-	"\x05vault\x18\x01 \x01(\tR\x05vault\"f\n" +
+	"\x05vault\x18\x01 \x01(\tR\x05vault\"K\n" +
 	"\x13ExportVaultResponse\x124\n" +
-	"\arecords\x18\x01 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\x12\x19\n" +
-	"\bhas_more\x18\x02 \x01(\bR\ahasMore\"\xe1\x03\n" +
+	"\arecords\x18\x01 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\"\xe1\x03\n" +
 	"\fExportRecord\x127\n" +
 	"\tsource_ts\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\bsourceTs\x127\n" +
 	"\tingest_ts\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\bingestTs\x12;\n" +

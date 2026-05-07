@@ -56,7 +56,7 @@ func (s *QueryServer) searchPipeline(
 	for _, rec := range result.Records {
 		batch = append(batch, recordToProto(rec))
 		if len(batch) >= 100 {
-			if err := stream.Send(&apiv1.SearchResponse{Records: batch, HasMore: true}); err != nil {
+			if err := stream.Send(&apiv1.SearchResponse{Records: batch}); err != nil {
 				return err
 			}
 			batch = batch[:0]
@@ -113,7 +113,7 @@ func (s *QueryServer) searchPipelineGlobal(
 	for _, rec := range result.Records {
 		batch = append(batch, recordToProto(rec))
 		if len(batch) >= 100 {
-			if err := stream.Send(&apiv1.SearchResponse{Records: batch, HasMore: true}); err != nil {
+			if err := stream.Send(&apiv1.SearchResponse{Records: batch}); err != nil {
 				return err
 			}
 			batch = batch[:0]

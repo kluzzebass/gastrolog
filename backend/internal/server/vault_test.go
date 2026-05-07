@@ -366,11 +366,7 @@ func TestExportVault(t *testing.T) {
 	}
 
 	var totalRecords int
-	for {
-		ok := stream.Receive()
-		if !ok {
-			break
-		}
+	for stream.Receive() {
 		msg := stream.Msg()
 		totalRecords += len(msg.Records)
 
@@ -379,10 +375,6 @@ func TestExportVault(t *testing.T) {
 			if len(rec.Raw) == 0 {
 				t.Error("exported record has empty raw data")
 			}
-		}
-
-		if !msg.HasMore {
-			break
 		}
 	}
 	if err := stream.Err(); err != nil && err != io.EOF {
@@ -490,9 +482,6 @@ func TestExportImportRoundTrip(t *testing.T) {
 	for stream.Receive() {
 		msg := stream.Msg()
 		allRecords = append(allRecords, msg.Records...)
-		if !msg.HasMore {
-			break
-		}
 	}
 	if err := stream.Err(); err != nil && err != io.EOF {
 		t.Fatalf("stream error: %v", err)
