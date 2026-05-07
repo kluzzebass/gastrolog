@@ -12,9 +12,9 @@ import (
 // own source of truth and the local chunk manager view is authoritative.
 //
 // Sealed-only filtering is honored: ChunkMeta.Sealed=false entries are
-// excluded from EntriesForVault and Entry. RetentionPending /
-// TransitionStreamed / TS-index TOC offsets are zero in the projected
-// entries (memory-mode tiers don't track them).
+// excluded from EntriesForVault and Entry. RetentionPending and TS-index
+// TOC offsets are zero in the projected entries (memory-mode tiers
+// don't track them).
 func NewProjectingReader(reg VaultRegistry) Reader {
 	return &projectingReader{reg: reg}
 }

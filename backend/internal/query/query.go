@@ -455,45 +455,24 @@ func (e *Engine) listVaults() []glid.GLID {
 	return []glid.GLID{glid.Nil}
 }
 
-// transitionStreamedChunks returns the set of chunk IDs in the given
-// vault/tier that are in the post-stream / pre-expire window — their
-// records have already been counted in the destination tier and must
-// not be counted again at the source. Used by every count-based
-// aggregator (histogram fast path, cloud counts, local counts, attr
-// scan groups). Single-vault engines (no registry) return nil because
-// they don't model transitions.
-//
-// See gastrolog-4xusf for the transition-window double-count this
-// filter prevents.
-func (e *Engine) transitionStreamedChunks(vaultID glid.GLID) map[chunk.ChunkID]bool {
-	if e.registry == nil {
-		return nil
-	}
-	return e.registry.TransitionStreamedChunks(vaultID)
-}
-
 // selectChunks filters to chunks that overlap the query time range,
 // sorted by WriteStart (ascending for forward, descending for reverse).
 // Unsealed chunks are always included (their WriteEnd is not final).
 // If chunkIDs is non-nil, only chunks with matching IDs are included.
 //
-// Chunks marked TransitionStreamed=true in the vault's tier FSM are
-// skipped: their records have already been counted/served from the
-// destination tier, so reading them at the source duplicates the work
-// (and produces double-counted histogram bars during the post-stream /
-// pre-expire window). See gastrolog-4xusf. The vaultID argument lets
-// the engine consult the registry for the streamed set; pass glid.Nil
-// for single-vault engines that don't model transitions.
+// gastrolog-5sywa removed the transition-streamed filter: the receipt
+// protocol is gone, retention firing is synchronous through the routing
+// engine (Phase 4 / gastrolog-42f9z), and there's no longer a
+// "post-stream / pre-expire" window where a chunk has been transferred
+// out but not yet deleted at the source. The vaultID argument is kept
+// for callers that already pass it; it's no longer consulted here.
 func (e *Engine) selectChunks(vaultID glid.GLID, metas []chunk.ChunkMeta, q Query, chunkIDs []chunk.ChunkID) []chunk.ChunkMeta {
+	_ = vaultID
 	lower, upper := q.TimeBounds()
 	chunkSet := buildChunkIDSet(chunkIDs)
-	streamed := e.transitionStreamedChunks(vaultID)
 
 	var out []chunk.ChunkMeta
 	for _, m := range metas {
-		if streamed[m.ID] {
-			continue
-		}
 		if chunkMatchesQuery(m, q, lower, upper, chunkSet) {
 			out = append(out, m)
 		}

@@ -481,21 +481,13 @@ export class ChunkMeta extends Message<ChunkMeta> {
   replicaCount = 0;
 
   /**
-   * Source tier: records were streamed to the next tier; local copy is kept
-   * until the destination tier commits a receipt, then retention deletes it.
-   *
-   * @generated from field: bool transition_streamed = 18;
-   */
-  transitionStreamed = false;
-
-  /**
    * Cluster-wide replica residency: the set of node IDs that reported having
    * this chunk locally during the most recent ListChunks fan-out. Lets the
    * inspector show which nodes physically hold each replica, distinct from
    * placement (which says where the chunk SHOULD live, not where it does).
    * See gastrolog-51gme.
    *
-   * @generated from field: repeated string replica_node_ids = 19;
+   * @generated from field: repeated string replica_node_ids = 18;
    */
   replicaNodeIds: string[] = [];
 
@@ -507,7 +499,7 @@ export class ChunkMeta extends Message<ChunkMeta> {
    * inspector show which specific node is the laggard holding up a stuck
    * delete. See gastrolog-51gme.
    *
-   * @generated from field: repeated string pending_ack_node_ids = 20;
+   * @generated from field: repeated string pending_ack_node_ids = 19;
    */
   pendingAckNodeIds: string[] = [];
 
@@ -516,7 +508,7 @@ export class ChunkMeta extends Message<ChunkMeta> {
    * pre-Phase-3 entries, callers derive the state from the legacy
    * sealed bool: state == SEALED iff sealed == true.
    *
-   * @generated from field: gastrolog.v1.ChunkState state = 21;
+   * @generated from field: gastrolog.v1.ChunkState state = 20;
    */
   state = ChunkState.UNSPECIFIED;
 
@@ -545,10 +537,9 @@ export class ChunkMeta extends Message<ChunkMeta> {
     { no: 15, name: "retention_pending", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 16, name: "storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 17, name: "replica_count", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
-    { no: 18, name: "transition_streamed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 19, name: "replica_node_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
-    { no: 20, name: "pending_ack_node_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
-    { no: 21, name: "state", kind: "enum", T: proto3.getEnumType(ChunkState) },
+    { no: 18, name: "replica_node_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 19, name: "pending_ack_node_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 20, name: "state", kind: "enum", T: proto3.getEnumType(ChunkState) },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkMeta {

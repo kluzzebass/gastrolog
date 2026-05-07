@@ -320,15 +320,11 @@ func newListChunksExecutor(o *orchestrator.Orchestrator) cluster.ListChunksExecu
 			return nil, err
 		}
 		pending := o.RetentionPendingChunks(vaultID)
-		streamed := o.TransitionStreamedChunks(vaultID)
 		out := make([]*gastrologv1.ChunkMeta, 0, len(metas))
 		for _, m := range metas {
 			pb := server.TieredChunkMetaToProto(m)
 			if pending[m.ID] {
 				pb.RetentionPending = true
-			}
-			if streamed[m.ID] {
-				pb.TransitionStreamed = true
 			}
 			out = append(out, pb)
 		}

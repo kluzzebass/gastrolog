@@ -81,8 +81,7 @@ type retentionRunner struct {
 	unreadable   map[chunk.ChunkID]*unreadableEntry // chunks that failed to read — retried with exponential backoff (gastrolog-25vur)
 	orch         *Orchestrator          // for eject/transition callbacks
 
-	applyRaftRetentionPending   func(id chunk.ChunkID) error
-	applyRaftTransitionStreamed func(id chunk.ChunkID) error
+	applyRaftRetentionPending func(id chunk.ChunkID) error
 
 	// reconciler is the tier lifecycle reconciler that owns chunk-lifecycle
 	// execution. All production deletes route through reconciler.deleteChunk
@@ -389,34 +388,6 @@ func (o *Orchestrator) RetryUnreadableChunks(vaultID glid.GLID) int {
 	return total
 }
 
-// tryEventDrivenExpire is invoked from a source-tier reconciler's
-// onTransitionStreamed callback (run on a goroutine to avoid the
-// apply-pump deadlock). The streamed flag was just committed for
-// chunkID on the (vaultID, tierID) source. If the destination has
-// already acked the receipt, expire the source immediately instead
-// of waiting for the next retention sweep tick. Common case path —
-// streaming and the receipt apply often complete within the same
-// Raft round-trip burst. See gastrolog-1g6br.
-func (o *Orchestrator) tryEventDrivenExpire(_, _ glid.GLID, _ chunk.ChunkID) {
-	// Phase 4 (gastrolog-42f9z): the transition-receipt protocol is gone.
-	// Retention firing routes records through the routing engine
-	// synchronously; there's no asynchronous "wait for destination
-	// receipt" stage anymore. The CmdTransitionStreamed FSM command
-	// still exists but never fires, so this hook is unreachable in
-	// practice. Kept as a no-op for the lifecycle-reconciler callback
-	// shape; the FSM-command + callback chain gets ripped out as a
-	// follow-up cleanup pass.
-}
-
-// notifyReceiptConfirmed is invoked from a destination-tier
-// reconciler's onTransitionReceived callback. The receipt apply just
-// committed for sourceChunkID. Find every source-tier runner in the
-// same vault and trigger their event-driven confirm-and-expire path —
-// the runner that holds the chunk in transitionStreamed state will
-// expire it; others bail cheaply. See gastrolog-1g6br.
-func (o *Orchestrator) notifyReceiptConfirmed(_ glid.GLID, _ chunk.ChunkID) {
-	// Phase 4 (gastrolog-42f9z): no-op — see tryEventDrivenExpire.
-}
 
 // RetentionPendingChunks returns chunk IDs marked as retention-pending in the
 // tier FSM for a vault. Visible to all nodes via Raft replication.
@@ -473,30 +444,6 @@ func (o *Orchestrator) PendingDeleteAcks(vaultID glid.GLID) map[chunk.ChunkID][]
 	return result
 }
 
-// TransitionStreamedChunks returns chunk IDs on source tiers where records
-// were streamed to the next tier but the local copy is not yet deleted
-// (awaiting destination receipt). See gastrolog-4913n.
-//
-// Read-only accessor, callable from any-node. No Vault.ReadinessErr gate —
-// results reflect whatever the local FSM has applied, which is acceptable for
-// inspector/observational callers. For any path that makes decisions based
-// on this set, gate on Vault.ReadinessErr first.
-func (o *Orchestrator) TransitionStreamedChunks(vaultID glid.GLID) map[chunk.ChunkID]bool {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	vault := o.vaults[vaultID]
-	if vault == nil {
-		return nil
-	}
-	result := make(map[chunk.ChunkID]bool)
-	if tier := vault.Instance; tier != nil && tier.ListTransitionStreamed != nil {
-		for _, id := range tier.ListTransitionStreamed() {
-			result[id] = true
-		}
-	}
-	return result
-}
-
 // retentionTargetForTier resolves a single tier instance into a sweep target.
 // Returns nil if the tier should be skipped (no rules, no leader, etc.).
 func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg system.VaultConfig, tier *VaultInstance, active map[string]bool) *sweepTarget {
@@ -539,7 +486,6 @@ func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg syste
 	runner.cm = tier.Chunks
 	runner.im = tier.Indexes
 	runner.applyRaftRetentionPending = tier.ApplyRaftRetentionPending
-	runner.applyRaftTransitionStreamed = tier.ApplyRaftTransitionStreamed
 	runner.reconciler = tier.Reconciler
 	runner.isLeader = tier.IsLeader()
 	runner.followerTargets = tier.FollowerTargets
@@ -608,14 +554,11 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 		}
 	}
 
-	// Build a set of chunks awaiting destination replication confirmation
-	// so we don't re-stream them on every sweep. See gastrolog-4913n.
-	streamed := make(map[chunk.ChunkID]bool)
-	if tier != nil && tier.ListTransitionStreamed != nil {
-		for _, id := range tier.ListTransitionStreamed() {
-			streamed[id] = true
-		}
-	}
+	// gastrolog-5sywa: the transition-streamed flag and the
+	// destination-receipt set are gone. Phase 4 removed the receipt
+	// protocol entirely — retention firing is synchronous, no chunks
+	// linger in a "streamed but not yet confirmed" state.
+	streamed := map[chunk.ChunkID]bool{}
 
 	// Build a set of chunks already flagged retention-pending in the FSM.
 	// We pass this down so tryRetainChunk skips the redundant

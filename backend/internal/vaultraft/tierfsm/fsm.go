@@ -34,17 +34,21 @@ const (
 	// correctly. See gastrolog-51gme step 11.
 	CmdDeleteChunk Command = 5
 
-	CmdRetentionPending    Command = 6
-	CmdTransitionStreamed  Command = 7
-	CmdTransitionReceived Command = 8 // destination tier records receipt of a source chunk
+	CmdRetentionPending Command = 6
 
 	// Receipt-based deletion protocol — gastrolog-51gme step 2. Replaces
 	// single-shot CmdDeleteChunk fan-out with an N-way receipt protocol
 	// that survives snapshot install and gives every node a first-class
 	// "delete locally and ack" obligation. See docs in fsm_receipts.go.
-	CmdRequestDelete  Command = 9  // tier leader proposes a delete; replicates the expected-acks set
-	CmdAckDelete      Command = 10 // each expected node acks after handling its local side
-	CmdFinalizeDelete Command = 11 // leader removes the entry once expectedFrom is empty
+	//
+	// Numbering note: the prior CmdTransitionStreamed (7) and
+	// CmdTransitionReceived (8) commands were removed entirely in
+	// gastrolog-5sywa (Phase 4 follow-up). Per the project's "delete and
+	// renumber, never reserved" rule, the receipt-protocol commands
+	// renumbered down to 7/8/9.
+	CmdRequestDelete  Command = 7 // tier leader proposes a delete; replicates the expected-acks set
+	CmdAckDelete      Command = 8 // each expected node acks after handling its local side
+	CmdFinalizeDelete Command = 9 // leader removes the entry once expectedFrom is empty
 
 	// Membership-change cleanup — gastrolog-51gme step 10. After a node
 	// is removed from this vault-ctl Raft group's voter set (decommissioned
@@ -53,7 +57,7 @@ const (
 	// this, deletes proposed before the node left would never finalize:
 	// the leader would hold the entry forever waiting for an ack from a
 	// node that no longer participates.
-	CmdPruneNode Command = 12
+	CmdPruneNode Command = 10
 
 	// CmdAttachOffsets carries the GLCB blob's section-offset/size pairs
 	// (IngestTS index, SourceTS index) once sealToGLCB has produced
@@ -64,7 +68,7 @@ const (
 	// from chunk/file.Manager after sealToGLCB and from the import path
 	// (orchestrator/vault_ops.finalizeImportedChunk) for replicated
 	// chunks. See gastrolog-1dg3i.
-	CmdAttachOffsets Command = 13
+	CmdAttachOffsets Command = 11
 
 	// CmdBeginSeal carries the Active → Sealing transition: the leader
 	// has stopped accepting appends on the chunk and is starting
@@ -73,7 +77,7 @@ const (
 	// retention triggers, and replication-completeness checks gate on
 	// State == Sealed; the Sealing entry is not yet a finished chunk
 	// even though it's no longer accepting writes. See gastrolog-1huz5.
-	CmdBeginSeal Command = 14
+	CmdBeginSeal Command = 12
 )
 
 // ManifestEntry holds the full metadata for one chunk in this tier's
@@ -112,9 +116,7 @@ type ManifestEntry struct {
 
 	CloudBacked      bool
 	Archived         bool
-	RetentionPending    bool
-	TransitionStreamed  bool // chunk records have been streamed to the next tier but deletion awaits destination replication confirmation
-
+	RetentionPending bool
 
 	// Cloud-specific TOC offsets (GLCB format).
 	IngestIdxOffset int64
@@ -189,10 +191,8 @@ type FSM struct {
 	// reconciler can project FSM state changes into local Manager state
 	// without polling. No callers wired yet — adding the surface here
 	// unblocks subsequent steps without requiring an FSM API churn.
-	onSeal               func(ManifestEntry)         // CmdSealChunk applied; passes the now-sealed entry
-	onRetentionPending   func(chunk.ChunkID) // CmdRetentionPending applied
-	onTransitionStreamed func(chunk.ChunkID) // CmdTransitionStreamed applied (source-tier signal)
-	onTransitionReceived func(chunk.ChunkID) // CmdTransitionReceived applied (destination-tier confirmation, ID is the source chunk's ID)
+	onSeal             func(ManifestEntry) // CmdSealChunk applied; passes the now-sealed entry
+	onRetentionPending func(chunk.ChunkID) // CmdRetentionPending applied
 
 	// Step-2 receipt-protocol state and hooks for gastrolog-51gme.
 	// pendingDeletes is the queue of chunk deletes awaiting per-node
@@ -200,17 +200,10 @@ type FSM struct {
 	// fsm_receipts.go.
 	pendingDeletes map[chunk.ChunkID]*PendingDelete
 
-	onRequestDelete  func(PendingDelete) // CmdRequestDelete applied; passes a copy of the new entry
-	onAckDelete      func(chunk.ChunkID, string) // CmdAckDelete applied; (chunkID, ackingNodeID)
-	onFinalizeDelete func(chunk.ChunkID)         // CmdFinalizeDelete applied; expectedFrom was empty
+	onRequestDelete  func(PendingDelete)           // CmdRequestDelete applied; passes a copy of the new entry
+	onAckDelete      func(chunk.ChunkID, string)   // CmdAckDelete applied; (chunkID, ackingNodeID)
+	onFinalizeDelete func(chunk.ChunkID)           // CmdFinalizeDelete applied; expectedFrom was empty
 	onPruneNode      func(string, []chunk.ChunkID) // CmdPruneNode applied; (prunedNodeID, finalizableChunks)
-
-	// transitionReceipts tracks source chunk IDs whose records have been
-	// imported into this tier. The source tier checks this set to confirm
-	// that the destination (this tier) has durably committed the data
-	// before expiring the source chunk. Keyed by source chunk ID.
-	// See gastrolog-4913n.
-	transitionReceipts map[chunk.ChunkID]bool
 
 	// tombstones records chunk IDs that have been deleted, with the apply
 	// timestamp of the delete. Consulted by the receive side of tier
@@ -229,10 +222,9 @@ type FSM struct {
 // New creates an empty chunk metadata FSM.
 func New() *FSM {
 	return &FSM{
-		chunks:             make(map[chunk.ChunkID]*ManifestEntry),
-		transitionReceipts: make(map[chunk.ChunkID]bool),
-		tombstones:         make(map[chunk.ChunkID]time.Time),
-		pendingDeletes:     make(map[chunk.ChunkID]*PendingDelete),
+		chunks:         make(map[chunk.ChunkID]*ManifestEntry),
+		tombstones:     make(map[chunk.ChunkID]time.Time),
+		pendingDeletes: make(map[chunk.ChunkID]*PendingDelete),
 	}
 }
 
@@ -333,29 +325,6 @@ func (f *FSM) SetOnRetentionPending(fn func(chunk.ChunkID)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.onRetentionPending = fn
-}
-
-// SetOnTransitionStreamed registers a callback invoked (outside the FSM
-// lock) after CmdTransitionStreamed applies. The callback receives the
-// source-side chunk ID. Source-tier reconcilers use this to track which
-// chunks are awaiting destination receipt before local expiry.
-func (f *FSM) SetOnTransitionStreamed(fn func(chunk.ChunkID)) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.onTransitionStreamed = fn
-}
-
-// SetOnTransitionReceived registers a callback invoked (outside the FSM
-// lock) after CmdTransitionReceived applies. The callback receives the
-// SOURCE chunk ID — the destination tier's FSM is recording a receipt
-// for the source. Destination-tier reconcilers don't need this; the
-// source-tier reconciler does (paired with the cross-tier confirmation
-// sweep), and any node hosting both source and destination tiers can
-// register the callback on each tier's FSM.
-func (f *FSM) SetOnTransitionReceived(fn func(chunk.ChunkID)) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.onTransitionReceived = fn
 }
 
 // SetOnRequestDelete registers a callback invoked (outside the FSM lock)
@@ -463,29 +432,25 @@ func (f *FSM) Apply(log *hraft.Log) any {
 // produced the IDs/entries, so a concurrent SetOn... after Apply
 // returns can never observe a stale binding.
 type applyEffects struct {
-	deletedID            *chunk.ChunkID
-	uploadedEntry        *ManifestEntry
-	sealedEntry          *ManifestEntry
-	retentionPendingID   *chunk.ChunkID
-	transitionStreamedID *chunk.ChunkID
-	transitionReceivedID *chunk.ChunkID
-	requestedDelete      *PendingDelete
-	ackedDeleteID        *chunk.ChunkID
-	ackedDeleteNodeID    string
-	finalizedDeleteID    *chunk.ChunkID
-	prunedNode           string
-	prunedFinalizable    []chunk.ChunkID
+	deletedID          *chunk.ChunkID
+	uploadedEntry      *ManifestEntry
+	sealedEntry        *ManifestEntry
+	retentionPendingID *chunk.ChunkID
+	requestedDelete    *PendingDelete
+	ackedDeleteID      *chunk.ChunkID
+	ackedDeleteNodeID  string
+	finalizedDeleteID  *chunk.ChunkID
+	prunedNode         string
+	prunedFinalizable  []chunk.ChunkID
 
-	onDelete             func(chunk.ChunkID)
-	onUpload             func(ManifestEntry)
-	onSeal               func(ManifestEntry)
-	onRetentionPending   func(chunk.ChunkID)
-	onTransitionStreamed func(chunk.ChunkID)
-	onTransitionReceived func(chunk.ChunkID)
-	onRequestDelete      func(PendingDelete)
-	onAckDelete          func(chunk.ChunkID, string)
-	onFinalizeDelete     func(chunk.ChunkID)
-	onPruneNode          func(string, []chunk.ChunkID)
+	onDelete           func(chunk.ChunkID)
+	onUpload           func(ManifestEntry)
+	onSeal             func(ManifestEntry)
+	onRetentionPending func(chunk.ChunkID)
+	onRequestDelete    func(PendingDelete)
+	onAckDelete        func(chunk.ChunkID, string)
+	onFinalizeDelete   func(chunk.ChunkID)
+	onPruneNode        func(string, []chunk.ChunkID)
 }
 
 func (e applyEffects) fire() {
@@ -500,12 +465,6 @@ func (e applyEffects) fire() {
 	}
 	if e.retentionPendingID != nil && e.onRetentionPending != nil {
 		e.onRetentionPending(*e.retentionPendingID)
-	}
-	if e.transitionStreamedID != nil && e.onTransitionStreamed != nil {
-		e.onTransitionStreamed(*e.transitionStreamedID)
-	}
-	if e.transitionReceivedID != nil && e.onTransitionReceived != nil {
-		e.onTransitionReceived(*e.transitionReceivedID)
 	}
 	if e.requestedDelete != nil && e.onRequestDelete != nil {
 		e.onRequestDelete(*e.requestedDelete)
@@ -547,12 +506,6 @@ func (f *FSM) applyLocked(cmd Command, payload []byte) (any, applyEffects) {
 	case CmdRetentionPending:
 		result = f.applyRetentionPending(payload)
 		fx.retentionPendingID = captureID(result, payload)
-	case CmdTransitionStreamed:
-		result = f.applyTransitionStreamed(payload)
-		fx.transitionStreamedID = captureID(result, payload)
-	case CmdTransitionReceived:
-		result = f.applyTransitionReceived(payload)
-		fx.transitionReceivedID = captureID(result, payload)
 	case CmdRequestDelete:
 		var entry *PendingDelete
 		entry, result = f.applyRequestDelete(payload)
@@ -586,8 +539,6 @@ func (f *FSM) applyLocked(cmd Command, payload []byte) (any, applyEffects) {
 	fx.onUpload = f.onUpload
 	fx.onSeal = f.onSeal
 	fx.onRetentionPending = f.onRetentionPending
-	fx.onTransitionStreamed = f.onTransitionStreamed
-	fx.onTransitionReceived = f.onTransitionReceived
 	fx.onRequestDelete = f.onRequestDelete
 	fx.onAckDelete = f.onAckDelete
 	fx.onFinalizeDelete = f.onFinalizeDelete
@@ -633,10 +584,6 @@ func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) {
 	for _, e := range f.chunks {
 		entries = append(entries, *e)
 	}
-	receipts := make([]chunk.ChunkID, 0, len(f.transitionReceipts))
-	for id := range f.transitionReceipts {
-		receipts = append(receipts, id)
-	}
 	tombstones := make(map[chunk.ChunkID]time.Time, len(f.tombstones))
 	maps.Copy(tombstones, f.tombstones)
 	pendingDeletes := make([]PendingDelete, 0, len(f.pendingDeletes))
@@ -645,7 +592,6 @@ func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) {
 	}
 	return &fsmSnapshot{
 		entries:        entries,
-		receipts:       receipts,
 		tombstones:     tombstones,
 		pendingDeletes: pendingDeletes,
 	}, nil
@@ -665,10 +611,6 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 	f.chunks = make(map[chunk.ChunkID]*ManifestEntry, len(snap.entries))
 	for i := range snap.entries {
 		f.chunks[snap.entries[i].ID] = &snap.entries[i]
-	}
-	f.transitionReceipts = make(map[chunk.ChunkID]bool, len(snap.receipts))
-	for _, id := range snap.receipts {
-		f.transitionReceipts[id] = true
 	}
 	f.tombstones = snap.tombstones
 	if f.tombstones == nil {
@@ -893,19 +835,6 @@ func (f *FSM) applyRetentionPending(data []byte) error {
 	return nil
 }
 
-// TransitionStreamed: [16 bytes ChunkID]
-func (f *FSM) applyTransitionStreamed(data []byte) error {
-	if len(data) < 16 {
-		return fmt.Errorf("transition streamed: payload too short (%d bytes)", len(data))
-	}
-	var id chunk.ChunkID
-	copy(id[:], data[:16])
-	if e := f.chunks[id]; e != nil {
-		e.TransitionStreamed = true
-	}
-	return nil
-}
-
 // ---------- Command builders (used by callers before Raft.Apply) ----------
 
 // MarshalCreateChunk builds the Raft log data for a CreateChunk command.
@@ -1015,42 +944,6 @@ func MarshalRetentionPending(id chunk.ChunkID) []byte {
 	return buf
 }
 
-// TransitionReceived: [16 bytes source ChunkID]
-func (f *FSM) applyTransitionReceived(data []byte) error {
-	if len(data) < 16 {
-		return fmt.Errorf("transition received: payload too short (%d bytes)", len(data))
-	}
-	var id chunk.ChunkID
-	copy(id[:], data[:16])
-	f.transitionReceipts[id] = true
-	return nil
-}
-
-// HasTransitionReceipt returns true if this tier has committed a receipt
-// for the given source chunk ID. Called by the source tier's confirmation
-// sweep to verify the destination has durably received the records.
-func (f *FSM) HasTransitionReceipt(sourceChunkID chunk.ChunkID) bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.transitionReceipts[sourceChunkID]
-}
-
-// MarshalTransitionReceived builds the Raft log data for a TransitionReceived command.
-func MarshalTransitionReceived(sourceChunkID chunk.ChunkID) []byte {
-	buf := make([]byte, 1+16)
-	buf[0] = byte(CmdTransitionReceived)
-	copy(buf[1:17], sourceChunkID[:])
-	return buf
-}
-
-// MarshalTransitionStreamed builds the Raft log data for a TransitionStreamed command.
-func MarshalTransitionStreamed(id chunk.ChunkID) []byte {
-	buf := make([]byte, 1+16)
-	buf[0] = byte(CmdTransitionStreamed)
-	copy(buf[1:17], id[:])
-	return buf
-}
-
 // ---------- Snapshot ----------
 //
 // Format (version 1):
@@ -1064,8 +957,13 @@ func MarshalTransitionStreamed(id chunk.ChunkID) []byte {
 //
 // Section kinds:
 //	1 = chunk entries   (payload: N×126 byte fixed entries)
-//	2 = transition receipts (payload: 4 byte count + N×16 byte IDs)
-//	3 = tombstones      (payload: 4 byte count + N×(16 ID + 8 nanos))
+//	2 = tombstones      (payload: 4 byte count + N×(16 ID + 8 nanos))
+//	3 = pendingDeletes  (gastrolog-51gme step 2)
+//
+// Section kind 2 was previously "transition receipts" and is renumbered
+// here after gastrolog-5sywa removed the receipt protocol entirely.
+// User-authorized cluster reinitialization applies — old snapshots
+// aren't expected to replay after this change.
 //
 // Replaces an older sentinel-based layout that read 126-byte entries until
 // EOF and used impossible-ChunkID markers to in-band the extra sections.
@@ -1084,14 +982,12 @@ type sectionKind byte
 
 const (
 	sectionEntries        sectionKind = 1
-	sectionReceipts       sectionKind = 2
-	sectionTombstones     sectionKind = 3
-	sectionPendingDeletes sectionKind = 4 // gastrolog-51gme step 2
+	sectionTombstones     sectionKind = 2
+	sectionPendingDeletes sectionKind = 3 // gastrolog-51gme step 2
 )
 
 type fsmSnapshot struct {
 	entries        []ManifestEntry
-	receipts       []chunk.ChunkID
 	tombstones     map[chunk.ChunkID]time.Time
 	pendingDeletes []PendingDelete // gastrolog-51gme step 2
 }
@@ -1112,27 +1008,6 @@ func (s *fsmSnapshot) Persist(sink hraft.SnapshotSink) error {
 		if err := encodeEntry(sink, &s.entries[i]); err != nil {
 			_ = sink.Cancel()
 			return err
-		}
-	}
-
-	// Section: receipts. Payload is 4-byte count + N×16 IDs.
-	if len(s.receipts) > 0 {
-		payloadLen := uint32(4 + len(s.receipts)*16) //nolint:gosec // G115: fits uint32
-		if err := writeSectionHeader(sink, sectionReceipts, payloadLen); err != nil {
-			_ = sink.Cancel()
-			return err
-		}
-		var countBuf [4]byte
-		binary.BigEndian.PutUint32(countBuf[:], uint32(len(s.receipts))) //nolint:gosec // G115: fits uint32
-		if _, err := sink.Write(countBuf[:]); err != nil {
-			_ = sink.Cancel()
-			return err
-		}
-		for _, id := range s.receipts {
-			if _, err := sink.Write(id[:]); err != nil {
-				_ = sink.Cancel()
-				return err
-			}
 		}
 	}
 
@@ -1253,11 +1128,8 @@ func encodeEntry(w io.Writer, e *ManifestEntry) error {
 	if e.RetentionPending {
 		flags |= 1 << 4
 	}
-	if e.TransitionStreamed {
-		flags |= 1 << 5
-	}
 	if e.IngestTSMonotonic {
-		flags |= 1 << 6
+		flags |= 1 << 5
 	}
 	binary.BigEndian.PutUint16(buf[120:122], flags)
 	buf[122] = byte(e.State)
@@ -1270,7 +1142,6 @@ func encodeEntry(w io.Writer, e *ManifestEntry) error {
 // decodeSnapshot return signature.
 type decodedSnapshot struct {
 	entries        []ManifestEntry
-	receipts       []chunk.ChunkID
 	tombstones     map[chunk.ChunkID]time.Time
 	pendingDeletes map[chunk.ChunkID]*PendingDelete // gastrolog-51gme step 2
 }
@@ -1301,8 +1172,6 @@ func decodeSnapshot(r io.Reader) (*decodedSnapshot, error) {
 		switch kind {
 		case sectionEntries:
 			out.entries, err = readEntriesSection(section, payloadLen)
-		case sectionReceipts:
-			out.receipts, err = readReceiptsSection(section)
 		case sectionTombstones:
 			out.tombstones, err = readTombstonesSection(section)
 		case sectionPendingDeletes:
@@ -1378,35 +1247,19 @@ func readEntriesSection(r io.Reader, payloadLen uint32) ([]ManifestEntry, error)
 			// flag bit 0 reserved (formerly Sealed) — replaced by State byte in
 			// Phase 3 (gastrolog-1huz5).
 			// flag bit 1 reserved (formerly Compressed) — see gastrolog-24m1t step 7f.
-			CloudBacked:        flags&(1<<2) != 0,
-			Archived:           flags&(1<<3) != 0,
-			RetentionPending:   flags&(1<<4) != 0,
-			TransitionStreamed: flags&(1<<5) != 0,
-			IngestTSMonotonic:  flags&(1<<6) != 0,
-			State:              chunk.ChunkState(buf[122]),
+			// flag bits 5 (TransitionStreamed) and the prior 6 are renumbered:
+			// gastrolog-5sywa removed the receipt protocol entirely, so the
+			// IngestTSMonotonic flag moves down to bit 5. User-authorized
+			// cluster reinitialization applies — old snapshots aren't expected
+			// to replay after this change.
+			CloudBacked:       flags&(1<<2) != 0,
+			Archived:          flags&(1<<3) != 0,
+			RetentionPending:  flags&(1<<4) != 0,
+			IngestTSMonotonic: flags&(1<<5) != 0,
+			State:             chunk.ChunkState(buf[122]),
 		})
 	}
 	return entries, nil
-}
-
-func readReceiptsSection(r io.Reader) ([]chunk.ChunkID, error) {
-	var countBuf [4]byte
-	if _, err := io.ReadFull(r, countBuf[:]); err != nil {
-		return nil, fmt.Errorf("read receipts count: %w", err)
-	}
-	count := binary.BigEndian.Uint32(countBuf[:])
-	if count == 0 {
-		return nil, nil
-	}
-	buf := make([]byte, int(count)*16)
-	if _, err := io.ReadFull(r, buf); err != nil {
-		return nil, fmt.Errorf("read receipts payload: %w", err)
-	}
-	ids := make([]chunk.ChunkID, count)
-	for i := range ids {
-		copy(ids[i][:], buf[i*16:(i+1)*16])
-	}
-	return ids, nil
 }
 
 func readTombstonesSection(r io.Reader) (map[chunk.ChunkID]time.Time, error) {

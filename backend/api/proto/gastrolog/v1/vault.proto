@@ -151,26 +151,23 @@ message ChunkMeta {
   bool retention_pending = 15; // true = chunk is marked for retention processing
   string storage_class = 16;   // current cloud storage class (e.g. "GLACIER", "cold", "Archive")
   int32 replica_count = 17;    // how many nodes currently have this chunk (leader + followers that have caught up)
-  // Source tier: records were streamed to the next tier; local copy is kept
-  // until the destination tier commits a receipt, then retention deletes it.
-  bool transition_streamed = 18;
   // Cluster-wide replica residency: the set of node IDs that reported having
   // this chunk locally during the most recent ListChunks fan-out. Lets the
   // inspector show which nodes physically hold each replica, distinct from
   // placement (which says where the chunk SHOULD live, not where it does).
   // See gastrolog-51gme.
-  repeated string replica_node_ids = 19;
+  repeated string replica_node_ids = 18;
   // Receipt-protocol pending acks: when a chunk is in pendingDeletes (i.e. a
   // CmdRequestDelete has been proposed but the cluster hasn't fully drained
   // the per-node acks), this is the set of node IDs that still owe an ack.
   // Empty/absent for chunks not currently in pendingDeletes. Lets the
   // inspector show which specific node is the laggard holding up a stuck
   // delete. See gastrolog-51gme.
-  repeated string pending_ack_node_ids = 20;
+  repeated string pending_ack_node_ids = 19;
   // Three-state lifecycle (gastrolog-1huz5). When unset for replay of
   // pre-Phase-3 entries, callers derive the state from the legacy
   // sealed bool: state == SEALED iff sealed == true.
-  ChunkState state = 21;
+  ChunkState state = 20;
 }
 
 message GetChunkRequest {

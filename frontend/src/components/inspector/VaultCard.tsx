@@ -569,18 +569,9 @@ function ChunkRow({
               <Badge
                 variant="warn"
                 dark={dark}
-                title="Retention pending — chunk is queued for expire/eject/transition, or mid-stream to the next tier (not the same as TTL elapsed)"
+                title="Retention pending — chunk is queued for retention firing"
               >
                 ret
-              </Badge>
-            )}
-            {chunk.transitionStreamed && (
-              <Badge
-                variant="warn"
-                dark={dark}
-                title="Transition complete on this tier — records were streamed to the next tier; this copy is awaiting replicated confirmation before deletion"
-              >
-                del
               </Badge>
             )}
             {rf > 1 && (() => {

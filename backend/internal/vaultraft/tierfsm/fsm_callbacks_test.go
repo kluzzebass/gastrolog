@@ -105,63 +105,10 @@ func TestOnRetentionPendingCallbackFires(t *testing.T) {
 	}
 }
 
-func TestOnTransitionStreamedCallbackFires(t *testing.T) {
-	t.Parallel()
-
-	fsm := New()
-	id := chunk.NewChunkID()
-	now := time.Now()
-
-	var mu sync.Mutex
-	var captured *chunk.ChunkID
-	fsm.SetOnTransitionStreamed(func(cid chunk.ChunkID) {
-		mu.Lock()
-		captured = &cid
-		mu.Unlock()
-	})
-
-	fsm.Apply(&hraft.Log{Data: MarshalCreateChunk(id, now, now, now)})
-	fsm.Apply(&hraft.Log{Data: marshalTransitionStreamed(id)})
-
-	mu.Lock()
-	defer mu.Unlock()
-	if captured == nil {
-		t.Fatal("OnTransitionStreamed callback was not called")
-	}
-	if *captured != id {
-		t.Errorf("ID = %s, want %s", *captured, id)
-	}
-}
-
-func TestOnTransitionReceivedCallbackFires(t *testing.T) {
-	t.Parallel()
-
-	fsm := New()
-	sourceID := chunk.NewChunkID()
-
-	var mu sync.Mutex
-	var captured *chunk.ChunkID
-	fsm.SetOnTransitionReceived(func(cid chunk.ChunkID) {
-		mu.Lock()
-		captured = &cid
-		mu.Unlock()
-	})
-
-	// TransitionReceived doesn't require the source chunk to exist on
-	// THIS tier's FSM — it's a destination-side receipt for a source
-	// that lives on the previous tier. Apply directly.
-	fsm.Apply(&hraft.Log{Data: marshalTransitionReceived(sourceID)})
-
-	mu.Lock()
-	defer mu.Unlock()
-	if captured == nil {
-		t.Fatal("OnTransitionReceived callback was not called")
-	}
-	if *captured != sourceID {
-		t.Errorf("ID = %s, want %s", *captured, sourceID)
-	}
-}
-
+// gastrolog-5sywa: TestOnTransitionStreamedCallbackFires and
+// TestOnTransitionReceivedCallbackFires were deleted along with the
+// receipt protocol they pinned. The earlier "no-panic when callbacks
+// unregistered" test stays useful for surviving callbacks.
 func TestNewCallbacksNoPanicWhenUnregistered(t *testing.T) {
 	t.Parallel()
 
@@ -178,31 +125,4 @@ func TestNewCallbacksNoPanicWhenUnregistered(t *testing.T) {
 	if err := fsm.Apply(&hraft.Log{Data: MarshalRetentionPending(id)}); err != nil {
 		t.Errorf("retention-pending apply unexpected error: %v", err)
 	}
-	if err := fsm.Apply(&hraft.Log{Data: marshalTransitionStreamed(id)}); err != nil {
-		t.Errorf("transition-streamed apply unexpected error: %v", err)
-	}
-	src := chunk.NewChunkID()
-	if err := fsm.Apply(&hraft.Log{Data: marshalTransitionReceived(src)}); err != nil {
-		t.Errorf("transition-received apply unexpected error: %v", err)
-	}
-}
-
-// marshalTransitionStreamed and marshalTransitionReceived build the
-// raft log data for the corresponding commands. The package only
-// exposes Marshal* helpers for the commands that have external
-// callers; these test-local helpers exist so the callback tests can
-// stay self-contained without leaking new exported APIs that the
-// reconciler hasn't yet locked down.
-func marshalTransitionStreamed(id chunk.ChunkID) []byte {
-	buf := make([]byte, 1+16)
-	buf[0] = byte(CmdTransitionStreamed)
-	copy(buf[1:17], id[:])
-	return buf
-}
-
-func marshalTransitionReceived(id chunk.ChunkID) []byte {
-	buf := make([]byte, 1+16)
-	buf[0] = byte(CmdTransitionReceived)
-	copy(buf[1:17], id[:])
-	return buf
 }

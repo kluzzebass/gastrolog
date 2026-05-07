@@ -230,10 +230,6 @@ func (r *searchReadyRegistry) IndexManager(key glid.GLID) index.IndexManager {
 	return v.IndexManager()
 }
 
-func (r *searchReadyRegistry) TransitionStreamedChunks(key glid.GLID) map[chunk.ChunkID]bool {
-	return r.o.TransitionStreamedChunks(key)
-}
-
 func (r *searchReadyRegistry) Reader() manifest.Reader { return r.o.ManifestReader() }
 
 func (r *searchReadyRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }
@@ -319,29 +315,6 @@ func (r *localVaultRegistry) Reader() manifest.Reader { return r.o.ManifestReade
 
 func (r *localVaultRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }
 
-// TransitionStreamedChunks returns the streamed-but-not-yet-expired set
-// for the given vault. Followers don't apply the flag locally (their
-// callbacks return empty), which is fine — the flag set is read primarily
-// to filter source chunks during transitions on the leader.
-// See gastrolog-66b7x.
-func (r *localVaultRegistry) TransitionStreamedChunks(vaultID glid.GLID) map[chunk.ChunkID]bool {
-	r.o.mu.RLock()
-	defer r.o.mu.RUnlock()
-	t := r.findLocalInstance(vaultID)
-	if t == nil || t.ListTransitionStreamed == nil {
-		return nil
-	}
-	ids := t.ListTransitionStreamed()
-	if len(ids) == 0 {
-		return nil
-	}
-	out := make(map[chunk.ChunkID]bool, len(ids))
-	for _, cid := range ids {
-		out[cid] = true
-	}
-	return out
-}
-
 // leaderVaultRegistry provides a flat view of all leader vaults. Each
 // vault is a searchable unit keyed by VAULT ID. Resume tokens emitted
 // from this registry tag positions with vault IDs.
@@ -404,28 +377,6 @@ func (r *leaderVaultRegistry) Reader() manifest.Reader { return r.o.ManifestRead
 
 func (r *leaderVaultRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }
 
-// TransitionStreamedChunks returns the streamed-but-not-yet-expired
-// chunk set for the given vault. Resolves the leader instance and reads
-// its ListTransitionStreamed callback (which reads the per-vault FSM).
-// See gastrolog-4xusf.
-func (r *leaderVaultRegistry) TransitionStreamedChunks(vaultID glid.GLID) map[chunk.ChunkID]bool {
-	r.o.mu.RLock()
-	defer r.o.mu.RUnlock()
-	t := r.findLeaderInstance(vaultID)
-	if t == nil || t.ListTransitionStreamed == nil {
-		return nil
-	}
-	ids := t.ListTransitionStreamed()
-	if len(ids) == 0 {
-		return nil
-	}
-	out := make(map[chunk.ChunkID]bool, len(ids))
-	for _, cid := range ids {
-		out[cid] = true
-	}
-	return out
-}
-
 // LeaderTierQueryEngineForVault returns a query engine scoped to the
 // leader instance of a single vault. Used by ForwardSearch — the vault
 // is already selected, no vault_id= filtering needed.
@@ -483,10 +434,3 @@ func (r *singleVaultRegistry) QueryEngine(_ glid.GLID) *query.Engine { return ni
 func (r *singleVaultRegistry) Reader() manifest.Reader { return r.o.ManifestReader() }
 
 func (r *singleVaultRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }
-
-func (r *singleVaultRegistry) TransitionStreamedChunks(key glid.GLID) map[chunk.ChunkID]bool {
-	if key != r.vaultID {
-		return nil
-	}
-	return r.o.TransitionStreamedChunks(key)
-}

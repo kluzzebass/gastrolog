@@ -43,24 +43,6 @@ type VaultInstance struct {
 	// ListRetentionPending returns chunk IDs with RetentionPending=true in the FSM.
 	ListRetentionPending func() []chunk.ChunkID
 
-	// ApplyRaftTransitionStreamed marks a chunk as streamed to the next tier
-	// in replicated metadata, so it won't be deleted until the destination confirms
-	// replication. See gastrolog-4913n.
-	ApplyRaftTransitionStreamed func(id chunk.ChunkID) error
-
-	// ListTransitionStreamed returns chunk IDs with TransitionStreamed=true in the FSM.
-	ListTransitionStreamed func() []chunk.ChunkID
-
-	// ApplyRaftTransitionReceived writes a receipt confirming that records
-	// from the given source chunk have been imported into this tier. Called
-	// by the source tier after streaming completes. The Raft commit gives
-	// majority-durable confirmation. See gastrolog-4913n.
-	ApplyRaftTransitionReceived func(sourceChunkID chunk.ChunkID) error
-
-	// HasTransitionReceipt returns true if the FSM has a receipt for the
-	// given source chunk ID, meaning this tier has durably received its records.
-	HasTransitionReceipt func(sourceChunkID chunk.ChunkID) bool
-
 	// IsTombstoned returns true if the given chunk ID has been deleted from
 	// this tier's replicated FSM and is still within the tombstone retention
 	// window. Used to reject stale replication commands (ImportSealed,
@@ -154,10 +136,6 @@ func (t *VaultInstance) applyRaftCallbacks(cb tierRaftCallbacks) {
 	t.ListManifest = cb.listChunks
 	t.ApplyRaftRetentionPending = cb.applyRetPending
 	t.ListRetentionPending = cb.listRetPending
-	t.ApplyRaftTransitionStreamed = cb.applyTransitionStreamed
-	t.ListTransitionStreamed = cb.listTransitionStreamed
-	t.ApplyRaftTransitionReceived = cb.applyTransitionReceived
-	t.HasTransitionReceipt = cb.hasTransitionReceipt
 	t.IsTombstoned = cb.isTombstoned
 	t.IsFSMReady = cb.isFSMReady
 	t.OverlayFromFSM = cb.overlayFromFSM
