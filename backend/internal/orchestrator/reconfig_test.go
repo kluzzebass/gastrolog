@@ -53,18 +53,19 @@ func TestReloadFilters(t *testing.T) {
 	loader := &fakeSystemLoader{}
 	orch, vaults := newFilteredTestSetupWithLoader(t, loader)
 
-	// gastrolog-4kkoo (Phase 5): expressions inlined per route via Stages.
+	// gastrolog-4kkoo (Phase 5): explicit priorities so the prod route
+	// fires before the archive catch-all under first-match-wins.
 	loader.cfg = &system.Config{
 		Routes: []system.RouteConfig{
-			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "env=prod"}}}, Destinations: []glid.GLID{vaults.prod}, Enabled: true},
-			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaults.archive}, Enabled: true},
+			{ID: glid.New(), Name: "prod", Priority: 10, Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "env=prod"}}}, Destinations: []glid.GLID{vaults.prod}, Enabled: true},
+			{ID: glid.New(), Name: "archive", Priority: 100, Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaults.archive}, Enabled: true},
 		},
 	}
 	if err := orch.ReloadFilters(context.Background()); err != nil {
 		t.Fatalf("ReloadFilters: %v", err)
 	}
 
-	// Ingest a prod message - should go to prod and archive.
+	// First-match-wins: env=prod record fires only the prod route.
 	rec := chunk.Record{
 		IngestTS: time.Now(),
 		Attrs:    chunk.Attributes{"env": "prod"},
@@ -77,22 +78,23 @@ func TestReloadFilters(t *testing.T) {
 	if count := countRecords(t, vaults.cms[vaults.prod]); count != 1 {
 		t.Errorf("prod: expected 1 record, got %d", count)
 	}
-	if count := countRecords(t, vaults.cms[vaults.archive]); count != 1 {
-		t.Errorf("archive: expected 1 record, got %d", count)
+	if count := countRecords(t, vaults.cms[vaults.archive]); count != 0 {
+		t.Errorf("archive: expected 0 records (prod claimed the match), got %d", count)
 	}
 
-	// Now update filters: prod gets env=staging instead.
+	// Now flip prod's expression to env=staging — env=prod records will
+	// now fall through to archive.
 	loader.cfg = &system.Config{
 		Routes: []system.RouteConfig{
-			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "env=staging"}}}, Destinations: []glid.GLID{vaults.prod}, Enabled: true},
-			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaults.archive}, Enabled: true},
+			{ID: glid.New(), Name: "prod", Priority: 10, Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "env=staging"}}}, Destinations: []glid.GLID{vaults.prod}, Enabled: true},
+			{ID: glid.New(), Name: "archive", Priority: 100, Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaults.archive}, Enabled: true},
 		},
 	}
 	if err := orch.ReloadFilters(context.Background()); err != nil {
 		t.Fatalf("ReloadFilters (2nd): %v", err)
 	}
 
-	// Ingest another prod message - should only go to archive now.
+	// Ingest another prod message — should fall through to archive now.
 	rec2 := chunk.Record{
 		IngestTS: time.Now(),
 		Attrs:    chunk.Attributes{"env": "prod"},
@@ -102,12 +104,12 @@ func TestReloadFilters(t *testing.T) {
 		t.Fatalf("Ingest (2nd): %v", err)
 	}
 
-	// prod should still have 1 (old message), archive should have 2.
+	// prod still has 1 (the original), archive picks up the second.
 	if count := countRecords(t, vaults.cms[vaults.prod]); count != 1 {
 		t.Errorf("prod after filter change: expected 1 record, got %d", count)
 	}
-	if count := countRecords(t, vaults.cms[vaults.archive]); count != 2 {
-		t.Errorf("archive after filter change: expected 2 records, got %d", count)
+	if count := countRecords(t, vaults.cms[vaults.archive]); count != 1 {
+		t.Errorf("archive after filter change: expected 1 record, got %d", count)
 	}
 }
 
@@ -466,9 +468,10 @@ func TestAddIngesterWhileRunning(t *testing.T) {
 	}
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
-	// Set catch-all filter.
-	filter, _ := orchestrator.CompileFilter(defaultID, "*")
-	orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{filter}))
+	// gastrolog-4kkoo (Phase 5): catch-all route into the vault.
+	cr, _ := orchestrator.CompileRoute(glid.New(), "all", 0, "*",
+		[]orchestrator.RouteDestination{{VaultID: defaultID}}, "fanout")
+	orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{cr}))
 
 	// Start orchestrator.
 	if err := orch.Start(context.Background()); err != nil {
@@ -664,55 +667,12 @@ func TestVaultConfigNotFound(t *testing.T) {
 	}
 }
 
-func TestUpdateVaultFilter(t *testing.T) {
-	t.Parallel()
-	orch, vaults := newFilteredTestSetup(t)
-
-	// Set initial filter: prod gets env=prod.
-	prodFilter, _ := orchestrator.CompileFilter(vaults.prod, "env=prod")
-	archiveFilter, _ := orchestrator.CompileFilter(vaults.archive, "*")
-	orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{prodFilter, archiveFilter}))
-
-	// Ingest a prod message.
-	rec := chunk.Record{
-		IngestTS: time.Now(),
-		Attrs:    chunk.Attributes{"env": "prod"},
-		Raw:      []byte("prod message 1"),
-	}
-	if err := orch.Ingest(rec); err != nil {
-		t.Fatalf("Ingest: %v", err)
-	}
-
-	// prod should have 1 message.
-	if count := countRecords(t, vaults.cms[vaults.prod]); count != 1 {
-		t.Errorf("prod: expected 1 record, got %d", count)
-	}
-
-	// Update prod's filter to env=staging.
-	if err := orch.UpdateVaultFilter(vaults.prod, "env=staging"); err != nil {
-		t.Fatalf("UpdateVaultFilter: %v", err)
-	}
-
-	// Ingest another prod message - should NOT go to prod anymore.
-	rec2 := chunk.Record{
-		IngestTS: time.Now(),
-		Attrs:    chunk.Attributes{"env": "prod"},
-		Raw:      []byte("prod message 2"),
-	}
-	if err := orch.Ingest(rec2); err != nil {
-		t.Fatalf("Ingest: %v", err)
-	}
-
-	// prod should still have 1 message (filter changed).
-	if count := countRecords(t, vaults.cms[vaults.prod]); count != 1 {
-		t.Errorf("prod after filter change: expected 1 record, got %d", count)
-	}
-
-	// archive should have 2 (catch-all).
-	if count := countRecords(t, vaults.cms[vaults.archive]); count != 2 {
-		t.Errorf("archive: expected 2 records, got %d", count)
-	}
-}
+// gastrolog-4kkoo (Phase 5): TestUpdateVaultFilter / TestUpdateVaultFilterNotFound /
+// TestUpdateVaultFilterInvalid removed. The Phase-4 UpdateVaultFilter API
+// is gone — vaults no longer carry filters; routes do. The equivalent
+// behavior (changing where a record lands when its source attrs match)
+// is exercised by TestReloadFilters in this file via swapping the
+// route's match expression and calling ReloadFilters.
 
 func TestSetRotationPolicyOnVaultDirectly(t *testing.T) {
 	t.Parallel()
@@ -1017,53 +977,10 @@ func TestRetentionSingleJobRegistered(t *testing.T) {
 	}
 }
 
-func TestUpdateVaultFilterNotFound(t *testing.T) {
-	t.Parallel()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = orch.UpdateVaultFilter(glid.New(), "*")
-	if err == nil {
-		t.Fatal("expected error for nonexistent vault")
-	}
-}
+// gastrolog-4kkoo (Phase 5): TestUpdateVaultFilterNotFound and
+// TestUpdateVaultFilterInvalid removed alongside UpdateVaultFilter.
+// Invalid-expression handling at the route level is covered by
+// TestReloadFiltersInvalidExpression earlier in this file, which
+// asserts that a route carrying a bad expression fails ReloadFilters.
 
 func strPtr(s string) *string { return &s }
-
-func TestUpdateVaultFilterInvalid(t *testing.T) {
-	t.Parallel()
-	vaultID := glid.New()
-
-	loader := &fakeSystemLoader{cfg: &system.Config{
-		Routes: []system.RouteConfig{
-			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
-		},
-	}}
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	factories := orchestrator.Factories{
-		ChunkManagers: map[string]chunk.ManagerFactory{
-			"memory": chunkmem.NewFactory(),
-		},
-		IndexManagers: map[string]index.ManagerFactory{
-			"memory": indexmem.NewFactory(),
-		},
-	}
-
-	vaultCfg := memVaultCfg(vaultID, loader)
-
-	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
-		t.Fatalf("AddVault: %v", err)
-	}
-
-	// Invalid filter expression.
-	err = orch.UpdateVaultFilter(vaultID, "(unclosed")
-	if err == nil {
-		t.Error("expected error for invalid filter expression")
-	}
-}

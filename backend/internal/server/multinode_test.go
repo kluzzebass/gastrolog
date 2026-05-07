@@ -1646,12 +1646,13 @@ func TestMultiNode_RouteStatsAggregated(t *testing.T) {
 	d1 := h.Node(t, "data-1")
 	d2 := h.Node(t, "data-2")
 
-	d1.orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
-		{VaultID: d1.vaultID, Kind: orchestrator.FilterCatchAll, Expr: "*"},
-	}))
-	d2.orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
-		{VaultID: d2.vaultID, Kind: orchestrator.FilterCatchAll, Expr: "*"},
-	}))
+	// gastrolog-4kkoo (Phase 5): catch-all route per data node.
+	d1cr, _ := orchestrator.CompileRoute(glid.New(), "all", 0, "*",
+		[]orchestrator.RouteDestination{{VaultID: d1.vaultID}}, "fanout")
+	d1.orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{d1cr}))
+	d2cr, _ := orchestrator.CompileRoute(glid.New(), "all", 0, "*",
+		[]orchestrator.RouteDestination{{VaultID: d2.vaultID}}, "fanout")
+	d2.orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{d2cr}))
 
 	// Ingest records on each data node (simulating ingesters on those nodes).
 	for range 3 {
@@ -1712,14 +1713,14 @@ func TestMultiNode_PerRouteStatsAggregated(t *testing.T) {
 	routeA := glid.New()
 	routeB := glid.New()
 
-	// data-1: route A catches everything.
-	d1.orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
-		{VaultID: d1.vaultID, Kind: orchestrator.FilterCatchAll, Expr: "*", RouteID: routeA},
-	}))
-	// data-2: route B catches everything.
-	d2.orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
-		{VaultID: d2.vaultID, Kind: orchestrator.FilterCatchAll, Expr: "*", RouteID: routeB},
-	}))
+	// gastrolog-4kkoo (Phase 5): one route per node, distinct RouteIDs so
+	// per-route stats stay attributable.
+	d1cr, _ := orchestrator.CompileRoute(routeA, "route-a", 0, "*",
+		[]orchestrator.RouteDestination{{VaultID: d1.vaultID}}, "fanout")
+	d1.orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{d1cr}))
+	d2cr, _ := orchestrator.CompileRoute(routeB, "route-b", 0, "*",
+		[]orchestrator.RouteDestination{{VaultID: d2.vaultID}}, "fanout")
+	d2.orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{d2cr}))
 
 	for range 5 {
 		if err := d1.orch.Ingest(chunk.Record{Raw: []byte("from-d1")}); err != nil {

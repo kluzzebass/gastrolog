@@ -161,12 +161,12 @@ func TestDeleteVaultForce(t *testing.T) {
 		t.Fatalf("PutVault: %v", err)
 	}
 
-	// Set a catch-all filter directly on the orchestrator (not via route,
-	// since the test also needs to force-delete the vault without
-	// hitting route referential integrity checks).
-	orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
-		{VaultID: vaultID, Kind: orchestrator.FilterCatchAll, Expr: "*"},
-	}))
+	// gastrolog-4kkoo (Phase 5): catch-all route directly on the orchestrator
+	// (not via the config store) so the test can force-delete the vault
+	// without hitting referential-integrity checks.
+	cr, _ := orchestrator.CompileRoute(glid.New(), "all", 0, "*",
+		[]orchestrator.RouteDestination{{VaultID: vaultID}}, "fanout")
+	orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{cr}))
 
 	// Ingest data so the vault is non-empty.
 	if err := orch.Ingest(chunk.Record{

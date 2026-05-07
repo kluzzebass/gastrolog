@@ -1,16 +1,15 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"testing"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/glid"
 )
 
-func FuzzCompileFilter(f *testing.F) {
+func FuzzCompileRoute(f *testing.F) {
 	f.Add("")
 	f.Add("*")
-	f.Add("+")
 	f.Add(`env="prod"`)
 	f.Add(`env="prod" AND level="error"`)
 	f.Add(`env="prod" OR env="staging"`)
@@ -27,17 +26,15 @@ func FuzzCompileFilter(f *testing.F) {
 	f.Add(`/regex/`)
 	f.Add(`env="prod" AND /pattern/`)
 
-	f.Fuzz(func(t *testing.T, filter string) {
-		vid := glid.New()
+	f.Fuzz(func(t *testing.T, expr string) {
 		// Must not panic on any input.
-		_, _ = CompileFilter(vid, filter)
+		_, _ = CompileRoute(glid.New(), "fuzz", 0, expr, []RouteDestination{{VaultID: glid.New()}}, "fanout")
 	})
 }
 
-func FuzzFilterSetMatch(f *testing.F) {
-	// Seed corpus: (filter expression, attribute key, attribute value)
+func FuzzRouteSetMatch(f *testing.F) {
+	// Seed corpus: (route expression, attribute key, attribute value)
 	f.Add("*", "env", "prod")
-	f.Add("+", "env", "prod")
 	f.Add("", "env", "prod")
 	f.Add(`env="prod"`, "env", "prod")
 	f.Add(`env="prod"`, "env", "staging")
@@ -48,14 +45,12 @@ func FuzzFilterSetMatch(f *testing.F) {
 	f.Add(`key_exists("host")`, "host", "web-1")
 	f.Add(`key_exists("host")`, "env", "prod")
 
-	f.Fuzz(func(t *testing.T, filter, key, value string) {
-		vid := glid.New()
-		cf, err := CompileFilter(vid, filter)
+	f.Fuzz(func(t *testing.T, expr, key, value string) {
+		cr, err := CompileRoute(glid.New(), "fuzz", 0, expr, []RouteDestination{{VaultID: glid.New()}}, "fanout")
 		if err != nil {
-			return // invalid filter expressions are expected
+			return // invalid expressions are expected
 		}
-
-		fs := NewFilterSet([]*CompiledFilter{cf})
+		rs := NewRouteSet([]*CompiledRoute{cr})
 
 		attrs := chunk.Attributes{}
 		if key != "" {
@@ -63,7 +58,6 @@ func FuzzFilterSetMatch(f *testing.F) {
 		}
 
 		// Must not panic on any input.
-		_ = fs.Match(attrs)
-		_ = fs.MatchWithNode(attrs)
+		_ = rs.Match(attrs)
 	})
 }

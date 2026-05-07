@@ -77,9 +77,11 @@ func newVaultTestSetup(t *testing.T, recordCount int) vaultTestClients {
 
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
-	// Set filter so orchestrator knows about the vault.
-	filter, _ := orchestrator.CompileFilter(defaultID, "*")
-	orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{filter}))
+	// gastrolog-4kkoo (Phase 5): catch-all route so the orchestrator
+	// knows about the vault.
+	cr, _ := orchestrator.CompileRoute(glid.New(), "all", 0, "*",
+		[]orchestrator.RouteDestination{{VaultID: defaultID}}, "fanout")
+	orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{cr}))
 
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
 	handler := srv.Handler()

@@ -48,7 +48,7 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 		"vaults", len(o.vaults),
 		"ingesters", len(o.ingesters))
 
-	if o.filterSet == nil && len(o.vaults) > 0 {
+	if o.routeSet == nil && len(o.vaults) > 0 {
 		o.logger.Warn("no routes configured, ingested records will be dropped")
 	}
 

@@ -69,12 +69,12 @@ func (o *Orchestrator) ingestLocked(rec chunk.Record) (*pendingAcks, [][]remoteF
 		return nil, nil, ErrNoChunkManagers
 	}
 
-	if o.filterSet == nil {
+	if o.routeSet == nil {
 		o.routeStats.Dropped.Add(1)
 		return nil, nil, nil // No routes configured — drop the record.
 	}
 
-	matches := o.filterSet.MatchWithNode(rec.Attrs)
+	matches := o.routeSet.Match(rec.Attrs)
 	if len(matches) == 0 {
 		o.routeStats.Dropped.Add(1)
 		return nil, nil, nil

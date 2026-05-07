@@ -103,10 +103,9 @@ func TestReliability_Ingest_ReleasesLockBeforeReplication(t *testing.T) {
 	vault.Name = "5oofa-regression"
 	orch.RegisterVault(vault)
 
-	// Set up a catch-all filter so Ingest routes to this vault.
-	orch.SetFilterSet(NewFilterSet([]*CompiledFilter{
-		{VaultID: vaultID, Kind: FilterCatchAll, Expr: "*"},
-	}))
+	// gastrolog-4kkoo (Phase 5): catch-all route into the vault.
+	cr, _ := CompileRoute(glid.New(), "all", 0, "*", []RouteDestination{{VaultID: vaultID}}, "fanout")
+	orch.SetRouteSet(NewRouteSet([]*CompiledRoute{cr}))
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
