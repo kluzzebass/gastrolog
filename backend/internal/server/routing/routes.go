@@ -45,6 +45,7 @@ func DefaultRoutes() map[string]RPCRoute {
 		gastrologv1connect.SystemServiceGetCertificateProcedure:       {Strategy: RouteLocal},
 		gastrologv1connect.SystemServiceGetIngesterDefaultsProcedure:  {Strategy: RouteLocal},
 		gastrologv1connect.SystemServiceGenerateNameProcedure:         {Strategy: RouteLocal},
+		gastrologv1connect.SystemServiceValidateExpressionProcedure:   {Strategy: RouteLocal},
 		gastrologv1connect.SystemServiceGetRouteStatsProcedure:        {Strategy: RouteLocal},
 		gastrologv1connect.SystemServiceListManagedFilesProcedure:     {Strategy: RouteLocal},
 		gastrologv1connect.SystemServiceWatchSystemProcedure:          {Strategy: RouteLocal, IsStreaming: true},

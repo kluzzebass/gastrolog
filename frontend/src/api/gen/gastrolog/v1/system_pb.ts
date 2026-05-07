@@ -5830,6 +5830,102 @@ export class GenerateNameResponse extends Message<GenerateNameResponse> {
 }
 
 /**
+ * ValidateExpressionRequest carries a route match expression for live
+ * editor feedback. gastrolog-4kkoo (Phase 5).
+ *
+ * @generated from message gastrolog.v1.ValidateExpressionRequest
+ */
+export class ValidateExpressionRequest extends Message<ValidateExpressionRequest> {
+  /**
+   * Match expression text. Empty is valid (route is muted/never fires).
+   * "*" is valid (catch-all).
+   *
+   * @generated from field: string expression = 1;
+   */
+  expression = "";
+
+  constructor(data?: PartialMessage<ValidateExpressionRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ValidateExpressionRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "expression", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ValidateExpressionRequest {
+    return new ValidateExpressionRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ValidateExpressionRequest {
+    return new ValidateExpressionRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ValidateExpressionRequest {
+    return new ValidateExpressionRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ValidateExpressionRequest | PlainMessage<ValidateExpressionRequest> | undefined, b: ValidateExpressionRequest | PlainMessage<ValidateExpressionRequest> | undefined): boolean {
+    return proto3.util.equals(ValidateExpressionRequest, a, b);
+  }
+}
+
+/**
+ * ValidateExpressionResponse reports whether the expression parses and
+ * uses only supported predicates. The error is human-readable and
+ * safe to surface directly in the editor.
+ *
+ * @generated from message gastrolog.v1.ValidateExpressionResponse
+ */
+export class ValidateExpressionResponse extends Message<ValidateExpressionResponse> {
+  /**
+   * Valid is true when the expression is parseable and uses only
+   * attribute predicates (the same constraint PutRoute enforces at
+   * save time).
+   *
+   * @generated from field: bool valid = 1;
+   */
+  valid = false;
+
+  /**
+   * Error is a human-readable diagnostic. Empty when valid is true.
+   *
+   * @generated from field: string error = 2;
+   */
+  error = "";
+
+  constructor(data?: PartialMessage<ValidateExpressionResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ValidateExpressionResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "valid", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 2, name: "error", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ValidateExpressionResponse {
+    return new ValidateExpressionResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ValidateExpressionResponse {
+    return new ValidateExpressionResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ValidateExpressionResponse {
+    return new ValidateExpressionResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ValidateExpressionResponse | PlainMessage<ValidateExpressionResponse> | undefined, b: ValidateExpressionResponse | PlainMessage<ValidateExpressionResponse> | undefined): boolean {
+    return proto3.util.equals(ValidateExpressionResponse, a, b);
+  }
+}
+
+/**
  * @generated from message gastrolog.v1.WatchSystemRequest
  */
 export class WatchSystemRequest extends Message<WatchSystemRequest> {

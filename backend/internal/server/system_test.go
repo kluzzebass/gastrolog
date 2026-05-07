@@ -1468,3 +1468,52 @@ func TestPutTierAcceptsUnchangedCloudServiceID(t *testing.T) {
 		t.Fatalf("PutTier (rename, no cloud_service_id change): %v", err)
 	}
 }
+
+// gastrolog-4kkoo (Phase 5): ValidateExpression covers what the lean
+// route filter editor needs from the backend — parse + semantic check
+// without committing the route.
+func TestValidateExpression(t *testing.T) {
+	t.Parallel()
+	client, _, _ := newConfigTestSetup(t)
+	ctx := context.Background()
+
+	cases := []struct {
+		name       string
+		expression string
+		wantValid  bool
+	}{
+		{"empty", "", true},
+		{"catch-all", "*", true},
+		{"simple kv", "env=prod", true},
+		{"complex", "env=prod AND level=error", true},
+		{"or", "env=staging OR env=dev", true},
+		{"key-exists", "env=*", true},
+		{"value-exists", "*=error", true},
+		{"not", "NOT env=prod", true},
+		{"synthetic source", `_source="ingest"`, true},
+		{"synthetic vault", `_source="retention" AND _vault="some-id"`, true},
+		{"token rejected", "error", false},
+		{"token in and rejected", "error AND env=prod", false},
+		{"invalid syntax", "env=prod AND", false},
+		{"unclosed paren", "(env=prod", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			resp, err := client.ValidateExpression(ctx, connect.NewRequest(&gastrologv1.ValidateExpressionRequest{
+				Expression: tc.expression,
+			}))
+			if err != nil {
+				t.Fatalf("ValidateExpression: %v", err)
+			}
+			if resp.Msg.Valid != tc.wantValid {
+				t.Errorf("expression %q: valid=%v, want %v (error: %s)",
+					tc.expression, resp.Msg.Valid, tc.wantValid, resp.Msg.Error)
+			}
+			if !tc.wantValid && resp.Msg.Error == "" {
+				t.Errorf("expression %q: invalid response missing error message", tc.expression)
+			}
+		})
+	}
+}

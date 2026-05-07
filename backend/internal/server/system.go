@@ -818,6 +818,37 @@ func (s *SystemServer) GenerateName(
 	}), nil
 }
 
+// ValidateExpression parses and semantically validates a route match
+// expression. gastrolog-4kkoo (Phase 5): drives live editor feedback in
+// the route filter UI.
+//
+// The check uses orchestrator.CompileRoute so the RPC's verdict is
+// identical to what PutRoute will accept at save time. A trivial route
+// is constructed with one local destination — the destination doesn't
+// affect parse/semantic validation, only the expression matters.
+func (s *SystemServer) ValidateExpression(
+	_ context.Context,
+	req *connect.Request[apiv1.ValidateExpressionRequest],
+) (*connect.Response[apiv1.ValidateExpressionResponse], error) {
+	expr := req.Msg.GetExpression()
+	_, err := orchestrator.CompileRoute(
+		glid.New(),
+		"validate",
+		0,
+		expr,
+		[]orchestrator.RouteDestination{{VaultID: glid.New()}},
+		"fanout",
+	)
+	resp := &apiv1.ValidateExpressionResponse{}
+	if err != nil {
+		resp.Valid = false
+		resp.Error = err.Error()
+	} else {
+		resp.Valid = true
+	}
+	return connect.NewResponse(resp), nil
+}
+
 // WatchConfig streams a notification whenever configuration changes.
 func (s *SystemServer) WatchSystem(
 	ctx context.Context,

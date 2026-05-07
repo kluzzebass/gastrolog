@@ -116,6 +116,12 @@ service SystemService {
   // GenerateName returns a random petname for use as a default entity name.
   rpc GenerateName(GenerateNameRequest) returns (GenerateNameResponse);
 
+  // ValidateExpression parses and semantically validates a route match
+  // expression. gastrolog-4kkoo (Phase 5): drives live editor feedback in
+  // the route filter UI — distinct from PutRoute's save-time validation.
+  // The check is read-only and node-local; no Raft Apply.
+  rpc ValidateExpression(ValidateExpressionRequest) returns (ValidateExpressionResponse);
+
   // WatchConfig streams a notification whenever configuration changes.
   rpc WatchSystem(WatchSystemRequest) returns (stream WatchSystemResponse);
 
@@ -926,6 +932,26 @@ message GenerateNameRequest {}
 
 message GenerateNameResponse {
   string name = 1;
+}
+
+// ValidateExpressionRequest carries a route match expression for live
+// editor feedback. gastrolog-4kkoo (Phase 5).
+message ValidateExpressionRequest {
+  // Match expression text. Empty is valid (route is muted/never fires).
+  // "*" is valid (catch-all).
+  string expression = 1;
+}
+
+// ValidateExpressionResponse reports whether the expression parses and
+// uses only supported predicates. The error is human-readable and
+// safe to surface directly in the editor.
+message ValidateExpressionResponse {
+  // Valid is true when the expression is parseable and uses only
+  // attribute predicates (the same constraint PutRoute enforces at
+  // save time).
+  bool valid = 1;
+  // Error is a human-readable diagnostic. Empty when valid is true.
+  string error = 2;
 }
 
 message WatchSystemRequest {}

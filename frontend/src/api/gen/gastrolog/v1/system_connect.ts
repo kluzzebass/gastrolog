@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { DeleteCertificateRequest, DeleteCertificateResponse, DeleteCloudServiceRequest, DeleteCloudServiceResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteLookupRequest, DeleteLookupResponse, DeleteManagedFileRequest, DeleteManagedFileResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteRouteRequest, DeleteRouteResponse, DeleteSavedQueryRequest, DeleteSavedQueryResponse, DeleteTierRequest, DeleteTierResponse, DeleteVaultRequest, DeleteVaultResponse, GenerateNameRequest, GenerateNameResponse, GetCertificateRequest, GetCertificateResponse, GetIngesterDefaultsRequest, GetIngesterDefaultsResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetPreferencesRequest, GetPreferencesResponse, GetRouteStatsRequest, GetRouteStatsResponse, GetSavedQueriesRequest, GetSavedQueriesResponse, GetSettingsRequest, GetSettingsResponse, GetSystemRequest, GetSystemResponse, ListCertificatesRequest, ListCertificatesResponse, ListIngestersRequest, ListIngestersResponse, ListManagedFilesRequest, ListManagedFilesResponse, PauseVaultRequest, PauseVaultResponse, PreviewCSVLookupRequest, PreviewCSVLookupResponse, PreviewJSONLookupRequest, PreviewJSONLookupResponse, PreviewYAMLLookupRequest, PreviewYAMLLookupResponse, PutCertificateRequest, PutCertificateResponse, PutCloudServiceRequest, PutCloudServiceResponse, PutIngesterRequest, PutIngesterResponse, PutLookupSettingsRequest, PutLookupSettingsResponse, PutMaxMindSettingsRequest, PutMaxMindSettingsResponse, PutNodeConfigRequest, PutNodeConfigResponse, PutPreferencesRequest, PutPreferencesResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutRouteRequest, PutRouteResponse, PutSavedQueryRequest, PutSavedQueryResponse, PutServiceSettingsRequest, PutServiceSettingsResponse, PutSetupSettingsRequest, PutSetupSettingsResponse, PutTierRequest, PutTierResponse, PutVaultRequest, PutVaultResponse, RegenerateJwtSecretRequest, RegenerateJwtSecretResponse, ResumeVaultRequest, ResumeVaultResponse, SetNodeStorageConfigRequest, SetNodeStorageConfigResponse, TestCloudServiceRequest, TestCloudServiceResponse, TestHTTPLookupRequest, TestHTTPLookupResponse, TestIngesterRequest, TestIngesterResponse, TriggerIngesterRequest, TriggerIngesterResponse, WatchIngesterStatusRequest, WatchIngesterStatusResponse, WatchSystemRequest, WatchSystemResponse } from "./system_pb.js";
+import { DeleteCertificateRequest, DeleteCertificateResponse, DeleteCloudServiceRequest, DeleteCloudServiceResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteLookupRequest, DeleteLookupResponse, DeleteManagedFileRequest, DeleteManagedFileResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteRouteRequest, DeleteRouteResponse, DeleteSavedQueryRequest, DeleteSavedQueryResponse, DeleteTierRequest, DeleteTierResponse, DeleteVaultRequest, DeleteVaultResponse, GenerateNameRequest, GenerateNameResponse, GetCertificateRequest, GetCertificateResponse, GetIngesterDefaultsRequest, GetIngesterDefaultsResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetPreferencesRequest, GetPreferencesResponse, GetRouteStatsRequest, GetRouteStatsResponse, GetSavedQueriesRequest, GetSavedQueriesResponse, GetSettingsRequest, GetSettingsResponse, GetSystemRequest, GetSystemResponse, ListCertificatesRequest, ListCertificatesResponse, ListIngestersRequest, ListIngestersResponse, ListManagedFilesRequest, ListManagedFilesResponse, PauseVaultRequest, PauseVaultResponse, PreviewCSVLookupRequest, PreviewCSVLookupResponse, PreviewJSONLookupRequest, PreviewJSONLookupResponse, PreviewYAMLLookupRequest, PreviewYAMLLookupResponse, PutCertificateRequest, PutCertificateResponse, PutCloudServiceRequest, PutCloudServiceResponse, PutIngesterRequest, PutIngesterResponse, PutLookupSettingsRequest, PutLookupSettingsResponse, PutMaxMindSettingsRequest, PutMaxMindSettingsResponse, PutNodeConfigRequest, PutNodeConfigResponse, PutPreferencesRequest, PutPreferencesResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutRouteRequest, PutRouteResponse, PutSavedQueryRequest, PutSavedQueryResponse, PutServiceSettingsRequest, PutServiceSettingsResponse, PutSetupSettingsRequest, PutSetupSettingsResponse, PutTierRequest, PutTierResponse, PutVaultRequest, PutVaultResponse, RegenerateJwtSecretRequest, RegenerateJwtSecretResponse, ResumeVaultRequest, ResumeVaultResponse, SetNodeStorageConfigRequest, SetNodeStorageConfigResponse, TestCloudServiceRequest, TestCloudServiceResponse, TestHTTPLookupRequest, TestHTTPLookupResponse, TestIngesterRequest, TestIngesterResponse, TriggerIngesterRequest, TriggerIngesterResponse, ValidateExpressionRequest, ValidateExpressionResponse, WatchIngesterStatusRequest, WatchIngesterStatusResponse, WatchSystemRequest, WatchSystemResponse } from "./system_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -400,6 +400,20 @@ export const SystemService = {
       name: "GenerateName",
       I: GenerateNameRequest,
       O: GenerateNameResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * ValidateExpression parses and semantically validates a route match
+     * expression. gastrolog-4kkoo (Phase 5): drives live editor feedback in
+     * the route filter UI — distinct from PutRoute's save-time validation.
+     * The check is read-only and node-local; no Raft Apply.
+     *
+     * @generated from rpc gastrolog.v1.SystemService.ValidateExpression
+     */
+    validateExpression: {
+      name: "ValidateExpression",
+      I: ValidateExpressionRequest,
+      O: ValidateExpressionResponse,
       kind: MethodKind.Unary,
     },
     /**

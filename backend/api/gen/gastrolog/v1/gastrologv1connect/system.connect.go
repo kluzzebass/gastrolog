@@ -135,6 +135,9 @@ const (
 	// SystemServiceGenerateNameProcedure is the fully-qualified name of the SystemService's
 	// GenerateName RPC.
 	SystemServiceGenerateNameProcedure = "/gastrolog.v1.SystemService/GenerateName"
+	// SystemServiceValidateExpressionProcedure is the fully-qualified name of the SystemService's
+	// ValidateExpression RPC.
+	SystemServiceValidateExpressionProcedure = "/gastrolog.v1.SystemService/ValidateExpression"
 	// SystemServiceWatchSystemProcedure is the fully-qualified name of the SystemService's WatchSystem
 	// RPC.
 	SystemServiceWatchSystemProcedure = "/gastrolog.v1.SystemService/WatchSystem"
@@ -259,6 +262,11 @@ type SystemServiceClient interface {
 	DeleteRoute(context.Context, *connect.Request[v1.DeleteRouteRequest]) (*connect.Response[v1.DeleteRouteResponse], error)
 	// GenerateName returns a random petname for use as a default entity name.
 	GenerateName(context.Context, *connect.Request[v1.GenerateNameRequest]) (*connect.Response[v1.GenerateNameResponse], error)
+	// ValidateExpression parses and semantically validates a route match
+	// expression. gastrolog-4kkoo (Phase 5): drives live editor feedback in
+	// the route filter UI — distinct from PutRoute's save-time validation.
+	// The check is read-only and node-local; no Raft Apply.
+	ValidateExpression(context.Context, *connect.Request[v1.ValidateExpressionRequest]) (*connect.Response[v1.ValidateExpressionResponse], error)
 	// WatchConfig streams a notification whenever configuration changes.
 	WatchSystem(context.Context, *connect.Request[v1.WatchSystemRequest]) (*connect.ServerStreamForClient[v1.WatchSystemResponse], error)
 	// GetRouteStats returns live routing statistics.
@@ -514,6 +522,12 @@ func NewSystemServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(systemServiceMethods.ByName("GenerateName")),
 			connect.WithClientOptions(opts...),
 		),
+		validateExpression: connect.NewClient[v1.ValidateExpressionRequest, v1.ValidateExpressionResponse](
+			httpClient,
+			baseURL+SystemServiceValidateExpressionProcedure,
+			connect.WithSchema(systemServiceMethods.ByName("ValidateExpression")),
+			connect.WithClientOptions(opts...),
+		),
 		watchSystem: connect.NewClient[v1.WatchSystemRequest, v1.WatchSystemResponse](
 			httpClient,
 			baseURL+SystemServiceWatchSystemProcedure,
@@ -650,6 +664,7 @@ type systemServiceClient struct {
 	putRoute              *connect.Client[v1.PutRouteRequest, v1.PutRouteResponse]
 	deleteRoute           *connect.Client[v1.DeleteRouteRequest, v1.DeleteRouteResponse]
 	generateName          *connect.Client[v1.GenerateNameRequest, v1.GenerateNameResponse]
+	validateExpression    *connect.Client[v1.ValidateExpressionRequest, v1.ValidateExpressionResponse]
 	watchSystem           *connect.Client[v1.WatchSystemRequest, v1.WatchSystemResponse]
 	getRouteStats         *connect.Client[v1.GetRouteStatsRequest, v1.GetRouteStatsResponse]
 	listManagedFiles      *connect.Client[v1.ListManagedFilesRequest, v1.ListManagedFilesResponse]
@@ -843,6 +858,11 @@ func (c *systemServiceClient) GenerateName(ctx context.Context, req *connect.Req
 	return c.generateName.CallUnary(ctx, req)
 }
 
+// ValidateExpression calls gastrolog.v1.SystemService.ValidateExpression.
+func (c *systemServiceClient) ValidateExpression(ctx context.Context, req *connect.Request[v1.ValidateExpressionRequest]) (*connect.Response[v1.ValidateExpressionResponse], error) {
+	return c.validateExpression.CallUnary(ctx, req)
+}
+
 // WatchSystem calls gastrolog.v1.SystemService.WatchSystem.
 func (c *systemServiceClient) WatchSystem(ctx context.Context, req *connect.Request[v1.WatchSystemRequest]) (*connect.ServerStreamForClient[v1.WatchSystemResponse], error) {
 	return c.watchSystem.CallServerStream(ctx, req)
@@ -998,6 +1018,11 @@ type SystemServiceHandler interface {
 	DeleteRoute(context.Context, *connect.Request[v1.DeleteRouteRequest]) (*connect.Response[v1.DeleteRouteResponse], error)
 	// GenerateName returns a random petname for use as a default entity name.
 	GenerateName(context.Context, *connect.Request[v1.GenerateNameRequest]) (*connect.Response[v1.GenerateNameResponse], error)
+	// ValidateExpression parses and semantically validates a route match
+	// expression. gastrolog-4kkoo (Phase 5): drives live editor feedback in
+	// the route filter UI — distinct from PutRoute's save-time validation.
+	// The check is read-only and node-local; no Raft Apply.
+	ValidateExpression(context.Context, *connect.Request[v1.ValidateExpressionRequest]) (*connect.Response[v1.ValidateExpressionResponse], error)
 	// WatchConfig streams a notification whenever configuration changes.
 	WatchSystem(context.Context, *connect.Request[v1.WatchSystemRequest], *connect.ServerStream[v1.WatchSystemResponse]) error
 	// GetRouteStats returns live routing statistics.
@@ -1249,6 +1274,12 @@ func NewSystemServiceHandler(svc SystemServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(systemServiceMethods.ByName("GenerateName")),
 		connect.WithHandlerOptions(opts...),
 	)
+	systemServiceValidateExpressionHandler := connect.NewUnaryHandler(
+		SystemServiceValidateExpressionProcedure,
+		svc.ValidateExpression,
+		connect.WithSchema(systemServiceMethods.ByName("ValidateExpression")),
+		connect.WithHandlerOptions(opts...),
+	)
 	systemServiceWatchSystemHandler := connect.NewServerStreamHandler(
 		SystemServiceWatchSystemProcedure,
 		svc.WatchSystem,
@@ -1417,6 +1448,8 @@ func NewSystemServiceHandler(svc SystemServiceHandler, opts ...connect.HandlerOp
 			systemServiceDeleteRouteHandler.ServeHTTP(w, r)
 		case SystemServiceGenerateNameProcedure:
 			systemServiceGenerateNameHandler.ServeHTTP(w, r)
+		case SystemServiceValidateExpressionProcedure:
+			systemServiceValidateExpressionHandler.ServeHTTP(w, r)
 		case SystemServiceWatchSystemProcedure:
 			systemServiceWatchSystemHandler.ServeHTTP(w, r)
 		case SystemServiceGetRouteStatsProcedure:
@@ -1596,6 +1629,10 @@ func (UnimplementedSystemServiceHandler) DeleteRoute(context.Context, *connect.R
 
 func (UnimplementedSystemServiceHandler) GenerateName(context.Context, *connect.Request[v1.GenerateNameRequest]) (*connect.Response[v1.GenerateNameResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.GenerateName is not implemented"))
+}
+
+func (UnimplementedSystemServiceHandler) ValidateExpression(context.Context, *connect.Request[v1.ValidateExpressionRequest]) (*connect.Response[v1.ValidateExpressionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.ValidateExpression is not implemented"))
 }
 
 func (UnimplementedSystemServiceHandler) WatchSystem(context.Context, *connect.Request[v1.WatchSystemRequest], *connect.ServerStream[v1.WatchSystemResponse]) error {

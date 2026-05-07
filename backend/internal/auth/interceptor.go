@@ -135,6 +135,7 @@ func NewAuthInterceptor(tokens *TokenService, counter UserCounter, validator Tok
 			gastrologv1connect.SystemServicePutNodeConfigProcedure:         true,
 			gastrologv1connect.SystemServicePutRouteProcedure:              true,
 			gastrologv1connect.SystemServiceDeleteRouteProcedure:           true,
+			gastrologv1connect.SystemServiceValidateExpressionProcedure:    true,
 			gastrologv1connect.SystemServicePauseVaultProcedure:            true,
 			gastrologv1connect.SystemServiceResumeVaultProcedure:           true,
 			gastrologv1connect.SystemServiceTriggerIngesterProcedure:       true,
