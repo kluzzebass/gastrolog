@@ -17,21 +17,16 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
   if (isLoading) return <LoadingPlaceholder dark={dark} />;
   if (!stats) return null;
 
-  const vaultNames = new Map<string, string>();
-  if (config?.vaults) {
-    for (const v of config.vaults) {
-      const vid = encode(v.id);
-      vaultNames.set(vid, v.name || vid.slice(0, 8));
-    }
-  }
-
-  const routeNames = new Map<string, string>();
-  if (config?.routes) {
-    for (const r of config.routes) {
-      const rid = encode(r.id);
-      routeNames.set(rid, r.name || rid.slice(0, 8));
-    }
-  }
+  // Build lookup maps that disambiguate same-named entities by appending
+  // an id-prefix suffix. Names collide in practice (two "default-vault"s
+  // from setup-wizard + bootstrap, etc.) and rendering identical labels
+  // for distinct rows looked like a stats-aggregation bug.
+  const vaultNames = buildDisplayNameMap(
+    config?.vaults?.map((v) => ({ id: encode(v.id), name: v.name })) ?? [],
+  );
+  const routeNames = buildDisplayNameMap(
+    config?.routes?.map((r) => ({ id: encode(r.id), name: r.name })) ?? [],
+  );
 
   const dropRate =
     stats.totalIngested > 0
@@ -238,4 +233,24 @@ function formatCount(n: bigint | number | string): string {
   if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
   if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`;
   return num.toLocaleString();
+}
+
+// buildDisplayNameMap returns id → display-name lookups. Distinct entries
+// that share the same name get an id-prefix suffix so the inspector
+// surface stays readable even when the configured names collide.
+function buildDisplayNameMap(
+  entities: { id: string; name: string }[],
+): Map<string, string> {
+  const counts = new Map<string, number>();
+  for (const e of entities) {
+    const key = e.name || "";
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const out = new Map<string, string>();
+  for (const e of entities) {
+    const baseName = e.name || e.id.slice(0, 8);
+    const collides = (counts.get(e.name || "") ?? 0) > 1;
+    out.set(e.id, collides ? `${baseName} (${e.id.slice(0, 8)})` : baseName);
+  }
+  return out;
 }
