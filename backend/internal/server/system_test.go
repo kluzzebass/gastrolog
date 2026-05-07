@@ -706,6 +706,16 @@ func (m *mockPeerIngesterStats) FindIngesterStats(id string) *gastrologv1.Ingest
 	return m.stats[id]
 }
 
+func (m *mockPeerIngesterStats) AggregateIngesterStats(id string) (messages, bytes, errors uint64, anyRunning bool) {
+	if s := m.stats[id]; s != nil {
+		messages = s.MessagesIngested
+		bytes = s.BytesIngested
+		errors = s.Errors
+		anyRunning = s.Running
+	}
+	return
+}
+
 func (m *mockPeerIngesterStats) CollectIngesterAlive(id string) map[string]bool {
 	if s := m.stats[id]; s != nil {
 		return map[string]bool{"peer": s.Running}

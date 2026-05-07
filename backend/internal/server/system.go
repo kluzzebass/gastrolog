@@ -36,6 +36,11 @@ import (
 // Implemented by cluster.PeerState; nil in single-node mode.
 type PeerIngesterStatsProvider interface {
 	FindIngesterStats(ingesterID string) *apiv1.IngesterNodeStats
+	// AggregateIngesterStats sums an ingester's counters across every
+	// live peer. For parallel ingesters (running on every node) this is
+	// the cluster total; for singleton ingesters all but one peer
+	// contribute zero so the sum still equals the singleton's stats.
+	AggregateIngesterStats(ingesterID string) (messages, bytes, errors uint64, anyRunning bool)
 	CollectIngesterAlive(ingesterID string) map[string]bool
 }
 

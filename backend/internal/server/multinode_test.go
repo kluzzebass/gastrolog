@@ -349,6 +349,26 @@ func (p *mnPeerIngesterStats) FindIngesterStats(ingesterID string) *gastrologv1.
 	return nil
 }
 
+func (p *mnPeerIngesterStats) AggregateIngesterStats(ingesterID string) (messages, bytes, errors uint64, anyRunning bool) {
+	id, err := glid.ParseUUID(ingesterID)
+	if err != nil {
+		return
+	}
+	for _, orch := range p.nodes {
+		stats := orch.GetIngesterStats(id)
+		if stats == nil {
+			continue
+		}
+		messages += uint64(stats.MessagesIngested.Load()) //nolint:gosec
+		bytes += uint64(stats.BytesIngested.Load())       //nolint:gosec
+		errors += uint64(stats.Errors.Load())             //nolint:gosec
+		if orch.IsIngesterRunning(id) {
+			anyRunning = true
+		}
+	}
+	return
+}
+
 func (p *mnPeerIngesterStats) CollectIngesterAlive(ingesterID string) map[string]bool {
 	id, err := glid.ParseUUID(ingesterID)
 	if err != nil {
