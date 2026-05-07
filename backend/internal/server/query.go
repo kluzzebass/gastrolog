@@ -431,11 +431,23 @@ func (s *QueryServer) mergeAndStream(
 	// even when local exhausted.
 	var mergeInvolved bool
 
+	// Dedup window owned by the search node's emit boundary. Both the
+	// merge path (mergeIterators) and the single-source path (streamLocal)
+	// route records through emitRecord, which consults this window to
+	// drop cross-vault duplicates that arrive adjacent in TS.
+	dedup := newDedupWindow(orderBy)
+
+	// Tracks whether the merge stopped because the merge-level limit was
+	// reached (more records may exist) vs because both iters drained
+	// naturally (nothing left). Drives the synth-token decision below:
+	// only synthesize a continuation token if we're sure there's more.
+	var limitHit bool
+
 	if remoteIter != nil {
 		mergeInvolved = true
 		// Two-way sorted merge of local and remote iterators.
 		captured := chunk.Record{}
-		if err := mergeIterators(ctx, sb, localIter, remoteIter, orderBy, reverse, limit, transform, streamedHistogram, &mergeHighwater, &captured); err != nil {
+		if err := mergeIterators(ctx, sb, localIter, remoteIter, orderBy, reverse, limit, transform, streamedHistogram, &mergeHighwater, &captured, dedup, &limitHit); err != nil {
 			return err
 		}
 		if !captured.IngestTS.IsZero() {
@@ -444,13 +456,18 @@ func (s *QueryServer) mergeAndStream(
 		}
 	} else {
 		// Fast path: no remote results, just stream local.
-		if err := streamLocal(ctx, sb, localIter, transform, streamedHistogram, &mergeHighwater); err != nil {
+		if err := streamLocal(ctx, sb, localIter, transform, streamedHistogram, &mergeHighwater, dedup); err != nil {
 			return err
 		}
 	}
 
 	// Build resume token from local state only (remote is fully streamed).
-	tokenBytes := buildResumeTokenBytes(transform, getToken, mergeHighwater, reverse, lastLocalSet, lastLocalRec, mergeInvolved)
+	// Synthesize a continuation token only when the merge stopped on
+	// limit — otherwise both iters drained, no more pages exist, and a
+	// synthesized token would make the CLI auto-paginate against an
+	// empty stream and yield phantom duplicates.
+	synthOK := mergeInvolved && limitHit
+	tokenBytes := buildResumeTokenBytes(transform, getToken, mergeHighwater, reverse, lastLocalSet, lastLocalRec, synthOK)
 	finalHistogram := histogram
 	if streamedHistogram != nil {
 		finalHistogram = streamedHistogram.toProto()
@@ -465,13 +482,68 @@ func (s *QueryServer) mergeAndStream(
 	})
 }
 
+// dedupWindow is the streaming cross-vault dedup state. Two copies of
+// the same record (deliberate fanout post-Phase-5) carry an identical
+// EventID, and EventID embeds IngestTS — so duplicates always arrive
+// ADJACENT in the sort-key TS-sorted stream that converges at the
+// search node's emit boundary. State is bounded to "EventIDs seen at
+// the current sort-key TS" — typically 1, occasionally a handful in
+// dense ties — and is cleared on every TS advance. No per-result heap
+// growth.
+//
+// The window lives at the FINAL emit point on the search node so it
+// applies uniformly whether records arrive via streamLocal (engine's
+// internal multi-vault merge) or mergeIterators (local + remote).
+// Histogram counts are deliberately NOT deduped: cross-vault fanout
+// double-counts in the histogram by design (documented in the UI as
+// approximate / "~"). The record list shows unique events.
+//
+type dedupWindow struct {
+	ts      time.Time
+	seen    map[chunk.EventID]struct{}
+	orderBy query.OrderBy
+}
+
+func newDedupWindow(orderBy query.OrderBy) *dedupWindow {
+	return &dedupWindow{seen: make(map[chunk.EventID]struct{}, 4), orderBy: orderBy}
+}
+
+// shouldSkip returns true if rec is a duplicate of a record already
+// emitted at the same sort-key TS. As a side effect, advances the
+// window's TS (clearing the set) when rec carries a new TS.
+//
+// Records without an ingester identity (zero IngesterID) are passed
+// through without dedup tracking: digest stamps a real IngesterID on
+// every legitimate record, and a zero IngesterID either means no
+// digest ran (synthetic test fixture appended directly via CM) or the
+// record predates EventID introduction. There is no canonical identity
+// to dedup against, so collapsing such records by the remaining
+// EventID fields would falsely fold distinct records that all happen
+// to share zero NodeID/IngestSeq.
+func (d *dedupWindow) shouldSkip(rec chunk.Record) bool {
+	var zeroGLID glid.GLID
+	if rec.EventID.IngesterID == zeroGLID {
+		return false
+	}
+	ts := d.orderBy.RecordTS(rec)
+	if !ts.Equal(d.ts) {
+		d.ts = ts
+		clear(d.seen)
+	}
+	if _, dup := d.seen[rec.EventID]; dup {
+		return true
+	}
+	d.seen[rec.EventID] = struct{}{}
+	return false
+}
+
 // streamLocal streams local iterator results through the batcher.
-func streamLocal(ctx context.Context, sb *streamBatcher, localIter iter.Seq2[chunk.Record, error], transform *query.RecordTransform, streamedHistogram *streamedHistogramBuilder, highwater *time.Time) error {
+func streamLocal(ctx context.Context, sb *streamBatcher, localIter iter.Seq2[chunk.Record, error], transform *query.RecordTransform, streamedHistogram *streamedHistogramBuilder, highwater *time.Time, dedup *dedupWindow) error {
 	for rec, err := range localIter {
 		if err != nil {
 			return mapSearchError(err)
 		}
-		done, emitErr := emitRecord(ctx, sb, rec, transform, streamedHistogram, highwater)
+		_, done, emitErr := emitRecord(ctx, sb, rec, transform, streamedHistogram, highwater, dedup)
 		if emitErr != nil {
 			return emitErr
 		}
@@ -498,6 +570,42 @@ func streamLocal(ctx context.Context, sb *streamBatcher, localIter iter.Seq2[chu
 // iter's lastRefs one position past what the merge actually emitted to
 // the client. The caller uses lastLocalRec to override the engine's
 // over-advanced positions in the resume token.
+type mergePending struct {
+	rec chunk.Record
+	err error
+}
+
+// pullPending advances an iter.Pull2 next() into a *mergePending, or
+// nil at exhaustion.
+func pullPending(next func() (chunk.Record, error, bool)) *mergePending {
+	rec, err, ok := next()
+	if !ok {
+		return nil
+	}
+	return &mergePending{rec: rec, err: err}
+}
+
+// pickWinner selects the next record between local and remote
+// pendings, advancing the corresponding iter.
+func pickWinner(local, remote *mergePending, orderBy query.OrderBy, reverse bool, localNext, remoteNext func() (chunk.Record, error, bool)) (rec chunk.Record, fromLocal bool, newLocal, newRemote *mergePending) {
+	switch {
+	case local == nil:
+		return remote.rec, false, local, pullPending(remoteNext)
+	case remote == nil:
+		return local.rec, true, pullPending(localNext), remote
+	}
+	la := orderBy.RecordTS(local.rec)
+	rb := orderBy.RecordTS(remote.rec)
+	localFirst := la.Before(rb)
+	if reverse {
+		localFirst = la.After(rb)
+	}
+	if localFirst {
+		return local.rec, true, pullPending(localNext), remote
+	}
+	return remote.rec, false, local, pullPending(remoteNext)
+}
+
 func mergeIterators(
 	ctx context.Context,
 	sb *streamBatcher,
@@ -509,14 +617,9 @@ func mergeIterators(
 	streamedHistogram *streamedHistogramBuilder,
 	highwater *time.Time,
 	lastLocalRec *chunk.Record,
+	dedup *dedupWindow,
+	limitHit *bool,
 ) error {
-	isBefore := func(a, b time.Time) bool {
-		if reverse {
-			return a.After(b)
-		}
-		return a.Before(b)
-	}
-
 	// Pull synchronously from each iterator using iter.Pull2. This is
 	// critical for resume-token correctness: the previous goroutine-pumped
 	// channel design ran the iterator one record AHEAD of merge consumption
@@ -530,25 +633,11 @@ func mergeIterators(
 	remoteNext, remoteStop := iter.Pull2(remoteIter)
 	defer remoteStop()
 
-	type pending struct {
-		rec chunk.Record
-		err error
-		ok  bool
-	}
-	pull := func(next func() (chunk.Record, error, bool)) *pending {
-		rec, err, ok := next()
-		if !ok {
-			return nil
-		}
-		return &pending{rec: rec, err: err}
-	}
-
-	localPending := pull(localNext)
-	remotePending := pull(remoteNext)
+	localPending := pullPending(localNext)
+	remotePending := pullPending(remoteNext)
 
 	emitted := 0
 	for localPending != nil || remotePending != nil {
-		var rec chunk.Record
 		if localPending != nil && localPending.err != nil {
 			return mapSearchError(localPending.err)
 		}
@@ -556,40 +645,28 @@ func mergeIterators(
 			return mapSearchError(remotePending.err)
 		}
 
+		var rec chunk.Record
 		var fromLocal bool
-		switch {
-		case localPending == nil:
-			rec = remotePending.rec
-			remotePending = pull(remoteNext)
-		case remotePending == nil:
-			rec = localPending.rec
-			fromLocal = true
-			localPending = pull(localNext)
-		default:
-			localTS := orderBy.RecordTS(localPending.rec)
-			remoteTS := orderBy.RecordTS(remotePending.rec)
-			if isBefore(localTS, remoteTS) {
-				rec = localPending.rec
-				fromLocal = true
-				localPending = pull(localNext)
-			} else {
-				rec = remotePending.rec
-				remotePending = pull(remoteNext)
-			}
-		}
+		rec, fromLocal, localPending, remotePending = pickWinner(localPending, remotePending, orderBy, reverse, localNext, remoteNext)
 
-		done, err := emitRecord(ctx, sb, rec, transform, streamedHistogram, highwater)
+		emittedNow, done, err := emitRecord(ctx, sb, rec, transform, streamedHistogram, highwater, dedup)
 		if err != nil {
 			return err
 		}
 		if done {
 			return nil
 		}
+		if !emittedNow {
+			continue
+		}
 		if fromLocal && lastLocalRec != nil {
 			*lastLocalRec = rec
 		}
 		emitted++
 		if limit > 0 && emitted >= limit {
+			if limitHit != nil {
+				*limitHit = true
+			}
 			return nil
 		}
 	}
@@ -605,30 +682,52 @@ func mergeIterators(
 // boundary the client should resume after on the next page — even when the
 // emitted record came from a remote iterator (where the local engine's own
 // highwater is unaware of the merge).
-func emitRecord(ctx context.Context, sb *streamBatcher, rec chunk.Record, transform *query.RecordTransform, streamedHistogram *streamedHistogramBuilder, highwater *time.Time) (bool, error) {
+// emitRecord routes one record through the per-record transform and the
+// stream batcher. Returns (emitted, done, err):
+//
+//   - emitted: true if the record was added to the outgoing stream;
+//     false if it was filtered out by the transform OR skipped as a
+//     cross-vault duplicate by the dedup window. Callers that count
+//     emissions (mergeIterators' merge-level limit) should only
+//     increment on emitted=true.
+//   - done: true if the transform is exhausted (e.g. head/limit pipe
+//     hit) and the caller should stop pulling.
+//
+// When dedup is non-nil, the record is checked against the dedup
+// window BEFORE any transform/highwater work — duplicates short-circuit
+// without affecting state, so the highwater advances only on records
+// the client actually receives. The histogram (streamedHistogram) is
+// also bypassed on dedup-skip; histograms are computed via a separate
+// index-rank arithmetic path that intentionally does NOT dedup, so
+// this branch only matters for the rare callers that pass in a
+// streaming histogram builder.
+func emitRecord(ctx context.Context, sb *streamBatcher, rec chunk.Record, transform *query.RecordTransform, streamedHistogram *streamedHistogramBuilder, highwater *time.Time, dedup *dedupWindow) (bool, bool, error) {
+	if dedup != nil && dedup.shouldSkip(rec) {
+		return false, false, nil
+	}
 	if streamedHistogram != nil {
 		streamedHistogram.add(rec)
 	}
 	if transform != nil {
 		rec, ok := transform.Apply(ctx, rec)
 		if !ok {
-			return transform.Done(), nil
+			return false, transform.Done(), nil
 		}
 		if err := sb.add(recordToProto(rec)); err != nil {
-			return false, err
+			return false, false, err
 		}
 		if highwater != nil {
 			*highwater = rec.IngestTS
 		}
-		return transform.Done(), nil
+		return true, transform.Done(), nil
 	}
 	if err := sb.add(recordToProto(rec)); err != nil {
-		return false, err
+		return false, false, err
 	}
 	if highwater != nil {
 		*highwater = rec.IngestTS
 	}
-	return false, nil
+	return true, false, nil
 }
 
 func normalizedRange(start, end time.Time) (time.Time, time.Time, bool) {

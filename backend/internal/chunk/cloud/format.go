@@ -148,12 +148,16 @@ func tsNanos(t time.Time) uint64 {
 }
 
 // tsFromNanos converts nanoseconds back to time.Time, returning the zero
-// value for the 0 sentinel.
+// value for the 0 sentinel. The result is in UTC so records read from
+// cloud-backed chunks compare equal (as Go struct values, which is what
+// map keys use) to records arriving via proto-wire deserialization
+// (timestamppb.AsTime() also yields UTC). The two paths must agree on
+// time.Location pointer or EventID-keyed map lookups silently miss.
 func tsFromNanos(n uint64) time.Time {
 	if n == 0 {
 		return time.Time{}
 	}
-	return time.Unix(0, int64(n)) //nolint:gosec // G115: nanosecond timestamps are always positive in practice
+	return time.Unix(0, int64(n)).UTC() //nolint:gosec // G115: nanosecond timestamps are always positive in practice
 }
 
 // BlobMeta holds the metadata decoded from a cloud blob header.

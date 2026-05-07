@@ -92,18 +92,26 @@ func EncodeIdxEntry(e IdxEntry, buf []byte) {
 
 // DecodeIdxEntry decodes an idx.log entry from a 74-byte buffer.
 // Timestamps are stored as Unix nanoseconds.
+//
+// All decoded times are normalized to UTC so that records reconstructed
+// from disk compare equal (as Go map keys via struct ==) to records
+// reconstructed from a proto wire roundtrip — timestamppb.AsTime() also
+// returns UTC. Without this, time.Unix(0, ns) returns Local timezone
+// and EventID values that represent the same instant compare unequal
+// in maps, breaking dedup at the search-side emit boundary on any
+// query that mixes local-engine reads with forwarded remote reads.
 func DecodeIdxEntry(buf []byte) IdxEntry {
 	var sourceTS time.Time
 	if ns := int64(binary.LittleEndian.Uint64(buf[idxSourceTSOffset:])); ns > 0 { //nolint:gosec // G115: nanosecond timestamps fit in int64
-		sourceTS = time.Unix(0, ns)
+		sourceTS = time.Unix(0, ns).UTC()
 	}
 	var ingesterID, nodeID glid.GLID
 	copy(ingesterID[:], buf[idxIngesterIDOffset:idxIngesterIDOffset+16])
 	copy(nodeID[:], buf[idxNodeIDOffset:idxNodeIDOffset+16])
 	return IdxEntry{
 		SourceTS:   sourceTS,
-		IngestTS:   time.Unix(0, int64(binary.LittleEndian.Uint64(buf[idxIngestTSOffset:]))), //nolint:gosec // G115: nanosecond timestamps fit in int64
-		WriteTS:    time.Unix(0, int64(binary.LittleEndian.Uint64(buf[idxWriteTSOffset:]))),  //nolint:gosec // G115: nanosecond timestamps fit in int64
+		IngestTS:   time.Unix(0, int64(binary.LittleEndian.Uint64(buf[idxIngestTSOffset:]))).UTC(), //nolint:gosec // G115: nanosecond timestamps fit in int64
+		WriteTS:    time.Unix(0, int64(binary.LittleEndian.Uint64(buf[idxWriteTSOffset:]))).UTC(),  //nolint:gosec // G115: nanosecond timestamps fit in int64
 		RawOffset:  binary.LittleEndian.Uint32(buf[idxRawOffsetOffset:]),
 		RawSize:    binary.LittleEndian.Uint32(buf[idxRawSizeOffset:]),
 		AttrOffset: binary.LittleEndian.Uint32(buf[idxAttrOffsetOffset:]),
