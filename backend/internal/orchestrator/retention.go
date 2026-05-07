@@ -696,18 +696,79 @@ func (r *retentionRunner) tryRetainChunk(id chunk.ChunkID, b retentionRule, alre
 }
 
 // fireRetentionEvent streams the chunk's records through the routing
-// engine with `source = retention-trigger(vault_id)`. Phase 4
-// (gastrolog-42f9z) lands this with a stub: the engine is consulted but
-// has no routes matching retention-trigger sources, so all records drop
-// silently. Phase 5 wires real per-record routing fan-out to destination
-// vaults. The original chunk is destroyed in the caller regardless.
+// engine with synthetic `_source = "retention"` and `_vault = vaultID`.
+// Each matched route writes the records to its destinations. The
+// original chunk is destroyed in the caller regardless of routing
+// outcome — records with no matching route drop silently, the same
+// observable behavior as the legacy expire action.
+//
+// gastrolog-4kkoo (Phase 5): replaces the Phase-4 stub that consulted
+// nothing. The `_reason` synthetic attribute is left empty for now —
+// distinguishing age vs. size vs. count requires splitting composite
+// retention policies into per-trigger rules, which lands in a
+// follow-up. Routes targeting retention today match on
+// `_source = "retention"` and `_vault = "<id>"`.
+//
+// The orchestrator's IngestWithSource path applies the full ingest
+// pipeline: route evaluation, local append, replication, cross-node
+// forwarding. A record with no matching destination drops silently.
+//
+// Operator footgun: a route that matches `_source = "retention"`
+// AND lists the source vault as a destination creates a cascade —
+// re-ingested records produce new chunks that themselves expire on
+// the next sweep. Routes for retention should target a different
+// vault (cold storage, archive, etc.).
 func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) {
-	r.logger.Debug("retention: firing retention-trigger event",
-		"vault", r.vaultID, "chunk", id)
-	// Stub: real routing-engine consultation lands in Phase 5
-	// (gastrolog-4kkoo). Until then, fired events have no effect on
-	// downstream vaults — the chunk's records are just dropped when the
-	// chunk is destroyed below.
+	if r.orch == nil {
+		return
+	}
+	inst := r.findTierInstance()
+	if inst == nil || inst.Chunks == nil {
+		return
+	}
+
+	cur, err := inst.Chunks.OpenCursor(id)
+	if err != nil {
+		r.logger.Warn("retention: open cursor for fan-out failed",
+			"vault", r.vaultID, "chunk", id, "error", err)
+		return
+	}
+	defer func() {
+		if cerr := cur.Close(); cerr != nil {
+			r.logger.Warn("retention: close cursor after fan-out failed",
+				"vault", r.vaultID, "chunk", id, "error", cerr)
+		}
+	}()
+
+	src := SourceContext{
+		Kind:    SourceRetention,
+		VaultID: r.vaultID,
+	}
+
+	fanned := 0
+	for {
+		rec, _, err := cur.Next()
+		if errors.Is(err, chunk.ErrNoMoreRecords) {
+			break
+		}
+		if err != nil {
+			r.logger.Warn("retention: fan-out cursor error",
+				"vault", r.vaultID, "chunk", id, "error", err)
+			return
+		}
+		// Cursor records may reference mmap'd memory that becomes
+		// invalid once we move on. Copy so the ingest path can persist
+		// independently of the cursor lifecycle.
+		if ingErr := r.orch.IngestWithSource(rec.Copy(), src); ingErr != nil {
+			r.logger.Warn("retention: fan-out ingest error",
+				"vault", r.vaultID, "chunk", id, "error", ingErr)
+			// Continue — partial fan-out is acceptable; the original
+			// chunk will still be destroyed by the caller.
+		}
+		fanned++
+	}
+	r.logger.Debug("retention: fanned out chunk records via routing engine",
+		"vault", r.vaultID, "chunk", id, "count", fanned)
 }
 
 // findTierInstance looks up this runner's tier in the orchestrator's vault registry.
