@@ -49,6 +49,58 @@ proto3.util.setEnumType(VaultType, "gastrolog.v1.VaultType", [
 ]);
 
 /**
+ * RouteSource is a source-predicate kind on a route. Phase 4
+ * (gastrolog-42f9z) disambiguates live ingest traffic from
+ * retention-driven re-routing events.
+ *
+ * A route's `sources` list says which kinds of source streams the route
+ * participates in. The route is consulted whenever ANY of its listed
+ * sources is active for the record at hand:
+ *   - ROUTE_SOURCE_INGEST: live ingester traffic. Routes carrying this
+ *     source participate in the live FilterSet.
+ *   - ROUTE_SOURCE_RETENTION_TRIGGER: retention events fired by a vault.
+ *     Routes carrying this source are consulted only when retention
+ *     fires. (They're still excluded from the live FilterSet unless they
+ *     also carry INGEST.)
+ *
+ * Each source kind can optionally narrow further via the repeated
+ * source-id fields. Empty lists mean "match any":
+ *   - INGEST + source_ingester_ids empty: match any ingester.
+ *   - INGEST + source_ingester_ids set: match only those ingesters.
+ *   - RETENTION_TRIGGER + source_vault_ids empty: match any vault.
+ *   - RETENTION_TRIGGER + source_vault_ids set: match only those vaults.
+ *
+ * The narrower lists are independent and only consulted for the matching
+ * source kind. A route with `sources=[INGEST, RETENTION_TRIGGER]`,
+ * `source_ingester_ids=[a]`, and `source_vault_ids=[v]` matches traffic
+ * from ingester a OR retention events from vault v.
+ *
+ * @generated from enum gastrolog.v1.RouteSource
+ */
+export enum RouteSource {
+  /**
+   * @generated from enum value: ROUTE_SOURCE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: ROUTE_SOURCE_INGEST = 1;
+   */
+  INGEST = 1,
+
+  /**
+   * @generated from enum value: ROUTE_SOURCE_RETENTION_TRIGGER = 2;
+   */
+  RETENTION_TRIGGER = 2,
+}
+// Retrieve enum metadata with: proto3.getEnumType(RouteSource)
+proto3.util.setEnumType(RouteSource, "gastrolog.v1.RouteSource", [
+  { no: 0, name: "ROUTE_SOURCE_UNSPECIFIED" },
+  { no: 1, name: "ROUTE_SOURCE_INGEST" },
+  { no: 2, name: "ROUTE_SOURCE_RETENTION_TRIGGER" },
+]);
+
+/**
  * IngesterMode classifies how an ingester acquires data.
  *
  * @generated from enum gastrolog.v1.IngesterMode
@@ -256,6 +308,15 @@ export class GetSystemResponse extends Message<GetSystemResponse> {
 }
 
 /**
+ * RetentionRule binds a retention policy to a vault. Phase 4 (gastrolog-42f9z)
+ * collapsed the prior expire/eject/transition/archive action enum: a fired
+ * retention event always streams the chunk's records through the routing
+ * engine with `source = retention-trigger(vault_id)` and always destroys
+ * the original chunk. The routing engine's verdict — re-route, keep, or
+ * drop — drives placement. Today the routing table has no routes that
+ * match retention-trigger sources, so all retention events drop, replicating
+ * the legacy "expire" behavior. Phase 5 extends the routing table.
+ *
  * @generated from message gastrolog.v1.RetentionRule
  */
 export class RetentionRule extends Message<RetentionRule> {
@@ -263,34 +324,6 @@ export class RetentionRule extends Message<RetentionRule> {
    * @generated from field: bytes retention_policy_id = 1;
    */
   retentionPolicyId = new Uint8Array(0);
-
-  /**
-   * "expire", "eject", "transition", or "archive"
-   *
-   * @generated from field: string action = 2;
-   */
-  action = "";
-
-  /**
-   * deprecated — was target vault for action=migrate
-   *
-   * @generated from field: bytes destination_id = 3;
-   */
-  destinationId = new Uint8Array(0);
-
-  /**
-   * target routes, only for action=eject
-   *
-   * @generated from field: repeated bytes eject_route_ids = 4;
-   */
-  ejectRouteIds: Uint8Array[] = [];
-
-  /**
-   * target class for archive (e.g. "GLACIER", "DEEP_ARCHIVE")
-   *
-   * @generated from field: string archive_storage_class = 5;
-   */
-  archiveStorageClass = "";
 
   constructor(data?: PartialMessage<RetentionRule>) {
     super();
@@ -301,10 +334,6 @@ export class RetentionRule extends Message<RetentionRule> {
   static readonly typeName = "gastrolog.v1.RetentionRule";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "retention_policy_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 2, name: "action", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "destination_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 4, name: "eject_route_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
-    { no: 5, name: "archive_storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RetentionRule {
@@ -595,11 +624,25 @@ export class RouteConfig extends Message<RouteConfig> {
   enabled = false;
 
   /**
-   * when true, excluded from live ingestion FilterSet; usable only as eject target
+   * source-predicate kinds; empty = INGEST default
    *
-   * @generated from field: bool eject_only = 7;
+   * @generated from field: repeated gastrolog.v1.RouteSource sources = 7;
    */
-  ejectOnly = false;
+  sources: RouteSource[] = [];
+
+  /**
+   * optional narrower for sources containing RETENTION_TRIGGER. Empty = any vault.
+   *
+   * @generated from field: repeated bytes source_vault_ids = 8;
+   */
+  sourceVaultIds: Uint8Array[] = [];
+
+  /**
+   * optional narrower for sources containing INGEST. Empty = any ingester.
+   *
+   * @generated from field: repeated bytes source_ingester_ids = 9;
+   */
+  sourceIngesterIds: Uint8Array[] = [];
 
   constructor(data?: PartialMessage<RouteConfig>) {
     super();
@@ -615,7 +658,9 @@ export class RouteConfig extends Message<RouteConfig> {
     { no: 4, name: "destinations", kind: "message", T: RouteDestination, repeated: true },
     { no: 5, name: "distribution", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 6, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 7, name: "eject_only", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 7, name: "sources", kind: "enum", T: proto3.getEnumType(RouteSource), repeated: true },
+    { no: 8, name: "source_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 9, name: "source_ingester_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RouteConfig {

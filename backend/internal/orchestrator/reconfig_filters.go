@@ -89,8 +89,13 @@ func (o *Orchestrator) reloadFiltersFromRoutes(sys *system.System) error {
 		if !route.Enabled {
 			continue
 		}
-		if route.EjectOnly {
-			continue // eject-only routes excluded from live FilterSet
+		// Phase 4 (gastrolog-42f9z): include the route on the live
+		// FilterSet only if it carries the Ingest source kind. Empty
+		// sources defaults to Ingest. A route with multiple kinds
+		// (e.g. {Ingest, RetentionTrigger}) shows up on both surfaces;
+		// the matching engine uses the source-id narrowers per kind.
+		if !routeHasIngestSource(route) {
+			continue
 		}
 
 		var filterExpr string
@@ -200,4 +205,20 @@ func (o *Orchestrator) rebuildFilterSetLocked() {
 	if len(removed) > 0 {
 		o.filterSet = o.filterSet.Without(removed...)
 	}
+}
+
+// routeHasIngestSource reports whether the route's source-predicate set
+// includes the Ingest kind. Empty Sources defaults to Ingest for back-
+// compat with pre-Phase-4 routes that pre-date the multi-select schema.
+// gastrolog-42f9z (Phase 4).
+func routeHasIngestSource(r system.RouteConfig) bool {
+	if len(r.Sources) == 0 {
+		return true
+	}
+	for _, s := range r.Sources {
+		if s == system.RouteSourceIngest || s == system.RouteSourceUnspecified {
+			return true
+		}
+	}
+	return false
 }

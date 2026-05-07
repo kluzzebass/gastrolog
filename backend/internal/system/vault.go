@@ -154,8 +154,6 @@ func MergeVaultFromTiers(v VaultConfig, tiers []TierConfig) VaultConfig {
 		for i, r := range t.RetentionRules {
 			v.RetentionRules[i] = RetentionRule{
 				RetentionPolicyID: r.RetentionPolicyID,
-				Action:            r.Action,
-				EjectRouteIDs:     append([]glid.GLID(nil), r.EjectRouteIDs...),
 			}
 		}
 	}
@@ -200,8 +198,31 @@ const (
 	DistributionFailover DistributionMode = "failover"
 )
 
-// RouteConfig defines a named routing rule that connects a filter to one or more
-// destination vaults. Routes decouple log routing from storage, enabling
+// RouteSource is the source-predicate on a route. Phase 4 (gastrolog-42f9z)
+// introduces this as the minimal disambiguator between live ingest traffic
+// and retention-driven re-routing events. Phase 5 extends to richer
+// predicate composition (per-vault retention sources, ingester-id matching,
+// etc.).
+type RouteSource string
+
+const (
+	// RouteSourceUnspecified is the zero value. Treated as RouteSourceIngest
+	// for back-compat — routes that pre-date Phase 4 had no source predicate
+	// and lived on the live ingestion FilterSet.
+	RouteSourceUnspecified RouteSource = ""
+	// RouteSourceIngest matches live ingestion traffic. The route participates
+	// in the FilterSet that ingester-side routing consults for every record.
+	RouteSourceIngest RouteSource = "ingest"
+	// RouteSourceRetentionTrigger matches retention events fired by a vault.
+	// Routes with this source are EXCLUDED from the live ingestion FilterSet
+	// (so they cannot accidentally match incoming records) and are consulted
+	// only when a retention event streams the records of an aged-out chunk
+	// through the routing engine.
+	RouteSourceRetentionTrigger RouteSource = "retention-trigger"
+)
+
+// RouteConfig defines a named routing rule that connects a filter to one or
+// more destination vaults. Routes decouple log routing from storage, enabling
 // multi-destination routing with distribution modes.
 type RouteConfig struct {
 	// ID is the unique identifier (UUIDv7).
@@ -225,11 +246,21 @@ type RouteConfig struct {
 	// Enabled controls whether this route is active.
 	Enabled bool `json:"enabled,omitempty"`
 
-	// EjectOnly marks this route as excluded from live ingestion.
-	// When false (default), the route participates in the FilterSet.
-	// When true, the route is excluded from live ingestion and can only
-	// be used as an eject target in retention rules.
-	EjectOnly bool `json:"ejectOnly,omitempty"`
+	// Sources is the set of source-predicate kinds the route participates
+	// in. Empty defaults to {Ingest} for back-compat with pre-Phase-4
+	// routes. A route with multiple kinds is consulted whenever ANY of
+	// its kinds matches the record at hand. gastrolog-42f9z (Phase 4).
+	Sources []RouteSource `json:"sources,omitempty"`
+
+	// SourceVaultIDs optionally narrows the RetentionTrigger source to a
+	// specific set of source vaults. Empty = match retention events from
+	// any vault. Ignored when Sources doesn't contain RetentionTrigger.
+	SourceVaultIDs []glid.GLID `json:"sourceVaultIds,omitempty"`
+
+	// SourceIngesterIDs optionally narrows the Ingest source to a
+	// specific set of ingesters. Empty = match any ingester. Ignored
+	// when Sources doesn't contain Ingest.
+	SourceIngesterIDs []glid.GLID `json:"sourceIngesterIds,omitempty"`
 }
 
 // IngesterConfig describes a ingester to instantiate.

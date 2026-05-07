@@ -23,7 +23,7 @@ A **File** vault is local-only by default. Selecting a Cloud Storage on it makes
 ### Common Settings
 
 - **Rotation Policy** — when to seal the active chunk and start a new one. Select a policy from the dropdown, or leave empty for no automatic rotation.
-- **Retention Policy** — what happens to sealed chunks that age out. Select a policy and the action defaults to expire (delete the chunk). Forwarding records between vaults via routes returns in a future release.
+- **Retention Policy** — when sealed chunks fire retention events. Select a policy; the routing engine then decides what happens to the records (re-route to another vault, drop, etc.) based on routes with `Source = Retention trigger`. The original chunk is destroyed regardless. Without retention-trigger routes, fired events drop their records — equivalent to the legacy "expire" behavior.
 - **Replication Factor** — how many copies of each chunk to maintain. 1 = no replication. 2 = one extra copy (redundancy). 3+ = fault-tolerant quorum. The maximum depends on how many [file storages](help:storage-config) have the matching storage class.
 
 ### File Vault Settings

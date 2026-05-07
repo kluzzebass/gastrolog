@@ -343,66 +343,10 @@ func TestLocalLeaderVaultIDsExcludesFollowerOnlyVaults(t *testing.T) {
 
 // --- Retention action from position ---
 
-func TestRetentionActionDerivedFromPosition(t *testing.T) {
-	t.Parallel()
-
-	tier1ID := glid.New()
-	tier2ID := glid.New()
-	tier3ID := glid.New()
-	policyID := glid.New()
-
-	vaultID := glid.New()
-	vaultCfg := system.VaultConfig{
-		ID: vaultID,
-	}
-
-	cfg := &system.Config{
-		RetentionPolicies: []system.RetentionPolicyConfig{
-			{ID: policyID, MaxAge: func() *string { s := "1s"; return &s }()},
-		},
-		Tiers: []system.TierConfig{
-			{ID: tier1ID, VaultID: vaultID, Position: 0},
-			{ID: tier2ID, VaultID: vaultID, Position: 1},
-			{ID: tier3ID, VaultID: vaultID, Position: 2},
-		},
-	}
-
-	// Tier at position 0 (not last) — should be transition.
-	tier1Cfg := &system.TierConfig{
-		ID: tier1ID, VaultID: vaultID, Position: 0,
-		RetentionRules: []system.RetentionRule{
-			{RetentionPolicyID: policyID, Action: system.RetentionActionExpire}, // stored as expire
-		},
-	}
-	rules1, err := resolveRetentionRulesFromTier(cfg, vaultCfg, tier1Cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(rules1) != 1 {
-		t.Fatalf("expected 1 rule, got %d", len(rules1))
-	}
-	if rules1[0].action != system.RetentionActionTransition {
-		t.Errorf("position 0 of 3: expected transition, got %v", rules1[0].action)
-	}
-
-	// Tier at position 2 (last) — should be expire.
-	tier3Cfg := &system.TierConfig{
-		ID: tier3ID, VaultID: vaultID, Position: 2,
-		RetentionRules: []system.RetentionRule{
-			{RetentionPolicyID: policyID, Action: system.RetentionActionTransition}, // stored as transition
-		},
-	}
-	rules3, err := resolveRetentionRulesFromTier(cfg, vaultCfg, tier3Cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(rules3) != 1 {
-		t.Fatalf("expected 1 rule, got %d", len(rules3))
-	}
-	if rules3[0].action != system.RetentionActionExpire {
-		t.Errorf("position 2 of 3: expected expire, got %v", rules3[0].action)
-	}
-}
+// Phase 4 (gastrolog-42f9z) deleted TestRetentionActionDerivedFromPosition:
+// the action enum is gone, retention rules carry only the policy, and the
+// "is this the last tier?" position-based action derivation was removed
+// alongside the multi-tier chain (Phase 2 collapsed the chain).
 
 // --- Import idempotency ---
 

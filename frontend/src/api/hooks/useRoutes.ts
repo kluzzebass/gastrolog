@@ -1,6 +1,7 @@
 import { systemClient } from "../client";
 import { useSystemMutation } from "./useSystem";
 import { decode } from "../glid";
+import { RouteSource } from "../gen/gastrolog/v1/system_pb";
 
 export function usePutRoute() {
   return useSystemMutation(
@@ -11,7 +12,9 @@ export function usePutRoute() {
       destinations: string[];
       distribution: string;
       enabled: boolean;
-      ejectOnly: boolean;
+      sources: RouteSource[];
+      sourceVaultIds: string[];
+      sourceIngesterIds: string[];
     }) => {
       return systemClient.putRoute({
         config: {
@@ -21,7 +24,9 @@ export function usePutRoute() {
           destinations: args.destinations.map((vaultId) => ({ vaultId: decode(vaultId) })),
           distribution: args.distribution,
           enabled: args.enabled,
-          ejectOnly: args.ejectOnly,
+          sources: args.sources,
+          sourceVaultIds: args.sourceVaultIds.map(decode),
+          sourceIngesterIds: args.sourceIngesterIds.map(decode),
         },
       });
     },

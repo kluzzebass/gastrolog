@@ -114,14 +114,12 @@ func findVaultConfig(vaults []system.VaultConfig, id glid.GLID) *system.VaultCon
 }
 
 // resolveRetentionRulesFromTier converts tier retention rules to resolved retentionRule objects.
-func resolveRetentionRulesFromTier(cfg *system.Config, vaultCfg system.VaultConfig, tierCfg *system.TierConfig) ([]retentionRule, error) {
-	// Derive the retention action from the tier's position in the vault chain.
-	// The stored action on the tier config is ignored — position is the source
-	// of truth. This prevents stale actions when tiers are added/removed.
-	tierIDs := system.VaultTierIDs(cfg.Tiers, vaultCfg.ID)
-	tierIndex := slices.Index(tierIDs, tierCfg.ID)
-	isLastTier := tierIndex < 0 || tierIndex == len(tierIDs)-1
-
+func resolveRetentionRulesFromTier(cfg *system.Config, _ system.VaultConfig, tierCfg *system.TierConfig) ([]retentionRule, error) {
+	// Phase 4 (gastrolog-42f9z): retention rules carry only the trigger
+	// policy. The action enum is gone — every fired event streams records
+	// through the routing engine and always destroys the chunk. Phase 2's
+	// 1:1 vault:tier collapse already eliminated the "next tier" concept,
+	// so position-based action derivation is also gone.
 	var rules []retentionRule
 	for _, b := range tierCfg.RetentionRules {
 		retCfg := findRetentionPolicy(cfg.RetentionPolicies, b.RetentionPolicyID)
@@ -136,21 +134,12 @@ func resolveRetentionRulesFromTier(cfg *system.Config, vaultCfg system.VaultConf
 			continue
 		}
 
-		// Eject uses the stored action (explicit route targets).
-		// Otherwise: transition if there's a next tier, expire if last.
-		action := b.Action
-		if action != system.RetentionActionEject {
-			if isLastTier {
-				action = system.RetentionActionExpire
-			} else {
-				action = system.RetentionActionTransition
-			}
-		}
-
+		// Phase 4 (gastrolog-42f9z): retention has no decision layer
+		// anymore. A fired retention event always streams the chunk's
+		// records through the routing engine and always destroys the
+		// chunk. The retention rule carries only the trigger policy.
 		rules = append(rules, retentionRule{
-			policy:        policy,
-			action:        action,
-			ejectRouteIDs: b.EjectRouteIDs,
+			policy: policy,
 		})
 	}
 	return rules, nil

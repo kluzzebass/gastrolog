@@ -188,12 +188,16 @@ message GetSystemResponse {
   repeated TierConfig tiers = 12;
 }
 
+// RetentionRule binds a retention policy to a vault. Phase 4 (gastrolog-42f9z)
+// collapsed the prior expire/eject/transition/archive action enum: a fired
+// retention event always streams the chunk's records through the routing
+// engine with `source = retention-trigger(vault_id)` and always destroys
+// the original chunk. The routing engine's verdict — re-route, keep, or
+// drop — drives placement. Today the routing table has no routes that
+// match retention-trigger sources, so all retention events drop, replicating
+// the legacy "expire" behavior. Phase 5 extends the routing table.
 message RetentionRule {
   bytes retention_policy_id = 1;
-  string action = 2;              // "expire", "eject", "transition", or "archive"
-  bytes destination_id = 3;      // deprecated — was target vault for action=migrate
-  repeated bytes eject_route_ids = 4; // target routes, only for action=eject
-  string archive_storage_class = 5;    // target class for archive (e.g. "GLACIER", "DEEP_ARCHIVE")
 }
 
 // VaultType identifies the storage shape of a vault.
@@ -251,6 +255,37 @@ message RouteDestination {
   bytes vault_id = 1;
 }
 
+// RouteSource is a source-predicate kind on a route. Phase 4
+// (gastrolog-42f9z) disambiguates live ingest traffic from
+// retention-driven re-routing events.
+//
+// A route's `sources` list says which kinds of source streams the route
+// participates in. The route is consulted whenever ANY of its listed
+// sources is active for the record at hand:
+//   - ROUTE_SOURCE_INGEST: live ingester traffic. Routes carrying this
+//     source participate in the live FilterSet.
+//   - ROUTE_SOURCE_RETENTION_TRIGGER: retention events fired by a vault.
+//     Routes carrying this source are consulted only when retention
+//     fires. (They're still excluded from the live FilterSet unless they
+//     also carry INGEST.)
+//
+// Each source kind can optionally narrow further via the repeated
+// source-id fields. Empty lists mean "match any":
+//   - INGEST + source_ingester_ids empty: match any ingester.
+//   - INGEST + source_ingester_ids set: match only those ingesters.
+//   - RETENTION_TRIGGER + source_vault_ids empty: match any vault.
+//   - RETENTION_TRIGGER + source_vault_ids set: match only those vaults.
+//
+// The narrower lists are independent and only consulted for the matching
+// source kind. A route with `sources=[INGEST, RETENTION_TRIGGER]`,
+// `source_ingester_ids=[a]`, and `source_vault_ids=[v]` matches traffic
+// from ingester a OR retention events from vault v.
+enum RouteSource {
+  ROUTE_SOURCE_UNSPECIFIED = 0;
+  ROUTE_SOURCE_INGEST = 1;
+  ROUTE_SOURCE_RETENTION_TRIGGER = 2;
+}
+
 message RouteConfig {
   bytes id = 1;
   string name = 2;
@@ -258,7 +293,9 @@ message RouteConfig {
   repeated RouteDestination destinations = 4;
   string distribution = 5;                     // "fanout" (default), "round-robin", or "failover"
   bool enabled = 6;
-  bool eject_only = 7;                          // when true, excluded from live ingestion FilterSet; usable only as eject target
+  repeated RouteSource sources = 7;             // source-predicate kinds; empty = INGEST default
+  repeated bytes source_vault_ids = 8;          // optional narrower for sources containing RETENTION_TRIGGER. Empty = any vault.
+  repeated bytes source_ingester_ids = 9;       // optional narrower for sources containing INGEST. Empty = any ingester.
 }
 
 // IngesterMode classifies how an ingester acquires data.

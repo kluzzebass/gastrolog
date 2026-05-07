@@ -190,15 +190,23 @@ func (s *SystemServer) buildIngesterStatus(ctx context.Context, id glid.GLID, ra
 		}
 	}
 
-	// Counters: local orchestrator for this node, peer broadcast for remote.
+	// Counters: sum local orchestrator + every live peer broadcast for
+	// this ingester. Parallel ingesters run on every node; reading just
+	// one node's counter (or just local + one peer) under-reports the
+	// cluster total by a factor of N (number of nodes running it). For
+	// singleton ingesters only the host node has non-zero counters, so
+	// the sum equals the singleton's stats. Either way, summing is
+	// correct and matches how route stats already aggregate.
 	if stats := s.orch.GetIngesterStats(id); stats != nil {
-		resp.MessagesIngested = stats.MessagesIngested.Load()
-		resp.Errors = stats.Errors.Load()
-		resp.BytesIngested = stats.BytesIngested.Load()
-	} else if ps := s.findPeerIngesterStats(id); ps != nil {
-		resp.MessagesIngested = int64(ps.MessagesIngested) //nolint:gosec // G115: broadcast uses uint64
-		resp.Errors = int64(ps.Errors)                     //nolint:gosec // G115: broadcast uses uint64
-		resp.BytesIngested = int64(ps.BytesIngested)       //nolint:gosec // G115: broadcast uses uint64
+		resp.MessagesIngested += stats.MessagesIngested.Load()
+		resp.Errors += stats.Errors.Load()
+		resp.BytesIngested += stats.BytesIngested.Load()
+	}
+	if s.peerStats != nil {
+		pMsgs, pBytes, pErrs, _ := s.peerStats.AggregateIngesterStats(id.String())
+		resp.MessagesIngested += int64(pMsgs)  //nolint:gosec // G115: broadcast uses uint64
+		resp.Errors += int64(pErrs)            //nolint:gosec // G115: broadcast uses uint64
+		resp.BytesIngested += int64(pBytes)    //nolint:gosec // G115: broadcast uses uint64
 	}
 
 	return resp, nil

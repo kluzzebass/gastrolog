@@ -39,7 +39,7 @@ func DefaultConfig() *Config {
 				Position:         0,
 				RotationPolicyID: new(rotationID),
 				RetentionRules: []RetentionRule{
-					{RetentionPolicyID: retentionID, Action: RetentionActionExpire},
+					{RetentionPolicyID: retentionID},
 				},
 			},
 		},

@@ -147,7 +147,7 @@ func newRetentionRunner(cm chunk.ChunkManager, im index.IndexManager, policy chu
 	var rules []retentionRule
 	if policy != nil {
 		rules = []retentionRule{
-			{policy: policy, action: system.RetentionActionExpire},
+			{policy: policy},
 		}
 	}
 	r := &retentionRunner{
@@ -301,7 +301,7 @@ func TestSetBindingsHotSwap(t *testing.T) {
 
 	// Hot-swap to keep-1 policy. Next sweep should delete the 2 oldest.
 	newRules := []retentionRule{
-		{policy: chunk.NewCountRetentionPolicy(1), action: system.RetentionActionExpire},
+		{policy: chunk.NewCountRetentionPolicy(1)},
 	}
 
 	r.sweep(newRules)
@@ -511,7 +511,7 @@ func TestClusterRetentionSweepDeletesOnAllNodes(t *testing.T) {
 	const keepN = 3
 	rules := []retentionRule{{
 		policy: chunk.NewCountRetentionPolicy(keepN),
-		action: system.RetentionActionExpire,
+		
 	}}
 	runner := newClusterRetentionRunner(leaderNode.orch, h.vaultID, h.tierIDs[0], leaderTier)
 	runner.sweep(rules)
@@ -590,7 +590,7 @@ func TestClusterRetentionSweepWithTTLOnAllNodes(t *testing.T) {
 	frozenNow := time.Now().Add(5 * time.Minute)
 	rules := []retentionRule{{
 		policy: chunk.NewTTLRetentionPolicy(1 * time.Minute),
-		action: system.RetentionActionExpire,
+		
 	}}
 	runner := newClusterRetentionRunner(leaderNode.orch, h.vaultID, h.tierIDs[0], leaderTier)
 	runner.now = func() time.Time { return frozenNow }

@@ -52,8 +52,7 @@ func tierDrainKey(vaultID, tierID glid.GLID) string {
 // is present. Individual operations inside the drain use the standard tier
 // FSM gates.
 func (o *Orchestrator) DrainTier(ctx context.Context, vaultID, tierID glid.GLID, mode TierDrainMode, targetNodeID string) error {
-	sys, err := o.loadSystem(ctx)
-	if err != nil {
+	if _, err := o.loadSystem(ctx); err != nil {
 		return fmt.Errorf("load config for tier drain: %w", err)
 	}
 
@@ -83,12 +82,11 @@ func (o *Orchestrator) DrainTier(ctx context.Context, vaultID, tierID glid.GLID,
 	// Validate mode-specific requirements.
 	switch mode {
 	case TierDrainDecommission:
-		_, _, err := resolveNextTierInChain(&sys.Config, vaultID, tierID)
-		if err != nil {
-			o.mu.Unlock()
-			// Terminal tier — just expire all chunks instead of transitioning.
-			// That's fine, we'll handle it in the worker.
-		}
+		// Phase 4 (gastrolog-42f9z): the multi-tier chain is gone (Phase 2
+		// collapsed it) and the transition concept is gone with it.
+		// Decommission drain just fires retention events on every chunk —
+		// the routing engine + retention path produce the same observable
+		// behavior the old "transition to next tier" produced.
 	case TierDrainRebalance:
 		if targetNodeID == "" {
 			o.mu.Unlock()
@@ -266,9 +264,14 @@ func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, va
 
 	switch mode {
 	case TierDrainDecommission:
-		if err := o.drainChunkToNextTier(ctx, sys, vaultID, tierID, cursor); err != nil {
-			return err
-		}
+		// Phase 4 (gastrolog-42f9z): no "next tier" anymore. Decommission
+		// just destroys the chunks — equivalent to firing a retention
+		// event with no matching retention-trigger routes (the legacy
+		// expire behavior). Phase 5's richer routing table will let
+		// operators provide a destination route to receive drained
+		// chunks if needed.
+		_ = cursor // caller closes
+		_ = sys
 
 	case TierDrainRebalance:
 		if o.chunkReplicator == nil {
@@ -403,38 +406,6 @@ func (o *Orchestrator) IsTierDraining(vaultID, tierID glid.GLID) bool {
 	defer o.mu.RUnlock()
 	_, ok := o.tierDraining[tierDrainKey(vaultID, tierID)]
 	return ok
-}
-
-// drainChunkToNextTier streams a chunk to the next tier in the vault chain.
-// If the tier is terminal, returns nil (chunk will just be deleted).
-func (o *Orchestrator) drainChunkToNextTier(ctx context.Context, sys *system.System, vaultID, tierID glid.GLID, cursor chunk.RecordCursor) error {
-	nextTierID, nextTierCfg, _ := resolveNextTierInChain(&sys.Config, vaultID, tierID)
-	if nextTierCfg == nil {
-		return nil // terminal tier — caller deletes the chunk
-	}
-	nextLeader := system.LeaderNodeID(sys.Runtime.TierPlacements[nextTierCfg.ID], sys.Runtime.NodeStorageConfigs)
-	remote := nextLeader != "" && nextLeader != o.localNodeID
-
-	if remote {
-		if o.transferrer == nil {
-			return errors.New("no transferrer for remote transition")
-		}
-		return o.transferrer.StreamToTier(ctx, nextLeader, vaultID, nextTierID, chunk.CursorIterator(cursor))
-	}
-
-	iter := chunk.CursorIterator(cursor)
-	for {
-		rec, iterErr := iter()
-		if errors.Is(iterErr, chunk.ErrNoMoreRecords) {
-			return nil
-		}
-		if iterErr != nil {
-			return fmt.Errorf("read chunk: %w", iterErr)
-		}
-		if err := o.AppendToVault(vaultID, nextTierID, chunk.ChunkID{}, rec); err != nil {
-			return fmt.Errorf("append to next tier: %w", err)
-		}
-	}
 }
 
 func drainModeName(m TierDrainMode) string {

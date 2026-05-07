@@ -144,8 +144,6 @@ func TierConfigToProto(t system.TierConfig, placements []system.TierPlacement) *
 	for i, r := range t.RetentionRules {
 		rules[i] = &gastrologv1.RetentionRule{
 			RetentionPolicyId: r.RetentionPolicyID.ToProto(),
-			Action:            string(r.Action),
-			EjectRouteIds:     glid.SliceToProto(r.EjectRouteIDs),
 		}
 	}
 
@@ -195,8 +193,6 @@ func TierConfigFromProto(p *gastrologv1.TierConfig) (system.TierConfig, error) {
 	for _, r := range p.GetRetentionRules() {
 		rule := system.RetentionRule{
 			RetentionPolicyID: glid.FromBytes(r.GetRetentionPolicyId()),
-			Action:            system.RetentionAction(r.GetAction()),
-			EjectRouteIDs:     glid.SliceFromProto(r.GetEjectRouteIds()),
 		}
 		cfg.RetentionRules = append(cfg.RetentionRules, rule)
 	}
@@ -268,8 +264,6 @@ func VaultConfigToProto(v system.VaultConfig) *gastrologv1.VaultConfig {
 	for i, r := range v.RetentionRules {
 		rules[i] = &gastrologv1.RetentionRule{
 			RetentionPolicyId: r.RetentionPolicyID.ToProto(),
-			Action:            string(r.Action),
-			EjectRouteIds:     glid.SliceToProto(r.EjectRouteIDs),
 		}
 	}
 
@@ -317,8 +311,6 @@ func VaultConfigFromProto(p *gastrologv1.VaultConfig) (system.VaultConfig, error
 	for _, r := range p.GetRetentionRules() {
 		rule := system.RetentionRule{
 			RetentionPolicyID: glid.FromBytes(r.GetRetentionPolicyId()),
-			Action:            system.RetentionAction(r.GetAction()),
-			EjectRouteIDs:     glid.SliceFromProto(r.GetEjectRouteIds()),
 		}
 		cfg.RetentionRules = append(cfg.RetentionRules, rule)
 	}
@@ -346,6 +338,61 @@ func VaultTypeToProto(t system.TierType) gastrologv1.VaultType {
 	default:
 		return gastrologv1.VaultType_VAULT_TYPE_UNSPECIFIED
 	}
+}
+
+// RouteSourceToProto maps the Go-side RouteSource string enum to the proto
+// RouteSource. Phase 4 (gastrolog-42f9z); replaces the legacy EjectOnly bool.
+// Empty / unspecified maps to ROUTE_SOURCE_INGEST so back-compat treats
+// pre-Phase-4 routes as live ingestion routes.
+func RouteSourceToProto(s system.RouteSource) gastrologv1.RouteSource {
+	switch s {
+	case system.RouteSourceRetentionTrigger:
+		return gastrologv1.RouteSource_ROUTE_SOURCE_RETENTION_TRIGGER
+	case system.RouteSourceIngest, system.RouteSourceUnspecified:
+		return gastrologv1.RouteSource_ROUTE_SOURCE_INGEST
+	default:
+		return gastrologv1.RouteSource_ROUTE_SOURCE_UNSPECIFIED
+	}
+}
+
+// RouteSourceFromProto maps proto RouteSource back to the Go-side string enum.
+// ROUTE_SOURCE_UNSPECIFIED collapses to RouteSourceIngest for back-compat.
+func RouteSourceFromProto(s gastrologv1.RouteSource) system.RouteSource {
+	switch s {
+	case gastrologv1.RouteSource_ROUTE_SOURCE_RETENTION_TRIGGER:
+		return system.RouteSourceRetentionTrigger
+	case gastrologv1.RouteSource_ROUTE_SOURCE_INGEST, gastrologv1.RouteSource_ROUTE_SOURCE_UNSPECIFIED:
+		return system.RouteSourceIngest
+	default:
+		return system.RouteSourceIngest
+	}
+}
+
+// RouteSourcesToProto maps a Go-side RouteSource slice to the proto
+// RouteSource slice. Empty input → empty output; the matching engine
+// applies the "default to Ingest" interpretation when the list is empty.
+func RouteSourcesToProto(ss []system.RouteSource) []gastrologv1.RouteSource {
+	if len(ss) == 0 {
+		return nil
+	}
+	out := make([]gastrologv1.RouteSource, len(ss))
+	for i, s := range ss {
+		out[i] = RouteSourceToProto(s)
+	}
+	return out
+}
+
+// RouteSourcesFromProto maps a proto RouteSource slice back to the
+// Go-side string enum slice.
+func RouteSourcesFromProto(ss []gastrologv1.RouteSource) []system.RouteSource {
+	if len(ss) == 0 {
+		return nil
+	}
+	out := make([]system.RouteSource, len(ss))
+	for i, s := range ss {
+		out[i] = RouteSourceFromProto(s)
+	}
+	return out
 }
 
 // VaultTypeFromProto maps proto VaultType back to the Go-side TierType.

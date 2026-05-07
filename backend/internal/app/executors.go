@@ -75,14 +75,14 @@ func (a *orchStatsAdapter) RouteStats() cluster.StatsRouteSnapshot {
 	}
 	for vaultID, vs := range a.orch.VaultRouteStatsList() {
 		snap.VaultStats = append(snap.VaultStats, cluster.StatsVaultRouteSnapshot{
-			VaultID:   vaultID.String(),
+			VaultID:   vaultID,
 			Matched:   vs.Matched.Load(),
 			Forwarded: vs.Forwarded.Load(),
 		})
 	}
 	for routeID, rs := range a.orch.PerRouteStatsList() {
 		snap.RouteStats = append(snap.RouteStats, cluster.StatsPerRouteSnapshot{
-			RouteID:   routeID.String(),
+			RouteID:   routeID,
 			Matched:   rs.Matched.Load(),
 			Forwarded: rs.Forwarded.Load(),
 		})

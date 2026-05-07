@@ -124,7 +124,7 @@ func vaultDetailPairs(v *v1.VaultConfig) [][2]string {
 	for i, r := range v.RetentionRules {
 		pairs = append(pairs, [2]string{
 			fmt.Sprintf("Retention Rule[%d]", i),
-			fmt.Sprintf("policy=%s action=%s", glid.FromBytes(r.RetentionPolicyId), r.Action),
+			fmt.Sprintf("policy=%s", glid.FromBytes(r.RetentionPolicyId)),
 		})
 	}
 	return pairs
@@ -298,10 +298,11 @@ func resolveVaultRetentionPolicy(ctx context.Context, cmd *cobra.Command, client
 	}
 	cfg.RetentionRules = []*v1.RetentionRule{{
 		RetentionPolicyId: retIDBytes,
-		// Phase 2 (gastrolog-3iy5l): single instance per vault; the only
-		// terminal action is expire. Cross-vault forwarding lands in
-		// Phase 4 (gastrolog-42f9z).
-		Action: "expire",
+		// Phase 4 (gastrolog-42f9z): retention rules carry only the
+		// trigger policy. Routing of expired chunks' records is the
+		// routing engine's job — give a vault a route with
+		// source=ROUTE_SOURCE_RETENTION_TRIGGER to receive its retired
+		// records (Phase 5 wires this fully).
 	}}
 	return nil
 }

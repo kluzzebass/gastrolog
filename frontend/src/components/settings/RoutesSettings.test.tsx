@@ -22,17 +22,25 @@ const sampleConfig = {
       id: testId(1),
       name: "default-route",
       filterId: testId(10),
-      destinations: [{ vaultId: testId(20) }],
+      // Two destinations so the distribution badge is meaningful here.
+      destinations: [{ vaultId: testId(20) }, { vaultId: testId(21) }],
       distribution: "fanout",
       enabled: true,
+      sources: [],
+      sourceVaultIds: [],
+      sourceIngesterIds: [],
     },
     {
       id: testId(2),
       name: "backup-route",
       filterId: ZERO_ID,
-      destinations: [{ vaultId: testId(21) }],
+      // Two destinations so the distribution badge stays visible.
+      destinations: [{ vaultId: testId(20) }, { vaultId: testId(21) }],
       distribution: "failover",
       enabled: false,
+      sources: [],
+      sourceVaultIds: [],
+      sourceIngesterIds: [],
     },
   ],
   filters: [{ id: testId(10), name: "prod-filter" }],
@@ -77,16 +85,50 @@ describe("RoutesSettings", () => {
     expect(getByText("failover")).toBeTruthy();
   });
 
+  // Distribution is only meaningful when there are 2+ destinations, so the
+  // type badge that surfaces it should disappear for single-destination routes.
+  test("hides distribution badge when route has a single destination", () => {
+    const qc = createTestQueryClient();
+    qc.setQueryData(["system"], {
+      ...sampleConfig,
+      routes: [
+        {
+          id: testId(3),
+          name: "solo-route",
+          filterId: ZERO_ID,
+          destinations: [{ vaultId: testId(20) }],
+          distribution: "fanout",
+          enabled: true,
+          sources: [],
+          sourceVaultIds: [],
+          sourceIngesterIds: [],
+        },
+      ],
+    });
+
+    const { getByText, queryByText } = render(<RoutesSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    expect(getByText("solo-route")).toBeTruthy();
+    // No "fanout" / "round-robin" / "failover" badge should appear.
+    expect(queryByText("fanout")).toBeNull();
+    expect(queryByText("round-robin")).toBeNull();
+    expect(queryByText("failover")).toBeNull();
+  });
+
   test("shows filter and destination names in route status", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], sampleConfig);
 
-    const { getByText } = render(<RoutesSettings dark />, {
+    const { getByText, getAllByText } = render(<RoutesSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
     expect(getByText(/prod-filter/)).toBeTruthy();
-    expect(getByText(/vault-alpha/)).toBeTruthy();
+    // Both routes in the fixture share the vault-alpha + vault-beta
+    // destinations, so the destination string appears once per route.
+    expect(getAllByText(/vault-alpha/).length).toBeGreaterThan(0);
   });
 
   test("shows disabled indicator for disabled routes", () => {

@@ -7,19 +7,17 @@ import { FormField, SelectInput } from "./FormField";
 import { Button } from "./Buttons";
 import type { Job } from "../../api/gen/gastrolog/v1/job_pb";
 
+// Phase 4 (gastrolog-42f9z): retention rules collapsed to just a policy
+// trigger. The action / eject-route-ids fields are gone — the routing
+// engine owns the "what happens to the records" decision via routes
+// with Source = Retention trigger.
 export interface RetentionRuleEdit {
   retentionPolicyId: string;
-  action: string;
-  ejectRouteIds: string[];
 }
 
 /** Returns true when the retention rule (if present) has required fields filled in. */
 export function retentionRulesValid(rules: RetentionRuleEdit[]): boolean {
-  return rules.every(
-    (r) =>
-      r.retentionPolicyId !== "" &&
-      (r.action !== "eject" || r.ejectRouteIds.length > 0),
-  );
+  return rules.every((r) => r.retentionPolicyId !== "");
 }
 
 export function JobProgress({
@@ -86,13 +84,11 @@ export function RetentionRuleEditor({
   rules,
   onChange,
   retentionPolicies,
-  routes,
   dark,
 }: Readonly<{
   rules: RetentionRuleEdit[];
   onChange: (rules: RetentionRuleEdit[]) => void;
   retentionPolicies: Array<{ id: string; name: string }>;
-  routes: Array<{ id: string; name: string; ejectOnly: boolean }>;
   dark: boolean;
 }>) {
   const c = useThemeClass(dark);
@@ -105,20 +101,6 @@ export function RetentionRuleEditor({
       .map((r) => ({ value: r.id, label: r.name || r.id }))
       .sort((a, b) => a.label.localeCompare(b.label)),
   ];
-  const actionOptions = [
-    { value: "expire", label: "expire" },
-    { value: "eject", label: "eject" },
-  ];
-
-  // Only eject-only routes are eligible as eject targets.
-  const ejectRoutes = routes
-    .filter((r) => r.ejectOnly)
-    .sort((a, b) => a.name.localeCompare(b.name));
-
-  const setRule = (patch: Partial<RetentionRuleEdit>) => {
-    if (!rule) return;
-    onChange([{ ...rule, ...patch }]);
-  };
 
   return (
     <div className="flex flex-col gap-2">
@@ -134,7 +116,7 @@ export function RetentionRuleEditor({
           onClick={() =>
             enabled
               ? onChange([])
-              : onChange([{ retentionPolicyId: "", action: "expire", ejectRouteIds: [] }])
+              : onChange([{ retentionPolicyId: "" }])
           }
         >
           {enabled ? "Remove" : "+ Add"}
@@ -148,107 +130,19 @@ export function RetentionRuleEditor({
         </span>
       )}
       {enabled && (
-        <div className="flex flex-col gap-2">
-          <div className="flex items-end gap-2">
-            <div className="flex-1">
-              <FormField label="Policy" dark={dark}>
-                <SelectInput
-                  value={rule.retentionPolicyId}
-                  onChange={(v) => setRule({ retentionPolicyId: v })}
-                  options={policyOptions}
-                  dark={dark}
-                />
-              </FormField>
-            </div>
-            <div className="w-28">
-              <FormField label="Action" dark={dark}>
-                <SelectInput
-                  value={rule.action}
-                  onChange={(v) =>
-                    setRule({
-                      action: v,
-                      ejectRouteIds: v === "eject" ? rule.ejectRouteIds : [],
-                    })
-                  }
-                  options={actionOptions}
-                  dark={dark}
-                />
-              </FormField>
-            </div>
-          </div>
-          {rule.action === "eject" && (
-            <EjectRoutesPicker
-              selectedIds={rule.ejectRouteIds}
-              onChange={(ids) => setRule({ ejectRouteIds: ids })}
-              routes={ejectRoutes}
-              dark={dark}
-            />
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function EjectRoutesPicker({
-  selectedIds,
-  onChange,
-  routes,
-  dark,
-}: Readonly<{
-  selectedIds: string[];
-  onChange: (ids: string[]) => void;
-  routes: Array<{ id: string; name: string }>;
-  dark: boolean;
-}>) {
-  const c = useThemeClass(dark);
-  const usedIds = new Set(selectedIds);
-  const available = routes.filter((r) => !usedIds.has(r.id));
-
-  return (
-    <FormField label="Eject Routes" dark={dark}>
-      <div className="flex flex-col gap-1.5">
-        {selectedIds.map((id) => {
-          const route = routes.find((r) => r.id === id);
-          return (
-            <div key={id} className="flex items-center gap-2">
-              <span
-                className={`flex-1 text-[0.85em] px-2.5 py-1.5 border rounded ${c(
-                  "bg-ink-surface border-ink-border text-text-bright",
-                  "bg-light-surface border-light-border text-light-text-bright",
-                )}`}
-              >
-                {route?.name || id}
-              </span>
-              <Button
-                variant="ghost"
-                onClick={() => onChange(selectedIds.filter((rid) => rid !== id))}
-                dark={dark}
-              >
-                Remove
-              </Button>
-            </div>
-          );
-        })}
-        {available.length > 0 && (
+        <FormField
+          label="Policy"
+          description="When this policy fires, the chunk's records are streamed through the routing engine and the chunk is destroyed. Configure routes with Source = Retention trigger to receive routed records."
+          dark={dark}
+        >
           <SelectInput
-            value=""
-            onChange={(v) => {
-              if (v) onChange([...selectedIds, v]);
-            }}
-            options={[
-              { value: "", label: "Add route\u2026" },
-              ...available.map((r) => ({ value: r.id, label: r.name || r.id })),
-            ]}
+            value={rule.retentionPolicyId}
+            onChange={(v) => onChange([{ retentionPolicyId: v }])}
+            options={policyOptions}
             dark={dark}
           />
-        )}
-        {selectedIds.length === 0 && available.length === 0 && (
-          <p className={`text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
-            No eject-only routes available. Create a route with "Eject Only" enabled first.
-          </p>
-        )}
-      </div>
-    </FormField>
+        </FormField>
+      )}
+    </div>
   );
 }

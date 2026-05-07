@@ -107,6 +107,34 @@ func (p *PeerState) FindIngesterStats(ingesterID string) *gastrologv1.IngesterNo
 	return nil
 }
 
+// AggregateIngesterStats sums an ingester's counters across all live peers.
+// For parallel ingesters (running on every node) the sum is the cluster
+// total; for singleton ingesters only one node carries non-zero counters
+// so the sum still gives the correct number. anyRunning is true when any
+// peer reports the ingester as running.
+func (p *PeerState) AggregateIngesterStats(ingesterID string) (messages, bytes, errors uint64, anyRunning bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	now := time.Now()
+	for _, e := range p.entries {
+		if now.Sub(e.received) > p.ttl || e.stats == nil {
+			continue
+		}
+		for _, is := range e.stats.Ingesters {
+			if string(is.Id) != ingesterID {
+				continue
+			}
+			messages += is.MessagesIngested
+			bytes += is.BytesIngested
+			errors += is.Errors
+			if is.Running {
+				anyRunning = true
+			}
+		}
+	}
+	return
+}
+
 // CollectIngesterAlive returns a map of nodeID → running for the given ingester
 // across all live peers. Only includes peers that report stats for this ingester.
 func (p *PeerState) CollectIngesterAlive(ingesterID string) map[string]bool {

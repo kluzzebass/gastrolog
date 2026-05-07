@@ -36,6 +36,11 @@ import (
 // Implemented by cluster.PeerState; nil in single-node mode.
 type PeerIngesterStatsProvider interface {
 	FindIngesterStats(ingesterID string) *apiv1.IngesterNodeStats
+	// AggregateIngesterStats sums an ingester's counters across every
+	// live peer. For parallel ingesters (running on every node) this is
+	// the cluster total; for singleton ingesters all but one peer
+	// contribute zero so the sum still equals the singleton's stats.
+	AggregateIngesterStats(ingesterID string) (messages, bytes, errors uint64, anyRunning bool)
 	CollectIngesterAlive(ingesterID string) map[string]bool
 }
 
@@ -338,11 +343,13 @@ func (s *SystemServer) loadConfigRoutes(ctx context.Context, resp *apiv1.GetSyst
 	}
 	for _, rt := range routes {
 		prt := &apiv1.RouteConfig{
-			Id:           rt.ID.ToProto(),
-			Name:         rt.Name,
-			Distribution: string(rt.Distribution),
-			Enabled:      rt.Enabled,
-			EjectOnly:    rt.EjectOnly,
+			Id:                rt.ID.ToProto(),
+			Name:              rt.Name,
+			Distribution:      string(rt.Distribution),
+			Enabled:           rt.Enabled,
+			Sources:           convert.RouteSourcesToProto(rt.Sources),
+			SourceVaultIds:    glid.SliceToProto(rt.SourceVaultIDs),
+			SourceIngesterIds: glid.SliceToProto(rt.SourceIngesterIDs),
 		}
 		if rt.FilterID != nil {
 			prt.FilterId = rt.FilterID.ToProto()
@@ -446,14 +453,9 @@ func (s *SystemServer) loadSystemTiers(ctx context.Context, resp *apiv1.GetSyste
 		// Cloud-backed tiers wire as TIER_TYPE_FILE; cloud-ness travels via
 		// cloud_service_id, not the type enum. See gastrolog-4k5mg.
 		for _, r := range tier.RetentionRules {
-			pb := &apiv1.RetentionRule{
+			tc.RetentionRules = append(tc.RetentionRules, &apiv1.RetentionRule{
 				RetentionPolicyId: r.RetentionPolicyID.ToProto(),
-				Action:            string(r.Action),
-			}
-			for _, eid := range r.EjectRouteIDs {
-				pb.EjectRouteIds = append(pb.EjectRouteIds, eid.ToProto())
-			}
-			tc.RetentionRules = append(tc.RetentionRules, pb)
+			})
 		}
 		resp.Tiers = append(resp.Tiers, tc)
 	}

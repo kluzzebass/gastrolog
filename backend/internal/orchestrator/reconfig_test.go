@@ -1055,7 +1055,7 @@ func TestRetentionSingleJobRegistered(t *testing.T) {
 		Tiers: []system.TierConfig{
 			{ID: tierID, Name: "tier", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0, RetentionRules: []system.RetentionRule{{
 				RetentionPolicyID: retPolicyID,
-				Action:            system.RetentionActionExpire,
+				
 			}}},
 		},
 		Vaults: []system.VaultConfig{

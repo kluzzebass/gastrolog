@@ -9,6 +9,7 @@ import (
 	"connectrpc.com/connect"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/convert"
 	"gastrolog/internal/system"
 	"gastrolog/internal/system/raftfsm"
 )
@@ -90,13 +91,15 @@ func (s *SystemServer) PutRoute(
 	}
 
 	cfg := system.RouteConfig{
-		ID:           id,
-		Name:         req.Msg.Config.Name,
-		FilterID:     filterID,
-		Destinations: destinations,
-		Distribution: system.DistributionMode(distribution),
-		Enabled:      req.Msg.Config.Enabled,
-		EjectOnly:    req.Msg.Config.EjectOnly,
+		ID:                id,
+		Name:              req.Msg.Config.Name,
+		FilterID:          filterID,
+		Destinations:      destinations,
+		Distribution:      system.DistributionMode(distribution),
+		Enabled:           req.Msg.Config.Enabled,
+		Sources:           convert.RouteSourcesFromProto(req.Msg.Config.GetSources()),
+		SourceVaultIDs:    glid.SliceFromProto(req.Msg.Config.GetSourceVaultIds()),
+		SourceIngesterIDs: glid.SliceFromProto(req.Msg.Config.GetSourceIngesterIds()),
 	}
 	if err := s.sysStore.PutRoute(ctx, cfg); err != nil {
 		return nil, errInternal(err)
@@ -124,38 +127,12 @@ func (s *SystemServer) DeleteRoute(
 		return nil, connErr
 	}
 
-	// Referential integrity: reject if any tier references this route as an
-	// eject target. Also check vaults — VaultConfig.RetentionRules is
-	// mirrored from TierConfig (gastrolog-257l7) and post-tier this becomes
-	// the only check.
-	tiers, err := s.sysStore.ListTiers(ctx)
-	if err != nil {
-		return nil, errInternal(err)
-	}
-	for _, t := range tiers {
-		for _, rule := range t.RetentionRules {
-			if rule.Action == system.RetentionActionEject {
-				if slices.Contains(rule.EjectRouteIDs, id) {
-					return nil, connect.NewError(connect.CodeFailedPrecondition,
-						fmt.Errorf("route %q is referenced as eject target by tier %q", req.Msg.Id, t.ID))
-				}
-			}
-		}
-	}
-	vaults, err := s.sysStore.ListVaults(ctx)
-	if err != nil {
-		return nil, errInternal(err)
-	}
-	for _, v := range vaults {
-		for _, rule := range v.RetentionRules {
-			if rule.Action == system.RetentionActionEject {
-				if slices.Contains(rule.EjectRouteIDs, id) {
-					return nil, connect.NewError(connect.CodeFailedPrecondition,
-						fmt.Errorf("route %q is referenced as eject target by vault %q", req.Msg.Id, v.ID))
-				}
-			}
-		}
-	}
+	// Phase 4 (gastrolog-42f9z): retention rules no longer carry route
+	// targets — the routing engine owns the WHAT via the route's source
+	// predicate. The eject-route referential-integrity check is gone.
+	// When Phase 5 adds richer routing, route deletion may need new
+	// integrity guards (e.g. block deletion if any retention-trigger
+	// route is the sole drain for a vault), but those don't exist yet.
 
 	if err := s.sysStore.DeleteRoute(ctx, id); err != nil {
 		return nil, errInternal(err)

@@ -85,7 +85,6 @@ function buildNewTierConfig(
       ? [
           new RetentionRule({
             retentionPolicyId: decode(newTier.retentionPolicyId),
-            action: "expire",
           }),
         ]
       : [],
@@ -126,17 +125,15 @@ function maybeUpdatedTier(
   const csIdBytes = csIdStr ? decode(csIdStr) : new Uint8Array(0);
   const csIdChanged = encode(tier.cloudServiceId) !== encode(csIdBytes);
 
-  // Phase 2 (gastrolog-3iy5l): single instance per vault, retention action
-  // is always "expire" (multi-tier transitions return as inter-vault routes
-  // in Phase 4).
-  const expectedAction = "expire";
-  const currentAction = tier.retentionRules[0]?.action;
+  // Phase 4 (gastrolog-42f9z): retention rules carry only the trigger
+  // policy. The action enum is gone — re-routing of expired chunks'
+  // records is the routing engine's job, configured via
+  // RouteSource.RETENTION_TRIGGER on routes.
   const currentRetId = tier.retentionRules[0] ? encode(tier.retentionRules[0].retentionPolicyId) : "";
 
   const changed =
     rpId !== encode(tier.rotationPolicyId) ||
     retPolicyId !== currentRetId ||
-    (!!retPolicyId && currentAction !== expectedAction) ||
     rf !== (tier.replicationFactor || 1) ||
     sc !== (tier.storageClass || 0) ||
     csIdChanged ||
@@ -165,7 +162,7 @@ function maybeUpdatedTier(
   updated.vaultId = new Uint8Array(vaultId);
   updated.position = tierIndex;
   updated.retentionRules = retPolicyId
-    ? [new RetentionRule({ retentionPolicyId: decode(retPolicyId), action: expectedAction })]
+    ? [new RetentionRule({ retentionPolicyId: decode(retPolicyId) })]
     : [];
 
   return updated;

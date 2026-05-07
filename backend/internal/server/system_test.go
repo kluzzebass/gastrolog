@@ -706,6 +706,16 @@ func (m *mockPeerIngesterStats) FindIngesterStats(id string) *gastrologv1.Ingest
 	return m.stats[id]
 }
 
+func (m *mockPeerIngesterStats) AggregateIngesterStats(id string) (messages, bytes, errors uint64, anyRunning bool) {
+	if s := m.stats[id]; s != nil {
+		messages = s.MessagesIngested
+		bytes = s.BytesIngested
+		errors = s.Errors
+		anyRunning = s.Running
+	}
+	return
+}
+
 func (m *mockPeerIngesterStats) CollectIngesterAlive(id string) map[string]bool {
 	if s := m.stats[id]; s != nil {
 		return map[string]bool{"peer": s.Running}
@@ -1192,22 +1202,22 @@ func TestPutRouteEjectOnly(t *testing.T) {
 
 	resp, err := client.PutRoute(ctx, connect.NewRequest(&gastrologv1.PutRouteRequest{
 		Config: &gastrologv1.RouteConfig{
-			Name:      "eject-route",
-			EjectOnly: true,
-			Enabled:   true,
+			Name:    "retention-trigger-route",
+			Sources: []gastrologv1.RouteSource{gastrologv1.RouteSource_ROUTE_SOURCE_RETENTION_TRIGGER},
+			Enabled: true,
 		},
 	}))
 	if err != nil {
 		t.Fatalf("PutRoute: %v", err)
 	}
 
-	// Verify route is in config and marked eject_only.
+	// Verify route is in config and marked with the retention-trigger source.
 	var found bool
 	for _, r := range resp.Msg.System.Routes {
-		if r.Name == "eject-route" {
+		if r.Name == "retention-trigger-route" {
 			found = true
-			if !r.EjectOnly {
-				t.Error("route should be eject_only=true")
+			if !slices.Contains(r.Sources, gastrologv1.RouteSource_ROUTE_SOURCE_RETENTION_TRIGGER) {
+				t.Errorf("route Sources = %v, want to contain ROUTE_SOURCE_RETENTION_TRIGGER", r.Sources)
 			}
 		}
 	}

@@ -178,21 +178,11 @@ func (c RetentionPolicyConfig) ToRetentionPolicy() (chunk.RetentionPolicy, error
 	return chunk.NewCompositeRetentionPolicy(policies...), nil
 }
 
-// RetentionAction describes what happens when a retention policy matches chunks.
-type RetentionAction string
-
-const (
-	// RetentionActionExpire deletes matching chunks (the default behavior).
-	RetentionActionExpire RetentionAction = "expire"
-	// RetentionActionEject streams matching chunks' records through named routes.
-	RetentionActionEject RetentionAction = "eject"
-	// RetentionActionTransition streams matching chunks' records to the next tier in the vault's chain.
-	RetentionActionTransition RetentionAction = "transition"
-)
-
-// RetentionRule pairs a retention policy with an action.
+// RetentionRule binds a retention policy to a vault. Phase 4 (gastrolog-42f9z)
+// collapsed the prior expire/eject/transition/archive action enum: a fired
+// retention event always streams the chunk's records through the routing
+// engine with `source = retention-trigger(vault_id)` and always destroys
+// the original chunk. The routing engine's verdict drives placement.
 type RetentionRule struct {
-	RetentionPolicyID glid.GLID       `json:"retentionPolicyId"`
-	Action            RetentionAction `json:"action"`
-	EjectRouteIDs     []glid.GLID     `json:"ejectRouteIds,omitempty"` // target routes, only for eject
+	RetentionPolicyID glid.GLID `json:"retentionPolicyId"`
 }
