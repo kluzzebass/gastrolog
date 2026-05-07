@@ -414,8 +414,16 @@ func (o *Orchestrator) writeLoop() {
 	defer close(o.done)
 
 	for dr := range o.digestedCh {
-		// Filter to chunk managers (reuses existing Ingest logic).
-		pa, err := o.ingest(dr.rec)
+		// gastrolog-4kkoo (Phase 5): build a SourceContext from the
+		// digested record so route expressions can match on
+		// `_source == "ingest"` and `_ingester == "<id>"`.
+		src := SourceContext{Kind: SourceIngest}
+		if dr.ingesterID != "" {
+			if id, perr := glid.ParseUUID(dr.ingesterID); perr == nil {
+				src.IngesterID = id
+			}
+		}
+		pa, err := o.ingestWithSource(dr.rec, src)
 		if fwErr := o.flushRecordRouteForwards(context.Background(), pa, dr.rec); fwErr != nil {
 			if err == nil {
 				err = fwErr

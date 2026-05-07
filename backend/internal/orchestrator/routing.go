@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"cmp"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -53,6 +54,56 @@ type RouteDestination struct {
 	VaultID glid.GLID
 	NodeID  string
 }
+
+// SourceKind identifies the origin of a record for synthetic-attribute
+// injection at routing-evaluation time. The string values are the
+// canonical wire form — they appear directly as the value of the
+// `_source` synthetic attribute, so route expressions like
+// `_source == "ingest"` work without a separate enum mapping.
+type SourceKind string
+
+const (
+	// SourceIngest tags records arriving from an ingester. The
+	// SourceContext carries the IngesterID so routes can target a
+	// specific ingester (`_ingester == "<id>"`) or a class of them
+	// via attribute filters at the ingester level.
+	SourceIngest SourceKind = "ingest"
+	// SourceRetention tags records the retention engine is feeding
+	// back through the routing table. The SourceContext carries the
+	// VaultID being drained and a Reason ("age", "size", "count")
+	// so routes can fan retention events out to archive or cloud
+	// destinations distinctly from live ingest.
+	SourceRetention SourceKind = "retention"
+	// SourceUnknown tags records from paths that haven't plumbed a
+	// SourceContext yet (test-only direct Ingest calls). Routes that
+	// don't reference synthetic attrs aren't affected.
+	SourceUnknown SourceKind = ""
+)
+
+// SourceContext carries the per-record routing-time fields that don't
+// persist with the record. The routing engine merges these onto the
+// record's attrs as reserved-prefix synthetic keys (`_source`,
+// `_ingester`, `_vault`, `_reason`) for the duration of the match.
+//
+// gastrolog-4kkoo (Phase 5): synthetic attributes unify the Phase-4
+// source-predicate enum and the content filter into a single
+// expression language.
+type SourceContext struct {
+	Kind       SourceKind
+	IngesterID glid.GLID // when Kind == SourceIngest
+	VaultID    glid.GLID // when Kind == SourceRetention (the source vault)
+	Reason     string    // when Kind == SourceRetention (e.g. "age")
+}
+
+// reserved synthetic-attribute keys. The `_` prefix is the convention
+// for system-managed keys; user records that happen to carry `_`-
+// prefixed attrs collide with this namespace and aren't supported.
+const (
+	synthAttrSource    = "_source"
+	synthAttrIngester  = "_ingester"
+	synthAttrVault     = "_vault"
+	synthAttrReason    = "_reason"
+)
 
 // MatchResult pairs a destination vault with the node that owns it,
 // the route that fired the match, and the route's distribution mode.
@@ -135,15 +186,47 @@ func (rs *RouteSet) Routes() []*CompiledRoute {
 	return rs.routes
 }
 
-// Match returns the destinations of the first route that matches the
-// record's attributes. Returns nil if no route matches (drop) or if
-// the routing table is empty. Walks routes in priority order and
-// stops on the first match.
-//
-// gastrolog-4kkoo (Phase 5): synthetic-attribute injection (`_source`,
-// `_ingester`, `_vault`, `_reason`) lands in a follow-up commit. For
-// now Match evaluates against the record's raw attrs only.
+// Match evaluates the routing table against the record's raw attrs
+// only — no synthetic-attribute injection. Use MatchWithSource for
+// the production ingest path; Match stays available for tests and
+// telemetry replays that don't carry source context.
 func (rs *RouteSet) Match(attrs chunk.Attributes) []MatchResult {
+	return rs.matchAttrs(attrs)
+}
+
+// MatchWithSource returns the destinations of the first route that
+// matches the record's attributes, with the SourceContext's synthetic
+// attributes overlaid (`_source`, `_ingester`, `_vault`, `_reason`).
+// First match wins; no-match returns nil (drop).
+//
+// The synthetic overlay is computed in a fresh map per call. For the
+// hot ingest path this is one small allocation per record — well
+// under the cost of the existing per-record digester pipeline. The
+// record's original attrs are not mutated.
+func (rs *RouteSet) MatchWithSource(attrs chunk.Attributes, src SourceContext) []MatchResult {
+	if rs == nil {
+		return nil
+	}
+	enriched := make(chunk.Attributes, len(attrs)+4)
+	maps.Copy(enriched, attrs)
+	if src.Kind != SourceUnknown {
+		enriched[synthAttrSource] = string(src.Kind)
+	}
+	if src.IngesterID != glid.Nil {
+		enriched[synthAttrIngester] = src.IngesterID.String()
+	}
+	if src.VaultID != glid.Nil {
+		enriched[synthAttrVault] = src.VaultID.String()
+	}
+	if src.Reason != "" {
+		enriched[synthAttrReason] = src.Reason
+	}
+	return rs.matchAttrs(enriched)
+}
+
+// matchAttrs is the inner first-match-wins loop shared by Match and
+// MatchWithSource.
+func (rs *RouteSet) matchAttrs(attrs chunk.Attributes) []MatchResult {
 	if rs == nil {
 		return nil
 	}

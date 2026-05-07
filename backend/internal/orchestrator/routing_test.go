@@ -245,6 +245,138 @@ func TestRouteSetRoutesReturnsSorted(t *testing.T) {
 	}
 }
 
+// gastrolog-4kkoo (Phase 5): synthetic-attribute injection.
+
+func TestRouteSetMatchWithSourceInjectsSyntheticAttrs(t *testing.T) {
+	t.Parallel()
+	ingestVault := glid.New()
+	retentionVault := glid.New()
+	ingesterID := glid.New()
+
+	// One route per source kind. Both at priority 0; route names are
+	// chosen so name tiebreaker doesn't cross-contaminate.
+	ingestRoute, err := CompileRoute(glid.New(), "a-ingest", 0,
+		`_source="ingest"`,
+		dest(ingestVault), "fanout")
+	if err != nil {
+		t.Fatalf("CompileRoute ingest: %v", err)
+	}
+	retentionRoute, err := CompileRoute(glid.New(), "b-retention", 0,
+		`_source="retention"`,
+		dest(retentionVault), "fanout")
+	if err != nil {
+		t.Fatalf("CompileRoute retention: %v", err)
+	}
+	rs := NewRouteSet([]*CompiledRoute{ingestRoute, retentionRoute})
+
+	// Ingest source fires the ingest route, not retention.
+	got := matchVaults(rs.MatchWithSource(chunk.Attributes{"env": "prod"}, SourceContext{
+		Kind:       SourceIngest,
+		IngesterID: ingesterID,
+	}))
+	if len(got) != 1 || got[0] != ingestVault {
+		t.Errorf("ingest source: expected [ingest], got %v", got)
+	}
+
+	// Retention source fires the retention route.
+	got = matchVaults(rs.MatchWithSource(chunk.Attributes{"env": "prod"}, SourceContext{
+		Kind:    SourceRetention,
+		VaultID: glid.New(),
+		Reason:  "age",
+	}))
+	if len(got) != 1 || got[0] != retentionVault {
+		t.Errorf("retention source: expected [retention], got %v", got)
+	}
+
+	// Plain Match (no source overlay) sees neither — nothing to drop into.
+	got = matchVaults(rs.Match(chunk.Attributes{"env": "prod"}))
+	if len(got) != 0 {
+		t.Errorf("plain Match without source overlay should miss both routes, got %v", got)
+	}
+}
+
+func TestRouteSetMatchOnSpecificIngester(t *testing.T) {
+	t.Parallel()
+	targetID := glid.New()
+	otherID := glid.New()
+	vaultID := glid.New()
+
+	r, err := CompileRoute(glid.New(), "ing-specific", 0,
+		`_ingester="`+targetID.String()+`"`,
+		dest(vaultID), "fanout")
+	if err != nil {
+		t.Fatalf("CompileRoute: %v", err)
+	}
+	rs := NewRouteSet([]*CompiledRoute{r})
+
+	// Records from the target ingester fire.
+	got := matchVaults(rs.MatchWithSource(chunk.Attributes{}, SourceContext{
+		Kind: SourceIngest, IngesterID: targetID,
+	}))
+	if len(got) != 1 || got[0] != vaultID {
+		t.Errorf("target ingester: expected [vault], got %v", got)
+	}
+
+	// Records from another ingester drop.
+	got = matchVaults(rs.MatchWithSource(chunk.Attributes{}, SourceContext{
+		Kind: SourceIngest, IngesterID: otherID,
+	}))
+	if len(got) != 0 {
+		t.Errorf("other ingester: expected drop, got %v", got)
+	}
+}
+
+func TestRouteSetMatchOnRetentionReason(t *testing.T) {
+	t.Parallel()
+	archiveID := glid.New()
+	vaultID := glid.New()
+
+	r, err := CompileRoute(glid.New(), "age-archive", 0,
+		`_source="retention" AND _reason="age"`,
+		dest(archiveID), "fanout")
+	if err != nil {
+		t.Fatalf("CompileRoute: %v", err)
+	}
+	rs := NewRouteSet([]*CompiledRoute{r})
+
+	// Retention by age fires.
+	got := matchVaults(rs.MatchWithSource(chunk.Attributes{}, SourceContext{
+		Kind: SourceRetention, VaultID: vaultID, Reason: "age",
+	}))
+	if len(got) != 1 || got[0] != archiveID {
+		t.Errorf("retention by age: expected [archive], got %v", got)
+	}
+
+	// Retention by size doesn't fire.
+	got = matchVaults(rs.MatchWithSource(chunk.Attributes{}, SourceContext{
+		Kind: SourceRetention, VaultID: vaultID, Reason: "size",
+	}))
+	if len(got) != 0 {
+		t.Errorf("retention by size: expected drop, got %v", got)
+	}
+}
+
+func TestMatchWithSourceDoesNotMutateAttrs(t *testing.T) {
+	t.Parallel()
+	r, _ := CompileRoute(glid.New(), "all", 0, "*",
+		dest(glid.New()), "fanout")
+	rs := NewRouteSet([]*CompiledRoute{r})
+
+	attrs := chunk.Attributes{"env": "prod"}
+	original := len(attrs)
+	rs.MatchWithSource(attrs, SourceContext{Kind: SourceIngest, IngesterID: glid.New()})
+
+	// The caller's attrs map must not have synthetic keys spliced in.
+	if len(attrs) != original {
+		t.Errorf("attrs map mutated: expected %d entries, got %d", original, len(attrs))
+	}
+	for k := range attrs {
+		if len(k) > 0 && k[0] == '_' {
+			t.Errorf("synthetic key leaked into caller's attrs: %q", k)
+		}
+	}
+}
+
 // Per-expression behavior tests — preserved from the Phase-4 suite,
 // adapted to the per-route shape.
 
