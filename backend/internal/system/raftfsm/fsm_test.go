@@ -31,38 +31,9 @@ func applyCmd(t *testing.T, fsm *FSM, cmd *gastrologv1.SystemCommand) {
 
 func newID() glid.GLID { return glid.New() }
 
-func TestApplyPutFilter(t *testing.T) {
-	t.Parallel()
-	fsm := New()
-	id := newID()
-	applyCmd(t, fsm, command.NewPutFilter(system.FilterConfig{
-		ID: id, Name: "test-filter", Expression: "env=prod",
-	}))
-
-	got, err := fsm.Store().GetFilter(context.Background(), id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got == nil || got.Name != "test-filter" || got.Expression != "env=prod" {
-		t.Fatalf("unexpected filter: %+v", got)
-	}
-}
-
-func TestApplyDeleteFilter(t *testing.T) {
-	t.Parallel()
-	fsm := New()
-	id := newID()
-	applyCmd(t, fsm, command.NewPutFilter(system.FilterConfig{ID: id, Name: "f"}))
-	applyCmd(t, fsm, command.NewDeleteFilter(id))
-
-	got, err := fsm.Store().GetFilter(context.Background(), id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != nil {
-		t.Fatalf("expected nil, got %+v", got)
-	}
-}
+// gastrolog-4kkoo (Phase 5): TestApplyPutFilter / TestApplyDeleteFilter
+// removed. FilterConfig is gone — match expressions live inline on
+// RouteConfig.Stages and the route apply/delete tests cover the dispatch.
 
 func TestApplyPutRotationPolicy(t *testing.T) {
 	t.Parallel()
@@ -670,8 +641,8 @@ func TestSnapshotRestore(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
 	// Populate with various entities.
-	filterID := newID()
-	applyCmd(t, fsm1, command.NewPutFilter(system.FilterConfig{ID: filterID, Name: "f1", Expression: "*"}))
+	// gastrolog-4kkoo (Phase 5): no FilterConfig — match expressions live
+	// inline on routes; the route round-trip below covers the snapshot path.
 
 	maxAge := "1h"
 	rpID := newID()
@@ -746,11 +717,6 @@ func TestSnapshotRestore(t *testing.T) {
 	}
 
 	// Verify all entities.
-	gotFilter, _ := fsm2.Store().GetFilter(ctx, filterID)
-	if gotFilter == nil || gotFilter.Name != "f1" {
-		t.Errorf("filter: %+v", gotFilter)
-	}
-
 	gotRP, _ := fsm2.Store().GetRotationPolicy(ctx, rpID)
 	if gotRP == nil || gotRP.Name != "rp1" {
 		t.Errorf("rotation policy: %+v", gotRP)
@@ -809,7 +775,13 @@ func TestApplyAfterRestore(t *testing.T) {
 	fsm1 := New()
 	now := time.Now().UTC().Truncate(time.Second)
 
-	applyCmd(t, fsm1, command.NewPutFilter(system.FilterConfig{ID: newID(), Name: "pre-snap", Expression: "*"}))
+	// gastrolog-4kkoo (Phase 5): exercise Apply via rotation policy instead
+	// of the deleted filter command — the assertion is about post-Restore
+	// Apply behavior, not about which entity is mutated.
+	preMaxAge := "1h"
+	applyCmd(t, fsm1, command.NewPutRotationPolicy(system.RotationPolicyConfig{
+		ID: newID(), Name: "pre-snap", MaxAge: &preMaxAge,
+	}))
 	applyCmd(t, fsm1, command.NewCreateUser(system.User{
 		ID: newID(), Username: "pre", PasswordHash: "h", Role: "user",
 		CreatedAt: now, UpdatedAt: now,
@@ -831,12 +803,13 @@ func TestApplyAfterRestore(t *testing.T) {
 	}
 
 	// Apply new commands after restore.
-	newFilterID := newID()
-	applyCmd(t, fsm2, command.NewPutFilter(system.FilterConfig{
-		ID: newFilterID, Name: "post-snap", Expression: "env=staging",
+	postMaxAge := "2h"
+	newRotID := newID()
+	applyCmd(t, fsm2, command.NewPutRotationPolicy(system.RotationPolicyConfig{
+		ID: newRotID, Name: "post-snap", MaxAge: &postMaxAge,
 	}))
 
-	got, err := fsm2.Store().GetFilter(context.Background(), newFilterID)
+	got, err := fsm2.Store().GetRotationPolicy(context.Background(), newRotID)
 	if err != nil {
 		t.Fatal(err)
 	}

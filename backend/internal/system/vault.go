@@ -198,69 +198,71 @@ const (
 	DistributionFailover DistributionMode = "failover"
 )
 
-// RouteSource is the source-predicate on a route. Phase 4 (gastrolog-42f9z)
-// introduces this as the minimal disambiguator between live ingest traffic
-// and retention-driven re-routing events. Phase 5 extends to richer
-// predicate composition (per-vault retention sources, ingester-id matching,
-// etc.).
-type RouteSource string
+// RouteStage is one step in a route's pipeline. Phase 5 (gastrolog-4kkoo)
+// introduces the stages model; today's only variant is Match. Future
+// stages (enrich, redact, sample, fork, route_by_field) per
+// gastrolog-5e85x (Programmable Ingestion) plug in here as additional
+// kinds.
+type RouteStage struct {
+	// Match is the boolean filter expression that gates the route.
+	// Exactly one stage variant must be set per stage; today only
+	// Match exists.
+	Match *MatchStage `json:"match,omitempty"`
+}
 
-const (
-	// RouteSourceUnspecified is the zero value. Treated as RouteSourceIngest
-	// for back-compat — routes that pre-date Phase 4 had no source predicate
-	// and lived on the live ingestion FilterSet.
-	RouteSourceUnspecified RouteSource = ""
-	// RouteSourceIngest matches live ingestion traffic. The route participates
-	// in the FilterSet that ingester-side routing consults for every record.
-	RouteSourceIngest RouteSource = "ingest"
-	// RouteSourceRetentionTrigger matches retention events fired by a vault.
-	// Routes with this source are EXCLUDED from the live ingestion FilterSet
-	// (so they cannot accidentally match incoming records) and are consulted
-	// only when a retention event streams the records of an aged-out chunk
-	// through the routing engine.
-	RouteSourceRetentionTrigger RouteSource = "retention-trigger"
-)
+// MatchStage gates the route on a boolean filter expression. The
+// expression is evaluated against the record (which carries
+// system-injected synthetic attributes via reserved-prefix keys:
+// _source, _ingester, _vault, _reason).
+type MatchStage struct {
+	Expression string `json:"expression"`
+}
 
-// RouteConfig defines a named routing rule that connects a filter to one or
-// more destination vaults. Routes decouple log routing from storage, enabling
-// multi-destination routing with distribution modes.
+// RouteConfig is a row in the cluster-wide routing table. Phase 5
+// (gastrolog-4kkoo) collapsed source predicates and content filters
+// into one expression-language model and dropped FilterConfig as a
+// separate entity. Routes are evaluated in priority order; first
+// match wins; no-match drops silently.
 type RouteConfig struct {
 	// ID is the unique identifier (UUIDv7).
 	ID glid.GLID `json:"id"`
 
-	// Name is the human-readable display name (unique).
+	// Name is the human-readable display name (unique). Used as the
+	// deterministic tiebreaker when two routes share a priority.
 	Name string `json:"name"`
 
-	// FilterID references a FilterConfig by UUID.
-	// Nil means no filter (route receives nothing).
-	FilterID *glid.GLID `json:"filterId,omitempty"`
+	// Priority orders routes for first-match-wins evaluation. Lower
+	// fires first. Routes at the same priority are tiebroken by Name
+	// lexicographically.
+	Priority int32 `json:"priority,omitempty"`
 
-	// Destinations lists the vault IDs that this route sends messages to.
+	// Stages is the route's pipeline. Today: a single MatchStage.
+	// Future phases (gastrolog-5e85x) add transform stages.
+	Stages []RouteStage `json:"stages,omitempty"`
+
+	// Destinations lists the vault IDs that this route sends matched
+	// records to.
 	Destinations []glid.GLID `json:"destinations"`
 
-	// Distribution controls how messages are distributed to destinations.
-	// "fanout" (default): send to all destinations.
-	// "round-robin": send to one destination at a time, rotating.
+	// Distribution controls how matched records are distributed across
+	// destinations: "fanout" (default), "round-robin", or "failover".
+	// Only meaningful when len(Destinations) > 1.
 	Distribution DistributionMode `json:"distribution,omitempty"`
 
-	// Enabled controls whether this route is active.
+	// Enabled controls whether this route is active in the routing table.
 	Enabled bool `json:"enabled,omitempty"`
+}
 
-	// Sources is the set of source-predicate kinds the route participates
-	// in. Empty defaults to {Ingest} for back-compat with pre-Phase-4
-	// routes. A route with multiple kinds is consulted whenever ANY of
-	// its kinds matches the record at hand. gastrolog-42f9z (Phase 4).
-	Sources []RouteSource `json:"sources,omitempty"`
-
-	// SourceVaultIDs optionally narrows the RetentionTrigger source to a
-	// specific set of source vaults. Empty = match retention events from
-	// any vault. Ignored when Sources doesn't contain RetentionTrigger.
-	SourceVaultIDs []glid.GLID `json:"sourceVaultIds,omitempty"`
-
-	// SourceIngesterIDs optionally narrows the Ingest source to a
-	// specific set of ingesters. Empty = match any ingester. Ignored
-	// when Sources doesn't contain Ingest.
-	SourceIngesterIDs []glid.GLID `json:"sourceIngesterIds,omitempty"`
+// MatchExpression returns the route's match-stage expression, or "" if
+// the route has no match stage. Convenience accessor — the match stage
+// is the gating predicate today (Phase 5 ships only one stage type).
+func (r *RouteConfig) MatchExpression() string {
+	for _, s := range r.Stages {
+		if s.Match != nil {
+			return s.Match.Expression
+		}
+	}
+	return ""
 }
 
 // IngesterConfig describes a ingester to instantiate.

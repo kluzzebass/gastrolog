@@ -4,7 +4,6 @@ import { Dialog } from "../Dialog";
 import {
   LockIcon,
   ServiceIcon,
-  FilterIcon,
   RouteIcon,
   VaultsIcon,
   IngestersIcon,
@@ -19,7 +18,8 @@ import {
 import { VaultsSettings } from "./VaultsSettings";
 import { IngestersSettings } from "./IngestersSettings";
 import { CertificatesSettings } from "./CertificatesSettings";
-import { FiltersSettings } from "./FiltersSettings";
+// gastrolog-4kkoo (Phase 5): FiltersSettings tab removed — match expressions
+// live inline on routes; the Routes tab edits them directly.
 import { RoutesSettings } from "./RoutesSettings";
 import { PoliciesSettings } from "./PoliciesSettings";
 import { RetentionPoliciesSettings } from "./RetentionPoliciesSettings";
@@ -40,7 +40,6 @@ export type SettingsTab =
   | "storage"
   | "vaults"
   | "ingesters"
-  | "filters"
   | "routes"
   | "policies"
   | "retention"
@@ -77,7 +76,6 @@ const allTabs: TabDef[] = [
   { id: "policies", label: "Rotation Policies", icon: PolicyIcon, helpTopicId: "policy-rotation" },
   { id: "retention", label: "Retention Policies", icon: RetentionIcon, helpTopicId: "policy-retention" },
   { id: "vaults", label: "Vaults", icon: VaultsIcon, helpTopicId: "storage-engines" },
-  { id: "filters", label: "Filters", icon: FilterIcon, helpTopicId: "routing" },
   { id: "routes", label: "Routes", icon: RouteIcon, helpTopicId: "routing" },
 ];
 
@@ -173,7 +171,6 @@ export function SettingsDialog({
           {tab === "users" && <UsersSettings dark={dark} noAuth={noAuth} />}
           {tab === "storage" && <StorageSettings dark={dark} />}
           {tab === "ingesters" && <IngestersSettings dark={dark} expandTarget={expandTarget} onExpandTargetConsumed={clearExpandTarget} onOpenInspector={onOpenInspector} />}
-          {tab === "filters" && <FiltersSettings dark={dark} onNavigateTo={navigateTo} />}
           {tab === "routes" && <RoutesSettings dark={dark} onNavigateTo={navigateTo} />}
           {tab === "policies" && <PoliciesSettings dark={dark} onNavigateTo={navigateTo} />}
           {tab === "retention" && <RetentionPoliciesSettings dark={dark} onNavigateTo={navigateTo} />}

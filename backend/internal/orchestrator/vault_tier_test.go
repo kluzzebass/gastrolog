@@ -1014,12 +1014,12 @@ func TestIngestReturnsReplicationTasks(t *testing.T) {
 	vault.Name = "ingest-ack"
 	orch.RegisterVault(vault)
 
-	// Set up a filter that routes everything to our vault.
-	filter, err := CompileFilter(vaultID, "*")
+	// gastrolog-4kkoo (Phase 5): catch-all route into the vault.
+	cr, err := CompileRoute(glid.New(), "all", 0, "*", []RouteDestination{{VaultID: vaultID}}, "fanout")
 	if err != nil {
 		t.Fatal(err)
 	}
-	orch.SetFilterSet(NewFilterSet([]*CompiledFilter{filter}))
+	orch.SetRouteSet(NewRouteSet([]*CompiledRoute{cr}))
 
 	rec := testRecord("ingest-me")
 	rec.WaitForReplica = true

@@ -26,15 +26,36 @@ import (
 // and CM B fails, the record is persisted in A but not B, and the error
 // from B is returned. There is no rollback.
 func (o *Orchestrator) Ingest(rec chunk.Record) error {
-	pa, err := o.ingest(rec)
+	return o.IngestWithSource(rec, SourceContext{Kind: SourceIngest})
+}
+
+// IngestWithSource ingests a record while tagging it with the given
+// SourceContext. The synthetic attrs (`_source`, `_ingester`, etc.) are
+// overlaid on rec.Attrs only at routing-evaluation time — they don't
+// persist with the record.
+//
+// gastrolog-4kkoo (Phase 5): callers that have the ingester or
+// retention-source identity should use this entry point. Direct
+// callers without source context fall through to Ingest with
+// {Kind: SourceIngest, IngesterID: zero}.
+func (o *Orchestrator) IngestWithSource(rec chunk.Record, src SourceContext) error {
+	pa, err := o.ingestWithSource(rec, src)
 	if err != nil {
 		return err
 	}
 	return o.flushRecordRouteForwards(context.Background(), pa, rec)
 }
 
-// ingest is the internal ingest implementation, called by processMessage.
-// Extracted from Ingest to allow both direct and channel-based ingestion.
+// ingest is the internal ingest implementation. Backwards-compatible
+// shim — defaults source to {Kind: SourceIngest} for callers that
+// haven't migrated to ingestWithSource.
+func (o *Orchestrator) ingest(rec chunk.Record) (*pendingAcks, error) {
+	return o.ingestWithSource(rec, SourceContext{Kind: SourceIngest})
+}
+
+// ingestWithSource is the source-aware ingest path. It threads a
+// SourceContext through to ingestLocked so synthetic attributes
+// (_source, _ingester, _vault, _reason) drive route evaluation.
 //
 // Returns pendingAcks bundling the sync work an ack-gated record triggers:
 // local tier replication to followers, plus cross-node forwarding of
@@ -43,8 +64,8 @@ func (o *Orchestrator) Ingest(rec chunk.Record) error {
 // match a remote vault, syncForwards is populated; the caller must run
 // flushRecordRouteForwards (outside o.mu) so the forward buffer can apply
 // backpressure instead of dropping. See gastrolog-27zvt.
-func (o *Orchestrator) ingest(rec chunk.Record) (*pendingAcks, error) {
-	pa, deferredRemotes, err := o.ingestLocked(rec)
+func (o *Orchestrator) ingestWithSource(rec chunk.Record, src SourceContext) (*pendingAcks, error) {
+	pa, deferredRemotes, err := o.ingestLocked(rec, src)
 	// Fire-and-forget remote replication happens OUTSIDE the orchestrator
 	// lock so a slow or paused follower cannot starve writers (retention,
 	// reconfig). See gastrolog-5oofa.
@@ -58,7 +79,12 @@ func (o *Orchestrator) ingest(rec chunk.Record) (*pendingAcks, error) {
 // pendingAcks for ack-gated sync work and a list of remote-target sets
 // (one per local vault append) that the caller must dispatch via
 // fireAndForgetRemote AFTER releasing the lock.
-func (o *Orchestrator) ingestLocked(rec chunk.Record) (*pendingAcks, [][]remoteForwardTarget, error) {
+//
+// gastrolog-4kkoo (Phase 5): src carries the synthetic-attribute fields
+// (_source, _ingester, _vault, _reason) that route expressions can
+// match against. The synthetic overlay is applied per match call —
+// rec.Attrs itself is not mutated.
+func (o *Orchestrator) ingestLocked(rec chunk.Record, src SourceContext) (*pendingAcks, [][]remoteForwardTarget, error) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
@@ -69,12 +95,12 @@ func (o *Orchestrator) ingestLocked(rec chunk.Record) (*pendingAcks, [][]remoteF
 		return nil, nil, ErrNoChunkManagers
 	}
 
-	if o.filterSet == nil {
+	if o.routeSet == nil {
 		o.routeStats.Dropped.Add(1)
 		return nil, nil, nil // No routes configured — drop the record.
 	}
 
-	matches := o.filterSet.MatchWithNode(rec.Attrs)
+	matches := o.routeSet.MatchWithSource(rec.Attrs, src)
 	if len(matches) == 0 {
 		o.routeStats.Dropped.Add(1)
 		return nil, nil, nil

@@ -30,12 +30,11 @@ func NewConfigCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
 		Short: "Manage gastrolog server configuration",
-		Long:  "Connect to a running gastrolog server and manage vaults, ingesters, filters, routes, policies, certificates, and server settings.",
+		Long:  "Connect to a running gastrolog server and manage vaults, ingesters, routes, policies, certificates, and server settings.",
 	}
 
 	cmd.AddCommand(
 		newCloudServiceCmd(),
-		newFilterCmd(),
 		newRotationPolicyCmd(),
 		newRetentionPolicyCmd(),
 		newVaultCmd(),

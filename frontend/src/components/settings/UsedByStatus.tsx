@@ -41,21 +41,10 @@ export function UsedByStatus({ dark, refs, onNavigate }: Readonly<UsedByStatusPr
   );
 }
 
-interface Route {
-  id: Uint8Array;
-  name: string;
-  filterId: Uint8Array;
-  destinations: { vaultId: Uint8Array }[];
-}
-
-export function routeRefsForFilter(
-  routes: Route[],
-  filterId: string,
-): string[] {
-  return routes
-    .filter((r) => encode(r.filterId) === filterId)
-    .map((r) => r.name || encode(r.id));
-}
+// gastrolog-4kkoo (Phase 5): routeRefsForFilter removed — FilterConfig is
+// gone, so there's nothing to back-reference. Match expressions live
+// inline on RouteConfig.Stages and routes are no longer "used by" any
+// filter entity.
 
 interface Tier {
   id: Uint8Array;

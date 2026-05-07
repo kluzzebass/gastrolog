@@ -44,13 +44,15 @@ func (o *Orchestrator) registerIngester(id glid.GLID, name, ingType string, pass
 	}
 }
 
-// SetFilterSet sets the filter set for attribute-based message filtering.
-// Must be called before Start() or Ingest().
-// If not set, messages are sent to all vaults (legacy fan-out behavior).
-func (o *Orchestrator) SetFilterSet(fs *FilterSet) {
+// SetRouteSet installs the routing table directly. Tests use this to
+// bypass config-driven reload; production wires it through ReloadFilters.
+// gastrolog-4kkoo (Phase 5): replaces the Phase-4 SetFilterSet — the
+// hot path now walks routes in priority order with first-match-wins
+// semantics instead of fanning out across per-vault filters.
+func (o *Orchestrator) SetRouteSet(rs *RouteSet) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.filterSet = fs
+	o.routeSet = rs
 }
 
 // UnregisterIngester removes a ingester from the registry.

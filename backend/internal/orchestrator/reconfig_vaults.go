@@ -78,10 +78,11 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg system.VaultConfig
 	vault.StorageType = string(vaultCfg.Type)
 	o.vaults[vaultCfg.ID] = vault
 
-	// Compile filters immediately so the vault can receive records right away.
-	// The rotation sweep also reconciles filters every 15s as a safety net.
+	// Recompile the routing table immediately so the vault can receive
+	// records right away. The rotation sweep also reconciles every 15s
+	// as a safety net.
 	if sys != nil {
-		_ = o.reloadFiltersFromRoutes(sys)
+		_ = o.reloadRoutesFromConfig(sys)
 	}
 
 	// Rotation and retention are reconciled by the discovery-based sweep
@@ -208,7 +209,7 @@ func (o *Orchestrator) teardownVault(id glid.GLID, vault *Vault) {
 	}
 
 	delete(o.vaults, id)
-	o.rebuildFilterSetLocked()
+	o.rebuildRouteSetLocked()
 }
 
 // DisableVault disables ingestion for a vault.
@@ -438,7 +439,7 @@ func (o *Orchestrator) removeTierFromVault(vaultID, tierID glid.GLID, deleteData
 	// subsequent AddTierToVault can rehydrate.
 	if deleteData {
 		delete(o.vaults, vaultID)
-		o.rebuildFilterSetLocked()
+		o.rebuildRouteSetLocked()
 		o.logger.Info("vault removed", "vault", vaultID)
 	}
 
@@ -582,7 +583,7 @@ func (o *Orchestrator) UnregisterVault(id glid.GLID) error {
 
 	// Remove from registry.
 	delete(o.vaults, id)
-	o.rebuildFilterSetLocked()
+	o.rebuildRouteSetLocked()
 
 	o.logger.Info("vault unregistered (data preserved)", "id", id, "name", vault.Name, "type", vault.Type())
 	return nil
@@ -605,26 +606,12 @@ func (o *Orchestrator) VaultConfig(id glid.GLID) (system.VaultConfig, error) {
 	return cfg, nil
 }
 
-// UpdateVaultFilter updates a vault's filter expression.
-// Returns ErrVaultNotFound if the vault doesn't exist.
-//
-// For rotation policy changes, use ChunkManager(id).SetRotationPolicy(policy)
-// directly with a composed policy object.
-func (o *Orchestrator) UpdateVaultFilter(id glid.GLID, filter string) error {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-
-	if _, exists := o.vaults[id]; !exists {
-		return fmt.Errorf("%w: %s", ErrVaultNotFound, id)
-	}
-
-	if err := o.updateFilterLocked(id, filter); err != nil {
-		return err
-	}
-
-	o.logger.Info("vault filter updated", "id", id, "filter", filter)
-	return nil
-}
+// gastrolog-4kkoo (Phase 5): UpdateVaultFilter is gone. Vaults no
+// longer carry filters of their own — match expressions live inline on
+// route stages. Operators change routing by editing the route, which
+// triggers a NotifyRoutePut → ReloadFilters → reloadRoutesFromConfig
+// cycle. The Phase-4 ergonomic API was test-only; no production caller
+// existed.
 
 // buildTierInstances creates VaultInstance objects for each tier in the vault config.
 // Every node joins every tier's Raft group regardless of storage placement

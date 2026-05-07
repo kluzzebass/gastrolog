@@ -105,12 +105,14 @@ func TestIngestForwardsToRemoteVault(t *testing.T) {
 	localVault.Enabled = true
 	o.vaults[localVaultID] = localVault
 
-	// Build filter set with local + remote targets, both catch-all.
-	localFilter, _ := CompileFilter(localVaultID, "*")
-	remoteFilter, _ := CompileFilter(remoteVaultID, "*")
-	remoteFilter.NodeID = remoteNodeID
-
-	o.filterSet = NewFilterSet([]*CompiledFilter{localFilter, remoteFilter})
+	// gastrolog-4kkoo (Phase 5): single catch-all route fans out to both
+	// local + remote destinations. The remote dest carries NodeID so the
+	// ingest path forwards rather than appends locally.
+	cr, _ := CompileRoute(glid.New(), "fan", 0, "*", []RouteDestination{
+		{VaultID: localVaultID},
+		{VaultID: remoteVaultID, NodeID: remoteNodeID},
+	}, "fanout")
+	o.routeSet = NewRouteSet([]*CompiledRoute{cr})
 
 	rec := chunk.Record{
 		Attrs: chunk.Attributes{"env": "prod"},
@@ -151,21 +153,16 @@ func TestIngestNoForwarderSkipsRemote(t *testing.T) {
 	localVault.Enabled = true
 	o.vaults[localVaultID] = localVault
 
-	// Filter set with local + remote.
-	localFilter, _ := CompileFilter(localVaultID, "*")
-	remoteFilter, _ := CompileFilter(remoteVaultID, "*")
-	remoteFilter.NodeID = "node-B"
-
-	o.filterSet = NewFilterSet([]*CompiledFilter{localFilter, remoteFilter})
-
-	// Test that reloadFiltersFromRoutes correctly skips remote
-	// vaults when no forwarder is set.
-	o.filterSet = nil
+	// gastrolog-4kkoo (Phase 5): exercise reloadRoutesFromConfig with a
+	// route that lists both local and remote destinations. With no
+	// forwarder, the remote destination is dropped during compilation.
+	o.routeSet = nil
 	o.sysLoader = &mockSystemLoader{cfg: &system.Config{
 		Routes: []system.RouteConfig{
 			{
 				ID:           glid.New(),
 				Enabled:      true,
+				Stages:       []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}},
 				Destinations: []glid.GLID{localVaultID, remoteVaultID},
 			},
 		},
@@ -175,19 +172,24 @@ func TestIngestNoForwarderSkipsRemote(t *testing.T) {
 		},
 	}}
 
-	if err := o.reloadFiltersFromRoutes(func() *system.System { s, _ := o.sysLoader.Load(context.Background()); return s }()); err != nil {
-		t.Fatalf("reloadFiltersFromRoutes failed: %v", err)
+	if err := o.reloadRoutesFromConfig(func() *system.System { s, _ := o.sysLoader.Load(context.Background()); return s }()); err != nil {
+		t.Fatalf("reloadRoutesFromConfig failed: %v", err)
 	}
 
-	// Only local vault should be in the filter set.
-	if o.filterSet == nil {
-		t.Fatal("filterSet should not be nil")
+	// Only the local destination should survive — remote is skipped
+	// without a forwarder.
+	if o.routeSet == nil {
+		t.Fatal("routeSet should not be nil")
 	}
-	if len(o.filterSet.filters) != 1 {
-		t.Fatalf("expected 1 filter, got %d", len(o.filterSet.filters))
+	if len(o.routeSet.routes) != 1 {
+		t.Fatalf("expected 1 route, got %d", len(o.routeSet.routes))
 	}
-	if o.filterSet.filters[0].VaultID != localVaultID {
-		t.Errorf("expected local vault %s, got %s", localVaultID, o.filterSet.filters[0].VaultID)
+	dests := o.routeSet.routes[0].Destinations
+	if len(dests) != 1 {
+		t.Fatalf("expected 1 destination, got %d", len(dests))
+	}
+	if dests[0].VaultID != localVaultID {
+		t.Errorf("expected local vault %s, got %s", localVaultID, dests[0].VaultID)
 	}
 }
 
@@ -275,9 +277,10 @@ func TestAckGatedRemoteRecordUsesForwardSync(t *testing.T) {
 	o.SetRecordForwarder(fwd)
 
 	// Single remote filter — no local vault registered.
-	remoteFilter, _ := CompileFilter(remoteVaultID, "*")
-	remoteFilter.NodeID = remoteNodeID
-	o.SetFilterSet(NewFilterSet([]*CompiledFilter{remoteFilter}))
+	// gastrolog-4kkoo (Phase 5): one route, one remote destination.
+	cr, _ := CompileRoute(glid.New(), "remote", 0, "*",
+		[]RouteDestination{{VaultID: remoteVaultID, NodeID: remoteNodeID}}, "fanout")
+	o.SetRouteSet(NewRouteSet([]*CompiledRoute{cr}))
 
 	rec := chunk.Record{
 		Attrs:          chunk.Attributes{"env": "prod"},
@@ -352,9 +355,10 @@ func TestNonAckRemoteVaultDefersForwardSyncUntilFlush(t *testing.T) {
 	}
 	o.SetRecordForwarder(fwd)
 
-	remoteFilter, _ := CompileFilter(remoteVaultID, "*")
-	remoteFilter.NodeID = remoteNodeID
-	o.SetFilterSet(NewFilterSet([]*CompiledFilter{remoteFilter}))
+	// gastrolog-4kkoo (Phase 5): one route, one remote destination.
+	cr, _ := CompileRoute(glid.New(), "remote", 0, "*",
+		[]RouteDestination{{VaultID: remoteVaultID, NodeID: remoteNodeID}}, "fanout")
+	o.SetRouteSet(NewRouteSet([]*CompiledRoute{cr}))
 
 	rec := chunk.Record{
 		Attrs: chunk.Attributes{"env": "prod"},
@@ -405,9 +409,10 @@ func TestAckGatedForwardPropagatesError(t *testing.T) {
 	}
 	o.SetRecordForwarder(fwd)
 
-	remoteFilter, _ := CompileFilter(remoteVaultID, "*")
-	remoteFilter.NodeID = remoteNodeID
-	o.SetFilterSet(NewFilterSet([]*CompiledFilter{remoteFilter}))
+	// gastrolog-4kkoo (Phase 5): one route, one remote destination.
+	cr, _ := CompileRoute(glid.New(), "remote", 0, "*",
+		[]RouteDestination{{VaultID: remoteVaultID, NodeID: remoteNodeID}}, "fanout")
+	o.SetRouteSet(NewRouteSet([]*CompiledRoute{cr}))
 
 	rec := chunk.Record{
 		Attrs:          chunk.Attributes{"env": "prod"},

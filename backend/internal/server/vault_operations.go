@@ -159,8 +159,7 @@ func (s *VaultServer) ExportVault(
 			return err
 		}
 	}
-
-	return stream.Send(&apiv1.ExportVaultResponse{HasMore: false})
+	return nil
 }
 
 func (s *VaultServer) exportChunk(vaultID glid.GLID, chunkID chunk.ChunkID, stream *connect.ServerStream[apiv1.ExportVaultResponse]) error {
@@ -185,7 +184,7 @@ func (s *VaultServer) exportChunk(vaultID glid.GLID, chunkID chunk.ChunkID, stre
 		batch = append(batch, convert.RecordToExport(rec))
 
 		if len(batch) >= batchSize {
-			if err := stream.Send(&apiv1.ExportVaultResponse{Records: batch, HasMore: true}); err != nil {
+			if err := stream.Send(&apiv1.ExportVaultResponse{Records: batch}); err != nil {
 				return err
 			}
 			batch = batch[:0]
@@ -193,7 +192,7 @@ func (s *VaultServer) exportChunk(vaultID glid.GLID, chunkID chunk.ChunkID, stre
 	}
 
 	if len(batch) > 0 {
-		return stream.Send(&apiv1.ExportVaultResponse{Records: batch, HasMore: true})
+		return stream.Send(&apiv1.ExportVaultResponse{Records: batch})
 	}
 	return nil
 }

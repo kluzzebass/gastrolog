@@ -473,7 +473,6 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 
 	vaultID := glid.New()
 	tierID := glid.New()
-	filterID := glid.New()
 	routeID := glid.New()
 
 	store := sysmem.NewStore()
@@ -483,11 +482,10 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 	_ = store.PutTier(context.Background(), system.TierConfig{
 		ID: tierID, Name: "t0", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0,
 	})
-	_ = store.PutFilter(context.Background(), system.FilterConfig{
-		ID: filterID, Name: "all", Expression: "*",
-	})
+	// gastrolog-4kkoo (Phase 5): expression inlined on the route via Stages.
 	_ = store.PutRoute(context.Background(), system.RouteConfig{
-		ID: routeID, Name: "default", FilterID: &filterID,
+		ID: routeID, Name: "default",
+		Stages:       []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}},
 		Destinations: []glid.GLID{vaultID}, Enabled: true,
 	})
 

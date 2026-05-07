@@ -49,58 +49,6 @@ proto3.util.setEnumType(VaultType, "gastrolog.v1.VaultType", [
 ]);
 
 /**
- * RouteSource is a source-predicate kind on a route. Phase 4
- * (gastrolog-42f9z) disambiguates live ingest traffic from
- * retention-driven re-routing events.
- *
- * A route's `sources` list says which kinds of source streams the route
- * participates in. The route is consulted whenever ANY of its listed
- * sources is active for the record at hand:
- *   - ROUTE_SOURCE_INGEST: live ingester traffic. Routes carrying this
- *     source participate in the live FilterSet.
- *   - ROUTE_SOURCE_RETENTION_TRIGGER: retention events fired by a vault.
- *     Routes carrying this source are consulted only when retention
- *     fires. (They're still excluded from the live FilterSet unless they
- *     also carry INGEST.)
- *
- * Each source kind can optionally narrow further via the repeated
- * source-id fields. Empty lists mean "match any":
- *   - INGEST + source_ingester_ids empty: match any ingester.
- *   - INGEST + source_ingester_ids set: match only those ingesters.
- *   - RETENTION_TRIGGER + source_vault_ids empty: match any vault.
- *   - RETENTION_TRIGGER + source_vault_ids set: match only those vaults.
- *
- * The narrower lists are independent and only consulted for the matching
- * source kind. A route with `sources=[INGEST, RETENTION_TRIGGER]`,
- * `source_ingester_ids=[a]`, and `source_vault_ids=[v]` matches traffic
- * from ingester a OR retention events from vault v.
- *
- * @generated from enum gastrolog.v1.RouteSource
- */
-export enum RouteSource {
-  /**
-   * @generated from enum value: ROUTE_SOURCE_UNSPECIFIED = 0;
-   */
-  UNSPECIFIED = 0,
-
-  /**
-   * @generated from enum value: ROUTE_SOURCE_INGEST = 1;
-   */
-  INGEST = 1,
-
-  /**
-   * @generated from enum value: ROUTE_SOURCE_RETENTION_TRIGGER = 2;
-   */
-  RETENTION_TRIGGER = 2,
-}
-// Retrieve enum metadata with: proto3.getEnumType(RouteSource)
-proto3.util.setEnumType(RouteSource, "gastrolog.v1.RouteSource", [
-  { no: 0, name: "ROUTE_SOURCE_UNSPECIFIED" },
-  { no: 1, name: "ROUTE_SOURCE_INGEST" },
-  { no: 2, name: "ROUTE_SOURCE_RETENTION_TRIGGER" },
-]);
-
-/**
  * IngesterMode classifies how an ingester acquires data.
  *
  * @generated from enum gastrolog.v1.IngesterMode
@@ -221,50 +169,45 @@ export class GetSystemResponse extends Message<GetSystemResponse> {
   rotationPolicies: RotationPolicyConfig[] = [];
 
   /**
-   * @generated from field: repeated gastrolog.v1.FilterConfig filters = 4;
-   */
-  filters: FilterConfig[] = [];
-
-  /**
-   * @generated from field: repeated gastrolog.v1.RetentionPolicyConfig retention_policies = 5;
+   * @generated from field: repeated gastrolog.v1.RetentionPolicyConfig retention_policies = 4;
    */
   retentionPolicies: RetentionPolicyConfig[] = [];
 
   /**
-   * @generated from field: repeated gastrolog.v1.NodeConfig node_configs = 6;
+   * @generated from field: repeated gastrolog.v1.NodeConfig node_configs = 5;
    */
   nodeConfigs: NodeConfig[] = [];
 
   /**
-   * @generated from field: repeated gastrolog.v1.RouteConfig routes = 7;
+   * @generated from field: repeated gastrolog.v1.RouteConfig routes = 6;
    */
   routes: RouteConfig[] = [];
+
+  /**
+   * @generated from field: repeated gastrolog.v1.ManagedFileInfo managed_files = 7;
+   */
+  managedFiles: ManagedFileInfo[] = [];
 
   /**
    * Committed log index on the system Raft group (monotonic). Used by clients
    * to avoid regressing cached replicated state with stale reads.
    *
-   * @generated from field: uint64 system_raft_index = 9;
+   * @generated from field: uint64 system_raft_index = 8;
    */
   systemRaftIndex = protoInt64.zero;
 
   /**
-   * @generated from field: repeated gastrolog.v1.ManagedFileInfo managed_files = 8;
-   */
-  managedFiles: ManagedFileInfo[] = [];
-
-  /**
-   * @generated from field: repeated gastrolog.v1.CloudService cloud_services = 10;
+   * @generated from field: repeated gastrolog.v1.CloudService cloud_services = 9;
    */
   cloudServices: CloudService[] = [];
 
   /**
-   * @generated from field: repeated gastrolog.v1.NodeStorageConfig node_storage_configs = 11;
+   * @generated from field: repeated gastrolog.v1.NodeStorageConfig node_storage_configs = 10;
    */
   nodeStorageConfigs: NodeStorageConfig[] = [];
 
   /**
-   * @generated from field: repeated gastrolog.v1.TierConfig tiers = 12;
+   * @generated from field: repeated gastrolog.v1.TierConfig tiers = 11;
    */
   tiers: TierConfig[] = [];
 
@@ -279,15 +222,14 @@ export class GetSystemResponse extends Message<GetSystemResponse> {
     { no: 1, name: "vaults", kind: "message", T: VaultConfig, repeated: true },
     { no: 2, name: "ingesters", kind: "message", T: IngesterConfig, repeated: true },
     { no: 3, name: "rotation_policies", kind: "message", T: RotationPolicyConfig, repeated: true },
-    { no: 4, name: "filters", kind: "message", T: FilterConfig, repeated: true },
-    { no: 5, name: "retention_policies", kind: "message", T: RetentionPolicyConfig, repeated: true },
-    { no: 6, name: "node_configs", kind: "message", T: NodeConfig, repeated: true },
-    { no: 7, name: "routes", kind: "message", T: RouteConfig, repeated: true },
-    { no: 9, name: "system_raft_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
-    { no: 8, name: "managed_files", kind: "message", T: ManagedFileInfo, repeated: true },
-    { no: 10, name: "cloud_services", kind: "message", T: CloudService, repeated: true },
-    { no: 11, name: "node_storage_configs", kind: "message", T: NodeStorageConfig, repeated: true },
-    { no: 12, name: "tiers", kind: "message", T: TierConfig, repeated: true },
+    { no: 4, name: "retention_policies", kind: "message", T: RetentionPolicyConfig, repeated: true },
+    { no: 5, name: "node_configs", kind: "message", T: NodeConfig, repeated: true },
+    { no: 6, name: "routes", kind: "message", T: RouteConfig, repeated: true },
+    { no: 7, name: "managed_files", kind: "message", T: ManagedFileInfo, repeated: true },
+    { no: 8, name: "system_raft_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 9, name: "cloud_services", kind: "message", T: CloudService, repeated: true },
+    { no: 10, name: "node_storage_configs", kind: "message", T: NodeStorageConfig, repeated: true },
+    { no: 11, name: "tiers", kind: "message", T: TierConfig, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetSystemResponse {
@@ -586,6 +528,29 @@ export class RouteDestination extends Message<RouteDestination> {
 }
 
 /**
+ * RouteConfig is a row in the cluster-wide routing table. Phase 5
+ * (gastrolog-4kkoo) collapsed the prior (filter_id + source predicate
+ * + narrower lists) shape into a sequence of stages plus destinations.
+ *
+ * Each route is evaluated in priority order (lower priority value fires
+ * first; lexicographic name as deterministic tiebreaker). On a record's
+ * behalf the routing engine evaluates each stage in `stages` against
+ * the record (which carries synthetic system-injected attributes
+ * `_source`, `_ingester`, `_vault`, `_reason` in addition to its own
+ * content attributes). Today only MatchStage exists — it gates the
+ * route on a boolean expression. Future stages (enrich, redact, sample,
+ * fork, route_by_field) plug in here as additional `RouteStage` oneof
+ * variants per gastrolog-5e85x (Programmable Ingestion).
+ *
+ * First-match-wins: when a record matches a route, that route fires
+ * and evaluation stops. Operators wanting parallel paths use the fork
+ * stage (Programmable Ingestion); operators wanting unconditional
+ * destinations use a single route with multiple `destinations` and a
+ * fanout `distribution`.
+ *
+ * A no-match record is dropped silently. Operators add a catch-all
+ * route at the lowest priority for explicit handling.
+ *
  * @generated from message gastrolog.v1.RouteConfig
  */
 export class RouteConfig extends Message<RouteConfig> {
@@ -600,49 +565,35 @@ export class RouteConfig extends Message<RouteConfig> {
   name = "";
 
   /**
-   * references FilterConfig.id
+   * lower fires first; ties broken by name lexicographically
    *
-   * @generated from field: bytes filter_id = 3;
+   * @generated from field: int32 priority = 3;
    */
-  filterId = new Uint8Array(0);
+  priority = 0;
 
   /**
-   * @generated from field: repeated gastrolog.v1.RouteDestination destinations = 4;
+   * pipeline; today: [MatchStage]
+   *
+   * @generated from field: repeated gastrolog.v1.RouteStage stages = 4;
+   */
+  stages: RouteStage[] = [];
+
+  /**
+   * @generated from field: repeated gastrolog.v1.RouteDestination destinations = 5;
    */
   destinations: RouteDestination[] = [];
 
   /**
    * "fanout" (default), "round-robin", or "failover"
    *
-   * @generated from field: string distribution = 5;
+   * @generated from field: string distribution = 6;
    */
   distribution = "";
 
   /**
-   * @generated from field: bool enabled = 6;
+   * @generated from field: bool enabled = 7;
    */
   enabled = false;
-
-  /**
-   * source-predicate kinds; empty = INGEST default
-   *
-   * @generated from field: repeated gastrolog.v1.RouteSource sources = 7;
-   */
-  sources: RouteSource[] = [];
-
-  /**
-   * optional narrower for sources containing RETENTION_TRIGGER. Empty = any vault.
-   *
-   * @generated from field: repeated bytes source_vault_ids = 8;
-   */
-  sourceVaultIds: Uint8Array[] = [];
-
-  /**
-   * optional narrower for sources containing INGEST. Empty = any ingester.
-   *
-   * @generated from field: repeated bytes source_ingester_ids = 9;
-   */
-  sourceIngesterIds: Uint8Array[] = [];
 
   constructor(data?: PartialMessage<RouteConfig>) {
     super();
@@ -654,13 +605,11 @@ export class RouteConfig extends Message<RouteConfig> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "filter_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 4, name: "destinations", kind: "message", T: RouteDestination, repeated: true },
-    { no: 5, name: "distribution", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 6, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 7, name: "sources", kind: "enum", T: proto3.getEnumType(RouteSource), repeated: true },
-    { no: 8, name: "source_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
-    { no: 9, name: "source_ingester_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 3, name: "priority", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 4, name: "stages", kind: "message", T: RouteStage, repeated: true },
+    { no: 5, name: "destinations", kind: "message", T: RouteDestination, repeated: true },
+    { no: 6, name: "distribution", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 7, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RouteConfig {
@@ -677,6 +626,95 @@ export class RouteConfig extends Message<RouteConfig> {
 
   static equals(a: RouteConfig | PlainMessage<RouteConfig> | undefined, b: RouteConfig | PlainMessage<RouteConfig> | undefined): boolean {
     return proto3.util.equals(RouteConfig, a, b);
+  }
+}
+
+/**
+ * RouteStage is one step in a route's pipeline. Phase 5 ships only
+ * MatchStage. Future stages (enrich, redact, sample, fork,
+ * route_by_field) per Programmable Ingestion (gastrolog-5e85x).
+ *
+ * @generated from message gastrolog.v1.RouteStage
+ */
+export class RouteStage extends Message<RouteStage> {
+  /**
+   * @generated from oneof gastrolog.v1.RouteStage.stage
+   */
+  stage: {
+    /**
+     * @generated from field: gastrolog.v1.MatchStage match = 1;
+     */
+    value: MatchStage;
+    case: "match";
+  } | { case: undefined; value?: undefined } = { case: undefined };
+
+  constructor(data?: PartialMessage<RouteStage>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.RouteStage";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "match", kind: "message", T: MatchStage, oneof: "stage" },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RouteStage {
+    return new RouteStage().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RouteStage {
+    return new RouteStage().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RouteStage {
+    return new RouteStage().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RouteStage | PlainMessage<RouteStage> | undefined, b: RouteStage | PlainMessage<RouteStage> | undefined): boolean {
+    return proto3.util.equals(RouteStage, a, b);
+  }
+}
+
+/**
+ * MatchStage gates the route on a boolean filter expression. The
+ * expression is evaluated against the record (with system-injected
+ * synthetic attributes available via reserved-prefix keys: _source,
+ * _ingester, _vault, _reason).
+ *
+ * @generated from message gastrolog.v1.MatchStage
+ */
+export class MatchStage extends Message<MatchStage> {
+  /**
+   * @generated from field: string expression = 1;
+   */
+  expression = "";
+
+  constructor(data?: PartialMessage<MatchStage>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.MatchStage";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "expression", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): MatchStage {
+    return new MatchStage().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): MatchStage {
+    return new MatchStage().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): MatchStage {
+    return new MatchStage().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: MatchStage | PlainMessage<MatchStage> | undefined, b: MatchStage | PlainMessage<MatchStage> | undefined): boolean {
+    return proto3.util.equals(MatchStage, a, b);
   }
 }
 
@@ -763,55 +801,6 @@ export class IngesterConfig extends Message<IngesterConfig> {
 
   static equals(a: IngesterConfig | PlainMessage<IngesterConfig> | undefined, b: IngesterConfig | PlainMessage<IngesterConfig> | undefined): boolean {
     return proto3.util.equals(IngesterConfig, a, b);
-  }
-}
-
-/**
- * @generated from message gastrolog.v1.FilterConfig
- */
-export class FilterConfig extends Message<FilterConfig> {
-  /**
-   * @generated from field: string expression = 1;
-   */
-  expression = "";
-
-  /**
-   * @generated from field: bytes id = 2;
-   */
-  id = new Uint8Array(0);
-
-  /**
-   * @generated from field: string name = 3;
-   */
-  name = "";
-
-  constructor(data?: PartialMessage<FilterConfig>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.FilterConfig";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "expression", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 3, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): FilterConfig {
-    return new FilterConfig().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): FilterConfig {
-    return new FilterConfig().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): FilterConfig {
-    return new FilterConfig().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: FilterConfig | PlainMessage<FilterConfig> | undefined, b: FilterConfig | PlainMessage<FilterConfig> | undefined): boolean {
-    return proto3.util.equals(FilterConfig, a, b);
   }
 }
 
@@ -1319,154 +1308,6 @@ export class WatchIngesterStatusResponse extends Message<WatchIngesterStatusResp
 
   static equals(a: WatchIngesterStatusResponse | PlainMessage<WatchIngesterStatusResponse> | undefined, b: WatchIngesterStatusResponse | PlainMessage<WatchIngesterStatusResponse> | undefined): boolean {
     return proto3.util.equals(WatchIngesterStatusResponse, a, b);
-  }
-}
-
-/**
- * @generated from message gastrolog.v1.PutFilterRequest
- */
-export class PutFilterRequest extends Message<PutFilterRequest> {
-  /**
-   * @generated from field: gastrolog.v1.FilterConfig config = 2;
-   */
-  config?: FilterConfig;
-
-  constructor(data?: PartialMessage<PutFilterRequest>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.PutFilterRequest";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 2, name: "config", kind: "message", T: FilterConfig },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutFilterRequest {
-    return new PutFilterRequest().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutFilterRequest {
-    return new PutFilterRequest().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutFilterRequest {
-    return new PutFilterRequest().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: PutFilterRequest | PlainMessage<PutFilterRequest> | undefined, b: PutFilterRequest | PlainMessage<PutFilterRequest> | undefined): boolean {
-    return proto3.util.equals(PutFilterRequest, a, b);
-  }
-}
-
-/**
- * @generated from message gastrolog.v1.PutFilterResponse
- */
-export class PutFilterResponse extends Message<PutFilterResponse> {
-  /**
-   * @generated from field: gastrolog.v1.GetSystemResponse system = 1;
-   */
-  system?: GetSystemResponse;
-
-  constructor(data?: PartialMessage<PutFilterResponse>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.PutFilterResponse";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "system", kind: "message", T: GetSystemResponse },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutFilterResponse {
-    return new PutFilterResponse().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutFilterResponse {
-    return new PutFilterResponse().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutFilterResponse {
-    return new PutFilterResponse().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: PutFilterResponse | PlainMessage<PutFilterResponse> | undefined, b: PutFilterResponse | PlainMessage<PutFilterResponse> | undefined): boolean {
-    return proto3.util.equals(PutFilterResponse, a, b);
-  }
-}
-
-/**
- * @generated from message gastrolog.v1.DeleteFilterRequest
- */
-export class DeleteFilterRequest extends Message<DeleteFilterRequest> {
-  /**
-   * @generated from field: bytes id = 1;
-   */
-  id = new Uint8Array(0);
-
-  constructor(data?: PartialMessage<DeleteFilterRequest>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.DeleteFilterRequest";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteFilterRequest {
-    return new DeleteFilterRequest().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DeleteFilterRequest {
-    return new DeleteFilterRequest().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DeleteFilterRequest {
-    return new DeleteFilterRequest().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: DeleteFilterRequest | PlainMessage<DeleteFilterRequest> | undefined, b: DeleteFilterRequest | PlainMessage<DeleteFilterRequest> | undefined): boolean {
-    return proto3.util.equals(DeleteFilterRequest, a, b);
-  }
-}
-
-/**
- * @generated from message gastrolog.v1.DeleteFilterResponse
- */
-export class DeleteFilterResponse extends Message<DeleteFilterResponse> {
-  /**
-   * @generated from field: gastrolog.v1.GetSystemResponse system = 1;
-   */
-  system?: GetSystemResponse;
-
-  constructor(data?: PartialMessage<DeleteFilterResponse>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.DeleteFilterResponse";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "system", kind: "message", T: GetSystemResponse },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteFilterResponse {
-    return new DeleteFilterResponse().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DeleteFilterResponse {
-    return new DeleteFilterResponse().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DeleteFilterResponse {
-    return new DeleteFilterResponse().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: DeleteFilterResponse | PlainMessage<DeleteFilterResponse> | undefined, b: DeleteFilterResponse | PlainMessage<DeleteFilterResponse> | undefined): boolean {
-    return proto3.util.equals(DeleteFilterResponse, a, b);
   }
 }
 
@@ -5985,6 +5826,102 @@ export class GenerateNameResponse extends Message<GenerateNameResponse> {
 
   static equals(a: GenerateNameResponse | PlainMessage<GenerateNameResponse> | undefined, b: GenerateNameResponse | PlainMessage<GenerateNameResponse> | undefined): boolean {
     return proto3.util.equals(GenerateNameResponse, a, b);
+  }
+}
+
+/**
+ * ValidateExpressionRequest carries a route match expression for live
+ * editor feedback. gastrolog-4kkoo (Phase 5).
+ *
+ * @generated from message gastrolog.v1.ValidateExpressionRequest
+ */
+export class ValidateExpressionRequest extends Message<ValidateExpressionRequest> {
+  /**
+   * Match expression text. Empty is valid (route is muted/never fires).
+   * "*" is valid (catch-all).
+   *
+   * @generated from field: string expression = 1;
+   */
+  expression = "";
+
+  constructor(data?: PartialMessage<ValidateExpressionRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ValidateExpressionRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "expression", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ValidateExpressionRequest {
+    return new ValidateExpressionRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ValidateExpressionRequest {
+    return new ValidateExpressionRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ValidateExpressionRequest {
+    return new ValidateExpressionRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ValidateExpressionRequest | PlainMessage<ValidateExpressionRequest> | undefined, b: ValidateExpressionRequest | PlainMessage<ValidateExpressionRequest> | undefined): boolean {
+    return proto3.util.equals(ValidateExpressionRequest, a, b);
+  }
+}
+
+/**
+ * ValidateExpressionResponse reports whether the expression parses and
+ * uses only supported predicates. The error is human-readable and
+ * safe to surface directly in the editor.
+ *
+ * @generated from message gastrolog.v1.ValidateExpressionResponse
+ */
+export class ValidateExpressionResponse extends Message<ValidateExpressionResponse> {
+  /**
+   * Valid is true when the expression is parseable and uses only
+   * attribute predicates (the same constraint PutRoute enforces at
+   * save time).
+   *
+   * @generated from field: bool valid = 1;
+   */
+  valid = false;
+
+  /**
+   * Error is a human-readable diagnostic. Empty when valid is true.
+   *
+   * @generated from field: string error = 2;
+   */
+  error = "";
+
+  constructor(data?: PartialMessage<ValidateExpressionResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ValidateExpressionResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "valid", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 2, name: "error", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ValidateExpressionResponse {
+    return new ValidateExpressionResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ValidateExpressionResponse {
+    return new ValidateExpressionResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ValidateExpressionResponse {
+    return new ValidateExpressionResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ValidateExpressionResponse | PlainMessage<ValidateExpressionResponse> | undefined, b: ValidateExpressionResponse | PlainMessage<ValidateExpressionResponse> | undefined): boolean {
+    return proto3.util.equals(ValidateExpressionResponse, a, b);
   }
 }
 

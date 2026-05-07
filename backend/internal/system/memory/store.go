@@ -42,9 +42,9 @@ type serverSettings struct {
 
 // Store is an in-memory ConfigStore implementation.
 type Store struct {
-	mu                   sync.RWMutex
-	filters              map[glid.GLID]system.FilterConfig
-	rotationPolicies     map[glid.GLID]system.RotationPolicyConfig
+	mu sync.RWMutex
+	// gastrolog-4kkoo (Phase 5): no filters map; expressions inline on routes.
+	rotationPolicies map[glid.GLID]system.RotationPolicyConfig
 	retentionPolicies    map[glid.GLID]system.RetentionPolicyConfig
 	vaults               map[glid.GLID]system.VaultConfig
 	ingesters            map[glid.GLID]system.IngesterConfig
@@ -71,7 +71,6 @@ var _ system.Store = (*Store)(nil)
 // NewStore creates a new in-memory ConfigStore.
 func NewStore() *Store {
 	return &Store{
-		filters:             make(map[glid.GLID]system.FilterConfig),
 		rotationPolicies:    make(map[glid.GLID]system.RotationPolicyConfig),
 		retentionPolicies:   make(map[glid.GLID]system.RetentionPolicyConfig),
 		vaults:              make(map[glid.GLID]system.VaultConfig),
@@ -94,7 +93,7 @@ func NewStore() *Store {
 
 // isEmpty reports whether the store has any entities at all.
 func (s *Store) isEmpty() bool {
-	return len(s.filters) == 0 && len(s.rotationPolicies) == 0 &&
+	return len(s.rotationPolicies) == 0 &&
 		len(s.retentionPolicies) == 0 && len(s.vaults) == 0 &&
 		len(s.ingesters) == 0 && len(s.routes) == 0 &&
 		len(s.managedFiles) == 0 && len(s.cloudServices) == 0 &&
@@ -117,7 +116,7 @@ func (s *Store) Load(ctx context.Context) (*system.System, error) {
 	rt := &sys.Runtime
 
 	// Config: operator-controlled entities.
-	cfg.Filters = collectAndSort(s.filters, copyFilterConfig, func(a, b system.FilterConfig) int { return cmpUUID(a.ID, b.ID) })
+	// gastrolog-4kkoo (Phase 5): Filters removed; expressions inline on routes.
 	cfg.RotationPolicies = collectAndSort(s.rotationPolicies, copyRotationPolicy, func(a, b system.RotationPolicyConfig) int { return cmpUUID(a.ID, b.ID) })
 	cfg.RetentionPolicies = collectAndSort(s.retentionPolicies, copyRetentionPolicy, func(a, b system.RetentionPolicyConfig) int { return cmpUUID(a.ID, b.ID) })
 	cfg.Vaults = collectAndSort(s.vaults, copyVaultConfig, func(a, b system.VaultConfig) int { return cmpUUID(a.ID, b.ID) })
@@ -184,48 +183,6 @@ func (s *Store) Load(ctx context.Context) (*system.System, error) {
 	}
 
 	return sys, nil
-}
-
-// Filters
-
-func (s *Store) GetFilter(ctx context.Context, id glid.GLID) (*system.FilterConfig, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	fc, ok := s.filters[id]
-	if !ok {
-		return nil, nil
-	}
-	c := copyFilterConfig(fc)
-	return &c, nil
-}
-
-func (s *Store) ListFilters(ctx context.Context) ([]system.FilterConfig, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	result := make([]system.FilterConfig, 0, len(s.filters))
-	for _, fc := range s.filters {
-		result = append(result, copyFilterConfig(fc))
-	}
-	slices.SortFunc(result, func(a, b system.FilterConfig) int { return cmpUUID(a.ID, b.ID) })
-	return result, nil
-}
-
-func (s *Store) PutFilter(ctx context.Context, cfg system.FilterConfig) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.filters[cfg.ID] = copyFilterConfig(cfg)
-	return nil
-}
-
-func (s *Store) DeleteFilter(ctx context.Context, id glid.GLID) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	delete(s.filters, id)
-	return nil
 }
 
 // Rotation policies
@@ -933,14 +890,6 @@ func (s *Store) DeleteUserRefreshTokens(ctx context.Context, userID glid.GLID) e
 
 // Deep copy helpers
 
-func copyFilterConfig(fc system.FilterConfig) system.FilterConfig {
-	return system.FilterConfig{
-		ID:         fc.ID,
-		Name:       fc.Name,
-		Expression: fc.Expression,
-	}
-}
-
 func copyRotationPolicy(rp system.RotationPolicyConfig) system.RotationPolicyConfig {
 	c := system.RotationPolicyConfig{
 		ID:   rp.ID,
@@ -1031,20 +980,18 @@ func copyRouteConfig(rt system.RouteConfig) system.RouteConfig {
 	c := system.RouteConfig{
 		ID:           rt.ID,
 		Name:         rt.Name,
+		Priority:     rt.Priority,
 		Distribution: rt.Distribution,
 		Enabled:      rt.Enabled,
 	}
-	if rt.FilterID != nil {
-		c.FilterID = new(*rt.FilterID)
-	}
-	if len(rt.Sources) > 0 {
-		c.Sources = append([]system.RouteSource(nil), rt.Sources...)
-	}
-	if len(rt.SourceVaultIDs) > 0 {
-		c.SourceVaultIDs = append([]glid.GLID(nil), rt.SourceVaultIDs...)
-	}
-	if len(rt.SourceIngesterIDs) > 0 {
-		c.SourceIngesterIDs = append([]glid.GLID(nil), rt.SourceIngesterIDs...)
+	if len(rt.Stages) > 0 {
+		c.Stages = make([]system.RouteStage, len(rt.Stages))
+		for i, s := range rt.Stages {
+			if s.Match != nil {
+				m := *s.Match
+				c.Stages[i] = system.RouteStage{Match: &m}
+			}
+		}
 	}
 	if len(rt.Destinations) > 0 {
 		c.Destinations = make([]glid.GLID, len(rt.Destinations))

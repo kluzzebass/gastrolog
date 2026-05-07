@@ -5,7 +5,7 @@
 
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
-import { RouteSource, TierConfig, TierPlacement, VaultConfig } from "./system_pb.js";
+import { RouteStage, TierConfig, TierPlacement, VaultConfig } from "./system_pb.js";
 import { CloudService, NodeStorageConfig } from "./storage_pb.js";
 
 /**
@@ -20,247 +20,240 @@ export class SystemCommand extends Message<SystemCommand> {
    */
   command: {
     /**
-     * @generated from field: gastrolog.v1.PutFilterCommand put_filter = 1;
-     */
-    value: PutFilterCommand;
-    case: "putFilter";
-  } | {
-    /**
-     * @generated from field: gastrolog.v1.DeleteFilterCommand delete_filter = 2;
-     */
-    value: DeleteFilterCommand;
-    case: "deleteFilter";
-  } | {
-    /**
-     * @generated from field: gastrolog.v1.PutRotationPolicyCommand put_rotation_policy = 3;
+     * Tags 1 (PutFilterCommand) and 2 (DeleteFilterCommand) removed in
+     * gastrolog-4kkoo (Phase 5): FilterConfig was inlined into
+     * RouteConfig.MatchStage.expression. Remaining tags renumbered to
+     * fill the holes per the project's "delete and renumber" rule.
+     *
+     * @generated from field: gastrolog.v1.PutRotationPolicyCommand put_rotation_policy = 1;
      */
     value: PutRotationPolicyCommand;
     case: "putRotationPolicy";
   } | {
     /**
-     * @generated from field: gastrolog.v1.DeleteRotationPolicyCommand delete_rotation_policy = 4;
+     * @generated from field: gastrolog.v1.DeleteRotationPolicyCommand delete_rotation_policy = 2;
      */
     value: DeleteRotationPolicyCommand;
     case: "deleteRotationPolicy";
   } | {
     /**
-     * @generated from field: gastrolog.v1.PutRetentionPolicyCommand put_retention_policy = 5;
+     * @generated from field: gastrolog.v1.PutRetentionPolicyCommand put_retention_policy = 3;
      */
     value: PutRetentionPolicyCommand;
     case: "putRetentionPolicy";
   } | {
     /**
-     * @generated from field: gastrolog.v1.DeleteRetentionPolicyCommand delete_retention_policy = 6;
+     * @generated from field: gastrolog.v1.DeleteRetentionPolicyCommand delete_retention_policy = 4;
      */
     value: DeleteRetentionPolicyCommand;
     case: "deleteRetentionPolicy";
   } | {
     /**
-     * @generated from field: gastrolog.v1.PutVaultCommand put_vault = 7;
+     * @generated from field: gastrolog.v1.PutVaultCommand put_vault = 5;
      */
     value: PutVaultCommand;
     case: "putVault";
   } | {
     /**
-     * @generated from field: gastrolog.v1.DeleteVaultCommand delete_vault = 8;
+     * @generated from field: gastrolog.v1.DeleteVaultCommand delete_vault = 6;
      */
     value: DeleteVaultCommand;
     case: "deleteVault";
   } | {
     /**
-     * @generated from field: gastrolog.v1.PutIngesterCommand put_ingester = 9;
+     * @generated from field: gastrolog.v1.PutIngesterCommand put_ingester = 7;
      */
     value: PutIngesterCommand;
     case: "putIngester";
   } | {
     /**
-     * @generated from field: gastrolog.v1.DeleteIngesterCommand delete_ingester = 10;
+     * @generated from field: gastrolog.v1.DeleteIngesterCommand delete_ingester = 8;
      */
     value: DeleteIngesterCommand;
     case: "deleteIngester";
   } | {
     /**
-     * @generated from field: gastrolog.v1.PutSettingCommand put_setting = 11;
+     * @generated from field: gastrolog.v1.PutSettingCommand put_setting = 9;
      */
     value: PutSettingCommand;
     case: "putSetting";
   } | {
     /**
-     * @generated from field: gastrolog.v1.DeleteSettingCommand delete_setting = 12;
+     * @generated from field: gastrolog.v1.DeleteSettingCommand delete_setting = 10;
      */
     value: DeleteSettingCommand;
     case: "deleteSetting";
   } | {
     /**
-     * @generated from field: gastrolog.v1.PutCertificateCommand put_certificate = 13;
+     * @generated from field: gastrolog.v1.PutCertificateCommand put_certificate = 11;
      */
     value: PutCertificateCommand;
     case: "putCertificate";
   } | {
     /**
-     * @generated from field: gastrolog.v1.DeleteCertificateCommand delete_certificate = 14;
+     * @generated from field: gastrolog.v1.DeleteCertificateCommand delete_certificate = 12;
      */
     value: DeleteCertificateCommand;
     case: "deleteCertificate";
   } | {
     /**
-     * @generated from field: gastrolog.v1.CreateUserCommand create_user = 15;
+     * @generated from field: gastrolog.v1.CreateUserCommand create_user = 13;
      */
     value: CreateUserCommand;
     case: "createUser";
   } | {
     /**
-     * @generated from field: gastrolog.v1.UpdatePasswordCommand update_password = 16;
+     * @generated from field: gastrolog.v1.UpdatePasswordCommand update_password = 14;
      */
     value: UpdatePasswordCommand;
     case: "updatePassword";
   } | {
     /**
-     * @generated from field: gastrolog.v1.UpdateUserRoleCommand update_user_role = 17;
+     * @generated from field: gastrolog.v1.UpdateUserRoleCommand update_user_role = 15;
      */
     value: UpdateUserRoleCommand;
     case: "updateUserRole";
   } | {
     /**
-     * @generated from field: gastrolog.v1.UpdateUsernameCommand update_username = 18;
+     * @generated from field: gastrolog.v1.UpdateUsernameCommand update_username = 16;
      */
     value: UpdateUsernameCommand;
     case: "updateUsername";
   } | {
     /**
-     * @generated from field: gastrolog.v1.DeleteUserCommand delete_user = 19;
+     * @generated from field: gastrolog.v1.DeleteUserCommand delete_user = 17;
      */
     value: DeleteUserCommand;
     case: "deleteUser";
   } | {
     /**
-     * @generated from field: gastrolog.v1.InvalidateTokensCommand invalidate_tokens = 20;
+     * @generated from field: gastrolog.v1.InvalidateTokensCommand invalidate_tokens = 18;
      */
     value: InvalidateTokensCommand;
     case: "invalidateTokens";
   } | {
     /**
-     * @generated from field: gastrolog.v1.PutUserPreferencesCommand put_user_preferences = 21;
+     * @generated from field: gastrolog.v1.PutUserPreferencesCommand put_user_preferences = 19;
      */
     value: PutUserPreferencesCommand;
     case: "putUserPreferences";
   } | {
     /**
-     * @generated from field: gastrolog.v1.CreateRefreshTokenCommand create_refresh_token = 22;
+     * @generated from field: gastrolog.v1.CreateRefreshTokenCommand create_refresh_token = 20;
      */
     value: CreateRefreshTokenCommand;
     case: "createRefreshToken";
   } | {
     /**
-     * @generated from field: gastrolog.v1.DeleteRefreshTokenCommand delete_refresh_token = 23;
+     * @generated from field: gastrolog.v1.DeleteRefreshTokenCommand delete_refresh_token = 21;
      */
     value: DeleteRefreshTokenCommand;
     case: "deleteRefreshToken";
   } | {
     /**
-     * @generated from field: gastrolog.v1.DeleteUserRefreshTokensCommand delete_user_refresh_tokens = 24;
+     * @generated from field: gastrolog.v1.DeleteUserRefreshTokensCommand delete_user_refresh_tokens = 22;
      */
     value: DeleteUserRefreshTokensCommand;
     case: "deleteUserRefreshTokens";
   } | {
     /**
-     * @generated from field: gastrolog.v1.PutNodeConfigCommand put_node_config = 25;
+     * @generated from field: gastrolog.v1.PutNodeConfigCommand put_node_config = 23;
      */
     value: PutNodeConfigCommand;
     case: "putNodeConfig";
   } | {
     /**
-     * @generated from field: gastrolog.v1.DeleteNodeConfigCommand delete_node_config = 26;
+     * @generated from field: gastrolog.v1.DeleteNodeConfigCommand delete_node_config = 24;
      */
     value: DeleteNodeConfigCommand;
     case: "deleteNodeConfig";
   } | {
     /**
-     * @generated from field: gastrolog.v1.PutClusterTLSCommand put_cluster_tls = 27;
+     * @generated from field: gastrolog.v1.PutClusterTLSCommand put_cluster_tls = 25;
      */
     value: PutClusterTLSCommand;
     case: "putClusterTls";
   } | {
     /**
-     * @generated from field: gastrolog.v1.PutRouteCommand put_route = 28;
+     * @generated from field: gastrolog.v1.PutRouteCommand put_route = 26;
      */
     value: PutRouteCommand;
     case: "putRoute";
   } | {
     /**
-     * @generated from field: gastrolog.v1.DeleteRouteCommand delete_route = 29;
+     * @generated from field: gastrolog.v1.DeleteRouteCommand delete_route = 27;
      */
     value: DeleteRouteCommand;
     case: "deleteRoute";
   } | {
     /**
-     * @generated from field: gastrolog.v1.PutManagedFileCommand put_managed_file = 30;
+     * @generated from field: gastrolog.v1.PutManagedFileCommand put_managed_file = 28;
      */
     value: PutManagedFileCommand;
     case: "putManagedFile";
   } | {
     /**
-     * @generated from field: gastrolog.v1.DeleteManagedFileCommand delete_managed_file = 31;
+     * @generated from field: gastrolog.v1.DeleteManagedFileCommand delete_managed_file = 29;
      */
     value: DeleteManagedFileCommand;
     case: "deleteManagedFile";
   } | {
     /**
-     * @generated from field: gastrolog.v1.PutCloudServiceCommand put_cloud_service = 32;
+     * @generated from field: gastrolog.v1.PutCloudServiceCommand put_cloud_service = 30;
      */
     value: PutCloudServiceCommand;
     case: "putCloudService";
   } | {
     /**
-     * @generated from field: gastrolog.v1.DeleteCloudServiceCommand delete_cloud_service = 33;
+     * @generated from field: gastrolog.v1.DeleteCloudServiceCommand delete_cloud_service = 31;
      */
     value: DeleteCloudServiceCommand;
     case: "deleteCloudService";
   } | {
     /**
-     * @generated from field: gastrolog.v1.SetNodeStorageConfigCommand set_node_storage_config = 34;
+     * @generated from field: gastrolog.v1.SetNodeStorageConfigCommand set_node_storage_config = 32;
      */
     value: SetNodeStorageConfigCommand;
     case: "setNodeStorageConfig";
   } | {
     /**
-     * @generated from field: gastrolog.v1.PutTierCommand put_tier = 35;
+     * @generated from field: gastrolog.v1.PutTierCommand put_tier = 33;
      */
     value: PutTierCommand;
     case: "putTier";
   } | {
     /**
-     * @generated from field: gastrolog.v1.DeleteTierCommand delete_tier = 36;
+     * @generated from field: gastrolog.v1.DeleteTierCommand delete_tier = 34;
      */
     value: DeleteTierCommand;
     case: "deleteTier";
   } | {
     /**
-     * @generated from field: gastrolog.v1.SetTierPlacementsCommand set_tier_placements = 37;
+     * @generated from field: gastrolog.v1.SetTierPlacementsCommand set_tier_placements = 35;
      */
     value: SetTierPlacementsCommand;
     case: "setTierPlacements";
   } | {
     /**
-     * @generated from field: gastrolog.v1.SetSetupWizardDismissedCommand set_setup_wizard_dismissed = 38;
+     * @generated from field: gastrolog.v1.SetSetupWizardDismissedCommand set_setup_wizard_dismissed = 36;
      */
     value: SetSetupWizardDismissedCommand;
     case: "setSetupWizardDismissed";
   } | {
     /**
-     * @generated from field: gastrolog.v1.SetIngesterAliveCommand set_ingester_alive = 39;
+     * @generated from field: gastrolog.v1.SetIngesterAliveCommand set_ingester_alive = 37;
      */
     value: SetIngesterAliveCommand;
     case: "setIngesterAlive";
   } | {
     /**
-     * @generated from field: gastrolog.v1.SetIngesterAssignmentCommand set_ingester_assignment = 40;
+     * @generated from field: gastrolog.v1.SetIngesterAssignmentCommand set_ingester_assignment = 38;
      */
     value: SetIngesterAssignmentCommand;
     case: "setIngesterAssignment";
   } | {
     /**
-     * @generated from field: gastrolog.v1.SetIngesterCheckpointCommand set_ingester_checkpoint = 41;
+     * @generated from field: gastrolog.v1.SetIngesterCheckpointCommand set_ingester_checkpoint = 39;
      */
     value: SetIngesterCheckpointCommand;
     case: "setIngesterCheckpoint";
@@ -274,47 +267,45 @@ export class SystemCommand extends Message<SystemCommand> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.SystemCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "put_filter", kind: "message", T: PutFilterCommand, oneof: "command" },
-    { no: 2, name: "delete_filter", kind: "message", T: DeleteFilterCommand, oneof: "command" },
-    { no: 3, name: "put_rotation_policy", kind: "message", T: PutRotationPolicyCommand, oneof: "command" },
-    { no: 4, name: "delete_rotation_policy", kind: "message", T: DeleteRotationPolicyCommand, oneof: "command" },
-    { no: 5, name: "put_retention_policy", kind: "message", T: PutRetentionPolicyCommand, oneof: "command" },
-    { no: 6, name: "delete_retention_policy", kind: "message", T: DeleteRetentionPolicyCommand, oneof: "command" },
-    { no: 7, name: "put_vault", kind: "message", T: PutVaultCommand, oneof: "command" },
-    { no: 8, name: "delete_vault", kind: "message", T: DeleteVaultCommand, oneof: "command" },
-    { no: 9, name: "put_ingester", kind: "message", T: PutIngesterCommand, oneof: "command" },
-    { no: 10, name: "delete_ingester", kind: "message", T: DeleteIngesterCommand, oneof: "command" },
-    { no: 11, name: "put_setting", kind: "message", T: PutSettingCommand, oneof: "command" },
-    { no: 12, name: "delete_setting", kind: "message", T: DeleteSettingCommand, oneof: "command" },
-    { no: 13, name: "put_certificate", kind: "message", T: PutCertificateCommand, oneof: "command" },
-    { no: 14, name: "delete_certificate", kind: "message", T: DeleteCertificateCommand, oneof: "command" },
-    { no: 15, name: "create_user", kind: "message", T: CreateUserCommand, oneof: "command" },
-    { no: 16, name: "update_password", kind: "message", T: UpdatePasswordCommand, oneof: "command" },
-    { no: 17, name: "update_user_role", kind: "message", T: UpdateUserRoleCommand, oneof: "command" },
-    { no: 18, name: "update_username", kind: "message", T: UpdateUsernameCommand, oneof: "command" },
-    { no: 19, name: "delete_user", kind: "message", T: DeleteUserCommand, oneof: "command" },
-    { no: 20, name: "invalidate_tokens", kind: "message", T: InvalidateTokensCommand, oneof: "command" },
-    { no: 21, name: "put_user_preferences", kind: "message", T: PutUserPreferencesCommand, oneof: "command" },
-    { no: 22, name: "create_refresh_token", kind: "message", T: CreateRefreshTokenCommand, oneof: "command" },
-    { no: 23, name: "delete_refresh_token", kind: "message", T: DeleteRefreshTokenCommand, oneof: "command" },
-    { no: 24, name: "delete_user_refresh_tokens", kind: "message", T: DeleteUserRefreshTokensCommand, oneof: "command" },
-    { no: 25, name: "put_node_config", kind: "message", T: PutNodeConfigCommand, oneof: "command" },
-    { no: 26, name: "delete_node_config", kind: "message", T: DeleteNodeConfigCommand, oneof: "command" },
-    { no: 27, name: "put_cluster_tls", kind: "message", T: PutClusterTLSCommand, oneof: "command" },
-    { no: 28, name: "put_route", kind: "message", T: PutRouteCommand, oneof: "command" },
-    { no: 29, name: "delete_route", kind: "message", T: DeleteRouteCommand, oneof: "command" },
-    { no: 30, name: "put_managed_file", kind: "message", T: PutManagedFileCommand, oneof: "command" },
-    { no: 31, name: "delete_managed_file", kind: "message", T: DeleteManagedFileCommand, oneof: "command" },
-    { no: 32, name: "put_cloud_service", kind: "message", T: PutCloudServiceCommand, oneof: "command" },
-    { no: 33, name: "delete_cloud_service", kind: "message", T: DeleteCloudServiceCommand, oneof: "command" },
-    { no: 34, name: "set_node_storage_config", kind: "message", T: SetNodeStorageConfigCommand, oneof: "command" },
-    { no: 35, name: "put_tier", kind: "message", T: PutTierCommand, oneof: "command" },
-    { no: 36, name: "delete_tier", kind: "message", T: DeleteTierCommand, oneof: "command" },
-    { no: 37, name: "set_tier_placements", kind: "message", T: SetTierPlacementsCommand, oneof: "command" },
-    { no: 38, name: "set_setup_wizard_dismissed", kind: "message", T: SetSetupWizardDismissedCommand, oneof: "command" },
-    { no: 39, name: "set_ingester_alive", kind: "message", T: SetIngesterAliveCommand, oneof: "command" },
-    { no: 40, name: "set_ingester_assignment", kind: "message", T: SetIngesterAssignmentCommand, oneof: "command" },
-    { no: 41, name: "set_ingester_checkpoint", kind: "message", T: SetIngesterCheckpointCommand, oneof: "command" },
+    { no: 1, name: "put_rotation_policy", kind: "message", T: PutRotationPolicyCommand, oneof: "command" },
+    { no: 2, name: "delete_rotation_policy", kind: "message", T: DeleteRotationPolicyCommand, oneof: "command" },
+    { no: 3, name: "put_retention_policy", kind: "message", T: PutRetentionPolicyCommand, oneof: "command" },
+    { no: 4, name: "delete_retention_policy", kind: "message", T: DeleteRetentionPolicyCommand, oneof: "command" },
+    { no: 5, name: "put_vault", kind: "message", T: PutVaultCommand, oneof: "command" },
+    { no: 6, name: "delete_vault", kind: "message", T: DeleteVaultCommand, oneof: "command" },
+    { no: 7, name: "put_ingester", kind: "message", T: PutIngesterCommand, oneof: "command" },
+    { no: 8, name: "delete_ingester", kind: "message", T: DeleteIngesterCommand, oneof: "command" },
+    { no: 9, name: "put_setting", kind: "message", T: PutSettingCommand, oneof: "command" },
+    { no: 10, name: "delete_setting", kind: "message", T: DeleteSettingCommand, oneof: "command" },
+    { no: 11, name: "put_certificate", kind: "message", T: PutCertificateCommand, oneof: "command" },
+    { no: 12, name: "delete_certificate", kind: "message", T: DeleteCertificateCommand, oneof: "command" },
+    { no: 13, name: "create_user", kind: "message", T: CreateUserCommand, oneof: "command" },
+    { no: 14, name: "update_password", kind: "message", T: UpdatePasswordCommand, oneof: "command" },
+    { no: 15, name: "update_user_role", kind: "message", T: UpdateUserRoleCommand, oneof: "command" },
+    { no: 16, name: "update_username", kind: "message", T: UpdateUsernameCommand, oneof: "command" },
+    { no: 17, name: "delete_user", kind: "message", T: DeleteUserCommand, oneof: "command" },
+    { no: 18, name: "invalidate_tokens", kind: "message", T: InvalidateTokensCommand, oneof: "command" },
+    { no: 19, name: "put_user_preferences", kind: "message", T: PutUserPreferencesCommand, oneof: "command" },
+    { no: 20, name: "create_refresh_token", kind: "message", T: CreateRefreshTokenCommand, oneof: "command" },
+    { no: 21, name: "delete_refresh_token", kind: "message", T: DeleteRefreshTokenCommand, oneof: "command" },
+    { no: 22, name: "delete_user_refresh_tokens", kind: "message", T: DeleteUserRefreshTokensCommand, oneof: "command" },
+    { no: 23, name: "put_node_config", kind: "message", T: PutNodeConfigCommand, oneof: "command" },
+    { no: 24, name: "delete_node_config", kind: "message", T: DeleteNodeConfigCommand, oneof: "command" },
+    { no: 25, name: "put_cluster_tls", kind: "message", T: PutClusterTLSCommand, oneof: "command" },
+    { no: 26, name: "put_route", kind: "message", T: PutRouteCommand, oneof: "command" },
+    { no: 27, name: "delete_route", kind: "message", T: DeleteRouteCommand, oneof: "command" },
+    { no: 28, name: "put_managed_file", kind: "message", T: PutManagedFileCommand, oneof: "command" },
+    { no: 29, name: "delete_managed_file", kind: "message", T: DeleteManagedFileCommand, oneof: "command" },
+    { no: 30, name: "put_cloud_service", kind: "message", T: PutCloudServiceCommand, oneof: "command" },
+    { no: 31, name: "delete_cloud_service", kind: "message", T: DeleteCloudServiceCommand, oneof: "command" },
+    { no: 32, name: "set_node_storage_config", kind: "message", T: SetNodeStorageConfigCommand, oneof: "command" },
+    { no: 33, name: "put_tier", kind: "message", T: PutTierCommand, oneof: "command" },
+    { no: 34, name: "delete_tier", kind: "message", T: DeleteTierCommand, oneof: "command" },
+    { no: 35, name: "set_tier_placements", kind: "message", T: SetTierPlacementsCommand, oneof: "command" },
+    { no: 36, name: "set_setup_wizard_dismissed", kind: "message", T: SetSetupWizardDismissedCommand, oneof: "command" },
+    { no: 37, name: "set_ingester_alive", kind: "message", T: SetIngesterAliveCommand, oneof: "command" },
+    { no: 38, name: "set_ingester_assignment", kind: "message", T: SetIngesterAssignmentCommand, oneof: "command" },
+    { no: 39, name: "set_ingester_checkpoint", kind: "message", T: SetIngesterCheckpointCommand, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemCommand {
@@ -331,92 +322,6 @@ export class SystemCommand extends Message<SystemCommand> {
 
   static equals(a: SystemCommand | PlainMessage<SystemCommand> | undefined, b: SystemCommand | PlainMessage<SystemCommand> | undefined): boolean {
     return proto3.util.equals(SystemCommand, a, b);
-  }
-}
-
-/**
- * @generated from message gastrolog.v1.PutFilterCommand
- */
-export class PutFilterCommand extends Message<PutFilterCommand> {
-  /**
-   * @generated from field: bytes id = 1;
-   */
-  id = new Uint8Array(0);
-
-  /**
-   * @generated from field: string name = 2;
-   */
-  name = "";
-
-  /**
-   * @generated from field: string expression = 3;
-   */
-  expression = "";
-
-  constructor(data?: PartialMessage<PutFilterCommand>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.PutFilterCommand";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "expression", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutFilterCommand {
-    return new PutFilterCommand().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutFilterCommand {
-    return new PutFilterCommand().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutFilterCommand {
-    return new PutFilterCommand().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: PutFilterCommand | PlainMessage<PutFilterCommand> | undefined, b: PutFilterCommand | PlainMessage<PutFilterCommand> | undefined): boolean {
-    return proto3.util.equals(PutFilterCommand, a, b);
-  }
-}
-
-/**
- * @generated from message gastrolog.v1.DeleteFilterCommand
- */
-export class DeleteFilterCommand extends Message<DeleteFilterCommand> {
-  /**
-   * @generated from field: bytes id = 1;
-   */
-  id = new Uint8Array(0);
-
-  constructor(data?: PartialMessage<DeleteFilterCommand>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.DeleteFilterCommand";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteFilterCommand {
-    return new DeleteFilterCommand().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DeleteFilterCommand {
-    return new DeleteFilterCommand().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DeleteFilterCommand {
-    return new DeleteFilterCommand().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: DeleteFilterCommand | PlainMessage<DeleteFilterCommand> | undefined, b: DeleteFilterCommand | PlainMessage<DeleteFilterCommand> | undefined): boolean {
-    return proto3.util.equals(DeleteFilterCommand, a, b);
   }
 }
 
@@ -1648,45 +1553,29 @@ export class PutRouteCommand extends Message<PutRouteCommand> {
   name = "";
 
   /**
-   * @generated from field: bytes filter_id = 3;
+   * @generated from field: int32 priority = 3;
    */
-  filterId = new Uint8Array(0);
+  priority = 0;
 
   /**
-   * @generated from field: repeated bytes destination_ids = 4;
+   * @generated from field: repeated gastrolog.v1.RouteStage stages = 4;
+   */
+  stages: RouteStage[] = [];
+
+  /**
+   * @generated from field: repeated bytes destination_ids = 5;
    */
   destinationIds: Uint8Array[] = [];
 
   /**
-   * @generated from field: string distribution = 5;
+   * @generated from field: string distribution = 6;
    */
   distribution = "";
 
   /**
-   * @generated from field: bool enabled = 6;
+   * @generated from field: bool enabled = 7;
    */
   enabled = false;
-
-  /**
-   * gastrolog-42f9z (Phase 4); replaces eject_only. Empty = INGEST.
-   *
-   * @generated from field: repeated gastrolog.v1.RouteSource sources = 7;
-   */
-  sources: RouteSource[] = [];
-
-  /**
-   * optional narrower for sources containing RETENTION_TRIGGER
-   *
-   * @generated from field: repeated bytes source_vault_ids = 8;
-   */
-  sourceVaultIds: Uint8Array[] = [];
-
-  /**
-   * optional narrower for sources containing INGEST
-   *
-   * @generated from field: repeated bytes source_ingester_ids = 9;
-   */
-  sourceIngesterIds: Uint8Array[] = [];
 
   constructor(data?: PartialMessage<PutRouteCommand>) {
     super();
@@ -1698,13 +1587,11 @@ export class PutRouteCommand extends Message<PutRouteCommand> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "filter_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 4, name: "destination_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
-    { no: 5, name: "distribution", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 6, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 7, name: "sources", kind: "enum", T: proto3.getEnumType(RouteSource), repeated: true },
-    { no: 8, name: "source_vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
-    { no: 9, name: "source_ingester_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 3, name: "priority", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 4, name: "stages", kind: "message", T: RouteStage, repeated: true },
+    { no: 5, name: "destination_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 6, name: "distribution", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 7, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutRouteCommand {
@@ -2296,107 +2183,104 @@ export class SetIngesterCheckpointCommand extends Message<SetIngesterCheckpointC
  */
 export class SystemSnapshot extends Message<SystemSnapshot> {
   /**
-   * @generated from field: repeated gastrolog.v1.PutFilterCommand filters = 1;
-   */
-  filters: PutFilterCommand[] = [];
-
-  /**
-   * @generated from field: repeated gastrolog.v1.PutRotationPolicyCommand rotation_policies = 2;
+   * Tag 1 (filters) removed in gastrolog-4kkoo. Remaining tags renumbered.
+   *
+   * @generated from field: repeated gastrolog.v1.PutRotationPolicyCommand rotation_policies = 1;
    */
   rotationPolicies: PutRotationPolicyCommand[] = [];
 
   /**
-   * @generated from field: repeated gastrolog.v1.PutRetentionPolicyCommand retention_policies = 3;
+   * @generated from field: repeated gastrolog.v1.PutRetentionPolicyCommand retention_policies = 2;
    */
   retentionPolicies: PutRetentionPolicyCommand[] = [];
 
   /**
-   * @generated from field: repeated gastrolog.v1.PutVaultCommand vaults = 4;
+   * @generated from field: repeated gastrolog.v1.PutVaultCommand vaults = 3;
    */
   vaults: PutVaultCommand[] = [];
 
   /**
-   * @generated from field: repeated gastrolog.v1.PutIngesterCommand ingesters = 5;
+   * @generated from field: repeated gastrolog.v1.PutIngesterCommand ingesters = 4;
    */
   ingesters: PutIngesterCommand[] = [];
 
   /**
-   * @generated from field: map<string, string> settings = 6;
+   * @generated from field: map<string, string> settings = 5;
    */
   settings: { [key: string]: string } = {};
 
   /**
-   * @generated from field: repeated gastrolog.v1.PutCertificateCommand certificates = 7;
+   * @generated from field: repeated gastrolog.v1.PutCertificateCommand certificates = 6;
    */
   certificates: PutCertificateCommand[] = [];
 
   /**
-   * @generated from field: repeated gastrolog.v1.CreateUserCommand users = 8;
+   * @generated from field: repeated gastrolog.v1.CreateUserCommand users = 7;
    */
   users: CreateUserCommand[] = [];
 
   /**
-   * @generated from field: repeated gastrolog.v1.CreateRefreshTokenCommand refresh_tokens = 9;
+   * @generated from field: repeated gastrolog.v1.CreateRefreshTokenCommand refresh_tokens = 8;
    */
   refreshTokens: CreateRefreshTokenCommand[] = [];
 
   /**
-   * @generated from field: repeated gastrolog.v1.PutNodeConfigCommand node_configs = 10;
+   * @generated from field: repeated gastrolog.v1.PutNodeConfigCommand node_configs = 9;
    */
   nodeConfigs: PutNodeConfigCommand[] = [];
 
   /**
-   * @generated from field: gastrolog.v1.PutClusterTLSCommand cluster_tls = 11;
+   * @generated from field: gastrolog.v1.PutClusterTLSCommand cluster_tls = 10;
    */
   clusterTls?: PutClusterTLSCommand;
 
   /**
-   * @generated from field: repeated gastrolog.v1.PutRouteCommand routes = 12;
+   * @generated from field: repeated gastrolog.v1.PutRouteCommand routes = 11;
    */
   routes: PutRouteCommand[] = [];
 
   /**
-   * @generated from field: repeated gastrolog.v1.PutManagedFileCommand managed_files = 13;
+   * @generated from field: repeated gastrolog.v1.PutManagedFileCommand managed_files = 12;
    */
   managedFiles: PutManagedFileCommand[] = [];
 
   /**
-   * @generated from field: repeated gastrolog.v1.PutCloudServiceCommand cloud_services = 14;
+   * @generated from field: repeated gastrolog.v1.PutCloudServiceCommand cloud_services = 13;
    */
   cloudServices: PutCloudServiceCommand[] = [];
 
   /**
-   * @generated from field: repeated gastrolog.v1.SetNodeStorageConfigCommand node_storage_configs = 15;
+   * @generated from field: repeated gastrolog.v1.SetNodeStorageConfigCommand node_storage_configs = 14;
    */
   nodeStorageConfigs: SetNodeStorageConfigCommand[] = [];
 
   /**
-   * @generated from field: repeated gastrolog.v1.PutTierCommand tiers = 16;
+   * @generated from field: repeated gastrolog.v1.PutTierCommand tiers = 15;
    */
   tiers: PutTierCommand[] = [];
 
   /**
-   * @generated from field: repeated gastrolog.v1.SetTierPlacementsCommand tier_placements = 17;
+   * @generated from field: repeated gastrolog.v1.SetTierPlacementsCommand tier_placements = 16;
    */
   tierPlacements: SetTierPlacementsCommand[] = [];
 
   /**
-   * @generated from field: bool setup_wizard_dismissed = 18;
+   * @generated from field: bool setup_wizard_dismissed = 17;
    */
   setupWizardDismissed = false;
 
   /**
-   * @generated from field: repeated gastrolog.v1.SetIngesterAliveCommand ingester_alive = 19;
+   * @generated from field: repeated gastrolog.v1.SetIngesterAliveCommand ingester_alive = 18;
    */
   ingesterAlive: SetIngesterAliveCommand[] = [];
 
   /**
-   * @generated from field: repeated gastrolog.v1.SetIngesterAssignmentCommand ingester_assignments = 20;
+   * @generated from field: repeated gastrolog.v1.SetIngesterAssignmentCommand ingester_assignments = 19;
    */
   ingesterAssignments: SetIngesterAssignmentCommand[] = [];
 
   /**
-   * @generated from field: repeated gastrolog.v1.SetIngesterCheckpointCommand ingester_checkpoints = 21;
+   * @generated from field: repeated gastrolog.v1.SetIngesterCheckpointCommand ingester_checkpoints = 20;
    */
   ingesterCheckpoints: SetIngesterCheckpointCommand[] = [];
 
@@ -2408,27 +2292,26 @@ export class SystemSnapshot extends Message<SystemSnapshot> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.SystemSnapshot";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "filters", kind: "message", T: PutFilterCommand, repeated: true },
-    { no: 2, name: "rotation_policies", kind: "message", T: PutRotationPolicyCommand, repeated: true },
-    { no: 3, name: "retention_policies", kind: "message", T: PutRetentionPolicyCommand, repeated: true },
-    { no: 4, name: "vaults", kind: "message", T: PutVaultCommand, repeated: true },
-    { no: 5, name: "ingesters", kind: "message", T: PutIngesterCommand, repeated: true },
-    { no: 6, name: "settings", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
-    { no: 7, name: "certificates", kind: "message", T: PutCertificateCommand, repeated: true },
-    { no: 8, name: "users", kind: "message", T: CreateUserCommand, repeated: true },
-    { no: 9, name: "refresh_tokens", kind: "message", T: CreateRefreshTokenCommand, repeated: true },
-    { no: 10, name: "node_configs", kind: "message", T: PutNodeConfigCommand, repeated: true },
-    { no: 11, name: "cluster_tls", kind: "message", T: PutClusterTLSCommand },
-    { no: 12, name: "routes", kind: "message", T: PutRouteCommand, repeated: true },
-    { no: 13, name: "managed_files", kind: "message", T: PutManagedFileCommand, repeated: true },
-    { no: 14, name: "cloud_services", kind: "message", T: PutCloudServiceCommand, repeated: true },
-    { no: 15, name: "node_storage_configs", kind: "message", T: SetNodeStorageConfigCommand, repeated: true },
-    { no: 16, name: "tiers", kind: "message", T: PutTierCommand, repeated: true },
-    { no: 17, name: "tier_placements", kind: "message", T: SetTierPlacementsCommand, repeated: true },
-    { no: 18, name: "setup_wizard_dismissed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 19, name: "ingester_alive", kind: "message", T: SetIngesterAliveCommand, repeated: true },
-    { no: 20, name: "ingester_assignments", kind: "message", T: SetIngesterAssignmentCommand, repeated: true },
-    { no: 21, name: "ingester_checkpoints", kind: "message", T: SetIngesterCheckpointCommand, repeated: true },
+    { no: 1, name: "rotation_policies", kind: "message", T: PutRotationPolicyCommand, repeated: true },
+    { no: 2, name: "retention_policies", kind: "message", T: PutRetentionPolicyCommand, repeated: true },
+    { no: 3, name: "vaults", kind: "message", T: PutVaultCommand, repeated: true },
+    { no: 4, name: "ingesters", kind: "message", T: PutIngesterCommand, repeated: true },
+    { no: 5, name: "settings", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
+    { no: 6, name: "certificates", kind: "message", T: PutCertificateCommand, repeated: true },
+    { no: 7, name: "users", kind: "message", T: CreateUserCommand, repeated: true },
+    { no: 8, name: "refresh_tokens", kind: "message", T: CreateRefreshTokenCommand, repeated: true },
+    { no: 9, name: "node_configs", kind: "message", T: PutNodeConfigCommand, repeated: true },
+    { no: 10, name: "cluster_tls", kind: "message", T: PutClusterTLSCommand },
+    { no: 11, name: "routes", kind: "message", T: PutRouteCommand, repeated: true },
+    { no: 12, name: "managed_files", kind: "message", T: PutManagedFileCommand, repeated: true },
+    { no: 13, name: "cloud_services", kind: "message", T: PutCloudServiceCommand, repeated: true },
+    { no: 14, name: "node_storage_configs", kind: "message", T: SetNodeStorageConfigCommand, repeated: true },
+    { no: 15, name: "tiers", kind: "message", T: PutTierCommand, repeated: true },
+    { no: 16, name: "tier_placements", kind: "message", T: SetTierPlacementsCommand, repeated: true },
+    { no: 17, name: "setup_wizard_dismissed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 18, name: "ingester_alive", kind: "message", T: SetIngesterAliveCommand, repeated: true },
+    { no: 19, name: "ingester_assignments", kind: "message", T: SetIngesterAssignmentCommand, repeated: true },
+    { no: 20, name: "ingester_checkpoints", kind: "message", T: SetIngesterCheckpointCommand, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemSnapshot {

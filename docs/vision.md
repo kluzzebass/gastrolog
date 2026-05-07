@@ -45,7 +45,7 @@ GastroLog does not need a separate tracing backend. A distributed trace is a set
 
 ## Programmable Ingestion
 
-Routes today are filter-to-vault mappings. At its ceiling, the routing layer is a lightweight data pipeline — the same pipeline language used for queries, applied at ingestion time.
+Routes today are priority-ordered match-to-vault mappings (`RouteConfig.Stages` ships only a `MatchStage` in Phase 5 — gastrolog-4kkoo). At its ceiling, the routing layer is a lightweight data pipeline — the same pipeline language used for queries, applied at ingestion time. Future stage variants (enrich, lookup, redact, sample, fork, route-by-field per gastrolog-5e85x) plug into the same `RouteStage` oneof without re-shaping the proto.
 
 **Route pipeline transforms.** Enrich with external data, redact sensitive fields, sample by severity — all after digestion but before the record hits storage. Parsing and field extraction are handled upstream by the ingester and digester; the route pipeline operates on fully digested records regardless of ingester type. The transform pipeline uses the same operator syntax as query pipelines, but is configured visually through the route editor in Settings — not through config files.
 
@@ -499,7 +499,8 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 
 | Capability | Status | Notes |
 |---|---|---|
-| Filter-based routing | Done | Filter expression → vault destinations |
+| Match-expression routing | Done | Inline `RouteConfig.Stages[].Match.Expression` → destinations; first-match-wins by priority (gastrolog-4kkoo) |
+| Synthetic-attribute routing | Done | `_source`, `_ingester`, `_vault`, `_reason` overlaid at eval time; routes can target retention vs. ingest distinctly (gastrolog-4kkoo) |
 | Multi-destination fanout | Done | Fanout, round-robin, failover distribution |
 | Transform pipelines on ingest | Not started | No parse, enrich, redact, sample stages in routes |
 | Visual route editor | Not started | Routes configured via form fields, no flow builder |

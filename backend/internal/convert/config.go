@@ -340,57 +340,44 @@ func VaultTypeToProto(t system.TierType) gastrologv1.VaultType {
 	}
 }
 
-// RouteSourceToProto maps the Go-side RouteSource string enum to the proto
-// RouteSource. Phase 4 (gastrolog-42f9z); replaces the legacy EjectOnly bool.
-// Empty / unspecified maps to ROUTE_SOURCE_INGEST so back-compat treats
-// pre-Phase-4 routes as live ingestion routes.
-func RouteSourceToProto(s system.RouteSource) gastrologv1.RouteSource {
-	switch s {
-	case system.RouteSourceRetentionTrigger:
-		return gastrologv1.RouteSource_ROUTE_SOURCE_RETENTION_TRIGGER
-	case system.RouteSourceIngest, system.RouteSourceUnspecified:
-		return gastrologv1.RouteSource_ROUTE_SOURCE_INGEST
-	default:
-		return gastrologv1.RouteSource_ROUTE_SOURCE_UNSPECIFIED
-	}
-}
+// ---------------------------------------------------------------------------
+// Route stages (gastrolog-4kkoo Phase 5)
+// ---------------------------------------------------------------------------
 
-// RouteSourceFromProto maps proto RouteSource back to the Go-side string enum.
-// ROUTE_SOURCE_UNSPECIFIED collapses to RouteSourceIngest for back-compat.
-func RouteSourceFromProto(s gastrologv1.RouteSource) system.RouteSource {
-	switch s {
-	case gastrologv1.RouteSource_ROUTE_SOURCE_RETENTION_TRIGGER:
-		return system.RouteSourceRetentionTrigger
-	case gastrologv1.RouteSource_ROUTE_SOURCE_INGEST, gastrologv1.RouteSource_ROUTE_SOURCE_UNSPECIFIED:
-		return system.RouteSourceIngest
-	default:
-		return system.RouteSourceIngest
-	}
-}
-
-// RouteSourcesToProto maps a Go-side RouteSource slice to the proto
-// RouteSource slice. Empty input → empty output; the matching engine
-// applies the "default to Ingest" interpretation when the list is empty.
-func RouteSourcesToProto(ss []system.RouteSource) []gastrologv1.RouteSource {
-	if len(ss) == 0 {
+// RouteStagesToProto converts a slice of system.RouteStage to its proto
+// representation. Today only MatchStage is set; future kinds (per
+// gastrolog-5e85x Programmable Ingestion) plug into the same oneof.
+func RouteStagesToProto(stages []system.RouteStage) []*gastrologv1.RouteStage {
+	if len(stages) == 0 {
 		return nil
 	}
-	out := make([]gastrologv1.RouteSource, len(ss))
-	for i, s := range ss {
-		out[i] = RouteSourceToProto(s)
+	out := make([]*gastrologv1.RouteStage, len(stages))
+	for i, s := range stages {
+		stage := &gastrologv1.RouteStage{}
+		if s.Match != nil {
+			stage.Stage = &gastrologv1.RouteStage_Match{
+				Match: &gastrologv1.MatchStage{Expression: s.Match.Expression},
+			}
+		}
+		out[i] = stage
 	}
 	return out
 }
 
-// RouteSourcesFromProto maps a proto RouteSource slice back to the
-// Go-side string enum slice.
-func RouteSourcesFromProto(ss []gastrologv1.RouteSource) []system.RouteSource {
-	if len(ss) == 0 {
+// RouteStagesFromProto converts a proto RouteStage slice back to
+// system.RouteStage. Stages without a recognized variant become zero-value
+// stages — semantic validation is the consumer's job (e.g. orchestrator).
+func RouteStagesFromProto(stages []*gastrologv1.RouteStage) []system.RouteStage {
+	if len(stages) == 0 {
 		return nil
 	}
-	out := make([]system.RouteSource, len(ss))
-	for i, s := range ss {
-		out[i] = RouteSourceFromProto(s)
+	out := make([]system.RouteStage, len(stages))
+	for i, s := range stages {
+		if m := s.GetMatch(); m != nil {
+			out[i] = system.RouteStage{
+				Match: &system.MatchStage{Expression: m.GetExpression()},
+			}
+		}
 	}
 	return out
 }

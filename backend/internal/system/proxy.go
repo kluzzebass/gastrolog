@@ -88,41 +88,8 @@ func (p *StoreProxy) Load(ctx context.Context) (*System, error) {
 	return p.inner.Load(ctx)
 }
 
-func (p *StoreProxy) GetFilter(ctx context.Context, id glid.GLID) (*FilterConfig, error) {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	if err := p.check(); err != nil {
-		return nil, err
-	}
-	return p.inner.GetFilter(ctx, id)
-}
-
-func (p *StoreProxy) ListFilters(ctx context.Context) ([]FilterConfig, error) {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	if err := p.check(); err != nil {
-		return nil, err
-	}
-	return p.inner.ListFilters(ctx)
-}
-
-func (p *StoreProxy) PutFilter(ctx context.Context, cfg FilterConfig) error {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	if err := p.check(); err != nil {
-		return err
-	}
-	return p.inner.PutFilter(ctx, cfg)
-}
-
-func (p *StoreProxy) DeleteFilter(ctx context.Context, id glid.GLID) error {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	if err := p.check(); err != nil {
-		return err
-	}
-	return p.inner.DeleteFilter(ctx, id)
-}
+// gastrolog-4kkoo (Phase 5): GetFilter/ListFilters/PutFilter/DeleteFilter
+// proxy methods removed. Filters inlined onto RouteConfig.Stages[].Match.
 
 func (p *StoreProxy) GetRotationPolicy(ctx context.Context, id glid.GLID) (*RotationPolicyConfig, error) {
 	p.mu.RLock()

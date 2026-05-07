@@ -44,23 +44,10 @@ func (s *SystemServer) PutRoute(
 		return nil, connErr
 	}
 
-	// Validate filter_id references an existing filter (if non-empty).
-	var filterID *glid.GLID
-	if len(req.Msg.Config.FilterId) != 0 {
-		fid, connErr := parseProtoID(req.Msg.Config.FilterId)
-		if connErr != nil {
-			return nil, connErr
-		}
-		fc, err := s.sysStore.GetFilter(ctx, fid)
-		if err != nil {
-			return nil, errInternal(err)
-		}
-		if fc == nil {
-			return nil, connect.NewError(connect.CodeInvalidArgument,
-				fmt.Errorf("filter %q not found", fid))
-		}
-		filterID = &fid
-	}
+	// gastrolog-4kkoo (Phase 5): no FilterConfig lookup; the gating expression
+	// arrives inline on req.Msg.Config.Stages and is validated structurally
+	// here. Semantic validation (parse, attribute existence) is the
+	// orchestrator's job at reload time.
 
 	// Validate all destination vault IDs reference existing vaults.
 	var destinations []glid.GLID
@@ -91,15 +78,13 @@ func (s *SystemServer) PutRoute(
 	}
 
 	cfg := system.RouteConfig{
-		ID:                id,
-		Name:              req.Msg.Config.Name,
-		FilterID:          filterID,
-		Destinations:      destinations,
-		Distribution:      system.DistributionMode(distribution),
-		Enabled:           req.Msg.Config.Enabled,
-		Sources:           convert.RouteSourcesFromProto(req.Msg.Config.GetSources()),
-		SourceVaultIDs:    glid.SliceFromProto(req.Msg.Config.GetSourceVaultIds()),
-		SourceIngesterIDs: glid.SliceFromProto(req.Msg.Config.GetSourceIngesterIds()),
+		ID:           id,
+		Name:         req.Msg.Config.Name,
+		Priority:     req.Msg.Config.GetPriority(),
+		Stages:       convert.RouteStagesFromProto(req.Msg.Config.GetStages()),
+		Destinations: destinations,
+		Distribution: system.DistributionMode(distribution),
+		Enabled:      req.Msg.Config.Enabled,
 	}
 	if err := s.sysStore.PutRoute(ctx, cfg); err != nil {
 		return nil, errInternal(err)

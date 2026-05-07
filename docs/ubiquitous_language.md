@@ -199,42 +199,58 @@ a tier's active chunk".
 
 ### Routing
 
-- **Filter** — a named query-language expression (`FilterConfig`) that matches
-  a set of records. Special forms: `"*"` = match everything, `"+"` = match
-  everything not already matched by a named filter ("catch the rest"),
-  empty string = match nothing.
+- **Route** — a row in the cluster-wide routing table:
+  `{priority, name, stages, destinations, distribution, enabled}`.
+  Routes are evaluated in priority order (lower fires first; name as
+  deterministic tiebreaker) with **first-match-wins** semantics. No
+  match → drop silently. [`system.RouteConfig`](../backend/internal/system/vault.go).
 
-- **Route** — a named binding of a filter to one or more destination vaults,
-  with a **distribution mode**. [`system.RouteConfig`](../backend/internal/system/vault.go).
+- **Stage** — one step in a route's pipeline (`RouteConfig.Stages`).
+  Phase 5 ships a single variant, `MatchStage{expression}`, which
+  gates the route on a boolean filter expression. Future stage kinds
+  (enrich, redact, sample, fork, route_by_field — gastrolog-5e85x)
+  plug into the same oneof without re-shaping the proto.
 
-- **Distribution mode** — how multi-vault routes pick a destination:
-  - `fanout` — write to all vaults.
-  - `round-robin` — rotate through vaults (load-balance).
+- **Match expression** — a query-language predicate evaluated against
+  each record's attributes. Special forms: `"*"` = match everything,
+  empty string = match nothing (route enrolled but never fires —
+  useful for muting). The Phase-4 catch-the-rest (`"+"`) form is
+  gone; an explicit catch-all at the lowest priority replaces it.
+
+- **Synthetic attributes** — reserved-prefix attributes (`_source`,
+  `_ingester`, `_vault`, `_reason`) overlaid on a record's real
+  attrs at routing-evaluation time only. The overlay is computed
+  per call and never mutates the record's persisted attrs. They
+  unify the Phase-4 source-predicate enum and the content filter
+  into a single expression language. Routes match on
+  `_source = "ingest"`, `_source = "retention" AND _vault = "<id>"`,
+  etc. User records carrying `_`-prefixed attrs collide with this
+  namespace and aren't supported.
+
+- **Source kinds** — the canonical wire values of the `_source`
+  synthetic: `"ingest"` (records arriving from an ingester) and
+  `"retention"` (records the retention engine is feeding back through
+  the routing table for a vault that's draining). Other kinds may be
+  added by future stages.
+
+- **Distribution mode** — how a single route fans matched records
+  across its destinations:
+  - `fanout` — write to all destinations (default).
+  - `round-robin` — rotate through destinations (load-balance).
   - `failover` — try first; on failure, try next.
 
-- **Route source predicate** — a route carries a SET of source-predicate
-  kinds (`RouteConfig.Sources`). Empty defaults to `ingest` for back-compat.
-  - `ingest` — the route participates in the live ingestion `FilterSet`
-    and matches records arriving from ingesters. Optional narrower:
-    `RouteConfig.SourceIngesterIDs` lists specific ingesters; empty = any.
-  - `retention-trigger` — the route is consulted only when a vault's
-    retention event fires; the chunk's records are streamed through every
-    matching retention-trigger route, and the chunk is destroyed afterward
-    regardless. Excluded from the live `FilterSet` (unless the route also
-    carries `ingest`) so re-routed records can't loop back through
-    ingestion. Optional narrower: `RouteConfig.SourceVaultIDs` lists
-    specific source vaults; empty = any.
+- **RouteSet** — the compiled, priority-sorted routing table on a
+  node. Reloaded when routes, vaults, or placements change.
 
-  A route can carry both kinds at once. The narrower lists are independent;
-  only the list matching the active source kind is consulted. Phase 4
-  (gastrolog-42f9z) replaced the old `EjectOnly route` concept.
+- **MatchResult** — the output of route evaluation: `VaultID`,
+  optional `NodeID` (for cross-node forwarding), `RouteID`,
+  `Distribution`. A single matched route returns one MatchResult
+  per destination.
 
-- **FilterSet** — the compiled, optimized set of all active filters on a node,
-  plus precomputed node routing ("which nodes hold which vaults"). Reloaded
-  when routes, vaults, or placements change.
-
-- **MatchResult** — the output of filter evaluation: `VaultID`, optional
-  `NodeID` (for forwarding), `RouteID`. One match per (vault, route) pair.
+- **ValidateExpression RPC** — read-only, node-local check that an
+  expression parses and uses only supported predicates. Drives the
+  route filter editor's live feedback; uses the same compile path
+  as `PutRoute` so editor verdict and save verdict cannot disagree.
 
 ### Ack semantics
 
@@ -424,7 +440,7 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
   - `o.scheduler` — the job queue + cron runner.
   - `o.groupMgr` — handle to the multiraft `GroupManager`.
   - `o.forwarder`, `o.tierReplicator`, `o.peerConns` — cross-node I/O.
-  - `o.filterSet` — compiled routing filters.
+  - `o.routeSet` — compiled routing table (priority-ordered, first-match-wins).
   - `o.replicaCircuit` — per-node circuit breaker for failed replication.
 
 - **Factories** — the bundle passed to `Orchestrator.ApplyConfig` that
@@ -646,8 +662,10 @@ config store.
 ### State model
 
 - **System** — `system.System`: the top-level cluster state. Two halves:
-  - **Config** — operator-controlled (vaults, tiers, filters, routes,
-    ingesters, policies, cloud services, server settings).
+  - **Config** — operator-controlled (vaults, tiers, routes, ingesters,
+    policies, cloud services, server settings). Routes carry their
+    match expressions inline on `RouteConfig.Stages`; there is no
+    separate `Filter` entity (gastrolog-4kkoo Phase 5).
   - **Runtime** — cluster-managed (node membership, tier placements,
     ingester assignments, setup wizard dismissal).
 
@@ -733,7 +751,9 @@ Live on `Config` directly (not as entities):
 | node             | server, host      | "Node" is the cluster-member canonical. Reserve "server" for `cluster.Server` (the gRPC server component). |
 | peer             | remote node       | "Peer" is relative; there is no absolute "remote".                 |
 | retention event  | retention action, expire/eject/transition | Phase 4 (gastrolog-42f9z) collapsed the action enum: a fired retention event always streams records through the routing engine and destroys the chunk. The "what" lives on routes, not on the rule. |
-| retention-trigger route | eject-only route, retention destination | Phase 4 (gastrolog-42f9z): routes carry a source predicate (`ingest` vs `retention-trigger`). The legacy `EjectOnly` boolean is gone. |
+| match expression | filter, FilterConfig | Phase 5 (gastrolog-4kkoo) inlined match expressions on `RouteConfig.Stages`; the named-`Filter` entity is gone. UI label: "Match expression" on the route editor. |
+| route table      | filter set        | Phase 5 (gastrolog-4kkoo): the runtime structure is a priority-ordered `RouteSet`, not a per-vault `FilterSet`. First-match-wins, no catch-the-rest. |
+| synthetic attribute | source predicate, RouteSource | Phase 5 (gastrolog-4kkoo): source/content predicates unify via `_source`/`_ingester`/`_vault`/`_reason` overlays at routing-eval time. The Phase-4 source-kind enum is gone. |
 
 ### Timestamp conventions
 

@@ -77,9 +77,11 @@ func newVaultTestSetup(t *testing.T, recordCount int) vaultTestClients {
 
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
-	// Set filter so orchestrator knows about the vault.
-	filter, _ := orchestrator.CompileFilter(defaultID, "*")
-	orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{filter}))
+	// gastrolog-4kkoo (Phase 5): catch-all route so the orchestrator
+	// knows about the vault.
+	cr, _ := orchestrator.CompileRoute(glid.New(), "all", 0, "*",
+		[]orchestrator.RouteDestination{{VaultID: defaultID}}, "fanout")
+	orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{cr}))
 
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
 	handler := srv.Handler()
@@ -364,11 +366,7 @@ func TestExportVault(t *testing.T) {
 	}
 
 	var totalRecords int
-	for {
-		ok := stream.Receive()
-		if !ok {
-			break
-		}
+	for stream.Receive() {
 		msg := stream.Msg()
 		totalRecords += len(msg.Records)
 
@@ -377,10 +375,6 @@ func TestExportVault(t *testing.T) {
 			if len(rec.Raw) == 0 {
 				t.Error("exported record has empty raw data")
 			}
-		}
-
-		if !msg.HasMore {
-			break
 		}
 	}
 	if err := stream.Err(); err != nil && err != io.EOF {
@@ -488,9 +482,6 @@ func TestExportImportRoundTrip(t *testing.T) {
 	for stream.Receive() {
 		msg := stream.Msg()
 		allRecords = append(allRecords, msg.Records...)
-		if !msg.HasMore {
-			break
-		}
 	}
 	if err := stream.Err(); err != nil && err != io.EOF {
 		t.Fatalf("stream error: %v", err)

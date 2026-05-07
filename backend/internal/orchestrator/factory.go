@@ -155,7 +155,7 @@ func (o *Orchestrator) applyVaults(sys *system.System, factories Factories) erro
 
 	// Compile filters at startup so vaults can receive records immediately.
 	// The rotation sweep also reconciles every 15s as a safety net.
-	if err := o.reloadFiltersFromRoutes(sys); err != nil {
+	if err := o.reloadRoutesFromConfig(sys); err != nil {
 		return err
 	}
 	return nil

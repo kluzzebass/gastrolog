@@ -1247,6 +1247,308 @@ func TestMultiNode_PaginatedReverseSearchRemoteOnly(t *testing.T) {
 	}
 }
 
+// TestMultiNode_PaginatedReverseSearchDenseMultiVault is the regression
+// guard for the "scroll jumps backward in time" symptom observed against
+// the Phase 5 hot/warm two-vault cluster: paginating reverse against a
+// coordinator that is leader of one vault and reaches another via remote
+// fan-out drops records mid-merge, surfacing in the UI as the timestamp
+// suddenly jumping minutes earlier mid-scroll.
+//
+// Setup: 2 nodes, each leader of its own vault. node-A is the coordinator,
+// so vault-A is searched locally and vault-B is fanned out via remote
+// SearchStream. Records are densely interleaved (1ms apart, 0.5ms offset
+// between vaults) so every page pulls from both iterators and the merge
+// alternates between them.
+//
+// The test labels each record uniquely (A-0..A-N-1, B-0..B-N-1) and
+// asserts the union of all paginated records equals the full label set.
+// Any record dropped at a page boundary shows up as a missing label —
+// concrete evidence of merge-level pagination loss, not just a gap in
+// timestamps that could be hand-waved as "rounding."
+func TestMultiNode_PaginatedReverseSearchDenseMultiVault(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"node-A", "node-B"})
+
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	const perVault = 500
+	const pageLimit = 73 // prime — avoid alignment with merge alternation
+
+	// Dense interleave: vault-A ticks at t0+i*1ms, vault-B at t0+i*1ms+0.5ms.
+	// Every consecutive pair of records straddles the local/remote boundary,
+	// guaranteeing the merge has to alternate between the two sources at
+	// least once per page.
+	for i := range perVault {
+		aTS := t0.Add(time.Duration(i) * time.Millisecond)
+		bTS := aTS.Add(500 * time.Microsecond)
+		h.Node(t, "node-A").vault.CM.Append(chunk.Record{
+			IngestTS: aTS,
+			WriteTS:  aTS,
+			Raw:      fmt.Appendf(nil, "A-%04d", i),
+		})
+		h.Node(t, "node-B").vault.CM.Append(chunk.Record{
+			IngestTS: bTS,
+			WriteTS:  bTS,
+			Raw:      fmt.Appendf(nil, "B-%04d", i),
+		})
+	}
+
+	expr := fmt.Sprintf("start=%s end=%s reverse=true limit=%d",
+		t0.Format(time.RFC3339Nano),
+		t0.Add(time.Duration(perVault+1)*time.Millisecond).Format(time.RFC3339Nano),
+		pageLimit)
+
+	seen := make(map[string]bool, perVault*2)
+	var allTS []time.Time
+	var resumeToken []byte
+	for page := 1; page <= 100; page++ {
+		req := &gastrologv1.SearchRequest{Query: &gastrologv1.Query{Expression: expr}}
+		if resumeToken != nil {
+			req.ResumeToken = resumeToken
+		}
+		stream, err := h.client.Search(context.Background(), connect.NewRequest(req))
+		if err != nil {
+			t.Fatalf("page %d Search: %v", page, err)
+		}
+		var pageRaws []string
+		var pageTS []time.Time
+		var nextToken []byte
+		var hasMore bool
+		// HasMore/ResumeToken are only set on the final response — intermediate
+		// batches carry records only. Overwriting on every message is the
+		// portable pattern: the final message wins.
+		for stream.Receive() {
+			msg := stream.Msg()
+			for _, r := range msg.Records {
+				pageRaws = append(pageRaws, string(r.Raw))
+				pageTS = append(pageTS, r.IngestTs.AsTime())
+			}
+			hasMore = msg.HasMore
+			if len(msg.ResumeToken) > 0 {
+				nextToken = msg.ResumeToken
+			} else {
+				nextToken = nil
+			}
+		}
+		if err := stream.Err(); err != nil && err != io.EOF {
+			t.Fatalf("page %d stream error: %v", page, err)
+		}
+
+		// Strictly descending within the page.
+		for i := 1; i < len(pageTS); i++ {
+			if !pageTS[i].Before(pageTS[i-1]) {
+				t.Fatalf("page %d not descending: pageTS[%d]=%v >= pageTS[%d]=%v",
+					page, i, pageTS[i], i-1, pageTS[i-1])
+			}
+		}
+		// No overlap with prior pages.
+		if len(allTS) > 0 && len(pageTS) > 0 {
+			lastPrev := allTS[len(allTS)-1]
+			if !pageTS[0].Before(lastPrev) {
+				t.Fatalf("page %d overlap: first=%v (%s) >= prev last=%v (%s)",
+					page, pageTS[0], pageRaws[0], lastPrev, allTS[len(allTS)-1])
+			}
+		}
+		// Track every unique label seen across all pages.
+		for _, raw := range pageRaws {
+			if seen[raw] {
+				t.Fatalf("page %d: duplicate record %q", page, raw)
+			}
+			seen[raw] = true
+		}
+		allTS = append(allTS, pageTS...)
+
+		if !hasMore {
+			break
+		}
+		if len(pageTS) == 0 {
+			t.Fatalf("page %d: hasMore=true but 0 records — pagination is stuck", page)
+		}
+		resumeToken = nextToken
+	}
+
+	// Every appended label must appear exactly once across all pages.
+	// A missing label means the merge silently dropped records at a page
+	// boundary — the regression we are guarding against.
+	const want = perVault * 2
+	if len(seen) != want {
+		var missing []string
+		for i := range perVault {
+			a := fmt.Sprintf("A-%04d", i)
+			b := fmt.Sprintf("B-%04d", i)
+			if !seen[a] {
+				missing = append(missing, a)
+			}
+			if !seen[b] {
+				missing = append(missing, b)
+			}
+		}
+		head := missing
+		if len(head) > 10 {
+			head = head[:10]
+		}
+		t.Fatalf("expected %d unique records, got %d (missing %d, first up to 10: %v)",
+			want, len(seen), len(missing), head)
+	}
+}
+
+// TestMultiNode_PaginatedReverseSearchNonOverlappingVaults reproduces the
+// user-reported "scroll jumps backward in time" symptom from the Phase 5
+// hot/warm two-vault topology. The setup: hot vault holds the most recent
+// 3 minutes of records (chatterbox flow), warm vault holds the older
+// retention-routed records. The two ranges are CONTIGUOUS but
+// NON-OVERLAPPING — the boundary between them is the retention
+// threshold.
+//
+// The bug surfaced only with this topology because the earlier pagination
+// tests (PaginatedReverseSearch, RemoteOnly) had both vaults span the
+// same time range, so each iter's per-q.Limit slice happened to interleave
+// contiguously with the other's. With non-overlapping ranges, hot's iter
+// emits q.Limit records (all newer than any warm record) and warm's iter
+// emits q.Limit records (all older), and the merge concatenated them with
+// a visible temporal gap at the boundary.
+//
+// The test asserts that paginating reverse from "now" through the entire
+// vault produces every record exactly once with no gap larger than the
+// natural inter-record spacing.
+func TestMultiNode_PaginatedReverseSearchNonOverlappingVaults(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"node-A", "node-B"})
+
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	const hotCount = 200
+	const warmCount = 300
+	const pageLimit = 50
+
+	// Warm vault: older block [t0..t0+299s].
+	for i := range warmCount {
+		ts := t0.Add(time.Duration(i) * time.Second)
+		h.Node(t, "node-B").vault.CM.Append(chunk.Record{
+			IngestTS: ts,
+			WriteTS:  ts,
+			Raw:      fmt.Appendf(nil, "W-%04d", i),
+		})
+	}
+	// Hot vault: newer block [t0+300s..t0+499s], contiguous with warm.
+	for i := range hotCount {
+		ts := t0.Add(time.Duration(warmCount+i) * time.Second)
+		h.Node(t, "node-A").vault.CM.Append(chunk.Record{
+			IngestTS: ts,
+			WriteTS:  ts,
+			Raw:      fmt.Appendf(nil, "H-%04d", i),
+		})
+	}
+
+	expr := fmt.Sprintf("start=%s end=%s reverse=true limit=%d",
+		t0.Format(time.RFC3339Nano),
+		t0.Add((warmCount+hotCount+1)*time.Second).Format(time.RFC3339Nano),
+		pageLimit)
+
+	seen := make(map[string]bool, hotCount+warmCount)
+	var allTS []time.Time
+	var resumeToken []byte
+	for page := 1; page <= 50; page++ {
+		req := &gastrologv1.SearchRequest{Query: &gastrologv1.Query{Expression: expr}}
+		if resumeToken != nil {
+			req.ResumeToken = resumeToken
+		}
+		stream, err := h.client.Search(context.Background(), connect.NewRequest(req))
+		if err != nil {
+			t.Fatalf("page %d Search: %v", page, err)
+		}
+		var pageRaws []string
+		var pageTS []time.Time
+		var nextToken []byte
+		var hasMore bool
+		for stream.Receive() {
+			msg := stream.Msg()
+			for _, r := range msg.Records {
+				pageRaws = append(pageRaws, string(r.Raw))
+				pageTS = append(pageTS, r.IngestTs.AsTime())
+			}
+			hasMore = msg.HasMore
+			if len(msg.ResumeToken) > 0 {
+				nextToken = msg.ResumeToken
+			} else {
+				nextToken = nil
+			}
+		}
+		if err := stream.Err(); err != nil && err != io.EOF {
+			t.Fatalf("page %d stream error: %v", page, err)
+		}
+
+		// Strictly descending within page.
+		for i := 1; i < len(pageTS); i++ {
+			if !pageTS[i].Before(pageTS[i-1]) {
+				t.Fatalf("page %d not descending: pageTS[%d]=%v >= pageTS[%d]=%v",
+					page, i, pageTS[i], i-1, pageTS[i-1])
+			}
+		}
+		// No overlap with previous pages.
+		if len(allTS) > 0 && len(pageTS) > 0 {
+			lastPrev := allTS[len(allTS)-1]
+			if !pageTS[0].Before(lastPrev) {
+				t.Fatalf("page %d overlap: first=%v >= prev last=%v",
+					page, pageTS[0], lastPrev)
+			}
+		}
+		// No gap > 1 second across the page boundary or within it. Records
+		// are 1s apart, so any gap > 1s means a record was skipped — the
+		// user-reported "jumps backward in time" symptom.
+		if len(allTS) > 0 && len(pageTS) > 0 {
+			gap := allTS[len(allTS)-1].Sub(pageTS[0])
+			if gap > 2*time.Second {
+				t.Fatalf("page %d boundary gap of %v: prev last=%v, this first=%v (record skipped)",
+					page, gap, allTS[len(allTS)-1], pageTS[0])
+			}
+		}
+		for i := 1; i < len(pageTS); i++ {
+			gap := pageTS[i-1].Sub(pageTS[i])
+			if gap > 2*time.Second {
+				t.Fatalf("page %d intra-page gap of %v: pageTS[%d]=%v, pageTS[%d]=%v (record skipped)",
+					page, gap, i-1, pageTS[i-1], i, pageTS[i])
+			}
+		}
+		for _, raw := range pageRaws {
+			if seen[raw] {
+				t.Fatalf("page %d: duplicate record %q", page, raw)
+			}
+			seen[raw] = true
+		}
+		allTS = append(allTS, pageTS...)
+
+		if !hasMore {
+			break
+		}
+		if len(pageTS) == 0 {
+			t.Fatalf("page %d: hasMore=true but 0 records — pagination is stuck", page)
+		}
+		resumeToken = nextToken
+	}
+
+	const want = hotCount + warmCount
+	if len(seen) != want {
+		var missing []string
+		for i := range hotCount {
+			id := fmt.Sprintf("H-%04d", i)
+			if !seen[id] {
+				missing = append(missing, id)
+			}
+		}
+		for i := range warmCount {
+			id := fmt.Sprintf("W-%04d", i)
+			if !seen[id] {
+				missing = append(missing, id)
+			}
+		}
+		head := missing
+		if len(head) > 10 {
+			head = head[:10]
+		}
+		t.Fatalf("expected %d unique records, got %d (missing %d, first up to 10: %v)",
+			want, len(seen), len(missing), head)
+	}
+}
+
 func TestMultiNode_PipelineStatsDistributed(t *testing.T) {
 	t.Parallel()
 	h := setupMultiNode(t, []string{"node-A", "node-B"})
@@ -1646,12 +1948,13 @@ func TestMultiNode_RouteStatsAggregated(t *testing.T) {
 	d1 := h.Node(t, "data-1")
 	d2 := h.Node(t, "data-2")
 
-	d1.orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
-		{VaultID: d1.vaultID, Kind: orchestrator.FilterCatchAll, Expr: "*"},
-	}))
-	d2.orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
-		{VaultID: d2.vaultID, Kind: orchestrator.FilterCatchAll, Expr: "*"},
-	}))
+	// gastrolog-4kkoo (Phase 5): catch-all route per data node.
+	d1cr, _ := orchestrator.CompileRoute(glid.New(), "all", 0, "*",
+		[]orchestrator.RouteDestination{{VaultID: d1.vaultID}}, "fanout")
+	d1.orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{d1cr}))
+	d2cr, _ := orchestrator.CompileRoute(glid.New(), "all", 0, "*",
+		[]orchestrator.RouteDestination{{VaultID: d2.vaultID}}, "fanout")
+	d2.orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{d2cr}))
 
 	// Ingest records on each data node (simulating ingesters on those nodes).
 	for range 3 {
@@ -1712,14 +2015,14 @@ func TestMultiNode_PerRouteStatsAggregated(t *testing.T) {
 	routeA := glid.New()
 	routeB := glid.New()
 
-	// data-1: route A catches everything.
-	d1.orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
-		{VaultID: d1.vaultID, Kind: orchestrator.FilterCatchAll, Expr: "*", RouteID: routeA},
-	}))
-	// data-2: route B catches everything.
-	d2.orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
-		{VaultID: d2.vaultID, Kind: orchestrator.FilterCatchAll, Expr: "*", RouteID: routeB},
-	}))
+	// gastrolog-4kkoo (Phase 5): one route per node, distinct RouteIDs so
+	// per-route stats stay attributable.
+	d1cr, _ := orchestrator.CompileRoute(routeA, "route-a", 0, "*",
+		[]orchestrator.RouteDestination{{VaultID: d1.vaultID}}, "fanout")
+	d1.orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{d1cr}))
+	d2cr, _ := orchestrator.CompileRoute(routeB, "route-b", 0, "*",
+		[]orchestrator.RouteDestination{{VaultID: d2.vaultID}}, "fanout")
+	d2.orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{d2cr}))
 
 	for range 5 {
 		if err := d1.orch.Ingest(chunk.Record{Raw: []byte("from-d1")}); err != nil {

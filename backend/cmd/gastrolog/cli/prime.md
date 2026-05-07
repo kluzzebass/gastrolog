@@ -11,13 +11,14 @@ ENTITIES
 
   Ingester   Receives logs (syslog, HTTP, OTLP, Docker, tail, Kafka, MQTT, RELP, Fluent Forward)
   Vault      Stores logs in time-ordered chunks (file or memory backend)
-  Route      Connects ingesters → vaults. Without a route, logs are dropped.
-  Filter     Match expression for routes. Routes without a filter accept everything.
+  Route      Connects ingesters → vaults via an inline match expression.
+             Routes are evaluated by priority (lower fires first); first match
+             wins. No match → drop. An empty/`*` expression matches everything.
   Rotation   Policy for when to seal chunks (size, age, cron)
   Retention  Policy for when to expire/migrate chunks (age, size, count)
   Node       Cluster member. Auto-created on join.
 
-  Data flow: Ingester → Route (filter?) → Vault → Chunks → Indexes → Queryable
+  Data flow: Ingester → Route (match expression) → Vault → Chunks → Indexes → Queryable
 
   All entities are managed via `gastrolog config <entity> <action>`.
   All entities accept --help: `gastrolog config vault create --help`
@@ -64,13 +65,11 @@ DEPENDENCY ORDER
 ═══════════════════════════════════════════════════
 
   1. Vault must exist before a route can reference it
-  2. Filter must exist before a route can reference it
-  3. Route must exist for logs to flow from ingester to vault
-  4. Ingester can exist without a route, but logs will be dropped
+  2. Route must exist for logs to flow from ingester to vault
+  3. Ingester can exist without a route, but logs will be dropped
 
   Delete constraints:
   - Vault: blocked if referenced by a route destination
-  - Filter: blocked if referenced by a route
   - Rotation/retention policy: auto-cleared from vaults on delete
 
 ═══════════════════════════════════════════════════
@@ -151,23 +150,29 @@ ROUTES
 
   gastrolog config route list
   gastrolog config route create --name default --destination app-logs
-  gastrolog config route create --name errors --filter errors-only --destination error-vault
+  gastrolog config route create --name errors --expression 'level=error' --destination error-vault
   gastrolog config route create --name balanced --destination vault-1 --destination vault-2 --distribution round-robin
   gastrolog config route create --help    # full flag list
   gastrolog config route delete default
 
   Distribution modes: fanout (all destinations), round-robin (rotate), failover (first available)
-  Routes without a --filter accept all records.
+  Routes are evaluated in priority order with first-match-wins. An empty or
+  `*` expression accepts all records. Synthetic attributes are available
+  for predicates: `_source` ("ingest" | "retention"), `_ingester` (id),
+  `_vault` (id, set on retention firing), `_reason` (retention reason).
 
 ═══════════════════════════════════════════════════
-FILTERS
+MATCH EXPRESSIONS
 ═══════════════════════════════════════════════════
 
-  gastrolog config filter create --name errors-only --expression 'level=error'
-  gastrolog config filter create --name web-traffic --expression 'service=web AND status>=400'
-  gastrolog config filter delete errors-only
+  Match expressions live inline on routes via --expression. The query
+  language is the same one used at search time:
+  key=value, AND, OR, NOT, >=, <=, globs, regex.
 
-  Expressions use the query language: key=value, AND, OR, NOT, >=, <=, globs, regex.
+  Examples:
+    'level=error'
+    'service=web AND status>=400'
+    '_source="retention" AND _vault="<id>"'   # retention from a specific vault
 
 ═══════════════════════════════════════════════════
 POLICIES
@@ -226,8 +231,7 @@ COMMON TASKS
 
   --- Split errors to separate vault ---
   gastrolog config vault create --name error-logs --type file
-  gastrolog config filter create --name errors --expression 'level=error'
-  gastrolog config route create --name error-route --filter errors --destination error-logs
+  gastrolog config route create --name error-route --expression 'level=error' --destination error-logs
 
   --- Docker container logging ---
   gastrolog config vault create --name containers --type file

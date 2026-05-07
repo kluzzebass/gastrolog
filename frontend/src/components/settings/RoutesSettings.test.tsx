@@ -14,36 +14,35 @@ function testId(n: number): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
-const ZERO_ID = new Uint8Array(16);
+// gastrolog-4kkoo (Phase 5): match expressions live inline on routes via
+// Stages → MatchStage. The fixtures use the proto's oneof JSON shape.
+const matchStage = (expression: string) => ({
+  stage: { case: "match" as const, value: { expression } },
+});
 
 const sampleConfig = {
   routes: [
     {
       id: testId(1),
       name: "default-route",
-      filterId: testId(10),
+      priority: 0,
+      stages: [matchStage("env=prod")],
       // Two destinations so the distribution badge is meaningful here.
       destinations: [{ vaultId: testId(20) }, { vaultId: testId(21) }],
       distribution: "fanout",
       enabled: true,
-      sources: [],
-      sourceVaultIds: [],
-      sourceIngesterIds: [],
     },
     {
       id: testId(2),
       name: "backup-route",
-      filterId: ZERO_ID,
+      priority: 0,
+      stages: [matchStage("")],
       // Two destinations so the distribution badge stays visible.
       destinations: [{ vaultId: testId(20) }, { vaultId: testId(21) }],
       distribution: "failover",
       enabled: false,
-      sources: [],
-      sourceVaultIds: [],
-      sourceIngesterIds: [],
     },
   ],
-  filters: [{ id: testId(10), name: "prod-filter" }],
   vaults: [
     { id: testId(20), name: "vault-alpha" },
     { id: testId(21), name: "vault-beta" },
@@ -62,7 +61,7 @@ beforeEach(() => {
 describe("RoutesSettings", () => {
   test("renders empty state when no routes", () => {
     const qc = createTestQueryClient();
-    qc.setQueryData(["system"], { routes: [], filters: [], vaults: [], ingesters: [], nodeConfigs: [] });
+    qc.setQueryData(["system"], { routes: [], vaults: [], ingesters: [], nodeConfigs: [] });
 
     const { getByText } = render(<RoutesSettings dark />, {
       wrapper: settingsWrapper(qc),
@@ -95,13 +94,11 @@ describe("RoutesSettings", () => {
         {
           id: testId(3),
           name: "solo-route",
-          filterId: ZERO_ID,
+          priority: 0,
+          stages: [matchStage("*")],
           destinations: [{ vaultId: testId(20) }],
           distribution: "fanout",
           enabled: true,
-          sources: [],
-          sourceVaultIds: [],
-          sourceIngesterIds: [],
         },
       ],
     });
@@ -117,7 +114,7 @@ describe("RoutesSettings", () => {
     expect(queryByText("failover")).toBeNull();
   });
 
-  test("shows filter and destination names in route status", () => {
+  test("shows match expression and destination names in route status", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], sampleConfig);
 
@@ -125,7 +122,7 @@ describe("RoutesSettings", () => {
       wrapper: settingsWrapper(qc),
     });
 
-    expect(getByText(/prod-filter/)).toBeTruthy();
+    expect(getByText(/env=prod/)).toBeTruthy();
     // Both routes in the fixture share the vault-alpha + vault-beta
     // destinations, so the destination string appears once per route.
     expect(getAllByText(/vault-alpha/).length).toBeGreaterThan(0);
@@ -142,7 +139,7 @@ describe("RoutesSettings", () => {
     expect(getByText(/\(disabled\)/)).toBeTruthy();
   });
 
-  test("shows no filter label when route has no filter", () => {
+  test("shows fallback label when route has no match expression", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], sampleConfig);
 
@@ -150,8 +147,8 @@ describe("RoutesSettings", () => {
       wrapper: settingsWrapper(qc),
     });
 
-    // backup-route has no filter
-    expect(getAllByText(/no filter/).length).toBeGreaterThanOrEqual(1);
+    // backup-route has an empty expression
+    expect(getAllByText(/no match expression/).length).toBeGreaterThanOrEqual(1);
   });
 
   test("expands route card on click and shows edit form", () => {
@@ -165,7 +162,8 @@ describe("RoutesSettings", () => {
     fireEvent.click(getByText("default-route"));
     // Form fields should appear
     expect(getByText("Name")).toBeTruthy();
-    expect(getByText("Filter")).toBeTruthy();
+    expect(getByText("Match expression")).toBeTruthy();
+    expect(getByText("Priority")).toBeTruthy();
     expect(getByText("Distribution")).toBeTruthy();
     expect(getByText("Destinations")).toBeTruthy();
     expect(getByText("Enabled")).toBeTruthy();
@@ -205,7 +203,7 @@ describe("RoutesSettings", () => {
   test("opens add form via Add Route button", async () => {
     m(mocks.systemClient, "generateName").mockResolvedValueOnce({ name: "lucky-panda" });
     const qc = createTestQueryClient();
-    qc.setQueryData(["system"], { routes: [], filters: [], vaults: [{ id: testId(20), name: "vault-alpha" }], ingesters: [], nodeConfigs: [] });
+    qc.setQueryData(["system"], { routes: [], vaults: [{ id: testId(20), name: "vault-alpha" }], ingesters: [], nodeConfigs: [] });
 
     const { getByText } = render(<RoutesSettings dark />, {
       wrapper: settingsWrapper(qc),

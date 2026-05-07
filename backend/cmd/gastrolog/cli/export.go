@@ -18,7 +18,7 @@ import (
 // that mirrors the internal system.Config structure.
 type exportDoc struct {
 	// Entity collections.
-	Filters           []*v1.FilterConfig          `json:"filters,omitempty"`
+	// gastrolog-4kkoo (Phase 5): no Filters; expressions live inline on routes.
 	RotationPolicies  []*v1.RotationPolicyConfig  `json:"rotation_policies,omitempty"`
 	RetentionPolicies []*v1.RetentionPolicyConfig `json:"retention_policies,omitempty"`
 	Vaults            []*v1.VaultConfig           `json:"vaults,omitempty"`
@@ -224,7 +224,6 @@ func newExportCmd() *cobra.Command {
 			auth, query, sched, tls, maxmind, setupDismissed := settingsToExport(scResp.Msg)
 
 			doc := &exportDoc{
-				Filters:              cfgResp.Msg.Filters,
 				RotationPolicies:     cfgResp.Msg.RotationPolicies,
 				RetentionPolicies:    cfgResp.Msg.RetentionPolicies,
 				Vaults:               cfgResp.Msg.Vaults,

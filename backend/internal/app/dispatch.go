@@ -88,8 +88,6 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 		d.handleVaultPut(ctx, n.ID)
 	case raftfsm.NotifyVaultDeleted:
 		d.handleVaultDeleted(n)
-	case raftfsm.NotifyFilterPut, raftfsm.NotifyFilterDeleted:
-		d.reloadFilters(ctx)
 	case raftfsm.NotifyRoutePut, raftfsm.NotifyRouteDeleted:
 		d.reloadFilters(ctx)
 	case raftfsm.NotifyRotationPolicyPut, raftfsm.NotifyRotationPolicyDeleted:

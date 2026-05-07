@@ -418,7 +418,13 @@ func PositionsToVaultToken(positions []query.MultiVaultPosition) []byte {
 
 // ResumeTokenToProto converts an internal resume token to proto bytes.
 func ResumeTokenToProto(token *query.ResumeToken) []byte {
-	if token == nil || (len(token.Positions) == 0 && len(token.VaultTokens) == 0) {
+	if token == nil {
+		return nil
+	}
+	hasPositions := len(token.Positions) > 0
+	hasVaultTokens := len(token.VaultTokens) > 0
+	hasHighwater := !token.HighwaterTS.IsZero()
+	if !hasPositions && !hasVaultTokens && !hasHighwater {
 		return nil
 	}
 

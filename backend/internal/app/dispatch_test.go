@@ -559,18 +559,9 @@ func TestHandle_ReloadErrors(t *testing.T) {
 		orch    *mockOrch
 		wantMsg string
 	}{
-		{
-			name:    "filter_put",
-			kind:    raftfsm.NotifyFilterPut,
-			orch:    &mockOrch{reloadFiltersErr: errors.New("f")},
-			wantMsg: "dispatch: reload filters",
-		},
-		{
-			name:    "filter_deleted",
-			kind:    raftfsm.NotifyFilterDeleted,
-			orch:    &mockOrch{reloadFiltersErr: errors.New("f")},
-			wantMsg: "dispatch: reload filters",
-		},
+		// gastrolog-4kkoo (Phase 5): NotifyFilterPut/Deleted removed —
+		// expressions are inline on routes, so route_put / route_deleted
+		// already cover the reload-filters dispatch case.
 		{
 			name:    "route_put",
 			kind:    raftfsm.NotifyRoutePut,

@@ -61,9 +61,9 @@ func newTestSetup(t *testing.T, maxRecords int64) (*orchestrator.Orchestrator, c
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, tracker, s.QE))
 
 	// Set up a catch-all route so records are delivered to the vault.
-	orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
-		{VaultID: defaultID, Kind: orchestrator.FilterCatchAll, Expr: "*"},
-	}))
+	cr, _ := orchestrator.CompileRoute(glid.New(), "all", 0, "*",
+		[]orchestrator.RouteDestination{{VaultID: defaultID}}, "fanout")
+	orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{cr}))
 
 	return orch, s.CM, tracker, defaultID
 }
@@ -483,9 +483,9 @@ func newIngesterTestSetup(t *testing.T) (*orchestrator.Orchestrator, chunk.Chunk
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
 	// Set up a catch-all route so records are delivered to the vault.
-	orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
-		{VaultID: defaultID, Kind: orchestrator.FilterCatchAll, Expr: "*"},
-	}))
+	cr, _ := orchestrator.CompileRoute(glid.New(), "all", 0, "*",
+		[]orchestrator.RouteDestination{{VaultID: defaultID}}, "fanout")
+	orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{cr}))
 
 	return orch, s.CM
 }
@@ -687,9 +687,9 @@ func TestIngesterSealOnChunkFull(t *testing.T) {
 		t.Fatal(err)
 	}
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
-	orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
-		{VaultID: defaultID, Kind: orchestrator.FilterCatchAll, Expr: "*"},
-	}))
+	cr, _ := orchestrator.CompileRoute(glid.New(), "all", 0, "*",
+		[]orchestrator.RouteDestination{{VaultID: defaultID}}, "fanout")
+	orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{cr}))
 
 	// Create ingester with 3 messages to trigger seal.
 	recv := newMockIngester([]orchestrator.IngestMessage{
@@ -1223,37 +1223,35 @@ func getRecordMessages(t *testing.T, cm chunk.ChunkManager) []string {
 func TestFilteringIntegration(t *testing.T) {
 	orch, vaults := newFilteredTestSetup(t)
 
-	// Compile filters:
-	// - prod: receives env=prod messages
-	// - staging: receives env=staging messages
-	// - archive: catch-all (*)
-	// - catchRest: catch-the-rest (+)
-	prodFilter, err := orchestrator.CompileFilter(vaults.prod, "env=prod")
+	// gastrolog-4kkoo (Phase 5): priority-ordered first-match-wins.
+	// Specific routes at priority 10 (env=prod, env=staging) fire first;
+	// the catch-all sits at priority 100 and absorbs everything else.
+	// Each record reaches exactly one vault (no multi-fan-out unless a
+	// single route lists multiple destinations).
+	prodRoute, err := orchestrator.CompileRoute(glid.New(), "prod", 10, "env=prod",
+		[]orchestrator.RouteDestination{{VaultID: vaults.prod}}, "fanout")
 	if err != nil {
-		t.Fatalf("CompileFilter prod failed: %v", err)
+		t.Fatalf("CompileRoute prod: %v", err)
 	}
-	stagingFilter, err := orchestrator.CompileFilter(vaults.staging, "env=staging")
+	stagingRoute, err := orchestrator.CompileRoute(glid.New(), "staging", 10, "env=staging",
+		[]orchestrator.RouteDestination{{VaultID: vaults.staging}}, "fanout")
 	if err != nil {
-		t.Fatalf("CompileFilter staging failed: %v", err)
+		t.Fatalf("CompileRoute staging: %v", err)
 	}
-	archiveFilter, err := orchestrator.CompileFilter(vaults.archive, "*")
+	archiveRoute, err := orchestrator.CompileRoute(glid.New(), "archive", 100, "*",
+		[]orchestrator.RouteDestination{{VaultID: vaults.archive}}, "fanout")
 	if err != nil {
-		t.Fatalf("CompileFilter archive failed: %v", err)
-	}
-	unfilteredFilter, err := orchestrator.CompileFilter(vaults.catchRest, "+")
-	if err != nil {
-		t.Fatalf("CompileFilter catchRest failed: %v", err)
+		t.Fatalf("CompileRoute archive: %v", err)
 	}
 
-	fs := orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
-		prodFilter,
-		stagingFilter,
-		archiveFilter,
-		unfilteredFilter,
+	rs := orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{
+		prodRoute,
+		stagingRoute,
+		archiveRoute,
 	})
-	orch.SetFilterSet(fs)
+	orch.SetRouteSet(rs)
 
-	// Test cases: message attrs -> expected vaults
+	// Test cases: message attrs -> expected vault (first-match-wins).
 	testCases := []struct {
 		name     string
 		attrs    chunk.Attributes
@@ -1261,28 +1259,28 @@ func TestFilteringIntegration(t *testing.T) {
 		expected []glid.GLID // vaults that should receive the message
 	}{
 		{
-			name:     "prod message goes to prod and archive",
+			name:     "prod message goes only to prod",
 			attrs:    chunk.Attributes{"env": "prod", "level": "error"},
 			raw:      "production error",
-			expected: []glid.GLID{vaults.prod, vaults.archive},
+			expected: []glid.GLID{vaults.prod},
 		},
 		{
-			name:     "staging message goes to staging and archive",
+			name:     "staging message goes only to staging",
 			attrs:    chunk.Attributes{"env": "staging", "level": "info"},
 			raw:      "staging info",
-			expected: []glid.GLID{vaults.staging, vaults.archive},
+			expected: []glid.GLID{vaults.staging},
 		},
 		{
-			name:     "dev message goes to archive and catchRest",
+			name:     "dev message falls through to archive",
 			attrs:    chunk.Attributes{"env": "dev", "level": "debug"},
 			raw:      "dev debug",
-			expected: []glid.GLID{vaults.archive, vaults.catchRest},
+			expected: []glid.GLID{vaults.archive},
 		},
 		{
-			name:     "no env goes to archive and catchRest",
+			name:     "no env falls through to archive",
 			attrs:    chunk.Attributes{"level": "warn"},
 			raw:      "no env warn",
-			expected: []glid.GLID{vaults.archive, vaults.catchRest},
+			expected: []glid.GLID{vaults.archive},
 		},
 	}
 
@@ -1331,12 +1329,16 @@ func TestFilteringIntegration(t *testing.T) {
 func TestFilteringWithIngesters(t *testing.T) {
 	orch, vaults := newFilteredTestSetup(t)
 
-	// Set up filtering: prod gets env=prod, archive is catch-all.
-	prodFilter, _ := orchestrator.CompileFilter(vaults.prod, "env=prod")
-	archiveFilter, _ := orchestrator.CompileFilter(vaults.archive, "*")
+	// gastrolog-4kkoo (Phase 5): prod route at priority 10, archive
+	// catch-all at priority 100. First-match-wins so env=prod records
+	// fire only the prod route; everything else falls through to archive.
+	prodRoute, _ := orchestrator.CompileRoute(glid.New(), "prod", 10, "env=prod",
+		[]orchestrator.RouteDestination{{VaultID: vaults.prod}}, "fanout")
+	archiveRoute, _ := orchestrator.CompileRoute(glid.New(), "archive", 100, "*",
+		[]orchestrator.RouteDestination{{VaultID: vaults.archive}}, "fanout")
 
-	fs := orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{prodFilter, archiveFilter})
-	orch.SetFilterSet(fs)
+	rs := orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{prodRoute, archiveRoute})
+	orch.SetRouteSet(rs)
 
 	// Create a ingester that emits messages with different attrs.
 	recv := newMockIngester([]orchestrator.IngestMessage{
@@ -1357,7 +1359,9 @@ func TestFilteringWithIngesters(t *testing.T) {
 		t.Fatalf("Stop failed: %v", err)
 	}
 
-	// Verify filtering: prod should have 2 messages, archive should have 3.
+	// Verify routing: prod fires for the two prod messages, archive
+	// catches the staging fallthrough only. (Phase 5 first-match-wins
+	// — prod records do NOT also reach archive.)
 	prodMsgs := getRecordMessages(t, vaults.cms[vaults.prod])
 	archiveMsgs := getRecordMessages(t, vaults.cms[vaults.archive])
 	stagingMsgs := getRecordMessages(t, vaults.cms[vaults.staging])
@@ -1365,8 +1369,8 @@ func TestFilteringWithIngesters(t *testing.T) {
 	if len(prodMsgs) != 2 {
 		t.Errorf("prod vault: expected 2 messages, got %d: %v", len(prodMsgs), prodMsgs)
 	}
-	if len(archiveMsgs) != 3 {
-		t.Errorf("archive vault: expected 3 messages, got %d: %v", len(archiveMsgs), archiveMsgs)
+	if len(archiveMsgs) != 1 {
+		t.Errorf("archive vault: expected 1 message (staging fallthrough), got %d: %v", len(archiveMsgs), archiveMsgs)
 	}
 	if len(stagingMsgs) != 0 {
 		t.Errorf("staging vault: expected 0 messages, got %d: %v", len(stagingMsgs), stagingMsgs)
@@ -1398,12 +1402,16 @@ func TestFilteringNoFilterSetDropsRecords(t *testing.T) {
 func TestFilteringEmptyFilterReceivesNothing(t *testing.T) {
 	orch, vaults := newFilteredTestSetup(t)
 
-	// prod has empty filter (receives nothing), archive is catch-all.
-	prodFilter, _ := orchestrator.CompileFilter(vaults.prod, "")
-	archiveFilter, _ := orchestrator.CompileFilter(vaults.archive, "*")
+	// gastrolog-4kkoo (Phase 5): a route with an empty match expression
+	// (MatchNone) is enrolled but never fires — useful as a temporary
+	// "muted" state. prod is muted at priority 10, archive catches at 100.
+	prodRoute, _ := orchestrator.CompileRoute(glid.New(), "prod", 10, "",
+		[]orchestrator.RouteDestination{{VaultID: vaults.prod}}, "fanout")
+	archiveRoute, _ := orchestrator.CompileRoute(glid.New(), "archive", 100, "*",
+		[]orchestrator.RouteDestination{{VaultID: vaults.archive}}, "fanout")
 
-	fs := orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{prodFilter, archiveFilter})
-	orch.SetFilterSet(fs)
+	rs := orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{prodRoute, archiveRoute})
+	orch.SetRouteSet(rs)
 
 	rec := chunk.Record{
 		IngestTS: time.Now(),
@@ -1414,9 +1422,9 @@ func TestFilteringEmptyFilterReceivesNothing(t *testing.T) {
 		t.Fatalf("Ingest failed: %v", err)
 	}
 
-	// prod should have 0, archive should have 1.
+	// prod's muted route never fires, so the record falls through to archive.
 	if count := countRecords(t, vaults.cms[vaults.prod]); count != 0 {
-		t.Errorf("prod vault: expected 0 records (empty filter), got %d", count)
+		t.Errorf("prod vault: expected 0 records (muted route), got %d", count)
 	}
 	if count := countRecords(t, vaults.cms[vaults.archive]); count != 1 {
 		t.Errorf("archive vault: expected 1 record, got %d", count)
@@ -1426,15 +1434,19 @@ func TestFilteringEmptyFilterReceivesNothing(t *testing.T) {
 func TestFilteringComplexExpression(t *testing.T) {
 	orch, vaults := newFilteredTestSetup(t)
 
-	// prod receives: (env=prod AND level=error) OR (env=prod AND level=critical)
-	prodFilter, err := orchestrator.CompileFilter(vaults.prod, "(env=prod AND level=error) OR (env=prod AND level=critical)")
+	// gastrolog-4kkoo (Phase 5): prod route at priority 10 with a complex
+	// expression; archive catch-all at priority 100.
+	prodRoute, err := orchestrator.CompileRoute(glid.New(), "prod", 10,
+		"(env=prod AND level=error) OR (env=prod AND level=critical)",
+		[]orchestrator.RouteDestination{{VaultID: vaults.prod}}, "fanout")
 	if err != nil {
-		t.Fatalf("CompileFilter failed: %v", err)
+		t.Fatalf("CompileRoute failed: %v", err)
 	}
-	archiveFilter, _ := orchestrator.CompileFilter(vaults.archive, "*")
+	archiveRoute, _ := orchestrator.CompileRoute(glid.New(), "archive", 100, "*",
+		[]orchestrator.RouteDestination{{VaultID: vaults.archive}}, "fanout")
 
-	fs := orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{prodFilter, archiveFilter})
-	orch.SetFilterSet(fs)
+	rs := orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{prodRoute, archiveRoute})
+	orch.SetRouteSet(rs)
 
 	testCases := []struct {
 		attrs        chunk.Attributes
@@ -1467,9 +1479,12 @@ func TestFilteringComplexExpression(t *testing.T) {
 		}
 	}
 
-	// Archive should have all 4 messages.
-	if count := countRecords(t, vaults.cms[vaults.archive]); count != 4 {
-		t.Errorf("archive: expected 4 messages, got %d", count)
+	// gastrolog-4kkoo (Phase 5): first-match-wins — archive only catches
+	// the records that didn't match the prod route. The fixture has 2
+	// matching (prod+error, prod+critical) and 2 falling through (prod+info,
+	// staging+error), so archive sees 2.
+	if count := countRecords(t, vaults.cms[vaults.archive]); count != 2 {
+		t.Errorf("archive: expected 2 fall-through messages, got %d", count)
 	}
 }
 
@@ -1591,9 +1606,9 @@ func TestPipelineOverlap(t *testing.T) {
 		t.Fatal(err)
 	}
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(vaultID, slowCM, s.IM, s.QE))
-	orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
-		{VaultID: vaultID, Kind: orchestrator.FilterCatchAll, Expr: "*"},
-	}))
+	cr, _ := orchestrator.CompileRoute(glid.New(), "all", 0, "*",
+		[]orchestrator.RouteDestination{{VaultID: vaultID}}, "fanout")
+	orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{cr}))
 	orch.RegisterDigester(&slowDigester{delay: digestDelay})
 
 	// Ingester that sends n messages then waits for cancellation.

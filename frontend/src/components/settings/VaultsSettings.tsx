@@ -3,7 +3,6 @@ import { useReducer, useState } from "react";
 import { protoInt64 } from "@bufbuild/protobuf";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
 import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
-import { useThemeClass } from "../../hooks/useThemeClass";
 import {
   useConfig,
   usePutVault,
@@ -206,6 +205,7 @@ export function VaultStorageForm({
   nodeOptions,
   vaultName,
   maxRF,
+  cloudLocked,
   onTypeChange,
   onUpdate,
 }: Readonly<{
@@ -218,17 +218,21 @@ export function VaultStorageForm({
   nodeOptions: { value: string; label: string }[];
   vaultName: string;
   maxRF?: number;
+  // cloudLocked freezes the Cloud Storage selector. The backend rejects
+  // cloud_service_id changes on existing vaults (gastrolog-4k5mg) — to
+  // change cloud binding, create a new vault and route data via
+  // retention. The Add form leaves this false; edit-existing passes true.
+  cloudLocked?: boolean;
   onTypeChange?: (t: TierTypeLabel) => void;
   onUpdate: (patch: Partial<TierEntry>) => void;
 }>) {
-  const c = useThemeClass(dark);
+  // gastrolog-4kkoo cleanup: no bordered/backgrounded wrapper. Phase-2
+  // and earlier the storage form was a tier sub-card and the border
+  // visually separated it from sibling tiers. With 1:1 vault:tier and
+  // the tier UI gone, there's nothing to separate it from — it's just
+  // the second half of the card body.
   return (
-    <div
-      className={`border rounded px-3 py-2.5 flex flex-col gap-2 ${c(
-        "border-ink-border/60 bg-ink-base/40",
-        "border-light-border/60 bg-light-base/40",
-      )}`}
-    >
+    <div className="flex flex-col gap-2">
       {onTypeChange && (
         <FormField label="Storage Type" dark={dark}>
           <SelectInput
@@ -265,7 +269,13 @@ export function VaultStorageForm({
           <FormField
             label="Cloud Storage"
             dark={dark}
-            description={cloudServiceOptions.length === 0 ? "No cloud services configured — leave empty for local-only" : "Optional — select to make this tier cloud-backed"}
+            description={
+              cloudLocked
+                ? "Cloud binding is fixed at vault creation. To change it, create a new vault and migrate data via retention routing."
+                : cloudServiceOptions.length === 0
+                  ? "No cloud services configured — leave empty for local-only"
+                  : "Optional — select to make this vault cloud-backed"
+            }
           >
             <SelectInput
               value={tier.cloudServiceId}
@@ -275,6 +285,7 @@ export function VaultStorageForm({
                 ...cloudServiceOptions,
               ]}
               dark={dark}
+              disabled={cloudLocked}
             />
           </FormField>
 
@@ -430,7 +441,6 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
   const existingNames = new Set(vaults.map((s) => s.name));
   const effectiveName = addForm.name.trim() || addForm.namePlaceholder || "vault";
   const nameConflict = existingNames.has(effectiveName);
-  const tiers = config?.tiers ?? [];
   const routes = config?.routes ?? [];
 
   // Derive storage class options with node availability.
@@ -607,7 +617,6 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
           key={encode(vault.id)}
           vault={vault}
           vaults={vaults}
-          tiers={tiers}
           routes={routes}
           nodeConfigs={config?.nodeConfigs ?? []}
           nodeStorageConfigs={config?.nodeStorageConfigs ?? []}

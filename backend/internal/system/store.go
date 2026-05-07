@@ -26,11 +26,8 @@ type Store interface {
 	// Load reads the full system state (config + runtime). Returns nil if nothing exists (bootstrap signal).
 	Load(ctx context.Context) (*System, error)
 
-	// Filters
-	GetFilter(ctx context.Context, id glid.GLID) (*FilterConfig, error)
-	ListFilters(ctx context.Context) ([]FilterConfig, error)
-	PutFilter(ctx context.Context, cfg FilterConfig) error
-	DeleteFilter(ctx context.Context, id glid.GLID) error
+	// gastrolog-4kkoo (Phase 5): filter CRUD removed. Filters are inlined
+	// onto RouteConfig.Stages[].Match.Expression — no separate entity.
 
 	// Rotation policies
 	GetRotationPolicy(ctx context.Context, id glid.GLID) (*RotationPolicyConfig, error)

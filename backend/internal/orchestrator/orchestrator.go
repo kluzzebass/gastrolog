@@ -211,8 +211,9 @@ type Orchestrator struct {
 	// Digesters (message enrichment pipeline).
 	digesters []Digester
 
-	// Vault filters.
-	filterSet *FilterSet
+	// Routing table — gastrolog-4kkoo (Phase 5): per-route, priority-ordered,
+	// first-match-wins. Replaces the Phase-4 per-vault FilterSet.
+	routeSet *RouteSet
 
 	// Route stats (atomic, no lock needed for reads/writes).
 	routeStats      RouteStats
@@ -653,12 +654,14 @@ func (o *Orchestrator) GetRouteStats() *RouteStats {
 	return &o.routeStats
 }
 
-// IsFilterSetActive reports whether a compiled filter set exists.
-// When false, all ingested records are silently dropped.
+// IsFilterSetActive reports whether a routing table is currently
+// loaded. When false, all ingested records are silently dropped.
+// gastrolog-4kkoo (Phase 5): name kept for proto/RPC stability — the
+// underlying state is now a RouteSet, not a per-vault FilterSet.
 func (o *Orchestrator) IsFilterSetActive() bool {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	return o.filterSet != nil
+	return o.routeSet != nil
 }
 
 // VaultRouteStatsList returns per-vault routing stats for all vaults

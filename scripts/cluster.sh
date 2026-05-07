@@ -208,20 +208,59 @@ configure() {
   $GLOG config rotation-policy create --addr "$S" --name "100-rows" --max-records 100 2>&1 | sed 's/^/  /'
   $GLOG config retention-policy create --addr "$S" --name "3m-retain" --max-age 3m 2>&1 | sed 's/^/  /'
 
-  echo ">>> Creating filter..."
-  $GLOG config filter create --addr "$S" --name "catch-all" --expression "*" 2>&1 | sed 's/^/  /'
+  # gastrolog-4kkoo (Phase 5): no filter entity — match expressions live
+  # inline on routes via --expression. Synthetic attributes (_source,
+  # _vault) tag the record's origin at routing-eval time and let one
+  # route distinguish "from an ingester" from "from a retention sweep".
 
-  echo ">>> Creating vault..."
-  # Phase 2 (gastrolog-3iy5l): a vault has a single storage shape. The legacy
-  # multi-tier hot/warm/cold chain has been collapsed; transitions across
-  # storage shapes will return as inter-vault routing in Phase 4.
-  $GLOG config vault create --addr "$S" --name "default-vault" \
+  echo ">>> Creating vaults..."
+  # Two-vault hot/warm chain that recreates the pre-Phase-2 multi-tier
+  # behavior using Phase-5 inter-vault routing.
+  #   - hot-vault:  file-backed on local disk, 100-row rotation, 3-minute
+  #                 retention. Chunks past their TTL fire the retention
+  #                 sweep, which streams their records back through the
+  #                 routing engine.
+  #   - warm-vault: file-backed but cloud-served (S3). 100-row rotation
+  #                 carries over so chunk granularity is consistent;
+  #                 no retention policy means data lives forever.
+  $GLOG config vault create --addr "$S" --name "hot-vault" \
     --type file --storage-class 1 --replication-factor "$NODES" \
     --rotation-policy "100-rows" --retention-policy "3m-retain" 2>&1 | sed 's/^/  /'
+  $GLOG config vault create --addr "$S" --name "warm-vault" \
+    --type file --storage-class 1 --replication-factor "$NODES" \
+    --cloud-service "S3" \
+    --rotation-policy "100-rows" 2>&1 | sed 's/^/  /'
 
-  echo ">>> Creating route..."
+  # The retention route needs the hot vault's GLID inline in its
+  # match expression — there's no name-resolution path for synthetic
+  # attribute values. Pull the ID out of `vault list -o json`, which
+  # emits canonical base32hex GLIDs ready to drop into a predicate.
+  local HOT_VAULT_ID
+  HOT_VAULT_ID=$(
+    $GLOG config vault list --addr "$S" -o json 2>/dev/null \
+    | jq -r '.[] | select(.name == "hot-vault") | .id'
+  )
+  if [[ -z "$HOT_VAULT_ID" ]]; then
+    echo "Error: failed to resolve hot-vault ID for retention route" >&2
+    exit 1
+  fi
+
+  echo ">>> Creating routes..."
+  # Live ingest → hot. `_source = "ingest"` tags every record arriving
+  # from an ingester at routing-eval time.
   $GLOG config route create --addr "$S" \
-    --name "default" --filter "catch-all" --destination "default-vault" 2>&1 | sed 's/^/  /'
+    --name "ingest-to-hot" \
+    --expression '_source = "ingest"' \
+    --destination "hot-vault" 2>&1 | sed 's/^/  /'
+  # Hot retention firing → warm. When hot-vault's 3m retention expires
+  # a chunk, its records stream back through the routing engine with
+  # `_source = "retention"` and `_vault = "<hot-id>"`. This route picks
+  # them up and lands them in warm-vault before the original chunk is
+  # destroyed.
+  $GLOG config route create --addr "$S" \
+    --name "hot-retention-to-warm" \
+    --expression "_source = \"retention\" AND _vault = \"${HOT_VAULT_ID}\"" \
+    --destination "warm-vault" 2>&1 | sed 's/^/  /'
 
   echo ">>> Creating ingesters (disabled)..."
   local NODE_IDS=()

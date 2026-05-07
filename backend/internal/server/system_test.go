@@ -54,8 +54,6 @@ func testAfterConfigApply(orch *orchestrator.Orchestrator, cfgStore system.Store
 			}
 		case raftfsm.NotifyVaultDeleted:
 			_ = orch.ForceRemoveVault(n.ID)
-		case raftfsm.NotifyFilterPut, raftfsm.NotifyFilterDeleted:
-			_ = orch.ReloadFilters(ctx)
 		case raftfsm.NotifyRotationPolicyPut, raftfsm.NotifyRotationPolicyDeleted:
 			_ = orch.ReloadRotationPolicies(ctx)
 		case raftfsm.NotifyRetentionPolicyPut, raftfsm.NotifyRetentionPolicyDeleted:
@@ -147,19 +145,12 @@ func TestDeleteVaultForce(t *testing.T) {
 	client, cfgStore, orch := newConfigTestSetup(t)
 	ctx := context.Background()
 
-	filterID := glid.New()
 	vaultID := glid.New()
 	ensureMemoryTier(t, cfgStore, vaultID)
 
-	// Create a filter first, then a vault that uses it.
-	_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
-		Config: &gastrologv1.FilterConfig{Id: filterID.Bytes(), Name: "catch-all", Expression: "*"},
-	}))
-	if err != nil {
-		t.Fatalf("PutFilter: %v", err)
-	}
-
-	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+	// gastrolog-4kkoo (Phase 5): no FilterConfig — the test wires a filter
+	// set directly onto the orchestrator below, so no Put step is needed.
+	_, err := client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
 			Id:      vaultID.Bytes(),
 			Name:    "test-vault",
@@ -170,12 +161,12 @@ func TestDeleteVaultForce(t *testing.T) {
 		t.Fatalf("PutVault: %v", err)
 	}
 
-	// Set a catch-all filter directly on the orchestrator (not via route,
-	// since the test also needs to force-delete the vault without
-	// hitting route referential integrity checks).
-	orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
-		{VaultID: vaultID, Kind: orchestrator.FilterCatchAll, Expr: "*"},
-	}))
+	// gastrolog-4kkoo (Phase 5): catch-all route directly on the orchestrator
+	// (not via the config store) so the test can force-delete the vault
+	// without hitting referential-integrity checks.
+	cr, _ := orchestrator.CompileRoute(glid.New(), "all", 0, "*",
+		[]orchestrator.RouteDestination{{VaultID: vaultID}}, "fanout")
+	orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{cr}))
 
 	// Ingest data so the vault is non-empty.
 	if err := orch.Ingest(chunk.Record{
@@ -239,19 +230,12 @@ func TestPauseResumeVaultRPC(t *testing.T) {
 	client, cfgStore, orch := newConfigTestSetup(t)
 	ctx := context.Background()
 
-	filterID := glid.New()
 	vaultID := glid.New()
 	ensureMemoryTier(t, cfgStore, vaultID)
 
-	// Create a filter and a vault.
-	_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
-		Config: &gastrologv1.FilterConfig{Id: filterID.Bytes(), Name: "catch-all-2", Expression: "*"},
-	}))
-	if err != nil {
-		t.Fatalf("PutFilter: %v", err)
-	}
-
-	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+	// gastrolog-4kkoo (Phase 5): expression inlined on the route via Stages
+	// — no separate FilterConfig entity.
+	_, err := client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
 			Id:      vaultID.Bytes(),
 			Name:    "pause-vault",
@@ -262,12 +246,16 @@ func TestPauseResumeVaultRPC(t *testing.T) {
 		t.Fatalf("PutVault: %v", err)
 	}
 
-	// Route the catch-all filter to the vault so Ingest delivers records.
+	// Route a catch-all expression to the vault so Ingest delivers records.
 	_, err = client.PutRoute(ctx, connect.NewRequest(&gastrologv1.PutRouteRequest{
 		Config: &gastrologv1.RouteConfig{
-			Id:       glid.New().Bytes(),
-			Name:     "test-route",
-			FilterId: filterID.Bytes(),
+			Id:   glid.New().Bytes(),
+			Name: "test-route",
+			Stages: []*gastrologv1.RouteStage{{
+				Stage: &gastrologv1.RouteStage_Match{
+					Match: &gastrologv1.MatchStage{Expression: "*"},
+				},
+			}},
 			Destinations: []*gastrologv1.RouteDestination{
 				{VaultId: vaultID.Bytes()},
 			},
@@ -359,19 +347,13 @@ func TestPauseVaultPersistsToConfig(t *testing.T) {
 	client, cfgStore, _ := newConfigTestSetup(t)
 	ctx := context.Background()
 
-	filterID := glid.New()
 	vaultID := glid.New()
 	ensureMemoryTier(t, cfgStore, vaultID)
 
-	// Create a filter and vault.
-	_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
-		Config: &gastrologv1.FilterConfig{Id: filterID.Bytes(), Name: "catch-all-3", Expression: "*"},
-	}))
-	if err != nil {
-		t.Fatalf("PutFilter: %v", err)
-	}
-
-	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+	// gastrolog-4kkoo (Phase 5): no FilterConfig — the test only verifies
+	// PauseVault config persistence and doesn't rely on a route, so the
+	// preflight Filter+Route setup is gone.
+	_, err := client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
 			Id:      vaultID.Bytes(),
 			Name:    "persist-vault",
@@ -457,23 +439,9 @@ func TestDuplicateEntityNames(t *testing.T) {
 	client, _, _ := newConfigTestSetup(t)
 	ctx := context.Background()
 
-	t.Run("filter", func(t *testing.T) {
-		_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
-			Config: &gastrologv1.FilterConfig{Name: "my-filter", Expression: "*"},
-		}))
-		if err != nil {
-			t.Fatalf("first PutFilter: %v", err)
-		}
-		_, err = client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
-			Config: &gastrologv1.FilterConfig{Name: "my-filter", Expression: "level=error"},
-		}))
-		if err == nil {
-			t.Fatal("expected error for duplicate filter name")
-		}
-		if connect.CodeOf(err) != connect.CodeAlreadyExists {
-			t.Fatalf("expected AlreadyExists, got %v", connect.CodeOf(err))
-		}
-	})
+	// gastrolog-4kkoo (Phase 5): the "filter" subtest is gone — filters are
+	// no longer a standalone entity, so duplicate-name semantics apply only
+	// to vaults / ingesters / routes / policies.
 
 	t.Run("vault", func(t *testing.T) {
 		_, err := client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
@@ -588,15 +556,17 @@ func TestDuplicateEntityNames(t *testing.T) {
 
 	t.Run("update_self_allowed", func(t *testing.T) {
 		// Creating with an explicit ID, then updating with the same ID and name should work.
+		// gastrolog-4kkoo (Phase 5): asserted on a Route now that filters are
+		// not a standalone entity. Same self-update semantics for any Put*.
 		id := glid.New()
-		_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
-			Config: &gastrologv1.FilterConfig{Id: id.Bytes(), Name: "self-update", Expression: "*"},
+		_, err := client.PutRoute(ctx, connect.NewRequest(&gastrologv1.PutRouteRequest{
+			Config: &gastrologv1.RouteConfig{Id: id.Bytes(), Name: "self-update", Enabled: true},
 		}))
 		if err != nil {
 			t.Fatalf("create: %v", err)
 		}
-		_, err = client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
-			Config: &gastrologv1.FilterConfig{Id: id.Bytes(), Name: "self-update", Expression: "level=error"},
+		_, err = client.PutRoute(ctx, connect.NewRequest(&gastrologv1.PutRouteRequest{
+			Config: &gastrologv1.RouteConfig{Id: id.Bytes(), Name: "self-update", Enabled: false},
 		}))
 		if err != nil {
 			t.Fatalf("update self should be allowed: %v", err)
@@ -642,8 +612,10 @@ func TestDuplicateEntityNames(t *testing.T) {
 	})
 
 	t.Run("empty_name_rejected", func(t *testing.T) {
-		_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
-			Config: &gastrologv1.FilterConfig{Name: "", Expression: "*"},
+		// gastrolog-4kkoo (Phase 5): asserted on a Route now that filters
+		// are not a standalone entity.
+		_, err := client.PutRoute(ctx, connect.NewRequest(&gastrologv1.PutRouteRequest{
+			Config: &gastrologv1.RouteConfig{Name: "", Enabled: true},
 		}))
 		if err == nil {
 			t.Fatal("expected error for empty name")
@@ -1135,9 +1107,9 @@ func TestGetRouteStats(t *testing.T) {
 		t.Error("expected filterSetActive=false before routes configured")
 	}
 
-	// Configure a vault, filter, and route.
+	// Configure a vault and route. gastrolog-4kkoo (Phase 5): expression
+	// inlined on the route via Stages — no FilterConfig entity.
 	vaultID := glid.New()
-	filterID := glid.New()
 	routeID := glid.New()
 
 	cm, err := chunkmem.NewManager(chunkmem.Config{
@@ -1149,9 +1121,9 @@ func TestGetRouteStats(t *testing.T) {
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(vaultID, cm, nil, nil))
 
 	_ = cfgStore.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "test-vault", Enabled: true})
-	_ = cfgStore.PutFilter(ctx, system.FilterConfig{ID: filterID, Expression: "*"})
 	_ = cfgStore.PutRoute(ctx, system.RouteConfig{
-		ID: routeID, FilterID: &filterID,
+		ID:           routeID,
+		Stages:       []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}},
 		Destinations: []glid.GLID{vaultID}, Enabled: true,
 	})
 
@@ -1196,35 +1168,11 @@ func TestGetRouteStats(t *testing.T) {
 
 // ---------- Eject route & retention rule validation ----------
 
-func TestPutRouteEjectOnly(t *testing.T) {
-	client, _, _ := newConfigTestSetup(t)
-	ctx := context.Background()
-
-	resp, err := client.PutRoute(ctx, connect.NewRequest(&gastrologv1.PutRouteRequest{
-		Config: &gastrologv1.RouteConfig{
-			Name:    "retention-trigger-route",
-			Sources: []gastrologv1.RouteSource{gastrologv1.RouteSource_ROUTE_SOURCE_RETENTION_TRIGGER},
-			Enabled: true,
-		},
-	}))
-	if err != nil {
-		t.Fatalf("PutRoute: %v", err)
-	}
-
-	// Verify route is in config and marked with the retention-trigger source.
-	var found bool
-	for _, r := range resp.Msg.System.Routes {
-		if r.Name == "retention-trigger-route" {
-			found = true
-			if !slices.Contains(r.Sources, gastrologv1.RouteSource_ROUTE_SOURCE_RETENTION_TRIGGER) {
-				t.Errorf("route Sources = %v, want to contain ROUTE_SOURCE_RETENTION_TRIGGER", r.Sources)
-			}
-		}
-	}
-	if !found {
-		t.Fatal("route not found in config response")
-	}
-}
+// gastrolog-4kkoo (Phase 5): TestPutRouteEjectOnly removed. The Phase-4
+// RouteSource enum is gone — retention firing will route through the
+// engine via synthetic _source=retention attribute injection (todo step 7
+// of gastrolog-4kkoo). The replacement test will assert that a route
+// matching `_source == retention` activates only on retention events.
 
 // TestPutVaultEjectRetentionRule, TestPutVaultEjectRuleRequiresEjectOnlyRoute,
 // TestPutVaultEjectRuleMissingRouteIDs, TestDeleteRouteReferencedByEjectVault,
@@ -1518,5 +1466,54 @@ func TestPutTierAcceptsUnchangedCloudServiceID(t *testing.T) {
 	// empty). Must succeed.
 	if _, err := client.PutTier(ctx, connect.NewRequest(mk("renamed"))); err != nil {
 		t.Fatalf("PutTier (rename, no cloud_service_id change): %v", err)
+	}
+}
+
+// gastrolog-4kkoo (Phase 5): ValidateExpression covers what the lean
+// route filter editor needs from the backend — parse + semantic check
+// without committing the route.
+func TestValidateExpression(t *testing.T) {
+	t.Parallel()
+	client, _, _ := newConfigTestSetup(t)
+	ctx := context.Background()
+
+	cases := []struct {
+		name       string
+		expression string
+		wantValid  bool
+	}{
+		{"empty", "", true},
+		{"catch-all", "*", true},
+		{"simple kv", "env=prod", true},
+		{"complex", "env=prod AND level=error", true},
+		{"or", "env=staging OR env=dev", true},
+		{"key-exists", "env=*", true},
+		{"value-exists", "*=error", true},
+		{"not", "NOT env=prod", true},
+		{"synthetic source", `_source="ingest"`, true},
+		{"synthetic vault", `_source="retention" AND _vault="some-id"`, true},
+		{"token rejected", "error", false},
+		{"token in and rejected", "error AND env=prod", false},
+		{"invalid syntax", "env=prod AND", false},
+		{"unclosed paren", "(env=prod", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			resp, err := client.ValidateExpression(ctx, connect.NewRequest(&gastrologv1.ValidateExpressionRequest{
+				Expression: tc.expression,
+			}))
+			if err != nil {
+				t.Fatalf("ValidateExpression: %v", err)
+			}
+			if resp.Msg.Valid != tc.wantValid {
+				t.Errorf("expression %q: valid=%v, want %v (error: %s)",
+					tc.expression, resp.Msg.Valid, tc.wantValid, resp.Msg.Error)
+			}
+			if !tc.wantValid && resp.Msg.Error == "" {
+				t.Errorf("expression %q: invalid response missing error message", tc.expression)
+			}
+		})
 	}
 }

@@ -152,10 +152,9 @@ func TestInternalRotationFiresRateAlerter(t *testing.T) {
 	vaultID := glid.New()
 	orch.RegisterVault(NewVaultFromComponents(vaultID, s.CM, s.IM, s.QE))
 
-	// Catch-all filter so every record routes into the vault.
-	orch.SetFilterSet(NewFilterSet([]*CompiledFilter{
-		{VaultID: vaultID, Kind: FilterCatchAll, Expr: "*"},
-	}))
+	// gastrolog-4kkoo (Phase 5): catch-all route into the vault.
+	cr, _ := CompileRoute(glid.New(), "all", 0, "*", []RouteDestination{{VaultID: vaultID}}, "fanout")
+	orch.SetRouteSet(NewRouteSet([]*CompiledRoute{cr}))
 
 	// Lower the rotation alerter's threshold so a handful of rotations
 	// crosses the warning line within the test window.

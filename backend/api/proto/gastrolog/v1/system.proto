@@ -17,12 +17,6 @@ service SystemService {
   // GetIngesterStatus returns status for a specific ingester.
   rpc GetIngesterStatus(GetIngesterStatusRequest) returns (GetIngesterStatusResponse);
 
-  // PutFilter creates or updates a filter.
-  rpc PutFilter(PutFilterRequest) returns (PutFilterResponse);
-
-  // DeleteFilter removes a filter.
-  rpc DeleteFilter(DeleteFilterRequest) returns (DeleteFilterResponse);
-
   // PutRotationPolicy creates or updates a rotation policy.
   rpc PutRotationPolicy(PutRotationPolicyRequest) returns (PutRotationPolicyResponse);
 
@@ -122,6 +116,12 @@ service SystemService {
   // GenerateName returns a random petname for use as a default entity name.
   rpc GenerateName(GenerateNameRequest) returns (GenerateNameResponse);
 
+  // ValidateExpression parses and semantically validates a route match
+  // expression. gastrolog-4kkoo (Phase 5): drives live editor feedback in
+  // the route filter UI — distinct from PutRoute's save-time validation.
+  // The check is read-only and node-local; no Raft Apply.
+  rpc ValidateExpression(ValidateExpressionRequest) returns (ValidateExpressionResponse);
+
   // WatchConfig streams a notification whenever configuration changes.
   rpc WatchSystem(WatchSystemRequest) returns (stream WatchSystemResponse);
 
@@ -175,17 +175,16 @@ message GetSystemResponse {
   repeated VaultConfig vaults = 1;
   repeated IngesterConfig ingesters = 2;
   repeated RotationPolicyConfig rotation_policies = 3;
-  repeated FilterConfig filters = 4;
-  repeated RetentionPolicyConfig retention_policies = 5;
-  repeated NodeConfig node_configs = 6;
-  repeated RouteConfig routes = 7;
+  repeated RetentionPolicyConfig retention_policies = 4;
+  repeated NodeConfig node_configs = 5;
+  repeated RouteConfig routes = 6;
+  repeated ManagedFileInfo managed_files = 7;
   // Committed log index on the system Raft group (monotonic). Used by clients
   // to avoid regressing cached replicated state with stale reads.
-  uint64 system_raft_index = 9;
-  repeated ManagedFileInfo managed_files = 8;
-  repeated CloudService cloud_services = 10;
-  repeated NodeStorageConfig node_storage_configs = 11;
-  repeated TierConfig tiers = 12;
+  uint64 system_raft_index = 8;
+  repeated CloudService cloud_services = 9;
+  repeated NodeStorageConfig node_storage_configs = 10;
+  repeated TierConfig tiers = 11;
 }
 
 // RetentionRule binds a retention policy to a vault. Phase 4 (gastrolog-42f9z)
@@ -255,47 +254,53 @@ message RouteDestination {
   bytes vault_id = 1;
 }
 
-// RouteSource is a source-predicate kind on a route. Phase 4
-// (gastrolog-42f9z) disambiguates live ingest traffic from
-// retention-driven re-routing events.
+// RouteConfig is a row in the cluster-wide routing table. Phase 5
+// (gastrolog-4kkoo) collapsed the prior (filter_id + source predicate
+// + narrower lists) shape into a sequence of stages plus destinations.
 //
-// A route's `sources` list says which kinds of source streams the route
-// participates in. The route is consulted whenever ANY of its listed
-// sources is active for the record at hand:
-//   - ROUTE_SOURCE_INGEST: live ingester traffic. Routes carrying this
-//     source participate in the live FilterSet.
-//   - ROUTE_SOURCE_RETENTION_TRIGGER: retention events fired by a vault.
-//     Routes carrying this source are consulted only when retention
-//     fires. (They're still excluded from the live FilterSet unless they
-//     also carry INGEST.)
+// Each route is evaluated in priority order (lower priority value fires
+// first; lexicographic name as deterministic tiebreaker). On a record's
+// behalf the routing engine evaluates each stage in `stages` against
+// the record (which carries synthetic system-injected attributes
+// `_source`, `_ingester`, `_vault`, `_reason` in addition to its own
+// content attributes). Today only MatchStage exists — it gates the
+// route on a boolean expression. Future stages (enrich, redact, sample,
+// fork, route_by_field) plug in here as additional `RouteStage` oneof
+// variants per gastrolog-5e85x (Programmable Ingestion).
 //
-// Each source kind can optionally narrow further via the repeated
-// source-id fields. Empty lists mean "match any":
-//   - INGEST + source_ingester_ids empty: match any ingester.
-//   - INGEST + source_ingester_ids set: match only those ingesters.
-//   - RETENTION_TRIGGER + source_vault_ids empty: match any vault.
-//   - RETENTION_TRIGGER + source_vault_ids set: match only those vaults.
+// First-match-wins: when a record matches a route, that route fires
+// and evaluation stops. Operators wanting parallel paths use the fork
+// stage (Programmable Ingestion); operators wanting unconditional
+// destinations use a single route with multiple `destinations` and a
+// fanout `distribution`.
 //
-// The narrower lists are independent and only consulted for the matching
-// source kind. A route with `sources=[INGEST, RETENTION_TRIGGER]`,
-// `source_ingester_ids=[a]`, and `source_vault_ids=[v]` matches traffic
-// from ingester a OR retention events from vault v.
-enum RouteSource {
-  ROUTE_SOURCE_UNSPECIFIED = 0;
-  ROUTE_SOURCE_INGEST = 1;
-  ROUTE_SOURCE_RETENTION_TRIGGER = 2;
-}
-
+// A no-match record is dropped silently. Operators add a catch-all
+// route at the lowest priority for explicit handling.
 message RouteConfig {
   bytes id = 1;
   string name = 2;
-  bytes filter_id = 3;                       // references FilterConfig.id
-  repeated RouteDestination destinations = 4;
-  string distribution = 5;                     // "fanout" (default), "round-robin", or "failover"
-  bool enabled = 6;
-  repeated RouteSource sources = 7;             // source-predicate kinds; empty = INGEST default
-  repeated bytes source_vault_ids = 8;          // optional narrower for sources containing RETENTION_TRIGGER. Empty = any vault.
-  repeated bytes source_ingester_ids = 9;       // optional narrower for sources containing INGEST. Empty = any ingester.
+  int32 priority = 3;                        // lower fires first; ties broken by name lexicographically
+  repeated RouteStage stages = 4;            // pipeline; today: [MatchStage]
+  repeated RouteDestination destinations = 5;
+  string distribution = 6;                    // "fanout" (default), "round-robin", or "failover"
+  bool enabled = 7;
+}
+
+// RouteStage is one step in a route's pipeline. Phase 5 ships only
+// MatchStage. Future stages (enrich, redact, sample, fork,
+// route_by_field) per Programmable Ingestion (gastrolog-5e85x).
+message RouteStage {
+  oneof stage {
+    MatchStage match = 1;
+  }
+}
+
+// MatchStage gates the route on a boolean filter expression. The
+// expression is evaluated against the record (with system-injected
+// synthetic attributes available via reserved-prefix keys: _source,
+// _ingester, _vault, _reason).
+message MatchStage {
+  string expression = 1;
 }
 
 // IngesterMode classifies how an ingester acquires data.
@@ -314,12 +319,6 @@ message IngesterConfig {
   bytes node_id = 6 [deprecated = true]; // Legacy single-node assignment. Use node_ids.
   repeated bytes node_ids = 7;           // Allowed nodes. Parallel: run on all. Singleton: place on one.
   bool singleton = 8;                    // HA semantics: false = run on every node in node_ids (parallel); true = Raft-assigned to one node with failover. Only takes effect when the ingester type has SingletonSupported=true.
-}
-
-message FilterConfig {
-  string expression = 1;
-  bytes id = 2;
-  string name = 3;
 }
 
 message RotationPolicyConfig {
@@ -384,22 +383,6 @@ message WatchIngesterStatusResponse {
   int64 messages_ingested = 4;
   int64 errors = 5;
   int64 bytes_ingested = 6;
-}
-
-message PutFilterRequest {
-  FilterConfig config = 2;
-}
-
-message PutFilterResponse {
-  GetSystemResponse system = 1;
-}
-
-message DeleteFilterRequest {
-  bytes id = 1;
-}
-
-message DeleteFilterResponse {
-  GetSystemResponse system = 1;
 }
 
 message PutRotationPolicyRequest {
@@ -949,6 +932,26 @@ message GenerateNameRequest {}
 
 message GenerateNameResponse {
   string name = 1;
+}
+
+// ValidateExpressionRequest carries a route match expression for live
+// editor feedback. gastrolog-4kkoo (Phase 5).
+message ValidateExpressionRequest {
+  // Match expression text. Empty is valid (route is muted/never fires).
+  // "*" is valid (catch-all).
+  string expression = 1;
+}
+
+// ValidateExpressionResponse reports whether the expression parses and
+// uses only supported predicates. The error is human-readable and
+// safe to surface directly in the editor.
+message ValidateExpressionResponse {
+  // Valid is true when the expression is parseable and uses only
+  // attribute predicates (the same constraint PutRoute enforces at
+  // save time).
+  bool valid = 1;
+  // Error is a human-readable diagnostic. Empty when valid is true.
+  string error = 2;
 }
 
 message WatchSystemRequest {}

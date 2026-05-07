@@ -100,12 +100,15 @@ func (o *Orchestrator) rotationSweep() {
 	}
 }
 
-// reconcileFilters recompiles the filter set from config under a write lock.
+// reconcileFilters recompiles the routing table from config under a
+// write lock. Name kept for callsite stability across the Phase 5
+// refactor — under the hood it now rebuilds a RouteSet rather than a
+// per-vault FilterSet.
 func (o *Orchestrator) reconcileFilters(sys *system.System) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if err := o.reloadFiltersFromRoutes(sys); err != nil {
-		o.logger.Warn("rotation sweep: filter reconciliation failed", "error", err)
+	if err := o.reloadRoutesFromConfig(sys); err != nil {
+		o.logger.Warn("rotation sweep: routing-table reconciliation failed", "error", err)
 	}
 }
 

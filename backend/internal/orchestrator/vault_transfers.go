@@ -252,8 +252,8 @@ func (o *Orchestrator) DrainVault(ctx context.Context, vaultID glid.GLID, target
 	ds := &drainState{TargetNodeID: targetNodeID, Cancel: cancel}
 	o.draining[vaultID] = ds
 
-	// Rebuild filters — draining vault will forward to targetNodeID.
-	if err := o.reloadFiltersFromRoutes(sys); err != nil {
+	// Rebuild the routing table — draining vault will forward to targetNodeID.
+	if err := o.reloadRoutesFromConfig(sys); err != nil {
 		delete(o.draining, vaultID)
 		cancel()
 		o.mu.Unlock()
@@ -392,7 +392,7 @@ func (o *Orchestrator) finishDrain(vaultID glid.GLID) {
 	}
 
 	delete(o.vaults, vaultID)
-	o.rebuildFilterSetLocked()
+	o.rebuildRouteSetLocked()
 
 	o.logger.Info("vault drain completed, vault unregistered", "vault", vaultID)
 }
@@ -414,8 +414,8 @@ func (o *Orchestrator) CancelDrain(ctx context.Context, vaultID glid.GLID) error
 	ds.Cancel()
 	delete(o.draining, vaultID)
 
-	if err := o.reloadFiltersFromRoutes(sys); err != nil {
-		o.logger.Warn("cancel drain: failed to reload filters", "vault", vaultID, "error", err)
+	if err := o.reloadRoutesFromConfig(sys); err != nil {
+		o.logger.Warn("cancel drain: failed to reload routing table", "vault", vaultID, "error", err)
 	}
 	o.mu.Unlock()
 
