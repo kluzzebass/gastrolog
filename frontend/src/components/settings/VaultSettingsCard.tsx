@@ -349,7 +349,7 @@ export function VaultSettingsCard({
             <Badge variant="muted" dark={dark}>disabled</Badge>
           )}
           {csName && (
-            <Badge variant="muted" dark={dark} title="Cloud-backed">{`☁ ${csName}`}</Badge>
+            <Badge variant="muted" dark={dark} title="Cloud-backed">{csName}</Badge>
           )}
           {rfShortfall && (
             <span className="text-[0.85em] text-severity-error">

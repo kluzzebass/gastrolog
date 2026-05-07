@@ -3,7 +3,6 @@ import { useReducer, useState } from "react";
 import { protoInt64 } from "@bufbuild/protobuf";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
 import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
-import { useThemeClass } from "../../hooks/useThemeClass";
 import {
   useConfig,
   usePutVault,
@@ -227,14 +226,13 @@ export function VaultStorageForm({
   onTypeChange?: (t: TierTypeLabel) => void;
   onUpdate: (patch: Partial<TierEntry>) => void;
 }>) {
-  const c = useThemeClass(dark);
+  // gastrolog-4kkoo cleanup: no bordered/backgrounded wrapper. Phase-2
+  // and earlier the storage form was a tier sub-card and the border
+  // visually separated it from sibling tiers. With 1:1 vault:tier and
+  // the tier UI gone, there's nothing to separate it from — it's just
+  // the second half of the card body.
   return (
-    <div
-      className={`border rounded px-3 py-2.5 flex flex-col gap-2 ${c(
-        "border-ink-border/60 bg-ink-base/40",
-        "border-light-border/60 bg-light-base/40",
-      )}`}
-    >
+    <div className="flex flex-col gap-2">
       {onTypeChange && (
         <FormField label="Storage Type" dark={dark}>
           <SelectInput
