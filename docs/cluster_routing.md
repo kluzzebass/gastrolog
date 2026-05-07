@@ -37,10 +37,12 @@ flowchart TD
 
 | Strategy | Count | Interceptor action | Example RPCs |
 |----------|------:|-------------------|-------------|
-| **RouteLocal** | 42 | Pass through | Health, GetConfig, ListVaults, GetStats, WatchConfig |
-| **RouteLeader** | 39 | Pass through (Raft Apply handles leader-forwarding) | PutVault, PutIngester, PutServiceSettings, PutLookupSettings, DeleteVault |
-| **RouteTargeted** | 12 | Auto-forward to vault owner via ForwardRPC | ListChunks, GetIndexes, SealVault, ValidateVault |
+| **RouteLocal** | 45 | Pass through | Health, GetConfig, ListVaults, GetStats, WatchConfig, ValidateExpression |
+| **RouteLeader** | 37 | Pass through (Raft Apply handles leader-forwarding) | PutVault, PutIngester, PutRoute, PutServiceSettings, PutLookupSettings, DeleteVault |
+| **RouteTargeted** | 10 | Auto-forward to vault owner via ForwardRPC | ListChunks, GetIndexes, SealVault, ValidateVault |
 | **RouteFanOut** | 7 | Pass through (handler fans out) | Search, Follow, Explain, GetContext, GetFields |
+
+> Phase 5 (gastrolog-4kkoo) dropped `PutFilter` / `DeleteFilter` (RouteLeader, -2) and added `ValidateExpression` (RouteLocal, +1). Match expressions are inlined on `RouteConfig.Stages` — there is no separate filter entity. The strategy distribution test enforces the totals.
 
 ## How Forwarding Works
 
