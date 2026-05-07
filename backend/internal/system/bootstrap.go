@@ -12,7 +12,6 @@ import (
 // The default vault is always in-memory; file-backed vaults are only created
 // when the user explicitly configures one.
 func DefaultConfig() *Config {
-	filterID := glid.New()
 	rotationID := glid.New()
 	retentionID := glid.New()
 	tierID := glid.New()
@@ -21,9 +20,8 @@ func DefaultConfig() *Config {
 	ingesterID := glid.New()
 
 	return &Config{
-		Filters: []FilterConfig{
-			{ID: filterID, Name: "catch-all", Expression: "*"},
-		},
+		// gastrolog-4kkoo (Phase 5): no separate Filters; the default route
+		// carries its catch-all expression inline via MatchStage.
 		RotationPolicies: []RotationPolicyConfig{
 			{ID: rotationID, Name: "default", MaxAge: new("5m")},
 		},
@@ -54,7 +52,7 @@ func DefaultConfig() *Config {
 			{
 				ID:           routeID,
 				Name:         "default",
-				FilterID:     new(filterID),
+				Stages:       []RouteStage{{Match: &MatchStage{Expression: "*"}}},
 				Destinations: []glid.GLID{vaultID},
 				Distribution: DistributionFanout,
 				Enabled:      true,
@@ -82,11 +80,6 @@ func DefaultConfig() *Config {
 func Bootstrap(ctx context.Context, store Store) error {
 	cfg := DefaultConfig()
 
-	for _, fc := range cfg.Filters {
-		if err := store.PutFilter(ctx, fc); err != nil {
-			return err
-		}
-	}
 	for _, rp := range cfg.RotationPolicies {
 		if err := store.PutRotationPolicy(ctx, rp); err != nil {
 			return err

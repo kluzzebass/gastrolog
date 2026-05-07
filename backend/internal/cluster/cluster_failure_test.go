@@ -12,6 +12,24 @@ import (
 	hraft "github.com/hashicorp/raft"
 )
 
+// dummyMaxAge backs the RotationPolicyConfig.MaxAge pointer used by
+// putReplProbe — avoids per-callsite local string vars in cluster tests.
+// gastrolog-4kkoo (Phase 5): rotation policy replaces FilterConfig as the
+// generic Raft replication probe.
+var dummyMaxAge = "1h"
+
+// putReplProbe writes a rotation policy through a node's store as a
+// generic Raft-replicate smoke test. Tests assert it shows up on other
+// nodes via waitReplication.
+func putReplProbe(t *testing.T, node *testNode, id glid.GLID, name, where string) {
+	t.Helper()
+	if err := node.store.PutRotationPolicy(context.Background(), system.RotationPolicyConfig{
+		ID: id, Name: name, MaxAge: &dummyMaxAge,
+	}); err != nil {
+		t.Fatalf("PutRotationPolicy %s: %v", where, err)
+	}
+}
+
 // waitStableLeader waits until a node reports a stable leader (with a non-empty ID).
 func waitStableLeader(t *testing.T, nodes []*testNode, timeout time.Duration) *testNode {
 	t.Helper()
@@ -31,19 +49,22 @@ func waitStableLeader(t *testing.T, nodes []*testNode, timeout time.Duration) *t
 	}
 }
 
-// waitReplication waits for a filter to appear on a node's FSM.
-func waitReplication(t *testing.T, node *testNode, filterID glid.GLID, timeout time.Duration) *system.FilterConfig {
+// waitReplication waits for a rotation policy to appear on a node's FSM.
+// gastrolog-4kkoo (Phase 5): switched from filter to rotation policy as
+// the replication probe — FilterConfig is gone, but the same Raft-replicate
+// smoke test is what matters.
+func waitReplication(t *testing.T, node *testNode, id glid.GLID, timeout time.Duration) *system.RotationPolicyConfig {
 	t.Helper()
 	ctx := context.Background()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		got, _ := node.store.GetFilter(ctx, filterID)
+		got, _ := node.store.GetRotationPolicy(ctx, id)
 		if got != nil {
 			return got
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("filter %s not replicated within %v", filterID, timeout)
+	t.Fatalf("rotation policy %s not replicated within %v", id, timeout)
 	return nil
 }
 
@@ -93,14 +114,9 @@ func TestLeadershipTransfer(t *testing.T) {
 	nodes := threeNodeCluster(t)
 	node1 := nodes[0]
 
-	// Write a filter while node1 is leader.
-	ctx := context.Background()
-	filterID := glid.New()
-	if err := node1.store.PutFilter(ctx, system.FilterConfig{
-		ID: filterID, Name: "before-transfer", Expression: "*",
-	}); err != nil {
-		t.Fatalf("PutFilter before transfer: %v", err)
-	}
+	// Write a probe while node1 is leader.
+	probeID := glid.New()
+	putReplProbe(t, node1, probeID, "before-transfer", "before transfer")
 
 	// Transfer leadership away from node1.
 	if err := node1.raft.LeadershipTransfer().Error(); err != nil {
@@ -116,16 +132,12 @@ func TestLeadershipTransfer(t *testing.T) {
 	}
 
 	// Write on the new leader.
-	filter2ID := glid.New()
-	if err := newLeader.store.PutFilter(ctx, system.FilterConfig{
-		ID: filter2ID, Name: "after-transfer", Expression: "*",
-	}); err != nil {
-		t.Fatalf("PutFilter on new leader: %v", err)
-	}
+	probe2ID := glid.New()
+	putReplProbe(t, newLeader, probe2ID, "after-transfer", "on new leader")
 
 	// Verify replication to all nodes.
 	for _, n := range nodes {
-		got := waitReplication(t, n, filter2ID, 5*time.Second)
+		got := waitReplication(t, n, probe2ID, 5*time.Second)
 		if got.Name != "after-transfer" {
 			t.Errorf("expected after-transfer, got %q", got.Name)
 		}
@@ -164,16 +176,11 @@ func TestNodeRemoval(t *testing.T) {
 	}
 
 	// Write on the leader after removal — cluster should still work with 2 nodes.
-	ctx := context.Background()
-	filterID := glid.New()
-	if err := node1.store.PutFilter(ctx, system.FilterConfig{
-		ID: filterID, Name: "post-removal", Expression: "*",
-	}); err != nil {
-		t.Fatalf("PutFilter after removal: %v", err)
-	}
+	probeID := glid.New()
+	putReplProbe(t, node1, probeID, "post-removal", "after removal")
 
 	// Verify replication to surviving follower.
-	got := waitReplication(t, node2, filterID, 5*time.Second)
+	got := waitReplication(t, node2, probeID, 5*time.Second)
 	if got.Name != "post-removal" {
 		t.Errorf("expected post-removal, got %q", got.Name)
 	}
@@ -197,16 +204,11 @@ func TestFollowerShutdownClusterSurvives(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Leader should still accept writes (quorum of 2 out of 3).
-	ctx := context.Background()
-	filterID := glid.New()
-	if err := node1.store.PutFilter(ctx, system.FilterConfig{
-		ID: filterID, Name: "after-follower-down", Expression: "*",
-	}); err != nil {
-		t.Fatalf("PutFilter with one follower down: %v", err)
-	}
+	probeID := glid.New()
+	putReplProbe(t, node1, probeID, "after-follower-down", "with one follower down")
 
 	// Verify the surviving follower got the write.
-	got := waitReplication(t, node2, filterID, 5*time.Second)
+	got := waitReplication(t, node2, probeID, 5*time.Second)
 	if got.Name != "after-follower-down" {
 		t.Errorf("expected after-follower-down, got %q", got.Name)
 	}
@@ -257,15 +259,10 @@ func TestNonvoterReplication(t *testing.T) {
 found:
 
 	// Write on leader and verify replication to nonvoter.
-	ctx := context.Background()
-	filterID := glid.New()
-	if err := node1.store.PutFilter(ctx, system.FilterConfig{
-		ID: filterID, Name: "nonvoter-test", Expression: "*",
-	}); err != nil {
-		t.Fatalf("PutFilter: %v", err)
-	}
+	probeID := glid.New()
+	putReplProbe(t, node1, probeID, "nonvoter-test", "to nonvoter")
 
-	got := waitReplication(t, nonvoter, filterID, 5*time.Second)
+	got := waitReplication(t, nonvoter, probeID, 5*time.Second)
 	if got.Name != "nonvoter-test" {
 		t.Errorf("expected nonvoter-test, got %q", got.Name)
 	}
@@ -308,15 +305,10 @@ func TestDemoteVoterToNonvoter(t *testing.T) {
 demoted:
 
 	// Leader should still accept writes (2 voters: node-1 + node-2).
-	ctx := context.Background()
-	filterID := glid.New()
-	if err := node1.store.PutFilter(ctx, system.FilterConfig{
-		ID: filterID, Name: "after-demote", Expression: "*",
-	}); err != nil {
-		t.Fatalf("PutFilter after demote: %v", err)
-	}
+	probeID := glid.New()
+	putReplProbe(t, node1, probeID, "after-demote", "after demote")
 
-	got := waitReplication(t, node2, filterID, 5*time.Second)
+	got := waitReplication(t, node2, probeID, 5*time.Second)
 	if got.Name != "after-demote" {
 		t.Errorf("expected after-demote, got %q", got.Name)
 	}
@@ -334,15 +326,10 @@ func TestLeaderStepDownNewElection(t *testing.T) {
 	node1, node2, node3 := nodes[0], nodes[1], nodes[2]
 
 	// Write something before the leader goes down.
-	ctx := context.Background()
-	preFilterID := glid.New()
-	if err := node1.store.PutFilter(ctx, system.FilterConfig{
-		ID: preFilterID, Name: "pre-election", Expression: "*",
-	}); err != nil {
-		t.Fatalf("PutFilter pre-election: %v", err)
-	}
-	waitReplication(t, node2, preFilterID, 5*time.Second)
-	waitReplication(t, node3, preFilterID, 5*time.Second)
+	preID := glid.New()
+	putReplProbe(t, node1, preID, "pre-election", "pre-election")
+	waitReplication(t, node2, preID, 5*time.Second)
+	waitReplication(t, node3, preID, 5*time.Second)
 
 	// Shut down the leader.
 	node1.close()
@@ -352,16 +339,12 @@ func TestLeaderStepDownNewElection(t *testing.T) {
 	newLeader := waitStableLeader(t, survivors, 10*time.Second)
 
 	// Write on the new leader.
-	postFilterID := glid.New()
-	if err := newLeader.store.PutFilter(ctx, system.FilterConfig{
-		ID: postFilterID, Name: "post-election", Expression: "*",
-	}); err != nil {
-		t.Fatalf("PutFilter post-election: %v", err)
-	}
+	postID := glid.New()
+	putReplProbe(t, newLeader, postID, "post-election", "post-election")
 
 	// Verify the other survivor got the write.
 	for _, n := range survivors {
-		got := waitReplication(t, n, postFilterID, 5*time.Second)
+		got := waitReplication(t, n, postID, 5*time.Second)
 		if got.Name != "post-election" {
 			t.Errorf("expected post-election, got %q", got.Name)
 		}
@@ -369,7 +352,7 @@ func TestLeaderStepDownNewElection(t *testing.T) {
 
 	// Verify the pre-election data survived the leader change.
 	for _, n := range survivors {
-		got := waitReplication(t, n, preFilterID, time.Second)
+		got := waitReplication(t, n, preID, time.Second)
 		if got.Name != "pre-election" {
 			t.Errorf("expected pre-election, got %q", got.Name)
 		}
@@ -389,14 +372,9 @@ func TestFollowerForwardingAfterLeaderChange(t *testing.T) {
 	node1, node2, node3 := nodes[0], nodes[1], nodes[2]
 
 	// Write via follower (node2) — should forward to node1 (current leader).
-	ctx := context.Background()
-	filter1ID := glid.New()
-	if err := node2.store.PutFilter(ctx, system.FilterConfig{
-		ID: filter1ID, Name: "fwd-to-node1", Expression: "*",
-	}); err != nil {
-		t.Fatalf("PutFilter via follower before transfer: %v", err)
-	}
-	waitReplication(t, node1, filter1ID, 5*time.Second)
+	probe1ID := glid.New()
+	putReplProbe(t, node2, probe1ID, "fwd-to-node1", "via follower before transfer")
+	waitReplication(t, node1, probe1ID, 5*time.Second)
 
 	// Transfer leadership away from node1.
 	if err := node1.raft.LeadershipTransfer().Error(); err != nil {
@@ -417,24 +395,24 @@ func TestFollowerForwardingAfterLeaderChange(t *testing.T) {
 
 	// Write via the follower — should forward to the new leader.
 	// Retry briefly: the follower may not know the new leader yet.
-	filter2ID := glid.New()
+	probe2ID := glid.New()
 	fwdDeadline := time.Now().Add(5 * time.Second)
 	for {
-		err := follower.store.PutFilter(ctx, system.FilterConfig{
-			ID: filter2ID, Name: "fwd-to-new-leader", Expression: "*",
+		err := follower.store.PutRotationPolicy(context.Background(), system.RotationPolicyConfig{
+			ID: probe2ID, Name: "fwd-to-new-leader", MaxAge: &dummyMaxAge,
 		})
 		if err == nil {
 			break
 		}
 		if time.Now().After(fwdDeadline) {
-			t.Fatalf("PutFilter via follower after transfer: %v", err)
+			t.Fatalf("PutRotationPolicy via follower after transfer: %v", err)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 
 	// Verify all nodes got both writes.
 	for _, n := range nodes {
-		waitReplication(t, n, filter2ID, 5*time.Second)
+		waitReplication(t, n, probe2ID, 5*time.Second)
 	}
 }
 
@@ -460,11 +438,11 @@ func TestQuorumLossBlocksWrites(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	filterID := glid.New()
-	err := node1.store.PutFilter(ctx, system.FilterConfig{
-		ID: filterID, Name: "should-fail", Expression: "*",
+	probeID := glid.New()
+	err := node1.store.PutRotationPolicy(ctx, system.RotationPolicyConfig{
+		ID: probeID, Name: "should-fail", MaxAge: &dummyMaxAge,
 	})
 	if err == nil {
-		t.Error("expected PutFilter to fail without quorum, but it succeeded")
+		t.Error("expected PutRotationPolicy to fail without quorum, but it succeeded")
 	}
 }

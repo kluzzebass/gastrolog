@@ -13,8 +13,8 @@ import (
 )
 
 // resolver maps names to UUIDs for all entity types by calling GetConfig once.
+// gastrolog-4kkoo (Phase 5): no filters map; the entity is gone.
 type resolver struct {
-	filters           map[string]string // name → id
 	rotationPolicies  map[string]string
 	retentionPolicies map[string]string
 	tiers             map[string]string
@@ -35,7 +35,6 @@ func newResolver(ctx context.Context, client *server.Client) (*resolver, error) 
 	}
 
 	r := &resolver{
-		filters:           make(map[string]string),
 		rotationPolicies:  make(map[string]string),
 		retentionPolicies: make(map[string]string),
 		tiers:             make(map[string]string),
@@ -49,9 +48,6 @@ func newResolver(ctx context.Context, client *server.Client) (*resolver, error) 
 	}
 
 	cfg := resp.Msg
-	for _, f := range cfg.Filters {
-		r.filters[strings.ToLower(f.Name)] = glid.FromBytes(f.Id).String()
-	}
 	for _, p := range cfg.RotationPolicies {
 		r.rotationPolicies[strings.ToLower(p.Name)] = glid.FromBytes(p.Id).String()
 	}

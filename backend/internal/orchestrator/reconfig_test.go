@@ -53,18 +53,11 @@ func TestReloadFilters(t *testing.T) {
 	loader := &fakeSystemLoader{}
 	orch, vaults := newFilteredTestSetupWithLoader(t, loader)
 
-	prodFilterID := glid.New()
-	catchAllFilterID := glid.New()
-
-	// Initially set filters: prod gets env=prod, archive is catch-all.
+	// gastrolog-4kkoo (Phase 5): expressions inlined per route via Stages.
 	loader.cfg = &system.Config{
-		Filters: []system.FilterConfig{
-			{ID: prodFilterID, Expression: "env=prod"},
-			{ID: catchAllFilterID, Expression: "*"},
-		},
 		Routes: []system.RouteConfig{
-			{ID: glid.New(), FilterID: new(prodFilterID), Destinations: []glid.GLID{vaults.prod}, Enabled: true},
-			{ID: glid.New(), FilterID: new(catchAllFilterID), Destinations: []glid.GLID{vaults.archive}, Enabled: true},
+			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "env=prod"}}}, Destinations: []glid.GLID{vaults.prod}, Enabled: true},
+			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaults.archive}, Enabled: true},
 		},
 	}
 	if err := orch.ReloadFilters(context.Background()); err != nil {
@@ -90,13 +83,9 @@ func TestReloadFilters(t *testing.T) {
 
 	// Now update filters: prod gets env=staging instead.
 	loader.cfg = &system.Config{
-		Filters: []system.FilterConfig{
-			{ID: prodFilterID, Expression: "env=staging"},
-			{ID: catchAllFilterID, Expression: "*"},
-		},
 		Routes: []system.RouteConfig{
-			{ID: glid.New(), FilterID: new(prodFilterID), Destinations: []glid.GLID{vaults.prod}, Enabled: true},
-			{ID: glid.New(), FilterID: new(catchAllFilterID), Destinations: []glid.GLID{vaults.archive}, Enabled: true},
+			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "env=staging"}}}, Destinations: []glid.GLID{vaults.prod}, Enabled: true},
+			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaults.archive}, Enabled: true},
 		},
 	}
 	if err := orch.ReloadFilters(context.Background()); err != nil {
@@ -127,14 +116,9 @@ func TestReloadFiltersInvalidExpression(t *testing.T) {
 	loader := &fakeSystemLoader{}
 	orch, vaults := newFilteredTestSetupWithLoader(t, loader)
 
-	invalidFilterID := glid.New()
-
 	loader.cfg = &system.Config{
-		Filters: []system.FilterConfig{
-			{ID: invalidFilterID, Expression: "(unclosed"},
-		},
 		Routes: []system.RouteConfig{
-			{ID: glid.New(), FilterID: new(invalidFilterID), Destinations: []glid.GLID{vaults.prod}, Enabled: true},
+			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "(unclosed"}}}, Destinations: []glid.GLID{vaults.prod}, Enabled: true},
 		},
 	}
 	err := orch.ReloadFilters(context.Background())
@@ -148,19 +132,13 @@ func TestReloadFiltersIgnoresUnknownVaults(t *testing.T) {
 	loader := &fakeSystemLoader{}
 	orch, vaults := newFilteredTestSetupWithLoader(t, loader)
 
-	prodFilterID := glid.New()
-	catchAllFilterID := glid.New()
 	nonexistentVaultID := glid.New()
 
 	// Include a vault that doesn't exist - should be ignored.
 	loader.cfg = &system.Config{
-		Filters: []system.FilterConfig{
-			{ID: prodFilterID, Expression: "env=prod"},
-			{ID: catchAllFilterID, Expression: "*"},
-		},
 		Routes: []system.RouteConfig{
-			{ID: glid.New(), FilterID: new(prodFilterID), Destinations: []glid.GLID{vaults.prod}, Enabled: true},
-			{ID: glid.New(), FilterID: new(catchAllFilterID), Destinations: []glid.GLID{nonexistentVaultID}, Enabled: true},
+			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "env=prod"}}}, Destinations: []glid.GLID{vaults.prod}, Enabled: true},
+			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{nonexistentVaultID}, Enabled: true},
 		},
 	}
 	if err := orch.ReloadFilters(context.Background()); err != nil {
@@ -170,15 +148,11 @@ func TestReloadFiltersIgnoresUnknownVaults(t *testing.T) {
 
 func TestAddVault(t *testing.T) {
 	t.Parallel()
-	filterID := glid.New()
 	vaultID := glid.New()
 
 	loader := &fakeSystemLoader{cfg: &system.Config{
-		Filters: []system.FilterConfig{
-			{ID: filterID, Expression: "env=test"},
-		},
 		Routes: []system.RouteConfig{
-			{ID: glid.New(), FilterID: new(filterID), Destinations: []glid.GLID{vaultID}, Enabled: true},
+			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "env=test"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
 	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
@@ -224,15 +198,11 @@ func TestAddVault(t *testing.T) {
 
 func TestAddVaultDuplicate(t *testing.T) {
 	t.Parallel()
-	filterID := glid.New()
 	vaultID := glid.New()
 
 	loader := &fakeSystemLoader{cfg: &system.Config{
-		Filters: []system.FilterConfig{
-			{ID: filterID, Expression: "*"},
-		},
 		Routes: []system.RouteConfig{
-			{ID: glid.New(), FilterID: new(filterID), Destinations: []glid.GLID{vaultID}, Enabled: true},
+			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
 	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
@@ -264,15 +234,11 @@ func TestAddVaultDuplicate(t *testing.T) {
 
 func TestRemoveVaultEmpty(t *testing.T) {
 	t.Parallel()
-	filterID := glid.New()
 	vaultID := glid.New()
 
 	loader := &fakeSystemLoader{cfg: &system.Config{
-		Filters: []system.FilterConfig{
-			{ID: filterID, Expression: "*"},
-		},
 		Routes: []system.RouteConfig{
-			{ID: glid.New(), FilterID: new(filterID), Destinations: []glid.GLID{vaultID}, Enabled: true},
+			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
 	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
@@ -308,15 +274,11 @@ func TestRemoveVaultEmpty(t *testing.T) {
 
 func TestRemoveVaultNotEmpty(t *testing.T) {
 	t.Parallel()
-	filterID := glid.New()
 	vaultID := glid.New()
 
 	loader := &fakeSystemLoader{cfg: &system.Config{
-		Filters: []system.FilterConfig{
-			{ID: filterID, Expression: "*"},
-		},
 		Routes: []system.RouteConfig{
-			{ID: glid.New(), FilterID: new(filterID), Destinations: []glid.GLID{vaultID}, Enabled: true},
+			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
 	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
@@ -372,15 +334,11 @@ func TestRemoveVaultNotFound(t *testing.T) {
 
 func TestForceRemoveVault(t *testing.T) {
 	t.Parallel()
-	filterID := glid.New()
 	vaultID := glid.New()
 
 	loader := &fakeSystemLoader{cfg: &system.Config{
-		Filters: []system.FilterConfig{
-			{ID: filterID, Expression: "*"},
-		},
 		Routes: []system.RouteConfig{
-			{ID: glid.New(), FilterID: new(filterID), Destinations: []glid.GLID{vaultID}, Enabled: true},
+			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
 	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
@@ -459,15 +417,11 @@ func TestForceRemoveVaultNotFound(t *testing.T) {
 
 func TestForceRemoveEmptyVault(t *testing.T) {
 	t.Parallel()
-	filterID := glid.New()
 	vaultID := glid.New()
 
 	loader := &fakeSystemLoader{cfg: &system.Config{
-		Filters: []system.FilterConfig{
-			{ID: filterID, Expression: "*"},
-		},
 		Routes: []system.RouteConfig{
-			{ID: glid.New(), FilterID: new(filterID), Destinations: []glid.GLID{vaultID}, Enabled: true},
+			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
 	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
@@ -659,15 +613,11 @@ func TestRemoveIngesterNotFound(t *testing.T) {
 
 func TestVaultConfig(t *testing.T) {
 	t.Parallel()
-	filterID := glid.New()
 	vaultID := glid.New()
 
 	loader := &fakeSystemLoader{cfg: &system.Config{
-		Filters: []system.FilterConfig{
-			{ID: filterID, Expression: "env=prod AND level=error"},
-		},
 		Routes: []system.RouteConfig{
-			{ID: glid.New(), FilterID: new(filterID), Destinations: []glid.GLID{vaultID}, Enabled: true},
+			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "env=prod AND level=error"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
 	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
@@ -766,15 +716,11 @@ func TestUpdateVaultFilter(t *testing.T) {
 
 func TestSetRotationPolicyOnVaultDirectly(t *testing.T) {
 	t.Parallel()
-	filterID := glid.New()
 	vaultID := glid.New()
 
 	loader := &fakeSystemLoader{cfg: &system.Config{
-		Filters: []system.FilterConfig{
-			{ID: filterID, Expression: "*"},
-		},
 		Routes: []system.RouteConfig{
-			{ID: glid.New(), FilterID: new(filterID), Destinations: []glid.GLID{vaultID}, Enabled: true},
+			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
 	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
@@ -826,15 +772,11 @@ func TestSetRotationPolicyOnVaultDirectly(t *testing.T) {
 
 func TestPauseVault(t *testing.T) {
 	t.Parallel()
-	filterID := glid.New()
 	vaultID := glid.New()
 
 	loader := &fakeSystemLoader{cfg: &system.Config{
-		Filters: []system.FilterConfig{
-			{ID: filterID, Expression: "*"},
-		},
 		Routes: []system.RouteConfig{
-			{ID: glid.New(), FilterID: new(filterID), Destinations: []glid.GLID{vaultID}, Enabled: true},
+			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
 	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
@@ -897,15 +839,11 @@ func TestPauseVault(t *testing.T) {
 
 func TestResumeVault(t *testing.T) {
 	t.Parallel()
-	filterID := glid.New()
 	vaultID := glid.New()
 
 	loader := &fakeSystemLoader{cfg: &system.Config{
-		Filters: []system.FilterConfig{
-			{ID: filterID, Expression: "*"},
-		},
 		Routes: []system.RouteConfig{
-			{ID: glid.New(), FilterID: new(filterID), Destinations: []glid.GLID{vaultID}, Enabled: true},
+			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
 	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
@@ -972,15 +910,11 @@ func TestDisableVaultNotFound(t *testing.T) {
 
 func TestDisableVaultDoesNotAffectQuery(t *testing.T) {
 	t.Parallel()
-	filterID := glid.New()
 	vaultID := glid.New()
 
 	loader := &fakeSystemLoader{cfg: &system.Config{
-		Filters: []system.FilterConfig{
-			{ID: filterID, Expression: "*"},
-		},
 		Routes: []system.RouteConfig{
-			{ID: glid.New(), FilterID: new(filterID), Destinations: []glid.GLID{vaultID}, Enabled: true},
+			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
 	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
@@ -1040,14 +974,10 @@ func TestRetentionSingleJobRegistered(t *testing.T) {
 	vaultID := glid.New()
 	tierID := glid.New()
 	retPolicyID := glid.New()
-	filterID := glid.New()
 
 	loader := &fakeSystemLoader{cfg: &system.Config{
-		Filters: []system.FilterConfig{
-			{ID: filterID, Expression: "*"},
-		},
 		Routes: []system.RouteConfig{
-			{ID: glid.New(), FilterID: &filterID, Destinations: []glid.GLID{vaultID}, Enabled: true},
+			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 		RetentionPolicies: []system.RetentionPolicyConfig{
 			{ID: retPolicyID, Name: "age-2m", MaxAge: strPtr("2m")},
@@ -1104,15 +1034,11 @@ func strPtr(s string) *string { return &s }
 
 func TestUpdateVaultFilterInvalid(t *testing.T) {
 	t.Parallel()
-	filterID := glid.New()
 	vaultID := glid.New()
 
 	loader := &fakeSystemLoader{cfg: &system.Config{
-		Filters: []system.FilterConfig{
-			{ID: filterID, Expression: "*"},
-		},
 		Routes: []system.RouteConfig{
-			{ID: glid.New(), FilterID: new(filterID), Destinations: []glid.GLID{vaultID}, Enabled: true},
+			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
 	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})

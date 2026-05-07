@@ -396,7 +396,6 @@ func drainSetup(t *testing.T, recordCount int) (*orchestrator.Orchestrator, glid
 	t.Helper()
 
 	vaultID := glid.New()
-	filterID := glid.New()
 	routeID := glid.New()
 
 	cm := newMemVault(t)
@@ -405,11 +404,12 @@ func drainSetup(t *testing.T, recordCount int) (*orchestrator.Orchestrator, glid
 		Vaults: []system.VaultConfig{
 			{ID: vaultID},
 		},
-		Filters: []system.FilterConfig{
-			{ID: filterID, Expression: "*"},
-		},
+		// gastrolog-4kkoo (Phase 5): expression inlined on route via Stages.
 		Routes: []system.RouteConfig{
-			{ID: routeID, FilterID: &filterID, Destinations: []glid.GLID{vaultID}, Enabled: true},
+			{ID: routeID,
+				Stages:       []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}},
+				Destinations: []glid.GLID{vaultID}, Enabled: true,
+			},
 		},
 	}}
 
@@ -502,7 +502,6 @@ func TestDrainVault_Basic(t *testing.T) {
 func TestDrainVault_CancelDrain(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()
-	filterID := glid.New()
 	routeID := glid.New()
 
 	cm := newMemVault(t)
@@ -511,11 +510,12 @@ func TestDrainVault_CancelDrain(t *testing.T) {
 		Vaults: []system.VaultConfig{
 			{ID: vaultID},
 		},
-		Filters: []system.FilterConfig{
-			{ID: filterID, Expression: "*"},
-		},
+		// gastrolog-4kkoo (Phase 5): expression inlined on route via Stages.
 		Routes: []system.RouteConfig{
-			{ID: routeID, FilterID: &filterID, Destinations: []glid.GLID{vaultID}, Enabled: true},
+			{ID: routeID,
+				Stages:       []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}},
+				Destinations: []glid.GLID{vaultID}, Enabled: true,
+			},
 		},
 	}}
 
@@ -632,7 +632,6 @@ func TestDrainVault_EmptyVault(t *testing.T) {
 func TestDrainVault_NoTransferrer(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()
-	filterID := glid.New()
 	routeID := glid.New()
 
 	cm := newMemVault(t)
@@ -641,11 +640,12 @@ func TestDrainVault_NoTransferrer(t *testing.T) {
 		Vaults: []system.VaultConfig{
 			{ID: vaultID},
 		},
-		Filters: []system.FilterConfig{
-			{ID: filterID, Expression: "*"},
-		},
+		// gastrolog-4kkoo (Phase 5): expression inlined on route via Stages.
 		Routes: []system.RouteConfig{
-			{ID: routeID, FilterID: &filterID, Destinations: []glid.GLID{vaultID}, Enabled: true},
+			{ID: routeID,
+				Stages:       []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}},
+				Destinations: []glid.GLID{vaultID}, Enabled: true,
+			},
 		},
 	}}
 

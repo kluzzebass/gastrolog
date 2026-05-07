@@ -142,7 +142,6 @@ func (s *SystemServer) buildFullSystem(ctx context.Context) (*apiv1.GetSystemRes
 		err := errors.Join(
 			s.loadSystemVaults(ctx, resp),
 			s.loadSystemIngesters(ctx, resp),
-			s.loadConfigFilters(ctx, resp),
 			s.loadConfigRotationPolicies(ctx, resp),
 			s.loadConfigRetentionPolicies(ctx, resp),
 			s.loadConfigRoutes(ctx, resp),
@@ -293,20 +292,9 @@ func (s *SystemServer) loadSystemIngesters(ctx context.Context, resp *apiv1.GetS
 	return nil
 }
 
-func (s *SystemServer) loadConfigFilters(ctx context.Context, resp *apiv1.GetSystemResponse) error {
-	filters, err := s.sysStore.ListFilters(ctx)
-	if err != nil {
-		return fmt.Errorf("list filters: %w", err)
-	}
-	for _, fc := range filters {
-		resp.Filters = append(resp.Filters, &apiv1.FilterConfig{
-			Id:         fc.ID.ToProto(),
-			Name:       fc.Name,
-			Expression: fc.Expression,
-		})
-	}
-	return nil
-}
+// gastrolog-4kkoo (Phase 5): no FilterConfig entity; expressions live
+// inline on RouteConfig.Stages[].Match.Expression. The dedicated
+// loadConfigFilters helper is gone.
 
 func (s *SystemServer) loadConfigRotationPolicies(ctx context.Context, resp *apiv1.GetSystemResponse) error {
 	policies, err := s.sysStore.ListRotationPolicies(ctx)
@@ -343,16 +331,12 @@ func (s *SystemServer) loadConfigRoutes(ctx context.Context, resp *apiv1.GetSyst
 	}
 	for _, rt := range routes {
 		prt := &apiv1.RouteConfig{
-			Id:                rt.ID.ToProto(),
-			Name:              rt.Name,
-			Distribution:      string(rt.Distribution),
-			Enabled:           rt.Enabled,
-			Sources:           convert.RouteSourcesToProto(rt.Sources),
-			SourceVaultIds:    glid.SliceToProto(rt.SourceVaultIDs),
-			SourceIngesterIds: glid.SliceToProto(rt.SourceIngesterIDs),
-		}
-		if rt.FilterID != nil {
-			prt.FilterId = rt.FilterID.ToProto()
+			Id:           rt.ID.ToProto(),
+			Name:         rt.Name,
+			Priority:     rt.Priority,
+			Stages:       convert.RouteStagesToProto(rt.Stages),
+			Distribution: string(rt.Distribution),
+			Enabled:      rt.Enabled,
 		}
 		for _, destID := range rt.Destinations {
 			prt.Destinations = append(prt.Destinations, &apiv1.RouteDestination{

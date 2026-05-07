@@ -118,14 +118,6 @@ func (s *Store) Load(ctx context.Context) (*system.System, error) {
 	return s.fsm.Store().Load(ctx)
 }
 
-func (s *Store) GetFilter(ctx context.Context, id glid.GLID) (*system.FilterConfig, error) {
-	return s.fsm.Store().GetFilter(ctx, id)
-}
-
-func (s *Store) ListFilters(ctx context.Context) ([]system.FilterConfig, error) {
-	return s.fsm.Store().ListFilters(ctx)
-}
-
 func (s *Store) GetRotationPolicy(ctx context.Context, id glid.GLID) (*system.RotationPolicyConfig, error) {
 	return s.fsm.Store().GetRotationPolicy(ctx, id)
 }
@@ -249,14 +241,6 @@ func (s *Store) ListNodeStorageConfigs(ctx context.Context) ([]system.NodeStorag
 // ---------------------------------------------------------------------------
 // Write methods — serialize → raft.Apply
 // ---------------------------------------------------------------------------
-
-func (s *Store) PutFilter(ctx context.Context, cfg system.FilterConfig) error {
-	return s.apply(ctx, command.NewPutFilter(cfg))
-}
-
-func (s *Store) DeleteFilter(ctx context.Context, id glid.GLID) error {
-	return s.apply(ctx, command.NewDeleteFilter(id))
-}
 
 func (s *Store) PutRotationPolicy(ctx context.Context, cfg system.RotationPolicyConfig) error {
 	return s.apply(ctx, command.NewPutRotationPolicy(cfg))

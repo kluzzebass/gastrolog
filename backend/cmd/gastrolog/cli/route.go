@@ -50,16 +50,30 @@ func newRouteListCmd() *cobra.Command {
 					dests[i] = glid.FromBytes(d.VaultId).String()
 				}
 				rows = append(rows, []string{
-					glid.FromBytes(r.Id).String(), r.Name, glid.FromBytes(r.FilterId).String(),
+					glid.FromBytes(r.Id).String(), r.Name,
+					strconv.FormatInt(int64(r.Priority), 10),
+					routeExpression(r),
 					strings.Join(dests, ","),
 					r.Distribution,
 					strconv.FormatBool(r.Enabled),
 				})
 			}
-			p.table([]string{"ID", "NAME", "FILTER", "DESTINATIONS", "DISTRIBUTION", "ENABLED"}, rows)
+			p.table([]string{"ID", "NAME", "PRIORITY", "EXPRESSION", "DESTINATIONS", "DISTRIBUTION", "ENABLED"}, rows)
 			return nil
 		},
 	}
+}
+
+// routeExpression returns the first MatchStage expression on the route, or
+// "" if no match stage is present. gastrolog-4kkoo (Phase 5) ships only
+// one stage variant; future stages plug into the same RouteStage oneof.
+func routeExpression(r *v1.RouteConfig) string {
+	for _, s := range r.GetStages() {
+		if m := s.GetMatch(); m != nil {
+			return m.GetExpression()
+		}
+	}
+	return ""
 }
 
 func newRouteGetCmd() *cobra.Command {
@@ -94,7 +108,8 @@ func newRouteGetCmd() *cobra.Command {
 					p.kv([][2]string{
 						{"ID", glid.FromBytes(rt.Id).String()},
 						{"Name", rt.Name},
-						{"Filter", glid.FromBytes(rt.FilterId).String()},
+						{"Priority", strconv.FormatInt(int64(rt.Priority), 10)},
+						{"Expression", routeExpression(rt)},
 						{"Destinations", strings.Join(dests, ", ")},
 						{"Distribution", rt.Distribution},
 						{"Enabled", strconv.FormatBool(rt.Enabled)},
@@ -161,7 +176,7 @@ func newRouteCreateCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().String("name", "", "route name (required)")
-	cmd.Flags().String("filter", "", "filter name or ID")
+	cmd.Flags().String("expression", "", "match expression (e.g. \"_source == ingest\"); empty matches everything")
 	cmd.Flags().StringSlice("destination", nil, "destination vault name or ID (repeatable)")
 	cmd.Flags().String("distribution", "fanout", "distribution: fanout, round-robin, or failover")
 	cmd.Flags().Bool("enabled", true, "enable the route")
@@ -169,40 +184,36 @@ func newRouteCreateCmd() *cobra.Command {
 	return cmd
 }
 
-// resolveRouteFilterAndDestinations resolves the --filter and --destination
-// flags, updating cfg in place. It only creates a resolver if needed.
+// resolveRouteFilterAndDestinations applies the --expression and --destination
+// flags onto cfg. It only builds a resolver when --destination is set, since
+// the expression is a free-form string that no longer references a filter
+// entity (gastrolog-4kkoo Phase 5).
 func resolveRouteFilterAndDestinations(ctx context.Context, cmd *cobra.Command, client *server.Client, cfg *v1.RouteConfig) error {
-	needsResolver := cmd.Flags().Changed("filter") || cmd.Flags().Changed("destination")
-	if !needsResolver {
+	if cmd.Flags().Changed("expression") {
+		expr, _ := cmd.Flags().GetString("expression")
+		cfg.Stages = []*v1.RouteStage{{
+			Stage: &v1.RouteStage_Match{
+				Match: &v1.MatchStage{Expression: expr},
+			},
+		}}
+	}
+	if !cmd.Flags().Changed("destination") {
 		return nil
 	}
 	r, err := newResolver(ctx, client)
 	if err != nil {
 		return err
 	}
-	if cmd.Flags().Changed("filter") {
-		filterName, _ := cmd.Flags().GetString("filter")
-		if filterName != "" {
-			cfg.FilterId, err = resolveToProto(filterName, r.filters, "filter")
-			if err != nil {
-				return err
-			}
-		} else {
-			cfg.FilterId = nil
+	destNames, _ := cmd.Flags().GetStringSlice("destination")
+	var dests []*v1.RouteDestination
+	for _, d := range destNames {
+		vaultIDBytes, err := resolveToProto(d, r.vaults, "vault")
+		if err != nil {
+			return err
 		}
+		dests = append(dests, &v1.RouteDestination{VaultId: vaultIDBytes})
 	}
-	if cmd.Flags().Changed("destination") {
-		destNames, _ := cmd.Flags().GetStringSlice("destination")
-		var dests []*v1.RouteDestination
-		for _, d := range destNames {
-			vaultIDBytes, err := resolveToProto(d, r.vaults, "vault")
-			if err != nil {
-				return err
-			}
-			dests = append(dests, &v1.RouteDestination{VaultId: vaultIDBytes})
-		}
-		cfg.Destinations = dests
-	}
+	cfg.Destinations = dests
 	return nil
 }
 

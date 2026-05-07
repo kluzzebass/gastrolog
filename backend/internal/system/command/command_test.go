@@ -17,55 +17,10 @@ func ptr[T any](v T) *T { return &v }
 // Command round-trip tests
 // ---------------------------------------------------------------------------
 
-func TestPutFilter(t *testing.T) {
-	t.Parallel()
-	want := system.FilterConfig{
-		ID:         glid.New(),
-		Name:       "prod-errors",
-		Expression: "env=prod AND level=error",
-	}
-	cmd := NewPutFilter(want)
-	b, err := Marshal(cmd)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-	cmd2, err := Unmarshal(b)
-	if err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
-	inner := cmd2.GetPutFilter()
-	if inner == nil {
-		t.Fatal("expected PutFilter variant")
-	}
-	got, err := ExtractPutFilter(inner)
-	if err != nil {
-		t.Fatalf("ExtractPutFilter: %v", err)
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("got %+v, want %+v", got, want)
-	}
-}
-
-func TestDeleteFilter(t *testing.T) {
-	t.Parallel()
-	want := glid.New()
-	cmd := NewDeleteFilter(want)
-	b, err := Marshal(cmd)
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
-	cmd2, err := Unmarshal(b)
-	if err != nil {
-		t.Fatalf("Unmarshal: %v", err)
-	}
-	got, err := ExtractDeleteFilter(cmd2.GetDeleteFilter())
-	if err != nil {
-		t.Fatalf("ExtractDeleteFilter: %v", err)
-	}
-	if got != want {
-		t.Fatalf("got %v, want %v", got, want)
-	}
-}
+// gastrolog-4kkoo (Phase 5): TestPutFilter / TestDeleteFilter removed.
+// FilterConfig is gone — match expressions live inline on RouteConfig.Stages.
+// The route-stages round-trip is covered indirectly by TestPutRoute below
+// once the Phase 5 route command tests land.
 
 func TestPutRotationPolicy(t *testing.T) {
 	t.Parallel()
@@ -453,13 +408,9 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	t.Parallel()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 
-	filterID := glid.New()
 	policyID := glid.New()
 	retPolicyID := glid.New()
 	cfg := &system.Config{
-		Filters: []system.FilterConfig{
-			{ID: filterID, Name: "all", Expression: "*"},
-		},
 		RotationPolicies: []system.RotationPolicyConfig{
 			{ID: policyID, Name: "hourly", MaxAge: ptr("1h"), MaxBytes: ptr("64MB")},
 		},
@@ -520,12 +471,6 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	}
 
 	// Compare config (excluding time-sensitive comparisons handled below).
-	if len(gotSys.Config.Filters) != len(cfg.Filters) {
-		t.Fatalf("filters: got %d, want %d", len(gotSys.Config.Filters), len(cfg.Filters))
-	}
-	if !reflect.DeepEqual(gotSys.Config.Filters, cfg.Filters) {
-		t.Fatalf("filters differ: got %+v, want %+v", gotSys.Config.Filters, cfg.Filters)
-	}
 	if !reflect.DeepEqual(gotSys.Config.RotationPolicies, cfg.RotationPolicies) {
 		t.Fatalf("rotation policies differ")
 	}
@@ -590,7 +535,7 @@ func TestSnapshotEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RestoreSnapshot: %v", err)
 	}
-	if len(gotSys.Config.Filters) != 0 || len(gotSys.Config.Vaults) != 0 || len(gotSys.Config.Ingesters) != 0 {
+	if len(gotSys.Config.Vaults) != 0 || len(gotSys.Config.Ingesters) != 0 {
 		t.Fatalf("expected empty config, got %+v", gotSys)
 	}
 	if len(gotUsers) != 0 {

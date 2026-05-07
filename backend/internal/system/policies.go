@@ -13,24 +13,10 @@ import (
 
 // ---------------------------------------------------------------------------
 
-// FilterConfig defines a named filter expression.
-// Vaults reference filters by UUID to determine which messages they receive.
-type FilterConfig struct {
-	// ID is the unique identifier (UUIDv7).
-	ID glid.GLID `json:"id"`
-
-	// Name is the human-readable display name (unique).
-	Name string `json:"name"`
-
-	// Expression is the filter expression string.
-	// Special values:
-	//   - "*": catch-all, receives all messages
-	//   - "+": catch-the-rest, receives messages that matched no other filter
-	//   - any other value: querylang expression matched against message attrs
-	//     (e.g., "env=prod AND level=error")
-	// Empty expression means the vault receives nothing.
-	Expression string `json:"expression"`
-}
+// gastrolog-4kkoo (Phase 5): FilterConfig type removed. Filters are now
+// inlined as RouteConfig.Stages[].Match.Expression — no separate entity.
+// The expression syntax (including the "*" catch-all and "+" catch-rest
+// wildcards) lives on RouteConfig.MatchStage.Expression.
 
 // RotationPolicyConfig defines when chunks should be rotated.
 // Multiple conditions can be specified; rotation occurs when ANY condition is met.

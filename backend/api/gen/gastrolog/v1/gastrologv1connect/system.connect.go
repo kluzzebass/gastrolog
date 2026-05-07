@@ -41,11 +41,6 @@ const (
 	// SystemServiceGetIngesterStatusProcedure is the fully-qualified name of the SystemService's
 	// GetIngesterStatus RPC.
 	SystemServiceGetIngesterStatusProcedure = "/gastrolog.v1.SystemService/GetIngesterStatus"
-	// SystemServicePutFilterProcedure is the fully-qualified name of the SystemService's PutFilter RPC.
-	SystemServicePutFilterProcedure = "/gastrolog.v1.SystemService/PutFilter"
-	// SystemServiceDeleteFilterProcedure is the fully-qualified name of the SystemService's
-	// DeleteFilter RPC.
-	SystemServiceDeleteFilterProcedure = "/gastrolog.v1.SystemService/DeleteFilter"
 	// SystemServicePutRotationPolicyProcedure is the fully-qualified name of the SystemService's
 	// PutRotationPolicy RPC.
 	SystemServicePutRotationPolicyProcedure = "/gastrolog.v1.SystemService/PutRotationPolicy"
@@ -197,10 +192,6 @@ type SystemServiceClient interface {
 	ListIngesters(context.Context, *connect.Request[v1.ListIngestersRequest]) (*connect.Response[v1.ListIngestersResponse], error)
 	// GetIngesterStatus returns status for a specific ingester.
 	GetIngesterStatus(context.Context, *connect.Request[v1.GetIngesterStatusRequest]) (*connect.Response[v1.GetIngesterStatusResponse], error)
-	// PutFilter creates or updates a filter.
-	PutFilter(context.Context, *connect.Request[v1.PutFilterRequest]) (*connect.Response[v1.PutFilterResponse], error)
-	// DeleteFilter removes a filter.
-	DeleteFilter(context.Context, *connect.Request[v1.DeleteFilterRequest]) (*connect.Response[v1.DeleteFilterResponse], error)
 	// PutRotationPolicy creates or updates a rotation policy.
 	PutRotationPolicy(context.Context, *connect.Request[v1.PutRotationPolicyRequest]) (*connect.Response[v1.PutRotationPolicyResponse], error)
 	// DeleteRotationPolicy removes a rotation policy.
@@ -329,18 +320,6 @@ func NewSystemServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			httpClient,
 			baseURL+SystemServiceGetIngesterStatusProcedure,
 			connect.WithSchema(systemServiceMethods.ByName("GetIngesterStatus")),
-			connect.WithClientOptions(opts...),
-		),
-		putFilter: connect.NewClient[v1.PutFilterRequest, v1.PutFilterResponse](
-			httpClient,
-			baseURL+SystemServicePutFilterProcedure,
-			connect.WithSchema(systemServiceMethods.ByName("PutFilter")),
-			connect.WithClientOptions(opts...),
-		),
-		deleteFilter: connect.NewClient[v1.DeleteFilterRequest, v1.DeleteFilterResponse](
-			httpClient,
-			baseURL+SystemServiceDeleteFilterProcedure,
-			connect.WithSchema(systemServiceMethods.ByName("DeleteFilter")),
 			connect.WithClientOptions(opts...),
 		),
 		putRotationPolicy: connect.NewClient[v1.PutRotationPolicyRequest, v1.PutRotationPolicyResponse](
@@ -639,8 +618,6 @@ type systemServiceClient struct {
 	getSystem             *connect.Client[v1.GetSystemRequest, v1.GetSystemResponse]
 	listIngesters         *connect.Client[v1.ListIngestersRequest, v1.ListIngestersResponse]
 	getIngesterStatus     *connect.Client[v1.GetIngesterStatusRequest, v1.GetIngesterStatusResponse]
-	putFilter             *connect.Client[v1.PutFilterRequest, v1.PutFilterResponse]
-	deleteFilter          *connect.Client[v1.DeleteFilterRequest, v1.DeleteFilterResponse]
 	putRotationPolicy     *connect.Client[v1.PutRotationPolicyRequest, v1.PutRotationPolicyResponse]
 	deleteRotationPolicy  *connect.Client[v1.DeleteRotationPolicyRequest, v1.DeleteRotationPolicyResponse]
 	putRetentionPolicy    *connect.Client[v1.PutRetentionPolicyRequest, v1.PutRetentionPolicyResponse]
@@ -704,16 +681,6 @@ func (c *systemServiceClient) ListIngesters(ctx context.Context, req *connect.Re
 // GetIngesterStatus calls gastrolog.v1.SystemService.GetIngesterStatus.
 func (c *systemServiceClient) GetIngesterStatus(ctx context.Context, req *connect.Request[v1.GetIngesterStatusRequest]) (*connect.Response[v1.GetIngesterStatusResponse], error) {
 	return c.getIngesterStatus.CallUnary(ctx, req)
-}
-
-// PutFilter calls gastrolog.v1.SystemService.PutFilter.
-func (c *systemServiceClient) PutFilter(ctx context.Context, req *connect.Request[v1.PutFilterRequest]) (*connect.Response[v1.PutFilterResponse], error) {
-	return c.putFilter.CallUnary(ctx, req)
-}
-
-// DeleteFilter calls gastrolog.v1.SystemService.DeleteFilter.
-func (c *systemServiceClient) DeleteFilter(ctx context.Context, req *connect.Request[v1.DeleteFilterRequest]) (*connect.Response[v1.DeleteFilterResponse], error) {
-	return c.deleteFilter.CallUnary(ctx, req)
 }
 
 // PutRotationPolicy calls gastrolog.v1.SystemService.PutRotationPolicy.
@@ -964,10 +931,6 @@ type SystemServiceHandler interface {
 	ListIngesters(context.Context, *connect.Request[v1.ListIngestersRequest]) (*connect.Response[v1.ListIngestersResponse], error)
 	// GetIngesterStatus returns status for a specific ingester.
 	GetIngesterStatus(context.Context, *connect.Request[v1.GetIngesterStatusRequest]) (*connect.Response[v1.GetIngesterStatusResponse], error)
-	// PutFilter creates or updates a filter.
-	PutFilter(context.Context, *connect.Request[v1.PutFilterRequest]) (*connect.Response[v1.PutFilterResponse], error)
-	// DeleteFilter removes a filter.
-	DeleteFilter(context.Context, *connect.Request[v1.DeleteFilterRequest]) (*connect.Response[v1.DeleteFilterResponse], error)
 	// PutRotationPolicy creates or updates a rotation policy.
 	PutRotationPolicy(context.Context, *connect.Request[v1.PutRotationPolicyRequest]) (*connect.Response[v1.PutRotationPolicyResponse], error)
 	// DeleteRotationPolicy removes a rotation policy.
@@ -1092,18 +1055,6 @@ func NewSystemServiceHandler(svc SystemServiceHandler, opts ...connect.HandlerOp
 		SystemServiceGetIngesterStatusProcedure,
 		svc.GetIngesterStatus,
 		connect.WithSchema(systemServiceMethods.ByName("GetIngesterStatus")),
-		connect.WithHandlerOptions(opts...),
-	)
-	systemServicePutFilterHandler := connect.NewUnaryHandler(
-		SystemServicePutFilterProcedure,
-		svc.PutFilter,
-		connect.WithSchema(systemServiceMethods.ByName("PutFilter")),
-		connect.WithHandlerOptions(opts...),
-	)
-	systemServiceDeleteFilterHandler := connect.NewUnaryHandler(
-		SystemServiceDeleteFilterProcedure,
-		svc.DeleteFilter,
-		connect.WithSchema(systemServiceMethods.ByName("DeleteFilter")),
 		connect.WithHandlerOptions(opts...),
 	)
 	systemServicePutRotationPolicyHandler := connect.NewUnaryHandler(
@@ -1402,10 +1353,6 @@ func NewSystemServiceHandler(svc SystemServiceHandler, opts ...connect.HandlerOp
 			systemServiceListIngestersHandler.ServeHTTP(w, r)
 		case SystemServiceGetIngesterStatusProcedure:
 			systemServiceGetIngesterStatusHandler.ServeHTTP(w, r)
-		case SystemServicePutFilterProcedure:
-			systemServicePutFilterHandler.ServeHTTP(w, r)
-		case SystemServiceDeleteFilterProcedure:
-			systemServiceDeleteFilterHandler.ServeHTTP(w, r)
 		case SystemServicePutRotationPolicyProcedure:
 			systemServicePutRotationPolicyHandler.ServeHTTP(w, r)
 		case SystemServiceDeleteRotationPolicyProcedure:
@@ -1521,14 +1468,6 @@ func (UnimplementedSystemServiceHandler) ListIngesters(context.Context, *connect
 
 func (UnimplementedSystemServiceHandler) GetIngesterStatus(context.Context, *connect.Request[v1.GetIngesterStatusRequest]) (*connect.Response[v1.GetIngesterStatusResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.GetIngesterStatus is not implemented"))
-}
-
-func (UnimplementedSystemServiceHandler) PutFilter(context.Context, *connect.Request[v1.PutFilterRequest]) (*connect.Response[v1.PutFilterResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.PutFilter is not implemented"))
-}
-
-func (UnimplementedSystemServiceHandler) DeleteFilter(context.Context, *connect.Request[v1.DeleteFilterRequest]) (*connect.Response[v1.DeleteFilterResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.DeleteFilter is not implemented"))
 }
 
 func (UnimplementedSystemServiceHandler) PutRotationPolicy(context.Context, *connect.Request[v1.PutRotationPolicyRequest]) (*connect.Response[v1.PutRotationPolicyResponse], error) {

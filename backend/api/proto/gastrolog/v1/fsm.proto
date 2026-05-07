@@ -12,60 +12,50 @@ option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
 // Each variant maps 1:1 to a system.Store write method.
 message SystemCommand {
   oneof command {
-    PutFilterCommand put_filter = 1;
-    DeleteFilterCommand delete_filter = 2;
-    PutRotationPolicyCommand put_rotation_policy = 3;
-    DeleteRotationPolicyCommand delete_rotation_policy = 4;
-    PutRetentionPolicyCommand put_retention_policy = 5;
-    DeleteRetentionPolicyCommand delete_retention_policy = 6;
-    PutVaultCommand put_vault = 7;
-    DeleteVaultCommand delete_vault = 8;
-    PutIngesterCommand put_ingester = 9;
-    DeleteIngesterCommand delete_ingester = 10;
-    PutSettingCommand put_setting = 11;
-    DeleteSettingCommand delete_setting = 12;
-    PutCertificateCommand put_certificate = 13;
-    DeleteCertificateCommand delete_certificate = 14;
-    CreateUserCommand create_user = 15;
-    UpdatePasswordCommand update_password = 16;
-    UpdateUserRoleCommand update_user_role = 17;
-    UpdateUsernameCommand update_username = 18;
-    DeleteUserCommand delete_user = 19;
-    InvalidateTokensCommand invalidate_tokens = 20;
-    PutUserPreferencesCommand put_user_preferences = 21;
-    CreateRefreshTokenCommand create_refresh_token = 22;
-    DeleteRefreshTokenCommand delete_refresh_token = 23;
-    DeleteUserRefreshTokensCommand delete_user_refresh_tokens = 24;
-    PutNodeConfigCommand put_node_config = 25;
-    DeleteNodeConfigCommand delete_node_config = 26;
-    PutClusterTLSCommand put_cluster_tls = 27;
-    PutRouteCommand put_route = 28;
-    DeleteRouteCommand delete_route = 29;
-    PutManagedFileCommand put_managed_file = 30;
-    DeleteManagedFileCommand delete_managed_file = 31;
-    PutCloudServiceCommand put_cloud_service = 32;
-    DeleteCloudServiceCommand delete_cloud_service = 33;
-    SetNodeStorageConfigCommand set_node_storage_config = 34;
-    PutTierCommand put_tier = 35;
-    DeleteTierCommand delete_tier = 36;
-    SetTierPlacementsCommand set_tier_placements = 37;
-    SetSetupWizardDismissedCommand set_setup_wizard_dismissed = 38;
-    SetIngesterAliveCommand set_ingester_alive = 39;
-    SetIngesterAssignmentCommand set_ingester_assignment = 40;
-    SetIngesterCheckpointCommand set_ingester_checkpoint = 41;
+    // Tags 1 (PutFilterCommand) and 2 (DeleteFilterCommand) removed in
+    // gastrolog-4kkoo (Phase 5): FilterConfig was inlined into
+    // RouteConfig.MatchStage.expression. Remaining tags renumbered to
+    // fill the holes per the project's "delete and renumber" rule.
+    PutRotationPolicyCommand put_rotation_policy = 1;
+    DeleteRotationPolicyCommand delete_rotation_policy = 2;
+    PutRetentionPolicyCommand put_retention_policy = 3;
+    DeleteRetentionPolicyCommand delete_retention_policy = 4;
+    PutVaultCommand put_vault = 5;
+    DeleteVaultCommand delete_vault = 6;
+    PutIngesterCommand put_ingester = 7;
+    DeleteIngesterCommand delete_ingester = 8;
+    PutSettingCommand put_setting = 9;
+    DeleteSettingCommand delete_setting = 10;
+    PutCertificateCommand put_certificate = 11;
+    DeleteCertificateCommand delete_certificate = 12;
+    CreateUserCommand create_user = 13;
+    UpdatePasswordCommand update_password = 14;
+    UpdateUserRoleCommand update_user_role = 15;
+    UpdateUsernameCommand update_username = 16;
+    DeleteUserCommand delete_user = 17;
+    InvalidateTokensCommand invalidate_tokens = 18;
+    PutUserPreferencesCommand put_user_preferences = 19;
+    CreateRefreshTokenCommand create_refresh_token = 20;
+    DeleteRefreshTokenCommand delete_refresh_token = 21;
+    DeleteUserRefreshTokensCommand delete_user_refresh_tokens = 22;
+    PutNodeConfigCommand put_node_config = 23;
+    DeleteNodeConfigCommand delete_node_config = 24;
+    PutClusterTLSCommand put_cluster_tls = 25;
+    PutRouteCommand put_route = 26;
+    DeleteRouteCommand delete_route = 27;
+    PutManagedFileCommand put_managed_file = 28;
+    DeleteManagedFileCommand delete_managed_file = 29;
+    PutCloudServiceCommand put_cloud_service = 30;
+    DeleteCloudServiceCommand delete_cloud_service = 31;
+    SetNodeStorageConfigCommand set_node_storage_config = 32;
+    PutTierCommand put_tier = 33;
+    DeleteTierCommand delete_tier = 34;
+    SetTierPlacementsCommand set_tier_placements = 35;
+    SetSetupWizardDismissedCommand set_setup_wizard_dismissed = 36;
+    SetIngesterAliveCommand set_ingester_alive = 37;
+    SetIngesterAssignmentCommand set_ingester_assignment = 38;
+    SetIngesterCheckpointCommand set_ingester_checkpoint = 39;
   }
-}
-
-// --- Filters ---
-
-message PutFilterCommand {
-  bytes id = 1;
-  string name = 2;
-  string expression = 3;
-}
-
-message DeleteFilterCommand {
-  bytes id = 1;
 }
 
 // --- Rotation Policies ---
@@ -246,13 +236,11 @@ message PutClusterTLSCommand {
 message PutRouteCommand {
   bytes id = 1;
   string name = 2;
-  bytes filter_id = 3;
-  repeated bytes destination_ids = 4;
-  string distribution = 5;
-  bool enabled = 6;
-  repeated RouteSource sources = 7;        // gastrolog-42f9z (Phase 4); replaces eject_only. Empty = INGEST.
-  repeated bytes source_vault_ids = 8;     // optional narrower for sources containing RETENTION_TRIGGER
-  repeated bytes source_ingester_ids = 9;  // optional narrower for sources containing INGEST
+  int32 priority = 3;
+  repeated RouteStage stages = 4;
+  repeated bytes destination_ids = 5;
+  string distribution = 6;
+  bool enabled = 7;
 }
 
 message DeleteRouteCommand {
@@ -342,25 +330,25 @@ message SetIngesterCheckpointCommand {
 // Each repeated field contains one entry per entity, using the Put/Create
 // command messages to represent complete entity state.
 message SystemSnapshot {
-  repeated PutFilterCommand filters = 1;
-  repeated PutRotationPolicyCommand rotation_policies = 2;
-  repeated PutRetentionPolicyCommand retention_policies = 3;
-  repeated PutVaultCommand vaults = 4;
-  repeated PutIngesterCommand ingesters = 5;
-  map<string, string> settings = 6;
-  repeated PutCertificateCommand certificates = 7;
-  repeated CreateUserCommand users = 8;
-  repeated CreateRefreshTokenCommand refresh_tokens = 9;
-  repeated PutNodeConfigCommand node_configs = 10;
-  PutClusterTLSCommand cluster_tls = 11;
-  repeated PutRouteCommand routes = 12;
-  repeated PutManagedFileCommand managed_files = 13;
-  repeated PutCloudServiceCommand cloud_services = 14;
-  repeated SetNodeStorageConfigCommand node_storage_configs = 15;
-  repeated PutTierCommand tiers = 16;
-  repeated SetTierPlacementsCommand tier_placements = 17;
-  bool setup_wizard_dismissed = 18;
-  repeated SetIngesterAliveCommand ingester_alive = 19;
-  repeated SetIngesterAssignmentCommand ingester_assignments = 20;
-  repeated SetIngesterCheckpointCommand ingester_checkpoints = 21;
+  // Tag 1 (filters) removed in gastrolog-4kkoo. Remaining tags renumbered.
+  repeated PutRotationPolicyCommand rotation_policies = 1;
+  repeated PutRetentionPolicyCommand retention_policies = 2;
+  repeated PutVaultCommand vaults = 3;
+  repeated PutIngesterCommand ingesters = 4;
+  map<string, string> settings = 5;
+  repeated PutCertificateCommand certificates = 6;
+  repeated CreateUserCommand users = 7;
+  repeated CreateRefreshTokenCommand refresh_tokens = 8;
+  repeated PutNodeConfigCommand node_configs = 9;
+  PutClusterTLSCommand cluster_tls = 10;
+  repeated PutRouteCommand routes = 11;
+  repeated PutManagedFileCommand managed_files = 12;
+  repeated PutCloudServiceCommand cloud_services = 13;
+  repeated SetNodeStorageConfigCommand node_storage_configs = 14;
+  repeated PutTierCommand tiers = 15;
+  repeated SetTierPlacementsCommand tier_placements = 16;
+  bool setup_wizard_dismissed = 17;
+  repeated SetIngesterAliveCommand ingester_alive = 18;
+  repeated SetIngesterAssignmentCommand ingester_assignments = 19;
+  repeated SetIngesterCheckpointCommand ingester_checkpoints = 20;
 }

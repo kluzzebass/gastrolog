@@ -95,16 +95,8 @@ func importEntities(ctx context.Context, client *server.Client, doc *exportDoc) 
 
 	var imported int
 
-	for _, f := range doc.Filters {
-		ensureProtoID(f.Name, r.filters, &f.Id)
-		_, err := client.System.PutFilter(ctx, connect.NewRequest(&v1.PutFilterRequest{
-			Config: f,
-		}))
-		if err != nil {
-			return imported, fmt.Errorf("import filter %q: %w", f.Name, err)
-		}
-		imported++
-	}
+	// gastrolog-4kkoo (Phase 5): no FilterConfig entity; expressions are
+	// inlined on routes (handled below in the Routes block).
 
 	for _, p := range doc.RotationPolicies {
 		ensureProtoID(p.Name, r.rotationPolicies, &p.Id)
@@ -235,11 +227,8 @@ func deleteAll(ctx context.Context, client *server.Client) error {
 			return fmt.Errorf("delete ingester %s: %w", ig.Name, err)
 		}
 	}
-	for _, f := range resp.Msg.Filters {
-		if _, err := client.System.DeleteFilter(ctx, connect.NewRequest(&v1.DeleteFilterRequest{Id: f.Id})); err != nil {
-			return fmt.Errorf("delete filter %s: %w", f.Name, err)
-		}
-	}
+	// gastrolog-4kkoo (Phase 5): no Filters to delete; expressions live on
+	// routes, which are deleted below.
 	for _, p := range resp.Msg.RotationPolicies {
 		if _, err := client.System.DeleteRotationPolicy(ctx, connect.NewRequest(&v1.DeleteRotationPolicyRequest{Id: p.Id})); err != nil {
 			return fmt.Errorf("delete rotation policy %s: %w", p.Name, err)

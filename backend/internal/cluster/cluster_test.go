@@ -149,28 +149,29 @@ func TestSingleNodeForwardApply(t *testing.T) {
 
 	waitLeader(t, node.raft, 5*time.Second)
 
-	// Write a filter config via the store (goes through raft.Apply on leader).
+	// gastrolog-4kkoo (Phase 5): exercise raft.Apply via rotation policy
+	// instead of the deleted filter command.
 	ctx := context.Background()
-	filterID := glid.New()
-	err := node.store.PutFilter(ctx, system.FilterConfig{
-		ID:         filterID,
-		Name:       "test-filter",
-		Expression: "*",
+	probeID := glid.New()
+	err := node.store.PutRotationPolicy(ctx, system.RotationPolicyConfig{
+		ID:     probeID,
+		Name:   "test-probe",
+		MaxAge: &dummyMaxAge,
 	})
 	if err != nil {
-		t.Fatalf("PutFilter: %v", err)
+		t.Fatalf("PutRotationPolicy: %v", err)
 	}
 
 	// Verify it's readable.
-	got, err := node.store.GetFilter(ctx, filterID)
+	got, err := node.store.GetRotationPolicy(ctx, probeID)
 	if err != nil {
-		t.Fatalf("GetFilter: %v", err)
+		t.Fatalf("GetRotationPolicy: %v", err)
 	}
 	if got == nil {
-		t.Fatal("expected filter, got nil")
+		t.Fatal("expected rotation policy, got nil")
 	}
-	if got.Name != "test-filter" {
-		t.Errorf("got name %q, want test-filter", got.Name)
+	if got.Name != "test-probe" {
+		t.Errorf("got name %q, want test-probe", got.Name)
 	}
 }
 
@@ -211,59 +212,60 @@ func TestThreeNodeCluster(t *testing.T) {
 		}
 	}
 
-	// Write a filter on the leader.
+	// gastrolog-4kkoo (Phase 5): exercise replication via rotation policy
+	// instead of the deleted filter command.
 	ctx := context.Background()
-	filterID := glid.New()
-	if err := node1.store.PutFilter(ctx, system.FilterConfig{
-		ID:         filterID,
-		Name:       "leader-filter",
-		Expression: "*",
+	probeID := glid.New()
+	if err := node1.store.PutRotationPolicy(ctx, system.RotationPolicyConfig{
+		ID:     probeID,
+		Name:   "leader-probe",
+		MaxAge: &dummyMaxAge,
 	}); err != nil {
-		t.Fatalf("PutFilter on leader: %v", err)
+		t.Fatalf("PutRotationPolicy on leader: %v", err)
 	}
 
-	// Verify the filter is replicated to node 2 and 3.
-	var got2, got3 *system.FilterConfig
+	// Verify the policy is replicated to node 2 and 3.
+	var got2, got3 *system.RotationPolicyConfig
 	replDeadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(replDeadline) {
-		got2, _ = node2.store.GetFilter(ctx, filterID)
-		got3, _ = node3.store.GetFilter(ctx, filterID)
+		got2, _ = node2.store.GetRotationPolicy(ctx, probeID)
+		got3, _ = node3.store.GetRotationPolicy(ctx, probeID)
 		if got2 != nil && got3 != nil {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	if got2 == nil {
-		t.Error("filter not replicated to node-2")
+		t.Error("policy not replicated to node-2")
 	}
 	if got3 == nil {
-		t.Error("filter not replicated to node-3")
+		t.Error("policy not replicated to node-3")
 	}
 
 	// Write on a follower — should be forwarded to the leader.
-	followerFilterID := glid.New()
-	if err := node2.store.PutFilter(ctx, system.FilterConfig{
-		ID:         followerFilterID,
-		Name:       "follower-filter",
-		Expression: "*",
+	followerProbeID := glid.New()
+	if err := node2.store.PutRotationPolicy(ctx, system.RotationPolicyConfig{
+		ID:     followerProbeID,
+		Name:   "follower-probe",
+		MaxAge: &dummyMaxAge,
 	}); err != nil {
-		t.Fatalf("PutFilter on follower: %v", err)
+		t.Fatalf("PutRotationPolicy on follower: %v", err)
 	}
 
-	// Verify the filter written via follower is readable on the leader.
-	var leaderGot *system.FilterConfig
+	// Verify the policy written via follower is readable on the leader.
+	var leaderGot *system.RotationPolicyConfig
 	fwdDeadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(fwdDeadline) {
-		leaderGot, _ = node1.store.GetFilter(ctx, followerFilterID)
+		leaderGot, _ = node1.store.GetRotationPolicy(ctx, followerProbeID)
 		if leaderGot != nil {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	if leaderGot == nil {
-		t.Fatal("filter written on follower not found on leader")
+		t.Fatal("policy written on follower not found on leader")
 	}
-	if leaderGot.Name != "follower-filter" {
-		t.Errorf("got name %q, want follower-filter", leaderGot.Name)
+	if leaderGot.Name != "follower-probe" {
+		t.Errorf("got name %q, want follower-probe", leaderGot.Name)
 	}
 }

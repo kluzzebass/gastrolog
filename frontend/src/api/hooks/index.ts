@@ -18,7 +18,7 @@ export { useExplain } from "./useExplain";
 export { useLiveHistogram } from "./useLiveHistogram";
 export { useRecordContext } from "./useContext";
 export { useConfig, useGenerateName } from "./useSystem";
-export { usePutFilter, useDeleteFilter } from "./useFilters";
+// gastrolog-4kkoo (Phase 5): useFilters removed; expressions live inline on routes.
 export { usePutRotationPolicy, useDeleteRotationPolicy } from "./useRotationPolicies";
 export { usePutRetentionPolicy, useDeleteRetentionPolicy } from "./useRetentionPolicies";
 export { usePutRoute, useDeleteRoute } from "./useRoutes";

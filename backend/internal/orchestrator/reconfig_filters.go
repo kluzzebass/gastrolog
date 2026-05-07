@@ -8,29 +8,6 @@ import (
 	"gastrolog/internal/system"
 )
 
-// resolveFilterExpr looks up a filter ID in the config and returns its expression.
-// Returns empty string if the filter ID is nil or not found (vault receives nothing).
-func resolveFilterExpr(cfg *system.Config, filterID glid.GLID) string {
-	if filterID == glid.Nil || cfg == nil {
-		return ""
-	}
-	fc := findFilter(cfg.Filters, filterID)
-	if fc == nil {
-		return ""
-	}
-	return fc.Expression
-}
-
-// findFilter finds a FilterConfig by ID in a slice.
-func findFilter(filters []system.FilterConfig, id glid.GLID) *system.FilterConfig {
-	for i := range filters {
-		if filters[i].ID == id {
-			return &filters[i]
-		}
-	}
-	return nil
-}
-
 // resolveVaultNodeID finds the node that owns the vault. Returns empty
 // string if the vault has no placements (unassigned).
 //
@@ -75,9 +52,13 @@ func (o *Orchestrator) ReloadFilters(ctx context.Context) error {
 // reloadFiltersFromRoutes builds the FilterSet from route configuration.
 // Must be called with o.mu held or at startup (before Start).
 //
-// For each enabled route, resolves the filter expression and compiles a
-// CompiledFilter for each destination vault. If multiple routes target
-// the same vault, the last route's filter wins (AddOrUpdate replaces).
+// For each enabled route, reads the inline match-stage expression and
+// compiles a CompiledFilter per destination vault. If multiple routes
+// target the same vault, the last route's expression wins (AddOrUpdate
+// replaces). gastrolog-4kkoo (Phase 5): expression is read directly from
+// route.MatchExpression() — no FilterConfig lookup. The synthetic-
+// attribute injection and first-match-wins semantics land in a follow-up
+// step on the same epic.
 func (o *Orchestrator) reloadFiltersFromRoutes(sys *system.System) error {
 	if sys == nil {
 		return nil
@@ -89,19 +70,8 @@ func (o *Orchestrator) reloadFiltersFromRoutes(sys *system.System) error {
 		if !route.Enabled {
 			continue
 		}
-		// Phase 4 (gastrolog-42f9z): include the route on the live
-		// FilterSet only if it carries the Ingest source kind. Empty
-		// sources defaults to Ingest. A route with multiple kinds
-		// (e.g. {Ingest, RetentionTrigger}) shows up on both surfaces;
-		// the matching engine uses the source-id narrowers per kind.
-		if !routeHasIngestSource(route) {
-			continue
-		}
 
-		var filterExpr string
-		if route.FilterID != nil {
-			filterExpr = resolveFilterExpr(cfg, *route.FilterID)
-		}
+		filterExpr := route.MatchExpression()
 
 		for _, destID := range route.Destinations {
 			hotTierNode := resolveVaultNodeID(sys, destID)
@@ -207,18 +177,3 @@ func (o *Orchestrator) rebuildFilterSetLocked() {
 	}
 }
 
-// routeHasIngestSource reports whether the route's source-predicate set
-// includes the Ingest kind. Empty Sources defaults to Ingest for back-
-// compat with pre-Phase-4 routes that pre-date the multi-select schema.
-// gastrolog-42f9z (Phase 4).
-func routeHasIngestSource(r system.RouteConfig) bool {
-	if len(r.Sources) == 0 {
-		return true
-	}
-	for _, s := range r.Sources {
-		if s == system.RouteSourceIngest || s == system.RouteSourceUnspecified {
-			return true
-		}
-	}
-	return false
-}

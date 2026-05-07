@@ -52,48 +52,6 @@ func UnmarshalSnapshot(b []byte) (*gastrologv1.SystemSnapshot, error) {
 }
 
 // ---------------------------------------------------------------------------
-// Filters
-// ---------------------------------------------------------------------------
-
-func putFilterCmd(cfg system.FilterConfig) *gastrologv1.PutFilterCommand {
-	return &gastrologv1.PutFilterCommand{
-		Id:         cfg.ID.ToProto(),
-		Name:       cfg.Name,
-		Expression: cfg.Expression,
-	}
-}
-
-// NewPutFilter creates a ConfigCommand for PutFilter.
-func NewPutFilter(cfg system.FilterConfig) *gastrologv1.SystemCommand {
-	return &gastrologv1.SystemCommand{
-		Command: &gastrologv1.SystemCommand_PutFilter{PutFilter: putFilterCmd(cfg)},
-	}
-}
-
-// NewDeleteFilter creates a ConfigCommand for DeleteFilter.
-func NewDeleteFilter(id glid.GLID) *gastrologv1.SystemCommand {
-	return &gastrologv1.SystemCommand{
-		Command: &gastrologv1.SystemCommand_DeleteFilter{
-			DeleteFilter: &gastrologv1.DeleteFilterCommand{Id: id.ToProto()},
-		},
-	}
-}
-
-// ExtractPutFilter converts a PutFilterCommand back to a FilterConfig.
-func ExtractPutFilter(cmd *gastrologv1.PutFilterCommand) (system.FilterConfig, error) {
-	return system.FilterConfig{
-		ID:         glid.FromBytes(cmd.GetId()),
-		Name:       cmd.GetName(),
-		Expression: cmd.GetExpression(),
-	}, nil
-}
-
-// ExtractDeleteFilter extracts the UUID from a DeleteFilterCommand.
-func ExtractDeleteFilter(cmd *gastrologv1.DeleteFilterCommand) (glid.GLID, error) {
-	return glid.FromBytes(cmd.GetId()), nil
-}
-
-// ---------------------------------------------------------------------------
 // Rotation Policies
 // ---------------------------------------------------------------------------
 
@@ -296,15 +254,13 @@ func ExtractDeleteIngester(cmd *gastrologv1.DeleteIngesterCommand) (glid.GLID, e
 
 func putRouteCmd(cfg system.RouteConfig) *gastrologv1.PutRouteCommand {
 	return &gastrologv1.PutRouteCommand{
-		Id:                cfg.ID.ToProto(),
-		Name:              cfg.Name,
-		FilterId:          glid.OptionalToProto(cfg.FilterID),
-		DestinationIds:    glid.SliceToProto(cfg.Destinations),
-		Distribution:      string(cfg.Distribution),
-		Enabled:           cfg.Enabled,
-		Sources:           convert.RouteSourcesToProto(cfg.Sources),
-		SourceVaultIds:    glid.SliceToProto(cfg.SourceVaultIDs),
-		SourceIngesterIds: glid.SliceToProto(cfg.SourceIngesterIDs),
+		Id:             cfg.ID.ToProto(),
+		Name:           cfg.Name,
+		Priority:       cfg.Priority,
+		Stages:         convert.RouteStagesToProto(cfg.Stages),
+		DestinationIds: glid.SliceToProto(cfg.Destinations),
+		Distribution:   string(cfg.Distribution),
+		Enabled:        cfg.Enabled,
 	}
 }
 
@@ -327,15 +283,13 @@ func NewDeleteRoute(id glid.GLID) *gastrologv1.SystemCommand {
 // ExtractPutRoute converts a PutRouteCommand back to a RouteConfig.
 func ExtractPutRoute(cmd *gastrologv1.PutRouteCommand) (system.RouteConfig, error) {
 	return system.RouteConfig{
-		ID:                glid.FromBytes(cmd.GetId()),
-		Name:              cmd.GetName(),
-		FilterID:          glid.OptionalFromProto(cmd.GetFilterId()),
-		Destinations:      glid.SliceFromProto(cmd.GetDestinationIds()),
-		Distribution:      system.DistributionMode(cmd.GetDistribution()),
-		Enabled:           cmd.GetEnabled(),
-		Sources:           convert.RouteSourcesFromProto(cmd.GetSources()),
-		SourceVaultIDs:    glid.SliceFromProto(cmd.GetSourceVaultIds()),
-		SourceIngesterIDs: glid.SliceFromProto(cmd.GetSourceIngesterIds()),
+		ID:           glid.FromBytes(cmd.GetId()),
+		Name:         cmd.GetName(),
+		Priority:     cmd.GetPriority(),
+		Stages:       convert.RouteStagesFromProto(cmd.GetStages()),
+		Destinations: glid.SliceFromProto(cmd.GetDestinationIds()),
+		Distribution: system.DistributionMode(cmd.GetDistribution()),
+		Enabled:      cmd.GetEnabled(),
 	}, nil
 }
 
@@ -822,9 +776,7 @@ func BuildSnapshot(sys *system.System, users []system.User, tokens []system.Refr
 	}
 
 	// Config entities.
-	for _, f := range cfg.Filters {
-		snap.Filters = append(snap.Filters, putFilterCmd(f))
-	}
+	// gastrolog-4kkoo (Phase 5): no Filters; expressions live inline on routes.
 	for _, rp := range cfg.RotationPolicies {
 		snap.RotationPolicies = append(snap.RotationPolicies, putRotationPolicyCmd(rp))
 	}
@@ -926,13 +878,9 @@ func RestoreSnapshot(snap *gastrologv1.SystemSnapshot) (*system.System, []system
 		}
 	}
 
-	for _, f := range snap.GetFilters() {
-		fc, err := ExtractPutFilter(f)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("restore filter: %w", err)
-		}
-		cfg.Filters = append(cfg.Filters, fc)
-	}
+	// gastrolog-4kkoo (Phase 5): snapshot Filters block dropped. The proto
+	// no longer carries snap.Filters; expressions live on snap.Routes via
+	// PutRouteCommand.Stages.
 	for _, rp := range snap.GetRotationPolicies() {
 		rc, err := ExtractPutRotationPolicy(rp)
 		if err != nil {

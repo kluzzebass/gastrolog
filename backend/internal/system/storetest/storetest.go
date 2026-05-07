@@ -28,7 +28,6 @@ func TestStore(t *testing.T, newStore func(t *testing.T) system.Store) {
 		}
 	})
 
-	testFilters(t, newStore)
 	testRotationPolicies(t, newStore)
 	testRetentionPolicies(t, newStore)
 	testVaults(t, newStore)
@@ -40,33 +39,6 @@ func TestStore(t *testing.T, newStore func(t *testing.T) system.Store) {
 	testCloudServices(t, newStore)
 	testTiers(t, newStore)
 	testNodeStorageConfigs(t, newStore)
-}
-
-func testFilters(t *testing.T, newStore func(t *testing.T) system.Store) {
-	t.Run("PutGetFilter", func(t *testing.T) {
-		s := newStore(t)
-		ctx := context.Background()
-
-		id := newID()
-		fc := system.FilterConfig{ID: id, Name: "catch-all", Expression: "*"}
-		if err := s.PutFilter(ctx, fc); err != nil {
-			t.Fatalf("Put: %v", err)
-		}
-
-		got, err := s.GetFilter(ctx, id)
-		if err != nil {
-			t.Fatalf("Get: %v", err)
-		}
-		if got == nil {
-			t.Fatal("expected filter, got nil")
-		}
-		if got.Name != "catch-all" {
-			t.Errorf("Name: expected %q, got %q", "catch-all", got.Name)
-		}
-		if got.Expression != "*" {
-			t.Errorf("Expression: expected %q, got %q", "*", got.Expression)
-		}
-	})
 }
 
 func testRotationPolicies(t *testing.T, newStore func(t *testing.T) system.Store) {

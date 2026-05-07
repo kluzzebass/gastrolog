@@ -25,8 +25,8 @@ type NotifyKind int
 const (
 	NotifyVaultPut NotifyKind = iota + 1
 	NotifyVaultDeleted
-	NotifyFilterPut
-	NotifyFilterDeleted
+	// gastrolog-4kkoo (Phase 5): NotifyFilterPut/Deleted removed; expressions
+	// live inline on routes, so route-put/delete carries the change.
 	NotifyRotationPolicyPut
 	NotifyRotationPolicyDeleted
 	NotifyRetentionPolicyPut
@@ -113,9 +113,7 @@ func (f *FSM) Apply(l *raft.Log) any {
 	ctx := context.Background()
 
 	switch cmd.Command.(type) {
-	case *gastrologv1.SystemCommand_PutFilter,
-		*gastrologv1.SystemCommand_DeleteFilter,
-		*gastrologv1.SystemCommand_PutRotationPolicy,
+	case *gastrologv1.SystemCommand_PutRotationPolicy,
 		*gastrologv1.SystemCommand_DeleteRotationPolicy,
 		*gastrologv1.SystemCommand_PutRetentionPolicy,
 		*gastrologv1.SystemCommand_DeleteRetentionPolicy,
@@ -186,10 +184,6 @@ func (f *FSM) applyConfig(ctx context.Context, cmd *gastrologv1.SystemCommand, r
 // need orchestrator side effects (settings delete, certificates).
 func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.SystemCommand) (*Notification, error) { //nolint:gocyclo // flat dispatch, grows linearly with command count
 	switch c := cmd.Command.(type) {
-	case *gastrologv1.SystemCommand_PutFilter:
-		return f.applyPutFilter(ctx, c.PutFilter)
-	case *gastrologv1.SystemCommand_DeleteFilter:
-		return f.applyDeleteFilter(ctx, c.DeleteFilter)
 	case *gastrologv1.SystemCommand_PutRotationPolicy:
 		return f.applyPutRotationPolicy(ctx, c.PutRotationPolicy)
 	case *gastrologv1.SystemCommand_DeleteRotationPolicy:
@@ -282,28 +276,6 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.SystemCommand
 	default:
 		return nil, fmt.Errorf("unexpected config command: %T", c)
 	}
-}
-
-func (f *FSM) applyPutFilter(ctx context.Context, pb *gastrologv1.PutFilterCommand) (*Notification, error) {
-	cfg, err := command.ExtractPutFilter(pb)
-	if err != nil {
-		return nil, err
-	}
-	if err := f.store.PutFilter(ctx, cfg); err != nil {
-		return nil, err
-	}
-	return &Notification{Kind: NotifyFilterPut, ID: cfg.ID}, nil
-}
-
-func (f *FSM) applyDeleteFilter(ctx context.Context, pb *gastrologv1.DeleteFilterCommand) (*Notification, error) {
-	id, err := command.ExtractDeleteFilter(pb)
-	if err != nil {
-		return nil, err
-	}
-	if err := f.store.DeleteFilter(ctx, id); err != nil {
-		return nil, err
-	}
-	return &Notification{Kind: NotifyFilterDeleted, ID: id}, nil
 }
 
 func (f *FSM) applyPutRotationPolicy(ctx context.Context, pb *gastrologv1.PutRotationPolicyCommand) (*Notification, error) {
@@ -847,11 +819,7 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit,gocyclo // sna
 	rt := &sys.Runtime
 
 	// Config entities.
-	for _, fc := range cfg.Filters {
-		if err := newStore.PutFilter(ctx, fc); err != nil {
-			return fmt.Errorf("restore filter %s: %w", fc.ID, err)
-		}
-	}
+	// gastrolog-4kkoo (Phase 5): no Filters; expressions live inline on routes.
 	for _, rp := range cfg.RotationPolicies {
 		if err := newStore.PutRotationPolicy(ctx, rp); err != nil {
 			return fmt.Errorf("restore rotation policy %s: %w", rp.ID, err)

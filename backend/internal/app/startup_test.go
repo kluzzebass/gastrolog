@@ -199,9 +199,12 @@ func TestEnsureConfig_ConfigWithoutSecret(t *testing.T) {
 	t.Parallel()
 	store := memory.NewStore()
 	ctx := context.Background()
-	// Add a dummy filter so Load() returns non-nil, but leave server settings empty.
-	if err := store.PutFilter(ctx, system.FilterConfig{
-		ID: glid.New(), Name: "dummy", Expression: "*",
+	// gastrolog-4kkoo (Phase 5): no FilterConfig — use a rotation policy
+	// to push Load() over the empty-store threshold while keeping server
+	// settings unset.
+	dummyMaxAge := "1h"
+	if err := store.PutRotationPolicy(ctx, system.RotationPolicyConfig{
+		ID: glid.New(), Name: "dummy", MaxAge: &dummyMaxAge,
 	}); err != nil {
 		t.Fatal(err)
 	}
