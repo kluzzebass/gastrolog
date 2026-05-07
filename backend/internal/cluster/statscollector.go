@@ -12,6 +12,7 @@ import (
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/alert"
+	"gastrolog/internal/glid"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/sysmetrics"
 )
@@ -39,15 +40,23 @@ type StatsRouteSnapshot struct {
 }
 
 // StatsVaultRouteSnapshot captures per-vault route stats.
+//
+// VaultID is the canonical glid.GLID type (NOT the String() form). The
+// marshal step uses VaultID.ToProto() to emit raw 16-byte proto bytes;
+// stuffing the String() form into a string field and then casting to
+// []byte produced ASCII bytes of the base32hex GLID string, which broke
+// round-tripping and caused the dedup map at the consumer to miss
+// (resulting in duplicate per-vault rows in the inspector).
 type StatsVaultRouteSnapshot struct {
-	VaultID   string
+	VaultID   glid.GLID
 	Matched   int64
 	Forwarded int64
 }
 
-// StatsPerRouteSnapshot captures per-route stats.
+// StatsPerRouteSnapshot captures per-route stats. Same GLID-encoding
+// note as StatsVaultRouteSnapshot.
 type StatsPerRouteSnapshot struct {
-	RouteID   string
+	RouteID   glid.GLID
 	Matched   int64
 	Forwarded int64
 }
@@ -264,14 +273,14 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 		stats.RouteStatsFilterActive = rs.FilterActive
 		for _, vs := range rs.VaultStats {
 			stats.RouteVaultStats = append(stats.RouteVaultStats, &gastrologv1.VaultRouteStats{
-				VaultId:          []byte(vs.VaultID),
+				VaultId:          vs.VaultID.ToProto(),
 				RecordsMatched:   vs.Matched,
 				RecordsForwarded: vs.Forwarded,
 			})
 		}
 		for _, ps := range rs.RouteStats {
 			stats.RoutePerRouteStats = append(stats.RoutePerRouteStats, &gastrologv1.PerRouteStats{
-				RouteId:          []byte(ps.RouteID),
+				RouteId:          ps.RouteID.ToProto(),
 				RecordsMatched:   ps.Matched,
 				RecordsForwarded: ps.Forwarded,
 			})
