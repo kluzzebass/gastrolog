@@ -208,8 +208,8 @@ configure() {
   $GLOG config rotation-policy create --addr "$S" --name "100-rows" --max-records 100 2>&1 | sed 's/^/  /'
   $GLOG config retention-policy create --addr "$S" --name "3m-retain" --max-age 3m 2>&1 | sed 's/^/  /'
 
-  echo ">>> Creating filter..."
-  $GLOG config filter create --addr "$S" --name "catch-all" --expression "*" 2>&1 | sed 's/^/  /'
+  # gastrolog-4kkoo (Phase 5): no filter entity — match expressions live
+  # inline on routes via --expression.
 
   echo ">>> Creating vault..."
   # Phase 2 (gastrolog-3iy5l): a vault has a single storage shape. The legacy
@@ -221,7 +221,7 @@ configure() {
 
   echo ">>> Creating route..."
   $GLOG config route create --addr "$S" \
-    --name "default" --filter "catch-all" --destination "default-vault" 2>&1 | sed 's/^/  /'
+    --name "default" --expression "*" --destination "default-vault" 2>&1 | sed 's/^/  /'
 
   echo ">>> Creating ingesters (disabled)..."
   local NODE_IDS=()
