@@ -325,14 +325,22 @@ type IngesterConfig struct {
 	Params map[string]string `json:"params,omitempty"`
 
 	// NodeIDs lists the raft server IDs of nodes allowed to run this ingester.
-	// Parallel ingesters run on all listed nodes. Singleton ingesters run on one.
+	// Honored only when AllNodes is false. Parallel ingesters run on every
+	// listed node; singleton ingesters run on one of them.
 	NodeIDs []string `json:"nodeIds,omitempty"`
 
 	// Singleton selects HA semantics. When false (default), the ingester runs
-	// on every node in NodeIDs (parallel). When true, the placement manager
+	// on every eligible node (parallel). When true, the placement manager
 	// Raft-assigns it to exactly one alive node with automatic failover. Only
 	// takes effect when the registered ingester type has SingletonSupported.
 	Singleton bool `json:"singleton,omitempty"`
+
+	// AllNodes, when true, makes the eligible-node set the entire cluster
+	// (re-evaluated on cluster-membership changes — joiners automatically
+	// pick up the ingester). When false, eligibility is determined by NodeIDs
+	// (literal pin). The dispatcher must consult cluster membership on every
+	// tick when AllNodes is true, not snapshot at config-write time.
+	AllNodes bool `json:"allNodes,omitempty"`
 }
 
 // CertPEM holds certificate content. Either stored PEM or file paths (directory monitoring).

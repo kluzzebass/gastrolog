@@ -13,7 +13,7 @@ import type { BadgeVariant } from "../Badge";
 type StatusVariant = Extract<BadgeVariant, "info" | "warn" | "error">;
 
 interface IngesterCardProps {
-  ingester: { id: Uint8Array; name: string; type: string; running: boolean; enabled: boolean; nodeIds: Uint8Array[]; nodeStatus: { [key: string]: boolean } };
+  ingester: { id: Uint8Array; name: string; type: string; running: boolean; enabled: boolean; nodeIds: Uint8Array[]; allNodes: boolean; nodeStatus: { [key: string]: boolean } };
   liveNodeIds: Set<string>;
   dark: boolean;
   expanded: boolean;
@@ -32,12 +32,14 @@ export function IngesterCard({
   onOpenSettings,
 }: Readonly<IngesterCardProps>) {
   const ingId = encode(ingester.id);
-  const selected = ingester.nodeIds.length;
+  // Eligible-set size: with AllNodes, every live cluster node is eligible;
+  // otherwise it's the literal nodeIds list.
+  const selected = ingester.allNodes ? liveNodeIds.size : ingester.nodeIds.length;
   const running = Object.values(ingester.nodeStatus).filter(Boolean).length;
 
   let statusVariant: StatusVariant = "info";
   if (selected > 0 && running < selected) {
-    const hasDeadNode = ingester.nodeIds.some((nid) => !liveNodeIds.has(encode(nid)));
+    const hasDeadNode = !ingester.allNodes && ingester.nodeIds.some((nid) => !liveNodeIds.has(encode(nid)));
     statusVariant = hasDeadNode ? "error" : "warn";
   }
 
@@ -60,7 +62,7 @@ export function IngesterCard({
         </span>
       }
     >
-      <IngesterDetail id={ingId} nodeIds={ingester.nodeIds} nodeStatus={ingester.nodeStatus} liveNodeIds={liveNodeIds} dark={dark} />
+      <IngesterDetail id={ingId} nodeIds={ingester.nodeIds} allNodes={ingester.allNodes} nodeStatus={ingester.nodeStatus} liveNodeIds={liveNodeIds} dark={dark} />
     </ExpandableCard>
   );
 }
@@ -73,9 +75,10 @@ function IngesterStatusBadge({ selected, running, variant, enabled, dark }: Read
   return <Badge variant="muted" dark={dark}>stopped</Badge>;
 }
 
-function IngesterDetail({ id, nodeIds, nodeStatus, liveNodeIds, dark }: Readonly<{
+function IngesterDetail({ id, nodeIds, allNodes, nodeStatus, liveNodeIds, dark }: Readonly<{
   id: string;
   nodeIds: Uint8Array[];
+  allNodes: boolean;
   nodeStatus: { [key: string]: boolean };
   liveNodeIds: Set<string>;
   dark: boolean;
@@ -149,16 +152,18 @@ function IngesterDetail({ id, nodeIds, nodeStatus, liveNodeIds, dark }: Readonly
           </div>
         ))}
       </div>
-      {nodeIds.length > 0 && (
+      {(allNodes || nodeIds.length > 0) && (
         <div className="mt-3">
           <div
             className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-muted", "text-light-text-muted")}`}
           >
-            Nodes
+            Nodes {allNodes && <span className="font-normal normal-case tracking-normal opacity-70">— all nodes</span>}
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {nodeIds.map((nid) => {
-              const nodeId = encode(nid);
+            {(allNodes
+              ? Array.from(liveNodeIds)
+              : nodeIds.map((nid) => encode(nid))
+            ).map((nodeId) => {
               const alive = nodeStatus[nodeId] ?? false;
               const dead = !liveNodeIds.has(nodeId);
               const nodeCfg = config?.nodeConfigs.find((n) => encode(n.id) === nodeId);

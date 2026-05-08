@@ -46,6 +46,7 @@ func (s *SystemServer) ListIngesters(
 			Enabled:    ing.Enabled,
 			NodeIds:    stringsToBytes(ing.NodeIDs),
 			Singleton:  ing.Singleton,
+			AllNodes:   ing.AllNodes,
 			NodeStatus: s.collectIngesterNodeStatus(ing.ID),
 		}
 		// Backwards compat: running = at least one node is alive.
@@ -264,6 +265,7 @@ func (s *SystemServer) PutIngester(
 		Params:    req.Msg.Config.Params,
 		NodeIDs:   nodeIDs,
 		Singleton: req.Msg.Config.Singleton,
+		AllNodes:  req.Msg.Config.AllNodes,
 	}
 
 	// Dry-run validation: verify type is known and factory can construct the

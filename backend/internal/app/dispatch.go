@@ -372,10 +372,21 @@ func (d *configDispatcher) handleIngesterPut(ctx context.Context, id glid.GLID) 
 }
 
 // shouldRunIngester checks whether this node should run the given ingester.
-// Parallel ingesters: this node must be in NodeIDs (or NodeIDs empty).
-// Singleton ingesters: this node must additionally be the Raft-assigned node.
+//
+// Eligibility:
+//   - AllNodes=true: every node in the current cluster is eligible — this
+//     node included, regardless of NodeIDs. Joiners pick up the ingester
+//     automatically; the dispatcher consults membership state on every
+//     call rather than snapshotting at config-write time.
+//   - AllNodes=false, NodeIDs non-empty: only listed nodes eligible.
+//   - AllNodes=false, NodeIDs empty: every node eligible (legacy
+//     "empty list = match all" semantic, preserved for backwards compat
+//     with configs created before AllNodes existed).
+//
+// Parallel ingesters run on every eligible node; singleton ingesters run
+// on the Raft-assigned eligible node.
 func (d *configDispatcher) shouldRunIngester(ctx context.Context, cfg system.IngesterConfig, singleton bool) bool {
-	if len(cfg.NodeIDs) > 0 && !slices.Contains(cfg.NodeIDs, d.localNodeID) {
+	if !cfg.AllNodes && len(cfg.NodeIDs) > 0 && !slices.Contains(cfg.NodeIDs, d.localNodeID) {
 		return false
 	}
 	if !singleton {

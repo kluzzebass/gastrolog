@@ -113,8 +113,9 @@ message PutIngesterCommand {
   bool enabled = 4;
   map<string, string> params = 5;
   bytes node_id = 6 [deprecated = true]; // Legacy. Use node_ids.
-  repeated bytes node_ids = 7;           // Allowed nodes.
-  bool singleton = 8;                    // HA semantics: false = parallel (run on every node), true = Raft-assigned singleton with failover.
+  repeated bytes node_ids = 7;           // Eligible nodes (honored when all_nodes=false).
+  bool singleton = 8;                    // HA semantics: false = parallel, true = Raft-assigned singleton with failover.
+  bool all_nodes = 9;                    // When true, eligibility is the entire current cluster (re-evaluated on membership change).
 }
 
 message DeleteIngesterCommand {

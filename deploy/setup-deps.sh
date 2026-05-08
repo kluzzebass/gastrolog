@@ -83,7 +83,10 @@ NODE_COUNT=0
 ADDED=0
 SKIPPED=0
 for n in $NODE_NAMES; do
-  if glog config node list-storage "$n" -o json 2>/dev/null | grep -q '"name"[[:space:]]*:[[:space:]]*"disk-1"'; then
+  # `list-storage <node> -o json` ignores the node filter and returns
+  # the full system list (CLI bug); use the text format which IS
+  # filtered server-side, then grep for `disk-1` as a whole word.
+  if glog config node list-storage "$n" 2>/dev/null | grep -qw disk-1; then
     SKIPPED=$((SKIPPED + 1))
   else
     glog config node add-storage "$n" \
@@ -150,19 +153,15 @@ glog config route create \
 echo "  routes: ingest-to-hot, hot-retention-to-warm"
 
 # ── 6. Ingesters ─────────────────────────────────────────────────────
-# All defined and ready, all assigned to "all nodes" (no --node-id),
-# all DISABLED by default. Operator opts in via the UI when they want
-# the cluster to actually start consuming. Listener ports match the
+# All defined and ready, assigned via --all-nodes=true so eligibility
+# is the entire cluster (re-evaluated on every cluster-membership
+# change — joiners pick up the ingester automatically). All DISABLED
+# by default — operator opts in via the UI when they want the cluster
+# to actually start consuming. Listener ports match the
 # rsyslog/otel/fluent-bit configs' push targets; recipes substitute
 # the bootstrap's hostname into those configs at deploy time.
-#
-# Skipping --node-id is the right default here for two reasons:
-#   1. The user expectation is "all nodes" so any node can serve.
-#   2. The CLI's --node-id flag stores the value as []byte(string),
-#      which doesn't round-trip through GLID encoding — leaving it
-#      unset sidesteps that pre-existing CLI bug.
 
-glog config ingester create --name kafka --enabled=false \
+glog config ingester create --name kafka --enabled=false --all-nodes=true \
   --type kafka \
   --param brokers=kafka:9092 \
   --param topic=gastrolog-logs \
@@ -171,23 +170,23 @@ glog config ingester create --name kafka --enabled=false \
 if [ "${SKIP_RSYSLOG:-0}" = "1" ]; then
   echo "  ingesters: kafka, otlp, fluentfwd, http, chatterbox, scatterbox (syslog/relp skipped — rsyslog unavailable)"
 else
-  glog config ingester create --name syslog --enabled=false \
+  glog config ingester create --name syslog --enabled=false --all-nodes=true \
     --type syslog --param tcp_addr=:1514 >/dev/null
-  glog config ingester create --name relp --enabled=false \
+  glog config ingester create --name relp --enabled=false --all-nodes=true \
     --type relp --param addr=:2514 >/dev/null
 fi
 
-glog config ingester create --name otlp --enabled=false \
+glog config ingester create --name otlp --enabled=false --all-nodes=true \
   --type otlp --param grpc_addr=:4317 --param http_addr=:4318 >/dev/null
-glog config ingester create --name fluentfwd --enabled=false \
+glog config ingester create --name fluentfwd --enabled=false --all-nodes=true \
   --type fluentfwd --param addr=:24224 >/dev/null
-glog config ingester create --name http --enabled=false \
+glog config ingester create --name http --enabled=false --all-nodes=true \
   --type http --param addr=:3100 >/dev/null
 
 # Synthetic generators.
-glog config ingester create --name chatterbox --enabled=false \
+glog config ingester create --name chatterbox --enabled=false --all-nodes=true \
   --type chatterbox >/dev/null
-glog config ingester create --name scatterbox --enabled=false \
+glog config ingester create --name scatterbox --enabled=false --all-nodes=true \
   --type scatterbox >/dev/null
 
 if [ "${SKIP_RSYSLOG:-0}" != "1" ]; then

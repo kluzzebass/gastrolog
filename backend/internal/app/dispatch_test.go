@@ -1065,6 +1065,91 @@ func TestShouldRunIngesterParallelNotOnSelectedNode(t *testing.T) {
 	}
 }
 
+// AllNodes=true must short-circuit any NodeIDs check — a brand-new node
+// that was never in NodeIDs still runs the ingester. That's the whole
+// point of the flag (gastrolog-2g7lr).
+func TestShouldRunIngesterAllNodesIncludesNewJoiner(t *testing.T) {
+	t.Parallel()
+	h := &captureHandler{}
+	d := newTestDispatcher(&mockOrch{}, &stubCfgStore{}, h)
+	d.localNodeID = "node-99-just-joined"
+
+	cfg := system.IngesterConfig{
+		ID:       glid.New(),
+		Enabled:  true,
+		AllNodes: true,
+		// NodeIDs intentionally a stale snapshot from before this node existed.
+		NodeIDs: []string{"node-1", "node-2", "node-3"},
+	}
+
+	if !d.shouldRunIngester(context.Background(), cfg, false) {
+		t.Fatal("AllNodes=true must run on every node, including those not in NodeIDs (gastrolog-2g7lr)")
+	}
+}
+
+// AllNodes=true with NodeIDs empty (clean state) — runs on every node.
+func TestShouldRunIngesterAllNodesEmptyNodeIDs(t *testing.T) {
+	t.Parallel()
+	h := &captureHandler{}
+	d := newTestDispatcher(&mockOrch{}, &stubCfgStore{}, h)
+	d.localNodeID = "node-1"
+
+	cfg := system.IngesterConfig{
+		ID:       glid.New(),
+		Enabled:  true,
+		AllNodes: true,
+		NodeIDs:  nil,
+	}
+
+	if !d.shouldRunIngester(context.Background(), cfg, false) {
+		t.Fatal("AllNodes=true with empty NodeIDs must run on every node")
+	}
+}
+
+// Legacy backwards compat: empty NodeIDs without AllNodes flag falls
+// through the old "empty list = match all" semantic. Existing FSM data
+// pre-AllNodes still works.
+func TestShouldRunIngesterLegacyEmptyNodeIDs(t *testing.T) {
+	t.Parallel()
+	h := &captureHandler{}
+	d := newTestDispatcher(&mockOrch{}, &stubCfgStore{}, h)
+	d.localNodeID = "node-1"
+
+	cfg := system.IngesterConfig{
+		ID:       glid.New(),
+		Enabled:  true,
+		AllNodes: false, // legacy config never had this flag set
+		NodeIDs:  nil,
+	}
+
+	if !d.shouldRunIngester(context.Background(), cfg, false) {
+		t.Fatal("legacy empty NodeIDs (no AllNodes flag) must keep running everywhere for backwards compat")
+	}
+}
+
+// Singleton + AllNodes — placement assignment still narrows to the one
+// node the placement manager picked, even though every node is eligible.
+func TestShouldRunIngesterSingletonAllNodesNotAssignedHere(t *testing.T) {
+	t.Parallel()
+	h := &captureHandler{}
+	ingID := glid.New()
+	d := newTestDispatcher(&mockOrch{}, &stubCfgStore{
+		ingesterAssignments: map[glid.GLID]string{ingID: "node-7"},
+	}, h)
+	d.localNodeID = "node-1"
+
+	cfg := system.IngesterConfig{
+		ID:        ingID,
+		Enabled:   true,
+		AllNodes:  true,
+		Singleton: true,
+	}
+
+	if d.shouldRunIngester(context.Background(), cfg, true) {
+		t.Fatal("singleton ingester must respect placement assignment even when AllNodes is on")
+	}
+}
+
 func TestShouldRunIngesterSingletonAssignedHere(t *testing.T) {
 	t.Parallel()
 	h := &captureHandler{}

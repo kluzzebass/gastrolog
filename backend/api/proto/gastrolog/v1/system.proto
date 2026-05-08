@@ -318,8 +318,16 @@ message IngesterConfig {
   bool enabled = 4;
   string name = 5;
   bytes node_id = 6 [deprecated = true]; // Legacy single-node assignment. Use node_ids.
-  repeated bytes node_ids = 7;           // Allowed nodes. Parallel: run on all. Singleton: place on one.
-  bool singleton = 8;                    // HA semantics: false = run on every node in node_ids (parallel); true = Raft-assigned to one node with failover. Only takes effect when the ingester type has SingletonSupported=true.
+  // Eligible nodes. Honored only when all_nodes is false. Parallel: run on
+  // every listed node. Singleton: Raft-assigned to one of them.
+  repeated bytes node_ids = 7;
+  bool singleton = 8; // HA semantics: false = run on every eligible node (parallel); true = Raft-assigned to one node with failover. Only takes effect when the ingester type has SingletonSupported=true.
+  // When true, the eligible-node set is the entire cluster and is
+  // re-evaluated on cluster-membership changes — joiners automatically
+  // pick up the ingester. When false, eligibility is determined by
+  // node_ids (literal pin). The dispatcher must evaluate this on every
+  // tick, not snapshot at config-write time.
+  bool all_nodes = 9;
 }
 
 message RotationPolicyConfig {
@@ -351,10 +359,11 @@ message IngesterInfo {
   bool running = 3;                       // Deprecated: use node_status for per-node detail.
   string name = 4;
   bytes node_id = 5 [deprecated = true]; // Legacy. Use node_ids.
-  repeated bytes node_ids = 6;           // Allowed nodes from config.
+  repeated bytes node_ids = 6;           // Eligible nodes from config (honored when all_nodes=false).
   map<string, bool> node_status = 8;     // Per-node running status: nodeID → alive.
   bool enabled = 9;                      // Whether the ingester is enabled in config.
-  bool singleton = 10;                    // HA semantics: false = parallel (every node_ids), true = Raft-assigned singleton.
+  bool singleton = 10;                   // HA semantics: false = parallel (every eligible node), true = Raft-assigned singleton.
+  bool all_nodes = 11;                   // When true, eligibility is the entire current cluster (re-evaluated on membership change).
 }
 
 message GetIngesterStatusRequest {

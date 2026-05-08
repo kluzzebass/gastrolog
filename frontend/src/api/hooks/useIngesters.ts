@@ -87,6 +87,7 @@ export function usePutIngester() {
       enabled: boolean;
       params: Record<string, string>;
       nodeIds?: string[];
+      allNodes?: boolean;
       singleton?: boolean;
     }) => {
       return systemClient.putIngester({
@@ -97,6 +98,7 @@ export function usePutIngester() {
           enabled: args.enabled,
           params: stripEmptyParams(args.params),
           nodeIds: (args.nodeIds ?? []).map(encodeString),
+          allNodes: args.allNodes ?? false,
           singleton: args.singleton ?? false,
         },
       });
