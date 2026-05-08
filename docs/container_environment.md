@@ -1,0 +1,101 @@
+# Container environment variables
+
+The `docker-entrypoint.sh` script wraps the `gastrolog` binary and
+translates a small set of environment variables into CLI flags. The
+binary itself takes only flags — the env-var convention exists so that
+container orchestrators (Docker, Podman, Kubernetes) can drive
+configuration via their native mechanisms (env, ConfigMap, Secret)
+without anyone having to replace the entrypoint or shadow the
+Dockerfile.
+
+If you're running `gastrolog` outside a container (e.g. via
+`go install`, a release binary, or systemd), use the flags directly —
+the env vars below are not consulted by the binary. See
+[`docs/cluster_enrollment.md`](./cluster_enrollment.md) for the
+operator-facing flag reference.
+
+## Mapping
+
+| Env var | Flag | Type | Notes |
+|---|---|---|---|
+| `GASTROLOG_HOME` | `--home` | string | Default: `/config`. Persistent home directory; mount as a volume. |
+| `GASTROLOG_VAULTS` | `--vaults` | string | Default: `/vaults`. Vault storage directory; mount as a volume. |
+| `GASTROLOG_LISTEN` | `--listen` | string | HTTP / Connect-RPC listen address (default `:4564`). |
+| `GASTROLOG_CLUSTER_ADDR` | `--cluster-addr` | string | Cluster gRPC listen address (default `:4566`). |
+| `GASTROLOG_NAME` | `--name` | string | Node name. Defaults to a random petname; set explicitly when stable identity matters (e.g. `gastrolog-0` from a StatefulSet ordinal). |
+| `GASTROLOG_JOIN_ADDR` | `--join-addr` | string | Bootstrap node's cluster address — set on joiners. Omit on the bootstrap node. |
+| `GASTROLOG_JOIN_TOKEN` | `--join-token` | string | Cluster join token — set on joiners. Pair with `GASTROLOG_JOIN_ADDR`. |
+| `GASTROLOG_NO_AUTH` | `--no-auth` | bool | Disable authentication. Truthy values: `1`, `true`, `yes`, `y`, `on` (case-insensitive). Anything else (including `false`, `0`, empty) is off. **Use only for testing.** |
+| `GASTROLOG_PPROF` | `--pprof` | string | pprof HTTP server address (e.g. `localhost:6060`). Empty/unset = disabled. |
+| `GASTROLOG_CONFIG_TYPE` | `--config-type` | string | Config store: `raft` (default) or `memory`. Use `memory` only for tests / ephemeral demos. |
+
+## Default-vs-explicit semantics
+
+The entrypoint always sets `--home` and `--vaults` (using the env-var
+defaults `/config` and `/vaults` if those env vars are unset). All
+other flags are passed only when the corresponding env var is set.
+
+This means:
+
+- The container's defaults (`/config`, `/vaults`) take effect even
+  when no env var is set, so a bare `docker run` produces a working
+  single-node node.
+- Setting `GASTROLOG_HOME=""` or `GASTROLOG_VAULTS=""` does NOT
+  unset the flag — it sets it to the empty string. To use the
+  binary's platform defaults instead of the container defaults,
+  override the entrypoint or use the binary directly.
+
+## Bool flag semantics
+
+Bool env vars (`GASTROLOG_NO_AUTH` is the only one today) follow
+standard truthy semantics: only `1`, `true`, `yes`, `y`, `on`
+(case-insensitive) enable the corresponding flag. Anything else —
+including `false`, `0`, `no`, `off`, or any unrecognized value —
+disables it.
+
+This was previously broken: any non-empty value enabled the flag,
+so `GASTROLOG_NO_AUTH=false` accidentally turned authentication off.
+Fixed in gastrolog-46yu5.
+
+## Persistence
+
+The image declares `/config` and `/vaults` as VOLUMEs, signaling that
+those paths must be persistent across container restarts. In
+production you should mount these explicitly:
+
+- **Docker Compose**: named volumes (`config_data:/config`,
+  `vault_data:/vaults`).
+- **Kubernetes StatefulSet**: PersistentVolumeClaim templates for
+  each path.
+- **`docker run` quickstart**: bind-mounts (`-v $(pwd)/config:/config
+  -v $(pwd)/vaults:/vaults`) for inspection, or omit volumes entirely
+  for an ephemeral demo.
+
+Without persistent volumes, all cluster state — Raft logs, vault
+data, the join token — is lost on container removal.
+
+## Bootstrap vs joiner
+
+A multi-node cluster has one bootstrap node and N joiners:
+
+- **Bootstrap node**: do NOT set `GASTROLOG_JOIN_ADDR` or
+  `GASTROLOG_JOIN_TOKEN`. The first node to start without those flags
+  becomes the bootstrap and prints a join token to its logs.
+- **Joiners**: set both `GASTROLOG_JOIN_ADDR` and
+  `GASTROLOG_JOIN_TOKEN` so the node enrolls into the existing
+  cluster instead of starting a fresh one.
+
+The current join-token delivery story (operator-extracts-from-logs)
+is a known limitation for unattended deployments — see
+gastrolog-o9z6o for the file-based / endpoint-based replacement.
+
+## Ports
+
+| Port | Purpose | When required |
+|---|---|---|
+| 4564 | HTTP / Connect-RPC (operator + ingestion API) | Always. |
+| 4566 | Cluster gRPC (inter-node Raft + RPC) | Multi-node only; harmless to expose on single-node. |
+
+Both ports are declared in the image's `EXPOSE`. The actual values are
+configurable via `GASTROLOG_LISTEN` and `GASTROLOG_CLUSTER_ADDR`; the
+defaults are baked into the binary, not the entrypoint.
