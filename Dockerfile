@@ -23,9 +23,33 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags "-X ma
 # busybox (~4 MB) instead of scratch — enables entrypoint scripts, exec,
 # and shell-based orchestration for cluster bootstrapping.
 FROM busybox:1.37-musl
+
+# OCI image labels (https://github.com/opencontainers/image-spec/blob/main/annotations.md).
+# Consumers like GHCR, Docker Hub, and Artifact Registry use these to
+# render image metadata. VERSION comes from the build arg; the rest
+# are static.
+ARG VERSION=dev
+LABEL org.opencontainers.image.title="GastroLog" \
+      org.opencontainers.image.description="Distributed log aggregation service with built-in clustering, routing, and tiered storage." \
+      org.opencontainers.image.source="https://github.com/kluzzebass/gastrolog" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${VERSION}"
+
 COPY --from=backend /gastrolog /gastrolog
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
-EXPOSE 4564
+
+# Persistent data directories. Orchestrators typically mount their own
+# volumes here (PVCs, named volumes, host bind-mounts); the VOLUME
+# declarations document the contract — anything written to these paths
+# must be persistent across container restarts. Defaults match the
+# entrypoint's GASTROLOG_HOME / GASTROLOG_VAULTS values.
+VOLUME ["/config", "/vaults"]
+
+# 4564 — HTTP / Connect-RPC server (operator + ingestion API).
+# 4566 — cluster gRPC (inter-node Raft + RPC). Required for multi-node
+# deployments; harmless to expose for single-node.
+EXPOSE 4564 4566
+
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["server"]

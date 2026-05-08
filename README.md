@@ -55,15 +55,17 @@ services:
       - "4318:4318"   # OTLP (HTTP)
       - "24224:24224"  # Fluent Forward
     volumes:
-      - config:/config                              # Configuration database
-      - stores:/stores                              # Log store data
+      - config:/config                              # Configuration database (Raft logs, FSM state)
+      - vaults:/vaults                              # Vault storage (chunk data)
       - /var/log:/logs:ro                           # Host logs (for tail ingester)
       - /var/run/docker.sock:/var/run/docker.sock:ro # Docker (for container log ingester)
 
 volumes:
   config:
-  stores:
+  vaults:
 ```
+
+Configuration via environment variables (used by `docker-entrypoint.sh`) is documented in [`docs/container_environment.md`](./docs/container_environment.md).
 
 ### With Homebrew
 
