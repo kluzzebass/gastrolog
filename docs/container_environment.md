@@ -21,7 +21,7 @@ operator-facing flag reference.
 | `GASTROLOG_HOME` | `--home` | string | Default: `/config`. Persistent home directory; mount as a volume. |
 | `GASTROLOG_VAULTS` | `--vaults` | string | Default: `/vaults`. Vault storage directory; mount as a volume. |
 | `GASTROLOG_LISTEN` | `--listen` | string | HTTP / Connect-RPC listen address (default `:4564`). |
-| `GASTROLOG_CLUSTER_ADDR` | `--cluster-addr` | string | Cluster gRPC listen address (default `:4566`). |
+| `GASTROLOG_CLUSTER_ADDR` | `--cluster-addr` | string | Cluster gRPC listen address (default `:4566`). Set to the literal string `auto` to have the entrypoint resolve the container's own hostname to its overlay IP and use that — required for Docker Swarm and Kubernetes overlay networks where service-name DNS resolves to a routing-mesh VIP that can't be bound. |
 | `GASTROLOG_NAME` | `--name` | string | Node name. Defaults to a random petname; set explicitly when stable identity matters (e.g. `gastrolog-0` from a StatefulSet ordinal). |
 | `GASTROLOG_JOIN_ADDR` | `--join-addr` | string | Bootstrap node's cluster address — set on joiners. Omit on the bootstrap node. |
 | `GASTROLOG_JOIN_TOKEN` | `--join-token` | string | Cluster join token — set on joiners. Pair with `GASTROLOG_JOIN_ADDR`. |

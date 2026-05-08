@@ -1,0 +1,108 @@
+# GastroLog 3-node cluster via Docker Compose.
+#
+# Boot:
+#   docker compose up -d
+#   open http://localhost:4564 (admin / change-me-please)
+#
+# Tear down (and wipe data):
+#   docker compose down -v
+#
+# What this recipe demonstrates:
+#   - File-based join-token delivery via a shared `cluster-token` volume
+#     (gastrolog-o9z6o). Bootstrap node writes; joiners poll and read.
+#   - File-based admin provisioning via a Compose secret
+#     (gastrolog-3ot7r). The credentials never appear in the compose
+#     file, env vars, or `docker inspect` — they're a host file
+#     mounted at /run/secrets/admin_creds.
+#   - Routable --cluster-addr per service so the leader can call
+#     back to joiners on the bridge network. (Default :4566 is a
+#     port-only bind that doesn't work cross-container.)
+#   - Health checks via the image's built-in HEALTHCHECK + Compose
+#     `condition: service_healthy` so joiners only start once the
+#     bootstrap is reachable.
+#
+# Replace the secret file (./admin-creds) with your own before
+# running this in any environment with real users.
+
+x-gastrolog-base: &base
+  image: gastrolog:test           # change to ghcr.io/kluzzebass/gastrolog:latest for a release image
+  environment:
+    GASTROLOG_INITIAL_ADMIN_FILE: /run/secrets/admin_creds
+  secrets:
+    - admin_creds
+  networks:
+    - gastrolog
+  restart: unless-stopped
+
+services:
+  bootstrap:
+    <<: *base
+    container_name: gastrolog-bootstrap
+    hostname: bootstrap
+    environment:
+      GASTROLOG_NAME: bootstrap
+      GASTROLOG_CLUSTER_ADDR: bootstrap:4566
+      GASTROLOG_WRITE_BOOTSTRAP_TOKEN: /shared/token
+      GASTROLOG_INITIAL_ADMIN_FILE: /run/secrets/admin_creds
+    ports:
+      - "4564:4564"
+    volumes:
+      - cluster-token:/shared
+      - bootstrap-config:/config
+      - bootstrap-vaults:/vaults
+
+  joiner-1:
+    <<: *base
+    container_name: gastrolog-joiner-1
+    hostname: joiner-1
+    depends_on:
+      bootstrap:
+        condition: service_healthy
+    environment:
+      GASTROLOG_NAME: joiner-1
+      GASTROLOG_CLUSTER_ADDR: joiner-1:4566
+      GASTROLOG_JOIN_ADDR: bootstrap:4566
+      GASTROLOG_BOOTSTRAP_TOKEN_FILE: /shared/token
+      GASTROLOG_INITIAL_ADMIN_FILE: /run/secrets/admin_creds
+    ports:
+      - "4574:4564"
+    volumes:
+      - cluster-token:/shared
+      - joiner-1-config:/config
+      - joiner-1-vaults:/vaults
+
+  joiner-2:
+    <<: *base
+    container_name: gastrolog-joiner-2
+    hostname: joiner-2
+    depends_on:
+      bootstrap:
+        condition: service_healthy
+    environment:
+      GASTROLOG_NAME: joiner-2
+      GASTROLOG_CLUSTER_ADDR: joiner-2:4566
+      GASTROLOG_JOIN_ADDR: bootstrap:4566
+      GASTROLOG_BOOTSTRAP_TOKEN_FILE: /shared/token
+      GASTROLOG_INITIAL_ADMIN_FILE: /run/secrets/admin_creds
+    ports:
+      - "4584:4564"
+    volumes:
+      - cluster-token:/shared
+      - joiner-2-config:/config
+      - joiner-2-vaults:/vaults
+
+volumes:
+  cluster-token:
+  bootstrap-config:
+  bootstrap-vaults:
+  joiner-1-config:
+  joiner-1-vaults:
+  joiner-2-config:
+  joiner-2-vaults:
+
+networks:
+  gastrolog:
+
+secrets:
+  admin_creds:
+    file: ./admin-creds

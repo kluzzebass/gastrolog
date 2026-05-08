@@ -1,0 +1,113 @@
+# GastroLog Docker Swarm stack.
+#
+# A 2-node example: one bootstrap service (replicas: 1) and one
+# joiner service (replicas: 1). Each as a distinct service block
+# rather than `replicas: N` on a single service, because Swarm's
+# default node-local volumes mean all replicas of a single
+# service that schedule on the same node would share /config
+# and /vaults — fatal for Raft.
+#
+# To scale beyond 2 nodes:
+#   - In a multi-node Swarm: each Swarm node gets its own copy of
+#     the named volume by default. You can either (a) duplicate the
+#     `joiner` service block (joiner-1, joiner-2, ...) and use
+#     placement constraints to pin each to a different node, or
+#     (b) keep a single replicated `joiner` service and add a
+#     placement constraint with `node.labels.gastrolog == true`
+#     plus `placement.preferences.spread: node.id`.
+#   - On a single-node Swarm: duplicate the joiner service block
+#     (joiner-1, joiner-2, ...) with separate volumes per service.
+#
+# Deploy:
+#   echo '{"username": "admin", "password": "change-me-please"}' \
+#     | docker secret create gastrolog_admin_creds -
+#   docker stack deploy -c stack.yml gastrolog
+#
+# Tear down:
+#   docker stack rm gastrolog
+#   docker secret rm gastrolog_admin_creds   # if you don't want to reuse it
+
+services:
+  bootstrap:
+    image: gastrolog:test           # change to ghcr.io/kluzzebass/gastrolog:latest for a release image
+    hostname: bootstrap
+    environment:
+      GASTROLOG_NAME: bootstrap
+      # `auto` makes the entrypoint resolve the container's hostname to
+      # its overlay IP and use that as cluster-addr. Required for Swarm
+      # and Kubernetes overlay networking, where service-name DNS
+      # resolves to a routing-mesh VIP that no container can bind to,
+      # and per-task DNS only registers after the first task is healthy
+      # (chicken-and-egg with the listener startup).
+      GASTROLOG_CLUSTER_ADDR: auto
+      GASTROLOG_WRITE_BOOTSTRAP_TOKEN: /shared/token
+      GASTROLOG_INITIAL_ADMIN_FILE: /run/secrets/admin_creds
+    secrets:
+      - source: gastrolog_admin_creds
+        target: admin_creds
+    volumes:
+      - cluster-token:/shared
+      - bootstrap-config:/config
+      - bootstrap-vaults:/vaults
+    ports:
+      - target: 4564
+        published: 4564
+        mode: ingress
+    networks:
+      - gastrolog
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+      update_config:
+        order: start-first
+        failure_action: rollback
+
+  joiner-1:
+    image: gastrolog:test
+    hostname: joiner-1
+    environment:
+      GASTROLOG_NAME: joiner-1
+      GASTROLOG_CLUSTER_ADDR: auto
+      # tasks.<service> DNS resolves to the bootstrap's overlay IP from
+      # any peer container. Only used at join time (after the bootstrap
+      # is up and registered in the overlay's DNS), so the resolution
+      # always succeeds.
+      GASTROLOG_JOIN_ADDR: tasks.gastrolog_bootstrap:4566
+      GASTROLOG_BOOTSTRAP_TOKEN_FILE: /shared/token
+      GASTROLOG_INITIAL_ADMIN_FILE: /run/secrets/admin_creds
+    secrets:
+      - source: gastrolog_admin_creds
+        target: admin_creds
+    volumes:
+      - cluster-token:/shared
+      - joiner-1-config:/config
+      - joiner-1-vaults:/vaults
+    networks:
+      - gastrolog
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+
+volumes:
+  cluster-token:
+  bootstrap-config:
+  bootstrap-vaults:
+  joiner-1-config:
+  joiner-1-vaults:
+
+networks:
+  gastrolog:
+    driver: overlay
+    attachable: true
+
+secrets:
+  gastrolog_admin_creds:
+    external: true
