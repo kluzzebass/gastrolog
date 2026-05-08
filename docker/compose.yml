@@ -33,6 +33,16 @@ x-gastrolog-base: &base
   networks:
     - gastrolog
   restart: unless-stopped
+  # Explicit healthcheck. The image's Dockerfile already declares one,
+  # but Podman / podman-compose don't honor inherited image healthchecks
+  # for `depends_on: service_healthy`. Defining it here makes the gating
+  # work across Docker AND Podman without per-runtime config.
+  healthcheck:
+    test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:4564/healthz"]
+    interval: 5s
+    timeout: 3s
+    retries: 6
+    start_period: 10s
 
 services:
   bootstrap:

@@ -60,12 +60,28 @@ write to it, or you'll see EACCES on first write.
 
 ### `podman compose` vs `docker-compose`
 
-Modern Podman (4.x+) ships a `podman compose` subcommand that's a
-drop-in replacement for `docker compose` for the YAML versions
-GastroLog uses (compose-spec-compliant). Older Podman versions
-relied on a separate `podman-compose` binary which is feature-thin
-in places. If `secrets:` doesn't work for you, upgrade Podman
-or use `--env-file` with `GASTROLOG_INITIAL_ADMIN_USER` and
+Modern Podman (4.x+ / 5.x) ships a `podman compose` subcommand
+that delegates to `docker-compose` (or `podman-compose`) as an
+external provider, pointing it at podman's socket. The compose
+file shipped at [`docker/compose.yml`](../../docker/compose.yml)
+works under both runtimes thanks to one specific accommodation:
+
+**The compose file declares an explicit `healthcheck:` block on
+the bootstrap service**, even though the image already has a
+`HEALTHCHECK` directive in its Dockerfile. This is required
+because podman-compose / `podman compose` does NOT inherit the
+image's `HEALTHCHECK` for the purpose of `depends_on:
+condition: service_healthy` gating. Without the explicit block,
+the joiners fail to start with "container has no healthcheck
+configured".
+
+Docker honors the inherited HEALTHCHECK fine; Podman doesn't.
+The explicit block costs nothing under Docker (it overrides the
+identical inherited directive) and unblocks Podman. So the same
+compose file is portable.
+
+If `secrets:` doesn't work for you, upgrade Podman or use
+`--env-file` with `GASTROLOG_INITIAL_ADMIN_USER` and
 `GASTROLOG_INITIAL_ADMIN_PASSWORD` instead of the secret mount
 (less secure — env shows up in `podman inspect`).
 
