@@ -25,8 +25,32 @@ is_truthy() {
 # Build the base arguments.
 args="--home ${GASTROLOG_HOME} --vaults ${GASTROLOG_VAULTS}"
 
+# auto_cluster_addr resolves the container's own primary IP and
+# emits "<ip>:4566". Used when GASTROLOG_CLUSTER_ADDR is "auto",
+# which is the right answer for Docker Swarm and Kubernetes where:
+#   - Service-name DNS resolves to a routing-mesh VIP that no
+#     container can bind to.
+#   - The container's overlay IP is bindable locally and reachable
+#     from peer containers via overlay L3 routing.
+# Uses `hostname -i` because busybox doesn't ship with getent; the
+# tradeoff is that hostname -i returns the first IP from the
+# container's primary interface, which is exactly what we want.
+# Falling back to ":4566" if resolution fails (single-node `docker
+# run` case where bind-on-all-interfaces is fine).
+auto_cluster_addr() {
+  ip=$(hostname -i 2>/dev/null | awk '{print $1; exit}')
+  if [ -n "$ip" ]; then
+    printf '%s:4566' "$ip"
+  else
+    printf ':4566'
+  fi
+}
+
 # Pass through string env vars as flags.
 [ -n "$GASTROLOG_LISTEN" ]       && args="$args --listen $GASTROLOG_LISTEN"
+if [ "$GASTROLOG_CLUSTER_ADDR" = "auto" ]; then
+  GASTROLOG_CLUSTER_ADDR="$(auto_cluster_addr)"
+fi
 [ -n "$GASTROLOG_CLUSTER_ADDR" ] && args="$args --cluster-addr $GASTROLOG_CLUSTER_ADDR"
 [ -n "$GASTROLOG_NAME" ]         && args="$args --name $GASTROLOG_NAME"
 [ -n "$GASTROLOG_JOIN_ADDR" ]    && args="$args --join-addr $GASTROLOG_JOIN_ADDR"

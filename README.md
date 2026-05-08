@@ -22,50 +22,30 @@ GastroLog is a log aggregation and search service. It collects logs from various
 
 ## Quick Start
 
-### From a release binary
+GastroLog runs the same way in containers and on bare metal. Pick the path that matches your environment:
+
+| Path | Best for | Recipe |
+|---|---|---|
+| **Single-node `docker run`** | Try it in 30 seconds | [docs/deployment/quickstart.md](./docs/deployment/quickstart.md) |
+| **Docker Compose** | Local multi-node cluster | [docs/deployment/docker-compose.md](./docs/deployment/docker-compose.md) |
+| **Docker Swarm** | Multi-host orchestration without K8s | [docs/deployment/docker-swarm.md](./docs/deployment/docker-swarm.md) |
+| **Kubernetes** | StatefulSet + per-pod DNS, anywhere K8s runs | [docs/deployment/kubernetes.md](./docs/deployment/kubernetes.md) |
+| **Podman** | Daemonless / rootless containers | [docs/deployment/podman.md](./docs/deployment/podman.md) |
+| **Uncontainerized** | Release binary, systemd, dev cluster | [docs/deployment/uncontainerized.md](./docs/deployment/uncontainerized.md) |
+
+The fastest path:
 
 ```sh
-# Download from GitHub Releases
-gastrolog server
+docker run --rm -p 4564:4564 \
+  -v gastrolog-config:/config -v gastrolog-vaults:/vaults \
+  -e GASTROLOG_INITIAL_ADMIN_USER=admin \
+  -e GASTROLOG_INITIAL_ADMIN_PASSWORD=change-me \
+  ghcr.io/kluzzebass/gastrolog:latest
 ```
 
-On first start, GastroLog auto-bootstraps as a single-node Raft cluster with a default configuration. Open http://localhost:4564 in your browser to access the web UI and configure ingesters, vaults, and routes.
+Open http://localhost:4564 and log in as `admin` / `change-me`.
 
-### With Docker
-
-```sh
-docker run -p 4564:4564 ghcr.io/kluzzebass/gastrolog:latest server
-```
-
-Example `compose.yml` with persistent volumes and all service ports:
-
-```yaml
-services:
-  gastrolog:
-    container_name: gastrolog
-    image: ghcr.io/kluzzebass/gastrolog:latest
-    ports:
-      - "4564:4564"   # HTTP  (API + web UI)
-      - "4566:4566"   # Cluster gRPC (inter-node communication)
-      - "514:514/udp" # Syslog (UDP)
-      - "514:514/tcp" # Syslog (TCP)
-      - "3100:3100"   # HTTP (Loki-compatible)
-      - "2514:2514"   # RELP
-      - "4317:4317"   # OTLP (gRPC)
-      - "4318:4318"   # OTLP (HTTP)
-      - "24224:24224"  # Fluent Forward
-    volumes:
-      - config:/config                              # Configuration database (Raft logs, FSM state)
-      - vaults:/vaults                              # Vault storage (chunk data)
-      - /var/log:/logs:ro                           # Host logs (for tail ingester)
-      - /var/run/docker.sock:/var/run/docker.sock:ro # Docker (for container log ingester)
-
-volumes:
-  config:
-  vaults:
-```
-
-Configuration via environment variables (used by `docker-entrypoint.sh`) is documented in [`docs/container_environment.md`](./docs/container_environment.md).
+Configuration via environment variables is documented in [`docs/container_environment.md`](./docs/container_environment.md). For the binary's CLI flags, run `gastrolog server --help` or see [docs/deployment/uncontainerized.md](./docs/deployment/uncontainerized.md).
 
 ### With Homebrew
 

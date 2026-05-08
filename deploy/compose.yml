@@ -1,0 +1,261 @@
+# GastroLog 3-node cluster via Docker Compose, with bundled cloud-storage
+# emulators and ingester-source containers.
+#
+# Boot:
+#   just deploy compose-up
+#   open http://localhost:4564 (admin / change-me)
+#
+# Tear down (and wipe data):
+#   just deploy compose-down
+#
+# Naming: the gastrolog cluster nodes are named gastrolog-0 (bootstrap),
+# gastrolog-1, gastrolog-2 — service name = container name = hostname =
+# GASTROLOG_NAME, so what you see in the UI matches what you see in
+# `docker ps`.
+#
+# Network model: all services land on the project's default bridge
+# network and reach each other by service name (`minio`, `kafka`,
+# `gastrolog-0`, ...). Only gastrolog API ports (4564 / 4574 / 4584) are
+# published to the host — dep services are reachable INSIDE the
+# project network only, mirroring the Swarm and K8s recipes.
+#
+# Why the deps are inlined here (not pulled from test/cloud-storage and
+# test/ingester-integration): those compose files are tuned for the
+# `cluster.sh` dev workflow where gastrolog runs on the host and needs
+# `localhost:9000`/`localhost:9092` to work. The bundled deployment
+# wants the opposite — internal-only DNS, single Kafka listener
+# advertised as `kafka:9092`, push-services aimed at `gastrolog-0` not
+# `host.docker.internal`. The two configurations diverge enough that
+# inlining is cleaner than overriding.
+#
+# Replace the secret file (./admin-creds) with your own before running
+# this in any environment with real users.
+
+x-gastrolog-base: &base
+  image: gastrolog:test # change to ghcr.io/kluzzebass/gastrolog:latest for a release image
+  environment:
+    GASTROLOG_INITIAL_ADMIN_FILE: /run/secrets/admin_creds
+  secrets:
+    - admin_creds
+  restart: unless-stopped
+  # Explicit healthcheck. The image's Dockerfile already declares one,
+  # but Podman / podman-compose don't honor inherited image healthchecks
+  # for `depends_on: service_healthy`. Defining it here makes the gating
+  # work across Docker AND Podman without per-runtime config.
+  healthcheck:
+    test:
+      [
+        "CMD",
+        "wget",
+        "--quiet",
+        "--tries=1",
+        "--spider",
+        "http://localhost:4564/healthz",
+      ]
+    interval: 5s
+    timeout: 3s
+    retries: 6
+    start_period: 10s
+
+services:
+  # ── GastroLog cluster ────────────────────────────────────────────
+  gastrolog-0:
+    <<: *base
+    container_name: gastrolog-0
+    hostname: gastrolog-0
+    environment:
+      GASTROLOG_NAME: gastrolog-0
+      GASTROLOG_CLUSTER_ADDR: gastrolog-0:4566
+      GASTROLOG_WRITE_BOOTSTRAP_TOKEN: /shared/token
+      GASTROLOG_INITIAL_ADMIN_FILE: /run/secrets/admin_creds
+    ports:
+      - "4564:4564"
+    volumes:
+      - cluster-token:/shared
+      - gastrolog-0-config:/config
+      - gastrolog-0-vaults:/vaults
+
+  gastrolog-1:
+    <<: *base
+    container_name: gastrolog-1
+    hostname: gastrolog-1
+    depends_on:
+      gastrolog-0:
+        condition: service_healthy
+    environment:
+      GASTROLOG_NAME: gastrolog-1
+      GASTROLOG_CLUSTER_ADDR: gastrolog-1:4566
+      GASTROLOG_JOIN_ADDR: gastrolog-0:4566
+      GASTROLOG_BOOTSTRAP_TOKEN_FILE: /shared/token
+      GASTROLOG_INITIAL_ADMIN_FILE: /run/secrets/admin_creds
+    ports:
+      - "4574:4564"
+    volumes:
+      - cluster-token:/shared
+      - gastrolog-1-config:/config
+      - gastrolog-1-vaults:/vaults
+
+  gastrolog-2:
+    <<: *base
+    container_name: gastrolog-2
+    hostname: gastrolog-2
+    depends_on:
+      gastrolog-0:
+        condition: service_healthy
+    environment:
+      GASTROLOG_NAME: gastrolog-2
+      GASTROLOG_CLUSTER_ADDR: gastrolog-2:4566
+      GASTROLOG_JOIN_ADDR: gastrolog-0:4566
+      GASTROLOG_BOOTSTRAP_TOKEN_FILE: /shared/token
+      GASTROLOG_INITIAL_ADMIN_FILE: /run/secrets/admin_creds
+    ports:
+      - "4584:4564"
+    volumes:
+      - cluster-token:/shared
+      - gastrolog-2-config:/config
+      - gastrolog-2-vaults:/vaults
+
+  # ── Cloud storage ────────────────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: gastrolog-minio
+    command: [ "server", "/data", "--console-address=:9001" ]
+    environment:
+      MINIO_ROOT_USER: gastrolog
+      MINIO_ROOT_PASSWORD: gastrolog
+    volumes:
+      - minio-data:/data
+
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    container_name: gastrolog-azurite
+    command:
+      - azurite
+      - --blobHost=0.0.0.0
+      - --queueHost=0.0.0.0
+      - --tableHost=0.0.0.0
+      - --skipApiVersionCheck
+    volumes:
+      - azurite-data:/data
+
+  fake-gcs:
+    image: fsouza/fake-gcs-server:latest
+    container_name: gastrolog-fake-gcs
+    command:
+      - -scheme=http
+      - -port=4443
+      - -backend=filesystem
+      - -filesystem-root=/data
+      - -external-url=http://fake-gcs:4443
+    volumes:
+      - fake-gcs-data:/data
+
+  # ── Kafka (KRaft, single-node, single-listener) ─────────────────
+  # Same shape as k8s-deps.yml and stack.yml: one PLAINTEXT listener
+  # advertised as kafka:9092, controller talks to itself via
+  # localhost:9093 (broker + controller share the same JVM, so no
+  # need to expose the controller listener as a Service).
+  kafka:
+    image: apache/kafka:latest
+    container_name: gastrolog-kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://localhost:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+  kafka-init:
+    image: apache/kafka:latest
+    container_name: gastrolog-kafka-init
+    depends_on: [ kafka ]
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        for i in $$(seq 1 60); do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list >/dev/null 2>&1 && break
+          sleep 2
+        done
+        /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server kafka:9092 \
+          --create --if-not-exists \
+          --topic gastrolog-logs \
+          --partitions 1 --replication-factor 1
+    restart: "no"
+
+  kafka-producer:
+    image: apache/kafka:latest
+    container_name: gastrolog-kafka-producer
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        i=0
+        while true; do
+          i=$$((i + 1))
+          echo "{\"message\": \"kafka integration test log line\", \"seq\": $$i}" | \
+            /opt/kafka/bin/kafka-console-producer.sh \
+              --bootstrap-server kafka:9092 \
+              --topic gastrolog-logs
+          sleep 2
+        done
+    restart: unless-stopped
+
+  # ── Push-source containers ──────────────────────────────────────
+  # Configs are bind-mounted from /tmp/gastrolog-deploy/, where the
+  # compose-up recipe writes sed-substituted copies of the test/
+  # configs (host.docker.internal → gastrolog-0). Same approach as
+  # swarm-up's docker-config-create flow, just bind-mounted instead.
+  rsyslog:
+    image: rsyslog/syslog_appliance_alpine:latest
+    container_name: gastrolog-rsyslog
+    depends_on:
+      gastrolog-0:
+        condition: service_healthy
+    volumes:
+      - /tmp/gastrolog-deploy/rsyslog.conf:/etc/rsyslog.conf:ro
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: gastrolog-otel
+    user: "0"
+    depends_on:
+      gastrolog-0:
+        condition: service_healthy
+    volumes:
+      - /tmp/gastrolog-deploy/otel-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+      - otel-logs:/var/log/otel
+
+  fluent-bit:
+    image: fluent/fluent-bit:latest
+    container_name: gastrolog-fluent-bit
+    depends_on:
+      gastrolog-0:
+        condition: service_healthy
+    volumes:
+      - /tmp/gastrolog-deploy/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+
+volumes:
+  cluster-token:
+  gastrolog-0-config:
+  gastrolog-0-vaults:
+  gastrolog-1-config:
+  gastrolog-1-vaults:
+  gastrolog-2-config:
+  gastrolog-2-vaults:
+  minio-data:
+  azurite-data:
+  fake-gcs-data:
+  otel-logs:
+
+secrets:
+  admin_creds:
+    file: ./admin-creds

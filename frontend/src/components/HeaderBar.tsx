@@ -8,6 +8,7 @@ import { useClusterStatus } from "../api/hooks/useClusterStatus";
 import { useAlerts } from "../api/hooks/useAlerts";
 import { AlertSeverity } from "../api/gen/gastrolog/v1/cluster_pb";
 import { formatBytes } from "../utils/units";
+import { middleTruncate } from "../utils/middleTruncate";
 import type { ClusterNode } from "../api/gen/gastrolog/v1/lifecycle_pb";
 import { encode } from "../api/glid";
 
@@ -318,8 +319,8 @@ function HoverStat({
         >
           {nodes.map((node) => (
             <div key={encode(node.id)} className="flex items-baseline justify-between gap-4 py-0.5">
-              <span className={`text-[0.75em] truncate max-w-24 ${c("text-text-muted", "text-light-text-muted")}`}>
-                {node.name || encode(node.id).slice(0, 8)}
+              <span className={`text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}>
+                {middleTruncate(node.name || encode(node.id).slice(0, 8), 14)}
               </span>
               <span className={`text-[0.75em] font-mono shrink-0 ${c("text-text-bright", "text-light-text-bright")}`}>
                 {node.stats ? renderNodeValue(node) : "—"}
