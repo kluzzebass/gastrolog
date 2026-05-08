@@ -12,6 +12,10 @@ frontend *args:
 backend *args:
     @just --justfile ./backend/justfile {{args}}
 
+# Run deployment-recipe smoke tests (test/justfile)
+deploy *args:
+    @just --justfile ./test/justfile {{args}}
+
 # Regenerate protobuf code (Go + TypeScript)
 gen:
     just backend gen
