@@ -248,6 +248,7 @@ message VaultConfig {
   string cache_eviction = 13;               // "lru" (default) or "ttl"
   string cache_budget = 14;                  // max cache size (e.g. "1GB", "500MB"; default: "1GiB")
   string cache_ttl = 15;                     // eviction TTL duration (e.g. "1h", "7d"); only for ttl mode
+  string retention_disposition = 16;         // "delete" (default) or "route" — what retention does with aged-out records
 }
 
 message RouteDestination {

@@ -278,9 +278,10 @@ func VaultConfigToProto(v system.VaultConfig) *gastrologv1.VaultConfig {
 		ReplicationFactor: v.ReplicationFactor,
 		Path:              v.Path,
 		Placements:        pbPlacements,
-		CacheEviction:     v.CacheEviction,
-		CacheBudget:       v.CacheBudget,
-		CacheTtl:          v.CacheTTL,
+		CacheEviction:        v.CacheEviction,
+		CacheBudget:          v.CacheBudget,
+		CacheTtl:             v.CacheTTL,
+		RetentionDisposition: v.RetentionDisposition,
 	}
 	pb.RotationPolicyId = glid.OptionalToProto(v.RotationPolicyID)
 	pb.CloudServiceId = glid.OptionalToProto(v.CloudServiceID)
@@ -301,11 +302,12 @@ func VaultConfigFromProto(p *gastrologv1.VaultConfig) (system.VaultConfig, error
 		StorageClass:      p.GetStorageClass(),
 		ReplicationFactor: p.GetReplicationFactor(),
 		Path:              p.GetPath(),
-		CacheEviction:     p.GetCacheEviction(),
-		CacheBudget:       p.GetCacheBudget(),
-		CacheTTL:          p.GetCacheTtl(),
-		RotationPolicyID:  glid.OptionalFromProto(p.GetRotationPolicyId()),
-		CloudServiceID:    glid.OptionalFromProto(p.GetCloudServiceId()),
+		CacheEviction:        p.GetCacheEviction(),
+		CacheBudget:          p.GetCacheBudget(),
+		CacheTTL:             p.GetCacheTtl(),
+		RetentionDisposition: p.GetRetentionDisposition(),
+		RotationPolicyID:     glid.OptionalFromProto(p.GetRotationPolicyId()),
+		CloudServiceID:       glid.OptionalFromProto(p.GetCloudServiceId()),
 	}
 
 	for _, r := range p.GetRetentionRules() {

@@ -468,24 +468,25 @@ func (x *VaultPlacement) GetLeader() bool {
 // Once consumers migrate, this message becomes the only vault-shape proto;
 // TierConfig and friends are deleted.
 type VaultConfig struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	Id                []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name              string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Enabled           bool                   `protobuf:"varint,3,opt,name=enabled,proto3" json:"enabled,omitempty"`
-	Type              VaultType              `protobuf:"varint,4,opt,name=type,proto3,enum=gastrolog.v1.VaultType" json:"type,omitempty"`
-	RotationPolicyId  []byte                 `protobuf:"bytes,5,opt,name=rotation_policy_id,json=rotationPolicyId,proto3" json:"rotation_policy_id,omitempty"`
-	RetentionRules    []*RetentionRule       `protobuf:"bytes,6,rep,name=retention_rules,json=retentionRules,proto3" json:"retention_rules,omitempty"`
-	MemoryBudgetBytes uint64                 `protobuf:"varint,7,opt,name=memory_budget_bytes,json=memoryBudgetBytes,proto3" json:"memory_budget_bytes,omitempty"`
-	StorageClass      uint32                 `protobuf:"varint,8,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`
-	CloudServiceId    []byte                 `protobuf:"bytes,9,opt,name=cloud_service_id,json=cloudServiceId,proto3" json:"cloud_service_id,omitempty"`
-	ReplicationFactor uint32                 `protobuf:"varint,10,opt,name=replication_factor,json=replicationFactor,proto3" json:"replication_factor,omitempty"` // desired RF (1 = no replication, default)
-	Path              string                 `protobuf:"bytes,11,opt,name=path,proto3" json:"path,omitempty"`                                                     // direct path for JSONL sinks
-	Placements        []*VaultPlacement      `protobuf:"bytes,12,rep,name=placements,proto3" json:"placements,omitempty"`                                         // system-managed: file storage assignments by placement manager
-	CacheEviction     string                 `protobuf:"bytes,13,opt,name=cache_eviction,json=cacheEviction,proto3" json:"cache_eviction,omitempty"`              // "lru" (default) or "ttl"
-	CacheBudget       string                 `protobuf:"bytes,14,opt,name=cache_budget,json=cacheBudget,proto3" json:"cache_budget,omitempty"`                    // max cache size (e.g. "1GB", "500MB"; default: "1GiB")
-	CacheTtl          string                 `protobuf:"bytes,15,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`                             // eviction TTL duration (e.g. "1h", "7d"); only for ttl mode
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	Id                   []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name                 string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Enabled              bool                   `protobuf:"varint,3,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Type                 VaultType              `protobuf:"varint,4,opt,name=type,proto3,enum=gastrolog.v1.VaultType" json:"type,omitempty"`
+	RotationPolicyId     []byte                 `protobuf:"bytes,5,opt,name=rotation_policy_id,json=rotationPolicyId,proto3" json:"rotation_policy_id,omitempty"`
+	RetentionRules       []*RetentionRule       `protobuf:"bytes,6,rep,name=retention_rules,json=retentionRules,proto3" json:"retention_rules,omitempty"`
+	MemoryBudgetBytes    uint64                 `protobuf:"varint,7,opt,name=memory_budget_bytes,json=memoryBudgetBytes,proto3" json:"memory_budget_bytes,omitempty"`
+	StorageClass         uint32                 `protobuf:"varint,8,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`
+	CloudServiceId       []byte                 `protobuf:"bytes,9,opt,name=cloud_service_id,json=cloudServiceId,proto3" json:"cloud_service_id,omitempty"`
+	ReplicationFactor    uint32                 `protobuf:"varint,10,opt,name=replication_factor,json=replicationFactor,proto3" json:"replication_factor,omitempty"`         // desired RF (1 = no replication, default)
+	Path                 string                 `protobuf:"bytes,11,opt,name=path,proto3" json:"path,omitempty"`                                                             // direct path for JSONL sinks
+	Placements           []*VaultPlacement      `protobuf:"bytes,12,rep,name=placements,proto3" json:"placements,omitempty"`                                                 // system-managed: file storage assignments by placement manager
+	CacheEviction        string                 `protobuf:"bytes,13,opt,name=cache_eviction,json=cacheEviction,proto3" json:"cache_eviction,omitempty"`                      // "lru" (default) or "ttl"
+	CacheBudget          string                 `protobuf:"bytes,14,opt,name=cache_budget,json=cacheBudget,proto3" json:"cache_budget,omitempty"`                            // max cache size (e.g. "1GB", "500MB"; default: "1GiB")
+	CacheTtl             string                 `protobuf:"bytes,15,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`                                     // eviction TTL duration (e.g. "1h", "7d"); only for ttl mode
+	RetentionDisposition string                 `protobuf:"bytes,16,opt,name=retention_disposition,json=retentionDisposition,proto3" json:"retention_disposition,omitempty"` // "delete" (default) or "route" — what retention does with aged-out records
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *VaultConfig) Reset() {
@@ -619,6 +620,13 @@ func (x *VaultConfig) GetCacheBudget() string {
 func (x *VaultConfig) GetCacheTtl() string {
 	if x != nil {
 		return x.CacheTtl
+	}
+	return ""
+}
+
+func (x *VaultConfig) GetRetentionDisposition() string {
+	if x != nil {
+		return x.RetentionDisposition
 	}
 	return ""
 }
@@ -8810,7 +8818,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x0eVaultPlacement\x12\x1d\n" +
 	"\n" +
 	"storage_id\x18\x01 \x01(\fR\tstorageId\x12\x16\n" +
-	"\x06leader\x18\x02 \x01(\bR\x06leader\"\xd3\x04\n" +
+	"\x06leader\x18\x02 \x01(\bR\x06leader\"\x88\x05\n" +
 	"\vVaultConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
@@ -8829,7 +8837,8 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"placements\x12%\n" +
 	"\x0ecache_eviction\x18\r \x01(\tR\rcacheEviction\x12!\n" +
 	"\fcache_budget\x18\x0e \x01(\tR\vcacheBudget\x12\x1b\n" +
-	"\tcache_ttl\x18\x0f \x01(\tR\bcacheTtl\"-\n" +
+	"\tcache_ttl\x18\x0f \x01(\tR\bcacheTtl\x123\n" +
+	"\x15retention_disposition\x18\x10 \x01(\tR\x14retentionDisposition\"-\n" +
 	"\x10RouteDestination\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\"\x81\x02\n" +
 	"\vRouteConfig\x12\x0e\n" +

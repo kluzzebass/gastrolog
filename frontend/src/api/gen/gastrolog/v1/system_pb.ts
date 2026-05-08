@@ -448,6 +448,13 @@ export class VaultConfig extends Message<VaultConfig> {
    */
   cacheTtl = "";
 
+  /**
+   * "delete" (default) or "route" — what retention does with aged-out records
+   *
+   * @generated from field: string retention_disposition = 16;
+   */
+  retentionDisposition = "";
+
   constructor(data?: PartialMessage<VaultConfig>) {
     super();
     proto3.util.initPartial(data, this);
@@ -471,6 +478,7 @@ export class VaultConfig extends Message<VaultConfig> {
     { no: 13, name: "cache_eviction", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 14, name: "cache_budget", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 15, name: "cache_ttl", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 16, name: "retention_disposition", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultConfig {

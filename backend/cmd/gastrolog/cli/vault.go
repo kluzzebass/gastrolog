@@ -118,6 +118,11 @@ func vaultDetailPairs(v *v1.VaultConfig) [][2]string {
 	if v.CacheTtl != "" {
 		pairs = append(pairs, [2]string{"Cache TTL", v.CacheTtl})
 	}
+	if v.RetentionDisposition != "" {
+		pairs = append(pairs, [2]string{"Retention Disposition", v.RetentionDisposition})
+	} else {
+		pairs = append(pairs, [2]string{"Retention Disposition", "delete (default)"})
+	}
 	if len(v.RotationPolicyId) > 0 {
 		pairs = append(pairs, [2]string{"Rotation Policy ID", glid.FromBytes(v.RotationPolicyId).String()})
 	}
@@ -196,6 +201,7 @@ shape (memory, file, file+cloud, JSONL) defined by --type, --storage-class
 	cmd.Flags().String("cache-eviction", "lru", "cache eviction strategy: lru or ttl")
 	cmd.Flags().String("cache-budget", "", "max cache size (e.g. 1GB, 500MB, 1GiB)")
 	cmd.Flags().String("cache-ttl", "", "cache TTL duration for ttl eviction mode (e.g. 1h, 7d)")
+	cmd.Flags().String("retention-disposition", "delete", "what retention does with aged-out records: delete (drop) or route (send through routing engine)")
 	cmd.Flags().String("path", "", "direct path for JSONL sinks")
 	cmd.Flags().Uint64("memory-budget", 0, "memory budget in bytes (memory vaults)")
 	_ = cmd.MarkFlagRequired("name")
@@ -229,6 +235,15 @@ func applyVaultFlags(ctx context.Context, cmd *cobra.Command, client *server.Cli
 	}
 	if cmd.Flags().Changed("cache-ttl") {
 		cfg.CacheTtl, _ = cmd.Flags().GetString("cache-ttl")
+	}
+	if cmd.Flags().Changed("retention-disposition") {
+		v, _ := cmd.Flags().GetString("retention-disposition")
+		switch v {
+		case "delete", "route":
+			cfg.RetentionDisposition = v
+		default:
+			return fmt.Errorf("invalid --retention-disposition %q (valid: delete, route)", v)
+		}
 	}
 	if cmd.Flags().Changed("path") {
 		cfg.Path, _ = cmd.Flags().GetString("path")
