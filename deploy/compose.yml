@@ -30,8 +30,11 @@ x-gastrolog-base: &base
     GASTROLOG_INITIAL_ADMIN_FILE: /run/secrets/admin_creds
   secrets:
     - admin_creds
-  networks:
-    - gastrolog
+  # No explicit network — services land on the project's default
+  # network. This lets us merge with the cloud-storage and
+  # ingester-integration compose files at recipe-invocation time,
+  # so MinIO / Kafka / rsyslog / etc are reachable from gastrolog
+  # containers by service name (no host.docker.internal dance).
   restart: unless-stopped
   # Explicit healthcheck. The image's Dockerfile already declares one,
   # but Podman / podman-compose don't honor inherited image healthchecks
@@ -109,9 +112,6 @@ volumes:
   joiner-1-vaults:
   joiner-2-config:
   joiner-2-vaults:
-
-networks:
-  gastrolog:
 
 secrets:
   admin_creds:

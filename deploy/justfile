@@ -71,12 +71,20 @@ quickstart-down:
 # Docker Compose 3-node cluster
 # ---------------------------------------------------------------------------
 
-# Start a 3-node Docker Compose cluster on host ports 4564 / 4574 / 4584.
-compose-up: image
+# All compose-driven recipes use the same project name `gastrolog-deploy`.
+# That puts every service from every compose file (gastrolog cluster,
+# cloud-storage emulators, ingester sources) on the same project
+# default network, so gastrolog containers reach `minio:9000`,
+# `kafka:9092`, `rsyslog:514`, etc. by service name. Each compose
+# file is invoked from its own directory so its relative paths
+# (e.g. ./otel/config.yaml) resolve correctly.
+
+# Start a 3-node Docker Compose cluster + cloud storage + ingester sources.
+compose-up: image cloud-storage-up ingester-integration-up
     #!/usr/bin/env bash
     set -euo pipefail
-    docker compose -p gtest-compose down -v 2>/dev/null || true
-    docker compose -p gtest-compose up -d
+    docker compose -p gastrolog-deploy -f compose.yml down -v 2>/dev/null || true
+    docker compose -p gastrolog-deploy -f compose.yml up -d
     echo "Waiting for all 3 nodes ready..."
     for i in $(seq 1 60); do
       ready=0
@@ -95,13 +103,17 @@ compose-up: image
       -d '{"username":"admin","password":"change-me-please"}'
     echo ""
     echo "3-node Compose cluster running at http://localhost:4564 (admin/change-me-please)"
+    echo "Cloud storage:    minio:9000, azurite:10000, fake-gcs:4443 (from inside the cluster)"
+    echo "Ingester sources: kafka:9092, rsyslog:514, otel-collector:4317, fluent-bit:24224, …"
     echo "Tear down with: just deploy compose-down"
 
-# Tear down the Docker Compose cluster and remove its volumes.
+# Tear down the Docker Compose cluster (gastrolog + deps) and remove its volumes.
 compose-down:
     #!/usr/bin/env bash
     set -euo pipefail
-    docker compose -p gtest-compose down -v >/dev/null 2>&1 || true
+    docker compose -p gastrolog-deploy -f compose.yml down -v >/dev/null 2>&1 || true
+    just ingester-integration-down >/dev/null 2>&1 || true
+    just cloud-storage-down >/dev/null 2>&1 || true
     echo "compose torn down"
 
 # ---------------------------------------------------------------------------
@@ -321,15 +333,20 @@ kubernetes-down:
 # Requires podman installed and `podman machine start` to be running.
 # Loads the docker-built gastrolog:test image into Podman's VM via save | load.
 #
-# Start a 3-node Podman cluster (uses the same compose.yml as Docker).
+# Start a 3-node Podman cluster + cloud storage + ingester sources.
 podman-up: image
     #!/usr/bin/env bash
     set -euo pipefail
     command -v podman >/dev/null || { echo "podman not installed — \`brew install podman\` first"; exit 1; }
     podman machine list 2>/dev/null | grep -q 'Currently running' || { echo "no running podman machine — \`podman machine init && podman machine start\` first"; exit 1; }
     docker save gastrolog:test | podman load >/dev/null
-    podman compose -p gtest-podman down -v 2>/dev/null || true
-    podman compose -p gtest-podman up -d
+    # Same project-name + same-network strategy as compose-up — bring
+    # up cloud-storage and ingester-integration in their own dirs first
+    # so paths resolve, then the gastrolog cluster.
+    (cd ../test/cloud-storage && podman compose -p gastrolog-deploy up -d)
+    (cd ../test/ingester-integration && podman compose -p gastrolog-deploy up --build -d)
+    podman compose -p gastrolog-deploy down -v 2>/dev/null || true
+    podman compose -p gastrolog-deploy up -d
     echo "Waiting for all 3 nodes ready..."
     for i in $(seq 1 60); do
       ready=0
@@ -348,13 +365,17 @@ podman-up: image
       -d '{"username":"admin","password":"change-me-please"}'
     echo ""
     echo "3-node Podman cluster running at http://localhost:4564 (admin/change-me-please)"
+    echo "Cloud storage:    minio:9000, azurite:10000, fake-gcs:4443"
+    echo "Ingester sources: kafka:9092, rsyslog:514, otel-collector:4317, fluent-bit:24224, …"
     echo "Tear down with: just deploy podman-down"
 
-# Tear down the Podman cluster and remove its volumes.
+# Tear down the Podman cluster (gastrolog + deps) and remove its volumes.
 podman-down:
     #!/usr/bin/env bash
     set -euo pipefail
-    podman compose -p gtest-podman down -v >/dev/null 2>&1 || true
+    podman compose -p gastrolog-deploy down -v >/dev/null 2>&1 || true
+    (cd ../test/ingester-integration && podman compose -p gastrolog-deploy down -v >/dev/null 2>&1) || true
+    (cd ../test/cloud-storage && podman compose -p gastrolog-deploy down -v >/dev/null 2>&1) || true
     echo "podman torn down"
 
 # ---------------------------------------------------------------------------
@@ -429,21 +450,27 @@ uncontainerized-down:
 # under test/ for historical reasons; the recipes belong here with
 # the other deployments.
 
+# Use the shared project name `gastrolog-deploy` so the standalone
+# recipes land services on the same project network as compose-up's
+# gastrolog services. Run each command from the compose file's own
+# directory so relative paths inside the file (e.g. otel/config.yaml)
+# resolve correctly.
+
 # Start cloud storage emulators (MinIO, Azurite, fake-gcs-server) for cloud-backed vaults.
 cloud-storage-up:
-    docker compose -f ../test/cloud-storage/compose.yml up -d
+    cd ../test/cloud-storage && docker compose -p gastrolog-deploy up -d
 
 # Tear down cloud storage emulators.
 cloud-storage-down:
-    docker compose -f ../test/cloud-storage/compose.yml down -v
+    cd ../test/cloud-storage && docker compose -p gastrolog-deploy down -v
 
 # Start ingester-source environment (syslog, RELP, OTLP, MQTT, Kafka, Fluent Forward, etc.).
 ingester-integration-up:
-    docker compose -f ../test/ingester-integration/compose.yml up --build -d
+    cd ../test/ingester-integration && docker compose -p gastrolog-deploy up --build -d
 
 # Tear down ingester-source environment.
 ingester-integration-down:
-    docker compose -f ../test/ingester-integration/compose.yml down -v
+    cd ../test/ingester-integration && docker compose -p gastrolog-deploy down -v
 
 # ---------------------------------------------------------------------------
 # CI / smoke-test orchestration
