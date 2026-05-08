@@ -28,6 +28,11 @@ operator-facing flag reference.
 | `GASTROLOG_NO_AUTH` | `--no-auth` | bool | Disable authentication. Truthy values: `1`, `true`, `yes`, `y`, `on` (case-insensitive). Anything else (including `false`, `0`, empty) is off. **Use only for testing.** |
 | `GASTROLOG_PPROF` | `--pprof` | string | pprof HTTP server address (e.g. `localhost:6060`). Empty/unset = disabled. |
 | `GASTROLOG_CONFIG_TYPE` | `--config-type` | string | Config store: `raft` (default) or `memory`. Use `memory` only for tests / ephemeral demos. |
+| `GASTROLOG_WRITE_BOOTSTRAP_TOKEN` | `--write-bootstrap-token` | string | Bootstrap node only: atomically write the join token to this path (mode 0600) so joiners can read it via `GASTROLOG_BOOTSTRAP_TOKEN_FILE`. |
+| `GASTROLOG_BOOTSTRAP_TOKEN_FILE` | `--bootstrap-token-file` | string | Joiner only: read the join token from this path, polling with backoff (1s → 30s, 10min total) until present. Alternative to `GASTROLOG_JOIN_TOKEN`. |
+| `GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET` | `--bootstrap-token-serve-secret` | string | Bootstrap node only: serve the join token at `GET /cluster/bootstrap-token`, gated on this shared secret. Empty disables. |
+| `GASTROLOG_BOOTSTRAP_TOKEN_URL` | `--bootstrap-token-url` | string | Joiner only: fetch the join token from this URL, polling with backoff. Pair with `GASTROLOG_BOOTSTRAP_TOKEN_SECRET`. |
+| `GASTROLOG_BOOTSTRAP_TOKEN_SECRET` | `--bootstrap-token-secret` | string | Joiner only: secret sent in the `X-Bootstrap-Token-Secret` header when fetching from `GASTROLOG_BOOTSTRAP_TOKEN_URL`. |
 
 ## Default-vs-explicit semantics
 
@@ -76,18 +81,54 @@ data, the join token — is lost on container removal.
 
 ## Bootstrap vs joiner
 
-A multi-node cluster has one bootstrap node and N joiners:
+A multi-node cluster has one bootstrap node and N joiners. The bootstrap
+node generates a join token at startup; joiners need to receive it
+before they can enroll. Three delivery paths exist:
+
+### 1. Literal token (attended setup)
 
 - **Bootstrap node**: do NOT set `GASTROLOG_JOIN_ADDR` or
   `GASTROLOG_JOIN_TOKEN`. The first node to start without those flags
-  becomes the bootstrap and prints a join token to its logs.
+  becomes the bootstrap and prints the token to its logs.
 - **Joiners**: set both `GASTROLOG_JOIN_ADDR` and
-  `GASTROLOG_JOIN_TOKEN` so the node enrolls into the existing
-  cluster instead of starting a fresh one.
+  `GASTROLOG_JOIN_TOKEN` (the operator pastes the token from the
+  bootstrap node's logs).
 
-The current join-token delivery story (operator-extracts-from-logs)
-is a known limitation for unattended deployments — see
-gastrolog-o9z6o for the file-based / endpoint-based replacement.
+### 2. File-based delivery (Docker Compose, K8s with shared volume)
+
+- **Bootstrap node**: set `GASTROLOG_WRITE_BOOTSTRAP_TOKEN=/path/to/token`
+  on a path that joiners can read (a named volume in compose, a
+  `PersistentVolumeClaim` or `emptyDir` in K8s). The bootstrap node
+  writes the token atomically with mode 0600 once the cluster TLS
+  is initialized.
+- **Joiners**: set `GASTROLOG_JOIN_ADDR` and
+  `GASTROLOG_BOOTSTRAP_TOKEN_FILE=/path/to/token` (same path). The
+  joiner polls the file with exponential backoff (1s → 30s, 10
+  minute total timeout) until it appears, then enrolls.
+
+### 3. Endpoint-based delivery (cross-region, immutable infra)
+
+- **Bootstrap node**: set
+  `GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET=<secret>`. The bootstrap node
+  serves the token at `GET /cluster/bootstrap-token` on its HTTP
+  listener (port 4564 by default), gated on the secret in the
+  `X-Bootstrap-Token-Secret` header.
+- **Joiners**: set `GASTROLOG_JOIN_ADDR`,
+  `GASTROLOG_BOOTSTRAP_TOKEN_URL=http://bootstrap-host:4564/cluster/bootstrap-token`,
+  and `GASTROLOG_BOOTSTRAP_TOKEN_SECRET=<same-secret>`. The joiner
+  polls the URL with the same backoff as the file-based path.
+
+### Precedence
+
+If multiple are set, precedence is:
+
+1. `GASTROLOG_JOIN_TOKEN` (literal) wins outright.
+2. `GASTROLOG_BOOTSTRAP_TOKEN_FILE` is consulted next.
+3. `GASTROLOG_BOOTSTRAP_TOKEN_URL` is the fallback.
+
+A joiner without `GASTROLOG_JOIN_ADDR` set is a bootstrap node, even
+if a bootstrap-token source is configured (the bootstrap-token sources
+are joiner-side and are no-ops without `--join-addr`).
 
 ## Ports
 

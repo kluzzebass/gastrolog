@@ -79,6 +79,32 @@ type RunConfig struct {
 	// Empty if pprof is disabled. Advertised to cluster peers via broadcast.
 	PprofAddr string
 
+	// Non-interactive cluster bootstrap (gastrolog-o9z6o).
+	//
+	// File-based path (default; no shared HTTP needed):
+	//   - WriteBootstrapToken: the bootstrap node atomically writes its
+	//     join token to this path with mode 0600 once cluster TLS is
+	//     bootstrapped. Joiners on the same shared volume read it via
+	//     BootstrapTokenFile.
+	//   - BootstrapTokenFile: a joiner reads the join token from this
+	//     path, polling with backoff until the file exists or the
+	//     timeout fires. Mutually exclusive with JoinToken (the literal
+	//     flag wins if both are set).
+	//
+	// Endpoint-based path (opt-in; for cross-region / immutable infra):
+	//   - BootstrapTokenServeSecret: the bootstrap node serves
+	//     `GET /cluster/bootstrap-token` on its HTTP listener (port
+	//     4564 by default), gated on this shared secret. Empty disables.
+	//   - BootstrapTokenURL: a joiner fetches the join token from this
+	//     URL, polling with backoff. Authenticates with
+	//     BootstrapTokenSecret.
+	//   - BootstrapTokenSecret: the secret sent by the joiner.
+	WriteBootstrapToken       string
+	BootstrapTokenFile        string
+	BootstrapTokenServeSecret string
+	BootstrapTokenURL         string
+	BootstrapTokenSecret      string
+
 	// SlogCapture receives copies of slog records for the "self" ingester.
 	// Created by main and shared with the CaptureHandler. Nil disables capture.
 	SlogCapture <-chan logging.CapturedRecord
@@ -99,6 +125,15 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	nodeID, err := resolveIdentity(logger, cfg, hd)
 	if err != nil {
 		return err
+	}
+
+	// gastrolog-o9z6o: when running unattended (Docker, K8s), the
+	// operator may have configured --bootstrap-token-file or
+	// --bootstrap-token-url instead of supplying --join-token directly.
+	// Resolve those into cfg.JoinToken before setupCluster reads it.
+	// No-op if --join-token is already set or if no source is configured.
+	if err := resolveJoinTokenFromSources(ctx, &cfg, logger); err != nil {
+		return fmt.Errorf("resolve bootstrap token: %w", err)
 	}
 
 	clusterSrv, clusterTLS, err := setupCluster(ctx, logger, cfg, hd, nodeID)
@@ -125,7 +160,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	cfgStore := system.Store(proxy)
 	var groupMgr *raftgroup.GroupManager // set later if cluster mode
 
-	if err := startClusterServices(ctx, clusterSrv, clusterTLS, cfgStore, hd, logger); err != nil {
+	if err := startClusterServices(ctx, clusterSrv, clusterTLS, cfgStore, hd, logger, cfg.WriteBootstrapToken); err != nil {
 		_ = proxy.Close()
 		return err
 	}
@@ -356,6 +391,9 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		WAL:                 tierWAL,
 		ConfigStore:         proxy,
 		PlacementReconcile:  placementReconcileFn,
+
+		BootstrapTokenServeSecret: cfg.BootstrapTokenServeSecret,
+		BootstrapTokenFn:          makeBootstrapTokenFn(cfgStore),
 	})
 }
 
@@ -962,6 +1000,12 @@ type serverDeps struct {
 	WAL                 *raftwal.WAL // tier-group WAL (same file as system raft when cluster mode); nil = per-group boltdb
 	ConfigStore         io.Closer    // rawStore — closed before gRPC for clean Raft shutdown
 	PlacementReconcile  func(ctx context.Context)
+
+	// gastrolog-o9z6o: when non-empty, the server registers
+	// /cluster/bootstrap-token gated on this secret. BootstrapTokenFn
+	// returns the cluster join token from the live config store.
+	BootstrapTokenServeSecret string
+	BootstrapTokenFn          func() (string, error)
 }
 
 func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
@@ -984,6 +1028,8 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 				"file": chunkcloud.NewConnectionTester(),
 			},
 			PlacementReconcile: deps.PlacementReconcile,
+			BootstrapTokenServeSecret: deps.BootstrapTokenServeSecret,
+			BootstrapTokenFn:          deps.BootstrapTokenFn,
 		})
 		// Provide the cluster's ForwardRPC handler with the internal mux.
 		// NoAuthInterceptor + no routing interceptor prevents loops.

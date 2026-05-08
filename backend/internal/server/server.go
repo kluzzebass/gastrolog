@@ -4,6 +4,7 @@ package server
 import (
 	"cmp"
 	"context"
+	"crypto/subtle"
 	"crypto/tls"
 	"gastrolog/internal/glid"
 	"log/slog"
@@ -138,6 +139,18 @@ type Config struct {
 	// PlacementReconcile runs synchronous placement so RPC responses include
 	// tier placements. Nil in single-node or non-cluster mode.
 	PlacementReconcile func(ctx context.Context)
+
+	// BootstrapTokenServeSecret enables the GET /cluster/bootstrap-token
+	// endpoint when non-empty. The endpoint is gated on a shared secret
+	// sent in the X-Bootstrap-Token-Secret header. Used by joiners
+	// configured with --bootstrap-token-url to fetch the join token
+	// without log-scraping or shared volumes (gastrolog-o9z6o).
+	BootstrapTokenServeSecret string
+
+	// BootstrapTokenFn returns the current cluster join token. Called
+	// by the bootstrap-token endpoint on each successful auth check.
+	// Nil when the endpoint is disabled or not applicable.
+	BootstrapTokenFn func() (string, error)
 }
 
 // CertManager interface for TLS certificate management.
@@ -183,6 +196,13 @@ type Server struct {
 	queryServer        *QueryServer              // stored for ExportToVault executor wiring
 	routingForwarder   routing.UnaryForwarder    // forwards requests to remote nodes; nil in single-node
 	placementReconcile func(ctx context.Context) // synchronous placement; nil in non-cluster mode
+
+	// gastrolog-o9z6o: bootstrap-token endpoint configuration. When the
+	// secret is non-empty, /cluster/bootstrap-token is registered and
+	// gated on the X-Bootstrap-Token-Secret header.
+	bootstrapTokenServeSecret string
+	bootstrapTokenFn          func() (string, error)
+
 	mu                 sync.Mutex
 	listener           net.Listener
 	server             *http.Server
@@ -242,9 +262,49 @@ func New(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orche
 		statsSignal:        cfg.StatsSignal,
 		routingForwarder:   cfg.RoutingForwarder,
 		placementReconcile: cfg.PlacementReconcile,
+		bootstrapTokenServeSecret: cfg.BootstrapTokenServeSecret,
+		bootstrapTokenFn:          cfg.BootstrapTokenFn,
 		shutdown:           make(chan struct{}),
 		rl:                 newRateLimiter(5.0/60.0, 5), // 5 req/min per IP, burst of 5
 	}
+}
+
+// registerBootstrapToken adds the /cluster/bootstrap-token endpoint
+// when the operator configured BootstrapTokenServeSecret + BootstrapTokenFn.
+// Joiners running with --bootstrap-token-url + --bootstrap-token-secret
+// fetch the join token here, gated on the shared secret in the
+// X-Bootstrap-Token-Secret header. See gastrolog-o9z6o.
+func (s *Server) registerBootstrapToken(mux *http.ServeMux) {
+	if s.bootstrapTokenServeSecret == "" || s.bootstrapTokenFn == nil {
+		return
+	}
+	servedSecret := s.bootstrapTokenServeSecret
+	tokenFn := s.bootstrapTokenFn
+	mux.HandleFunc("/cluster/bootstrap-token", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		got := r.Header.Get("X-Bootstrap-Token-Secret")
+		if subtle.ConstantTimeCompare([]byte(got), []byte(servedSecret)) != 1 {
+			s.logger.Warn("bootstrap token endpoint rejected request: bad secret", "remote", r.RemoteAddr)
+			http.Error(w, "invalid secret", http.StatusUnauthorized)
+			return
+		}
+		token, err := tokenFn()
+		if err != nil {
+			s.logger.Error("bootstrap token endpoint failed to load token", "error", err)
+			http.Error(w, "token unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if token == "" {
+			http.Error(w, "token unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write([]byte(token))
+	})
 }
 
 // registerProbes adds Kubernetes liveness and readiness probe endpoints.
@@ -478,6 +538,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 	mux.Handle(gastrologv1connect.NewJobServiceHandler(jobServer, handlerOpts...))
 
 	s.registerProbes(mux)
+	s.registerBootstrapToken(mux)
 	s.registerUploadHandler(mux)
 
 	if h := frontend.Handler(); h != nil {

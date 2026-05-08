@@ -34,6 +34,13 @@ args="--home ${GASTROLOG_HOME} --vaults ${GASTROLOG_VAULTS}"
 [ -n "$GASTROLOG_PPROF" ]        && args="$args --pprof $GASTROLOG_PPROF"
 [ -n "$GASTROLOG_CONFIG_TYPE" ]  && args="$args --config-type $GASTROLOG_CONFIG_TYPE"
 
+# Non-interactive cluster bootstrap (gastrolog-o9z6o).
+[ -n "$GASTROLOG_WRITE_BOOTSTRAP_TOKEN" ]        && args="$args --write-bootstrap-token $GASTROLOG_WRITE_BOOTSTRAP_TOKEN"
+[ -n "$GASTROLOG_BOOTSTRAP_TOKEN_FILE" ]         && args="$args --bootstrap-token-file $GASTROLOG_BOOTSTRAP_TOKEN_FILE"
+[ -n "$GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET" ] && args="$args --bootstrap-token-serve-secret $GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET"
+[ -n "$GASTROLOG_BOOTSTRAP_TOKEN_URL" ]          && args="$args --bootstrap-token-url $GASTROLOG_BOOTSTRAP_TOKEN_URL"
+[ -n "$GASTROLOG_BOOTSTRAP_TOKEN_SECRET" ]       && args="$args --bootstrap-token-secret $GASTROLOG_BOOTSTRAP_TOKEN_SECRET"
+
 # Bool env vars use truthy semantics: only 1/true/yes/y/on enable the flag.
 is_truthy "$GASTROLOG_NO_AUTH" && args="$args --no-auth"
 
