@@ -80,6 +80,33 @@ build_imux_cmd() {
   echo "imux --name ${names} --tee ${DATA_DIR}/cluster.log $(printf ' "%s"' "${cmds[@]}")"
 }
 
+# --- Init: dependency preflight ---
+
+# check_dependencies probes the external services the bootstrap depends on.
+# Currently the only hard dependency is the S3-compatible object store at
+# localhost:9000, which the warm-vault setup needs for cloud-backed
+# placement. Without it, the warm-vault placement step blocks each node
+# in a 3-attempt S3 retry loop (~5s/node) and leaves nodes hung in retry
+# state at shutdown — the script appears to "take a loooong time" then
+# emits Killed: 9 messages from the SIGKILL fallback. Failing here with
+# a clear message is much better than that. See gastrolog-18du3.
+check_dependencies() {
+  local s3_host="localhost"
+  local s3_port="9000"
+  # Use bash's /dev/tcp pseudo-device so we don't depend on nc/curl/etc
+  # being installed; works on macOS and Linux out of the box.
+  if ! (exec 3<>/dev/tcp/${s3_host}/${s3_port}) 2>/dev/null; then
+    echo "Error: S3-compatible service not reachable at ${s3_host}:${s3_port}." >&2
+    echo "       The bootstrap creates a cloud-backed warm-vault that needs" >&2
+    echo "       MinIO (or another S3 emulator) running on this port." >&2
+    echo "       Start the local cloud emulators and try again:" >&2
+    echo "         just cloud-storage-up" >&2
+    exit 1
+  fi
+  # Close the probe FD; success means the dial completed.
+  exec 3>&- 2>/dev/null || true
+}
+
 # --- Init: enroll nodes ---
 
 enroll_nodes() {
@@ -286,6 +313,7 @@ configure() {
 
 case "$COMMAND" in
   init)
+    check_dependencies
     enroll_nodes
     configure
 
