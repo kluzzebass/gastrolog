@@ -19,7 +19,7 @@ podman run --rm -d --name gastrolog \
   ghcr.io/kluzzebass/gastrolog:latest
 
 # Multi-node compose:
-cd docker
+cd deploy
 podman compose up -d
 ```
 
@@ -63,7 +63,7 @@ write to it, or you'll see EACCES on first write.
 Modern Podman (4.x+ / 5.x) ships a `podman compose` subcommand
 that delegates to `docker-compose` (or `podman-compose`) as an
 external provider, pointing it at podman's socket. The compose
-file shipped at [`docker/compose.yml`](../../docker/compose.yml)
+file shipped at [`deploy/compose.yml`](../../deploy/compose.yml)
 works under both runtimes thanks to one specific accommodation:
 
 **The compose file declares an explicit `healthcheck:` block on

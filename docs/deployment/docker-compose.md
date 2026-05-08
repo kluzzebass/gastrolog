@@ -8,7 +8,7 @@ provides.
 ## Quick start
 
 ```sh
-cd docker
+cd deploy
 docker compose up -d
 open http://localhost:4564           # admin / change-me-please
 ```
@@ -21,7 +21,7 @@ docker compose down -v
 
 ## What's in the recipe
 
-The compose file ([`docker/compose.yml`](../../docker/compose.yml))
+The compose file ([`deploy/compose.yml`](../../deploy/compose.yml))
 defines three services — `bootstrap`, `joiner-1`, `joiner-2` —
 that share a Compose `secret` for admin credentials and a named
 volume for the cluster join token.
@@ -54,20 +54,20 @@ Provisioned via a Compose `secret` mounted at
 once at startup, creates the admin user, and the file/secret
 becomes a no-op on subsequent restarts (idempotency).
 
-The secret file in the repo (`docker/admin-creds`) is a **demo
+The secret file in the repo (`deploy/admin-creds`) is a **demo
 placeholder** with `admin` / `change-me-please`. Replace it before
 running this in any environment with real users:
 
 ```sh
-echo '{"username": "admin", "password": "your-strong-password"}' > docker/admin-creds
-chmod 0400 docker/admin-creds
+echo '{"username": "admin", "password": "your-strong-password"}' > deploy/admin-creds
+chmod 0400 deploy/admin-creds
 ```
 
 Or use the colon format:
 
 ```sh
-echo 'admin:your-strong-password' > docker/admin-creds
-chmod 0400 docker/admin-creds
+echo 'admin:your-strong-password' > deploy/admin-creds
+chmod 0400 deploy/admin-creds
 ```
 
 ### Cluster addresses
@@ -114,7 +114,7 @@ For more than ~5 nodes or any cross-host deployment, switch to
 
 ## Production caveats
 
-- **Admin password**: change `docker/admin-creds` before exposing
+- **Admin password**: change `deploy/admin-creds` before exposing
   this beyond `localhost`.
 - **External access**: this recipe exposes the dashboard on
   `localhost:4564` only. For external access, put a TLS-terminating

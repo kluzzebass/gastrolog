@@ -24,7 +24,7 @@ docker swarm init   # if not already in a Swarm
 echo '{"username": "admin", "password": "change-me-please"}' \
   | docker secret create gastrolog_admin_creds -
 
-cd docker
+cd deploy
 docker stack deploy -c stack.yml gastrolog
 open http://localhost:4564             # admin / change-me-please
 ```
@@ -40,7 +40,7 @@ docker volume ls -q | grep ^gastrolog_ | xargs docker volume rm
 ## What's in the recipe
 
 The stack file
-([`docker/stack.yml`](../../docker/stack.yml)) defines two
+([`deploy/stack.yml`](../../deploy/stack.yml)) defines two
 services — `bootstrap` and `joiner-1` — plus an overlay network
 and named volumes. Both services share a single Swarm `secret`
 for admin credentials, mounted at `/run/secrets/admin_creds`.

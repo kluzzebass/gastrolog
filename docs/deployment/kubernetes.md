@@ -16,7 +16,7 @@ OrbStack, kind, minikube, EKS, GKE, AKS — anywhere).
 ## Quick start
 
 ```sh
-kubectl apply -f k8s/statefulset.yml
+kubectl apply -f deploy/k8s.yml
 kubectl -n gastrolog get pods -w
 # wait for gastrolog-bootstrap-0, gastrolog-joiner-0, gastrolog-joiner-1 all Running
 
@@ -30,14 +30,14 @@ kubectl -n gastrolog port-forward svc/gastrolog 4564:4564
 To tear down:
 
 ```sh
-kubectl delete -f k8s/statefulset.yml
+kubectl delete -f deploy/k8s.yml
 # PVCs are not auto-deleted; remove them explicitly if you want to wipe data:
 kubectl -n gastrolog delete pvc --all
 ```
 
 ## What's in the recipe
 
-The manifest ([`k8s/statefulset.yml`](../../k8s/statefulset.yml))
+The manifest ([`deploy/k8s.yml`](../../deploy/k8s.yml))
 defines:
 
 - **Namespace** `gastrolog` — keeps everything scoped.

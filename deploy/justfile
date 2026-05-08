@@ -75,7 +75,6 @@ quickstart-down:
 compose-up: image
     #!/usr/bin/env bash
     set -euo pipefail
-    cd ../docker
     docker compose -p gtest-compose down -v 2>/dev/null || true
     docker compose -p gtest-compose up -d
     echo "Waiting for all 3 nodes ready..."
@@ -102,7 +101,6 @@ compose-up: image
 compose-down:
     #!/usr/bin/env bash
     set -euo pipefail
-    cd ../docker
     docker compose -p gtest-compose down -v >/dev/null 2>&1 || true
     echo "compose torn down"
 
@@ -121,7 +119,6 @@ swarm-up: image
     docker swarm init 2>/dev/null || true
     docker secret rm gastrolog_admin_creds 2>/dev/null || true
     echo '{"username":"admin","password":"change-me-please"}' | docker secret create gastrolog_admin_creds - >/dev/null
-    cd ../docker
     docker stack rm gastrolog 2>/dev/null || true
     for i in $(seq 1 30); do
       [[ "$(docker ps -a --filter label=com.docker.stack.namespace=gastrolog -q | wc -l | tr -d ' ')" == "0" ]] && break
@@ -241,10 +238,9 @@ kubernetes-up: image
     #!/usr/bin/env bash
     set -euo pipefail
     kubectl config current-context >/dev/null 2>&1 || { echo "no K8s context active — enable OrbStack/kind/minikube first"; exit 1; }
-    cd ..
-    kubectl delete -f k8s/statefulset.yml --ignore-not-found 2>/dev/null
+    kubectl delete -f k8s.yml --ignore-not-found 2>/dev/null
     kubectl -n gastrolog delete pvc --all --ignore-not-found 2>/dev/null
-    kubectl apply -f k8s/statefulset.yml
+    kubectl apply -f k8s.yml
     echo "Waiting for all 3 pods ready..."
     for i in $(seq 1 60); do
       ready=$(kubectl -n gastrolog get pods -o jsonpath='{range .items[*]}{.status.containerStatuses[0].ready}{"\n"}{end}' 2>/dev/null | grep -c '^true$' || true)
@@ -313,8 +309,7 @@ kubernetes-contract:
 kubernetes-down:
     #!/usr/bin/env bash
     set -euo pipefail
-    cd ..
-    kubectl delete -f k8s/statefulset.yml --ignore-not-found >/dev/null 2>&1 || true
+    kubectl delete -f k8s.yml --ignore-not-found >/dev/null 2>&1 || true
     kubectl -n gastrolog delete pvc --all --ignore-not-found >/dev/null 2>&1 || true
     kubectl delete namespace gastrolog --ignore-not-found >/dev/null 2>&1 || true
     echo "kubernetes torn down"
@@ -333,7 +328,6 @@ podman-up: image
     command -v podman >/dev/null || { echo "podman not installed — \`brew install podman\` first"; exit 1; }
     podman machine list 2>/dev/null | grep -q 'Currently running' || { echo "no running podman machine — \`podman machine init && podman machine start\` first"; exit 1; }
     docker save gastrolog:test | podman load >/dev/null
-    cd ../docker
     podman compose -p gtest-podman down -v 2>/dev/null || true
     podman compose -p gtest-podman up -d
     echo "Waiting for all 3 nodes ready..."
@@ -360,7 +354,6 @@ podman-up: image
 podman-down:
     #!/usr/bin/env bash
     set -euo pipefail
-    cd ../docker
     podman compose -p gtest-podman down -v >/dev/null 2>&1 || true
     echo "podman torn down"
 
