@@ -21,8 +21,7 @@ _default:
 image:
     cd .. && docker build -t gastrolog:test --build-arg VERSION=test .
 
-# --- Single-node docker run quickstart ---
-
+# Single-node `docker run` quickstart: one container, persistent volumes, login.
 quickstart: image
     #!/usr/bin/env bash
     set -euo pipefail
@@ -45,8 +44,7 @@ quickstart: image
     docker rm -f gtest-quickstart >/dev/null
     docker volume rm gtest-quickstart-config gtest-quickstart-vaults >/dev/null
 
-# --- Docker Compose 3-node cluster ---
-
+# Docker Compose 3-node cluster on the bridge network with shared-volume token delivery.
 compose: image
     #!/usr/bin/env bash
     set -euo pipefail
@@ -71,13 +69,11 @@ compose: image
       -d '{"username":"admin","password":"change-me-please"}'
     docker compose -p gtest-compose down -v >/dev/null
 
-# --- Docker Swarm stack ---
+# Note: `just` interprets `{{ }}` as interpolation, so `docker --format '{{.Replicas}}'`
+# can't be used inside recipes. We skip --format and grep the human-readable
+# table instead — same signal, no escaping headaches.
 #
-# `just` interprets {{ }} as interpolation. Inside shell heredocs
-# the recipe's text is delivered to bash literally, so the simplest
-# workaround for `docker --format '{{.Replicas}}'` is to skip the
-# --format flag and grep the human-readable output instead.
-
+# Docker Swarm stack on an overlay network with secret-mounted admin creds.
 swarm: image
     #!/usr/bin/env bash
     set -euo pipefail
@@ -112,8 +108,9 @@ swarm: image
     docker secret rm gastrolog_admin_creds >/dev/null
     docker swarm leave --force >/dev/null 2>&1 || true
 
-# --- Kubernetes (requires K8s context already active) ---
-
+# Requires an active kubectl context (OrbStack, kind, minikube, or a real cluster).
+#
+# Kubernetes 3-pod cluster (bootstrap StatefulSet + 2-replica joiner StatefulSet).
 kubernetes: image
     #!/usr/bin/env bash
     set -euo pipefail
@@ -137,8 +134,10 @@ kubernetes: image
     kubectl -n gastrolog delete pvc --all --ignore-not-found >/dev/null 2>&1 || true
     kubectl delete namespace gastrolog --ignore-not-found >/dev/null 2>&1 || true
 
-# --- Podman compose (requires podman + a running podman machine) ---
-
+# Requires podman installed and `podman machine start` to be running.
+# Loads the docker-built gastrolog:test image into Podman's VM via save | load.
+#
+# Podman 3-node compose cluster (uses the same compose.yml as Docker).
 podman: image
     #!/usr/bin/env bash
     set -euo pipefail
@@ -166,8 +165,9 @@ podman: image
       -d '{"username":"admin","password":"change-me-please"}'
     podman compose -p gtest-podman down -v >/dev/null
 
-# --- Uncontainerized (single-node from a fresh build of the binary) ---
-
+# Verifies the bare-metal / systemd / dev path documented in uncontainerized.md.
+#
+# Uncontainerized single-node from a `go run` of the binary, no image needed.
 uncontainerized:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -191,8 +191,7 @@ uncontainerized:
       http://localhost:5564/gastrolog.v1.AuthService/Login \
       -d '{"username":"admin","password":"change-me-please"}'
 
-# --- Run every recipe in sequence ---
-
+# Run every deployment recipe in sequence; short-circuits on the first failure.
 all: quickstart compose swarm kubernetes podman uncontainerized
     @echo ""
     @echo "All deployment recipes verified."
