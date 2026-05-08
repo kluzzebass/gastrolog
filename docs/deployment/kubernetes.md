@@ -58,25 +58,21 @@ defines:
 
 ### Architecture
 
+```mermaid
+graph TD
+    subgraph ns["Namespace: gastrolog"]
+        bootstrap["gastrolog-bootstrap-0<br/><i>StatefulSet (replicas: 1)</i>"]
+        joiner0["gastrolog-joiner-0<br/><i>StatefulSet (replicas: 2)</i>"]
+        joiner1["gastrolog-joiner-1"]
+        bootstrap <-->|raft| joiner0
+        bootstrap <-->|raft| joiner1
+        joiner0 <-->|raft| joiner1
+    end
+    client(["External<br/>NodePort 30564 → 4564"]) --> bootstrap
 ```
-                    Namespace: gastrolog
-   ┌──────────────────────────────────────────────────────────┐
-   │                                                           │
-   │  gastrolog-bootstrap-0  ◄─raft─►  gastrolog-joiner-0      │
-   │       (StatefulSet,                  (StatefulSet,        │
-   │        replicas: 1)                   replicas: 2)        │
-   │                                                           │
-   │                          ◄─raft─►  gastrolog-joiner-1     │
-   │                                                           │
-   │  Stable per-pod DNS via gastrolog-headless:                │
-   │    gastrolog-bootstrap-0.gastrolog-headless...            │
-   │    gastrolog-joiner-0.gastrolog-headless...               │
-   │    gastrolog-joiner-1.gastrolog-headless...               │
-   │                                                           │
-   │  ────────  External  ────────                             │
-   │  NodePort 30564 → 4564 (HTTP/Connect-RPC)                 │
-   └──────────────────────────────────────────────────────────┘
-```
+
+Each pod has stable DNS via the headless service, e.g.
+`gastrolog-bootstrap-0.gastrolog-headless.gastrolog.svc.cluster.local`.
 
 ### Why two StatefulSets instead of one with replicas=N?
 

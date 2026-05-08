@@ -47,22 +47,14 @@ for admin credentials, mounted at `/run/secrets/admin_creds`.
 
 ### Architecture
 
-```
-                         overlay network
-                         "gastrolog_gastrolog"
-   ┌──────────────────────────────────────────────────────┐
-   │                                                       │
-   │   ┌─────────────────┐         ┌─────────────────┐    │
-   │   │  bootstrap      │ ◄─────► │  joiner-1       │    │
-   │   │  10.0.x.y:4566  │  raft   │  10.0.x.z:4566  │    │
-   │   └─────────────────┘         └─────────────────┘    │
-   │           │                                           │
-   │           │ host port 4564 (ingress mesh)             │
-   │           ▼                                           │
-   └──────────────────────────────────────────────────────┘
-                         │
-                         ▼
-                  http://host:4564
+```mermaid
+graph TD
+    subgraph overlay["overlay network: gastrolog_gastrolog"]
+        bootstrap["bootstrap<br/>10.0.x.y:4566"]
+        joiner["joiner-1<br/>10.0.x.z:4566"]
+        bootstrap <-->|raft| joiner
+    end
+    client(["http://host:4564"]) -->|ingress mesh| bootstrap
 ```
 
 The bootstrap service is `replicas: 1`. Joiners are separate
