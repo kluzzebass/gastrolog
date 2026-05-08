@@ -21,12 +21,12 @@ Kubernetes.
 docker swarm init   # if not already in a Swarm
 
 # Create the admin credentials secret (replace with your password):
-echo '{"username": "admin", "password": "change-me-please"}' \
+echo '{"username": "admin", "password": "change-me"}' \
   | docker secret create gastrolog_admin_creds -
 
 cd deploy
 docker stack deploy -c stack.yml gastrolog
-open http://localhost:4564             # admin / change-me-please
+open http://localhost:4564             # admin / change-me
 ```
 
 To tear down:
@@ -44,6 +44,19 @@ The stack file
 services — `bootstrap` and `joiner-1` — plus an overlay network
 and named volumes. Both services share a single Swarm `secret`
 for admin credentials, mounted at `/run/secrets/admin_creds`.
+
+> **Naming note.** Swarm service names (`bootstrap`, `joiner-1`)
+> stay role-clear in `docker service ls` and the
+> `gastrolog_<service>` stack-prefixed forms, while the gastrolog
+> *node* names — what shows up in the UI and via `cluster status`
+> — are `gastrolog-0`, `gastrolog-1`, etc. The two layers are
+> intentionally distinct: Swarm's name is operational
+> (orchestrator-facing); the gastrolog name is logical
+> (cluster-identity-facing). When this doc references "the
+> bootstrap" or "joiner-1" it means the Swarm service; the same
+> container's gastrolog node-name is `gastrolog-0` /
+> `gastrolog-1`. `cluster remove-node` and similar commands take
+> the gastrolog node-name.
 
 ### Architecture
 
@@ -173,7 +186,7 @@ docker exec "$B" /gastrolog --home /config cluster status
 # Login:
 curl -s -X POST -H "Content-Type: application/json" \
   http://localhost:4564/gastrolog.v1.AuthService/Login \
-  -d '{"username":"admin","password":"change-me-please"}'
+  -d '{"username":"admin","password":"change-me"}'
 ```
 
 ## Production caveats

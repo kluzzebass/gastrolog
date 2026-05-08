@@ -15,7 +15,7 @@ podman run --rm -d --name gastrolog \
   -v gastrolog-config:/config \
   -v gastrolog-vaults:/vaults \
   -e GASTROLOG_INITIAL_ADMIN_USER=admin \
-  -e GASTROLOG_INITIAL_ADMIN_PASSWORD=change-me-please \
+  -e GASTROLOG_INITIAL_ADMIN_PASSWORD=change-me \
   ghcr.io/kluzzebass/gastrolog:latest
 
 # Multi-node compose:

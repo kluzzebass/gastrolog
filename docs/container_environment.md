@@ -61,9 +61,8 @@ standard truthy semantics: only `1`, `true`, `yes`, `y`, `on`
 including `false`, `0`, `no`, `off`, or any unrecognized value —
 disables it.
 
-This was previously broken: any non-empty value enabled the flag,
-so `GASTROLOG_NO_AUTH=false` accidentally turned authentication off.
-Fixed in gastrolog-46yu5.
+In particular: `GASTROLOG_NO_AUTH=false` correctly disables the
+flag rather than enabling it.
 
 ## Persistence
 

@@ -18,10 +18,10 @@ OrbStack, kind, minikube, EKS, GKE, AKS — anywhere).
 ```sh
 kubectl apply -f deploy/k8s.yml
 kubectl -n gastrolog get pods -w
-# wait for gastrolog-bootstrap-0, gastrolog-joiner-0, gastrolog-joiner-1 all Running
+# wait for gastrolog-0, gastrolog-1, gastrolog-2 all Running
 
 # OrbStack/kind: NodePort exposes 4564 on localhost:30564
-open http://localhost:30564          # admin / change-me-please
+open http://localhost:30564          # admin / change-me
 
 # Or port-forward:
 kubectl -n gastrolog port-forward svc/gastrolog 4564:4564
@@ -37,8 +37,7 @@ kubectl -n gastrolog delete pvc --all
 
 ## What's in the recipe
 
-The manifest ([`deploy/k8s.yml`](../../deploy/k8s.yml))
-defines:
+The manifest ([`deploy/k8s.yml`](../../deploy/k8s.yml)) defines:
 
 - **Namespace** `gastrolog` — keeps everything scoped.
 - **Headless Service** `gastrolog-headless` — `clusterIP: None` so
@@ -47,116 +46,125 @@ defines:
 - **NodePort Service** `gastrolog` — external ingress on port
   30564 → 4564.
 - **ConfigMap** `gastrolog-config` — non-secret env (listen
-  address, cluster-addr=`auto`, the join-addr DNS for joiners).
+  address, cluster-addr=`auto`).
 - **Secret** `gastrolog-secrets` — initial admin credentials and
   the bootstrap-token shared secret.
-- **Bootstrap StatefulSet** `gastrolog-bootstrap` — `replicas: 1`,
-  generates cluster TLS + join token, serves the token via
-  `/cluster/bootstrap-token`.
-- **Joiner StatefulSet** `gastrolog-joiner` — `replicas: 2`,
-  polls the bootstrap pod's HTTP token endpoint and enrolls.
+- **StatefulSet** `gastrolog` — `replicas: 3` by default. Pod 0
+  (`gastrolog-0`) is the bootstrap; pods 1..N-1 are joiners. The
+  container's startup wrapper branches on the pod's ordinal to
+  set bootstrap-vs-joiner env vars at run time.
 
 ### Architecture
 
 ```mermaid
 graph TD
     subgraph ns["Namespace: gastrolog"]
-        bootstrap["gastrolog-bootstrap-0<br/><i>StatefulSet (replicas: 1)</i>"]
-        joiner0["gastrolog-joiner-0<br/><i>StatefulSet (replicas: 2)</i>"]
-        joiner1["gastrolog-joiner-1"]
-        bootstrap <-->|raft| joiner0
+        bootstrap["gastrolog-0<br/><i>bootstrap (ordinal 0)</i>"]
+        joiner1["gastrolog-1<br/><i>joiner</i>"]
+        joiner2["gastrolog-2<br/><i>joiner</i>"]
         bootstrap <-->|raft| joiner1
-        joiner0 <-->|raft| joiner1
+        bootstrap <-->|raft| joiner2
+        joiner1 <-->|raft| joiner2
     end
     client(["External<br/>NodePort 30564 → 4564"]) --> bootstrap
 ```
 
 Each pod has stable DNS via the headless service, e.g.
-`gastrolog-bootstrap-0.gastrolog-headless.gastrolog.svc.cluster.local`.
+`gastrolog-0.gastrolog-headless.gastrolog.svc.cluster.local`. Pod
+name = hostname = `GASTROLOG_NAME`, so what you see in `kubectl get
+pods` matches what's in the gastrolog UI.
 
-### Why two StatefulSets instead of one with replicas=N?
+### Role detection
 
-The cleanest role differentiation. The bootstrap pod has a
-distinct startup path (generate cluster TLS, serve the token);
-joiners have a different one (poll the token, enroll). With one
-StatefulSet, the pod-0-is-special logic has to live in an init
-container that parses the pod's ordinal — ugly.
+Pod ordinal 0 is the bootstrap; pods 1..N-1 are joiners. The
+container's `command:` field carries a 6-line shell prelude that
+reads `${HOSTNAME##*-}` to get the ordinal and exports the right
+`GASTROLOG_*` env vars before exec'ing the entrypoint:
 
-Two StatefulSets makes each role's env vars explicit and visible
-in `kubectl describe`. Each StatefulSet's spec tells the operator
-exactly what that pod set does without reading any branching shell
-script.
+```sh
+ord=${HOSTNAME##*-}
+if [ "$ord" = "0" ]; then
+  export GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET=$BOOTSTRAP_TOKEN_SHARED_SECRET
+else
+  export GASTROLOG_JOIN_ADDR=gastrolog-0.gastrolog-headless...:4566
+  export GASTROLOG_BOOTSTRAP_TOKEN_URL=http://gastrolog-0...:4564/cluster/bootstrap-token
+  export GASTROLOG_BOOTSTRAP_TOKEN_SECRET=$BOOTSTRAP_TOKEN_SHARED_SECRET
+fi
+exec /docker-entrypoint.sh server
+```
+
+This keeps pod-name = hostname = `GASTROLOG_NAME` consistent across
+`kubectl get pods`, the gastrolog UI, and CLI operations like
+`cluster remove-node gastrolog-3`.
 
 ### Why HTTP token delivery instead of file-based?
 
 K8s pods don't natively share volumes between replicas. The
 file-based path (works in Compose and Swarm via shared named
-volumes) requires a `ReadWriteMany` storage class — uncommon,
-not portable to all K8s distros.
+volumes) requires a `ReadWriteMany` storage class — uncommon, not
+portable to all K8s distros.
 
 The HTTP endpoint path (`gastrolog-o9z6o`) is the natural K8s fit:
-the bootstrap pod serves the token at a known URL, joiners poll
-with backoff. The shared secret in the K8s Secret authenticates
-the request.
+`gastrolog-0` serves the token at a known URL, joiners poll with
+backoff. The shared secret in the K8s Secret authenticates the
+request.
 
 If you want the file-based path on a K8s with `ReadWriteMany`
-support (Rook/Ceph, AWS EFS, Azure Files, NFS), you can adapt
-the manifest by adding a shared PVC mounted into both
-StatefulSets at `/shared` and switching to
-`GASTROLOG_WRITE_BOOTSTRAP_TOKEN` / `GASTROLOG_BOOTSTRAP_TOKEN_FILE`
-env vars.
+support (Rook/Ceph, AWS EFS, Azure Files, NFS), you can adapt the
+manifest by adding a shared PVC mounted into all pods at `/shared`
+and switching to `GASTROLOG_WRITE_BOOTSTRAP_TOKEN` /
+`GASTROLOG_BOOTSTRAP_TOKEN_FILE` env vars.
 
 ### How the cluster forms
 
-1. K8s schedules `gastrolog-bootstrap-0`. Its entrypoint sees
-   `GASTROLOG_CLUSTER_ADDR=auto` and resolves the pod's own IP
-   via `hostname -i` (e.g. `10.244.1.17`). Binds + advertises on
-   that IP:4566.
-2. Bootstrap generates cluster TLS + join token, mounts the
-   admin credentials from `/etc/gastrolog/admin_creds`, provisions
-   the initial admin user, and starts serving:
+1. K8s schedules `gastrolog-0`. Its entrypoint sees
+   `GASTROLOG_CLUSTER_ADDR=auto` and resolves the pod's own IP via
+   `hostname -i` (e.g. `10.244.1.17`). Binds + advertises on that
+   IP:4566.
+2. `gastrolog-0` generates cluster TLS + the join token, mounts
+   the admin credentials from `/etc/gastrolog/admin_creds`,
+   provisions the initial admin user, and starts serving:
    - `/healthz`, `/readyz` for K8s probes
    - `/cluster/bootstrap-token` gated on the
      `GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET`
    - The full Connect-RPC + UI on port 4564
-3. K8s schedules joiner pods (`gastrolog-joiner-0`, then `-1`).
-   Each polls
-   `http://gastrolog-bootstrap-0.gastrolog-headless.gastrolog.svc.cluster.local:4564/cluster/bootstrap-token`
-   with the shared secret in the `X-Bootstrap-Token-Secret` header.
-4. Joiner receives the token, enrolls with bootstrap via the
-   stable per-pod DNS (`gastrolog-bootstrap-0.gastrolog-headless...:4566`),
-   joins the Raft cluster.
-5. Both joiners settle as `FOLLOWER` / `VOTER` within ~10
-   seconds.
+3. K8s schedules `gastrolog-1`, then `gastrolog-2`. Each polls
+   `http://gastrolog-0.gastrolog-headless.gastrolog.svc.cluster.local:4564/cluster/bootstrap-token`
+   with the shared secret in the `X-Bootstrap-Token-Secret`
+   header.
+4. Joiners receive the token, enroll with `gastrolog-0` via the
+   stable per-pod DNS (`gastrolog-0.gastrolog-headless...:4566`),
+   join the Raft cluster.
+5. Both joiners settle as `FOLLOWER` / `VOTER` within ~10 seconds.
 
 ### Probes
 
-The manifest wires K8s `livenessProbe` and `readinessProbe` to
-the corresponding HTTP endpoints. K8s probes override the image's
+The manifest wires K8s `livenessProbe` and `readinessProbe` to the
+corresponding HTTP endpoints. K8s probes override the image's
 built-in `HEALTHCHECK` — the `Dockerfile` directive is for
 plain-Docker users.
 
 - **Liveness** (`/healthz`): if it fails, K8s restarts the pod.
-- **Readiness** (`/readyz`): if it fails, K8s removes the pod
-  from Service endpoints. Useful during startup, leader-loss
-  windows, and graceful shutdown.
+- **Readiness** (`/readyz`): if it fails, K8s removes the pod from
+  Service endpoints. Useful during startup, leader-loss windows,
+  and graceful shutdown.
 
 ## Verify
 
 ```sh
 kubectl -n gastrolog get pods
-# NAME                    READY   STATUS    RESTARTS   AGE
-# gastrolog-bootstrap-0   1/1     Running   0          2m
-# gastrolog-joiner-0      1/1     Running   0          1m
-# gastrolog-joiner-1      1/1     Running   0          1m
+# NAME           READY   STATUS    RESTARTS   AGE
+# gastrolog-0    1/1     Running   0          2m
+# gastrolog-1    1/1     Running   0          1m
+# gastrolog-2    1/1     Running   0          1m
 
-# Cluster topology from inside the bootstrap:
-kubectl -n gastrolog exec gastrolog-bootstrap-0 -- /gastrolog --home /config cluster status
+# Cluster topology from gastrolog-0:
+kubectl -n gastrolog exec gastrolog-0 -- /gastrolog --home /config cluster status
 
 # Admin login (via NodePort or port-forward):
 curl -s -X POST -H "Content-Type: application/json" \
   http://localhost:30564/gastrolog.v1.AuthService/Login \
-  -d '{"username":"admin","password":"change-me-please"}'
+  -d '{"username":"admin","password":"change-me"}'
 ```
 
 ## Scaling out
@@ -164,15 +172,26 @@ curl -s -X POST -H "Content-Type: application/json" \
 Add joiners with:
 
 ```sh
-kubectl -n gastrolog scale statefulset gastrolog-joiner --replicas=4
+kubectl -n gastrolog scale statefulset gastrolog --replicas=5
 ```
 
-K8s creates `gastrolog-joiner-2` and `gastrolog-joiner-3`; each
-gets its own PVC via the `volumeClaimTemplates`, polls the
-bootstrap pod for the token, and enrolls.
+K8s creates `gastrolog-3` and `gastrolog-4`; each gets its own
+PVCs via the `volumeClaimTemplates`, polls `gastrolog-0` for the
+token, and enrolls. The `kubernetes-expand` / `kubernetes-scale`
+recipes ([`deploy/justfile`](../../deploy/justfile)) wrap this with
+post-scale storage initialization on the new pods (the dispatcher
+needs file storage on each node before vault chunks can land
+there).
 
-The bootstrap StatefulSet should stay at `replicas: 1` — there's
-exactly one bootstrap node per cluster lifetime.
+To shrink, use `kubernetes-contract` / `kubernetes-scale` — they
+remove voters from Raft membership *before* `kubectl scale` so dead
+pods don't linger in `cluster status` as orphan voters, and they
+delete the now-unused PVCs after scale-down.
+
+`gastrolog-0` should never be removed — it's the bootstrap and
+holds Raft state required for new joiners to enroll. The recipes
+enforce a floor of 3 replicas (bootstrap + 2 joiners minimum) to
+preserve quorum tolerance.
 
 ## Production considerations
 
@@ -186,15 +205,16 @@ exactly one bootstrap node per cluster lifetime.
   file that's never checked in. **Always rotate the
   `bootstrap_token_secret` after first use.**
 - **Storage class**: the `volumeClaimTemplates` use the cluster's
-  default storage class. For production, set
-  `storageClassName: <your-class>` explicitly so PVCs land on
-  the right backend (SSD, NVMe, network-attached, etc.).
-- **TLS**: this manifest exposes plaintext HTTP via NodePort.
-  In production, use an Ingress with TLS termination
-  (cert-manager + Let's Encrypt is the common path on K8s).
-- **PodDisruptionBudget**: add one for `gastrolog-joiner` so
-  cluster maintenance doesn't take down enough nodes to lose
-  Raft quorum.
+  default storage class. For production, set `storageClassName:
+  <your-class>` explicitly so PVCs land on the right backend (SSD,
+  NVMe, network-attached, etc.).
+- **TLS**: this manifest exposes plaintext HTTP via NodePort. In
+  production, use an Ingress with TLS termination (cert-manager +
+  Let's Encrypt is the common path on K8s).
+- **PodDisruptionBudget**: add one for the `gastrolog` StatefulSet
+  with `minAvailable: 2` (or whatever respects your Raft quorum)
+  so cluster maintenance doesn't take down enough nodes to lose
+  quorum.
 - **Network policies**: restrict 4566 to intra-cluster traffic
   (`from: app=gastrolog`); 4564 stays open for the dashboard.
 - **Backup**: snapshot the PVCs via your cluster's volume
@@ -208,28 +228,29 @@ exactly one bootstrap node per cluster lifetime.
 Usually a missing image. Verify:
 
 ```sh
-kubectl -n gastrolog describe pod gastrolog-bootstrap-0 | tail -20
+kubectl -n gastrolog describe pod gastrolog-0 | tail -20
 ```
 
-For OrbStack, kind, or minikube, the image must be loaded into
-the cluster's local image cache (see Prerequisites). For a
-real cluster with `imagePullPolicy: IfNotPresent`, the image must
-be available at the configured registry.
+For OrbStack, kind, or minikube, the image must be loaded into the
+cluster's local image cache (see Prerequisites). For a real
+cluster with `imagePullPolicy: IfNotPresent`, the image must be
+available at the configured registry.
 
-### Bootstrap pod ready but joiners stuck
+### `gastrolog-0` ready but joiners stuck
 
 Joiners can't reach the bootstrap's HTTP endpoint. Check:
 
 ```sh
-kubectl -n gastrolog logs gastrolog-joiner-0 | grep -i bootstrap
+kubectl -n gastrolog logs gastrolog-1 | grep -i bootstrap
 ```
 
 If you see "endpoint rejected secret" 401s, the
-`bootstrap_token_secret` doesn't match between the bootstrap's
+`bootstrap_token_secret` doesn't match between `gastrolog-0`'s
 `GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET` and the joiner's
-`GASTROLOG_BOOTSTRAP_TOKEN_SECRET`. Both reference the same
-Secret key, so this means the Secret was rotated mid-run; restart
-the bootstrap pod to pick up the new value.
+`GASTROLOG_BOOTSTRAP_TOKEN_SECRET`. Both pods read the same Secret
+key via the shared `BOOTSTRAP_TOKEN_SHARED_SECRET` env var, so this
+means the Secret was rotated mid-run; restart `gastrolog-0` to
+pick up the new value.
 
 ### `/readyz` returns 503
 
@@ -238,5 +259,5 @@ vault FSMs haven't applied any log entries yet. Wait 10-30
 seconds. If readiness doesn't recover, check the FSM logs:
 
 ```sh
-kubectl -n gastrolog logs gastrolog-bootstrap-0 | grep -iE 'fsm|catch'
+kubectl -n gastrolog logs gastrolog-0 | grep -iE 'fsm|catch'
 ```

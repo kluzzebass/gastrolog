@@ -51,7 +51,7 @@ To run unattended (no interactive admin prompt):
 ```sh
 gastrolog server \
   --initial-admin-user admin \
-  --initial-admin-password change-me-please
+  --initial-admin-password change-me
 ```
 
 ## Multi-node cluster (development)

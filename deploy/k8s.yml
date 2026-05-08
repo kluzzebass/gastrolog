@@ -1,22 +1,26 @@
-# GastroLog Kubernetes manifests: bootstrap + joiner StatefulSets,
-# headless Service for stable per-pod DNS, ConfigMap for non-secret
-# config, Secret for admin credentials and bootstrap-token shared
-# secret.
+# GastroLog Kubernetes manifests: single StatefulSet, headless Service
+# for stable per-pod DNS, ConfigMap for non-secret config, Secret for
+# admin credentials and bootstrap-token shared secret.
 #
 # Apply:
-#   kubectl apply -f statefulset.yml
+#   kubectl apply -f k8s.yml
 #   open http://localhost:30564 (NodePort) or use port-forward
 #
-# Two StatefulSets give clean role differentiation: gastrolog-bootstrap
-# (replicas: 1) is the cluster founder; gastrolog-joiner (replicas: 2+)
-# enrolls with it. This avoids hostname-parsing in the entrypoint and
-# lets each role have its own env vars naturally.
+# Naming: cluster nodes are `gastrolog-0` (bootstrap), `gastrolog-1`,
+# `gastrolog-2`, ... — pod name = hostname = GASTROLOG_NAME, so what
+# you see in `kubectl get pods` matches what's in the gastrolog UI.
+#
+# Role detection: pod 0 is always the bootstrap; pods 1..N-1 are
+# joiners. The container's `command:` wrapper branches on
+# `${HOSTNAME##*-}` to set bootstrap-vs-joiner env vars at startup —
+# this is the only way to get per-ordinal env in a StatefulSet
+# (Kubernetes env substitution doesn't have conditionals).
 #
 # Token delivery uses the HTTP endpoint path (gastrolog-o9z6o):
-# bootstrap serves /cluster/bootstrap-token gated on a shared secret;
-# joiners poll the URL with backoff. K8s pods don't natively share
-# volumes between replicas, so the file-based path that works in
-# Compose/Swarm doesn't fit here as cleanly.
+# pod 0 serves /cluster/bootstrap-token gated on a shared secret;
+# joiners poll the URL with backoff. Same secret value flows to every
+# pod via the gastrolog-secrets Secret; the wrapper picks which
+# direction (serve vs consume) based on ordinal.
 
 ---
 apiVersion: v1
@@ -26,7 +30,7 @@ metadata:
 
 ---
 # Headless Service — gives each pod a stable DNS name
-# (e.g. gastrolog-bootstrap-0.gastrolog-headless.gastrolog.svc.cluster.local).
+# (e.g. gastrolog-0.gastrolog-headless.gastrolog.svc.cluster.local).
 # clusterIP: None disables the routing-mesh VIP, so DNS returns the
 # pod's actual IP — required for Raft peer-to-peer communication.
 apiVersion: v1
@@ -62,7 +66,7 @@ spec:
       nodePort: 30564
 
 ---
-# Non-secret config shared by both StatefulSets.
+# Non-secret config shared by all pods.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -71,11 +75,6 @@ metadata:
 data:
   GASTROLOG_LISTEN: ":4564"
   GASTROLOG_CLUSTER_ADDR: "auto"
-  # tasks.<headless-service> resolves to all pod IPs of the named
-  # StatefulSet via headless-service DNS. Joiners use this to find
-  # the bootstrap. Only resolves once gastrolog-bootstrap-0 is
-  # ready, which is exactly when the joiner needs it.
-  GASTROLOG_JOIN_ADDR: "gastrolog-bootstrap-0.gastrolog-headless.gastrolog.svc.cluster.local:4566"
 
 ---
 # Secret for admin credentials + the bootstrap-token shared secret.
@@ -90,29 +89,28 @@ metadata:
 type: Opaque
 stringData:
   admin_creds: |
-    {"username": "admin", "password": "change-me-please"}
+    {"username": "admin", "password": "change-me"}
   bootstrap_token_secret: "rotate-this-secret-please"
 
 ---
-# Bootstrap StatefulSet — replicas: 1, generates the cluster TLS
-# and join token, serves the token via /cluster/bootstrap-token.
+# Single StatefulSet. Default replicas: 3 (bootstrap + 2 joiners).
+# Scale via `just deploy kubernetes-expand N` / `kubernetes-scale N`.
+# Floor of 3 — anything less drops below quorum tolerance.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: gastrolog-bootstrap
+  name: gastrolog
   namespace: gastrolog
 spec:
   serviceName: gastrolog-headless
-  replicas: 1
+  replicas: 3
   selector:
     matchLabels:
       app: gastrolog
-      role: bootstrap
   template:
     metadata:
       labels:
         app: gastrolog
-        role: bootstrap
     spec:
       containers:
         - name: gastrolog
@@ -127,116 +125,34 @@ spec:
             - configMapRef:
                 name: gastrolog-config
           env:
-            - name: GASTROLOG_NAME
-              value: bootstrap
             - name: GASTROLOG_INITIAL_ADMIN_FILE
               value: /etc/gastrolog/admin_creds
-            - name: GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET
+            # Token-delivery secret. Wrapper exports it as either
+            # GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET (pod 0) or
+            # GASTROLOG_BOOTSTRAP_TOKEN_SECRET (pods 1..N-1).
+            - name: BOOTSTRAP_TOKEN_SHARED_SECRET
               valueFrom:
                 secretKeyRef:
                   name: gastrolog-secrets
                   key: bootstrap_token_secret
-            # Bootstrap doesn't need --join-addr — overriding the
-            # ConfigMap default with empty so the binary doesn't try
-            # to enroll itself.
-            - name: GASTROLOG_JOIN_ADDR
-              value: ""
-          volumeMounts:
-            - name: config
-              mountPath: /config
-            - name: vaults
-              mountPath: /vaults
-            - name: secrets
-              mountPath: /etc/gastrolog
-              readOnly: true
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: 4564
-            initialDelaySeconds: 10
-            periodSeconds: 10
-          readinessProbe:
-            httpGet:
-              path: /readyz
-              port: 4564
-            initialDelaySeconds: 5
-            periodSeconds: 5
-      volumes:
-        - name: secrets
-          secret:
-            secretName: gastrolog-secrets
-            defaultMode: 0o400
-            items:
-              - key: admin_creds
-                path: admin_creds
-  volumeClaimTemplates:
-    - metadata:
-        name: config
-      spec:
-        accessModes: ["ReadWriteOnce"]
-        resources:
-          requests:
-            storage: 1Gi
-    - metadata:
-        name: vaults
-      spec:
-        accessModes: ["ReadWriteOnce"]
-        resources:
-          requests:
-            storage: 10Gi
-
----
-# Joiner StatefulSet — replicas: 2, polls the bootstrap pod for the
-# join token via the HTTP endpoint, enrolls, and joins the Raft
-# cluster.
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: gastrolog-joiner
-  namespace: gastrolog
-spec:
-  serviceName: gastrolog-headless
-  replicas: 2
-  selector:
-    matchLabels:
-      app: gastrolog
-      role: joiner
-  template:
-    metadata:
-      labels:
-        app: gastrolog
-        role: joiner
-    spec:
-      containers:
-        - name: gastrolog
-          image: gastrolog:test
-          imagePullPolicy: IfNotPresent
-          ports:
-            - containerPort: 4564
-              name: http
-            - containerPort: 4566
-              name: cluster
-          envFrom:
-            - configMapRef:
-                name: gastrolog-config
-          env:
-            # Each pod's hostname is gastrolog-joiner-0, gastrolog-joiner-1, ...
-            # Use that as the node name for stable identity.
-            - name: HOSTNAME_FROM_DOWNWARD
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
-            - name: GASTROLOG_NAME
-              value: $(HOSTNAME_FROM_DOWNWARD)
-            - name: GASTROLOG_INITIAL_ADMIN_FILE
-              value: /etc/gastrolog/admin_creds
-            - name: GASTROLOG_BOOTSTRAP_TOKEN_URL
-              value: "http://gastrolog-bootstrap-0.gastrolog-headless.gastrolog.svc.cluster.local:4564/cluster/bootstrap-token"
-            - name: GASTROLOG_BOOTSTRAP_TOKEN_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: gastrolog-secrets
-                  key: bootstrap_token_secret
+          # Per-ordinal role detection. Pod 0 is the bootstrap; pods
+          # 1..N-1 are joiners. Pod hostname is `gastrolog-N` (matches
+          # the StatefulSet's pod naming), so $HOSTNAME = the gastrolog
+          # node name directly.
+          command:
+            - /bin/sh
+            - -c
+            - |
+              export GASTROLOG_NAME=$HOSTNAME
+              ord=${HOSTNAME##*-}
+              if [ "$ord" = "0" ]; then
+                export GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET=$BOOTSTRAP_TOKEN_SHARED_SECRET
+              else
+                export GASTROLOG_JOIN_ADDR=gastrolog-0.gastrolog-headless.gastrolog.svc.cluster.local:4566
+                export GASTROLOG_BOOTSTRAP_TOKEN_URL=http://gastrolog-0.gastrolog-headless.gastrolog.svc.cluster.local:4564/cluster/bootstrap-token
+                export GASTROLOG_BOOTSTRAP_TOKEN_SECRET=$BOOTSTRAP_TOKEN_SHARED_SECRET
+              fi
+              exec /docker-entrypoint.sh server
           volumeMounts:
             - name: config
               mountPath: /config

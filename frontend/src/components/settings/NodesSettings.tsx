@@ -19,6 +19,7 @@ import { SettingsCard } from "./SettingsCard";
 import { FormField, TextInput } from "./FormField";
 import { Button } from "./Buttons";
 import { sortByName } from "../../lib/sort";
+import { middleTruncate } from "../../utils/middleTruncate";
 
 function roleName(role: ClusterNodeRole): string {
   switch (role) {
@@ -339,8 +340,7 @@ function JoinInfoCard({ dark, joinToken, clusterAddress }: Readonly<{ dark: bool
   const c = useThemeClass(dark);
   const [showToken, setShowToken] = useState(false);
 
-  const maskedToken = joinToken.slice(0, 8) + "..." + joinToken.slice(-4);
-  const displayToken = showToken ? joinToken : maskedToken;
+  const displayToken = showToken ? joinToken : middleTruncate(joinToken, 13, 8, 4);
 
   const joinCmd = `gastrolog server --join-addr ${clusterAddress || "<cluster-addr>"} --join-token ${joinToken} --cluster-addr :4575`;
 

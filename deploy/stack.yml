@@ -19,7 +19,7 @@
 #     (joiner-1, joiner-2, ...) with separate volumes per service.
 #
 # Deploy:
-#   echo '{"username": "admin", "password": "change-me-please"}' \
+#   echo '{"username": "admin", "password": "change-me"}' \
 #     | docker secret create gastrolog_admin_creds -
 #   docker stack deploy -c stack.yml gastrolog
 #
@@ -28,11 +28,13 @@
 #   docker secret rm gastrolog_admin_creds   # if you don't want to reuse it
 
 services:
+  # Swarm service name stays `bootstrap` (operator-facing in `docker
+  # service ls`); the gastrolog node name is `gastrolog-0` (UI-facing).
   bootstrap:
-    image: gastrolog:test           # change to ghcr.io/kluzzebass/gastrolog:latest for a release image
-    hostname: bootstrap
+    image: gastrolog:test # change to ghcr.io/kluzzebass/gastrolog:latest for a release image
+    hostname: gastrolog-0
     environment:
-      GASTROLOG_NAME: bootstrap
+      GASTROLOG_NAME: gastrolog-0
       # `auto` makes the entrypoint resolve the container's hostname to
       # its overlay IP and use that as cluster-addr. Required for Swarm
       # and Kubernetes overlay networking, where service-name DNS
@@ -66,11 +68,12 @@ services:
         order: start-first
         failure_action: rollback
 
+  # Swarm service name stays `joiner-1`; gastrolog node name is `gastrolog-1`.
   joiner-1:
     image: gastrolog:test
-    hostname: joiner-1
+    hostname: gastrolog-1
     environment:
-      GASTROLOG_NAME: joiner-1
+      GASTROLOG_NAME: gastrolog-1
       GASTROLOG_CLUSTER_ADDR: auto
       # tasks.<service> DNS resolves to the bootstrap's overlay IP from
       # any peer container. Only used at join time (after the bootstrap
@@ -99,7 +102,7 @@ services:
   # ── Cloud storage ────────────────────────────────────────────────
   minio:
     image: minio/minio:latest
-    command: ["server", "/data", "--console-address=:9001"]
+    command: [ "server", "/data", "--console-address=:9001" ]
     environment:
       MINIO_ROOT_USER: gastrolog
       MINIO_ROOT_PASSWORD: gastrolog
@@ -108,7 +111,7 @@ services:
     networks:
       - gastrolog
     deploy:
-      placement: { constraints: [node.role == manager] }
+      placement: { constraints: [ node.role == manager ] }
 
   azurite:
     image: mcr.microsoft.com/azure-storage/azurite:latest
@@ -123,7 +126,7 @@ services:
     networks:
       - gastrolog
     deploy:
-      placement: { constraints: [node.role == manager] }
+      placement: { constraints: [ node.role == manager ] }
 
   fake-gcs:
     image: fsouza/fake-gcs-server:latest
@@ -138,7 +141,7 @@ services:
     networks:
       - gastrolog
     deploy:
-      placement: { constraints: [node.role == manager] }
+      placement: { constraints: [ node.role == manager ] }
 
   # ── Kafka (KRaft, single-node) ──────────────────────────────────
   # Same trick as in k8s-deps.yml: controller talks to itself via
@@ -158,7 +161,7 @@ services:
     networks:
       - gastrolog
     deploy:
-      placement: { constraints: [node.role == manager] }
+      placement: { constraints: [ node.role == manager ] }
 
   kafka-init:
     image: apache/kafka:latest
@@ -179,7 +182,7 @@ services:
       - gastrolog
     deploy:
       restart_policy: { condition: none }
-      placement: { constraints: [node.role == manager] }
+      placement: { constraints: [ node.role == manager ] }
 
   kafka-producer:
     image: apache/kafka:latest
@@ -203,7 +206,7 @@ services:
     networks:
       - gastrolog
     deploy:
-      placement: { constraints: [node.role == manager] }
+      placement: { constraints: [ node.role == manager ] }
 
   # ── rsyslog ──────────────────────────────────────────────────────
   # Config rewrites host.docker.internal → tasks.gastrolog_bootstrap so
@@ -244,7 +247,7 @@ services:
     networks:
       - gastrolog
     deploy:
-      placement: { constraints: [node.role == manager] }
+      placement: { constraints: [ node.role == manager ] }
 
   # ── Fluent Bit ───────────────────────────────────────────────────
   fluent-bit:
@@ -256,7 +259,7 @@ services:
     networks:
       - gastrolog
     deploy:
-      placement: { constraints: [node.role == manager] }
+      placement: { constraints: [ node.role == manager ] }
 
 volumes:
   cluster-token:

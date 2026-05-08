@@ -39,11 +39,11 @@ The fastest path:
 docker run --rm -p 4564:4564 \
   -v gastrolog-config:/config -v gastrolog-vaults:/vaults \
   -e GASTROLOG_INITIAL_ADMIN_USER=admin \
-  -e GASTROLOG_INITIAL_ADMIN_PASSWORD=change-me-please \
+  -e GASTROLOG_INITIAL_ADMIN_PASSWORD=change-me \
   ghcr.io/kluzzebass/gastrolog:latest
 ```
 
-Open http://localhost:4564 and log in as `admin` / `change-me-please`.
+Open http://localhost:4564 and log in as `admin` / `change-me`.
 
 Configuration via environment variables is documented in [`docs/container_environment.md`](./docs/container_environment.md). For the binary's CLI flags, run `gastrolog server --help` or see [docs/deployment/uncontainerized.md](./docs/deployment/uncontainerized.md).
 

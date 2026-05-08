@@ -44,7 +44,7 @@ quickstart-up: image
     docker run --rm -d --name gtest-quickstart -p 5564:4564 \
       -v gtest-quickstart-config:/config -v gtest-quickstart-vaults:/vaults \
       -e GASTROLOG_INITIAL_ADMIN_USER=admin \
-      -e GASTROLOG_INITIAL_ADMIN_PASSWORD=change-me-please \
+      -e GASTROLOG_INITIAL_ADMIN_PASSWORD=change-me \
       gastrolog:test >/dev/null
     echo "Waiting for /readyz=200..."
     for i in $(seq 1 30); do
@@ -54,9 +54,9 @@ quickstart-up: image
     curl -s -o /dev/null -w "  /readyz=%{http_code}\n" http://localhost:5564/readyz
     curl -s -o /dev/null -w "  login=%{http_code}\n" -X POST -H 'Content-Type: application/json' \
       http://localhost:5564/gastrolog.v1.AuthService/Login \
-      -d '{"username":"admin","password":"change-me-please"}'
+      -d '{"username":"admin","password":"change-me"}'
     echo ""
-    echo "Cluster running at http://localhost:5564 (admin/change-me-please)"
+    echo "Cluster running at http://localhost:5564 (admin/change-me)"
     echo "Tear down with: just deploy quickstart-down"
 
 # Tear down the single-node `docker run` cluster and remove its volumes.
@@ -71,18 +71,20 @@ quickstart-down:
 # Docker Compose 3-node cluster
 # ---------------------------------------------------------------------------
 
-# All compose-driven recipes use the same project name `gastrolog-deploy`.
-# That puts every service from every compose file (gastrolog cluster,
-# cloud-storage emulators, ingester sources) on the same project
-# default network, so gastrolog containers reach `minio:9000`,
-# `kafka:9092`, `rsyslog:514`, etc. by service name. Each compose
-# file is invoked from its own directory so its relative paths
-# (e.g. ./otel/config.yaml) resolve correctly.
-
-# Start a 3-node Docker Compose cluster + cloud storage + ingester sources.
-compose-up: image cloud-storage-up ingester-integration-up
+# Start a 3-node Docker Compose cluster + bundled deps (deps internal-only, no host ports).
+compose-up: image
     #!/usr/bin/env bash
     set -euo pipefail
+    # Push-service configs (rsyslog/otel/fluent-bit) reference
+    # `host.docker.internal` in the source files under
+    # test/ingester-integration/; we sed-substitute them to `gastrolog-0`
+    # (the bootstrap node's service-name) and write the result to
+    # /tmp/gastrolog-deploy/ where compose.yml bind-mounts them. Same
+    # approach as swarm-up's docker-config-create.
+    mkdir -p /tmp/gastrolog-deploy
+    sed 's/host\.docker\.internal/gastrolog-0/g' ../test/ingester-integration/rsyslog/rsyslog.conf  > /tmp/gastrolog-deploy/rsyslog.conf
+    sed 's/host\.docker\.internal/gastrolog-0/g' ../test/ingester-integration/otel/config.yaml      > /tmp/gastrolog-deploy/otel-config.yaml
+    sed 's/host\.docker\.internal/gastrolog-0/g' ../test/ingester-integration/fluent-bit/fluent-bit.conf > /tmp/gastrolog-deploy/fluent-bit.conf
     docker compose -p gastrolog-deploy -f compose.yml down -v 2>/dev/null || true
     docker compose -p gastrolog-deploy -f compose.yml up -d
     echo "Waiting for all 3 nodes ready..."
@@ -100,11 +102,11 @@ compose-up: image cloud-storage-up ingester-integration-up
     done
     curl -s -o /dev/null -w "  login=%{http_code}\n" -X POST -H 'Content-Type: application/json' \
       http://localhost:4564/gastrolog.v1.AuthService/Login \
-      -d '{"username":"admin","password":"change-me-please"}'
+      -d '{"username":"admin","password":"change-me"}'
+    docker exec -i gastrolog-0 sh < setup-deps.sh
     echo ""
-    echo "3-node Compose cluster running at http://localhost:4564 (admin/change-me-please)"
-    echo "Cloud storage:    minio:9000, azurite:10000, fake-gcs:4443 (from inside the cluster)"
-    echo "Ingester sources: kafka:9092, rsyslog:514, otel-collector:4317, fluent-bit:24224, …"
+    echo "3-node Compose cluster running at http://localhost:4564 (admin/change-me)"
+    echo "Cloud storage + ingester sources reachable on the project network only."
     echo "Tear down with: just deploy compose-down"
 
 # Tear down the Docker Compose cluster (gastrolog + deps) and remove its volumes.
@@ -112,8 +114,7 @@ compose-down:
     #!/usr/bin/env bash
     set -euo pipefail
     docker compose -p gastrolog-deploy -f compose.yml down -v >/dev/null 2>&1 || true
-    just ingester-integration-down >/dev/null 2>&1 || true
-    just cloud-storage-down >/dev/null 2>&1 || true
+    rm -rf /tmp/gastrolog-deploy
     echo "compose torn down"
 
 # ---------------------------------------------------------------------------
@@ -130,7 +131,7 @@ swarm-up: image
     set -euo pipefail
     docker swarm init 2>/dev/null || true
     docker secret rm gastrolog_admin_creds 2>/dev/null || true
-    echo '{"username":"admin","password":"change-me-please"}' | docker secret create gastrolog_admin_creds - >/dev/null
+    echo '{"username":"admin","password":"change-me"}' | docker secret create gastrolog_admin_creds - >/dev/null
     # Push-target host: bootstrap pod's overlay-resolvable name. Substituted
     # into the rsyslog / otel / fluent-bit configs as docker configs so the
     # ingester sources actually target the bundled gastrolog cluster.
@@ -163,77 +164,159 @@ swarm-up: image
     curl -s -o /dev/null -w "  /readyz=%{http_code}\n" http://localhost:4564/readyz
     curl -s -o /dev/null -w "  login=%{http_code}\n" -X POST -H 'Content-Type: application/json' \
       http://localhost:4564/gastrolog.v1.AuthService/Login \
-      -d '{"username":"admin","password":"change-me-please"}'
+      -d '{"username":"admin","password":"change-me"}'
+    boot=$(docker ps -q --filter label=com.docker.swarm.service.name=gastrolog_bootstrap | head -1)
+    docker exec -i -e SKIP_RSYSLOG=1 "$boot" sh < setup-deps.sh
     echo ""
-    echo "Swarm stack running at http://localhost:4564 (admin/change-me-please)"
-    echo "Cloud storage:    minio:9000, azurite:10000, fake-gcs:4443 (overlay service DNS)"
+    echo "Swarm stack running at http://localhost:4564 (admin/change-me)"
+    echo "Cloud storage:    minio:9000, azurite:10000, fake-gcs:4443 (auto-wired as CloudServices)"
     echo "Ingester sources: kafka:9092, otel-collector:4317, fluent-bit:24224"
     echo "(rsyslog is intentionally omitted on Swarm — see stack.yml)"
+    echo "Configure routes + vaults via the UI to start landing records."
     echo "Tear down with: just deploy swarm-down"
 
-# Each new joiner is its own service (`gastrolog_joiner-N`) because Swarm's
-# default node-local volumes mean replicas-of-one-service that schedule on
-# the same node would share /config and /vaults — fatal for Raft. The
-# stack.yml uses the same pattern (separate joiner-1 service); this recipe
-# keeps the convention going for joiner-2, joiner-3, ...
-#
-# Add one more joiner service to the running Swarm stack.
-swarm-expand:
+# Add COUNT more joiner services (default 1, e.g. `swarm-expand 4`).
+swarm-expand count="1":
     #!/usr/bin/env bash
     set -euo pipefail
+    # Each new joiner is its own service (gastrolog_joiner-N) because
+    # Swarm's default node-local volumes mean replicas-of-one-service
+    # that schedule on the same node would share /config and /vaults —
+    # fatal for Raft. stack.yml uses the same pattern for joiner-1.
     docker service ls | grep -q gastrolog_bootstrap || { echo "swarm stack not running — run swarm-up first"; exit 1; }
+    [[ "{{count}}" =~ ^[1-9][0-9]*$ ]] || { echo "count must be a positive integer, got '{{count}}'"; exit 1; }
     # `docker service ls --filter name=gastrolog_joiner` includes a header row;
     # tail -n +2 strips it. Counting lines = current joiner count.
     current=$(docker service ls --filter name=gastrolog_joiner | tail -n +2 | wc -l | tr -d ' ')
-    next=$((current + 1))
-    name=gastrolog_joiner-$next
-    echo "Adding $name..."
-    docker service create \
-      --name $name \
-      --network gastrolog_gastrolog \
-      --secret source=gastrolog_admin_creds,target=admin_creds \
-      --mount type=volume,source=gastrolog_cluster-token,target=/shared \
-      --mount type=volume,source=gastrolog_${name}-config,target=/config \
-      --mount type=volume,source=gastrolog_${name}-vaults,target=/vaults \
-      --env GASTROLOG_NAME=joiner-$next \
-      --env GASTROLOG_CLUSTER_ADDR=auto \
-      --env GASTROLOG_JOIN_ADDR=tasks.gastrolog_bootstrap:4566 \
-      --env GASTROLOG_BOOTSTRAP_TOKEN_FILE=/shared/token \
-      --env GASTROLOG_INITIAL_ADMIN_FILE=/run/secrets/admin_creds \
-      --replicas 1 \
-      --constraint node.role==manager \
-      gastrolog:test >/dev/null
-    echo "Waiting for $name to be 1/1..."
-    for i in $(seq 1 60); do
-      ok=$(docker service ls --filter name=$name | tail -n +2 | grep -c '1/1' || true)
-      [[ $ok == 1 ]] && break
-      sleep 2
+    for i in $(seq 1 {{count}}); do
+      next=$((current + i))
+      name=gastrolog_joiner-$next
+      echo "Adding $name (gastrolog-$next, $i of {{count}})..."
+      docker service create \
+        --name $name \
+        --network gastrolog_gastrolog \
+        --secret source=gastrolog_admin_creds,target=admin_creds \
+        --mount type=volume,source=gastrolog_cluster-token,target=/shared \
+        --mount type=volume,source=gastrolog_${name}-config,target=/config \
+        --mount type=volume,source=gastrolog_${name}-vaults,target=/vaults \
+        --hostname gastrolog-$next \
+        --env GASTROLOG_NAME=gastrolog-$next \
+        --env GASTROLOG_CLUSTER_ADDR=auto \
+        --env GASTROLOG_JOIN_ADDR=tasks.gastrolog_bootstrap:4566 \
+        --env GASTROLOG_BOOTSTRAP_TOKEN_FILE=/shared/token \
+        --env GASTROLOG_INITIAL_ADMIN_FILE=/run/secrets/admin_creds \
+        --replicas 1 \
+        --constraint node.role==manager \
+        gastrolog:test >/dev/null
+      echo "Waiting for $name to be 1/1..."
+      for j in $(seq 1 60); do
+        ok=$(docker service ls --filter name=$name | tail -n +2 | grep -c '1/1' || true)
+        [[ $ok == 1 ]] && break
+        sleep 2
+      done
     done
     docker service ls --filter name=gastrolog_
     echo ""
-    echo "Cluster state from bootstrap:"
     boot=$(docker ps -q --filter label=com.docker.swarm.service.name=gastrolog_bootstrap | head -1)
+    # Wire `disk-1` storage on the new joiner(s). Idempotent.
+    docker exec -i "$boot" sh < add-storage.sh
+    echo ""
+    echo "Cluster state from bootstrap:"
     docker exec "$boot" /gastrolog --home /config cluster status | tail -10
 
-# Remove the highest-numbered joiner from the running Swarm stack and clean up its volumes.
-swarm-contract:
+# Set absolute node count (bootstrap + joiners) to TOTAL; floor 3 (`swarm-scale 5`).
+swarm-scale total:
     #!/usr/bin/env bash
     set -euo pipefail
-    # docker service ls table: ID NAME MODE REPLICAS IMAGE PORTS — name is column 2.
-    last=$(docker service ls --filter name=gastrolog_joiner | tail -n +2 | awk '{print $2}' | sort -V | tail -1)
-    [[ -n "$last" ]] || { echo "no joiner services to remove"; exit 1; }
-    [[ "$last" == "gastrolog_joiner-1" ]] && { echo "refusing to drop below 1 joiner — would leave bootstrap alone"; exit 1; }
-    # Remove from Raft membership FIRST. Otherwise the dropped service
-    # leaves an orphan voter behind and `cluster status` keeps reporting
-    # the now-dead peer until quorum problems force operator intervention.
+    # Floor of 3 (bootstrap + 2 joiners). With only 2 nodes total quorum
+    # is 2; losing either halts writes with no automatic recovery.
+    [[ "{{total}}" =~ ^[1-9][0-9]*$ && {{total}} -ge 3 ]] || { echo "total must be an integer >= 3 (bootstrap + 2 joiners minimum), got '{{total}}'"; exit 1; }
+    docker service ls | grep -q gastrolog_bootstrap || { echo "swarm stack not running — run swarm-up first"; exit 1; }
+    target=$(({{total}} - 1))
+    current=$(docker service ls --filter name=gastrolog_joiner | tail -n +2 | wc -l | tr -d ' ')
     boot=$(docker ps -q --filter label=com.docker.swarm.service.name=gastrolog_bootstrap | head -1)
-    nodename=joiner-${last##*-}
-    echo "Removing $nodename from Raft membership..."
-    docker exec "$boot" /gastrolog --home /config cluster remove-node "$nodename" >/dev/null 2>&1 || true
-    echo "Removing service $last..."
-    docker service rm $last >/dev/null
-    sleep 3
-    docker volume rm gastrolog_${last}-config gastrolog_${last}-vaults 2>/dev/null || true
+    if [[ $target -eq $current ]]; then
+      echo "Already at $current joiners (total {{total}} nodes); nothing to do"
+      exit 0
+    fi
+    if [[ $target -gt $current ]]; then
+      echo "Scaling joiners $current → $target (total {{total}} nodes)..."
+      for i in $(seq $((current + 1)) $target); do
+        name=gastrolog_joiner-$i
+        echo "  Adding $name (gastrolog-$i)..."
+        docker service create \
+          --name $name \
+          --network gastrolog_gastrolog \
+          --secret source=gastrolog_admin_creds,target=admin_creds \
+          --mount type=volume,source=gastrolog_cluster-token,target=/shared \
+          --mount type=volume,source=gastrolog_${name}-config,target=/config \
+          --mount type=volume,source=gastrolog_${name}-vaults,target=/vaults \
+          --hostname gastrolog-$i \
+          --env GASTROLOG_NAME=gastrolog-$i \
+          --env GASTROLOG_CLUSTER_ADDR=auto \
+          --env GASTROLOG_JOIN_ADDR=tasks.gastrolog_bootstrap:4566 \
+          --env GASTROLOG_BOOTSTRAP_TOKEN_FILE=/shared/token \
+          --env GASTROLOG_INITIAL_ADMIN_FILE=/run/secrets/admin_creds \
+          --replicas 1 \
+          --constraint node.role==manager \
+          gastrolog:test >/dev/null
+        for j in $(seq 1 60); do
+          ok=$(docker service ls --filter name=$name | tail -n +2 | grep -c '1/1' || true)
+          [[ $ok == 1 ]] && break
+          sleep 2
+        done
+      done
+    else
+      echo "Scaling joiners $current → $target (total {{total}} nodes)..."
+      for i in $(seq $current -1 $((target + 1))); do
+        last=gastrolog_joiner-$i
+        nodename=gastrolog-$i
+        echo "  Removing $nodename from Raft membership..."
+        docker exec "$boot" /gastrolog --home /config cluster remove-node "$nodename" >/dev/null 2>&1 || true
+        echo "  Removing service $last..."
+        docker service rm $last >/dev/null
+        sleep 3
+        docker volume rm gastrolog_${last}-config gastrolog_${last}-vaults 2>/dev/null || true
+      done
+    fi
+    docker service ls --filter name=gastrolog_
+    echo ""
+    # When growing, wire `disk-1` storage on the new joiner(s).
+    # Idempotent — skips existing nodes.
+    if [[ $target -gt $current ]]; then
+      docker exec -i "$boot" sh < add-storage.sh
+      echo ""
+    fi
+    echo "Cluster state from bootstrap:"
+    docker exec "$boot" /gastrolog --home /config cluster status | tail -10
+
+# Remove COUNT highest-numbered joiners (default 1, e.g. `swarm-contract 3`).
+swarm-contract count="1":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [[ "{{count}}" =~ ^[1-9][0-9]*$ ]] || { echo "count must be a positive integer, got '{{count}}'"; exit 1; }
+    # docker service ls table: ID NAME MODE REPLICAS IMAGE PORTS — name is column 2.
+    current=$(docker service ls --filter name=gastrolog_joiner | tail -n +2 | wc -l | tr -d ' ')
+    [[ $current -ge 1 ]] || { echo "no joiner services to remove"; exit 1; }
+    # Floor of 2 joiners (3 nodes total). With 2 nodes, quorum=2 — losing
+    # either halts writes with no automatic recovery.
+    target=$((current - {{count}}))
+    [[ $target -ge 2 ]] || { echo "refusing to shrink from $current to $target joiners — minimum is 2 to preserve quorum tolerance"; exit 1; }
+    boot=$(docker ps -q --filter label=com.docker.swarm.service.name=gastrolog_bootstrap | head -1)
+    for i in $(seq 1 {{count}}); do
+      last=$(docker service ls --filter name=gastrolog_joiner | tail -n +2 | awk '{print $2}' | sort -V | tail -1)
+      [[ -n "$last" ]] || { echo "ran out of joiner services after $((i - 1)) removals"; exit 1; }
+      # Remove from Raft membership FIRST. Otherwise the dropped service
+      # leaves an orphan voter behind and `cluster status` keeps reporting
+      # the now-dead peer until quorum problems force operator intervention.
+      nodename=gastrolog-${last##*-}
+      echo "Removing $nodename from Raft membership ($i of {{count}})..."
+      docker exec "$boot" /gastrolog --home /config cluster remove-node "$nodename" >/dev/null 2>&1 || true
+      echo "Removing service $last..."
+      docker service rm $last >/dev/null
+      sleep 3
+      docker volume rm gastrolog_${last}-config gastrolog_${last}-vaults 2>/dev/null || true
+    done
     echo ""
     echo "Cluster state from bootstrap:"
     docker exec "$boot" /gastrolog --home /config cluster status | tail -10
@@ -266,7 +349,7 @@ swarm-down:
 # Kubernetes (requires an active kubectl context)
 # ---------------------------------------------------------------------------
 
-# Apply the K8s StatefulSets (requires OrbStack/kind/minikube/real K8s context).
+# Apply the K8s StatefulSet (requires OrbStack/kind/minikube/real K8s context).
 kubernetes-up: image
     #!/usr/bin/env bash
     set -euo pipefail
@@ -286,61 +369,125 @@ kubernetes-up: image
     curl -s -o /dev/null -w "  NodePort /readyz=%{http_code}\n" http://localhost:30564/readyz
     curl -s -o /dev/null -w "  login=%{http_code}\n" -X POST -H 'Content-Type: application/json' \
       http://localhost:30564/gastrolog.v1.AuthService/Login \
-      -d '{"username":"admin","password":"change-me-please"}'
+      -d '{"username":"admin","password":"change-me"}'
+    kubectl -n gastrolog exec -i gastrolog-0 -- sh < setup-deps.sh
     echo ""
-    echo "K8s cluster running at http://localhost:30564 (admin/change-me-please)"
-    echo "Cloud storage:    minio:9000, azurite:10000, fake-gcs:4443 (in-cluster service DNS)"
-    echo "Ingester sources: kafka:9092, rsyslog:514, otel-collector:4317, fluent-bit:24224"
+    echo "K8s cluster running at http://localhost:30564 (admin/change-me)"
+    echo "Cloud storage + ingester sources reachable on the in-cluster service network only."
     echo "Tear down with: just deploy kubernetes-down"
 
-# K8s scales StatefulSets natively — each new pod gets its own PVC via
-# the volumeClaimTemplate, so unlike Swarm there's no need to spawn a
-# separate service per replica.
-#
-# Add one more replica to the joiner StatefulSet.
-kubernetes-expand:
+# Add COUNT more replicas to the gastrolog StatefulSet (default 1, e.g. `kubernetes-expand 4`).
+kubernetes-expand count="1":
     #!/usr/bin/env bash
     set -euo pipefail
-    kubectl -n gastrolog get sts gastrolog-joiner >/dev/null 2>&1 || { echo "K8s cluster not running — run kubernetes-up first"; exit 1; }
-    current=$(kubectl -n gastrolog get sts gastrolog-joiner -o jsonpath='{.spec.replicas}')
-    next=$((current + 1))
-    echo "Scaling gastrolog-joiner from $current to $next..."
-    kubectl -n gastrolog scale sts gastrolog-joiner --replicas=$next >/dev/null
-    echo "Waiting for new pod ready..."
-    for i in $(seq 1 60); do
-      ready=$(kubectl -n gastrolog get pods -l app=gastrolog,role=joiner -o jsonpath='{range .items[*]}{.status.containerStatuses[0].ready}{"\n"}{end}' 2>/dev/null | grep -c '^true$' || true)
+    # K8s scales StatefulSets natively — each new pod gets its own PVC
+    # via the volumeClaimTemplate, so unlike Swarm there's no need to
+    # spawn a separate service per replica.
+    kubectl -n gastrolog get sts gastrolog >/dev/null 2>&1 || { echo "K8s cluster not running — run kubernetes-up first"; exit 1; }
+    [[ "{{count}}" =~ ^[1-9][0-9]*$ ]] || { echo "count must be a positive integer, got '{{count}}'"; exit 1; }
+    current=$(kubectl -n gastrolog get sts gastrolog -o jsonpath='{.spec.replicas}')
+    next=$((current + {{count}}))
+    echo "Scaling gastrolog $current → $next..."
+    kubectl -n gastrolog scale sts gastrolog --replicas=$next >/dev/null
+    echo "Waiting for all $next pods ready..."
+    for i in $(seq 1 120); do
+      ready=$(kubectl -n gastrolog get pods -l app=gastrolog -o jsonpath='{range .items[*]}{.status.containerStatuses[0].ready}{"\n"}{end}' 2>/dev/null | grep -c '^true$' || true)
       [[ $ready == $next ]] && break
       sleep 3
     done
+    # Wire `disk-1` storage on the new pods (idempotent — skips
+    # existing nodes that already have it).
+    kubectl -n gastrolog exec -i gastrolog-0 -- sh < add-storage.sh
     kubectl -n gastrolog get pods
     echo ""
-    echo "Cluster state from bootstrap:"
-    kubectl -n gastrolog exec gastrolog-bootstrap-0 -- /gastrolog --home /config cluster status | tail -10
+    echo "Cluster state from gastrolog-0:"
+    kubectl -n gastrolog exec gastrolog-0 -- /gastrolog --home /config cluster status | tail -10
 
-# Remove the highest-ordinal joiner pod from the StatefulSet (and its PVC).
-kubernetes-contract:
+# Set absolute node count (bootstrap + joiners) to TOTAL; floor 3 (`kubernetes-scale 10`).
+kubernetes-scale total:
     #!/usr/bin/env bash
     set -euo pipefail
-    current=$(kubectl -n gastrolog get sts gastrolog-joiner -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 0)
-    [[ $current -le 1 ]] && { echo "refusing to drop below 1 joiner — would leave bootstrap alone"; exit 1; }
-    next=$((current - 1))
-    last=gastrolog-joiner-$next
-    # Remove from Raft membership FIRST. K8s scale-down kills the pod
-    # but doesn't tell Raft the voter is gone — without this step,
-    # `cluster status` keeps reporting the now-dead peer indefinitely.
-    echo "Removing $last from Raft membership..."
-    kubectl -n gastrolog exec gastrolog-bootstrap-0 -- /gastrolog --home /config cluster remove-node "$last" >/dev/null 2>&1 || true
-    echo "Scaling gastrolog-joiner from $current to $next (removing $last)..."
-    kubectl -n gastrolog scale sts gastrolog-joiner --replicas=$next >/dev/null
-    # PVCs are not auto-deleted by StatefulSet scale-down — the operator
-    # decides whether to keep them around for re-attach. For this test
-    # recipe we always discard them so contract is a true cluster shrink.
-    sleep 3
-    kubectl -n gastrolog delete pvc config-$last vaults-$last --ignore-not-found >/dev/null 2>&1 || true
+    # Floor of 3 (bootstrap + 2 joiners). With only 2 nodes total quorum
+    # is 2; losing either halts writes with no automatic recovery.
+    [[ "{{total}}" =~ ^[1-9][0-9]*$ && {{total}} -ge 3 ]] || { echo "total must be an integer >= 3 (bootstrap + 2 joiners minimum), got '{{total}}'"; exit 1; }
+    kubectl -n gastrolog get sts gastrolog >/dev/null 2>&1 || { echo "K8s cluster not running — run kubernetes-up first"; exit 1; }
+    current=$(kubectl -n gastrolog get sts gastrolog -o jsonpath='{.spec.replicas}')
+    target={{total}}
+    if [[ $target -eq $current ]]; then
+      echo "Already at $current pods (total {{total}} nodes); nothing to do"
+      exit 0
+    fi
+    echo "Scaling gastrolog $current → $target..."
+    if [[ $target -lt $current ]]; then
+      # Shrinking: remove voters from Raft FIRST so dead pods don't
+      # linger in `cluster status` as orphaned voters. Walk highest
+      # ordinal first to mirror the order K8s actually deletes pods.
+      # Pod ordinal == node name suffix (gastrolog-N), so the same
+      # name does double duty for `cluster remove-node` and PVC sweep.
+      for ord in $(seq $((current - 1)) -1 $target); do
+        echo "  Removing gastrolog-$ord from Raft membership..."
+        kubectl -n gastrolog exec gastrolog-0 -- /gastrolog --home /config cluster remove-node "gastrolog-$ord" >/dev/null 2>&1 || true
+      done
+    fi
+    kubectl -n gastrolog scale sts gastrolog --replicas=$target >/dev/null
+    if [[ $target -gt $current ]]; then
+      # Growing: wait for the new pods to be ready. StatefulSet creates
+      # pods in ordinal order, so the wait is roughly linear in delta.
+      echo "Waiting for all $target pods ready..."
+      for i in $(seq 1 120); do
+        ready=$(kubectl -n gastrolog get pods -l app=gastrolog -o jsonpath='{range .items[*]}{.status.containerStatuses[0].ready}{"\n"}{end}' 2>/dev/null | grep -c '^true$' || true)
+        [[ $ready == $target ]] && break
+        sleep 3
+      done
+    else
+      # Shrinking: PVCs aren't auto-deleted on scale-down — sweep them
+      # for the doomed ordinals so contract is a true cluster shrink.
+      sleep 3
+      for ord in $(seq $((current - 1)) -1 $target); do
+        kubectl -n gastrolog delete pvc config-gastrolog-$ord vaults-gastrolog-$ord --ignore-not-found >/dev/null 2>&1 || true
+      done
+    fi
+    # When growing, wire `disk-1` storage on the new pods. Idempotent
+    # — skips existing nodes. Skipped on shrink (nothing to add).
+    if [[ $target -gt $current ]]; then
+      kubectl -n gastrolog exec -i gastrolog-0 -- sh < add-storage.sh
+    fi
     kubectl -n gastrolog get pods
     echo ""
-    echo "Cluster state from bootstrap:"
-    kubectl -n gastrolog exec gastrolog-bootstrap-0 -- /gastrolog --home /config cluster status | tail -10
+    echo "Cluster state from gastrolog-0:"
+    kubectl -n gastrolog exec gastrolog-0 -- /gastrolog --home /config cluster status | tail -10
+
+# Remove COUNT highest-ordinal pods from the gastrolog StatefulSet (default 1, e.g. `kubernetes-contract 3`).
+kubernetes-contract count="1":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [[ "{{count}}" =~ ^[1-9][0-9]*$ ]] || { echo "count must be a positive integer, got '{{count}}'"; exit 1; }
+    current=$(kubectl -n gastrolog get sts gastrolog -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 0)
+    target=$((current - {{count}}))
+    # Floor of 3 nodes total (gastrolog-0 + 2 joiners). With 2 nodes,
+    # quorum=2 — losing either halts writes with no automatic recovery.
+    [[ $target -ge 3 ]] || { echo "refusing to shrink from $current to $target pods — minimum is 3 to preserve quorum tolerance"; exit 1; }
+    # Remove each pod-to-be-deleted from Raft membership FIRST. K8s
+    # scale-down kills pods but doesn't tell Raft the voters are gone;
+    # without this step `cluster status` keeps reporting them indefinitely.
+    # Walk highest-ordinal first to mirror the order K8s removes them.
+    for ord in $(seq $((current - 1)) -1 $target); do
+      echo "Removing gastrolog-$ord from Raft membership..."
+      kubectl -n gastrolog exec gastrolog-0 -- /gastrolog --home /config cluster remove-node "gastrolog-$ord" >/dev/null 2>&1 || true
+    done
+    echo "Scaling gastrolog $current → $target..."
+    kubectl -n gastrolog scale sts gastrolog --replicas=$target >/dev/null
+    # PVCs are not auto-deleted by StatefulSet scale-down — the operator
+    # decides whether to keep them around for re-attach. For this recipe
+    # we always discard them so contract is a true cluster shrink.
+    sleep 3
+    for ord in $(seq $((current - 1)) -1 $target); do
+      kubectl -n gastrolog delete pvc config-gastrolog-$ord vaults-gastrolog-$ord --ignore-not-found >/dev/null 2>&1 || true
+    done
+    kubectl -n gastrolog get pods
+    echo ""
+    echo "Cluster state from gastrolog-0:"
+    kubectl -n gastrolog exec gastrolog-0 -- /gastrolog --home /config cluster status | tail -10
 
 # Delete the K8s manifests, PVCs, and the namespace.
 kubernetes-down:
@@ -359,18 +506,17 @@ kubernetes-down:
 # Requires podman installed and `podman machine start` to be running.
 # Loads the docker-built gastrolog:test image into Podman's VM via save | load.
 #
-# Start a 3-node Podman cluster + cloud storage + ingester sources.
+# Start a 3-node Podman cluster + bundled deps (deps internal-only, no host ports).
 podman-up: image
     #!/usr/bin/env bash
     set -euo pipefail
     command -v podman >/dev/null || { echo "podman not installed — \`brew install podman\` first"; exit 1; }
     podman machine list 2>/dev/null | grep -q 'Currently running' || { echo "no running podman machine — \`podman machine init && podman machine start\` first"; exit 1; }
     docker save gastrolog:test | podman load >/dev/null
-    # Same project-name + same-network strategy as compose-up — bring
-    # up cloud-storage and ingester-integration in their own dirs first
-    # so paths resolve, then the gastrolog cluster.
-    (cd ../test/cloud-storage && podman compose -p gastrolog-deploy up -d)
-    (cd ../test/ingester-integration && podman compose -p gastrolog-deploy up --build -d)
+    mkdir -p /tmp/gastrolog-deploy
+    sed 's/host\.docker\.internal/gastrolog-0/g' ../test/ingester-integration/rsyslog/rsyslog.conf  > /tmp/gastrolog-deploy/rsyslog.conf
+    sed 's/host\.docker\.internal/gastrolog-0/g' ../test/ingester-integration/otel/config.yaml      > /tmp/gastrolog-deploy/otel-config.yaml
+    sed 's/host\.docker\.internal/gastrolog-0/g' ../test/ingester-integration/fluent-bit/fluent-bit.conf > /tmp/gastrolog-deploy/fluent-bit.conf
     podman compose -p gastrolog-deploy down -v 2>/dev/null || true
     podman compose -p gastrolog-deploy up -d
     echo "Waiting for all 3 nodes ready..."
@@ -388,11 +534,11 @@ podman-up: image
     done
     curl -s -o /dev/null -w "  login=%{http_code}\n" -X POST -H 'Content-Type: application/json' \
       http://localhost:4564/gastrolog.v1.AuthService/Login \
-      -d '{"username":"admin","password":"change-me-please"}'
+      -d '{"username":"admin","password":"change-me"}'
+    podman exec -i gastrolog-0 sh < setup-deps.sh
     echo ""
-    echo "3-node Podman cluster running at http://localhost:4564 (admin/change-me-please)"
-    echo "Cloud storage:    minio:9000, azurite:10000, fake-gcs:4443"
-    echo "Ingester sources: kafka:9092, rsyslog:514, otel-collector:4317, fluent-bit:24224, …"
+    echo "3-node Podman cluster running at http://localhost:4564 (admin/change-me)"
+    echo "Cloud storage + ingester sources reachable on the project network only."
     echo "Tear down with: just deploy podman-down"
 
 # Tear down the Podman cluster (gastrolog + deps) and remove its volumes.
@@ -400,8 +546,7 @@ podman-down:
     #!/usr/bin/env bash
     set -euo pipefail
     podman compose -p gastrolog-deploy down -v >/dev/null 2>&1 || true
-    (cd ../test/ingester-integration && podman compose -p gastrolog-deploy down -v >/dev/null 2>&1) || true
-    (cd ../test/cloud-storage && podman compose -p gastrolog-deploy down -v >/dev/null 2>&1) || true
+    rm -rf /tmp/gastrolog-deploy
     echo "podman torn down"
 
 # ---------------------------------------------------------------------------
@@ -431,7 +576,7 @@ uncontainerized-up:
       --listen :5564 \
       --cluster-addr :5566 \
       --initial-admin-user admin \
-      --initial-admin-password change-me-please \
+      --initial-admin-password change-me \
       >"$homedir/log" 2>&1 &
     echo $! > "$pidfile"
     echo "Waiting for /readyz=200..."
@@ -442,9 +587,9 @@ uncontainerized-up:
     curl -s -o /dev/null -w "  /readyz=%{http_code}\n" http://localhost:5564/readyz
     curl -s -o /dev/null -w "  login=%{http_code}\n" -X POST -H 'Content-Type: application/json' \
       http://localhost:5564/gastrolog.v1.AuthService/Login \
-      -d '{"username":"admin","password":"change-me-please"}'
+      -d '{"username":"admin","password":"change-me"}'
     echo ""
-    echo "Uncontainerized binary running at http://localhost:5564 (admin/change-me-please)"
+    echo "Uncontainerized binary running at http://localhost:5564 (admin/change-me)"
     echo "Logs: $homedir/log"
     echo "Tear down with: just deploy uncontainerized-down"
 

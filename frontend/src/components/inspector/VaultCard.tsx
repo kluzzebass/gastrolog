@@ -8,6 +8,7 @@ import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
 import type { VaultInfo, ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
 import { protoToInstant, instantToMs, instantToDate, formatDateTimeShort } from "../../utils/temporal";
 import { formatBytes } from "../../utils/units";
+import { middleTruncate } from "../../utils/middleTruncate";
 import { leaderNodeId, followerNodeIds } from "../../utils/placement";
 import { Badge } from "../Badge";
 import { CogIcon } from "../icons";
@@ -69,15 +70,6 @@ export function VaultCard({
       <ChunkList vaultId={encode(vault.id)} dark={dark} />
     </ExpandableCard>
   );
-}
-
-// Chunk IDs are 26-char base32 strings. Render as <8>…<5> so adjacent
-// rows stay distinguishable while fitting in a stable column width
-// without any layout-measurement library or flex tricks. Full ID is in
-// the title attribute.
-function middleTruncateChunkID(id: string): string {
-  if (id.length <= 16) return id;
-  return id.slice(0, 8) + "…" + id.slice(-5);
 }
 
 function VaultActions({
@@ -535,7 +527,7 @@ function ChunkRow({
             className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}
             title={encode(chunk.id)}
           >
-            {middleTruncateChunkID(encode(chunk.id))}
+            {middleTruncate(encode(chunk.id), 16, 8, 5)}
           </span>
         </td>
         <td className="px-2 py-2">

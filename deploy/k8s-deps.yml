@@ -9,20 +9,26 @@
 #   kafka:9092          rsyslog:514          otel-collector:4317
 #   fluent-bit:24224
 #
+# Each singleton dep is a StatefulSet (replicas: 1) rather than a
+# Deployment so pod names are stable and predictable
+# (`minio-0`, `kafka-0`, ...) instead of the
+# `<deployment>-<rs-hash>-<random>` triple Deployments produce.
+# Same control-loop semantics for our use case; better operator UX.
+#
 # Push services (rsyslog/otel/fluent-bit) carry their config from the
 # test/ingester-integration/<svc>/ files, with `host.docker.internal`
-# rewritten to `gastrolog-bootstrap-0.gastrolog-headless.gastrolog.svc.cluster.local`
-# so they target the bundled gastrolog cluster. Operators still need
-# to configure the matching ingester listeners in gastrolog itself.
+# rewritten to `gastrolog-0.gastrolog-headless.gastrolog.svc.cluster.local`
+# so they target the bundled gastrolog cluster's bootstrap pod.
 
 ---
 # ── Cloud storage ────────────────────────────────────────────────────
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: minio
   namespace: gastrolog
 spec:
+  serviceName: minio
   replicas: 1
   selector: { matchLabels: { app: minio } }
   template:
@@ -57,11 +63,12 @@ spec:
 
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: azurite
   namespace: gastrolog
 spec:
+  serviceName: azurite
   replicas: 1
   selector: { matchLabels: { app: azurite } }
   template:
@@ -100,11 +107,12 @@ spec:
 
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: fake-gcs
   namespace: gastrolog
 spec:
+  serviceName: fake-gcs
   replicas: 1
   selector: { matchLabels: { app: fake-gcs } }
   template:
@@ -147,11 +155,12 @@ spec:
 ---
 # ── Kafka (KRaft, single-node) ──────────────────────────────────────
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: kafka
   namespace: gastrolog
 spec:
+  serviceName: kafka
   replicas: 1
   selector: { matchLabels: { app: kafka } }
   template:
@@ -178,9 +187,9 @@ spec:
             - { containerPort: 9092 }
           # No readinessProbe: kafka-topics.sh is a heavy JVM invocation
           # that even with generous timeouts is racy. The downstream
-          # consumers (kafka-init Job, kafka-producer Deployment) have
-          # their own bootstrap-poll loops, so a Pod-level probe adds
-          # nothing — just gate on TCP if you need one externally.
+          # consumer (kafka-producer's initContainer) has its own
+          # bootstrap-poll loop, so a Pod-level probe adds nothing —
+          # just gate on TCP if you need one externally.
 
 ---
 apiVersion: v1
@@ -194,25 +203,33 @@ spec:
     - { port: 9092, targetPort: 9092 }
 
 ---
-# kafka-init: create the gastrolog-logs topic once Kafka is up.
-apiVersion: batch/v1
-kind: Job
+# kafka-producer: continuously produce test messages so the kafka
+# ingester always has fresh data. The topic-creation step runs as an
+# initContainer on this pod (formerly a separate Job called
+# kafka-init) so it doesn't pollute `kubectl get pods` with a
+# random-suffixed completed Job pod. The producer container only
+# starts once the initContainer succeeds, which guarantees the topic
+# exists by the time the first message lands.
+apiVersion: apps/v1
+kind: StatefulSet
 metadata:
-  name: kafka-init
+  name: kafka-producer
   namespace: gastrolog
 spec:
-  backoffLimit: 6
+  serviceName: kafka-producer
+  replicas: 1
+  selector: { matchLabels: { app: kafka-producer } }
   template:
+    metadata: { labels: { app: kafka-producer } }
     spec:
-      restartPolicy: OnFailure
-      containers:
+      initContainers:
         - name: kafka-init
           image: apache/kafka:latest
           command:
             - /bin/sh
             - -c
             - |
-              # Wait for Kafka to be ready then create the topic.
+              # Wait for Kafka to be reachable, then create the topic.
               for i in $(seq 1 60); do
                 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list >/dev/null 2>&1 && break
                 sleep 2
@@ -222,21 +239,6 @@ spec:
                 --create --if-not-exists \
                 --topic gastrolog-logs \
                 --partitions 1 --replication-factor 1
-
----
-# kafka-producer: continuously produce test messages so the kafka
-# ingester always has fresh data.
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: kafka-producer
-  namespace: gastrolog
-spec:
-  replicas: 1
-  selector: { matchLabels: { app: kafka-producer } }
-  template:
-    metadata: { labels: { app: kafka-producer } }
-    spec:
       containers:
         - name: kafka-producer
           image: apache/kafka:latest
@@ -244,11 +246,6 @@ spec:
             - /bin/sh
             - -c
             - |
-              # Wait for the topic to exist (created by kafka-init Job).
-              for i in $(seq 1 60); do
-                /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --describe --topic gastrolog-logs >/dev/null 2>&1 && break
-                sleep 2
-              done
               i=0
               while true; do
                 i=$((i + 1))
@@ -276,7 +273,7 @@ data:
 
     *.* action(
         type="omfwd"
-        target="gastrolog-bootstrap-0.gastrolog-headless.gastrolog.svc.cluster.local"
+        target="gastrolog-0.gastrolog-headless.gastrolog.svc.cluster.local"
         port="1514"
         protocol="tcp"
         template="RSYSLOG_SyslogProtocol23Format"
@@ -284,18 +281,19 @@ data:
 
     *.* action(
         type="omrelp"
-        target="gastrolog-bootstrap-0.gastrolog-headless.gastrolog.svc.cluster.local"
+        target="gastrolog-0.gastrolog-headless.gastrolog.svc.cluster.local"
         port="2514"
         template="RSYSLOG_SyslogProtocol23Format"
     )
 
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: rsyslog
   namespace: gastrolog
 spec:
+  serviceName: rsyslog
   replicas: 1
   selector: { matchLabels: { app: rsyslog } }
   template:
@@ -341,7 +339,7 @@ data:
 
     exporters:
       otlp/gastrolog:
-        endpoint: gastrolog-bootstrap-0.gastrolog-headless.gastrolog.svc.cluster.local:4317
+        endpoint: gastrolog-0.gastrolog-headless.gastrolog.svc.cluster.local:4317
         tls:
           insecure: true
 
@@ -358,11 +356,12 @@ data:
 
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: otel-collector
   namespace: gastrolog
 spec:
+  serviceName: otel-collector
   replicas: 1
   selector: { matchLabels: { app: otel-collector } }
   template:
@@ -415,23 +414,24 @@ data:
     [OUTPUT]
         Name         forward
         Match        *
-        Host         gastrolog-bootstrap-0.gastrolog-headless.gastrolog.svc.cluster.local
+        Host         gastrolog-0.gastrolog-headless.gastrolog.svc.cluster.local
         Port         24224
 
     [OUTPUT]
         Name         loki
         Match        *
-        Host         gastrolog-bootstrap-0.gastrolog-headless.gastrolog.svc.cluster.local
+        Host         gastrolog-0.gastrolog-headless.gastrolog.svc.cluster.local
         Port         3100
         Labels       job=fluent-bit
 
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: fluent-bit
   namespace: gastrolog
 spec:
+  serviceName: fluent-bit
   replicas: 1
   selector: { matchLabels: { app: fluent-bit } }
   template:
