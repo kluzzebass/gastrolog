@@ -26,7 +26,10 @@ NODE_NAMES=$(glog config node list -o json | sed -n 's/.*"name"[[:space:]]*:[[:s
 ADDED=0
 SKIPPED=0
 for n in $NODE_NAMES; do
-  if glog config node list-storage "$n" -o json 2>/dev/null | grep -q '"name"[[:space:]]*:[[:space:]]*"disk-1"'; then
+  # `list-storage <node> -o json` ignores the node filter and returns
+  # the full system list (CLI bug); use the text format which IS
+  # filtered server-side, then grep for `disk-1` as a whole word.
+  if glog config node list-storage "$n" 2>/dev/null | grep -qw disk-1; then
     SKIPPED=$((SKIPPED + 1))
   else
     glog config node add-storage "$n" \
