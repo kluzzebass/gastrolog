@@ -52,21 +52,10 @@ cloc:
     @echo "Repository: $(basename $(git rev-parse --show-toplevel))"
     @cloc --vcs=git --exclude-ext=lock,sum
 
-# Start cloud storage emulators (MinIO, Azurite, fake-gcs-server)
-cloud-storage-up:
-    docker compose -f test/cloud-storage/compose.yml up -d
-
-# Tear down cloud storage emulators
-cloud-storage-down:
-    docker compose -f test/cloud-storage/compose.yml down -v
-
-# Start ingester integration test environment (all ingesters + real services)
-ingester-integration-up:
-    docker compose -f test/ingester-integration/compose.yml up --build -d
-
-# Tear down ingester integration test environment
-ingester-integration-down:
-    docker compose -f test/ingester-integration/compose.yml down -v
+# cloud-storage and ingester-integration recipes moved into deploy/justfile —
+# they're deployments of supporting services (object storage, ingester
+# sources) that GastroLog talks to, useful both for tests and for local
+# dev work. Run them as `just deploy <recipe>`.
 
 # Run E2E tests (fully containerized — builds, starts cluster, runs Playwright, tears down)
 e2e:

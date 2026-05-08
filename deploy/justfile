@@ -418,6 +418,34 @@ uncontainerized-down:
     echo "uncontainerized torn down"
 
 # ---------------------------------------------------------------------------
+# Supporting-service deployments
+# ---------------------------------------------------------------------------
+#
+# Object storage and ingester-source services that GastroLog talks to.
+# These are deployments in their own right — equally useful for local
+# dev work (point a cloud-backed vault at the local MinIO, or feed
+# the local syslog/RELP/OTLP ingester from the integration stack) as
+# they are for automated testing. The compose files happen to live
+# under test/ for historical reasons; the recipes belong here with
+# the other deployments.
+
+# Start cloud storage emulators (MinIO, Azurite, fake-gcs-server) for cloud-backed vaults.
+cloud-storage-up:
+    docker compose -f ../test/cloud-storage/compose.yml up -d
+
+# Tear down cloud storage emulators.
+cloud-storage-down:
+    docker compose -f ../test/cloud-storage/compose.yml down -v
+
+# Start ingester-source environment (syslog, RELP, OTLP, MQTT, Kafka, Fluent Forward, etc.).
+ingester-integration-up:
+    docker compose -f ../test/ingester-integration/compose.yml up --build -d
+
+# Tear down ingester-source environment.
+ingester-integration-down:
+    docker compose -f ../test/ingester-integration/compose.yml down -v
+
+# ---------------------------------------------------------------------------
 # CI / smoke-test orchestration
 # ---------------------------------------------------------------------------
 
