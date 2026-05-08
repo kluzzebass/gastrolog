@@ -41,6 +41,11 @@ args="--home ${GASTROLOG_HOME} --vaults ${GASTROLOG_VAULTS}"
 [ -n "$GASTROLOG_BOOTSTRAP_TOKEN_URL" ]          && args="$args --bootstrap-token-url $GASTROLOG_BOOTSTRAP_TOKEN_URL"
 [ -n "$GASTROLOG_BOOTSTRAP_TOKEN_SECRET" ]       && args="$args --bootstrap-token-secret $GASTROLOG_BOOTSTRAP_TOKEN_SECRET"
 
+# Initial admin provisioning (gastrolog-3ot7r). Bootstrap node only.
+[ -n "$GASTROLOG_INITIAL_ADMIN_FILE" ]     && args="$args --initial-admin-file $GASTROLOG_INITIAL_ADMIN_FILE"
+[ -n "$GASTROLOG_INITIAL_ADMIN_USER" ]     && args="$args --initial-admin-user $GASTROLOG_INITIAL_ADMIN_USER"
+[ -n "$GASTROLOG_INITIAL_ADMIN_PASSWORD" ] && args="$args --initial-admin-password $GASTROLOG_INITIAL_ADMIN_PASSWORD"
+
 # Bool env vars use truthy semantics: only 1/true/yes/y/on enable the flag.
 is_truthy "$GASTROLOG_NO_AUTH" && args="$args --no-auth"
 

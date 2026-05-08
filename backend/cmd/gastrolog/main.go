@@ -95,6 +95,10 @@ func main() {
 				BootstrapTokenURL:         mustString(cmd, "bootstrap-token-url"),
 				BootstrapTokenSecret:      mustString(cmd, "bootstrap-token-secret"),
 
+				InitialAdminFile:     mustString(cmd, "initial-admin-file"),
+				InitialAdminUser:     mustString(cmd, "initial-admin-user"),
+				InitialAdminPassword: mustString(cmd, "initial-admin-password"),
+
 				SlogCapture:        slogCaptureCh,
 				SlogCaptureHandler: captureHandler,
 			}
@@ -121,6 +125,12 @@ func main() {
 	serverCmd.Flags().String("bootstrap-token-serve-secret", "", "bootstrap node only: serve the join token at GET /cluster/bootstrap-token, gated on this secret (empty disables endpoint)")
 	serverCmd.Flags().String("bootstrap-token-url", "", "joiner only: fetch the join token from this URL, polling with backoff (alternative to --join-token); pair with --bootstrap-token-secret")
 	serverCmd.Flags().String("bootstrap-token-secret", "", "joiner only: secret sent in the X-Bootstrap-Token-Secret header when fetching from --bootstrap-token-url")
+
+	// Initial admin provisioning (gastrolog-3ot7r). Bootstrap node only;
+	// no-op once any user exists.
+	serverCmd.Flags().String("initial-admin-file", "", "bootstrap node only: read initial admin credentials from this file (JSON {\"username\":..., \"password\":...} or \"username:password\" line)")
+	serverCmd.Flags().String("initial-admin-user", "", "bootstrap node only: initial admin username (paired with --initial-admin-password); ignored if --initial-admin-file is set")
+	serverCmd.Flags().String("initial-admin-password", "", "bootstrap node only: initial admin password (paired with --initial-admin-user); ignored if --initial-admin-file is set")
 
 	versionCmd := &cobra.Command{
 		Use:   "version",

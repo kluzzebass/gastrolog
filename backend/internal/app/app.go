@@ -105,6 +105,20 @@ type RunConfig struct {
 	BootstrapTokenURL         string
 	BootstrapTokenSecret      string
 
+	// Initial admin provisioning (gastrolog-3ot7r).
+	//
+	// When set on a bootstrap node (no --join-addr) and no users exist
+	// in the cluster yet, an admin user is created at startup. The
+	// existing first-access UI remains the default for unattended /
+	// interactive setups and serves as the fallback when no provisioning
+	// source is configured.
+	//
+	// Precedence: file > env. Once any user exists, both sources are
+	// no-ops (idempotency — restarts don't re-provision).
+	InitialAdminFile     string
+	InitialAdminUser     string
+	InitialAdminPassword string
+
 	// SlogCapture receives copies of slog records for the "self" ingester.
 	// Created by main and shared with the CaptureHandler. Nil disables capture.
 	SlogCapture <-chan logging.CapturedRecord
@@ -177,6 +191,14 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	appSys, fromLocalFSM, err := loadLocalConfig(ctx, logger, cfg, cfgStore, clusterTLS, nodeID)
 	if err != nil {
 		return err
+	}
+
+	// gastrolog-3ot7r: provision the initial admin user from --initial-admin-file
+	// or --initial-admin-user/--initial-admin-password if configured and no
+	// users exist yet. Joiners skip this entirely. The interactive
+	// first-access UI remains the fallback for any unconfigured bootstrap.
+	if err := provisionInitialAdmin(ctx, cfgStore, cfg, logger); err != nil {
+		return fmt.Errorf("provision initial admin: %w", err)
 	}
 
 	asyncNodeConfig := fromLocalFSM || appSys == nil

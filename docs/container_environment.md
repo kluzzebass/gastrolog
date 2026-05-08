@@ -33,6 +33,9 @@ operator-facing flag reference.
 | `GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET` | `--bootstrap-token-serve-secret` | string | Bootstrap node only: serve the join token at `GET /cluster/bootstrap-token`, gated on this shared secret. Empty disables. |
 | `GASTROLOG_BOOTSTRAP_TOKEN_URL` | `--bootstrap-token-url` | string | Joiner only: fetch the join token from this URL, polling with backoff. Pair with `GASTROLOG_BOOTSTRAP_TOKEN_SECRET`. |
 | `GASTROLOG_BOOTSTRAP_TOKEN_SECRET` | `--bootstrap-token-secret` | string | Joiner only: secret sent in the `X-Bootstrap-Token-Secret` header when fetching from `GASTROLOG_BOOTSTRAP_TOKEN_URL`. |
+| `GASTROLOG_INITIAL_ADMIN_FILE` | `--initial-admin-file` | string | Bootstrap node only: read initial admin credentials from this path. JSON `{"username": ..., "password": ...}` or single-line `username:password`. Wins over the env-var pair. No-op once any user exists. |
+| `GASTROLOG_INITIAL_ADMIN_USER` | `--initial-admin-user` | string | Bootstrap node only: initial admin username (paired with `GASTROLOG_INITIAL_ADMIN_PASSWORD`). No-op once any user exists. |
+| `GASTROLOG_INITIAL_ADMIN_PASSWORD` | `--initial-admin-password` | string | Bootstrap node only: initial admin password. **Prefer `GASTROLOG_INITIAL_ADMIN_FILE` for production** — env-var-based passwords show up in `docker inspect`, process listings, and Kubernetes Pod manifests. |
 
 ## Default-vs-explicit semantics
 
@@ -129,6 +132,52 @@ If multiple are set, precedence is:
 A joiner without `GASTROLOG_JOIN_ADDR` set is a bootstrap node, even
 if a bootstrap-token source is configured (the bootstrap-token sources
 are joiner-side and are no-ops without `--join-addr`).
+
+## Initial admin user
+
+A fresh GastroLog cluster has no users. Three ways to create the
+initial admin:
+
+1. **First-access UI (default).** When no one is registered, hitting
+   the dashboard at `http://<host>:4564` shows an admin-creation
+   screen. Username + password are entered interactively; the user
+   is created and the screen is replaced by the normal login flow
+   on next visit. This is the right answer for human-driven
+   single-node setups.
+
+2. **File-based provisioning** (recommended for production
+   orchestration). Set `GASTROLOG_INITIAL_ADMIN_FILE=/path/to/creds`
+   on the bootstrap node, with the file containing either:
+   - JSON: `{"username": "admin", "password": "..."}`, or
+   - One line: `admin:password-here`.
+   The file is read once at startup, the user is created with role
+   `admin`, and the first-access UI is suppressed. The file is best
+   mounted as a Kubernetes `Secret`-as-volume or a Compose secret.
+
+3. **Env-var provisioning.** Set `GASTROLOG_INITIAL_ADMIN_USER` +
+   `GASTROLOG_INITIAL_ADMIN_PASSWORD`. Same result as file-based,
+   but the password is visible to `docker inspect` and equivalent
+   tooling — fine for development, **avoid in production**.
+
+### Idempotency
+
+All three paths are first-user-only. Once any user exists in the
+cluster (created via any path), the file/env sources become no-ops
+on subsequent restarts. The operator's password changes are not
+overwritten by a Secret left in place.
+
+### Validation
+
+Username must be 3-64 characters, alphanumeric / underscores /
+hyphens. Password must be at least 8 characters. Same rules the
+interactive UI enforces.
+
+### Joiners
+
+Joiners (`GASTROLOG_JOIN_ADDR` set) skip provisioning entirely
+regardless of file/env config. Only the bootstrap node creates
+users; joiners inherit the user state from the cluster's Raft
+replication.
 
 ## Ports
 
