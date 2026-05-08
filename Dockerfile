@@ -51,5 +51,17 @@ VOLUME ["/config", "/vaults"]
 # deployments; harmless to expose for single-node.
 EXPOSE 4564 4566
 
+# Liveness probe — /healthz returns 200 if the HTTP listener is serving.
+# Docker uses this to decide whether to mark the container unhealthy and
+# (with a restart policy) restart it. K8s users typically configure their
+# own probes via the Pod spec and override this.
+#
+# /readyz is also exposed (200 when the orchestrator is running, not
+# draining, and local vault FSMs are caught up) but isn't used here:
+# Docker has no separate readiness concept, so liveness-only is the
+# right shape for this directive.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD wget --quiet --tries=1 --spider http://localhost:4564/healthz || exit 1
+
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["server"]
