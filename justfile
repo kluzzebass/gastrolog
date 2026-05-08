@@ -52,42 +52,9 @@ cloc:
     @echo "Repository: $(basename $(git rev-parse --show-toplevel))"
     @cloc --vcs=git --exclude-ext=lock,sum
 
-# Start cloud storage emulators (MinIO, Azurite, fake-gcs-server)
-cloud-storage-up:
-    docker compose -f test/cloud-storage/compose.yml up -d
-
-# Tear down cloud storage emulators
-cloud-storage-down:
-    docker compose -f test/cloud-storage/compose.yml down -v
-
-# Start ingester integration test environment (all ingesters + real services)
-ingester-integration-up:
-    docker compose -f test/ingester-integration/compose.yml up --build -d
-
-# Tear down ingester integration test environment
-ingester-integration-down:
-    docker compose -f test/ingester-integration/compose.yml down -v
-
-# Run E2E tests (fully containerized — builds, starts cluster, runs Playwright, tears down)
-e2e:
-    #!/usr/bin/env bash
-    set -uo pipefail
-    docker compose -f test/e2e/compose.yml --profile test up --build --abort-on-container-exit --exit-code-from playwright
-    rc=$?
-    docker compose -f test/e2e/compose.yml --profile test down -v
-    exit $rc
-
-# Start E2E cluster with host ports for local Playwright development
-e2e-up:
-    docker compose -f test/e2e/compose.yml --profile dev up --build -d
-
-# Run Playwright tests locally against the dev cluster (started with e2e-up)
-e2e-test *args:
-    cd test/e2e && bunx playwright test {{args}}
-
-# Tear down E2E cluster
-e2e-down:
-    docker compose -f test/e2e/compose.yml --profile dev down -v
+# Cloud-storage, ingester-integration, and e2e compose-up/down recipes were
+# moved into deploy/justfile alongside the other docker-compose-managed
+# environments. Run them as `just deploy <recipe>` from the repo root.
 
 # Tag and push to kick off draft release creation via GitHub Actions.
 draft bump:
