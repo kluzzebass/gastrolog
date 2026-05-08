@@ -1,0 +1,460 @@
+# Supporting-service deployments for the gastrolog K8s cluster
+# (gastrolog-4agdq). Mirrors what `compose-up` brings up alongside
+# the gastrolog services: cloud-storage emulators (MinIO, Azurite,
+# fake-gcs) and ingester sources (Kafka, rsyslog, OTel, fluent-bit).
+#
+# All deps land in the `gastrolog` namespace alongside gastrolog
+# itself, so the cluster pods reach them by service name:
+#   minio:9000          azurite:10000        fake-gcs:4443
+#   kafka:9092          rsyslog:514          otel-collector:4317
+#   fluent-bit:24224
+#
+# Push services (rsyslog/otel/fluent-bit) carry their config from the
+# test/ingester-integration/<svc>/ files, with `host.docker.internal`
+# rewritten to `gastrolog-bootstrap-0.gastrolog-headless.gastrolog.svc.cluster.local`
+# so they target the bundled gastrolog cluster. Operators still need
+# to configure the matching ingester listeners in gastrolog itself.
+
+---
+# ── Cloud storage ────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: gastrolog
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: minio } }
+  template:
+    metadata: { labels: { app: minio } }
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio:latest
+          args: ["server", "/data", "--console-address=:9001"]
+          env:
+            - { name: MINIO_ROOT_USER,     value: gastrolog }
+            - { name: MINIO_ROOT_PASSWORD, value: gastrolog }
+          ports:
+            - { containerPort: 9000, name: api }
+            - { containerPort: 9001, name: console }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+      volumes:
+        - { name: data, emptyDir: {} }
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: gastrolog
+spec:
+  selector: { app: minio }
+  ports:
+    - { name: api,     port: 9000, targetPort: 9000 }
+    - { name: console, port: 9001, targetPort: 9001 }
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: azurite
+  namespace: gastrolog
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: azurite } }
+  template:
+    metadata: { labels: { app: azurite } }
+    spec:
+      containers:
+        - name: azurite
+          image: mcr.microsoft.com/azure-storage/azurite:latest
+          args:
+            - azurite
+            - --blobHost=0.0.0.0
+            - --queueHost=0.0.0.0
+            - --tableHost=0.0.0.0
+            - --skipApiVersionCheck
+          ports:
+            - { containerPort: 10000, name: blob }
+            - { containerPort: 10001, name: queue }
+            - { containerPort: 10002, name: table }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+      volumes:
+        - { name: data, emptyDir: {} }
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: azurite
+  namespace: gastrolog
+spec:
+  selector: { app: azurite }
+  ports:
+    - { name: blob,  port: 10000, targetPort: 10000 }
+    - { name: queue, port: 10001, targetPort: 10001 }
+    - { name: table, port: 10002, targetPort: 10002 }
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fake-gcs
+  namespace: gastrolog
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: fake-gcs } }
+  template:
+    metadata: { labels: { app: fake-gcs } }
+    spec:
+      # K8s injects env vars `<SERVICE>_PORT=tcp://<ip>:<port>` for every
+      # Service in the namespace. fake-gcs has a Service called `fake-gcs`,
+      # which produces `FAKE_GCS_PORT=tcp://<ip>:4443` — and the binary
+      # tries to parse that as a port number and crashes. Disabling
+      # service-link injection skips the auto-env entirely; pods still
+      # resolve services by DNS.
+      enableServiceLinks: false
+      containers:
+        - name: fake-gcs
+          image: fsouza/fake-gcs-server:latest
+          args:
+            - -scheme=http
+            - -port=4443
+            - -backend=filesystem
+            - -filesystem-root=/data
+            - -external-url=http://localhost:4443
+          ports:
+            - { containerPort: 4443 }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+      volumes:
+        - { name: data, emptyDir: {} }
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fake-gcs
+  namespace: gastrolog
+spec:
+  selector: { app: fake-gcs }
+  ports:
+    - { port: 4443, targetPort: 4443 }
+
+---
+# ── Kafka (KRaft, single-node) ──────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka
+  namespace: gastrolog
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: kafka } }
+  template:
+    metadata: { labels: { app: kafka } }
+    spec:
+      containers:
+        - name: kafka
+          image: apache/kafka:latest
+          env:
+            # Single-node KRaft: broker and controller are in the same JVM,
+            # so the controller talks to itself via localhost. Only the
+            # broker listener (9092) goes through the Service VIP; the
+            # controller listener (9093) is intra-pod only.
+            - { name: KAFKA_NODE_ID,                       value: "1" }
+            - { name: KAFKA_PROCESS_ROLES,                 value: "broker,controller" }
+            - { name: KAFKA_LISTENERS,                     value: "PLAINTEXT://:9092,CONTROLLER://localhost:9093" }
+            - { name: KAFKA_ADVERTISED_LISTENERS,          value: "PLAINTEXT://kafka:9092" }
+            - { name: KAFKA_CONTROLLER_QUORUM_VOTERS,      value: "1@localhost:9093" }
+            - { name: KAFKA_CONTROLLER_LISTENER_NAMES,     value: "CONTROLLER" }
+            - { name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP, value: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT" }
+            - { name: KAFKA_INTER_BROKER_LISTENER_NAME,    value: "PLAINTEXT" }
+            - { name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR, value: "1" }
+          ports:
+            - { containerPort: 9092 }
+          # No readinessProbe: kafka-topics.sh is a heavy JVM invocation
+          # that even with generous timeouts is racy. The downstream
+          # consumers (kafka-init Job, kafka-producer Deployment) have
+          # their own bootstrap-poll loops, so a Pod-level probe adds
+          # nothing — just gate on TCP if you need one externally.
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: gastrolog
+spec:
+  selector: { app: kafka }
+  ports:
+    - { port: 9092, targetPort: 9092 }
+
+---
+# kafka-init: create the gastrolog-logs topic once Kafka is up.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-init
+  namespace: gastrolog
+spec:
+  backoffLimit: 6
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: kafka-init
+          image: apache/kafka:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              # Wait for Kafka to be ready then create the topic.
+              for i in $(seq 1 60); do
+                /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list >/dev/null 2>&1 && break
+                sleep 2
+              done
+              /opt/kafka/bin/kafka-topics.sh \
+                --bootstrap-server kafka:9092 \
+                --create --if-not-exists \
+                --topic gastrolog-logs \
+                --partitions 1 --replication-factor 1
+
+---
+# kafka-producer: continuously produce test messages so the kafka
+# ingester always has fresh data.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-producer
+  namespace: gastrolog
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: kafka-producer } }
+  template:
+    metadata: { labels: { app: kafka-producer } }
+    spec:
+      containers:
+        - name: kafka-producer
+          image: apache/kafka:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              # Wait for the topic to exist (created by kafka-init Job).
+              for i in $(seq 1 60); do
+                /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --describe --topic gastrolog-logs >/dev/null 2>&1 && break
+                sleep 2
+              done
+              i=0
+              while true; do
+                i=$((i + 1))
+                echo "{\"message\": \"kafka integration test log line\", \"seq\": $i}" | \
+                  /opt/kafka/bin/kafka-console-producer.sh \
+                    --bootstrap-server kafka:9092 \
+                    --topic gastrolog-logs
+                sleep 2
+              done
+
+---
+# ── rsyslog ─────────────────────────────────────────────────────────
+# Forwards its own internal messages to gastrolog via syslog TCP and
+# RELP. Config rewrites `host.docker.internal` → the gastrolog
+# bootstrap pod's stable DNS, since K8s pods don't get host-gateway.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rsyslog-conf
+  namespace: gastrolog
+data:
+  rsyslog.conf: |
+    module(load="immark" interval="30")
+    module(load="omrelp")
+
+    *.* action(
+        type="omfwd"
+        target="gastrolog-bootstrap-0.gastrolog-headless.gastrolog.svc.cluster.local"
+        port="1514"
+        protocol="tcp"
+        template="RSYSLOG_SyslogProtocol23Format"
+    )
+
+    *.* action(
+        type="omrelp"
+        target="gastrolog-bootstrap-0.gastrolog-headless.gastrolog.svc.cluster.local"
+        port="2514"
+        template="RSYSLOG_SyslogProtocol23Format"
+    )
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rsyslog
+  namespace: gastrolog
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: rsyslog } }
+  template:
+    metadata: { labels: { app: rsyslog } }
+    spec:
+      containers:
+        - name: rsyslog
+          image: rsyslog/syslog_appliance_alpine:latest
+          ports:
+            - { containerPort: 514, name: syslog }
+          volumeMounts:
+            - { name: conf, mountPath: /etc/rsyslog.conf, subPath: rsyslog.conf, readOnly: true }
+      volumes:
+        - name: conf
+          configMap:
+            name: rsyslog-conf
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rsyslog
+  namespace: gastrolog
+spec:
+  selector: { app: rsyslog }
+  ports:
+    - { name: syslog, port: 514, targetPort: 514 }
+
+---
+# ── OTel Collector ──────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-conf
+  namespace: gastrolog
+data:
+  config.yaml: |
+    receivers:
+      filelog:
+        include:
+          - /var/log/otel/collector.log
+        start_at: beginning
+
+    exporters:
+      otlp/gastrolog:
+        endpoint: gastrolog-bootstrap-0.gastrolog-headless.gastrolog.svc.cluster.local:4317
+        tls:
+          insecure: true
+
+    service:
+      telemetry:
+        logs:
+          level: debug
+          encoding: json
+          output_paths: ["/var/log/otel/collector.log"]
+      pipelines:
+        logs:
+          receivers: [filelog]
+          exporters: [otlp/gastrolog]
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  namespace: gastrolog
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: otel-collector } }
+  template:
+    metadata: { labels: { app: otel-collector } }
+    spec:
+      containers:
+        - name: otel-collector
+          image: otel/opentelemetry-collector-contrib:latest
+          ports:
+            - { containerPort: 4317, name: otlp-grpc }
+          volumeMounts:
+            - { name: conf, mountPath: /etc/otelcol-contrib/config.yaml, subPath: config.yaml, readOnly: true }
+            - { name: logs, mountPath: /var/log/otel }
+      volumes:
+        - name: conf
+          configMap: { name: otel-conf }
+        - name: logs
+          emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: gastrolog
+spec:
+  selector: { app: otel-collector }
+  ports:
+    - { name: otlp-grpc, port: 4317, targetPort: 4317 }
+
+---
+# ── Fluent Bit ──────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluent-bit-conf
+  namespace: gastrolog
+data:
+  fluent-bit.conf: |
+    [SERVICE]
+        Flush        1
+        Log_Level    info
+
+    [INPUT]
+        Name         dummy
+        Tag          test.fluent
+        Dummy        {"message": "fluent-bit integration test log line"}
+        Rate         1
+
+    [OUTPUT]
+        Name         forward
+        Match        *
+        Host         gastrolog-bootstrap-0.gastrolog-headless.gastrolog.svc.cluster.local
+        Port         24224
+
+    [OUTPUT]
+        Name         loki
+        Match        *
+        Host         gastrolog-bootstrap-0.gastrolog-headless.gastrolog.svc.cluster.local
+        Port         3100
+        Labels       job=fluent-bit
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fluent-bit
+  namespace: gastrolog
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: fluent-bit } }
+  template:
+    metadata: { labels: { app: fluent-bit } }
+    spec:
+      containers:
+        - name: fluent-bit
+          image: fluent/fluent-bit:latest
+          ports:
+            - { containerPort: 24224, name: forward }
+          volumeMounts:
+            - { name: conf, mountPath: /fluent-bit/etc/fluent-bit.conf, subPath: fluent-bit.conf, readOnly: true }
+      volumes:
+        - name: conf
+          configMap: { name: fluent-bit-conf }
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fluent-bit
+  namespace: gastrolog
+spec:
+  selector: { app: fluent-bit }
+  ports:
+    - { name: forward, port: 24224, targetPort: 24224 }

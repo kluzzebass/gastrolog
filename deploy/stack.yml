@@ -96,12 +96,167 @@ services:
       restart_policy:
         condition: on-failure
 
+  # ── Cloud storage ────────────────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    command: ["server", "/data", "--console-address=:9001"]
+    environment:
+      MINIO_ROOT_USER: gastrolog
+      MINIO_ROOT_PASSWORD: gastrolog
+    volumes:
+      - minio-data:/data
+    networks:
+      - gastrolog
+    deploy:
+      placement: { constraints: [node.role == manager] }
+
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    command:
+      - azurite
+      - --blobHost=0.0.0.0
+      - --queueHost=0.0.0.0
+      - --tableHost=0.0.0.0
+      - --skipApiVersionCheck
+    volumes:
+      - azurite-data:/data
+    networks:
+      - gastrolog
+    deploy:
+      placement: { constraints: [node.role == manager] }
+
+  fake-gcs:
+    image: fsouza/fake-gcs-server:latest
+    command:
+      - -scheme=http
+      - -port=4443
+      - -backend=filesystem
+      - -filesystem-root=/data
+      - -external-url=http://localhost:4443
+    volumes:
+      - fake-gcs-data:/data
+    networks:
+      - gastrolog
+    deploy:
+      placement: { constraints: [node.role == manager] }
+
+  # ── Kafka (KRaft, single-node) ──────────────────────────────────
+  # Same trick as in k8s-deps.yml: controller talks to itself via
+  # localhost so we don't have to expose port 9093 on a Service.
+  kafka:
+    image: apache/kafka:latest
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://localhost:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    networks:
+      - gastrolog
+    deploy:
+      placement: { constraints: [node.role == manager] }
+
+  kafka-init:
+    image: apache/kafka:latest
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        for i in $$(seq 1 60); do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list >/dev/null 2>&1 && break
+          sleep 2
+        done
+        /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server kafka:9092 \
+          --create --if-not-exists \
+          --topic gastrolog-logs \
+          --partitions 1 --replication-factor 1
+    networks:
+      - gastrolog
+    deploy:
+      restart_policy: { condition: none }
+      placement: { constraints: [node.role == manager] }
+
+  kafka-producer:
+    image: apache/kafka:latest
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        for i in $$(seq 1 60); do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --describe --topic gastrolog-logs >/dev/null 2>&1 && break
+          sleep 2
+        done
+        i=0
+        while true; do
+          i=$$((i + 1))
+          echo "{\"message\": \"kafka integration test log line\", \"seq\": $$i}" | \
+            /opt/kafka/bin/kafka-console-producer.sh \
+              --bootstrap-server kafka:9092 \
+              --topic gastrolog-logs
+          sleep 2
+        done
+    networks:
+      - gastrolog
+    deploy:
+      placement: { constraints: [node.role == manager] }
+
+  # ── rsyslog ──────────────────────────────────────────────────────
+  # Config rewrites host.docker.internal → tasks.gastrolog_bootstrap so
+  # rsyslog targets the bootstrap pod's overlay IP. Configs are created
+  # by the swarm-up recipe before deploy.
+  rsyslog:
+    image: rsyslog/syslog_appliance_alpine:latest
+    configs:
+      - source: gastrolog_rsyslog_conf
+        target: /etc/rsyslog.conf
+        mode: 0o444
+    networks:
+      - gastrolog
+    deploy:
+      placement: { constraints: [node.role == manager] }
+
+  # ── OTel Collector ───────────────────────────────────────────────
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    user: "0"
+    configs:
+      - source: gastrolog_otel_conf
+        target: /etc/otelcol-contrib/config.yaml
+        mode: 0o444
+    volumes:
+      - otel-logs:/var/log/otel
+    networks:
+      - gastrolog
+    deploy:
+      placement: { constraints: [node.role == manager] }
+
+  # ── Fluent Bit ───────────────────────────────────────────────────
+  fluent-bit:
+    image: fluent/fluent-bit:latest
+    configs:
+      - source: gastrolog_fluent_bit_conf
+        target: /fluent-bit/etc/fluent-bit.conf
+        mode: 0o444
+    networks:
+      - gastrolog
+    deploy:
+      placement: { constraints: [node.role == manager] }
+
 volumes:
   cluster-token:
   bootstrap-config:
   bootstrap-vaults:
   joiner-1-config:
   joiner-1-vaults:
+  minio-data:
+  azurite-data:
+  fake-gcs-data:
+  otel-logs:
 
 networks:
   gastrolog:
@@ -110,4 +265,12 @@ networks:
 
 secrets:
   gastrolog_admin_creds:
+    external: true
+
+configs:
+  gastrolog_rsyslog_conf:
+    external: true
+  gastrolog_otel_conf:
+    external: true
+  gastrolog_fluent_bit_conf:
     external: true

@@ -131,6 +131,16 @@ swarm-up: image
     docker swarm init 2>/dev/null || true
     docker secret rm gastrolog_admin_creds 2>/dev/null || true
     echo '{"username":"admin","password":"change-me-please"}' | docker secret create gastrolog_admin_creds - >/dev/null
+    # Push-target host: bootstrap pod's overlay-resolvable name. Substituted
+    # into the rsyslog / otel / fluent-bit configs as docker configs so the
+    # ingester sources actually target the bundled gastrolog cluster.
+    target=tasks.gastrolog_bootstrap
+    for c in gastrolog_rsyslog_conf gastrolog_otel_conf gastrolog_fluent_bit_conf; do
+      docker config rm $c 2>/dev/null || true
+    done
+    sed "s/host\.docker\.internal/$target/g" ../test/ingester-integration/rsyslog/rsyslog.conf | docker config create gastrolog_rsyslog_conf - >/dev/null
+    sed "s/host\.docker\.internal/$target/g" ../test/ingester-integration/otel/config.yaml | docker config create gastrolog_otel_conf - >/dev/null
+    sed "s/host\.docker\.internal/$target/g" ../test/ingester-integration/fluent-bit/fluent-bit.conf | docker config create gastrolog_fluent_bit_conf - >/dev/null
     docker stack rm gastrolog 2>/dev/null || true
     for i in $(seq 1 30); do
       [[ "$(docker ps -a --filter label=com.docker.stack.namespace=gastrolog -q | wc -l | tr -d ' ')" == "0" ]] && break
@@ -138,11 +148,15 @@ swarm-up: image
     done
     docker volume ls -q | grep '^gastrolog_' | xargs -r docker volume rm 2>/dev/null || true
     docker stack deploy -c stack.yml gastrolog
-    echo "Waiting for both services 1/1..."
-    for i in $(seq 1 60); do
-      ok=$(docker stack services gastrolog | tail -n +2 | grep -c '1/1' || true)
-      [[ $ok == 2 ]] && break
-      sleep 2
+    echo "Waiting for gastrolog services + deps to come up..."
+    for i in $(seq 1 90); do
+      # Need bootstrap + joiner-1 1/1 plus the long-running deps (minio, azurite,
+      # fake-gcs, kafka, kafka-producer, rsyslog, otel-collector, fluent-bit = 8).
+      # kafka-init exits cleanly after creating the topic and reports 0/1 forever
+      # since restart_policy is "none" — exclude it from the wait condition.
+      ok=$(docker stack services gastrolog | tail -n +2 | grep -v gastrolog_kafka-init | grep -c '1/1' || true)
+      [[ $ok -ge 10 ]] && break
+      sleep 3
     done
     docker stack services gastrolog
     curl -s -o /dev/null -w "  /readyz=%{http_code}\n" http://localhost:4564/readyz
@@ -151,6 +165,8 @@ swarm-up: image
       -d '{"username":"admin","password":"change-me-please"}'
     echo ""
     echo "Swarm stack running at http://localhost:4564 (admin/change-me-please)"
+    echo "Cloud storage:    minio:9000, azurite:10000, fake-gcs:4443 (overlay service DNS)"
+    echo "Ingester sources: kafka:9092, rsyslog:514, otel-collector:4317, fluent-bit:24224"
     echo "Tear down with: just deploy swarm-down"
 
 # Each new joiner is its own service (`gastrolog_joiner-N`) because Swarm's
@@ -238,6 +254,9 @@ swarm-down:
     done
     docker volume ls -q | grep '^gastrolog_' | xargs -r docker volume rm >/dev/null 2>&1 || true
     docker secret rm gastrolog_admin_creds >/dev/null 2>&1 || true
+    for c in gastrolog_rsyslog_conf gastrolog_otel_conf gastrolog_fluent_bit_conf; do
+      docker config rm $c >/dev/null 2>&1 || true
+    done
     docker swarm leave --force >/dev/null 2>&1 || true
     echo "swarm torn down"
 
@@ -251,11 +270,13 @@ kubernetes-up: image
     set -euo pipefail
     kubectl config current-context >/dev/null 2>&1 || { echo "no K8s context active — enable OrbStack/kind/minikube first"; exit 1; }
     kubectl delete -f k8s.yml --ignore-not-found 2>/dev/null
+    kubectl delete -f k8s-deps.yml --ignore-not-found 2>/dev/null
     kubectl -n gastrolog delete pvc --all --ignore-not-found 2>/dev/null
     kubectl apply -f k8s.yml
-    echo "Waiting for all 3 pods ready..."
+    kubectl apply -f k8s-deps.yml
+    echo "Waiting for gastrolog cluster (3 pods) ready..."
     for i in $(seq 1 60); do
-      ready=$(kubectl -n gastrolog get pods -o jsonpath='{range .items[*]}{.status.containerStatuses[0].ready}{"\n"}{end}' 2>/dev/null | grep -c '^true$' || true)
+      ready=$(kubectl -n gastrolog get pods -l app=gastrolog -o jsonpath='{range .items[*]}{.status.containerStatuses[0].ready}{"\n"}{end}' 2>/dev/null | grep -c '^true$' || true)
       [[ $ready == 3 ]] && break
       sleep 3
     done
@@ -266,6 +287,8 @@ kubernetes-up: image
       -d '{"username":"admin","password":"change-me-please"}'
     echo ""
     echo "K8s cluster running at http://localhost:30564 (admin/change-me-please)"
+    echo "Cloud storage:    minio:9000, azurite:10000, fake-gcs:4443 (in-cluster service DNS)"
+    echo "Ingester sources: kafka:9092, rsyslog:514, otel-collector:4317, fluent-bit:24224"
     echo "Tear down with: just deploy kubernetes-down"
 
 # K8s scales StatefulSets natively — each new pod gets its own PVC via
@@ -321,6 +344,7 @@ kubernetes-contract:
 kubernetes-down:
     #!/usr/bin/env bash
     set -euo pipefail
+    kubectl delete -f k8s-deps.yml --ignore-not-found >/dev/null 2>&1 || true
     kubectl delete -f k8s.yml --ignore-not-found >/dev/null 2>&1 || true
     kubectl -n gastrolog delete pvc --all --ignore-not-found >/dev/null 2>&1 || true
     kubectl delete namespace gastrolog --ignore-not-found >/dev/null 2>&1 || true
