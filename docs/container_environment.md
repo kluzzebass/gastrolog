@@ -99,3 +99,38 @@ gastrolog-o9z6o for the file-based / endpoint-based replacement.
 Both ports are declared in the image's `EXPOSE`. The actual values are
 configurable via `GASTROLOG_LISTEN` and `GASTROLOG_CLUSTER_ADDR`; the
 defaults are baked into the binary, not the entrypoint.
+
+## Health endpoints
+
+Two HTTP endpoints expose health state. Both are unauthenticated so
+container orchestrators can probe them without a token, and both are
+served on the HTTP port (`4564` by default).
+
+| Endpoint | Returns | Meaning |
+|---|---|---|
+| `GET /healthz` | `200` always (when the HTTP listener is serving) | **Liveness.** The process is up and the HTTP server is accepting requests. Failing this means the container is unrecoverable — kill and restart. |
+| `GET /readyz` | `200` when ready, `503` otherwise | **Readiness.** The orchestrator has started, the node isn't draining, and every locally-hosted vault's tier FSM has applied at least one log entry. Failing this means "remove from load balancer, but don't restart" — typical during startup, leader change, or shutdown. |
+
+The image's built-in `HEALTHCHECK` directive probes `/healthz` every
+30 seconds (with a 30-second startup grace period and 3 retries before
+marking the container unhealthy). This is appropriate for Docker; in
+Kubernetes you typically configure both `livenessProbe` (against
+`/healthz`) and `readinessProbe` (against `/readyz`) directly in the
+Pod spec, which overrides the Dockerfile's `HEALTHCHECK`.
+
+Example Kubernetes probe configuration:
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 4564
+  initialDelaySeconds: 10
+  periodSeconds: 10
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: 4564
+  initialDelaySeconds: 5
+  periodSeconds: 5
+```
