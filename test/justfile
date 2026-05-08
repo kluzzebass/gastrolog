@@ -144,10 +144,84 @@ swarm-up: image
     echo "Swarm stack running at http://localhost:4564 (admin/change-me-please)"
     echo "Tear down with: just deploy swarm-down"
 
+# Each new joiner is its own service (`gastrolog_joiner-N`) because Swarm's
+# default node-local volumes mean replicas-of-one-service that schedule on
+# the same node would share /config and /vaults — fatal for Raft. The
+# stack.yml uses the same pattern (separate joiner-1 service); this recipe
+# keeps the convention going for joiner-2, joiner-3, ...
+#
+# Add one more joiner service to the running Swarm stack.
+swarm-expand:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    docker service ls | grep -q gastrolog_bootstrap || { echo "swarm stack not running — run swarm-up first"; exit 1; }
+    # `docker service ls --filter name=gastrolog_joiner` includes a header row;
+    # tail -n +2 strips it. Counting lines = current joiner count.
+    current=$(docker service ls --filter name=gastrolog_joiner | tail -n +2 | wc -l | tr -d ' ')
+    next=$((current + 1))
+    name=gastrolog_joiner-$next
+    echo "Adding $name..."
+    docker service create \
+      --name $name \
+      --network gastrolog_gastrolog \
+      --secret source=gastrolog_admin_creds,target=admin_creds \
+      --mount type=volume,source=gastrolog_cluster-token,target=/shared \
+      --mount type=volume,source=gastrolog_${name}-config,target=/config \
+      --mount type=volume,source=gastrolog_${name}-vaults,target=/vaults \
+      --env GASTROLOG_NAME=joiner-$next \
+      --env GASTROLOG_CLUSTER_ADDR=auto \
+      --env GASTROLOG_JOIN_ADDR=tasks.gastrolog_bootstrap:4566 \
+      --env GASTROLOG_BOOTSTRAP_TOKEN_FILE=/shared/token \
+      --env GASTROLOG_INITIAL_ADMIN_FILE=/run/secrets/admin_creds \
+      --replicas 1 \
+      --constraint node.role==manager \
+      gastrolog:test >/dev/null
+    echo "Waiting for $name to be 1/1..."
+    for i in $(seq 1 60); do
+      ok=$(docker service ls --filter name=$name | tail -n +2 | grep -c '1/1' || true)
+      [[ $ok == 1 ]] && break
+      sleep 2
+    done
+    docker service ls --filter name=gastrolog_
+    echo ""
+    echo "Cluster state from bootstrap:"
+    boot=$(docker ps -q --filter label=com.docker.swarm.service.name=gastrolog_bootstrap | head -1)
+    docker exec "$boot" /gastrolog --home /config cluster status | tail -10
+
+# Remove the highest-numbered joiner from the running Swarm stack and clean up its volumes.
+swarm-contract:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # docker service ls table: ID NAME MODE REPLICAS IMAGE PORTS — name is column 2.
+    last=$(docker service ls --filter name=gastrolog_joiner | tail -n +2 | awk '{print $2}' | sort -V | tail -1)
+    [[ -n "$last" ]] || { echo "no joiner services to remove"; exit 1; }
+    [[ "$last" == "gastrolog_joiner-1" ]] && { echo "refusing to drop below 1 joiner — would leave bootstrap alone"; exit 1; }
+    # Remove from Raft membership FIRST. Otherwise the dropped service
+    # leaves an orphan voter behind and `cluster status` keeps reporting
+    # the now-dead peer until quorum problems force operator intervention.
+    boot=$(docker ps -q --filter label=com.docker.swarm.service.name=gastrolog_bootstrap | head -1)
+    nodename=joiner-${last##*-}
+    echo "Removing $nodename from Raft membership..."
+    docker exec "$boot" /gastrolog --home /config cluster remove-node "$nodename" >/dev/null 2>&1 || true
+    echo "Removing service $last..."
+    docker service rm $last >/dev/null
+    sleep 3
+    docker volume rm gastrolog_${last}-config gastrolog_${last}-vaults 2>/dev/null || true
+    echo ""
+    echo "Cluster state from bootstrap:"
+    docker exec "$boot" /gastrolog --home /config cluster status | tail -10
+
+# Also removes any extra joiner services added via swarm-expand (those live
+# outside the stack and `docker stack rm` doesn't catch them).
+#
 # Tear down the Swarm stack, remove its secret + volumes, and leave the swarm.
 swarm-down:
     #!/usr/bin/env bash
     set -euo pipefail
+    extras=$(docker service ls --filter name=gastrolog_joiner | tail -n +2 | awk '{print $2}' | grep -v '^gastrolog_joiner-1$' || true)
+    if [[ -n "$extras" ]]; then
+      echo "$extras" | xargs -r docker service rm >/dev/null 2>&1 || true
+    fi
     docker stack rm gastrolog >/dev/null 2>&1 || true
     for i in $(seq 1 30); do
       [[ "$(docker ps -a --filter label=com.docker.stack.namespace=gastrolog -q | wc -l | tr -d ' ')" == "0" ]] && break
@@ -185,6 +259,55 @@ kubernetes-up: image
     echo ""
     echo "K8s cluster running at http://localhost:30564 (admin/change-me-please)"
     echo "Tear down with: just deploy kubernetes-down"
+
+# K8s scales StatefulSets natively — each new pod gets its own PVC via
+# the volumeClaimTemplate, so unlike Swarm there's no need to spawn a
+# separate service per replica.
+#
+# Add one more replica to the joiner StatefulSet.
+kubernetes-expand:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    kubectl -n gastrolog get sts gastrolog-joiner >/dev/null 2>&1 || { echo "K8s cluster not running — run kubernetes-up first"; exit 1; }
+    current=$(kubectl -n gastrolog get sts gastrolog-joiner -o jsonpath='{.spec.replicas}')
+    next=$((current + 1))
+    echo "Scaling gastrolog-joiner from $current to $next..."
+    kubectl -n gastrolog scale sts gastrolog-joiner --replicas=$next >/dev/null
+    echo "Waiting for new pod ready..."
+    for i in $(seq 1 60); do
+      ready=$(kubectl -n gastrolog get pods -l app=gastrolog,role=joiner -o jsonpath='{range .items[*]}{.status.containerStatuses[0].ready}{"\n"}{end}' 2>/dev/null | grep -c '^true$' || true)
+      [[ $ready == $next ]] && break
+      sleep 3
+    done
+    kubectl -n gastrolog get pods
+    echo ""
+    echo "Cluster state from bootstrap:"
+    kubectl -n gastrolog exec gastrolog-bootstrap-0 -- /gastrolog --home /config cluster status | tail -10
+
+# Remove the highest-ordinal joiner pod from the StatefulSet (and its PVC).
+kubernetes-contract:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    current=$(kubectl -n gastrolog get sts gastrolog-joiner -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 0)
+    [[ $current -le 1 ]] && { echo "refusing to drop below 1 joiner — would leave bootstrap alone"; exit 1; }
+    next=$((current - 1))
+    last=gastrolog-joiner-$next
+    # Remove from Raft membership FIRST. K8s scale-down kills the pod
+    # but doesn't tell Raft the voter is gone — without this step,
+    # `cluster status` keeps reporting the now-dead peer indefinitely.
+    echo "Removing $last from Raft membership..."
+    kubectl -n gastrolog exec gastrolog-bootstrap-0 -- /gastrolog --home /config cluster remove-node "$last" >/dev/null 2>&1 || true
+    echo "Scaling gastrolog-joiner from $current to $next (removing $last)..."
+    kubectl -n gastrolog scale sts gastrolog-joiner --replicas=$next >/dev/null
+    # PVCs are not auto-deleted by StatefulSet scale-down — the operator
+    # decides whether to keep them around for re-attach. For this test
+    # recipe we always discard them so contract is a true cluster shrink.
+    sleep 3
+    kubectl -n gastrolog delete pvc config-$last vaults-$last --ignore-not-found >/dev/null 2>&1 || true
+    kubectl -n gastrolog get pods
+    echo ""
+    echo "Cluster state from bootstrap:"
+    kubectl -n gastrolog exec gastrolog-bootstrap-0 -- /gastrolog --home /config cluster status | tail -10
 
 # Delete the K8s manifests, PVCs, and the namespace.
 kubernetes-down:
