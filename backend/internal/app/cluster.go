@@ -34,6 +34,9 @@ func setupCluster(ctx context.Context, logger *slog.Logger, cfg RunConfig, hd ho
 	clusterTLS := cluster.NewClusterTLS()
 
 	// Joining flow: enroll with the leader before creating the cluster server.
+	// gastrolog-o9z6o: cfg.JoinToken may have been populated from a
+	// file or HTTP source by resolveJoinTokenFromSources before we got
+	// here, so the literal-token check still does the right thing.
 	if cfg.JoinAddr != "" && cfg.JoinToken != "" {
 		enrolled, err := enrollInCluster(ctx, logger, cfg, hd, nodeID)
 		if err != nil {
@@ -92,13 +95,13 @@ func enrollInCluster(ctx context.Context, logger *slog.Logger, cfg RunConfig, hd
 }
 
 // startClusterServices bootstraps TLS if needed and starts the cluster gRPC server.
-func startClusterServices(ctx context.Context, clusterSrv *cluster.Server, clusterTLS *cluster.ClusterTLS, cfgStore system.Store, hd home.Dir, logger *slog.Logger) error {
+func startClusterServices(ctx context.Context, clusterSrv *cluster.Server, clusterTLS *cluster.ClusterTLS, cfgStore system.Store, hd home.Dir, logger *slog.Logger, writeBootstrapTokenPath string) error {
 	if clusterSrv == nil {
 		return nil
 	}
 
 	if clusterTLS.State() == nil {
-		if err := bootstrapClusterTLS(ctx, cfgStore, clusterTLS, hd.ClusterTLSPath(), logger); err != nil {
+		if err := bootstrapClusterTLS(ctx, cfgStore, clusterTLS, hd.ClusterTLSPath(), logger, writeBootstrapTokenPath); err != nil {
 			return fmt.Errorf("bootstrap cluster TLS: %w", err)
 		}
 	}
@@ -107,24 +110,17 @@ func startClusterServices(ctx context.Context, clusterSrv *cluster.Server, clust
 	return clusterSrv.Start()
 }
 
-// bootstrapClusterTLS generates CA, cluster cert, and join token.
-func bootstrapClusterTLS(ctx context.Context, cfgStore system.Store, ctls *cluster.ClusterTLS, tlsFilePath string, logger *slog.Logger) error {
+// bootstrapClusterTLS generates CA, cluster cert, and join token. When
+// writeBootstrapTokenPath is non-empty, the token is also written
+// atomically to that path with mode 0600 so an orchestrator-launched
+// joiner can pick it up via --bootstrap-token-file (gastrolog-o9z6o).
+func bootstrapClusterTLS(ctx context.Context, cfgStore system.Store, ctls *cluster.ClusterTLS, tlsFilePath string, logger *slog.Logger, writeBootstrapTokenPath string) error {
 	existingCfg, err := cfgStore.Load(ctx)
 	if err != nil {
 		return fmt.Errorf("check existing cluster TLS: %w", err)
 	}
 	if existingCfg != nil && existingCfg.Runtime.ClusterTLS != nil {
-		existing := existingCfg.Runtime.ClusterTLS
-		if err := ctls.Load([]byte(existing.ClusterCertPEM), []byte(existing.ClusterKeyPEM), []byte(existing.CACertPEM)); err != nil {
-			return fmt.Errorf("load existing cluster TLS: %w", err)
-		}
-		if err := cluster.SaveFile(tlsFilePath, []byte(existing.ClusterCertPEM), []byte(existing.ClusterKeyPEM), []byte(existing.CACertPEM)); err != nil {
-			return fmt.Errorf(errFmtSaveClusterTLS, err)
-		}
-		logger.Info("cluster TLS loaded from existing config")
-		_, caHash, _ := tlsutil.ParseJoinToken(existing.JoinToken)
-		logger.Info("cluster join token", "token", existing.JoinToken, "ca_hash", caHash)
-		return nil
+		return loadExistingClusterTLS(existingCfg.Runtime.ClusterTLS, ctls, tlsFilePath, logger, writeBootstrapTokenPath)
 	}
 
 	ca, err := tlsutil.GenerateCA()
@@ -161,6 +157,37 @@ func bootstrapClusterTLS(ctx context.Context, cfgStore system.Store, ctls *clust
 	logger.Info("cluster TLS bootstrapped")
 	logger.Info("cluster join token (use --join-token to join)", "token", token)
 
+	if writeBootstrapTokenPath != "" {
+		if err := writeBootstrapTokenAtomic(writeBootstrapTokenPath, token); err != nil {
+			return fmt.Errorf("write bootstrap token: %w", err)
+		}
+		logger.Info("bootstrap token written to file", "path", writeBootstrapTokenPath)
+	}
+
+	return nil
+}
+
+// loadExistingClusterTLS handles the restart path: cluster TLS material
+// already exists in the store from a prior run, so reuse it instead of
+// regenerating. Also writes the join token to the configured path if
+// requested. Extracted from bootstrapClusterTLS to keep both branches
+// flat per the project's nestif lint rule.
+func loadExistingClusterTLS(existing *system.ClusterTLS, ctls *cluster.ClusterTLS, tlsFilePath string, logger *slog.Logger, writeBootstrapTokenPath string) error {
+	if err := ctls.Load([]byte(existing.ClusterCertPEM), []byte(existing.ClusterKeyPEM), []byte(existing.CACertPEM)); err != nil {
+		return fmt.Errorf("load existing cluster TLS: %w", err)
+	}
+	if err := cluster.SaveFile(tlsFilePath, []byte(existing.ClusterCertPEM), []byte(existing.ClusterKeyPEM), []byte(existing.CACertPEM)); err != nil {
+		return fmt.Errorf(errFmtSaveClusterTLS, err)
+	}
+	logger.Info("cluster TLS loaded from existing config")
+	_, caHash, _ := tlsutil.ParseJoinToken(existing.JoinToken)
+	logger.Info("cluster join token", "token", existing.JoinToken, "ca_hash", caHash)
+	if writeBootstrapTokenPath != "" {
+		if err := writeBootstrapTokenAtomic(writeBootstrapTokenPath, existing.JoinToken); err != nil {
+			return fmt.Errorf("write bootstrap token: %w", err)
+		}
+		logger.Info("bootstrap token written to file", "path", writeBootstrapTokenPath)
+	}
 	return nil
 }
 

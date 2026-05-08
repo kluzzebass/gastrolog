@@ -88,6 +88,13 @@ func main() {
 				JoinToken:   mustString(cmd, "join-token"),
 				NodeName:    mustString(cmd, "name"),
 				PprofAddr:   mustString(cmd, "pprof"),
+
+				WriteBootstrapToken:       mustString(cmd, "write-bootstrap-token"),
+				BootstrapTokenFile:        mustString(cmd, "bootstrap-token-file"),
+				BootstrapTokenServeSecret: mustString(cmd, "bootstrap-token-serve-secret"),
+				BootstrapTokenURL:         mustString(cmd, "bootstrap-token-url"),
+				BootstrapTokenSecret:      mustString(cmd, "bootstrap-token-secret"),
+
 				SlogCapture:        slogCaptureCh,
 				SlogCaptureHandler: captureHandler,
 			}
@@ -107,6 +114,13 @@ func main() {
 	serverCmd.Flags().String("join-addr", "", "leader's cluster address to join an existing cluster")
 	serverCmd.Flags().String("join-token", "", "join token for cluster enrollment (from cluster-init node)")
 	serverCmd.Flags().String("name", "", "node name (default: random petname)")
+
+	// Non-interactive cluster bootstrap (gastrolog-o9z6o).
+	serverCmd.Flags().String("write-bootstrap-token", "", "bootstrap node only: atomically write the join token to this path (mode 0600) for joiners to read via --bootstrap-token-file")
+	serverCmd.Flags().String("bootstrap-token-file", "", "joiner only: read the join token from this path, polling with backoff until present (alternative to --join-token)")
+	serverCmd.Flags().String("bootstrap-token-serve-secret", "", "bootstrap node only: serve the join token at GET /cluster/bootstrap-token, gated on this secret (empty disables endpoint)")
+	serverCmd.Flags().String("bootstrap-token-url", "", "joiner only: fetch the join token from this URL, polling with backoff (alternative to --join-token); pair with --bootstrap-token-secret")
+	serverCmd.Flags().String("bootstrap-token-secret", "", "joiner only: secret sent in the X-Bootstrap-Token-Secret header when fetching from --bootstrap-token-url")
 
 	versionCmd := &cobra.Command{
 		Use:   "version",
