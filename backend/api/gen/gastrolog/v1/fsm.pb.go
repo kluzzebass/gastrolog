@@ -1060,9 +1060,10 @@ type PutIngesterCommand struct {
 	Enabled bool                   `protobuf:"varint,4,opt,name=enabled,proto3" json:"enabled,omitempty"`
 	Params  map[string]string      `protobuf:"bytes,5,rep,name=params,proto3" json:"params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Deprecated: Marked as deprecated in gastrolog/v1/fsm.proto.
-	NodeId        []byte   `protobuf:"bytes,6,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`    // Legacy. Use node_ids.
-	NodeIds       [][]byte `protobuf:"bytes,7,rep,name=node_ids,json=nodeIds,proto3" json:"node_ids,omitempty"` // Allowed nodes.
-	Singleton     bool     `protobuf:"varint,8,opt,name=singleton,proto3" json:"singleton,omitempty"`           // HA semantics: false = parallel (run on every node), true = Raft-assigned singleton with failover.
+	NodeId        []byte   `protobuf:"bytes,6,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`        // Legacy. Use node_ids.
+	NodeIds       [][]byte `protobuf:"bytes,7,rep,name=node_ids,json=nodeIds,proto3" json:"node_ids,omitempty"`     // Eligible nodes (honored when all_nodes=false).
+	Singleton     bool     `protobuf:"varint,8,opt,name=singleton,proto3" json:"singleton,omitempty"`               // HA semantics: false = parallel, true = Raft-assigned singleton with failover.
+	AllNodes      bool     `protobuf:"varint,9,opt,name=all_nodes,json=allNodes,proto3" json:"all_nodes,omitempty"` // When true, eligibility is the entire current cluster (re-evaluated on membership change).
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1150,6 +1151,13 @@ func (x *PutIngesterCommand) GetNodeIds() [][]byte {
 func (x *PutIngesterCommand) GetSingleton() bool {
 	if x != nil {
 		return x.Singleton
+	}
+	return false
+}
+
+func (x *PutIngesterCommand) GetAllNodes() bool {
+	if x != nil {
+		return x.AllNodes
 	}
 	return false
 }
@@ -3207,7 +3215,7 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\x12DeleteVaultCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x1f\n" +
 	"\vdelete_data\x18\x02 \x01(\bR\n" +
-	"deleteData\"\xbd\x02\n" +
+	"deleteData\"\xda\x02\n" +
 	"\x12PutIngesterCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -3216,7 +3224,8 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\x06params\x18\x05 \x03(\v2,.gastrolog.v1.PutIngesterCommand.ParamsEntryR\x06params\x12\x1b\n" +
 	"\anode_id\x18\x06 \x01(\fB\x02\x18\x01R\x06nodeId\x12\x19\n" +
 	"\bnode_ids\x18\a \x03(\fR\anodeIds\x12\x1c\n" +
-	"\tsingleton\x18\b \x01(\bR\tsingleton\x1a9\n" +
+	"\tsingleton\x18\b \x01(\bR\tsingleton\x12\x1b\n" +
+	"\tall_nodes\x18\t \x01(\bR\ballNodes\x1a9\n" +
 	"\vParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"'\n" +

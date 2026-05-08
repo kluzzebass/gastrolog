@@ -974,6 +974,7 @@ func copyIngesterConfig(ing system.IngesterConfig) system.IngesterConfig {
 		Params:    copyParams(ing.Params),
 		NodeIDs:   append([]string(nil), ing.NodeIDs...),
 		Singleton: ing.Singleton,
+		AllNodes:  ing.AllNodes,
 	}
 }
 

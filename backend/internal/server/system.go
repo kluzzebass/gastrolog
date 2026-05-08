@@ -287,6 +287,7 @@ func (s *SystemServer) loadSystemIngesters(ctx context.Context, resp *apiv1.GetS
 			Enabled:   ing.Enabled,
 			NodeIds:   stringsToBytes(ing.NodeIDs),
 			Singleton: ing.Singleton,
+			AllNodes:  ing.AllNodes,
 		})
 	}
 	return nil

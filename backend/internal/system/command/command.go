@@ -202,6 +202,7 @@ func putIngesterCmd(cfg system.IngesterConfig) *gastrologv1.PutIngesterCommand {
 		Params:    cfg.Params,
 		NodeIds:   nodeIDs,
 		Singleton: cfg.Singleton,
+		AllNodes:  cfg.AllNodes,
 	}
 }
 
@@ -240,6 +241,7 @@ func ExtractPutIngester(cmd *gastrologv1.PutIngesterCommand) (system.IngesterCon
 		Params:    nilIfEmpty(cmd.GetParams()),
 		NodeIDs:   nodeIDs,
 		Singleton: cmd.GetSingleton(),
+		AllNodes:  cmd.GetAllNodes(),
 	}, nil
 }
 

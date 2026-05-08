@@ -914,9 +914,17 @@ type IngesterConfig struct {
 	Enabled bool                   `protobuf:"varint,4,opt,name=enabled,proto3" json:"enabled,omitempty"`
 	Name    string                 `protobuf:"bytes,5,opt,name=name,proto3" json:"name,omitempty"`
 	// Deprecated: Marked as deprecated in gastrolog/v1/system.proto.
-	NodeId        []byte   `protobuf:"bytes,6,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`    // Legacy single-node assignment. Use node_ids.
-	NodeIds       [][]byte `protobuf:"bytes,7,rep,name=node_ids,json=nodeIds,proto3" json:"node_ids,omitempty"` // Allowed nodes. Parallel: run on all. Singleton: place on one.
-	Singleton     bool     `protobuf:"varint,8,opt,name=singleton,proto3" json:"singleton,omitempty"`           // HA semantics: false = run on every node in node_ids (parallel); true = Raft-assigned to one node with failover. Only takes effect when the ingester type has SingletonSupported=true.
+	NodeId []byte `protobuf:"bytes,6,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"` // Legacy single-node assignment. Use node_ids.
+	// Eligible nodes. Honored only when all_nodes is false. Parallel: run on
+	// every listed node. Singleton: Raft-assigned to one of them.
+	NodeIds   [][]byte `protobuf:"bytes,7,rep,name=node_ids,json=nodeIds,proto3" json:"node_ids,omitempty"`
+	Singleton bool     `protobuf:"varint,8,opt,name=singleton,proto3" json:"singleton,omitempty"` // HA semantics: false = run on every eligible node (parallel); true = Raft-assigned to one node with failover. Only takes effect when the ingester type has SingletonSupported=true.
+	// When true, the eligible-node set is the entire cluster and is
+	// re-evaluated on cluster-membership changes — joiners automatically
+	// pick up the ingester. When false, eligibility is determined by
+	// node_ids (literal pin). The dispatcher must evaluate this on every
+	// tick, not snapshot at config-write time.
+	AllNodes      bool `protobuf:"varint,9,opt,name=all_nodes,json=allNodes,proto3" json:"all_nodes,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1004,6 +1012,13 @@ func (x *IngesterConfig) GetNodeIds() [][]byte {
 func (x *IngesterConfig) GetSingleton() bool {
 	if x != nil {
 		return x.Singleton
+	}
+	return false
+}
+
+func (x *IngesterConfig) GetAllNodes() bool {
+	if x != nil {
+		return x.AllNodes
 	}
 	return false
 }
@@ -1256,10 +1271,11 @@ type IngesterInfo struct {
 	Name    string                 `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
 	// Deprecated: Marked as deprecated in gastrolog/v1/system.proto.
 	NodeId        []byte          `protobuf:"bytes,5,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`                                                                                        // Legacy. Use node_ids.
-	NodeIds       [][]byte        `protobuf:"bytes,6,rep,name=node_ids,json=nodeIds,proto3" json:"node_ids,omitempty"`                                                                                     // Allowed nodes from config.
+	NodeIds       [][]byte        `protobuf:"bytes,6,rep,name=node_ids,json=nodeIds,proto3" json:"node_ids,omitempty"`                                                                                     // Eligible nodes from config (honored when all_nodes=false).
 	NodeStatus    map[string]bool `protobuf:"bytes,8,rep,name=node_status,json=nodeStatus,proto3" json:"node_status,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"` // Per-node running status: nodeID → alive.
 	Enabled       bool            `protobuf:"varint,9,opt,name=enabled,proto3" json:"enabled,omitempty"`                                                                                                   // Whether the ingester is enabled in config.
-	Singleton     bool            `protobuf:"varint,10,opt,name=singleton,proto3" json:"singleton,omitempty"`                                                                                              // HA semantics: false = parallel (every node_ids), true = Raft-assigned singleton.
+	Singleton     bool            `protobuf:"varint,10,opt,name=singleton,proto3" json:"singleton,omitempty"`                                                                                              // HA semantics: false = parallel (every eligible node), true = Raft-assigned singleton.
+	AllNodes      bool            `protobuf:"varint,11,opt,name=all_nodes,json=allNodes,proto3" json:"all_nodes,omitempty"`                                                                                // When true, eligibility is the entire current cluster (re-evaluated on membership change).
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1354,6 +1370,13 @@ func (x *IngesterInfo) GetEnabled() bool {
 func (x *IngesterInfo) GetSingleton() bool {
 	if x != nil {
 		return x.Singleton
+	}
+	return false
+}
+
+func (x *IngesterInfo) GetAllNodes() bool {
+	if x != nil {
+		return x.AllNodes
 	}
 	return false
 }
@@ -8857,7 +8880,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"MatchStage\x12\x1e\n" +
 	"\n" +
 	"expression\x18\x01 \x01(\tR\n" +
-	"expression\"\xb5\x02\n" +
+	"expression\"\xd2\x02\n" +
 	"\x0eIngesterConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12@\n" +
@@ -8866,7 +8889,8 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x04name\x18\x05 \x01(\tR\x04name\x12\x1b\n" +
 	"\anode_id\x18\x06 \x01(\fB\x02\x18\x01R\x06nodeId\x12\x19\n" +
 	"\bnode_ids\x18\a \x03(\fR\anodeIds\x12\x1c\n" +
-	"\tsingleton\x18\b \x01(\bR\tsingleton\x1a9\n" +
+	"\tsingleton\x18\b \x01(\bR\tsingleton\x12\x1b\n" +
+	"\tall_nodes\x18\t \x01(\bR\ballNodes\x1a9\n" +
 	"\vParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xb4\x01\n" +
@@ -8887,7 +8911,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x04name\x18\x05 \x01(\tR\x04name\"\x16\n" +
 	"\x14ListIngestersRequest\"Q\n" +
 	"\x15ListIngestersResponse\x128\n" +
-	"\tingesters\x18\x01 \x03(\v2\x1a.gastrolog.v1.IngesterInfoR\tingesters\"\xdc\x02\n" +
+	"\tingesters\x18\x01 \x03(\v2\x1a.gastrolog.v1.IngesterInfoR\tingesters\"\xf9\x02\n" +
 	"\fIngesterInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x18\n" +
@@ -8899,7 +8923,8 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"nodeStatus\x12\x18\n" +
 	"\aenabled\x18\t \x01(\bR\aenabled\x12\x1c\n" +
 	"\tsingleton\x18\n" +
-	" \x01(\bR\tsingleton\x1a=\n" +
+	" \x01(\bR\tsingleton\x12\x1b\n" +
+	"\tall_nodes\x18\v \x01(\bR\ballNodes\x1a=\n" +
 	"\x0fNodeStatusEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\bR\x05value:\x028\x01\"*\n" +

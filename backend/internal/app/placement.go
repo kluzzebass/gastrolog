@@ -169,7 +169,12 @@ func (pm *placementManager) reconcileSingletonIngesters(ctx context.Context, ali
 	}
 
 	for _, ing := range ingesters {
-		if !ing.Enabled || len(ing.NodeIDs) == 0 {
+		if !ing.Enabled {
+			continue
+		}
+		// Singleton with no eligibility expressed (no AllNodes, no NodeIDs)
+		// is operator-error — skip silently.
+		if !ing.AllNodes && len(ing.NodeIDs) == 0 {
 			continue
 		}
 		if !pm.isSingletonIngester(ing) {
@@ -179,22 +184,40 @@ func (pm *placementManager) reconcileSingletonIngesters(ctx context.Context, ali
 	}
 }
 
-// placeSingletonIngester assigns a single singleton ingester to one alive node.
-func (pm *placementManager) placeSingletonIngester(ctx context.Context, ing system.IngesterConfig, alive map[string]bool, leaderID string) {
-	current, _ := pm.cfgStore.GetIngesterAssignment(ctx, ing.ID)
-
-	// Current assignment still valid?
-	if current != "" && alive[current] && slices.Contains(ing.NodeIDs, current) {
-		return
+// eligibleNodes returns the set of node IDs an ingester is allowed to run on.
+// AllNodes=true: every alive node in the cluster (membership-aware).
+// AllNodes=false: NodeIDs intersected with alive nodes (literal pin).
+func eligibleNodes(ing system.IngesterConfig, alive map[string]bool) []string {
+	if ing.AllNodes {
+		nodes := make([]string, 0, len(alive))
+		for nodeID, isAlive := range alive {
+			if isAlive {
+				nodes = append(nodes, nodeID)
+			}
+		}
+		return nodes
 	}
-
-	// Pick an eligible alive node, preferring non-leader.
-	var candidates []string
+	candidates := make([]string, 0, len(ing.NodeIDs))
 	for _, nodeID := range ing.NodeIDs {
 		if alive[nodeID] {
 			candidates = append(candidates, nodeID)
 		}
 	}
+	return candidates
+}
+
+// placeSingletonIngester assigns a single singleton ingester to one alive node.
+func (pm *placementManager) placeSingletonIngester(ctx context.Context, ing system.IngesterConfig, alive map[string]bool, leaderID string) {
+	current, _ := pm.cfgStore.GetIngesterAssignment(ctx, ing.ID)
+
+	candidates := eligibleNodes(ing, alive)
+
+	// Current assignment still valid? AllNodes accepts any current alive
+	// node; NodeIDs requires current to be in the list.
+	if current != "" && alive[current] && (ing.AllNodes || slices.Contains(ing.NodeIDs, current)) {
+		return
+	}
+
 	if len(candidates) == 0 {
 		pm.logger.Warn("placement: no alive node for active ingester", "id", ing.ID, "name", ing.Name)
 		return

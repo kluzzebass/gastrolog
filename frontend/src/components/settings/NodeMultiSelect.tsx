@@ -6,15 +6,30 @@ import { Checkbox } from "./Checkbox";
 
 /**
  * Multi-select node picker for ingesters. Renders a list of checkboxes,
- * one per cluster node. Hidden in single-node mode.
+ * one per cluster node, plus a top-level "All nodes" checkbox.
+ *
+ * The "All nodes" checkbox is **NOT a UI shortcut for "check all current
+ * nodes"** — that would bake a snapshot of cluster membership into the
+ * config, and new joiners would silently drop out of the assignment. It
+ * controls a real `allNodes` field on IngesterConfig that the backend
+ * dispatcher re-evaluates on every cluster-membership change. When
+ * `allNodes` is on, the per-node checkboxes are visually disabled and
+ * the underlying `value` list is preserved (so unchecking "All nodes"
+ * restores the previous selection).
+ *
+ * Hidden in single-node mode.
  */
 export function NodeMultiSelect({
   value,
-  onChange,
+  allNodes,
+  onValueChange,
+  onAllNodesChange,
   dark,
 }: Readonly<{
   value: string[];
-  onChange: (nodeIds: string[]) => void;
+  allNodes: boolean;
+  onValueChange: (nodeIds: string[]) => void;
+  onAllNodesChange: (allNodes: boolean) => void;
   dark: boolean;
 }>) {
   const { data: clusterStatus } = useClusterStatus();
@@ -33,19 +48,9 @@ export function NodeMultiSelect({
 
   const toggle = (nodeId: string) => {
     if (selected.has(nodeId)) {
-      onChange(value.filter((id) => id !== nodeId));
+      onValueChange(value.filter((id) => id !== nodeId));
     } else {
-      onChange([...value, nodeId]);
-    }
-  };
-
-  const allSelected = sorted.every((n) => selected.has(n.id));
-
-  const toggleAll = () => {
-    if (allSelected) {
-      onChange([]);
-    } else {
-      onChange(sorted.map((n) => n.id));
+      onValueChange([...value, nodeId]);
     }
   };
 
@@ -56,8 +61,8 @@ export function NodeMultiSelect({
         "border-light-border bg-light-surface",
       )}`}>
         <Checkbox
-          checked={allSelected}
-          onChange={toggleAll}
+          checked={allNodes}
+          onChange={onAllNodesChange}
           label="All nodes"
           dark={dark}
         />
@@ -69,6 +74,7 @@ export function NodeMultiSelect({
             onChange={() => toggle(node.id)}
             label={node.label}
             dark={dark}
+            disabled={allNodes}
           />
         ))}
       </div>

@@ -150,6 +150,9 @@ func newIngesterCreateCmd() *cobra.Command {
 			if cmd.Flags().Changed("singleton") {
 				cfg.Singleton, _ = cmd.Flags().GetBool("singleton")
 			}
+			if cmd.Flags().Changed("all-nodes") {
+				cfg.AllNodes, _ = cmd.Flags().GetBool("all-nodes")
+			}
 
 			if cfg.Type == "" {
 				return errors.New("--type is required for new ingesters")
@@ -174,6 +177,7 @@ func newIngesterCreateCmd() *cobra.Command {
 	cmd.Flags().Bool("enabled", true, "enable the ingester")
 	cmd.Flags().String("node-id", "", "node ID to assign")
 	cmd.Flags().Bool("singleton", false, "run on one node with Raft-coordinated failover (only meaningful for types that support it)")
+	cmd.Flags().Bool("all-nodes", false, "run on every node in the cluster, including future joiners (re-evaluated on cluster-membership change)")
 	_ = cmd.MarkFlagRequired("name")
 	return cmd
 }

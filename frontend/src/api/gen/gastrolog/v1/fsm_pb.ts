@@ -653,18 +653,25 @@ export class PutIngesterCommand extends Message<PutIngesterCommand> {
   nodeId = new Uint8Array(0);
 
   /**
-   * Allowed nodes.
+   * Eligible nodes (honored when all_nodes=false).
    *
    * @generated from field: repeated bytes node_ids = 7;
    */
   nodeIds: Uint8Array[] = [];
 
   /**
-   * HA semantics: false = parallel (run on every node), true = Raft-assigned singleton with failover.
+   * HA semantics: false = parallel, true = Raft-assigned singleton with failover.
    *
    * @generated from field: bool singleton = 8;
    */
   singleton = false;
+
+  /**
+   * When true, eligibility is the entire current cluster (re-evaluated on membership change).
+   *
+   * @generated from field: bool all_nodes = 9;
+   */
+  allNodes = false;
 
   constructor(data?: PartialMessage<PutIngesterCommand>) {
     super();
@@ -682,6 +689,7 @@ export class PutIngesterCommand extends Message<PutIngesterCommand> {
     { no: 6, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 7, name: "node_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
     { no: 8, name: "singleton", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 9, name: "all_nodes", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutIngesterCommand {

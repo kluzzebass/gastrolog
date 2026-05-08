@@ -16,6 +16,8 @@ export function IngesterCommonFields({
   onEnabledChange,
   nodeIds,
   onNodeIdsChange,
+  allNodes,
+  onAllNodesChange,
   singleton,
   onSingletonChange,
   singletonSupported,
@@ -28,6 +30,8 @@ export function IngesterCommonFields({
   onEnabledChange: (v: boolean) => void;
   nodeIds: string[];
   onNodeIdsChange: (v: string[]) => void;
+  allNodes: boolean;
+  onAllNodesChange: (v: boolean) => void;
   singleton: boolean;
   onSingletonChange: (v: boolean) => void;
   singletonSupported: boolean;
@@ -51,7 +55,9 @@ export function IngesterCommonFields({
       />
       <NodeMultiSelect
         value={nodeIds}
-        onChange={onNodeIdsChange}
+        allNodes={allNodes}
+        onValueChange={onNodeIdsChange}
+        onAllNodesChange={onAllNodesChange}
         dark={dark}
       />
       {singletonSupported && (

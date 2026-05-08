@@ -764,18 +764,30 @@ export class IngesterConfig extends Message<IngesterConfig> {
   nodeId = new Uint8Array(0);
 
   /**
-   * Allowed nodes. Parallel: run on all. Singleton: place on one.
+   * Eligible nodes. Honored only when all_nodes is false. Parallel: run on
+   * every listed node. Singleton: Raft-assigned to one of them.
    *
    * @generated from field: repeated bytes node_ids = 7;
    */
   nodeIds: Uint8Array[] = [];
 
   /**
-   * HA semantics: false = run on every node in node_ids (parallel); true = Raft-assigned to one node with failover. Only takes effect when the ingester type has SingletonSupported=true.
+   * HA semantics: false = run on every eligible node (parallel); true = Raft-assigned to one node with failover. Only takes effect when the ingester type has SingletonSupported=true.
    *
    * @generated from field: bool singleton = 8;
    */
   singleton = false;
+
+  /**
+   * When true, the eligible-node set is the entire cluster and is
+   * re-evaluated on cluster-membership changes — joiners automatically
+   * pick up the ingester. When false, eligibility is determined by
+   * node_ids (literal pin). The dispatcher must evaluate this on every
+   * tick, not snapshot at config-write time.
+   *
+   * @generated from field: bool all_nodes = 9;
+   */
+  allNodes = false;
 
   constructor(data?: PartialMessage<IngesterConfig>) {
     super();
@@ -793,6 +805,7 @@ export class IngesterConfig extends Message<IngesterConfig> {
     { no: 6, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 7, name: "node_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
     { no: 8, name: "singleton", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 9, name: "all_nodes", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): IngesterConfig {
@@ -1043,7 +1056,7 @@ export class IngesterInfo extends Message<IngesterInfo> {
   nodeId = new Uint8Array(0);
 
   /**
-   * Allowed nodes from config.
+   * Eligible nodes from config (honored when all_nodes=false).
    *
    * @generated from field: repeated bytes node_ids = 6;
    */
@@ -1064,11 +1077,18 @@ export class IngesterInfo extends Message<IngesterInfo> {
   enabled = false;
 
   /**
-   * HA semantics: false = parallel (every node_ids), true = Raft-assigned singleton.
+   * HA semantics: false = parallel (every eligible node), true = Raft-assigned singleton.
    *
    * @generated from field: bool singleton = 10;
    */
   singleton = false;
+
+  /**
+   * When true, eligibility is the entire current cluster (re-evaluated on membership change).
+   *
+   * @generated from field: bool all_nodes = 11;
+   */
+  allNodes = false;
 
   constructor(data?: PartialMessage<IngesterInfo>) {
     super();
@@ -1087,6 +1107,7 @@ export class IngesterInfo extends Message<IngesterInfo> {
     { no: 8, name: "node_status", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 8 /* ScalarType.BOOL */} },
     { no: 9, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 10, name: "singleton", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 11, name: "all_nodes", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): IngesterInfo {

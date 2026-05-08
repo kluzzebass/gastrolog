@@ -15,22 +15,28 @@ interface CheckboxProps {
   /** Additional classes on the outer row — e.g. `flex-1` to grow in a flex parent. */
   className?: string;
   helpTopicId?: string;
+  /** When true, the checkbox is greyed out and clicks/keys are ignored. */
+  disabled?: boolean;
   dark: boolean;
 }
 
-export function Checkbox({ checked, onChange, label, className, helpTopicId, dark }: Readonly<CheckboxProps>) {
+export function Checkbox({ checked, onChange, label, className, helpTopicId, disabled, dark }: Readonly<CheckboxProps>) {
   const c = useThemeClass(dark);
+  const cursor = disabled ? "cursor-not-allowed" : "cursor-pointer";
+  const opacity = disabled ? "opacity-40" : "";
   return (
     <div
-      className={`flex items-center gap-2 cursor-pointer select-none${className ? " " + className : ""}`}
-      onClick={() => onChange(!checked)}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onChange(!checked); } }}
+      className={`flex items-center gap-2 ${cursor} ${opacity} select-none${className ? " " + className : ""}`}
+      onClick={() => { if (!disabled) onChange(!checked); }}
+      onKeyDown={(e) => { if (!disabled && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onChange(!checked); } }}
       role="checkbox"
       aria-checked={checked}
-      tabIndex={0}
+      aria-disabled={disabled || undefined}
+      tabIndex={disabled ? -1 : 0}
     >
       <button
         type="button"
+        disabled={disabled}
         className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${
           checked
             ? "bg-copper border-copper text-text-on-copper"
