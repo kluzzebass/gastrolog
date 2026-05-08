@@ -150,12 +150,13 @@ swarm-up: image
     docker stack deploy -c stack.yml gastrolog
     echo "Waiting for gastrolog services + deps to come up..."
     for i in $(seq 1 90); do
-      # Need bootstrap + joiner-1 1/1 plus the long-running deps (minio, azurite,
-      # fake-gcs, kafka, kafka-producer, rsyslog, otel-collector, fluent-bit = 8).
-      # kafka-init exits cleanly after creating the topic and reports 0/1 forever
-      # since restart_policy is "none" — exclude it from the wait condition.
+      # 9 long-running services on swarm: bootstrap, joiner-1, minio,
+      # azurite, fake-gcs, kafka, kafka-producer, otel-collector,
+      # fluent-bit. (rsyslog excluded — see stack.yml comment about
+      # the amd64-only image. kafka-init exits cleanly and reports
+      # 0/1 forever, also excluded.)
       ok=$(docker stack services gastrolog | tail -n +2 | grep -v gastrolog_kafka-init | grep -c '1/1' || true)
-      [[ $ok -ge 10 ]] && break
+      [[ $ok -ge 9 ]] && break
       sleep 3
     done
     docker stack services gastrolog
@@ -166,7 +167,8 @@ swarm-up: image
     echo ""
     echo "Swarm stack running at http://localhost:4564 (admin/change-me-please)"
     echo "Cloud storage:    minio:9000, azurite:10000, fake-gcs:4443 (overlay service DNS)"
-    echo "Ingester sources: kafka:9092, rsyslog:514, otel-collector:4317, fluent-bit:24224"
+    echo "Ingester sources: kafka:9092, otel-collector:4317, fluent-bit:24224"
+    echo "(rsyslog is intentionally omitted on Swarm — see stack.yml)"
     echo "Tear down with: just deploy swarm-down"
 
 # Each new joiner is its own service (`gastrolog_joiner-N`) because Swarm's

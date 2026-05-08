@@ -209,16 +209,27 @@ services:
   # Config rewrites host.docker.internal → tasks.gastrolog_bootstrap so
   # rsyslog targets the bootstrap pod's overlay IP. Configs are created
   # by the swarm-up recipe before deploy.
-  rsyslog:
-    image: rsyslog/syslog_appliance_alpine:latest
-    configs:
-      - source: gastrolog_rsyslog_conf
-        target: /etc/rsyslog.conf
-        mode: 0o444
-    networks:
-      - gastrolog
-    deploy:
-      placement: { constraints: [node.role == manager] }
+  # rsyslog is intentionally NOT in the Swarm stack:
+  #
+  # The `rsyslog/syslog_appliance_alpine` image is amd64-only.
+  # K8s/OrbStack run it via QEMU emulation; Swarm refuses with
+  # "unsupported platform on 1 node" and the `platform:` field
+  # isn't honored at the service level in stack files (it's a
+  # Compose-only directive). The clean fix would be a multi-arch
+  # image; until then, rsyslog is omitted on Swarm.
+  #
+  # If you're on an amd64 Swarm host, uncomment the block below.
+  #
+  # rsyslog:
+  #   image: rsyslog/syslog_appliance_alpine:latest
+  #   configs:
+  #     - source: gastrolog_rsyslog_conf
+  #       target: /etc/rsyslog.conf
+  #       mode: 0o444
+  #   networks:
+  #     - gastrolog
+  #   deploy:
+  #     placement: { constraints: [node.role == manager] }
 
   # ── OTel Collector ───────────────────────────────────────────────
   otel-collector:
