@@ -85,6 +85,7 @@ function vaultToEntry(v: VaultConfig): TierEntry {
     memoryBudget: v.memoryBudgetBytes > 0 ? formatBytes(v.memoryBudgetBytes) : "",
     rotationPolicyId: v.rotationPolicyId.length > 0 ? encode(v.rotationPolicyId) : "",
     retentionPolicyId: v.retentionRules[0] ? encode(v.retentionRules[0].retentionPolicyId) : "",
+    retentionDisposition: v.retentionDisposition || "delete",
     replicationFactor: String(v.replicationFactor || 1),
     path: v.path || "",
     nodeId: "",
@@ -116,6 +117,7 @@ function entryToVault(
     retentionRules: entry.retentionPolicyId
       ? [new RetentionRule({ retentionPolicyId: decode(entry.retentionPolicyId) })]
       : [],
+    retentionDisposition: entry.type !== "jsonl" ? (entry.retentionDisposition || "delete") : "",
     replicationFactor: entry.type === "jsonl" ? 1 : parseInt(entry.replicationFactor, 10) || 1,
     path: entry.type === "jsonl" ? entry.path : "",
     placements: vault.placements,

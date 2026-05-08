@@ -101,6 +101,13 @@ type retentionRunner struct {
 	// chunks. Used to forward chunk deletions after retention expires them.
 	followerTargets []system.ReplicationTarget
 
+	// disposition is the resolved VaultConfig.RetentionDisposition value.
+	// Refreshed on every sweep via retentionTargetForTier so live config
+	// edits take effect on the next tick. Branches the per-chunk path:
+	// "delete" skips the routing engine entirely, "route" fans records
+	// out for operator-configured routes to forward.
+	disposition string
+
 	now    func() time.Time
 	logger *slog.Logger
 }
@@ -492,6 +499,7 @@ func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg syste
 	runner.vaultName = vaultCfg.Name
 	runner.tierType = string(tierCfg.Type)
 	runner.tierPosition = tierPositionInVault(cfg, vaultCfg.ID, tier.TierID)
+	runner.disposition = vaultCfg.ResolveRetentionDisposition()
 	return &sweepTarget{runner: runner, rules: rules}
 }
 
@@ -683,16 +691,30 @@ func (r *retentionRunner) tryRetainChunk(id chunk.ChunkID, b retentionRule, alre
 		}
 	}
 
-	// Phase 4 (gastrolog-42f9z): retention has no decision layer. The
-	// chunk's records are streamed through the routing engine with
-	// `source = retention-trigger(vault_id)` and the original chunk is
-	// always destroyed regardless of routing outcome. Today the routing
-	// table has no routes that match retention-trigger sources, so all
-	// records drop on the floor — the same observable behavior as the
-	// legacy expire action. Phase 5 extends the routing table.
+	// gastrolog-18du3: the disposition flag controls whether records are
+	// streamed through the routing engine before the chunk is destroyed.
+	// "delete" (the safe default) skips routing entirely — records drop
+	// and storage frees immediately. "route" preserves the prior Phase 5
+	// behavior: records flow through the routing engine with synthetic
+	// `_source = "retention"`, so operator-configured routes can forward
+	// them to archive vaults, cold storage, etc. The original chunk is
+	// always destroyed regardless of disposition.
 	defer r.clearInflight(id)
-	r.fireRetentionEvent(id)
+	r.applyRetentionDispositionToChunk(id)
 	r.expireChunk(id, "retention-trigger")
+}
+
+// applyRetentionDispositionToChunk runs the chunk's records through the
+// routing engine when the vault's disposition is "route"; otherwise it
+// is a no-op. The caller is still responsible for destroying the chunk
+// via expireChunk regardless of disposition. Extracted so tests can
+// verify the disposition gate without standing up the full
+// expire-chunk machinery (which needs a reconciler, Raft, etc.). See
+// gastrolog-18du3.
+func (r *retentionRunner) applyRetentionDispositionToChunk(id chunk.ChunkID) {
+	if r.disposition == system.RetentionDispositionRoute {
+		r.fireRetentionEvent(id)
+	}
 }
 
 // fireRetentionEvent streams the chunk's records through the routing

@@ -490,17 +490,31 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 
 - **Retention rule** (`RetentionRule`) — per-vault, per-policy: "when do
   sealed chunks fire retention events". Phase 4 (gastrolog-42f9z) collapsed
-  the prior expire/eject/transition action enum: a fired event always
-  streams the chunk's records through the routing engine and always
-  destroys the chunk. The routing engine's verdict (which retention-trigger
-  routes match) drives placement. Without matching routes, the records drop.
+  the prior expire/eject/transition action enum: a fired event destroys
+  the chunk, optionally streaming its records through the routing engine
+  first depending on the vault's retention disposition (see below).
 
 - **Retention policy** (`RetentionPolicyConfig`) — named, reusable
   policy referenced by `RetentionRule`.
 
 - **Retention event** — the cluster-visible signal that a chunk has aged
-  out. Fires unconditionally on policy match; consumed by the routing
-  engine with `source = retention-trigger(vault_id)`.
+  out. Fires unconditionally on policy match; the vault's retention
+  disposition decides whether the records are forwarded through the
+  routing engine before the chunk is destroyed.
+
+- **Retention disposition** (`VaultConfig.RetentionDisposition`,
+  gastrolog-18du3) — per-vault flag controlling what happens to records
+  when a retention event fires. Two canonical values:
+  - **`delete`** (default): records drop, storage frees, the routing
+    engine is never invoked. The safe default — no risk of accidental
+    cascades.
+  - **`route`**: records flow through the routing engine with synthetic
+    `_source = "retention"` and `_vault = "<id>"`, so operator-configured
+    routes can forward them to archive vaults, cold storage, etc. The
+    chunk is destroyed regardless of disposition.
+
+  Empty/unrecognized values resolve to `delete` via
+  `VaultConfig.ResolveRetentionDisposition()`.
 
 ### Core state transitions (verbs)
 
@@ -511,10 +525,14 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 
 - **Expire** — destroy a chunk that has aged out according to retention.
   Phase 4 (gastrolog-42f9z) collapsed transition / eject / expire into a
-  single retention event: the chunk's records are always streamed through
-  the routing engine before the chunk is destroyed. If a retention-trigger
-  route directs records to another vault, that's the new "transition"
-  semantics; if no route matches, the records drop (legacy expire).
+  single retention event; gastrolog-18du3 added a per-vault disposition
+  that controls whether the chunk's records flow through the routing
+  engine before destruction. With `disposition = delete` (default),
+  records drop and the chunk is destroyed. With `disposition = route`,
+  the records are first streamed through the routing engine (synthetic
+  `_source = "retention"`), then the chunk is destroyed. Any
+  retention-trigger route directing records to another vault is the
+  modern equivalent of the legacy "transition" semantics.
 
 - **Reconcile** — compare the tier FSM manifest against local disk;
   delete sealed chunks on disk that aren't in the manifest (orphan
@@ -750,7 +768,7 @@ Live on `Config` directly (not as entities):
 | applied index    | committed-and-applied | Precision: commit = quorum-persisted; applied = FSM-processed.  |
 | node             | server, host      | "Node" is the cluster-member canonical. Reserve "server" for `cluster.Server` (the gRPC server component). |
 | peer             | remote node       | "Peer" is relative; there is no absolute "remote".                 |
-| retention event  | retention action, expire/eject/transition | Phase 4 (gastrolog-42f9z) collapsed the action enum: a fired retention event always streams records through the routing engine and destroys the chunk. The "what" lives on routes, not on the rule. |
+| retention event  | retention action, expire/eject/transition | Phase 4 (gastrolog-42f9z) collapsed the action enum: a fired retention event destroys the chunk and (per the vault's retention disposition, gastrolog-18du3) optionally streams the records through the routing engine first. The "what" lives on routes; the "whether to invoke routes at all" lives on the disposition. |
 | match expression | filter, FilterConfig | Phase 5 (gastrolog-4kkoo) inlined match expressions on `RouteConfig.Stages`; the named-`Filter` entity is gone. UI label: "Match expression" on the route editor. |
 | route table      | filter set        | Phase 5 (gastrolog-4kkoo): the runtime structure is a priority-ordered `RouteSet`, not a per-vault `FilterSet`. First-match-wins, no catch-the-rest. |
 | synthetic attribute | source predicate, RouteSource | Phase 5 (gastrolog-4kkoo): source/content predicates unify via `_source`/`_ingester`/`_vault`/`_reason` overlays at routing-eval time. The Phase-4 source-kind enum is gone. |

@@ -62,6 +62,45 @@ type VaultConfig struct {
 
 	// CacheTTL is the eviction TTL duration (e.g. "1h", "7d") for ttl mode.
 	CacheTTL string `json:"cacheTtl,omitempty"`
+
+	// RetentionDisposition decides what happens to records as retention
+	// ages chunks out of this vault. "delete" (default) drops the records
+	// and frees storage immediately, never touching the routing engine.
+	// "route" feeds the records back through the routing engine with
+	// _source = "retention" so operator-configured routes can forward
+	// them to archive vaults, cold storage, etc.
+	//
+	// Default is "delete" because the routing path is fail-open: an
+	// accidental match on a retention-source route can create a cascade
+	// (re-ingested records produce new chunks that themselves expire on
+	// the next sweep). Operators who want forwarding must opt in
+	// explicitly. See gastrolog-18du3.
+	RetentionDisposition string `json:"retentionDisposition,omitempty"`
+}
+
+// Canonical values for VaultConfig.RetentionDisposition.
+const (
+	// RetentionDispositionDelete drops records when retention triggers.
+	// Storage is freed immediately; the routing engine is not invoked.
+	RetentionDispositionDelete = "delete"
+	// RetentionDispositionRoute streams retention output through the
+	// routing engine so operator-configured routes can forward records
+	// to other destinations.
+	RetentionDispositionRoute = "route"
+)
+
+// ResolveRetentionDisposition returns the effective retention disposition
+// for this vault. Empty/unrecognized values resolve to "delete" — the
+// safe default. Callers that need to branch on disposition should use
+// this rather than reading the raw field, so the empty-string sentinel
+// is centralized in one place.
+func (v VaultConfig) ResolveRetentionDisposition() string {
+	switch v.RetentionDisposition {
+	case RetentionDispositionRoute:
+		return RetentionDispositionRoute
+	default:
+		return RetentionDispositionDelete
+	}
 }
 
 // VaultTierIDs returns the ordered tier IDs for a vault by filtering tiers

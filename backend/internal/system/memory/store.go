@@ -929,17 +929,18 @@ func copyRetentionPolicy(rp system.RetentionPolicyConfig) system.RetentionPolicy
 
 func copyVaultConfig(st system.VaultConfig) system.VaultConfig {
 	cp := system.VaultConfig{
-		ID:                st.ID,
-		Name:              st.Name,
-		Enabled:           st.Enabled,
-		Type:              st.Type,
-		MemoryBudgetBytes: st.MemoryBudgetBytes,
-		StorageClass:      st.StorageClass,
-		ReplicationFactor: st.ReplicationFactor,
-		Path:              st.Path,
-		CacheEviction:     st.CacheEviction,
-		CacheBudget:       st.CacheBudget,
-		CacheTTL:          st.CacheTTL,
+		ID:                   st.ID,
+		Name:                 st.Name,
+		Enabled:              st.Enabled,
+		Type:                 st.Type,
+		MemoryBudgetBytes:    st.MemoryBudgetBytes,
+		StorageClass:         st.StorageClass,
+		ReplicationFactor:    st.ReplicationFactor,
+		Path:                 st.Path,
+		CacheEviction:        st.CacheEviction,
+		CacheBudget:          st.CacheBudget,
+		CacheTTL:             st.CacheTTL,
+		RetentionDisposition: st.RetentionDisposition,
 	}
 	if st.RotationPolicyID != nil {
 		id := *st.RotationPolicyID

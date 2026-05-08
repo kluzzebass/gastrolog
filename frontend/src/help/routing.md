@@ -7,7 +7,7 @@ Routes connect data sources to vaults. Each route binds a **filter** to one or m
 Routes carry a **set** of source-predicate kinds, telling the routing engine which kinds of input streams the route participates in. Two kinds exist today:
 
 - **Ingest**: the route participates in live ingestion. When records arrive from an ingester and pass through [digestion](help:digesters), every enabled ingest-source route's filter is evaluated against each record.
-- **Retention trigger**: the route is consulted only when a [retention event](help:policy-retention) fires on a vault. The chunk's records are streamed through every retention-trigger route whose filter matches.
+- **Retention trigger**: the route is consulted when a [retention event](help:policy-retention) fires on a vault **whose retention disposition is set to "Send records to routing engine"**. Vaults with the default "Delete" disposition skip the routing engine entirely on retention — extracted-trigger routes never see their records. When the disposition is set to "route", the chunk's records are streamed through every retention-trigger route whose filter matches.
 
 A route may carry both kinds at once — useful if you want the same destination + filter to apply to both live traffic AND retired chunks from a vault.
 
@@ -54,4 +54,4 @@ A route can have both checked. The narrowers are independent — only the one ma
 
 **Catch-rest safety net:** Always have at least one ingest route with a `+` filter pointing to a catch-all vault. This ensures no record is silently dropped if it doesn't match any other route.
 
-**Cold storage via retention re-routing:** Route live logs to a fast local vault, then add a retention-trigger route that re-sends aged records into a cloud-backed cold vault. See [Retention Policies](help:policy-retention) and [Sealed Backing](help:storage-cloud).
+**Cold storage via retention re-routing:** Route live logs to a fast local vault, then add a retention-trigger route that re-sends aged records into a cloud-backed cold vault. **You must also set the source vault's retention disposition to "Send records to routing engine"** for this to work — the default disposition deletes records on retention without invoking routing. See [Retention Policies](help:policy-retention) and [Sealed Backing](help:storage-cloud).

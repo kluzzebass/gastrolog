@@ -42,6 +42,7 @@ export interface TierEntry {
   memoryBudget: string;
   rotationPolicyId: string;
   retentionPolicyId: string;
+  retentionDisposition: string; // "delete" (default) | "route"
   replicationFactor: string;
   path: string;
   nodeId: string;
@@ -59,6 +60,7 @@ export function emptyTierEntry(type: TierTypeLabel): TierEntry {
     memoryBudget: "",
     rotationPolicyId: "",
     retentionPolicyId: "",
+    retentionDisposition: "delete",
     replicationFactor: "1",
     path: "",
     nodeId: "",
@@ -407,6 +409,24 @@ export function VaultStorageForm({
       )}
 
       {tier.type !== "jsonl" && (
+        <FormField
+          label="Retention Disposition"
+          dark={dark}
+          description="What happens to records when retention triggers. 'Delete' frees storage immediately. 'Route' sends records through the routing engine — only enable if you have an archival route configured for this vault, otherwise records may cascade unexpectedly."
+        >
+          <SelectInput
+            value={tier.retentionDisposition || "delete"}
+            onChange={(v) => onUpdate({ retentionDisposition: v })}
+            options={[
+              { value: "delete", label: "Delete records on retention" },
+              { value: "route", label: "Send records to routing engine" },
+            ]}
+            dark={dark}
+          />
+        </FormField>
+      )}
+
+      {tier.type !== "jsonl" && (
         <FormField label="Replication Factor" dark={dark} description="1 = none, 2 = redundant, 3+ = fault tolerant">
           <SpinnerInput
             value={tier.replicationFactor}
@@ -543,6 +563,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
       retentionRules: storage.retentionPolicyId
         ? [new RetentionRule({ retentionPolicyId: decode(storage.retentionPolicyId) })]
         : [],
+      retentionDisposition: storage.type !== "jsonl" ? (storage.retentionDisposition || "delete") : "",
       replicationFactor: parseInt(storage.replicationFactor, 10) || 1,
       path: storage.type === "jsonl" ? storage.path : "",
     });
