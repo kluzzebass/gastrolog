@@ -406,7 +406,7 @@ func (s *SystemServer) loadSystemTiers(ctx context.Context, resp *apiv1.GetSyste
 		return fmt.Errorf("list tiers: %w", err)
 	}
 	for _, tier := range tiers {
-		tierPlacements, _ := s.sysStore.GetTierPlacements(ctx, tier.ID)
+		tierPlacements, _ := s.sysStore.GetVaultPlacements(ctx, tier.ID)
 		var placements []*apiv1.VaultPlacement
 		for _, p := range tierPlacements {
 			placements = append(placements, &apiv1.VaultPlacement{

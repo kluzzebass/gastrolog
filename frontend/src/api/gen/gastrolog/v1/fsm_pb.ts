@@ -229,10 +229,10 @@ export class SystemCommand extends Message<SystemCommand> {
     case: "deleteTier";
   } | {
     /**
-     * @generated from field: gastrolog.v1.SetTierPlacementsCommand set_tier_placements = 35;
+     * @generated from field: gastrolog.v1.SetVaultPlacementsCommand set_vault_placements = 35;
      */
-    value: SetTierPlacementsCommand;
-    case: "setTierPlacements";
+    value: SetVaultPlacementsCommand;
+    case: "setVaultPlacements";
   } | {
     /**
      * @generated from field: gastrolog.v1.SetSetupWizardDismissedCommand set_setup_wizard_dismissed = 36;
@@ -301,7 +301,7 @@ export class SystemCommand extends Message<SystemCommand> {
     { no: 32, name: "set_node_storage_config", kind: "message", T: SetNodeStorageConfigCommand, oneof: "command" },
     { no: 33, name: "put_tier", kind: "message", T: PutTierCommand, oneof: "command" },
     { no: 34, name: "delete_tier", kind: "message", T: DeleteTierCommand, oneof: "command" },
-    { no: 35, name: "set_tier_placements", kind: "message", T: SetTierPlacementsCommand, oneof: "command" },
+    { no: 35, name: "set_vault_placements", kind: "message", T: SetVaultPlacementsCommand, oneof: "command" },
     { no: 36, name: "set_setup_wizard_dismissed", kind: "message", T: SetSetupWizardDismissedCommand, oneof: "command" },
     { no: 37, name: "set_ingester_alive", kind: "message", T: SetIngesterAliveCommand, oneof: "command" },
     { no: 38, name: "set_ingester_assignment", kind: "message", T: SetIngesterAssignmentCommand, oneof: "command" },
@@ -1964,9 +1964,9 @@ export class DeleteTierCommand extends Message<DeleteTierCommand> {
 }
 
 /**
- * @generated from message gastrolog.v1.SetTierPlacementsCommand
+ * @generated from message gastrolog.v1.SetVaultPlacementsCommand
  */
-export class SetTierPlacementsCommand extends Message<SetTierPlacementsCommand> {
+export class SetVaultPlacementsCommand extends Message<SetVaultPlacementsCommand> {
   /**
    * @generated from field: bytes tier_id = 1;
    */
@@ -1977,32 +1977,32 @@ export class SetTierPlacementsCommand extends Message<SetTierPlacementsCommand> 
    */
   placements: VaultPlacement[] = [];
 
-  constructor(data?: PartialMessage<SetTierPlacementsCommand>) {
+  constructor(data?: PartialMessage<SetVaultPlacementsCommand>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.SetTierPlacementsCommand";
+  static readonly typeName = "gastrolog.v1.SetVaultPlacementsCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "tier_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "placements", kind: "message", T: VaultPlacement, repeated: true },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SetTierPlacementsCommand {
-    return new SetTierPlacementsCommand().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SetVaultPlacementsCommand {
+    return new SetVaultPlacementsCommand().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SetTierPlacementsCommand {
-    return new SetTierPlacementsCommand().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SetVaultPlacementsCommand {
+    return new SetVaultPlacementsCommand().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SetTierPlacementsCommand {
-    return new SetTierPlacementsCommand().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SetVaultPlacementsCommand {
+    return new SetVaultPlacementsCommand().fromJsonString(jsonString, options);
   }
 
-  static equals(a: SetTierPlacementsCommand | PlainMessage<SetTierPlacementsCommand> | undefined, b: SetTierPlacementsCommand | PlainMessage<SetTierPlacementsCommand> | undefined): boolean {
-    return proto3.util.equals(SetTierPlacementsCommand, a, b);
+  static equals(a: SetVaultPlacementsCommand | PlainMessage<SetVaultPlacementsCommand> | undefined, b: SetVaultPlacementsCommand | PlainMessage<SetVaultPlacementsCommand> | undefined): boolean {
+    return proto3.util.equals(SetVaultPlacementsCommand, a, b);
   }
 }
 
@@ -2268,9 +2268,9 @@ export class SystemSnapshot extends Message<SystemSnapshot> {
   tiers: PutTierCommand[] = [];
 
   /**
-   * @generated from field: repeated gastrolog.v1.SetTierPlacementsCommand tier_placements = 16;
+   * @generated from field: repeated gastrolog.v1.SetVaultPlacementsCommand vault_placements = 16;
    */
-  tierPlacements: SetTierPlacementsCommand[] = [];
+  vaultPlacements: SetVaultPlacementsCommand[] = [];
 
   /**
    * @generated from field: bool setup_wizard_dismissed = 17;
@@ -2315,7 +2315,7 @@ export class SystemSnapshot extends Message<SystemSnapshot> {
     { no: 13, name: "cloud_services", kind: "message", T: PutCloudServiceCommand, repeated: true },
     { no: 14, name: "node_storage_configs", kind: "message", T: SetNodeStorageConfigCommand, repeated: true },
     { no: 15, name: "tiers", kind: "message", T: PutTierCommand, repeated: true },
-    { no: 16, name: "tier_placements", kind: "message", T: SetTierPlacementsCommand, repeated: true },
+    { no: 16, name: "vault_placements", kind: "message", T: SetVaultPlacementsCommand, repeated: true },
     { no: 17, name: "setup_wizard_dismissed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 18, name: "ingester_alive", kind: "message", T: SetIngesterAliveCommand, repeated: true },
     { no: 19, name: "ingester_assignments", kind: "message", T: SetIngesterAssignmentCommand, repeated: true },

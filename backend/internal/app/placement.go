@@ -125,14 +125,14 @@ func (pm *placementManager) reconcile(ctx context.Context) {
 	tierCount := make(map[string]int)
 	for _, t := range tiers {
 		leaderNodeID := system.LeaderNodeID(func() []system.VaultPlacement {
-			p, _ := pm.cfgStore.GetTierPlacements(context.Background(), t.ID)
+			p, _ := pm.cfgStore.GetVaultPlacements(context.Background(), t.ID)
 			return p
 		}(), nscs)
 		if leaderNodeID != "" && alive[leaderNodeID] {
 			tierCount[leaderNodeID]++
 		}
 		for _, sid := range system.FollowerNodeIDs(func() []system.VaultPlacement {
-			p, _ := pm.cfgStore.GetTierPlacements(context.Background(), t.ID)
+			p, _ := pm.cfgStore.GetVaultPlacements(context.Background(), t.ID)
 			return p
 		}(), nscs) {
 			if alive[sid] {
@@ -262,7 +262,7 @@ func (pm *placementManager) placeTier(ctx context.Context, tier system.TierConfi
 	alertKey := fmt.Sprintf("tier-unplaced:%s", tier.ID)
 
 	currentLeader := system.LeaderNodeID(func() []system.VaultPlacement {
-		p, _ := pm.cfgStore.GetTierPlacements(context.Background(), tier.ID)
+		p, _ := pm.cfgStore.GetVaultPlacements(context.Background(), tier.ID)
 		return p
 	}(), nscs)
 
@@ -289,9 +289,9 @@ func (pm *placementManager) placeTier(ctx context.Context, tier system.TierConfi
 
 	old := currentLeader
 	// Replace the leader placement.
-	oldP, _ := pm.cfgStore.GetTierPlacements(context.Background(), tier.ID)
+	oldP, _ := pm.cfgStore.GetVaultPlacements(context.Background(), tier.ID)
 	newP := replaceLeaderPlacement(oldP, system.StorageIDForNode(best, tier, nscs))
-	_ = pm.cfgStore.SetTierPlacements(ctx, tier.ID, newP)
+	_ = pm.cfgStore.SetVaultPlacements(ctx, tier.ID, newP)
 	if err := pm.cfgStore.PutTier(ctx, tier); err != nil {
 		pm.logger.Error("placement: assign tier", "vault", tier.ID, "name", tier.Name, "node", best, "error", err)
 		return
@@ -338,7 +338,7 @@ func (pm *placementManager) placeFollowers(ctx context.Context, tier *system.Tie
 	}
 
 	leaderStorageID := system.LeaderStorageID(func() []system.VaultPlacement {
-		p, _ := pm.cfgStore.GetTierPlacements(context.Background(), tier.ID)
+		p, _ := pm.cfgStore.GetVaultPlacements(context.Background(), tier.ID)
 		return p
 	}())
 	leaderNodeID := system.NodeIDForStorage(leaderStorageID, nscs)
@@ -350,10 +350,10 @@ func (pm *placementManager) placeFollowers(ctx context.Context, tier *system.Tie
 	newPlacements = append(newPlacements, kept...)
 
 	if !placementsEqual(func() []system.VaultPlacement {
-		p, _ := pm.cfgStore.GetTierPlacements(context.Background(), tier.ID)
+		p, _ := pm.cfgStore.GetVaultPlacements(context.Background(), tier.ID)
 		return p
 	}(), newPlacements) {
-		_ = pm.cfgStore.SetTierPlacements(ctx, tier.ID, newPlacements)
+		_ = pm.cfgStore.SetVaultPlacements(ctx, tier.ID, newPlacements)
 		if err := pm.cfgStore.PutTier(ctx, *tier); err != nil {
 			pm.logger.Error("placement: assign followers", "vault", tier.ID, "error", err)
 			return
@@ -368,7 +368,7 @@ func (pm *placementManager) placeFollowers(ctx context.Context, tier *system.Tie
 // clearStaleFollowers removes leftover follower placements when RF <= 1.
 func (pm *placementManager) clearStaleFollowers(ctx context.Context, tier *system.TierConfig, nscs []system.NodeStorageConfig, tierCount map[string]int) {
 	currentFollowers := system.FollowerStorageIDs(func() []system.VaultPlacement {
-		p, _ := pm.cfgStore.GetTierPlacements(context.Background(), tier.ID)
+		p, _ := pm.cfgStore.GetVaultPlacements(context.Background(), tier.ID)
 		return p
 	}())
 	if len(currentFollowers) == 0 {
@@ -379,8 +379,8 @@ func (pm *placementManager) clearStaleFollowers(ctx context.Context, tier *syste
 			tierCount[nid]--
 		}
 	}
-	cp, _ := pm.cfgStore.GetTierPlacements(context.Background(), tier.ID)
-	_ = pm.cfgStore.SetTierPlacements(ctx, tier.ID, clearFollowerPlacements(cp))
+	cp, _ := pm.cfgStore.GetVaultPlacements(context.Background(), tier.ID)
+	_ = pm.cfgStore.SetVaultPlacements(ctx, tier.ID, clearFollowerPlacements(cp))
 	if err := pm.cfgStore.PutTier(ctx, *tier); err != nil {
 		pm.logger.Error("placement: clear stale followers", "vault", tier.ID, "error", err)
 	}
@@ -419,7 +419,7 @@ func (pm *placementManager) selectFollowers(tier *system.TierConfig, desired int
 	usedNodes := map[string]bool{leaderNodeID: true} // 1:1:1: one store per tier per node
 
 	// Keep existing valid follower placements.
-	tierPs, _ := pm.cfgStore.GetTierPlacements(context.Background(), tier.ID)
+	tierPs, _ := pm.cfgStore.GetVaultPlacements(context.Background(), tier.ID)
 	for _, p := range tierPs {
 		if p.Leader || len(kept) >= desired {
 			continue
@@ -551,12 +551,12 @@ func slicesEqual(a, b []string) bool {
 // handleUnplaceable clears a tier's assignment when no eligible node exists.
 func (pm *placementManager) handleUnplaceable(ctx context.Context, tier system.TierConfig, alertKey string, nscs []system.NodeStorageConfig, tierCount map[string]int) {
 	currentLeader := system.LeaderNodeID(func() []system.VaultPlacement {
-		p, _ := pm.cfgStore.GetTierPlacements(context.Background(), tier.ID)
+		p, _ := pm.cfgStore.GetVaultPlacements(context.Background(), tier.ID)
 		return p
 	}(), nscs)
 	if currentLeader != "" {
 		old := currentLeader
-		_ = pm.cfgStore.SetTierPlacements(ctx, tier.ID, nil)
+		_ = pm.cfgStore.SetVaultPlacements(ctx, tier.ID, nil)
 		if err := pm.cfgStore.PutTier(ctx, tier); err != nil {
 			pm.logger.Error("placement: clear tier assignment", "vault", tier.ID, "name", tier.Name, "error", err)
 		} else {
@@ -580,7 +580,7 @@ func (pm *placementManager) nodeEligible(tier system.TierConfig, nodeID string, 
 	case system.VaultTypeJSONL:
 		// JSONL tiers have explicit node assignment via Path.
 		leaderNodeID := system.LeaderNodeID(func() []system.VaultPlacement {
-			p, _ := pm.cfgStore.GetTierPlacements(context.Background(), tier.ID)
+			p, _ := pm.cfgStore.GetVaultPlacements(context.Background(), tier.ID)
 			return p
 		}(), nscs)
 		return leaderNodeID == nodeID

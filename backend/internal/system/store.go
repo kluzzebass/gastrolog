@@ -119,8 +119,8 @@ type Store interface {
 	DeleteTier(ctx context.Context, id glid.GLID, drain bool) error
 
 	// Tier placements (runtime — system-managed, not operator-edited)
-	GetTierPlacements(ctx context.Context, tierID glid.GLID) ([]VaultPlacement, error)
-	SetTierPlacements(ctx context.Context, tierID glid.GLID, placements []VaultPlacement) error
+	GetVaultPlacements(ctx context.Context, tierID glid.GLID) ([]VaultPlacement, error)
+	SetVaultPlacements(ctx context.Context, tierID glid.GLID, placements []VaultPlacement) error
 
 	// Ingester alive state (runtime — system-managed)
 	GetIngesterAlive(ctx context.Context, ingesterID glid.GLID) (map[string]bool, error)

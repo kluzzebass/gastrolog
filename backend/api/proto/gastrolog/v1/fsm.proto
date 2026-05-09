@@ -50,7 +50,7 @@ message SystemCommand {
     SetNodeStorageConfigCommand set_node_storage_config = 32;
     PutTierCommand put_tier = 33;
     DeleteTierCommand delete_tier = 34;
-    SetTierPlacementsCommand set_tier_placements = 35;
+    SetVaultPlacementsCommand set_vault_placements = 35;
     SetSetupWizardDismissedCommand set_setup_wizard_dismissed = 36;
     SetIngesterAliveCommand set_ingester_alive = 37;
     SetIngesterAssignmentCommand set_ingester_assignment = 38;
@@ -296,7 +296,7 @@ message DeleteTierCommand {
 
 // --- Tier Placements ---
 
-message SetTierPlacementsCommand {
+message SetVaultPlacementsCommand {
   bytes tier_id = 1;
   repeated VaultPlacement placements = 2;
 }
@@ -347,7 +347,7 @@ message SystemSnapshot {
   repeated PutCloudServiceCommand cloud_services = 13;
   repeated SetNodeStorageConfigCommand node_storage_configs = 14;
   repeated PutTierCommand tiers = 15;
-  repeated SetTierPlacementsCommand tier_placements = 16;
+  repeated SetVaultPlacementsCommand vault_placements = 16;
   bool setup_wizard_dismissed = 17;
   repeated SetIngesterAliveCommand ingester_alive = 18;
   repeated SetIngesterAssignmentCommand ingester_assignments = 19;

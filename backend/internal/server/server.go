@@ -346,7 +346,7 @@ type configVaultOwner struct {
 // the vault is owned locally / has no placement / cannot be resolved.
 //
 // Reads VaultConfig.Placements directly (mirrored from tier placements on
-// every SetTierPlacements via the FSM bridge — gastrolog-257l7). When the
+// every SetVaultPlacements via the FSM bridge — gastrolog-257l7). When the
 // tier list is removed in a later commit, this code path stays correct
 // because the placement data flows from the same source.
 func (c *configVaultOwner) ResolveVaultOwner(ctx context.Context, vaultID string) string {

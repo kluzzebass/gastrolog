@@ -118,14 +118,14 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 		d.handleTierDeleted(ctx, n.ID, n.Drain)
 	case raftfsm.NotifyIngesterAssignmentSet:
 		d.handleIngesterAssignment(ctx, n.ID)
-	case raftfsm.NotifyTierPlacementsSet:
+	case raftfsm.NotifyVaultPlacementsSet:
 		// Re-fire handleTierPut so applyTierMembershipChange can pick
 		// up the now-complete placements. handleTierPut's earlier
 		// invocation (from the TierPut notification) may have deferred
 		// with "no leader" because placements arrive in a separate
-		// CmdSetTierPlacements log entry. Without this re-trigger, a
+		// CmdSetVaultPlacements log entry. Without this re-trigger, a
 		// rejoining node that replays TierPut before
-		// CmdSetTierPlacements never builds the missing tiers — the
+		// CmdSetVaultPlacements never builds the missing tiers — the
 		// failure mode that left node3 with only 1 of 3 tiers after
 		// a snapshot/replication catchup. See gastrolog-51gme.
 		d.handleTierPut(ctx, n.ID)
@@ -506,8 +506,8 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID glid.GLID) 
 		return
 	}
 
-	leaderNodeID := system.LeaderNodeID(func() []system.VaultPlacement { p, _ := d.cfgStore.GetTierPlacements(ctx, tierCfg.ID); return p }(), nscs)
-	followerNodeIDs := system.FollowerNodeIDs(func() []system.VaultPlacement { p, _ := d.cfgStore.GetTierPlacements(ctx, tierCfg.ID); return p }(), nscs)
+	leaderNodeID := system.LeaderNodeID(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, tierCfg.ID); return p }(), nscs)
+	followerNodeIDs := system.FollowerNodeIDs(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, tierCfg.ID); return p }(), nscs)
 
 	// Only act on tier membership once placements are fully assigned. During
 	// cluster-init the placement manager assigns placements one-at-a-time,
@@ -560,7 +560,7 @@ func (d *configDispatcher) applyTierMembershipChange(ctx context.Context, v syst
 	// down — the placement manager writes the best it can with surviving
 	// nodes. Gating on RF caused permanent deferral after node failure:
 	// the role was never updated, rotation never ran, chunks never sealed.
-	placements, _ := d.cfgStore.GetTierPlacements(ctx, tierID)
+	placements, _ := d.cfgStore.GetVaultPlacements(ctx, tierID)
 	hasLeader := false
 	for _, p := range placements {
 		if p.Leader {
@@ -622,8 +622,8 @@ func (d *configDispatcher) updateTierRoleIfNeeded(ctx context.Context, vaultID, 
 	if err != nil {
 		return
 	}
-	leaderNodeID := system.LeaderNodeID(func() []system.VaultPlacement { p, _ := d.cfgStore.GetTierPlacements(ctx, tierCfg.ID); return p }(), nscs)
-	followerNodeIDs := system.FollowerNodeIDs(func() []system.VaultPlacement { p, _ := d.cfgStore.GetTierPlacements(ctx, tierCfg.ID); return p }(), nscs)
+	leaderNodeID := system.LeaderNodeID(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, tierCfg.ID); return p }(), nscs)
+	followerNodeIDs := system.FollowerNodeIDs(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, tierCfg.ID); return p }(), nscs)
 	shouldBeFollower := slices.Contains(followerNodeIDs, d.localNodeID)
 	if existing.IsFollower == shouldBeFollower {
 		return // role unchanged

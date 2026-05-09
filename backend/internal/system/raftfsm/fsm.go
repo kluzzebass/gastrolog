@@ -46,7 +46,7 @@ const (
 	NotifyNodeStorageConfigSet
 	NotifyTierPut
 	NotifyTierDeleted
-	NotifyTierPlacementsSet
+	NotifyVaultPlacementsSet
 	NotifyIngesterAliveSet
 	NotifyIngesterCheckpointSet
 	NotifyIngesterAssignmentSet
@@ -137,7 +137,7 @@ func (f *FSM) Apply(l *raft.Log) any {
 		*gastrologv1.SystemCommand_SetNodeStorageConfig,
 		*gastrologv1.SystemCommand_PutTier,
 		*gastrologv1.SystemCommand_DeleteTier,
-		*gastrologv1.SystemCommand_SetTierPlacements,
+		*gastrologv1.SystemCommand_SetVaultPlacements,
 		*gastrologv1.SystemCommand_SetIngesterAlive,
 		*gastrologv1.SystemCommand_SetIngesterCheckpoint,
 		*gastrologv1.SystemCommand_SetIngesterAssignment,
@@ -260,8 +260,8 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.SystemCommand
 		return f.applyPutTier(ctx, c.PutTier)
 	case *gastrologv1.SystemCommand_DeleteTier:
 		return f.applyDeleteTier(ctx, c.DeleteTier)
-	case *gastrologv1.SystemCommand_SetTierPlacements:
-		return f.applySetTierPlacements(ctx, c.SetTierPlacements)
+	case *gastrologv1.SystemCommand_SetVaultPlacements:
+		return f.applySetVaultPlacements(ctx, c.SetVaultPlacements)
 	case *gastrologv1.SystemCommand_SetIngesterAlive:
 		return f.applySetIngesterAlive(ctx, c.SetIngesterAlive)
 	case *gastrologv1.SystemCommand_SetIngesterCheckpoint:
@@ -379,7 +379,7 @@ func (f *FSM) syncTierFromVault(ctx context.Context, v system.VaultConfig) error
 	if len(v.Placements) > 0 {
 		placements := make([]system.VaultPlacement, len(v.Placements))
 		copy(placements, v.Placements)
-		if err := f.store.SetTierPlacements(ctx, tier.ID, placements); err != nil {
+		if err := f.store.SetVaultPlacements(ctx, tier.ID, placements); err != nil {
 			return err
 		}
 	}
@@ -554,12 +554,12 @@ func (f *FSM) applyDeleteTier(ctx context.Context, pb *gastrologv1.DeleteTierCom
 	return &Notification{Kind: NotifyTierDeleted, ID: id, Drain: pb.GetDrain()}, nil
 }
 
-func (f *FSM) applySetTierPlacements(ctx context.Context, pb *gastrologv1.SetTierPlacementsCommand) (*Notification, error) {
-	tierID, placements, err := command.ExtractSetTierPlacements(pb)
+func (f *FSM) applySetVaultPlacements(ctx context.Context, pb *gastrologv1.SetVaultPlacementsCommand) (*Notification, error) {
+	tierID, placements, err := command.ExtractSetVaultPlacements(pb)
 	if err != nil {
 		return nil, err
 	}
-	if err := f.store.SetTierPlacements(ctx, tierID, placements); err != nil {
+	if err := f.store.SetVaultPlacements(ctx, tierID, placements); err != nil {
 		return nil, err
 	}
 	// Phase 2 (gastrolog-3iy5l): mirror placements back onto the matching
@@ -569,7 +569,7 @@ func (f *FSM) applySetTierPlacements(ctx context.Context, pb *gastrologv1.SetTie
 	if err := f.mirrorPlacementsToVault(ctx, tierID, placements); err != nil {
 		return nil, err
 	}
-	return &Notification{Kind: NotifyTierPlacementsSet, ID: tierID}, nil
+	return &Notification{Kind: NotifyVaultPlacementsSet, ID: tierID}, nil
 }
 
 // mirrorPlacementsToVault writes the placement set to the owning vault's
@@ -910,7 +910,7 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit,gocyclo // sna
 		}
 	}
 	for tierID, placements := range rt.TierPlacements {
-		if err := newStore.SetTierPlacements(ctx, tierID, placements); err != nil {
+		if err := newStore.SetVaultPlacements(ctx, tierID, placements); err != nil {
 			return fmt.Errorf("restore tier placements %s: %w", tierID, err)
 		}
 	}

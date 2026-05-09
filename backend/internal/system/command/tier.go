@@ -46,8 +46,8 @@ func ExtractDeleteTier(cmd *gastrologv1.DeleteTierCommand) (glid.GLID, error) {
 	return glid.FromBytes(cmd.GetId()), nil
 }
 
-// NewSetTierPlacements creates a SystemCommand for SetTierPlacements.
-func NewSetTierPlacements(tierID glid.GLID, placements []system.VaultPlacement) *gastrologv1.SystemCommand {
+// NewSetVaultPlacements creates a SystemCommand for SetVaultPlacements.
+func NewSetVaultPlacements(tierID glid.GLID, placements []system.VaultPlacement) *gastrologv1.SystemCommand {
 	pbPlacements := make([]*gastrologv1.VaultPlacement, len(placements))
 	for i, p := range placements {
 		pbPlacements[i] = &gastrologv1.VaultPlacement{
@@ -56,8 +56,8 @@ func NewSetTierPlacements(tierID glid.GLID, placements []system.VaultPlacement) 
 		}
 	}
 	return &gastrologv1.SystemCommand{
-		Command: &gastrologv1.SystemCommand_SetTierPlacements{
-			SetTierPlacements: &gastrologv1.SetTierPlacementsCommand{
+		Command: &gastrologv1.SystemCommand_SetVaultPlacements{
+			SetVaultPlacements: &gastrologv1.SetVaultPlacementsCommand{
 				TierId:     tierID.ToProto(),
 				Placements: pbPlacements,
 			},
@@ -74,8 +74,8 @@ func NewSetSetupWizardDismissed(dismissed bool) *gastrologv1.SystemCommand {
 	}
 }
 
-// ExtractSetTierPlacements converts a SetTierPlacementsCommand back.
-func ExtractSetTierPlacements(cmd *gastrologv1.SetTierPlacementsCommand) (glid.GLID, []system.VaultPlacement, error) {
+// ExtractSetVaultPlacements converts a SetVaultPlacementsCommand back.
+func ExtractSetVaultPlacements(cmd *gastrologv1.SetVaultPlacementsCommand) (glid.GLID, []system.VaultPlacement, error) {
 	tierID := glid.FromBytes(cmd.GetTierId())
 	placements := make([]system.VaultPlacement, len(cmd.GetPlacements()))
 	for i, p := range cmd.GetPlacements() {

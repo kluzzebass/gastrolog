@@ -72,7 +72,7 @@ func newTestStore(cfg *system.Config, nodeID string) *sysmem.Store {
 	}
 	for _, tc := range cfg.Tiers {
 		_ = store.PutTier(ctx, tc)
-		_ = store.SetTierPlacements(ctx, tc.ID, []system.VaultPlacement{
+		_ = store.SetVaultPlacements(ctx, tc.ID, []system.VaultPlacement{
 			{StorageID: system.SyntheticStorageID(nodeID), Leader: true},
 		})
 	}
@@ -131,7 +131,7 @@ func newMemoryTierInstance(t *testing.T, tierID glid.GLID) *VaultInstance {
 func setupTestStoreRuntime(store *sysmem.Store, nodeID string, tierIDs ...glid.GLID) {
 	ctx := context.Background()
 	for _, tid := range tierIDs {
-		_ = store.SetTierPlacements(ctx, tid, []system.VaultPlacement{
+		_ = store.SetVaultPlacements(ctx, tid, []system.VaultPlacement{
 			{StorageID: system.SyntheticStorageID(nodeID), Leader: true},
 		})
 	}
@@ -731,7 +731,7 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 			Position: uint32(i),
 		}
 		_ = store.PutTier(context.Background(), tierCfgs[i])
-		_ = store.SetTierPlacements(context.Background(), tierIDs[i], placements)
+		_ = store.SetVaultPlacements(context.Background(), tierIDs[i], placements)
 	}
 	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "cluster-vault",

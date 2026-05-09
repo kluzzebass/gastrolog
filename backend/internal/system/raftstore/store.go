@@ -380,12 +380,12 @@ func (s *Store) SetNodeStorageConfig(ctx context.Context, cfg system.NodeStorage
 
 // --- Runtime methods (delegate to inner store for reads, apply for writes) ---
 
-func (s *Store) GetTierPlacements(ctx context.Context, tierID glid.GLID) ([]system.VaultPlacement, error) {
-	return s.fsm.Store().GetTierPlacements(ctx, tierID)
+func (s *Store) GetVaultPlacements(ctx context.Context, tierID glid.GLID) ([]system.VaultPlacement, error) {
+	return s.fsm.Store().GetVaultPlacements(ctx, tierID)
 }
 
-func (s *Store) SetTierPlacements(ctx context.Context, tierID glid.GLID, placements []system.VaultPlacement) error {
-	return s.apply(ctx, command.NewSetTierPlacements(tierID, placements))
+func (s *Store) SetVaultPlacements(ctx context.Context, tierID glid.GLID, placements []system.VaultPlacement) error {
+	return s.apply(ctx, command.NewSetVaultPlacements(tierID, placements))
 }
 
 func (s *Store) GetIngesterAlive(ctx context.Context, ingesterID glid.GLID) (map[string]bool, error) {

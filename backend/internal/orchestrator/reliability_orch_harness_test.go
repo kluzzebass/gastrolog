@@ -293,8 +293,8 @@ func (h *orchRelHarness) seedSharedConfig() {
 				Leader:    pos == 0,
 			})
 		}
-		if err := h.cfgStore.SetTierPlacements(ctx, v.tierID, placements); err != nil {
-			h.t.Fatalf("SetTierPlacements %s: %v", v.label, err)
+		if err := h.cfgStore.SetVaultPlacements(ctx, v.tierID, placements); err != nil {
+			h.t.Fatalf("SetVaultPlacements %s: %v", v.label, err)
 		}
 	}
 }

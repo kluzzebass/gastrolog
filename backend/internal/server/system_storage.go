@@ -242,7 +242,7 @@ func (s *SystemServer) PutTier(
 
 	// Placements are system-managed (in Runtime, not Config).
 	// PutTier only stores the config portion. Placements are
-	// managed separately via SetTierPlacements.
+	// managed separately via SetVaultPlacements.
 
 	if err := s.sysStore.PutTier(ctx, cfg); err != nil {
 		return nil, errInternal(err)

@@ -826,10 +826,10 @@ func BuildSnapshot(sys *system.System, users []system.User, tokens []system.Refr
 		snap.ClusterTls = NewPutClusterTLS(*rt.ClusterTLS).GetPutClusterTls()
 	}
 
-	// Runtime: tier placements.
-	for tierID, placements := range rt.TierPlacements {
-		cmd := NewSetTierPlacements(tierID, placements).GetSetTierPlacements()
-		snap.TierPlacements = append(snap.TierPlacements, cmd)
+	// Runtime: vault placements.
+	for vaultID, placements := range rt.TierPlacements {
+		cmd := NewSetVaultPlacements(vaultID, placements).GetSetVaultPlacements()
+		snap.VaultPlacements = append(snap.VaultPlacements, cmd)
 	}
 
 	// Runtime: ingester alive state.
@@ -987,10 +987,10 @@ func RestoreSnapshot(snap *gastrologv1.SystemSnapshot) (*system.System, []system
 	}
 
 	// Restore tier placements.
-	if len(snap.GetTierPlacements()) > 0 {
-		rt.TierPlacements = make(map[glid.GLID][]system.VaultPlacement, len(snap.GetTierPlacements()))
-		for _, tp := range snap.GetTierPlacements() {
-			tierID, placements, err := ExtractSetTierPlacements(tp)
+	if len(snap.GetVaultPlacements()) > 0 {
+		rt.TierPlacements = make(map[glid.GLID][]system.VaultPlacement, len(snap.GetVaultPlacements()))
+		for _, tp := range snap.GetVaultPlacements() {
+			tierID, placements, err := ExtractSetVaultPlacements(tp)
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("restore tier placements: %w", err)
 			}
