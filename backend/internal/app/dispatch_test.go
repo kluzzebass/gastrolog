@@ -128,7 +128,7 @@ func (m *mockOrch) DeleteVaultInstance(vaultID glid.GLID) bool {
 	m.removeTierCalls = append(m.removeTierCalls, [2]glid.GLID{vaultID, vaultID})
 	return true
 }
-func (m *mockOrch) DrainTier(_ context.Context, vaultID glid.GLID, _ orchestrator.TierDrainMode, _ string) error {
+func (m *mockOrch) DrainTier(_ context.Context, vaultID glid.GLID, _ orchestrator.DrainMode, _ string) error {
 	m.tierDrainCalls = append(m.tierDrainCalls, vaultID)
 	return nil
 }

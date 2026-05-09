@@ -10,21 +10,21 @@ import (
 	"gastrolog/internal/system"
 )
 
-// TierDrainMode determines where chunks go during a inst drain.
-type TierDrainMode int
+// DrainMode determines where chunks go during a inst drain.
+type DrainMode int
 
 const (
-	// TierDrainDecommission transitions chunks to the next inst in the vault chain.
-	TierDrainDecommission TierDrainMode = iota
-	// TierDrainRebalance replicates chunks to the same inst on a different node.
-	TierDrainRebalance
+	// DrainDecommission transitions chunks to the next inst in the vault chain.
+	DrainDecommission DrainMode = iota
+	// DrainRebalance replicates chunks to the same inst on a different node.
+	DrainRebalance
 )
 
 // tierDrainState tracks an in-progress inst drain.
 type tierDrainState struct {
 	VaultID      glid.GLID
 	TierID       glid.GLID
-	Mode         TierDrainMode
+	Mode         DrainMode
 	TargetNodeID string // only for rebalance mode
 	JobID        string
 	Cancel       context.CancelFunc
@@ -51,7 +51,7 @@ func tierDrainKey(vaultID glid.GLID) string {
 // readiness-affecting state change, so it runs as soon as the inst instance
 // is present. Individual operations inside the drain use the standard inst
 // FSM gates.
-func (o *Orchestrator) DrainTier(ctx context.Context, vaultID glid.GLID, mode TierDrainMode, targetNodeID string) error {
+func (o *Orchestrator) DrainTier(ctx context.Context, vaultID glid.GLID, mode DrainMode, targetNodeID string) error {
 	if _, err := o.loadSystem(ctx); err != nil {
 		return fmt.Errorf("load config for inst drain: %w", err)
 	}
@@ -81,13 +81,13 @@ func (o *Orchestrator) DrainTier(ctx context.Context, vaultID glid.GLID, mode Ti
 
 	// Validate mode-specific requirements.
 	switch mode {
-	case TierDrainDecommission:
+	case DrainDecommission:
 		// Phase 4 (gastrolog-42f9z): the multi-transition chain is gone (Phase 2
 		// collapsed it) and the transition concept is gone with it.
 		// Decommission drain just fires retention events on every chunk —
 		// the routing engine + retention path produce the same observable
 		// behavior the old "transition to next inst" produced.
-	case TierDrainRebalance:
+	case DrainRebalance:
 		if targetNodeID == "" {
 			o.mu.Unlock()
 			return errors.New("target node required for rebalance drain")
@@ -143,7 +143,7 @@ func (o *Orchestrator) DrainTier(ctx context.Context, vaultID glid.GLID, mode Ti
 }
 
 // tierDrainWorker is the async job that transfers all chunks and cleans up.
-func (o *Orchestrator) tierDrainWorker(ctx context.Context, vaultID glid.GLID, mode TierDrainMode, targetNodeID string) {
+func (o *Orchestrator) tierDrainWorker(ctx context.Context, vaultID glid.GLID, mode DrainMode, targetNodeID string) {
 	// Always clean up drain state on exit — leaked state keeps Raft groups alive.
 	// But only notify completion (vault config update) on success.
 	success := false
@@ -194,7 +194,7 @@ func (o *Orchestrator) tierDrainWorker(ctx context.Context, vaultID glid.GLID, m
 }
 
 // drainTierChunks transfers all sealed chunks from the inst. Returns false if cancelled.
-func (o *Orchestrator) drainTierChunks(ctx context.Context, sys *system.System, vaultID glid.GLID, inst *VaultInstance, mode TierDrainMode, targetNodeID string) bool {
+func (o *Orchestrator) drainTierChunks(ctx context.Context, sys *system.System, vaultID glid.GLID, inst *VaultInstance, mode DrainMode, targetNodeID string) bool {
 	metas, err := inst.Chunks.List()
 	if err != nil {
 		o.logger.Error("inst drain: list chunks failed", "vault", vaultID, "error", err)
@@ -245,7 +245,7 @@ func drainCursorToRecords(cursor chunk.RecordCursor) ([]chunk.Record, error) {
 }
 
 // drainOneChunk transfers a single chunk and deletes the source.
-func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, vaultID glid.GLID, inst *VaultInstance, chunkID chunk.ChunkID, mode TierDrainMode, targetNodeID string) error {
+func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, vaultID glid.GLID, inst *VaultInstance, chunkID chunk.ChunkID, mode DrainMode, targetNodeID string) error {
 	cursor, err := inst.Chunks.OpenCursor(chunkID)
 	if err != nil {
 		return fmt.Errorf("open cursor: %w", err)
@@ -263,7 +263,7 @@ func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, va
 	}()
 
 	switch mode {
-	case TierDrainDecommission:
+	case DrainDecommission:
 		// Phase 4 (gastrolog-42f9z): no "next inst" anymore. Decommission
 		// just destroys the chunks — equivalent to firing a retention
 		// event with no matching retention-trigger routes (the legacy
@@ -273,7 +273,7 @@ func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, va
 		_ = cursor // caller closes
 		_ = sys
 
-	case TierDrainRebalance:
+	case DrainRebalance:
 		if o.chunkReplicator == nil {
 			return errors.New("inst drain rebalance: inst replicator not configured")
 		}
@@ -409,11 +409,11 @@ func (o *Orchestrator) IsTierDraining(vaultID glid.GLID) bool {
 	return ok
 }
 
-func drainModeName(m TierDrainMode) string {
+func drainModeName(m DrainMode) string {
 	switch m {
-	case TierDrainDecommission:
+	case DrainDecommission:
 		return "decommission"
-	case TierDrainRebalance:
+	case DrainRebalance:
 		return "rebalance"
 	default:
 		return "unknown"
