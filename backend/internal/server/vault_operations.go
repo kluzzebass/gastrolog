@@ -338,20 +338,19 @@ func (s *VaultServer) resolveRestoreDefaults(ctx context.Context, vaultID glid.G
 	return tier, days
 }
 
-// lookupCloudServiceForChunk finds the CloudService config for a chunk's tier.
+// lookupCloudServiceForChunk finds the CloudService config for a chunk's vault.
 func (s *VaultServer) lookupCloudServiceForChunk(ctx context.Context, vaultID glid.GLID, _ chunk.ChunkID) *system.CloudService {
 	cfg, err := s.cfgStore.Load(ctx)
 	if err != nil || cfg == nil {
 		return nil
 	}
-	// Find vault → tiers → cloud service.
-	for i := range cfg.Config.Tiers {
-		t := &cfg.Config.Tiers[i]
-		if t.VaultID != vaultID || t.CloudServiceID == nil {
+	for i := range cfg.Config.Vaults {
+		v := &cfg.Config.Vaults[i]
+		if v.ID != vaultID || v.CloudServiceID == nil {
 			continue
 		}
 		for j := range cfg.Config.CloudServices {
-			if cfg.Config.CloudServices[j].ID == *t.CloudServiceID {
+			if cfg.Config.CloudServices[j].ID == *v.CloudServiceID {
 				return &cfg.Config.CloudServices[j]
 			}
 		}
