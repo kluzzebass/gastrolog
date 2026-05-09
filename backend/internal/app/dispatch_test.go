@@ -913,9 +913,9 @@ func TestHandle_VaultDrain(t *testing.T) {
 	})
 }
 
-func (m *mockOrch) FindLocalTierExported(vaultID, tierID glid.GLID) *orchestrator.VaultInstance {
+func (m *mockOrch) FindLocalVaultInstance(vaultID glid.GLID) *orchestrator.VaultInstance {
 	if m.localTierExported != nil {
-		return m.localTierExported(vaultID, tierID)
+		return m.localTierExported(vaultID, vaultID)
 	}
 	return nil
 }

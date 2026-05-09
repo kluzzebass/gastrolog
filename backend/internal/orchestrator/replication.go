@@ -31,7 +31,7 @@ import (
 // different invariants. SealActive (leader) fans out replication; this
 // function is the target of that fan-out on followers.
 func (o *Orchestrator) SealActiveTier(vaultID, tierID glid.GLID, expectedChunkID chunk.ChunkID) error {
-	tier := o.findLocalTier(vaultID, tierID)
+	tier := o.findLocalVaultInstance(vaultID)
 	if tier == nil {
 		return fmt.Errorf("%w: tier %s in vault %s", ErrTierNotLocal, tierID, vaultID)
 	}
@@ -134,7 +134,7 @@ func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID
 		return
 	}
 
-	tier := o.findLocalTier(vaultID, tierID)
+	tier := o.findLocalVaultInstance(vaultID)
 	if tier == nil {
 		o.logger.Warn("replication: tier not found for sealed chunk",
 			"vault", vaultID, "chunk", chunkID.String())
@@ -295,7 +295,7 @@ func (o *Orchestrator) replicateToFollower(ctx context.Context, vaultID, tierID 
 	// tombstone is on its own FSM. This leader-side recheck short-
 	// circuits the RPC entirely when the leader already knows the chunk
 	// is gone. See gastrolog-11rzz.
-	tier := o.findLocalTier(vaultID, tierID)
+	tier := o.findLocalVaultInstance(vaultID)
 	if tier != nil && tier.IsTombstoned != nil && tier.IsTombstoned(chunkID) {
 		o.logger.Debug("replication: chunk tombstoned after cursor read, aborting send",
 			"vault", vaultID, "chunk", chunkID.String(), "node", nodeID)

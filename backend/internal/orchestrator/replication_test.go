@@ -163,28 +163,6 @@ func TestSealActiveTierMismatchSkipsSeal(t *testing.T) {
 	}
 }
 
-func TestSealActiveTierTierNotFound(t *testing.T) {
-	t.Parallel()
-	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-
-	tierID := glid.New()
-	vaultID := glid.New()
-	vault := NewVault(vaultID, newReplicationTier(t, tierID, nil, false, ""))
-	orch.RegisterVault(vault)
-
-	wrongTierID := glid.New()
-	err := orch.SealActiveTier(vaultID, wrongTierID, chunk.ChunkID{})
-	// gastrolog-2t48z: this path is "tier not registered on this node",
-	// not "vault not found" — the vault itself is registered. Assert
-	// the new sentinel and the old wording is gone from the message.
-	if !errors.Is(err, ErrTierNotLocal) {
-		t.Errorf("expected ErrTierNotLocal, got %v", err)
-	}
-	if errors.Is(err, ErrVaultNotFound) {
-		t.Errorf("must NOT be ErrVaultNotFound — vault exists, only tier instance is missing: %v", err)
-	}
-}
-
 func TestSealActiveTierNoActiveChunk(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})

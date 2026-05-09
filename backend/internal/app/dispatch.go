@@ -43,7 +43,7 @@ type orchActions interface {
 	RemoveIngester(id glid.GLID) error
 	UpdateMaxConcurrentJobs(n int) error
 	MaxConcurrentJobs() int
-	FindLocalTierExported(vaultID, tierID glid.GLID) *orchestrator.VaultInstance
+	FindLocalVaultInstance(vaultID glid.GLID) *orchestrator.VaultInstance
 }
 
 // ManagedFileHandler handles managed file lifecycle events from the FSM.
@@ -582,7 +582,7 @@ func (d *configDispatcher) applyTierMembershipChange(ctx context.Context, v syst
 	// nodes get a VaultInstance, non-storage nodes only get a Raft group.
 	tierBelongsHere := leaderNodeID == d.localNodeID || slices.Contains(followerNodeIDs, d.localNodeID)
 	if !tierBelongsHere {
-		if existing := d.orch.FindLocalTierExported(v.ID, tierID); existing != nil {
+		if existing := d.orch.FindLocalVaultInstance(v.ID); existing != nil {
 			// Tier moved away from this node — drop the storage instance.
 			// The Raft group itself stays (symmetric voting).
 			d.orch.RemoveTierFromVault(v.ID, tierID)
@@ -599,7 +599,7 @@ func (d *configDispatcher) registerVault(ctx context.Context, v system.VaultConf
 }
 
 func (d *configDispatcher) rebuildVaultIfTierMissing(ctx context.Context, v system.VaultConfig, tierID glid.GLID) {
-	existing := d.orch.FindLocalTierExported(v.ID, tierID)
+	existing := d.orch.FindLocalVaultInstance(v.ID)
 	if existing != nil {
 		d.updateTierRoleIfNeeded(ctx, v.ID, tierID, existing)
 		return
@@ -646,7 +646,7 @@ func (d *configDispatcher) updateTierRoleIfNeeded(ctx context.Context, vaultID, 
 // catchup. This prevents redundant chunk transfers on leader reassignment
 // (e.g. when a node dies and the leader moves but followers stay the same).
 func (d *configDispatcher) newFollowersForTier(vaultID, tierID glid.GLID, followerNodeIDs []string) []string {
-	existing := d.orch.FindLocalTierExported(vaultID, tierID)
+	existing := d.orch.FindLocalVaultInstance(vaultID)
 	if existing == nil {
 		// Tier was just added to this node — all followers are new.
 		return followerNodeIDs
@@ -672,7 +672,7 @@ func (d *configDispatcher) handleTierDeleted(ctx context.Context, tierID glid.GL
 	// The tier config is already deleted from the store, so we can't look up
 	// VaultID. Instead, scan locally registered vaults for this tier instance.
 	for _, vaultID := range d.orch.ListVaults() {
-		tier := d.orch.FindLocalTierExported(vaultID, tierID)
+		tier := d.orch.FindLocalVaultInstance(vaultID)
 		if tier == nil {
 			continue // this node doesn't host the tier in this vault
 		}

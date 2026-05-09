@@ -360,20 +360,19 @@ func (o *Orchestrator) LocalTierIDs(vaultID glid.GLID) []glid.GLID {
 	return nil
 }
 
-func (o *Orchestrator) FindLocalTierExported(vaultID, tierID glid.GLID) *VaultInstance {
-	return o.findLocalTier(vaultID, tierID)
+// FindLocalVaultInstance returns the VaultInstance for the given vault, or
+// nil if not local. Exported for cross-package use.
+func (o *Orchestrator) FindLocalVaultInstance(vaultID glid.GLID) *VaultInstance {
+	return o.findLocalVaultInstance(vaultID)
 }
 
-// findLocalTier returns the VaultInstance for the given vault if its
-// (single) tier ID matches, or nil if the tier is not local.
-func (o *Orchestrator) findLocalTier(vaultID, tierID glid.GLID) *VaultInstance {
+// findLocalVaultInstance returns the VaultInstance for the given vault, or
+// nil if the vault has no local instance.
+func (o *Orchestrator) findLocalVaultInstance(vaultID glid.GLID) *VaultInstance {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
 	o.mu.RUnlock()
 	if vault == nil || vault.Instance == nil {
-		return nil
-	}
-	if vault.Instance.TierID != tierID {
 		return nil
 	}
 	return vault.Instance

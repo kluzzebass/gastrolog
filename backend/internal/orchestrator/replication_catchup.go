@@ -75,7 +75,7 @@ func (o *Orchestrator) scheduleCatchupForNode(vaultID, tierID glid.GLID, nodeID 
 // follower node. Each chunk's records are streamed via TransferRecords,
 // producing an identical sealed chunk on the follower.
 func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, tierID glid.GLID, nodeID string) error {
-	tier := o.findLocalTier(vaultID, tierID)
+	tier := o.findLocalVaultInstance(vaultID)
 	if tier == nil {
 		return fmt.Errorf("tier %s not found in vault %s", tierID, vaultID)
 	}
