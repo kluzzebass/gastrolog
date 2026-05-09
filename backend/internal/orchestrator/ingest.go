@@ -290,7 +290,7 @@ func (o *Orchestrator) postSealWork(vaultID glid.GLID, cm chunk.ChunkManager, ch
 // After the pipeline completes, sealed-chunk replication is triggered for leader tiers.
 func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager, chunkID chunk.ChunkID) {
 	// Resolve inst info for post-pipeline replication.
-	instID, followerTargets := o.tierReplicationInfo(vaultID, cm)
+	instID, followerTargets := o.instReplicationInfo(vaultID, cm)
 
 	processor, ok := cm.(chunk.ChunkPostSealProcessor)
 	if ok {
@@ -320,10 +320,10 @@ func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager
 	o.scheduleReplication(vaultID, instID, chunkID, followerTargets)
 }
 
-// tierReplicationInfo returns the inst ID and follower targets for the inst
+// instReplicationInfo returns the inst ID and follower targets for the inst
 // that owns the given ChunkManager. Returns zero values if not found or if the
 // inst is a follower (followers don't replicate further).
-func (o *Orchestrator) tierReplicationInfo(vaultID glid.GLID, cm chunk.ChunkManager) (glid.GLID, []system.ReplicationTarget) {
+func (o *Orchestrator) instReplicationInfo(vaultID glid.GLID, cm chunk.ChunkManager) (glid.GLID, []system.ReplicationTarget) {
 	vault := o.vaults[vaultID]
 	if vault == nil {
 		return glid.GLID{}, nil

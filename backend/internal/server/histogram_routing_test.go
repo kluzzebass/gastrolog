@@ -42,11 +42,11 @@ func TestHistogramFullyLocal_RequiresLeadership(t *testing.T) {
 
 	leaderVaultID := glid.New()
 	followerVaultID := glid.New()
-	leaderTierID := glid.New()
-	followerTierID := glid.New()
+	leaderInstID := glid.New()
+	followerInstID := glid.New()
 
-	orch.RegisterVault(orchestrator.NewVault(leaderVaultID, mustTierInstance(t, leaderTierID, false)))
-	orch.RegisterVault(orchestrator.NewVault(followerVaultID, mustTierInstance(t, followerTierID, true)))
+	orch.RegisterVault(orchestrator.NewVault(leaderVaultID, mustTierInstance(t, leaderInstID, false)))
+	orch.RegisterVault(orchestrator.NewVault(followerVaultID, mustTierInstance(t, followerInstID, true)))
 
 	store := sysmem.NewStore()
 	for _, vid := range []glid.GLID{leaderVaultID, followerVaultID} {
@@ -58,8 +58,8 @@ func TestHistogramFullyLocal_RequiresLeadership(t *testing.T) {
 		instID  glid.GLID
 		vaultID glid.GLID
 	}{
-		{leaderTierID, leaderVaultID},
-		{followerTierID, followerVaultID},
+		{leaderInstID, leaderVaultID},
+		{followerInstID, followerVaultID},
 	} {
 		if err := store.PutTier(ctx, system.TierConfig{
 			ID: tc.instID, Name: "tier-" + tc.instID.String(), Type: system.VaultTypeMemory,

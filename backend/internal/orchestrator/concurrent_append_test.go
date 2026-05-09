@@ -240,9 +240,9 @@ func TestCursorOpenDuringSeal(t *testing.T) {
 // gastrolog-3p8zh: ImportToVault cursor verification
 // ==========================================================================
 
-// TestImportToTierCursorVerified imports records to a file-backed inst and
+// TestImportToInstanceCursorVerified imports records to a file-backed inst and
 // verifies every record via cursor — not just metadata RecordCount.
-func TestImportToTierCursorVerified(t *testing.T) {
+func TestImportToInstanceCursorVerified(t *testing.T) {
 	t.Parallel()
 
 	vaultID := glid.New()

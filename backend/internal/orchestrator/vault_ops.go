@@ -957,7 +957,7 @@ func (o *Orchestrator) ImportChunkRecords(ctx context.Context, vaultID glid.GLID
 // preserving the given chunk ID. Used by sealed-chunk replication —
 // the follower receives a sealed chunk from the leader with the same ID.
 // Schedules postSealWork for local indexing (secondaries need indexes for queries)
-// but won't trigger further replication (gated by !IsFollower in tierReplicationInfo).
+// but won't trigger further replication (gated by !IsFollower in instReplicationInfo).
 func (o *Orchestrator) ImportToVault(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
 	inst := o.findLocalVaultInstance(vaultID)
 	if inst == nil {
