@@ -1076,20 +1076,17 @@ func (s *Store) SetVaultPlacements(_ context.Context, tierID glid.GLID, placemen
 	cp := make([]system.VaultPlacement, len(placements))
 	copy(cp, placements)
 	s.tierPlacements[tierID] = cp
-	// Phase 2 (gastrolog-3iy5l): also write VaultConfig.Placements so the
-	// orchestrator's reads from VaultConfig.Placements see the placement
-	// set. Drives the same flow as the FSM bridge in mirrorPlacementsToVault.
-	if tier, ok := s.tiers[tierID]; ok {
-		if v, ok := s.vaults[tier.VaultID]; ok {
-			merged := v
-			if len(placements) > 0 {
-				merged.Placements = make([]system.VaultPlacement, len(placements))
-				copy(merged.Placements, placements)
-			} else {
-				merged.Placements = nil
-			}
-			s.vaults[tier.VaultID] = copyVaultConfig(merged)
+	// 1:1 vault:tier — placement keys are vault IDs. Mirror the placement
+	// set onto VaultConfig.Placements so the orchestrator's reads see them.
+	if v, ok := s.vaults[tierID]; ok {
+		merged := v
+		if len(placements) > 0 {
+			merged.Placements = make([]system.VaultPlacement, len(placements))
+			copy(merged.Placements, placements)
+		} else {
+			merged.Placements = nil
 		}
+		s.vaults[tierID] = copyVaultConfig(merged)
 	}
 	return nil
 }
