@@ -291,8 +291,6 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		})
 	}
 
-	orch.OnTierDrainComplete = makeTierDrainCompleteHandler(cfgStore, logger)
-
 	if err := startOrchestrator(ctx, logger, orch, appSys, factories); err != nil {
 		return err
 	}
@@ -417,21 +415,6 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		BootstrapTokenServeSecret: cfg.BootstrapTokenServeSecret,
 		BootstrapTokenFn:          makeBootstrapTokenFn(cfgStore),
 	})
-}
-
-// makeTierDrainCompleteHandler returns a callback that deletes the drained tier
-// config (removing its vault association). Vault control-plane Raft is not
-// torn down per tier.
-func makeTierDrainCompleteHandler(cfgStore system.Store, logger *slog.Logger) func(context.Context, glid.GLID, glid.GLID) {
-	return func(ctx context.Context, _, tierID glid.GLID) {
-		// Tier ownership lives on TierConfig.VaultID — deleting the tier
-		// config removes the association. The drain=false flag avoids
-		// re-triggering a drain notification.
-		if err := cfgStore.DeleteTier(ctx, tierID, false); err != nil {
-			logger.Error("tier drain complete: failed to delete tier config",
-				"vault", tierID, "error", err)
-		}
-	}
 }
 
 // wireClusterForwarding sets up cross-node record, search, context, vault,
