@@ -163,25 +163,58 @@ func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID
 		return
 	}
 
+	// Track per-target outcomes so the caller / logs reflect the actual
+	// replica count rather than the target count. Without this, a single
+	// unhealthy follower silently caps every chunk at less-than-RF and
+	// the only signal is the chunk's replica_count column. See gastrolog-3tn5g.
+	var (
+		succeeded   int
+		failedNodes []string
+	)
 	for _, tgt := range targets {
-		o.replicateToTarget(ctx, vaultID, tierID, chunkID, tier.Chunks, tgt)
+		if err := o.replicateToTarget(ctx, vaultID, tierID, chunkID, tier.Chunks, tgt); err != nil {
+			failedNodes = append(failedNodes, tgt.NodeID)
+		} else {
+			succeeded++
+		}
+	}
+	// Replication on the leader counts toward RF too — the chunk lives
+	// locally on the leader's storage by virtue of being sealed there.
+	// Total replicas = leader (1) + successful follower copies.
+	totalReplicas := 1 + succeeded
+	expectedReplicas := 1 + len(targets)
+	if len(failedNodes) > 0 {
+		// Placement churn means the peer evicted its tier instance —
+		// expected during reconfiguration, not a degraded-replication signal.
+		// We don't know per-target whether failure was churn-shaped here, so
+		// log at WARN with actual counts; the per-target log inside
+		// replicateToTarget already classified each individual error.
+		o.logger.Warn("replication: chunk replicated to fewer followers than expected",
+			"vault", vaultID, "tier", tierID, "chunk", chunkID.String(),
+			"replicas", totalReplicas, "expected", expectedReplicas,
+			"failed_nodes", failedNodes)
+	} else {
+		o.logger.Debug("replication: chunk fully replicated",
+			"vault", vaultID, "tier", tierID, "chunk", chunkID.String(),
+			"replicas", totalReplicas)
 	}
 }
 
 // replicateToTarget sends a sealed chunk to one target. Same-node targets
-// use local ImportToTierStorage; cross-node targets use gRPC.
-func (o *Orchestrator) replicateToTarget(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, sourceCM chunk.ChunkManager, tgt system.ReplicationTarget) {
+// use local ImportToTierStorage; cross-node targets use gRPC. Returns nil
+// on success so the caller can count actual replicas vs configured targets.
+func (o *Orchestrator) replicateToTarget(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, sourceCM chunk.ChunkManager, tgt system.ReplicationTarget) error {
 	if tgt.NodeID == o.localNodeID {
 		if err := o.replicateLocally(ctx, vaultID, tierID, tgt.StorageID, chunkID, sourceCM); err != nil {
 			o.logger.Warn("replication: local copy failed",
 				"vault", vaultID, "tier", tierID, "storage", tgt.StorageID,
 				"chunk", chunkID.String(), "error", err)
-		} else {
-			o.logger.Debug("replication: local copy done",
-				"vault", vaultID, "tier", tierID, "storage", tgt.StorageID,
-				"chunk", chunkID.String())
+			return err
 		}
-		return
+		o.logger.Debug("replication: local copy done",
+			"vault", vaultID, "tier", tierID, "storage", tgt.StorageID,
+			"chunk", chunkID.String())
+		return nil
 	}
 	if err := o.replicateToFollower(ctx, vaultID, tierID, chunkID, sourceCM, tgt.NodeID); err != nil {
 		// Placement churn (peer evicted the tier instance) is expected
@@ -194,11 +227,12 @@ func (o *Orchestrator) replicateToTarget(ctx context.Context, vaultID, tierID gl
 		o.logger.Log(ctx, level, "replication: sealed chunk failed",
 			"node", tgt.NodeID, "vault", vaultID, "tier", tierID,
 			"chunk", chunkID.String(), "error", err)
-	} else {
-		o.logger.Debug("replication: sealed chunk sent",
-			"node", tgt.NodeID, "vault", vaultID, "tier", tierID,
-			"chunk", chunkID.String())
+		return err
 	}
+	o.logger.Debug("replication: sealed chunk sent",
+		"node", tgt.NodeID, "vault", vaultID, "tier", tierID,
+		"chunk", chunkID.String())
+	return nil
 }
 
 // replicateLocally copies a sealed chunk to a different storage-specific
