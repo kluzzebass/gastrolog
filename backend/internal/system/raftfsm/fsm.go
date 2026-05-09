@@ -553,15 +553,10 @@ func (f *FSM) applySetVaultPlacements(ctx context.Context, pb *gastrologv1.SetVa
 }
 
 // mirrorPlacementsToVault writes the placement set to the owning vault's
-// VaultConfig.Placements. Used by the placement manager (which still
-// operates on tier IDs) until placement state migrates to vault-keyed
-// in Phase 5.
+// VaultConfig.Placements. The placement manager passes a tier ID that —
+// under 1:1 vault:tier — equals the vault ID.
 func (f *FSM) mirrorPlacementsToVault(ctx context.Context, tierID glid.GLID, placements []system.VaultPlacement) error {
-	tier, err := f.store.GetTier(ctx, tierID)
-	if err != nil || tier == nil {
-		return nil //nolint:nilerr // tier might be transient; not worth failing the placement write
-	}
-	v, err := f.store.GetVault(ctx, tier.VaultID)
+	v, err := f.store.GetVault(ctx, tierID)
 	if err != nil || v == nil {
 		return nil //nolint:nilerr // vault not yet present; will pick up on PutVault
 	}
