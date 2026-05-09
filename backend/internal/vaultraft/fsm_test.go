@@ -70,20 +70,20 @@ func TestFSM_SnapshotRestore_empty(t *testing.T) {
 	}
 }
 
-func TestFSM_SnapshotRestore_twoTiers(t *testing.T) {
+func TestFSM_SnapshotRestore_twoInstances(t *testing.T) {
 	t.Parallel()
 	f := NewFSM()
-	tierA, tierB := glid.New(), glid.New()
-	if bytes.Compare(tierA[:], tierB[:]) > 0 {
-		tierA, tierB = tierB, tierA
+	instA, instB := glid.New(), glid.New()
+	if bytes.Compare(instA[:], instB[:]) > 0 {
+		instA, instB = instB, instA
 	}
 	now := time.Now().Truncate(time.Nanosecond)
 	a := testChunkID(1)
 	b := testChunkID(2)
-	if r := f.Apply(&hraft.Log{Data: MarshalVaultChunkCommand(tierA, vaultctlfsm.MarshalCreateChunk(a, now, now, now))}); r != nil {
+	if r := f.Apply(&hraft.Log{Data: MarshalVaultChunkCommand(instA, vaultctlfsm.MarshalCreateChunk(a, now, now, now))}); r != nil {
 		t.Fatalf("tier A: %v", r)
 	}
-	if r := f.Apply(&hraft.Log{Data: MarshalVaultChunkCommand(tierB, vaultctlfsm.MarshalCreateChunk(b, now, now, now))}); r != nil {
+	if r := f.Apply(&hraft.Log{Data: MarshalVaultChunkCommand(instB, vaultctlfsm.MarshalCreateChunk(b, now, now, now))}); r != nil {
 		t.Fatalf("tier B: %v", r)
 	}
 	snap, err := f.Snapshot()
@@ -98,10 +98,10 @@ func TestFSM_SnapshotRestore_twoTiers(t *testing.T) {
 	if err := f2.Restore(io.NopCloser(bytes.NewReader(buf.Bytes()))); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
-	if f2.InstanceFSM(tierA).Get(a) == nil {
+	if f2.InstanceFSM(instA).Get(a) == nil {
 		t.Fatal("tier A chunk missing after restore")
 	}
-	if f2.InstanceFSM(tierB).Get(b) == nil {
+	if f2.InstanceFSM(instB).Get(b) == nil {
 		t.Fatal("tier B chunk missing after restore")
 	}
 }
@@ -115,9 +115,9 @@ func TestFSM_OnAfterRestoreFires(t *testing.T) {
 
 	src := NewFSM()
 	now := time.Now().Truncate(time.Nanosecond)
-	tierA, tierB := glid.New(), glid.New()
-	_ = src.Apply(&hraft.Log{Data: MarshalVaultChunkCommand(tierA, vaultctlfsm.MarshalCreateChunk(testChunkID(1), now, now, now))})
-	_ = src.Apply(&hraft.Log{Data: MarshalVaultChunkCommand(tierB, vaultctlfsm.MarshalCreateChunk(testChunkID(2), now, now, now))})
+	instA, instB := glid.New(), glid.New()
+	_ = src.Apply(&hraft.Log{Data: MarshalVaultChunkCommand(instA, vaultctlfsm.MarshalCreateChunk(testChunkID(1), now, now, now))})
+	_ = src.Apply(&hraft.Log{Data: MarshalVaultChunkCommand(instB, vaultctlfsm.MarshalCreateChunk(testChunkID(2), now, now, now))})
 
 	snap, err := src.Snapshot()
 	if err != nil {
