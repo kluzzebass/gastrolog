@@ -82,19 +82,7 @@ func (s *SystemServer) DeleteCloudService(
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("cloud service not found"))
 	}
 
-	// Referential integrity: reject if any tier or vault references this
-	// cloud service. VaultConfig.CloudServiceID is mirrored from TierConfig
-	// (gastrolog-257l7); post-tier the vault check is the only one.
-	tiers, err := s.sysStore.ListTiers(ctx)
-	if err != nil {
-		return nil, errInternal(err)
-	}
-	for _, t := range tiers {
-		if t.CloudServiceID != nil && *t.CloudServiceID == id {
-			return nil, connect.NewError(connect.CodeFailedPrecondition,
-				fmt.Errorf("cloud service %q is referenced by tier %q", req.Msg.Id, t.ID))
-		}
-	}
+	// Referential integrity: reject if any vault references this cloud service.
 	vaults, err := s.sysStore.ListVaults(ctx)
 	if err != nil {
 		return nil, errInternal(err)
