@@ -3386,7 +3386,6 @@ type ImportRecordMessage struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	VaultId       []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
 	Record        *ExportRecord          `protobuf:"bytes,2,opt,name=record,proto3" json:"record,omitempty"`
-	TierId        []byte                 `protobuf:"bytes,3,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"` // optional: route to a specific tier's active chunk (StreamToTier)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3431,13 +3430,6 @@ func (x *ImportRecordMessage) GetVaultId() []byte {
 func (x *ImportRecordMessage) GetRecord() *ExportRecord {
 	if x != nil {
 		return x.Record
-	}
-	return nil
-}
-
-func (x *ImportRecordMessage) GetTierId() []byte {
-	if x != nil {
-		return x.TierId
 	}
 	return nil
 }
@@ -3934,11 +3926,10 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\tvault_ids\x18\x01 \x03(\fR\bvaultIds\x12\x14\n" +
 	"\x05query\x18\x02 \x01(\tR\x05query\"M\n" +
 	"\x15ForwardFollowResponse\x124\n" +
-	"\arecords\x18\x01 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\"}\n" +
+	"\arecords\x18\x01 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\"d\n" +
 	"\x13ImportRecordMessage\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x122\n" +
-	"\x06record\x18\x02 \x01(\v2\x1a.gastrolog.v1.ExportRecordR\x06record\x12\x17\n" +
-	"\atier_id\x18\x03 \x01(\fR\x06tierId\"1\n" +
+	"\x06record\x18\x02 \x01(\v2\x1a.gastrolog.v1.ExportRecordR\x06record\"1\n" +
 	"\x16PullManagedFileRequest\x12\x17\n" +
 	"\afile_id\x18\x01 \x01(\fR\x06fileId\"V\n" +
 	"\x14PullManagedFileChunk\x12\x12\n" +

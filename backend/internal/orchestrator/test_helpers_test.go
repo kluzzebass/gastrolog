@@ -242,23 +242,6 @@ func (p *keepNPolicy) Apply(state chunk.VaultState) []chunk.ChunkID {
 	return ids
 }
 
-func (m *transitionFakeTransferrer) StreamToTier(_ context.Context, nodeID string, vaultID, tierID glid.GLID, next chunk.RecordIterator) error {
-	if m.failErr != nil {
-		return m.failErr
-	}
-	var count int
-	for {
-		if _, err := next(); err != nil {
-			break
-		}
-		count++
-	}
-	m.streamCalls = append(m.streamCalls, transitionStreamCall{
-		nodeID: nodeID, vaultID: vaultID, tierID: tierID, count: count,
-	})
-	return nil
-}
-
 // ---------- cloud tier transition test ----------
 
 // newCloudFileTier creates a file-backed VaultInstance with cloud storage.
@@ -469,14 +452,6 @@ func makeRecordWithEventID(raw string, ingesterID glid.GLID, seq uint32) chunk.R
 // transferrer used in production — same operations, no network.
 type directTransferrer struct {
 	nodes map[string]*Orchestrator
-}
-
-func (d *directTransferrer) StreamToTier(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, next chunk.RecordIterator) error {
-	orch, ok := d.nodes[nodeID]
-	if !ok {
-		return fmt.Errorf("directTransferrer: unknown node %q", nodeID)
-	}
-	return orch.StreamAppendToTier(ctx, vaultID, tierID, next)
 }
 
 func (d *directTransferrer) ForwardAppend(_ context.Context, nodeID string, vaultID glid.GLID, records []chunk.Record) error {

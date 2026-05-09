@@ -696,6 +696,3 @@ func TestDrainVault_NoTransferrer(t *testing.T) {
 	}
 }
 
-func (m *mockTransferrer) StreamToTier(_ context.Context, _ string, _, _ glid.GLID, _ chunk.RecordIterator) error {
-	return nil
-}

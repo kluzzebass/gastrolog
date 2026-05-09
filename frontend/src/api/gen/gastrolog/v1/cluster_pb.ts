@@ -2826,13 +2826,6 @@ export class ImportRecordMessage extends Message<ImportRecordMessage> {
    */
   record?: ExportRecord;
 
-  /**
-   * optional: route to a specific tier's active chunk (StreamToTier)
-   *
-   * @generated from field: bytes tier_id = 3;
-   */
-  tierId = new Uint8Array(0);
-
   constructor(data?: PartialMessage<ImportRecordMessage>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2843,7 +2836,6 @@ export class ImportRecordMessage extends Message<ImportRecordMessage> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "record", kind: "message", T: ExportRecord },
-    { no: 3, name: "tier_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ImportRecordMessage {

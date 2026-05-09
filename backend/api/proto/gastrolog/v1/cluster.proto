@@ -456,7 +456,6 @@ message ForwardFollowResponse {
 message ImportRecordMessage {
   bytes vault_id = 1;
   ExportRecord record = 2;
-  bytes tier_id = 3;   // optional: route to a specific tier's active chunk (StreamToTier)
 }
 
 // --- Managed file distribution ---

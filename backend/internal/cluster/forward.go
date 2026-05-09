@@ -83,11 +83,6 @@ type RecordImporter func(ctx context.Context, vaultID glid.GLID, next chunk.Reco
 // preserving the original chunk ID. Used for sealed-chunk replication.
 type TierRecordImporter func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error
 
-// TierStreamAppender appends streamed records to a tier's active chunk.
-// Used for tier transitions — records flow into the destination tier like
-// normal ingestion. The tier's rotation policy handles sealing.
-type TierStreamAppender func(ctx context.Context, vaultID, tierID glid.GLID, next chunk.RecordIterator) error
-
 // ManagedFileReader opens a managed file for streaming to a peer.
 // Returns the original filename, a ReadCloser for the content, and the SHA256 hex hash.
 type ManagedFileReader func(fileID string) (name string, rc io.ReadCloser, sha256hex string, err error)
@@ -138,11 +133,6 @@ func (s *Server) SetRecordImporter(fn RecordImporter) {
 // SetTierRecordImporter injects the callback for tier-targeted sealed-chunk imports.
 func (s *Server) SetTierRecordImporter(fn TierRecordImporter) {
 	s.tierRecordImporter = fn
-}
-
-// SetTierStreamAppender injects the callback for streaming records to a tier's active chunk.
-func (s *Server) SetTierStreamAppender(fn TierStreamAppender) {
-	s.tierStreamAppender = fn
 }
 
 // SetSearchExecutor injects the callback for handling remote search requests.
@@ -331,18 +321,6 @@ func forwardImportRecordsStreamHandler(srv any, stream grpc.ServerStream) error 
 		return err
 	}
 
-	// tier_id routes the stream to a specific tier's active chunk (used by
-	// StreamToTier for tier transitions). Empty tier_id means the import
-	// creates a new sealed chunk in the vault (used by TransferRecords for
-	// cross-node chunk migration).
-	var tierID glid.GLID
-	if len(first.GetTierId()) >= glid.Size {
-		tierID, err = parseTierID(first.GetTierId())
-		if err != nil {
-			return err
-		}
-	}
-
 	// Build iterator: yields first record, then reads from stream.
 	var count int64
 	firstConsumed := false
@@ -371,14 +349,8 @@ func forwardImportRecordsStreamHandler(srv any, stream grpc.ServerStream) error 
 		return convert.ExportToRecord(msg.GetRecord()), nil
 	})
 
-	if tierID != glid.Nil && s.tierStreamAppender != nil {
-		if err := s.tierStreamAppender(stream.Context(), vaultID, tierID, next); err != nil {
-			return status.Errorf(codes.Internal, "tier stream append: %v", err)
-		}
-	} else {
-		if err := s.recordImporter(stream.Context(), vaultID, next); err != nil {
-			return status.Errorf(codes.Internal, "import records: %v", err)
-		}
+	if err := s.recordImporter(stream.Context(), vaultID, next); err != nil {
+		return status.Errorf(codes.Internal, "import records: %v", err)
 	}
 
 	return stream.SendMsg(&gastrologv1.ForwardRecordsResponse{RecordsWritten: count})

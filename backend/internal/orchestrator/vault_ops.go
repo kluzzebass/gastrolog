@@ -1105,23 +1105,6 @@ func (o *Orchestrator) finalizeImportedChunk(vaultID, tierID glid.GLID, cm chunk
 	return nil
 }
 
-// StreamAppendToTier appends records from an iterator to a tier's active chunk.
-// The tier's rotation policy handles sealing. Used for remote tier transitions.
-func (o *Orchestrator) StreamAppendToTier(ctx context.Context, vaultID, tierID glid.GLID, next chunk.RecordIterator) error {
-	for {
-		rec, iterErr := next()
-		if errors.Is(iterErr, chunk.ErrNoMoreRecords) {
-			return nil
-		}
-		if iterErr != nil {
-			return iterErr
-		}
-		if err := o.AppendToVault(vaultID, tierID, chunk.ChunkID{}, rec); err != nil {
-			return err
-		}
-	}
-}
-
 // drainIterator reads and discards all remaining records from an iterator.
 // Used when skipping an import but the caller (network stream) still needs
 // its data consumed.
