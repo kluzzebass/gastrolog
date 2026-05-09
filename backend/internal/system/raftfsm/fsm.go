@@ -44,8 +44,6 @@ const (
 	NotifyCloudServicePut
 	NotifyCloudServiceDeleted
 	NotifyNodeStorageConfigSet
-	NotifyTierPut
-	NotifyTierDeleted
 	NotifyVaultPlacementsSet
 	NotifyIngesterAliveSet
 	NotifyIngesterCheckpointSet

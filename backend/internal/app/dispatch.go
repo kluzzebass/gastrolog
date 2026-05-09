@@ -112,21 +112,14 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 		if d.managedFileHandler != nil {
 			d.managedFileHandler.OnDelete(n.ID)
 		}
-	case raftfsm.NotifyTierPut:
-		d.handleInstancePut(ctx, n.ID)
-	case raftfsm.NotifyTierDeleted:
-		d.handleInstanceDeleted(ctx, n.ID, n.Drain)
 	case raftfsm.NotifyIngesterAssignmentSet:
 		d.handleIngesterAssignment(ctx, n.ID)
 	case raftfsm.NotifyVaultPlacementsSet:
 		// Re-fire handleInstancePut so applyInstanceMembershipChange can pick
-		// up the now-complete placements. handleInstancePut's earlier
-		// invocation (from the TierPut notification) may have deferred
-		// with "no leader" because placements arrive in a separate
-		// CmdSetVaultPlacements log entry. Without this re-trigger, a
-		// rejoining node that replays TierPut before
-		// CmdSetVaultPlacements never builds the missing tiers — the
-		// failure mode that left node3 with only 1 of 3 tiers after
+		// up the now-complete placements. Without this re-trigger, a
+		// rejoining node that replays VaultPut before
+		// CmdSetVaultPlacements never builds the missing instance — the
+		// failure mode that left node3 with only 1 of 3 instances after
 		// a snapshot/replication catchup. See gastrolog-51gme.
 		d.handleInstancePut(ctx, n.ID)
 	case raftfsm.NotifyCloudServicePut, raftfsm.NotifyCloudServiceDeleted,
@@ -648,38 +641,6 @@ func (d *configDispatcher) newFollowersForInstance(vaultID, instID glid.GLID, fo
 		}
 	}
 	return added
-}
-
-// handleInstanceDeleted removes vaults that no longer have any local tiers.
-func (d *configDispatcher) handleInstanceDeleted(ctx context.Context, instID glid.GLID, drain bool) {
-	d.logger.Info("dispatch: handleInstanceDeleted", "vault", instID, "drain", drain)
-
-	// The inst config is already deleted from the store, so we can't look up
-	// VaultID. Instead, scan locally registered vaults for this inst instance.
-	for _, vaultID := range d.orch.ListVaults() {
-		inst := d.orch.FindLocalVaultInstance(vaultID)
-		if inst == nil {
-			continue // this node doesn't host the inst in this vault
-		}
-
-		if drain && inst.IsLeader() {
-			// Only the config leader should drain — it owns the data.
-			if err := d.orch.DrainInstance(ctx, vaultID, orchestrator.DrainDecommission, ""); err != nil {
-				d.logger.Warn("dispatch: inst drain failed, removing immediately",
-					"vault", vaultID, "error", err)
-				d.orch.DeleteVaultInstance(vaultID)
-			} else {
-				// Don't remove the inst instance yet — drain needs it.
-				// finishInstDrain will clean up after completion.
-				return
-			}
-		} else {
-			// Non-leader or non-drain: remove local instance immediately.
-			// This path is the genuine inst-deletion case (CmdTierDeleted),
-			// so the destructive wipe is correct here.
-			d.orch.DeleteVaultInstance(vaultID)
-		}
-	}
 }
 
 func (d *configDispatcher) handleClusterTLSPut(ctx context.Context) {
