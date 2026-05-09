@@ -153,7 +153,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
   // Group chunks by tier, then sort within each tier by time (newest first).
   const tierGroups = new Map<string, { vaultType: string; chunks: ChunkMeta[] }>();
   for (const chunk of dedupedChunks) {
-    const key = encode(chunk.tierId) || "unknown";
+    const key = encode(chunk.vaultId) || "unknown";
     const existing = tierGroups.get(key);
     if (existing) {
       existing.chunks.push(chunk);

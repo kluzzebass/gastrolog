@@ -446,11 +446,11 @@ export class ChunkMeta extends Message<ChunkMeta> {
   archived = false;
 
   /**
-   * which tier this chunk belongs to (transitional during gastrolog-55dej)
+   * which vault this chunk belongs to
    *
-   * @generated from field: bytes tier_id = 13;
+   * @generated from field: bytes vault_id = 13;
    */
-  tierId = new Uint8Array(0);
+  vaultId = new Uint8Array(0);
 
   /**
    * vault type: "memory", "file", "jsonl"
@@ -532,7 +532,7 @@ export class ChunkMeta extends Message<ChunkMeta> {
     { no: 10, name: "ingest_end", kind: "message", T: Timestamp },
     { no: 11, name: "cloud_backed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 12, name: "archived", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 13, name: "tier_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 13, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 14, name: "vault_type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 15, name: "retention_pending", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 16, name: "storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },

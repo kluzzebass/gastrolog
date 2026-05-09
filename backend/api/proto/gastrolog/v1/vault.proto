@@ -146,7 +146,7 @@ message ChunkMeta {
   google.protobuf.Timestamp ingest_end = 10;
   bool cloud_backed = 11; // true = chunk lives in cloud storage (S3/Azure/GCS)
   bool archived = 12;     // true = chunk is in offline storage class (Glacier, Azure Archive)
-  bytes tier_id = 13;     // which tier this chunk belongs to (transitional during gastrolog-55dej)
+  bytes vault_id = 13;    // which vault this chunk belongs to
   string vault_type = 14;  // vault type: "memory", "file", "jsonl"
   bool retention_pending = 15; // true = chunk is marked for retention processing
   string storage_class = 16;   // current cloud storage class (e.g. "GLACIER", "cold", "Archive")

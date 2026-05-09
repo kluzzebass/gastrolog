@@ -76,7 +76,7 @@ func runInspectVault(cmd *cobra.Command, args []string) error {
 
 	chunksByTier := make(map[string][]*v1.ChunkMeta)
 	for _, c := range chunksResp.Msg.Chunks {
-		key := glid.FromBytes(c.TierId).String()
+		key := glid.FromBytes(c.VaultId).String()
 		chunksByTier[key] = append(chunksByTier[key], c)
 	}
 
@@ -240,7 +240,7 @@ func runInspectChunk(cmd *cobra.Command, args []string) error {
 		return newPrinter("json").json(c)
 	}
 
-	tierName := resolveTierName(client, glid.FromBytes(c.TierId).String())
+	tierName := resolveTierName(client, glid.FromBytes(c.VaultId).String())
 	pairs := buildChunkKV(c, tierName)
 	newPrinter(outputFormat(cmd)).kv(pairs)
 	return nil

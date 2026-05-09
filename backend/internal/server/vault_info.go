@@ -418,10 +418,10 @@ func ChunkMetaToProto(meta chunk.ChunkMeta) *apiv1.ChunkMeta {
 	return pb
 }
 
-// TieredChunkMetaToProto converts a TieredChunkMeta to a proto ChunkMeta with tier info.
+// TieredChunkMetaToProto converts a TieredChunkMeta to a proto ChunkMeta.
 func TieredChunkMetaToProto(meta orchestrator.TieredChunkMeta) *apiv1.ChunkMeta {
 	pb := ChunkMetaToProto(meta.ChunkMeta)
-	pb.TierId = meta.TierID.ToProto()
+	pb.VaultId = meta.TierID.ToProto()
 	pb.VaultType = meta.VaultType
 	return pb
 }
