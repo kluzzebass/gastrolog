@@ -164,10 +164,10 @@ func NodeIDForStorage(storageID string, nscs []NodeStorageConfig) string {
 	return ""
 }
 
-// StorageIDForNode returns the best storage ID on a given node for a tier.
-// For file/cloud tiers, matches the required storage class.
-// Returns a synthetic storage ID for memory tiers on nodes without matching file storages.
-func StorageIDForNode(nodeID string, tier TierConfig, nscs []NodeStorageConfig) string {
+// StorageIDForNode returns the best storage ID on a given node for a vault.
+// For file/cloud vaults, matches the required storage class.
+// Returns a synthetic storage ID for memory vaults on nodes without matching file storages.
+func StorageIDForNode(nodeID string, v VaultConfig, nscs []NodeStorageConfig) string {
 	idx := slices.IndexFunc(nscs, func(n NodeStorageConfig) bool { return n.NodeID == nodeID })
 	if idx < 0 {
 		// Node has no storage config — use synthetic storage ID.
@@ -176,14 +176,14 @@ func StorageIDForNode(nodeID string, tier TierConfig, nscs []NodeStorageConfig) 
 
 	nsc := nscs[idx]
 	var requiredClass uint32
-	switch tier.Type {
+	switch v.Type {
 	case VaultTypeFile:
-		// Single storage class for all file tiers (local-only and
+		// Single storage class for all file vaults (local-only and
 		// cloud-backed alike). After step 7k, the active chunk and
 		// the warm cache live at the same path under chunkDir, so
 		// distinguishing "active" and "cache" classes serves no
 		// purpose. See gastrolog-4k5mg.
-		requiredClass = tier.StorageClass
+		requiredClass = v.StorageClass
 	case VaultTypeMemory, VaultTypeJSONL:
 		// No storage class — pick any storage, or synthetic if none.
 		if len(nsc.FileStorages) > 0 {
