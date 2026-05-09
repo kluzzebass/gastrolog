@@ -1,6 +1,6 @@
 // Package vaultraft holds the vault control-plane Raft FSM (gastrolog-5xxbd).
 // Tier chunk metadata is namespaced under OpVaultChunkFSM (per-vault sub-FSMs) on that
-// same Raft group, without changing the tierfsm wire encoding.
+// same Raft group, without changing the vaultctlfsm wire encoding.
 package vaultraft
 
 import (
@@ -37,7 +37,7 @@ type FSM struct {
 	mu sync.Mutex
 	instances  map[glid.GLID]*vaultctlfsm.FSM
 
-	// onAfterRestore fires (outside tierMu) once Restore() has swapped
+	// onAfterRestore fires (outside mu) once Restore() has swapped
 	// the vault-sub-FSM map. The orchestrator uses this to walk each
 	// tier's reconciler and run ReconcileFromSnapshot, which processes
 	// any pendingDeletes obligations the rejoining node owes and
@@ -67,7 +67,7 @@ func (f *FSM) SetOnAfterRestore(fn func()) {
 
 // Tiers returns a snapshot of the current (instID → sub-FSM) map.
 // Safe for the orchestrator's after-restore handler to iterate
-// without holding tierMu.
+// without holding mu.
 func (f *FSM) Instances() map[glid.GLID]*vaultctlfsm.FSM {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -93,7 +93,7 @@ func (f *FSM) Apply(l *hraft.Log) any {
 		copy(instID[:], l.Data[1:1+glid.Size])
 		sub := l.Data[1+glid.Size:]
 		if len(sub) == 0 {
-			return errors.New("vaultraft: OpVaultChunkFSM missing tier command body")
+			return errors.New("vaultraft: OpVaultChunkFSM missing instance command body")
 		}
 		f.mu.Lock()
 		t := f.instances[instID]
@@ -135,7 +135,7 @@ func (f *FSM) EnsureInstanceFSM(instID glid.GLID) *vaultctlfsm.FSM {
 func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) {
 	f.mu.Lock()
 	ids := slices.SortedFunc(maps.Keys(f.instances), compareGLID)
-	var tierBlobs [][]byte
+	var instBlobs [][]byte
 	for _, id := range ids {
 		t := f.instances[id]
 		if t == nil {
@@ -154,10 +154,10 @@ func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) {
 		blob := make([]byte, 0, glid.Size+len(raw))
 		blob = append(blob, id[:]...)
 		blob = append(blob, raw...)
-		tierBlobs = append(tierBlobs, blob)
+		instBlobs = append(instBlobs, blob)
 	}
 	f.mu.Unlock()
-	return &vaultCtlSnapshot{tierBlobs: tierBlobs}, nil
+	return &vaultCtlSnapshot{instBlobs: instBlobs}, nil
 }
 
 // Restore replaces FSM state from a snapshot produced by Snapshot, or the
@@ -214,34 +214,34 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 
 	var countBuf [4]byte
 	if _, err := io.ReadFull(rc, countBuf[:]); err != nil {
-		return fmt.Errorf("vaultraft restore: read tier count: %w", err)
+		return fmt.Errorf("vaultraft restore: read instance count: %w", err)
 	}
 	n := int(binary.BigEndian.Uint32(countBuf[:]))
 
-	nextTiers := make(map[glid.GLID]*vaultctlfsm.FSM, n)
+	nextInstances := make(map[glid.GLID]*vaultctlfsm.FSM, n)
 	for i := range n {
 		var tid glid.GLID
 		if _, err := io.ReadFull(rc, tid[:]); err != nil {
-			return fmt.Errorf("vaultraft restore: read tier[%d] id: %w", i, err)
+			return fmt.Errorf("vaultraft restore: read instance[%d] id: %w", i, err)
 		}
 		var blenBuf [4]byte
 		if _, err := io.ReadFull(rc, blenBuf[:]); err != nil {
-			return fmt.Errorf("vaultraft restore: read tier[%d] blob length: %w", i, err)
+			return fmt.Errorf("vaultraft restore: read instance[%d] blob length: %w", i, err)
 		}
 		blen := int64(binary.BigEndian.Uint32(blenBuf[:]))
-		tierReader := io.LimitReader(rc, blen)
+		instReader := io.LimitReader(rc, blen)
 		t := vaultctlfsm.New()
-		if err := t.Restore(io.NopCloser(tierReader)); err != nil {
-			return fmt.Errorf("vaultraft restore tier %x: %w", tid[:], err)
+		if err := t.Restore(io.NopCloser(instReader)); err != nil {
+			return fmt.Errorf("vaultraft restore instance %x: %w", tid[:], err)
 		}
-		// Drain any unread bytes so the next tier header aligns.
-		if _, err := io.Copy(io.Discard, tierReader); err != nil {
+		// Drain any unread bytes so the next instance header aligns.
+		if _, err := io.Copy(io.Discard, instReader); err != nil {
 			return fmt.Errorf("vaultraft restore: drain tier[%d] tail: %w", i, err)
 		}
-		nextTiers[tid] = t
+		nextInstances[tid] = t
 	}
 	f.mu.Lock()
-	f.instances = nextTiers
+	f.instances = nextInstances
 	hook := f.onAfterRestore
 	f.mu.Unlock()
 	// Fire outside the mutex — the handler walks per-vault reconcilers
@@ -272,7 +272,7 @@ func (s *bufSink) ID() string    { return "vaultraft" }
 func (s *bufSink) Cancel() error { return nil }
 
 type vaultCtlSnapshot struct {
-	tierBlobs [][]byte // each: [16 instID][tier snapshot bytes...]
+	instBlobs [][]byte // each: [16 instID][tier snapshot bytes...]
 }
 
 func (s *vaultCtlSnapshot) Persist(sink hraft.SnapshotSink) error {
@@ -282,12 +282,12 @@ func (s *vaultCtlSnapshot) Persist(sink hraft.SnapshotSink) error {
 	}
 	var hdr [8]byte
 	binary.BigEndian.PutUint32(hdr[0:4], vaultSnapVersion)
-	binary.BigEndian.PutUint32(hdr[4:8], uint32(len(s.tierBlobs))) //nolint:gosec // G115: tier count bounded in practice
+	binary.BigEndian.PutUint32(hdr[4:8], uint32(len(s.instBlobs))) //nolint:gosec // G115: tier count bounded in practice
 	if _, err := sink.Write(hdr[:]); err != nil {
 		_ = sink.Cancel()
 		return err
 	}
-	for _, blob := range s.tierBlobs {
+	for _, blob := range s.instBlobs {
 		if len(blob) < glid.Size {
 			_ = sink.Cancel()
 			return errors.New("vaultraft snapshot: tier blob too short")
