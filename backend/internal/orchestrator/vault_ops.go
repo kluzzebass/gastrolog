@@ -29,10 +29,10 @@ type ChunkIndexReport struct {
 	Indexes []IndexInfo
 }
 
-// activeTierManagers returns chunk and index managers for the vault's active
+// activeManagers returns chunk and index managers for the vault's active
 // (ingest) inst — Tiers[0]. Returns ErrVaultNotFound if the vault doesn't exist
 // or has no tiers.
-func (o *Orchestrator) activeTierManagers(vaultID glid.GLID) (chunk.ChunkManager, index.IndexManager, error) {
+func (o *Orchestrator) activeManagers(vaultID glid.GLID) (chunk.ChunkManager, index.IndexManager, error) {
 	o.mu.RLock()
 	s := o.vaults[vaultID]
 	o.mu.RUnlock()
@@ -49,8 +49,8 @@ func (o *Orchestrator) activeTierManagers(vaultID glid.GLID) (chunk.ChunkManager
 	return cm, im, nil
 }
 
-// activeTierChunkManager returns the chunk manager for the vault's instance.
-func (o *Orchestrator) activeTierChunkManager(vaultID glid.GLID) (chunk.ChunkManager, error) {
+// activeChunkManager returns the chunk manager for the vault's instance.
+func (o *Orchestrator) activeChunkManager(vaultID glid.GLID) (chunk.ChunkManager, error) {
 	o.mu.RLock()
 	s := o.vaults[vaultID]
 	o.mu.RUnlock()
@@ -67,8 +67,8 @@ func (o *Orchestrator) activeTierChunkManager(vaultID glid.GLID) (chunk.ChunkMan
 	return cm, nil
 }
 
-// activeTierIndexManager returns the index manager for the vault's instance.
-func (o *Orchestrator) activeTierIndexManager(vaultID glid.GLID) (index.IndexManager, error) {
+// activeIndexManager returns the index manager for the vault's instance.
+func (o *Orchestrator) activeIndexManager(vaultID glid.GLID) (index.IndexManager, error) {
 	o.mu.RLock()
 	s := o.vaults[vaultID]
 	o.mu.RUnlock()
@@ -116,12 +116,12 @@ func (o *Orchestrator) findChunkManagerForChunk(vaultID glid.GLID, chunkID chunk
 	return cm, err
 }
 
-// findTierForChunk returns the vault's VaultInstance when the chunk lives
+// findInstanceForChunk returns the vault's VaultInstance when the chunk lives
 // there. Used by paths (vault migrate, drain) that need the reconciler +
 // placement metadata to drive cluster-wide deletes through the receipt
 // protocol. Errors if the vault is unknown / not ready, or if its
 // instance does not hold the chunk.
-func (o *Orchestrator) findTierForChunk(vaultID glid.GLID, chunkID chunk.ChunkID) (*VaultInstance, error) {
+func (o *Orchestrator) findInstanceForChunk(vaultID glid.GLID, chunkID chunk.ChunkID) (*VaultInstance, error) {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
 	o.mu.RUnlock()
@@ -180,7 +180,7 @@ type VaultChunkMeta struct {
 // ListChunkMetas returns all chunk metadata for a vault (active inst only).
 // Use ListAllChunkMetas for a multi-inst view.
 func (o *Orchestrator) ListChunkMetas(vaultID glid.GLID) ([]chunk.ChunkMeta, error) {
-	cm, err := o.activeTierChunkManager(vaultID)
+	cm, err := o.activeChunkManager(vaultID)
 	if err != nil {
 		return nil, err
 	}
@@ -346,8 +346,8 @@ func (o *Orchestrator) MissingVaultInstance(vaultID glid.GLID, instIDs []glid.GL
 	return false
 }
 
-// LocalTierIDs returns the vault IDs currently instantiated for the given vault.
-func (o *Orchestrator) LocalTierIDs(vaultID glid.GLID) []glid.GLID {
+// LocalInstanceIDs returns the vault IDs currently instantiated for the given vault.
+func (o *Orchestrator) LocalInstanceIDs(vaultID glid.GLID) []glid.GLID {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	vault := o.vaults[vaultID]
@@ -637,16 +637,16 @@ func (o *Orchestrator) appendToLocalFollower(vault *Vault, instID glid.GLID, sto
 // new active chunk but the follower still has the old ID as active (records
 // sync via ChunkReplicator.AppendRecords preserves the leader's chunk ID).
 func (o *Orchestrator) DeleteChunk(vaultID glid.GLID, chunkID chunk.ChunkID) error {
-	inst, err := o.findTierForDelete(vaultID)
+	inst, err := o.findInstanceForDelete(vaultID)
 	if err != nil {
 		return err
 	}
-	return o.deleteChunkFromTierInstance(inst, vaultID, inst.VaultID, chunkID)
+	return o.deleteChunkFromInstance(inst, vaultID, inst.VaultID, chunkID)
 }
 
-// findTierForDelete returns the vault's instance or an error, releasing
+// findInstanceForDelete returns the vault's instance or an error, releasing
 // the orchestrator read lock before returning.
-func (o *Orchestrator) findTierForDelete(vaultID glid.GLID) (*VaultInstance, error) {
+func (o *Orchestrator) findInstanceForDelete(vaultID glid.GLID) (*VaultInstance, error) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	vault := o.vaults[vaultID]
@@ -656,7 +656,7 @@ func (o *Orchestrator) findTierForDelete(vaultID glid.GLID) (*VaultInstance, err
 	return vault.Instance, nil
 }
 
-// deleteChunkFromTierInstance seals the active chunk if it matches, then
+// deleteChunkFromInstance seals the active chunk if it matches, then
 // deletes the chunk via the lifecycle reconciler's receipt protocol when one
 // is wired (production) or via direct local cleanup otherwise (test harnesses
 // that build TierInstances without going through ApplyConfig).
@@ -664,7 +664,7 @@ func (o *Orchestrator) findTierForDelete(vaultID glid.GLID) (*VaultInstance, err
 // reason="manual-delete-rpc" lands in the FSM's pendingDeletes audit trail so
 // operators can distinguish operator-initiated deletes from retention/transit
 // drivers in chunk-history reviews. See gastrolog-51gme step 7.
-func (o *Orchestrator) deleteChunkFromTierInstance(t *VaultInstance, vaultID, instID glid.GLID, chunkID chunk.ChunkID) error {
+func (o *Orchestrator) deleteChunkFromInstance(t *VaultInstance, vaultID, instID glid.GLID, chunkID chunk.ChunkID) error {
 	if active := t.Chunks.Active(); active != nil && active.ID == chunkID {
 		if err := t.Chunks.Seal(); err != nil {
 			return fmt.Errorf("seal active before delete: %w", err)
@@ -891,10 +891,10 @@ func (o *Orchestrator) appendRecord(vaultID glid.GLID, rec chunk.Record) (chunk.
 	//
 	// When WaitForReplica is set, skip fire-and-forget — the caller does
 	// sync forwarding outside the lock via ackAfterReplication.
-	activeTier := vault.Instance
+	activeInst := vault.Instance
 	var task *replicationTask
 	var remotes []remoteForwardTarget
-	if activeTier != nil && activeTier.ShouldForwardToFollowers() {
+	if activeInst != nil && activeInst.ShouldForwardToFollowers() {
 		if rec.WaitForReplica {
 			activeNow := cm.Active()
 			var activeChunkID chunk.ChunkID
@@ -903,12 +903,12 @@ func (o *Orchestrator) appendRecord(vaultID glid.GLID, rec chunk.Record) (chunk.
 			}
 			task = &replicationTask{
 				vaultID: vaultID,
-				instID:  activeTier.VaultID,
+				instID:  activeInst.VaultID,
 				chunkID: activeChunkID,
-				targets: activeTier.FollowerTargets,
+				targets: activeInst.FollowerTargets,
 			}
 		} else {
-			remotes = o.forwardToFollowers(vault, vaultID, activeTier, cm, rec)
+			remotes = o.forwardToFollowers(vault, vaultID, activeInst, cm, rec)
 		}
 	}
 
@@ -920,8 +920,8 @@ func (o *Orchestrator) appendRecord(vaultID glid.GLID, rec chunk.Record) (chunk.
 	// alert before the pipeline collapses. See gastrolog-47qyw.
 	activeAfter := cm.Active()
 	if activeBefore != nil && (activeAfter == nil || activeAfter.ID != activeBefore.ID) {
-		if activeTier != nil {
-			o.rotationRates.Record(activeTier.VaultID, o.now())
+		if activeInst != nil {
+			o.rotationRates.Record(activeInst.VaultID, o.now())
 		}
 		o.schedulePostSeal(vaultID, cm, activeBefore.ID)
 	}
@@ -934,7 +934,7 @@ func (o *Orchestrator) appendRecord(vaultID glid.GLID, rec chunk.Record) (chunk.
 // chunk migrations. Works with any ChunkManager type (file or memory).
 // Compression and index builds are scheduled asynchronously via the scheduler.
 func (o *Orchestrator) ImportChunkRecords(ctx context.Context, vaultID glid.GLID, next chunk.RecordIterator) error {
-	cm, _, err := o.activeTierManagers(vaultID)
+	cm, _, err := o.activeManagers(vaultID)
 	if err != nil {
 		return err
 	}
@@ -1306,7 +1306,7 @@ func (o *Orchestrator) ChunkIndexInfos(vaultID glid.GLID, chunkID chunk.ChunkID)
 // inst. For a specific chunk (possibly on a non-active inst), use
 // NewAnalyzerForChunk.
 func (o *Orchestrator) NewAnalyzer(vaultID glid.GLID) (*analyzer.Analyzer, error) {
-	cm, im, err := o.activeTierManagers(vaultID)
+	cm, im, err := o.activeManagers(vaultID)
 	if err != nil {
 		return nil, err
 	}

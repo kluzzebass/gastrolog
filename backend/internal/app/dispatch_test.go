@@ -137,7 +137,7 @@ func (m *mockOrch) UnregisterVault(id glid.GLID) error {
 	return m.unregisterErr
 }
 func (m *mockOrch) MissingVaultInstance(_ glid.GLID, _ []glid.GLID) bool { return false }
-func (m *mockOrch) LocalTierIDs(_ glid.GLID) []glid.GLID            { return nil }
+func (m *mockOrch) LocalInstanceIDs(_ glid.GLID) []glid.GLID            { return nil }
 func (m *mockOrch) AddVaultInstance(_ context.Context, _ glid.GLID, _ orchestrator.Factories) error {
 	return nil
 }

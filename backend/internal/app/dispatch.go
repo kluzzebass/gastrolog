@@ -34,7 +34,7 @@ type orchActions interface {
 	DrainInstance(ctx context.Context, vaultID glid.GLID, mode orchestrator.DrainMode, targetNodeID string) error
 	UnregisterVault(id glid.GLID) error
 	MissingVaultInstance(vaultID glid.GLID, instIDs []glid.GLID) bool
-	LocalTierIDs(vaultID glid.GLID) []glid.GLID
+	LocalInstanceIDs(vaultID glid.GLID) []glid.GLID
 	DrainVault(ctx context.Context, vaultID glid.GLID, targetNodeID string) error
 	IsDraining(vaultID glid.GLID) bool
 	CancelDrain(ctx context.Context, vaultID glid.GLID) error
@@ -228,7 +228,7 @@ func (d *configDispatcher) reconcileVaultTiers(ctx context.Context, vaultID glid
 	}
 
 	// Remove instances that are no longer expected.
-	for _, localTierID := range d.orch.LocalTierIDs(vaultID) {
+	for _, localTierID := range d.orch.LocalInstanceIDs(vaultID) {
 		if !expected[localTierID] {
 			d.orch.RemoveVaultInstance(vaultID)
 		}

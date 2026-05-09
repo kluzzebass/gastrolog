@@ -32,7 +32,7 @@ func (o *Orchestrator) MoveChunk(ctx context.Context, chunkID chunk.ChunkID, src
 		return o.moveChunkRemote(ctx, chunkID, srcID, srcCM, dstID, dstNodeID)
 	}
 
-	dstCM, dstIM, err := o.activeTierManagers(dstID)
+	dstCM, dstIM, err := o.activeManagers(dstID)
 	if err != nil {
 		return err
 	}
@@ -164,7 +164,7 @@ func (o *Orchestrator) isRemoteVault(ctx context.Context, vaultID glid.GLID) (st
 // memory-mode tiers without Raft. Reason "vault-migrate-source-expire"
 // lands in pendingDeletes audit. See gastrolog-51gme.
 func (o *Orchestrator) deleteSourceChunk(srcID glid.GLID, chunkID chunk.ChunkID) error {
-	inst, err := o.findTierForChunk(srcID, chunkID)
+	inst, err := o.findInstanceForChunk(srcID, chunkID)
 	if err != nil {
 		return err
 	}
@@ -291,7 +291,7 @@ func (o *Orchestrator) DrainVault(ctx context.Context, vaultID glid.GLID, target
 
 // drainWorker runs in the scheduler, transferring sealed chunks one by one.
 func (o *Orchestrator) drainWorker(ctx context.Context, vaultID glid.GLID, targetNodeID string, job *JobProgress) {
-	cm, err := o.activeTierChunkManager(vaultID)
+	cm, err := o.activeChunkManager(vaultID)
 	if err != nil {
 		job.Fail(o.now(), fmt.Sprintf("get chunk manager: %v", err))
 		return
