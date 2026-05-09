@@ -232,7 +232,7 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]TieredChunkMeta, 
 		}
 		result = append(result, TieredChunkMeta{
 			ChunkMeta: m,
-			TierID:    tier.TierID,
+			TierID:    tier.VaultID,
 			VaultType:  tier.Type,
 		})
 	}
@@ -284,7 +284,7 @@ func (o *Orchestrator) GetTieredChunkMeta(vaultID glid.GLID, chunkID chunk.Chunk
 			}
 			return TieredChunkMeta{
 				ChunkMeta: m,
-				TierID:    tier.TierID,
+				TierID:    tier.VaultID,
 				VaultType:  tier.Type,
 			}, nil
 		}
@@ -331,7 +331,7 @@ func (o *Orchestrator) HasMissingTiers(vaultID glid.GLID, tierIDs []glid.GLID) b
 	// Single-instance model: at most one local tier ID per vault.
 	var local glid.GLID
 	if t := vault.Instance; t != nil {
-		local = t.TierID
+		local = t.VaultID
 	}
 	expected := make(map[glid.GLID]bool, len(tierIDs))
 	for _, id := range tierIDs {
@@ -355,7 +355,7 @@ func (o *Orchestrator) LocalTierIDs(vaultID glid.GLID) []glid.GLID {
 		return nil
 	}
 	if t := vault.Instance; t != nil {
-		return []glid.GLID{t.TierID}
+		return []glid.GLID{t.VaultID}
 	}
 	return nil
 }
@@ -404,7 +404,7 @@ func (o *Orchestrator) AppendToVault(vaultID glid.GLID, leaderChunkID chunk.Chun
 		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 	// Block appends to vaults that are draining.
-	if _, draining := o.tierDraining[tierDrainKey(vaultID, tier.TierID)]; draining {
+	if _, draining := o.tierDraining[tierDrainKey(vaultID, tier.VaultID)]; draining {
 		o.mu.RUnlock()
 		return ErrTierDraining
 	}
@@ -479,11 +479,11 @@ func (o *Orchestrator) forwardToFollowers(vault *Vault, vaultID glid.GLID, tier 
 	var remotes []remoteForwardTarget
 	for _, tgt := range tier.FollowerTargets {
 		if tgt.NodeID == o.localNodeID {
-			o.appendToLocalFollower(vault, tier.TierID, tgt.StorageID, activeChunkID, rec)
+			o.appendToLocalFollower(vault, tier.VaultID, tgt.StorageID, activeChunkID, rec)
 		} else {
 			remotes = append(remotes, remoteForwardTarget{
 				nodeID: tgt.NodeID, vaultID: vaultID,
-				tierID: tier.TierID, activeChunkID: activeChunkID,
+				tierID: tier.VaultID, activeChunkID: activeChunkID,
 			})
 		}
 	}
@@ -609,7 +609,7 @@ func (o *Orchestrator) clearReplicaBackoff(nodeID string) {
 // followerTargets stops listing the local node. Called under o.mu.RLock.
 func (o *Orchestrator) appendToLocalFollower(vault *Vault, tierID glid.GLID, storageID string, leaderChunkID chunk.ChunkID, rec chunk.Record) {
 	t := vault.Instance
-	if t == nil || t.TierID != tierID || t.StorageID != storageID || !t.IsFollower {
+	if t == nil || t.VaultID != tierID || t.StorageID != storageID || !t.IsFollower {
 		return
 	}
 	if leaderChunkID != (chunk.ChunkID{}) {
@@ -641,7 +641,7 @@ func (o *Orchestrator) DeleteChunkFromTier(vaultID glid.GLID, chunkID chunk.Chun
 	if err != nil {
 		return err
 	}
-	return o.deleteChunkFromTierInstance(tier, vaultID, tier.TierID, chunkID)
+	return o.deleteChunkFromTierInstance(tier, vaultID, tier.VaultID, chunkID)
 }
 
 // findTierForDelete returns the vault's instance or an error, releasing
@@ -822,7 +822,7 @@ func (o *Orchestrator) deleteFromFollowers(vaultID glid.GLID, tierID glid.GLID, 
 	if vault == nil {
 		return
 	}
-	if t := vault.Instance; t != nil && t.TierID == tierID && t.IsFollower {
+	if t := vault.Instance; t != nil && t.VaultID == tierID && t.IsFollower {
 		if err := chunk.DeleteNoAnnounce(t.Chunks, chunkID); err != nil {
 			o.logger.Warn("delete from followers: failed",
 				"vault", vaultID, "chunk", chunkID, "error", err)
@@ -903,7 +903,7 @@ func (o *Orchestrator) appendRecord(vaultID glid.GLID, rec chunk.Record) (chunk.
 			}
 			task = &replicationTask{
 				vaultID: vaultID,
-				tierID:  activeTier.TierID,
+				tierID:  activeTier.VaultID,
 				chunkID: activeChunkID,
 				targets: activeTier.FollowerTargets,
 			}
@@ -921,7 +921,7 @@ func (o *Orchestrator) appendRecord(vaultID glid.GLID, rec chunk.Record) (chunk.
 	activeAfter := cm.Active()
 	if activeBefore != nil && (activeAfter == nil || activeAfter.ID != activeBefore.ID) {
 		if activeTier != nil {
-			o.rotationRates.Record(activeTier.TierID, o.now())
+			o.rotationRates.Record(activeTier.VaultID, o.now())
 		}
 		o.schedulePostSeal(vaultID, cm, activeBefore.ID)
 	}
@@ -963,7 +963,7 @@ func (o *Orchestrator) ImportToVault(ctx context.Context, vaultID glid.GLID, chu
 	if tier == nil {
 		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
-	return o.ImportToTierStorage(ctx, vaultID, tier.TierID, "", chunkID, next)
+	return o.ImportToTierStorage(ctx, vaultID, tier.VaultID, "", chunkID, next)
 }
 
 // ImportToTierStorage imports a sealed chunk to a specific storage-targeted tier
@@ -986,7 +986,7 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, tierID 
 		if vault == nil {
 			return nil
 		}
-		if t := vault.Instance; t != nil && t.TierID == tierID && (storageID == "" || t.StorageID == storageID) {
+		if t := vault.Instance; t != nil && t.VaultID == tierID && (storageID == "" || t.StorageID == storageID) {
 			return &tierRef{cm: t.Chunks, isFollower: t.IsFollower, isTombstoned: t.IsTombstoned}
 		}
 		return nil

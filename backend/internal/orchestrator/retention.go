@@ -285,7 +285,7 @@ func (o *Orchestrator) enforceMemoryBudgets(cfg *system.Config) {
 		if excess := monitor.BudgetExceeded(); excess > 0 {
 			targets = append(targets, budgetTarget{
 				vaultID: vaultCfg.ID,
-				tierID:  tier.TierID,
+				tierID:  tier.VaultID,
 				cm:      tier.Chunks,
 				excess:  excess,
 			})
@@ -318,7 +318,7 @@ func (o *Orchestrator) drainExcessChunks(vaultID, tierID glid.GLID, cm chunk.Chu
 	var im index.IndexManager
 	o.mu.RLock()
 	if vault := o.vaults[vaultID]; vault != nil {
-		if tier := vault.Instance; tier != nil && tier.TierID == tierID {
+		if tier := vault.Instance; tier != nil && tier.VaultID == tierID {
 			im = tier.Indexes
 		}
 	}
@@ -476,14 +476,14 @@ func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg syste
 		return nil
 	}
 
-	key := retentionKey(tier.TierID, tier.StorageID)
+	key := retentionKey(tier.VaultID, tier.StorageID)
 	active[key] = true
 
 	runner := o.retention[key]
 	if runner == nil {
 		runner = &retentionRunner{
 			vaultID: vaultCfg.ID,
-			tierID:  tier.TierID,
+			tierID:  tier.VaultID,
 			cm:      tier.Chunks,
 			im:      tier.Indexes,
 			orch:    o,
@@ -500,7 +500,7 @@ func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg syste
 	runner.followerTargets = tier.FollowerTargets
 	runner.vaultName = vaultCfg.Name
 	runner.tierType = string(tierCfg.Type)
-	runner.tierPosition = tierPositionInVault(cfg, vaultCfg.ID, tier.TierID)
+	runner.tierPosition = tierPositionInVault(cfg, vaultCfg.ID, tier.VaultID)
 	runner.disposition = vaultCfg.ResolveRetentionDisposition()
 	return &sweepTarget{runner: runner, rules: rules}
 }

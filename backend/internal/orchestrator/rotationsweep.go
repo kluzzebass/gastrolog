@@ -67,7 +67,7 @@ func (o *Orchestrator) rotationSweep() {
 			o.logger.Debug("rotation triggered",
 				"vault", vaultID,
 				"name", vault.Name,
-				"vault", tier.TierID,
+				"vault", tier.VaultID,
 				"trigger", *trigger,
 			)
 			if activeBefore != nil {
@@ -76,7 +76,7 @@ func (o *Orchestrator) rotationSweep() {
 				// alerter. We do this here (under the read lock) so
 				// the count reflects every triggered rotation, not
 				// only those whose post-seal pipeline is scheduled.
-				o.rotationRates.Record(tier.TierID, o.now())
+				o.rotationRates.Record(tier.VaultID, o.now())
 			}
 		}
 	}
@@ -158,8 +158,8 @@ func (o *Orchestrator) applyRotationFromConfig(sys *system.System,
 
 	// Ensure cron job exists with the right schedule.
 	if policyCfg.Cron != nil && *policyCfg.Cron != "" {
-		jobName := cronJobName(vaultCfg.ID, tier.TierID)
+		jobName := cronJobName(vaultCfg.ID, tier.VaultID)
 		activeCronJobs[jobName] = true
-		o.cronRotation.ensure(vaultCfg.ID, tier.TierID, vaultCfg.Name, *policyCfg.Cron, tier.Chunks)
+		o.cronRotation.ensure(vaultCfg.ID, tier.VaultID, vaultCfg.Name, *policyCfg.Cron, tier.Chunks)
 	}
 }

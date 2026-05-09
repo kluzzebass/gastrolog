@@ -472,7 +472,7 @@ func TestRetentionTargetThreadsDispositionFromVaultConfig(t *testing.T) {
 			defer orch.Stop()
 
 			tier := &VaultInstance{
-				TierID:  tierID,
+				VaultID:  tierID,
 				Chunks:  &retentionFakeChunkManager{},
 				Indexes: &retentionFakeIndexManager{},
 			}

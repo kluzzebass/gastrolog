@@ -42,7 +42,7 @@ func (o *Orchestrator) cacheEvictionSweepAll() {
 		targets = append(targets, evictTarget{
 			evictor: ev,
 			vaultID: v.ID.String(),
-			tierID:  t.TierID.String(),
+			tierID:  t.VaultID.String(),
 		})
 	}
 	o.mu.RUnlock()

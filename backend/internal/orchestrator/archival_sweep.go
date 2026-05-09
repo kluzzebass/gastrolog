@@ -96,7 +96,7 @@ func (o *Orchestrator) archivalSweepAll() {
 		if tier == nil || !tier.IsLeader() {
 			continue
 		}
-		tierCfg := findTierConfig(sys.Config.Tiers, tier.TierID)
+		tierCfg := findTierConfig(sys.Config.Tiers, tier.VaultID)
 		if tierCfg == nil || tierCfg.CloudServiceID == nil {
 			continue
 		}
@@ -112,7 +112,7 @@ func (o *Orchestrator) archivalSweepAll() {
 func (o *Orchestrator) archivalSweepTier(tier *VaultInstance, cs *system.CloudService, now time.Time) {
 	metas, err := tier.Chunks.List()
 	if err != nil {
-		o.logger.Warn("archival sweep: list chunks failed", "vault", tier.TierID, "error", err)
+		o.logger.Warn("archival sweep: list chunks failed", "vault", tier.VaultID, "error", err)
 		return
 	}
 
@@ -236,7 +236,7 @@ func (o *Orchestrator) reconcileSweepAll() {
 		if tier == nil || !tier.IsLeader() {
 			continue
 		}
-		tierCfg := findTierConfig(sys.Config.Tiers, tier.TierID)
+		tierCfg := findTierConfig(sys.Config.Tiers, tier.VaultID)
 		if tierCfg == nil || tierCfg.CloudServiceID == nil {
 			continue
 		}
@@ -314,7 +314,7 @@ func (o *Orchestrator) reconcileCloudChunk(tier *VaultInstance, id chunk.ChunkID
 	suspectDays := uint32(now.Sub(since).Hours() / 24)
 	if suspectDays < graceDays {
 		o.logger.Info("reconcile: chunk still suspect",
-			"vault", tier.TierID, "chunk", id.String(),
+			"vault", tier.VaultID, "chunk", id.String(),
 			"suspectDays", suspectDays, "graceDays", graceDays)
 		return
 	}
@@ -344,7 +344,7 @@ func (o *Orchestrator) markSuspect(tier *VaultInstance, id chunk.ChunkID, now ti
 		)
 	}
 	o.logger.Warn("reconcile: chunk not found, marking suspect",
-		"vault", tier.TierID, "chunk", id.String())
+		"vault", tier.VaultID, "chunk", id.String())
 }
 
 // expireSuspect removes a chunk from the index after its grace period has
@@ -356,12 +356,12 @@ func (o *Orchestrator) expireSuspect(tier *VaultInstance, id chunk.ChunkID, susp
 	if tier.Reconciler != nil {
 		if err := tier.Reconciler.deleteChunk(id, "cloud-blob-missing", o.placementMembership(tier)); err != nil {
 			o.logger.Error("reconcile: reconciler delete failed",
-				"vault", tier.TierID, "chunk", id.String(), "error", err)
+				"vault", tier.VaultID, "chunk", id.String(), "error", err)
 			return
 		}
 	} else if err := tier.Chunks.Delete(id); err != nil {
 		o.logger.Error("reconcile: failed to remove suspect chunk from index",
-			"vault", tier.TierID, "chunk", id.String(), "error", err)
+			"vault", tier.VaultID, "chunk", id.String(), "error", err)
 		return
 	}
 	o.suspects.clear(id)
@@ -374,7 +374,7 @@ func (o *Orchestrator) expireSuspect(tier *VaultInstance, id chunk.ChunkID, susp
 		)
 	}
 	o.logger.Warn("reconcile: removed chunk from index after grace period",
-		"vault", tier.TierID, "chunk", id.String(), "suspectDays", suspectDays)
+		"vault", tier.VaultID, "chunk", id.String(), "suspectDays", suspectDays)
 }
 
 // isChunkSuspect returns true if the error indicates a 404 (blob not found).

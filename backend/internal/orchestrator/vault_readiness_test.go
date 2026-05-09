@@ -39,7 +39,7 @@ func TestVaultReplicationReadinessErr_fsmNotReady(t *testing.T) {
 		t.Fatal(err)
 	}
 	tier := &VaultInstance{
-		TierID:     glid.New(),
+		VaultID:     glid.New(),
 		Type:       "memory",
 		Chunks:     s.CM,
 		Indexes:    s.IM,
@@ -60,7 +60,7 @@ func TestVaultReplicationReadinessErr_ready(t *testing.T) {
 		t.Fatal(err)
 	}
 	tier := &VaultInstance{
-		TierID:     glid.New(),
+		VaultID:     glid.New(),
 		Type:       "memory",
 		Chunks:     s.CM,
 		Indexes:    s.IM,
@@ -85,7 +85,7 @@ func TestListAllChunkMetas_vaultNotReady(t *testing.T) {
 		t.Fatal(err)
 	}
 	tier := &VaultInstance{
-		TierID:     glid.New(),
+		VaultID:     glid.New(),
 		Type:       "memory",
 		Chunks:     s.CM,
 		Indexes:    s.IM,
@@ -134,7 +134,7 @@ func TestSearch_ErrVaultNotReady(t *testing.T) {
 		t.Fatal(err)
 	}
 	tier := &VaultInstance{
-		TierID:     glid.New(),
+		VaultID:     glid.New(),
 		Type:       "memory",
 		Chunks:     s.CM,
 		Indexes:    s.IM,
@@ -161,7 +161,7 @@ func TestAppendToTier_ErrVaultNotReady(t *testing.T) {
 		t.Fatal(err)
 	}
 	tier := &VaultInstance{
-		TierID:     tierID,
+		VaultID:     tierID,
 		Type:       "memory",
 		Chunks:     s.CM,
 		Indexes:    s.IM,
@@ -194,7 +194,7 @@ func TestLocalVaultsReplicationReady(t *testing.T) {
 		t.Fatal(err)
 	}
 	tier := &VaultInstance{
-		TierID:     glid.New(),
+		VaultID:     glid.New(),
 		Type:       "memory",
 		Chunks:     s.CM,
 		Indexes:    s.IM,
@@ -219,7 +219,7 @@ func TestSearchReadyRegistry_skipsNotReadyVault(t *testing.T) {
 		t.Fatal(err)
 	}
 	o.RegisterVault(NewVault(readyID, &VaultInstance{
-		TierID:     glid.New(),
+		VaultID:     glid.New(),
 		Type:       "memory",
 		Chunks:     sReady.CM,
 		Indexes:    sReady.IM,
@@ -232,7 +232,7 @@ func TestSearchReadyRegistry_skipsNotReadyVault(t *testing.T) {
 		t.Fatal(err)
 	}
 	o.RegisterVault(NewVault(notReadyID, &VaultInstance{
-		TierID:     glid.New(),
+		VaultID:     glid.New(),
 		Type:       "memory",
 		Chunks:     sNR.CM,
 		Indexes:    sNR.IM,

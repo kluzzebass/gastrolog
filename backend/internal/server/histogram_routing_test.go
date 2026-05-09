@@ -107,7 +107,7 @@ func mustTierInstance(t *testing.T, tierID glid.GLID, isFollower bool) *orchestr
 		t.Fatalf("indexmem factory: %v", err)
 	}
 	return &orchestrator.VaultInstance{
-		TierID:     tierID,
+		VaultID:     tierID,
 		Type:       "memory",
 		Chunks:     cm,
 		Indexes:    im,

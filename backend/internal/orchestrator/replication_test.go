@@ -75,7 +75,7 @@ func newReplicationTier(t *testing.T, tierID glid.GLID, followers []system.Repli
 		t.Fatal(err)
 	}
 	return &VaultInstance{
-		TierID:          tierID,
+		VaultID:          tierID,
 		Type:            "memory",
 		Chunks:          cm,
 		Indexes:         im,

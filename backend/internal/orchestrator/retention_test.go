@@ -338,7 +338,7 @@ func TestExpireChunkProposesRequestDelete(t *testing.T) {
 		gotExpectedFrom []string
 	)
 	tier := &VaultInstance{
-		TierID: tierID,
+		VaultID: tierID,
 		Chunks: cm,
 		Indexes: im,
 		FollowerTargets: []system.ReplicationTarget{
@@ -404,7 +404,7 @@ func TestExpireChunkSkipsLocalOnRequestDeleteFailure(t *testing.T) {
 
 	vaultID, tierID := glid.New(), glid.New()
 	tier := &VaultInstance{
-		TierID:  tierID,
+		VaultID:  tierID,
 		Chunks:  cm,
 		Indexes: im,
 		ApplyRaftRequestDelete: func(_ chunk.ChunkID, _ string, _ []string) error {
@@ -649,7 +649,7 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 
 	// First call: creates a new runner with cm1/im1.
 	tier1 := &VaultInstance{
-		TierID:  tierID,
+		VaultID:  tierID,
 		Chunks:  cm1,
 		Indexes: im1,
 	}
@@ -668,7 +668,7 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 
 	// Second call with different chunk manager: runner is reused, cm/im refreshed.
 	tier2 := &VaultInstance{
-		TierID:  tierID,
+		VaultID:  tierID,
 		Chunks:  cm2,
 		Indexes: im2,
 	}

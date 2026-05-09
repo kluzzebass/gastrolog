@@ -18,9 +18,8 @@ import (
 // has a unique StorageID and its own chunk manager pointing to a different
 // directory.
 type VaultInstance struct {
-	TierID          glid.GLID
-	VaultID         glid.GLID // owning vault — set during construction; with 1:1 vault/tier this is the natural ID
-	StorageID       string    // the file storage ID this instance uses (empty for memory/JSONL tiers)
+	VaultID         glid.GLID // identity of the owning vault (1:1 vault:tier — also the tier ID)
+	StorageID       string    // the file storage ID this instance uses (empty for memory/JSONL vaults)
 	Type            string
 	Chunks          chunk.ChunkManager
 	Indexes         index.IndexManager

@@ -71,7 +71,7 @@ func (o *Orchestrator) DrainTier(ctx context.Context, vaultID, tierID glid.GLID,
 
 	// Find the tier instance.
 	var tier *VaultInstance
-	if vault.Instance != nil && vault.Instance.TierID == tierID {
+	if vault.Instance != nil && vault.Instance.VaultID == tierID {
 		tier = vault.Instance
 	}
 	if tier == nil {
@@ -110,7 +110,7 @@ func (o *Orchestrator) DrainTier(ctx context.Context, vaultID, tierID glid.GLID,
 	o.tierDraining[key] = ds
 
 	// Remove retention/rotation jobs for this tier so they don't interfere.
-	delete(o.retention, retentionKey(tier.TierID, tier.StorageID))
+	delete(o.retention, retentionKey(tier.VaultID, tier.StorageID))
 
 	// Seal the active chunk.
 	cm := tier.Chunks
@@ -168,7 +168,7 @@ func (o *Orchestrator) tierDrainWorker(ctx context.Context, vaultID, tierID glid
 		return
 	}
 	var tier *VaultInstance
-	if vault.Instance != nil && vault.Instance.TierID == tierID {
+	if vault.Instance != nil && vault.Instance.VaultID == tierID {
 		tier = vault.Instance
 	}
 	o.mu.RUnlock()

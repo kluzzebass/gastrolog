@@ -933,7 +933,7 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 			vaults: []glid.GLID{vaultID},
 			localTierExported: func(_, _ glid.GLID) *orchestrator.VaultInstance {
 				return &orchestrator.VaultInstance{
-					TierID:     tierID,
+					VaultID:     tierID,
 					IsFollower: false, // this node is the leader
 				}
 			},
@@ -961,7 +961,7 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 			vaults: []glid.GLID{vaultID},
 			localTierExported: func(_, _ glid.GLID) *orchestrator.VaultInstance {
 				return &orchestrator.VaultInstance{
-					TierID:       tierID,
+					VaultID:       tierID,
 					IsFollower:   true,
 					LeaderNodeID: "other-node",
 				}
@@ -1009,7 +1009,7 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 			vaults: []glid.GLID{vaultID},
 			localTierExported: func(_, _ glid.GLID) *orchestrator.VaultInstance {
 				return &orchestrator.VaultInstance{
-					TierID:     tierID,
+					VaultID:     tierID,
 					IsFollower: false,
 				}
 			},

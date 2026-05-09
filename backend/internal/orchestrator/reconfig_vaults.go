@@ -181,7 +181,7 @@ func (o *Orchestrator) RemoveVault(id glid.GLID) error {
 // without closing managers or unregistering. Used by UnregisterVault and drain.
 func (o *Orchestrator) removeVaultJobs(id glid.GLID, vault *Vault) {
 	if inst := vault.Instance; inst != nil {
-		delete(o.retention, retentionKey(inst.TierID, inst.StorageID))
+		delete(o.retention, retentionKey(inst.VaultID, inst.StorageID))
 	}
 	o.cronRotation.removeAllForVault(id)
 }
@@ -199,7 +199,7 @@ func (o *Orchestrator) teardownVault(id glid.GLID, vault *Vault) {
 
 	// Remove per-instance retention runner and cron rotation jobs.
 	if inst := vault.Instance; inst != nil {
-		delete(o.retention, retentionKey(inst.TierID, inst.StorageID))
+		delete(o.retention, retentionKey(inst.VaultID, inst.StorageID))
 	}
 	o.cronRotation.removeAllForVault(id)
 
@@ -390,7 +390,7 @@ func (o *Orchestrator) removeTierFromVault(vaultID, tierID glid.GLID, deleteData
 	}
 
 	inst := vault.Instance
-	if inst == nil || inst.TierID != tierID {
+	if inst == nil || inst.VaultID != tierID {
 		return false
 	}
 
@@ -428,7 +428,7 @@ func (o *Orchestrator) removeTierFromVault(vaultID, tierID glid.GLID, deleteData
 	}
 
 	// Remove retention runner and cron rotation for this vault.
-	delete(o.retention, retentionKey(inst.TierID, inst.StorageID))
+	delete(o.retention, retentionKey(inst.VaultID, inst.StorageID))
 	o.cronRotation.removeAllForVault(vaultID)
 
 	// Drop the instance from the vault.
@@ -464,7 +464,7 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID glid.
 		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 	// Already present?
-	if vault.Instance != nil && vault.Instance.TierID == tierID {
+	if vault.Instance != nil && vault.Instance.VaultID == tierID {
 		o.mu.Unlock()
 		return nil
 	}
@@ -777,7 +777,6 @@ func (o *Orchestrator) buildTierInstance(sys *system.System, vaultCfg system.Vau
 	// JSONL sinks are write-only — no query engine, no indexes.
 	if tierCfg.Type == system.VaultTypeJSONL {
 		ti := &VaultInstance{
-			TierID:  tierCfg.ID,
 			VaultID: vaultCfg.ID,
 			Type:    string(tierCfg.Type),
 			Chunks:  cm,
@@ -815,7 +814,6 @@ func (o *Orchestrator) buildTierInstance(sys *system.System, vaultCfg system.Vau
 	}
 
 	ti := &VaultInstance{
-		TierID:  tierCfg.ID,
 		VaultID: vaultCfg.ID,
 		Type:    string(tierCfg.Type),
 		Chunks:  cm,
@@ -927,7 +925,6 @@ func (o *Orchestrator) buildTierInstanceForStorage(sys *system.System, vaultCfg 
 	}
 
 	ti := &VaultInstance{
-		TierID:  tierCfg.ID,
 		VaultID: vaultCfg.ID,
 		Type:    string(tierCfg.Type),
 		Chunks:  cm,

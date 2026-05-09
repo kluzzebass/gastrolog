@@ -83,7 +83,7 @@ func TestEvaluateCloudHealth_SetsAlertWhenDegraded(t *testing.T) {
 
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = ac
-	tier := &VaultInstance{TierID: tierID, Type: "cloud", Chunks: mock}
+	tier := &VaultInstance{VaultID: tierID, Type: "cloud", Chunks: mock}
 	orch.RegisterVault(NewVault(glid.New(), tier))
 
 	orch.evaluateCloudHealth()
@@ -110,7 +110,7 @@ func TestEvaluateCloudHealth_ClearsAlertWhenHealthy(t *testing.T) {
 
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = ac
-	tier := &VaultInstance{TierID: tierID, Type: "cloud", Chunks: mock}
+	tier := &VaultInstance{VaultID: tierID, Type: "cloud", Chunks: mock}
 	orch.RegisterVault(NewVault(glid.New(), tier))
 
 	// Simulate prior degraded alert.
@@ -137,7 +137,7 @@ func TestEvaluateCloudHealth_SkipsNonCloudTiers(t *testing.T) {
 	orch.alerts = ac
 
 	// Type is "file", not "cloud" — should be skipped.
-	tier := &VaultInstance{TierID: glid.New(), Type: "file", Chunks: mock}
+	tier := &VaultInstance{VaultID: glid.New(), Type: "file", Chunks: mock}
 	orch.RegisterVault(NewVault(glid.New(), tier))
 
 	orch.evaluateCloudHealth()
@@ -174,7 +174,7 @@ func TestBackfillCloudUploads_SchedulesSealedNonCloudBacked(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
 	tier := &VaultInstance{
-		TierID:       tierID,
+		VaultID:       tierID,
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },
@@ -208,7 +208,7 @@ func TestBackfillCloudUploads_SkipsCloudBacked(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
 	tier := &VaultInstance{
-		TierID:       glid.New(),
+		VaultID:       glid.New(),
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },
@@ -238,7 +238,7 @@ func TestBackfillCloudUploads_SkipsUnsealed(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
 	tier := &VaultInstance{
-		TierID:       glid.New(),
+		VaultID:       glid.New(),
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },
@@ -269,7 +269,7 @@ func TestBackfillCloudUploads_SkipsWhenFSMOverlaySaysCloudBacked(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
 	tier := &VaultInstance{
-		TierID:       glid.New(),
+		VaultID:       glid.New(),
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },
@@ -311,7 +311,7 @@ func TestBackfillCloudUploadsLeaderOnly(t *testing.T) {
 	orch.alerts = ac
 
 	tier := &VaultInstance{
-		TierID:       tierID,
+		VaultID:       tierID,
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },
@@ -355,7 +355,7 @@ func TestBackfillCloudUploadsSkippedOnFollower(t *testing.T) {
 	orch.alerts = ac
 
 	tier := &VaultInstance{
-		TierID:       glid.New(),
+		VaultID:       glid.New(),
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return false },
@@ -390,7 +390,7 @@ func TestBackfillCloudUploads_DeduplicatesPendingJobs(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
 	tier := &VaultInstance{
-		TierID:       tierID,
+		VaultID:       tierID,
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },

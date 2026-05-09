@@ -43,11 +43,11 @@ func (o *Orchestrator) evaluateTierCloudHealth(tier *VaultInstance) {
 	if !ok {
 		return
 	}
-	alertID := fmt.Sprintf("cloud-store:%s", tier.TierID)
+	alertID := fmt.Sprintf("cloud-store:%s", tier.VaultID)
 	if chk.CloudDegraded() {
 		o.alerts.Set(alertID, alert.Error, "cloud",
 			fmt.Sprintf("Cloud store unreachable for tier %s: %s",
-				tier.TierID.String()[:8], chk.CloudDegradedError()))
+				tier.VaultID.String()[:8], chk.CloudDegradedError()))
 	} else {
 		o.alerts.Clear(alertID)
 	}
@@ -88,7 +88,7 @@ func (o *Orchestrator) backfillCloudUploads(tier *VaultInstance) {
 		if !m.Sealed || chunkIsCloudBacked(tier, m) {
 			continue
 		}
-		name := fmt.Sprintf("cloud-backfill:%s:%s", tier.TierID, m.ID)
+		name := fmt.Sprintf("cloud-backfill:%s:%s", tier.VaultID, m.ID)
 		if o.scheduler.HasPendingPrefix(name) {
 			continue
 		}
@@ -101,7 +101,7 @@ func (o *Orchestrator) backfillCloudUploads(tier *VaultInstance) {
 	}
 	if backfilled > 0 {
 		o.logger.Debug("cloud backfill: scheduled uploads",
-			"vault", tier.TierID, "count", backfilled)
+			"vault", tier.VaultID, "count", backfilled)
 	}
 }
 

@@ -92,7 +92,7 @@ func TestReliability_Ingest_ReleasesLockBeforeReplication(t *testing.T) {
 	im := indexmem.NewManager(nil, nil, nil, nil, nil)
 	qe := query.New(cm, im, nil)
 	tier := &VaultInstance{
-		TierID:          tierID,
+		VaultID:          tierID,
 		Type:            "memory",
 		Chunks:          cm,
 		Indexes:         im,

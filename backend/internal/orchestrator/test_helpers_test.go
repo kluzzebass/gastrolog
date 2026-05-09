@@ -117,7 +117,7 @@ func newMemoryTierInstance(t *testing.T, tierID glid.GLID) *VaultInstance {
 		t.Fatal(err)
 	}
 	return &VaultInstance{
-		TierID:  tierID,
+		VaultID:  tierID,
 		Type:    "memory",
 		Chunks:  cm,
 		Indexes: im,
@@ -262,7 +262,7 @@ func newCloudFileTier(t *testing.T, tierID glid.GLID, vaultID glid.GLID, store b
 	}
 	im := indexfile.NewManager(dir, nil, nil)
 	return &VaultInstance{
-		TierID:  tierID,
+		VaultID:  tierID,
 		Type:    "cloud",
 		Chunks:  cm,
 		Indexes: im,
@@ -296,7 +296,7 @@ func newFileTierInstance(t *testing.T, tierID glid.GLID) (*VaultInstance, string
 	}
 	im := indexfile.NewManager(dir, nil, nil)
 	return &VaultInstance{
-		TierID:  tierID,
+		VaultID:  tierID,
 		Type:    "file",
 		Chunks:  cm,
 		Indexes: im,
@@ -751,7 +751,7 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 			}
 			im := indexfile.NewManager(dir, nil, nil)
 			tier := &VaultInstance{
-				TierID:  tierIDs[i],
+				VaultID:  tierIDs[i],
 				Type:    "file",
 				Chunks:  cm,
 				Indexes: im,

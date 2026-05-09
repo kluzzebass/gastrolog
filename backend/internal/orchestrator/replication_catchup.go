@@ -21,7 +21,7 @@ func (o *Orchestrator) ScheduleCatchup(vaultID, tierID glid.GLID, followerNodeID
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
 	var found *VaultInstance
-	if vault != nil && vault.Instance != nil && vault.Instance.TierID == tierID {
+	if vault != nil && vault.Instance != nil && vault.Instance.VaultID == tierID {
 		found = vault.Instance
 	}
 	o.mu.RUnlock()
@@ -179,7 +179,7 @@ func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID glid.G
 		return 0, fmt.Errorf("vault %s not found", vaultID)
 	}
 	tier := vault.Instance
-	tierID := tier.TierID
+	tierID := tier.VaultID
 	if tier.IsFollower {
 		return 0, fmt.Errorf("not placement leader for vault %s (follower)", vaultID)
 	}
