@@ -128,7 +128,7 @@ func (o *Orchestrator) scheduleReplication(vaultID, tierID glid.GLID, chunkID ch
 //
 // Cloud-backed chunks are skipped: the data is in shared S3, so followers don't
 // need record streaming. The vault-ctl FSM's OnUpload callback registers the
-// chunk in each follower's cloud index (see wireTierFSMOnUpload).
+// chunk in each follower's cloud index (see wireVaultFSMOnUpload).
 func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, targets []system.ReplicationTarget) {
 	if o.transferrer == nil || len(targets) == 0 {
 		return

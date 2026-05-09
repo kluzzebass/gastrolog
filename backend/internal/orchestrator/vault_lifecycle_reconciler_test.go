@@ -892,7 +892,7 @@ func TestSweepLocalOrphansDemotesActiveTombstonedChunk(t *testing.T) {
 // recordingSilentDeleter implements chunk.SilentDeleter on top of the
 // shared fake chunk manager so the rest of chunk.ChunkManager is
 // satisfied by embedding. Used by gastrolog-2ob86 tests that need to
-// observe wireTierFSMOnDelete's local-delete behavior alongside the
+// observe wireVaultFSMOnDelete's local-delete behavior alongside the
 // orchestrator-level signal.
 type recordingSilentDeleter struct {
 	retentionFakeChunkManager
@@ -1050,7 +1050,7 @@ func TestWireTierFSMOnDeleteFiresNotifyChunkChange(t *testing.T) {
 	cm := &recordingSilentDeleter{}
 	tierID := glid.New()
 	g := &raftgroup.Group{FSM: fsm}
-	wireTierFSMOnDelete(g, tierID, cm, nil, orch, slog.Default())
+	wireVaultFSMOnDelete(g, tierID, cm, nil, orch, slog.Default())
 
 	id := chunk.NewChunkID()
 	now := time.Now()
@@ -1088,7 +1088,7 @@ func TestWireTierFSMOnDeleteNotifiesEvenWhenDeleteSilentFails(t *testing.T) {
 	cm := &recordingSilentDeleter{failNext: chunk.ErrChunkNotFound}
 	tierID := glid.New()
 	g := &raftgroup.Group{FSM: fsm}
-	wireTierFSMOnDelete(g, tierID, cm, nil, orch, slog.Default())
+	wireVaultFSMOnDelete(g, tierID, cm, nil, orch, slog.Default())
 
 	id := chunk.NewChunkID()
 	now := time.Now()
@@ -1119,7 +1119,7 @@ func TestWireTierFSMOnUploadFiresNotifyChunkChange(t *testing.T) {
 	cm := &recordingCloudRegistrar{}
 	tierID := glid.New()
 	g := &raftgroup.Group{FSM: fsm}
-	wireTierFSMOnUpload(g, tierID, cm, orch, slog.Default())
+	wireVaultFSMOnUpload(g, tierID, cm, orch, slog.Default())
 
 	id := chunk.NewChunkID()
 	now := time.Now()

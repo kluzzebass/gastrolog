@@ -199,11 +199,11 @@ func (m *transitionFakeTransferrer) WaitVaultReady(_ context.Context, _ string, 
 // Reproduces gastrolog-9umo2: 3m TTL on cloud inst, chunks sit for 10+ minutes.
 
 // TestCloudTierLeaderPreservesCloudBacking verifies that a cloud vault leader
-// built through the production code path (buildLeaderTierInstance →
-// buildTierInstanceForStorage) retains the sealed_backing parameter so that
+// built through the production code path (buildLeaderInstance →
+// buildInstanceForStorage) retains the sealed_backing parameter so that
 // PostSealProcess uploads chunks to cloud storage.
 //
-// Regression test: buildTierInstanceForStorage previously stripped sealed_backing
+// Regression test: buildInstanceForStorage previously stripped sealed_backing
 // unconditionally (with the comment "always follower"), even when called for the
 // leader. This caused cloud inst leaders to have CloudStore=nil, silently
 // preventing all cloud uploads and breaking the entire archival lifecycle.
@@ -1014,9 +1014,9 @@ func waitForDrainJob(t *testing.T, orch *Orchestrator, vaultID glid.GLID, timeou
 
 
 // TestExplicitStorageLeaderGetsRotationPolicy verifies that a inst built via
-// buildTierInstanceForStorage (explicit placement path) applies the rotation
+// buildInstanceForStorage (explicit placement path) applies the rotation
 // policy from system. Regression test for a gap where applyRotationPolicy was
-// only called in buildTierInstance but not buildTierInstanceForStorage.
+// only called in buildInstance but not buildInstanceForStorage.
 
 // waitForTransitions polls until all transition:* jobs in the scheduler
 // have completed. Transitions run as one-shot scheduler jobs since

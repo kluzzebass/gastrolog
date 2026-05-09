@@ -734,7 +734,7 @@ func replaceForwardedChunk(cm chunk.ChunkManager, chunkID chunk.ChunkID, isActiv
 // code — pendingDeletes silently leak across snapshot install
 // boundaries and FSM-sealed-but-local-active divergences (e.g.
 // gastrolog-uccg6) don't reconcile. Wired from
-// ensureVaultCtlTierMetadata via vfsm.SetOnAfterRestore. See
+// ensureVaultCtlMetadata via vfsm.SetOnAfterRestore. See
 // gastrolog-51gme.
 //
 // Snapshot the vault's instance under the read lock and run reconciliation

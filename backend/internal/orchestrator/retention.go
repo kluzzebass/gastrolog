@@ -87,7 +87,7 @@ type retentionRunner struct {
 	// execution. All production deletes route through reconciler.deleteChunk
 	// → CmdRequestDelete (gastrolog-51gme steps 4-7). Nil only in older test
 	// harnesses that build TierInstances directly without going through
-	// buildTierInstance; those harnesses fall through to the legacy
+	// buildInstance; those harnesses fall through to the legacy
 	// direct-delete path below (for cross-node propagation they wire
 	// directChunkReplicator.DeleteChunk RPC fan-out separately).
 	reconciler *VaultLifecycleReconciler
@@ -466,7 +466,7 @@ func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg syste
 	if len(tierCfg.RetentionRules) == 0 {
 		return nil
 	}
-	rules, err := resolveRetentionRulesFromTier(cfg, vaultCfg, tierCfg)
+	rules, err := resolveRetentionRulesFromVault(cfg, vaultCfg, tierCfg)
 	if err != nil {
 		o.logger.Warn("retention: failed to resolve rules",
 			"vault", vaultCfg.ID, "error", err)
@@ -943,7 +943,7 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID, reason string) {
 	// Reconciler-less fallback: legacy direct-delete path.
 	//
 	// Reached only by older test harnesses that build a retentionRunner
-	// without going through buildTierInstance (so inst.Reconciler is nil).
+	// without going through buildInstance (so inst.Reconciler is nil).
 	// They wire cross-node propagation via directChunkReplicator.DeleteChunk
 	// RPC fan-out (forwardDeletionToFollowers below) instead of vault-ctl
 	// Raft. Production has no path into here after gastrolog-51gme step 11

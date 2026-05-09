@@ -80,7 +80,7 @@ type Factories struct {
 	VaultsDir string
 
 	// GroupManager, when non-nil, manages vault-ctl Raft groups for chunk metadata
-	// replication. buildTierInstance creates a Raft group per inst and wires
+	// replication. buildInstance creates a Raft group per inst and wires
 	// a RaftAnnouncer to the chunk manager.
 	GroupManager *raftgroup.GroupManager
 

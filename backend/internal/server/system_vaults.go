@@ -48,7 +48,7 @@ func (s *SystemServer) PutVault(
 	// RouteLeader RPCs run on any node with Raft writes forwarded to the leader,
 	// but reads are local. In a multi-node cluster, tiers created moments before
 	// the vault may not have replicated to this node's FSM yet. The orchestrator's
-	// buildTierInstances handles missing tiers gracefully (logs a warning, skips).
+	// buildVaultInstances handles missing tiers gracefully (logs a warning, skips).
 	// Referential integrity is enforced on the delete path (DeleteTier rejects
 	// if any vault references the tier).
 
