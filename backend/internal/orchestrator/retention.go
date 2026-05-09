@@ -460,13 +460,10 @@ func (o *Orchestrator) retentionTargetForInstance(cfg *system.Config, vaultCfg s
 	// IsRaftLeader check removed: the inst apply forwarder transparently
 	// routes applies to the vault-ctl Raft leader. The config placement leader
 	// always runs retention regardless of vault-ctl Raft leadership.
-	// 1:1 vault:tier — synthesize the inst config from the vault.
-	tier2 := system.TierFromVault(vaultCfg)
-	vaultCfg2 := &tier2
-	if len(vaultCfg2.RetentionRules) == 0 {
+	if len(vaultCfg.RetentionRules) == 0 {
 		return nil
 	}
-	rules, err := resolveRetentionRulesFromVault(cfg, vaultCfg, vaultCfg2)
+	rules, err := resolveRetentionRulesFromVault(cfg, vaultCfg)
 	if err != nil {
 		o.logger.Warn("retention: failed to resolve rules",
 			"vault", vaultCfg.ID, "error", err)
@@ -499,7 +496,7 @@ func (o *Orchestrator) retentionTargetForInstance(cfg *system.Config, vaultCfg s
 	runner.isLeader = inst.IsLeader()
 	runner.followerTargets = inst.FollowerTargets
 	runner.vaultName = vaultCfg.Name
-	runner.vaultType = string(vaultCfg2.Type)
+	runner.vaultType = string(vaultCfg.Type)
 	runner.instPosition = tierPositionInVault(cfg, vaultCfg.ID, inst.VaultID)
 	runner.disposition = vaultCfg.ResolveRetentionDisposition()
 	return &sweepTarget{runner: runner, rules: rules}

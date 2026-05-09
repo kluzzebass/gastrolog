@@ -114,22 +114,20 @@ func findVaultConfig(vaults []system.VaultConfig, id glid.GLID) *system.VaultCon
 	return nil
 }
 
-// resolveRetentionRulesFromVault converts inst retention rules to resolved retentionRule objects.
-func resolveRetentionRulesFromVault(cfg *system.Config, _ system.VaultConfig, vaultCfg2 *system.TierConfig) ([]retentionRule, error) {
+// resolveRetentionRulesFromVault converts vault retention rules to resolved retentionRule objects.
+func resolveRetentionRulesFromVault(cfg *system.Config, vaultCfg system.VaultConfig) ([]retentionRule, error) {
 	// Phase 4 (gastrolog-42f9z): retention rules carry only the trigger
 	// policy. The action enum is gone — every fired event streams records
-	// through the routing engine and always destroys the chunk. Phase 2's
-	// 1:1 vault:tier collapse already eliminated the "next inst" concept,
-	// so position-based action derivation is also gone.
+	// through the routing engine and always destroys the chunk.
 	var rules []retentionRule
-	for _, b := range vaultCfg2.RetentionRules {
+	for _, b := range vaultCfg.RetentionRules {
 		retCfg := findRetentionPolicy(cfg.RetentionPolicies, b.RetentionPolicyID)
 		if retCfg == nil {
-			return nil, fmt.Errorf("vault %s references unknown retention policy: %s", vaultCfg2.ID, b.RetentionPolicyID)
+			return nil, fmt.Errorf("vault %s references unknown retention policy: %s", vaultCfg.ID, b.RetentionPolicyID)
 		}
 		policy, err := retCfg.ToRetentionPolicy()
 		if err != nil {
-			return nil, fmt.Errorf("invalid retention policy %s for vault %s: %w", b.RetentionPolicyID, vaultCfg2.ID, err)
+			return nil, fmt.Errorf("invalid retention policy %s for vault %s: %w", b.RetentionPolicyID, vaultCfg.ID, err)
 		}
 		if policy == nil {
 			continue
