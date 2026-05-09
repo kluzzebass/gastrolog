@@ -131,13 +131,15 @@ type Server struct {
 	// Set after the orchestrator is created, before forwarding starts.
 	recordAppender RecordAppender
 
-	// recordTierAppender writes forwarded records into a specific tier.
+	// recordAppenderForVault writes forwarded records into a specific tier.
 	// Used for inter-tier transition when tier_id is set on ForwardRecordsRequest.
-	recordTierAppender RecordTierAppender
+	recordAppenderForVault VaultRecordAppender
 
-	// sealTierExecutor seals a specific tier's active chunk on this node.
-	// Invoked by the ChunkReplication stream handler.
-	sealTierExecutor SealTierExecutor
+	// chunkSealExecutor seals a specific chunk on this node, used by the
+	// ChunkReplication stream handler when the leader propagates a seal
+	// command. Distinct from sealVaultExecutor which is the user-facing
+	// SealVault RPC handler with no expected-chunk gate.
+	chunkSealExecutor ChunkSealExecutor
 
 	// deleteChunkExecutor deletes a sealed chunk from a tier on this node.
 	// Invoked by the ChunkReplication stream handler.
@@ -147,9 +149,9 @@ type Server struct {
 	// Set after the orchestrator is created, before chunk transfer starts.
 	recordImporter RecordImporter
 
-	// tierRecordImporter imports records as a sealed chunk in a specific tier,
+	// vaultRecordImporter imports records as a sealed chunk in a specific tier,
 	// preserving the original chunk ID. Used for sealed-chunk replication.
-	tierRecordImporter TierRecordImporter
+	vaultRecordImporter VaultRecordImporter
 
 	// searchExecutor runs a search on a local vault for remote search requests.
 	// Set after the orchestrator is created, before search forwarding starts.

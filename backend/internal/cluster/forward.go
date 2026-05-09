@@ -23,9 +23,9 @@ import (
 // Used by the ForwardRecords handler to write received records.
 type RecordAppender func(ctx context.Context, vaultID glid.GLID, rec chunk.Record) error
 
-// RecordTierAppender appends a single record to a specific tier in a local vault.
+// VaultRecordAppender appends a single record to a specific tier in a local vault.
 // Used by the ForwardRecords handler when tier_id is set (inter-tier transition).
-type RecordTierAppender func(ctx context.Context, vaultID, tierID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error
+type VaultRecordAppender func(ctx context.Context, vaultID, tierID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error
 
 // SearchExecutor runs a search on a local vault and returns results.
 // For regular searches, it returns an iterator over records (the caller
@@ -79,9 +79,9 @@ type ExportToVaultExecutor func(ctx context.Context, expression string, targetVa
 // Used by the ForwardImportRecords handler for cross-node chunk migration.
 type RecordImporter func(ctx context.Context, vaultID glid.GLID, next chunk.RecordIterator) error
 
-// TierRecordImporter imports records as a sealed chunk in a specific tier,
+// VaultRecordImporter imports records as a sealed chunk in a specific tier,
 // preserving the original chunk ID. Used for sealed-chunk replication.
-type TierRecordImporter func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error
+type VaultRecordImporter func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error
 
 // ManagedFileReader opens a managed file for streaming to a peer.
 // Returns the original filename, a ReadCloser for the content, and the SHA256 hex hash.
@@ -119,9 +119,9 @@ func (s *Server) SetRecordAppender(fn RecordAppender) {
 	s.recordAppender = fn
 }
 
-// SetRecordTierAppender injects the callback for tier-targeted forwarding.
-func (s *Server) SetRecordTierAppender(fn RecordTierAppender) {
-	s.recordTierAppender = fn
+// SetVaultRecordAppender injects the callback for tier-targeted forwarding.
+func (s *Server) SetVaultRecordAppender(fn VaultRecordAppender) {
+	s.recordAppenderForVault = fn
 }
 
 // SetRecordImporter injects the callback for importing transferred records.
@@ -130,9 +130,9 @@ func (s *Server) SetRecordImporter(fn RecordImporter) {
 	s.recordImporter = fn
 }
 
-// SetTierRecordImporter injects the callback for tier-targeted sealed-chunk imports.
-func (s *Server) SetTierRecordImporter(fn TierRecordImporter) {
-	s.tierRecordImporter = fn
+// SetVaultRecordImporter injects the callback for tier-targeted sealed-chunk imports.
+func (s *Server) SetVaultRecordImporter(fn VaultRecordImporter) {
+	s.vaultRecordImporter = fn
 }
 
 // SetSearchExecutor injects the callback for handling remote search requests.
@@ -631,13 +631,13 @@ func (s *Server) forwardSealVault(ctx context.Context, req *gastrologv1.ForwardS
 	return &gastrologv1.ForwardSealVaultResponse{}, nil
 }
 
-// SealTierExecutor seals a specific tier's active chunk on this node.
+// ChunkSealExecutor seals a specific tier's active chunk on this node.
 // Invoked by the ChunkReplication stream handler.
-type SealTierExecutor func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error
+type ChunkSealExecutor func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error
 
-// SetSealTierExecutor injects the callback for handling ChunkReplicationSeal commands.
-func (s *Server) SetSealTierExecutor(fn SealTierExecutor) {
-	s.sealTierExecutor = fn
+// SetChunkSealExecutor injects the callback for handling ChunkReplicationSeal commands.
+func (s *Server) SetChunkSealExecutor(fn ChunkSealExecutor) {
+	s.chunkSealExecutor = fn
 }
 
 // DeleteChunkExecutor deletes a specific sealed chunk from a tier on this node.

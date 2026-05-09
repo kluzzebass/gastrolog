@@ -482,7 +482,7 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 		}
 		return err
 	})
-	clusterSrv.SetRecordTierAppender(func(ctx context.Context, vaultID, tierID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error {
+	clusterSrv.SetVaultRecordAppender(func(ctx context.Context, vaultID, tierID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error {
 		if err := waitForOrch(ctx); err != nil {
 			return err
 		}
@@ -508,7 +508,7 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 		}
 		return orch.ImportChunkRecords(ctx, vaultID, next)
 	})
-	clusterSrv.SetTierRecordImporter(func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
+	clusterSrv.SetVaultRecordImporter(func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
 		if err := waitForOrch(ctx); err != nil {
 			return err
 		}
@@ -523,7 +523,7 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	clusterSrv.SetGetChunkExecutor(newGetChunkExecutor(orch))
 	clusterSrv.SetAnalyzeChunkExecutor(newAnalyzeChunkExecutor(orch))
 	clusterSrv.SetSealVaultExecutor(newSealVaultExecutor(orch))
-	clusterSrv.SetSealTierExecutor(func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
+	clusterSrv.SetChunkSealExecutor(func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
 		return orch.SealActiveTier(vaultID, chunkID)
 	})
 	clusterSrv.SetDeleteChunkExecutor(func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
