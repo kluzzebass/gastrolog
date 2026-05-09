@@ -44,7 +44,7 @@ func (s *VaultServer) ListChunks(
 		if req.Msg.ActiveOnly && meta.Sealed {
 			continue // lightweight poll: skip sealed chunks
 		}
-		pb := TieredChunkMetaToProto(meta)
+		pb := VaultChunkMetaToProto(meta)
 		if pending[meta.ID] {
 			pb.RetentionPending = true
 		}
@@ -239,13 +239,13 @@ func (s *VaultServer) GetChunk(
 		return nil, errInvalidArg(err)
 	}
 
-	meta, err := s.orch.GetTieredChunkMeta(vaultID, chunkID)
+	meta, err := s.orch.GetVaultChunkMeta(vaultID, chunkID)
 	if err != nil {
 		return nil, mapVaultError(err)
 	}
 
 	return connect.NewResponse(&apiv1.GetChunkResponse{
-		Chunk: TieredChunkMetaToProto(meta),
+		Chunk: VaultChunkMetaToProto(meta),
 	}), nil
 }
 

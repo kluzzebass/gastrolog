@@ -170,8 +170,8 @@ func (o *Orchestrator) RestoreChunk(ctx context.Context, vaultID glid.GLID, chun
 
 // --- Chunk read ---
 
-// TieredChunkMeta pairs a chunk with the inst it belongs to.
-type TieredChunkMeta struct {
+// VaultChunkMeta pairs a chunk with the inst it belongs to.
+type VaultChunkMeta struct {
 	chunk.ChunkMeta
 	TierID   glid.GLID
 	VaultType string
@@ -202,7 +202,7 @@ func (o *Orchestrator) ListChunkMetas(vaultID glid.GLID) ([]chunk.ChunkMeta, err
 // readiness definition.
 //
 // Caller-side deduplication across nodes happens in the server's ListChunks.
-func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]TieredChunkMeta, error) {
+func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]VaultChunkMeta, error) {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
 	o.mu.RUnlock()
@@ -221,7 +221,7 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]TieredChunkMeta, 
 	if err != nil {
 		return nil, fmt.Errorf("list chunks for vault %s: %w", vaultID, err)
 	}
-	var result []TieredChunkMeta
+	var result []VaultChunkMeta
 	for _, m := range metas {
 		// Override CloudBacked / Archived from the vault-ctl Raft FSM
 		// (the cluster-wide source of truth). Without this, follower
@@ -230,7 +230,7 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]TieredChunkMeta, 
 		if inst.OverlayFromFSM != nil {
 			m = inst.OverlayFromFSM(m)
 		}
-		result = append(result, TieredChunkMeta{
+		result = append(result, VaultChunkMeta{
 			ChunkMeta: m,
 			TierID:    inst.VaultID,
 			VaultType:  inst.Type,
@@ -265,16 +265,16 @@ func (o *Orchestrator) GetChunkMeta(vaultID glid.GLID, chunkID chunk.ChunkID) (c
 	return chunk.ChunkMeta{}, chunk.ErrChunkNotFound
 }
 
-// GetTieredChunkMeta returns metadata for a specific chunk with inst info.
-func (o *Orchestrator) GetTieredChunkMeta(vaultID glid.GLID, chunkID chunk.ChunkID) (TieredChunkMeta, error) {
+// GetVaultChunkMeta returns metadata for a specific chunk with inst info.
+func (o *Orchestrator) GetVaultChunkMeta(vaultID glid.GLID, chunkID chunk.ChunkID) (VaultChunkMeta, error) {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
 	o.mu.RUnlock()
 	if vault == nil {
-		return TieredChunkMeta{}, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+		return VaultChunkMeta{}, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 	if err := vaultReplicationReadinessErr(vaultID, vault); err != nil {
-		return TieredChunkMeta{}, err
+		return VaultChunkMeta{}, err
 	}
 	if inst := vault.Instance; inst != nil {
 		m, err := inst.Chunks.Meta(chunkID)
@@ -282,14 +282,14 @@ func (o *Orchestrator) GetTieredChunkMeta(vaultID glid.GLID, chunkID chunk.Chunk
 			if inst.OverlayFromFSM != nil {
 				m = inst.OverlayFromFSM(m)
 			}
-			return TieredChunkMeta{
+			return VaultChunkMeta{
 				ChunkMeta: m,
 				TierID:    inst.VaultID,
 				VaultType:  inst.Type,
 			}, nil
 		}
 	}
-	return TieredChunkMeta{}, chunk.ErrChunkNotFound
+	return VaultChunkMeta{}, chunk.ErrChunkNotFound
 }
 
 // OpenCursor opens a record cursor for the given chunk on the inst that owns it.

@@ -322,7 +322,7 @@ func newListChunksExecutor(o *orchestrator.Orchestrator) cluster.ListChunksExecu
 		pending := o.RetentionPendingChunks(vaultID)
 		out := make([]*gastrologv1.ChunkMeta, 0, len(metas))
 		for _, m := range metas {
-			pb := server.TieredChunkMetaToProto(m)
+			pb := server.VaultChunkMetaToProto(m)
 			if pending[m.ID] {
 				pb.RetentionPending = true
 			}
