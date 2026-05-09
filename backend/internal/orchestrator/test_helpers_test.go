@@ -850,11 +850,11 @@ func (h *clusterHarness) sealAndReplicate(t *testing.T, leaderNode *clusterTestN
 	leaderNode.orch.Scheduler().WaitIdle(30 * time.Second)
 }
 
-// assertTierDirEmpty verifies that a inst's filesystem directory contains no
+// assertInstDirEmpty verifies that a inst's filesystem directory contains no
 // chunk subdirectories on ANY node. This goes below the chunk manager API —
 // it checks the actual filesystem to catch silent delete failures, leaked
 // directories, and stale files.
-func (h *clusterHarness) assertTierDirEmpty(t *testing.T, instIdx int) {
+func (h *clusterHarness) assertInstDirEmpty(t *testing.T, instIdx int) {
 	t.Helper()
 	// Poll briefly — async chunk deletion may lag under CPU contention.
 	deadline := time.Now().Add(60 * time.Second)

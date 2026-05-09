@@ -464,7 +464,7 @@ func TestClusterRetentionSweepDeletesOnAllNodes(t *testing.T) {
 	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 1, 100)
 
 	leaderNode := h.nodes["leader"]
-	leaderTier := leaderNode.instances[0]
+	leaderInst := leaderNode.instances[0]
 
 	// Ingest 1000 records → 10 sealed chunks.
 	const totalRecords = 1_000
@@ -479,24 +479,24 @@ func TestClusterRetentionSweepDeletesOnAllNodes(t *testing.T) {
 			t.Fatalf("append %d: %v", i, err)
 		}
 	}
-	if active := leaderTier.Chunks.Active(); active != nil && active.RecordCount > 0 {
-		_ = leaderTier.Chunks.Seal()
+	if active := leaderInst.Chunks.Active(); active != nil && active.RecordCount > 0 {
+		_ = leaderInst.Chunks.Seal()
 	}
 
-	metas, _ := leaderTier.Chunks.List()
+	metas, _ := leaderInst.Chunks.List()
 	t.Logf("leader: %d sealed chunks before retention", len(metas))
 	if len(metas) < 5 {
 		t.Fatalf("expected at least 5 sealed chunks, got %d", len(metas))
 	}
 
 	// PostSealProcess + replicate to all followers.
-	processor, ok := leaderTier.Chunks.(chunk.ChunkPostSealProcessor)
+	processor, ok := leaderInst.Chunks.(chunk.ChunkPostSealProcessor)
 	ctx := context.Background()
 	for _, m := range metas {
 		if ok {
 			_ = processor.PostSealProcess(ctx, m.ID)
 		}
-		leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, h.instIDs[0], m.ID, leaderTier.FollowerTargets)
+		leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, h.instIDs[0], m.ID, leaderInst.FollowerTargets)
 	}
 
 	// Verify followers have all records before sweep.
@@ -513,15 +513,15 @@ func TestClusterRetentionSweepDeletesOnAllNodes(t *testing.T) {
 		policy: chunk.NewCountRetentionPolicy(keepN),
 		
 	}}
-	runner := newClusterRetentionRunner(leaderNode.orch, h.vaultID, h.instIDs[0], leaderTier)
+	runner := newClusterRetentionRunner(leaderNode.orch, h.vaultID, h.instIDs[0], leaderInst)
 	runner.sweep(rules)
 
 	// ---- Verify: leader retained exactly keepN chunks ----
-	metasAfter, _ := leaderTier.Chunks.List()
+	metasAfter, _ := leaderInst.Chunks.List()
 	if len(metasAfter) != keepN {
 		t.Errorf("leader: expected %d retained chunks, got %d", keepN, len(metasAfter))
 	}
-	leaderRecords := cursorCountRecords(t, leaderTier.Chunks)
+	leaderRecords := cursorCountRecords(t, leaderInst.Chunks)
 	expectedRetained := int64(keepN) * 100 // 100 records per chunk
 	if leaderRecords != expectedRetained {
 		t.Errorf("leader: cursor read %d records, expected %d (keepN=%d × 100)", leaderRecords, expectedRetained, keepN)
@@ -557,7 +557,7 @@ func TestClusterRetentionSweepWithTTLOnAllNodes(t *testing.T) {
 	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 1, 50)
 
 	leaderNode := h.nodes["leader"]
-	leaderTier := leaderNode.instances[0]
+	leaderInst := leaderNode.instances[0]
 
 	// Ingest 500 records → 10 sealed chunks.
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
@@ -573,17 +573,17 @@ func TestClusterRetentionSweepWithTTLOnAllNodes(t *testing.T) {
 	}
 	h.sealAndReplicate(t, leaderNode, 0)
 
-	metas, _ := leaderTier.Chunks.List()
+	metas, _ := leaderInst.Chunks.List()
 	t.Logf("leader: %d sealed chunks", len(metas))
 
 	// Replicate to followers.
-	processor, ok := leaderTier.Chunks.(chunk.ChunkPostSealProcessor)
+	processor, ok := leaderInst.Chunks.(chunk.ChunkPostSealProcessor)
 	ctx := context.Background()
 	for _, m := range metas {
 		if ok {
 			_ = processor.PostSealProcess(ctx, m.ID)
 		}
-		leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, h.instIDs[0], m.ID, leaderTier.FollowerTargets)
+		leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, h.instIDs[0], m.ID, leaderInst.FollowerTargets)
 	}
 
 	// Run TTL sweep with clock set 5 minutes in the future — all chunks expired.
@@ -592,7 +592,7 @@ func TestClusterRetentionSweepWithTTLOnAllNodes(t *testing.T) {
 		policy: chunk.NewTTLRetentionPolicy(1 * time.Minute),
 		
 	}}
-	runner := newClusterRetentionRunner(leaderNode.orch, h.vaultID, h.instIDs[0], leaderTier)
+	runner := newClusterRetentionRunner(leaderNode.orch, h.vaultID, h.instIDs[0], leaderInst)
 	runner.now = func() time.Time { return frozenNow }
 	runner.sweep(rules)
 
@@ -605,7 +605,7 @@ func TestClusterRetentionSweepWithTTLOnAllNodes(t *testing.T) {
 	}
 
 	// ---- Verify: no chunk directories on disk on ANY node ----
-	h.assertTierDirEmpty(t, 0)
+	h.assertInstDirEmpty(t, 0)
 }
 
 // TestRetentionTargetRefreshesCmOnExistingRunner verifies that
@@ -648,14 +648,14 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 	defer orch.Stop()
 
 	// First call: creates a new runner with cm1/im1.
-	tier1 := &VaultInstance{
+	inst1 := &VaultInstance{
 		VaultID:  instID,
 		Chunks:  cm1,
 		Indexes: im1,
 	}
 	active := make(map[string]bool)
 	vaultCfg := cfg.Vaults[0]
-	target1 := orch.retentionTargetForInstance(cfg, vaultCfg, tier1, active)
+	target1 := orch.retentionTargetForInstance(cfg, vaultCfg, inst1, active)
 	if target1 == nil {
 		t.Fatal("expected non-nil sweep target")
 	}
@@ -667,13 +667,13 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 	}
 
 	// Second call with different chunk manager: runner is reused, cm/im refreshed.
-	tier2 := &VaultInstance{
+	inst2 := &VaultInstance{
 		VaultID:  instID,
 		Chunks:  cm2,
 		Indexes: im2,
 	}
 	active2 := make(map[string]bool)
-	target2 := orch.retentionTargetForInstance(cfg, vaultCfg, tier2, active2)
+	target2 := orch.retentionTargetForInstance(cfg, vaultCfg, inst2, active2)
 	if target2 == nil {
 		t.Fatal("expected non-nil sweep target on second call")
 	}

@@ -727,5 +727,5 @@ func TestClusterReplicationDeletePropagation(t *testing.T) {
 	}
 
 	// ---- Verify: no chunk directories on disk on ANY node ----
-	h.assertTierDirEmpty(t, 0)
+	h.assertInstDirEmpty(t, 0)
 }
