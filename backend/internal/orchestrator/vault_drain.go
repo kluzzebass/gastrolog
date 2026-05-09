@@ -23,7 +23,7 @@ const (
 // instDrainState tracks an in-progress inst drain.
 type instDrainState struct {
 	VaultID      glid.GLID
-	TierID       glid.GLID
+	InstanceID       glid.GLID
 	Mode         DrainMode
 	TargetNodeID string // only for rebalance mode
 	JobID        string
@@ -102,7 +102,7 @@ func (o *Orchestrator) DrainInstance(ctx context.Context, vaultID glid.GLID, mod
 	drainCtx, cancel := context.WithCancel(context.Background())
 	ds := &instDrainState{
 		VaultID:      vaultID,
-		TierID:       vaultID,
+		InstanceID:       vaultID,
 		Mode:         mode,
 		TargetNodeID: targetNodeID,
 		Cancel:       cancel,

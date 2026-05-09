@@ -403,7 +403,7 @@ type instTestReplicator struct {
 type instForwardCall struct {
 	NodeID  string
 	VaultID glid.GLID
-	TierID  glid.GLID
+	InstanceID  glid.GLID
 	ChunkID chunk.ChunkID
 	Records []chunk.Record
 }

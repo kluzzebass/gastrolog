@@ -173,7 +173,7 @@ func (o *Orchestrator) RestoreChunk(ctx context.Context, vaultID glid.GLID, chun
 // VaultChunkMeta pairs a chunk with the inst it belongs to.
 type VaultChunkMeta struct {
 	chunk.ChunkMeta
-	TierID   glid.GLID
+	InstanceID   glid.GLID
 	VaultType string
 }
 
@@ -232,7 +232,7 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]VaultChunkMeta, e
 		}
 		result = append(result, VaultChunkMeta{
 			ChunkMeta: m,
-			TierID:    inst.VaultID,
+			InstanceID:    inst.VaultID,
 			VaultType:  inst.Type,
 		})
 	}
@@ -284,7 +284,7 @@ func (o *Orchestrator) GetVaultChunkMeta(vaultID glid.GLID, chunkID chunk.ChunkI
 			}
 			return VaultChunkMeta{
 				ChunkMeta: m,
-				TierID:    inst.VaultID,
+				InstanceID:    inst.VaultID,
 				VaultType:  inst.Type,
 			}, nil
 		}
