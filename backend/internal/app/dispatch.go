@@ -151,15 +151,9 @@ func (d *configDispatcher) handleVaultPut(ctx context.Context, id glid.GLID) {
 		return
 	}
 
-	tiers, err := d.cfgStore.ListTiers(ctx)
-	if err != nil {
-		d.logger.Error("dispatch: list tiers for vault put", "id", id, "error", err)
-		return
-	}
-	tierIDs := system.VaultTierIDs(tiers, id)
-
-	// With tiered storage, vaults no longer have a NodeID. Every node
-	// instantiates all tiers it can serve.
+	// 1:1 vault:tier — the vault has exactly one tier whose ID equals
+	// the vault's ID. Every node instantiates the tier if it can serve it.
+	tierIDs := []glid.GLID{id}
 
 	// Cancel any in-progress drain.
 	if d.orch.IsDraining(id) {
