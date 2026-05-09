@@ -11,7 +11,7 @@ import (
 // resolveVaultNodeID finds the node that owns the vault. Returns empty
 // string if the vault has no placements (unassigned).
 //
-// Reads VaultConfig.Placements directly (mirrored from tier placements
+// Reads VaultConfig.Placements directly (mirrored from inst placements
 // via the FSM bridge — gastrolog-257l7).
 func resolveVaultNodeID(sys *system.System, vaultID glid.GLID) string {
 	cfg := &sys.Config
@@ -79,12 +79,12 @@ func (o *Orchestrator) reloadRoutesFromConfig(sys *system.System) error {
 			case o.draining[destID] != nil:
 				nodeID = o.draining[destID].TargetNodeID
 			case hotTierNode == "" || hotTierNode == o.localNodeID:
-				// Hot tier is local (or unassigned) — append locally if registered.
+				// Hot inst is local (or unassigned) — append locally if registered.
 				if _, ok := o.vaults[destID]; !ok {
 					continue // not registered locally
 				}
 			case o.forwarder != nil:
-				// Hot tier is on a remote node — forward.
+				// Hot inst is on a remote node — forward.
 				nodeID = hotTierNode
 			default:
 				continue // single-node mode, skip remote

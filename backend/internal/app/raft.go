@@ -78,7 +78,7 @@ func (s *raftSystemStore) WaitForLeader(ctx context.Context, logger *slog.Logger
 }
 
 // WaitForFSMCatchup blocks until the local config FSM reflects the cluster's
-// latest committed state. This is a prerequisite for reading tier placements
+// latest committed state. This is a prerequisite for reading inst placements
 // from the FSM at startup — without it, hraft.NewRaft leaves the FSM at the
 // snapshot level, and post-snapshot committed entries (e.g. placement
 // assignments) are not yet applied.

@@ -13,13 +13,13 @@ import (
 // level matrix in backend/internal/vaultraft. That one is fast and narrow
 // (only vault-ctl Raft); this one is slower but catches bugs at
 // orchestrator wiring boundaries — readiness gating on real
-// LocalVaultsReplicationReady, ApplyConfig correctness, file-tier
+// LocalVaultsReplicationReady, ApplyConfig correctness, file-inst
 // chunk manager emitting CmdCreateChunk/CmdSealChunk through vault-ctl
 // Raft to followers.
 //
 // The harness uses file-backed tiers (not memory) because only the
-// file-tier ChunkManager wires SetAnnouncer — the pathway that propagates
-// sealed-chunk metadata across the cluster. Memory-tier chunks stay
+// file-inst ChunkManager wires SetAnnouncer — the pathway that propagates
+// sealed-chunk metadata across the cluster. Memory-inst chunks stay
 // local to the leader and would make replication scenarios vacuous.
 //
 // Scenarios landed:
@@ -45,7 +45,7 @@ import (
 // we wire in buildTierRaftCallbacks now keys on that.
 //
 // Goes through the full orchestrator.LocalVaultsReplicationReady →
-// Vault.ReadinessErr → tier.IsFSMReady path used by search/ingest RPCs
+// Vault.ReadinessErr → inst.IsFSMReady path used by search/ingest RPCs
 // in production.
 func TestOrchRel_FreshCluster_VaultReady(t *testing.T) {
 	t.Parallel()
@@ -86,7 +86,7 @@ func TestOrchRel_SealedChunk_ReplicatesCrossNode(t *testing.T) {
 
 // Append + seal on the leader, stop every node, restart every node,
 // confirm the sealed chunk metadata is still visible from every node.
-// WAL replay at the orchestrator layer — the tier FSM manifest must
+// WAL replay at the orchestrator layer — the inst FSM manifest must
 // survive a full cluster crash.
 func TestOrchRel_Restart_SealedChunkSurvives(t *testing.T) {
 	t.Parallel()
@@ -123,7 +123,7 @@ func TestOrchRel_Restart_SealedChunkSurvives(t *testing.T) {
 	h.waitForAllReady()
 
 	// Post-restart: same chunk IDs should be visible via vault-ctl Raft
-	// replay and tier FSM restore.
+	// replay and inst FSM restore.
 	h.assertAllNodesSee(pre)
 }
 
@@ -143,7 +143,7 @@ func TestOrchRel_Restart_SealedChunkSurvives(t *testing.T) {
 //     (well before the leader's local ForwardingTimeout budget per record);
 //   - concurrent UnregisterVault on the leader is not blocked by the
 //     paused peer (the lock-release fix is held);
-//   - after unpausing, the paused peer catches up and all nodes' tier
+//   - after unpausing, the paused peer catches up and all nodes' inst
 //     sub-FSMs converge.
 func TestOrchRel_PausedPeer_ClusterStaysHealthy(t *testing.T) {
 	t.Parallel()
@@ -245,7 +245,7 @@ func TestOrchRel_FollowerWipe_CatchupRebuilds(t *testing.T) {
 	h.startNode(victim)
 
 	// Post-wipe: the node rejoins the cluster with empty state. Wait
-	// for tier FSMs to converge again; catchup replication rebuilds
+	// for inst FSMs to converge again; catchup replication rebuilds
 	// the manifest through snapshot install or log replay.
 	h.assertAllNodesSee(baseline)
 }
@@ -262,7 +262,7 @@ func TestOrchRel_TwoVaults_Isolated(t *testing.T) {
 	// (which gates the whole server, hence both vaults) and confirm
 	// append+seal still completes on the default vault.
 	//
-	// True multi-vault isolation would require per-vault tier placements
+	// True multi-vault isolation would require per-vault inst placements
 	// that differ. The harness seeds one vault by design; extending it
 	// to multi-vault is a larger structural change. For now this test
 	// asserts the weaker but still valuable property: pausing one peer
@@ -470,7 +470,7 @@ func TestOrchRel_SlowPeer_BackoffAbsorbs(t *testing.T) {
 
 // Stop the vault-ctl Raft leader mid-append: fire a burst of appends,
 // shortly after kill the Raft leader, verify that appends that RETURNED
-// success are still present on the surviving quorum's tier FSMs. hraft
+// success are still present on the surviving quorum's inst FSMs. hraft
 // guarantees this via majority commit before returning from Apply; we
 // just need to make sure our plumbing preserves it.
 func TestOrchRel_LeaderKilledMidAppend_NoLoss(t *testing.T) {
@@ -631,7 +631,7 @@ func TestOrchRel_MultiVault_IsolatedFromPausedPeer(t *testing.T) {
 	vaultA := h.vaults[0] // placed on {0,1,2,3}
 	vaultB := h.vaults[1] // placed on {0,1,3} — node2 excluded
 
-	// Pause node2. It's part of vault A's tier, not vault B's.
+	// Pause node2. It's part of vault A's inst, not vault B's.
 	victim := h.nodeIDs[2]
 	h.pausePeer(victim)
 	t.Cleanup(func() { h.unpausePeer(victim) })

@@ -19,9 +19,9 @@ import (
 
 // --- helpers ---
 
-// archivalTestSetup creates a single-node orchestrator with a cloud tier backed
+// archivalTestSetup creates a single-node orchestrator with a cloud inst backed
 // by the in-memory blobstore. Returns the orchestrator, cloud store, chunk manager,
-// vault/tier IDs, and config store.
+// vault/inst IDs, and config store.
 func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition) (
 	*Orchestrator, *blobstore.Memory, *chunkfile.Manager, glid.GLID, glid.GLID, *sysmem.Store,
 ) {
@@ -67,11 +67,11 @@ func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition
 	})
 	_ = orch.Scheduler().Stop()
 
-	tier := &VaultInstance{
+	inst := &VaultInstance{
 		VaultID: tierID, Type: "cloud",
 		Chunks: cm, Indexes: im, Query: query.New(cm, im, nil),
 	}
-	orch.RegisterVault(NewVault(vaultID, tier))
+	orch.RegisterVault(NewVault(vaultID, inst))
 
 	t.Cleanup(func() { _ = cm.Close() })
 
@@ -526,7 +526,7 @@ type cloudClusterHarness struct {
 	csID       glid.GLID
 }
 
-// setupCloudCluster creates a 4-node cluster where the single tier is cloud-backed
+// setupCloudCluster creates a 4-node cluster where the single inst is cloud-backed
 // using a shared in-memory blobstore. The leader has a file-backed chunk manager
 // with CloudStore set; followers have file-backed chunk managers without CloudStore
 // (matching production: followers don't upload to cloud).
@@ -550,7 +550,7 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 		})
 	}
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tierID, Name: "cloud-tier", Type: system.VaultTypeFile, CloudServiceID: &csID,
+		ID: tierID, Name: "cloud-inst", Type: system.VaultTypeFile, CloudServiceID: &csID,
 		VaultID: vaultID,
 	})
 	_ = store.SetVaultPlacements(context.Background(), tierID, placements)
@@ -601,21 +601,21 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 		}
 		im := indexfile.NewManager(dir, nil, nil)
 
-		tier := &VaultInstance{
+		inst := &VaultInstance{
 			VaultID: tierID, Type: "cloud",
 			Chunks: cm, Indexes: im, Query: query.New(cm, im, nil),
 		}
 		if isLeader {
-			tier.FollowerTargets = followerTargets
+			inst.FollowerTargets = followerTargets
 		} else {
-			tier.IsFollower = true
+			inst.IsFollower = true
 		}
 
-		orch.RegisterVault(NewVault(vaultID, tier))
+		orch.RegisterVault(NewVault(vaultID, inst))
 		nodes[nid] = &clusterTestNode{
 			nodeID:   nid,
 			orch:     orch,
-			tiers:    []*VaultInstance{tier},
+			tiers:    []*VaultInstance{inst},
 			tierDirs: []string{dir},
 		}
 	}
@@ -635,8 +635,8 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 			n.orch.Stop()
 		}
 		for _, n := range nodes {
-			for _, tier := range n.tiers {
-				_ = tier.Chunks.Close()
+			for _, inst := range n.tiers {
+				_ = inst.Chunks.Close()
 			}
 		}
 	})
@@ -1102,7 +1102,7 @@ func TestCloudClusterReconcileSweepDetectsMissingBlobs(t *testing.T) {
 
 // TestCloudClusterReconcileSkipsTombstoned verifies that reconcile ignores
 // chunks our own retention just deleted. Without this, every retention
-// sweep on a cloud tier produced a paired WARN per evicted chunk
+// sweep on a cloud inst produced a paired WARN per evicted chunk
 // (cache/download fallback + reconcile/mark-suspect) and corresponding UI
 // alerts — dozens per second. See gastrolog-2c96i.
 func TestCloudClusterReconcileSkipsTombstoned(t *testing.T) {
@@ -1135,7 +1135,7 @@ func TestCloudClusterReconcileSkipsTombstoned(t *testing.T) {
 	}
 
 	// Simulate what retention looks like from reconcile's point of view:
-	// the blobs are gone from cloud AND the tier FSM has tombstoned every
+	// the blobs are gone from cloud AND the inst FSM has tombstoned every
 	// chunk. The local cloud index still carries stale entries (that's
 	// the window reconcile historically noticed).
 	_ = h.cloudStore.List(context.Background(), "", func(info blobstore.BlobInfo) error {

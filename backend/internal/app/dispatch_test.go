@@ -91,7 +91,7 @@ type mockOrch struct {
 	reloadFiltersCalls int         // number of ReloadFilters calls
 
 	// Tier drain tracking.
-	tierDrainCalls    []glid.GLID                                                // tier IDs passed to DrainTier
+	tierDrainCalls    []glid.GLID                                                // inst IDs passed to DrainTier
 	removeTierCalls   [][2]glid.GLID                                             // [vaultID, tierID] pairs passed to RemoveVaultInstance
 	localTierExported func(vaultID, tierID glid.GLID) *orchestrator.VaultInstance // configurable return
 }
@@ -289,7 +289,7 @@ func TestHandle_VaultPut(t *testing.T) {
 	// remote_node_reloads_filters and cloud_vault_reassignment_skips_drain
 	// were removed: they tested the concept of NodeID-based remote vault
 	// assignment which no longer exists. Remote vault routing will be
-	// reintroduced via tier leader election in a future issue.
+	// reintroduced via inst leader election in a future issue.
 
 	t.Run("unscoped_node_not_skipped", func(t *testing.T) {
 		h := &captureHandler{}
@@ -920,9 +920,9 @@ func (m *mockOrch) FindLocalVaultInstance(vaultID glid.GLID) *orchestrator.Vault
 	return nil
 }
 
-// TestHandleTierDeleted_DrainOnlyOnLeader verifies that when a tier is deleted
-// with drain=true, only the config leader for that tier initiates a drain.
-// Follower nodes should immediately remove their local tier instance.
+// TestHandleTierDeleted_DrainOnlyOnLeader verifies that when a inst is deleted
+// with drain=true, only the config leader for that inst initiates a drain.
+// Follower nodes should immediately remove their local inst instance.
 func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 	vaultID := glid.New()
 	tierID := glid.New()
@@ -948,7 +948,7 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 			t.Fatalf("expected 1 DrainTier call, got %d", len(mo.tierDrainCalls))
 		}
 		if mo.tierDrainCalls[0] != tierID {
-			t.Fatalf("DrainTier called with wrong tier: %s", mo.tierDrainCalls[0])
+			t.Fatalf("DrainTier called with wrong inst: %s", mo.tierDrainCalls[0])
 		}
 		if len(mo.removeTierCalls) != 0 {
 			t.Fatalf("leader should not call RemoveVaultInstance, got %d calls", len(mo.removeTierCalls))
@@ -986,7 +986,7 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 		mo := &mockOrch{
 			vaults: []glid.GLID{vaultID},
 			localTierExported: func(_, _ glid.GLID) *orchestrator.VaultInstance {
-				return nil // this node doesn't host the tier
+				return nil // this node doesn't host the inst
 			},
 		}
 		d := newTestDispatcher(mo, &stubCfgStore{
@@ -996,10 +996,10 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyTierDeleted, ID: tierID, Drain: true})
 
 		if len(mo.tierDrainCalls) != 0 {
-			t.Fatalf("node without tier should not drain, got %d calls", len(mo.tierDrainCalls))
+			t.Fatalf("node without inst should not drain, got %d calls", len(mo.tierDrainCalls))
 		}
 		if len(mo.removeTierCalls) != 0 {
-			t.Fatalf("node without tier should not remove, got %d calls", len(mo.removeTierCalls))
+			t.Fatalf("node without inst should not remove, got %d calls", len(mo.removeTierCalls))
 		}
 	})
 

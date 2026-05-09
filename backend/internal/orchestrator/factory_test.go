@@ -125,7 +125,7 @@ func (f *fakeIndexManager) BuildAdapter() chunk.ChunkIndexBuilder { return nil }
 
 // testVaultCfg creates a VaultConfig + TierConfig pair for tests.
 // vaultType is the storage shape (e.g., system.VaultTypeMemory or "test").
-// 1:1 vault:tier — the returned tier shares the vault's ID.
+// 1:1 vault:inst — the returned inst shares the vault's ID.
 func testVaultCfg(vaultID glid.GLID, vaultType system.VaultType) (system.VaultConfig, system.TierConfig) {
 	v := system.VaultConfig{
 		ID:      vaultID,
@@ -157,7 +157,7 @@ func TestApplyConfigNil(t *testing.T) {
 // silently skip registering any vault whose buildTierInstances returned
 // zero local tiers — which happens on a node that isn't a placement
 // target for any of the vault's tiers (e.g. a node that joined
-// the cluster as a non-tier-member, or a snapshot-restored node where
+// the cluster as a non-inst-member, or a snapshot-restored node where
 // placements are reapplied via post-snapshot log replay rather than the
 // initial ApplyConfig). The vault then never made it into the
 // orchestrator, and any subsequent NotifyTierPut firing handleTierPut
@@ -167,7 +167,7 @@ func TestApplyConfigNil(t *testing.T) {
 // correctly; initVault must do the same. This test asserts the parity.
 func TestApplyConfigVaultWithNoLocalTiers(t *testing.T) {
 	t.Parallel()
-	// Local node is "node-1". Build a vault whose only tier is placed
+	// Local node is "node-1". Build a vault whose only inst is placed
 	// exclusively on "node-2" — buildTierInstances should return zero
 	// local tiers, but the vault must still be registered so a later
 	// AddVaultInstance call can succeed.
@@ -373,7 +373,7 @@ func TestApplyConfigDuplicateVaultID(t *testing.T) {
 
 	dupID := glid.New()
 	vc1, tc1 := testVaultCfg(dupID, system.VaultTypeMemory)
-	vc2 := vc1 // duplicate ID, same tier
+	vc2 := vc1 // duplicate ID, same inst
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{vc1, vc2},
 		Tiers:  []system.TierConfig{tc1},
@@ -555,7 +555,7 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 		},
 	}
 
-	// 1:1 vault:tier — IDs match.
+	// 1:1 vault:inst — IDs match.
 	vaultID := glid.New()
 	tierID := vaultID
 	storageID := glid.New()
@@ -584,7 +584,7 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify dir param: <storage-path>/vaults/<vault-id>/<tier-id>
+	// Verify dir param: <storage-path>/vaults/<vault-id>/<inst-id>
 	expectedDir := "/data/chunks/vaults/" + vaultID.String() + "/" + tierID.String()
 	if cmReceivedParams["dir"] != expectedDir {
 		t.Errorf("chunk manager: expected dir=%s, got %s", expectedDir, cmReceivedParams["dir"])
@@ -631,7 +631,7 @@ func TestApplyConfigIndexManagerReceivesChunkManager(t *testing.T) {
 	}
 }
 
-// --- gastrolog-292yi: all nodes in all tier Raft groups ---
+// --- gastrolog-292yi: all nodes in all inst Raft groups ---
 
 // TestBuildTierRaftMembers_AllClusterNodes verifies that buildTierRaftMembers
 // returns every cluster node as a Raft member, regardless of storage placement.

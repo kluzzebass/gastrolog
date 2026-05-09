@@ -9,8 +9,8 @@ import (
 )
 
 // TestRemoveTierFromVaultPreservesData verifies that RemoveVaultInstance is
-// non-destructive: it unregisters the tier instance but leaves chunks and
-// the tier directory intact, so placement flaps don't wipe data.
+// non-destructive: it unregisters the inst instance but leaves chunks and
+// the inst directory intact, so placement flaps don't wipe data.
 // See gastrolog-4vz40.
 func TestRemoveTierFromVaultPreservesData(t *testing.T) {
 	t.Parallel()
@@ -19,20 +19,20 @@ func TestRemoveTierFromVaultPreservesData(t *testing.T) {
 	tierID := glid.New()
 	vaultID := glid.New()
 
-	tier, dir := newFileTierInstance(t, tierID)
-	if _, _, err := tier.Chunks.Append(testRecord("data")); err != nil {
+	inst, dir := newFileTierInstance(t, tierID)
+	if _, _, err := inst.Chunks.Append(testRecord("data")); err != nil {
 		t.Fatal(err)
 	}
-	if err := tier.Chunks.Seal(); err != nil {
+	if err := inst.Chunks.Seal(); err != nil {
 		t.Fatal(err)
 	}
 
-	vault := NewVault(vaultID, tier)
+	vault := NewVault(vaultID, inst)
 	vault.Name = "remove-preserves"
 	orch.RegisterVault(vault)
 
 	if _, err := os.Stat(dir); err != nil {
-		t.Fatalf("tier directory should exist before removal: %v", err)
+		t.Fatalf("inst directory should exist before removal: %v", err)
 	}
 
 	if !orch.RemoveVaultInstance(vaultID) {
@@ -40,14 +40,14 @@ func TestRemoveTierFromVaultPreservesData(t *testing.T) {
 	}
 
 	if _, err := os.Stat(dir); err != nil {
-		t.Errorf("tier directory must survive non-destructive removal, got: %v", err)
+		t.Errorf("inst directory must survive non-destructive removal, got: %v", err)
 	}
 }
 
 // TestDeleteTierFromVaultCleansTierDirectory verifies that DeleteVaultInstance
-// removes the tier's data directory entirely — not just the chunk subdirs.
-// Regression test for gastrolog-42j4n: orphaned tier directories accumulate
-// on disk after tier deletion.
+// removes the inst's data directory entirely — not just the chunk subdirs.
+// Regression test for gastrolog-42j4n: orphaned inst directories accumulate
+// on disk after inst deletion.
 func TestDeleteTierFromVaultCleansTierDirectory(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
@@ -55,20 +55,20 @@ func TestDeleteTierFromVaultCleansTierDirectory(t *testing.T) {
 	tierID := glid.New()
 	vaultID := glid.New()
 
-	tier, dir := newFileTierInstance(t, tierID)
-	if _, _, err := tier.Chunks.Append(testRecord("data")); err != nil {
+	inst, dir := newFileTierInstance(t, tierID)
+	if _, _, err := inst.Chunks.Append(testRecord("data")); err != nil {
 		t.Fatal(err)
 	}
-	if err := tier.Chunks.Seal(); err != nil {
+	if err := inst.Chunks.Seal(); err != nil {
 		t.Fatal(err)
 	}
 
-	vault := NewVault(vaultID, tier)
+	vault := NewVault(vaultID, inst)
 	vault.Name = "delete-test"
 	orch.RegisterVault(vault)
 
 	if _, err := os.Stat(dir); err != nil {
-		t.Fatalf("tier directory should exist before deletion: %v", err)
+		t.Fatalf("inst directory should exist before deletion: %v", err)
 	}
 
 	if !orch.DeleteVaultInstance(vaultID) {
@@ -76,12 +76,12 @@ func TestDeleteTierFromVaultCleansTierDirectory(t *testing.T) {
 	}
 
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Errorf("tier directory should be removed after DeleteVaultInstance, got: %v", err)
+		t.Errorf("inst directory should be removed after DeleteVaultInstance, got: %v", err)
 	}
 }
 
 // TestDeleteTierFromVaultCleansEmptyTierDirectory verifies that even an
-// empty tier (no chunks appended) has its directory removed on deletion.
+// empty inst (no chunks appended) has its directory removed on deletion.
 func TestDeleteTierFromVaultCleansEmptyTierDirectory(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
@@ -89,9 +89,9 @@ func TestDeleteTierFromVaultCleansEmptyTierDirectory(t *testing.T) {
 	tierID := glid.New()
 	vaultID := glid.New()
 
-	tier, dir := newFileTierInstance(t, tierID)
+	inst, dir := newFileTierInstance(t, tierID)
 
-	vault := NewVault(vaultID, tier)
+	vault := NewVault(vaultID, inst)
 	vault.Name = "empty-delete-test"
 	orch.RegisterVault(vault)
 
@@ -100,7 +100,7 @@ func TestDeleteTierFromVaultCleansEmptyTierDirectory(t *testing.T) {
 	}
 
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Errorf("empty tier directory should be removed, got: %v", err)
+		t.Errorf("empty inst directory should be removed, got: %v", err)
 	}
 }
 

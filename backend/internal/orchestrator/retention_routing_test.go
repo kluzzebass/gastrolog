@@ -203,7 +203,7 @@ func TestFireRetentionEventStreamsThroughRoutingEngine(t *testing.T) {
 	// path that fireRetentionEvent exercises.
 	r := &retentionRunner{
 		vaultID: sourceID,
-		tierID:  sourceID, // 1:1 vault:tier
+		tierID:  sourceID, // 1:1 vault:inst
 		orch:    orch,
 		logger:  slog.Default(),
 	}
@@ -431,7 +431,7 @@ func TestRetentionDispositionEmptyTreatedAsDelete(t *testing.T) {
 func TestRetentionTargetThreadsDispositionFromVaultConfig(t *testing.T) {
 	t.Parallel()
 
-	// 1:1 vault:tier — IDs match.
+	// 1:1 vault:inst — IDs match.
 	vaultID := glid.New()
 	tierID := vaultID
 	policyID := glid.New()
@@ -471,13 +471,13 @@ func TestRetentionTargetThreadsDispositionFromVaultConfig(t *testing.T) {
 			}
 			defer orch.Stop()
 
-			tier := &VaultInstance{
+			inst := &VaultInstance{
 				VaultID:  tierID,
 				Chunks:  &retentionFakeChunkManager{},
 				Indexes: &retentionFakeIndexManager{},
 			}
 			active := make(map[string]bool)
-			target := orch.retentionTargetForTier(cfg, cfg.Vaults[0], tier, active)
+			target := orch.retentionTargetForTier(cfg, cfg.Vaults[0], inst, active)
 			if target == nil {
 				t.Fatal("expected non-nil sweep target")
 			}

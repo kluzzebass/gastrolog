@@ -91,7 +91,7 @@ func TestTierLeaderManager_StartStopIdempotent(t *testing.T) {
 	mgr.Start(tierID, g)
 	mgr.Stop(tierID)
 
-	// Stopping a tier with no loop should be safe.
+	// Stopping a inst with no loop should be safe.
 	mgr.Stop(tierID)
 }
 
@@ -192,7 +192,7 @@ func TestTierLeaderManager_ReconcileRemovesExtras(t *testing.T) {
 	t.Fatal("doomed peer was not removed from Raft configuration within 5s")
 }
 
-// makeTwoNodeTierGroup builds a 2-node tier Raft cluster using in-memory
+// makeTwoNodeTierGroup builds a 2-node inst Raft cluster using in-memory
 // transport. Returns the groups (group[0] is the leader after election)
 // and a cleanup func.
 func makeTwoNodeTierGroup(t *testing.T, id1, id2 string) ([]*raftgroup.Group, func()) {
@@ -317,7 +317,7 @@ func TestTierMembershipMap_RoundTrip(t *testing.T) {
 
 	// Initial Get returns nil.
 	if got := m.Get(tierID); got != nil {
-		t.Errorf("expected nil for unknown tier, got %v", got)
+		t.Errorf("expected nil for unknown inst, got %v", got)
 	}
 
 	// Set + Get round-trip.

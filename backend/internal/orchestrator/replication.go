@@ -14,8 +14,8 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// SealActiveTier seals the active chunk for a specific tier, on a **follower**
-// node, as the local effect of a tier-leader-originated SealVault replication
+// SealActiveTier seals the active chunk for a specific inst, on a **follower**
+// node, as the local effect of a inst-leader-originated SealVault replication
 // command. Use SealActive on the leader-triggered path.
 //
 // Role: follower-side. Caller is typically the ChunkReplicator handler that
@@ -31,11 +31,11 @@ import (
 // different invariants. SealActive (leader) fans out replication; this
 // function is the target of that fan-out on followers.
 func (o *Orchestrator) SealActiveTier(vaultID glid.GLID, expectedChunkID chunk.ChunkID) error {
-	tier := o.findLocalVaultInstance(vaultID)
-	if tier == nil {
+	inst := o.findLocalVaultInstance(vaultID)
+	if inst == nil {
 		return fmt.Errorf("%w: vault %s", ErrTierNotLocal, vaultID)
 	}
-	active := tier.Chunks.Active()
+	active := inst.Chunks.Active()
 	if active == nil {
 		return nil // nothing to seal
 	}
@@ -46,10 +46,10 @@ func (o *Orchestrator) SealActiveTier(vaultID glid.GLID, expectedChunkID chunk.C
 		return nil
 	}
 	chunkID := active.ID
-	if err := tier.Chunks.Seal(); err != nil {
+	if err := inst.Chunks.Seal(); err != nil {
 		return err
 	}
-	o.postSealWork(vaultID, tier.Chunks, chunkID)
+	o.postSealWork(vaultID, inst.Chunks, chunkID)
 	return nil
 }
 
@@ -57,7 +57,7 @@ func (o *Orchestrator) SealActiveTier(vaultID glid.GLID, expectedChunkID chunk.C
 // cross-node forwarding for ack-gated records, then sends the ack.
 // Runs in a goroutine — doesn't block the writeLoop.
 //
-// All tier follower AppendRecords and all cross-node ForwardSync calls run
+// All inst follower AppendRecords and all cross-node ForwardSync calls run
 // concurrently under one deadline (cluster.ReplicationTimeout). The first
 // error wins and is sent to the ack channel; errgroup cancels the shared
 // context so other RPCs stop promptly.
@@ -127,36 +127,36 @@ func (o *Orchestrator) scheduleReplication(vaultID, tierID glid.GLID, chunkID ch
 // same node are distinct (different file storages for same-node replication).
 //
 // Cloud-backed chunks are skipped: the data is in shared S3, so followers don't
-// need record streaming. The tier FSM's OnUpload callback registers the
+// need record streaming. The inst FSM's OnUpload callback registers the
 // chunk in each follower's cloud index (see wireTierFSMOnUpload).
 func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, targets []system.ReplicationTarget) {
 	if o.transferrer == nil || len(targets) == 0 {
 		return
 	}
 
-	tier := o.findLocalVaultInstance(vaultID)
-	if tier == nil {
-		o.logger.Warn("replication: tier not found for sealed chunk",
+	inst := o.findLocalVaultInstance(vaultID)
+	if inst == nil {
+		o.logger.Warn("replication: inst not found for sealed chunk",
 			"vault", vaultID, "chunk", chunkID.String())
 		return
 	}
 
 	// If retention deleted the chunk while this replication job was queued,
-	// the tier FSM now holds a tombstone for it. Skip the replication —
+	// the inst FSM now holds a tombstone for it. Skip the replication —
 	// sending ImportSealedChunk to followers would recreate a chunk the
 	// cluster has already decided to forget (ghost chunk). Closes the
 	// retention-beats-replication ordering at the leader; the receiver-side
 	// tombstone check closes the reverse ordering. See gastrolog-11rzz.
-	if tier.IsTombstoned != nil && tier.IsTombstoned(chunkID) {
+	if inst.IsTombstoned != nil && inst.IsTombstoned(chunkID) {
 		o.logger.Debug("replication: skipping tombstoned chunk (retention beat replication)",
 			"vault", vaultID, "chunk", chunkID.String())
 		return
 	}
 
 	// Cloud-backed chunks live in shared object storage (S3/GCS/Azure).
-	// Followers learn about them via the tier FSM's OnUpload callback
+	// Followers learn about them via the inst FSM's OnUpload callback
 	// and read directly from the bucket — no record streaming needed.
-	meta, err := tier.Chunks.Meta(chunkID)
+	meta, err := inst.Chunks.Meta(chunkID)
 	if err == nil && meta.CloudBacked {
 		o.logger.Debug("replication: skipping cloud-backed chunk (shared bucket)",
 			"vault", vaultID, "chunk", chunkID.String())
@@ -172,7 +172,7 @@ func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID
 		failedNodes []string
 	)
 	for _, tgt := range targets {
-		if err := o.replicateToTarget(ctx, vaultID, tierID, chunkID, tier.Chunks, tgt); err != nil {
+		if err := o.replicateToTarget(ctx, vaultID, tierID, chunkID, inst.Chunks, tgt); err != nil {
 			failedNodes = append(failedNodes, tgt.NodeID)
 		} else {
 			succeeded++
@@ -184,7 +184,7 @@ func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID
 	totalReplicas := 1 + succeeded
 	expectedReplicas := 1 + len(targets)
 	if len(failedNodes) > 0 {
-		// Placement churn means the peer evicted its tier instance —
+		// Placement churn means the peer evicted its inst instance —
 		// expected during reconfiguration, not a degraded-replication signal.
 		// We don't know per-target whether failure was churn-shaped here, so
 		// log at WARN with actual counts; the per-target log inside
@@ -217,7 +217,7 @@ func (o *Orchestrator) replicateToTarget(ctx context.Context, vaultID, tierID gl
 		return nil
 	}
 	if err := o.replicateToFollower(ctx, vaultID, tierID, chunkID, sourceCM, tgt.NodeID); err != nil {
-		// Placement churn (peer evicted the tier instance) is expected
+		// Placement churn (peer evicted the inst instance) is expected
 		// during reconfiguration and gets logged at Debug rather than
 		// WARN-spamming the operator dashboard. See gastrolog-5z607.
 		level := slog.LevelWarn
@@ -236,7 +236,7 @@ func (o *Orchestrator) replicateToTarget(ctx context.Context, vaultID, tierID gl
 }
 
 // replicateLocally copies a sealed chunk to a different storage-specific
-// tier instance on the same node. Opens a cursor on the source, then
+// inst instance on the same node. Opens a cursor on the source, then
 // imports into the target via ImportToTierStorage.
 func (o *Orchestrator) replicateLocally(ctx context.Context, vaultID, tierID glid.GLID, storageID string, chunkID chunk.ChunkID, sourceCM chunk.ChunkManager) error {
 	cursor, err := sourceCM.OpenCursor(chunkID)
@@ -254,7 +254,7 @@ func (o *Orchestrator) replicateLocally(ctx context.Context, vaultID, tierID gli
 // corrupted chunks fail fast without touching the wire.
 func (o *Orchestrator) replicateToFollower(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, cm chunk.ChunkManager, nodeID string) error {
 	if o.chunkReplicator == nil {
-		return errors.New("replicateToFollower: tier replicator not configured")
+		return errors.New("replicateToFollower: inst replicator not configured")
 	}
 	// Pre-flight: open and read the first record to confirm the chunk is intact.
 	// Corrupted compressed data fails here instantly — no network round-trip.
@@ -295,8 +295,8 @@ func (o *Orchestrator) replicateToFollower(ctx context.Context, vaultID, tierID 
 	// tombstone is on its own FSM. This leader-side recheck short-
 	// circuits the RPC entirely when the leader already knows the chunk
 	// is gone. See gastrolog-11rzz.
-	tier := o.findLocalVaultInstance(vaultID)
-	if tier != nil && tier.IsTombstoned != nil && tier.IsTombstoned(chunkID) {
+	inst := o.findLocalVaultInstance(vaultID)
+	if inst != nil && inst.IsTombstoned != nil && inst.IsTombstoned(chunkID) {
 		o.logger.Debug("replication: chunk tombstoned after cursor read, aborting send",
 			"vault", vaultID, "chunk", chunkID.String(), "node", nodeID)
 		return nil

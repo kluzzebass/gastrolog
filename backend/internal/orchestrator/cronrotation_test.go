@@ -208,10 +208,10 @@ func TestRemoveAllForVault(t *testing.T) {
 	m.removeAllForVault(vaultA)
 
 	if m.scheduler.HasJob(cronJobName(vaultA, tierA)) {
-		t.Error("tier-a job should be removed")
+		t.Error("inst-a job should be removed")
 	}
 	if m.scheduler.HasJob(cronJobName(vaultA, tierB)) {
-		t.Error("tier-b job should be removed")
+		t.Error("inst-b job should be removed")
 	}
 	if len(m.schedules) != 0 {
 		t.Errorf("expected empty schedules map, got %d entries", len(m.schedules))

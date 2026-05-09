@@ -212,7 +212,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// Shared shutdown phase. Constructed once per process and threaded into
 	// every subsystem that needs to short-circuit work during drain — the
 	// orchestrator's replication fanout, the cluster server's stream
-	// handlers, the tier announcer, etc. See gastrolog-1e5ke.
+	// handlers, the inst announcer, etc. See gastrolog-1e5ke.
 	shutdownPhase := lifecycle.New()
 
 	orch, err := orchestrator.New(orchestrator.Config{
@@ -304,7 +304,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 	wireClusterRaftApplies(clusterSrv, groupMgr)
 
-	// Tier Raft group membership is reconciled by per-tier leader loops
+	// Tier Raft group membership is reconciled by per-inst leader loops
 	// (raftgroup.LeaderLoop) wired by reconfig_vaults.go. On snapshot
 	// restore the loops fire as soon as elections complete and reconcile
 	// from inside the leader epoch.
@@ -321,7 +321,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 	broadcaster, peerState, peerJobState, localStatsFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, recordForwarder, alertCollector, nodeID, cfg.ServerAddr, cfg.PprofAddr, statsSignal)
 
-	// Start tier placement manager (cluster mode only).
+	// Start inst placement manager (cluster mode only).
 	var placementReconcileFn func(ctx context.Context)
 	if clusterSrv != nil && peerState != nil {
 		pm := &placementManager{
@@ -480,8 +480,8 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	chunkTransferrer := cluster.NewChunkTransferrer(peerConns)
 	orch.SetRemoteTransferrer(chunkTransferrer)
 
-	// Tier replication: unified ordered stream per tier per follower.
-	chunkReplicator := cluster.NewChunkReplicator(peerConns, logger.With("component", "tier-replicator"))
+	// Tier replication: unified ordered stream per inst per follower.
+	chunkReplicator := cluster.NewChunkReplicator(peerConns, logger.With("component", "inst-replicator"))
 	orch.SetChunkReplicator(chunkReplicator)
 
 	// Same readiness gate for bulk chunk imports.
@@ -672,7 +672,7 @@ func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cf
 		// Wait for a leader AND for the local FSM to catch up to the cluster's
 		// latest committed state before reading anything from it. hraft's
 		// NewRaft returns with the FSM at the snapshot level; post-snapshot
-		// committed entries (tier placements, NSCs, etc.) only become visible
+		// committed entries (inst placements, NSCs, etc.) only become visible
 		// after either a Barrier on the leader or a few AppendEntries rounds
 		// on a follower. Without this wait, the orchestrator reads stale
 		// state and creates vault-ctl Raft groups with incomplete member lists.
@@ -991,7 +991,7 @@ type serverDeps struct {
 	SetNodeSuffrageFunc func(ctx context.Context, nodeID string, voter bool) error
 	Dispatcher          *configDispatcher
 	GroupMgr            *raftgroup.GroupManager
-	WAL                 *raftwal.WAL // tier-group WAL (same file as system raft when cluster mode); nil = per-group boltdb
+	WAL                 *raftwal.WAL // inst-group WAL (same file as system raft when cluster mode); nil = per-group boltdb
 	ConfigStore         io.Closer    // rawStore — closed before gRPC for clean Raft shutdown
 	PlacementReconcile  func(ctx context.Context)
 

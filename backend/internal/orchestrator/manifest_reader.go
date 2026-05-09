@@ -13,13 +13,13 @@ import (
 )
 
 // ManifestReader returns a manifest.Reader backed by this orchestrator's
-// vaults. Walks the per-tier sub-FSMs to project a global view of sealed
+// vaults. Walks the per-inst sub-FSMs to project a global view of sealed
 // chunk manifests; honors the active-chunk exception by filtering on
 // Sealed=true.
 //
 // Memory-mode tiers (no FSM, no replication) are projected from the local
 // chunk manager's List() so callers see a uniform view regardless of how
-// the tier is backed.
+// the inst is backed.
 func (o *Orchestrator) ManifestReader() manifest.Reader {
 	return &orchestratorManifestReader{o: o}
 }
@@ -33,7 +33,7 @@ func (o *Orchestrator) IntegrityVerifier() chunk.IntegrityVerifier {
 }
 
 // orchestratorManifestReader implements manifest.Reader by walking the
-// orchestrator's vaults and their tiers. Sealed entries from the tier FSM
+// orchestrator's vaults and their tiers. Sealed entries from the inst FSM
 // are returned verbatim; memory-mode tiers project from chunk.ChunkManager
 // because those tiers are their own source of truth (no replication).
 type orchestratorManifestReader struct {
@@ -92,7 +92,7 @@ func (r *orchestratorManifestReader) EntriesForVault(key glid.GLID) []tierfsm.Ma
 // active) for the given vault, read directly from the replicated vault-ctl
 // Raft FSM rather than from local TierInstances. Every node participates as
 // a voter in every vault-ctl Raft group (gastrolog-292yi), so the FSM is
-// authoritative cluster-wide and visible on nodes that don't host any tier
+// authoritative cluster-wide and visible on nodes that don't host any inst
 // instance for the vault — the case where ManifestReader().EntriesForVault
 // returns nil because o.vaults has no entry. Returns nil when there is no
 // GroupManager (single-node / memory mode) or when this node hasn't joined
@@ -179,8 +179,8 @@ func (o *Orchestrator) IndexReader() manifest.IndexReader {
 }
 
 // orchestratorIndexReader implements manifest.IndexReader by walking the
-// orchestrator's local tier instances to find the chunk's owning tier,
-// then dispatching to that tier's chunk manager (and index manager) for
+// orchestrator's local inst instances to find the chunk's owning inst,
+// then dispatching to that inst's chunk manager (and index manager) for
 // the actual rank/pos lookup. Same fallback logic as the legacy
 // findIngestRank/findIngestPos helpers in internal/query/histogram.go,
 // just behind the manifest.IndexReader interface.

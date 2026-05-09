@@ -9,16 +9,16 @@ import (
 	"gastrolog/internal/alert"
 )
 
-// RateAlerter tracks per-tier event rates over a sliding window and raises
+// RateAlerter tracks per-inst event rates over a sliding window and raises
 // or clears alerts when sustained rates exceed configured thresholds. It is
 // the mechanism behind gastrolog-47qyw: detecting and surfacing pathological
 // rotation or retention configurations as operator-visible signals rather
 // than silent throughput collapse.
 //
-// The alerter owns one RateWindow per tier and looks up tier names through
+// The alerter owns one RateWindow per inst and looks up inst names through
 // an injected callback (so it doesn't need to know about the orchestrator's
 // vault registry directly). Alert IDs are stable strings of the form
-// "<kind>-rate:<tierID>", so each tier has an independent Set/Clear pair.
+// "<kind>-rate:<tierID>", so each inst has an independent Set/Clear pair.
 //
 // Hysteresis: warningAt and errorAt are escalation thresholds. The alert
 // only clears when the observed rate drops back to below warningAt — there
@@ -29,7 +29,7 @@ import (
 type RateAlerter struct {
 	mu      sync.Mutex
 	windows map[glid.GLID]*RateWindow
-	// active tracks the last severity we raised for each tier so Evaluate
+	// active tracks the last severity we raised for each inst so Evaluate
 	// can decide whether the alert state changed.
 	active map[glid.GLID]alert.Severity
 
@@ -56,7 +56,7 @@ type rateAlerterConfig struct {
 }
 
 // newRateAlerter constructs a RateAlerter. tierName may be nil; if provided,
-// it returns a human label for the tier (e.g., the operator's chosen tier
+// it returns a human label for the inst (e.g., the operator's chosen inst
 // name from config) and is invoked under no locks so it must be safe to call
 // concurrently.
 func newRateAlerter(cfg rateAlerterConfig) *RateAlerter {
@@ -73,8 +73,8 @@ func newRateAlerter(cfg rateAlerterConfig) *RateAlerter {
 	}
 }
 
-// Record marks one event for the given tier at the given time. Lazily
-// creates a per-tier RateWindow on first call. Safe for concurrent use.
+// Record marks one event for the given inst at the given time. Lazily
+// creates a per-inst RateWindow on first call. Safe for concurrent use.
 func (r *RateAlerter) Record(tierID glid.GLID, now time.Time) {
 	r.mu.Lock()
 	w, ok := r.windows[tierID]
@@ -86,8 +86,8 @@ func (r *RateAlerter) Record(tierID glid.GLID, now time.Time) {
 	w.Record(now)
 }
 
-// Forget removes a tier's tracking and clears any active alert for it.
-// Call this when a tier is removed from the orchestrator.
+// Forget removes a inst's tracking and clears any active alert for it.
+// Call this when a inst is removed from the orchestrator.
 func (r *RateAlerter) Forget(tierID glid.GLID) {
 	r.mu.Lock()
 	delete(r.windows, tierID)
@@ -99,7 +99,7 @@ func (r *RateAlerter) Forget(tierID glid.GLID) {
 	}
 }
 
-// Evaluate walks every tracked tier, computes its current rate, and raises
+// Evaluate walks every tracked inst, computes its current rate, and raises
 // or clears the alert as the threshold dictates. Intended to be called on
 // a fixed cadence (e.g., every 5 seconds) by a background goroutine.
 func (r *RateAlerter) Evaluate(now time.Time) {

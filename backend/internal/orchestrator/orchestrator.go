@@ -103,17 +103,17 @@ type RecordForwarder interface {
 	RedirectNode(fromNodeID, toNodeID string)
 }
 
-// ChunkReplicator sequences all replication commands for a tier on a single
+// ChunkReplicator sequences all replication commands for a inst on a single
 // ordered stream per follower. Nil in single-node mode.
 //
-// Caller role: always invoked on the tier **leader** node. Each method sends
+// Caller role: always invoked on the inst **leader** node. Each method sends
 // a command to a follower (`nodeID`) that applies it locally. Callers must
 // verify they hold leadership for (`vaultID`, `tierID`) before invoking —
 // the replicator itself does not re-check.
 //
 // Validation: methods assume the (`vaultID`, `tierID`) pair is consistent
-// (tier belongs to vault). The receiver on the remote node rejects mismatches
-// via tier lookup; callers should not rely on the replicator to catch
+// (inst belongs to vault). The receiver on the remote node rejects mismatches
+// via inst lookup; callers should not rely on the replicator to catch
 // programmer errors.
 //
 // Readiness: the leader's own Vault.ReadinessErr gate fires upstream of
@@ -221,7 +221,7 @@ type Orchestrator struct {
 	// Remote transferrer for cross-node chunk migration (nil in single-node mode).
 	transferrer RemoteTransferrer
 
-	// Tier replicator: ordered stream per tier per follower (nil in single-node mode).
+	// Tier replicator: ordered stream per inst per follower (nil in single-node mode).
 	chunkReplicator ChunkReplicator
 
 	// replicaCircuit tracks per-node backoff for follower replication.
@@ -251,17 +251,17 @@ type Orchestrator struct {
 	ackWg        sync.WaitGroup // tracks in-flight ack-gated replication goroutines
 	auxWg        sync.WaitGroup // tracks auxiliary goroutines (watchdog, etc.)
 
-	// Per-tier import mutex for serializing SetNextChunkID + ImportRecords.
+	// Per-inst import mutex for serializing SetNextChunkID + ImportRecords.
 	importMu sync.Map // tierID → *sync.Mutex
 
 	// Draining vaults (keyed by vault ID, tracks in-progress migrations).
 	draining map[glid.GLID]*drainState
 
-	// Draining tiers (keyed by "vaultID:tierID", tracks in-progress tier drains).
+	// Draining tiers (keyed by "vaultID:tierID", tracks in-progress inst drains).
 	tierDraining map[string]*tierDrainState
 
-	// OnTierDrainComplete is called after a tier drain finishes. The dispatch
-	// layer uses this to remove the tier from vault tier lists in the config
+	// OnTierDrainComplete is called after a inst drain finishes. The dispatch
+	// layer uses this to remove the inst from vault inst lists in the config
 	// store (which fires a subsequent vault-put notification to rebuild).
 	OnTierDrainComplete func(ctx context.Context, vaultID, tierID glid.GLID)
 
@@ -274,7 +274,7 @@ type Orchestrator struct {
 	// Cron rotation lifecycle.
 	cronRotation *cronRotationManager
 
-	// Per-tier rate alerters that surface pathological rotation or
+	// Per-inst rate alerters that surface pathological rotation or
 	// retention configurations as operator-visible alerts. See
 	// gastrolog-47qyw. Both are initialized in New() and evaluated by
 	// a periodic goroutine in Start().
@@ -318,7 +318,7 @@ type Orchestrator struct {
 	// Suspect tracker for cloud chunks that returned 404.
 	suspects *suspectTracker
 
-	// Per-vault leader loop for vault control-plane Raft (replicated tier
+	// Per-vault leader loop for vault control-plane Raft (replicated inst
 	// chunk metadata when multiraft is enabled). Membership reconciliation
 	// runs on the vault ctl Raft leader inside its leader epoch.
 	vaultCtlLeaders *vaultCtlLeaderManager
@@ -386,9 +386,9 @@ func (o *Orchestrator) NotifyChunkChange() {
 	o.progressTrigger.Signal()
 }
 
-// tierLabel returns the operator-friendly name for a tier as configured,
-// or "" if the tier or config is unknown. Used by RateAlerter to build
-// alert messages that say "tier ssd-hot" instead of just a UUID. Safe to
+// tierLabel returns the operator-friendly name for a inst as configured,
+// or "" if the inst or config is unknown. Used by RateAlerter to build
+// alert messages that say "inst ssd-hot" instead of just a UUID. Safe to
 // call from any goroutine — it acquires the orchestrator read lock.
 func (o *Orchestrator) tierLabel(tierID glid.GLID) string {
 	if o.sysLoader == nil {
@@ -519,18 +519,18 @@ func New(cfg Config) (*Orchestrator, error) {
 	o.cronRotation.onSeal = o.postSealWork
 
 	// gastrolog-51gme step 10: when the vault-ctl Raft leader removes a
-	// node from the voter set, propose CmdPruneNode on every tier
+	// node from the voter set, propose CmdPruneNode on every inst
 	// sub-FSM in that vault so pendingDeletes ExpectedFrom obligations
 	// from the decommissioned node don't block finalization. The
 	// reconciler's onPruneNode handler will then propose
 	// CmdFinalizeDelete for any chunk whose ExpectedFrom became empty.
 	o.vaultCtlLeaders.SetOnMemberRemoved(o.proposePruneNodeForVault)
 
-	// Per-tier rate alerters. Thresholds are taken from gastrolog-47qyw:
+	// Per-inst rate alerters. Thresholds are taken from gastrolog-47qyw:
 	//   rotation: warn at >1/sec, error at >5/sec, sustained over 30s
 	//   retention: warn at >10/sec sustained over 30s
 	// The orchestrator's tierName closure looks up the human label from
-	// the current vault registry; "" is returned if the tier is unknown.
+	// the current vault registry; "" is returned if the inst is unknown.
 	o.rotationRates = newRateAlerter(rateAlerterConfig{
 		Window:    30 * time.Second,
 		Kind:      "rotation",
@@ -558,8 +558,8 @@ func New(cfg Config) (*Orchestrator, error) {
 		o.rotationRates.Record(tierID, o.now())
 	}
 
-	// Register the single retention sweep that discovers all tier instances
-	// each tick. No per-tier lifecycle management needed.
+	// Register the single retention sweep that discovers all inst instances
+	// each tick. No per-inst lifecycle management needed.
 	if err := o.startRetentionSweep(); err != nil {
 		return nil, fmt.Errorf("retention sweep: %w", err)
 	}
@@ -574,15 +574,15 @@ func New(cfg Config) (*Orchestrator, error) {
 
 	// Tier catchup sweep: every node consults its OWN replicated FSM
 	// every 20s and runs three independent reconciliation passes per
-	// tier (pending obligations, local orphans, missing replicas).
+	// inst (pending obligations, local orphans, missing replicas).
 	// Phase-offset from retention's :00 tick to avoid spikiness. See
 	// gastrolog-51gme (delete-side) and gastrolog-2dgvj (create-side).
 	if err := o.startTierCatchupSweep(); err != nil {
-		return nil, fmt.Errorf("tier catchup sweep: %w", err)
+		return nil, fmt.Errorf("inst catchup sweep: %w", err)
 	}
 
 	// Warm-cache eviction sweep: every minute (second 23, phase-offset
-	// from the other sweeps) walk every leader tier and apply whatever
+	// from the other sweeps) walk every leader inst and apply whatever
 	// LRU + TTL policies its chunk manager was configured with. No-op for
 	// managers without an eviction policy. See gastrolog-2idw8.
 	if err := o.startCacheEvictionSweep(); err != nil {
@@ -604,7 +604,7 @@ func (o *Orchestrator) SetRemoteTransferrer(t RemoteTransferrer) {
 	o.transferrer = t
 }
 
-// SetChunkReplicator injects the ordered tier replication client.
+// SetChunkReplicator injects the ordered inst replication client.
 func (o *Orchestrator) SetChunkReplicator(tr ChunkReplicator) {
 	o.chunkReplicator = tr
 }

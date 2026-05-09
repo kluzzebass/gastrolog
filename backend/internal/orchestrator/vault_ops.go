@@ -30,7 +30,7 @@ type ChunkIndexReport struct {
 }
 
 // activeTierManagers returns chunk and index managers for the vault's active
-// (ingest) tier — Tiers[0]. Returns ErrVaultNotFound if the vault doesn't exist
+// (ingest) inst — Tiers[0]. Returns ErrVaultNotFound if the vault doesn't exist
 // or has no tiers.
 func (o *Orchestrator) activeTierManagers(vaultID glid.GLID) (chunk.ChunkManager, index.IndexManager, error) {
 	o.mu.RLock()
@@ -98,12 +98,12 @@ func (o *Orchestrator) findManagersForChunk(vaultID glid.GLID, chunkID chunk.Chu
 	if err := vaultReplicationReadinessErr(vaultID, vault); err != nil {
 		return nil, nil, err
 	}
-	if tier := vault.Instance; tier != nil {
-		if _, err := tier.Chunks.Meta(chunkID); err == nil {
-			return tier.Chunks, tier.Indexes, nil
+	if inst := vault.Instance; inst != nil {
+		if _, err := inst.Chunks.Meta(chunkID); err == nil {
+			return inst.Chunks, inst.Indexes, nil
 		}
-		if active := tier.Chunks.Active(); active != nil && active.ID == chunkID {
-			return tier.Chunks, tier.Indexes, nil
+		if active := inst.Chunks.Active(); active != nil && active.ID == chunkID {
+			return inst.Chunks, inst.Indexes, nil
 		}
 	}
 	return nil, nil, fmt.Errorf("%w: chunk %s in vault %s", chunk.ErrChunkNotFound, chunkID, vaultID)
@@ -131,12 +131,12 @@ func (o *Orchestrator) findTierForChunk(vaultID glid.GLID, chunkID chunk.ChunkID
 	if err := vaultReplicationReadinessErr(vaultID, vault); err != nil {
 		return nil, err
 	}
-	if tier := vault.Instance; tier != nil {
-		if _, err := tier.Chunks.Meta(chunkID); err == nil {
-			return tier, nil
+	if inst := vault.Instance; inst != nil {
+		if _, err := inst.Chunks.Meta(chunkID); err == nil {
+			return inst, nil
 		}
-		if active := tier.Chunks.Active(); active != nil && active.ID == chunkID {
-			return tier, nil
+		if active := inst.Chunks.Active(); active != nil && active.ID == chunkID {
+			return inst, nil
 		}
 	}
 	return nil, fmt.Errorf("%w: chunk %s in vault %s", chunk.ErrChunkNotFound, chunkID, vaultID)
@@ -156,7 +156,7 @@ func (o *Orchestrator) ArchiveChunk(ctx context.Context, vaultID glid.GLID, chun
 }
 
 // RestoreChunk initiates retrieval of an archived chunk.
-func (o *Orchestrator) RestoreChunk(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, tier string, days int) error {
+func (o *Orchestrator) RestoreChunk(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, inst string, days int) error {
 	cm, err := o.findChunkManagerForChunk(vaultID, chunkID)
 	if err != nil {
 		return err
@@ -165,20 +165,20 @@ func (o *Orchestrator) RestoreChunk(ctx context.Context, vaultID glid.GLID, chun
 	if !ok {
 		return errors.New("chunk manager does not support restore")
 	}
-	return archiver.RestoreChunk(ctx, chunkID, tier, days)
+	return archiver.RestoreChunk(ctx, chunkID, inst, days)
 }
 
 // --- Chunk read ---
 
-// TieredChunkMeta pairs a chunk with the tier it belongs to.
+// TieredChunkMeta pairs a chunk with the inst it belongs to.
 type TieredChunkMeta struct {
 	chunk.ChunkMeta
 	TierID   glid.GLID
 	VaultType string
 }
 
-// ListChunkMetas returns all chunk metadata for a vault (active tier only).
-// Use ListAllChunkMetas for a multi-tier view.
+// ListChunkMetas returns all chunk metadata for a vault (active inst only).
+// Use ListAllChunkMetas for a multi-inst view.
 func (o *Orchestrator) ListChunkMetas(vaultID glid.GLID) ([]chunk.ChunkMeta, error) {
 	cm, err := o.activeTierChunkManager(vaultID)
 	if err != nil {
@@ -188,14 +188,14 @@ func (o *Orchestrator) ListChunkMetas(vaultID glid.GLID) ([]chunk.ChunkMeta, err
 }
 
 // ListAllChunkMetas returns chunk metadata from ALL local tiers of a vault,
-// each tagged with its tier ID and type.
-// ListAllChunkMetas returns chunk metadata from all local tier instances.
-// When a vault has multiple tier instances for the same tier on the same
+// each tagged with its inst ID and type.
+// ListAllChunkMetas returns chunk metadata from all local inst instances.
+// When a vault has multiple inst instances for the same inst on the same
 // node (leader + same-node follower storages), the leader's view is preferred
 // to avoid double-counting chunks. Follower-only tiers are still included
 // (the leader node is elsewhere; this node contributes replica presence).
 //
-// If this node hosts no tier instances for the vault (all placements are on
+// If this node hosts no inst instances for the vault (all placements are on
 // other nodes), this returns (nil, nil) so the server's ListChunks can still
 // fan out to peers. Writes still gate on Vault.ReadinessErr and will reject
 // that case with ErrVaultNotReady. See vault_readiness.go for the canonical
@@ -209,15 +209,15 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]TieredChunkMeta, 
 	if vault == nil {
 		return nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
-	tier := vault.Instance
-	if tier == nil {
+	inst := vault.Instance
+	if inst == nil {
 		return nil, nil
 	}
 	if err := vaultReplicationReadinessErr(vaultID, vault); err != nil {
 		return nil, err
 	}
 
-	metas, err := tier.Chunks.List()
+	metas, err := inst.Chunks.List()
 	if err != nil {
 		return nil, fmt.Errorf("list chunks for vault %s: %w", vaultID, err)
 	}
@@ -227,20 +227,20 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]TieredChunkMeta, 
 		// (the cluster-wide source of truth). Without this, follower
 		// nodes always report CloudBacked=false because their local
 		// chunk manager has CloudStore=nil. See gastrolog-asg4l.
-		if tier.OverlayFromFSM != nil {
-			m = tier.OverlayFromFSM(m)
+		if inst.OverlayFromFSM != nil {
+			m = inst.OverlayFromFSM(m)
 		}
 		result = append(result, TieredChunkMeta{
 			ChunkMeta: m,
-			TierID:    tier.VaultID,
-			VaultType:  tier.Type,
+			TierID:    inst.VaultID,
+			VaultType:  inst.Type,
 		})
 	}
 	return result, nil
 }
 
 // GetChunkMeta returns metadata for a specific chunk. The result is overlaid
-// from the tier FSM if the chunk belongs to a tier with a Raft group, so
+// from the inst FSM if the chunk belongs to a inst with a Raft group, so
 // CloudBacked / Archived reflect the cluster-wide truth rather than this
 // node's local chunk-manager view. See gastrolog-asg4l.
 func (o *Orchestrator) GetChunkMeta(vaultID glid.GLID, chunkID chunk.ChunkID) (chunk.ChunkMeta, error) {
@@ -253,11 +253,11 @@ func (o *Orchestrator) GetChunkMeta(vaultID glid.GLID, chunkID chunk.ChunkID) (c
 	if err := vaultReplicationReadinessErr(vaultID, vault); err != nil {
 		return chunk.ChunkMeta{}, err
 	}
-	if tier := vault.Instance; tier != nil {
-		m, err := tier.Chunks.Meta(chunkID)
+	if inst := vault.Instance; inst != nil {
+		m, err := inst.Chunks.Meta(chunkID)
 		if err == nil {
-			if tier.OverlayFromFSM != nil {
-				m = tier.OverlayFromFSM(m)
+			if inst.OverlayFromFSM != nil {
+				m = inst.OverlayFromFSM(m)
 			}
 			return m, nil
 		}
@@ -265,7 +265,7 @@ func (o *Orchestrator) GetChunkMeta(vaultID glid.GLID, chunkID chunk.ChunkID) (c
 	return chunk.ChunkMeta{}, chunk.ErrChunkNotFound
 }
 
-// GetTieredChunkMeta returns metadata for a specific chunk with tier info.
+// GetTieredChunkMeta returns metadata for a specific chunk with inst info.
 func (o *Orchestrator) GetTieredChunkMeta(vaultID glid.GLID, chunkID chunk.ChunkID) (TieredChunkMeta, error) {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
@@ -276,23 +276,23 @@ func (o *Orchestrator) GetTieredChunkMeta(vaultID glid.GLID, chunkID chunk.Chunk
 	if err := vaultReplicationReadinessErr(vaultID, vault); err != nil {
 		return TieredChunkMeta{}, err
 	}
-	if tier := vault.Instance; tier != nil {
-		m, err := tier.Chunks.Meta(chunkID)
+	if inst := vault.Instance; inst != nil {
+		m, err := inst.Chunks.Meta(chunkID)
 		if err == nil {
-			if tier.OverlayFromFSM != nil {
-				m = tier.OverlayFromFSM(m)
+			if inst.OverlayFromFSM != nil {
+				m = inst.OverlayFromFSM(m)
 			}
 			return TieredChunkMeta{
 				ChunkMeta: m,
-				TierID:    tier.VaultID,
-				VaultType:  tier.Type,
+				TierID:    inst.VaultID,
+				VaultType:  inst.Type,
 			}, nil
 		}
 	}
 	return TieredChunkMeta{}, chunk.ErrChunkNotFound
 }
 
-// OpenCursor opens a record cursor for the given chunk on the tier that owns it.
+// OpenCursor opens a record cursor for the given chunk on the inst that owns it.
 func (o *Orchestrator) OpenCursor(vaultID glid.GLID, chunkID chunk.ChunkID) (chunk.RecordCursor, error) {
 	cm, err := o.findChunkManagerForChunk(vaultID, chunkID)
 	if err != nil {
@@ -319,8 +319,8 @@ func (o *Orchestrator) VaultType(vaultID glid.GLID) string {
 	return ""
 }
 
-// MissingVaultInstance returns true if the vault's local tier list differs from the
-// given tier IDs — either tiers were added or removed.
+// MissingVaultInstance returns true if the vault's local inst list differs from the
+// given inst IDs — either tiers were added or removed.
 func (o *Orchestrator) MissingVaultInstance(vaultID glid.GLID, tierIDs []glid.GLID) bool {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
@@ -328,7 +328,7 @@ func (o *Orchestrator) MissingVaultInstance(vaultID glid.GLID, tierIDs []glid.GL
 	if vault == nil {
 		return false
 	}
-	// Single-instance model: at most one local tier ID per vault.
+	// Single-instance model: at most one local inst ID per vault.
 	var local glid.GLID
 	if t := vault.Instance; t != nil {
 		local = t.VaultID
@@ -337,16 +337,16 @@ func (o *Orchestrator) MissingVaultInstance(vaultID glid.GLID, tierIDs []glid.GL
 	for _, id := range tierIDs {
 		expected[id] = true
 		if local != id {
-			return true // tier added
+			return true // inst added
 		}
 	}
 	if (local != glid.GLID{}) && !expected[local] {
-		return true // tier removed
+		return true // inst removed
 	}
 	return false
 }
 
-// LocalTierIDs returns the tier IDs currently instantiated for the given vault.
+// LocalTierIDs returns the inst IDs currently instantiated for the given vault.
 func (o *Orchestrator) LocalTierIDs(vaultID glid.GLID) []glid.GLID {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
@@ -378,10 +378,10 @@ func (o *Orchestrator) findLocalVaultInstance(vaultID glid.GLID) *VaultInstance 
 	return vault.Instance
 }
 
-// AppendToVault appends a record to a specific tier's chunk manager.
-// Used by inter-tier transition to target a downstream tier directly,
-// bypassing the vault's active tier. Includes seal detection.
-// AppendToVault appends a record to a specific tier. leaderChunkID, when
+// AppendToVault appends a record to a specific inst's chunk manager.
+// Used by inter-inst transition to target a downstream inst directly,
+// bypassing the vault's active inst. Includes seal detection.
+// AppendToVault appends a record to a specific inst. leaderChunkID, when
 // non-zero on followers, syncs the chunk ID with the leader so the
 // follower has real, queryable, promotable chunks.
 func (o *Orchestrator) AppendToVault(vaultID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error {
@@ -398,23 +398,23 @@ func (o *Orchestrator) AppendToVault(vaultID glid.GLID, leaderChunkID chunk.Chun
 		return err
 	}
 
-	tier := vault.Instance
-	if tier == nil {
+	inst := vault.Instance
+	if inst == nil {
 		o.mu.RUnlock()
 		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 	// Block appends to vaults that are draining.
-	if _, draining := o.tierDraining[tierDrainKey(vaultID, tier.VaultID)]; draining {
+	if _, draining := o.tierDraining[tierDrainKey(vaultID, inst.VaultID)]; draining {
 		o.mu.RUnlock()
 		return ErrTierDraining
 	}
-	cm := tier.Chunks
+	cm := inst.Chunks
 
 	// Reject writes targeting a tombstoned chunk ID — a stale replication
 	// RPC that would otherwise recreate a chunk the cluster has already
 	// deleted. Caller translates this into a benign ack on the receive
 	// path. See gastrolog-11rzz.
-	if leaderChunkID != (chunk.ChunkID{}) && tier.IsTombstoned != nil && tier.IsTombstoned(leaderChunkID) {
+	if leaderChunkID != (chunk.ChunkID{}) && inst.IsTombstoned != nil && inst.IsTombstoned(leaderChunkID) {
 		o.mu.RUnlock()
 		return fmt.Errorf("%w: append to tombstoned chunk %s", chunk.ErrChunkTombstoned, leaderChunkID)
 	}
@@ -422,7 +422,7 @@ func (o *Orchestrator) AppendToVault(vaultID glid.GLID, leaderChunkID chunk.Chun
 	// On followers, sync chunk ID with the leader. If the active
 	// chunk has a different ID (left over from a previous leader cycle),
 	// seal it so the next append opens a new chunk with the synced ID.
-	if tier.IsFollower && leaderChunkID != (chunk.ChunkID{}) {
+	if inst.IsFollower && leaderChunkID != (chunk.ChunkID{}) {
 		if active := cm.Active(); active != nil && active.ID != leaderChunkID {
 			_ = cm.Seal()
 		}
@@ -438,13 +438,13 @@ func (o *Orchestrator) AppendToVault(vaultID glid.GLID, leaderChunkID chunk.Chun
 
 	// Leader: collect remote forward targets (local appends happen under lock).
 	var remotes []remoteForwardTarget
-	if tier.ShouldForwardToFollowers() {
-		remotes = o.forwardToFollowers(vault, vaultID, tier, cm, rec)
+	if inst.ShouldForwardToFollowers() {
+		remotes = o.forwardToFollowers(vault, vaultID, inst, cm, rec)
 	}
 
 	activeAfter := cm.Active()
 	sealed := activeBefore != nil && (activeAfter == nil || activeAfter.ID != activeBefore.ID)
-	if sealed && !tier.IsFollower {
+	if sealed && !inst.IsFollower {
 		o.schedulePostSeal(vaultID, cm, activeBefore.ID)
 	}
 	o.mu.RUnlock()
@@ -470,20 +470,20 @@ type remoteForwardTarget struct {
 // durability. Same-node targets use direct append (under lock); cross-node targets
 // are collected and returned for the caller to forward AFTER releasing the lock.
 // Called under o.mu.RLock.
-func (o *Orchestrator) forwardToFollowers(vault *Vault, vaultID glid.GLID, tier *VaultInstance, cm chunk.ChunkManager, rec chunk.Record) []remoteForwardTarget {
+func (o *Orchestrator) forwardToFollowers(vault *Vault, vaultID glid.GLID, inst *VaultInstance, cm chunk.ChunkManager, rec chunk.Record) []remoteForwardTarget {
 	activeNow := cm.Active()
 	var activeChunkID chunk.ChunkID
 	if activeNow != nil {
 		activeChunkID = activeNow.ID
 	}
 	var remotes []remoteForwardTarget
-	for _, tgt := range tier.FollowerTargets {
+	for _, tgt := range inst.FollowerTargets {
 		if tgt.NodeID == o.localNodeID {
-			o.appendToLocalFollower(vault, tier.VaultID, tgt.StorageID, activeChunkID, rec)
+			o.appendToLocalFollower(vault, inst.VaultID, tgt.StorageID, activeChunkID, rec)
 		} else {
 			remotes = append(remotes, remoteForwardTarget{
 				nodeID: tgt.NodeID, vaultID: vaultID,
-				tierID: tier.VaultID, activeChunkID: activeChunkID,
+				tierID: inst.VaultID, activeChunkID: activeChunkID,
 			})
 		}
 	}
@@ -491,10 +491,10 @@ func (o *Orchestrator) forwardToFollowers(vault *Vault, vaultID glid.GLID, tier 
 }
 
 // sealRemoteFollowers sends seal commands to remote followers through the
-// tier replication stream, ensuring they seal at the same boundary as the
+// inst replication stream, ensuring they seal at the same boundary as the
 // leader. Must be called BEFORE the next record's append to maintain ordering.
 // Seal RPCs to distinct followers run in parallel so the leader does not pay
-// sum(latency) per seal boundary (important for remote tier transition streams
+// sum(latency) per seal boundary (important for remote inst transition streams
 // that append one record at a time). Ordering per follower stream is still
 // sequential because each follower receives at most one in-flight seal here.
 //
@@ -525,7 +525,7 @@ func (o *Orchestrator) sealRemoteFollowers(targets []remoteForwardTarget, chunkI
 // fireAndForgetRemote sends records to remote followers outside any lock.
 // Appends to distinct followers run in parallel (WaitGroup) so per-record
 // latency is bounded by the slowest follower, not the sum — same ordering
-// guarantee as sealRemoteFollowers: each follower tier stream still processes
+// guarantee as sealRemoteFollowers: each follower inst stream still processes
 // one RPC at a time, and AppendToVault does not start the next record until
 // this function returns.
 //
@@ -630,18 +630,18 @@ func (o *Orchestrator) appendToLocalFollower(vault *Vault, tierID glid.GLID, sto
 }
 
 // deleteFromFollowers removes a chunk from all same-node follower instances
-// of a tier. Called by retention after deleting from the leader.
-// DeleteChunkFromTier deletes a specific chunk from a tier. If the chunk is
-// currently the tier's active chunk, it is sealed first so the delete can
+// of a inst. Called by retention after deleting from the leader.
+// DeleteChunkFromTier deletes a specific chunk from a inst. If the chunk is
+// currently the inst's active chunk, it is sealed first so the delete can
 // proceed. This handles the follower case where the leader has moved on to a
 // new active chunk but the follower still has the old ID as active (records
 // sync via ChunkReplicator.AppendRecords preserves the leader's chunk ID).
 func (o *Orchestrator) DeleteChunkFromTier(vaultID glid.GLID, chunkID chunk.ChunkID) error {
-	tier, err := o.findTierForDelete(vaultID)
+	inst, err := o.findTierForDelete(vaultID)
 	if err != nil {
 		return err
 	}
-	return o.deleteChunkFromTierInstance(tier, vaultID, tier.VaultID, chunkID)
+	return o.deleteChunkFromTierInstance(inst, vaultID, inst.VaultID, chunkID)
 }
 
 // findTierForDelete returns the vault's instance or an error, releasing
@@ -716,11 +716,11 @@ func replaceForwardedChunk(cm chunk.ChunkManager, chunkID chunk.ChunkID, isActiv
 	return nil
 }
 
-// proposePruneNodeForVault fans CmdPruneNode out to every tier sub-FSM
+// proposePruneNodeForVault fans CmdPruneNode out to every inst sub-FSM
 // in the vault after the vault-ctl Raft leader removed a node from the
-// voter set. Each tier's applier transparently routes the propose to
+// voter set. Each inst's applier transparently routes the propose to
 // the leader, so this callback can fire from the leader's reconcile
-// pass without needing per-tier leadership checks. See gastrolog-51gme
+// pass without needing per-inst leadership checks. See gastrolog-51gme
 // step 10.
 //
 // afterVaultCtlRestore fires (off the FSM apply pump, on the
@@ -758,7 +758,7 @@ func (o *Orchestrator) afterVaultCtlRestore(vaultID glid.GLID) {
 }
 
 // Errors are logged at warn but do not abort: the next reconcile pass
-// will re-propose CmdPruneNode for any tier where the apply failed
+// will re-propose CmdPruneNode for any inst where the apply failed
 // (the FSM's applyPruneNode is idempotent — repeated prunes for the
 // same node are no-ops on entries where it's already gone).
 func (o *Orchestrator) proposePruneNodeForVault(vaultID glid.GLID, removedNodeID string) {
@@ -782,7 +782,7 @@ func (o *Orchestrator) proposePruneNodeForVault(vaultID glid.GLID, removedNodeID
 }
 
 // placementMembership returns the set of node IDs that participate in a
-// tier's chunk-lifecycle obligations: the local node (always present
+// inst's chunk-lifecycle obligations: the local node (always present
 // because callers run on the leader path) plus every follower target's
 // node ID, with duplicates collapsed. Suitable for passing as the
 // expectedFrom argument to VaultLifecycleReconciler.deleteChunk.
@@ -791,14 +791,14 @@ func (o *Orchestrator) proposePruneNodeForVault(vaultID glid.GLID, removedNodeID
 // their declared order) so that audit-log output is reproducible across
 // runs even though the FSM-side encoding stores expectedFrom as a map.
 // See gastrolog-51gme.
-func (o *Orchestrator) placementMembership(tier *VaultInstance) []string {
-	expected := make([]string, 0, 1+len(tier.FollowerTargets))
+func (o *Orchestrator) placementMembership(inst *VaultInstance) []string {
+	expected := make([]string, 0, 1+len(inst.FollowerTargets))
 	seen := map[string]bool{}
 	if o.localNodeID != "" {
 		expected = append(expected, o.localNodeID)
 		seen[o.localNodeID] = true
 	}
-	for _, t := range tier.FollowerTargets {
+	for _, t := range inst.FollowerTargets {
 		if t.NodeID == "" || seen[t.NodeID] {
 			continue
 		}
@@ -808,7 +808,7 @@ func (o *Orchestrator) placementMembership(tier *VaultInstance) []string {
 	return expected
 }
 
-// deleteFromFollowers removes a chunk from same-node follower tier instances.
+// deleteFromFollowers removes a chunk from same-node follower inst instances.
 // Called from the reconciler-less fallback in retention's expireChunk after
 // applyRaftDelete has already fired the global CmdDeleteChunk. Uses
 // DeleteNoAnnounce to avoid a redundant second Raft-wide announce (the
@@ -860,7 +860,7 @@ type replicationTask struct {
 // Caller MUST hold o.mu.RLock.
 //
 // Returns a replicationTask when the record has WaitForReplica set and
-// the tier has secondaries. Also returns remoteForwardTargets for
+// the inst has secondaries. Also returns remoteForwardTargets for
 // fire-and-forget forwarding — the caller fires these AFTER releasing the lock.
 func (o *Orchestrator) appendRecord(vaultID glid.GLID, rec chunk.Record) (chunk.ChunkID, uint64, *replicationTask, []remoteForwardTarget, error) {
 	vault := o.vaults[vaultID]
@@ -953,24 +953,24 @@ func (o *Orchestrator) ImportChunkRecords(ctx context.Context, vaultID glid.GLID
 	return nil
 }
 
-// ImportToVault imports records as a sealed chunk into a specific tier,
+// ImportToVault imports records as a sealed chunk into a specific inst,
 // preserving the given chunk ID. Used by sealed-chunk replication —
 // the follower receives a sealed chunk from the leader with the same ID.
 // Schedules postSealWork for local indexing (secondaries need indexes for queries)
 // but won't trigger further replication (gated by !IsFollower in tierReplicationInfo).
 func (o *Orchestrator) ImportToVault(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
-	tier := o.findLocalVaultInstance(vaultID)
-	if tier == nil {
+	inst := o.findLocalVaultInstance(vaultID)
+	if inst == nil {
 		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
-	return o.ImportToTierStorage(ctx, vaultID, tier.VaultID, "", chunkID, next)
+	return o.ImportToTierStorage(ctx, vaultID, inst.VaultID, "", chunkID, next)
 }
 
-// ImportToTierStorage imports a sealed chunk to a specific storage-targeted tier
-// instance. When storageID is empty, falls back to the first matching tier (backward compat).
+// ImportToTierStorage imports a sealed chunk to a specific storage-targeted inst
+// instance. When storageID is empty, falls back to the first matching inst (backward compat).
 // Used by same-node replication to route to specific file storage instances.
 func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, tierID glid.GLID, storageID string, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
-	// Look up the tier under lock, then release BEFORE the import.
+	// Look up the inst under lock, then release BEFORE the import.
 	// ImportRecords reads from a network stream and can block — holding
 	// RLock during a network read starves writers (FSM dispatcher) and
 	// deadlocks the entire orchestrator.
@@ -992,11 +992,11 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, tierID 
 		return nil
 	}()
 	if ref == nil {
-		// "tier not registered on this node" rather than "vault not found":
-		// the vault almost always still exists cluster-wide; only the tier
+		// "inst not registered on this node" rather than "vault not found":
+		// the vault almost always still exists cluster-wide; only the inst
 		// instance was evicted from this node by placement churn (or never
 		// landed here in the first place). See gastrolog-2t48z.
-		return fmt.Errorf("%w: tier %s in vault %s", ErrTierNotLocal, tierID, vaultID)
+		return fmt.Errorf("%w: inst %s in vault %s", ErrTierNotLocal, tierID, vaultID)
 	}
 	// Reject stale ImportSealed RPCs for chunks the cluster already deleted.
 	// The race is: leader schedules replication, retention fires, delete is
@@ -1004,11 +1004,11 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, tierID 
 	// RPC arrives. Without this check the receiver would recreate the chunk.
 	// See gastrolog-11rzz.
 	if ref.isTombstoned != nil && ref.isTombstoned(chunkID) {
-		return fmt.Errorf("%w: import sealed chunk %s into tier %s", chunk.ErrChunkTombstoned, chunkID, tierID)
+		return fmt.Errorf("%w: import sealed chunk %s into inst %s", chunk.ErrChunkTombstoned, chunkID, tierID)
 	}
 	cm := ref.cm
 
-	// Serialize SetNextChunkID + ImportRecords per tier instance to prevent
+	// Serialize SetNextChunkID + ImportRecords per inst instance to prevent
 	// concurrent replication messages from interleaving the two calls.
 	// Key includes storageID so same-node replicas can import in parallel.
 	importKey := tierID.String() + ":" + storageID
@@ -1047,7 +1047,7 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, tierID 
 
 	meta, err := cm.ImportRecords(chunkID, next)
 	if err != nil {
-		return fmt.Errorf("import to tier %s: %w", tierID, err)
+		return fmt.Errorf("import to inst %s: %w", tierID, err)
 	}
 	o.logger.Debug("replication: sealed chunk imported",
 		"vault", vaultID,
@@ -1063,7 +1063,7 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, tierID 
 // Ordering matters: announce first, then re-check tombstone. This covers
 // the race where DeleteChunk applies between ImportRecords and our check
 // — if we checked first we'd miss it; announcing first propagates the
-// create through the tier FSM (which rejects it when tombstoned via the
+// create through the inst FSM (which rejects it when tombstoned via the
 // applyCreate guard), so by the time we re-check the tombstone state is
 // authoritative and any on-disk files we wrote are orphans we must
 // clean up explicitly because the FSM onDelete callback fired before
@@ -1120,7 +1120,7 @@ func drainIterator(next chunk.RecordIterator) {
 // in the vault are sealed. Returns the number of tiers sealed. No-op if the
 // active chunk is empty or absent.
 //
-// Role: tier leader. Sealing on the leader triggers follower seals via the
+// Role: inst leader. Sealing on the leader triggers follower seals via the
 // ChunkReplicator's SealVault call, which arrives on followers as an invocation
 // of SealActiveTier. Callers that are already on the follower side (seal
 // commands dispatched from the leader's Raft) must use SealActiveTier
@@ -1144,19 +1144,19 @@ func (o *Orchestrator) SealActive(vaultID glid.GLID) (int, error) {
 	}
 
 	var sealed int
-	tier := vault.Instance
-	if tier == nil {
+	inst := vault.Instance
+	if inst == nil {
 		return 0, nil
 	}
-	active := tier.Chunks.Active()
+	active := inst.Chunks.Active()
 	if active != nil && active.RecordCount > 0 {
 		chunkID := active.ID
-		if err := tier.Chunks.Seal(); err != nil {
+		if err := inst.Chunks.Seal(); err != nil {
 			return sealed, fmt.Errorf("seal vault %s: %w", vaultID, err)
 		}
 		sealed++
 		o.mu.RLock()
-		o.schedulePostSeal(vaultID, tier.Chunks, chunkID)
+		o.schedulePostSeal(vaultID, inst.Chunks, chunkID)
 		o.mu.RUnlock()
 	}
 	return sealed, nil
@@ -1195,7 +1195,7 @@ func (o *Orchestrator) BuildIndexes(ctx context.Context, vaultID glid.GLID, chun
 		return err
 	}
 	if im == nil {
-		return errors.New("no index manager for chunk tier")
+		return errors.New("no index manager for chunk inst")
 	}
 	return im.BuildIndexes(ctx, chunkID)
 }
@@ -1226,7 +1226,7 @@ func (o *Orchestrator) ChunkIndexInfos(vaultID glid.GLID, chunkID chunk.ChunkID)
 		return nil, err
 	}
 	if im == nil {
-		return nil, errors.New("no index manager for chunk tier")
+		return nil, errors.New("no index manager for chunk inst")
 	}
 
 	sizes := im.IndexSizes(chunkID)
@@ -1303,7 +1303,7 @@ func (o *Orchestrator) ChunkIndexInfos(vaultID glid.GLID, chunkID chunk.ChunkID)
 }
 
 // NewAnalyzer returns an index analyzer backed by the vault's active (ingest)
-// tier. For a specific chunk (possibly on a non-active tier), use
+// inst. For a specific chunk (possibly on a non-active inst), use
 // NewAnalyzerForChunk.
 func (o *Orchestrator) NewAnalyzer(vaultID glid.GLID) (*analyzer.Analyzer, error) {
 	cm, im, err := o.activeTierManagers(vaultID)
@@ -1313,14 +1313,14 @@ func (o *Orchestrator) NewAnalyzer(vaultID glid.GLID) (*analyzer.Analyzer, error
 	return analyzer.New(cm, im), nil
 }
 
-// NewAnalyzerForChunk returns an analyzer backed by the tier that owns chunkID.
+// NewAnalyzerForChunk returns an analyzer backed by the inst that owns chunkID.
 func (o *Orchestrator) NewAnalyzerForChunk(vaultID glid.GLID, chunkID chunk.ChunkID) (*analyzer.Analyzer, error) {
 	cm, im, err := o.findManagersForChunk(vaultID, chunkID)
 	if err != nil {
 		return nil, err
 	}
 	if im == nil {
-		return nil, errors.New("no index manager for chunk tier")
+		return nil, errors.New("no index manager for chunk inst")
 	}
 	return analyzer.New(cm, im), nil
 }

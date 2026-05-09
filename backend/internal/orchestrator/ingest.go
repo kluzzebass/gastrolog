@@ -58,7 +58,7 @@ func (o *Orchestrator) ingest(rec chunk.Record) (*pendingAcks, error) {
 // (_source, _ingester, _vault, _reason) drive route evaluation.
 //
 // Returns pendingAcks bundling the sync work an ack-gated record triggers:
-// local tier replication to followers, plus cross-node forwarding of
+// local inst replication to followers, plus cross-node forwarding of
 // records matched to remote vaults. Both task kinds must complete before
 // the ack is delivered to the ingester. For non-ack-gated records that
 // match a remote vault, syncForwards is populated; the caller must run
@@ -171,7 +171,7 @@ func (o *Orchestrator) handleRemoteVaultMatch(pa *pendingAcks, t MatchResult, re
 }
 
 // pendingAcks bundles the sync work that an ack-gated record triggers —
-// local tier replication to followers and cross-node forwarding of
+// local inst replication to followers and cross-node forwarding of
 // records matched to remote vaults. Both must complete before the ack
 // is delivered to the ingester.
 //
@@ -289,7 +289,7 @@ func (o *Orchestrator) postSealWork(vaultID glid.GLID, cm chunk.ChunkManager, ch
 // as one sequential job. Otherwise falls back to compress-only for non-file managers.
 // After the pipeline completes, sealed-chunk replication is triggered for leader tiers.
 func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager, chunkID chunk.ChunkID) {
-	// Resolve tier info for post-pipeline replication.
+	// Resolve inst info for post-pipeline replication.
 	tierID, followerTargets := o.tierReplicationInfo(vaultID, cm)
 
 	processor, ok := cm.(chunk.ChunkPostSealProcessor)
@@ -320,16 +320,16 @@ func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager
 	o.scheduleReplication(vaultID, tierID, chunkID, followerTargets)
 }
 
-// tierReplicationInfo returns the tier ID and follower targets for the tier
+// tierReplicationInfo returns the inst ID and follower targets for the inst
 // that owns the given ChunkManager. Returns zero values if not found or if the
-// tier is a follower (followers don't replicate further).
+// inst is a follower (followers don't replicate further).
 func (o *Orchestrator) tierReplicationInfo(vaultID glid.GLID, cm chunk.ChunkManager) (glid.GLID, []system.ReplicationTarget) {
 	vault := o.vaults[vaultID]
 	if vault == nil {
 		return glid.GLID{}, nil
 	}
-	if tier := vault.Instance; tier != nil && tier.Chunks == cm && tier.ShouldForwardToFollowers() {
-		return tier.VaultID, tier.FollowerTargets
+	if inst := vault.Instance; inst != nil && inst.Chunks == cm && inst.ShouldForwardToFollowers() {
+		return inst.VaultID, inst.FollowerTargets
 	}
 	return glid.GLID{}, nil
 }

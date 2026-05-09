@@ -71,8 +71,8 @@ func TestImportToTierPreservesChunkID(t *testing.T) {
 
 	tierID := glid.New()
 	vaultID := glid.New()
-	tier := newMemTier(t, tierID, true, nil)
-	vault := NewVault(vaultID, tier)
+	inst := newMemTier(t, tierID, true, nil)
+	vault := NewVault(vaultID, inst)
 	vault.Name = "import-id"
 	orch.RegisterVault(vault)
 
@@ -82,7 +82,7 @@ func TestImportToTierPreservesChunkID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	metas, err := tier.Chunks.List()
+	metas, err := inst.Chunks.List()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,8 +106,8 @@ func TestImportToTierConcurrentSafe(t *testing.T) {
 
 	tierID := glid.New()
 	vaultID := glid.New()
-	tier := newMemTier(t, tierID, true, nil)
-	vault := NewVault(vaultID, tier)
+	inst := newMemTier(t, tierID, true, nil)
+	vault := NewVault(vaultID, inst)
 	vault.Name = "concurrent-import"
 	orch.RegisterVault(vault)
 
@@ -134,7 +134,7 @@ func TestImportToTierConcurrentSafe(t *testing.T) {
 		}
 	}
 
-	metas, err := tier.Chunks.List()
+	metas, err := inst.Chunks.List()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestImportToTierConcurrentSafe(t *testing.T) {
 
 // TestListAllChunkMetasOverlaysFromFSM is the regression test for
 // gastrolog-asg4l. The local chunk manager only sets CloudBacked=true on the
-// node that actually uploaded the blob (the cold tier raft leader);
+// node that actually uploaded the blob (the cold inst raft leader);
 // followers strip sealed_backing from their chunk-manager params and never
 // see the cloud state, so their local CloudBacked is permanently false. The
 // fix is to overlay the cluster-wide FSM view onto each chunk meta returned
@@ -168,32 +168,32 @@ func TestListAllChunkMetasOverlaysFromFSM(t *testing.T) {
 	tierID := glid.New()
 	vaultID := glid.New()
 
-	tier := newMemTier(t, tierID, false, nil)
+	inst := newMemTier(t, tierID, false, nil)
 	// Simulate the follower scenario: the FSM has CloudBacked=true (because
 	// some other node — the leader — uploaded the blob) but the local chunk
 	// manager has no CloudStore so its local meta reports CloudBacked=false.
 	// The OverlayFromFSM callback closes the gap.
-	tier.OverlayFromFSM = func(m chunk.ChunkMeta) chunk.ChunkMeta {
+	inst.OverlayFromFSM = func(m chunk.ChunkMeta) chunk.ChunkMeta {
 		m.CloudBacked = true
 		m.Archived = true
 		return m
 	}
 
-	vault := NewVault(vaultID, tier)
+	vault := NewVault(vaultID, inst)
 	vault.Name = "follower-with-fsm-overlay"
 	orch.RegisterVault(vault)
 
-	if _, _, err := tier.Chunks.Append(testRecord("payload")); err != nil {
+	if _, _, err := inst.Chunks.Append(testRecord("payload")); err != nil {
 		t.Fatal(err)
 	}
-	if err := tier.Chunks.Seal(); err != nil {
+	if err := inst.Chunks.Seal(); err != nil {
 		t.Fatal(err)
 	}
 
 	// Sanity-check: the local chunk manager itself reports CloudBacked=false
 	// (because it has no CloudStore wired up). This is the bug condition we
 	// expect the overlay to correct.
-	rawMetas, err := tier.Chunks.List()
+	rawMetas, err := inst.Chunks.List()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,16 +242,16 @@ func TestListAllChunkMetasNilOverlayPassthrough(t *testing.T) {
 	tierID := glid.New()
 	vaultID := glid.New()
 
-	tier := newMemTier(t, tierID, false, nil)
-	// Note: tier.OverlayFromFSM is nil, simulating a tier with no Raft group.
+	inst := newMemTier(t, tierID, false, nil)
+	// Note: inst.OverlayFromFSM is nil, simulating a inst with no Raft group.
 
-	vault := NewVault(vaultID, tier)
+	vault := NewVault(vaultID, inst)
 	orch.RegisterVault(vault)
 
-	if _, _, err := tier.Chunks.Append(testRecord("payload")); err != nil {
+	if _, _, err := inst.Chunks.Append(testRecord("payload")); err != nil {
 		t.Fatal(err)
 	}
-	if err := tier.Chunks.Seal(); err != nil {
+	if err := inst.Chunks.Seal(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -269,8 +269,8 @@ func TestListAllChunkMetasNilOverlayPassthrough(t *testing.T) {
 
 
 // TestListAllChunkMetasSkipsFollowerInstances is the regression test for
-// gastrolog-2rvak. When a vault has both a leader and a follower tier
-// instance for the same tier on the same node, ListAllChunkMetas must
+// gastrolog-2rvak. When a vault has both a leader and a follower inst
+// instance for the same inst on the same node, ListAllChunkMetas must
 // return only the leader's chunks. Including the follower's view double-
 // counts records and produces non-authoritative counts in the Inspector.
 
@@ -302,7 +302,7 @@ func TestListAllChunkMetasIncludesFollowerOnlyTiers(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(metas) != 1 {
-		t.Fatalf("expected 1 chunk from follower-only tier, got %d", len(metas))
+		t.Fatalf("expected 1 chunk from follower-only inst, got %d", len(metas))
 	}
 }
 
@@ -317,13 +317,13 @@ func TestLocalLeaderVaultIDsExcludesFollowerOnlyVaults(t *testing.T) {
 	leaderVaultID := glid.New()
 	followerVaultID := glid.New()
 
-	// Vault with a leader tier on this node — should be in the result.
+	// Vault with a leader inst on this node — should be in the result.
 	leader := newMemTier(t, leaderTierID, false, nil)
 	leaderVault := NewVault(leaderVaultID, leader)
 	leaderVault.Name = "leader-vault"
 	orch.RegisterVault(leaderVault)
 
-	// Vault with only a follower tier on this node — should NOT be in result.
+	// Vault with only a follower inst on this node — should NOT be in result.
 	follower := newMemTier(t, followerTierID, true, nil)
 	followerVault := NewVault(followerVaultID, follower)
 	followerVault.Name = "follower-vault"
@@ -331,7 +331,7 @@ func TestLocalLeaderVaultIDsExcludesFollowerOnlyVaults(t *testing.T) {
 
 	ids := orch.LocalLeaderVaultIDs()
 	if !ids[leaderVaultID] {
-		t.Error("vault with a leader tier should be in LocalLeaderVaultIDs")
+		t.Error("vault with a leader inst should be in LocalLeaderVaultIDs")
 	}
 	if ids[followerVaultID] {
 		t.Error("vault with only follower tiers should NOT be in LocalLeaderVaultIDs")
@@ -345,8 +345,8 @@ func TestLocalLeaderVaultIDsExcludesFollowerOnlyVaults(t *testing.T) {
 
 // Phase 4 (gastrolog-42f9z) deleted TestRetentionActionDerivedFromPosition:
 // the action enum is gone, retention rules carry only the policy, and the
-// "is this the last tier?" position-based action derivation was removed
-// alongside the multi-tier chain (Phase 2 collapsed the chain).
+// "is this the last inst?" position-based action derivation was removed
+// alongside the multi-inst chain (Phase 2 collapsed the chain).
 
 // --- Import idempotency ---
 
@@ -356,8 +356,8 @@ func TestImportToTierIdempotent(t *testing.T) {
 
 	tierID := glid.New()
 	vaultID := glid.New()
-	tier := newMemTier(t, tierID, false, nil)
-	vault := NewVault(vaultID, tier)
+	inst := newMemTier(t, tierID, false, nil)
+	vault := NewVault(vaultID, inst)
 	vault.Name = "idempotent"
 	orch.RegisterVault(vault)
 
@@ -376,7 +376,7 @@ func TestImportToTierIdempotent(t *testing.T) {
 	}
 
 	// Verify only one chunk exists with that ID, with 5 records (first import kept).
-	metas, _ := tier.Chunks.List()
+	metas, _ := inst.Chunks.List()
 	count := 0
 	for _, m := range metas {
 		if m.ID == chunkID {
@@ -447,8 +447,8 @@ func TestAppendToTierLeaderForwardsToFollowers(t *testing.T) {
 	orch.SetChunkReplicator(fwd)
 
 	vaultID := glid.New()
-	tier := newMemTier(t, vaultID, false, []system.ReplicationTarget{{NodeID: "node-2"}, {NodeID: "node-3"}})
-	vault := NewVault(vaultID, tier)
+	inst := newMemTier(t, vaultID, false, []system.ReplicationTarget{{NodeID: "node-2"}, {NodeID: "node-3"}})
+	vault := NewVault(vaultID, inst)
 	vault.Name = "fwd-test"
 	orch.RegisterVault(vault)
 
@@ -487,9 +487,9 @@ func TestAppendToTierSecondaryDoesNotForward(t *testing.T) {
 
 	tierID := glid.New()
 	vaultID := glid.New()
-	// Follower tier — should NOT re-forward.
-	tier := newMemTier(t, tierID, true, nil)
-	vault := NewVault(vaultID, tier)
+	// Follower inst — should NOT re-forward.
+	inst := newMemTier(t, tierID, true, nil)
+	vault := NewVault(vaultID, inst)
 	vault.Name = "no-reforward"
 	orch.RegisterVault(vault)
 
@@ -508,8 +508,8 @@ func TestAppendToTierSecondaryUsesChunkID(t *testing.T) {
 
 	tierID := glid.New()
 	vaultID := glid.New()
-	tier := newMemTier(t, tierID, true, nil)
-	vault := NewVault(vaultID, tier)
+	inst := newMemTier(t, tierID, true, nil)
+	vault := NewVault(vaultID, inst)
 	vault.Name = "id-sync"
 	orch.RegisterVault(vault)
 
@@ -519,7 +519,7 @@ func TestAppendToTierSecondaryUsesChunkID(t *testing.T) {
 	}
 
 	// The follower's active chunk should have the leader's chunk ID.
-	active := tier.Chunks.Active()
+	active := inst.Chunks.Active()
 	if active == nil {
 		t.Fatal("expected active chunk on follower")
 	}
@@ -544,7 +544,7 @@ func TestAppendToTierSecondarySkipsPostSeal(t *testing.T) {
 		t.Fatal(cErr)
 	}
 	im, _ := indexmem.NewFactory()(nil, cm, nil)
-	tier := &VaultInstance{
+	inst := &VaultInstance{
 		VaultID:     tierID,
 		Type:       "memory",
 		Chunks:     cm,
@@ -552,7 +552,7 @@ func TestAppendToTierSecondarySkipsPostSeal(t *testing.T) {
 		Query:      query.New(cm, im, nil),
 		IsFollower: true,
 	}
-	vault := NewVault(vaultID, tier)
+	vault := NewVault(vaultID, inst)
 	vault.Name = "skip-postseal"
 	orch.RegisterVault(vault)
 
@@ -588,8 +588,8 @@ func TestImportToTierSecondarySealsActiveAndKeeps(t *testing.T) {
 
 	tierID := glid.New()
 	vaultID := glid.New()
-	tier := newMemTier(t, tierID, true, nil)
-	vault := NewVault(vaultID, tier)
+	inst := newMemTier(t, tierID, true, nil)
+	vault := NewVault(vaultID, inst)
 	vault.Name = "seal-and-keep"
 	orch.RegisterVault(vault)
 
@@ -597,13 +597,13 @@ func TestImportToTierSecondarySealsActiveAndKeeps(t *testing.T) {
 
 	// Simulate active record forwarding: follower has an active chunk
 	// with the leader's ID, still receiving records.
-	tier.Chunks.SetNextChunkID(chunkID)
+	inst.Chunks.SetNextChunkID(chunkID)
 	for range 3 {
-		if _, _, err := tier.Chunks.Append(testRecord("forwarded")); err != nil {
+		if _, _, err := inst.Chunks.Append(testRecord("forwarded")); err != nil {
 			t.Fatal(err)
 		}
 	}
-	active := tier.Chunks.Active()
+	active := inst.Chunks.Active()
 	if active == nil || active.ID != chunkID {
 		t.Fatal("expected active chunk with leader's ID")
 	}
@@ -616,7 +616,7 @@ func TestImportToTierSecondarySealsActiveAndKeeps(t *testing.T) {
 	}
 
 	// Forwarded version was replaced by canonical (5 records).
-	meta, err := tier.Chunks.Meta(chunkID)
+	meta, err := inst.Chunks.Meta(chunkID)
 	if err != nil {
 		t.Fatalf("expected canonical chunk to exist: %v", err)
 	}
@@ -634,8 +634,8 @@ func TestImportToTierSecondaryKeepsSealedForwarded(t *testing.T) {
 
 	tierID := glid.New()
 	vaultID := glid.New()
-	tier := newMemTier(t, tierID, true, nil)
-	vault := NewVault(vaultID, tier)
+	inst := newMemTier(t, tierID, true, nil)
+	vault := NewVault(vaultID, inst)
 	vault.Name = "keep-sealed"
 	orch.RegisterVault(vault)
 
@@ -643,13 +643,13 @@ func TestImportToTierSecondaryKeepsSealedForwarded(t *testing.T) {
 
 	// Simulate: forwarded version is already sealed (e.g., follower
 	// received SealActiveTier before the canonical import arrives).
-	tier.Chunks.SetNextChunkID(chunkID)
+	inst.Chunks.SetNextChunkID(chunkID)
 	for range 3 {
-		if _, _, err := tier.Chunks.Append(testRecord("forwarded")); err != nil {
+		if _, _, err := inst.Chunks.Append(testRecord("forwarded")); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := tier.Chunks.Seal(); err != nil {
+	if err := inst.Chunks.Seal(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -660,7 +660,7 @@ func TestImportToTierSecondaryKeepsSealedForwarded(t *testing.T) {
 	}
 
 	// Canonical version replaces forwarded (5 records, not 3).
-	meta, err := tier.Chunks.Meta(chunkID)
+	meta, err := inst.Chunks.Meta(chunkID)
 	if err != nil {
 		t.Fatalf("expected canonical chunk to exist: %v", err)
 	}
@@ -669,7 +669,7 @@ func TestImportToTierSecondaryKeepsSealedForwarded(t *testing.T) {
 	}
 
 	// Only one chunk with this ID.
-	metas, _ := tier.Chunks.List()
+	metas, _ := inst.Chunks.List()
 	count := 0
 	for _, m := range metas {
 		if m.ID == chunkID {
@@ -690,8 +690,8 @@ func TestAppendToTierNoForwarderSingleNode(t *testing.T) {
 
 	tierID := glid.New()
 	vaultID := glid.New()
-	tier := newMemTier(t, tierID, false, []system.ReplicationTarget{{NodeID: "node-2"}})
-	vault := NewVault(vaultID, tier)
+	inst := newMemTier(t, tierID, false, []system.ReplicationTarget{{NodeID: "node-2"}})
+	vault := NewVault(vaultID, inst)
 	vault.Name = "no-forwarder"
 	orch.RegisterVault(vault)
 
@@ -701,7 +701,7 @@ func TestAppendToTierNoForwarderSingleNode(t *testing.T) {
 	}
 
 	// Record should be appended locally.
-	active := tier.Chunks.Active()
+	active := inst.Chunks.Active()
 	if active == nil {
 		t.Fatal("expected active chunk after append")
 	}
@@ -731,19 +731,19 @@ func TestImportToTierDrainsIteratorOnSkip(t *testing.T) {
 
 	tierID := glid.New()
 	vaultID := glid.New()
-	tier := newMemTier(t, tierID, true, nil)
-	vault := NewVault(vaultID, tier)
+	inst := newMemTier(t, tierID, true, nil)
+	vault := NewVault(vaultID, inst)
 	vault.Name = "drain-on-skip"
 	orch.RegisterVault(vault)
 
 	chunkID := chunk.NewChunkID()
 
 	// Pre-populate a sealed chunk with this ID so ImportToVault will skip.
-	tier.Chunks.SetNextChunkID(chunkID)
-	if _, _, err := tier.Chunks.Append(testRecord("existing")); err != nil {
+	inst.Chunks.SetNextChunkID(chunkID)
+	if _, _, err := inst.Chunks.Append(testRecord("existing")); err != nil {
 		t.Fatal(err)
 	}
-	if err := tier.Chunks.Seal(); err != nil {
+	if err := inst.Chunks.Seal(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -779,8 +779,8 @@ func TestAppendToTierForwardLifecycle(t *testing.T) {
 	orch.SetChunkReplicator(fwd)
 
 	vaultID := glid.New()
-	tier := newMemTier(t, vaultID, false, []system.ReplicationTarget{{NodeID: "node-2"}})
-	vault := NewVault(vaultID, tier)
+	inst := newMemTier(t, vaultID, false, []system.ReplicationTarget{{NodeID: "node-2"}})
+	vault := NewVault(vaultID, inst)
 	vault.Name = "forward-lifecycle"
 	orch.RegisterVault(vault)
 
@@ -798,7 +798,7 @@ func TestAppendToTierForwardLifecycle(t *testing.T) {
 		t.Fatalf("expected 3 AppendRecords calls, got %d", len(calls))
 	}
 
-	// All calls should target the same vault, tier, and chunk ID.
+	// All calls should target the same vault, inst, and chunk ID.
 	firstChunkID := calls[0].ChunkID
 	if firstChunkID == (chunk.ChunkID{}) {
 		t.Fatal("expected non-zero chunk ID in forward calls")
@@ -815,8 +815,8 @@ func TestAppendToTierForwardLifecycle(t *testing.T) {
 		}
 	}
 
-	// Verify local tier has 3 records in active chunk.
-	active := tier.Chunks.Active()
+	// Verify local inst has 3 records in active chunk.
+	active := inst.Chunks.Active()
 	if active == nil {
 		t.Fatal("expected active chunk")
 	}
@@ -860,8 +860,8 @@ func TestAppendRecordWaitForReplicaReturnsTask(t *testing.T) {
 
 	tierID := glid.New()
 	vaultID := glid.New()
-	tier := newMemTier(t, tierID, false, []system.ReplicationTarget{{NodeID: "node-2"}})
-	vault := NewVault(vaultID, tier)
+	inst := newMemTier(t, tierID, false, []system.ReplicationTarget{{NodeID: "node-2"}})
+	vault := NewVault(vaultID, inst)
 	vault.Name = "ack-gated"
 	orch.RegisterVault(vault)
 
@@ -903,8 +903,8 @@ func TestAppendRecordNoWaitForReplicaFiresAndForgets(t *testing.T) {
 
 	tierID := glid.New()
 	vaultID := glid.New()
-	tier := newMemTier(t, tierID, false, []system.ReplicationTarget{{NodeID: "node-2"}})
-	vault := NewVault(vaultID, tier)
+	inst := newMemTier(t, tierID, false, []system.ReplicationTarget{{NodeID: "node-2"}})
+	vault := NewVault(vaultID, inst)
 	vault.Name = "no-ack"
 	orch.RegisterVault(vault)
 
@@ -946,8 +946,8 @@ func TestIngestReturnsReplicationTasks(t *testing.T) {
 
 	tierID := glid.New()
 	vaultID := glid.New()
-	tier := newMemTier(t, tierID, false, []system.ReplicationTarget{{NodeID: "node-2"}})
-	vault := NewVault(vaultID, tier)
+	inst := newMemTier(t, tierID, false, []system.ReplicationTarget{{NodeID: "node-2"}})
+	vault := NewVault(vaultID, inst)
 	vault.Name = "ingest-ack"
 	orch.RegisterVault(vault)
 
@@ -1099,26 +1099,26 @@ func TestImportToTierReplacesIncompleteForwardedChunk(t *testing.T) {
 
 	tierID := glid.New()
 	vaultID := glid.New()
-	tier := newMemTier(t, tierID, true, nil) // follower receives forwarded + canonical
-	vault := NewVault(vaultID, tier)
+	inst := newMemTier(t, tierID, true, nil) // follower receives forwarded + canonical
+	vault := NewVault(vaultID, inst)
 	vault.Name = "incomplete-forward"
 	orch.RegisterVault(vault)
 
 	chunkID := chunk.NewChunkID()
 
 	// Simulate fire-and-forget forwarding: only 70 of 100 records arrive.
-	tier.Chunks.SetNextChunkID(chunkID)
+	inst.Chunks.SetNextChunkID(chunkID)
 	for i := 0; i < 70; i++ {
-		if _, _, err := tier.Chunks.Append(testRecord("forwarded")); err != nil {
+		if _, _, err := inst.Chunks.Append(testRecord("forwarded")); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// Seal the incomplete forwarded chunk.
-	if err := tier.Chunks.Seal(); err != nil {
+	if err := inst.Chunks.Seal(); err != nil {
 		t.Fatal(err)
 	}
 
-	meta, err := tier.Chunks.Meta(chunkID)
+	meta, err := inst.Chunks.Meta(chunkID)
 	if err != nil {
 		t.Fatalf("expected forwarded chunk to exist: %v", err)
 	}
@@ -1133,7 +1133,7 @@ func TestImportToTierReplacesIncompleteForwardedChunk(t *testing.T) {
 	}
 
 	// Verify: chunk now has 100 records (canonical replaced incomplete).
-	meta, err = tier.Chunks.Meta(chunkID)
+	meta, err = inst.Chunks.Meta(chunkID)
 	if err != nil {
 		t.Fatalf("expected canonical chunk to exist: %v", err)
 	}
@@ -1145,7 +1145,7 @@ func TestImportToTierReplacesIncompleteForwardedChunk(t *testing.T) {
 	}
 
 	// Verify exactly one chunk with this ID.
-	metas, _ := tier.Chunks.List()
+	metas, _ := inst.Chunks.List()
 	count := 0
 	for _, m := range metas {
 		if m.ID == chunkID {
@@ -1158,8 +1158,8 @@ func TestImportToTierReplacesIncompleteForwardedChunk(t *testing.T) {
 }
 
 // TestTransitionLocalPreservesAllRecords verifies zero record loss when
-// transitioning a large sealed chunk from tier 0 to tier 1. The 5000 records
-// may span multiple chunks in the destination tier due to rotation policy.
+// transitioning a large sealed chunk from inst 0 to inst 1. The 5000 records
+// may span multiple chunks in the destination inst due to rotation policy.
 
 // errorCursor is a RecordCursor that returns N records, then returns a
 // configurable error (not ErrNoMoreRecords) to simulate mid-read failures.
@@ -1247,8 +1247,8 @@ func TestAppendToTierForwardingDoesNotBlockOnFullChannel(t *testing.T) {
 
 	tierID := glid.New()
 	vaultID := glid.New()
-	tier := newMemTier(t, tierID, false, []system.ReplicationTarget{{NodeID: "node-2"}, {NodeID: "node-3"}})
-	vault := NewVault(vaultID, tier)
+	inst := newMemTier(t, tierID, false, []system.ReplicationTarget{{NodeID: "node-2"}, {NodeID: "node-3"}})
+	vault := NewVault(vaultID, inst)
 	vault.Name = "non-blocking"
 	orch.RegisterVault(vault)
 
@@ -1262,7 +1262,7 @@ func TestAppendToTierForwardingDoesNotBlockOnFullChannel(t *testing.T) {
 	}
 
 	// Verify all records committed locally despite forwarder failures.
-	active := tier.Chunks.Active()
+	active := inst.Chunks.Active()
 	if active == nil {
 		t.Fatal("expected active chunk after appends")
 	}

@@ -131,7 +131,7 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	// Start the pressure gate after everything else is wired.
 	o.auxWg.Go(func() { gate.Run(ctx, 200*time.Millisecond) })
 
-	// Periodic per-tier rate alert evaluator (gastrolog-47qyw). Evaluates
+	// Periodic per-inst rate alert evaluator (gastrolog-47qyw). Evaluates
 	// rotation and retention rates against thresholds every 5 seconds and
 	// raises/clears alerts as needed.
 	o.auxWg.Go(func() { o.runRateAlertEvaluator(ctx, 5*time.Second) })
@@ -231,7 +231,7 @@ func (o *Orchestrator) Stop() error {
 	// cron rotation, retention) to finish.
 	_ = o.scheduler.Stop()
 
-	// Stop all per-tier leader loops (after the scheduler so reconcile
+	// Stop all per-inst leader loops (after the scheduler so reconcile
 	// passes don't fight retention deletes during shutdown).
 	o.vaultCtlLeaders.StopAll()
 
@@ -497,16 +497,16 @@ func (o *Orchestrator) RebuildMissingIndexes(ctx context.Context) error {
 	return nil
 }
 
-// rebuildTierIndexes checks a single tier for sealed chunks with incomplete indexes.
-func (o *Orchestrator) rebuildTierIndexes(ctx context.Context, vaultID glid.GLID, tier *VaultInstance) error {
+// rebuildTierIndexes checks a single inst for sealed chunks with incomplete indexes.
+func (o *Orchestrator) rebuildTierIndexes(ctx context.Context, vaultID glid.GLID, inst *VaultInstance) error {
 	// Skip tiers where the post-seal pipeline handles indexes.
-	if proc, ok := tier.Chunks.(chunk.ChunkPostSealProcessor); ok {
+	if proc, ok := inst.Chunks.(chunk.ChunkPostSealProcessor); ok {
 		if !proc.HasIndexBuilders() {
 			return nil
 		}
 	}
 
-	metas, err := tier.Chunks.List()
+	metas, err := inst.Chunks.List()
 	if err != nil {
 		return err
 	}
@@ -515,36 +515,36 @@ func (o *Orchestrator) rebuildTierIndexes(ctx context.Context, vaultID glid.GLID
 		// Phase 3 (gastrolog-1huz5): rebuild indexes only for chunks
 		// the FSM considers Sealed — Sealing chunks have no GLCB yet,
 		// so the index builder would fail to read records.
-		if tier.OverlayFromFSM != nil {
-			meta = tier.OverlayFromFSM(meta)
+		if inst.OverlayFromFSM != nil {
+			meta = inst.OverlayFromFSM(meta)
 		}
 		if !meta.Sealed {
 			continue
 		}
-		if meta.CloudBacked && tier.IsFollower {
+		if meta.CloudBacked && inst.IsFollower {
 			continue // no local data — adopted via RegisterCloudChunk
 		}
-		o.scheduleIndexRebuildIfNeeded(ctx, vaultID, tier, meta)
+		o.scheduleIndexRebuildIfNeeded(ctx, vaultID, inst, meta)
 	}
 	return nil
 }
 
-func (o *Orchestrator) scheduleIndexRebuildIfNeeded(ctx context.Context, vaultID glid.GLID, tier *VaultInstance, meta chunk.ChunkMeta) {
-	complete, err := tier.Indexes.IndexesComplete(meta.ID)
+func (o *Orchestrator) scheduleIndexRebuildIfNeeded(ctx context.Context, vaultID glid.GLID, inst *VaultInstance, meta chunk.ChunkMeta) {
+	complete, err := inst.Indexes.IndexesComplete(meta.ID)
 	if err != nil || complete {
 		return
 	}
 	// Followers can host many replicated chunks; eagerly rebuilding every
 	// missing index on each follower at startup causes N-way rebuild storms.
 	// Keep bootstrap rebuilds on leaders only.
-	if tier.IsFollower {
+	if inst.IsFollower {
 		return
 	}
 	o.logger.Info("rebuilding missing indexes",
 		"vault", vaultID, "chunk", meta.ID.String())
-	name := fmt.Sprintf("index-rebuild:%s:%s:%s", vaultID, tier.VaultID, meta.ID)
+	name := fmt.Sprintf("index-rebuild:%s:%s:%s", vaultID, inst.VaultID, meta.ID)
 	runBuild := func(runCtx context.Context, chunkID chunk.ChunkID) error {
-		return tier.Indexes.BuildIndexes(runCtx, chunkID)
+		return inst.Indexes.BuildIndexes(runCtx, chunkID)
 	}
 	if err := o.scheduler.RunOnce(name, runBuild, ctx, meta.ID); err != nil {
 		o.logger.Warn("failed to schedule index rebuild", "name", name, "error", err)

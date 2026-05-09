@@ -8,7 +8,7 @@ import (
 	"gastrolog/internal/chunk"
 )
 
-// cronJobName returns the scheduler job name for a tier's cron rotation.
+// cronJobName returns the scheduler job name for a inst's cron rotation.
 func cronJobName(vaultID, tierID glid.GLID) string {
 	return fmt.Sprintf("cron-rotate:%s:%s", vaultID, tierID)
 }
@@ -70,7 +70,7 @@ func (m *cronRotationManager) removeAllForVault(vaultID glid.GLID) {
 	}
 }
 
-// rotateVault seals the active chunk for a vault tier if it has records.
+// rotateVault seals the active chunk for a vault inst if it has records.
 func (m *cronRotationManager) rotateVault(vaultID, tierID glid.GLID, vaultName string, cm chunk.ChunkManager) {
 	active := cm.Active()
 	if active == nil || active.RecordCount == 0 {

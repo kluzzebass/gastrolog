@@ -42,11 +42,11 @@ func TestConcurrentAppendToTierAttrIntegrity(t *testing.T) {
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 
-	tier := &VaultInstance{
+	inst := &VaultInstance{
 		VaultID: tierID, Type: "file",
 		Chunks: cm, Indexes: im, Query: query.New(cm, im, nil),
 	}
-	orch.RegisterVault(NewVault(vaultID, tier))
+	orch.RegisterVault(NewVault(vaultID, inst))
 	t.Cleanup(func() {
 		orch.Stop()
 		_ = cm.Close()
@@ -148,7 +148,7 @@ func TestConcurrentAppendToTierAttrIntegrity(t *testing.T) {
 
 // TestTransitionConcurrentWithAppends runs appends and transitions simultaneously.
 // One goroutine continuously appends records (creating new sealed chunks via
-// rotation), while another goroutine transitions completed chunks to tier 1.
+// rotation), while another goroutine transitions completed chunks to inst 1.
 // Verifies no data loss and no panics from concurrent Delete + Append races.
 
 // ==========================================================================
@@ -240,7 +240,7 @@ func TestCursorOpenDuringSeal(t *testing.T) {
 // gastrolog-3p8zh: ImportToVault cursor verification
 // ==========================================================================
 
-// TestImportToTierCursorVerified imports records to a file-backed tier and
+// TestImportToTierCursorVerified imports records to a file-backed inst and
 // verifies every record via cursor — not just metadata RecordCount.
 func TestImportToTierCursorVerified(t *testing.T) {
 	t.Parallel()
@@ -260,8 +260,8 @@ func TestImportToTierCursorVerified(t *testing.T) {
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 
-	tier := &VaultInstance{VaultID: tierID, Type: "file", Chunks: cm, Indexes: im, Query: query.New(cm, im, nil)}
-	orch.RegisterVault(NewVault(vaultID, tier))
+	inst := &VaultInstance{VaultID: tierID, Type: "file", Chunks: cm, Indexes: im, Query: query.New(cm, im, nil)}
+	orch.RegisterVault(NewVault(vaultID, inst))
 	t.Cleanup(func() {
 		orch.Stop()
 		_ = cm.Close()
@@ -348,7 +348,7 @@ func testIterFromSlice(records []chunk.Record) chunk.RecordIterator {
 // ==========================================================================
 
 // TestTransitionSourceDeleteFailsAfterImport verifies behavior when the
-// transition successfully streams records to the next tier but fails to
+// transition successfully streams records to the next inst but fails to
 // delete the source chunk. The source chunk should be retained (not lost).
 
 // failingIndexManager always fails on DeleteIndexes.
@@ -359,7 +359,7 @@ func (f *failingIndexManager) DeleteIndexes(_ chunk.ChunkID) error {
 }
 
 // ==========================================================================
-// gastrolog-60h49: Faulty blobstore for cloud tier tests
+// gastrolog-60h49: Faulty blobstore for cloud inst tests
 // ==========================================================================
 
 // faultyBlobstore wraps a real blobstore and injects failures.
@@ -458,7 +458,7 @@ func TestCloudUploadFailureRetainsChunk(t *testing.T) {
 // ==========================================================================
 
 // TestReconfigDuringTransitionDoesNotPanic verifies that changing the vault's
-// tier list while a transition is running doesn't cause a panic. The transition
+// inst list while a transition is running doesn't cause a panic. The transition
 // should either complete with the original config or fail gracefully.
 
 // ==========================================================================

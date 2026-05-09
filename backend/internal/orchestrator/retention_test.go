@@ -337,7 +337,7 @@ func TestExpireChunkProposesRequestDelete(t *testing.T) {
 		gotReason       string
 		gotExpectedFrom []string
 	)
-	tier := &VaultInstance{
+	inst := &VaultInstance{
 		VaultID: tierID,
 		Chunks: cm,
 		Indexes: im,
@@ -352,7 +352,7 @@ func TestExpireChunkProposesRequestDelete(t *testing.T) {
 			return nil
 		},
 	}
-	rec := NewTierLifecycleReconciler(nil, vaultID, tierID, tier, "node-A", slog.Default())
+	rec := NewTierLifecycleReconciler(nil, vaultID, tierID, inst, "node-A", slog.Default())
 
 	r := &retentionRunner{
 		isLeader:        true,
@@ -361,7 +361,7 @@ func TestExpireChunkProposesRequestDelete(t *testing.T) {
 		cm:              cm,
 		im:              im,
 		reconciler:      rec,
-		followerTargets: tier.FollowerTargets,
+		followerTargets: inst.FollowerTargets,
 		now:             time.Now,
 		logger:          slog.Default(),
 	}
@@ -403,7 +403,7 @@ func TestExpireChunkSkipsLocalOnRequestDeleteFailure(t *testing.T) {
 	im := &retentionFakeIndexManager{}
 
 	vaultID, tierID := glid.New(), glid.New()
-	tier := &VaultInstance{
+	inst := &VaultInstance{
 		VaultID:  tierID,
 		Chunks:  cm,
 		Indexes: im,
@@ -411,7 +411,7 @@ func TestExpireChunkSkipsLocalOnRequestDeleteFailure(t *testing.T) {
 			return fmt.Errorf("not leader")
 		},
 	}
-	rec := NewTierLifecycleReconciler(nil, vaultID, tierID, tier, "node-A", slog.Default())
+	rec := NewTierLifecycleReconciler(nil, vaultID, tierID, inst, "node-A", slog.Default())
 
 	r := &retentionRunner{
 		isLeader:   true,
@@ -610,11 +610,11 @@ func TestClusterRetentionSweepWithTTLOnAllNodes(t *testing.T) {
 
 // TestRetentionTargetRefreshesCmOnExistingRunner verifies that
 // retentionTargetForTier updates cm and im on an existing runner
-// when the tier's chunk manager changes (e.g., after vault rebuild).
+// when the inst's chunk manager changes (e.g., after vault rebuild).
 func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 	t.Parallel()
 
-	// 1:1 vault:tier — IDs match.
+	// 1:1 vault:inst — IDs match.
 	vaultID := glid.New()
 	tierID := vaultID
 	policyID := glid.New()

@@ -941,7 +941,7 @@ func TestRetentionSingleJobRegistered(t *testing.T) {
 			{ID: retPolicyID, Name: "age-2m", MaxAge: strPtr("2m")},
 		},
 		Tiers: []system.TierConfig{
-			{ID: tierID, Name: "tier", Type: system.VaultTypeMemory, VaultID: vaultID, RetentionRules: []system.RetentionRule{{
+			{ID: tierID, Name: "inst", Type: system.VaultTypeMemory, VaultID: vaultID, RetentionRules: []system.RetentionRule{{
 				RetentionPolicyID: retPolicyID,
 				
 			}}},
@@ -964,14 +964,14 @@ func TestRetentionSingleJobRegistered(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The single "retention" job should be registered, not per-tier jobs.
+	// The single "retention" job should be registered, not per-inst jobs.
 	sched := orch.Scheduler()
 	if !sched.HasJob("retention") {
 		t.Fatal("single retention sweep job should exist")
 	}
 	perTierJobName := "retention:" + tierID.String()
 	if sched.HasJob(perTierJobName) {
-		t.Fatal("per-tier retention job should NOT exist — retention uses a single discovery-based sweep")
+		t.Fatal("per-inst retention job should NOT exist — retention uses a single discovery-based sweep")
 	}
 }
 

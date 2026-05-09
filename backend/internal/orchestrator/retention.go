@@ -26,7 +26,7 @@ const (
 	// collide with the retention sweep at second 0. Each node consults
 	// its OWN replicated FSM and reconciles local disk state in both
 	// directions — no leader involvement. Drives three independent
-	// catchup mechanisms per tier instance:
+	// catchup mechanisms per inst instance:
 	//
 	//   - SweepPendingObligations    receipt-protocol delete acks
 	//                                (gastrolog-51gme)
@@ -40,11 +40,11 @@ const (
 	// resolve within a sweep cycle, slow enough that a cluster of N
 	// nodes only generates N applies per cycle even when nothing is
 	// diverged.
-	tierCatchupSweepJobName  = "tier-catchup-sweep"
+	tierCatchupSweepJobName  = "inst-catchup-sweep"
 	tierCatchupSweepSchedule = "13,33,53 * * * * *"
 )
 
-// retentionKey returns a unique map key for a tier instance's retention state.
+// retentionKey returns a unique map key for a inst instance's retention state.
 func retentionKey(tierID glid.GLID, storageID string) string {
 	if storageID == "" {
 		return tierID.String()
@@ -62,15 +62,15 @@ type retentionRule struct {
 	policy chunk.RetentionPolicy
 }
 
-// retentionRunner holds per-tier-instance state that persists across sweeps.
-// Only leaders get runners — followers react to the tier FSM manifest
+// retentionRunner holds per-inst-instance state that persists across sweeps.
+// Only leaders get runners — followers react to the inst FSM manifest
 // via the ChunkFSM.OnDelete callback.
 type retentionRunner struct {
 	mu      sync.Mutex
 	vaultID glid.GLID
 	tierID  glid.GLID
 	// Cached for job descriptions so the Jobs inspector can tell sweep
-	// sub-jobs (transitions) apart by their vault/tier. Refreshed from
+	// sub-jobs (transitions) apart by their vault/inst. Refreshed from
 	// config on every sweep via retentionTargetForTier.
 	vaultName    string
 	tierPosition int
@@ -83,7 +83,7 @@ type retentionRunner struct {
 
 	applyRaftRetentionPending func(id chunk.ChunkID) error
 
-	// reconciler is the tier lifecycle reconciler that owns chunk-lifecycle
+	// reconciler is the inst lifecycle reconciler that owns chunk-lifecycle
 	// execution. All production deletes route through reconciler.deleteChunk
 	// → CmdRequestDelete (gastrolog-51gme steps 4-7). Nil only in older test
 	// harnesses that build TierInstances directly without going through
@@ -92,12 +92,12 @@ type retentionRunner struct {
 	// directChunkReplicator.DeleteChunk RPC fan-out separately).
 	reconciler *VaultLifecycleReconciler
 
-	// isLeader returns true if this node is the config leader for this tier.
+	// isLeader returns true if this node is the config leader for this inst.
 	// Retention (expiry + transitions) only runs on the leader to prevent
 	// all nodes from independently transitioning the same chunks.
 	isLeader bool
 
-	// followerTargets are the remote nodes that hold replicas of this tier's
+	// followerTargets are the remote nodes that hold replicas of this inst's
 	// chunks. Used to forward chunk deletions after retention expires them.
 	followerTargets []system.ReplicationTarget
 
@@ -118,15 +118,15 @@ type sweepTarget struct {
 }
 
 // retentionSweepAll is the single scheduled retention job. Runs on every node
-// that hosts at least one tier instance.
+// that hosts at least one inst instance.
 //
-// Per-tier role and readiness:
-//   - Rule evaluation runs only when the tier is the leader (tier.IsLeader()).
+// Per-inst role and readiness:
+//   - Rule evaluation runs only when the inst is the leader (inst.IsLeader()).
 //     Followers skip rule evaluation because rule results must be applied via
 //     the vault control-plane Raft, which only the leader writes to.
 //
 // There is no per-vault Vault.ReadinessErr gate at this level because the
-// per-tier IsLeader checks already cover the preconditions for each action.
+// per-inst IsLeader checks already cover the preconditions for each action.
 // See vault_readiness.go for the canonical vault readiness definition used
 // by ingest/query entry points.
 //
@@ -157,9 +157,9 @@ func (o *Orchestrator) retentionSweepAll() {
 		if vault == nil {
 			continue
 		}
-		tier := vault.Instance
-		if tier != nil && tier.IsLeader() {
-			if t := o.retentionTargetForTier(cfg, vaultCfg, tier, active); t != nil {
+		inst := vault.Instance
+		if inst != nil && inst.IsLeader() {
+			if t := o.retentionTargetForTier(cfg, vaultCfg, inst, active); t != nil {
 				targets = append(targets, *t)
 			}
 		}
@@ -183,7 +183,7 @@ func (o *Orchestrator) retentionSweepAll() {
 	// receipt" stage anymore.
 	//
 	// (Disk-vs-manifest orphan cleanup and missing-replica catchup are
-	// done out-of-band on the tier-catchup sweep tick — see
+	// done out-of-band on the inst-catchup sweep tick — see
 	// tierCatchupSweepAll. The retention sweep stays focused on rule
 	// evaluation.)
 
@@ -195,8 +195,8 @@ func (o *Orchestrator) retentionSweepAll() {
 	var evictors []chunk.ChunkCacheEvictor
 	o.mu.RLock()
 	for _, vault := range o.vaults {
-		if tier := vault.Instance; tier != nil {
-			if evictor, ok := tier.Chunks.(chunk.ChunkCacheEvictor); ok {
+		if inst := vault.Instance; inst != nil {
+			if evictor, ok := inst.Chunks.(chunk.ChunkCacheEvictor); ok {
 				evictors = append(evictors, evictor)
 			}
 		}
@@ -209,7 +209,7 @@ func (o *Orchestrator) retentionSweepAll() {
 
 // tierCatchupSweepAll runs every 20 seconds (cron 13/33/53s, phase-
 // offset from the retention sweep) on every node. For each (vault,
-// tier) on this node it asks the lifecycle reconciler to run all
+// inst) on this node it asks the lifecycle reconciler to run all
 // three local-state catchup sweeps:
 //
 //  1. SweepPendingObligations — re-runs fulfillObligation for any
@@ -255,7 +255,7 @@ func (o *Orchestrator) tierCatchupSweepAll() {
 }
 
 // enforceMemoryBudgets checks memory tiers for budget overruns and transitions
-// the oldest sealed chunks to the next tier. Only runs on leaders.
+// the oldest sealed chunks to the next inst. Only runs on leaders.
 func (o *Orchestrator) enforceMemoryBudgets(cfg *system.Config) {
 	if cfg == nil {
 		return
@@ -274,19 +274,19 @@ func (o *Orchestrator) enforceMemoryBudgets(cfg *system.Config) {
 		if vault == nil {
 			continue
 		}
-		tier := vault.Instance
-		if tier == nil || !tier.IsLeader() {
+		inst := vault.Instance
+		if inst == nil || !inst.IsLeader() {
 			continue
 		}
-		monitor, ok := tier.Chunks.(chunk.ChunkBudgetMonitor)
+		monitor, ok := inst.Chunks.(chunk.ChunkBudgetMonitor)
 		if !ok {
 			continue
 		}
 		if excess := monitor.BudgetExceeded(); excess > 0 {
 			targets = append(targets, budgetTarget{
 				vaultID: vaultCfg.ID,
-				tierID:  tier.VaultID,
-				cm:      tier.Chunks,
+				tierID:  inst.VaultID,
+				cm:      inst.Chunks,
 				excess:  excess,
 			})
 		}
@@ -301,7 +301,7 @@ func (o *Orchestrator) enforceMemoryBudgets(cfg *system.Config) {
 // drainExcessChunks fires retention events on the oldest sealed chunks
 // of a memory vault until the excess bytes are reclaimed (or no more
 // sealed chunks remain). Phase 4 (gastrolog-42f9z): these used to be
-// "transitioned to the next tier"; now they're just retention events
+// "transitioned to the next inst"; now they're just retention events
 // like any other, with the routing engine deciding their fate.
 func (o *Orchestrator) drainExcessChunks(vaultID, tierID glid.GLID, cm chunk.ChunkManager, excess int64) {
 	metas, err := cm.List()
@@ -314,12 +314,12 @@ func (o *Orchestrator) drainExcessChunks(vaultID, tierID glid.GLID, cm chunk.Chu
 		return a.WriteStart.Compare(b.WriteStart)
 	})
 
-	// Find the index manager for this tier.
+	// Find the index manager for this inst.
 	var im index.IndexManager
 	o.mu.RLock()
 	if vault := o.vaults[vaultID]; vault != nil {
-		if tier := vault.Instance; tier != nil && tier.VaultID == tierID {
-			im = tier.Indexes
+		if inst := vault.Instance; inst != nil && inst.VaultID == tierID {
+			im = inst.Indexes
 		}
 	}
 	o.mu.RUnlock()
@@ -356,7 +356,7 @@ func (o *Orchestrator) drainExcessChunks(vaultID, tierID glid.GLID, cm chunk.Chu
 }
 
 // UnreadableChunks returns chunk IDs currently flagged as unreadable
-// across all tier-instance retention runners for the vault. Used by
+// across all inst-instance retention runners for the vault. Used by
 // the inspector to surface which chunks are in retry-with-backoff and
 // by tests. Read-only accessor; safe to call from any node.
 func (o *Orchestrator) UnreadableChunks(vaultID glid.GLID) []chunk.ChunkID {
@@ -377,7 +377,7 @@ func (o *Orchestrator) UnreadableChunks(vaultID glid.GLID) []chunk.ChunkID {
 }
 
 // RetryUnreadableChunks resets every unreadable chunk's retry backoff
-// across all tier-instance retention runners for the vault, so the
+// across all inst-instance retention runners for the vault, so the
 // next retention sweep retries them all immediately. Returns the total
 // count of entries reset across runners. Operator-driven recovery
 // action exposed via the manual "Retry unreadable" inspector button
@@ -397,7 +397,7 @@ func (o *Orchestrator) RetryUnreadableChunks(vaultID glid.GLID) int {
 
 
 // RetentionPendingChunks returns chunk IDs marked as retention-pending in the
-// tier FSM for a vault. Visible to all nodes via Raft replication.
+// inst FSM for a vault. Visible to all nodes via Raft replication.
 //
 // Read-only accessor, callable from any-node. No Vault.ReadinessErr gate —
 // observational use only. Decision-making callers should gate on
@@ -410,15 +410,15 @@ func (o *Orchestrator) RetentionPendingChunks(vaultID glid.GLID) map[chunk.Chunk
 		return nil
 	}
 	result := make(map[chunk.ChunkID]bool)
-	if tier := vault.Instance; tier != nil && tier.ListRetentionPending != nil {
-		for _, id := range tier.ListRetentionPending() {
+	if inst := vault.Instance; inst != nil && inst.ListRetentionPending != nil {
+		for _, id := range inst.ListRetentionPending() {
 			result[id] = true
 		}
 	}
 	return result
 }
 
-// PendingDeleteAcks returns, for each chunk currently in any tier's
+// PendingDeleteAcks returns, for each chunk currently in any inst's
 // receipt-protocol pendingDeletes map within the vault, the set of node
 // IDs that have NOT yet acked the delete. As nodes ack, their entry is
 // removed from ExpectedFrom; what's returned here is the still-owed
@@ -439,8 +439,8 @@ func (o *Orchestrator) PendingDeleteAcks(vaultID glid.GLID) map[chunk.ChunkID][]
 		return nil
 	}
 	result := make(map[chunk.ChunkID][]string)
-	if tier := vault.Instance; tier != nil && tier.Reconciler != nil && tier.Reconciler.fsm != nil {
-		for _, p := range tier.Reconciler.fsm.PendingDeletes() {
+	if inst := vault.Instance; inst != nil && inst.Reconciler != nil && inst.Reconciler.fsm != nil {
+		for _, p := range inst.Reconciler.fsm.PendingDeletes() {
 			expected := make([]string, 0, len(p.ExpectedFrom))
 			for nodeID := range p.ExpectedFrom {
 				expected = append(expected, nodeID)
@@ -451,16 +451,16 @@ func (o *Orchestrator) PendingDeleteAcks(vaultID glid.GLID) map[chunk.ChunkID][]
 	return result
 }
 
-// retentionTargetForTier resolves a single tier instance into a sweep target.
-// Returns nil if the tier should be skipped (no rules, no leader, etc.).
-func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg system.VaultConfig, tier *VaultInstance, active map[string]bool) *sweepTarget {
-	if tier.HasRaftLeader != nil && !tier.HasRaftLeader() {
+// retentionTargetForTier resolves a single inst instance into a sweep target.
+// Returns nil if the inst should be skipped (no rules, no leader, etc.).
+func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg system.VaultConfig, inst *VaultInstance, active map[string]bool) *sweepTarget {
+	if inst.HasRaftLeader != nil && !inst.HasRaftLeader() {
 		return nil
 	}
-	// IsRaftLeader check removed: the tier apply forwarder transparently
+	// IsRaftLeader check removed: the inst apply forwarder transparently
 	// routes applies to the vault-ctl Raft leader. The config placement leader
 	// always runs retention regardless of vault-ctl Raft leadership.
-	// 1:1 vault:tier — synthesize the tier config from the vault.
+	// 1:1 vault:inst — synthesize the inst config from the vault.
 	tier2 := system.TierFromVault(vaultCfg)
 	tierCfg := &tier2
 	if len(tierCfg.RetentionRules) == 0 {
@@ -476,37 +476,37 @@ func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg syste
 		return nil
 	}
 
-	key := retentionKey(tier.VaultID, tier.StorageID)
+	key := retentionKey(inst.VaultID, inst.StorageID)
 	active[key] = true
 
 	runner := o.retention[key]
 	if runner == nil {
 		runner = &retentionRunner{
 			vaultID: vaultCfg.ID,
-			tierID:  tier.VaultID,
-			cm:      tier.Chunks,
-			im:      tier.Indexes,
+			tierID:  inst.VaultID,
+			cm:      inst.Chunks,
+			im:      inst.Indexes,
 			orch:    o,
 			now:     o.now,
 			logger:  o.logger,
 		}
 		o.retention[key] = runner
 	}
-	runner.cm = tier.Chunks
-	runner.im = tier.Indexes
-	runner.applyRaftRetentionPending = tier.ApplyRaftRetentionPending
-	runner.reconciler = tier.Reconciler
-	runner.isLeader = tier.IsLeader()
-	runner.followerTargets = tier.FollowerTargets
+	runner.cm = inst.Chunks
+	runner.im = inst.Indexes
+	runner.applyRaftRetentionPending = inst.ApplyRaftRetentionPending
+	runner.reconciler = inst.Reconciler
+	runner.isLeader = inst.IsLeader()
+	runner.followerTargets = inst.FollowerTargets
 	runner.vaultName = vaultCfg.Name
 	runner.tierType = string(tierCfg.Type)
-	runner.tierPosition = tierPositionInVault(cfg, vaultCfg.ID, tier.VaultID)
+	runner.tierPosition = tierPositionInVault(cfg, vaultCfg.ID, inst.VaultID)
 	runner.disposition = vaultCfg.ResolveRetentionDisposition()
 	return &sweepTarget{runner: runner, rules: rules}
 }
 
 // tierPositionInVault returns the 0-based index of tierID in the vault's
-// ordered tier list. With 1:1 vault:tier the index is always 0.
+// ordered inst list. With 1:1 vault:inst the index is always 0.
 func tierPositionInVault(cfg *system.Config, vaultID, tierID glid.GLID) int {
 	if vaultID == tierID {
 		return 0
@@ -547,16 +547,16 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 
 	r.mu.Lock()
 	unreadable := r.unreadable
-	tier := r.findTierInstance()
+	inst := r.findTierInstance()
 	r.mu.Unlock()
 
 	// Phase 3 (gastrolog-1huz5): overlay each meta with FSM state so
 	// selectRetentionCandidates' meta.Sealed gate reflects cluster
 	// truth — Sealing chunks (active-form files closed locally but
 	// GLCB not yet committed) must not be eligible.
-	if tier != nil && tier.OverlayFromFSM != nil {
+	if inst != nil && inst.OverlayFromFSM != nil {
 		for i := range metas {
-			metas[i] = tier.OverlayFromFSM(metas[i])
+			metas[i] = inst.OverlayFromFSM(metas[i])
 		}
 	}
 
@@ -573,13 +573,13 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	// unreachable destination, receipt-protocol stuck) and the same
 	// chunk gets re-evaluated every minute. See gastrolog-51gme.
 	pendingFlag := make(map[chunk.ChunkID]bool)
-	if tier != nil && tier.ListRetentionPending != nil {
-		for _, id := range tier.ListRetentionPending() {
+	if inst != nil && inst.ListRetentionPending != nil {
+		for _, id := range inst.ListRetentionPending() {
 			pendingFlag[id] = true
 		}
 	}
 
-	manifest, manifestKnown := buildManifestSet(tier)
+	manifest, manifestKnown := buildManifestSet(inst)
 
 	now := time.Now()
 	sealed := selectRetentionCandidates(metas, streamed, manifest, manifestKnown, unreadable, now)
@@ -607,19 +607,19 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	}
 }
 
-// buildManifestSet returns the FSM-known chunk IDs for the given tier and a
+// buildManifestSet returns the FSM-known chunk IDs for the given inst and a
 // flag indicating whether the manifest is queryable. Any chunk on disk whose
 // ID is NOT in the manifest is a ghost — its FSM entry was finalize-deleted
 // but the disk file was never reaped. Filtering ghosts out of the retention
 // sweep prevents repeated no-op transitions (the apply silently no-ops when
 // f.chunks[id] is nil, the flag never sticks, and we re-stream the chunk's
-// records to the next tier on every sweep). See gastrolog-66b7x.
-func buildManifestSet(tier *VaultInstance) (map[chunk.ChunkID]bool, bool) {
+// records to the next inst on every sweep). See gastrolog-66b7x.
+func buildManifestSet(inst *VaultInstance) (map[chunk.ChunkID]bool, bool) {
 	manifest := make(map[chunk.ChunkID]bool)
-	if tier == nil || tier.ListManifest == nil {
+	if inst == nil || inst.ListManifest == nil {
 		return manifest, false
 	}
-	ids := tier.ListManifest()
+	ids := inst.ListManifest()
 	if ids == nil {
 		return manifest, false
 	}
@@ -791,7 +791,7 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) {
 		"vault", r.vaultID, "chunk", id, "count", fanned)
 }
 
-// findTierInstance looks up this runner's tier in the orchestrator's vault registry.
+// findTierInstance looks up this runner's inst in the orchestrator's vault registry.
 func (r *retentionRunner) findTierInstance() *VaultInstance {
 	if r.orch == nil {
 		return nil
@@ -929,8 +929,8 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID, reason string) {
 			return
 		}
 		if r.orch != nil && r.orch.retentionRates != nil {
-			// Per-tier rate alert (see gastrolog-47qyw). Only counted on
-			// the leader path (this function only runs on tier leaders)
+			// Per-inst rate alert (see gastrolog-47qyw). Only counted on
+			// the leader path (this function only runs on inst leaders)
 			// so the rate reflects active expiration decisions, not
 			// follower delete-cascade applications.
 			r.orch.retentionRates.Record(r.tierID, r.orch.now())
@@ -943,7 +943,7 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID, reason string) {
 	// Reconciler-less fallback: legacy direct-delete path.
 	//
 	// Reached only by older test harnesses that build a retentionRunner
-	// without going through buildTierInstance (so tier.Reconciler is nil).
+	// without going through buildTierInstance (so inst.Reconciler is nil).
 	// They wire cross-node propagation via directChunkReplicator.DeleteChunk
 	// RPC fan-out (forwardDeletionToFollowers below) instead of vault-ctl
 	// Raft. Production has no path into here after gastrolog-51gme step 11
@@ -1042,7 +1042,7 @@ func (r *retentionRunner) forwardDeleteWithRetry(nodeID string, id chunk.ChunkID
 	}
 }
 
-// sendDeleteToFollower issues a single chunk-delete RPC via the tier
+// sendDeleteToFollower issues a single chunk-delete RPC via the inst
 // replicator. Returns nil when no replicator is configured (single-node mode).
 func (r *retentionRunner) sendDeleteToFollower(followerID string, id chunk.ChunkID) error {
 	if r.orch.chunkReplicator == nil {

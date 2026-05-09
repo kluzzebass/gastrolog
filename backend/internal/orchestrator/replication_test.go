@@ -26,7 +26,7 @@ func (f *replicationFakeForwarder) Forward(_ context.Context, _ string, _ glid.G
 	return nil
 }
 
-// ---------- fake tier replicator that records operations ----------
+// ---------- fake inst replicator that records operations ----------
 
 type replicationFakeReplicator struct {
 	sealCalls        []sealCall
@@ -237,14 +237,14 @@ func TestCatchupSecondaryNoTransferrer(t *testing.T) {
 
 // TestCatchupSkipsFSMRetiredChunks is the regression test for gastrolog-5grpa.
 // Before the fix, catchupFollower used the leader's on-disk chunk list as the
-// authoritative set, which could include chunks that the tier Raft FSM had
+// authoritative set, which could include chunks that the inst Raft FSM had
 // already retired (DeleteChunk applied) but whose local file hadn't been
 // unlinked yet. Catchup would ship those orphans to the follower, where the
 // follower's reconcile loop would then delete them within ~1 minute. Net
 // result: catchup work wasted, follower under-replicated, repeat forever.
 //
-// The fix filters the catchup list by tier.ListManifest() — the FSM's
-// authoritative view of what should exist. This test populates a tier with
+// The fix filters the catchup list by inst.ListManifest() — the FSM's
+// authoritative view of what should exist. This test populates a inst with
 // 3 sealed chunks, configures ListManifest to return only 2 of them
 // (simulating the FSM having retired the third), and asserts that catchup
 // transferred only the 2 manifest-included chunks.
@@ -255,8 +255,8 @@ func TestCatchupSkipsFSMRetiredChunks(t *testing.T) {
 
 	tierID := glid.New()
 	vaultID := glid.New()
-	tier := newReplicationTier(t, tierID, nil, false, "")
-	vault := NewVault(vaultID, tier)
+	inst := newReplicationTier(t, tierID, nil, false, "")
+	vault := NewVault(vaultID, inst)
 	orch.RegisterVault(vault)
 
 	mock := &replicationFakeReplicator{}
@@ -268,7 +268,7 @@ func TestCatchupSkipsFSMRetiredChunks(t *testing.T) {
 		if _, _, err := orch.Append(vaultID, testRecord(fmt.Sprintf("rec-%d", i))); err != nil {
 			t.Fatalf("append %d: %v", i, err)
 		}
-		active := tier.Chunks.Active()
+		active := inst.Chunks.Active()
 		if active == nil {
 			t.Fatalf("chunk %d: no active chunk after append", i)
 		}
@@ -283,7 +283,7 @@ func TestCatchupSkipsFSMRetiredChunks(t *testing.T) {
 	}
 
 	// Confirm all 3 chunks are present on disk (the leader's local view).
-	metas, err := tier.Chunks.List()
+	metas, err := inst.Chunks.List()
 	if err != nil {
 		t.Fatalf("list chunks: %v", err)
 	}
@@ -300,7 +300,7 @@ func TestCatchupSkipsFSMRetiredChunks(t *testing.T) {
 	// Configure the FSM manifest to return only chunks 0 and 2, simulating
 	// chunk 1 being retired by the FSM (DeleteChunk applied) while still
 	// existing on disk in the brief window before unlink.
-	tier.ListManifest = func() []chunk.ChunkID {
+	inst.ListManifest = func() []chunk.ChunkID {
 		return []chunk.ChunkID{ids[0], ids[2]}
 	}
 
@@ -331,7 +331,7 @@ func TestCatchupSkipsFSMRetiredChunks(t *testing.T) {
 }
 
 // TestCatchupNilManifestUsesAllChunks verifies that when ListManifest is nil
-// (e.g., a tier with no Raft group, or a memory tier without FSM tracking),
+// (e.g., a inst with no Raft group, or a memory inst without FSM tracking),
 // catchupFollower falls back to the leader's on-disk list — the pre-fix
 // behaviour. This is the backward-compatibility guarantee.
 func TestCatchupNilManifestUsesAllChunks(t *testing.T) {
@@ -341,8 +341,8 @@ func TestCatchupNilManifestUsesAllChunks(t *testing.T) {
 
 	tierID := glid.New()
 	vaultID := glid.New()
-	tier := newReplicationTier(t, tierID, nil, false, "")
-	vault := NewVault(vaultID, tier)
+	inst := newReplicationTier(t, tierID, nil, false, "")
+	vault := NewVault(vaultID, inst)
 	orch.RegisterVault(vault)
 
 	mock := &replicationFakeReplicator{}
@@ -353,14 +353,14 @@ func TestCatchupNilManifestUsesAllChunks(t *testing.T) {
 		if _, _, err := orch.Append(vaultID, testRecord(fmt.Sprintf("rec-%d", i))); err != nil {
 			t.Fatalf("append %d: %v", i, err)
 		}
-		active := tier.Chunks.Active()
+		active := inst.Chunks.Active()
 		if err := orch.SealActiveTier(vaultID, active.ID); err != nil {
 			t.Fatalf("seal: %v", err)
 		}
 	}
 
 	// ListManifest is nil — catchup must fall back to disk list.
-	tier.ListManifest = nil
+	inst.ListManifest = nil
 
 	if err := orch.catchupFollower(context.Background(), vaultID, tierID, "node-2"); err != nil {
 		t.Fatalf("catchupFollower: %v", err)
@@ -466,7 +466,7 @@ func TestClusterReplicationSealedChunksArriveOnFollowers(t *testing.T) {
 
 // TestClusterReplicationSealedIdxWriteTSMatchesLeader verifies that after
 // sealed-chunk replication, follower idx.log entries match the leader for
-// WriteTS and IngestTS (offline read — same contract as tier ImportSealed).
+// WriteTS and IngestTS (offline read — same contract as inst ImportSealed).
 func TestClusterReplicationSealedIdxWriteTSMatchesLeader(t *testing.T) {
 	t.Parallel()
 	h := setupCluster(t, []string{"leader", "f1", "f2"}, 1, 100)
@@ -512,7 +512,7 @@ func TestClusterReplicationSealedIdxWriteTSMatchesLeader(t *testing.T) {
 
 	processor, ok := leaderTier.Chunks.(chunk.ChunkPostSealProcessor)
 	if !ok {
-		t.Fatal("leader tier chunks must implement ChunkPostSealProcessor")
+		t.Fatal("leader inst chunks must implement ChunkPostSealProcessor")
 	}
 	if err := processor.PostSealProcess(context.Background(), sealedID); err != nil {
 		t.Fatalf("PostSealProcess: %v", err)
@@ -618,7 +618,7 @@ func TestClusterReplicationSealSync(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Forward seal to followers via the tier replicator (uses SealActiveTier
+	// Forward seal to followers via the inst replicator (uses SealActiveTier
 	// which checks the expected chunk ID matches the follower's active chunk).
 	for _, fid := range []string{"f1", "f2"} {
 		if err := leaderNode.orch.chunkReplicator.SealVault(

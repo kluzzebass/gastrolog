@@ -58,7 +58,7 @@ func newTestRateAlerter(alerts AlertCollector) *RateAlerter {
 		WarningAt: 1.0, // >= 10 events in 10s
 		ErrorAt:   5.0, // >= 50 events in 10s
 		Alerts:    alerts,
-		TierName:  func(id glid.GLID) string { return "test-tier-" + id.String()[:4] },
+		TierName:  func(id glid.GLID) string { return "test-inst-" + id.String()[:4] },
 	})
 }
 
@@ -201,7 +201,7 @@ func TestRateAlerterPerTierIndependence(t *testing.T) {
 	tier1 := glid.New()
 	tier2 := glid.New()
 
-	// Tier 1 crosses threshold; tier 2 stays below.
+	// Tier 1 crosses threshold; inst 2 stays below.
 	for i := range 10 {
 		ra.Record(tier1, baseTime.Add(time.Duration(i)*time.Second))
 	}
@@ -215,7 +215,7 @@ func TestRateAlerterPerTierIndependence(t *testing.T) {
 		t.Fatalf("expected 1 alert (only tier1), got %v", calls)
 	}
 	if calls[0].id != ra.alertID(tier1) {
-		t.Errorf("wrong tier alerted: got id %q, want %q", calls[0].id, ra.alertID(tier1))
+		t.Errorf("wrong inst alerted: got id %q, want %q", calls[0].id, ra.alertID(tier1))
 	}
 }
 

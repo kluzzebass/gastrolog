@@ -46,7 +46,7 @@ package orchestrator
 //     drops a decommissioned node from every pendingDeletes entry's
 //     ExpectedFrom; the apply returns the chunkIDs whose ExpectedFrom
 //     became empty. The vault-ctl leader manager's onMemberRemoved hook
-//     fans CmdPruneNode out across the vault's tier sub-FSMs after a
+//     fans CmdPruneNode out across the vault's inst sub-FSMs after a
 //     successful RemoveServer call; the reconciler's onPruneNode handler
 //     (leader-only) proposes CmdFinalizeDelete for each finalizable
 //     chunk so deletes don't pin pendingDeletes forever.
@@ -78,8 +78,8 @@ import (
 )
 
 // VaultLifecycleReconciler owns chunk-lifecycle execution for a single
-// VaultInstance. Created during tier wiring (reconfig_vaults.go), wired
-// to the tier's FSM via Wire(), and torn down with the tier instance.
+// VaultInstance. Created during inst wiring (reconfig_vaults.go), wired
+// to the inst's FSM via Wire(), and torn down with the inst instance.
 //
 // The reconciler is the canonical caller of `chunk.DeleteNoAnnounce`
 // and the SilentDeleter shortcut. A forbidigo lint rule (step 9)
@@ -97,7 +97,7 @@ type VaultLifecycleReconciler struct {
 	// deleteFromFollowers path) and bump WatchChunks subscribers.
 	orch *Orchestrator
 
-	// fsm is the tier sub-FSM this reconciler is bound to. Stored on
+	// fsm is the inst sub-FSM this reconciler is bound to. Stored on
 	// Wire() so onAckDelete can read remaining ExpectedFrom without
 	// having to re-resolve the FSM through the Raft group.
 	fsm *tierfsm.FSM
@@ -118,7 +118,7 @@ type VaultLifecycleReconciler struct {
 	postSealHook func(vaultID glid.GLID, cm chunk.ChunkManager, id chunk.ChunkID)
 }
 
-// NewTierLifecycleReconciler creates a reconciler for a tier instance.
+// NewTierLifecycleReconciler creates a reconciler for a inst instance.
 // localNodeID is required so the reconciler can recognize when its own
 // node ID appears in a CmdRequestDelete's ExpectedFrom set (and ack)
 // or doesn't (and ignore).
@@ -126,18 +126,18 @@ type VaultLifecycleReconciler struct {
 // orch may be nil in tests that exercise the reconciler in isolation;
 // when nil, the same-node sibling cleanup path is skipped and chunk-
 // change notifications are dropped.
-func NewTierLifecycleReconciler(orch *Orchestrator, vaultID, tierID glid.GLID, tier *VaultInstance, localNodeID string, logger *slog.Logger) *VaultLifecycleReconciler {
+func NewTierLifecycleReconciler(orch *Orchestrator, vaultID, tierID glid.GLID, inst *VaultInstance, localNodeID string, logger *slog.Logger) *VaultLifecycleReconciler {
 	return &VaultLifecycleReconciler{
 		vaultID:     vaultID,
 		tierID:      tierID,
-		inst:        tier,
+		inst:        inst,
 		localNodeID: localNodeID,
 		orch:        orch,
 		logger:      logger.With("component", "vault-lifecycle-reconciler", "vault", vaultID),
 	}
 }
 
-// Wire installs the reconciler's callbacks on the given tier FSM. Must
+// Wire installs the reconciler's callbacks on the given inst FSM. Must
 // be called once after the FSM is constructed. Idempotent — repeat
 // calls just rebind the callback bindings.
 //
@@ -757,7 +757,7 @@ func (r *VaultLifecycleReconciler) SweepMissingReplicas() {
 		ctx, r.inst.LeaderNodeID, r.vaultID, missing, r.localNodeID)
 	if err != nil {
 		// The next sweep tick will retry. Possible causes: leader changed
-		// after we resolved tier.LeaderNodeID, leader is unreachable, peer
+		// after we resolved inst.LeaderNodeID, leader is unreachable, peer
 		// connection still warming up. None of these are terminal — the
 		// FSM diff is local state, so we converge on the next tick.
 		r.logger.Warn("missing-replica sweep: request failed",
@@ -778,7 +778,7 @@ func (r *VaultLifecycleReconciler) SweepMissingReplicas() {
 const staleLeaderFSMGracePeriod = 1 * time.Hour
 
 // SweepStaleLeaderFSMEntries walks the FSM manifest on the leader of a
-// non-cloud tier and proposes CmdRequestDelete for any sealed entry
+// non-cloud inst and proposes CmdRequestDelete for any sealed entry
 // missing from the leader's local chunk manager AND past the grace
 // period. The leader is the source of truth for non-cloud tiers
 // (per SweepMissingReplicas's invariant); if the leader doesn't have
@@ -874,7 +874,7 @@ func (r *VaultLifecycleReconciler) SweepStaleLeaderFSMEntries() {
 
 // placementMembership returns the expectedFrom set for delete
 // proposals: the local node plus every replication target. Mirrored
-// from orchestrator.placementMembership which takes a tier as input
+// from orchestrator.placementMembership which takes a inst as input
 // and is wired through r.inst directly here so the reconciler doesn't
 // need an orchestrator back-pointer for this.
 func (r *VaultLifecycleReconciler) placementMembership() []string {
@@ -904,7 +904,7 @@ func (r *VaultLifecycleReconciler) placementMembership() []string {
 // the active pointer (gastrolog-2yeht). The FSM has authoritatively
 // scheduled this chunk for deletion via the receipt protocol; the
 // local stale active pointer must yield. Without this prelude,
-// downstream-tier followers (no continuous record-stream to swap
+// downstream-inst followers (no continuous record-stream to swap
 // active naturally) would have fulfillObligation bouncing off
 // ErrActiveChunk on every periodic-sweep tick, blocking finalize
 // indefinitely.
@@ -983,7 +983,7 @@ func (r *VaultLifecycleReconciler) deleteLocalCopy(chunkID chunk.ChunkID) error 
 //   "retention-ttl"             retention rule fired
 //   "transition-source-expire"  source after destination receipt
 //   "manual-delete-rpc"         operator-initiated via CLI/UI
-//   "archived-to-glacier"       archival sweep on cloud tier
+//   "archived-to-glacier"       archival sweep on cloud inst
 //   "unreadable"                chunk classified as corrupt
 //   "crash-recovery-orphan"     local-only orphan with no FSM entry
 //
@@ -1007,7 +1007,7 @@ func (r *VaultLifecycleReconciler) deleteLocalCopy(chunkID chunk.ChunkID) error 
 // point, so dedup'ing here is safe.
 func (r *VaultLifecycleReconciler) deleteChunk(chunkID chunk.ChunkID, reason string, expectedFrom []string) error {
 	if r.inst == nil {
-		return errors.New("deleteChunk: nil tier instance")
+		return errors.New("deleteChunk: nil inst instance")
 	}
 	if r.inst.ApplyRaftRequestDelete == nil {
 		// Single-node fallback: no Raft, no receipt protocol. Just
