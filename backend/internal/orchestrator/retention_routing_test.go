@@ -422,7 +422,7 @@ func TestRetentionDispositionEmptyTreatedAsDelete(t *testing.T) {
 }
 
 // TestRetentionTargetThreadsDispositionFromVaultConfig verifies that
-// retentionTargetForTier reads VaultConfig.RetentionDisposition (via
+// retentionTargetForInstance reads VaultConfig.RetentionDisposition (via
 // ResolveRetentionDisposition) and writes the resolved value to the
 // runner. This is the load-bearing plumbing — without it, the per-chunk
 // gate in tryRetainChunk always sees an empty string and defaults to
@@ -477,7 +477,7 @@ func TestRetentionTargetThreadsDispositionFromVaultConfig(t *testing.T) {
 				Indexes: &retentionFakeIndexManager{},
 			}
 			active := make(map[string]bool)
-			target := orch.retentionTargetForTier(cfg, cfg.Vaults[0], inst, active)
+			target := orch.retentionTargetForInstance(cfg, cfg.Vaults[0], inst, active)
 			if target == nil {
 				t.Fatal("expected non-nil sweep target")
 			}

@@ -40,8 +40,8 @@ const (
 	// resolve within a sweep cycle, slow enough that a cluster of N
 	// nodes only generates N applies per cycle even when nothing is
 	// diverged.
-	tierCatchupSweepJobName  = "inst-catchup-sweep"
-	tierCatchupSweepSchedule = "13,33,53 * * * * *"
+	instCatchupSweepJobName  = "inst-catchup-sweep"
+	instCatchupSweepSchedule = "13,33,53 * * * * *"
 )
 
 // retentionKey returns a unique map key for a inst instance's retention state.
@@ -71,9 +71,9 @@ type retentionRunner struct {
 	instID  glid.GLID
 	// Cached for job descriptions so the Jobs inspector can tell sweep
 	// sub-jobs (transitions) apart by their vault/inst. Refreshed from
-	// config on every sweep via retentionTargetForTier.
+	// config on every sweep via retentionTargetForInstance.
 	vaultName    string
-	tierPosition int
+	instPosition int
 	vaultType     string
 	cm           chunk.ChunkManager
 	im           index.IndexManager
@@ -102,7 +102,7 @@ type retentionRunner struct {
 	followerTargets []system.ReplicationTarget
 
 	// disposition is the resolved VaultConfig.RetentionDisposition value.
-	// Refreshed on every sweep via retentionTargetForTier so live config
+	// Refreshed on every sweep via retentionTargetForInstance so live config
 	// edits take effect on the next tick. Branches the per-chunk path:
 	// "delete" skips the routing engine entirely, "route" fans records
 	// out for operator-configured routes to forward.
@@ -159,7 +159,7 @@ func (o *Orchestrator) retentionSweepAll() {
 		}
 		inst := vault.Instance
 		if inst != nil && inst.IsLeader() {
-			if t := o.retentionTargetForTier(cfg, vaultCfg, inst, active); t != nil {
+			if t := o.retentionTargetForInstance(cfg, vaultCfg, inst, active); t != nil {
 				targets = append(targets, *t)
 			}
 		}
@@ -184,7 +184,7 @@ func (o *Orchestrator) retentionSweepAll() {
 	//
 	// (Disk-vs-manifest orphan cleanup and missing-replica catchup are
 	// done out-of-band on the inst-catchup sweep tick — see
-	// tierCatchupSweepAll. The retention sweep stays focused on rule
+	// instCatchupSweepAll. The retention sweep stays focused on rule
 	// evaluation.)
 
 	// Memory budget enforcement: transition oldest chunks when over budget.
@@ -207,7 +207,7 @@ func (o *Orchestrator) retentionSweepAll() {
 	}
 }
 
-// tierCatchupSweepAll runs every 20 seconds (cron 13/33/53s, phase-
+// instCatchupSweepAll runs every 20 seconds (cron 13/33/53s, phase-
 // offset from the retention sweep) on every node. For each (vault,
 // inst) on this node it asks the lifecycle reconciler to run all
 // three local-state catchup sweeps:
@@ -237,7 +237,7 @@ func (o *Orchestrator) retentionSweepAll() {
 // (1) and (2) take no remote actions. (3) sends a unary RPC to the
 // placement leader, but the *decision* to send is local — the leader
 // is just the transport for the response.
-func (o *Orchestrator) tierCatchupSweepAll() {
+func (o *Orchestrator) instCatchupSweepAll() {
 	o.mu.RLock()
 	tiers := make([]*VaultInstance, 0)
 	for _, vault := range o.vaults {
@@ -451,9 +451,9 @@ func (o *Orchestrator) PendingDeleteAcks(vaultID glid.GLID) map[chunk.ChunkID][]
 	return result
 }
 
-// retentionTargetForTier resolves a single inst instance into a sweep target.
+// retentionTargetForInstance resolves a single inst instance into a sweep target.
 // Returns nil if the inst should be skipped (no rules, no leader, etc.).
-func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg system.VaultConfig, inst *VaultInstance, active map[string]bool) *sweepTarget {
+func (o *Orchestrator) retentionTargetForInstance(cfg *system.Config, vaultCfg system.VaultConfig, inst *VaultInstance, active map[string]bool) *sweepTarget {
 	if inst.HasRaftLeader != nil && !inst.HasRaftLeader() {
 		return nil
 	}
@@ -500,7 +500,7 @@ func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg syste
 	runner.followerTargets = inst.FollowerTargets
 	runner.vaultName = vaultCfg.Name
 	runner.vaultType = string(vaultCfg2.Type)
-	runner.tierPosition = tierPositionInVault(cfg, vaultCfg.ID, inst.VaultID)
+	runner.instPosition = tierPositionInVault(cfg, vaultCfg.ID, inst.VaultID)
 	runner.disposition = vaultCfg.ResolveRetentionDisposition()
 	return &sweepTarget{runner: runner, rules: rules}
 }

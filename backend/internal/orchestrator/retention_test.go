@@ -609,7 +609,7 @@ func TestClusterRetentionSweepWithTTLOnAllNodes(t *testing.T) {
 }
 
 // TestRetentionTargetRefreshesCmOnExistingRunner verifies that
-// retentionTargetForTier updates cm and im on an existing runner
+// retentionTargetForInstance updates cm and im on an existing runner
 // when the vault's chunk manager changes (e.g., after vault rebuild).
 func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 	t.Parallel()
@@ -655,7 +655,7 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 	}
 	active := make(map[string]bool)
 	vaultCfg := cfg.Vaults[0]
-	target1 := orch.retentionTargetForTier(cfg, vaultCfg, tier1, active)
+	target1 := orch.retentionTargetForInstance(cfg, vaultCfg, tier1, active)
 	if target1 == nil {
 		t.Fatal("expected non-nil sweep target")
 	}
@@ -673,7 +673,7 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 		Indexes: im2,
 	}
 	active2 := make(map[string]bool)
-	target2 := orch.retentionTargetForTier(cfg, vaultCfg, tier2, active2)
+	target2 := orch.retentionTargetForInstance(cfg, vaultCfg, tier2, active2)
 	if target2 == nil {
 		t.Fatal("expected non-nil sweep target on second call")
 	}

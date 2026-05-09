@@ -210,15 +210,15 @@ func (o *Orchestrator) startRetentionSweep() error {
 // local-state convergence on every inst instance. Every 20 seconds
 // (cron 13/33/53s, phase-offset from the retention sweep at second 0)
 // every node walks its OWN vault-ctl FSM and runs three independent
-// reconciliation passes per inst — see tierCatchupSweepAll for the
+// reconciliation passes per inst — see instCatchupSweepAll for the
 // per-pass invariants. Covers receipt-protocol delete convergence
 // (gastrolog-51gme) and create-side replication catchup
 // (gastrolog-2dgvj).
 func (o *Orchestrator) startTierCatchupSweep() error {
-	if err := o.scheduler.AddJob(tierCatchupSweepJobName, tierCatchupSweepSchedule, o.tierCatchupSweepAll); err != nil {
+	if err := o.scheduler.AddJob(instCatchupSweepJobName, instCatchupSweepSchedule, o.instCatchupSweepAll); err != nil {
 		return fmt.Errorf("inst catchup sweep job: %w", err)
 	}
-	o.scheduler.Describe(tierCatchupSweepJobName, "Tier catchup sweep (delete + orphan + replica convergence)")
+	o.scheduler.Describe(instCatchupSweepJobName, "Tier catchup sweep (delete + orphan + replica convergence)")
 	return nil
 }
 
