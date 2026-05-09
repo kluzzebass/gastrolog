@@ -704,33 +704,38 @@ func (f *FSM) applyRefreshToken(ctx context.Context, cmd *gastrologv1.SystemComm
 	}
 }
 
-// cascadeDeleteRotationPolicy clears rotation policy references from tiers.
+// cascadeDeleteRotationPolicy clears rotation policy references from vaults
+// after the policy is deleted. Tier mirrors are kept in sync by syncTierFromVault.
 func (f *FSM) cascadeDeleteRotationPolicy(ctx context.Context, policyID glid.GLID) error {
-	tiers, err := f.store.ListTiers(ctx)
+	vaults, err := f.store.ListVaults(ctx)
 	if err != nil {
-		return fmt.Errorf("list tiers for cascade: %w", err)
+		return fmt.Errorf("list vaults for cascade: %w", err)
 	}
-	for _, t := range tiers {
-		if t.RotationPolicyID != nil && *t.RotationPolicyID == policyID {
-			t.RotationPolicyID = nil
-			if err := f.store.PutTier(ctx, t); err != nil {
-				return fmt.Errorf("cascade update tier %s: %w", t.ID, err)
+	for _, v := range vaults {
+		if v.RotationPolicyID != nil && *v.RotationPolicyID == policyID {
+			v.RotationPolicyID = nil
+			if err := f.store.PutVault(ctx, v); err != nil {
+				return fmt.Errorf("cascade update vault %s: %w", v.ID, err)
+			}
+			if err := f.syncTierFromVault(ctx, v); err != nil {
+				return fmt.Errorf("cascade sync tier for vault %s: %w", v.ID, err)
 			}
 		}
 	}
 	return nil
 }
 
-// cascadeDeleteRetentionPolicy removes retention rules referencing the policy from tiers.
+// cascadeDeleteRetentionPolicy removes retention rules referencing the policy
+// from vaults. Tier mirrors are kept in sync by syncTierFromVault.
 func (f *FSM) cascadeDeleteRetentionPolicy(ctx context.Context, policyID glid.GLID) error {
-	tiers, err := f.store.ListTiers(ctx)
+	vaults, err := f.store.ListVaults(ctx)
 	if err != nil {
-		return fmt.Errorf("list tiers for cascade: %w", err)
+		return fmt.Errorf("list vaults for cascade: %w", err)
 	}
-	for _, t := range tiers {
+	for _, v := range vaults {
 		modified := false
-		filtered := t.RetentionRules[:0]
-		for _, rule := range t.RetentionRules {
+		filtered := v.RetentionRules[:0]
+		for _, rule := range v.RetentionRules {
 			if rule.RetentionPolicyID == policyID {
 				modified = true
 				continue
@@ -738,9 +743,12 @@ func (f *FSM) cascadeDeleteRetentionPolicy(ctx context.Context, policyID glid.GL
 			filtered = append(filtered, rule)
 		}
 		if modified {
-			t.RetentionRules = filtered
-			if err := f.store.PutTier(ctx, t); err != nil {
-				return fmt.Errorf("cascade update tier %s: %w", t.ID, err)
+			v.RetentionRules = filtered
+			if err := f.store.PutVault(ctx, v); err != nil {
+				return fmt.Errorf("cascade update vault %s: %w", v.ID, err)
+			}
+			if err := f.syncTierFromVault(ctx, v); err != nil {
+				return fmt.Errorf("cascade sync tier for vault %s: %w", v.ID, err)
 			}
 		}
 	}
