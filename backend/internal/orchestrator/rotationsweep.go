@@ -58,8 +58,7 @@ func (o *Orchestrator) rotationSweep() {
 
 		// Apply rotation policy + reconcile cron job + refresh replication targets.
 		if cfg != nil && vaultCfg != nil {
-			tierCfg := findTierConfig(cfg.Tiers, tier.TierID)
-			o.applyRotationFromConfig(sys, cfg, *vaultCfg, tier, tierCfg, activeCronJobs)
+			o.applyRotationFromConfig(sys, cfg, *vaultCfg, tier, activeCronJobs)
 		}
 
 		// Check for time-based rotation triggers.
@@ -112,19 +111,24 @@ func (o *Orchestrator) reconcileFilters(sys *system.System) {
 	}
 }
 
-// applyRotationFromConfig resolves the rotation policy for a leader tier
-// from the current config and applies it. Also ensures the cron job exists
-// if configured. Called each tick by rotationSweep.
+// applyRotationFromConfig refreshes the leader tier's replication targets
+// and rotation policy from the current config. Called each tick by
+// rotationSweep.
+//
+// gastrolog-1ex3b: the tierCfg parameter is no longer consulted — Phase 2/3
+// collapsed TierConfig into VaultConfig, so cfg.Tiers is empty and the
+// previous `if tierCfg == nil { return }` guard prevented FollowerTargets
+// from ever refreshing. Result: vaults built before placements arrived
+// kept FollowerTargets=[] forever and never replicated chunks to followers
+// despite RF=N. The guard is gone; the function now proceeds for every
+// leader tier and short-circuits per-section based on the actual data each
+// section needs.
 func (o *Orchestrator) applyRotationFromConfig(sys *system.System,
 	cfg *system.Config,
 	vaultCfg system.VaultConfig,
 	tier *VaultInstance,
-	tierCfg *system.TierConfig,
 	activeCronJobs map[string]bool,
 ) {
-	if tierCfg == nil {
-		return
-	}
 	// Refresh replication targets from current system. Reads placements
 	// from VaultConfig (mirrored from tier placements via the FSM bridge —
 	// gastrolog-257l7).
