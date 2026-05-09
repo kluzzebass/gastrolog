@@ -31,7 +31,7 @@ type orchActions interface {
 	RemoveVaultInstance(vaultID glid.GLID) bool
 	DeleteVaultInstance(vaultID glid.GLID) bool
 	AddVaultInstance(ctx context.Context, vaultID glid.GLID, f orchestrator.Factories) error
-	DrainTier(ctx context.Context, vaultID, tierID glid.GLID, mode orchestrator.TierDrainMode, targetNodeID string) error
+	DrainTier(ctx context.Context, vaultID glid.GLID, mode orchestrator.TierDrainMode, targetNodeID string) error
 	UnregisterVault(id glid.GLID) error
 	MissingVaultInstance(vaultID glid.GLID, tierIDs []glid.GLID) bool
 	LocalTierIDs(vaultID glid.GLID) []glid.GLID
@@ -664,7 +664,7 @@ func (d *configDispatcher) handleTierDeleted(ctx context.Context, tierID glid.GL
 
 		if drain && inst.IsLeader() {
 			// Only the config leader should drain — it owns the data.
-			if err := d.orch.DrainTier(ctx, vaultID, tierID, orchestrator.TierDrainDecommission, ""); err != nil {
+			if err := d.orch.DrainTier(ctx, vaultID, orchestrator.TierDrainDecommission, ""); err != nil {
 				d.logger.Warn("dispatch: inst drain failed, removing immediately",
 					"vault", vaultID, "error", err)
 				d.orch.DeleteVaultInstance(vaultID)

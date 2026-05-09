@@ -128,8 +128,8 @@ func (m *mockOrch) DeleteVaultInstance(vaultID glid.GLID) bool {
 	m.removeTierCalls = append(m.removeTierCalls, [2]glid.GLID{vaultID, vaultID})
 	return true
 }
-func (m *mockOrch) DrainTier(_ context.Context, _, tierID glid.GLID, _ orchestrator.TierDrainMode, _ string) error {
-	m.tierDrainCalls = append(m.tierDrainCalls, tierID)
+func (m *mockOrch) DrainTier(_ context.Context, vaultID glid.GLID, _ orchestrator.TierDrainMode, _ string) error {
+	m.tierDrainCalls = append(m.tierDrainCalls, vaultID)
 	return nil
 }
 func (m *mockOrch) UnregisterVault(id glid.GLID) error {
@@ -947,8 +947,8 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 		if len(mo.tierDrainCalls) != 1 {
 			t.Fatalf("expected 1 DrainTier call, got %d", len(mo.tierDrainCalls))
 		}
-		if mo.tierDrainCalls[0] != tierID {
-			t.Fatalf("DrainTier called with wrong inst: %s", mo.tierDrainCalls[0])
+		if mo.tierDrainCalls[0] != vaultID {
+			t.Fatalf("DrainTier called with wrong vault: %s", mo.tierDrainCalls[0])
 		}
 		if len(mo.removeTierCalls) != 0 {
 			t.Fatalf("leader should not call RemoveVaultInstance, got %d calls", len(mo.removeTierCalls))
