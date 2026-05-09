@@ -484,9 +484,10 @@ func (d *configDispatcher) handleSettingPut(ctx context.Context, key string) {
 // ownership based on the tier's resolved node IDs vs localNodeID.
 // Also reloads rotation/retention policies when tier config changes.
 func (d *configDispatcher) handleTierPut(ctx context.Context, tierID glid.GLID) {
-	tierCfg, err := d.cfgStore.GetTier(ctx, tierID)
-	if err != nil || tierCfg == nil {
-		d.logger.Error("dispatch: read tier config", "vault", tierID, "error", err)
+	// 1:1 vault:tier — the tier's ID is its vault's ID.
+	v, err := d.cfgStore.GetVault(ctx, tierID)
+	if err != nil || v == nil {
+		d.logger.Error("dispatch: get vault for tier change", "vault", tierID, "error", err)
 		return
 	}
 
@@ -496,18 +497,8 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID glid.GLID) 
 		return
 	}
 
-	// Each tier owns its vault reference directly.
-	if tierCfg.VaultID == (glid.GLID{}) {
-		return // tier not assigned to a vault
-	}
-	v, err := d.cfgStore.GetVault(ctx, tierCfg.VaultID)
-	if err != nil || v == nil {
-		d.logger.Error("dispatch: get vault for tier change", "vault", tierCfg.VaultID, "error", err)
-		return
-	}
-
-	leaderNodeID := system.LeaderNodeID(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, tierCfg.ID); return p }(), nscs)
-	followerNodeIDs := system.FollowerNodeIDs(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, tierCfg.ID); return p }(), nscs)
+	leaderNodeID := system.LeaderNodeID(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, tierID); return p }(), nscs)
+	followerNodeIDs := system.FollowerNodeIDs(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, tierID); return p }(), nscs)
 
 	// Only act on tier membership once placements are fully assigned. During
 	// cluster-init the placement manager assigns placements one-at-a-time,
@@ -614,16 +605,16 @@ func (d *configDispatcher) rebuildVaultIfTierMissing(ctx context.Context, v syst
 // updateTierRoleIfNeeded checks whether a tier's role (leader ↔ follower) has changed
 // and updates it in place — avoiding a full vault rebuild and file lock churn.
 func (d *configDispatcher) updateTierRoleIfNeeded(ctx context.Context, vaultID, tierID glid.GLID, existing *orchestrator.VaultInstance) {
-	tierCfg, err := d.cfgStore.GetTier(ctx, tierID)
-	if err != nil || tierCfg == nil {
+	v, err := d.cfgStore.GetVault(ctx, tierID)
+	if err != nil || v == nil {
 		return
 	}
 	nscs, err := d.cfgStore.ListNodeStorageConfigs(ctx)
 	if err != nil {
 		return
 	}
-	leaderNodeID := system.LeaderNodeID(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, tierCfg.ID); return p }(), nscs)
-	followerNodeIDs := system.FollowerNodeIDs(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, tierCfg.ID); return p }(), nscs)
+	leaderNodeID := system.LeaderNodeID(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, tierID); return p }(), nscs)
+	followerNodeIDs := system.FollowerNodeIDs(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, tierID); return p }(), nscs)
 	shouldBeFollower := slices.Contains(followerNodeIDs, d.localNodeID)
 	if existing.IsFollower == shouldBeFollower {
 		return // role unchanged
