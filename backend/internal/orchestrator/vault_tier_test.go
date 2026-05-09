@@ -408,25 +408,25 @@ type tierForwardCall struct {
 	Records []chunk.Record
 }
 
-func (r *tierTestReplicator) AppendRecords(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
+func (r *tierTestReplicator) AppendRecords(_ context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls = append(r.calls, tierForwardCall{
-		NodeID: nodeID, VaultID: vaultID, TierID: tierID,
+		NodeID: nodeID, VaultID: vaultID,
 		ChunkID: chunkID, Records: records,
 	})
 	return nil
 }
 
-func (r *tierTestReplicator) SealVault(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
+func (r *tierTestReplicator) SealVault(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
 }
 
-func (r *tierTestReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
+func (r *tierTestReplicator) ImportSealedChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
 	return nil
 }
 
-func (r *tierTestReplicator) DeleteChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
+func (r *tierTestReplicator) DeleteChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
 }
 
@@ -446,9 +446,8 @@ func TestAppendToTierLeaderForwardsToFollowers(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 	orch.SetChunkReplicator(fwd)
 
-	tierID := glid.New()
 	vaultID := glid.New()
-	tier := newMemTier(t, tierID, false, []system.ReplicationTarget{{NodeID: "node-2"}, {NodeID: "node-3"}})
+	tier := newMemTier(t, vaultID, false, []system.ReplicationTarget{{NodeID: "node-2"}, {NodeID: "node-3"}})
 	vault := NewVault(vaultID, tier)
 	vault.Name = "fwd-test"
 	orch.RegisterVault(vault)
@@ -467,9 +466,6 @@ func TestAppendToTierLeaderForwardsToFollowers(t *testing.T) {
 		nodes[c.NodeID] = true
 		if c.VaultID != vaultID {
 			t.Errorf("call.VaultID = %s, want %s", c.VaultID, vaultID)
-		}
-		if c.TierID != tierID {
-			t.Errorf("call.TierID = %s, want %s", c.TierID, tierID)
 		}
 		if c.ChunkID == (chunk.ChunkID{}) {
 			t.Error("call.ChunkID should be non-zero (active chunk ID)")
@@ -782,9 +778,8 @@ func TestAppendToTierForwardLifecycle(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 	orch.SetChunkReplicator(fwd)
 
-	tierID := glid.New()
 	vaultID := glid.New()
-	tier := newMemTier(t, tierID, false, []system.ReplicationTarget{{NodeID: "node-2"}})
+	tier := newMemTier(t, vaultID, false, []system.ReplicationTarget{{NodeID: "node-2"}})
 	vault := NewVault(vaultID, tier)
 	vault.Name = "forward-lifecycle"
 	orch.RegisterVault(vault)
@@ -811,9 +806,6 @@ func TestAppendToTierForwardLifecycle(t *testing.T) {
 	for i, c := range calls {
 		if c.VaultID != vaultID {
 			t.Errorf("call %d: VaultID = %s, want %s", i, c.VaultID, vaultID)
-		}
-		if c.TierID != tierID {
-			t.Errorf("call %d: TierID = %s, want %s", i, c.TierID, tierID)
 		}
 		if c.ChunkID != firstChunkID {
 			t.Errorf("call %d: ChunkID = %s, want consistent %s", i, c.ChunkID, firstChunkID)
@@ -844,17 +836,17 @@ type ackTestReplicator struct {
 	tierAppendErr   error
 }
 
-func (m *ackTestReplicator) AppendRecords(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
+func (m *ackTestReplicator) AppendRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
 	m.tierAppendCalls.Add(1)
 	return m.tierAppendErr
 }
-func (m *ackTestReplicator) SealVault(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
+func (m *ackTestReplicator) SealVault(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
 }
-func (m *ackTestReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
+func (m *ackTestReplicator) ImportSealedChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
 	return nil
 }
-func (m *ackTestReplicator) DeleteChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
+func (m *ackTestReplicator) DeleteChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
 }
 func (m *ackTestReplicator) RequestReplicaCatchup(_ context.Context, _ string, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {
@@ -1209,18 +1201,18 @@ type failingForwarder struct {
 	returnErr error
 }
 
-func (f *failingForwarder) AppendRecords(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
+func (f *failingForwarder) AppendRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
 	return f.returnErr
 }
 
-func (f *failingForwarder) SealVault(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
+func (f *failingForwarder) SealVault(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
 }
 
-func (f *failingForwarder) ImportSealedChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
+func (f *failingForwarder) ImportSealedChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
 	return nil
 }
 
@@ -1228,7 +1220,7 @@ func (f *failingForwarder) RequestReplicaCatchup(_ context.Context, _ string, _ 
 	return 0, nil
 }
 
-func (f *failingForwarder) DeleteChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
+func (f *failingForwarder) DeleteChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
 }
 

@@ -496,7 +496,7 @@ type directChunkReplicator struct {
 	nodes map[string]*Orchestrator
 }
 
-func (d *directChunkReplicator) AppendRecords(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
+func (d *directChunkReplicator) AppendRecords(_ context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
 		return fmt.Errorf("directChunkReplicator: unknown node %q", nodeID)
@@ -509,7 +509,7 @@ func (d *directChunkReplicator) AppendRecords(_ context.Context, nodeID string, 
 	return nil
 }
 
-func (d *directChunkReplicator) SealVault(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
+func (d *directChunkReplicator) SealVault(_ context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
 		return fmt.Errorf("directChunkReplicator: unknown node %q", nodeID)
@@ -517,7 +517,7 @@ func (d *directChunkReplicator) SealVault(_ context.Context, nodeID string, vaul
 	return orch.SealActiveTier(vaultID, chunkID)
 }
 
-func (d *directChunkReplicator) ImportSealedChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
+func (d *directChunkReplicator) ImportSealedChunk(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
 		return fmt.Errorf("directChunkReplicator: unknown node %q", nodeID)
@@ -534,7 +534,7 @@ func (d *directChunkReplicator) ImportSealedChunk(ctx context.Context, nodeID st
 	return orch.ImportToVault(ctx, vaultID, chunkID, iter)
 }
 
-func (d *directChunkReplicator) DeleteChunk(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
+func (d *directChunkReplicator) DeleteChunk(_ context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
 		return fmt.Errorf("directChunkReplicator: unknown node %q", nodeID)
@@ -680,9 +680,12 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 	}
 	leaderID := nodeIDs[0]
 	vaultID := glid.New()
+	// 1:1 vault:tier — single tier shares the vault's ID. tierCount is
+	// always 1 in current callers; the slice survives only for legacy
+	// fixture wiring.
 	tierIDs := make([]glid.GLID, tierCount)
 	for i := range tierCount {
-		tierIDs[i] = glid.New()
+		tierIDs[i] = vaultID
 	}
 
 	// Create config store.

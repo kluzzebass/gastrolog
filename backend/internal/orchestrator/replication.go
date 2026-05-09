@@ -80,7 +80,7 @@ func (o *Orchestrator) ackAfterReplication(ack chan<- error, pa *pendingAcks, re
 		for _, t := range pa.replication {
 			for _, tgt := range t.targets {
 				g.Go(func() error {
-					if err := o.chunkReplicator.AppendRecords(ctx, tgt.NodeID, t.vaultID, t.tierID, t.chunkID, []chunk.Record{rec}); err != nil {
+					if err := o.chunkReplicator.AppendRecords(ctx, tgt.NodeID, t.tierID, t.chunkID, []chunk.Record{rec}); err != nil {
 						return fmt.Errorf("ack-gated replication to %s: %w", tgt.NodeID, err)
 					}
 					return nil
@@ -302,5 +302,5 @@ func (o *Orchestrator) replicateToFollower(ctx context.Context, vaultID, tierID 
 		return nil
 	}
 
-	return o.chunkReplicator.ImportSealedChunk(ctx, nodeID, vaultID, tierID, chunkID, records)
+	return o.chunkReplicator.ImportSealedChunk(ctx, nodeID, tierID, chunkID, records)
 }

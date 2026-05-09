@@ -512,7 +512,7 @@ func (o *Orchestrator) sealRemoteFollowers(targets []remoteForwardTarget, chunkI
 		wg.Go(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), cluster.ForwardingTimeout)
 			defer cancel()
-			if err := o.chunkReplicator.SealVault(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, chunkID); err != nil {
+			if err := o.chunkReplicator.SealVault(ctx, tgt.nodeID, tgt.tierID, chunkID); err != nil {
 				o.logger.Warn("replication: failed to seal remote follower",
 					"node", tgt.nodeID, "vault", tgt.vaultID,
 					"chunk", chunkID.String(), "error", err)
@@ -556,7 +556,7 @@ func (o *Orchestrator) fireAndForgetRemote(targets []remoteForwardTarget, rec ch
 		wg.Go(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), cluster.ForwardingTimeout)
 			defer cancel()
-			err := o.chunkReplicator.AppendRecords(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, tgt.activeChunkID, []chunk.Record{rec})
+			err := o.chunkReplicator.AppendRecords(ctx, tgt.nodeID, tgt.tierID, tgt.activeChunkID, []chunk.Record{rec})
 			if err != nil {
 				o.bumpReplicaBackoff(tgt.nodeID, err)
 			} else {

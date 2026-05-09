@@ -174,12 +174,12 @@ func (tr *ChunkReplicator) closeStream(tierID glid.GLID, nodeID string) {
 }
 
 // AppendRecords forwards records to a follower's active chunk.
-func (tr *ChunkReplicator) AppendRecords(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
+func (tr *ChunkReplicator) AppendRecords(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
 	exports := make([]*gastrologv1.ExportRecord, len(records))
 	for i, rec := range records {
 		exports[i] = convert.RecordToExport(rec)
 	}
-	return tr.send(ctx, tierID, nodeID, &gastrologv1.ChunkReplicationCommand{
+	return tr.send(ctx, vaultID, nodeID, &gastrologv1.ChunkReplicationCommand{
 		VaultId: vaultID.ToProto(),
 		Command: &gastrologv1.ChunkReplicationCommand_Append{
 			Append: &gastrologv1.ChunkReplicationAppend{
@@ -191,9 +191,8 @@ func (tr *ChunkReplicator) AppendRecords(ctx context.Context, nodeID string, vau
 }
 
 // SealVault tells a follower to seal its active chunk for the vault.
-// The tier-keyed routing is internal — the operation is per-vault now.
-func (tr *ChunkReplicator) SealVault(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
-	return tr.send(ctx, tierID, nodeID, &gastrologv1.ChunkReplicationCommand{
+func (tr *ChunkReplicator) SealVault(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID) error {
+	return tr.send(ctx, vaultID, nodeID, &gastrologv1.ChunkReplicationCommand{
 		VaultId: vaultID.ToProto(),
 		Command: &gastrologv1.ChunkReplicationCommand_Seal{
 			Seal: &gastrologv1.ChunkReplicationSeal{
@@ -204,12 +203,12 @@ func (tr *ChunkReplicator) SealVault(ctx context.Context, nodeID string, vaultID
 }
 
 // ImportSealedChunk sends a canonical sealed chunk to a follower.
-func (tr *ChunkReplicator) ImportSealedChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
+func (tr *ChunkReplicator) ImportSealedChunk(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
 	exports := make([]*gastrologv1.ExportRecord, len(records))
 	for i, rec := range records {
 		exports[i] = convert.RecordToExport(rec)
 	}
-	return tr.send(ctx, tierID, nodeID, &gastrologv1.ChunkReplicationCommand{
+	return tr.send(ctx, vaultID, nodeID, &gastrologv1.ChunkReplicationCommand{
 		VaultId: vaultID.ToProto(),
 		Command: &gastrologv1.ChunkReplicationCommand_ImportSealed{
 			ImportSealed: &gastrologv1.ChunkReplicationImport{
@@ -221,8 +220,8 @@ func (tr *ChunkReplicator) ImportSealedChunk(ctx context.Context, nodeID string,
 }
 
 // DeleteChunk tells a follower to delete a sealed chunk.
-func (tr *ChunkReplicator) DeleteChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
-	return tr.send(ctx, tierID, nodeID, &gastrologv1.ChunkReplicationCommand{
+func (tr *ChunkReplicator) DeleteChunk(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID) error {
+	return tr.send(ctx, vaultID, nodeID, &gastrologv1.ChunkReplicationCommand{
 		VaultId: vaultID.ToProto(),
 		Command: &gastrologv1.ChunkReplicationCommand_DeleteChunk{
 			DeleteChunk: &gastrologv1.ChunkReplicationDelete{

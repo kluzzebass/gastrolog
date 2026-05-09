@@ -281,7 +281,7 @@ func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, va
 		if err != nil {
 			return fmt.Errorf("read chunk for rebalance: %w", err)
 		}
-		if err := o.chunkReplicator.ImportSealedChunk(ctx, targetNodeID, vaultID, tierID, chunkID, records); err != nil {
+		if err := o.chunkReplicator.ImportSealedChunk(ctx, targetNodeID, tierID, chunkID, records); err != nil {
 			return fmt.Errorf("replicate to target node: %w", err)
 		}
 	}

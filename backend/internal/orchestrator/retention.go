@@ -1051,6 +1051,6 @@ func (r *retentionRunner) sendDeleteToFollower(followerID string, id chunk.Chunk
 		return nil
 	}
 	return r.orch.chunkReplicator.DeleteChunk(
-		context.Background(), followerID, r.vaultID, r.tierID, id,
+		context.Background(), followerID, r.vaultID, id,
 	)
 }

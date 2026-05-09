@@ -41,21 +41,21 @@ type sealCall struct {
 	chunkID chunk.ChunkID
 }
 
-func (m *replicationFakeReplicator) AppendRecords(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
+func (m *replicationFakeReplicator) AppendRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
 	return nil
 }
-func (m *replicationFakeReplicator) SealVault(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
+func (m *replicationFakeReplicator) SealVault(_ context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID) error {
 	if m.sealErr != nil {
 		return m.sealErr
 	}
-	m.sealCalls = append(m.sealCalls, sealCall{nodeID: nodeID, vaultID: vaultID, tierID: tierID, chunkID: chunkID})
+	m.sealCalls = append(m.sealCalls, sealCall{nodeID: nodeID, vaultID: vaultID, chunkID: chunkID})
 	return nil
 }
-func (m *replicationFakeReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ glid.GLID, chunkID chunk.ChunkID, _ []chunk.Record) error {
+func (m *replicationFakeReplicator) ImportSealedChunk(_ context.Context, _ string, _ glid.GLID, chunkID chunk.ChunkID, _ []chunk.Record) error {
 	m.replicatedChunks = append(m.replicatedChunks, chunkID)
 	return nil
 }
-func (m *replicationFakeReplicator) DeleteChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
+func (m *replicationFakeReplicator) DeleteChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
 }
 func (m *replicationFakeReplicator) RequestReplicaCatchup(_ context.Context, _ string, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {
@@ -622,7 +622,7 @@ func TestClusterReplicationSealSync(t *testing.T) {
 	// which checks the expected chunk ID matches the follower's active chunk).
 	for _, fid := range []string{"f1", "f2"} {
 		if err := leaderNode.orch.chunkReplicator.SealVault(
-			context.Background(), fid, h.vaultID, h.tierIDs[0], leaderChunkID,
+			context.Background(), fid, h.vaultID, leaderChunkID,
 		); err != nil {
 			t.Fatalf("SealVault to %s: %v", fid, err)
 		}
@@ -711,7 +711,7 @@ func TestClusterReplicationDeletePropagation(t *testing.T) {
 		// Forward delete to each follower.
 		for _, fid := range []string{"f1", "f2", "f3"} {
 			if err := leaderNode.orch.chunkReplicator.DeleteChunk(
-				ctx, fid, h.vaultID, h.tierIDs[0], m.ID,
+				ctx, fid, h.vaultID, m.ID,
 			); err != nil {
 				t.Errorf("DeleteChunk(%s, %s): %v", fid, m.ID, err)
 			}
