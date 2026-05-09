@@ -150,6 +150,7 @@ func TestDeleteVaultForce(t *testing.T) {
 			Id:      vaultID.Bytes(),
 			Name:    "test-vault",
 			Enabled: true,
+			Type:    gastrologv1.VaultType_VAULT_TYPE_MEMORY,
 		},
 	}))
 	if err != nil {
@@ -235,6 +236,7 @@ func TestPauseResumeVaultRPC(t *testing.T) {
 			Id:      vaultID.Bytes(),
 			Name:    "pause-vault",
 			Enabled: true,
+			Type:    gastrologv1.VaultType_VAULT_TYPE_MEMORY,
 		},
 	}))
 	if err != nil {

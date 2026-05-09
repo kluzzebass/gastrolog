@@ -492,7 +492,7 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 	if !isLeader && !isFollower {
 		// No storage placement, but still join the vault control-plane Raft
 		// group as a voter for this vault's replicated inst metadata.
-		o.ensureVaultCtlMetadata(*vaultCfg2, rt.Nodes, factories)
+		o.ensureVaultCtlMetadata(*vaultCfg, rt.Nodes, factories)
 		return nil
 	}
 
@@ -633,14 +633,14 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 	if !isLeader && !isFollower {
 		// No storage placement on this node, but still join the vault
 		// control-plane Raft group as a voter for replicated inst metadata.
-		o.ensureVaultCtlMetadata(*vaultCfg2, rt.Nodes, factories)
+		o.ensureVaultCtlMetadata(vaultCfg, rt.Nodes, factories)
 		return nil, nil
 	}
 
 	if isLeader {
 		ti, err := o.buildLeaderInstance(sys, vaultCfg, vaultCfg2, factories)
 		if err != nil {
-			o.alertVaultInitFailed(vaultID, vaultCfg2.Name, err)
+			o.alertVaultInitFailed(vaultID, vaultCfg.Name, err)
 			return nil, nil
 		}
 		ti.FollowerTargets = system.FollowerTargets(placements, nscs)
@@ -654,7 +654,7 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 		}
 		sti, err := o.buildInstanceForStorage(sys, vaultCfg, *vaultCfg2, factories, tgt.StorageID, true)
 		if err != nil {
-			o.alertVaultInitFailed(vaultID, vaultCfg2.Name, err)
+			o.alertVaultInitFailed(vaultID, vaultCfg.Name, err)
 			return nil, nil
 		}
 		sti.IsFollower = true
@@ -716,13 +716,13 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 	cfg := &sys.Config
 	rt := &sys.Runtime
 	// Map TierConfig.Type to factory name.
-	factoryName := mapVaultTypeToFactory(vaultCfg2.Type)
+	factoryName := mapVaultTypeToFactory(vaultCfg.Type)
 
 	// Create the vault-ctl Raft group BEFORE the chunk manager. Group creation is
 	// fast (Raft log replay). Chunk manager creation is slow (scans disk for
 	// existing chunks). Starting the Raft group early gives it time to elect
 	// a leader and catch up while the chunk manager is loading.
-	vaultGroup, applier, raftCB := o.ensureVaultCtlMetadata(vaultCfg2, rt.Nodes, factories)
+	vaultGroup, applier, raftCB := o.ensureVaultCtlMetadata(vaultCfg, rt.Nodes, factories)
 
 	// Build params from inst system.
 	params := buildVaultParams(sys, vaultCfg, vaultCfg2, o.localNodeID)
@@ -736,7 +736,7 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 
 	cmFactory, ok := factories.ChunkManagers[factoryName]
 	if !ok {
-		return nil, fmt.Errorf("unknown chunk manager type: %s (mapped from inst type %s)", factoryName, vaultCfg2.Type)
+		return nil, fmt.Errorf("unknown chunk manager type: %s (mapped from inst type %s)", factoryName, vaultCfg.Type)
 	}
 
 	var cmLogger = factories.Logger
@@ -759,7 +759,7 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 	}
 
 	// Apply rotation policy from inst.
-	if err := applyRotationPolicy(cm, cfg.RotationPolicies, vaultCfg2.RotationPolicyID); err != nil {
+	if err := applyRotationPolicy(cm, cfg.RotationPolicies, vaultCfg.RotationPolicyID); err != nil {
 		_ = cm.Close()
 		return nil, err
 	}
@@ -772,22 +772,22 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 	setIntegrityVerifier(cm, o.IntegrityVerifier())
 
 	// JSONL sinks are write-only — no query engine, no indexes.
-	if vaultCfg2.Type == system.VaultTypeJSONL {
+	if vaultCfg.Type == system.VaultTypeJSONL {
 		ti := &VaultInstance{
 			VaultID: vaultCfg.ID,
-			Type:    string(vaultCfg2.Type),
+			Type:    string(vaultCfg.Type),
 			Chunks:  cm,
 		}
 		ti.applyRaftCallbacks(raftCB)
 		o.attachLifecycleReconciler(ti, vaultCfg.ID, vaultGroup)
-		wireVaultFSMOnDelete(vaultGroup, vaultCfg2.ID, cm, nil, o, o.logger)
+		wireVaultFSMOnDelete(vaultGroup, vaultCfg.ID, cm, nil, o, o.logger)
 		return ti, nil
 	}
 
 	imFactory, ok := factories.IndexManagers[factoryName]
 	if !ok {
 		_ = cm.Close()
-		return nil, fmt.Errorf("unknown index manager type: %s (mapped from inst type %s)", factoryName, vaultCfg2.Type)
+		return nil, fmt.Errorf("unknown index manager type: %s (mapped from inst type %s)", factoryName, vaultCfg.Type)
 	}
 	var imLogger = factories.Logger
 	if imLogger != nil {
@@ -812,15 +812,15 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 
 	ti := &VaultInstance{
 		VaultID: vaultCfg.ID,
-		Type:    string(vaultCfg2.Type),
+		Type:    string(vaultCfg.Type),
 		Chunks:  cm,
 		Indexes: im,
 		Query:   qe,
 	}
 	ti.applyRaftCallbacks(raftCB)
 	o.attachLifecycleReconciler(ti, vaultCfg.ID, vaultGroup)
-	wireVaultFSMOnDelete(vaultGroup, vaultCfg2.ID, cm, im, o, o.logger)
-	wireVaultFSMOnUpload(vaultGroup, vaultCfg2.ID, cm, o, o.logger)
+	wireVaultFSMOnDelete(vaultGroup, vaultCfg.ID, cm, im, o, o.logger)
+	wireVaultFSMOnUpload(vaultGroup, vaultCfg.ID, cm, o, o.logger)
 	return ti, nil
 }
 
@@ -857,7 +857,7 @@ func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg syst
 
 	// Create the vault-ctl Raft group BEFORE the chunk manager — same rationale
 	// as buildInstance: start elections while chunk loading is in progress.
-	vaultGroup, applier, raftCB := o.ensureVaultCtlMetadata(vaultCfg2, rt.Nodes, factories)
+	vaultGroup, applier, raftCB := o.ensureVaultCtlMetadata(vaultCfg, rt.Nodes, factories)
 
 	// Build params normally, then override the dir with this storage's path.
 	params := buildVaultParams(sys, vaultCfg, vaultCfg2, o.localNodeID)
@@ -865,9 +865,9 @@ func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg syst
 	if isFollower {
 		params["_cloud_read_only"] = "true"
 	}
-	params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), vaultCfg2.ID.String())
+	params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), vaultCfg.ID.String())
 
-	factoryName := mapVaultTypeToFactory(vaultCfg2.Type)
+	factoryName := mapVaultTypeToFactory(vaultCfg.Type)
 	cmFactory, ok := factories.ChunkManagers[factoryName]
 	if !ok {
 		return nil, fmt.Errorf("unknown chunk manager type: %s", factoryName)
@@ -887,7 +887,7 @@ func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg syst
 		return nil, fmt.Errorf("create chunk manager: %w", err)
 	}
 
-	if err := applyRotationPolicy(cm, cfg.RotationPolicies, vaultCfg2.RotationPolicyID); err != nil {
+	if err := applyRotationPolicy(cm, cfg.RotationPolicies, vaultCfg.RotationPolicyID); err != nil {
 		_ = cm.Close()
 		return nil, err
 	}
@@ -923,15 +923,15 @@ func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg syst
 
 	ti := &VaultInstance{
 		VaultID: vaultCfg.ID,
-		Type:    string(vaultCfg2.Type),
+		Type:    string(vaultCfg.Type),
 		Chunks:  cm,
 		Indexes: im,
 		Query:   qe,
 	}
 	ti.applyRaftCallbacks(raftCB)
 	o.attachLifecycleReconciler(ti, vaultCfg.ID, vaultGroup)
-	wireVaultFSMOnDelete(vaultGroup, vaultCfg2.ID, cm, im, o, o.logger)
-	wireVaultFSMOnUpload(vaultGroup, vaultCfg2.ID, cm, o, o.logger)
+	wireVaultFSMOnDelete(vaultGroup, vaultCfg.ID, cm, im, o, o.logger)
+	wireVaultFSMOnUpload(vaultGroup, vaultCfg.ID, cm, o, o.logger)
 	return ti, nil
 }
 
@@ -1061,18 +1061,18 @@ type vaultRaftCallbacks struct {
 //
 // Call this BEFORE creating the chunk manager so Raft can start
 // elections while chunk loading is still in progress.
-func (o *Orchestrator) ensureVaultCtlMetadata(vaultCfg2 system.TierConfig, clusterNodes []system.NodeConfig, factories Factories) (*raftgroup.Group, vaultctlfsm.Applier, vaultRaftCallbacks) {
+func (o *Orchestrator) ensureVaultCtlMetadata(vaultCfg system.VaultConfig, clusterNodes []system.NodeConfig, factories Factories) (*raftgroup.Group, vaultctlfsm.Applier, vaultRaftCallbacks) {
 	if factories.GroupManager == nil {
 		return nil, nil, vaultRaftCallbacks{}
 	}
-	vaultGID := raftgroup.VaultControlPlaneGroupID(vaultCfg2.VaultID)
+	vaultGID := raftgroup.VaultControlPlaneGroupID(vaultCfg.ID)
 	g, members := o.tryStartClusterRaftGroup(vaultGID, vaultraft.NewFSM(), clusterNodes, factories)
 	if g == nil {
 		return nil, nil, vaultRaftCallbacks{}
 	}
 
-	o.vaultCtlLeaders.SetDesiredMembers(vaultCfg2.VaultID, members)
-	o.vaultCtlLeaders.Start(vaultCfg2.VaultID, g)
+	o.vaultCtlLeaders.SetDesiredMembers(vaultCfg.ID, members)
+	o.vaultCtlLeaders.Start(vaultCfg.ID, g)
 
 	vfsm, ok := g.FSM.(*vaultraft.FSM)
 	if !ok || vfsm == nil {
@@ -1085,17 +1085,17 @@ func (o *Orchestrator) ensureVaultCtlMetadata(vaultCfg2 system.TierConfig, clust
 	// just rebind to the same closure. Without this hook, the receipt
 	// protocol's pendingDeletes silently leak across snapshot install
 	// boundaries (the bug gastrolog-51gme step 3 was supposed to close).
-	vaultID := vaultCfg2.VaultID
+	vaultID := vaultCfg.ID
 	vfsm.SetOnAfterRestore(func() { o.afterVaultCtlRestore(vaultID) })
-	tierFSM := vfsm.EnsureInstanceFSM(vaultCfg2.ID)
+	tierFSM := vfsm.EnsureInstanceFSM(vaultCfg.ID)
 	r := g.Raft
 	timeout := cluster.ReplicationTimeout
 
 	var applier vaultctlfsm.Applier
 	if factories.PeerConns != nil {
-		applier = cluster.NewVaultCtlChunkApplyForwarder(r, vaultGID, vaultCfg2.ID, factories.PeerConns, timeout)
+		applier = cluster.NewVaultCtlChunkApplyForwarder(r, vaultGID, vaultCfg.ID, factories.PeerConns, timeout)
 	} else {
-		applier = &vaultCtlTierApplier{o: o, vaultID: vaultCfg2.VaultID, instID: vaultCfg2.ID}
+		applier = &vaultCtlTierApplier{o: o, vaultID: vaultCfg.ID, instID: vaultCfg.ID}
 	}
 
 	return g, applier, buildVaultRaftCallbacks(r, tierFSM, applier)
@@ -1443,7 +1443,7 @@ func buildVaultParams(sys *system.System, vaultCfg system.VaultConfig, vaultCfg2
 	rt := &sys.Runtime
 	params := make(map[string]string)
 
-	switch vaultCfg2.Type {
+	switch vaultCfg.Type {
 	case system.VaultTypeMemory:
 		if vaultCfg2.MemoryBudgetBytes > 0 {
 			params["budgetBytes"] = strconv.FormatUint(vaultCfg2.MemoryBudgetBytes, 10)
@@ -1457,7 +1457,7 @@ func buildVaultParams(sys *system.System, vaultCfg system.VaultConfig, vaultCfg2
 			addCloudParams(params, &sys.Config, vaultCfg2)
 		}
 		if fs := findLocalFileStorage(rt, localNodeID, vaultCfg2.StorageClass); fs != nil {
-			params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), vaultCfg2.ID.String())
+			params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), vaultCfg.ID.String())
 		}
 
 	case system.VaultTypeJSONL:
@@ -1465,7 +1465,7 @@ func buildVaultParams(sys *system.System, vaultCfg system.VaultConfig, vaultCfg2
 			params["path"] = vaultCfg2.Path
 		} else {
 			// Default: jsonl/<vault-id>/<inst-id>.jsonl
-			params["path"] = filepath.Join("jsonl", vaultCfg.ID.String(), vaultCfg2.ID.String()+".jsonl")
+			params["path"] = filepath.Join("jsonl", vaultCfg.ID.String(), vaultCfg.ID.String()+".jsonl")
 		}
 	}
 
