@@ -37,7 +37,7 @@ func ExtractPutTier(cmd *gastrologv1.PutTierCommand) (system.TierConfig, error) 
 }
 
 // ExtractPutTierPlacements extracts placements from a PutTierCommand.
-func ExtractPutTierPlacements(cmd *gastrologv1.PutTierCommand) []system.TierPlacement {
+func ExtractPutTierPlacements(cmd *gastrologv1.PutTierCommand) []system.VaultPlacement {
 	return convert.TierPlacementsFromProto(cmd.GetTier())
 }
 
@@ -47,10 +47,10 @@ func ExtractDeleteTier(cmd *gastrologv1.DeleteTierCommand) (glid.GLID, error) {
 }
 
 // NewSetTierPlacements creates a SystemCommand for SetTierPlacements.
-func NewSetTierPlacements(tierID glid.GLID, placements []system.TierPlacement) *gastrologv1.SystemCommand {
-	pbPlacements := make([]*gastrologv1.TierPlacement, len(placements))
+func NewSetTierPlacements(tierID glid.GLID, placements []system.VaultPlacement) *gastrologv1.SystemCommand {
+	pbPlacements := make([]*gastrologv1.VaultPlacement, len(placements))
 	for i, p := range placements {
-		pbPlacements[i] = &gastrologv1.TierPlacement{
+		pbPlacements[i] = &gastrologv1.VaultPlacement{
 			StorageId: []byte(p.StorageID),
 			Leader:    p.Leader,
 		}
@@ -75,11 +75,11 @@ func NewSetSetupWizardDismissed(dismissed bool) *gastrologv1.SystemCommand {
 }
 
 // ExtractSetTierPlacements converts a SetTierPlacementsCommand back.
-func ExtractSetTierPlacements(cmd *gastrologv1.SetTierPlacementsCommand) (glid.GLID, []system.TierPlacement, error) {
+func ExtractSetTierPlacements(cmd *gastrologv1.SetTierPlacementsCommand) (glid.GLID, []system.VaultPlacement, error) {
 	tierID := glid.FromBytes(cmd.GetTierId())
-	placements := make([]system.TierPlacement, len(cmd.GetPlacements()))
+	placements := make([]system.VaultPlacement, len(cmd.GetPlacements()))
 	for i, p := range cmd.GetPlacements() {
-		placements[i] = system.TierPlacement{
+		placements[i] = system.VaultPlacement{
 			StorageID: string(p.GetStorageId()),
 			Leader:    p.GetLeader(),
 		}

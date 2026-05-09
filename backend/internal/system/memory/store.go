@@ -57,7 +57,7 @@ type Store struct {
 	managedFiles         map[glid.GLID]system.ManagedFileConfig
 	cloudServices        map[glid.GLID]system.CloudService
 	tiers                map[glid.GLID]system.TierConfig
-	tierPlacements       map[glid.GLID][]system.TierPlacement // runtime: system-managed
+	tierPlacements       map[glid.GLID][]system.VaultPlacement // runtime: system-managed
 	ingesterAlive        map[glid.GLID]map[string]bool        // runtime: system-managed
 	ingesterCheckpoints  map[glid.GLID][]byte                 // runtime: system-managed
 	ingesterAssignment   map[glid.GLID]string                 // runtime: system-managed
@@ -83,7 +83,7 @@ func NewStore() *Store {
 		managedFiles:        make(map[glid.GLID]system.ManagedFileConfig),
 		cloudServices:       make(map[glid.GLID]system.CloudService),
 		tiers:               make(map[glid.GLID]system.TierConfig),
-		tierPlacements:      make(map[glid.GLID][]system.TierPlacement),
+		tierPlacements:      make(map[glid.GLID][]system.VaultPlacement),
 		ingesterAlive:       make(map[glid.GLID]map[string]bool),
 		ingesterCheckpoints: make(map[glid.GLID][]byte),
 		ingesterAssignment:  make(map[glid.GLID]string),
@@ -148,9 +148,9 @@ func (s *Store) Load(ctx context.Context) (*system.System, error) {
 
 	// Runtime: tier placements (stored separately from TierConfig).
 	if len(s.tierPlacements) > 0 {
-		rt.TierPlacements = make(map[glid.GLID][]system.TierPlacement, len(s.tierPlacements))
+		rt.TierPlacements = make(map[glid.GLID][]system.VaultPlacement, len(s.tierPlacements))
 		for id, p := range s.tierPlacements {
-			cp := make([]system.TierPlacement, len(p))
+			cp := make([]system.VaultPlacement, len(p))
 			copy(cp, p)
 			rt.TierPlacements[id] = cp
 		}
@@ -959,7 +959,7 @@ func copyVaultConfig(st system.VaultConfig) system.VaultConfig {
 		}
 	}
 	if len(st.Placements) > 0 {
-		cp.Placements = make([]system.TierPlacement, len(st.Placements))
+		cp.Placements = make([]system.VaultPlacement, len(st.Placements))
 		copy(cp.Placements, st.Placements)
 	}
 	return cp
@@ -1061,19 +1061,19 @@ func copyParams(params map[string]string) map[string]string {
 
 // --- Tier Placements (runtime) ---
 
-func (s *Store) GetTierPlacements(_ context.Context, tierID glid.GLID) ([]system.TierPlacement, error) {
+func (s *Store) GetTierPlacements(_ context.Context, tierID glid.GLID) ([]system.VaultPlacement, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	p := s.tierPlacements[tierID]
-	cp := make([]system.TierPlacement, len(p))
+	cp := make([]system.VaultPlacement, len(p))
 	copy(cp, p)
 	return cp, nil
 }
 
-func (s *Store) SetTierPlacements(_ context.Context, tierID glid.GLID, placements []system.TierPlacement) error {
+func (s *Store) SetTierPlacements(_ context.Context, tierID glid.GLID, placements []system.VaultPlacement) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cp := make([]system.TierPlacement, len(placements))
+	cp := make([]system.VaultPlacement, len(placements))
 	copy(cp, placements)
 	s.tierPlacements[tierID] = cp
 	// Phase 2 (gastrolog-3iy5l): also write VaultConfig.Placements so the
@@ -1083,7 +1083,7 @@ func (s *Store) SetTierPlacements(_ context.Context, tierID glid.GLID, placement
 		if v, ok := s.vaults[tier.VaultID]; ok {
 			merged := v
 			if len(placements) > 0 {
-				merged.Placements = make([]system.TierPlacement, len(placements))
+				merged.Placements = make([]system.VaultPlacement, len(placements))
 				copy(merged.Placements, placements)
 			} else {
 				merged.Placements = nil

@@ -2672,7 +2672,7 @@ func (x *DeleteTierCommand) GetDrain() bool {
 type SetTierPlacementsCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	TierId        []byte                 `protobuf:"bytes,1,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"`
-	Placements    []*TierPlacement       `protobuf:"bytes,2,rep,name=placements,proto3" json:"placements,omitempty"`
+	Placements    []*VaultPlacement      `protobuf:"bytes,2,rep,name=placements,proto3" json:"placements,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2714,7 +2714,7 @@ func (x *SetTierPlacementsCommand) GetTierId() []byte {
 	return nil
 }
 
-func (x *SetTierPlacementsCommand) GetPlacements() []*TierPlacement {
+func (x *SetTierPlacementsCommand) GetPlacements() []*VaultPlacement {
 	if x != nil {
 		return x.Placements
 	}
@@ -3331,11 +3331,11 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\x04tier\x18\x01 \x01(\v2\x18.gastrolog.v1.TierConfigR\x04tier\"9\n" +
 	"\x11DeleteTierCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x14\n" +
-	"\x05drain\x18\x02 \x01(\bR\x05drain\"p\n" +
+	"\x05drain\x18\x02 \x01(\bR\x05drain\"q\n" +
 	"\x18SetTierPlacementsCommand\x12\x17\n" +
-	"\atier_id\x18\x01 \x01(\fR\x06tierId\x12;\n" +
+	"\atier_id\x18\x01 \x01(\fR\x06tierId\x12<\n" +
 	"\n" +
-	"placements\x18\x02 \x03(\v2\x1b.gastrolog.v1.TierPlacementR\n" +
+	"placements\x18\x02 \x03(\v2\x1c.gastrolog.v1.VaultPlacementR\n" +
 	"placements\">\n" +
 	"\x1eSetSetupWizardDismissedCommand\x12\x1c\n" +
 	"\tdismissed\x18\x01 \x01(\bR\tdismissed\"i\n" +
@@ -3442,7 +3442,7 @@ var file_gastrolog_v1_fsm_proto_goTypes = []any{
 	(*CloudService)(nil),                   // 46: gastrolog.v1.CloudService
 	(*NodeStorageConfig)(nil),              // 47: gastrolog.v1.NodeStorageConfig
 	(*TierConfig)(nil),                     // 48: gastrolog.v1.TierConfig
-	(*TierPlacement)(nil),                  // 49: gastrolog.v1.TierPlacement
+	(*VaultPlacement)(nil),                 // 49: gastrolog.v1.VaultPlacement
 }
 var file_gastrolog_v1_fsm_proto_depIdxs = []int32{
 	1,  // 0: gastrolog.v1.SystemCommand.put_rotation_policy:type_name -> gastrolog.v1.PutRotationPolicyCommand
@@ -3496,7 +3496,7 @@ var file_gastrolog_v1_fsm_proto_depIdxs = []int32{
 	46, // 48: gastrolog.v1.PutCloudServiceCommand.cloud_service:type_name -> gastrolog.v1.CloudService
 	47, // 49: gastrolog.v1.SetNodeStorageConfigCommand.node_storage:type_name -> gastrolog.v1.NodeStorageConfig
 	48, // 50: gastrolog.v1.PutTierCommand.tier:type_name -> gastrolog.v1.TierConfig
-	49, // 51: gastrolog.v1.SetTierPlacementsCommand.placements:type_name -> gastrolog.v1.TierPlacement
+	49, // 51: gastrolog.v1.SetTierPlacementsCommand.placements:type_name -> gastrolog.v1.VaultPlacement
 	1,  // 52: gastrolog.v1.SystemSnapshot.rotation_policies:type_name -> gastrolog.v1.PutRotationPolicyCommand
 	3,  // 53: gastrolog.v1.SystemSnapshot.retention_policies:type_name -> gastrolog.v1.PutRetentionPolicyCommand
 	5,  // 54: gastrolog.v1.SystemSnapshot.vaults:type_name -> gastrolog.v1.PutVaultCommand

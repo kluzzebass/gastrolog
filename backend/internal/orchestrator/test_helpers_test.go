@@ -27,8 +27,8 @@ import (
 )
 
 // syntheticPlacements creates a Placements slice with a leader using a synthetic storage ID.
-func syntheticPlacements(nodeID string) []system.TierPlacement {
-	return []system.TierPlacement{{StorageID: system.SyntheticStorageID(nodeID), Leader: true}}
+func syntheticPlacements(nodeID string) []system.VaultPlacement {
+	return []system.VaultPlacement{{StorageID: system.SyntheticStorageID(nodeID), Leader: true}}
 }
 
 // ---------- config loader adapter ----------
@@ -49,11 +49,11 @@ func (l *transitionSystemLoader) Load(ctx context.Context) (*system.System, erro
 		nodeID = "test-node"
 	}
 	if sys.Runtime.TierPlacements == nil {
-		sys.Runtime.TierPlacements = make(map[glid.GLID][]system.TierPlacement)
+		sys.Runtime.TierPlacements = make(map[glid.GLID][]system.VaultPlacement)
 	}
 	for _, tier := range sys.Config.Tiers {
 		if _, ok := sys.Runtime.TierPlacements[tier.ID]; !ok {
-			sys.Runtime.TierPlacements[tier.ID] = []system.TierPlacement{
+			sys.Runtime.TierPlacements[tier.ID] = []system.VaultPlacement{
 				{StorageID: system.SyntheticStorageID(nodeID), Leader: true},
 			}
 		}
@@ -72,7 +72,7 @@ func newTestStore(cfg *system.Config, nodeID string) *sysmem.Store {
 	}
 	for _, tc := range cfg.Tiers {
 		_ = store.PutTier(ctx, tc)
-		_ = store.SetTierPlacements(ctx, tc.ID, []system.TierPlacement{
+		_ = store.SetTierPlacements(ctx, tc.ID, []system.VaultPlacement{
 			{StorageID: system.SyntheticStorageID(nodeID), Leader: true},
 		})
 	}
@@ -131,7 +131,7 @@ func newMemoryTierInstance(t *testing.T, tierID glid.GLID) *VaultInstance {
 func setupTestStoreRuntime(store *sysmem.Store, nodeID string, tierIDs ...glid.GLID) {
 	ctx := context.Background()
 	for _, tid := range tierIDs {
-		_ = store.SetTierPlacements(ctx, tid, []system.TierPlacement{
+		_ = store.SetTierPlacements(ctx, tid, []system.VaultPlacement{
 			{StorageID: system.SyntheticStorageID(nodeID), Leader: true},
 		})
 	}
@@ -714,12 +714,12 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 	store := sysmem.NewStore()
 	tierCfgs := make([]system.TierConfig, tierCount)
 	for i := range tierCount {
-		placements := make([]system.TierPlacement, 0, len(nodeIDs))
-		placements = append(placements, system.TierPlacement{
+		placements := make([]system.VaultPlacement, 0, len(nodeIDs))
+		placements = append(placements, system.VaultPlacement{
 			StorageID: system.SyntheticStorageID(leaderID), Leader: true,
 		})
 		for _, fid := range nodeIDs[1:] {
-			placements = append(placements, system.TierPlacement{
+			placements = append(placements, system.VaultPlacement{
 				StorageID: system.SyntheticStorageID(fid), Leader: false,
 			})
 		}

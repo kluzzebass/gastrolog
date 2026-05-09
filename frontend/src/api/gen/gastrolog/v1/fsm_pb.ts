@@ -5,7 +5,7 @@
 
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
-import { RouteStage, TierConfig, TierPlacement, VaultConfig } from "./system_pb.js";
+import { RouteStage, TierConfig, VaultConfig, VaultPlacement } from "./system_pb.js";
 import { CloudService, NodeStorageConfig } from "./storage_pb.js";
 
 /**
@@ -1973,9 +1973,9 @@ export class SetTierPlacementsCommand extends Message<SetTierPlacementsCommand> 
   tierId = new Uint8Array(0);
 
   /**
-   * @generated from field: repeated gastrolog.v1.TierPlacement placements = 2;
+   * @generated from field: repeated gastrolog.v1.VaultPlacement placements = 2;
    */
-  placements: TierPlacement[] = [];
+  placements: VaultPlacement[] = [];
 
   constructor(data?: PartialMessage<SetTierPlacementsCommand>) {
     super();
@@ -1986,7 +1986,7 @@ export class SetTierPlacementsCommand extends Message<SetTierPlacementsCommand> 
   static readonly typeName = "gastrolog.v1.SetTierPlacementsCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "tier_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 2, name: "placements", kind: "message", T: TierPlacement, repeated: true },
+    { no: 2, name: "placements", kind: "message", T: VaultPlacement, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SetTierPlacementsCommand {

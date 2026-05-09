@@ -100,15 +100,15 @@ func (t TierConfig) IsCloud() bool {
 	return t.CloudServiceID != nil
 }
 
-// TierPlacement assigns one replica of a tier to a specific file storage.
+// VaultPlacement assigns one replica of a tier to a specific file storage.
 // The node is derived from the file storage's NodeStorageConfig.
-type TierPlacement struct {
+type VaultPlacement struct {
 	StorageID string `json:"storageId"`
 	Leader    bool   `json:"leader"`
 }
 
 // LeaderStorageID returns the storage ID of the leader placement, or empty if unplaced.
-func LeaderStorageID(placements []TierPlacement) string {
+func LeaderStorageID(placements []VaultPlacement) string {
 	for _, p := range placements {
 		if p.Leader {
 			return p.StorageID
@@ -118,7 +118,7 @@ func LeaderStorageID(placements []TierPlacement) string {
 }
 
 // FollowerStorageIDs returns the storage IDs of all follower placements.
-func FollowerStorageIDs(placements []TierPlacement) []string {
+func FollowerStorageIDs(placements []VaultPlacement) []string {
 	var ids []string
 	for _, p := range placements {
 		if !p.Leader {
@@ -129,7 +129,7 @@ func FollowerStorageIDs(placements []TierPlacement) []string {
 }
 
 // StorageIDs returns all placed storage IDs (leader first, then followers).
-func StorageIDs(placements []TierPlacement) []string {
+func StorageIDs(placements []VaultPlacement) []string {
 	var ids []string
 	for _, p := range placements {
 		if p.Leader {
@@ -206,7 +206,7 @@ func StorageIDForNode(nodeID string, tier TierConfig, nscs []NodeStorageConfig) 
 }
 
 // LeaderNodeID derives the leader node from placements + storage configs.
-func LeaderNodeID(placements []TierPlacement, nscs []NodeStorageConfig) string {
+func LeaderNodeID(placements []VaultPlacement, nscs []NodeStorageConfig) string {
 	storageID := LeaderStorageID(placements)
 	if storageID == "" {
 		return ""
@@ -217,7 +217,7 @@ func LeaderNodeID(placements []TierPlacement, nscs []NodeStorageConfig) string {
 // FollowerNodeIDs derives unique follower node IDs from placements + storage configs.
 // Multiple same-node placements are deduplicated. Use FollowerTargets for
 // storage-level granularity.
-func FollowerNodeIDs(placements []TierPlacement, nscs []NodeStorageConfig) []string {
+func FollowerNodeIDs(placements []VaultPlacement, nscs []NodeStorageConfig) []string {
 	var nodeIDs []string
 	seen := make(map[string]bool)
 	for _, storageID := range FollowerStorageIDs(placements) {
@@ -239,7 +239,7 @@ type ReplicationTarget struct {
 // FollowerTargets returns one target per follower placement — NOT deduplicated
 // by node. Multiple placements on the same node produce multiple targets,
 // enabling same-node replication across different file storages.
-func FollowerTargets(placements []TierPlacement, nscs []NodeStorageConfig) []ReplicationTarget {
+func FollowerTargets(placements []VaultPlacement, nscs []NodeStorageConfig) []ReplicationTarget {
 	var targets []ReplicationTarget
 	for _, storageID := range FollowerStorageIDs(placements) {
 		nid := NodeIDForStorage(storageID, nscs)

@@ -50,7 +50,7 @@ func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition
 		ID: tierID, Name: "cloud", Type: system.VaultTypeFile, CloudServiceID: &csID,
 		VaultID: vaultID, Position: 0,
 	})
-	_ = store.SetTierPlacements(context.Background(), tierID, []system.TierPlacement{{StorageID: system.SyntheticStorageID("test-node"), Leader: true}})
+	_ = store.SetTierPlacements(context.Background(), tierID, []system.VaultPlacement{{StorageID: system.SyntheticStorageID("test-node"), Leader: true}})
 	_ = store.PutCloudService(context.Background(), system.CloudService{
 		ID:           csID,
 		Name:         "test-cloud",
@@ -541,11 +541,11 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 	cloudStore := blobstore.NewMemory()
 
 	store := sysmem.NewStore()
-	placements := []system.TierPlacement{
+	placements := []system.VaultPlacement{
 		{StorageID: system.SyntheticStorageID(leaderID), Leader: true},
 	}
 	for _, fid := range nodeIDs[1:] {
-		placements = append(placements, system.TierPlacement{
+		placements = append(placements, system.VaultPlacement{
 			StorageID: system.SyntheticStorageID(fid), Leader: false,
 		})
 	}

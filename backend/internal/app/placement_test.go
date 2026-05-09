@@ -15,8 +15,8 @@ import (
 )
 
 // leaderPlacement creates a Placements slice with a single leader using a synthetic storage ID.
-func leaderPlacement(nodeID string) []system.TierPlacement {
-	return []system.TierPlacement{{StorageID: system.SyntheticStorageID(nodeID), Leader: true}}
+func leaderPlacement(nodeID string) []system.VaultPlacement {
+	return []system.VaultPlacement{{StorageID: system.SyntheticStorageID(nodeID), Leader: true}}
 }
 
 func newTestPlacement(t *testing.T, localNodeID string, livePeers []string) (*placementManager, *sysmem.Store, *alert.Collector) {
@@ -746,14 +746,14 @@ func TestPlacementRF2AssignsSecondary(t *testing.T) {
 
 	_, _ = store.GetTier(ctx, tierID)
 	nscs, _ := store.ListNodeStorageConfigs(ctx)
-	if system.LeaderNodeID(func() []system.TierPlacement { p, _ := store.GetTierPlacements(ctx, tierID); return p }(), nscs) == "" {
+	if system.LeaderNodeID(func() []system.VaultPlacement { p, _ := store.GetTierPlacements(ctx, tierID); return p }(), nscs) == "" {
 		t.Fatal("expected leader assigned")
 	}
-	followers := system.FollowerNodeIDs(func() []system.TierPlacement { p, _ := store.GetTierPlacements(ctx, tierID); return p }(), nscs)
+	followers := system.FollowerNodeIDs(func() []system.VaultPlacement { p, _ := store.GetTierPlacements(ctx, tierID); return p }(), nscs)
 	if len(followers) != 1 {
 		t.Fatalf("expected 1 follower, got %d", len(followers))
 	}
-	if followers[0] == system.LeaderNodeID(func() []system.TierPlacement { p, _ := store.GetTierPlacements(ctx, tierID); return p }(), nscs) {
+	if followers[0] == system.LeaderNodeID(func() []system.VaultPlacement { p, _ := store.GetTierPlacements(ctx, tierID); return p }(), nscs) {
 		t.Error("follower should not be the same as leader")
 	}
 }
@@ -772,7 +772,7 @@ func TestPlacementRF1NoSecondaries(t *testing.T) {
 
 	_, _ = store.GetTier(ctx, tierID)
 	nscs, _ := store.ListNodeStorageConfigs(ctx)
-	if followers := system.FollowerNodeIDs(func() []system.TierPlacement { p, _ := store.GetTierPlacements(ctx, tierID); return p }(), nscs); len(followers) != 0 {
+	if followers := system.FollowerNodeIDs(func() []system.VaultPlacement { p, _ := store.GetTierPlacements(ctx, tierID); return p }(), nscs); len(followers) != 0 {
 		t.Errorf("expected 0 followers for RF=1, got %d", len(followers))
 	}
 }
@@ -792,7 +792,7 @@ func TestPlacementRF3InsufficientNodes(t *testing.T) {
 	_, _ = store.GetTier(ctx, tierID)
 	nscs, _ := store.ListNodeStorageConfigs(ctx)
 	// RF=3 needs 2 followers, but only 1 other node available.
-	if followers := system.FollowerNodeIDs(func() []system.TierPlacement { p, _ := store.GetTierPlacements(ctx, tierID); return p }(), nscs); len(followers) != 1 {
+	if followers := system.FollowerNodeIDs(func() []system.VaultPlacement { p, _ := store.GetTierPlacements(ctx, tierID); return p }(), nscs); len(followers) != 1 {
 		t.Errorf("expected 1 follower (max available), got %d", len(followers))
 	}
 	if !hasAlert(alerts, "tier-underreplicated:") {

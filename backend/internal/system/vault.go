@@ -161,9 +161,8 @@ const (
 )
 
 // VaultPlacement is the new canonical name for storage assignments
-// during the refactor. Alias of TierPlacement; once consumers migrate,
-// TierPlacement is deleted and this becomes the only name.
-type VaultPlacement = TierPlacement
+// during the refactor. Alias of VaultPlacement; once consumers migrate,
+// VaultPlacement is deleted and this becomes the only name.
 
 // MergeVaultFromTiers populates v's merged storage/lifecycle fields from
 // its (single) tier in tiers, returning the merged copy. Used during the

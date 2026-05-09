@@ -298,7 +298,7 @@ message DeleteTierCommand {
 
 message SetTierPlacementsCommand {
   bytes tier_id = 1;
-  repeated TierPlacement placements = 2;
+  repeated VaultPlacement placements = 2;
 }
 
 // --- Setup Wizard ---

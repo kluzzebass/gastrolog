@@ -296,11 +296,8 @@ export class RetentionRule extends Message<RetentionRule> {
 }
 
 /**
- * VaultPlacement assigns one replica of a vault to a specific file
- * storage. The node is derived from the file storage's NodeStorageConfig.
- *
- * Mirrors TierPlacement during the vault refactor (gastrolog-257l7);
- * once every consumer migrates to VaultConfig, TierPlacement is deleted.
+ * VaultPlacement assigns one replica of a vault to a specific file storage.
+ * The node is derived from the file storage's NodeStorageConfig.
  *
  * @generated from message gastrolog.v1.VaultPlacement
  */
@@ -5584,9 +5581,9 @@ export class TierConfig extends Message<TierConfig> {
   /**
    * system-managed: file storage assignments by placement manager
    *
-   * @generated from field: repeated gastrolog.v1.TierPlacement placements = 11;
+   * @generated from field: repeated gastrolog.v1.VaultPlacement placements = 11;
    */
-  placements: TierPlacement[] = [];
+  placements: VaultPlacement[] = [];
 
   /**
    * owning vault — exactly one vault per tier
@@ -5641,7 +5638,7 @@ export class TierConfig extends Message<TierConfig> {
     { no: 8, name: "cloud_service_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 9, name: "replication_factor", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 10, name: "path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 11, name: "placements", kind: "message", T: TierPlacement, repeated: true },
+    { no: 11, name: "placements", kind: "message", T: VaultPlacement, repeated: true },
     { no: 12, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 13, name: "position", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 14, name: "cache_eviction", kind: "scalar", T: 9 /* ScalarType.STRING */ },
@@ -5663,56 +5660,6 @@ export class TierConfig extends Message<TierConfig> {
 
   static equals(a: TierConfig | PlainMessage<TierConfig> | undefined, b: TierConfig | PlainMessage<TierConfig> | undefined): boolean {
     return proto3.util.equals(TierConfig, a, b);
-  }
-}
-
-/**
- * TierPlacement assigns one replica of a tier to a specific file storage.
- * The node is derived from the file storage's NodeStorageConfig.
- *
- * @generated from message gastrolog.v1.TierPlacement
- */
-export class TierPlacement extends Message<TierPlacement> {
-  /**
-   * references FileStorage.id
-   *
-   * @generated from field: bytes storage_id = 1;
-   */
-  storageId = new Uint8Array(0);
-
-  /**
-   * true = this storage bootstraps the Raft group (initial leader)
-   *
-   * @generated from field: bool leader = 2;
-   */
-  leader = false;
-
-  constructor(data?: PartialMessage<TierPlacement>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.TierPlacement";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "storage_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 2, name: "leader", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TierPlacement {
-    return new TierPlacement().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TierPlacement {
-    return new TierPlacement().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TierPlacement {
-    return new TierPlacement().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: TierPlacement | PlainMessage<TierPlacement> | undefined, b: TierPlacement | PlainMessage<TierPlacement> | undefined): boolean {
-    return proto3.util.equals(TierPlacement, a, b);
   }
 }
 

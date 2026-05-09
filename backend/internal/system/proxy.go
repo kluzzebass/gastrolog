@@ -658,7 +658,7 @@ func (p *StoreProxy) SetNodeStorageConfig(ctx context.Context, cfg NodeStorageCo
 	return p.inner.SetNodeStorageConfig(ctx, cfg)
 }
 
-func (p *StoreProxy) GetTierPlacements(ctx context.Context, tierID glid.GLID) ([]TierPlacement, error) {
+func (p *StoreProxy) GetTierPlacements(ctx context.Context, tierID glid.GLID) ([]VaultPlacement, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -667,7 +667,7 @@ func (p *StoreProxy) GetTierPlacements(ctx context.Context, tierID glid.GLID) ([
 	return p.inner.GetTierPlacements(ctx, tierID)
 }
 
-func (p *StoreProxy) SetTierPlacements(ctx context.Context, tierID glid.GLID, placements []TierPlacement) error {
+func (p *StoreProxy) SetTierPlacements(ctx context.Context, tierID glid.GLID, placements []VaultPlacement) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {

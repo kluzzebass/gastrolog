@@ -988,7 +988,7 @@ func RestoreSnapshot(snap *gastrologv1.SystemSnapshot) (*system.System, []system
 
 	// Restore tier placements.
 	if len(snap.GetTierPlacements()) > 0 {
-		rt.TierPlacements = make(map[glid.GLID][]system.TierPlacement, len(snap.GetTierPlacements()))
+		rt.TierPlacements = make(map[glid.GLID][]system.VaultPlacement, len(snap.GetTierPlacements()))
 		for _, tp := range snap.GetTierPlacements() {
 			tierID, placements, err := ExtractSetTierPlacements(tp)
 			if err != nil {

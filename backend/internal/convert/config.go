@@ -132,10 +132,10 @@ func NodeStorageConfigFromProto(p *gastrologv1.NodeStorageConfig) system.NodeSto
 
 // TierConfigToProto converts a system.TierConfig to its proto representation.
 // Placements are passed separately since they live in system.Runtime, not Config.
-func TierConfigToProto(t system.TierConfig, placements []system.TierPlacement) *gastrologv1.TierConfig {
-	pbPlacements := make([]*gastrologv1.TierPlacement, len(placements))
+func TierConfigToProto(t system.TierConfig, placements []system.VaultPlacement) *gastrologv1.TierConfig {
+	pbPlacements := make([]*gastrologv1.VaultPlacement, len(placements))
 	for i, p := range placements {
-		pbPlacements[i] = &gastrologv1.TierPlacement{
+		pbPlacements[i] = &gastrologv1.VaultPlacement{
 			StorageId: []byte(p.StorageID),
 			Leader:    p.Leader,
 		}
@@ -201,13 +201,13 @@ func TierConfigFromProto(p *gastrologv1.TierConfig) (system.TierConfig, error) {
 }
 
 // TierPlacementsFromProto extracts placements from a proto TierConfig.
-func TierPlacementsFromProto(p *gastrologv1.TierConfig) []system.TierPlacement {
+func TierPlacementsFromProto(p *gastrologv1.TierConfig) []system.VaultPlacement {
 	if p == nil {
 		return nil
 	}
-	var placements []system.TierPlacement
+	var placements []system.VaultPlacement
 	for _, pp := range p.GetPlacements() {
-		placements = append(placements, system.TierPlacement{
+		placements = append(placements, system.VaultPlacement{
 			StorageID: string(pp.GetStorageId()),
 			Leader:    pp.GetLeader(),
 		})
@@ -318,7 +318,7 @@ func VaultConfigFromProto(p *gastrologv1.VaultConfig) (system.VaultConfig, error
 	}
 
 	for _, pp := range p.GetPlacements() {
-		cfg.Placements = append(cfg.Placements, system.TierPlacement{
+		cfg.Placements = append(cfg.Placements, system.VaultPlacement{
 			StorageID: string(pp.GetStorageId()),
 			Leader:    pp.GetLeader(),
 		})

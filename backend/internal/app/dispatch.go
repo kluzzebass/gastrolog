@@ -506,8 +506,8 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID glid.GLID) 
 		return
 	}
 
-	leaderNodeID := system.LeaderNodeID(func() []system.TierPlacement { p, _ := d.cfgStore.GetTierPlacements(ctx, tierCfg.ID); return p }(), nscs)
-	followerNodeIDs := system.FollowerNodeIDs(func() []system.TierPlacement { p, _ := d.cfgStore.GetTierPlacements(ctx, tierCfg.ID); return p }(), nscs)
+	leaderNodeID := system.LeaderNodeID(func() []system.VaultPlacement { p, _ := d.cfgStore.GetTierPlacements(ctx, tierCfg.ID); return p }(), nscs)
+	followerNodeIDs := system.FollowerNodeIDs(func() []system.VaultPlacement { p, _ := d.cfgStore.GetTierPlacements(ctx, tierCfg.ID); return p }(), nscs)
 
 	// Only act on tier membership once placements are fully assigned. During
 	// cluster-init the placement manager assigns placements one-at-a-time,
@@ -622,8 +622,8 @@ func (d *configDispatcher) updateTierRoleIfNeeded(ctx context.Context, vaultID, 
 	if err != nil {
 		return
 	}
-	leaderNodeID := system.LeaderNodeID(func() []system.TierPlacement { p, _ := d.cfgStore.GetTierPlacements(ctx, tierCfg.ID); return p }(), nscs)
-	followerNodeIDs := system.FollowerNodeIDs(func() []system.TierPlacement { p, _ := d.cfgStore.GetTierPlacements(ctx, tierCfg.ID); return p }(), nscs)
+	leaderNodeID := system.LeaderNodeID(func() []system.VaultPlacement { p, _ := d.cfgStore.GetTierPlacements(ctx, tierCfg.ID); return p }(), nscs)
+	followerNodeIDs := system.FollowerNodeIDs(func() []system.VaultPlacement { p, _ := d.cfgStore.GetTierPlacements(ctx, tierCfg.ID); return p }(), nscs)
 	shouldBeFollower := slices.Contains(followerNodeIDs, d.localNodeID)
 	if existing.IsFollower == shouldBeFollower {
 		return // role unchanged

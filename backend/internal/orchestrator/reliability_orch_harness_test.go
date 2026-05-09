@@ -282,13 +282,13 @@ func (h *orchRelHarness) seedSharedConfig() {
 			h.t.Fatalf("PutTier %s: %v", v.label, err)
 		}
 		// Placements: one per participating node. First listed is leader.
-		placements := make([]system.TierPlacement, 0, len(v.nodeIdxs))
+		placements := make([]system.VaultPlacement, 0, len(v.nodeIdxs))
 		for pos, idx := range v.nodeIdxs {
 			if idx < 0 || idx >= len(h.nodeIDs) {
 				h.t.Fatalf("vault %s: invalid node index %d (have %d nodes)", v.label, idx, len(h.nodeIDs))
 			}
 			n := h.nodes[h.nodeIDs[idx]]
-			placements = append(placements, system.TierPlacement{
+			placements = append(placements, system.VaultPlacement{
 				StorageID: n.fileStorageID.String(),
 				Leader:    pos == 0,
 			})

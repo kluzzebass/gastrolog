@@ -377,7 +377,7 @@ func (f *FSM) syncTierFromVault(ctx context.Context, v system.VaultConfig) error
 		return err
 	}
 	if len(v.Placements) > 0 {
-		placements := make([]system.TierPlacement, len(v.Placements))
+		placements := make([]system.VaultPlacement, len(v.Placements))
 		copy(placements, v.Placements)
 		if err := f.store.SetTierPlacements(ctx, tier.ID, placements); err != nil {
 			return err
@@ -576,7 +576,7 @@ func (f *FSM) applySetTierPlacements(ctx context.Context, pb *gastrologv1.SetTie
 // VaultConfig.Placements. Used by the placement manager (which still
 // operates on tier IDs) until placement state migrates to vault-keyed
 // in Phase 5.
-func (f *FSM) mirrorPlacementsToVault(ctx context.Context, tierID glid.GLID, placements []system.TierPlacement) error {
+func (f *FSM) mirrorPlacementsToVault(ctx context.Context, tierID glid.GLID, placements []system.VaultPlacement) error {
 	tier, err := f.store.GetTier(ctx, tierID)
 	if err != nil || tier == nil {
 		return nil //nolint:nilerr // tier might be transient; not worth failing the placement write
@@ -587,7 +587,7 @@ func (f *FSM) mirrorPlacementsToVault(ctx context.Context, tierID glid.GLID, pla
 	}
 	merged := *v
 	if len(placements) > 0 {
-		merged.Placements = make([]system.TierPlacement, len(placements))
+		merged.Placements = make([]system.VaultPlacement, len(placements))
 		copy(merged.Placements, placements)
 	} else {
 		merged.Placements = nil

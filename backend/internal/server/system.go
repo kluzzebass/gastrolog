@@ -407,9 +407,9 @@ func (s *SystemServer) loadSystemTiers(ctx context.Context, resp *apiv1.GetSyste
 	}
 	for _, tier := range tiers {
 		tierPlacements, _ := s.sysStore.GetTierPlacements(ctx, tier.ID)
-		var placements []*apiv1.TierPlacement
+		var placements []*apiv1.VaultPlacement
 		for _, p := range tierPlacements {
-			placements = append(placements, &apiv1.TierPlacement{
+			placements = append(placements, &apiv1.VaultPlacement{
 				StorageId: []byte(p.StorageID),
 				Leader:    p.Leader,
 			})

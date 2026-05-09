@@ -124,14 +124,14 @@ func (pm *placementManager) reconcile(ctx context.Context) {
 	// Counts both leaders and followers.
 	tierCount := make(map[string]int)
 	for _, t := range tiers {
-		leaderNodeID := system.LeaderNodeID(func() []system.TierPlacement {
+		leaderNodeID := system.LeaderNodeID(func() []system.VaultPlacement {
 			p, _ := pm.cfgStore.GetTierPlacements(context.Background(), t.ID)
 			return p
 		}(), nscs)
 		if leaderNodeID != "" && alive[leaderNodeID] {
 			tierCount[leaderNodeID]++
 		}
-		for _, sid := range system.FollowerNodeIDs(func() []system.TierPlacement {
+		for _, sid := range system.FollowerNodeIDs(func() []system.VaultPlacement {
 			p, _ := pm.cfgStore.GetTierPlacements(context.Background(), t.ID)
 			return p
 		}(), nscs) {
@@ -261,7 +261,7 @@ func (pm *placementManager) isSingletonIngester(ing system.IngesterConfig) bool 
 func (pm *placementManager) placeTier(ctx context.Context, tier system.TierConfig, alive map[string]bool, nscs []system.NodeStorageConfig, tierCount map[string]int) {
 	alertKey := fmt.Sprintf("tier-unplaced:%s", tier.ID)
 
-	currentLeader := system.LeaderNodeID(func() []system.TierPlacement {
+	currentLeader := system.LeaderNodeID(func() []system.VaultPlacement {
 		p, _ := pm.cfgStore.GetTierPlacements(context.Background(), tier.ID)
 		return p
 	}(), nscs)
@@ -317,14 +317,14 @@ func (pm *placementManager) placeTier(ctx context.Context, tier system.TierConfi
 }
 
 // replaceLeaderPlacement returns a new Placements slice with the leader set to storageID.
-func replaceLeaderPlacement(placements []system.TierPlacement, storageID string) []system.TierPlacement {
-	var result []system.TierPlacement
+func replaceLeaderPlacement(placements []system.VaultPlacement, storageID string) []system.VaultPlacement {
+	var result []system.VaultPlacement
 	for _, p := range placements {
 		if !p.Leader {
 			result = append(result, p)
 		}
 	}
-	return append([]system.TierPlacement{{StorageID: storageID, Leader: true}}, result...)
+	return append([]system.VaultPlacement{{StorageID: storageID, Leader: true}}, result...)
 }
 
 // placeFollowers assigns follower file storages for a tier based on its ReplicationFactor.
@@ -337,7 +337,7 @@ func (pm *placementManager) placeFollowers(ctx context.Context, tier *system.Tie
 		return
 	}
 
-	leaderStorageID := system.LeaderStorageID(func() []system.TierPlacement {
+	leaderStorageID := system.LeaderStorageID(func() []system.VaultPlacement {
 		p, _ := pm.cfgStore.GetTierPlacements(context.Background(), tier.ID)
 		return p
 	}())
@@ -346,10 +346,10 @@ func (pm *placementManager) placeFollowers(ctx context.Context, tier *system.Tie
 	kept := pm.selectFollowers(tier, desired, leaderStorageID, leaderNodeID, candidates, nscs, alive, tierCount)
 
 	// Build new placements.
-	newPlacements := []system.TierPlacement{{StorageID: leaderStorageID, Leader: true}}
+	newPlacements := []system.VaultPlacement{{StorageID: leaderStorageID, Leader: true}}
 	newPlacements = append(newPlacements, kept...)
 
-	if !placementsEqual(func() []system.TierPlacement {
+	if !placementsEqual(func() []system.VaultPlacement {
 		p, _ := pm.cfgStore.GetTierPlacements(context.Background(), tier.ID)
 		return p
 	}(), newPlacements) {
@@ -367,7 +367,7 @@ func (pm *placementManager) placeFollowers(ctx context.Context, tier *system.Tie
 
 // clearStaleFollowers removes leftover follower placements when RF <= 1.
 func (pm *placementManager) clearStaleFollowers(ctx context.Context, tier *system.TierConfig, nscs []system.NodeStorageConfig, tierCount map[string]int) {
-	currentFollowers := system.FollowerStorageIDs(func() []system.TierPlacement {
+	currentFollowers := system.FollowerStorageIDs(func() []system.VaultPlacement {
 		p, _ := pm.cfgStore.GetTierPlacements(context.Background(), tier.ID)
 		return p
 	}())
@@ -413,8 +413,8 @@ func (pm *placementManager) followerCandidates(tier system.TierConfig, leaderSto
 
 // selectFollowers picks follower placements: retains existing valid ones first,
 // then fills from sorted candidates.
-func (pm *placementManager) selectFollowers(tier *system.TierConfig, desired int, leaderStorageID, leaderNodeID string, candidates []eligibleStorage, nscs []system.NodeStorageConfig, alive map[string]bool, tierCount map[string]int) []system.TierPlacement {
-	var kept []system.TierPlacement
+func (pm *placementManager) selectFollowers(tier *system.TierConfig, desired int, leaderStorageID, leaderNodeID string, candidates []eligibleStorage, nscs []system.NodeStorageConfig, alive map[string]bool, tierCount map[string]int) []system.VaultPlacement {
+	var kept []system.VaultPlacement
 	usedStorages := map[string]bool{leaderStorageID: true}
 	usedNodes := map[string]bool{leaderNodeID: true} // 1:1:1: one store per tier per node
 
@@ -440,7 +440,7 @@ func (pm *placementManager) selectFollowers(tier *system.TierConfig, desired int
 		if usedStorages[ea.storageID] || usedNodes[ea.nodeID] {
 			continue
 		}
-		kept = append(kept, system.TierPlacement{StorageID: ea.storageID, Leader: false})
+		kept = append(kept, system.VaultPlacement{StorageID: ea.storageID, Leader: false})
 		usedStorages[ea.storageID] = true
 		usedNodes[ea.nodeID] = true
 		tierCount[ea.nodeID]++
@@ -514,8 +514,8 @@ func (pm *placementManager) storageEligible(storageID string, tier system.TierCo
 }
 
 // clearFollowerPlacements removes all non-leader placements.
-func clearFollowerPlacements(placements []system.TierPlacement) []system.TierPlacement {
-	var result []system.TierPlacement
+func clearFollowerPlacements(placements []system.VaultPlacement) []system.VaultPlacement {
+	var result []system.VaultPlacement
 	for _, p := range placements {
 		if p.Leader {
 			result = append(result, p)
@@ -524,7 +524,7 @@ func clearFollowerPlacements(placements []system.TierPlacement) []system.TierPla
 	return result
 }
 
-func placementsEqual(a, b []system.TierPlacement) bool {
+func placementsEqual(a, b []system.VaultPlacement) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -550,7 +550,7 @@ func slicesEqual(a, b []string) bool {
 
 // handleUnplaceable clears a tier's assignment when no eligible node exists.
 func (pm *placementManager) handleUnplaceable(ctx context.Context, tier system.TierConfig, alertKey string, nscs []system.NodeStorageConfig, tierCount map[string]int) {
-	currentLeader := system.LeaderNodeID(func() []system.TierPlacement {
+	currentLeader := system.LeaderNodeID(func() []system.VaultPlacement {
 		p, _ := pm.cfgStore.GetTierPlacements(context.Background(), tier.ID)
 		return p
 	}(), nscs)
@@ -579,7 +579,7 @@ func (pm *placementManager) nodeEligible(tier system.TierConfig, nodeID string, 
 		return nodeHasStorageClass(nscs, nodeID, tier.StorageClass)
 	case system.VaultTypeJSONL:
 		// JSONL tiers have explicit node assignment via Path.
-		leaderNodeID := system.LeaderNodeID(func() []system.TierPlacement {
+		leaderNodeID := system.LeaderNodeID(func() []system.VaultPlacement {
 			p, _ := pm.cfgStore.GetTierPlacements(context.Background(), tier.ID)
 			return p
 		}(), nscs)

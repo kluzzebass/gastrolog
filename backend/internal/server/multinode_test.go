@@ -131,7 +131,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 			// Phase 2 (gastrolog-3iy5l): tier and vault are 1:1 with shared
 			// IDs. Write VaultConfig directly with all storage fields, plus
 			// a synthetic placement for this node, plus the matching tier.
-			placements := []system.TierPlacement{
+			placements := []system.VaultPlacement{
 				{StorageID: system.SyntheticStorageID(id), Leader: true},
 			}
 			_ = cfgStore.PutVault(ctx, system.VaultConfig{
