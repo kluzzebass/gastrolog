@@ -88,7 +88,7 @@ import (
 type VaultLifecycleReconciler struct {
 	vaultID     glid.GLID
 	tierID      glid.GLID
-	tier        *VaultInstance
+	inst        *VaultInstance
 	localNodeID string
 	logger      *slog.Logger
 
@@ -130,7 +130,7 @@ func NewTierLifecycleReconciler(orch *Orchestrator, vaultID, tierID glid.GLID, t
 	return &VaultLifecycleReconciler{
 		vaultID:     vaultID,
 		tierID:      tierID,
-		tier:        tier,
+		inst:        tier,
 		localNodeID: localNodeID,
 		orch:        orch,
 		logger:      logger.With("component", "vault-lifecycle-reconciler", "vault", vaultID),
@@ -227,10 +227,10 @@ func (r *VaultLifecycleReconciler) ReconcileFromSnapshot(fsm *tierfsm.FSM) {
 // which may have missed CmdSealChunk replays. Idempotent: chunks that
 // are already sealed locally, or that don't exist locally, are no-ops.
 func (r *VaultLifecycleReconciler) projectAllSealedFromFSM(fsm *tierfsm.FSM) {
-	if r.tier == nil || r.tier.Chunks == nil {
+	if r.inst == nil || r.inst.Chunks == nil {
 		return
 	}
-	ensurer, ok := r.tier.Chunks.(chunk.SealEnsurer)
+	ensurer, ok := r.inst.Chunks.(chunk.SealEnsurer)
 	if !ok {
 		return
 	}
@@ -272,7 +272,7 @@ func (r *VaultLifecycleReconciler) projectAllSealedFromFSM(fsm *tierfsm.FSM) {
 // placement the leader holding the FSM Sealing entry is the only node
 // that ever held the chunk locally, so this is the right place).
 func (r *VaultLifecycleReconciler) resumeSealingFromFSM(fsm *tierfsm.FSM) {
-	if r.tier == nil || r.tier.Chunks == nil {
+	if r.inst == nil || r.inst.Chunks == nil {
 		return
 	}
 	schedule := r.postSealHook
@@ -284,7 +284,7 @@ func (r *VaultLifecycleReconciler) resumeSealingFromFSM(fsm *tierfsm.FSM) {
 	}
 	// Build a local-chunk index so we don't repeatedly walk the Manager
 	// for each FSM entry — the seal-resume pass should be cheap.
-	localMetas, err := r.tier.Chunks.List()
+	localMetas, err := r.inst.Chunks.List()
 	if err != nil {
 		r.logger.Warn("reconcile-from-snapshot: list chunks failed for sealing-resume",
 			"error", err)
@@ -324,7 +324,7 @@ func (r *VaultLifecycleReconciler) resumeSealingFromFSM(fsm *tierfsm.FSM) {
 		}
 		r.logger.Info("reconcile-from-snapshot: resuming PostSealProcess for Sealing chunk",
 			"chunk", e.ID)
-		schedule(r.vaultID, r.tier.Chunks, e.ID)
+		schedule(r.vaultID, r.inst.Chunks, e.ID)
 		resumed++
 	}
 	if resumed > 0 {
@@ -346,10 +346,10 @@ func (r *VaultLifecycleReconciler) resumeSealingFromFSM(fsm *tierfsm.FSM) {
 // m.cloudIdx), so calling it for every cloud-backed entry is safe.
 // See gastrolog-3ukgz.
 func (r *VaultLifecycleReconciler) projectAllCloudBackedFromFSM(fsm *tierfsm.FSM) {
-	if r.tier == nil || r.tier.Chunks == nil {
+	if r.inst == nil || r.inst.Chunks == nil {
 		return
 	}
-	registrar, ok := r.tier.Chunks.(chunk.CloudChunkRegistrar)
+	registrar, ok := r.inst.Chunks.(chunk.CloudChunkRegistrar)
 	if !ok {
 		return
 	}
@@ -407,10 +407,10 @@ func (r *VaultLifecycleReconciler) onSeal(e tierfsm.ManifestEntry) {
 			r.orch.NotifyChunkChange()
 		}
 	}()
-	if r.tier == nil || r.tier.Chunks == nil {
+	if r.inst == nil || r.inst.Chunks == nil {
 		return
 	}
-	ensurer, ok := r.tier.Chunks.(chunk.SealEnsurer)
+	ensurer, ok := r.inst.Chunks.(chunk.SealEnsurer)
 	if !ok {
 		return
 	}
@@ -460,10 +460,10 @@ func (r *VaultLifecycleReconciler) onRequestDelete(p tierfsm.PendingDelete) {
 // command to apply.
 func (r *VaultLifecycleReconciler) onAckDelete(chunkID chunk.ChunkID, ackingNodeID string) {
 	r.logger.Debug("onAckDelete", "chunk", chunkID, "node", ackingNodeID)
-	if r.tier == nil || r.tier.IsRaftLeader == nil || !r.tier.IsRaftLeader() {
+	if r.inst == nil || r.inst.IsRaftLeader == nil || !r.inst.IsRaftLeader() {
 		return
 	}
-	if r.fsm == nil || r.tier.ApplyRaftFinalizeDelete == nil {
+	if r.fsm == nil || r.inst.ApplyRaftFinalizeDelete == nil {
 		return
 	}
 	p := r.fsm.PendingDelete(chunkID)
@@ -471,7 +471,7 @@ func (r *VaultLifecycleReconciler) onAckDelete(chunkID chunk.ChunkID, ackingNode
 		return // still owed acks, or already finalized
 	}
 	go func() {
-		if err := r.tier.ApplyRaftFinalizeDelete(chunkID); err != nil {
+		if err := r.inst.ApplyRaftFinalizeDelete(chunkID); err != nil {
 			r.logger.Warn("onAckDelete: finalize failed",
 				"chunk", chunkID, "error", err)
 		}
@@ -498,10 +498,10 @@ func (r *VaultLifecycleReconciler) onFinalizeDelete(chunkID chunk.ChunkID) {
 func (r *VaultLifecycleReconciler) onPruneNode(prunedNodeID string, finalizable []chunk.ChunkID) {
 	r.logger.Debug("onPruneNode",
 		"node", prunedNodeID, "finalizable_count", len(finalizable))
-	if r.tier == nil || r.tier.IsRaftLeader == nil || !r.tier.IsRaftLeader() {
+	if r.inst == nil || r.inst.IsRaftLeader == nil || !r.inst.IsRaftLeader() {
 		return
 	}
-	if r.tier.ApplyRaftFinalizeDelete == nil || len(finalizable) == 0 {
+	if r.inst.ApplyRaftFinalizeDelete == nil || len(finalizable) == 0 {
 		return
 	}
 	// Finalize Applies MUST run off the FSM apply pump — same reason as
@@ -510,7 +510,7 @@ func (r *VaultLifecycleReconciler) onPruneNode(prunedNodeID string, finalizable 
 	ids := append([]chunk.ChunkID(nil), finalizable...)
 	go func() {
 		for _, id := range ids {
-			if err := r.tier.ApplyRaftFinalizeDelete(id); err != nil {
+			if err := r.inst.ApplyRaftFinalizeDelete(id); err != nil {
 				r.logger.Warn("onPruneNode: post-prune finalize failed",
 					"chunk", id, "node", prunedNodeID, "error", err)
 			}
@@ -605,15 +605,15 @@ func (r *VaultLifecycleReconciler) SweepPendingObligations() {
 // without per-component log-level overrides — the whole point of this
 // sweep is operator-visible recovery.
 func (r *VaultLifecycleReconciler) SweepLocalOrphans() {
-	if r.fsm == nil || r.tier == nil || r.tier.Chunks == nil {
+	if r.fsm == nil || r.inst == nil || r.inst.Chunks == nil {
 		return
 	}
-	metas, err := r.tier.Chunks.List()
+	metas, err := r.inst.Chunks.List()
 	if err != nil {
 		r.logger.Warn("local-orphan sweep: list chunks failed", "error", err)
 		return
 	}
-	ensurer, _ := r.tier.Chunks.(chunk.SealEnsurer) // optional
+	ensurer, _ := r.inst.Chunks.(chunk.SealEnsurer) // optional
 	// Chunks freshly created on this node but whose CmdCreateChunk hasn't
 	// applied yet would also fail fsm.Get / IsTombstoned. We don't want to
 	// race-delete them. Use seal age as a coarse "old enough that announce
@@ -704,13 +704,13 @@ func (r *VaultLifecycleReconciler) SweepLocalOrphans() {
 // shared object storage and are skipped: they are not a local-replica
 // concern. See gastrolog-2dgvj.
 func (r *VaultLifecycleReconciler) SweepMissingReplicas() {
-	if r.fsm == nil || r.tier == nil || r.tier.Chunks == nil {
+	if r.fsm == nil || r.inst == nil || r.inst.Chunks == nil {
 		return
 	}
-	if !r.tier.IsFollower {
+	if !r.inst.IsFollower {
 		return // leader's own disk is the source of truth
 	}
-	if r.tier.LeaderNodeID == "" {
+	if r.inst.LeaderNodeID == "" {
 		return // no known placement leader; nowhere to send the request
 	}
 	if r.orch == nil || r.orch.chunkReplicator == nil {
@@ -718,7 +718,7 @@ func (r *VaultLifecycleReconciler) SweepMissingReplicas() {
 	}
 
 	// Local index of what's on disk so the diff is O(N+M) not O(N×M).
-	localMetas, err := r.tier.Chunks.List()
+	localMetas, err := r.inst.Chunks.List()
 	if err != nil {
 		r.logger.Warn("missing-replica sweep: list chunks failed", "error", err)
 		return
@@ -748,24 +748,24 @@ func (r *VaultLifecycleReconciler) SweepMissingReplicas() {
 	}
 
 	r.logger.Info("missing-replica sweep: requesting catchup",
-		"leader", r.tier.LeaderNodeID, "missing", len(missing))
+		"leader", r.inst.LeaderNodeID, "missing", len(missing))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	scheduled, err := r.orch.chunkReplicator.RequestReplicaCatchup(
-		ctx, r.tier.LeaderNodeID, r.vaultID, missing, r.localNodeID)
+		ctx, r.inst.LeaderNodeID, r.vaultID, missing, r.localNodeID)
 	if err != nil {
 		// The next sweep tick will retry. Possible causes: leader changed
 		// after we resolved tier.LeaderNodeID, leader is unreachable, peer
 		// connection still warming up. None of these are terminal — the
 		// FSM diff is local state, so we converge on the next tick.
 		r.logger.Warn("missing-replica sweep: request failed",
-			"leader", r.tier.LeaderNodeID, "missing", len(missing), "error", err)
+			"leader", r.inst.LeaderNodeID, "missing", len(missing), "error", err)
 		return
 	}
 	r.logger.Info("missing-replica sweep: leader scheduled pushes",
-		"leader", r.tier.LeaderNodeID, "scheduled", scheduled, "requested", len(missing))
+		"leader", r.inst.LeaderNodeID, "scheduled", scheduled, "requested", len(missing))
 }
 
 // staleLeaderFSMGracePeriod is how long a sealed-but-not-on-disk-locally
@@ -796,17 +796,17 @@ const staleLeaderFSMGracePeriod = 1 * time.Hour
 //
 // See gastrolog-5nhwe.
 func (r *VaultLifecycleReconciler) SweepStaleLeaderFSMEntries() {
-	if r.fsm == nil || r.tier == nil || r.tier.Chunks == nil {
+	if r.fsm == nil || r.inst == nil || r.inst.Chunks == nil {
 		return
 	}
-	if r.tier.IsFollower {
+	if r.inst.IsFollower {
 		return // followers use SweepMissingReplicas to pull from leader
 	}
-	if r.tier.ApplyRaftRequestDelete == nil {
+	if r.inst.ApplyRaftRequestDelete == nil {
 		return // single-node / no Raft; no receipt protocol
 	}
 
-	localMetas, err := r.tier.Chunks.List()
+	localMetas, err := r.inst.Chunks.List()
 	if err != nil {
 		r.logger.Warn("stale-fsm sweep: list chunks failed", "error", err)
 		return
@@ -875,16 +875,16 @@ func (r *VaultLifecycleReconciler) SweepStaleLeaderFSMEntries() {
 // placementMembership returns the expectedFrom set for delete
 // proposals: the local node plus every replication target. Mirrored
 // from orchestrator.placementMembership which takes a tier as input
-// and is wired through r.tier directly here so the reconciler doesn't
+// and is wired through r.inst directly here so the reconciler doesn't
 // need an orchestrator back-pointer for this.
 func (r *VaultLifecycleReconciler) placementMembership() []string {
-	expected := make([]string, 0, 1+len(r.tier.FollowerTargets))
+	expected := make([]string, 0, 1+len(r.inst.FollowerTargets))
 	seen := map[string]bool{}
 	if r.localNodeID != "" {
 		expected = append(expected, r.localNodeID)
 		seen[r.localNodeID] = true
 	}
-	for _, t := range r.tier.FollowerTargets {
+	for _, t := range r.inst.FollowerTargets {
 		if t.NodeID == "" || seen[t.NodeID] {
 			continue
 		}
@@ -909,8 +909,8 @@ func (r *VaultLifecycleReconciler) placementMembership() []string {
 // ErrActiveChunk on every periodic-sweep tick, blocking finalize
 // indefinitely.
 func (r *VaultLifecycleReconciler) fulfillObligation(chunkID chunk.ChunkID, reason, source string) {
-	if r.tier != nil && r.tier.Chunks != nil {
-		if ensurer, ok := r.tier.Chunks.(chunk.SealEnsurer); ok {
+	if r.inst != nil && r.inst.Chunks != nil {
+		if ensurer, ok := r.inst.Chunks.(chunk.SealEnsurer); ok {
 			if err := ensurer.EnsureSealed(chunkID); err != nil {
 				r.logger.Warn("delete obligation: pre-demote failed",
 					"chunk", chunkID, "reason", reason, "source", source, "error", err)
@@ -928,12 +928,12 @@ func (r *VaultLifecycleReconciler) fulfillObligation(chunkID chunk.ChunkID, reas
 			"chunk", chunkID, "reason", reason, "source", source, "error", err)
 		return
 	}
-	if r.tier == nil || r.tier.ApplyRaftAckDelete == nil {
+	if r.inst == nil || r.inst.ApplyRaftAckDelete == nil {
 		// No applier wired — nothing to ack against. Single-node mode
 		// uses deleteChunk's local-only fallback and never reaches here.
 		return
 	}
-	if err := r.tier.ApplyRaftAckDelete(chunkID, r.localNodeID); err != nil {
+	if err := r.inst.ApplyRaftAckDelete(chunkID, r.localNodeID); err != nil {
 		r.logger.Warn("delete obligation: ack failed",
 			"chunk", chunkID, "reason", reason, "source", source, "error", err)
 	}
@@ -945,7 +945,7 @@ func (r *VaultLifecycleReconciler) fulfillObligation(chunkID chunk.ChunkID, reas
 //
 // No same-node sibling fan-out: in the receipt protocol every node
 // runs its own per-TI reconciler, so each TI self-cleans via its own
-// r.tier.Chunks. The legacy `deleteFromFollowers` walk only made sense
+// r.inst.Chunks. The legacy `deleteFromFollowers` walk only made sense
 // when a single leader-side expireChunk had to clean up sibling
 // follower TIs on the same node; per-TI reconcilers obsolete that, and
 // per 1:1:1 placement there are no sibling TIs anyway. Calling
@@ -953,16 +953,16 @@ func (r *VaultLifecycleReconciler) fulfillObligation(chunkID chunk.ChunkID, reas
 // from and log a spurious "chunk not found" warning. See the cluster
 // log storm fixed alongside this change.
 func (r *VaultLifecycleReconciler) deleteLocalCopy(chunkID chunk.ChunkID) error {
-	if r.tier == nil {
+	if r.inst == nil {
 		return nil
 	}
-	if r.tier.Indexes != nil {
-		if err := r.tier.Indexes.DeleteIndexes(chunkID); err != nil && !errors.Is(err, chunk.ErrChunkNotFound) {
+	if r.inst.Indexes != nil {
+		if err := r.inst.Indexes.DeleteIndexes(chunkID); err != nil && !errors.Is(err, chunk.ErrChunkNotFound) {
 			return fmt.Errorf("delete indexes: %w", err)
 		}
 	}
-	if r.tier.Chunks != nil {
-		if err := chunk.DeleteNoAnnounce(r.tier.Chunks, chunkID); err != nil && !errors.Is(err, chunk.ErrChunkNotFound) {
+	if r.inst.Chunks != nil {
+		if err := chunk.DeleteNoAnnounce(r.inst.Chunks, chunkID); err != nil && !errors.Is(err, chunk.ErrChunkNotFound) {
 			return fmt.Errorf("delete chunk: %w", err)
 		}
 	}
@@ -1006,10 +1006,10 @@ func (r *VaultLifecycleReconciler) deleteLocalCopy(chunkID chunk.ChunkID) error 
 // directly from local FSM state without going through this entry
 // point, so dedup'ing here is safe.
 func (r *VaultLifecycleReconciler) deleteChunk(chunkID chunk.ChunkID, reason string, expectedFrom []string) error {
-	if r.tier == nil {
+	if r.inst == nil {
 		return errors.New("deleteChunk: nil tier instance")
 	}
-	if r.tier.ApplyRaftRequestDelete == nil {
+	if r.inst.ApplyRaftRequestDelete == nil {
 		// Single-node fallback: no Raft, no receipt protocol. Just
 		// delete locally and notify chunk-change subscribers.
 		r.logger.Debug("deleteChunk: single-node fallback",
@@ -1023,5 +1023,5 @@ func (r *VaultLifecycleReconciler) deleteChunk(chunkID chunk.ChunkID, reason str
 	}
 	r.logger.Debug("deleteChunk: proposing CmdRequestDelete",
 		"chunk", chunkID, "reason", reason, "expected_count", len(expectedFrom))
-	return r.tier.ApplyRaftRequestDelete(chunkID, reason, expectedFrom)
+	return r.inst.ApplyRaftRequestDelete(chunkID, reason, expectedFrom)
 }
