@@ -57,19 +57,19 @@ type CloudService struct {
 	ReconcileSchedule string                   `json:"reconcileSchedule,omitempty"` // default "0 3 * * *"
 }
 
-// TierType identifies the storage medium for a tier.
+// VaultType identifies the storage medium for a vault.
 //
-// "cloud" is no longer a distinct type: a cloud-backed tier is a file tier
-// with CloudServiceID set, exposed via TierConfig.IsCloud(). Step 8 of the
+// "cloud" is no longer a distinct type: a cloud-backed vault is a file vault
+// with CloudServiceID set, exposed via VaultConfig.IsCloud(). Step 8 of the
 // chunk redesign collapsed the parallel cloud/file dispatch into a single
 // file path that flips behavior based on whether a cloud store is wired.
 // See gastrolog-4k5mg.
-type TierType string
+type VaultType string
 
 const (
-	TierTypeMemory TierType = "memory"
-	TierTypeFile   TierType = "file"
-	TierTypeJSONL  TierType = "jsonl"
+	VaultTypeMemory VaultType = "memory"
+	VaultTypeFile   VaultType = "file"
+	VaultTypeJSONL  VaultType = "jsonl"
 )
 
 // TierConfig defines a storage tier owned by exactly one vault. Tiers are
@@ -77,7 +77,7 @@ const (
 type TierConfig struct {
 	ID                glid.GLID       `json:"id"`
 	Name              string          `json:"name"`
-	Type              TierType        `json:"type"`
+	Type              VaultType       `json:"type"`
 	VaultID           glid.GLID       `json:"vaultId"`  // owning vault
 	Position          uint32          `json:"position"` // 0-based order in vault's tier chain
 	RotationPolicyID  *glid.GLID      `json:"rotationPolicyId,omitempty"`
@@ -178,14 +178,14 @@ func StorageIDForNode(nodeID string, tier TierConfig, nscs []NodeStorageConfig) 
 	nsc := nscs[idx]
 	var requiredClass uint32
 	switch tier.Type {
-	case TierTypeFile:
+	case VaultTypeFile:
 		// Single storage class for all file tiers (local-only and
 		// cloud-backed alike). After step 7k, the active chunk and
 		// the warm cache live at the same path under chunkDir, so
 		// distinguishing "active" and "cache" classes serves no
 		// purpose. See gastrolog-4k5mg.
 		requiredClass = tier.StorageClass
-	case TierTypeMemory, TierTypeJSONL:
+	case VaultTypeMemory, VaultTypeJSONL:
 		// No storage class — pick any storage, or synthetic if none.
 		if len(nsc.FileStorages) > 0 {
 			return nsc.FileStorages[0].ID.String()

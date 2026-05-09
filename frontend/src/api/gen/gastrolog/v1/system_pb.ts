@@ -14,9 +14,6 @@ import { CloudService, NodeStorageConfig } from "./storage_pb.js";
  * set; the server flips behavior on the cloud-store binding rather than
  * the type enum.
  *
- * Mirrors TierType during the vault refactor (gastrolog-257l7); once
- * every consumer migrates to VaultConfig, TierType is deleted.
- *
  * @generated from enum gastrolog.v1.VaultType
  */
 export enum VaultType {
@@ -78,44 +75,6 @@ proto3.util.setEnumType(IngesterMode, "gastrolog.v1.IngesterMode", [
   { no: 0, name: "INGESTER_MODE_UNSPECIFIED" },
   { no: 1, name: "INGESTER_MODE_PASSIVE" },
   { no: 2, name: "INGESTER_MODE_ACTIVE" },
-]);
-
-/**
- * TierType identifies the storage medium for a tier.
- *
- * A cloud-backed tier is a TIER_TYPE_FILE tier with cloud_service_id set;
- * the server flips behavior on the cloud-store binding rather than the
- * type enum. See gastrolog-4k5mg.
- *
- * @generated from enum gastrolog.v1.TierType
- */
-export enum TierType {
-  /**
-   * @generated from enum value: TIER_TYPE_UNSPECIFIED = 0;
-   */
-  UNSPECIFIED = 0,
-
-  /**
-   * @generated from enum value: TIER_TYPE_MEMORY = 1;
-   */
-  MEMORY = 1,
-
-  /**
-   * @generated from enum value: TIER_TYPE_FILE = 2;
-   */
-  FILE = 2,
-
-  /**
-   * @generated from enum value: TIER_TYPE_JSONL = 3;
-   */
-  JSONL = 3,
-}
-// Retrieve enum metadata with: proto3.getEnumType(TierType)
-proto3.util.setEnumType(TierType, "gastrolog.v1.TierType", [
-  { no: 0, name: "TIER_TYPE_UNSPECIFIED" },
-  { no: 1, name: "TIER_TYPE_MEMORY" },
-  { no: 2, name: "TIER_TYPE_FILE" },
-  { no: 3, name: "TIER_TYPE_JSONL" },
 ]);
 
 /**
@@ -5518,6 +5477,11 @@ export class NodeConfig extends Message<NodeConfig> {
 }
 
 /**
+ * VaultType identifies the storage medium for a tier.
+ *
+ * A cloud-backed tier is a TIER_TYPE_FILE tier with cloud_service_id set;
+ * the server flips behavior on the cloud-store binding rather than the
+ * type enum. See gastrolog-4k5mg.
  * TierConfig defines a storage tier owned by exactly one vault. Tiers are
  * ordered within a vault by their position field (0 = hottest / first).
  *
@@ -5535,9 +5499,9 @@ export class TierConfig extends Message<TierConfig> {
   name = "";
 
   /**
-   * @generated from field: gastrolog.v1.TierType type = 3;
+   * @generated from field: gastrolog.v1.VaultType type = 3;
    */
-  type = TierType.UNSPECIFIED;
+  type = VaultType.UNSPECIFIED;
 
   /**
    * @generated from field: bytes rotation_policy_id = 4;
@@ -5630,7 +5594,7 @@ export class TierConfig extends Message<TierConfig> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "type", kind: "enum", T: proto3.getEnumType(TierType) },
+    { no: 3, name: "type", kind: "enum", T: proto3.getEnumType(VaultType) },
     { no: 4, name: "rotation_policy_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 5, name: "retention_rules", kind: "message", T: RetentionRule, repeated: true },
     { no: 6, name: "memory_budget_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },

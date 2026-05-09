@@ -1398,7 +1398,7 @@ func TestPutTierRejectsCloudServiceIDChange(t *testing.T) {
 		Config: &gastrologv1.TierConfig{
 			Id:                tierID.ToProto(),
 			Name:              "tier",
-			Type:              gastrologv1.TierType_TIER_TYPE_FILE,
+			Type:              gastrologv1.VaultType_VAULT_TYPE_FILE,
 			VaultId:           vaultID.ToProto(),
 			Position:          0,
 			StorageClass:      1,
@@ -1416,7 +1416,7 @@ func TestPutTierRejectsCloudServiceIDChange(t *testing.T) {
 		Config: &gastrologv1.TierConfig{
 			Id:                tierID.ToProto(),
 			Name:              "tier",
-			Type:              gastrologv1.TierType_TIER_TYPE_FILE,
+			Type:              gastrologv1.VaultType_VAULT_TYPE_FILE,
 			VaultId:           vaultID.ToProto(),
 			Position:          0,
 			CloudServiceId:    csID.ToProto(),
@@ -1451,7 +1451,7 @@ func TestPutTierAcceptsUnchangedCloudServiceID(t *testing.T) {
 			Config: &gastrologv1.TierConfig{
 				Id:                tierID.ToProto(),
 				Name:              name,
-				Type:              gastrologv1.TierType_TIER_TYPE_FILE,
+				Type:              gastrologv1.VaultType_VAULT_TYPE_FILE,
 				VaultId:           vaultID.ToProto(),
 				Position:          0,
 				StorageClass:      1,

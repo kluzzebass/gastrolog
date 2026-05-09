@@ -985,7 +985,7 @@ func tableToMap(t *testing.T, table *gastrologv1.TableResult, keyCol, valCol str
 
 // Fresh cluster must not reject search before any ingestion. Baseline
 // regression for the "no data yet" case. NOTE: this harness uses
-// TierTypeMemory (IsFSMReady == nil, treated as ready), so it does NOT
+// VaultTypeMemory (IsFSMReady == nil, treated as ready), so it does NOT
 // exercise the Raft-backed readiness gate that fails on a real cluster
 // bootstrap. The full reproduction requires a Raft-backed multi-node
 // harness — tracked as part of gastrolog-5ff7z.

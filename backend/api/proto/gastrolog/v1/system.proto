@@ -204,9 +204,6 @@ message RetentionRule {
 // A cloud-backed vault is a VAULT_TYPE_FILE vault with cloud_service_id
 // set; the server flips behavior on the cloud-store binding rather than
 // the type enum.
-//
-// Mirrors TierType during the vault refactor (gastrolog-257l7); once
-// every consumer migrates to VaultConfig, TierType is deleted.
 enum VaultType {
   VAULT_TYPE_UNSPECIFIED = 0;
   VAULT_TYPE_MEMORY = 1;
@@ -892,19 +889,12 @@ message NodeConfig {
 // A cloud-backed tier is a TIER_TYPE_FILE tier with cloud_service_id set;
 // the server flips behavior on the cloud-store binding rather than the
 // type enum. See gastrolog-4k5mg.
-enum TierType {
-  TIER_TYPE_UNSPECIFIED = 0;
-  TIER_TYPE_MEMORY = 1;
-  TIER_TYPE_FILE = 2;
-  TIER_TYPE_JSONL = 3;
-}
-
 // TierConfig defines a storage tier owned by exactly one vault. Tiers are
 // ordered within a vault by their position field (0 = hottest / first).
 message TierConfig {
   bytes id = 1;
   string name = 2;
-  TierType type = 3;
+  VaultType type = 3;
   bytes rotation_policy_id = 4;
   repeated RetentionRule retention_rules = 5;
   uint64 memory_budget_bytes = 6;

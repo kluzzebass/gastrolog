@@ -215,28 +215,28 @@ func TierPlacementsFromProto(p *gastrologv1.TierConfig) []system.VaultPlacement 
 	return placements
 }
 
-func TierTypeToProto(t system.TierType) gastrologv1.TierType {
+func TierTypeToProto(t system.VaultType) gastrologv1.VaultType {
 	switch t {
 	case system.VaultTypeMemory:
-		return gastrologv1.TierType_TIER_TYPE_MEMORY
+		return gastrologv1.VaultType_VAULT_TYPE_MEMORY
 	case system.VaultTypeFile:
-		return gastrologv1.TierType_TIER_TYPE_FILE
+		return gastrologv1.VaultType_VAULT_TYPE_FILE
 	case system.VaultTypeJSONL:
-		return gastrologv1.TierType_TIER_TYPE_JSONL
+		return gastrologv1.VaultType_VAULT_TYPE_JSONL
 	default:
-		return gastrologv1.TierType_TIER_TYPE_UNSPECIFIED
+		return gastrologv1.VaultType_VAULT_TYPE_UNSPECIFIED
 	}
 }
 
-func TierTypeFromProto(t gastrologv1.TierType) system.TierType {
+func TierTypeFromProto(t gastrologv1.VaultType) system.VaultType {
 	switch t {
-	case gastrologv1.TierType_TIER_TYPE_MEMORY:
+	case gastrologv1.VaultType_VAULT_TYPE_MEMORY:
 		return system.VaultTypeMemory
-	case gastrologv1.TierType_TIER_TYPE_FILE:
+	case gastrologv1.VaultType_VAULT_TYPE_FILE:
 		return system.VaultTypeFile
-	case gastrologv1.TierType_TIER_TYPE_JSONL:
+	case gastrologv1.VaultType_VAULT_TYPE_JSONL:
 		return system.VaultTypeJSONL
-	case gastrologv1.TierType_TIER_TYPE_UNSPECIFIED:
+	case gastrologv1.VaultType_VAULT_TYPE_UNSPECIFIED:
 		return system.VaultTypeFile
 	default:
 		return system.VaultTypeFile
@@ -327,9 +327,9 @@ func VaultConfigFromProto(p *gastrologv1.VaultConfig) (system.VaultConfig, error
 	return cfg, nil
 }
 
-// VaultTypeToProto maps the Go-side TierType (still used as the underlying
+// VaultTypeToProto maps the Go-side VaultType (still used as the underlying
 // string enum during the refactor) to the new proto VaultType.
-func VaultTypeToProto(t system.TierType) gastrologv1.VaultType {
+func VaultTypeToProto(t system.VaultType) gastrologv1.VaultType {
 	switch t {
 	case system.VaultTypeMemory:
 		return gastrologv1.VaultType_VAULT_TYPE_MEMORY
@@ -384,13 +384,13 @@ func RouteStagesFromProto(stages []*gastrologv1.RouteStage) []system.RouteStage 
 	return out
 }
 
-// VaultTypeFromProto maps proto VaultType back to the Go-side TierType.
-// Round-trips empty: VAULT_TYPE_UNSPECIFIED maps to the empty TierType so
+// VaultTypeFromProto maps proto VaultType back to the Go-side VaultType.
+// Round-trips empty: VAULT_TYPE_UNSPECIFIED maps to the empty VaultType so
 // "type was never set" is distinguishable from "type is file". (TierTypeFromProto
 // defaults UNSPECIFIED to file because the legacy tier path always wrote a
 // non-empty type; the vault path doesn't have that guarantee yet during
 // the refactor.)
-func VaultTypeFromProto(t gastrologv1.VaultType) system.TierType {
+func VaultTypeFromProto(t gastrologv1.VaultType) system.VaultType {
 	switch t {
 	case gastrologv1.VaultType_VAULT_TYPE_MEMORY:
 		return system.VaultTypeMemory

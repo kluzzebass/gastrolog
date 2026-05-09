@@ -422,7 +422,7 @@ func ChunkMetaToProto(meta chunk.ChunkMeta) *apiv1.ChunkMeta {
 func TieredChunkMetaToProto(meta orchestrator.TieredChunkMeta) *apiv1.ChunkMeta {
 	pb := ChunkMetaToProto(meta.ChunkMeta)
 	pb.TierId = meta.TierID.ToProto()
-	pb.TierType = meta.TierType
+	pb.VaultType = meta.VaultType
 	return pb
 }
 

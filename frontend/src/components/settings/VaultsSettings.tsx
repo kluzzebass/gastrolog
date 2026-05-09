@@ -8,7 +8,7 @@ import {
   usePutVault,
   useGenerateName,
 } from "../../api/hooks";
-import { TierType, VaultType, RetentionRule, VaultConfig } from "../../api/gen/gastrolog/v1/system_pb";
+import { VaultType, RetentionRule, VaultConfig } from "../../api/gen/gastrolog/v1/system_pb";
 import { useToast } from "../Toast";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
@@ -24,16 +24,16 @@ import { VaultSettingsCard } from "./VaultSettingsCard";
 // "cloud" is no longer a distinct tier kind. A cloud-backed tier is a file
 // tier with cloudServiceId set; cloud-ness is derived via isCloudBacked()
 // rather than checking the type discriminator. See gastrolog-4k5mg.
-export type TierTypeLabel = "memory" | "file" | "jsonl";
+export type VaultTypeLabel = "memory" | "file" | "jsonl";
 
 /** Returns true if this tier is cloud-backed (file tier with a cloud service binding). */
-export function isCloudBacked(tier: { type: TierTypeLabel; cloudServiceId: string }): boolean {
+export function isCloudBacked(tier: { type: VaultTypeLabel; cloudServiceId: string }): boolean {
   return tier.type === "file" && tier.cloudServiceId !== "";
 }
 
 export interface TierEntry {
   key: string;
-  type: TierTypeLabel;
+  type: VaultTypeLabel;
   storageClass: string;
   cloudServiceId: string;
   cacheEviction: string;
@@ -48,7 +48,7 @@ export interface TierEntry {
   nodeId: string;
 }
 
-export function emptyTierEntry(type: TierTypeLabel): TierEntry {
+export function emptyTierEntry(type: VaultTypeLabel): TierEntry {
   return {
     key: crypto.randomUUID(),
     type,
@@ -94,18 +94,7 @@ export function parseMemoryBudget(raw: string): bigint {
 // Tier type enum conversion
 // ---------------------------------------------------------------------------
 
-export function tierTypeEnum(t: TierTypeLabel): TierType {
-  switch (t) {
-    case "memory":
-      return TierType.MEMORY;
-    case "file":
-      return TierType.FILE;
-    case "jsonl":
-      return TierType.JSONL;
-  }
-}
-
-export function vaultTypeEnum(t: TierTypeLabel): VaultType {
+export function tierTypeEnum(t: VaultTypeLabel): VaultType {
   switch (t) {
     case "memory":
       return VaultType.MEMORY;
@@ -116,12 +105,23 @@ export function vaultTypeEnum(t: TierTypeLabel): VaultType {
   }
 }
 
-/** Map a TierType proto enum to its display label. */
-export function tierTypeLabel(type: TierType): string {
+export function vaultTypeEnum(t: VaultTypeLabel): VaultType {
+  switch (t) {
+    case "memory":
+      return VaultType.MEMORY;
+    case "file":
+      return VaultType.FILE;
+    case "jsonl":
+      return VaultType.JSONL;
+  }
+}
+
+/** Map a VaultType proto enum to its display label. */
+export function tierTypeLabel(type: VaultType): string {
   switch (type) {
-    case TierType.MEMORY: return "memory";
-    case TierType.FILE: return "file";
-    case TierType.JSONL: return "jsonl";
+    case VaultType.MEMORY: return "memory";
+    case VaultType.FILE: return "file";
+    case VaultType.JSONL: return "jsonl";
     default: return "unknown";
   }
 }
@@ -173,7 +173,7 @@ type AddFormAction =
   | { type: "close" }
   | { type: "reset" }
   | { type: "set"; patch: Partial<Omit<AddFormState, "storage">> }
-  | { type: "setType"; tierType: TierTypeLabel }
+  | { type: "setType"; vaultType: VaultTypeLabel }
   | { type: "updateStorage"; patch: Partial<TierEntry> };
 
 function addFormReducer(state: AddFormState, action: AddFormAction): AddFormState {
@@ -186,7 +186,7 @@ function addFormReducer(state: AddFormState, action: AddFormAction): AddFormStat
     case "set":
       return { ...state, ...action.patch };
     case "setType":
-      return { ...state, storage: emptyTierEntry(action.tierType) };
+      return { ...state, storage: emptyTierEntry(action.vaultType) };
     case "updateStorage":
       return { ...state, storage: { ...state.storage, ...action.patch } };
   }
@@ -225,7 +225,7 @@ export function VaultStorageForm({
   // change cloud binding, create a new vault and route data via
   // retention. The Add form leaves this false; edit-existing passes true.
   cloudLocked?: boolean;
-  onTypeChange?: (t: TierTypeLabel) => void;
+  onTypeChange?: (t: VaultTypeLabel) => void;
   onUpdate: (patch: Partial<TierEntry>) => void;
 }>) {
   // gastrolog-4kkoo cleanup: no bordered/backgrounded wrapper. Phase-2
@@ -239,7 +239,7 @@ export function VaultStorageForm({
         <FormField label="Storage Type" dark={dark}>
           <SelectInput
             value={tier.type}
-            onChange={(v) => onTypeChange(v as TierTypeLabel)}
+            onChange={(v) => onTypeChange(v as VaultTypeLabel)}
             options={[
               { value: "memory", label: "Memory" },
               { value: "file", label: "File" },
@@ -627,7 +627,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
             nodeOptions={(config?.nodeConfigs ?? []).map((n) => ({ value: encode(n.id), label: n.name || encode(n.id) })).sort((a, b) => a.label.localeCompare(b.label))}
             vaultName={addForm.name || addForm.namePlaceholder || ""}
             maxRF={maxRFForTier(addForm.storage)}
-            onTypeChange={(t) => dispatchAdd({ type: "setType", tierType: t })}
+            onTypeChange={(t) => dispatchAdd({ type: "setType", vaultType: t })}
             onUpdate={(patch) => dispatchAdd({ type: "updateStorage", patch })}
           />
         </AddFormCard>

@@ -489,7 +489,7 @@ type ChunkMeta struct {
 	CloudBacked      bool                   `protobuf:"varint,11,opt,name=cloud_backed,json=cloudBacked,proto3" json:"cloud_backed,omitempty"`                // true = chunk lives in cloud storage (S3/Azure/GCS)
 	Archived         bool                   `protobuf:"varint,12,opt,name=archived,proto3" json:"archived,omitempty"`                                         // true = chunk is in offline storage class (Glacier, Azure Archive)
 	TierId           []byte                 `protobuf:"bytes,13,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"`                                // which tier this chunk belongs to (transitional during gastrolog-55dej)
-	TierType         string                 `protobuf:"bytes,14,opt,name=tier_type,json=tierType,proto3" json:"tier_type,omitempty"`                          // tier type: "memory", "file", "cloud" (transitional)
+	VaultType        string                 `protobuf:"bytes,14,opt,name=vault_type,json=vaultType,proto3" json:"vault_type,omitempty"`                       // vault type: "memory", "file", "jsonl"
 	RetentionPending bool                   `protobuf:"varint,15,opt,name=retention_pending,json=retentionPending,proto3" json:"retention_pending,omitempty"` // true = chunk is marked for retention processing
 	StorageClass     string                 `protobuf:"bytes,16,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`              // current cloud storage class (e.g. "GLACIER", "cold", "Archive")
 	ReplicaCount     int32                  `protobuf:"varint,17,opt,name=replica_count,json=replicaCount,proto3" json:"replica_count,omitempty"`             // how many nodes currently have this chunk (leader + followers that have caught up)
@@ -635,9 +635,9 @@ func (x *ChunkMeta) GetTierId() []byte {
 	return nil
 }
 
-func (x *ChunkMeta) GetTierType() string {
+func (x *ChunkMeta) GetVaultType() string {
 	if x != nil {
-		return x.TierType
+		return x.VaultType
 	}
 	return ""
 }
@@ -2667,7 +2667,7 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\vactive_only\x18\x02 \x01(\bR\n" +
 	"activeOnly\"E\n" +
 	"\x12ListChunksResponse\x12/\n" +
-	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"\x92\x06\n" +
+	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"\x94\x06\n" +
 	"\tChunkMeta\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12;\n" +
 	"\vwrite_start\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
@@ -2687,8 +2687,9 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\tingestEnd\x12!\n" +
 	"\fcloud_backed\x18\v \x01(\bR\vcloudBacked\x12\x1a\n" +
 	"\barchived\x18\f \x01(\bR\barchived\x12\x17\n" +
-	"\atier_id\x18\r \x01(\fR\x06tierId\x12\x1b\n" +
-	"\ttier_type\x18\x0e \x01(\tR\btierType\x12+\n" +
+	"\atier_id\x18\r \x01(\fR\x06tierId\x12\x1d\n" +
+	"\n" +
+	"vault_type\x18\x0e \x01(\tR\tvaultType\x12+\n" +
 	"\x11retention_pending\x18\x0f \x01(\bR\x10retentionPending\x12#\n" +
 	"\rstorage_class\x18\x10 \x01(\tR\fstorageClass\x12#\n" +
 	"\rreplica_count\x18\x11 \x01(\x05R\freplicaCount\x12(\n" +

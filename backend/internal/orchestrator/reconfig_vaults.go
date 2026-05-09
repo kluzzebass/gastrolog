@@ -1445,7 +1445,7 @@ func (o *Orchestrator) buildTierRaftMembers(clusterNodes []system.NodeConfig, fa
 	return members
 }
 
-func mapTierTypeToFactory(t system.TierType) string {
+func mapTierTypeToFactory(t system.VaultType) string {
 	switch t {
 	case system.VaultTypeMemory:
 		return "memory"

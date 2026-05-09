@@ -354,7 +354,7 @@ func (f *FSM) applyPutVault(ctx context.Context, pb *gastrologv1.PutVaultCommand
 func (f *FSM) syncTierFromVault(ctx context.Context, v system.VaultConfig) error {
 	tierType := v.Type
 	if tierType == "" {
-		tierType = system.TierTypeFile
+		tierType = system.VaultTypeFile
 	}
 	tier := system.TierConfig{
 		ID:                v.ID, // 1:1 vault:tier — share the ID

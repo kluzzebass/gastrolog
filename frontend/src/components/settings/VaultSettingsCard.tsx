@@ -33,7 +33,7 @@ import {
   parseMemoryBudget,
   vaultTypeEnum,
   type TierEntry,
-  type TierTypeLabel,
+  type VaultTypeLabel,
 } from "./VaultsSettings";
 
 interface VaultSettingsCardProps {
@@ -61,7 +61,7 @@ interface VaultSettingsCardProps {
 // internally for compatibility with consumers mid-migration, but the UI
 // edits the vault directly.
 
-function vaultTypeLabel(t: VaultType): TierTypeLabel {
+function vaultTypeLabel(t: VaultType): VaultTypeLabel {
   switch (t) {
     case VaultType.MEMORY: return "memory";
     case VaultType.JSONL:  return "jsonl";

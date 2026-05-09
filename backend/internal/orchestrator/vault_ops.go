@@ -174,7 +174,7 @@ func (o *Orchestrator) RestoreChunk(ctx context.Context, vaultID glid.GLID, chun
 type TieredChunkMeta struct {
 	chunk.ChunkMeta
 	TierID   glid.GLID
-	TierType string
+	VaultType string
 }
 
 // ListChunkMetas returns all chunk metadata for a vault (active tier only).
@@ -233,7 +233,7 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]TieredChunkMeta, 
 		result = append(result, TieredChunkMeta{
 			ChunkMeta: m,
 			TierID:    tier.TierID,
-			TierType:  tier.Type,
+			VaultType:  tier.Type,
 		})
 	}
 	return result, nil
@@ -285,7 +285,7 @@ func (o *Orchestrator) GetTieredChunkMeta(vaultID glid.GLID, chunkID chunk.Chunk
 			return TieredChunkMeta{
 				ChunkMeta: m,
 				TierID:    tier.TierID,
-				TierType:  tier.Type,
+				VaultType:  tier.Type,
 			}, nil
 		}
 	}

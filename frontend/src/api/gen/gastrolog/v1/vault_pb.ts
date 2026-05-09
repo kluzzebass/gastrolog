@@ -453,11 +453,11 @@ export class ChunkMeta extends Message<ChunkMeta> {
   tierId = new Uint8Array(0);
 
   /**
-   * tier type: "memory", "file", "cloud" (transitional)
+   * vault type: "memory", "file", "jsonl"
    *
-   * @generated from field: string tier_type = 14;
+   * @generated from field: string vault_type = 14;
    */
-  tierType = "";
+  vaultType = "";
 
   /**
    * true = chunk is marked for retention processing
@@ -533,7 +533,7 @@ export class ChunkMeta extends Message<ChunkMeta> {
     { no: 11, name: "cloud_backed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 12, name: "archived", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 13, name: "tier_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 14, name: "tier_type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 14, name: "vault_type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 15, name: "retention_pending", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 16, name: "storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 17, name: "replica_count", kind: "scalar", T: 5 /* ScalarType.INT32 */ },

@@ -39,7 +39,7 @@ type reliabilityNode struct {
 // Use for scenarios that must exercise the full Raft/FSM stack: restart
 // survival, leader failover, partition heal, mid-apply crash. For scenarios
 // that only need multiple orchestrators but not real Raft, use
-// server.setupMultiNode (TierTypeMemory, no Raft).
+// server.setupMultiNode (VaultTypeMemory, no Raft).
 type reliabilityHarness struct {
 	t         *testing.T
 	nodeIDs   []string

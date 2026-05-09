@@ -125,7 +125,7 @@ func (f *fakeIndexManager) BuildAdapter() chunk.ChunkIndexBuilder { return nil }
 
 // testVaultCfg creates a VaultConfig + TierConfig pair for tests.
 // tierType is the tier type (e.g., system.VaultTypeMemory or "test").
-func testVaultCfg(vaultID glid.GLID, tierType system.TierType) (system.VaultConfig, system.TierConfig) {
+func testVaultCfg(vaultID glid.GLID, tierType system.VaultType) (system.VaultConfig, system.TierConfig) {
 	tierID := glid.New()
 	return system.VaultConfig{
 			ID:      vaultID,

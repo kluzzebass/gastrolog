@@ -153,14 +153,14 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
   const dedupedChunks = chunks ?? [];
 
   // Group chunks by tier, then sort within each tier by time (newest first).
-  const tierGroups = new Map<string, { tierType: string; chunks: ChunkMeta[] }>();
+  const tierGroups = new Map<string, { vaultType: string; chunks: ChunkMeta[] }>();
   for (const chunk of dedupedChunks) {
     const key = encode(chunk.tierId) || "unknown";
     const existing = tierGroups.get(key);
     if (existing) {
       existing.chunks.push(chunk);
     } else {
-      tierGroups.set(key, { tierType: chunk.tierType, chunks: [chunk] });
+      tierGroups.set(key, { vaultType: chunk.vaultType, chunks: [chunk] });
     }
   }
 
@@ -282,7 +282,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
 
             // Phase 2 (gastrolog-3iy5l): single instance per vault — drop
             // the "Tier N" prefix, just show the storage type.
-            const label = group.tierType.toUpperCase();
+            const label = group.vaultType.toUpperCase();
             const tierCfg = config?.tiers.find((t) => encode(t.id) === tierId);
             const rf = tierCfg?.replicationFactor || 1;
             const secondaries = tierCfg ? followerNodeIds(tierCfg, nscs) : [];
@@ -300,7 +300,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
                     <span className="inline-flex flex-wrap items-center gap-2">
                       <Badge variant="copper" dark={dark}>{label}</Badge>
                       {nodeName && <span>{`on ${nodeName}`}</span>}
-                      {group.tierType === "jsonl" && tierCfg?.path && (
+                      {group.vaultType === "jsonl" && tierCfg?.path && (
                         <span className="font-mono">{tierCfg.path}</span>
                       )}
                       <span>{`${String(group.chunks.length)} ${group.chunks.length === 1 ? "chunk" : "chunks"}`}</span>

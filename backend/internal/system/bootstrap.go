@@ -32,7 +32,7 @@ func DefaultConfig() *Config {
 			{
 				ID:               tierID,
 				Name:             "default",
-				Type:             TierTypeMemory,
+				Type:             VaultTypeMemory,
 				VaultID:          vaultID,
 				Position:         0,
 				RotationPolicyID: new(rotationID),
