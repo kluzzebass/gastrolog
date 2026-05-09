@@ -214,9 +214,9 @@ func (h *reliabilityHarness) leader() *reliabilityNode {
 	return h.nodes[h.waitForLeader()]
 }
 
-// applyTierCreate submits a CmdCreateChunk to the vault FSM via the current
+// applyInstanceCreate submits a CmdCreateChunk to the vault FSM via the current
 // leader. Used by scenarios that want to populate FSM state.
-func (h *reliabilityHarness) applyTierCreate(instID glid.GLID, chunkID chunk.ChunkID, at time.Time) {
+func (h *reliabilityHarness) applyInstanceCreate(instID glid.GLID, chunkID chunk.ChunkID, at time.Time) {
 	h.t.Helper()
 	leader := h.leader()
 	wire := vaultctlfsm.MarshalCreateChunk(chunkID, at, at, at)

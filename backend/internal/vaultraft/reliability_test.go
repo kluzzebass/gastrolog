@@ -107,9 +107,9 @@ func TestReliability_LeaderApply_ReplicatesToFollowers(t *testing.T) {
 
 	instID := glid.New()
 	now := time.Now().Truncate(time.Nanosecond)
-	h.applyTierCreate(instID, chunkIDWithPrefix(0xA1), now)
-	h.applyTierCreate(instID, chunkIDWithPrefix(0xB2), now)
-	h.applyTierCreate(instID, chunkIDWithPrefix(0xC3), now)
+	h.applyInstanceCreate(instID, chunkIDWithPrefix(0xA1), now)
+	h.applyInstanceCreate(instID, chunkIDWithPrefix(0xB2), now)
+	h.applyInstanceCreate(instID, chunkIDWithPrefix(0xC3), now)
 
 	h.assertAllFSMsConverged()
 }
@@ -123,8 +123,8 @@ func TestReliability_Restart_AllNodes_ChunkStateSurvives(t *testing.T) {
 
 	instID := glid.New()
 	now := time.Now().Truncate(time.Nanosecond)
-	h.applyTierCreate(instID, chunkIDWithPrefix(0x01), now)
-	h.applyTierCreate(instID, chunkIDWithPrefix(0x02), now)
+	h.applyInstanceCreate(instID, chunkIDWithPrefix(0x01), now)
+	h.applyInstanceCreate(instID, chunkIDWithPrefix(0x02), now)
 	h.assertAllFSMsConverged()
 
 	// Capture the pre-restart fingerprint (any node, since they're converged).
@@ -152,7 +152,7 @@ func TestReliability_Failover_LeaderDown_NewLeaderElected(t *testing.T) {
 
 	instID := glid.New()
 	now := time.Now().Truncate(time.Nanosecond)
-	h.applyTierCreate(instID, chunkIDWithPrefix(0x10), now)
+	h.applyInstanceCreate(instID, chunkIDWithPrefix(0x10), now)
 	h.assertAllFSMsConverged()
 
 	oldLeader := h.leaderID()
@@ -210,8 +210,8 @@ func TestReliability_Failover_FollowerDown_QuorumHolds(t *testing.T) {
 	h.stopNode(follower)
 
 	// Writes still commit under 2-node quorum.
-	h.applyTierCreate(instID, chunkIDWithPrefix(0x20), now)
-	h.applyTierCreate(instID, chunkIDWithPrefix(0x21), now)
+	h.applyInstanceCreate(instID, chunkIDWithPrefix(0x20), now)
+	h.applyInstanceCreate(instID, chunkIDWithPrefix(0x21), now)
 
 	liveIDs := []string{}
 	for _, id := range h.nodeIDs {
@@ -231,7 +231,7 @@ func TestReliability_Partition_MinorityBlocked_HealReconverges(t *testing.T) {
 
 	instID := glid.New()
 	now := time.Now().Truncate(time.Nanosecond)
-	h.applyTierCreate(instID, chunkIDWithPrefix(0x30), now)
+	h.applyInstanceCreate(instID, chunkIDWithPrefix(0x30), now)
 	h.assertAllFSMsConverged()
 
 	leaderID := h.leaderID()
@@ -251,8 +251,8 @@ func TestReliability_Partition_MinorityBlocked_HealReconverges(t *testing.T) {
 	}
 
 	// Majority continues to accept writes.
-	h.applyTierCreate(instID, chunkIDWithPrefix(0x31), now)
-	h.applyTierCreate(instID, chunkIDWithPrefix(0x32), now)
+	h.applyInstanceCreate(instID, chunkIDWithPrefix(0x31), now)
+	h.applyInstanceCreate(instID, chunkIDWithPrefix(0x32), now)
 
 	// Heal the partition.
 	for _, id := range h.nodeIDs {
@@ -277,7 +277,7 @@ func TestReliability_WholeClusterCrash_WALReplayRestoresState(t *testing.T) {
 	instID := glid.New()
 	now := time.Now().Truncate(time.Nanosecond)
 	for i := range byte(5) {
-		h.applyTierCreate(instID, chunkIDWithPrefix(0x40+i), now)
+		h.applyInstanceCreate(instID, chunkIDWithPrefix(0x40+i), now)
 	}
 	h.assertAllFSMsConverged()
 
@@ -387,7 +387,7 @@ func TestReliability_FollowerWipe_CatchupViaSnapshotOrReplay(t *testing.T) {
 
 	// Seed some pre-wipe state.
 	for i := range byte(3) {
-		h.applyTierCreate(instID, chunkIDWithPrefix(0x50+i), now)
+		h.applyInstanceCreate(instID, chunkIDWithPrefix(0x50+i), now)
 	}
 	h.assertAllFSMsConverged()
 
@@ -414,7 +414,7 @@ func TestReliability_FollowerWipe_CatchupViaSnapshotOrReplay(t *testing.T) {
 	// This also forces the log past what the wiped follower had before,
 	// proving catch-up includes post-wipe entries.
 	for i := range byte(3) {
-		h.applyTierCreate(instID, chunkIDWithPrefix(0x60+i), now)
+		h.applyInstanceCreate(instID, chunkIDWithPrefix(0x60+i), now)
 	}
 
 	h.assertAllFSMsConverged()
@@ -437,7 +437,7 @@ func TestReliability_SnapshotInstall_CatchesUpWipedFollower(t *testing.T) {
 
 	// Phase 1: seed many entries so a snapshot has meaningful content.
 	for i := range byte(20) {
-		h.applyTierCreate(instID, chunkIDWithPrefix(0x70+i), now)
+		h.applyInstanceCreate(instID, chunkIDWithPrefix(0x70+i), now)
 	}
 	h.assertAllFSMsConverged()
 
@@ -452,7 +452,7 @@ func TestReliability_SnapshotInstall_CatchesUpWipedFollower(t *testing.T) {
 	// Phase 2: apply more entries after the snapshot so the snapshot is
 	// behind the leader's LastIndex. Catch-up must still work.
 	for i := range byte(5) {
-		h.applyTierCreate(instID, chunkIDWithPrefix(0x90+i), now)
+		h.applyInstanceCreate(instID, chunkIDWithPrefix(0x90+i), now)
 	}
 
 	// Wipe a follower.
@@ -493,7 +493,7 @@ func TestReliability_PipelinedApplies_SurviveLeaderKill(t *testing.T) {
 	now := time.Now().Truncate(time.Nanosecond)
 
 	// Build up a confirmed baseline.
-	h.applyTierCreate(instID, chunkIDWithPrefix(0xA0), now)
+	h.applyInstanceCreate(instID, chunkIDWithPrefix(0xA0), now)
 	h.assertAllFSMsConverged()
 
 	// Pipeline 20 Apply futures on the current leader. Collect success
@@ -588,7 +588,7 @@ func TestReliability_RapidLeaderRestart_NoDivergence(t *testing.T) {
 	now := time.Now().Truncate(time.Nanosecond)
 
 	for i := range byte(3) {
-		h.applyTierCreate(instID, chunkIDWithPrefix(0xC0+i), now)
+		h.applyInstanceCreate(instID, chunkIDWithPrefix(0xC0+i), now)
 	}
 	h.assertAllFSMsConverged()
 
@@ -600,7 +600,7 @@ func TestReliability_RapidLeaderRestart_NoDivergence(t *testing.T) {
 	}
 
 	// Drop a final entry and confirm it replicates.
-	h.applyTierCreate(instID, chunkIDWithPrefix(0xCF), now)
+	h.applyInstanceCreate(instID, chunkIDWithPrefix(0xCF), now)
 	h.assertAllFSMsConverged()
 
 	// Leader's FSM should have 3 original + 1 final = 4 entries.
@@ -626,21 +626,21 @@ func TestReliability_MultipleVaults_IsolatedAndConvergent(t *testing.T) {
 	t.Parallel()
 	h := newReliabilityHarness(t, 3)
 
-	tierA := glid.New()
-	tierB := glid.New()
+	instA := glid.New()
+	instB := glid.New()
 	now := time.Now().Truncate(time.Nanosecond)
 
-	h.applyTierCreate(tierA, chunkIDWithPrefix(0xD0), now)
-	h.applyTierCreate(tierA, chunkIDWithPrefix(0xD1), now)
-	h.applyTierCreate(tierB, chunkIDWithPrefix(0xE0), now)
-	h.applyTierCreate(tierB, chunkIDWithPrefix(0xE1), now)
-	h.applyTierCreate(tierB, chunkIDWithPrefix(0xE2), now)
+	h.applyInstanceCreate(instA, chunkIDWithPrefix(0xD0), now)
+	h.applyInstanceCreate(instA, chunkIDWithPrefix(0xD1), now)
+	h.applyInstanceCreate(instB, chunkIDWithPrefix(0xE0), now)
+	h.applyInstanceCreate(instB, chunkIDWithPrefix(0xE1), now)
+	h.applyInstanceCreate(instB, chunkIDWithPrefix(0xE2), now)
 
 	h.assertAllFSMsConverged()
 
 	leader := h.nodes[h.leaderID()]
-	subA := leader.fsm.InstanceFSM(tierA)
-	subB := leader.fsm.InstanceFSM(tierB)
+	subA := leader.fsm.InstanceFSM(instA)
+	subB := leader.fsm.InstanceFSM(instB)
 	if subA == nil || subB == nil {
 		t.Fatal("missing tier sub-FSM")
 	}
@@ -681,7 +681,7 @@ func TestReliability_SnapshotCycleUnderLoad_NoCorruption(t *testing.T) {
 	)
 
 	for i := range byte(totalCommands) {
-		h.applyTierCreate(instID, chunkIDWithPrefix(i), now)
+		h.applyInstanceCreate(instID, chunkIDWithPrefix(i), now)
 		if (i+1)%snapEvery == 0 {
 			if err := h.nodes[h.leaderID()].raft.Snapshot().Error(); err != nil {
 				// ErrNothingNewToSnapshot is benign (snapshot cycle may overlap).
