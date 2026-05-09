@@ -34,8 +34,8 @@ const vaultSnapVersion uint32 = 1
 // never reach FSM.Apply. See buildTierRaftCallbacks in
 // orchestrator/reconfig_vaults.go for the readiness wiring.
 type FSM struct {
-	tierMu sync.Mutex
-	tiers  map[glid.GLID]*vaultctlfsm.FSM
+	mu sync.Mutex
+	instances  map[glid.GLID]*vaultctlfsm.FSM
 
 	// onAfterRestore fires (outside tierMu) once Restore() has swapped
 	// the tier-sub-FSM map. The orchestrator uses this to walk each
@@ -50,7 +50,7 @@ type FSM struct {
 // NewFSM returns a new vault control-plane FSM instance.
 func NewFSM() *FSM {
 	return &FSM{
-		tiers: make(map[glid.GLID]*vaultctlfsm.FSM),
+		instances: make(map[glid.GLID]*vaultctlfsm.FSM),
 	}
 }
 
@@ -60,19 +60,19 @@ func NewFSM() *FSM {
 // the vault-ctl Raft group is first ensured so that snapshot install
 // triggers ReconcileFromSnapshot on every tier in the vault.
 func (f *FSM) SetOnAfterRestore(fn func()) {
-	f.tierMu.Lock()
-	defer f.tierMu.Unlock()
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.onAfterRestore = fn
 }
 
 // Tiers returns a snapshot of the current (tierID → sub-FSM) map.
 // Safe for the orchestrator's after-restore handler to iterate
 // without holding tierMu.
-func (f *FSM) Tiers() map[glid.GLID]*vaultctlfsm.FSM {
-	f.tierMu.Lock()
-	defer f.tierMu.Unlock()
-	out := make(map[glid.GLID]*vaultctlfsm.FSM, len(f.tiers))
-	maps.Copy(out, f.tiers)
+func (f *FSM) Instances() map[glid.GLID]*vaultctlfsm.FSM {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make(map[glid.GLID]*vaultctlfsm.FSM, len(f.instances))
+	maps.Copy(out, f.instances)
 	return out
 }
 
@@ -95,14 +95,14 @@ func (f *FSM) Apply(l *hraft.Log) any {
 		if len(sub) == 0 {
 			return errors.New("vaultraft: OpVaultChunkFSM missing tier command body")
 		}
-		f.tierMu.Lock()
-		t := f.tiers[tierID]
+		f.mu.Lock()
+		t := f.instances[tierID]
 		if t == nil {
 			t = vaultctlfsm.New()
-			f.tiers[tierID] = t
+			f.instances[tierID] = t
 		}
 		subFSM := t
-		f.tierMu.Unlock()
+		f.mu.Unlock()
 		inner := &hraft.Log{Index: l.Index, Term: l.Term, Type: l.Type, Data: sub}
 		return subFSM.Apply(inner)
 	default:
@@ -110,45 +110,45 @@ func (f *FSM) Apply(l *hraft.Log) any {
 	}
 }
 
-// TierFSM returns the tierfsm sub-machine for tierID, or nil if no command
+// InstanceFSM returns the tierfsm sub-machine for tierID, or nil if no command
 // has been applied for that tier yet.
-func (f *FSM) TierFSM(tierID glid.GLID) *vaultctlfsm.FSM {
-	f.tierMu.Lock()
-	defer f.tierMu.Unlock()
-	return f.tiers[tierID]
+func (f *FSM) InstanceFSM(tierID glid.GLID) *vaultctlfsm.FSM {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.instances[tierID]
 }
 
-// EnsureTierFSM returns the tierfsm sub-state for tierID, creating an empty
+// EnsureInstanceFSM returns the tierfsm sub-state for tierID, creating an empty
 // sub-FSM if none exists yet (for wiring OnDelete/OnUpload before first Apply).
-func (f *FSM) EnsureTierFSM(tierID glid.GLID) *vaultctlfsm.FSM {
-	f.tierMu.Lock()
-	defer f.tierMu.Unlock()
-	t := f.tiers[tierID]
+func (f *FSM) EnsureInstanceFSM(tierID glid.GLID) *vaultctlfsm.FSM {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	t := f.instances[tierID]
 	if t == nil {
 		t = vaultctlfsm.New()
-		f.tiers[tierID] = t
+		f.instances[tierID] = t
 	}
 	return t
 }
 
 // Snapshot returns a snapshot of all tier sub-FSMs (versioned wire format).
 func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) {
-	f.tierMu.Lock()
-	ids := slices.SortedFunc(maps.Keys(f.tiers), compareGLID)
+	f.mu.Lock()
+	ids := slices.SortedFunc(maps.Keys(f.instances), compareGLID)
 	var tierBlobs [][]byte
 	for _, id := range ids {
-		t := f.tiers[id]
+		t := f.instances[id]
 		if t == nil {
 			continue
 		}
 		snap, err := t.Snapshot()
 		if err != nil {
-			f.tierMu.Unlock()
+			f.mu.Unlock()
 			return nil, err
 		}
 		raw, err := persistSnapshotToBytes(snap)
 		if err != nil {
-			f.tierMu.Unlock()
+			f.mu.Unlock()
 			return nil, err
 		}
 		blob := make([]byte, 0, glid.Size+len(raw))
@@ -156,7 +156,7 @@ func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) {
 		blob = append(blob, raw...)
 		tierBlobs = append(tierBlobs, blob)
 	}
-	f.tierMu.Unlock()
+	f.mu.Unlock()
 	return &vaultCtlSnapshot{tierBlobs: tierBlobs}, nil
 }
 
@@ -182,10 +182,10 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 		// Legacy empty snapshot from the pre-composite FSM.
 		var probe [1]byte
 		if n, _ := rc.Read(probe[:]); n == 0 {
-			f.tierMu.Lock()
-			f.tiers = make(map[glid.GLID]*vaultctlfsm.FSM)
+			f.mu.Lock()
+			f.instances = make(map[glid.GLID]*vaultctlfsm.FSM)
 			hook := f.onAfterRestore
-			f.tierMu.Unlock()
+			f.mu.Unlock()
 			if hook != nil {
 				hook()
 			}
@@ -240,10 +240,10 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 		}
 		nextTiers[tid] = t
 	}
-	f.tierMu.Lock()
-	f.tiers = nextTiers
+	f.mu.Lock()
+	f.instances = nextTiers
 	hook := f.onAfterRestore
-	f.tierMu.Unlock()
+	f.mu.Unlock()
 	// Fire outside the mutex — the handler walks per-tier reconcilers
 	// which can call back into the FSM (Tiers, PendingDeletes, etc.).
 	if hook != nil {

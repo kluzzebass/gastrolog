@@ -342,20 +342,20 @@ func tierFSMFingerprint(t *vaultctlfsm.FSM) string {
 // vaultFSMFingerprint deterministically encodes every tier sub-FSM in the
 // vault FSM. Two vault FSMs with equal fingerprints have converged.
 func vaultFSMFingerprint(f *FSM) string {
-	f.tierMu.Lock()
-	ids := make([]glid.GLID, 0, len(f.tiers))
-	for id := range f.tiers {
+	f.mu.Lock()
+	ids := make([]glid.GLID, 0, len(f.instances))
+	for id := range f.instances {
 		ids = append(ids, id)
 	}
-	f.tierMu.Unlock()
+	f.mu.Unlock()
 	slices.SortFunc(ids, compareGLID)
 
 	var sb fingerprintBuilder
 	for _, id := range ids {
 		sb.writef("tier=%x\n", id[:])
-		f.tierMu.Lock()
-		sub := f.tiers[id]
-		f.tierMu.Unlock()
+		f.mu.Lock()
+		sub := f.instances[id]
+		f.mu.Unlock()
 		if sub != nil {
 			sb.write(tierFSMFingerprint(sub))
 		}

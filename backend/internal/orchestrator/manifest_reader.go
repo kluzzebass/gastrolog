@@ -110,7 +110,7 @@ func (o *Orchestrator) VaultManifestEntriesFromCtlFSM(vaultID glid.GLID) []vault
 		return nil
 	}
 	var out []vaultctlfsm.ManifestEntry
-	for _, t := range vfsm.Tiers() {
+	for _, t := range vfsm.Instances() {
 		out = append(out, t.List()...)
 	}
 	return out

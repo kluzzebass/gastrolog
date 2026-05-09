@@ -360,7 +360,7 @@ func TestReliability_ConcurrentWrites_NoDivergence(t *testing.T) {
 	leader := h.nodes[h.leaderID()]
 	total := 0
 	for _, tid := range tierIDs {
-		if sub := leader.fsm.TierFSM(tid); sub != nil {
+		if sub := leader.fsm.InstanceFSM(tid); sub != nil {
 			total += len(sub.List())
 		}
 	}
@@ -563,7 +563,7 @@ func TestReliability_PipelinedApplies_SurviveLeaderKill(t *testing.T) {
 	assertSubsetConverged(t, h, liveIDs)
 
 	// Every chunk that Apply confirmed must be in the surviving leader's FSM.
-	surviving := h.nodes[newLeader].fsm.TierFSM(tierID)
+	surviving := h.nodes[newLeader].fsm.InstanceFSM(tierID)
 	if surviving == nil {
 		t.Fatal("surviving leader lost tier FSM entirely")
 	}
@@ -605,7 +605,7 @@ func TestReliability_RapidLeaderRestart_NoDivergence(t *testing.T) {
 
 	// Leader's FSM should have 3 original + 1 final = 4 entries.
 	leader := h.nodes[h.leaderID()]
-	sub := leader.fsm.TierFSM(tierID)
+	sub := leader.fsm.InstanceFSM(tierID)
 	if sub == nil {
 		t.Fatal("tier FSM missing after restarts")
 	}
@@ -639,8 +639,8 @@ func TestReliability_MultipleVaults_IsolatedAndConvergent(t *testing.T) {
 	h.assertAllFSMsConverged()
 
 	leader := h.nodes[h.leaderID()]
-	subA := leader.fsm.TierFSM(tierA)
-	subB := leader.fsm.TierFSM(tierB)
+	subA := leader.fsm.InstanceFSM(tierA)
+	subB := leader.fsm.InstanceFSM(tierB)
 	if subA == nil || subB == nil {
 		t.Fatal("missing tier sub-FSM")
 	}
@@ -694,7 +694,7 @@ func TestReliability_SnapshotCycleUnderLoad_NoCorruption(t *testing.T) {
 
 	h.assertAllFSMsConverged()
 
-	leader := h.nodes[h.leaderID()].fsm.TierFSM(tierID)
+	leader := h.nodes[h.leaderID()].fsm.InstanceFSM(tierID)
 	if leader == nil {
 		t.Fatal("tier missing after snapshot cycle")
 	}
@@ -771,7 +771,7 @@ func TestReliability_LargeFSM_SnapshotRestoreRoundtrip(t *testing.T) {
 	// Sanity: total entry count matches.
 	total := 0
 	for _, tierID := range tiers {
-		if sub := dst.TierFSM(tierID); sub != nil {
+		if sub := dst.InstanceFSM(tierID); sub != nil {
 			total += len(sub.List())
 		}
 	}

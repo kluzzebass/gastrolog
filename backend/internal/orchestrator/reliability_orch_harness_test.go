@@ -554,7 +554,7 @@ func (h *orchRelHarness) chunkIDsOnNodeForVault(v vaultSpec, id string) map[chun
 	if !ok || vfsm == nil {
 		return nil
 	}
-	sub := vfsm.TierFSM(v.tierID)
+	sub := vfsm.InstanceFSM(v.tierID)
 	if sub == nil {
 		return map[chunk.ChunkID]bool{}
 	}
@@ -584,7 +584,7 @@ func (h *orchRelHarness) chunkIDsOnNode(id string) map[chunk.ChunkID]bool {
 	if !ok || vfsm == nil {
 		return nil
 	}
-	sub := vfsm.TierFSM(h.tierID)
+	sub := vfsm.InstanceFSM(h.tierID)
 	if sub == nil {
 		return map[chunk.ChunkID]bool{}
 	}

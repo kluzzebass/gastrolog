@@ -41,7 +41,7 @@ func TestFSM_OpVaultChunkFSM_delegate(t *testing.T) {
 	if got := f.Apply(&hraft.Log{Data: cmd}); got != nil {
 		t.Fatalf("apply: %v", got)
 	}
-	sub := f.TierFSM(tierID)
+	sub := f.InstanceFSM(tierID)
 	if sub == nil {
 		t.Fatal("expected tier sub-FSM")
 	}
@@ -98,10 +98,10 @@ func TestFSM_SnapshotRestore_twoTiers(t *testing.T) {
 	if err := f2.Restore(io.NopCloser(bytes.NewReader(buf.Bytes()))); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
-	if f2.TierFSM(tierA).Get(a) == nil {
+	if f2.InstanceFSM(tierA).Get(a) == nil {
 		t.Fatal("tier A chunk missing after restore")
 	}
-	if f2.TierFSM(tierB).Get(b) == nil {
+	if f2.InstanceFSM(tierB).Get(b) == nil {
 		t.Fatal("tier B chunk missing after restore")
 	}
 }
@@ -140,7 +140,7 @@ func TestFSM_OnAfterRestoreFires(t *testing.T) {
 	}
 	// Sanity: the hook fires AFTER tiers were swapped in, so the
 	// orchestrator's handler can already iterate Tiers() to find work.
-	if got := dst.Tiers(); len(got) != 2 {
+	if got := dst.Instances(); len(got) != 2 {
 		t.Errorf("post-restore Tiers() = %d, want 2", len(got))
 	}
 }
@@ -170,13 +170,13 @@ func TestFSM_Restore_legacyEmptyByte(t *testing.T) {
 	if r := f.Apply(&hraft.Log{Data: MarshalVaultChunkCommand(tierID, vaultctlfsm.MarshalCreateChunk(testChunkID(9), now, now, now))}); r != nil {
 		t.Fatalf("apply: %v", r)
 	}
-	if f.TierFSM(tierID) == nil {
+	if f.InstanceFSM(tierID) == nil {
 		t.Fatal("expected tier before legacy restore")
 	}
 	if err := f.Restore(io.NopCloser(bytes.NewReader([]byte{1}))); err != nil {
 		t.Fatalf("legacy restore: %v", err)
 	}
-	if f.TierFSM(tierID) != nil {
+	if f.InstanceFSM(tierID) != nil {
 		t.Fatal("legacy restore should reset tier state")
 	}
 }
