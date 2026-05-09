@@ -350,12 +350,9 @@ func (o *Orchestrator) finishInstDrain(vaultID glid.GLID) {
 			"vault", vaultID)
 	}
 
-	// Notify the dispatch layer to remove the inst from the vault's inst
-	// list in system. This fires a vault-put through Raft, causing all
-	// nodes to rebuild the vault without the drained inst.
-	if o.OnTierDrainComplete != nil {
-		o.OnTierDrainComplete(context.Background(), vaultID, vaultID)
-	}
+	// Drain completion no longer fires a config-mutation callback —
+	// placement updates are the source of truth for instance lifecycle
+	// under 1:1 vault:tier collapse (see app.go drop of OnTierDrainComplete).
 }
 
 // cancelInstDrainState removes drain state without triggering vault config
@@ -380,9 +377,9 @@ func (o *Orchestrator) cancelInstDrainState(vaultID glid.GLID) {
 	}
 }
 
-// CancelTierDrain aborts an in-progress inst drain. The inst remains in the
+// CancelInstanceDrain aborts an in-progress inst drain. The inst remains in the
 // vault with whatever chunks haven't been transferred yet.
-func (o *Orchestrator) CancelTierDrain(vaultID glid.GLID) error {
+func (o *Orchestrator) CancelInstanceDrain(vaultID glid.GLID) error {
 	key := instDrainKey(vaultID)
 
 	o.mu.Lock()
@@ -401,8 +398,8 @@ func (o *Orchestrator) CancelTierDrain(vaultID glid.GLID) error {
 	return nil
 }
 
-// IsTierDraining returns true if the given inst is currently draining.
-func (o *Orchestrator) IsTierDraining(vaultID glid.GLID) bool {
+// IsInstanceDraining returns true if the given inst is currently draining.
+func (o *Orchestrator) IsInstanceDraining(vaultID glid.GLID) bool {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	_, ok := o.instDraining[instDrainKey(vaultID)]

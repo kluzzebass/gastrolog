@@ -257,13 +257,8 @@ type Orchestrator struct {
 	// Draining vaults (keyed by vault ID, tracks in-progress migrations).
 	draining map[glid.GLID]*drainState
 
-	// Draining tiers (keyed by "vaultID:instID", tracks in-progress inst drains).
+	// In-progress instance drains, keyed by vault ID.
 	instDraining map[string]*instDrainState
-
-	// OnTierDrainComplete is called after a inst drain finishes. The dispatch
-	// layer uses this to remove the inst from vault inst lists in the config
-	// store (which fires a subsequent vault-put notification to rebuild).
-	OnTierDrainComplete func(ctx context.Context, vaultID, instID glid.GLID)
 
 	// Retention runners (keyed by instID:storageID, invoked by the shared scheduler).
 	retention map[string]*retentionRunner
