@@ -13,12 +13,12 @@ var (
 	ErrVaultNotEmpty = errors.New("vault is not empty")
 	// ErrVaultNotFound is returned when attempting to operate on a non-existent vault.
 	ErrVaultNotFound = errors.New("vault not found")
-	// ErrTierNotLocal is returned when a inst instance is not registered on
+	// ErrInstanceNotLocal is returned when a inst instance is not registered on
 	// this node (typically because placement reconfiguration evicted it),
 	// even though the vault still exists cluster-wide. Distinct from
 	// ErrVaultNotFound so log lines don't suggest the vault was deleted
 	// during legitimate placement churn. See gastrolog-2t48z.
-	ErrTierNotLocal = errors.New("inst not registered on this node")
+	ErrInstanceNotLocal = errors.New("inst not registered on this node")
 	// ErrIngesterNotFound is returned when attempting to operate on a non-existent ingester.
 	ErrIngesterNotFound = errors.New("ingester not found")
 	// ErrVaultDisabled is returned when attempting to append to a disabled vault.
@@ -44,7 +44,7 @@ func IsPlacementChurnErr(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, ErrVaultNotFound) || errors.Is(err, ErrTierNotLocal) {
+	if errors.Is(err, ErrVaultNotFound) || errors.Is(err, ErrInstanceNotLocal) {
 		return true
 	}
 	msg := err.Error()

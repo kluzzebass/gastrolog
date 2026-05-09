@@ -23,8 +23,8 @@ func TestIsPlacementChurnErr(t *testing.T) {
 		{"unrelated", errors.New("disk full"), false},
 		{"direct ErrVaultNotFound", ErrVaultNotFound, true},
 		{"wrapped ErrVaultNotFound", fmt.Errorf("look up vault: %w", ErrVaultNotFound), true},
-		{"direct ErrTierNotLocal", ErrTierNotLocal, true},
-		{"wrapped ErrTierNotLocal", fmt.Errorf("seal: %w: inst x in vault y", ErrTierNotLocal), true},
+		{"direct ErrInstanceNotLocal", ErrInstanceNotLocal, true},
+		{"wrapped ErrInstanceNotLocal", fmt.Errorf("seal: %w: inst x in vault y", ErrInstanceNotLocal), true},
 		{
 			"cross-RPC legacy vault-not-found",
 			errors.New("follower rejected command: import failed: vault not found: inst T in vault V"),

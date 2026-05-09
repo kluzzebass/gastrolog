@@ -33,7 +33,7 @@ import (
 func (o *Orchestrator) SealActiveTier(vaultID glid.GLID, expectedChunkID chunk.ChunkID) error {
 	inst := o.findLocalVaultInstance(vaultID)
 	if inst == nil {
-		return fmt.Errorf("%w: vault %s", ErrTierNotLocal, vaultID)
+		return fmt.Errorf("%w: vault %s", ErrInstanceNotLocal, vaultID)
 	}
 	active := inst.Chunks.Active()
 	if active == nil {
@@ -201,7 +201,7 @@ func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, instID
 }
 
 // replicateToTarget sends a sealed chunk to one target. Same-node targets
-// use local ImportToTierStorage; cross-node targets use gRPC. Returns nil
+// use local ImportToInstanceStorage; cross-node targets use gRPC. Returns nil
 // on success so the caller can count actual replicas vs configured targets.
 func (o *Orchestrator) replicateToTarget(ctx context.Context, vaultID, instID glid.GLID, chunkID chunk.ChunkID, sourceCM chunk.ChunkManager, tgt system.ReplicationTarget) error {
 	if tgt.NodeID == o.localNodeID {
@@ -237,7 +237,7 @@ func (o *Orchestrator) replicateToTarget(ctx context.Context, vaultID, instID gl
 
 // replicateLocally copies a sealed chunk to a different storage-specific
 // inst instance on the same node. Opens a cursor on the source, then
-// imports into the target via ImportToTierStorage.
+// imports into the target via ImportToInstanceStorage.
 func (o *Orchestrator) replicateLocally(ctx context.Context, vaultID, instID glid.GLID, storageID string, chunkID chunk.ChunkID, sourceCM chunk.ChunkManager) error {
 	cursor, err := sourceCM.OpenCursor(chunkID)
 	if err != nil {
@@ -246,7 +246,7 @@ func (o *Orchestrator) replicateLocally(ctx context.Context, vaultID, instID gli
 	defer func() { _ = cursor.Close() }()
 
 	iter := chunk.CursorIterator(cursor)
-	return o.ImportToTierStorage(ctx, vaultID, instID, storageID, chunkID, iter)
+	return o.ImportToInstanceStorage(ctx, vaultID, instID, storageID, chunkID, iter)
 }
 
 // replicateToFollower streams a single sealed chunk to one follower node.

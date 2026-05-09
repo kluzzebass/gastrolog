@@ -963,23 +963,23 @@ func (o *Orchestrator) ImportToVault(ctx context.Context, vaultID glid.GLID, chu
 	if inst == nil {
 		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
-	return o.ImportToTierStorage(ctx, vaultID, inst.VaultID, "", chunkID, next)
+	return o.ImportToInstanceStorage(ctx, vaultID, inst.VaultID, "", chunkID, next)
 }
 
-// ImportToTierStorage imports a sealed chunk to a specific storage-targeted inst
+// ImportToInstanceStorage imports a sealed chunk to a specific storage-targeted inst
 // instance. When storageID is empty, falls back to the first matching inst (backward compat).
 // Used by same-node replication to route to specific file storage instances.
-func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, instID glid.GLID, storageID string, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
+func (o *Orchestrator) ImportToInstanceStorage(ctx context.Context, vaultID, instID glid.GLID, storageID string, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
 	// Look up the inst under lock, then release BEFORE the import.
 	// ImportRecords reads from a network stream and can block — holding
 	// RLock during a network read starves writers (FSM dispatcher) and
 	// deadlocks the entire orchestrator.
-	type tierRef struct {
+	type instRef struct {
 		cm           chunk.ChunkManager
 		isFollower   bool
 		isTombstoned func(chunk.ChunkID) bool
 	}
-	ref := func() *tierRef {
+	ref := func() *instRef {
 		o.mu.RLock()
 		defer o.mu.RUnlock()
 		vault := o.vaults[vaultID]
@@ -987,7 +987,7 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, instID 
 			return nil
 		}
 		if t := vault.Instance; t != nil && t.VaultID == instID && (storageID == "" || t.StorageID == storageID) {
-			return &tierRef{cm: t.Chunks, isFollower: t.IsFollower, isTombstoned: t.IsTombstoned}
+			return &instRef{cm: t.Chunks, isFollower: t.IsFollower, isTombstoned: t.IsTombstoned}
 		}
 		return nil
 	}()
@@ -996,7 +996,7 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, instID 
 		// the vault almost always still exists cluster-wide; only the inst
 		// instance was evicted from this node by placement churn (or never
 		// landed here in the first place). See gastrolog-2t48z.
-		return fmt.Errorf("%w: vault %s in vault %s", ErrTierNotLocal, instID, vaultID)
+		return fmt.Errorf("%w: vault %s in vault %s", ErrInstanceNotLocal, instID, vaultID)
 	}
 	// Reject stale ImportSealed RPCs for chunks the cluster already deleted.
 	// The race is: leader schedules replication, retention fires, delete is
@@ -1013,9 +1013,9 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, instID 
 	// Key includes storageID so same-node replicas can import in parallel.
 	importKey := instID.String() + ":" + storageID
 	muVal, _ := o.importMu.LoadOrStore(importKey, &sync.Mutex{})
-	tierMu := muVal.(*sync.Mutex)
-	tierMu.Lock()
-	defer tierMu.Unlock()
+	instMu := muVal.(*sync.Mutex)
+	instMu.Lock()
+	defer instMu.Unlock()
 
 	// Check if this chunk already exists (sealed or active).
 	_, metaErr := cm.Meta(chunkID)
