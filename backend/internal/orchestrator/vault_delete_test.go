@@ -19,7 +19,7 @@ func TestRemoveTierFromVaultPreservesData(t *testing.T) {
 	instID := glid.New()
 	vaultID := glid.New()
 
-	inst, dir := newFileTierInstance(t, instID)
+	inst, dir := newFileInstance(t, instID)
 	if _, _, err := inst.Chunks.Append(testRecord("data")); err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestDeleteTierFromVaultCleansTierDirectory(t *testing.T) {
 	instID := glid.New()
 	vaultID := glid.New()
 
-	inst, dir := newFileTierInstance(t, instID)
+	inst, dir := newFileInstance(t, instID)
 	if _, _, err := inst.Chunks.Append(testRecord("data")); err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestDeleteTierFromVaultCleansEmptyTierDirectory(t *testing.T) {
 	instID := glid.New()
 	vaultID := glid.New()
 
-	inst, dir := newFileTierInstance(t, instID)
+	inst, dir := newFileInstance(t, instID)
 
 	vault := NewVault(vaultID, inst)
 	vault.Name = "empty-delete-test"

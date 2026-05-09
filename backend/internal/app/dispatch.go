@@ -33,7 +33,7 @@ type orchActions interface {
 	AddVaultInstance(ctx context.Context, vaultID glid.GLID, f orchestrator.Factories) error
 	DrainTier(ctx context.Context, vaultID glid.GLID, mode orchestrator.DrainMode, targetNodeID string) error
 	UnregisterVault(id glid.GLID) error
-	MissingVaultInstance(vaultID glid.GLID, tierIDs []glid.GLID) bool
+	MissingVaultInstance(vaultID glid.GLID, instIDs []glid.GLID) bool
 	LocalTierIDs(vaultID glid.GLID) []glid.GLID
 	DrainVault(ctx context.Context, vaultID glid.GLID, targetNodeID string) error
 	IsDraining(vaultID glid.GLID) bool
@@ -153,7 +153,7 @@ func (d *configDispatcher) handleVaultPut(ctx context.Context, id glid.GLID) {
 
 	// 1:1 vault:tier — the vault has exactly one inst whose ID equals
 	// the vault's ID. Every node instantiates the inst if it can serve it.
-	tierIDs := []glid.GLID{id}
+	instIDs := []glid.GLID{id}
 
 	// Cancel any in-progress drain.
 	if d.orch.IsDraining(id) {
@@ -175,8 +175,8 @@ func (d *configDispatcher) handleVaultPut(ctx context.Context, id glid.GLID) {
 
 	// Incrementally add/remove tiers that changed. Never tear down the
 	// entire vault — that causes cascading rebuilds and data warnings.
-	if d.orch.MissingVaultInstance(id, tierIDs) {
-		d.reconcileVaultTiers(ctx, id, tierIDs)
+	if d.orch.MissingVaultInstance(id, instIDs) {
+		d.reconcileVaultTiers(ctx, id, instIDs)
 		return
 	}
 
@@ -221,9 +221,9 @@ func (d *configDispatcher) maybeStartDrain(ctx context.Context, id glid.GLID, ta
 
 // reconcileVaultTiers incrementally adds missing tiers and removes stale tiers
 // from an existing vault, without tearing down any tiers that are unchanged.
-func (d *configDispatcher) reconcileVaultTiers(ctx context.Context, vaultID glid.GLID, tierIDs []glid.GLID) {
-	expected := make(map[glid.GLID]bool, len(tierIDs))
-	for _, id := range tierIDs {
+func (d *configDispatcher) reconcileVaultTiers(ctx context.Context, vaultID glid.GLID, instIDs []glid.GLID) {
+	expected := make(map[glid.GLID]bool, len(instIDs))
+	for _, id := range instIDs {
 		expected[id] = true
 	}
 
@@ -235,7 +235,7 @@ func (d *configDispatcher) reconcileVaultTiers(ctx context.Context, vaultID glid
 	}
 
 	// Add instances that are expected but not local.
-	for range tierIDs {
+	for range instIDs {
 		if err := d.orch.AddVaultInstance(ctx, vaultID, d.factories); err != nil {
 			d.logger.Error("dispatch: add vault instance",
 				"vault", vaultID, "error", err)

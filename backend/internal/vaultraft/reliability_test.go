@@ -319,9 +319,9 @@ func TestReliability_ConcurrentWrites_NoDivergence(t *testing.T) {
 		commandsPerWriter = 25
 	)
 
-	tierIDs := make([]glid.GLID, writers)
+	instIDs := make([]glid.GLID, writers)
 	for i := range writers {
-		tierIDs[i] = glid.New()
+		instIDs[i] = glid.New()
 	}
 
 	now := time.Now().Truncate(time.Nanosecond)
@@ -331,7 +331,7 @@ func TestReliability_ConcurrentWrites_NoDivergence(t *testing.T) {
 		wg.Add(1)
 		go func(writerIdx int) {
 			defer wg.Done()
-			instID := tierIDs[writerIdx]
+			instID := instIDs[writerIdx]
 			for c := range commandsPerWriter {
 				// Unique chunk ID: writer index in byte 0, command index in byte 1.
 				var cid chunk.ChunkID
@@ -359,7 +359,7 @@ func TestReliability_ConcurrentWrites_NoDivergence(t *testing.T) {
 	// Cross-check: leader's FSM has exactly writers*commandsPerWriter entries.
 	leader := h.nodes[h.leaderID()]
 	total := 0
-	for _, tid := range tierIDs {
+	for _, tid := range instIDs {
 		if sub := leader.fsm.InstanceFSM(tid); sub != nil {
 			total += len(sub.List())
 		}

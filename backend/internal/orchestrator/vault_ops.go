@@ -321,7 +321,7 @@ func (o *Orchestrator) VaultType(vaultID glid.GLID) string {
 
 // MissingVaultInstance returns true if the vault's local vault list differs from the
 // given vault IDs — either tiers were added or removed.
-func (o *Orchestrator) MissingVaultInstance(vaultID glid.GLID, tierIDs []glid.GLID) bool {
+func (o *Orchestrator) MissingVaultInstance(vaultID glid.GLID, instIDs []glid.GLID) bool {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
 	o.mu.RUnlock()
@@ -333,8 +333,8 @@ func (o *Orchestrator) MissingVaultInstance(vaultID glid.GLID, tierIDs []glid.GL
 	if t := vault.Instance; t != nil {
 		local = t.VaultID
 	}
-	expected := make(map[glid.GLID]bool, len(tierIDs))
-	for _, id := range tierIDs {
+	expected := make(map[glid.GLID]bool, len(instIDs))
+	for _, id := range instIDs {
 		expected[id] = true
 		if local != id {
 			return true // inst added
@@ -631,12 +631,12 @@ func (o *Orchestrator) appendToLocalFollower(vault *Vault, instID glid.GLID, sto
 
 // deleteFromFollowers removes a chunk from all same-node follower instances
 // of a inst. Called by retention after deleting from the leader.
-// DeleteChunkFromTier deletes a specific chunk from a inst. If the chunk is
+// DeleteChunk deletes a specific chunk from a inst. If the chunk is
 // currently the vault's active chunk, it is sealed first so the delete can
 // proceed. This handles the follower case where the leader has moved on to a
 // new active chunk but the follower still has the old ID as active (records
 // sync via ChunkReplicator.AppendRecords preserves the leader's chunk ID).
-func (o *Orchestrator) DeleteChunkFromTier(vaultID glid.GLID, chunkID chunk.ChunkID) error {
+func (o *Orchestrator) DeleteChunk(vaultID glid.GLID, chunkID chunk.ChunkID) error {
 	inst, err := o.findTierForDelete(vaultID)
 	if err != nil {
 		return err
@@ -1115,7 +1115,7 @@ func drainIterator(next chunk.RecordIterator) {
 	}
 }
 
-// SealActive seals the active chunk on matching vaults, on the
+// SealActiveTier seals the active chunk on matching vaults, on the
 // **leader** side of the seal flow. If instID is glid.Nil, all local tiers
 // in the vault are sealed. Returns the number of tiers sealed. No-op if the
 // active chunk is empty or absent.
@@ -1132,8 +1132,8 @@ func drainIterator(next chunk.RecordIterator) {
 // chicken-and-egg deadlock with readiness recovery.
 //
 // Do not merge with SealActiveTier: the two paths run on different nodes
-// with different invariants. SealActive (leader) fans out replication;
-// SealActiveTier is the target of that fan-out on followers. After sealing,
+// with different invariants. SealActiveTier (leader) fans out replication;
+// SealActive is the target of that fan-out on followers. After sealing,
 // schedules compression and index builds (same as ingest-triggered seal).
 func (o *Orchestrator) SealActive(vaultID glid.GLID) (int, error) {
 	o.mu.RLock()

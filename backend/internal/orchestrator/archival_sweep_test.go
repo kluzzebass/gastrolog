@@ -646,7 +646,7 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 			nodes:    nodes,
 			cfgStore: store,
 			vaultID:  vaultID,
-			tierIDs:  []glid.GLID{instID},
+			instIDs:  []glid.GLID{instID},
 		},
 		cloudStore: cloudStore,
 		csID:       csID,

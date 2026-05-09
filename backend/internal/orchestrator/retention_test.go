@@ -496,7 +496,7 @@ func TestClusterRetentionSweepDeletesOnAllNodes(t *testing.T) {
 		if ok {
 			_ = processor.PostSealProcess(ctx, m.ID)
 		}
-		leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, h.tierIDs[0], m.ID, leaderTier.FollowerTargets)
+		leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, h.instIDs[0], m.ID, leaderTier.FollowerTargets)
 	}
 
 	// Verify followers have all records before sweep.
@@ -513,7 +513,7 @@ func TestClusterRetentionSweepDeletesOnAllNodes(t *testing.T) {
 		policy: chunk.NewCountRetentionPolicy(keepN),
 		
 	}}
-	runner := newClusterRetentionRunner(leaderNode.orch, h.vaultID, h.tierIDs[0], leaderTier)
+	runner := newClusterRetentionRunner(leaderNode.orch, h.vaultID, h.instIDs[0], leaderTier)
 	runner.sweep(rules)
 
 	// ---- Verify: leader retained exactly keepN chunks ----
@@ -583,7 +583,7 @@ func TestClusterRetentionSweepWithTTLOnAllNodes(t *testing.T) {
 		if ok {
 			_ = processor.PostSealProcess(ctx, m.ID)
 		}
-		leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, h.tierIDs[0], m.ID, leaderTier.FollowerTargets)
+		leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, h.instIDs[0], m.ID, leaderTier.FollowerTargets)
 	}
 
 	// Run TTL sweep with clock set 5 minutes in the future — all chunks expired.
@@ -592,7 +592,7 @@ func TestClusterRetentionSweepWithTTLOnAllNodes(t *testing.T) {
 		policy: chunk.NewTTLRetentionPolicy(1 * time.Minute),
 		
 	}}
-	runner := newClusterRetentionRunner(leaderNode.orch, h.vaultID, h.tierIDs[0], leaderTier)
+	runner := newClusterRetentionRunner(leaderNode.orch, h.vaultID, h.instIDs[0], leaderTier)
 	runner.now = func() time.Time { return frozenNow }
 	runner.sweep(rules)
 

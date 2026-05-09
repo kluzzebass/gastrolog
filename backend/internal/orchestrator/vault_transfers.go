@@ -313,7 +313,7 @@ func (o *Orchestrator) drainWorker(ctx context.Context, vaultID glid.GLID, targe
 	}
 
 	// Final seal: catch any records that were appended between
-	// DrainVault's SealActive and the worker starting (e.g. from
+	// DrainVault's SealActiveTier and the worker starting (e.g. from
 	// ForwardRecords RPCs from nodes with stale filter sets).
 	if _, err := o.SealActive(vaultID); err != nil {
 		o.logger.Warn("drain: final seal", "vault", vaultID, "error", err)

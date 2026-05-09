@@ -432,7 +432,7 @@ func TestClusterReplicationSealedChunksArriveOnFollowers(t *testing.T) {
 	followerTargets := tier0.FollowerTargets
 	ctx := context.Background()
 	for _, m := range metas {
-		leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, h.tierIDs[0], m.ID, followerTargets)
+		leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, h.instIDs[0], m.ID, followerTargets)
 	}
 
 	// ---- Verify: each follower has all records (cursor-verified) ----
@@ -519,7 +519,7 @@ func TestClusterReplicationSealedIdxWriteTSMatchesLeader(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, h.tierIDs[0], sealedID, leaderTier.FollowerTargets)
+	leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, h.instIDs[0], sealedID, leaderTier.FollowerTargets)
 
 	leaderEntries := chunkRecordTimestamps(t, leaderTier.Chunks, sealedID)
 	if len(leaderEntries) != totalRecords {
@@ -688,7 +688,7 @@ func TestClusterReplicationDeletePropagation(t *testing.T) {
 	}
 	ctx := context.Background()
 	for _, m := range metas {
-		leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, h.tierIDs[0], m.ID, leaderTier.FollowerTargets)
+		leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, h.instIDs[0], m.ID, leaderTier.FollowerTargets)
 	}
 
 	// Verify followers have chunks.

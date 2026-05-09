@@ -106,7 +106,7 @@ func newTestOrch(t *testing.T, cfg Config) *Orchestrator {
 	return orch
 }
 
-func newMemoryTierInstance(t *testing.T, instID glid.GLID) *VaultInstance {
+func newMemoryInstance(t *testing.T, instID glid.GLID) *VaultInstance {
 	t.Helper()
 	cm, err := chunkmem.NewFactory()(nil, nil)
 	if err != nil {
@@ -128,9 +128,9 @@ func newMemoryTierInstance(t *testing.T, instID glid.GLID) *VaultInstance {
 // setupTestStoreRuntime populates the test store with runtime state that tests
 // need — vault placements and node storage config. Most tests use memory tiers
 // with a single test-node, so placements use synthetic storage IDs.
-func setupTestStoreRuntime(store *sysmem.Store, nodeID string, tierIDs ...glid.GLID) {
+func setupTestStoreRuntime(store *sysmem.Store, nodeID string, instIDs ...glid.GLID) {
 	ctx := context.Background()
-	for _, tid := range tierIDs {
+	for _, tid := range instIDs {
 		_ = store.SetVaultPlacements(ctx, tid, []system.VaultPlacement{
 			{StorageID: system.SyntheticStorageID(nodeID), Leader: true},
 		})
@@ -244,10 +244,10 @@ func (p *keepNPolicy) Apply(state chunk.VaultState) []chunk.ChunkID {
 
 // ---------- cloud inst transition test ----------
 
-// newCloudFileTier creates a file-backed VaultInstance with cloud storage.
+// newCloudFileInstance creates a file-backed VaultInstance with cloud storage.
 // Sealed chunks are uploaded to the in-memory blobstore and local files deleted,
 // matching production cloud inst behavior.
-func newCloudFileTier(t *testing.T, instID glid.GLID, vaultID glid.GLID, store blobstore.Store) (*VaultInstance, string) {
+func newCloudFileInstance(t *testing.T, instID glid.GLID, vaultID glid.GLID, store blobstore.Store) (*VaultInstance, string) {
 	t.Helper()
 	dir := t.TempDir()
 	cm, err := chunkfile.NewManager(chunkfile.Config{
@@ -281,9 +281,9 @@ func newCloudFileTier(t *testing.T, instID glid.GLID, vaultID glid.GLID, store b
 
 // ---------- helpers for new tests ----------
 
-// newFileTierInstance creates a file-backed VaultInstance without cloud storage.
+// newFileInstance creates a file-backed VaultInstance without cloud storage.
 // Returns the inst instance and its filesystem directory for post-test verification.
-func newFileTierInstance(t *testing.T, instID glid.GLID) (*VaultInstance, string) {
+func newFileInstance(t *testing.T, instID glid.GLID) (*VaultInstance, string) {
 	t.Helper()
 	dir := t.TempDir()
 	cm, err := chunkfile.NewManager(chunkfile.Config{
@@ -319,8 +319,8 @@ func assertNoDirsOnDisk(t *testing.T, label, dir string) {
 	}
 }
 
-// countAllTierRecords counts all records across both sealed and active chunks.
-func countAllTierRecords(tb testing.TB, cm chunk.ChunkManager) int64 {
+// countAllInstanceRecords counts all records across both sealed and active chunks.
+func countAllInstanceRecords(tb testing.TB, cm chunk.ChunkManager) int64 {
 	tb.Helper()
 	metas, _ := cm.List()
 	var total int64
@@ -539,7 +539,7 @@ func (d *directChunkReplicator) DeleteChunk(_ context.Context, nodeID string, va
 	if !ok {
 		return fmt.Errorf("directChunkReplicator: unknown node %q", nodeID)
 	}
-	return orch.DeleteChunkFromTier(vaultID, chunkID)
+	return orch.DeleteChunk(vaultID, chunkID)
 }
 
 func (d *directChunkReplicator) RequestReplicaCatchup(ctx context.Context, leaderNodeID string, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error) {
@@ -586,7 +586,7 @@ type clusterHarness struct {
 	nodes    map[string]*clusterTestNode
 	cfgStore *sysmem.Store
 	vaultID  glid.GLID
-	tierIDs  []glid.GLID
+	instIDs  []glid.GLID
 }
 
 // allNodeIDs returns sorted node IDs.
@@ -616,8 +616,8 @@ func (h *clusterHarness) countRecordsOnNode(t *testing.T, nodeID string) int64 {
 	return total
 }
 
-// countRecordsOnTier counts cursor-verified records in a specific inst across ALL nodes.
-func (h *clusterHarness) countRecordsOnTier(t *testing.T, tierIdx int) map[string]int64 {
+// countRecordsOnInstance counts cursor-verified records in a specific inst across ALL nodes.
+func (h *clusterHarness) countRecordsOnInstance(t *testing.T, tierIdx int) map[string]int64 {
 	t.Helper()
 	counts := make(map[string]int64)
 	for nodeID, node := range h.nodes {
@@ -628,8 +628,8 @@ func (h *clusterHarness) countRecordsOnTier(t *testing.T, tierIdx int) map[strin
 	return counts
 }
 
-// countChunksOnTier counts sealed chunks in a specific inst across ALL nodes.
-func (h *clusterHarness) countChunksOnTier(t *testing.T, tierIdx int) map[string]int {
+// countChunksOnInstance counts sealed chunks in a specific inst across ALL nodes.
+func (h *clusterHarness) countChunksOnInstance(t *testing.T, tierIdx int) map[string]int {
 	t.Helper()
 	counts := make(map[string]int)
 	for nodeID, node := range h.nodes {
@@ -683,9 +683,9 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 	// 1:1 vault:tier — single inst shares the vault's ID. tierCount is
 	// always 1 in current callers; the slice survives only for legacy
 	// fixture wiring.
-	tierIDs := make([]glid.GLID, tierCount)
+	instIDs := make([]glid.GLID, tierCount)
 	for i := range tierCount {
-		tierIDs[i] = vaultID
+		instIDs[i] = vaultID
 	}
 
 	// Create config store.
@@ -702,13 +702,13 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 			})
 		}
 		tierCfgs[i] = system.TierConfig{
-			ID:      tierIDs[i],
+			ID:      instIDs[i],
 			Name:    fmt.Sprintf("inst-%d", i),
 			Type:    system.VaultTypeFile,
 			VaultID: vaultID,
 		}
 		_ = store.PutTier(context.Background(), tierCfgs[i])
-		_ = store.SetVaultPlacements(context.Background(), tierIDs[i], placements)
+		_ = store.SetVaultPlacements(context.Background(), instIDs[i], placements)
 	}
 	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID:   vaultID,
@@ -751,7 +751,7 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 			}
 			im := indexfile.NewManager(dir, nil, nil)
 			inst := &VaultInstance{
-				VaultID:  tierIDs[i],
+				VaultID:  instIDs[i],
 				Type:    "file",
 				Chunks:  cm,
 				Indexes: im,
@@ -810,7 +810,7 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 		nodes:    nodes,
 		cfgStore: store,
 		vaultID:  vaultID,
-		tierIDs:  tierIDs,
+		instIDs:  instIDs,
 	}
 }
 
