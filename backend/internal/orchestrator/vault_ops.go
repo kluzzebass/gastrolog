@@ -404,9 +404,9 @@ func (o *Orchestrator) AppendToVault(vaultID glid.GLID, leaderChunkID chunk.Chun
 		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 	// Block appends to vaults that are draining.
-	if _, draining := o.tierDraining[tierDrainKey(vaultID)]; draining {
+	if _, draining := o.instDraining[instDrainKey(vaultID)]; draining {
 		o.mu.RUnlock()
-		return ErrTierDraining
+		return ErrInstDraining
 	}
 	cm := inst.Chunks
 

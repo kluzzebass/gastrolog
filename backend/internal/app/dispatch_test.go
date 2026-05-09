@@ -91,7 +91,7 @@ type mockOrch struct {
 	reloadFiltersCalls int         // number of ReloadFilters calls
 
 	// Tier drain tracking.
-	tierDrainCalls    []glid.GLID                                                // vault IDs passed to DrainTier
+	tierDrainCalls    []glid.GLID                                                // vault IDs passed to DrainInstance
 	removeTierCalls   [][2]glid.GLID                                             // [vaultID, instID] pairs passed to RemoveVaultInstance
 	localTierExported func(vaultID, instID glid.GLID) *orchestrator.VaultInstance // configurable return
 }
@@ -128,7 +128,7 @@ func (m *mockOrch) DeleteVaultInstance(vaultID glid.GLID) bool {
 	m.removeTierCalls = append(m.removeTierCalls, [2]glid.GLID{vaultID, vaultID})
 	return true
 }
-func (m *mockOrch) DrainTier(_ context.Context, vaultID glid.GLID, _ orchestrator.DrainMode, _ string) error {
+func (m *mockOrch) DrainInstance(_ context.Context, vaultID glid.GLID, _ orchestrator.DrainMode, _ string) error {
 	m.tierDrainCalls = append(m.tierDrainCalls, vaultID)
 	return nil
 }
@@ -945,10 +945,10 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyTierDeleted, ID: instID, Drain: true})
 
 		if len(mo.tierDrainCalls) != 1 {
-			t.Fatalf("expected 1 DrainTier call, got %d", len(mo.tierDrainCalls))
+			t.Fatalf("expected 1 DrainInstance call, got %d", len(mo.tierDrainCalls))
 		}
 		if mo.tierDrainCalls[0] != vaultID {
-			t.Fatalf("DrainTier called with wrong vault: %s", mo.tierDrainCalls[0])
+			t.Fatalf("DrainInstance called with wrong vault: %s", mo.tierDrainCalls[0])
 		}
 		if len(mo.removeTierCalls) != 0 {
 			t.Fatalf("leader should not call RemoveVaultInstance, got %d calls", len(mo.removeTierCalls))
@@ -974,7 +974,7 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyTierDeleted, ID: instID, Drain: true})
 
 		if len(mo.tierDrainCalls) != 0 {
-			t.Fatalf("follower should not drain, got %d DrainTier calls", len(mo.tierDrainCalls))
+			t.Fatalf("follower should not drain, got %d DrainInstance calls", len(mo.tierDrainCalls))
 		}
 		if len(mo.removeTierCalls) != 1 {
 			t.Fatalf("expected 1 RemoveVaultInstance call, got %d", len(mo.removeTierCalls))
@@ -1021,7 +1021,7 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyTierDeleted, ID: instID, Drain: false})
 
 		if len(mo.tierDrainCalls) != 0 {
-			t.Fatalf("non-drain delete should not call DrainTier, got %d calls", len(mo.tierDrainCalls))
+			t.Fatalf("non-drain delete should not call DrainInstance, got %d calls", len(mo.tierDrainCalls))
 		}
 		if len(mo.removeTierCalls) != 1 {
 			t.Fatalf("expected 1 RemoveVaultInstance call, got %d", len(mo.removeTierCalls))

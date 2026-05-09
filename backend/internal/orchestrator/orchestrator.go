@@ -258,7 +258,7 @@ type Orchestrator struct {
 	draining map[glid.GLID]*drainState
 
 	// Draining tiers (keyed by "vaultID:instID", tracks in-progress inst drains).
-	tierDraining map[string]*tierDrainState
+	instDraining map[string]*instDrainState
 
 	// OnTierDrainComplete is called after a inst drain finishes. The dispatch
 	// layer uses this to remove the inst from vault inst lists in the config
@@ -493,7 +493,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		ingesterStats:        make(map[glid.GLID]*IngesterStats),
 		ingesterMeta:         make(map[glid.GLID]ingesterInfo),
 		draining:             make(map[glid.GLID]*drainState),
-		tierDraining:         make(map[string]*tierDrainState),
+		instDraining:         make(map[string]*instDrainState),
 		retention:            make(map[string]*retentionRunner),
 		scheduler:            sched,
 		cronRotation:         newCronRotationManager(sched, logger),
