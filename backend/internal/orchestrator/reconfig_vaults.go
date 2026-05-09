@@ -22,7 +22,7 @@ import (
 	"gastrolog/internal/query"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/system"
-	"gastrolog/internal/vaultraft/tierfsm"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
 	"gastrolog/internal/vaultraft"
 
 	hraft "github.com/hashicorp/raft"
@@ -1046,8 +1046,8 @@ type tierRaftCallbacks struct {
 	listChunks          func() []chunk.ChunkID
 	listRetPending      func() []chunk.ChunkID
 	overlayFromFSM      func(chunk.ChunkMeta) chunk.ChunkMeta
-	manifestEntries     func() []tierfsm.ManifestEntry
-	manifestEntry       func(id chunk.ChunkID) (tierfsm.ManifestEntry, bool)
+	manifestEntries     func() []vaultctlfsm.ManifestEntry
+	manifestEntry       func(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool)
 }
 
 // ensureVaultCtlMetadata joins this node to the vault control-plane
@@ -1055,7 +1055,7 @@ type tierRaftCallbacks struct {
 // returns the applier + callbacks for this inst's chunk metadata. Every
 // inst in the same vault shares the same vault-ctl Raft group; each
 // inst's chunk FSM is a sub-FSM keyed by inst ID (see vaultraft.FSM and
-// vaultraft/tierfsm.FSM). With no GroupManager, returns nils.
+// vaultraft/vaultctlfsm.FSM). With no GroupManager, returns nils.
 //
 // Post-gastrolog-5xxbd there is no per-vault-ctl Raft group. The historical
 // function name ensureVaultCtlMetadata is preserved as a no-op alias in
@@ -1063,7 +1063,7 @@ type tierRaftCallbacks struct {
 //
 // Call this BEFORE creating the chunk manager so Raft can start
 // elections while chunk loading is still in progress.
-func (o *Orchestrator) ensureVaultCtlMetadata(tierCfg system.TierConfig, clusterNodes []system.NodeConfig, factories Factories) (*raftgroup.Group, tierfsm.Applier, tierRaftCallbacks) {
+func (o *Orchestrator) ensureVaultCtlMetadata(tierCfg system.TierConfig, clusterNodes []system.NodeConfig, factories Factories) (*raftgroup.Group, vaultctlfsm.Applier, tierRaftCallbacks) {
 	if factories.GroupManager == nil {
 		return nil, nil, tierRaftCallbacks{}
 	}
@@ -1093,7 +1093,7 @@ func (o *Orchestrator) ensureVaultCtlMetadata(tierCfg system.TierConfig, cluster
 	r := g.Raft
 	timeout := cluster.ReplicationTimeout
 
-	var applier tierfsm.Applier
+	var applier vaultctlfsm.Applier
 	if factories.PeerConns != nil {
 		applier = cluster.NewVaultCtlChunkApplyForwarder(r, vaultGID, tierCfg.ID, factories.PeerConns, timeout)
 	} else {
@@ -1124,25 +1124,25 @@ func (o *Orchestrator) ensureVaultCtlMetadata(tierCfg system.TierConfig, cluster
 // which a fresh vault with no chunks never sends — keying readiness on any
 // FSM-level signal leaves every fresh vault wedged as "not ready" until
 // first ingestion.
-func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.Applier) tierRaftCallbacks {
+func buildTierRaftCallbacks(r *hraft.Raft, fsm *vaultctlfsm.FSM, applier vaultctlfsm.Applier) tierRaftCallbacks {
 	return tierRaftCallbacks{
 		hasLeader:  func() bool { return r.Leader() != "" },
 		isLeader:   func() bool { return r.State() == hraft.Leader },
 		isFSMReady: func() bool { return r.AppliedIndex() > 0 },
 		applyRequestDelete: func(id chunk.ChunkID, reason string, expectedFrom []string) error {
-			return applier.Apply(tierfsm.MarshalRequestDelete(id, time.Now(), reason, expectedFrom))
+			return applier.Apply(vaultctlfsm.MarshalRequestDelete(id, time.Now(), reason, expectedFrom))
 		},
 		applyAckDelete: func(id chunk.ChunkID, nodeID string) error {
-			return applier.Apply(tierfsm.MarshalAckDelete(id, nodeID))
+			return applier.Apply(vaultctlfsm.MarshalAckDelete(id, nodeID))
 		},
 		applyFinalizeDelete: func(id chunk.ChunkID) error {
-			return applier.Apply(tierfsm.MarshalFinalizeDelete(id))
+			return applier.Apply(vaultctlfsm.MarshalFinalizeDelete(id))
 		},
 		applyPruneNode: func(nodeID string) error {
-			return applier.Apply(tierfsm.MarshalPruneNode(nodeID))
+			return applier.Apply(vaultctlfsm.MarshalPruneNode(nodeID))
 		},
 		applyRetPending: func(id chunk.ChunkID) error {
-			return applier.Apply(tierfsm.MarshalRetentionPending(id))
+			return applier.Apply(vaultctlfsm.MarshalRetentionPending(id))
 		},
 		isTombstoned: func(id chunk.ChunkID) bool {
 			if fsm == nil {
@@ -1161,7 +1161,7 @@ func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.App
 			}
 			return ids
 		},
-		listRetPending: listFSMByFlag(fsm, func(e tierfsm.ManifestEntry) bool { return e.RetentionPending }),
+		listRetPending: listFSMByFlag(fsm, func(e vaultctlfsm.ManifestEntry) bool { return e.RetentionPending }),
 		overlayFromFSM: func(m chunk.ChunkMeta) chunk.ChunkMeta {
 			if fsm == nil {
 				return m
@@ -1187,19 +1187,19 @@ func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.App
 			m.Sealed = e.State == chunk.ChunkStateSealed
 			return m
 		},
-		manifestEntries: func() []tierfsm.ManifestEntry {
+		manifestEntries: func() []vaultctlfsm.ManifestEntry {
 			if fsm == nil {
 				return nil
 			}
 			return fsm.List()
 		},
-		manifestEntry: func(id chunk.ChunkID) (tierfsm.ManifestEntry, bool) {
+		manifestEntry: func(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool) {
 			if fsm == nil {
-				return tierfsm.ManifestEntry{}, false
+				return vaultctlfsm.ManifestEntry{}, false
 			}
 			e := fsm.Get(id)
 			if e == nil {
-				return tierfsm.ManifestEntry{}, false
+				return vaultctlfsm.ManifestEntry{}, false
 			}
 			return *e, true
 		},
@@ -1208,7 +1208,7 @@ func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.App
 
 // listFSMByFlag returns a function that filters the FSM's entries by a
 // boolean predicate (e.g., RetentionPending or TransitionStreamed).
-func listFSMByFlag(fsm *tierfsm.FSM, pred func(tierfsm.ManifestEntry) bool) func() []chunk.ChunkID {
+func listFSMByFlag(fsm *vaultctlfsm.FSM, pred func(vaultctlfsm.ManifestEntry) bool) func() []chunk.ChunkID {
 	return func() []chunk.ChunkID {
 		if fsm == nil {
 			return nil
@@ -1242,7 +1242,7 @@ func setIntegrityVerifier(cm chunk.ChunkManager, v chunk.IntegrityVerifier) {
 // routing to the vault ctl Raft leader when peers are configured. The phase parameter lets
 // the announcer short-circuit during shutdown so trailing applies don't
 // fire "raft is already shutdown" warnings (see gastrolog-1e5ke).
-func setVaultRaftAnnouncer(cm chunk.ChunkManager, applier tierfsm.Applier, phase *lifecycle.Phase, logger *slog.Logger) {
+func setVaultRaftAnnouncer(cm chunk.ChunkManager, applier vaultctlfsm.Applier, phase *lifecycle.Phase, logger *slog.Logger) {
 	if applier == nil {
 		return
 	}
@@ -1250,7 +1250,7 @@ func setVaultRaftAnnouncer(cm chunk.ChunkManager, applier tierfsm.Applier, phase
 	if !ok {
 		return
 	}
-	setter.SetAnnouncer(tierfsm.NewAnnouncer(applier, phase, logger))
+	setter.SetAnnouncer(vaultctlfsm.NewAnnouncer(applier, phase, logger))
 }
 
 // clearVaultFSMChunkCallbacks clears OnDelete/OnUpload for a vault's FSM slice
@@ -1265,9 +1265,9 @@ func (o *Orchestrator) clearVaultFSMChunkCallbacks(vaultID, tierID glid.GLID) {
 	if g == nil {
 		return
 	}
-	var fsm *tierfsm.FSM
+	var fsm *vaultctlfsm.FSM
 	switch raw := g.FSM.(type) {
-	case *tierfsm.FSM:
+	case *vaultctlfsm.FSM:
 		fsm = raw
 	case *vaultraft.FSM:
 		fsm = raw.EnsureTierFSM(vaultID)
@@ -1303,9 +1303,9 @@ func wireVaultFSMOnDelete(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 	if g == nil || cm == nil {
 		return
 	}
-	var fsm *tierfsm.FSM
+	var fsm *vaultctlfsm.FSM
 	switch raw := g.FSM.(type) {
-	case *tierfsm.FSM:
+	case *vaultctlfsm.FSM:
 		fsm = raw
 	case *vaultraft.FSM:
 		fsm = raw.EnsureTierFSM(vaultID)
@@ -1360,9 +1360,9 @@ func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 	if g == nil || cm == nil {
 		return
 	}
-	var fsm *tierfsm.FSM
+	var fsm *vaultctlfsm.FSM
 	switch raw := g.FSM.(type) {
-	case *tierfsm.FSM:
+	case *vaultctlfsm.FSM:
 		fsm = raw
 	case *vaultraft.FSM:
 		fsm = raw.EnsureTierFSM(vaultID)
@@ -1373,7 +1373,7 @@ func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 	if !ok {
 		return
 	}
-	fsm.SetOnUpload(func(e tierfsm.ManifestEntry) {
+	fsm.SetOnUpload(func(e vaultctlfsm.ManifestEntry) {
 		// Notify WatchChunks subscribers: the chunk transitioned to
 		// cloud-backed (DiskBytes / CloudBacked changed
 		// in the FSM), which the inspector renders. Fire regardless

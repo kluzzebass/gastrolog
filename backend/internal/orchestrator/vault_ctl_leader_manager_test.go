@@ -8,17 +8,17 @@ import (
 	"time"
 
 	"gastrolog/internal/raftgroup"
-	"gastrolog/internal/vaultraft/tierfsm"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
 
 	hraft "github.com/hashicorp/raft"
 )
 
 // makeSingleNodeTierGroup builds a single-node Raft group using in-memory
 // transport + storage. Returns the group, the FSM, and a cleanup func.
-func makeSingleNodeTierGroup(t *testing.T, nodeID string) (*raftgroup.Group, *tierfsm.FSM, func()) {
+func makeSingleNodeTierGroup(t *testing.T, nodeID string) (*raftgroup.Group, *vaultctlfsm.FSM, func()) {
 	t.Helper()
 
-	fsm := tierfsm.New()
+	fsm := vaultctlfsm.New()
 	_, trans := hraft.NewInmemTransportWithTimeout(hraft.ServerAddress(nodeID), 1*time.Second)
 
 	conf := hraft.DefaultConfig()
@@ -199,7 +199,7 @@ func makeTwoNodeTierGroup(t *testing.T, id1, id2 string) ([]*raftgroup.Group, fu
 	t.Helper()
 
 	ids := []string{id1, id2}
-	fsms := make([]*tierfsm.FSM, 2)
+	fsms := make([]*vaultctlfsm.FSM, 2)
 	rafts := make([]*hraft.Raft, 2)
 	transports := make([]*hraft.InmemTransport, 2)
 
@@ -216,7 +216,7 @@ func makeTwoNodeTierGroup(t *testing.T, id1, id2 string) ([]*raftgroup.Group, fu
 	transports[1].Connect(hraft.ServerAddress(id1), transports[0])
 
 	for i, nid := range ids {
-		fsms[i] = tierfsm.New()
+		fsms[i] = vaultctlfsm.New()
 
 		conf := hraft.DefaultConfig()
 		conf.LocalID = hraft.ServerID(nid)

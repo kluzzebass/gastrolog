@@ -14,7 +14,7 @@ import (
 	"sync"
 
 	"gastrolog/internal/glid"
-	"gastrolog/internal/vaultraft/tierfsm"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
 
 	hraft "github.com/hashicorp/raft"
 )
@@ -35,7 +35,7 @@ const vaultSnapVersion uint32 = 1
 // orchestrator/reconfig_vaults.go for the readiness wiring.
 type FSM struct {
 	tierMu sync.Mutex
-	tiers  map[glid.GLID]*tierfsm.FSM
+	tiers  map[glid.GLID]*vaultctlfsm.FSM
 
 	// onAfterRestore fires (outside tierMu) once Restore() has swapped
 	// the tier-sub-FSM map. The orchestrator uses this to walk each
@@ -50,7 +50,7 @@ type FSM struct {
 // NewFSM returns a new vault control-plane FSM instance.
 func NewFSM() *FSM {
 	return &FSM{
-		tiers: make(map[glid.GLID]*tierfsm.FSM),
+		tiers: make(map[glid.GLID]*vaultctlfsm.FSM),
 	}
 }
 
@@ -68,10 +68,10 @@ func (f *FSM) SetOnAfterRestore(fn func()) {
 // Tiers returns a snapshot of the current (tierID → sub-FSM) map.
 // Safe for the orchestrator's after-restore handler to iterate
 // without holding tierMu.
-func (f *FSM) Tiers() map[glid.GLID]*tierfsm.FSM {
+func (f *FSM) Tiers() map[glid.GLID]*vaultctlfsm.FSM {
 	f.tierMu.Lock()
 	defer f.tierMu.Unlock()
-	out := make(map[glid.GLID]*tierfsm.FSM, len(f.tiers))
+	out := make(map[glid.GLID]*vaultctlfsm.FSM, len(f.tiers))
 	maps.Copy(out, f.tiers)
 	return out
 }
@@ -98,7 +98,7 @@ func (f *FSM) Apply(l *hraft.Log) any {
 		f.tierMu.Lock()
 		t := f.tiers[tierID]
 		if t == nil {
-			t = tierfsm.New()
+			t = vaultctlfsm.New()
 			f.tiers[tierID] = t
 		}
 		subFSM := t
@@ -112,7 +112,7 @@ func (f *FSM) Apply(l *hraft.Log) any {
 
 // TierFSM returns the tierfsm sub-machine for tierID, or nil if no command
 // has been applied for that tier yet.
-func (f *FSM) TierFSM(tierID glid.GLID) *tierfsm.FSM {
+func (f *FSM) TierFSM(tierID glid.GLID) *vaultctlfsm.FSM {
 	f.tierMu.Lock()
 	defer f.tierMu.Unlock()
 	return f.tiers[tierID]
@@ -120,12 +120,12 @@ func (f *FSM) TierFSM(tierID glid.GLID) *tierfsm.FSM {
 
 // EnsureTierFSM returns the tierfsm sub-state for tierID, creating an empty
 // sub-FSM if none exists yet (for wiring OnDelete/OnUpload before first Apply).
-func (f *FSM) EnsureTierFSM(tierID glid.GLID) *tierfsm.FSM {
+func (f *FSM) EnsureTierFSM(tierID glid.GLID) *vaultctlfsm.FSM {
 	f.tierMu.Lock()
 	defer f.tierMu.Unlock()
 	t := f.tiers[tierID]
 	if t == nil {
-		t = tierfsm.New()
+		t = vaultctlfsm.New()
 		f.tiers[tierID] = t
 	}
 	return t
@@ -183,7 +183,7 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 		var probe [1]byte
 		if n, _ := rc.Read(probe[:]); n == 0 {
 			f.tierMu.Lock()
-			f.tiers = make(map[glid.GLID]*tierfsm.FSM)
+			f.tiers = make(map[glid.GLID]*vaultctlfsm.FSM)
 			hook := f.onAfterRestore
 			f.tierMu.Unlock()
 			if hook != nil {
@@ -218,7 +218,7 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 	}
 	n := int(binary.BigEndian.Uint32(countBuf[:]))
 
-	nextTiers := make(map[glid.GLID]*tierfsm.FSM, n)
+	nextTiers := make(map[glid.GLID]*vaultctlfsm.FSM, n)
 	for i := range n {
 		var tid glid.GLID
 		if _, err := io.ReadFull(rc, tid[:]); err != nil {
@@ -230,7 +230,7 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 		}
 		blen := int64(binary.BigEndian.Uint32(blenBuf[:]))
 		tierReader := io.LimitReader(rc, blen)
-		t := tierfsm.New()
+		t := vaultctlfsm.New()
 		if err := t.Restore(io.NopCloser(tierReader)); err != nil {
 			return fmt.Errorf("vaultraft restore tier %x: %w", tid[:], err)
 		}

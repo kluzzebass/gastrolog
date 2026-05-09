@@ -1,4 +1,4 @@
-package tierfsm
+package vaultctlfsm
 
 // Receipt-based deletion protocol — gastrolog-51gme step 2.
 //

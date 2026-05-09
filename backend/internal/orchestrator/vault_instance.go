@@ -6,7 +6,7 @@ import (
 	"gastrolog/internal/index"
 	"gastrolog/internal/query"
 	"gastrolog/internal/system"
-	"gastrolog/internal/vaultraft/tierfsm"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
 // VaultInstance is the node-local materialization of a TierConfig.
@@ -96,12 +96,12 @@ type VaultInstance struct {
 	// honoring the active-chunk exception). Nil for memory-mode tiers
 	// (no FSM); the orchestrator falls back to the chunk manager in
 	// that case.
-	ManifestEntries func() []tierfsm.ManifestEntry
+	ManifestEntries func() []vaultctlfsm.ManifestEntry
 
 	// ManifestEntry returns the manifest entry for one chunk on this inst,
 	// or false if this inst doesn't hold the chunk. Nil for memory-mode
 	// tiers; the orchestrator falls back to the chunk manager.
-	ManifestEntry func(id chunk.ChunkID) (tierfsm.ManifestEntry, bool)
+	ManifestEntry func(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool)
 
 	// IsFSMReady returns true after the vault-ctl FSM has applied at least one log
 	// entry or restored from a snapshot. Before that, the manifest is incomplete

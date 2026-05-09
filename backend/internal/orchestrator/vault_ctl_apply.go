@@ -9,7 +9,7 @@ import (
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/vaultraft"
 
-	"gastrolog/internal/vaultraft/tierfsm"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
 // ErrVaultCtlRaftUnavailable is returned when ApplyVaultControlPlane is called
@@ -35,7 +35,7 @@ func (o *Orchestrator) ApplyVaultControlPlane(vaultID glid.GLID, data []byte) er
 	return fwd.Apply(data)
 }
 
-// vaultCtlTierApplier implements tierfsm.Applier by wrapping inst commands as
+// vaultCtlTierApplier implements vaultctlfsm.Applier by wrapping inst commands as
 // vault control-plane OpVaultChunkFSM entries (see vaultraft.MarshalVaultChunkCommand).
 type vaultCtlTierApplier struct {
 	o       *Orchestrator
@@ -47,4 +47,4 @@ func (a *vaultCtlTierApplier) Apply(data []byte) error {
 	return a.o.ApplyVaultControlPlane(a.vaultID, vaultraft.MarshalVaultChunkCommand(a.tierID, data))
 }
 
-var _ tierfsm.Applier = (*vaultCtlTierApplier)(nil)
+var _ vaultctlfsm.Applier = (*vaultCtlTierApplier)(nil)

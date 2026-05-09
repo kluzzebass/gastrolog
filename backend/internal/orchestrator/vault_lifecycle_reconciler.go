@@ -74,7 +74,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
-	"gastrolog/internal/vaultraft/tierfsm"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
 // VaultLifecycleReconciler owns chunk-lifecycle execution for a single
@@ -100,7 +100,7 @@ type VaultLifecycleReconciler struct {
 	// fsm is the inst sub-FSM this reconciler is bound to. Stored on
 	// Wire() so onAckDelete can read remaining ExpectedFrom without
 	// having to re-resolve the FSM through the Raft group.
-	fsm *tierfsm.FSM
+	fsm *vaultctlfsm.FSM
 
 	mu sync.Mutex
 
@@ -145,7 +145,7 @@ func NewVaultLifecycleReconciler(orch *Orchestrator, vaultID glid.GLID, inst *Va
 // into the chunk manager / Raft applier without risking the
 // FSM-mutex / orchestrator-mutex inversion that's been a recurring
 // problem (see gastrolog-5oofa, gastrolog-1s3mf).
-func (r *VaultLifecycleReconciler) Wire(fsm *tierfsm.FSM) {
+func (r *VaultLifecycleReconciler) Wire(fsm *vaultctlfsm.FSM) {
 	if fsm == nil {
 		return
 	}
@@ -182,7 +182,7 @@ func (r *VaultLifecycleReconciler) Wire(fsm *tierfsm.FSM) {
 // the apply pump waiting for our own ack to commit. Snapshot the
 // pending list, then dispatch the obligations on a goroutine so the
 // apply pump can drain.
-func (r *VaultLifecycleReconciler) ReconcileFromSnapshot(fsm *tierfsm.FSM) {
+func (r *VaultLifecycleReconciler) ReconcileFromSnapshot(fsm *vaultctlfsm.FSM) {
 	if fsm == nil {
 		return
 	}
@@ -226,7 +226,7 @@ func (r *VaultLifecycleReconciler) ReconcileFromSnapshot(fsm *tierfsm.FSM) {
 // fully reloaded but the local Manager has only the on-disk flag bits,
 // which may have missed CmdSealChunk replays. Idempotent: chunks that
 // are already sealed locally, or that don't exist locally, are no-ops.
-func (r *VaultLifecycleReconciler) projectAllSealedFromFSM(fsm *tierfsm.FSM) {
+func (r *VaultLifecycleReconciler) projectAllSealedFromFSM(fsm *vaultctlfsm.FSM) {
 	if r.inst == nil || r.inst.Chunks == nil {
 		return
 	}
@@ -271,7 +271,7 @@ func (r *VaultLifecycleReconciler) projectAllSealedFromFSM(fsm *tierfsm.FSM) {
 // this path and must come in via SweepMissingReplicas — but with 1:1:1
 // placement the leader holding the FSM Sealing entry is the only node
 // that ever held the chunk locally, so this is the right place).
-func (r *VaultLifecycleReconciler) resumeSealingFromFSM(fsm *tierfsm.FSM) {
+func (r *VaultLifecycleReconciler) resumeSealingFromFSM(fsm *vaultctlfsm.FSM) {
 	if r.inst == nil || r.inst.Chunks == nil {
 		return
 	}
@@ -345,7 +345,7 @@ func (r *VaultLifecycleReconciler) resumeSealingFromFSM(fsm *tierfsm.FSM) {
 // RegisterCloudChunk is idempotent (skips if already in m.metas or
 // m.cloudIdx), so calling it for every cloud-backed entry is safe.
 // See gastrolog-3ukgz.
-func (r *VaultLifecycleReconciler) projectAllCloudBackedFromFSM(fsm *tierfsm.FSM) {
+func (r *VaultLifecycleReconciler) projectAllCloudBackedFromFSM(fsm *vaultctlfsm.FSM) {
 	if r.inst == nil || r.inst.Chunks == nil {
 		return
 	}
@@ -400,7 +400,7 @@ func (r *VaultLifecycleReconciler) projectAllCloudBackedFromFSM(fsm *tierfsm.FSM
 // inspector's WatchChunks subscribers on this node need to refresh.
 // Local EnsureSealed failure does not gate the notification — the
 // inspector reflects FSM state, not on-disk state. See gastrolog-2ob86.
-func (r *VaultLifecycleReconciler) onSeal(e tierfsm.ManifestEntry) {
+func (r *VaultLifecycleReconciler) onSeal(e vaultctlfsm.ManifestEntry) {
 	r.logger.Debug("onSeal", "chunk", e.ID, "records", e.RecordCount)
 	defer func() {
 		if r.orch != nil {
@@ -439,7 +439,7 @@ func (r *VaultLifecycleReconciler) onRetentionPending(id chunk.ChunkID) {
 // which would deadlock the leader's apply pump waiting for its own
 // queued ack to apply. See gastrolog-51gme follow-up: apply-pump
 // self-cycle stall observed in the 4-node test cluster.
-func (r *VaultLifecycleReconciler) onRequestDelete(p tierfsm.PendingDelete) {
+func (r *VaultLifecycleReconciler) onRequestDelete(p vaultctlfsm.PendingDelete) {
 	if !p.ExpectedFrom[r.localNodeID] {
 		r.logger.Debug("onRequestDelete: not in expectedFrom",
 			"chunk", p.ChunkID, "reason", p.Reason)

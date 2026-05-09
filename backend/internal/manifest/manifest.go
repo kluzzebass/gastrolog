@@ -16,7 +16,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/index"
-	"gastrolog/internal/vaultraft/tierfsm"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
 // VaultRegistry provides access to all vaults' chunk and index managers and
@@ -63,14 +63,14 @@ type Reader interface {
 	// active (active chunks are not part of the manifest read surface —
 	// see chunk.Manager for those). ChunkIDs are globally unique GLIDs,
 	// so no vault qualifier is needed.
-	Entry(chunkID chunk.ChunkID) (tierfsm.ManifestEntry, bool)
+	Entry(chunkID chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool)
 
 	// EntriesForVault returns the manifest entries for every sealed chunk
 	// in the given vault, regardless of tier. The returned slice is a
 	// snapshot; callers may mutate or sort it.
 	//
 	// Returns nil if the vault is unknown.
-	EntriesForVault(vaultID glid.GLID) []tierfsm.ManifestEntry
+	EntriesForVault(vaultID glid.GLID) []vaultctlfsm.ManifestEntry
 }
 
 // IndexReader is the FSM-grounded read path for the IngestTS rank index

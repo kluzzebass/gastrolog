@@ -12,7 +12,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/raftwal"
-	"gastrolog/internal/vaultraft/tierfsm"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
 
 	hraft "github.com/hashicorp/raft"
 )
@@ -219,7 +219,7 @@ func (h *reliabilityHarness) leader() *reliabilityNode {
 func (h *reliabilityHarness) applyTierCreate(tierID glid.GLID, chunkID chunk.ChunkID, at time.Time) {
 	h.t.Helper()
 	leader := h.leader()
-	wire := tierfsm.MarshalCreateChunk(chunkID, at, at, at)
+	wire := vaultctlfsm.MarshalCreateChunk(chunkID, at, at, at)
 	cmd := MarshalVaultChunkCommand(tierID, wire)
 	fut := leader.raft.Apply(cmd, 2*time.Second)
 	if err := fut.Error(); err != nil {
@@ -314,10 +314,10 @@ func (h *reliabilityHarness) shutdown() {
 // tier sub-FSM's state: sorted chunk IDs with their seal/compressed state,
 // sorted transition receipts, sorted tombstone IDs. Two fingerprints that
 // string-equal represent identical replicated state.
-func tierFSMFingerprint(t *tierfsm.FSM) string {
+func tierFSMFingerprint(t *vaultctlfsm.FSM) string {
 	entries := t.List()
 	ids := make([]chunk.ChunkID, len(entries))
-	byID := make(map[chunk.ChunkID]tierfsm.ManifestEntry, len(entries))
+	byID := make(map[chunk.ChunkID]vaultctlfsm.ManifestEntry, len(entries))
 	for i, e := range entries {
 		ids[i] = e.ID
 		byID[e.ID] = e
