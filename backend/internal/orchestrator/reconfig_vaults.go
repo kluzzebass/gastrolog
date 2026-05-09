@@ -95,16 +95,6 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg system.VaultConfig
 // Rotation and retention are handled by discovery-based sweep jobs
 // (rotationSweep and retentionSweepAll). No per-vault setup needed during AddVault.
 
-// findVaultTierConfig finds a TierConfig by ID in a slice.
-func findVaultTierConfig(tiers []system.TierConfig, id glid.GLID) *system.TierConfig {
-	for i := range tiers {
-		if tiers[i].ID == id {
-			return &tiers[i]
-		}
-	}
-	return nil
-}
-
 func findVaultConfig(vaults []system.VaultConfig, id glid.GLID) *system.VaultConfig {
 	for i := range vaults {
 		if vaults[i].ID == id {
@@ -1083,7 +1073,7 @@ func (o *Orchestrator) ensureVaultCtlMetadata(vaultCfg system.VaultConfig, clust
 	// boundaries (the bug gastrolog-51gme step 3 was supposed to close).
 	vaultID := vaultCfg.ID
 	vfsm.SetOnAfterRestore(func() { o.afterVaultCtlRestore(vaultID) })
-	tierFSM := vfsm.EnsureInstanceFSM(vaultCfg.ID)
+	instFSM := vfsm.EnsureInstanceFSM(vaultCfg.ID)
 	r := g.Raft
 	timeout := cluster.ReplicationTimeout
 
@@ -1091,10 +1081,10 @@ func (o *Orchestrator) ensureVaultCtlMetadata(vaultCfg system.VaultConfig, clust
 	if factories.PeerConns != nil {
 		applier = cluster.NewVaultCtlChunkApplyForwarder(r, vaultGID, vaultCfg.ID, factories.PeerConns, timeout)
 	} else {
-		applier = &vaultCtlTierApplier{o: o, vaultID: vaultCfg.ID, instID: vaultCfg.ID}
+		applier = &vaultCtlInstApplier{o: o, vaultID: vaultCfg.ID, instID: vaultCfg.ID}
 	}
 
-	return g, applier, buildVaultRaftCallbacks(r, tierFSM, applier)
+	return g, applier, buildVaultRaftCallbacks(r, instFSM, applier)
 }
 
 // buildVaultRaftCallbacks constructs the callback struct for replicated inst
