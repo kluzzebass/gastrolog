@@ -33,19 +33,17 @@ func (f *fakeSystemLoader) Load(_ context.Context) (*system.System, error) {
 // It also adds the TierConfig to the loader's config if present, so AddVault
 // can find it via buildTierInstances.
 func memVaultCfg(vaultID glid.GLID, loader *fakeSystemLoader) system.VaultConfig {
-	tierID := glid.New()
-	tc := system.TierConfig{
-		ID:      tierID,
-		Name:    "tier-" + vaultID.String()[:8],
-		Type:    system.VaultTypeMemory,
-		VaultID: vaultID,
+	v := system.VaultConfig{
+		ID:   vaultID,
+		Name: "vault-" + vaultID.String()[:8],
+		Type: system.VaultTypeMemory,
 	}
+	// Some tests still inspect loader.cfg.Tiers; keep the legacy mirror in
+	// sync until those callers migrate.
 	if loader != nil && loader.cfg != nil {
-		loader.cfg.Tiers = append(loader.cfg.Tiers, tc)
+		loader.cfg.Tiers = append(loader.cfg.Tiers, system.TierFromVault(v))
 	}
-	return system.VaultConfig{
-		ID: vaultID,
-	}
+	return v
 }
 
 func TestReloadFilters(t *testing.T) {

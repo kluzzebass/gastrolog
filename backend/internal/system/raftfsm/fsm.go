@@ -352,26 +352,7 @@ func (f *FSM) applyPutVault(ctx context.Context, pb *gastrologv1.PutVaultCommand
 // VaultConfig. Called from applyPutVault to keep the orchestrator's
 // tier-keyed reads working until they migrate to VaultConfig directly.
 func (f *FSM) syncTierFromVault(ctx context.Context, v system.VaultConfig) error {
-	tierType := v.Type
-	if tierType == "" {
-		tierType = system.VaultTypeFile
-	}
-	tier := system.TierConfig{
-		ID:                v.ID, // 1:1 vault:tier — share the ID
-		Name:              v.Name,
-		Type:              tierType,
-		VaultID:           v.ID,
-		StorageClass:      v.StorageClass,
-		CloudServiceID:    v.CloudServiceID,
-		ReplicationFactor: v.ReplicationFactor,
-		Path:              v.Path,
-		MemoryBudgetBytes: v.MemoryBudgetBytes,
-		RotationPolicyID:  v.RotationPolicyID,
-		RetentionRules:    append([]system.RetentionRule(nil), v.RetentionRules...),
-		CacheEviction:     v.CacheEviction,
-		CacheBudget:       v.CacheBudget,
-		CacheTTL:          v.CacheTTL,
-	}
+	tier := system.TierFromVault(v)
 	if err := f.store.PutTier(ctx, tier); err != nil {
 		return err
 	}

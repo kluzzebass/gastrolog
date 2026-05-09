@@ -460,8 +460,10 @@ func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg syste
 	// IsRaftLeader check removed: the tier apply forwarder transparently
 	// routes applies to the vault-ctl Raft leader. The config placement leader
 	// always runs retention regardless of vault-ctl Raft leadership.
-	tierCfg := findTierConfig(cfg.Tiers, tier.TierID)
-	if tierCfg == nil || len(tierCfg.RetentionRules) == 0 {
+	// 1:1 vault:tier — synthesize the tier config from the vault.
+	tier2 := system.TierFromVault(vaultCfg)
+	tierCfg := &tier2
+	if len(tierCfg.RetentionRules) == 0 {
 		return nil
 	}
 	rules, err := resolveRetentionRulesFromTier(cfg, vaultCfg, tierCfg)
@@ -504,14 +506,10 @@ func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg syste
 }
 
 // tierPositionInVault returns the 0-based index of tierID in the vault's
-// ordered tier list, or -1 if the tier isn't found (shouldn't happen for
-// an active sweep target).
+// ordered tier list. With 1:1 vault:tier the index is always 0.
 func tierPositionInVault(cfg *system.Config, vaultID, tierID glid.GLID) int {
-	tierIDs := system.VaultTierIDs(cfg.Tiers, vaultID)
-	for i, id := range tierIDs {
-		if id == tierID {
-			return i
-		}
+	if vaultID == tierID {
+		return 0
 	}
 	return -1
 }

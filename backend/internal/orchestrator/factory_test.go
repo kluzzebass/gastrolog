@@ -124,18 +124,16 @@ func (f *fakeIndexManager) IndexSizes(chunkID chunk.ChunkID) map[string]int64 {
 func (f *fakeIndexManager) BuildAdapter() chunk.ChunkIndexBuilder { return nil }
 
 // testVaultCfg creates a VaultConfig + TierConfig pair for tests.
-// tierType is the tier type (e.g., system.VaultTypeMemory or "test").
-func testVaultCfg(vaultID glid.GLID, tierType system.VaultType) (system.VaultConfig, system.TierConfig) {
-	tierID := glid.New()
-	return system.VaultConfig{
-			ID:      vaultID,
-			Enabled: true,
-		}, system.TierConfig{
-			ID:      tierID,
-			Name:    "tier-" + vaultID.String()[:8],
-			Type:    tierType,
-			VaultID: vaultID,
-		}
+// vaultType is the storage shape (e.g., system.VaultTypeMemory or "test").
+// 1:1 vault:tier — the returned tier shares the vault's ID.
+func testVaultCfg(vaultID glid.GLID, vaultType system.VaultType) (system.VaultConfig, system.TierConfig) {
+	v := system.VaultConfig{
+		ID:      vaultID,
+		Name:    "vault-" + vaultID.String()[:8],
+		Enabled: true,
+		Type:    vaultType,
+	}
+	return v, system.TierFromVault(v)
 }
 
 // fakeIngester implements Ingester for testing.
@@ -557,17 +555,15 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 		},
 	}
 
+	// 1:1 vault:tier — IDs match.
 	vaultID := glid.New()
-	tierID := glid.New()
+	tierID := vaultID
 	storageID := glid.New()
 
 	sys := &system.System{
 		Config: system.Config{
 			Vaults: []system.VaultConfig{
-				{ID: vaultID, Enabled: true},
-			},
-			Tiers: []system.TierConfig{
-				{ID: tierID, Name: "local", Type: system.VaultTypeFile, StorageClass: 1, VaultID: vaultID},
+				{ID: vaultID, Name: "vault", Enabled: true, Type: system.VaultTypeFile, StorageClass: 1},
 			},
 		},
 		Runtime: system.Runtime{

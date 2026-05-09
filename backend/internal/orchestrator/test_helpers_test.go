@@ -702,16 +702,18 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 			})
 		}
 		tierCfgs[i] = system.TierConfig{
-			ID:       tierIDs[i],
-			Name:     fmt.Sprintf("tier-%d", i),
-			Type:     system.VaultTypeFile,
-			VaultID:  vaultID,
+			ID:      tierIDs[i],
+			Name:    fmt.Sprintf("tier-%d", i),
+			Type:    system.VaultTypeFile,
+			VaultID: vaultID,
 		}
 		_ = store.PutTier(context.Background(), tierCfgs[i])
 		_ = store.SetVaultPlacements(context.Background(), tierIDs[i], placements)
 	}
 	_ = store.PutVault(context.Background(), system.VaultConfig{
-		ID: vaultID, Name: "cluster-vault",
+		ID:   vaultID,
+		Name: "cluster-vault",
+		Type: system.VaultTypeFile,
 	})
 
 	// Build follower targets for the leader.

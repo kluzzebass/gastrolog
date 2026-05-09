@@ -472,15 +472,14 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID glid.
 
 	cfg := &sys.Config
 	rt := &sys.Runtime
-	tierCfg := findTierConfig(cfg.Tiers, tierID)
-	if tierCfg == nil {
-		return fmt.Errorf("tier %s not found in config", tierID)
-	}
 
 	vaultCfg := findVaultConfig(cfg.Vaults, vaultID)
 	if vaultCfg == nil {
 		return fmt.Errorf("vault %s not found in config", vaultID)
 	}
+	// 1:1 vault:tier — synthesize the tier config from the vault.
+	tier := system.TierFromVault(*vaultCfg)
+	tierCfg := &tier
 
 	o.ensureVaultControlPlaneRaftGroup(vaultID, rt.Nodes, factories)
 
@@ -618,26 +617,13 @@ func (o *Orchestrator) VaultConfig(id glid.GLID) (system.VaultConfig, error) {
 // (gastrolog-292yi). Nodes with storage placements also get a VaultInstance with
 // a chunk manager; nodes without storage only participate in the Raft group.
 func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.VaultConfig, factories Factories) (*VaultInstance, error) {
-	cfg := &sys.Config
 	rt := &sys.Runtime
 	o.ensureVaultControlPlaneRaftGroup(vaultCfg.ID, rt.Nodes, factories)
 
-	tierIDs := system.VaultTierIDs(cfg.Tiers, vaultCfg.ID)
-	if len(tierIDs) == 0 {
-		// No tier yet — placement / config arrives incrementally via
-		// AddTierToVault.
-		return nil, nil
-	}
-
-	// 1:1 vault:tier post-Phase-1 — there's only ever a single TierConfig
-	// for any given vault.
-	tierID := tierIDs[0]
-	tierCfg := findTierConfig(cfg.Tiers, tierID)
-	if tierCfg == nil {
-		o.logger.Warn("buildVaultInstance: tier not in config, skipping",
-			"vault", vaultCfg.ID)
-		return nil, nil
-	}
+	// 1:1 vault:tier — synthesize the tier config from the vault.
+	tierID := vaultCfg.ID
+	tier := system.TierFromVault(vaultCfg)
+	tierCfg := &tier
 
 	// Determine this node's role for this vault. With one-replica-per-node
 	// (Phase 2 invariant) the node is at most one of: leader, follower, neither.

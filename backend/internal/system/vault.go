@@ -101,6 +101,33 @@ func (v VaultConfig) ResolveRetentionDisposition() string {
 	}
 }
 
+// TierFromVault synthesizes the matching TierConfig for a vault under the 1:1
+// vault:tier model. The returned tier shares the vault's ID. This is the
+// inverse of MergeVaultFromTiers and replaces walking cfg.Tiers for the single
+// tier per vault.
+func TierFromVault(v VaultConfig) TierConfig {
+	tierType := v.Type
+	if tierType == "" {
+		tierType = VaultTypeFile
+	}
+	return TierConfig{
+		ID:                v.ID,
+		Name:              v.Name,
+		Type:              tierType,
+		VaultID:           v.ID,
+		StorageClass:      v.StorageClass,
+		CloudServiceID:    v.CloudServiceID,
+		ReplicationFactor: v.ReplicationFactor,
+		Path:              v.Path,
+		MemoryBudgetBytes: v.MemoryBudgetBytes,
+		RotationPolicyID:  v.RotationPolicyID,
+		RetentionRules:    append([]RetentionRule(nil), v.RetentionRules...),
+		CacheEviction:     v.CacheEviction,
+		CacheBudget:       v.CacheBudget,
+		CacheTTL:          v.CacheTTL,
+	}
+}
+
 // VaultTierIDs returns the tier IDs for a vault. With 1:1 vault:tier the
 // result is at most a single entry; the iteration over the tier list
 // stays for callers that pass legacy multi-tier fixtures.

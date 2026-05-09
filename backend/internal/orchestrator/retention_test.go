@@ -614,8 +614,9 @@ func TestClusterRetentionSweepWithTTLOnAllNodes(t *testing.T) {
 func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 	t.Parallel()
 
+	// 1:1 vault:tier — IDs match.
 	vaultID := glid.New()
-	tierID := glid.New()
+	tierID := vaultID
 	policyID := glid.New()
 
 	cm1 := &retentionFakeChunkManager{}
@@ -624,10 +625,9 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 	im2 := &retentionFakeIndexManager{}
 
 	cfg := &system.Config{
-		Vaults: []system.VaultConfig{{ID: vaultID, Enabled: true}},
-		Tiers: []system.TierConfig{{
-			ID:      tierID,
-			VaultID: vaultID,
+		Vaults: []system.VaultConfig{{
+			ID:      vaultID,
+			Enabled: true,
 			RetentionRules: []system.RetentionRule{{
 				RetentionPolicyID: policyID,
 			}},

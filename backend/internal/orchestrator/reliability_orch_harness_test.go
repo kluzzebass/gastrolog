@@ -113,10 +113,12 @@ type orchRelOption func(*orchRelHarness)
 func withExtraVault(nodeIdxs []int) orchRelOption {
 	return func(h *orchRelHarness) {
 		label := string(rune('B' + len(h.vaults) - 1))
+		// 1:1 vault:tier — tier ID equals vault ID.
+		id := glid.New()
 		h.vaults = append(h.vaults, vaultSpec{
 			label:    label,
-			id:       glid.New(),
-			tierID:   glid.New(),
+			id:       id,
+			tierID:   id,
 			nodeIdxs: nodeIdxs,
 		})
 	}
@@ -139,13 +141,15 @@ func newOrchRelHarness(t *testing.T, n int, opts ...orchRelOption) *orchRelHarne
 	}
 
 	sharedCtx, sharedCancel := context.WithCancel(context.Background())
+	// 1:1 vault:tier — tier ID equals vault ID.
+	defaultID := glid.New()
 	h := &orchRelHarness{
 		t:            t,
 		nodes:        make(map[string]*orchRelNode, n),
 		nodeIDs:      make([]string, 0, n),
 		cfgStore:     sysmem.NewStore(),
-		vaultID:      glid.New(),
-		tierID:       glid.New(),
+		vaultID:      defaultID,
+		tierID:       defaultID,
 		sharedCtx:    sharedCtx,
 		sharedCancel: sharedCancel,
 	}
@@ -266,8 +270,10 @@ func (h *orchRelHarness) seedSharedConfig() {
 	// additional entries come from withExtraVault options.
 	for _, v := range h.vaults {
 		if err := h.cfgStore.PutVault(ctx, system.VaultConfig{
-			ID:   v.id,
-			Name: "orch-rel-vault-" + v.label,
+			ID:           v.id,
+			Name:         "orch-rel-vault-" + v.label,
+			Type:         system.VaultTypeFile,
+			StorageClass: harnessStorageClass,
 		}); err != nil {
 			h.t.Fatalf("PutVault %s: %v", v.label, err)
 		}

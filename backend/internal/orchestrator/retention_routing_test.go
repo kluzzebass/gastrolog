@@ -431,8 +431,9 @@ func TestRetentionDispositionEmptyTreatedAsDelete(t *testing.T) {
 func TestRetentionTargetThreadsDispositionFromVaultConfig(t *testing.T) {
 	t.Parallel()
 
+	// 1:1 vault:tier — IDs match.
 	vaultID := glid.New()
-	tierID := glid.New()
+	tierID := vaultID
 	policyID := glid.New()
 
 	cases := []struct {
@@ -451,10 +452,6 @@ func TestRetentionTargetThreadsDispositionFromVaultConfig(t *testing.T) {
 					ID:                   vaultID,
 					Enabled:              true,
 					RetentionDisposition: c.set,
-				}},
-				Tiers: []system.TierConfig{{
-					ID:      tierID,
-					VaultID: vaultID,
 					RetentionRules: []system.RetentionRule{{
 						RetentionPolicyID: policyID,
 					}},
