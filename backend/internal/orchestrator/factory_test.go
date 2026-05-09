@@ -152,7 +152,7 @@ func TestApplyConfigNil(t *testing.T) {
 	}
 }
 
-// TestApplyConfigVaultWithNoLocalTiers is the regression test for
+// TestApplyConfigVaultWithNoLocalInstance is the regression test for
 // gastrolog-264pk. Before the fix, ApplyConfig (the startup path) would
 // silently skip registering any vault whose buildVaultInstances returned
 // zero local tiers — which happens on a node that isn't a placement
@@ -165,7 +165,7 @@ func TestApplyConfigNil(t *testing.T) {
 // fires for snapshot-restored vaults, the cluster ends up in a permanent
 // stuck state. AddVault (the runtime path) registers empty vaults
 // correctly; initVault must do the same. This test asserts the parity.
-func TestApplyConfigVaultWithNoLocalTiers(t *testing.T) {
+func TestApplyConfigVaultWithNoLocalInstance(t *testing.T) {
 	t.Parallel()
 	// Local node is "node-1". Build a vault whose only inst is placed
 	// exclusively on "node-2" — buildVaultInstances should return zero
@@ -619,9 +619,9 @@ func TestApplyConfigIndexManagerReceivesChunkManager(t *testing.T) {
 
 // --- gastrolog-292yi: all nodes in all inst Raft groups ---
 
-// TestBuildTierRaftMembers_AllClusterNodes verifies that buildVaultRaftMembers
+// TestBuildVaultRaftMembers_AllClusterNodes verifies that buildVaultRaftMembers
 // returns every cluster node as a Raft member, regardless of storage placement.
-func TestBuildTierRaftMembers_AllClusterNodes(t *testing.T) {
+func TestBuildVaultRaftMembers_AllClusterNodes(t *testing.T) {
 	t.Parallel()
 
 	node1 := glid.New()
@@ -660,9 +660,9 @@ func TestBuildTierRaftMembers_AllClusterNodes(t *testing.T) {
 	}
 }
 
-// TestBuildTierRaftMembers_UnresolvableNodeSkipped verifies that nodes whose
+// TestBuildVaultRaftMembers_UnresolvableNodeSkipped verifies that nodes whose
 // address can't be resolved are excluded from the member list.
-func TestBuildTierRaftMembers_UnresolvableNodeSkipped(t *testing.T) {
+func TestBuildVaultRaftMembers_UnresolvableNodeSkipped(t *testing.T) {
 	t.Parallel()
 
 	node1 := glid.New()
@@ -695,9 +695,9 @@ func TestBuildTierRaftMembers_UnresolvableNodeSkipped(t *testing.T) {
 	}
 }
 
-// TestBuildTierRaftMembers_NilResolver verifies that a nil NodeAddressResolver
+// TestBuildVaultRaftMembers_NilResolver verifies that a nil NodeAddressResolver
 // returns no members.
-func TestBuildTierRaftMembers_NilResolver(t *testing.T) {
+func TestBuildVaultRaftMembers_NilResolver(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{})
 	members := orch.buildVaultRaftMembers(
@@ -709,8 +709,8 @@ func TestBuildTierRaftMembers_NilResolver(t *testing.T) {
 	}
 }
 
-// TestBuildTierRaftMembers_EmptyNodes verifies that empty node list returns nil.
-func TestBuildTierRaftMembers_EmptyNodes(t *testing.T) {
+// TestBuildVaultRaftMembers_EmptyNodes verifies that empty node list returns nil.
+func TestBuildVaultRaftMembers_EmptyNodes(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{})
 	members := orch.buildVaultRaftMembers(nil, Factories{
