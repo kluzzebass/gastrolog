@@ -1,4 +1,4 @@
-// Package manifest defines the cluster-wide read surfaces over the per-tier
+// Package manifest defines the cluster-wide read surfaces over the per-vault
 // chunk manifests held by tier sub-FSMs. It is the home for any interface
 // that exposes vaults' runtime metadata to consumers above
 // internal/chunk and internal/index but below internal/orchestrator —

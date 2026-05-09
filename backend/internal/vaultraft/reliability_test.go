@@ -615,7 +615,7 @@ func TestReliability_RapidLeaderRestart_NoDivergence(t *testing.T) {
 }
 
 // Two independent vault FSMs cohabiting the same cluster must converge
-// independently without cross-contamination. Validates the tier-ID
+// independently without cross-contamination. Validates the vault-ID
 // keying inside vaultraft.FSM: commands for tier A must not affect
 // tier B's sub-FSM.
 //

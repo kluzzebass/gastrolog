@@ -274,7 +274,7 @@ func (s *VaultServer) GetIndexes(
 		return nil, errInvalidArg(err)
 	}
 
-	// Local first: cheap path when this node hosts the tier.
+	// Local first: cheap path when this node hosts the vault.
 	if report, err := s.orch.ChunkIndexInfos(vaultID, chunkID); err == nil {
 		return connect.NewResponse(reportToProto(report)), nil
 	} else if !errors.Is(err, chunk.ErrChunkNotFound) && !errors.Is(err, orchestrator.ErrVaultNotFound) {

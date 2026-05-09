@@ -11,7 +11,7 @@ import (
 // createTierRaft builds an in-process Raft instance for use in forwarder
 // tests. The name is historical (kept to avoid churn in existing tests);
 // in the current architecture this just builds a generic Raft group, not
-// a per-tier one. New tests should use this directly rather than inventing
+// a per-vault one. New tests should use this directly rather than inventing
 // parallel helpers.
 func createTierRaft(t *testing.T, nodeID string, fsm hraft.FSM, bootstrap bool, members []hraft.Server) *hraft.Raft {
 	t.Helper()

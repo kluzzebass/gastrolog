@@ -135,7 +135,7 @@ type ManifestEntry struct {
 	Hash [32]byte
 	// CloudServiceID pins the chunk to the cloud store it was actually
 	// uploaded to, surviving any future tier reconfiguration that points
-	// the tier at a different cloud service.
+	// the vault at a different cloud service.
 	CloudServiceID glid.GLID
 	// KeyScheme selects from the table of blobKey() derivation functions.
 	// Today only scheme 0 exists ("vault-<vault>/<chunk>.glcb"); future
@@ -637,7 +637,7 @@ func (f *FSM) applyCreate(data []byte) error {
 	ingestStart := time.Unix(0, int64(binary.BigEndian.Uint64(data[24:32]))) //nolint:gosec // G115: safe round-trip from uint64 nano timestamp
 	sourceStart := time.Unix(0, int64(binary.BigEndian.Uint64(data[32:40]))) //nolint:gosec // G115: safe round-trip from uint64 nano timestamp
 
-	// Reject creates for tombstoned chunk IDs. If the tier already applied
+	// Reject creates for tombstoned chunk IDs. If the vault already applied
 	// a DeleteChunk for this ID, a later CreateChunk (late replication /
 	// out-of-order Raft apply) must not resurrect it in the live map —
 	// that's exactly the ghost-chunk bug from gastrolog-11rzz. The

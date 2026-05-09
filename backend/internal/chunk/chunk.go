@@ -242,7 +242,7 @@ type ChunkCacheEvictor interface {
 }
 
 // CloudChunkInfo carries the metadata needed to register a cloud-backed chunk
-// on a follower without streaming any records. All fields come from the tier
+// on a follower without streaming any records. All fields come from the vault
 // Raft FSM entry (populated by AnnounceSeal + AnnounceUpload on the leader).
 type CloudChunkInfo struct {
 	WriteStart        time.Time

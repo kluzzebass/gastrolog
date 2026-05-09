@@ -128,8 +128,8 @@ func TierFromVault(v VaultConfig) TierConfig {
 	}
 }
 
-// VaultTierIDs returns the tier IDs for a vault. With 1:1 vault:tier the
-// result is at most a single entry; the iteration over the tier list
+// VaultTierIDs returns the vault IDs for a vault. With 1:1 vault:tier the
+// result is at most a single entry; the iteration over the vault list
 // stays for callers that pass legacy multi-tier fixtures.
 func VaultTierIDs(tiers []TierConfig, vaultID glid.GLID) []glid.GLID {
 	var ids []glid.GLID
@@ -141,7 +141,7 @@ func VaultTierIDs(tiers []TierConfig, vaultID glid.GLID) []glid.GLID {
 	return ids
 }
 
-// VaultTiers returns the tier configs for a vault.
+// VaultTiers returns the vault configs for a vault.
 func VaultTiers(tiers []TierConfig, vaultID glid.GLID) []TierConfig {
 	var matched []TierConfig
 	for _, t := range tiers {

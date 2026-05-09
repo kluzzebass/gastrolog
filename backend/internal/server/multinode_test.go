@@ -1775,7 +1775,7 @@ func TestMultiNode_ListChunksLocal(t *testing.T) {
 
 	addMNRecords(t, h.Node(t, "data-1"), "D1", 3, nil)
 
-	// ListChunks is RouteLocal — must call from the node that has the tier.
+	// ListChunks is RouteLocal — must call from the node that has the vault.
 	dataNode := h.Node(t, "data-1")
 	vaultID := dataNode.vaultID.String()
 	metas, err := dataNode.orch.ListAllChunkMetas(dataNode.vaultID)

@@ -12,7 +12,7 @@
 //	    wal/                           (raftwal: log + stable store; system group + tier groups)
 //	    groups/
 //	      system/                      (system/config raft file snapshots — same layout as tier groups)
-//	      <tier-group-id>/               (tier metadata raft snapshots)
+//	      <tier-group-id>/               (vault metadata raft snapshots)
 //	  stores/
 //	    <vault-id>/                    (per-vault chunk + index data)
 //	  managed-files/
@@ -82,7 +82,7 @@ func (d Dir) RaftDir() string {
 
 // RaftGroupDir returns the per-group directory under raft/groups/<groupID>/.
 // Used for file snapshot stores: "system" for cluster config raft, tier GLID
-// strings for tier metadata raft (see raftgroup.GroupManager BaseDir).
+// strings for vault metadata raft (see raftgroup.GroupManager BaseDir).
 func (d Dir) RaftGroupDir(groupID string) string {
 	return filepath.Join(d.RaftDir(), "groups", groupID)
 }

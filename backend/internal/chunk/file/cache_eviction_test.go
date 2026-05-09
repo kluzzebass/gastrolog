@@ -194,7 +194,7 @@ func TestEvictCache_LRUIgnoresTTL(t *testing.T) {
 	now := time.Now()
 	clock := &mutableClock{t: now}
 	// Policy=lru, no budget, very short TTL. Real world: operator picked
-	// LRU; the TTL field is left over from a previous tier config or a
+	// LRU; the TTL field is left over from a previous vault config or a
 	// confused operator. EvictCache must NOT silently apply TTL.
 	cm := newEvictionTestManager(t, "lru", 0, time.Millisecond, clock.now)
 	ids := uploadN(t, cm, 2, 100)

@@ -93,7 +93,7 @@ func testAfterConfigApply(orch *orchestrator.Orchestrator, cfgStore system.Store
 }
 
 // ensureMemoryTier creates a memory tier in the config store linked to the
-// given vault, and returns the tier ID as a string.
+// given vault, and returns the vault ID as a string.
 func ensureMemoryTier(t *testing.T, cfgStore system.Store, vaultID glid.GLID) string {
 	t.Helper()
 	instID := glid.New()
@@ -224,7 +224,7 @@ func TestDeleteVaultNotFound(t *testing.T) {
 }
 
 // TestPutVaultNestedDirPrevention was removed: directory overlap validation
-// has moved from VaultConfig to TierConfig (tiered storage refactor).
+// has moved from VaultConfig to TierConfig (vault storage refactor).
 
 func TestPauseResumeVaultRPC(t *testing.T) {
 	client, cfgStore, orch := newConfigTestSetup(t)
@@ -1178,7 +1178,7 @@ func TestGetRouteStats(t *testing.T) {
 // TestPutVaultEjectRuleMissingRouteIDs, TestDeleteRouteReferencedByEjectVault,
 // and TestPutVaultEjectRuleNonexistentRoute were removed: retention rules
 // (including eject rules) have moved from VaultConfig to TierConfig as part of
-// the tiered storage refactor. These validations will be tested when the
+// the vault storage refactor. These validations will be tested when the
 // PutTier RPC is implemented.
 
 // Remaining eject tests removed — see comment above.

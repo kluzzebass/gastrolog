@@ -1115,7 +1115,7 @@ func drainIterator(next chunk.RecordIterator) {
 	}
 }
 
-// SealActive seals the active chunk on matching tiers in the vault, on the
+// SealActive seals the active chunk on matching vaults, on the
 // **leader** side of the seal flow. If instID is glid.Nil, all local tiers
 // in the vault are sealed. Returns the number of tiers sealed. No-op if the
 // active chunk is empty or absent.

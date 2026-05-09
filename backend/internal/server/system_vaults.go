@@ -50,7 +50,7 @@ func (s *SystemServer) PutVault(
 	// the vault may not have replicated to this node's FSM yet. The orchestrator's
 	// buildVaultInstances handles missing tiers gracefully (logs a warning, skips).
 	// Referential integrity is enforced on the delete path (DeleteTier rejects
-	// if any vault references the tier).
+	// if any vault references the vault).
 
 	// Persist to config store. For raft stores, the FSM notification callback
 	// handles orchestrator side effects. For non-raft stores, notify() does.

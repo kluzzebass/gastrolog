@@ -517,7 +517,7 @@ func (f *FSM) applySetVaultPlacements(ctx context.Context, pb *gastrologv1.SetVa
 		return nil, err
 	}
 	// Phase 2 (gastrolog-3iy5l): mirror placements back onto the matching
-	// VaultConfig (1:1 vault:tier — the vault shares the tier's ID for new
+	// VaultConfig (1:1 vault:tier — the vault shares the vault's ID for new
 	// vault-driven writes; older log entries may use distinct IDs).
 	// Placement-driven write path; PutVault is the user-facing surface.
 	if err := f.mirrorPlacementsToVault(ctx, instID, placements); err != nil {

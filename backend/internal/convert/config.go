@@ -247,7 +247,7 @@ func TierTypeFromProto(t gastrologv1.VaultType) system.VaultType {
 //
 // Mirrors the TierConfig converters during the vault refactor
 // (gastrolog-257l7). Once consumers migrate from TierConfig to VaultConfig,
-// the tier converters above are deleted.
+// the vault converters above are deleted.
 
 // VaultConfigToProto converts a system.VaultConfig to its proto representation.
 func VaultConfigToProto(v system.VaultConfig) *gastrologv1.VaultConfig {

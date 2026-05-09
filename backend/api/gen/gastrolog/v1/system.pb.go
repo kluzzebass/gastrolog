@@ -6517,7 +6517,7 @@ type TierConfig struct {
 	ReplicationFactor uint32                 `protobuf:"varint,9,opt,name=replication_factor,json=replicationFactor,proto3" json:"replication_factor,omitempty"` // desired RF (1 = no replication, default)
 	Path              string                 `protobuf:"bytes,10,opt,name=path,proto3" json:"path,omitempty"`                                                    // direct path for JSONL sinks
 	Placements        []*VaultPlacement      `protobuf:"bytes,11,rep,name=placements,proto3" json:"placements,omitempty"`                                        // system-managed: file storage assignments by placement manager
-	VaultId           []byte                 `protobuf:"bytes,12,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`                               // owning vault — exactly one vault per tier
+	VaultId           []byte                 `protobuf:"bytes,12,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`                               // owning vault — exactly one vault per vault
 	CacheEviction     string                 `protobuf:"bytes,13,opt,name=cache_eviction,json=cacheEviction,proto3" json:"cache_eviction,omitempty"`             // "lru" (default) or "ttl"
 	CacheBudget       string                 `protobuf:"bytes,14,opt,name=cache_budget,json=cacheBudget,proto3" json:"cache_budget,omitempty"`                   // max cache size (e.g. "1GB", "500MB"; default: "1GiB")
 	CacheTtl          string                 `protobuf:"bytes,15,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`                            // eviction TTL duration (e.g. "1h", "7d"); only for ttl mode

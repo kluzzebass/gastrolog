@@ -108,7 +108,7 @@ type VaultServiceClient interface {
 	RetryUnreadableChunks(context.Context, *connect.Request[v1.RetryUnreadableChunksRequest]) (*connect.Response[v1.RetryUnreadableChunksResponse], error)
 	// ArchiveChunk transitions a cloud-backed sealed chunk to an offline
 	// storage class (Glacier, Deep Archive, Azure Archive). The chunk stays
-	// in the tier but becomes unreadable until restored.
+	// in the vault but becomes unreadable until restored.
 	ArchiveChunk(context.Context, *connect.Request[v1.ArchiveChunkRequest]) (*connect.Response[v1.ArchiveChunkResponse], error)
 	// RestoreChunk initiates retrieval of an archived chunk. On S3 this is
 	// async (RestoreObject). The chunk becomes readable once restore completes.
@@ -364,7 +364,7 @@ type VaultServiceHandler interface {
 	RetryUnreadableChunks(context.Context, *connect.Request[v1.RetryUnreadableChunksRequest]) (*connect.Response[v1.RetryUnreadableChunksResponse], error)
 	// ArchiveChunk transitions a cloud-backed sealed chunk to an offline
 	// storage class (Glacier, Deep Archive, Azure Archive). The chunk stays
-	// in the tier but becomes unreadable until restored.
+	// in the vault but becomes unreadable until restored.
 	ArchiveChunk(context.Context, *connect.Request[v1.ArchiveChunkRequest]) (*connect.Response[v1.ArchiveChunkResponse], error)
 	// RestoreChunk initiates retrieval of an archived chunk. On S3 this is
 	// async (RestoreObject). The chunk becomes readable once restore completes.

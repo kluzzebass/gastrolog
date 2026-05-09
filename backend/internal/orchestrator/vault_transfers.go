@@ -120,7 +120,7 @@ func (o *Orchestrator) moveChunkRemote(ctx context.Context, chunkID chunk.ChunkI
 }
 
 // resolveVaultNode loads config and returns the NodeID for the given vault.
-// With tiered storage, vaults no longer have a NodeID. All nodes can serve
+// With vault storage, vaults no longer have a NodeID. All nodes can serve
 // all vaults. This always returns empty string (local).
 func (o *Orchestrator) resolveVaultNode(ctx context.Context, vaultID glid.GLID) (string, error) {
 	if o.sysLoader == nil {

@@ -104,7 +104,7 @@ func TestCloudTierChunksIncludedInSearch(t *testing.T) {
 	}
 
 	// Search WITH a limit — cloud records must still participate in the merge
-	// so that timestamp ordering is correct across tiers.
+	// so that timestamp ordering is correct across vaults.
 	iter, _ = eng.Search(context.Background(), query.Query{Limit: 3}, nil)
 	count = 0
 	for _, err := range iter {

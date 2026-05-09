@@ -401,7 +401,7 @@ func (s *SystemServer) loadConfigCloudServices(ctx context.Context, resp *apiv1.
 }
 
 func (s *SystemServer) loadSystemTiers(ctx context.Context, resp *apiv1.GetSystemResponse) error {
-	// 1:1 vault:tier — synthesize the tier list from vaults rather than
+	// 1:1 vault:tier — synthesize the vault list from vaults rather than
 	// reading the soon-to-be-deleted TierConfig store.
 	vaults, err := s.sysStore.ListVaults(ctx)
 	if err != nil {

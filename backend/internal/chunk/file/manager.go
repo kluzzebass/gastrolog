@@ -1079,7 +1079,7 @@ func (m *Manager) loadExisting() error {
 	// but newest" startup heuristic that lived here. Sealed-state
 	// projection is now FSM-driven via VaultLifecycleReconciler.onSeal +
 	// ReconcileFromSnapshot, which call chunk.SealEnsurer.EnsureSealed
-	// on this Manager once the tier sub-FSM has loaded. Until that
+	// on this Manager once the vault sub-FSM has loaded. Until that
 	// projection runs, multiple unsealed chunks are tolerated; the
 	// newest is opened as active and the older ones stay as
 	// unsealed-on-disk until the FSM tells us they were sealed.
@@ -2351,7 +2351,7 @@ func (m *Manager) Close() error {
 
 // RemoveDir removes the manager's data directory from disk. Must be called
 // after Close() — the manager must not be used afterward. Used when a tier
-// is deleted, to clean up leftover files (.lock, cloud.idx) and the tier
+// is deleted, to clean up leftover files (.lock, cloud.idx) and the vault
 // directory itself so removed tiers don't accumulate as orphans.
 // See gastrolog-42j4n.
 func (m *Manager) RemoveDir() error {
@@ -2830,7 +2830,7 @@ func (m *Manager) Delete(id chunk.ChunkID) error {
 }
 
 // DeleteSilent removes the chunk's local files and metadata without firing
-// the metadata announcer. Used by the tier FSM apply path when a delete
+// the metadata announcer. Used by the vault FSM apply path when a delete
 // originating from any node propagates via Raft — re-announcing would create
 // an infinite feedback loop.
 func (m *Manager) DeleteSilent(id chunk.ChunkID) error {
@@ -3056,7 +3056,7 @@ func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
 
 	// 5. Upload to cloud and delete local if cloud-backed.
 	// CloudReadOnly followers skip upload — they adopt the leader's blob
-	// via RegisterCloudChunk when the tier FSM propagates the upload.
+	// via RegisterCloudChunk when the vault FSM propagates the upload.
 	if m.cfg.CloudStore != nil && !m.cfg.CloudReadOnly {
 		if err := m.uploadToCloud(id); err != nil {
 			m.logger.Warn("cloud upload failed, keeping local", "chunk", id, "error", err)
@@ -4192,7 +4192,7 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 // RegisterCloudChunk registers a cloud-backed chunk from metadata alone,
 // without streaming any records or downloading from S3. Creates a cloud
 // index entry so the chunk appears in List() and is queryable via
-// openCloudCursor. Used by follower nodes when the tier FSM
+// openCloudCursor. Used by follower nodes when the vault FSM
 // propagates the leader's AnnounceUpload.
 //
 // Idempotent: if the chunk is already registered (in metas or cloudIdx),

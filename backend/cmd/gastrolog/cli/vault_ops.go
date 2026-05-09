@@ -23,7 +23,7 @@ func NewSealCommand() *cobra.Command {
 		RunE:  runSeal,
 	}
 	cmd.Flags().String("tier", "", "seal only this tier (name or ID)")
-	cmd.Flags().Bool("all", false, "seal all tiers in the vault")
+	cmd.Flags().Bool("all", false, "seal all vaults")
 	return cmd
 }
 

@@ -53,7 +53,7 @@ func (s *QueryServer) Explain(
 		if nid, ok := vaultNodeCache[vaultID]; ok {
 			return nid
 		}
-		// With tiered storage, vaults no longer have a NodeID.
+		// With vault storage, vaults no longer have a NodeID.
 		vaultNodeCache[vaultID] = ""
 		return ""
 	}

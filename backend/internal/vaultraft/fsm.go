@@ -1,5 +1,5 @@
 // Package vaultraft holds the vault control-plane Raft FSM (gastrolog-5xxbd).
-// Tier chunk metadata is namespaced under OpVaultChunkFSM (per-tier sub-FSMs) on that
+// Tier chunk metadata is namespaced under OpVaultChunkFSM (per-vault sub-FSMs) on that
 // same Raft group, without changing the tierfsm wire encoding.
 package vaultraft
 
@@ -24,7 +24,7 @@ var vaultSnapMagic = [8]byte{'G', 'L', 'V', 'C', 'T', 'L', 'S', '1'}
 const vaultSnapVersion uint32 = 1
 
 // FSM implements the vault control-plane replicated state machine: no-ops,
-// tier-scoped tierfsm commands, and snapshot/restore across tiers.
+// vault-scoped tierfsm commands, and snapshot/restore across vaults.
 //
 // Readiness for reads/writes is NOT tracked on this FSM — it is tracked at
 // the Raft level via r.AppliedIndex(), which advances for every log entry
@@ -38,7 +38,7 @@ type FSM struct {
 	instances  map[glid.GLID]*vaultctlfsm.FSM
 
 	// onAfterRestore fires (outside tierMu) once Restore() has swapped
-	// the tier-sub-FSM map. The orchestrator uses this to walk each
+	// the vault-sub-FSM map. The orchestrator uses this to walk each
 	// tier's reconciler and run ReconcileFromSnapshot, which processes
 	// any pendingDeletes obligations the rejoining node owes and
 	// projects FSM-sealed state onto local files. Without this hook
@@ -244,7 +244,7 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 	f.instances = nextTiers
 	hook := f.onAfterRestore
 	f.mu.Unlock()
-	// Fire outside the mutex — the handler walks per-tier reconcilers
+	// Fire outside the mutex — the handler walks per-vault reconcilers
 	// which can call back into the FSM (Tiers, PendingDeletes, etc.).
 	if hook != nil {
 		hook()

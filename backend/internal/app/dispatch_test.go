@@ -857,7 +857,7 @@ func TestHandle_VaultDrain(t *testing.T) {
 
 	// reassign_triggers_drain and drain_error_logged were removed:
 	// they tested NodeID-based vault reassignment which no longer exists.
-	// With tiered storage, handleVaultPut no longer calls maybeStartDrain.
+	// With vault storage, handleVaultPut no longer calls maybeStartDrain.
 
 	t.Run("already_draining_cancels", func(t *testing.T) {
 		h := &captureHandler{}

@@ -755,9 +755,9 @@ func normalizedRange(start, end time.Time) (time.Time, time.Time, bool) {
 // Bounded queries (last=5m, explicit start=/end=) are no-ops.
 //
 // Reads from VaultManifestEntriesFromCtlFSM, which goes directly through the
-// vault-ctl Raft group's FSM rather than per-tier-instance state. Every node
+// vault-ctl Raft group's FSM rather than per-vault-instance state. Every node
 // is a voter of every vault-ctl group (gastrolog-292yi), so the FSM is
-// authoritative cluster-wide regardless of which node hosts the tier — a
+// authoritative cluster-wide regardless of which node hosts the vault — a
 // coordinator that runs no tier replicas still sees the full sealed manifest.
 // Falls back to ListChunkMetas for the legacy memory-mode path (no GroupManager,
 // no FSM); that path also picks up the active chunk for vaults that have not
