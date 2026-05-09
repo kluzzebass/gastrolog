@@ -479,9 +479,7 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "drain-concurrent",
 	})
-	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: instID, Name: "t0", Type: system.VaultTypeMemory, VaultID: vaultID,
-	})
+	_ = instID // legacy fixture handle; vault registered above is the only canonical config
 	// gastrolog-4kkoo (Phase 5): expression inlined on the route via Stages.
 	_ = store.PutRoute(context.Background(), system.RouteConfig{
 		ID: routeID, Name: "default",

@@ -71,7 +71,6 @@ func newTestStore(cfg *system.Config, nodeID string) *sysmem.Store {
 		_ = store.PutVault(ctx, v)
 	}
 	for _, tc := range cfg.Tiers {
-		_ = store.PutTier(ctx, tc)
 		_ = store.SetVaultPlacements(ctx, tc.ID, []system.VaultPlacement{
 			{StorageID: system.SyntheticStorageID(nodeID), Leader: true},
 		})
@@ -707,7 +706,6 @@ func setupCluster(t *testing.T, nodeIDs []string, instCount int, rotationRecords
 			Type:    system.VaultTypeFile,
 			VaultID: vaultID,
 		}
-		_ = store.PutTier(context.Background(), instCfgs[i])
 		_ = store.SetVaultPlacements(context.Background(), instIDs[i], placements)
 	}
 	_ = store.PutVault(context.Background(), system.VaultConfig{

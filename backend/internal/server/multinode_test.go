@@ -140,12 +140,6 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 				Type:       system.VaultTypeMemory,
 				Placements: placements,
 			})
-			_ = cfgStore.PutTier(ctx, system.TierConfig{
-				ID:      node.vaultID, // 1:1 with vault
-				Name:    "tier-" + id,
-				Type:    system.VaultTypeMemory,
-				VaultID: node.vaultID,
-			})
 			_ = cfgStore.SetVaultPlacements(ctx, node.vaultID, placements)
 			nodes[id] = node
 		}

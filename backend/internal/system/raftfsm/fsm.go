@@ -135,8 +135,6 @@ func (f *FSM) Apply(l *raft.Log) any {
 		*gastrologv1.SystemCommand_PutCloudService,
 		*gastrologv1.SystemCommand_DeleteCloudService,
 		*gastrologv1.SystemCommand_SetNodeStorageConfig,
-		*gastrologv1.SystemCommand_PutTier,
-		*gastrologv1.SystemCommand_DeleteTier,
 		*gastrologv1.SystemCommand_SetVaultPlacements,
 		*gastrologv1.SystemCommand_SetIngesterAlive,
 		*gastrologv1.SystemCommand_SetIngesterCheckpoint,
@@ -256,10 +254,6 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.SystemCommand
 		return f.applyDeleteCloudService(ctx, c.DeleteCloudService)
 	case *gastrologv1.SystemCommand_SetNodeStorageConfig:
 		return f.applySetNodeStorageConfig(ctx, c.SetNodeStorageConfig)
-	case *gastrologv1.SystemCommand_PutTier:
-		return f.applyPutTier(ctx, c.PutTier)
-	case *gastrologv1.SystemCommand_DeleteTier:
-		return f.applyDeleteTier(ctx, c.DeleteTier)
 	case *gastrologv1.SystemCommand_SetVaultPlacements:
 		return f.applySetVaultPlacements(ctx, c.SetVaultPlacements)
 	case *gastrologv1.SystemCommand_SetIngesterAlive:
@@ -480,32 +474,6 @@ func (f *FSM) applySetNodeStorageConfig(ctx context.Context, pb *gastrologv1.Set
 		return nil, err
 	}
 	return &Notification{Kind: NotifyNodeStorageConfigSet}, nil
-}
-
-func (f *FSM) applyPutTier(ctx context.Context, pb *gastrologv1.PutTierCommand) (*Notification, error) {
-	tier, err := command.ExtractPutTier(pb)
-	if err != nil {
-		return nil, err
-	}
-	if err := f.store.PutTier(ctx, tier); err != nil {
-		return nil, err
-	}
-	// Phase 2 (gastrolog-3iy5l): the legacy tier→vault merge is gone.
-	// PutTier is retained for replay of historical Raft log entries; new
-	// writes flow through PutVault, which carries the canonical fields and
-	// synthesizes the matching TierConfig in applyPutVault.
-	return &Notification{Kind: NotifyTierPut, ID: tier.ID}, nil
-}
-
-func (f *FSM) applyDeleteTier(ctx context.Context, pb *gastrologv1.DeleteTierCommand) (*Notification, error) {
-	id, err := command.ExtractDeleteTier(pb)
-	if err != nil {
-		return nil, err
-	}
-	if err := f.store.DeleteTier(ctx, id, pb.GetDrain()); err != nil {
-		return nil, err
-	}
-	return &Notification{Kind: NotifyTierDeleted, ID: id, Drain: pb.GetDrain()}, nil
 }
 
 func (f *FSM) applySetVaultPlacements(ctx context.Context, pb *gastrologv1.SetVaultPlacementsCommand) (*Notification, error) {
@@ -826,12 +794,6 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit,gocyclo // sna
 			return fmt.Errorf("restore cloud service %s: %w", cs.ID, err)
 		}
 	}
-	for _, tier := range cfg.Tiers {
-		if err := newStore.PutTier(ctx, tier); err != nil {
-			return fmt.Errorf("restore tier %s: %w", tier.ID, err)
-		}
-	}
-
 	// Users and tokens.
 	for _, u := range users {
 		if err := newStore.CreateUser(ctx, u); err != nil {

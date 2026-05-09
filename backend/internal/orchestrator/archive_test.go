@@ -42,11 +42,6 @@ func TestArchiveChunkViaRetentionSweep(t *testing.T) {
 	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "archive-test",
 	})
-	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: instID, Name: "cloud", Type: system.VaultTypeFile,
-		VaultID: vaultID,
-	})
-
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID, SystemLoader: &transitionSystemLoader{store: store}})
 	_ = orch.Scheduler().Stop()
 

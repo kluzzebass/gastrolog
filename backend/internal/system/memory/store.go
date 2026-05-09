@@ -56,7 +56,6 @@ type Store struct {
 	nodes                map[glid.GLID]system.NodeConfig   // keyed by node ID
 	managedFiles         map[glid.GLID]system.ManagedFileConfig
 	cloudServices        map[glid.GLID]system.CloudService
-	tiers                map[glid.GLID]system.TierConfig
 	tierPlacements       map[glid.GLID][]system.VaultPlacement // runtime: system-managed
 	ingesterAlive        map[glid.GLID]map[string]bool        // runtime: system-managed
 	ingesterCheckpoints  map[glid.GLID][]byte                 // runtime: system-managed
@@ -82,7 +81,6 @@ func NewStore() *Store {
 		nodes:               make(map[glid.GLID]system.NodeConfig),
 		managedFiles:        make(map[glid.GLID]system.ManagedFileConfig),
 		cloudServices:       make(map[glid.GLID]system.CloudService),
-		tiers:               make(map[glid.GLID]system.TierConfig),
 		tierPlacements:      make(map[glid.GLID][]system.VaultPlacement),
 		ingesterAlive:       make(map[glid.GLID]map[string]bool),
 		ingesterCheckpoints: make(map[glid.GLID][]byte),
@@ -97,7 +95,7 @@ func (s *Store) isEmpty() bool {
 		len(s.retentionPolicies) == 0 && len(s.vaults) == 0 &&
 		len(s.ingesters) == 0 && len(s.routes) == 0 &&
 		len(s.managedFiles) == 0 && len(s.cloudServices) == 0 &&
-		len(s.tiers) == 0 && len(s.nodeStorageConfigs) == 0 &&
+		len(s.nodeStorageConfigs) == 0 &&
 		!s.ss.hasServerSettings && s.clusterTLS == nil
 }
 
@@ -124,7 +122,6 @@ func (s *Store) Load(ctx context.Context) (*system.System, error) {
 	cfg.Routes = collectAndSort(s.routes, copyRouteConfig, func(a, b system.RouteConfig) int { return cmpUUID(a.ID, b.ID) })
 	cfg.ManagedFiles = collectAndSort(s.managedFiles, func(v system.ManagedFileConfig) system.ManagedFileConfig { return v }, func(a, b system.ManagedFileConfig) int { return cmpUUID(a.ID, b.ID) })
 	cfg.CloudServices = collectAndSort(s.cloudServices, copyCloudService, func(a, b system.CloudService) int { return cmpUUID(a.ID, b.ID) })
-	cfg.Tiers = collectAndSort(s.tiers, copyTierConfig, func(a, b system.TierConfig) int { return cmpUUID(a.ID, b.ID) })
 	cfg.Certs = collectAndSort(s.certs, copyCertPEM, func(a, b system.CertPEM) int { return cmpUUID(a.ID, b.ID) })
 
 	// Config: server settings.
@@ -550,47 +547,6 @@ func (s *Store) DeleteCloudService(ctx context.Context, id glid.GLID) error {
 	defer s.mu.Unlock()
 
 	delete(s.cloudServices, id)
-	return nil
-}
-
-// Tiers
-
-func (s *Store) GetTier(ctx context.Context, id glid.GLID) (*system.TierConfig, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	tier, ok := s.tiers[id]
-	if !ok {
-		return nil, nil
-	}
-	return &tier, nil
-}
-
-func (s *Store) ListTiers(ctx context.Context) ([]system.TierConfig, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	result := make([]system.TierConfig, 0, len(s.tiers))
-	for _, tier := range s.tiers {
-		result = append(result, tier)
-	}
-	slices.SortFunc(result, func(a, b system.TierConfig) int { return cmpUUID(a.ID, b.ID) })
-	return result, nil
-}
-
-func (s *Store) PutTier(ctx context.Context, tier system.TierConfig) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.tiers[tier.ID] = tier
-	return nil
-}
-
-func (s *Store) DeleteTier(ctx context.Context, id glid.GLID, _ bool) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	delete(s.tiers, id)
 	return nil
 }
 

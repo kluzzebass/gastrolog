@@ -471,56 +471,6 @@ func TestApplyDeleteCloudService(t *testing.T) {
 	}
 }
 
-func TestApplyPutTier(t *testing.T) {
-	t.Parallel()
-	fsm := New()
-	id := newID()
-	rpID := newID()
-	csID := newID()
-	applyCmd(t, fsm, command.NewPutTier(system.TierConfig{
-		ID: id, Name: "hot-tier", Type: system.VaultTypeFile,
-		RotationPolicyID:  &rpID,
-		MemoryBudgetBytes: 512 * 1024 * 1024,
-		StorageClass:      1,
-		CloudServiceID:    &csID,
-	}))
-
-	got, err := fsm.Store().GetTier(context.Background(), id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got == nil || got.Name != "hot-tier" || got.Type != system.VaultTypeFile {
-		t.Fatalf("unexpected tier: %+v", got)
-	}
-	if got.RotationPolicyID == nil || *got.RotationPolicyID != rpID {
-		t.Fatalf("unexpected rotation policy: %v", got.RotationPolicyID)
-	}
-	if got.CloudServiceID == nil || *got.CloudServiceID != csID {
-		t.Fatalf("unexpected cloud service: %v", got.CloudServiceID)
-	}
-	if got.StorageClass != 1 {
-		t.Fatalf("unexpected storage class: %d", got.StorageClass)
-	}
-}
-
-func TestApplyDeleteTier(t *testing.T) {
-	t.Parallel()
-	fsm := New()
-	id := newID()
-	applyCmd(t, fsm, command.NewPutTier(system.TierConfig{
-		ID: id, Name: "tier", Type: system.VaultTypeMemory,
-	}))
-	applyCmd(t, fsm, command.NewDeleteTier(id, false))
-
-	got, err := fsm.Store().GetTier(context.Background(), id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != nil {
-		t.Fatalf("expected nil, got %+v", got)
-	}
-}
-
 func TestApplySetNodeStorageConfig(t *testing.T) {
 	t.Parallel()
 	fsm := New()
@@ -653,19 +603,15 @@ func TestSnapshotRestore(t *testing.T) {
 	applyCmd(t, fsm1, command.NewPutRetentionPolicy(system.RetentionPolicyConfig{ID: retID, Name: "ret1", MaxAge: &retMaxAge}))
 
 	vaultID := newID()
-	instID := newID()
-	applyCmd(t, fsm1, command.NewPutTier(system.TierConfig{
-		ID: instID, Name: "tier1", Type: system.VaultTypeMemory,
-		VaultID: vaultID,
-		RotationPolicyID: &rpID,
-		RetentionRules: []system.RetentionRule{
-			{RetentionPolicyID: retID},
-		},
-	}))
+	instID := vaultID
 
 	applyCmd(t, fsm1, command.NewPutVault(system.VaultConfig{
-		ID: vaultID, Name: "vault1",
-		Enabled: true,
+		ID:               vaultID,
+		Name:             "vault1",
+		Enabled:          true,
+		Type:             system.VaultTypeMemory,
+		RotationPolicyID: &rpID,
+		RetentionRules:   []system.RetentionRule{{RetentionPolicyID: retID}},
 	}))
 
 	ingID := newID()
@@ -732,16 +678,7 @@ func TestSnapshotRestore(t *testing.T) {
 		t.Errorf("vault: %+v", gotVault)
 	}
 
-	gotTier, _ := fsm2.Store().GetTier(ctx, instID)
-	if gotTier == nil || gotTier.Name != "tier1" {
-		t.Errorf("tier: %+v", gotTier)
-	}
-	if gotTier != nil && gotTier.VaultID != vaultID {
-		t.Errorf("tier VaultID: got %v, want %v", gotTier.VaultID, vaultID)
-	}
-	if gotTier != nil && len(gotTier.RetentionRules) != 1 {
-		t.Errorf("tier retention rules: %+v", gotTier.RetentionRules)
-	}
+	_ = instID // tier mirror dropped — vault check above is the canonical assertion
 
 	gotIng, _ := fsm2.Store().GetIngester(ctx, ingID)
 	if gotIng == nil || gotIng.Name != "ing1" {

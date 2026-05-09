@@ -595,42 +595,6 @@ func (p *StoreProxy) DeleteCloudService(ctx context.Context, id glid.GLID) error
 	return p.inner.DeleteCloudService(ctx, id)
 }
 
-func (p *StoreProxy) GetTier(ctx context.Context, id glid.GLID) (*TierConfig, error) {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	if err := p.check(); err != nil {
-		return nil, err
-	}
-	return p.inner.GetTier(ctx, id)
-}
-
-func (p *StoreProxy) ListTiers(ctx context.Context) ([]TierConfig, error) {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	if err := p.check(); err != nil {
-		return nil, err
-	}
-	return p.inner.ListTiers(ctx)
-}
-
-func (p *StoreProxy) PutTier(ctx context.Context, tier TierConfig) error {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	if err := p.check(); err != nil {
-		return err
-	}
-	return p.inner.PutTier(ctx, tier)
-}
-
-func (p *StoreProxy) DeleteTier(ctx context.Context, id glid.GLID, drain bool) error {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	if err := p.check(); err != nil {
-		return err
-	}
-	return p.inner.DeleteTier(ctx, id, drain)
-}
-
 func (p *StoreProxy) GetNodeStorageConfig(ctx context.Context, nodeID string) (*NodeStorageConfig, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()

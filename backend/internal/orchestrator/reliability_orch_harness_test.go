@@ -277,15 +277,6 @@ func (h *orchRelHarness) seedSharedConfig() {
 		}); err != nil {
 			h.t.Fatalf("PutVault %s: %v", v.label, err)
 		}
-		if err := h.cfgStore.PutTier(ctx, system.TierConfig{
-			ID:           v.instID,
-			Name:         "orch-rel-inst-" + v.label,
-			Type:         system.VaultTypeFile,
-			VaultID:      v.id,
-			StorageClass: harnessStorageClass,
-		}); err != nil {
-			h.t.Fatalf("PutTier %s: %v", v.label, err)
-		}
 		// Placements: one per participating node. First listed is leader.
 		placements := make([]system.VaultPlacement, 0, len(v.nodeIdxs))
 		for pos, idx := range v.nodeIdxs {

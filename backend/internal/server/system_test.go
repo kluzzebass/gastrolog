@@ -92,18 +92,13 @@ func testAfterConfigApply(orch *orchestrator.Orchestrator, cfgStore system.Store
 	}
 }
 
-// ensureMemoryTier creates a memory tier in the config store linked to the
-// given vault, and returns the vault ID as a string.
+// ensureMemoryTier is a legacy fixture helper. With 1:1 vault:tier collapse
+// the orchestrator no longer reads tier configs; this is kept only so
+// historical callers continue compiling — the returned ID equals the vaultID.
 func ensureMemoryTier(t *testing.T, cfgStore system.Store, vaultID glid.GLID) string {
 	t.Helper()
-	instID := glid.New()
-	if err := cfgStore.PutTier(context.Background(), system.TierConfig{
-		ID: instID, Name: "test-tier-" + instID.String()[:8], Type: system.VaultTypeMemory,
-		VaultID: vaultID,
-	}); err != nil {
-		t.Fatalf("ensureMemoryTier: %v", err)
-	}
-	return instID.String()
+	_ = cfgStore
+	return vaultID.String()
 }
 
 // newConfigTestSetup creates an orchestrator, config vault, and Connect client

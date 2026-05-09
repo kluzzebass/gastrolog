@@ -61,12 +61,7 @@ func TestHistogramFullyLocal_RequiresLeadership(t *testing.T) {
 		{leaderInstID, leaderVaultID},
 		{followerInstID, followerVaultID},
 	} {
-		if err := store.PutTier(ctx, system.TierConfig{
-			ID: tc.instID, Name: "tier-" + tc.instID.String(), Type: system.VaultTypeMemory,
-			VaultID: tc.vaultID,
-		}); err != nil {
-			t.Fatalf("PutTier: %v", err)
-		}
+		_ = tc // legacy fixture loop — vault is registered above; orchestrator no longer reads cfgStore.GetTier
 	}
 
 	qs := NewQueryServer(orch, store, nil, "node-1", nil, nil, 0, 0, 0, nil)

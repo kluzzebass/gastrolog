@@ -44,11 +44,7 @@ func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition
 
 	store := sysmem.NewStore()
 	_ = store.PutVault(context.Background(), system.VaultConfig{
-		ID: vaultID, Name: "archival-test",
-	})
-	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: instID, Name: "cloud", Type: system.VaultTypeFile, CloudServiceID: &csID,
-		VaultID: vaultID,
+		ID: vaultID, Name: "archival-test", Type: system.VaultTypeFile, CloudServiceID: &csID,
 	})
 	_ = store.SetVaultPlacements(context.Background(), instID, []system.VaultPlacement{{StorageID: system.SyntheticStorageID("test-node"), Leader: true}})
 	_ = store.PutCloudService(context.Background(), system.CloudService{
@@ -549,13 +545,9 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 			StorageID: system.SyntheticStorageID(fid), Leader: false,
 		})
 	}
-	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: instID, Name: "cloud-inst", Type: system.VaultTypeFile, CloudServiceID: &csID,
-		VaultID: vaultID,
-	})
 	_ = store.SetVaultPlacements(context.Background(), instID, placements)
 	_ = store.PutVault(context.Background(), system.VaultConfig{
-		ID: vaultID, Name: "cloud-vault",
+		ID: vaultID, Name: "cloud-vault", Type: system.VaultTypeFile, CloudServiceID: &csID,
 	})
 	_ = store.PutCloudService(context.Background(), system.CloudService{
 		ID:           csID,
