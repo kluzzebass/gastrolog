@@ -344,7 +344,8 @@ func (o *Orchestrator) finishTierDrain(vaultID, tierID glid.GLID) {
 	// Remove the tier instance (closes managers, deletes remaining data).
 	// Drain has already migrated chunks to the target; the destructive wipe
 	// on the source tier is the correct semantics here.
-	if o.DeleteVaultInstance(vaultID, tierID) {
+	_ = tierID
+	if o.DeleteVaultInstance(vaultID) {
 		o.logger.Info("tier drain: completed",
 			"vault", vaultID)
 	}

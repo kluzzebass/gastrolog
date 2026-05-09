@@ -120,12 +120,12 @@ func (m *mockOrch) ForceRemoveVault(id glid.GLID) error {
 	m.forceRemoveIDs = append(m.forceRemoveIDs, id)
 	return m.forceRemoveErr
 }
-func (m *mockOrch) RemoveVaultInstance(vaultID, tierID glid.GLID) bool {
-	m.removeTierCalls = append(m.removeTierCalls, [2]glid.GLID{vaultID, tierID})
+func (m *mockOrch) RemoveVaultInstance(vaultID glid.GLID) bool {
+	m.removeTierCalls = append(m.removeTierCalls, [2]glid.GLID{vaultID, vaultID})
 	return true
 }
-func (m *mockOrch) DeleteVaultInstance(vaultID, tierID glid.GLID) bool {
-	m.removeTierCalls = append(m.removeTierCalls, [2]glid.GLID{vaultID, tierID})
+func (m *mockOrch) DeleteVaultInstance(vaultID glid.GLID) bool {
+	m.removeTierCalls = append(m.removeTierCalls, [2]glid.GLID{vaultID, vaultID})
 	return true
 }
 func (m *mockOrch) DrainTier(_ context.Context, _, tierID glid.GLID, _ orchestrator.TierDrainMode, _ string) error {
@@ -138,7 +138,7 @@ func (m *mockOrch) UnregisterVault(id glid.GLID) error {
 }
 func (m *mockOrch) MissingVaultInstance(_ glid.GLID, _ []glid.GLID) bool { return false }
 func (m *mockOrch) LocalTierIDs(_ glid.GLID) []glid.GLID            { return nil }
-func (m *mockOrch) AddVaultInstance(_ context.Context, _, _ glid.GLID, _ orchestrator.Factories) error {
+func (m *mockOrch) AddVaultInstance(_ context.Context, _ glid.GLID, _ orchestrator.Factories) error {
 	return nil
 }
 func (m *mockOrch) DrainVault(_ context.Context, id glid.GLID, _ string) error {

@@ -35,7 +35,7 @@ func TestRemoveTierFromVaultPreservesData(t *testing.T) {
 		t.Fatalf("tier directory should exist before removal: %v", err)
 	}
 
-	if !orch.RemoveVaultInstance(vaultID, tierID) {
+	if !orch.RemoveVaultInstance(vaultID) {
 		t.Fatal("RemoveVaultInstance returned false")
 	}
 
@@ -71,7 +71,7 @@ func TestDeleteTierFromVaultCleansTierDirectory(t *testing.T) {
 		t.Fatalf("tier directory should exist before deletion: %v", err)
 	}
 
-	if !orch.DeleteVaultInstance(vaultID, tierID) {
+	if !orch.DeleteVaultInstance(vaultID) {
 		t.Fatal("DeleteVaultInstance returned false")
 	}
 
@@ -95,7 +95,7 @@ func TestDeleteTierFromVaultCleansEmptyTierDirectory(t *testing.T) {
 	vault.Name = "empty-delete-test"
 	orch.RegisterVault(vault)
 
-	if !orch.DeleteVaultInstance(vaultID, tierID) {
+	if !orch.DeleteVaultInstance(vaultID) {
 		t.Fatal("DeleteVaultInstance returned false")
 	}
 
