@@ -49,7 +49,9 @@ func runSeal(cmd *cobra.Command, args []string) error {
 
 	req := &v1.SealVaultRequest{Vault: vaultID}
 	if tierFlag != "" {
-		instID, err := resolve(tierFlag, r.tiers, "tier")
+		// 1:1 vault:tier — resolve via the vault map, since the synthesized
+		// tier list is just a mirror of vaults.
+		instID, err := resolve(tierFlag, r.vaults, "vault")
 		if err != nil {
 			return err
 		}
