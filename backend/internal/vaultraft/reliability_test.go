@@ -725,16 +725,16 @@ func TestReliability_LargeFSM_SnapshotRestoreRoundtrip(t *testing.T) {
 	now := time.Now().Truncate(time.Nanosecond)
 
 	const (
-		numTiers         = 20
-		chunksPerTier    = 30
+		numInsts         = 20
+		chunksPerInst    = 30
 	)
-	tiers := make([]glid.GLID, numTiers)
-	for i := range numTiers {
-		tiers[i] = glid.New()
+	insts := make([]glid.GLID, numInsts)
+	for i := range numInsts {
+		insts[i] = glid.New()
 	}
 
-	for ti, instID := range tiers {
-		for ci := range chunksPerTier {
+	for ti, instID := range insts {
+		for ci := range chunksPerInst {
 			var cid chunk.ChunkID
 			cid[0] = byte(ti)
 			cid[1] = byte(ci)
@@ -770,12 +770,12 @@ func TestReliability_LargeFSM_SnapshotRestoreRoundtrip(t *testing.T) {
 
 	// Sanity: total entry count matches.
 	total := 0
-	for _, instID := range tiers {
+	for _, instID := range insts {
 		if sub := dst.InstanceFSM(instID); sub != nil {
 			total += len(sub.List())
 		}
 	}
-	if want := numTiers * chunksPerTier; total != want {
+	if want := numInsts * chunksPerInst; total != want {
 		t.Errorf("expected %d total entries, got %d", want, total)
 	}
 }
