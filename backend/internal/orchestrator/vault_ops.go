@@ -319,9 +319,9 @@ func (o *Orchestrator) VaultType(vaultID glid.GLID) string {
 	return ""
 }
 
-// HasMissingTiers returns true if the vault's local tier list differs from the
+// MissingVaultInstance returns true if the vault's local tier list differs from the
 // given tier IDs — either tiers were added or removed.
-func (o *Orchestrator) HasMissingTiers(vaultID glid.GLID, tierIDs []glid.GLID) bool {
+func (o *Orchestrator) MissingVaultInstance(vaultID glid.GLID, tierIDs []glid.GLID) bool {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
 	o.mu.RUnlock()

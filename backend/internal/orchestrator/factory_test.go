@@ -170,7 +170,7 @@ func TestApplyConfigVaultWithNoLocalTiers(t *testing.T) {
 	// Local node is "node-1". Build a vault whose only tier is placed
 	// exclusively on "node-2" — buildTierInstances should return zero
 	// local tiers, but the vault must still be registered so a later
-	// AddTierToVault call can succeed.
+	// AddVaultInstance call can succeed.
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
 	factories := Factories{

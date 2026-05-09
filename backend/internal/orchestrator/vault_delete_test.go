@@ -8,7 +8,7 @@ import (
 	"gastrolog/internal/chunk"
 )
 
-// TestRemoveTierFromVaultPreservesData verifies that RemoveTierFromVault is
+// TestRemoveTierFromVaultPreservesData verifies that RemoveVaultInstance is
 // non-destructive: it unregisters the tier instance but leaves chunks and
 // the tier directory intact, so placement flaps don't wipe data.
 // See gastrolog-4vz40.
@@ -35,8 +35,8 @@ func TestRemoveTierFromVaultPreservesData(t *testing.T) {
 		t.Fatalf("tier directory should exist before removal: %v", err)
 	}
 
-	if !orch.RemoveTierFromVault(vaultID, tierID) {
-		t.Fatal("RemoveTierFromVault returned false")
+	if !orch.RemoveVaultInstance(vaultID, tierID) {
+		t.Fatal("RemoveVaultInstance returned false")
 	}
 
 	if _, err := os.Stat(dir); err != nil {
@@ -44,7 +44,7 @@ func TestRemoveTierFromVaultPreservesData(t *testing.T) {
 	}
 }
 
-// TestDeleteTierFromVaultCleansTierDirectory verifies that DeleteTierFromVault
+// TestDeleteTierFromVaultCleansTierDirectory verifies that DeleteVaultInstance
 // removes the tier's data directory entirely — not just the chunk subdirs.
 // Regression test for gastrolog-42j4n: orphaned tier directories accumulate
 // on disk after tier deletion.
@@ -71,12 +71,12 @@ func TestDeleteTierFromVaultCleansTierDirectory(t *testing.T) {
 		t.Fatalf("tier directory should exist before deletion: %v", err)
 	}
 
-	if !orch.DeleteTierFromVault(vaultID, tierID) {
-		t.Fatal("DeleteTierFromVault returned false")
+	if !orch.DeleteVaultInstance(vaultID, tierID) {
+		t.Fatal("DeleteVaultInstance returned false")
 	}
 
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Errorf("tier directory should be removed after DeleteTierFromVault, got: %v", err)
+		t.Errorf("tier directory should be removed after DeleteVaultInstance, got: %v", err)
 	}
 }
 
@@ -95,8 +95,8 @@ func TestDeleteTierFromVaultCleansEmptyTierDirectory(t *testing.T) {
 	vault.Name = "empty-delete-test"
 	orch.RegisterVault(vault)
 
-	if !orch.DeleteTierFromVault(vaultID, tierID) {
-		t.Fatal("DeleteTierFromVault returned false")
+	if !orch.DeleteVaultInstance(vaultID, tierID) {
+		t.Fatal("DeleteVaultInstance returned false")
 	}
 
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {

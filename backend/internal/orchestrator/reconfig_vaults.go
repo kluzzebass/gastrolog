@@ -321,9 +321,9 @@ func (o *Orchestrator) forceRemoveVaultData(id glid.GLID, inst *VaultInstance) e
 // vault-ctl Raft. The announcement would propagate to every voter and trigger
 // FSM.applyDelete + onDelete on each node, physically wiping the chunk
 // across the entire cluster. The intended cluster-wide effect (when
-// RemoveTierFromVault reacts to placement loss, or DeleteTierFromVault
+// RemoveVaultInstance reacts to placement loss, or DeleteVaultInstance
 // reacts to an admin teardown) comes from each node independently running
-// its own RemoveTierFromVault as the config change propagates — not from
+// its own RemoveVaultInstance as the config change propagates — not from
 // per-chunk delete announcements out of one node. See gastrolog-4vz40.
 func (o *Orchestrator) sealAndDeleteAllChunks(tier *VaultInstance, op string, tierID glid.GLID) int {
 	if active := tier.Chunks.Active(); active != nil {
@@ -349,15 +349,15 @@ func (o *Orchestrator) sealAndDeleteAllChunks(tier *VaultInstance, op string, ti
 	return len(metas)
 }
 
-// RemoveTierFromVault unregisters a tier instance from this node WITHOUT
+// RemoveVaultInstance unregisters a tier instance from this node WITHOUT
 // destroying its on-disk data. Used when placement moves the tier elsewhere
 // (transient — the node may well get the tier back seconds later when
 // placement flaps back). The tier's Chunks/Indexes managers are closed, jobs
 // are cancelled, and the VaultInstance is removed from the vault's tier list,
 // but the chunk files and tier directory remain on disk. A subsequent
-// AddTierToVault will re-discover the existing chunks.
+// AddVaultInstance will re-discover the existing chunks.
 //
-// For actual tier deletion (admin-driven), use DeleteTierFromVault which
+// For actual tier deletion (admin-driven), use DeleteVaultInstance which
 // additionally wipes all chunks and removes the data directory.
 //
 // Returns true if a tier was removed.
@@ -365,18 +365,18 @@ func (o *Orchestrator) sealAndDeleteAllChunks(tier *VaultInstance, op string, ti
 // gastrolog-4vz40: previously this function always wiped chunks, which meant
 // any placement flap (caused by transient peer-conn teardowns from
 // peers.Invalidate) destroyed data cluster-wide. The destructive behaviour is
-// now opt-in via DeleteTierFromVault.
-func (o *Orchestrator) RemoveTierFromVault(vaultID, tierID glid.GLID) bool {
+// now opt-in via DeleteVaultInstance.
+func (o *Orchestrator) RemoveVaultInstance(vaultID, tierID glid.GLID) bool {
 	return o.removeTierFromVault(vaultID, tierID, false)
 }
 
-// DeleteTierFromVault unregisters a tier instance AND permanently wipes its
+// DeleteVaultInstance unregisters a tier instance AND permanently wipes its
 // on-disk data (chunks, indexes, and the tier directory). Used only when a
 // tier is being deliberately deleted (admin action via CmdTierDeleted, or
 // post-drain cleanup).
 //
 // Returns true if a tier was removed.
-func (o *Orchestrator) DeleteTierFromVault(vaultID, tierID glid.GLID) bool {
+func (o *Orchestrator) DeleteVaultInstance(vaultID, tierID glid.GLID) bool {
 	return o.removeTierFromVault(vaultID, tierID, true)
 }
 
@@ -436,7 +436,7 @@ func (o *Orchestrator) removeTierFromVault(vaultID, tierID glid.GLID, deleteData
 
 	// On destructive removal, drop the vault entry entirely. For
 	// non-destructive placement-driven removals, the vault shell stays so a
-	// subsequent AddTierToVault can rehydrate.
+	// subsequent AddVaultInstance can rehydrate.
 	if deleteData {
 		delete(o.vaults, vaultID)
 		o.rebuildRouteSetLocked()
@@ -448,10 +448,10 @@ func (o *Orchestrator) removeTierFromVault(vaultID, tierID glid.GLID, deleteData
 	return true
 }
 
-// AddTierToVault builds a single tier instance and adds it to an existing vault
+// AddVaultInstance builds a single tier instance and adds it to an existing vault
 // without tearing down any other tiers. This is the incremental counterpart to
-// RemoveTierFromVault.
-func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID glid.GLID, factories Factories) error {
+// RemoveVaultInstance.
+func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID, tierID glid.GLID, factories Factories) error {
 	sys, err := o.loadSystem(ctx)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -1257,7 +1257,7 @@ func setTierRaftAnnouncer(cm chunk.ChunkManager, applier tierfsm.Applier, phase 
 // clearTierFSMChunkCallbacks clears OnDelete/OnUpload for a tier's FSM slice
 // in the vault control-plane group. Used before closing that tier's chunk
 // manager when the Raft group may still deliver log entries for this tier
-// (e.g. RemoveTierFromVault while other tiers in the same vault stay open).
+// (e.g. RemoveVaultInstance while other tiers in the same vault stay open).
 func (o *Orchestrator) clearTierFSMChunkCallbacks(vaultID, tierID glid.GLID) {
 	if o.groupMgr == nil {
 		return

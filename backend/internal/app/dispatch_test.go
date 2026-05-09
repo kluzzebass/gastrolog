@@ -92,7 +92,7 @@ type mockOrch struct {
 
 	// Tier drain tracking.
 	tierDrainCalls    []glid.GLID                                                // tier IDs passed to DrainTier
-	removeTierCalls   [][2]glid.GLID                                             // [vaultID, tierID] pairs passed to RemoveTierFromVault
+	removeTierCalls   [][2]glid.GLID                                             // [vaultID, tierID] pairs passed to RemoveVaultInstance
 	localTierExported func(vaultID, tierID glid.GLID) *orchestrator.VaultInstance // configurable return
 }
 
@@ -120,11 +120,11 @@ func (m *mockOrch) ForceRemoveVault(id glid.GLID) error {
 	m.forceRemoveIDs = append(m.forceRemoveIDs, id)
 	return m.forceRemoveErr
 }
-func (m *mockOrch) RemoveTierFromVault(vaultID, tierID glid.GLID) bool {
+func (m *mockOrch) RemoveVaultInstance(vaultID, tierID glid.GLID) bool {
 	m.removeTierCalls = append(m.removeTierCalls, [2]glid.GLID{vaultID, tierID})
 	return true
 }
-func (m *mockOrch) DeleteTierFromVault(vaultID, tierID glid.GLID) bool {
+func (m *mockOrch) DeleteVaultInstance(vaultID, tierID glid.GLID) bool {
 	m.removeTierCalls = append(m.removeTierCalls, [2]glid.GLID{vaultID, tierID})
 	return true
 }
@@ -136,9 +136,9 @@ func (m *mockOrch) UnregisterVault(id glid.GLID) error {
 	m.unregisterIDs = append(m.unregisterIDs, id)
 	return m.unregisterErr
 }
-func (m *mockOrch) HasMissingTiers(_ glid.GLID, _ []glid.GLID) bool { return false }
+func (m *mockOrch) MissingVaultInstance(_ glid.GLID, _ []glid.GLID) bool { return false }
 func (m *mockOrch) LocalTierIDs(_ glid.GLID) []glid.GLID            { return nil }
-func (m *mockOrch) AddTierToVault(_ context.Context, _, _ glid.GLID, _ orchestrator.Factories) error {
+func (m *mockOrch) AddVaultInstance(_ context.Context, _, _ glid.GLID, _ orchestrator.Factories) error {
 	return nil
 }
 func (m *mockOrch) DrainVault(_ context.Context, id glid.GLID, _ string) error {
@@ -951,7 +951,7 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 			t.Fatalf("DrainTier called with wrong tier: %s", mo.tierDrainCalls[0])
 		}
 		if len(mo.removeTierCalls) != 0 {
-			t.Fatalf("leader should not call RemoveTierFromVault, got %d calls", len(mo.removeTierCalls))
+			t.Fatalf("leader should not call RemoveVaultInstance, got %d calls", len(mo.removeTierCalls))
 		}
 	})
 
@@ -977,7 +977,7 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 			t.Fatalf("follower should not drain, got %d DrainTier calls", len(mo.tierDrainCalls))
 		}
 		if len(mo.removeTierCalls) != 1 {
-			t.Fatalf("expected 1 RemoveTierFromVault call, got %d", len(mo.removeTierCalls))
+			t.Fatalf("expected 1 RemoveVaultInstance call, got %d", len(mo.removeTierCalls))
 		}
 	})
 
@@ -1024,7 +1024,7 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 			t.Fatalf("non-drain delete should not call DrainTier, got %d calls", len(mo.tierDrainCalls))
 		}
 		if len(mo.removeTierCalls) != 1 {
-			t.Fatalf("expected 1 RemoveTierFromVault call, got %d", len(mo.removeTierCalls))
+			t.Fatalf("expected 1 RemoveVaultInstance call, got %d", len(mo.removeTierCalls))
 		}
 	})
 }

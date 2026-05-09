@@ -28,12 +28,12 @@ type orchActions interface {
 	DisableVault(id glid.GLID) error
 	EnableVault(id glid.GLID) error
 	ForceRemoveVault(id glid.GLID) error
-	RemoveTierFromVault(vaultID, tierID glid.GLID) bool
-	DeleteTierFromVault(vaultID, tierID glid.GLID) bool
-	AddTierToVault(ctx context.Context, vaultID, tierID glid.GLID, f orchestrator.Factories) error
+	RemoveVaultInstance(vaultID, tierID glid.GLID) bool
+	DeleteVaultInstance(vaultID, tierID glid.GLID) bool
+	AddVaultInstance(ctx context.Context, vaultID, tierID glid.GLID, f orchestrator.Factories) error
 	DrainTier(ctx context.Context, vaultID, tierID glid.GLID, mode orchestrator.TierDrainMode, targetNodeID string) error
 	UnregisterVault(id glid.GLID) error
-	HasMissingTiers(vaultID glid.GLID, tierIDs []glid.GLID) bool
+	MissingVaultInstance(vaultID glid.GLID, tierIDs []glid.GLID) bool
 	LocalTierIDs(vaultID glid.GLID) []glid.GLID
 	DrainVault(ctx context.Context, vaultID glid.GLID, targetNodeID string) error
 	IsDraining(vaultID glid.GLID) bool
@@ -175,7 +175,7 @@ func (d *configDispatcher) handleVaultPut(ctx context.Context, id glid.GLID) {
 
 	// Incrementally add/remove tiers that changed. Never tear down the
 	// entire vault — that causes cascading rebuilds and data warnings.
-	if d.orch.HasMissingTiers(id, tierIDs) {
+	if d.orch.MissingVaultInstance(id, tierIDs) {
 		d.reconcileVaultTiers(ctx, id, tierIDs)
 		return
 	}
@@ -230,13 +230,13 @@ func (d *configDispatcher) reconcileVaultTiers(ctx context.Context, vaultID glid
 	// Remove tiers that are no longer in the config's tier list.
 	for _, localTierID := range d.orch.LocalTierIDs(vaultID) {
 		if !expected[localTierID] {
-			d.orch.RemoveTierFromVault(vaultID, localTierID)
+			d.orch.RemoveVaultInstance(vaultID, localTierID)
 		}
 	}
 
 	// Add tiers that are in the config but not local.
 	for _, tierID := range tierIDs {
-		if err := d.orch.AddTierToVault(ctx, vaultID, tierID, d.factories); err != nil {
+		if err := d.orch.AddVaultInstance(ctx, vaultID, tierID, d.factories); err != nil {
 			d.logger.Error("dispatch: add tier to vault",
 				"vault", vaultID, "error", err)
 		}
@@ -563,14 +563,14 @@ func (d *configDispatcher) applyTierMembershipChange(ctx context.Context, v syst
 	// whether or not it has a storage placement for this tier. Non-storage
 	// nodes still need to join as voters — without that, a tier with RF
 	// smaller than the cluster size can't reach quorum because most nodes
-	// never registered the group. AddTierToVault handles both cases: storage
+	// never registered the group. AddVaultInstance handles both cases: storage
 	// nodes get a VaultInstance, non-storage nodes only get a Raft group.
 	tierBelongsHere := leaderNodeID == d.localNodeID || slices.Contains(followerNodeIDs, d.localNodeID)
 	if !tierBelongsHere {
 		if existing := d.orch.FindLocalVaultInstance(v.ID); existing != nil {
 			// Tier moved away from this node — drop the storage instance.
 			// The Raft group itself stays (symmetric voting).
-			d.orch.RemoveTierFromVault(v.ID, tierID)
+			d.orch.RemoveVaultInstance(v.ID, tierID)
 		}
 	}
 	d.rebuildVaultIfTierMissing(ctx, v, tierID)
@@ -590,7 +590,7 @@ func (d *configDispatcher) rebuildVaultIfTierMissing(ctx context.Context, v syst
 		return
 	}
 	// Tier doesn't exist locally yet — add it incrementally.
-	if err := d.orch.AddTierToVault(ctx, v.ID, tierID, d.factories); err != nil {
+	if err := d.orch.AddVaultInstance(ctx, v.ID, tierID, d.factories); err != nil {
 		d.logger.Error("dispatch: add tier to vault",
 			"vault", v.ID, "error", err)
 	}
@@ -667,7 +667,7 @@ func (d *configDispatcher) handleTierDeleted(ctx context.Context, tierID glid.GL
 			if err := d.orch.DrainTier(ctx, vaultID, tierID, orchestrator.TierDrainDecommission, ""); err != nil {
 				d.logger.Warn("dispatch: tier drain failed, removing immediately",
 					"vault", vaultID, "error", err)
-				d.orch.DeleteTierFromVault(vaultID, tierID)
+				d.orch.DeleteVaultInstance(vaultID, tierID)
 			} else {
 				// Don't remove the tier instance yet — drain needs it.
 				// finishTierDrain will clean up after completion.
@@ -677,7 +677,7 @@ func (d *configDispatcher) handleTierDeleted(ctx context.Context, tierID glid.GL
 			// Non-leader or non-drain: remove local instance immediately.
 			// This path is the genuine tier-deletion case (CmdTierDeleted),
 			// so the destructive wipe is correct here.
-			d.orch.DeleteTierFromVault(vaultID, tierID)
+			d.orch.DeleteVaultInstance(vaultID, tierID)
 		}
 	}
 }

@@ -346,7 +346,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 				// the forwarder observes as EOF. Expiring the peer from
 				// LivePeers() on that signal causes placement to evict
 				// the node from its tiers, which in turn triggers
-				// RemoveTierFromVault → sealAndDeleteAllChunks — the
+				// RemoveVaultInstance → sealAndDeleteAllChunks — the
 				// cluster-wide data wipe. Raft heartbeats and PeerState's
 				// stats-broadcast TTL remain the canonical liveness
 				// signals; pm.Trigger() alone is idempotent when inputs

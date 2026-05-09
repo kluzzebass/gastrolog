@@ -180,10 +180,10 @@ func (o *Orchestrator) initVault(sys *system.System, vaultCfg system.VaultConfig
 
 	// Register the vault even when no instance is built locally (this node
 	// has no placement). Matches AddVault's runtime behaviour: the vault
-	// shell is registered so a later placement-driven AddTierToVault can
+	// shell is registered so a later placement-driven AddVaultInstance can
 	// hydrate it. On cluster snapshot restore there's no NotifyVaultPut for
 	// bulk-loaded state, so initVault must register here or subsequent
-	// AddTierToVault fires "vault not found" in a loop. See gastrolog-264pk.
+	// AddVaultInstance fires "vault not found" in a loop. See gastrolog-264pk.
 	vault := NewVault(vaultCfg.ID, instance)
 	vault.Name = vaultCfg.Name
 	vault.Enabled = vaultCfg.Enabled
