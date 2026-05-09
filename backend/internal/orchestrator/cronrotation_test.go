@@ -136,12 +136,12 @@ func TestEnsureCreatesAndUpdatesJob(t *testing.T) {
 	m := newTestCronManager(t)
 
 	vaultA := glid.New()
-	tierA := glid.New()
+	instA := glid.New()
 
 	// First ensure creates the job.
-	m.ensure(vaultA, tierA, "vault-a", "* * * * *", cm)
+	m.ensure(vaultA, instA, "vault-a", "* * * * *", cm)
 
-	name := cronJobName(vaultA, tierA)
+	name := cronJobName(vaultA, instA)
 	if !m.scheduler.HasJob(name) {
 		t.Error("expected job to be registered after ensure")
 	}
@@ -150,13 +150,13 @@ func TestEnsureCreatesAndUpdatesJob(t *testing.T) {
 	}
 
 	// Ensure with same schedule is a no-op.
-	m.ensure(vaultA, tierA, "vault-a", "* * * * *", cm)
+	m.ensure(vaultA, instA, "vault-a", "* * * * *", cm)
 	if m.schedules[name] != "* * * * *" {
 		t.Error("schedule should be unchanged")
 	}
 
 	// Ensure with new schedule updates.
-	m.ensure(vaultA, tierA, "vault-a", "0 * * * *", cm)
+	m.ensure(vaultA, instA, "vault-a", "0 * * * *", cm)
 	if m.schedules[name] != "0 * * * *" {
 		t.Errorf("expected updated schedule '0 * * * *', got %q", m.schedules[name])
 	}
@@ -171,14 +171,14 @@ func TestPruneExceptRemovesStaleJobs(t *testing.T) {
 
 	vaultA := glid.New()
 	vaultB := glid.New()
-	tierA := glid.New()
-	tierB := glid.New()
+	instA := glid.New()
+	instB := glid.New()
 
-	m.ensure(vaultA, tierA, "vault-a", "* * * * *", cm)
-	m.ensure(vaultB, tierB, "vault-b", "0 * * * *", cm)
+	m.ensure(vaultA, instA, "vault-a", "* * * * *", cm)
+	m.ensure(vaultB, instB, "vault-b", "0 * * * *", cm)
 
-	nameA := cronJobName(vaultA, tierA)
-	nameB := cronJobName(vaultB, tierB)
+	nameA := cronJobName(vaultA, instA)
+	nameB := cronJobName(vaultB, instB)
 
 	// Prune everything except vault-a's job.
 	m.pruneExcept(map[string]bool{nameA: true})
@@ -199,18 +199,18 @@ func TestRemoveAllForVault(t *testing.T) {
 	m := newTestCronManager(t)
 
 	vaultA := glid.New()
-	tierA := glid.New()
-	tierB := glid.New()
+	instA := glid.New()
+	instB := glid.New()
 
-	m.ensure(vaultA, tierA, "vault-a", "* * * * *", cm)
-	m.ensure(vaultA, tierB, "vault-a", "0 * * * *", cm)
+	m.ensure(vaultA, instA, "vault-a", "* * * * *", cm)
+	m.ensure(vaultA, instB, "vault-a", "0 * * * *", cm)
 
 	m.removeAllForVault(vaultA)
 
-	if m.scheduler.HasJob(cronJobName(vaultA, tierA)) {
+	if m.scheduler.HasJob(cronJobName(vaultA, instA)) {
 		t.Error("inst-a job should be removed")
 	}
-	if m.scheduler.HasJob(cronJobName(vaultA, tierB)) {
+	if m.scheduler.HasJob(cronJobName(vaultA, instB)) {
 		t.Error("inst-b job should be removed")
 	}
 	if len(m.schedules) != 0 {
