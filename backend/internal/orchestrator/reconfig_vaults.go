@@ -475,8 +475,6 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 		return fmt.Errorf("vault %s not found in config", vaultID)
 	}
 	// 1:1 vault:tier — synthesize the inst config from the vault.
-	inst := system.TierFromVault(*vaultCfg)
-	vaultCfg2 := &inst
 
 	o.ensureVaultControlPlaneRaftGroup(vaultID, rt.Nodes, factories)
 
@@ -498,7 +496,7 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 
 	var ti *VaultInstance
 	if isLeader {
-		t, err := o.buildLeaderInstance(sys, *vaultCfg, vaultCfg2, factories)
+		t, err := o.buildLeaderInstance(sys, *vaultCfg, factories)
 		if err != nil {
 			return fmt.Errorf("build vault %s: %w", vaultID, err)
 		}
@@ -509,7 +507,7 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 			if tgt.NodeID != o.localNodeID {
 				continue
 			}
-			t, err := o.buildInstanceForStorage(sys, *vaultCfg, *vaultCfg2, factories, tgt.StorageID, true)
+			t, err := o.buildInstanceForStorage(sys, *vaultCfg, factories, tgt.StorageID, true)
 			if err != nil {
 				return fmt.Errorf("build vault %s storage %s: %w", vaultID, tgt.StorageID, err)
 			}
@@ -619,8 +617,6 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 
 	// 1:1 vault:tier — synthesize the inst config from the vault.
 	vaultID := vaultCfg.ID
-	inst := system.TierFromVault(vaultCfg)
-	vaultCfg2 := &inst
 
 	// Determine this node's role for this vault. With one-replica-per-node
 	// (Phase 2 invariant) the node is at most one of: leader, follower, neither.
@@ -638,7 +634,7 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 	}
 
 	if isLeader {
-		ti, err := o.buildLeaderInstance(sys, vaultCfg, vaultCfg2, factories)
+		ti, err := o.buildLeaderInstance(sys, vaultCfg, factories)
 		if err != nil {
 			o.alertVaultInitFailed(vaultID, vaultCfg.Name, err)
 			return nil, nil
@@ -652,7 +648,7 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 		if tgt.NodeID != o.localNodeID {
 			continue
 		}
-		sti, err := o.buildInstanceForStorage(sys, vaultCfg, *vaultCfg2, factories, tgt.StorageID, true)
+		sti, err := o.buildInstanceForStorage(sys, vaultCfg, factories, tgt.StorageID, true)
 		if err != nil {
 			o.alertVaultInitFailed(vaultID, vaultCfg.Name, err)
 			return nil, nil
@@ -685,12 +681,12 @@ func (o *Orchestrator) alertVaultInitFailed(vaultID glid.GLID, vaultName string,
 // buildLeaderInstance creates the leader VaultInstance using the placement's
 // storage ID. This avoids directory collisions with same-node follower placements
 // that would occur if findLocalFileStorage picked a different storage by class.
-func (o *Orchestrator) buildLeaderInstance(sys *system.System, vaultCfg system.VaultConfig, vaultCfg2 *system.TierConfig, factories Factories) (*VaultInstance, error) {
+func (o *Orchestrator) buildLeaderInstance(sys *system.System, vaultCfg system.VaultConfig, factories Factories) (*VaultInstance, error) {
 	// Read placements from VaultConfig (mirrored from vault placements via
 	// the FSM bridge — gastrolog-257l7).
 	storageID := system.LeaderStorageID(vaultCfg.Placements)
 	if storageID != "" && !strings.HasPrefix(storageID, system.SyntheticStoragePrefix) {
-		ti, err := o.buildInstanceForStorage(sys, vaultCfg, *vaultCfg2, factories, storageID, false)
+		ti, err := o.buildInstanceForStorage(sys, vaultCfg, factories, storageID, false)
 		if err != nil {
 			return nil, err
 		}
@@ -698,7 +694,7 @@ func (o *Orchestrator) buildLeaderInstance(sys *system.System, vaultCfg system.V
 		return ti, nil
 	}
 	// Synthetic or unplaced — fall back to class-based resolution.
-	ti, err := o.buildInstance(sys, vaultCfg, *vaultCfg2, factories, false)
+	ti, err := o.buildInstance(sys, vaultCfg, factories, false)
 	if err != nil {
 		return nil, err
 	}
@@ -712,7 +708,7 @@ func (o *Orchestrator) buildLeaderInstance(sys *system.System, vaultCfg system.V
 // Cloud tiers use a shared blob key (vault-ID/chunk-ID.glcb) — if the follower
 // also uploads, it overwrites the leader's blob with a different-sized version,
 // corrupting the leader's stored diskBytes and breaking all future cloud reads.
-func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultConfig, vaultCfg2 system.TierConfig, factories Factories, isFollower bool) (*VaultInstance, error) {
+func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultConfig, factories Factories, isFollower bool) (*VaultInstance, error) {
 	cfg := &sys.Config
 	rt := &sys.Runtime
 	// Map TierConfig.Type to factory name.
@@ -725,7 +721,7 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 	vaultGroup, applier, raftCB := o.ensureVaultCtlMetadata(vaultCfg, rt.Nodes, factories)
 
 	// Build params from inst system.
-	params := buildVaultParams(sys, vaultCfg, vaultCfg2, o.localNodeID)
+	params := buildVaultParams(sys, vaultCfg, o.localNodeID)
 
 	// Followers keep cloud store access for reads (queries) but skip uploads.
 	// The leader owns the blob; the follower adopts it via RegisterCloudChunk
@@ -847,7 +843,7 @@ func (o *Orchestrator) attachLifecycleReconciler(ti *VaultInstance, vaultID glid
 // buildInstanceForStorage creates a VaultInstance whose data directory is
 // resolved from a specific file storage ID. Used for both leaders with
 // explicit storage placements and followers (one per node per inst).
-func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg system.VaultConfig, vaultCfg2 system.TierConfig, factories Factories, storageID string, isFollower bool) (*VaultInstance, error) {
+func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg system.VaultConfig, factories Factories, storageID string, isFollower bool) (*VaultInstance, error) {
 	cfg := &sys.Config
 	rt := &sys.Runtime
 	fs := findFileStorageByID(rt, storageID)
@@ -860,7 +856,7 @@ func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg syst
 	vaultGroup, applier, raftCB := o.ensureVaultCtlMetadata(vaultCfg, rt.Nodes, factories)
 
 	// Build params normally, then override the dir with this storage's path.
-	params := buildVaultParams(sys, vaultCfg, vaultCfg2, o.localNodeID)
+	params := buildVaultParams(sys, vaultCfg, o.localNodeID)
 	// Followers keep cloud store access for reads but skip uploads.
 	if isFollower {
 		params["_cloud_read_only"] = "true"
@@ -1439,30 +1435,30 @@ func mapVaultTypeToFactory(t system.VaultType) string {
 }
 
 // buildVaultParams builds a params map from a TierConfig suitable for factory consumption.
-func buildVaultParams(sys *system.System, vaultCfg system.VaultConfig, vaultCfg2 system.TierConfig, localNodeID string) map[string]string {
+func buildVaultParams(sys *system.System, vaultCfg system.VaultConfig, localNodeID string) map[string]string {
 	rt := &sys.Runtime
 	params := make(map[string]string)
 
 	switch vaultCfg.Type {
 	case system.VaultTypeMemory:
-		if vaultCfg2.MemoryBudgetBytes > 0 {
-			params["budgetBytes"] = strconv.FormatUint(vaultCfg2.MemoryBudgetBytes, 10)
+		if vaultCfg.MemoryBudgetBytes > 0 {
+			params["budgetBytes"] = strconv.FormatUint(vaultCfg.MemoryBudgetBytes, 10)
 		}
 
 	case system.VaultTypeFile:
 		// Single storage class for all file tiers — local-only and
 		// cloud-backed alike. The active chunk and warm cache live at
 		// the same chunkDir path post-step-7k. See gastrolog-4k5mg.
-		if vaultCfg2.IsCloud() {
-			addCloudParams(params, &sys.Config, vaultCfg2)
+		if vaultCfg.IsCloud() {
+			addCloudParams(params, &sys.Config, vaultCfg)
 		}
-		if fs := findLocalFileStorage(rt, localNodeID, vaultCfg2.StorageClass); fs != nil {
+		if fs := findLocalFileStorage(rt, localNodeID, vaultCfg.StorageClass); fs != nil {
 			params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), vaultCfg.ID.String())
 		}
 
 	case system.VaultTypeJSONL:
-		if vaultCfg2.Path != "" {
-			params["path"] = vaultCfg2.Path
+		if vaultCfg.Path != "" {
+			params["path"] = vaultCfg.Path
 		} else {
 			// Default: jsonl/<vault-id>/<inst-id>.jsonl
 			params["path"] = filepath.Join("jsonl", vaultCfg.ID.String(), vaultCfg.ID.String()+".jsonl")
@@ -1477,9 +1473,9 @@ func buildVaultParams(sys *system.System, vaultCfg system.VaultConfig, vaultCfg2
 // onto every CmdUploadChunk via gastrolog-grnc3); no-op for the rest if the
 // referenced cloud service entry is missing — the chunk manager will start
 // without a CloudStore wired but still knows which service it would pin to.
-func addCloudParams(params map[string]string, cfg *system.Config, vaultCfg2 system.TierConfig) {
-	params["cloud_service_id"] = vaultCfg2.CloudServiceID.String()
-	cs := findCloudService(cfg, *vaultCfg2.CloudServiceID)
+func addCloudParams(params map[string]string, cfg *system.Config, vaultCfg system.VaultConfig) {
+	params["cloud_service_id"] = vaultCfg.CloudServiceID.String()
+	cs := findCloudService(cfg, *vaultCfg.CloudServiceID)
 	if cs == nil {
 		return
 	}
