@@ -153,11 +153,6 @@ type RemoteTransferrer interface {
 	// destination's normal rotation lifecycle.
 	ForwardAppend(ctx context.Context, nodeID string, vaultID glid.GLID, records []chunk.Record) error
 
-	// StreamToTier opens a single streaming connection and pipes all records
-	// to a remote tier's active chunk. Used for tier transitions — one stream,
-	// no per-batch round trips.
-	StreamToTier(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, next chunk.RecordIterator) error
-
 	// WaitVaultReady blocks until the vault is registered and accepting
 	// records on the given node, or ctx expires. Used by DrainVault to
 	// synchronize with the target node's AddVault before unregistering
