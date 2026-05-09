@@ -291,9 +291,8 @@ func (pm *placementManager) placeTier(ctx context.Context, tier system.TierConfi
 	// Replace the leader placement.
 	oldP, _ := pm.cfgStore.GetVaultPlacements(context.Background(), tier.ID)
 	newP := replaceLeaderPlacement(oldP, system.StorageIDForNode(best, tier, nscs))
-	_ = pm.cfgStore.SetVaultPlacements(ctx, tier.ID, newP)
-	if err := pm.cfgStore.PutTier(ctx, tier); err != nil {
-		pm.logger.Error("placement: assign tier", "vault", tier.ID, "name", tier.Name, "node", best, "error", err)
+	if err := pm.cfgStore.SetVaultPlacements(ctx, tier.ID, newP); err != nil {
+		pm.logger.Error("placement: assign vault", "vault", tier.ID, "name", tier.Name, "node", best, "error", err)
 		return
 	}
 
@@ -353,8 +352,7 @@ func (pm *placementManager) placeFollowers(ctx context.Context, tier *system.Tie
 		p, _ := pm.cfgStore.GetVaultPlacements(context.Background(), tier.ID)
 		return p
 	}(), newPlacements) {
-		_ = pm.cfgStore.SetVaultPlacements(ctx, tier.ID, newPlacements)
-		if err := pm.cfgStore.PutTier(ctx, *tier); err != nil {
+		if err := pm.cfgStore.SetVaultPlacements(ctx, tier.ID, newPlacements); err != nil {
 			pm.logger.Error("placement: assign followers", "vault", tier.ID, "error", err)
 			return
 		}
@@ -380,8 +378,7 @@ func (pm *placementManager) clearStaleFollowers(ctx context.Context, tier *syste
 		}
 	}
 	cp, _ := pm.cfgStore.GetVaultPlacements(context.Background(), tier.ID)
-	_ = pm.cfgStore.SetVaultPlacements(ctx, tier.ID, clearFollowerPlacements(cp))
-	if err := pm.cfgStore.PutTier(ctx, *tier); err != nil {
+	if err := pm.cfgStore.SetVaultPlacements(ctx, tier.ID, clearFollowerPlacements(cp)); err != nil {
 		pm.logger.Error("placement: clear stale followers", "vault", tier.ID, "error", err)
 	}
 }
@@ -556,11 +553,10 @@ func (pm *placementManager) handleUnplaceable(ctx context.Context, tier system.T
 	}(), nscs)
 	if currentLeader != "" {
 		old := currentLeader
-		_ = pm.cfgStore.SetVaultPlacements(ctx, tier.ID, nil)
-		if err := pm.cfgStore.PutTier(ctx, tier); err != nil {
-			pm.logger.Error("placement: clear tier assignment", "vault", tier.ID, "name", tier.Name, "error", err)
+		if err := pm.cfgStore.SetVaultPlacements(ctx, tier.ID, nil); err != nil {
+			pm.logger.Error("placement: clear vault assignment", "vault", tier.ID, "name", tier.Name, "error", err)
 		} else {
-			pm.logger.Warn("placement: tier unplaced, no eligible nodes", "vault", tier.ID, "name", tier.Name)
+			pm.logger.Warn("placement: vault unplaced, no eligible nodes", "vault", tier.ID, "name", tier.Name)
 		}
 		tierCount[old]--
 	}
