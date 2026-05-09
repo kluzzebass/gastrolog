@@ -34,7 +34,6 @@ func DefaultConfig() *Config {
 				Name:             "default",
 				Type:             VaultTypeMemory,
 				VaultID:          vaultID,
-				Position:         0,
 				RotationPolicyID: new(rotationID),
 				RetentionRules: []RetentionRule{
 					{RetentionPolicyID: retentionID},

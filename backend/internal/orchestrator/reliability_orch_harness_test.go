@@ -276,7 +276,6 @@ func (h *orchRelHarness) seedSharedConfig() {
 			Name:         "orch-rel-tier-" + v.label,
 			Type:         system.VaultTypeFile,
 			VaultID:      v.id,
-			Position:     0,
 			StorageClass: harnessStorageClass,
 		}); err != nil {
 			h.t.Fatalf("PutTier %s: %v", v.label, err)

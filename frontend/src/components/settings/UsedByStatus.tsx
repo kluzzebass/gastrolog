@@ -50,7 +50,6 @@ interface Tier {
   id: Uint8Array;
   name: string;
   vaultId: Uint8Array;
-  position: number;
   rotationPolicyId: Uint8Array;
   retentionRules: { retentionPolicyId: Uint8Array }[];
 }
@@ -64,7 +63,7 @@ function tierLabel(tier: Tier, vaults: VaultRef[]): string | null {
   const vaultId = encode(tier.vaultId);
   const vault = vaults.find((v) => encode(v.id) === vaultId);
   if (!vault) return null;
-  return `${vault.name || vaultId}/tier ${String(tier.position + 1)}`;
+  return vault.name || vaultId;
 }
 
 export function tierRefsForRotationPolicy(

@@ -5477,7 +5477,7 @@ export class NodeConfig extends Message<NodeConfig> {
 }
 
 /**
- * VaultType identifies the storage medium for a tier.
+ * TierType identifies the storage medium for a tier.
  *
  * A cloud-backed tier is a TIER_TYPE_FILE tier with cloud_service_id set;
  * the server flips behavior on the cloud-store binding rather than the
@@ -5557,30 +5557,23 @@ export class TierConfig extends Message<TierConfig> {
   vaultId = new Uint8Array(0);
 
   /**
-   * 0-based order within the vault's tier chain
-   *
-   * @generated from field: uint32 position = 13;
-   */
-  position = 0;
-
-  /**
    * "lru" (default) or "ttl"
    *
-   * @generated from field: string cache_eviction = 14;
+   * @generated from field: string cache_eviction = 13;
    */
   cacheEviction = "";
 
   /**
    * max cache size (e.g. "1GB", "500MB"; default: "1GiB")
    *
-   * @generated from field: string cache_budget = 15;
+   * @generated from field: string cache_budget = 14;
    */
   cacheBudget = "";
 
   /**
    * eviction TTL duration (e.g. "1h", "7d"); only for ttl mode
    *
-   * @generated from field: string cache_ttl = 16;
+   * @generated from field: string cache_ttl = 15;
    */
   cacheTtl = "";
 
@@ -5604,10 +5597,9 @@ export class TierConfig extends Message<TierConfig> {
     { no: 10, name: "path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 11, name: "placements", kind: "message", T: VaultPlacement, repeated: true },
     { no: 12, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 13, name: "position", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-    { no: 14, name: "cache_eviction", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 15, name: "cache_budget", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 16, name: "cache_ttl", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 13, name: "cache_eviction", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 14, name: "cache_budget", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 15, name: "cache_ttl", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TierConfig {

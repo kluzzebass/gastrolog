@@ -297,7 +297,7 @@ func TestHandle_VaultPut(t *testing.T) {
 		tierID := glid.New()
 		d := newTestDispatcher(mo, &stubCfgStore{
 			vault: &system.VaultConfig{ID: id, Enabled: true},
-			tiers: []system.TierConfig{{ID: tierID, VaultID: id, Position: 0}},
+			tiers: []system.TierConfig{{ID: tierID, VaultID: id}},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
@@ -313,7 +313,7 @@ func TestHandle_VaultPut(t *testing.T) {
 		tierID := glid.New()
 		d := newTestDispatcher(mo, &stubCfgStore{
 			vault: &system.VaultConfig{ID: id, Enabled: true},
-			tiers: []system.TierConfig{{ID: tierID, VaultID: id, Position: 0}},
+			tiers: []system.TierConfig{{ID: tierID, VaultID: id}},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})

@@ -361,7 +361,6 @@ func (f *FSM) syncTierFromVault(ctx context.Context, v system.VaultConfig) error
 		Name:              v.Name,
 		Type:              tierType,
 		VaultID:           v.ID,
-		Position:          0,
 		StorageClass:      v.StorageClass,
 		CloudServiceID:    v.CloudServiceID,
 		ReplicationFactor: v.ReplicationFactor,

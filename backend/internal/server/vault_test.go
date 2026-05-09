@@ -308,7 +308,7 @@ func newFullVaultTestSetup(t *testing.T, recordCount int) fullVaultTestClients {
 	tierID := glid.New()
 	cfgStore.PutTier(context.Background(), system.TierConfig{
 		ID: tierID, Name: "default-tier", Type: system.VaultTypeMemory,
-		VaultID: defaultID, Position: 0,
+		VaultID: defaultID,
 	})
 	vaultCfg := system.VaultConfig{
 		ID: defaultID,

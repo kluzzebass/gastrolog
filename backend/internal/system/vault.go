@@ -1,9 +1,7 @@
 package system
 
 import (
-	"cmp"
 	"gastrolog/internal/glid"
-	"slices"
 )
 
 // VaultConfig describes a vault — the unit of independent storage and the
@@ -103,31 +101,20 @@ func (v VaultConfig) ResolveRetentionDisposition() string {
 	}
 }
 
-// VaultTierIDs returns the ordered tier IDs for a vault by filtering tiers
-// with matching VaultID and sorting by Position. This replaces the old
-// VaultConfig.TierIDs field — tier ownership now lives on TierConfig.
+// VaultTierIDs returns the tier IDs for a vault. With 1:1 vault:tier the
+// result is at most a single entry; the iteration over the tier list
+// stays for callers that pass legacy multi-tier fixtures.
 func VaultTierIDs(tiers []TierConfig, vaultID glid.GLID) []glid.GLID {
-	type entry struct {
-		id  glid.GLID
-		pos uint32
-	}
-	var matched []entry
+	var ids []glid.GLID
 	for _, t := range tiers {
 		if t.VaultID == vaultID {
-			matched = append(matched, entry{t.ID, t.Position})
+			ids = append(ids, t.ID)
 		}
-	}
-	slices.SortFunc(matched, func(a, b entry) int {
-		return cmp.Compare(a.pos, b.pos)
-	})
-	ids := make([]glid.GLID, len(matched))
-	for i, e := range matched {
-		ids[i] = e.id
 	}
 	return ids
 }
 
-// VaultTiers returns the ordered tier configs for a vault.
+// VaultTiers returns the tier configs for a vault.
 func VaultTiers(tiers []TierConfig, vaultID glid.GLID) []TierConfig {
 	var matched []TierConfig
 	for _, t := range tiers {
@@ -135,9 +122,6 @@ func VaultTiers(tiers []TierConfig, vaultID glid.GLID) []TierConfig {
 			matched = append(matched, t)
 		}
 	}
-	slices.SortFunc(matched, func(a, b TierConfig) int {
-		return cmp.Compare(a.Position, b.Position)
-	})
 	return matched
 }
 

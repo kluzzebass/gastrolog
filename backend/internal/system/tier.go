@@ -78,8 +78,7 @@ type TierConfig struct {
 	ID                glid.GLID       `json:"id"`
 	Name              string          `json:"name"`
 	Type              VaultType       `json:"type"`
-	VaultID           glid.GLID       `json:"vaultId"`  // owning vault
-	Position          uint32          `json:"position"` // 0-based order in vault's tier chain
+	VaultID           glid.GLID       `json:"vaultId"` // owning vault
 	RotationPolicyID  *glid.GLID      `json:"rotationPolicyId,omitempty"`
 	RetentionRules    []RetentionRule `json:"retentionRules,omitempty"`
 	MemoryBudgetBytes uint64          `json:"memoryBudgetBytes,omitempty"`

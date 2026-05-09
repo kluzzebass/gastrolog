@@ -424,7 +424,6 @@ func (s *SystemServer) loadSystemTiers(ctx context.Context, resp *apiv1.GetSyste
 			Path:              tier.Path,
 			Placements:        placements,
 			VaultId:           tier.VaultID.ToProto(),
-			Position:          tier.Position,
 			CacheEviction:     tier.CacheEviction,
 			CacheBudget:       tier.CacheBudget,
 			CacheTtl:          tier.CacheTTL,

@@ -114,9 +114,6 @@ func collectVaultTiers(tiers []*v1.TierConfig, vaultID string) []*v1.TierConfig 
 			out = append(out, t)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].Position < out[j].Position
-	})
 	return out
 }
 
@@ -137,8 +134,8 @@ func printTierSection(tier *v1.TierConfig, chunks []*v1.ChunkMeta, nodeNames map
 		totalBytes += c.DiskBytes
 	}
 
-	fmt.Printf("  TIER %d: %s  %q  %d chunks  %d records  %s\n",
-		tier.Position+1, tierType, tier.Name,
+	fmt.Printf("  STORAGE: %s  %q  %d chunks  %d records  %s\n",
+		tierType, tier.Name,
 		len(chunks), totalRecords, units.FormatBytesDisplay(totalBytes))
 
 	sort.Slice(chunks, func(i, j int) bool {

@@ -567,7 +567,7 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 				{ID: vaultID, Enabled: true},
 			},
 			Tiers: []system.TierConfig{
-				{ID: tierID, Name: "local", Type: system.VaultTypeFile, StorageClass: 1, VaultID: vaultID, Position: 0},
+				{ID: tierID, Name: "local", Type: system.VaultTypeFile, StorageClass: 1, VaultID: vaultID},
 			},
 		},
 		Runtime: system.Runtime{

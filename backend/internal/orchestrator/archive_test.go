@@ -44,7 +44,7 @@ func TestArchiveChunkViaRetentionSweep(t *testing.T) {
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
 		ID: tierID, Name: "cloud", Type: system.VaultTypeFile,
-		VaultID: vaultID, Position: 0,
+		VaultID: vaultID,
 	})
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID, SystemLoader: &transitionSystemLoader{store: store}})

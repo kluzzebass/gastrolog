@@ -656,7 +656,7 @@ func TestSnapshotRestore(t *testing.T) {
 	tierID := newID()
 	applyCmd(t, fsm1, command.NewPutTier(system.TierConfig{
 		ID: tierID, Name: "tier1", Type: system.VaultTypeMemory,
-		VaultID: vaultID, Position: 0,
+		VaultID: vaultID,
 		RotationPolicyID: &rpID,
 		RetentionRules: []system.RetentionRule{
 			{RetentionPolicyID: retID},

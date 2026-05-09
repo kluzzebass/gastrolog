@@ -369,10 +369,10 @@ func testRetentionPolicies(t *testing.T, newStore func(t *testing.T) system.Stor
 		if err := s.PutVault(ctx, v); err != nil {
 			t.Fatalf("PutVault: %v", err)
 		}
-		if err := s.PutTier(ctx, system.TierConfig{ID: tierID1, Name: "t1", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0}); err != nil {
+		if err := s.PutTier(ctx, system.TierConfig{ID: tierID1, Name: "t1", Type: system.VaultTypeMemory, VaultID: vaultID}); err != nil {
 			t.Fatalf("PutTier t1: %v", err)
 		}
-		if err := s.PutTier(ctx, system.TierConfig{ID: tierID2, Name: "t2", Type: system.VaultTypeFile, VaultID: vaultID, Position: 1}); err != nil {
+		if err := s.PutTier(ctx, system.TierConfig{ID: tierID2, Name: "t2", Type: system.VaultTypeFile, VaultID: vaultID}); err != nil {
 			t.Fatalf("PutTier t2: %v", err)
 		}
 
@@ -383,9 +383,6 @@ func testRetentionPolicies(t *testing.T, newStore func(t *testing.T) system.Stor
 		if got1.VaultID != vaultID {
 			t.Errorf("tier1 VaultID: got %s, want %s", got1.VaultID, vaultID)
 		}
-		if got1.Position != 0 {
-			t.Errorf("tier1 Position: got %d, want 0", got1.Position)
-		}
 
 		got2, err := s.GetTier(ctx, tierID2)
 		if err != nil {
@@ -393,9 +390,6 @@ func testRetentionPolicies(t *testing.T, newStore func(t *testing.T) system.Stor
 		}
 		if got2.VaultID != vaultID {
 			t.Errorf("tier2 VaultID: got %s, want %s", got2.VaultID, vaultID)
-		}
-		if got2.Position != 1 {
-			t.Errorf("tier2 Position: got %d, want 1", got2.Position)
 		}
 	})
 }
@@ -1683,7 +1677,6 @@ func testTiers(t *testing.T, newStore func(t *testing.T) system.Store) {
 			Name:              "hot",
 			Type:              system.VaultTypeFile,
 			VaultID:           vaultID,
-			Position:          1,
 			RotationPolicyID:  &rpID,
 			MemoryBudgetBytes: 256 * 1024 * 1024,
 			StorageClass:      1,
@@ -1708,9 +1701,6 @@ func testTiers(t *testing.T, newStore func(t *testing.T) system.Store) {
 		}
 		if got.VaultID != vaultID {
 			t.Errorf("VaultID: expected %s, got %s", vaultID, got.VaultID)
-		}
-		if got.Position != 1 {
-			t.Errorf("Position: expected 1, got %d", got.Position)
 		}
 		if got.RotationPolicyID == nil || *got.RotationPolicyID != rpID {
 			t.Errorf("RotationPolicyID: expected %s, got %v", rpID, got.RotationPolicyID)

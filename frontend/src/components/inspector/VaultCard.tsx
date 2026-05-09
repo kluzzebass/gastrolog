@@ -129,13 +129,11 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
   const { data: config } = useConfig();
   const [expandedChunk, setExpandedChunk] = useState<string | null>(null);
 
-  // Build tier position map from vault config for labeling.
-  // Tiers own their vault association via vaultId + position fields.
+  // 1:1 vault:tier — at most one tier per vault.
   const vaultTiers = (config?.tiers ?? [])
-    .filter((t) => encode(t.vaultId) === vaultId)
-    .toSorted((a, b) => a.position - b.position);
+    .filter((t) => encode(t.vaultId) === vaultId);
   const tierPositions = new Map<string, number>(
-    vaultTiers.map((t) => [encode(t.id), t.position + 1]),
+    vaultTiers.map((t) => [encode(t.id), 1]),
   );
 
   if (isLoading) {

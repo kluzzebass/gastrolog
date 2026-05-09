@@ -99,7 +99,7 @@ func ensureMemoryTier(t *testing.T, cfgStore system.Store, vaultID glid.GLID) st
 	tierID := glid.New()
 	if err := cfgStore.PutTier(context.Background(), system.TierConfig{
 		ID: tierID, Name: "test-tier-" + tierID.String()[:8], Type: system.VaultTypeMemory,
-		VaultID: vaultID, Position: 0,
+		VaultID: vaultID,
 	}); err != nil {
 		t.Fatalf("ensureMemoryTier: %v", err)
 	}
@@ -1400,7 +1400,6 @@ func TestPutTierRejectsCloudServiceIDChange(t *testing.T) {
 			Name:              "tier",
 			Type:              gastrologv1.VaultType_VAULT_TYPE_FILE,
 			VaultId:           vaultID.ToProto(),
-			Position:          0,
 			StorageClass:      1,
 			ReplicationFactor: 1,
 		},
@@ -1418,7 +1417,6 @@ func TestPutTierRejectsCloudServiceIDChange(t *testing.T) {
 			Name:              "tier",
 			Type:              gastrologv1.VaultType_VAULT_TYPE_FILE,
 			VaultId:           vaultID.ToProto(),
-			Position:          0,
 			CloudServiceId:    csID.ToProto(),
 			StorageClass:      1,
 			ReplicationFactor: 1,
@@ -1453,7 +1451,6 @@ func TestPutTierAcceptsUnchangedCloudServiceID(t *testing.T) {
 				Name:              name,
 				Type:              gastrologv1.VaultType_VAULT_TYPE_FILE,
 				VaultId:           vaultID.ToProto(),
-				Position:          0,
 				StorageClass:      1,
 				ReplicationFactor: 1,
 			},

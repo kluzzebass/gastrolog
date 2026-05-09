@@ -6518,10 +6518,9 @@ type TierConfig struct {
 	Path              string                 `protobuf:"bytes,10,opt,name=path,proto3" json:"path,omitempty"`                                                    // direct path for JSONL sinks
 	Placements        []*VaultPlacement      `protobuf:"bytes,11,rep,name=placements,proto3" json:"placements,omitempty"`                                        // system-managed: file storage assignments by placement manager
 	VaultId           []byte                 `protobuf:"bytes,12,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`                               // owning vault — exactly one vault per tier
-	Position          uint32                 `protobuf:"varint,13,opt,name=position,proto3" json:"position,omitempty"`                                           // 0-based order within the vault's tier chain
-	CacheEviction     string                 `protobuf:"bytes,14,opt,name=cache_eviction,json=cacheEviction,proto3" json:"cache_eviction,omitempty"`             // "lru" (default) or "ttl"
-	CacheBudget       string                 `protobuf:"bytes,15,opt,name=cache_budget,json=cacheBudget,proto3" json:"cache_budget,omitempty"`                   // max cache size (e.g. "1GB", "500MB"; default: "1GiB")
-	CacheTtl          string                 `protobuf:"bytes,16,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`                            // eviction TTL duration (e.g. "1h", "7d"); only for ttl mode
+	CacheEviction     string                 `protobuf:"bytes,13,opt,name=cache_eviction,json=cacheEviction,proto3" json:"cache_eviction,omitempty"`             // "lru" (default) or "ttl"
+	CacheBudget       string                 `protobuf:"bytes,14,opt,name=cache_budget,json=cacheBudget,proto3" json:"cache_budget,omitempty"`                   // max cache size (e.g. "1GB", "500MB"; default: "1GiB")
+	CacheTtl          string                 `protobuf:"bytes,15,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`                            // eviction TTL duration (e.g. "1h", "7d"); only for ttl mode
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -6638,13 +6637,6 @@ func (x *TierConfig) GetVaultId() []byte {
 		return x.VaultId
 	}
 	return nil
-}
-
-func (x *TierConfig) GetPosition() uint32 {
-	if x != nil {
-		return x.Position
-	}
-	return 0
 }
 
 func (x *TierConfig) GetCacheEviction() string {
@@ -9190,7 +9182,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\n" +
 	"NodeConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\"\xef\x04\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\"\xd3\x04\n" +
 	"\n" +
 	"TierConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
@@ -9207,11 +9199,10 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\n" +
 	"placements\x18\v \x03(\v2\x1c.gastrolog.v1.VaultPlacementR\n" +
 	"placements\x12\x19\n" +
-	"\bvault_id\x18\f \x01(\fR\avaultId\x12\x1a\n" +
-	"\bposition\x18\r \x01(\rR\bposition\x12%\n" +
-	"\x0ecache_eviction\x18\x0e \x01(\tR\rcacheEviction\x12!\n" +
-	"\fcache_budget\x18\x0f \x01(\tR\vcacheBudget\x12\x1b\n" +
-	"\tcache_ttl\x18\x10 \x01(\tR\bcacheTtl\"H\n" +
+	"\bvault_id\x18\f \x01(\fR\avaultId\x12%\n" +
+	"\x0ecache_eviction\x18\r \x01(\tR\rcacheEviction\x12!\n" +
+	"\fcache_budget\x18\x0e \x01(\tR\vcacheBudget\x12\x1b\n" +
+	"\tcache_ttl\x18\x0f \x01(\tR\bcacheTtl\"H\n" +
 	"\x14PutNodeConfigRequest\x120\n" +
 	"\x06config\x18\x01 \x01(\v2\x18.gastrolog.v1.NodeConfigR\x06config\"P\n" +
 	"\x15PutNodeConfigResponse\x127\n" +

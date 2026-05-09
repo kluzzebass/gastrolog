@@ -728,7 +728,6 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 			Name:     fmt.Sprintf("tier-%d", i),
 			Type:     system.VaultTypeFile,
 			VaultID:  vaultID,
-			Position: uint32(i),
 		}
 		_ = store.PutTier(context.Background(), tierCfgs[i])
 		_ = store.SetVaultPlacements(context.Background(), tierIDs[i], placements)
