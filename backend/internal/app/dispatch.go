@@ -113,14 +113,14 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 			d.managedFileHandler.OnDelete(n.ID)
 		}
 	case raftfsm.NotifyTierPut:
-		d.handleTierPut(ctx, n.ID)
+		d.handleInstancePut(ctx, n.ID)
 	case raftfsm.NotifyTierDeleted:
-		d.handleTierDeleted(ctx, n.ID, n.Drain)
+		d.handleInstanceDeleted(ctx, n.ID, n.Drain)
 	case raftfsm.NotifyIngesterAssignmentSet:
 		d.handleIngesterAssignment(ctx, n.ID)
 	case raftfsm.NotifyVaultPlacementsSet:
-		// Re-fire handleTierPut so applyTierMembershipChange can pick
-		// up the now-complete placements. handleTierPut's earlier
+		// Re-fire handleInstancePut so applyInstanceMembershipChange can pick
+		// up the now-complete placements. handleInstancePut's earlier
 		// invocation (from the TierPut notification) may have deferred
 		// with "no leader" because placements arrive in a separate
 		// CmdSetVaultPlacements log entry. Without this re-trigger, a
@@ -128,7 +128,7 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 		// CmdSetVaultPlacements never builds the missing tiers — the
 		// failure mode that left node3 with only 1 of 3 tiers after
 		// a snapshot/replication catchup. See gastrolog-51gme.
-		d.handleTierPut(ctx, n.ID)
+		d.handleInstancePut(ctx, n.ID)
 	case raftfsm.NotifyCloudServicePut, raftfsm.NotifyCloudServiceDeleted,
 		raftfsm.NotifyNodeStorageConfigSet, raftfsm.NotifySetupWizardDismissedSet,
 		raftfsm.NotifyIngesterAliveSet,
@@ -176,7 +176,7 @@ func (d *configDispatcher) handleVaultPut(ctx context.Context, id glid.GLID) {
 	// Incrementally add/remove tiers that changed. Never tear down the
 	// entire vault — that causes cascading rebuilds and data warnings.
 	if d.orch.MissingVaultInstance(id, instIDs) {
-		d.reconcileVaultTiers(ctx, id, instIDs)
+		d.reconcileVaultInstance(ctx, id, instIDs)
 		return
 	}
 
@@ -219,9 +219,9 @@ func (d *configDispatcher) maybeStartDrain(ctx context.Context, id glid.GLID, ta
 	}
 }
 
-// reconcileVaultTiers incrementally adds missing tiers and removes stale tiers
+// reconcileVaultInstance incrementally adds missing tiers and removes stale tiers
 // from an existing vault, without tearing down any tiers that are unchanged.
-func (d *configDispatcher) reconcileVaultTiers(ctx context.Context, vaultID glid.GLID, instIDs []glid.GLID) {
+func (d *configDispatcher) reconcileVaultInstance(ctx context.Context, vaultID glid.GLID, instIDs []glid.GLID) {
 	expected := make(map[glid.GLID]bool, len(instIDs))
 	for _, id := range instIDs {
 		expected[id] = true
@@ -473,11 +473,11 @@ func (d *configDispatcher) handleSettingPut(ctx context.Context, key string) {
 	}
 }
 
-// handleTierPut adjusts vault registration when a inst's placements change.
+// handleInstancePut adjusts vault registration when a inst's placements change.
 // Runs on ALL nodes — each node independently decides whether it gained or lost
 // ownership based on the vault's resolved node IDs vs localNodeID.
 // Also reloads rotation/retention policies when inst config changes.
-func (d *configDispatcher) handleTierPut(ctx context.Context, instID glid.GLID) {
+func (d *configDispatcher) handleInstancePut(ctx context.Context, instID glid.GLID) {
 	// 1:1 vault:tier — the vault's ID is its vault's ID.
 	v, err := d.cfgStore.GetVault(ctx, instID)
 	if err != nil || v == nil {
@@ -504,7 +504,7 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, instID glid.GLID) 
 	//
 	// Policy reloads (rotation/retention) still run below because they are
 	// independent of placement state.
-	d.applyTierMembershipChange(ctx, *v, instID, leaderNodeID, followerNodeIDs)
+	d.applyInstanceMembershipChange(ctx, *v, instID, leaderNodeID, followerNodeIDs)
 
 	// Reload filters so ingestion routing picks up the new placement leader
 	// immediately. Without this, records are forwarded to the old (possibly
@@ -522,7 +522,7 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, instID glid.GLID) 
 	// When a leader changes but followers stay the same (e.g. a node dies),
 	// the surviving followers already have all chunks — no catchup needed.
 	if leaderNodeID == d.localNodeID && len(followerNodeIDs) > 0 && d.catchupScheduler != nil {
-		newFollowers := d.newFollowersForTier(v.ID, instID, followerNodeIDs)
+		newFollowers := d.newFollowersForInstance(v.ID, instID, followerNodeIDs)
 		if len(newFollowers) > 0 {
 			d.catchupScheduler(v.ID, instID, newFollowers)
 		}
@@ -535,11 +535,11 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, instID glid.GLID) 
 	}
 }
 
-// applyTierMembershipChange decides whether the inst belongs here based on
+// applyInstanceMembershipChange decides whether the inst belongs here based on
 // the (complete) placement state, and either adds/rebuilds it locally or
 // removes it if it no longer belongs. Deferred entirely when placements are
 // incomplete — the next CmdPutTier from the placement manager will retry.
-func (d *configDispatcher) applyTierMembershipChange(ctx context.Context, v system.VaultConfig, instID glid.GLID, leaderNodeID string, followerNodeIDs []string) {
+func (d *configDispatcher) applyInstanceMembershipChange(ctx context.Context, v system.VaultConfig, instID glid.GLID, leaderNodeID string, followerNodeIDs []string) {
 	// Placements are "complete" when they include a leader. We can't gate on
 	// len(placements) >= RF because RF may be unsatisfiable when a node is
 	// down — the placement manager writes the best it can with surviving
@@ -573,7 +573,7 @@ func (d *configDispatcher) applyTierMembershipChange(ctx context.Context, v syst
 			d.orch.RemoveVaultInstance(v.ID)
 		}
 	}
-	d.rebuildVaultIfTierMissing(ctx, v, instID)
+	d.rebuildVaultIfInstanceMissing(ctx, v, instID)
 }
 
 func (d *configDispatcher) registerVault(ctx context.Context, v system.VaultConfig, instID glid.GLID) {
@@ -583,10 +583,10 @@ func (d *configDispatcher) registerVault(ctx context.Context, v system.VaultConf
 	}
 }
 
-func (d *configDispatcher) rebuildVaultIfTierMissing(ctx context.Context, v system.VaultConfig, instID glid.GLID) {
+func (d *configDispatcher) rebuildVaultIfInstanceMissing(ctx context.Context, v system.VaultConfig, instID glid.GLID) {
 	existing := d.orch.FindLocalVaultInstance(v.ID)
 	if existing != nil {
-		d.updateTierRoleIfNeeded(ctx, v.ID, instID, existing)
+		d.updateInstanceRoleIfNeeded(ctx, v.ID, instID, existing)
 		return
 	}
 	// Tier doesn't exist locally yet — add it incrementally.
@@ -596,9 +596,9 @@ func (d *configDispatcher) rebuildVaultIfTierMissing(ctx context.Context, v syst
 	}
 }
 
-// updateTierRoleIfNeeded checks whether a inst's role (leader ↔ follower) has changed
+// updateInstanceRoleIfNeeded checks whether a inst's role (leader ↔ follower) has changed
 // and updates it in place — avoiding a full vault rebuild and file lock churn.
-func (d *configDispatcher) updateTierRoleIfNeeded(ctx context.Context, vaultID, instID glid.GLID, existing *orchestrator.VaultInstance) {
+func (d *configDispatcher) updateInstanceRoleIfNeeded(ctx context.Context, vaultID, instID glid.GLID, existing *orchestrator.VaultInstance) {
 	v, err := d.cfgStore.GetVault(ctx, instID)
 	if err != nil || v == nil {
 		return
@@ -625,12 +625,12 @@ func (d *configDispatcher) updateTierRoleIfNeeded(ctx context.Context, vaultID, 
 		"isFollower", shouldBeFollower)
 }
 
-// newFollowersForTier returns follower node IDs that don't already have a
+// newFollowersForInstance returns follower node IDs that don't already have a
 // local inst instance on this node's orchestrator. Existing followers already
 // have all chunks from normal replication — only genuinely new followers need
 // catchup. This prevents redundant chunk transfers on leader reassignment
 // (e.g. when a node dies and the leader moves but followers stay the same).
-func (d *configDispatcher) newFollowersForTier(vaultID, instID glid.GLID, followerNodeIDs []string) []string {
+func (d *configDispatcher) newFollowersForInstance(vaultID, instID glid.GLID, followerNodeIDs []string) []string {
 	existing := d.orch.FindLocalVaultInstance(vaultID)
 	if existing == nil {
 		// Tier was just added to this node — all followers are new.
@@ -650,9 +650,9 @@ func (d *configDispatcher) newFollowersForTier(vaultID, instID glid.GLID, follow
 	return added
 }
 
-// handleTierDeleted removes vaults that no longer have any local tiers.
-func (d *configDispatcher) handleTierDeleted(ctx context.Context, instID glid.GLID, drain bool) {
-	d.logger.Info("dispatch: handleTierDeleted", "vault", instID, "drain", drain)
+// handleInstanceDeleted removes vaults that no longer have any local tiers.
+func (d *configDispatcher) handleInstanceDeleted(ctx context.Context, instID glid.GLID, drain bool) {
+	d.logger.Info("dispatch: handleInstanceDeleted", "vault", instID, "drain", drain)
 
 	// The inst config is already deleted from the store, so we can't look up
 	// VaultID. Instead, scan locally registered vaults for this inst instance.
