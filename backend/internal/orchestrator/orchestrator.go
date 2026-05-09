@@ -326,7 +326,7 @@ type Orchestrator struct {
 	// Per-vault leader loop for vault control-plane Raft (replicated tier
 	// chunk metadata when multiraft is enabled). Membership reconciliation
 	// runs on the vault ctl Raft leader inside its leader epoch.
-	vaultCtlLeaders *tierLeaderManager
+	vaultCtlLeaders *vaultCtlLeaderManager
 
 	// Shutdown phase (nil in tests / single-node setups without a
 	// Phase wired). When non-nil, hot-path replication helpers like

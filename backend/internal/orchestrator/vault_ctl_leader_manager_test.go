@@ -312,7 +312,7 @@ func TestTierLeaderManager_ReconcileNoOpWhenStable(t *testing.T) {
 func TestTierMembershipMap_RoundTrip(t *testing.T) {
 	t.Parallel()
 
-	m := newTierMembershipMap()
+	m := newVaultCtlMembershipMap()
 	tierID := glid.New()
 
 	// Initial Get returns nil.
