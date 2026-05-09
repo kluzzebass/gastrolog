@@ -44,27 +44,24 @@ func chunkReplicationStreamHandler(srv any, stream grpc.ServerStream) error {
 
 func (s *Server) handleReplicationCommand(ctx context.Context, msg *gastrologv1.ChunkReplicationCommand) *gastrologv1.ChunkReplicationAck {
 	vaultID := glid.FromBytes(msg.GetVaultId())
-	// 1:1 vault:tier — tier shares the vault's ID. Internal handlers still
-	// take tierID for now; pass vaultID until they are migrated.
-	tierID := vaultID
 
 	switch cmd := msg.Command.(type) {
 	case *gastrologv1.ChunkReplicationCommand_Append:
-		return s.handleReplicationAppend(ctx, vaultID, tierID, cmd.Append)
+		return s.handleReplicationAppend(ctx, vaultID, cmd.Append)
 	case *gastrologv1.ChunkReplicationCommand_Seal:
-		return s.handleReplicationSeal(ctx, vaultID, tierID, cmd.Seal)
+		return s.handleReplicationSeal(ctx, vaultID, cmd.Seal)
 	case *gastrologv1.ChunkReplicationCommand_ImportSealed:
-		return s.handleReplicationImport(ctx, vaultID, tierID, cmd.ImportSealed)
+		return s.handleReplicationImport(ctx, vaultID, cmd.ImportSealed)
 	case *gastrologv1.ChunkReplicationCommand_DeleteChunk:
-		return s.handleReplicationDelete(ctx, vaultID, tierID, cmd.DeleteChunk)
+		return s.handleReplicationDelete(ctx, vaultID, cmd.DeleteChunk)
 	default:
 		return &gastrologv1.ChunkReplicationAck{Ok: false, Error: "unknown command type"}
 	}
 }
 
-func (s *Server) handleReplicationAppend(ctx context.Context, vaultID, tierID glid.GLID, cmd *gastrologv1.ChunkReplicationAppend) *gastrologv1.ChunkReplicationAck {
+func (s *Server) handleReplicationAppend(ctx context.Context, vaultID glid.GLID, cmd *gastrologv1.ChunkReplicationAppend) *gastrologv1.ChunkReplicationAck {
 	if s.recordAppenderForVault == nil {
-		return &gastrologv1.ChunkReplicationAck{Ok: false, Error: "tier appender not configured"}
+		return &gastrologv1.ChunkReplicationAck{Ok: false, Error: "vault appender not configured"}
 	}
 
 	chunkID := chunk.ChunkID{}
@@ -74,7 +71,7 @@ func (s *Server) handleReplicationAppend(ctx context.Context, vaultID, tierID gl
 
 	for _, er := range cmd.GetRecords() {
 		rec := convert.ExportToRecord(er)
-		if err := s.recordAppenderForVault(ctx, vaultID, tierID, chunkID, rec); err != nil {
+		if err := s.recordAppenderForVault(ctx, vaultID, chunkID, rec); err != nil {
 			if isTombstonedErr(err) {
 				// Chunk was deleted between the leader scheduling this
 				// append and its arrival here. Ack as success — goal
@@ -92,8 +89,8 @@ func (s *Server) handleReplicationAppend(ctx context.Context, vaultID, tierID gl
 	return &gastrologv1.ChunkReplicationAck{Ok: true, ChunkId: cmd.GetChunkId()}
 }
 
-func (s *Server) handleReplicationSeal(ctx context.Context, vaultID, tierID glid.GLID, cmd *gastrologv1.ChunkReplicationSeal) *gastrologv1.ChunkReplicationAck {
-	if s.sealVaultExecutor == nil {
+func (s *Server) handleReplicationSeal(ctx context.Context, vaultID glid.GLID, cmd *gastrologv1.ChunkReplicationSeal) *gastrologv1.ChunkReplicationAck {
+	if s.chunkSealExecutor == nil {
 		return &gastrologv1.ChunkReplicationAck{Ok: false, Error: "seal executor not configured"}
 	}
 
@@ -102,7 +99,7 @@ func (s *Server) handleReplicationSeal(ctx context.Context, vaultID, tierID glid
 		chunkID = chunk.ChunkID(glid.FromBytes(cmd.GetChunkId()))
 	}
 
-	if err := s.chunkSealExecutor(ctx, vaultID, tierID, chunkID); err != nil {
+	if err := s.chunkSealExecutor(ctx, vaultID, chunkID); err != nil {
 		if isTombstonedErr(err) {
 			return &gastrologv1.ChunkReplicationAck{Ok: true, ChunkId: cmd.GetChunkId()}
 		}
@@ -124,9 +121,9 @@ func isTombstonedErr(err error) bool {
 	return errors.Is(err, chunk.ErrChunkTombstoned)
 }
 
-func (s *Server) handleReplicationImport(ctx context.Context, vaultID, tierID glid.GLID, cmd *gastrologv1.ChunkReplicationImport) *gastrologv1.ChunkReplicationAck {
+func (s *Server) handleReplicationImport(ctx context.Context, vaultID glid.GLID, cmd *gastrologv1.ChunkReplicationImport) *gastrologv1.ChunkReplicationAck {
 	if s.vaultRecordImporter == nil {
-		return &gastrologv1.ChunkReplicationAck{Ok: false, Error: "tier importer not configured"}
+		return &gastrologv1.ChunkReplicationAck{Ok: false, Error: "vault importer not configured"}
 	}
 
 	chunkID := chunk.ChunkID(glid.FromBytes(cmd.GetChunkId()))
@@ -146,7 +143,7 @@ func (s *Server) handleReplicationImport(ctx context.Context, vaultID, tierID gl
 		return rec, nil
 	}
 
-	if err := s.vaultRecordImporter(ctx, vaultID, tierID, chunkID, iter); err != nil {
+	if err := s.vaultRecordImporter(ctx, vaultID, chunkID, iter); err != nil {
 		if isTombstonedErr(err) {
 			// Chunk was deleted between leader scheduling ImportSealed
 			// and its arrival here. Ack as success — the cluster's
@@ -163,14 +160,14 @@ func (s *Server) handleReplicationImport(ctx context.Context, vaultID, tierID gl
 	return &gastrologv1.ChunkReplicationAck{Ok: true, ChunkId: cmd.GetChunkId()}
 }
 
-func (s *Server) handleReplicationDelete(ctx context.Context, vaultID, tierID glid.GLID, cmd *gastrologv1.ChunkReplicationDelete) *gastrologv1.ChunkReplicationAck {
+func (s *Server) handleReplicationDelete(ctx context.Context, vaultID glid.GLID, cmd *gastrologv1.ChunkReplicationDelete) *gastrologv1.ChunkReplicationAck {
 	if s.deleteChunkExecutor == nil {
 		return &gastrologv1.ChunkReplicationAck{Ok: false, Error: "delete executor not configured"}
 	}
 
 	chunkID := chunk.ChunkID(glid.FromBytes(cmd.GetChunkId()))
 
-	if err := s.deleteChunkExecutor(ctx, vaultID, tierID, chunkID); err != nil {
+	if err := s.deleteChunkExecutor(ctx, vaultID, chunkID); err != nil {
 		return &gastrologv1.ChunkReplicationAck{
 			Ok:      false,
 			Error:   "delete failed: " + err.Error(),

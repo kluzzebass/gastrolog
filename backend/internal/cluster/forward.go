@@ -23,9 +23,9 @@ import (
 // Used by the ForwardRecords handler to write received records.
 type RecordAppender func(ctx context.Context, vaultID glid.GLID, rec chunk.Record) error
 
-// VaultRecordAppender appends a single record to a specific tier in a local vault.
+// VaultRecordAppender appends a single record to a local vault.
 // Used by the ForwardRecords handler when tier_id is set (inter-tier transition).
-type VaultRecordAppender func(ctx context.Context, vaultID, tierID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error
+type VaultRecordAppender func(ctx context.Context, vaultID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error
 
 // SearchExecutor runs a search on a local vault and returns results.
 // For regular searches, it returns an iterator over records (the caller
@@ -79,9 +79,9 @@ type ExportToVaultExecutor func(ctx context.Context, expression string, targetVa
 // Used by the ForwardImportRecords handler for cross-node chunk migration.
 type RecordImporter func(ctx context.Context, vaultID glid.GLID, next chunk.RecordIterator) error
 
-// VaultRecordImporter imports records as a sealed chunk in a specific tier,
+// VaultRecordImporter imports records as a sealed chunk in a vault,
 // preserving the original chunk ID. Used for sealed-chunk replication.
-type VaultRecordImporter func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error
+type VaultRecordImporter func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error
 
 // ManagedFileReader opens a managed file for streaming to a peer.
 // Returns the original filename, a ReadCloser for the content, and the SHA256 hex hash.
@@ -631,18 +631,18 @@ func (s *Server) forwardSealVault(ctx context.Context, req *gastrologv1.ForwardS
 	return &gastrologv1.ForwardSealVaultResponse{}, nil
 }
 
-// ChunkSealExecutor seals a specific tier's active chunk on this node.
-// Invoked by the ChunkReplication stream handler.
-type ChunkSealExecutor func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error
+// ChunkSealExecutor seals a specific chunk on this node, gated on the
+// expected chunk ID. Invoked by the ChunkReplication stream handler.
+type ChunkSealExecutor func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID) error
 
 // SetChunkSealExecutor injects the callback for handling ChunkReplicationSeal commands.
 func (s *Server) SetChunkSealExecutor(fn ChunkSealExecutor) {
 	s.chunkSealExecutor = fn
 }
 
-// DeleteChunkExecutor deletes a specific sealed chunk from a tier on this node.
-// Invoked by the ChunkReplication stream handler.
-type DeleteChunkExecutor func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error
+// DeleteChunkExecutor deletes a specific sealed chunk from a vault on this
+// node. Invoked by the ChunkReplication stream handler.
+type DeleteChunkExecutor func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID) error
 
 // SetDeleteChunkExecutor injects the callback for handling ChunkReplicationDelete commands.
 func (s *Server) SetDeleteChunkExecutor(fn DeleteChunkExecutor) {
