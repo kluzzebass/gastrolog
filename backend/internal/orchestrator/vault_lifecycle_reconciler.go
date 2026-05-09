@@ -51,8 +51,8 @@ package orchestrator
 //     (leader-only) proposes CmdFinalizeDelete for each finalizable
 //     chunk so deletes don't pin pendingDeletes forever.
 //   step 11 (deprecate CmdDeleteChunk): done. The dead production
-//     plumbing (VaultInstance.ApplyRaftDelete, tierRaftCallbacks.applyDelete,
-//     buildTierRaftCallbacks's MarshalDeleteChunk producer,
+//     plumbing (VaultInstance.ApplyRaftDelete, vaultRaftCallbacks.applyDelete,
+//     buildVaultRaftCallbacks's MarshalDeleteChunk producer,
 //     retentionRunner.applyRaftDelete + clusterMode branch) was removed.
 //     CmdDeleteChunk + applyDeleteChunk + MarshalDeleteChunk stay in the
 //     FSM for WAL replay backward-compat, but a forbidigo rule blocks

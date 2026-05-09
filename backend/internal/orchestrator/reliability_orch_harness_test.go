@@ -45,7 +45,7 @@ const harnessStorageClass uint32 = 1
 //
 // id is the node's LocalNodeID string — the same value the orchestrator
 // reports as its own identity and the same value the Raft resolver keys
-// on. buildTierRaftMembers converts NodeConfig.ID (a GLID) to its string
+// on. buildVaultRaftMembers converts NodeConfig.ID (a GLID) to its string
 // form and calls NodeAddressResolver with that, so id here MUST be the
 // GLID string form, not a human-readable label.
 type orchRelNode struct {
@@ -172,7 +172,7 @@ func newOrchRelHarness(t *testing.T, n int, opts ...orchRelOption) *orchRelHarne
 
 	// Phase 1: create cluster servers so peer addresses exist before we
 	// build the NodeAddressResolver. Each node's identity is a GLID
-	// (its string form) so buildTierRaftMembers' call to
+	// (its string form) so buildVaultRaftMembers' call to
 	// NodeAddressResolver(nodeID) is well-defined.
 	for i := range n {
 		nodeGLID := glid.New()

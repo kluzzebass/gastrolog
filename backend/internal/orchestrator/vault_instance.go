@@ -124,8 +124,8 @@ type VaultInstance struct {
 	OverlayFromFSM func(chunk.ChunkMeta) chunk.ChunkMeta
 }
 
-// applyRaftCallbacks wires raft-backed metadata operations from a tierRaftCallbacks.
-func (t *VaultInstance) applyRaftCallbacks(cb tierRaftCallbacks) {
+// applyRaftCallbacks wires raft-backed metadata operations from a vaultRaftCallbacks.
+func (t *VaultInstance) applyRaftCallbacks(cb vaultRaftCallbacks) {
 	t.HasRaftLeader = cb.hasLeader
 	t.IsRaftLeader = cb.isLeader
 	t.ApplyRaftRequestDelete = cb.applyRequestDelete

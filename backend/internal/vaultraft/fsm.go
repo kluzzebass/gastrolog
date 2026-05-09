@@ -31,7 +31,7 @@ const vaultSnapVersion uint32 = 1
 // type (LogCommand, LogConfiguration, LogNoop) whereas FSM.Apply is only
 // called for LogCommand. On a fresh cluster the only log entries are the
 // bootstrap configuration and the leader's post-election no-op, which
-// never reach FSM.Apply. See buildTierRaftCallbacks in
+// never reach FSM.Apply. See buildVaultRaftCallbacks in
 // orchestrator/reconfig_vaults.go for the readiness wiring.
 type FSM struct {
 	mu sync.Mutex

@@ -42,7 +42,7 @@ import (
 // gastrolog-5j6eu: on fresh init with no user commands, readiness must
 // flip true because hraft's post-bootstrap LogConfiguration + post-
 // election LogNoop advance r.AppliedIndex(), and the isFSMReady closure
-// we wire in buildTierRaftCallbacks now keys on that.
+// we wire in buildVaultRaftCallbacks now keys on that.
 //
 // Goes through the full orchestrator.LocalVaultsReplicationReady →
 // Vault.ReadinessErr → inst.IsFSMReady path used by search/ingest RPCs

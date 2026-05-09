@@ -633,7 +633,7 @@ func TestApplyConfigIndexManagerReceivesChunkManager(t *testing.T) {
 
 // --- gastrolog-292yi: all nodes in all inst Raft groups ---
 
-// TestBuildTierRaftMembers_AllClusterNodes verifies that buildTierRaftMembers
+// TestBuildTierRaftMembers_AllClusterNodes verifies that buildVaultRaftMembers
 // returns every cluster node as a Raft member, regardless of storage placement.
 func TestBuildTierRaftMembers_AllClusterNodes(t *testing.T) {
 	t.Parallel()
@@ -656,7 +656,7 @@ func TestBuildTierRaftMembers_AllClusterNodes(t *testing.T) {
 		},
 	}
 
-	members := orch.buildTierRaftMembers(clusterNodes, factories)
+	members := orch.buildVaultRaftMembers(clusterNodes, factories)
 
 	if len(members) != 3 {
 		t.Fatalf("expected 3 members (all cluster nodes), got %d", len(members))
@@ -699,7 +699,7 @@ func TestBuildTierRaftMembers_UnresolvableNodeSkipped(t *testing.T) {
 		},
 	}
 
-	members := orch.buildTierRaftMembers(clusterNodes, factories)
+	members := orch.buildVaultRaftMembers(clusterNodes, factories)
 
 	if len(members) != 1 {
 		t.Fatalf("expected 1 member (only resolvable node), got %d", len(members))
@@ -714,7 +714,7 @@ func TestBuildTierRaftMembers_UnresolvableNodeSkipped(t *testing.T) {
 func TestBuildTierRaftMembers_NilResolver(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{})
-	members := orch.buildTierRaftMembers(
+	members := orch.buildVaultRaftMembers(
 		[]system.NodeConfig{{ID: glid.New()}},
 		Factories{},
 	)
@@ -727,7 +727,7 @@ func TestBuildTierRaftMembers_NilResolver(t *testing.T) {
 func TestBuildTierRaftMembers_EmptyNodes(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{})
-	members := orch.buildTierRaftMembers(nil, Factories{
+	members := orch.buildVaultRaftMembers(nil, Factories{
 		NodeAddressResolver: func(string) (string, bool) { return "addr", true },
 	})
 	if members != nil {

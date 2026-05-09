@@ -398,7 +398,7 @@ func (o *Orchestrator) tierLabel(instID glid.GLID) string {
 	if err != nil || sys == nil {
 		return ""
 	}
-	if vaultCfg2 := findTierConfig(sys.Config.Tiers, instID); vaultCfg2 != nil {
+	if vaultCfg2 := findVaultTierConfig(sys.Config.Tiers, instID); vaultCfg2 != nil {
 		return vaultCfg2.Name
 	}
 	return ""

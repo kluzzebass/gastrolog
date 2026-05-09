@@ -95,8 +95,8 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg system.VaultConfig
 // Rotation and retention are handled by discovery-based sweep jobs
 // (rotationSweep and retentionSweepAll). No per-vault setup needed during AddVault.
 
-// findTierConfig finds a TierConfig by ID in a slice.
-func findTierConfig(tiers []system.TierConfig, id glid.GLID) *system.TierConfig {
+// findVaultTierConfig finds a TierConfig by ID in a slice.
+func findVaultTierConfig(tiers []system.TierConfig, id glid.GLID) *system.TierConfig {
 	for i := range tiers {
 		if tiers[i].ID == id {
 			return &tiers[i]
@@ -968,7 +968,7 @@ func applyRotationPolicy(cm chunk.ChunkManager, policies []system.RotationPolicy
 	return nil
 }
 
-// tierRaftCallbacks holds the callbacks returned by ensureVaultCtlMetadata.
+// vaultRaftCallbacks holds the callbacks returned by ensureVaultCtlMetadata.
 func (o *Orchestrator) destroyVaultControlPlaneRaftGroup(vaultID glid.GLID) {
 	if o.vaultCtlLeaders != nil {
 		o.vaultCtlLeaders.Stop(vaultID)
@@ -999,7 +999,7 @@ func (o *Orchestrator) tryStartClusterRaftGroup(groupID string, fsm hraft.FSM, c
 	if factories.GroupManager == nil {
 		return nil, nil
 	}
-	members := o.buildTierRaftMembers(clusterNodes, factories)
+	members := o.buildVaultRaftMembers(clusterNodes, factories)
 	if len(members) < len(clusterNodes) {
 		o.logger.Debug("cluster raft group: not all cluster nodes resolvable, deferring creation",
 			"group", groupID,
@@ -1033,7 +1033,7 @@ func (o *Orchestrator) tryStartClusterRaftGroup(groupID string, fsm hraft.FSM, c
 	return g, members
 }
 
-type tierRaftCallbacks struct {
+type vaultRaftCallbacks struct {
 	hasLeader           func() bool
 	isLeader            func() bool
 	isFSMReady          func() bool
@@ -1063,14 +1063,14 @@ type tierRaftCallbacks struct {
 //
 // Call this BEFORE creating the chunk manager so Raft can start
 // elections while chunk loading is still in progress.
-func (o *Orchestrator) ensureVaultCtlMetadata(vaultCfg2 system.TierConfig, clusterNodes []system.NodeConfig, factories Factories) (*raftgroup.Group, vaultctlfsm.Applier, tierRaftCallbacks) {
+func (o *Orchestrator) ensureVaultCtlMetadata(vaultCfg2 system.TierConfig, clusterNodes []system.NodeConfig, factories Factories) (*raftgroup.Group, vaultctlfsm.Applier, vaultRaftCallbacks) {
 	if factories.GroupManager == nil {
-		return nil, nil, tierRaftCallbacks{}
+		return nil, nil, vaultRaftCallbacks{}
 	}
 	vaultGID := raftgroup.VaultControlPlaneGroupID(vaultCfg2.VaultID)
 	g, members := o.tryStartClusterRaftGroup(vaultGID, vaultraft.NewFSM(), clusterNodes, factories)
 	if g == nil {
-		return nil, nil, tierRaftCallbacks{}
+		return nil, nil, vaultRaftCallbacks{}
 	}
 
 	o.vaultCtlLeaders.SetDesiredMembers(vaultCfg2.VaultID, members)
@@ -1078,7 +1078,7 @@ func (o *Orchestrator) ensureVaultCtlMetadata(vaultCfg2 system.TierConfig, clust
 
 	vfsm, ok := g.FSM.(*vaultraft.FSM)
 	if !ok || vfsm == nil {
-		return nil, nil, tierRaftCallbacks{}
+		return nil, nil, vaultRaftCallbacks{}
 	}
 	// Wire the after-restore hook so that vault-ctl snapshot install on
 	// this node triggers the receipt protocol's catchup pass on every
@@ -1100,10 +1100,10 @@ func (o *Orchestrator) ensureVaultCtlMetadata(vaultCfg2 system.TierConfig, clust
 		applier = &vaultCtlTierApplier{o: o, vaultID: vaultCfg2.VaultID, instID: vaultCfg2.ID}
 	}
 
-	return g, applier, buildTierRaftCallbacks(r, tierFSM, applier)
+	return g, applier, buildVaultRaftCallbacks(r, tierFSM, applier)
 }
 
-// buildTierRaftCallbacks constructs the callback struct for replicated inst
+// buildVaultRaftCallbacks constructs the callback struct for replicated inst
 // chunk metadata (vault control-plane Raft in cluster mode).
 // Extracted from ensureVaultCtlMetadata to keep cognitive complexity within lint
 // thresholds.
@@ -1124,8 +1124,8 @@ func (o *Orchestrator) ensureVaultCtlMetadata(vaultCfg2 system.TierConfig, clust
 // which a fresh vault with no chunks never sends — keying readiness on any
 // FSM-level signal leaves every fresh vault wedged as "not ready" until
 // first ingestion.
-func buildTierRaftCallbacks(r *hraft.Raft, fsm *vaultctlfsm.FSM, applier vaultctlfsm.Applier) tierRaftCallbacks {
-	return tierRaftCallbacks{
+func buildVaultRaftCallbacks(r *hraft.Raft, fsm *vaultctlfsm.FSM, applier vaultctlfsm.Applier) vaultRaftCallbacks {
+	return vaultRaftCallbacks{
 		hasLeader:  func() bool { return r.Leader() != "" },
 		isLeader:   func() bool { return r.State() == hraft.Leader },
 		isFSMReady: func() bool { return r.AppliedIndex() > 0 },
@@ -1406,11 +1406,11 @@ func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 	})
 }
 
-// buildTierRaftMembers returns ALL cluster nodes as Raft members for a vault
+// buildVaultRaftMembers returns ALL cluster nodes as Raft members for a vault
 // control-plane Raft group. Every node participates regardless of which tiers
 // it stores — nodes without local inst data still replicate inst metadata.
 // See gastrolog-292yi.
-func (o *Orchestrator) buildTierRaftMembers(clusterNodes []system.NodeConfig, factories Factories) []hraft.Server {
+func (o *Orchestrator) buildVaultRaftMembers(clusterNodes []system.NodeConfig, factories Factories) []hraft.Server {
 	if factories.NodeAddressResolver == nil || len(clusterNodes) == 0 {
 		return nil
 	}
