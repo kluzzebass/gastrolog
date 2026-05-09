@@ -1782,9 +1782,8 @@ func (x *ChunkReplicationAck) GetChunkId() []byte {
 type RequestReplicaCatchupRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	VaultId         []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
-	TierId          []byte                 `protobuf:"bytes,2,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"`                              // retained transitionally during the vault refactor (gastrolog-257l7)
-	ChunkIds        [][]byte               `protobuf:"bytes,3,rep,name=chunk_ids,json=chunkIds,proto3" json:"chunk_ids,omitempty"`                        // 16-byte ChunkIDs
-	RequesterNodeId []byte                 `protobuf:"bytes,4,opt,name=requester_node_id,json=requesterNodeId,proto3" json:"requester_node_id,omitempty"` // utf-8 node ID of the requesting follower
+	ChunkIds        [][]byte               `protobuf:"bytes,2,rep,name=chunk_ids,json=chunkIds,proto3" json:"chunk_ids,omitempty"`                        // 16-byte ChunkIDs
+	RequesterNodeId []byte                 `protobuf:"bytes,3,opt,name=requester_node_id,json=requesterNodeId,proto3" json:"requester_node_id,omitempty"` // utf-8 node ID of the requesting follower
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -1822,13 +1821,6 @@ func (*RequestReplicaCatchupRequest) Descriptor() ([]byte, []int) {
 func (x *RequestReplicaCatchupRequest) GetVaultId() []byte {
 	if x != nil {
 		return x.VaultId
-	}
-	return nil
-}
-
-func (x *RequestReplicaCatchupRequest) GetTierId() []byte {
-	if x != nil {
-		return x.TierId
 	}
 	return nil
 }
@@ -3869,12 +3861,11 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x13ChunkReplicationAck\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12\x19\n" +
-	"\bchunk_id\x18\x03 \x01(\fR\achunkId\"\x9b\x01\n" +
+	"\bchunk_id\x18\x03 \x01(\fR\achunkId\"\x82\x01\n" +
 	"\x1cRequestReplicaCatchupRequest\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12\x17\n" +
-	"\atier_id\x18\x02 \x01(\fR\x06tierId\x12\x1b\n" +
-	"\tchunk_ids\x18\x03 \x03(\fR\bchunkIds\x12*\n" +
-	"\x11requester_node_id\x18\x04 \x01(\fR\x0frequesterNodeId\"=\n" +
+	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12\x1b\n" +
+	"\tchunk_ids\x18\x02 \x03(\fR\bchunkIds\x12*\n" +
+	"\x11requester_node_id\x18\x03 \x01(\fR\x0frequesterNodeId\"=\n" +
 	"\x1dRequestReplicaCatchupResponse\x12\x1c\n" +
 	"\tscheduled\x18\x01 \x01(\rR\tscheduled\"j\n" +
 	"\x14ForwardSearchRequest\x12\x19\n" +

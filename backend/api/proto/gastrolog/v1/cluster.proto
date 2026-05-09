@@ -276,9 +276,8 @@ message ChunkReplicationAck {
 // partition / rejoin window — see gastrolog-2dgvj.
 message RequestReplicaCatchupRequest {
   bytes vault_id = 1;
-  bytes tier_id = 2;                   // retained transitionally during the vault refactor (gastrolog-257l7)
-  repeated bytes chunk_ids = 3;        // 16-byte ChunkIDs
-  bytes requester_node_id = 4;         // utf-8 node ID of the requesting follower
+  repeated bytes chunk_ids = 2;        // 16-byte ChunkIDs
+  bytes requester_node_id = 3;         // utf-8 node ID of the requesting follower
 }
 
 // RequestReplicaCatchupResponse acknowledges receipt of the catchup

@@ -250,7 +250,7 @@ func (tr *ChunkReplicator) DeleteChunk(ctx context.Context, nodeID string, vault
 // which is exclusively leader→follower commands): the request is
 // follower→leader and small, so a one-shot Invoke is the cleaner
 // match.
-func (tr *ChunkReplicator) RequestReplicaCatchup(ctx context.Context, leaderNodeID string, vaultID, tierID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error) {
+func (tr *ChunkReplicator) RequestReplicaCatchup(ctx context.Context, leaderNodeID string, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error) {
 	conn, err := tr.peers.Conn(leaderNodeID)
 	if err != nil {
 		return 0, fmt.Errorf("dial leader %s: %w", leaderNodeID, err)

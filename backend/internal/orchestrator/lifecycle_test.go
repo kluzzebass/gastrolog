@@ -35,7 +35,7 @@ func (m *slowAckReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ 
 func (m *slowAckReplicator) DeleteChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
 }
-func (m *slowAckReplicator) RequestReplicaCatchup(_ context.Context, _ string, _, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {
+func (m *slowAckReplicator) RequestReplicaCatchup(_ context.Context, _ string, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {
 	return 0, nil
 }
 

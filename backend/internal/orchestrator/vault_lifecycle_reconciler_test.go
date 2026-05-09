@@ -24,7 +24,6 @@ type captureCatchupReplicator struct {
 	calls          atomic.Int32
 	lastLeader     string
 	lastVault      glid.GLID
-	lastTier       glid.GLID
 	lastChunks     []chunk.ChunkID
 	lastRequester  string
 	scheduledRet   uint32
@@ -43,11 +42,10 @@ func (c *captureCatchupReplicator) ImportSealedChunk(_ context.Context, _ string
 func (c *captureCatchupReplicator) DeleteChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
 }
-func (c *captureCatchupReplicator) RequestReplicaCatchup(_ context.Context, leaderNodeID string, vaultID, tierID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error) {
+func (c *captureCatchupReplicator) RequestReplicaCatchup(_ context.Context, leaderNodeID string, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error) {
 	c.calls.Add(1)
 	c.lastLeader = leaderNodeID
 	c.lastVault = vaultID
-	c.lastTier = tierID
 	c.lastChunks = append([]chunk.ChunkID(nil), chunkIDs...)
 	c.lastRequester = requesterNodeID
 	if c.failNextWith != nil {

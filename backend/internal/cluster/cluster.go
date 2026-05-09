@@ -125,7 +125,7 @@ type Server struct {
 	// Returns the count of chunks for which a push was actually scheduled
 	// (after leader-side filtering: tombstoned, cloud-backed, missing-locally).
 	// Set by the composition root in app.go. See gastrolog-2dgvj.
-	replicaCatchupFn func(ctx context.Context, vaultID, tierID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (int, error)
+	replicaCatchupFn func(ctx context.Context, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (int, error)
 
 	// recordAppender writes forwarded records into local vaults.
 	// Set after the orchestrator is created, before forwarding starts.
@@ -478,7 +478,7 @@ func (s *Server) SetNodeSuffrageFn(fn func(ctx context.Context, nodeID, nodeAddr
 // Returns the count of chunks for which a push was actually scheduled
 // (after leader-side filtering of tombstoned / cloud-backed / locally-
 // missing chunks). See gastrolog-2dgvj.
-func (s *Server) SetReplicaCatchupFn(fn func(ctx context.Context, vaultID, tierID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (int, error)) {
+func (s *Server) SetReplicaCatchupFn(fn func(ctx context.Context, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (int, error)) {
 	s.replicaCatchupFn = fn
 }
 

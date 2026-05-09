@@ -285,8 +285,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// validates leadership, filters chunk eligibility, and fans out pushes
 	// asynchronously via the existing replicateToFollower machinery.
 	if clusterSrv != nil {
-		clusterSrv.SetReplicaCatchupFn(func(ctx context.Context, vaultID, tierID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (int, error) {
-			n, err := orch.CatchupSelectedChunks(ctx, vaultID, tierID, requesterNodeID, chunkIDs)
+		clusterSrv.SetReplicaCatchupFn(func(ctx context.Context, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (int, error) {
+			n, err := orch.CatchupSelectedChunks(ctx, vaultID, requesterNodeID, chunkIDs)
 			return int(n), err
 		})
 	}

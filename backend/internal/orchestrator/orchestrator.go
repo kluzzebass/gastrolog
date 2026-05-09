@@ -133,7 +133,7 @@ type ChunkReplicator interface {
 	// local disk; the placement leader fans pushes out asynchronously via
 	// existing replicateToFollower machinery. Returns the count of
 	// pushes scheduled (after leader-side filtering). See gastrolog-2dgvj.
-	RequestReplicaCatchup(ctx context.Context, leaderNodeID string, vaultID, tierID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error)
+	RequestReplicaCatchup(ctx context.Context, leaderNodeID string, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error)
 }
 
 // RemoteTransferrer sends records to a remote node for cross-node chunk

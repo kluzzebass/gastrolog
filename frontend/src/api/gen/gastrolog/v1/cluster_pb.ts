@@ -1443,23 +1443,16 @@ export class RequestReplicaCatchupRequest extends Message<RequestReplicaCatchupR
   vaultId = new Uint8Array(0);
 
   /**
-   * retained transitionally during the vault refactor (gastrolog-257l7)
-   *
-   * @generated from field: bytes tier_id = 2;
-   */
-  tierId = new Uint8Array(0);
-
-  /**
    * 16-byte ChunkIDs
    *
-   * @generated from field: repeated bytes chunk_ids = 3;
+   * @generated from field: repeated bytes chunk_ids = 2;
    */
   chunkIds: Uint8Array[] = [];
 
   /**
    * utf-8 node ID of the requesting follower
    *
-   * @generated from field: bytes requester_node_id = 4;
+   * @generated from field: bytes requester_node_id = 3;
    */
   requesterNodeId = new Uint8Array(0);
 
@@ -1472,9 +1465,8 @@ export class RequestReplicaCatchupRequest extends Message<RequestReplicaCatchupR
   static readonly typeName = "gastrolog.v1.RequestReplicaCatchupRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 2, name: "tier_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 3, name: "chunk_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
-    { no: 4, name: "requester_node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "chunk_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 3, name: "requester_node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RequestReplicaCatchupRequest {

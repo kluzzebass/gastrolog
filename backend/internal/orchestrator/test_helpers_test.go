@@ -567,12 +567,12 @@ func (d *directChunkReplicator) DeleteChunk(_ context.Context, nodeID string, va
 	return orch.DeleteChunkFromTier(vaultID, tierID, chunkID)
 }
 
-func (d *directChunkReplicator) RequestReplicaCatchup(ctx context.Context, leaderNodeID string, vaultID, tierID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error) {
+func (d *directChunkReplicator) RequestReplicaCatchup(ctx context.Context, leaderNodeID string, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error) {
 	orch, ok := d.nodes[leaderNodeID]
 	if !ok {
 		return 0, fmt.Errorf("directChunkReplicator: unknown leader %q", leaderNodeID)
 	}
-	return orch.CatchupSelectedChunks(ctx, vaultID, tierID, requesterNodeID, chunkIDs)
+	return orch.CatchupSelectedChunks(ctx, vaultID, requesterNodeID, chunkIDs)
 }
 
 // newClusterRetentionRunner creates a retention runner with follower targets

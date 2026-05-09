@@ -171,16 +171,20 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, tierID glid
 // deliberate choice: the RPC stays cheap, the slow per-chunk transfers
 // run on a single goroutine sequentially per (vault, tier, requester)
 // to avoid storming the bandwidth path. See gastrolog-2dgvj.
-func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID, tierID glid.GLID, requesterNodeID string, chunkIDs []chunk.ChunkID) (uint32, error) {
-	tier := o.findLocalTier(vaultID, tierID)
-	if tier == nil {
-		return 0, fmt.Errorf("tier %s not found in vault %s", tierID, vaultID)
+func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID glid.GLID, requesterNodeID string, chunkIDs []chunk.ChunkID) (uint32, error) {
+	o.mu.RLock()
+	vault := o.vaults[vaultID]
+	o.mu.RUnlock()
+	if vault == nil || vault.Instance == nil {
+		return 0, fmt.Errorf("vault %s not found", vaultID)
 	}
+	tier := vault.Instance
+	tierID := tier.TierID
 	if tier.IsFollower {
-		return 0, fmt.Errorf("not placement leader for tier %s (follower)", tierID)
+		return 0, fmt.Errorf("not placement leader for vault %s (follower)", vaultID)
 	}
 	if o.chunkReplicator == nil {
-		return 0, errors.New("no tier replicator configured")
+		return 0, errors.New("no chunk replicator configured")
 	}
 
 	metas, err := tier.Chunks.List()

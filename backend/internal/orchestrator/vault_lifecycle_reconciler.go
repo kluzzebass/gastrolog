@@ -754,7 +754,7 @@ func (r *VaultLifecycleReconciler) SweepMissingReplicas() {
 	defer cancel()
 
 	scheduled, err := r.orch.chunkReplicator.RequestReplicaCatchup(
-		ctx, r.tier.LeaderNodeID, r.vaultID, r.tierID, missing, r.localNodeID)
+		ctx, r.tier.LeaderNodeID, r.vaultID, missing, r.localNodeID)
 	if err != nil {
 		// The next sweep tick will retry. Possible causes: leader changed
 		// after we resolved tier.LeaderNodeID, leader is unreachable, peer
