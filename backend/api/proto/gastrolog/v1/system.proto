@@ -161,10 +161,6 @@ service SystemService {
   // Node storage
   rpc SetNodeStorageConfig(SetNodeStorageConfigRequest) returns (SetNodeStorageConfigResponse);
 
-  // Tiers
-  rpc PutTier(PutTierRequest) returns (PutTierResponse);
-  rpc DeleteTier(DeleteTierRequest) returns (DeleteTierResponse);
-
   // DeleteLookup removes a lookup table by name (any type).
   rpc DeleteLookup(DeleteLookupRequest) returns (DeleteLookupResponse);
 }
@@ -1095,25 +1091,6 @@ message SetNodeStorageConfigRequest {
 }
 
 message SetNodeStorageConfigResponse {
-  GetSystemResponse system = 1;
-}
-
-// --- Tiers ---
-
-message PutTierRequest {
-  TierConfig config = 1;
-}
-
-message PutTierResponse {
-  GetSystemResponse system = 1;
-}
-
-message DeleteTierRequest {
-  bytes id = 1;
-  bool drain = 2;   // When true, drain chunks to the next tier before deleting.
-}
-
-message DeleteTierResponse {
   GetSystemResponse system = 1;
 }
 

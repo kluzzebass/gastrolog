@@ -86,8 +86,6 @@ func DefaultRoutes() map[string]RPCRoute {
 		gastrologv1connect.SystemServicePutCloudServiceProcedure:      {Strategy: RouteLeader},
 		gastrologv1connect.SystemServiceDeleteCloudServiceProcedure:   {Strategy: RouteLeader},
 		gastrologv1connect.SystemServiceSetNodeStorageConfigProcedure: {Strategy: RouteLeader},
-		gastrologv1connect.SystemServicePutTierProcedure:              {Strategy: RouteLeader},
-		gastrologv1connect.SystemServiceDeleteTierProcedure:           {Strategy: RouteLeader},
 		gastrologv1connect.SystemServiceDeleteLookupProcedure:         {Strategy: RouteLeader},
 
 		// ── JobService ───────────────────────────────────────────────────

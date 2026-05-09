@@ -57,6 +57,4 @@ export {
   usePutCloudService,
   useDeleteCloudService,
   useSetNodeStorageConfig,
-  usePutTier,
-  useDeleteTier,
 } from "./useStorage";

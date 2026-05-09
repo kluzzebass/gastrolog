@@ -177,11 +177,6 @@ const (
 	// SystemServiceSetNodeStorageConfigProcedure is the fully-qualified name of the SystemService's
 	// SetNodeStorageConfig RPC.
 	SystemServiceSetNodeStorageConfigProcedure = "/gastrolog.v1.SystemService/SetNodeStorageConfig"
-	// SystemServicePutTierProcedure is the fully-qualified name of the SystemService's PutTier RPC.
-	SystemServicePutTierProcedure = "/gastrolog.v1.SystemService/PutTier"
-	// SystemServiceDeleteTierProcedure is the fully-qualified name of the SystemService's DeleteTier
-	// RPC.
-	SystemServiceDeleteTierProcedure = "/gastrolog.v1.SystemService/DeleteTier"
 	// SystemServiceDeleteLookupProcedure is the fully-qualified name of the SystemService's
 	// DeleteLookup RPC.
 	SystemServiceDeleteLookupProcedure = "/gastrolog.v1.SystemService/DeleteLookup"
@@ -294,9 +289,6 @@ type SystemServiceClient interface {
 	DeleteCloudService(context.Context, *connect.Request[v1.DeleteCloudServiceRequest]) (*connect.Response[v1.DeleteCloudServiceResponse], error)
 	// Node storage
 	SetNodeStorageConfig(context.Context, *connect.Request[v1.SetNodeStorageConfigRequest]) (*connect.Response[v1.SetNodeStorageConfigResponse], error)
-	// Tiers
-	PutTier(context.Context, *connect.Request[v1.PutTierRequest]) (*connect.Response[v1.PutTierResponse], error)
-	DeleteTier(context.Context, *connect.Request[v1.DeleteTierRequest]) (*connect.Response[v1.DeleteTierResponse], error)
 	// DeleteLookup removes a lookup table by name (any type).
 	DeleteLookup(context.Context, *connect.Request[v1.DeleteLookupRequest]) (*connect.Response[v1.DeleteLookupResponse], error)
 }
@@ -606,18 +598,6 @@ func NewSystemServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(systemServiceMethods.ByName("SetNodeStorageConfig")),
 			connect.WithClientOptions(opts...),
 		),
-		putTier: connect.NewClient[v1.PutTierRequest, v1.PutTierResponse](
-			httpClient,
-			baseURL+SystemServicePutTierProcedure,
-			connect.WithSchema(systemServiceMethods.ByName("PutTier")),
-			connect.WithClientOptions(opts...),
-		),
-		deleteTier: connect.NewClient[v1.DeleteTierRequest, v1.DeleteTierResponse](
-			httpClient,
-			baseURL+SystemServiceDeleteTierProcedure,
-			connect.WithSchema(systemServiceMethods.ByName("DeleteTier")),
-			connect.WithClientOptions(opts...),
-		),
 		deleteLookup: connect.NewClient[v1.DeleteLookupRequest, v1.DeleteLookupResponse](
 			httpClient,
 			baseURL+SystemServiceDeleteLookupProcedure,
@@ -678,8 +658,6 @@ type systemServiceClient struct {
 	putCloudService       *connect.Client[v1.PutCloudServiceRequest, v1.PutCloudServiceResponse]
 	deleteCloudService    *connect.Client[v1.DeleteCloudServiceRequest, v1.DeleteCloudServiceResponse]
 	setNodeStorageConfig  *connect.Client[v1.SetNodeStorageConfigRequest, v1.SetNodeStorageConfigResponse]
-	putTier               *connect.Client[v1.PutTierRequest, v1.PutTierResponse]
-	deleteTier            *connect.Client[v1.DeleteTierRequest, v1.DeleteTierResponse]
 	deleteLookup          *connect.Client[v1.DeleteLookupRequest, v1.DeleteLookupResponse]
 }
 
@@ -928,16 +906,6 @@ func (c *systemServiceClient) SetNodeStorageConfig(ctx context.Context, req *con
 	return c.setNodeStorageConfig.CallUnary(ctx, req)
 }
 
-// PutTier calls gastrolog.v1.SystemService.PutTier.
-func (c *systemServiceClient) PutTier(ctx context.Context, req *connect.Request[v1.PutTierRequest]) (*connect.Response[v1.PutTierResponse], error) {
-	return c.putTier.CallUnary(ctx, req)
-}
-
-// DeleteTier calls gastrolog.v1.SystemService.DeleteTier.
-func (c *systemServiceClient) DeleteTier(ctx context.Context, req *connect.Request[v1.DeleteTierRequest]) (*connect.Response[v1.DeleteTierResponse], error) {
-	return c.deleteTier.CallUnary(ctx, req)
-}
-
 // DeleteLookup calls gastrolog.v1.SystemService.DeleteLookup.
 func (c *systemServiceClient) DeleteLookup(ctx context.Context, req *connect.Request[v1.DeleteLookupRequest]) (*connect.Response[v1.DeleteLookupResponse], error) {
 	return c.deleteLookup.CallUnary(ctx, req)
@@ -1050,9 +1018,6 @@ type SystemServiceHandler interface {
 	DeleteCloudService(context.Context, *connect.Request[v1.DeleteCloudServiceRequest]) (*connect.Response[v1.DeleteCloudServiceResponse], error)
 	// Node storage
 	SetNodeStorageConfig(context.Context, *connect.Request[v1.SetNodeStorageConfigRequest]) (*connect.Response[v1.SetNodeStorageConfigResponse], error)
-	// Tiers
-	PutTier(context.Context, *connect.Request[v1.PutTierRequest]) (*connect.Response[v1.PutTierResponse], error)
-	DeleteTier(context.Context, *connect.Request[v1.DeleteTierRequest]) (*connect.Response[v1.DeleteTierResponse], error)
 	// DeleteLookup removes a lookup table by name (any type).
 	DeleteLookup(context.Context, *connect.Request[v1.DeleteLookupRequest]) (*connect.Response[v1.DeleteLookupResponse], error)
 }
@@ -1358,18 +1323,6 @@ func NewSystemServiceHandler(svc SystemServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(systemServiceMethods.ByName("SetNodeStorageConfig")),
 		connect.WithHandlerOptions(opts...),
 	)
-	systemServicePutTierHandler := connect.NewUnaryHandler(
-		SystemServicePutTierProcedure,
-		svc.PutTier,
-		connect.WithSchema(systemServiceMethods.ByName("PutTier")),
-		connect.WithHandlerOptions(opts...),
-	)
-	systemServiceDeleteTierHandler := connect.NewUnaryHandler(
-		SystemServiceDeleteTierProcedure,
-		svc.DeleteTier,
-		connect.WithSchema(systemServiceMethods.ByName("DeleteTier")),
-		connect.WithHandlerOptions(opts...),
-	)
 	systemServiceDeleteLookupHandler := connect.NewUnaryHandler(
 		SystemServiceDeleteLookupProcedure,
 		svc.DeleteLookup,
@@ -1476,10 +1429,6 @@ func NewSystemServiceHandler(svc SystemServiceHandler, opts ...connect.HandlerOp
 			systemServiceDeleteCloudServiceHandler.ServeHTTP(w, r)
 		case SystemServiceSetNodeStorageConfigProcedure:
 			systemServiceSetNodeStorageConfigHandler.ServeHTTP(w, r)
-		case SystemServicePutTierProcedure:
-			systemServicePutTierHandler.ServeHTTP(w, r)
-		case SystemServiceDeleteTierProcedure:
-			systemServiceDeleteTierHandler.ServeHTTP(w, r)
 		case SystemServiceDeleteLookupProcedure:
 			systemServiceDeleteLookupHandler.ServeHTTP(w, r)
 		default:
@@ -1685,14 +1634,6 @@ func (UnimplementedSystemServiceHandler) DeleteCloudService(context.Context, *co
 
 func (UnimplementedSystemServiceHandler) SetNodeStorageConfig(context.Context, *connect.Request[v1.SetNodeStorageConfigRequest]) (*connect.Response[v1.SetNodeStorageConfigResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.SetNodeStorageConfig is not implemented"))
-}
-
-func (UnimplementedSystemServiceHandler) PutTier(context.Context, *connect.Request[v1.PutTierRequest]) (*connect.Response[v1.PutTierResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.PutTier is not implemented"))
-}
-
-func (UnimplementedSystemServiceHandler) DeleteTier(context.Context, *connect.Request[v1.DeleteTierRequest]) (*connect.Response[v1.DeleteTierResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.DeleteTier is not implemented"))
 }
 
 func (UnimplementedSystemServiceHandler) DeleteLookup(context.Context, *connect.Request[v1.DeleteLookupRequest]) (*connect.Response[v1.DeleteLookupResponse], error) {
