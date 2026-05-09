@@ -181,7 +181,6 @@ func (tr *ChunkReplicator) AppendRecords(ctx context.Context, nodeID string, vau
 	}
 	return tr.send(ctx, tierID, nodeID, &gastrologv1.ChunkReplicationCommand{
 		VaultId: vaultID.ToProto(),
-		TierId:  tierID.ToProto(),
 		Command: &gastrologv1.ChunkReplicationCommand_Append{
 			Append: &gastrologv1.ChunkReplicationAppend{
 				ChunkId: glid.GLID(chunkID).ToProto(),
@@ -196,7 +195,6 @@ func (tr *ChunkReplicator) AppendRecords(ctx context.Context, nodeID string, vau
 func (tr *ChunkReplicator) SealVault(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
 	return tr.send(ctx, tierID, nodeID, &gastrologv1.ChunkReplicationCommand{
 		VaultId: vaultID.ToProto(),
-		TierId:  tierID.ToProto(),
 		Command: &gastrologv1.ChunkReplicationCommand_Seal{
 			Seal: &gastrologv1.ChunkReplicationSeal{
 				ChunkId: glid.GLID(chunkID).ToProto(),
@@ -213,7 +211,6 @@ func (tr *ChunkReplicator) ImportSealedChunk(ctx context.Context, nodeID string,
 	}
 	return tr.send(ctx, tierID, nodeID, &gastrologv1.ChunkReplicationCommand{
 		VaultId: vaultID.ToProto(),
-		TierId:  tierID.ToProto(),
 		Command: &gastrologv1.ChunkReplicationCommand_ImportSealed{
 			ImportSealed: &gastrologv1.ChunkReplicationImport{
 				ChunkId: glid.GLID(chunkID).ToProto(),
@@ -227,7 +224,6 @@ func (tr *ChunkReplicator) ImportSealedChunk(ctx context.Context, nodeID string,
 func (tr *ChunkReplicator) DeleteChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
 	return tr.send(ctx, tierID, nodeID, &gastrologv1.ChunkReplicationCommand{
 		VaultId: vaultID.ToProto(),
-		TierId:  tierID.ToProto(),
 		Command: &gastrologv1.ChunkReplicationCommand_DeleteChunk{
 			DeleteChunk: &gastrologv1.ChunkReplicationDelete{
 				ChunkId: glid.GLID(chunkID).ToProto(),

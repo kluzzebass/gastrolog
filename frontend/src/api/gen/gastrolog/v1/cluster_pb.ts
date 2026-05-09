@@ -1119,11 +1119,6 @@ export class ForwardVaultApplyResponse extends Message<ForwardVaultApplyResponse
  * identifies the target vault; the oneof command determines the
  * operation. New command types can be added without changing framing.
  *
- * tier_id is retained transitionally during the vault refactor
- * (gastrolog-257l7) so the orchestrator's existing tier-keyed routing
- * continues to work. It is removed once the orchestrator's runtime
- * dispatch is vault-keyed.
- *
  * @generated from message gastrolog.v1.ChunkReplicationCommand
  */
 export class ChunkReplicationCommand extends Message<ChunkReplicationCommand> {
@@ -1131,11 +1126,6 @@ export class ChunkReplicationCommand extends Message<ChunkReplicationCommand> {
    * @generated from field: bytes vault_id = 1;
    */
   vaultId = new Uint8Array(0);
-
-  /**
-   * @generated from field: bytes tier_id = 2;
-   */
-  tierId = new Uint8Array(0);
 
   /**
    * @generated from oneof gastrolog.v1.ChunkReplicationCommand.command
@@ -1175,7 +1165,6 @@ export class ChunkReplicationCommand extends Message<ChunkReplicationCommand> {
   static readonly typeName = "gastrolog.v1.ChunkReplicationCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 2, name: "tier_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 10, name: "append", kind: "message", T: ChunkReplicationAppend, oneof: "command" },
     { no: 11, name: "seal", kind: "message", T: ChunkReplicationSeal, oneof: "command" },
     { no: 12, name: "import_sealed", kind: "message", T: ChunkReplicationImport, oneof: "command" },

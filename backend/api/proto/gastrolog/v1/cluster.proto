@@ -220,14 +220,8 @@ message ForwardVaultApplyResponse {}
 // ChunkReplicationCommand is sent leader → follower. The vault_id
 // identifies the target vault; the oneof command determines the
 // operation. New command types can be added without changing framing.
-//
-// tier_id is retained transitionally during the vault refactor
-// (gastrolog-257l7) so the orchestrator's existing tier-keyed routing
-// continues to work. It is removed once the orchestrator's runtime
-// dispatch is vault-keyed.
 message ChunkReplicationCommand {
   bytes vault_id = 1;
-  bytes tier_id = 2;
 
   oneof command {
     ChunkReplicationAppend append = 10;

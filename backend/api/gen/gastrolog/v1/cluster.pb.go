@@ -1379,15 +1379,9 @@ func (*ForwardVaultApplyResponse) Descriptor() ([]byte, []int) {
 // ChunkReplicationCommand is sent leader → follower. The vault_id
 // identifies the target vault; the oneof command determines the
 // operation. New command types can be added without changing framing.
-//
-// tier_id is retained transitionally during the vault refactor
-// (gastrolog-257l7) so the orchestrator's existing tier-keyed routing
-// continues to work. It is removed once the orchestrator's runtime
-// dispatch is vault-keyed.
 type ChunkReplicationCommand struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	VaultId []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
-	TierId  []byte                 `protobuf:"bytes,2,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"`
 	// Types that are valid to be assigned to Command:
 	//
 	//	*ChunkReplicationCommand_Append
@@ -1432,13 +1426,6 @@ func (*ChunkReplicationCommand) Descriptor() ([]byte, []int) {
 func (x *ChunkReplicationCommand) GetVaultId() []byte {
 	if x != nil {
 		return x.VaultId
-	}
-	return nil
-}
-
-func (x *ChunkReplicationCommand) GetTierId() []byte {
-	if x != nil {
-		return x.TierId
 	}
 	return nil
 }
@@ -3838,10 +3825,9 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x18ForwardVaultApplyRequest\x12\x19\n" +
 	"\bgroup_id\x18\x01 \x01(\fR\agroupId\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\fR\acommand\"\x1b\n" +
-	"\x19ForwardVaultApplyResponse\"\xea\x02\n" +
+	"\x19ForwardVaultApplyResponse\"\xd1\x02\n" +
 	"\x17ChunkReplicationCommand\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12\x17\n" +
-	"\atier_id\x18\x02 \x01(\fR\x06tierId\x12>\n" +
+	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12>\n" +
 	"\x06append\x18\n" +
 	" \x01(\v2$.gastrolog.v1.ChunkReplicationAppendH\x00R\x06append\x128\n" +
 	"\x04seal\x18\v \x01(\v2\".gastrolog.v1.ChunkReplicationSealH\x00R\x04seal\x12K\n" +

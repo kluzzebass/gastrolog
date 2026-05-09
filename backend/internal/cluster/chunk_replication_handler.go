@@ -44,7 +44,9 @@ func chunkReplicationStreamHandler(srv any, stream grpc.ServerStream) error {
 
 func (s *Server) handleReplicationCommand(ctx context.Context, msg *gastrologv1.ChunkReplicationCommand) *gastrologv1.ChunkReplicationAck {
 	vaultID := glid.FromBytes(msg.GetVaultId())
-	tierID := glid.FromBytes(msg.GetTierId())
+	// 1:1 vault:tier — tier shares the vault's ID. Internal handlers still
+	// take tierID for now; pass vaultID until they are migrated.
+	tierID := vaultID
 
 	switch cmd := msg.Command.(type) {
 	case *gastrologv1.ChunkReplicationCommand_Append:
