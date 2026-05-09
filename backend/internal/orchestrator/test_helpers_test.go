@@ -689,7 +689,6 @@ func setupCluster(t *testing.T, nodeIDs []string, instCount int, rotationRecords
 
 	// Create config store.
 	store := sysmem.NewStore()
-	instCfgs := make([]system.TierConfig, instCount)
 	for i := range instCount {
 		placements := make([]system.VaultPlacement, 0, len(nodeIDs))
 		placements = append(placements, system.VaultPlacement{
@@ -699,12 +698,6 @@ func setupCluster(t *testing.T, nodeIDs []string, instCount int, rotationRecords
 			placements = append(placements, system.VaultPlacement{
 				StorageID: system.SyntheticStorageID(fid), Leader: false,
 			})
-		}
-		instCfgs[i] = system.TierConfig{
-			ID:      instIDs[i],
-			Name:    fmt.Sprintf("inst-%d", i),
-			Type:    system.VaultTypeFile,
-			VaultID: vaultID,
 		}
 		_ = store.SetVaultPlacements(context.Background(), instIDs[i], placements)
 	}
