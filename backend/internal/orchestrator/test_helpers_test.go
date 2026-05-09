@@ -690,7 +690,7 @@ func setupCluster(t *testing.T, nodeIDs []string, instCount int, rotationRecords
 
 	// Create config store.
 	store := sysmem.NewStore()
-	tierCfgs := make([]system.TierConfig, instCount)
+	instCfgs := make([]system.TierConfig, instCount)
 	for i := range instCount {
 		placements := make([]system.VaultPlacement, 0, len(nodeIDs))
 		placements = append(placements, system.VaultPlacement{
@@ -701,13 +701,13 @@ func setupCluster(t *testing.T, nodeIDs []string, instCount int, rotationRecords
 				StorageID: system.SyntheticStorageID(fid), Leader: false,
 			})
 		}
-		tierCfgs[i] = system.TierConfig{
+		instCfgs[i] = system.TierConfig{
 			ID:      instIDs[i],
 			Name:    fmt.Sprintf("inst-%d", i),
 			Type:    system.VaultTypeFile,
 			VaultID: vaultID,
 		}
-		_ = store.PutTier(context.Background(), tierCfgs[i])
+		_ = store.PutTier(context.Background(), instCfgs[i])
 		_ = store.SetVaultPlacements(context.Background(), instIDs[i], placements)
 	}
 	_ = store.PutVault(context.Background(), system.VaultConfig{
@@ -735,7 +735,7 @@ func setupCluster(t *testing.T, nodeIDs []string, instCount int, rotationRecords
 		orchs[nid] = orch
 
 		isLeader := nid == leaderID
-		tiers := make([]*VaultInstance, instCount)
+		instances := make([]*VaultInstance, instCount)
 		instanceDirs := make([]string, instCount)
 		for i := range instCount {
 			dir := t.TempDir()
@@ -762,21 +762,21 @@ func setupCluster(t *testing.T, nodeIDs []string, instCount int, rotationRecords
 			} else {
 				inst.IsFollower = true
 			}
-			tiers[i] = inst
+			instances[i] = inst
 		}
 
 		// Phase 2 (gastrolog-3iy5l): vaults are single-instance. Use the
 		// first inst as the vault's instance; instCount > 1 is unused
 		// post-collapse (callers that asked for it were transition tests
 		// that have been removed).
-		vault := NewVault(vaultID, tiers[0])
+		vault := NewVault(vaultID, instances[0])
 		vault.Name = "cluster-vault"
 		orch.RegisterVault(vault)
 
 		nodes[nid] = &clusterTestNode{
 			nodeID:   nid,
 			orch:     orch,
-			instances:    tiers,
+			instances:    instances,
 			instanceDirs: instanceDirs,
 		}
 	}
