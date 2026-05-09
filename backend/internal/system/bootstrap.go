@@ -14,7 +14,6 @@ import (
 func DefaultConfig() *Config {
 	rotationID := glid.New()
 	retentionID := glid.New()
-	tierID := glid.New()
 	vaultID := glid.New()
 	routeID := glid.New()
 	ingesterID := glid.New()
@@ -28,23 +27,16 @@ func DefaultConfig() *Config {
 		RetentionPolicies: []RetentionPolicyConfig{
 			{ID: retentionID, Name: "default", MaxChunks: new(int64(10))},
 		},
-		Tiers: []TierConfig{
+		Vaults: []VaultConfig{
 			{
-				ID:               tierID,
+				ID:               vaultID,
 				Name:             "default",
+				Enabled:          true,
 				Type:             VaultTypeMemory,
-				VaultID:          vaultID,
 				RotationPolicyID: new(rotationID),
 				RetentionRules: []RetentionRule{
 					{RetentionPolicyID: retentionID},
 				},
-			},
-		},
-		Vaults: []VaultConfig{
-			{
-				ID:      vaultID,
-				Name:    "default",
-				Enabled: true,
 			},
 		},
 		Routes: []RouteConfig{
@@ -89,17 +81,10 @@ func Bootstrap(ctx context.Context, store Store) error {
 			return err
 		}
 	}
-	for _, tier := range cfg.Tiers {
-		if err := store.PutTier(ctx, tier); err != nil {
-			return err
-		}
-	}
-	// Populate the merged storage/lifecycle fields on each VaultConfig from
-	// its (single) tier in cfg.Tiers, so vaults written to the store carry
-	// the post-tier shape. The tier list is still seeded above for consumers
-	// that haven't migrated yet (gastrolog-257l7 — vault refactor in progress).
+	// 1:1 vault:tier — VaultConfig carries the storage/lifecycle fields
+	// directly. Bootstrap no longer writes TierConfig; the FSM bridge
+	// syncTierFromVault mirrors VaultConfig → TierConfig on every PutVault.
 	for _, v := range cfg.Vaults {
-		v = MergeVaultFromTiers(v, cfg.Tiers)
 		if err := store.PutVault(ctx, v); err != nil {
 			return err
 		}
