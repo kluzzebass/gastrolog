@@ -401,9 +401,15 @@ func (s *SystemServer) loadConfigCloudServices(ctx context.Context, resp *apiv1.
 }
 
 func (s *SystemServer) loadSystemTiers(ctx context.Context, resp *apiv1.GetSystemResponse) error {
-	tiers, err := s.sysStore.ListTiers(ctx)
+	// 1:1 vault:tier — synthesize the tier list from vaults rather than
+	// reading the soon-to-be-deleted TierConfig store.
+	vaults, err := s.sysStore.ListVaults(ctx)
 	if err != nil {
-		return fmt.Errorf("list tiers: %w", err)
+		return fmt.Errorf("list vaults for tiers: %w", err)
+	}
+	tiers := make([]system.TierConfig, 0, len(vaults))
+	for _, v := range vaults {
+		tiers = append(tiers, system.TierFromVault(v))
 	}
 	for _, tier := range tiers {
 		tierPlacements, _ := s.sysStore.GetVaultPlacements(ctx, tier.ID)
