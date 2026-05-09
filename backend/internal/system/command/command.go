@@ -803,9 +803,9 @@ func BuildSnapshot(sys *system.System, users []system.User, tokens []system.Refr
 	for _, cs := range cfg.CloudServices {
 		snap.CloudServices = append(snap.CloudServices, putCloudServiceCmd(cs))
 	}
-	for _, tier := range cfg.Tiers {
-		snap.Tiers = append(snap.Tiers, putTierCmd(tier))
-	}
+	// 1:1 vault:tier — tier configs aren't snapshotted; vaults carry the
+	// canonical fields and the FSM rebuilds tier mirrors from vaults on
+	// restore.
 
 	// Users and tokens.
 	for _, u := range users {
@@ -946,13 +946,8 @@ func RestoreSnapshot(snap *gastrologv1.SystemSnapshot) (*system.System, []system
 		}
 		rt.NodeStorageConfigs = append(rt.NodeStorageConfigs, nc)
 	}
-	for _, tier := range snap.GetTiers() {
-		tc, err := ExtractPutTier(tier)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("restore tier: %w", err)
-		}
-		cfg.Tiers = append(cfg.Tiers, tc)
-	}
+	// 1:1 vault:tier — historical snapshots may include tier entries; ignore
+	// them, the FSM bridge rebuilds tier mirrors from vaults on restore.
 
 	users := make([]system.User, 0, len(snap.GetUsers()))
 	for _, u := range snap.GetUsers() {
