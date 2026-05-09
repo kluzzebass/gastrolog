@@ -67,7 +67,7 @@ func (o *Orchestrator) rotationSweep() {
 			o.logger.Debug("rotation triggered",
 				"vault", vaultID,
 				"name", vault.Name,
-				"tier", tier.TierID,
+				"vault", tier.TierID,
 				"trigger", *trigger,
 			)
 			if activeBefore != nil {
@@ -149,7 +149,7 @@ func (o *Orchestrator) applyRotationFromConfig(sys *system.System,
 	policy, err := policyCfg.ToRotationPolicy()
 	if err != nil {
 		o.logger.Warn("rotation sweep: invalid policy",
-			"vault", vaultCfg.ID, "tier", tier.TierID, "error", err)
+			"vault", vaultCfg.ID, "error", err)
 		return
 	}
 	if policy != nil {

@@ -42,7 +42,7 @@ func (m *cronRotationManager) ensure(vaultID, tierID glid.GLID, vaultName, cronE
 	}
 	if err := m.scheduler.AddJob(name, cronExpr, m.rotateVault, vaultID, tierID, vaultName, cm); err != nil {
 		m.logger.Error("cron rotation: failed to add job",
-			"vault", vaultID, "tier", tierID, "cron", cronExpr, "error", err)
+			"vault", vaultID, "cron", cronExpr, "error", err)
 		return
 	}
 	m.scheduler.Describe(name, fmt.Sprintf("Rotate active chunk in '%s'", vaultName))
@@ -89,7 +89,7 @@ func (m *cronRotationManager) rotateVault(vaultID, tierID glid.GLID, vaultName s
 	m.logger.Info("rotating chunk",
 		"trigger", "cron",
 		"vault", vaultID,
-		"tier", tierID,
+		"vault", tierID,
 		"name", vaultName,
 		"chunk", sealedID.String(),
 		"bytes", active.Bytes,

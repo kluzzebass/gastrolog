@@ -293,7 +293,7 @@ func (pm *placementManager) placeTier(ctx context.Context, tier system.TierConfi
 	newP := replaceLeaderPlacement(oldP, system.StorageIDForNode(best, tier, nscs))
 	_ = pm.cfgStore.SetTierPlacements(ctx, tier.ID, newP)
 	if err := pm.cfgStore.PutTier(ctx, tier); err != nil {
-		pm.logger.Error("placement: assign tier", "tier", tier.ID, "name", tier.Name, "node", best, "error", err)
+		pm.logger.Error("placement: assign tier", "vault", tier.ID, "name", tier.Name, "node", best, "error", err)
 		return
 	}
 
@@ -307,9 +307,9 @@ func (pm *placementManager) placeTier(ctx context.Context, tier system.TierConfi
 	}
 
 	if old == "" {
-		pm.logger.Info("placement: tier assigned", "tier", tier.ID, "name", tier.Name, "node", best)
+		pm.logger.Info("placement: tier assigned", "vault", tier.ID, "name", tier.Name, "node", best)
 	} else {
-		pm.logger.Info("placement: tier reassigned", "tier", tier.ID, "name", tier.Name, "from", old, "to", best)
+		pm.logger.Info("placement: tier reassigned", "vault", tier.ID, "name", tier.Name, "from", old, "to", best)
 	}
 
 	// Place followers if replication is configured.
@@ -355,11 +355,11 @@ func (pm *placementManager) placeFollowers(ctx context.Context, tier *system.Tie
 	}(), newPlacements) {
 		_ = pm.cfgStore.SetTierPlacements(ctx, tier.ID, newPlacements)
 		if err := pm.cfgStore.PutTier(ctx, *tier); err != nil {
-			pm.logger.Error("placement: assign followers", "tier", tier.ID, "error", err)
+			pm.logger.Error("placement: assign followers", "vault", tier.ID, "error", err)
 			return
 		}
 		pm.logger.Info("placement: followers updated",
-			"tier", tier.ID, "name", tier.Name, "placements", len(newPlacements))
+			"vault", tier.ID, "name", tier.Name, "placements", len(newPlacements))
 	}
 
 	pm.alertReplication(tier, len(kept), desired)
@@ -382,7 +382,7 @@ func (pm *placementManager) clearStaleFollowers(ctx context.Context, tier *syste
 	cp, _ := pm.cfgStore.GetTierPlacements(context.Background(), tier.ID)
 	_ = pm.cfgStore.SetTierPlacements(ctx, tier.ID, clearFollowerPlacements(cp))
 	if err := pm.cfgStore.PutTier(ctx, *tier); err != nil {
-		pm.logger.Error("placement: clear stale followers", "tier", tier.ID, "error", err)
+		pm.logger.Error("placement: clear stale followers", "vault", tier.ID, "error", err)
 	}
 }
 
@@ -558,9 +558,9 @@ func (pm *placementManager) handleUnplaceable(ctx context.Context, tier system.T
 		old := currentLeader
 		_ = pm.cfgStore.SetTierPlacements(ctx, tier.ID, nil)
 		if err := pm.cfgStore.PutTier(ctx, tier); err != nil {
-			pm.logger.Error("placement: clear tier assignment", "tier", tier.ID, "name", tier.Name, "error", err)
+			pm.logger.Error("placement: clear tier assignment", "vault", tier.ID, "name", tier.Name, "error", err)
 		} else {
-			pm.logger.Warn("placement: tier unplaced, no eligible nodes", "tier", tier.ID, "name", tier.Name)
+			pm.logger.Warn("placement: tier unplaced, no eligible nodes", "vault", tier.ID, "name", tier.Name)
 		}
 		tierCount[old]--
 	}

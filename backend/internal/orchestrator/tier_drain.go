@@ -119,7 +119,7 @@ func (o *Orchestrator) DrainTier(ctx context.Context, vaultID, tierID glid.GLID,
 	if active := cm.Active(); active != nil {
 		if err := cm.Seal(); err != nil {
 			o.logger.Warn("tier drain: failed to seal active chunk",
-				"vault", vaultID, "tier", tierID, "error", err)
+				"vault", vaultID, "error", err)
 		}
 	}
 
@@ -137,7 +137,7 @@ func (o *Orchestrator) DrainTier(ctx context.Context, vaultID, tierID glid.GLID,
 	o.mu.Unlock()
 
 	o.logger.Info("tier drain started",
-		"vault", vaultID, "tier", tierID,
+		"vault", vaultID,
 		"mode", drainModeName(mode), "target", targetNodeID)
 	return nil
 }
@@ -157,7 +157,7 @@ func (o *Orchestrator) tierDrainWorker(ctx context.Context, vaultID, tierID glid
 
 	sys, err := o.loadSystem(ctx)
 	if err != nil {
-		o.logger.Error("tier drain: failed to load config", "vault", vaultID, "tier", tierID, "error", err)
+		o.logger.Error("tier drain: failed to load config", "vault", vaultID, "error", err)
 		return
 	}
 
@@ -185,7 +185,7 @@ func (o *Orchestrator) tierDrainWorker(ctx context.Context, vaultID, tierID glid
 	// Final seal to catch any stragglers.
 	if active := tier.Chunks.Active(); active != nil {
 		if err := tier.Chunks.Seal(); err != nil {
-			o.logger.Warn("tier drain: final seal failed", "vault", vaultID, "tier", tierID, "error", err)
+			o.logger.Warn("tier drain: final seal failed", "vault", vaultID, "error", err)
 		}
 		o.drainTierChunks(ctx, sys, vaultID, tierID, tier, mode, targetNodeID)
 	}
@@ -197,7 +197,7 @@ func (o *Orchestrator) tierDrainWorker(ctx context.Context, vaultID, tierID glid
 func (o *Orchestrator) drainTierChunks(ctx context.Context, sys *system.System, vaultID, tierID glid.GLID, tier *VaultInstance, mode TierDrainMode, targetNodeID string) bool {
 	metas, err := tier.Chunks.List()
 	if err != nil {
-		o.logger.Error("tier drain: list chunks failed", "vault", vaultID, "tier", tierID, "error", err)
+		o.logger.Error("tier drain: list chunks failed", "vault", vaultID, "error", err)
 		return false
 	}
 
@@ -220,7 +220,7 @@ func (o *Orchestrator) drainTierChunks(ctx context.Context, sys *system.System, 
 
 		if err := o.drainOneChunk(ctx, sys, vaultID, tierID, tier, meta.ID, mode, targetNodeID); err != nil {
 			o.logger.Error("tier drain: chunk transfer failed",
-				"vault", vaultID, "tier", tierID, "chunk", meta.ID, "error", err)
+				"vault", vaultID, "chunk", meta.ID, "error", err)
 			continue // best effort — try the rest
 		}
 	}
@@ -300,7 +300,7 @@ func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, va
 	}
 
 	o.logger.Info("tier drain: chunk transferred",
-		"vault", vaultID, "tier", tierID, "chunk", chunkID, "mode", drainModeName(mode))
+		"vault", vaultID, "chunk", chunkID, "mode", drainModeName(mode))
 	return nil
 }
 
@@ -318,7 +318,7 @@ func (o *Orchestrator) deleteDrainSource(tier *VaultInstance, vaultID, tierID gl
 	if tier.Indexes != nil {
 		if err := tier.Indexes.DeleteIndexes(chunkID); err != nil {
 			o.logger.Warn("tier drain: delete source indexes failed",
-				"vault", vaultID, "tier", tierID, "chunk", chunkID, "error", err)
+				"vault", vaultID, "chunk", chunkID, "error", err)
 		}
 	}
 	if err := tier.Chunks.Delete(chunkID); err != nil {
@@ -346,7 +346,7 @@ func (o *Orchestrator) finishTierDrain(vaultID, tierID glid.GLID) {
 	// on the source tier is the correct semantics here.
 	if o.DeleteTierFromVault(vaultID, tierID) {
 		o.logger.Info("tier drain: completed",
-			"vault", vaultID, "tier", tierID)
+			"vault", vaultID)
 	}
 
 	// Notify the dispatch layer to remove the tier from the vault's tier
@@ -375,7 +375,7 @@ func (o *Orchestrator) cancelTierDrainState(vaultID, tierID glid.GLID) {
 
 	if ok {
 		o.logger.Info("tier drain: state cleaned up (drain did not complete)",
-			"vault", vaultID, "tier", tierID)
+			"vault", vaultID)
 	}
 }
 
@@ -396,7 +396,7 @@ func (o *Orchestrator) CancelTierDrain(vaultID, tierID glid.GLID) error {
 	delete(o.tierDraining, key)
 	o.scheduler.RemoveJob(ds.JobID)
 
-	o.logger.Info("tier drain: cancelled", "vault", vaultID, "tier", tierID)
+	o.logger.Info("tier drain: cancelled", "vault", vaultID)
 	return nil
 }
 

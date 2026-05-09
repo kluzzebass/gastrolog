@@ -170,7 +170,7 @@ func (m *tierLeaderManager) reconcile(tierID glid.GLID, group *raftgroup.Group) 
 	future := group.Raft.GetConfiguration()
 	if err := future.Error(); err != nil {
 		m.logger.Warn("get configuration failed",
-			"tier", tierID, "error", err)
+			"vault", tierID, "error", err)
 		return
 	}
 	current := future.Configuration().Servers
@@ -192,11 +192,11 @@ func (m *tierLeaderManager) reconcile(tierID glid.GLID, group *raftgroup.Group) 
 		fut := group.Raft.AddVoter(srv.ID, srv.Address, 0, tierMembershipChangeTimeout)
 		if err := fut.Error(); err != nil {
 			m.logger.Warn("AddVoter failed",
-				"tier", tierID, "node", srv.ID, "error", err)
+				"vault", tierID, "node", srv.ID, "error", err)
 			return // bail; next epoch will retry
 		}
 		m.logger.Info("added voter",
-			"tier", tierID, "node", srv.ID, "addr", srv.Address)
+			"vault", tierID, "node", srv.ID, "addr", srv.Address)
 	}
 
 	// Remove extras (voters or nonvoters that aren't in the desired set).
@@ -207,11 +207,11 @@ func (m *tierLeaderManager) reconcile(tierID glid.GLID, group *raftgroup.Group) 
 		fut := group.Raft.RemoveServer(srv.ID, 0, tierMembershipChangeTimeout)
 		if err := fut.Error(); err != nil {
 			m.logger.Warn("RemoveServer failed",
-				"tier", tierID, "node", srv.ID, "error", err)
+				"vault", tierID, "node", srv.ID, "error", err)
 			return // bail; next epoch will retry
 		}
 		m.logger.Info("removed server",
-			"tier", tierID, "node", srv.ID)
+			"vault", tierID, "node", srv.ID)
 
 		// Snapshot the callback under the lock so a concurrent
 		// SetOnMemberRemoved doesn't race; fire outside the lock.
@@ -249,14 +249,14 @@ func (m *tierLeaderManager) transferIfNeeded(tierID glid.GLID, group *raftgroup.
 	}
 
 	m.logger.Info("transferring vault-ctl Raft leadership",
-		"tier", tierID,
+		"vault", tierID,
 		"from", currentID,
 		"to", want.ID)
 
 	fut := group.Raft.LeadershipTransferToServer(want.ID, want.Address)
 	if err := fut.Error(); err != nil {
 		m.logger.Warn("leadership transfer failed",
-			"tier", tierID, "target", want.ID, "error", err)
+			"vault", tierID, "target", want.ID, "error", err)
 	}
 }
 

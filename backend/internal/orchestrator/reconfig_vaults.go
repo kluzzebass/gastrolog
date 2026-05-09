@@ -328,22 +328,22 @@ func (o *Orchestrator) forceRemoveVaultData(id glid.GLID, inst *VaultInstance) e
 func (o *Orchestrator) sealAndDeleteAllChunks(tier *VaultInstance, op string, tierID glid.GLID) int {
 	if active := tier.Chunks.Active(); active != nil {
 		if err := tier.Chunks.Seal(); err != nil {
-			o.logger.Warn(op+": seal failed", "tier", tierID, "error", err)
+			o.logger.Warn(op+": seal failed", "vault", tierID, "error", err)
 		}
 	}
 	metas, err := tier.Chunks.List()
 	if err != nil {
-		o.logger.Warn(op+": list failed", "tier", tierID, "error", err)
+		o.logger.Warn(op+": list failed", "vault", tierID, "error", err)
 		return 0
 	}
 	for _, m := range metas {
 		if tier.Indexes != nil {
 			if err := tier.Indexes.DeleteIndexes(m.ID); err != nil {
-				o.logger.Warn(op+": delete indexes failed", "tier", tierID, "chunk", m.ID, "error", err)
+				o.logger.Warn(op+": delete indexes failed", "vault", tierID, "chunk", m.ID, "error", err)
 			}
 		}
 		if err := chunk.DeleteNoAnnounce(tier.Chunks, m.ID); err != nil {
-			o.logger.Warn(op+": delete chunk failed", "tier", tierID, "chunk", m.ID, "error", err)
+			o.logger.Warn(op+": delete chunk failed", "vault", tierID, "chunk", m.ID, "error", err)
 		}
 	}
 	return len(metas)
@@ -635,7 +635,7 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 	tierCfg := findTierConfig(cfg.Tiers, tierID)
 	if tierCfg == nil {
 		o.logger.Warn("buildVaultInstance: tier not in config, skipping",
-			"vault", vaultCfg.ID, "tier", tierID)
+			"vault", vaultCfg.ID)
 		return nil, nil
 	}
 
@@ -689,7 +689,7 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 // retried on the next reconfig cycle. See gastrolog-68fqk.
 func (o *Orchestrator) alertTierInitFailed(tierID glid.GLID, tierName string, err error) {
 	o.logger.Warn("buildTierInstances: tier init failed, skipping",
-		"tier", tierID, "name", tierName, "error", err)
+		"vault", tierID, "name", tierName, "error", err)
 	if o.alerts != nil {
 		o.alerts.Set(
 			fmt.Sprintf("tier-init:%s", tierID),
@@ -758,7 +758,7 @@ func (o *Orchestrator) buildTierInstance(sys *system.System, vaultCfg system.Vau
 
 	var cmLogger = factories.Logger
 	if cmLogger != nil {
-		cmLogger = cmLogger.With("vault", vaultCfg.ID, "tier", tierCfg.ID)
+		cmLogger = cmLogger.With("vault", vaultCfg.ID)
 	}
 
 	cmParams := resolveVaultDir(params, factories.VaultsDir, vaultCfg.ID.String())
@@ -809,7 +809,7 @@ func (o *Orchestrator) buildTierInstance(sys *system.System, vaultCfg system.Vau
 	}
 	var imLogger = factories.Logger
 	if imLogger != nil {
-		imLogger = imLogger.With("vault", vaultCfg.ID, "tier", tierCfg.ID)
+		imLogger = imLogger.With("vault", vaultCfg.ID)
 	}
 	im, err := imFactory(cmParams, cm, imLogger)
 	if err != nil {
@@ -819,7 +819,7 @@ func (o *Orchestrator) buildTierInstance(sys *system.System, vaultCfg system.Vau
 
 	var qeLogger = factories.Logger
 	if qeLogger != nil {
-		qeLogger = qeLogger.With("vault", vaultCfg.ID, "tier", tierCfg.ID)
+		qeLogger = qeLogger.With("vault", vaultCfg.ID)
 	}
 	qe := query.New(cm, im, qeLogger)
 
@@ -894,7 +894,7 @@ func (o *Orchestrator) buildTierInstanceForStorage(sys *system.System, vaultCfg 
 
 	var cmLogger = factories.Logger
 	if cmLogger != nil {
-		cmLogger = cmLogger.With("vault", vaultCfg.ID, "tier", tierCfg.ID, "storage", storageID)
+		cmLogger = cmLogger.With("vault", vaultCfg.ID, "storage", storageID)
 	}
 
 	cmParams := resolveVaultDir(params, factories.VaultsDir, vaultCfg.ID.String())
@@ -922,7 +922,7 @@ func (o *Orchestrator) buildTierInstanceForStorage(sys *system.System, vaultCfg 
 	}
 	var imLogger = factories.Logger
 	if imLogger != nil {
-		imLogger = imLogger.With("vault", vaultCfg.ID, "tier", tierCfg.ID, "storage", storageID)
+		imLogger = imLogger.With("vault", vaultCfg.ID, "storage", storageID)
 	}
 	im, err := imFactory(cmParams, cm, imLogger)
 	if err != nil {
@@ -932,7 +932,7 @@ func (o *Orchestrator) buildTierInstanceForStorage(sys *system.System, vaultCfg 
 
 	var qeLogger = factories.Logger
 	if qeLogger != nil {
-		qeLogger = qeLogger.With("vault", vaultCfg.ID, "tier", tierCfg.ID, "storage", storageID)
+		qeLogger = qeLogger.With("vault", vaultCfg.ID, "storage", storageID)
 	}
 	qe := query.New(cm, im, qeLogger)
 
@@ -1296,7 +1296,7 @@ func (o *Orchestrator) clearTierFSMChunkCallbacks(vaultID, tierID glid.GLID) {
 	fsm.SetOnUpload(nil)
 	if o.logger != nil {
 		o.logger.Debug("cleared tier FSM chunk callbacks before manager close",
-			"vault", vaultID, "tier", tierID)
+			"vault", vaultID)
 	}
 }
 

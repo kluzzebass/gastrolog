@@ -52,7 +52,7 @@ func (o *Orchestrator) cacheEvictionSweepAll() {
 		if evicted > 0 && o.logger != nil {
 			o.logger.Debug("cache eviction sweep",
 				"vault", tgt.vaultID,
-				"tier", tgt.tierID,
+				"vault", tgt.tierID,
 				"evicted", evicted,
 				"freed_bytes", freed)
 		}

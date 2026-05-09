@@ -133,7 +133,7 @@ func NewTierLifecycleReconciler(orch *Orchestrator, vaultID, tierID glid.GLID, t
 		tier:        tier,
 		localNodeID: localNodeID,
 		orch:        orch,
-		logger:      logger.With("component", "tier-lifecycle-reconciler", "vault", vaultID, "tier", tierID),
+		logger:      logger.With("component", "vault-lifecycle-reconciler", "vault", vaultID),
 	}
 }
 
@@ -857,7 +857,7 @@ func (r *VaultLifecycleReconciler) SweepStaleLeaderFSMEntries() {
 			continue
 		}
 		r.logger.Warn("stale-fsm sweep: proposing delete for unrecoverable chunk",
-			"chunk", e.ID, "tier", r.tierID, "vault", r.vaultID,
+			"chunk", e.ID, "vault", r.vaultID,
 			"state", e.State, "anchor", anchor, "age", now.Sub(anchor))
 		if err := r.deleteChunk(e.ID, "stale-fsm-leader-missing", expectedFrom); err != nil {
 			r.logger.Warn("stale-fsm sweep: deleteChunk failed",
@@ -868,7 +868,7 @@ func (r *VaultLifecycleReconciler) SweepStaleLeaderFSMEntries() {
 	}
 	if stale > 0 {
 		r.logger.Info("stale-fsm sweep: deletes proposed",
-			"tier", r.tierID, "vault", r.vaultID, "count", stale)
+			"vault", r.vaultID, "count", stale)
 	}
 }
 

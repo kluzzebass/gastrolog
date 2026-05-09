@@ -541,7 +541,7 @@ func (o *Orchestrator) scheduleIndexRebuildIfNeeded(ctx context.Context, vaultID
 		return
 	}
 	o.logger.Info("rebuilding missing indexes",
-		"vault", vaultID, "tier", tier.TierID, "chunk", meta.ID.String())
+		"vault", vaultID, "chunk", meta.ID.String())
 	name := fmt.Sprintf("index-rebuild:%s:%s:%s", vaultID, tier.TierID, meta.ID)
 	runBuild := func(runCtx context.Context, chunkID chunk.ChunkID) error {
 		return tier.Indexes.BuildIndexes(runCtx, chunkID)

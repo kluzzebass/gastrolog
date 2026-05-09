@@ -350,7 +350,7 @@ func (o *Orchestrator) drainExcessChunks(vaultID, tierID glid.GLID, cm chunk.Chu
 
 	if reclaimed > 0 {
 		o.logger.Info("memory budget enforcement: retention events fired",
-			"vault", vaultID, "tier", tierID,
+			"vault", vaultID,
 			"excess", excess, "reclaimed", reclaimed)
 	}
 }
@@ -467,7 +467,7 @@ func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg syste
 	rules, err := resolveRetentionRulesFromTier(cfg, vaultCfg, tierCfg)
 	if err != nil {
 		o.logger.Warn("retention: failed to resolve rules",
-			"vault", vaultCfg.ID, "tier", tier.TierID, "error", err)
+			"vault", vaultCfg.ID, "error", err)
 		return nil
 	}
 	if len(rules) == 0 {

@@ -101,7 +101,7 @@ func (o *Orchestrator) backfillCloudUploads(tier *VaultInstance) {
 	}
 	if backfilled > 0 {
 		o.logger.Debug("cloud backfill: scheduled uploads",
-			"tier", tier.TierID, "count", backfilled)
+			"vault", tier.TierID, "count", backfilled)
 	}
 }
 

@@ -429,7 +429,7 @@ func makeTierDrainCompleteHandler(cfgStore system.Store, logger *slog.Logger) fu
 		// re-triggering a drain notification.
 		if err := cfgStore.DeleteTier(ctx, tierID, false); err != nil {
 			logger.Error("tier drain complete: failed to delete tier config",
-				"tier", tierID, "error", err)
+				"vault", tierID, "error", err)
 		}
 	}
 }

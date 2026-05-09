@@ -1763,7 +1763,7 @@ func testTiers(t *testing.T, newStore func(t *testing.T) system.Store) {
 		ctx := context.Background()
 
 		id := newID()
-		if err := s.PutTier(ctx, system.TierConfig{ID: id, Name: "tier", Type: system.VaultTypeFile}); err != nil {
+		if err := s.PutTier(ctx, system.TierConfig{ID: id, Name: "vault", Type: system.VaultTypeFile}); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
