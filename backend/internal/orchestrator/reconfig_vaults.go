@@ -115,21 +115,21 @@ func findVaultConfig(vaults []system.VaultConfig, id glid.GLID) *system.VaultCon
 }
 
 // resolveRetentionRulesFromVault converts inst retention rules to resolved retentionRule objects.
-func resolveRetentionRulesFromVault(cfg *system.Config, _ system.VaultConfig, tierCfg *system.TierConfig) ([]retentionRule, error) {
+func resolveRetentionRulesFromVault(cfg *system.Config, _ system.VaultConfig, vaultCfg2 *system.TierConfig) ([]retentionRule, error) {
 	// Phase 4 (gastrolog-42f9z): retention rules carry only the trigger
 	// policy. The action enum is gone — every fired event streams records
 	// through the routing engine and always destroys the chunk. Phase 2's
 	// 1:1 vault:tier collapse already eliminated the "next inst" concept,
 	// so position-based action derivation is also gone.
 	var rules []retentionRule
-	for _, b := range tierCfg.RetentionRules {
+	for _, b := range vaultCfg2.RetentionRules {
 		retCfg := findRetentionPolicy(cfg.RetentionPolicies, b.RetentionPolicyID)
 		if retCfg == nil {
-			return nil, fmt.Errorf("vault %s references unknown retention policy: %s", tierCfg.ID, b.RetentionPolicyID)
+			return nil, fmt.Errorf("vault %s references unknown retention policy: %s", vaultCfg2.ID, b.RetentionPolicyID)
 		}
 		policy, err := retCfg.ToRetentionPolicy()
 		if err != nil {
-			return nil, fmt.Errorf("invalid retention policy %s for vault %s: %w", b.RetentionPolicyID, tierCfg.ID, err)
+			return nil, fmt.Errorf("invalid retention policy %s for vault %s: %w", b.RetentionPolicyID, vaultCfg2.ID, err)
 		}
 		if policy == nil {
 			continue
@@ -478,7 +478,7 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 	}
 	// 1:1 vault:tier — synthesize the inst config from the vault.
 	inst := system.TierFromVault(*vaultCfg)
-	tierCfg := &inst
+	vaultCfg2 := &inst
 
 	o.ensureVaultControlPlaneRaftGroup(vaultID, rt.Nodes, factories)
 
@@ -494,13 +494,13 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 	if !isLeader && !isFollower {
 		// No storage placement, but still join the vault control-plane Raft
 		// group as a voter for this vault's replicated inst metadata.
-		o.ensureVaultCtlMetadata(*tierCfg, rt.Nodes, factories)
+		o.ensureVaultCtlMetadata(*vaultCfg2, rt.Nodes, factories)
 		return nil
 	}
 
 	var ti *VaultInstance
 	if isLeader {
-		t, err := o.buildLeaderInstance(sys, *vaultCfg, tierCfg, factories)
+		t, err := o.buildLeaderInstance(sys, *vaultCfg, vaultCfg2, factories)
 		if err != nil {
 			return fmt.Errorf("build vault %s: %w", vaultID, err)
 		}
@@ -511,7 +511,7 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 			if tgt.NodeID != o.localNodeID {
 				continue
 			}
-			t, err := o.buildInstanceForStorage(sys, *vaultCfg, *tierCfg, factories, tgt.StorageID, true)
+			t, err := o.buildInstanceForStorage(sys, *vaultCfg, *vaultCfg2, factories, tgt.StorageID, true)
 			if err != nil {
 				return fmt.Errorf("build vault %s storage %s: %w", vaultID, tgt.StorageID, err)
 			}
@@ -622,7 +622,7 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 	// 1:1 vault:tier — synthesize the inst config from the vault.
 	vaultID := vaultCfg.ID
 	inst := system.TierFromVault(vaultCfg)
-	tierCfg := &inst
+	vaultCfg2 := &inst
 
 	// Determine this node's role for this vault. With one-replica-per-node
 	// (Phase 2 invariant) the node is at most one of: leader, follower, neither.
@@ -635,14 +635,14 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 	if !isLeader && !isFollower {
 		// No storage placement on this node, but still join the vault
 		// control-plane Raft group as a voter for replicated inst metadata.
-		o.ensureVaultCtlMetadata(*tierCfg, rt.Nodes, factories)
+		o.ensureVaultCtlMetadata(*vaultCfg2, rt.Nodes, factories)
 		return nil, nil
 	}
 
 	if isLeader {
-		ti, err := o.buildLeaderInstance(sys, vaultCfg, tierCfg, factories)
+		ti, err := o.buildLeaderInstance(sys, vaultCfg, vaultCfg2, factories)
 		if err != nil {
-			o.alertVaultInitFailed(vaultID, tierCfg.Name, err)
+			o.alertVaultInitFailed(vaultID, vaultCfg2.Name, err)
 			return nil, nil
 		}
 		ti.FollowerTargets = system.FollowerTargets(placements, nscs)
@@ -654,9 +654,9 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 		if tgt.NodeID != o.localNodeID {
 			continue
 		}
-		sti, err := o.buildInstanceForStorage(sys, vaultCfg, *tierCfg, factories, tgt.StorageID, true)
+		sti, err := o.buildInstanceForStorage(sys, vaultCfg, *vaultCfg2, factories, tgt.StorageID, true)
 		if err != nil {
-			o.alertVaultInitFailed(vaultID, tierCfg.Name, err)
+			o.alertVaultInitFailed(vaultID, vaultCfg2.Name, err)
 			return nil, nil
 		}
 		sti.IsFollower = true
@@ -672,14 +672,14 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 // failed to initialize during vault build. The inst is skipped but the
 // vault continues with its remaining tiers. The failed inst will be
 // retried on the next reconfig cycle. See gastrolog-68fqk.
-func (o *Orchestrator) alertVaultInitFailed(vaultID glid.GLID, tierName string, err error) {
+func (o *Orchestrator) alertVaultInitFailed(vaultID glid.GLID, vaultName string, err error) {
 	o.logger.Warn("buildVaultInstances: inst init failed, skipping",
-		"vault", vaultID, "name", tierName, "error", err)
+		"vault", vaultID, "name", vaultName, "error", err)
 	if o.alerts != nil {
 		o.alerts.Set(
 			fmt.Sprintf("inst-init:%s", vaultID),
 			alert.Error, "orchestrator",
-			fmt.Sprintf("Tier %q failed to initialize: %v", tierName, err),
+			fmt.Sprintf("Tier %q failed to initialize: %v", vaultName, err),
 		)
 	}
 }
@@ -687,12 +687,12 @@ func (o *Orchestrator) alertVaultInitFailed(vaultID glid.GLID, tierName string, 
 // buildLeaderInstance creates the leader VaultInstance using the placement's
 // storage ID. This avoids directory collisions with same-node follower placements
 // that would occur if findLocalFileStorage picked a different storage by class.
-func (o *Orchestrator) buildLeaderInstance(sys *system.System, vaultCfg system.VaultConfig, tierCfg *system.TierConfig, factories Factories) (*VaultInstance, error) {
+func (o *Orchestrator) buildLeaderInstance(sys *system.System, vaultCfg system.VaultConfig, vaultCfg2 *system.TierConfig, factories Factories) (*VaultInstance, error) {
 	// Read placements from VaultConfig (mirrored from vault placements via
 	// the FSM bridge — gastrolog-257l7).
 	storageID := system.LeaderStorageID(vaultCfg.Placements)
 	if storageID != "" && !strings.HasPrefix(storageID, system.SyntheticStoragePrefix) {
-		ti, err := o.buildInstanceForStorage(sys, vaultCfg, *tierCfg, factories, storageID, false)
+		ti, err := o.buildInstanceForStorage(sys, vaultCfg, *vaultCfg2, factories, storageID, false)
 		if err != nil {
 			return nil, err
 		}
@@ -700,7 +700,7 @@ func (o *Orchestrator) buildLeaderInstance(sys *system.System, vaultCfg system.V
 		return ti, nil
 	}
 	// Synthetic or unplaced — fall back to class-based resolution.
-	ti, err := o.buildInstance(sys, vaultCfg, *tierCfg, factories, false)
+	ti, err := o.buildInstance(sys, vaultCfg, *vaultCfg2, factories, false)
 	if err != nil {
 		return nil, err
 	}
@@ -714,20 +714,20 @@ func (o *Orchestrator) buildLeaderInstance(sys *system.System, vaultCfg system.V
 // Cloud tiers use a shared blob key (vault-ID/chunk-ID.glcb) — if the follower
 // also uploads, it overwrites the leader's blob with a different-sized version,
 // corrupting the leader's stored diskBytes and breaking all future cloud reads.
-func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultConfig, tierCfg system.TierConfig, factories Factories, isFollower bool) (*VaultInstance, error) {
+func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultConfig, vaultCfg2 system.TierConfig, factories Factories, isFollower bool) (*VaultInstance, error) {
 	cfg := &sys.Config
 	rt := &sys.Runtime
 	// Map TierConfig.Type to factory name.
-	factoryName := mapVaultTypeToFactory(tierCfg.Type)
+	factoryName := mapVaultTypeToFactory(vaultCfg2.Type)
 
 	// Create the vault-ctl Raft group BEFORE the chunk manager. Group creation is
 	// fast (Raft log replay). Chunk manager creation is slow (scans disk for
 	// existing chunks). Starting the Raft group early gives it time to elect
 	// a leader and catch up while the chunk manager is loading.
-	tierGroup, applier, raftCB := o.ensureVaultCtlMetadata(tierCfg, rt.Nodes, factories)
+	vaultGroup, applier, raftCB := o.ensureVaultCtlMetadata(vaultCfg2, rt.Nodes, factories)
 
 	// Build params from inst system.
-	params := buildVaultParams(sys, vaultCfg, tierCfg, o.localNodeID)
+	params := buildVaultParams(sys, vaultCfg, vaultCfg2, o.localNodeID)
 
 	// Followers keep cloud store access for reads (queries) but skip uploads.
 	// The leader owns the blob; the follower adopts it via RegisterCloudChunk
@@ -738,7 +738,7 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 
 	cmFactory, ok := factories.ChunkManagers[factoryName]
 	if !ok {
-		return nil, fmt.Errorf("unknown chunk manager type: %s (mapped from inst type %s)", factoryName, tierCfg.Type)
+		return nil, fmt.Errorf("unknown chunk manager type: %s (mapped from inst type %s)", factoryName, vaultCfg2.Type)
 	}
 
 	var cmLogger = factories.Logger
@@ -761,7 +761,7 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 	}
 
 	// Apply rotation policy from inst.
-	if err := applyRotationPolicy(cm, cfg.RotationPolicies, tierCfg.RotationPolicyID); err != nil {
+	if err := applyRotationPolicy(cm, cfg.RotationPolicies, vaultCfg2.RotationPolicyID); err != nil {
 		_ = cm.Close()
 		return nil, err
 	}
@@ -774,22 +774,22 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 	setIntegrityVerifier(cm, o.IntegrityVerifier())
 
 	// JSONL sinks are write-only — no query engine, no indexes.
-	if tierCfg.Type == system.VaultTypeJSONL {
+	if vaultCfg2.Type == system.VaultTypeJSONL {
 		ti := &VaultInstance{
 			VaultID: vaultCfg.ID,
-			Type:    string(tierCfg.Type),
+			Type:    string(vaultCfg2.Type),
 			Chunks:  cm,
 		}
 		ti.applyRaftCallbacks(raftCB)
-		o.attachLifecycleReconciler(ti, vaultCfg.ID, tierGroup)
-		wireVaultFSMOnDelete(tierGroup, tierCfg.ID, cm, nil, o, o.logger)
+		o.attachLifecycleReconciler(ti, vaultCfg.ID, vaultGroup)
+		wireVaultFSMOnDelete(vaultGroup, vaultCfg2.ID, cm, nil, o, o.logger)
 		return ti, nil
 	}
 
 	imFactory, ok := factories.IndexManagers[factoryName]
 	if !ok {
 		_ = cm.Close()
-		return nil, fmt.Errorf("unknown index manager type: %s (mapped from inst type %s)", factoryName, tierCfg.Type)
+		return nil, fmt.Errorf("unknown index manager type: %s (mapped from inst type %s)", factoryName, vaultCfg2.Type)
 	}
 	var imLogger = factories.Logger
 	if imLogger != nil {
@@ -814,15 +814,15 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 
 	ti := &VaultInstance{
 		VaultID: vaultCfg.ID,
-		Type:    string(tierCfg.Type),
+		Type:    string(vaultCfg2.Type),
 		Chunks:  cm,
 		Indexes: im,
 		Query:   qe,
 	}
 	ti.applyRaftCallbacks(raftCB)
-	o.attachLifecycleReconciler(ti, vaultCfg.ID, tierGroup)
-	wireVaultFSMOnDelete(tierGroup, tierCfg.ID, cm, im, o, o.logger)
-	wireVaultFSMOnUpload(tierGroup, tierCfg.ID, cm, o, o.logger)
+	o.attachLifecycleReconciler(ti, vaultCfg.ID, vaultGroup)
+	wireVaultFSMOnDelete(vaultGroup, vaultCfg2.ID, cm, im, o, o.logger)
+	wireVaultFSMOnUpload(vaultGroup, vaultCfg2.ID, cm, o, o.logger)
 	return ti, nil
 }
 
@@ -836,12 +836,12 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 // this rare, but possible). Each TI's reconciler.Wire() call rebinds the
 // callback set on the FSM; last-writer-wins matches the existing OnDelete /
 // OnUpload behavior wired alongside.
-func (o *Orchestrator) attachLifecycleReconciler(ti *VaultInstance, vaultID glid.GLID, tierGroup *raftgroup.Group) {
+func (o *Orchestrator) attachLifecycleReconciler(ti *VaultInstance, vaultID glid.GLID, vaultGroup *raftgroup.Group) {
 	ti.Reconciler = NewVaultLifecycleReconciler(o, vaultID, ti, o.localNodeID, o.logger)
-	if tierGroup == nil {
+	if vaultGroup == nil {
 		return
 	}
-	if vfsm, ok := tierGroup.FSM.(*vaultraft.FSM); ok && vfsm != nil {
+	if vfsm, ok := vaultGroup.FSM.(*vaultraft.FSM); ok && vfsm != nil {
 		ti.Reconciler.Wire(vfsm.EnsureInstanceFSM(vaultID))
 	}
 }
@@ -849,7 +849,7 @@ func (o *Orchestrator) attachLifecycleReconciler(ti *VaultInstance, vaultID glid
 // buildInstanceForStorage creates a VaultInstance whose data directory is
 // resolved from a specific file storage ID. Used for both leaders with
 // explicit storage placements and followers (one per node per inst).
-func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg system.VaultConfig, tierCfg system.TierConfig, factories Factories, storageID string, isFollower bool) (*VaultInstance, error) {
+func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg system.VaultConfig, vaultCfg2 system.TierConfig, factories Factories, storageID string, isFollower bool) (*VaultInstance, error) {
 	cfg := &sys.Config
 	rt := &sys.Runtime
 	fs := findFileStorageByID(rt, storageID)
@@ -859,17 +859,17 @@ func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg syst
 
 	// Create the vault-ctl Raft group BEFORE the chunk manager — same rationale
 	// as buildInstance: start elections while chunk loading is in progress.
-	tierGroup, applier, raftCB := o.ensureVaultCtlMetadata(tierCfg, rt.Nodes, factories)
+	vaultGroup, applier, raftCB := o.ensureVaultCtlMetadata(vaultCfg2, rt.Nodes, factories)
 
 	// Build params normally, then override the dir with this storage's path.
-	params := buildVaultParams(sys, vaultCfg, tierCfg, o.localNodeID)
+	params := buildVaultParams(sys, vaultCfg, vaultCfg2, o.localNodeID)
 	// Followers keep cloud store access for reads but skip uploads.
 	if isFollower {
 		params["_cloud_read_only"] = "true"
 	}
-	params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), tierCfg.ID.String())
+	params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), vaultCfg2.ID.String())
 
-	factoryName := mapVaultTypeToFactory(tierCfg.Type)
+	factoryName := mapVaultTypeToFactory(vaultCfg2.Type)
 	cmFactory, ok := factories.ChunkManagers[factoryName]
 	if !ok {
 		return nil, fmt.Errorf("unknown chunk manager type: %s", factoryName)
@@ -889,7 +889,7 @@ func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg syst
 		return nil, fmt.Errorf("create chunk manager: %w", err)
 	}
 
-	if err := applyRotationPolicy(cm, cfg.RotationPolicies, tierCfg.RotationPolicyID); err != nil {
+	if err := applyRotationPolicy(cm, cfg.RotationPolicies, vaultCfg2.RotationPolicyID); err != nil {
 		_ = cm.Close()
 		return nil, err
 	}
@@ -925,15 +925,15 @@ func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg syst
 
 	ti := &VaultInstance{
 		VaultID: vaultCfg.ID,
-		Type:    string(tierCfg.Type),
+		Type:    string(vaultCfg2.Type),
 		Chunks:  cm,
 		Indexes: im,
 		Query:   qe,
 	}
 	ti.applyRaftCallbacks(raftCB)
-	o.attachLifecycleReconciler(ti, vaultCfg.ID, tierGroup)
-	wireVaultFSMOnDelete(tierGroup, tierCfg.ID, cm, im, o, o.logger)
-	wireVaultFSMOnUpload(tierGroup, tierCfg.ID, cm, o, o.logger)
+	o.attachLifecycleReconciler(ti, vaultCfg.ID, vaultGroup)
+	wireVaultFSMOnDelete(vaultGroup, vaultCfg2.ID, cm, im, o, o.logger)
+	wireVaultFSMOnUpload(vaultGroup, vaultCfg2.ID, cm, o, o.logger)
 	return ti, nil
 }
 
@@ -1063,18 +1063,18 @@ type tierRaftCallbacks struct {
 //
 // Call this BEFORE creating the chunk manager so Raft can start
 // elections while chunk loading is still in progress.
-func (o *Orchestrator) ensureVaultCtlMetadata(tierCfg system.TierConfig, clusterNodes []system.NodeConfig, factories Factories) (*raftgroup.Group, vaultctlfsm.Applier, tierRaftCallbacks) {
+func (o *Orchestrator) ensureVaultCtlMetadata(vaultCfg2 system.TierConfig, clusterNodes []system.NodeConfig, factories Factories) (*raftgroup.Group, vaultctlfsm.Applier, tierRaftCallbacks) {
 	if factories.GroupManager == nil {
 		return nil, nil, tierRaftCallbacks{}
 	}
-	vaultGID := raftgroup.VaultControlPlaneGroupID(tierCfg.VaultID)
+	vaultGID := raftgroup.VaultControlPlaneGroupID(vaultCfg2.VaultID)
 	g, members := o.tryStartClusterRaftGroup(vaultGID, vaultraft.NewFSM(), clusterNodes, factories)
 	if g == nil {
 		return nil, nil, tierRaftCallbacks{}
 	}
 
-	o.vaultCtlLeaders.SetDesiredMembers(tierCfg.VaultID, members)
-	o.vaultCtlLeaders.Start(tierCfg.VaultID, g)
+	o.vaultCtlLeaders.SetDesiredMembers(vaultCfg2.VaultID, members)
+	o.vaultCtlLeaders.Start(vaultCfg2.VaultID, g)
 
 	vfsm, ok := g.FSM.(*vaultraft.FSM)
 	if !ok || vfsm == nil {
@@ -1087,17 +1087,17 @@ func (o *Orchestrator) ensureVaultCtlMetadata(tierCfg system.TierConfig, cluster
 	// just rebind to the same closure. Without this hook, the receipt
 	// protocol's pendingDeletes silently leak across snapshot install
 	// boundaries (the bug gastrolog-51gme step 3 was supposed to close).
-	vaultID := tierCfg.VaultID
+	vaultID := vaultCfg2.VaultID
 	vfsm.SetOnAfterRestore(func() { o.afterVaultCtlRestore(vaultID) })
-	tierFSM := vfsm.EnsureInstanceFSM(tierCfg.ID)
+	tierFSM := vfsm.EnsureInstanceFSM(vaultCfg2.ID)
 	r := g.Raft
 	timeout := cluster.ReplicationTimeout
 
 	var applier vaultctlfsm.Applier
 	if factories.PeerConns != nil {
-		applier = cluster.NewVaultCtlChunkApplyForwarder(r, vaultGID, tierCfg.ID, factories.PeerConns, timeout)
+		applier = cluster.NewVaultCtlChunkApplyForwarder(r, vaultGID, vaultCfg2.ID, factories.PeerConns, timeout)
 	} else {
-		applier = &vaultCtlTierApplier{o: o, vaultID: tierCfg.VaultID, instID: tierCfg.ID}
+		applier = &vaultCtlTierApplier{o: o, vaultID: vaultCfg2.VaultID, instID: vaultCfg2.ID}
 	}
 
 	return g, applier, buildTierRaftCallbacks(r, tierFSM, applier)
@@ -1441,33 +1441,33 @@ func mapVaultTypeToFactory(t system.VaultType) string {
 }
 
 // buildVaultParams builds a params map from a TierConfig suitable for factory consumption.
-func buildVaultParams(sys *system.System, vaultCfg system.VaultConfig, tierCfg system.TierConfig, localNodeID string) map[string]string {
+func buildVaultParams(sys *system.System, vaultCfg system.VaultConfig, vaultCfg2 system.TierConfig, localNodeID string) map[string]string {
 	rt := &sys.Runtime
 	params := make(map[string]string)
 
-	switch tierCfg.Type {
+	switch vaultCfg2.Type {
 	case system.VaultTypeMemory:
-		if tierCfg.MemoryBudgetBytes > 0 {
-			params["budgetBytes"] = strconv.FormatUint(tierCfg.MemoryBudgetBytes, 10)
+		if vaultCfg2.MemoryBudgetBytes > 0 {
+			params["budgetBytes"] = strconv.FormatUint(vaultCfg2.MemoryBudgetBytes, 10)
 		}
 
 	case system.VaultTypeFile:
 		// Single storage class for all file tiers — local-only and
 		// cloud-backed alike. The active chunk and warm cache live at
 		// the same chunkDir path post-step-7k. See gastrolog-4k5mg.
-		if tierCfg.IsCloud() {
-			addCloudParams(params, &sys.Config, tierCfg)
+		if vaultCfg2.IsCloud() {
+			addCloudParams(params, &sys.Config, vaultCfg2)
 		}
-		if fs := findLocalFileStorage(rt, localNodeID, tierCfg.StorageClass); fs != nil {
-			params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), tierCfg.ID.String())
+		if fs := findLocalFileStorage(rt, localNodeID, vaultCfg2.StorageClass); fs != nil {
+			params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), vaultCfg2.ID.String())
 		}
 
 	case system.VaultTypeJSONL:
-		if tierCfg.Path != "" {
-			params["path"] = tierCfg.Path
+		if vaultCfg2.Path != "" {
+			params["path"] = vaultCfg2.Path
 		} else {
 			// Default: jsonl/<vault-id>/<inst-id>.jsonl
-			params["path"] = filepath.Join("jsonl", vaultCfg.ID.String(), tierCfg.ID.String()+".jsonl")
+			params["path"] = filepath.Join("jsonl", vaultCfg.ID.String(), vaultCfg2.ID.String()+".jsonl")
 		}
 	}
 
@@ -1479,9 +1479,9 @@ func buildVaultParams(sys *system.System, vaultCfg system.VaultConfig, tierCfg s
 // onto every CmdUploadChunk via gastrolog-grnc3); no-op for the rest if the
 // referenced cloud service entry is missing — the chunk manager will start
 // without a CloudStore wired but still knows which service it would pin to.
-func addCloudParams(params map[string]string, cfg *system.Config, tierCfg system.TierConfig) {
-	params["cloud_service_id"] = tierCfg.CloudServiceID.String()
-	cs := findCloudService(cfg, *tierCfg.CloudServiceID)
+func addCloudParams(params map[string]string, cfg *system.Config, vaultCfg2 system.TierConfig) {
+	params["cloud_service_id"] = vaultCfg2.CloudServiceID.String()
+	cs := findCloudService(cfg, *vaultCfg2.CloudServiceID)
 	if cs == nil {
 		return
 	}

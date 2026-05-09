@@ -127,7 +127,7 @@ func resolveVaultName(vaults []*v1.VaultConfig, vaultID, fallback string) string
 }
 
 func printTierSection(tier *v1.TierConfig, chunks []*v1.ChunkMeta, nodeNames map[string]string) {
-	tierType := strings.TrimPrefix(tier.Type.String(), "TIER_TYPE_")
+	vaultType := strings.TrimPrefix(tier.Type.String(), "TIER_TYPE_")
 	var totalRecords, totalBytes int64
 	for _, c := range chunks {
 		totalRecords += c.RecordCount
@@ -135,7 +135,7 @@ func printTierSection(tier *v1.TierConfig, chunks []*v1.ChunkMeta, nodeNames map
 	}
 
 	fmt.Printf("  STORAGE: %s  %q  %d chunks  %d records  %s\n",
-		tierType, tier.Name,
+		vaultType, tier.Name,
 		len(chunks), totalRecords, units.FormatBytesDisplay(totalBytes))
 
 	sort.Slice(chunks, func(i, j int) bool {
@@ -240,8 +240,8 @@ func runInspectChunk(cmd *cobra.Command, args []string) error {
 		return newPrinter("json").json(c)
 	}
 
-	tierName := resolveTierName(client, glid.FromBytes(c.VaultId).String())
-	pairs := buildChunkKV(c, tierName)
+	vaultName := resolveTierName(client, glid.FromBytes(c.VaultId).String())
+	pairs := buildChunkKV(c, vaultName)
 	newPrinter(outputFormat(cmd)).kv(pairs)
 	return nil
 }
@@ -262,10 +262,10 @@ func resolveTierName(client *server.Client, instID string) string {
 	return instID
 }
 
-func buildChunkKV(c *v1.ChunkMeta, tierName string) [][2]string {
+func buildChunkKV(c *v1.ChunkMeta, vaultName string) [][2]string {
 	pairs := [][2]string{
 		{"Chunk ID", glid.FromBytes(c.Id).String()},
-		{"Tier", tierName},
+		{"Tier", vaultName},
 		{"Status", chunkBadges(c)},
 		{"Records", strconv.FormatInt(c.RecordCount, 10)},
 		{"Logical Size", units.FormatBytesDisplay(c.Bytes)},

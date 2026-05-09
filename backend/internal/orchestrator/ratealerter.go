@@ -39,7 +39,7 @@ type RateAlerter struct {
 	warningAt float64 // events/sec to raise Warning
 	errorAt   float64 // events/sec to raise Error (0 disables Error escalation)
 	alerts    AlertCollector
-	tierName  func(glid.GLID) string // best-effort human label, "" if unknown
+	vaultName  func(glid.GLID) string // best-effort human label, "" if unknown
 }
 
 // rateAlerterConfig bundles the constructor parameters so RateAlerter
@@ -55,7 +55,7 @@ type rateAlerterConfig struct {
 	TierName  func(glid.GLID) string
 }
 
-// newRateAlerter constructs a RateAlerter. tierName may be nil; if provided,
+// newRateAlerter constructs a RateAlerter. vaultName may be nil; if provided,
 // it returns a human label for the inst (e.g., the operator's chosen inst
 // name from config) and is invoked under no locks so it must be safe to call
 // concurrently.
@@ -69,7 +69,7 @@ func newRateAlerter(cfg rateAlerterConfig) *RateAlerter {
 		warningAt: cfg.WarningAt,
 		errorAt:   cfg.ErrorAt,
 		alerts:    cfg.Alerts,
-		tierName:  cfg.TierName,
+		vaultName:  cfg.TierName,
 	}
 }
 
@@ -160,8 +160,8 @@ func (r *RateAlerter) alertID(instID glid.GLID) string {
 
 func (r *RateAlerter) message(instID glid.GLID, rate float64, count int64) string {
 	label := instID.String()
-	if r.tierName != nil {
-		if name := r.tierName(instID); name != "" {
+	if r.vaultName != nil {
+		if name := r.vaultName(instID); name != "" {
 			label = fmt.Sprintf("%s (%s)", name, instID.String()[:8])
 		}
 	}

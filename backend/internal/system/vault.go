@@ -106,14 +106,14 @@ func (v VaultConfig) ResolveRetentionDisposition() string {
 // inverse of MergeVaultFromTiers and replaces walking cfg.Tiers for the single
 // tier per vault.
 func TierFromVault(v VaultConfig) TierConfig {
-	tierType := v.Type
-	if tierType == "" {
-		tierType = VaultTypeFile
+	vaultType := v.Type
+	if vaultType == "" {
+		vaultType = VaultTypeFile
 	}
 	return TierConfig{
 		ID:                v.ID,
 		Name:              v.Name,
-		Type:              tierType,
+		Type:              vaultType,
 		VaultID:           v.ID,
 		StorageClass:      v.StorageClass,
 		CloudServiceID:    v.CloudServiceID,

@@ -398,8 +398,8 @@ func (o *Orchestrator) tierLabel(instID glid.GLID) string {
 	if err != nil || sys == nil {
 		return ""
 	}
-	if tierCfg := findTierConfig(sys.Config.Tiers, instID); tierCfg != nil {
-		return tierCfg.Name
+	if vaultCfg2 := findTierConfig(sys.Config.Tiers, instID); vaultCfg2 != nil {
+		return vaultCfg2.Name
 	}
 	return ""
 }
@@ -529,7 +529,7 @@ func New(cfg Config) (*Orchestrator, error) {
 	// Per-inst rate alerters. Thresholds are taken from gastrolog-47qyw:
 	//   rotation: warn at >1/sec, error at >5/sec, sustained over 30s
 	//   retention: warn at >10/sec sustained over 30s
-	// The orchestrator's tierName closure looks up the human label from
+	// The orchestrator's vaultName closure looks up the human label from
 	// the current vault registry; "" is returned if the inst is unknown.
 	o.rotationRates = newRateAlerter(rateAlerterConfig{
 		Window:    30 * time.Second,

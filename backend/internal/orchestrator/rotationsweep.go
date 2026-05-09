@@ -115,9 +115,9 @@ func (o *Orchestrator) reconcileFilters(sys *system.System) {
 // and rotation policy from the current config. Called each tick by
 // rotationSweep.
 //
-// gastrolog-1ex3b: the tierCfg parameter is no longer consulted — Phase 2/3
+// gastrolog-1ex3b: the vaultCfg2 parameter is no longer consulted — Phase 2/3
 // collapsed TierConfig into VaultConfig, so cfg.Tiers is empty and the
-// previous `if tierCfg == nil { return }` guard prevented FollowerTargets
+// previous `if vaultCfg2 == nil { return }` guard prevented FollowerTargets
 // from ever refreshing. Result: vaults built before placements arrived
 // kept FollowerTargets=[] forever and never replicated chunks to followers
 // despite RF=N. The guard is gone; the function now proceeds for every

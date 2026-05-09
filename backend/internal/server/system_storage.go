@@ -170,11 +170,11 @@ func (s *SystemServer) validateCloudTierFields(ctx context.Context, cfg *apiv1.T
 }
 
 // validateReplicationFactor rejects RF higher than the number of eligible nodes.
-func (s *SystemServer) validateReplicationFactor(ctx context.Context, tierType system.VaultType, p *apiv1.TierConfig) *connect.Error {
+func (s *SystemServer) validateReplicationFactor(ctx context.Context, vaultType system.VaultType, p *apiv1.TierConfig) *connect.Error {
 	if p.ReplicationFactor <= 1 {
 		return nil
 	}
-	eligible, err := s.countEligibleStorages(ctx, tierType, p)
+	eligible, err := s.countEligibleStorages(ctx, vaultType, p)
 	if err != nil {
 		return errInternal(err)
 	}
@@ -189,7 +189,7 @@ func (s *SystemServer) validateReplicationFactor(ctx context.Context, tierType s
 // countEligibleStorages returns how many file storages can host a replica of
 // this tier type. Same-node replication is valid (different file storages on the
 // same node), so this counts file storages, not nodes.
-func (s *SystemServer) countEligibleStorages(ctx context.Context, tierType system.VaultType, p *apiv1.TierConfig) (int, error) {
+func (s *SystemServer) countEligibleStorages(ctx context.Context, vaultType system.VaultType, p *apiv1.TierConfig) (int, error) {
 	nscs, err := s.sysStore.ListNodeStorageConfigs(ctx)
 	if err != nil {
 		return 0, err
@@ -199,7 +199,7 @@ func (s *SystemServer) countEligibleStorages(ctx context.Context, tierType syste
 		return 0, err
 	}
 
-	switch tierType {
+	switch vaultType {
 	case system.VaultTypeMemory:
 		return len(nodes), nil // memory tiers: one per node (no disk storage)
 	case system.VaultTypeJSONL:

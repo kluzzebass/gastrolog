@@ -96,11 +96,11 @@ func (o *Orchestrator) archivalSweepAll() {
 		if inst == nil || !inst.IsLeader() {
 			continue
 		}
-		tierCfg := findTierConfig(sys.Config.Tiers, inst.VaultID)
-		if tierCfg == nil || tierCfg.CloudServiceID == nil {
+		vaultCfg2 := findTierConfig(sys.Config.Tiers, inst.VaultID)
+		if vaultCfg2 == nil || vaultCfg2.CloudServiceID == nil {
 			continue
 		}
-		cs, ok := activeCS[*tierCfg.CloudServiceID]
+		cs, ok := activeCS[*vaultCfg2.CloudServiceID]
 		if !ok {
 			continue
 		}
@@ -236,11 +236,11 @@ func (o *Orchestrator) reconcileSweepAll() {
 		if inst == nil || !inst.IsLeader() {
 			continue
 		}
-		tierCfg := findTierConfig(sys.Config.Tiers, inst.VaultID)
-		if tierCfg == nil || tierCfg.CloudServiceID == nil {
+		vaultCfg2 := findTierConfig(sys.Config.Tiers, inst.VaultID)
+		if vaultCfg2 == nil || vaultCfg2.CloudServiceID == nil {
 			continue
 		}
-		cs := findCloudService(&sys.Config, *tierCfg.CloudServiceID)
+		cs := findCloudService(&sys.Config, *vaultCfg2.CloudServiceID)
 		if cs == nil {
 			continue
 		}

@@ -74,7 +74,7 @@ type retentionRunner struct {
 	// config on every sweep via retentionTargetForTier.
 	vaultName    string
 	tierPosition int
-	tierType     string
+	vaultType     string
 	cm           chunk.ChunkManager
 	im           index.IndexManager
 	inflight     map[chunk.ChunkID]bool // chunks currently being processed
@@ -462,11 +462,11 @@ func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg syste
 	// always runs retention regardless of vault-ctl Raft leadership.
 	// 1:1 vault:tier — synthesize the inst config from the vault.
 	tier2 := system.TierFromVault(vaultCfg)
-	tierCfg := &tier2
-	if len(tierCfg.RetentionRules) == 0 {
+	vaultCfg2 := &tier2
+	if len(vaultCfg2.RetentionRules) == 0 {
 		return nil
 	}
-	rules, err := resolveRetentionRulesFromVault(cfg, vaultCfg, tierCfg)
+	rules, err := resolveRetentionRulesFromVault(cfg, vaultCfg, vaultCfg2)
 	if err != nil {
 		o.logger.Warn("retention: failed to resolve rules",
 			"vault", vaultCfg.ID, "error", err)
@@ -499,7 +499,7 @@ func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg syste
 	runner.isLeader = inst.IsLeader()
 	runner.followerTargets = inst.FollowerTargets
 	runner.vaultName = vaultCfg.Name
-	runner.tierType = string(tierCfg.Type)
+	runner.vaultType = string(vaultCfg2.Type)
 	runner.tierPosition = tierPositionInVault(cfg, vaultCfg.ID, inst.VaultID)
 	runner.disposition = vaultCfg.ResolveRetentionDisposition()
 	return &sweepTarget{runner: runner, rules: rules}
