@@ -38,11 +38,6 @@ func memVaultCfg(vaultID glid.GLID, loader *fakeSystemLoader) system.VaultConfig
 		Name: "vault-" + vaultID.String()[:8],
 		Type: system.VaultTypeMemory,
 	}
-	// Some tests still inspect loader.cfg.Tiers; keep the legacy mirror in
-	// sync until those callers migrate.
-	if loader != nil && loader.cfg != nil {
-		loader.cfg.Tiers = append(loader.cfg.Tiers, system.TierFromVault(v))
-	}
 	return v
 }
 
@@ -939,12 +934,6 @@ func TestRetentionSingleJobRegistered(t *testing.T) {
 		},
 		RetentionPolicies: []system.RetentionPolicyConfig{
 			{ID: retPolicyID, Name: "age-2m", MaxAge: strPtr("2m")},
-		},
-		Tiers: []system.TierConfig{
-			{ID: instID, Name: "inst", Type: system.VaultTypeMemory, VaultID: vaultID, RetentionRules: []system.RetentionRule{{
-				RetentionPolicyID: retPolicyID,
-				
-			}}},
 		},
 		Vaults: []system.VaultConfig{
 			{ID: vaultID, Name: "src"},

@@ -176,7 +176,6 @@ type stubCfgStore struct {
 	vaultErr     error
 	vaultList    []system.VaultConfig
 	vaultListErr error
-	tiers        []system.TierConfig
 	ingester     *system.IngesterConfig
 	ingesterErr  error
 	settings     system.ServerSettings
@@ -205,16 +204,6 @@ func (s *stubCfgStore) Load(context.Context) (*system.System, error) {
 	}
 	return &system.System{Config: *s.cfg}, s.loadErr
 }
-func (s *stubCfgStore) ListTiers(context.Context) ([]system.TierConfig, error) {
-	if len(s.tiers) > 0 {
-		return s.tiers, nil
-	}
-	if s.cfg != nil {
-		return s.cfg.Tiers, nil
-	}
-	return nil, nil
-}
-
 func (s *stubCfgStore) GetIngesterAssignment(_ context.Context, id glid.GLID) (string, error) {
 	if s.ingesterAssignments != nil {
 		return s.ingesterAssignments[id], nil
@@ -294,10 +283,8 @@ func TestHandle_VaultPut(t *testing.T) {
 	t.Run("unscoped_node_not_skipped", func(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{} // no error → AddVault succeeds
-		instID := glid.New()
 		d := newTestDispatcher(mo, &stubCfgStore{
 			vault: &system.VaultConfig{ID: id, Enabled: true},
-			tiers: []system.TierConfig{{ID: instID, VaultID: id}},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
@@ -310,10 +297,8 @@ func TestHandle_VaultPut(t *testing.T) {
 	t.Run("add_vault_error", func(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{addVaultErr: errors.New("factory boom")}
-		instID := glid.New()
 		d := newTestDispatcher(mo, &stubCfgStore{
 			vault: &system.VaultConfig{ID: id, Enabled: true},
-			tiers: []system.TierConfig{{ID: instID, VaultID: id}},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})

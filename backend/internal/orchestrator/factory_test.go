@@ -187,15 +187,8 @@ func TestApplyConfigVaultWithNoLocalTiers(t *testing.T) {
 	}
 
 	vaultID := glid.New()
-	instID := glid.New()
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{{ID: vaultID, Enabled: true}},
-		Tiers: []system.TierConfig{{
-			ID:      instID,
-			Name:    "remote-only",
-			Type:    system.VaultTypeMemory,
-			VaultID: vaultID,
-		}},
 	}
 
 	if err := orch.ApplyConfig(&system.System{Config: *cfg}, factories); err != nil {
@@ -227,12 +220,11 @@ func TestApplyConfigVaults(t *testing.T) {
 
 	vault1ID := glid.New()
 	vault2ID := glid.New()
-	vc1, tc1 := testVaultCfg(vault1ID, system.VaultTypeMemory)
-	vc2, tc2 := testVaultCfg(vault2ID, system.VaultTypeMemory)
+	vc1, _ := testVaultCfg(vault1ID, system.VaultTypeMemory)
+	vc2, _ := testVaultCfg(vault2ID, system.VaultTypeMemory)
 
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{vc1, vc2},
-		Tiers:  []system.TierConfig{tc1, tc2},
 	}
 
 	err := orch.ApplyConfig(&system.System{Config: *cfg}, factories)
@@ -290,10 +282,9 @@ func TestApplyConfigUnknownChunkManagerType(t *testing.T) {
 	orch := newTestOrch(t, Config{})
 
 	vaultID := glid.New()
-	vc, tc := testVaultCfg(vaultID, system.VaultTypeMemory)
+	vc, _ := testVaultCfg(vaultID, system.VaultTypeMemory)
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{vc},
-		Tiers:  []system.TierConfig{tc},
 	}
 
 	// Vault init failure is non-fatal (vault skipped), so no error returned.
@@ -313,7 +304,7 @@ func TestApplyConfigUnknownIndexManagerType(t *testing.T) {
 	orch := newTestOrch(t, Config{})
 
 	vaultID := glid.New()
-	vc, tc := testVaultCfg(vaultID, system.VaultTypeMemory)
+	vc, _ := testVaultCfg(vaultID, system.VaultTypeMemory)
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			"memory": func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
@@ -325,7 +316,6 @@ func TestApplyConfigUnknownIndexManagerType(t *testing.T) {
 
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{vc},
-		Tiers:  []system.TierConfig{tc},
 	}
 
 	// Vault init failure is non-fatal (vault skipped), so no error returned.
@@ -372,11 +362,10 @@ func TestApplyConfigDuplicateVaultID(t *testing.T) {
 	}
 
 	dupID := glid.New()
-	vc1, tc1 := testVaultCfg(dupID, system.VaultTypeMemory)
+	vc1, _ := testVaultCfg(dupID, system.VaultTypeMemory)
 	vc2 := vc1 // duplicate ID, same inst
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{vc1, vc2},
-		Tiers:  []system.TierConfig{tc1},
 	}
 
 	err := orch.ApplyConfig(&system.System{Config: *cfg}, factories)
@@ -414,7 +403,7 @@ func TestApplyConfigChunkManagerFactoryError(t *testing.T) {
 	orch := newTestOrch(t, Config{})
 
 	vaultID := glid.New()
-	vc, tc := testVaultCfg(vaultID, system.VaultTypeMemory)
+	vc, _ := testVaultCfg(vaultID, system.VaultTypeMemory)
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			"memory": func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
@@ -430,7 +419,6 @@ func TestApplyConfigChunkManagerFactoryError(t *testing.T) {
 
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{vc},
-		Tiers:  []system.TierConfig{tc},
 	}
 
 	// Vault init failure is non-fatal — node stays up, vault is skipped.
@@ -447,7 +435,7 @@ func TestApplyConfigIndexManagerFactoryError(t *testing.T) {
 	orch := newTestOrch(t, Config{})
 
 	vaultID := glid.New()
-	vc, tc := testVaultCfg(vaultID, system.VaultTypeMemory)
+	vc, _ := testVaultCfg(vaultID, system.VaultTypeMemory)
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			"memory": func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
@@ -463,7 +451,6 @@ func TestApplyConfigIndexManagerFactoryError(t *testing.T) {
 
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{vc},
-		Tiers:  []system.TierConfig{tc},
 	}
 
 	// Vault init failure is non-fatal — node stays up, vault is skipped.
@@ -615,10 +602,9 @@ func TestApplyConfigIndexManagerReceivesChunkManager(t *testing.T) {
 	}
 
 	vaultID := glid.New()
-	vc, tc := testVaultCfg(vaultID, system.VaultTypeMemory)
+	vc, _ := testVaultCfg(vaultID, system.VaultTypeMemory)
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{vc},
-		Tiers:  []system.TierConfig{tc},
 	}
 
 	err := orch.ApplyConfig(&system.System{Config: *cfg}, factories)

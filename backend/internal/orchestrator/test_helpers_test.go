@@ -51,9 +51,9 @@ func (l *transitionSystemLoader) Load(ctx context.Context) (*system.System, erro
 	if sys.Runtime.VaultPlacements == nil {
 		sys.Runtime.VaultPlacements = make(map[glid.GLID][]system.VaultPlacement)
 	}
-	for _, inst := range sys.Config.Tiers {
-		if _, ok := sys.Runtime.VaultPlacements[inst.ID]; !ok {
-			sys.Runtime.VaultPlacements[inst.ID] = []system.VaultPlacement{
+	for _, v := range sys.Config.Vaults {
+		if _, ok := sys.Runtime.VaultPlacements[v.ID]; !ok {
+			sys.Runtime.VaultPlacements[v.ID] = []system.VaultPlacement{
 				{StorageID: system.SyntheticStorageID(nodeID), Leader: true},
 			}
 		}
@@ -70,8 +70,8 @@ func newTestStore(cfg *system.Config, nodeID string) *sysmem.Store {
 	for _, v := range cfg.Vaults {
 		_ = store.PutVault(ctx, v)
 	}
-	for _, tc := range cfg.Tiers {
-		_ = store.SetVaultPlacements(ctx, tc.ID, []system.VaultPlacement{
+	for _, v := range cfg.Vaults {
+		_ = store.SetVaultPlacements(ctx, v.ID, []system.VaultPlacement{
 			{StorageID: system.SyntheticStorageID(nodeID), Leader: true},
 		})
 	}
