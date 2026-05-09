@@ -487,7 +487,7 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID glid.
 	nscs := rt.NodeStorageConfigs
 	// VaultConfig.Placements is mirrored from tier placements via the FSM
 	// bridge (gastrolog-257l7). Read from the vault directly so the lookup
-	// survives the eventual deletion of rt.TierPlacements.
+	// survives the eventual deletion of rt.VaultPlacements.
 	placements := vaultCfg.Placements
 	leaderNodeID := system.LeaderNodeID(placements, nscs)
 	followerNodeIDs := system.FollowerNodeIDs(placements, nscs)

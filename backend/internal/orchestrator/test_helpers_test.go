@@ -48,12 +48,12 @@ func (l *transitionSystemLoader) Load(ctx context.Context) (*system.System, erro
 	if nodeID == "" {
 		nodeID = "test-node"
 	}
-	if sys.Runtime.TierPlacements == nil {
-		sys.Runtime.TierPlacements = make(map[glid.GLID][]system.VaultPlacement)
+	if sys.Runtime.VaultPlacements == nil {
+		sys.Runtime.VaultPlacements = make(map[glid.GLID][]system.VaultPlacement)
 	}
 	for _, tier := range sys.Config.Tiers {
-		if _, ok := sys.Runtime.TierPlacements[tier.ID]; !ok {
-			sys.Runtime.TierPlacements[tier.ID] = []system.VaultPlacement{
+		if _, ok := sys.Runtime.VaultPlacements[tier.ID]; !ok {
+			sys.Runtime.VaultPlacements[tier.ID] = []system.VaultPlacement{
 				{StorageID: system.SyntheticStorageID(nodeID), Leader: true},
 			}
 		}

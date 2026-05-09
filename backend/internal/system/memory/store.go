@@ -148,11 +148,11 @@ func (s *Store) Load(ctx context.Context) (*system.System, error) {
 
 	// Runtime: tier placements (stored separately from TierConfig).
 	if len(s.tierPlacements) > 0 {
-		rt.TierPlacements = make(map[glid.GLID][]system.VaultPlacement, len(s.tierPlacements))
+		rt.VaultPlacements = make(map[glid.GLID][]system.VaultPlacement, len(s.tierPlacements))
 		for id, p := range s.tierPlacements {
 			cp := make([]system.VaultPlacement, len(p))
 			copy(cp, p)
-			rt.TierPlacements[id] = cp
+			rt.VaultPlacements[id] = cp
 		}
 	}
 

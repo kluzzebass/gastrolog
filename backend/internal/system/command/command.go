@@ -827,7 +827,7 @@ func BuildSnapshot(sys *system.System, users []system.User, tokens []system.Refr
 	}
 
 	// Runtime: vault placements.
-	for vaultID, placements := range rt.TierPlacements {
+	for vaultID, placements := range rt.VaultPlacements {
 		cmd := NewSetVaultPlacements(vaultID, placements).GetSetVaultPlacements()
 		snap.VaultPlacements = append(snap.VaultPlacements, cmd)
 	}
@@ -988,13 +988,13 @@ func RestoreSnapshot(snap *gastrologv1.SystemSnapshot) (*system.System, []system
 
 	// Restore tier placements.
 	if len(snap.GetVaultPlacements()) > 0 {
-		rt.TierPlacements = make(map[glid.GLID][]system.VaultPlacement, len(snap.GetVaultPlacements()))
+		rt.VaultPlacements = make(map[glid.GLID][]system.VaultPlacement, len(snap.GetVaultPlacements()))
 		for _, tp := range snap.GetVaultPlacements() {
 			tierID, placements, err := ExtractSetVaultPlacements(tp)
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("restore tier placements: %w", err)
 			}
-			rt.TierPlacements[tierID] = placements
+			rt.VaultPlacements[tierID] = placements
 		}
 	}
 

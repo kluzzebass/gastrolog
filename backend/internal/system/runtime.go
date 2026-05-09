@@ -14,7 +14,7 @@ type Runtime struct {
 	// Tier placements: which storages hold replicas, and who leads.
 	// Keyed by tier ID. The operator sets replication factor and storage
 	// class on TierConfig; the system decides placements.
-	TierPlacements map[glid.GLID][]VaultPlacement `json:"tierPlacements,omitempty"`
+	VaultPlacements map[glid.GLID][]VaultPlacement `json:"vaultPlacements,omitempty"`
 
 	// Cluster identity material (generated at cluster-init).
 	ClusterTLS *ClusterTLS `json:"cluster_tls,omitempty"`

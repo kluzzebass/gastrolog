@@ -577,7 +577,7 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 					ID: storageID, StorageClass: 1, Name: "fast", Path: "/data/chunks",
 				}},
 			}},
-			TierPlacements: map[glid.GLID][]system.VaultPlacement{
+			VaultPlacements: map[glid.GLID][]system.VaultPlacement{
 				tierID: {{StorageID: storageID.String(), Leader: true}},
 			},
 		},

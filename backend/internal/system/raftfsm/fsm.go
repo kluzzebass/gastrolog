@@ -909,7 +909,7 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit,gocyclo // sna
 			return fmt.Errorf("restore cluster TLS: %w", err)
 		}
 	}
-	for tierID, placements := range rt.TierPlacements {
+	for tierID, placements := range rt.VaultPlacements {
 		if err := newStore.SetVaultPlacements(ctx, tierID, placements); err != nil {
 			return fmt.Errorf("restore tier placements %s: %w", tierID, err)
 		}
