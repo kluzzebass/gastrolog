@@ -577,8 +577,8 @@ func newClusterRetentionRunner(orch *Orchestrator, vaultID, instID glid.GLID, in
 type clusterTestNode struct {
 	nodeID   string
 	orch     *Orchestrator
-	tiers    []*VaultInstance // all inst instances on this node
-	tierDirs []string        // filesystem directories, one per inst
+	instances    []*VaultInstance // all inst instances on this node
+	instanceDirs []string        // filesystem directories, one per inst
 }
 
 // clusterHarness holds the full multi-node cluster.
@@ -610,31 +610,31 @@ func (h *clusterHarness) countRecordsOnNode(t *testing.T, nodeID string) int64 {
 	t.Helper()
 	node := h.nodes[nodeID]
 	var total int64
-	for _, inst := range node.tiers {
+	for _, inst := range node.instances {
 		total += cursorCountRecords(t, inst.Chunks)
 	}
 	return total
 }
 
 // countRecordsOnInstance counts cursor-verified records in a specific inst across ALL nodes.
-func (h *clusterHarness) countRecordsOnInstance(t *testing.T, tierIdx int) map[string]int64 {
+func (h *clusterHarness) countRecordsOnInstance(t *testing.T, instIdx int) map[string]int64 {
 	t.Helper()
 	counts := make(map[string]int64)
 	for nodeID, node := range h.nodes {
-		if tierIdx < len(node.tiers) {
-			counts[nodeID] = cursorCountRecords(t, node.tiers[tierIdx].Chunks)
+		if instIdx < len(node.instances) {
+			counts[nodeID] = cursorCountRecords(t, node.instances[instIdx].Chunks)
 		}
 	}
 	return counts
 }
 
 // countChunksOnInstance counts sealed chunks in a specific inst across ALL nodes.
-func (h *clusterHarness) countChunksOnInstance(t *testing.T, tierIdx int) map[string]int {
+func (h *clusterHarness) countChunksOnInstance(t *testing.T, instIdx int) map[string]int {
 	t.Helper()
 	counts := make(map[string]int)
 	for nodeID, node := range h.nodes {
-		if tierIdx < len(node.tiers) {
-			metas, _ := node.tiers[tierIdx].Chunks.List()
+		if instIdx < len(node.instances) {
+			metas, _ := node.instances[instIdx].Chunks.List()
 			counts[nodeID] = len(metas)
 		}
 	}
@@ -673,25 +673,25 @@ func newClusterLifecycleLogger(t *testing.T) *slog.Logger {
 	return slog.New(handler)
 }
 
-func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords uint64) *clusterHarness {
+func setupCluster(t *testing.T, nodeIDs []string, instCount int, rotationRecords uint64) *clusterHarness {
 	t.Helper()
 	if len(nodeIDs) < 2 {
 		t.Fatal("setupCluster needs at least 2 nodes")
 	}
 	leaderID := nodeIDs[0]
 	vaultID := glid.New()
-	// 1:1 vault:tier — single inst shares the vault's ID. tierCount is
+	// 1:1 vault:tier — single inst shares the vault's ID. instCount is
 	// always 1 in current callers; the slice survives only for legacy
 	// fixture wiring.
-	instIDs := make([]glid.GLID, tierCount)
-	for i := range tierCount {
+	instIDs := make([]glid.GLID, instCount)
+	for i := range instCount {
 		instIDs[i] = vaultID
 	}
 
 	// Create config store.
 	store := sysmem.NewStore()
-	tierCfgs := make([]system.TierConfig, tierCount)
-	for i := range tierCount {
+	tierCfgs := make([]system.TierConfig, instCount)
+	for i := range instCount {
 		placements := make([]system.VaultPlacement, 0, len(nodeIDs))
 		placements = append(placements, system.VaultPlacement{
 			StorageID: system.SyntheticStorageID(leaderID), Leader: true,
@@ -735,11 +735,11 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 		orchs[nid] = orch
 
 		isLeader := nid == leaderID
-		tiers := make([]*VaultInstance, tierCount)
-		tierDirs := make([]string, tierCount)
-		for i := range tierCount {
+		tiers := make([]*VaultInstance, instCount)
+		instanceDirs := make([]string, instCount)
+		for i := range instCount {
 			dir := t.TempDir()
-			tierDirs[i] = dir
+			instanceDirs[i] = dir
 			cm, cmErr := chunkfile.NewManager(chunkfile.Config{
 				Dir:            dir,
 				Now:            time.Now,
@@ -766,7 +766,7 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 		}
 
 		// Phase 2 (gastrolog-3iy5l): vaults are single-instance. Use the
-		// first inst as the vault's instance; tierCount > 1 is unused
+		// first inst as the vault's instance; instCount > 1 is unused
 		// post-collapse (callers that asked for it were transition tests
 		// that have been removed).
 		vault := NewVault(vaultID, tiers[0])
@@ -776,8 +776,8 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 		nodes[nid] = &clusterTestNode{
 			nodeID:   nid,
 			orch:     orch,
-			tiers:    tiers,
-			tierDirs: tierDirs,
+			instances:    tiers,
+			instanceDirs: instanceDirs,
 		}
 	}
 
@@ -800,7 +800,7 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 			n.orch.Stop()
 		}
 		for _, n := range nodes {
-			for _, inst := range n.tiers {
+			for _, inst := range n.instances {
 				_ = inst.Chunks.Close()
 			}
 		}
@@ -823,26 +823,26 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 // followers' active chunks would stay active, causing forwardDelete to
 // fail with ErrActiveChunk. The leader's production seal-on-rotation path
 // uses sealRemoteFollowers; tests that manually seal must do the same.
-func (h *clusterHarness) sealAndReplicate(t *testing.T, leaderNode *clusterTestNode, tierIdx int) {
+func (h *clusterHarness) sealAndReplicate(t *testing.T, leaderNode *clusterTestNode, instIdx int) {
 	t.Helper()
-	inst := leaderNode.tiers[tierIdx]
+	inst := leaderNode.instances[instIdx]
 	active := inst.Chunks.Active()
 	if active == nil || active.RecordCount == 0 {
 		return
 	}
 	chunkID := active.ID
 	if err := inst.Chunks.Seal(); err != nil {
-		t.Fatalf("seal inst %d: %v", tierIdx, err)
+		t.Fatalf("seal inst %d: %v", instIdx, err)
 	}
 	// Propagate seal to all follower nodes.
 	for _, nid := range h.allNodeIDs() {
 		if nid == leaderNode.nodeID {
 			continue
 		}
-		ftier := h.nodes[nid].tiers[tierIdx]
+		ftier := h.nodes[nid].instances[instIdx]
 		if active := ftier.Chunks.Active(); active != nil && active.ID == chunkID {
 			if err := ftier.Chunks.Seal(); err != nil {
-				t.Fatalf("seal follower %s inst %d: %v", nid, tierIdx, err)
+				t.Fatalf("seal follower %s inst %d: %v", nid, instIdx, err)
 			}
 		}
 	}
@@ -856,14 +856,14 @@ func (h *clusterHarness) sealAndReplicate(t *testing.T, leaderNode *clusterTestN
 // chunk subdirectories on ANY node. This goes below the chunk manager API —
 // it checks the actual filesystem to catch silent delete failures, leaked
 // directories, and stale files.
-func (h *clusterHarness) assertTierDirEmpty(t *testing.T, tierIdx int) {
+func (h *clusterHarness) assertTierDirEmpty(t *testing.T, instIdx int) {
 	t.Helper()
 	// Poll briefly — async chunk deletion may lag under CPU contention.
 	deadline := time.Now().Add(60 * time.Second)
 	for {
 		allEmpty := true
 		for _, nid := range h.allNodeIDs() {
-			if len(h.chunkDirsOnNode(nid, tierIdx)) > 0 {
+			if len(h.chunkDirsOnNode(nid, instIdx)) > 0 {
 				allEmpty = false
 				break
 			}
@@ -877,23 +877,23 @@ func (h *clusterHarness) assertTierDirEmpty(t *testing.T, tierIdx int) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	for _, nid := range h.allNodeIDs() {
-		chunkDirs := h.chunkDirsOnNode(nid, tierIdx)
+		chunkDirs := h.chunkDirsOnNode(nid, instIdx)
 		if len(chunkDirs) > 0 {
 			t.Errorf("inst %d on %s: %d chunk directories still on disk: %v",
-				tierIdx, nid, len(chunkDirs), chunkDirs)
+				instIdx, nid, len(chunkDirs), chunkDirs)
 		}
 	}
 }
 
 // assertTierEmptyAllNodes polls until all nodes report zero records on the
 // given inst, or fails after 10s. Follower chunk deletion is async.
-func (h *clusterHarness) assertTierEmptyAllNodes(t *testing.T, tierIdx int) {
+func (h *clusterHarness) assertTierEmptyAllNodes(t *testing.T, instIdx int) {
 	t.Helper()
 	deadline := time.Now().Add(60 * time.Second)
 	for {
 		allEmpty := true
 		for _, nid := range h.allNodeIDs() {
-			if cursorCountRecords(t, h.nodes[nid].tiers[tierIdx].Chunks) > 0 {
+			if cursorCountRecords(t, h.nodes[nid].instances[instIdx].Chunks) > 0 {
 				allEmpty = false
 				break
 			}
@@ -907,15 +907,15 @@ func (h *clusterHarness) assertTierEmptyAllNodes(t *testing.T, tierIdx int) {
 		time.Sleep(200 * time.Millisecond)
 	}
 	for _, nid := range h.allNodeIDs() {
-		count := cursorCountRecords(t, h.nodes[nid].tiers[tierIdx].Chunks)
+		count := cursorCountRecords(t, h.nodes[nid].instances[instIdx].Chunks)
 		if count != 0 {
-			t.Errorf("inst %d on %s: cursor read %d records after full chain (should be 0)", tierIdx, nid, count)
+			t.Errorf("inst %d on %s: cursor read %d records after full chain (should be 0)", instIdx, nid, count)
 		}
 	}
 }
 
-func (h *clusterHarness) chunkDirsOnNode(nid string, tierIdx int) []string {
-	dir := h.nodes[nid].tierDirs[tierIdx]
+func (h *clusterHarness) chunkDirsOnNode(nid string, instIdx int) []string {
+	dir := h.nodes[nid].instanceDirs[instIdx]
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
@@ -930,9 +930,9 @@ func (h *clusterHarness) chunkDirsOnNode(nid string, tierIdx int) []string {
 }
 
 // listChunkDirsOnNode returns the chunk directory names in a inst dir on a node.
-func (h *clusterHarness) listChunkDirsOnNode(t *testing.T, nodeID string, tierIdx int) []string {
+func (h *clusterHarness) listChunkDirsOnNode(t *testing.T, nodeID string, instIdx int) []string {
 	t.Helper()
-	dir := h.nodes[nodeID].tierDirs[tierIdx]
+	dir := h.nodes[nodeID].instanceDirs[instIdx]
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("ReadDir(%s): %v", dir, err)

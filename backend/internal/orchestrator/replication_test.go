@@ -388,7 +388,7 @@ func TestClusterReplicationSealedChunksArriveOnFollowers(t *testing.T) {
 	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 1, 100)
 
 	leaderNode := h.nodes["leader"]
-	tier0 := leaderNode.tiers[0]
+	tier0 := leaderNode.instances[0]
 
 	// Burst ingest 1K records → 10 sealed chunks via 100-record rotation.
 	const totalRecords = 1_000
@@ -437,7 +437,7 @@ func TestClusterReplicationSealedChunksArriveOnFollowers(t *testing.T) {
 
 	// ---- Verify: each follower has all records (cursor-verified) ----
 	for _, fid := range []string{"f1", "f2", "f3"} {
-		followerCM := h.nodes[fid].tiers[0].Chunks
+		followerCM := h.nodes[fid].instances[0].Chunks
 		count := cursorCountRecords(t, followerCM)
 		if count != totalRecords {
 			t.Errorf("follower %s: cursor read %d records, expected %d", fid, count, totalRecords)
@@ -446,7 +446,7 @@ func TestClusterReplicationSealedChunksArriveOnFollowers(t *testing.T) {
 
 	// ---- Verify: followers have chunk directories on disk ----
 	for _, fid := range []string{"f1", "f2", "f3"} {
-		dir := h.nodes[fid].tierDirs[0]
+		dir := h.nodes[fid].instanceDirs[0]
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			t.Fatalf("ReadDir(%s): %v", dir, err)
@@ -472,7 +472,7 @@ func TestClusterReplicationSealedIdxWriteTSMatchesLeader(t *testing.T) {
 	h := setupCluster(t, []string{"leader", "f1", "f2"}, 1, 100)
 
 	leaderNode := h.nodes["leader"]
-	leaderTier := leaderNode.tiers[0]
+	leaderTier := leaderNode.instances[0]
 
 	// Fewer records than rotation threshold → single active chunk, then one
 	// sealed chunk after explicit Seal().
@@ -527,7 +527,7 @@ func TestClusterReplicationSealedIdxWriteTSMatchesLeader(t *testing.T) {
 	}
 
 	for _, fid := range []string{"f1", "f2"} {
-		got := chunkRecordTimestamps(t, h.nodes[fid].tiers[0].Chunks, sealedID)
+		got := chunkRecordTimestamps(t, h.nodes[fid].instances[0].Chunks, sealedID)
 		if len(got) != len(leaderEntries) {
 			t.Fatalf("follower %s: entries %d, leader %d", fid, len(got), len(leaderEntries))
 		}
@@ -582,7 +582,7 @@ func TestClusterReplicationSealSync(t *testing.T) {
 	h := setupCluster(t, []string{"leader", "f1", "f2"}, 1, 10000) // high rotation so we control seal manually
 
 	leaderNode := h.nodes["leader"]
-	leaderTier := leaderNode.tiers[0]
+	leaderTier := leaderNode.instances[0]
 
 	// Ingest 50 records on leader. With chunkReplicator wired, AppendToVault
 	// auto-forwards to followers via AppendRecords, so the followers end up
@@ -607,7 +607,7 @@ func TestClusterReplicationSealSync(t *testing.T) {
 
 	// Verify followers have the same active chunk ID as the leader.
 	for _, fid := range []string{"f1", "f2"} {
-		active := h.nodes[fid].tiers[0].Chunks.Active()
+		active := h.nodes[fid].instances[0].Chunks.Active()
 		if active == nil || active.ID != leaderChunkID {
 			t.Fatalf("follower %s: active chunk ID mismatch — sync failed", fid)
 		}
@@ -630,7 +630,7 @@ func TestClusterReplicationSealSync(t *testing.T) {
 
 	// Verify: followers have sealed the chunk.
 	for _, fid := range []string{"f1", "f2"} {
-		followerCM := h.nodes[fid].tiers[0].Chunks
+		followerCM := h.nodes[fid].instances[0].Chunks
 		metas, _ := followerCM.List()
 		sealed := 0
 		for _, m := range metas {
@@ -658,7 +658,7 @@ func TestClusterReplicationDeletePropagation(t *testing.T) {
 	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 1, 100)
 
 	leaderNode := h.nodes["leader"]
-	leaderTier := leaderNode.tiers[0]
+	leaderTier := leaderNode.instances[0]
 
 	// Ingest 500 records (5 sealed chunks).
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
@@ -693,7 +693,7 @@ func TestClusterReplicationDeletePropagation(t *testing.T) {
 
 	// Verify followers have chunks.
 	for _, fid := range []string{"f1", "f2", "f3"} {
-		count := cursorCountRecords(t, h.nodes[fid].tiers[0].Chunks)
+		count := cursorCountRecords(t, h.nodes[fid].instances[0].Chunks)
 		if count == 0 {
 			t.Fatalf("follower %s has 0 records before delete test — replication failed", fid)
 		}
@@ -720,7 +720,7 @@ func TestClusterReplicationDeletePropagation(t *testing.T) {
 
 	// ---- Verify: all nodes have 0 cursor-readable records ----
 	for _, nid := range h.allNodeIDs() {
-		count := cursorCountRecords(t, h.nodes[nid].tiers[0].Chunks)
+		count := cursorCountRecords(t, h.nodes[nid].instances[0].Chunks)
 		if count != 0 {
 			t.Errorf("%s: cursor read %d records after delete (should be 0)", nid, count)
 		}

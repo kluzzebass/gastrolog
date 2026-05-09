@@ -615,8 +615,8 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 		nodes[nid] = &clusterTestNode{
 			nodeID:   nid,
 			orch:     orch,
-			tiers:    []*VaultInstance{inst},
-			tierDirs: []string{dir},
+			instances:    []*VaultInstance{inst},
+			instanceDirs: []string{dir},
 		}
 	}
 
@@ -635,7 +635,7 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 			n.orch.Stop()
 		}
 		for _, n := range nodes {
-			for _, inst := range n.tiers {
+			for _, inst := range n.instances {
 				_ = inst.Chunks.Close()
 			}
 		}
@@ -660,7 +660,7 @@ func TestCloudClusterArchivalSweepSetsArchivedOnLeader(t *testing.T) {
 	})
 
 	leaderNode := h.nodes["leader"]
-	leaderCM := leaderNode.tiers[0].Chunks.(*chunkfile.Manager)
+	leaderCM := leaderNode.instances[0].Chunks.(*chunkfile.Manager)
 
 	// Ingest, seal, upload to cloud on leader.
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
@@ -720,7 +720,7 @@ func TestCloudClusterArchivalSweepOnlyRunsOnLeader(t *testing.T) {
 	})
 
 	leaderNode := h.nodes["leader"]
-	leaderCM := leaderNode.tiers[0].Chunks.(*chunkfile.Manager)
+	leaderCM := leaderNode.instances[0].Chunks.(*chunkfile.Manager)
 
 	// Ingest and upload on leader.
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
@@ -761,7 +761,7 @@ func TestCloudClusterRestoreChunkViaOrchestrator(t *testing.T) {
 	})
 
 	leaderNode := h.nodes["leader"]
-	leaderCM := leaderNode.tiers[0].Chunks.(*chunkfile.Manager)
+	leaderCM := leaderNode.instances[0].Chunks.(*chunkfile.Manager)
 
 	// Ingest, seal, upload, archive.
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
@@ -820,7 +820,7 @@ func TestCloudClusterArchivedChunkUnreadableOnLeader(t *testing.T) {
 	})
 
 	leaderNode := h.nodes["leader"]
-	leaderCM := leaderNode.tiers[0].Chunks.(*chunkfile.Manager)
+	leaderCM := leaderNode.instances[0].Chunks.(*chunkfile.Manager)
 
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 200 {
@@ -869,7 +869,7 @@ func TestCloudClusterSweepThresholdBoundary(t *testing.T) {
 	})
 
 	leaderNode := h.nodes["leader"]
-	leaderCM := leaderNode.tiers[0].Chunks.(*chunkfile.Manager)
+	leaderCM := leaderNode.instances[0].Chunks.(*chunkfile.Manager)
 
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 200 {
@@ -921,7 +921,7 @@ func TestCloudClusterGracePeriodBoundary(t *testing.T) {
 	h := setupCloudCluster(t, nil)
 
 	leaderNode := h.nodes["leader"]
-	leaderCM := leaderNode.tiers[0].Chunks.(*chunkfile.Manager)
+	leaderCM := leaderNode.instances[0].Chunks.(*chunkfile.Manager)
 
 	// Set grace period to 3 days.
 	sys, _ := h.cfgStore.Load(context.Background())
@@ -988,7 +988,7 @@ func TestCloudClusterArchivalSurvivesRestart(t *testing.T) {
 	})
 
 	leaderNode := h.nodes["leader"]
-	leaderCM := leaderNode.tiers[0].Chunks.(*chunkfile.Manager)
+	leaderCM := leaderNode.instances[0].Chunks.(*chunkfile.Manager)
 
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 200 {
@@ -1024,7 +1024,7 @@ func TestCloudClusterArchivalSurvivesRestart(t *testing.T) {
 	}
 
 	// Simulate restart: close and reopen the chunk manager with the same directory.
-	dir := leaderNode.tierDirs[0]
+	dir := leaderNode.instanceDirs[0]
 	_ = leaderCM.Close()
 
 	cm2, err := chunkfile.NewManager(chunkfile.Config{
@@ -1054,7 +1054,7 @@ func TestCloudClusterReconcileSweepDetectsMissingBlobs(t *testing.T) {
 	h := setupCloudCluster(t, nil)
 
 	leaderNode := h.nodes["leader"]
-	leaderCM := leaderNode.tiers[0].Chunks.(*chunkfile.Manager)
+	leaderCM := leaderNode.instances[0].Chunks.(*chunkfile.Manager)
 
 	// Ingest, seal, upload.
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
@@ -1110,7 +1110,7 @@ func TestCloudClusterReconcileSkipsTombstoned(t *testing.T) {
 	h := setupCloudCluster(t, nil)
 
 	leaderNode := h.nodes["leader"]
-	leaderCM := leaderNode.tiers[0].Chunks.(*chunkfile.Manager)
+	leaderCM := leaderNode.instances[0].Chunks.(*chunkfile.Manager)
 
 	// Produce some sealed + uploaded cloud chunks.
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
@@ -1145,7 +1145,7 @@ func TestCloudClusterReconcileSkipsTombstoned(t *testing.T) {
 	for _, m := range metasBefore {
 		tombstoned[m.ID] = true
 	}
-	leaderNode.tiers[0].IsTombstoned = func(id chunk.ChunkID) bool {
+	leaderNode.instances[0].IsTombstoned = func(id chunk.ChunkID) bool {
 		return tombstoned[id]
 	}
 

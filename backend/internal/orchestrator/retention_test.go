@@ -464,7 +464,7 @@ func TestClusterRetentionSweepDeletesOnAllNodes(t *testing.T) {
 	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 1, 100)
 
 	leaderNode := h.nodes["leader"]
-	leaderTier := leaderNode.tiers[0]
+	leaderTier := leaderNode.instances[0]
 
 	// Ingest 1000 records → 10 sealed chunks.
 	const totalRecords = 1_000
@@ -501,7 +501,7 @@ func TestClusterRetentionSweepDeletesOnAllNodes(t *testing.T) {
 
 	// Verify followers have all records before sweep.
 	for _, fid := range []string{"f1", "f2", "f3"} {
-		count := cursorCountRecords(t, h.nodes[fid].tiers[0].Chunks)
+		count := cursorCountRecords(t, h.nodes[fid].instances[0].Chunks)
 		if count != totalRecords {
 			t.Fatalf("follower %s: expected %d records before sweep, got %d", fid, totalRecords, count)
 		}
@@ -529,7 +529,7 @@ func TestClusterRetentionSweepDeletesOnAllNodes(t *testing.T) {
 
 	// ---- Verify: followers also have exactly keepN chunks ----
 	for _, fid := range []string{"f1", "f2", "f3"} {
-		followerCM := h.nodes[fid].tiers[0].Chunks
+		followerCM := h.nodes[fid].instances[0].Chunks
 		followerMetas, _ := followerCM.List()
 		if len(followerMetas) != keepN {
 			t.Errorf("follower %s: expected %d retained chunks, got %d", fid, keepN, len(followerMetas))
@@ -557,7 +557,7 @@ func TestClusterRetentionSweepWithTTLOnAllNodes(t *testing.T) {
 	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 1, 50)
 
 	leaderNode := h.nodes["leader"]
-	leaderTier := leaderNode.tiers[0]
+	leaderTier := leaderNode.instances[0]
 
 	// Ingest 500 records → 10 sealed chunks.
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
@@ -598,7 +598,7 @@ func TestClusterRetentionSweepWithTTLOnAllNodes(t *testing.T) {
 
 	// ---- Verify: ALL chunks expired on ALL nodes ----
 	for _, nid := range h.allNodeIDs() {
-		count := cursorCountRecords(t, h.nodes[nid].tiers[0].Chunks)
+		count := cursorCountRecords(t, h.nodes[nid].instances[0].Chunks)
 		if count != 0 {
 			t.Errorf("%s: cursor read %d records after TTL sweep (should be 0)", nid, count)
 		}
