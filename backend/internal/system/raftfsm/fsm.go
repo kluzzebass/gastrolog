@@ -336,35 +336,9 @@ func (f *FSM) applyPutVault(ctx context.Context, pb *gastrologv1.PutVaultCommand
 	if err := f.store.PutVault(ctx, cfg); err != nil {
 		return nil, err
 	}
-	// Phase 2 (gastrolog-3iy5l): synthesize a TierConfig that mirrors the
-	// VaultConfig so the orchestrator's existing tier-keyed read paths
-	// keep working while VaultConfig is the authoritative input. The tier
-	// shares the vault's ID — single instance per vault. PutTier is no
-	// longer the public write surface; this is the bridge in the
-	// vault→tier direction, replacing the legacy tier→vault merge.
-	if err := f.syncTierFromVault(ctx, cfg); err != nil {
-		return nil, err
-	}
 	return &Notification{Kind: NotifyVaultPut, ID: cfg.ID}, nil
 }
 
-// syncTierFromVault writes a TierConfig + placements that mirror the given
-// VaultConfig. Called from applyPutVault to keep the orchestrator's
-// tier-keyed reads working until they migrate to VaultConfig directly.
-func (f *FSM) syncTierFromVault(ctx context.Context, v system.VaultConfig) error {
-	tier := system.TierFromVault(v)
-	if err := f.store.PutTier(ctx, tier); err != nil {
-		return err
-	}
-	if len(v.Placements) > 0 {
-		placements := make([]system.VaultPlacement, len(v.Placements))
-		copy(placements, v.Placements)
-		if err := f.store.SetVaultPlacements(ctx, tier.ID, placements); err != nil {
-			return err
-		}
-	}
-	return nil
-}
 
 func (f *FSM) applyDeleteVault(ctx context.Context, pb *gastrologv1.DeleteVaultCommand) (*Notification, error) {
 	id, err := command.ExtractDeleteVault(pb)
@@ -693,9 +667,6 @@ func (f *FSM) cascadeDeleteRotationPolicy(ctx context.Context, policyID glid.GLI
 			if err := f.store.PutVault(ctx, v); err != nil {
 				return fmt.Errorf("cascade update vault %s: %w", v.ID, err)
 			}
-			if err := f.syncTierFromVault(ctx, v); err != nil {
-				return fmt.Errorf("cascade sync tier for vault %s: %w", v.ID, err)
-			}
 		}
 	}
 	return nil
@@ -722,9 +693,6 @@ func (f *FSM) cascadeDeleteRetentionPolicy(ctx context.Context, policyID glid.GL
 			v.RetentionRules = filtered
 			if err := f.store.PutVault(ctx, v); err != nil {
 				return fmt.Errorf("cascade update vault %s: %w", v.ID, err)
-			}
-			if err := f.syncTierFromVault(ctx, v); err != nil {
-				return fmt.Errorf("cascade sync tier for vault %s: %w", v.ID, err)
 			}
 		}
 	}
