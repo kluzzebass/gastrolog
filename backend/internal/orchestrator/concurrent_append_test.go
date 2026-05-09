@@ -26,7 +26,7 @@ func TestConcurrentAppendToTierAttrIntegrity(t *testing.T) {
 	t.Parallel()
 
 	vaultID := glid.New()
-	tierID := glid.New()
+	instID := glid.New()
 	nodeID := "test-node"
 
 	dir := t.TempDir()
@@ -43,7 +43,7 @@ func TestConcurrentAppendToTierAttrIntegrity(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 
 	inst := &VaultInstance{
-		VaultID: tierID, Type: "file",
+		VaultID: instID, Type: "file",
 		Chunks: cm, Indexes: im, Query: query.New(cm, im, nil),
 	}
 	orch.RegisterVault(NewVault(vaultID, inst))
@@ -246,7 +246,7 @@ func TestImportToTierCursorVerified(t *testing.T) {
 	t.Parallel()
 
 	vaultID := glid.New()
-	tierID := glid.New()
+	instID := glid.New()
 	nodeID := "test-node"
 
 	dir := t.TempDir()
@@ -260,7 +260,7 @@ func TestImportToTierCursorVerified(t *testing.T) {
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 
-	inst := &VaultInstance{VaultID: tierID, Type: "file", Chunks: cm, Indexes: im, Query: query.New(cm, im, nil)}
+	inst := &VaultInstance{VaultID: instID, Type: "file", Chunks: cm, Indexes: im, Query: query.New(cm, im, nil)}
 	orch.RegisterVault(NewVault(vaultID, inst))
 	t.Cleanup(func() {
 		orch.Stop()
@@ -472,7 +472,7 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 	t.Parallel()
 
 	vaultID := glid.New()
-	tierID := glid.New()
+	instID := glid.New()
 	routeID := glid.New()
 
 	store := sysmem.NewStore()
@@ -480,7 +480,7 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 		ID: vaultID, Name: "drain-concurrent",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tierID, Name: "t0", Type: system.VaultTypeMemory, VaultID: vaultID,
+		ID: instID, Name: "t0", Type: system.VaultTypeMemory, VaultID: vaultID,
 	})
 	// gastrolog-4kkoo (Phase 5): expression inlined on the route via Stages.
 	_ = store.PutRoute(context.Background(), system.RouteConfig{
@@ -507,7 +507,7 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	srcTier := &VaultInstance{VaultID: tierID, Type: "file", Chunks: srcCM, Indexes: srcIM, Query: query.New(srcCM, srcIM, nil)}
+	srcTier := &VaultInstance{VaultID: instID, Type: "file", Chunks: srcCM, Indexes: srcIM, Query: query.New(srcCM, srcIM, nil)}
 	orchA.RegisterVault(NewVault(vaultID, srcTier))
 
 	// Destination node.
@@ -527,7 +527,7 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dstTier := &VaultInstance{VaultID: tierID, Type: "file", Chunks: dstCM, Indexes: dstIM, Query: query.New(dstCM, dstIM, nil)}
+	dstTier := &VaultInstance{VaultID: instID, Type: "file", Chunks: dstCM, Indexes: dstIM, Query: query.New(dstCM, dstIM, nil)}
 	orchB.RegisterVault(NewVault(vaultID, dstTier))
 
 	orchA.SetRemoteTransferrer(&directTransferrer{nodes: map[string]*Orchestrator{"node-B": orchB}})

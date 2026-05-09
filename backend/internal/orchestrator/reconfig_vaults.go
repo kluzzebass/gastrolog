@@ -1097,7 +1097,7 @@ func (o *Orchestrator) ensureVaultCtlMetadata(tierCfg system.TierConfig, cluster
 	if factories.PeerConns != nil {
 		applier = cluster.NewVaultCtlChunkApplyForwarder(r, vaultGID, tierCfg.ID, factories.PeerConns, timeout)
 	} else {
-		applier = &vaultCtlTierApplier{o: o, vaultID: tierCfg.VaultID, tierID: tierCfg.ID}
+		applier = &vaultCtlTierApplier{o: o, vaultID: tierCfg.VaultID, instID: tierCfg.ID}
 	}
 
 	return g, applier, buildTierRaftCallbacks(r, tierFSM, applier)
@@ -1257,7 +1257,7 @@ func setVaultRaftAnnouncer(cm chunk.ChunkManager, applier vaultctlfsm.Applier, p
 // in the vault control-plane group. Used before closing that vault's chunk
 // manager when the Raft group may still deliver log entries
 // (e.g. RemoveVaultInstance during placement loss).
-func (o *Orchestrator) clearVaultFSMChunkCallbacks(vaultID, tierID glid.GLID) {
+func (o *Orchestrator) clearVaultFSMChunkCallbacks(vaultID, instID glid.GLID) {
 	if o.groupMgr == nil {
 		return
 	}

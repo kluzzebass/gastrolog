@@ -77,10 +77,10 @@ type orchRelHarness struct {
 	nodes        map[string]*orchRelNode
 	nodeIDs      []string
 	cfgStore     system.Store
-	// vaultID/tierID are the default (first) vault's identifiers; kept as
+	// vaultID/instID are the default (first) vault's identifiers; kept as
 	// top-level fields for the single-vault convenience API.
 	vaultID glid.GLID
-	tierID  glid.GLID
+	instID  glid.GLID
 	// vaults holds every configured vault, with the default vault as
 	// vaults[0]. Multi-vault scenarios use addVaultSpec during setup to
 	// add more, each with its own node subset.
@@ -96,7 +96,7 @@ type orchRelHarness struct {
 type vaultSpec struct {
 	label    string    // human label for test output ("A", "B", ...)
 	id       glid.GLID // vault GLID
-	tierID   glid.GLID // inst GLID
+	instID   glid.GLID // inst GLID
 	nodeIdxs []int     // indexes into h.nodeIDs; first is vault leader
 }
 
@@ -118,7 +118,7 @@ func withExtraVault(nodeIdxs []int) orchRelOption {
 		h.vaults = append(h.vaults, vaultSpec{
 			label:    label,
 			id:       id,
-			tierID:   id,
+			instID:   id,
 			nodeIdxs: nodeIdxs,
 		})
 	}
@@ -149,7 +149,7 @@ func newOrchRelHarness(t *testing.T, n int, opts ...orchRelOption) *orchRelHarne
 		nodeIDs:      make([]string, 0, n),
 		cfgStore:     sysmem.NewStore(),
 		vaultID:      defaultID,
-		tierID:       defaultID,
+		instID:       defaultID,
 		sharedCtx:    sharedCtx,
 		sharedCancel: sharedCancel,
 	}
@@ -161,7 +161,7 @@ func newOrchRelHarness(t *testing.T, n int, opts ...orchRelOption) *orchRelHarne
 	h.vaults = []vaultSpec{{
 		label:    "A",
 		id:       h.vaultID,
-		tierID:   h.tierID,
+		instID:   h.instID,
 		nodeIdxs: defaultIdxs,
 	}}
 
@@ -278,7 +278,7 @@ func (h *orchRelHarness) seedSharedConfig() {
 			h.t.Fatalf("PutVault %s: %v", v.label, err)
 		}
 		if err := h.cfgStore.PutTier(ctx, system.TierConfig{
-			ID:           v.tierID,
+			ID:           v.instID,
 			Name:         "orch-rel-inst-" + v.label,
 			Type:         system.VaultTypeFile,
 			VaultID:      v.id,
@@ -298,7 +298,7 @@ func (h *orchRelHarness) seedSharedConfig() {
 				Leader:    pos == 0,
 			})
 		}
-		if err := h.cfgStore.SetVaultPlacements(ctx, v.tierID, placements); err != nil {
+		if err := h.cfgStore.SetVaultPlacements(ctx, v.instID, placements); err != nil {
 			h.t.Fatalf("SetVaultPlacements %s: %v", v.label, err)
 		}
 	}
@@ -554,7 +554,7 @@ func (h *orchRelHarness) chunkIDsOnNodeForVault(v vaultSpec, id string) map[chun
 	if !ok || vfsm == nil {
 		return nil
 	}
-	sub := vfsm.InstanceFSM(v.tierID)
+	sub := vfsm.InstanceFSM(v.instID)
 	if sub == nil {
 		return map[chunk.ChunkID]bool{}
 	}
@@ -584,7 +584,7 @@ func (h *orchRelHarness) chunkIDsOnNode(id string) map[chunk.ChunkID]bool {
 	if !ok || vfsm == nil {
 		return nil
 	}
-	sub := vfsm.InstanceFSM(h.tierID)
+	sub := vfsm.InstanceFSM(h.instID)
 	if sub == nil {
 		return map[chunk.ChunkID]bool{}
 	}

@@ -80,19 +80,19 @@ func TestTierLeaderManager_StartStopIdempotent(t *testing.T) {
 	mgr := newVaultCtlLeaderManager(discardLogger())
 	defer mgr.StopAll()
 
-	tierID := glid.New()
+	instID := glid.New()
 
 	// Start twice — second is a no-op.
-	mgr.Start(tierID, g)
-	mgr.Start(tierID, g)
+	mgr.Start(instID, g)
+	mgr.Start(instID, g)
 
 	// Stop and start again — should re-register cleanly.
-	mgr.Stop(tierID)
-	mgr.Start(tierID, g)
-	mgr.Stop(tierID)
+	mgr.Stop(instID)
+	mgr.Start(instID, g)
+	mgr.Stop(instID)
 
 	// Stopping a inst with no loop should be safe.
-	mgr.Stop(tierID)
+	mgr.Stop(instID)
 }
 
 // TestTierLeaderManager_ReconcileAddsMissingMember verifies that the leader
@@ -112,15 +112,15 @@ func TestTierLeaderManager_ReconcileAddsMissingMember(t *testing.T) {
 	mgr := newVaultCtlLeaderManager(discardLogger())
 	defer mgr.StopAll()
 
-	tierID := glid.New()
+	instID := glid.New()
 
 	// Desired set = current (just the leader) + a synthetic second member.
-	mgr.SetDesiredMembers(tierID, []hraft.Server{
+	mgr.SetDesiredMembers(instID, []hraft.Server{
 		{ID: "leader-add", Address: "leader-add"},
 		{ID: "synthetic-peer", Address: "synthetic-addr"},
 	})
 
-	mgr.Start(tierID, g)
+	mgr.Start(instID, g)
 
 	// Wait for the reconcile pass to add the synthetic peer.
 	deadline := time.Now().Add(5 * time.Second)
@@ -162,15 +162,15 @@ func TestTierLeaderManager_ReconcileRemovesExtras(t *testing.T) {
 	mgr := newVaultCtlLeaderManager(discardLogger())
 	defer mgr.StopAll()
 
-	tierID := glid.New()
+	instID := glid.New()
 
 	// Desired set = just the two alive nodes. doomed should be removed.
-	mgr.SetDesiredMembers(tierID, []hraft.Server{
+	mgr.SetDesiredMembers(instID, []hraft.Server{
 		{ID: "alive-1", Address: "alive-1"},
 		{ID: "alive-2", Address: "alive-2"},
 	})
 
-	mgr.Start(tierID, leader)
+	mgr.Start(instID, leader)
 
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -284,17 +284,17 @@ func TestTierLeaderManager_ReconcileNoOpWhenStable(t *testing.T) {
 	mgr := newVaultCtlLeaderManager(discardLogger())
 	defer mgr.StopAll()
 
-	tierID := glid.New()
+	instID := glid.New()
 
 	// Desired = current = just the leader.
-	mgr.SetDesiredMembers(tierID, []hraft.Server{
+	mgr.SetDesiredMembers(instID, []hraft.Server{
 		{ID: "stable-node", Address: "stable-node"},
 	})
 
 	// Snapshot configuration before reconcile.
 	beforeIdx := g.Raft.GetConfiguration().Index()
 
-	mgr.Start(tierID, g)
+	mgr.Start(instID, g)
 
 	// Give the reconcile pass a moment to run, then verify the
 	// configuration index hasn't changed (no membership writes).
@@ -313,10 +313,10 @@ func TestTierMembershipMap_RoundTrip(t *testing.T) {
 	t.Parallel()
 
 	m := newVaultCtlMembershipMap()
-	tierID := glid.New()
+	instID := glid.New()
 
 	// Initial Get returns nil.
-	if got := m.Get(tierID); got != nil {
+	if got := m.Get(instID); got != nil {
 		t.Errorf("expected nil for unknown inst, got %v", got)
 	}
 
@@ -325,15 +325,15 @@ func TestTierMembershipMap_RoundTrip(t *testing.T) {
 		{ID: "a", Address: "a-addr"},
 		{ID: "b", Address: "b-addr"},
 	}
-	m.Set(tierID, original)
-	got := m.Get(tierID)
+	m.Set(instID, original)
+	got := m.Get(instID)
 	if len(got) != 2 || got[0].ID != "a" || got[1].ID != "b" {
 		t.Errorf("Get returned wrong slice: %v", got)
 	}
 
 	// Mutating the returned slice does not affect the stored copy.
 	got[0].ID = "MUTATED"
-	got2 := m.Get(tierID)
+	got2 := m.Get(instID)
 	if got2[0].ID != "a" {
 		t.Errorf("stored slice was mutated by caller; got %v", got2)
 	}
@@ -341,14 +341,14 @@ func TestTierMembershipMap_RoundTrip(t *testing.T) {
 	// Mutating the original input also doesn't affect the stored copy
 	// (Set takes a defensive copy).
 	original[1].ID = "ALSO-MUTATED"
-	got3 := m.Get(tierID)
+	got3 := m.Get(instID)
 	if got3[1].ID != "b" {
 		t.Errorf("stored slice was mutated by Set caller; got %v", got3)
 	}
 
 	// Delete clears the entry.
-	m.Delete(tierID)
-	if got := m.Get(tierID); got != nil {
+	m.Delete(instID)
+	if got := m.Get(instID); got != nil {
 		t.Errorf("expected nil after Delete, got %v", got)
 	}
 }

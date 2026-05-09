@@ -65,7 +65,7 @@ func (f *FSM) SetOnAfterRestore(fn func()) {
 	f.onAfterRestore = fn
 }
 
-// Tiers returns a snapshot of the current (tierID → sub-FSM) map.
+// Tiers returns a snapshot of the current (instID → sub-FSM) map.
 // Safe for the orchestrator's after-restore handler to iterate
 // without holding tierMu.
 func (f *FSM) Instances() map[glid.GLID]*vaultctlfsm.FSM {
@@ -89,17 +89,17 @@ func (f *FSM) Apply(l *hraft.Log) any {
 		if len(l.Data) < 1+glid.Size {
 			return fmt.Errorf("vaultraft: OpVaultChunkFSM payload too short (%d bytes)", len(l.Data))
 		}
-		var tierID glid.GLID
-		copy(tierID[:], l.Data[1:1+glid.Size])
+		var instID glid.GLID
+		copy(instID[:], l.Data[1:1+glid.Size])
 		sub := l.Data[1+glid.Size:]
 		if len(sub) == 0 {
 			return errors.New("vaultraft: OpVaultChunkFSM missing tier command body")
 		}
 		f.mu.Lock()
-		t := f.instances[tierID]
+		t := f.instances[instID]
 		if t == nil {
 			t = vaultctlfsm.New()
-			f.instances[tierID] = t
+			f.instances[instID] = t
 		}
 		subFSM := t
 		f.mu.Unlock()
@@ -110,23 +110,23 @@ func (f *FSM) Apply(l *hraft.Log) any {
 	}
 }
 
-// InstanceFSM returns the tierfsm sub-machine for tierID, or nil if no command
+// InstanceFSM returns the tierfsm sub-machine for instID, or nil if no command
 // has been applied for that tier yet.
-func (f *FSM) InstanceFSM(tierID glid.GLID) *vaultctlfsm.FSM {
+func (f *FSM) InstanceFSM(instID glid.GLID) *vaultctlfsm.FSM {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.instances[tierID]
+	return f.instances[instID]
 }
 
-// EnsureInstanceFSM returns the tierfsm sub-state for tierID, creating an empty
+// EnsureInstanceFSM returns the tierfsm sub-state for instID, creating an empty
 // sub-FSM if none exists yet (for wiring OnDelete/OnUpload before first Apply).
-func (f *FSM) EnsureInstanceFSM(tierID glid.GLID) *vaultctlfsm.FSM {
+func (f *FSM) EnsureInstanceFSM(instID glid.GLID) *vaultctlfsm.FSM {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	t := f.instances[tierID]
+	t := f.instances[instID]
 	if t == nil {
 		t = vaultctlfsm.New()
-		f.instances[tierID] = t
+		f.instances[instID] = t
 	}
 	return t
 }
@@ -272,7 +272,7 @@ func (s *bufSink) ID() string    { return "vaultraft" }
 func (s *bufSink) Cancel() error { return nil }
 
 type vaultCtlSnapshot struct {
-	tierBlobs [][]byte // each: [16 tierID][tier snapshot bytes...]
+	tierBlobs [][]byte // each: [16 instID][tier snapshot bytes...]
 }
 
 func (s *vaultCtlSnapshot) Persist(sink hraft.SnapshotSink) error {

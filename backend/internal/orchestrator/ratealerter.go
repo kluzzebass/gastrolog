@@ -18,7 +18,7 @@ import (
 // The alerter owns one RateWindow per inst and looks up inst names through
 // an injected callback (so it doesn't need to know about the orchestrator's
 // vault registry directly). Alert IDs are stable strings of the form
-// "<kind>-rate:<tierID>", so each inst has an independent Set/Clear pair.
+// "<kind>-rate:<instID>", so each inst has an independent Set/Clear pair.
 //
 // Hysteresis: warningAt and errorAt are escalation thresholds. The alert
 // only clears when the observed rate drops back to below warningAt — there
@@ -75,12 +75,12 @@ func newRateAlerter(cfg rateAlerterConfig) *RateAlerter {
 
 // Record marks one event for the given inst at the given time. Lazily
 // creates a per-vault RateWindow on first call. Safe for concurrent use.
-func (r *RateAlerter) Record(tierID glid.GLID, now time.Time) {
+func (r *RateAlerter) Record(instID glid.GLID, now time.Time) {
 	r.mu.Lock()
-	w, ok := r.windows[tierID]
+	w, ok := r.windows[instID]
 	if !ok {
 		w = NewRateWindow(r.window)
-		r.windows[tierID] = w
+		r.windows[instID] = w
 	}
 	r.mu.Unlock()
 	w.Record(now)
@@ -88,14 +88,14 @@ func (r *RateAlerter) Record(tierID glid.GLID, now time.Time) {
 
 // Forget removes a inst's tracking and clears any active alert for it.
 // Call this when a inst is removed from the orchestrator.
-func (r *RateAlerter) Forget(tierID glid.GLID) {
+func (r *RateAlerter) Forget(instID glid.GLID) {
 	r.mu.Lock()
-	delete(r.windows, tierID)
-	prev, hadActive := r.active[tierID]
-	delete(r.active, tierID)
+	delete(r.windows, instID)
+	prev, hadActive := r.active[instID]
+	delete(r.active, instID)
 	r.mu.Unlock()
 	if hadActive && prev != 0 && r.alerts != nil {
-		r.alerts.Clear(r.alertID(tierID))
+		r.alerts.Clear(r.alertID(instID))
 	}
 }
 
@@ -104,7 +104,7 @@ func (r *RateAlerter) Forget(tierID glid.GLID) {
 // a fixed cadence (e.g., every 5 seconds) by a background goroutine.
 func (r *RateAlerter) Evaluate(now time.Time) {
 	type pending struct {
-		tierID   glid.GLID
+		instID   glid.GLID
 		severity alert.Severity // 0 = clear
 		rate     float64
 		count    int64
@@ -112,16 +112,16 @@ func (r *RateAlerter) Evaluate(now time.Time) {
 	var work []pending
 
 	r.mu.Lock()
-	for tierID, w := range r.windows {
+	for instID, w := range r.windows {
 		rate := w.Rate(now)
 		count := w.Count(now)
 		desired := r.classify(rate)
-		prev := r.active[tierID]
+		prev := r.active[instID]
 		if desired == prev {
 			continue
 		}
-		r.active[tierID] = desired
-		work = append(work, pending{tierID: tierID, severity: desired, rate: rate, count: count})
+		r.active[instID] = desired
+		work = append(work, pending{instID: instID, severity: desired, rate: rate, count: count})
 	}
 	r.mu.Unlock()
 
@@ -130,14 +130,14 @@ func (r *RateAlerter) Evaluate(now time.Time) {
 	}
 	for _, p := range work {
 		if p.severity == 0 {
-			r.alerts.Clear(r.alertID(p.tierID))
+			r.alerts.Clear(r.alertID(p.instID))
 			continue
 		}
 		r.alerts.Set(
-			r.alertID(p.tierID),
+			r.alertID(p.instID),
 			p.severity,
 			r.source,
-			r.message(p.tierID, p.rate, p.count),
+			r.message(p.instID, p.rate, p.count),
 		)
 	}
 }
@@ -154,15 +154,15 @@ func (r *RateAlerter) classify(rate float64) alert.Severity {
 	return 0
 }
 
-func (r *RateAlerter) alertID(tierID glid.GLID) string {
-	return fmt.Sprintf("%s-rate:%s", r.kind, tierID)
+func (r *RateAlerter) alertID(instID glid.GLID) string {
+	return fmt.Sprintf("%s-rate:%s", r.kind, instID)
 }
 
-func (r *RateAlerter) message(tierID glid.GLID, rate float64, count int64) string {
-	label := tierID.String()
+func (r *RateAlerter) message(instID glid.GLID, rate float64, count int64) string {
+	label := instID.String()
 	if r.tierName != nil {
-		if name := r.tierName(tierID); name != "" {
-			label = fmt.Sprintf("%s (%s)", name, tierID.String()[:8])
+		if name := r.tierName(instID); name != "" {
+			label = fmt.Sprintf("%s (%s)", name, instID.String()[:8])
 		}
 	}
 	return fmt.Sprintf(

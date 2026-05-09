@@ -1061,24 +1061,24 @@ func copyParams(params map[string]string) map[string]string {
 
 // --- Tier Placements (runtime) ---
 
-func (s *Store) GetVaultPlacements(_ context.Context, tierID glid.GLID) ([]system.VaultPlacement, error) {
+func (s *Store) GetVaultPlacements(_ context.Context, instID glid.GLID) ([]system.VaultPlacement, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	p := s.tierPlacements[tierID]
+	p := s.tierPlacements[instID]
 	cp := make([]system.VaultPlacement, len(p))
 	copy(cp, p)
 	return cp, nil
 }
 
-func (s *Store) SetVaultPlacements(_ context.Context, tierID glid.GLID, placements []system.VaultPlacement) error {
+func (s *Store) SetVaultPlacements(_ context.Context, instID glid.GLID, placements []system.VaultPlacement) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cp := make([]system.VaultPlacement, len(placements))
 	copy(cp, placements)
-	s.tierPlacements[tierID] = cp
+	s.tierPlacements[instID] = cp
 	// 1:1 vault:tier — placement keys are vault IDs. Mirror the placement
 	// set onto VaultConfig.Placements so the orchestrator's reads see them.
-	if v, ok := s.vaults[tierID]; ok {
+	if v, ok := s.vaults[instID]; ok {
 		merged := v
 		if len(placements) > 0 {
 			merged.Placements = make([]system.VaultPlacement, len(placements))
@@ -1086,7 +1086,7 @@ func (s *Store) SetVaultPlacements(_ context.Context, tierID glid.GLID, placemen
 		} else {
 			merged.Placements = nil
 		}
-		s.vaults[tierID] = copyVaultConfig(merged)
+		s.vaults[instID] = copyVaultConfig(merged)
 	}
 	return nil
 }

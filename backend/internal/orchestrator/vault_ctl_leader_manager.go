@@ -78,22 +78,22 @@ func newVaultCtlLeaderManager(logger *slog.Logger) *vaultCtlLeaderManager {
 
 // Start spawns a leader loop for the given inst's Raft group if one is not
 // already running. Idempotent: re-calling for the same inst ID is a no-op.
-func (m *vaultCtlLeaderManager) Start(tierID glid.GLID, group *raftgroup.Group) {
+func (m *vaultCtlLeaderManager) Start(instID glid.GLID, group *raftgroup.Group) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.epochs[tierID]; ok {
+	if _, ok := m.epochs[instID]; ok {
 		return
 	}
 
 	epochCtx, cancel := context.WithCancel(m.rootCtx)
-	m.epochs[tierID] = cancel
+	m.epochs[instID] = cancel
 
 	loop := raftgroup.NewLeaderLoop(raftgroup.LeaderLoopConfig{
 		Group:  group,
-		Name:   tierID.String(),
+		Name:   instID.String(),
 		Logger: m.logger,
 		OnLead: func(ctx context.Context) {
-			m.runLeaderEpoch(ctx, tierID, group)
+			m.runLeaderEpoch(ctx, instID, group)
 		},
 	})
 	go loop.Run(epochCtx)
@@ -101,14 +101,14 @@ func (m *vaultCtlLeaderManager) Start(tierID glid.GLID, group *raftgroup.Group) 
 
 // Stop cancels the leader loop for a inst and clears its desired-member
 // state. Safe to call even if no loop was started.
-func (m *vaultCtlLeaderManager) Stop(tierID glid.GLID) {
+func (m *vaultCtlLeaderManager) Stop(instID glid.GLID) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if cancel, ok := m.epochs[tierID]; ok {
+	if cancel, ok := m.epochs[instID]; ok {
 		cancel()
-		delete(m.epochs, tierID)
+		delete(m.epochs, instID)
 	}
-	m.desired.Delete(tierID)
+	m.desired.Delete(instID)
 }
 
 // StopAll cancels all leader loops. Called during orchestrator shutdown.
@@ -125,22 +125,22 @@ func (m *vaultCtlLeaderManager) StopAll() {
 // SetDesiredMembers updates the desired member list for a inst. The next
 // reconcile pass on the vault-ctl Raft leader will apply the diff against the
 // current Raft configuration.
-func (m *vaultCtlLeaderManager) SetDesiredMembers(tierID glid.GLID, members []hraft.Server) {
-	m.desired.Set(tierID, members)
+func (m *vaultCtlLeaderManager) SetDesiredMembers(instID glid.GLID, members []hraft.Server) {
+	m.desired.Set(instID, members)
 }
 
 // SetDesiredLeader sets the node that should be the vault-ctl Raft leader.
 // If the current Raft leader differs, the leader epoch will call
 // LeadershipTransferToServer to align them. Pass nil to clear.
-func (m *vaultCtlLeaderManager) SetDesiredLeader(tierID glid.GLID, server *hraft.Server) {
-	m.desiredLeader.Set(tierID, server)
+func (m *vaultCtlLeaderManager) SetDesiredLeader(instID glid.GLID, server *hraft.Server) {
+	m.desiredLeader.Set(instID, server)
 }
 
 // runLeaderEpoch runs the per-epoch reconcile loop. Called after Barrier()
 // returns successfully on the leader. Exits when ctx is cancelled.
-func (m *vaultCtlLeaderManager) runLeaderEpoch(ctx context.Context, tierID glid.GLID, group *raftgroup.Group) {
+func (m *vaultCtlLeaderManager) runLeaderEpoch(ctx context.Context, instID glid.GLID, group *raftgroup.Group) {
 	// Initial reconcile immediately after barrier.
-	m.reconcile(tierID, group)
+	m.reconcile(instID, group)
 
 	ticker := time.NewTicker(tierMembershipReconcileInterval)
 	defer ticker.Stop()
@@ -149,7 +149,7 @@ func (m *vaultCtlLeaderManager) runLeaderEpoch(ctx context.Context, tierID glid.
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			m.reconcile(tierID, group)
+			m.reconcile(instID, group)
 		}
 	}
 }
@@ -158,8 +158,8 @@ func (m *vaultCtlLeaderManager) runLeaderEpoch(ctx context.Context, tierID glid.
 // Raft configuration and applies the diff via AddVoter / RemoveServer.
 // Bails on the first error (lost leadership, timeout, etc.) — the next pass
 // (or the next epoch on the new leader) will pick up where we left off.
-func (m *vaultCtlLeaderManager) reconcile(tierID glid.GLID, group *raftgroup.Group) {
-	desired := m.desired.Get(tierID)
+func (m *vaultCtlLeaderManager) reconcile(instID glid.GLID, group *raftgroup.Group) {
+	desired := m.desired.Get(instID)
 	if len(desired) == 0 {
 		// No desired-members info yet. The orchestrator should have
 		// called SetDesiredMembers before Start; if it didn't, the next
@@ -170,7 +170,7 @@ func (m *vaultCtlLeaderManager) reconcile(tierID glid.GLID, group *raftgroup.Gro
 	future := group.Raft.GetConfiguration()
 	if err := future.Error(); err != nil {
 		m.logger.Warn("get configuration failed",
-			"vault", tierID, "error", err)
+			"vault", instID, "error", err)
 		return
 	}
 	current := future.Configuration().Servers
@@ -192,11 +192,11 @@ func (m *vaultCtlLeaderManager) reconcile(tierID glid.GLID, group *raftgroup.Gro
 		fut := group.Raft.AddVoter(srv.ID, srv.Address, 0, tierMembershipChangeTimeout)
 		if err := fut.Error(); err != nil {
 			m.logger.Warn("AddVoter failed",
-				"vault", tierID, "node", srv.ID, "error", err)
+				"vault", instID, "node", srv.ID, "error", err)
 			return // bail; next epoch will retry
 		}
 		m.logger.Info("added voter",
-			"vault", tierID, "node", srv.ID, "addr", srv.Address)
+			"vault", instID, "node", srv.ID, "addr", srv.Address)
 	}
 
 	// Remove extras (voters or nonvoters that aren't in the desired set).
@@ -207,36 +207,36 @@ func (m *vaultCtlLeaderManager) reconcile(tierID glid.GLID, group *raftgroup.Gro
 		fut := group.Raft.RemoveServer(srv.ID, 0, tierMembershipChangeTimeout)
 		if err := fut.Error(); err != nil {
 			m.logger.Warn("RemoveServer failed",
-				"vault", tierID, "node", srv.ID, "error", err)
+				"vault", instID, "node", srv.ID, "error", err)
 			return // bail; next epoch will retry
 		}
 		m.logger.Info("removed server",
-			"vault", tierID, "node", srv.ID)
+			"vault", instID, "node", srv.ID)
 
 		// Snapshot the callback under the lock so a concurrent
 		// SetOnMemberRemoved doesn't race; fire outside the lock.
-		// tierID here is the vault-ctl Raft group ID (== vault ID per
+		// instID here is the vault-ctl Raft group ID (== vault ID per
 		// reconfig_vaults.go's Start call site).
 		m.mu.Lock()
 		hook := m.onMemberRemoved
 		m.mu.Unlock()
 		if hook != nil {
-			hook(tierID, string(srv.ID))
+			hook(instID, string(srv.ID))
 		}
 	}
 
 	// Transfer leadership if the desired leader differs from the current
 	// Raft leader. Only the current leader can initiate a transfer (which
 	// is guaranteed — we're inside the leader epoch).
-	m.transferIfNeeded(tierID, group)
+	m.transferIfNeeded(instID, group)
 }
 
 // transferIfNeeded checks whether the vault-ctl Raft leader matches the desired
 // placement leader. If not, initiates LeadershipTransferToServer so the Raft
 // leader aligns with the node that owns the data. This reduces FSM apply
 // latency (no forwarding hop) and simplifies the operational model.
-func (m *vaultCtlLeaderManager) transferIfNeeded(tierID glid.GLID, group *raftgroup.Group) {
-	want := m.desiredLeader.Get(tierID)
+func (m *vaultCtlLeaderManager) transferIfNeeded(instID glid.GLID, group *raftgroup.Group) {
+	want := m.desiredLeader.Get(instID)
 	if want == nil {
 		return // no desired leader set (single-node or not yet configured)
 	}
@@ -249,18 +249,18 @@ func (m *vaultCtlLeaderManager) transferIfNeeded(tierID glid.GLID, group *raftgr
 	}
 
 	m.logger.Info("transferring vault-ctl Raft leadership",
-		"vault", tierID,
+		"vault", instID,
 		"from", currentID,
 		"to", want.ID)
 
 	fut := group.Raft.LeadershipTransferToServer(want.ID, want.Address)
 	if err := fut.Error(); err != nil {
 		m.logger.Warn("leadership transfer failed",
-			"vault", tierID, "target", want.ID, "error", err)
+			"vault", instID, "target", want.ID, "error", err)
 	}
 }
 
-// vaultCtlMembershipMap is a thread-safe map of tierID → desired member list.
+// vaultCtlMembershipMap is a thread-safe map of instID → desired member list.
 // Writes happen from the dispatcher's path (when config changes); reads
 // happen from inside leader epoch reconcile callbacks.
 type vaultCtlMembershipMap struct {
@@ -274,18 +274,18 @@ func newVaultCtlMembershipMap() *vaultCtlMembershipMap {
 	}
 }
 
-func (t *vaultCtlMembershipMap) Set(tierID glid.GLID, members []hraft.Server) {
+func (t *vaultCtlMembershipMap) Set(instID glid.GLID, members []hraft.Server) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	cp := make([]hraft.Server, len(members))
 	copy(cp, members)
-	t.desired[tierID] = cp
+	t.desired[instID] = cp
 }
 
-func (t *vaultCtlMembershipMap) Get(tierID glid.GLID) []hraft.Server {
+func (t *vaultCtlMembershipMap) Get(instID glid.GLID) []hraft.Server {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	src := t.desired[tierID]
+	src := t.desired[instID]
 	if src == nil {
 		return nil
 	}
@@ -294,10 +294,10 @@ func (t *vaultCtlMembershipMap) Get(tierID glid.GLID) []hraft.Server {
 	return cp
 }
 
-func (t *vaultCtlMembershipMap) Delete(tierID glid.GLID) {
+func (t *vaultCtlMembershipMap) Delete(instID glid.GLID) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	delete(t.desired, tierID)
+	delete(t.desired, instID)
 }
 
 // vaultCtlDesiredLeaderMap tracks which node should be the Raft leader for each inst.
@@ -312,21 +312,21 @@ func newVaultCtlDesiredLeaderMap() *vaultCtlDesiredLeaderMap {
 	}
 }
 
-func (t *vaultCtlDesiredLeaderMap) Set(tierID glid.GLID, srv *hraft.Server) {
+func (t *vaultCtlDesiredLeaderMap) Set(instID glid.GLID, srv *hraft.Server) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if srv == nil {
-		delete(t.leaders, tierID)
+		delete(t.leaders, instID)
 	} else {
 		cp := *srv
-		t.leaders[tierID] = &cp
+		t.leaders[instID] = &cp
 	}
 }
 
-func (t *vaultCtlDesiredLeaderMap) Get(tierID glid.GLID) *hraft.Server {
+func (t *vaultCtlDesiredLeaderMap) Get(instID glid.GLID) *hraft.Server {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	srv := t.leaders[tierID]
+	srv := t.leaders[instID]
 	if srv == nil {
 		return nil
 	}

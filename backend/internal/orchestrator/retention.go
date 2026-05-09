@@ -45,11 +45,11 @@ const (
 )
 
 // retentionKey returns a unique map key for a inst instance's retention state.
-func retentionKey(tierID glid.GLID, storageID string) string {
+func retentionKey(instID glid.GLID, storageID string) string {
 	if storageID == "" {
-		return tierID.String()
+		return instID.String()
 	}
-	return tierID.String() + ":" + storageID
+	return instID.String() + ":" + storageID
 }
 
 // retentionRule is a resolved retention trigger: a compiled policy that
@@ -68,7 +68,7 @@ type retentionRule struct {
 type retentionRunner struct {
 	mu      sync.Mutex
 	vaultID glid.GLID
-	tierID  glid.GLID
+	instID  glid.GLID
 	// Cached for job descriptions so the Jobs inspector can tell sweep
 	// sub-jobs (transitions) apart by their vault/inst. Refreshed from
 	// config on every sweep via retentionTargetForTier.
@@ -262,7 +262,7 @@ func (o *Orchestrator) enforceMemoryBudgets(cfg *system.Config) {
 	}
 	type budgetTarget struct {
 		vaultID glid.GLID
-		tierID  glid.GLID
+		instID  glid.GLID
 		cm      chunk.ChunkManager
 		excess  int64
 	}
@@ -285,7 +285,7 @@ func (o *Orchestrator) enforceMemoryBudgets(cfg *system.Config) {
 		if excess := monitor.BudgetExceeded(); excess > 0 {
 			targets = append(targets, budgetTarget{
 				vaultID: vaultCfg.ID,
-				tierID:  inst.VaultID,
+				instID:  inst.VaultID,
 				cm:      inst.Chunks,
 				excess:  excess,
 			})
@@ -294,7 +294,7 @@ func (o *Orchestrator) enforceMemoryBudgets(cfg *system.Config) {
 	o.mu.RUnlock()
 
 	for _, t := range targets {
-		o.drainExcessChunks(t.vaultID, t.tierID, t.cm, t.excess)
+		o.drainExcessChunks(t.vaultID, t.instID, t.cm, t.excess)
 	}
 }
 
@@ -303,7 +303,7 @@ func (o *Orchestrator) enforceMemoryBudgets(cfg *system.Config) {
 // sealed chunks remain). Phase 4 (gastrolog-42f9z): these used to be
 // "transitioned to the next inst"; now they're just retention events
 // like any other, with the routing engine deciding their fate.
-func (o *Orchestrator) drainExcessChunks(vaultID, tierID glid.GLID, cm chunk.ChunkManager, excess int64) {
+func (o *Orchestrator) drainExcessChunks(vaultID, instID glid.GLID, cm chunk.ChunkManager, excess int64) {
 	metas, err := cm.List()
 	if err != nil {
 		return
@@ -318,7 +318,7 @@ func (o *Orchestrator) drainExcessChunks(vaultID, tierID glid.GLID, cm chunk.Chu
 	var im index.IndexManager
 	o.mu.RLock()
 	if vault := o.vaults[vaultID]; vault != nil {
-		if inst := vault.Instance; inst != nil && inst.VaultID == tierID {
+		if inst := vault.Instance; inst != nil && inst.VaultID == instID {
 			im = inst.Indexes
 		}
 	}
@@ -336,7 +336,7 @@ func (o *Orchestrator) drainExcessChunks(vaultID, tierID glid.GLID, cm chunk.Chu
 		runner := &retentionRunner{
 			isLeader: true,
 			vaultID:  vaultID,
-			tierID:   tierID,
+			instID:   instID,
 			cm:       cm,
 			im:       im,
 			orch:     o,
@@ -483,7 +483,7 @@ func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg syste
 	if runner == nil {
 		runner = &retentionRunner{
 			vaultID: vaultCfg.ID,
-			tierID:  inst.VaultID,
+			instID:  inst.VaultID,
 			cm:      inst.Chunks,
 			im:      inst.Indexes,
 			orch:    o,
@@ -505,10 +505,10 @@ func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg syste
 	return &sweepTarget{runner: runner, rules: rules}
 }
 
-// tierPositionInVault returns the 0-based index of tierID in the vault's
+// tierPositionInVault returns the 0-based index of instID in the vault's
 // ordered vault list. With 1:1 vault:tier the index is always 0.
-func tierPositionInVault(cfg *system.Config, vaultID, tierID glid.GLID) int {
-	if vaultID == tierID {
+func tierPositionInVault(cfg *system.Config, vaultID, instID glid.GLID) int {
+	if vaultID == instID {
 		return 0
 	}
 	return -1
@@ -800,7 +800,7 @@ func (r *retentionRunner) findTierInstance() *VaultInstance {
 	if vault == nil || vault.Instance == nil {
 		return nil
 	}
-	if vault.Instance.VaultID != r.tierID {
+	if vault.Instance.VaultID != r.instID {
 		return nil
 	}
 	return vault.Instance
@@ -933,7 +933,7 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID, reason string) {
 			// the leader path (this function only runs on inst leaders)
 			// so the rate reflects active expiration decisions, not
 			// follower delete-cascade applications.
-			r.orch.retentionRates.Record(r.tierID, r.orch.now())
+			r.orch.retentionRates.Record(r.instID, r.orch.now())
 		}
 		r.logger.Debug("retention: requested chunk delete via reconciler",
 			"vault", r.vaultID, "chunk", id.String(), "reason", reason)
@@ -960,10 +960,10 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID, reason string) {
 	}
 	if r.orch != nil {
 		if r.orch.retentionRates != nil {
-			r.orch.retentionRates.Record(r.tierID, r.orch.now())
+			r.orch.retentionRates.Record(r.instID, r.orch.now())
 		}
 		r.orch.NotifyChunkChange()
-		r.orch.deleteFromFollowers(r.vaultID, r.tierID, id)
+		r.orch.deleteFromFollowers(r.vaultID, r.instID, id)
 		r.forwardDeletionToFollowers(id)
 	}
 	r.logger.Debug("retention: deleted chunk (no-reconciler fallback)",

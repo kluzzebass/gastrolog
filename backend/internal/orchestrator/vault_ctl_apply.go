@@ -40,11 +40,11 @@ func (o *Orchestrator) ApplyVaultControlPlane(vaultID glid.GLID, data []byte) er
 type vaultCtlTierApplier struct {
 	o       *Orchestrator
 	vaultID glid.GLID
-	tierID  glid.GLID
+	instID  glid.GLID
 }
 
 func (a *vaultCtlTierApplier) Apply(data []byte) error {
-	return a.o.ApplyVaultControlPlane(a.vaultID, vaultraft.MarshalVaultChunkCommand(a.tierID, data))
+	return a.o.ApplyVaultControlPlane(a.vaultID, vaultraft.MarshalVaultChunkCommand(a.instID, data))
 }
 
 var _ vaultctlfsm.Applier = (*vaultCtlTierApplier)(nil)

@@ -96,14 +96,14 @@ func testAfterConfigApply(orch *orchestrator.Orchestrator, cfgStore system.Store
 // given vault, and returns the tier ID as a string.
 func ensureMemoryTier(t *testing.T, cfgStore system.Store, vaultID glid.GLID) string {
 	t.Helper()
-	tierID := glid.New()
+	instID := glid.New()
 	if err := cfgStore.PutTier(context.Background(), system.TierConfig{
-		ID: tierID, Name: "test-tier-" + tierID.String()[:8], Type: system.VaultTypeMemory,
+		ID: instID, Name: "test-tier-" + instID.String()[:8], Type: system.VaultTypeMemory,
 		VaultID: vaultID,
 	}); err != nil {
 		t.Fatalf("ensureMemoryTier: %v", err)
 	}
-	return tierID.String()
+	return instID.String()
 }
 
 // newConfigTestSetup creates an orchestrator, config vault, and Connect client

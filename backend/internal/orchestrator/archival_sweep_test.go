@@ -27,7 +27,7 @@ func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition
 ) {
 	t.Helper()
 	vaultID := glid.New()
-	tierID := glid.New()
+	instID := glid.New()
 	csID := glid.New()
 	nodeID := "test-node"
 
@@ -47,10 +47,10 @@ func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition
 		ID: vaultID, Name: "archival-test",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tierID, Name: "cloud", Type: system.VaultTypeFile, CloudServiceID: &csID,
+		ID: instID, Name: "cloud", Type: system.VaultTypeFile, CloudServiceID: &csID,
 		VaultID: vaultID,
 	})
-	_ = store.SetVaultPlacements(context.Background(), tierID, []system.VaultPlacement{{StorageID: system.SyntheticStorageID("test-node"), Leader: true}})
+	_ = store.SetVaultPlacements(context.Background(), instID, []system.VaultPlacement{{StorageID: system.SyntheticStorageID("test-node"), Leader: true}})
 	_ = store.PutCloudService(context.Background(), system.CloudService{
 		ID:           csID,
 		Name:         "test-cloud",
@@ -68,14 +68,14 @@ func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition
 	_ = orch.Scheduler().Stop()
 
 	inst := &VaultInstance{
-		VaultID: tierID, Type: "cloud",
+		VaultID: instID, Type: "cloud",
 		Chunks: cm, Indexes: im, Query: query.New(cm, im, nil),
 	}
 	orch.RegisterVault(NewVault(vaultID, inst))
 
 	t.Cleanup(func() { _ = cm.Close() })
 
-	return orch, cloudStore, cm, vaultID, tierID, store
+	return orch, cloudStore, cm, vaultID, instID, store
 }
 
 // ingestSealUpload ingests N records, seals, and runs PostSealProcess (compress + cloud upload).
@@ -535,7 +535,7 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 	nodeIDs := []string{"leader", "f1", "f2", "f3"}
 	leaderID := nodeIDs[0]
 	vaultID := glid.New()
-	tierID := glid.New()
+	instID := glid.New()
 	csID := glid.New()
 
 	cloudStore := blobstore.NewMemory()
@@ -550,10 +550,10 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 		})
 	}
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tierID, Name: "cloud-inst", Type: system.VaultTypeFile, CloudServiceID: &csID,
+		ID: instID, Name: "cloud-inst", Type: system.VaultTypeFile, CloudServiceID: &csID,
 		VaultID: vaultID,
 	})
-	_ = store.SetVaultPlacements(context.Background(), tierID, placements)
+	_ = store.SetVaultPlacements(context.Background(), instID, placements)
 	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "cloud-vault",
 	})
@@ -602,7 +602,7 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 		im := indexfile.NewManager(dir, nil, nil)
 
 		inst := &VaultInstance{
-			VaultID: tierID, Type: "cloud",
+			VaultID: instID, Type: "cloud",
 			Chunks: cm, Indexes: im, Query: query.New(cm, im, nil),
 		}
 		if isLeader {
@@ -646,7 +646,7 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 			nodes:    nodes,
 			cfgStore: store,
 			vaultID:  vaultID,
-			tierIDs:  []glid.GLID{tierID},
+			tierIDs:  []glid.GLID{instID},
 		},
 		cloudStore: cloudStore,
 		csID:       csID,

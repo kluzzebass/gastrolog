@@ -454,11 +454,11 @@ func TestThreeNodeThreeGroupsIndependentLeaders(t *testing.T) {
 
 // ---------- Non-string group ID ----------
 
-// tierID is a custom integer type used as a Raft group ID to prove
+// instID is a custom integer type used as a Raft group ID to prove
 // the generic works with non-string types.
-type tierID uint64
+type instID uint64
 
-func encodeTierID(id tierID) []byte {
+func encodeTierID(id instID) []byte {
 	b := make([]byte, 8)
 	b[0] = byte(id >> 56)
 	b[1] = byte(id >> 48)
@@ -471,8 +471,8 @@ func encodeTierID(id tierID) []byte {
 	return b
 }
 
-func decodeTierID(b []byte) tierID {
-	return tierID(uint64(b[0])<<56 | uint64(b[1])<<48 | uint64(b[2])<<40 | uint64(b[3])<<32 |
+func decodeTierID(b []byte) instID {
+	return instID(uint64(b[0])<<56 | uint64(b[1])<<48 | uint64(b[2])<<40 | uint64(b[3])<<32 |
 		uint64(b[4])<<24 | uint64(b[5])<<16 | uint64(b[6])<<8 | uint64(b[7]))
 }
 
@@ -484,11 +484,11 @@ func TestNonStringGroupID(t *testing.T) {
 	srv1 := grpc.NewServer()
 	srv2 := grpc.NewServer()
 
-	tp1 := New[tierID](raft.ServerAddress(lis1.Addr().String()),
+	tp1 := New[instID](raft.ServerAddress(lis1.Addr().String()),
 		[]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
 		encodeTierID, decodeTierID,
 	)
-	tp2 := New[tierID](raft.ServerAddress(lis2.Addr().String()),
+	tp2 := New[instID](raft.ServerAddress(lis2.Addr().String()),
 		[]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
 		encodeTierID, decodeTierID,
 	)
@@ -519,8 +519,8 @@ func TestNonStringGroupID(t *testing.T) {
 	})
 
 	// Use integer group IDs.
-	var group1 tierID = 42
-	var group2 tierID = 9999
+	var group1 instID = 42
+	var group2 instID = 9999
 
 	gt1a := tp1.GroupTransport(group1)
 	gt1b := tp2.GroupTransport(group1)

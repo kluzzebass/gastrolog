@@ -108,10 +108,10 @@ type RecordForwarder interface {
 //
 // Caller role: always invoked on the inst **leader** node. Each method sends
 // a command to a follower (`nodeID`) that applies it locally. Callers must
-// verify they hold leadership for (`vaultID`, `tierID`) before invoking —
+// verify they hold leadership for (`vaultID`, `instID`) before invoking —
 // the replicator itself does not re-check.
 //
-// Validation: methods assume the (`vaultID`, `tierID`) pair is consistent
+// Validation: methods assume the (`vaultID`, `instID`) pair is consistent
 // (inst belongs to vault). The receiver on the remote node rejects mismatches
 // via inst lookup; callers should not rely on the replicator to catch
 // programmer errors.
@@ -252,20 +252,20 @@ type Orchestrator struct {
 	auxWg        sync.WaitGroup // tracks auxiliary goroutines (watchdog, etc.)
 
 	// Per-inst import mutex for serializing SetNextChunkID + ImportRecords.
-	importMu sync.Map // tierID → *sync.Mutex
+	importMu sync.Map // instID → *sync.Mutex
 
 	// Draining vaults (keyed by vault ID, tracks in-progress migrations).
 	draining map[glid.GLID]*drainState
 
-	// Draining tiers (keyed by "vaultID:tierID", tracks in-progress inst drains).
+	// Draining tiers (keyed by "vaultID:instID", tracks in-progress inst drains).
 	tierDraining map[string]*tierDrainState
 
 	// OnTierDrainComplete is called after a inst drain finishes. The dispatch
 	// layer uses this to remove the inst from vault inst lists in the config
 	// store (which fires a subsequent vault-put notification to rebuild).
-	OnTierDrainComplete func(ctx context.Context, vaultID, tierID glid.GLID)
+	OnTierDrainComplete func(ctx context.Context, vaultID, instID glid.GLID)
 
-	// Retention runners (keyed by tierID:storageID, invoked by the shared scheduler).
+	// Retention runners (keyed by instID:storageID, invoked by the shared scheduler).
 	retention map[string]*retentionRunner
 
 	// Shared scheduler for all periodic tasks (cron rotation, retention, etc.).
@@ -390,7 +390,7 @@ func (o *Orchestrator) NotifyChunkChange() {
 // or "" if the inst or config is unknown. Used by RateAlerter to build
 // alert messages that say "inst ssd-hot" instead of just a UUID. Safe to
 // call from any goroutine — it acquires the orchestrator read lock.
-func (o *Orchestrator) tierLabel(tierID glid.GLID) string {
+func (o *Orchestrator) tierLabel(instID glid.GLID) string {
 	if o.sysLoader == nil {
 		return ""
 	}
@@ -398,7 +398,7 @@ func (o *Orchestrator) tierLabel(tierID glid.GLID) string {
 	if err != nil || sys == nil {
 		return ""
 	}
-	if tierCfg := findTierConfig(sys.Config.Tiers, tierID); tierCfg != nil {
+	if tierCfg := findTierConfig(sys.Config.Tiers, instID); tierCfg != nil {
 		return tierCfg.Name
 	}
 	return ""
@@ -554,8 +554,8 @@ func New(cfg Config) (*Orchestrator, error) {
 	// so the rotation rate counter must be hooked from the cron manager
 	// directly. The age-based rotationsweep path increments the counter
 	// inline at its seal-trigger site.
-	o.cronRotation.onRotation = func(_, tierID glid.GLID) {
-		o.rotationRates.Record(tierID, o.now())
+	o.cronRotation.onRotation = func(_, instID glid.GLID) {
+		o.rotationRates.Record(instID, o.now())
 	}
 
 	// Register the single retention sweep that discovers all inst instances

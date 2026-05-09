@@ -290,7 +290,7 @@ func (o *Orchestrator) postSealWork(vaultID glid.GLID, cm chunk.ChunkManager, ch
 // After the pipeline completes, sealed-chunk replication is triggered for leader tiers.
 func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager, chunkID chunk.ChunkID) {
 	// Resolve inst info for post-pipeline replication.
-	tierID, followerTargets := o.tierReplicationInfo(vaultID, cm)
+	instID, followerTargets := o.tierReplicationInfo(vaultID, cm)
 
 	processor, ok := cm.(chunk.ChunkPostSealProcessor)
 	if ok {
@@ -303,7 +303,7 @@ func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager
 			o.NotifyChunkChange()
 			// Schedule replication as a separate job — never blocks the
 			// post-seal scheduler slot.
-			o.scheduleReplication(vaultID, tierID, id, followerTargets)
+			o.scheduleReplication(vaultID, instID, id, followerTargets)
 			return nil
 		}
 		if err := o.scheduler.RunOnce(name, wrappedFn, context.Background(), chunkID); err != nil {
@@ -317,7 +317,7 @@ func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager
 	// ChunkCompressor fallback is gone (gastrolog-24m1t step 7e); only
 	// chunkfile.Manager implemented it, and it now goes through the
 	// PostSealProcess branch above.
-	o.scheduleReplication(vaultID, tierID, chunkID, followerTargets)
+	o.scheduleReplication(vaultID, instID, chunkID, followerTargets)
 }
 
 // tierReplicationInfo returns the inst ID and follower targets for the inst

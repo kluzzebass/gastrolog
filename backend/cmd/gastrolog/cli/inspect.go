@@ -246,20 +246,20 @@ func runInspectChunk(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func resolveTierName(client *server.Client, tierID string) string {
-	if tierID == "" {
+func resolveTierName(client *server.Client, instID string) string {
+	if instID == "" {
 		return ""
 	}
 	cfgResp, err := client.System.GetSystem(context.Background(), connect.NewRequest(&v1.GetSystemRequest{}))
 	if err != nil {
-		return tierID
+		return instID
 	}
 	for _, t := range cfgResp.Msg.Tiers {
-		if glid.FromBytes(t.Id).String() == tierID {
+		if glid.FromBytes(t.Id).String() == instID {
 			return fmt.Sprintf("%s (%s)", t.Name, strings.TrimPrefix(t.Type.String(), "TIER_TYPE_"))
 		}
 	}
-	return tierID
+	return instID
 }
 
 func buildChunkKV(c *v1.ChunkMeta, tierName string) [][2]string {

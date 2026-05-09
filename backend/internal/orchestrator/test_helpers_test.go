@@ -106,7 +106,7 @@ func newTestOrch(t *testing.T, cfg Config) *Orchestrator {
 	return orch
 }
 
-func newMemoryTierInstance(t *testing.T, tierID glid.GLID) *VaultInstance {
+func newMemoryTierInstance(t *testing.T, instID glid.GLID) *VaultInstance {
 	t.Helper()
 	cm, err := chunkmem.NewFactory()(nil, nil)
 	if err != nil {
@@ -117,7 +117,7 @@ func newMemoryTierInstance(t *testing.T, tierID glid.GLID) *VaultInstance {
 		t.Fatal(err)
 	}
 	return &VaultInstance{
-		VaultID:  tierID,
+		VaultID:  instID,
 		Type:    "memory",
 		Chunks:  cm,
 		Indexes: im,
@@ -138,11 +138,11 @@ func setupTestStoreRuntime(store *sysmem.Store, nodeID string, tierIDs ...glid.G
 }
 
 
-func newTestRetentionRunner(orch *Orchestrator, vaultID, tierID glid.GLID, cm chunk.ChunkManager, im index.IndexManager) *retentionRunner {
+func newTestRetentionRunner(orch *Orchestrator, vaultID, instID glid.GLID, cm chunk.ChunkManager, im index.IndexManager) *retentionRunner {
 	return &retentionRunner{
 		isLeader: true,
 		vaultID:  vaultID,
-		tierID:   tierID,
+		instID:   instID,
 		cm:       cm,
 		im:       im,
 		orch:     orch,
@@ -169,14 +169,14 @@ type transitionFakeTransferrer struct {
 type transitionTransferCall struct {
 	nodeID  string
 	vaultID glid.GLID
-	tierID  glid.GLID
+	instID  glid.GLID
 	records []chunk.Record
 }
 
 type transitionStreamCall struct {
 	nodeID  string
 	vaultID glid.GLID
-	tierID  glid.GLID
+	instID  glid.GLID
 	count   int
 }
 
@@ -247,7 +247,7 @@ func (p *keepNPolicy) Apply(state chunk.VaultState) []chunk.ChunkID {
 // newCloudFileTier creates a file-backed VaultInstance with cloud storage.
 // Sealed chunks are uploaded to the in-memory blobstore and local files deleted,
 // matching production cloud inst behavior.
-func newCloudFileTier(t *testing.T, tierID glid.GLID, vaultID glid.GLID, store blobstore.Store) (*VaultInstance, string) {
+func newCloudFileTier(t *testing.T, instID glid.GLID, vaultID glid.GLID, store blobstore.Store) (*VaultInstance, string) {
 	t.Helper()
 	dir := t.TempDir()
 	cm, err := chunkfile.NewManager(chunkfile.Config{
@@ -262,7 +262,7 @@ func newCloudFileTier(t *testing.T, tierID glid.GLID, vaultID glid.GLID, store b
 	}
 	im := indexfile.NewManager(dir, nil, nil)
 	return &VaultInstance{
-		VaultID:  tierID,
+		VaultID:  instID,
 		Type:    "cloud",
 		Chunks:  cm,
 		Indexes: im,
@@ -283,7 +283,7 @@ func newCloudFileTier(t *testing.T, tierID glid.GLID, vaultID glid.GLID, store b
 
 // newFileTierInstance creates a file-backed VaultInstance without cloud storage.
 // Returns the inst instance and its filesystem directory for post-test verification.
-func newFileTierInstance(t *testing.T, tierID glid.GLID) (*VaultInstance, string) {
+func newFileTierInstance(t *testing.T, instID glid.GLID) (*VaultInstance, string) {
 	t.Helper()
 	dir := t.TempDir()
 	cm, err := chunkfile.NewManager(chunkfile.Config{
@@ -296,7 +296,7 @@ func newFileTierInstance(t *testing.T, tierID glid.GLID) (*VaultInstance, string
 	}
 	im := indexfile.NewManager(dir, nil, nil)
 	return &VaultInstance{
-		VaultID:  tierID,
+		VaultID:  instID,
 		Type:    "file",
 		Chunks:  cm,
 		Indexes: im,
@@ -558,11 +558,11 @@ func (d *directChunkReplicator) RequestReplicaCatchup(ctx context.Context, leade
 // → CmdAckDelete from each → CmdFinalizeDelete on the leader. Without this,
 // expireChunk falls through to the legacy direct-delete fallback which
 // doesn't replicate, and the cluster retention assertions fail.
-func newClusterRetentionRunner(orch *Orchestrator, vaultID, tierID glid.GLID, inst *VaultInstance) *retentionRunner {
+func newClusterRetentionRunner(orch *Orchestrator, vaultID, instID glid.GLID, inst *VaultInstance) *retentionRunner {
 	return &retentionRunner{
 		isLeader:        true,
 		vaultID:         vaultID,
-		tierID:          tierID,
+		instID:          instID,
 		cm:              inst.Chunks,
 		im:              inst.Indexes,
 		orch:            orch,

@@ -331,14 +331,14 @@ func TestExpireChunkProposesRequestDelete(t *testing.T) {
 	}
 	im := &retentionFakeIndexManager{}
 
-	vaultID, tierID := glid.New(), glid.New()
+	vaultID, instID := glid.New(), glid.New()
 	var (
 		gotChunkID      chunk.ChunkID
 		gotReason       string
 		gotExpectedFrom []string
 	)
 	inst := &VaultInstance{
-		VaultID: tierID,
+		VaultID: instID,
 		Chunks: cm,
 		Indexes: im,
 		FollowerTargets: []system.ReplicationTarget{
@@ -357,7 +357,7 @@ func TestExpireChunkProposesRequestDelete(t *testing.T) {
 	r := &retentionRunner{
 		isLeader:        true,
 		vaultID:         vaultID,
-		tierID:          tierID,
+		instID:          instID,
 		cm:              cm,
 		im:              im,
 		reconciler:      rec,
@@ -402,9 +402,9 @@ func TestExpireChunkSkipsLocalOnRequestDeleteFailure(t *testing.T) {
 	}
 	im := &retentionFakeIndexManager{}
 
-	vaultID, tierID := glid.New(), glid.New()
+	vaultID, instID := glid.New(), glid.New()
 	inst := &VaultInstance{
-		VaultID:  tierID,
+		VaultID:  instID,
 		Chunks:  cm,
 		Indexes: im,
 		ApplyRaftRequestDelete: func(_ chunk.ChunkID, _ string, _ []string) error {
@@ -416,7 +416,7 @@ func TestExpireChunkSkipsLocalOnRequestDeleteFailure(t *testing.T) {
 	r := &retentionRunner{
 		isLeader:   true,
 		vaultID:    vaultID,
-		tierID:     tierID,
+		instID:     instID,
 		cm:         cm,
 		im:         im,
 		reconciler: rec,
@@ -616,7 +616,7 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 
 	// 1:1 vault:tier — IDs match.
 	vaultID := glid.New()
-	tierID := vaultID
+	instID := vaultID
 	policyID := glid.New()
 
 	cm1 := &retentionFakeChunkManager{}
@@ -649,7 +649,7 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 
 	// First call: creates a new runner with cm1/im1.
 	tier1 := &VaultInstance{
-		VaultID:  tierID,
+		VaultID:  instID,
 		Chunks:  cm1,
 		Indexes: im1,
 	}
@@ -668,7 +668,7 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 
 	// Second call with different chunk manager: runner is reused, cm/im refreshed.
 	tier2 := &VaultInstance{
-		VaultID:  tierID,
+		VaultID:  instID,
 		Chunks:  cm2,
 		Indexes: im2,
 	}

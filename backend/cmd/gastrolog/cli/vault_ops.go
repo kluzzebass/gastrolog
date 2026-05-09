@@ -49,11 +49,11 @@ func runSeal(cmd *cobra.Command, args []string) error {
 
 	req := &v1.SealVaultRequest{Vault: vaultID}
 	if tierFlag != "" {
-		tierID, err := resolve(tierFlag, r.tiers, "tier")
+		instID, err := resolve(tierFlag, r.tiers, "tier")
 		if err != nil {
 			return err
 		}
-		req.Tier = tierID
+		req.Tier = instID
 	}
 
 	resp, err := client.Vault.SealVault(context.Background(), connect.NewRequest(req))

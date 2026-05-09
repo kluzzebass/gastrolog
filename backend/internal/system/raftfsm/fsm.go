@@ -509,28 +509,28 @@ func (f *FSM) applyDeleteTier(ctx context.Context, pb *gastrologv1.DeleteTierCom
 }
 
 func (f *FSM) applySetVaultPlacements(ctx context.Context, pb *gastrologv1.SetVaultPlacementsCommand) (*Notification, error) {
-	tierID, placements, err := command.ExtractSetVaultPlacements(pb)
+	instID, placements, err := command.ExtractSetVaultPlacements(pb)
 	if err != nil {
 		return nil, err
 	}
-	if err := f.store.SetVaultPlacements(ctx, tierID, placements); err != nil {
+	if err := f.store.SetVaultPlacements(ctx, instID, placements); err != nil {
 		return nil, err
 	}
 	// Phase 2 (gastrolog-3iy5l): mirror placements back onto the matching
 	// VaultConfig (1:1 vault:tier — the vault shares the tier's ID for new
 	// vault-driven writes; older log entries may use distinct IDs).
 	// Placement-driven write path; PutVault is the user-facing surface.
-	if err := f.mirrorPlacementsToVault(ctx, tierID, placements); err != nil {
+	if err := f.mirrorPlacementsToVault(ctx, instID, placements); err != nil {
 		return nil, err
 	}
-	return &Notification{Kind: NotifyVaultPlacementsSet, ID: tierID}, nil
+	return &Notification{Kind: NotifyVaultPlacementsSet, ID: instID}, nil
 }
 
 // mirrorPlacementsToVault writes the placement set to the owning vault's
 // VaultConfig.Placements. The placement manager passes a tier ID that —
 // under 1:1 vault:tier — equals the vault ID.
-func (f *FSM) mirrorPlacementsToVault(ctx context.Context, tierID glid.GLID, placements []system.VaultPlacement) error {
-	v, err := f.store.GetVault(ctx, tierID)
+func (f *FSM) mirrorPlacementsToVault(ctx context.Context, instID glid.GLID, placements []system.VaultPlacement) error {
+	v, err := f.store.GetVault(ctx, instID)
 	if err != nil || v == nil {
 		return nil //nolint:nilerr // vault not yet present; will pick up on PutVault
 	}
@@ -860,9 +860,9 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit,gocyclo // sna
 			return fmt.Errorf("restore cluster TLS: %w", err)
 		}
 	}
-	for tierID, placements := range rt.VaultPlacements {
-		if err := newStore.SetVaultPlacements(ctx, tierID, placements); err != nil {
-			return fmt.Errorf("restore tier placements %s: %w", tierID, err)
+	for instID, placements := range rt.VaultPlacements {
+		if err := newStore.SetVaultPlacements(ctx, instID, placements); err != nil {
+			return fmt.Errorf("restore tier placements %s: %w", instID, err)
 		}
 	}
 	for ingesterID, nodes := range rt.IngesterAlive {

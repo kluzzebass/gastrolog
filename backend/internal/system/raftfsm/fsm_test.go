@@ -653,9 +653,9 @@ func TestSnapshotRestore(t *testing.T) {
 	applyCmd(t, fsm1, command.NewPutRetentionPolicy(system.RetentionPolicyConfig{ID: retID, Name: "ret1", MaxAge: &retMaxAge}))
 
 	vaultID := newID()
-	tierID := newID()
+	instID := newID()
 	applyCmd(t, fsm1, command.NewPutTier(system.TierConfig{
-		ID: tierID, Name: "tier1", Type: system.VaultTypeMemory,
+		ID: instID, Name: "tier1", Type: system.VaultTypeMemory,
 		VaultID: vaultID,
 		RotationPolicyID: &rpID,
 		RetentionRules: []system.RetentionRule{
@@ -732,7 +732,7 @@ func TestSnapshotRestore(t *testing.T) {
 		t.Errorf("vault: %+v", gotVault)
 	}
 
-	gotTier, _ := fsm2.Store().GetTier(ctx, tierID)
+	gotTier, _ := fsm2.Store().GetTier(ctx, instID)
 	if gotTier == nil || gotTier.Name != "tier1" {
 		t.Errorf("tier: %+v", gotTier)
 	}

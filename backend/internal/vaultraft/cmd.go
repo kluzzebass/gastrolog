@@ -15,12 +15,12 @@ const (
 func MarshalNoop() []byte { return []byte{OpNoop} }
 
 // MarshalVaultChunkCommand builds a vault control-plane log entry that applies
-// tierWire to the tierfsm sub-state for tierID. tierWire must be a full
+// tierWire to the tierfsm sub-state for instID. tierWire must be a full
 // tierfsm command (e.g. output of vaultctlfsm.MarshalCreateChunk).
-func MarshalVaultChunkCommand(tierID glid.GLID, tierWire []byte) []byte {
+func MarshalVaultChunkCommand(instID glid.GLID, tierWire []byte) []byte {
 	out := make([]byte, 0, 1+glid.Size+len(tierWire))
 	out = append(out, OpVaultChunkFSM)
-	out = append(out, tierID[:]...)
+	out = append(out, instID[:]...)
 	out = append(out, tierWire...)
 	return out
 }

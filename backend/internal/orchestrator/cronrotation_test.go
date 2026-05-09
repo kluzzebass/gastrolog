@@ -89,9 +89,9 @@ func TestRotateVaultSealsNonEmptyChunk(t *testing.T) {
 	}
 
 	vaultID := glid.New()
-	tierID := glid.New()
+	instID := glid.New()
 	m := newTestCronManager(t)
-	m.rotateVault(vaultID, tierID, "test-vault", cm)
+	m.rotateVault(vaultID, instID, "test-vault", cm)
 
 	if !cm.sealed {
 		t.Error("expected chunk to be sealed")
@@ -107,9 +107,9 @@ func TestRotateVaultSkipsEmptyChunk(t *testing.T) {
 	}
 
 	vaultID := glid.New()
-	tierID := glid.New()
+	instID := glid.New()
 	m := newTestCronManager(t)
-	m.rotateVault(vaultID, tierID, "test-vault", cm)
+	m.rotateVault(vaultID, instID, "test-vault", cm)
 
 	if cm.sealed {
 		t.Error("expected empty chunk to NOT be sealed")
@@ -122,9 +122,9 @@ func TestRotateVaultSkipsNilActive(t *testing.T) {
 	}
 
 	vaultID := glid.New()
-	tierID := glid.New()
+	instID := glid.New()
 	m := newTestCronManager(t)
-	m.rotateVault(vaultID, tierID, "test-vault", cm)
+	m.rotateVault(vaultID, instID, "test-vault", cm)
 
 	if cm.sealed {
 		t.Error("expected nil active to NOT trigger seal")

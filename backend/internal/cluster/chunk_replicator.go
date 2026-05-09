@@ -17,7 +17,7 @@ import (
 // streamKey identifies a replication stream to a specific follower for a
 // specific tier. One stream per key.
 type streamKey struct {
-	tierID glid.GLID
+	instID glid.GLID
 	nodeID string
 }
 
@@ -32,7 +32,7 @@ type tierStream struct {
 }
 
 // ChunkReplicator manages ordered replication streams from a tier leader to
-// its followers. All operations for a given (tierID, followerNodeID) are
+// its followers. All operations for a given (instID, followerNodeID) are
 // serialized on a single bidirectional gRPC stream.
 type ChunkReplicator struct {
 	peers  *PeerConns
@@ -59,8 +59,8 @@ func NewChunkReplicator(peers *PeerConns, logger *slog.Logger) *ChunkReplicator 
 
 // getOrOpen returns the stream for the given tier+node, opening a new one
 // if needed. The caller must NOT hold tr.mu.
-func (tr *ChunkReplicator) getOrOpen(tierID glid.GLID, nodeID string) (*tierStream, error) {
-	key := streamKey{tierID: tierID, nodeID: nodeID}
+func (tr *ChunkReplicator) getOrOpen(instID glid.GLID, nodeID string) (*tierStream, error) {
+	key := streamKey{instID: instID, nodeID: nodeID}
 
 	tr.mu.Lock()
 	ts := tr.streams[key]
@@ -111,8 +111,8 @@ func (tr *ChunkReplicator) getOrOpen(tierID glid.GLID, nodeID string) (*tierStre
 //
 // See gastrolog-5oofa: without this, RecvMsg on a paused peer blocks
 // forever, holding ts.mu and cascading into ingest-path stalls.
-func (tr *ChunkReplicator) send(ctx context.Context, tierID glid.GLID, nodeID string, cmd *gastrologv1.ChunkReplicationCommand) error {
-	ts, err := tr.getOrOpen(tierID, nodeID)
+func (tr *ChunkReplicator) send(ctx context.Context, instID glid.GLID, nodeID string, cmd *gastrologv1.ChunkReplicationCommand) error {
+	ts, err := tr.getOrOpen(instID, nodeID)
 	if err != nil {
 		return err
 	}
@@ -121,19 +121,19 @@ func (tr *ChunkReplicator) send(ctx context.Context, tierID glid.GLID, nodeID st
 	defer ts.mu.Unlock()
 
 	if ts.closed {
-		return fmt.Errorf("stream to %s for tier %s is closed", nodeID, tierID)
+		return fmt.Errorf("stream to %s for tier %s is closed", nodeID, instID)
 	}
 
 	sendErr := tr.runWithCtx(ctx, func() error { return ts.stream.SendMsg(cmd) })
 	if sendErr != nil {
-		tr.closeStream(tierID, nodeID)
+		tr.closeStream(instID, nodeID)
 		return fmt.Errorf("send: %w", sendErr)
 	}
 
 	ack := &gastrologv1.ChunkReplicationAck{}
 	recvErr := tr.runWithCtx(ctx, func() error { return ts.stream.RecvMsg(ack) })
 	if recvErr != nil {
-		tr.closeStream(tierID, nodeID)
+		tr.closeStream(instID, nodeID)
 		return fmt.Errorf("recv ack: %w", recvErr)
 	}
 
@@ -161,8 +161,8 @@ func (tr *ChunkReplicator) runWithCtx(ctx context.Context, fn func() error) erro
 }
 
 // closeStream marks a stream as closed and cancels its context.
-func (tr *ChunkReplicator) closeStream(tierID glid.GLID, nodeID string) {
-	key := streamKey{tierID: tierID, nodeID: nodeID}
+func (tr *ChunkReplicator) closeStream(instID glid.GLID, nodeID string) {
+	key := streamKey{instID: instID, nodeID: nodeID}
 	tr.mu.Lock()
 	ts := tr.streams[key]
 	if ts != nil {
@@ -267,8 +267,8 @@ func (tr *ChunkReplicator) RequestReplicaCatchup(ctx context.Context, leaderNode
 }
 
 // CloseStream closes the stream for a specific tier+follower.
-func (tr *ChunkReplicator) CloseStream(tierID glid.GLID, nodeID string) {
-	tr.closeStream(tierID, nodeID)
+func (tr *ChunkReplicator) CloseStream(instID glid.GLID, nodeID string) {
+	tr.closeStream(instID, nodeID)
 }
 
 // Close closes all open streams.

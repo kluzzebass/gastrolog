@@ -15,34 +15,34 @@ import (
 // ScheduleCatchup schedules catchup replication for newly added followers of
 // a inst within the given vault. Must be called on the node that holds the
 // vault leader replica — no-op if this node is a follower or does not host
-// the inst. The caller owns the (vaultID, tierID) pair; the orchestrator
-// does not reverse-lookup by tierID alone.
-func (o *Orchestrator) ScheduleCatchup(vaultID, tierID glid.GLID, followerNodeIDs []string) {
+// the inst. The caller owns the (vaultID, instID) pair; the orchestrator
+// does not reverse-lookup by instID alone.
+func (o *Orchestrator) ScheduleCatchup(vaultID, instID glid.GLID, followerNodeIDs []string) {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
 	var found *VaultInstance
-	if vault != nil && vault.Instance != nil && vault.Instance.VaultID == tierID {
+	if vault != nil && vault.Instance != nil && vault.Instance.VaultID == instID {
 		found = vault.Instance
 	}
 	o.mu.RUnlock()
 	if found == nil || found.IsFollower {
 		return
 	}
-	o.scheduleCatchup(vaultID, tierID, followerNodeIDs)
+	o.scheduleCatchup(vaultID, instID, followerNodeIDs)
 }
 
 // scheduleCatchup schedules background jobs to replicate existing sealed chunks
 // from the leader to newly added follower nodes.
-func (o *Orchestrator) scheduleCatchup(vaultID, tierID glid.GLID, newFollowers []string) {
+func (o *Orchestrator) scheduleCatchup(vaultID, instID glid.GLID, newFollowers []string) {
 	for _, nodeID := range newFollowers {
-		o.scheduleCatchupForNode(vaultID, tierID, nodeID, 0)
+		o.scheduleCatchupForNode(vaultID, instID, nodeID, 0)
 	}
 }
 
 const maxCatchupRetries = 3
 
-func (o *Orchestrator) scheduleCatchupForNode(vaultID, tierID glid.GLID, nodeID string, attempt int) {
-	name := "replication-catchup:" + vaultID.String() + ":" + tierID.String() + ":" + nodeID
+func (o *Orchestrator) scheduleCatchupForNode(vaultID, instID glid.GLID, nodeID string, attempt int) {
+	name := "replication-catchup:" + vaultID.String() + ":" + instID.String() + ":" + nodeID
 	if attempt > 0 {
 		name += fmt.Sprintf(":retry-%d", attempt)
 	}
@@ -55,12 +55,12 @@ func (o *Orchestrator) scheduleCatchupForNode(vaultID, tierID glid.GLID, nodeID 
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), cluster.CatchupTimeout)
 		defer cancel()
-		if err := o.catchupFollower(ctx, vaultID, tierID, nodeID); err != nil {
+		if err := o.catchupFollower(ctx, vaultID, instID, nodeID); err != nil {
 			if attempt < maxCatchupRetries && strings.Contains(err.Error(), "not ready") {
 				o.logger.Info("catchup: follower not ready, will retry",
 					"vault", vaultID, "node", nodeID,
 					"attempt", attempt+1)
-				o.scheduleCatchupForNode(vaultID, tierID, nodeID, attempt+1)
+				o.scheduleCatchupForNode(vaultID, instID, nodeID, attempt+1)
 			} else {
 				o.logger.Warn("catchup failed", "vault", vaultID, "node", nodeID, "error", err)
 			}
@@ -74,10 +74,10 @@ func (o *Orchestrator) scheduleCatchupForNode(vaultID, tierID glid.GLID, nodeID 
 // catchupFollower copies all sealed chunks from the leader's inst to a
 // follower node. Each chunk's records are streamed via TransferRecords,
 // producing an identical sealed chunk on the follower.
-func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, tierID glid.GLID, nodeID string) error {
+func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, instID glid.GLID, nodeID string) error {
 	inst := o.findLocalVaultInstance(vaultID)
 	if inst == nil {
-		return fmt.Errorf("vault %s not found in vault %s", tierID, vaultID)
+		return fmt.Errorf("vault %s not found in vault %s", instID, vaultID)
 	}
 	if inst.IsFollower {
 		return nil // only leader initiates catchup
@@ -128,7 +128,7 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, tierID glid
 
 	transferred := 0
 	for _, meta := range sealed {
-		if err := o.replicateToFollower(ctx, vaultID, tierID, meta.ID, inst.Chunks, nodeID); err != nil {
+		if err := o.replicateToFollower(ctx, vaultID, instID, meta.ID, inst.Chunks, nodeID); err != nil {
 			// If the follower rejected because its inst isn't built yet
 			// (recovering node still in startup), return a retryable error.
 			// The scheduler will re-run the job. Sentinel sentinels don't
@@ -138,7 +138,7 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, tierID glid
 			// this node" (gastrolog-2t48z).
 			msg := err.Error()
 			if strings.Contains(msg, "vault not found") || strings.Contains(msg, "inst not registered on this node") {
-				return fmt.Errorf("follower %s not ready for vault %s (still building): %w", nodeID, tierID, err)
+				return fmt.Errorf("follower %s not ready for vault %s (still building): %w", nodeID, instID, err)
 			}
 			o.logger.Warn("replication catchup: transfer failed",
 				"chunk", meta.ID.String(), "follower", nodeID, "error", err)
@@ -179,7 +179,7 @@ func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID glid.G
 		return 0, fmt.Errorf("vault %s not found", vaultID)
 	}
 	inst := vault.Instance
-	tierID := inst.VaultID
+	instID := inst.VaultID
 	if inst.IsFollower {
 		return 0, fmt.Errorf("not placement leader for vault %s (follower)", vaultID)
 	}
@@ -254,7 +254,7 @@ func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID glid.G
 		defer cancel()
 		transferred := 0
 		for _, m := range eligible {
-			if err := o.replicateToFollower(ctxBg, vaultID, tierID, m.ID, inst.Chunks, requesterNodeID); err != nil {
+			if err := o.replicateToFollower(ctxBg, vaultID, instID, m.ID, inst.Chunks, requesterNodeID); err != nil {
 				o.logger.Warn("replica catchup: push failed",
 					"vault", vaultID, "chunk", m.ID.String(),
 					"requester", requesterNodeID, "error", err)

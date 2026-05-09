@@ -187,11 +187,11 @@ func TestApplyConfigVaultWithNoLocalTiers(t *testing.T) {
 	}
 
 	vaultID := glid.New()
-	tierID := glid.New()
+	instID := glid.New()
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{{ID: vaultID, Enabled: true}},
 		Tiers: []system.TierConfig{{
-			ID:      tierID,
+			ID:      instID,
 			Name:    "remote-only",
 			Type:    system.VaultTypeMemory,
 			VaultID: vaultID,
@@ -557,7 +557,7 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 
 	// 1:1 vault:tier — IDs match.
 	vaultID := glid.New()
-	tierID := vaultID
+	instID := vaultID
 	storageID := glid.New()
 
 	sys := &system.System{
@@ -574,7 +574,7 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 				}},
 			}},
 			VaultPlacements: map[glid.GLID][]system.VaultPlacement{
-				tierID: {{StorageID: storageID.String(), Leader: true}},
+				instID: {{StorageID: storageID.String(), Leader: true}},
 			},
 		},
 	}
@@ -585,7 +585,7 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 	}
 
 	// Verify dir param: <storage-path>/vaults/<vault-id>/<inst-id>
-	expectedDir := "/data/chunks/vaults/" + vaultID.String() + "/" + tierID.String()
+	expectedDir := "/data/chunks/vaults/" + vaultID.String() + "/" + instID.String()
 	if cmReceivedParams["dir"] != expectedDir {
 		t.Errorf("chunk manager: expected dir=%s, got %s", expectedDir, cmReceivedParams["dir"])
 	}

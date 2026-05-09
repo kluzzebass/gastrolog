@@ -92,8 +92,8 @@ type mockOrch struct {
 
 	// Tier drain tracking.
 	tierDrainCalls    []glid.GLID                                                // vault IDs passed to DrainTier
-	removeTierCalls   [][2]glid.GLID                                             // [vaultID, tierID] pairs passed to RemoveVaultInstance
-	localTierExported func(vaultID, tierID glid.GLID) *orchestrator.VaultInstance // configurable return
+	removeTierCalls   [][2]glid.GLID                                             // [vaultID, instID] pairs passed to RemoveVaultInstance
+	localTierExported func(vaultID, instID glid.GLID) *orchestrator.VaultInstance // configurable return
 }
 
 func (m *mockOrch) ListVaults() []glid.GLID    { return m.vaults }
@@ -294,10 +294,10 @@ func TestHandle_VaultPut(t *testing.T) {
 	t.Run("unscoped_node_not_skipped", func(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{} // no error → AddVault succeeds
-		tierID := glid.New()
+		instID := glid.New()
 		d := newTestDispatcher(mo, &stubCfgStore{
 			vault: &system.VaultConfig{ID: id, Enabled: true},
-			tiers: []system.TierConfig{{ID: tierID, VaultID: id}},
+			tiers: []system.TierConfig{{ID: instID, VaultID: id}},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
@@ -310,10 +310,10 @@ func TestHandle_VaultPut(t *testing.T) {
 	t.Run("add_vault_error", func(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{addVaultErr: errors.New("factory boom")}
-		tierID := glid.New()
+		instID := glid.New()
 		d := newTestDispatcher(mo, &stubCfgStore{
 			vault: &system.VaultConfig{ID: id, Enabled: true},
-			tiers: []system.TierConfig{{ID: tierID, VaultID: id}},
+			tiers: []system.TierConfig{{ID: instID, VaultID: id}},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
@@ -925,7 +925,7 @@ func (m *mockOrch) FindLocalVaultInstance(vaultID glid.GLID) *orchestrator.Vault
 // Follower nodes should immediately remove their local inst instance.
 func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 	vaultID := glid.New()
-	tierID := glid.New()
+	instID := glid.New()
 
 	t.Run("leader_drains", func(t *testing.T) {
 		h := &captureHandler{}
@@ -933,7 +933,7 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 			vaults: []glid.GLID{vaultID},
 			localTierExported: func(_, _ glid.GLID) *orchestrator.VaultInstance {
 				return &orchestrator.VaultInstance{
-					VaultID:     tierID,
+					VaultID:     instID,
 					IsFollower: false, // this node is the leader
 				}
 			},
@@ -942,7 +942,7 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 			vaultList: []system.VaultConfig{{ID: vaultID}},
 		}, h)
 
-		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyTierDeleted, ID: tierID, Drain: true})
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyTierDeleted, ID: instID, Drain: true})
 
 		if len(mo.tierDrainCalls) != 1 {
 			t.Fatalf("expected 1 DrainTier call, got %d", len(mo.tierDrainCalls))
@@ -961,7 +961,7 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 			vaults: []glid.GLID{vaultID},
 			localTierExported: func(_, _ glid.GLID) *orchestrator.VaultInstance {
 				return &orchestrator.VaultInstance{
-					VaultID:       tierID,
+					VaultID:       instID,
 					IsFollower:   true,
 					LeaderNodeID: "other-node",
 				}
@@ -971,7 +971,7 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 			vaultList: []system.VaultConfig{{ID: vaultID}},
 		}, h)
 
-		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyTierDeleted, ID: tierID, Drain: true})
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyTierDeleted, ID: instID, Drain: true})
 
 		if len(mo.tierDrainCalls) != 0 {
 			t.Fatalf("follower should not drain, got %d DrainTier calls", len(mo.tierDrainCalls))
@@ -993,7 +993,7 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 			vaultList: []system.VaultConfig{{ID: vaultID}},
 		}, h)
 
-		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyTierDeleted, ID: tierID, Drain: true})
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyTierDeleted, ID: instID, Drain: true})
 
 		if len(mo.tierDrainCalls) != 0 {
 			t.Fatalf("node without inst should not drain, got %d calls", len(mo.tierDrainCalls))
@@ -1009,7 +1009,7 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 			vaults: []glid.GLID{vaultID},
 			localTierExported: func(_, _ glid.GLID) *orchestrator.VaultInstance {
 				return &orchestrator.VaultInstance{
-					VaultID:     tierID,
+					VaultID:     instID,
 					IsFollower: false,
 				}
 			},
@@ -1018,7 +1018,7 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 			vaultList: []system.VaultConfig{{ID: vaultID}},
 		}, h)
 
-		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyTierDeleted, ID: tierID, Drain: false})
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyTierDeleted, ID: instID, Drain: false})
 
 		if len(mo.tierDrainCalls) != 0 {
 			t.Fatalf("non-drain delete should not call DrainTier, got %d calls", len(mo.tierDrainCalls))

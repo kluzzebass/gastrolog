@@ -276,8 +276,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	disp.orch = orch
 	disp.cfgStore = cfgStore
 	disp.factories = factories
-	disp.catchupScheduler = func(vaultID, tierID glid.GLID, followerNodeIDs []string) {
-		orch.ScheduleCatchup(vaultID, tierID, followerNodeIDs)
+	disp.catchupScheduler = func(vaultID, instID glid.GLID, followerNodeIDs []string) {
+		orch.ScheduleCatchup(vaultID, instID, followerNodeIDs)
 	}
 
 	// Wire follower-driven replica catchup (gastrolog-2dgvj). The cluster

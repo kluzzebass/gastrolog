@@ -155,13 +155,13 @@ func TestAppendToTier_ErrVaultNotReady(t *testing.T) {
 		t.Fatal(err)
 	}
 	vid := glid.New()
-	tierID := glid.New()
+	instID := glid.New()
 	s, err := memtest.NewVault(chunkmem.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	inst := &VaultInstance{
-		VaultID:     tierID,
+		VaultID:     instID,
 		Type:       "memory",
 		Chunks:     s.CM,
 		Indexes:    s.IM,

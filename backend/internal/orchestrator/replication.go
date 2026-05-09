@@ -80,7 +80,7 @@ func (o *Orchestrator) ackAfterReplication(ack chan<- error, pa *pendingAcks, re
 		for _, t := range pa.replication {
 			for _, tgt := range t.targets {
 				g.Go(func() error {
-					if err := o.chunkReplicator.AppendRecords(ctx, tgt.NodeID, t.tierID, t.chunkID, []chunk.Record{rec}); err != nil {
+					if err := o.chunkReplicator.AppendRecords(ctx, tgt.NodeID, t.instID, t.chunkID, []chunk.Record{rec}); err != nil {
 						return fmt.Errorf("ack-gated replication to %s: %w", tgt.NodeID, err)
 					}
 					return nil
@@ -105,7 +105,7 @@ func (o *Orchestrator) ackAfterReplication(ack chan<- error, pa *pendingAcks, re
 
 // scheduleReplication schedules a separate job to replicate a sealed chunk.
 // Decoupled from the post-seal pipeline — never blocks compression or indexing.
-func (o *Orchestrator) scheduleReplication(vaultID, tierID glid.GLID, chunkID chunk.ChunkID, targets []system.ReplicationTarget) {
+func (o *Orchestrator) scheduleReplication(vaultID, instID glid.GLID, chunkID chunk.ChunkID, targets []system.ReplicationTarget) {
 	if len(targets) == 0 {
 		return
 	}
@@ -115,7 +115,7 @@ func (o *Orchestrator) scheduleReplication(vaultID, tierID glid.GLID, chunkID ch
 		// not when it's scheduled.
 		ctx, cancel := context.WithTimeout(context.Background(), cluster.ReplicationTimeout)
 		defer cancel()
-		o.replicateSealedChunk(ctx, vaultID, tierID, chunkID, targets)
+		o.replicateSealedChunk(ctx, vaultID, instID, chunkID, targets)
 	}); err != nil {
 		o.logger.Warn("failed to schedule replication", "name", name, "error", err)
 	}
@@ -129,7 +129,7 @@ func (o *Orchestrator) scheduleReplication(vaultID, tierID glid.GLID, chunkID ch
 // Cloud-backed chunks are skipped: the data is in shared S3, so followers don't
 // need record streaming. The vault-ctl FSM's OnUpload callback registers the
 // chunk in each follower's cloud index (see wireVaultFSMOnUpload).
-func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, targets []system.ReplicationTarget) {
+func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, instID glid.GLID, chunkID chunk.ChunkID, targets []system.ReplicationTarget) {
 	if o.transferrer == nil || len(targets) == 0 {
 		return
 	}
@@ -172,7 +172,7 @@ func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID
 		failedNodes []string
 	)
 	for _, tgt := range targets {
-		if err := o.replicateToTarget(ctx, vaultID, tierID, chunkID, inst.Chunks, tgt); err != nil {
+		if err := o.replicateToTarget(ctx, vaultID, instID, chunkID, inst.Chunks, tgt); err != nil {
 			failedNodes = append(failedNodes, tgt.NodeID)
 		} else {
 			succeeded++
@@ -203,9 +203,9 @@ func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID
 // replicateToTarget sends a sealed chunk to one target. Same-node targets
 // use local ImportToTierStorage; cross-node targets use gRPC. Returns nil
 // on success so the caller can count actual replicas vs configured targets.
-func (o *Orchestrator) replicateToTarget(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, sourceCM chunk.ChunkManager, tgt system.ReplicationTarget) error {
+func (o *Orchestrator) replicateToTarget(ctx context.Context, vaultID, instID glid.GLID, chunkID chunk.ChunkID, sourceCM chunk.ChunkManager, tgt system.ReplicationTarget) error {
 	if tgt.NodeID == o.localNodeID {
-		if err := o.replicateLocally(ctx, vaultID, tierID, tgt.StorageID, chunkID, sourceCM); err != nil {
+		if err := o.replicateLocally(ctx, vaultID, instID, tgt.StorageID, chunkID, sourceCM); err != nil {
 			o.logger.Warn("replication: local copy failed",
 				"vault", vaultID, "storage", tgt.StorageID,
 				"chunk", chunkID.String(), "error", err)
@@ -216,7 +216,7 @@ func (o *Orchestrator) replicateToTarget(ctx context.Context, vaultID, tierID gl
 			"chunk", chunkID.String())
 		return nil
 	}
-	if err := o.replicateToFollower(ctx, vaultID, tierID, chunkID, sourceCM, tgt.NodeID); err != nil {
+	if err := o.replicateToFollower(ctx, vaultID, instID, chunkID, sourceCM, tgt.NodeID); err != nil {
 		// Placement churn (peer evicted the inst instance) is expected
 		// during reconfiguration and gets logged at Debug rather than
 		// WARN-spamming the operator dashboard. See gastrolog-5z607.
@@ -238,7 +238,7 @@ func (o *Orchestrator) replicateToTarget(ctx context.Context, vaultID, tierID gl
 // replicateLocally copies a sealed chunk to a different storage-specific
 // inst instance on the same node. Opens a cursor on the source, then
 // imports into the target via ImportToTierStorage.
-func (o *Orchestrator) replicateLocally(ctx context.Context, vaultID, tierID glid.GLID, storageID string, chunkID chunk.ChunkID, sourceCM chunk.ChunkManager) error {
+func (o *Orchestrator) replicateLocally(ctx context.Context, vaultID, instID glid.GLID, storageID string, chunkID chunk.ChunkID, sourceCM chunk.ChunkManager) error {
 	cursor, err := sourceCM.OpenCursor(chunkID)
 	if err != nil {
 		return fmt.Errorf("open cursor: %w", err)
@@ -246,13 +246,13 @@ func (o *Orchestrator) replicateLocally(ctx context.Context, vaultID, tierID gli
 	defer func() { _ = cursor.Close() }()
 
 	iter := chunk.CursorIterator(cursor)
-	return o.ImportToTierStorage(ctx, vaultID, tierID, storageID, chunkID, iter)
+	return o.ImportToTierStorage(ctx, vaultID, instID, storageID, chunkID, iter)
 }
 
 // replicateToFollower streams a single sealed chunk to one follower node.
 // Validates that the chunk is readable before opening the network stream —
 // corrupted chunks fail fast without touching the wire.
-func (o *Orchestrator) replicateToFollower(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, cm chunk.ChunkManager, nodeID string) error {
+func (o *Orchestrator) replicateToFollower(ctx context.Context, vaultID, instID glid.GLID, chunkID chunk.ChunkID, cm chunk.ChunkManager, nodeID string) error {
 	if o.chunkReplicator == nil {
 		return errors.New("replicateToFollower: inst replicator not configured")
 	}
@@ -302,5 +302,5 @@ func (o *Orchestrator) replicateToFollower(ctx context.Context, vaultID, tierID 
 		return nil
 	}
 
-	return o.chunkReplicator.ImportSealedChunk(ctx, nodeID, tierID, chunkID, records)
+	return o.chunkReplicator.ImportSealedChunk(ctx, nodeID, instID, chunkID, records)
 }

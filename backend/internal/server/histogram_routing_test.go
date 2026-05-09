@@ -55,14 +55,14 @@ func TestHistogramFullyLocal_RequiresLeadership(t *testing.T) {
 		}
 	}
 	for _, tc := range []struct {
-		tierID  glid.GLID
+		instID  glid.GLID
 		vaultID glid.GLID
 	}{
 		{leaderTierID, leaderVaultID},
 		{followerTierID, followerVaultID},
 	} {
 		if err := store.PutTier(ctx, system.TierConfig{
-			ID: tc.tierID, Name: "tier-" + tc.tierID.String(), Type: system.VaultTypeMemory,
+			ID: tc.instID, Name: "tier-" + tc.instID.String(), Type: system.VaultTypeMemory,
 			VaultID: tc.vaultID,
 		}); err != nil {
 			t.Fatalf("PutTier: %v", err)
@@ -92,7 +92,7 @@ func TestHistogramFullyLocal_RequiresLeadership(t *testing.T) {
 	}
 }
 
-func mustTierInstance(t *testing.T, tierID glid.GLID, isFollower bool) *orchestrator.VaultInstance {
+func mustTierInstance(t *testing.T, instID glid.GLID, isFollower bool) *orchestrator.VaultInstance {
 	t.Helper()
 	cm, err := chunkmem.NewManager(chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
@@ -107,7 +107,7 @@ func mustTierInstance(t *testing.T, tierID glid.GLID, isFollower bool) *orchestr
 		t.Fatalf("indexmem factory: %v", err)
 	}
 	return &orchestrator.VaultInstance{
-		VaultID:     tierID,
+		VaultID:     instID,
 		Type:       "memory",
 		Chunks:     cm,
 		Indexes:    im,
