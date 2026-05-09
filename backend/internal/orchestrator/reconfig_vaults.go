@@ -837,7 +837,7 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 // callback set on the FSM; last-writer-wins matches the existing OnDelete /
 // OnUpload behavior wired alongside.
 func (o *Orchestrator) attachLifecycleReconciler(ti *VaultInstance, vaultID glid.GLID, tierGroup *raftgroup.Group) {
-	ti.Reconciler = NewTierLifecycleReconciler(o, vaultID, vaultID, ti, o.localNodeID, o.logger)
+	ti.Reconciler = NewVaultLifecycleReconciler(o, vaultID, ti, o.localNodeID, o.logger)
 	if tierGroup == nil {
 		return
 	}

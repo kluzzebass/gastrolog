@@ -352,7 +352,7 @@ func TestExpireChunkProposesRequestDelete(t *testing.T) {
 			return nil
 		},
 	}
-	rec := NewTierLifecycleReconciler(nil, vaultID, tierID, inst, "node-A", slog.Default())
+	rec := NewVaultLifecycleReconciler(nil, vaultID, inst, "node-A", slog.Default())
 
 	r := &retentionRunner{
 		isLeader:        true,
@@ -411,7 +411,7 @@ func TestExpireChunkSkipsLocalOnRequestDeleteFailure(t *testing.T) {
 			return fmt.Errorf("not leader")
 		},
 	}
-	rec := NewTierLifecycleReconciler(nil, vaultID, tierID, inst, "node-A", slog.Default())
+	rec := NewVaultLifecycleReconciler(nil, vaultID, inst, "node-A", slog.Default())
 
 	r := &retentionRunner{
 		isLeader:   true,

@@ -118,7 +118,7 @@ type VaultLifecycleReconciler struct {
 	postSealHook func(vaultID glid.GLID, cm chunk.ChunkManager, id chunk.ChunkID)
 }
 
-// NewTierLifecycleReconciler creates a reconciler for a inst instance.
+// NewVaultLifecycleReconciler creates a reconciler for a inst instance.
 // localNodeID is required so the reconciler can recognize when its own
 // node ID appears in a CmdRequestDelete's ExpectedFrom set (and ack)
 // or doesn't (and ignore).
@@ -126,10 +126,10 @@ type VaultLifecycleReconciler struct {
 // orch may be nil in tests that exercise the reconciler in isolation;
 // when nil, the same-node sibling cleanup path is skipped and chunk-
 // change notifications are dropped.
-func NewTierLifecycleReconciler(orch *Orchestrator, vaultID, tierID glid.GLID, inst *VaultInstance, localNodeID string, logger *slog.Logger) *VaultLifecycleReconciler {
+func NewVaultLifecycleReconciler(orch *Orchestrator, vaultID glid.GLID, inst *VaultInstance, localNodeID string, logger *slog.Logger) *VaultLifecycleReconciler {
 	return &VaultLifecycleReconciler{
 		vaultID:     vaultID,
-		tierID:      tierID,
+		tierID:      vaultID, // 1:1 vault:tier — kept for legacy field readers
 		inst:        inst,
 		localNodeID: localNodeID,
 		orch:        orch,
