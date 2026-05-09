@@ -13,9 +13,9 @@ import (
 	hraft "github.com/hashicorp/raft"
 )
 
-// makeSingleNodeTierGroup builds a single-node Raft group using in-memory
+// makeSingleNodeVaultGroup builds a single-node Raft group using in-memory
 // transport + storage. Returns the group, the FSM, and a cleanup func.
-func makeSingleNodeTierGroup(t *testing.T, nodeID string) (*raftgroup.Group, *vaultctlfsm.FSM, func()) {
+func makeSingleNodeVaultGroup(t *testing.T, nodeID string) (*raftgroup.Group, *vaultctlfsm.FSM, func()) {
 	t.Helper()
 
 	fsm := vaultctlfsm.New()
@@ -71,10 +71,10 @@ func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-func TestTierLeaderManager_StartStopIdempotent(t *testing.T) {
+func TestVaultCtlLeaderManager_StartStopIdempotent(t *testing.T) {
 	t.Parallel()
 
-	g, _, cleanup := makeSingleNodeTierGroup(t, "node-1")
+	g, _, cleanup := makeSingleNodeVaultGroup(t, "node-1")
 	defer cleanup()
 
 	mgr := newVaultCtlLeaderManager(discardLogger())
@@ -95,7 +95,7 @@ func TestTierLeaderManager_StartStopIdempotent(t *testing.T) {
 	mgr.Stop(instID)
 }
 
-// TestTierLeaderManager_ReconcileAddsMissingMember verifies that the leader
+// TestVaultCtlLeaderManager_ReconcileAddsMissingMember verifies that the leader
 // epoch's reconcile pass calls AddVoter when the desired member list contains
 // a node that's not in the current Raft configuration.
 //
@@ -103,10 +103,10 @@ func TestTierLeaderManager_StartStopIdempotent(t *testing.T) {
 // configuration change locally even though the synthetic peer is unreachable
 // (the change is committed via the local node's quorum-of-one). We verify the
 // new member appears in GetConfiguration.
-func TestTierLeaderManager_ReconcileAddsMissingMember(t *testing.T) {
+func TestVaultCtlLeaderManager_ReconcileAddsMissingMember(t *testing.T) {
 	t.Parallel()
 
-	g, _, cleanup := makeSingleNodeTierGroup(t, "leader-add")
+	g, _, cleanup := makeSingleNodeVaultGroup(t, "leader-add")
 	defer cleanup()
 
 	mgr := newVaultCtlLeaderManager(discardLogger())
@@ -138,16 +138,16 @@ func TestTierLeaderManager_ReconcileAddsMissingMember(t *testing.T) {
 	t.Fatal("synthetic peer was not added to Raft configuration within 5s")
 }
 
-// TestTierLeaderManager_ReconcileRemovesExtras verifies that the leader
+// TestVaultCtlLeaderManager_ReconcileRemovesExtras verifies that the leader
 // epoch's reconcile pass calls RemoveServer when a member is in the current
 // configuration but not in the desired set. We need a real 2-voter cluster
 // (so the configuration change can commit) plus a synthetic 3rd doomed
 // voter that we want removed.
-func TestTierLeaderManager_ReconcileRemovesExtras(t *testing.T) {
+func TestVaultCtlLeaderManager_ReconcileRemovesExtras(t *testing.T) {
 	t.Parallel()
 
 	// Build a 2-real-node cluster: alive-1 and alive-2.
-	groups, cleanup := makeTwoNodeTierGroup(t, "alive-1", "alive-2")
+	groups, cleanup := makeTwoNodeVaultGroup(t, "alive-1", "alive-2")
 	defer cleanup()
 	leader := groups[0]
 
@@ -192,10 +192,10 @@ func TestTierLeaderManager_ReconcileRemovesExtras(t *testing.T) {
 	t.Fatal("doomed peer was not removed from Raft configuration within 5s")
 }
 
-// makeTwoNodeTierGroup builds a 2-node inst Raft cluster using in-memory
+// makeTwoNodeVaultGroup builds a 2-node inst Raft cluster using in-memory
 // transport. Returns the groups (group[0] is the leader after election)
 // and a cleanup func.
-func makeTwoNodeTierGroup(t *testing.T, id1, id2 string) ([]*raftgroup.Group, func()) {
+func makeTwoNodeVaultGroup(t *testing.T, id1, id2 string) ([]*raftgroup.Group, func()) {
 	t.Helper()
 
 	ids := []string{id1, id2}
@@ -272,13 +272,13 @@ func makeTwoNodeTierGroup(t *testing.T, id1, id2 string) ([]*raftgroup.Group, fu
 	return groups, cleanup
 }
 
-// TestTierLeaderManager_ReconcileNoOpWhenStable verifies that a reconcile
+// TestVaultCtlLeaderManager_ReconcileNoOpWhenStable verifies that a reconcile
 // pass against a configuration that already matches the desired set does
 // not make any membership changes (idempotency).
-func TestTierLeaderManager_ReconcileNoOpWhenStable(t *testing.T) {
+func TestVaultCtlLeaderManager_ReconcileNoOpWhenStable(t *testing.T) {
 	t.Parallel()
 
-	g, _, cleanup := makeSingleNodeTierGroup(t, "stable-node")
+	g, _, cleanup := makeSingleNodeVaultGroup(t, "stable-node")
 	defer cleanup()
 
 	mgr := newVaultCtlLeaderManager(discardLogger())
@@ -307,9 +307,9 @@ func TestTierLeaderManager_ReconcileNoOpWhenStable(t *testing.T) {
 	}
 }
 
-// TestTierMembershipMap_RoundTrip exercises the basic Set/Get/Delete + copy
+// TestVaultMembershipMap_RoundTrip exercises the basic Set/Get/Delete + copy
 // semantics of the desired-members map.
-func TestTierMembershipMap_RoundTrip(t *testing.T) {
+func TestVaultMembershipMap_RoundTrip(t *testing.T) {
 	t.Parallel()
 
 	m := newVaultCtlMembershipMap()
