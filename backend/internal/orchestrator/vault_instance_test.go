@@ -274,11 +274,11 @@ func TestListAllChunkMetasNilOverlayPassthrough(t *testing.T) {
 // return only the leader's chunks. Including the follower's view double-
 // counts records and produces non-authoritative counts in the Inspector.
 
-// TestListAllChunkMetasIncludesFollowerOnlyTiers verifies that tiers where
+// TestListAllChunkMetasIncludesFollowerOnlyInstances verifies that tiers where
 // this node is a follower-only (no leader instance locally) ARE included.
 // The leader node lives elsewhere, but this node's follower view is still
 // needed at the server layer to count replica presence.
-func TestListAllChunkMetasIncludesFollowerOnlyTiers(t *testing.T) {
+func TestListAllChunkMetasIncludesFollowerOnlyInstances(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
@@ -440,7 +440,7 @@ func (r *instTestReplicator) getCalls() []instForwardCall {
 	return append([]instForwardCall(nil), r.calls...)
 }
 
-func TestAppendToTierLeaderForwardsToFollowers(t *testing.T) {
+func TestAppendToInstanceLeaderForwardsToFollowers(t *testing.T) {
 	t.Parallel()
 	fwd := &instTestReplicator{}
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
@@ -479,7 +479,7 @@ func TestAppendToTierLeaderForwardsToFollowers(t *testing.T) {
 	}
 }
 
-func TestAppendToTierSecondaryDoesNotForward(t *testing.T) {
+func TestAppendToInstanceSecondaryDoesNotForward(t *testing.T) {
 	t.Parallel()
 	fwd := &instTestReplicator{}
 	orch := newTestOrch(t, Config{LocalNodeID: "node-2"})
@@ -502,7 +502,7 @@ func TestAppendToTierSecondaryDoesNotForward(t *testing.T) {
 	}
 }
 
-func TestAppendToTierSecondaryUsesChunkID(t *testing.T) {
+func TestAppendToInstanceSecondaryUsesChunkID(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-2"})
 
@@ -528,7 +528,7 @@ func TestAppendToTierSecondaryUsesChunkID(t *testing.T) {
 	}
 }
 
-func TestAppendToTierSecondarySkipsPostSeal(t *testing.T) {
+func TestAppendToInstanceSecondarySkipsPostSeal(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-2"})
 
@@ -683,7 +683,7 @@ func TestImportToInstanceSecondaryKeepsSealedForwarded(t *testing.T) {
 
 // --- Active record forwarding ---
 
-func TestAppendToTierNoForwarderSingleNode(t *testing.T) {
+func TestAppendToInstanceNoForwarderSingleNode(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 	// No forwarder set — single-node mode.
@@ -710,7 +710,7 @@ func TestAppendToTierNoForwarderSingleNode(t *testing.T) {
 	}
 }
 
-func TestAppendToTierVaultNotFound(t *testing.T) {
+func TestAppendToInstanceVaultNotFound(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
@@ -772,7 +772,7 @@ func TestImportToInstanceDrainsIteratorOnSkip(t *testing.T) {
 	}
 }
 
-func TestAppendToTierForwardLifecycle(t *testing.T) {
+func TestAppendToInstanceForwardLifecycle(t *testing.T) {
 	t.Parallel()
 	fwd := &instTestReplicator{}
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
@@ -832,13 +832,13 @@ func TestAppendToTierForwardLifecycle(t *testing.T) {
 // ackTestReplicator records AppendRecords calls and returns a configurable error.
 // Implements orchestrator.ChunkReplicator.
 type ackTestReplicator struct {
-	tierAppendCalls atomic.Int32
-	tierAppendErr   error
+	instAppendCalls atomic.Int32
+	instAppendErr   error
 }
 
 func (m *ackTestReplicator) AppendRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
-	m.tierAppendCalls.Add(1)
-	return m.tierAppendErr
+	m.instAppendCalls.Add(1)
+	return m.instAppendErr
 }
 func (m *ackTestReplicator) SealVault(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
@@ -1005,8 +1005,8 @@ func TestAckAfterReplicationSuccess(t *testing.T) {
 		t.Fatal("timed out waiting for ack")
 	}
 
-	if mock.tierAppendCalls.Load() != 1 {
-		t.Errorf("expected 1 AppendRecords call, got %d", mock.tierAppendCalls.Load())
+	if mock.instAppendCalls.Load() != 1 {
+		t.Errorf("expected 1 AppendRecords call, got %d", mock.instAppendCalls.Load())
 	}
 }
 
@@ -1046,7 +1046,7 @@ func TestAckAfterReplicationInvokesEveryReplicationTarget(t *testing.T) {
 		t.Fatal("timed out waiting for ack")
 	}
 
-	if got := mock.tierAppendCalls.Load(); got != 3 {
+	if got := mock.instAppendCalls.Load(); got != 3 {
 		t.Errorf("expected 3 AppendRecords calls (one per follower), got %d", got)
 	}
 }
@@ -1054,7 +1054,7 @@ func TestAckAfterReplicationInvokesEveryReplicationTarget(t *testing.T) {
 func TestAckAfterReplicationFailure(t *testing.T) {
 	t.Parallel()
 	mock := &ackTestReplicator{
-		tierAppendErr: errors.New("replication failed"),
+		instAppendErr: errors.New("replication failed"),
 	}
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 	orch.SetChunkReplicator(mock)
@@ -1230,12 +1230,12 @@ func (f *failingForwarder) callCount() int {
 	return f.calls
 }
 
-// TestAppendToTierForwardingDoesNotBlockOnFullChannel verifies fire-and-forget
+// TestAppendToInstanceForwardingDoesNotBlockOnFullChannel verifies fire-and-forget
 // semantics: AppendToVault commits the record locally and succeeds even when
 // the forwarder returns errors. The local append must not be rolled back, and
 // high-volume ingestion (exceeding typical queue capacity) must complete
 // without error regardless of forwarder failures.
-func TestAppendToTierForwardingDoesNotBlockOnFullChannel(t *testing.T) {
+func TestAppendToInstanceForwardingDoesNotBlockOnFullChannel(t *testing.T) {
 	t.Parallel()
 
 	fwd := &failingForwarder{
