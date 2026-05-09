@@ -126,7 +126,7 @@ func newMemoryTierInstance(t *testing.T, tierID glid.GLID) *VaultInstance {
 }
 
 // setupTestStoreRuntime populates the test store with runtime state that tests
-// need — inst placements and node storage config. Most tests use memory tiers
+// need — vault placements and node storage config. Most tests use memory tiers
 // with a single test-node, so placements use synthetic storage IDs.
 func setupTestStoreRuntime(store *sysmem.Store, nodeID string, tierIDs ...glid.GLID) {
 	ctx := context.Background()
@@ -198,7 +198,7 @@ func (m *transitionFakeTransferrer) WaitVaultReady(_ context.Context, _ string, 
 // policy correctly transitions cloud-backed sealed chunks to the next inst.
 // Reproduces gastrolog-9umo2: 3m TTL on cloud inst, chunks sit for 10+ minutes.
 
-// TestCloudTierLeaderPreservesCloudBacking verifies that a cloud inst leader
+// TestCloudTierLeaderPreservesCloudBacking verifies that a cloud vault leader
 // built through the production code path (buildLeaderTierInstance →
 // buildTierInstanceForStorage) retains the sealed_backing parameter so that
 // PostSealProcess uploads chunks to cloud storage.
@@ -304,7 +304,7 @@ func newFileTierInstance(t *testing.T, tierID glid.GLID) (*VaultInstance, string
 	}, dir
 }
 
-// assertNoDirsOnDisk verifies no chunk subdirectories remain in a inst directory.
+// assertNoDirsOnDisk verifies no chunk subdirectories remain in a vault directory.
 func assertNoDirsOnDisk(t *testing.T, label, dir string) {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
@@ -405,9 +405,9 @@ func makeRecordWithEventID(raw string, ingesterID glid.GLID, seq uint32) chunk.R
 	}
 }
 
-// ---------- 3-inst chain transition tests ----------
+// ---------- 3-transition chain transition tests ----------
 
-// TestTransitionThreeTierChainMemory verifies that a 3-inst chain
+// TestTransitionThreeTierChainMemory verifies that a 3-transition chain
 // (memory→memory→memory) preserves exact record count with no duplication.
 
 // TestTransitionThreeTierChainFileFileCloud verifies the production-like
@@ -680,7 +680,7 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 	}
 	leaderID := nodeIDs[0]
 	vaultID := glid.New()
-	// 1:1 vault:inst — single inst shares the vault's ID. tierCount is
+	// 1:1 vault:tier — single inst shares the vault's ID. tierCount is
 	// always 1 in current callers; the slice survives only for legacy
 	// fixture wiring.
 	tierIDs := make([]glid.GLID, tierCount)
@@ -955,7 +955,7 @@ func (h *clusterHarness) listChunkDirsOnNode(t *testing.T, nodeID string, tierId
 //   - Record count matches on the leader
 
 // TestClusterTransitionThreeTierChainBurst creates a 4-node cluster with
-// 3 tiers and bursts 10K records through the full inst chain with 100-record
+// 3 tiers and bursts 10K records through the full transition chain with 100-record
 // rotation. Verifies no orphans on any node and exact record preservation.
 
 // TestClusterTransitionEventIDPreservedAcrossNodes verifies that EventIDs

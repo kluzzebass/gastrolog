@@ -260,7 +260,7 @@ func (o *Orchestrator) DrainVault(ctx context.Context, vaultID glid.GLID, target
 		return fmt.Errorf("reload filters for drain: %w", err)
 	}
 
-	// Remove per-inst retention and rotation jobs (no longer needed locally).
+	// Remove per-vault retention and rotation jobs (no longer needed locally).
 	if vault := o.vaults[vaultID]; vault != nil {
 		o.removeVaultJobs(vaultID, vault)
 	}

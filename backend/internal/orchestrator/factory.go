@@ -197,7 +197,7 @@ func (o *Orchestrator) initVault(sys *system.System, vaultCfg system.VaultConfig
 }
 
 // startRetentionSweep registers the single retention sweep job that discovers
-// and evaluates all inst instances each tick. No per-inst lifecycle needed.
+// and evaluates all inst instances each tick. No per-vault lifecycle needed.
 func (o *Orchestrator) startRetentionSweep() error {
 	if err := o.scheduler.AddJob(retentionJobName, defaultRetentionSchedule, o.retentionSweepAll); err != nil {
 		return fmt.Errorf("retention sweep job: %w", err)

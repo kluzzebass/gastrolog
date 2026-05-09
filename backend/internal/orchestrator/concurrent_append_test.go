@@ -458,7 +458,7 @@ func TestCloudUploadFailureRetainsChunk(t *testing.T) {
 // ==========================================================================
 
 // TestReconfigDuringTransitionDoesNotPanic verifies that changing the vault's
-// inst list while a transition is running doesn't cause a panic. The transition
+// vault list while a transition is running doesn't cause a panic. The transition
 // should either complete with the original config or fail gracefully.
 
 // ==========================================================================

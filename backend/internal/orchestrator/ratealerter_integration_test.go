@@ -62,7 +62,7 @@ func TestRotationHookFiresRateAlerter(t *testing.T) {
 		orch.cronRotation.rotateVault(glid.New(), tierID, "test-vault", cm)
 	}
 
-	// Trigger evaluation; alerter should raise the per-inst warning.
+	// Trigger evaluation; alerter should raise the per-vault warning.
 	orch.rotationRates.Evaluate(orch.now())
 
 	calls := fa.snapshot()

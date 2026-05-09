@@ -86,7 +86,7 @@ func TestOrchRel_SealedChunk_ReplicatesCrossNode(t *testing.T) {
 
 // Append + seal on the leader, stop every node, restart every node,
 // confirm the sealed chunk metadata is still visible from every node.
-// WAL replay at the orchestrator layer — the inst FSM manifest must
+// WAL replay at the orchestrator layer — the vault-ctl FSM manifest must
 // survive a full cluster crash.
 func TestOrchRel_Restart_SealedChunkSurvives(t *testing.T) {
 	t.Parallel()
@@ -123,7 +123,7 @@ func TestOrchRel_Restart_SealedChunkSurvives(t *testing.T) {
 	h.waitForAllReady()
 
 	// Post-restart: same chunk IDs should be visible via vault-ctl Raft
-	// replay and inst FSM restore.
+	// replay and vault-ctl FSM restore.
 	h.assertAllNodesSee(pre)
 }
 
@@ -262,7 +262,7 @@ func TestOrchRel_TwoVaults_Isolated(t *testing.T) {
 	// (which gates the whole server, hence both vaults) and confirm
 	// append+seal still completes on the default vault.
 	//
-	// True multi-vault isolation would require per-vault inst placements
+	// True multi-vault isolation would require per-vault vault placements
 	// that differ. The harness seeds one vault by design; extending it
 	// to multi-vault is a larger structural change. For now this test
 	// asserts the weaker but still valuable property: pausing one peer

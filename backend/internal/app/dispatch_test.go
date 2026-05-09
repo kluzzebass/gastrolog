@@ -91,7 +91,7 @@ type mockOrch struct {
 	reloadFiltersCalls int         // number of ReloadFilters calls
 
 	// Tier drain tracking.
-	tierDrainCalls    []glid.GLID                                                // inst IDs passed to DrainTier
+	tierDrainCalls    []glid.GLID                                                // vault IDs passed to DrainTier
 	removeTierCalls   [][2]glid.GLID                                             // [vaultID, tierID] pairs passed to RemoveVaultInstance
 	localTierExported func(vaultID, tierID glid.GLID) *orchestrator.VaultInstance // configurable return
 }
@@ -289,7 +289,7 @@ func TestHandle_VaultPut(t *testing.T) {
 	// remote_node_reloads_filters and cloud_vault_reassignment_skips_drain
 	// were removed: they tested the concept of NodeID-based remote vault
 	// assignment which no longer exists. Remote vault routing will be
-	// reintroduced via inst leader election in a future issue.
+	// reintroduced via vault leader election in a future issue.
 
 	t.Run("unscoped_node_not_skipped", func(t *testing.T) {
 		h := &captureHandler{}

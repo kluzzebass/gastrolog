@@ -100,7 +100,7 @@ func TestListAllChunkMetas_vaultNotReady(t *testing.T) {
 }
 
 // Regression: ListChunks fans out to remote nodes; a node with the vault
-// registered but no local inst placements must not fail ListAllChunkMetas
+// registered but no local vault placements must not fail ListAllChunkMetas
 // with ErrVaultNotReady, or the UI sees 503 and empty chunks.
 func TestListAllChunkMetas_noLocalTiersReturnsEmpty(t *testing.T) {
 	t.Parallel()
@@ -203,7 +203,7 @@ func TestLocalVaultsReplicationReady(t *testing.T) {
 	}
 	o.RegisterVault(NewVault(vid, inst))
 	if o.LocalVaultsReplicationReady() {
-		t.Fatal("expected false when local inst FSM is not ready")
+		t.Fatal("expected false when local vault-ctl FSM is not ready")
 	}
 }
 

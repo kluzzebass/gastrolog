@@ -14,7 +14,7 @@ import (
 
 // ScheduleCatchup schedules catchup replication for newly added followers of
 // a inst within the given vault. Must be called on the node that holds the
-// inst leader replica — no-op if this node is a follower or does not host
+// vault leader replica — no-op if this node is a follower or does not host
 // the inst. The caller owns the (vaultID, tierID) pair; the orchestrator
 // does not reverse-lookup by tierID alone.
 func (o *Orchestrator) ScheduleCatchup(vaultID, tierID glid.GLID, followerNodeIDs []string) {
@@ -77,7 +77,7 @@ func (o *Orchestrator) scheduleCatchupForNode(vaultID, tierID glid.GLID, nodeID 
 func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, tierID glid.GLID, nodeID string) error {
 	inst := o.findLocalVaultInstance(vaultID)
 	if inst == nil {
-		return fmt.Errorf("inst %s not found in vault %s", tierID, vaultID)
+		return fmt.Errorf("vault %s not found in vault %s", tierID, vaultID)
 	}
 	if inst.IsFollower {
 		return nil // only leader initiates catchup
@@ -91,7 +91,7 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, tierID glid
 		return fmt.Errorf("list chunks: %w", err)
 	}
 
-	// Snapshot the inst FSM manifest at the start of the catchup pass.
+	// Snapshot the vault-ctl FSM manifest at the start of the catchup pass.
 	// We use it to filter out chunks that have already been retired from the
 	// cluster's view of the data — there's a race window between the FSM
 	// applying a delete and the leader's local file actually being unlinked,
@@ -138,7 +138,7 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, tierID glid
 			// this node" (gastrolog-2t48z).
 			msg := err.Error()
 			if strings.Contains(msg, "vault not found") || strings.Contains(msg, "inst not registered on this node") {
-				return fmt.Errorf("follower %s not ready for inst %s (still building): %w", nodeID, tierID, err)
+				return fmt.Errorf("follower %s not ready for vault %s (still building): %w", nodeID, tierID, err)
 			}
 			o.logger.Warn("replication catchup: transfer failed",
 				"chunk", meta.ID.String(), "follower", nodeID, "error", err)

@@ -11,7 +11,7 @@ import (
 // resolveVaultNodeID finds the node that owns the vault. Returns empty
 // string if the vault has no placements (unassigned).
 //
-// Reads VaultConfig.Placements directly (mirrored from inst placements
+// Reads VaultConfig.Placements directly (mirrored from vault placements
 // via the FSM bridge — gastrolog-257l7).
 func resolveVaultNodeID(sys *system.System, vaultID glid.GLID) string {
 	cfg := &sys.Config

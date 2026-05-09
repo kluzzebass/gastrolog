@@ -90,14 +90,14 @@ type orchRelHarness struct {
 }
 
 // vaultSpec identifies one vault in the harness along with which nodes
-// participate in its inst-Raft group. First node in nodeIdxs is the
+// participate in its vault-ctl Raft group. First node in nodeIdxs is the
 // placement leader. For multi-vault scenarios, use orchRelOptions to
 // register additional vaultSpecs before startup.
 type vaultSpec struct {
 	label    string    // human label for test output ("A", "B", ...)
 	id       glid.GLID // vault GLID
 	tierID   glid.GLID // inst GLID
-	nodeIdxs []int     // indexes into h.nodeIDs; first is inst leader
+	nodeIdxs []int     // indexes into h.nodeIDs; first is vault leader
 }
 
 // orchRelOption configures a harness before it boots. Applied between
@@ -106,14 +106,14 @@ type vaultSpec struct {
 type orchRelOption func(*orchRelHarness)
 
 // withExtraVault registers an additional vault placed on the given
-// node indexes (into h.nodeIDs). The first index is the inst leader.
+// node indexes (into h.nodeIDs). The first index is the vault leader.
 // len(nodeIdxs) must be an odd number >= 1 for valid Raft quorum, and
 // each index must be a valid h.nodeIDs index. The vault is labeled
 // "B" (or "C", "D", ...) based on insertion order.
 func withExtraVault(nodeIdxs []int) orchRelOption {
 	return func(h *orchRelHarness) {
 		label := string(rune('B' + len(h.vaults) - 1))
-		// 1:1 vault:inst — inst ID equals vault ID.
+		// 1:1 vault:tier — inst ID equals vault ID.
 		id := glid.New()
 		h.vaults = append(h.vaults, vaultSpec{
 			label:    label,
@@ -141,7 +141,7 @@ func newOrchRelHarness(t *testing.T, n int, opts ...orchRelOption) *orchRelHarne
 	}
 
 	sharedCtx, sharedCancel := context.WithCancel(context.Background())
-	// 1:1 vault:inst — inst ID equals vault ID.
+	// 1:1 vault:tier — inst ID equals vault ID.
 	defaultID := glid.New()
 	h := &orchRelHarness{
 		t:            t,
@@ -225,7 +225,7 @@ func newOrchRelHarness(t *testing.T, n int, opts ...orchRelOption) *orchRelHarne
 	return h
 }
 
-// seedSharedConfig writes a vault, a file-backed inst, and inst placements
+// seedSharedConfig writes a vault, a file-backed inst, and vault placements
 // (one per node, first is leader) to the shared config store. Also
 // registers per-node FileStorage entries so findLocalFileStorage can
 // resolve a chunk directory on each node.
@@ -494,7 +494,7 @@ func (h *orchRelHarness) waitForAllReady() {
 	h.t.Fatalf("vaults not ready after %s on: %v", orchHarnessReadyWait, notReady)
 }
 
-// appendOnLeaderForVault appends to a specific vault's inst leader (the
+// appendOnLeaderForVault appends to a specific vault's vault leader (the
 // vault-ctl Raft leader for that vault, not the placement leader).
 // Parameterized variant of appendOnLeader used by multi-vault tests.
 func (h *orchRelHarness) appendOnLeaderForVault(v vaultSpec, rec chunk.Record) error {
@@ -540,7 +540,7 @@ func (h *orchRelHarness) waitForVaultCtlLeaderForVault(v vaultSpec) *orchRelNode
 }
 
 // chunkIDsOnNodeForVault returns the chunk IDs in the given vault's
-// inst FSM on `id`. Returns nil if the node doesn't host the vault.
+// vault-ctl FSM on `id`. Returns nil if the node doesn't host the vault.
 func (h *orchRelHarness) chunkIDsOnNodeForVault(v vaultSpec, id string) map[chunk.ChunkID]bool {
 	n := h.nodes[id]
 	if n == nil || n.groupMgr == nil {
@@ -566,7 +566,7 @@ func (h *orchRelHarness) chunkIDsOnNodeForVault(v vaultSpec, id string) map[chun
 	return out
 }
 
-// chunkIDsOnNode returns the chunk IDs present in the vault-ctl inst FSM on
+// chunkIDsOnNode returns the chunk IDs present in the vault-ctl vault-ctl FSM on
 // a node. Reads the replicated metadata directly instead of via
 // ListAllChunkMetas — ListAllChunkMetas overlays FSM state onto the local
 // chunk-manager view, which is empty on nodes that are not the vault-ctl

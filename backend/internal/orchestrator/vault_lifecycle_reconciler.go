@@ -79,7 +79,7 @@ import (
 
 // VaultLifecycleReconciler owns chunk-lifecycle execution for a single
 // VaultInstance. Created during inst wiring (reconfig_vaults.go), wired
-// to the inst's FSM via Wire(), and torn down with the inst instance.
+// to the vault's FSM via Wire(), and torn down with the inst instance.
 //
 // The reconciler is the canonical caller of `chunk.DeleteNoAnnounce`
 // and the SilentDeleter shortcut. A forbidigo lint rule (step 9)
@@ -137,7 +137,7 @@ func NewTierLifecycleReconciler(orch *Orchestrator, vaultID, tierID glid.GLID, i
 	}
 }
 
-// Wire installs the reconciler's callbacks on the given inst FSM. Must
+// Wire installs the reconciler's callbacks on the given vault-ctl FSM. Must
 // be called once after the FSM is constructed. Idempotent — repeat
 // calls just rebind the callback bindings.
 //

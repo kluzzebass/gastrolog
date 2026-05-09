@@ -559,7 +559,7 @@ func New(cfg Config) (*Orchestrator, error) {
 	}
 
 	// Register the single retention sweep that discovers all inst instances
-	// each tick. No per-inst lifecycle management needed.
+	// each tick. No per-vault lifecycle management needed.
 	if err := o.startRetentionSweep(); err != nil {
 		return nil, fmt.Errorf("retention sweep: %w", err)
 	}

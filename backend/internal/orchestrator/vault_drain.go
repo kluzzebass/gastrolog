@@ -42,7 +42,7 @@ func tierDrainKey(vaultID, tierID glid.GLID) string {
 // chunks transition to the next inst in the vault chain. In rebalance mode,
 // chunks replicate to the same inst on the target node.
 //
-// Role: **inst leader only**. The drain walks the inst's chunks and applies
+// Role: **vault leader only**. The drain walks the vault's chunks and applies
 // CmdDeleteChunk / CmdTransitionStreamed to the vault control-plane Raft,
 // which only the leader may write to. Callers must check `inst.IsLeader()`
 // before invoking — callers in dispatch do so explicitly.
@@ -66,7 +66,7 @@ func (o *Orchestrator) DrainTier(ctx context.Context, vaultID, tierID glid.GLID,
 	key := tierDrainKey(vaultID, tierID)
 	if _, already := o.tierDraining[key]; already {
 		o.mu.Unlock()
-		return fmt.Errorf("inst %s in vault %s is already draining", tierID, vaultID)
+		return fmt.Errorf("vault %s in vault %s is already draining", tierID, vaultID)
 	}
 
 	// Find the inst instance.
@@ -76,13 +76,13 @@ func (o *Orchestrator) DrainTier(ctx context.Context, vaultID, tierID glid.GLID,
 	}
 	if inst == nil {
 		o.mu.Unlock()
-		return fmt.Errorf("inst %s not found in vault %s", tierID, vaultID)
+		return fmt.Errorf("vault %s not found in vault %s", tierID, vaultID)
 	}
 
 	// Validate mode-specific requirements.
 	switch mode {
 	case TierDrainDecommission:
-		// Phase 4 (gastrolog-42f9z): the multi-inst chain is gone (Phase 2
+		// Phase 4 (gastrolog-42f9z): the multi-transition chain is gone (Phase 2
 		// collapsed it) and the transition concept is gone with it.
 		// Decommission drain just fires retention events on every chunk —
 		// the routing engine + retention path produce the same observable
@@ -128,7 +128,7 @@ func (o *Orchestrator) DrainTier(ctx context.Context, vaultID, tierID glid.GLID,
 	jobID := o.scheduler.Submit(jobName, func(ctx2 context.Context, job *JobProgress) {
 		o.tierDrainWorker(drainCtx, vaultID, tierID, mode, targetNodeID)
 	})
-	o.scheduler.Describe(jobName, fmt.Sprintf("Drain inst %s from vault", tierID))
+	o.scheduler.Describe(jobName, fmt.Sprintf("Drain vault %s from vault", tierID))
 
 	o.mu.Lock()
 	if d, ok := o.tierDraining[key]; ok {
@@ -390,7 +390,7 @@ func (o *Orchestrator) CancelTierDrain(vaultID, tierID glid.GLID) error {
 
 	ds, ok := o.tierDraining[key]
 	if !ok {
-		return fmt.Errorf("inst %s in vault %s is not draining", tierID, vaultID)
+		return fmt.Errorf("vault %s in vault %s is not draining", tierID, vaultID)
 	}
 
 	ds.Cancel()

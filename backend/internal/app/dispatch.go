@@ -151,7 +151,7 @@ func (d *configDispatcher) handleVaultPut(ctx context.Context, id glid.GLID) {
 		return
 	}
 
-	// 1:1 vault:inst — the vault has exactly one inst whose ID equals
+	// 1:1 vault:tier — the vault has exactly one inst whose ID equals
 	// the vault's ID. Every node instantiates the inst if it can serve it.
 	tierIDs := []glid.GLID{id}
 
@@ -475,10 +475,10 @@ func (d *configDispatcher) handleSettingPut(ctx context.Context, key string) {
 
 // handleTierPut adjusts vault registration when a inst's placements change.
 // Runs on ALL nodes — each node independently decides whether it gained or lost
-// ownership based on the inst's resolved node IDs vs localNodeID.
+// ownership based on the vault's resolved node IDs vs localNodeID.
 // Also reloads rotation/retention policies when inst config changes.
 func (d *configDispatcher) handleTierPut(ctx context.Context, tierID glid.GLID) {
-	// 1:1 vault:inst — the inst's ID is its vault's ID.
+	// 1:1 vault:tier — the vault's ID is its vault's ID.
 	v, err := d.cfgStore.GetVault(ctx, tierID)
 	if err != nil || v == nil {
 		d.logger.Error("dispatch: get vault for inst change", "vault", tierID, "error", err)
@@ -554,7 +554,7 @@ func (d *configDispatcher) applyTierMembershipChange(ctx context.Context, v syst
 		}
 	}
 	if !hasLeader {
-		d.logger.Debug("dispatch: inst placements have no leader, deferring rebuild",
+		d.logger.Debug("dispatch: vault placements have no leader, deferring rebuild",
 			"vault", tierID, "placements", len(placements))
 		return
 	}

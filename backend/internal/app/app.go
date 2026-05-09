@@ -304,7 +304,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 	wireClusterRaftApplies(clusterSrv, groupMgr)
 
-	// Tier Raft group membership is reconciled by per-inst leader loops
+	// Tier Raft group membership is reconciled by per-vault leader loops
 	// (raftgroup.LeaderLoop) wired by reconfig_vaults.go. On snapshot
 	// restore the loops fire as soon as elections complete and reconcile
 	// from inside the leader epoch.
@@ -672,7 +672,7 @@ func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cf
 		// Wait for a leader AND for the local FSM to catch up to the cluster's
 		// latest committed state before reading anything from it. hraft's
 		// NewRaft returns with the FSM at the snapshot level; post-snapshot
-		// committed entries (inst placements, NSCs, etc.) only become visible
+		// committed entries (vault placements, NSCs, etc.) only become visible
 		// after either a Barrier on the leader or a few AppendEntries rounds
 		// on a follower. Without this wait, the orchestrator reads stale
 		// state and creates vault-ctl Raft groups with incomplete member lists.

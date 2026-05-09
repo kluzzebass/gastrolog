@@ -964,14 +964,14 @@ func TestRetentionSingleJobRegistered(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The single "retention" job should be registered, not per-inst jobs.
+	// The single "retention" job should be registered, not per-vault jobs.
 	sched := orch.Scheduler()
 	if !sched.HasJob("retention") {
 		t.Fatal("single retention sweep job should exist")
 	}
 	perTierJobName := "retention:" + tierID.String()
 	if sched.HasJob(perTierJobName) {
-		t.Fatal("per-inst retention job should NOT exist — retention uses a single discovery-based sweep")
+		t.Fatal("per-vault retention job should NOT exist — retention uses a single discovery-based sweep")
 	}
 }
 

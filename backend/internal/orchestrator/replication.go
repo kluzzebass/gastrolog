@@ -127,7 +127,7 @@ func (o *Orchestrator) scheduleReplication(vaultID, tierID glid.GLID, chunkID ch
 // same node are distinct (different file storages for same-node replication).
 //
 // Cloud-backed chunks are skipped: the data is in shared S3, so followers don't
-// need record streaming. The inst FSM's OnUpload callback registers the
+// need record streaming. The vault-ctl FSM's OnUpload callback registers the
 // chunk in each follower's cloud index (see wireTierFSMOnUpload).
 func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, targets []system.ReplicationTarget) {
 	if o.transferrer == nil || len(targets) == 0 {
@@ -142,7 +142,7 @@ func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID
 	}
 
 	// If retention deleted the chunk while this replication job was queued,
-	// the inst FSM now holds a tombstone for it. Skip the replication —
+	// the vault-ctl FSM now holds a tombstone for it. Skip the replication —
 	// sending ImportSealedChunk to followers would recreate a chunk the
 	// cluster has already decided to forget (ghost chunk). Closes the
 	// retention-beats-replication ordering at the leader; the receiver-side
@@ -154,7 +154,7 @@ func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID
 	}
 
 	// Cloud-backed chunks live in shared object storage (S3/GCS/Azure).
-	// Followers learn about them via the inst FSM's OnUpload callback
+	// Followers learn about them via the vault-ctl FSM's OnUpload callback
 	// and read directly from the bucket — no record streaming needed.
 	meta, err := inst.Chunks.Meta(chunkID)
 	if err == nil && meta.CloudBacked {

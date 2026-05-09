@@ -610,11 +610,11 @@ func TestClusterRetentionSweepWithTTLOnAllNodes(t *testing.T) {
 
 // TestRetentionTargetRefreshesCmOnExistingRunner verifies that
 // retentionTargetForTier updates cm and im on an existing runner
-// when the inst's chunk manager changes (e.g., after vault rebuild).
+// when the vault's chunk manager changes (e.g., after vault rebuild).
 func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 	t.Parallel()
 
-	// 1:1 vault:inst — IDs match.
+	// 1:1 vault:tier — IDs match.
 	vaultID := glid.New()
 	tierID := vaultID
 	policyID := glid.New()

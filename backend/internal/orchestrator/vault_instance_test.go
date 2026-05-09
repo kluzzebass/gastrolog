@@ -346,7 +346,7 @@ func TestLocalLeaderVaultIDsExcludesFollowerOnlyVaults(t *testing.T) {
 // Phase 4 (gastrolog-42f9z) deleted TestRetentionActionDerivedFromPosition:
 // the action enum is gone, retention rules carry only the policy, and the
 // "is this the last inst?" position-based action derivation was removed
-// alongside the multi-inst chain (Phase 2 collapsed the chain).
+// alongside the multi-transition chain (Phase 2 collapsed the chain).
 
 // --- Import idempotency ---
 

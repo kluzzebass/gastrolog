@@ -18,7 +18,7 @@ const (
 //  2. Reconciles cron rotation jobs (add new, remove stale).
 //  3. Checks each leader inst's active chunk for time-based rotation triggers.
 //
-// This discovery-based approach replaces the per-inst lifecycle management
+// This discovery-based approach replaces the per-vault lifecycle management
 // (applyTierRotation / reloadTierRotation) — no setup, teardown, or hot-swap.
 func (o *Orchestrator) rotationSweep() {
 	sys, err := o.loadSystem(context.Background())
@@ -130,7 +130,7 @@ func (o *Orchestrator) applyRotationFromConfig(sys *system.System,
 	activeCronJobs map[string]bool,
 ) {
 	// Refresh replication targets from current system. Reads placements
-	// from VaultConfig (mirrored from inst placements via the FSM bridge —
+	// from VaultConfig (mirrored from vault placements via the FSM bridge —
 	// gastrolog-257l7).
 	inst.FollowerTargets = system.FollowerTargets(vaultCfg.Placements, sys.Runtime.NodeStorageConfigs)
 

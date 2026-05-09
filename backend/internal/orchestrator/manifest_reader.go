@@ -13,7 +13,7 @@ import (
 )
 
 // ManifestReader returns a manifest.Reader backed by this orchestrator's
-// vaults. Walks the per-inst sub-FSMs to project a global view of sealed
+// vaults. Walks the per-vault sub-FSMs to project a global view of sealed
 // chunk manifests; honors the active-chunk exception by filtering on
 // Sealed=true.
 //
@@ -33,7 +33,7 @@ func (o *Orchestrator) IntegrityVerifier() chunk.IntegrityVerifier {
 }
 
 // orchestratorManifestReader implements manifest.Reader by walking the
-// orchestrator's vaults and their tiers. Sealed entries from the inst FSM
+// orchestrator's vaults and their tiers. Sealed entries from the vault-ctl FSM
 // are returned verbatim; memory-mode tiers project from chunk.ChunkManager
 // because those tiers are their own source of truth (no replication).
 type orchestratorManifestReader struct {

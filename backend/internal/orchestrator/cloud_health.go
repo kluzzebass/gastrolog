@@ -36,8 +36,8 @@ func (o *Orchestrator) evaluateCloudHealth() {
 }
 
 // evaluateTierCloudHealth checks a single cloud inst's health and runs
-// backfill on the inst leader only. Followers skip backfill — they learn
-// about cloud-backed chunks via the inst FSM.
+// backfill on the vault leader only. Followers skip backfill — they learn
+// about cloud-backed chunks via the vault-ctl FSM.
 func (o *Orchestrator) evaluateTierCloudHealth(inst *VaultInstance) {
 	chk, ok := inst.Chunks.(cloudHealthChecker)
 	if !ok {
@@ -46,7 +46,7 @@ func (o *Orchestrator) evaluateTierCloudHealth(inst *VaultInstance) {
 	alertID := fmt.Sprintf("cloud-store:%s", inst.VaultID)
 	if chk.CloudDegraded() {
 		o.alerts.Set(alertID, alert.Error, "cloud",
-			fmt.Sprintf("Cloud store unreachable for inst %s: %s",
+			fmt.Sprintf("Cloud store unreachable for vault %s: %s",
 				inst.VaultID.String()[:8], chk.CloudDegradedError()))
 	} else {
 		o.alerts.Clear(alertID)
@@ -56,7 +56,7 @@ func (o *Orchestrator) evaluateTierCloudHealth(inst *VaultInstance) {
 	}
 }
 
-// backfillCloudUploads reconciles sealed chunks against the inst FSM
+// backfillCloudUploads reconciles sealed chunks against the vault-ctl FSM
 // (the single source of truth for CloudBacked). For every sealed chunk
 // where the FSM says CloudBacked=false, it schedules an UploadToCloud job.
 // UploadToCloud does a Head check — if the blob already exists in S3, it

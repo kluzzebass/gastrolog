@@ -203,7 +203,7 @@ func TestFireRetentionEventStreamsThroughRoutingEngine(t *testing.T) {
 	// path that fireRetentionEvent exercises.
 	r := &retentionRunner{
 		vaultID: sourceID,
-		tierID:  sourceID, // 1:1 vault:inst
+		tierID:  sourceID, // 1:1 vault:tier
 		orch:    orch,
 		logger:  slog.Default(),
 	}
@@ -431,7 +431,7 @@ func TestRetentionDispositionEmptyTreatedAsDelete(t *testing.T) {
 func TestRetentionTargetThreadsDispositionFromVaultConfig(t *testing.T) {
 	t.Parallel()
 
-	// 1:1 vault:inst — IDs match.
+	// 1:1 vault:tier — IDs match.
 	vaultID := glid.New()
 	tierID := vaultID
 	policyID := glid.New()

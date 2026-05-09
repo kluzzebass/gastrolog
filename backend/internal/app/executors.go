@@ -180,7 +180,7 @@ func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
 	return func(ctx context.Context, vaultID glid.GLID, queryExpr string, resumeTokenData []byte) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error) {
 		// Don't add vault_id= scope — the engine is already scoped to this
 		// vault's leader tiers. Adding vault_id= would fail because the
-		// engine uses inst IDs, not vault IDs.
+		// engine uses vault IDs, not vault IDs.
 		q, pipeline, err := server.ParseExpression(queryExpr)
 		if err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("parse query: %w", err)

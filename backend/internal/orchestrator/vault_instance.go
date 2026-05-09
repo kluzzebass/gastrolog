@@ -18,7 +18,7 @@ import (
 // has a unique StorageID and its own chunk manager pointing to a different
 // directory.
 type VaultInstance struct {
-	VaultID         glid.GLID // identity of the owning vault (1:1 vault:inst — also the inst ID)
+	VaultID         glid.GLID // identity of the owning vault (1:1 vault:tier — also the inst ID)
 	StorageID       string    // the file storage ID this instance uses (empty for memory/JSONL vaults)
 	Type            string
 	Chunks          chunk.ChunkManager
@@ -86,7 +86,7 @@ type VaultInstance struct {
 	// (no FSM, no replication).
 	Reconciler *VaultLifecycleReconciler
 
-	// ListManifest returns all chunk IDs in the inst FSM view — the authoritative
+	// ListManifest returns all chunk IDs in the vault-ctl FSM view — the authoritative
 	// set of chunks that should exist. Nil when no Raft group exists.
 	ListManifest func() []chunk.ChunkID
 
@@ -103,7 +103,7 @@ type VaultInstance struct {
 	// tiers; the orchestrator falls back to the chunk manager.
 	ManifestEntry func(id chunk.ChunkID) (tierfsm.ManifestEntry, bool)
 
-	// IsFSMReady returns true after the inst FSM has applied at least one log
+	// IsFSMReady returns true after the vault-ctl FSM has applied at least one log
 	// entry or restored from a snapshot. Before that, the manifest is incomplete
 	// and must not be used for reconciliation decisions.
 	IsFSMReady func() bool

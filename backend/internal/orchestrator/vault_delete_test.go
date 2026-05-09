@@ -10,7 +10,7 @@ import (
 
 // TestRemoveTierFromVaultPreservesData verifies that RemoveVaultInstance is
 // non-destructive: it unregisters the inst instance but leaves chunks and
-// the inst directory intact, so placement flaps don't wipe data.
+// the vault directory intact, so placement flaps don't wipe data.
 // See gastrolog-4vz40.
 func TestRemoveTierFromVaultPreservesData(t *testing.T) {
 	t.Parallel()
@@ -32,7 +32,7 @@ func TestRemoveTierFromVaultPreservesData(t *testing.T) {
 	orch.RegisterVault(vault)
 
 	if _, err := os.Stat(dir); err != nil {
-		t.Fatalf("inst directory should exist before removal: %v", err)
+		t.Fatalf("vault directory should exist before removal: %v", err)
 	}
 
 	if !orch.RemoveVaultInstance(vaultID) {
@@ -40,12 +40,12 @@ func TestRemoveTierFromVaultPreservesData(t *testing.T) {
 	}
 
 	if _, err := os.Stat(dir); err != nil {
-		t.Errorf("inst directory must survive non-destructive removal, got: %v", err)
+		t.Errorf("vault directory must survive non-destructive removal, got: %v", err)
 	}
 }
 
 // TestDeleteTierFromVaultCleansTierDirectory verifies that DeleteVaultInstance
-// removes the inst's data directory entirely — not just the chunk subdirs.
+// removes the vault's data directory entirely — not just the chunk subdirs.
 // Regression test for gastrolog-42j4n: orphaned inst directories accumulate
 // on disk after inst deletion.
 func TestDeleteTierFromVaultCleansTierDirectory(t *testing.T) {
@@ -68,7 +68,7 @@ func TestDeleteTierFromVaultCleansTierDirectory(t *testing.T) {
 	orch.RegisterVault(vault)
 
 	if _, err := os.Stat(dir); err != nil {
-		t.Fatalf("inst directory should exist before deletion: %v", err)
+		t.Fatalf("vault directory should exist before deletion: %v", err)
 	}
 
 	if !orch.DeleteVaultInstance(vaultID) {
@@ -76,7 +76,7 @@ func TestDeleteTierFromVaultCleansTierDirectory(t *testing.T) {
 	}
 
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Errorf("inst directory should be removed after DeleteVaultInstance, got: %v", err)
+		t.Errorf("vault directory should be removed after DeleteVaultInstance, got: %v", err)
 	}
 }
 
@@ -100,7 +100,7 @@ func TestDeleteTierFromVaultCleansEmptyTierDirectory(t *testing.T) {
 	}
 
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Errorf("empty inst directory should be removed, got: %v", err)
+		t.Errorf("empty vault directory should be removed, got: %v", err)
 	}
 }
 

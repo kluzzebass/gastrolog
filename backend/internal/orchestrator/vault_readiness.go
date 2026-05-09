@@ -32,7 +32,7 @@ import (
 // Readiness was introduced in gastrolog-4ip1o.
 
 // ErrVaultNotReady is returned when the vault exists locally but replicated
-// inst metadata (vault control-plane / inst FSM) has not applied far enough
+// inst metadata (vault control-plane / vault-ctl FSM) has not applied far enough
 // for safe reads or writes. Callers should retry with backoff.
 var ErrVaultNotReady = errors.New("vault not ready")
 

@@ -24,7 +24,7 @@ const (
 	tierMembershipChangeTimeout = 10 * time.Second
 )
 
-// vaultCtlLeaderManager spawns and supervises per-inst leader loops. Each inst
+// vaultCtlLeaderManager spawns and supervises per-vault leader loops. Each inst
 // Raft group gets a raftgroup.LeaderLoop whose OnLead callback runs
 // membership reconciliation and leadership alignment against the
 // orchestrator's view of the desired state.

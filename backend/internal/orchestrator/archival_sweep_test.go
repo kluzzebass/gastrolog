@@ -21,7 +21,7 @@ import (
 
 // archivalTestSetup creates a single-node orchestrator with a cloud inst backed
 // by the in-memory blobstore. Returns the orchestrator, cloud store, chunk manager,
-// vault/inst IDs, and config store.
+// vault/vault IDs, and config store.
 func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition) (
 	*Orchestrator, *blobstore.Memory, *chunkfile.Manager, glid.GLID, glid.GLID, *sysmem.Store,
 ) {
@@ -1135,7 +1135,7 @@ func TestCloudClusterReconcileSkipsTombstoned(t *testing.T) {
 	}
 
 	// Simulate what retention looks like from reconcile's point of view:
-	// the blobs are gone from cloud AND the inst FSM has tombstoned every
+	// the blobs are gone from cloud AND the vault-ctl FSM has tombstoned every
 	// chunk. The local cloud index still carries stale entries (that's
 	// the window reconcile historically noticed).
 	_ = h.cloudStore.List(context.Background(), "", func(info blobstore.BlobInfo) error {

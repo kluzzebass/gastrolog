@@ -51,7 +51,7 @@ func resolveVaultDir(params map[string]string, vaultsDir, vaultID string) map[st
 }
 
 // AddVault adds a new vault (chunk manager, index manager, query engine) and updates the filter set.
-// Loads the full config internally to resolve the vault's inst IDs to inst configs.
+// Loads the full config internally to resolve the vault's vault IDs to vault configs.
 // Returns ErrDuplicateID if a vault with this ID already exists.
 func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg system.VaultConfig, factories Factories) error {
 	sys, err := o.loadSystem(ctx)
@@ -93,7 +93,7 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg system.VaultConfig
 }
 
 // Rotation and retention are handled by discovery-based sweep jobs
-// (rotationSweep and retentionSweepAll). No per-inst setup needed during AddVault.
+// (rotationSweep and retentionSweepAll). No per-vault setup needed during AddVault.
 
 // findTierConfig finds a TierConfig by ID in a slice.
 func findTierConfig(tiers []system.TierConfig, id glid.GLID) *system.TierConfig {
@@ -119,17 +119,17 @@ func resolveRetentionRulesFromTier(cfg *system.Config, _ system.VaultConfig, tie
 	// Phase 4 (gastrolog-42f9z): retention rules carry only the trigger
 	// policy. The action enum is gone — every fired event streams records
 	// through the routing engine and always destroys the chunk. Phase 2's
-	// 1:1 vault:inst collapse already eliminated the "next inst" concept,
+	// 1:1 vault:tier collapse already eliminated the "next inst" concept,
 	// so position-based action derivation is also gone.
 	var rules []retentionRule
 	for _, b := range tierCfg.RetentionRules {
 		retCfg := findRetentionPolicy(cfg.RetentionPolicies, b.RetentionPolicyID)
 		if retCfg == nil {
-			return nil, fmt.Errorf("inst %s references unknown retention policy: %s", tierCfg.ID, b.RetentionPolicyID)
+			return nil, fmt.Errorf("vault %s references unknown retention policy: %s", tierCfg.ID, b.RetentionPolicyID)
 		}
 		policy, err := retCfg.ToRetentionPolicy()
 		if err != nil {
-			return nil, fmt.Errorf("invalid retention policy %s for inst %s: %w", b.RetentionPolicyID, tierCfg.ID, err)
+			return nil, fmt.Errorf("invalid retention policy %s for vault %s: %w", b.RetentionPolicyID, tierCfg.ID, err)
 		}
 		if policy == nil {
 			continue
@@ -353,8 +353,8 @@ func (o *Orchestrator) sealAndDeleteAllChunks(inst *VaultInstance, op string, va
 // destroying its on-disk data. Used when placement moves the inst elsewhere
 // (transient — the node may well get the inst back seconds later when
 // placement flaps back). The inst's Chunks/Indexes managers are closed, jobs
-// are cancelled, and the VaultInstance is removed from the vault's inst list,
-// but the chunk files and inst directory remain on disk. A subsequent
+// are cancelled, and the VaultInstance is removed from the vault's vault list,
+// but the chunk files and vault directory remain on disk. A subsequent
 // AddVaultInstance will re-discover the existing chunks.
 //
 // For actual inst deletion (admin-driven), use DeleteVaultInstance which
@@ -371,7 +371,7 @@ func (o *Orchestrator) RemoveVaultInstance(vaultID glid.GLID) bool {
 }
 
 // DeleteVaultInstance unregisters a inst instance AND permanently wipes its
-// on-disk data (chunks, indexes, and the inst directory). Used only when a
+// on-disk data (chunks, indexes, and the vault directory). Used only when a
 // inst is being deliberately deleted (admin action via CmdTierDeleted, or
 // post-drain cleanup).
 //
@@ -476,14 +476,14 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 	if vaultCfg == nil {
 		return fmt.Errorf("vault %s not found in config", vaultID)
 	}
-	// 1:1 vault:inst — synthesize the inst config from the vault.
+	// 1:1 vault:tier — synthesize the inst config from the vault.
 	inst := system.TierFromVault(*vaultCfg)
 	tierCfg := &inst
 
 	o.ensureVaultControlPlaneRaftGroup(vaultID, rt.Nodes, factories)
 
 	nscs := rt.NodeStorageConfigs
-	// VaultConfig.Placements is mirrored from inst placements via the FSM
+	// VaultConfig.Placements is mirrored from vault placements via the FSM
 	// bridge (gastrolog-257l7). Read from the vault directly so the lookup
 	// survives the eventual deletion of rt.VaultPlacements.
 	placements := vaultCfg.Placements
@@ -502,7 +502,7 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 	if isLeader {
 		t, err := o.buildLeaderTierInstance(sys, *vaultCfg, tierCfg, factories)
 		if err != nil {
-			return fmt.Errorf("build inst %s: %w", vaultID, err)
+			return fmt.Errorf("build vault %s: %w", vaultID, err)
 		}
 		t.FollowerTargets = system.FollowerTargets(placements, nscs)
 		ti = t
@@ -513,7 +513,7 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 			}
 			t, err := o.buildTierInstanceForStorage(sys, *vaultCfg, *tierCfg, factories, tgt.StorageID, true)
 			if err != nil {
-				return fmt.Errorf("build inst %s storage %s: %w", vaultID, tgt.StorageID, err)
+				return fmt.Errorf("build vault %s storage %s: %w", vaultID, tgt.StorageID, err)
 			}
 			t.IsFollower = true
 			t.LeaderNodeID = leaderNodeID
@@ -576,7 +576,7 @@ func (o *Orchestrator) UnregisterVault(id glid.GLID) error {
 			"vault", id, "error", err)
 	}
 
-	// Remove per-inst retention and rotation jobs.
+	// Remove per-vault retention and rotation jobs.
 	o.removeVaultJobs(id, vault)
 
 	// Remove from registry.
@@ -619,7 +619,7 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 	rt := &sys.Runtime
 	o.ensureVaultControlPlaneRaftGroup(vaultCfg.ID, rt.Nodes, factories)
 
-	// 1:1 vault:inst — synthesize the inst config from the vault.
+	// 1:1 vault:tier — synthesize the inst config from the vault.
 	vaultID := vaultCfg.ID
 	inst := system.TierFromVault(vaultCfg)
 	tierCfg := &inst
@@ -688,7 +688,7 @@ func (o *Orchestrator) alertTierInitFailed(vaultID glid.GLID, tierName string, e
 // storage ID. This avoids directory collisions with same-node follower placements
 // that would occur if findLocalFileStorage picked a different storage by class.
 func (o *Orchestrator) buildLeaderTierInstance(sys *system.System, vaultCfg system.VaultConfig, tierCfg *system.TierConfig, factories Factories) (*VaultInstance, error) {
-	// Read placements from VaultConfig (mirrored from inst placements via
+	// Read placements from VaultConfig (mirrored from vault placements via
 	// the FSM bridge — gastrolog-257l7).
 	storageID := system.LeaderStorageID(vaultCfg.Placements)
 	if storageID != "" && !strings.HasPrefix(storageID, system.SyntheticStoragePrefix) {
@@ -731,7 +731,7 @@ func (o *Orchestrator) buildTierInstance(sys *system.System, vaultCfg system.Vau
 
 	// Followers keep cloud store access for reads (queries) but skip uploads.
 	// The leader owns the blob; the follower adopts it via RegisterCloudChunk
-	// when the inst FSM propagates the upload announcement.
+	// when the vault-ctl FSM propagates the upload announcement.
 	if isFollower {
 		params["_cloud_read_only"] = "true"
 	}
@@ -1051,7 +1051,7 @@ type tierRaftCallbacks struct {
 }
 
 // ensureVaultCtlTierMetadata joins this node to the vault control-plane
-// Raft group for the inst's vault (creating the group if needed) and
+// Raft group for the vault's vault (creating the group if needed) and
 // returns the applier + callbacks for this inst's chunk metadata. Every
 // inst in the same vault shares the same vault-ctl Raft group; each
 // inst's chunk FSM is a sub-FSM keyed by inst ID (see vaultraft.FSM and
@@ -1118,7 +1118,7 @@ func (o *Orchestrator) ensureVaultCtlTierMetadata(tierCfg system.TierConfig, clu
 // it advances on bootstrap, elections, snapshot restore, and normal
 // replication alike.
 //
-// Before 5xxbd, inst FSM was a top-level Raft group whose Ready flag
+// Before 5xxbd, vault-ctl FSM was a top-level Raft group whose Ready flag
 // flipped on every apply in practice, because `CmdPutTier` was a LogCommand
 // that hit it. After 5xxbd the inst sub-FSM only sees OpVaultChunkFSM commands,
 // which a fresh vault with no chunks never sends — keying readiness on any
@@ -1277,12 +1277,12 @@ func (o *Orchestrator) clearTierFSMChunkCallbacks(vaultID, tierID glid.GLID) {
 	fsm.SetOnDelete(nil)
 	fsm.SetOnUpload(nil)
 	if o.logger != nil {
-		o.logger.Debug("cleared inst FSM chunk callbacks before manager close",
+		o.logger.Debug("cleared vault-ctl FSM chunk callbacks before manager close",
 			"vault", vaultID)
 	}
 }
 
-// wireTierFSMOnDelete sets up the inst FSM's OnDelete callback so that
+// wireTierFSMOnDelete sets up the vault-ctl FSM's OnDelete callback so that
 // CmdDeleteChunk applied via Raft on this node deletes the local chunk
 // files (and indexes if available). The callback uses chunk.SilentDeleter
 // to avoid the announcer feedback loop — re-announcing the delete that
@@ -1352,7 +1352,7 @@ func wireTierFSMOnDelete(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkMa
 	})
 }
 
-// wireTierFSMOnUpload connects the inst FSM's OnUpload callback to the
+// wireTierFSMOnUpload connects the vault-ctl FSM's OnUpload callback to the
 // chunk manager's RegisterCloudChunk method. When the FSM applies CmdUploadChunk
 // (from the leader's AnnounceUpload), the follower's chunk manager registers
 // the cloud chunk from metadata alone — no record streaming or S3 download.

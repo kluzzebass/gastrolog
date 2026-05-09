@@ -240,7 +240,7 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]TieredChunkMeta, 
 }
 
 // GetChunkMeta returns metadata for a specific chunk. The result is overlaid
-// from the inst FSM if the chunk belongs to a inst with a Raft group, so
+// from the vault-ctl FSM if the chunk belongs to a inst with a Raft group, so
 // CloudBacked / Archived reflect the cluster-wide truth rather than this
 // node's local chunk-manager view. See gastrolog-asg4l.
 func (o *Orchestrator) GetChunkMeta(vaultID glid.GLID, chunkID chunk.ChunkID) (chunk.ChunkMeta, error) {
@@ -319,8 +319,8 @@ func (o *Orchestrator) VaultType(vaultID glid.GLID) string {
 	return ""
 }
 
-// MissingVaultInstance returns true if the vault's local inst list differs from the
-// given inst IDs — either tiers were added or removed.
+// MissingVaultInstance returns true if the vault's local vault list differs from the
+// given vault IDs — either tiers were added or removed.
 func (o *Orchestrator) MissingVaultInstance(vaultID glid.GLID, tierIDs []glid.GLID) bool {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
@@ -346,7 +346,7 @@ func (o *Orchestrator) MissingVaultInstance(vaultID glid.GLID, tierIDs []glid.GL
 	return false
 }
 
-// LocalTierIDs returns the inst IDs currently instantiated for the given vault.
+// LocalTierIDs returns the vault IDs currently instantiated for the given vault.
 func (o *Orchestrator) LocalTierIDs(vaultID glid.GLID) []glid.GLID {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
@@ -632,7 +632,7 @@ func (o *Orchestrator) appendToLocalFollower(vault *Vault, tierID glid.GLID, sto
 // deleteFromFollowers removes a chunk from all same-node follower instances
 // of a inst. Called by retention after deleting from the leader.
 // DeleteChunkFromTier deletes a specific chunk from a inst. If the chunk is
-// currently the inst's active chunk, it is sealed first so the delete can
+// currently the vault's active chunk, it is sealed first so the delete can
 // proceed. This handles the follower case where the leader has moved on to a
 // new active chunk but the follower still has the old ID as active (records
 // sync via ChunkReplicator.AppendRecords preserves the leader's chunk ID).
@@ -720,7 +720,7 @@ func replaceForwardedChunk(cm chunk.ChunkManager, chunkID chunk.ChunkID, isActiv
 // in the vault after the vault-ctl Raft leader removed a node from the
 // voter set. Each inst's applier transparently routes the propose to
 // the leader, so this callback can fire from the leader's reconcile
-// pass without needing per-inst leadership checks. See gastrolog-51gme
+// pass without needing per-vault leadership checks. See gastrolog-51gme
 // step 10.
 //
 // afterVaultCtlRestore fires (off the FSM apply pump, on the
@@ -996,7 +996,7 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, tierID 
 		// the vault almost always still exists cluster-wide; only the inst
 		// instance was evicted from this node by placement churn (or never
 		// landed here in the first place). See gastrolog-2t48z.
-		return fmt.Errorf("%w: inst %s in vault %s", ErrTierNotLocal, tierID, vaultID)
+		return fmt.Errorf("%w: vault %s in vault %s", ErrTierNotLocal, tierID, vaultID)
 	}
 	// Reject stale ImportSealed RPCs for chunks the cluster already deleted.
 	// The race is: leader schedules replication, retention fires, delete is
@@ -1004,7 +1004,7 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, tierID 
 	// RPC arrives. Without this check the receiver would recreate the chunk.
 	// See gastrolog-11rzz.
 	if ref.isTombstoned != nil && ref.isTombstoned(chunkID) {
-		return fmt.Errorf("%w: import sealed chunk %s into inst %s", chunk.ErrChunkTombstoned, chunkID, tierID)
+		return fmt.Errorf("%w: import sealed chunk %s into vault %s", chunk.ErrChunkTombstoned, chunkID, tierID)
 	}
 	cm := ref.cm
 
@@ -1047,7 +1047,7 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, tierID 
 
 	meta, err := cm.ImportRecords(chunkID, next)
 	if err != nil {
-		return fmt.Errorf("import to inst %s: %w", tierID, err)
+		return fmt.Errorf("import to vault %s: %w", tierID, err)
 	}
 	o.logger.Debug("replication: sealed chunk imported",
 		"vault", vaultID,
@@ -1063,7 +1063,7 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, tierID 
 // Ordering matters: announce first, then re-check tombstone. This covers
 // the race where DeleteChunk applies between ImportRecords and our check
 // — if we checked first we'd miss it; announcing first propagates the
-// create through the inst FSM (which rejects it when tombstoned via the
+// create through the vault-ctl FSM (which rejects it when tombstoned via the
 // applyCreate guard), so by the time we re-check the tombstone state is
 // authoritative and any on-disk files we wrote are orphans we must
 // clean up explicitly because the FSM onDelete callback fired before
@@ -1120,7 +1120,7 @@ func drainIterator(next chunk.RecordIterator) {
 // in the vault are sealed. Returns the number of tiers sealed. No-op if the
 // active chunk is empty or absent.
 //
-// Role: inst leader. Sealing on the leader triggers follower seals via the
+// Role: vault leader. Sealing on the leader triggers follower seals via the
 // ChunkReplicator's SealVault call, which arrives on followers as an invocation
 // of SealActiveTier. Callers that are already on the follower side (seal
 // commands dispatched from the leader's Raft) must use SealActiveTier

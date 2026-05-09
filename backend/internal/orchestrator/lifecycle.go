@@ -131,7 +131,7 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	// Start the pressure gate after everything else is wired.
 	o.auxWg.Go(func() { gate.Run(ctx, 200*time.Millisecond) })
 
-	// Periodic per-inst rate alert evaluator (gastrolog-47qyw). Evaluates
+	// Periodic per-vault rate alert evaluator (gastrolog-47qyw). Evaluates
 	// rotation and retention rates against thresholds every 5 seconds and
 	// raises/clears alerts as needed.
 	o.auxWg.Go(func() { o.runRateAlertEvaluator(ctx, 5*time.Second) })
@@ -231,7 +231,7 @@ func (o *Orchestrator) Stop() error {
 	// cron rotation, retention) to finish.
 	_ = o.scheduler.Stop()
 
-	// Stop all per-inst leader loops (after the scheduler so reconcile
+	// Stop all per-vault leader loops (after the scheduler so reconcile
 	// passes don't fight retention deletes during shutdown).
 	o.vaultCtlLeaders.StopAll()
 

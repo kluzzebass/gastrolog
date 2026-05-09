@@ -62,8 +62,8 @@ type retentionRule struct {
 	policy chunk.RetentionPolicy
 }
 
-// retentionRunner holds per-inst-instance state that persists across sweeps.
-// Only leaders get runners — followers react to the inst FSM manifest
+// retentionRunner holds per-vault-instance state that persists across sweeps.
+// Only leaders get runners — followers react to the vault-ctl FSM manifest
 // via the ChunkFSM.OnDelete callback.
 type retentionRunner struct {
 	mu      sync.Mutex
@@ -126,7 +126,7 @@ type sweepTarget struct {
 //     the vault control-plane Raft, which only the leader writes to.
 //
 // There is no per-vault Vault.ReadinessErr gate at this level because the
-// per-inst IsLeader checks already cover the preconditions for each action.
+// per-vault IsLeader checks already cover the preconditions for each action.
 // See vault_readiness.go for the canonical vault readiness definition used
 // by ingest/query entry points.
 //
@@ -397,7 +397,7 @@ func (o *Orchestrator) RetryUnreadableChunks(vaultID glid.GLID) int {
 
 
 // RetentionPendingChunks returns chunk IDs marked as retention-pending in the
-// inst FSM for a vault. Visible to all nodes via Raft replication.
+// vault-ctl FSM for a vault. Visible to all nodes via Raft replication.
 //
 // Read-only accessor, callable from any-node. No Vault.ReadinessErr gate —
 // observational use only. Decision-making callers should gate on
@@ -460,7 +460,7 @@ func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg syste
 	// IsRaftLeader check removed: the inst apply forwarder transparently
 	// routes applies to the vault-ctl Raft leader. The config placement leader
 	// always runs retention regardless of vault-ctl Raft leadership.
-	// 1:1 vault:inst — synthesize the inst config from the vault.
+	// 1:1 vault:tier — synthesize the inst config from the vault.
 	tier2 := system.TierFromVault(vaultCfg)
 	tierCfg := &tier2
 	if len(tierCfg.RetentionRules) == 0 {
@@ -506,7 +506,7 @@ func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg syste
 }
 
 // tierPositionInVault returns the 0-based index of tierID in the vault's
-// ordered inst list. With 1:1 vault:inst the index is always 0.
+// ordered vault list. With 1:1 vault:tier the index is always 0.
 func tierPositionInVault(cfg *system.Config, vaultID, tierID glid.GLID) int {
 	if vaultID == tierID {
 		return 0

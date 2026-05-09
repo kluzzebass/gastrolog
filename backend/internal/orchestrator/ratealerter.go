@@ -9,7 +9,7 @@ import (
 	"gastrolog/internal/alert"
 )
 
-// RateAlerter tracks per-inst event rates over a sliding window and raises
+// RateAlerter tracks per-vault event rates over a sliding window and raises
 // or clears alerts when sustained rates exceed configured thresholds. It is
 // the mechanism behind gastrolog-47qyw: detecting and surfacing pathological
 // rotation or retention configurations as operator-visible signals rather
@@ -74,7 +74,7 @@ func newRateAlerter(cfg rateAlerterConfig) *RateAlerter {
 }
 
 // Record marks one event for the given inst at the given time. Lazily
-// creates a per-inst RateWindow on first call. Safe for concurrent use.
+// creates a per-vault RateWindow on first call. Safe for concurrent use.
 func (r *RateAlerter) Record(tierID glid.GLID, now time.Time) {
 	r.mu.Lock()
 	w, ok := r.windows[tierID]
