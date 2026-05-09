@@ -169,7 +169,7 @@ func TestAppendToTier_ErrVaultNotReady(t *testing.T) {
 		IsFSMReady: func() bool { return false },
 	}
 	o.RegisterVault(NewVault(vid, tier))
-	err = o.AppendToVault(vid, tierID, chunk.ChunkID{}, chunk.Record{Raw: []byte("x")})
+	err = o.AppendToVault(vid, chunk.ChunkID{}, chunk.Record{Raw: []byte("x")})
 	if !errors.Is(err, ErrVaultNotReady) {
 		t.Fatalf("AppendToVault: got %v, want ErrVaultNotReady", err)
 	}

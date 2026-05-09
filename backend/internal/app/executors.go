@@ -424,7 +424,7 @@ func analyzeChunkOneForExecutor(o *orchestrator.Orchestrator, vaultID glid.GLID,
 
 func newSealVaultExecutor(o *orchestrator.Orchestrator) cluster.SealVaultExecutor {
 	return func(_ context.Context, vaultID glid.GLID) error {
-		_, err := o.SealActive(vaultID, glid.Nil)
+		_, err := o.SealActive(vaultID)
 		return err
 	}
 }

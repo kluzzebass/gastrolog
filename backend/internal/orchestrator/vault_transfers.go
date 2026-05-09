@@ -268,7 +268,7 @@ func (o *Orchestrator) DrainVault(ctx context.Context, vaultID glid.GLID, target
 	o.mu.Unlock()
 
 	// Seal active chunk outside the lock — flush any locally-buffered records.
-	if _, err := o.SealActive(vaultID, glid.Nil); err != nil {
+	if _, err := o.SealActive(vaultID); err != nil {
 		o.logger.Warn("drain: failed to seal active chunk", "vault", vaultID, "error", err)
 	}
 
@@ -315,7 +315,7 @@ func (o *Orchestrator) drainWorker(ctx context.Context, vaultID glid.GLID, targe
 	// Final seal: catch any records that were appended between
 	// DrainVault's SealActive and the worker starting (e.g. from
 	// ForwardRecords RPCs from nodes with stale filter sets).
-	if _, err := o.SealActive(vaultID, glid.Nil); err != nil {
+	if _, err := o.SealActive(vaultID); err != nil {
 		o.logger.Warn("drain: final seal", "vault", vaultID, "error", err)
 	}
 	if !o.drainSealed(ctx, vaultID, cm, targetNodeID, job) {

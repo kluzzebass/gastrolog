@@ -384,7 +384,7 @@ func (o *Orchestrator) findLocalVaultInstance(vaultID glid.GLID) *VaultInstance 
 // AppendToVault appends a record to a specific tier. leaderChunkID, when
 // non-zero on followers, syncs the chunk ID with the leader so the
 // follower has real, queryable, promotable chunks.
-func (o *Orchestrator) AppendToVault(vaultID, tierID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error {
+func (o *Orchestrator) AppendToVault(vaultID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error {
 	o.mu.RLock()
 	// NOTE: manually unlocked below — remote forwards happen outside the lock.
 
@@ -398,16 +398,15 @@ func (o *Orchestrator) AppendToVault(vaultID, tierID glid.GLID, leaderChunkID ch
 		return err
 	}
 
-	// Block appends to tiers that are draining.
-	if _, draining := o.tierDraining[tierDrainKey(vaultID, tierID)]; draining {
+	tier := vault.Instance
+	if tier == nil {
+		o.mu.RUnlock()
+		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+	}
+	// Block appends to vaults that are draining.
+	if _, draining := o.tierDraining[tierDrainKey(vaultID, tier.TierID)]; draining {
 		o.mu.RUnlock()
 		return ErrTierDraining
-	}
-
-	tier := vault.Instance
-	if tier == nil || tier.TierID != tierID {
-		o.mu.RUnlock()
-		return fmt.Errorf("tier %s not found in vault %s", tierID, vaultID)
 	}
 	cm := tier.Chunks
 
@@ -637,27 +636,24 @@ func (o *Orchestrator) appendToLocalFollower(vault *Vault, tierID glid.GLID, sto
 // proceed. This handles the follower case where the leader has moved on to a
 // new active chunk but the follower still has the old ID as active (records
 // sync via ChunkReplicator.AppendRecords preserves the leader's chunk ID).
-func (o *Orchestrator) DeleteChunkFromTier(vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
-	tier, err := o.findTierForDelete(vaultID, tierID)
+func (o *Orchestrator) DeleteChunkFromTier(vaultID glid.GLID, chunkID chunk.ChunkID) error {
+	tier, err := o.findTierForDelete(vaultID)
 	if err != nil {
 		return err
 	}
-	return o.deleteChunkFromTierInstance(tier, vaultID, tierID, chunkID)
+	return o.deleteChunkFromTierInstance(tier, vaultID, tier.TierID, chunkID)
 }
 
-// findTierForDelete returns the matching tier instance or an error, releasing
+// findTierForDelete returns the vault's instance or an error, releasing
 // the orchestrator read lock before returning.
-func (o *Orchestrator) findTierForDelete(vaultID, tierID glid.GLID) (*VaultInstance, error) {
+func (o *Orchestrator) findTierForDelete(vaultID glid.GLID) (*VaultInstance, error) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	vault := o.vaults[vaultID]
-	if vault == nil {
+	if vault == nil || vault.Instance == nil {
 		return nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
-	if vault.Instance != nil && vault.Instance.TierID == tierID {
-		return vault.Instance, nil
-	}
-	return nil, fmt.Errorf("tier %s not found in vault %s", tierID, vaultID)
+	return vault.Instance, nil
 }
 
 // deleteChunkFromTierInstance seals the active chunk if it matches, then
@@ -962,8 +958,12 @@ func (o *Orchestrator) ImportChunkRecords(ctx context.Context, vaultID glid.GLID
 // the follower receives a sealed chunk from the leader with the same ID.
 // Schedules postSealWork for local indexing (secondaries need indexes for queries)
 // but won't trigger further replication (gated by !IsFollower in tierReplicationInfo).
-func (o *Orchestrator) ImportToVault(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
-	return o.ImportToTierStorage(ctx, vaultID, tierID, "", chunkID, next)
+func (o *Orchestrator) ImportToVault(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
+	tier := o.findLocalVaultInstance(vaultID)
+	if tier == nil {
+		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+	}
+	return o.ImportToTierStorage(ctx, vaultID, tier.TierID, "", chunkID, next)
 }
 
 // ImportToTierStorage imports a sealed chunk to a specific storage-targeted tier
@@ -1135,7 +1135,7 @@ func drainIterator(next chunk.RecordIterator) {
 // with different invariants. SealActive (leader) fans out replication;
 // SealActiveTier is the target of that fan-out on followers. After sealing,
 // schedules compression and index builds (same as ingest-triggered seal).
-func (o *Orchestrator) SealActive(vaultID glid.GLID, tierID glid.GLID) (int, error) {
+func (o *Orchestrator) SealActive(vaultID glid.GLID) (int, error) {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
 	o.mu.RUnlock()
@@ -1146,9 +1146,6 @@ func (o *Orchestrator) SealActive(vaultID glid.GLID, tierID glid.GLID) (int, err
 	var sealed int
 	tier := vault.Instance
 	if tier == nil {
-		return 0, nil
-	}
-	if tierID != glid.Nil && tier.TierID != tierID {
 		return 0, nil
 	}
 	active := tier.Chunks.Active()

@@ -69,7 +69,7 @@ func TestConcurrentAppendToTierAttrIntegrity(t *testing.T) {
 			base := gIdx * perGoroutine
 			for i := range perGoroutine {
 				ts := t0.Add(time.Duration(base+i) * time.Microsecond)
-				err := orch.AppendToVault(vaultID, tierID, chunk.ChunkID{}, chunk.Record{
+				err := orch.AppendToVault(vaultID, chunk.ChunkID{}, chunk.Record{
 					IngestTS: ts,
 					WriteTS:  ts,
 					Raw:      fmt.Appendf(nil, "orch-concurrent-%d-%d", gIdx, i),
@@ -286,7 +286,7 @@ func TestImportToTierCursorVerified(t *testing.T) {
 
 	// Import via orchestrator.
 	iter := testIterFromSlice(records)
-	if err := orch.ImportToVault(context.Background(), vaultID, tierID, chunkID, iter); err != nil {
+	if err := orch.ImportToVault(context.Background(), vaultID, chunkID, iter); err != nil {
 		t.Fatalf("ImportToVault: %v", err)
 	}
 
@@ -560,7 +560,7 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 		defer wg.Done()
 		for i := range 200 {
 			ts := t0.Add(time.Duration(500+i) * time.Microsecond)
-			err := orchA.AppendToVault(vaultID, tierID, chunk.ChunkID{}, chunk.Record{
+			err := orchA.AppendToVault(vaultID, chunk.ChunkID{}, chunk.Record{
 				IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "during-drain-%d", i),
 			})
 			if err != nil {

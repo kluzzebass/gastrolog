@@ -486,7 +486,7 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 		if err := waitForOrch(ctx); err != nil {
 			return err
 		}
-		err := orch.AppendToVault(vaultID, tierID, leaderChunkID, rec)
+		err := orch.AppendToVault(vaultID, leaderChunkID, rec)
 		if err != nil && errors.Is(err, orchestrator.ErrVaultNotReady) {
 			return errors.Join(cluster.ErrForwardTargetNotReady, err)
 		}
@@ -512,7 +512,7 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 		if err := waitForOrch(ctx); err != nil {
 			return err
 		}
-		return orch.ImportToVault(ctx, vaultID, tierID, chunkID, next)
+		return orch.ImportToVault(ctx, vaultID, chunkID, next)
 	})
 	searchForwarder := cluster.NewSearchForwarder(peerConns)
 	clusterSrv.SetSearchExecutor(newSearchExecutor(orch))
@@ -524,10 +524,10 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	clusterSrv.SetAnalyzeChunkExecutor(newAnalyzeChunkExecutor(orch))
 	clusterSrv.SetSealVaultExecutor(newSealVaultExecutor(orch))
 	clusterSrv.SetSealTierExecutor(func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
-		return orch.SealActiveTier(vaultID, tierID, chunkID)
+		return orch.SealActiveTier(vaultID, chunkID)
 	})
 	clusterSrv.SetDeleteChunkExecutor(func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
-		return orch.DeleteChunkFromTier(vaultID, tierID, chunkID)
+		return orch.DeleteChunkFromTier(vaultID, chunkID)
 	})
 	clusterSrv.SetReindexVaultExecutor(newReindexVaultExecutor(orch))
 	clusterSrv.SetExplainExecutor(newExplainExecutor(orch, nodeID))

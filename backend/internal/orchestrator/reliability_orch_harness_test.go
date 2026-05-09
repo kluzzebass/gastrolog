@@ -494,7 +494,7 @@ func (h *orchRelHarness) waitForAllReady() {
 func (h *orchRelHarness) appendOnLeaderForVault(v vaultSpec, rec chunk.Record) error {
 	h.t.Helper()
 	leader := h.waitForVaultCtlLeaderForVault(v)
-	return leader.orch.AppendToVault(v.id, v.tierID, chunk.ChunkID{}, rec)
+	return leader.orch.AppendToVault(v.id, chunk.ChunkID{}, rec)
 }
 
 // sealOnLeaderForVault seals the active chunk for a specific vault on
@@ -502,7 +502,7 @@ func (h *orchRelHarness) appendOnLeaderForVault(v vaultSpec, rec chunk.Record) e
 func (h *orchRelHarness) sealOnLeaderForVault(v vaultSpec) {
 	h.t.Helper()
 	leader := h.waitForVaultCtlLeaderForVault(v)
-	if _, err := leader.orch.SealActive(v.id, glid.Nil); err != nil {
+	if _, err := leader.orch.SealActive(v.id); err != nil {
 		h.t.Fatalf("SealActive vault %s: %v", v.label, err)
 	}
 }
@@ -680,7 +680,7 @@ func formatChunkSnapshot(m map[string]map[chunk.ChunkID]bool) string {
 func (h *orchRelHarness) appendOnLeader(rec chunk.Record) error {
 	h.t.Helper()
 	leader := h.waitForVaultCtlLeader()
-	return leader.orch.AppendToVault(h.vaultID, h.tierID, chunk.ChunkID{}, rec)
+	return leader.orch.AppendToVault(h.vaultID, chunk.ChunkID{}, rec)
 }
 
 // sealOnLeader seals the active chunk on every tier of the vault, on the
@@ -689,7 +689,7 @@ func (h *orchRelHarness) appendOnLeader(rec chunk.Record) error {
 func (h *orchRelHarness) sealOnLeader() {
 	h.t.Helper()
 	leader := h.waitForVaultCtlLeader()
-	if _, err := leader.orch.SealActive(h.vaultID, glid.Nil); err != nil {
+	if _, err := leader.orch.SealActive(h.vaultID); err != nil {
 		h.t.Fatalf("SealActive: %v", err)
 	}
 }

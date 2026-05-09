@@ -30,10 +30,10 @@ import (
 // Do not merge with SealActive: the two paths run on different nodes with
 // different invariants. SealActive (leader) fans out replication; this
 // function is the target of that fan-out on followers.
-func (o *Orchestrator) SealActiveTier(vaultID, tierID glid.GLID, expectedChunkID chunk.ChunkID) error {
+func (o *Orchestrator) SealActiveTier(vaultID glid.GLID, expectedChunkID chunk.ChunkID) error {
 	tier := o.findLocalVaultInstance(vaultID)
 	if tier == nil {
-		return fmt.Errorf("%w: tier %s in vault %s", ErrTierNotLocal, tierID, vaultID)
+		return fmt.Errorf("%w: vault %s", ErrTierNotLocal, vaultID)
 	}
 	active := tier.Chunks.Active()
 	if active == nil {

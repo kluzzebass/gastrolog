@@ -666,7 +666,7 @@ func TestCloudClusterArchivalSweepSetsArchivedOnLeader(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 500 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		if err := leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+		if err := leaderNode.orch.AppendToVault(h.vaultID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "cluster-archive-%d", i),
 		}); err != nil {
 			t.Fatalf("append %d: %v", i, err)
@@ -726,7 +726,7 @@ func TestCloudClusterArchivalSweepOnlyRunsOnLeader(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 200 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		_ = leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+		_ = leaderNode.orch.AppendToVault(h.vaultID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "leader-only-%d", i),
 		})
 	}
@@ -767,7 +767,7 @@ func TestCloudClusterRestoreChunkViaOrchestrator(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 200 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		_ = leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+		_ = leaderNode.orch.AppendToVault(h.vaultID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "restore-%d", i),
 		})
 	}
@@ -825,7 +825,7 @@ func TestCloudClusterArchivedChunkUnreadableOnLeader(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 200 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		_ = leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+		_ = leaderNode.orch.AppendToVault(h.vaultID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "unreadable-%d", i),
 		})
 	}
@@ -874,7 +874,7 @@ func TestCloudClusterSweepThresholdBoundary(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 200 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		_ = leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+		_ = leaderNode.orch.AppendToVault(h.vaultID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "boundary-%d", i),
 		})
 	}
@@ -932,7 +932,7 @@ func TestCloudClusterGracePeriodBoundary(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 100 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		_ = leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+		_ = leaderNode.orch.AppendToVault(h.vaultID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "grace-%d", i),
 		})
 	}
@@ -993,7 +993,7 @@ func TestCloudClusterArchivalSurvivesRestart(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 200 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		_ = leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+		_ = leaderNode.orch.AppendToVault(h.vaultID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "restart-%d", i),
 		})
 	}
@@ -1060,7 +1060,7 @@ func TestCloudClusterReconcileSweepDetectsMissingBlobs(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 200 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		_ = leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+		_ = leaderNode.orch.AppendToVault(h.vaultID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "reconcile-%d", i),
 		})
 	}
@@ -1116,7 +1116,7 @@ func TestCloudClusterReconcileSkipsTombstoned(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 200 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		_ = leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+		_ = leaderNode.orch.AppendToVault(h.vaultID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "reconcile-tombstone-%d", i),
 		})
 	}

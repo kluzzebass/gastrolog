@@ -77,7 +77,7 @@ func TestImportToTierPreservesChunkID(t *testing.T) {
 	orch.RegisterVault(vault)
 
 	targetID := chunk.NewChunkID()
-	err := orch.ImportToVault(context.Background(), vaultID, tierID, targetID, testIter(smallRecords(5)))
+	err := orch.ImportToVault(context.Background(), vaultID, targetID, testIter(smallRecords(5)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestImportToTierConcurrentSafe(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			errs[idx] = orch.ImportToVault(context.Background(), vaultID, tierID, ids[idx], testIter(smallRecords(3)))
+			errs[idx] = orch.ImportToVault(context.Background(), vaultID, ids[idx], testIter(smallRecords(3)))
 		}(i)
 	}
 	wg.Wait()
@@ -364,13 +364,13 @@ func TestImportToTierIdempotent(t *testing.T) {
 	chunkID := chunk.NewChunkID()
 
 	// First import — should succeed.
-	err := orch.ImportToVault(context.Background(), vaultID, tierID, chunkID, testIter(smallRecords(5)))
+	err := orch.ImportToVault(context.Background(), vaultID, chunkID, testIter(smallRecords(5)))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Second import with same chunk ID — idempotent skip (chunk already exists).
-	err = orch.ImportToVault(context.Background(), vaultID, tierID, chunkID, testIter(smallRecords(3)))
+	err = orch.ImportToVault(context.Background(), vaultID, chunkID, testIter(smallRecords(3)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -454,7 +454,7 @@ func TestAppendToTierLeaderForwardsToFollowers(t *testing.T) {
 	orch.RegisterVault(vault)
 
 	rec := testRecord("hello")
-	if err := orch.AppendToVault(vaultID, tierID, chunk.ChunkID{}, rec); err != nil {
+	if err := orch.AppendToVault(vaultID, chunk.ChunkID{}, rec); err != nil {
 		t.Fatal(err)
 	}
 
@@ -497,8 +497,7 @@ func TestAppendToTierSecondaryDoesNotForward(t *testing.T) {
 	vault.Name = "no-reforward"
 	orch.RegisterVault(vault)
 
-	leaderChunkID := chunk.NewChunkID()
-	if err := orch.AppendToVault(vaultID, tierID, leaderChunkID, testRecord("data")); err != nil {
+	if err := orch.AppendToVault(vaultID, chunk.NewChunkID(), testRecord("data")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -519,7 +518,7 @@ func TestAppendToTierSecondaryUsesChunkID(t *testing.T) {
 	orch.RegisterVault(vault)
 
 	leaderChunkID := chunk.NewChunkID()
-	if err := orch.AppendToVault(vaultID, tierID, leaderChunkID, testRecord("data")); err != nil {
+	if err := orch.AppendToVault(vaultID, leaderChunkID, testRecord("data")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -563,10 +562,10 @@ func TestAppendToTierSecondarySkipsPostSeal(t *testing.T) {
 
 	leaderChunkID := chunk.NewChunkID()
 	// First record fills the chunk (policy = 1 record), triggering seal on the second.
-	if err := orch.AppendToVault(vaultID, tierID, leaderChunkID, testRecord("rec-1")); err != nil {
+	if err := orch.AppendToVault(vaultID, leaderChunkID, testRecord("rec-1")); err != nil {
 		t.Fatal(err)
 	}
-	if err := orch.AppendToVault(vaultID, tierID, leaderChunkID, testRecord("rec-2")); err != nil {
+	if err := orch.AppendToVault(vaultID, leaderChunkID, testRecord("rec-2")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -615,7 +614,7 @@ func TestImportToTierSecondarySealsActiveAndKeeps(t *testing.T) {
 
 	// Primary seals and sends canonical version. ImportToVault should
 	// seal the active chunk and keep it (no delete-and-replace).
-	err := orch.ImportToVault(context.Background(), vaultID, tierID, chunkID, testIter(smallRecords(5)))
+	err := orch.ImportToVault(context.Background(), vaultID, chunkID, testIter(smallRecords(5)))
 	if err != nil {
 		t.Fatalf("ImportToVault: %v", err)
 	}
@@ -659,7 +658,7 @@ func TestImportToTierSecondaryKeepsSealedForwarded(t *testing.T) {
 	}
 
 	// ImportToVault should replace the forwarded version with canonical.
-	err := orch.ImportToVault(context.Background(), vaultID, tierID, chunkID, testIter(smallRecords(5)))
+	err := orch.ImportToVault(context.Background(), vaultID, chunkID, testIter(smallRecords(5)))
 	if err != nil {
 		t.Fatalf("ImportToVault: %v", err)
 	}
@@ -701,7 +700,7 @@ func TestAppendToTierNoForwarderSingleNode(t *testing.T) {
 	orch.RegisterVault(vault)
 
 	rec := testRecord("single-node")
-	if err := orch.AppendToVault(vaultID, tierID, chunk.ChunkID{}, rec); err != nil {
+	if err := orch.AppendToVault(vaultID, chunk.ChunkID{}, rec); err != nil {
 		t.Fatal(err)
 	}
 
@@ -720,67 +719,13 @@ func TestAppendToTierVaultNotFound(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
 	bogusVaultID := glid.New()
-	tierID := glid.New()
 
-	err := orch.AppendToVault(bogusVaultID, tierID, chunk.ChunkID{}, testRecord("data"))
+	err := orch.AppendToVault(bogusVaultID, chunk.ChunkID{}, testRecord("data"))
 	if err == nil {
 		t.Fatal("expected error for non-existent vault")
 	}
 	if !errors.Is(err, ErrVaultNotFound) {
 		t.Errorf("expected ErrVaultNotFound, got %v", err)
-	}
-}
-
-func TestAppendToTierTierNotFound(t *testing.T) {
-	t.Parallel()
-	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-
-	tierID := glid.New()
-	vaultID := glid.New()
-	tier := newMemTier(t, tierID, false, nil)
-	vault := NewVault(vaultID, tier)
-	vault.Name = "tier-not-found"
-	orch.RegisterVault(vault)
-
-	bogusTierID := glid.New()
-	err := orch.AppendToVault(vaultID, bogusTierID, chunk.ChunkID{}, testRecord("data"))
-	if err == nil {
-		t.Fatal("expected error for non-existent tier")
-	}
-	if !strings.Contains(err.Error(), "not found") {
-		t.Errorf("expected error containing 'not found', got %v", err)
-	}
-}
-
-// TestImportToTierTierNotLocal pins gastrolog-2t48z: when ImportToVault
-// is invoked against a (vault, tier) pair where the tier instance has
-// been evicted from this node by placement reconfiguration, the error
-// must be ErrTierNotLocal — not ErrVaultNotFound — so log lines don't
-// suggest the vault was deleted.
-func TestImportToTierTierNotLocal(t *testing.T) {
-	t.Parallel()
-	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-
-	tierID := glid.New()
-	vaultID := glid.New()
-	tier := newMemTier(t, tierID, false, nil)
-	vault := NewVault(vaultID, tier)
-	orch.RegisterVault(vault)
-
-	// Vault exists, but ask for a tier that doesn't live here.
-	bogusTierID := glid.New()
-	iter := func() (chunk.Record, error) {
-		return chunk.Record{}, chunk.ErrNoMoreRecords
-	}
-	err := orch.ImportToVault(context.Background(), vaultID, bogusTierID, chunk.NewChunkID(), iter)
-	if err == nil {
-		t.Fatal("expected error for non-resident tier")
-	}
-	if !errors.Is(err, ErrTierNotLocal) {
-		t.Errorf("expected ErrTierNotLocal, got %v", err)
-	}
-	if errors.Is(err, ErrVaultNotFound) {
-		t.Errorf("must NOT be ErrVaultNotFound — vault is registered, only tier instance is missing: %v", err)
 	}
 }
 
@@ -821,7 +766,7 @@ func TestImportToTierDrainsIteratorOnSkip(t *testing.T) {
 		}, nil
 	}
 
-	err := orch.ImportToVault(context.Background(), vaultID, tierID, chunkID, trackingIter)
+	err := orch.ImportToVault(context.Background(), vaultID, chunkID, trackingIter)
 	if err != nil {
 		t.Fatalf("ImportToVault: %v", err)
 	}
@@ -847,7 +792,7 @@ func TestAppendToTierForwardLifecycle(t *testing.T) {
 	// Append 3 records.
 	for i := range 3 {
 		rec := testRecord("rec-" + string(rune('a'+i)))
-		if err := orch.AppendToVault(vaultID, tierID, chunk.ChunkID{}, rec); err != nil {
+		if err := orch.AppendToVault(vaultID, chunk.ChunkID{}, rec); err != nil {
 			t.Fatalf("append %d: %v", i, err)
 		}
 	}
@@ -1190,7 +1135,7 @@ func TestImportToTierReplacesIncompleteForwardedChunk(t *testing.T) {
 	}
 
 	// ImportToVault with canonical version: all 100 records.
-	err = orch.ImportToVault(context.Background(), vaultID, tierID, chunkID, testIter(smallRecords(100)))
+	err = orch.ImportToVault(context.Background(), vaultID, chunkID, testIter(smallRecords(100)))
 	if err != nil {
 		t.Fatalf("ImportToVault: %v", err)
 	}
@@ -1319,7 +1264,7 @@ func TestAppendToTierForwardingDoesNotBlockOnFullChannel(t *testing.T) {
 	// Every forwarder call fails, but AppendToVault must still succeed.
 	const total = 200
 	for i := 0; i < total; i++ {
-		if err := orch.AppendToVault(vaultID, tierID, chunk.ChunkID{}, testRecord("burst")); err != nil {
+		if err := orch.AppendToVault(vaultID, chunk.ChunkID{}, testRecord("burst")); err != nil {
 			t.Fatalf("AppendToVault %d: %v", i, err)
 		}
 	}

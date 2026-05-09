@@ -502,7 +502,7 @@ func (d *directChunkReplicator) AppendRecords(_ context.Context, nodeID string, 
 		return fmt.Errorf("directChunkReplicator: unknown node %q", nodeID)
 	}
 	for _, rec := range records {
-		if err := orch.AppendToVault(vaultID, tierID, chunkID, rec); err != nil {
+		if err := orch.AppendToVault(vaultID, chunkID, rec); err != nil {
 			return err
 		}
 	}
@@ -514,7 +514,7 @@ func (d *directChunkReplicator) SealVault(_ context.Context, nodeID string, vaul
 	if !ok {
 		return fmt.Errorf("directChunkReplicator: unknown node %q", nodeID)
 	}
-	return orch.SealActiveTier(vaultID, tierID, chunkID)
+	return orch.SealActiveTier(vaultID, chunkID)
 }
 
 func (d *directChunkReplicator) ImportSealedChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
@@ -531,7 +531,7 @@ func (d *directChunkReplicator) ImportSealedChunk(ctx context.Context, nodeID st
 		i++
 		return rec, nil
 	}
-	return orch.ImportToVault(ctx, vaultID, tierID, chunkID, iter)
+	return orch.ImportToVault(ctx, vaultID, chunkID, iter)
 }
 
 func (d *directChunkReplicator) DeleteChunk(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
@@ -539,7 +539,7 @@ func (d *directChunkReplicator) DeleteChunk(_ context.Context, nodeID string, va
 	if !ok {
 		return fmt.Errorf("directChunkReplicator: unknown node %q", nodeID)
 	}
-	return orch.DeleteChunkFromTier(vaultID, tierID, chunkID)
+	return orch.DeleteChunkFromTier(vaultID, chunkID)
 }
 
 func (d *directChunkReplicator) RequestReplicaCatchup(ctx context.Context, leaderNodeID string, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error) {

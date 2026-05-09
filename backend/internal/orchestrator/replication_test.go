@@ -119,7 +119,7 @@ func TestSealActiveTier(t *testing.T) {
 	}
 	chunkID := active.ID
 
-	if err := orch.SealActiveTier(vaultID, tierID, chunkID); err != nil {
+	if err := orch.SealActiveTier(vaultID, chunkID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -147,7 +147,7 @@ func TestSealActiveTierMismatchSkipsSeal(t *testing.T) {
 	// Seal with a wrong chunk ID — should be a no-op (the expected chunk
 	// was already rotated by the follower's own rotation policy).
 	wrongID := chunkIDAt(time.Now().Add(-1 * time.Hour))
-	if err := orch.SealActiveTier(vaultID, tierID, wrongID); err != nil {
+	if err := orch.SealActiveTier(vaultID, wrongID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -173,7 +173,7 @@ func TestSealActiveTierNoActiveChunk(t *testing.T) {
 	orch.RegisterVault(vault)
 
 	// No records appended — no active chunk.
-	err := orch.SealActiveTier(vaultID, tierID, chunk.ChunkID{})
+	err := orch.SealActiveTier(vaultID, chunk.ChunkID{})
 	if err != nil {
 		t.Errorf("expected nil error for no active chunk, got %v", err)
 	}
@@ -273,7 +273,7 @@ func TestCatchupSkipsFSMRetiredChunks(t *testing.T) {
 			t.Fatalf("chunk %d: no active chunk after append", i)
 		}
 		id := active.ID
-		if err := orch.SealActiveTier(vaultID, tierID, id); err != nil {
+		if err := orch.SealActiveTier(vaultID, id); err != nil {
 			t.Fatalf("seal chunk %d: %v", i, err)
 		}
 		ids = append(ids, id)
@@ -354,7 +354,7 @@ func TestCatchupNilManifestUsesAllChunks(t *testing.T) {
 			t.Fatalf("append %d: %v", i, err)
 		}
 		active := tier.Chunks.Active()
-		if err := orch.SealActiveTier(vaultID, tierID, active.ID); err != nil {
+		if err := orch.SealActiveTier(vaultID, active.ID); err != nil {
 			t.Fatalf("seal: %v", err)
 		}
 	}
@@ -395,7 +395,7 @@ func TestClusterReplicationSealedChunksArriveOnFollowers(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range totalRecords {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		if err := leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+		if err := leaderNode.orch.AppendToVault(h.vaultID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts,
 			WriteTS:  ts,
 			Raw:      fmt.Appendf(nil, "repl-%d", i),
@@ -480,7 +480,7 @@ func TestClusterReplicationSealedIdxWriteTSMatchesLeader(t *testing.T) {
 	t0 := time.Date(2025, 7, 1, 12, 0, 0, 0, time.UTC)
 	for i := range totalRecords {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		if err := leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+		if err := leaderNode.orch.AppendToVault(h.vaultID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts,
 			WriteTS:  ts,
 			Raw:      fmt.Appendf(nil, "idxcmp-%d", i),
@@ -590,7 +590,7 @@ func TestClusterReplicationSealSync(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 50 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		if err := leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+		if err := leaderNode.orch.AppendToVault(h.vaultID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts,
 			WriteTS:  ts,
 			Raw:      fmt.Appendf(nil, "seal-sync-%d", i),
@@ -664,7 +664,7 @@ func TestClusterReplicationDeletePropagation(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 500 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		if err := leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+		if err := leaderNode.orch.AppendToVault(h.vaultID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts,
 			WriteTS:  ts,
 			Raw:      fmt.Appendf(nil, "del-prop-%d", i),

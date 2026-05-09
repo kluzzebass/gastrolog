@@ -140,7 +140,7 @@ func seedAndSeal(t *testing.T, orch *orchestrator.Orchestrator, vaultID glid.GLI
 			t.Fatalf("append: %v", err)
 		}
 	}
-	if _, err := orch.SealActive(vaultID, glid.Nil); err != nil {
+	if _, err := orch.SealActive(vaultID); err != nil {
 		t.Fatalf("seal: %v", err)
 	}
 	metas, err := orch.ListChunkMetas(vaultID)

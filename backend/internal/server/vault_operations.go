@@ -34,17 +34,7 @@ func (s *VaultServer) SealVault(
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("vault not found"))
 	}
 
-	// Resolve optional tier filter.
-	tierID := glid.Nil
-	if req.Msg.Tier != "" {
-		tid, connErr := parseUUID(req.Msg.Tier)
-		if connErr != nil {
-			return nil, connErr
-		}
-		tierID = tid
-	}
-
-	sealed, err := s.orch.SealActive(vaultID, tierID)
+	sealed, err := s.orch.SealActive(vaultID)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("seal active chunk: %w", err))
 	}
