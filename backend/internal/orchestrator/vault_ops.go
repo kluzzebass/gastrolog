@@ -187,7 +187,7 @@ func (o *Orchestrator) ListChunkMetas(vaultID glid.GLID) ([]chunk.ChunkMeta, err
 	return cm.List()
 }
 
-// ListAllChunkMetas returns chunk metadata from ALL local tiers of a vault,
+// ListAllChunkMetas returns chunk metadata from ALL local instances of a vault,
 // each tagged with its inst ID and type.
 // ListAllChunkMetas returns chunk metadata from all local inst instances.
 // When a vault has multiple inst instances for the same inst on the same
@@ -1116,8 +1116,8 @@ func drainIterator(next chunk.RecordIterator) {
 }
 
 // SealActiveTier seals the active chunk on matching vaults, on the
-// **leader** side of the seal flow. If instID is glid.Nil, all local tiers
-// in the vault are sealed. Returns the number of tiers sealed. No-op if the
+// **leader** side of the seal flow. If instID is glid.Nil, all local instances
+// in the vault are sealed. Returns the number of vaults sealed. No-op if the
 // active chunk is empty or absent.
 //
 // Role: vault leader. Sealing on the leader triggers follower seals via the

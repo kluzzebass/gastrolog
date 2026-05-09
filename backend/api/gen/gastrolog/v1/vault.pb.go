@@ -374,7 +374,7 @@ type ListChunksRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Vault string                 `protobuf:"bytes,1,opt,name=vault,proto3" json:"vault,omitempty"`
 	// When true, return only unsealed (active) chunks from this node's
-	// local tiers — no cross-node fan-out. Used for lightweight 5-second
+	// local instances — no cross-node fan-out. Used for lightweight 5-second
 	// polling of active-chunk stats (record count, bytes) while discrete
 	// events (seal, delete, compress) come through the WatchChunks stream.
 	// See gastrolog-1jijm.
@@ -2225,7 +2225,7 @@ func (x *SealVaultRequest) GetTier() string {
 
 type SealVaultResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	SealedCount   int32                  `protobuf:"varint,1,opt,name=sealed_count,json=sealedCount,proto3" json:"sealed_count,omitempty"` // number of tiers whose active chunk was sealed
+	SealedCount   int32                  `protobuf:"varint,1,opt,name=sealed_count,json=sealedCount,proto3" json:"sealed_count,omitempty"` // number of vaults whose active chunk was sealed
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

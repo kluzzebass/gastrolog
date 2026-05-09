@@ -141,7 +141,7 @@ func StorageIDs(placements []VaultPlacement) []string {
 }
 
 // SyntheticStoragePrefix is the prefix for synthetic storage IDs used when a node has
-// no file storages (e.g. memory tiers). Format: "node:<nodeID>".
+// no file storages (e.g. memory vaults). Format: "node:<nodeID>".
 const SyntheticStoragePrefix = "node:"
 
 // SyntheticStorageID returns a synthetic storage ID for a node without file storages.
@@ -150,7 +150,7 @@ func SyntheticStorageID(nodeID string) string { return SyntheticStoragePrefix + 
 // NodeIDForStorage resolves a storage ID to its node ID using the provided storage configs.
 // Handles synthetic storage IDs of the form "node:<nodeID>" for nodes without file storages.
 func NodeIDForStorage(storageID string, nscs []NodeStorageConfig) string {
-	// Check synthetic storage IDs first (used for memory tiers on nodes without file storages).
+	// Check synthetic storage IDs first (used for memory vaults on nodes without file storages).
 	if strings.HasPrefix(storageID, SyntheticStoragePrefix) {
 		return storageID[len(SyntheticStoragePrefix):]
 	}

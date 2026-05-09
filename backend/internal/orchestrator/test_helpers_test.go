@@ -125,7 +125,7 @@ func newMemoryInstance(t *testing.T, instID glid.GLID) *VaultInstance {
 }
 
 // setupTestStoreRuntime populates the test store with runtime state that tests
-// need — vault placements and node storage config. Most tests use memory tiers
+// need — vault placements and node storage config. Most tests use memory vaults
 // with a single test-node, so placements use synthetic storage IDs.
 func setupTestStoreRuntime(store *sysmem.Store, nodeID string, instIDs ...glid.GLID) {
 	ctx := context.Background()

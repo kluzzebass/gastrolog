@@ -152,7 +152,7 @@ func (s *SystemServer) SetNodeStorageConfig(
 // that the referenced cloud service exists.
 func (s *SystemServer) validateCloudTierFields(ctx context.Context, cfg *apiv1.TierConfig) *connect.Error {
 	if len(cfg.CloudServiceId) == 0 {
-		return connect.NewError(connect.CodeInvalidArgument, errors.New("cloud_service_id required for cloud tiers"))
+		return connect.NewError(connect.CodeInvalidArgument, errors.New("cloud_service_id required for cloud vaults"))
 	}
 	csID, connErr := parseProtoID(cfg.CloudServiceId)
 	if connErr != nil {
@@ -201,12 +201,12 @@ func (s *SystemServer) countEligibleStorages(ctx context.Context, vaultType syst
 
 	switch vaultType {
 	case system.VaultTypeMemory:
-		return len(nodes), nil // memory tiers: one per node (no disk storage)
+		return len(nodes), nil // memory vaults: one per node (no disk storage)
 	case system.VaultTypeJSONL:
-		return 1, nil // JSONL tiers are pinned to a single node
+		return 1, nil // JSONL vaults are pinned to a single node
 	case system.VaultTypeFile:
 		// Single storage class for both local-only and cloud-backed
-		// file tiers. See gastrolog-4k5mg.
+		// file vaults. See gastrolog-4k5mg.
 		requiredClass := p.GetStorageClass()
 		count := 0
 		for _, nsc := range nscs {

@@ -233,7 +233,7 @@ func TestListAllChunkMetasOverlaysFromFSM(t *testing.T) {
 }
 
 // TestListAllChunkMetasNilOverlayPassthrough verifies that tiers without an
-// OverlayFromFSM callback (single-node mode, memory tiers) pass the local
+// OverlayFromFSM callback (single-node mode, memory vaults) pass the local
 // chunk manager's view through unchanged. The overlay is opt-in.
 func TestListAllChunkMetasNilOverlayPassthrough(t *testing.T) {
 	t.Parallel()

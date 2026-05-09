@@ -155,8 +155,8 @@ func TestApplyConfigNil(t *testing.T) {
 // TestApplyConfigVaultWithNoLocalInstance is the regression test for
 // gastrolog-264pk. Before the fix, ApplyConfig (the startup path) would
 // silently skip registering any vault whose buildVaultInstances returned
-// zero local tiers — which happens on a node that isn't a placement
-// target for any of the vault's tiers (e.g. a node that joined
+// zero local instances — which happens on a node that isn't a placement
+// target for any of the vault's instances (e.g. a node that joined
 // the cluster as a non-inst-member, or a snapshot-restored node where
 // placements are reapplied via post-snapshot log replay rather than the
 // initial ApplyConfig). The vault then never made it into the
@@ -169,7 +169,7 @@ func TestApplyConfigVaultWithNoLocalInstance(t *testing.T) {
 	t.Parallel()
 	// Local node is "node-1". Build a vault whose only inst is placed
 	// exclusively on "node-2" — buildVaultInstances should return zero
-	// local tiers, but the vault must still be registered so a later
+	// local instances, but the vault must still be registered so a later
 	// AddVaultInstance call can succeed.
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
@@ -196,9 +196,9 @@ func TestApplyConfigVaultWithNoLocalInstance(t *testing.T) {
 	}
 
 	// The vault MUST be registered, even though buildVaultInstances
-	// returned zero local tiers for it.
+	// returned zero local instances for it.
 	if !slices.Contains(orch.ListVaults(), vaultID) {
-		t.Fatalf("vault %s should be registered after ApplyConfig even with zero local tiers", vaultID)
+		t.Fatalf("vault %s should be registered after ApplyConfig even with zero local instances", vaultID)
 	}
 }
 

@@ -19,7 +19,7 @@ import (
 // TestHistogramFullyLocal_RequiresLeadership is the regression for
 // gastrolog-2g334. The bug: histogramFullyLocal used LocalReplicaTierIDs
 // which includes follower tiers, so a node that's only a follower for
-// a vault's tiers would skip the cross-node fan-out and serve the
+// a vault's instances would skip the cross-node fan-out and serve the
 // histogram from purely local data. Followers receive only sealed chunks
 // via replication — the active (un-sealed) chunk lives only on the
 // leader and is never replicated. The follower-only view drops every

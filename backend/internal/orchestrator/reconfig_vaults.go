@@ -1273,7 +1273,7 @@ func (o *Orchestrator) clearVaultFSMChunkCallbacks(vaultID, instID glid.GLID) {
 // just arrived from Raft would cause infinite re-application.
 //
 // Safe to call with nil group, nil cm, or a chunk manager that doesn't
-// implement SilentDeleter (e.g. memory tiers): the callback is simply not
+// implement SilentDeleter (e.g. memory vaults): the callback is simply not
 // wired in those cases.
 //
 // IMPORTANT: this callback acquires the chunk manager's m.mu via
@@ -1436,7 +1436,7 @@ func buildVaultParams(sys *system.System, vaultCfg system.VaultConfig, localNode
 		}
 
 	case system.VaultTypeFile:
-		// Single storage class for all file tiers — local-only and
+		// Single storage class for all file vaults — local-only and
 		// cloud-backed alike. The active chunk and warm cache live at
 		// the same chunkDir path post-step-7k. See gastrolog-4k5mg.
 		if vaultCfg.IsCloud() {

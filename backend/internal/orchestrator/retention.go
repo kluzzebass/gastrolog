@@ -254,7 +254,7 @@ func (o *Orchestrator) instCatchupSweepAll() {
 	}
 }
 
-// enforceMemoryBudgets checks memory tiers for budget overruns and transitions
+// enforceMemoryBudgets checks memory vaults for budget overruns and transitions
 // the oldest sealed chunks to the next inst. Only runs on leaders.
 func (o *Orchestrator) enforceMemoryBudgets(cfg *system.Config) {
 	if cfg == nil {

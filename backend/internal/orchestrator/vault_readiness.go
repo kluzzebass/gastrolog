@@ -11,7 +11,7 @@ import (
 //
 // A vault on this node is "ready" iff:
 //   1. It has at least one local inst instance (len(Vault.Tiers) > 0). A vault
-//      registered with zero local tiers is a routing shell; it cannot serve
+//      registered with zero local instances is a routing shell; it cannot serve
 //      reads or writes and callers must forward to a peer that holds the
 //      data.
 //   2. Every local inst's FSM has applied at least one log entry (or has
@@ -62,7 +62,7 @@ func vaultReplicationReadinessErr(vaultID glid.GLID, v *Vault) error {
 
 // LocalVaultsReplicationReady reports whether every vault that hosts at least
 // one local inst instance has replication metadata ready. Vaults registered
-// with zero local tiers are ignored so routing-only shells do not fail
+// with zero local instances are ignored so routing-only shells do not fail
 // load-balancer readiness (gastrolog-4ip1o).
 func (o *Orchestrator) LocalVaultsReplicationReady() bool {
 	o.mu.RLock()

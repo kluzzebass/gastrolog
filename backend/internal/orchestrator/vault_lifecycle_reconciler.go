@@ -780,7 +780,7 @@ const staleLeaderFSMGracePeriod = 1 * time.Hour
 // SweepStaleLeaderFSMEntries walks the FSM manifest on the leader of a
 // non-cloud inst and proposes CmdRequestDelete for any sealed entry
 // missing from the leader's local chunk manager AND past the grace
-// period. The leader is the source of truth for non-cloud tiers
+// period. The leader is the source of truth for non-cloud vaults
 // (per SweepMissingReplicas's invariant); if the leader doesn't have
 // the chunk and the chunk isn't recoverable from peers (the
 // missing-replica catchup mechanism only works leader→follower, so a
