@@ -64,7 +64,7 @@ func (m *replicationFakeReplicator) RequestReplicaCatchup(_ context.Context, _ s
 
 // ---------- helpers ----------
 
-func newReplicationTier(t *testing.T, instID glid.GLID, followers []system.ReplicationTarget, isFollower bool, leaderNodeID string) *VaultInstance {
+func newReplicationInstance(t *testing.T, instID glid.GLID, followers []system.ReplicationTarget, isFollower bool, leaderNodeID string) *VaultInstance {
 	t.Helper()
 	cm, err := chunkmem.NewFactory()(nil, nil)
 	if err != nil {
@@ -105,7 +105,7 @@ func TestSealActiveTier(t *testing.T) {
 
 	instID := glid.New()
 	vaultID := glid.New()
-	vault := NewVault(vaultID, newReplicationTier(t, instID, nil, false, ""))
+	vault := NewVault(vaultID, newReplicationInstance(t, instID, nil, false, ""))
 	vault.Name = "seal-test"
 	orch.RegisterVault(vault)
 
@@ -136,7 +136,7 @@ func TestSealActiveTierMismatchSkipsSeal(t *testing.T) {
 
 	instID := glid.New()
 	vaultID := glid.New()
-	vault := NewVault(vaultID, newReplicationTier(t, instID, nil, false, ""))
+	vault := NewVault(vaultID, newReplicationInstance(t, instID, nil, false, ""))
 	vault.Name = "mismatch"
 	orch.RegisterVault(vault)
 
@@ -169,7 +169,7 @@ func TestSealActiveTierNoActiveChunk(t *testing.T) {
 
 	instID := glid.New()
 	vaultID := glid.New()
-	vault := NewVault(vaultID, newReplicationTier(t, instID, nil, false, ""))
+	vault := NewVault(vaultID, newReplicationInstance(t, instID, nil, false, ""))
 	orch.RegisterVault(vault)
 
 	// No records appended — no active chunk.
@@ -190,7 +190,7 @@ func TestCatchupSecondaryNoSealedChunks(t *testing.T) {
 
 	instID := glid.New()
 	vaultID := glid.New()
-	vault := NewVault(vaultID, newReplicationTier(t, instID, nil, false, ""))
+	vault := NewVault(vaultID, newReplicationInstance(t, instID, nil, false, ""))
 	orch.RegisterVault(vault)
 
 	mock := &replicationFakeReplicator{}
@@ -210,7 +210,7 @@ func TestCatchupSecondaryOnlyPrimary(t *testing.T) {
 	instID := glid.New()
 	vaultID := glid.New()
 	// This is a follower — should not initiate catchup.
-	vault := NewVault(vaultID, newReplicationTier(t, instID, nil, true, "node-2"))
+	vault := NewVault(vaultID, newReplicationInstance(t, instID, nil, true, "node-2"))
 	orch.RegisterVault(vault)
 
 	err := orch.catchupFollower(context.Background(), vaultID, instID, "node-3")
@@ -225,7 +225,7 @@ func TestCatchupSecondaryNoTransferrer(t *testing.T) {
 
 	instID := glid.New()
 	vaultID := glid.New()
-	vault := NewVault(vaultID, newReplicationTier(t, instID, nil, false, ""))
+	vault := NewVault(vaultID, newReplicationInstance(t, instID, nil, false, ""))
 	orch.RegisterVault(vault)
 	// No transferrer set.
 
@@ -255,7 +255,7 @@ func TestCatchupSkipsFSMRetiredChunks(t *testing.T) {
 
 	instID := glid.New()
 	vaultID := glid.New()
-	inst := newReplicationTier(t, instID, nil, false, "")
+	inst := newReplicationInstance(t, instID, nil, false, "")
 	vault := NewVault(vaultID, inst)
 	orch.RegisterVault(vault)
 
@@ -341,7 +341,7 @@ func TestCatchupNilManifestUsesAllChunks(t *testing.T) {
 
 	instID := glid.New()
 	vaultID := glid.New()
-	inst := newReplicationTier(t, instID, nil, false, "")
+	inst := newReplicationInstance(t, instID, nil, false, "")
 	vault := NewVault(vaultID, inst)
 	orch.RegisterVault(vault)
 
@@ -388,7 +388,7 @@ func TestClusterReplicationSealedChunksArriveOnFollowers(t *testing.T) {
 	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 1, 100)
 
 	leaderNode := h.nodes["leader"]
-	tier0 := leaderNode.instances[0]
+	inst0 := leaderNode.instances[0]
 
 	// Burst ingest 1K records → 10 sealed chunks via 100-record rotation.
 	const totalRecords = 1_000
@@ -405,12 +405,12 @@ func TestClusterReplicationSealedChunksArriveOnFollowers(t *testing.T) {
 	}
 
 	// Seal remaining active chunk.
-	if active := tier0.Chunks.Active(); active != nil && active.RecordCount > 0 {
-		_ = tier0.Chunks.Seal()
+	if active := inst0.Chunks.Active(); active != nil && active.RecordCount > 0 {
+		_ = inst0.Chunks.Seal()
 	}
 
 	// Get sealed chunks on leader.
-	metas, _ := tier0.Chunks.List()
+	metas, _ := inst0.Chunks.List()
 	if len(metas) < 5 {
 		t.Fatalf("expected many sealed chunks, got %d", len(metas))
 	}
@@ -419,7 +419,7 @@ func TestClusterReplicationSealedChunksArriveOnFollowers(t *testing.T) {
 	// Run PostSealProcess on each chunk (compress + index) — required before
 	// replication because replicateToFollower opens a cursor which needs the
 	// chunk to be readable.
-	processor, ok := tier0.Chunks.(chunk.ChunkPostSealProcessor)
+	processor, ok := inst0.Chunks.(chunk.ChunkPostSealProcessor)
 	if ok {
 		for _, m := range metas {
 			if err := processor.PostSealProcess(context.Background(), m.ID); err != nil {
@@ -429,7 +429,7 @@ func TestClusterReplicationSealedChunksArriveOnFollowers(t *testing.T) {
 	}
 
 	// Replicate each sealed chunk to all followers.
-	followerTargets := tier0.FollowerTargets
+	followerTargets := inst0.FollowerTargets
 	ctx := context.Background()
 	for _, m := range metas {
 		leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, h.instIDs[0], m.ID, followerTargets)
@@ -472,7 +472,7 @@ func TestClusterReplicationSealedIdxWriteTSMatchesLeader(t *testing.T) {
 	h := setupCluster(t, []string{"leader", "f1", "f2"}, 1, 100)
 
 	leaderNode := h.nodes["leader"]
-	leaderTier := leaderNode.instances[0]
+	leaderInst := leaderNode.instances[0]
 
 	// Fewer records than rotation threshold → single active chunk, then one
 	// sealed chunk after explicit Seal().
@@ -489,13 +489,13 @@ func TestClusterReplicationSealedIdxWriteTSMatchesLeader(t *testing.T) {
 		}
 	}
 
-	if active := leaderTier.Chunks.Active(); active != nil && active.RecordCount > 0 {
-		if err := leaderTier.Chunks.Seal(); err != nil {
+	if active := leaderInst.Chunks.Active(); active != nil && active.RecordCount > 0 {
+		if err := leaderInst.Chunks.Seal(); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	metas, err := leaderTier.Chunks.List()
+	metas, err := leaderInst.Chunks.List()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -510,7 +510,7 @@ func TestClusterReplicationSealedIdxWriteTSMatchesLeader(t *testing.T) {
 		t.Fatalf("no sealed chunk with %d records", totalRecords)
 	}
 
-	processor, ok := leaderTier.Chunks.(chunk.ChunkPostSealProcessor)
+	processor, ok := leaderInst.Chunks.(chunk.ChunkPostSealProcessor)
 	if !ok {
 		t.Fatal("leader inst chunks must implement ChunkPostSealProcessor")
 	}
@@ -519,9 +519,9 @@ func TestClusterReplicationSealedIdxWriteTSMatchesLeader(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, h.instIDs[0], sealedID, leaderTier.FollowerTargets)
+	leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, h.instIDs[0], sealedID, leaderInst.FollowerTargets)
 
-	leaderEntries := chunkRecordTimestamps(t, leaderTier.Chunks, sealedID)
+	leaderEntries := chunkRecordTimestamps(t, leaderInst.Chunks, sealedID)
 	if len(leaderEntries) != totalRecords {
 		t.Fatalf("leader entries: want %d got %d", totalRecords, len(leaderEntries))
 	}
@@ -582,7 +582,7 @@ func TestClusterReplicationSealSync(t *testing.T) {
 	h := setupCluster(t, []string{"leader", "f1", "f2"}, 1, 10000) // high rotation so we control seal manually
 
 	leaderNode := h.nodes["leader"]
-	leaderTier := leaderNode.instances[0]
+	leaderInst := leaderNode.instances[0]
 
 	// Ingest 50 records on leader. With chunkReplicator wired, AppendToVault
 	// auto-forwards to followers via AppendRecords, so the followers end up
@@ -599,7 +599,7 @@ func TestClusterReplicationSealSync(t *testing.T) {
 		}
 	}
 
-	leaderActive := leaderTier.Chunks.Active()
+	leaderActive := leaderInst.Chunks.Active()
 	if leaderActive == nil {
 		t.Fatal("expected active chunk on leader after append")
 	}
@@ -614,7 +614,7 @@ func TestClusterReplicationSealSync(t *testing.T) {
 	}
 
 	// Seal on leader.
-	if err := leaderTier.Chunks.Seal(); err != nil {
+	if err := leaderInst.Chunks.Seal(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -658,7 +658,7 @@ func TestClusterReplicationDeletePropagation(t *testing.T) {
 	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 1, 100)
 
 	leaderNode := h.nodes["leader"]
-	leaderTier := leaderNode.instances[0]
+	leaderInst := leaderNode.instances[0]
 
 	// Ingest 500 records (5 sealed chunks).
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
@@ -672,15 +672,15 @@ func TestClusterReplicationDeletePropagation(t *testing.T) {
 			t.Fatalf("append %d: %v", i, err)
 		}
 	}
-	if active := leaderTier.Chunks.Active(); active != nil && active.RecordCount > 0 {
-		_ = leaderTier.Chunks.Seal()
+	if active := leaderInst.Chunks.Active(); active != nil && active.RecordCount > 0 {
+		_ = leaderInst.Chunks.Seal()
 	}
 
-	metas, _ := leaderTier.Chunks.List()
+	metas, _ := leaderInst.Chunks.List()
 	t.Logf("leader: %d sealed chunks", len(metas))
 
 	// Post-seal process and replicate to followers.
-	processor, ok := leaderTier.Chunks.(chunk.ChunkPostSealProcessor)
+	processor, ok := leaderInst.Chunks.(chunk.ChunkPostSealProcessor)
 	if ok {
 		for _, m := range metas {
 			_ = processor.PostSealProcess(context.Background(), m.ID)
@@ -688,7 +688,7 @@ func TestClusterReplicationDeletePropagation(t *testing.T) {
 	}
 	ctx := context.Background()
 	for _, m := range metas {
-		leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, h.instIDs[0], m.ID, leaderTier.FollowerTargets)
+		leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, h.instIDs[0], m.ID, leaderInst.FollowerTargets)
 	}
 
 	// Verify followers have chunks.
@@ -702,10 +702,10 @@ func TestClusterReplicationDeletePropagation(t *testing.T) {
 	// Now delete all chunks on leader AND forward delete to followers.
 	for _, m := range metas {
 		// Delete on leader.
-		if err := leaderTier.Indexes.DeleteIndexes(m.ID); err != nil {
+		if err := leaderInst.Indexes.DeleteIndexes(m.ID); err != nil {
 			t.Logf("leader DeleteIndexes(%s): %v", m.ID, err)
 		}
-		if err := leaderTier.Chunks.Delete(m.ID); err != nil {
+		if err := leaderInst.Chunks.Delete(m.ID); err != nil {
 			t.Fatalf("leader Delete(%s): %v", m.ID, err)
 		}
 		// Forward delete to each follower.
