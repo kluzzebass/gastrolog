@@ -27,7 +27,7 @@ import (
 //     generous for round-trip + processing.
 //   - TransferRecords streams a sealed chunk into ImportRecords on the peer.
 //     15s bounds stalled peers without tying up resources indefinitely.
-//   - StreamToTier streams each record into StreamAppendToTier, and the peer
+//   - Vault streaming forwards each record to the destination, and the peer
 //     runs follower replication per record (ForwardingTimeout per follower).
 //     Follower fanout is parallelized on the destination (WaitGroup per record),
 //     but each record still waits for the slowest follower before the next

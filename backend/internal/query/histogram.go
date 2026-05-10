@@ -753,7 +753,7 @@ func timechartChunkByIngestTS(
 	// IngestStart / IngestEnd track the FIRST and LAST *appended* records'
 	// IngestTS, NOT min/max of IngestTS within the chunk. For non-monotonic
 	// chunks (records appended out of TS order — common for cloud-backed
-	// chunks built via ImportRecords or for tier-2+ destinations receiving
+	// chunks built via ImportRecords or for downstream destinations receiving
 	// streamed records), IngestEnd can be earlier than IngestStart, and the
 	// chunk's true TS range can extend beyond [IngestStart, IngestEnd] in
 	// either direction. Clamp by min/max instead of treating Start/End
@@ -811,7 +811,7 @@ func timechartChunkByIngestTS(
 
 // bucketizeActiveChunk iterates the active chunk's records once and
 // increments the corresponding bucket for each record. Required for
-// non-monotonic active chunks (tier 2+ destinations receiving streamed
+// non-monotonic active chunks (downstream destinations receiving streamed
 // records out of IngestTS order); the rank-arithmetic path is unsafe
 // there because cm.FindIngestStartPosition returns physical position,
 // not rank. See gastrolog-66b7x.
@@ -1083,7 +1083,7 @@ func distributeChunkRecordsByOverlap(
 	// Without the sort, a non-monotonic chunk hits the span≤0 branch and
 	// dumps RecordCount into the IngestStart bucket — which can be RECENT
 	// (last-appended record's TS) even when the chunk's actual records are
-	// all old. That produced false cloudCount on file-tier-only buckets at
+	// all old. That produced false cloudCount on local-only buckets at
 	// chunk-rotation cadence (every ~rotation interval). See
 	// gastrolog-2zdsc follow-up.
 	loBound, hiBound := meta.IngestStart, meta.IngestEnd

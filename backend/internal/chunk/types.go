@@ -203,13 +203,13 @@ type ChunkMeta struct {
 	SourceEnd    time.Time // max SourceTS in chunk
 
 	// IngestTSMonotonic is true when records were appended in
-	// IngestTS-monotonic order (typical tier 1 ingest path). False when
-	// records arrived out of IngestTS order — notably tier 2+ destinations
-	// receiving streamed records via Append. Distinguishes when physical
-	// record position equals IngestTS-sorted rank (monotonic) vs when it
-	// doesn't (non-monotonic). Histograms use this to pick between fast
-	// O(buckets × log N) rank arithmetic and the slower full-scan
-	// bucketize path. See gastrolog-66b7x.
+	// IngestTS-monotonic order (typical edge ingest path). False when
+	// records arrived out of IngestTS order — notably downstream
+	// destinations receiving streamed records via Append. Distinguishes
+	// when physical record position equals IngestTS-sorted rank
+	// (monotonic) vs when it doesn't (non-monotonic). Histograms use
+	// this to pick between fast O(buckets × log N) rank arithmetic
+	// and the slower full-scan bucketize path. See gastrolog-66b7x.
 	IngestTSMonotonic bool
 	CloudBacked  bool      // true = chunk lives in cloud storage, not local disk
 	Archived     bool      // true = chunk is in an offline storage tier (Glacier, Azure Archive)

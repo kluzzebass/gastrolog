@@ -1,5 +1,5 @@
 // Package vaultraft holds the vault control-plane Raft FSM (gastrolog-5xxbd).
-// Tier chunk metadata is namespaced under OpVaultChunkFSM (per-vault sub-FSMs) on that
+// Vault chunk metadata is namespaced under OpVaultChunkFSM (per-vault sub-FSMs) on that
 // same Raft group, without changing the vaultctlfsm wire encoding.
 package vaultraft
 
@@ -24,7 +24,7 @@ var vaultSnapMagic = [8]byte{'G', 'L', 'V', 'C', 'T', 'L', 'S', '1'}
 const vaultSnapVersion uint32 = 1
 
 // FSM implements the vault control-plane replicated state machine: no-ops,
-// vault-scoped tierfsm commands, and snapshot/restore across vaults.
+// vault-scoped vaultctlfsm commands, and snapshot/restore across vaults.
 //
 // Readiness for reads/writes is NOT tracked on this FSM — it is tracked at
 // the Raft level via r.AppliedIndex(), which advances for every log entry
@@ -39,7 +39,7 @@ type FSM struct {
 
 	// onAfterRestore fires (outside mu) once Restore() has swapped
 	// the vault-sub-FSM map. The orchestrator uses this to walk each
-	// tier's reconciler and run ReconcileFromSnapshot, which processes
+	// instance's reconciler and run ReconcileFromSnapshot, which processes
 	// any pendingDeletes obligations the rejoining node owes and
 	// projects FSM-sealed state onto local files. Without this hook
 	// the receipt protocol's catchup mechanism is dead code.
@@ -58,14 +58,14 @@ func NewFSM() *FSM {
 // mutex) at the tail of every successful Restore. Idempotent;
 // replaces any prior callback. The orchestrator wires this when
 // the vault-ctl Raft group is first ensured so that snapshot install
-// triggers ReconcileFromSnapshot on every tier in the vault.
+// triggers ReconcileFromSnapshot on every instance in the vault.
 func (f *FSM) SetOnAfterRestore(fn func()) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.onAfterRestore = fn
 }
 
-// Tiers returns a snapshot of the current (instID → sub-FSM) map.
+// Instances returns a snapshot of the current (instID → sub-FSM) map.
 // Safe for the orchestrator's after-restore handler to iterate
 // without holding mu.
 func (f *FSM) Instances() map[glid.GLID]*vaultctlfsm.FSM {
@@ -110,16 +110,17 @@ func (f *FSM) Apply(l *hraft.Log) any {
 	}
 }
 
-// InstanceFSM returns the tierfsm sub-machine for instID, or nil if no command
-// has been applied for that tier yet.
+// InstanceFSM returns the vaultctlfsm sub-machine for instID, or nil if no
+// command has been applied for that instance yet.
 func (f *FSM) InstanceFSM(instID glid.GLID) *vaultctlfsm.FSM {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.instances[instID]
 }
 
-// EnsureInstanceFSM returns the tierfsm sub-state for instID, creating an empty
-// sub-FSM if none exists yet (for wiring OnDelete/OnUpload before first Apply).
+// EnsureInstanceFSM returns the vaultctlfsm sub-state for instID, creating
+// an empty sub-FSM if none exists yet (for wiring OnDelete/OnUpload before
+// first Apply).
 func (f *FSM) EnsureInstanceFSM(instID glid.GLID) *vaultctlfsm.FSM {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -131,7 +132,7 @@ func (f *FSM) EnsureInstanceFSM(instID glid.GLID) *vaultctlfsm.FSM {
 	return t
 }
 
-// Snapshot returns a snapshot of all tier sub-FSMs (versioned wire format).
+// Snapshot returns a snapshot of all instance sub-FSMs (versioned wire format).
 func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) {
 	f.mu.Lock()
 	ids := slices.SortedFunc(maps.Keys(f.instances), compareGLID)
@@ -164,7 +165,7 @@ func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) {
 // legacy single-byte empty snapshot ({1}) written by older builds.
 //
 // Streams the snapshot incrementally rather than slurping it into memory —
-// the combined tier-state blob may be large on clusters with many tiers.
+// the combined instance-state blob may be large on clusters with many vaults.
 func (f *FSM) Restore(rc io.ReadCloser) error {
 	defer func() { _ = rc.Close() }()
 
@@ -236,7 +237,7 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 		}
 		// Drain any unread bytes so the next instance header aligns.
 		if _, err := io.Copy(io.Discard, instReader); err != nil {
-			return fmt.Errorf("vaultraft restore: drain tier[%d] tail: %w", i, err)
+			return fmt.Errorf("vaultraft restore: drain instance[%d] tail: %w", i, err)
 		}
 		nextInstances[tid] = t
 	}
@@ -245,7 +246,7 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 	hook := f.onAfterRestore
 	f.mu.Unlock()
 	// Fire outside the mutex — the handler walks per-vault reconcilers
-	// which can call back into the FSM (Tiers, PendingDeletes, etc.).
+	// which can call back into the FSM (Instances, PendingDeletes, etc.).
 	if hook != nil {
 		hook()
 	}
@@ -272,7 +273,7 @@ func (s *bufSink) ID() string    { return "vaultraft" }
 func (s *bufSink) Cancel() error { return nil }
 
 type vaultCtlSnapshot struct {
-	instBlobs [][]byte // each: [16 instID][tier snapshot bytes...]
+	instBlobs [][]byte // each: [16 instID][instance snapshot bytes...]
 }
 
 func (s *vaultCtlSnapshot) Persist(sink hraft.SnapshotSink) error {
@@ -282,7 +283,7 @@ func (s *vaultCtlSnapshot) Persist(sink hraft.SnapshotSink) error {
 	}
 	var hdr [8]byte
 	binary.BigEndian.PutUint32(hdr[0:4], vaultSnapVersion)
-	binary.BigEndian.PutUint32(hdr[4:8], uint32(len(s.instBlobs))) //nolint:gosec // G115: tier count bounded in practice
+	binary.BigEndian.PutUint32(hdr[4:8], uint32(len(s.instBlobs))) //nolint:gosec // G115: instance count bounded in practice
 	if _, err := sink.Write(hdr[:]); err != nil {
 		_ = sink.Cancel()
 		return err
@@ -290,7 +291,7 @@ func (s *vaultCtlSnapshot) Persist(sink hraft.SnapshotSink) error {
 	for _, blob := range s.instBlobs {
 		if len(blob) < glid.Size {
 			_ = sink.Cancel()
-			return errors.New("vaultraft snapshot: tier blob too short")
+			return errors.New("vaultraft snapshot: instance blob too short")
 		}
 		tid := blob[:glid.Size]
 		payload := blob[glid.Size:]

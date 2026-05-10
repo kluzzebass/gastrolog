@@ -43,11 +43,11 @@ func TestFSM_OpVaultChunkFSM_delegate(t *testing.T) {
 	}
 	sub := f.InstanceFSM(instID)
 	if sub == nil {
-		t.Fatal("expected tier sub-FSM")
+		t.Fatal("expected instance sub-FSM")
 	}
 	e := sub.Get(cid)
 	if e == nil {
-		t.Fatal("expected chunk in tier FSM")
+		t.Fatal("expected chunk in instance FSM")
 	}
 	if e.ID != cid {
 		t.Fatalf("chunk id: got %v want %v", e.ID, cid)
@@ -81,10 +81,10 @@ func TestFSM_SnapshotRestore_twoInstances(t *testing.T) {
 	a := testChunkID(1)
 	b := testChunkID(2)
 	if r := f.Apply(&hraft.Log{Data: MarshalVaultChunkCommand(instA, vaultctlfsm.MarshalCreateChunk(a, now, now, now))}); r != nil {
-		t.Fatalf("tier A: %v", r)
+		t.Fatalf("instance A: %v", r)
 	}
 	if r := f.Apply(&hraft.Log{Data: MarshalVaultChunkCommand(instB, vaultctlfsm.MarshalCreateChunk(b, now, now, now))}); r != nil {
-		t.Fatalf("tier B: %v", r)
+		t.Fatalf("instance B: %v", r)
 	}
 	snap, err := f.Snapshot()
 	if err != nil {
@@ -99,16 +99,16 @@ func TestFSM_SnapshotRestore_twoInstances(t *testing.T) {
 		t.Fatalf("Restore: %v", err)
 	}
 	if f2.InstanceFSM(instA).Get(a) == nil {
-		t.Fatal("tier A chunk missing after restore")
+		t.Fatal("instance A chunk missing after restore")
 	}
 	if f2.InstanceFSM(instB).Get(b) == nil {
-		t.Fatal("tier B chunk missing after restore")
+		t.Fatal("instance B chunk missing after restore")
 	}
 }
 
 // TestFSM_OnAfterRestoreFires pins the gastrolog-51gme catchup hook:
 // snapshot install must fire SetOnAfterRestore so the orchestrator can
-// run ReconcileFromSnapshot on every tier. Without this, the receipt
+// run ReconcileFromSnapshot on every instance. Without this, the receipt
 // protocol's pendingDeletes silently leak across snapshot boundaries.
 func TestFSM_OnAfterRestoreFires(t *testing.T) {
 	t.Parallel()
@@ -171,12 +171,12 @@ func TestFSM_Restore_legacyEmptyByte(t *testing.T) {
 		t.Fatalf("apply: %v", r)
 	}
 	if f.InstanceFSM(instID) == nil {
-		t.Fatal("expected tier before legacy restore")
+		t.Fatal("expected instance before legacy restore")
 	}
 	if err := f.Restore(io.NopCloser(bytes.NewReader([]byte{1}))); err != nil {
 		t.Fatalf("legacy restore: %v", err)
 	}
 	if f.InstanceFSM(instID) != nil {
-		t.Fatal("legacy restore should reset tier state")
+		t.Fatal("legacy restore should reset instance state")
 	}
 }

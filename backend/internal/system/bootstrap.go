@@ -81,9 +81,6 @@ func Bootstrap(ctx context.Context, store Store) error {
 			return err
 		}
 	}
-	// 1:1 vault:tier — VaultConfig carries the storage/lifecycle fields
-	// directly. Bootstrap no longer writes TierConfig; the FSM bridge
-	// syncTierFromVault mirrors VaultConfig → TierConfig on every PutVault.
 	for _, v := range cfg.Vaults {
 		if err := store.PutVault(ctx, v); err != nil {
 			return err

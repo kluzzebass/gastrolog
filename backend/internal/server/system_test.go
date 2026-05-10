@@ -92,15 +92,6 @@ func testAfterConfigApply(orch *orchestrator.Orchestrator, cfgStore system.Store
 	}
 }
 
-// ensureMemoryTier is a legacy fixture helper. With 1:1 vault:tier collapse
-// the orchestrator no longer reads tier configs; this is kept only so
-// historical callers continue compiling — the returned ID equals the vaultID.
-func ensureMemoryTier(t *testing.T, cfgStore system.Store, vaultID glid.GLID) string {
-	t.Helper()
-	_ = cfgStore
-	return vaultID.String()
-}
-
 // newConfigTestSetup creates an orchestrator, config vault, and Connect client
 // for testing config RPCs.
 func newConfigTestSetup(t *testing.T) (gastrologv1connect.SystemServiceClient, system.Store, *orchestrator.Orchestrator) {
@@ -141,7 +132,6 @@ func TestDeleteVaultForce(t *testing.T) {
 	ctx := context.Background()
 
 	vaultID := glid.New()
-	ensureMemoryTier(t, cfgStore, vaultID)
 
 	// gastrolog-4kkoo (Phase 5): no FilterConfig — the test wires a filter
 	// set directly onto the orchestrator below, so no Put step is needed.
@@ -219,15 +209,11 @@ func TestDeleteVaultNotFound(t *testing.T) {
 	}
 }
 
-// TestPutVaultNestedDirPrevention was removed: directory overlap validation
-// has moved from VaultConfig to TierConfig (vault storage refactor).
-
 func TestPauseResumeVaultRPC(t *testing.T) {
-	client, cfgStore, orch := newConfigTestSetup(t)
+	client, _, orch := newConfigTestSetup(t)
 	ctx := context.Background()
 
 	vaultID := glid.New()
-	ensureMemoryTier(t, cfgStore, vaultID)
 
 	// gastrolog-4kkoo (Phase 5): expression inlined on the route via Stages
 	// — no separate FilterConfig entity.
@@ -345,7 +331,6 @@ func TestPauseVaultPersistsToConfig(t *testing.T) {
 	ctx := context.Background()
 
 	vaultID := glid.New()
-	ensureMemoryTier(t, cfgStore, vaultID)
 
 	// gastrolog-4kkoo (Phase 5): no FilterConfig — the test only verifies
 	// PauseVault config persistence and doesn't rely on a route, so the
@@ -1170,15 +1155,6 @@ func TestGetRouteStats(t *testing.T) {
 // engine via synthetic _source=retention attribute injection (todo step 7
 // of gastrolog-4kkoo). The replacement test will assert that a route
 // matching `_source == retention` activates only on retention events.
-
-// TestPutVaultEjectRetentionRule, TestPutVaultEjectRuleRequiresEjectOnlyRoute,
-// TestPutVaultEjectRuleMissingRouteIDs, TestDeleteRouteReferencedByEjectVault,
-// and TestPutVaultEjectRuleNonexistentRoute were removed: retention rules
-// (including eject rules) have moved from VaultConfig to TierConfig as part of
-// the vault storage refactor. These validations will be tested when the
-// PutTier RPC is implemented.
-
-// Remaining eject tests removed — see comment above.
 
 // ---------------------------------------------------------------------------
 // DeleteLookup tests

@@ -81,7 +81,7 @@ type Server struct {
 
 	// stopCtx is cancelled by Stop() to signal long-running stream handlers
 	// that they should return cleanly. Handlers that block in
-	// stream.RecvMsg() — tier replication, stream forward records, forward
+	// stream.RecvMsg() — vault replication, stream forward records, forward
 	// import records — wrap their Recv in recvOrShutdown() so they observe
 	// this cancellation within a few milliseconds rather than waiting for
 	// grpcSrv.GracefulStop()'s transport-level drain. See gastrolog-1e5ke.
@@ -95,11 +95,10 @@ type Server struct {
 	applyFn func(ctx context.Context, data []byte) error
 
 	// groupApplyFn applies a pre-marshaled command to the multiraft group
-	// identified by groupID. Used by both ForwardTierApply (groupID = the
-	// vault-ctl group carrying an OpVaultChunkFSM-wrapped payload) and
-	// ForwardVaultApply (groupID = the vault-ctl group, payload = native
-	// vault-ctl command). Post-gastrolog-5xxbd there is no separate
-	// tier-Raft path; both RPCs route through this single function.
+	// identified by groupID. Used by ForwardVaultApply for both the
+	// OpVaultChunkFSM-wrapped chunk-FSM case and the native vault-ctl
+	// command case — both target the vault-ctl Raft group via this single
+	// function.
 	groupApplyFn func(ctx context.Context, groupID string, data []byte) error
 
 	// enrollHandler handles the Enroll RPC for joining nodes.
@@ -131,8 +130,8 @@ type Server struct {
 	// Set after the orchestrator is created, before forwarding starts.
 	recordAppender RecordAppender
 
-	// recordAppenderForVault writes forwarded records into a specific tier.
-	// Used for inter-tier transition when tier_id is set on ForwardRecordsRequest.
+	// recordAppenderForVault writes forwarded records into a specific vault.
+	// Used for inter-vault transition when vault_id is set on ForwardRecordsRequest.
 	recordAppenderForVault VaultRecordAppender
 
 	// chunkSealExecutor seals a specific chunk on this node, used by the
@@ -141,7 +140,7 @@ type Server struct {
 	// SealVault RPC handler with no expected-chunk gate.
 	chunkSealExecutor ChunkSealExecutor
 
-	// deleteChunkExecutor deletes a sealed chunk from a tier on this node.
+	// deleteChunkExecutor deletes a sealed chunk from a vault on this node.
 	// Invoked by the ChunkReplication stream handler.
 	deleteChunkExecutor DeleteChunkExecutor
 
@@ -149,7 +148,7 @@ type Server struct {
 	// Set after the orchestrator is created, before chunk transfer starts.
 	recordImporter RecordImporter
 
-	// vaultRecordImporter imports records as a sealed chunk in a specific tier,
+	// vaultRecordImporter imports records as a sealed chunk in a specific vault,
 	// preserving the original chunk ID. Used for sealed-chunk replication.
 	vaultRecordImporter VaultRecordImporter
 
@@ -443,11 +442,11 @@ func (s *Server) SetApplyFn(fn func(ctx context.Context, data []byte) error) {
 	s.applyFn = fn
 }
 
-// SetGroupApplyFn sets the function used by both ForwardTierApply and
-// ForwardVaultApply handlers to apply commands to a multiraft group on
-// this node. Callers typically pass a closure that resolves groupID via
-// the GroupManager and calls Apply on the resulting Raft instance.
-// See wireClusterRaftApplies in app.go for the canonical wiring.
+// SetGroupApplyFn sets the function used by ForwardVaultApply handlers to
+// apply commands to a multiraft group on this node. Callers typically pass
+// a closure that resolves groupID via the GroupManager and calls Apply on
+// the resulting Raft instance. See wireClusterRaftApplies in app.go for the
+// canonical wiring.
 func (s *Server) SetGroupApplyFn(fn func(ctx context.Context, groupID string, data []byte) error) {
 	s.groupApplyFn = fn
 }
@@ -607,7 +606,8 @@ func (s *Server) Start() error {
 	s.grpcSrv = grpc.NewServer(opts...)
 
 	// Multi-raft transport (AppendEntries, RequestVote, InstallSnapshot, etc.).
-	// Multiplexes all Raft groups (config + future tier groups) over one gRPC service.
+	// Multiplexes all Raft groups (config + per-vault control-plane groups)
+	// over one gRPC service.
 	s.tm.Register(s.grpcSrv)
 
 	// Membership management (AddVoter, RemoveServer, GetConfiguration, etc.).
@@ -672,7 +672,7 @@ func requireClientCert(ctx context.Context, method string) error {
 // The drain order matters:
 //
 //  1. stopCancel() fires the cluster server's shutdown context. Long-
-//     running stream handlers (tier replication, stream forward records,
+//     running stream handlers (vault replication, stream forward records,
 //     forward import records) that wrap their RecvMsg via recvOrShutdown
 //     observe this immediately and return errShuttingDown → no error →
 //     handler goroutine exits. Without this step those handlers block

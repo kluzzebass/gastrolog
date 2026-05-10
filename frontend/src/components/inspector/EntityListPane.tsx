@@ -88,13 +88,13 @@ function useNodeContext() {
   return { localNodeId, multiNode, nodeNames, cluster };
 }
 
-/** Build vault ID → "cloud" map from config tiers. */
-function buildCloudProviderMap(config: { vaults: { id: Uint8Array }[]; tiers: { id: Uint8Array; vaultId: Uint8Array; cloudServiceId: Uint8Array }[] } | undefined): Map<string, string> {
+/** Build vault ID → "cloud" map from VaultConfig.cloudServiceId. */
+function buildCloudProviderMap(config: { vaults: { id: Uint8Array; cloudServiceId: Uint8Array }[] } | undefined): Map<string, string> {
   const map = new Map<string, string>();
   if (!config) return map;
-  for (const tier of config.tiers) {
-    if (encode(tier.cloudServiceId) && encode(tier.vaultId)) {
-      map.set(encode(tier.vaultId), "cloud");
+  for (const v of config.vaults) {
+    if (encode(v.cloudServiceId)) {
+      map.set(encode(v.id), "cloud");
     }
   }
   return map;

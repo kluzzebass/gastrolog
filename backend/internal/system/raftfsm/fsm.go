@@ -61,7 +61,7 @@ type Notification struct {
 	NodeIDs    []string  // allowed nodes (populated on ingester deletes)
 	Dir        string    // file vault directory (populated on file vault deletes)
 	DeleteData bool      // when true, vault data directory should be removed from disk
-	Drain      bool      // when true, drain tier data to next tier before deleting
+	Drain      bool      // when true, drain vault data to a destination vault before deleting
 	Index      uint64    // Raft log index of this mutation (monotonically increasing config version)
 }
 
@@ -482,9 +482,7 @@ func (f *FSM) applySetVaultPlacements(ctx context.Context, pb *gastrologv1.SetVa
 	if err := f.store.SetVaultPlacements(ctx, instID, placements); err != nil {
 		return nil, err
 	}
-	// Phase 2 (gastrolog-3iy5l): mirror placements back onto the matching
-	// VaultConfig (1:1 vault:tier — the vault shares the vault's ID for new
-	// vault-driven writes; older log entries may use distinct IDs).
+	// Mirror placements back onto the matching VaultConfig.Placements.
 	// Placement-driven write path; PutVault is the user-facing surface.
 	if err := f.mirrorPlacementsToVault(ctx, instID, placements); err != nil {
 		return nil, err
@@ -493,8 +491,7 @@ func (f *FSM) applySetVaultPlacements(ctx context.Context, pb *gastrologv1.SetVa
 }
 
 // mirrorPlacementsToVault writes the placement set to the owning vault's
-// VaultConfig.Placements. The placement manager passes a tier ID that —
-// under 1:1 vault:tier — equals the vault ID.
+// VaultConfig.Placements.
 func (f *FSM) mirrorPlacementsToVault(ctx context.Context, instID glid.GLID, placements []system.VaultPlacement) error {
 	v, err := f.store.GetVault(ctx, instID)
 	if err != nil || v == nil {
@@ -621,7 +618,7 @@ func (f *FSM) applyRefreshToken(ctx context.Context, cmd *gastrologv1.SystemComm
 }
 
 // cascadeDeleteRotationPolicy clears rotation policy references from vaults
-// after the policy is deleted. Tier mirrors are kept in sync by syncTierFromVault.
+// after the policy is deleted.
 func (f *FSM) cascadeDeleteRotationPolicy(ctx context.Context, policyID glid.GLID) error {
 	vaults, err := f.store.ListVaults(ctx)
 	if err != nil {
@@ -639,7 +636,7 @@ func (f *FSM) cascadeDeleteRotationPolicy(ctx context.Context, policyID glid.GLI
 }
 
 // cascadeDeleteRetentionPolicy removes retention rules referencing the policy
-// from vaults. Tier mirrors are kept in sync by syncTierFromVault.
+// from vaults.
 func (f *FSM) cascadeDeleteRetentionPolicy(ctx context.Context, policyID glid.GLID) error {
 	vaults, err := f.store.ListVaults(ctx)
 	if err != nil {
@@ -699,7 +696,7 @@ func (f *FSM) Snapshot() (raft.FSMSnapshot, error) {
 
 // maxSnapshotBytes caps the size of a Raft snapshot the FSM will accept on
 // restore. The snapshot is a marshaled SystemSnapshot proto containing the
-// full cluster config (vaults, tiers, ingesters, routes, users, certs, etc.)
+// full cluster config (vaults, ingesters, routes, users, certs, etc.)
 // — the realistic ceiling is at most a few hundred MB even for very large
 // clusters. The cap rejects pathological / corrupted snapshots without
 // pulling unbounded bytes into the heap.
@@ -822,7 +819,7 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit,gocyclo // sna
 	}
 	for instID, placements := range rt.VaultPlacements {
 		if err := newStore.SetVaultPlacements(ctx, instID, placements); err != nil {
-			return fmt.Errorf("restore tier placements %s: %w", instID, err)
+			return fmt.Errorf("restore vault placements %s: %w", instID, err)
 		}
 	}
 	for ingesterID, nodes := range rt.IngesterAlive {

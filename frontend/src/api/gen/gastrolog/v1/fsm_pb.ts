@@ -5,7 +5,7 @@
 
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
-import { RouteStage, TierConfig, VaultConfig, VaultPlacement } from "./system_pb.js";
+import { RouteStage, VaultConfig, VaultPlacement } from "./system_pb.js";
 import { CloudService, NodeStorageConfig } from "./storage_pb.js";
 
 /**
@@ -217,43 +217,31 @@ export class SystemCommand extends Message<SystemCommand> {
     case: "setNodeStorageConfig";
   } | {
     /**
-     * @generated from field: gastrolog.v1.PutTierCommand put_tier = 33;
-     */
-    value: PutTierCommand;
-    case: "putTier";
-  } | {
-    /**
-     * @generated from field: gastrolog.v1.DeleteTierCommand delete_tier = 34;
-     */
-    value: DeleteTierCommand;
-    case: "deleteTier";
-  } | {
-    /**
-     * @generated from field: gastrolog.v1.SetVaultPlacementsCommand set_vault_placements = 35;
+     * @generated from field: gastrolog.v1.SetVaultPlacementsCommand set_vault_placements = 33;
      */
     value: SetVaultPlacementsCommand;
     case: "setVaultPlacements";
   } | {
     /**
-     * @generated from field: gastrolog.v1.SetSetupWizardDismissedCommand set_setup_wizard_dismissed = 36;
+     * @generated from field: gastrolog.v1.SetSetupWizardDismissedCommand set_setup_wizard_dismissed = 34;
      */
     value: SetSetupWizardDismissedCommand;
     case: "setSetupWizardDismissed";
   } | {
     /**
-     * @generated from field: gastrolog.v1.SetIngesterAliveCommand set_ingester_alive = 37;
+     * @generated from field: gastrolog.v1.SetIngesterAliveCommand set_ingester_alive = 35;
      */
     value: SetIngesterAliveCommand;
     case: "setIngesterAlive";
   } | {
     /**
-     * @generated from field: gastrolog.v1.SetIngesterAssignmentCommand set_ingester_assignment = 38;
+     * @generated from field: gastrolog.v1.SetIngesterAssignmentCommand set_ingester_assignment = 36;
      */
     value: SetIngesterAssignmentCommand;
     case: "setIngesterAssignment";
   } | {
     /**
-     * @generated from field: gastrolog.v1.SetIngesterCheckpointCommand set_ingester_checkpoint = 39;
+     * @generated from field: gastrolog.v1.SetIngesterCheckpointCommand set_ingester_checkpoint = 37;
      */
     value: SetIngesterCheckpointCommand;
     case: "setIngesterCheckpoint";
@@ -299,13 +287,11 @@ export class SystemCommand extends Message<SystemCommand> {
     { no: 30, name: "put_cloud_service", kind: "message", T: PutCloudServiceCommand, oneof: "command" },
     { no: 31, name: "delete_cloud_service", kind: "message", T: DeleteCloudServiceCommand, oneof: "command" },
     { no: 32, name: "set_node_storage_config", kind: "message", T: SetNodeStorageConfigCommand, oneof: "command" },
-    { no: 33, name: "put_tier", kind: "message", T: PutTierCommand, oneof: "command" },
-    { no: 34, name: "delete_tier", kind: "message", T: DeleteTierCommand, oneof: "command" },
-    { no: 35, name: "set_vault_placements", kind: "message", T: SetVaultPlacementsCommand, oneof: "command" },
-    { no: 36, name: "set_setup_wizard_dismissed", kind: "message", T: SetSetupWizardDismissedCommand, oneof: "command" },
-    { no: 37, name: "set_ingester_alive", kind: "message", T: SetIngesterAliveCommand, oneof: "command" },
-    { no: 38, name: "set_ingester_assignment", kind: "message", T: SetIngesterAssignmentCommand, oneof: "command" },
-    { no: 39, name: "set_ingester_checkpoint", kind: "message", T: SetIngesterCheckpointCommand, oneof: "command" },
+    { no: 33, name: "set_vault_placements", kind: "message", T: SetVaultPlacementsCommand, oneof: "command" },
+    { no: 34, name: "set_setup_wizard_dismissed", kind: "message", T: SetSetupWizardDismissedCommand, oneof: "command" },
+    { no: 35, name: "set_ingester_alive", kind: "message", T: SetIngesterAliveCommand, oneof: "command" },
+    { no: 36, name: "set_ingester_assignment", kind: "message", T: SetIngesterAssignmentCommand, oneof: "command" },
+    { no: 37, name: "set_ingester_checkpoint", kind: "message", T: SetIngesterCheckpointCommand, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemCommand {
@@ -1880,97 +1866,13 @@ export class SetNodeStorageConfigCommand extends Message<SetNodeStorageConfigCom
 }
 
 /**
- * PutTierCommand carries the full API TierConfig from system.proto.
- *
- * @generated from message gastrolog.v1.PutTierCommand
- */
-export class PutTierCommand extends Message<PutTierCommand> {
-  /**
-   * @generated from field: gastrolog.v1.TierConfig tier = 1;
-   */
-  tier?: TierConfig;
-
-  constructor(data?: PartialMessage<PutTierCommand>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.PutTierCommand";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "tier", kind: "message", T: TierConfig },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutTierCommand {
-    return new PutTierCommand().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutTierCommand {
-    return new PutTierCommand().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutTierCommand {
-    return new PutTierCommand().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: PutTierCommand | PlainMessage<PutTierCommand> | undefined, b: PutTierCommand | PlainMessage<PutTierCommand> | undefined): boolean {
-    return proto3.util.equals(PutTierCommand, a, b);
-  }
-}
-
-/**
- * @generated from message gastrolog.v1.DeleteTierCommand
- */
-export class DeleteTierCommand extends Message<DeleteTierCommand> {
-  /**
-   * @generated from field: bytes id = 1;
-   */
-  id = new Uint8Array(0);
-
-  /**
-   * When true, drain chunks to the next tier before deleting.
-   *
-   * @generated from field: bool drain = 2;
-   */
-  drain = false;
-
-  constructor(data?: PartialMessage<DeleteTierCommand>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.DeleteTierCommand";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 2, name: "drain", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteTierCommand {
-    return new DeleteTierCommand().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DeleteTierCommand {
-    return new DeleteTierCommand().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DeleteTierCommand {
-    return new DeleteTierCommand().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: DeleteTierCommand | PlainMessage<DeleteTierCommand> | undefined, b: DeleteTierCommand | PlainMessage<DeleteTierCommand> | undefined): boolean {
-    return proto3.util.equals(DeleteTierCommand, a, b);
-  }
-}
-
-/**
  * @generated from message gastrolog.v1.SetVaultPlacementsCommand
  */
 export class SetVaultPlacementsCommand extends Message<SetVaultPlacementsCommand> {
   /**
-   * @generated from field: bytes tier_id = 1;
+   * @generated from field: bytes vault_id = 1;
    */
-  tierId = new Uint8Array(0);
+  vaultId = new Uint8Array(0);
 
   /**
    * @generated from field: repeated gastrolog.v1.VaultPlacement placements = 2;
@@ -1985,7 +1887,7 @@ export class SetVaultPlacementsCommand extends Message<SetVaultPlacementsCommand
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.SetVaultPlacementsCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "tier_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "placements", kind: "message", T: VaultPlacement, repeated: true },
   ]);
 
@@ -2263,32 +2165,27 @@ export class SystemSnapshot extends Message<SystemSnapshot> {
   nodeStorageConfigs: SetNodeStorageConfigCommand[] = [];
 
   /**
-   * @generated from field: repeated gastrolog.v1.PutTierCommand tiers = 15;
-   */
-  tiers: PutTierCommand[] = [];
-
-  /**
-   * @generated from field: repeated gastrolog.v1.SetVaultPlacementsCommand vault_placements = 16;
+   * @generated from field: repeated gastrolog.v1.SetVaultPlacementsCommand vault_placements = 15;
    */
   vaultPlacements: SetVaultPlacementsCommand[] = [];
 
   /**
-   * @generated from field: bool setup_wizard_dismissed = 17;
+   * @generated from field: bool setup_wizard_dismissed = 16;
    */
   setupWizardDismissed = false;
 
   /**
-   * @generated from field: repeated gastrolog.v1.SetIngesterAliveCommand ingester_alive = 18;
+   * @generated from field: repeated gastrolog.v1.SetIngesterAliveCommand ingester_alive = 17;
    */
   ingesterAlive: SetIngesterAliveCommand[] = [];
 
   /**
-   * @generated from field: repeated gastrolog.v1.SetIngesterAssignmentCommand ingester_assignments = 19;
+   * @generated from field: repeated gastrolog.v1.SetIngesterAssignmentCommand ingester_assignments = 18;
    */
   ingesterAssignments: SetIngesterAssignmentCommand[] = [];
 
   /**
-   * @generated from field: repeated gastrolog.v1.SetIngesterCheckpointCommand ingester_checkpoints = 20;
+   * @generated from field: repeated gastrolog.v1.SetIngesterCheckpointCommand ingester_checkpoints = 19;
    */
   ingesterCheckpoints: SetIngesterCheckpointCommand[] = [];
 
@@ -2314,12 +2211,11 @@ export class SystemSnapshot extends Message<SystemSnapshot> {
     { no: 12, name: "managed_files", kind: "message", T: PutManagedFileCommand, repeated: true },
     { no: 13, name: "cloud_services", kind: "message", T: PutCloudServiceCommand, repeated: true },
     { no: 14, name: "node_storage_configs", kind: "message", T: SetNodeStorageConfigCommand, repeated: true },
-    { no: 15, name: "tiers", kind: "message", T: PutTierCommand, repeated: true },
-    { no: 16, name: "vault_placements", kind: "message", T: SetVaultPlacementsCommand, repeated: true },
-    { no: 17, name: "setup_wizard_dismissed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 18, name: "ingester_alive", kind: "message", T: SetIngesterAliveCommand, repeated: true },
-    { no: 19, name: "ingester_assignments", kind: "message", T: SetIngesterAssignmentCommand, repeated: true },
-    { no: 20, name: "ingester_checkpoints", kind: "message", T: SetIngesterCheckpointCommand, repeated: true },
+    { no: 15, name: "vault_placements", kind: "message", T: SetVaultPlacementsCommand, repeated: true },
+    { no: 16, name: "setup_wizard_dismissed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 17, name: "ingester_alive", kind: "message", T: SetIngesterAliveCommand, repeated: true },
+    { no: 18, name: "ingester_assignments", kind: "message", T: SetIngesterAssignmentCommand, repeated: true },
+    { no: 19, name: "ingester_checkpoints", kind: "message", T: SetIngesterCheckpointCommand, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemSnapshot {

@@ -144,8 +144,8 @@ func (d *configDispatcher) handleVaultPut(ctx context.Context, id glid.GLID) {
 		return
 	}
 
-	// 1:1 vault:tier — the vault has exactly one inst whose ID equals
-	// the vault's ID. Every node instantiates the inst if it can serve it.
+	// The vault has exactly one inst whose ID equals the vault's ID.
+	// Every node instantiates the inst if it can serve it.
 	instIDs := []glid.GLID{id}
 
 	// Cancel any in-progress drain.
@@ -166,8 +166,8 @@ func (d *configDispatcher) handleVaultPut(ctx context.Context, id glid.GLID) {
 		return
 	}
 
-	// Incrementally add/remove tiers that changed. Never tear down the
-	// entire vault — that causes cascading rebuilds and data warnings.
+	// Incrementally add/remove instances that changed. Never tear down
+	// the entire vault — that causes cascading rebuilds and data warnings.
 	if d.orch.MissingVaultInstance(id, instIDs) {
 		d.reconcileVaultInstance(ctx, id, instIDs)
 		return
@@ -212,8 +212,9 @@ func (d *configDispatcher) maybeStartDrain(ctx context.Context, id glid.GLID, ta
 	}
 }
 
-// reconcileVaultInstance incrementally adds missing tiers and removes stale tiers
-// from an existing vault, without tearing down any tiers that are unchanged.
+// reconcileVaultInstance incrementally adds missing instances and removes
+// stale ones from an existing vault, without tearing down any instances
+// that are unchanged.
 func (d *configDispatcher) reconcileVaultInstance(ctx context.Context, vaultID glid.GLID, instIDs []glid.GLID) {
 	expected := make(map[glid.GLID]bool, len(instIDs))
 	for _, id := range instIDs {
@@ -466,12 +467,12 @@ func (d *configDispatcher) handleSettingPut(ctx context.Context, key string) {
 	}
 }
 
-// handleInstancePut adjusts vault registration when a inst's placements change.
+// handleInstancePut adjusts vault registration when an instance's placements change.
 // Runs on ALL nodes — each node independently decides whether it gained or lost
 // ownership based on the vault's resolved node IDs vs localNodeID.
-// Also reloads rotation/retention policies when inst config changes.
+// Also reloads rotation/retention policies when instance config changes.
 func (d *configDispatcher) handleInstancePut(ctx context.Context, instID glid.GLID) {
-	// 1:1 vault:tier — the vault's ID is its vault's ID.
+	// The vault's ID equals the instance's ID.
 	v, err := d.cfgStore.GetVault(ctx, instID)
 	if err != nil || v == nil {
 		d.logger.Error("dispatch: get vault for inst change", "vault", instID, "error", err)
@@ -558,11 +559,11 @@ func (d *configDispatcher) applyInstanceMembershipChange(ctx context.Context, v 
 	// smaller than the cluster size can't reach quorum because most nodes
 	// never registered the group. AddVaultInstance handles both cases: storage
 	// nodes get a VaultInstance, non-storage nodes only get a Raft group.
-	tierBelongsHere := leaderNodeID == d.localNodeID || slices.Contains(followerNodeIDs, d.localNodeID)
-	if !tierBelongsHere {
+	instBelongsHere := leaderNodeID == d.localNodeID || slices.Contains(followerNodeIDs, d.localNodeID)
+	if !instBelongsHere {
 		if existing := d.orch.FindLocalVaultInstance(v.ID); existing != nil {
-			// Tier moved away from this node — drop the storage instance.
-			// The Raft group itself stays (symmetric voting).
+			// Instance moved away from this node — drop the storage
+			// instance. The Raft group itself stays (symmetric voting).
 			d.orch.RemoveVaultInstance(v.ID)
 		}
 	}
@@ -582,7 +583,7 @@ func (d *configDispatcher) rebuildVaultIfInstanceMissing(ctx context.Context, v 
 		d.updateInstanceRoleIfNeeded(ctx, v.ID, instID, existing)
 		return
 	}
-	// Tier doesn't exist locally yet — add it incrementally.
+	// Instance doesn't exist locally yet — add it incrementally.
 	if err := d.orch.AddVaultInstance(ctx, v.ID, d.factories); err != nil {
 		d.logger.Error("dispatch: add vault instance",
 			"vault", v.ID, "error", err)
@@ -626,7 +627,7 @@ func (d *configDispatcher) updateInstanceRoleIfNeeded(ctx context.Context, vault
 func (d *configDispatcher) newFollowersForInstance(vaultID, instID glid.GLID, followerNodeIDs []string) []string {
 	existing := d.orch.FindLocalVaultInstance(vaultID)
 	if existing == nil {
-		// Tier was just added to this node — all followers are new.
+		// Instance was just added to this node — all followers are new.
 		return followerNodeIDs
 	}
 	// Build set of follower node IDs that were already being replicated to.

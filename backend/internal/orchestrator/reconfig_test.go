@@ -29,9 +29,7 @@ func (f *fakeSystemLoader) Load(_ context.Context) (*system.System, error) {
 	return &system.System{Config: *f.cfg}, nil
 }
 
-// memVaultCfg creates a VaultConfig + TierConfig pair for a memory-backed vault.
-// It also adds the TierConfig to the loader's config if present, so AddVault
-// can find it via buildVaultInstances.
+// memVaultCfg creates a VaultConfig for a memory-backed vault.
 func memVaultCfg(vaultID glid.GLID, loader *fakeSystemLoader) system.VaultConfig {
 	v := system.VaultConfig{
 		ID:   vaultID,

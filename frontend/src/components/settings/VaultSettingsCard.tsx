@@ -29,10 +29,10 @@ import { formatBytes } from "../../utils/units";
 import {
   VaultStorageForm,
   isCloudBacked,
-  isTierComplete,
+  isStorageComplete,
   parseMemoryBudget,
   vaultTypeEnum,
-  type TierEntry,
+  type StorageEntry,
   type VaultTypeLabel,
 } from "./VaultsSettings";
 
@@ -52,14 +52,10 @@ interface VaultSettingsCardProps {
   onOpenInspector?: (inspectorParam: string) => void;
 }
 
-// gastrolog-3iy5l (Phase 2) collapsed multi-tier vaults to 1:1 vault:tier;
-// gastrolog-4kkoo (Phase 5) shipped inter-vault routing for the hot/warm
-// chain people used to express via tiers. The vault now carries the full
-// storage shape directly (Type, RotationPolicyID, RetentionRules, RF,
-// StorageClass, CloudServiceID, cache fields) — there is no operator-
-// facing "tier" concept anymore. The FSM still synthesizes a TierConfig
-// internally for compatibility with consumers mid-migration, but the UI
-// edits the vault directly.
+// The vault carries the full storage shape directly: Type, RotationPolicyID,
+// RetentionRules, RF, StorageClass, CloudServiceID, cache fields. There is
+// no operator-facing "tier" concept; the UI edits the vault directly.
+// Inter-vault routing (gastrolog-4kkoo) covers hot/warm chains.
 
 function vaultTypeLabel(t: VaultType): VaultTypeLabel {
   switch (t) {
@@ -69,11 +65,10 @@ function vaultTypeLabel(t: VaultType): VaultTypeLabel {
   }
 }
 
-// vaultToEntry projects the vault's storage shape onto the TierEntry
+// vaultToEntry projects the vault's storage shape onto the StorageEntry
 // form shape so VaultStorageForm can edit it. The `key` field is the
-// vault ID — TierEntry was Phase-4 vocabulary; here we're just reusing
-// the shape, not the concept.
-function vaultToEntry(v: VaultConfig): TierEntry {
+// vault ID.
+function vaultToEntry(v: VaultConfig): StorageEntry {
   return {
     key: encode(v.id),
     type: vaultTypeLabel(v.type),
@@ -92,12 +87,12 @@ function vaultToEntry(v: VaultConfig): TierEntry {
   };
 }
 
-// entryToVault rolls a TierEntry edit back into a VaultConfig, preserving
-// fields that aren't part of the form (placements, name, enabled — caller
-// supplies those).
+// entryToVault rolls a StorageEntry edit back into a VaultConfig, preserving
+// fields that aren't part of the form (placements — caller supplies name and
+// enabled).
 function entryToVault(
   vault: VaultConfig,
-  entry: TierEntry,
+  entry: StorageEntry,
   name: string,
   enabled: boolean,
 ): VaultConfig {
@@ -160,7 +155,7 @@ export function VaultSettingsCard({
     }
   }
   const totalNodes = nodeConfigs.length || 1;
-  const maxRFForEntry = (e: TierEntry) => {
+  const maxRFForEntry = (e: StorageEntry) => {
     if (e.type === "memory") return totalNodes;
     if (e.type === "jsonl") return 1;
     const sc = parseInt(e.storageClass, 10) || 0;
@@ -168,12 +163,12 @@ export function VaultSettingsCard({
     return classStorageCount.get(sc) ?? 1;
   };
 
-  // Edit state — single TierEntry projection of the vault's storage
+  // Edit state — single StorageEntry projection of the vault's storage
   // shape, plus name+enabled.
   interface VaultEdit {
     name: string;
     enabled: boolean;
-    storage: TierEntry;
+    storage: StorageEntry;
   }
   const buildInitialEdit = (): VaultEdit => ({
     name: vault.name,
@@ -183,7 +178,7 @@ export function VaultSettingsCard({
   const [edit, setEditState] = useState<VaultEdit>(buildInitialEdit);
   const resetEdit = () => setEditState(buildInitialEdit());
   const setEdit = (patch: Partial<VaultEdit>) => setEditState((prev) => ({ ...prev, ...patch }));
-  const updateStorage = (patch: Partial<TierEntry>) =>
+  const updateStorage = (patch: Partial<StorageEntry>) =>
     setEditState((prev) => ({ ...prev, storage: { ...prev.storage, ...patch } }));
 
   // Re-sync the edit form when the vault prop changes (e.g. after a save
@@ -202,7 +197,7 @@ export function VaultSettingsCard({
   }
 
   const anyDirty = JSON.stringify(edit) !== initialJson;
-  const storageComplete = isTierComplete(edit.storage, cloudServiceOptions.length > 0);
+  const storageComplete = isStorageComplete(edit.storage, cloudServiceOptions.length > 0);
 
   const { handleSave: saveVault, handleDelete } = useCrudHandlers({
     mutation: putVault,
@@ -426,7 +421,7 @@ export function VaultSettingsCard({
             type or cloud binding, create a new vault and migrate via
             retention routing. */}
         <VaultStorageForm
-          tier={edit.storage}
+          storage={edit.storage}
           dark={dark}
           storageClassOptions={storageClassOptions}
           cloudServiceOptions={cloudServiceOptions}

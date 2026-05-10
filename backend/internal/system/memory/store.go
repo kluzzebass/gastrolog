@@ -143,7 +143,7 @@ func (s *Store) Load(ctx context.Context) (*system.System, error) {
 	}
 	rt.SetupWizardDismissed = s.setupWizardDismissed
 
-	// Runtime: tier placements (stored separately from TierConfig).
+	// Runtime: vault placements (mirrored onto VaultConfig.Placements).
 	if len(s.tierPlacements) > 0 {
 		rt.VaultPlacements = make(map[glid.GLID][]system.VaultPlacement, len(s.tierPlacements))
 		for id, p := range s.tierPlacements {
@@ -980,23 +980,6 @@ func copyNodeStorageConfig(nsc system.NodeStorageConfig) system.NodeStorageConfi
 	return c
 }
 
-func copyTierConfig(tc system.TierConfig) system.TierConfig {
-	c := tc
-	if tc.RotationPolicyID != nil {
-		id := *tc.RotationPolicyID
-		c.RotationPolicyID = &id
-	}
-	if tc.CloudServiceID != nil {
-		id := *tc.CloudServiceID
-		c.CloudServiceID = &id
-	}
-	if len(tc.RetentionRules) > 0 {
-		c.RetentionRules = make([]system.RetentionRule, len(tc.RetentionRules))
-		copy(c.RetentionRules, tc.RetentionRules)
-	}
-	return c
-}
-
 func copyCloudService(cs system.CloudService) system.CloudService {
 	c := cs
 	if len(cs.Transitions) > 0 {
@@ -1032,8 +1015,8 @@ func (s *Store) SetVaultPlacements(_ context.Context, instID glid.GLID, placemen
 	cp := make([]system.VaultPlacement, len(placements))
 	copy(cp, placements)
 	s.tierPlacements[instID] = cp
-	// 1:1 vault:tier — placement keys are vault IDs. Mirror the placement
-	// set onto VaultConfig.Placements so the orchestrator's reads see them.
+	// Mirror the placement set onto VaultConfig.Placements so the
+	// orchestrator's reads see them.
 	if v, ok := s.vaults[instID]; ok {
 		merged := v
 		if len(placements) > 0 {

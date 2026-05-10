@@ -13,38 +13,6 @@ term used inconsistently in the code, open an issue or fix it in-place.
 
 ---
 
-## Refactor in progress: tiers go away
-
-The vault refactor (gastrolog-55dej / docs/vault_redesign.md) is removing
-the **tier** abstraction. Every place this document still says "tier"
-is a transition note, not a stable definition. Going forward:
-
-- **Vault** is the only storage unit. There is no tier-within-vault chain.
-- Storage shape (memory / file / jsonl) lives directly on `VaultConfig.Type`.
-- `gastrolog config tier` CLI is deleted. `gastrolog config vault create`
-  takes `--type`, `--storage-class`, `--cloud-service`, `--rotation-policy`,
-  `--retention-policy` and the cache flags directly (Phase 2,
-  gastrolog-3iy5l). cluster-init no longer creates a tier chain.
-- The frontend vault settings + setup wizard expose a single Storage
-  Type selector — no tier list, no add/remove, no per-tier ordering.
-- `TierConfig` proto + `PutTier`/`DeleteTier` RPCs survive transitionally
-  for backward compatibility; new writes flow through `PutVault`, which
-  auto-syncs the matching tier. The backend orchestrator's read paths
-  still resolve through the tier list during the transition; that
-  read-path migration is queued for a later Phase-5 commit.
-- `TierReplicator`, `TierApplyForwarder`, `OpTierFSM`, `LeaderTierQueryEngine`,
-  `tier_id` on ChunkMeta, `transition_streamed` — still in flight; all
-  phase out.
-- "Tier transitions" disappear. Retention becomes a chunk-age event that
-  feeds records back through the routing engine (Phase 4, gastrolog-42f9z).
-
-When the rest of the refactor lands, the entries below currently using
-"tier" get rewritten to use the post-tier vocabulary. Until then,
-**prefer the new names in new code** (`Vault*` instead of `Tier*`) and
-treat tier vocabulary as legacy.
-
----
-
 ## Reading map
 
 GastroLog is split into **eight bounded contexts**. The boundaries are not arbitrary;
@@ -74,25 +42,18 @@ for append-heavy write patterns and time-ordered reads.
 
 ### Aggregates
 
-- **Vault** — a named, versioned container for log records. A vault owns one or
-  more **tiers** arranged in an ordered chain (position 0 is hottest). Records
-  enter at tier 0; retention moves them down the chain. Operators create and
-  delete vaults; the system manages tier instances. Defined:
-  [`backend/internal/orchestrator/vault.go`](../backend/internal/orchestrator/vault.go),
-  declarative config in
-  [`system.VaultConfig`](../backend/internal/system/vault.go).
-
-- **Tier** — a storage layer within a vault. Each tier has a **type** (memory,
-  file, cloud, jsonl), a **position** in the vault chain, a **rotation policy**
-  for when to seal its active chunk, and **retention rules** for when to expire
-  sealed chunks. Declarative:
-  [`system.TierConfig`](../backend/internal/system/tier.go). Runtime:
-  [`TierInstance`](../backend/internal/orchestrator/tier_instance.go) — the
-  per-node, per-tier bundle of chunk manager, index manager, query engine,
-  and Raft callbacks.
+- **Vault** — a named, versioned container for log records. The unit of independent
+  storage and the only abstraction over the chunk layer. A vault carries its full
+  storage shape directly: a **type** (memory, file, jsonl), a **storage class**, an
+  optional **cloud service** binding, a **rotation policy**, **retention rules**, a
+  **replication factor**, and cache tuning. Operators create and delete vaults; the
+  system manages placements. Declarative config in
+  [`system.VaultConfig`](../backend/internal/system/vault.go); per-node runtime in
+  [`VaultInstance`](../backend/internal/orchestrator/vault_instance.go) — the
+  bundle of chunk manager, index manager, query engine, and Raft callbacks.
 
 - **Chunk** — an immutable, self-contained segment of records. One active chunk
-  per tier per node accepts new records; it is **sealed** when a rotation
+  per vault per node accepts new records; it is **sealed** when a rotation
   policy fires (or manually). Sealed chunks can be compressed, indexed, and
   eventually expired. Each chunk has a `ChunkID` (sortable GLID) and metadata
   (`ChunkMeta`). Defined: [`chunk/types.go`](../backend/internal/chunk/types.go).
@@ -117,37 +78,35 @@ for append-heavy write patterns and time-ordered reads.
 
 - **ChunkMeta** — the stats bag for a chunk: sealed/compressed/cloud-backed
   flags, record count, byte counts, timestamps (`WriteStart/End`, `IngestStart/End`,
-  `SourceStart/End`), retention-pending + transition-streamed flags, frame count
-  for cloud chunks.
+  `SourceStart/End`), retention-pending flag, frame count for cloud chunks.
 
 ### States a chunk passes through
 
-- **Active** — open for writes; lives only on the tier leader.
+- **Active** — open for writes; lives only on the vault leader.
 - **Sealed** — immutable; eligible for compression/indexing/replication.
 - **Compressed** — `raw.log`/`attr.log` encoded zstd; `DiskBytes ≠ Bytes`.
 - **Cloud-backed** — record bytes live in S3/Azure/GCS, not local disk; marked
-  with `CloudBacked = true` in `ChunkMeta`.
+  with `CloudBacked = true` in `ChunkMeta`. A cloud-backed vault is a file vault
+  with `CloudServiceID` set; there is no separate "cloud" vault type.
 - **Archived** — in an offline cloud storage class (e.g. Glacier). Unreadable
   until `Restore` completes. Tracked via `Archived = true`.
-- **Retention-pending** — marked in the tier FSM for deletion on the next sweep.
-- **Transition-streamed** — records have been streamed to the next tier; local
-  copy is kept until the destination commits its receipt, then deleted.
+- **Retention-pending** — marked in the vault FSM for deletion on the next sweep.
 
 ### Physical storage
 
 - **FileStorage** — a directory on a node's disk, identified by a GLID, tagged
   with a **StorageClass**. A node can have many file storages (different disks,
-  different performance tiers). [`system.FileStorage`](../backend/internal/system/tier.go).
+  different performance classes). [`system.FileStorage`](../backend/internal/system/storage.go).
 
 - **NodeStorageConfig** — the list of file storages on one node. Runtime state
-  (not operator-authored). [`system.NodeStorageConfig`](../backend/internal/system/tier.go).
+  (not operator-authored). [`system.NodeStorageConfig`](../backend/internal/system/storage.go).
 
 - **StorageClass** (`uint32`) — non-zero integer grouping storages by performance
-  or role. A tier's `StorageClass` selects which FileStorage on each node hosts
+  or role. A vault's `StorageClass` selects which FileStorage on each node hosts
   its chunks.
 
 - **CloudService** — a cluster-wide cloud endpoint (S3, Azure, GCS) with
-  optional archival lifecycle. [`system.CloudService`](../backend/internal/system/tier.go).
+  optional archival lifecycle. [`system.CloudService`](../backend/internal/system/storage.go).
 
 - **Frame** — a seekable zstd block within a cloud chunk. `NumFrames` records
   how many frames a cloud chunk was uploaded in; range queries seek to a
@@ -155,19 +114,20 @@ for append-heavy write patterns and time-ordered reads.
 
 ### Placement
 
-- **TierPlacement** — a mapping of a tier to a specific `FileStorage.ID` on a
-  specific node, with a `Leader` flag. A tier normally has N placements (N =
-  replication factor). [`system.TierPlacement`](../backend/internal/system/tier.go).
+- **VaultPlacement** — a mapping of a vault to a specific `FileStorage.ID` on a
+  specific node, with a `Leader` flag. A vault normally has N placements (N =
+  replication factor). [`system.VaultPlacement`](../backend/internal/system/storage.go).
 
-- **SyntheticStorageID** — test-only placeholder ID used when placement doesn't
-  reference a real FileStorage (memory-tier tests). Production uses real IDs.
+- **SyntheticStorageID** — placeholder ID used when placement doesn't reference
+  a real FileStorage (memory-vault on a node without file storages). Format:
+  `node:<nodeID>`.
 
 ---
 
 ## 2. Ingestion
 
 Everything between "bytes arrive from the outside" and "record is appended to
-a tier's active chunk".
+a vault's active chunk".
 
 ### Aggregates
 
@@ -206,26 +166,26 @@ a tier's active chunk".
   match → drop silently. [`system.RouteConfig`](../backend/internal/system/vault.go).
 
 - **Stage** — one step in a route's pipeline (`RouteConfig.Stages`).
-  Phase 5 ships a single variant, `MatchStage{expression}`, which
-  gates the route on a boolean filter expression. Future stage kinds
-  (enrich, redact, sample, fork, route_by_field — gastrolog-5e85x)
-  plug into the same oneof without re-shaping the proto.
+  Today's only variant is `MatchStage{expression}`, which gates the route
+  on a boolean filter expression. Future stage kinds (enrich, redact,
+  sample, fork, route_by_field — gastrolog-5e85x) plug into the same
+  oneof without re-shaping the proto.
 
 - **Match expression** — a query-language predicate evaluated against
   each record's attributes. Special forms: `"*"` = match everything,
   empty string = match nothing (route enrolled but never fires —
-  useful for muting). The Phase-4 catch-the-rest (`"+"`) form is
-  gone; an explicit catch-all at the lowest priority replaces it.
+  useful for muting). An explicit catch-all at the lowest priority replaces
+  any "rest" semantics.
 
 - **Synthetic attributes** — reserved-prefix attributes (`_source`,
   `_ingester`, `_vault`, `_reason`) overlaid on a record's real
   attrs at routing-evaluation time only. The overlay is computed
   per call and never mutates the record's persisted attrs. They
-  unify the Phase-4 source-predicate enum and the content filter
-  into a single expression language. Routes match on
-  `_source = "ingest"`, `_source = "retention" AND _vault = "<id>"`,
-  etc. User records carrying `_`-prefixed attrs collide with this
-  namespace and aren't supported.
+  unify source-predicate and content-filter into a single expression
+  language. Routes match on `_source = "ingest"`,
+  `_source = "retention" AND _vault = "<id>"`, etc. User records
+  carrying `_`-prefixed attrs collide with this namespace and aren't
+  supported.
 
 - **Source kinds** — the canonical wire values of the `_source`
   synthetic: `"ingest"` (records arriving from an ingester) and
@@ -343,7 +303,7 @@ Nodes agreeing on what the cluster believes, via Raft.
 ### Identity
 
 - **Node** — one running GastroLog process. Identified by a `NodeID` (GLID).
-  A node hosts tier instances, runs ingesters, serves queries, and
+  A node hosts vault instances, runs ingesters, serves queries, and
   participates in Raft groups.
 
 - **NodeConfig** — the declarative (`ID`, `Name`) record for a node. Lives
@@ -364,19 +324,19 @@ gRPC transport:
 
 - **Vault Control-Plane Raft** (a.k.a. "vault-ctl Raft", "vault-ctl group") —
   one group *per vault*. Replicates that vault's chunk metadata across all
-  nodes that host any of its tiers. Uses the `vaultraft.FSM` whose state is a
-  map of **tier FSMs** — one sub-FSM per tier, namespaced by `OpTierFSM`
-  commands. See
+  nodes participating in the vault. Uses the `vaultraft.FSM` whose state is
+  a map of **instance FSMs** — one sub-FSM per vault instance, namespaced by
+  `OpVaultChunkFSM` commands. See
   [`vault-control-plane-architecture.md`](./vault-control-plane-architecture.md)
   for the design rationale.
 
-- **Tier FSM** (`tierfsm.FSM`) — the per-tier sub-state-machine inside a
-  vault-ctl FSM. Holds the **manifest** of chunks for one tier: each chunk's
-  metadata (sealed? compressed? retention-pending?), transition receipts,
-  tombstones.
+- **Vault chunk FSM** (`vaultctlfsm.FSM`) — the per-vault sub-state-machine
+  inside a vault-ctl FSM. Holds the **manifest** of chunks for one vault: each
+  chunk's metadata (sealed? compressed? retention-pending?), tombstones, and
+  pending-delete receipt state.
 
-- **Manifest** — the tier FSM's set of chunk entries. The authoritative
-  answer to "which chunks should exist on this tier?" Compared against
+- **Manifest** — the vault FSM's set of chunk entries. The authoritative
+  answer to "which chunks should exist in this vault?" Compared against
   local disk in the reconcile sweep; disagreement means orphan cleanup.
 
 ### Raft primitives (hashicorp/raft vocabulary)
@@ -399,9 +359,9 @@ gRPC transport:
 
 ### Placement & membership
 
-- **TierPlacement** — covered under [Storage](#1-storage); also a cluster
+- **VaultPlacement** — covered under [Storage](#1-storage); also a cluster
   concept because the placement manager (in system Raft) decides which
-  nodes host each tier.
+  nodes host each vault.
 
 - **Ingester placement** — the singleton-ingester assignment map in
   `system.Runtime`. The placement manager picks an alive node per singleton
@@ -413,7 +373,7 @@ gRPC transport:
 
 - **Dispatcher** — the subsystem that reacts to *applied* config changes
   (from system Raft FSM) and drives their side effects into the local
-  orchestrator (register vault, build tier, start ingester, etc.).
+  orchestrator (register vault, build vault instance, start ingester, etc.).
 
 ### Transport
 
@@ -439,7 +399,7 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
     `o.mu`, a `sync.RWMutex`).
   - `o.scheduler` — the job queue + cron runner.
   - `o.groupMgr` — handle to the multiraft `GroupManager`.
-  - `o.forwarder`, `o.tierReplicator`, `o.peerConns` — cross-node I/O.
+  - `o.forwarder`, `o.chunkReplicator`, `o.peerConns` — cross-node I/O.
   - `o.routeSet` — compiled routing table (priority-ordered, first-match-wins).
   - `o.replicaCircuit` — per-node circuit breaker for failed replication.
 
@@ -457,16 +417,16 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 - **`orch.Stop()`** — cancel all background goroutines, wait for in-flight
   writes, close chunk managers. Called via `t.Cleanup` in tests.
 
-- **Shutting down (`o.phase`)** — a `tierfsm.Phase` atomic flag. When set,
+- **Shutting down (`o.phase`)** — a `vaultctlfsm.Phase` atomic flag. When set,
   `fireAndForgetRemote` skips remote dispatches; drain and replication
   short-circuit. Used to suppress benign errors during shutdown.
 
-- **Vault readiness** — a vault on this node is "ready" iff it has at least
-  one local tier AND every local tier's `IsFSMReady()` callback returns
-  `true` (i.e. the vault-ctl Raft has applied at least one log entry on
-  this node, or restored from a snapshot). Canonical definition in
+- **Vault readiness** — a vault on this node is "ready" iff it has a local
+  instance AND that instance's `IsFSMReady()` callback returns `true` (i.e.
+  the vault-ctl Raft has applied at least one log entry on this node, or
+  restored from a snapshot). Canonical definition in
   [`vault_readiness.go`](../backend/internal/orchestrator/vault_readiness.go).
-  Checked by every read and write path before touching tier state.
+  Checked by every read and write path before touching vault state.
 
 ### Scheduler & Jobs
 
@@ -486,13 +446,12 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 
 - **Rotation policy** (`RotationPolicyConfig`) — when to seal the active
   chunk. Shapes: `MaxBytes`, `MaxAge`, `MaxRecords`, `Cron`, or a
-  composite. Per-tier: `tier.RotationPolicyID` points at a policy.
+  composite. Per-vault: `vault.RotationPolicyID` points at a policy.
 
 - **Retention rule** (`RetentionRule`) — per-vault, per-policy: "when do
-  sealed chunks fire retention events". Phase 4 (gastrolog-42f9z) collapsed
-  the prior expire/eject/transition action enum: a fired event destroys
-  the chunk, optionally streaming its records through the routing engine
-  first depending on the vault's retention disposition (see below).
+  sealed chunks fire retention events". A fired event destroys the chunk,
+  optionally streaming its records through the routing engine first
+  depending on the vault's retention disposition (see below).
 
 - **Retention policy** (`RetentionPolicyConfig`) — named, reusable
   policy referenced by `RetentionRule`.
@@ -524,22 +483,18 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 - **Rotate** — open a new active chunk after sealing the old one.
 
 - **Expire** — destroy a chunk that has aged out according to retention.
-  Phase 4 (gastrolog-42f9z) collapsed transition / eject / expire into a
-  single retention event; gastrolog-18du3 added a per-vault disposition
-  that controls whether the chunk's records flow through the routing
-  engine before destruction. With `disposition = delete` (default),
-  records drop and the chunk is destroyed. With `disposition = route`,
-  the records are first streamed through the routing engine (synthetic
-  `_source = "retention"`), then the chunk is destroyed. Any
-  retention-trigger route directing records to another vault is the
-  modern equivalent of the legacy "transition" semantics.
+  With `disposition = delete` (default), records drop and the chunk is
+  destroyed. With `disposition = route`, the records are first streamed
+  through the routing engine (synthetic `_source = "retention"`), then
+  the chunk is destroyed. A retention-trigger route directing records to
+  another vault is how hot/warm/cold chains are expressed.
 
-- **Reconcile** — compare the tier FSM manifest against local disk;
+- **Reconcile** — compare the vault FSM manifest against local disk;
   delete sealed chunks on disk that aren't in the manifest (orphan
   cleanup) and replicate manifest chunks that are missing locally.
 
-- **Drain** — move all of a tier's (or a vault's) chunks to another
-  node, then remove the local instance. Used for decommission.
+- **Drain** — move all of a vault's chunks off this node, then remove the
+  local instance. Used for decommission.
 
 - **Catchup** — replicate sealed chunks from a leader to a follower that
   just joined or restarted. Distinct from live replication (which happens
@@ -555,9 +510,9 @@ Cross-node data movement. Three distinct mechanisms; do not confuse them.
   events). Flows through hraft via the multiraft transport. Committed only
   when a majority acks. This is the **authoritative** metadata replication.
 
-- **Tier replication** — actual chunk content (records) from a tier leader
-  to its tier followers. Uses ordered streams per `(tierID, followerNodeID)`
-  via the **TierReplicator**. Does NOT use Raft; uses gRPC streams with
+- **Vault replication** — actual chunk content (records) from a vault leader
+  to its followers. Uses ordered streams per `(vaultID, followerNodeID)`
+  via the **ChunkReplicator**. Does NOT use Raft; uses gRPC streams with
   application-level acks.
 
 - **Cross-vault record forwarding** — at ingestion time, a record that
@@ -567,10 +522,10 @@ Cross-node data movement. Three distinct mechanisms; do not confuse them.
 
 ### The actors
 
-- **TierReplicator** — per-node manager of replication streams to follower
-  tiers. Methods: `AppendRecords`, `SealTier`, `ImportSealedChunk`,
-  `DeleteChunk`. Always invoked on the **tier leader**.
-  [`cluster/tier_replicator.go`](../backend/internal/cluster/tier_replicator.go).
+- **ChunkReplicator** — per-node manager of replication streams to follower
+  vaults. Methods: `AppendRecords`, `SealVault`, `ImportSealedChunk`,
+  `DeleteChunk`. Always invoked on the **vault leader**.
+  [`cluster/chunk_replicator.go`](../backend/internal/cluster/chunk_replicator.go).
 
 - **RecordForwarder** — per-node ingestion forwarder. Batches records by
   destination node; uses long-lived client-streaming RPCs with backpressure.
@@ -584,13 +539,14 @@ Cross-node data movement. Three distinct mechanisms; do not confuse them.
   follower node to the current vault-ctl leader. Used when `PeerConns` is
   wired. [`cluster/vault_apply_forwarder.go`](../backend/internal/cluster/vault_apply_forwarder.go).
 
-- **TierApplyForwarder** — forwards a tier-FSM command (wrapped in
-  `OpTierFSM`) to the vault-ctl leader. Same shape as vault forwarder,
-  different wrapping. [`cluster/tier_apply_forwarder.go`](../backend/internal/cluster/tier_apply_forwarder.go).
+- **VaultCtlChunkApplyForwarder** — forwards a chunk-FSM command (wrapped in
+  `OpVaultChunkFSM`) to the vault-ctl leader. Same shape as the vault
+  forwarder, different wrapping.
+  [`cluster/vault_ctl_chunk_apply_forwarder.go`](../backend/internal/cluster/vault_ctl_chunk_apply_forwarder.go).
 
 ### The verbs
 
-- **`fireAndForgetRemote`** — called from `ingest()` and `AppendToTier`:
+- **`fireAndForgetRemote`** — called from the ingest and append paths:
   dispatches per-follower replication goroutines. MUST be called
   *outside* `o.mu`; holding the lock across this call cascades into
   cluster-wide deadlock on a paused peer
@@ -604,16 +560,11 @@ Cross-node data movement. Three distinct mechanisms; do not confuse them.
 - **Replica count** — how many nodes are known to have this chunk
   (leader + caught-up followers). Surfaced on `ChunkMeta.ReplicaCount`.
 
-- **Transition receipt** — the durable ack from the destination tier
-  that it has received and replicated a transitioned chunk's records.
-  Source tier keeps `TransitionStreamed = true` until the receipt lands,
-  then deletes the source copy.
-
 ### Connection management
 
 - **PeerConns** — shared gRPC connection pool. One connection per peer
   node; reused by all callers (Broadcaster, RecordForwarder, SearchForwarder,
-  TierReplicator). `Invalidate(nodeID)` drops a stuck connection so the
+  ChunkReplicator). `Invalidate(nodeID)` drops a stuck connection so the
   next call re-dials.
 
 - **MultiRaftTransport** — per-node multiplexing transport for Raft RPCs.
@@ -680,11 +631,11 @@ config store.
 ### State model
 
 - **System** — `system.System`: the top-level cluster state. Two halves:
-  - **Config** — operator-controlled (vaults, tiers, routes, ingesters,
+  - **Config** — operator-controlled (vaults, routes, ingesters,
     policies, cloud services, server settings). Routes carry their
     match expressions inline on `RouteConfig.Stages`; there is no
     separate `Filter` entity (gastrolog-4kkoo Phase 5).
-  - **Runtime** — cluster-managed (node membership, tier placements,
+  - **Runtime** — cluster-managed (node membership, vault placements,
     ingester assignments, setup wizard dismissal).
 
   Both are replicated via the system Raft group.
@@ -742,7 +693,7 @@ Live on `Config` directly (not as entities):
 ### IDs
 
 - **GLID** — GastroLog ID: 16 bytes, UUIDv7-shaped, lexicographically
-  sortable by creation time. Every entity (vault, tier, user, chunk, node,
+  sortable by creation time. Every entity (vault, user, chunk, node,
   storage) has a GLID. 26-character base32hex string form is canonical in
   URLs, logs, and user-facing surfaces.
   [`backend/internal/glid/glid.go`](../backend/internal/glid/glid.go).
@@ -759,19 +710,22 @@ Live on `Config` directly (not as entities):
 | follower         | secondary, replica| "replica" is ambiguous with the separate concept of chunk replica. |
 | active chunk     | open chunk        | "Active" matches `ChunkMeta.Sealed = false`.                       |
 | sealed chunk     | closed chunk, finalized chunk | "Sealed" is what the chunk manager actually calls it.  |
-| cloud-backed     | cloud chunk       | Cloud-backed describes storage; "cloud chunk" conflates with archival state. |
+| cloud-backed     | cloud chunk, cloud tier | Cloud-backed describes storage; "cloud chunk" conflates with archival state and "cloud tier" is dead vocabulary. |
 | archived         | cold, glacier-tier| "Archived" is the canonical flag; cloud storage-class is orthogonal.|
-| vault-ctl Raft   | tier Raft         | Post-`gastrolog-5xxbd`, tier FSMs are sub-FSMs; there is no per-tier Raft group. |
+| vault            | tier              | The tier abstraction was removed; vault is the only storage unit. Storage shape lives directly on `VaultConfig`. |
+| vault-ctl Raft   | tier Raft         | There is no per-tier Raft group; chunk metadata is a sub-FSM under the vault-ctl group. |
+| vault FSM, instance FSM | tier FSM   | The per-vault chunk-metadata sub-FSM lives in `vaultctlfsm`; "tier FSM" is dead vocabulary. |
+| vault replication | tier replication | Record streams from leader to follower are per-vault now. |
 | ingester         | source, collector | "Ingester" is the proto name; "source" leaks from UI copy.          |
 | route            | pipeline (at ingest) | Ingestion "route" ≠ query "pipeline"; use "route pipeline" or "ingestion pipeline" to bridge. |
 | record           | event, message    | "Event" conflates with `EventID`; "message" conflates with ingester internals. |
 | applied index    | committed-and-applied | Precision: commit = quorum-persisted; applied = FSM-processed.  |
 | node             | server, host      | "Node" is the cluster-member canonical. Reserve "server" for `cluster.Server` (the gRPC server component). |
 | peer             | remote node       | "Peer" is relative; there is no absolute "remote".                 |
-| retention event  | retention action, expire/eject/transition | Phase 4 (gastrolog-42f9z) collapsed the action enum: a fired retention event destroys the chunk and (per the vault's retention disposition, gastrolog-18du3) optionally streams the records through the routing engine first. The "what" lives on routes; the "whether to invoke routes at all" lives on the disposition. |
-| match expression | filter, FilterConfig | Phase 5 (gastrolog-4kkoo) inlined match expressions on `RouteConfig.Stages`; the named-`Filter` entity is gone. UI label: "Match expression" on the route editor. |
-| route table      | filter set        | Phase 5 (gastrolog-4kkoo): the runtime structure is a priority-ordered `RouteSet`, not a per-vault `FilterSet`. First-match-wins, no catch-the-rest. |
-| synthetic attribute | source predicate, RouteSource | Phase 5 (gastrolog-4kkoo): source/content predicates unify via `_source`/`_ingester`/`_vault`/`_reason` overlays at routing-eval time. The Phase-4 source-kind enum is gone. |
+| retention event  | retention action, expire/eject/transition | A fired retention event destroys the chunk and (per the vault's retention disposition, gastrolog-18du3) optionally streams the records through the routing engine first. The "what" lives on routes; the "whether to invoke routes at all" lives on the disposition. |
+| match expression | filter, FilterConfig | Match expressions are inlined on `RouteConfig.Stages`; the named-`Filter` entity is gone (gastrolog-4kkoo Phase 5). UI label: "Match expression" on the route editor. |
+| route table      | filter set        | The runtime structure is a priority-ordered `RouteSet`, not a per-vault `FilterSet`. First-match-wins, no catch-the-rest. |
+| synthetic attribute | source predicate, RouteSource | Source/content predicates unify via `_source`/`_ingester`/`_vault`/`_reason` overlays at routing-eval time. |
 
 ### Timestamp conventions
 
@@ -805,26 +759,25 @@ if SourceTS is absent or obviously bogus. For internal ordering
 Error values that cross bounded contexts:
 
 - `ErrVaultNotFound` — the vault doesn't exist on this node.
-- `ErrVaultNotReady` — vault exists but tier FSM hasn't applied enough
+- `ErrVaultNotReady` — vault exists but the vault FSM hasn't applied enough
   log entries (or hasn't restored). Canonical definition in
   [`vault_readiness.go`](../backend/internal/orchestrator/vault_readiness.go).
 - `ErrChunkNotFound` / `ErrActiveChunk` / `ErrChunkTombstoned` — chunk
   manager errors with specific meanings. Never conflate.
-- `ErrNoChunkManagers` — this node hosts no tiers for any vault.
-- `ErrTierDraining` — tier is mid-drain; writes are rejected.
+- `ErrNoChunkManagers` — this node hosts no vaults.
 
 ### What "replication" means in which context
 
-- **Record replication** (tier layer) — copying record bytes from the
-  tier leader to tier followers. Done by `TierReplicator`. Acked by
-  a per-tier application-level ack; bounded by `ForwardingTimeout`.
+- **Record replication** (vault layer) — copying record bytes from the
+  vault leader to vault followers. Done by `ChunkReplicator`. Acked by
+  a per-vault application-level ack; bounded by `ForwardingTimeout`.
 - **Metadata replication** (vault-ctl Raft) — propagating chunk-create /
   seal / delete / upload events. Done by hraft via multiraft transport.
   Acked by Raft majority; bounded by `ReplicationTimeout`.
 - **Apply forwarding** — follower → leader forwarding of a write command.
-  Done by `VaultApplyForwarder`, `TierApplyForwarder`, or (for config
-  Raft) `Forwarder`. This is not replication; it's routing to the node
-  that CAN do the replication.
+  Done by `VaultApplyForwarder`, `VaultCtlChunkApplyForwarder`, or (for
+  config Raft) `Forwarder`. This is not replication; it's routing to the
+  node that CAN do the replication.
 
 When you see "replication" in a log line or a comment, check whether the
 subject is bytes or metadata — the operational consequences are different.

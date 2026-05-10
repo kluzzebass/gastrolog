@@ -41,7 +41,7 @@ var crc32Table = crc32.MakeTable(crc32.Castagnoli)
 func main() {
 	var (
 		cmdOnly     = flag.Bool("cmd-only", false, "only print FSM-command log entries")
-		filterGroup = flag.String("filter-group", "", "only print entries from this group name (tier id, 'config', etc.)")
+		filterGroup = flag.String("filter-group", "", "only print entries from this group name (vault-ctl group ID, 'config', etc.)")
 		filterCmd   = flag.String("filter-cmd", "", "only print entries with this FSM command (e.g. CmdDeleteChunk)")
 		summary     = flag.Bool("summary", false, "print per-group + per-command counts only")
 		termHist    = flag.Bool("term-hist", false, "print per-(group, term, cmd) counts to localize spikes")

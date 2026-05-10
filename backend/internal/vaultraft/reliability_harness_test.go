@@ -223,10 +223,10 @@ func (h *reliabilityHarness) applyInstanceCreate(instID glid.GLID, chunkID chunk
 	cmd := MarshalVaultChunkCommand(instID, wire)
 	fut := leader.raft.Apply(cmd, 2*time.Second)
 	if err := fut.Error(); err != nil {
-		h.t.Fatalf("apply tier create: %v", err)
+		h.t.Fatalf("apply instance create: %v", err)
 	}
 	if r, ok := fut.Response().(error); ok && r != nil {
-		h.t.Fatalf("apply tier create FSM error: %v", r)
+		h.t.Fatalf("apply instance create FSM error: %v", r)
 	}
 }
 
@@ -310,11 +310,11 @@ func (h *reliabilityHarness) shutdown() {
 
 // --- Divergence assertions ---
 
-// tierFSMFingerprint produces a deterministic, comparable snapshot of a
-// tier sub-FSM's state: sorted chunk IDs with their seal/compressed state,
-// sorted transition receipts, sorted tombstone IDs. Two fingerprints that
-// string-equal represent identical replicated state.
-func tierFSMFingerprint(t *vaultctlfsm.FSM) string {
+// instanceFSMFingerprint produces a deterministic, comparable snapshot of
+// an instance sub-FSM's state: sorted chunk IDs with their seal/compressed
+// state, sorted transition receipts, sorted tombstone IDs. Two fingerprints
+// that string-equal represent identical replicated state.
+func instanceFSMFingerprint(t *vaultctlfsm.FSM) string {
 	entries := t.List()
 	ids := make([]chunk.ChunkID, len(entries))
 	byID := make(map[chunk.ChunkID]vaultctlfsm.ManifestEntry, len(entries))
@@ -339,8 +339,8 @@ func tierFSMFingerprint(t *vaultctlfsm.FSM) string {
 	return sb.String()
 }
 
-// vaultFSMFingerprint deterministically encodes every tier sub-FSM in the
-// vault FSM. Two vault FSMs with equal fingerprints have converged.
+// vaultFSMFingerprint deterministically encodes every instance sub-FSM in
+// the vault FSM. Two vault FSMs with equal fingerprints have converged.
 func vaultFSMFingerprint(f *FSM) string {
 	f.mu.Lock()
 	ids := make([]glid.GLID, 0, len(f.instances))
@@ -352,12 +352,12 @@ func vaultFSMFingerprint(f *FSM) string {
 
 	var sb fingerprintBuilder
 	for _, id := range ids {
-		sb.writef("tier=%x\n", id[:])
+		sb.writef("inst=%x\n", id[:])
 		f.mu.Lock()
 		sub := f.instances[id]
 		f.mu.Unlock()
 		if sub != nil {
-			sb.write(tierFSMFingerprint(sub))
+			sb.write(instanceFSMFingerprint(sub))
 		}
 	}
 	return sb.String()

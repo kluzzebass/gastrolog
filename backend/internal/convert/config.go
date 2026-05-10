@@ -1,10 +1,9 @@
 package convert
 
-// system.go provides canonical converters between config domain types and
-// their protobuf representations for CloudService, NodeStorageConfig, and
-// TierConfig. Both the server RPC handlers and the Raft FSM command
-// package call these functions — there is exactly one source of truth for
-// each field mapping. See gastrolog-2f8et.
+// config.go provides canonical converters between config domain types and
+// their protobuf representations. Both the server RPC handlers and the
+// Raft FSM command package call these functions — there is exactly one
+// source of truth for each field mapping. See gastrolog-2f8et.
 
 import (
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
@@ -127,44 +126,8 @@ func NodeStorageConfigFromProto(p *gastrologv1.NodeStorageConfig) system.NodeSto
 }
 
 // ---------------------------------------------------------------------------
-// TierConfig
+// VaultConfig
 // ---------------------------------------------------------------------------
-
-func TierTypeToProto(t system.VaultType) gastrologv1.VaultType {
-	switch t {
-	case system.VaultTypeMemory:
-		return gastrologv1.VaultType_VAULT_TYPE_MEMORY
-	case system.VaultTypeFile:
-		return gastrologv1.VaultType_VAULT_TYPE_FILE
-	case system.VaultTypeJSONL:
-		return gastrologv1.VaultType_VAULT_TYPE_JSONL
-	default:
-		return gastrologv1.VaultType_VAULT_TYPE_UNSPECIFIED
-	}
-}
-
-func TierTypeFromProto(t gastrologv1.VaultType) system.VaultType {
-	switch t {
-	case gastrologv1.VaultType_VAULT_TYPE_MEMORY:
-		return system.VaultTypeMemory
-	case gastrologv1.VaultType_VAULT_TYPE_FILE:
-		return system.VaultTypeFile
-	case gastrologv1.VaultType_VAULT_TYPE_JSONL:
-		return system.VaultTypeJSONL
-	case gastrologv1.VaultType_VAULT_TYPE_UNSPECIFIED:
-		return system.VaultTypeFile
-	default:
-		return system.VaultTypeFile
-	}
-}
-
-// ---------------------------------------------------------------------------
-// VaultConfig (post-tier shape)
-// ---------------------------------------------------------------------------
-//
-// Mirrors the TierConfig converters during the vault refactor
-// (gastrolog-257l7). Once consumers migrate from TierConfig to VaultConfig,
-// the vault converters above are deleted.
 
 // VaultConfigToProto converts a system.VaultConfig to its proto representation.
 func VaultConfigToProto(v system.VaultConfig) *gastrologv1.VaultConfig {
@@ -242,8 +205,7 @@ func VaultConfigFromProto(p *gastrologv1.VaultConfig) (system.VaultConfig, error
 	return cfg, nil
 }
 
-// VaultTypeToProto maps the Go-side VaultType (still used as the underlying
-// string enum during the refactor) to the new proto VaultType.
+// VaultTypeToProto maps the Go-side VaultType to the proto VaultType.
 func VaultTypeToProto(t system.VaultType) gastrologv1.VaultType {
 	switch t {
 	case system.VaultTypeMemory:
@@ -301,10 +263,7 @@ func RouteStagesFromProto(stages []*gastrologv1.RouteStage) []system.RouteStage 
 
 // VaultTypeFromProto maps proto VaultType back to the Go-side VaultType.
 // Round-trips empty: VAULT_TYPE_UNSPECIFIED maps to the empty VaultType so
-// "type was never set" is distinguishable from "type is file". (TierTypeFromProto
-// defaults UNSPECIFIED to file because the legacy tier path always wrote a
-// non-empty type; the vault path doesn't have that guarantee yet during
-// the refactor.)
+// "type was never set" is distinguishable from "type is file".
 func VaultTypeFromProto(t gastrologv1.VaultType) system.VaultType {
 	switch t {
 	case gastrologv1.VaultType_VAULT_TYPE_MEMORY:

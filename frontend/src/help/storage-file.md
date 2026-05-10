@@ -1,4 +1,4 @@
-# File Tier
+# File Vault
 
 Persists chunks to local disk. Sealed chunks are compressed automatically for efficient storage and fast reads.
 
@@ -6,14 +6,14 @@ Persists chunks to local disk. Sealed chunks are compressed automatically for ef
 
 | Setting | Description |
 |---------|-------------|
-| Storage Class | Which [file storages](help:storage-config) this tier uses. The placement manager assigns one file storage per replica. |
+| Storage Class | Which [file storages](help:storage-config) this vault uses. The placement manager assigns one file storage per replica. |
 | Replication Factor | Number of copies across available file storages with the matching class. |
 | Rotation Policy | When to seal the active chunk and start a new one. |
-| Retention Rules | What to do with sealed chunks that age out — delete or eject to another tier. |
+| Retention Rules | What to do with sealed chunks that age out — delete, or send records through the routing engine for delivery to another vault. |
 
 ## What You Should Know
 
-- The tier's data directory is derived from its assigned file storage path — you don't set it manually.
+- The vault's data directory is derived from its assigned file storage path — you don't set it manually.
 - Only one process can open a chunk directory at a time (enforced by a lock file).
 - Sealed chunks are automatically compressed — no configuration needed.
 - If GastroLog crashes, it recovers on restart — at most the last partially-written record is lost.

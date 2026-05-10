@@ -464,14 +464,10 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 	if vaultCfg == nil {
 		return fmt.Errorf("vault %s not found in config", vaultID)
 	}
-	// 1:1 vault:tier — synthesize the inst config from the vault.
 
 	o.ensureVaultControlPlaneRaftGroup(vaultID, rt.Nodes, factories)
 
 	nscs := rt.NodeStorageConfigs
-	// VaultConfig.Placements is mirrored from vault placements via the FSM
-	// bridge (gastrolog-257l7). Read from the vault directly so the lookup
-	// survives the eventual deletion of rt.VaultPlacements.
 	placements := vaultCfg.Placements
 	leaderNodeID := system.LeaderNodeID(placements, nscs)
 	followerNodeIDs := system.FollowerNodeIDs(placements, nscs)
@@ -605,7 +601,6 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 	rt := &sys.Runtime
 	o.ensureVaultControlPlaneRaftGroup(vaultCfg.ID, rt.Nodes, factories)
 
-	// 1:1 vault:tier — synthesize the inst config from the vault.
 	vaultID := vaultCfg.ID
 
 	// Determine this node's role for this vault. With one-replica-per-node
@@ -652,10 +647,9 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 	return nil, nil
 }
 
-// alertVaultInitFailed logs a warning and raises an alert for a inst that
-// failed to initialize during vault build. The inst is skipped but the
-// vault continues with its remaining tiers. The failed inst will be
-// retried on the next reconfig cycle. See gastrolog-68fqk.
+// alertVaultInitFailed logs a warning and raises an alert when a vault
+// inst fails to initialize during build. The failed inst is retried on
+// the next reconfig cycle. See gastrolog-68fqk.
 func (o *Orchestrator) alertVaultInitFailed(vaultID glid.GLID, vaultName string, err error) {
 	o.logger.Warn("buildVaultInstances: inst init failed, skipping",
 		"vault", vaultID, "name", vaultName, "error", err)
@@ -663,7 +657,7 @@ func (o *Orchestrator) alertVaultInitFailed(vaultID glid.GLID, vaultName string,
 		o.alerts.Set(
 			fmt.Sprintf("inst-init:%s", vaultID),
 			alert.Error, "orchestrator",
-			fmt.Sprintf("Tier %q failed to initialize: %v", vaultName, err),
+			fmt.Sprintf("Vault %q failed to initialize: %v", vaultName, err),
 		)
 	}
 }
@@ -692,16 +686,15 @@ func (o *Orchestrator) buildLeaderInstance(sys *system.System, vaultCfg system.V
 	return ti, nil
 }
 
-// buildInstance creates a single VaultInstance from a TierConfig.
+// buildInstance creates a single VaultInstance from a VaultConfig.
 // When isFollower is true, cloud backing params are stripped so the follower's
 // PostSealProcess only runs compress + index without uploading to cloud storage.
-// Cloud tiers use a shared blob key (vault-ID/chunk-ID.glcb) — if the follower
+// Cloud-backed vaults share a blob key (vault-ID/chunk-ID.glcb) — if the follower
 // also uploads, it overwrites the leader's blob with a different-sized version,
 // corrupting the leader's stored diskBytes and breaking all future cloud reads.
 func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultConfig, factories Factories, isFollower bool) (*VaultInstance, error) {
 	cfg := &sys.Config
 	rt := &sys.Runtime
-	// Map TierConfig.Type to factory name.
 	factoryName := mapVaultTypeToFactory(vaultCfg.Type)
 
 	// Create the vault-ctl Raft group BEFORE the chunk manager. Group creation is
@@ -812,7 +805,7 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 
 // attachLifecycleReconciler constructs a VaultLifecycleReconciler for the given
 // inst instance and binds it to the inst sub-FSM in the vault control-plane
-// Raft group. Skipped silently when there is no group (memory-mode tiers
+// Raft group. Skipped silently when there is no group (memory-mode vaults
 // without replication) — single-node deletes go straight through the chunk
 // manager via deleteChunk's local-only fallback. See gastrolog-51gme.
 //
@@ -1391,7 +1384,7 @@ func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 }
 
 // buildVaultRaftMembers returns ALL cluster nodes as Raft members for a vault
-// control-plane Raft group. Every node participates regardless of which tiers
+// control-plane Raft group. Every node participates regardless of which vaults
 // it stores — nodes without local inst data still replicate inst metadata.
 // See gastrolog-292yi.
 func (o *Orchestrator) buildVaultRaftMembers(clusterNodes []system.NodeConfig, factories Factories) []hraft.Server {
@@ -1424,7 +1417,7 @@ func mapVaultTypeToFactory(t system.VaultType) string {
 	}
 }
 
-// buildVaultParams builds a params map from a TierConfig suitable for factory consumption.
+// buildVaultParams builds a params map from a VaultConfig suitable for factory consumption.
 func buildVaultParams(sys *system.System, vaultCfg system.VaultConfig, localNodeID string) map[string]string {
 	rt := &sys.Runtime
 	params := make(map[string]string)

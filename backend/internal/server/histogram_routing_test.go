@@ -17,18 +17,17 @@ import (
 )
 
 // TestHistogramFullyLocal_RequiresLeadership is the regression for
-// gastrolog-2g334. The bug: histogramFullyLocal used LocalReplicaTierIDs
-// which includes follower tiers, so a node that's only a follower for
-// a vault's instances would skip the cross-node fan-out and serve the
-// histogram from purely local data. Followers receive only sealed chunks
-// via replication — the active (un-sealed) chunk lives only on the
-// leader and is never replicated. The follower-only view drops every
-// record currently in the active chunk, producing an empty right edge
-// where the histogram cuts off at the last sealed chunk's IngestEnd
-// instead of running up to "now".
+// gastrolog-2g334. The bug: histogramFullyLocal used LocalReplicaVaultIDs
+// which includes follower vaults, so a node that's only a follower would
+// skip the cross-node fan-out and serve the histogram from purely local
+// data. Followers receive only sealed chunks via replication — the active
+// (un-sealed) chunk lives only on the leader and is never replicated.
+// The follower-only view drops every record currently in the active
+// chunk, producing an empty right edge where the histogram cuts off at
+// the last sealed chunk's IngestEnd instead of running up to "now".
 //
 // The fix gates the local-only path on local LEADERSHIP of every queried
-// tier, so a follower node correctly falls back to the leader-engine +
+// vault, so a follower node correctly falls back to the leader-engine +
 // remote-merge path that includes the leader's active chunk.
 func TestHistogramFullyLocal_RequiresLeadership(t *testing.T) {
 	t.Parallel()
@@ -74,7 +73,7 @@ func TestHistogramFullyLocal_RequiresLeadership(t *testing.T) {
 		BoolExpr: vaultEqualExpr(leaderVaultID),
 	}
 	if !qs.histogramFullyLocal(ctx, leaderQ) {
-		t.Errorf("histogramFullyLocal(leader-only vault) = false; want true (this node leads every queried tier)")
+		t.Errorf("histogramFullyLocal(leader-only vault) = false; want true (this node leads every queried vault)")
 	}
 
 	followerQ := query.Query{

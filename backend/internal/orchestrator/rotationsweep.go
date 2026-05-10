@@ -14,12 +14,9 @@ const (
 )
 
 // rotationSweep is the single scheduled rotation job. Each tick it:
-//  1. Loads current config and applies rotation policies to all leader tiers.
+//  1. Loads current config and applies rotation policies to all leader vaults.
 //  2. Reconciles cron rotation jobs (add new, remove stale).
 //  3. Checks each leader inst's active chunk for time-based rotation triggers.
-//
-// This discovery-based approach replaces the per-vault lifecycle management
-// (applyTierRotation / reloadTierRotation) — no setup, teardown, or hot-swap.
 func (o *Orchestrator) rotationSweep() {
 	sys, err := o.loadSystem(context.Background())
 	if err != nil {
@@ -82,7 +79,7 @@ func (o *Orchestrator) rotationSweep() {
 	}
 	o.mu.RUnlock()
 
-	// Prune cron jobs for tiers that no longer need them.
+	// Prune cron jobs for vaults that no longer need them.
 	if cfg != nil {
 		o.cronRotation.pruneExcept(activeCronJobs)
 	}
@@ -113,30 +110,17 @@ func (o *Orchestrator) reconcileFilters(sys *system.System) {
 
 // applyRotationFromConfig refreshes the leader inst's replication targets
 // and rotation policy from the current config. Called each tick by
-// rotationSweep.
-//
-// gastrolog-1ex3b: the vaultCfg2 parameter is no longer consulted — Phase 2/3
-// collapsed TierConfig into VaultConfig, so cfg.Tiers is empty and the
-// previous `if vaultCfg2 == nil { return }` guard prevented FollowerTargets
-// from ever refreshing. Result: vaults built before placements arrived
-// kept FollowerTargets=[] forever and never replicated chunks to followers
-// despite RF=N. The guard is gone; the function now proceeds for every
-// leader inst and short-circuits per-section based on the actual data each
-// section needs.
+// rotationSweep. The function proceeds for every leader inst and
+// short-circuits per-section based on the data each section needs.
 func (o *Orchestrator) applyRotationFromConfig(sys *system.System,
 	cfg *system.Config,
 	vaultCfg system.VaultConfig,
 	inst *VaultInstance,
 	activeCronJobs map[string]bool,
 ) {
-	// Refresh replication targets from current system. Reads placements
-	// from VaultConfig (mirrored from vault placements via the FSM bridge —
-	// gastrolog-257l7).
+	// Refresh replication targets from current system.
 	inst.FollowerTargets = system.FollowerTargets(vaultCfg.Placements, sys.Runtime.NodeStorageConfigs)
 
-	// Rotation policy is mirrored from TierConfig onto VaultConfig at PutTier
-	// time. Reading from vaultCfg keeps this code path stable when TierConfig
-	// goes away.
 	if vaultCfg.RotationPolicyID == nil {
 		return
 	}

@@ -18,7 +18,7 @@ function testId(n: number): Uint8Array<ArrayBuffer> {
 // Use real VaultConfig instances so proto-default fields (cloudServiceId,
 // retentionRules, path, cache fields, etc.) come back as their typed
 // zero values rather than `undefined`. The card reads those fields
-// directly off the vault now that there's no tier-list indirection.
+// directly off the vault.
 const sampleConfig = {
   vaults: [
     new VaultConfig({
@@ -80,7 +80,7 @@ describe("VaultsSettings", () => {
 
     expect(getByText("vault-alpha")).toBeTruthy();
     expect(getByText("vault-beta")).toBeTruthy();
-    // vault-alpha has a local tier
+    // vault-alpha is file-backed
     expect(getByText("file")).toBeTruthy();
   });
 
@@ -96,11 +96,6 @@ describe("VaultsSettings", () => {
     expect(getByText("disabled")).toBeTruthy();
   });
 
-  // gastrolog-3iy5l + 4kkoo: removed "warns about missing tiers" — vaults
-  // carry their storage shape directly; there is no tier-list concept
-  // for an operator to forget to populate. Vaults are valid as soon as
-  // they're created.
-
   test("expand vault shows edit form and action buttons", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], sampleConfig);
@@ -110,9 +105,7 @@ describe("VaultsSettings", () => {
     });
 
     fireEvent.click(getByText("vault-alpha"));
-    // gastrolog-3iy5l + 4kkoo: vaults carry their storage shape directly,
-    // no operator-facing tier concept. The expanded card shows name,
-    // enabled, and the storage shape form.
+    // The expanded card shows name, enabled, and the storage shape form.
     expect(getByText("Name")).toBeTruthy();
     expect(getByText("Enabled")).toBeTruthy();
     expect(getByText("Storage Class")).toBeTruthy();
@@ -234,8 +227,8 @@ describe("VaultsSettings", () => {
     fireEvent.click(getByText("Add Vault"));
     await waitFor(() => expect(getByText("Create")).toBeTruthy());
 
-    // Phase 2 (gastrolog-3iy5l): a vault has one storage shape — the form
-    // exposes a single "Storage Type" select inline, no add-tier dropdown.
+    // A vault has one storage shape — the form exposes a single
+    // "Storage Type" select inline.
     fireEvent.change(getByLabelText("Storage Type"), { target: { value: "memory" } });
 
     const createBtn = getByText("Create").closest("button")!;
@@ -251,11 +244,9 @@ describe("VaultsSettings", () => {
 
 // ── Vault-level save tests ───────────────────────────────────────────
 //
-// gastrolog-3iy5l (Phase 2) collapsed multi-tier vaults to 1:1 vault:tier
-// and gastrolog-4kkoo (Phase 5) shipped inter-vault routing for the
-// hot/warm chain people used to express via tiers. All vault edits now
-// route through PutVault directly — there is no operator-facing tier
-// list, no Add Tier dropdown, and no PutTier/DeleteTier path from the UI.
+// All vault edits route through PutVault directly. The vault carries
+// its full storage shape, so there's exactly one form to populate per
+// vault — no add/remove sub-entries.
 
 // Config with one file-backed vault — enough to exercise the vault edit
 // flow. Uses real VaultConfig so the form's projection back to a fresh

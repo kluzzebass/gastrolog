@@ -41,11 +41,11 @@ export const helpTopics: HelpTopic[] = [
   },
   { id: 'routing', title: 'Routes & Filtering', load: md(() => import('./routing.md?raw')) },
   {
-    id: 'storage', title: 'Vaults & Tiers', load: md(() => import('./storage.md?raw')),
+    id: 'storage', title: 'Vaults', load: md(() => import('./storage.md?raw')),
     children: [
-      { id: 'storage-file', title: 'File Tier', load: md(() => import('./storage-file.md?raw')) },
-      { id: 'storage-memory', title: 'Memory Tier', load: md(() => import('./storage-memory.md?raw')) },
-      { id: 'storage-cloud', title: 'Cloud Tier', load: md(() => import('./storage-cloud.md?raw')) },
+      { id: 'storage-file', title: 'File Vault', load: md(() => import('./storage-file.md?raw')) },
+      { id: 'storage-memory', title: 'Memory Vault', load: md(() => import('./storage-memory.md?raw')) },
+      { id: 'storage-cloud', title: 'Cloud-backed Vault', load: md(() => import('./storage-cloud.md?raw')) },
       { id: 'policy-rotation', title: 'Rotation Policies', load: md(() => import('./policy-rotation.md?raw')) },
       { id: 'policy-retention', title: 'Retention Policies', load: md(() => import('./policy-retention.md?raw')) },
     ],

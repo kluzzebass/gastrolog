@@ -29,7 +29,7 @@ type tsEntry struct {
 // The format is unconditionally uncompressed at the file layer.
 // Compression, when applicable, is applied as a generic file-level
 // wrapper produced by the cloud-upload pipeline (see
-// docs/vault_redesign.md decisions 6 and 9).
+// docs/obsoleted/vault_redesign.md decisions 6 and 9).
 type Writer struct {
 	chunkID chunk.ChunkID
 	vaultID glid.GLID
@@ -143,7 +143,7 @@ func (cw *countWriter) Write(p []byte) (int, error) {
 //
 // The format is unconditionally uncompressed at the file layer; cloud
 // transport applies a separate zstd wrapper above this stream (see
-// docs/vault_redesign.md decisions 6 and 9).
+// docs/obsoleted/vault_redesign.md decisions 6 and 9).
 func (w *Writer) WriteTo(dst io.Writer) (int64, error) {
 	// countWriter tracks total bytes written to dst and tees them through
 	// SHA-256 to build the whole-blob digest written into the TOC footer.

@@ -96,21 +96,19 @@ func (o *Orchestrator) archivalSweepAll() {
 		if inst == nil || !inst.IsLeader() {
 			continue
 		}
-		t := system.TierFromVault(vaultCfg)
-		vaultCfg2 := &t
-		if vaultCfg2.CloudServiceID == nil {
+		if vaultCfg.CloudServiceID == nil {
 			continue
 		}
-		cs, ok := activeCS[*vaultCfg2.CloudServiceID]
+		cs, ok := activeCS[*vaultCfg.CloudServiceID]
 		if !ok {
 			continue
 		}
-		o.archivalSweepTier(inst, cs, now)
+		o.archivalSweepVault(inst, cs, now)
 	}
 }
 
-// archivalSweepTier evaluates one inst's cloud chunks against the transition chain.
-func (o *Orchestrator) archivalSweepTier(inst *VaultInstance, cs *system.CloudService, now time.Time) {
+// archivalSweepVault evaluates one vault's cloud chunks against the transition chain.
+func (o *Orchestrator) archivalSweepVault(inst *VaultInstance, cs *system.CloudService, now time.Time) {
 	metas, err := inst.Chunks.List()
 	if err != nil {
 		o.logger.Warn("archival sweep: list chunks failed", "vault", inst.VaultID, "error", err)
@@ -166,7 +164,7 @@ func (o *Orchestrator) archivalSweepTier(inst *VaultInstance, cs *system.CloudSe
 // archivalExpire deletes a cloud chunk that has aged past its lifecycle's
 // terminal "delete" transition. Routes through the receipt protocol when a
 // reconciler is wired (every node drops its index entry symmetrically);
-// falls back to the local Manager.Delete path for memory-mode tiers without
+// falls back to the local Manager.Delete path for memory-mode vaults without
 // Raft. See gastrolog-51gme step 6.
 func (o *Orchestrator) archivalExpire(inst *VaultInstance, id chunk.ChunkID, age time.Duration) {
 	if inst.Reconciler != nil {
@@ -237,21 +235,19 @@ func (o *Orchestrator) reconcileSweepAll() {
 		if inst == nil || !inst.IsLeader() {
 			continue
 		}
-		t := system.TierFromVault(vaultCfg)
-		vaultCfg2 := &t
-		if vaultCfg2.CloudServiceID == nil {
+		if vaultCfg.CloudServiceID == nil {
 			continue
 		}
-		cs := findCloudService(&sys.Config, *vaultCfg2.CloudServiceID)
+		cs := findCloudService(&sys.Config, *vaultCfg.CloudServiceID)
 		if cs == nil {
 			continue
 		}
-		o.reconcileTier(inst, cs, now)
+		o.reconcileVault(inst, cs, now)
 	}
 }
 
-// reconcileTier checks one inst's cloud chunks against the blob store.
-func (o *Orchestrator) reconcileTier(inst *VaultInstance, cs *system.CloudService, now time.Time) {
+// reconcileVault checks one vault's cloud chunks against the blob store.
+func (o *Orchestrator) reconcileVault(inst *VaultInstance, cs *system.CloudService, now time.Time) {
 	metas, err := inst.Chunks.List()
 	if err != nil {
 		return
@@ -352,7 +348,7 @@ func (o *Orchestrator) markSuspect(inst *VaultInstance, id chunk.ChunkID, now ti
 // expireSuspect removes a chunk from the index after its grace period has
 // elapsed without the blob reappearing. Routes through the receipt protocol
 // when a reconciler is wired (every node drops its index entry symmetrically);
-// falls back to the local Manager.Delete path for memory-mode tiers without
+// falls back to the local Manager.Delete path for memory-mode vaults without
 // Raft. See gastrolog-51gme step 6.
 func (o *Orchestrator) expireSuspect(inst *VaultInstance, id chunk.ChunkID, suspectDays uint32) {
 	if inst.Reconciler != nil {

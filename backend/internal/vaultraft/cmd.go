@@ -6,8 +6,9 @@ import "gastrolog/internal/glid"
 const (
 	// OpNoop is a no-op replicated command for tests and liveness checks.
 	OpNoop byte = 1
-	// OpVaultChunkFSM wraps a tier chunk-metadata command (tierfsm wire format, including
-	// its leading command byte) scoped to a tier GLID. See MarshalVaultChunkCommand.
+	// OpVaultChunkFSM wraps a chunk-metadata command (vaultctlfsm wire format,
+	// including its leading command byte) scoped to a vault-instance GLID.
+	// See MarshalVaultChunkCommand.
 	OpVaultChunkFSM byte = 2
 )
 
@@ -15,12 +16,12 @@ const (
 func MarshalNoop() []byte { return []byte{OpNoop} }
 
 // MarshalVaultChunkCommand builds a vault control-plane log entry that applies
-// tierWire to the tierfsm sub-state for instID. tierWire must be a full
-// tierfsm command (e.g. output of vaultctlfsm.MarshalCreateChunk).
-func MarshalVaultChunkCommand(instID glid.GLID, tierWire []byte) []byte {
-	out := make([]byte, 0, 1+glid.Size+len(tierWire))
+// chunkWire to the vaultctlfsm sub-state for instID. chunkWire must be a full
+// vaultctlfsm command (e.g. output of vaultctlfsm.MarshalCreateChunk).
+func MarshalVaultChunkCommand(instID glid.GLID, chunkWire []byte) []byte {
+	out := make([]byte, 0, 1+glid.Size+len(chunkWire))
 	out = append(out, OpVaultChunkFSM)
 	out = append(out, instID[:]...)
-	out = append(out, tierWire...)
+	out = append(out, chunkWire...)
 	return out
 }

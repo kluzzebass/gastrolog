@@ -9,10 +9,10 @@
 //	  node_id                          (advisory cache — see app.resolveNodeID; the raft StableStore is canonical)
 //	  node_name                        (human-readable petname, mirrors config store)
 //	  raft/
-//	    wal/                           (raftwal: log + stable store; system group + tier groups)
+//	    wal/                           (raftwal: log + stable store; system group + vault-ctl groups)
 //	    groups/
-//	      system/                      (system/config raft file snapshots — same layout as tier groups)
-//	      <tier-group-id>/               (vault metadata raft snapshots)
+//	      system/                      (system/config raft file snapshots — same layout as vault-ctl groups)
+//	      <vault-ctl-group-id>/        (vault metadata raft snapshots)
 //	  stores/
 //	    <vault-id>/                    (per-vault chunk + index data)
 //	  managed-files/

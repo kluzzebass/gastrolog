@@ -116,7 +116,7 @@ type Config struct {
 
 	// CloudServiceID is the FSM-snapshot identifier for the cloud service
 	// this Manager is currently wired to. Recorded onto every CmdUploadChunk
-	// so a chunk's authoritative store survives a tier reconfiguration that
+	// so a chunk's authoritative store survives a vault reconfiguration that
 	// repoints CloudStore. Zero value when CloudStore is nil. See
 	// gastrolog-grnc3.
 	CloudServiceID glid.GLID
@@ -128,7 +128,7 @@ type Config struct {
 
 	// CacheEviction selects the warm-cache eviction policy: "lru" (default)
 	// or "ttl". The two are mutually exclusive — operators pick one mode,
-	// not both. Empty string is treated as "lru" so a tier with a budget
+	// not both. Empty string is treated as "lru" so a vault with a budget
 	// but no explicit policy still gets eviction. See gastrolog-2idw8.
 	CacheEviction string
 
@@ -284,15 +284,15 @@ type chunkMeta struct {
 
 	// IngestTSMonotonic starts true and flips to false the first time an
 	// Append delivers a record with IngestTS earlier than the running max.
-	// Determined dynamically per chunk — never assumed by tier — because
-	// tier 1 ingesters (RELP, Syslog, Fluent, etc.) routinely stamp
-	// arbitrary IngestTS values or deliver out of order, and tier 2+
-	// destinations may happen to receive records in IngestTS order.
+	// Determined dynamically per chunk — never assumed up-front — because
+	// edge ingesters (RELP, Syslog, Fluent, etc.) routinely stamp
+	// arbitrary IngestTS values or deliver out of order, and downstream
+	// relays may happen to receive records in IngestTS order.
 	// See gastrolog-66b7x.
 	ingestTSMonotonic bool
 
 	cloudBacked bool // true = chunk lives in cloud, not on local disk
-	archived    bool // true = chunk is in offline storage tier (Glacier, Azure Archive)
+	archived    bool // true = chunk is in an offline storage class (Glacier, Azure Archive)
 
 	// GLCB TOC: section offsets for embedded TS indexes (0 = none).
 	ingestIdxOffset int64
@@ -1609,12 +1609,12 @@ func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
 	// IngestTS and SourceTS bounds cannot be derived from first+last
 	// physical records on chunks built via ImportRecords (or any chunk
 	// where physical write order doesn't match Ingest/Source TS order).
-	// Such chunks are produced by tier transitions: streamLocal /
-	// StreamAppendToTier preserves each record's IngestTS/SourceTS but
-	// appends in source-WriteTS order, so the physical first/last
-	// records are not the IngestTS extrema. Scanning all idx entries is
-	// O(records) but the idx file is small (12 bytes/entry) and only
-	// loaded once per chunk on manager startup. See gastrolog-66b7x.
+	// Such chunks are produced by retention-driven re-ingestion paths
+	// that preserve each record's IngestTS/SourceTS but append in
+	// source-WriteTS order — so the physical first/last records are not
+	// the IngestTS extrema. Scanning all idx entries is O(records) but
+	// the idx file is small (12 bytes/entry) and only loaded once per
+	// chunk on manager startup. See gastrolog-66b7x.
 	if err := scanTSBounds(idxFile, recordCount, meta); err != nil {
 		return nil, fmt.Errorf("scan TS bounds for chunk %s: %w", id, err)
 	}
@@ -2098,7 +2098,7 @@ type importState struct {
 // writeRecord writes a single record to the import files and updates offsets/metadata.
 func (s *importState) writeRecord(rec chunk.Record) error {
 	// Match append path: stamp local write time when the iterator did not
-	// supply one (e.g. ad-hoc imports). Tier replication and other paths
+	// supply one (e.g. ad-hoc imports). Vault replication and other paths
 	// set WriteTS from the source chunk — preserve it for leader/follower parity.
 	if rec.WriteTS.IsZero() {
 		rec.WriteTS = s.now()
@@ -2172,7 +2172,7 @@ func (s *importState) writeRecord(rec chunk.Record) error {
 
 // ImportRecords creates a new sealed chunk with the given ID by consuming
 // records from the iterator. A non-zero WriteTS on each record is preserved
-// (e.g. tier replication from the leader); if WriteTS is zero, the current
+// (e.g. vault replication from the leader); if WriteTS is zero, the current
 // time from Now is used. Records are written to a new chunk directory
 // separate from the active chunk; concurrent Append calls are not affected.
 //
@@ -2350,9 +2350,9 @@ func (m *Manager) Close() error {
 }
 
 // RemoveDir removes the manager's data directory from disk. Must be called
-// after Close() — the manager must not be used afterward. Used when a tier
+// after Close() — the manager must not be used afterward. Used when a vault
 // is deleted, to clean up leftover files (.lock, cloud.idx) and the vault
-// directory itself so removed tiers don't accumulate as orphans.
+// directory itself so removed vaults don't accumulate as orphans.
 // See gastrolog-42j4n.
 func (m *Manager) RemoveDir() error {
 	if !m.closed {
@@ -3350,7 +3350,7 @@ func (m *Manager) cacheCandidates() []cacheEntry {
 // fetches it, decompresses the wrapper into the local data.glcb, and
 // hands the resulting plain GLCB to the local-cursor fast path. The
 // chunk dir becomes the warm cache, structurally identical to a freshly-
-// sealed local chunk. See docs/vault_redesign.md decisions 6 and 9.
+// sealed local chunk. See docs/obsoleted/vault_redesign.md decisions 6 and 9.
 func (m *Manager) downloadCloudBlobToChunkDir(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	dir := m.chunkDir(id)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
@@ -3961,7 +3961,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	}
 
 	// Wrap the uncompressed GLCB with zstd as a transport-only layer
-	// (gastrolog-69fd5 / docs/vault_redesign.md decisions 6 and 9).
+	// (gastrolog-69fd5 / docs/obsoleted/vault_redesign.md decisions 6 and 9).
 	// The format itself stays uncompressed on local disk; cloud transport
 	// applies the wrapper here and DownloadAndUnwrap removes it on read.
 	pr, pw := io.Pipe()
@@ -4360,19 +4360,10 @@ func (m *Manager) dropLocalMetaForCloudChunks() {
 	m.mu.Unlock()
 }
 
-// backfillTSOffsets is a no-op in the post-Phase-6 model
-// (gastrolog-69fd5). The pre-Phase-6 implementation pulled the GLCB TOC
-// footer via byte-range requests for cloud chunks missing TS index
-// offsets. With the cloud blob now zstd-wrapped end to end, byte-range
-// fetches don't decode anything useful (you'd be reading compressed
-// bytes), so the backfill path needs a different strategy if it's ever
-// resurrected — most likely "download the whole blob, unwrap, read TOC".
-// In practice the TS offsets are populated at upload time
-// (sealToGLCB → applyPutTier mirror, gastrolog-257l7), so the
-// backfill becomes redundant for chunks created after the refactor.
-func (m *Manager) backfillTSOffsets() {
-	// Intentionally empty — see godoc above.
-}
+// backfillTSOffsets is a no-op (gastrolog-69fd5). TS index offsets are
+// populated at GLCB upload time, so backfill is redundant. Kept as a
+// stub call site in case a future zstd-aware backfill is needed.
+func (m *Manager) backfillTSOffsets() {}
 
 // loadCloudChunksFromStore iterates blobs from the cloud store and populates
 // the local B+ tree index. Does NOT insert into m.metas.

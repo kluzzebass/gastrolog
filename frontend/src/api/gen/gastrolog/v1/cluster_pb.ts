@@ -637,7 +637,7 @@ export class NodeStats extends Message<NodeStats> {
   /**
    * Per-peer inter-node gRPC transport bytes, from this node's perspective.
    * Populated from the cluster transport stats handlers — includes Raft,
-   * broadcast, tier replication, query forwarding, chunk streaming, etc.
+   * broadcast, vault replication, query forwarding, chunk streaming, etc.
    * See gastrolog-47u85.
    *
    * @generated from field: repeated gastrolog.v1.PeerBytesStat peer_bytes = 37;
@@ -1030,14 +1030,10 @@ export class ForwardRecordsResponse extends Message<ForwardRecordsResponse> {
 
 /**
  * ForwardVaultApplyRequest carries a pre-marshaled vault control-plane Raft
- * command for the leader to apply. group_id is the vault ctl group
+ * command for the leader to apply. group_id is the vault-ctl group
  * (vault/<vaultGLID>/ctl); command is the marshaled FSM command bytes
- * (typically OpVaultChunkFSM + tier GLID + tierfsm wire payload, see
- * vaultraft.MarshalVaultChunkCommand).
- *
- * Replaces the historical ForwardTierApply RPC during the vault refactor
- * (gastrolog-257l7) — the two had identical schema and RPC behavior;
- * merged into one.
+ * (typically OpVaultChunkFSM + vault-instance GLID + vaultctlfsm wire
+ * payload, see vaultraft.MarshalVaultChunkCommand).
  *
  * @generated from message gastrolog.v1.ForwardVaultApplyRequest
  */

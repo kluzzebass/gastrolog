@@ -9,16 +9,16 @@ import (
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
-// VaultInstance is the node-local materialization of a TierConfig.
-// TierConfig (in Raft config) is the logical definition.
-// VaultInstance is the physical runtime: chunk manager + index manager + query engine.
+// VaultInstance is the node-local materialization of a VaultConfig.
+// VaultConfig (in Raft config) is the logical definition; VaultInstance is the
+// physical runtime: chunk manager + index manager + query engine.
 //
-// A single node may host multiple TierInstances for the same inst when
+// A single node may host multiple VaultInstances for the same vault when
 // same-node replication is active (different file storages). Each instance
 // has a unique StorageID and its own chunk manager pointing to a different
 // directory.
 type VaultInstance struct {
-	VaultID         glid.GLID // identity of the owning vault (1:1 vault:tier — also the inst ID)
+	VaultID         glid.GLID // identity of the owning vault
 	StorageID       string    // the file storage ID this instance uses (empty for memory/JSONL vaults)
 	Type            string
 	Chunks          chunk.ChunkManager
@@ -82,7 +82,7 @@ type VaultInstance struct {
 	// FSM-apply event handlers (seal, retention-pending, transition-streamed,
 	// transition-received, request-delete, ack-delete, finalize-delete) plus
 	// the canonical deleteChunk entry point. All cluster-wide deletes route
-	// through here over gastrolog-51gme steps 4-8. Nil for memory-mode tiers
+	// through here over gastrolog-51gme steps 4-8. Nil for memory-mode vaults
 	// (no FSM, no replication).
 	Reconciler *VaultLifecycleReconciler
 

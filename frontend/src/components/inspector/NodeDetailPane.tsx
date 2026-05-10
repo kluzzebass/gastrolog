@@ -38,12 +38,12 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
     peerNameById.set(id, n.name || id);
   }
 
-  // Build vault ID → cloud tier type map from config tiers.
+  // Build vault ID → "cloud" map from VaultConfig.cloudServiceId.
   const cloudProviders = new Map<string, string>();
   if (config) {
-    for (const tier of config.tiers) {
-      if (encode(tier.cloudServiceId) && encode(tier.vaultId)) {
-        cloudProviders.set(encode(tier.vaultId), "cloud");
+    for (const v of config.vaults) {
+      if (encode(v.cloudServiceId)) {
+        cloudProviders.set(encode(v.id), "cloud");
       }
     }
   }

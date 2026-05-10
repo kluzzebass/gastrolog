@@ -5,14 +5,7 @@ import (
 )
 
 // VaultConfig describes a vault — the unit of independent storage and the
-// only abstraction over the chunk layer (post-tier model).
-//
-// Pre-refactor, the storage/lifecycle fields lived on TierConfig and a vault
-// owned 1..N tiers. During the vault refactor (gastrolog-257l7), VaultConfig
-// absorbs every tier field; once consumers migrate, TierConfig is deleted.
-//
-// All new fields are JSON-omitempty so existing serialized data
-// (which only has id/name/enabled) still deserializes cleanly.
+// only abstraction over the chunk layer.
 type VaultConfig struct {
 	// ID is the unique identifier (UUIDv7).
 	ID glid.GLID `json:"id"`
@@ -98,33 +91,6 @@ func (v VaultConfig) ResolveRetentionDisposition() string {
 		return RetentionDispositionRoute
 	default:
 		return RetentionDispositionDelete
-	}
-}
-
-// TierFromVault synthesizes the matching TierConfig for a vault under the 1:1
-// vault:tier model. The returned tier shares the vault's ID. This is the
-// inverse of MergeVaultFromTiers and replaces walking cfg.Tiers for the single
-// tier per vault.
-func TierFromVault(v VaultConfig) TierConfig {
-	vaultType := v.Type
-	if vaultType == "" {
-		vaultType = VaultTypeFile
-	}
-	return TierConfig{
-		ID:                v.ID,
-		Name:              v.Name,
-		Type:              vaultType,
-		VaultID:           v.ID,
-		StorageClass:      v.StorageClass,
-		CloudServiceID:    v.CloudServiceID,
-		ReplicationFactor: v.ReplicationFactor,
-		Path:              v.Path,
-		MemoryBudgetBytes: v.MemoryBudgetBytes,
-		RotationPolicyID:  v.RotationPolicyID,
-		RetentionRules:    append([]RetentionRule(nil), v.RetentionRules...),
-		CacheEviction:     v.CacheEviction,
-		CacheBudget:       v.CacheBudget,
-		CacheTTL:          v.CacheTTL,
 	}
 }
 

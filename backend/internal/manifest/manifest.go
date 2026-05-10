@@ -1,5 +1,5 @@
 // Package manifest defines the cluster-wide read surfaces over the per-vault
-// chunk manifests held by tier sub-FSMs. It is the home for any interface
+// chunk manifests held by instance sub-FSMs. It is the home for any interface
 // that exposes vaults' runtime metadata to consumers above
 // internal/chunk and internal/index but below internal/orchestrator —
 // principally the query engine, retention, and any future caller that
@@ -41,7 +41,7 @@ type VaultRegistry interface {
 	Reader() Reader
 
 	// IndexReader returns the FSM-grounded IngestTS-rank lookup interface.
-	// Returns nil when the registry's tier instances aren't wired to a
+	// Returns nil when the registry's vault instances aren't wired to a
 	// chunk/index manager (e.g. a metadata-only test registry); callers
 	// should treat nil as "no index access" and fall through to other
 	// strategies (FSM-based proportional distribution).
@@ -66,8 +66,8 @@ type Reader interface {
 	Entry(chunkID chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool)
 
 	// EntriesForVault returns the manifest entries for every sealed chunk
-	// in the given vault, regardless of tier. The returned slice is a
-	// snapshot; callers may mutate or sort it.
+	// in the given vault. The returned slice is a snapshot; callers may
+	// mutate or sort it.
 	//
 	// Returns nil if the vault is unknown.
 	EntriesForVault(vaultID glid.GLID) []vaultctlfsm.ManifestEntry
@@ -84,7 +84,7 @@ type Reader interface {
 // The histogram and other rank-arithmetic consumers route through this
 // instead of reaching into chunk.Manager.FindIngestEntryIndex /
 // index.Manager.FindIngestEntryIndex directly. The implementation is
-// responsible for dispatching to the right tier's chunk Manager and
+// responsible for dispatching to the right vault's chunk Manager and
 // using FSM-derived offsets — never trusting projected meta when the
 // FSM has the authoritative offsets.
 type IndexReader interface {

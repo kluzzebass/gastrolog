@@ -51,7 +51,7 @@ service VaultService {
 
   // ArchiveChunk transitions a cloud-backed sealed chunk to an offline
   // storage class (Glacier, Deep Archive, Azure Archive). The chunk stays
-  // in the tier but becomes unreadable until restored.
+  // in the vault but becomes unreadable until restored.
   rpc ArchiveChunk(ArchiveChunkRequest) returns (ArchiveChunkResponse);
 
   // RestoreChunk initiates retrieval of an archived chunk. On S3 this is
@@ -97,7 +97,7 @@ message ListChunksRequest {
   string vault = 1;
 
   // When true, return only unsealed (active) chunks from this node's
-  // local tiers — no cross-node fan-out. Used for lightweight 5-second
+  // local vaults — no cross-node fan-out. Used for lightweight 5-second
   // polling of active-chunk stats (record count, bytes) while discrete
   // events (seal, delete, compress) come through the WatchChunks stream.
   // See gastrolog-1jijm.
@@ -336,11 +336,10 @@ message ImportRecordsResponse {
 
 message SealVaultRequest {
   string vault = 1;
-  string tier = 2; // optional: seal only this tier (name or ID). Empty = all tiers.
 }
 
 message SealVaultResponse {
-  int32 sealed_count = 1; // number of tiers whose active chunk was sealed
+  int32 sealed_count = 1; // number of vaults whose active chunk was sealed
 }
 
 message RetryUnreadableChunksRequest {

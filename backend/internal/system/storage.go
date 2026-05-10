@@ -72,34 +72,7 @@ const (
 	VaultTypeJSONL  VaultType = "jsonl"
 )
 
-// TierConfig defines a storage tier owned by exactly one vault. Tiers are
-// ordered within a vault by their Position field (0 = hottest / first).
-type TierConfig struct {
-	ID                glid.GLID       `json:"id"`
-	Name              string          `json:"name"`
-	Type              VaultType       `json:"type"`
-	VaultID           glid.GLID       `json:"vaultId"` // owning vault
-	RotationPolicyID  *glid.GLID      `json:"rotationPolicyId,omitempty"`
-	RetentionRules    []RetentionRule `json:"retentionRules,omitempty"`
-	MemoryBudgetBytes uint64          `json:"memoryBudgetBytes,omitempty"`
-	StorageClass      uint32          `json:"storageClass,omitempty"`
-	CloudServiceID    *glid.GLID      `json:"cloudServiceId,omitempty"`
-	Path              string          `json:"path,omitempty"`              // direct path for JSONL sinks
-	ReplicationFactor uint32          `json:"replicationFactor,omitempty"` // desired RF (1 = no replication)
-	CacheEviction     string          `json:"cacheEviction,omitempty"`     // "lru" (default) or "ttl"
-	CacheBudget       string          `json:"cacheBudget,omitempty"`       // max cache size (e.g. "1GB", "500MB", default: "1GiB")
-	CacheTTL          string          `json:"cacheTtl,omitempty"`          // duration for TTL mode (e.g. "1h", "7d")
-}
-
-// IsCloud reports whether this tier is cloud-backed. A cloud-backed tier is
-// a file tier that has CloudServiceID set; the chunk manager flips on cloud
-// upload + cache-as-source semantics for those. There is no separate
-// TierTypeCloud — see gastrolog-4k5mg.
-func (t TierConfig) IsCloud() bool {
-	return t.CloudServiceID != nil
-}
-
-// VaultPlacement assigns one replica of a tier to a specific file storage.
+// VaultPlacement assigns one replica of a vault to a specific file storage.
 // The node is derived from the file storage's NodeStorageConfig.
 type VaultPlacement struct {
 	StorageID string `json:"storageId"`

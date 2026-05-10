@@ -4,7 +4,7 @@ The Vaults settings tab is where you create and manage vaults and their storage 
 
 ## Creating a Vault
 
-A vault needs a **Name** and a single **storage shape** — memory, file, or JSONL sink. Configure the shape inline when you click "Add Vault"; there is no separate tier list.
+A vault needs a **Name** and a single **storage shape** — memory, file, or JSONL sink. Configure the shape inline when you click "Add Vault".
 
 The **Enabled** checkbox controls whether the vault starts accepting records immediately. Uncheck it to create the vault in a disabled state — useful when you want to finish configuring storage before routes start directing traffic into it. Toggle it on later from the vault card.
 
@@ -24,7 +24,7 @@ A **File** vault is local-only by default. Selecting a Cloud Storage on it makes
 
 - **Rotation Policy** — when to seal the active chunk and start a new one. Select a policy from the dropdown, or leave empty for no automatic rotation.
 - **Retention Policy** — when sealed chunks become eligible for retention. Select a policy that defines the trigger (max age, max chunk count, etc.); leave empty for no retention.
-- **Retention Disposition** — what happens to records when retention triggers. The default is **Delete records on retention**: records drop, storage frees, the routing engine is never invoked. The opt-in alternative is **Send records to routing engine**: the records flow through the routing table with synthetic `_source = "retention"` and `_vault = "<vault-id>"`, so routes you configure can forward them to an archive vault, cold-storage tier, etc. Use the routing path only when you have a specific archival or forwarding pipeline in mind — otherwise a misconfigured route can re-inject records into this vault and create a cascade. The original chunk is destroyed regardless of disposition.
+- **Retention Disposition** — what happens to records when retention triggers. The default is **Delete records on retention**: records drop, storage frees, the routing engine is never invoked. The opt-in alternative is **Send records to routing engine**: the records flow through the routing table with synthetic `_source = "retention"` and `_vault = "<vault-id>"`, so routes you configure can forward them to an archive vault, cold-storage vault, etc. Use the routing path only when you have a specific archival or forwarding pipeline in mind — otherwise a misconfigured route can re-inject records into this vault and create a cascade. The original chunk is destroyed regardless of disposition.
 - **Replication Factor** — how many copies of each chunk to maintain. 1 = no replication. 2 = one extra copy (redundancy). 3+ = fault-tolerant quorum. The maximum depends on how many [file storages](help:storage-config) have the matching storage class.
 
 ### File Vault Settings

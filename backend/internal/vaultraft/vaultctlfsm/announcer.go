@@ -9,14 +9,14 @@ import (
 	"gastrolog/internal/lifecycle"
 )
 
-// Applier applies pre-marshaled tier FSM commands. Implementations handle
+// Applier applies pre-marshaled chunk-FSM commands. Implementations handle
 // local application and forwarding to the vault-ctl Raft leader as needed.
 type Applier interface {
 	Apply(data []byte) error
 }
 
-// Announcer implements chunk.MetadataAnnouncer by applying commands to
-// a tier's Raft group via an Applier. The Applier handles leader routing —
+// Announcer implements chunk.MetadataAnnouncer by applying commands to a
+// vault-ctl Raft group via an Applier. The Applier handles leader routing —
 // the Announcer doesn't need to know which node is the Raft leader.
 // All methods are best-effort: errors are logged but not propagated.
 //
@@ -24,7 +24,7 @@ type Applier interface {
 // every apply call before touching the Applier. This prevents the
 // "chunk metadata announce failed: raft is already shutdown" warnings
 // that fire when the orchestrator's drain queues a last-minute chunk
-// event after the local vault-ctl Raft has been torn down. The tier FSM's
+// event after the local vault-ctl Raft has been torn down. The chunk-FSM's
 // reconcile-on-load pass covers any missed announces on the next
 // startup. See gastrolog-1e5ke.
 type Announcer struct {

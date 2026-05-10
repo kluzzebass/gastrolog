@@ -128,9 +128,8 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 			nodes[id] = setupMNNodeNoVault(t, id)
 		} else {
 			node := setupMNNode(t, id)
-			// Phase 2 (gastrolog-3iy5l): tier and vault are 1:1 with shared
-			// IDs. Write VaultConfig directly with all storage fields, plus
-			// a synthetic placement for this node, plus the matching tier.
+			// Write VaultConfig directly with all storage fields, plus a
+			// synthetic placement for this node.
 			placements := []system.VaultPlacement{
 				{StorageID: system.SyntheticStorageID(id), Leader: true},
 			}
@@ -434,7 +433,7 @@ func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *g
 		return nil, fmt.Errorf("invalid vault_id: empty or too short")
 	}
 
-	// Match production behavior: only search leader tiers on this node.
+	// Match production behavior: only search leader vaults on this node.
 	// Production ForwardSearch uses LeaderTierQueryEngineForVault.
 	eng, engErr := orch.LeaderTierQueryEngineForVault(vaultID)
 	if engErr != nil {
@@ -515,7 +514,7 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 		return recCh, nil, nil, errCh, func() []byte { return nil }
 	}
 
-	// Match production behavior: only search leader tiers on this node.
+	// Match production behavior: only search leader vaults on this node.
 	eng, engErr := orch.LeaderTierQueryEngineForVault(vaultID)
 	if engErr != nil {
 		errCh <- engErr
@@ -1030,12 +1029,10 @@ func TestMultiNode_SearchFanOut(t *testing.T) {
 //   - have its first ts strictly less than the previous page's last ts,
 //   - terminate (HasMore=false) once the full set is drained.
 //
-// Regression coverage for the splitResumeToken bug where:
-//   - tier-ID-keyed local tokens were misrouted as remote (local engine
-//     restarted from window edge each page),
-//   - real-vault-ID-keyed remote tokens were misrouted as local on nodes
-//     that held a follower replica (remote restarted from window edge each
-//     page).
+// Regression coverage for the splitResumeToken bug where local tokens
+// were misrouted as remote (local engine restarted from window edge
+// each page) and remote tokens were misrouted as local on nodes that
+// held a follower replica (remote restarted from window edge each page).
 func TestMultiNode_PaginatedReverseSearch(t *testing.T) {
 	t.Parallel()
 	h := setupMultiNode(t, []string{"node-A", "node-B"})
@@ -2337,7 +2334,7 @@ func TestMultiNode_GetIndexesLocalFastPath(t *testing.T) {
 
 // TestMultiNode_GetIndexesNotFoundAnywhere pins that GetIndexes
 // returns NotFound when no node — local or remote — has the chunk.
-// Pre-fix this case looked identical to "chunk migrated to a tier I
+// Pre-fix this case looked identical to "chunk migrated to a vault I
 // don't host"; post-fix the handler has correctly fanned out and only
 // returns NotFound when every peer reports the same.
 func TestMultiNode_GetIndexesNotFoundAnywhere(t *testing.T) {

@@ -60,11 +60,11 @@ Conditions use union semantics — a chunk fires if **any** condition matches. T
 
 **Combining TTL with size budget:** Use TTL as the primary control and size budget as a guardrail. Under normal load, TTL governs what gets deleted. During traffic spikes, the size budget prevents the vault from consuming all available disk before chunks age out.
 
-**Tiered storage via retention-trigger routes:** Instead of dropping old data, re-route it to a cloud-backed vault for long-term archival:
+**Layered storage via retention-trigger routes:** Instead of dropping old data, re-route it to a cloud-backed vault for long-term archival:
 
-1. Create a file vault with [sealed backing](help:storage-cloud) (e.g. S3) — this is your cold tier.
+1. Create a [cloud-backed vault](help:storage-cloud) (e.g. S3) — this is your cold storage.
 2. Create a route with `Source = Retention trigger`, a `*` filter, and the cold vault as destination.
-3. On your hot vault, set a retention rule (no action selector — every fired event consults the routing engine).
+3. On your hot vault, set a retention rule and choose `Send records to routing engine` as the disposition.
 
 Records flow: hot vault retention fires → routing engine matches the retention-trigger route → cold vault (cloud-backed). The hot vault stays small and fast; the cold vault accumulates history in cheap cloud storage. Queries automatically search both.
 

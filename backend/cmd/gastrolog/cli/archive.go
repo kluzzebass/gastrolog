@@ -71,7 +71,7 @@ func NewRestoreCommand() *cobra.Command {
 			if vaultFlag == "" {
 				return errors.New("--vault is required")
 			}
-			restoreTier, _ := cmd.Flags().GetString("tier")
+			restoreTier, _ := cmd.Flags().GetString("restore-tier")
 			restoreDays, _ := cmd.Flags().GetInt32("days")
 
 			r, err := newResolver(context.Background(), client)
@@ -103,7 +103,7 @@ func NewRestoreCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().String("vault", "", "vault name or ID (required)")
-	cmd.Flags().String("tier", "", "restore speed tier: Expedited, Standard, Bulk (default: Standard)")
+	cmd.Flags().String("restore-tier", "", "S3 RestoreTier — restore speed: Expedited, Standard, Bulk (default: Standard)")
 	cmd.Flags().Int32("days", 0, "days to keep restored copy readable (S3 only, default: provider default)")
 	return cmd
 }

@@ -484,7 +484,7 @@ Single-file, self-describing format for sealed chunks. Used universally:
 local-only vaults store one `data.glcb` per sealed chunk; cloud-backed
 vaults upload the same bytes to object storage (zstd-wrapped only as a
 transport layer) and keep a local cache copy with the same `data.glcb`
-name (gastrolog-69fd5; see [`docs/vault_redesign.md`](./vault_redesign.md)
+name (gastrolog-69fd5; see [`docs/obsoleted/vault_redesign.md`](./obsoleted/vault_redesign.md)
 decisions 6 and 9). The on-disk format is unconditionally **uncompressed**:
 every section is directly readable without a decompression step.
 
@@ -582,7 +582,7 @@ Each record is written as `[frameLen:u32][frame body]`, frame after frame, with 
 
 ### Compression
 
-The on-disk format is uncompressed. Cloud-backed vaults wrap the entire blob with a single zstd stream **only on transport** (uploaded as `chunk.glcb.zst`); the local cache, after `DownloadAndUnwrap`, is a plain `data.glcb` byte-for-byte equivalent to a freshly-sealed local chunk. See [`docs/vault_redesign.md`](./vault_redesign.md) decisions 6 and 9.
+The on-disk format is uncompressed. Cloud-backed vaults wrap the entire blob with a single zstd stream **only on transport** (uploaded as `chunk.glcb.zst`); the local cache, after `DownloadAndUnwrap`, is a plain `data.glcb` byte-for-byte equivalent to a freshly-sealed local chunk. See [`docs/obsoleted/vault_redesign.md`](./obsoleted/vault_redesign.md) decisions 6 and 9.
 
 Pre-Phase-6 layouts used per-record seekable zstd (~256 KiB frames) for byte-range S3 fetches. That mechanism is gone (gastrolog-69fd5): cloud reads now download the whole blob (decompressed once), populate the warm cache, and serve subsequent reads via the local-cursor fast path.
 

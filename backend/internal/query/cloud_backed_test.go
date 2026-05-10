@@ -15,7 +15,7 @@ import (
 )
 
 // cloudBackedCM wraps a ChunkManager so that List() returns all chunks
-// with CloudBacked=true. This simulates a cloud tier for testing.
+// with CloudBacked=true. This simulates a cloud-backed vault for testing.
 type cloudBackedCM struct {
 	chunk.ChunkManager
 }
@@ -40,11 +40,11 @@ func (c *cloudBackedCM) Meta(id chunk.ChunkID) (chunk.ChunkMeta, error) {
 	return m, nil
 }
 
-// TestCloudTierChunksIncludedInSearch verifies that cloud-backed chunks
+// TestCloudBackedChunksIncludedInSearch verifies that cloud-backed chunks
 // participate in search results. This is the regression test for the bug
 // where cloud chunks were "deferred" during heap priming but the lazy
 // priming was never implemented — deferredChunks was written but never read.
-func TestCloudTierChunksIncludedInSearch(t *testing.T) {
+func TestCloudBackedChunksIncludedInSearch(t *testing.T) {
 	reg := &testRegistry{
 		vaults: make(map[glid.GLID]struct {
 			cm chunk.ChunkManager
@@ -54,7 +54,7 @@ func TestCloudTierChunksIncludedInSearch(t *testing.T) {
 
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 
-	// Tier 1 (local): 5 records at t0+0s through t0+4s
+	// Local vault: 5 records at t0+0s through t0+4s.
 	localVaultID := glid.New()
 	local := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
@@ -71,7 +71,7 @@ func TestCloudTierChunksIncludedInSearch(t *testing.T) {
 		im index.IndexManager
 	}{local.CM, local.IM}
 
-	// Tier 2 (cloud): 5 records at t0+5s through t0+9s
+	// Cloud-backed vault: 5 records at t0+5s through t0+9s.
 	cloudVaultID := glid.New()
 	cloud := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
@@ -118,10 +118,10 @@ func TestCloudTierChunksIncludedInSearch(t *testing.T) {
 	}
 }
 
-// TestCloudTierTimestampOrdering verifies that cloud-backed and local
+// TestCloudBackedTimestampOrdering verifies that cloud-backed and local
 // records are merge-sorted correctly by timestamp. Cloud records that are
 // chronologically earlier than local records must appear first.
-func TestCloudTierTimestampOrdering(t *testing.T) {
+func TestCloudBackedTimestampOrdering(t *testing.T) {
 	reg := &testRegistry{
 		vaults: make(map[glid.GLID]struct {
 			cm chunk.ChunkManager
@@ -131,7 +131,7 @@ func TestCloudTierTimestampOrdering(t *testing.T) {
 
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 
-	// Cloud tier has EARLIER records (t0+0s through t0+2s).
+	// Cloud-backed vault has EARLIER records (t0+0s through t0+2s).
 	cloudVaultID := glid.New()
 	cloud := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
@@ -148,7 +148,7 @@ func TestCloudTierTimestampOrdering(t *testing.T) {
 		im index.IndexManager
 	}{&cloudBackedCM{cloud.CM}, cloud.IM}
 
-	// Local tier has LATER records (t0+3s through t0+5s).
+	// Local vault has LATER records (t0+3s through t0+5s).
 	localVaultID := glid.New()
 	local := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
@@ -167,8 +167,8 @@ func TestCloudTierTimestampOrdering(t *testing.T) {
 
 	eng := query.NewWithRegistry(reg, nil)
 
-	// Limit=3: the first 3 records should all be from the cloud tier
-	// (they have earlier timestamps). If cloud chunks were skipped,
+	// Limit=3: the first 3 records should all be from the cloud-backed
+	// vault (they have earlier timestamps). If cloud chunks were skipped,
 	// we'd get local records instead — wrong ordering.
 	iter, _ := eng.Search(context.Background(), query.Query{Limit: 3}, nil)
 	var raws []string

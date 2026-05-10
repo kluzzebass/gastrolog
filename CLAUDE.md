@@ -53,7 +53,7 @@ Do not suggest creating PRs.
 
 ## Cluster-First: Every Feature Must Work on Every Node
 
-GastroLog is a fully distributed system. No node has cluster-wide authority — tier leaders and Raft leaders are elected per vault/group, not assigned to a single privileged node. Any node can serve any request. Every feature, handler, and piece of state must work correctly regardless of which node the user is connected to. If a correct implementation requires the user to be connected to a specific node, it is wrong.
+GastroLog is a fully distributed system. No node has cluster-wide authority — vault leaders and Raft leaders are elected per vault/group, not assigned to a single privileged node. Any node can serve any request. Every feature, handler, and piece of state must work correctly regardless of which node the user is connected to. If a correct implementation requires the user to be connected to a specific node, it is wrong.
 
 When implementing anything new, ask: **"Does this work if the user is on a different node than the data?"** If the answer is no, redesign before proceeding.
 
@@ -89,7 +89,7 @@ When choosing what to do next or how deep to test: **favor WAL-related work** (c
 
 Every feature must have tests across ALL of these dimensions:
 - **Single-node**: basic correctness
-- **Multi-node**: cluster behavior with 4+ nodes, file-backed tiers, real transferrers
+- **Multi-node**: cluster behavior with 4+ nodes, file-backed vaults, real transferrers
 - **Happy path**: feature works as designed
 - **Unhappy path**: failures, errors, races, partial operations, recovery, disk full, corrupt data
 - **Edge cases**: boundary conditions, concurrent access, restart survival, empty inputs

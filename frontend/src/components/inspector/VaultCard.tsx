@@ -129,12 +129,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
   const { data: config } = useConfig();
   const [expandedChunk, setExpandedChunk] = useState<string | null>(null);
 
-  // 1:1 vault:tier — at most one tier per vault.
-  const vaultTiers = (config?.tiers ?? [])
-    .filter((t) => encode(t.vaultId) === vaultId);
-  const tierPositions = new Map<string, number>(
-    vaultTiers.map((t) => [encode(t.id), 1]),
-  );
+  const vaultMatches = (config?.vaults ?? []).filter((v) => encode(v.id) === vaultId);
 
   if (isLoading) {
     return (
@@ -150,46 +145,45 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
   // chunk appears exactly once with authoritative metadata from the leader.
   const dedupedChunks = chunks ?? [];
 
-  // Group chunks by tier, then sort within each tier by time (newest first).
-  const tierGroups = new Map<string, { vaultType: string; chunks: ChunkMeta[] }>();
+  // Group chunks by vault, then sort within each group by time (newest first).
+  const chunkGroups = new Map<string, { vaultType: string; chunks: ChunkMeta[] }>();
   for (const chunk of dedupedChunks) {
     const key = encode(chunk.vaultId) || "unknown";
-    const existing = tierGroups.get(key);
+    const existing = chunkGroups.get(key);
     if (existing) {
       existing.chunks.push(chunk);
     } else {
-      tierGroups.set(key, { vaultType: chunk.vaultType, chunks: [chunk] });
+      chunkGroups.set(key, { vaultType: chunk.vaultType, chunks: [chunk] });
     }
   }
 
-  // Node name resolution — used by both local and remote tier headers.
+  // Node name resolution — used by both local and remote vault headers.
   const nodeNameMap = buildNodeNameMap(config?.nodeConfigs ?? []);
 
-  // Identify remote tiers (in vault config but no local chunks).
-  const remoteTierInfo = (() => {
-    if (vaultTiers.length === 0) return [];
-    const localTierIds = new Set(tierGroups.keys());
-    // type enum 3 was the former TIER_TYPE_CLOUD; cloud-backed tiers now
-    // wire as TIER_TYPE_FILE with cloud_service_id set, so derive the
-    // display label from cloudServiceId presence rather than the raw enum.
-    const tierTypeMap: Record<number, string> = { 1: "memory", 2: "file", 4: "jsonl" };
-    const tierTypeLabel = (tc: { type: number; cloudServiceId: Uint8Array }): string => {
-      const base = tierTypeMap[tc.type] ?? "unknown";
-      return base === "file" && tc.cloudServiceId.length > 0 ? "cloud" : base;
+  // Identify remote vaults (in vault config but no local chunks).
+  const remoteVaultInfo = (() => {
+    if (vaultMatches.length === 0) return [];
+    const localVaultIds = new Set(chunkGroups.keys());
+    // Cloud-backed vaults wire as VAULT_TYPE_FILE with cloud_service_id set,
+    // so derive the display label from cloudServiceId presence rather than
+    // the raw enum.
+    const vaultTypeMap: Record<number, string> = { 1: "memory", 2: "file", 4: "jsonl" };
+    const vaultTypeLabel = (v: { type: number; cloudServiceId: Uint8Array }): string => {
+      const base = vaultTypeMap[v.type] ?? "unknown";
+      return base === "file" && v.cloudServiceId.length > 0 ? "cloud" : base;
     };
     const nscs = config?.nodeStorageConfigs ?? [];
-    return vaultTiers
-      .filter((tc) => !localTierIds.has(encode(tc.id)))
-      .map((tc) => {
-        const pnId = leaderNodeId(tc, nscs);
+    return vaultMatches
+      .filter((v: { id: Uint8Array }) => !localVaultIds.has(encode(v.id)))
+      .map((v: { id: Uint8Array; type: number; cloudServiceId: Uint8Array; replicationFactor: number; storageClass: number; placements: { storageId: Uint8Array; leader: boolean }[] }) => {
+        const pnId = leaderNodeId(v, nscs);
         return {
-          id: encode(tc.id),
-          pos: tierPositions.get(encode(tc.id)) ?? 0,
-          type: tierTypeLabel(tc),
+          id: encode(v.id),
+          type: vaultTypeLabel(v),
           nodeName: pnId ? resolveNodeName(nodeNameMap, pnId) : "",
-          rf: tc.replicationFactor || 1,
-          followerNodeIds: followerNodeIds(tc, nscs),
-          storageClass: tc.storageClass,
+          rf: v.replicationFactor || 1,
+          followerNodeIds: followerNodeIds(v, nscs),
+          storageClass: v.storageClass,
         };
       });
   })();
@@ -203,10 +197,10 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
       return bTime - aTime;
     });
 
-  // One <table> for ALL tiers so column widths align across the vault.
-  // Tier headers are colSpan rows interleaved between chunk groups; remote
-  // (placement-only, no local chunks) tiers render as a single placeholder
-  // header row with no chunk rows underneath. See gastrolog-28yi3.
+  // One <table> per vault so column widths align across chunks. Vault
+  // header is a colSpan row above the chunk rows; a remote (placement-only,
+  // no local chunks) vault renders as a single placeholder header row with
+  // no chunk rows underneath. See gastrolog-28yi3.
   const nscs = config?.nodeStorageConfigs ?? [];
   return (
     <div>
@@ -226,15 +220,15 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
           </tr>
         </thead>
         <tbody>
-          {vaultTiers.map((vt) => encode(vt.id)).map((tierId) => {
-            const group = tierGroups.get(tierId);
-            const remote = remoteTierInfo.find((rt) => rt.id === tierId);
+          {vaultMatches.map((v: { id: Uint8Array }) => encode(v.id)).map((vId: string) => {
+            const group = chunkGroups.get(vId);
+            const remote = remoteVaultInfo.find((rv: { id: string }) => rv.id === vId);
 
-            // Remote tier with no local chunks — single placeholder row.
+            // Remote vault with no local chunks — single placeholder row.
             if (!group && remote) {
               return (
                 <tr
-                  key={tierId}
+                  key={vId}
                   className={`text-[0.75em] font-medium uppercase tracking-[0.12em] border-b ${c(
                     "text-text-muted border-ink-border-subtle bg-ink-base/30",
                     "text-light-text-muted border-light-border-subtle bg-light-base/30",
@@ -248,7 +242,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
               {remote.followerNodeIds.length > 0 && (
                 <span>
                   {"\u2192 "}
-                  {remote.followerNodeIds.map((id, si) => {
+                  {remote.followerNodeIds.map((id: string, si: number) => {
                     const name = resolveNodeName(nodeNameMap, id);
                     let fallbackClass = 0;
                     if (remote.storageClass > 0) {
@@ -278,16 +272,14 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
 
             if (!group) return null;
 
-            // Phase 2 (gastrolog-3iy5l): single instance per vault — drop
-            // the "Tier N" prefix, just show the storage type.
             const label = group.vaultType.toUpperCase();
-            const tierCfg = config?.tiers.find((t) => encode(t.id) === tierId);
-            const rf = tierCfg?.replicationFactor || 1;
-            const secondaries = tierCfg ? followerNodeIds(tierCfg, nscs) : [];
-            const pnId = tierCfg ? leaderNodeId(tierCfg, nscs) : "";
+            const vaultCfg = config?.vaults.find((v) => encode(v.id) === vId);
+            const rf = vaultCfg?.replicationFactor || 1;
+            const secondaries = vaultCfg ? followerNodeIds(vaultCfg, nscs) : [];
+            const pnId = vaultCfg ? leaderNodeId(vaultCfg, nscs) : "";
             const nodeName = pnId ? resolveNodeName(nodeNameMap, pnId) : "";
             return (
-              <Fragment key={tierId}>
+              <Fragment key={vId}>
                 <tr
                   className={`text-[0.75em] font-medium uppercase tracking-[0.12em] border-b ${c(
                     "text-text-muted border-ink-border-subtle bg-ink-base/30",
@@ -298,8 +290,8 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
                     <span className="inline-flex flex-wrap items-center gap-2">
                       <Badge variant="copper" dark={dark}>{label}</Badge>
                       {nodeName && <span>{`on ${nodeName}`}</span>}
-                      {group.vaultType === "jsonl" && tierCfg?.path && (
-                        <span className="font-mono">{tierCfg.path}</span>
+                      {group.vaultType === "jsonl" && vaultCfg?.path && (
+                        <span className="font-mono">{vaultCfg.path}</span>
                       )}
                       <span>{`${String(group.chunks.length)} ${group.chunks.length === 1 ? "chunk" : "chunks"}`}</span>
                       <span>{`${group.chunks.reduce((sum, ch) => sum + Number(ch.recordCount), 0).toLocaleString()} records`}</span>
@@ -309,7 +301,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
                           {"\u2192 "}
                           {secondaries.map((id, si) => {
                             const name = resolveNodeName(nodeNameMap, id);
-                            const requiredClass = tierCfg?.storageClass ?? 0;
+                            const requiredClass = vaultCfg?.storageClass ?? 0;
                             let fallbackClass = 0;
                             if (requiredClass > 0) {
                               const nsc = nscs.find((n) => encode(n.nodeId) === id);
@@ -343,12 +335,12 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
                 const replicas = chunk.replicaCount || 1;
                 // Actual residency from the cluster fan-out: which nodes
                 // physically hold this chunk right now. Distinct from
-                // placement (leader + secondaries from tier config), which
+                // placement (leader + secondaries from vault config), which
                 // says where the chunk SHOULD live, not where it IS.
                 const residentNodes = chunk.replicaNodeIds.map((id) =>
                   resolveNodeName(nodeNameMap, id),
                 );
-                const placementNodes = tierCfg
+                const placementNodes = vaultCfg
                   ? [pnId, ...secondaries].filter(Boolean).map((id) => resolveNodeName(nodeNameMap, id))
                   : [];
                 // Per-node ack laggards for chunks stuck in the receipt

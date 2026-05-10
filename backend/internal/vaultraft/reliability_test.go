@@ -40,7 +40,7 @@ import (
 //   - LargeFSM_SnapshotRestoreRoundtrip          (stress streaming Restore)
 //
 // Future direction: a full orchestrator-backed harness that boots N real
-// orchestrators with Raft-backed tiers (GroupManager + raftwal +
+// orchestrators with Raft-backed vaults (GroupManager + raftwal +
 // multiraft.Transport on loopback gRPC). That unlocks end-to-end
 // scenarios — ingest, seal, search across nodes during failover —
 // instead of testing the vault control-plane Raft in isolation. Tracked
@@ -99,8 +99,8 @@ func TestReliability_FreshCluster_FSMsConvergeEmpty(t *testing.T) {
 	h.assertAllFSMsConverged()
 }
 
-// Leader applies a tier command; every follower must converge to the same
-// FSM state. Baseline end-to-end replication check.
+// Leader applies an instance command; every follower must converge to the
+// same FSM state. Baseline end-to-end replication check.
 func TestReliability_LeaderApply_ReplicatesToFollowers(t *testing.T) {
 	t.Parallel()
 	h := newReliabilityHarness(t, 3)
@@ -303,7 +303,7 @@ func TestReliability_WholeClusterCrash_WALReplayRestoresState(t *testing.T) {
 	}
 }
 
-// Many concurrent writers pushing to different tiers. All FSMs must
+// Many concurrent writers pushing to different instances. All FSMs must
 // converge to a state that contains exactly the total number of commands
 // issued, and every chunk ID shows up on every node.
 //
@@ -565,7 +565,7 @@ func TestReliability_PipelinedApplies_SurviveLeaderKill(t *testing.T) {
 	// Every chunk that Apply confirmed must be in the surviving leader's FSM.
 	surviving := h.nodes[newLeader].fsm.InstanceFSM(instID)
 	if surviving == nil {
-		t.Fatal("surviving leader lost tier FSM entirely")
+		t.Fatal("surviving leader lost instance FSM entirely")
 	}
 	for cid := range confirmed {
 		if surviving.Get(cid) == nil {
@@ -607,21 +607,21 @@ func TestReliability_RapidLeaderRestart_NoDivergence(t *testing.T) {
 	leader := h.nodes[h.leaderID()]
 	sub := leader.fsm.InstanceFSM(instID)
 	if sub == nil {
-		t.Fatal("tier FSM missing after restarts")
+		t.Fatal("instance FSM missing after restarts")
 	}
 	if got := len(sub.List()); got != 4 {
 		t.Errorf("expected 4 chunks, got %d", got)
 	}
 }
 
-// Two independent vault FSMs cohabiting the same cluster must converge
-// independently without cross-contamination. Validates the vault-ID
-// keying inside vaultraft.FSM: commands for tier A must not affect
-// tier B's sub-FSM.
+// Two independent instance FSMs cohabiting the same vault FSM must
+// converge independently without cross-contamination. Validates the
+// instance-ID keying inside vaultraft.FSM: commands for instance A must
+// not affect instance B's sub-FSM.
 //
 // This is the "one vault-ctl group per vault" model in miniature — the
 // production deployment runs N vault-ctl groups per node, each with its
-// own tier sub-FSMs.
+// own instance sub-FSMs.
 func TestReliability_MultipleVaults_IsolatedAndConvergent(t *testing.T) {
 	t.Parallel()
 	h := newReliabilityHarness(t, 3)
@@ -642,19 +642,19 @@ func TestReliability_MultipleVaults_IsolatedAndConvergent(t *testing.T) {
 	subA := leader.fsm.InstanceFSM(instA)
 	subB := leader.fsm.InstanceFSM(instB)
 	if subA == nil || subB == nil {
-		t.Fatal("missing tier sub-FSM")
+		t.Fatal("missing instance sub-FSM")
 	}
 	if got := len(subA.List()); got != 2 {
-		t.Errorf("tier A: expected 2 chunks, got %d", got)
+		t.Errorf("instance A: expected 2 chunks, got %d", got)
 	}
 	if got := len(subB.List()); got != 3 {
-		t.Errorf("tier B: expected 3 chunks, got %d", got)
+		t.Errorf("instance B: expected 3 chunks, got %d", got)
 	}
 
-	// Cross-check isolation: tier A must not contain tier B's chunks.
+	// Cross-check isolation: instance A must not contain instance B's chunks.
 	for _, e := range subA.List() {
 		if e.ID[0] >= 0xE0 {
-			t.Errorf("tier A leaked tier B chunk: %x", e.ID[:4])
+			t.Errorf("instance A leaked instance B chunk: %x", e.ID[:4])
 		}
 	}
 }
@@ -696,7 +696,7 @@ func TestReliability_SnapshotCycleUnderLoad_NoCorruption(t *testing.T) {
 
 	leader := h.nodes[h.leaderID()].fsm.InstanceFSM(instID)
 	if leader == nil {
-		t.Fatal("tier missing after snapshot cycle")
+		t.Fatal("instance missing after snapshot cycle")
 	}
 	if got := len(leader.List()); got != totalCommands {
 		t.Errorf("expected %d entries, got %d", totalCommands, got)
@@ -710,11 +710,11 @@ func isBenignSnapshotErr(err error) bool {
 	return errors.Is(err, hraft.ErrNothingNewToSnapshot)
 }
 
-// Build a large FSM (many tiers × many chunks), take a snapshot, Restore
+// Build a large FSM (many instances × many chunks), take a snapshot, Restore
 // into a fresh FSM from the snapshot bytes, compare fingerprints. This
 // is the streaming Restore path from gastrolog-5j6eu under a realistic
 // payload size — the io.ReadFull / io.LimitReader framing must stay
-// aligned across many tier blobs.
+// aligned across many instance blobs.
 //
 // Runs entirely in-process (no Raft) to isolate the Snapshot+Restore
 // contract from replication concerns.
@@ -740,7 +740,7 @@ func TestReliability_LargeFSM_SnapshotRestoreRoundtrip(t *testing.T) {
 			cid[1] = byte(ci)
 			cmd := MarshalVaultChunkCommand(instID, vaultctlfsm.MarshalCreateChunk(cid, now, now, now))
 			if r := src.Apply(&hraft.Log{Data: cmd}); r != nil {
-				t.Fatalf("apply tier=%d chunk=%d: %v", ti, ci, r)
+				t.Fatalf("apply inst=%d chunk=%d: %v", ti, ci, r)
 			}
 		}
 	}
@@ -818,7 +818,7 @@ func (r *readBytesCloser) Close() error { return nil }
 //
 // Used by the concurrent-writes scenario where leader flap under contention
 // is expected; production code has the same retry shape in
-// cluster.VaultCtlTierApplyForwarder.
+// cluster.VaultCtlChunkApplyForwarder.
 func applyWithLeaderRetry(h *reliabilityHarness, cmd []byte, maxAttempts int, timeout time.Duration) error {
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {

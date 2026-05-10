@@ -15,31 +15,32 @@ import (
 )
 
 // streamKey identifies a replication stream to a specific follower for a
-// specific tier. One stream per key.
+// specific vault. One stream per key.
 type streamKey struct {
 	instID glid.GLID
 	nodeID string
 }
 
-// tierStream wraps a bidirectional gRPC stream with a mutex to serialize
-// sends. The mutex is the ordering guarantee — only one command at a time
-// on the wire, and the sender waits for the ack before releasing.
-type tierStream struct {
+// vaultStream wraps a bidirectional gRPC stream (per vault, per follower)
+// with a mutex to serialize sends. The mutex is the ordering guarantee —
+// only one command at a time on the wire, and the sender waits for the ack
+// before releasing.
+type vaultStream struct {
 	mu     sync.Mutex
 	stream grpc.ClientStream
 	cancel context.CancelFunc
 	closed bool
 }
 
-// ChunkReplicator manages ordered replication streams from a tier leader to
-// its followers. All operations for a given (instID, followerNodeID) are
-// serialized on a single bidirectional gRPC stream.
+// ChunkReplicator manages ordered replication streams from a vault leader
+// to its followers. All operations for a given (instID, followerNodeID)
+// are serialized on a single bidirectional gRPC stream.
 type ChunkReplicator struct {
 	peers  *PeerConns
 	logger *slog.Logger
 
 	mu      sync.Mutex
-	streams map[streamKey]*tierStream
+	streams map[streamKey]*vaultStream
 }
 
 var chunkReplicationStreamDesc = &grpc.StreamDesc{
@@ -53,13 +54,13 @@ func NewChunkReplicator(peers *PeerConns, logger *slog.Logger) *ChunkReplicator 
 	return &ChunkReplicator{
 		peers:   peers,
 		logger:  logger,
-		streams: make(map[streamKey]*tierStream),
+		streams: make(map[streamKey]*vaultStream),
 	}
 }
 
-// getOrOpen returns the stream for the given tier+node, opening a new one
+// getOrOpen returns the stream for the given vault+node, opening a new one
 // if needed. The caller must NOT hold tr.mu.
-func (tr *ChunkReplicator) getOrOpen(instID glid.GLID, nodeID string) (*tierStream, error) {
+func (tr *ChunkReplicator) getOrOpen(instID glid.GLID, nodeID string) (*vaultStream, error) {
 	key := streamKey{instID: instID, nodeID: nodeID}
 
 	tr.mu.Lock()
@@ -82,10 +83,10 @@ func (tr *ChunkReplicator) getOrOpen(instID glid.GLID, nodeID string) (*tierStre
 	if err != nil {
 		cancel()
 		tr.peers.Invalidate(nodeID, err)
-		return nil, fmt.Errorf("open tier replication stream to %s: %w", nodeID, err)
+		return nil, fmt.Errorf("open vault replication stream to %s: %w", nodeID, err)
 	}
 
-	ts = &tierStream{stream: stream, cancel: cancel}
+	ts = &vaultStream{stream: stream, cancel: cancel}
 
 	tr.mu.Lock()
 	// Another goroutine may have opened one while we were dialing.
@@ -121,7 +122,7 @@ func (tr *ChunkReplicator) send(ctx context.Context, instID glid.GLID, nodeID st
 	defer ts.mu.Unlock()
 
 	if ts.closed {
-		return fmt.Errorf("stream to %s for tier %s is closed", nodeID, instID)
+		return fmt.Errorf("stream to %s for vault %s is closed", nodeID, instID)
 	}
 
 	sendErr := tr.runWithCtx(ctx, func() error { return ts.stream.SendMsg(cmd) })
@@ -266,7 +267,7 @@ func (tr *ChunkReplicator) RequestReplicaCatchup(ctx context.Context, leaderNode
 	return resp.GetScheduled(), nil
 }
 
-// CloseStream closes the stream for a specific tier+follower.
+// CloseStream closes the stream for a specific vault+follower.
 func (tr *ChunkReplicator) CloseStream(instID glid.GLID, nodeID string) {
 	tr.closeStream(instID, nodeID)
 }
@@ -279,5 +280,5 @@ func (tr *ChunkReplicator) Close() {
 		ts.closed = true
 		ts.cancel()
 	}
-	tr.streams = make(map[streamKey]*tierStream)
+	tr.streams = make(map[streamKey]*vaultStream)
 }

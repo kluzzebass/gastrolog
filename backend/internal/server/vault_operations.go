@@ -39,7 +39,7 @@ func (s *VaultServer) SealVault(
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("seal active chunk: %w", err))
 	}
 
-	return connect.NewResponse(&apiv1.SealVaultResponse{SealedCount: int32(sealed)}), nil //nolint:gosec // G115: tier count is always small
+	return connect.NewResponse(&apiv1.SealVaultResponse{SealedCount: int32(sealed)}), nil //nolint:gosec // G115: sealed-vault count is always small
 }
 
 // RetryUnreadableChunks resets the retry backoff for every chunk
@@ -48,7 +48,7 @@ func (s *VaultServer) SealVault(
 // see gastrolog-25vur.
 //
 // Routing: RouteTargeted — the interceptor forwards to the vault-owning
-// node. Per-tier-instance unreadable maps live on the local
+// node. Per-vault-instance unreadable maps live on the local
 // orchestrator, so the retry-now action only resets the runners that
 // actually hold the entries.
 func (s *VaultServer) RetryUnreadableChunks(

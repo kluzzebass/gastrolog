@@ -165,11 +165,6 @@ export class GetSystemResponse extends Message<GetSystemResponse> {
    */
   nodeStorageConfigs: NodeStorageConfig[] = [];
 
-  /**
-   * @generated from field: repeated gastrolog.v1.TierConfig tiers = 11;
-   */
-  tiers: TierConfig[] = [];
-
   constructor(data?: PartialMessage<GetSystemResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -188,7 +183,6 @@ export class GetSystemResponse extends Message<GetSystemResponse> {
     { no: 8, name: "system_raft_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 9, name: "cloud_services", kind: "message", T: CloudService, repeated: true },
     { no: 10, name: "node_storage_configs", kind: "message", T: NodeStorageConfig, repeated: true },
-    { no: 11, name: "tiers", kind: "message", T: TierConfig, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetSystemResponse {
@@ -307,12 +301,6 @@ export class VaultPlacement extends Message<VaultPlacement> {
 /**
  * VaultConfig defines a vault — the unit of independent storage and the
  * only abstraction over the chunk layer.
- *
- * Tags 1, 7, 8 are the original VaultConfig shape (id, enabled, name).
- * Tags 2-6 and 9-15 are added during the vault refactor (gastrolog-257l7)
- * to absorb the fields that lived on TierConfig before tiers went away.
- * Once consumers migrate, this message becomes the only vault-shape proto;
- * TierConfig and friends are deleted.
  *
  * @generated from message gastrolog.v1.VaultConfig
  */
@@ -5473,149 +5461,6 @@ export class NodeConfig extends Message<NodeConfig> {
 
   static equals(a: NodeConfig | PlainMessage<NodeConfig> | undefined, b: NodeConfig | PlainMessage<NodeConfig> | undefined): boolean {
     return proto3.util.equals(NodeConfig, a, b);
-  }
-}
-
-/**
- * TierType identifies the storage medium for a tier.
- *
- * A cloud-backed tier is a TIER_TYPE_FILE tier with cloud_service_id set;
- * the server flips behavior on the cloud-store binding rather than the
- * type enum. See gastrolog-4k5mg.
- * TierConfig defines a storage tier owned by exactly one vault. Tiers are
- * ordered within a vault by their position field (0 = hottest / first).
- *
- * @generated from message gastrolog.v1.TierConfig
- */
-export class TierConfig extends Message<TierConfig> {
-  /**
-   * @generated from field: bytes id = 1;
-   */
-  id = new Uint8Array(0);
-
-  /**
-   * @generated from field: string name = 2;
-   */
-  name = "";
-
-  /**
-   * @generated from field: gastrolog.v1.VaultType type = 3;
-   */
-  type = VaultType.UNSPECIFIED;
-
-  /**
-   * @generated from field: bytes rotation_policy_id = 4;
-   */
-  rotationPolicyId = new Uint8Array(0);
-
-  /**
-   * @generated from field: repeated gastrolog.v1.RetentionRule retention_rules = 5;
-   */
-  retentionRules: RetentionRule[] = [];
-
-  /**
-   * @generated from field: uint64 memory_budget_bytes = 6;
-   */
-  memoryBudgetBytes = protoInt64.zero;
-
-  /**
-   * @generated from field: uint32 storage_class = 7;
-   */
-  storageClass = 0;
-
-  /**
-   * @generated from field: bytes cloud_service_id = 8;
-   */
-  cloudServiceId = new Uint8Array(0);
-
-  /**
-   * desired RF (1 = no replication, default)
-   *
-   * @generated from field: uint32 replication_factor = 9;
-   */
-  replicationFactor = 0;
-
-  /**
-   * direct path for JSONL sinks
-   *
-   * @generated from field: string path = 10;
-   */
-  path = "";
-
-  /**
-   * system-managed: file storage assignments by placement manager
-   *
-   * @generated from field: repeated gastrolog.v1.VaultPlacement placements = 11;
-   */
-  placements: VaultPlacement[] = [];
-
-  /**
-   * owning vault — exactly one vault per tier
-   *
-   * @generated from field: bytes vault_id = 12;
-   */
-  vaultId = new Uint8Array(0);
-
-  /**
-   * "lru" (default) or "ttl"
-   *
-   * @generated from field: string cache_eviction = 13;
-   */
-  cacheEviction = "";
-
-  /**
-   * max cache size (e.g. "1GB", "500MB"; default: "1GiB")
-   *
-   * @generated from field: string cache_budget = 14;
-   */
-  cacheBudget = "";
-
-  /**
-   * eviction TTL duration (e.g. "1h", "7d"); only for ttl mode
-   *
-   * @generated from field: string cache_ttl = 15;
-   */
-  cacheTtl = "";
-
-  constructor(data?: PartialMessage<TierConfig>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.TierConfig";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "type", kind: "enum", T: proto3.getEnumType(VaultType) },
-    { no: 4, name: "rotation_policy_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 5, name: "retention_rules", kind: "message", T: RetentionRule, repeated: true },
-    { no: 6, name: "memory_budget_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
-    { no: 7, name: "storage_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-    { no: 8, name: "cloud_service_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 9, name: "replication_factor", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-    { no: 10, name: "path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 11, name: "placements", kind: "message", T: VaultPlacement, repeated: true },
-    { no: 12, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 13, name: "cache_eviction", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 14, name: "cache_budget", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 15, name: "cache_ttl", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TierConfig {
-    return new TierConfig().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TierConfig {
-    return new TierConfig().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TierConfig {
-    return new TierConfig().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: TierConfig | PlainMessage<TierConfig> | undefined, b: TierConfig | PlainMessage<TierConfig> | undefined): boolean {
-    return proto3.util.equals(TierConfig, a, b);
   }
 }
 

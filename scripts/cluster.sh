@@ -241,8 +241,7 @@ configure() {
   # route distinguish "from an ingester" from "from a retention sweep".
 
   echo ">>> Creating vaults..."
-  # Two-vault hot/warm chain that recreates the pre-Phase-2 multi-tier
-  # behavior using Phase-5 inter-vault routing.
+  # Two-vault hot/warm chain wired via inter-vault routing (gastrolog-4kkoo).
   #   - hot-vault:  file-backed on local disk, 100-row rotation, 3-minute
   #                 retention. Chunks past their TTL fire the retention
   #                 sweep, which streams their records back through the

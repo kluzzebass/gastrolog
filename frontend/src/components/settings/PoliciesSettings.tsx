@@ -16,7 +16,7 @@ import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, NumberInput } from "./FormField";
 import { Button } from "./Buttons";
-import { UsedByStatus, tierRefsForRotationPolicy } from "./UsedByStatus";
+import { UsedByStatus, vaultRefsForRotationPolicy } from "./UsedByStatus";
 import type { SettingsTab } from "./SettingsDialog";
 import { sortByName } from "../../lib/sort";
 
@@ -149,7 +149,6 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
   const existingNames = new Set(policies.map((p) => p.name));
   const effectiveName = newName.trim() || namePlaceholder || "default";
   const nameConflict = existingNames.has(effectiveName);
-  const tiers = config?.tiers ?? [];
   const vaults = config?.vaults ?? [];
 
   const defaults = (id: string): PolicyEdit => {
@@ -186,12 +185,12 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
       };
     },
     onDeleteSuccess: (id) => {
-      const referencedBy = tiers
-        .filter((t) => encode(t.rotationPolicyId) === id)
-        .map((t) => t.name || encode(t.id));
+      const referencedBy = vaults
+        .filter((v) => encode(v.rotationPolicyId) === id)
+        .map((v) => v.name || encode(v.id));
       if (referencedBy.length > 0) {
         addToast(
-          `Policy "${id}" deleted (was used by tiers: ${referencedBy.join(", ")})`,
+          `Policy "${id}" deleted (was used by vaults: ${referencedBy.join(", ")})`,
           "warn",
         );
       } else {
@@ -305,7 +304,7 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
       {sortByName(policies).map((pol) => {
         const id = encode(pol.id);
         const edit = getEdit(id);
-        const refs = tierRefsForRotationPolicy(tiers, id, vaults);
+        const refs = vaultRefsForRotationPolicy(id, vaults);
         return (
           <SettingsCard
             key={id}

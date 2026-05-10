@@ -374,7 +374,7 @@ type ListChunksRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Vault string                 `protobuf:"bytes,1,opt,name=vault,proto3" json:"vault,omitempty"`
 	// When true, return only unsealed (active) chunks from this node's
-	// local instances — no cross-node fan-out. Used for lightweight 5-second
+	// local vaults — no cross-node fan-out. Used for lightweight 5-second
 	// polling of active-chunk stats (record count, bytes) while discrete
 	// events (seal, delete, compress) come through the WatchChunks stream.
 	// See gastrolog-1jijm.
@@ -2174,7 +2174,6 @@ func (x *ImportRecordsResponse) GetRecordsImported() int64 {
 type SealVaultRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Vault         string                 `protobuf:"bytes,1,opt,name=vault,proto3" json:"vault,omitempty"`
-	Tier          string                 `protobuf:"bytes,2,opt,name=tier,proto3" json:"tier,omitempty"` // optional: seal only this tier (name or ID). Empty = all tiers.
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2212,13 +2211,6 @@ func (*SealVaultRequest) Descriptor() ([]byte, []int) {
 func (x *SealVaultRequest) GetVault() string {
 	if x != nil {
 		return x.Vault
-	}
-	return ""
-}
-
-func (x *SealVaultRequest) GetTier() string {
-	if x != nil {
-		return x.Tier
 	}
 	return ""
 }
@@ -2820,10 +2812,9 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\x124\n" +
 	"\arecords\x18\x02 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\"B\n" +
 	"\x15ImportRecordsResponse\x12)\n" +
-	"\x10records_imported\x18\x01 \x01(\x03R\x0frecordsImported\"<\n" +
+	"\x10records_imported\x18\x01 \x01(\x03R\x0frecordsImported\"(\n" +
 	"\x10SealVaultRequest\x12\x14\n" +
-	"\x05vault\x18\x01 \x01(\tR\x05vault\x12\x12\n" +
-	"\x04tier\x18\x02 \x01(\tR\x04tier\"6\n" +
+	"\x05vault\x18\x01 \x01(\tR\x05vault\"6\n" +
 	"\x11SealVaultResponse\x12!\n" +
 	"\fsealed_count\x18\x01 \x01(\x05R\vsealedCount\"4\n" +
 	"\x1cRetryUnreadableChunksRequest\x12\x14\n" +

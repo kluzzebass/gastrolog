@@ -133,7 +133,7 @@ func newCloudServiceCreateCmd() *cobra.Command {
 	cmd.Flags().String("container", "", "container name (Azure)")
 	cmd.Flags().String("connection-string", "", "connection string (Azure)")
 	cmd.Flags().String("credentials-json", "", "credentials JSON (GCS)")
-	cmd.Flags().Uint32("storage-class", 0, "storage class for tier placement")
+	cmd.Flags().Uint32("storage-class", 0, "storage class for vault placement")
 	cmd.Flags().String("archival-mode", "", "storage class transition management: 'none' (external) or 'active' (managed by GastroLog)")
 	cmd.Flags().StringSlice("transition", nil, "archival transition: 'AFTER:CLASS' (e.g. '90d:GLACIER', '360d:DEEP_ARCHIVE', '730d:' for delete). Repeatable.")
 	cmd.Flags().String("restore-tier", "", "default restore speed (S3: Expedited/Standard/Bulk, Azure: High/Standard)")

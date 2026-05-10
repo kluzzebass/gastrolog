@@ -4,41 +4,33 @@ This document breaks the vision into epics and issues, with dependencies. Each i
 
 ---
 
-## Epic 1: Tiered Storage
+## Epic 1: Layered Storage via Routing
 
-The foundation that most other epics depend on. Must be built first.
+The foundation most other epics depend on. The model: each vault owns one storage shape; layered hot/warm/cold deployments are composed by chaining vaults via the routing engine. Most of this epic is **done**; remaining items are about higher-level capacity tooling.
 
 | # | Issue | Depends on | Vision section |
 |---|-------|-----------|----------------|
-| 1.1 | Decouple vault from single storage backend (vault as logical container) | — | Tiered Storage: vault as logical container |
-| 1.2 | Tier chain configuration model (ordered list of tier backends per vault) | 1.1 | Tiered Storage: vault as logical container |
-| 1.3 | Tier interface: active chunk + sealed chunks + rotation + retention per tier | 1.1 | Tiered Storage: tier types |
-| 1.4 | Memory tier backend (extract from current memory vault) | 1.3 | Tiered Storage: tier types |
-| 1.5 | Local SSD tier backend (extract from current file vault) | 1.3 | Tiered Storage: tier types |
-| 1.6 | S3 tier backend (active chunk on local disk, sealed chunks in S3) | 1.3 | Tiered Storage: tier types |
-| 1.7 | GCS tier backend | 1.6 | Tiered Storage: tier types |
-| 1.8 | R2 tier backend | 1.6 | Tiered Storage: tier types |
-| 1.9 | Archival tier backend (Glacier/Archive storage class transitions) | 1.6 | Tiered Storage: tier types |
-| 1.10 | Per-tier leader election | 1.3 | Tiered Storage: per-tier leader nodes |
-| 1.11 | Memory tier replication (write-mirror to follower) | 1.4, 1.10 | Tiered Storage: replication |
-| 1.12 | Local SSD tier replication (sealed chunk copy to follower) | 1.5, 1.10 | Tiered Storage: replication |
-| 1.13 | Inter-tier record streaming (leader-to-leader) | 1.10 | Tiered Storage: inter-tier record streaming |
-| 1.14 | Durability handoff protocol (durable ack before source tier drops chunk) | 1.13 | Tiered Storage: durability handoff |
-| 1.15 | Time-based tier transition policy | 1.13 | Tiered Storage: tier transitions |
-| 1.16 | Size-based tier transition policy | 1.13 | Tiered Storage: tier transitions |
-| 1.17 | Budget-based tier transition policy | 1.13 | Tiered Storage: tier transitions |
-| 1.18 | Access-based tier transition policy (query frequency tracking) | 1.13 | Tiered Storage: tier transitions |
-| 1.19 | Cross-tier query fan-out (progressive results from each tier) | 1.3 | Tiered Storage: transparent query fan-out |
-| 1.20 | On-demand promotion (cold → warm cache fetch) | 1.6 | Tiered Storage: on-demand promotion |
-| 1.21 | Warm cache eviction (drop local copy when durable in colder tier) | 1.20 | Tiered Storage: on-demand promotion |
-| 1.22 | Research: chunk metadata storage at scale (Raft vs gossip vs hybrid) | 1.10 | Tiered Storage: open design question |
-| 1.23 | Migrate existing memory/file/cloud vaults to tier chain model | 1.4, 1.5, 1.6 | Tiered Storage: vault as logical container |
+| 1.1 | Vault as the storage unit (storage shape on `VaultConfig`) | — | Layered Storage: the vault as the storage unit |
+| 1.2 | Memory vault | 1.1 | Layered Storage: vault types |
+| 1.3 | File vault (local SSD, mmap'd, sealed-chunk compression) | 1.1 | Layered Storage: vault types |
+| 1.4 | Cloud-backed file vault (active chunk on local disk, sealed chunks in S3/GCS/Azure) | 1.3 | Layered Storage: vault types |
+| 1.5 | Archival storage class transitions (Glacier/Archive) | 1.4 | Layered Storage: per-vault chunk shapes |
+| 1.6 | Per-vault leader election | 1.1 | Layered Storage: per-vault leader nodes |
+| 1.7 | Replication: leader → followers per vault (memory mirror; sealed-chunk copy for file) | 1.6 | Layered Storage: replication |
+| 1.8 | Inter-vault record routing on retention (`disposition=route` re-emits expiring chunk records through the routing engine) | 1.6 | Layered Storage: golden thread |
+| 1.9 | Time-based retention | 1.1 | Layered Storage: retention triggers |
+| 1.10 | Size-based retention | 1.1 | Layered Storage: retention triggers |
+| 1.11 | Budget-based retention (cluster-wide $-budget allocation across vaults) | 1.4 | Layered Storage: retention triggers |
+| 1.12 | Access-based retention (query frequency tracking) | 1.1 | Layered Storage: retention triggers |
+| 1.13 | Cross-vault query fan-out (progressive results) | 1.6 | Layered Storage: transparent query fan-out |
+| 1.14 | On-demand promotion (cloud-backed → warm cache fetch) | 1.4 | Layered Storage: on-demand caching |
+| 1.15 | Warm cache eviction (LRU + TTL, gated by `CacheBudget` and `CacheTTL`) | 1.14 | Layered Storage: on-demand caching |
 
 **Contradictions / risks:**
 
-- **1.14 + replication timing**: The durability handoff requires waiting for replication ack before the source tier drops a chunk. If the destination tier's followers are slow or unreachable, this blocks the source tier's retention from running. Need a policy for what happens when the ack is delayed — does the source tier hold indefinitely, or is there a timeout with data loss acceptance?
-- **1.10 + "no cluster-wide authority" principle**: Per-tier leaders reintroduce the concept of a node "owning" a responsibility. CLAUDE.md states "no node has cluster-wide authority." The distinction is that tier leaders are per-tier-per-vault (fine-grained, dynamic, redistributable), not per-node. But the tension should be acknowledged — this is a deliberate, scoped exception to the general principle.
-- **1.6 active chunk locality**: Cloud tier active chunks live on the tier leader's local disk. If the leader dies before sealing, the active chunk is lost. This is the same risk as the memory tier, but for cloud tiers it's less obvious since the expectation is "my data is in S3." The durability handoff (1.14) mitigates this for data from previous tiers, but records that arrived directly into the cloud tier's active chunk are at risk until sealed and uploaded.
+- **1.8 + replication timing**: The retention-route handoff streams records into the destination vault, where they're appended through the destination's normal write path with full replication. If the destination's followers are slow or unreachable, append latency rises and back-pressure flows up the route chain — but no source data is dropped. The trade-off lives in the destination's RF + ack policy, not in a separate handoff protocol.
+- **1.6 + "no cluster-wide authority" principle**: Per-vault leaders reintroduce the concept of a node "owning" a responsibility. CLAUDE.md states "no node has cluster-wide authority." The distinction is that vault leaders are per-vault (fine-grained, dynamic, redistributable), not per-node. But the tension should be acknowledged — this is a deliberate, scoped exception to the general principle.
+- **1.4 active chunk locality**: A cloud-backed vault's active chunk lives on the leader's local disk. If the leader dies before sealing, the active chunk is lost (same risk as a memory vault). For cloud-backed vaults this is less obvious since the expectation is "my data is in S3." The active-chunk window is the only at-risk slice; sealed chunks are durable in the cloud.
 
 ---
 
@@ -136,17 +128,17 @@ The foundation that most other epics depend on. Must be built first.
 
 | # | Issue | Depends on | Vision section |
 |---|-------|-----------|----------------|
-| 7.1 | Purge command: delete records matching expression across all vaults/tiers/nodes | 1.3 | Compliance: right to erasure |
+| 7.1 | Purge command: delete records matching expression across all vaults/nodes | 1.1 | Compliance: right to erasure |
 | 7.2 | Purge audit trail and compliance certificate | 7.1 | Compliance: right to erasure |
 | 7.3 | Role-based display masking (PII role sees real values, others see masked) | — | Security: sensitive field handling |
 | 7.4 | Redact stage in route pipeline (irreversible field removal/hashing) | 2.13 | Security: sensitive field handling |
 | 7.5 | Audit vault (log all queries, record accesses, exports) | — | Compliance: access auditing |
-| 7.6 | Data residency constraints (pin vault tiers to specific nodes/regions) | 1.10 | Compliance: data residency |
-| 7.7 | Cryptographic retention enforcement (verifiable deletion proof) | 1.3 | Compliance: retention enforcement |
+| 7.6 | Data residency constraints (pin vaults to specific nodes/regions) | 1.6 | Compliance: data residency |
+| 7.7 | Cryptographic retention enforcement (verifiable deletion proof) | 1.1 | Compliance: retention enforcement |
 
 **Contradictions / risks:**
 
-- **7.6 + per-tier leaders (1.10)**: If a vault has a data residency constraint (EU only), all tier leaders for that vault must be on EU nodes. The tier leader election (1.10) must be residency-aware. If no EU nodes are available, the vault can't accept writes — need to define this failure mode.
+- **7.6 + per-vault leaders (1.6)**: If a vault has a data residency constraint (EU only), the vault's leader and followers must all live on EU nodes. The vault placement and leader election (1.6) must be residency-aware. If no EU nodes are available, the vault can't accept writes — need to define this failure mode.
 
 ---
 
@@ -186,10 +178,10 @@ The foundation that most other epics depend on. Must be built first.
 
 | # | Issue | Depends on | Vision section |
 |---|-------|-----------|----------------|
-| 10.1 | Automatic tier leader re-election on node failure | 1.10 | Self-Healing: graceful degradation |
-| 10.2 | Automatic vault rebalancing on node join/leave | 1.10 | Self-Healing: automatic vault rebalancing |
-| 10.3 | Storage pressure detection and automatic tier demotion | 1.15, 1.16 | Self-Healing: storage pressure management |
-| 10.4 | Partial-data query response (answer with available data, indicate gaps) | 1.19 | Self-Healing: graceful degradation |
+| 10.1 | Automatic vault leader re-election on node failure | 1.6 | Self-Healing: graceful degradation |
+| 10.2 | Automatic vault rebalancing on node join/leave | 1.6 | Self-Healing: automatic vault rebalancing |
+| 10.3 | Storage pressure detection and automatic retention acceleration along the route chain | 1.9, 1.10 | Self-Healing: storage pressure management |
+| 10.4 | Partial-data query response (answer with available data, indicate gaps) | 1.13 | Self-Healing: graceful degradation |
 | 10.5 | Capacity planning signals in inspector | — | Self-Healing: capacity planning signals |
 
 ---
@@ -225,21 +217,21 @@ Key dependencies that span epics:
 |---|---|---|
 | 2.9 (visual route editor) | 2.1–2.8 (all route operators) | Can't build the picker until the operators exist |
 | 5.6 (investigation model) | — | **Keystone**: collaboration (6.4, 6.5), CLI shared state (11.4), and handoff all build on this |
-| 7.1 (purge) | 1.3 (tier interface) | Must purge across all tiers |
+| 7.1 (purge) | 1.1 (vault as the storage unit) | Must purge across all vaults |
 | 7.3 (field masking) | 2.13 (route pipeline engine) | Masking/redaction is a pipeline stage |
-| 7.6 (data residency) | 1.10 (per-tier leaders) | Leader election must be residency-aware |
+| 7.6 (data residency) | 1.6 (per-vault leaders) | Leader election and placement must be residency-aware |
 | 9.5 (tenant routing) | 2.8 (route-by-field) | Tenant identification is a routing decision |
-| 10.1–10.3 (self-healing) | 1.10 (per-tier leaders) | Healing requires re-election and rebalancing of tier leaders |
+| 10.1–10.3 (self-healing) | 1.6 (per-vault leaders) | Healing requires re-election and rebalancing of vault leaders |
 
 ## Summary of Contradictions and Open Questions
 
-1. **Durability handoff timeout** (1.14): If the destination tier's replication is slow or unreachable, the source tier can't drop its chunk. Unbounded hold is a resource leak; timeout means potential data loss. Need a policy.
+1. **Retention-route back-pressure** (1.8): If the destination vault's followers are slow or unreachable, append latency rises and back-pressure flows up the route chain into the source vault's retention loop. Unbounded back-pressure stalls retention (resource leak); a timeout drops records. Need a policy.
 
 2. **Route pipeline failure mode** (2.13): A slow or failed pipeline stage (external API lookup) could block ingestion. Need defined behavior: skip, buffer, dead-letter, timeout.
 
 3. **Anomaly score storage** (8.3): Per-record scores are expensive to store; per-bucket scores change query semantics. Need to decide granularity.
 
-4. **Query composition model** (3.1–3.3): Industry research shows three tiers. (a) `inline_stats` (Splunk's `eventstats`, ES|QL's `INLINE STATS`): appends aggregate as field to every row, streaming-compatible, no parser changes beyond a new operator — handles the p99-then-filter case with zero subquery machinery. (b) `let` statements (Kusto, Cribl, ClickHouse CTEs): named intermediate results, blocking, explicit — handles set-membership cases (`where user_id in $error_users`). (c) Nested subqueries (Splunk `[...]`): most flexible but has caps (Splunk: 10K results, 60s), blocking, complex. Recommended order: ship `inline_stats` first (most common case, streaming), then `let` (composition), defer nested subqueries (may never be needed).
+4. **Query composition model** (3.1–3.3): Industry research shows three tiers of approach. (a) `inline_stats` (Splunk's `eventstats`, ES|QL's `INLINE STATS`): appends aggregate as field to every row, streaming-compatible, no parser changes beyond a new operator — handles the p99-then-filter case with zero subquery machinery. (b) `let` statements (Kusto, Cribl, ClickHouse CTEs): named intermediate results, blocking, explicit — handles set-membership cases (`where user_id in $error_users`). (c) Nested subqueries (Splunk `[...]`): most flexible but has caps (Splunk: 10K results, 60s), blocking, complex. Recommended order: ship `inline_stats` first (most common case, streaming), then `let` (composition), defer nested subqueries (may never be needed).
 
 6. **Automatic shape detection threshold** (4.3): When do results switch from log list to waterfall? All results must have span fields? Majority? Per-record rendering? Surprising behavior if mixed.
 
@@ -262,7 +254,7 @@ The performance pillar depends on mmap for zero-copy reads of sealed chunks on l
 - **ClickHouse**: Supports application-level encryption of MergeTree parts via encrypted disks, but this uses a virtual filesystem layer that decrypts blocks on read into buffers — no mmap. Performance penalty acknowledged in docs.
 - **Loki**: No encryption at rest. Delegates to the object store's encryption (S3 SSE, GCS CMEK).
 
-**Implication for GastroLog:** Application-level encryption of the local SSD tier would break the mmap architecture. The practical path is filesystem/volume-level encryption (LUKS, encrypted EBS volumes), which is transparent to the application. The vision's claim of "per-tenant encryption keys" at the vault level is not achievable with mmap unless each tenant's data lives on a separate encrypted filesystem — possible but operationally complex. For cloud tiers, server-side encryption (S3 SSE-KMS) handles per-tenant keys naturally.
+**Implication for GastroLog:** Application-level encryption of local file vaults would break the mmap architecture. The practical path is filesystem/volume-level encryption (LUKS, encrypted EBS volumes), which is transparent to the application. The vision's claim of "per-tenant encryption keys" at the vault level is not achievable with mmap unless each tenant's data lives on a separate encrypted filesystem — possible but operationally complex. For cloud-backed vaults, server-side encryption (S3 SSE-KMS) handles per-tenant keys naturally.
 
 ### Conflict 2: Field-level encryption vs. indexing
 
@@ -289,7 +281,7 @@ Encrypted data does not compress. The correct order is compress-then-encrypt. Bu
 - **Elasticsearch / Splunk / Loki**: Avoid the problem entirely by using volume-level encryption (transparent to the application). Indexes and data are both encrypted at the filesystem level, decrypted transparently on read by the OS.
 - **ClickHouse**: Encrypted disk implementation encrypts whole files (data + indexes together) and decrypts blocks on read. No mmap. Accepts the performance cost.
 
-**Implication for GastroLog:** Application-level encrypt-after-compress with separate index treatment is complex and leaks metadata. Volume-level encryption avoids all of these issues. For cloud tiers, S3 SSE-KMS provides per-key encryption transparently.
+**Implication for GastroLog:** Application-level encrypt-after-compress with separate index treatment is complex and leaks metadata. Volume-level encryption avoids all of these issues. For cloud-backed vaults, S3 SSE-KMS provides per-key encryption transparently.
 
 ### Conflict 4: BYOK trust model
 
@@ -301,14 +293,14 @@ Encrypted data does not compress. The correct order is compress-then-encrypt. Bu
 - **Splunk**: BYOK via AWS KMS for Splunk Cloud. Self-managed Splunk has no BYOK — the operator controls everything.
 - **Datadog / Loki**: No BYOK. SaaS trust model — you trust the provider.
 
-**Implication for GastroLog:** BYOK is achievable for cloud tiers (S3 SSE-KMS with customer-managed keys is a standard AWS feature). For local tiers, it requires integration with an external KMS for envelope encryption, plus the performance cost of KMS API calls on every chunk seal/read. The vision should scope BYOK to cloud tiers initially and treat local-tier BYOK as a separate, later effort.
+**Implication for GastroLog:** BYOK is achievable for cloud-backed vaults (S3 SSE-KMS with customer-managed keys is a standard AWS feature). For local file vaults, it requires integration with an external KMS for envelope encryption, plus the performance cost of KMS API calls on every chunk seal/read. The vision should scope BYOK to cloud-backed vaults initially and treat local-vault BYOK as a separate, later effort.
 
 ### Recommendation
 
 Update the vision's encryption claims to reflect reality:
 
-1. **At-rest encryption** for local tiers: delegate to volume/filesystem-level encryption (LUKS, encrypted EBS). Transparent to the application, preserves mmap.
-2. **At-rest encryption** for cloud tiers: use provider-native encryption (S3 SSE-KMS, GCS CMEK). Per-tenant keys are natural here.
+1. **At-rest encryption** for local file vaults: delegate to volume/filesystem-level encryption (LUKS, encrypted EBS). Transparent to the application, preserves mmap.
+2. **At-rest encryption** for cloud-backed vaults: use provider-native encryption (S3 SSE-KMS, GCS CMEK). Per-tenant keys are natural here.
 3. **Field-level "encryption"**: clarify as role-based display masking (data stored in plaintext, masked at query time by role). Actual field-level encryption makes fields unsearchable — document this tradeoff explicitly.
-4. **BYOK**: scope to cloud tiers via KMS integration. Local-tier BYOK deferred.
+4. **BYOK**: scope to cloud-backed vaults via KMS integration. Local-vault BYOK deferred.
 5. Remove claims about application-level encryption of local vault data unless the mmap architecture is also reconsidered.

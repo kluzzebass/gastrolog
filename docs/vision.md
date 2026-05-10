@@ -51,7 +51,7 @@ Routes today are priority-ordered match-to-vault mappings (`RouteConfig.Stages` 
 
 **Visual route editor.** The route configuration UI extends the existing Settings route panel with a flow builder. Each transform stage is a card: enrich, lookup, redact, sample, route-by-field. Cards are added from a categorized picker, configured with forms that show only valid options, and connected visually to their destinations. The flow builder makes it obvious what your options are at each stage — you never guess keywords or read docs to discover that `geoip`, `lookup`, or `redact` exist. The underlying pipeline syntax is generated from the visual representation and displayed as a read-only text preview for users who want to see it, but the source of truth is the visual editor.
 
-A syslog route with enrichment and tiered routing (parsing already handled by the syslog ingester and digester):
+A syslog route with enrichment and per-tenant fan-out (parsing already handled by the syslog ingester and digester):
 
 ```mermaid
 flowchart LR
@@ -118,13 +118,15 @@ Traditional alerting is threshold-based: "alert when error rate exceeds 5%." Thi
 
 ---
 
-## Tiered and Infinite Storage
+## Layered Storage via Routing
 
-Storage should be a budget, not a cliff. Today, a vault is tightly coupled to a single storage backend — you create a memory vault, a file vault, or a cloud vault. The vault *is* its storage. That's the wrong abstraction.
+Storage should be a budget, not a cliff. The cluster expresses hot/warm/cold layering as **multiple vaults connected by routes**, not as tiered chains inside a single vault. Each vault owns one storage shape; layering is the operator's choice of which vaults exist and how records flow between them.
 
-### The vault as logical container
+### The vault as the storage unit
 
-A vault should be the **logical container** — it owns the records, the indexes, the retention policy, the access controls. The vault type distinction (memory/file/cloud) goes away entirely. Every vault has the same type. Underneath, a vault has a **tier chain**: an ordered list of storage priorities that data flows through as it ages.
+A vault is the **only abstraction over the chunk layer**. It carries its full storage shape directly: a **type** (memory, file, jsonl), a **storage class**, an optional **cloud service** binding, a **rotation policy**, **retention rules**, a **replication factor**, and cache tuning for cloud-backed reads. There is no vault-internal hierarchy — no tier chains, no sub-vaults. The simpler the unit, the simpler the failure modes.
+
+A cloud-backed vault is a file vault with a `CloudServiceID` set: sealed chunks upload to the cloud service, while the active chunk and a warm cache stay on local disk. This is the only "fancy" storage shape — every other vault is straightforwardly a memory, file, or JSONL container.
 
 ### Storage building blocks
 
@@ -147,134 +149,127 @@ Cloud services:
   glacier-archive: provider=s3, bucket=logs-archive, region=eu-west-1, storage-class=GLACIER
 ```
 
-**Tier** — three types, each a full chunk manager:
+**Vault** — the storage container. Its `type`, `storage_class`, optional `cloud_service_id`, rotation policy, retention rules, and replication factor fully describe how records are persisted.
 
-- **Memory tier**: RAM-backed. Active + sealed chunks in memory. Budget limits how much RAM it can use.
-- **Local tier**: disk-backed. Has a storage class requirement — the system matches it to file storages on nodes that declare that class. That's where its chunks live.
-- **Cloud tier**: references a CloudService for sealed chunk storage. Has a storage class requirement for the **active chunk** (needs local disk to write to before sealing and uploading). Has a separate storage class requirement for the **chunk cache** (local disk for caching sealed chunks fetched from the cloud during queries).
-
-A vault contains one or more tiers, ordered:
+A typical hot/warm/cold deployment looks like three vaults wired by routes:
 
 ```
-Vault "api-logs"
-  ├── Memory tier (budget: 4GB)
-  ├── Local tier (storage class: 1, last 7 days)
-  ├── Cloud tier (service: s3-prod, active chunk class: 3, cache class: 3, last 90 days)
-  └── Transition policy: budget $30/month
+Vault "api-logs-hot"
+  type=memory  budget=4GB  rotation=size:64MB
+  retention="last 1h" disposition=route   →   feeds warm
+
+Vault "api-logs-warm"
+  type=file  storage_class=1  rotation=time:1h
+  retention="last 7d" disposition=route   →   feeds cold
+
+Vault "api-logs-cold"
+  type=file  storage_class=3  cloud_service=s3-prod  rotation=time:1d
+  retention="last 90d" disposition=delete
 ```
 
-Every tier is a full chunk manager — it has an active chunk that receives writes, seals on its own schedule, and maintains its own set of sealed chunks with its own rotation and retention policies. The memory tier is not just a write buffer; it holds an active chunk plus sealed chunks in RAM, queryable at microsecond latency. Cloud tiers can't append to remote objects, so their active chunk lives on local disk matching the active chunk storage class. When the active chunk seals, it's uploaded to the cloud service.
+Each vault is a full chunk manager. The operator designs the layering by composing vaults and routes; the cluster runs each vault independently.
 
-The vault doesn't care where its data lives. It hands records to the first tier in the chain, and each tier manages its own chunking, sealing, and transition to the next tier. Queries fan out across all tiers transparently.
+### Per-vault leader nodes
 
-At configuration time, the system validates that at least one node can serve each tier's storage class requirement. At runtime, if a tier's nodes become unavailable, the upstream tier holds its data (see durability handoff below) — effectively failing up until the operator resolves the issue.
-
-### Per-tier leader nodes
-
-Each tier within a vault has an **elected leader node** (via the vault's vault-ctl Raft group, with a tier FSM per tier). The leader is the single authority for that tier — it receives all writes, decides chunk boundaries, and handles rotation. Follower nodes for the same tier receive replicated records with chunk assignment metadata, producing identical chunks (same boundaries, same content, same IDs). No independent chunking decisions on replicas.
+Each vault has an **elected leader node** via the vault-ctl Raft group. The leader is the single authority — it receives all writes, decides chunk boundaries, and handles rotation. Follower nodes for the same vault receive replicated records with chunk assignment metadata, producing identical chunks (same boundaries, same content, same IDs). No independent chunking decisions on replicas.
 
 ### Replication
 
-The leader for each tier replicates to its followers. How replication works depends on the tier type:
+The leader replicates to its followers per vault. How replication works depends on the vault type:
 
-- **Memory tiers**: the leader mirrors writes to follower nodes' memory buffers. Followers receive records tagged with chunk assignment. If the leader dies, a follower is promoted — it has identical data and can resume streaming to the next tier.
-- **Local tiers**: the leader replicates sealed chunks (post-compression, post-indexing) to followers. A sealed chunk is stable and self-contained, so replication is a file copy.
-- **Cloud tiers**: no cluster-level replication of sealed chunks needed — the cloud provider handles AZ redundancy. Only chunk metadata needs to be shared across the cluster so every node knows what exists. The active chunk (on local disk) is replicated the same way as a local tier.
+- **Memory vaults**: the leader mirrors writes to follower nodes' memory buffers. Followers receive records tagged with chunk assignment. If the leader dies, a follower is promoted — it has identical data.
+- **File vaults**: the leader replicates sealed chunks (post-compression, post-indexing) to followers. A sealed chunk is stable and self-contained, so replication is a file copy.
+- **Cloud-backed file vaults**: no cluster-level replication of sealed chunks needed — the cloud provider handles AZ redundancy. Only chunk metadata is shared via the vault-ctl Raft so every node knows what exists. The active chunk (on local disk) is replicated the same way as a non-cloud file vault.
 
 ### The golden thread
 
-Tier transitions are **leader-to-leader**. When a tier's leader rotates sealed chunks, it streams records to the next tier's leader. There is exactly one authoritative path from first insert through every tier — the golden thread:
+Records flow through the cluster on a single authoritative path: the leader of the receiving vault. When a vault's retention disposition is `route`, expired chunks stream their records back through the routing engine — which delivers them to the leader of the next vault. There is exactly one authoritative path through every vault — the golden thread:
 
 ```mermaid
 flowchart TB
-    I([fa:fa-plug Ingester]) --> M
+    I([fa:fa-plug Ingester]) --> RT[Routing engine]
 
-    subgraph node1mem [Node-1: memory tier leader]
-        M[fa:fa-bolt Memory<br/>active + sealed chunks]
+    RT -->|route| HOT
+    HOT -->|retention=route| RT2[Routing engine<br/>_source=retention]
+    RT2 -->|route| WARM
+    WARM -->|retention=route| RT3[Routing engine<br/>_source=retention]
+    RT3 -->|route| COLD
+
+    subgraph node1hot [Node-1: hot vault leader]
+        HOT[fa:fa-bolt Memory vault<br/>active + sealed chunks]
     end
 
-    subgraph node2mem [Node-2: memory tier follower]
-        MR[fa:fa-bolt Memory<br/>replica]
+    subgraph node2hot [Node-2: hot vault follower]
+        HOT_R[fa:fa-bolt Memory<br/>replica]
     end
 
-    subgraph node3local [Node-3: local tier leader]
-        L[fa:fa-hard-drive Local tier<br/>active chunk] -->|seal| LS[Sealed chunks]
+    subgraph node3warm [Node-3: warm vault leader]
+        WARM[fa:fa-hard-drive File vault<br/>active + sealed chunks]
     end
 
-    subgraph node1local [Node-1: local tier follower]
-        LR[fa:fa-hard-drive Local tier<br/>replica]
+    subgraph node1warm [Node-1: warm vault follower]
+        WARM_R[fa:fa-hard-drive File<br/>replica]
     end
 
-    M -.->|mirror writes| MR
-    M -->|record stream| L
-    LS -->|record stream| CS[(fa:fa-cloud Cloud tier: S3)]
-    LS -.->|chunk copy| LR
+    subgraph clouds3 [Node-N: cold vault leader]
+        COLD[fa:fa-cloud File vault<br/>cloud-backed]
+    end
 
-    style M fill:#c4956a,color:#1a1a1a
-    style L fill:#a07850,color:#1a1a1a
-    style LS fill:#a07850,color:#1a1a1a
-    style MR fill:#c4956a33,color:#c4956a,stroke:#c4956a,stroke-dasharray:5
-    style LR fill:#a0785033,color:#a07850,stroke:#a07850,stroke-dasharray:5
+    HOT -.->|mirror writes| HOT_R
+    WARM -.->|chunk copy| WARM_R
+
+    style HOT fill:#c4956a,color:#1a1a1a
+    style WARM fill:#a07850,color:#1a1a1a
+    style COLD fill:#6a5040,color:#f0e8e0
+    style HOT_R fill:#c4956a33,color:#c4956a,stroke:#c4956a,stroke-dasharray:5
+    style WARM_R fill:#a0785033,color:#a07850,stroke:#a07850,stroke-dasharray:5
 ```
 
-No duplicate uploads. No coordination questions about who does what. The leader for each tier is the single decision-maker. If a leader dies, a follower is promoted and the golden thread reconnects — the new leader picks up where the old one left off, resuming the stream to the next tier's leader.
+No duplicate writes. No coordination questions about who does what. The leader for each vault is the single decision-maker. If a leader dies, a follower is promoted and the golden thread reconnects — the new leader picks up where the old one left off.
 
-### Durability handoff
+### Durability and retention
 
-A tier must not drop a chunk until the next tier has **received and durably replicated** the records it contained. Without this guarantee, a poorly timed failure loses data:
+Each vault retires chunks per its retention policy. The **retention disposition** decides what happens to the records inside an expiring chunk:
 
-1. Priority 0 drops a sealed chunk ("priority 1 received it")
-2. Priority 1 leader has the records but hasn't replicated to followers yet
-3. Priority 1 leader dies → records lost
+- **`delete`** (default): records drop, storage frees, the routing engine is never invoked. The safe default — no risk of accidental cascades.
+- **`route`**: records stream through the routing engine with synthetic `_source = "retention"` and `_vault = "<id>"` so operator-configured routes can deliver them to the next vault in the chain. The chunk is destroyed after the records have been routed.
 
-The handoff sequence at each tier boundary:
-
-1. Source tier leader streams records from a sealed chunk to the destination tier leader
-2. Destination tier leader appends records to its active chunk
-3. If the destination tier has replication configured, the leader waits for replication ack from its followers
-4. Destination tier leader sends a **durable ack** back to the source tier leader
-5. Only then does the source tier mark the chunk as eligible for removal by its retention policy
-
-The same pattern applies at every tier boundary. A local-disk tier doesn't delete a chunk until the cloud tier confirms the upload completed. The ack always means "durably stored according to this tier's replication requirements," not just "received by the leader."
-
-This is effectively a two-phase commit at each tier boundary — the cost is one extra round-trip per chunk transition, which is negligible given that chunks seal on the order of minutes to hours.
+The receiving vault's leader appends records to its active chunk; durability comes from that vault's own replication factor. The hand-off is **explicit and per-record**: the source chunk is destroyed only after its records have been routed, and the destination vault writes them through its normal append path with full replication. There is no special inter-vault chunk transfer protocol.
 
 ### Resolved: chunk metadata in Raft
 
-Each vault has its own Raft group (**vault-ctl Raft**), with a **tier FSM** per tier nested inside it. The config Raft stores cluster-wide configuration; each vault-ctl Raft group stores the chunk manifest for every tier in that vault — which chunks exist, their sealed/deleted state, and replication metadata. This is the hybrid approach: config-plane state in the config Raft, data-plane metadata in the vault-ctl Raft. Leaders and followers for each tier are determined by the owning vault's Raft group election (one election per vault, shared across all tier FSMs it hosts).
+Each vault has its own Raft group (**vault-ctl Raft**). The config Raft stores cluster-wide configuration; each vault-ctl Raft group stores the chunk manifest for that vault — which chunks exist, their sealed/deleted state, replication metadata, and the receipt-protocol state for cluster-wide deletes. Leader and followers for the vault are determined by that group's election.
 
-### Tier transitions
+### Retention triggers
 
-The transition between tiers is driven by policy. Multiple strategies can coexist, with the most restrictive one winning:
+Retention policies decide when chunks expire. Strategies can be combined; the most restrictive wins:
 
-- **Time-based**: chunks older than N days demote to the next tier. Simple, predictable.
-- **Size-based**: when the current tier exceeds N GB, the oldest chunks demote. Practical for capacity planning.
-- **Budget-based**: the vault has a monthly storage budget; the cluster distributes data across tiers to stay within it. The most powerful model — the operator sets a dollar amount and GastroLog figures out the rest.
-- **Access-based**: chunks that haven't been queried in N days demote. Data that's actively used stays warm; data that's gathering dust moves cold.
-- **Value-based differentiation** is handled by routing, not by tier policies. Sealed chunks are immutable and contain mixed severities — you can't demote half a chunk. Instead, use route forking to send high-value records (errors, traced requests) to a vault with a longer warm tier, and low-value records (debug, info) to a vault with aggressive demotion. The visual route editor makes this a natural fork in the flow, not a special tier feature.
+- **Time-based**: chunks older than N days expire. Simple, predictable.
+- **Size-based**: when the vault exceeds N GB, the oldest chunks expire. Practical for capacity planning.
+- **Budget-based**: the cluster has a monthly storage budget; the operator distributes data across vaults to stay within it. The vault model makes per-vault budgets natural — `hot` is small and expensive, `cold` is large and cheap.
+- **Access-based**: chunks that haven't been queried in N days expire. Data that's actively used stays warm; data that's gathering dust moves cold.
+- **Value-based differentiation** is the routing engine's job. Sealed chunks are immutable and contain mixed severities — you can't expire half a chunk. Instead, use route forking at ingest to send high-value records (errors, traced requests) to a vault with long retention, and low-value records (debug, info) to a vault with aggressive retention. The visual route editor makes this a natural fork in the flow.
 
-### Live tier chain reconfiguration
+### Live storage reconfiguration
 
-A vault's tier chain can be modified while the vault is live — adding tiers, removing tiers, or changing transition policies. The principle: **reconfiguration affects the future, not the past.**
+Vaults can be added, retired, or rewired while the cluster is live. The principle: **reconfiguration affects the future, not the past.**
 
-**Adding a tier** (e.g., [0, 1, 5] → [0, 1, 3, 5]): new data from priority 1 streams to priority 3 instead of 5. Existing data already in priority 5 stays there — no back-migration.
+**Adding a vault** (e.g. inserting a new "warm" vault between hot and cold): change the upstream vault's retention route to point at the new vault. Existing data in the cold vault stays there — no back-migration.
 
-**Removing a tier** (e.g., [0, 1, 3, 5] → [0, 1, 5]): new data from priority 1 streams directly to priority 5. Priority 3 enters a **wind-down** state: it stops receiving new records, but its existing sealed chunks remain part of the vault. They are still queryable, still count toward storage metrics, and still visible in the inspector. The wind-down tier drains forward — its sealed chunks stream to the next active tier (priority 5) in the background. Once drained, the tier is empty and can be fully removed.
+**Retiring a vault**: stop routes that send records into it; existing chunks remain queryable until they expire under the vault's retention policy. The vault drains naturally; no special wind-down state is needed because the records flowing in stop the moment the route is disabled.
 
-The key invariant: **orphaned data in a removed tier still belongs to the vault.** It doesn't disappear, it doesn't become invisible, it doesn't move to a different vault. Queries still hit it. The inspector shows it as a draining tier. The operator can see exactly how much data remains and how long the drain will take.
-
-**Changing transition policies**: new thresholds apply to future transitions. Data already seated in a tier is unaffected until its next evaluation.
+**Changing retention policies**: new thresholds apply to future expirations. Data already in the vault is unaffected until its next evaluation.
 
 ### Transparent query fan-out
 
-A query for `last=90d` scans all tiers automatically. The user doesn't know or care where the data lives. Results from warmer tiers arrive first; colder tiers stream in progressively, with a subtle loading indicator showing that older data is still arriving.
+A query for `last=90d` scans all vaults automatically. The user doesn't know or care where the data lives. Results from warmer vaults arrive first; colder vaults stream in progressively, with a subtle loading indicator showing that older data is still arriving.
 
 ```mermaid
 flowchart LR
-    Q([fa:fa-search Query]) -.->|microseconds| MT[fa:fa-bolt Memory tier]
-    Q -.->|milliseconds| LT[fa:fa-hard-drive Local tier]
-    Q -.->|seconds| CT[fa:fa-cloud Cloud tier: S3]
-    Q -.->|minutes to hours| AT[fa:fa-snowflake Cloud tier: Glacier]
+    Q([fa:fa-search Query]) -.->|microseconds| MT[fa:fa-bolt Memory vault]
+    Q -.->|milliseconds| LT[fa:fa-hard-drive File vault]
+    Q -.->|seconds| CT[fa:fa-cloud Cloud-backed vault: S3]
+    Q -.->|minutes to hours| AT[fa:fa-snowflake Cloud-backed vault: Glacier]
 
     style MT fill:#c4956a,color:#1a1a1a
     style LT fill:#a07850,color:#1a1a1a
@@ -282,29 +277,25 @@ flowchart LR
     style AT fill:#3a3030,color:#f0e8e0
 ```
 
-### Inter-tier record streaming
+### Per-vault chunk shapes
 
-Chunks never move between tiers. **Records do.** Each tier is its own ingestion pipeline — it receives a record stream from the tier above, appends to its own active chunk, seals on its own schedule, and manages its own sealed chunks with its own retention policy. Each tier's chunk size, rotation schedule, and compression strategy are tuned for its medium independently.
-
-This means each tier produces different chunks from the same records. A memory tier might have dozens of small 5-minute chunks. A local tier might have a few large hourly chunks. A cloud tier might have even fewer, multi-GB chunks. Same records, different containers, each optimized for its access pattern.
-
-Records can also move between vaults based on policies (e.g. eject old records, re-route by severity), but this operates at the vault level — selecting which chunks to keep or discard — not by mutating individual chunks.
+Different vaults produce different chunks from the same records. A memory vault might have dozens of small 5-minute chunks. A file vault might have a few large hourly chunks. A cloud-backed vault might have even fewer, multi-GB chunks. Same records, different containers, each optimized for its access pattern. Chunk size, rotation schedule, and compression strategy are tuned per vault.
 
 ```mermaid
 flowchart LR
-    subgraph node1mem [Node-1: memory tier leader]
+    subgraph node1mem [Node-1: hot vault leader]
         I([fa:fa-plug Ingester]) --> MT[Active + sealed chunks<br/>seals every ~5 min]
     end
 
-    MT -->|stream from sealed chunks| LT
+    MT -->|retention=route| LT
 
-    subgraph node3local [Node-3: local tier leader]
+    subgraph node3local [Node-3: warm vault leader]
         LT[Active chunk<br/>seals every ~1h or ~500MB] -->|seal| LTS[Sealed chunks<br/>compressed · indexed]
     end
 
-    LTS -->|record stream| CT
+    LTS -->|retention=route| CT
 
-    subgraph clouds3 [Cloud tier: S3]
+    subgraph clouds3 [Cold vault: cloud-backed]
         CT[Active chunk on local disk<br/>seals into large objects] -->|seal + upload| CTS[(Sealed chunks in S3)]
     end
 
@@ -314,17 +305,17 @@ flowchart LR
     style CT fill:#6a5040,color:#f0e8e0
 ```
 
-Each tier is a full chunk manager with its own active chunk and sealed chunks. When a sealed chunk in one tier reaches its transition threshold, its records stream to the next tier's leader. Each tier just does what it already knows how to do: accept records, chunk them, seal them. No compaction, no merge logic.
+When a sealed chunk reaches its retention threshold, its records (per the disposition) stream through the routing engine into the next vault's active chunk. Each vault just does what it already knows how to do: accept records, chunk them, seal them. No compaction, no merge logic.
 
-**Every tier in the chain is a full chunk manager** — including cloud tiers. Cloud tiers receive a record stream, buffer into an active chunk on local disk (matching the active chunk storage class requirement), and seal into objects optimized for their medium (fewer, larger objects to minimize per-request overhead and listing costs). The only exception is the archival transition (e.g. S3 Standard → Glacier): a storage class change on the same object, not a re-chunking.
+The only exception to "every chunk produced is a full local seal" is the archival transition (e.g. S3 Standard → Glacier): a storage class change on the same object, not a re-chunking.
 
-### On-demand promotion and caching
+### On-demand caching for cloud-backed vaults
 
-Cloud-backed priorities store sealed chunks remotely. Querying them incurs latency and egress costs. To mitigate this, queried chunks are cached locally on the node's `cache` storage (declared per-node alongside `active-buffer`). The cache is shared across all vaults using the same cloud priority.
+Cloud-backed vaults store sealed chunks remotely. Querying them incurs latency and egress costs. The vault keeps a **warm cache** on local disk, sized by `CacheBudget` and aged out by `CacheEviction` (LRU by default; TTL with `CacheTTL` for time-bounded eviction).
 
 - **Promote**: query hits a cloud-stored chunk → download to local cache → serve from local → keep in cache.
-- **Evict**: LRU or TTL-based. Evict least-recently-queried chunks when cache fills, or chunks not accessed within a configurable window. The cloud copy is the source of truth; the cache is purely a performance optimization.
-- **Cost awareness**: cache hits avoid egress charges entirely. Budget-based transition policies should include storage + request + egress costs, not just GB-months.
+- **Evict**: LRU or TTL-based, per the cache config. The cloud copy is the source of truth; the cache is purely a performance optimization.
+- **Cost awareness**: cache hits avoid egress charges entirely. Budget-based retention should include storage + request + egress costs, not just GB-months.
 
 ---
 
@@ -334,7 +325,7 @@ Multi-tenancy is not an afterthought bolted onto single-tenant architecture. It 
 
 **Tenant isolation at the vault level.** Each tenant gets dedicated vaults with independent retention policies and storage budgets. A query from tenant A physically cannot access tenant B's data — the isolation is enforced at the index level, before any records are read.
 
-**Per-tenant encryption.** For local tiers, encryption is handled at the volume/filesystem level (LUKS, encrypted EBS volumes), transparent to the application and compatible with mmap. For cloud tiers, provider-native encryption with per-tenant keys is standard (S3 SSE-KMS with customer-managed keys, GCS CMEK). A tenant can bring their own KMS key (BYOK) for cloud tiers, giving them independent control over their data's encryption without the cluster operator holding plaintext keys.
+**Per-tenant encryption.** For local file vaults, encryption is handled at the volume/filesystem level (LUKS, encrypted EBS volumes), transparent to the application and compatible with mmap. For cloud-backed vaults, provider-native encryption with per-tenant keys is standard (S3 SSE-KMS with customer-managed keys, GCS CMEK). A tenant can bring their own KMS key (BYOK) for cloud-backed vaults, giving them independent control over their data's encryption without the cluster operator holding plaintext keys.
 
 **Tenant-aware routing.** The ingestion pipeline identifies tenant boundaries (by source IP, API key, field value, or ingester configuration) and routes records to the correct tenant vault. Cross-tenant data never mingles in storage.
 
@@ -378,11 +369,11 @@ Investigating incidents is a team activity, but most tools treat it as a solo on
 
 The cluster should not need an operator for steady-state operations. It should heal itself, rebalance itself, and operate within its resource budget without human intervention.
 
-**Automatic vault rebalancing.** When a node joins or leaves the cluster, vaults are redistributed across the remaining nodes to maintain even load. The rebalancing is lightweight because most data lives in object storage tiers — only the active chunk and warm-tier cache need to migrate. Queries continue to work during rebalancing; the routing layer forwards requests to whichever node currently owns each vault.
+**Automatic vault rebalancing.** When a node joins or leaves the cluster, vaults are redistributed across the remaining nodes to maintain even load. The rebalancing is lightweight because cold data lives in cloud-backed vaults — only the active chunk and warm cache need to migrate. Queries continue to work during rebalancing; the routing layer forwards requests to whichever node currently owns each vault.
 
-**Storage pressure management.** When local storage approaches capacity, the tier chain handles it automatically — warm-tier chunks are promoted to object storage, local caches are evicted, and rotation accelerates. This isn't a separate mechanism; it's the tier transition policy responding to its size-based trigger. The operator sets the budget; the tier chain manages within it.
+**Storage pressure management.** When local storage approaches capacity, the cluster responds along the route chain automatically — accelerating retention on the hot vault so records flow into the warm vault sooner, evicting cache entries on cloud-backed vaults, and tightening rotation thresholds. The operator sets the budget; the routes-and-retention layer manages within it.
 
-**Graceful degradation.** When a node goes down, its vaults' sealed data is already durable in object storage tiers. Another node picks up ingestion for the affected vaults, and queries against sealed chunks continue to work (they're in S3, not on the dead node's disk). The only data at risk is the active memory-tier chunk — minutes of records, recoverable from the peer mirror if configured, or re-ingested from source. The cluster never refuses to answer a query because a node is down — it answers with what's durable and tells you what's missing.
+**Graceful degradation.** When a node goes down, its vaults' sealed data is already durable in cloud-backed vaults further down the chain. Another node picks up ingestion for the affected vaults, and queries against cloud-backed chunks continue to work (they're in S3, not on the dead node's disk). The only data at risk is the active memory-vault chunk — minutes of records, recoverable from the peer mirror if configured, or re-ingested from source. The cluster never refuses to answer a query because a node is down — it answers with what's durable and tells you what's missing.
 
 **Capacity planning signals.** The cluster exposes forward-looking metrics: "At current ingestion rate, local storage will be full in 14 days." "Adding one node would reduce average query latency by 30%." These are not alerts — they are planning signals visible in the inspector, available when you need them, invisible when you don't.
 
@@ -396,24 +387,24 @@ GastroLog is a commercial-grade product for SREs, developers, and operations tea
 
 - **Transport**: mTLS between all cluster nodes. HTTPS for client connections.
 - **Authentication**: JWT-based with per-session refresh tokens. RBAC for authorization.
-- **Encryption at rest (local tiers)**: delegated to the operating system or infrastructure — LUKS, dm-crypt, encrypted EBS volumes. Transparent to the application, compatible with mmap. GastroLog does not implement application-level encryption of local data.
-- **Encryption at rest (cloud tiers)**: provider-native encryption — S3 SSE-KMS, GCS CMEK. Per-tenant KMS keys for multi-tenant deployments. BYOK via customer-managed KMS keys.
+- **Encryption at rest (local file vaults)**: delegated to the operating system or infrastructure — LUKS, dm-crypt, encrypted EBS volumes. Transparent to the application, compatible with mmap. GastroLog does not implement application-level encryption of local data.
+- **Encryption at rest (cloud-backed vaults)**: provider-native encryption — S3 SSE-KMS, GCS CMEK. Per-tenant KMS keys for multi-tenant deployments. BYOK via customer-managed KMS keys.
 - **Sensitive field handling**: two mechanisms, chosen at ingestion time via the route pipeline:
   - **Role-based display masking**: data stored in plaintext (searchable, indexable), masked at query time based on role. Analysts see `credit_card=****` unless they have the PII role.
-  - **Irreversible redaction**: the `redact` stage removes or hashes fields before they reach any tier. Data is gone — not masked, not encrypted, gone. For fields that must never be stored.
+  - **Irreversible redaction**: the `redact` stage removes or hashes fields before they reach any vault. Data is gone — not masked, not encrypted, gone. For fields that must never be stored.
 - **No field-level encryption**: encrypting individual fields would make them unsearchable and unindexable, which conflicts with the query model. This is a deliberate tradeoff, consistent with how Elasticsearch, Splunk, and Loki handle it.
 
 ### Compliance
 
 Compliance requirements — data retention, access auditing, right-to-erasure, data residency — should be satisfiable through the same interfaces used for everything else: queries and configuration.
 
-**Right to erasure.** `gastrolog purge user_id=abc123` removes all records containing that user's data across all vaults, all tiers, all nodes. The purge is audited and produces a compliance certificate. It is a command, not a project.
+**Right to erasure.** `gastrolog purge user_id=abc123` removes all records containing that user's data across all vaults, all nodes. The purge is audited and produces a compliance certificate. It is a command, not a project.
 
 **Access auditing.** Every query, every record access, every export is logged to a dedicated audit vault. "Who accessed records containing `patient_id=12345` in the last 90 days?" is a query against the audit vault. The audit trail is itself immutable and tamper-evident.
 
 **Data residency.** Vaults can be pinned to specific nodes or regions. A vault configured with `residency: eu-west-1` will only store data on nodes in that region, and queries against it will only execute on those nodes. Cross-region queries are explicitly opt-in, with clear indication of which data is crossing boundaries.
 
-**Retention enforcement.** Retention policies are verifiable. When a retention policy says "delete after 90 days," the data is gone from all tiers after 90 days. The cluster produces retention compliance reports that can be submitted to auditors without manual verification.
+**Retention enforcement.** Retention policies are verifiable. When a retention policy says "delete after 90 days," the data is gone from all vaults after 90 days. The cluster produces retention compliance reports that can be submitted to auditors without manual verification.
 
 ---
 
@@ -506,24 +497,23 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 | Visual route editor | Not started | Routes configured via form fields, no flow builder |
 | Sampling | Not started | No per-severity sampling at ingestion |
 
-### Tiered Storage
+### Layered Storage
 
 | Capability | Status | Notes |
 |---|---|---|
 | Memory chunk manager | Done | In-memory chunks with rotation/retention |
 | File chunk manager | Done | Local SSD, mmap'd reads, sealed chunk compression |
-| Cloud chunk manager | Done | S3/GCS/Azure for sealed chunks and indexes |
+| Cloud-backed chunk manager | Done | S3/GCS/Azure for sealed chunks and indexes |
 | FileStorage model | Done | Per-node local storage declarations with storage classes |
 | CloudService model | Done | Cluster-wide cloud service definitions with archival lifecycle |
-| Three tier types (memory/local/cloud) | Done | Memory, file, cloud — each a full chunk manager. JSONL also supported |
-| Vault as logical container | Done | Vault owns an ordered tier chain; vault type decoupled from storage |
-| Per-tier leader election | Done | Tier Raft groups with leader/follower election per tier |
-| Inter-tier record streaming | Done | Sealed chunks stream records to the next tier via transitions |
-| Replication | Done | Leader replicates to followers via TierReplicator; ack-gated durability |
-| Durability handoff | Partial | Two-phase: source marks TransitionStreamed, expires on next sweep after stream success. Full follower-replication confirmation deferred (needs chunk ID mapping) |
+| Vault types | Done | Memory, file (optionally cloud-backed), JSONL — each a full chunk manager |
+| Vault as the storage unit | Done | One storage shape per vault; layering expressed via routes between vaults |
+| Per-vault leader election | Done | Vault-ctl Raft group per vault with leader/follower election |
+| Replication | Done | Leader replicates to followers via ChunkReplicator; ack-gated durability |
+| Inter-vault record routing on retention | Done | Vault `disposition=route` re-emits expiring chunks' records through the routing engine for delivery to the next vault |
 | Budget-driven retention | Not started | Retention is time/count/size-based only |
-| Cloud chunk caching | Partial | Cloud index exists; cache eviction (LRU/TTL) not implemented |
-| Memory tier budget enforcement | Done | Total budget with drain to next tier on overflow |
+| Cloud chunk cache eviction | Done | LRU and TTL eviction on warm cache, gated by `CacheBudget` and `CacheTTL` |
+| Memory budget enforcement | Done | Total budget per memory vault; retention triggers when over |
 
 ### Anomaly Detection
 
@@ -538,7 +528,7 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 | Capability | Status | Notes |
 |---|---|---|
 | Tenant model | Not started | No tenant concept in config or proto |
-| Per-tenant encryption | Not started | Volume-level for local tiers, SSE-KMS for cloud tiers |
+| Per-tenant encryption | Not started | Volume-level for local file vaults, SSE-KMS for cloud-backed vaults |
 | Resource quotas | Not started | No per-tenant rate/storage limits |
 | Tenant-aware routing | Not started | No tenant boundary detection |
 
@@ -566,7 +556,7 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 
 | Capability | Status | Notes |
 |---|---|---|
-| Raft consensus | Done | Config Raft + per-vault vault-ctl Raft groups (tier FSM per tier) |
+| Raft consensus | Done | Config Raft + per-vault vault-ctl Raft groups (chunk-FSM sub-state per vault) |
 | Cross-node query fan-out | Done | ForwardSearch, collectRemote, GetFields, GetContext |
 | Config push (WatchConfig) | Done | Real-time config propagation via server stream |
 | Chunk push (WatchChunks) | Done | Real-time chunk metadata notifications via server stream |
@@ -574,7 +564,7 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 | Forward backpressure | Done | ForwardSync for ack-gated records, PressureGate probes on forward channels |
 | Operational alerting | Done | Rotation/retention rate alerts, self-ingester drop visibility, ingest pressure |
 | Automatic vault rebalancing | Not started | Vaults stay on their assigned node |
-| Storage pressure management | Not started | No automatic tier demotion under pressure |
+| Storage pressure management | Not started | No automatic retention acceleration along the route chain under pressure |
 | Graceful degradation | Partial | Queries fan out but don't indicate missing data |
 | Capacity planning signals | Not started | No forward-looking metrics |
 

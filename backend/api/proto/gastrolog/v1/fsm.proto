@@ -48,13 +48,11 @@ message SystemCommand {
     PutCloudServiceCommand put_cloud_service = 30;
     DeleteCloudServiceCommand delete_cloud_service = 31;
     SetNodeStorageConfigCommand set_node_storage_config = 32;
-    PutTierCommand put_tier = 33;
-    DeleteTierCommand delete_tier = 34;
-    SetVaultPlacementsCommand set_vault_placements = 35;
-    SetSetupWizardDismissedCommand set_setup_wizard_dismissed = 36;
-    SetIngesterAliveCommand set_ingester_alive = 37;
-    SetIngesterAssignmentCommand set_ingester_assignment = 38;
-    SetIngesterCheckpointCommand set_ingester_checkpoint = 39;
+    SetVaultPlacementsCommand set_vault_placements = 33;
+    SetSetupWizardDismissedCommand set_setup_wizard_dismissed = 34;
+    SetIngesterAliveCommand set_ingester_alive = 35;
+    SetIngesterAssignmentCommand set_ingester_assignment = 36;
+    SetIngesterCheckpointCommand set_ingester_checkpoint = 37;
   }
 }
 
@@ -282,22 +280,10 @@ message SetNodeStorageConfigCommand {
   NodeStorageConfig node_storage = 1;
 }
 
-// --- Tiers ---
-
-// PutTierCommand carries the full API TierConfig from system.proto.
-message PutTierCommand {
-  TierConfig tier = 1;
-}
-
-message DeleteTierCommand {
-  bytes id = 1;
-  bool drain = 2; // When true, drain chunks to the next tier before deleting.
-}
-
-// --- Tier Placements ---
+// --- Vault Placements ---
 
 message SetVaultPlacementsCommand {
-  bytes tier_id = 1;
+  bytes vault_id = 1;
   repeated VaultPlacement placements = 2;
 }
 
@@ -346,10 +332,9 @@ message SystemSnapshot {
   repeated PutManagedFileCommand managed_files = 12;
   repeated PutCloudServiceCommand cloud_services = 13;
   repeated SetNodeStorageConfigCommand node_storage_configs = 14;
-  repeated PutTierCommand tiers = 15;
-  repeated SetVaultPlacementsCommand vault_placements = 16;
-  bool setup_wizard_dismissed = 17;
-  repeated SetIngesterAliveCommand ingester_alive = 18;
-  repeated SetIngesterAssignmentCommand ingester_assignments = 19;
-  repeated SetIngesterCheckpointCommand ingester_checkpoints = 20;
+  repeated SetVaultPlacementsCommand vault_placements = 15;
+  bool setup_wizard_dismissed = 16;
+  repeated SetIngesterAliveCommand ingester_alive = 17;
+  repeated SetIngesterAssignmentCommand ingester_assignments = 18;
+  repeated SetIngesterCheckpointCommand ingester_checkpoints = 19;
 }

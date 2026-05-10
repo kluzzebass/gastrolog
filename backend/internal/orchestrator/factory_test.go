@@ -123,17 +123,15 @@ func (f *fakeIndexManager) IndexSizes(chunkID chunk.ChunkID) map[string]int64 {
 }
 func (f *fakeIndexManager) BuildAdapter() chunk.ChunkIndexBuilder { return nil }
 
-// testVaultCfg creates a VaultConfig + TierConfig pair for tests.
+// testVaultCfg creates a VaultConfig for tests.
 // vaultType is the storage shape (e.g., system.VaultTypeMemory or "test").
-// 1:1 vault:tier — the returned inst shares the vault's ID.
-func testVaultCfg(vaultID glid.GLID, vaultType system.VaultType) (system.VaultConfig, system.TierConfig) {
-	v := system.VaultConfig{
+func testVaultCfg(vaultID glid.GLID, vaultType system.VaultType) system.VaultConfig {
+	return system.VaultConfig{
 		ID:      vaultID,
 		Name:    "vault-" + vaultID.String()[:8],
 		Enabled: true,
 		Type:    vaultType,
 	}
-	return v, system.TierFromVault(v)
 }
 
 // fakeIngester implements Ingester for testing.
@@ -220,8 +218,8 @@ func TestApplyConfigVaults(t *testing.T) {
 
 	vault1ID := glid.New()
 	vault2ID := glid.New()
-	vc1, _ := testVaultCfg(vault1ID, system.VaultTypeMemory)
-	vc2, _ := testVaultCfg(vault2ID, system.VaultTypeMemory)
+	vc1 := testVaultCfg(vault1ID, system.VaultTypeMemory)
+	vc2 := testVaultCfg(vault2ID, system.VaultTypeMemory)
 
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{vc1, vc2},
@@ -282,7 +280,7 @@ func TestApplyConfigUnknownChunkManagerType(t *testing.T) {
 	orch := newTestOrch(t, Config{})
 
 	vaultID := glid.New()
-	vc, _ := testVaultCfg(vaultID, system.VaultTypeMemory)
+	vc := testVaultCfg(vaultID, system.VaultTypeMemory)
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{vc},
 	}
@@ -304,7 +302,7 @@ func TestApplyConfigUnknownIndexManagerType(t *testing.T) {
 	orch := newTestOrch(t, Config{})
 
 	vaultID := glid.New()
-	vc, _ := testVaultCfg(vaultID, system.VaultTypeMemory)
+	vc := testVaultCfg(vaultID, system.VaultTypeMemory)
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			"memory": func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
@@ -362,7 +360,7 @@ func TestApplyConfigDuplicateVaultID(t *testing.T) {
 	}
 
 	dupID := glid.New()
-	vc1, _ := testVaultCfg(dupID, system.VaultTypeMemory)
+	vc1 := testVaultCfg(dupID, system.VaultTypeMemory)
 	vc2 := vc1 // duplicate ID, same inst
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{vc1, vc2},
@@ -403,7 +401,7 @@ func TestApplyConfigChunkManagerFactoryError(t *testing.T) {
 	orch := newTestOrch(t, Config{})
 
 	vaultID := glid.New()
-	vc, _ := testVaultCfg(vaultID, system.VaultTypeMemory)
+	vc := testVaultCfg(vaultID, system.VaultTypeMemory)
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			"memory": func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
@@ -435,7 +433,7 @@ func TestApplyConfigIndexManagerFactoryError(t *testing.T) {
 	orch := newTestOrch(t, Config{})
 
 	vaultID := glid.New()
-	vc, _ := testVaultCfg(vaultID, system.VaultTypeMemory)
+	vc := testVaultCfg(vaultID, system.VaultTypeMemory)
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			"memory": func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
@@ -602,7 +600,7 @@ func TestApplyConfigIndexManagerReceivesChunkManager(t *testing.T) {
 	}
 
 	vaultID := glid.New()
-	vc, _ := testVaultCfg(vaultID, system.VaultTypeMemory)
+	vc := testVaultCfg(vaultID, system.VaultTypeMemory)
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{vc},
 	}
