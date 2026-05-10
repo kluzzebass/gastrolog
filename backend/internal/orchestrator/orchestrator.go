@@ -381,11 +381,11 @@ func (o *Orchestrator) NotifyChunkChange() {
 	o.progressTrigger.Signal()
 }
 
-// tierLabel returns the operator-friendly name for a inst as configured,
+// vaultLabel returns the operator-friendly name for a inst as configured,
 // or "" if the inst or config is unknown. Used by RateAlerter to build
 // alert messages that say "inst ssd-hot" instead of just a UUID. Safe to
 // call from any goroutine — it acquires the orchestrator read lock.
-func (o *Orchestrator) tierLabel(instID glid.GLID) string {
+func (o *Orchestrator) vaultLabel(instID glid.GLID) string {
 	if o.sysLoader == nil {
 		return ""
 	}
@@ -535,7 +535,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		WarningAt: 1.0,
 		ErrorAt:   5.0,
 		Alerts:    o.alerts,
-		TierName:  o.tierLabel,
+		VaultName:  o.vaultLabel,
 	})
 	o.retentionRates = newRateAlerter(rateAlerterConfig{
 		Window:    30 * time.Second,
@@ -544,7 +544,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		WarningAt: 10.0,
 		ErrorAt:   0, // no error escalation per issue scope
 		Alerts:    o.alerts,
-		TierName:  o.tierLabel,
+		VaultName:  o.vaultLabel,
 	})
 
 	// Cron rotation completes its work outside the post-seal pipeline,
@@ -574,7 +574,7 @@ func New(cfg Config) (*Orchestrator, error) {
 	// inst (pending obligations, local orphans, missing replicas).
 	// Phase-offset from retention's :00 tick to avoid spikiness. See
 	// gastrolog-51gme (delete-side) and gastrolog-2dgvj (create-side).
-	if err := o.startTierCatchupSweep(); err != nil {
+	if err := o.startInstanceCatchupSweep(); err != nil {
 		return nil, fmt.Errorf("inst catchup sweep: %w", err)
 	}
 

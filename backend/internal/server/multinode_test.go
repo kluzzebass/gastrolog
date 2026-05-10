@@ -434,8 +434,8 @@ func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *g
 	}
 
 	// Match production behavior: only search leader vaults on this node.
-	// Production ForwardSearch uses LeaderTierQueryEngineForVault.
-	eng, engErr := orch.LeaderTierQueryEngineForVault(vaultID)
+	// Production ForwardSearch uses LeaderQueryEngineForVault.
+	eng, engErr := orch.LeaderQueryEngineForVault(vaultID)
 	if engErr != nil {
 		return nil, engErr
 	}
@@ -515,7 +515,7 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 	}
 
 	// Match production behavior: only search leader vaults on this node.
-	eng, engErr := orch.LeaderTierQueryEngineForVault(vaultID)
+	eng, engErr := orch.LeaderQueryEngineForVault(vaultID)
 	if engErr != nil {
 		errCh <- engErr
 		close(recCh)

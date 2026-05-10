@@ -17,7 +17,7 @@ import (
 // chunk manager emitting CmdCreateChunk/CmdSealChunk through vault-ctl
 // Raft to followers.
 //
-// The harness uses file-backed tiers (not memory) because only the
+// The harness uses file-backed vaults (not memory) because only the
 // file-inst ChunkManager wires SetAnnouncer — the pathway that propagates
 // sealed-chunk metadata across the cluster. Memory-inst chunks stay
 // local to the leader and would make replication scenarios vacuous.

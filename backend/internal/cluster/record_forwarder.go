@@ -38,7 +38,7 @@ const (
 )
 
 // forwardEntry is a single record queued for forwarding to a remote node's
-// vault. Used exclusively for cross-node vault routing — tier-targeted
+// vault. Used exclusively for cross-node vault routing — chunk-ID-preserving
 // follower replication now goes through ChunkReplicator (see gastrolog-5c6fp).
 type forwardEntry struct {
 	vaultID glid.GLID

@@ -8,12 +8,12 @@ import (
 
 // NewProjectingReader returns a Reader that projects manifest entries from
 // each vault's chunk manager via List() / Meta(). Used when no FSM is
-// wired (memory-mode tiers, unit-test registries) — those tiers are their
+// wired (memory-mode vaults, unit-test registries) — those tiers are their
 // own source of truth and the local chunk manager view is authoritative.
 //
 // Sealed-only filtering is honored: ChunkMeta.Sealed=false entries are
 // excluded from EntriesForVault and Entry. RetentionPending and TS-index
-// TOC offsets are zero in the projected entries (memory-mode tiers
+// TOC offsets are zero in the projected entries (memory-mode vaults
 // don't track them).
 func NewProjectingReader(reg VaultRegistry) Reader {
 	return &projectingReader{reg: reg}

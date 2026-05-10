@@ -421,7 +421,7 @@ func TestPipelineAppendEntries(t *testing.T) {
 func TestThreeNodeThreeGroupsIndependentLeaders(t *testing.T) {
 	// Not parallel — gRPC servers + bufconn need clean sequential lifecycle.
 	nodes := makeTestCluster(t, 3)
-	groups := []string{"config", "tier-1", "tier-2"}
+	groups := []string{"config", "vault-1", "vault-2"}
 
 	// Each group responds with a different term to prove isolation.
 	for gi, group := range groups {
@@ -458,7 +458,7 @@ func TestThreeNodeThreeGroupsIndependentLeaders(t *testing.T) {
 // the generic works with non-string types.
 type instID uint64
 
-func encodeTierID(id instID) []byte {
+func encodeInstID(id instID) []byte {
 	b := make([]byte, 8)
 	b[0] = byte(id >> 56)
 	b[1] = byte(id >> 48)
@@ -471,7 +471,7 @@ func encodeTierID(id instID) []byte {
 	return b
 }
 
-func decodeTierID(b []byte) instID {
+func decodeInstID(b []byte) instID {
 	return instID(uint64(b[0])<<56 | uint64(b[1])<<48 | uint64(b[2])<<40 | uint64(b[3])<<32 |
 		uint64(b[4])<<24 | uint64(b[5])<<16 | uint64(b[6])<<8 | uint64(b[7]))
 }
@@ -486,11 +486,11 @@ func TestNonStringGroupID(t *testing.T) {
 
 	tp1 := New[instID](raft.ServerAddress(lis1.Addr().String()),
 		[]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
-		encodeTierID, decodeTierID,
+		encodeInstID, decodeInstID,
 	)
 	tp2 := New[instID](raft.ServerAddress(lis2.Addr().String()),
 		[]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
-		encodeTierID, decodeTierID,
+		encodeInstID, decodeInstID,
 	)
 	tp1.Register(srv1)
 	tp2.Register(srv2)

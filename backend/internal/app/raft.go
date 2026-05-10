@@ -38,11 +38,11 @@ type raftStoreOpts struct {
 	// When nil, a new transport is obtained from ClusterSrv.Transport().
 	transport hraft.Transport
 
-	// TierRaftSharesWAL is set only from the main Run path when cluster mode
+	// VaultCtlRaftSharesWAL is set only from the main Run path when cluster mode
 	// is enabled: vault-ctl Raft groups use the same raftwal instance as the
 	// system store, and serveAndAwaitShutdown closes it after system raft.
 	// Rejoin / rollback paths omit this so each store owns its WAL again.
-	TierRaftSharesWAL bool
+	VaultCtlRaftSharesWAL bool
 }
 
 // raftSystemStore wraps a raftstore.Store with cleanup logic for the
@@ -244,7 +244,7 @@ func openRaftSystemStore(opts raftStoreOpts) (*raftSystemStore, error) {
 	fwd := cluster.NewForwarder(r, opts.ClusterTLS)
 	store.SetForwarder(fwd)
 
-	ownsWAL := !opts.TierRaftSharesWAL
+	ownsWAL := !opts.VaultCtlRaftSharesWAL
 	return &raftSystemStore{
 		Store:     store,
 		raftStore: store,

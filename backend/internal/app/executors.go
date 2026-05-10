@@ -179,19 +179,19 @@ func forwardSearchAfterParse(
 func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
 	return func(ctx context.Context, vaultID glid.GLID, queryExpr string, resumeTokenData []byte) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error) {
 		// Don't add vault_id= scope — the engine is already scoped to this
-		// vault's leader tiers. Adding vault_id= would fail because the
+		// vault's leader instances. Adding vault_id= would fail because the
 		// engine uses vault IDs, not vault IDs.
 		q, pipeline, err := server.ParseExpression(queryExpr)
 		if err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("parse query: %w", err)
 		}
 
-		eng, err := o.LeaderTierQueryEngineForVault(vaultID)
+		eng, err := o.LeaderQueryEngineForVault(vaultID)
 		if err != nil {
 			return nil, nil, nil, nil, err
 		}
 		if eng == nil {
-			return nil, nil, nil, nil, nil // no leader tiers for this vault
+			return nil, nil, nil, nil, nil // no leader instance for this vault
 		}
 
 		return forwardSearchAfterParse(ctx, eng, q, pipeline, resumeTokenData)
@@ -207,19 +207,19 @@ func newExplainExecutor(o *orchestrator.Orchestrator, localNodeID string) cluste
 		var totalChunks int32
 
 		// Parse the query once — don't add vault_id= scope because the
-		// engine is already scoped to the vault's leader tiers.
+		// engine is already scoped to the vault's leader instances.
 		q, _, err := server.ParseExpression(queryExpr)
 		if err != nil {
 			return nil, 0, fmt.Errorf("parse query: %w", err)
 		}
 
 		for _, vid := range vaultIDs {
-			eng, err := o.LeaderTierQueryEngineForVault(vid)
+			eng, err := o.LeaderQueryEngineForVault(vid)
 			if err != nil {
 				return nil, 0, fmt.Errorf("vault %s: %w", vid, err)
 			}
 			if eng == nil {
-				continue // no leader tiers for this vault
+				continue // no leader instance for this vault
 			}
 			plan, err := eng.Explain(ctx, q)
 			if err != nil {
@@ -294,12 +294,12 @@ func newFollowExecutor(o *orchestrator.Orchestrator) cluster.FollowExecutor {
 
 func newContextExecutor(o *orchestrator.Orchestrator) cluster.ContextExecutor {
 	return func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, pos uint64, before, after int) ([]chunk.Record, chunk.Record, []chunk.Record, error) {
-		eng, err := o.LeaderTierQueryEngineForVault(vaultID)
+		eng, err := o.LeaderQueryEngineForVault(vaultID)
 		if err != nil {
 			return nil, chunk.Record{}, nil, err
 		}
 		if eng == nil {
-			return nil, chunk.Record{}, nil, fmt.Errorf("no leader tiers for vault %s", vaultID)
+			return nil, chunk.Record{}, nil, fmt.Errorf("no leader instance for vault %s", vaultID)
 		}
 		result, err := eng.GetContext(ctx, query.ContextRef{
 			VaultID: vaultID,

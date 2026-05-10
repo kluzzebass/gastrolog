@@ -413,6 +413,6 @@ func TestReadyz_localVaultReplicationNotReady(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("readyz: want 503 while tier FSM not ready, got %d", resp.StatusCode)
+		t.Fatalf("readyz: want 503 while instance FSM not ready, got %d", resp.StatusCode)
 	}
 }

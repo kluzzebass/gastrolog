@@ -101,7 +101,7 @@ type GroupManagerConfig struct {
 	Logger *slog.Logger
 
 	// ShutdownLast is a group ID that should be shut down after all others.
-	// Typically the config group — it must remain available while tier groups
+	// Typically the config group — it must remain available while vault-ctl groups
 	// are shutting down so they can still replicate final state.
 	ShutdownLast string
 

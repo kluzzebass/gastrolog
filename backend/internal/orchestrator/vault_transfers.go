@@ -161,7 +161,7 @@ func (o *Orchestrator) isRemoteVault(ctx context.Context, vaultID glid.GLID) (st
 // that owns it. Routes through the receipt protocol when a reconciler is
 // wired (production) so the source-side delete propagates cluster-wide
 // via CmdRequestDelete. Falls back to a direct local delete for
-// memory-mode tiers without Raft. Reason "vault-migrate-source-expire"
+// memory-mode vaults without Raft. Reason "vault-migrate-source-expire"
 // lands in pendingDeletes audit. See gastrolog-51gme.
 func (o *Orchestrator) deleteSourceChunk(srcID glid.GLID, chunkID chunk.ChunkID) error {
 	inst, err := o.findInstanceForChunk(srcID, chunkID)
@@ -313,7 +313,7 @@ func (o *Orchestrator) drainWorker(ctx context.Context, vaultID glid.GLID, targe
 	}
 
 	// Final seal: catch any records that were appended between
-	// DrainVault's SealActiveTier and the worker starting (e.g. from
+	// DrainVault's SealActiveChunk and the worker starting (e.g. from
 	// ForwardRecords RPCs from nodes with stale filter sets).
 	if _, err := o.SealActive(vaultID); err != nil {
 		o.logger.Warn("drain: final seal", "vault", vaultID, "error", err)

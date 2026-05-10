@@ -20,9 +20,9 @@ import (
 	sysmem "gastrolog/internal/system/memory"
 )
 
-// TestConcurrentAppendToTierAttrIntegrity reproduces gastrolog-4dd48:
+// TestConcurrentAppendAttrIntegrity reproduces gastrolog-4dd48:
 // concurrent AppendToVault calls through the orchestrator corrupt attr.log.
-func TestConcurrentAppendToTierAttrIntegrity(t *testing.T) {
+func TestConcurrentAppendAttrIntegrity(t *testing.T) {
 	t.Parallel()
 
 	vaultID := glid.New()
@@ -505,8 +505,8 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	srcTier := &VaultInstance{VaultID: instID, Type: "file", Chunks: srcCM, Indexes: srcIM, Query: query.New(srcCM, srcIM, nil)}
-	orchA.RegisterVault(NewVault(vaultID, srcTier))
+	srcInst := &VaultInstance{VaultID: instID, Type: "file", Chunks: srcCM, Indexes: srcIM, Query: query.New(srcCM, srcIM, nil)}
+	orchA.RegisterVault(NewVault(vaultID, srcInst))
 
 	// Destination node.
 	dstDir := t.TempDir()
@@ -525,8 +525,8 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dstTier := &VaultInstance{VaultID: instID, Type: "file", Chunks: dstCM, Indexes: dstIM, Query: query.New(dstCM, dstIM, nil)}
-	orchB.RegisterVault(NewVault(vaultID, dstTier))
+	dstInst := &VaultInstance{VaultID: instID, Type: "file", Chunks: dstCM, Indexes: dstIM, Query: query.New(dstCM, dstIM, nil)}
+	orchB.RegisterVault(NewVault(vaultID, dstInst))
 
 	orchA.SetRemoteTransferrer(&directTransferrer{nodes: map[string]*Orchestrator{"node-B": orchB}})
 

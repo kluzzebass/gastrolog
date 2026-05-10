@@ -14,9 +14,9 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// SealActiveTier seals the active chunk for a specific inst, on a **follower**
-// node, as the local effect of a inst-leader-originated SealVault replication
-// command. Use SealActiveTier on the leader-triggered path.
+// SealActiveChunk seals the active chunk for a vault on a **follower**
+// node, as the local effect of a leader-originated SealVault replication
+// command. Use SealActive on the leader-triggered path.
 //
 // Role: follower-side. Caller is typically the ChunkReplicator handler that
 // receives the seal command from the leader. Validates expectedChunkID to
@@ -27,10 +27,10 @@ import (
 // manifest may lag, but the physical seal (flush + close file) is local
 // and safe regardless.
 //
-// Do not merge with SealActiveTier: the two paths run on different nodes with
-// different invariants. SealActiveTier (leader) fans out replication; this
+// Do not merge with SealActive: the two paths run on different nodes with
+// different invariants. SealActive (leader) fans out replication; this
 // function is the target of that fan-out on followers.
-func (o *Orchestrator) SealActiveTier(vaultID glid.GLID, expectedChunkID chunk.ChunkID) error {
+func (o *Orchestrator) SealActiveChunk(vaultID glid.GLID, expectedChunkID chunk.ChunkID) error {
 	inst := o.findLocalVaultInstance(vaultID)
 	if inst == nil {
 		return fmt.Errorf("%w: vault %s", ErrInstanceNotLocal, vaultID)

@@ -13,15 +13,15 @@ import (
 )
 
 const (
-	// tierMembershipReconcileInterval is how often the leader epoch's
+	// vaultMembershipReconcileInterval is how often the leader epoch's
 	// reconcile callback re-runs as a safety net. The primary trigger
 	// for reconciliation is leadership gain (after raft.Barrier returns)
 	// and explicit calls to SetDesiredMembers; the periodic tick catches
 	// transient transitions where the explicit triggers were missed.
-	tierMembershipReconcileInterval = 30 * time.Second
+	vaultMembershipReconcileInterval = 30 * time.Second
 
-	// tierMembershipChangeTimeout bounds AddVoter / RemoveServer calls.
-	tierMembershipChangeTimeout = 10 * time.Second
+	// vaultMembershipChangeTimeout bounds AddVoter / RemoveServer calls.
+	vaultMembershipChangeTimeout = 10 * time.Second
 )
 
 // vaultCtlLeaderManager spawns and supervises per-vault leader loops. Each inst
@@ -142,7 +142,7 @@ func (m *vaultCtlLeaderManager) runLeaderEpoch(ctx context.Context, instID glid.
 	// Initial reconcile immediately after barrier.
 	m.reconcile(instID, group)
 
-	ticker := time.NewTicker(tierMembershipReconcileInterval)
+	ticker := time.NewTicker(vaultMembershipReconcileInterval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -189,7 +189,7 @@ func (m *vaultCtlLeaderManager) reconcile(instID glid.GLID, group *raftgroup.Gro
 		if currentByID[srv.ID] {
 			continue
 		}
-		fut := group.Raft.AddVoter(srv.ID, srv.Address, 0, tierMembershipChangeTimeout)
+		fut := group.Raft.AddVoter(srv.ID, srv.Address, 0, vaultMembershipChangeTimeout)
 		if err := fut.Error(); err != nil {
 			m.logger.Warn("AddVoter failed",
 				"vault", instID, "node", srv.ID, "error", err)
@@ -204,7 +204,7 @@ func (m *vaultCtlLeaderManager) reconcile(instID glid.GLID, group *raftgroup.Gro
 		if _, want := desiredByID[srv.ID]; want {
 			continue
 		}
-		fut := group.Raft.RemoveServer(srv.ID, 0, tierMembershipChangeTimeout)
+		fut := group.Raft.RemoveServer(srv.ID, 0, vaultMembershipChangeTimeout)
 		if err := fut.Error(); err != nil {
 			m.logger.Warn("RemoveServer failed",
 				"vault", instID, "node", srv.ID, "error", err)

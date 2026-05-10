@@ -33,9 +33,9 @@ func (o *Orchestrator) IntegrityVerifier() chunk.IntegrityVerifier {
 }
 
 // orchestratorManifestReader implements manifest.Reader by walking the
-// orchestrator's vaults and their tiers. Sealed entries from the vault-ctl FSM
-// are returned verbatim; memory-mode tiers project from chunk.ChunkManager
-// because those tiers are their own source of truth (no replication).
+// orchestrator's vaults. Sealed entries from the vault-ctl FSM are returned
+// verbatim; memory-mode vaults project from chunk.ChunkManager because those
+// vaults are their own source of truth (no replication).
 type orchestratorManifestReader struct {
 	o *Orchestrator
 }
@@ -90,7 +90,7 @@ func (r *orchestratorManifestReader) EntriesForVault(key glid.GLID) []vaultctlfs
 
 // VaultManifestEntriesFromCtlFSM returns every manifest entry (sealed and
 // active) for the given vault, read directly from the replicated vault-ctl
-// Raft FSM rather than from local TierInstances. Every node participates as
+// Raft FSM rather than from local VaultInstances. Every node participates as
 // a voter in every vault-ctl Raft group (gastrolog-292yi), so the FSM is
 // authoritative cluster-wide and visible on nodes that don't host any inst
 // instance for the vault — the case where ManifestReader().EntriesForVault
@@ -168,7 +168,7 @@ func vaultManifestEntries(t *VaultInstance) []vaultctlfsm.ManifestEntry {
 }
 
 // IndexReader returns a manifest.IndexReader that resolves IngestTS rank /
-// position lookups against this orchestrator's locally-hosted tiers. Phase 1
+// position lookups against this orchestrator's locally-hosted vaults. Phase 1
 // implementation delegates to the existing layered fallback
 // (chunk.ChunkManager.FindIngestEntryIndex → index.IndexManager.FindIngestEntryIndex).
 // A future pass will collapse those two file-access paths onto a single
@@ -246,10 +246,10 @@ func (r *orchestratorIndexReader) lookupVaultManagers(chunkID chunk.ChunkID) (ch
 }
 
 // chunkMetaToManifestEntry projects a chunk.ChunkMeta into the FSM-shaped
-// vaultctlfsm.ManifestEntry. Used only for memory-mode tiers, which have no
+// vaultctlfsm.ManifestEntry. Used only for memory-mode vaults, which have no
 // FSM and no replication — the local chunk manager IS the source of truth
 // there. RetentionPending / TransitionStreamed / IngestIdx*/SourceIdx*
-// fields stay zero (memory-mode tiers don't track them).
+// fields stay zero (memory-mode vaults don't track them).
 func chunkMetaToManifestEntry(m chunk.ChunkMeta) vaultctlfsm.ManifestEntry {
 	state := m.State
 	if state == chunk.ChunkStateUnknown {

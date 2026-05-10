@@ -668,13 +668,13 @@ func TestSweepMissingReplicasRequestsOnlySealedAndAbsentEntries(t *testing.T) {
 	}
 }
 
-// TestSweepMissingReplicasSkipsLeaderTier pins that the sweep is a
+// TestSweepMissingReplicasSkipsLeader pins that the sweep is a
 // follower-only operation. The leader's local store is by definition
 // the source of truth — if a chunk is in its FSM but not on its disk,
 // the chunk has been lost and no peer catchup will recover it. Running
 // the sweep on the leader would waste an RPC and could mask a real
 // disk-failure incident.
-func TestSweepMissingReplicasSkipsLeaderTier(t *testing.T) {
+func TestSweepMissingReplicasSkipsLeader(t *testing.T) {
 	t.Parallel()
 
 	fsm := vaultctlfsm.New()
@@ -1030,13 +1030,13 @@ func TestReconcilerOnSealNotifiesEvenWhenEnsureSealedFails(t *testing.T) {
 	}
 }
 
-// TestWireTierFSMOnDeleteFiresNotifyChunkChange pins that the legacy
+// TestWireInstanceFSMOnDeleteFiresNotifyChunkChange pins that the legacy
 // FSM-driven delete callback (CmdDeleteChunk applied via Raft, not the
 // receipt-protocol path) also fires NotifyChunkChange. Without this,
 // nodes that don't own the chunk locally — but display it via the
 // inspector's cluster-wide ListChunks fan-out — would never refresh
 // after a remote delete. See gastrolog-2ob86.
-func TestWireTierFSMOnDeleteFiresNotifyChunkChange(t *testing.T) {
+func TestWireInstanceFSMOnDeleteFiresNotifyChunkChange(t *testing.T) {
 	t.Parallel()
 
 	orch, err := New(Config{LocalNodeID: "node-A"})
@@ -1069,12 +1069,12 @@ func TestWireTierFSMOnDeleteFiresNotifyChunkChange(t *testing.T) {
 	}
 }
 
-// TestWireTierFSMOnDeleteNotifiesEvenWhenDeleteSilentFails pins the
+// TestWireInstanceFSMOnDeleteNotifiesEvenWhenDeleteSilentFails pins the
 // FSM-state-is-authoritative principle for the delete callback: a
 // failed local file delete (chunk missing, manager closed, etc.) must
 // not gate the inspector signal. The chunks-map entry was removed from
 // the FSM regardless. See gastrolog-2ob86.
-func TestWireTierFSMOnDeleteNotifiesEvenWhenDeleteSilentFails(t *testing.T) {
+func TestWireInstanceFSMOnDeleteNotifiesEvenWhenDeleteSilentFails(t *testing.T) {
 	t.Parallel()
 
 	orch, err := New(Config{LocalNodeID: "node-A"})
@@ -1100,12 +1100,12 @@ func TestWireTierFSMOnDeleteNotifiesEvenWhenDeleteSilentFails(t *testing.T) {
 	}
 }
 
-// TestWireTierFSMOnUploadFiresNotifyChunkChange pins that follower
+// TestWireInstanceFSMOnUploadFiresNotifyChunkChange pins that follower
 // nodes, on receiving a CmdUploadChunk via Raft (the leader's
 // AnnounceUpload propagated through), refresh their inspector view.
 // Pre-fix the cloud-backed transition was invisible until manual
 // reload. See gastrolog-2ob86.
-func TestWireTierFSMOnUploadFiresNotifyChunkChange(t *testing.T) {
+func TestWireInstanceFSMOnUploadFiresNotifyChunkChange(t *testing.T) {
 	t.Parallel()
 
 	orch, err := New(Config{LocalNodeID: "node-A"})

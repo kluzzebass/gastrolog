@@ -113,7 +113,7 @@ type orchRelOption func(*orchRelHarness)
 func withExtraVault(nodeIdxs []int) orchRelOption {
 	return func(h *orchRelHarness) {
 		label := string(rune('B' + len(h.vaults) - 1))
-		// 1:1 vault:tier — inst ID equals vault ID.
+		// Vault and instance share the same ID — inst ID equals vault ID.
 		id := glid.New()
 		h.vaults = append(h.vaults, vaultSpec{
 			label:    label,
@@ -141,7 +141,7 @@ func newOrchRelHarness(t *testing.T, n int, opts ...orchRelOption) *orchRelHarne
 	}
 
 	sharedCtx, sharedCancel := context.WithCancel(context.Background())
-	// 1:1 vault:tier — inst ID equals vault ID.
+	// Vault and instance share the same ID — inst ID equals vault ID.
 	defaultID := glid.New()
 	h := &orchRelHarness{
 		t:            t,
@@ -500,7 +500,7 @@ func (h *orchRelHarness) sealOnLeaderForVault(v vaultSpec) {
 	h.t.Helper()
 	leader := h.waitForVaultCtlLeaderForVault(v)
 	if _, err := leader.orch.SealActive(v.id); err != nil {
-		h.t.Fatalf("SealActiveTier vault %s: %v", v.label, err)
+		h.t.Fatalf("SealActiveChunk vault %s: %v", v.label, err)
 	}
 }
 
@@ -590,7 +590,7 @@ func (h *orchRelHarness) chunkIDsOnNode(id string) map[chunk.ChunkID]bool {
 // chunkIDsOnLeader returns the chunk IDs as observed by the current
 // vault-ctl Raft leader. Reading from the leader avoids a flaky pattern
 // where `chunkIDsOnNode(h.nodeIDs[0])` is called immediately after
-// `sealOnLeader()`: SealActiveTier only blocks on the leader's local FSM
+// `sealOnLeader()`: SealActiveChunk only blocks on the leader's local FSM
 // apply, so a non-leader at h.nodeIDs[0] can still be lagging and
 // return an empty/stale set as the test's "expected".
 func (h *orchRelHarness) chunkIDsOnLeader() map[chunk.ChunkID]bool {
@@ -687,7 +687,7 @@ func (h *orchRelHarness) sealOnLeader() {
 	h.t.Helper()
 	leader := h.waitForVaultCtlLeader()
 	if _, err := leader.orch.SealActive(h.vaultID); err != nil {
-		h.t.Fatalf("SealActiveTier: %v", err)
+		h.t.Fatalf("SealActiveChunk: %v", err)
 	}
 }
 

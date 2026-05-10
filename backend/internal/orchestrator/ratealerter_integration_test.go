@@ -35,7 +35,7 @@ func TestRotationHookFiresRateAlerter(t *testing.T) {
 		Source:    "rotation",
 		WarningAt: 0.5, // >= 5 rotations in 10s
 		Alerts:    fa,
-		TierName:  orch.tierLabel,
+		VaultName:  orch.vaultLabel,
 	})
 	// Re-wire the cron callback against the new alerter.
 	orch.cronRotation.onRotation = func(_, instID glid.GLID) {
@@ -96,7 +96,7 @@ func TestRetentionHookFiresRateAlerter(t *testing.T) {
 		Source:    "retention",
 		WarningAt: 0.5, // >= 5 deletes in 10s
 		Alerts:    fa,
-		TierName:  orch.tierLabel,
+		VaultName:  orch.vaultLabel,
 	})
 
 	instID := glid.New()
@@ -164,7 +164,7 @@ func TestInternalRotationFiresRateAlerter(t *testing.T) {
 		Source:    "rotation",
 		WarningAt: 0.2, // >= 2 rotations in 10s
 		Alerts:    fa,
-		TierName:  orch.tierLabel,
+		VaultName:  orch.vaultLabel,
 	})
 
 	// Feed 15 records. With a 3-record policy this triggers 5 rotations,
@@ -211,7 +211,7 @@ func TestRateAlertEvaluatorRunsPeriodically(t *testing.T) {
 		Source:    "rotation",
 		WarningAt: 0.2, // >= 2 rotations in 10s
 		Alerts:    fa,
-		TierName:  orch.tierLabel,
+		VaultName:  orch.vaultLabel,
 	})
 
 	if err := orch.Start(context.Background()); err != nil {

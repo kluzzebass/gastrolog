@@ -540,7 +540,7 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 		},
 	}
 
-	// 1:1 vault:tier — IDs match.
+	// Vault and instance share the same ID.
 	vaultID := glid.New()
 	instID := vaultID
 	storageID := glid.New()

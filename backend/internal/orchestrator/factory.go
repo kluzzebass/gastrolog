@@ -119,7 +119,7 @@ func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) erro
 		return err
 	}
 	// Retention and rotation are now applied per-vault inside initVault
-	// via applyTierPolicies. No separate pass needed.
+	// via applyVaultPolicies. No separate pass needed.
 	if err := o.applyIngesters(sys, factories); err != nil {
 		return err
 	}
@@ -206,7 +206,7 @@ func (o *Orchestrator) startRetentionSweep() error {
 	return nil
 }
 
-// startTierCatchupSweep registers the periodic per-node sweep that drives
+// startInstanceCatchupSweep registers the periodic per-node sweep that drives
 // local-state convergence on every inst instance. Every 20 seconds
 // (cron 13/33/53s, phase-offset from the retention sweep at second 0)
 // every node walks its OWN vault-ctl FSM and runs three independent
@@ -214,7 +214,7 @@ func (o *Orchestrator) startRetentionSweep() error {
 // per-pass invariants. Covers receipt-protocol delete convergence
 // (gastrolog-51gme) and create-side replication catchup
 // (gastrolog-2dgvj).
-func (o *Orchestrator) startTierCatchupSweep() error {
+func (o *Orchestrator) startInstanceCatchupSweep() error {
 	if err := o.scheduler.AddJob(instCatchupSweepJobName, instCatchupSweepSchedule, o.instCatchupSweepAll); err != nil {
 		return fmt.Errorf("inst catchup sweep job: %w", err)
 	}

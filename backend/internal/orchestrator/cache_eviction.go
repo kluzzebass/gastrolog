@@ -19,7 +19,7 @@ const (
 
 // cacheEvictionSweepAll fans out EvictCache across every chunk manager in
 // the orchestrator. No-op for managers that don't implement CacheEvictor
-// (memory-mode tiers) or that have no eviction policy configured (every
+// (memory-mode vaults) or that have no eviction policy configured (every
 // EvictCache call short-circuits when CacheBudgetBytes and CacheTTL are
 // both zero).
 func (o *Orchestrator) cacheEvictionSweepAll() {

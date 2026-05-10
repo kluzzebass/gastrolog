@@ -99,7 +99,7 @@ func testRecord(raw string) chunk.Record {
 // SEAL ACTIVE TIER TESTS
 // ================================================================
 
-func TestSealActiveTier(t *testing.T) {
+func TestSealActiveChunk(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
@@ -119,7 +119,7 @@ func TestSealActiveTier(t *testing.T) {
 	}
 	chunkID := active.ID
 
-	if err := orch.SealActiveTier(vaultID, chunkID); err != nil {
+	if err := orch.SealActiveChunk(vaultID, chunkID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -129,7 +129,7 @@ func TestSealActiveTier(t *testing.T) {
 	}
 }
 
-func TestSealActiveTierMismatchSkipsSeal(t *testing.T) {
+func TestSealActiveChunkMismatchSkipsSeal(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 	orch.logger = slog.Default()
@@ -147,7 +147,7 @@ func TestSealActiveTierMismatchSkipsSeal(t *testing.T) {
 	// Seal with a wrong chunk ID — should be a no-op (the expected chunk
 	// was already rotated by the follower's own rotation policy).
 	wrongID := chunkIDAt(time.Now().Add(-1 * time.Hour))
-	if err := orch.SealActiveTier(vaultID, wrongID); err != nil {
+	if err := orch.SealActiveChunk(vaultID, wrongID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -163,7 +163,7 @@ func TestSealActiveTierMismatchSkipsSeal(t *testing.T) {
 	}
 }
 
-func TestSealActiveTierNoActiveChunk(t *testing.T) {
+func TestSealActiveChunkNoActiveChunk(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
@@ -173,7 +173,7 @@ func TestSealActiveTierNoActiveChunk(t *testing.T) {
 	orch.RegisterVault(vault)
 
 	// No records appended — no active chunk.
-	err := orch.SealActiveTier(vaultID, chunk.ChunkID{})
+	err := orch.SealActiveChunk(vaultID, chunk.ChunkID{})
 	if err != nil {
 		t.Errorf("expected nil error for no active chunk, got %v", err)
 	}
@@ -273,7 +273,7 @@ func TestCatchupSkipsFSMRetiredChunks(t *testing.T) {
 			t.Fatalf("chunk %d: no active chunk after append", i)
 		}
 		id := active.ID
-		if err := orch.SealActiveTier(vaultID, id); err != nil {
+		if err := orch.SealActiveChunk(vaultID, id); err != nil {
 			t.Fatalf("seal chunk %d: %v", i, err)
 		}
 		ids = append(ids, id)
@@ -354,7 +354,7 @@ func TestCatchupNilManifestUsesAllChunks(t *testing.T) {
 			t.Fatalf("append %d: %v", i, err)
 		}
 		active := inst.Chunks.Active()
-		if err := orch.SealActiveTier(vaultID, active.ID); err != nil {
+		if err := orch.SealActiveChunk(vaultID, active.ID); err != nil {
 			t.Fatalf("seal: %v", err)
 		}
 	}
@@ -618,7 +618,7 @@ func TestClusterReplicationSealSync(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Forward seal to followers via the inst replicator (uses SealActiveTier
+	// Forward seal to followers via the inst replicator (uses SealActiveChunk
 	// which checks the expected chunk ID matches the follower's active chunk).
 	for _, fid := range []string{"f1", "f2"} {
 		if err := leaderNode.orch.chunkReplicator.SealVault(

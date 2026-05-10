@@ -103,7 +103,7 @@ func TestSealActive(t *testing.T) {
 	appendRecords(t, orch, id, 3)
 
 	if _, err := orch.SealActive(id); err != nil {
-		t.Fatalf("SealActiveTier: %v", err)
+		t.Fatalf("SealActiveChunk: %v", err)
 	}
 
 	metas, err := orch.ListChunkMetas(id)
@@ -127,7 +127,7 @@ func TestSealActive_Empty(t *testing.T) {
 	orch, id := newFacadeSetup(t)
 	// No records appended — seal should be a no-op.
 	if _, err := orch.SealActive(id); err != nil {
-		t.Fatalf("SealActiveTier on empty vault: %v", err)
+		t.Fatalf("SealActiveChunk on empty vault: %v", err)
 	}
 }
 

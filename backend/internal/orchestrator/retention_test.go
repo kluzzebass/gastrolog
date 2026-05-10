@@ -445,7 +445,7 @@ func strPtr(s string) *string { return &s }
 // ==========================================================================
 // Multi-node retention sweep tests
 //
-// Uses setupCluster (from transition_test.go) with file-backed tiers and
+// Uses setupCluster (from transition_test.go) with file-backed vaults and
 // directTransferrer to verify that retention sweep expiry correctly
 // propagates chunk deletions to all follower nodes.
 // ==========================================================================
@@ -614,7 +614,7 @@ func TestClusterRetentionSweepWithTTLOnAllNodes(t *testing.T) {
 func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 	t.Parallel()
 
-	// 1:1 vault:tier — IDs match.
+	// Vault and instance share the same ID.
 	vaultID := glid.New()
 	instID := vaultID
 	policyID := glid.New()

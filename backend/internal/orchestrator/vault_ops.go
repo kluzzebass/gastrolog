@@ -30,8 +30,8 @@ type ChunkIndexReport struct {
 }
 
 // activeManagers returns chunk and index managers for the vault's active
-// (ingest) inst — Tiers[0]. Returns ErrVaultNotFound if the vault doesn't exist
-// or has no tiers.
+// instance. Returns ErrVaultNotFound if the vault doesn't exist or is
+// not registered locally.
 func (o *Orchestrator) activeManagers(vaultID glid.GLID) (chunk.ChunkManager, index.IndexManager, error) {
 	o.mu.RLock()
 	s := o.vaults[vaultID]
@@ -192,7 +192,7 @@ func (o *Orchestrator) ListChunkMetas(vaultID glid.GLID) ([]chunk.ChunkMeta, err
 // ListAllChunkMetas returns chunk metadata from all local inst instances.
 // When a vault has multiple inst instances for the same inst on the same
 // node (leader + same-node follower storages), the leader's view is preferred
-// to avoid double-counting chunks. Follower-only tiers are still included
+// to avoid double-counting chunks. Follower-only instances are still included
 // (the leader node is elsewhere; this node contributes replica presence).
 //
 // If this node hosts no inst instances for the vault (all placements are on
@@ -319,8 +319,9 @@ func (o *Orchestrator) VaultType(vaultID glid.GLID) string {
 	return ""
 }
 
-// MissingVaultInstance returns true if the vault's local vault list differs from the
-// given vault IDs — either tiers were added or removed.
+// MissingVaultInstance returns true if the vault's local instance list
+// differs from the given instance IDs — either instances were added or
+// removed.
 func (o *Orchestrator) MissingVaultInstance(vaultID glid.GLID, instIDs []glid.GLID) bool {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
@@ -659,7 +660,7 @@ func (o *Orchestrator) findInstanceForDelete(vaultID glid.GLID) (*VaultInstance,
 // deleteChunkFromInstance seals the active chunk if it matches, then
 // deletes the chunk via the lifecycle reconciler's receipt protocol when one
 // is wired (production) or via direct local cleanup otherwise (test harnesses
-// that build TierInstances without going through ApplyConfig).
+// that build VaultInstances without going through ApplyConfig).
 //
 // reason="manual-delete-rpc" lands in the FSM's pendingDeletes audit trail so
 // operators can distinguish operator-initiated deletes from retention/transit
@@ -1115,26 +1116,26 @@ func drainIterator(next chunk.RecordIterator) {
 	}
 }
 
-// SealActiveTier seals the active chunk on matching vaults, on the
-// **leader** side of the seal flow. If instID is glid.Nil, all local instances
-// in the vault are sealed. Returns the number of vaults sealed. No-op if the
-// active chunk is empty or absent.
+// SealActive seals the active chunk on the matching local vault, on the
+// **leader** side of the seal flow. Returns the number of vaults sealed.
+// No-op if the active chunk is empty or absent.
 //
 // Role: vault leader. Sealing on the leader triggers follower seals via the
-// ChunkReplicator's SealVault call, which arrives on followers as an invocation
-// of SealActiveTier. Callers that are already on the follower side (seal
-// commands dispatched from the leader's Raft) must use SealActiveTier
-// directly.
+// ChunkReplicator's SealVault call, which arrives on followers as an
+// invocation of SealActiveChunk. Callers that are already on the follower
+// side (seal commands dispatched from the leader's Raft) must use
+// SealActiveChunk directly.
 //
 // Readiness: no Vault.ReadinessErr gate — seal operates on the in-memory
 // active chunk, not the FSM. Seal is also a step on the drain path (which
 // runs even with lagging followers), so gating here would create a
 // chicken-and-egg deadlock with readiness recovery.
 //
-// Do not merge with SealActiveTier: the two paths run on different nodes
-// with different invariants. SealActiveTier (leader) fans out replication;
-// SealActive is the target of that fan-out on followers. After sealing,
-// schedules compression and index builds (same as ingest-triggered seal).
+// Do not merge with SealActiveChunk: the two paths run on different nodes
+// with different invariants. SealActive (leader) fans out replication;
+// SealActiveChunk is the target of that fan-out on followers. After
+// sealing, schedules compression and index builds (same as ingest-triggered
+// seal).
 func (o *Orchestrator) SealActive(vaultID glid.GLID) (int, error) {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]

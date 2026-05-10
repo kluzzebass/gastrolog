@@ -642,7 +642,7 @@ func TestImportToInstanceSecondaryKeepsSealedForwarded(t *testing.T) {
 	chunkID := chunk.NewChunkID()
 
 	// Simulate: forwarded version is already sealed (e.g., follower
-	// received SealActiveTier before the canonical import arrives).
+	// received SealActiveChunk before the canonical import arrives).
 	inst.Chunks.SetNextChunkID(chunkID)
 	for range 3 {
 		if _, _, err := inst.Chunks.Append(testRecord("forwarded")); err != nil {

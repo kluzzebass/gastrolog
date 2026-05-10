@@ -292,7 +292,7 @@ func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, va
 	cursorClosed = true
 
 	// Delete source chunk via the receipt protocol when wired (production)
-	// or via direct local cleanup otherwise (memory-mode tiers without a
+	// or via direct local cleanup otherwise (memory-mode vaults without a
 	// reconciler). Reason "inst-drain" lands in pendingDeletes audit. See
 	// gastrolog-51gme.
 	if err := o.deleteDrainSource(inst, vaultID, chunkID); err != nil {
@@ -306,7 +306,7 @@ func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, va
 
 // deleteDrainSource removes a successfully-drained source chunk. Routes
 // through the receipt protocol when a reconciler is wired; falls back to
-// the direct local delete for memory-mode tiers. Extracted from
+// the direct local delete for memory-mode vaults. Extracted from
 // drainOneChunk to keep nestif within lint thresholds.
 func (o *Orchestrator) deleteDrainSource(inst *VaultInstance, vaultID glid.GLID, chunkID chunk.ChunkID) error {
 	if inst.Reconciler != nil {
@@ -352,7 +352,7 @@ func (o *Orchestrator) finishInstDrain(vaultID glid.GLID) {
 
 	// Drain completion no longer fires a config-mutation callback —
 	// placement updates are the source of truth for instance lifecycle
-	// under 1:1 vault:tier collapse (see app.go drop of OnTierDrainComplete).
+	// with the per-vault collapse (OnTierDrainComplete dropped).
 }
 
 // cancelInstDrainState removes drain state without triggering vault config

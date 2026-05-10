@@ -43,7 +43,7 @@ func (l *transitionSystemLoader) Load(ctx context.Context) (*system.System, erro
 	if err != nil || sys == nil {
 		return sys, err
 	}
-	// Auto-populate placements for test tiers that don't have them.
+	// Auto-populate placements for test vaults that don't have them.
 	nodeID := l.nodeID
 	if nodeID == "" {
 		nodeID = "test-node"
@@ -193,27 +193,6 @@ func (m *transitionFakeTransferrer) WaitVaultReady(_ context.Context, _ string, 
 
 
 
-// TestTransitionCloudTierTTLSweep verifies that the retention sweep with a TTL
-// policy correctly transitions cloud-backed sealed chunks to the next inst.
-// Reproduces gastrolog-9umo2: 3m TTL on cloud inst, chunks sit for 10+ minutes.
-
-// TestCloudTierLeaderPreservesCloudBacking verifies that a cloud vault leader
-// built through the production code path (buildLeaderInstance →
-// buildInstanceForStorage) retains the sealed_backing parameter so that
-// PostSealProcess uploads chunks to cloud storage.
-//
-// Regression test: buildInstanceForStorage previously stripped sealed_backing
-// unconditionally (with the comment "always follower"), even when called for the
-// leader. This caused cloud inst leaders to have CloudStore=nil, silently
-// preventing all cloud uploads and breaking the entire archival lifecycle.
-
-// TestTransitionCloudTierFollowerDoesNotOverwriteBlob verifies that the
-// follower's PostSealProcess does NOT upload to cloud storage, preventing
-// it from overwriting the leader's blob with a different-sized version.
-// This was the root cause of gastrolog-9umo2: the follower's upload changed
-// the blob size, corrupting the leader's stored diskBytes and breaking all
-// future cloud cursor reads (S3 416 Range Not Satisfiable).
-
 func testIterFromRecords(recs []chunk.Record) chunk.RecordIterator {
 	i := 0
 	return func() (chunk.Record, error) {
@@ -268,15 +247,6 @@ func newCloudFileInstance(t *testing.T, instID glid.GLID, vaultID glid.GLID, sto
 		Query:   query.New(cm, im, nil),
 	}, dir
 }
-
-// TestTransitionCloudTierToNextTier verifies that sealed cloud-backed chunks
-// are read back from object storage and streamed to the next inst. This is
-// the exact scenario from gastrolog-9umo2: FILE → FILE → CLOUD → FILE chain
-// where the cloud inst's sealed chunks never transition to inst 4.
-
-// TestTransitionCloudTierSweepDispatch verifies that the retention sweep
-// correctly picks up cloud-backed sealed chunks and transitions them.
-// This tests the full sweep() path rather than calling transitionChunk directly.
 
 // ---------- helpers for new tests ----------
 
@@ -413,30 +383,6 @@ func makeRecordWithEventID(raw string, ingesterID glid.GLID, seq uint32) chunk.R
 // file→file→cloud chain preserves all records without N× duplication.
 // This is the exact scenario from the gastrolog-1rv42 session bugs.
 
-// ---------- EventID preservation tests ----------
-
-// TestTransitionEventIDPreserved verifies that EventIDs survive local inst transitions.
-
-// TestTransitionEventIDPreservedThroughCloudTier verifies EventIDs survive
-// transitions through a cloud-backed inst (the full round-trip: ingest → seal
-// → cloud upload → cloud cursor read → transition to next inst).
-
-// ---------- Record count accuracy tests ----------
-
-// TestTransitionRecordCountAccuracy verifies that chunk metadata RecordCount
-// matches the actual number of records readable via cursor at each inst stage.
-
-// ---------- Cloud search after transition ----------
-
-// TestTransitionCloudSearchAfterTransition verifies that records in a cloud
-// inst are searchable via the query engine after transition and upload.
-
-// ---------- Cloud upload idempotency ----------
-
-// TestTransitionCloudUploadOnlyOneBlob verifies that uploading a sealed chunk
-// to cloud produces exactly one blob in the blobstore, and that the blob
-// contains all records. This guards against duplicate uploads from racing nodes.
-
 // ==========================================================================
 // Multi-node cluster transition tests
 //
@@ -513,7 +459,7 @@ func (d *directChunkReplicator) SealVault(_ context.Context, nodeID string, vaul
 	if !ok {
 		return fmt.Errorf("directChunkReplicator: unknown node %q", nodeID)
 	}
-	return orch.SealActiveTier(vaultID, chunkID)
+	return orch.SealActiveChunk(vaultID, chunkID)
 }
 
 func (d *directChunkReplicator) ImportSealedChunk(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
@@ -604,7 +550,7 @@ func cursorCountRecords(t *testing.T, cm chunk.ChunkManager) int64 {
 	return int64(len(readAllRecords(t, cm)))
 }
 
-// countRecordsOnNode counts all cursor-verified records across all tiers on a node.
+// countRecordsOnNode counts all cursor-verified records across all vaults on a node.
 func (h *clusterHarness) countRecordsOnNode(t *testing.T, nodeID string) int64 {
 	t.Helper()
 	node := h.nodes[nodeID]
@@ -644,11 +590,11 @@ func (h *clusterHarness) countChunksOnInstance(t *testing.T, instIdx int) map[st
 // file-backed chunk managers with real filesystem directories.
 //
 // Layout:
-//   - nodeIDs[0] is the leader for all tiers
-//   - nodeIDs[1:] are followers for all tiers
+//   - nodeIDs[0] is the leader for all vaults
+//   - nodeIDs[1:] are followers for all vaults
 //   - Each inst gets its own TempDir per node (real filesystem I/O)
 //   - rotationRecords controls the rotation policy (e.g., 100 = seal every 100 records)
-//   - The leader's tiers have FollowerTargets pointing to all followers
+//   - The leader's vaults have FollowerTargets pointing to all followers
 //   - Every node has a directTransferrer wired to all other nodes
 //
 // newClusterLifecycleLogger returns a slog.Logger that writes ALL levels
@@ -679,7 +625,7 @@ func setupCluster(t *testing.T, nodeIDs []string, instCount int, rotationRecords
 	}
 	leaderID := nodeIDs[0]
 	vaultID := glid.New()
-	// 1:1 vault:tier — single inst shares the vault's ID. instCount is
+	// Single inst per vault sharing the vault's ID. instCount is
 	// always 1 in current callers; the slice survives only for legacy
 	// fixture wiring.
 	instIDs := make([]glid.GLID, instCount)
@@ -713,7 +659,7 @@ func setupCluster(t *testing.T, nodeIDs []string, instCount int, rotationRecords
 		followerTargets = append(followerTargets, system.ReplicationTarget{NodeID: fid})
 	}
 
-	// Create all orchestrators with file-backed tiers.
+	// Create all orchestrators with file-backed vaults.
 	orchs := make(map[string]*Orchestrator)
 	nodes := make(map[string]*clusterTestNode)
 
@@ -830,9 +776,9 @@ func (h *clusterHarness) sealAndReplicate(t *testing.T, leaderNode *clusterTestN
 		if nid == leaderNode.nodeID {
 			continue
 		}
-		ftier := h.nodes[nid].instances[instIdx]
-		if active := ftier.Chunks.Active(); active != nil && active.ID == chunkID {
-			if err := ftier.Chunks.Seal(); err != nil {
+		finst := h.nodes[nid].instances[instIdx]
+		if active := finst.Chunks.Active(); active != nil && active.ID == chunkID {
+			if err := finst.Chunks.Seal(); err != nil {
 				t.Fatalf("seal follower %s inst %d: %v", nid, instIdx, err)
 			}
 		}
@@ -876,35 +822,6 @@ func (h *clusterHarness) assertInstDirEmpty(t *testing.T, instIdx int) {
 	}
 }
 
-// assertTierEmptyAllNodes polls until all nodes report zero records on the
-// given inst, or fails after 10s. Follower chunk deletion is async.
-func (h *clusterHarness) assertTierEmptyAllNodes(t *testing.T, instIdx int) {
-	t.Helper()
-	deadline := time.Now().Add(60 * time.Second)
-	for {
-		allEmpty := true
-		for _, nid := range h.allNodeIDs() {
-			if cursorCountRecords(t, h.nodes[nid].instances[instIdx].Chunks) > 0 {
-				allEmpty = false
-				break
-			}
-		}
-		if allEmpty {
-			return
-		}
-		if time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	for _, nid := range h.allNodeIDs() {
-		count := cursorCountRecords(t, h.nodes[nid].instances[instIdx].Chunks)
-		if count != 0 {
-			t.Errorf("inst %d on %s: cursor read %d records after full chain (should be 0)", instIdx, nid, count)
-		}
-	}
-}
-
 func (h *clusterHarness) chunkDirsOnNode(nid string, instIdx int) []string {
 	dir := h.nodes[nid].instanceDirs[instIdx]
 	entries, err := os.ReadDir(dir)
@@ -936,33 +853,6 @@ func (h *clusterHarness) listChunkDirsOnNode(t *testing.T, nodeID string, instId
 	}
 	return dirs
 }
-
-// TestClusterTransitionBurstNoOrphans creates a 4-node cluster with 2 tiers,
-// bursts 10K records with a 100-record rotation policy (100 sealed chunks),
-// transitions all chunks from inst 0 → inst 1, and verifies:
-//   - All records arrive in inst 1 on the LEADER
-//   - Source inst 0 is empty on ALL nodes
-//   - No records are lost or duplicated
-//   - Record count matches on the leader
-
-// TestClusterTransitionThreeTierChainBurst creates a 4-node cluster with
-// 3 tiers and bursts 10K records through the full transition chain with 100-record
-// rotation. Verifies no orphans on any node and exact record preservation.
-
-// TestClusterTransitionEventIDPreservedAcrossNodes verifies that EventIDs
-// survive transitions in a multi-node cluster with replication.
-
-// TestClusterTransitionLargeBurst ingests a large burst (10K records) through
-// the serialized AppendToVault path and verifies no data loss after transition.
-// The burst creates ~100 sealed chunks via the 100-record rotation policy.
-//
-// NOTE: concurrent Append through the file chunk manager's attr.log writer
-// is not safe (see gastrolog-3l7ow findings). Production serializes through
-// the digest loop. This test uses sequential ingestion to match that model.
-
-// TestClusterTransitionNoChunksLeftBehindOnFollowers verifies that after
-// transition, the source inst's sealed chunks are cleaned up on follower nodes
-// (via deleteFromFollowers), not just on the leader.
 
 // ==========================================================================
 // Multi-node drain tests

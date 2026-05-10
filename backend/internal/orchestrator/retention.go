@@ -21,7 +21,7 @@ const (
 	defaultRetentionSchedule = "* * * * *" // every minute
 	retentionJobName         = "retention"
 
-	// Tier catchup sweep — runs every 20 seconds (cron: 13/33/53s of
+	// Vault catchup sweep — runs every 20 seconds (cron: 13/33/53s of
 	// each minute) on every node, with a phase offset that doesn't
 	// collide with the retention sweep at second 0. Each node consults
 	// its OWN replicated FSM and reconciles local disk state in both
@@ -73,7 +73,6 @@ type retentionRunner struct {
 	// sub-jobs (transitions) apart by their vault/inst. Refreshed from
 	// config on every sweep via retentionTargetForInstance.
 	vaultName    string
-	instPosition int
 	vaultType     string
 	cm           chunk.ChunkManager
 	im           index.IndexManager
@@ -86,7 +85,7 @@ type retentionRunner struct {
 	// reconciler is the inst lifecycle reconciler that owns chunk-lifecycle
 	// execution. All production deletes route through reconciler.deleteChunk
 	// → CmdRequestDelete (gastrolog-51gme steps 4-7). Nil only in older test
-	// harnesses that build TierInstances directly without going through
+	// harnesses that build VaultInstances directly without going through
 	// buildInstance; those harnesses fall through to the legacy
 	// direct-delete path below (for cross-node propagation they wire
 	// directChunkReplicator.DeleteChunk RPC fan-out separately).
@@ -239,14 +238,14 @@ func (o *Orchestrator) retentionSweepAll() {
 // is just the transport for the response.
 func (o *Orchestrator) instCatchupSweepAll() {
 	o.mu.RLock()
-	tiers := make([]*VaultInstance, 0)
+	insts := make([]*VaultInstance, 0)
 	for _, vault := range o.vaults {
 		if t := vault.Instance; t != nil && t.Reconciler != nil {
-			tiers = append(tiers, t)
+			insts = append(insts, t)
 		}
 	}
 	o.mu.RUnlock()
-	for _, t := range tiers {
+	for _, t := range insts {
 		t.Reconciler.SweepPendingObligations()
 		t.Reconciler.SweepLocalOrphans()
 		t.Reconciler.SweepMissingReplicas()
@@ -497,18 +496,8 @@ func (o *Orchestrator) retentionTargetForInstance(cfg *system.Config, vaultCfg s
 	runner.followerTargets = inst.FollowerTargets
 	runner.vaultName = vaultCfg.Name
 	runner.vaultType = string(vaultCfg.Type)
-	runner.instPosition = tierPositionInVault(cfg, vaultCfg.ID, inst.VaultID)
 	runner.disposition = vaultCfg.ResolveRetentionDisposition()
 	return &sweepTarget{runner: runner, rules: rules}
-}
-
-// tierPositionInVault returns the 0-based index of instID in the vault's
-// ordered vault list. With 1:1 vault:tier the index is always 0.
-func tierPositionInVault(cfg *system.Config, vaultID, instID glid.GLID) int {
-	if vaultID == instID {
-		return 0
-	}
-	return -1
 }
 
 // (Disk-vs-manifest orphan cleanup lives on VaultLifecycleReconciler now —
@@ -519,7 +508,7 @@ func tierPositionInVault(cfg *system.Config, vaultID, instID glid.GLID) int {
 // sweep evaluates retention rules on a leader and applies expire/eject/transition.
 func (r *retentionRunner) sweep(rules []retentionRule) {
 	// Only the config placement leader runs retention. Raft applies are
-	// forwarded transparently to the Raft leader via TierApplyForwarder.
+	// forwarded transparently to the Raft leader via VaultCtlChunkApplyForwarder.
 	// Config followers must not independently evaluate and transition chunks —
 	// that causes N× duplication.
 	if !r.isLeader {
@@ -544,7 +533,7 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 
 	r.mu.Lock()
 	unreadable := r.unreadable
-	inst := r.findTierInstance()
+	inst := r.findVaultInstance()
 	r.mu.Unlock()
 
 	// Phase 3 (gastrolog-1huz5): overlay each meta with FSM state so
@@ -739,7 +728,7 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) {
 	if r.orch == nil {
 		return
 	}
-	inst := r.findTierInstance()
+	inst := r.findVaultInstance()
 	if inst == nil || inst.Chunks == nil {
 		return
 	}
@@ -788,8 +777,8 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) {
 		"vault", r.vaultID, "chunk", id, "count", fanned)
 }
 
-// findTierInstance looks up this runner's inst in the orchestrator's vault registry.
-func (r *retentionRunner) findTierInstance() *VaultInstance {
+// findVaultInstance looks up this runner's inst in the orchestrator's vault registry.
+func (r *retentionRunner) findVaultInstance() *VaultInstance {
 	if r.orch == nil {
 		return nil
 	}

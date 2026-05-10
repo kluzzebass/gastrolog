@@ -93,7 +93,7 @@ type VaultInstance struct {
 	// ManifestEntries returns every chunk's full manifest entry for this
 	// inst (sealed and active alike — callers filter on Sealed when they
 	// want only sealed chunks, e.g. the manifest.Reader implementation
-	// honoring the active-chunk exception). Nil for memory-mode tiers
+	// honoring the active-chunk exception). Nil for memory-mode vaults
 	// (no FSM); the orchestrator falls back to the chunk manager in
 	// that case.
 	ManifestEntries func() []vaultctlfsm.ManifestEntry

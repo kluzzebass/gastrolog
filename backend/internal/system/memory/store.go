@@ -56,7 +56,7 @@ type Store struct {
 	nodes                map[glid.GLID]system.NodeConfig   // keyed by node ID
 	managedFiles         map[glid.GLID]system.ManagedFileConfig
 	cloudServices        map[glid.GLID]system.CloudService
-	tierPlacements       map[glid.GLID][]system.VaultPlacement // runtime: system-managed
+	vaultPlacements       map[glid.GLID][]system.VaultPlacement // runtime: system-managed
 	ingesterAlive        map[glid.GLID]map[string]bool        // runtime: system-managed
 	ingesterCheckpoints  map[glid.GLID][]byte                 // runtime: system-managed
 	ingesterAssignment   map[glid.GLID]string                 // runtime: system-managed
@@ -81,7 +81,7 @@ func NewStore() *Store {
 		nodes:               make(map[glid.GLID]system.NodeConfig),
 		managedFiles:        make(map[glid.GLID]system.ManagedFileConfig),
 		cloudServices:       make(map[glid.GLID]system.CloudService),
-		tierPlacements:      make(map[glid.GLID][]system.VaultPlacement),
+		vaultPlacements:      make(map[glid.GLID][]system.VaultPlacement),
 		ingesterAlive:       make(map[glid.GLID]map[string]bool),
 		ingesterCheckpoints: make(map[glid.GLID][]byte),
 		ingesterAssignment:  make(map[glid.GLID]string),
@@ -144,9 +144,9 @@ func (s *Store) Load(ctx context.Context) (*system.System, error) {
 	rt.SetupWizardDismissed = s.setupWizardDismissed
 
 	// Runtime: vault placements (mirrored onto VaultConfig.Placements).
-	if len(s.tierPlacements) > 0 {
-		rt.VaultPlacements = make(map[glid.GLID][]system.VaultPlacement, len(s.tierPlacements))
-		for id, p := range s.tierPlacements {
+	if len(s.vaultPlacements) > 0 {
+		rt.VaultPlacements = make(map[glid.GLID][]system.VaultPlacement, len(s.vaultPlacements))
+		for id, p := range s.vaultPlacements {
 			cp := make([]system.VaultPlacement, len(p))
 			copy(cp, p)
 			rt.VaultPlacements[id] = cp
@@ -1003,7 +1003,7 @@ func copyParams(params map[string]string) map[string]string {
 func (s *Store) GetVaultPlacements(_ context.Context, instID glid.GLID) ([]system.VaultPlacement, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	p := s.tierPlacements[instID]
+	p := s.vaultPlacements[instID]
 	cp := make([]system.VaultPlacement, len(p))
 	copy(cp, p)
 	return cp, nil
@@ -1014,7 +1014,7 @@ func (s *Store) SetVaultPlacements(_ context.Context, instID glid.GLID, placemen
 	defer s.mu.Unlock()
 	cp := make([]system.VaultPlacement, len(placements))
 	copy(cp, placements)
-	s.tierPlacements[instID] = cp
+	s.vaultPlacements[instID] = cp
 	// Mirror the placement set onto VaultConfig.Placements so the
 	// orchestrator's reads see them.
 	if v, ok := s.vaults[instID]; ok {

@@ -21,7 +21,7 @@ const NodeIDMetadataKey = "x-gastrolog-node-id"
 
 // PeerByteMetrics tracks cumulative gRPC wire bytes sent to and received
 // from each cluster peer. Aggregates traffic across ALL inter-node RPCs —
-// Raft, broadcast, tier replication, query forwarding, chunk streaming,
+// Raft, broadcast, vault replication, query forwarding, chunk streaming,
 // and anything else that goes through the cluster transport.
 //
 // Counters are monotonic and reset only on process restart. Rate derivation

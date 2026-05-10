@@ -52,7 +52,7 @@ type rateAlerterConfig struct {
 	WarningAt float64
 	ErrorAt   float64 // 0 = no error escalation
 	Alerts    AlertCollector
-	TierName  func(glid.GLID) string
+	VaultName  func(glid.GLID) string
 }
 
 // newRateAlerter constructs a RateAlerter. vaultName may be nil; if provided,
@@ -69,7 +69,7 @@ func newRateAlerter(cfg rateAlerterConfig) *RateAlerter {
 		warningAt: cfg.WarningAt,
 		errorAt:   cfg.ErrorAt,
 		alerts:    cfg.Alerts,
-		vaultName:  cfg.TierName,
+		vaultName:  cfg.VaultName,
 	}
 }
 

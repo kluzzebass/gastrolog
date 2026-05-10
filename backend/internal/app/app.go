@@ -162,7 +162,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		Home: hd, NodeID: nodeID, JoinAddr: cfg.JoinAddr,
 		ClusterSrv: clusterSrv, ClusterTLS: clusterTLS,
 		Logger: logger, FSMOpts: []raftfsm.Option{raftfsm.WithOnApply(disp.Handle)},
-		TierRaftSharesWAL: clusterSrv != nil,
+		VaultCtlRaftSharesWAL: clusterSrv != nil,
 	})
 	if err != nil {
 		return fmt.Errorf("open config store: %w", err)
@@ -253,7 +253,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		return err
 	}
 
-	groupMgr, tierWAL, nodeAddrResolver := setupMultiRaft(clusterSrv, rawStore, nodeID, homeDir, logger)
+	groupMgr, vaultWAL, nodeAddrResolver := setupMultiRaft(clusterSrv, rawStore, nodeID, homeDir, logger)
 
 	factories := buildFactories(logger, homeDir, vaultsDir, cfgStore, orch, certMgr, cfg.SlogCapture, cfg.SlogCaptureHandler, alertCollector, groupMgr, nodeAddrResolver, nodeID)
 	if clusterSrv != nil {
@@ -408,7 +408,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		SetNodeSuffrageFunc: setNodeSuffrageFn,
 		Dispatcher:          disp,
 		GroupMgr:            groupMgr,
-		WAL:                 tierWAL,
+		WAL:                 vaultWAL,
 		ConfigStore:         proxy,
 		PlacementReconcile:  placementReconcileFn,
 
@@ -507,7 +507,7 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	clusterSrv.SetAnalyzeChunkExecutor(newAnalyzeChunkExecutor(orch))
 	clusterSrv.SetSealVaultExecutor(newSealVaultExecutor(orch))
 	clusterSrv.SetChunkSealExecutor(func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID) error {
-		return orch.SealActiveTier(vaultID, chunkID)
+		return orch.SealActiveChunk(vaultID, chunkID)
 	})
 	clusterSrv.SetDeleteChunkExecutor(func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID) error {
 		return orch.DeleteChunk(vaultID, chunkID)

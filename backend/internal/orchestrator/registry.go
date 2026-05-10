@@ -379,10 +379,10 @@ func (r *leaderVaultRegistry) Reader() manifest.Reader { return r.o.ManifestRead
 
 func (r *leaderVaultRegistry) IndexReader() manifest.IndexReader { return r.o.IndexReader() }
 
-// LeaderTierQueryEngineForVault returns a query engine scoped to the
+// LeaderQueryEngineForVault returns a query engine scoped to the
 // leader instance of a single vault. Used by ForwardSearch — the vault
 // is already selected, no vault_id= filtering needed.
-func (o *Orchestrator) LeaderTierQueryEngineForVault(vaultID glid.GLID) (*query.Engine, error) {
+func (o *Orchestrator) LeaderQueryEngineForVault(vaultID glid.GLID) (*query.Engine, error) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	v := o.vaults[vaultID]

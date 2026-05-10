@@ -809,7 +809,7 @@ func (s *QueryServer) selectedOrAllVaults(ctx context.Context, q query.Query) []
 // aggregateVaultBounds returns (min IngestStart, max IngestEnd) across every
 // chunk visible for the given vaults. Walks both the cluster-replicated
 // vault-ctl FSM (sealed manifest, visible on every voter) and the local
-// chunk manager (active + memory-mode tiers). Either source contributing
+// chunk manager (active + memory-mode vaults). Either source contributing
 // nothing is fine — the function only collapses to (zero, zero) when neither
 // has anything to say.
 func (s *QueryServer) aggregateVaultBounds(vaults []glid.GLID) (time.Time, time.Time) {

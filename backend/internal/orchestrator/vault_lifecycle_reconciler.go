@@ -129,7 +129,7 @@ type VaultLifecycleReconciler struct {
 func NewVaultLifecycleReconciler(orch *Orchestrator, vaultID glid.GLID, inst *VaultInstance, localNodeID string, logger *slog.Logger) *VaultLifecycleReconciler {
 	return &VaultLifecycleReconciler{
 		vaultID:     vaultID,
-		instID:      vaultID, // 1:1 vault:tier — kept for legacy field readers
+		instID:      vaultID, // Vault and instance share the same ID — kept for legacy field readers
 		inst:        inst,
 		localNodeID: localNodeID,
 		orch:        orch,

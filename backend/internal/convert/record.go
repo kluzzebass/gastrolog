@@ -18,7 +18,7 @@ import (
 // RecordToExport converts a chunk.Record to a proto ExportRecord with all
 // fields populated. This is the single canonical Record → ExportRecord
 // converter. All code paths that serialize a chunk.Record for wire
-// transmission (tier transfers, ingestion forwarding, vault export,
+// transmission (vault transfers, ingestion forwarding, vault export,
 // cross-node search) MUST use this function.
 //
 // Zero-valued fields serialize naturally: a zero UUID becomes
@@ -59,7 +59,7 @@ func RecordToExport(rec chunk.Record) *gastrologv1.ExportRecord {
 // ExportToRecord converts a proto ExportRecord to a chunk.Record with all
 // fields populated. This is the single canonical ExportRecord → Record
 // converter. All code paths that deserialize a wire ExportRecord (import
-// handlers, search result collection, tier replication) MUST use this
+// handlers, search result collection, vault replication) MUST use this
 // function.
 func ExportToRecord(er *gastrologv1.ExportRecord) chunk.Record {
 	rec := chunk.Record{Raw: er.GetRaw()}
