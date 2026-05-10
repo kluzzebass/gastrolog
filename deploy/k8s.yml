@@ -104,6 +104,14 @@ metadata:
 spec:
   serviceName: gastrolog-headless
   replicas: 3
+  # Parallel pod management — new pods are created regardless of whether
+  # older pods are Ready. Default OrderedReady deadlocks scale-up if any
+  # existing pod is unhealthy: K8s sits waiting for pod-N to report Ready
+  # before creating pod-N+1. Per-vault Raft groups are symmetric, no
+  # cross-pod startup ordering is needed beyond the bootstrap-token
+  # handshake (HTTP-gated on pod-0's /readyz, which the joiner polls
+  # itself).
+  podManagementPolicy: Parallel
   selector:
     matchLabels:
       app: gastrolog
