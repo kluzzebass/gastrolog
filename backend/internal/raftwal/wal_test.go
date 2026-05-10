@@ -1155,9 +1155,9 @@ func TestGroupNameSpecialChars(t *testing.T) {
 	defer w.Close()
 
 	names := []string{
-		"tier/with/slashes",
-		"tier with spaces",
-		"tier-with-dashes-and-019d87f1-3ec2-7144-a042-uuid",
+		"vault/with/slashes",
+		"vault with spaces",
+		"vault-with-dashes-and-019d87f1-3ec2-7144-a042-uuid",
 		"日本語",
 		strings.Repeat("a", 1000),
 	}

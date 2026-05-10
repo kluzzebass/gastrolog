@@ -4,7 +4,7 @@ The role of this file is to describe common mistakes and confusion points that a
 
 ## Vocabulary
 
-Read [`docs/ubiquitous_language.md`](./docs/ubiquitous_language.md) before writing prose (commit messages, issue titles, comments, code identifiers) that names domain concepts. It defines 8 bounded contexts and ~75 canonical terms, plus a consistency-rules table naming the synonyms to phase out (`primary` → leader, `tier Raft` → vault-ctl Raft, `cloud chunk` → cloud-backed chunk, etc.). Use the canonical terms. Extend the doc in the same PR when introducing a new concept.
+Read [`docs/ubiquitous_language.md`](./docs/ubiquitous_language.md) before writing prose (commit messages, issue titles, comments, code identifiers) that names domain concepts. It defines 8 bounded contexts and ~75 canonical terms, plus a consistency-rules table naming the synonyms to phase out (`primary` → leader, `cloud chunk` → cloud-backed chunk, etc.). Use the canonical terms. Extend the doc in the same PR when introducing a new concept.
 
 ## Agent workflow (read first)
 
@@ -116,7 +116,7 @@ When removing a proto field, message, oneof case, or enum value, **delete it ent
 
 **This is the opposite of the protobuf community's general advice.** Standard advice ("always reserve removed tags") assumes long-lived deployed schemas. GastroLog's atomic-refactor model invalidates that assumption. Apply project-specific rule, not the generic one.
 
-Precedent: gastrolog-4k5mg (cloud/file tier collapse) removed all `reserved` declarations from prior cleanup passes and renumbered the remaining tags. That is the standard pattern; follow it.
+Precedent: gastrolog-4k5mg removed all `reserved` declarations from prior cleanup passes and renumbered the remaining tags. That is the standard pattern; follow it.
 
 ## Data Integrity: Facts Before Speculation
 

@@ -710,12 +710,11 @@ Live on `Config` directly (not as entities):
 | follower         | secondary, replica| "replica" is ambiguous with the separate concept of chunk replica. |
 | active chunk     | open chunk        | "Active" matches `ChunkMeta.Sealed = false`.                       |
 | sealed chunk     | closed chunk, finalized chunk | "Sealed" is what the chunk manager actually calls it.  |
-| cloud-backed     | cloud chunk, cloud tier | Cloud-backed describes storage; "cloud chunk" conflates with archival state and "cloud tier" is dead vocabulary. |
-| archived         | cold, glacier-tier| "Archived" is the canonical flag; cloud storage-class is orthogonal.|
-| vault            | tier              | The tier abstraction was removed; vault is the only storage unit. Storage shape lives directly on `VaultConfig`. |
-| vault-ctl Raft   | tier Raft         | There is no per-tier Raft group; chunk metadata is a sub-FSM under the vault-ctl group. |
-| vault FSM, instance FSM | tier FSM   | The per-vault chunk-metadata sub-FSM lives in `vaultctlfsm`; "tier FSM" is dead vocabulary. |
-| vault replication | tier replication | Record streams from leader to follower are per-vault now. |
+| cloud-backed     | cloud chunk       | Cloud-backed describes storage; "cloud chunk" conflates with archival state. |
+| archived         | cold              | "Archived" is the canonical flag; cloud storage-class is orthogonal. |
+| vault-ctl Raft   |                   | One Raft group per vault, authoritative for that vault's chunk metadata. |
+| instance FSM     |                   | Per-vault chunk-metadata sub-FSM in `vaultctlfsm`. |
+| vault replication |                  | Record streams from leader to follower, per vault. |
 | ingester         | source, collector | "Ingester" is the proto name; "source" leaks from UI copy.          |
 | route            | pipeline (at ingest) | Ingestion "route" ≠ query "pipeline"; use "route pipeline" or "ingestion pipeline" to bridge. |
 | record           | event, message    | "Event" conflates with `EventID`; "message" conflates with ingester internals. |

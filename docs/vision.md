@@ -62,7 +62,7 @@ flowchart LR
         F --> G[fa:fa-globe Enrich<br/>geoip on remote_host]
         G --> L[fa:fa-book Lookup<br/>customer_id from billing_api]
         L --> R[fa:fa-eye-slash Redact<br/>credit_card_number]
-        R --> S{fa:fa-code-branch Route by<br/>customer_tier}
+        R --> S{fa:fa-code-branch Route by<br/>customer_plan}
     end
 
     S -->|premium| V1[(fa:fa-database vault-premium)]
@@ -120,11 +120,11 @@ Traditional alerting is threshold-based: "alert when error rate exceeds 5%." Thi
 
 ## Layered Storage via Routing
 
-Storage should be a budget, not a cliff. The cluster expresses hot/warm/cold layering as **multiple vaults connected by routes**, not as tiered chains inside a single vault. Each vault owns one storage shape; layering is the operator's choice of which vaults exist and how records flow between them.
+Storage should be a budget, not a cliff. The cluster expresses hot/warm/cold layering as **multiple vaults connected by routes**. Each vault owns one storage shape; layering is the operator's choice of which vaults exist and how records flow between them.
 
 ### The vault as the storage unit
 
-A vault is the **only abstraction over the chunk layer**. It carries its full storage shape directly: a **type** (memory, file, jsonl), a **storage class**, an optional **cloud service** binding, a **rotation policy**, **retention rules**, a **replication factor**, and cache tuning for cloud-backed reads. There is no vault-internal hierarchy — no tier chains, no sub-vaults. The simpler the unit, the simpler the failure modes.
+A vault is the **only abstraction over the chunk layer**. It carries its full storage shape directly: a **type** (memory, file, jsonl), a **storage class**, an optional **cloud service** binding, a **rotation policy**, **retention rules**, a **replication factor**, and cache tuning for cloud-backed reads. The simpler the unit, the simpler the failure modes.
 
 A cloud-backed vault is a file vault with a `CloudServiceID` set: sealed chunks upload to the cloud service, while the active chunk and a warm cache stay on local disk. This is the only "fancy" storage shape — every other vault is straightforwardly a memory, file, or JSONL container.
 

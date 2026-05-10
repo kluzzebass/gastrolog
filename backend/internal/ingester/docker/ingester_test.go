@@ -600,7 +600,7 @@ func TestContainerAttrs(t *testing.T) {
 	info := containerInfo{
 		Name:   "web-1",
 		Image:  "nginx:latest",
-		Labels: map[string]string{"env": "prod", "tier": "frontend"},
+		Labels: map[string]string{"env": "prod", "role": "frontend"},
 	}
 
 	attrs := containerAttrs(info)
@@ -614,8 +614,8 @@ func TestContainerAttrs(t *testing.T) {
 	if attrs["label.env"] != "prod" {
 		t.Errorf("label.env = %q, want %q", attrs["label.env"], "prod")
 	}
-	if attrs["label.tier"] != "frontend" {
-		t.Errorf("label.tier = %q, want %q", attrs["label.tier"], "frontend")
+	if attrs["label.role"] != "frontend" {
+		t.Errorf("label.role = %q, want %q", attrs["label.role"], "frontend")
 	}
 	if len(attrs) != 4 {
 		t.Errorf("expected 4 attrs, got %d", len(attrs))

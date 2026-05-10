@@ -4,9 +4,9 @@ Once a record has been ingested and digested, [routes](help:routing) direct it i
 
 ## What a vault is
 
-A **vault** owns its records, indexes, retention rules, and access shape. It has one **type** (memory, file, jsonl) and — for file vaults — an optional **cloud service** binding. There is no internal hierarchy: a vault is the unit, and the cluster runs each vault independently.
+A **vault** owns its records, indexes, retention rules, and access shape. It has one **type** (memory, file, jsonl) and — for file vaults — an optional **cloud service** binding. The vault is the storage unit, and the cluster runs each vault independently.
 
-Hot/warm/cold layering is composed by **chaining vaults via routes**, not by a vault-internal tier list. Records exit one vault when retention triggers and (with `Send records to routing engine` disposition) flow into the next vault through the routing table.
+Hot/warm/cold layering is composed by **chaining vaults via routes**. Records exit one vault when retention triggers and (with `Send records to routing engine` disposition) flow into the next vault through the routing table.
 
 Example: a hot/warm/cold deployment with three vaults:
 

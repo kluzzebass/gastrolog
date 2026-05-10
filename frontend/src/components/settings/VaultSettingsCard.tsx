@@ -52,10 +52,9 @@ interface VaultSettingsCardProps {
   onOpenInspector?: (inspectorParam: string) => void;
 }
 
-// The vault carries the full storage shape directly: Type, RotationPolicyID,
-// RetentionRules, RF, StorageClass, CloudServiceID, cache fields. There is
-// no operator-facing "tier" concept; the UI edits the vault directly.
-// Inter-vault routing (gastrolog-4kkoo) covers hot/warm chains.
+// The vault carries its full storage shape directly: Type, RotationPolicyID,
+// RetentionRules, RF, StorageClass, CloudServiceID, cache fields. The UI
+// edits the vault directly; inter-vault routing covers hot/warm chains.
 
 function vaultTypeLabel(t: VaultType): VaultTypeLabel {
   switch (t) {
@@ -215,8 +214,7 @@ export function VaultSettingsCard({
   };
 
   // Placement summary for the header — node where the leader storage
-  // lives, plus follower nodes for cluster vaults. Phase-2-onward this
-  // info is per-vault, not per-tier.
+  // lives, plus follower nodes for cluster vaults.
   const nodeNameMap = buildNodeNameMap(nodeConfigs);
   const leaderId = leaderNodeId(vault, nodeStorageConfigs);
   const leaderName = leaderId ? resolveNodeName(nodeNameMap, leaderId) : null;
