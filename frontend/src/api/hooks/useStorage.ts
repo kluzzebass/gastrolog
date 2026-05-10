@@ -20,7 +20,7 @@ export function usePutCloudService() {
       credentialsJson: string;
       archivalMode?: string;
       transitions?: Array<{ after: string; storageClass: string }>;
-      restoreTier?: string;
+      restoreSpeed?: string;
       restoreDays?: number;
       suspectGraceDays?: number;
       reconcileSchedule?: string;
@@ -43,7 +43,7 @@ export function usePutCloudService() {
             after: t.after,
             storageClass: t.storageClass,
           })),
-          restoreTier: args.restoreTier ?? "",
+          restoreSpeed: args.restoreSpeed ?? "",
           restoreDays: args.restoreDays ?? 0,
           suspectGraceDays: args.suspectGraceDays ?? 0,
           reconcileSchedule: args.reconcileSchedule ?? "",

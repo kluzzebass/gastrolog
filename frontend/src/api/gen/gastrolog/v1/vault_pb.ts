@@ -2064,9 +2064,9 @@ export class RestoreChunkRequest extends Message<RestoreChunkRequest> {
   /**
    * "Expedited"/"Standard"/"Bulk" (S3), "High"/"Standard" (Azure)
    *
-   * @generated from field: string restore_tier = 3;
+   * @generated from field: string restore_speed = 3;
    */
-  restoreTier = "";
+  restoreSpeed = "";
 
   /**
    * How long restored copy stays readable (S3 only, 0 = provider default)
@@ -2085,7 +2085,7 @@ export class RestoreChunkRequest extends Message<RestoreChunkRequest> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "vault", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 3, name: "restore_tier", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "restore_speed", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "restore_days", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
   ]);
 

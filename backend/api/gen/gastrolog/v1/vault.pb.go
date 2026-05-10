@@ -2447,8 +2447,8 @@ type RestoreChunkRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Vault         string                 `protobuf:"bytes,1,opt,name=vault,proto3" json:"vault,omitempty"`
 	ChunkId       []byte                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
-	RestoreTier   string                 `protobuf:"bytes,3,opt,name=restore_tier,json=restoreTier,proto3" json:"restore_tier,omitempty"`  // "Expedited"/"Standard"/"Bulk" (S3), "High"/"Standard" (Azure)
-	RestoreDays   int32                  `protobuf:"varint,4,opt,name=restore_days,json=restoreDays,proto3" json:"restore_days,omitempty"` // How long restored copy stays readable (S3 only, 0 = provider default)
+	RestoreSpeed  string                 `protobuf:"bytes,3,opt,name=restore_speed,json=restoreSpeed,proto3" json:"restore_speed,omitempty"` // "Expedited"/"Standard"/"Bulk" (S3), "High"/"Standard" (Azure)
+	RestoreDays   int32                  `protobuf:"varint,4,opt,name=restore_days,json=restoreDays,proto3" json:"restore_days,omitempty"`   // How long restored copy stays readable (S3 only, 0 = provider default)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2497,9 +2497,9 @@ func (x *RestoreChunkRequest) GetChunkId() []byte {
 	return nil
 }
 
-func (x *RestoreChunkRequest) GetRestoreTier() string {
+func (x *RestoreChunkRequest) GetRestoreSpeed() string {
 	if x != nil {
-		return x.RestoreTier
+		return x.RestoreSpeed
 	}
 	return ""
 }
@@ -2825,11 +2825,11 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\x12\x19\n" +
 	"\bchunk_id\x18\x02 \x01(\fR\achunkId\x12#\n" +
 	"\rstorage_class\x18\x03 \x01(\tR\fstorageClass\"\x16\n" +
-	"\x14ArchiveChunkResponse\"\x8c\x01\n" +
+	"\x14ArchiveChunkResponse\"\x8e\x01\n" +
 	"\x13RestoreChunkRequest\x12\x14\n" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\x12\x19\n" +
-	"\bchunk_id\x18\x02 \x01(\fR\achunkId\x12!\n" +
-	"\frestore_tier\x18\x03 \x01(\tR\vrestoreTier\x12!\n" +
+	"\bchunk_id\x18\x02 \x01(\fR\achunkId\x12#\n" +
+	"\rrestore_speed\x18\x03 \x01(\tR\frestoreSpeed\x12!\n" +
 	"\frestore_days\x18\x04 \x01(\x05R\vrestoreDays\"\x16\n" +
 	"\x14RestoreChunkResponse\"\x14\n" +
 	"\x12WatchChunksRequest\"/\n" +

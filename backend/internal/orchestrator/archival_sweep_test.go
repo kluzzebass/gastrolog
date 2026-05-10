@@ -53,7 +53,7 @@ func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition
 		Provider:     "memory",
 		ArchivalMode: "active",
 		Transitions:  transitions,
-		RestoreTier:  "Standard",
+		RestoreSpeed:  "Standard",
 		RestoreDays:  7,
 	})
 
@@ -434,7 +434,7 @@ func TestCloudServiceArchivalConfigRoundTrip(t *testing.T) {
 			{After: "90d", StorageClass: "deep-freeze"},
 			{After: "365d", StorageClass: ""},
 		},
-		RestoreTier:       "Expedited",
+		RestoreSpeed:       "Expedited",
 		RestoreDays:       14,
 		SuspectGraceDays:  3,
 		ReconcileSchedule: "0 */6 * * *",
@@ -461,8 +461,8 @@ func TestCloudServiceArchivalConfigRoundTrip(t *testing.T) {
 	if loaded.Transitions[2].StorageClass != "" {
 		t.Errorf("Transition 2 (delete): StorageClass=%q", loaded.Transitions[2].StorageClass)
 	}
-	if loaded.RestoreTier != "Expedited" {
-		t.Errorf("RestoreTier=%q", loaded.RestoreTier)
+	if loaded.RestoreSpeed != "Expedited" {
+		t.Errorf("RestoreSpeed=%q", loaded.RestoreSpeed)
 	}
 	if loaded.RestoreDays != 14 {
 		t.Errorf("RestoreDays=%d", loaded.RestoreDays)
@@ -555,7 +555,7 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 		Provider:     "memory",
 		ArchivalMode: "active",
 		Transitions:  transitions,
-		RestoreTier:  "Standard",
+		RestoreSpeed:  "Standard",
 		RestoreDays:  7,
 	})
 

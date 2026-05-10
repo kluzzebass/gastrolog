@@ -230,7 +230,7 @@ type CloudService struct {
 	// "active" = GastroLog manages transitions via the sweep job.
 	ArchivalMode      string                    `protobuf:"bytes,13,opt,name=archival_mode,json=archivalMode,proto3" json:"archival_mode,omitempty"`
 	Transitions       []*CloudStorageTransition `protobuf:"bytes,14,rep,name=transitions,proto3" json:"transitions,omitempty"`                                      // ordered by after_days
-	RestoreTier       string                    `protobuf:"bytes,15,opt,name=restore_tier,json=restoreTier,proto3" json:"restore_tier,omitempty"`                   // default restore speed (S3: Expedited/Standard/Bulk, Azure: High/Standard)
+	RestoreSpeed      string                    `protobuf:"bytes,15,opt,name=restore_speed,json=restoreSpeed,proto3" json:"restore_speed,omitempty"`                // default restore speed (S3: Expedited/Standard/Bulk, Azure: High/Standard)
 	RestoreDays       uint32                    `protobuf:"varint,16,opt,name=restore_days,json=restoreDays,proto3" json:"restore_days,omitempty"`                  // S3: how long restored copy stays readable (days)
 	SuspectGraceDays  uint32                    `protobuf:"varint,17,opt,name=suspect_grace_days,json=suspectGraceDays,proto3" json:"suspect_grace_days,omitempty"` // days before suspect chunk removed from index (default 7)
 	ReconcileSchedule string                    `protobuf:"bytes,18,opt,name=reconcile_schedule,json=reconcileSchedule,proto3" json:"reconcile_schedule,omitempty"` // cron for reconciliation sweep (default "0 3 * * *")
@@ -366,9 +366,9 @@ func (x *CloudService) GetTransitions() []*CloudStorageTransition {
 	return nil
 }
 
-func (x *CloudService) GetRestoreTier() string {
+func (x *CloudService) GetRestoreSpeed() string {
 	if x != nil {
-		return x.RestoreTier
+		return x.RestoreSpeed
 	}
 	return ""
 }
@@ -410,7 +410,7 @@ const file_gastrolog_v1_storage_proto_rawDesc = "" +
 	"\rfile_storages\x18\x02 \x03(\v2\x19.gastrolog.v1.FileStorageR\ffileStorages\"S\n" +
 	"\x16CloudStorageTransition\x12\x14\n" +
 	"\x05after\x18\x01 \x01(\tR\x05after\x12#\n" +
-	"\rstorage_class\x18\x02 \x01(\tR\fstorageClass\"\x83\x05\n" +
+	"\rstorage_class\x18\x02 \x01(\tR\fstorageClass\"\x85\x05\n" +
 	"\fCloudService\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
@@ -428,8 +428,8 @@ const file_gastrolog_v1_storage_proto_rawDesc = "" +
 	"\x10credentials_json\x18\v \x01(\tR\x0fcredentialsJson\x12#\n" +
 	"\rstorage_class\x18\f \x01(\rR\fstorageClass\x12#\n" +
 	"\rarchival_mode\x18\r \x01(\tR\farchivalMode\x12F\n" +
-	"\vtransitions\x18\x0e \x03(\v2$.gastrolog.v1.CloudStorageTransitionR\vtransitions\x12!\n" +
-	"\frestore_tier\x18\x0f \x01(\tR\vrestoreTier\x12!\n" +
+	"\vtransitions\x18\x0e \x03(\v2$.gastrolog.v1.CloudStorageTransitionR\vtransitions\x12#\n" +
+	"\rrestore_speed\x18\x0f \x01(\tR\frestoreSpeed\x12!\n" +
 	"\frestore_days\x18\x10 \x01(\rR\vrestoreDays\x12,\n" +
 	"\x12suspect_grace_days\x18\x11 \x01(\rR\x10suspectGraceDays\x12-\n" +
 	"\x12reconcile_schedule\x18\x12 \x01(\tR\x11reconcileScheduleB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"

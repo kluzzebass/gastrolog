@@ -39,7 +39,7 @@ interface AddFormState {
   credentialsJson: string;
   archivalMode: string;
   transitions: Array<{ after: string; storageClass: string }>;
-  restoreTier: string;
+  restoreSpeed: string;
   restoreDays: number;
   suspectGraceDays: number;
   reconcileSchedule: string;
@@ -60,7 +60,7 @@ const addFormInitial: AddFormState = {
   credentialsJson: "",
   archivalMode: "none",
   transitions: [],
-  restoreTier: "",
+  restoreSpeed: "",
   restoreDays: 7,
   suspectGraceDays: 7,
   reconcileSchedule: "0 3 * * *",

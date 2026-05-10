@@ -136,7 +136,7 @@ func newCloudServiceCreateCmd() *cobra.Command {
 	cmd.Flags().Uint32("storage-class", 0, "storage class for vault placement")
 	cmd.Flags().String("archival-mode", "", "storage class transition management: 'none' (external) or 'active' (managed by GastroLog)")
 	cmd.Flags().StringSlice("transition", nil, "archival transition: 'AFTER:CLASS' (e.g. '90d:GLACIER', '360d:DEEP_ARCHIVE', '730d:' for delete). Repeatable.")
-	cmd.Flags().String("restore-tier", "", "default restore speed (S3: Expedited/Standard/Bulk, Azure: High/Standard)")
+	cmd.Flags().String("restore-speed", "", "default restore speed (S3: Expedited/Standard/Bulk, Azure: High/Standard)")
 	cmd.Flags().Uint32("restore-days", 0, "S3: how long restored copy stays readable (days)")
 	cmd.Flags().Uint32("suspect-grace-days", 0, "days before suspect chunk removed from index (default 7)")
 	cmd.Flags().String("reconcile-schedule", "", "cron for reconciliation sweep (default '0 3 * * *')")
@@ -195,8 +195,8 @@ func printCloudService(cmd *cobra.Command, cs *v1.CloudService) error {
 		}
 		pairs = append(pairs, [2]string{fmt.Sprintf("Transition %d", i+1), fmt.Sprintf("after %s → %s", tr.After, class)})
 	}
-	if cs.RestoreTier != "" {
-		pairs = append(pairs, [2]string{"Restore Tier", cs.RestoreTier})
+	if cs.RestoreSpeed != "" {
+		pairs = append(pairs, [2]string{"Restore Tier", cs.RestoreSpeed})
 	}
 	if cs.RestoreDays > 0 {
 		pairs = append(pairs, [2]string{"Restore Days", strconv.FormatUint(uint64(cs.RestoreDays), 10)})
@@ -258,8 +258,8 @@ func applyCloudServiceFlags(cmd *cobra.Command, cfg *v1.CloudService) {
 			})
 		}
 	}
-	if cmd.Flags().Changed("restore-tier") {
-		cfg.RestoreTier, _ = cmd.Flags().GetString("restore-tier")
+	if cmd.Flags().Changed("restore-speed") {
+		cfg.RestoreSpeed, _ = cmd.Flags().GetString("restore-speed")
 	}
 	if cmd.Flags().Changed("restore-days") {
 		d, _ := cmd.Flags().GetUint32("restore-days")

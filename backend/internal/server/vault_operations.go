@@ -309,7 +309,7 @@ func (s *VaultServer) RestoreChunk(
 	}
 
 	// Use request values, falling back to cloud service defaults, then hardcoded defaults.
-	tier, days := s.resolveRestoreDefaults(ctx, vaultID, chunkID, req.Msg.RestoreTier, int(req.Msg.RestoreDays))
+	tier, days := s.resolveRestoreDefaults(ctx, vaultID, chunkID, req.Msg.RestoreSpeed, int(req.Msg.RestoreDays))
 
 	if err := s.orch.RestoreChunk(ctx, vaultID, chunkID, tier, days); err != nil {
 		return nil, errInternal(err)
@@ -323,7 +323,7 @@ func (s *VaultServer) resolveRestoreDefaults(ctx context.Context, vaultID glid.G
 	if (tier == "" || days <= 0) && s.cfgStore != nil {
 		cs := s.lookupCloudServiceForChunk(ctx, vaultID, chunkID)
 		if cs != nil && tier == "" {
-			tier = cs.RestoreTier
+			tier = cs.RestoreSpeed
 		}
 		if cs != nil && days <= 0 {
 			days = int(cs.RestoreDays)

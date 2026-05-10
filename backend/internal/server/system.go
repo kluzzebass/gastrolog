@@ -390,7 +390,7 @@ func (s *SystemServer) loadConfigCloudServices(ctx context.Context, resp *apiv1.
 			StorageClass:      cs.StorageClass,
 			ArchivalMode:      cs.ArchivalMode,
 			Transitions:       transitions,
-			RestoreTier:       cs.RestoreTier,
+			RestoreSpeed:       cs.RestoreSpeed,
 			RestoreDays:       cs.RestoreDays,
 			SuspectGraceDays:  cs.SuspectGraceDays,
 			ReconcileSchedule: cs.ReconcileSchedule,

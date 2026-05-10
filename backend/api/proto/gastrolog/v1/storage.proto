@@ -52,7 +52,7 @@ message CloudService {
   // "active" = GastroLog manages transitions via the sweep job.
   string archival_mode = 13;
   repeated CloudStorageTransition transitions = 14; // ordered by after_days
-  string restore_tier = 15;                         // default restore speed (S3: Expedited/Standard/Bulk, Azure: High/Standard)
+  string restore_speed = 15;                         // default restore speed (S3: Expedited/Standard/Bulk, Azure: High/Standard)
   uint32 restore_days = 16;                         // S3: how long restored copy stays readable (days)
   uint32 suspect_grace_days = 17;                   // days before suspect chunk removed from index (default 7)
   string reconcile_schedule = 18;                   // cron for reconciliation sweep (default "0 3 * * *")
