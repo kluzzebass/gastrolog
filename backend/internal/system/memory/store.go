@@ -998,7 +998,7 @@ func copyParams(params map[string]string) map[string]string {
 	return cp
 }
 
-// --- Tier Placements (runtime) ---
+// --- Vault Placements (runtime) ---
 
 func (s *Store) GetVaultPlacements(_ context.Context, instID glid.GLID) ([]system.VaultPlacement, error) {
 	s.mu.RLock()

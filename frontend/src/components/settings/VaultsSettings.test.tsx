@@ -198,7 +198,7 @@ describe("VaultsSettings", () => {
     });
   });
 
-  test("create button disabled with no tiers", async () => {
+  test("create button disabled before storage type is selected", async () => {
     m(mocks.systemClient, "generateName").mockResolvedValueOnce({ name: "happy-fox" });
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], { ...sampleConfig, vaults: [] });

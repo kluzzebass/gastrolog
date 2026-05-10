@@ -11,7 +11,7 @@ import (
 // Factory parameter keys.
 const (
 	ParamMaxRecords = "maxRecords"
-	ParamBudget     = "budgetBytes" // total tier budget in bytes
+	ParamBudget     = "budgetBytes" // total vault budget in bytes
 )
 
 // Default values.

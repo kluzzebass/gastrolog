@@ -515,9 +515,6 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
     const storage = addForm.storage;
     const cloudBacked = isCloudBacked(storage);
 
-    // Phase 2 (gastrolog-3iy5l): a vault carries its own storage shape;
-    // PutVault is sufficient on its own — the FSM auto-synthesizes the
-    // matching TierConfig until that field set lives only on the vault.
     const vaultCfg = new VaultConfig({
       id: vaultIdBytes,
       name,

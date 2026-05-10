@@ -8,7 +8,7 @@ import (
 
 // NewProjectingReader returns a Reader that projects manifest entries from
 // each vault's chunk manager via List() / Meta(). Used when no FSM is
-// wired (memory-mode vaults, unit-test registries) — those tiers are their
+// wired (memory-mode vaults, unit-test registries) — those vaults are their
 // own source of truth and the local chunk manager view is authoritative.
 //
 // Sealed-only filtering is honored: ChunkMeta.Sealed=false entries are

@@ -274,7 +274,7 @@ func TestListAllChunkMetasNilOverlayPassthrough(t *testing.T) {
 // return only the leader's chunks. Including the follower's view double-
 // counts records and produces non-authoritative counts in the Inspector.
 
-// TestListAllChunkMetasIncludesFollowerOnlyInstances verifies that tiers where
+// TestListAllChunkMetasIncludesFollowerOnlyInstances verifies that vaults where
 // this node is a follower-only (no leader instance locally) ARE included.
 // The leader node lives elsewhere, but this node's follower view is still
 // needed at the server layer to count replica presence.

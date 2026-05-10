@@ -678,7 +678,7 @@ func TestSnapshotRestore(t *testing.T) {
 		t.Errorf("vault: %+v", gotVault)
 	}
 
-	_ = instID // tier mirror is gone — vault check above is the canonical assertion
+	_ = instID // the legacy mirror is gone — vault check above is the canonical assertion
 
 	gotIng, _ := fsm2.Store().GetIngester(ctx, ingID)
 	if gotIng == nil || gotIng.Name != "ing1" {
