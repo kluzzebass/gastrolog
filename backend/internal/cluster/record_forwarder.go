@@ -38,7 +38,7 @@ const (
 )
 
 // forwardEntry is a single record queued for forwarding to a remote node's
-// vault. Used exclusively for cross-node vault routing — tier-targeted
+// vault. Used exclusively for cross-node vault routing — chunk-ID-preserving
 // follower replication now goes through ChunkReplicator (see gastrolog-5c6fp).
 type forwardEntry struct {
 	vaultID glid.GLID
@@ -98,7 +98,7 @@ type RecordForwarder struct {
 
 	// onNodeUnreachable is called on the first consecutive failure for a
 	// node. The orchestrator uses this to trigger immediate placement
-	// reconciliation so the dead node's tiers are reassigned without
+	// reconciliation so the dead node's vaults are reassigned without
 	// waiting for the 15-second placement interval.
 	onNodeUnreachable func(nodeID string)
 }
@@ -458,7 +458,7 @@ func (rf *RecordForwarder) Sent() int64 {
 }
 
 // RedirectNode drains all queued records from fromNodeID's channel and
-// re-enqueues them to toNodeID. Called when placement reassigns a tier's
+// re-enqueues them to toNodeID. Called when placement reassigns a vault&apos;s
 // leader to a different node — records buffered for the dead node get
 // sent to the new leader instead of being stuck until the channel fills.
 // If toNodeID is empty, records are returned for local processing.

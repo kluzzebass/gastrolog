@@ -34,22 +34,12 @@ func (s *VaultServer) SealVault(
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("vault not found"))
 	}
 
-	// Resolve optional tier filter.
-	tierID := glid.Nil
-	if req.Msg.Tier != "" {
-		tid, connErr := parseUUID(req.Msg.Tier)
-		if connErr != nil {
-			return nil, connErr
-		}
-		tierID = tid
-	}
-
-	sealed, err := s.orch.SealActive(vaultID, tierID)
+	sealed, err := s.orch.SealActive(vaultID)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("seal active chunk: %w", err))
 	}
 
-	return connect.NewResponse(&apiv1.SealVaultResponse{SealedCount: int32(sealed)}), nil //nolint:gosec // G115: tier count is always small
+	return connect.NewResponse(&apiv1.SealVaultResponse{SealedCount: int32(sealed)}), nil //nolint:gosec // G115: sealed-vault count is always small
 }
 
 // RetryUnreadableChunks resets the retry backoff for every chunk
@@ -58,7 +48,7 @@ func (s *VaultServer) SealVault(
 // see gastrolog-25vur.
 //
 // Routing: RouteTargeted — the interceptor forwards to the vault-owning
-// node. Per-tier-instance unreadable maps live on the local
+// node. Per-vault-instance unreadable maps live on the local
 // orchestrator, so the retry-now action only resets the runners that
 // actually hold the entries.
 func (s *VaultServer) RetryUnreadableChunks(
@@ -319,49 +309,48 @@ func (s *VaultServer) RestoreChunk(
 	}
 
 	// Use request values, falling back to cloud service defaults, then hardcoded defaults.
-	tier, days := s.resolveRestoreDefaults(ctx, vaultID, chunkID, req.Msg.RestoreTier, int(req.Msg.RestoreDays))
+	speed, days := s.resolveRestoreDefaults(ctx, vaultID, chunkID, req.Msg.RestoreSpeed, int(req.Msg.RestoreDays))
 
-	if err := s.orch.RestoreChunk(ctx, vaultID, chunkID, tier, days); err != nil {
+	if err := s.orch.RestoreChunk(ctx, vaultID, chunkID, speed, days); err != nil {
 		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.RestoreChunkResponse{}), nil
 }
 
-// resolveRestoreDefaults fills in restore tier and days from cloud service system.
-func (s *VaultServer) resolveRestoreDefaults(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, reqTier string, reqDays int) (string, int) {
-	tier, days := reqTier, reqDays
-	if (tier == "" || days <= 0) && s.cfgStore != nil {
+// resolveRestoreDefaults fills in restore speed and days from cloud service system.
+func (s *VaultServer) resolveRestoreDefaults(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, reqSpeed string, reqDays int) (string, int) {
+	speed, days := reqSpeed, reqDays
+	if (speed == "" || days <= 0) && s.cfgStore != nil {
 		cs := s.lookupCloudServiceForChunk(ctx, vaultID, chunkID)
-		if cs != nil && tier == "" {
-			tier = cs.RestoreTier
+		if cs != nil && speed == "" {
+			speed = cs.RestoreSpeed
 		}
 		if cs != nil && days <= 0 {
 			days = int(cs.RestoreDays)
 		}
 	}
-	if tier == "" {
-		tier = "Standard"
+	if speed == "" {
+		speed = "Standard"
 	}
 	if days <= 0 {
 		days = 7
 	}
-	return tier, days
+	return speed, days
 }
 
-// lookupCloudServiceForChunk finds the CloudService config for a chunk's tier.
+// lookupCloudServiceForChunk finds the CloudService config for a chunk's vault.
 func (s *VaultServer) lookupCloudServiceForChunk(ctx context.Context, vaultID glid.GLID, _ chunk.ChunkID) *system.CloudService {
 	cfg, err := s.cfgStore.Load(ctx)
 	if err != nil || cfg == nil {
 		return nil
 	}
-	// Find vault → tiers → cloud service.
-	for i := range cfg.Config.Tiers {
-		t := &cfg.Config.Tiers[i]
-		if t.VaultID != vaultID || t.CloudServiceID == nil {
+	for i := range cfg.Config.Vaults {
+		v := &cfg.Config.Vaults[i]
+		if v.ID != vaultID || v.CloudServiceID == nil {
 			continue
 		}
 		for j := range cfg.Config.CloudServices {
-			if cfg.Config.CloudServices[j].ID == *t.CloudServiceID {
+			if cfg.Config.CloudServices[j].ID == *v.CloudServiceID {
 				return &cfg.Config.CloudServices[j]
 			}
 		}

@@ -57,7 +57,6 @@ type Config struct {
 	Certs             []CertPEM               `json:"certs,omitempty"`
 	ManagedFiles      []ManagedFileConfig     `json:"managedFiles,omitempty"`
 	CloudServices     []CloudService          `json:"cloudServices,omitempty"`
-	Tiers             []TierConfig            `json:"tiers,omitempty"`
 
 	// Server-level settings.
 	Auth      AuthConfig      `json:"auth,omitzero"`

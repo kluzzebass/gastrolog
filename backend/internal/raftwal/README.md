@@ -44,9 +44,9 @@ wal.Close()
 
 ```mermaid
 sequenceDiagram
-    participant G1 as Tier Group 1
-    participant G2 as Tier Group 2
-    participant G3 as Tier Group 3
+    participant G1 as Vault Group 1
+    participant G2 as Vault Group 2
+    participant G3 as Vault Group 3
     participant GS as GroupStore
     participant CH as writeCh (buffered)
     participant BW as batchWriter goroutine

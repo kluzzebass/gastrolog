@@ -123,19 +123,15 @@ func (f *fakeIndexManager) IndexSizes(chunkID chunk.ChunkID) map[string]int64 {
 }
 func (f *fakeIndexManager) BuildAdapter() chunk.ChunkIndexBuilder { return nil }
 
-// testVaultCfg creates a VaultConfig + TierConfig pair for tests.
-// tierType is the tier type (e.g., system.VaultTypeMemory or "test").
-func testVaultCfg(vaultID glid.GLID, tierType system.TierType) (system.VaultConfig, system.TierConfig) {
-	tierID := glid.New()
+// testVaultCfg creates a VaultConfig for tests.
+// vaultType is the storage shape (e.g., system.VaultTypeMemory or "test").
+func testVaultCfg(vaultID glid.GLID, vaultType system.VaultType) system.VaultConfig {
 	return system.VaultConfig{
-			ID:      vaultID,
-			Enabled: true,
-		}, system.TierConfig{
-			ID:      tierID,
-			Name:    "tier-" + vaultID.String()[:8],
-			Type:    tierType,
-			VaultID: vaultID,
-		}
+		ID:      vaultID,
+		Name:    "vault-" + vaultID.String()[:8],
+		Enabled: true,
+		Type:    vaultType,
+	}
 }
 
 // fakeIngester implements Ingester for testing.
@@ -154,25 +150,25 @@ func TestApplyConfigNil(t *testing.T) {
 	}
 }
 
-// TestApplyConfigVaultWithNoLocalTiers is the regression test for
+// TestApplyConfigVaultWithNoLocalInstance is the regression test for
 // gastrolog-264pk. Before the fix, ApplyConfig (the startup path) would
-// silently skip registering any vault whose buildTierInstances returned
-// zero local tiers — which happens on a node that isn't a placement
-// target for any of the vault's tiers (e.g. a node that joined
-// the cluster as a non-tier-member, or a snapshot-restored node where
+// silently skip registering any vault whose buildVaultInstances returned
+// zero local instances — which happens on a node that isn't a placement
+// target for any of the vault's instances (e.g. a node that joined
+// the cluster as a non-instance-member, or a snapshot-restored node where
 // placements are reapplied via post-snapshot log replay rather than the
 // initial ApplyConfig). The vault then never made it into the
-// orchestrator, and any subsequent NotifyTierPut firing handleTierPut
+// orchestrator, and any subsequent notification firing handleInstancePut
 // would fail with "vault not found" — and since handleVaultPut never
 // fires for snapshot-restored vaults, the cluster ends up in a permanent
 // stuck state. AddVault (the runtime path) registers empty vaults
 // correctly; initVault must do the same. This test asserts the parity.
-func TestApplyConfigVaultWithNoLocalTiers(t *testing.T) {
+func TestApplyConfigVaultWithNoLocalInstance(t *testing.T) {
 	t.Parallel()
-	// Local node is "node-1". Build a vault whose only tier is placed
-	// exclusively on "node-2" — buildTierInstances should return zero
-	// local tiers, but the vault must still be registered so a later
-	// AddTierToVault call can succeed.
+	// Local node is "node-1". Build a vault whose only instance is placed
+	// exclusively on "node-2" — buildVaultInstances should return zero
+	// local instances, but the vault must still be registered so a later
+	// AddVaultInstance call can succeed.
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
 	factories := Factories{
@@ -189,25 +185,18 @@ func TestApplyConfigVaultWithNoLocalTiers(t *testing.T) {
 	}
 
 	vaultID := glid.New()
-	tierID := glid.New()
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{{ID: vaultID, Enabled: true}},
-		Tiers: []system.TierConfig{{
-			ID:      tierID,
-			Name:    "remote-only",
-			Type:    system.VaultTypeMemory,
-			VaultID: vaultID,
-		}},
 	}
 
 	if err := orch.ApplyConfig(&system.System{Config: *cfg}, factories); err != nil {
 		t.Fatalf("ApplyConfig: %v", err)
 	}
 
-	// The vault MUST be registered, even though buildTierInstances
-	// returned zero local tiers for it.
+	// The vault MUST be registered, even though buildVaultInstances
+	// returned zero local instances for it.
 	if !slices.Contains(orch.ListVaults(), vaultID) {
-		t.Fatalf("vault %s should be registered after ApplyConfig even with zero local tiers", vaultID)
+		t.Fatalf("vault %s should be registered after ApplyConfig even with zero local instances", vaultID)
 	}
 }
 
@@ -229,12 +218,11 @@ func TestApplyConfigVaults(t *testing.T) {
 
 	vault1ID := glid.New()
 	vault2ID := glid.New()
-	vc1, tc1 := testVaultCfg(vault1ID, system.VaultTypeMemory)
-	vc2, tc2 := testVaultCfg(vault2ID, system.VaultTypeMemory)
+	vc1 := testVaultCfg(vault1ID, system.VaultTypeMemory)
+	vc2 := testVaultCfg(vault2ID, system.VaultTypeMemory)
 
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{vc1, vc2},
-		Tiers:  []system.TierConfig{tc1, tc2},
 	}
 
 	err := orch.ApplyConfig(&system.System{Config: *cfg}, factories)
@@ -292,10 +280,9 @@ func TestApplyConfigUnknownChunkManagerType(t *testing.T) {
 	orch := newTestOrch(t, Config{})
 
 	vaultID := glid.New()
-	vc, tc := testVaultCfg(vaultID, system.VaultTypeMemory)
+	vc := testVaultCfg(vaultID, system.VaultTypeMemory)
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{vc},
-		Tiers:  []system.TierConfig{tc},
 	}
 
 	// Vault init failure is non-fatal (vault skipped), so no error returned.
@@ -315,7 +302,7 @@ func TestApplyConfigUnknownIndexManagerType(t *testing.T) {
 	orch := newTestOrch(t, Config{})
 
 	vaultID := glid.New()
-	vc, tc := testVaultCfg(vaultID, system.VaultTypeMemory)
+	vc := testVaultCfg(vaultID, system.VaultTypeMemory)
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			"memory": func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
@@ -327,7 +314,6 @@ func TestApplyConfigUnknownIndexManagerType(t *testing.T) {
 
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{vc},
-		Tiers:  []system.TierConfig{tc},
 	}
 
 	// Vault init failure is non-fatal (vault skipped), so no error returned.
@@ -374,11 +360,10 @@ func TestApplyConfigDuplicateVaultID(t *testing.T) {
 	}
 
 	dupID := glid.New()
-	vc1, tc1 := testVaultCfg(dupID, system.VaultTypeMemory)
-	vc2 := vc1 // duplicate ID, same tier
+	vc1 := testVaultCfg(dupID, system.VaultTypeMemory)
+	vc2 := vc1 // duplicate ID, same instance
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{vc1, vc2},
-		Tiers:  []system.TierConfig{tc1},
 	}
 
 	err := orch.ApplyConfig(&system.System{Config: *cfg}, factories)
@@ -416,7 +401,7 @@ func TestApplyConfigChunkManagerFactoryError(t *testing.T) {
 	orch := newTestOrch(t, Config{})
 
 	vaultID := glid.New()
-	vc, tc := testVaultCfg(vaultID, system.VaultTypeMemory)
+	vc := testVaultCfg(vaultID, system.VaultTypeMemory)
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			"memory": func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
@@ -432,7 +417,6 @@ func TestApplyConfigChunkManagerFactoryError(t *testing.T) {
 
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{vc},
-		Tiers:  []system.TierConfig{tc},
 	}
 
 	// Vault init failure is non-fatal — node stays up, vault is skipped.
@@ -449,7 +433,7 @@ func TestApplyConfigIndexManagerFactoryError(t *testing.T) {
 	orch := newTestOrch(t, Config{})
 
 	vaultID := glid.New()
-	vc, tc := testVaultCfg(vaultID, system.VaultTypeMemory)
+	vc := testVaultCfg(vaultID, system.VaultTypeMemory)
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			"memory": func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
@@ -465,7 +449,6 @@ func TestApplyConfigIndexManagerFactoryError(t *testing.T) {
 
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{vc},
-		Tiers:  []system.TierConfig{tc},
 	}
 
 	// Vault init failure is non-fatal — node stays up, vault is skipped.
@@ -557,17 +540,14 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 		},
 	}
 
+	// Vault and instance share the same ID.
 	vaultID := glid.New()
-	tierID := glid.New()
 	storageID := glid.New()
 
 	sys := &system.System{
 		Config: system.Config{
 			Vaults: []system.VaultConfig{
-				{ID: vaultID, Enabled: true},
-			},
-			Tiers: []system.TierConfig{
-				{ID: tierID, Name: "local", Type: system.VaultTypeFile, StorageClass: 1, VaultID: vaultID, Position: 0},
+				{ID: vaultID, Name: "vault", Enabled: true, Type: system.VaultTypeFile, StorageClass: 1},
 			},
 		},
 		Runtime: system.Runtime{
@@ -577,8 +557,8 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 					ID: storageID, StorageClass: 1, Name: "fast", Path: "/data/chunks",
 				}},
 			}},
-			TierPlacements: map[glid.GLID][]system.TierPlacement{
-				tierID: {{StorageID: storageID.String(), Leader: true}},
+			VaultPlacements: map[glid.GLID][]system.VaultPlacement{
+				vaultID: {{StorageID: storageID.String(), Leader: true}},
 			},
 		},
 	}
@@ -588,8 +568,8 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify dir param: <storage-path>/vaults/<vault-id>/<tier-id>
-	expectedDir := "/data/chunks/vaults/" + vaultID.String() + "/" + tierID.String()
+	// Verify dir param: <storage-path>/vaults/<vault-id>/<vault-id>
+	expectedDir := "/data/chunks/vaults/" + vaultID.String() + "/" + vaultID.String()
 	if cmReceivedParams["dir"] != expectedDir {
 		t.Errorf("chunk manager: expected dir=%s, got %s", expectedDir, cmReceivedParams["dir"])
 	}
@@ -619,10 +599,9 @@ func TestApplyConfigIndexManagerReceivesChunkManager(t *testing.T) {
 	}
 
 	vaultID := glid.New()
-	vc, tc := testVaultCfg(vaultID, system.VaultTypeMemory)
+	vc := testVaultCfg(vaultID, system.VaultTypeMemory)
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{vc},
-		Tiers:  []system.TierConfig{tc},
 	}
 
 	err := orch.ApplyConfig(&system.System{Config: *cfg}, factories)
@@ -635,11 +614,11 @@ func TestApplyConfigIndexManagerReceivesChunkManager(t *testing.T) {
 	}
 }
 
-// --- gastrolog-292yi: all nodes in all tier Raft groups ---
+// --- gastrolog-292yi: all nodes in all instance Raft groups ---
 
-// TestBuildTierRaftMembers_AllClusterNodes verifies that buildTierRaftMembers
+// TestBuildVaultRaftMembers_AllClusterNodes verifies that buildVaultRaftMembers
 // returns every cluster node as a Raft member, regardless of storage placement.
-func TestBuildTierRaftMembers_AllClusterNodes(t *testing.T) {
+func TestBuildVaultRaftMembers_AllClusterNodes(t *testing.T) {
 	t.Parallel()
 
 	node1 := glid.New()
@@ -660,7 +639,7 @@ func TestBuildTierRaftMembers_AllClusterNodes(t *testing.T) {
 		},
 	}
 
-	members := orch.buildTierRaftMembers(clusterNodes, factories)
+	members := orch.buildVaultRaftMembers(clusterNodes, factories)
 
 	if len(members) != 3 {
 		t.Fatalf("expected 3 members (all cluster nodes), got %d", len(members))
@@ -678,9 +657,9 @@ func TestBuildTierRaftMembers_AllClusterNodes(t *testing.T) {
 	}
 }
 
-// TestBuildTierRaftMembers_UnresolvableNodeSkipped verifies that nodes whose
+// TestBuildVaultRaftMembers_UnresolvableNodeSkipped verifies that nodes whose
 // address can't be resolved are excluded from the member list.
-func TestBuildTierRaftMembers_UnresolvableNodeSkipped(t *testing.T) {
+func TestBuildVaultRaftMembers_UnresolvableNodeSkipped(t *testing.T) {
 	t.Parallel()
 
 	node1 := glid.New()
@@ -703,7 +682,7 @@ func TestBuildTierRaftMembers_UnresolvableNodeSkipped(t *testing.T) {
 		},
 	}
 
-	members := orch.buildTierRaftMembers(clusterNodes, factories)
+	members := orch.buildVaultRaftMembers(clusterNodes, factories)
 
 	if len(members) != 1 {
 		t.Fatalf("expected 1 member (only resolvable node), got %d", len(members))
@@ -713,12 +692,12 @@ func TestBuildTierRaftMembers_UnresolvableNodeSkipped(t *testing.T) {
 	}
 }
 
-// TestBuildTierRaftMembers_NilResolver verifies that a nil NodeAddressResolver
+// TestBuildVaultRaftMembers_NilResolver verifies that a nil NodeAddressResolver
 // returns no members.
-func TestBuildTierRaftMembers_NilResolver(t *testing.T) {
+func TestBuildVaultRaftMembers_NilResolver(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{})
-	members := orch.buildTierRaftMembers(
+	members := orch.buildVaultRaftMembers(
 		[]system.NodeConfig{{ID: glid.New()}},
 		Factories{},
 	)
@@ -727,11 +706,11 @@ func TestBuildTierRaftMembers_NilResolver(t *testing.T) {
 	}
 }
 
-// TestBuildTierRaftMembers_EmptyNodes verifies that empty node list returns nil.
-func TestBuildTierRaftMembers_EmptyNodes(t *testing.T) {
+// TestBuildVaultRaftMembers_EmptyNodes verifies that empty node list returns nil.
+func TestBuildVaultRaftMembers_EmptyNodes(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{})
-	members := orch.buildTierRaftMembers(nil, Factories{
+	members := orch.buildVaultRaftMembers(nil, Factories{
 		NodeAddressResolver: func(string) (string, bool) { return "addr", true },
 	})
 	if members != nil {

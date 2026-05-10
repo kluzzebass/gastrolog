@@ -51,64 +51,36 @@ type CloudService struct {
 	// Archival lifecycle.
 	ArchivalMode      string                   `json:"archivalMode,omitempty"`      // "none" or "active"
 	Transitions       []CloudStorageTransition `json:"transitions,omitempty"`       // ordered by After duration
-	RestoreTier       string                   `json:"restoreTier,omitempty"`       // default restore speed
+	RestoreSpeed       string                   `json:"restoreSpeed,omitempty"`       // default restore speed
 	RestoreDays       uint32                   `json:"restoreDays,omitempty"`       // S3 restore window
 	SuspectGraceDays  uint32                   `json:"suspectGraceDays,omitempty"`  // default 7
 	ReconcileSchedule string                   `json:"reconcileSchedule,omitempty"` // default "0 3 * * *"
 }
 
-// TierType identifies the storage medium for a tier.
+// VaultType identifies the storage medium for a vault.
 //
-// "cloud" is no longer a distinct type: a cloud-backed tier is a file tier
-// with CloudServiceID set, exposed via TierConfig.IsCloud(). Step 8 of the
+// "cloud" is no longer a distinct type: a cloud-backed vault is a file vault
+// with CloudServiceID set, exposed via VaultConfig.IsCloud(). Step 8 of the
 // chunk redesign collapsed the parallel cloud/file dispatch into a single
 // file path that flips behavior based on whether a cloud store is wired.
 // See gastrolog-4k5mg.
-type TierType string
+type VaultType string
 
 const (
-	TierTypeMemory TierType = "memory"
-	TierTypeFile   TierType = "file"
-	TierTypeJSONL  TierType = "jsonl"
+	VaultTypeMemory VaultType = "memory"
+	VaultTypeFile   VaultType = "file"
+	VaultTypeJSONL  VaultType = "jsonl"
 )
 
-// TierConfig defines a storage tier owned by exactly one vault. Tiers are
-// ordered within a vault by their Position field (0 = hottest / first).
-type TierConfig struct {
-	ID                glid.GLID       `json:"id"`
-	Name              string          `json:"name"`
-	Type              TierType        `json:"type"`
-	VaultID           glid.GLID       `json:"vaultId"`  // owning vault
-	Position          uint32          `json:"position"` // 0-based order in vault's tier chain
-	RotationPolicyID  *glid.GLID      `json:"rotationPolicyId,omitempty"`
-	RetentionRules    []RetentionRule `json:"retentionRules,omitempty"`
-	MemoryBudgetBytes uint64          `json:"memoryBudgetBytes,omitempty"`
-	StorageClass      uint32          `json:"storageClass,omitempty"`
-	CloudServiceID    *glid.GLID      `json:"cloudServiceId,omitempty"`
-	Path              string          `json:"path,omitempty"`              // direct path for JSONL sinks
-	ReplicationFactor uint32          `json:"replicationFactor,omitempty"` // desired RF (1 = no replication)
-	CacheEviction     string          `json:"cacheEviction,omitempty"`     // "lru" (default) or "ttl"
-	CacheBudget       string          `json:"cacheBudget,omitempty"`       // max cache size (e.g. "1GB", "500MB", default: "1GiB")
-	CacheTTL          string          `json:"cacheTtl,omitempty"`          // duration for TTL mode (e.g. "1h", "7d")
-}
-
-// IsCloud reports whether this tier is cloud-backed. A cloud-backed tier is
-// a file tier that has CloudServiceID set; the chunk manager flips on cloud
-// upload + cache-as-source semantics for those. There is no separate
-// TierTypeCloud — see gastrolog-4k5mg.
-func (t TierConfig) IsCloud() bool {
-	return t.CloudServiceID != nil
-}
-
-// TierPlacement assigns one replica of a tier to a specific file storage.
+// VaultPlacement assigns one replica of a vault to a specific file storage.
 // The node is derived from the file storage's NodeStorageConfig.
-type TierPlacement struct {
+type VaultPlacement struct {
 	StorageID string `json:"storageId"`
 	Leader    bool   `json:"leader"`
 }
 
 // LeaderStorageID returns the storage ID of the leader placement, or empty if unplaced.
-func LeaderStorageID(placements []TierPlacement) string {
+func LeaderStorageID(placements []VaultPlacement) string {
 	for _, p := range placements {
 		if p.Leader {
 			return p.StorageID
@@ -118,7 +90,7 @@ func LeaderStorageID(placements []TierPlacement) string {
 }
 
 // FollowerStorageIDs returns the storage IDs of all follower placements.
-func FollowerStorageIDs(placements []TierPlacement) []string {
+func FollowerStorageIDs(placements []VaultPlacement) []string {
 	var ids []string
 	for _, p := range placements {
 		if !p.Leader {
@@ -129,7 +101,7 @@ func FollowerStorageIDs(placements []TierPlacement) []string {
 }
 
 // StorageIDs returns all placed storage IDs (leader first, then followers).
-func StorageIDs(placements []TierPlacement) []string {
+func StorageIDs(placements []VaultPlacement) []string {
 	var ids []string
 	for _, p := range placements {
 		if p.Leader {
@@ -142,7 +114,7 @@ func StorageIDs(placements []TierPlacement) []string {
 }
 
 // SyntheticStoragePrefix is the prefix for synthetic storage IDs used when a node has
-// no file storages (e.g. memory tiers). Format: "node:<nodeID>".
+// no file storages (e.g. memory vaults). Format: "node:<nodeID>".
 const SyntheticStoragePrefix = "node:"
 
 // SyntheticStorageID returns a synthetic storage ID for a node without file storages.
@@ -151,7 +123,7 @@ func SyntheticStorageID(nodeID string) string { return SyntheticStoragePrefix + 
 // NodeIDForStorage resolves a storage ID to its node ID using the provided storage configs.
 // Handles synthetic storage IDs of the form "node:<nodeID>" for nodes without file storages.
 func NodeIDForStorage(storageID string, nscs []NodeStorageConfig) string {
-	// Check synthetic storage IDs first (used for memory tiers on nodes without file storages).
+	// Check synthetic storage IDs first (used for memory vaults on nodes without file storages).
 	if strings.HasPrefix(storageID, SyntheticStoragePrefix) {
 		return storageID[len(SyntheticStoragePrefix):]
 	}
@@ -165,10 +137,10 @@ func NodeIDForStorage(storageID string, nscs []NodeStorageConfig) string {
 	return ""
 }
 
-// StorageIDForNode returns the best storage ID on a given node for a tier.
-// For file/cloud tiers, matches the required storage class.
-// Returns a synthetic storage ID for memory tiers on nodes without matching file storages.
-func StorageIDForNode(nodeID string, tier TierConfig, nscs []NodeStorageConfig) string {
+// StorageIDForNode returns the best storage ID on a given node for a vault.
+// For file/cloud vaults, matches the required storage class.
+// Returns a synthetic storage ID for memory vaults on nodes without matching file storages.
+func StorageIDForNode(nodeID string, v VaultConfig, nscs []NodeStorageConfig) string {
 	idx := slices.IndexFunc(nscs, func(n NodeStorageConfig) bool { return n.NodeID == nodeID })
 	if idx < 0 {
 		// Node has no storage config — use synthetic storage ID.
@@ -177,15 +149,15 @@ func StorageIDForNode(nodeID string, tier TierConfig, nscs []NodeStorageConfig) 
 
 	nsc := nscs[idx]
 	var requiredClass uint32
-	switch tier.Type {
-	case TierTypeFile:
-		// Single storage class for all file tiers (local-only and
+	switch v.Type {
+	case VaultTypeFile:
+		// Single storage class for all file vaults (local-only and
 		// cloud-backed alike). After step 7k, the active chunk and
 		// the warm cache live at the same path under chunkDir, so
 		// distinguishing "active" and "cache" classes serves no
 		// purpose. See gastrolog-4k5mg.
-		requiredClass = tier.StorageClass
-	case TierTypeMemory, TierTypeJSONL:
+		requiredClass = v.StorageClass
+	case VaultTypeMemory, VaultTypeJSONL:
 		// No storage class — pick any storage, or synthetic if none.
 		if len(nsc.FileStorages) > 0 {
 			return nsc.FileStorages[0].ID.String()
@@ -206,7 +178,7 @@ func StorageIDForNode(nodeID string, tier TierConfig, nscs []NodeStorageConfig) 
 }
 
 // LeaderNodeID derives the leader node from placements + storage configs.
-func LeaderNodeID(placements []TierPlacement, nscs []NodeStorageConfig) string {
+func LeaderNodeID(placements []VaultPlacement, nscs []NodeStorageConfig) string {
 	storageID := LeaderStorageID(placements)
 	if storageID == "" {
 		return ""
@@ -217,7 +189,7 @@ func LeaderNodeID(placements []TierPlacement, nscs []NodeStorageConfig) string {
 // FollowerNodeIDs derives unique follower node IDs from placements + storage configs.
 // Multiple same-node placements are deduplicated. Use FollowerTargets for
 // storage-level granularity.
-func FollowerNodeIDs(placements []TierPlacement, nscs []NodeStorageConfig) []string {
+func FollowerNodeIDs(placements []VaultPlacement, nscs []NodeStorageConfig) []string {
 	var nodeIDs []string
 	seen := make(map[string]bool)
 	for _, storageID := range FollowerStorageIDs(placements) {
@@ -239,7 +211,7 @@ type ReplicationTarget struct {
 // FollowerTargets returns one target per follower placement — NOT deduplicated
 // by node. Multiple placements on the same node produce multiple targets,
 // enabling same-node replication across different file storages.
-func FollowerTargets(placements []TierPlacement, nscs []NodeStorageConfig) []ReplicationTarget {
+func FollowerTargets(placements []VaultPlacement, nscs []NodeStorageConfig) []ReplicationTarget {
 	var targets []ReplicationTarget
 	for _, storageID := range FollowerStorageIDs(placements) {
 		nid := NodeIDForStorage(storageID, nscs)

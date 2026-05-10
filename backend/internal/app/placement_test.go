@@ -15,8 +15,8 @@ import (
 )
 
 // leaderPlacement creates a Placements slice with a single leader using a synthetic storage ID.
-func leaderPlacement(nodeID string) []system.TierPlacement {
-	return []system.TierPlacement{{StorageID: system.SyntheticStorageID(nodeID), Leader: true}}
+func leaderPlacement(nodeID string) []system.VaultPlacement {
+	return []system.VaultPlacement{{StorageID: system.SyntheticStorageID(nodeID), Leader: true}}
 }
 
 func newTestPlacement(t *testing.T, localNodeID string, livePeers []string) (*placementManager, *sysmem.Store, *alert.Collector) {
@@ -39,21 +39,14 @@ func newTestPlacement(t *testing.T, localNodeID string, livePeers []string) (*pl
 	return pm, store, alerts
 }
 
-func tierNode(t *testing.T, store *sysmem.Store, tierID glid.GLID) string {
+func vaultNode(t *testing.T, store *sysmem.Store, vaultID glid.GLID) string {
 	t.Helper()
 	ctx := context.Background()
-	tier, err := store.GetTier(ctx, tierID)
-	if err != nil {
-		t.Fatalf("GetTier(%s): %v", tierID, err)
-	}
-	if tier == nil {
-		t.Fatalf("tier %s not found", tierID)
-	}
 	nscs, err := store.ListNodeStorageConfigs(ctx)
 	if err != nil {
 		t.Fatalf("ListNodeStorageConfigs: %v", err)
 	}
-	placements, _ := store.GetTierPlacements(ctx, tierID)
+	placements, _ := store.GetVaultPlacements(ctx, vaultID)
 	return system.LeaderNodeID(placements, nscs)
 }
 
@@ -68,32 +61,28 @@ func hasAlert(alerts *alert.Collector, prefix string) bool {
 
 // ---------- Basic assignment ----------
 
-func TestPlacementSingleNodeMemoryTier(t *testing.T) {
+func TestPlacementSingleNodeMemoryVault(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	pm, store, _ := newTestPlacement(t, "node-1", nil)
 
 	vaultID := glid.New()
-	tierID := glid.New()
-	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v", Type: system.VaultTypeMemory})
 
 	pm.reconcile(ctx)
 
-	if got := tierNode(t, store, tierID); got != "node-1" {
+	if got := vaultNode(t, store, vaultID); got != "node-1" {
 		t.Fatalf("expected node-1, got %q", got)
 	}
 }
 
-func TestPlacementLocalTierRequiresStorageClass(t *testing.T) {
+func TestPlacementLocalVaultRequiresStorageClass(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
 
 	vaultID := glid.New()
-	tierID := glid.New()
-	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "local", Type: system.VaultTypeFile, StorageClass: 1, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "local", Type: system.VaultTypeFile, StorageClass: 1})
 
 	// Only node-2 has storage class 1.
 	_ = store.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
@@ -103,12 +92,12 @@ func TestPlacementLocalTierRequiresStorageClass(t *testing.T) {
 
 	pm.reconcile(ctx)
 
-	if got := tierNode(t, store, tierID); got != "node-2" {
+	if got := vaultNode(t, store, vaultID); got != "node-2" {
 		t.Fatalf("expected node-2, got %q", got)
 	}
 }
 
-func TestPlacementCloudTierMatchesActiveChunkClass(t *testing.T) {
+func TestPlacementCloudVaultMatchesActiveChunkClass(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
@@ -116,13 +105,11 @@ func TestPlacementCloudTierMatchesActiveChunkClass(t *testing.T) {
 	csID := glid.New()
 	_ = store.PutCloudService(ctx, system.CloudService{ID: csID, Name: "s3", Provider: "s3", Bucket: "b"})
 
-	tierID := glid.New()
 	vaultID := glid.New()
-	_ = store.PutTier(ctx, system.TierConfig{
-		ID: tierID, Name: "cloud", Type: system.VaultTypeFile,
-		CloudServiceID: &csID, StorageClass: 2, VaultID: vaultID, Position: 0,
+	_ = store.PutVault(ctx, system.VaultConfig{
+		ID: vaultID, Name: "cloud", Type: system.VaultTypeFile,
+		CloudServiceID: &csID, StorageClass: 2,
 	})
-	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	// Only node-2 has storage class 2.
 	_ = store.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
@@ -132,27 +119,24 @@ func TestPlacementCloudTierMatchesActiveChunkClass(t *testing.T) {
 
 	pm.reconcile(ctx)
 
-	if got := tierNode(t, store, tierID); got != "node-2" {
+	if got := vaultNode(t, store, vaultID); got != "node-2" {
 		t.Fatalf("expected node-2, got %q", got)
 	}
 }
 
-func TestPlacementMemoryTierAnyNodeEligible(t *testing.T) {
+func TestPlacementMemoryVaultAnyNodeEligible(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	// 3 nodes, no storage configs — memory tier should still be assigned.
+	// 3 nodes, no storage configs — memory vault should still be assigned.
 	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2", "node-3"})
 
 	vaultID := glid.New()
-	tierID := glid.New()
-	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "mem", Type: system.VaultTypeMemory})
 
 	pm.reconcile(ctx)
 
-	got := tierNode(t, store, tierID)
-	if got == "" {
-		t.Fatal("expected tier to be assigned, got empty")
+	if got := vaultNode(t, store, vaultID); got == "" {
+		t.Fatal("expected vault to be assigned, got empty")
 	}
 }
 
@@ -164,19 +148,17 @@ func TestPlacementStableAssignment(t *testing.T) {
 	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
 
 	vaultID := glid.New()
-	tierID := glid.New()
-	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "mem", Type: system.VaultTypeMemory})
 
 	pm.reconcile(ctx)
-	first := tierNode(t, store, tierID)
+	first := vaultNode(t, store, vaultID)
 	if first == "" {
-		t.Fatal("expected tier to be assigned after first reconcile")
+		t.Fatal("expected vault to be assigned after first reconcile")
 	}
 
 	// Reconcile again — assignment should be stable.
 	pm.reconcile(ctx)
-	second := tierNode(t, store, tierID)
+	second := vaultNode(t, store, vaultID)
 	if second != first {
 		t.Fatalf("assignment changed: first=%q, second=%q", first, second)
 	}
@@ -188,16 +170,14 @@ func TestPlacementIdempotent(t *testing.T) {
 	pm, store, _ := newTestPlacement(t, "node-1", nil)
 
 	vaultID := glid.New()
-	tierID := glid.New()
-	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "mem", Type: system.VaultTypeMemory})
 
 	pm.reconcile(ctx)
-	first := tierNode(t, store, tierID)
+	first := vaultNode(t, store, vaultID)
 
 	// Run again — should not change.
 	pm.reconcile(ctx)
-	second := tierNode(t, store, tierID)
+	second := vaultNode(t, store, vaultID)
 
 	if first != second {
 		t.Fatalf("reconcile is not idempotent: first=%q, second=%q", first, second)
@@ -210,17 +190,15 @@ func TestPlacementMultipleReconcilesStable(t *testing.T) {
 	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2", "node-3"})
 
 	vaultID := glid.New()
-	tierID := glid.New()
-	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "mem", Type: system.VaultTypeMemory})
 
 	pm.reconcile(ctx)
-	assigned := tierNode(t, store, tierID)
+	assigned := vaultNode(t, store, vaultID)
 
 	// 10 more reconciles — should stay on the same node.
 	for i := 0; i < 10; i++ {
 		pm.reconcile(ctx)
-		if got := tierNode(t, store, tierID); got != assigned {
+		if got := vaultNode(t, store, vaultID); got != assigned {
 			t.Fatalf("reconcile %d changed assignment from %q to %q", i, assigned, got)
 		}
 	}
@@ -235,27 +213,23 @@ func TestPlacementReassignOnNodeDeath(t *testing.T) {
 	pm, store, _ := newTestPlacement(t, "node-1", nil)
 
 	vaultID := glid.New()
-	tierID := glid.New()
-	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "mem", Type: system.VaultTypeMemory})
 
 	pm.reconcile(ctx)
 
-	if got := tierNode(t, store, tierID); got != "node-1" {
+	if got := vaultNode(t, store, vaultID); got != "node-1" {
 		t.Fatalf("expected reassignment to node-1, got %q", got)
 	}
 }
 
-func TestPlacementReassignLocalTierOnNodeDeath(t *testing.T) {
+func TestPlacementReassignLocalVaultOnNodeDeath(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	// node-2 dies. node-1 and node-3 alive, but only node-3 has matching storage.
 	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-3"})
 
 	vaultID := glid.New()
-	tierID := glid.New()
-	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "local", Type: system.VaultTypeFile, StorageClass: 1, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "local", Type: system.VaultTypeFile, StorageClass: 1})
 
 	_ = store.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
 		NodeID:       "node-3",
@@ -264,7 +238,7 @@ func TestPlacementReassignLocalTierOnNodeDeath(t *testing.T) {
 
 	pm.reconcile(ctx)
 
-	if got := tierNode(t, store, tierID); got != "node-3" {
+	if got := vaultNode(t, store, vaultID); got != "node-3" {
 		t.Fatalf("expected reassignment to node-3, got %q", got)
 	}
 }
@@ -275,9 +249,7 @@ func TestPlacementNodeLosesStorageClass(t *testing.T) {
 	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
 
 	vaultID := glid.New()
-	tierID := glid.New()
-	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "local", Type: system.VaultTypeFile, StorageClass: 1, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "local", Type: system.VaultTypeFile, StorageClass: 1})
 
 	// node-1 has no file storages. node-2 has the right class.
 	_ = store.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
@@ -288,7 +260,7 @@ func TestPlacementNodeLosesStorageClass(t *testing.T) {
 	pm.reconcile(ctx)
 
 	// node-1 is alive but ineligible — should reassign to node-2.
-	if got := tierNode(t, store, tierID); got != "node-2" {
+	if got := vaultNode(t, store, vaultID); got != "node-2" {
 		t.Fatalf("expected reassignment to eligible node-2, got %q", got)
 	}
 }
@@ -299,19 +271,17 @@ func TestPlacementNoEligibleNodeClearsAssignment(t *testing.T) {
 	pm, store, alerts := newTestPlacement(t, "node-1", nil)
 
 	vaultID := glid.New()
-	tierID := glid.New()
-	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "local", Type: system.VaultTypeFile, StorageClass: 5, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "local", Type: system.VaultTypeFile, StorageClass: 5})
 
 	pm.reconcile(ctx)
 
-	if got := tierNode(t, store, tierID); got != "" {
+	if got := vaultNode(t, store, vaultID); got != "" {
 		t.Fatalf("expected cleared, got %q", got)
 	}
 
 	// Alert should be set.
-	if !hasAlert(alerts, "tier-unplaced:") {
-		t.Fatal("expected tier-unplaced alert")
+	if !hasAlert(alerts, "vault-unplaced:") {
+		t.Fatal("expected vault-unplaced alert")
 	}
 }
 
@@ -321,18 +291,16 @@ func TestPlacementNoEligibleNodeAlreadyUnassigned(t *testing.T) {
 	pm, store, alerts := newTestPlacement(t, "node-1", nil)
 
 	vaultID := glid.New()
-	tierID := glid.New()
 	// Already unassigned, no eligible node.
-	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "local", Type: system.VaultTypeFile, StorageClass: 5, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "local", Type: system.VaultTypeFile, StorageClass: 5})
 
 	pm.reconcile(ctx)
 
-	if got := tierNode(t, store, tierID); got != "" {
+	if got := vaultNode(t, store, vaultID); got != "" {
 		t.Fatalf("expected still unassigned, got %q", got)
 	}
-	if !hasAlert(alerts, "tier-unplaced:") {
-		t.Fatal("expected alert for unplaceable tier")
+	if !hasAlert(alerts, "vault-unplaced:") {
+		t.Fatal("expected alert for unplaceable vault")
 	}
 }
 
@@ -343,19 +311,16 @@ func TestPlacementLoadBalances(t *testing.T) {
 	ctx := context.Background()
 	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
 
-	vaultID := glid.New()
-	tier1 := glid.New()
-	_ = store.PutTier(ctx, system.TierConfig{ID: tier1, Name: "t1", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0})
+	vault1 := glid.New()
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vault1, Name: "v1", Type: system.VaultTypeMemory})
 
-	tier2 := glid.New()
-	_ = store.PutTier(ctx, system.TierConfig{ID: tier2, Name: "t2", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 1})
-
-	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
+	vault2 := glid.New()
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vault2, Name: "v2", Type: system.VaultTypeMemory})
 
 	pm.reconcile(ctx)
 
-	node1 := tierNode(t, store, tier1)
-	node2 := tierNode(t, store, tier2)
+	node1 := vaultNode(t, store, vault1)
+	node2 := vaultNode(t, store, vault2)
 	if node1 == node2 {
 		t.Fatalf("expected load-balanced across two nodes, both on %q", node1)
 	}
@@ -366,32 +331,30 @@ func TestPlacementLoadBalancesAcrossThreeNodes(t *testing.T) {
 	ctx := context.Background()
 	pm, store, _ := newTestPlacement(t, "node-a", []string{"node-b", "node-c"})
 
-	vaultID := glid.New()
-	var tierIDs []glid.GLID
+	var vaultIDs []glid.GLID
 	for i := 0; i < 6; i++ {
-		tid := glid.New()
-		_ = store.PutTier(ctx, system.TierConfig{ID: tid, Name: "t", Type: system.VaultTypeMemory, VaultID: vaultID, Position: uint32(i)})
-		tierIDs = append(tierIDs, tid)
+		vid := glid.New()
+		_ = store.PutVault(ctx, system.VaultConfig{ID: vid, Name: "v", Type: system.VaultTypeMemory})
+		vaultIDs = append(vaultIDs, vid)
 	}
-	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	pm.reconcile(ctx)
 
-	// Count tiers per node.
+	// Count vaults per node.
 	counts := make(map[string]int)
-	for _, tid := range tierIDs {
-		counts[tierNode(t, store, tid)]++
+	for _, vid := range vaultIDs {
+		counts[vaultNode(t, store, vid)]++
 	}
 
-	// With load balancing, no node should have more than 3 tiers (6 / 3 = 2, +1 for randomness).
+	// With load balancing, no node should have more than 3 vaults (6 / 3 = 2, +1 for randomness).
 	for node, count := range counts {
 		if count > 3 {
-			t.Errorf("node %s has %d tiers, expected at most 3", node, count)
+			t.Errorf("node %s has %d vaults, expected at most 3", node, count)
 		}
 	}
-	// All 3 nodes should have at least 1 tier.
+	// All 3 nodes should have at least 1 vault.
 	if len(counts) != 3 {
-		t.Errorf("expected tiers on 3 nodes, got %d", len(counts))
+		t.Errorf("expected vaults on 3 nodes, got %d", len(counts))
 	}
 }
 
@@ -401,87 +364,54 @@ func TestPlacementRandomTiebreak(t *testing.T) {
 	pm, store, _ := newTestPlacement(t, "node-a", []string{"node-b"})
 
 	vaultID := glid.New()
-	tierID := glid.New()
-	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "mem", Type: system.VaultTypeMemory})
 
 	pm.reconcile(ctx)
 
-	got := tierNode(t, store, tierID)
+	got := vaultNode(t, store, vaultID)
 	if got != "node-a" && got != "node-b" {
-		t.Fatalf("expected tier assigned to node-a or node-b, got %q", got)
+		t.Fatalf("expected vault assigned to node-a or node-b, got %q", got)
 	}
 }
 
-// ---------- Orphaned / edge cases ----------
-
-func TestPlacementOrphanedTierIgnored(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	pm, store, _ := newTestPlacement(t, "node-1", nil)
-
-	tierID := glid.New()
-	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "orphan", Type: system.VaultTypeMemory})
-	// No vault references this tier.
-
-	pm.reconcile(ctx)
-
-	if got := tierNode(t, store, tierID); got != "" {
-		t.Fatalf("expected orphaned tier unassigned, got %q", got)
-	}
-}
+// ---------- Edge cases ----------
 
 func TestPlacementEmptyConfig(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	pm, _, _ := newTestPlacement(t, "node-1", nil)
 
-	// No tiers, no vaults — should not panic.
+	// No vaults — should not panic.
 	pm.reconcile(ctx)
 }
 
-func TestPlacementVaultWithNoTiers(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	pm, store, _ := newTestPlacement(t, "node-1", nil)
-
-	_ = store.PutVault(ctx, system.VaultConfig{ID: glid.New(), Name: "empty"})
-
-	pm.reconcile(ctx)
-	// No panic, no error.
-}
-
-func TestPlacementUnknownTierType(t *testing.T) {
+func TestPlacementUnknownVaultType(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	pm, store, alerts := newTestPlacement(t, "node-1", nil)
 
 	vaultID := glid.New()
-	tierID := glid.New()
-	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "weird", Type: "quantum", VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "weird", Type: "quantum"})
 
 	pm.reconcile(ctx)
 
 	// Unknown type → nodeEligible returns false → no eligible node.
-	if got := tierNode(t, store, tierID); got != "" {
-		t.Fatalf("expected unknown type tier unassigned, got %q", got)
+	if got := vaultNode(t, store, vaultID); got != "" {
+		t.Fatalf("expected unknown type vault unassigned, got %q", got)
 	}
-	if !hasAlert(alerts, "tier-unplaced:") {
-		t.Fatal("expected alert for unplaceable unknown-type tier")
+	if !hasAlert(alerts, "vault-unplaced:") {
+		t.Fatal("expected alert for unplaceable unknown-type vault")
 	}
 }
 
-func TestPlacementLocalTierStorageClassZero(t *testing.T) {
+func TestPlacementLocalVaultStorageClassZero(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	pm, store, alerts := newTestPlacement(t, "node-1", nil)
 
 	vaultID := glid.New()
-	tierID := glid.New()
 	// StorageClass 0 is invalid — nodeHasStorageClass returns false for class 0.
-	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "local", Type: system.VaultTypeFile, StorageClass: 0, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "local", Type: system.VaultTypeFile, StorageClass: 0})
 
 	_ = store.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
 		NodeID:       "node-1",
@@ -490,15 +420,15 @@ func TestPlacementLocalTierStorageClassZero(t *testing.T) {
 
 	pm.reconcile(ctx)
 
-	if got := tierNode(t, store, tierID); got != "" {
-		t.Fatalf("expected StorageClass 0 tier unassigned, got %q", got)
+	if got := vaultNode(t, store, vaultID); got != "" {
+		t.Fatalf("expected StorageClass 0 vault unassigned, got %q", got)
 	}
-	if !hasAlert(alerts, "tier-unplaced:") {
+	if !hasAlert(alerts, "vault-unplaced:") {
 		t.Fatal("expected alert")
 	}
 }
 
-func TestPlacementCloudTierActiveChunkClassZero(t *testing.T) {
+func TestPlacementCloudVaultActiveChunkClassZero(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	pm, store, alerts := newTestPlacement(t, "node-1", nil)
@@ -506,20 +436,18 @@ func TestPlacementCloudTierActiveChunkClassZero(t *testing.T) {
 	csID := glid.New()
 	_ = store.PutCloudService(ctx, system.CloudService{ID: csID, Name: "s3", Provider: "s3", Bucket: "b"})
 
-	tierID := glid.New()
 	vaultID := glid.New()
-	_ = store.PutTier(ctx, system.TierConfig{
-		ID: tierID, Name: "cloud", Type: system.VaultTypeFile,
-		CloudServiceID: &csID, StorageClass: 0, VaultID: vaultID, Position: 0,
+	_ = store.PutVault(ctx, system.VaultConfig{
+		ID: vaultID, Name: "cloud", Type: system.VaultTypeFile,
+		CloudServiceID: &csID, StorageClass: 0,
 	})
-	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	pm.reconcile(ctx)
 
-	if got := tierNode(t, store, tierID); got != "" {
-		t.Fatalf("expected ActiveChunkClass 0 tier unassigned, got %q", got)
+	if got := vaultNode(t, store, vaultID); got != "" {
+		t.Fatalf("expected ActiveChunkClass 0 vault unassigned, got %q", got)
 	}
-	if !hasAlert(alerts, "tier-unplaced:") {
+	if !hasAlert(alerts, "vault-unplaced:") {
 		t.Fatal("expected alert")
 	}
 }
@@ -532,13 +460,11 @@ func TestPlacementAlertClearedWhenPlaced(t *testing.T) {
 	pm, store, alerts := newTestPlacement(t, "node-1", nil)
 
 	vaultID := glid.New()
-	tierID := glid.New()
-	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "local", Type: system.VaultTypeFile, StorageClass: 1, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "local", Type: system.VaultTypeFile, StorageClass: 1})
 
 	// First reconcile: no eligible node → alert set.
 	pm.reconcile(ctx)
-	if !hasAlert(alerts, "tier-unplaced:") {
+	if !hasAlert(alerts, "vault-unplaced:") {
 		t.Fatal("expected alert after first reconcile")
 	}
 
@@ -550,10 +476,10 @@ func TestPlacementAlertClearedWhenPlaced(t *testing.T) {
 
 	pm.reconcile(ctx)
 
-	if got := tierNode(t, store, tierID); got != "node-1" {
+	if got := vaultNode(t, store, vaultID); got != "node-1" {
 		t.Fatalf("expected placed on node-1, got %q", got)
 	}
-	if hasAlert(alerts, "tier-unplaced:") {
+	if hasAlert(alerts, "vault-unplaced:") {
 		t.Fatal("expected alert to be cleared after placement")
 	}
 }
@@ -564,59 +490,31 @@ func TestPlacementAlertClearedOnStableAssignment(t *testing.T) {
 	pm, store, alerts := newTestPlacement(t, "node-1", nil)
 
 	vaultID := glid.New()
-	tierID := glid.New()
-	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "mem", Type: system.VaultTypeMemory})
 
 	// Pre-set an alert manually.
-	alerts.Set("tier-unplaced:"+tierID.String(), alert.Warning, "test", "stale alert")
+	alerts.Set("vault-unplaced:"+vaultID.String(), alert.Warning, "test", "stale alert")
 
 	pm.reconcile(ctx)
 
-	// Tier is correctly assigned → alert should be cleared.
-	if hasAlert(alerts, "tier-unplaced:") {
+	// Vault is correctly assigned → alert should be cleared.
+	if hasAlert(alerts, "vault-unplaced:") {
 		t.Fatal("expected stale alert to be cleared")
 	}
 }
 
-// ---------- Multi-vault / shared tiers ----------
+// ---------- Multiple vaults / mixed types ----------
 
-func TestPlacementTierSharedByMultipleVaults(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	pm, store, _ := newTestPlacement(t, "node-1", nil)
-
-	vault1ID := glid.New()
-	vault2ID := glid.New()
-	tierID := glid.New()
-	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "shared", Type: system.VaultTypeMemory, VaultID: vault1ID, Position: 0})
-
-	// Two vaults reference the same tier.
-	_ = store.PutVault(ctx, system.VaultConfig{ID: vault1ID, Name: "v1"})
-	_ = store.PutVault(ctx, system.VaultConfig{ID: vault2ID, Name: "v2"})
-
-	pm.reconcile(ctx)
-
-	if got := tierNode(t, store, tierID); got != "node-1" {
-		t.Fatalf("expected assigned, got %q", got)
-	}
-}
-
-func TestPlacementMultipleTiersDifferentTypes(t *testing.T) {
+func TestPlacementMultipleVaultsDifferentTypes(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
 
-	vaultID := glid.New()
-	memTier := glid.New()
-	_ = store.PutTier(ctx, system.TierConfig{ID: memTier, Name: "mem", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0})
+	memVault := glid.New()
+	_ = store.PutVault(ctx, system.VaultConfig{ID: memVault, Name: "mem", Type: system.VaultTypeMemory})
 
-	localTier := glid.New()
-	_ = store.PutTier(ctx, system.TierConfig{ID: localTier, Name: "local", Type: system.VaultTypeFile, StorageClass: 1, VaultID: vaultID, Position: 1})
-
-	_ = store.PutVault(ctx, system.VaultConfig{
-		ID: vaultID, Name: "v",
-	})
+	localVault := glid.New()
+	_ = store.PutVault(ctx, system.VaultConfig{ID: localVault, Name: "local", Type: system.VaultTypeFile, StorageClass: 1})
 
 	// Only node-2 has the storage class.
 	_ = store.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
@@ -626,15 +524,15 @@ func TestPlacementMultipleTiersDifferentTypes(t *testing.T) {
 
 	pm.reconcile(ctx)
 
-	// Memory tier: either node. Local tier: must be node-2.
-	memNode := tierNode(t, store, memTier)
-	localNode := tierNode(t, store, localTier)
+	// Memory vault: either node. Local vault: must be node-2.
+	memNode := vaultNode(t, store, memVault)
+	localNode := vaultNode(t, store, localVault)
 
 	if memNode == "" {
-		t.Fatal("memory tier should be assigned")
+		t.Fatal("memory vault should be assigned")
 	}
 	if localNode != "node-2" {
-		t.Fatalf("local tier should be on node-2, got %q", localNode)
+		t.Fatalf("local vault should be on node-2, got %q", localNode)
 	}
 }
 
@@ -645,14 +543,11 @@ func TestPlacementNodeWithMultipleStorageClasses(t *testing.T) {
 	ctx := context.Background()
 	pm, store, _ := newTestPlacement(t, "node-1", nil)
 
-	vaultID := glid.New()
-	tier1 := glid.New()
-	_ = store.PutTier(ctx, system.TierConfig{ID: tier1, Name: "fast", Type: system.VaultTypeFile, StorageClass: 1, VaultID: vaultID, Position: 0})
+	vault1 := glid.New()
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vault1, Name: "fast", Type: system.VaultTypeFile, StorageClass: 1})
 
-	tier2 := glid.New()
-	_ = store.PutTier(ctx, system.TierConfig{ID: tier2, Name: "slow", Type: system.VaultTypeFile, StorageClass: 3, VaultID: vaultID, Position: 1})
-
-	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
+	vault2 := glid.New()
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vault2, Name: "slow", Type: system.VaultTypeFile, StorageClass: 3})
 
 	// node-1 has both classes.
 	_ = store.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
@@ -665,11 +560,11 @@ func TestPlacementNodeWithMultipleStorageClasses(t *testing.T) {
 
 	pm.reconcile(ctx)
 
-	if got := tierNode(t, store, tier1); got != "node-1" {
-		t.Fatalf("fast tier: expected node-1, got %q", got)
+	if got := vaultNode(t, store, vault1); got != "node-1" {
+		t.Fatalf("fast vault: expected node-1, got %q", got)
 	}
-	if got := tierNode(t, store, tier2); got != "node-1" {
-		t.Fatalf("slow tier: expected node-1, got %q", got)
+	if got := vaultNode(t, store, vault2); got != "node-1" {
+		t.Fatalf("slow vault: expected node-1, got %q", got)
 	}
 }
 
@@ -682,14 +577,12 @@ func TestPlacementNilAlerts(t *testing.T) {
 	pm.alerts = nil // no alert collector
 
 	vaultID := glid.New()
-	tierID := glid.New()
-	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "mem", Type: system.VaultTypeMemory})
 
 	// Should not panic.
 	pm.reconcile(ctx)
 
-	if got := tierNode(t, store, tierID); got != "node-1" {
+	if got := vaultNode(t, store, vaultID); got != "node-1" {
 		t.Fatalf("expected node-1, got %q", got)
 	}
 }
@@ -738,22 +631,20 @@ func TestPlacementRF2AssignsSecondary(t *testing.T) {
 	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
 
 	vaultID := glid.New()
-	tierID := glid.New()
-	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.VaultTypeMemory, ReplicationFactor: 2, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "mem", Type: system.VaultTypeMemory, ReplicationFactor: 2})
 
 	pm.reconcile(ctx)
 
-	_, _ = store.GetTier(ctx, tierID)
 	nscs, _ := store.ListNodeStorageConfigs(ctx)
-	if system.LeaderNodeID(func() []system.TierPlacement { p, _ := store.GetTierPlacements(ctx, tierID); return p }(), nscs) == "" {
+	placements, _ := store.GetVaultPlacements(ctx, vaultID)
+	if system.LeaderNodeID(placements, nscs) == "" {
 		t.Fatal("expected leader assigned")
 	}
-	followers := system.FollowerNodeIDs(func() []system.TierPlacement { p, _ := store.GetTierPlacements(ctx, tierID); return p }(), nscs)
+	followers := system.FollowerNodeIDs(placements, nscs)
 	if len(followers) != 1 {
 		t.Fatalf("expected 1 follower, got %d", len(followers))
 	}
-	if followers[0] == system.LeaderNodeID(func() []system.TierPlacement { p, _ := store.GetTierPlacements(ctx, tierID); return p }(), nscs) {
+	if followers[0] == system.LeaderNodeID(placements, nscs) {
 		t.Error("follower should not be the same as leader")
 	}
 }
@@ -764,15 +655,13 @@ func TestPlacementRF1NoSecondaries(t *testing.T) {
 	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
 
 	vaultID := glid.New()
-	tierID := glid.New()
-	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.VaultTypeMemory, ReplicationFactor: 1, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "mem", Type: system.VaultTypeMemory, ReplicationFactor: 1})
 
 	pm.reconcile(ctx)
 
-	_, _ = store.GetTier(ctx, tierID)
 	nscs, _ := store.ListNodeStorageConfigs(ctx)
-	if followers := system.FollowerNodeIDs(func() []system.TierPlacement { p, _ := store.GetTierPlacements(ctx, tierID); return p }(), nscs); len(followers) != 0 {
+	placements, _ := store.GetVaultPlacements(ctx, vaultID)
+	if followers := system.FollowerNodeIDs(placements, nscs); len(followers) != 0 {
 		t.Errorf("expected 0 followers for RF=1, got %d", len(followers))
 	}
 }
@@ -783,19 +672,17 @@ func TestPlacementRF3InsufficientNodes(t *testing.T) {
 	pm, store, alerts := newTestPlacement(t, "node-1", []string{"node-2"})
 
 	vaultID := glid.New()
-	tierID := glid.New()
-	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.VaultTypeMemory, ReplicationFactor: 3, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "mem", Type: system.VaultTypeMemory, ReplicationFactor: 3})
 
 	pm.reconcile(ctx)
 
-	_, _ = store.GetTier(ctx, tierID)
 	nscs, _ := store.ListNodeStorageConfigs(ctx)
+	placements, _ := store.GetVaultPlacements(ctx, vaultID)
 	// RF=3 needs 2 followers, but only 1 other node available.
-	if followers := system.FollowerNodeIDs(func() []system.TierPlacement { p, _ := store.GetTierPlacements(ctx, tierID); return p }(), nscs); len(followers) != 1 {
+	if followers := system.FollowerNodeIDs(placements, nscs); len(followers) != 1 {
 		t.Errorf("expected 1 follower (max available), got %d", len(followers))
 	}
-	if !hasAlert(alerts, "tier-underreplicated:") {
+	if !hasAlert(alerts, "vault-underreplicated:") {
 		t.Error("expected underreplicated alert")
 	}
 }

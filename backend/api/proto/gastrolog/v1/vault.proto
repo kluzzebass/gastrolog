@@ -51,7 +51,7 @@ service VaultService {
 
   // ArchiveChunk transitions a cloud-backed sealed chunk to an offline
   // storage class (Glacier, Deep Archive, Azure Archive). The chunk stays
-  // in the tier but becomes unreadable until restored.
+  // in the vault but becomes unreadable until restored.
   rpc ArchiveChunk(ArchiveChunkRequest) returns (ArchiveChunkResponse);
 
   // RestoreChunk initiates retrieval of an archived chunk. On S3 this is
@@ -97,7 +97,7 @@ message ListChunksRequest {
   string vault = 1;
 
   // When true, return only unsealed (active) chunks from this node's
-  // local tiers — no cross-node fan-out. Used for lightweight 5-second
+  // local vaults — no cross-node fan-out. Used for lightweight 5-second
   // polling of active-chunk stats (record count, bytes) while discrete
   // events (seal, delete, compress) come through the WatchChunks stream.
   // See gastrolog-1jijm.
@@ -146,8 +146,8 @@ message ChunkMeta {
   google.protobuf.Timestamp ingest_end = 10;
   bool cloud_backed = 11; // true = chunk lives in cloud storage (S3/Azure/GCS)
   bool archived = 12;     // true = chunk is in offline storage class (Glacier, Azure Archive)
-  bytes tier_id = 13;     // which tier this chunk belongs to (transitional during gastrolog-55dej)
-  string tier_type = 14;  // tier type: "memory", "file", "cloud" (transitional)
+  bytes vault_id = 13;    // which vault this chunk belongs to
+  string vault_type = 14;  // vault type: "memory", "file", "jsonl"
   bool retention_pending = 15; // true = chunk is marked for retention processing
   string storage_class = 16;   // current cloud storage class (e.g. "GLACIER", "cold", "Archive")
   int32 replica_count = 17;    // how many nodes currently have this chunk (leader + followers that have caught up)
@@ -336,11 +336,10 @@ message ImportRecordsResponse {
 
 message SealVaultRequest {
   string vault = 1;
-  string tier = 2; // optional: seal only this tier (name or ID). Empty = all tiers.
 }
 
 message SealVaultResponse {
-  int32 sealed_count = 1; // number of tiers whose active chunk was sealed
+  int32 sealed_count = 1; // number of vaults whose active chunk was sealed
 }
 
 message RetryUnreadableChunksRequest {
@@ -362,7 +361,7 @@ message ArchiveChunkResponse {}
 message RestoreChunkRequest {
   string vault = 1;
   bytes chunk_id = 2;
-  string restore_tier = 3; // "Expedited"/"Standard"/"Bulk" (S3), "High"/"Standard" (Azure)
+  string restore_speed = 3; // "Expedited"/"Standard"/"Bulk" (S3), "High"/"Standard" (Azure)
   int32 restore_days = 4;  // How long restored copy stays readable (S3 only, 0 = provider default)
 }
 

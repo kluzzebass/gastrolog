@@ -26,12 +26,12 @@ import (
 	hraft "github.com/hashicorp/raft"
 )
 
-// tierTypeKey is the string form of the file-tier type used as a
-// factory-map key. File tier is used (rather than memory tier) because
-// only the file-tier chunk Manager implements SetAnnouncer — the pathway
+// vaultTypeKey is the string form of the file-instance type used as a
+// factory-map key. File instance is used (rather than memory instance) because
+// only the file-instance chunk Manager implements SetAnnouncer — the pathway
 // that propagates chunk metadata events through vault-ctl Raft to
 // followers. Without announcements, replication tests are vacuous.
-const tierTypeKey = string(system.VaultTypeFile)
+const vaultTypeKey = string(system.VaultTypeFile)
 
 // harnessStorageClass is a non-zero storage class so findLocalFileStorage
 // matches the NodeStorageConfig we seed. Value is arbitrary; zero is
@@ -45,7 +45,7 @@ const harnessStorageClass uint32 = 1
 //
 // id is the node's LocalNodeID string — the same value the orchestrator
 // reports as its own identity and the same value the Raft resolver keys
-// on. buildTierRaftMembers converts NodeConfig.ID (a GLID) to its string
+// on. buildVaultRaftMembers converts NodeConfig.ID (a GLID) to its string
 // form and calls NodeAddressResolver with that, so id here MUST be the
 // GLID string form, not a human-readable label.
 type orchRelNode struct {
@@ -65,7 +65,7 @@ type orchRelNode struct {
 // lower-level reliability harness in backend/internal/vaultraft, this one
 // exercises the full orchestrator wiring: ApplyConfig, AppendToVault,
 // ListAllChunkMetas, the scheduler, vault readiness gating, and the
-// vault-ctl Raft group built via createTierRaftGroupVaultCtl.
+// vault-ctl Raft group built via createVaultRaftGroupVaultCtl.
 //
 // Cross-node cluster RPCs (RecordForwarder, RemoteTransferrer,
 // ChunkReplicator) are left nil — scenarios that need them should stub via
@@ -77,10 +77,9 @@ type orchRelHarness struct {
 	nodes        map[string]*orchRelNode
 	nodeIDs      []string
 	cfgStore     system.Store
-	// vaultID/tierID are the default (first) vault's identifiers; kept as
-	// top-level fields for the single-vault convenience API.
+	// vaultID is the default (first) vault's identifier; kept as a top-level
+	// field for the single-vault convenience API.
 	vaultID glid.GLID
-	tierID  glid.GLID
 	// vaults holds every configured vault, with the default vault as
 	// vaults[0]. Multi-vault scenarios use addVaultSpec during setup to
 	// add more, each with its own node subset.
@@ -90,14 +89,13 @@ type orchRelHarness struct {
 }
 
 // vaultSpec identifies one vault in the harness along with which nodes
-// participate in its tier-Raft group. First node in nodeIdxs is the
+// participate in its vault-ctl Raft group. First node in nodeIdxs is the
 // placement leader. For multi-vault scenarios, use orchRelOptions to
 // register additional vaultSpecs before startup.
 type vaultSpec struct {
 	label    string    // human label for test output ("A", "B", ...)
 	id       glid.GLID // vault GLID
-	tierID   glid.GLID // tier GLID
-	nodeIdxs []int     // indexes into h.nodeIDs; first is tier leader
+	nodeIdxs []int     // indexes into h.nodeIDs; first is vault leader
 }
 
 // orchRelOption configures a harness before it boots. Applied between
@@ -106,17 +104,18 @@ type vaultSpec struct {
 type orchRelOption func(*orchRelHarness)
 
 // withExtraVault registers an additional vault placed on the given
-// node indexes (into h.nodeIDs). The first index is the tier leader.
+// node indexes (into h.nodeIDs). The first index is the vault leader.
 // len(nodeIdxs) must be an odd number >= 1 for valid Raft quorum, and
 // each index must be a valid h.nodeIDs index. The vault is labeled
 // "B" (or "C", "D", ...) based on insertion order.
 func withExtraVault(nodeIdxs []int) orchRelOption {
 	return func(h *orchRelHarness) {
 		label := string(rune('B' + len(h.vaults) - 1))
+		// Vault and instance share the same ID — instance ID equals vault ID.
+		id := glid.New()
 		h.vaults = append(h.vaults, vaultSpec{
 			label:    label,
-			id:       glid.New(),
-			tierID:   glid.New(),
+			id:       id,
 			nodeIdxs: nodeIdxs,
 		})
 	}
@@ -129,7 +128,7 @@ const (
 )
 
 // newOrchRelHarness boots n nodes with a shared config store, at least one
-// file-tier vault (the default), and real vault-ctl Raft. Additional vaults
+// file-instance vault (the default), and real vault-ctl Raft. Additional vaults
 // can be registered via options (see withExtraVault). Blocks until every
 // node reports LocalVaultsReplicationReady.
 func newOrchRelHarness(t *testing.T, n int, opts ...orchRelOption) *orchRelHarness {
@@ -139,13 +138,14 @@ func newOrchRelHarness(t *testing.T, n int, opts ...orchRelOption) *orchRelHarne
 	}
 
 	sharedCtx, sharedCancel := context.WithCancel(context.Background())
+	// Vault and instance share the same ID — instance ID equals vault ID.
+	defaultID := glid.New()
 	h := &orchRelHarness{
 		t:            t,
 		nodes:        make(map[string]*orchRelNode, n),
 		nodeIDs:      make([]string, 0, n),
 		cfgStore:     sysmem.NewStore(),
-		vaultID:      glid.New(),
-		tierID:       glid.New(),
+		vaultID:      defaultID,
 		sharedCtx:    sharedCtx,
 		sharedCancel: sharedCancel,
 	}
@@ -157,7 +157,6 @@ func newOrchRelHarness(t *testing.T, n int, opts ...orchRelOption) *orchRelHarne
 	h.vaults = []vaultSpec{{
 		label:    "A",
 		id:       h.vaultID,
-		tierID:   h.tierID,
 		nodeIdxs: defaultIdxs,
 	}}
 
@@ -168,7 +167,7 @@ func newOrchRelHarness(t *testing.T, n int, opts ...orchRelOption) *orchRelHarne
 
 	// Phase 1: create cluster servers so peer addresses exist before we
 	// build the NodeAddressResolver. Each node's identity is a GLID
-	// (its string form) so buildTierRaftMembers' call to
+	// (its string form) so buildVaultRaftMembers' call to
 	// NodeAddressResolver(nodeID) is well-defined.
 	for i := range n {
 		nodeGLID := glid.New()
@@ -207,7 +206,7 @@ func newOrchRelHarness(t *testing.T, n int, opts ...orchRelOption) *orchRelHarne
 		}
 	})
 
-	// Phase 3: seed shared config (vault + tier + placements). Every node
+	// Phase 3: seed shared config (vault + instance + placements). Every node
 	// reads the same sysmem store so ApplyConfig produces the same view.
 	h.seedSharedConfig()
 
@@ -221,7 +220,7 @@ func newOrchRelHarness(t *testing.T, n int, opts ...orchRelOption) *orchRelHarne
 	return h
 }
 
-// seedSharedConfig writes a vault, a file-backed tier, and tier placements
+// seedSharedConfig writes a vault, a file-backed instance, and vault placements
 // (one per node, first is leader) to the shared config store. Also
 // registers per-node FileStorage entries so findLocalFileStorage can
 // resolve a chunk directory on each node.
@@ -231,7 +230,7 @@ func (h *orchRelHarness) seedSharedConfig() {
 
 	// Register every node with its canonical GLID. Also register a
 	// NodeStorageConfig containing a FileStorage with a per-node chunk
-	// directory — the file-tier factory requires `dir` in its params, and
+	// directory — the file-instance factory requires `dir` in its params, and
 	// that comes from findLocalFileStorage at ApplyConfig time.
 	for _, id := range h.nodeIDs {
 		nodeGLID, err := glid.Parse(id)
@@ -262,39 +261,31 @@ func (h *orchRelHarness) seedSharedConfig() {
 		}
 	}
 
-	// Register every vault + tier + placement. vaults[0] is the default;
+	// Register every vault + instance + placement. vaults[0] is the default;
 	// additional entries come from withExtraVault options.
 	for _, v := range h.vaults {
 		if err := h.cfgStore.PutVault(ctx, system.VaultConfig{
-			ID:   v.id,
-			Name: "orch-rel-vault-" + v.label,
+			ID:           v.id,
+			Name:         "orch-rel-vault-" + v.label,
+			Type:         system.VaultTypeFile,
+			StorageClass: harnessStorageClass,
 		}); err != nil {
 			h.t.Fatalf("PutVault %s: %v", v.label, err)
 		}
-		if err := h.cfgStore.PutTier(ctx, system.TierConfig{
-			ID:           v.tierID,
-			Name:         "orch-rel-tier-" + v.label,
-			Type:         system.VaultTypeFile,
-			VaultID:      v.id,
-			Position:     0,
-			StorageClass: harnessStorageClass,
-		}); err != nil {
-			h.t.Fatalf("PutTier %s: %v", v.label, err)
-		}
 		// Placements: one per participating node. First listed is leader.
-		placements := make([]system.TierPlacement, 0, len(v.nodeIdxs))
+		placements := make([]system.VaultPlacement, 0, len(v.nodeIdxs))
 		for pos, idx := range v.nodeIdxs {
 			if idx < 0 || idx >= len(h.nodeIDs) {
 				h.t.Fatalf("vault %s: invalid node index %d (have %d nodes)", v.label, idx, len(h.nodeIDs))
 			}
 			n := h.nodes[h.nodeIDs[idx]]
-			placements = append(placements, system.TierPlacement{
+			placements = append(placements, system.VaultPlacement{
 				StorageID: n.fileStorageID.String(),
 				Leader:    pos == 0,
 			})
 		}
-		if err := h.cfgStore.SetTierPlacements(ctx, v.tierID, placements); err != nil {
-			h.t.Fatalf("SetTierPlacements %s: %v", v.label, err)
+		if err := h.cfgStore.SetVaultPlacements(ctx, v.id, placements); err != nil {
+			h.t.Fatalf("SetVaultPlacements %s: %v", v.label, err)
 		}
 	}
 }
@@ -336,10 +327,10 @@ func (h *orchRelHarness) startNode(id string) {
 		GroupManager:        groupMgr,
 		NodeAddressResolver: h.resolver(),
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			tierTypeKey: chunkfile.NewFactory(),
+			vaultTypeKey: chunkfile.NewFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			tierTypeKey: indexfile.NewFactory(),
+			vaultTypeKey: indexfile.NewFactory(),
 		},
 		Logger: logger,
 	}
@@ -376,7 +367,7 @@ func (h *orchRelHarness) resolver() func(string) (string, bool) {
 
 // stopNode shuts down the orchestrator, then the group manager, then the
 // WAL, then the cluster server. Order matters: orchestrator owns the
-// scheduler jobs that still touch tier managers; the group manager keeps
+// scheduler jobs that still touch instance managers; the group manager keeps
 // Raft running.
 func (h *orchRelHarness) stopNode(id string) {
 	n, ok := h.nodes[id]
@@ -489,13 +480,13 @@ func (h *orchRelHarness) waitForAllReady() {
 	h.t.Fatalf("vaults not ready after %s on: %v", orchHarnessReadyWait, notReady)
 }
 
-// appendOnLeaderForVault appends to a specific vault's tier leader (the
+// appendOnLeaderForVault appends to a specific vault's vault leader (the
 // vault-ctl Raft leader for that vault, not the placement leader).
 // Parameterized variant of appendOnLeader used by multi-vault tests.
 func (h *orchRelHarness) appendOnLeaderForVault(v vaultSpec, rec chunk.Record) error {
 	h.t.Helper()
 	leader := h.waitForVaultCtlLeaderForVault(v)
-	return leader.orch.AppendToVault(v.id, v.tierID, chunk.ChunkID{}, rec)
+	return leader.orch.AppendToVault(v.id, chunk.ChunkID{}, rec)
 }
 
 // sealOnLeaderForVault seals the active chunk for a specific vault on
@@ -503,8 +494,8 @@ func (h *orchRelHarness) appendOnLeaderForVault(v vaultSpec, rec chunk.Record) e
 func (h *orchRelHarness) sealOnLeaderForVault(v vaultSpec) {
 	h.t.Helper()
 	leader := h.waitForVaultCtlLeaderForVault(v)
-	if _, err := leader.orch.SealActive(v.id, glid.Nil); err != nil {
-		h.t.Fatalf("SealActive vault %s: %v", v.label, err)
+	if _, err := leader.orch.SealActive(v.id); err != nil {
+		h.t.Fatalf("SealActiveChunk vault %s: %v", v.label, err)
 	}
 }
 
@@ -535,7 +526,7 @@ func (h *orchRelHarness) waitForVaultCtlLeaderForVault(v vaultSpec) *orchRelNode
 }
 
 // chunkIDsOnNodeForVault returns the chunk IDs in the given vault's
-// tier FSM on `id`. Returns nil if the node doesn't host the vault.
+// vault-ctl FSM on `id`. Returns nil if the node doesn't host the vault.
 func (h *orchRelHarness) chunkIDsOnNodeForVault(v vaultSpec, id string) map[chunk.ChunkID]bool {
 	n := h.nodes[id]
 	if n == nil || n.groupMgr == nil {
@@ -549,7 +540,7 @@ func (h *orchRelHarness) chunkIDsOnNodeForVault(v vaultSpec, id string) map[chun
 	if !ok || vfsm == nil {
 		return nil
 	}
-	sub := vfsm.TierFSM(v.tierID)
+	sub := vfsm.VaultFSM(v.id)
 	if sub == nil {
 		return map[chunk.ChunkID]bool{}
 	}
@@ -561,7 +552,7 @@ func (h *orchRelHarness) chunkIDsOnNodeForVault(v vaultSpec, id string) map[chun
 	return out
 }
 
-// chunkIDsOnNode returns the chunk IDs present in the vault-ctl tier FSM on
+// chunkIDsOnNode returns the chunk IDs present in the vault-ctl vault-ctl FSM on
 // a node. Reads the replicated metadata directly instead of via
 // ListAllChunkMetas — ListAllChunkMetas overlays FSM state onto the local
 // chunk-manager view, which is empty on nodes that are not the vault-ctl
@@ -579,7 +570,7 @@ func (h *orchRelHarness) chunkIDsOnNode(id string) map[chunk.ChunkID]bool {
 	if !ok || vfsm == nil {
 		return nil
 	}
-	sub := vfsm.TierFSM(h.tierID)
+	sub := vfsm.VaultFSM(h.vaultID)
 	if sub == nil {
 		return map[chunk.ChunkID]bool{}
 	}
@@ -594,7 +585,7 @@ func (h *orchRelHarness) chunkIDsOnNode(id string) map[chunk.ChunkID]bool {
 // chunkIDsOnLeader returns the chunk IDs as observed by the current
 // vault-ctl Raft leader. Reading from the leader avoids a flaky pattern
 // where `chunkIDsOnNode(h.nodeIDs[0])` is called immediately after
-// `sealOnLeader()`: SealActive only blocks on the leader's local FSM
+// `sealOnLeader()`: SealActiveChunk only blocks on the leader's local FSM
 // apply, so a non-leader at h.nodeIDs[0] can still be lagging and
 // return an empty/stale set as the test's "expected".
 func (h *orchRelHarness) chunkIDsOnLeader() map[chunk.ChunkID]bool {
@@ -681,17 +672,17 @@ func formatChunkSnapshot(m map[string]map[chunk.ChunkID]bool) string {
 func (h *orchRelHarness) appendOnLeader(rec chunk.Record) error {
 	h.t.Helper()
 	leader := h.waitForVaultCtlLeader()
-	return leader.orch.AppendToVault(h.vaultID, h.tierID, chunk.ChunkID{}, rec)
+	return leader.orch.AppendToVault(h.vaultID, chunk.ChunkID{}, rec)
 }
 
-// sealOnLeader seals the active chunk on every tier of the vault, on the
+// sealOnLeader seals the active chunk on every instance of the vault, on the
 // vault-ctl Raft leader. Sealing on a non-leader would skip the CmdSealChunk
 // announcement.
 func (h *orchRelHarness) sealOnLeader() {
 	h.t.Helper()
 	leader := h.waitForVaultCtlLeader()
-	if _, err := leader.orch.SealActive(h.vaultID, glid.Nil); err != nil {
-		h.t.Fatalf("SealActive: %v", err)
+	if _, err := leader.orch.SealActive(h.vaultID); err != nil {
+		h.t.Fatalf("SealActiveChunk: %v", err)
 	}
 }
 

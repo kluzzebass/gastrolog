@@ -23,9 +23,10 @@ import (
 // Used by the ForwardRecords handler to write received records.
 type RecordAppender func(ctx context.Context, vaultID glid.GLID, rec chunk.Record) error
 
-// RecordTierAppender appends a single record to a specific tier in a local vault.
-// Used by the ForwardRecords handler when tier_id is set (inter-tier transition).
-type RecordTierAppender func(ctx context.Context, vaultID, tierID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error
+// VaultRecordAppender appends a single record to a local vault, preserving
+// the leader's chunk-ID assignment. Used by the ForwardRecords handler for
+// per-record replication from a leader to its followers.
+type VaultRecordAppender func(ctx context.Context, vaultID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error
 
 // SearchExecutor runs a search on a local vault and returns results.
 // For regular searches, it returns an iterator over records (the caller
@@ -79,14 +80,9 @@ type ExportToVaultExecutor func(ctx context.Context, expression string, targetVa
 // Used by the ForwardImportRecords handler for cross-node chunk migration.
 type RecordImporter func(ctx context.Context, vaultID glid.GLID, next chunk.RecordIterator) error
 
-// TierRecordImporter imports records as a sealed chunk in a specific tier,
+// VaultRecordImporter imports records as a sealed chunk in a vault,
 // preserving the original chunk ID. Used for sealed-chunk replication.
-type TierRecordImporter func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error
-
-// TierStreamAppender appends streamed records to a tier's active chunk.
-// Used for tier transitions — records flow into the destination tier like
-// normal ingestion. The tier's rotation policy handles sealing.
-type TierStreamAppender func(ctx context.Context, vaultID, tierID glid.GLID, next chunk.RecordIterator) error
+type VaultRecordImporter func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error
 
 // ManagedFileReader opens a managed file for streaming to a peer.
 // Returns the original filename, a ReadCloser for the content, and the SHA256 hex hash.
@@ -104,13 +100,6 @@ func parseVaultID(raw []byte) (glid.GLID, error) {
 	return glid.FromBytes(raw), nil
 }
 
-func parseTierID(raw []byte) (glid.GLID, error) {
-	if len(raw) < glid.Size {
-		return glid.Nil, status.Error(codes.InvalidArgument, "invalid tier_id: too short")
-	}
-	return glid.FromBytes(raw), nil
-}
-
 func parseChunkID(raw []byte) (chunk.ChunkID, error) {
 	if len(raw) < glid.Size {
 		return chunk.ChunkID{}, status.Error(codes.InvalidArgument, "invalid chunk_id: too short")
@@ -124,9 +113,9 @@ func (s *Server) SetRecordAppender(fn RecordAppender) {
 	s.recordAppender = fn
 }
 
-// SetRecordTierAppender injects the callback for tier-targeted forwarding.
-func (s *Server) SetRecordTierAppender(fn RecordTierAppender) {
-	s.recordTierAppender = fn
+// SetVaultRecordAppender injects the callback for chunk-ID-preserving forwarding.
+func (s *Server) SetVaultRecordAppender(fn VaultRecordAppender) {
+	s.recordAppenderForVault = fn
 }
 
 // SetRecordImporter injects the callback for importing transferred records.
@@ -135,14 +124,9 @@ func (s *Server) SetRecordImporter(fn RecordImporter) {
 	s.recordImporter = fn
 }
 
-// SetTierRecordImporter injects the callback for tier-targeted sealed-chunk imports.
-func (s *Server) SetTierRecordImporter(fn TierRecordImporter) {
-	s.tierRecordImporter = fn
-}
-
-// SetTierStreamAppender injects the callback for streaming records to a tier's active chunk.
-func (s *Server) SetTierStreamAppender(fn TierStreamAppender) {
-	s.tierStreamAppender = fn
+// SetVaultRecordImporter injects the callback for chunk-ID-preserving sealed-chunk imports.
+func (s *Server) SetVaultRecordImporter(fn VaultRecordImporter) {
+	s.vaultRecordImporter = fn
 }
 
 // SetSearchExecutor injects the callback for handling remote search requests.
@@ -216,8 +200,8 @@ func (s *Server) SetManagedFileIDs(fn ManagedFileIDsLister) {
 }
 
 // forwardRecords handles the unary ForwardRecords RPC. Used by retention
-// eject to send records to the node owning the destination vault. Records
-// are appended to the vault's active chunk (no tier targeting).
+// routing to send records to the node owning the destination vault.
+// Records are appended to the vault's active chunk.
 func (s *Server) forwardRecords(ctx context.Context, req *gastrologv1.ForwardRecordsRequest) (*gastrologv1.ForwardRecordsResponse, error) {
 	if s.recordAppender == nil {
 		return nil, status.Error(codes.Unavailable, "record appender not configured")
@@ -281,8 +265,9 @@ func streamForwardRecordsHandler(srv any, stream grpc.ServerStream) error {
 		}
 
 		// StreamForwardRecords is exclusively the cross-node vault routing
-		// path since gastrolog-5c6fp — tier-targeted replication goes through
-		// ChunkReplication instead. Always append as a regular vault record.
+		// path since gastrolog-5c6fp — chunk-ID-preserving replication goes
+		// through ChunkReplication instead. Always append as a regular
+		// vault record.
 		for _, exportRec := range msg.GetRecords() {
 			rec := convert.ExportToRecord(exportRec)
 			if appendErr := s.recordAppender(stream.Context(), vaultID, rec); appendErr != nil {
@@ -311,7 +296,7 @@ func forwardImportRecordsStreamHandler(srv any, stream grpc.ServerStream) error 
 		return status.Error(codes.Unavailable, "record importer not configured")
 	}
 
-	// Read first message to get vault_id and optional tier_id.
+	// Read first message to get vault_id.
 	first := &gastrologv1.ImportRecordMessage{}
 	err := s.recvOrShutdown(stream, first)
 	if errors.Is(err, io.EOF) {
@@ -329,18 +314,6 @@ func forwardImportRecordsStreamHandler(srv any, stream grpc.ServerStream) error 
 	vaultID, err := parseVaultID(first.GetVaultId())
 	if err != nil {
 		return err
-	}
-
-	// tier_id routes the stream to a specific tier's active chunk (used by
-	// StreamToTier for tier transitions). Empty tier_id means the import
-	// creates a new sealed chunk in the vault (used by TransferRecords for
-	// cross-node chunk migration).
-	var tierID glid.GLID
-	if len(first.GetTierId()) >= glid.Size {
-		tierID, err = parseTierID(first.GetTierId())
-		if err != nil {
-			return err
-		}
 	}
 
 	// Build iterator: yields first record, then reads from stream.
@@ -371,14 +344,8 @@ func forwardImportRecordsStreamHandler(srv any, stream grpc.ServerStream) error 
 		return convert.ExportToRecord(msg.GetRecord()), nil
 	})
 
-	if tierID != glid.Nil && s.tierStreamAppender != nil {
-		if err := s.tierStreamAppender(stream.Context(), vaultID, tierID, next); err != nil {
-			return status.Errorf(codes.Internal, "tier stream append: %v", err)
-		}
-	} else {
-		if err := s.recordImporter(stream.Context(), vaultID, next); err != nil {
-			return status.Errorf(codes.Internal, "import records: %v", err)
-		}
+	if err := s.recordImporter(stream.Context(), vaultID, next); err != nil {
+		return status.Errorf(codes.Internal, "import records: %v", err)
 	}
 
 	return stream.SendMsg(&gastrologv1.ForwardRecordsResponse{RecordsWritten: count})
@@ -452,7 +419,7 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 		})
 	}
 
-	// No results (vault has no leader tiers on this node).
+	// No results (vault has no leader instance on this node).
 	if searchIter == nil {
 		return stream.SendMsg(&gastrologv1.ForwardSearchResponse{Histogram: histogram})
 	}
@@ -659,18 +626,18 @@ func (s *Server) forwardSealVault(ctx context.Context, req *gastrologv1.ForwardS
 	return &gastrologv1.ForwardSealVaultResponse{}, nil
 }
 
-// SealTierExecutor seals a specific tier's active chunk on this node.
-// Invoked by the ChunkReplication stream handler.
-type SealTierExecutor func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error
+// ChunkSealExecutor seals a specific chunk on this node, gated on the
+// expected chunk ID. Invoked by the ChunkReplication stream handler.
+type ChunkSealExecutor func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID) error
 
-// SetSealTierExecutor injects the callback for handling ChunkReplicationSeal commands.
-func (s *Server) SetSealTierExecutor(fn SealTierExecutor) {
-	s.sealTierExecutor = fn
+// SetChunkSealExecutor injects the callback for handling ChunkReplicationSeal commands.
+func (s *Server) SetChunkSealExecutor(fn ChunkSealExecutor) {
+	s.chunkSealExecutor = fn
 }
 
-// DeleteChunkExecutor deletes a specific sealed chunk from a tier on this node.
-// Invoked by the ChunkReplication stream handler.
-type DeleteChunkExecutor func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error
+// DeleteChunkExecutor deletes a specific sealed chunk from a vault on this
+// node. Invoked by the ChunkReplication stream handler.
+type DeleteChunkExecutor func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID) error
 
 // SetDeleteChunkExecutor injects the callback for handling ChunkReplicationDelete commands.
 func (s *Server) SetDeleteChunkExecutor(fn DeleteChunkExecutor) {
@@ -742,13 +709,10 @@ func (s *Server) forwardApply(ctx context.Context, req *gastrologv1.ForwardApply
 }
 
 // forwardVaultApply handles the ForwardVaultApply RPC. The payload is a
-// vault-ctl Raft FSM command — either an OpVaultChunkFSM-wrapped tierfsm
+// vault-ctl Raft FSM command — either an OpVaultChunkFSM-wrapped vaultctlfsm
 // command (see NewVaultCtlChunkApplyForwarder) or a native vault-ctl
 // command. The group ID is the vault-ctl Raft group ID. Dispatches to
 // the shared groupApplyFn.
-//
-// Replaces the historical forwardTierApply path during the vault refactor
-// (gastrolog-257l7); the two had identical schema and semantics.
 func (s *Server) forwardVaultApply(ctx context.Context, req *gastrologv1.ForwardVaultApplyRequest) (*gastrologv1.ForwardVaultApplyResponse, error) {
 	if s.groupApplyFn == nil {
 		return nil, status.Error(codes.Unavailable, "group apply function not configured")
@@ -776,11 +740,7 @@ func (s *Server) requestReplicaCatchup(ctx context.Context, req *gastrologv1.Req
 	if len(req.GetVaultId()) != glid.Size {
 		return nil, status.Errorf(codes.InvalidArgument, "vault_id: expected %d bytes, got %d", glid.Size, len(req.GetVaultId()))
 	}
-	if len(req.GetTierId()) != glid.Size {
-		return nil, status.Errorf(codes.InvalidArgument, "tier_id: expected %d bytes, got %d", glid.Size, len(req.GetTierId()))
-	}
 	vaultID := glid.FromBytes(req.GetVaultId())
-	tierID := glid.FromBytes(req.GetTierId())
 	chunkIDs := make([]chunk.ChunkID, 0, len(req.GetChunkIds()))
 	for i, raw := range req.GetChunkIds() {
 		if len(raw) != 16 {
@@ -794,7 +754,7 @@ func (s *Server) requestReplicaCatchup(ctx context.Context, req *gastrologv1.Req
 	if requesterNodeID == "" {
 		return nil, status.Error(codes.InvalidArgument, "requester_node_id is required")
 	}
-	scheduled, err := s.replicaCatchupFn(ctx, vaultID, tierID, chunkIDs, requesterNodeID)
+	scheduled, err := s.replicaCatchupFn(ctx, vaultID, chunkIDs, requesterNodeID)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "replica catchup: %v", err)
 	}

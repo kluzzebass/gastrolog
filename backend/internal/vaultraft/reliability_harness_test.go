@@ -12,7 +12,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/raftwal"
-	"gastrolog/internal/vaultraft/tierfsm"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
 
 	hraft "github.com/hashicorp/raft"
 )
@@ -39,7 +39,7 @@ type reliabilityNode struct {
 // Use for scenarios that must exercise the full Raft/FSM stack: restart
 // survival, leader failover, partition heal, mid-apply crash. For scenarios
 // that only need multiple orchestrators but not real Raft, use
-// server.setupMultiNode (TierTypeMemory, no Raft).
+// server.setupMultiNode (VaultTypeMemory, no Raft).
 type reliabilityHarness struct {
 	t         *testing.T
 	nodeIDs   []string
@@ -214,19 +214,19 @@ func (h *reliabilityHarness) leader() *reliabilityNode {
 	return h.nodes[h.waitForLeader()]
 }
 
-// applyTierCreate submits a CmdCreateChunk to the vault FSM via the current
+// applyInstanceCreate submits a CmdCreateChunk to the vault FSM via the current
 // leader. Used by scenarios that want to populate FSM state.
-func (h *reliabilityHarness) applyTierCreate(tierID glid.GLID, chunkID chunk.ChunkID, at time.Time) {
+func (h *reliabilityHarness) applyInstanceCreate(vaultID glid.GLID, chunkID chunk.ChunkID, at time.Time) {
 	h.t.Helper()
 	leader := h.leader()
-	wire := tierfsm.MarshalCreateChunk(chunkID, at, at, at)
-	cmd := MarshalVaultChunkCommand(tierID, wire)
+	wire := vaultctlfsm.MarshalCreateChunk(chunkID, at, at, at)
+	cmd := MarshalVaultChunkCommand(vaultID, wire)
 	fut := leader.raft.Apply(cmd, 2*time.Second)
 	if err := fut.Error(); err != nil {
-		h.t.Fatalf("apply tier create: %v", err)
+		h.t.Fatalf("apply instance create: %v", err)
 	}
 	if r, ok := fut.Response().(error); ok && r != nil {
-		h.t.Fatalf("apply tier create FSM error: %v", r)
+		h.t.Fatalf("apply instance create FSM error: %v", r)
 	}
 }
 
@@ -310,14 +310,14 @@ func (h *reliabilityHarness) shutdown() {
 
 // --- Divergence assertions ---
 
-// tierFSMFingerprint produces a deterministic, comparable snapshot of a
-// tier sub-FSM's state: sorted chunk IDs with their seal/compressed state,
-// sorted transition receipts, sorted tombstone IDs. Two fingerprints that
-// string-equal represent identical replicated state.
-func tierFSMFingerprint(t *tierfsm.FSM) string {
+// instanceFSMFingerprint produces a deterministic, comparable snapshot of
+// an vault sub-FSM's state: sorted chunk IDs with their seal/compressed
+// state, sorted transition receipts, sorted tombstone IDs. Two fingerprints
+// that string-equal represent identical replicated state.
+func instanceFSMFingerprint(t *vaultctlfsm.FSM) string {
 	entries := t.List()
 	ids := make([]chunk.ChunkID, len(entries))
-	byID := make(map[chunk.ChunkID]tierfsm.ManifestEntry, len(entries))
+	byID := make(map[chunk.ChunkID]vaultctlfsm.ManifestEntry, len(entries))
 	for i, e := range entries {
 		ids[i] = e.ID
 		byID[e.ID] = e
@@ -339,25 +339,25 @@ func tierFSMFingerprint(t *tierfsm.FSM) string {
 	return sb.String()
 }
 
-// vaultFSMFingerprint deterministically encodes every tier sub-FSM in the
-// vault FSM. Two vault FSMs with equal fingerprints have converged.
+// vaultFSMFingerprint deterministically encodes every vault sub-FSM in
+// the vault FSM. Two vault FSMs with equal fingerprints have converged.
 func vaultFSMFingerprint(f *FSM) string {
-	f.tierMu.Lock()
-	ids := make([]glid.GLID, 0, len(f.tiers))
-	for id := range f.tiers {
+	f.mu.Lock()
+	ids := make([]glid.GLID, 0, len(f.vaults))
+	for id := range f.vaults {
 		ids = append(ids, id)
 	}
-	f.tierMu.Unlock()
+	f.mu.Unlock()
 	slices.SortFunc(ids, compareGLID)
 
 	var sb fingerprintBuilder
 	for _, id := range ids {
-		sb.writef("tier=%x\n", id[:])
-		f.tierMu.Lock()
-		sub := f.tiers[id]
-		f.tierMu.Unlock()
+		sb.writef("vault=%x\n", id[:])
+		f.mu.Lock()
+		sub := f.vaults[id]
+		f.mu.Unlock()
 		if sub != nil {
-			sb.write(tierFSMFingerprint(sub))
+			sb.write(instanceFSMFingerprint(sub))
 		}
 	}
 	return sb.String()

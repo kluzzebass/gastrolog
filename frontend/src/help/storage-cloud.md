@@ -1,17 +1,19 @@
-# Cloud Tier
+# Cloud-backed Vault
 
-Stores sealed chunks in cloud object storage (S3, GCS, or Azure Blob Storage). The active chunk lives on local disk — only sealed chunks are uploaded. After upload, the local copy is deleted and queries fetch data via range requests.
+A **file vault with a cloud service binding**. The active chunk lives on local disk — only sealed chunks are uploaded to S3, GCS, or Azure Blob Storage. After upload, queries fetch the chunk's records via HTTP range requests; a local **warm cache** keeps frequently-read chunks on disk.
 
 ## Settings
 
 | Setting | Description |
 |---------|-------------|
 | Cloud Service | Which [cloud storage endpoint](help:storage-config) to use for sealed chunks. |
-| Active Chunk Class | The [file storage](help:storage-config) class for the local active chunk. Fast storage recommended. |
-| Cache Class | The file storage class for cached cloud chunks during queries. Can be slower. |
+| Storage Class | The [file storage](help:storage-config) class for the local active chunk and the warm cache. |
 | Replication Factor | Number of copies. Each replica has its own local active chunk; sealed chunks are shared in the cloud. |
 | Rotation Policy | When to seal the active chunk and upload it. |
-| Retention Rules | What to do with aged-out cloud chunks — delete from the cloud store. |
+| Retention Rules | What to do with aged-out cloud chunks — delete from the cloud store, or send records through the routing engine to another vault. |
+| Cache Eviction | `lru` (default) or `ttl` for the warm cache. |
+| Cache Budget | Soft cap on warm-cache disk usage (e.g. `1GiB`). |
+| Cache TTL | Eviction age for `ttl` mode (e.g. `1h`, `7d`). |
 
 ## Cloud Providers
 
@@ -51,6 +53,6 @@ When Credentials JSON is empty, the GCS client uses ADC: the `GOOGLE_APPLICATION
 - The active chunk is always local — ingestion latency is unaffected by cloud storage.
 - Each sealed chunk is stored as a single blob in GLCB format (seekable zstd compression).
 - Queries read cloud chunks via HTTP range requests — only the needed frames are downloaded, not the entire blob.
-- Cloud services are configured in the [Storage settings](help:storage-config) tab and referenced by name on a file tier's **Cloud Storage** field to make it cloud-backed.
+- Cloud services are configured in the [Storage settings](help:storage-config) tab and referenced by name on a file vault's **Cloud Storage** field to make it cloud-backed.
 - Use the **Test Connection** button in cloud service settings to verify credentials.
 - Follower replicas keep a local compressed copy for queries — they do not upload to the cloud (only the leader uploads).

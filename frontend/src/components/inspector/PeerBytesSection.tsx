@@ -2,7 +2,7 @@
  * Per-peer inter-node gRPC tx/rx for a single node. Reads cumulative counters
  * from NodeStats.peerBytes and renders backend-derived rates + sparkline
  * windows. Covers ALL cluster transport traffic —
- * Raft, broadcast, tier replication, query forwarding, chunk streaming,
+ * Raft, broadcast, vault replication, query forwarding, chunk streaming,
  * drain, etc. See gastrolog-47u85.
  */
 import { useThemeClass } from "../../hooks/useThemeClass";

@@ -111,7 +111,7 @@ func TestListDeduplicatesCloudAndLocal(t *testing.T) {
 }
 
 // TestListNoDuplicatesWithoutCloudIndex verifies that List() still works
-// normally when there is no cloud index (non-cloud tier).
+// normally when there is no cloud index (local-only vault).
 func TestListNoDuplicatesWithoutCloudIndex(t *testing.T) {
 	t.Parallel()
 

@@ -100,7 +100,7 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, remoteTo
 // When selectedVaults is non-nil, only vaults in that set are included
 // (used when the query contains a vault_id=X filter).
 //
-// Reads VaultConfig.Placements directly (mirrored from tier placements
+// Reads VaultConfig.Placements directly (mirrored from vault placements
 // via the FSM bridge — gastrolog-257l7).
 func (s *QueryServer) remoteVaultsByNode(ctx context.Context, selectedVaults []glid.GLID) map[string][]glid.GLID {
 	return s.remoteVaultsByNodeFiltered(ctx, selectedVaults, s.orch.LocalLeaderVaultIDs())

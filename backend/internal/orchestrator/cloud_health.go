@@ -9,14 +9,14 @@ import (
 
 // cloudHealthChecker is an optional interface implemented by chunk managers
 // that have a cloud backing store. The orchestrator polls this every 5s
-// to raise/clear a "cloud-store:<tierID>" alert.
+// to raise/clear a "cloud-store:<vaultID>" alert.
 type cloudHealthChecker interface {
 	CloudDegraded() bool
 	CloudDegradedError() string
 }
 
-// evaluateCloudHealth checks every tier's cloud health and sets/clears
-// alerts. When a tier transitions from degraded → healthy, schedules
+// evaluateCloudHealth checks every instance's cloud health and sets/clears
+// alerts. When an instance transitions from degraded → healthy, schedules
 // post-seal work for sealed chunks that are missing their cloud upload.
 // Runs in the rate alert evaluator loop (every 5s).
 func (o *Orchestrator) evaluateCloudHealth() {
@@ -27,36 +27,36 @@ func (o *Orchestrator) evaluateCloudHealth() {
 	defer o.mu.RUnlock()
 
 	for _, vault := range o.vaults {
-		tier := vault.Instance
-		if tier == nil || tier.Type != "cloud" {
+		vaultInst := vault.Instance
+		if vaultInst == nil || vaultInst.Type != "cloud" {
 			continue
 		}
-		o.evaluateTierCloudHealth(tier)
+		o.evaluateVaultCloudHealth(vaultInst)
 	}
 }
 
-// evaluateTierCloudHealth checks a single cloud tier's health and runs
-// backfill on the tier leader only. Followers skip backfill — they learn
-// about cloud-backed chunks via the tier FSM.
-func (o *Orchestrator) evaluateTierCloudHealth(tier *VaultInstance) {
-	chk, ok := tier.Chunks.(cloudHealthChecker)
+// evaluateVaultCloudHealth checks a single cloud instance's health and runs
+// backfill on the vault leader only. Followers skip backfill — they learn
+// about cloud-backed chunks via the vault-ctl FSM.
+func (o *Orchestrator) evaluateVaultCloudHealth(vaultInst *VaultInstance) {
+	chk, ok := vaultInst.Chunks.(cloudHealthChecker)
 	if !ok {
 		return
 	}
-	alertID := fmt.Sprintf("cloud-store:%s", tier.TierID)
+	alertID := fmt.Sprintf("cloud-store:%s", vaultInst.VaultID)
 	if chk.CloudDegraded() {
 		o.alerts.Set(alertID, alert.Error, "cloud",
-			fmt.Sprintf("Cloud store unreachable for tier %s: %s",
-				tier.TierID.String()[:8], chk.CloudDegradedError()))
+			fmt.Sprintf("Cloud store unreachable for vault %s: %s",
+				vaultInst.VaultID.String()[:8], chk.CloudDegradedError()))
 	} else {
 		o.alerts.Clear(alertID)
 	}
-	if tier.IsRaftLeader != nil && tier.IsRaftLeader() {
-		o.backfillCloudUploads(tier)
+	if vaultInst.IsRaftLeader != nil && vaultInst.IsRaftLeader() {
+		o.backfillCloudUploads(vaultInst)
 	}
 }
 
-// backfillCloudUploads reconciles sealed chunks against the tier FSM
+// backfillCloudUploads reconciles sealed chunks against the vault-ctl FSM
 // (the single source of truth for CloudBacked). For every sealed chunk
 // where the FSM says CloudBacked=false, it schedules an UploadToCloud job.
 // UploadToCloud does a Head check — if the blob already exists in S3, it
@@ -64,13 +64,13 @@ func (o *Orchestrator) evaluateTierCloudHealth(tier *VaultInstance) {
 //
 // The local CloudBacked flag from List() is intentionally ignored — only
 // the FSM decides whether a chunk needs work. See gastrolog-68fqk.
-func (o *Orchestrator) backfillCloudUploads(tier *VaultInstance) {
-	uploader, ok := tier.Chunks.(chunk.ChunkCloudUploader)
+func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
+	uploader, ok := vaultInst.Chunks.(chunk.ChunkCloudUploader)
 	if !ok {
 		return
 	}
 
-	metas, err := tier.Chunks.List()
+	metas, err := vaultInst.Chunks.List()
 	if err != nil {
 		return
 	}
@@ -82,13 +82,13 @@ func (o *Orchestrator) backfillCloudUploads(tier *VaultInstance) {
 		// files but data.glcb does not exist yet — uploading would
 		// fail with no-such-file. Overlaying through the FSM makes us
 		// wait for AnnounceSeal in PostSealProcess.
-		if tier.OverlayFromFSM != nil {
-			m = tier.OverlayFromFSM(m)
+		if vaultInst.OverlayFromFSM != nil {
+			m = vaultInst.OverlayFromFSM(m)
 		}
-		if !m.Sealed || chunkIsCloudBacked(tier, m) {
+		if !m.Sealed || chunkIsCloudBacked(vaultInst, m) {
 			continue
 		}
-		name := fmt.Sprintf("cloud-backfill:%s:%s", tier.TierID, m.ID)
+		name := fmt.Sprintf("cloud-backfill:%s:%s", vaultInst.VaultID, m.ID)
 		if o.scheduler.HasPendingPrefix(name) {
 			continue
 		}
@@ -101,15 +101,15 @@ func (o *Orchestrator) backfillCloudUploads(tier *VaultInstance) {
 	}
 	if backfilled > 0 {
 		o.logger.Debug("cloud backfill: scheduled uploads",
-			"tier", tier.TierID, "count", backfilled)
+			"vault", vaultInst.VaultID, "count", backfilled)
 	}
 }
 
 // chunkIsCloudBacked checks the FSM (single source of truth) for CloudBacked.
 // Falls back to local state when no FSM exists (single-node / memory mode).
-func chunkIsCloudBacked(tier *VaultInstance, m chunk.ChunkMeta) bool {
-	if tier.OverlayFromFSM != nil {
-		return tier.OverlayFromFSM(m).CloudBacked
+func chunkIsCloudBacked(vaultInst *VaultInstance, m chunk.ChunkMeta) bool {
+	if vaultInst.OverlayFromFSM != nil {
+		return vaultInst.OverlayFromFSM(m).CloudBacked
 	}
 	return m.CloudBacked
 }

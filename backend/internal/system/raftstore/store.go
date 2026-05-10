@@ -222,14 +222,6 @@ func (s *Store) ListCloudServices(ctx context.Context) ([]system.CloudService, e
 	return s.fsm.Store().ListCloudServices(ctx)
 }
 
-func (s *Store) GetTier(ctx context.Context, id glid.GLID) (*system.TierConfig, error) {
-	return s.fsm.Store().GetTier(ctx, id)
-}
-
-func (s *Store) ListTiers(ctx context.Context) ([]system.TierConfig, error) {
-	return s.fsm.Store().ListTiers(ctx)
-}
-
 func (s *Store) GetNodeStorageConfig(ctx context.Context, nodeID string) (*system.NodeStorageConfig, error) {
 	return s.fsm.Store().GetNodeStorageConfig(ctx, nodeID)
 }
@@ -366,26 +358,18 @@ func (s *Store) DeleteCloudService(ctx context.Context, id glid.GLID) error {
 	return s.apply(ctx, command.NewDeleteCloudService(id))
 }
 
-func (s *Store) PutTier(ctx context.Context, tier system.TierConfig) error {
-	return s.apply(ctx, command.NewPutTier(tier))
-}
-
-func (s *Store) DeleteTier(ctx context.Context, id glid.GLID, drain bool) error {
-	return s.apply(ctx, command.NewDeleteTier(id, drain))
-}
-
 func (s *Store) SetNodeStorageConfig(ctx context.Context, cfg system.NodeStorageConfig) error {
 	return s.apply(ctx, command.NewSetNodeStorageConfig(cfg))
 }
 
 // --- Runtime methods (delegate to inner store for reads, apply for writes) ---
 
-func (s *Store) GetTierPlacements(ctx context.Context, tierID glid.GLID) ([]system.TierPlacement, error) {
-	return s.fsm.Store().GetTierPlacements(ctx, tierID)
+func (s *Store) GetVaultPlacements(ctx context.Context, vaultID glid.GLID) ([]system.VaultPlacement, error) {
+	return s.fsm.Store().GetVaultPlacements(ctx, vaultID)
 }
 
-func (s *Store) SetTierPlacements(ctx context.Context, tierID glid.GLID, placements []system.TierPlacement) error {
-	return s.apply(ctx, command.NewSetTierPlacements(tierID, placements))
+func (s *Store) SetVaultPlacements(ctx context.Context, vaultID glid.GLID, placements []system.VaultPlacement) error {
+	return s.apply(ctx, command.NewSetVaultPlacements(vaultID, placements))
 }
 
 func (s *Store) GetIngesterAlive(ctx context.Context, ingesterID glid.GLID) (map[string]bool, error) {

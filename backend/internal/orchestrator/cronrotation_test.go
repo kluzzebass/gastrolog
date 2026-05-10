@@ -89,9 +89,8 @@ func TestRotateVaultSealsNonEmptyChunk(t *testing.T) {
 	}
 
 	vaultID := glid.New()
-	tierID := glid.New()
 	m := newTestCronManager(t)
-	m.rotateVault(vaultID, tierID, "test-vault", cm)
+	m.rotateVault(vaultID, "test-vault", cm)
 
 	if !cm.sealed {
 		t.Error("expected chunk to be sealed")
@@ -107,9 +106,8 @@ func TestRotateVaultSkipsEmptyChunk(t *testing.T) {
 	}
 
 	vaultID := glid.New()
-	tierID := glid.New()
 	m := newTestCronManager(t)
-	m.rotateVault(vaultID, tierID, "test-vault", cm)
+	m.rotateVault(vaultID, "test-vault", cm)
 
 	if cm.sealed {
 		t.Error("expected empty chunk to NOT be sealed")
@@ -122,9 +120,8 @@ func TestRotateVaultSkipsNilActive(t *testing.T) {
 	}
 
 	vaultID := glid.New()
-	tierID := glid.New()
 	m := newTestCronManager(t)
-	m.rotateVault(vaultID, tierID, "test-vault", cm)
+	m.rotateVault(vaultID, "test-vault", cm)
 
 	if cm.sealed {
 		t.Error("expected nil active to NOT trigger seal")
@@ -136,12 +133,11 @@ func TestEnsureCreatesAndUpdatesJob(t *testing.T) {
 	m := newTestCronManager(t)
 
 	vaultA := glid.New()
-	tierA := glid.New()
 
 	// First ensure creates the job.
-	m.ensure(vaultA, tierA, "vault-a", "* * * * *", cm)
+	m.ensure(vaultA, "vault-a", "* * * * *", cm)
 
-	name := cronJobName(vaultA, tierA)
+	name := cronJobName(vaultA)
 	if !m.scheduler.HasJob(name) {
 		t.Error("expected job to be registered after ensure")
 	}
@@ -150,13 +146,13 @@ func TestEnsureCreatesAndUpdatesJob(t *testing.T) {
 	}
 
 	// Ensure with same schedule is a no-op.
-	m.ensure(vaultA, tierA, "vault-a", "* * * * *", cm)
+	m.ensure(vaultA, "vault-a", "* * * * *", cm)
 	if m.schedules[name] != "* * * * *" {
 		t.Error("schedule should be unchanged")
 	}
 
 	// Ensure with new schedule updates.
-	m.ensure(vaultA, tierA, "vault-a", "0 * * * *", cm)
+	m.ensure(vaultA, "vault-a", "0 * * * *", cm)
 	if m.schedules[name] != "0 * * * *" {
 		t.Errorf("expected updated schedule '0 * * * *', got %q", m.schedules[name])
 	}
@@ -171,14 +167,12 @@ func TestPruneExceptRemovesStaleJobs(t *testing.T) {
 
 	vaultA := glid.New()
 	vaultB := glid.New()
-	tierA := glid.New()
-	tierB := glid.New()
 
-	m.ensure(vaultA, tierA, "vault-a", "* * * * *", cm)
-	m.ensure(vaultB, tierB, "vault-b", "0 * * * *", cm)
+	m.ensure(vaultA, "vault-a", "* * * * *", cm)
+	m.ensure(vaultB, "vault-b", "0 * * * *", cm)
 
-	nameA := cronJobName(vaultA, tierA)
-	nameB := cronJobName(vaultB, tierB)
+	nameA := cronJobName(vaultA)
+	nameB := cronJobName(vaultB)
 
 	// Prune everything except vault-a's job.
 	m.pruneExcept(map[string]bool{nameA: true})
@@ -199,19 +193,13 @@ func TestRemoveAllForVault(t *testing.T) {
 	m := newTestCronManager(t)
 
 	vaultA := glid.New()
-	tierA := glid.New()
-	tierB := glid.New()
 
-	m.ensure(vaultA, tierA, "vault-a", "* * * * *", cm)
-	m.ensure(vaultA, tierB, "vault-a", "0 * * * *", cm)
+	m.ensure(vaultA, "vault-a", "* * * * *", cm)
 
 	m.removeAllForVault(vaultA)
 
-	if m.scheduler.HasJob(cronJobName(vaultA, tierA)) {
-		t.Error("tier-a job should be removed")
-	}
-	if m.scheduler.HasJob(cronJobName(vaultA, tierB)) {
-		t.Error("tier-b job should be removed")
+	if m.scheduler.HasJob(cronJobName(vaultA)) {
+		t.Error("vault-a job should be removed")
 	}
 	if len(m.schedules) != 0 {
 		t.Errorf("expected empty schedules map, got %d entries", len(m.schedules))

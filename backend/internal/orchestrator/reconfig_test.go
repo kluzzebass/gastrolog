@@ -29,23 +29,14 @@ func (f *fakeSystemLoader) Load(_ context.Context) (*system.System, error) {
 	return &system.System{Config: *f.cfg}, nil
 }
 
-// memVaultCfg creates a VaultConfig + TierConfig pair for a memory-backed vault.
-// It also adds the TierConfig to the loader's config if present, so AddVault
-// can find it via buildTierInstances.
+// memVaultCfg creates a VaultConfig for a memory-backed vault.
 func memVaultCfg(vaultID glid.GLID, loader *fakeSystemLoader) system.VaultConfig {
-	tierID := glid.New()
-	tc := system.TierConfig{
-		ID:      tierID,
-		Name:    "tier-" + vaultID.String()[:8],
-		Type:    system.VaultTypeMemory,
-		VaultID: vaultID,
+	v := system.VaultConfig{
+		ID:   vaultID,
+		Name: "vault-" + vaultID.String()[:8],
+		Type: system.VaultTypeMemory,
 	}
-	if loader != nil && loader.cfg != nil {
-		loader.cfg.Tiers = append(loader.cfg.Tiers, tc)
-	}
-	return system.VaultConfig{
-		ID: vaultID,
-	}
+	return v
 }
 
 func TestReloadFilters(t *testing.T) {
@@ -932,7 +923,6 @@ func TestDisableVaultDoesNotAffectQuery(t *testing.T) {
 func TestRetentionSingleJobRegistered(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()
-	tierID := glid.New()
 	retPolicyID := glid.New()
 
 	loader := &fakeSystemLoader{cfg: &system.Config{
@@ -941,12 +931,6 @@ func TestRetentionSingleJobRegistered(t *testing.T) {
 		},
 		RetentionPolicies: []system.RetentionPolicyConfig{
 			{ID: retPolicyID, Name: "age-2m", MaxAge: strPtr("2m")},
-		},
-		Tiers: []system.TierConfig{
-			{ID: tierID, Name: "tier", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0, RetentionRules: []system.RetentionRule{{
-				RetentionPolicyID: retPolicyID,
-				
-			}}},
 		},
 		Vaults: []system.VaultConfig{
 			{ID: vaultID, Name: "src"},
@@ -966,14 +950,14 @@ func TestRetentionSingleJobRegistered(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The single "retention" job should be registered, not per-tier jobs.
+	// The single "retention" job should be registered, not per-vault jobs.
 	sched := orch.Scheduler()
 	if !sched.HasJob("retention") {
 		t.Fatal("single retention sweep job should exist")
 	}
-	perTierJobName := "retention:" + tierID.String()
-	if sched.HasJob(perTierJobName) {
-		t.Fatal("per-tier retention job should NOT exist — retention uses a single discovery-based sweep")
+	perVaultJobName := "retention:" + vaultID.String()
+	if sched.HasJob(perVaultJobName) {
+		t.Fatal("per-vault retention job should NOT exist — retention uses a single discovery-based sweep")
 	}
 }
 

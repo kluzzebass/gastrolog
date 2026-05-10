@@ -137,7 +137,7 @@ type Config struct {
 	RoutingForwarder routing.UnaryForwarder
 
 	// PlacementReconcile runs synchronous placement so RPC responses include
-	// tier placements. Nil in single-node or non-cluster mode.
+	// vault placements. Nil in single-node or non-cluster mode.
 	PlacementReconcile func(ctx context.Context)
 
 	// BootstrapTokenServeSecret enables the GET /cluster/bootstrap-token
@@ -345,10 +345,7 @@ type configVaultOwner struct {
 // ResolveVaultOwner returns the node ID of the vault leader, or "" when
 // the vault is owned locally / has no placement / cannot be resolved.
 //
-// Reads VaultConfig.Placements directly (mirrored from tier placements on
-// every SetTierPlacements via the FSM bridge — gastrolog-257l7). When the
-// tier list is removed in a later commit, this code path stays correct
-// because the placement data flows from the same source.
+// Reads VaultConfig.Placements directly.
 func (c *configVaultOwner) ResolveVaultOwner(ctx context.Context, vaultID string) string {
 	if c.cfgStore == nil {
 		return ""

@@ -9,7 +9,7 @@
 // readable without a decompression step. Compression, when applied, is
 // a generic file-level wrapper produced by the cloud-upload pipeline
 // (see ../../chunk/file/manager.go's uploadToCloud). See
-// docs/vault_redesign.md decisions 6 and 9.
+// docs/obsoleted/vault_redesign.md decisions 6 and 9.
 //
 //	Layout (offsets are absolute from the start of the file):
 //

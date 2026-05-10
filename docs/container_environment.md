@@ -198,7 +198,7 @@ served on the HTTP port (`4564` by default).
 | Endpoint | Returns | Meaning |
 |---|---|---|
 | `GET /healthz` | `200` always (when the HTTP listener is serving) | **Liveness.** The process is up and the HTTP server is accepting requests. Failing this means the container is unrecoverable — kill and restart. |
-| `GET /readyz` | `200` when ready, `503` otherwise | **Readiness.** The orchestrator has started, the node isn't draining, and every locally-hosted vault's tier FSM has applied at least one log entry. Failing this means "remove from load balancer, but don't restart" — typical during startup, leader change, or shutdown. |
+| `GET /readyz` | `200` when ready, `503` otherwise | **Readiness.** The orchestrator has started, the node isn't draining, and every locally-hosted vault's chunk-FSM has applied at least one log entry. Failing this means "remove from load balancer, but don't restart" — typical during startup, leader change, or shutdown. |
 
 The image's built-in `HEALTHCHECK` directive probes `/healthz` every
 30 seconds (with a 30-second startup grace period and 3 retries before

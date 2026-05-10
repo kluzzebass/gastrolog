@@ -203,7 +203,6 @@ func TestFireRetentionEventStreamsThroughRoutingEngine(t *testing.T) {
 	// path that fireRetentionEvent exercises.
 	r := &retentionRunner{
 		vaultID: sourceID,
-		tierID:  sourceID, // 1:1 vault:tier
 		orch:    orch,
 		logger:  slog.Default(),
 	}
@@ -322,7 +321,6 @@ func TestFireRetentionEventDropsWhenNoRouteMatches(t *testing.T) {
 
 	r := &retentionRunner{
 		vaultID: sourceID,
-		tierID:  sourceID,
 		orch:    orch,
 		logger:  slog.Default(),
 	}
@@ -362,7 +360,6 @@ func TestRetentionDispositionRouteFiresFanOut(t *testing.T) {
 
 	r := &retentionRunner{
 		vaultID:     fx.sourceID,
-		tierID:      fx.sourceID,
 		orch:        fx.orch,
 		logger:      slog.Default(),
 		disposition: system.RetentionDispositionRoute,
@@ -386,7 +383,6 @@ func TestRetentionDispositionDeleteSkipsFanOut(t *testing.T) {
 
 	r := &retentionRunner{
 		vaultID:     fx.sourceID,
-		tierID:      fx.sourceID,
 		orch:        fx.orch,
 		logger:      slog.Default(),
 		disposition: system.RetentionDispositionDelete,
@@ -409,7 +405,6 @@ func TestRetentionDispositionEmptyTreatedAsDelete(t *testing.T) {
 
 	r := &retentionRunner{
 		vaultID:     fx.sourceID,
-		tierID:      fx.sourceID,
 		orch:        fx.orch,
 		logger:      slog.Default(),
 		disposition: "", // explicitly empty — what the runner sees pre-resolution
@@ -422,7 +417,7 @@ func TestRetentionDispositionEmptyTreatedAsDelete(t *testing.T) {
 }
 
 // TestRetentionTargetThreadsDispositionFromVaultConfig verifies that
-// retentionTargetForTier reads VaultConfig.RetentionDisposition (via
+// retentionTargetForInstance reads VaultConfig.RetentionDisposition (via
 // ResolveRetentionDisposition) and writes the resolved value to the
 // runner. This is the load-bearing plumbing — without it, the per-chunk
 // gate in tryRetainChunk always sees an empty string and defaults to
@@ -431,8 +426,9 @@ func TestRetentionDispositionEmptyTreatedAsDelete(t *testing.T) {
 func TestRetentionTargetThreadsDispositionFromVaultConfig(t *testing.T) {
 	t.Parallel()
 
+	// Vault and instance share the same ID.
 	vaultID := glid.New()
-	tierID := glid.New()
+	
 	policyID := glid.New()
 
 	cases := []struct {
@@ -451,10 +447,6 @@ func TestRetentionTargetThreadsDispositionFromVaultConfig(t *testing.T) {
 					ID:                   vaultID,
 					Enabled:              true,
 					RetentionDisposition: c.set,
-				}},
-				Tiers: []system.TierConfig{{
-					ID:      tierID,
-					VaultID: vaultID,
 					RetentionRules: []system.RetentionRule{{
 						RetentionPolicyID: policyID,
 					}},
@@ -474,13 +466,13 @@ func TestRetentionTargetThreadsDispositionFromVaultConfig(t *testing.T) {
 			}
 			defer orch.Stop()
 
-			tier := &VaultInstance{
-				TierID:  tierID,
+			vaultInst := &VaultInstance{
+				VaultID:  vaultID,
 				Chunks:  &retentionFakeChunkManager{},
 				Indexes: &retentionFakeIndexManager{},
 			}
 			active := make(map[string]bool)
-			target := orch.retentionTargetForTier(cfg, cfg.Vaults[0], tier, active)
+			target := orch.retentionTargetForInstance(cfg, cfg.Vaults[0], vaultInst, active)
 			if target == nil {
 				t.Fatal("expected non-nil sweep target")
 			}

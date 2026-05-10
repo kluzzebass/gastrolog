@@ -128,7 +128,7 @@ func TestDistributeChunkRecordsByOverlap(t *testing.T) {
 	// branch — but for a cloud chunk built from out-of-order records,
 	// IngestStart is the last-APPENDED record's TS (which can be recent),
 	// not the chunk's actual TS upper bound. Result: histogram attributed
-	// records to file-tier-only recent buckets every ~rotation interval.
+	// records to local-only recent buckets every ~rotation interval.
 	// The fix sorts the bounds before computing span/overlap so records
 	// distribute across the chunk's actual [min, max] TS envelope.
 	t.Run("non-monotonic cloud chunk distributes across sorted [min,max] envelope", func(t *testing.T) {

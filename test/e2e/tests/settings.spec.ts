@@ -106,12 +106,11 @@ test.describe.serial("Settings", () => {
   test("creates a memory vault", async ({ page }) => {
     const dialog = await openSettingsTab(page, "Vaults");
 
-    // Open the vault creation form, then add a memory tier.
+    // Open the vault creation form, then select memory as the storage type.
     await dialog.getByRole("button", { name: /Add Vault/i }).click();
-    await dialog.getByRole("button", { name: /Add Tier/i }).click();
-    const memBtn = page.getByRole("button", { name: "Memory", exact: true });
-    await memBtn.waitFor({ state: "visible", timeout: 5_000 });
-    await memBtn.click();
+    await dialog
+      .getByLabel("Storage Type")
+      .selectOption({ value: "memory" });
 
     // Fill the name.
     await dialog.getByLabel("Name").fill("e2e-test-vault");

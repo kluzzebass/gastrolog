@@ -11,7 +11,7 @@ type CacheEvictor interface {
 
 const (
 	// cacheEvictionSchedule runs once per minute, second 23 — phase-offset
-	// from retention (second 0) and tier-catchup (13/33/53s) so the sweeps
+	// from retention (second 0) and instance-catchup (13/33/53s) so the sweeps
 	// don't pile up on the same wall-clock tick.
 	cacheEvictionSchedule = "23 * * * * *"
 	cacheEvictionJobName  = "cache-eviction"
@@ -19,7 +19,7 @@ const (
 
 // cacheEvictionSweepAll fans out EvictCache across every chunk manager in
 // the orchestrator. No-op for managers that don't implement CacheEvictor
-// (memory-mode tiers) or that have no eviction policy configured (every
+// (memory-mode vaults) or that have no eviction policy configured (every
 // EvictCache call short-circuits when CacheBudgetBytes and CacheTTL are
 // both zero).
 func (o *Orchestrator) cacheEvictionSweepAll() {
@@ -27,7 +27,6 @@ func (o *Orchestrator) cacheEvictionSweepAll() {
 	type evictTarget struct {
 		evictor CacheEvictor
 		vaultID string
-		tierID  string
 	}
 	var targets []evictTarget
 	for _, v := range o.vaults {
@@ -42,7 +41,6 @@ func (o *Orchestrator) cacheEvictionSweepAll() {
 		targets = append(targets, evictTarget{
 			evictor: ev,
 			vaultID: v.ID.String(),
-			tierID:  t.TierID.String(),
 		})
 	}
 	o.mu.RUnlock()
@@ -52,7 +50,7 @@ func (o *Orchestrator) cacheEvictionSweepAll() {
 		if evicted > 0 && o.logger != nil {
 			o.logger.Debug("cache eviction sweep",
 				"vault", tgt.vaultID,
-				"tier", tgt.tierID,
+				"vault", tgt.vaultID,
 				"evicted", evicted,
 				"freed_bytes", freed)
 		}
@@ -60,7 +58,7 @@ func (o *Orchestrator) cacheEvictionSweepAll() {
 }
 
 // startCacheEvictionSweep registers the periodic warm-cache eviction
-// sweep. Each tick walks every leader tier and asks its chunk manager to
+// sweep. Each tick walks every leader instance and asks its chunk manager to
 // apply its configured eviction policies. See gastrolog-2idw8.
 func (o *Orchestrator) startCacheEvictionSweep() error {
 	if err := o.scheduler.AddJob(cacheEvictionJobName, cacheEvictionSchedule, o.cacheEvictionSweepAll); err != nil {

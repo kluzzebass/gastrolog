@@ -39,7 +39,7 @@ interface AddFormState {
   credentialsJson: string;
   archivalMode: string;
   transitions: Array<{ after: string; storageClass: string }>;
-  restoreTier: string;
+  restoreSpeed: string;
   restoreDays: number;
   suspectGraceDays: number;
   reconcileSchedule: string;
@@ -60,7 +60,7 @@ const addFormInitial: AddFormState = {
   credentialsJson: "",
   archivalMode: "none",
   transitions: [],
-  restoreTier: "",
+  restoreSpeed: "",
   restoreDays: 7,
   suspectGraceDays: 7,
   reconcileSchedule: "0 3 * * *",
@@ -350,7 +350,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
           Cloud Storage
         </h3>
         <p className={`text-[0.85em] mb-4 ${c("text-text-muted", "text-light-text-muted")}`}>
-          Cluster-wide cloud storage endpoints. Tiers reference a cloud service by ID.
+          Cluster-wide cloud storage endpoints. Cloud-backed vaults reference a cloud service by ID.
         </p>
         <SettingsSection
           addLabel="Add Cloud Storage"

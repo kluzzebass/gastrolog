@@ -1987,7 +1987,7 @@ func TestOpenActiveChunkDictRecovery(t *testing.T) {
 }
 
 // Regression: cloud backfill can call UploadToCloud after the file manager is
-// closed during tier removal; must return ErrManagerClosed instead of
+// closed during vault removal; must return ErrManagerClosed instead of
 // panicking on a nil zstd encoder (gastrolog: RF churn / node crash).
 func TestUploadToCloudAfterClose(t *testing.T) {
 	t.Parallel()

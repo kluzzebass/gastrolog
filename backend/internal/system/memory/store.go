@@ -56,8 +56,7 @@ type Store struct {
 	nodes                map[glid.GLID]system.NodeConfig   // keyed by node ID
 	managedFiles         map[glid.GLID]system.ManagedFileConfig
 	cloudServices        map[glid.GLID]system.CloudService
-	tiers                map[glid.GLID]system.TierConfig
-	tierPlacements       map[glid.GLID][]system.TierPlacement // runtime: system-managed
+	vaultPlacements       map[glid.GLID][]system.VaultPlacement // runtime: system-managed
 	ingesterAlive        map[glid.GLID]map[string]bool        // runtime: system-managed
 	ingesterCheckpoints  map[glid.GLID][]byte                 // runtime: system-managed
 	ingesterAssignment   map[glid.GLID]string                 // runtime: system-managed
@@ -82,8 +81,7 @@ func NewStore() *Store {
 		nodes:               make(map[glid.GLID]system.NodeConfig),
 		managedFiles:        make(map[glid.GLID]system.ManagedFileConfig),
 		cloudServices:       make(map[glid.GLID]system.CloudService),
-		tiers:               make(map[glid.GLID]system.TierConfig),
-		tierPlacements:      make(map[glid.GLID][]system.TierPlacement),
+		vaultPlacements:      make(map[glid.GLID][]system.VaultPlacement),
 		ingesterAlive:       make(map[glid.GLID]map[string]bool),
 		ingesterCheckpoints: make(map[glid.GLID][]byte),
 		ingesterAssignment:  make(map[glid.GLID]string),
@@ -97,7 +95,7 @@ func (s *Store) isEmpty() bool {
 		len(s.retentionPolicies) == 0 && len(s.vaults) == 0 &&
 		len(s.ingesters) == 0 && len(s.routes) == 0 &&
 		len(s.managedFiles) == 0 && len(s.cloudServices) == 0 &&
-		len(s.tiers) == 0 && len(s.nodeStorageConfigs) == 0 &&
+		len(s.nodeStorageConfigs) == 0 &&
 		!s.ss.hasServerSettings && s.clusterTLS == nil
 }
 
@@ -124,7 +122,6 @@ func (s *Store) Load(ctx context.Context) (*system.System, error) {
 	cfg.Routes = collectAndSort(s.routes, copyRouteConfig, func(a, b system.RouteConfig) int { return cmpUUID(a.ID, b.ID) })
 	cfg.ManagedFiles = collectAndSort(s.managedFiles, func(v system.ManagedFileConfig) system.ManagedFileConfig { return v }, func(a, b system.ManagedFileConfig) int { return cmpUUID(a.ID, b.ID) })
 	cfg.CloudServices = collectAndSort(s.cloudServices, copyCloudService, func(a, b system.CloudService) int { return cmpUUID(a.ID, b.ID) })
-	cfg.Tiers = collectAndSort(s.tiers, copyTierConfig, func(a, b system.TierConfig) int { return cmpUUID(a.ID, b.ID) })
 	cfg.Certs = collectAndSort(s.certs, copyCertPEM, func(a, b system.CertPEM) int { return cmpUUID(a.ID, b.ID) })
 
 	// Config: server settings.
@@ -146,13 +143,13 @@ func (s *Store) Load(ctx context.Context) (*system.System, error) {
 	}
 	rt.SetupWizardDismissed = s.setupWizardDismissed
 
-	// Runtime: tier placements (stored separately from TierConfig).
-	if len(s.tierPlacements) > 0 {
-		rt.TierPlacements = make(map[glid.GLID][]system.TierPlacement, len(s.tierPlacements))
-		for id, p := range s.tierPlacements {
-			cp := make([]system.TierPlacement, len(p))
+	// Runtime: vault placements (mirrored onto VaultConfig.Placements).
+	if len(s.vaultPlacements) > 0 {
+		rt.VaultPlacements = make(map[glid.GLID][]system.VaultPlacement, len(s.vaultPlacements))
+		for id, p := range s.vaultPlacements {
+			cp := make([]system.VaultPlacement, len(p))
 			copy(cp, p)
-			rt.TierPlacements[id] = cp
+			rt.VaultPlacements[id] = cp
 		}
 	}
 
@@ -553,47 +550,6 @@ func (s *Store) DeleteCloudService(ctx context.Context, id glid.GLID) error {
 	return nil
 }
 
-// Tiers
-
-func (s *Store) GetTier(ctx context.Context, id glid.GLID) (*system.TierConfig, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	tier, ok := s.tiers[id]
-	if !ok {
-		return nil, nil
-	}
-	return &tier, nil
-}
-
-func (s *Store) ListTiers(ctx context.Context) ([]system.TierConfig, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	result := make([]system.TierConfig, 0, len(s.tiers))
-	for _, tier := range s.tiers {
-		result = append(result, tier)
-	}
-	slices.SortFunc(result, func(a, b system.TierConfig) int { return cmpUUID(a.ID, b.ID) })
-	return result, nil
-}
-
-func (s *Store) PutTier(ctx context.Context, tier system.TierConfig) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.tiers[tier.ID] = tier
-	return nil
-}
-
-func (s *Store) DeleteTier(ctx context.Context, id glid.GLID, _ bool) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	delete(s.tiers, id)
-	return nil
-}
-
 // Node storage configs
 
 func (s *Store) GetNodeStorageConfig(ctx context.Context, nodeID string) (*system.NodeStorageConfig, error) {
@@ -959,7 +915,7 @@ func copyVaultConfig(st system.VaultConfig) system.VaultConfig {
 		}
 	}
 	if len(st.Placements) > 0 {
-		cp.Placements = make([]system.TierPlacement, len(st.Placements))
+		cp.Placements = make([]system.VaultPlacement, len(st.Placements))
 		copy(cp.Placements, st.Placements)
 	}
 	return cp
@@ -1024,23 +980,6 @@ func copyNodeStorageConfig(nsc system.NodeStorageConfig) system.NodeStorageConfi
 	return c
 }
 
-func copyTierConfig(tc system.TierConfig) system.TierConfig {
-	c := tc
-	if tc.RotationPolicyID != nil {
-		id := *tc.RotationPolicyID
-		c.RotationPolicyID = &id
-	}
-	if tc.CloudServiceID != nil {
-		id := *tc.CloudServiceID
-		c.CloudServiceID = &id
-	}
-	if len(tc.RetentionRules) > 0 {
-		c.RetentionRules = make([]system.RetentionRule, len(tc.RetentionRules))
-		copy(c.RetentionRules, tc.RetentionRules)
-	}
-	return c
-}
-
 func copyCloudService(cs system.CloudService) system.CloudService {
 	c := cs
 	if len(cs.Transitions) > 0 {
@@ -1059,37 +998,34 @@ func copyParams(params map[string]string) map[string]string {
 	return cp
 }
 
-// --- Tier Placements (runtime) ---
+// --- Vault Placements (runtime) ---
 
-func (s *Store) GetTierPlacements(_ context.Context, tierID glid.GLID) ([]system.TierPlacement, error) {
+func (s *Store) GetVaultPlacements(_ context.Context, vaultID glid.GLID) ([]system.VaultPlacement, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	p := s.tierPlacements[tierID]
-	cp := make([]system.TierPlacement, len(p))
+	p := s.vaultPlacements[vaultID]
+	cp := make([]system.VaultPlacement, len(p))
 	copy(cp, p)
 	return cp, nil
 }
 
-func (s *Store) SetTierPlacements(_ context.Context, tierID glid.GLID, placements []system.TierPlacement) error {
+func (s *Store) SetVaultPlacements(_ context.Context, vaultID glid.GLID, placements []system.VaultPlacement) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cp := make([]system.TierPlacement, len(placements))
+	cp := make([]system.VaultPlacement, len(placements))
 	copy(cp, placements)
-	s.tierPlacements[tierID] = cp
-	// Phase 2 (gastrolog-3iy5l): also write VaultConfig.Placements so the
-	// orchestrator's reads from VaultConfig.Placements see the placement
-	// set. Drives the same flow as the FSM bridge in mirrorPlacementsToVault.
-	if tier, ok := s.tiers[tierID]; ok {
-		if v, ok := s.vaults[tier.VaultID]; ok {
-			merged := v
-			if len(placements) > 0 {
-				merged.Placements = make([]system.TierPlacement, len(placements))
-				copy(merged.Placements, placements)
-			} else {
-				merged.Placements = nil
-			}
-			s.vaults[tier.VaultID] = copyVaultConfig(merged)
+	s.vaultPlacements[vaultID] = cp
+	// Mirror the placement set onto VaultConfig.Placements so the
+	// orchestrator's reads see them.
+	if v, ok := s.vaults[vaultID]; ok {
+		merged := v
+		if len(placements) > 0 {
+			merged.Placements = make([]system.VaultPlacement, len(placements))
+			copy(merged.Placements, placements)
+		} else {
+			merged.Placements = nil
 		}
+		s.vaults[vaultID] = copyVaultConfig(merged)
 	}
 	return nil
 }

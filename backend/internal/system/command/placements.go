@@ -1,0 +1,85 @@
+package command
+
+import (
+	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/glid"
+	"gastrolog/internal/system"
+)
+
+// NewSetVaultPlacements creates a SystemCommand for SetVaultPlacements.
+func NewSetVaultPlacements(vaultID glid.GLID, placements []system.VaultPlacement) *gastrologv1.SystemCommand {
+	pbPlacements := make([]*gastrologv1.VaultPlacement, len(placements))
+	for i, p := range placements {
+		pbPlacements[i] = &gastrologv1.VaultPlacement{
+			StorageId: []byte(p.StorageID),
+			Leader:    p.Leader,
+		}
+	}
+	return &gastrologv1.SystemCommand{
+		Command: &gastrologv1.SystemCommand_SetVaultPlacements{
+			SetVaultPlacements: &gastrologv1.SetVaultPlacementsCommand{
+				VaultId:     vaultID.ToProto(),
+				Placements: pbPlacements,
+			},
+		},
+	}
+}
+
+// NewSetSetupWizardDismissed creates a SystemCommand for SetSetupWizardDismissed.
+func NewSetSetupWizardDismissed(dismissed bool) *gastrologv1.SystemCommand {
+	return &gastrologv1.SystemCommand{
+		Command: &gastrologv1.SystemCommand_SetSetupWizardDismissed{
+			SetSetupWizardDismissed: &gastrologv1.SetSetupWizardDismissedCommand{Dismissed: dismissed},
+		},
+	}
+}
+
+// ExtractSetVaultPlacements converts a SetVaultPlacementsCommand back.
+func ExtractSetVaultPlacements(cmd *gastrologv1.SetVaultPlacementsCommand) (glid.GLID, []system.VaultPlacement, error) {
+	vaultID := glid.FromBytes(cmd.GetVaultId())
+	placements := make([]system.VaultPlacement, len(cmd.GetPlacements()))
+	for i, p := range cmd.GetPlacements() {
+		placements[i] = system.VaultPlacement{
+			StorageID: string(p.GetStorageId()),
+			Leader:    p.GetLeader(),
+		}
+	}
+	return vaultID, placements, nil
+}
+
+// NewSetIngesterAlive creates a SystemCommand for SetIngesterAlive.
+func NewSetIngesterAlive(ingesterID glid.GLID, nodeID string, alive bool) *gastrologv1.SystemCommand {
+	return &gastrologv1.SystemCommand{
+		Command: &gastrologv1.SystemCommand_SetIngesterAlive{
+			SetIngesterAlive: &gastrologv1.SetIngesterAliveCommand{
+				IngesterId: ingesterID.ToProto(),
+				NodeId:     nodeID,
+				Alive:      alive,
+			},
+		},
+	}
+}
+
+// NewSetIngesterCheckpoint creates a SystemCommand for SetIngesterCheckpoint.
+func NewSetIngesterCheckpoint(ingesterID glid.GLID, data []byte) *gastrologv1.SystemCommand {
+	return &gastrologv1.SystemCommand{
+		Command: &gastrologv1.SystemCommand_SetIngesterCheckpoint{
+			SetIngesterCheckpoint: &gastrologv1.SetIngesterCheckpointCommand{
+				IngesterId: ingesterID.ToProto(),
+				Data:       data,
+			},
+		},
+	}
+}
+
+// NewSetIngesterAssignment creates a SystemCommand for SetIngesterAssignment.
+func NewSetIngesterAssignment(ingesterID glid.GLID, nodeID string) *gastrologv1.SystemCommand {
+	return &gastrologv1.SystemCommand{
+		Command: &gastrologv1.SystemCommand_SetIngesterAssignment{
+			SetIngesterAssignment: &gastrologv1.SetIngesterAssignmentCommand{
+				IngesterId: ingesterID.ToProto(),
+				NodeId:     nodeID,
+			},
+		},
+	}
+}

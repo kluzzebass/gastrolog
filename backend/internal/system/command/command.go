@@ -803,9 +803,7 @@ func BuildSnapshot(sys *system.System, users []system.User, tokens []system.Refr
 	for _, cs := range cfg.CloudServices {
 		snap.CloudServices = append(snap.CloudServices, putCloudServiceCmd(cs))
 	}
-	for _, tier := range cfg.Tiers {
-		snap.Tiers = append(snap.Tiers, putTierCmd(tier))
-	}
+
 
 	// Users and tokens.
 	for _, u := range users {
@@ -826,10 +824,10 @@ func BuildSnapshot(sys *system.System, users []system.User, tokens []system.Refr
 		snap.ClusterTls = NewPutClusterTLS(*rt.ClusterTLS).GetPutClusterTls()
 	}
 
-	// Runtime: tier placements.
-	for tierID, placements := range rt.TierPlacements {
-		cmd := NewSetTierPlacements(tierID, placements).GetSetTierPlacements()
-		snap.TierPlacements = append(snap.TierPlacements, cmd)
+	// Runtime: vault placements.
+	for vaultID, placements := range rt.VaultPlacements {
+		cmd := NewSetVaultPlacements(vaultID, placements).GetSetVaultPlacements()
+		snap.VaultPlacements = append(snap.VaultPlacements, cmd)
 	}
 
 	// Runtime: ingester alive state.
@@ -946,14 +944,6 @@ func RestoreSnapshot(snap *gastrologv1.SystemSnapshot) (*system.System, []system
 		}
 		rt.NodeStorageConfigs = append(rt.NodeStorageConfigs, nc)
 	}
-	for _, tier := range snap.GetTiers() {
-		tc, err := ExtractPutTier(tier)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("restore tier: %w", err)
-		}
-		cfg.Tiers = append(cfg.Tiers, tc)
-	}
-
 	users := make([]system.User, 0, len(snap.GetUsers()))
 	for _, u := range snap.GetUsers() {
 		user, err := ExtractCreateUser(u)
@@ -986,15 +976,15 @@ func RestoreSnapshot(snap *gastrologv1.SystemSnapshot) (*system.System, []system
 		rt.ClusterTLS = &tls
 	}
 
-	// Restore tier placements.
-	if len(snap.GetTierPlacements()) > 0 {
-		rt.TierPlacements = make(map[glid.GLID][]system.TierPlacement, len(snap.GetTierPlacements()))
-		for _, tp := range snap.GetTierPlacements() {
-			tierID, placements, err := ExtractSetTierPlacements(tp)
+	// Restore vault placements.
+	if len(snap.GetVaultPlacements()) > 0 {
+		rt.VaultPlacements = make(map[glid.GLID][]system.VaultPlacement, len(snap.GetVaultPlacements()))
+		for _, tp := range snap.GetVaultPlacements() {
+			vaultID, placements, err := ExtractSetVaultPlacements(tp)
 			if err != nil {
-				return nil, nil, nil, fmt.Errorf("restore tier placements: %w", err)
+				return nil, nil, nil, fmt.Errorf("restore vault placements: %w", err)
 			}
-			rt.TierPlacements[tierID] = placements
+			rt.VaultPlacements[vaultID] = placements
 		}
 	}
 

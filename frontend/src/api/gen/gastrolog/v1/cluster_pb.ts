@@ -637,7 +637,7 @@ export class NodeStats extends Message<NodeStats> {
   /**
    * Per-peer inter-node gRPC transport bytes, from this node's perspective.
    * Populated from the cluster transport stats handlers — includes Raft,
-   * broadcast, tier replication, query forwarding, chunk streaming, etc.
+   * broadcast, vault replication, query forwarding, chunk streaming, etc.
    * See gastrolog-47u85.
    *
    * @generated from field: repeated gastrolog.v1.PeerBytesStat peer_bytes = 37;
@@ -1030,14 +1030,10 @@ export class ForwardRecordsResponse extends Message<ForwardRecordsResponse> {
 
 /**
  * ForwardVaultApplyRequest carries a pre-marshaled vault control-plane Raft
- * command for the leader to apply. group_id is the vault ctl group
+ * command for the leader to apply. group_id is the vault-ctl group
  * (vault/<vaultGLID>/ctl); command is the marshaled FSM command bytes
- * (typically OpVaultChunkFSM + tier GLID + tierfsm wire payload, see
- * vaultraft.MarshalVaultChunkCommand).
- *
- * Replaces the historical ForwardTierApply RPC during the vault refactor
- * (gastrolog-257l7) — the two had identical schema and RPC behavior;
- * merged into one.
+ * (typically OpVaultChunkFSM + vault-instance GLID + vaultctlfsm wire
+ * payload, see vaultraft.MarshalVaultChunkCommand).
  *
  * @generated from message gastrolog.v1.ForwardVaultApplyRequest
  */
@@ -1119,11 +1115,6 @@ export class ForwardVaultApplyResponse extends Message<ForwardVaultApplyResponse
  * identifies the target vault; the oneof command determines the
  * operation. New command types can be added without changing framing.
  *
- * tier_id is retained transitionally during the vault refactor
- * (gastrolog-257l7) so the orchestrator's existing tier-keyed routing
- * continues to work. It is removed once the orchestrator's runtime
- * dispatch is vault-keyed.
- *
  * @generated from message gastrolog.v1.ChunkReplicationCommand
  */
 export class ChunkReplicationCommand extends Message<ChunkReplicationCommand> {
@@ -1131,11 +1122,6 @@ export class ChunkReplicationCommand extends Message<ChunkReplicationCommand> {
    * @generated from field: bytes vault_id = 1;
    */
   vaultId = new Uint8Array(0);
-
-  /**
-   * @generated from field: bytes tier_id = 2;
-   */
-  tierId = new Uint8Array(0);
 
   /**
    * @generated from oneof gastrolog.v1.ChunkReplicationCommand.command
@@ -1175,7 +1161,6 @@ export class ChunkReplicationCommand extends Message<ChunkReplicationCommand> {
   static readonly typeName = "gastrolog.v1.ChunkReplicationCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 2, name: "tier_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 10, name: "append", kind: "message", T: ChunkReplicationAppend, oneof: "command" },
     { no: 11, name: "seal", kind: "message", T: ChunkReplicationSeal, oneof: "command" },
     { no: 12, name: "import_sealed", kind: "message", T: ChunkReplicationImport, oneof: "command" },
@@ -1443,23 +1428,16 @@ export class RequestReplicaCatchupRequest extends Message<RequestReplicaCatchupR
   vaultId = new Uint8Array(0);
 
   /**
-   * retained transitionally during the vault refactor (gastrolog-257l7)
-   *
-   * @generated from field: bytes tier_id = 2;
-   */
-  tierId = new Uint8Array(0);
-
-  /**
    * 16-byte ChunkIDs
    *
-   * @generated from field: repeated bytes chunk_ids = 3;
+   * @generated from field: repeated bytes chunk_ids = 2;
    */
   chunkIds: Uint8Array[] = [];
 
   /**
    * utf-8 node ID of the requesting follower
    *
-   * @generated from field: bytes requester_node_id = 4;
+   * @generated from field: bytes requester_node_id = 3;
    */
   requesterNodeId = new Uint8Array(0);
 
@@ -1472,9 +1450,8 @@ export class RequestReplicaCatchupRequest extends Message<RequestReplicaCatchupR
   static readonly typeName = "gastrolog.v1.RequestReplicaCatchupRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 2, name: "tier_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 3, name: "chunk_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
-    { no: 4, name: "requester_node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "chunk_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 3, name: "requester_node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RequestReplicaCatchupRequest {
@@ -2845,13 +2822,6 @@ export class ImportRecordMessage extends Message<ImportRecordMessage> {
    */
   record?: ExportRecord;
 
-  /**
-   * optional: route to a specific tier's active chunk (StreamToTier)
-   *
-   * @generated from field: bytes tier_id = 3;
-   */
-  tierId = new Uint8Array(0);
-
   constructor(data?: PartialMessage<ImportRecordMessage>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2862,7 +2832,6 @@ export class ImportRecordMessage extends Message<ImportRecordMessage> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "record", kind: "message", T: ExportRecord },
-    { no: 3, name: "tier_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ImportRecordMessage {

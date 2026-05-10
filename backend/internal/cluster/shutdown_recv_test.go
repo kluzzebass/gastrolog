@@ -25,7 +25,7 @@ func (b *blockingServerStream) Context() context.Context     { return b.ctx }
 func (b *blockingServerStream) SendMsg(any) error            { return nil }
 
 // RecvMsg blocks until stop closes. This mirrors the real behaviour of
-// tierReplicationStreamHandler's RecvMsg when no peer is sending: the
+// vaultChunkStreamHandler's RecvMsg when no peer is sending: the
 // handler is parked in Recv indefinitely.
 func (b *blockingServerStream) RecvMsg(any) error {
 	<-b.stop
@@ -34,7 +34,7 @@ func (b *blockingServerStream) RecvMsg(any) error {
 
 // TestRecvOrShutdownReturnsQuicklyOnCancel is the regression test for
 // the cluster-server half of gastrolog-1e5ke. Before this change,
-// long-running stream handlers (tier replication, stream forward
+// long-running stream handlers (vault replication, stream forward
 // records, forward import records) sat in stream.RecvMsg forever, and
 // cluster.Server.Stop()'s GracefulStop had to wait the full 5-second
 // fallback timeout because the handlers would not return. Fixing this

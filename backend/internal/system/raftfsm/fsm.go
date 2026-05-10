@@ -44,9 +44,7 @@ const (
 	NotifyCloudServicePut
 	NotifyCloudServiceDeleted
 	NotifyNodeStorageConfigSet
-	NotifyTierPut
-	NotifyTierDeleted
-	NotifyTierPlacementsSet
+	NotifyVaultPlacementsSet
 	NotifyIngesterAliveSet
 	NotifyIngesterCheckpointSet
 	NotifyIngesterAssignmentSet
@@ -63,7 +61,7 @@ type Notification struct {
 	NodeIDs    []string  // allowed nodes (populated on ingester deletes)
 	Dir        string    // file vault directory (populated on file vault deletes)
 	DeleteData bool      // when true, vault data directory should be removed from disk
-	Drain      bool      // when true, drain tier data to next tier before deleting
+	Drain      bool      // when true, drain vault data to a destination vault before deleting
 	Index      uint64    // Raft log index of this mutation (monotonically increasing config version)
 }
 
@@ -135,9 +133,7 @@ func (f *FSM) Apply(l *raft.Log) any {
 		*gastrologv1.SystemCommand_PutCloudService,
 		*gastrologv1.SystemCommand_DeleteCloudService,
 		*gastrologv1.SystemCommand_SetNodeStorageConfig,
-		*gastrologv1.SystemCommand_PutTier,
-		*gastrologv1.SystemCommand_DeleteTier,
-		*gastrologv1.SystemCommand_SetTierPlacements,
+		*gastrologv1.SystemCommand_SetVaultPlacements,
 		*gastrologv1.SystemCommand_SetIngesterAlive,
 		*gastrologv1.SystemCommand_SetIngesterCheckpoint,
 		*gastrologv1.SystemCommand_SetIngesterAssignment,
@@ -256,12 +252,8 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.SystemCommand
 		return f.applyDeleteCloudService(ctx, c.DeleteCloudService)
 	case *gastrologv1.SystemCommand_SetNodeStorageConfig:
 		return f.applySetNodeStorageConfig(ctx, c.SetNodeStorageConfig)
-	case *gastrologv1.SystemCommand_PutTier:
-		return f.applyPutTier(ctx, c.PutTier)
-	case *gastrologv1.SystemCommand_DeleteTier:
-		return f.applyDeleteTier(ctx, c.DeleteTier)
-	case *gastrologv1.SystemCommand_SetTierPlacements:
-		return f.applySetTierPlacements(ctx, c.SetTierPlacements)
+	case *gastrologv1.SystemCommand_SetVaultPlacements:
+		return f.applySetVaultPlacements(ctx, c.SetVaultPlacements)
 	case *gastrologv1.SystemCommand_SetIngesterAlive:
 		return f.applySetIngesterAlive(ctx, c.SetIngesterAlive)
 	case *gastrologv1.SystemCommand_SetIngesterCheckpoint:
@@ -336,55 +328,9 @@ func (f *FSM) applyPutVault(ctx context.Context, pb *gastrologv1.PutVaultCommand
 	if err := f.store.PutVault(ctx, cfg); err != nil {
 		return nil, err
 	}
-	// Phase 2 (gastrolog-3iy5l): synthesize a TierConfig that mirrors the
-	// VaultConfig so the orchestrator's existing tier-keyed read paths
-	// keep working while VaultConfig is the authoritative input. The tier
-	// shares the vault's ID — single instance per vault. PutTier is no
-	// longer the public write surface; this is the bridge in the
-	// vault→tier direction, replacing the legacy tier→vault merge.
-	if err := f.syncTierFromVault(ctx, cfg); err != nil {
-		return nil, err
-	}
 	return &Notification{Kind: NotifyVaultPut, ID: cfg.ID}, nil
 }
 
-// syncTierFromVault writes a TierConfig + placements that mirror the given
-// VaultConfig. Called from applyPutVault to keep the orchestrator's
-// tier-keyed reads working until they migrate to VaultConfig directly.
-func (f *FSM) syncTierFromVault(ctx context.Context, v system.VaultConfig) error {
-	tierType := v.Type
-	if tierType == "" {
-		tierType = system.TierTypeFile
-	}
-	tier := system.TierConfig{
-		ID:                v.ID, // 1:1 vault:tier — share the ID
-		Name:              v.Name,
-		Type:              tierType,
-		VaultID:           v.ID,
-		Position:          0,
-		StorageClass:      v.StorageClass,
-		CloudServiceID:    v.CloudServiceID,
-		ReplicationFactor: v.ReplicationFactor,
-		Path:              v.Path,
-		MemoryBudgetBytes: v.MemoryBudgetBytes,
-		RotationPolicyID:  v.RotationPolicyID,
-		RetentionRules:    append([]system.RetentionRule(nil), v.RetentionRules...),
-		CacheEviction:     v.CacheEviction,
-		CacheBudget:       v.CacheBudget,
-		CacheTTL:          v.CacheTTL,
-	}
-	if err := f.store.PutTier(ctx, tier); err != nil {
-		return err
-	}
-	if len(v.Placements) > 0 {
-		placements := make([]system.TierPlacement, len(v.Placements))
-		copy(placements, v.Placements)
-		if err := f.store.SetTierPlacements(ctx, tier.ID, placements); err != nil {
-			return err
-		}
-	}
-	return nil
-}
 
 func (f *FSM) applyDeleteVault(ctx context.Context, pb *gastrologv1.DeleteVaultCommand) (*Notification, error) {
 	id, err := command.ExtractDeleteVault(pb)
@@ -528,66 +474,32 @@ func (f *FSM) applySetNodeStorageConfig(ctx context.Context, pb *gastrologv1.Set
 	return &Notification{Kind: NotifyNodeStorageConfigSet}, nil
 }
 
-func (f *FSM) applyPutTier(ctx context.Context, pb *gastrologv1.PutTierCommand) (*Notification, error) {
-	tier, err := command.ExtractPutTier(pb)
+func (f *FSM) applySetVaultPlacements(ctx context.Context, pb *gastrologv1.SetVaultPlacementsCommand) (*Notification, error) {
+	vaultID, placements, err := command.ExtractSetVaultPlacements(pb)
 	if err != nil {
 		return nil, err
 	}
-	if err := f.store.PutTier(ctx, tier); err != nil {
+	if err := f.store.SetVaultPlacements(ctx, vaultID, placements); err != nil {
 		return nil, err
 	}
-	// Phase 2 (gastrolog-3iy5l): the legacy tier→vault merge is gone.
-	// PutTier is retained for replay of historical Raft log entries; new
-	// writes flow through PutVault, which carries the canonical fields and
-	// synthesizes the matching TierConfig in applyPutVault.
-	return &Notification{Kind: NotifyTierPut, ID: tier.ID}, nil
-}
-
-func (f *FSM) applyDeleteTier(ctx context.Context, pb *gastrologv1.DeleteTierCommand) (*Notification, error) {
-	id, err := command.ExtractDeleteTier(pb)
-	if err != nil {
-		return nil, err
-	}
-	if err := f.store.DeleteTier(ctx, id, pb.GetDrain()); err != nil {
-		return nil, err
-	}
-	return &Notification{Kind: NotifyTierDeleted, ID: id, Drain: pb.GetDrain()}, nil
-}
-
-func (f *FSM) applySetTierPlacements(ctx context.Context, pb *gastrologv1.SetTierPlacementsCommand) (*Notification, error) {
-	tierID, placements, err := command.ExtractSetTierPlacements(pb)
-	if err != nil {
-		return nil, err
-	}
-	if err := f.store.SetTierPlacements(ctx, tierID, placements); err != nil {
-		return nil, err
-	}
-	// Phase 2 (gastrolog-3iy5l): mirror placements back onto the matching
-	// VaultConfig (1:1 vault:tier — the vault shares the tier's ID for new
-	// vault-driven writes; older log entries may use distinct IDs).
+	// Mirror placements back onto the matching VaultConfig.Placements.
 	// Placement-driven write path; PutVault is the user-facing surface.
-	if err := f.mirrorPlacementsToVault(ctx, tierID, placements); err != nil {
+	if err := f.mirrorPlacementsToVault(ctx, vaultID, placements); err != nil {
 		return nil, err
 	}
-	return &Notification{Kind: NotifyTierPlacementsSet, ID: tierID}, nil
+	return &Notification{Kind: NotifyVaultPlacementsSet, ID: vaultID}, nil
 }
 
 // mirrorPlacementsToVault writes the placement set to the owning vault's
-// VaultConfig.Placements. Used by the placement manager (which still
-// operates on tier IDs) until placement state migrates to vault-keyed
-// in Phase 5.
-func (f *FSM) mirrorPlacementsToVault(ctx context.Context, tierID glid.GLID, placements []system.TierPlacement) error {
-	tier, err := f.store.GetTier(ctx, tierID)
-	if err != nil || tier == nil {
-		return nil //nolint:nilerr // tier might be transient; not worth failing the placement write
-	}
-	v, err := f.store.GetVault(ctx, tier.VaultID)
+// VaultConfig.Placements.
+func (f *FSM) mirrorPlacementsToVault(ctx context.Context, vaultID glid.GLID, placements []system.VaultPlacement) error {
+	v, err := f.store.GetVault(ctx, vaultID)
 	if err != nil || v == nil {
 		return nil //nolint:nilerr // vault not yet present; will pick up on PutVault
 	}
 	merged := *v
 	if len(placements) > 0 {
-		merged.Placements = make([]system.TierPlacement, len(placements))
+		merged.Placements = make([]system.VaultPlacement, len(placements))
 		copy(merged.Placements, placements)
 	} else {
 		merged.Placements = nil
@@ -705,33 +617,35 @@ func (f *FSM) applyRefreshToken(ctx context.Context, cmd *gastrologv1.SystemComm
 	}
 }
 
-// cascadeDeleteRotationPolicy clears rotation policy references from tiers.
+// cascadeDeleteRotationPolicy clears rotation policy references from vaults
+// after the policy is deleted.
 func (f *FSM) cascadeDeleteRotationPolicy(ctx context.Context, policyID glid.GLID) error {
-	tiers, err := f.store.ListTiers(ctx)
+	vaults, err := f.store.ListVaults(ctx)
 	if err != nil {
-		return fmt.Errorf("list tiers for cascade: %w", err)
+		return fmt.Errorf("list vaults for cascade: %w", err)
 	}
-	for _, t := range tiers {
-		if t.RotationPolicyID != nil && *t.RotationPolicyID == policyID {
-			t.RotationPolicyID = nil
-			if err := f.store.PutTier(ctx, t); err != nil {
-				return fmt.Errorf("cascade update tier %s: %w", t.ID, err)
+	for _, v := range vaults {
+		if v.RotationPolicyID != nil && *v.RotationPolicyID == policyID {
+			v.RotationPolicyID = nil
+			if err := f.store.PutVault(ctx, v); err != nil {
+				return fmt.Errorf("cascade update vault %s: %w", v.ID, err)
 			}
 		}
 	}
 	return nil
 }
 
-// cascadeDeleteRetentionPolicy removes retention rules referencing the policy from tiers.
+// cascadeDeleteRetentionPolicy removes retention rules referencing the policy
+// from vaults.
 func (f *FSM) cascadeDeleteRetentionPolicy(ctx context.Context, policyID glid.GLID) error {
-	tiers, err := f.store.ListTiers(ctx)
+	vaults, err := f.store.ListVaults(ctx)
 	if err != nil {
-		return fmt.Errorf("list tiers for cascade: %w", err)
+		return fmt.Errorf("list vaults for cascade: %w", err)
 	}
-	for _, t := range tiers {
+	for _, v := range vaults {
 		modified := false
-		filtered := t.RetentionRules[:0]
-		for _, rule := range t.RetentionRules {
+		filtered := v.RetentionRules[:0]
+		for _, rule := range v.RetentionRules {
 			if rule.RetentionPolicyID == policyID {
 				modified = true
 				continue
@@ -739,9 +653,9 @@ func (f *FSM) cascadeDeleteRetentionPolicy(ctx context.Context, policyID glid.GL
 			filtered = append(filtered, rule)
 		}
 		if modified {
-			t.RetentionRules = filtered
-			if err := f.store.PutTier(ctx, t); err != nil {
-				return fmt.Errorf("cascade update tier %s: %w", t.ID, err)
+			v.RetentionRules = filtered
+			if err := f.store.PutVault(ctx, v); err != nil {
+				return fmt.Errorf("cascade update vault %s: %w", v.ID, err)
 			}
 		}
 	}
@@ -782,7 +696,7 @@ func (f *FSM) Snapshot() (raft.FSMSnapshot, error) {
 
 // maxSnapshotBytes caps the size of a Raft snapshot the FSM will accept on
 // restore. The snapshot is a marshaled SystemSnapshot proto containing the
-// full cluster config (vaults, tiers, ingesters, routes, users, certs, etc.)
+// full cluster config (vaults, ingesters, routes, users, certs, etc.)
 // — the realistic ceiling is at most a few hundred MB even for very large
 // clusters. The cap rejects pathological / corrupted snapshots without
 // pulling unbounded bytes into the heap.
@@ -875,12 +789,6 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit,gocyclo // sna
 			return fmt.Errorf("restore cloud service %s: %w", cs.ID, err)
 		}
 	}
-	for _, tier := range cfg.Tiers {
-		if err := newStore.PutTier(ctx, tier); err != nil {
-			return fmt.Errorf("restore tier %s: %w", tier.ID, err)
-		}
-	}
-
 	// Users and tokens.
 	for _, u := range users {
 		if err := newStore.CreateUser(ctx, u); err != nil {
@@ -909,9 +817,9 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit,gocyclo // sna
 			return fmt.Errorf("restore cluster TLS: %w", err)
 		}
 	}
-	for tierID, placements := range rt.TierPlacements {
-		if err := newStore.SetTierPlacements(ctx, tierID, placements); err != nil {
-			return fmt.Errorf("restore tier placements %s: %w", tierID, err)
+	for vaultID, placements := range rt.VaultPlacements {
+		if err := newStore.SetVaultPlacements(ctx, vaultID, placements); err != nil {
+			return fmt.Errorf("restore vault placements %s: %w", vaultID, err)
 		}
 	}
 	for ingesterID, nodes := range rt.IngesterAlive {

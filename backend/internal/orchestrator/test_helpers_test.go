@@ -27,8 +27,8 @@ import (
 )
 
 // syntheticPlacements creates a Placements slice with a leader using a synthetic storage ID.
-func syntheticPlacements(nodeID string) []system.TierPlacement {
-	return []system.TierPlacement{{StorageID: system.SyntheticStorageID(nodeID), Leader: true}}
+func syntheticPlacements(nodeID string) []system.VaultPlacement {
+	return []system.VaultPlacement{{StorageID: system.SyntheticStorageID(nodeID), Leader: true}}
 }
 
 // ---------- config loader adapter ----------
@@ -43,17 +43,17 @@ func (l *transitionSystemLoader) Load(ctx context.Context) (*system.System, erro
 	if err != nil || sys == nil {
 		return sys, err
 	}
-	// Auto-populate placements for test tiers that don't have them.
+	// Auto-populate placements for test vaults that don't have them.
 	nodeID := l.nodeID
 	if nodeID == "" {
 		nodeID = "test-node"
 	}
-	if sys.Runtime.TierPlacements == nil {
-		sys.Runtime.TierPlacements = make(map[glid.GLID][]system.TierPlacement)
+	if sys.Runtime.VaultPlacements == nil {
+		sys.Runtime.VaultPlacements = make(map[glid.GLID][]system.VaultPlacement)
 	}
-	for _, tier := range sys.Config.Tiers {
-		if _, ok := sys.Runtime.TierPlacements[tier.ID]; !ok {
-			sys.Runtime.TierPlacements[tier.ID] = []system.TierPlacement{
+	for _, v := range sys.Config.Vaults {
+		if _, ok := sys.Runtime.VaultPlacements[v.ID]; !ok {
+			sys.Runtime.VaultPlacements[v.ID] = []system.VaultPlacement{
 				{StorageID: system.SyntheticStorageID(nodeID), Leader: true},
 			}
 		}
@@ -62,7 +62,7 @@ func (l *transitionSystemLoader) Load(ctx context.Context) (*system.System, erro
 }
 
 // newTestStore creates a memory store and populates it with config entities
-// AND runtime placements for single-node tests. Each tier gets a synthetic
+// AND runtime placements for single-node tests. Each instance gets a synthetic
 // leader placement for nodeID.
 func newTestStore(cfg *system.Config, nodeID string) *sysmem.Store {
 	store := sysmem.NewStore()
@@ -70,9 +70,8 @@ func newTestStore(cfg *system.Config, nodeID string) *sysmem.Store {
 	for _, v := range cfg.Vaults {
 		_ = store.PutVault(ctx, v)
 	}
-	for _, tc := range cfg.Tiers {
-		_ = store.PutTier(ctx, tc)
-		_ = store.SetTierPlacements(ctx, tc.ID, []system.TierPlacement{
+	for _, v := range cfg.Vaults {
+		_ = store.SetVaultPlacements(ctx, v.ID, []system.VaultPlacement{
 			{StorageID: system.SyntheticStorageID(nodeID), Leader: true},
 		})
 	}
@@ -106,7 +105,7 @@ func newTestOrch(t *testing.T, cfg Config) *Orchestrator {
 	return orch
 }
 
-func newMemoryTierInstance(t *testing.T, tierID glid.GLID) *VaultInstance {
+func newMemoryInstance(t *testing.T, vaultID glid.GLID) *VaultInstance {
 	t.Helper()
 	cm, err := chunkmem.NewFactory()(nil, nil)
 	if err != nil {
@@ -117,7 +116,7 @@ func newMemoryTierInstance(t *testing.T, tierID glid.GLID) *VaultInstance {
 		t.Fatal(err)
 	}
 	return &VaultInstance{
-		TierID:  tierID,
+		VaultID:  vaultID,
 		Type:    "memory",
 		Chunks:  cm,
 		Indexes: im,
@@ -126,23 +125,22 @@ func newMemoryTierInstance(t *testing.T, tierID glid.GLID) *VaultInstance {
 }
 
 // setupTestStoreRuntime populates the test store with runtime state that tests
-// need — tier placements and node storage config. Most tests use memory tiers
+// need — vault placements and node storage config. Most tests use memory vaults
 // with a single test-node, so placements use synthetic storage IDs.
-func setupTestStoreRuntime(store *sysmem.Store, nodeID string, tierIDs ...glid.GLID) {
+func setupTestStoreRuntime(store *sysmem.Store, nodeID string, vaultIDs ...glid.GLID) {
 	ctx := context.Background()
-	for _, tid := range tierIDs {
-		_ = store.SetTierPlacements(ctx, tid, []system.TierPlacement{
+	for _, tid := range vaultIDs {
+		_ = store.SetVaultPlacements(ctx, tid, []system.VaultPlacement{
 			{StorageID: system.SyntheticStorageID(nodeID), Leader: true},
 		})
 	}
 }
 
 
-func newTestRetentionRunner(orch *Orchestrator, vaultID, tierID glid.GLID, cm chunk.ChunkManager, im index.IndexManager) *retentionRunner {
+func newTestRetentionRunner(orch *Orchestrator, vaultID glid.GLID, cm chunk.ChunkManager, im index.IndexManager) *retentionRunner {
 	return &retentionRunner{
 		isLeader: true,
 		vaultID:  vaultID,
-		tierID:   tierID,
 		cm:       cm,
 		im:       im,
 		orch:     orch,
@@ -169,14 +167,12 @@ type transitionFakeTransferrer struct {
 type transitionTransferCall struct {
 	nodeID  string
 	vaultID glid.GLID
-	tierID  glid.GLID
 	records []chunk.Record
 }
 
 type transitionStreamCall struct {
 	nodeID  string
 	vaultID glid.GLID
-	tierID  glid.GLID
 	count   int
 }
 
@@ -193,27 +189,6 @@ func (m *transitionFakeTransferrer) WaitVaultReady(_ context.Context, _ string, 
 
 
 
-
-// TestTransitionCloudTierTTLSweep verifies that the retention sweep with a TTL
-// policy correctly transitions cloud-backed sealed chunks to the next tier.
-// Reproduces gastrolog-9umo2: 3m TTL on cloud tier, chunks sit for 10+ minutes.
-
-// TestCloudTierLeaderPreservesCloudBacking verifies that a cloud tier leader
-// built through the production code path (buildLeaderTierInstance →
-// buildTierInstanceForStorage) retains the sealed_backing parameter so that
-// PostSealProcess uploads chunks to cloud storage.
-//
-// Regression test: buildTierInstanceForStorage previously stripped sealed_backing
-// unconditionally (with the comment "always follower"), even when called for the
-// leader. This caused cloud tier leaders to have CloudStore=nil, silently
-// preventing all cloud uploads and breaking the entire archival lifecycle.
-
-// TestTransitionCloudTierFollowerDoesNotOverwriteBlob verifies that the
-// follower's PostSealProcess does NOT upload to cloud storage, preventing
-// it from overwriting the leader's blob with a different-sized version.
-// This was the root cause of gastrolog-9umo2: the follower's upload changed
-// the blob size, corrupting the leader's stored diskBytes and breaking all
-// future cloud cursor reads (S3 416 Range Not Satisfiable).
 
 func testIterFromRecords(recs []chunk.Record) chunk.RecordIterator {
 	i := 0
@@ -242,29 +217,12 @@ func (p *keepNPolicy) Apply(state chunk.VaultState) []chunk.ChunkID {
 	return ids
 }
 
-func (m *transitionFakeTransferrer) StreamToTier(_ context.Context, nodeID string, vaultID, tierID glid.GLID, next chunk.RecordIterator) error {
-	if m.failErr != nil {
-		return m.failErr
-	}
-	var count int
-	for {
-		if _, err := next(); err != nil {
-			break
-		}
-		count++
-	}
-	m.streamCalls = append(m.streamCalls, transitionStreamCall{
-		nodeID: nodeID, vaultID: vaultID, tierID: tierID, count: count,
-	})
-	return nil
-}
+// ---------- cloud instance transition test ----------
 
-// ---------- cloud tier transition test ----------
-
-// newCloudFileTier creates a file-backed VaultInstance with cloud storage.
+// newCloudFileInstance creates a file-backed VaultInstance with cloud storage.
 // Sealed chunks are uploaded to the in-memory blobstore and local files deleted,
-// matching production cloud tier behavior.
-func newCloudFileTier(t *testing.T, tierID glid.GLID, vaultID glid.GLID, store blobstore.Store) (*VaultInstance, string) {
+// matching production cloud instance behavior.
+func newCloudFileInstance(t *testing.T, vaultID glid.GLID, store blobstore.Store) (*VaultInstance, string) {
 	t.Helper()
 	dir := t.TempDir()
 	cm, err := chunkfile.NewManager(chunkfile.Config{
@@ -279,7 +237,7 @@ func newCloudFileTier(t *testing.T, tierID glid.GLID, vaultID glid.GLID, store b
 	}
 	im := indexfile.NewManager(dir, nil, nil)
 	return &VaultInstance{
-		TierID:  tierID,
+		VaultID:  vaultID,
 		Type:    "cloud",
 		Chunks:  cm,
 		Indexes: im,
@@ -287,20 +245,11 @@ func newCloudFileTier(t *testing.T, tierID glid.GLID, vaultID glid.GLID, store b
 	}, dir
 }
 
-// TestTransitionCloudTierToNextTier verifies that sealed cloud-backed chunks
-// are read back from object storage and streamed to the next tier. This is
-// the exact scenario from gastrolog-9umo2: FILE → FILE → CLOUD → FILE chain
-// where the cloud tier's sealed chunks never transition to tier 4.
-
-// TestTransitionCloudTierSweepDispatch verifies that the retention sweep
-// correctly picks up cloud-backed sealed chunks and transitions them.
-// This tests the full sweep() path rather than calling transitionChunk directly.
-
 // ---------- helpers for new tests ----------
 
-// newFileTierInstance creates a file-backed VaultInstance without cloud storage.
-// Returns the tier instance and its filesystem directory for post-test verification.
-func newFileTierInstance(t *testing.T, tierID glid.GLID) (*VaultInstance, string) {
+// newFileInstance creates a file-backed VaultInstance without cloud storage.
+// Returns the vault instance and its filesystem directory for post-test verification.
+func newFileInstance(t *testing.T, vaultID glid.GLID) (*VaultInstance, string) {
 	t.Helper()
 	dir := t.TempDir()
 	cm, err := chunkfile.NewManager(chunkfile.Config{
@@ -313,7 +262,7 @@ func newFileTierInstance(t *testing.T, tierID glid.GLID) (*VaultInstance, string
 	}
 	im := indexfile.NewManager(dir, nil, nil)
 	return &VaultInstance{
-		TierID:  tierID,
+		VaultID:  vaultID,
 		Type:    "file",
 		Chunks:  cm,
 		Indexes: im,
@@ -321,7 +270,7 @@ func newFileTierInstance(t *testing.T, tierID glid.GLID) (*VaultInstance, string
 	}, dir
 }
 
-// assertNoDirsOnDisk verifies no chunk subdirectories remain in a tier directory.
+// assertNoDirsOnDisk verifies no chunk subdirectories remain in a vault directory.
 func assertNoDirsOnDisk(t *testing.T, label, dir string) {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
@@ -336,8 +285,8 @@ func assertNoDirsOnDisk(t *testing.T, label, dir string) {
 	}
 }
 
-// countAllTierRecords counts all records across both sealed and active chunks.
-func countAllTierRecords(tb testing.TB, cm chunk.ChunkManager) int64 {
+// countAllInstanceRecords counts all records across both sealed and active chunks.
+func countAllInstanceRecords(tb testing.TB, cm chunk.ChunkManager) int64 {
 	tb.Helper()
 	metas, _ := cm.List()
 	var total int64
@@ -422,44 +371,11 @@ func makeRecordWithEventID(raw string, ingesterID glid.GLID, seq uint32) chunk.R
 	}
 }
 
-// ---------- 3-tier chain transition tests ----------
-
-// TestTransitionThreeTierChainMemory verifies that a 3-tier chain
-// (memory→memory→memory) preserves exact record count with no duplication.
-
-// TestTransitionThreeTierChainFileFileCloud verifies the production-like
-// file→file→cloud chain preserves all records without N× duplication.
-// This is the exact scenario from the gastrolog-1rv42 session bugs.
-
-// ---------- EventID preservation tests ----------
-
-// TestTransitionEventIDPreserved verifies that EventIDs survive local tier transitions.
-
-// TestTransitionEventIDPreservedThroughCloudTier verifies EventIDs survive
-// transitions through a cloud-backed tier (the full round-trip: ingest → seal
-// → cloud upload → cloud cursor read → transition to next tier).
-
-// ---------- Record count accuracy tests ----------
-
-// TestTransitionRecordCountAccuracy verifies that chunk metadata RecordCount
-// matches the actual number of records readable via cursor at each tier stage.
-
-// ---------- Cloud search after transition ----------
-
-// TestTransitionCloudSearchAfterTransition verifies that records in a cloud
-// tier are searchable via the query engine after transition and upload.
-
-// ---------- Cloud upload idempotency ----------
-
-// TestTransitionCloudUploadOnlyOneBlob verifies that uploading a sealed chunk
-// to cloud produces exactly one blob in the blobstore, and that the blob
-// contains all records. This guards against duplicate uploads from racing nodes.
-
 // ==========================================================================
 // Multi-node cluster transition tests
 //
 // These wire up multiple full orchestrators with in-process RemoteTransferrers,
-// multi-tier vaults with leader/follower replication, rotation policies that
+// multi-instance vaults with leader/follower replication, rotation policies that
 // create many sealed chunks, and burst ingestion to stress the transition +
 // replication pipeline under realistic conditions.
 // ==========================================================================
@@ -469,14 +385,6 @@ func makeRecordWithEventID(raw string, ingesterID glid.GLID, seq uint32) chunk.R
 // transferrer used in production — same operations, no network.
 type directTransferrer struct {
 	nodes map[string]*Orchestrator
-}
-
-func (d *directTransferrer) StreamToTier(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, next chunk.RecordIterator) error {
-	orch, ok := d.nodes[nodeID]
-	if !ok {
-		return fmt.Errorf("directTransferrer: unknown node %q", nodeID)
-	}
-	return orch.StreamAppendToTier(ctx, vaultID, tierID, next)
 }
 
 func (d *directTransferrer) ForwardAppend(_ context.Context, nodeID string, vaultID glid.GLID, records []chunk.Record) error {
@@ -521,28 +429,28 @@ type directChunkReplicator struct {
 	nodes map[string]*Orchestrator
 }
 
-func (d *directChunkReplicator) AppendRecords(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
+func (d *directChunkReplicator) AppendRecords(_ context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
 		return fmt.Errorf("directChunkReplicator: unknown node %q", nodeID)
 	}
 	for _, rec := range records {
-		if err := orch.AppendToVault(vaultID, tierID, chunkID, rec); err != nil {
+		if err := orch.AppendToVault(vaultID, chunkID, rec); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (d *directChunkReplicator) SealVault(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
+func (d *directChunkReplicator) SealVault(_ context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
 		return fmt.Errorf("directChunkReplicator: unknown node %q", nodeID)
 	}
-	return orch.SealActiveTier(vaultID, tierID, chunkID)
+	return orch.SealActiveChunk(vaultID, chunkID)
 }
 
-func (d *directChunkReplicator) ImportSealedChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
+func (d *directChunkReplicator) ImportSealedChunk(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
 		return fmt.Errorf("directChunkReplicator: unknown node %q", nodeID)
@@ -556,23 +464,23 @@ func (d *directChunkReplicator) ImportSealedChunk(ctx context.Context, nodeID st
 		i++
 		return rec, nil
 	}
-	return orch.ImportToVault(ctx, vaultID, tierID, chunkID, iter)
+	return orch.ImportToVault(ctx, vaultID, chunkID, iter)
 }
 
-func (d *directChunkReplicator) DeleteChunk(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
+func (d *directChunkReplicator) DeleteChunk(_ context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
 		return fmt.Errorf("directChunkReplicator: unknown node %q", nodeID)
 	}
-	return orch.DeleteChunkFromTier(vaultID, tierID, chunkID)
+	return orch.DeleteChunk(vaultID, chunkID)
 }
 
-func (d *directChunkReplicator) RequestReplicaCatchup(ctx context.Context, leaderNodeID string, vaultID, tierID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error) {
+func (d *directChunkReplicator) RequestReplicaCatchup(ctx context.Context, leaderNodeID string, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error) {
 	orch, ok := d.nodes[leaderNodeID]
 	if !ok {
 		return 0, fmt.Errorf("directChunkReplicator: unknown leader %q", leaderNodeID)
 	}
-	return orch.CatchupSelectedChunks(ctx, vaultID, tierID, requesterNodeID, chunkIDs)
+	return orch.CatchupSelectedChunks(ctx, vaultID, requesterNodeID, chunkIDs)
 }
 
 // newClusterRetentionRunner creates a retention runner with follower targets
@@ -583,16 +491,15 @@ func (d *directChunkReplicator) RequestReplicaCatchup(ctx context.Context, leade
 // → CmdAckDelete from each → CmdFinalizeDelete on the leader. Without this,
 // expireChunk falls through to the legacy direct-delete fallback which
 // doesn't replicate, and the cluster retention assertions fail.
-func newClusterRetentionRunner(orch *Orchestrator, vaultID, tierID glid.GLID, tier *VaultInstance) *retentionRunner {
+func newClusterRetentionRunner(orch *Orchestrator, vaultID glid.GLID, vaultInst *VaultInstance) *retentionRunner {
 	return &retentionRunner{
 		isLeader:        true,
 		vaultID:         vaultID,
-		tierID:          tierID,
-		cm:              tier.Chunks,
-		im:              tier.Indexes,
+		cm:              vaultInst.Chunks,
+		im:              vaultInst.Indexes,
 		orch:            orch,
-		followerTargets: tier.FollowerTargets,
-		reconciler:      tier.Reconciler,
+		followerTargets: vaultInst.FollowerTargets,
+		reconciler:      vaultInst.Reconciler,
 		now:             time.Now,
 		logger:          slog.Default(),
 	}
@@ -602,8 +509,8 @@ func newClusterRetentionRunner(orch *Orchestrator, vaultID, tierID glid.GLID, ti
 type clusterTestNode struct {
 	nodeID   string
 	orch     *Orchestrator
-	tiers    []*VaultInstance // all tier instances on this node
-	tierDirs []string        // filesystem directories, one per tier
+	instances    []*VaultInstance // all vault instances on this node
+	instanceDirs []string        // filesystem directories, one per instance
 }
 
 // clusterHarness holds the full multi-node cluster.
@@ -611,7 +518,7 @@ type clusterHarness struct {
 	nodes    map[string]*clusterTestNode
 	cfgStore *sysmem.Store
 	vaultID  glid.GLID
-	tierIDs  []glid.GLID
+	vaultIDs  []glid.GLID
 }
 
 // allNodeIDs returns sorted node IDs.
@@ -630,36 +537,36 @@ func cursorCountRecords(t *testing.T, cm chunk.ChunkManager) int64 {
 	return int64(len(readAllRecords(t, cm)))
 }
 
-// countRecordsOnNode counts all cursor-verified records across all tiers on a node.
+// countRecordsOnNode counts all cursor-verified records across all vaults on a node.
 func (h *clusterHarness) countRecordsOnNode(t *testing.T, nodeID string) int64 {
 	t.Helper()
 	node := h.nodes[nodeID]
 	var total int64
-	for _, tier := range node.tiers {
-		total += cursorCountRecords(t, tier.Chunks)
+	for _, vaultInst := range node.instances {
+		total += cursorCountRecords(t, vaultInst.Chunks)
 	}
 	return total
 }
 
-// countRecordsOnTier counts cursor-verified records in a specific tier across ALL nodes.
-func (h *clusterHarness) countRecordsOnTier(t *testing.T, tierIdx int) map[string]int64 {
+// countRecordsOnInstance counts cursor-verified records in a specific instance across ALL nodes.
+func (h *clusterHarness) countRecordsOnInstance(t *testing.T, vaultIdx int) map[string]int64 {
 	t.Helper()
 	counts := make(map[string]int64)
 	for nodeID, node := range h.nodes {
-		if tierIdx < len(node.tiers) {
-			counts[nodeID] = cursorCountRecords(t, node.tiers[tierIdx].Chunks)
+		if vaultIdx < len(node.instances) {
+			counts[nodeID] = cursorCountRecords(t, node.instances[vaultIdx].Chunks)
 		}
 	}
 	return counts
 }
 
-// countChunksOnTier counts sealed chunks in a specific tier across ALL nodes.
-func (h *clusterHarness) countChunksOnTier(t *testing.T, tierIdx int) map[string]int {
+// countChunksOnInstance counts sealed chunks in a specific instance across ALL nodes.
+func (h *clusterHarness) countChunksOnInstance(t *testing.T, vaultIdx int) map[string]int {
 	t.Helper()
 	counts := make(map[string]int)
 	for nodeID, node := range h.nodes {
-		if tierIdx < len(node.tiers) {
-			metas, _ := node.tiers[tierIdx].Chunks.List()
+		if vaultIdx < len(node.instances) {
+			metas, _ := node.instances[vaultIdx].Chunks.List()
 			counts[nodeID] = len(metas)
 		}
 	}
@@ -670,11 +577,11 @@ func (h *clusterHarness) countChunksOnTier(t *testing.T, tierIdx int) map[string
 // file-backed chunk managers with real filesystem directories.
 //
 // Layout:
-//   - nodeIDs[0] is the leader for all tiers
-//   - nodeIDs[1:] are followers for all tiers
-//   - Each tier gets its own TempDir per node (real filesystem I/O)
+//   - nodeIDs[0] is the leader for all vaults
+//   - nodeIDs[1:] are followers for all vaults
+//   - Each instance gets its own TempDir per node (real filesystem I/O)
 //   - rotationRecords controls the rotation policy (e.g., 100 = seal every 100 records)
-//   - The leader's tiers have FollowerTargets pointing to all followers
+//   - The leader's vaults have FollowerTargets pointing to all followers
 //   - Every node has a directTransferrer wired to all other nodes
 //
 // newClusterLifecycleLogger returns a slog.Logger that writes ALL levels
@@ -698,43 +605,39 @@ func newClusterLifecycleLogger(t *testing.T) *slog.Logger {
 	return slog.New(handler)
 }
 
-func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords uint64) *clusterHarness {
+func setupCluster(t *testing.T, nodeIDs []string, vaultCount int, rotationRecords uint64) *clusterHarness {
 	t.Helper()
 	if len(nodeIDs) < 2 {
 		t.Fatal("setupCluster needs at least 2 nodes")
 	}
 	leaderID := nodeIDs[0]
 	vaultID := glid.New()
-	tierIDs := make([]glid.GLID, tierCount)
-	for i := range tierCount {
-		tierIDs[i] = glid.New()
+	// Single instance per vault sharing the vault's ID. vaultCount is
+	// always 1 in current callers; the slice survives only for legacy
+	// fixture wiring.
+	vaultIDs := make([]glid.GLID, vaultCount)
+	for i := range vaultCount {
+		vaultIDs[i] = vaultID
 	}
 
 	// Create config store.
 	store := sysmem.NewStore()
-	tierCfgs := make([]system.TierConfig, tierCount)
-	for i := range tierCount {
-		placements := make([]system.TierPlacement, 0, len(nodeIDs))
-		placements = append(placements, system.TierPlacement{
+	for i := range vaultCount {
+		placements := make([]system.VaultPlacement, 0, len(nodeIDs))
+		placements = append(placements, system.VaultPlacement{
 			StorageID: system.SyntheticStorageID(leaderID), Leader: true,
 		})
 		for _, fid := range nodeIDs[1:] {
-			placements = append(placements, system.TierPlacement{
+			placements = append(placements, system.VaultPlacement{
 				StorageID: system.SyntheticStorageID(fid), Leader: false,
 			})
 		}
-		tierCfgs[i] = system.TierConfig{
-			ID:       tierIDs[i],
-			Name:     fmt.Sprintf("tier-%d", i),
-			Type:     system.VaultTypeFile,
-			VaultID:  vaultID,
-			Position: uint32(i),
-		}
-		_ = store.PutTier(context.Background(), tierCfgs[i])
-		_ = store.SetTierPlacements(context.Background(), tierIDs[i], placements)
+		_ = store.SetVaultPlacements(context.Background(), vaultIDs[i], placements)
 	}
 	_ = store.PutVault(context.Background(), system.VaultConfig{
-		ID: vaultID, Name: "cluster-vault",
+		ID:   vaultID,
+		Name: "cluster-vault",
+		Type: system.VaultTypeFile,
 	})
 
 	// Build follower targets for the leader.
@@ -743,7 +646,7 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 		followerTargets = append(followerTargets, system.ReplicationTarget{NodeID: fid})
 	}
 
-	// Create all orchestrators with file-backed tiers.
+	// Create all orchestrators with file-backed vaults.
 	orchs := make(map[string]*Orchestrator)
 	nodes := make(map[string]*clusterTestNode)
 
@@ -756,49 +659,49 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 		orchs[nid] = orch
 
 		isLeader := nid == leaderID
-		tiers := make([]*VaultInstance, tierCount)
-		tierDirs := make([]string, tierCount)
-		for i := range tierCount {
+		instances := make([]*VaultInstance, vaultCount)
+		instanceDirs := make([]string, vaultCount)
+		for i := range vaultCount {
 			dir := t.TempDir()
-			tierDirs[i] = dir
+			instanceDirs[i] = dir
 			cm, cmErr := chunkfile.NewManager(chunkfile.Config{
 				Dir:            dir,
 				Now:            time.Now,
 				RotationPolicy: chunk.NewRecordCountPolicy(rotationRecords),
-				Logger:         nodeLogger.With("tier", fmt.Sprintf("tier-%d", i)),
+				Logger:         nodeLogger.With("vault", fmt.Sprintf("vault-%d", i)),
 			})
 			if cmErr != nil {
 				t.Fatal(cmErr)
 			}
 			im := indexfile.NewManager(dir, nil, nil)
-			tier := &VaultInstance{
-				TierID:  tierIDs[i],
+			vaultInst := &VaultInstance{
+				VaultID:  vaultIDs[i],
 				Type:    "file",
 				Chunks:  cm,
 				Indexes: im,
 				Query:   query.New(cm, im, nil),
 			}
 			if isLeader {
-				tier.FollowerTargets = followerTargets
+				vaultInst.FollowerTargets = followerTargets
 			} else {
-				tier.IsFollower = true
+				vaultInst.IsFollower = true
 			}
-			tiers[i] = tier
+			instances[i] = vaultInst
 		}
 
 		// Phase 2 (gastrolog-3iy5l): vaults are single-instance. Use the
-		// first tier as the vault's instance; tierCount > 1 is unused
+		// first instance as the vault's instance; vaultCount > 1 is unused
 		// post-collapse (callers that asked for it were transition tests
 		// that have been removed).
-		vault := NewVault(vaultID, tiers[0])
+		vault := NewVault(vaultID, instances[0])
 		vault.Name = "cluster-vault"
 		orch.RegisterVault(vault)
 
 		nodes[nid] = &clusterTestNode{
 			nodeID:   nid,
 			orch:     orch,
-			tiers:    tiers,
-			tierDirs: tierDirs,
+			instances:    instances,
+			instanceDirs: instanceDirs,
 		}
 	}
 
@@ -821,8 +724,8 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 			n.orch.Stop()
 		}
 		for _, n := range nodes {
-			for _, tier := range n.tiers {
-				_ = tier.Chunks.Close()
+			for _, vaultInst := range n.instances {
+				_ = vaultInst.Chunks.Close()
 			}
 		}
 	})
@@ -831,7 +734,7 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 		nodes:    nodes,
 		cfgStore: store,
 		vaultID:  vaultID,
-		tierIDs:  tierIDs,
+		vaultIDs:  vaultIDs,
 	}
 }
 
@@ -844,26 +747,26 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 // followers' active chunks would stay active, causing forwardDelete to
 // fail with ErrActiveChunk. The leader's production seal-on-rotation path
 // uses sealRemoteFollowers; tests that manually seal must do the same.
-func (h *clusterHarness) sealAndReplicate(t *testing.T, leaderNode *clusterTestNode, tierIdx int) {
+func (h *clusterHarness) sealAndReplicate(t *testing.T, leaderNode *clusterTestNode, vaultIdx int) {
 	t.Helper()
-	tier := leaderNode.tiers[tierIdx]
-	active := tier.Chunks.Active()
+	vaultInst := leaderNode.instances[vaultIdx]
+	active := vaultInst.Chunks.Active()
 	if active == nil || active.RecordCount == 0 {
 		return
 	}
 	chunkID := active.ID
-	if err := tier.Chunks.Seal(); err != nil {
-		t.Fatalf("seal tier %d: %v", tierIdx, err)
+	if err := vaultInst.Chunks.Seal(); err != nil {
+		t.Fatalf("seal vaultInst %d: %v", vaultIdx, err)
 	}
 	// Propagate seal to all follower nodes.
 	for _, nid := range h.allNodeIDs() {
 		if nid == leaderNode.nodeID {
 			continue
 		}
-		ftier := h.nodes[nid].tiers[tierIdx]
-		if active := ftier.Chunks.Active(); active != nil && active.ID == chunkID {
-			if err := ftier.Chunks.Seal(); err != nil {
-				t.Fatalf("seal follower %s tier %d: %v", nid, tierIdx, err)
+		followerVault := h.nodes[nid].instances[vaultIdx]
+		if active := followerVault.Chunks.Active(); active != nil && active.ID == chunkID {
+			if err := followerVault.Chunks.Seal(); err != nil {
+				t.Fatalf("seal follower %s vaultInst %d: %v", nid, vaultIdx, err)
 			}
 		}
 	}
@@ -873,18 +776,18 @@ func (h *clusterHarness) sealAndReplicate(t *testing.T, leaderNode *clusterTestN
 	leaderNode.orch.Scheduler().WaitIdle(30 * time.Second)
 }
 
-// assertTierDirEmpty verifies that a tier's filesystem directory contains no
+// assertVaultDirEmpty verifies that an instance's filesystem directory contains no
 // chunk subdirectories on ANY node. This goes below the chunk manager API —
 // it checks the actual filesystem to catch silent delete failures, leaked
 // directories, and stale files.
-func (h *clusterHarness) assertTierDirEmpty(t *testing.T, tierIdx int) {
+func (h *clusterHarness) assertVaultDirEmpty(t *testing.T, vaultIdx int) {
 	t.Helper()
 	// Poll briefly — async chunk deletion may lag under CPU contention.
 	deadline := time.Now().Add(60 * time.Second)
 	for {
 		allEmpty := true
 		for _, nid := range h.allNodeIDs() {
-			if len(h.chunkDirsOnNode(nid, tierIdx)) > 0 {
+			if len(h.chunkDirsOnNode(nid, vaultIdx)) > 0 {
 				allEmpty = false
 				break
 			}
@@ -898,45 +801,16 @@ func (h *clusterHarness) assertTierDirEmpty(t *testing.T, tierIdx int) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	for _, nid := range h.allNodeIDs() {
-		chunkDirs := h.chunkDirsOnNode(nid, tierIdx)
+		chunkDirs := h.chunkDirsOnNode(nid, vaultIdx)
 		if len(chunkDirs) > 0 {
-			t.Errorf("tier %d on %s: %d chunk directories still on disk: %v",
-				tierIdx, nid, len(chunkDirs), chunkDirs)
+			t.Errorf("vault %d on %s: %d chunk directories still on disk: %v",
+				vaultIdx, nid, len(chunkDirs), chunkDirs)
 		}
 	}
 }
 
-// assertTierEmptyAllNodes polls until all nodes report zero records on the
-// given tier, or fails after 10s. Follower chunk deletion is async.
-func (h *clusterHarness) assertTierEmptyAllNodes(t *testing.T, tierIdx int) {
-	t.Helper()
-	deadline := time.Now().Add(60 * time.Second)
-	for {
-		allEmpty := true
-		for _, nid := range h.allNodeIDs() {
-			if cursorCountRecords(t, h.nodes[nid].tiers[tierIdx].Chunks) > 0 {
-				allEmpty = false
-				break
-			}
-		}
-		if allEmpty {
-			return
-		}
-		if time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	for _, nid := range h.allNodeIDs() {
-		count := cursorCountRecords(t, h.nodes[nid].tiers[tierIdx].Chunks)
-		if count != 0 {
-			t.Errorf("tier %d on %s: cursor read %d records after full chain (should be 0)", tierIdx, nid, count)
-		}
-	}
-}
-
-func (h *clusterHarness) chunkDirsOnNode(nid string, tierIdx int) []string {
-	dir := h.nodes[nid].tierDirs[tierIdx]
+func (h *clusterHarness) chunkDirsOnNode(nid string, vaultIdx int) []string {
+	dir := h.nodes[nid].instanceDirs[vaultIdx]
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
@@ -950,10 +824,10 @@ func (h *clusterHarness) chunkDirsOnNode(nid string, tierIdx int) []string {
 	return dirs
 }
 
-// listChunkDirsOnNode returns the chunk directory names in a tier dir on a node.
-func (h *clusterHarness) listChunkDirsOnNode(t *testing.T, nodeID string, tierIdx int) []string {
+// listChunkDirsOnNode returns the chunk directory names in an instance dir on a node.
+func (h *clusterHarness) listChunkDirsOnNode(t *testing.T, nodeID string, vaultIdx int) []string {
 	t.Helper()
-	dir := h.nodes[nodeID].tierDirs[tierIdx]
+	dir := h.nodes[nodeID].instanceDirs[vaultIdx]
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("ReadDir(%s): %v", dir, err)
@@ -966,33 +840,6 @@ func (h *clusterHarness) listChunkDirsOnNode(t *testing.T, nodeID string, tierId
 	}
 	return dirs
 }
-
-// TestClusterTransitionBurstNoOrphans creates a 4-node cluster with 2 tiers,
-// bursts 10K records with a 100-record rotation policy (100 sealed chunks),
-// transitions all chunks from tier 0 → tier 1, and verifies:
-//   - All records arrive in tier 1 on the LEADER
-//   - Source tier 0 is empty on ALL nodes
-//   - No records are lost or duplicated
-//   - Record count matches on the leader
-
-// TestClusterTransitionThreeTierChainBurst creates a 4-node cluster with
-// 3 tiers and bursts 10K records through the full tier chain with 100-record
-// rotation. Verifies no orphans on any node and exact record preservation.
-
-// TestClusterTransitionEventIDPreservedAcrossNodes verifies that EventIDs
-// survive transitions in a multi-node cluster with replication.
-
-// TestClusterTransitionLargeBurst ingests a large burst (10K records) through
-// the serialized AppendToVault path and verifies no data loss after transition.
-// The burst creates ~100 sealed chunks via the 100-record rotation policy.
-//
-// NOTE: concurrent Append through the file chunk manager's attr.log writer
-// is not safe (see gastrolog-3l7ow findings). Production serializes through
-// the digest loop. This test uses sequential ingestion to match that model.
-
-// TestClusterTransitionNoChunksLeftBehindOnFollowers verifies that after
-// transition, the source tier's sealed chunks are cleaned up on follower nodes
-// (via deleteFromFollowers), not just on the leader.
 
 // ==========================================================================
 // Multi-node drain tests
@@ -1034,10 +881,10 @@ func waitForDrainJob(t *testing.T, orch *Orchestrator, vaultID glid.GLID, timeou
 
 
 
-// TestExplicitStorageLeaderGetsRotationPolicy verifies that a tier built via
-// buildTierInstanceForStorage (explicit placement path) applies the rotation
+// TestExplicitStorageLeaderGetsRotationPolicy verifies that an instance built via
+// buildInstanceForStorage (explicit placement path) applies the rotation
 // policy from system. Regression test for a gap where applyRotationPolicy was
-// only called in buildTierInstance but not buildTierInstanceForStorage.
+// only called in buildInstance but not buildInstanceForStorage.
 
 // waitForTransitions polls until all transition:* jobs in the scheduler
 // have completed. Transitions run as one-shot scheduler jobs since

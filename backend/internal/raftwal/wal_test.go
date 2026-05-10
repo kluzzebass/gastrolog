@@ -21,7 +21,7 @@ func TestGroupStoreLogRoundTrip(t *testing.T) {
 	}
 	defer w.Close()
 
-	gs := w.GroupStore("tier-1")
+	gs := w.GroupStore("vault-1")
 
 	// Store 100 logs.
 	for i := uint64(1); i <= 100; i++ {
@@ -68,7 +68,7 @@ func TestGroupStoreDeleteRange(t *testing.T) {
 	}
 	defer w.Close()
 
-	gs := w.GroupStore("tier-1")
+	gs := w.GroupStore("vault-1")
 
 	for i := uint64(1); i <= 10; i++ {
 		_ = gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: []byte("x")})
@@ -105,7 +105,7 @@ func TestGroupStoreStableRoundTrip(t *testing.T) {
 	}
 	defer w.Close()
 
-	gs := w.GroupStore("tier-1")
+	gs := w.GroupStore("vault-1")
 
 	// Set/Get bytes.
 	if err := gs.Set([]byte("CurrentTerm"), []byte("hello")); err != nil {
@@ -145,8 +145,8 @@ func TestMultipleGroupsIsolated(t *testing.T) {
 	}
 	defer w.Close()
 
-	g1 := w.GroupStore("tier-1")
-	g2 := w.GroupStore("tier-2")
+	g1 := w.GroupStore("vault-1")
+	g2 := w.GroupStore("vault-2")
 
 	// Write to g1.
 	_ = g1.StoreLog(&hraft.Log{Index: 1, Term: 1, Data: []byte("g1")})
@@ -202,7 +202,7 @@ func TestConcurrentGroups(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			gs := w.GroupStore(fmt.Sprintf("tier-%d", g))
+			gs := w.GroupStore(fmt.Sprintf("vault-%d", g))
 			for i := uint64(1); i <= logsPerGroup; i++ {
 				if err := gs.StoreLog(&hraft.Log{
 					Index: i,
@@ -224,7 +224,7 @@ func TestConcurrentGroups(t *testing.T) {
 
 	// Verify all groups.
 	for g := range numGroups {
-		gs := w.GroupStore(fmt.Sprintf("tier-%d", g))
+		gs := w.GroupStore(fmt.Sprintf("vault-%d", g))
 		first, _ := gs.FirstIndex()
 		last, _ := gs.LastIndex()
 		if first != 1 || last != logsPerGroup {
@@ -242,7 +242,7 @@ func TestCrashRecoveryTruncatedEntry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gs := w.GroupStore("tier-1")
+	gs := w.GroupStore("vault-1")
 	for i := uint64(1); i <= 10; i++ {
 		_ = gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: []byte(fmt.Sprintf("e%d", i))})
 	}
@@ -265,7 +265,7 @@ func TestCrashRecoveryTruncatedEntry(t *testing.T) {
 	}
 	defer w2.Close()
 
-	gs2 := w2.GroupStore("tier-1")
+	gs2 := w2.GroupStore("vault-1")
 	last, _ := gs2.LastIndex()
 	if last != 10 {
 		t.Fatalf("last=%d after crash recovery, want 10", last)
@@ -280,7 +280,7 @@ func TestCrashRecoveryBadCRC(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gs := w.GroupStore("tier-1")
+	gs := w.GroupStore("vault-1")
 	for i := uint64(1); i <= 5; i++ {
 		_ = gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: []byte("ok")})
 	}
@@ -306,7 +306,7 @@ func TestCrashRecoveryBadCRC(t *testing.T) {
 	}
 	defer w2.Close()
 
-	gs2 := w2.GroupStore("tier-1")
+	gs2 := w2.GroupStore("vault-1")
 	last, _ := gs2.LastIndex()
 	// Some entries should survive (those before the corruption).
 	// Exact count depends on where byte 50 falls.
@@ -334,7 +334,7 @@ func TestConcurrentStoreLogsStress(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			gs := w.GroupStore(fmt.Sprintf("tier-%d", g))
+			gs := w.GroupStore(fmt.Sprintf("vault-%d", g))
 			for i := uint64(1); i <= logsPerGroup; i++ {
 				if err := gs.StoreLog(&hraft.Log{
 					Index: i,
@@ -360,7 +360,7 @@ func TestConcurrentStoreLogsStress(t *testing.T) {
 
 	// Verify all groups.
 	for g := range numGroups {
-		gs := w.GroupStore(fmt.Sprintf("tier-%d", g))
+		gs := w.GroupStore(fmt.Sprintf("vault-%d", g))
 		first, _ := gs.FirstIndex()
 		last, _ := gs.LastIndex()
 		if first != 1 || last != logsPerGroup {
@@ -382,7 +382,7 @@ func TestReplayAfterReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gs := w.GroupStore("tier-1")
+	gs := w.GroupStore("vault-1")
 	for i := uint64(1); i <= 50; i++ {
 		_ = gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: []byte(fmt.Sprintf("e%d", i))})
 	}
@@ -397,7 +397,7 @@ func TestReplayAfterReopen(t *testing.T) {
 	}
 	defer w2.Close()
 
-	gs2 := w2.GroupStore("tier-1")
+	gs2 := w2.GroupStore("vault-1")
 	first, _ := gs2.FirstIndex()
 	last, _ := gs2.LastIndex()
 	if first != 11 || last != 50 {
@@ -500,7 +500,7 @@ func TestDeleteRangeEntireLog(t *testing.T) {
 	}
 	defer w.Close()
 
-	gs := w.GroupStore("tier-1")
+	gs := w.GroupStore("vault-1")
 	for i := uint64(1); i <= 5; i++ {
 		_ = gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: []byte("x")})
 	}
@@ -524,7 +524,7 @@ func TestDeleteRangeThenAppend(t *testing.T) {
 	}
 	defer w.Close()
 
-	gs := w.GroupStore("tier-1")
+	gs := w.GroupStore("vault-1")
 	for i := uint64(1); i <= 10; i++ {
 		_ = gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: []byte("old")})
 	}
@@ -564,7 +564,7 @@ func TestDeleteRangeIdempotent(t *testing.T) {
 	}
 	defer w.Close()
 
-	gs := w.GroupStore("tier-1")
+	gs := w.GroupStore("vault-1")
 	for i := uint64(1); i <= 5; i++ {
 		_ = gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: []byte("x")})
 	}
@@ -591,7 +591,7 @@ func TestDeleteRangeSuffixPreservesPrefix(t *testing.T) {
 	}
 	defer w.Close()
 
-	gs := w.GroupStore("tier-1")
+	gs := w.GroupStore("vault-1")
 	for i := uint64(1); i <= 10; i++ {
 		_ = gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: []byte("x")})
 	}
@@ -625,7 +625,7 @@ func TestDeleteRangeBeyondLastIndex(t *testing.T) {
 	}
 	defer w.Close()
 
-	gs := w.GroupStore("tier-1")
+	gs := w.GroupStore("vault-1")
 	for i := uint64(1); i <= 5; i++ {
 		_ = gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: []byte("x")})
 	}
@@ -662,7 +662,7 @@ func TestStableStoreOverwrite(t *testing.T) {
 	}
 	defer w.Close()
 
-	gs := w.GroupStore("tier-1")
+	gs := w.GroupStore("vault-1")
 	_ = gs.Set([]byte("key"), []byte("v1"))
 	_ = gs.Set([]byte("key"), []byte("v2"))
 	_ = gs.Set([]byte("key"), []byte("v3"))
@@ -682,7 +682,7 @@ func TestStableStoreUint64Overwrite(t *testing.T) {
 	}
 	defer w.Close()
 
-	gs := w.GroupStore("tier-1")
+	gs := w.GroupStore("vault-1")
 	_ = gs.SetUint64([]byte("term"), 1)
 	_ = gs.SetUint64([]byte("term"), 2)
 	_ = gs.SetUint64([]byte("term"), 3)
@@ -702,7 +702,7 @@ func TestStableStoreEmptyValue(t *testing.T) {
 	}
 	defer w.Close()
 
-	gs := w.GroupStore("tier-1")
+	gs := w.GroupStore("vault-1")
 	_ = gs.Set([]byte("key"), []byte{})
 	val, _ := gs.Get([]byte("key"))
 	if val == nil || len(val) != 0 {
@@ -719,7 +719,7 @@ func TestStableStoreEmptyKey(t *testing.T) {
 	}
 	defer w.Close()
 
-	gs := w.GroupStore("tier-1")
+	gs := w.GroupStore("vault-1")
 	_ = gs.Set([]byte(""), []byte("val"))
 	val, _ := gs.Get([]byte(""))
 	if string(val) != "val" {
@@ -736,7 +736,7 @@ func TestLogWithExtensions(t *testing.T) {
 	}
 	defer w.Close()
 
-	gs := w.GroupStore("tier-1")
+	gs := w.GroupStore("vault-1")
 	ext := []byte{0xDE, 0xAD, 0xBE, 0xEF}
 	_ = gs.StoreLog(&hraft.Log{
 		Index:      1,
@@ -762,7 +762,7 @@ func TestLogWithEmptyData(t *testing.T) {
 	}
 	defer w.Close()
 
-	gs := w.GroupStore("tier-1")
+	gs := w.GroupStore("vault-1")
 	_ = gs.StoreLog(&hraft.Log{Index: 1, Term: 1, Data: nil})
 
 	var log hraft.Log
@@ -781,7 +781,7 @@ func TestLogAllTypes(t *testing.T) {
 	}
 	defer w.Close()
 
-	gs := w.GroupStore("tier-1")
+	gs := w.GroupStore("vault-1")
 	types := []hraft.LogType{
 		hraft.LogCommand,
 		hraft.LogNoop,
@@ -809,7 +809,7 @@ func TestLargeLogEntry(t *testing.T) {
 	}
 	defer w.Close()
 
-	gs := w.GroupStore("tier-1")
+	gs := w.GroupStore("vault-1")
 	bigData := make([]byte, 1<<20) // 1MB
 	for i := range bigData {
 		bigData[i] = byte(i % 256)
@@ -838,7 +838,7 @@ func TestStoreLogsMultiple(t *testing.T) {
 	}
 	defer w.Close()
 
-	gs := w.GroupStore("tier-1")
+	gs := w.GroupStore("vault-1")
 	logs := make([]*hraft.Log, 100)
 	for i := range logs {
 		logs[i] = &hraft.Log{Index: uint64(i + 1), Term: 1, Data: []byte(fmt.Sprintf("batch-%d", i))}
@@ -864,7 +864,7 @@ func TestGroupStoreGetDoesNotReturnInternalReference(t *testing.T) {
 	}
 	defer w.Close()
 
-	gs := w.GroupStore("tier-1")
+	gs := w.GroupStore("vault-1")
 	_ = gs.Set([]byte("key"), []byte("original"))
 
 	val, _ := gs.Get([]byte("key"))
@@ -886,7 +886,7 @@ func TestGroupStoreGetLogDoesNotReturnInternalReference(t *testing.T) {
 	}
 	defer w.Close()
 
-	gs := w.GroupStore("tier-1")
+	gs := w.GroupStore("vault-1")
 	_ = gs.StoreLog(&hraft.Log{Index: 1, Term: 1, Data: []byte("original")})
 
 	var log1 hraft.Log
@@ -911,7 +911,7 @@ func TestSegmentRotation(t *testing.T) {
 	}
 	defer w.Close()
 
-	gs := w.GroupStore("tier-1")
+	gs := w.GroupStore("vault-1")
 
 	// Write enough data to trigger segment rotation (64MB target).
 	// Use 64KB entries — need ~1024 to hit 64MB.
@@ -993,7 +993,7 @@ func TestConcurrentReadWrite(t *testing.T) {
 	}
 	defer w.Close()
 
-	gs := w.GroupStore("tier-1")
+	gs := w.GroupStore("vault-1")
 
 	// Pre-populate.
 	for i := uint64(1); i <= 100; i++ {
@@ -1116,7 +1116,7 @@ func TestWriteAfterClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gs := w.GroupStore("tier-1")
+	gs := w.GroupStore("vault-1")
 	w.Close()
 
 	err = gs.StoreLog(&hraft.Log{Index: 1, Term: 1, Data: []byte("after-close")})
@@ -1155,9 +1155,9 @@ func TestGroupNameSpecialChars(t *testing.T) {
 	defer w.Close()
 
 	names := []string{
-		"tier/with/slashes",
-		"tier with spaces",
-		"tier-with-dashes-and-019d87f1-3ec2-7144-a042-uuid",
+		"vault/with/slashes",
+		"vault with spaces",
+		"vault-with-dashes-and-019d87f1-3ec2-7144-a042-uuid",
 		"日本語",
 		strings.Repeat("a", 1000),
 	}
@@ -1180,8 +1180,8 @@ func TestSameGroupStoreReturnsSameView(t *testing.T) {
 	}
 	defer w.Close()
 
-	gs1 := w.GroupStore("tier-1")
-	gs2 := w.GroupStore("tier-1")
+	gs1 := w.GroupStore("vault-1")
+	gs2 := w.GroupStore("vault-1")
 
 	_ = gs1.StoreLog(&hraft.Log{Index: 1, Term: 1, Data: []byte("from-gs1")})
 
@@ -1205,7 +1205,7 @@ func TestNonContiguousIndices(t *testing.T) {
 	}
 	defer w.Close()
 
-	gs := w.GroupStore("tier-1")
+	gs := w.GroupStore("vault-1")
 	// hashicorp/raft may store non-contiguous indices after snapshot restore.
 	_ = gs.StoreLog(&hraft.Log{Index: 100, Term: 5, Data: []byte("after-snapshot")})
 	_ = gs.StoreLog(&hraft.Log{Index: 101, Term: 5, Data: []byte("next")})
@@ -1233,7 +1233,7 @@ func TestHighTermNumbers(t *testing.T) {
 	}
 	defer w.Close()
 
-	gs := w.GroupStore("tier-1")
+	gs := w.GroupStore("vault-1")
 	_ = gs.StoreLog(&hraft.Log{Index: 1, Term: 1<<63 - 1, Data: []byte("max-term")})
 	_ = gs.SetUint64([]byte("term"), 1<<64-1)
 
@@ -1302,7 +1302,7 @@ func TestReplayWithDeleteRanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gs := w.GroupStore("tier-1")
+	gs := w.GroupStore("vault-1")
 	for i := uint64(1); i <= 100; i++ {
 		_ = gs.StoreLog(&hraft.Log{Index: i, Term: 1, Data: []byte("x")})
 	}
@@ -1318,7 +1318,7 @@ func TestReplayWithDeleteRanges(t *testing.T) {
 	}
 	defer w2.Close()
 
-	gs2 := w2.GroupStore("tier-1")
+	gs2 := w2.GroupStore("vault-1")
 	first, _ := gs2.FirstIndex()
 	last, _ := gs2.LastIndex()
 	if first != 61 || last != 100 {

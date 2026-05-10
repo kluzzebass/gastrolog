@@ -17,18 +17,17 @@ import (
 )
 
 // TestHistogramFullyLocal_RequiresLeadership is the regression for
-// gastrolog-2g334. The bug: histogramFullyLocal used LocalReplicaTierIDs
-// which includes follower tiers, so a node that's only a follower for
-// a vault's tiers would skip the cross-node fan-out and serve the
-// histogram from purely local data. Followers receive only sealed chunks
-// via replication — the active (un-sealed) chunk lives only on the
-// leader and is never replicated. The follower-only view drops every
-// record currently in the active chunk, producing an empty right edge
-// where the histogram cuts off at the last sealed chunk's IngestEnd
-// instead of running up to "now".
+// gastrolog-2g334. The bug: histogramFullyLocal used LocalReplicaVaultIDs
+// which includes follower vaults, so a node that's only a follower would
+// skip the cross-node fan-out and serve the histogram from purely local
+// data. Followers receive only sealed chunks via replication — the active
+// (un-sealed) chunk lives only on the leader and is never replicated.
+// The follower-only view drops every record currently in the active
+// chunk, producing an empty right edge where the histogram cuts off at
+// the last sealed chunk's IngestEnd instead of running up to "now".
 //
 // The fix gates the local-only path on local LEADERSHIP of every queried
-// tier, so a follower node correctly falls back to the leader-engine +
+// vault, so a follower node correctly falls back to the leader-engine +
 // remote-merge path that includes the leader's active chunk.
 func TestHistogramFullyLocal_RequiresLeadership(t *testing.T) {
 	t.Parallel()
@@ -42,30 +41,14 @@ func TestHistogramFullyLocal_RequiresLeadership(t *testing.T) {
 
 	leaderVaultID := glid.New()
 	followerVaultID := glid.New()
-	leaderTierID := glid.New()
-	followerTierID := glid.New()
 
-	orch.RegisterVault(orchestrator.NewVault(leaderVaultID, mustTierInstance(t, leaderTierID, false)))
-	orch.RegisterVault(orchestrator.NewVault(followerVaultID, mustTierInstance(t, followerTierID, true)))
+	orch.RegisterVault(orchestrator.NewVault(leaderVaultID, mustVaultInstance(t, leaderVaultID, false)))
+	orch.RegisterVault(orchestrator.NewVault(followerVaultID, mustVaultInstance(t, followerVaultID, true)))
 
 	store := sysmem.NewStore()
 	for _, vid := range []glid.GLID{leaderVaultID, followerVaultID} {
 		if err := store.PutVault(ctx, system.VaultConfig{ID: vid, Name: "v-" + vid.String()}); err != nil {
 			t.Fatalf("PutVault: %v", err)
-		}
-	}
-	for _, tc := range []struct {
-		tierID  glid.GLID
-		vaultID glid.GLID
-	}{
-		{leaderTierID, leaderVaultID},
-		{followerTierID, followerVaultID},
-	} {
-		if err := store.PutTier(ctx, system.TierConfig{
-			ID: tc.tierID, Name: "tier-" + tc.tierID.String(), Type: system.VaultTypeMemory,
-			VaultID: tc.vaultID, Position: 0,
-		}); err != nil {
-			t.Fatalf("PutTier: %v", err)
 		}
 	}
 
@@ -79,7 +62,7 @@ func TestHistogramFullyLocal_RequiresLeadership(t *testing.T) {
 		BoolExpr: vaultEqualExpr(leaderVaultID),
 	}
 	if !qs.histogramFullyLocal(ctx, leaderQ) {
-		t.Errorf("histogramFullyLocal(leader-only vault) = false; want true (this node leads every queried tier)")
+		t.Errorf("histogramFullyLocal(leader-only vault) = false; want true (this node leads every queried vault)")
 	}
 
 	followerQ := query.Query{
@@ -92,7 +75,7 @@ func TestHistogramFullyLocal_RequiresLeadership(t *testing.T) {
 	}
 }
 
-func mustTierInstance(t *testing.T, tierID glid.GLID, isFollower bool) *orchestrator.VaultInstance {
+func mustVaultInstance(t *testing.T, vaultID glid.GLID, isFollower bool) *orchestrator.VaultInstance {
 	t.Helper()
 	cm, err := chunkmem.NewManager(chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
@@ -107,7 +90,7 @@ func mustTierInstance(t *testing.T, tierID glid.GLID, isFollower bool) *orchestr
 		t.Fatalf("indexmem factory: %v", err)
 	}
 	return &orchestrator.VaultInstance{
-		TierID:     tierID,
+		VaultID:     vaultID,
 		Type:       "memory",
 		Chunks:     cm,
 		Indexes:    im,

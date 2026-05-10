@@ -41,54 +41,35 @@ export function UsedByStatus({ dark, refs, onNavigate }: Readonly<UsedByStatusPr
   );
 }
 
-// gastrolog-4kkoo (Phase 5): routeRefsForFilter removed — FilterConfig is
-// gone, so there's nothing to back-reference. Match expressions live
-// inline on RouteConfig.Stages and routes are no longer "used by" any
-// filter entity.
-
-interface Tier {
+interface VaultRef {
   id: Uint8Array;
   name: string;
-  vaultId: Uint8Array;
-  position: number;
   rotationPolicyId: Uint8Array;
   retentionRules: { retentionPolicyId: Uint8Array }[];
 }
 
-interface VaultRef {
-  id: Uint8Array;
-  name: string;
+function vaultLabel(v: VaultRef): string {
+  return v.name || encode(v.id);
 }
 
-function tierLabel(tier: Tier, vaults: VaultRef[]): string | null {
-  const vaultId = encode(tier.vaultId);
-  const vault = vaults.find((v) => encode(v.id) === vaultId);
-  if (!vault) return null;
-  return `${vault.name || vaultId}/tier ${String(tier.position + 1)}`;
-}
-
-export function tierRefsForRotationPolicy(
-  tiers: Tier[],
+export function vaultRefsForRotationPolicy(
   rotationPolicyId: string,
   vaults: VaultRef[] = [],
 ): string[] {
-  return tiers
-    .filter((t) => encode(t.rotationPolicyId) === rotationPolicyId)
-    .map((t) => tierLabel(t, vaults))
-    .filter((label): label is string => label !== null);
+  return vaults
+    .filter((v) => encode(v.rotationPolicyId) === rotationPolicyId)
+    .map(vaultLabel);
 }
 
-export function tierRuleRefsFor(
-  tiers: Tier[],
+export function vaultRefsForRetentionPolicy(
   retentionPolicyId: string,
   vaults: VaultRef[] = [],
 ): string[] {
-  return tiers
-    .filter((t) =>
-      t.retentionRules.some(
+  return vaults
+    .filter((v) =>
+      v.retentionRules.some(
         (r) => encode(r.retentionPolicyId) === retentionPolicyId,
       ),
     )
-    .map((t) => tierLabel(t, vaults))
-    .filter((label): label is string => label !== null);
+    .map(vaultLabel);
 }

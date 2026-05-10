@@ -2,7 +2,6 @@ import { systemClient } from "../client";
 import { useSystemMutation } from "./useSystem";
 import type { CloudService } from "../gen/gastrolog/v1/storage_pb";
 import type { NodeStorageConfig } from "../gen/gastrolog/v1/storage_pb";
-import type { TierConfig } from "../gen/gastrolog/v1/system_pb";
 import { decode, encodeString } from "../glid";
 
 export function usePutCloudService() {
@@ -21,7 +20,7 @@ export function usePutCloudService() {
       credentialsJson: string;
       archivalMode?: string;
       transitions?: Array<{ after: string; storageClass: string }>;
-      restoreTier?: string;
+      restoreSpeed?: string;
       restoreDays?: number;
       suspectGraceDays?: number;
       reconcileSchedule?: string;
@@ -44,7 +43,7 @@ export function usePutCloudService() {
             after: t.after,
             storageClass: t.storageClass,
           })),
-          restoreTier: args.restoreTier ?? "",
+          restoreSpeed: args.restoreSpeed ?? "",
           restoreDays: args.restoreDays ?? 0,
           suspectGraceDays: args.suspectGraceDays ?? 0,
           reconcileSchedule: args.reconcileSchedule ?? "",
@@ -90,22 +89,3 @@ export function useSetNodeStorageConfig() {
   );
 }
 
-export function usePutTier() {
-  return useSystemMutation(
-    async (args: {
-      config: TierConfig;
-    }) => {
-      return systemClient.putTier({ config: args.config });
-    },
-    [["vaults"], ["stats"]],
-  );
-}
-
-export function useDeleteTier() {
-  return useSystemMutation(
-    async (args: { id: string; drain?: boolean }) => {
-      return systemClient.deleteTier({ id: decode(args.id), drain: args.drain });
-    },
-    [["vaults"], ["stats"]],
-  );
-}

@@ -20,13 +20,12 @@ import (
 	sysmem "gastrolog/internal/system/memory"
 )
 
-// TestConcurrentAppendToTierAttrIntegrity reproduces gastrolog-4dd48:
+// TestConcurrentAppendAttrIntegrity reproduces gastrolog-4dd48:
 // concurrent AppendToVault calls through the orchestrator corrupt attr.log.
-func TestConcurrentAppendToTierAttrIntegrity(t *testing.T) {
+func TestConcurrentAppendAttrIntegrity(t *testing.T) {
 	t.Parallel()
 
 	vaultID := glid.New()
-	tierID := glid.New()
 	nodeID := "test-node"
 
 	dir := t.TempDir()
@@ -42,11 +41,11 @@ func TestConcurrentAppendToTierAttrIntegrity(t *testing.T) {
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 
-	tier := &VaultInstance{
-		TierID: tierID, Type: "file",
+	vaultInst := &VaultInstance{
+		VaultID: vaultID, Type: "file",
 		Chunks: cm, Indexes: im, Query: query.New(cm, im, nil),
 	}
-	orch.RegisterVault(NewVault(vaultID, tier))
+	orch.RegisterVault(NewVault(vaultID, vaultInst))
 	t.Cleanup(func() {
 		orch.Stop()
 		_ = cm.Close()
@@ -69,7 +68,7 @@ func TestConcurrentAppendToTierAttrIntegrity(t *testing.T) {
 			base := gIdx * perGoroutine
 			for i := range perGoroutine {
 				ts := t0.Add(time.Duration(base+i) * time.Microsecond)
-				err := orch.AppendToVault(vaultID, tierID, chunk.ChunkID{}, chunk.Record{
+				err := orch.AppendToVault(vaultID, chunk.ChunkID{}, chunk.Record{
 					IngestTS: ts,
 					WriteTS:  ts,
 					Raw:      fmt.Appendf(nil, "orch-concurrent-%d-%d", gIdx, i),
@@ -148,7 +147,7 @@ func TestConcurrentAppendToTierAttrIntegrity(t *testing.T) {
 
 // TestTransitionConcurrentWithAppends runs appends and transitions simultaneously.
 // One goroutine continuously appends records (creating new sealed chunks via
-// rotation), while another goroutine transitions completed chunks to tier 1.
+// rotation), while another goroutine transitions completed chunks to instance 1.
 // Verifies no data loss and no panics from concurrent Delete + Append races.
 
 // ==========================================================================
@@ -240,13 +239,12 @@ func TestCursorOpenDuringSeal(t *testing.T) {
 // gastrolog-3p8zh: ImportToVault cursor verification
 // ==========================================================================
 
-// TestImportToTierCursorVerified imports records to a file-backed tier and
+// TestImportToInstanceCursorVerified imports records to a file-backed instance and
 // verifies every record via cursor — not just metadata RecordCount.
-func TestImportToTierCursorVerified(t *testing.T) {
+func TestImportToInstanceCursorVerified(t *testing.T) {
 	t.Parallel()
 
 	vaultID := glid.New()
-	tierID := glid.New()
 	nodeID := "test-node"
 
 	dir := t.TempDir()
@@ -260,8 +258,8 @@ func TestImportToTierCursorVerified(t *testing.T) {
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 
-	tier := &VaultInstance{TierID: tierID, Type: "file", Chunks: cm, Indexes: im, Query: query.New(cm, im, nil)}
-	orch.RegisterVault(NewVault(vaultID, tier))
+	vaultInst := &VaultInstance{VaultID: vaultID, Type: "file", Chunks: cm, Indexes: im, Query: query.New(cm, im, nil)}
+	orch.RegisterVault(NewVault(vaultID, vaultInst))
 	t.Cleanup(func() {
 		orch.Stop()
 		_ = cm.Close()
@@ -286,7 +284,7 @@ func TestImportToTierCursorVerified(t *testing.T) {
 
 	// Import via orchestrator.
 	iter := testIterFromSlice(records)
-	if err := orch.ImportToVault(context.Background(), vaultID, tierID, chunkID, iter); err != nil {
+	if err := orch.ImportToVault(context.Background(), vaultID, chunkID, iter); err != nil {
 		t.Fatalf("ImportToVault: %v", err)
 	}
 
@@ -348,7 +346,7 @@ func testIterFromSlice(records []chunk.Record) chunk.RecordIterator {
 // ==========================================================================
 
 // TestTransitionSourceDeleteFailsAfterImport verifies behavior when the
-// transition successfully streams records to the next tier but fails to
+// transition successfully streams records to the next instance but fails to
 // delete the source chunk. The source chunk should be retained (not lost).
 
 // failingIndexManager always fails on DeleteIndexes.
@@ -359,7 +357,7 @@ func (f *failingIndexManager) DeleteIndexes(_ chunk.ChunkID) error {
 }
 
 // ==========================================================================
-// gastrolog-60h49: Faulty blobstore for cloud tier tests
+// gastrolog-60h49: Faulty blobstore for cloud instance tests
 // ==========================================================================
 
 // faultyBlobstore wraps a real blobstore and injects failures.
@@ -458,7 +456,7 @@ func TestCloudUploadFailureRetainsChunk(t *testing.T) {
 // ==========================================================================
 
 // TestReconfigDuringTransitionDoesNotPanic verifies that changing the vault's
-// tier list while a transition is running doesn't cause a panic. The transition
+// vault list while a transition is running doesn't cause a panic. The transition
 // should either complete with the original config or fail gracefully.
 
 // ==========================================================================
@@ -472,16 +470,13 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 	t.Parallel()
 
 	vaultID := glid.New()
-	tierID := glid.New()
 	routeID := glid.New()
 
 	store := sysmem.NewStore()
 	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "drain-concurrent",
 	})
-	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tierID, Name: "t0", Type: system.VaultTypeMemory, VaultID: vaultID, Position: 0,
-	})
+	_ = vaultID // legacy fixture handle; vault registered above is the only canonical config
 	// gastrolog-4kkoo (Phase 5): expression inlined on the route via Stages.
 	_ = store.PutRoute(context.Background(), system.RouteConfig{
 		ID: routeID, Name: "default",
@@ -507,8 +502,8 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	srcTier := &VaultInstance{TierID: tierID, Type: "file", Chunks: srcCM, Indexes: srcIM, Query: query.New(srcCM, srcIM, nil)}
-	orchA.RegisterVault(NewVault(vaultID, srcTier))
+	srcInst := &VaultInstance{VaultID: vaultID, Type: "file", Chunks: srcCM, Indexes: srcIM, Query: query.New(srcCM, srcIM, nil)}
+	orchA.RegisterVault(NewVault(vaultID, srcInst))
 
 	// Destination node.
 	dstDir := t.TempDir()
@@ -527,8 +522,8 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dstTier := &VaultInstance{TierID: tierID, Type: "file", Chunks: dstCM, Indexes: dstIM, Query: query.New(dstCM, dstIM, nil)}
-	orchB.RegisterVault(NewVault(vaultID, dstTier))
+	dstInst := &VaultInstance{VaultID: vaultID, Type: "file", Chunks: dstCM, Indexes: dstIM, Query: query.New(dstCM, dstIM, nil)}
+	orchB.RegisterVault(NewVault(vaultID, dstInst))
 
 	orchA.SetRemoteTransferrer(&directTransferrer{nodes: map[string]*Orchestrator{"node-B": orchB}})
 
@@ -560,7 +555,7 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 		defer wg.Done()
 		for i := range 200 {
 			ts := t0.Add(time.Duration(500+i) * time.Microsecond)
-			err := orchA.AppendToVault(vaultID, tierID, chunk.ChunkID{}, chunk.Record{
+			err := orchA.AppendToVault(vaultID, chunk.ChunkID{}, chunk.Record{
 				IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "during-drain-%d", i),
 			})
 			if err != nil {

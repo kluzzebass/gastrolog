@@ -1,4 +1,4 @@
-package tierfsm
+package vaultctlfsm
 
 import (
 	"encoding/binary"
@@ -46,7 +46,7 @@ const (
 	// gastrolog-5sywa (Phase 4 follow-up). Per the project's "delete and
 	// renumber, never reserved" rule, the receipt-protocol commands
 	// renumbered down to 7/8/9.
-	CmdRequestDelete  Command = 7 // tier leader proposes a delete; replicates the expected-acks set
+	CmdRequestDelete  Command = 7 // vault leader proposes a delete; replicates the expected-acks set
 	CmdAckDelete      Command = 8 // each expected node acks after handling its local side
 	CmdFinalizeDelete Command = 9 // leader removes the entry once expectedFrom is empty
 
@@ -80,8 +80,8 @@ const (
 	CmdBeginSeal Command = 12
 )
 
-// ManifestEntry holds the full metadata for one chunk in this tier's
-// manifest (the FSM's set of chunks for one tier — see Manifest in
+// ManifestEntry holds the full metadata for one chunk in this vault's
+// manifest (the FSM's set of chunks for one vault — see Manifest in
 // docs/ubiquitous_language.md). Every chunk in the cluster is described by
 // exactly one ManifestEntry, mutated only by the Cmd* applies. This is the
 // Raft-replicated equivalent of file.Manager.chunkMeta + cloudIdx entries
@@ -134,8 +134,8 @@ type ManifestEntry struct {
 	// mismatch.
 	Hash [32]byte
 	// CloudServiceID pins the chunk to the cloud store it was actually
-	// uploaded to, surviving any future tier reconfiguration that points
-	// the tier at a different cloud service.
+	// uploaded to, surviving any future vault reconfiguration that points
+	// the vault at a different cloud service.
 	CloudServiceID glid.GLID
 	// KeyScheme selects from the table of blobKey() derivation functions.
 	// Today only scheme 0 exists ("vault-<vault>/<chunk>.glcb"); future
@@ -177,7 +177,7 @@ func (e *ManifestEntry) ToChunkMeta() chunk.ChunkMeta {
 	}
 }
 
-// FSM is a Raft FSM that maintains chunk metadata for a single tier.
+// FSM is a Raft FSM that maintains chunk metadata for a single vault.
 // All reads are local (no Raft round-trip). Writes go through Raft.Apply().
 type FSM struct {
 	mu       sync.RWMutex
@@ -206,7 +206,7 @@ type FSM struct {
 	onPruneNode      func(string, []chunk.ChunkID) // CmdPruneNode applied; (prunedNodeID, finalizableChunks)
 
 	// tombstones records chunk IDs that have been deleted, with the apply
-	// timestamp of the delete. Consulted by the receive side of tier
+	// timestamp of the delete. Consulted by the receive side of vault
 	// replication to reject stale ImportSealed / Append commands that
 	// arrive after a chunk has been deleted — closes the race between
 	// retention and post-seal replication where a late replication RPC
@@ -637,7 +637,7 @@ func (f *FSM) applyCreate(data []byte) error {
 	ingestStart := time.Unix(0, int64(binary.BigEndian.Uint64(data[24:32]))) //nolint:gosec // G115: safe round-trip from uint64 nano timestamp
 	sourceStart := time.Unix(0, int64(binary.BigEndian.Uint64(data[32:40]))) //nolint:gosec // G115: safe round-trip from uint64 nano timestamp
 
-	// Reject creates for tombstoned chunk IDs. If the tier already applied
+	// Reject creates for tombstoned chunk IDs. If the vault already applied
 	// a DeleteChunk for this ID, a later CreateChunk (late replication /
 	// out-of-order Raft apply) must not resurrect it in the live map —
 	// that's exactly the ghost-chunk bug from gastrolog-11rzz. The

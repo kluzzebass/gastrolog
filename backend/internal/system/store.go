@@ -112,15 +112,9 @@ type Store interface {
 	PutCloudService(ctx context.Context, svc CloudService) error
 	DeleteCloudService(ctx context.Context, id glid.GLID) error
 
-	// Tiers
-	GetTier(ctx context.Context, id glid.GLID) (*TierConfig, error)
-	ListTiers(ctx context.Context) ([]TierConfig, error)
-	PutTier(ctx context.Context, tier TierConfig) error
-	DeleteTier(ctx context.Context, id glid.GLID, drain bool) error
-
-	// Tier placements (runtime — system-managed, not operator-edited)
-	GetTierPlacements(ctx context.Context, tierID glid.GLID) ([]TierPlacement, error)
-	SetTierPlacements(ctx context.Context, tierID glid.GLID, placements []TierPlacement) error
+	// Vault placements (runtime — system-managed, not operator-edited)
+	GetVaultPlacements(ctx context.Context, vaultID glid.GLID) ([]VaultPlacement, error)
+	SetVaultPlacements(ctx context.Context, vaultID glid.GLID, placements []VaultPlacement) error
 
 	// Ingester alive state (runtime — system-managed)
 	GetIngesterAlive(ctx context.Context, ingesterID glid.GLID) (map[string]bool, error)

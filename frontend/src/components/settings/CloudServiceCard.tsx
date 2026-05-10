@@ -55,7 +55,7 @@ interface CloudServiceEdit {
   credentialsJson: string;
   archivalMode: string;
   transitions: TransitionEdit[];
-  restoreTier: string;
+  restoreSpeed: string;
   restoreDays: number;
   suspectGraceDays: number;
   reconcileSchedule: string;
@@ -88,7 +88,7 @@ export function CloudServiceCard({
       after: t.after,
       storageClass: t.storageClass,
     })),
-    restoreTier: service.restoreTier || "",
+    restoreSpeed: service.restoreSpeed || "",
     restoreDays: service.restoreDays || 7,
     suspectGraceDays: service.suspectGraceDays || 7,
     reconcileSchedule: service.reconcileSchedule || "0 3 * * *",
@@ -118,7 +118,7 @@ export function CloudServiceCard({
         after: t.after,
         storageClass: t.storageClass,
       })),
-      restoreTier: e.restoreTier,
+      restoreSpeed: e.restoreSpeed,
       restoreDays: e.restoreDays,
       suspectGraceDays: e.suspectGraceDays,
       reconcileSchedule: e.reconcileSchedule,

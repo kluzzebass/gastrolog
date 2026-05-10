@@ -121,7 +121,7 @@ message NodeStats {
 
   // Per-peer inter-node gRPC transport bytes, from this node's perspective.
   // Populated from the cluster transport stats handlers — includes Raft,
-  // broadcast, tier replication, query forwarding, chunk streaming, etc.
+  // broadcast, vault replication, query forwarding, chunk streaming, etc.
   // See gastrolog-47u85.
   repeated PeerBytesStat peer_bytes = 37;
 }
@@ -189,14 +189,10 @@ message ForwardRecordsResponse {
 }
 
 // ForwardVaultApplyRequest carries a pre-marshaled vault control-plane Raft
-// command for the leader to apply. group_id is the vault ctl group
+// command for the leader to apply. group_id is the vault-ctl group
 // (vault/<vaultGLID>/ctl); command is the marshaled FSM command bytes
-// (typically OpVaultChunkFSM + tier GLID + tierfsm wire payload, see
-// vaultraft.MarshalVaultChunkCommand).
-//
-// Replaces the historical ForwardTierApply RPC during the vault refactor
-// (gastrolog-257l7) — the two had identical schema and RPC behavior;
-// merged into one.
+// (typically OpVaultChunkFSM + vault-instance GLID + vaultctlfsm wire
+// payload, see vaultraft.MarshalVaultChunkCommand).
 message ForwardVaultApplyRequest {
   // UTF-8 vault control-plane group id: vault/<vaultGLID>/ctl
   bytes group_id = 1;
@@ -211,23 +207,13 @@ message ForwardVaultApplyResponse {}
 // record forwarding (fire-and-forget) and sealed chunk replacement
 // (one-shot) so all chunk operations for a vault are sequenced on one
 // stream, eliminating the race between record forwarding and sealed
-// chunk replacement.
-//
-// Renamed from TierReplication* during the vault refactor (gastrolog-257l7).
-// The wire format drops the tier_id field on the envelope — chunks are
-// vault-keyed in the post-tier model.
+// chunk replacement. Chunks are vault-keyed.
 
 // ChunkReplicationCommand is sent leader → follower. The vault_id
 // identifies the target vault; the oneof command determines the
 // operation. New command types can be added without changing framing.
-//
-// tier_id is retained transitionally during the vault refactor
-// (gastrolog-257l7) so the orchestrator's existing tier-keyed routing
-// continues to work. It is removed once the orchestrator's runtime
-// dispatch is vault-keyed.
 message ChunkReplicationCommand {
   bytes vault_id = 1;
-  bytes tier_id = 2;
 
   oneof command {
     ChunkReplicationAppend append = 10;
@@ -276,9 +262,8 @@ message ChunkReplicationAck {
 // partition / rejoin window — see gastrolog-2dgvj.
 message RequestReplicaCatchupRequest {
   bytes vault_id = 1;
-  bytes tier_id = 2;                   // retained transitionally during the vault refactor (gastrolog-257l7)
-  repeated bytes chunk_ids = 3;        // 16-byte ChunkIDs
-  bytes requester_node_id = 4;         // utf-8 node ID of the requesting follower
+  repeated bytes chunk_ids = 2;        // 16-byte ChunkIDs
+  bytes requester_node_id = 3;         // utf-8 node ID of the requesting follower
 }
 
 // RequestReplicaCatchupResponse acknowledges receipt of the catchup
@@ -463,7 +448,6 @@ message ForwardFollowResponse {
 message ImportRecordMessage {
   bytes vault_id = 1;
   ExportRecord record = 2;
-  bytes tier_id = 3;   // optional: route to a specific tier's active chunk (StreamToTier)
 }
 
 // --- Managed file distribution ---

@@ -387,7 +387,7 @@ func TestReadyz_localVaultReplicationNotReady(t *testing.T) {
 		t.Fatal(err)
 	}
 	orch.RegisterVault(orchestrator.NewVault(vid, &orchestrator.VaultInstance{
-		TierID:     glid.New(),
+		VaultID:     glid.New(),
 		Type:       "memory",
 		Chunks:     s.CM,
 		Indexes:    s.IM,
@@ -413,6 +413,6 @@ func TestReadyz_localVaultReplicationNotReady(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("readyz: want 503 while tier FSM not ready, got %d", resp.StatusCode)
+		t.Fatalf("readyz: want 503 while instance FSM not ready, got %d", resp.StatusCode)
 	}
 }

@@ -162,7 +162,7 @@ export const VaultService = {
     /**
      * ArchiveChunk transitions a cloud-backed sealed chunk to an offline
      * storage class (Glacier, Deep Archive, Azure Archive). The chunk stays
-     * in the tier but becomes unreadable until restored.
+     * in the vault but becomes unreadable until restored.
      *
      * @generated from rpc gastrolog.v1.VaultService.ArchiveChunk
      */

@@ -22,7 +22,7 @@ import (
 	"gastrolog/internal/query"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/system"
-	"gastrolog/internal/vaultraft/tierfsm"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
 	"gastrolog/internal/vaultraft"
 
 	hraft "github.com/hashicorp/raft"
@@ -51,7 +51,7 @@ func resolveVaultDir(params map[string]string, vaultsDir, vaultID string) map[st
 }
 
 // AddVault adds a new vault (chunk manager, index manager, query engine) and updates the filter set.
-// Loads the full config internally to resolve the vault's tier IDs to tier configs.
+// Loads the full config internally to resolve the vault's vault IDs to vault configs.
 // Returns ErrDuplicateID if a vault with this ID already exists.
 func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg system.VaultConfig, factories Factories) error {
 	sys, err := o.loadSystem(ctx)
@@ -93,17 +93,7 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg system.VaultConfig
 }
 
 // Rotation and retention are handled by discovery-based sweep jobs
-// (rotationSweep and retentionSweepAll). No per-tier setup needed during AddVault.
-
-// findTierConfig finds a TierConfig by ID in a slice.
-func findTierConfig(tiers []system.TierConfig, id glid.GLID) *system.TierConfig {
-	for i := range tiers {
-		if tiers[i].ID == id {
-			return &tiers[i]
-		}
-	}
-	return nil
-}
+// (rotationSweep and retentionSweepAll). No per-vault setup needed during AddVault.
 
 func findVaultConfig(vaults []system.VaultConfig, id glid.GLID) *system.VaultConfig {
 	for i := range vaults {
@@ -114,22 +104,20 @@ func findVaultConfig(vaults []system.VaultConfig, id glid.GLID) *system.VaultCon
 	return nil
 }
 
-// resolveRetentionRulesFromTier converts tier retention rules to resolved retentionRule objects.
-func resolveRetentionRulesFromTier(cfg *system.Config, _ system.VaultConfig, tierCfg *system.TierConfig) ([]retentionRule, error) {
+// resolveRetentionRulesFromVault converts vault retention rules to resolved retentionRule objects.
+func resolveRetentionRulesFromVault(cfg *system.Config, vaultCfg system.VaultConfig) ([]retentionRule, error) {
 	// Phase 4 (gastrolog-42f9z): retention rules carry only the trigger
 	// policy. The action enum is gone — every fired event streams records
-	// through the routing engine and always destroys the chunk. Phase 2's
-	// 1:1 vault:tier collapse already eliminated the "next tier" concept,
-	// so position-based action derivation is also gone.
+	// through the routing engine and always destroys the chunk.
 	var rules []retentionRule
-	for _, b := range tierCfg.RetentionRules {
+	for _, b := range vaultCfg.RetentionRules {
 		retCfg := findRetentionPolicy(cfg.RetentionPolicies, b.RetentionPolicyID)
 		if retCfg == nil {
-			return nil, fmt.Errorf("tier %s references unknown retention policy: %s", tierCfg.ID, b.RetentionPolicyID)
+			return nil, fmt.Errorf("vault %s references unknown retention policy: %s", vaultCfg.ID, b.RetentionPolicyID)
 		}
 		policy, err := retCfg.ToRetentionPolicy()
 		if err != nil {
-			return nil, fmt.Errorf("invalid retention policy %s for tier %s: %w", b.RetentionPolicyID, tierCfg.ID, err)
+			return nil, fmt.Errorf("invalid retention policy %s for vault %s: %w", b.RetentionPolicyID, vaultCfg.ID, err)
 		}
 		if policy == nil {
 			continue
@@ -157,8 +145,8 @@ func (o *Orchestrator) RemoveVault(id glid.GLID) error {
 	if !exists {
 		return fmt.Errorf("%w: %s", ErrVaultNotFound, id)
 	}
-	if inst := vault.Instance; inst != nil {
-		metas, err := inst.Chunks.List()
+	if vaultInst := vault.Instance; vaultInst != nil {
+		metas, err := vaultInst.Chunks.List()
 		if err != nil {
 			return fmt.Errorf("list chunks for vault %s: %w", id, err)
 		}
@@ -167,7 +155,7 @@ func (o *Orchestrator) RemoveVault(id glid.GLID) error {
 				return fmt.Errorf("%w: vault %s has data", ErrVaultNotEmpty, id)
 			}
 		}
-		if active := inst.Chunks.Active(); active != nil {
+		if active := vaultInst.Chunks.Active(); active != nil {
 			return fmt.Errorf("%w: vault %s has active chunk", ErrVaultNotEmpty, id)
 		}
 	}
@@ -180,8 +168,8 @@ func (o *Orchestrator) RemoveVault(id glid.GLID) error {
 // removeVaultJobs removes retention runners and cron rotation jobs for a vault
 // without closing managers or unregistering. Used by UnregisterVault and drain.
 func (o *Orchestrator) removeVaultJobs(id glid.GLID, vault *Vault) {
-	if inst := vault.Instance; inst != nil {
-		delete(o.retention, retentionKey(inst.TierID, inst.StorageID))
+	if vaultInst := vault.Instance; vaultInst != nil {
+		delete(o.retention, retentionKey(vaultInst.VaultID, vaultInst.StorageID))
 	}
 	o.cronRotation.removeAllForVault(id)
 }
@@ -198,8 +186,8 @@ func (o *Orchestrator) teardownVault(id glid.GLID, vault *Vault) {
 	o.scheduler.RemoveJobsByPrefix("index-build:" + vaultPrefix)
 
 	// Remove per-instance retention runner and cron rotation jobs.
-	if inst := vault.Instance; inst != nil {
-		delete(o.retention, retentionKey(inst.TierID, inst.StorageID))
+	if vaultInst := vault.Instance; vaultInst != nil {
+		delete(o.retention, retentionKey(vaultInst.VaultID, vaultInst.StorageID))
 	}
 	o.cronRotation.removeAllForVault(id)
 
@@ -281,12 +269,12 @@ func (o *Orchestrator) ForceRemoveVault(id glid.GLID) error {
 // indexes, and locally drops every chunk on the given instance. LOCAL
 // cleanup only — uses chunk.DeleteNoAnnounce so per-chunk deletes do not
 // fan across vault-ctl Raft. See gastrolog-4vz40 / sealAndDeleteAllChunks.
-func (o *Orchestrator) forceRemoveVaultData(id glid.GLID, inst *VaultInstance) error {
-	if inst == nil {
+func (o *Orchestrator) forceRemoveVaultData(id glid.GLID, vaultInst *VaultInstance) error {
+	if vaultInst == nil {
 		return nil
 	}
-	cm := inst.Chunks
-	im := inst.Indexes
+	cm := vaultInst.Chunks
+	im := vaultInst.Indexes
 
 	if active := cm.Active(); active != nil {
 		if err := cm.Seal(); err != nil {
@@ -321,66 +309,66 @@ func (o *Orchestrator) forceRemoveVaultData(id glid.GLID, inst *VaultInstance) e
 // vault-ctl Raft. The announcement would propagate to every voter and trigger
 // FSM.applyDelete + onDelete on each node, physically wiping the chunk
 // across the entire cluster. The intended cluster-wide effect (when
-// RemoveTierFromVault reacts to placement loss, or DeleteTierFromVault
+// RemoveVaultInstance reacts to placement loss, or DeleteVaultInstance
 // reacts to an admin teardown) comes from each node independently running
-// its own RemoveTierFromVault as the config change propagates — not from
+// its own RemoveVaultInstance as the config change propagates — not from
 // per-chunk delete announcements out of one node. See gastrolog-4vz40.
-func (o *Orchestrator) sealAndDeleteAllChunks(tier *VaultInstance, op string, tierID glid.GLID) int {
-	if active := tier.Chunks.Active(); active != nil {
-		if err := tier.Chunks.Seal(); err != nil {
-			o.logger.Warn(op+": seal failed", "tier", tierID, "error", err)
+func (o *Orchestrator) sealAndDeleteAllChunks(vaultInst *VaultInstance, op string, vaultID glid.GLID) int {
+	if active := vaultInst.Chunks.Active(); active != nil {
+		if err := vaultInst.Chunks.Seal(); err != nil {
+			o.logger.Warn(op+": seal failed", "vault", vaultID, "error", err)
 		}
 	}
-	metas, err := tier.Chunks.List()
+	metas, err := vaultInst.Chunks.List()
 	if err != nil {
-		o.logger.Warn(op+": list failed", "tier", tierID, "error", err)
+		o.logger.Warn(op+": list failed", "vault", vaultID, "error", err)
 		return 0
 	}
 	for _, m := range metas {
-		if tier.Indexes != nil {
-			if err := tier.Indexes.DeleteIndexes(m.ID); err != nil {
-				o.logger.Warn(op+": delete indexes failed", "tier", tierID, "chunk", m.ID, "error", err)
+		if vaultInst.Indexes != nil {
+			if err := vaultInst.Indexes.DeleteIndexes(m.ID); err != nil {
+				o.logger.Warn(op+": delete indexes failed", "vault", vaultID, "chunk", m.ID, "error", err)
 			}
 		}
-		if err := chunk.DeleteNoAnnounce(tier.Chunks, m.ID); err != nil {
-			o.logger.Warn(op+": delete chunk failed", "tier", tierID, "chunk", m.ID, "error", err)
+		if err := chunk.DeleteNoAnnounce(vaultInst.Chunks, m.ID); err != nil {
+			o.logger.Warn(op+": delete chunk failed", "vault", vaultID, "chunk", m.ID, "error", err)
 		}
 	}
 	return len(metas)
 }
 
-// RemoveTierFromVault unregisters a tier instance from this node WITHOUT
-// destroying its on-disk data. Used when placement moves the tier elsewhere
-// (transient — the node may well get the tier back seconds later when
-// placement flaps back). The tier's Chunks/Indexes managers are closed, jobs
-// are cancelled, and the VaultInstance is removed from the vault's tier list,
-// but the chunk files and tier directory remain on disk. A subsequent
-// AddTierToVault will re-discover the existing chunks.
+// RemoveVaultInstance unregisters a vault instance from this node WITHOUT
+// destroying its on-disk data. Used when placement moves the instance elsewhere
+// (transient — the node may well get the instance back seconds later when
+// placement flaps back). The instance's Chunks/Indexes managers are closed, jobs
+// are cancelled, and the VaultInstance is removed from the vault's vault list,
+// but the chunk files and vault directory remain on disk. A subsequent
+// AddVaultInstance will re-discover the existing chunks.
 //
-// For actual tier deletion (admin-driven), use DeleteTierFromVault which
+// For actual instance deletion (admin-driven), use DeleteVaultInstance which
 // additionally wipes all chunks and removes the data directory.
 //
-// Returns true if a tier was removed.
+// Returns true if an instance was removed.
 //
 // gastrolog-4vz40: previously this function always wiped chunks, which meant
 // any placement flap (caused by transient peer-conn teardowns from
 // peers.Invalidate) destroyed data cluster-wide. The destructive behaviour is
-// now opt-in via DeleteTierFromVault.
-func (o *Orchestrator) RemoveTierFromVault(vaultID, tierID glid.GLID) bool {
-	return o.removeTierFromVault(vaultID, tierID, false)
+// now opt-in via DeleteVaultInstance.
+func (o *Orchestrator) RemoveVaultInstance(vaultID glid.GLID) bool {
+	return o.removeVaultInstance(vaultID, false)
 }
 
-// DeleteTierFromVault unregisters a tier instance AND permanently wipes its
-// on-disk data (chunks, indexes, and the tier directory). Used only when a
-// tier is being deliberately deleted (admin action via CmdTierDeleted, or
+// DeleteVaultInstance unregisters a vault instance AND permanently wipes its
+// on-disk data (chunks, indexes, and the vault directory). Used only when a
+// instance is being deliberately deleted (admin action via CmdDeleteVault, or
 // post-drain cleanup).
 //
-// Returns true if a tier was removed.
-func (o *Orchestrator) DeleteTierFromVault(vaultID, tierID glid.GLID) bool {
-	return o.removeTierFromVault(vaultID, tierID, true)
+// Returns true if an instance was removed.
+func (o *Orchestrator) DeleteVaultInstance(vaultID glid.GLID) bool {
+	return o.removeVaultInstance(vaultID, true)
 }
 
-func (o *Orchestrator) removeTierFromVault(vaultID, tierID glid.GLID, deleteData bool) bool {
+func (o *Orchestrator) removeVaultInstance(vaultID glid.GLID, deleteData bool) bool {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -389,30 +377,30 @@ func (o *Orchestrator) removeTierFromVault(vaultID, tierID glid.GLID, deleteData
 		return false
 	}
 
-	inst := vault.Instance
-	if inst == nil || inst.TierID != tierID {
+	vaultInst := vault.Instance
+	if vaultInst == nil {
 		return false
 	}
 
 	// Cancel pending jobs for this vault.
 	prefix := vaultID.String()
-	o.scheduler.RemoveJobsByPrefix("post-seal:" + prefix + ":" + tierID.String())
-	o.scheduler.RemoveJobsByPrefix("compress:" + prefix + ":" + tierID.String())
-	o.scheduler.RemoveJobsByPrefix("index-build:" + prefix + ":" + tierID.String())
+	o.scheduler.RemoveJobsByPrefix("post-seal:" + prefix + ":" + vaultID.String())
+	o.scheduler.RemoveJobsByPrefix("compress:" + prefix + ":" + vaultID.String())
+	o.scheduler.RemoveJobsByPrefix("index-build:" + prefix + ":" + vaultID.String())
 
 	// Destructive cleanup — only on explicit deletion.
 	if deleteData {
-		o.sealAndDeleteAllChunks(inst, "remove vault placement", tierID)
+		o.sealAndDeleteAllChunks(vaultInst, "remove vault placement", vaultID)
 	}
 
 	// Drop FSM → chunk-manager hooks before Close. Placement can remove the
 	// instance while the vault control-plane Raft group still receives
 	// CmdDeleteChunk from the leader; without clearing, onDelete would call
 	// DeleteSilent on an already-closed file.Manager.
-	o.clearTierFSMChunkCallbacks(vaultID, tierID)
+	o.clearVaultFSMChunkCallbacks(vaultID)
 
 	// Close managers.
-	if err := inst.Chunks.Close(); err != nil {
+	if err := vaultInst.Chunks.Close(); err != nil {
 		o.logger.Warn("remove vault placement: close chunk manager failed", "vault", vaultID, "error", err)
 	}
 
@@ -420,7 +408,7 @@ func (o *Orchestrator) removeTierFromVault(vaultID, tierID glid.GLID, deleteData
 	// Without this, leftover files (.lock, cloud.idx) and the directory itself
 	// accumulate on disk forever. See gastrolog-42j4n.
 	if deleteData {
-		if remover, ok := inst.Chunks.(chunk.DirRemover); ok {
+		if remover, ok := vaultInst.Chunks.(chunk.DirRemover); ok {
 			if err := remover.RemoveDir(); err != nil {
 				o.logger.Warn("remove vault placement: remove data directory failed", "vault", vaultID, "error", err)
 			}
@@ -428,7 +416,7 @@ func (o *Orchestrator) removeTierFromVault(vaultID, tierID glid.GLID, deleteData
 	}
 
 	// Remove retention runner and cron rotation for this vault.
-	delete(o.retention, retentionKey(inst.TierID, inst.StorageID))
+	delete(o.retention, retentionKey(vaultInst.VaultID, vaultInst.StorageID))
 	o.cronRotation.removeAllForVault(vaultID)
 
 	// Drop the instance from the vault.
@@ -436,7 +424,7 @@ func (o *Orchestrator) removeTierFromVault(vaultID, tierID glid.GLID, deleteData
 
 	// On destructive removal, drop the vault entry entirely. For
 	// non-destructive placement-driven removals, the vault shell stays so a
-	// subsequent AddTierToVault can rehydrate.
+	// subsequent AddVaultInstance can rehydrate.
 	if deleteData {
 		delete(o.vaults, vaultID)
 		o.rebuildRouteSetLocked()
@@ -448,10 +436,9 @@ func (o *Orchestrator) removeTierFromVault(vaultID, tierID glid.GLID, deleteData
 	return true
 }
 
-// AddTierToVault builds a single tier instance and adds it to an existing vault
-// without tearing down any other tiers. This is the incremental counterpart to
-// RemoveTierFromVault.
-func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID glid.GLID, factories Factories) error {
+// AddVaultInstance builds the single VaultInstance for an already-registered
+// vault. The orchestrator picks up storage/policy fields from the VaultConfig.
+func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, factories Factories) error {
 	sys, err := o.loadSystem(ctx)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -464,7 +451,7 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID glid.
 		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 	// Already present?
-	if vault.Instance != nil && vault.Instance.TierID == tierID {
+	if vault.Instance != nil && vault.Instance.VaultID == vaultID {
 		o.mu.Unlock()
 		return nil
 	}
@@ -472,10 +459,6 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID glid.
 
 	cfg := &sys.Config
 	rt := &sys.Runtime
-	tierCfg := findTierConfig(cfg.Tiers, tierID)
-	if tierCfg == nil {
-		return fmt.Errorf("tier %s not found in config", tierID)
-	}
 
 	vaultCfg := findVaultConfig(cfg.Vaults, vaultID)
 	if vaultCfg == nil {
@@ -485,9 +468,6 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID glid.
 	o.ensureVaultControlPlaneRaftGroup(vaultID, rt.Nodes, factories)
 
 	nscs := rt.NodeStorageConfigs
-	// VaultConfig.Placements is mirrored from tier placements via the FSM
-	// bridge (gastrolog-257l7). Read from the vault directly so the lookup
-	// survives the eventual deletion of rt.TierPlacements.
 	placements := vaultCfg.Placements
 	leaderNodeID := system.LeaderNodeID(placements, nscs)
 	followerNodeIDs := system.FollowerNodeIDs(placements, nscs)
@@ -495,16 +475,16 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID glid.
 	isFollower := slices.Contains(followerNodeIDs, o.localNodeID)
 	if !isLeader && !isFollower {
 		// No storage placement, but still join the vault control-plane Raft
-		// group as a voter for this vault's replicated tier metadata.
-		o.ensureVaultCtlTierMetadata(*tierCfg, rt.Nodes, factories)
+		// group as a voter for this vault's replicated instance metadata.
+		o.ensureVaultCtlMetadata(*vaultCfg, rt.Nodes, factories)
 		return nil
 	}
 
 	var ti *VaultInstance
 	if isLeader {
-		t, err := o.buildLeaderTierInstance(sys, *vaultCfg, tierCfg, factories)
+		t, err := o.buildLeaderInstance(sys, *vaultCfg, factories)
 		if err != nil {
-			return fmt.Errorf("build tier %s: %w", tierID, err)
+			return fmt.Errorf("build vault %s: %w", vaultID, err)
 		}
 		t.FollowerTargets = system.FollowerTargets(placements, nscs)
 		ti = t
@@ -513,9 +493,9 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID glid.
 			if tgt.NodeID != o.localNodeID {
 				continue
 			}
-			t, err := o.buildTierInstanceForStorage(sys, *vaultCfg, *tierCfg, factories, tgt.StorageID, true)
+			t, err := o.buildInstanceForStorage(sys, *vaultCfg, factories, tgt.StorageID, true)
 			if err != nil {
-				return fmt.Errorf("build tier %s storage %s: %w", tierID, tgt.StorageID, err)
+				return fmt.Errorf("build vault %s storage %s: %w", vaultID, tgt.StorageID, err)
 			}
 			t.IsFollower = true
 			t.LeaderNodeID = leaderNodeID
@@ -578,7 +558,7 @@ func (o *Orchestrator) UnregisterVault(id glid.GLID) error {
 			"vault", id, "error", err)
 	}
 
-	// Remove per-tier retention and rotation jobs.
+	// Remove per-vault retention and rotation jobs.
 	o.removeVaultJobs(id, vault)
 
 	// Remove from registry.
@@ -613,31 +593,15 @@ func (o *Orchestrator) VaultConfig(id glid.GLID) (system.VaultConfig, error) {
 // cycle. The Phase-4 ergonomic API was test-only; no production caller
 // existed.
 
-// buildTierInstances creates VaultInstance objects for each tier in the vault config.
-// Every node joins every tier's Raft group regardless of storage placement
+// buildVaultInstances creates VaultInstance objects for each instance in the vault config.
+// Every node joins every instance's Raft group regardless of storage placement
 // (gastrolog-292yi). Nodes with storage placements also get a VaultInstance with
 // a chunk manager; nodes without storage only participate in the Raft group.
 func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.VaultConfig, factories Factories) (*VaultInstance, error) {
-	cfg := &sys.Config
 	rt := &sys.Runtime
 	o.ensureVaultControlPlaneRaftGroup(vaultCfg.ID, rt.Nodes, factories)
 
-	tierIDs := system.VaultTierIDs(cfg.Tiers, vaultCfg.ID)
-	if len(tierIDs) == 0 {
-		// No tier yet — placement / config arrives incrementally via
-		// AddTierToVault.
-		return nil, nil
-	}
-
-	// 1:1 vault:tier post-Phase-1 — there's only ever a single TierConfig
-	// for any given vault.
-	tierID := tierIDs[0]
-	tierCfg := findTierConfig(cfg.Tiers, tierID)
-	if tierCfg == nil {
-		o.logger.Warn("buildVaultInstance: tier not in config, skipping",
-			"vault", vaultCfg.ID, "tier", tierID)
-		return nil, nil
-	}
+	vaultID := vaultCfg.ID
 
 	// Determine this node's role for this vault. With one-replica-per-node
 	// (Phase 2 invariant) the node is at most one of: leader, follower, neither.
@@ -649,15 +613,15 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 	isFollower := slices.Contains(followerNodeIDs, o.localNodeID)
 	if !isLeader && !isFollower {
 		// No storage placement on this node, but still join the vault
-		// control-plane Raft group as a voter for replicated tier metadata.
-		o.ensureVaultCtlTierMetadata(*tierCfg, rt.Nodes, factories)
+		// control-plane Raft group as a voter for replicated instance metadata.
+		o.ensureVaultCtlMetadata(vaultCfg, rt.Nodes, factories)
 		return nil, nil
 	}
 
 	if isLeader {
-		ti, err := o.buildLeaderTierInstance(sys, vaultCfg, tierCfg, factories)
+		ti, err := o.buildLeaderInstance(sys, vaultCfg, factories)
 		if err != nil {
-			o.alertTierInitFailed(tierID, tierCfg.Name, err)
+			o.alertVaultInitFailed(vaultID, vaultCfg.Name, err)
 			return nil, nil
 		}
 		ti.FollowerTargets = system.FollowerTargets(placements, nscs)
@@ -669,9 +633,9 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 		if tgt.NodeID != o.localNodeID {
 			continue
 		}
-		sti, err := o.buildTierInstanceForStorage(sys, vaultCfg, *tierCfg, factories, tgt.StorageID, true)
+		sti, err := o.buildInstanceForStorage(sys, vaultCfg, factories, tgt.StorageID, true)
 		if err != nil {
-			o.alertTierInitFailed(tierID, tierCfg.Name, err)
+			o.alertVaultInitFailed(vaultID, vaultCfg.Name, err)
 			return nil, nil
 		}
 		sti.IsFollower = true
@@ -683,31 +647,30 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 	return nil, nil
 }
 
-// alertTierInitFailed logs a warning and raises an alert for a tier that
-// failed to initialize during vault build. The tier is skipped but the
-// vault continues with its remaining tiers. The failed tier will be
-// retried on the next reconfig cycle. See gastrolog-68fqk.
-func (o *Orchestrator) alertTierInitFailed(tierID glid.GLID, tierName string, err error) {
-	o.logger.Warn("buildTierInstances: tier init failed, skipping",
-		"tier", tierID, "name", tierName, "error", err)
+// alertVaultInitFailed logs a warning and raises an alert when a vault
+// instance fails to initialize during build. The failed instance is retried on
+// the next reconfig cycle. See gastrolog-68fqk.
+func (o *Orchestrator) alertVaultInitFailed(vaultID glid.GLID, vaultName string, err error) {
+	o.logger.Warn("buildVaultInstances: vaultInst init failed, skipping",
+		"vault", vaultID, "name", vaultName, "error", err)
 	if o.alerts != nil {
 		o.alerts.Set(
-			fmt.Sprintf("tier-init:%s", tierID),
+			fmt.Sprintf("vault-init:%s", vaultID),
 			alert.Error, "orchestrator",
-			fmt.Sprintf("Tier %q failed to initialize: %v", tierName, err),
+			fmt.Sprintf("Vault %q failed to initialize: %v", vaultName, err),
 		)
 	}
 }
 
-// buildLeaderTierInstance creates the leader VaultInstance using the placement's
+// buildLeaderInstance creates the leader VaultInstance using the placement's
 // storage ID. This avoids directory collisions with same-node follower placements
 // that would occur if findLocalFileStorage picked a different storage by class.
-func (o *Orchestrator) buildLeaderTierInstance(sys *system.System, vaultCfg system.VaultConfig, tierCfg *system.TierConfig, factories Factories) (*VaultInstance, error) {
-	// Read placements from VaultConfig (mirrored from tier placements via
+func (o *Orchestrator) buildLeaderInstance(sys *system.System, vaultCfg system.VaultConfig, factories Factories) (*VaultInstance, error) {
+	// Read placements from VaultConfig (mirrored from vault placements via
 	// the FSM bridge — gastrolog-257l7).
 	storageID := system.LeaderStorageID(vaultCfg.Placements)
 	if storageID != "" && !strings.HasPrefix(storageID, system.SyntheticStoragePrefix) {
-		ti, err := o.buildTierInstanceForStorage(sys, vaultCfg, *tierCfg, factories, storageID, false)
+		ti, err := o.buildInstanceForStorage(sys, vaultCfg, factories, storageID, false)
 		if err != nil {
 			return nil, err
 		}
@@ -715,7 +678,7 @@ func (o *Orchestrator) buildLeaderTierInstance(sys *system.System, vaultCfg syst
 		return ti, nil
 	}
 	// Synthetic or unplaced — fall back to class-based resolution.
-	ti, err := o.buildTierInstance(sys, vaultCfg, *tierCfg, factories, false)
+	ti, err := o.buildInstance(sys, vaultCfg, factories, false)
 	if err != nil {
 		return nil, err
 	}
@@ -723,42 +686,41 @@ func (o *Orchestrator) buildLeaderTierInstance(sys *system.System, vaultCfg syst
 	return ti, nil
 }
 
-// buildTierInstance creates a single VaultInstance from a TierConfig.
+// buildInstance creates a single VaultInstance from a VaultConfig.
 // When isFollower is true, cloud backing params are stripped so the follower's
 // PostSealProcess only runs compress + index without uploading to cloud storage.
-// Cloud tiers use a shared blob key (vault-ID/chunk-ID.glcb) — if the follower
+// Cloud-backed vaults share a blob key (vault-ID/chunk-ID.glcb) — if the follower
 // also uploads, it overwrites the leader's blob with a different-sized version,
 // corrupting the leader's stored diskBytes and breaking all future cloud reads.
-func (o *Orchestrator) buildTierInstance(sys *system.System, vaultCfg system.VaultConfig, tierCfg system.TierConfig, factories Factories, isFollower bool) (*VaultInstance, error) {
+func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultConfig, factories Factories, isFollower bool) (*VaultInstance, error) {
 	cfg := &sys.Config
 	rt := &sys.Runtime
-	// Map TierConfig.Type to factory name.
-	factoryName := mapTierTypeToFactory(tierCfg.Type)
+	factoryName := mapVaultTypeToFactory(vaultCfg.Type)
 
 	// Create the vault-ctl Raft group BEFORE the chunk manager. Group creation is
 	// fast (Raft log replay). Chunk manager creation is slow (scans disk for
 	// existing chunks). Starting the Raft group early gives it time to elect
 	// a leader and catch up while the chunk manager is loading.
-	tierGroup, applier, raftCB := o.ensureVaultCtlTierMetadata(tierCfg, rt.Nodes, factories)
+	vaultGroup, applier, raftCB := o.ensureVaultCtlMetadata(vaultCfg, rt.Nodes, factories)
 
-	// Build params from tier system.
-	params := buildTierParams(sys, vaultCfg, tierCfg, o.localNodeID)
+	// Build params from instance system.
+	params := buildVaultParams(sys, vaultCfg, o.localNodeID)
 
 	// Followers keep cloud store access for reads (queries) but skip uploads.
 	// The leader owns the blob; the follower adopts it via RegisterCloudChunk
-	// when the tier FSM propagates the upload announcement.
+	// when the vault-ctl FSM propagates the upload announcement.
 	if isFollower {
 		params["_cloud_read_only"] = "true"
 	}
 
 	cmFactory, ok := factories.ChunkManagers[factoryName]
 	if !ok {
-		return nil, fmt.Errorf("unknown chunk manager type: %s (mapped from tier type %s)", factoryName, tierCfg.Type)
+		return nil, fmt.Errorf("unknown chunk manager type: %s (mapped from vaultInst type %s)", factoryName, vaultCfg.Type)
 	}
 
 	var cmLogger = factories.Logger
 	if cmLogger != nil {
-		cmLogger = cmLogger.With("vault", vaultCfg.ID, "tier", tierCfg.ID)
+		cmLogger = cmLogger.With("vault", vaultCfg.ID)
 	}
 
 	cmParams := resolveVaultDir(params, factories.VaultsDir, vaultCfg.ID.String())
@@ -775,41 +737,40 @@ func (o *Orchestrator) buildTierInstance(sys *system.System, vaultCfg system.Vau
 		return nil, fmt.Errorf("create chunk manager: %w", err)
 	}
 
-	// Apply rotation policy from tier.
-	if err := applyRotationPolicy(cm, cfg.RotationPolicies, tierCfg.RotationPolicyID); err != nil {
+	// Apply rotation policy from instance.
+	if err := applyRotationPolicy(cm, cfg.RotationPolicies, vaultCfg.RotationPolicyID); err != nil {
 		_ = cm.Close()
 		return nil, err
 	}
 
 	// Wire the Raft announcer now that both the group and chunk manager exist.
-	setTierRaftAnnouncer(cm, applier, o.phase, o.logger)
+	setVaultRaftAnnouncer(cm, applier, o.phase, o.logger)
 	// Wire the FSM-backed integrity verifier so cold-cache cloud downloads
 	// reject blobs whose digest doesn't match what the leader stamped at
 	// upload time. gastrolog-grnc3.
 	setIntegrityVerifier(cm, o.IntegrityVerifier())
 
 	// JSONL sinks are write-only — no query engine, no indexes.
-	if tierCfg.Type == system.VaultTypeJSONL {
+	if vaultCfg.Type == system.VaultTypeJSONL {
 		ti := &VaultInstance{
-			TierID:  tierCfg.ID,
 			VaultID: vaultCfg.ID,
-			Type:    string(tierCfg.Type),
+			Type:    string(vaultCfg.Type),
 			Chunks:  cm,
 		}
 		ti.applyRaftCallbacks(raftCB)
-		o.attachLifecycleReconciler(ti, vaultCfg.ID, tierCfg.ID, tierGroup)
-		wireTierFSMOnDelete(tierGroup, tierCfg.ID, cm, nil, o, o.logger)
+		o.attachLifecycleReconciler(ti, vaultCfg.ID, vaultGroup)
+		wireVaultFSMOnDelete(vaultGroup, vaultCfg.ID, cm, nil, o, o.logger)
 		return ti, nil
 	}
 
 	imFactory, ok := factories.IndexManagers[factoryName]
 	if !ok {
 		_ = cm.Close()
-		return nil, fmt.Errorf("unknown index manager type: %s (mapped from tier type %s)", factoryName, tierCfg.Type)
+		return nil, fmt.Errorf("unknown index manager type: %s (mapped from vaultInst type %s)", factoryName, vaultCfg.Type)
 	}
 	var imLogger = factories.Logger
 	if imLogger != nil {
-		imLogger = imLogger.With("vault", vaultCfg.ID, "tier", tierCfg.ID)
+		imLogger = imLogger.With("vault", vaultCfg.ID)
 	}
 	im, err := imFactory(cmParams, cm, imLogger)
 	if err != nil {
@@ -819,7 +780,7 @@ func (o *Orchestrator) buildTierInstance(sys *system.System, vaultCfg system.Vau
 
 	var qeLogger = factories.Logger
 	if qeLogger != nil {
-		qeLogger = qeLogger.With("vault", vaultCfg.ID, "tier", tierCfg.ID)
+		qeLogger = qeLogger.With("vault", vaultCfg.ID)
 	}
 	qe := query.New(cm, im, qeLogger)
 
@@ -829,44 +790,43 @@ func (o *Orchestrator) buildTierInstance(sys *system.System, vaultCfg system.Vau
 	}
 
 	ti := &VaultInstance{
-		TierID:  tierCfg.ID,
 		VaultID: vaultCfg.ID,
-		Type:    string(tierCfg.Type),
+		Type:    string(vaultCfg.Type),
 		Chunks:  cm,
 		Indexes: im,
 		Query:   qe,
 	}
 	ti.applyRaftCallbacks(raftCB)
-	o.attachLifecycleReconciler(ti, vaultCfg.ID, tierCfg.ID, tierGroup)
-	wireTierFSMOnDelete(tierGroup, tierCfg.ID, cm, im, o, o.logger)
-	wireTierFSMOnUpload(tierGroup, tierCfg.ID, cm, o, o.logger)
+	o.attachLifecycleReconciler(ti, vaultCfg.ID, vaultGroup)
+	wireVaultFSMOnDelete(vaultGroup, vaultCfg.ID, cm, im, o, o.logger)
+	wireVaultFSMOnUpload(vaultGroup, vaultCfg.ID, cm, o, o.logger)
 	return ti, nil
 }
 
 // attachLifecycleReconciler constructs a VaultLifecycleReconciler for the given
-// tier instance and binds it to the tier sub-FSM in the vault control-plane
-// Raft group. Skipped silently when there is no group (memory-mode tiers
+// vault instance and binds it to the instance sub-FSM in the vault control-plane
+// Raft group. Skipped silently when there is no group (memory-mode vaults
 // without replication) — single-node deletes go straight through the chunk
 // manager via deleteChunk's local-only fallback. See gastrolog-51gme.
 //
-// Multiple TIs on the same node share a tier sub-FSM (1:1:1 placement makes
+// Multiple TIs on the same node share an instance sub-FSM (1:1:1 placement makes
 // this rare, but possible). Each TI's reconciler.Wire() call rebinds the
 // callback set on the FSM; last-writer-wins matches the existing OnDelete /
 // OnUpload behavior wired alongside.
-func (o *Orchestrator) attachLifecycleReconciler(ti *VaultInstance, vaultID, tierID glid.GLID, tierGroup *raftgroup.Group) {
-	ti.Reconciler = NewTierLifecycleReconciler(o, vaultID, tierID, ti, o.localNodeID, o.logger)
-	if tierGroup == nil {
+func (o *Orchestrator) attachLifecycleReconciler(ti *VaultInstance, vaultID glid.GLID, vaultGroup *raftgroup.Group) {
+	ti.Reconciler = NewVaultLifecycleReconciler(o, vaultID, ti, o.localNodeID, o.logger)
+	if vaultGroup == nil {
 		return
 	}
-	if vfsm, ok := tierGroup.FSM.(*vaultraft.FSM); ok && vfsm != nil {
-		ti.Reconciler.Wire(vfsm.EnsureTierFSM(tierID))
+	if vfsm, ok := vaultGroup.FSM.(*vaultraft.FSM); ok && vfsm != nil {
+		ti.Reconciler.Wire(vfsm.EnsureVaultFSM(vaultID))
 	}
 }
 
-// buildTierInstanceForStorage creates a VaultInstance whose data directory is
+// buildInstanceForStorage creates a VaultInstance whose data directory is
 // resolved from a specific file storage ID. Used for both leaders with
-// explicit storage placements and followers (one per node per tier).
-func (o *Orchestrator) buildTierInstanceForStorage(sys *system.System, vaultCfg system.VaultConfig, tierCfg system.TierConfig, factories Factories, storageID string, isFollower bool) (*VaultInstance, error) {
+// explicit storage placements and followers (one per node per instance).
+func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg system.VaultConfig, factories Factories, storageID string, isFollower bool) (*VaultInstance, error) {
 	cfg := &sys.Config
 	rt := &sys.Runtime
 	fs := findFileStorageByID(rt, storageID)
@@ -875,18 +835,18 @@ func (o *Orchestrator) buildTierInstanceForStorage(sys *system.System, vaultCfg 
 	}
 
 	// Create the vault-ctl Raft group BEFORE the chunk manager — same rationale
-	// as buildTierInstance: start elections while chunk loading is in progress.
-	tierGroup, applier, raftCB := o.ensureVaultCtlTierMetadata(tierCfg, rt.Nodes, factories)
+	// as buildInstance: start elections while chunk loading is in progress.
+	vaultGroup, applier, raftCB := o.ensureVaultCtlMetadata(vaultCfg, rt.Nodes, factories)
 
 	// Build params normally, then override the dir with this storage's path.
-	params := buildTierParams(sys, vaultCfg, tierCfg, o.localNodeID)
+	params := buildVaultParams(sys, vaultCfg, o.localNodeID)
 	// Followers keep cloud store access for reads but skip uploads.
 	if isFollower {
 		params["_cloud_read_only"] = "true"
 	}
-	params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), tierCfg.ID.String())
+	params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), vaultCfg.ID.String())
 
-	factoryName := mapTierTypeToFactory(tierCfg.Type)
+	factoryName := mapVaultTypeToFactory(vaultCfg.Type)
 	cmFactory, ok := factories.ChunkManagers[factoryName]
 	if !ok {
 		return nil, fmt.Errorf("unknown chunk manager type: %s", factoryName)
@@ -894,7 +854,7 @@ func (o *Orchestrator) buildTierInstanceForStorage(sys *system.System, vaultCfg 
 
 	var cmLogger = factories.Logger
 	if cmLogger != nil {
-		cmLogger = cmLogger.With("vault", vaultCfg.ID, "tier", tierCfg.ID, "storage", storageID)
+		cmLogger = cmLogger.With("vault", vaultCfg.ID, "storage", storageID)
 	}
 
 	cmParams := resolveVaultDir(params, factories.VaultsDir, vaultCfg.ID.String())
@@ -906,13 +866,13 @@ func (o *Orchestrator) buildTierInstanceForStorage(sys *system.System, vaultCfg 
 		return nil, fmt.Errorf("create chunk manager: %w", err)
 	}
 
-	if err := applyRotationPolicy(cm, cfg.RotationPolicies, tierCfg.RotationPolicyID); err != nil {
+	if err := applyRotationPolicy(cm, cfg.RotationPolicies, vaultCfg.RotationPolicyID); err != nil {
 		_ = cm.Close()
 		return nil, err
 	}
 
 	// Wire Raft announcer now that chunk manager exists.
-	setTierRaftAnnouncer(cm, applier, o.phase, o.logger)
+	setVaultRaftAnnouncer(cm, applier, o.phase, o.logger)
 
 	// Follower replicas need index builders for local queries.
 	imFactory, ok := factories.IndexManagers[factoryName]
@@ -922,7 +882,7 @@ func (o *Orchestrator) buildTierInstanceForStorage(sys *system.System, vaultCfg 
 	}
 	var imLogger = factories.Logger
 	if imLogger != nil {
-		imLogger = imLogger.With("vault", vaultCfg.ID, "tier", tierCfg.ID, "storage", storageID)
+		imLogger = imLogger.With("vault", vaultCfg.ID, "storage", storageID)
 	}
 	im, err := imFactory(cmParams, cm, imLogger)
 	if err != nil {
@@ -932,7 +892,7 @@ func (o *Orchestrator) buildTierInstanceForStorage(sys *system.System, vaultCfg 
 
 	var qeLogger = factories.Logger
 	if qeLogger != nil {
-		qeLogger = qeLogger.With("vault", vaultCfg.ID, "tier", tierCfg.ID, "storage", storageID)
+		qeLogger = qeLogger.With("vault", vaultCfg.ID, "storage", storageID)
 	}
 	qe := query.New(cm, im, qeLogger)
 
@@ -941,17 +901,16 @@ func (o *Orchestrator) buildTierInstanceForStorage(sys *system.System, vaultCfg 
 	}
 
 	ti := &VaultInstance{
-		TierID:  tierCfg.ID,
 		VaultID: vaultCfg.ID,
-		Type:    string(tierCfg.Type),
+		Type:    string(vaultCfg.Type),
 		Chunks:  cm,
 		Indexes: im,
 		Query:   qe,
 	}
 	ti.applyRaftCallbacks(raftCB)
-	o.attachLifecycleReconciler(ti, vaultCfg.ID, tierCfg.ID, tierGroup)
-	wireTierFSMOnDelete(tierGroup, tierCfg.ID, cm, im, o, o.logger)
-	wireTierFSMOnUpload(tierGroup, tierCfg.ID, cm, o, o.logger)
+	o.attachLifecycleReconciler(ti, vaultCfg.ID, vaultGroup)
+	wireVaultFSMOnDelete(vaultGroup, vaultCfg.ID, cm, im, o, o.logger)
+	wireVaultFSMOnUpload(vaultGroup, vaultCfg.ID, cm, o, o.logger)
 	return ti, nil
 }
 
@@ -986,7 +945,7 @@ func applyRotationPolicy(cm chunk.ChunkManager, policies []system.RotationPolicy
 	return nil
 }
 
-// tierRaftCallbacks holds the callbacks returned by ensureVaultCtlTierMetadata.
+// vaultRaftCallbacks holds the callbacks returned by ensureVaultCtlMetadata.
 func (o *Orchestrator) destroyVaultControlPlaneRaftGroup(vaultID glid.GLID) {
 	if o.vaultCtlLeaders != nil {
 		o.vaultCtlLeaders.Stop(vaultID)
@@ -1017,7 +976,7 @@ func (o *Orchestrator) tryStartClusterRaftGroup(groupID string, fsm hraft.FSM, c
 	if factories.GroupManager == nil {
 		return nil, nil
 	}
-	members := o.buildTierRaftMembers(clusterNodes, factories)
+	members := o.buildVaultRaftMembers(clusterNodes, factories)
 	if len(members) < len(clusterNodes) {
 		o.logger.Debug("cluster raft group: not all cluster nodes resolvable, deferring creation",
 			"group", groupID,
@@ -1051,7 +1010,7 @@ func (o *Orchestrator) tryStartClusterRaftGroup(groupID string, fsm hraft.FSM, c
 	return g, members
 }
 
-type tierRaftCallbacks struct {
+type vaultRaftCallbacks struct {
 	hasLeader           func() bool
 	isLeader            func() bool
 	isFSMReady          func() bool
@@ -1064,66 +1023,66 @@ type tierRaftCallbacks struct {
 	listChunks          func() []chunk.ChunkID
 	listRetPending      func() []chunk.ChunkID
 	overlayFromFSM      func(chunk.ChunkMeta) chunk.ChunkMeta
-	manifestEntries     func() []tierfsm.ManifestEntry
-	manifestEntry       func(id chunk.ChunkID) (tierfsm.ManifestEntry, bool)
+	manifestEntries     func() []vaultctlfsm.ManifestEntry
+	manifestEntry       func(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool)
 }
 
-// ensureVaultCtlTierMetadata joins this node to the vault control-plane
-// Raft group for the tier's vault (creating the group if needed) and
-// returns the applier + callbacks for this tier's chunk metadata. Every
-// tier in the same vault shares the same vault-ctl Raft group; each
-// tier's chunk FSM is a sub-FSM keyed by tier ID (see vaultraft.FSM and
-// vaultraft/tierfsm.FSM). With no GroupManager, returns nils.
+// ensureVaultCtlMetadata joins this node to the vault control-plane
+// Raft group for the vault's vault (creating the group if needed) and
+// returns the applier + callbacks for this instance's chunk metadata. Every
+// instance in the same vault shares the same vault-ctl Raft group; each
+// instance's chunk FSM is a sub-FSM keyed by instance ID (see vaultraft.FSM and
+// vaultraft/vaultctlfsm.FSM). With no GroupManager, returns nils.
 //
 // Post-gastrolog-5xxbd there is no per-vault-ctl Raft group. The historical
-// function name ensureVaultCtlTierMetadata is preserved as a no-op alias in
+// function name ensureVaultCtlMetadata is preserved as a no-op alias in
 // tests only; production wires through this function.
 //
 // Call this BEFORE creating the chunk manager so Raft can start
 // elections while chunk loading is still in progress.
-func (o *Orchestrator) ensureVaultCtlTierMetadata(tierCfg system.TierConfig, clusterNodes []system.NodeConfig, factories Factories) (*raftgroup.Group, tierfsm.Applier, tierRaftCallbacks) {
+func (o *Orchestrator) ensureVaultCtlMetadata(vaultCfg system.VaultConfig, clusterNodes []system.NodeConfig, factories Factories) (*raftgroup.Group, vaultctlfsm.Applier, vaultRaftCallbacks) {
 	if factories.GroupManager == nil {
-		return nil, nil, tierRaftCallbacks{}
+		return nil, nil, vaultRaftCallbacks{}
 	}
-	vaultGID := raftgroup.VaultControlPlaneGroupID(tierCfg.VaultID)
+	vaultGID := raftgroup.VaultControlPlaneGroupID(vaultCfg.ID)
 	g, members := o.tryStartClusterRaftGroup(vaultGID, vaultraft.NewFSM(), clusterNodes, factories)
 	if g == nil {
-		return nil, nil, tierRaftCallbacks{}
+		return nil, nil, vaultRaftCallbacks{}
 	}
 
-	o.vaultCtlLeaders.SetDesiredMembers(tierCfg.VaultID, members)
-	o.vaultCtlLeaders.Start(tierCfg.VaultID, g)
+	o.vaultCtlLeaders.SetDesiredMembers(vaultCfg.ID, members)
+	o.vaultCtlLeaders.Start(vaultCfg.ID, g)
 
 	vfsm, ok := g.FSM.(*vaultraft.FSM)
 	if !ok || vfsm == nil {
-		return nil, nil, tierRaftCallbacks{}
+		return nil, nil, vaultRaftCallbacks{}
 	}
 	// Wire the after-restore hook so that vault-ctl snapshot install on
 	// this node triggers the receipt protocol's catchup pass on every
-	// tier reconciler in the vault. Idempotent — calling SetOnAfterRestore
-	// on every ensureVaultCtlTierMetadata invocation is fine; later calls
+	// instance reconciler in the vault. Idempotent — calling SetOnAfterRestore
+	// on every ensureVaultCtlMetadata invocation is fine; later calls
 	// just rebind to the same closure. Without this hook, the receipt
 	// protocol's pendingDeletes silently leak across snapshot install
 	// boundaries (the bug gastrolog-51gme step 3 was supposed to close).
-	vaultID := tierCfg.VaultID
+	vaultID := vaultCfg.ID
 	vfsm.SetOnAfterRestore(func() { o.afterVaultCtlRestore(vaultID) })
-	tierFSM := vfsm.EnsureTierFSM(tierCfg.ID)
+	vaultFSM := vfsm.EnsureVaultFSM(vaultCfg.ID)
 	r := g.Raft
 	timeout := cluster.ReplicationTimeout
 
-	var applier tierfsm.Applier
+	var applier vaultctlfsm.Applier
 	if factories.PeerConns != nil {
-		applier = cluster.NewVaultCtlChunkApplyForwarder(r, vaultGID, tierCfg.ID, factories.PeerConns, timeout)
+		applier = cluster.NewVaultCtlChunkApplyForwarder(r, vaultGID, vaultCfg.ID, factories.PeerConns, timeout)
 	} else {
-		applier = &vaultCtlTierApplier{o: o, vaultID: tierCfg.VaultID, tierID: tierCfg.ID}
+		applier = &vaultCtlApplier{o: o, vaultID: vaultCfg.ID}
 	}
 
-	return g, applier, buildTierRaftCallbacks(r, tierFSM, applier)
+	return g, applier, buildVaultRaftCallbacks(r, vaultFSM, applier)
 }
 
-// buildTierRaftCallbacks constructs the callback struct for replicated tier
+// buildVaultRaftCallbacks constructs the callback struct for replicated instance
 // chunk metadata (vault control-plane Raft in cluster mode).
-// Extracted from ensureVaultCtlTierMetadata to keep cognitive complexity within lint
+// Extracted from ensureVaultCtlMetadata to keep cognitive complexity within lint
 // thresholds.
 //
 // Readiness uses the Raft applied index, not the FSM's ready flag. hraft
@@ -1136,31 +1095,31 @@ func (o *Orchestrator) ensureVaultCtlTierMetadata(tierCfg system.TierConfig, clu
 // it advances on bootstrap, elections, snapshot restore, and normal
 // replication alike.
 //
-// Before 5xxbd, tier FSM was a top-level Raft group whose Ready flag
-// flipped on every apply in practice, because `CmdPutTier` was a LogCommand
-// that hit it. After 5xxbd the tier sub-FSM only sees OpVaultChunkFSM commands,
+// Before 5xxbd, vault-ctl FSM was a top-level Raft group whose Ready flag
+// flipped on every apply in practice, because `CmdPutVault` was a LogCommand
+// that hit it. After 5xxbd the instance sub-FSM only sees OpVaultChunkFSM commands,
 // which a fresh vault with no chunks never sends — keying readiness on any
 // FSM-level signal leaves every fresh vault wedged as "not ready" until
 // first ingestion.
-func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.Applier) tierRaftCallbacks {
-	return tierRaftCallbacks{
+func buildVaultRaftCallbacks(r *hraft.Raft, fsm *vaultctlfsm.FSM, applier vaultctlfsm.Applier) vaultRaftCallbacks {
+	return vaultRaftCallbacks{
 		hasLeader:  func() bool { return r.Leader() != "" },
 		isLeader:   func() bool { return r.State() == hraft.Leader },
 		isFSMReady: func() bool { return r.AppliedIndex() > 0 },
 		applyRequestDelete: func(id chunk.ChunkID, reason string, expectedFrom []string) error {
-			return applier.Apply(tierfsm.MarshalRequestDelete(id, time.Now(), reason, expectedFrom))
+			return applier.Apply(vaultctlfsm.MarshalRequestDelete(id, time.Now(), reason, expectedFrom))
 		},
 		applyAckDelete: func(id chunk.ChunkID, nodeID string) error {
-			return applier.Apply(tierfsm.MarshalAckDelete(id, nodeID))
+			return applier.Apply(vaultctlfsm.MarshalAckDelete(id, nodeID))
 		},
 		applyFinalizeDelete: func(id chunk.ChunkID) error {
-			return applier.Apply(tierfsm.MarshalFinalizeDelete(id))
+			return applier.Apply(vaultctlfsm.MarshalFinalizeDelete(id))
 		},
 		applyPruneNode: func(nodeID string) error {
-			return applier.Apply(tierfsm.MarshalPruneNode(nodeID))
+			return applier.Apply(vaultctlfsm.MarshalPruneNode(nodeID))
 		},
 		applyRetPending: func(id chunk.ChunkID) error {
-			return applier.Apply(tierfsm.MarshalRetentionPending(id))
+			return applier.Apply(vaultctlfsm.MarshalRetentionPending(id))
 		},
 		isTombstoned: func(id chunk.ChunkID) bool {
 			if fsm == nil {
@@ -1179,7 +1138,7 @@ func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.App
 			}
 			return ids
 		},
-		listRetPending: listFSMByFlag(fsm, func(e tierfsm.ManifestEntry) bool { return e.RetentionPending }),
+		listRetPending: listFSMByFlag(fsm, func(e vaultctlfsm.ManifestEntry) bool { return e.RetentionPending }),
 		overlayFromFSM: func(m chunk.ChunkMeta) chunk.ChunkMeta {
 			if fsm == nil {
 				return m
@@ -1205,19 +1164,19 @@ func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.App
 			m.Sealed = e.State == chunk.ChunkStateSealed
 			return m
 		},
-		manifestEntries: func() []tierfsm.ManifestEntry {
+		manifestEntries: func() []vaultctlfsm.ManifestEntry {
 			if fsm == nil {
 				return nil
 			}
 			return fsm.List()
 		},
-		manifestEntry: func(id chunk.ChunkID) (tierfsm.ManifestEntry, bool) {
+		manifestEntry: func(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool) {
 			if fsm == nil {
-				return tierfsm.ManifestEntry{}, false
+				return vaultctlfsm.ManifestEntry{}, false
 			}
 			e := fsm.Get(id)
 			if e == nil {
-				return tierfsm.ManifestEntry{}, false
+				return vaultctlfsm.ManifestEntry{}, false
 			}
 			return *e, true
 		},
@@ -1226,7 +1185,7 @@ func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.App
 
 // listFSMByFlag returns a function that filters the FSM's entries by a
 // boolean predicate (e.g., RetentionPending or TransitionStreamed).
-func listFSMByFlag(fsm *tierfsm.FSM, pred func(tierfsm.ManifestEntry) bool) func() []chunk.ChunkID {
+func listFSMByFlag(fsm *vaultctlfsm.FSM, pred func(vaultctlfsm.ManifestEntry) bool) func() []chunk.ChunkID {
 	return func() []chunk.ChunkID {
 		if fsm == nil {
 			return nil
@@ -1255,12 +1214,12 @@ func setIntegrityVerifier(cm chunk.ChunkManager, v chunk.IntegrityVerifier) {
 	setter.SetIntegrityVerifier(v)
 }
 
-// setTierRaftAnnouncer wires the Raft announcer to a chunk manager after both
+// setVaultRaftAnnouncer wires the Raft announcer to a chunk manager after both
 // the Raft group and chunk manager have been created. The applier handles
 // routing to the vault ctl Raft leader when peers are configured. The phase parameter lets
 // the announcer short-circuit during shutdown so trailing applies don't
 // fire "raft is already shutdown" warnings (see gastrolog-1e5ke).
-func setTierRaftAnnouncer(cm chunk.ChunkManager, applier tierfsm.Applier, phase *lifecycle.Phase, logger *slog.Logger) {
+func setVaultRaftAnnouncer(cm chunk.ChunkManager, applier vaultctlfsm.Applier, phase *lifecycle.Phase, logger *slog.Logger) {
 	if applier == nil {
 		return
 	}
@@ -1268,14 +1227,14 @@ func setTierRaftAnnouncer(cm chunk.ChunkManager, applier tierfsm.Applier, phase 
 	if !ok {
 		return
 	}
-	setter.SetAnnouncer(tierfsm.NewAnnouncer(applier, phase, logger))
+	setter.SetAnnouncer(vaultctlfsm.NewAnnouncer(applier, phase, logger))
 }
 
-// clearTierFSMChunkCallbacks clears OnDelete/OnUpload for a tier's FSM slice
-// in the vault control-plane group. Used before closing that tier's chunk
-// manager when the Raft group may still deliver log entries for this tier
-// (e.g. RemoveTierFromVault while other tiers in the same vault stay open).
-func (o *Orchestrator) clearTierFSMChunkCallbacks(vaultID, tierID glid.GLID) {
+// clearVaultFSMChunkCallbacks clears OnDelete/OnUpload for a vault's FSM slice
+// in the vault control-plane group. Used before closing that vault's chunk
+// manager when the Raft group may still deliver log entries
+// (e.g. RemoveVaultInstance during placement loss).
+func (o *Orchestrator) clearVaultFSMChunkCallbacks(vaultID glid.GLID) {
 	if o.groupMgr == nil {
 		return
 	}
@@ -1283,31 +1242,31 @@ func (o *Orchestrator) clearTierFSMChunkCallbacks(vaultID, tierID glid.GLID) {
 	if g == nil {
 		return
 	}
-	var fsm *tierfsm.FSM
+	var fsm *vaultctlfsm.FSM
 	switch raw := g.FSM.(type) {
-	case *tierfsm.FSM:
+	case *vaultctlfsm.FSM:
 		fsm = raw
 	case *vaultraft.FSM:
-		fsm = raw.EnsureTierFSM(tierID)
+		fsm = raw.EnsureVaultFSM(vaultID)
 	default:
 		return
 	}
 	fsm.SetOnDelete(nil)
 	fsm.SetOnUpload(nil)
 	if o.logger != nil {
-		o.logger.Debug("cleared tier FSM chunk callbacks before manager close",
-			"vault", vaultID, "tier", tierID)
+		o.logger.Debug("cleared vault-ctl FSM chunk callbacks before manager close",
+			"vault", vaultID)
 	}
 }
 
-// wireTierFSMOnDelete sets up the tier FSM's OnDelete callback so that
+// wireVaultFSMOnDelete sets up the vault-ctl FSM's OnDelete callback so that
 // CmdDeleteChunk applied via Raft on this node deletes the local chunk
 // files (and indexes if available). The callback uses chunk.SilentDeleter
 // to avoid the announcer feedback loop — re-announcing the delete that
 // just arrived from Raft would cause infinite re-application.
 //
 // Safe to call with nil group, nil cm, or a chunk manager that doesn't
-// implement SilentDeleter (e.g. memory tiers): the callback is simply not
+// implement SilentDeleter (e.g. memory vaults): the callback is simply not
 // wired in those cases.
 //
 // IMPORTANT: this callback acquires the chunk manager's m.mu via
@@ -1317,16 +1276,16 @@ func (o *Orchestrator) clearTierFSMChunkCallbacks(vaultID, tierID glid.GLID) {
 // enforce this by releasing m.mu before calling the announcer; if a new
 // path is added that holds the mutex during an announcer call, this
 // callback will deadlock with it.
-func wireTierFSMOnDelete(g *raftgroup.Group, tierID glid.GLID, cm chunk.ChunkManager, im index.IndexManager, o *Orchestrator, logger *slog.Logger) {
+func wireVaultFSMOnDelete(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkManager, im index.IndexManager, o *Orchestrator, logger *slog.Logger) {
 	if g == nil || cm == nil {
 		return
 	}
-	var fsm *tierfsm.FSM
+	var fsm *vaultctlfsm.FSM
 	switch raw := g.FSM.(type) {
-	case *tierfsm.FSM:
+	case *vaultctlfsm.FSM:
 		fsm = raw
 	case *vaultraft.FSM:
-		fsm = raw.EnsureTierFSM(tierID)
+		fsm = raw.EnsureVaultFSM(vaultID)
 	default:
 		return
 	}
@@ -1370,20 +1329,20 @@ func wireTierFSMOnDelete(g *raftgroup.Group, tierID glid.GLID, cm chunk.ChunkMan
 	})
 }
 
-// wireTierFSMOnUpload connects the tier FSM's OnUpload callback to the
+// wireVaultFSMOnUpload connects the vault-ctl FSM's OnUpload callback to the
 // chunk manager's RegisterCloudChunk method. When the FSM applies CmdUploadChunk
 // (from the leader's AnnounceUpload), the follower's chunk manager registers
 // the cloud chunk from metadata alone — no record streaming or S3 download.
-func wireTierFSMOnUpload(g *raftgroup.Group, tierID glid.GLID, cm chunk.ChunkManager, o *Orchestrator, logger *slog.Logger) {
+func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkManager, o *Orchestrator, logger *slog.Logger) {
 	if g == nil || cm == nil {
 		return
 	}
-	var fsm *tierfsm.FSM
+	var fsm *vaultctlfsm.FSM
 	switch raw := g.FSM.(type) {
-	case *tierfsm.FSM:
+	case *vaultctlfsm.FSM:
 		fsm = raw
 	case *vaultraft.FSM:
-		fsm = raw.EnsureTierFSM(tierID)
+		fsm = raw.EnsureVaultFSM(vaultID)
 	default:
 		return
 	}
@@ -1391,7 +1350,7 @@ func wireTierFSMOnUpload(g *raftgroup.Group, tierID glid.GLID, cm chunk.ChunkMan
 	if !ok {
 		return
 	}
-	fsm.SetOnUpload(func(e tierfsm.ManifestEntry) {
+	fsm.SetOnUpload(func(e vaultctlfsm.ManifestEntry) {
 		// Notify WatchChunks subscribers: the chunk transitioned to
 		// cloud-backed (DiskBytes / CloudBacked changed
 		// in the FSM), which the inspector renders. Fire regardless
@@ -1424,11 +1383,11 @@ func wireTierFSMOnUpload(g *raftgroup.Group, tierID glid.GLID, cm chunk.ChunkMan
 	})
 }
 
-// buildTierRaftMembers returns ALL cluster nodes as Raft members for a vault
-// control-plane Raft group. Every node participates regardless of which tiers
-// it stores — nodes without local tier data still replicate tier metadata.
+// buildVaultRaftMembers returns ALL cluster nodes as Raft members for a vault
+// control-plane Raft group. Every node participates regardless of which vaults
+// it stores — nodes without local instance data still replicate instance metadata.
 // See gastrolog-292yi.
-func (o *Orchestrator) buildTierRaftMembers(clusterNodes []system.NodeConfig, factories Factories) []hraft.Server {
+func (o *Orchestrator) buildVaultRaftMembers(clusterNodes []system.NodeConfig, factories Factories) []hraft.Server {
 	if factories.NodeAddressResolver == nil || len(clusterNodes) == 0 {
 		return nil
 	}
@@ -1445,7 +1404,7 @@ func (o *Orchestrator) buildTierRaftMembers(clusterNodes []system.NodeConfig, fa
 	return members
 }
 
-func mapTierTypeToFactory(t system.TierType) string {
+func mapVaultTypeToFactory(t system.VaultType) string {
 	switch t {
 	case system.VaultTypeMemory:
 		return "memory"
@@ -1458,34 +1417,34 @@ func mapTierTypeToFactory(t system.TierType) string {
 	}
 }
 
-// buildTierParams builds a params map from a TierConfig suitable for factory consumption.
-func buildTierParams(sys *system.System, vaultCfg system.VaultConfig, tierCfg system.TierConfig, localNodeID string) map[string]string {
+// buildVaultParams builds a params map from a VaultConfig suitable for factory consumption.
+func buildVaultParams(sys *system.System, vaultCfg system.VaultConfig, localNodeID string) map[string]string {
 	rt := &sys.Runtime
 	params := make(map[string]string)
 
-	switch tierCfg.Type {
+	switch vaultCfg.Type {
 	case system.VaultTypeMemory:
-		if tierCfg.MemoryBudgetBytes > 0 {
-			params["budgetBytes"] = strconv.FormatUint(tierCfg.MemoryBudgetBytes, 10)
+		if vaultCfg.MemoryBudgetBytes > 0 {
+			params["budgetBytes"] = strconv.FormatUint(vaultCfg.MemoryBudgetBytes, 10)
 		}
 
 	case system.VaultTypeFile:
-		// Single storage class for all file tiers — local-only and
+		// Single storage class for all file vaults — local-only and
 		// cloud-backed alike. The active chunk and warm cache live at
 		// the same chunkDir path post-step-7k. See gastrolog-4k5mg.
-		if tierCfg.IsCloud() {
-			addCloudParams(params, &sys.Config, tierCfg)
+		if vaultCfg.IsCloud() {
+			addCloudParams(params, &sys.Config, vaultCfg)
 		}
-		if fs := findLocalFileStorage(rt, localNodeID, tierCfg.StorageClass); fs != nil {
-			params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), tierCfg.ID.String())
+		if fs := findLocalFileStorage(rt, localNodeID, vaultCfg.StorageClass); fs != nil {
+			params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), vaultCfg.ID.String())
 		}
 
 	case system.VaultTypeJSONL:
-		if tierCfg.Path != "" {
-			params["path"] = tierCfg.Path
+		if vaultCfg.Path != "" {
+			params["path"] = vaultCfg.Path
 		} else {
-			// Default: jsonl/<vault-id>/<tier-id>.jsonl
-			params["path"] = filepath.Join("jsonl", vaultCfg.ID.String(), tierCfg.ID.String()+".jsonl")
+			// Default: jsonl/<vault-id>/<instance-id>.jsonl
+			params["path"] = filepath.Join("jsonl", vaultCfg.ID.String(), vaultCfg.ID.String()+".jsonl")
 		}
 	}
 
@@ -1493,13 +1452,13 @@ func buildTierParams(sys *system.System, vaultCfg system.VaultConfig, tierCfg sy
 }
 
 // addCloudParams writes cloud-store credentials + bucket info into params
-// for a cloud-backed file tier. Always records the cloud_service_id (snapshot
+// for a cloud-backed file instance. Always records the cloud_service_id (snapshot
 // onto every CmdUploadChunk via gastrolog-grnc3); no-op for the rest if the
 // referenced cloud service entry is missing — the chunk manager will start
 // without a CloudStore wired but still knows which service it would pin to.
-func addCloudParams(params map[string]string, cfg *system.Config, tierCfg system.TierConfig) {
-	params["cloud_service_id"] = tierCfg.CloudServiceID.String()
-	cs := findCloudService(cfg, *tierCfg.CloudServiceID)
+func addCloudParams(params map[string]string, cfg *system.Config, vaultCfg system.VaultConfig) {
+	params["cloud_service_id"] = vaultCfg.CloudServiceID.String()
+	cs := findCloudService(cfg, *vaultCfg.CloudServiceID)
 	if cs == nil {
 		return
 	}

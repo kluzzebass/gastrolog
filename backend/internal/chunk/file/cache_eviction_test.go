@@ -194,7 +194,7 @@ func TestEvictCache_LRUIgnoresTTL(t *testing.T) {
 	now := time.Now()
 	clock := &mutableClock{t: now}
 	// Policy=lru, no budget, very short TTL. Real world: operator picked
-	// LRU; the TTL field is left over from a previous tier config or a
+	// LRU; the TTL field is left over from a previous vault config or a
 	// confused operator. EvictCache must NOT silently apply TTL.
 	cm := newEvictionTestManager(t, "lru", 0, time.Millisecond, clock.now)
 	ids := uploadN(t, cm, 2, 100)
@@ -214,7 +214,7 @@ func TestEvictCache_LRUIgnoresTTL(t *testing.T) {
 }
 
 // TestEvictCache_TTLIgnoresBudget covers the inverse: in TTL mode, the
-// budget is irrelevant. A TTL-mode tier with a tiny budget but every
+// budget is irrelevant. A TTL-mode vault with a tiny budget but every
 // entry fresh must NOT evict anything.
 func TestEvictCache_TTLIgnoresBudget(t *testing.T) {
 	t.Parallel()

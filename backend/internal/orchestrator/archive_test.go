@@ -24,7 +24,6 @@ func TestArchiveChunkViaRetentionSweep(t *testing.T) {
 	t.Parallel()
 
 	vaultID := glid.New()
-	tierID := glid.New()
 	nodeID := "test-node"
 
 	cloudStore := blobstore.NewMemory()
@@ -42,16 +41,11 @@ func TestArchiveChunkViaRetentionSweep(t *testing.T) {
 	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "archive-test",
 	})
-	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tierID, Name: "cloud", Type: system.VaultTypeFile,
-		VaultID: vaultID, Position: 0,
-	})
-
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID, SystemLoader: &transitionSystemLoader{store: store}})
 	_ = orch.Scheduler().Stop()
 
-	tier := &VaultInstance{TierID: tierID, Type: "cloud", Chunks: cm, Indexes: im, Query: query.New(cm, im, nil)}
-	orch.RegisterVault(NewVault(vaultID, tier))
+	vaultInst := &VaultInstance{VaultID: vaultID, Type: "cloud", Chunks: cm, Indexes: im, Query: query.New(cm, im, nil)}
+	orch.RegisterVault(NewVault(vaultID, vaultInst))
 	t.Cleanup(func() { _ = cm.Close() })
 
 	// Ingest 100 records, seal, upload to cloud.

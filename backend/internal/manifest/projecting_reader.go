@@ -3,17 +3,17 @@ package manifest
 import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
-	"gastrolog/internal/vaultraft/tierfsm"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
 // NewProjectingReader returns a Reader that projects manifest entries from
 // each vault's chunk manager via List() / Meta(). Used when no FSM is
-// wired (memory-mode tiers, unit-test registries) — those tiers are their
+// wired (memory-mode vaults, unit-test registries) — those vaults are their
 // own source of truth and the local chunk manager view is authoritative.
 //
 // Sealed-only filtering is honored: ChunkMeta.Sealed=false entries are
 // excluded from EntriesForVault and Entry. RetentionPending and TS-index
-// TOC offsets are zero in the projected entries (memory-mode tiers
+// TOC offsets are zero in the projected entries (memory-mode vaults
 // don't track them).
 func NewProjectingReader(reg VaultRegistry) Reader {
 	return &projectingReader{reg: reg}
@@ -23,7 +23,7 @@ type projectingReader struct {
 	reg VaultRegistry
 }
 
-func (p *projectingReader) Entry(id chunk.ChunkID) (tierfsm.ManifestEntry, bool) {
+func (p *projectingReader) Entry(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool) {
 	for _, vaultID := range p.reg.ListVaults() {
 		cm := p.reg.ChunkManager(vaultID)
 		if cm == nil {
@@ -34,14 +34,14 @@ func (p *projectingReader) Entry(id chunk.ChunkID) (tierfsm.ManifestEntry, bool)
 			continue
 		}
 		if !meta.Sealed {
-			return tierfsm.ManifestEntry{}, false
+			return vaultctlfsm.ManifestEntry{}, false
 		}
 		return projectChunkMeta(meta), true
 	}
-	return tierfsm.ManifestEntry{}, false
+	return vaultctlfsm.ManifestEntry{}, false
 }
 
-func (p *projectingReader) EntriesForVault(vaultID glid.GLID) []tierfsm.ManifestEntry {
+func (p *projectingReader) EntriesForVault(vaultID glid.GLID) []vaultctlfsm.ManifestEntry {
 	cm := p.reg.ChunkManager(vaultID)
 	if cm == nil {
 		return nil
@@ -50,7 +50,7 @@ func (p *projectingReader) EntriesForVault(vaultID glid.GLID) []tierfsm.Manifest
 	if err != nil || len(metas) == 0 {
 		return nil
 	}
-	out := make([]tierfsm.ManifestEntry, 0, len(metas))
+	out := make([]vaultctlfsm.ManifestEntry, 0, len(metas))
 	for _, m := range metas {
 		if !m.Sealed {
 			continue
@@ -60,7 +60,7 @@ func (p *projectingReader) EntriesForVault(vaultID glid.GLID) []tierfsm.Manifest
 	return out
 }
 
-func projectChunkMeta(m chunk.ChunkMeta) tierfsm.ManifestEntry {
+func projectChunkMeta(m chunk.ChunkMeta) vaultctlfsm.ManifestEntry {
 	state := m.State
 	if state == chunk.ChunkStateUnknown {
 		// projecting_reader runs in single-node / memory-mode where the
@@ -73,7 +73,7 @@ func projectChunkMeta(m chunk.ChunkMeta) tierfsm.ManifestEntry {
 			state = chunk.ChunkStateActive
 		}
 	}
-	return tierfsm.ManifestEntry{
+	return vaultctlfsm.ManifestEntry{
 		ID:          m.ID,
 		WriteStart:  m.WriteStart,
 		WriteEnd:    m.WriteEnd,

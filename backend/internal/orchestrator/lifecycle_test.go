@@ -21,21 +21,21 @@ type slowAckReplicator struct {
 	delay time.Duration
 }
 
-func (m *slowAckReplicator) AppendRecords(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
+func (m *slowAckReplicator) AppendRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
 	time.Sleep(m.delay)
 	m.calls.Add(1)
 	return nil
 }
-func (m *slowAckReplicator) SealVault(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
+func (m *slowAckReplicator) SealVault(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
 }
-func (m *slowAckReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
+func (m *slowAckReplicator) ImportSealedChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
 	return nil
 }
-func (m *slowAckReplicator) DeleteChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
+func (m *slowAckReplicator) DeleteChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
 }
-func (m *slowAckReplicator) RequestReplicaCatchup(_ context.Context, _ string, _, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {
+func (m *slowAckReplicator) RequestReplicaCatchup(_ context.Context, _ string, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {
 	return 0, nil
 }
 
@@ -50,20 +50,19 @@ func TestStopWaitsForAckGoroutines(t *testing.T) {
 	orch.SetChunkReplicator(replicator)
 
 	// Create a vault with a follower target so ack-gated records trigger replication.
-	tierID := glid.New()
 	vaultID := glid.New()
 	cm, _ := chunkmem.NewManager(chunkmem.Config{})
 	im := indexmem.NewManager(nil, nil, nil, nil, nil)
 	qe := query.New(cm, im, nil)
-	tier := &VaultInstance{
-		TierID:          tierID,
+	vaultInst := &VaultInstance{
+		VaultID:          vaultID,
 		Type:            "memory",
 		Chunks:          cm,
 		Indexes:         im,
 		Query:           qe,
 		FollowerTargets: []system.ReplicationTarget{{NodeID: "node-2"}},
 	}
-	vault := NewVault(vaultID, tier)
+	vault := NewVault(vaultID, vaultInst)
 	vault.Name = "ack-test"
 	orch.RegisterVault(vault)
 

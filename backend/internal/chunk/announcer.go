@@ -23,7 +23,7 @@ type MetadataAnnouncer interface {
 	// (ingestStart) and IngestTSMonotonic flag in addition to the seal
 	// finalization fields. Both must reach the FSM at seal time: createdAt
 	// (which CmdCreateChunk seeded into IngestStart) is wall-clock and
-	// can lag the actual record TSs by a tier-transition delay; the
+	// can lag the actual record TSs by a retention-routing delay; the
 	// monotonic flag is the chunk manager's running observation that's
 	// not preserved in the FSM otherwise.
 	AnnounceSeal(id ChunkID, writeEnd time.Time, recordCount, bytes int64, ingestStart, ingestEnd, sourceEnd time.Time, ingestTSMonotonic bool)
@@ -38,7 +38,7 @@ type MetadataAnnouncer interface {
 	// AnnounceUpload publishes a successful cloud upload. hash is the GLCB
 	// whole-blob digest (32 bytes) read from the TOC footer; cloudServiceID
 	// is the cloud service the chunk was actually uploaded to (snapshot,
-	// survives later tier reconfiguration); keyScheme selects the
+	// survives later vault reconfiguration); keyScheme selects the
 	// blobKey() derivation function (only scheme 0 today). See gastrolog-grnc3.
 	AnnounceUpload(id ChunkID, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, hash [32]byte, cloudServiceID glid.GLID, keyScheme uint8)
 	AnnounceDelete(id ChunkID)
@@ -100,9 +100,9 @@ type SilentDeleter interface {
 // this into "steady-state skip-active" + "recovery force-demote" on the
 // theory that the leader's record-stream would swap the follower's active
 // pointer in steady state. That assumption is topology-dependent — true for
-// ingest tiers fed by continuous appends, false for downstream tiers fed
+// ingest vaults fed by continuous appends, false for downstream vaults fed
 // only by transitions. The skip-active variant left receipt-protocol delete
-// obligations bouncing off ErrActiveChunk forever on transition-fed tiers
+// obligations bouncing off ErrActiveChunk forever on retention-fed vaults
 // (gastrolog-2yeht), and SweepLocalOrphans transitively blocked because no
 // tombstone gets created when finalize never fires. The single-method
 // always-demote contract is correct for every topology.

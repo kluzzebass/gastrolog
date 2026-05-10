@@ -60,9 +60,7 @@ type SystemCommand struct {
 	//	*SystemCommand_PutCloudService
 	//	*SystemCommand_DeleteCloudService
 	//	*SystemCommand_SetNodeStorageConfig
-	//	*SystemCommand_PutTier
-	//	*SystemCommand_DeleteTier
-	//	*SystemCommand_SetTierPlacements
+	//	*SystemCommand_SetVaultPlacements
 	//	*SystemCommand_SetSetupWizardDismissed
 	//	*SystemCommand_SetIngesterAlive
 	//	*SystemCommand_SetIngesterAssignment
@@ -397,28 +395,10 @@ func (x *SystemCommand) GetSetNodeStorageConfig() *SetNodeStorageConfigCommand {
 	return nil
 }
 
-func (x *SystemCommand) GetPutTier() *PutTierCommand {
+func (x *SystemCommand) GetSetVaultPlacements() *SetVaultPlacementsCommand {
 	if x != nil {
-		if x, ok := x.Command.(*SystemCommand_PutTier); ok {
-			return x.PutTier
-		}
-	}
-	return nil
-}
-
-func (x *SystemCommand) GetDeleteTier() *DeleteTierCommand {
-	if x != nil {
-		if x, ok := x.Command.(*SystemCommand_DeleteTier); ok {
-			return x.DeleteTier
-		}
-	}
-	return nil
-}
-
-func (x *SystemCommand) GetSetTierPlacements() *SetTierPlacementsCommand {
-	if x != nil {
-		if x, ok := x.Command.(*SystemCommand_SetTierPlacements); ok {
-			return x.SetTierPlacements
+		if x, ok := x.Command.(*SystemCommand_SetVaultPlacements); ok {
+			return x.SetVaultPlacements
 		}
 	}
 	return nil
@@ -596,32 +576,24 @@ type SystemCommand_SetNodeStorageConfig struct {
 	SetNodeStorageConfig *SetNodeStorageConfigCommand `protobuf:"bytes,32,opt,name=set_node_storage_config,json=setNodeStorageConfig,proto3,oneof"`
 }
 
-type SystemCommand_PutTier struct {
-	PutTier *PutTierCommand `protobuf:"bytes,33,opt,name=put_tier,json=putTier,proto3,oneof"`
-}
-
-type SystemCommand_DeleteTier struct {
-	DeleteTier *DeleteTierCommand `protobuf:"bytes,34,opt,name=delete_tier,json=deleteTier,proto3,oneof"`
-}
-
-type SystemCommand_SetTierPlacements struct {
-	SetTierPlacements *SetTierPlacementsCommand `protobuf:"bytes,35,opt,name=set_tier_placements,json=setTierPlacements,proto3,oneof"`
+type SystemCommand_SetVaultPlacements struct {
+	SetVaultPlacements *SetVaultPlacementsCommand `protobuf:"bytes,33,opt,name=set_vault_placements,json=setVaultPlacements,proto3,oneof"`
 }
 
 type SystemCommand_SetSetupWizardDismissed struct {
-	SetSetupWizardDismissed *SetSetupWizardDismissedCommand `protobuf:"bytes,36,opt,name=set_setup_wizard_dismissed,json=setSetupWizardDismissed,proto3,oneof"`
+	SetSetupWizardDismissed *SetSetupWizardDismissedCommand `protobuf:"bytes,34,opt,name=set_setup_wizard_dismissed,json=setSetupWizardDismissed,proto3,oneof"`
 }
 
 type SystemCommand_SetIngesterAlive struct {
-	SetIngesterAlive *SetIngesterAliveCommand `protobuf:"bytes,37,opt,name=set_ingester_alive,json=setIngesterAlive,proto3,oneof"`
+	SetIngesterAlive *SetIngesterAliveCommand `protobuf:"bytes,35,opt,name=set_ingester_alive,json=setIngesterAlive,proto3,oneof"`
 }
 
 type SystemCommand_SetIngesterAssignment struct {
-	SetIngesterAssignment *SetIngesterAssignmentCommand `protobuf:"bytes,38,opt,name=set_ingester_assignment,json=setIngesterAssignment,proto3,oneof"`
+	SetIngesterAssignment *SetIngesterAssignmentCommand `protobuf:"bytes,36,opt,name=set_ingester_assignment,json=setIngesterAssignment,proto3,oneof"`
 }
 
 type SystemCommand_SetIngesterCheckpoint struct {
-	SetIngesterCheckpoint *SetIngesterCheckpointCommand `protobuf:"bytes,39,opt,name=set_ingester_checkpoint,json=setIngesterCheckpoint,proto3,oneof"`
+	SetIngesterCheckpoint *SetIngesterCheckpointCommand `protobuf:"bytes,37,opt,name=set_ingester_checkpoint,json=setIngesterCheckpoint,proto3,oneof"`
 }
 
 func (*SystemCommand_PutRotationPolicy) isSystemCommand_Command() {}
@@ -688,11 +660,7 @@ func (*SystemCommand_DeleteCloudService) isSystemCommand_Command() {}
 
 func (*SystemCommand_SetNodeStorageConfig) isSystemCommand_Command() {}
 
-func (*SystemCommand_PutTier) isSystemCommand_Command() {}
-
-func (*SystemCommand_DeleteTier) isSystemCommand_Command() {}
-
-func (*SystemCommand_SetTierPlacements) isSystemCommand_Command() {}
+func (*SystemCommand_SetVaultPlacements) isSystemCommand_Command() {}
 
 func (*SystemCommand_SetSetupWizardDismissed) isSystemCommand_Command() {}
 
@@ -2572,28 +2540,28 @@ func (x *SetNodeStorageConfigCommand) GetNodeStorage() *NodeStorageConfig {
 	return nil
 }
 
-// PutTierCommand carries the full API TierConfig from system.proto.
-type PutTierCommand struct {
+type SetVaultPlacementsCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Tier          *TierConfig            `protobuf:"bytes,1,opt,name=tier,proto3" json:"tier,omitempty"`
+	VaultId       []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
+	Placements    []*VaultPlacement      `protobuf:"bytes,2,rep,name=placements,proto3" json:"placements,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *PutTierCommand) Reset() {
-	*x = PutTierCommand{}
+func (x *SetVaultPlacementsCommand) Reset() {
+	*x = SetVaultPlacementsCommand{}
 	mi := &file_gastrolog_v1_fsm_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *PutTierCommand) String() string {
+func (x *SetVaultPlacementsCommand) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*PutTierCommand) ProtoMessage() {}
+func (*SetVaultPlacementsCommand) ProtoMessage() {}
 
-func (x *PutTierCommand) ProtoReflect() protoreflect.Message {
+func (x *SetVaultPlacementsCommand) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_fsm_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -2605,116 +2573,19 @@ func (x *PutTierCommand) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use PutTierCommand.ProtoReflect.Descriptor instead.
-func (*PutTierCommand) Descriptor() ([]byte, []int) {
+// Deprecated: Use SetVaultPlacementsCommand.ProtoReflect.Descriptor instead.
+func (*SetVaultPlacementsCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{33}
 }
 
-func (x *PutTierCommand) GetTier() *TierConfig {
+func (x *SetVaultPlacementsCommand) GetVaultId() []byte {
 	if x != nil {
-		return x.Tier
+		return x.VaultId
 	}
 	return nil
 }
 
-type DeleteTierCommand struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Drain         bool                   `protobuf:"varint,2,opt,name=drain,proto3" json:"drain,omitempty"` // When true, drain chunks to the next tier before deleting.
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *DeleteTierCommand) Reset() {
-	*x = DeleteTierCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[34]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *DeleteTierCommand) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DeleteTierCommand) ProtoMessage() {}
-
-func (x *DeleteTierCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[34]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DeleteTierCommand.ProtoReflect.Descriptor instead.
-func (*DeleteTierCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{34}
-}
-
-func (x *DeleteTierCommand) GetId() []byte {
-	if x != nil {
-		return x.Id
-	}
-	return nil
-}
-
-func (x *DeleteTierCommand) GetDrain() bool {
-	if x != nil {
-		return x.Drain
-	}
-	return false
-}
-
-type SetTierPlacementsCommand struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	TierId        []byte                 `protobuf:"bytes,1,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"`
-	Placements    []*TierPlacement       `protobuf:"bytes,2,rep,name=placements,proto3" json:"placements,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SetTierPlacementsCommand) Reset() {
-	*x = SetTierPlacementsCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[35]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SetTierPlacementsCommand) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SetTierPlacementsCommand) ProtoMessage() {}
-
-func (x *SetTierPlacementsCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[35]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SetTierPlacementsCommand.ProtoReflect.Descriptor instead.
-func (*SetTierPlacementsCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{35}
-}
-
-func (x *SetTierPlacementsCommand) GetTierId() []byte {
-	if x != nil {
-		return x.TierId
-	}
-	return nil
-}
-
-func (x *SetTierPlacementsCommand) GetPlacements() []*TierPlacement {
+func (x *SetVaultPlacementsCommand) GetPlacements() []*VaultPlacement {
 	if x != nil {
 		return x.Placements
 	}
@@ -2730,7 +2601,7 @@ type SetSetupWizardDismissedCommand struct {
 
 func (x *SetSetupWizardDismissedCommand) Reset() {
 	*x = SetSetupWizardDismissedCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[36]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2742,7 +2613,7 @@ func (x *SetSetupWizardDismissedCommand) String() string {
 func (*SetSetupWizardDismissedCommand) ProtoMessage() {}
 
 func (x *SetSetupWizardDismissedCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[36]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2755,7 +2626,7 @@ func (x *SetSetupWizardDismissedCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetSetupWizardDismissedCommand.ProtoReflect.Descriptor instead.
 func (*SetSetupWizardDismissedCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{36}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *SetSetupWizardDismissedCommand) GetDismissed() bool {
@@ -2776,7 +2647,7 @@ type SetIngesterAliveCommand struct {
 
 func (x *SetIngesterAliveCommand) Reset() {
 	*x = SetIngesterAliveCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[37]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2788,7 +2659,7 @@ func (x *SetIngesterAliveCommand) String() string {
 func (*SetIngesterAliveCommand) ProtoMessage() {}
 
 func (x *SetIngesterAliveCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[37]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2801,7 +2672,7 @@ func (x *SetIngesterAliveCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetIngesterAliveCommand.ProtoReflect.Descriptor instead.
 func (*SetIngesterAliveCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{37}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *SetIngesterAliveCommand) GetIngesterId() []byte {
@@ -2835,7 +2706,7 @@ type SetIngesterAssignmentCommand struct {
 
 func (x *SetIngesterAssignmentCommand) Reset() {
 	*x = SetIngesterAssignmentCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[38]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2847,7 +2718,7 @@ func (x *SetIngesterAssignmentCommand) String() string {
 func (*SetIngesterAssignmentCommand) ProtoMessage() {}
 
 func (x *SetIngesterAssignmentCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[38]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2860,7 +2731,7 @@ func (x *SetIngesterAssignmentCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetIngesterAssignmentCommand.ProtoReflect.Descriptor instead.
 func (*SetIngesterAssignmentCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{38}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *SetIngesterAssignmentCommand) GetIngesterId() []byte {
@@ -2887,7 +2758,7 @@ type SetIngesterCheckpointCommand struct {
 
 func (x *SetIngesterCheckpointCommand) Reset() {
 	*x = SetIngesterCheckpointCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[39]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2899,7 +2770,7 @@ func (x *SetIngesterCheckpointCommand) String() string {
 func (*SetIngesterCheckpointCommand) ProtoMessage() {}
 
 func (x *SetIngesterCheckpointCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[39]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2912,7 +2783,7 @@ func (x *SetIngesterCheckpointCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetIngesterCheckpointCommand.ProtoReflect.Descriptor instead.
 func (*SetIngesterCheckpointCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{39}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *SetIngesterCheckpointCommand) GetIngesterId() []byte {
@@ -2949,19 +2820,18 @@ type SystemSnapshot struct {
 	ManagedFiles         []*PutManagedFileCommand        `protobuf:"bytes,12,rep,name=managed_files,json=managedFiles,proto3" json:"managed_files,omitempty"`
 	CloudServices        []*PutCloudServiceCommand       `protobuf:"bytes,13,rep,name=cloud_services,json=cloudServices,proto3" json:"cloud_services,omitempty"`
 	NodeStorageConfigs   []*SetNodeStorageConfigCommand  `protobuf:"bytes,14,rep,name=node_storage_configs,json=nodeStorageConfigs,proto3" json:"node_storage_configs,omitempty"`
-	Tiers                []*PutTierCommand               `protobuf:"bytes,15,rep,name=tiers,proto3" json:"tiers,omitempty"`
-	TierPlacements       []*SetTierPlacementsCommand     `protobuf:"bytes,16,rep,name=tier_placements,json=tierPlacements,proto3" json:"tier_placements,omitempty"`
-	SetupWizardDismissed bool                            `protobuf:"varint,17,opt,name=setup_wizard_dismissed,json=setupWizardDismissed,proto3" json:"setup_wizard_dismissed,omitempty"`
-	IngesterAlive        []*SetIngesterAliveCommand      `protobuf:"bytes,18,rep,name=ingester_alive,json=ingesterAlive,proto3" json:"ingester_alive,omitempty"`
-	IngesterAssignments  []*SetIngesterAssignmentCommand `protobuf:"bytes,19,rep,name=ingester_assignments,json=ingesterAssignments,proto3" json:"ingester_assignments,omitempty"`
-	IngesterCheckpoints  []*SetIngesterCheckpointCommand `protobuf:"bytes,20,rep,name=ingester_checkpoints,json=ingesterCheckpoints,proto3" json:"ingester_checkpoints,omitempty"`
+	VaultPlacements      []*SetVaultPlacementsCommand    `protobuf:"bytes,15,rep,name=vault_placements,json=vaultPlacements,proto3" json:"vault_placements,omitempty"`
+	SetupWizardDismissed bool                            `protobuf:"varint,16,opt,name=setup_wizard_dismissed,json=setupWizardDismissed,proto3" json:"setup_wizard_dismissed,omitempty"`
+	IngesterAlive        []*SetIngesterAliveCommand      `protobuf:"bytes,17,rep,name=ingester_alive,json=ingesterAlive,proto3" json:"ingester_alive,omitempty"`
+	IngesterAssignments  []*SetIngesterAssignmentCommand `protobuf:"bytes,18,rep,name=ingester_assignments,json=ingesterAssignments,proto3" json:"ingester_assignments,omitempty"`
+	IngesterCheckpoints  []*SetIngesterCheckpointCommand `protobuf:"bytes,19,rep,name=ingester_checkpoints,json=ingesterCheckpoints,proto3" json:"ingester_checkpoints,omitempty"`
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
 }
 
 func (x *SystemSnapshot) Reset() {
 	*x = SystemSnapshot{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[40]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2973,7 +2843,7 @@ func (x *SystemSnapshot) String() string {
 func (*SystemSnapshot) ProtoMessage() {}
 
 func (x *SystemSnapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[40]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2986,7 +2856,7 @@ func (x *SystemSnapshot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SystemSnapshot.ProtoReflect.Descriptor instead.
 func (*SystemSnapshot) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{40}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *SystemSnapshot) GetRotationPolicies() []*PutRotationPolicyCommand {
@@ -3087,16 +2957,9 @@ func (x *SystemSnapshot) GetNodeStorageConfigs() []*SetNodeStorageConfigCommand 
 	return nil
 }
 
-func (x *SystemSnapshot) GetTiers() []*PutTierCommand {
+func (x *SystemSnapshot) GetVaultPlacements() []*SetVaultPlacementsCommand {
 	if x != nil {
-		return x.Tiers
-	}
-	return nil
-}
-
-func (x *SystemSnapshot) GetTierPlacements() []*SetTierPlacementsCommand {
-	if x != nil {
-		return x.TierPlacements
+		return x.VaultPlacements
 	}
 	return nil
 }
@@ -3133,7 +2996,7 @@ var File_gastrolog_v1_fsm_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\n" +
-	"\x16gastrolog/v1/fsm.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x19gastrolog/v1/system.proto\x1a\x1agastrolog/v1/storage.proto\"\xe4\x19\n" +
+	"\x16gastrolog/v1/fsm.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x19gastrolog/v1/system.proto\x1a\x1agastrolog/v1/storage.proto\"\xe8\x18\n" +
 	"\rSystemCommand\x12X\n" +
 	"\x13put_rotation_policy\x18\x01 \x01(\v2&.gastrolog.v1.PutRotationPolicyCommandH\x00R\x11putRotationPolicy\x12a\n" +
 	"\x16delete_rotation_policy\x18\x02 \x01(\v2).gastrolog.v1.DeleteRotationPolicyCommandH\x00R\x14deleteRotationPolicy\x12[\n" +
@@ -3170,15 +3033,12 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\x13delete_managed_file\x18\x1d \x01(\v2&.gastrolog.v1.DeleteManagedFileCommandH\x00R\x11deleteManagedFile\x12R\n" +
 	"\x11put_cloud_service\x18\x1e \x01(\v2$.gastrolog.v1.PutCloudServiceCommandH\x00R\x0fputCloudService\x12[\n" +
 	"\x14delete_cloud_service\x18\x1f \x01(\v2'.gastrolog.v1.DeleteCloudServiceCommandH\x00R\x12deleteCloudService\x12b\n" +
-	"\x17set_node_storage_config\x18  \x01(\v2).gastrolog.v1.SetNodeStorageConfigCommandH\x00R\x14setNodeStorageConfig\x129\n" +
-	"\bput_tier\x18! \x01(\v2\x1c.gastrolog.v1.PutTierCommandH\x00R\aputTier\x12B\n" +
-	"\vdelete_tier\x18\" \x01(\v2\x1f.gastrolog.v1.DeleteTierCommandH\x00R\n" +
-	"deleteTier\x12X\n" +
-	"\x13set_tier_placements\x18# \x01(\v2&.gastrolog.v1.SetTierPlacementsCommandH\x00R\x11setTierPlacements\x12k\n" +
-	"\x1aset_setup_wizard_dismissed\x18$ \x01(\v2,.gastrolog.v1.SetSetupWizardDismissedCommandH\x00R\x17setSetupWizardDismissed\x12U\n" +
-	"\x12set_ingester_alive\x18% \x01(\v2%.gastrolog.v1.SetIngesterAliveCommandH\x00R\x10setIngesterAlive\x12d\n" +
-	"\x17set_ingester_assignment\x18& \x01(\v2*.gastrolog.v1.SetIngesterAssignmentCommandH\x00R\x15setIngesterAssignment\x12d\n" +
-	"\x17set_ingester_checkpoint\x18' \x01(\v2*.gastrolog.v1.SetIngesterCheckpointCommandH\x00R\x15setIngesterCheckpointB\t\n" +
+	"\x17set_node_storage_config\x18  \x01(\v2).gastrolog.v1.SetNodeStorageConfigCommandH\x00R\x14setNodeStorageConfig\x12[\n" +
+	"\x14set_vault_placements\x18! \x01(\v2'.gastrolog.v1.SetVaultPlacementsCommandH\x00R\x12setVaultPlacements\x12k\n" +
+	"\x1aset_setup_wizard_dismissed\x18\" \x01(\v2,.gastrolog.v1.SetSetupWizardDismissedCommandH\x00R\x17setSetupWizardDismissed\x12U\n" +
+	"\x12set_ingester_alive\x18# \x01(\v2%.gastrolog.v1.SetIngesterAliveCommandH\x00R\x10setIngesterAlive\x12d\n" +
+	"\x17set_ingester_assignment\x18$ \x01(\v2*.gastrolog.v1.SetIngesterAssignmentCommandH\x00R\x15setIngesterAssignment\x12d\n" +
+	"\x17set_ingester_checkpoint\x18% \x01(\v2*.gastrolog.v1.SetIngesterCheckpointCommandH\x00R\x15setIngesterCheckpointB\t\n" +
 	"\acommand\"\xf0\x01\n" +
 	"\x18PutRotationPolicyCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
@@ -3326,16 +3186,11 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\x19DeleteCloudServiceCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\"a\n" +
 	"\x1bSetNodeStorageConfigCommand\x12B\n" +
-	"\fnode_storage\x18\x01 \x01(\v2\x1f.gastrolog.v1.NodeStorageConfigR\vnodeStorage\">\n" +
-	"\x0ePutTierCommand\x12,\n" +
-	"\x04tier\x18\x01 \x01(\v2\x18.gastrolog.v1.TierConfigR\x04tier\"9\n" +
-	"\x11DeleteTierCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\fR\x02id\x12\x14\n" +
-	"\x05drain\x18\x02 \x01(\bR\x05drain\"p\n" +
-	"\x18SetTierPlacementsCommand\x12\x17\n" +
-	"\atier_id\x18\x01 \x01(\fR\x06tierId\x12;\n" +
+	"\fnode_storage\x18\x01 \x01(\v2\x1f.gastrolog.v1.NodeStorageConfigR\vnodeStorage\"t\n" +
+	"\x19SetVaultPlacementsCommand\x12\x19\n" +
+	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12<\n" +
 	"\n" +
-	"placements\x18\x02 \x03(\v2\x1b.gastrolog.v1.TierPlacementR\n" +
+	"placements\x18\x02 \x03(\v2\x1c.gastrolog.v1.VaultPlacementR\n" +
 	"placements\">\n" +
 	"\x1eSetSetupWizardDismissedCommand\x12\x1c\n" +
 	"\tdismissed\x18\x01 \x01(\bR\tdismissed\"i\n" +
@@ -3351,7 +3206,7 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\x1cSetIngesterCheckpointCommand\x12\x1f\n" +
 	"\vingester_id\x18\x01 \x01(\fR\n" +
 	"ingesterId\x12\x12\n" +
-	"\x04data\x18\x02 \x01(\fR\x04data\"\x87\f\n" +
+	"\x04data\x18\x02 \x01(\fR\x04data\"\xd6\v\n" +
 	"\x0eSystemSnapshot\x12S\n" +
 	"\x11rotation_policies\x18\x01 \x03(\v2&.gastrolog.v1.PutRotationPolicyCommandR\x10rotationPolicies\x12V\n" +
 	"\x12retention_policies\x18\x02 \x03(\v2'.gastrolog.v1.PutRetentionPolicyCommandR\x11retentionPolicies\x125\n" +
@@ -3368,13 +3223,12 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\x06routes\x18\v \x03(\v2\x1d.gastrolog.v1.PutRouteCommandR\x06routes\x12H\n" +
 	"\rmanaged_files\x18\f \x03(\v2#.gastrolog.v1.PutManagedFileCommandR\fmanagedFiles\x12K\n" +
 	"\x0ecloud_services\x18\r \x03(\v2$.gastrolog.v1.PutCloudServiceCommandR\rcloudServices\x12[\n" +
-	"\x14node_storage_configs\x18\x0e \x03(\v2).gastrolog.v1.SetNodeStorageConfigCommandR\x12nodeStorageConfigs\x122\n" +
-	"\x05tiers\x18\x0f \x03(\v2\x1c.gastrolog.v1.PutTierCommandR\x05tiers\x12O\n" +
-	"\x0ftier_placements\x18\x10 \x03(\v2&.gastrolog.v1.SetTierPlacementsCommandR\x0etierPlacements\x124\n" +
-	"\x16setup_wizard_dismissed\x18\x11 \x01(\bR\x14setupWizardDismissed\x12L\n" +
-	"\x0eingester_alive\x18\x12 \x03(\v2%.gastrolog.v1.SetIngesterAliveCommandR\ringesterAlive\x12]\n" +
-	"\x14ingester_assignments\x18\x13 \x03(\v2*.gastrolog.v1.SetIngesterAssignmentCommandR\x13ingesterAssignments\x12]\n" +
-	"\x14ingester_checkpoints\x18\x14 \x03(\v2*.gastrolog.v1.SetIngesterCheckpointCommandR\x13ingesterCheckpoints\x1a;\n" +
+	"\x14node_storage_configs\x18\x0e \x03(\v2).gastrolog.v1.SetNodeStorageConfigCommandR\x12nodeStorageConfigs\x12R\n" +
+	"\x10vault_placements\x18\x0f \x03(\v2'.gastrolog.v1.SetVaultPlacementsCommandR\x0fvaultPlacements\x124\n" +
+	"\x16setup_wizard_dismissed\x18\x10 \x01(\bR\x14setupWizardDismissed\x12L\n" +
+	"\x0eingester_alive\x18\x11 \x03(\v2%.gastrolog.v1.SetIngesterAliveCommandR\ringesterAlive\x12]\n" +
+	"\x14ingester_assignments\x18\x12 \x03(\v2*.gastrolog.v1.SetIngesterAssignmentCommandR\x13ingesterAssignments\x12]\n" +
+	"\x14ingester_checkpoints\x18\x13 \x03(\v2*.gastrolog.v1.SetIngesterCheckpointCommandR\x13ingesterCheckpoints\x1a;\n" +
 	"\rSettingsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
@@ -3391,7 +3245,7 @@ func file_gastrolog_v1_fsm_proto_rawDescGZIP() []byte {
 	return file_gastrolog_v1_fsm_proto_rawDescData
 }
 
-var file_gastrolog_v1_fsm_proto_msgTypes = make([]protoimpl.MessageInfo, 43)
+var file_gastrolog_v1_fsm_proto_msgTypes = make([]protoimpl.MessageInfo, 41)
 var file_gastrolog_v1_fsm_proto_goTypes = []any{
 	(*SystemCommand)(nil),                  // 0: gastrolog.v1.SystemCommand
 	(*PutRotationPolicyCommand)(nil),       // 1: gastrolog.v1.PutRotationPolicyCommand
@@ -3426,23 +3280,20 @@ var file_gastrolog_v1_fsm_proto_goTypes = []any{
 	(*PutCloudServiceCommand)(nil),         // 30: gastrolog.v1.PutCloudServiceCommand
 	(*DeleteCloudServiceCommand)(nil),      // 31: gastrolog.v1.DeleteCloudServiceCommand
 	(*SetNodeStorageConfigCommand)(nil),    // 32: gastrolog.v1.SetNodeStorageConfigCommand
-	(*PutTierCommand)(nil),                 // 33: gastrolog.v1.PutTierCommand
-	(*DeleteTierCommand)(nil),              // 34: gastrolog.v1.DeleteTierCommand
-	(*SetTierPlacementsCommand)(nil),       // 35: gastrolog.v1.SetTierPlacementsCommand
-	(*SetSetupWizardDismissedCommand)(nil), // 36: gastrolog.v1.SetSetupWizardDismissedCommand
-	(*SetIngesterAliveCommand)(nil),        // 37: gastrolog.v1.SetIngesterAliveCommand
-	(*SetIngesterAssignmentCommand)(nil),   // 38: gastrolog.v1.SetIngesterAssignmentCommand
-	(*SetIngesterCheckpointCommand)(nil),   // 39: gastrolog.v1.SetIngesterCheckpointCommand
-	(*SystemSnapshot)(nil),                 // 40: gastrolog.v1.SystemSnapshot
-	nil,                                    // 41: gastrolog.v1.PutIngesterCommand.ParamsEntry
-	nil,                                    // 42: gastrolog.v1.SystemSnapshot.SettingsEntry
-	(*VaultConfig)(nil),                    // 43: gastrolog.v1.VaultConfig
-	(*timestamppb.Timestamp)(nil),          // 44: google.protobuf.Timestamp
-	(*RouteStage)(nil),                     // 45: gastrolog.v1.RouteStage
-	(*CloudService)(nil),                   // 46: gastrolog.v1.CloudService
-	(*NodeStorageConfig)(nil),              // 47: gastrolog.v1.NodeStorageConfig
-	(*TierConfig)(nil),                     // 48: gastrolog.v1.TierConfig
-	(*TierPlacement)(nil),                  // 49: gastrolog.v1.TierPlacement
+	(*SetVaultPlacementsCommand)(nil),      // 33: gastrolog.v1.SetVaultPlacementsCommand
+	(*SetSetupWizardDismissedCommand)(nil), // 34: gastrolog.v1.SetSetupWizardDismissedCommand
+	(*SetIngesterAliveCommand)(nil),        // 35: gastrolog.v1.SetIngesterAliveCommand
+	(*SetIngesterAssignmentCommand)(nil),   // 36: gastrolog.v1.SetIngesterAssignmentCommand
+	(*SetIngesterCheckpointCommand)(nil),   // 37: gastrolog.v1.SetIngesterCheckpointCommand
+	(*SystemSnapshot)(nil),                 // 38: gastrolog.v1.SystemSnapshot
+	nil,                                    // 39: gastrolog.v1.PutIngesterCommand.ParamsEntry
+	nil,                                    // 40: gastrolog.v1.SystemSnapshot.SettingsEntry
+	(*VaultConfig)(nil),                    // 41: gastrolog.v1.VaultConfig
+	(*timestamppb.Timestamp)(nil),          // 42: google.protobuf.Timestamp
+	(*RouteStage)(nil),                     // 43: gastrolog.v1.RouteStage
+	(*CloudService)(nil),                   // 44: gastrolog.v1.CloudService
+	(*NodeStorageConfig)(nil),              // 45: gastrolog.v1.NodeStorageConfig
+	(*VaultPlacement)(nil),                 // 46: gastrolog.v1.VaultPlacement
 }
 var file_gastrolog_v1_fsm_proto_depIdxs = []int32{
 	1,  // 0: gastrolog.v1.SystemCommand.put_rotation_policy:type_name -> gastrolog.v1.PutRotationPolicyCommand
@@ -3477,50 +3328,46 @@ var file_gastrolog_v1_fsm_proto_depIdxs = []int32{
 	30, // 29: gastrolog.v1.SystemCommand.put_cloud_service:type_name -> gastrolog.v1.PutCloudServiceCommand
 	31, // 30: gastrolog.v1.SystemCommand.delete_cloud_service:type_name -> gastrolog.v1.DeleteCloudServiceCommand
 	32, // 31: gastrolog.v1.SystemCommand.set_node_storage_config:type_name -> gastrolog.v1.SetNodeStorageConfigCommand
-	33, // 32: gastrolog.v1.SystemCommand.put_tier:type_name -> gastrolog.v1.PutTierCommand
-	34, // 33: gastrolog.v1.SystemCommand.delete_tier:type_name -> gastrolog.v1.DeleteTierCommand
-	35, // 34: gastrolog.v1.SystemCommand.set_tier_placements:type_name -> gastrolog.v1.SetTierPlacementsCommand
-	36, // 35: gastrolog.v1.SystemCommand.set_setup_wizard_dismissed:type_name -> gastrolog.v1.SetSetupWizardDismissedCommand
-	37, // 36: gastrolog.v1.SystemCommand.set_ingester_alive:type_name -> gastrolog.v1.SetIngesterAliveCommand
-	38, // 37: gastrolog.v1.SystemCommand.set_ingester_assignment:type_name -> gastrolog.v1.SetIngesterAssignmentCommand
-	39, // 38: gastrolog.v1.SystemCommand.set_ingester_checkpoint:type_name -> gastrolog.v1.SetIngesterCheckpointCommand
-	43, // 39: gastrolog.v1.PutVaultCommand.vault:type_name -> gastrolog.v1.VaultConfig
-	41, // 40: gastrolog.v1.PutIngesterCommand.params:type_name -> gastrolog.v1.PutIngesterCommand.ParamsEntry
-	44, // 41: gastrolog.v1.CreateUserCommand.token_invalidated_at:type_name -> google.protobuf.Timestamp
-	44, // 42: gastrolog.v1.CreateUserCommand.created_at:type_name -> google.protobuf.Timestamp
-	44, // 43: gastrolog.v1.CreateUserCommand.updated_at:type_name -> google.protobuf.Timestamp
-	44, // 44: gastrolog.v1.InvalidateTokensCommand.at:type_name -> google.protobuf.Timestamp
-	44, // 45: gastrolog.v1.CreateRefreshTokenCommand.expires_at:type_name -> google.protobuf.Timestamp
-	44, // 46: gastrolog.v1.CreateRefreshTokenCommand.created_at:type_name -> google.protobuf.Timestamp
-	45, // 47: gastrolog.v1.PutRouteCommand.stages:type_name -> gastrolog.v1.RouteStage
-	46, // 48: gastrolog.v1.PutCloudServiceCommand.cloud_service:type_name -> gastrolog.v1.CloudService
-	47, // 49: gastrolog.v1.SetNodeStorageConfigCommand.node_storage:type_name -> gastrolog.v1.NodeStorageConfig
-	48, // 50: gastrolog.v1.PutTierCommand.tier:type_name -> gastrolog.v1.TierConfig
-	49, // 51: gastrolog.v1.SetTierPlacementsCommand.placements:type_name -> gastrolog.v1.TierPlacement
-	1,  // 52: gastrolog.v1.SystemSnapshot.rotation_policies:type_name -> gastrolog.v1.PutRotationPolicyCommand
-	3,  // 53: gastrolog.v1.SystemSnapshot.retention_policies:type_name -> gastrolog.v1.PutRetentionPolicyCommand
-	5,  // 54: gastrolog.v1.SystemSnapshot.vaults:type_name -> gastrolog.v1.PutVaultCommand
-	7,  // 55: gastrolog.v1.SystemSnapshot.ingesters:type_name -> gastrolog.v1.PutIngesterCommand
-	42, // 56: gastrolog.v1.SystemSnapshot.settings:type_name -> gastrolog.v1.SystemSnapshot.SettingsEntry
-	11, // 57: gastrolog.v1.SystemSnapshot.certificates:type_name -> gastrolog.v1.PutCertificateCommand
-	13, // 58: gastrolog.v1.SystemSnapshot.users:type_name -> gastrolog.v1.CreateUserCommand
-	20, // 59: gastrolog.v1.SystemSnapshot.refresh_tokens:type_name -> gastrolog.v1.CreateRefreshTokenCommand
-	23, // 60: gastrolog.v1.SystemSnapshot.node_configs:type_name -> gastrolog.v1.PutNodeConfigCommand
-	25, // 61: gastrolog.v1.SystemSnapshot.cluster_tls:type_name -> gastrolog.v1.PutClusterTLSCommand
-	26, // 62: gastrolog.v1.SystemSnapshot.routes:type_name -> gastrolog.v1.PutRouteCommand
-	28, // 63: gastrolog.v1.SystemSnapshot.managed_files:type_name -> gastrolog.v1.PutManagedFileCommand
-	30, // 64: gastrolog.v1.SystemSnapshot.cloud_services:type_name -> gastrolog.v1.PutCloudServiceCommand
-	32, // 65: gastrolog.v1.SystemSnapshot.node_storage_configs:type_name -> gastrolog.v1.SetNodeStorageConfigCommand
-	33, // 66: gastrolog.v1.SystemSnapshot.tiers:type_name -> gastrolog.v1.PutTierCommand
-	35, // 67: gastrolog.v1.SystemSnapshot.tier_placements:type_name -> gastrolog.v1.SetTierPlacementsCommand
-	37, // 68: gastrolog.v1.SystemSnapshot.ingester_alive:type_name -> gastrolog.v1.SetIngesterAliveCommand
-	38, // 69: gastrolog.v1.SystemSnapshot.ingester_assignments:type_name -> gastrolog.v1.SetIngesterAssignmentCommand
-	39, // 70: gastrolog.v1.SystemSnapshot.ingester_checkpoints:type_name -> gastrolog.v1.SetIngesterCheckpointCommand
-	71, // [71:71] is the sub-list for method output_type
-	71, // [71:71] is the sub-list for method input_type
-	71, // [71:71] is the sub-list for extension type_name
-	71, // [71:71] is the sub-list for extension extendee
-	0,  // [0:71] is the sub-list for field type_name
+	33, // 32: gastrolog.v1.SystemCommand.set_vault_placements:type_name -> gastrolog.v1.SetVaultPlacementsCommand
+	34, // 33: gastrolog.v1.SystemCommand.set_setup_wizard_dismissed:type_name -> gastrolog.v1.SetSetupWizardDismissedCommand
+	35, // 34: gastrolog.v1.SystemCommand.set_ingester_alive:type_name -> gastrolog.v1.SetIngesterAliveCommand
+	36, // 35: gastrolog.v1.SystemCommand.set_ingester_assignment:type_name -> gastrolog.v1.SetIngesterAssignmentCommand
+	37, // 36: gastrolog.v1.SystemCommand.set_ingester_checkpoint:type_name -> gastrolog.v1.SetIngesterCheckpointCommand
+	41, // 37: gastrolog.v1.PutVaultCommand.vault:type_name -> gastrolog.v1.VaultConfig
+	39, // 38: gastrolog.v1.PutIngesterCommand.params:type_name -> gastrolog.v1.PutIngesterCommand.ParamsEntry
+	42, // 39: gastrolog.v1.CreateUserCommand.token_invalidated_at:type_name -> google.protobuf.Timestamp
+	42, // 40: gastrolog.v1.CreateUserCommand.created_at:type_name -> google.protobuf.Timestamp
+	42, // 41: gastrolog.v1.CreateUserCommand.updated_at:type_name -> google.protobuf.Timestamp
+	42, // 42: gastrolog.v1.InvalidateTokensCommand.at:type_name -> google.protobuf.Timestamp
+	42, // 43: gastrolog.v1.CreateRefreshTokenCommand.expires_at:type_name -> google.protobuf.Timestamp
+	42, // 44: gastrolog.v1.CreateRefreshTokenCommand.created_at:type_name -> google.protobuf.Timestamp
+	43, // 45: gastrolog.v1.PutRouteCommand.stages:type_name -> gastrolog.v1.RouteStage
+	44, // 46: gastrolog.v1.PutCloudServiceCommand.cloud_service:type_name -> gastrolog.v1.CloudService
+	45, // 47: gastrolog.v1.SetNodeStorageConfigCommand.node_storage:type_name -> gastrolog.v1.NodeStorageConfig
+	46, // 48: gastrolog.v1.SetVaultPlacementsCommand.placements:type_name -> gastrolog.v1.VaultPlacement
+	1,  // 49: gastrolog.v1.SystemSnapshot.rotation_policies:type_name -> gastrolog.v1.PutRotationPolicyCommand
+	3,  // 50: gastrolog.v1.SystemSnapshot.retention_policies:type_name -> gastrolog.v1.PutRetentionPolicyCommand
+	5,  // 51: gastrolog.v1.SystemSnapshot.vaults:type_name -> gastrolog.v1.PutVaultCommand
+	7,  // 52: gastrolog.v1.SystemSnapshot.ingesters:type_name -> gastrolog.v1.PutIngesterCommand
+	40, // 53: gastrolog.v1.SystemSnapshot.settings:type_name -> gastrolog.v1.SystemSnapshot.SettingsEntry
+	11, // 54: gastrolog.v1.SystemSnapshot.certificates:type_name -> gastrolog.v1.PutCertificateCommand
+	13, // 55: gastrolog.v1.SystemSnapshot.users:type_name -> gastrolog.v1.CreateUserCommand
+	20, // 56: gastrolog.v1.SystemSnapshot.refresh_tokens:type_name -> gastrolog.v1.CreateRefreshTokenCommand
+	23, // 57: gastrolog.v1.SystemSnapshot.node_configs:type_name -> gastrolog.v1.PutNodeConfigCommand
+	25, // 58: gastrolog.v1.SystemSnapshot.cluster_tls:type_name -> gastrolog.v1.PutClusterTLSCommand
+	26, // 59: gastrolog.v1.SystemSnapshot.routes:type_name -> gastrolog.v1.PutRouteCommand
+	28, // 60: gastrolog.v1.SystemSnapshot.managed_files:type_name -> gastrolog.v1.PutManagedFileCommand
+	30, // 61: gastrolog.v1.SystemSnapshot.cloud_services:type_name -> gastrolog.v1.PutCloudServiceCommand
+	32, // 62: gastrolog.v1.SystemSnapshot.node_storage_configs:type_name -> gastrolog.v1.SetNodeStorageConfigCommand
+	33, // 63: gastrolog.v1.SystemSnapshot.vault_placements:type_name -> gastrolog.v1.SetVaultPlacementsCommand
+	35, // 64: gastrolog.v1.SystemSnapshot.ingester_alive:type_name -> gastrolog.v1.SetIngesterAliveCommand
+	36, // 65: gastrolog.v1.SystemSnapshot.ingester_assignments:type_name -> gastrolog.v1.SetIngesterAssignmentCommand
+	37, // 66: gastrolog.v1.SystemSnapshot.ingester_checkpoints:type_name -> gastrolog.v1.SetIngesterCheckpointCommand
+	67, // [67:67] is the sub-list for method output_type
+	67, // [67:67] is the sub-list for method input_type
+	67, // [67:67] is the sub-list for extension type_name
+	67, // [67:67] is the sub-list for extension extendee
+	0,  // [0:67] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_fsm_proto_init() }
@@ -3563,9 +3410,7 @@ func file_gastrolog_v1_fsm_proto_init() {
 		(*SystemCommand_PutCloudService)(nil),
 		(*SystemCommand_DeleteCloudService)(nil),
 		(*SystemCommand_SetNodeStorageConfig)(nil),
-		(*SystemCommand_PutTier)(nil),
-		(*SystemCommand_DeleteTier)(nil),
-		(*SystemCommand_SetTierPlacements)(nil),
+		(*SystemCommand_SetVaultPlacements)(nil),
 		(*SystemCommand_SetSetupWizardDismissed)(nil),
 		(*SystemCommand_SetIngesterAlive)(nil),
 		(*SystemCommand_SetIngesterAssignment)(nil),
@@ -3580,7 +3425,7 @@ func file_gastrolog_v1_fsm_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_fsm_proto_rawDesc), len(file_gastrolog_v1_fsm_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   43,
+			NumMessages:   41,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

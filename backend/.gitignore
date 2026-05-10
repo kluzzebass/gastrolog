@@ -8,3 +8,9 @@ jsonl/
 /gastrolog-*
 /multirun
 storage/
+
+# Chunk-file-manager output. The default relative dir is "vaults/<id>/<id>",
+# so a test that runs ApplyConfig with empty FileStorage.Path drops these
+# under whichever package directory the test lives in. Never check in.
+internal/**/vaults/
+

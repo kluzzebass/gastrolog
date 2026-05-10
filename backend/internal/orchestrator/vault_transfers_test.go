@@ -140,7 +140,7 @@ func seedAndSeal(t *testing.T, orch *orchestrator.Orchestrator, vaultID glid.GLI
 			t.Fatalf("append: %v", err)
 		}
 	}
-	if _, err := orch.SealActive(vaultID, glid.Nil); err != nil {
+	if _, err := orch.SealActive(vaultID); err != nil {
 		t.Fatalf("seal: %v", err)
 	}
 	metas, err := orch.ListChunkMetas(vaultID)
@@ -156,7 +156,7 @@ func seedAndSeal(t *testing.T, orch *orchestrator.Orchestrator, vaultID glid.GLI
 // TestMoveChunkRemote, TestMoveChunkRemoteMemoryVault, and
 // TestMoveChunkRemoteTransferError were removed: they tested the concept of
 // NodeID-based remote vault assignment which no longer exists. Remote vault
-// transfer will be reintroduced via tier leader election in a future issue.
+// transfer will be reintroduced via vault leader election in a future issue.
 
 func TestMoveChunkRemoteNoTransferrer(t *testing.T) {
 	t.Parallel()
@@ -696,6 +696,3 @@ func TestDrainVault_NoTransferrer(t *testing.T) {
 	}
 }
 
-func (m *mockTransferrer) StreamToTier(_ context.Context, _ string, _, _ glid.GLID, _ chunk.RecordIterator) error {
-	return nil
-}

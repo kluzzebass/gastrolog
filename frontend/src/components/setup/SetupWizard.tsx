@@ -145,9 +145,6 @@ export function SetupWizard() {
     const rotationIdBytes = hasRotation ? crypto.getRandomValues(new Uint8Array(16)) : new Uint8Array(16);
     const retentionIdBytes = hasRetention ? crypto.getRandomValues(new Uint8Array(16)) : new Uint8Array(16);
 
-    // Phase 2 (gastrolog-3iy5l): the vault carries its own storage shape
-    // and policy bindings — no separate TierConfig write. The FSM
-    // auto-syncs the matching tier on PutVault.
 
     // Build policy promises outside try so the compiler can optimize conditionals.
     const policyPromises: Promise<unknown>[] = [];

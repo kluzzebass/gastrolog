@@ -7,14 +7,14 @@ import (
 )
 
 func FuzzProtoToVaultConfig(f *testing.F) {
-	// Seed corpus: (id, name, enabled, tierID)
+	// Seed corpus: (id, name, enabled, vaultID)
 	f.Add("01961234-5678-7abc-8def-0123456789ab", "my-vault", true, "")
 	f.Add("01961234-5678-7abc-8def-0123456789ab", "my-vault", true, "01961234-5678-7abc-8def-ffffffffffff")
 	f.Add("not-a-uuid", "vault", false, "")
 	f.Add("01961234-5678-7abc-8def-0123456789ab", "vault", true, "bad-uuid")
 	f.Add("", "", false, "")
 
-	f.Fuzz(func(t *testing.T, id, name string, enabled bool, tierID string) {
+	f.Fuzz(func(t *testing.T, id, name string, enabled bool, vaultID string) {
 		pb := &apiv1.VaultConfig{
 			Id:      []byte(id),
 			Name:    name,

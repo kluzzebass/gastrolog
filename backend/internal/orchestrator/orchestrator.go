@@ -103,17 +103,17 @@ type RecordForwarder interface {
 	RedirectNode(fromNodeID, toNodeID string)
 }
 
-// ChunkReplicator sequences all replication commands for a tier on a single
+// ChunkReplicator sequences all replication commands for an instance on a single
 // ordered stream per follower. Nil in single-node mode.
 //
-// Caller role: always invoked on the tier **leader** node. Each method sends
+// Caller role: always invoked on the instance **leader** node. Each method sends
 // a command to a follower (`nodeID`) that applies it locally. Callers must
-// verify they hold leadership for (`vaultID`, `tierID`) before invoking —
+// verify they hold leadership for (`vaultID`, `vaultID`) before invoking —
 // the replicator itself does not re-check.
 //
-// Validation: methods assume the (`vaultID`, `tierID`) pair is consistent
-// (tier belongs to vault). The receiver on the remote node rejects mismatches
-// via tier lookup; callers should not rely on the replicator to catch
+// Validation: methods assume the (`vaultID`, `vaultID`) pair is consistent
+// (instance belongs to vault). The receiver on the remote node rejects mismatches
+// via instance lookup; callers should not rely on the replicator to catch
 // programmer errors.
 //
 // Readiness: the leader's own Vault.ReadinessErr gate fires upstream of
@@ -122,10 +122,10 @@ type RecordForwarder interface {
 // its own concern; transient follower-not-ready errors are retried by
 // higher-level catchup scheduling (see ScheduleCatchup).
 type ChunkReplicator interface {
-	AppendRecords(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error
-	SealVault(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error
-	ImportSealedChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error
-	DeleteChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error
+	AppendRecords(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error
+	SealVault(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID) error
+	ImportSealedChunk(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error
+	DeleteChunk(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID) error
 
 	// RequestReplicaCatchup is the follower→leader inverse of the other
 	// methods on this interface. Sent by a follower's lifecycle reconciler
@@ -133,7 +133,7 @@ type ChunkReplicator interface {
 	// local disk; the placement leader fans pushes out asynchronously via
 	// existing replicateToFollower machinery. Returns the count of
 	// pushes scheduled (after leader-side filtering). See gastrolog-2dgvj.
-	RequestReplicaCatchup(ctx context.Context, leaderNodeID string, vaultID, tierID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error)
+	RequestReplicaCatchup(ctx context.Context, leaderNodeID string, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error)
 }
 
 // RemoteTransferrer sends records to a remote node for cross-node chunk
@@ -152,11 +152,6 @@ type RemoteTransferrer interface {
 	// Used by retention eject where records should flow through the
 	// destination's normal rotation lifecycle.
 	ForwardAppend(ctx context.Context, nodeID string, vaultID glid.GLID, records []chunk.Record) error
-
-	// StreamToTier opens a single streaming connection and pipes all records
-	// to a remote tier's active chunk. Used for tier transitions — one stream,
-	// no per-batch round trips.
-	StreamToTier(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, next chunk.RecordIterator) error
 
 	// WaitVaultReady blocks until the vault is registered and accepting
 	// records on the given node, or ctx expires. Used by DrainVault to
@@ -226,7 +221,7 @@ type Orchestrator struct {
 	// Remote transferrer for cross-node chunk migration (nil in single-node mode).
 	transferrer RemoteTransferrer
 
-	// Tier replicator: ordered stream per tier per follower (nil in single-node mode).
+	// Vault replicator: ordered stream per instance per follower (nil in single-node mode).
 	chunkReplicator ChunkReplicator
 
 	// replicaCircuit tracks per-node backoff for follower replication.
@@ -256,21 +251,16 @@ type Orchestrator struct {
 	ackWg        sync.WaitGroup // tracks in-flight ack-gated replication goroutines
 	auxWg        sync.WaitGroup // tracks auxiliary goroutines (watchdog, etc.)
 
-	// Per-tier import mutex for serializing SetNextChunkID + ImportRecords.
-	importMu sync.Map // tierID → *sync.Mutex
+	// Per-instance import mutex for serializing SetNextChunkID + ImportRecords.
+	importMu sync.Map // vaultID → *sync.Mutex
 
 	// Draining vaults (keyed by vault ID, tracks in-progress migrations).
 	draining map[glid.GLID]*drainState
 
-	// Draining tiers (keyed by "vaultID:tierID", tracks in-progress tier drains).
-	tierDraining map[string]*tierDrainState
+	// In-progress instance drains, keyed by vault ID.
+	vaultDraining map[string]*vaultDrainState
 
-	// OnTierDrainComplete is called after a tier drain finishes. The dispatch
-	// layer uses this to remove the tier from vault tier lists in the config
-	// store (which fires a subsequent vault-put notification to rebuild).
-	OnTierDrainComplete func(ctx context.Context, vaultID, tierID glid.GLID)
-
-	// Retention runners (keyed by tierID:storageID, invoked by the shared scheduler).
+	// Retention runners (keyed by vaultID:storageID, invoked by the shared scheduler).
 	retention map[string]*retentionRunner
 
 	// Shared scheduler for all periodic tasks (cron rotation, retention, etc.).
@@ -279,7 +269,7 @@ type Orchestrator struct {
 	// Cron rotation lifecycle.
 	cronRotation *cronRotationManager
 
-	// Per-tier rate alerters that surface pathological rotation or
+	// Per-instance rate alerters that surface pathological rotation or
 	// retention configurations as operator-visible alerts. See
 	// gastrolog-47qyw. Both are initialized in New() and evaluated by
 	// a periodic goroutine in Start().
@@ -323,10 +313,10 @@ type Orchestrator struct {
 	// Suspect tracker for cloud chunks that returned 404.
 	suspects *suspectTracker
 
-	// Per-vault leader loop for vault control-plane Raft (replicated tier
+	// Per-vault leader loop for vault control-plane Raft (replicated instance
 	// chunk metadata when multiraft is enabled). Membership reconciliation
 	// runs on the vault ctl Raft leader inside its leader epoch.
-	vaultCtlLeaders *tierLeaderManager
+	vaultCtlLeaders *vaultCtlLeaderManager
 
 	// Shutdown phase (nil in tests / single-node setups without a
 	// Phase wired). When non-nil, hot-path replication helpers like
@@ -391,11 +381,11 @@ func (o *Orchestrator) NotifyChunkChange() {
 	o.progressTrigger.Signal()
 }
 
-// tierLabel returns the operator-friendly name for a tier as configured,
-// or "" if the tier or config is unknown. Used by RateAlerter to build
-// alert messages that say "tier ssd-hot" instead of just a UUID. Safe to
+// vaultLabel returns the operator-friendly name for an instance as configured,
+// or "" if the instance or config is unknown. Used by RateAlerter to build
+// alert messages that say "instance ssd-hot" instead of just a UUID. Safe to
 // call from any goroutine — it acquires the orchestrator read lock.
-func (o *Orchestrator) tierLabel(tierID glid.GLID) string {
+func (o *Orchestrator) vaultLabel(vaultID glid.GLID) string {
 	if o.sysLoader == nil {
 		return ""
 	}
@@ -403,8 +393,10 @@ func (o *Orchestrator) tierLabel(tierID glid.GLID) string {
 	if err != nil || sys == nil {
 		return ""
 	}
-	if tierCfg := findTierConfig(sys.Config.Tiers, tierID); tierCfg != nil {
-		return tierCfg.Name
+	for _, v := range sys.Config.Vaults {
+		if v.ID == vaultID {
+			return v.Name
+		}
 	}
 	return ""
 }
@@ -498,7 +490,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		ingesterStats:        make(map[glid.GLID]*IngesterStats),
 		ingesterMeta:         make(map[glid.GLID]ingesterInfo),
 		draining:             make(map[glid.GLID]*drainState),
-		tierDraining:         make(map[string]*tierDrainState),
+		vaultDraining:         make(map[string]*vaultDrainState),
 		retention:            make(map[string]*retentionRunner),
 		scheduler:            sched,
 		cronRotation:         newCronRotationManager(sched, logger),
@@ -524,18 +516,18 @@ func New(cfg Config) (*Orchestrator, error) {
 	o.cronRotation.onSeal = o.postSealWork
 
 	// gastrolog-51gme step 10: when the vault-ctl Raft leader removes a
-	// node from the voter set, propose CmdPruneNode on every tier
+	// node from the voter set, propose CmdPruneNode on every instance
 	// sub-FSM in that vault so pendingDeletes ExpectedFrom obligations
 	// from the decommissioned node don't block finalization. The
 	// reconciler's onPruneNode handler will then propose
 	// CmdFinalizeDelete for any chunk whose ExpectedFrom became empty.
 	o.vaultCtlLeaders.SetOnMemberRemoved(o.proposePruneNodeForVault)
 
-	// Per-tier rate alerters. Thresholds are taken from gastrolog-47qyw:
+	// Per-instance rate alerters. Thresholds are taken from gastrolog-47qyw:
 	//   rotation: warn at >1/sec, error at >5/sec, sustained over 30s
 	//   retention: warn at >10/sec sustained over 30s
-	// The orchestrator's tierName closure looks up the human label from
-	// the current vault registry; "" is returned if the tier is unknown.
+	// The orchestrator's vaultName closure looks up the human label from
+	// the current vault registry; "" is returned if the instance is unknown.
 	o.rotationRates = newRateAlerter(rateAlerterConfig{
 		Window:    30 * time.Second,
 		Kind:      "rotation",
@@ -543,7 +535,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		WarningAt: 1.0,
 		ErrorAt:   5.0,
 		Alerts:    o.alerts,
-		TierName:  o.tierLabel,
+		VaultName:  o.vaultLabel,
 	})
 	o.retentionRates = newRateAlerter(rateAlerterConfig{
 		Window:    30 * time.Second,
@@ -552,19 +544,19 @@ func New(cfg Config) (*Orchestrator, error) {
 		WarningAt: 10.0,
 		ErrorAt:   0, // no error escalation per issue scope
 		Alerts:    o.alerts,
-		TierName:  o.tierLabel,
+		VaultName:  o.vaultLabel,
 	})
 
 	// Cron rotation completes its work outside the post-seal pipeline,
 	// so the rotation rate counter must be hooked from the cron manager
 	// directly. The age-based rotationsweep path increments the counter
 	// inline at its seal-trigger site.
-	o.cronRotation.onRotation = func(_, tierID glid.GLID) {
-		o.rotationRates.Record(tierID, o.now())
+	o.cronRotation.onRotation = func(vaultID glid.GLID) {
+		o.rotationRates.Record(vaultID, o.now())
 	}
 
-	// Register the single retention sweep that discovers all tier instances
-	// each tick. No per-tier lifecycle management needed.
+	// Register the single retention sweep that discovers all vault instances
+	// each tick. No per-vault lifecycle management needed.
 	if err := o.startRetentionSweep(); err != nil {
 		return nil, fmt.Errorf("retention sweep: %w", err)
 	}
@@ -577,17 +569,17 @@ func New(cfg Config) (*Orchestrator, error) {
 		return nil, fmt.Errorf("reconcile sweep: %w", err)
 	}
 
-	// Tier catchup sweep: every node consults its OWN replicated FSM
+	// Vault catchup sweep: every node consults its OWN replicated FSM
 	// every 20s and runs three independent reconciliation passes per
-	// tier (pending obligations, local orphans, missing replicas).
+	// instance (pending obligations, local orphans, missing replicas).
 	// Phase-offset from retention's :00 tick to avoid spikiness. See
 	// gastrolog-51gme (delete-side) and gastrolog-2dgvj (create-side).
-	if err := o.startTierCatchupSweep(); err != nil {
-		return nil, fmt.Errorf("tier catchup sweep: %w", err)
+	if err := o.startInstanceCatchupSweep(); err != nil {
+		return nil, fmt.Errorf("vault catchup sweep: %w", err)
 	}
 
 	// Warm-cache eviction sweep: every minute (second 23, phase-offset
-	// from the other sweeps) walk every leader tier and apply whatever
+	// from the other sweeps) walk every leader instance and apply whatever
 	// LRU + TTL policies its chunk manager was configured with. No-op for
 	// managers without an eviction policy. See gastrolog-2idw8.
 	if err := o.startCacheEvictionSweep(); err != nil {
@@ -609,7 +601,7 @@ func (o *Orchestrator) SetRemoteTransferrer(t RemoteTransferrer) {
 	o.transferrer = t
 }
 
-// SetChunkReplicator injects the ordered tier replication client.
+// SetChunkReplicator injects the ordered instance replication client.
 func (o *Orchestrator) SetChunkReplicator(tr ChunkReplicator) {
 	o.chunkReplicator = tr
 }

@@ -148,7 +148,6 @@ func (s *SystemServer) buildFullSystem(ctx context.Context) (*apiv1.GetSystemRes
 			s.loadConfigNodeConfigs(ctx, resp),
 			s.loadConfigManagedFiles(ctx, resp),
 			s.loadConfigCloudServices(ctx, resp),
-			s.loadSystemTiers(ctx, resp),
 			s.loadConfigNodeStorageConfigs(ctx, resp),
 		)
 		if err != nil {
@@ -391,73 +390,13 @@ func (s *SystemServer) loadConfigCloudServices(ctx context.Context, resp *apiv1.
 			StorageClass:      cs.StorageClass,
 			ArchivalMode:      cs.ArchivalMode,
 			Transitions:       transitions,
-			RestoreTier:       cs.RestoreTier,
+			RestoreSpeed:       cs.RestoreSpeed,
 			RestoreDays:       cs.RestoreDays,
 			SuspectGraceDays:  cs.SuspectGraceDays,
 			ReconcileSchedule: cs.ReconcileSchedule,
 		})
 	}
 	return nil
-}
-
-func (s *SystemServer) loadSystemTiers(ctx context.Context, resp *apiv1.GetSystemResponse) error {
-	tiers, err := s.sysStore.ListTiers(ctx)
-	if err != nil {
-		return fmt.Errorf("list tiers: %w", err)
-	}
-	for _, tier := range tiers {
-		tierPlacements, _ := s.sysStore.GetTierPlacements(ctx, tier.ID)
-		var placements []*apiv1.TierPlacement
-		for _, p := range tierPlacements {
-			placements = append(placements, &apiv1.TierPlacement{
-				StorageId: []byte(p.StorageID),
-				Leader:    p.Leader,
-			})
-		}
-		tc := &apiv1.TierConfig{
-			Id:                tier.ID.ToProto(),
-			Name:              tier.Name,
-			Type:              tierTypeToProto(tier.Type),
-			MemoryBudgetBytes: tier.MemoryBudgetBytes,
-			StorageClass:      tier.StorageClass,
-			ReplicationFactor: tier.ReplicationFactor,
-			Path:              tier.Path,
-			Placements:        placements,
-			VaultId:           tier.VaultID.ToProto(),
-			Position:          tier.Position,
-			CacheEviction:     tier.CacheEviction,
-			CacheBudget:       tier.CacheBudget,
-			CacheTtl:          tier.CacheTTL,
-		}
-		if tier.RotationPolicyID != nil {
-			tc.RotationPolicyId = tier.RotationPolicyID.ToProto()
-		}
-		if tier.CloudServiceID != nil {
-			tc.CloudServiceId = tier.CloudServiceID.ToProto()
-		}
-		// Cloud-backed tiers wire as TIER_TYPE_FILE; cloud-ness travels via
-		// cloud_service_id, not the type enum. See gastrolog-4k5mg.
-		for _, r := range tier.RetentionRules {
-			tc.RetentionRules = append(tc.RetentionRules, &apiv1.RetentionRule{
-				RetentionPolicyId: r.RetentionPolicyID.ToProto(),
-			})
-		}
-		resp.Tiers = append(resp.Tiers, tc)
-	}
-	return nil
-}
-
-func tierTypeToProto(t system.TierType) apiv1.TierType {
-	switch t {
-	case system.VaultTypeMemory:
-		return apiv1.TierType_TIER_TYPE_MEMORY
-	case system.VaultTypeFile:
-		return apiv1.TierType_TIER_TYPE_FILE
-	case system.VaultTypeJSONL:
-		return apiv1.TierType_TIER_TYPE_JSONL
-	default:
-		return apiv1.TierType_TIER_TYPE_UNSPECIFIED
-	}
 }
 
 func (s *SystemServer) loadConfigNodeStorageConfigs(ctx context.Context, resp *apiv1.GetSystemResponse) error {

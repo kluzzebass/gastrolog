@@ -58,7 +58,7 @@ func newTestRateAlerter(alerts AlertCollector) *RateAlerter {
 		WarningAt: 1.0, // >= 10 events in 10s
 		ErrorAt:   5.0, // >= 50 events in 10s
 		Alerts:    alerts,
-		TierName:  func(id glid.GLID) string { return "test-tier-" + id.String()[:4] },
+		VaultName:  func(id glid.GLID) string { return "test-vault-" + id.String()[:4] },
 	})
 }
 
@@ -66,11 +66,11 @@ func TestRateAlerterStaysSilentBelowThreshold(t *testing.T) {
 	t.Parallel()
 	alerts := &fakeAlerts{}
 	ra := newTestRateAlerter(alerts)
-	tierID := glid.New()
+	vaultID := glid.New()
 
 	// 5 events in 10s = 0.5/s, below the 1.0 warning threshold.
 	for i := range 5 {
-		ra.Record(tierID, baseTime.Add(time.Duration(i)*time.Second))
+		ra.Record(vaultID, baseTime.Add(time.Duration(i)*time.Second))
 	}
 	ra.Evaluate(baseTime.Add(9 * time.Second))
 
@@ -83,11 +83,11 @@ func TestRateAlerterRaisesWarningAtThreshold(t *testing.T) {
 	t.Parallel()
 	alerts := &fakeAlerts{}
 	ra := newTestRateAlerter(alerts)
-	tierID := glid.New()
+	vaultID := glid.New()
 
 	// 10 events in 10s = exactly 1.0/s (the warning threshold).
 	for i := range 10 {
-		ra.Record(tierID, baseTime.Add(time.Duration(i)*time.Second))
+		ra.Record(vaultID, baseTime.Add(time.Duration(i)*time.Second))
 	}
 	ra.Evaluate(baseTime.Add(9 * time.Second))
 
@@ -107,11 +107,11 @@ func TestRateAlerterEscalatesToError(t *testing.T) {
 	t.Parallel()
 	alerts := &fakeAlerts{}
 	ra := newTestRateAlerter(alerts)
-	tierID := glid.New()
+	vaultID := glid.New()
 
 	// 50 events in 10s = 5.0/s (exactly the error threshold).
 	for i := range 50 {
-		ra.Record(tierID, baseTime.Add(time.Duration(i%10)*time.Second))
+		ra.Record(vaultID, baseTime.Add(time.Duration(i%10)*time.Second))
 	}
 	ra.Evaluate(baseTime.Add(9 * time.Second))
 
@@ -125,11 +125,11 @@ func TestRateAlerterClearsWhenRateDrops(t *testing.T) {
 	t.Parallel()
 	alerts := &fakeAlerts{}
 	ra := newTestRateAlerter(alerts)
-	tierID := glid.New()
+	vaultID := glid.New()
 
 	// Cross threshold.
 	for i := range 10 {
-		ra.Record(tierID, baseTime.Add(time.Duration(i)*time.Second))
+		ra.Record(vaultID, baseTime.Add(time.Duration(i)*time.Second))
 	}
 	ra.Evaluate(baseTime.Add(9 * time.Second))
 	if len(alerts.snapshot()) != 1 {
@@ -152,10 +152,10 @@ func TestRateAlerterIdempotentRepeatedEvaluations(t *testing.T) {
 	t.Parallel()
 	alerts := &fakeAlerts{}
 	ra := newTestRateAlerter(alerts)
-	tierID := glid.New()
+	vaultID := glid.New()
 
 	for i := range 10 {
-		ra.Record(tierID, baseTime.Add(time.Duration(i)*time.Second))
+		ra.Record(vaultID, baseTime.Add(time.Duration(i)*time.Second))
 	}
 	// Evaluate three times at the same instant — should produce only one Set.
 	for range 3 {
@@ -171,17 +171,17 @@ func TestRateAlerterTransitionsWarningToErrorEmitsResetSet(t *testing.T) {
 	t.Parallel()
 	alerts := &fakeAlerts{}
 	ra := newTestRateAlerter(alerts)
-	tierID := glid.New()
+	vaultID := glid.New()
 
 	// First, push into warning territory.
 	for i := range 10 {
-		ra.Record(tierID, baseTime.Add(time.Duration(i)*time.Second))
+		ra.Record(vaultID, baseTime.Add(time.Duration(i)*time.Second))
 	}
 	ra.Evaluate(baseTime.Add(9 * time.Second))
 
 	// Now push to error territory in the same buckets.
 	for i := range 40 {
-		ra.Record(tierID, baseTime.Add(time.Duration(i%10)*time.Second))
+		ra.Record(vaultID, baseTime.Add(time.Duration(i%10)*time.Second))
 	}
 	ra.Evaluate(baseTime.Add(9 * time.Second))
 
@@ -194,28 +194,28 @@ func TestRateAlerterTransitionsWarningToErrorEmitsResetSet(t *testing.T) {
 	}
 }
 
-func TestRateAlerterPerTierIndependence(t *testing.T) {
+func TestRateAlerterPerInstanceIndependence(t *testing.T) {
 	t.Parallel()
 	alerts := &fakeAlerts{}
 	ra := newTestRateAlerter(alerts)
-	tier1 := glid.New()
-	tier2 := glid.New()
+	vaultA := glid.New()
+	vaultB := glid.New()
 
-	// Tier 1 crosses threshold; tier 2 stays below.
+	// Vault A crosses threshold; vault B stays below.
 	for i := range 10 {
-		ra.Record(tier1, baseTime.Add(time.Duration(i)*time.Second))
+		ra.Record(vaultA, baseTime.Add(time.Duration(i)*time.Second))
 	}
 	for range 3 {
-		ra.Record(tier2, baseTime)
+		ra.Record(vaultB, baseTime)
 	}
 	ra.Evaluate(baseTime.Add(9 * time.Second))
 
 	calls := alerts.snapshot()
 	if len(calls) != 1 {
-		t.Fatalf("expected 1 alert (only tier1), got %v", calls)
+		t.Fatalf("expected 1 alert (only vaultA), got %v", calls)
 	}
-	if calls[0].id != ra.alertID(tier1) {
-		t.Errorf("wrong tier alerted: got id %q, want %q", calls[0].id, ra.alertID(tier1))
+	if calls[0].id != ra.alertID(vaultA) {
+		t.Errorf("wrong vaultInst alerted: got id %q, want %q", calls[0].id, ra.alertID(vaultA))
 	}
 }
 
@@ -223,15 +223,15 @@ func TestRateAlerterForgetClearsActiveAlert(t *testing.T) {
 	t.Parallel()
 	alerts := &fakeAlerts{}
 	ra := newTestRateAlerter(alerts)
-	tierID := glid.New()
+	vaultID := glid.New()
 
 	for i := range 10 {
-		ra.Record(tierID, baseTime.Add(time.Duration(i)*time.Second))
+		ra.Record(vaultID, baseTime.Add(time.Duration(i)*time.Second))
 	}
 	ra.Evaluate(baseTime.Add(9 * time.Second))
 	alerts.reset()
 
-	ra.Forget(tierID)
+	ra.Forget(vaultID)
 
 	calls := alerts.snapshot()
 	if len(calls) != 1 || calls[0].op != "clear" {
@@ -243,16 +243,16 @@ func TestRateAlerterForgetWithoutActiveDoesNotClear(t *testing.T) {
 	t.Parallel()
 	alerts := &fakeAlerts{}
 	ra := newTestRateAlerter(alerts)
-	tierID := glid.New()
+	vaultID := glid.New()
 
 	// Record a small number that doesn't trip the threshold.
 	for range 3 {
-		ra.Record(tierID, baseTime)
+		ra.Record(vaultID, baseTime)
 	}
 	ra.Evaluate(baseTime.Add(9 * time.Second))
 	alerts.reset()
 
-	ra.Forget(tierID)
+	ra.Forget(vaultID)
 
 	if got := len(alerts.snapshot()); got != 0 {
 		t.Errorf("expected no Clear (alert was never active), got %d calls", got)

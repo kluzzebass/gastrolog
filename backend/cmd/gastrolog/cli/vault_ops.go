@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"connectrpc.com/connect"
@@ -12,31 +11,19 @@ import (
 )
 
 // NewSealCommand returns the top-level "seal" command.
-// Forces rotation: seals the active chunk on the specified tier (or all tiers)
-// and triggers the post-seal pipeline (compress → index → upload).
+// Forces rotation: seals the active chunk for the named vault and triggers
+// the post-seal pipeline (compress → index → upload).
 func NewSealCommand() *cobra.Command {
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use:   "seal <vault-name-or-id>",
 		Short: "Seal the active chunk and start a new one",
-		Long:  "Seal the active chunk on a tier (or all tiers with --all) in a vault.\nExactly one of --tier or --all must be specified.",
+		Long:  "Seal the active chunk in a vault. Triggers compress + index + (cloud) upload.",
 		Args:  cobra.ExactArgs(1),
 		RunE:  runSeal,
 	}
-	cmd.Flags().String("tier", "", "seal only this tier (name or ID)")
-	cmd.Flags().Bool("all", false, "seal all tiers in the vault")
-	return cmd
 }
 
 func runSeal(cmd *cobra.Command, args []string) error {
-	tierFlag, _ := cmd.Flags().GetString("tier")
-	allFlag, _ := cmd.Flags().GetBool("all")
-	if tierFlag == "" && !allFlag {
-		return errors.New("specify --tier <name-or-id> or --all")
-	}
-	if tierFlag != "" && allFlag {
-		return errors.New("--tier and --all are mutually exclusive")
-	}
-
 	client := clientFromCmd(cmd)
 	r, err := newResolver(context.Background(), client)
 	if err != nil {
@@ -47,20 +34,11 @@ func runSeal(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	req := &v1.SealVaultRequest{Vault: vaultID}
-	if tierFlag != "" {
-		tierID, err := resolve(tierFlag, r.tiers, "tier")
-		if err != nil {
-			return err
-		}
-		req.Tier = tierID
-	}
-
-	resp, err := client.Vault.SealVault(context.Background(), connect.NewRequest(req))
+	resp, err := client.Vault.SealVault(context.Background(), connect.NewRequest(&v1.SealVaultRequest{Vault: vaultID}))
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Sealed %d tier(s) in vault %s\n", resp.Msg.SealedCount, args[0])
+	fmt.Printf("Sealed %d active chunk(s) in vault %s\n", resp.Msg.SealedCount, args[0])
 	return nil
 }
 

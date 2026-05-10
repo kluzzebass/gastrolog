@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"gastrolog/internal/glid"
 	"log/slog"
 	"math/rand"
 	"slices"
@@ -20,9 +19,9 @@ import (
 
 const placementInterval = 15 * time.Second
 
-// placementManager assigns tiers to nodes automatically.
+// placementManager assigns vaults to nodes automatically.
 // Runs on every node but only acts when this node is the Raft leader.
-// Writes tier assignments via system.Store (Raft-replicated).
+// Writes vault assignments via system.Store (Raft-replicated).
 type placementManager struct {
 	cfgStore    system.Store
 	clusterSrv  *cluster.Server
@@ -80,12 +79,12 @@ func (pm *placementManager) Reconcile(ctx context.Context) {
 	}
 }
 
-// reconcile evaluates all tiers and active ingesters, assigning them to
+// reconcile evaluates all vaults and active ingesters, assigning them to
 // eligible alive nodes. Only writes when the assignment actually changes.
 func (pm *placementManager) reconcile(ctx context.Context) {
-	tiers, err := pm.cfgStore.ListTiers(ctx)
+	vaults, err := pm.cfgStore.ListVaults(ctx)
 	if err != nil {
-		pm.logger.Error("placement: list tiers", "error", err)
+		pm.logger.Error("placement: list vaults", "error", err)
 		return
 	}
 	nscs, err := pm.cfgStore.ListNodeStorageConfigs(ctx)
@@ -112,40 +111,24 @@ func (pm *placementManager) reconcile(ctx context.Context) {
 		}
 	}
 
-	// Build set of tier IDs actually referenced by vaults (tiers with a VaultID).
-	referencedTiers := make(map[string]bool)
-	for _, t := range tiers {
-		if t.VaultID != (glid.GLID{}) {
-			referencedTiers[t.ID.String()] = true
-		}
-	}
-
-	// Count current tier assignments per node (for load balancing).
+	// Count current vault assignments per node (for load balancing).
 	// Counts both leaders and followers.
-	tierCount := make(map[string]int)
-	for _, t := range tiers {
-		leaderNodeID := system.LeaderNodeID(func() []system.TierPlacement {
-			p, _ := pm.cfgStore.GetTierPlacements(context.Background(), t.ID)
-			return p
-		}(), nscs)
+	vaultCount := make(map[string]int)
+	for _, v := range vaults {
+		placements, _ := pm.cfgStore.GetVaultPlacements(ctx, v.ID)
+		leaderNodeID := system.LeaderNodeID(placements, nscs)
 		if leaderNodeID != "" && alive[leaderNodeID] {
-			tierCount[leaderNodeID]++
+			vaultCount[leaderNodeID]++
 		}
-		for _, sid := range system.FollowerNodeIDs(func() []system.TierPlacement {
-			p, _ := pm.cfgStore.GetTierPlacements(context.Background(), t.ID)
-			return p
-		}(), nscs) {
+		for _, sid := range system.FollowerNodeIDs(placements, nscs) {
 			if alive[sid] {
-				tierCount[sid]++
+				vaultCount[sid]++
 			}
 		}
 	}
 
-	for _, tier := range tiers {
-		if !referencedTiers[tier.ID.String()] {
-			continue
-		}
-		pm.placeTier(ctx, tier, alive, nscs, tierCount)
+	for _, v := range vaults {
+		pm.placeVault(ctx, v, alive, nscs, vaultCount)
 	}
 
 	pm.reconcileSingletonIngesters(ctx, alive)
@@ -257,118 +240,116 @@ func (pm *placementManager) isSingletonIngester(ing system.IngesterConfig) bool 
 	return ok && reg.SingletonSupported
 }
 
-// placeTier evaluates a single tier and assigns it to an eligible node if needed.
-func (pm *placementManager) placeTier(ctx context.Context, tier system.TierConfig, alive map[string]bool, nscs []system.NodeStorageConfig, tierCount map[string]int) {
-	alertKey := fmt.Sprintf("tier-unplaced:%s", tier.ID)
+// placeVault evaluates a single vault and assigns it to an eligible node if needed.
+func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig, alive map[string]bool, nscs []system.NodeStorageConfig, vaultCount map[string]int) {
+	alertKey := fmt.Sprintf("vault-unplaced:%s", v.ID)
 
-	currentLeader := system.LeaderNodeID(func() []system.TierPlacement {
-		p, _ := pm.cfgStore.GetTierPlacements(context.Background(), tier.ID)
+	currentLeader := system.LeaderNodeID(func() []system.VaultPlacement {
+		p, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
 		return p
 	}(), nscs)
 
 	// Current leader assignment still valid — check followers too.
-	if currentLeader != "" && alive[currentLeader] && pm.nodeEligible(tier, currentLeader, nscs) {
+	if currentLeader != "" && alive[currentLeader] && pm.nodeEligible(v, currentLeader, nscs) {
 		if pm.alerts != nil {
 			pm.alerts.Clear(alertKey)
 		}
-		pm.placeFollowers(ctx, &tier, alive, nscs, tierCount)
+		pm.placeFollowers(ctx, &v, alive, nscs, vaultCount)
 		return
 	}
 
-	eligible := pm.eligibleNodes(tier, alive, nscs)
+	eligible := pm.eligibleNodes(v, alive, nscs)
 
 	if len(eligible) == 0 {
-		pm.handleUnplaceable(ctx, tier, alertKey, nscs, tierCount)
+		pm.handleUnplaceable(ctx, v, alertKey, nscs, vaultCount)
 		return
 	}
 
-	best := pm.selectNode(eligible, tierCount)
+	best := pm.selectNode(eligible, vaultCount)
 	if best == currentLeader {
 		return
 	}
 
 	old := currentLeader
 	// Replace the leader placement.
-	oldP, _ := pm.cfgStore.GetTierPlacements(context.Background(), tier.ID)
-	newP := replaceLeaderPlacement(oldP, system.StorageIDForNode(best, tier, nscs))
-	_ = pm.cfgStore.SetTierPlacements(ctx, tier.ID, newP)
-	if err := pm.cfgStore.PutTier(ctx, tier); err != nil {
-		pm.logger.Error("placement: assign tier", "tier", tier.ID, "name", tier.Name, "node", best, "error", err)
+	oldP, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
+	newP := replaceLeaderPlacement(oldP, system.StorageIDForNode(best, v, nscs))
+	if err := pm.cfgStore.SetVaultPlacements(ctx, v.ID, newP); err != nil {
+		pm.logger.Error("placement: assign vault", "vault", v.ID, "name", v.Name, "node", best, "error", err)
 		return
 	}
 
 	if old != "" {
-		tierCount[old]--
+		vaultCount[old]--
 	}
-	tierCount[best]++
+	vaultCount[best]++
 
 	if pm.alerts != nil {
 		pm.alerts.Clear(alertKey)
 	}
 
 	if old == "" {
-		pm.logger.Info("placement: tier assigned", "tier", tier.ID, "name", tier.Name, "node", best)
+		pm.logger.Info("placement: vault assigned", "vault", v.ID, "name", v.Name, "node", best)
 	} else {
-		pm.logger.Info("placement: tier reassigned", "tier", tier.ID, "name", tier.Name, "from", old, "to", best)
+		pm.logger.Info("placement: vault reassigned", "vault", v.ID, "name", v.Name, "from", old, "to", best)
 	}
 
 	// Place followers if replication is configured.
-	pm.placeFollowers(ctx, &tier, alive, nscs, tierCount)
+	pm.placeFollowers(ctx, &v, alive, nscs, vaultCount)
 }
 
 // replaceLeaderPlacement returns a new Placements slice with the leader set to storageID.
-func replaceLeaderPlacement(placements []system.TierPlacement, storageID string) []system.TierPlacement {
-	var result []system.TierPlacement
+func replaceLeaderPlacement(placements []system.VaultPlacement, storageID string) []system.VaultPlacement {
+	var result []system.VaultPlacement
 	for _, p := range placements {
 		if !p.Leader {
 			result = append(result, p)
 		}
 	}
-	return append([]system.TierPlacement{{StorageID: storageID, Leader: true}}, result...)
+	return append([]system.VaultPlacement{{StorageID: storageID, Leader: true}}, result...)
 }
 
-// placeFollowers assigns follower file storages for a tier based on its ReplicationFactor.
+// placeFollowers assigns follower file storages for a vault based on its ReplicationFactor.
 // Prefers storages on different nodes (availability), falls back to different storages on
 // the same node (redundancy). Never places two replicas on the same file storage.
-func (pm *placementManager) placeFollowers(ctx context.Context, tier *system.TierConfig, alive map[string]bool, nscs []system.NodeStorageConfig, tierCount map[string]int) {
-	desired := int(tier.ReplicationFactor) - 1
+func (pm *placementManager) placeFollowers(ctx context.Context, v *system.VaultConfig, alive map[string]bool, nscs []system.NodeStorageConfig, vaultCount map[string]int) {
+	desired := int(v.ReplicationFactor) - 1
 	if desired <= 0 {
-		pm.clearStaleFollowers(ctx, tier, nscs, tierCount)
+		pm.clearStaleFollowers(ctx, v, nscs, vaultCount)
 		return
 	}
 
-	leaderStorageID := system.LeaderStorageID(func() []system.TierPlacement {
-		p, _ := pm.cfgStore.GetTierPlacements(context.Background(), tier.ID)
+	leaderStorageID := system.LeaderStorageID(func() []system.VaultPlacement {
+		p, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
 		return p
 	}())
 	leaderNodeID := system.NodeIDForStorage(leaderStorageID, nscs)
-	candidates := pm.followerCandidates(*tier, leaderStorageID, leaderNodeID, alive, nscs, tierCount)
-	kept := pm.selectFollowers(tier, desired, leaderStorageID, leaderNodeID, candidates, nscs, alive, tierCount)
+	candidates := pm.followerCandidates(*v, leaderStorageID, leaderNodeID, alive, nscs, vaultCount)
+	kept := pm.selectFollowers(v, desired, leaderStorageID, leaderNodeID, candidates, nscs, alive, vaultCount)
 
 	// Build new placements.
-	newPlacements := []system.TierPlacement{{StorageID: leaderStorageID, Leader: true}}
+	newPlacements := []system.VaultPlacement{{StorageID: leaderStorageID, Leader: true}}
 	newPlacements = append(newPlacements, kept...)
 
-	if !placementsEqual(func() []system.TierPlacement {
-		p, _ := pm.cfgStore.GetTierPlacements(context.Background(), tier.ID)
+	if !placementsEqual(func() []system.VaultPlacement {
+		p, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
 		return p
 	}(), newPlacements) {
-		_ = pm.cfgStore.SetTierPlacements(ctx, tier.ID, newPlacements)
-		if err := pm.cfgStore.PutTier(ctx, *tier); err != nil {
-			pm.logger.Error("placement: assign followers", "tier", tier.ID, "error", err)
+		if err := pm.cfgStore.SetVaultPlacements(ctx, v.ID, newPlacements); err != nil {
+			pm.logger.Error("placement: assign followers", "vault", v.ID, "error", err)
 			return
 		}
 		pm.logger.Info("placement: followers updated",
-			"tier", tier.ID, "name", tier.Name, "placements", len(newPlacements))
+			"vault", v.ID, "name", v.Name, "placements", len(newPlacements))
 	}
 
-	pm.alertReplication(tier, len(kept), desired)
+	pm.alertReplication(v, len(kept), desired)
 }
 
 // clearStaleFollowers removes leftover follower placements when RF <= 1.
-func (pm *placementManager) clearStaleFollowers(ctx context.Context, tier *system.TierConfig, nscs []system.NodeStorageConfig, tierCount map[string]int) {
-	currentFollowers := system.FollowerStorageIDs(func() []system.TierPlacement {
-		p, _ := pm.cfgStore.GetTierPlacements(context.Background(), tier.ID)
+func (pm *placementManager) clearStaleFollowers(ctx context.Context, v *system.VaultConfig, nscs []system.NodeStorageConfig, vaultCount map[string]int) {
+	currentFollowers := system.FollowerStorageIDs(func() []system.VaultPlacement {
+		p, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
 		return p
 	}())
 	if len(currentFollowers) == 0 {
@@ -376,21 +357,20 @@ func (pm *placementManager) clearStaleFollowers(ctx context.Context, tier *syste
 	}
 	for _, sID := range currentFollowers {
 		if nid := system.NodeIDForStorage(sID, nscs); nid != "" {
-			tierCount[nid]--
+			vaultCount[nid]--
 		}
 	}
-	cp, _ := pm.cfgStore.GetTierPlacements(context.Background(), tier.ID)
-	_ = pm.cfgStore.SetTierPlacements(ctx, tier.ID, clearFollowerPlacements(cp))
-	if err := pm.cfgStore.PutTier(ctx, *tier); err != nil {
-		pm.logger.Error("placement: clear stale followers", "tier", tier.ID, "error", err)
+	cp, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
+	if err := pm.cfgStore.SetVaultPlacements(ctx, v.ID, clearFollowerPlacements(cp)); err != nil {
+		pm.logger.Error("placement: clear stale followers", "vault", v.ID, "error", err)
 	}
 }
 
 // followerCandidates returns eligible storages excluding the leader, sorted
 // by preference: cross-node first (availability), then same-node (redundancy),
 // then least-loaded.
-func (pm *placementManager) followerCandidates(tier system.TierConfig, leaderStorageID, leaderNodeID string, alive map[string]bool, nscs []system.NodeStorageConfig, tierCount map[string]int) []eligibleStorage {
-	all := pm.eligibleStorages(tier, alive, nscs)
+func (pm *placementManager) followerCandidates(v system.VaultConfig, leaderStorageID, leaderNodeID string, alive map[string]bool, nscs []system.NodeStorageConfig, vaultCount map[string]int) []eligibleStorage {
+	all := pm.eligibleStorages(v, alive, nscs)
 	var candidates []eligibleStorage
 	for _, ea := range all {
 		if ea.storageID != leaderStorageID {
@@ -406,26 +386,26 @@ func (pm *placementManager) followerCandidates(tier system.TierConfig, leaderSto
 			}
 			return 1
 		}
-		return tierCount[a.nodeID] - tierCount[b.nodeID]
+		return vaultCount[a.nodeID] - vaultCount[b.nodeID]
 	})
 	return candidates
 }
 
 // selectFollowers picks follower placements: retains existing valid ones first,
 // then fills from sorted candidates.
-func (pm *placementManager) selectFollowers(tier *system.TierConfig, desired int, leaderStorageID, leaderNodeID string, candidates []eligibleStorage, nscs []system.NodeStorageConfig, alive map[string]bool, tierCount map[string]int) []system.TierPlacement {
-	var kept []system.TierPlacement
+func (pm *placementManager) selectFollowers(v *system.VaultConfig, desired int, leaderStorageID, leaderNodeID string, candidates []eligibleStorage, nscs []system.NodeStorageConfig, alive map[string]bool, vaultCount map[string]int) []system.VaultPlacement {
+	var kept []system.VaultPlacement
 	usedStorages := map[string]bool{leaderStorageID: true}
-	usedNodes := map[string]bool{leaderNodeID: true} // 1:1:1: one store per tier per node
+	usedNodes := map[string]bool{leaderNodeID: true} // 1:1:1: one store per vault per node
 
 	// Keep existing valid follower placements.
-	tierPs, _ := pm.cfgStore.GetTierPlacements(context.Background(), tier.ID)
-	for _, p := range tierPs {
+	current, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
+	for _, p := range current {
 		if p.Leader || len(kept) >= desired {
 			continue
 		}
 		nid := system.NodeIDForStorage(p.StorageID, nscs)
-		if nid != "" && alive[nid] && !usedStorages[p.StorageID] && !usedNodes[nid] && pm.storageEligible(p.StorageID, *tier, nscs) {
+		if nid != "" && alive[nid] && !usedStorages[p.StorageID] && !usedNodes[nid] && pm.storageEligible(p.StorageID, *v, nscs) {
 			kept = append(kept, p)
 			usedStorages[p.StorageID] = true
 			usedNodes[nid] = true
@@ -440,23 +420,23 @@ func (pm *placementManager) selectFollowers(tier *system.TierConfig, desired int
 		if usedStorages[ea.storageID] || usedNodes[ea.nodeID] {
 			continue
 		}
-		kept = append(kept, system.TierPlacement{StorageID: ea.storageID, Leader: false})
+		kept = append(kept, system.VaultPlacement{StorageID: ea.storageID, Leader: false})
 		usedStorages[ea.storageID] = true
 		usedNodes[ea.nodeID] = true
-		tierCount[ea.nodeID]++
+		vaultCount[ea.nodeID]++
 	}
 	return kept
 }
 
-// alertReplication sets or clears the under-replicated tier alert.
-func (pm *placementManager) alertReplication(tier *system.TierConfig, placed, desired int) {
+// alertReplication sets or clears the under-replicated vault alert.
+func (pm *placementManager) alertReplication(v *system.VaultConfig, placed, desired int) {
 	if pm.alerts == nil {
 		return
 	}
-	alertKey := fmt.Sprintf("tier-underreplicated:%s", tier.ID)
+	alertKey := fmt.Sprintf("vault-underreplicated:%s", v.ID)
 	if placed < desired {
 		pm.alerts.Set(alertKey, alert.Warning, "placement",
-			fmt.Sprintf("Tier %q: only %d of %d desired replicas (insufficient eligible file storages)", tier.Name, placed+1, int(tier.ReplicationFactor)))
+			fmt.Sprintf("Vault %q: only %d of %d desired replicas (insufficient eligible file storages)", v.Name, placed+1, int(v.ReplicationFactor)))
 	} else {
 		pm.alerts.Clear(alertKey)
 	}
@@ -468,12 +448,12 @@ type eligibleStorage struct {
 }
 
 // eligibleStorages returns all storages across all alive nodes that can host a replica.
-// For memory tiers: one synthetic storage per alive node (no file storage needed).
-// For file/cloud tiers: all file storages matching the required class.
-func (pm *placementManager) eligibleStorages(tier system.TierConfig, alive map[string]bool, nscs []system.NodeStorageConfig) []eligibleStorage {
+// For memory vaults: one synthetic storage per alive node (no file storage needed).
+// For file/cloud vaults: all file storages matching the required class.
+func (pm *placementManager) eligibleStorages(v system.VaultConfig, alive map[string]bool, nscs []system.NodeStorageConfig) []eligibleStorage {
 	var result []eligibleStorage
 
-	if tier.Type == system.VaultTypeMemory {
+	if v.Type == system.VaultTypeMemory {
 		for nodeID := range alive {
 			result = append(result, eligibleStorage{
 				storageID: system.SyntheticStorageID(nodeID),
@@ -483,7 +463,7 @@ func (pm *placementManager) eligibleStorages(tier system.TierConfig, alive map[s
 		return result
 	}
 
-	sc := tier.StorageClass
+	sc := v.StorageClass
 	for _, nsc := range nscs {
 		if !alive[nsc.NodeID] {
 			continue
@@ -497,12 +477,12 @@ func (pm *placementManager) eligibleStorages(tier system.TierConfig, alive map[s
 	return result
 }
 
-// storageEligible checks if a specific storage still matches the tier's requirements.
-func (pm *placementManager) storageEligible(storageID string, tier system.TierConfig, nscs []system.NodeStorageConfig) bool {
-	if tier.Type == system.VaultTypeMemory {
+// storageEligible checks if a specific storage still matches the vault's requirements.
+func (pm *placementManager) storageEligible(storageID string, v system.VaultConfig, nscs []system.NodeStorageConfig) bool {
+	if v.Type == system.VaultTypeMemory {
 		return strings.HasPrefix(storageID, system.SyntheticStoragePrefix)
 	}
-	sc := tier.StorageClass
+	sc := v.StorageClass
 	for _, nsc := range nscs {
 		for _, fs := range nsc.FileStorages {
 			if fs.ID.String() == storageID && fs.StorageClass == sc {
@@ -514,8 +494,8 @@ func (pm *placementManager) storageEligible(storageID string, tier system.TierCo
 }
 
 // clearFollowerPlacements removes all non-leader placements.
-func clearFollowerPlacements(placements []system.TierPlacement) []system.TierPlacement {
-	var result []system.TierPlacement
+func clearFollowerPlacements(placements []system.VaultPlacement) []system.VaultPlacement {
+	var result []system.VaultPlacement
 	for _, p := range placements {
 		if p.Leader {
 			result = append(result, p)
@@ -524,7 +504,7 @@ func clearFollowerPlacements(placements []system.TierPlacement) []system.TierPla
 	return result
 }
 
-func placementsEqual(a, b []system.TierPlacement) bool {
+func placementsEqual(a, b []system.VaultPlacement) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -548,39 +528,38 @@ func slicesEqual(a, b []string) bool {
 	return true
 }
 
-// handleUnplaceable clears a tier's assignment when no eligible node exists.
-func (pm *placementManager) handleUnplaceable(ctx context.Context, tier system.TierConfig, alertKey string, nscs []system.NodeStorageConfig, tierCount map[string]int) {
-	currentLeader := system.LeaderNodeID(func() []system.TierPlacement {
-		p, _ := pm.cfgStore.GetTierPlacements(context.Background(), tier.ID)
+// handleUnplaceable clears a vault's assignment when no eligible node exists.
+func (pm *placementManager) handleUnplaceable(ctx context.Context, v system.VaultConfig, alertKey string, nscs []system.NodeStorageConfig, vaultCount map[string]int) {
+	currentLeader := system.LeaderNodeID(func() []system.VaultPlacement {
+		p, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
 		return p
 	}(), nscs)
 	if currentLeader != "" {
 		old := currentLeader
-		_ = pm.cfgStore.SetTierPlacements(ctx, tier.ID, nil)
-		if err := pm.cfgStore.PutTier(ctx, tier); err != nil {
-			pm.logger.Error("placement: clear tier assignment", "tier", tier.ID, "name", tier.Name, "error", err)
+		if err := pm.cfgStore.SetVaultPlacements(ctx, v.ID, nil); err != nil {
+			pm.logger.Error("placement: clear vault assignment", "vault", v.ID, "name", v.Name, "error", err)
 		} else {
-			pm.logger.Warn("placement: tier unplaced, no eligible nodes", "tier", tier.ID, "name", tier.Name)
+			pm.logger.Warn("placement: vault unplaced, no eligible nodes", "vault", v.ID, "name", v.Name)
 		}
-		tierCount[old]--
+		vaultCount[old]--
 	}
 	if pm.alerts != nil {
 		pm.alerts.Set(alertKey, alert.Warning, "placement",
-			fmt.Sprintf("Tier %q has no eligible node", tier.Name))
+			fmt.Sprintf("Vault %q has no eligible node", v.Name))
 	}
 }
 
-// nodeEligible checks whether a specific node can serve a tier.
-func (pm *placementManager) nodeEligible(tier system.TierConfig, nodeID string, nscs []system.NodeStorageConfig) bool {
-	switch tier.Type {
+// nodeEligible checks whether a specific node can serve a vault.
+func (pm *placementManager) nodeEligible(v system.VaultConfig, nodeID string, nscs []system.NodeStorageConfig) bool {
+	switch v.Type {
 	case system.VaultTypeMemory:
-		return true // any node can serve memory tiers
+		return true // any node can serve memory vaults
 	case system.VaultTypeFile:
-		return nodeHasStorageClass(nscs, nodeID, tier.StorageClass)
+		return nodeHasStorageClass(nscs, nodeID, v.StorageClass)
 	case system.VaultTypeJSONL:
-		// JSONL tiers have explicit node assignment via Path.
-		leaderNodeID := system.LeaderNodeID(func() []system.TierPlacement {
-			p, _ := pm.cfgStore.GetTierPlacements(context.Background(), tier.ID)
+		// JSONL vaults have explicit node assignment via Path.
+		leaderNodeID := system.LeaderNodeID(func() []system.VaultPlacement {
+			p, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
 			return p
 		}(), nscs)
 		return leaderNodeID == nodeID
@@ -589,31 +568,31 @@ func (pm *placementManager) nodeEligible(tier system.TierConfig, nodeID string, 
 	}
 }
 
-// eligibleNodes returns all alive nodes that can serve a tier.
-func (pm *placementManager) eligibleNodes(tier system.TierConfig, alive map[string]bool, nscs []system.NodeStorageConfig) []string {
+// eligibleNodes returns all alive nodes that can serve a vault.
+func (pm *placementManager) eligibleNodes(v system.VaultConfig, alive map[string]bool, nscs []system.NodeStorageConfig) []string {
 	var result []string
 	for nodeID := range alive {
-		if pm.nodeEligible(tier, nodeID, nscs) {
+		if pm.nodeEligible(v, nodeID, nscs) {
 			result = append(result, nodeID)
 		}
 	}
 	return result
 }
 
-// selectNode picks the node with the fewest assigned tiers.
-// Ties are broken randomly to spread tiers evenly across nodes.
-func (pm *placementManager) selectNode(eligible []string, tierCount map[string]int) string {
-	// Find the minimum tier count.
-	minCount := tierCount[eligible[0]]
+// selectNode picks the node with the fewest assigned vaults.
+// Ties are broken randomly to spread vaults evenly across nodes.
+func (pm *placementManager) selectNode(eligible []string, vaultCount map[string]int) string {
+	// Find the minimum vault count.
+	minCount := vaultCount[eligible[0]]
 	for _, id := range eligible[1:] {
-		if c := tierCount[id]; c < minCount {
+		if c := vaultCount[id]; c < minCount {
 			minCount = c
 		}
 	}
 	// Collect all candidates at the minimum count.
 	var candidates []string
 	for _, id := range eligible {
-		if tierCount[id] == minCount {
+		if vaultCount[id] == minCount {
 			candidates = append(candidates, id)
 		}
 	}

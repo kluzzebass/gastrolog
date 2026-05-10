@@ -27,7 +27,7 @@ import (
 //     generous for round-trip + processing.
 //   - TransferRecords streams a sealed chunk into ImportRecords on the peer.
 //     15s bounds stalled peers without tying up resources indefinitely.
-//   - StreamToTier streams each record into StreamAppendToTier, and the peer
+//   - Vault streaming forwards each record to the destination, and the peer
 //     runs follower replication per record (ForwardingTimeout per follower).
 //     Follower fanout is parallelized on the destination (WaitGroup per record),
 //     but each record still waits for the slowest follower before the next
@@ -142,70 +142,6 @@ func (ct *ChunkTransferrer) ForwardAppend(ctx context.Context, nodeID string, va
 	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardRecords", req, resp); err != nil {
 		ct.peers.Invalidate(nodeID, err)
 		return fmt.Errorf("forward append to %s: %w", nodeID, err)
-	}
-	return nil
-}
-
-// StreamToTier opens a single gRPC stream and pipes all records from the
-// iterator to a remote tier's active chunk. The stream close is the ack.
-// Used for remote tier transitions — destination handles its own chunking.
-func (ct *ChunkTransferrer) StreamToTier(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, next chunk.RecordIterator) error {
-	ctx, cancel := context.WithTimeout(ctx, CatchupTimeout)
-	defer cancel()
-
-	conn, err := ct.peers.Conn(nodeID)
-	if err != nil {
-		return fmt.Errorf("dial node %s: %w", nodeID, err)
-	}
-
-	streamDesc := &grpc.StreamDesc{
-		StreamName:    "ForwardImportRecords",
-		ClientStreams: true,
-	}
-	stream, err := conn.NewStream(ctx, streamDesc, "/gastrolog.v1.ClusterService/ForwardImportRecords")
-	if err != nil {
-		ct.peers.Invalidate(nodeID, err)
-		return fmt.Errorf("open transition stream to %s: %w", nodeID, err)
-	}
-
-	streamClosed := false
-	defer func() {
-		if !streamClosed {
-			_ = stream.CloseSend()
-		}
-	}()
-
-	vid := vaultID.ToProto()
-	tid := tierID.ToProto()
-	for {
-		rec, iterErr := next()
-		if errors.Is(iterErr, chunk.ErrNoMoreRecords) {
-			break
-		}
-		if iterErr != nil {
-			return fmt.Errorf("%w: transition: %w", ErrSourceRead, iterErr)
-		}
-		msg := &gastrologv1.ImportRecordMessage{
-			VaultId: vid,
-			TierId:  tid,
-			Record:  convert.RecordToExport(rec),
-		}
-		if err := stream.SendMsg(msg); err != nil {
-			ct.peers.Invalidate(nodeID, err)
-			return fmt.Errorf("send record to %s: %w", nodeID, err)
-		}
-	}
-
-	streamClosed = true
-	if err := stream.CloseSend(); err != nil {
-		ct.peers.Invalidate(nodeID, err)
-		return fmt.Errorf("close send to %s: %w", nodeID, err)
-	}
-
-	resp := &gastrologv1.ForwardRecordsResponse{}
-	if err := stream.RecvMsg(resp); err != nil {
-		ct.peers.Invalidate(nodeID, err)
-		return fmt.Errorf("receive response from %s: %w", nodeID, err)
 	}
 	return nil
 }

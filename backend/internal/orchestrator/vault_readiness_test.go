@@ -38,15 +38,15 @@ func TestVaultReplicationReadinessErr_fsmNotReady(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tier := &VaultInstance{
-		TierID:     glid.New(),
+	vaultInst := &VaultInstance{
+		VaultID:     glid.New(),
 		Type:       "memory",
 		Chunks:     s.CM,
 		Indexes:    s.IM,
 		Query:      s.QE,
 		IsFSMReady: func() bool { return false },
 	}
-	v := NewVault(vid, tier)
+	v := NewVault(vid, vaultInst)
 	if err := vaultReplicationReadinessErr(vid, v); !errors.Is(err, ErrVaultNotReady) {
 		t.Fatalf("got %v, want ErrVaultNotReady", err)
 	}
@@ -59,15 +59,15 @@ func TestVaultReplicationReadinessErr_ready(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tier := &VaultInstance{
-		TierID:     glid.New(),
+	vaultInst := &VaultInstance{
+		VaultID:     glid.New(),
 		Type:       "memory",
 		Chunks:     s.CM,
 		Indexes:    s.IM,
 		Query:      s.QE,
 		IsFSMReady: func() bool { return true },
 	}
-	v := NewVault(vid, tier)
+	v := NewVault(vid, vaultInst)
 	if err := vaultReplicationReadinessErr(vid, v); err != nil {
 		t.Fatalf("got %v, want nil", err)
 	}
@@ -84,15 +84,15 @@ func TestListAllChunkMetas_vaultNotReady(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tier := &VaultInstance{
-		TierID:     glid.New(),
+	vaultInst := &VaultInstance{
+		VaultID:     glid.New(),
 		Type:       "memory",
 		Chunks:     s.CM,
 		Indexes:    s.IM,
 		Query:      s.QE,
 		IsFSMReady: func() bool { return false },
 	}
-	o.RegisterVault(NewVault(vid, tier))
+	o.RegisterVault(NewVault(vid, vaultInst))
 	_, err = o.ListAllChunkMetas(vid)
 	if !errors.Is(err, ErrVaultNotReady) {
 		t.Fatalf("got %v, want ErrVaultNotReady", err)
@@ -100,9 +100,9 @@ func TestListAllChunkMetas_vaultNotReady(t *testing.T) {
 }
 
 // Regression: ListChunks fans out to remote nodes; a node with the vault
-// registered but no local tier placements must not fail ListAllChunkMetas
+// registered but no local vault placements must not fail ListAllChunkMetas
 // with ErrVaultNotReady, or the UI sees 503 and empty chunks.
-func TestListAllChunkMetas_noLocalTiersReturnsEmpty(t *testing.T) {
+func TestListAllChunkMetas_noLocalVaultsReturnsEmpty(t *testing.T) {
 	t.Parallel()
 	o, err := New(Config{})
 	if err != nil {
@@ -133,43 +133,43 @@ func TestSearch_ErrVaultNotReady(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tier := &VaultInstance{
-		TierID:     glid.New(),
+	vaultInst := &VaultInstance{
+		VaultID:     glid.New(),
 		Type:       "memory",
 		Chunks:     s.CM,
 		Indexes:    s.IM,
 		Query:      s.QE,
 		IsFSMReady: func() bool { return false },
 	}
-	o.RegisterVault(NewVault(vid, tier))
+	o.RegisterVault(NewVault(vid, vaultInst))
 	_, _, err = o.Search(context.Background(), vid, query.Query{}, nil)
 	if !errors.Is(err, ErrVaultNotReady) {
 		t.Fatalf("Search: got %v, want ErrVaultNotReady", err)
 	}
 }
 
-func TestAppendToTier_ErrVaultNotReady(t *testing.T) {
+func TestAppendToVault_ErrVaultNotReady(t *testing.T) {
 	t.Parallel()
 	o, err := New(Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	vid := glid.New()
-	tierID := glid.New()
+	vaultID := glid.New()
 	s, err := memtest.NewVault(chunkmem.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	tier := &VaultInstance{
-		TierID:     tierID,
+	vaultInst := &VaultInstance{
+		VaultID:     vaultID,
 		Type:       "memory",
 		Chunks:     s.CM,
 		Indexes:    s.IM,
 		Query:      s.QE,
 		IsFSMReady: func() bool { return false },
 	}
-	o.RegisterVault(NewVault(vid, tier))
-	err = o.AppendToVault(vid, tierID, chunk.ChunkID{}, chunk.Record{Raw: []byte("x")})
+	o.RegisterVault(NewVault(vid, vaultInst))
+	err = o.AppendToVault(vid, chunk.ChunkID{}, chunk.Record{Raw: []byte("x")})
 	if !errors.Is(err, ErrVaultNotReady) {
 		t.Fatalf("AppendToVault: got %v, want ErrVaultNotReady", err)
 	}
@@ -187,23 +187,23 @@ func TestLocalVaultsReplicationReady(t *testing.T) {
 	vid := glid.New()
 	o.RegisterVault(NewVault(vid, nil))
 	if !o.LocalVaultsReplicationReady() {
-		t.Fatal("routing-only vault (no tiers) should not block readiness")
+		t.Fatal("routing-only vault (has no local vaults — should not block readiness")
 	}
 	s, err := memtest.NewVault(chunkmem.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	tier := &VaultInstance{
-		TierID:     glid.New(),
+	vaultInst := &VaultInstance{
+		VaultID:     glid.New(),
 		Type:       "memory",
 		Chunks:     s.CM,
 		Indexes:    s.IM,
 		Query:      s.QE,
 		IsFSMReady: func() bool { return false },
 	}
-	o.RegisterVault(NewVault(vid, tier))
+	o.RegisterVault(NewVault(vid, vaultInst))
 	if o.LocalVaultsReplicationReady() {
-		t.Fatal("expected false when local tier FSM is not ready")
+		t.Fatal("expected false when local vault-ctl FSM is not ready")
 	}
 }
 
@@ -219,7 +219,7 @@ func TestSearchReadyRegistry_skipsNotReadyVault(t *testing.T) {
 		t.Fatal(err)
 	}
 	o.RegisterVault(NewVault(readyID, &VaultInstance{
-		TierID:     glid.New(),
+		VaultID:     glid.New(),
 		Type:       "memory",
 		Chunks:     sReady.CM,
 		Indexes:    sReady.IM,
@@ -232,7 +232,7 @@ func TestSearchReadyRegistry_skipsNotReadyVault(t *testing.T) {
 		t.Fatal(err)
 	}
 	o.RegisterVault(NewVault(notReadyID, &VaultInstance{
-		TierID:     glid.New(),
+		VaultID:     glid.New(),
 		Type:       "memory",
 		Chunks:     sNR.CM,
 		Indexes:    sNR.IM,

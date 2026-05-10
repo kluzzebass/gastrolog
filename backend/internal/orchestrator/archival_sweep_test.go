@@ -19,15 +19,14 @@ import (
 
 // --- helpers ---
 
-// archivalTestSetup creates a single-node orchestrator with a cloud tier backed
+// archivalTestSetup creates a single-node orchestrator with a cloud instance backed
 // by the in-memory blobstore. Returns the orchestrator, cloud store, chunk manager,
-// vault/tier IDs, and config store.
+// vault/vault IDs, and config store.
 func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition) (
-	*Orchestrator, *blobstore.Memory, *chunkfile.Manager, glid.GLID, glid.GLID, *sysmem.Store,
+	*Orchestrator, *blobstore.Memory, *chunkfile.Manager, glid.GLID, *sysmem.Store,
 ) {
 	t.Helper()
 	vaultID := glid.New()
-	tierID := glid.New()
 	csID := glid.New()
 	nodeID := "test-node"
 
@@ -44,20 +43,16 @@ func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition
 
 	store := sysmem.NewStore()
 	_ = store.PutVault(context.Background(), system.VaultConfig{
-		ID: vaultID, Name: "archival-test",
+		ID: vaultID, Name: "archival-test", Type: system.VaultTypeFile, CloudServiceID: &csID,
 	})
-	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tierID, Name: "cloud", Type: system.VaultTypeFile, CloudServiceID: &csID,
-		VaultID: vaultID, Position: 0,
-	})
-	_ = store.SetTierPlacements(context.Background(), tierID, []system.TierPlacement{{StorageID: system.SyntheticStorageID("test-node"), Leader: true}})
+	_ = store.SetVaultPlacements(context.Background(), vaultID, []system.VaultPlacement{{StorageID: system.SyntheticStorageID("test-node"), Leader: true}})
 	_ = store.PutCloudService(context.Background(), system.CloudService{
 		ID:           csID,
 		Name:         "test-cloud",
 		Provider:     "memory",
 		ArchivalMode: "active",
 		Transitions:  transitions,
-		RestoreTier:  "Standard",
+		RestoreSpeed:  "Standard",
 		RestoreDays:  7,
 	})
 
@@ -67,15 +62,15 @@ func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition
 	})
 	_ = orch.Scheduler().Stop()
 
-	tier := &VaultInstance{
-		TierID: tierID, Type: "cloud",
+	vaultInst := &VaultInstance{
+		VaultID: vaultID, Type: "cloud",
 		Chunks: cm, Indexes: im, Query: query.New(cm, im, nil),
 	}
-	orch.RegisterVault(NewVault(vaultID, tier))
+	orch.RegisterVault(NewVault(vaultID, vaultInst))
 
 	t.Cleanup(func() { _ = cm.Close() })
 
-	return orch, cloudStore, cm, vaultID, tierID, store
+	return orch, cloudStore, cm, vaultID, store
 }
 
 // ingestSealUpload ingests N records, seals, and runs PostSealProcess (compress + cloud upload).
@@ -108,7 +103,7 @@ func ingestSealUpload(t *testing.T, cm *chunkfile.Manager, n int) []chunk.ChunkI
 
 func TestArchivalSweepArchivesOldChunks(t *testing.T) {
 	t.Parallel()
-	orch, _, cm, _, _, _ := archivalTestSetup(t, []system.CloudStorageTransition{
+	orch, _, cm, _, _ := archivalTestSetup(t, []system.CloudStorageTransition{
 		{After: "1d", StorageClass: "GLACIER"},
 	})
 
@@ -137,7 +132,7 @@ func TestArchivalSweepArchivesOldChunks(t *testing.T) {
 
 func TestArchivalSweepDeletesExpiredChunks(t *testing.T) {
 	t.Parallel()
-	orch, _, cm, _, _, _ := archivalTestSetup(t, []system.CloudStorageTransition{
+	orch, _, cm, _, _ := archivalTestSetup(t, []system.CloudStorageTransition{
 		{After: "1d", StorageClass: ""}, // delete after 1 day
 	})
 
@@ -156,7 +151,7 @@ func TestArchivalSweepDeletesExpiredChunks(t *testing.T) {
 
 func TestArchivalSweepIgnoresInactiveServices(t *testing.T) {
 	t.Parallel()
-	orch, _, cm, _, _, store := archivalTestSetup(t, []system.CloudStorageTransition{
+	orch, _, cm, _, store := archivalTestSetup(t, []system.CloudStorageTransition{
 		{After: "1d", StorageClass: "GLACIER"},
 	})
 
@@ -179,7 +174,7 @@ func TestArchivalSweepIgnoresInactiveServices(t *testing.T) {
 
 func TestArchivalSweepMultiStepTransition(t *testing.T) {
 	t.Parallel()
-	orch, _, cm, _, _, _ := archivalTestSetup(t, []system.CloudStorageTransition{
+	orch, _, cm, _, _ := archivalTestSetup(t, []system.CloudStorageTransition{
 		{After: "1d", StorageClass: "cold"},
 		{After: "30d", StorageClass: "deep-freeze"},
 	})
@@ -200,7 +195,7 @@ func TestArchivalSweepMultiStepTransition(t *testing.T) {
 
 func TestReconcileSweepMarksSuspectOnMissing(t *testing.T) {
 	t.Parallel()
-	orch, cloudStore, cm, _, _, _ := archivalTestSetup(t, nil)
+	orch, cloudStore, cm, _, _ := archivalTestSetup(t, nil)
 
 	ids := ingestSealUpload(t, cm, 50)
 
@@ -230,7 +225,7 @@ func TestReconcileSweepMarksSuspectOnMissing(t *testing.T) {
 
 func TestReconcileSweepRemovesAfterGracePeriod(t *testing.T) {
 	t.Parallel()
-	orch, cloudStore, cm, _, _, store := archivalTestSetup(t, nil)
+	orch, cloudStore, cm, _, store := archivalTestSetup(t, nil)
 
 	ids := ingestSealUpload(t, cm, 50)
 
@@ -266,7 +261,7 @@ func TestReconcileSweepRemovesAfterGracePeriod(t *testing.T) {
 
 func TestReconcileSweepClearsSuspectWhenBlobReturns(t *testing.T) {
 	t.Parallel()
-	orch, cloudStore, cm, _, _, _ := archivalTestSetup(t, nil)
+	orch, cloudStore, cm, _, _ := archivalTestSetup(t, nil)
 
 	ids := ingestSealUpload(t, cm, 50)
 
@@ -312,7 +307,7 @@ func TestReconcileSweepClearsSuspectWhenBlobReturns(t *testing.T) {
 
 func TestArchivalFullLifecycle(t *testing.T) {
 	t.Parallel()
-	orch, _, cm, vaultID, _, _ := archivalTestSetup(t, []system.CloudStorageTransition{
+	orch, _, cm, vaultID, _ := archivalTestSetup(t, []system.CloudStorageTransition{
 		{After: "1d", StorageClass: "cold"},
 	})
 
@@ -438,7 +433,7 @@ func TestCloudServiceArchivalConfigRoundTrip(t *testing.T) {
 			{After: "90d", StorageClass: "deep-freeze"},
 			{After: "365d", StorageClass: ""},
 		},
-		RestoreTier:       "Expedited",
+		RestoreSpeed:       "Expedited",
 		RestoreDays:       14,
 		SuspectGraceDays:  3,
 		ReconcileSchedule: "0 */6 * * *",
@@ -465,8 +460,8 @@ func TestCloudServiceArchivalConfigRoundTrip(t *testing.T) {
 	if loaded.Transitions[2].StorageClass != "" {
 		t.Errorf("Transition 2 (delete): StorageClass=%q", loaded.Transitions[2].StorageClass)
 	}
-	if loaded.RestoreTier != "Expedited" {
-		t.Errorf("RestoreTier=%q", loaded.RestoreTier)
+	if loaded.RestoreSpeed != "Expedited" {
+		t.Errorf("RestoreSpeed=%q", loaded.RestoreSpeed)
 	}
 	if loaded.RestoreDays != 14 {
 		t.Errorf("RestoreDays=%d", loaded.RestoreDays)
@@ -526,7 +521,7 @@ type cloudClusterHarness struct {
 	csID       glid.GLID
 }
 
-// setupCloudCluster creates a 4-node cluster where the single tier is cloud-backed
+// setupCloudCluster creates a 4-node cluster where the single instance is cloud-backed
 // using a shared in-memory blobstore. The leader has a file-backed chunk manager
 // with CloudStore set; followers have file-backed chunk managers without CloudStore
 // (matching production: followers don't upload to cloud).
@@ -535,27 +530,22 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 	nodeIDs := []string{"leader", "f1", "f2", "f3"}
 	leaderID := nodeIDs[0]
 	vaultID := glid.New()
-	tierID := glid.New()
 	csID := glid.New()
 
 	cloudStore := blobstore.NewMemory()
 
 	store := sysmem.NewStore()
-	placements := []system.TierPlacement{
+	placements := []system.VaultPlacement{
 		{StorageID: system.SyntheticStorageID(leaderID), Leader: true},
 	}
 	for _, fid := range nodeIDs[1:] {
-		placements = append(placements, system.TierPlacement{
+		placements = append(placements, system.VaultPlacement{
 			StorageID: system.SyntheticStorageID(fid), Leader: false,
 		})
 	}
-	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tierID, Name: "cloud-tier", Type: system.VaultTypeFile, CloudServiceID: &csID,
-		VaultID: vaultID, Position: 0,
-	})
-	_ = store.SetTierPlacements(context.Background(), tierID, placements)
+	_ = store.SetVaultPlacements(context.Background(), vaultID, placements)
 	_ = store.PutVault(context.Background(), system.VaultConfig{
-		ID: vaultID, Name: "cloud-vault",
+		ID: vaultID, Name: "cloud-vault", Type: system.VaultTypeFile, CloudServiceID: &csID,
 	})
 	_ = store.PutCloudService(context.Background(), system.CloudService{
 		ID:           csID,
@@ -563,7 +553,7 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 		Provider:     "memory",
 		ArchivalMode: "active",
 		Transitions:  transitions,
-		RestoreTier:  "Standard",
+		RestoreSpeed:  "Standard",
 		RestoreDays:  7,
 	})
 
@@ -601,22 +591,22 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 		}
 		im := indexfile.NewManager(dir, nil, nil)
 
-		tier := &VaultInstance{
-			TierID: tierID, Type: "cloud",
+		vaultInst := &VaultInstance{
+			VaultID: vaultID, Type: "cloud",
 			Chunks: cm, Indexes: im, Query: query.New(cm, im, nil),
 		}
 		if isLeader {
-			tier.FollowerTargets = followerTargets
+			vaultInst.FollowerTargets = followerTargets
 		} else {
-			tier.IsFollower = true
+			vaultInst.IsFollower = true
 		}
 
-		orch.RegisterVault(NewVault(vaultID, tier))
+		orch.RegisterVault(NewVault(vaultID, vaultInst))
 		nodes[nid] = &clusterTestNode{
 			nodeID:   nid,
 			orch:     orch,
-			tiers:    []*VaultInstance{tier},
-			tierDirs: []string{dir},
+			instances:    []*VaultInstance{vaultInst},
+			instanceDirs: []string{dir},
 		}
 	}
 
@@ -635,8 +625,8 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 			n.orch.Stop()
 		}
 		for _, n := range nodes {
-			for _, tier := range n.tiers {
-				_ = tier.Chunks.Close()
+			for _, vaultInst := range n.instances {
+				_ = vaultInst.Chunks.Close()
 			}
 		}
 	})
@@ -646,7 +636,7 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 			nodes:    nodes,
 			cfgStore: store,
 			vaultID:  vaultID,
-			tierIDs:  []glid.GLID{tierID},
+			vaultIDs: []glid.GLID{vaultID},
 		},
 		cloudStore: cloudStore,
 		csID:       csID,
@@ -660,13 +650,13 @@ func TestCloudClusterArchivalSweepSetsArchivedOnLeader(t *testing.T) {
 	})
 
 	leaderNode := h.nodes["leader"]
-	leaderCM := leaderNode.tiers[0].Chunks.(*chunkfile.Manager)
+	leaderCM := leaderNode.instances[0].Chunks.(*chunkfile.Manager)
 
 	// Ingest, seal, upload to cloud on leader.
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 500 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		if err := leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+		if err := leaderNode.orch.AppendToVault(h.vaultID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "cluster-archive-%d", i),
 		}); err != nil {
 			t.Fatalf("append %d: %v", i, err)
@@ -720,13 +710,13 @@ func TestCloudClusterArchivalSweepOnlyRunsOnLeader(t *testing.T) {
 	})
 
 	leaderNode := h.nodes["leader"]
-	leaderCM := leaderNode.tiers[0].Chunks.(*chunkfile.Manager)
+	leaderCM := leaderNode.instances[0].Chunks.(*chunkfile.Manager)
 
 	// Ingest and upload on leader.
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 200 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		_ = leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+		_ = leaderNode.orch.AppendToVault(h.vaultID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "leader-only-%d", i),
 		})
 	}
@@ -761,13 +751,13 @@ func TestCloudClusterRestoreChunkViaOrchestrator(t *testing.T) {
 	})
 
 	leaderNode := h.nodes["leader"]
-	leaderCM := leaderNode.tiers[0].Chunks.(*chunkfile.Manager)
+	leaderCM := leaderNode.instances[0].Chunks.(*chunkfile.Manager)
 
 	// Ingest, seal, upload, archive.
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 200 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		_ = leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+		_ = leaderNode.orch.AppendToVault(h.vaultID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "restore-%d", i),
 		})
 	}
@@ -820,12 +810,12 @@ func TestCloudClusterArchivedChunkUnreadableOnLeader(t *testing.T) {
 	})
 
 	leaderNode := h.nodes["leader"]
-	leaderCM := leaderNode.tiers[0].Chunks.(*chunkfile.Manager)
+	leaderCM := leaderNode.instances[0].Chunks.(*chunkfile.Manager)
 
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 200 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		_ = leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+		_ = leaderNode.orch.AppendToVault(h.vaultID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "unreadable-%d", i),
 		})
 	}
@@ -869,12 +859,12 @@ func TestCloudClusterSweepThresholdBoundary(t *testing.T) {
 	})
 
 	leaderNode := h.nodes["leader"]
-	leaderCM := leaderNode.tiers[0].Chunks.(*chunkfile.Manager)
+	leaderCM := leaderNode.instances[0].Chunks.(*chunkfile.Manager)
 
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 200 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		_ = leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+		_ = leaderNode.orch.AppendToVault(h.vaultID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "boundary-%d", i),
 		})
 	}
@@ -921,7 +911,7 @@ func TestCloudClusterGracePeriodBoundary(t *testing.T) {
 	h := setupCloudCluster(t, nil)
 
 	leaderNode := h.nodes["leader"]
-	leaderCM := leaderNode.tiers[0].Chunks.(*chunkfile.Manager)
+	leaderCM := leaderNode.instances[0].Chunks.(*chunkfile.Manager)
 
 	// Set grace period to 3 days.
 	sys, _ := h.cfgStore.Load(context.Background())
@@ -932,7 +922,7 @@ func TestCloudClusterGracePeriodBoundary(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 100 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		_ = leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+		_ = leaderNode.orch.AppendToVault(h.vaultID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "grace-%d", i),
 		})
 	}
@@ -988,12 +978,12 @@ func TestCloudClusterArchivalSurvivesRestart(t *testing.T) {
 	})
 
 	leaderNode := h.nodes["leader"]
-	leaderCM := leaderNode.tiers[0].Chunks.(*chunkfile.Manager)
+	leaderCM := leaderNode.instances[0].Chunks.(*chunkfile.Manager)
 
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 200 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		_ = leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+		_ = leaderNode.orch.AppendToVault(h.vaultID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "restart-%d", i),
 		})
 	}
@@ -1024,7 +1014,7 @@ func TestCloudClusterArchivalSurvivesRestart(t *testing.T) {
 	}
 
 	// Simulate restart: close and reopen the chunk manager with the same directory.
-	dir := leaderNode.tierDirs[0]
+	dir := leaderNode.instanceDirs[0]
 	_ = leaderCM.Close()
 
 	cm2, err := chunkfile.NewManager(chunkfile.Config{
@@ -1054,13 +1044,13 @@ func TestCloudClusterReconcileSweepDetectsMissingBlobs(t *testing.T) {
 	h := setupCloudCluster(t, nil)
 
 	leaderNode := h.nodes["leader"]
-	leaderCM := leaderNode.tiers[0].Chunks.(*chunkfile.Manager)
+	leaderCM := leaderNode.instances[0].Chunks.(*chunkfile.Manager)
 
 	// Ingest, seal, upload.
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 200 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		_ = leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+		_ = leaderNode.orch.AppendToVault(h.vaultID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "reconcile-%d", i),
 		})
 	}
@@ -1102,7 +1092,7 @@ func TestCloudClusterReconcileSweepDetectsMissingBlobs(t *testing.T) {
 
 // TestCloudClusterReconcileSkipsTombstoned verifies that reconcile ignores
 // chunks our own retention just deleted. Without this, every retention
-// sweep on a cloud tier produced a paired WARN per evicted chunk
+// sweep on a cloud instance produced a paired WARN per evicted chunk
 // (cache/download fallback + reconcile/mark-suspect) and corresponding UI
 // alerts — dozens per second. See gastrolog-2c96i.
 func TestCloudClusterReconcileSkipsTombstoned(t *testing.T) {
@@ -1110,13 +1100,13 @@ func TestCloudClusterReconcileSkipsTombstoned(t *testing.T) {
 	h := setupCloudCluster(t, nil)
 
 	leaderNode := h.nodes["leader"]
-	leaderCM := leaderNode.tiers[0].Chunks.(*chunkfile.Manager)
+	leaderCM := leaderNode.instances[0].Chunks.(*chunkfile.Manager)
 
 	// Produce some sealed + uploaded cloud chunks.
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 200 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		_ = leaderNode.orch.AppendToVault(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+		_ = leaderNode.orch.AppendToVault(h.vaultID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "reconcile-tombstone-%d", i),
 		})
 	}
@@ -1135,7 +1125,7 @@ func TestCloudClusterReconcileSkipsTombstoned(t *testing.T) {
 	}
 
 	// Simulate what retention looks like from reconcile's point of view:
-	// the blobs are gone from cloud AND the tier FSM has tombstoned every
+	// the blobs are gone from cloud AND the vault-ctl FSM has tombstoned every
 	// chunk. The local cloud index still carries stale entries (that's
 	// the window reconcile historically noticed).
 	_ = h.cloudStore.List(context.Background(), "", func(info blobstore.BlobInfo) error {
@@ -1145,7 +1135,7 @@ func TestCloudClusterReconcileSkipsTombstoned(t *testing.T) {
 	for _, m := range metasBefore {
 		tombstoned[m.ID] = true
 	}
-	leaderNode.tiers[0].IsTombstoned = func(id chunk.ChunkID) bool {
+	leaderNode.instances[0].IsTombstoned = func(id chunk.ChunkID) bool {
 		return tombstoned[id]
 	}
 

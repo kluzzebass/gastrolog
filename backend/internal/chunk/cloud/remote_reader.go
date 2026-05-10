@@ -23,7 +23,7 @@ import (
 // the returned Reader's Close().
 //
 // Cloud transport contract: cloud blobs are zstd-compressed wrappers
-// around GLCBs (see docs/vault_redesign.md decisions 6 and 9). The
+// around GLCBs (see docs/obsoleted/vault_redesign.md decisions 6 and 9). The
 // format itself is silent on compression; the wrapper is added at
 // upload and removed at download. This function is the canonical
 // download-side unwrap.

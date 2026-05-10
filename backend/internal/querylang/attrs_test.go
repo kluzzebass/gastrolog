@@ -185,7 +185,7 @@ func TestMatchAttrsGlobKeyPattern(t *testing.T) {
 	if !MatchAttrs(dnf, map[string]string{"label.env": "prod"}) {
 		t.Error("should match glob key")
 	}
-	if !MatchAttrs(dnf, map[string]string{"label.tier": "prod"}) {
+	if !MatchAttrs(dnf, map[string]string{"label.role": "prod"}) {
 		t.Error("should match different glob key with same value")
 	}
 	if MatchAttrs(dnf, map[string]string{"label.env": "staging"}) {

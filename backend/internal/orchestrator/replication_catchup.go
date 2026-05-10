@@ -13,56 +13,54 @@ import (
 )
 
 // ScheduleCatchup schedules catchup replication for newly added followers of
-// a tier within the given vault. Must be called on the node that holds the
-// tier leader replica — no-op if this node is a follower or does not host
-// the tier. The caller owns the (vaultID, tierID) pair; the orchestrator
-// does not reverse-lookup by tierID alone.
-func (o *Orchestrator) ScheduleCatchup(vaultID, tierID glid.GLID, followerNodeIDs []string) {
+// the given vault. Must be called on the node that holds the vault leader
+// replica — no-op if this node is a follower or does not host the vault.
+func (o *Orchestrator) ScheduleCatchup(vaultID glid.GLID, followerNodeIDs []string) {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
 	var found *VaultInstance
-	if vault != nil && vault.Instance != nil && vault.Instance.TierID == tierID {
+	if vault != nil && vault.Instance != nil {
 		found = vault.Instance
 	}
 	o.mu.RUnlock()
 	if found == nil || found.IsFollower {
 		return
 	}
-	o.scheduleCatchup(vaultID, tierID, followerNodeIDs)
+	o.scheduleCatchup(vaultID, followerNodeIDs)
 }
 
 // scheduleCatchup schedules background jobs to replicate existing sealed chunks
 // from the leader to newly added follower nodes.
-func (o *Orchestrator) scheduleCatchup(vaultID, tierID glid.GLID, newFollowers []string) {
+func (o *Orchestrator) scheduleCatchup(vaultID glid.GLID, newFollowers []string) {
 	for _, nodeID := range newFollowers {
-		o.scheduleCatchupForNode(vaultID, tierID, nodeID, 0)
+		o.scheduleCatchupForNode(vaultID, nodeID, 0)
 	}
 }
 
 const maxCatchupRetries = 3
 
-func (o *Orchestrator) scheduleCatchupForNode(vaultID, tierID glid.GLID, nodeID string, attempt int) {
-	name := "replication-catchup:" + vaultID.String() + ":" + tierID.String() + ":" + nodeID
+func (o *Orchestrator) scheduleCatchupForNode(vaultID glid.GLID, nodeID string, attempt int) {
+	name := "replication-catchup:" + vaultID.String() + ":" + nodeID
 	if attempt > 0 {
 		name += fmt.Sprintf(":retry-%d", attempt)
 	}
 	if err := o.scheduler.RunOnce(name, func() {
 		// On retries, wait for the recovering node to finish building
-		// its tiers. The tier appears within a few seconds as the
+		// its vaults. The instance appears within a few seconds as the
 		// dispatch processes Raft notifications after ApplyConfig.
 		if attempt > 0 {
 			<-time.After(5 * time.Second)
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), cluster.CatchupTimeout)
 		defer cancel()
-		if err := o.catchupFollower(ctx, vaultID, tierID, nodeID); err != nil {
+		if err := o.catchupFollower(ctx, vaultID, nodeID); err != nil {
 			if attempt < maxCatchupRetries && strings.Contains(err.Error(), "not ready") {
 				o.logger.Info("catchup: follower not ready, will retry",
-					"vault", vaultID, "tier", tierID, "node", nodeID,
+					"vault", vaultID, "node", nodeID,
 					"attempt", attempt+1)
-				o.scheduleCatchupForNode(vaultID, tierID, nodeID, attempt+1)
+				o.scheduleCatchupForNode(vaultID, nodeID, attempt+1)
 			} else {
-				o.logger.Warn("catchup failed", "vault", vaultID, "tier", tierID, "node", nodeID, "error", err)
+				o.logger.Warn("catchup failed", "vault", vaultID, "node", nodeID, "error", err)
 			}
 		}
 	}); err != nil {
@@ -71,37 +69,37 @@ func (o *Orchestrator) scheduleCatchupForNode(vaultID, tierID glid.GLID, nodeID 
 	o.scheduler.Describe(name, "Replicate sealed chunks to follower "+nodeID[:8])
 }
 
-// catchupFollower copies all sealed chunks from the leader's tier to a
-// follower node. Each chunk's records are streamed via TransferRecords,
+// catchupFollower copies all sealed chunks from the leader's vault instance
+// to a follower node. Each chunk's records are streamed via TransferRecords,
 // producing an identical sealed chunk on the follower.
-func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, tierID glid.GLID, nodeID string) error {
-	tier := o.findLocalTier(vaultID, tierID)
-	if tier == nil {
-		return fmt.Errorf("tier %s not found in vault %s", tierID, vaultID)
+func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID glid.GLID, nodeID string) error {
+	vaultInst := o.findLocalVaultInstance(vaultID)
+	if vaultInst == nil {
+		return fmt.Errorf("vault %s not found", vaultID)
 	}
-	if tier.IsFollower {
+	if vaultInst.IsFollower {
 		return nil // only leader initiates catchup
 	}
 	if o.chunkReplicator == nil {
-		return errors.New("no tier replicator configured")
+		return errors.New("no chunk replicator configured")
 	}
 
-	metas, err := tier.Chunks.List()
+	metas, err := vaultInst.Chunks.List()
 	if err != nil {
 		return fmt.Errorf("list chunks: %w", err)
 	}
 
-	// Snapshot the tier FSM manifest at the start of the catchup pass.
+	// Snapshot the vault-ctl FSM manifest at the start of the catchup pass.
 	// We use it to filter out chunks that have already been retired from the
 	// cluster's view of the data — there's a race window between the FSM
 	// applying a delete and the leader's local file actually being unlinked,
-	// during which tier.Chunks.List() will still return the chunk. Sending
+	// during which instance.Chunks.List() will still return the chunk. Sending
 	// such a chunk would be wasted work: the receiver would write it to disk
 	// and immediately apply the matching CmdRequestDelete (see gastrolog-5grpa
 	// and the gastrolog-51gme receipt protocol).
 	var manifestSet map[chunk.ChunkID]bool
-	if tier.ListManifest != nil {
-		ids := tier.ListManifest()
+	if vaultInst.ListManifest != nil {
+		ids := vaultInst.ListManifest()
 		manifestSet = make(map[chunk.ChunkID]bool, len(ids))
 		for _, id := range ids {
 			manifestSet[id] = true
@@ -110,35 +108,35 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, tierID glid
 
 	// Phase 3 (gastrolog-1huz5): overlay through FSM so catchupCandidates'
 	// .Sealed gate excludes Sealing chunks (GLCB not yet committed).
-	if tier.OverlayFromFSM != nil {
+	if vaultInst.OverlayFromFSM != nil {
 		for i := range metas {
-			metas[i] = tier.OverlayFromFSM(metas[i])
+			metas[i] = vaultInst.OverlayFromFSM(metas[i])
 		}
 	}
-	sealed := catchupCandidates(metas, tier.Type, manifestSet)
+	sealed := catchupCandidates(metas, vaultInst.Type, manifestSet)
 
 	if len(sealed) == 0 {
 		o.logger.Debug("replication catchup: no sealed chunks to copy",
-			"vault", vaultID, "tier", tierID, "follower", nodeID)
+			"vault", vaultID, "follower", nodeID)
 		return nil
 	}
 
 	o.logger.Info("replication catchup: starting",
-		"vault", vaultID, "tier", tierID, "follower", nodeID, "chunks", len(sealed))
+		"vault", vaultID, "follower", nodeID, "chunks", len(sealed))
 
 	transferred := 0
 	for _, meta := range sealed {
-		if err := o.replicateToFollower(ctx, vaultID, tierID, meta.ID, tier.Chunks, nodeID); err != nil {
-			// If the follower rejected because its tier isn't built yet
+		if err := o.replicateToFollower(ctx, vaultID, meta.ID, vaultInst.Chunks, nodeID); err != nil {
+			// If the follower rejected because its vault isn't built yet
 			// (recovering node still in startup), return a retryable error.
-			// The scheduler will re-run the job. Sentinel sentinels don't
+			// The scheduler will re-run the job. Sentinel errors don't
 			// survive the cluster RPC boundary (the handler concatenates
 			// strings) so we substring-match both error wordings — the
-			// legacy "vault not found" and the new "tier not registered on
-			// this node" (gastrolog-2t48z).
+			// legacy "vault not found" and the new "instance not registered
+			// on this node" (gastrolog-2t48z).
 			msg := err.Error()
-			if strings.Contains(msg, "vault not found") || strings.Contains(msg, "tier not registered on this node") {
-				return fmt.Errorf("follower %s not ready for tier %s (still building): %w", nodeID, tierID, err)
+			if strings.Contains(msg, "vault not found") || strings.Contains(msg, "instance not registered on this node") {
+				return fmt.Errorf("follower %s not ready for vault %s (still building): %w", nodeID, vaultID, err)
 			}
 			o.logger.Warn("replication catchup: transfer failed",
 				"chunk", meta.ID.String(), "follower", nodeID, "error", err)
@@ -146,12 +144,12 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, tierID glid
 		}
 		transferred++
 		o.logger.Debug("replication catchup: chunk transferred",
-			"vault", vaultID, "tier", tierID, "chunk", meta.ID.String(), "follower", nodeID,
+			"vault", vaultID, "chunk", meta.ID.String(), "follower", nodeID,
 			"records", meta.RecordCount)
 	}
 
 	o.logger.Info("replication catchup: completed",
-		"vault", vaultID, "tier", tierID, "follower", nodeID,
+		"vault", vaultID, "follower", nodeID,
 		"transferred", transferred, "total", len(sealed))
 	return nil
 }
@@ -161,29 +159,31 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, tierID glid
 // reconciler (SweepMissingReplicas) computes its FSM-vs-disk diff and
 // sends the requested chunk IDs to the leader; this method validates
 // each chunk against catchupCandidates' filters (sealed locally,
-// uncompressed-file-tier exclusion, cloud-backed exclusion, FSM
-// manifest membership) and fans pushes out asynchronously via the
-// existing replicateToFollower machinery.
+// cloud-backed exclusion, FSM manifest membership) and fans pushes out
+// asynchronously via the existing replicateToFollower machinery.
 //
 // Returns the count of pushes scheduled — not delivered. The follower
 // will re-request anything still missing on its next sweep tick if a
 // push fails after this call returns. Asynchronous fan-out is a
 // deliberate choice: the RPC stays cheap, the slow per-chunk transfers
-// run on a single goroutine sequentially per (vault, tier, requester)
-// to avoid storming the bandwidth path. See gastrolog-2dgvj.
-func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID, tierID glid.GLID, requesterNodeID string, chunkIDs []chunk.ChunkID) (uint32, error) {
-	tier := o.findLocalTier(vaultID, tierID)
-	if tier == nil {
-		return 0, fmt.Errorf("tier %s not found in vault %s", tierID, vaultID)
+// run on a single goroutine sequentially per (vault, requester) to
+// avoid storming the bandwidth path. See gastrolog-2dgvj.
+func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID glid.GLID, requesterNodeID string, chunkIDs []chunk.ChunkID) (uint32, error) {
+	o.mu.RLock()
+	vault := o.vaults[vaultID]
+	o.mu.RUnlock()
+	if vault == nil || vault.Instance == nil {
+		return 0, fmt.Errorf("vault %s not found", vaultID)
 	}
-	if tier.IsFollower {
-		return 0, fmt.Errorf("not placement leader for tier %s (follower)", tierID)
+	vaultInst := vault.Instance
+	if vaultInst.IsFollower {
+		return 0, fmt.Errorf("not placement leader for vault %s (follower)", vaultID)
 	}
 	if o.chunkReplicator == nil {
-		return 0, errors.New("no tier replicator configured")
+		return 0, errors.New("no chunk replicator configured")
 	}
 
-	metas, err := tier.Chunks.List()
+	metas, err := vaultInst.Chunks.List()
 	if err != nil {
 		return 0, fmt.Errorf("list chunks: %w", err)
 	}
@@ -193,8 +193,8 @@ func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID, tierI
 	}
 
 	var manifestSet map[chunk.ChunkID]bool
-	if tier.ListManifest != nil {
-		ids := tier.ListManifest()
+	if vaultInst.ListManifest != nil {
+		ids := vaultInst.ListManifest()
 		manifestSet = make(map[chunk.ChunkID]bool, len(ids))
 		for _, id := range ids {
 			manifestSet[id] = true
@@ -215,8 +215,8 @@ func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID, tierI
 		// only. Sealing chunks have no GLCB yet — overlay through the
 		// FSM so we don't queue a push for a chunk that's still in
 		// assembly.
-		if tier.OverlayFromFSM != nil {
-			m = tier.OverlayFromFSM(m)
+		if vaultInst.OverlayFromFSM != nil {
+			m = vaultInst.OverlayFromFSM(m)
 		}
 		if !m.Sealed {
 			continue
@@ -232,13 +232,13 @@ func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID, tierI
 
 	if len(eligible) == 0 {
 		o.logger.Info("replica catchup: no eligible chunks to push",
-			"vault", vaultID, "tier", tierID, "requester", requesterNodeID,
+			"vault", vaultID, "requester", requesterNodeID,
 			"requested", len(chunkIDs))
 		return 0, nil
 	}
 
 	o.logger.Info("replica catchup: scheduling pushes",
-		"vault", vaultID, "tier", tierID, "requester", requesterNodeID,
+		"vault", vaultID, "requester", requesterNodeID,
 		"scheduled", len(eligible), "requested", len(chunkIDs))
 
 	// Run the actual pushes asynchronously so the RPC returns promptly.
@@ -250,16 +250,16 @@ func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID, tierI
 		defer cancel()
 		transferred := 0
 		for _, m := range eligible {
-			if err := o.replicateToFollower(ctxBg, vaultID, tierID, m.ID, tier.Chunks, requesterNodeID); err != nil {
+			if err := o.replicateToFollower(ctxBg, vaultID, m.ID, vaultInst.Chunks, requesterNodeID); err != nil {
 				o.logger.Warn("replica catchup: push failed",
-					"vault", vaultID, "tier", tierID, "chunk", m.ID.String(),
+					"vault", vaultID, "chunk", m.ID.String(),
 					"requester", requesterNodeID, "error", err)
 				continue
 			}
 			transferred++
 		}
 		o.logger.Info("replica catchup: completed",
-			"vault", vaultID, "tier", tierID, "requester", requesterNodeID,
+			"vault", vaultID, "requester", requesterNodeID,
 			"transferred", transferred, "scheduled", len(eligible))
 	}()
 
@@ -268,8 +268,7 @@ func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID, tierI
 }
 
 // catchupCandidates filters chunk metas to those eligible for catchup
-// replication. Excludes unsealed, uncompressed file-tier, cloud-backed,
-// and FSM-retired chunks.
+// replication. Excludes unsealed, cloud-backed, and FSM-retired chunks.
 func catchupCandidates(metas []chunk.ChunkMeta, _ string, manifestSet map[chunk.ChunkID]bool) []chunk.ChunkMeta {
 	var out []chunk.ChunkMeta
 	for _, m := range metas {

@@ -162,7 +162,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		Home: hd, NodeID: nodeID, JoinAddr: cfg.JoinAddr,
 		ClusterSrv: clusterSrv, ClusterTLS: clusterTLS,
 		Logger: logger, FSMOpts: []raftfsm.Option{raftfsm.WithOnApply(disp.Handle)},
-		TierRaftSharesWAL: clusterSrv != nil,
+		VaultCtlRaftSharesWAL: clusterSrv != nil,
 	})
 	if err != nil {
 		return fmt.Errorf("open config store: %w", err)
@@ -212,7 +212,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// Shared shutdown phase. Constructed once per process and threaded into
 	// every subsystem that needs to short-circuit work during drain — the
 	// orchestrator's replication fanout, the cluster server's stream
-	// handlers, the tier announcer, etc. See gastrolog-1e5ke.
+	// handlers, the vault announcer, etc. See gastrolog-1e5ke.
 	shutdownPhase := lifecycle.New()
 
 	orch, err := orchestrator.New(orchestrator.Config{
@@ -253,7 +253,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		return err
 	}
 
-	groupMgr, tierWAL, nodeAddrResolver := setupMultiRaft(clusterSrv, rawStore, nodeID, homeDir, logger)
+	groupMgr, vaultWAL, nodeAddrResolver := setupMultiRaft(clusterSrv, rawStore, nodeID, homeDir, logger)
 
 	factories := buildFactories(logger, homeDir, vaultsDir, cfgStore, orch, certMgr, cfg.SlogCapture, cfg.SlogCaptureHandler, alertCollector, groupMgr, nodeAddrResolver, nodeID)
 	if clusterSrv != nil {
@@ -276,8 +276,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	disp.orch = orch
 	disp.cfgStore = cfgStore
 	disp.factories = factories
-	disp.catchupScheduler = func(vaultID, tierID glid.GLID, followerNodeIDs []string) {
-		orch.ScheduleCatchup(vaultID, tierID, followerNodeIDs)
+	disp.catchupScheduler = func(vaultID glid.GLID, followerNodeIDs []string) {
+		orch.ScheduleCatchup(vaultID, followerNodeIDs)
 	}
 
 	// Wire follower-driven replica catchup (gastrolog-2dgvj). The cluster
@@ -285,13 +285,11 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// validates leadership, filters chunk eligibility, and fans out pushes
 	// asynchronously via the existing replicateToFollower machinery.
 	if clusterSrv != nil {
-		clusterSrv.SetReplicaCatchupFn(func(ctx context.Context, vaultID, tierID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (int, error) {
-			n, err := orch.CatchupSelectedChunks(ctx, vaultID, tierID, requesterNodeID, chunkIDs)
+		clusterSrv.SetReplicaCatchupFn(func(ctx context.Context, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (int, error) {
+			n, err := orch.CatchupSelectedChunks(ctx, vaultID, requesterNodeID, chunkIDs)
 			return int(n), err
 		})
 	}
-
-	orch.OnTierDrainComplete = makeTierDrainCompleteHandler(cfgStore, logger)
 
 	if err := startOrchestrator(ctx, logger, orch, appSys, factories); err != nil {
 		return err
@@ -306,7 +304,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 	wireClusterRaftApplies(clusterSrv, groupMgr)
 
-	// Tier Raft group membership is reconciled by per-tier leader loops
+	// Vault-ctl Raft group membership is reconciled by per-vault leader loops
 	// (raftgroup.LeaderLoop) wired by reconfig_vaults.go. On snapshot
 	// restore the loops fire as soon as elections complete and reconcile
 	// from inside the leader epoch.
@@ -323,7 +321,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 	broadcaster, peerState, peerJobState, localStatsFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, recordForwarder, alertCollector, nodeID, cfg.ServerAddr, cfg.PprofAddr, statsSignal)
 
-	// Start tier placement manager (cluster mode only).
+	// Start vault placement manager (cluster mode only).
 	var placementReconcileFn func(ctx context.Context)
 	if clusterSrv != nil && peerState != nil {
 		pm := &placementManager{
@@ -347,8 +345,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 				// persistent stream on the shared grpc.ClientConn, which
 				// the forwarder observes as EOF. Expiring the peer from
 				// LivePeers() on that signal causes placement to evict
-				// the node from its tiers, which in turn triggers
-				// RemoveTierFromVault → sealAndDeleteAllChunks — the
+				// the node from its vaults, which in turn triggers
+				// RemoveVaultInstance → sealAndDeleteAllChunks — the
 				// cluster-wide data wipe. Raft heartbeats and PeerState's
 				// stats-broadcast TTL remain the canonical liveness
 				// signals; pm.Trigger() alone is idempotent when inputs
@@ -410,28 +408,13 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		SetNodeSuffrageFunc: setNodeSuffrageFn,
 		Dispatcher:          disp,
 		GroupMgr:            groupMgr,
-		WAL:                 tierWAL,
+		WAL:                 vaultWAL,
 		ConfigStore:         proxy,
 		PlacementReconcile:  placementReconcileFn,
 
 		BootstrapTokenServeSecret: cfg.BootstrapTokenServeSecret,
 		BootstrapTokenFn:          makeBootstrapTokenFn(cfgStore),
 	})
-}
-
-// makeTierDrainCompleteHandler returns a callback that deletes the drained tier
-// config (removing its vault association). Vault control-plane Raft is not
-// torn down per tier.
-func makeTierDrainCompleteHandler(cfgStore system.Store, logger *slog.Logger) func(context.Context, glid.GLID, glid.GLID) {
-	return func(ctx context.Context, _, tierID glid.GLID) {
-		// Tier ownership lives on TierConfig.VaultID — deleting the tier
-		// config removes the association. The drain=false flag avoids
-		// re-triggering a drain notification.
-		if err := cfgStore.DeleteTier(ctx, tierID, false); err != nil {
-			logger.Error("tier drain complete: failed to delete tier config",
-				"tier", tierID, "error", err)
-		}
-	}
 }
 
 // wireClusterForwarding sets up cross-node record, search, context, vault,
@@ -482,11 +465,11 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 		}
 		return err
 	})
-	clusterSrv.SetRecordTierAppender(func(ctx context.Context, vaultID, tierID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error {
+	clusterSrv.SetVaultRecordAppender(func(ctx context.Context, vaultID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error {
 		if err := waitForOrch(ctx); err != nil {
 			return err
 		}
-		err := orch.AppendToVault(vaultID, tierID, leaderChunkID, rec)
+		err := orch.AppendToVault(vaultID, leaderChunkID, rec)
 		if err != nil && errors.Is(err, orchestrator.ErrVaultNotReady) {
 			return errors.Join(cluster.ErrForwardTargetNotReady, err)
 		}
@@ -497,8 +480,8 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	chunkTransferrer := cluster.NewChunkTransferrer(peerConns)
 	orch.SetRemoteTransferrer(chunkTransferrer)
 
-	// Tier replication: unified ordered stream per tier per follower.
-	chunkReplicator := cluster.NewChunkReplicator(peerConns, logger.With("component", "tier-replicator"))
+	// Vault replication: unified ordered stream per vault per follower.
+	chunkReplicator := cluster.NewChunkReplicator(peerConns, logger.With("component", "vault-replicator"))
 	orch.SetChunkReplicator(chunkReplicator)
 
 	// Same readiness gate for bulk chunk imports.
@@ -508,23 +491,12 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 		}
 		return orch.ImportChunkRecords(ctx, vaultID, next)
 	})
-	clusterSrv.SetTierRecordImporter(func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
+	clusterSrv.SetVaultRecordImporter(func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
 		if err := waitForOrch(ctx); err != nil {
 			return err
 		}
-		return orch.ImportToVault(ctx, vaultID, tierID, chunkID, next)
+		return orch.ImportToVault(ctx, vaultID, chunkID, next)
 	})
-	clusterSrv.SetTierStreamAppender(func(ctx context.Context, vaultID, tierID glid.GLID, next chunk.RecordIterator) error {
-		if err := waitForOrch(ctx); err != nil {
-			return err
-		}
-		err := orch.StreamAppendToTier(ctx, vaultID, tierID, next)
-		if err != nil && errors.Is(err, orchestrator.ErrVaultNotReady) {
-			return errors.Join(cluster.ErrForwardTargetNotReady, err)
-		}
-		return err
-	})
-
 	searchForwarder := cluster.NewSearchForwarder(peerConns)
 	clusterSrv.SetSearchExecutor(newSearchExecutor(orch))
 	clusterSrv.SetContextExecutor(newContextExecutor(orch))
@@ -534,11 +506,11 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	clusterSrv.SetGetChunkExecutor(newGetChunkExecutor(orch))
 	clusterSrv.SetAnalyzeChunkExecutor(newAnalyzeChunkExecutor(orch))
 	clusterSrv.SetSealVaultExecutor(newSealVaultExecutor(orch))
-	clusterSrv.SetSealTierExecutor(func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
-		return orch.SealActiveTier(vaultID, tierID, chunkID)
+	clusterSrv.SetChunkSealExecutor(func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID) error {
+		return orch.SealActiveChunk(vaultID, chunkID)
 	})
-	clusterSrv.SetDeleteChunkExecutor(func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
-		return orch.DeleteChunkFromTier(vaultID, tierID, chunkID)
+	clusterSrv.SetDeleteChunkExecutor(func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID) error {
+		return orch.DeleteChunk(vaultID, chunkID)
 	})
 	clusterSrv.SetReindexVaultExecutor(newReindexVaultExecutor(orch))
 	clusterSrv.SetExplainExecutor(newExplainExecutor(orch, nodeID))
@@ -700,7 +672,7 @@ func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cf
 		// Wait for a leader AND for the local FSM to catch up to the cluster's
 		// latest committed state before reading anything from it. hraft's
 		// NewRaft returns with the FSM at the snapshot level; post-snapshot
-		// committed entries (tier placements, NSCs, etc.) only become visible
+		// committed entries (vault placements, NSCs, etc.) only become visible
 		// after either a Barrier on the leader or a few AppendEntries rounds
 		// on a follower. Without this wait, the orchestrator reads stale
 		// state and creates vault-ctl Raft groups with incomplete member lists.
@@ -1019,7 +991,7 @@ type serverDeps struct {
 	SetNodeSuffrageFunc func(ctx context.Context, nodeID string, voter bool) error
 	Dispatcher          *configDispatcher
 	GroupMgr            *raftgroup.GroupManager
-	WAL                 *raftwal.WAL // tier-group WAL (same file as system raft when cluster mode); nil = per-group boltdb
+	WAL                 *raftwal.WAL // vault-group WAL (same file as system raft when cluster mode); nil = per-group boltdb
 	ConfigStore         io.Closer    // rawStore — closed before gRPC for clean Raft shutdown
 	PlacementReconcile  func(ctx context.Context)
 

@@ -80,17 +80,17 @@ type Factories struct {
 	VaultsDir string
 
 	// GroupManager, when non-nil, manages vault-ctl Raft groups for chunk metadata
-	// replication. buildTierInstance creates a Raft group per tier and wires
+	// replication. buildInstance creates a Raft group per instance and wires
 	// a RaftAnnouncer to the chunk manager.
 	GroupManager *raftgroup.GroupManager
 
 	// NodeAddressResolver maps a node ID to its Raft server address.
-	// Used to build vault-ctl Raft group membership from tier config's node assignments.
-	// When nil, tier groups bootstrap as single-node (no cross-node replication).
+	// Used to build vault-ctl Raft group membership from instance config's node assignments.
+	// When nil, instance groups bootstrap as single-node (no cross-node replication).
 	NodeAddressResolver func(nodeID string) (string, bool)
 
 	// PeerConns provides cached gRPC connections to cluster peers.
-	// Used by the tier apply forwarder to forward Raft applies when
+	// Used by the instance apply forwarder to forward Raft applies when
 	// the config placement leader is not the vault-ctl Raft leader.
 	// Nil in single-node mode.
 	PeerConns *cluster.PeerConns
@@ -119,7 +119,7 @@ func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) erro
 		return err
 	}
 	// Retention and rotation are now applied per-vault inside initVault
-	// via applyTierPolicies. No separate pass needed.
+	// via applyVaultPolicies. No separate pass needed.
 	if err := o.applyIngesters(sys, factories); err != nil {
 		return err
 	}
@@ -136,7 +136,7 @@ func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) erro
 	return nil
 }
 
-// applyVaults creates tier instances for each vault in the config,
+// applyVaults creates vault instances for each vault in the config,
 // compiles filters, and registers vaults.
 func (o *Orchestrator) applyVaults(sys *system.System, factories Factories) error {
 	cfg := &sys.Config
@@ -161,7 +161,7 @@ func (o *Orchestrator) applyVaults(sys *system.System, factories Factories) erro
 	return nil
 }
 
-// initVault creates tier instances for a single vault and registers it.
+// initVault creates vault instances for a single vault and registers it.
 // Returns nil on success and on recoverable init failures (vault is skipped).
 // Returns an error only for structural config problems.
 func (o *Orchestrator) initVault(sys *system.System, vaultCfg system.VaultConfig, factories Factories) error {
@@ -180,10 +180,10 @@ func (o *Orchestrator) initVault(sys *system.System, vaultCfg system.VaultConfig
 
 	// Register the vault even when no instance is built locally (this node
 	// has no placement). Matches AddVault's runtime behaviour: the vault
-	// shell is registered so a later placement-driven AddTierToVault can
+	// shell is registered so a later placement-driven AddVaultInstance can
 	// hydrate it. On cluster snapshot restore there's no NotifyVaultPut for
 	// bulk-loaded state, so initVault must register here or subsequent
-	// AddTierToVault fires "vault not found" in a loop. See gastrolog-264pk.
+	// AddVaultInstance fires "vault not found" in a loop. See gastrolog-264pk.
 	vault := NewVault(vaultCfg.ID, instance)
 	vault.Name = vaultCfg.Name
 	vault.Enabled = vaultCfg.Enabled
@@ -197,28 +197,28 @@ func (o *Orchestrator) initVault(sys *system.System, vaultCfg system.VaultConfig
 }
 
 // startRetentionSweep registers the single retention sweep job that discovers
-// and evaluates all tier instances each tick. No per-tier lifecycle needed.
+// and evaluates all vault instances each tick. No per-vault lifecycle needed.
 func (o *Orchestrator) startRetentionSweep() error {
 	if err := o.scheduler.AddJob(retentionJobName, defaultRetentionSchedule, o.retentionSweepAll); err != nil {
 		return fmt.Errorf("retention sweep job: %w", err)
 	}
-	o.scheduler.Describe(retentionJobName, "Retention sweep (all tiers)")
+	o.scheduler.Describe(retentionJobName, "Retention sweep (all vaults)")
 	return nil
 }
 
-// startTierCatchupSweep registers the periodic per-node sweep that drives
-// local-state convergence on every tier instance. Every 20 seconds
+// startInstanceCatchupSweep registers the periodic per-node sweep that drives
+// local-state convergence on every vault instance. Every 20 seconds
 // (cron 13/33/53s, phase-offset from the retention sweep at second 0)
 // every node walks its OWN vault-ctl FSM and runs three independent
-// reconciliation passes per tier — see tierCatchupSweepAll for the
+// reconciliation passes per instance — see vaultCatchupSweepAll for the
 // per-pass invariants. Covers receipt-protocol delete convergence
 // (gastrolog-51gme) and create-side replication catchup
 // (gastrolog-2dgvj).
-func (o *Orchestrator) startTierCatchupSweep() error {
-	if err := o.scheduler.AddJob(tierCatchupSweepJobName, tierCatchupSweepSchedule, o.tierCatchupSweepAll); err != nil {
-		return fmt.Errorf("tier catchup sweep job: %w", err)
+func (o *Orchestrator) startInstanceCatchupSweep() error {
+	if err := o.scheduler.AddJob(vaultCatchupSweepJobName, vaultCatchupSweepSchedule, o.vaultCatchupSweepAll); err != nil {
+		return fmt.Errorf("vault catchup sweep job: %w", err)
 	}
-	o.scheduler.Describe(tierCatchupSweepJobName, "Tier catchup sweep (delete + orphan + replica convergence)")
+	o.scheduler.Describe(vaultCatchupSweepJobName, "Vault catchup sweep (delete + orphan + replica convergence)")
 	return nil
 }
 

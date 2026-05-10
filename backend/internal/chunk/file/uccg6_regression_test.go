@@ -17,17 +17,17 @@ import (
 //
 // Topology-independent contract: the FSM is authoritative; if it
 // says sealed, the local Manager's active pointer must yield. This
-// holds equally for ingest tiers (where a continuous record-stream
-// would eventually swap active too) and for downstream tiers (where
+// holds equally for ingest vaults (where a continuous record-stream
+// would eventually swap active too) and for downstream vaults (where
 // no continuous record-stream means no natural swap, see
 // gastrolog-2yeht). The "skip-active in steady state" variant
-// previously introduced was wrong for downstream tiers — reverted
+// previously introduced was wrong for downstream vaults — reverted
 // in 2yeht.
 //
 // Original incident: a follower restarted after the cluster sealed
 // its in-flight chunk in absence; pre-fix, EnsureSealed silently
 // skipped the still-active chunk and the local Manager kept
-// appending past the rotation cap (53K records on a 10K-cap tier;
+// appending past the rotation cap (53K records on a 10K-cap vault;
 // replica_count=1).
 //
 // Post-fix: EnsureSealed force-demotes the local active pointer

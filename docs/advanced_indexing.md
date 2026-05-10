@@ -1,6 +1,6 @@
 # Advanced Indexing & Compression Approaches for Chunk-Local Search
 
-**Status:** Research artifact for [gastrolog-4dh5i](https://github.com/kluzzebass/gastrolog/issues). Reviewed against the GLCB chunk format ([gastrolog-2n697](https://github.com/kluzzebass/gastrolog/issues)) and the existing per-tier file/cloud chunk managers.
+**Status:** Research artifact for [gastrolog-4dh5i](https://github.com/kluzzebass/gastrolog/issues). Reviewed against the GLCB chunk format ([gastrolog-2n697](https://github.com/kluzzebass/gastrolog/issues)) and the existing file (optionally cloud-backed) chunk manager.
 
 **Scope:** What indexing + compression techniques should GastroLog use *inside a single sealed chunk* to make field-level search fast without requiring full decompression? All approaches must be applicable chunk-locally — there is no global cluster-wide index, by design.
 
@@ -33,7 +33,7 @@ Concrete shape:
 
 The single biggest performance lever from production systems (Lucene, ClickHouse, Splunk, Husky, Quickwit) is **always decide-then-decompress**, never decompress-then-search. Every component above respects that ordering. The single biggest engineering lever is **the codec abstraction** — Lucene proved this in 2010 and Bluge proved it works in Go; pick a versioned codec interface from day one so the chunk format can evolve without rewrites.
 
-What this is **not**: it is not Loki's "scan everything" model (only works with strict label discipline that GastroLog's "any vault, any tier" doesn't enforce); it is not Honeycomb Retriever's pure-column-scan model (works for analytics queries on wide events, loses to bloom-skipping for grep-style log queries); and it is not a CLP-only design (cgo cost is real, and CLP's search engine is not exposed in `clp-ffi-go` as of April 2026).
+What this is **not**: it is not Loki's "scan everything" model (only works with strict label discipline that GastroLog's "any vault, any storage shape" doesn't enforce); it is not Honeycomb Retriever's pure-column-scan model (works for analytics queries on wide events, loses to bloom-skipping for grep-style log queries); and it is not a CLP-only design (cgo cost is real, and CLP's search engine is not exposed in `clp-ffi-go` as of April 2026).
 
 ---
 
@@ -93,7 +93,7 @@ What this is **not**: it is not Loki's "scan everything" model (only works with 
 
 **Bluge's Ice segment format (Go).** Bluge is `blugelabs`' Go-native fork of Bleve, designed around a versioned **Ice** segment format with a pluggable codec interface. Vellum FST per field, postings, doc-values, mmap by default. Pure Go, no cgo. **This is the closest existing reference for "Lucene-style indexing in Go."** Read the Ice format before designing GastroLog's chunk index — there's a high probability Bluge's format is good enough to *embed* directly inside the GLCB blob, or to use as the inspiration for a GastroLog-tuned codec. Repo: [github.com/blugelabs/bluge](https://github.com/blugelabs/bluge).
 
-**Quickwit hotcache footer.** Quickwit's `hotcache` is a small (KB to single-digit MB) blob at the end of every split that contains the metadata structures (term dict roots, fast field metadata, file pointers) needed to *open* the split. With it, a searcher answers queries by issuing precisely-targeted byte-range GETs to S3 instead of downloading the index. **For GastroLog's cross-node and cloud-tier search story, this is the most directly portable idea in the survey.** Co-locate the footer with the chunk; teach the cluster's record forwarder to fetch just the footer, plan, then fetch only the body bytes the query needs.
+**Quickwit hotcache footer.** Quickwit's `hotcache` is a small (KB to single-digit MB) blob at the end of every split that contains the metadata structures (term dict roots, fast field metadata, file pointers) needed to *open* the split. With it, a searcher answers queries by issuing precisely-targeted byte-range GETs to S3 instead of downloading the index. **For GastroLog's cross-node and cloud-backed-vault search story, this is the most directly portable idea in the survey.** Co-locate the footer with the chunk; teach the cluster's record forwarder to fetch just the footer, plan, then fetch only the body bytes the query needs.
 
 **Succinct data structures, FM-indexes, wavelet trees, learned indexes.** All exist; none have a mature Go library at the level of Vellum or Roaring. FM-indexes give substring search in O(p log n) on compressed text but the implementation effort is large. Wavelet trees give rank/select on arbitrary alphabets and are theoretically great for log token streams but again no Go library worth using. Learned indexes (RMI, ALEX) are interesting for monotone numeric data but don't compose with the inverted-index world. **Not recommended for v1**; revisit if Roaring + FST hit a wall and the team has appetite for a research-grade implementation.
 
@@ -101,7 +101,7 @@ What this is **not**: it is not Loki's "scan everything" model (only works with 
 
 **Production-system patterns worth stealing**, beyond what's covered above:
 
-- **Splunk's TSIDX reduction** (drop the lexicon for cold buckets, keep the journal): a clean tier story for the cloud tier — store the index when warm, drop it when cold and accept slow scan.
+- **Splunk's TSIDX reduction** (drop the lexicon for cold buckets, keep the journal): a clean tier story applicable to cloud-backed vaults — store the index when warm, drop it when cold and accept slow scan.
 - **VictoriaLogs's stream-as-partition**: collapse the index size by treating the stream identity as the primary key. If GastroLog's natural stream key (vault × ingester × source) has high selectivity, much of the per-chunk index work can be avoided entirely.
 - **Husky's column-skip-list + sketch-instead-of-bloom**: their "superset regex" sketch is a real design point for log content where users do `error` and `err.*timeout`.
 - **ClickHouse's deprecation of `tokenbf_v1` / `ngrambf_v1` in favor of a real `text` inverted index** (2025+): bloom variants are useful but not sufficient for full-text search at scale. Don't try to skip the inverted index entirely.
@@ -203,7 +203,7 @@ Approaches compose well or poorly. The matrix below names the pairs that are exp
 
 Land v1 of the codec with: per-field FST term dict (Vellum), per-term Roaring posting list, per-block bloom filter (`bits-and-blooms/bloom`), and the hotcache footer with the index directory. Do NOT add columnar fast fields or CLP yet.
 
-**Phase 2 — Cross-node footer-only opening (1–2 weeks).** Teach the cluster's chunk forwarder and the cloud-tier reader to fetch just the hotcache footer for remote chunks. Search planner uses the footer to decide which body byte ranges to fetch. Quickwit's `quickwit-search` is the reference. Concrete acceptance: cross-node search of cloud-tier chunks issues O(log N) range GETs instead of full-blob fetches.
+**Phase 2 — Cross-node footer-only opening (1–2 weeks).** Teach the cluster's chunk forwarder and the cloud-backed reader to fetch just the hotcache footer for remote chunks. Search planner uses the footer to decide which body byte ranges to fetch. Quickwit's `quickwit-search` is the reference. Concrete acceptance: cross-node search of cloud-backed chunks issues O(log N) range GETs instead of full-blob fetches.
 
 **Phase 3 — Columnar fast fields (3–4 weeks).** Add SoA columnar storage for low-cardinality numeric and enum fields (level, status, response time buckets). Bit-pack, GCD-encode, dictionary-encode as appropriate. Read-only at search time, no rewrite of historical chunks (codec abstraction earns its keep here).
 

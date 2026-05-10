@@ -609,7 +609,7 @@ type NodeStats struct {
 	Alerts []*SystemAlert `protobuf:"bytes,36,rep,name=alerts,proto3" json:"alerts,omitempty"`
 	// Per-peer inter-node gRPC transport bytes, from this node's perspective.
 	// Populated from the cluster transport stats handlers — includes Raft,
-	// broadcast, tier replication, query forwarding, chunk streaming, etc.
+	// broadcast, vault replication, query forwarding, chunk streaming, etc.
 	// See gastrolog-47u85.
 	PeerBytes     []*PeerBytesStat `protobuf:"bytes,37,rep,name=peer_bytes,json=peerBytes,proto3" json:"peer_bytes,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -1279,14 +1279,10 @@ func (x *ForwardRecordsResponse) GetRecordsWritten() int64 {
 }
 
 // ForwardVaultApplyRequest carries a pre-marshaled vault control-plane Raft
-// command for the leader to apply. group_id is the vault ctl group
+// command for the leader to apply. group_id is the vault-ctl group
 // (vault/<vaultGLID>/ctl); command is the marshaled FSM command bytes
-// (typically OpVaultChunkFSM + tier GLID + tierfsm wire payload, see
-// vaultraft.MarshalVaultChunkCommand).
-//
-// Replaces the historical ForwardTierApply RPC during the vault refactor
-// (gastrolog-257l7) — the two had identical schema and RPC behavior;
-// merged into one.
+// (typically OpVaultChunkFSM + vault-instance GLID + vaultctlfsm wire
+// payload, see vaultraft.MarshalVaultChunkCommand).
 type ForwardVaultApplyRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// UTF-8 vault control-plane group id: vault/<vaultGLID>/ctl
@@ -1379,15 +1375,9 @@ func (*ForwardVaultApplyResponse) Descriptor() ([]byte, []int) {
 // ChunkReplicationCommand is sent leader → follower. The vault_id
 // identifies the target vault; the oneof command determines the
 // operation. New command types can be added without changing framing.
-//
-// tier_id is retained transitionally during the vault refactor
-// (gastrolog-257l7) so the orchestrator's existing tier-keyed routing
-// continues to work. It is removed once the orchestrator's runtime
-// dispatch is vault-keyed.
 type ChunkReplicationCommand struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	VaultId []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
-	TierId  []byte                 `protobuf:"bytes,2,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"`
 	// Types that are valid to be assigned to Command:
 	//
 	//	*ChunkReplicationCommand_Append
@@ -1432,13 +1422,6 @@ func (*ChunkReplicationCommand) Descriptor() ([]byte, []int) {
 func (x *ChunkReplicationCommand) GetVaultId() []byte {
 	if x != nil {
 		return x.VaultId
-	}
-	return nil
-}
-
-func (x *ChunkReplicationCommand) GetTierId() []byte {
-	if x != nil {
-		return x.TierId
 	}
 	return nil
 }
@@ -1782,9 +1765,8 @@ func (x *ChunkReplicationAck) GetChunkId() []byte {
 type RequestReplicaCatchupRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	VaultId         []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
-	TierId          []byte                 `protobuf:"bytes,2,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"`                              // retained transitionally during the vault refactor (gastrolog-257l7)
-	ChunkIds        [][]byte               `protobuf:"bytes,3,rep,name=chunk_ids,json=chunkIds,proto3" json:"chunk_ids,omitempty"`                        // 16-byte ChunkIDs
-	RequesterNodeId []byte                 `protobuf:"bytes,4,opt,name=requester_node_id,json=requesterNodeId,proto3" json:"requester_node_id,omitempty"` // utf-8 node ID of the requesting follower
+	ChunkIds        [][]byte               `protobuf:"bytes,2,rep,name=chunk_ids,json=chunkIds,proto3" json:"chunk_ids,omitempty"`                        // 16-byte ChunkIDs
+	RequesterNodeId []byte                 `protobuf:"bytes,3,opt,name=requester_node_id,json=requesterNodeId,proto3" json:"requester_node_id,omitempty"` // utf-8 node ID of the requesting follower
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -1822,13 +1804,6 @@ func (*RequestReplicaCatchupRequest) Descriptor() ([]byte, []int) {
 func (x *RequestReplicaCatchupRequest) GetVaultId() []byte {
 	if x != nil {
 		return x.VaultId
-	}
-	return nil
-}
-
-func (x *RequestReplicaCatchupRequest) GetTierId() []byte {
-	if x != nil {
-		return x.TierId
 	}
 	return nil
 }
@@ -3407,7 +3382,6 @@ type ImportRecordMessage struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	VaultId       []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
 	Record        *ExportRecord          `protobuf:"bytes,2,opt,name=record,proto3" json:"record,omitempty"`
-	TierId        []byte                 `protobuf:"bytes,3,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"` // optional: route to a specific tier's active chunk (StreamToTier)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3452,13 +3426,6 @@ func (x *ImportRecordMessage) GetVaultId() []byte {
 func (x *ImportRecordMessage) GetRecord() *ExportRecord {
 	if x != nil {
 		return x.Record
-	}
-	return nil
-}
-
-func (x *ImportRecordMessage) GetTierId() []byte {
-	if x != nil {
-		return x.TierId
 	}
 	return nil
 }
@@ -3846,10 +3813,9 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x18ForwardVaultApplyRequest\x12\x19\n" +
 	"\bgroup_id\x18\x01 \x01(\fR\agroupId\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\fR\acommand\"\x1b\n" +
-	"\x19ForwardVaultApplyResponse\"\xea\x02\n" +
+	"\x19ForwardVaultApplyResponse\"\xd1\x02\n" +
 	"\x17ChunkReplicationCommand\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12\x17\n" +
-	"\atier_id\x18\x02 \x01(\fR\x06tierId\x12>\n" +
+	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12>\n" +
 	"\x06append\x18\n" +
 	" \x01(\v2$.gastrolog.v1.ChunkReplicationAppendH\x00R\x06append\x128\n" +
 	"\x04seal\x18\v \x01(\v2\".gastrolog.v1.ChunkReplicationSealH\x00R\x04seal\x12K\n" +
@@ -3869,12 +3835,11 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x13ChunkReplicationAck\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12\x19\n" +
-	"\bchunk_id\x18\x03 \x01(\fR\achunkId\"\x9b\x01\n" +
+	"\bchunk_id\x18\x03 \x01(\fR\achunkId\"\x82\x01\n" +
 	"\x1cRequestReplicaCatchupRequest\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12\x17\n" +
-	"\atier_id\x18\x02 \x01(\fR\x06tierId\x12\x1b\n" +
-	"\tchunk_ids\x18\x03 \x03(\fR\bchunkIds\x12*\n" +
-	"\x11requester_node_id\x18\x04 \x01(\fR\x0frequesterNodeId\"=\n" +
+	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12\x1b\n" +
+	"\tchunk_ids\x18\x02 \x03(\fR\bchunkIds\x12*\n" +
+	"\x11requester_node_id\x18\x03 \x01(\fR\x0frequesterNodeId\"=\n" +
 	"\x1dRequestReplicaCatchupResponse\x12\x1c\n" +
 	"\tscheduled\x18\x01 \x01(\rR\tscheduled\"j\n" +
 	"\x14ForwardSearchRequest\x12\x19\n" +
@@ -3957,11 +3922,10 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\tvault_ids\x18\x01 \x03(\fR\bvaultIds\x12\x14\n" +
 	"\x05query\x18\x02 \x01(\tR\x05query\"M\n" +
 	"\x15ForwardFollowResponse\x124\n" +
-	"\arecords\x18\x01 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\"}\n" +
+	"\arecords\x18\x01 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\"d\n" +
 	"\x13ImportRecordMessage\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x122\n" +
-	"\x06record\x18\x02 \x01(\v2\x1a.gastrolog.v1.ExportRecordR\x06record\x12\x17\n" +
-	"\atier_id\x18\x03 \x01(\fR\x06tierId\"1\n" +
+	"\x06record\x18\x02 \x01(\v2\x1a.gastrolog.v1.ExportRecordR\x06record\"1\n" +
 	"\x16PullManagedFileRequest\x12\x17\n" +
 	"\afile_id\x18\x01 \x01(\fR\x06fileId\"V\n" +
 	"\x14PullManagedFileChunk\x12\x12\n" +

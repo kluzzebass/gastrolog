@@ -44,7 +44,7 @@ type LeaderLoopConfig struct {
 	// Group is the Raft group whose leadership transitions we watch.
 	Group *Group
 
-	// Name identifies this loop in log messages (e.g. the tier ID).
+	// Name identifies this loop in log messages (e.g. the vault ID).
 	Name string
 
 	// OnLead is invoked once per leader epoch, after Barrier() returns.

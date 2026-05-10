@@ -1,4 +1,4 @@
-package tierfsm
+package vaultctlfsm
 
 import (
 	"context"
@@ -95,7 +95,7 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 		// Symmetric seeding: every node passes the same member list. Raft
 		// elects a leader through normal election. No node has a special role.
 		_, err = nodes[i].manager.CreateGroup(raftgroup.GroupConfig{
-			GroupID:     "tier-test",
+			GroupID:     "vault-test",
 			FSM:         nodes[i].fsm,
 			SeedMembers: members,
 		})
@@ -115,7 +115,7 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 	// Wait for leader.
 	var leaderGroup *raftgroup.Group
 	for _, n := range nodes {
-		g := n.manager.GetGroup("tier-test")
+		g := n.manager.GetGroup("vault-test")
 		waitForLeader(t, g, 5*time.Second)
 		if g.Raft.State() == hraft.Leader {
 			leaderGroup = g
@@ -336,7 +336,7 @@ func TestAnnouncerSealingStateVisibleAcrossReplicas(t *testing.T) {
 		})
 		nodes[i].fsm = New()
 		_, err = nodes[i].manager.CreateGroup(raftgroup.GroupConfig{
-			GroupID:     "tier-test",
+			GroupID:     "vault-test",
 			FSM:         nodes[i].fsm,
 			SeedMembers: members,
 		})
@@ -355,7 +355,7 @@ func TestAnnouncerSealingStateVisibleAcrossReplicas(t *testing.T) {
 
 	var leaderGroup *raftgroup.Group
 	for _, n := range nodes {
-		g := n.manager.GetGroup("tier-test")
+		g := n.manager.GetGroup("vault-test")
 		waitForLeader(t, g, 5*time.Second)
 		if g.Raft.State() == hraft.Leader {
 			leaderGroup = g
@@ -469,7 +469,7 @@ func TestAnnouncerSealingStateVisibleAcrossReplicas(t *testing.T) {
 // TestAnnouncerShortCircuitsDuringShutdown is the regression test for the
 // announcer half of gastrolog-1e5ke. When the orchestrator's drain queues
 // a last-minute chunk event (seal, create, delete, etc.) after the local
-// tier Raft has already been shut down, the previous code would call
+// vault-ctl Raft has already been shut down, the previous code would call
 // Applier.Apply, receive "raft is already shutdown", and log a WARN. This
 // fired 2-4 times per node shutdown and added noise without any value —
 // missed announces are reconciled on next startup from local chunk state.

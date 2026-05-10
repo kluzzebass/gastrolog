@@ -1,4 +1,4 @@
-package tierfsm
+package vaultctlfsm
 
 import (
 	"io"

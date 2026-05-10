@@ -294,7 +294,7 @@ export class ListChunksRequest extends Message<ListChunksRequest> {
 
   /**
    * When true, return only unsealed (active) chunks from this node's
-   * local tiers — no cross-node fan-out. Used for lightweight 5-second
+   * local vaults — no cross-node fan-out. Used for lightweight 5-second
    * polling of active-chunk stats (record count, bytes) while discrete
    * events (seal, delete, compress) come through the WatchChunks stream.
    * See gastrolog-1jijm.
@@ -446,18 +446,18 @@ export class ChunkMeta extends Message<ChunkMeta> {
   archived = false;
 
   /**
-   * which tier this chunk belongs to (transitional during gastrolog-55dej)
+   * which vault this chunk belongs to
    *
-   * @generated from field: bytes tier_id = 13;
+   * @generated from field: bytes vault_id = 13;
    */
-  tierId = new Uint8Array(0);
+  vaultId = new Uint8Array(0);
 
   /**
-   * tier type: "memory", "file", "cloud" (transitional)
+   * vault type: "memory", "file", "jsonl"
    *
-   * @generated from field: string tier_type = 14;
+   * @generated from field: string vault_type = 14;
    */
-  tierType = "";
+  vaultType = "";
 
   /**
    * true = chunk is marked for retention processing
@@ -532,8 +532,8 @@ export class ChunkMeta extends Message<ChunkMeta> {
     { no: 10, name: "ingest_end", kind: "message", T: Timestamp },
     { no: 11, name: "cloud_backed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 12, name: "archived", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 13, name: "tier_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 14, name: "tier_type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 13, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 14, name: "vault_type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 15, name: "retention_pending", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 16, name: "storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 17, name: "replica_count", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
@@ -1822,13 +1822,6 @@ export class SealVaultRequest extends Message<SealVaultRequest> {
    */
   vault = "";
 
-  /**
-   * optional: seal only this tier (name or ID). Empty = all tiers.
-   *
-   * @generated from field: string tier = 2;
-   */
-  tier = "";
-
   constructor(data?: PartialMessage<SealVaultRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1838,7 +1831,6 @@ export class SealVaultRequest extends Message<SealVaultRequest> {
   static readonly typeName = "gastrolog.v1.SealVaultRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "vault", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "tier", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SealVaultRequest {
@@ -1863,7 +1855,7 @@ export class SealVaultRequest extends Message<SealVaultRequest> {
  */
 export class SealVaultResponse extends Message<SealVaultResponse> {
   /**
-   * number of tiers whose active chunk was sealed
+   * number of vaults whose active chunk was sealed
    *
    * @generated from field: int32 sealed_count = 1;
    */
@@ -2072,9 +2064,9 @@ export class RestoreChunkRequest extends Message<RestoreChunkRequest> {
   /**
    * "Expedited"/"Standard"/"Bulk" (S3), "High"/"Standard" (Azure)
    *
-   * @generated from field: string restore_tier = 3;
+   * @generated from field: string restore_speed = 3;
    */
-  restoreTier = "";
+  restoreSpeed = "";
 
   /**
    * How long restored copy stays readable (S3 only, 0 = provider default)
@@ -2093,7 +2085,7 @@ export class RestoreChunkRequest extends Message<RestoreChunkRequest> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "vault", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 3, name: "restore_tier", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "restore_speed", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "restore_days", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
   ]);
 

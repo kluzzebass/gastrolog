@@ -25,7 +25,7 @@ const tsFormat = "2006-01-02 15:04:05 UTC"
 func NewInspectCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "inspect",
-		Short: "Inspect vault, tier, and chunk details",
+		Short: "Inspect vault and chunk details",
 	}
 	cmd.AddCommand(
 		newInspectVaultCmd(),
@@ -37,7 +37,7 @@ func NewInspectCommand() *cobra.Command {
 func newInspectVaultCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "vault <name-or-id>",
-		Short: "Show vault tiers and chunks with status badges",
+		Short: "Show vault details and chunks with status badges",
 		Args:  cobra.ExactArgs(1),
 		RunE:  runInspectVault,
 	}
@@ -59,7 +59,10 @@ func runInspectVault(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	vaultTiers := collectVaultTiers(cfgResp.Msg.Tiers, vaultID)
+	vault := findVaultConfigInSystem(cfgResp.Msg.Vaults, vaultID)
+	if vault == nil {
+		return fmt.Errorf("vault %s not found", vaultID)
+	}
 
 	chunksResp, err := client.Vault.ListChunks(context.Background(),
 		connect.NewRequest(&v1.ListChunksRequest{Vault: vaultID}))
@@ -69,24 +72,22 @@ func runInspectVault(cmd *cobra.Command, args []string) error {
 
 	if outputFormat(cmd) == "json" {
 		return newPrinter("json").json(map[string]any{
-			"tiers":  vaultTiers,
+			"vault":  vault,
 			"chunks": chunksResp.Msg.Chunks,
 		})
 	}
 
-	chunksByTier := make(map[string][]*v1.ChunkMeta)
+	chunksByVault := make(map[string][]*v1.ChunkMeta)
 	for _, c := range chunksResp.Msg.Chunks {
-		key := glid.FromBytes(c.TierId).String()
-		chunksByTier[key] = append(chunksByTier[key], c)
+		key := glid.FromBytes(c.VaultId).String()
+		chunksByVault[key] = append(chunksByVault[key], c)
 	}
 
 	vaultName := resolveVaultName(cfgResp.Msg.Vaults, vaultID, args[0])
 	fmt.Printf("Vault: %s (%s)\n\n", vaultName, vaultID)
 
 	nodeNames := nodeIDToNameMap(cfgResp.Msg.NodeConfigs)
-	for _, tier := range vaultTiers {
-		printTierSection(tier, chunksByTier[glid.FromBytes(tier.Id).String()], nodeNames)
-	}
+	printVaultSection(vault, chunksByVault[glid.FromBytes(vault.Id).String()], nodeNames)
 
 	return nil
 }
@@ -107,17 +108,13 @@ func nodeIDToNameMap(nodes []*v1.NodeConfig) map[string]string {
 	return m
 }
 
-func collectVaultTiers(tiers []*v1.TierConfig, vaultID string) []*v1.TierConfig {
-	var out []*v1.TierConfig
-	for _, t := range tiers {
-		if glid.FromBytes(t.VaultId).String() == vaultID {
-			out = append(out, t)
+func findVaultConfigInSystem(vaults []*v1.VaultConfig, vaultID string) *v1.VaultConfig {
+	for _, v := range vaults {
+		if glid.FromBytes(v.Id).String() == vaultID {
+			return v
 		}
 	}
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].Position < out[j].Position
-	})
-	return out
+	return nil
 }
 
 func resolveVaultName(vaults []*v1.VaultConfig, vaultID, fallback string) string {
@@ -129,16 +126,16 @@ func resolveVaultName(vaults []*v1.VaultConfig, vaultID, fallback string) string
 	return fallback
 }
 
-func printTierSection(tier *v1.TierConfig, chunks []*v1.ChunkMeta, nodeNames map[string]string) {
-	tierType := strings.TrimPrefix(tier.Type.String(), "TIER_TYPE_")
+func printVaultSection(vault *v1.VaultConfig, chunks []*v1.ChunkMeta, nodeNames map[string]string) {
+	vaultType := strings.TrimPrefix(vault.Type.String(), "VAULT_TYPE_")
 	var totalRecords, totalBytes int64
 	for _, c := range chunks {
 		totalRecords += c.RecordCount
 		totalBytes += c.DiskBytes
 	}
 
-	fmt.Printf("  TIER %d: %s  %q  %d chunks  %d records  %s\n",
-		tier.Position+1, tierType, tier.Name,
+	fmt.Printf("  STORAGE: %s  %q  %d chunks  %d records  %s\n",
+		vaultType, vault.Name,
 		len(chunks), totalRecords, units.FormatBytesDisplay(totalBytes))
 
 	sort.Slice(chunks, func(i, j int) bool {
@@ -243,32 +240,36 @@ func runInspectChunk(cmd *cobra.Command, args []string) error {
 		return newPrinter("json").json(c)
 	}
 
-	tierName := resolveTierName(client, glid.FromBytes(c.TierId).String())
-	pairs := buildChunkKV(c, tierName)
+	vaultName := lookupVaultLabel(client, glid.FromBytes(c.VaultId).String())
+	pairs := buildChunkKV(c, vaultName)
 	newPrinter(outputFormat(cmd)).kv(pairs)
 	return nil
 }
 
-func resolveTierName(client *server.Client, tierID string) string {
-	if tierID == "" {
+// lookupVaultLabel fetches the system config via client and returns
+// "Name (TYPE)" for the vault with the given ID, falling back to the ID.
+// Distinct from resolveVaultName above, which takes an already-fetched
+// vaults slice and returns just the name.
+func lookupVaultLabel(client *server.Client, vaultID string) string {
+	if vaultID == "" {
 		return ""
 	}
 	cfgResp, err := client.System.GetSystem(context.Background(), connect.NewRequest(&v1.GetSystemRequest{}))
 	if err != nil {
-		return tierID
+		return vaultID
 	}
-	for _, t := range cfgResp.Msg.Tiers {
-		if glid.FromBytes(t.Id).String() == tierID {
-			return fmt.Sprintf("%s (%s)", t.Name, strings.TrimPrefix(t.Type.String(), "TIER_TYPE_"))
+	for _, v := range cfgResp.Msg.Vaults {
+		if glid.FromBytes(v.Id).String() == vaultID {
+			return fmt.Sprintf("%s (%s)", v.Name, strings.TrimPrefix(v.Type.String(), "VAULT_TYPE_"))
 		}
 	}
-	return tierID
+	return vaultID
 }
 
-func buildChunkKV(c *v1.ChunkMeta, tierName string) [][2]string {
+func buildChunkKV(c *v1.ChunkMeta, vaultName string) [][2]string {
 	pairs := [][2]string{
 		{"Chunk ID", glid.FromBytes(c.Id).String()},
-		{"Tier", tierName},
+		{"Vault", vaultName},
 		{"Status", chunkBadges(c)},
 		{"Records", strconv.FormatInt(c.RecordCount, 10)},
 		{"Logical Size", units.FormatBytesDisplay(c.Bytes)},

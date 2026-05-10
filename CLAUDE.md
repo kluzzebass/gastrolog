@@ -4,7 +4,7 @@ The role of this file is to describe common mistakes and confusion points that a
 
 ## Vocabulary
 
-Read [`docs/ubiquitous_language.md`](./docs/ubiquitous_language.md) before writing prose (commit messages, issue titles, comments, code identifiers) that names domain concepts. It defines 8 bounded contexts and ~75 canonical terms, plus a consistency-rules table naming the synonyms to phase out (`primary` → leader, `tier Raft` → vault-ctl Raft, `cloud chunk` → cloud-backed chunk, etc.). Use the canonical terms. Extend the doc in the same PR when introducing a new concept.
+Read [`docs/ubiquitous_language.md`](./docs/ubiquitous_language.md) before writing prose (commit messages, issue titles, comments, code identifiers) that names domain concepts. It defines 8 bounded contexts and ~75 canonical terms, plus a consistency-rules table naming the synonyms to phase out (`primary` → leader, `cloud chunk` → cloud-backed chunk, etc.). Use the canonical terms. Extend the doc in the same PR when introducing a new concept.
 
 ## Agent workflow (read first)
 
@@ -53,7 +53,7 @@ Do not suggest creating PRs.
 
 ## Cluster-First: Every Feature Must Work on Every Node
 
-GastroLog is a fully distributed system. No node has cluster-wide authority — tier leaders and Raft leaders are elected per vault/group, not assigned to a single privileged node. Any node can serve any request. Every feature, handler, and piece of state must work correctly regardless of which node the user is connected to. If a correct implementation requires the user to be connected to a specific node, it is wrong.
+GastroLog is a fully distributed system. No node has cluster-wide authority — vault leaders and Raft leaders are elected per vault/group, not assigned to a single privileged node. Any node can serve any request. Every feature, handler, and piece of state must work correctly regardless of which node the user is connected to. If a correct implementation requires the user to be connected to a specific node, it is wrong.
 
 When implementing anything new, ask: **"Does this work if the user is on a different node than the data?"** If the answer is no, redesign before proceeding.
 
@@ -89,7 +89,7 @@ When choosing what to do next or how deep to test: **favor WAL-related work** (c
 
 Every feature must have tests across ALL of these dimensions:
 - **Single-node**: basic correctness
-- **Multi-node**: cluster behavior with 4+ nodes, file-backed tiers, real transferrers
+- **Multi-node**: cluster behavior with 4+ nodes, file-backed vaults, real transferrers
 - **Happy path**: feature works as designed
 - **Unhappy path**: failures, errors, races, partial operations, recovery, disk full, corrupt data
 - **Edge cases**: boundary conditions, concurrent access, restart survival, empty inputs
@@ -116,7 +116,7 @@ When removing a proto field, message, oneof case, or enum value, **delete it ent
 
 **This is the opposite of the protobuf community's general advice.** Standard advice ("always reserve removed tags") assumes long-lived deployed schemas. GastroLog's atomic-refactor model invalidates that assumption. Apply project-specific rule, not the generic one.
 
-Precedent: gastrolog-4k5mg (cloud/file tier collapse) removed all `reserved` declarations from prior cleanup passes and renumbered the remaining tags. That is the standard pattern; follow it.
+Precedent: gastrolog-4k5mg removed all `reserved` declarations from prior cleanup passes and renumbered the remaining tags. That is the standard pattern; follow it.
 
 ## Data Integrity: Facts Before Speculation
 

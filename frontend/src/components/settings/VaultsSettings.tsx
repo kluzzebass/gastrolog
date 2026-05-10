@@ -8,7 +8,7 @@ import {
   usePutVault,
   useGenerateName,
 } from "../../api/hooks";
-import { TierType, VaultType, RetentionRule, VaultConfig } from "../../api/gen/gastrolog/v1/system_pb";
+import { VaultType, RetentionRule, VaultConfig } from "../../api/gen/gastrolog/v1/system_pb";
 import { useToast } from "../Toast";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
@@ -18,22 +18,22 @@ import { sortByName } from "../../lib/sort";
 import { VaultSettingsCard } from "./VaultSettingsCard";
 
 // ---------------------------------------------------------------------------
-// Tier entry types
+// Vault storage form types
 // ---------------------------------------------------------------------------
 
-// "cloud" is no longer a distinct tier kind. A cloud-backed tier is a file
-// tier with cloudServiceId set; cloud-ness is derived via isCloudBacked()
-// rather than checking the type discriminator. See gastrolog-4k5mg.
-export type TierTypeLabel = "memory" | "file" | "jsonl";
+// A cloud-backed vault is a file vault with cloudServiceId set; cloud-ness
+// is derived via isCloudBacked() rather than a separate type discriminator.
+// See gastrolog-4k5mg.
+export type VaultTypeLabel = "memory" | "file" | "jsonl";
 
-/** Returns true if this tier is cloud-backed (file tier with a cloud service binding). */
-export function isCloudBacked(tier: { type: TierTypeLabel; cloudServiceId: string }): boolean {
-  return tier.type === "file" && tier.cloudServiceId !== "";
+/** Returns true if this vault is cloud-backed (file vault with a cloud service binding). */
+export function isCloudBacked(v: { type: VaultTypeLabel; cloudServiceId: string }): boolean {
+  return v.type === "file" && v.cloudServiceId !== "";
 }
 
-export interface TierEntry {
+export interface StorageEntry {
   key: string;
-  type: TierTypeLabel;
+  type: VaultTypeLabel;
   storageClass: string;
   cloudServiceId: string;
   cacheEviction: string;
@@ -48,7 +48,7 @@ export interface TierEntry {
   nodeId: string;
 }
 
-export function emptyTierEntry(type: TierTypeLabel): TierEntry {
+export function emptyStorageEntry(type: VaultTypeLabel): StorageEntry {
   return {
     key: crypto.randomUUID(),
     type,
@@ -91,21 +91,10 @@ export function parseMemoryBudget(raw: string): bigint {
 }
 
 // ---------------------------------------------------------------------------
-// Tier type enum conversion
+// VaultType label ↔ enum conversion
 // ---------------------------------------------------------------------------
 
-export function tierTypeEnum(t: TierTypeLabel): TierType {
-  switch (t) {
-    case "memory":
-      return TierType.MEMORY;
-    case "file":
-      return TierType.FILE;
-    case "jsonl":
-      return TierType.JSONL;
-  }
-}
-
-export function vaultTypeEnum(t: TierTypeLabel): VaultType {
+export function vaultTypeEnum(t: VaultTypeLabel): VaultType {
   switch (t) {
     case "memory":
       return VaultType.MEMORY;
@@ -116,40 +105,26 @@ export function vaultTypeEnum(t: TierTypeLabel): VaultType {
   }
 }
 
-/** Map a TierType proto enum to its display label. */
-export function tierTypeLabel(type: TierType): string {
-  switch (type) {
-    case TierType.MEMORY: return "memory";
-    case TierType.FILE: return "file";
-    case TierType.JSONL: return "jsonl";
-    default: return "unknown";
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Tier completeness check
-// ---------------------------------------------------------------------------
-
 function extractErrorMessage(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
 }
 
-export function isTierComplete(tier: TierEntry, _hasCloudServices: boolean): boolean {
-  switch (tier.type) {
+export function isStorageComplete(s: StorageEntry, _hasCloudServices: boolean): boolean {
+  switch (s.type) {
     case "memory":
       return true;
     case "file":
       // Single storage class for both local-only and cloud-backed file
       // vaults — the active chunk and warm cache live at the same chunkDir
       // path, so no separate "active" or "cache" class is meaningful.
-      return tier.storageClass !== "";
+      return s.storageClass !== "";
     case "jsonl":
-      return tier.nodeId !== "";
+      return s.nodeId !== "";
   }
 }
 
 // ---------------------------------------------------------------------------
-// Add-form reducer (single-instance shape per gastrolog-3iy5l)
+// Add-form reducer
 // ---------------------------------------------------------------------------
 
 interface AddFormState {
@@ -157,7 +132,7 @@ interface AddFormState {
   name: string;
   namePlaceholder: string;
   enabled: boolean;
-  storage: TierEntry;
+  storage: StorageEntry;
 }
 
 const addFormInitial: AddFormState = {
@@ -165,7 +140,7 @@ const addFormInitial: AddFormState = {
   name: "",
   namePlaceholder: "",
   enabled: true,
-  storage: emptyTierEntry("file"),
+  storage: emptyStorageEntry("file"),
 };
 
 type AddFormAction =
@@ -173,8 +148,8 @@ type AddFormAction =
   | { type: "close" }
   | { type: "reset" }
   | { type: "set"; patch: Partial<Omit<AddFormState, "storage">> }
-  | { type: "setType"; tierType: TierTypeLabel }
-  | { type: "updateStorage"; patch: Partial<TierEntry> };
+  | { type: "setType"; vaultType: VaultTypeLabel }
+  | { type: "updateStorage"; patch: Partial<StorageEntry> };
 
 function addFormReducer(state: AddFormState, action: AddFormAction): AddFormState {
   switch (action.type) {
@@ -186,7 +161,7 @@ function addFormReducer(state: AddFormState, action: AddFormAction): AddFormStat
     case "set":
       return { ...state, ...action.patch };
     case "setType":
-      return { ...state, storage: emptyTierEntry(action.tierType) };
+      return { ...state, storage: emptyStorageEntry(action.vaultType) };
     case "updateStorage":
       return { ...state, storage: { ...state.storage, ...action.patch } };
   }
@@ -194,11 +169,11 @@ function addFormReducer(state: AddFormState, action: AddFormAction): AddFormStat
 
 
 // ---------------------------------------------------------------------------
-// Tier entry card
+// Vault storage form
 // ---------------------------------------------------------------------------
 
 export function VaultStorageForm({
-  tier,
+  storage,
   dark,
   storageClassOptions,
   cloudServiceOptions,
@@ -211,7 +186,7 @@ export function VaultStorageForm({
   onTypeChange,
   onUpdate,
 }: Readonly<{
-  tier: TierEntry;
+  storage: StorageEntry;
   dark: boolean;
   storageClassOptions: { value: string; label: string }[];
   cloudServiceOptions: { value: string; label: string }[];
@@ -225,21 +200,16 @@ export function VaultStorageForm({
   // change cloud binding, create a new vault and route data via
   // retention. The Add form leaves this false; edit-existing passes true.
   cloudLocked?: boolean;
-  onTypeChange?: (t: TierTypeLabel) => void;
-  onUpdate: (patch: Partial<TierEntry>) => void;
+  onTypeChange?: (t: VaultTypeLabel) => void;
+  onUpdate: (patch: Partial<StorageEntry>) => void;
 }>) {
-  // gastrolog-4kkoo cleanup: no bordered/backgrounded wrapper. Phase-2
-  // and earlier the storage form was a tier sub-card and the border
-  // visually separated it from sibling tiers. With 1:1 vault:tier and
-  // the tier UI gone, there's nothing to separate it from — it's just
-  // the second half of the card body.
   return (
     <div className="flex flex-col gap-2">
       {onTypeChange && (
         <FormField label="Storage Type" dark={dark}>
           <SelectInput
-            value={tier.type}
-            onChange={(v) => onTypeChange(v as TierTypeLabel)}
+            value={storage.type}
+            onChange={(v) => onTypeChange(v as VaultTypeLabel)}
             options={[
               { value: "memory", label: "Memory" },
               { value: "file", label: "File" },
@@ -250,10 +220,10 @@ export function VaultStorageForm({
         </FormField>
       )}
 
-      {tier.type === "memory" && (
+      {storage.type === "memory" && (
         <FormField label="Budget" dark={dark} description="Leave empty for system default">
           <TextInput
-            value={tier.memoryBudget}
+            value={storage.memoryBudget}
             onChange={(v) => onUpdate({ memoryBudget: v })}
             placeholder="4GB"
             dark={dark}
@@ -262,9 +232,9 @@ export function VaultStorageForm({
         </FormField>
       )}
 
-      {tier.type === "file" && (
+      {storage.type === "file" && (
         <>
-          {/* Cloud Storage selector — when set, the file tier becomes
+          {/* Cloud Storage selector — when set, the file vault becomes
               cloud-backed (sealed chunks upload to S3/etc; the active
               chunk and a warm cache stay on local disk). The storage
               class governs the local placement either way. */}
@@ -280,7 +250,7 @@ export function VaultStorageForm({
             }
           >
             <SelectInput
-              value={tier.cloudServiceId}
+              value={storage.cloudServiceId}
               onChange={(v) => onUpdate({ cloudServiceId: v })}
               options={[
                 { value: "", label: "Local-only" },
@@ -294,7 +264,7 @@ export function VaultStorageForm({
           <FormField label="Storage Class" dark={dark}>
             {storageClassOptions.length > 0 ? (
               <SelectInput
-                value={tier.storageClass}
+                value={storage.storageClass}
                 onChange={(v) => onUpdate({ storageClass: v })}
                 options={[
                   { value: "", label: "Select storage class..." },
@@ -304,7 +274,7 @@ export function VaultStorageForm({
               />
             ) : (
               <SpinnerInput
-                value={tier.storageClass}
+                value={storage.storageClass}
                 onChange={(v) => onUpdate({ storageClass: v })}
                 dark={dark}
                 min={0}
@@ -313,13 +283,13 @@ export function VaultStorageForm({
           </FormField>
 
           {/* Cache eviction tuning is only meaningful on cloud-backed
-              tiers — local-only tiers have nothing to evict (sealed
+              vaults — local-only vaults have nothing to evict (sealed
               chunks ARE the data, not a cache). */}
-          {tier.cloudServiceId !== "" && (
+          {storage.cloudServiceId !== "" && (
             <>
               <FormField label="Cache Eviction" dark={dark}>
                 <SelectInput
-                  value={tier.cacheEviction || "lru"}
+                  value={storage.cacheEviction || "lru"}
                   onChange={(v) => onUpdate({ cacheEviction: v })}
                   options={[
                     { value: "lru", label: "LRU — evict oldest when over budget" },
@@ -330,7 +300,7 @@ export function VaultStorageForm({
               </FormField>
               <FormField label="Cache Budget" dark={dark}>
                 <TextInput
-                  value={tier.cacheBudget}
+                  value={storage.cacheBudget}
                   onChange={(v) => onUpdate({ cacheBudget: v })}
                   placeholder="1GiB"
                   dark={dark}
@@ -338,10 +308,10 @@ export function VaultStorageForm({
                   examples={["500MB", "1GiB", "5GB", "10GB"]}
                 />
               </FormField>
-              {(tier.cacheEviction === "ttl") && (
+              {(storage.cacheEviction === "ttl") && (
                 <FormField label="Cache TTL" dark={dark}>
                   <TextInput
-                    value={tier.cacheTTL}
+                    value={storage.cacheTTL}
                     onChange={(v) => onUpdate({ cacheTTL: v })}
                     placeholder=""
                     dark={dark}
@@ -355,11 +325,11 @@ export function VaultStorageForm({
         </>
       )}
 
-      {tier.type === "jsonl" && (
+      {storage.type === "jsonl" && (
         <>
           <FormField label="Node" dark={dark}>
             <SelectInput
-              value={tier.nodeId}
+              value={storage.nodeId}
               onChange={(v) => onUpdate({ nodeId: v })}
               options={[
                 { value: "", label: "Select node..." },
@@ -370,7 +340,7 @@ export function VaultStorageForm({
           </FormField>
           <FormField label="Path" dark={dark} description="Relative to node home">
             <TextInput
-              value={tier.path}
+              value={storage.path}
               onChange={(v) => onUpdate({ path: v })}
               placeholder={`jsonl/${vaultName || "vault"}.jsonl`}
               dark={dark}
@@ -380,10 +350,10 @@ export function VaultStorageForm({
         </>
       )}
 
-      {tier.type !== "jsonl" && rotationPolicyOptions.length > 0 && (
+      {storage.type !== "jsonl" && rotationPolicyOptions.length > 0 && (
         <FormField label="Rotation Policy" dark={dark}>
           <SelectInput
-            value={tier.rotationPolicyId}
+            value={storage.rotationPolicyId}
             onChange={(v) => onUpdate({ rotationPolicyId: v })}
             options={[
               { value: "", label: "None" },
@@ -394,10 +364,10 @@ export function VaultStorageForm({
         </FormField>
       )}
 
-      {tier.type !== "jsonl" && retentionPolicyOptions.length > 0 && (
+      {storage.type !== "jsonl" && retentionPolicyOptions.length > 0 && (
         <FormField label="Retention Policy" dark={dark}>
           <SelectInput
-            value={tier.retentionPolicyId}
+            value={storage.retentionPolicyId}
             onChange={(v) => onUpdate({ retentionPolicyId: v })}
             options={[
               { value: "", label: "None" },
@@ -408,14 +378,14 @@ export function VaultStorageForm({
         </FormField>
       )}
 
-      {tier.type !== "jsonl" && (
+      {storage.type !== "jsonl" && (
         <FormField
           label="Retention Disposition"
           dark={dark}
           description="What happens to records when retention triggers. 'Delete' frees storage immediately. 'Route' sends records through the routing engine — only enable if you have an archival route configured for this vault, otherwise records may cascade unexpectedly."
         >
           <SelectInput
-            value={tier.retentionDisposition || "delete"}
+            value={storage.retentionDisposition || "delete"}
             onChange={(v) => onUpdate({ retentionDisposition: v })}
             options={[
               { value: "delete", label: "Delete records on retention" },
@@ -426,10 +396,10 @@ export function VaultStorageForm({
         </FormField>
       )}
 
-      {tier.type !== "jsonl" && (
+      {storage.type !== "jsonl" && (
         <FormField label="Replication Factor" dark={dark} description="1 = none, 2 = redundant, 3+ = fault tolerant">
           <SpinnerInput
-            value={tier.replicationFactor}
+            value={storage.replicationFactor}
             onChange={(v) => onUpdate({ replicationFactor: v })}
             dark={dark}
             min={1}
@@ -497,11 +467,11 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
     }
   }
   const totalNodes = config?.nodeConfigs.length ?? 1;
-  const maxRFForTier = (tier: { type: string; storageClass: string }) => {
-    if (tier.type === "memory") return totalNodes;
-    if (tier.type === "jsonl") return 1;
-    // Single storage class for all file tiers (local-only and cloud-backed).
-    const sc = parseInt(tier.storageClass, 10) || 0;
+  const maxRFForStorage = (s: { type: string; storageClass: string }) => {
+    if (s.type === "memory") return totalNodes;
+    if (s.type === "jsonl") return 1;
+    // Single storage class for all file vaults (local-only and cloud-backed).
+    const sc = parseInt(s.storageClass, 10) || 0;
     if (sc === 0) return 1; // no class selected yet
     return classStorageCount.get(sc) ?? 1;
   };
@@ -525,7 +495,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
     .map((rp) => ({ value: encode(rp.id), label: rp.name || encode(rp.id) }));
 
   // Validation: storage shape complete, no name conflict.
-  const storageComplete = isTierComplete(addForm.storage, cloudServiceOptions.length > 0);
+  const storageComplete = isStorageComplete(addForm.storage, cloudServiceOptions.length > 0);
   const createDisabled = nameConflict || !storageComplete;
 
   // Auto-expand a vault when navigated to from another view.
@@ -545,9 +515,6 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
     const storage = addForm.storage;
     const cloudBacked = isCloudBacked(storage);
 
-    // Phase 2 (gastrolog-3iy5l): a vault carries its own storage shape;
-    // PutVault is sufficient on its own — the FSM auto-synthesizes the
-    // matching TierConfig until that field set lives only on the vault.
     const vaultCfg = new VaultConfig({
       id: vaultIdBytes,
       name,
@@ -618,7 +585,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
           />
 
           <VaultStorageForm
-            tier={addForm.storage}
+            storage={addForm.storage}
             dark={dark}
             storageClassOptions={storageClassOptions}
             cloudServiceOptions={cloudServiceOptions}
@@ -626,8 +593,8 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
             retentionPolicyOptions={retentionPolicyOptions}
             nodeOptions={(config?.nodeConfigs ?? []).map((n) => ({ value: encode(n.id), label: n.name || encode(n.id) })).sort((a, b) => a.label.localeCompare(b.label))}
             vaultName={addForm.name || addForm.namePlaceholder || ""}
-            maxRF={maxRFForTier(addForm.storage)}
-            onTypeChange={(t) => dispatchAdd({ type: "setType", tierType: t })}
+            maxRF={maxRFForStorage(addForm.storage)}
+            onTypeChange={(t) => dispatchAdd({ type: "setType", vaultType: t })}
             onUpdate={(patch) => dispatchAdd({ type: "updateStorage", patch })}
           />
         </AddFormCard>

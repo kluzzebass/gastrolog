@@ -1,20 +1,11 @@
 package system
 
 import (
-	"cmp"
 	"gastrolog/internal/glid"
-	"slices"
 )
 
 // VaultConfig describes a vault — the unit of independent storage and the
-// only abstraction over the chunk layer (post-tier model).
-//
-// Pre-refactor, the storage/lifecycle fields lived on TierConfig and a vault
-// owned 1..N tiers. During the vault refactor (gastrolog-257l7), VaultConfig
-// absorbs every tier field; once consumers migrate, TierConfig is deleted.
-//
-// All new fields are JSON-omitempty so existing serialized data
-// (which only has id/name/enabled) still deserializes cleanly.
+// only abstraction over the chunk layer.
 type VaultConfig struct {
 	// ID is the unique identifier (UUIDv7).
 	ID glid.GLID `json:"id"`
@@ -103,127 +94,10 @@ func (v VaultConfig) ResolveRetentionDisposition() string {
 	}
 }
 
-// VaultTierIDs returns the ordered tier IDs for a vault by filtering tiers
-// with matching VaultID and sorting by Position. This replaces the old
-// VaultConfig.TierIDs field — tier ownership now lives on TierConfig.
-func VaultTierIDs(tiers []TierConfig, vaultID glid.GLID) []glid.GLID {
-	type entry struct {
-		id  glid.GLID
-		pos uint32
-	}
-	var matched []entry
-	for _, t := range tiers {
-		if t.VaultID == vaultID {
-			matched = append(matched, entry{t.ID, t.Position})
-		}
-	}
-	slices.SortFunc(matched, func(a, b entry) int {
-		return cmp.Compare(a.pos, b.pos)
-	})
-	ids := make([]glid.GLID, len(matched))
-	for i, e := range matched {
-		ids[i] = e.id
-	}
-	return ids
-}
-
-// VaultTiers returns the ordered tier configs for a vault.
-func VaultTiers(tiers []TierConfig, vaultID glid.GLID) []TierConfig {
-	var matched []TierConfig
-	for _, t := range tiers {
-		if t.VaultID == vaultID {
-			matched = append(matched, t)
-		}
-	}
-	slices.SortFunc(matched, func(a, b TierConfig) int {
-		return cmp.Compare(a.Position, b.Position)
-	})
-	return matched
-}
-
 // IsCloud reports whether this vault is cloud-backed (CloudServiceID set).
-// Mirrors TierConfig.IsCloud() now that VaultConfig absorbs the storage
-// fields. Once TierConfig is deleted, IsCloud lives only here.
 func (v VaultConfig) IsCloud() bool {
 	return v.CloudServiceID != nil
 }
-
-// VaultType is the new canonical name for the storage-shape enum during
-// the vault refactor (gastrolog-257l7). Alias of TierType for now —
-// once consumers migrate, TierType and its constants are deleted and
-// this becomes the only name.
-type VaultType = TierType
-
-const (
-	VaultTypeMemory = TierTypeMemory
-	VaultTypeFile   = TierTypeFile
-	VaultTypeJSONL  = TierTypeJSONL
-)
-
-// VaultPlacement is the new canonical name for storage assignments
-// during the refactor. Alias of TierPlacement; once consumers migrate,
-// TierPlacement is deleted and this becomes the only name.
-type VaultPlacement = TierPlacement
-
-// MergeVaultFromTiers populates v's merged storage/lifecycle fields from
-// its (single) tier in tiers, returning the merged copy. Used during the
-// vault refactor (gastrolog-257l7) to ensure VaultConfig values written
-// to the store carry the post-tier shape, even when the source data still
-// comes from a separate TierConfig list. The original v is not mutated.
-//
-// If the vault has no tiers, returns v unchanged. If the vault has multiple
-// tiers, the lowest-position tier's fields win (matches the eventual
-// "one storage shape per vault" model). Fields explicitly set on v are
-// not overwritten.
-func MergeVaultFromTiers(v VaultConfig, tiers []TierConfig) VaultConfig {
-	matched := VaultTiers(tiers, v.ID)
-	if len(matched) == 0 {
-		return v
-	}
-	t := matched[0]
-	if v.Type == "" {
-		v.Type = t.Type
-	}
-	if v.RotationPolicyID == nil && t.RotationPolicyID != nil {
-		id := *t.RotationPolicyID
-		v.RotationPolicyID = &id
-	}
-	if len(v.RetentionRules) == 0 && len(t.RetentionRules) > 0 {
-		v.RetentionRules = make([]RetentionRule, len(t.RetentionRules))
-		for i, r := range t.RetentionRules {
-			v.RetentionRules[i] = RetentionRule{
-				RetentionPolicyID: r.RetentionPolicyID,
-			}
-		}
-	}
-	if v.MemoryBudgetBytes == 0 {
-		v.MemoryBudgetBytes = t.MemoryBudgetBytes
-	}
-	if v.StorageClass == 0 {
-		v.StorageClass = t.StorageClass
-	}
-	if v.CloudServiceID == nil && t.CloudServiceID != nil {
-		id := *t.CloudServiceID
-		v.CloudServiceID = &id
-	}
-	if v.ReplicationFactor == 0 {
-		v.ReplicationFactor = t.ReplicationFactor
-	}
-	if v.Path == "" {
-		v.Path = t.Path
-	}
-	if v.CacheEviction == "" {
-		v.CacheEviction = t.CacheEviction
-	}
-	if v.CacheBudget == "" {
-		v.CacheBudget = t.CacheBudget
-	}
-	if v.CacheTTL == "" {
-		v.CacheTTL = t.CacheTTL
-	}
-	return v
-}
-
 
 // DistributionMode controls how messages are distributed across route destinations.
 type DistributionMode string

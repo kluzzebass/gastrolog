@@ -41,7 +41,7 @@ func TestDedupChunkReportsCollapsesReplicas(t *testing.T) {
 }
 
 // TestDedupChunkReportsSameNodeDoesNotInflateReplicas verifies that duplicate
-// list rows for the same chunk from one node (e.g. multiple local tiers) only
+// list rows for the same chunk from one node (e.g. multiple local instances) only
 // count as one replica.
 func TestDedupChunkReportsSameNodeDoesNotInflateReplicas(t *testing.T) {
 	t.Parallel()

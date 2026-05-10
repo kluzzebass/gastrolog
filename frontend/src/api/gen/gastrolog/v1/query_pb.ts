@@ -89,7 +89,7 @@ export class SearchResponse extends Message<SearchResponse> {
   histogram: HistogramBucket[] = [];
 
   /**
-   * Number of chunks skipped because they are in an offline storage tier
+   * Number of chunks skipped because they are in an offline storage class
    * (S3 Glacier, Azure Archive). Set on the first response message.
    *
    * @generated from field: int32 archived_chunks = 6;

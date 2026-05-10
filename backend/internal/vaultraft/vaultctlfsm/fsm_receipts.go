@@ -1,4 +1,4 @@
-package tierfsm
+package vaultctlfsm
 
 // Receipt-based deletion protocol — gastrolog-51gme step 2.
 //
@@ -13,7 +13,7 @@ package tierfsm
 // The replacement is an N-way receipt protocol that lives in the FSM
 // state itself, so a snapshot carries it across the boundary intact:
 //
-//   1. Tier leader proposes CmdRequestDelete(chunkID, expectedFrom, reason).
+//   1. Vault leader proposes CmdRequestDelete(chunkID, expectedFrom, reason).
 //      The FSM stores the entry in pendingDeletes with expectedFrom equal
 //      to the placement membership at proposal time.
 //   2. Each node in expectedFrom handles the local side (delete the file

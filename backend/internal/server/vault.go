@@ -30,7 +30,7 @@ type RemoteChunkLister interface {
 }
 
 // RemoteIndexer queries chunk index information on a remote node.
-// Used by GetIndexes when the chunk has migrated to a tier this node
+// Used by GetIndexes when the chunk has migrated to a vault this node
 // doesn't host. See gastrolog-3570f.
 type RemoteIndexer interface {
 	GetIndexes(ctx context.Context, nodeID string, req *apiv1.ForwardGetIndexesRequest) (*apiv1.ForwardGetIndexesResponse, error)

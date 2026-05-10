@@ -9,17 +9,17 @@ import (
 	"gastrolog/internal/manifest"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/vaultraft"
-	"gastrolog/internal/vaultraft/tierfsm"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
 // ManifestReader returns a manifest.Reader backed by this orchestrator's
-// vaults. Walks the per-tier sub-FSMs to project a global view of sealed
+// vaults. Walks the per-vault sub-FSMs to project a global view of sealed
 // chunk manifests; honors the active-chunk exception by filtering on
 // Sealed=true.
 //
-// Memory-mode tiers (no FSM, no replication) are projected from the local
+// Memory-mode vaults (no FSM, no replication) are projected from the local
 // chunk manager's List() so callers see a uniform view regardless of how
-// the tier is backed.
+// the instance is backed.
 func (o *Orchestrator) ManifestReader() manifest.Reader {
 	return &orchestratorManifestReader{o: o}
 }
@@ -33,9 +33,9 @@ func (o *Orchestrator) IntegrityVerifier() chunk.IntegrityVerifier {
 }
 
 // orchestratorManifestReader implements manifest.Reader by walking the
-// orchestrator's vaults and their tiers. Sealed entries from the tier FSM
-// are returned verbatim; memory-mode tiers project from chunk.ChunkManager
-// because those tiers are their own source of truth (no replication).
+// orchestrator's vaults. Sealed entries from the vault-ctl FSM are returned
+// verbatim; memory-mode vaults project from chunk.ChunkManager because those
+// vaults are their own source of truth (no replication).
 type orchestratorManifestReader struct {
 	o *Orchestrator
 }
@@ -63,7 +63,7 @@ func (r *orchestratorManifestReader) ExpectedDigest(id chunk.ChunkID) ([32]byte,
 // Entry returns the sealed manifest entry for the given chunk ID. ChunkIDs
 // are globally unique, so this fans out across every vault until it finds
 // the chunk; it does NOT return active chunks (Sealed=false).
-func (r *orchestratorManifestReader) Entry(id chunk.ChunkID) (tierfsm.ManifestEntry, bool) {
+func (r *orchestratorManifestReader) Entry(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool) {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
 	for _, v := range r.o.vaults {
@@ -74,12 +74,12 @@ func (r *orchestratorManifestReader) Entry(id chunk.ChunkID) (tierfsm.ManifestEn
 			return e, true
 		}
 	}
-	return tierfsm.ManifestEntry{}, false
+	return vaultctlfsm.ManifestEntry{}, false
 }
 
 // EntriesForVault returns every sealed manifest entry for the given vault.
 // Returns nil when the vault isn't registered on this node.
-func (r *orchestratorManifestReader) EntriesForVault(key glid.GLID) []tierfsm.ManifestEntry {
+func (r *orchestratorManifestReader) EntriesForVault(key glid.GLID) []vaultctlfsm.ManifestEntry {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
 	if v := r.o.vaults[key]; v != nil && v.Instance != nil {
@@ -90,14 +90,14 @@ func (r *orchestratorManifestReader) EntriesForVault(key glid.GLID) []tierfsm.Ma
 
 // VaultManifestEntriesFromCtlFSM returns every manifest entry (sealed and
 // active) for the given vault, read directly from the replicated vault-ctl
-// Raft FSM rather than from local TierInstances. Every node participates as
+// Raft FSM rather than from local VaultInstances. Every node participates as
 // a voter in every vault-ctl Raft group (gastrolog-292yi), so the FSM is
-// authoritative cluster-wide and visible on nodes that don't host any tier
+// authoritative cluster-wide and visible on nodes that don't host any instance
 // instance for the vault — the case where ManifestReader().EntriesForVault
 // returns nil because o.vaults has no entry. Returns nil when there is no
 // GroupManager (single-node / memory mode) or when this node hasn't joined
 // the vault-ctl group yet.
-func (o *Orchestrator) VaultManifestEntriesFromCtlFSM(vaultID glid.GLID) []tierfsm.ManifestEntry {
+func (o *Orchestrator) VaultManifestEntriesFromCtlFSM(vaultID glid.GLID) []vaultctlfsm.ManifestEntry {
 	if o.groupMgr == nil {
 		return nil
 	}
@@ -109,19 +109,19 @@ func (o *Orchestrator) VaultManifestEntriesFromCtlFSM(vaultID glid.GLID) []tierf
 	if !ok || vfsm == nil {
 		return nil
 	}
-	var out []tierfsm.ManifestEntry
-	for _, t := range vfsm.Tiers() {
+	var out []vaultctlfsm.ManifestEntry
+	for _, t := range vfsm.Vaults() {
 		out = append(out, t.List()...)
 	}
 	return out
 }
 
-func collectSealedEntries(inst *VaultInstance) []tierfsm.ManifestEntry {
-	if inst == nil {
+func collectSealedEntries(vaultInst *VaultInstance) []vaultctlfsm.ManifestEntry {
+	if vaultInst == nil {
 		return nil
 	}
-	var out []tierfsm.ManifestEntry
-	for _, e := range vaultManifestEntries(inst) {
+	var out []vaultctlfsm.ManifestEntry
+	for _, e := range vaultManifestEntries(vaultInst) {
 		if e.IsSealed() {
 			out = append(out, e)
 		}
@@ -132,16 +132,16 @@ func collectSealedEntries(inst *VaultInstance) []tierfsm.ManifestEntry {
 // vaultManifestEntry returns the manifest entry for a chunk on this instance.
 // Prefers the FSM callback (cluster-replicated truth) and falls back to
 // projecting from the local chunk manager for memory-mode vaults.
-func vaultManifestEntry(t *VaultInstance, id chunk.ChunkID) (tierfsm.ManifestEntry, bool) {
+func vaultManifestEntry(t *VaultInstance, id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool) {
 	if t.ManifestEntry != nil {
 		return t.ManifestEntry(id)
 	}
 	if t.Chunks == nil {
-		return tierfsm.ManifestEntry{}, false
+		return vaultctlfsm.ManifestEntry{}, false
 	}
 	meta, err := t.Chunks.Meta(id)
 	if err != nil {
-		return tierfsm.ManifestEntry{}, false
+		return vaultctlfsm.ManifestEntry{}, false
 	}
 	return chunkMetaToManifestEntry(meta), true
 }
@@ -149,7 +149,7 @@ func vaultManifestEntry(t *VaultInstance, id chunk.ChunkID) (tierfsm.ManifestEnt
 // vaultManifestEntries returns every manifest entry on this instance.
 // FSM-backed instances go through the callback; memory-mode vaults
 // project from List().
-func vaultManifestEntries(t *VaultInstance) []tierfsm.ManifestEntry {
+func vaultManifestEntries(t *VaultInstance) []vaultctlfsm.ManifestEntry {
 	if t.ManifestEntries != nil {
 		return t.ManifestEntries()
 	}
@@ -160,7 +160,7 @@ func vaultManifestEntries(t *VaultInstance) []tierfsm.ManifestEntry {
 	if err != nil || len(metas) == 0 {
 		return nil
 	}
-	out := make([]tierfsm.ManifestEntry, len(metas))
+	out := make([]vaultctlfsm.ManifestEntry, len(metas))
 	for i, m := range metas {
 		out[i] = chunkMetaToManifestEntry(m)
 	}
@@ -168,7 +168,7 @@ func vaultManifestEntries(t *VaultInstance) []tierfsm.ManifestEntry {
 }
 
 // IndexReader returns a manifest.IndexReader that resolves IngestTS rank /
-// position lookups against this orchestrator's locally-hosted tiers. Phase 1
+// position lookups against this orchestrator's locally-hosted vaults. Phase 1
 // implementation delegates to the existing layered fallback
 // (chunk.ChunkManager.FindIngestEntryIndex → index.IndexManager.FindIngestEntryIndex).
 // A future pass will collapse those two file-access paths onto a single
@@ -179,8 +179,8 @@ func (o *Orchestrator) IndexReader() manifest.IndexReader {
 }
 
 // orchestratorIndexReader implements manifest.IndexReader by walking the
-// orchestrator's local tier instances to find the chunk's owning tier,
-// then dispatching to that tier's chunk manager (and index manager) for
+// orchestrator's local vault instances to find the chunk's owning instance,
+// then dispatching to that instance's chunk manager (and index manager) for
 // the actual rank/pos lookup. Same fallback logic as the legacy
 // findIngestRank/findIngestPos helpers in internal/query/histogram.go,
 // just behind the manifest.IndexReader interface.
@@ -246,14 +246,14 @@ func (r *orchestratorIndexReader) lookupVaultManagers(chunkID chunk.ChunkID) (ch
 }
 
 // chunkMetaToManifestEntry projects a chunk.ChunkMeta into the FSM-shaped
-// tierfsm.ManifestEntry. Used only for memory-mode tiers, which have no
+// vaultctlfsm.ManifestEntry. Used only for memory-mode vaults, which have no
 // FSM and no replication — the local chunk manager IS the source of truth
 // there. RetentionPending / TransitionStreamed / IngestIdx*/SourceIdx*
-// fields stay zero (memory-mode tiers don't track them).
-func chunkMetaToManifestEntry(m chunk.ChunkMeta) tierfsm.ManifestEntry {
+// fields stay zero (memory-mode vaults don't track them).
+func chunkMetaToManifestEntry(m chunk.ChunkMeta) vaultctlfsm.ManifestEntry {
 	state := m.State
 	if state == chunk.ChunkStateUnknown {
-		// Memory-mode tiers don't carry FSM state. Derive from the
+		// Memory-mode vaults don't carry FSM state. Derive from the
 		// local Sealed bool — there's no Sealing intermediate without
 		// an FSM driving the announce protocol.
 		if m.Sealed {
@@ -262,7 +262,7 @@ func chunkMetaToManifestEntry(m chunk.ChunkMeta) tierfsm.ManifestEntry {
 			state = chunk.ChunkStateActive
 		}
 	}
-	return tierfsm.ManifestEntry{
+	return vaultctlfsm.ManifestEntry{
 		ID:          m.ID,
 		WriteStart:  m.WriteStart,
 		WriteEnd:    m.WriteEnd,

@@ -18,7 +18,7 @@ import (
 	"gastrolog/internal/system"
 )
 
-// ListChunks returns all chunks in a vault from all tiers across all nodes.
+// ListChunks returns all chunks in a vault across all nodes that host it.
 // Routing: RouteFanOut — collects local chunks + remote chunks from all nodes.
 func (s *VaultServer) ListChunks(
 	ctx context.Context,
@@ -44,7 +44,7 @@ func (s *VaultServer) ListChunks(
 		if req.Msg.ActiveOnly && meta.Sealed {
 			continue // lightweight poll: skip sealed chunks
 		}
-		pb := TieredChunkMetaToProto(meta)
+		pb := VaultChunkMetaToProto(meta)
 		if pending[meta.ID] {
 			pb.RetentionPending = true
 		}
@@ -56,10 +56,10 @@ func (s *VaultServer) ListChunks(
 		reports = append(reports, chunkReport{reportingNode: s.localNodeID, chunk: pb})
 	}
 
-	// Full mode: collect remote chunks from all nodes hosting the vault's
-	// tiers. Skipped in active_only mode — the caller only needs the
-	// connected node's active chunk stats for the 5-second refresh; the
-	// full cluster-wide picture comes through the stream-driven refetch.
+	// Full mode: collect remote chunks from all nodes hosting the vault.
+	// Skipped in active_only mode — the caller only needs the connected
+	// node's active chunk stats for the 5-second refresh; the full
+	// cluster-wide picture comes through the stream-driven refetch.
 	//
 	// Parallel fan-out with per-peer timeout (gastrolog-csspr): a paused
 	// or partitioned peer used to block this loop for minutes (gRPC
@@ -95,8 +95,8 @@ func (s *VaultServer) ListChunks(
 	// the same chunk ID appears in the raw merge multiple times.
 	// Keep the most authoritative version (sealed + compressed > not) and
 	// set replica_count to how many distinct nodes reported the chunk (not
-	// raw row count — a single node can list the same ID twice when it hosts
-	// multiple local tier instances, e.g. warm + cloud during transitions).
+	// raw row count — a single node can list the same ID twice when it
+	// hosts multiple local instances).
 	return connect.NewResponse(&apiv1.ListChunksResponse{Chunks: dedupChunkReports(reports)}), nil
 }
 
@@ -190,8 +190,7 @@ func moreAuthoritative(a, b *apiv1.ChunkMeta) bool {
 // vault — both leader and followers. Leader provides authoritative chunk
 // metadata; followers are queried to verify replica presence for the UI.
 //
-// Reads VaultConfig.Placements directly (mirrored from tier placements
-// via the FSM bridge — gastrolog-257l7).
+// Reads VaultConfig.Placements directly.
 func (s *VaultServer) remoteVaultNodes(ctx context.Context, vaultID glid.GLID) []string {
 	vaultCfg, err := s.cfgStore.GetVault(ctx, vaultID)
 	if err != nil || vaultCfg == nil {
@@ -239,23 +238,23 @@ func (s *VaultServer) GetChunk(
 		return nil, errInvalidArg(err)
 	}
 
-	meta, err := s.orch.GetTieredChunkMeta(vaultID, chunkID)
+	meta, err := s.orch.GetVaultChunkMeta(vaultID, chunkID)
 	if err != nil {
 		return nil, mapVaultError(err)
 	}
 
 	return connect.NewResponse(&apiv1.GetChunkResponse{
-		Chunk: TieredChunkMetaToProto(meta),
+		Chunk: VaultChunkMetaToProto(meta),
 	}), nil
 }
 
 // GetIndexes returns index status for a chunk.
 //
 // Routing: RouteLocal — the handler tries the local node first, then
-// fans out to remote tier-hosting nodes if the chunk has migrated to a
-// tier this node doesn't host. Cross-tier migration (warm → cloud, etc.)
-// shifts a chunk's owning node, so a single RouteTargeted hop would
-// frequently miss and produce ErrChunkNotFound log spam. See
+// fans out to remote vault-hosting nodes if the chunk has migrated to a
+// vault this node doesn't host. Cross-vault migration (warm → cloud,
+// etc.) shifts a chunk's owning node, so a single RouteTargeted hop
+// would frequently miss and produce ErrChunkNotFound log spam. See
 // gastrolog-3570f.
 func (s *VaultServer) GetIndexes(
 	ctx context.Context,
@@ -274,15 +273,15 @@ func (s *VaultServer) GetIndexes(
 		return nil, errInvalidArg(err)
 	}
 
-	// Local first: cheap path when this node hosts the tier.
+	// Local first: cheap path when this node hosts the vault.
 	if report, err := s.orch.ChunkIndexInfos(vaultID, chunkID); err == nil {
 		return connect.NewResponse(reportToProto(report)), nil
 	} else if !errors.Is(err, chunk.ErrChunkNotFound) && !errors.Is(err, orchestrator.ErrVaultNotFound) {
 		return nil, mapVaultError(err)
 	}
 
-	// Local doesn't have it — chunk has migrated to a tier on another
-	// node. Fan out to all peers hosting tiers for this vault; the one
+	// Local doesn't have it — chunk has migrated to another vault on a
+	// different node. Fan out to all peers hosting this vault; the one
 	// that has the chunk responds with index info, others say
 	// ErrChunkNotFound and are silently elided.
 	if s.remoteIndexer == nil {

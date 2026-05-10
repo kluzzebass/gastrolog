@@ -237,8 +237,8 @@ func (s *QueryServer) searchDirect(
 	}
 
 	// computeDedupHistogram (record-iterating EventID dedup) is no longer
-	// needed for cross-tier transition double-counting — that's handled at
-	// the index level via per-chunk IngestTSMonotonic dispatch +
+	// needed for cross-vault transition double-counting — that's handled
+	// at the index level via per-chunk IngestTSMonotonic dispatch +
 	// ScanTSBounds + on-disk TS index rank arithmetic. The local histogram
 	// path above computes correct counts directly. Skipping the dedup
 	// avoids iterating ALL records per histogram query. See gastrolog-66b7x.
@@ -250,11 +250,9 @@ func (s *QueryServer) searchDirect(
 // splitResumeToken separates a unified resume token into local positions
 // (for eng.Search) and remote opaque blobs (for collectRemote).
 //
-// Post-vault-refactor (gastrolog-257l7): all keys in VaultTokens are
-// vault IDs — the local query engine's leaderTierRegistry now emits
-// positions tagged by vault ID instead of tier ID. The split is a
-// straight membership check against the local-leader vault set; no more
-// dual-ID-space dispatch.
+// All keys in VaultTokens are vault IDs — the local query engine emits
+// positions tagged by vault ID. The split is a straight membership
+// check against the local-leader vault set.
 func (s *QueryServer) splitResumeToken(resume *query.ResumeToken) (*query.ResumeToken, map[glid.GLID][]byte) {
 	if resume == nil || len(resume.VaultTokens) == 0 {
 		return nil, nil
@@ -755,10 +753,10 @@ func normalizedRange(start, end time.Time) (time.Time, time.Time, bool) {
 // Bounded queries (last=5m, explicit start=/end=) are no-ops.
 //
 // Reads from VaultManifestEntriesFromCtlFSM, which goes directly through the
-// vault-ctl Raft group's FSM rather than per-tier-instance state. Every node
+// vault-ctl Raft group's FSM rather than per-vault-instance state. Every node
 // is a voter of every vault-ctl group (gastrolog-292yi), so the FSM is
-// authoritative cluster-wide regardless of which node hosts the tier — a
-// coordinator that runs no tier replicas still sees the full sealed manifest.
+// authoritative cluster-wide regardless of which node hosts the vault — a
+// coordinator that runs no vault replicas still sees the full sealed manifest.
 // Falls back to ListChunkMetas for the legacy memory-mode path (no GroupManager,
 // no FSM); that path also picks up the active chunk for vaults that have not
 // yet sealed any data.
@@ -811,7 +809,7 @@ func (s *QueryServer) selectedOrAllVaults(ctx context.Context, q query.Query) []
 // aggregateVaultBounds returns (min IngestStart, max IngestEnd) across every
 // chunk visible for the given vaults. Walks both the cluster-replicated
 // vault-ctl FSM (sealed manifest, visible on every voter) and the local
-// chunk manager (active + memory-mode tiers). Either source contributing
+// chunk manager (active + memory-mode vaults). Either source contributing
 // nothing is fine — the function only collapses to (zero, zero) when neither
 // has anything to say.
 func (s *QueryServer) aggregateVaultBounds(vaults []glid.GLID) (time.Time, time.Time) {

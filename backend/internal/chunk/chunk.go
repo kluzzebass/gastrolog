@@ -87,7 +87,7 @@ type ChunkManager interface {
 	// IngestTS-sorted order. The callback receives IngestTS in nanoseconds
 	// and returns false to stop early. Returns ErrChunkNotFound if id is
 	// not the active chunk. No attr or raw reads — cheap. Used by the
-	// histogram counts path on non-monotonic active chunks (tier 2+
+	// histogram counts path on non-monotonic active chunks (downstream
 	// destinations) where position-as-rank assumptions break.
 	// See gastrolog-66b7x.
 	ScanActiveIngestTS(id ChunkID, cb func(tsNanos int64) bool) error
@@ -163,7 +163,7 @@ type ChunkMover interface {
 }
 
 // DirRemover extends ChunkManager with the ability to remove its entire
-// data directory. Called after Close() when a tier is deleted so that
+// data directory. Called after Close() when a vault is deleted so that
 // leftover files (.lock, cloud.idx, etc.) and the directory itself are
 // cleaned up. Implementations should not attempt any operations after
 // RemoveDir returns.
@@ -222,15 +222,15 @@ type ChunkArchiver interface {
 
 	// RestoreChunk initiates retrieval of an archived chunk. On S3 this is
 	// async (RestoreObject). Returns nil if already restored or not archived.
-	// tier is the restore speed ("Expedited"/"Standard"/"Bulk" for S3,
+	// speed is the restore speed ("Expedited"/"Standard"/"Bulk" for S3,
 	// "High"/"Standard" for Azure). days is how long the restored copy stays
 	// readable (S3 only).
-	RestoreChunk(ctx context.Context, id ChunkID, tier string, days int) error
+	RestoreChunk(ctx context.Context, id ChunkID, speed string, days int) error
 }
 
 // ChunkBudgetMonitor extends ChunkManager with memory budget awareness.
 // The orchestrator checks BudgetExceeded during retention sweeps to force
-// early transitions when a memory tier is over budget.
+// early transitions when a memory vault is over budget.
 type ChunkBudgetMonitor interface {
 	BudgetExceeded() int64 // bytes over budget, 0 = within budget or no budget
 }
@@ -242,7 +242,7 @@ type ChunkCacheEvictor interface {
 }
 
 // CloudChunkInfo carries the metadata needed to register a cloud-backed chunk
-// on a follower without streaming any records. All fields come from the tier
+// on a follower without streaming any records. All fields come from the vault
 // Raft FSM entry (populated by AnnounceSeal + AnnounceUpload on the leader).
 type CloudChunkInfo struct {
 	WriteStart        time.Time
@@ -265,7 +265,7 @@ type CloudChunkInfo struct {
 // CloudChunkRegistrar extends ChunkManager with the ability to register a
 // cloud-backed chunk from metadata alone — no local files, no record streaming.
 // Used by follower nodes to adopt chunks from the shared S3 bucket after the
-// tier FSM propagates the leader's AnnounceUpload.
+// vault FSM propagates the leader's AnnounceUpload.
 type CloudChunkRegistrar interface {
 	RegisterCloudChunk(id ChunkID, info CloudChunkInfo) error
 }

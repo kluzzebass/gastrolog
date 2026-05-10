@@ -86,8 +86,6 @@ func DefaultRoutes() map[string]RPCRoute {
 		gastrologv1connect.SystemServicePutCloudServiceProcedure:      {Strategy: RouteLeader},
 		gastrologv1connect.SystemServiceDeleteCloudServiceProcedure:   {Strategy: RouteLeader},
 		gastrologv1connect.SystemServiceSetNodeStorageConfigProcedure: {Strategy: RouteLeader},
-		gastrologv1connect.SystemServicePutTierProcedure:              {Strategy: RouteLeader},
-		gastrologv1connect.SystemServiceDeleteTierProcedure:           {Strategy: RouteLeader},
 		gastrologv1connect.SystemServiceDeleteLookupProcedure:         {Strategy: RouteLeader},
 
 		// ── JobService ───────────────────────────────────────────────────
@@ -127,7 +125,7 @@ func DefaultRoutes() map[string]RPCRoute {
 		// WrapResponse enables the interceptor to deserialize forwarded responses.
 		gastrologv1connect.VaultServiceListChunksProcedure:    {Strategy: RouteFanOut},
 		gastrologv1connect.VaultServiceGetChunkProcedure:      {Strategy: RouteTargeted, WrapResponse: NewRespWrapper[apiv1.GetChunkResponse]()},
-		gastrologv1connect.VaultServiceGetIndexesProcedure:    {Strategy: RouteLocal}, // gastrolog-3570f: handler fans out to tier-hosting peers
+		gastrologv1connect.VaultServiceGetIndexesProcedure:    {Strategy: RouteLocal}, // gastrolog-3570f: handler fans out to vault-hosting peers
 
 		gastrologv1connect.VaultServiceAnalyzeChunkProcedure:  {Strategy: RouteTargeted, WrapResponse: NewRespWrapper[apiv1.AnalyzeChunkResponse]()},
 		gastrologv1connect.VaultServiceValidateVaultProcedure: {Strategy: RouteTargeted, WrapResponse: NewRespWrapper[apiv1.ValidateVaultResponse]()},

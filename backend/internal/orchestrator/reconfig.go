@@ -13,12 +13,12 @@ var (
 	ErrVaultNotEmpty = errors.New("vault is not empty")
 	// ErrVaultNotFound is returned when attempting to operate on a non-existent vault.
 	ErrVaultNotFound = errors.New("vault not found")
-	// ErrTierNotLocal is returned when a tier instance is not registered on
+	// ErrInstanceNotLocal is returned when a vault instance is not registered on
 	// this node (typically because placement reconfiguration evicted it),
 	// even though the vault still exists cluster-wide. Distinct from
 	// ErrVaultNotFound so log lines don't suggest the vault was deleted
 	// during legitimate placement churn. See gastrolog-2t48z.
-	ErrTierNotLocal = errors.New("tier not registered on this node")
+	ErrInstanceNotLocal = errors.New("vault instance not registered on this node")
 	// ErrIngesterNotFound is returned when attempting to operate on a non-existent ingester.
 	ErrIngesterNotFound = errors.New("ingester not found")
 	// ErrVaultDisabled is returned when attempting to append to a disabled vault.
@@ -31,7 +31,7 @@ var (
 
 // IsPlacementChurnErr reports whether err signals a benign placement-state
 // drift between the calling node and a peer: the peer either has no record
-// of the vault, has the vault but the tier instance was evicted, or the
+// of the vault, has the vault but the vault instance was evicted, or the
 // caller's cached placement view is stale. None of these are real failures
 // — they are expected during placement reconfiguration and should not
 // drive WARN-level log spam. See gastrolog-5z607.
@@ -44,12 +44,12 @@ func IsPlacementChurnErr(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, ErrVaultNotFound) || errors.Is(err, ErrTierNotLocal) {
+	if errors.Is(err, ErrVaultNotFound) || errors.Is(err, ErrInstanceNotLocal) {
 		return true
 	}
 	msg := err.Error()
 	return strings.Contains(msg, "vault not found") ||
-		strings.Contains(msg, "tier not registered on this node")
+		strings.Contains(msg, "vault instance not registered on this node")
 }
 
 // loadSystem loads the full system state (config + runtime) via the SystemLoader.

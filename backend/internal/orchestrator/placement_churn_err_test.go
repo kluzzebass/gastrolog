@@ -10,7 +10,7 @@ import (
 // covers the four authentic origin shapes (local sentinel direct,
 // local sentinel wrapped via fmt.Errorf %w, cross-RPC rendered string
 // for legacy "vault not found" wording, cross-RPC rendered string for
-// new "tier not registered on this node" wording) plus the negative
+// new "instance not registered on this node" wording) plus the negative
 // cases (nil, unrelated errors).
 func TestIsPlacementChurnErr(t *testing.T) {
 	t.Parallel()
@@ -23,16 +23,16 @@ func TestIsPlacementChurnErr(t *testing.T) {
 		{"unrelated", errors.New("disk full"), false},
 		{"direct ErrVaultNotFound", ErrVaultNotFound, true},
 		{"wrapped ErrVaultNotFound", fmt.Errorf("look up vault: %w", ErrVaultNotFound), true},
-		{"direct ErrTierNotLocal", ErrTierNotLocal, true},
-		{"wrapped ErrTierNotLocal", fmt.Errorf("seal: %w: tier x in vault y", ErrTierNotLocal), true},
+		{"direct ErrInstanceNotLocal", ErrInstanceNotLocal, true},
+		{"wrapped ErrInstanceNotLocal", fmt.Errorf("seal: %w: vaultInst x in vault y", ErrInstanceNotLocal), true},
 		{
 			"cross-RPC legacy vault-not-found",
-			errors.New("follower rejected command: import failed: vault not found: tier T in vault V"),
+			errors.New("follower rejected command: import failed: vault not found: vaultInst T in vault V"),
 			true,
 		},
 		{
-			"cross-RPC new tier-not-local",
-			errors.New("follower rejected command: seal failed: tier not registered on this node: tier T in vault V"),
+			"cross-RPC new instance-not-local",
+			errors.New("follower rejected command: seal failed: vault instance not registered on this node: vault V"),
 			true,
 		},
 		{

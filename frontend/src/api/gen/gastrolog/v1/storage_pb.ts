@@ -254,9 +254,9 @@ export class CloudService extends Message<CloudService> {
   /**
    * default restore speed (S3: Expedited/Standard/Bulk, Azure: High/Standard)
    *
-   * @generated from field: string restore_tier = 15;
+   * @generated from field: string restore_speed = 15;
    */
-  restoreTier = "";
+  restoreSpeed = "";
 
   /**
    * S3: how long restored copy stays readable (days)
@@ -301,7 +301,7 @@ export class CloudService extends Message<CloudService> {
     { no: 12, name: "storage_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 13, name: "archival_mode", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 14, name: "transitions", kind: "message", T: CloudStorageTransition, repeated: true },
-    { no: 15, name: "restore_tier", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 15, name: "restore_speed", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 16, name: "restore_days", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 17, name: "suspect_grace_days", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 18, name: "reconcile_schedule", kind: "scalar", T: 9 /* ScalarType.STRING */ },

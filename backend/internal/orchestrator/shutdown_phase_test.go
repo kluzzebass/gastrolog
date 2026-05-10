@@ -18,25 +18,25 @@ type recordingChunkReplicator struct {
 	sealCalls   atomic.Int32
 }
 
-func (r *recordingChunkReplicator) AppendRecords(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
+func (r *recordingChunkReplicator) AppendRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
 	r.appendCalls.Add(1)
 	return nil
 }
 
-func (r *recordingChunkReplicator) SealVault(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
+func (r *recordingChunkReplicator) SealVault(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
 	r.sealCalls.Add(1)
 	return nil
 }
 
-func (r *recordingChunkReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
+func (r *recordingChunkReplicator) ImportSealedChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
 	return nil
 }
 
-func (r *recordingChunkReplicator) DeleteChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
+func (r *recordingChunkReplicator) DeleteChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
 }
 
-func (r *recordingChunkReplicator) RequestReplicaCatchup(_ context.Context, _ string, _, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {
+func (r *recordingChunkReplicator) RequestReplicaCatchup(_ context.Context, _ string, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {
 	return 0, nil
 }
 
@@ -68,8 +68,8 @@ func TestFireAndForgetRemoteSkipsDuringShutdown(t *testing.T) {
 	orch.SetChunkReplicator(replicator)
 
 	targets := []remoteForwardTarget{
-		{nodeID: "remote-a", vaultID: glid.New(), tierID: glid.New()},
-		{nodeID: "remote-b", vaultID: glid.New(), tierID: glid.New()},
+		{nodeID: "remote-a", vaultID: glid.New()},
+		{nodeID: "remote-b", vaultID: glid.New()},
 	}
 	rec := chunk.Record{Raw: []byte("payload")}
 
@@ -106,7 +106,7 @@ func TestSealRemoteFollowersSkipsDuringShutdown(t *testing.T) {
 	orch.SetChunkReplicator(replicator)
 
 	targets := []remoteForwardTarget{
-		{nodeID: "remote-a", vaultID: glid.New(), tierID: glid.New()},
+		{nodeID: "remote-a", vaultID: glid.New()},
 	}
 	chunkID := chunk.ChunkID{}
 
@@ -137,7 +137,7 @@ func TestFireAndForgetRemoteNilPhaseDoesNotPanic(t *testing.T) {
 	orch.SetChunkReplicator(replicator)
 
 	targets := []remoteForwardTarget{
-		{nodeID: "remote-a", vaultID: glid.New(), tierID: glid.New()},
+		{nodeID: "remote-a", vaultID: glid.New()},
 	}
 	orch.fireAndForgetRemote(targets, chunk.Record{Raw: []byte("payload")})
 

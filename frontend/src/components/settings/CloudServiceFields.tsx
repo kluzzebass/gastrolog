@@ -19,7 +19,7 @@ interface CloudServiceFieldValues {
   credentialsJson: string;
   archivalMode: string;
   transitions: CloudStorageTransitionEdit[];
-  restoreTier: string;
+  restoreSpeed: string;
   restoreDays: number;
   suspectGraceDays: number;
   reconcileSchedule: string;
@@ -174,7 +174,7 @@ const memoryClassOptions = [
   { value: "", label: "Delete" },
 ];
 
-const s3RestoreTierOptions = [
+const s3RestoreSpeedOptions = [
   { value: "Expedited", label: "Expedited (1-5 min)" },
   { value: "Standard", label: "Standard (3-5 hr)" },
   { value: "Bulk", label: "Bulk (5-12 hr)" },
@@ -311,9 +311,9 @@ function ArchivalSection({
               <div className="flex-1">
                 <FormField label="Restore Speed" dark={dark}>
                   <SelectInput
-                    value={values.restoreTier || "Standard"}
-                    onChange={(v) => onChange({ restoreTier: v })}
-                    options={isAzure ? azureRehydrateOptions : s3RestoreTierOptions}
+                    value={values.restoreSpeed || "Standard"}
+                    onChange={(v) => onChange({ restoreSpeed: v })}
+                    options={isAzure ? azureRehydrateOptions : s3RestoreSpeedOptions}
                     dark={dark}
                   />
                 </FormField>

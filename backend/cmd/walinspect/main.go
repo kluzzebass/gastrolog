@@ -20,7 +20,7 @@ import (
 	"strings"
 
 	"gastrolog/internal/glid"
-	"gastrolog/internal/vaultraft/tierfsm"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
 
 	hraft "github.com/hashicorp/raft"
 )
@@ -41,7 +41,7 @@ var crc32Table = crc32.MakeTable(crc32.Castagnoli)
 func main() {
 	var (
 		cmdOnly     = flag.Bool("cmd-only", false, "only print FSM-command log entries")
-		filterGroup = flag.String("filter-group", "", "only print entries from this group name (tier id, 'config', etc.)")
+		filterGroup = flag.String("filter-group", "", "only print entries from this group name (vault-ctl group ID, 'config', etc.)")
 		filterCmd   = flag.String("filter-cmd", "", "only print entries with this FSM command (e.g. CmdDeleteChunk)")
 		summary     = flag.Bool("summary", false, "print per-group + per-command counts only")
 		termHist    = flag.Bool("term-hist", false, "print per-(group, term, cmd) counts to localize spikes")
@@ -248,7 +248,7 @@ func decodeFSMCmd(data []byte, logType hraft.LogType) (string, string) {
 	if logType != hraft.LogCommand || len(data) < 1 {
 		return "", ""
 	}
-	cmd := tierfsm.Command(data[0])
+	cmd := vaultctlfsm.Command(data[0])
 	cmdName := commandName(cmd)
 	if len(data) < 1+glid.Size {
 		return cmdName, ""
@@ -256,31 +256,31 @@ func decodeFSMCmd(data []byte, logType hraft.LogType) (string, string) {
 	return cmdName, glid.FromBytes(data[1 : 1+glid.Size]).String()
 }
 
-func commandName(cmd tierfsm.Command) string {
+func commandName(cmd vaultctlfsm.Command) string {
 	switch cmd {
-	case tierfsm.CmdCreateChunk:
+	case vaultctlfsm.CmdCreateChunk:
 		return "CmdCreateChunk"
-	case tierfsm.CmdSealChunk:
+	case vaultctlfsm.CmdSealChunk:
 		return "CmdSealChunk"
-	case tierfsm.CmdCompressChunk:
+	case vaultctlfsm.CmdCompressChunk:
 		return "CmdCompressChunk"
-	case tierfsm.CmdUploadChunk:
+	case vaultctlfsm.CmdUploadChunk:
 		return "CmdUploadChunk"
-	case tierfsm.CmdDeleteChunk:
+	case vaultctlfsm.CmdDeleteChunk:
 		return "CmdDeleteChunk"
-	case tierfsm.CmdRetentionPending:
+	case vaultctlfsm.CmdRetentionPending:
 		return "CmdRetentionPending"
-	case tierfsm.CmdRequestDelete:
+	case vaultctlfsm.CmdRequestDelete:
 		return "CmdRequestDelete"
-	case tierfsm.CmdAckDelete:
+	case vaultctlfsm.CmdAckDelete:
 		return "CmdAckDelete"
-	case tierfsm.CmdFinalizeDelete:
+	case vaultctlfsm.CmdFinalizeDelete:
 		return "CmdFinalizeDelete"
-	case tierfsm.CmdPruneNode:
+	case vaultctlfsm.CmdPruneNode:
 		return "CmdPruneNode"
-	case tierfsm.CmdAttachOffsets:
+	case vaultctlfsm.CmdAttachOffsets:
 		return "CmdAttachOffsets"
-	case tierfsm.CmdBeginSeal:
+	case vaultctlfsm.CmdBeginSeal:
 		return "CmdBeginSeal"
 	default:
 		return fmt.Sprintf("CmdUnknown(%d)", cmd)

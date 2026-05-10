@@ -92,20 +92,6 @@ func testAfterConfigApply(orch *orchestrator.Orchestrator, cfgStore system.Store
 	}
 }
 
-// ensureMemoryTier creates a memory tier in the config store linked to the
-// given vault, and returns the tier ID as a string.
-func ensureMemoryTier(t *testing.T, cfgStore system.Store, vaultID glid.GLID) string {
-	t.Helper()
-	tierID := glid.New()
-	if err := cfgStore.PutTier(context.Background(), system.TierConfig{
-		ID: tierID, Name: "test-tier-" + tierID.String()[:8], Type: system.VaultTypeMemory,
-		VaultID: vaultID, Position: 0,
-	}); err != nil {
-		t.Fatalf("ensureMemoryTier: %v", err)
-	}
-	return tierID.String()
-}
-
 // newConfigTestSetup creates an orchestrator, config vault, and Connect client
 // for testing config RPCs.
 func newConfigTestSetup(t *testing.T) (gastrologv1connect.SystemServiceClient, system.Store, *orchestrator.Orchestrator) {
@@ -146,7 +132,6 @@ func TestDeleteVaultForce(t *testing.T) {
 	ctx := context.Background()
 
 	vaultID := glid.New()
-	ensureMemoryTier(t, cfgStore, vaultID)
 
 	// gastrolog-4kkoo (Phase 5): no FilterConfig — the test wires a filter
 	// set directly onto the orchestrator below, so no Put step is needed.
@@ -155,6 +140,7 @@ func TestDeleteVaultForce(t *testing.T) {
 			Id:      vaultID.Bytes(),
 			Name:    "test-vault",
 			Enabled: true,
+			Type:    gastrologv1.VaultType_VAULT_TYPE_MEMORY,
 		},
 	}))
 	if err != nil {
@@ -223,15 +209,11 @@ func TestDeleteVaultNotFound(t *testing.T) {
 	}
 }
 
-// TestPutVaultNestedDirPrevention was removed: directory overlap validation
-// has moved from VaultConfig to TierConfig (tiered storage refactor).
-
 func TestPauseResumeVaultRPC(t *testing.T) {
-	client, cfgStore, orch := newConfigTestSetup(t)
+	client, _, orch := newConfigTestSetup(t)
 	ctx := context.Background()
 
 	vaultID := glid.New()
-	ensureMemoryTier(t, cfgStore, vaultID)
 
 	// gastrolog-4kkoo (Phase 5): expression inlined on the route via Stages
 	// — no separate FilterConfig entity.
@@ -240,6 +222,7 @@ func TestPauseResumeVaultRPC(t *testing.T) {
 			Id:      vaultID.Bytes(),
 			Name:    "pause-vault",
 			Enabled: true,
+			Type:    gastrologv1.VaultType_VAULT_TYPE_MEMORY,
 		},
 	}))
 	if err != nil {
@@ -348,7 +331,6 @@ func TestPauseVaultPersistsToConfig(t *testing.T) {
 	ctx := context.Background()
 
 	vaultID := glid.New()
-	ensureMemoryTier(t, cfgStore, vaultID)
 
 	// gastrolog-4kkoo (Phase 5): no FilterConfig — the test only verifies
 	// PauseVault config persistence and doesn't rely on a route, so the
@@ -1174,15 +1156,6 @@ func TestGetRouteStats(t *testing.T) {
 // of gastrolog-4kkoo). The replacement test will assert that a route
 // matching `_source == retention` activates only on retention events.
 
-// TestPutVaultEjectRetentionRule, TestPutVaultEjectRuleRequiresEjectOnlyRoute,
-// TestPutVaultEjectRuleMissingRouteIDs, TestDeleteRouteReferencedByEjectVault,
-// and TestPutVaultEjectRuleNonexistentRoute were removed: retention rules
-// (including eject rules) have moved from VaultConfig to TierConfig as part of
-// the tiered storage refactor. These validations will be tested when the
-// PutTier RPC is implemented.
-
-// Remaining eject tests removed — see comment above.
-
 // ---------------------------------------------------------------------------
 // DeleteLookup tests
 // ---------------------------------------------------------------------------
@@ -1374,98 +1347,6 @@ func TestDeleteLookupIdempotentSecondCallFails(t *testing.T) {
 	}
 	if connect.CodeOf(err) != connect.CodeNotFound {
 		t.Fatalf("expected NotFound on second delete, got %v", connect.CodeOf(err))
-	}
-}
-
-// TestPutTierRejectsCloudServiceIDChange pins the tier-shape immutability
-// rule: cloud_service_id is fixed at tier creation. Mutating it would
-// either orphan cloud blobs (cloud→local) or trigger an implicit
-// mass-upload (local→cloud); neither is safe to do silently. To migrate,
-// users must create a new tier and route data via retention rules. See
-// gastrolog-4k5mg.
-func TestPutTierRejectsCloudServiceIDChange(t *testing.T) {
-	client, cfgStore, _ := newConfigTestSetup(t)
-	ctx := context.Background()
-
-	vaultID := glid.New()
-	if err := cfgStore.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v", Enabled: true}); err != nil {
-		t.Fatalf("PutVault: %v", err)
-	}
-
-	// Create a local-only file tier first.
-	tierID := glid.New()
-	if _, err := client.PutTier(ctx, connect.NewRequest(&gastrologv1.PutTierRequest{
-		Config: &gastrologv1.TierConfig{
-			Id:                tierID.ToProto(),
-			Name:              "tier",
-			Type:              gastrologv1.TierType_TIER_TYPE_FILE,
-			VaultId:           vaultID.ToProto(),
-			Position:          0,
-			StorageClass:      1,
-			ReplicationFactor: 1,
-		},
-	})); err != nil {
-		t.Fatalf("PutTier (initial local-only): %v", err)
-	}
-
-	// Attempt to flip the same tier to cloud-backed by setting
-	// cloud_service_id. Must reject — even though the cloud service may
-	// be valid, the binding cannot be added in-place.
-	csID := glid.New()
-	_, err := client.PutTier(ctx, connect.NewRequest(&gastrologv1.PutTierRequest{
-		Config: &gastrologv1.TierConfig{
-			Id:                tierID.ToProto(),
-			Name:              "tier",
-			Type:              gastrologv1.TierType_TIER_TYPE_FILE,
-			VaultId:           vaultID.ToProto(),
-			Position:          0,
-			CloudServiceId:    csID.ToProto(),
-			StorageClass:      1,
-			ReplicationFactor: 1,
-		},
-	}))
-	if err == nil {
-		t.Fatal("expected PutTier to reject cloud_service_id change on existing tier")
-	}
-	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
-		t.Fatalf("expected FailedPrecondition, got %v: %v", connect.CodeOf(err), err)
-	}
-}
-
-// TestPutTierAcceptsUnchangedCloudServiceID verifies the immutability
-// guard doesn't fire on no-op updates: re-putting a tier with the same
-// (or no) cloud_service_id must succeed, so users can edit other tier
-// fields without triggering false positives.
-func TestPutTierAcceptsUnchangedCloudServiceID(t *testing.T) {
-	client, cfgStore, _ := newConfigTestSetup(t)
-	ctx := context.Background()
-
-	vaultID := glid.New()
-	if err := cfgStore.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v", Enabled: true}); err != nil {
-		t.Fatalf("PutVault: %v", err)
-	}
-
-	tierID := glid.New()
-	mk := func(name string) *gastrologv1.PutTierRequest {
-		return &gastrologv1.PutTierRequest{
-			Config: &gastrologv1.TierConfig{
-				Id:                tierID.ToProto(),
-				Name:              name,
-				Type:              gastrologv1.TierType_TIER_TYPE_FILE,
-				VaultId:           vaultID.ToProto(),
-				Position:          0,
-				StorageClass:      1,
-				ReplicationFactor: 1,
-			},
-		}
-	}
-	if _, err := client.PutTier(ctx, connect.NewRequest(mk("first"))); err != nil {
-		t.Fatalf("PutTier (initial): %v", err)
-	}
-	// Re-put with a different name but unchanged cloud_service_id (still
-	// empty). Must succeed.
-	if _, err := client.PutTier(ctx, connect.NewRequest(mk("renamed"))); err != nil {
-		t.Fatalf("PutTier (rename, no cloud_service_id change): %v", err)
 	}
 }
 

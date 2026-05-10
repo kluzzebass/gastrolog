@@ -374,7 +374,7 @@ type ListChunksRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Vault string                 `protobuf:"bytes,1,opt,name=vault,proto3" json:"vault,omitempty"`
 	// When true, return only unsealed (active) chunks from this node's
-	// local tiers — no cross-node fan-out. Used for lightweight 5-second
+	// local vaults — no cross-node fan-out. Used for lightweight 5-second
 	// polling of active-chunk stats (record count, bytes) while discrete
 	// events (seal, delete, compress) come through the WatchChunks stream.
 	// See gastrolog-1jijm.
@@ -488,8 +488,8 @@ type ChunkMeta struct {
 	IngestEnd        *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=ingest_end,json=ingestEnd,proto3" json:"ingest_end,omitempty"`
 	CloudBacked      bool                   `protobuf:"varint,11,opt,name=cloud_backed,json=cloudBacked,proto3" json:"cloud_backed,omitempty"`                // true = chunk lives in cloud storage (S3/Azure/GCS)
 	Archived         bool                   `protobuf:"varint,12,opt,name=archived,proto3" json:"archived,omitempty"`                                         // true = chunk is in offline storage class (Glacier, Azure Archive)
-	TierId           []byte                 `protobuf:"bytes,13,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"`                                // which tier this chunk belongs to (transitional during gastrolog-55dej)
-	TierType         string                 `protobuf:"bytes,14,opt,name=tier_type,json=tierType,proto3" json:"tier_type,omitempty"`                          // tier type: "memory", "file", "cloud" (transitional)
+	VaultId          []byte                 `protobuf:"bytes,13,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`                             // which vault this chunk belongs to
+	VaultType        string                 `protobuf:"bytes,14,opt,name=vault_type,json=vaultType,proto3" json:"vault_type,omitempty"`                       // vault type: "memory", "file", "jsonl"
 	RetentionPending bool                   `protobuf:"varint,15,opt,name=retention_pending,json=retentionPending,proto3" json:"retention_pending,omitempty"` // true = chunk is marked for retention processing
 	StorageClass     string                 `protobuf:"bytes,16,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`              // current cloud storage class (e.g. "GLACIER", "cold", "Archive")
 	ReplicaCount     int32                  `protobuf:"varint,17,opt,name=replica_count,json=replicaCount,proto3" json:"replica_count,omitempty"`             // how many nodes currently have this chunk (leader + followers that have caught up)
@@ -628,16 +628,16 @@ func (x *ChunkMeta) GetArchived() bool {
 	return false
 }
 
-func (x *ChunkMeta) GetTierId() []byte {
+func (x *ChunkMeta) GetVaultId() []byte {
 	if x != nil {
-		return x.TierId
+		return x.VaultId
 	}
 	return nil
 }
 
-func (x *ChunkMeta) GetTierType() string {
+func (x *ChunkMeta) GetVaultType() string {
 	if x != nil {
-		return x.TierType
+		return x.VaultType
 	}
 	return ""
 }
@@ -2174,7 +2174,6 @@ func (x *ImportRecordsResponse) GetRecordsImported() int64 {
 type SealVaultRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Vault         string                 `protobuf:"bytes,1,opt,name=vault,proto3" json:"vault,omitempty"`
-	Tier          string                 `protobuf:"bytes,2,opt,name=tier,proto3" json:"tier,omitempty"` // optional: seal only this tier (name or ID). Empty = all tiers.
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2216,16 +2215,9 @@ func (x *SealVaultRequest) GetVault() string {
 	return ""
 }
 
-func (x *SealVaultRequest) GetTier() string {
-	if x != nil {
-		return x.Tier
-	}
-	return ""
-}
-
 type SealVaultResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	SealedCount   int32                  `protobuf:"varint,1,opt,name=sealed_count,json=sealedCount,proto3" json:"sealed_count,omitempty"` // number of tiers whose active chunk was sealed
+	SealedCount   int32                  `protobuf:"varint,1,opt,name=sealed_count,json=sealedCount,proto3" json:"sealed_count,omitempty"` // number of vaults whose active chunk was sealed
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2455,8 +2447,8 @@ type RestoreChunkRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Vault         string                 `protobuf:"bytes,1,opt,name=vault,proto3" json:"vault,omitempty"`
 	ChunkId       []byte                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
-	RestoreTier   string                 `protobuf:"bytes,3,opt,name=restore_tier,json=restoreTier,proto3" json:"restore_tier,omitempty"`  // "Expedited"/"Standard"/"Bulk" (S3), "High"/"Standard" (Azure)
-	RestoreDays   int32                  `protobuf:"varint,4,opt,name=restore_days,json=restoreDays,proto3" json:"restore_days,omitempty"` // How long restored copy stays readable (S3 only, 0 = provider default)
+	RestoreSpeed  string                 `protobuf:"bytes,3,opt,name=restore_speed,json=restoreSpeed,proto3" json:"restore_speed,omitempty"` // "Expedited"/"Standard"/"Bulk" (S3), "High"/"Standard" (Azure)
+	RestoreDays   int32                  `protobuf:"varint,4,opt,name=restore_days,json=restoreDays,proto3" json:"restore_days,omitempty"`   // How long restored copy stays readable (S3 only, 0 = provider default)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2505,9 +2497,9 @@ func (x *RestoreChunkRequest) GetChunkId() []byte {
 	return nil
 }
 
-func (x *RestoreChunkRequest) GetRestoreTier() string {
+func (x *RestoreChunkRequest) GetRestoreSpeed() string {
 	if x != nil {
-		return x.RestoreTier
+		return x.RestoreSpeed
 	}
 	return ""
 }
@@ -2667,7 +2659,7 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\vactive_only\x18\x02 \x01(\bR\n" +
 	"activeOnly\"E\n" +
 	"\x12ListChunksResponse\x12/\n" +
-	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"\x92\x06\n" +
+	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"\x96\x06\n" +
 	"\tChunkMeta\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12;\n" +
 	"\vwrite_start\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
@@ -2686,9 +2678,10 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"ingest_end\x18\n" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\tingestEnd\x12!\n" +
 	"\fcloud_backed\x18\v \x01(\bR\vcloudBacked\x12\x1a\n" +
-	"\barchived\x18\f \x01(\bR\barchived\x12\x17\n" +
-	"\atier_id\x18\r \x01(\fR\x06tierId\x12\x1b\n" +
-	"\ttier_type\x18\x0e \x01(\tR\btierType\x12+\n" +
+	"\barchived\x18\f \x01(\bR\barchived\x12\x19\n" +
+	"\bvault_id\x18\r \x01(\fR\avaultId\x12\x1d\n" +
+	"\n" +
+	"vault_type\x18\x0e \x01(\tR\tvaultType\x12+\n" +
 	"\x11retention_pending\x18\x0f \x01(\bR\x10retentionPending\x12#\n" +
 	"\rstorage_class\x18\x10 \x01(\tR\fstorageClass\x12#\n" +
 	"\rreplica_count\x18\x11 \x01(\x05R\freplicaCount\x12(\n" +
@@ -2819,10 +2812,9 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\x124\n" +
 	"\arecords\x18\x02 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\"B\n" +
 	"\x15ImportRecordsResponse\x12)\n" +
-	"\x10records_imported\x18\x01 \x01(\x03R\x0frecordsImported\"<\n" +
+	"\x10records_imported\x18\x01 \x01(\x03R\x0frecordsImported\"(\n" +
 	"\x10SealVaultRequest\x12\x14\n" +
-	"\x05vault\x18\x01 \x01(\tR\x05vault\x12\x12\n" +
-	"\x04tier\x18\x02 \x01(\tR\x04tier\"6\n" +
+	"\x05vault\x18\x01 \x01(\tR\x05vault\"6\n" +
 	"\x11SealVaultResponse\x12!\n" +
 	"\fsealed_count\x18\x01 \x01(\x05R\vsealedCount\"4\n" +
 	"\x1cRetryUnreadableChunksRequest\x12\x14\n" +
@@ -2833,11 +2825,11 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\x12\x19\n" +
 	"\bchunk_id\x18\x02 \x01(\fR\achunkId\x12#\n" +
 	"\rstorage_class\x18\x03 \x01(\tR\fstorageClass\"\x16\n" +
-	"\x14ArchiveChunkResponse\"\x8c\x01\n" +
+	"\x14ArchiveChunkResponse\"\x8e\x01\n" +
 	"\x13RestoreChunkRequest\x12\x14\n" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\x12\x19\n" +
-	"\bchunk_id\x18\x02 \x01(\fR\achunkId\x12!\n" +
-	"\frestore_tier\x18\x03 \x01(\tR\vrestoreTier\x12!\n" +
+	"\bchunk_id\x18\x02 \x01(\fR\achunkId\x12#\n" +
+	"\rrestore_speed\x18\x03 \x01(\tR\frestoreSpeed\x12!\n" +
 	"\frestore_days\x18\x04 \x01(\x05R\vrestoreDays\"\x16\n" +
 	"\x14RestoreChunkResponse\"\x14\n" +
 	"\x12WatchChunksRequest\"/\n" +

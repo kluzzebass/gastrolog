@@ -6,26 +6,25 @@ import (
 	"gastrolog/internal/index"
 	"gastrolog/internal/query"
 	"gastrolog/internal/system"
-	"gastrolog/internal/vaultraft/tierfsm"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
-// VaultInstance is the node-local materialization of a TierConfig.
-// TierConfig (in Raft config) is the logical definition.
-// VaultInstance is the physical runtime: chunk manager + index manager + query engine.
+// VaultInstance is the node-local materialization of a VaultConfig.
+// VaultConfig (in Raft config) is the logical definition; VaultInstance is the
+// physical runtime: chunk manager + index manager + query engine.
 //
-// A single node may host multiple TierInstances for the same tier when
+// A single node may host multiple VaultInstances for the same vault when
 // same-node replication is active (different file storages). Each instance
 // has a unique StorageID and its own chunk manager pointing to a different
 // directory.
 type VaultInstance struct {
-	TierID          glid.GLID
-	VaultID         glid.GLID // owning vault — set during construction; with 1:1 vault/tier this is the natural ID
-	StorageID       string    // the file storage ID this instance uses (empty for memory/JSONL tiers)
+	VaultID         glid.GLID // identity of the owning vault
+	StorageID       string    // the file storage ID this instance uses (empty for memory/JSONL vaults)
 	Type            string
 	Chunks          chunk.ChunkManager
 	Indexes         index.IndexManager
 	Query           *query.Engine
-	IsFollower      bool                       // true if this node is a follower for this tier
+	IsFollower      bool                       // true if this node is a follower for this instance
 	LeaderNodeID    string                     // the leader node's ID (empty if this IS the leader)
 	FollowerTargets []system.ReplicationTarget // per-storage targets (populated on leader only)
 
@@ -44,7 +43,7 @@ type VaultInstance struct {
 	ListRetentionPending func() []chunk.ChunkID
 
 	// IsTombstoned returns true if the given chunk ID has been deleted from
-	// this tier's replicated FSM and is still within the tombstone retention
+	// this instance's replicated FSM and is still within the tombstone retention
 	// window. Used to reject stale replication commands (ImportSealed,
 	// Append, Seal) that race with retention — without this check, a late
 	// ImportSealed RPC could recreate a chunk the cluster already deleted,
@@ -73,38 +72,38 @@ type VaultInstance struct {
 	ApplyRaftFinalizeDelete func(id chunk.ChunkID) error
 
 	// ApplyRaftPruneNode proposes removal of a node from every pendingDeletes
-	// entry's ExpectedFrom set on this tier sub-FSM. Used by the leader's
+	// entry's ExpectedFrom set on this instance sub-FSM. Used by the leader's
 	// membership-change handler after RemoveServer succeeds: a decommissioned
 	// node's outstanding ack obligations would otherwise pin pendingDeletes
 	// entries forever. Nil when no Raft group exists. See gastrolog-51gme step 10.
 	ApplyRaftPruneNode func(nodeID string) error
 
-	// Reconciler owns chunk-lifecycle execution for this tier instance:
+	// Reconciler owns chunk-lifecycle execution for this vault instance:
 	// FSM-apply event handlers (seal, retention-pending, transition-streamed,
 	// transition-received, request-delete, ack-delete, finalize-delete) plus
 	// the canonical deleteChunk entry point. All cluster-wide deletes route
-	// through here over gastrolog-51gme steps 4-8. Nil for memory-mode tiers
+	// through here over gastrolog-51gme steps 4-8. Nil for memory-mode vaults
 	// (no FSM, no replication).
 	Reconciler *VaultLifecycleReconciler
 
-	// ListManifest returns all chunk IDs in the tier FSM view — the authoritative
+	// ListManifest returns all chunk IDs in the vault-ctl FSM view — the authoritative
 	// set of chunks that should exist. Nil when no Raft group exists.
 	ListManifest func() []chunk.ChunkID
 
 	// ManifestEntries returns every chunk's full manifest entry for this
-	// tier (sealed and active alike — callers filter on Sealed when they
+	// instance (sealed and active alike — callers filter on Sealed when they
 	// want only sealed chunks, e.g. the manifest.Reader implementation
-	// honoring the active-chunk exception). Nil for memory-mode tiers
+	// honoring the active-chunk exception). Nil for memory-mode vaults
 	// (no FSM); the orchestrator falls back to the chunk manager in
 	// that case.
-	ManifestEntries func() []tierfsm.ManifestEntry
+	ManifestEntries func() []vaultctlfsm.ManifestEntry
 
-	// ManifestEntry returns the manifest entry for one chunk on this tier,
-	// or false if this tier doesn't hold the chunk. Nil for memory-mode
-	// tiers; the orchestrator falls back to the chunk manager.
-	ManifestEntry func(id chunk.ChunkID) (tierfsm.ManifestEntry, bool)
+	// ManifestEntry returns the manifest entry for one chunk on this instance,
+	// or false if this instance doesn't hold the chunk. Nil for memory-mode
+	// instances; the orchestrator falls back to the chunk manager.
+	ManifestEntry func(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool)
 
-	// IsFSMReady returns true after the tier FSM has applied at least one log
+	// IsFSMReady returns true after the vault-ctl FSM has applied at least one log
 	// entry or restored from a snapshot. Before that, the manifest is incomplete
 	// and must not be used for reconciliation decisions.
 	IsFSMReady func() bool
@@ -125,8 +124,8 @@ type VaultInstance struct {
 	OverlayFromFSM func(chunk.ChunkMeta) chunk.ChunkMeta
 }
 
-// applyRaftCallbacks wires raft-backed metadata operations from a tierRaftCallbacks.
-func (t *VaultInstance) applyRaftCallbacks(cb tierRaftCallbacks) {
+// applyRaftCallbacks wires raft-backed metadata operations from a vaultRaftCallbacks.
+func (t *VaultInstance) applyRaftCallbacks(cb vaultRaftCallbacks) {
 	t.HasRaftLeader = cb.hasLeader
 	t.IsRaftLeader = cb.isLeader
 	t.ApplyRaftRequestDelete = cb.applyRequestDelete
@@ -143,10 +142,10 @@ func (t *VaultInstance) applyRaftCallbacks(cb tierRaftCallbacks) {
 	t.ManifestEntry = cb.manifestEntry
 }
 
-// IsLeader returns true if this node is the leader for this tier.
+// IsLeader returns true if this node is the leader for this instance.
 func (t *VaultInstance) IsLeader() bool { return !t.IsFollower }
 
-// ShouldForwardToFollowers returns true if this leader tier has replication targets.
+// ShouldForwardToFollowers returns true if this leader instance has replication targets.
 func (t *VaultInstance) ShouldForwardToFollowers() bool {
 	return t.IsLeader() && len(t.FollowerTargets) > 0
 }

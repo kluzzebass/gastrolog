@@ -16,7 +16,7 @@ import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, NumberInput } from "./FormField";
 import { Button } from "./Buttons";
-import { UsedByStatus, tierRuleRefsFor } from "./UsedByStatus";
+import { UsedByStatus, vaultRefsForRetentionPolicy } from "./UsedByStatus";
 import type { SettingsTab } from "./SettingsDialog";
 import { sortByName } from "../../lib/sort";
 
@@ -98,7 +98,6 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
   const existingNames = new Set(policies.map((p) => p.name));
   const effectiveName = newName.trim() || namePlaceholder || "default";
   const nameConflict = existingNames.has(effectiveName);
-  const tiers = config?.tiers ?? [];
   const vaults = config?.vaults ?? [];
 
   const defaults = (id: string): PolicyEdit => {
@@ -129,12 +128,12 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
       };
     },
     onDeleteSuccess: (id) => {
-      const referencedBy = tiers
-        .filter((t) => t.retentionRules.some((r) => encode(r.retentionPolicyId) === id))
-        .map((t) => t.name || encode(t.id));
+      const referencedBy = vaults
+        .filter((v) => v.retentionRules.some((r) => encode(r.retentionPolicyId) === id))
+        .map((v) => v.name || encode(v.id));
       if (referencedBy.length > 0) {
         addToast(
-          `Retention policy "${id}" deleted (was used by tiers: ${referencedBy.join(", ")})`,
+          `Retention policy "${id}" deleted (was used by vaults: ${referencedBy.join(", ")})`,
           "warn",
         );
       } else {
@@ -239,7 +238,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
       {sortByName(policies).map((pol) => {
         const id = encode(pol.id);
         const edit = getEdit(id);
-        const refs = tierRuleRefsFor(tiers, id, vaults);
+        const refs = vaultRefsForRetentionPolicy(id, vaults);
         return (
           <SettingsCard
             key={id}
