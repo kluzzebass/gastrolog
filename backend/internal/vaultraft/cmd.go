@@ -16,12 +16,12 @@ const (
 func MarshalNoop() []byte { return []byte{OpNoop} }
 
 // MarshalVaultChunkCommand builds a vault control-plane log entry that applies
-// chunkWire to the vaultctlfsm sub-state for instID. chunkWire must be a full
+// chunkWire to the vaultctlfsm sub-state for vaultID. chunkWire must be a full
 // vaultctlfsm command (e.g. output of vaultctlfsm.MarshalCreateChunk).
-func MarshalVaultChunkCommand(instID glid.GLID, chunkWire []byte) []byte {
+func MarshalVaultChunkCommand(vaultID glid.GLID, chunkWire []byte) []byte {
 	out := make([]byte, 0, 1+glid.Size+len(chunkWire))
 	out = append(out, OpVaultChunkFSM)
-	out = append(out, instID[:]...)
+	out = append(out, vaultID[:]...)
 	out = append(out, chunkWire...)
 	return out
 }

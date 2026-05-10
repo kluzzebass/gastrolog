@@ -475,25 +475,25 @@ func (f *FSM) applySetNodeStorageConfig(ctx context.Context, pb *gastrologv1.Set
 }
 
 func (f *FSM) applySetVaultPlacements(ctx context.Context, pb *gastrologv1.SetVaultPlacementsCommand) (*Notification, error) {
-	instID, placements, err := command.ExtractSetVaultPlacements(pb)
+	vaultID, placements, err := command.ExtractSetVaultPlacements(pb)
 	if err != nil {
 		return nil, err
 	}
-	if err := f.store.SetVaultPlacements(ctx, instID, placements); err != nil {
+	if err := f.store.SetVaultPlacements(ctx, vaultID, placements); err != nil {
 		return nil, err
 	}
 	// Mirror placements back onto the matching VaultConfig.Placements.
 	// Placement-driven write path; PutVault is the user-facing surface.
-	if err := f.mirrorPlacementsToVault(ctx, instID, placements); err != nil {
+	if err := f.mirrorPlacementsToVault(ctx, vaultID, placements); err != nil {
 		return nil, err
 	}
-	return &Notification{Kind: NotifyVaultPlacementsSet, ID: instID}, nil
+	return &Notification{Kind: NotifyVaultPlacementsSet, ID: vaultID}, nil
 }
 
 // mirrorPlacementsToVault writes the placement set to the owning vault's
 // VaultConfig.Placements.
-func (f *FSM) mirrorPlacementsToVault(ctx context.Context, instID glid.GLID, placements []system.VaultPlacement) error {
-	v, err := f.store.GetVault(ctx, instID)
+func (f *FSM) mirrorPlacementsToVault(ctx context.Context, vaultID glid.GLID, placements []system.VaultPlacement) error {
+	v, err := f.store.GetVault(ctx, vaultID)
 	if err != nil || v == nil {
 		return nil //nolint:nilerr // vault not yet present; will pick up on PutVault
 	}
@@ -817,9 +817,9 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit,gocyclo // sna
 			return fmt.Errorf("restore cluster TLS: %w", err)
 		}
 	}
-	for instID, placements := range rt.VaultPlacements {
-		if err := newStore.SetVaultPlacements(ctx, instID, placements); err != nil {
-			return fmt.Errorf("restore vault placements %s: %w", instID, err)
+	for vaultID, placements := range rt.VaultPlacements {
+		if err := newStore.SetVaultPlacements(ctx, vaultID, placements); err != nil {
+			return fmt.Errorf("restore vault placements %s: %w", vaultID, err)
 		}
 	}
 	for ingesterID, nodes := range rt.IngesterAlive {

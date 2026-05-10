@@ -25,7 +25,7 @@ var ErrNoRaftLeader = errors.New("no raft leader")
 type VaultCtlChunkApplyForwarder struct {
 	raft            *hraft.Raft
 	vaultCtlGroupID string
-	instID          glid.GLID
+	vaultID          glid.GLID
 	peers           *PeerConns
 	timeout         time.Duration
 }
@@ -34,11 +34,11 @@ type VaultCtlChunkApplyForwarder struct {
 // commands to the vault control-plane Raft group, wrapping each payload
 // with OpVaultChunkFSM + instance ID. ForwardVaultApply uses the vault-ctl
 // group_id.
-func NewVaultCtlChunkApplyForwarder(r *hraft.Raft, vaultCtlGroupID string, instID glid.GLID, peers *PeerConns, timeout time.Duration) *VaultCtlChunkApplyForwarder {
+func NewVaultCtlChunkApplyForwarder(r *hraft.Raft, vaultCtlGroupID string, vaultID glid.GLID, peers *PeerConns, timeout time.Duration) *VaultCtlChunkApplyForwarder {
 	return &VaultCtlChunkApplyForwarder{
 		raft:            r,
 		vaultCtlGroupID: vaultCtlGroupID,
-		instID:          instID,
+		vaultID:          vaultID,
 		peers:           peers,
 		timeout:         timeout,
 	}
@@ -47,7 +47,7 @@ func NewVaultCtlChunkApplyForwarder(r *hraft.Raft, vaultCtlGroupID string, instI
 // Apply applies a chunk-FSM command. Tries locally first; forwards to the
 // vault-ctl Raft leader on ErrNotLeader.
 func (f *VaultCtlChunkApplyForwarder) Apply(data []byte) error {
-	payload := vaultraft.MarshalVaultChunkCommand(f.instID, data)
+	payload := vaultraft.MarshalVaultChunkCommand(f.vaultID, data)
 	future := f.raft.Apply(payload, f.timeout)
 	if err := future.Error(); err != nil {
 		if errors.Is(err, hraft.ErrNotLeader) {

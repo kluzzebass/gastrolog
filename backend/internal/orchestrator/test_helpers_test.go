@@ -105,7 +105,7 @@ func newTestOrch(t *testing.T, cfg Config) *Orchestrator {
 	return orch
 }
 
-func newMemoryInstance(t *testing.T, instID glid.GLID) *VaultInstance {
+func newMemoryInstance(t *testing.T, vaultID glid.GLID) *VaultInstance {
 	t.Helper()
 	cm, err := chunkmem.NewFactory()(nil, nil)
 	if err != nil {
@@ -116,7 +116,7 @@ func newMemoryInstance(t *testing.T, instID glid.GLID) *VaultInstance {
 		t.Fatal(err)
 	}
 	return &VaultInstance{
-		VaultID:  instID,
+		VaultID:  vaultID,
 		Type:    "memory",
 		Chunks:  cm,
 		Indexes: im,
@@ -127,9 +127,9 @@ func newMemoryInstance(t *testing.T, instID glid.GLID) *VaultInstance {
 // setupTestStoreRuntime populates the test store with runtime state that tests
 // need — vault placements and node storage config. Most tests use memory vaults
 // with a single test-node, so placements use synthetic storage IDs.
-func setupTestStoreRuntime(store *sysmem.Store, nodeID string, instIDs ...glid.GLID) {
+func setupTestStoreRuntime(store *sysmem.Store, nodeID string, vaultIDs ...glid.GLID) {
 	ctx := context.Background()
-	for _, tid := range instIDs {
+	for _, tid := range vaultIDs {
 		_ = store.SetVaultPlacements(ctx, tid, []system.VaultPlacement{
 			{StorageID: system.SyntheticStorageID(nodeID), Leader: true},
 		})
@@ -137,11 +137,10 @@ func setupTestStoreRuntime(store *sysmem.Store, nodeID string, instIDs ...glid.G
 }
 
 
-func newTestRetentionRunner(orch *Orchestrator, vaultID, instID glid.GLID, cm chunk.ChunkManager, im index.IndexManager) *retentionRunner {
+func newTestRetentionRunner(orch *Orchestrator, vaultID glid.GLID, cm chunk.ChunkManager, im index.IndexManager) *retentionRunner {
 	return &retentionRunner{
 		isLeader: true,
 		vaultID:  vaultID,
-		instID:   instID,
 		cm:       cm,
 		im:       im,
 		orch:     orch,
@@ -168,14 +167,12 @@ type transitionFakeTransferrer struct {
 type transitionTransferCall struct {
 	nodeID  string
 	vaultID glid.GLID
-	instID  glid.GLID
 	records []chunk.Record
 }
 
 type transitionStreamCall struct {
 	nodeID  string
 	vaultID glid.GLID
-	instID  glid.GLID
 	count   int
 }
 
@@ -225,7 +222,7 @@ func (p *keepNPolicy) Apply(state chunk.VaultState) []chunk.ChunkID {
 // newCloudFileInstance creates a file-backed VaultInstance with cloud storage.
 // Sealed chunks are uploaded to the in-memory blobstore and local files deleted,
 // matching production cloud inst behavior.
-func newCloudFileInstance(t *testing.T, instID glid.GLID, vaultID glid.GLID, store blobstore.Store) (*VaultInstance, string) {
+func newCloudFileInstance(t *testing.T, vaultID glid.GLID, store blobstore.Store) (*VaultInstance, string) {
 	t.Helper()
 	dir := t.TempDir()
 	cm, err := chunkfile.NewManager(chunkfile.Config{
@@ -240,7 +237,7 @@ func newCloudFileInstance(t *testing.T, instID glid.GLID, vaultID glid.GLID, sto
 	}
 	im := indexfile.NewManager(dir, nil, nil)
 	return &VaultInstance{
-		VaultID:  instID,
+		VaultID:  vaultID,
 		Type:    "cloud",
 		Chunks:  cm,
 		Indexes: im,
@@ -251,8 +248,8 @@ func newCloudFileInstance(t *testing.T, instID glid.GLID, vaultID glid.GLID, sto
 // ---------- helpers for new tests ----------
 
 // newFileInstance creates a file-backed VaultInstance without cloud storage.
-// Returns the inst instance and its filesystem directory for post-test verification.
-func newFileInstance(t *testing.T, instID glid.GLID) (*VaultInstance, string) {
+// Returns the vault instance and its filesystem directory for post-test verification.
+func newFileInstance(t *testing.T, vaultID glid.GLID) (*VaultInstance, string) {
 	t.Helper()
 	dir := t.TempDir()
 	cm, err := chunkfile.NewManager(chunkfile.Config{
@@ -265,7 +262,7 @@ func newFileInstance(t *testing.T, instID glid.GLID) (*VaultInstance, string) {
 	}
 	im := indexfile.NewManager(dir, nil, nil)
 	return &VaultInstance{
-		VaultID:  instID,
+		VaultID:  vaultID,
 		Type:    "file",
 		Chunks:  cm,
 		Indexes: im,
@@ -494,11 +491,10 @@ func (d *directChunkReplicator) RequestReplicaCatchup(ctx context.Context, leade
 // → CmdAckDelete from each → CmdFinalizeDelete on the leader. Without this,
 // expireChunk falls through to the legacy direct-delete fallback which
 // doesn't replicate, and the cluster retention assertions fail.
-func newClusterRetentionRunner(orch *Orchestrator, vaultID, instID glid.GLID, inst *VaultInstance) *retentionRunner {
+func newClusterRetentionRunner(orch *Orchestrator, vaultID glid.GLID, inst *VaultInstance) *retentionRunner {
 	return &retentionRunner{
 		isLeader:        true,
 		vaultID:         vaultID,
-		instID:          instID,
 		cm:              inst.Chunks,
 		im:              inst.Indexes,
 		orch:            orch,
@@ -522,7 +518,7 @@ type clusterHarness struct {
 	nodes    map[string]*clusterTestNode
 	cfgStore *sysmem.Store
 	vaultID  glid.GLID
-	instIDs  []glid.GLID
+	vaultIDs  []glid.GLID
 }
 
 // allNodeIDs returns sorted node IDs.
@@ -619,9 +615,9 @@ func setupCluster(t *testing.T, nodeIDs []string, instCount int, rotationRecords
 	// Single inst per vault sharing the vault's ID. instCount is
 	// always 1 in current callers; the slice survives only for legacy
 	// fixture wiring.
-	instIDs := make([]glid.GLID, instCount)
+	vaultIDs := make([]glid.GLID, instCount)
 	for i := range instCount {
-		instIDs[i] = vaultID
+		vaultIDs[i] = vaultID
 	}
 
 	// Create config store.
@@ -636,7 +632,7 @@ func setupCluster(t *testing.T, nodeIDs []string, instCount int, rotationRecords
 				StorageID: system.SyntheticStorageID(fid), Leader: false,
 			})
 		}
-		_ = store.SetVaultPlacements(context.Background(), instIDs[i], placements)
+		_ = store.SetVaultPlacements(context.Background(), vaultIDs[i], placements)
 	}
 	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID:   vaultID,
@@ -679,7 +675,7 @@ func setupCluster(t *testing.T, nodeIDs []string, instCount int, rotationRecords
 			}
 			im := indexfile.NewManager(dir, nil, nil)
 			inst := &VaultInstance{
-				VaultID:  instIDs[i],
+				VaultID:  vaultIDs[i],
 				Type:    "file",
 				Chunks:  cm,
 				Indexes: im,
@@ -738,7 +734,7 @@ func setupCluster(t *testing.T, nodeIDs []string, instCount int, rotationRecords
 		nodes:    nodes,
 		cfgStore: store,
 		vaultID:  vaultID,
-		instIDs:  instIDs,
+		vaultIDs:  vaultIDs,
 	}
 }
 

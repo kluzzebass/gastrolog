@@ -622,22 +622,22 @@ func (p *StoreProxy) SetNodeStorageConfig(ctx context.Context, cfg NodeStorageCo
 	return p.inner.SetNodeStorageConfig(ctx, cfg)
 }
 
-func (p *StoreProxy) GetVaultPlacements(ctx context.Context, instID glid.GLID) ([]VaultPlacement, error) {
+func (p *StoreProxy) GetVaultPlacements(ctx context.Context, vaultID glid.GLID) ([]VaultPlacement, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
 		return nil, err
 	}
-	return p.inner.GetVaultPlacements(ctx, instID)
+	return p.inner.GetVaultPlacements(ctx, vaultID)
 }
 
-func (p *StoreProxy) SetVaultPlacements(ctx context.Context, instID glid.GLID, placements []VaultPlacement) error {
+func (p *StoreProxy) SetVaultPlacements(ctx context.Context, vaultID glid.GLID, placements []VaultPlacement) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
 		return err
 	}
-	return p.inner.SetVaultPlacements(ctx, instID, placements)
+	return p.inner.SetVaultPlacements(ctx, vaultID, placements)
 }
 
 func (p *StoreProxy) GetIngesterAlive(ctx context.Context, ingesterID glid.GLID) (map[string]bool, error) {

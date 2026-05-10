@@ -364,12 +364,12 @@ func (s *Store) SetNodeStorageConfig(ctx context.Context, cfg system.NodeStorage
 
 // --- Runtime methods (delegate to inner store for reads, apply for writes) ---
 
-func (s *Store) GetVaultPlacements(ctx context.Context, instID glid.GLID) ([]system.VaultPlacement, error) {
-	return s.fsm.Store().GetVaultPlacements(ctx, instID)
+func (s *Store) GetVaultPlacements(ctx context.Context, vaultID glid.GLID) ([]system.VaultPlacement, error) {
+	return s.fsm.Store().GetVaultPlacements(ctx, vaultID)
 }
 
-func (s *Store) SetVaultPlacements(ctx context.Context, instID glid.GLID, placements []system.VaultPlacement) error {
-	return s.apply(ctx, command.NewSetVaultPlacements(instID, placements))
+func (s *Store) SetVaultPlacements(ctx context.Context, vaultID glid.GLID, placements []system.VaultPlacement) error {
+	return s.apply(ctx, command.NewSetVaultPlacements(vaultID, placements))
 }
 
 func (s *Store) GetIngesterAlive(ctx context.Context, ingesterID glid.GLID) (map[string]bool, error) {

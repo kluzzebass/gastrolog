@@ -9,7 +9,7 @@ import (
 
 // cloudHealthChecker is an optional interface implemented by chunk managers
 // that have a cloud backing store. The orchestrator polls this every 5s
-// to raise/clear a "cloud-store:<instID>" alert.
+// to raise/clear a "cloud-store:<vaultID>" alert.
 type cloudHealthChecker interface {
 	CloudDegraded() bool
 	CloudDegradedError() string

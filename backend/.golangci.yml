@@ -56,7 +56,7 @@ linters:
         # lists the legitimate non-reconciler call sites (memory-mode
         # fallbacks; the chunk-package definition itself).
         - pattern: "Chunks\\.Delete$"
-          msg: "inst.Chunks.Delete announces CmdDeleteChunk. Route through inst.Reconciler.deleteChunk so the receipt protocol drives cluster-wide propagation. See gastrolog-51gme."
+          msg: "VaultInstance.Chunks.Delete announces CmdDeleteChunk. Route through VaultInstance.Reconciler.deleteChunk so the receipt protocol drives cluster-wide propagation. See gastrolog-51gme."
   exclusions:
     paths:
       - _test\.go
@@ -82,7 +82,7 @@ linters:
       - linters: [forbidigo]
         path: "internal/chunk/file/manager\\.go"
       # Memory-mode reconciler-less fallback paths. Each callsite gates
-      # inst.Chunks.Delete behind `if inst.Reconciler == nil`, so in
+      # VaultInstance.Chunks.Delete behind `if inst.Reconciler == nil`, so in
       # production (reconciler always wired) the lint-flagged statement
       # never executes. Removing these would break test harnesses that
       # build VaultInstances directly without going through

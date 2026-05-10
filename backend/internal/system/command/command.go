@@ -980,11 +980,11 @@ func RestoreSnapshot(snap *gastrologv1.SystemSnapshot) (*system.System, []system
 	if len(snap.GetVaultPlacements()) > 0 {
 		rt.VaultPlacements = make(map[glid.GLID][]system.VaultPlacement, len(snap.GetVaultPlacements()))
 		for _, tp := range snap.GetVaultPlacements() {
-			instID, placements, err := ExtractSetVaultPlacements(tp)
+			vaultID, placements, err := ExtractSetVaultPlacements(tp)
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("restore vault placements: %w", err)
 			}
-			rt.VaultPlacements[instID] = placements
+			rt.VaultPlacements[vaultID] = placements
 		}
 	}
 

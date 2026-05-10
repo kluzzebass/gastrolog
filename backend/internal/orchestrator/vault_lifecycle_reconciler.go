@@ -87,7 +87,6 @@ import (
 // outside a small allow-list (vault teardown, replaceForwardedChunk).
 type VaultLifecycleReconciler struct {
 	vaultID     glid.GLID
-	instID      glid.GLID
 	inst        *VaultInstance
 	localNodeID string
 	logger      *slog.Logger
@@ -129,7 +128,6 @@ type VaultLifecycleReconciler struct {
 func NewVaultLifecycleReconciler(orch *Orchestrator, vaultID glid.GLID, inst *VaultInstance, localNodeID string, logger *slog.Logger) *VaultLifecycleReconciler {
 	return &VaultLifecycleReconciler{
 		vaultID:     vaultID,
-		instID:      vaultID, // Vault and instance share the same ID — kept for legacy field readers
 		inst:        inst,
 		localNodeID: localNodeID,
 		orch:        orch,

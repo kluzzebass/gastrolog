@@ -289,8 +289,7 @@ func (o *Orchestrator) postSealWork(vaultID glid.GLID, cm chunk.ChunkManager, ch
 // as one sequential job. Otherwise falls back to compress-only for non-file managers.
 // After the pipeline completes, sealed-chunk replication is triggered for leader vaults.
 func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager, chunkID chunk.ChunkID) {
-	// Resolve inst info for post-pipeline replication.
-	instID, followerTargets := o.instReplicationInfo(vaultID, cm)
+	followerTargets := o.followerReplicationTargets(vaultID, cm)
 
 	processor, ok := cm.(chunk.ChunkPostSealProcessor)
 	if ok {
@@ -303,7 +302,7 @@ func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager
 			o.NotifyChunkChange()
 			// Schedule replication as a separate job — never blocks the
 			// post-seal scheduler slot.
-			o.scheduleReplication(vaultID, instID, id, followerTargets)
+			o.scheduleReplication(vaultID, id, followerTargets)
 			return nil
 		}
 		if err := o.scheduler.RunOnce(name, wrappedFn, context.Background(), chunkID); err != nil {
@@ -317,19 +316,19 @@ func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager
 	// ChunkCompressor fallback is gone (gastrolog-24m1t step 7e); only
 	// chunkfile.Manager implemented it, and it now goes through the
 	// PostSealProcess branch above.
-	o.scheduleReplication(vaultID, instID, chunkID, followerTargets)
+	o.scheduleReplication(vaultID, chunkID, followerTargets)
 }
 
-// instReplicationInfo returns the inst ID and follower targets for the inst
-// that owns the given ChunkManager. Returns zero values if not found or if the
-// inst is a follower (followers don't replicate further).
-func (o *Orchestrator) instReplicationInfo(vaultID glid.GLID, cm chunk.ChunkManager) (glid.GLID, []system.ReplicationTarget) {
+// followerReplicationTargets returns the follower targets for the vault that
+// owns the given ChunkManager. Returns nil if not found or if the vault is a
+// follower (followers don't replicate further).
+func (o *Orchestrator) followerReplicationTargets(vaultID glid.GLID, cm chunk.ChunkManager) []system.ReplicationTarget {
 	vault := o.vaults[vaultID]
 	if vault == nil {
-		return glid.GLID{}, nil
+		return nil
 	}
 	if inst := vault.Instance; inst != nil && inst.Chunks == cm && inst.ShouldForwardToFollowers() {
-		return inst.VaultID, inst.FollowerTargets
+		return inst.FollowerTargets
 	}
-	return glid.GLID{}, nil
+	return nil
 }

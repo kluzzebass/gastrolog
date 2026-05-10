@@ -542,7 +542,6 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 
 	// Vault and instance share the same ID.
 	vaultID := glid.New()
-	instID := vaultID
 	storageID := glid.New()
 
 	sys := &system.System{
@@ -559,7 +558,7 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 				}},
 			}},
 			VaultPlacements: map[glid.GLID][]system.VaultPlacement{
-				instID: {{StorageID: storageID.String(), Leader: true}},
+				vaultID: {{StorageID: storageID.String(), Leader: true}},
 			},
 		},
 	}
@@ -569,8 +568,8 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify dir param: <storage-path>/vaults/<vault-id>/<inst-id>
-	expectedDir := "/data/chunks/vaults/" + vaultID.String() + "/" + instID.String()
+	// Verify dir param: <storage-path>/vaults/<vault-id>/<vault-id>
+	expectedDir := "/data/chunks/vaults/" + vaultID.String() + "/" + vaultID.String()
 	if cmReceivedParams["dir"] != expectedDir {
 		t.Errorf("chunk manager: expected dir=%s, got %s", expectedDir, cmReceivedParams["dir"])
 	}

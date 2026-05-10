@@ -1048,9 +1048,9 @@ func TestWireInstanceFSMOnDeleteFiresNotifyChunkChange(t *testing.T) {
 
 	fsm := vaultctlfsm.New()
 	cm := &recordingSilentDeleter{}
-	instID := glid.New()
+	vaultID := glid.New()
 	g := &raftgroup.Group{FSM: fsm}
-	wireVaultFSMOnDelete(g, instID, cm, nil, orch, slog.Default())
+	wireVaultFSMOnDelete(g, vaultID, cm, nil, orch, slog.Default())
 
 	id := chunk.NewChunkID()
 	now := time.Now()
@@ -1086,9 +1086,9 @@ func TestWireInstanceFSMOnDeleteNotifiesEvenWhenDeleteSilentFails(t *testing.T) 
 
 	fsm := vaultctlfsm.New()
 	cm := &recordingSilentDeleter{failNext: chunk.ErrChunkNotFound}
-	instID := glid.New()
+	vaultID := glid.New()
 	g := &raftgroup.Group{FSM: fsm}
-	wireVaultFSMOnDelete(g, instID, cm, nil, orch, slog.Default())
+	wireVaultFSMOnDelete(g, vaultID, cm, nil, orch, slog.Default())
 
 	id := chunk.NewChunkID()
 	now := time.Now()
@@ -1117,9 +1117,9 @@ func TestWireInstanceFSMOnUploadFiresNotifyChunkChange(t *testing.T) {
 
 	fsm := vaultctlfsm.New()
 	cm := &recordingCloudRegistrar{}
-	instID := glid.New()
+	vaultID := glid.New()
 	g := &raftgroup.Group{FSM: fsm}
-	wireVaultFSMOnUpload(g, instID, cm, orch, slog.Default())
+	wireVaultFSMOnUpload(g, vaultID, cm, orch, slog.Default())
 
 	id := chunk.NewChunkID()
 	now := time.Now()

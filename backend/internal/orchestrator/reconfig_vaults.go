@@ -397,7 +397,7 @@ func (o *Orchestrator) removeVaultInstance(vaultID glid.GLID, deleteData bool) b
 	// instance while the vault control-plane Raft group still receives
 	// CmdDeleteChunk from the leader; without clearing, onDelete would call
 	// DeleteSilent on an already-closed file.Manager.
-	o.clearVaultFSMChunkCallbacks(vaultID, vaultID)
+	o.clearVaultFSMChunkCallbacks(vaultID)
 
 	// Close managers.
 	if err := inst.Chunks.Close(); err != nil {
@@ -1074,7 +1074,7 @@ func (o *Orchestrator) ensureVaultCtlMetadata(vaultCfg system.VaultConfig, clust
 	if factories.PeerConns != nil {
 		applier = cluster.NewVaultCtlChunkApplyForwarder(r, vaultGID, vaultCfg.ID, factories.PeerConns, timeout)
 	} else {
-		applier = &vaultCtlInstApplier{o: o, vaultID: vaultCfg.ID, instID: vaultCfg.ID}
+		applier = &vaultCtlInstApplier{o: o, vaultID: vaultCfg.ID}
 	}
 
 	return g, applier, buildVaultRaftCallbacks(r, instFSM, applier)
@@ -1234,7 +1234,7 @@ func setVaultRaftAnnouncer(cm chunk.ChunkManager, applier vaultctlfsm.Applier, p
 // in the vault control-plane group. Used before closing that vault's chunk
 // manager when the Raft group may still deliver log entries
 // (e.g. RemoveVaultInstance during placement loss).
-func (o *Orchestrator) clearVaultFSMChunkCallbacks(vaultID, instID glid.GLID) {
+func (o *Orchestrator) clearVaultFSMChunkCallbacks(vaultID glid.GLID) {
 	if o.groupMgr == nil {
 		return
 	}

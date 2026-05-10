@@ -76,14 +76,14 @@ func TestEvaluateCloudHealth_SetsAlertWhenDegraded(t *testing.T) {
 	t.Parallel()
 
 	ac := alert.New()
-	instID := glid.New()
+	vaultID := glid.New()
 	mock := &mockCloudChunkManager{}
 	mock.degraded.Store(true)
 	mock.degradedErr.Store("connection refused")
 
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = ac
-	inst := &VaultInstance{VaultID: instID, Type: "cloud", Chunks: mock}
+	inst := &VaultInstance{VaultID: vaultID, Type: "cloud", Chunks: mock}
 	orch.RegisterVault(NewVault(glid.New(), inst))
 
 	orch.evaluateCloudHealth()
@@ -92,7 +92,7 @@ func TestEvaluateCloudHealth_SetsAlertWhenDegraded(t *testing.T) {
 	if len(alerts) != 1 {
 		t.Fatalf("expected 1 alert, got %d", len(alerts))
 	}
-	wantID := fmt.Sprintf("cloud-store:%s", instID)
+	wantID := fmt.Sprintf("cloud-store:%s", vaultID)
 	if alerts[0].ID != wantID {
 		t.Errorf("alert ID = %q, want %q", alerts[0].ID, wantID)
 	}
@@ -105,16 +105,16 @@ func TestEvaluateCloudHealth_ClearsAlertWhenHealthy(t *testing.T) {
 	t.Parallel()
 
 	ac := alert.New()
-	instID := glid.New()
+	vaultID := glid.New()
 	mock := &mockCloudChunkManager{}
 
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = ac
-	inst := &VaultInstance{VaultID: instID, Type: "cloud", Chunks: mock}
+	inst := &VaultInstance{VaultID: vaultID, Type: "cloud", Chunks: mock}
 	orch.RegisterVault(NewVault(glid.New(), inst))
 
 	// Simulate prior degraded alert.
-	alertID := fmt.Sprintf("cloud-store:%s", instID)
+	alertID := fmt.Sprintf("cloud-store:%s", vaultID)
 	ac.Set(alertID, alert.Error, "cloud", "was broken")
 
 	// Now cloud is healthy (degraded=false, default).
@@ -170,11 +170,11 @@ func TestBackfillCloudUploads_SchedulesSealedNonCloudBacked(t *testing.T) {
 		},
 	}
 
-	instID := glid.New()
+	vaultID := glid.New()
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
 	inst := &VaultInstance{
-		VaultID:       instID,
+		VaultID:       vaultID,
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },
@@ -306,12 +306,12 @@ func TestBackfillCloudUploadsLeaderOnly(t *testing.T) {
 		},
 	}
 
-	instID := glid.New()
+	vaultID := glid.New()
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = ac
 
 	inst := &VaultInstance{
-		VaultID:       instID,
+		VaultID:       vaultID,
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },
@@ -386,11 +386,11 @@ func TestBackfillCloudUploads_DeduplicatesPendingJobs(t *testing.T) {
 		},
 	}
 
-	instID := glid.New()
+	vaultID := glid.New()
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
 	inst := &VaultInstance{
-		VaultID:       instID,
+		VaultID:       vaultID,
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },

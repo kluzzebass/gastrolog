@@ -105,11 +105,11 @@ func TestReliability_LeaderApply_ReplicatesToFollowers(t *testing.T) {
 	t.Parallel()
 	h := newReliabilityHarness(t, 3)
 
-	instID := glid.New()
+	vaultID := glid.New()
 	now := time.Now().Truncate(time.Nanosecond)
-	h.applyInstanceCreate(instID, chunkIDWithPrefix(0xA1), now)
-	h.applyInstanceCreate(instID, chunkIDWithPrefix(0xB2), now)
-	h.applyInstanceCreate(instID, chunkIDWithPrefix(0xC3), now)
+	h.applyInstanceCreate(vaultID, chunkIDWithPrefix(0xA1), now)
+	h.applyInstanceCreate(vaultID, chunkIDWithPrefix(0xB2), now)
+	h.applyInstanceCreate(vaultID, chunkIDWithPrefix(0xC3), now)
 
 	h.assertAllFSMsConverged()
 }
@@ -121,10 +121,10 @@ func TestReliability_Restart_AllNodes_ChunkStateSurvives(t *testing.T) {
 	t.Parallel()
 	h := newReliabilityHarness(t, 3)
 
-	instID := glid.New()
+	vaultID := glid.New()
 	now := time.Now().Truncate(time.Nanosecond)
-	h.applyInstanceCreate(instID, chunkIDWithPrefix(0x01), now)
-	h.applyInstanceCreate(instID, chunkIDWithPrefix(0x02), now)
+	h.applyInstanceCreate(vaultID, chunkIDWithPrefix(0x01), now)
+	h.applyInstanceCreate(vaultID, chunkIDWithPrefix(0x02), now)
 	h.assertAllFSMsConverged()
 
 	// Capture the pre-restart fingerprint (any node, since they're converged).
@@ -150,9 +150,9 @@ func TestReliability_Failover_LeaderDown_NewLeaderElected(t *testing.T) {
 	t.Parallel()
 	h := newReliabilityHarness(t, 3)
 
-	instID := glid.New()
+	vaultID := glid.New()
 	now := time.Now().Truncate(time.Nanosecond)
-	h.applyInstanceCreate(instID, chunkIDWithPrefix(0x10), now)
+	h.applyInstanceCreate(vaultID, chunkIDWithPrefix(0x10), now)
 	h.assertAllFSMsConverged()
 
 	oldLeader := h.leaderID()
@@ -175,7 +175,7 @@ func TestReliability_Failover_LeaderDown_NewLeaderElected(t *testing.T) {
 
 	// New leader accepts writes.
 	leader := h.nodes[newLeader]
-	cmd := MarshalVaultChunkCommand(instID, vaultctlfsm.MarshalCreateChunk(chunkIDWithPrefix(0x11), now, now, now))
+	cmd := MarshalVaultChunkCommand(vaultID, vaultctlfsm.MarshalCreateChunk(chunkIDWithPrefix(0x11), now, now, now))
 	if err := leader.raft.Apply(cmd, 2*time.Second).Error(); err != nil {
 		t.Fatalf("apply under new leader: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestReliability_Failover_FollowerDown_QuorumHolds(t *testing.T) {
 	t.Parallel()
 	h := newReliabilityHarness(t, 3)
 
-	instID := glid.New()
+	vaultID := glid.New()
 	now := time.Now().Truncate(time.Nanosecond)
 
 	// Pick a follower (any non-leader node).
@@ -210,8 +210,8 @@ func TestReliability_Failover_FollowerDown_QuorumHolds(t *testing.T) {
 	h.stopNode(follower)
 
 	// Writes still commit under 2-node quorum.
-	h.applyInstanceCreate(instID, chunkIDWithPrefix(0x20), now)
-	h.applyInstanceCreate(instID, chunkIDWithPrefix(0x21), now)
+	h.applyInstanceCreate(vaultID, chunkIDWithPrefix(0x20), now)
+	h.applyInstanceCreate(vaultID, chunkIDWithPrefix(0x21), now)
 
 	liveIDs := []string{}
 	for _, id := range h.nodeIDs {
@@ -229,9 +229,9 @@ func TestReliability_Partition_MinorityBlocked_HealReconverges(t *testing.T) {
 	t.Parallel()
 	h := newReliabilityHarness(t, 3)
 
-	instID := glid.New()
+	vaultID := glid.New()
 	now := time.Now().Truncate(time.Nanosecond)
-	h.applyInstanceCreate(instID, chunkIDWithPrefix(0x30), now)
+	h.applyInstanceCreate(vaultID, chunkIDWithPrefix(0x30), now)
 	h.assertAllFSMsConverged()
 
 	leaderID := h.leaderID()
@@ -251,8 +251,8 @@ func TestReliability_Partition_MinorityBlocked_HealReconverges(t *testing.T) {
 	}
 
 	// Majority continues to accept writes.
-	h.applyInstanceCreate(instID, chunkIDWithPrefix(0x31), now)
-	h.applyInstanceCreate(instID, chunkIDWithPrefix(0x32), now)
+	h.applyInstanceCreate(vaultID, chunkIDWithPrefix(0x31), now)
+	h.applyInstanceCreate(vaultID, chunkIDWithPrefix(0x32), now)
 
 	// Heal the partition.
 	for _, id := range h.nodeIDs {
@@ -274,10 +274,10 @@ func TestReliability_WholeClusterCrash_WALReplayRestoresState(t *testing.T) {
 	t.Parallel()
 	h := newReliabilityHarness(t, 3)
 
-	instID := glid.New()
+	vaultID := glid.New()
 	now := time.Now().Truncate(time.Nanosecond)
 	for i := range byte(5) {
-		h.applyInstanceCreate(instID, chunkIDWithPrefix(0x40+i), now)
+		h.applyInstanceCreate(vaultID, chunkIDWithPrefix(0x40+i), now)
 	}
 	h.assertAllFSMsConverged()
 
@@ -319,9 +319,9 @@ func TestReliability_ConcurrentWrites_NoDivergence(t *testing.T) {
 		commandsPerWriter = 25
 	)
 
-	instIDs := make([]glid.GLID, writers)
+	vaultIDs := make([]glid.GLID, writers)
 	for i := range writers {
-		instIDs[i] = glid.New()
+		vaultIDs[i] = glid.New()
 	}
 
 	now := time.Now().Truncate(time.Nanosecond)
@@ -331,14 +331,14 @@ func TestReliability_ConcurrentWrites_NoDivergence(t *testing.T) {
 		wg.Add(1)
 		go func(writerIdx int) {
 			defer wg.Done()
-			instID := instIDs[writerIdx]
+			vaultID := vaultIDs[writerIdx]
 			for c := range commandsPerWriter {
 				// Unique chunk ID: writer index in byte 0, command index in byte 1.
 				var cid chunk.ChunkID
 				cid[0] = byte(writerIdx)
 				cid[1] = byte(c)
 				wire := vaultctlfsm.MarshalCreateChunk(cid, now, now, now)
-				cmd := MarshalVaultChunkCommand(instID, wire)
+				cmd := MarshalVaultChunkCommand(vaultID, wire)
 				if err := applyWithLeaderRetry(h, cmd, 5, 3*time.Second); err != nil {
 					errCh <- fmt.Errorf("writer %d cmd %d: %w", writerIdx, c, err)
 					return
@@ -359,7 +359,7 @@ func TestReliability_ConcurrentWrites_NoDivergence(t *testing.T) {
 	// Cross-check: leader's FSM has exactly writers*commandsPerWriter entries.
 	leader := h.nodes[h.leaderID()]
 	total := 0
-	for _, tid := range instIDs {
+	for _, tid := range vaultIDs {
 		if sub := leader.fsm.InstanceFSM(tid); sub != nil {
 			total += len(sub.List())
 		}
@@ -382,12 +382,12 @@ func TestReliability_FollowerWipe_CatchupViaSnapshotOrReplay(t *testing.T) {
 	t.Parallel()
 	h := newReliabilityHarness(t, 3)
 
-	instID := glid.New()
+	vaultID := glid.New()
 	now := time.Now().Truncate(time.Nanosecond)
 
 	// Seed some pre-wipe state.
 	for i := range byte(3) {
-		h.applyInstanceCreate(instID, chunkIDWithPrefix(0x50+i), now)
+		h.applyInstanceCreate(vaultID, chunkIDWithPrefix(0x50+i), now)
 	}
 	h.assertAllFSMsConverged()
 
@@ -414,7 +414,7 @@ func TestReliability_FollowerWipe_CatchupViaSnapshotOrReplay(t *testing.T) {
 	// This also forces the log past what the wiped follower had before,
 	// proving catch-up includes post-wipe entries.
 	for i := range byte(3) {
-		h.applyInstanceCreate(instID, chunkIDWithPrefix(0x60+i), now)
+		h.applyInstanceCreate(vaultID, chunkIDWithPrefix(0x60+i), now)
 	}
 
 	h.assertAllFSMsConverged()
@@ -432,12 +432,12 @@ func TestReliability_SnapshotInstall_CatchesUpWipedFollower(t *testing.T) {
 	t.Parallel()
 	h := newReliabilityHarness(t, 3)
 
-	instID := glid.New()
+	vaultID := glid.New()
 	now := time.Now().Truncate(time.Nanosecond)
 
 	// Phase 1: seed many entries so a snapshot has meaningful content.
 	for i := range byte(20) {
-		h.applyInstanceCreate(instID, chunkIDWithPrefix(0x70+i), now)
+		h.applyInstanceCreate(vaultID, chunkIDWithPrefix(0x70+i), now)
 	}
 	h.assertAllFSMsConverged()
 
@@ -452,7 +452,7 @@ func TestReliability_SnapshotInstall_CatchesUpWipedFollower(t *testing.T) {
 	// Phase 2: apply more entries after the snapshot so the snapshot is
 	// behind the leader's LastIndex. Catch-up must still work.
 	for i := range byte(5) {
-		h.applyInstanceCreate(instID, chunkIDWithPrefix(0x90+i), now)
+		h.applyInstanceCreate(vaultID, chunkIDWithPrefix(0x90+i), now)
 	}
 
 	// Wipe a follower.
@@ -489,11 +489,11 @@ func TestReliability_PipelinedApplies_SurviveLeaderKill(t *testing.T) {
 	t.Parallel()
 	h := newReliabilityHarness(t, 3)
 
-	instID := glid.New()
+	vaultID := glid.New()
 	now := time.Now().Truncate(time.Nanosecond)
 
 	// Build up a confirmed baseline.
-	h.applyInstanceCreate(instID, chunkIDWithPrefix(0xA0), now)
+	h.applyInstanceCreate(vaultID, chunkIDWithPrefix(0xA0), now)
 	h.assertAllFSMsConverged()
 
 	// Pipeline 20 Apply futures on the current leader. Collect success
@@ -511,7 +511,7 @@ func TestReliability_PipelinedApplies_SurviveLeaderKill(t *testing.T) {
 		wg.Add(1)
 		go func(cid chunk.ChunkID) {
 			defer wg.Done()
-			cmd := MarshalVaultChunkCommand(instID, vaultctlfsm.MarshalCreateChunk(cid, now, now, now))
+			cmd := MarshalVaultChunkCommand(vaultID, vaultctlfsm.MarshalCreateChunk(cid, now, now, now))
 			n := h.nodes[oldLeader]
 			n.mu.Lock()
 			r := n.raft
@@ -563,7 +563,7 @@ func TestReliability_PipelinedApplies_SurviveLeaderKill(t *testing.T) {
 	assertSubsetConverged(t, h, liveIDs)
 
 	// Every chunk that Apply confirmed must be in the surviving leader's FSM.
-	surviving := h.nodes[newLeader].fsm.InstanceFSM(instID)
+	surviving := h.nodes[newLeader].fsm.InstanceFSM(vaultID)
 	if surviving == nil {
 		t.Fatal("surviving leader lost instance FSM entirely")
 	}
@@ -584,11 +584,11 @@ func TestReliability_RapidLeaderRestart_NoDivergence(t *testing.T) {
 	t.Parallel()
 	h := newReliabilityHarness(t, 3)
 
-	instID := glid.New()
+	vaultID := glid.New()
 	now := time.Now().Truncate(time.Nanosecond)
 
 	for i := range byte(3) {
-		h.applyInstanceCreate(instID, chunkIDWithPrefix(0xC0+i), now)
+		h.applyInstanceCreate(vaultID, chunkIDWithPrefix(0xC0+i), now)
 	}
 	h.assertAllFSMsConverged()
 
@@ -600,12 +600,12 @@ func TestReliability_RapidLeaderRestart_NoDivergence(t *testing.T) {
 	}
 
 	// Drop a final entry and confirm it replicates.
-	h.applyInstanceCreate(instID, chunkIDWithPrefix(0xCF), now)
+	h.applyInstanceCreate(vaultID, chunkIDWithPrefix(0xCF), now)
 	h.assertAllFSMsConverged()
 
 	// Leader's FSM should have 3 original + 1 final = 4 entries.
 	leader := h.nodes[h.leaderID()]
-	sub := leader.fsm.InstanceFSM(instID)
+	sub := leader.fsm.InstanceFSM(vaultID)
 	if sub == nil {
 		t.Fatal("instance FSM missing after restarts")
 	}
@@ -671,7 +671,7 @@ func TestReliability_SnapshotCycleUnderLoad_NoCorruption(t *testing.T) {
 	t.Parallel()
 	h := newReliabilityHarness(t, 3)
 
-	instID := glid.New()
+	vaultID := glid.New()
 	now := time.Now().Truncate(time.Nanosecond)
 
 	// Apply workload: 40 commands, with Snapshot() forced every 10 commands.
@@ -681,7 +681,7 @@ func TestReliability_SnapshotCycleUnderLoad_NoCorruption(t *testing.T) {
 	)
 
 	for i := range byte(totalCommands) {
-		h.applyInstanceCreate(instID, chunkIDWithPrefix(i), now)
+		h.applyInstanceCreate(vaultID, chunkIDWithPrefix(i), now)
 		if (i+1)%snapEvery == 0 {
 			if err := h.nodes[h.leaderID()].raft.Snapshot().Error(); err != nil {
 				// ErrNothingNewToSnapshot is benign (snapshot cycle may overlap).
@@ -694,7 +694,7 @@ func TestReliability_SnapshotCycleUnderLoad_NoCorruption(t *testing.T) {
 
 	h.assertAllFSMsConverged()
 
-	leader := h.nodes[h.leaderID()].fsm.InstanceFSM(instID)
+	leader := h.nodes[h.leaderID()].fsm.InstanceFSM(vaultID)
 	if leader == nil {
 		t.Fatal("instance missing after snapshot cycle")
 	}
@@ -733,12 +733,12 @@ func TestReliability_LargeFSM_SnapshotRestoreRoundtrip(t *testing.T) {
 		insts[i] = glid.New()
 	}
 
-	for ti, instID := range insts {
+	for ti, vaultID := range insts {
 		for ci := range chunksPerInst {
 			var cid chunk.ChunkID
 			cid[0] = byte(ti)
 			cid[1] = byte(ci)
-			cmd := MarshalVaultChunkCommand(instID, vaultctlfsm.MarshalCreateChunk(cid, now, now, now))
+			cmd := MarshalVaultChunkCommand(vaultID, vaultctlfsm.MarshalCreateChunk(cid, now, now, now))
 			if r := src.Apply(&hraft.Log{Data: cmd}); r != nil {
 				t.Fatalf("apply inst=%d chunk=%d: %v", ti, ci, r)
 			}
@@ -770,8 +770,8 @@ func TestReliability_LargeFSM_SnapshotRestoreRoundtrip(t *testing.T) {
 
 	// Sanity: total entry count matches.
 	total := 0
-	for _, instID := range insts {
-		if sub := dst.InstanceFSM(instID); sub != nil {
+	for _, vaultID := range insts {
+		if sub := dst.InstanceFSM(vaultID); sub != nil {
 			total += len(sub.List())
 		}
 	}

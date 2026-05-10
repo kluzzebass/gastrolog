@@ -86,13 +86,12 @@ func TestReliability_Ingest_ReleasesLockBeforeReplication(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 	orch.SetChunkReplicator(replicator)
 
-	instID := glid.New()
 	vaultID := glid.New()
 	cm, _ := chunkmem.NewManager(chunkmem.Config{})
 	im := indexmem.NewManager(nil, nil, nil, nil, nil)
 	qe := query.New(cm, im, nil)
 	inst := &VaultInstance{
-		VaultID:          instID,
+		VaultID:          vaultID,
 		Type:            "memory",
 		Chunks:          cm,
 		Indexes:         im,

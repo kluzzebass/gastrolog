@@ -27,7 +27,6 @@ func (o *Orchestrator) cacheEvictionSweepAll() {
 	type evictTarget struct {
 		evictor CacheEvictor
 		vaultID string
-		instID  string
 	}
 	var targets []evictTarget
 	for _, v := range o.vaults {
@@ -42,7 +41,6 @@ func (o *Orchestrator) cacheEvictionSweepAll() {
 		targets = append(targets, evictTarget{
 			evictor: ev,
 			vaultID: v.ID.String(),
-			instID:  t.VaultID.String(),
 		})
 	}
 	o.mu.RUnlock()
@@ -52,7 +50,7 @@ func (o *Orchestrator) cacheEvictionSweepAll() {
 		if evicted > 0 && o.logger != nil {
 			o.logger.Debug("cache eviction sweep",
 				"vault", tgt.vaultID,
-				"vault", tgt.instID,
+				"vault", tgt.vaultID,
 				"evicted", evicted,
 				"freed_bytes", freed)
 		}

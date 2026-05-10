@@ -108,10 +108,10 @@ type RecordForwarder interface {
 //
 // Caller role: always invoked on the inst **leader** node. Each method sends
 // a command to a follower (`nodeID`) that applies it locally. Callers must
-// verify they hold leadership for (`vaultID`, `instID`) before invoking —
+// verify they hold leadership for (`vaultID`, `vaultID`) before invoking —
 // the replicator itself does not re-check.
 //
-// Validation: methods assume the (`vaultID`, `instID`) pair is consistent
+// Validation: methods assume the (`vaultID`, `vaultID`) pair is consistent
 // (inst belongs to vault). The receiver on the remote node rejects mismatches
 // via inst lookup; callers should not rely on the replicator to catch
 // programmer errors.
@@ -252,7 +252,7 @@ type Orchestrator struct {
 	auxWg        sync.WaitGroup // tracks auxiliary goroutines (watchdog, etc.)
 
 	// Per-inst import mutex for serializing SetNextChunkID + ImportRecords.
-	importMu sync.Map // instID → *sync.Mutex
+	importMu sync.Map // vaultID → *sync.Mutex
 
 	// Draining vaults (keyed by vault ID, tracks in-progress migrations).
 	draining map[glid.GLID]*drainState
@@ -260,7 +260,7 @@ type Orchestrator struct {
 	// In-progress instance drains, keyed by vault ID.
 	instDraining map[string]*instDrainState
 
-	// Retention runners (keyed by instID:storageID, invoked by the shared scheduler).
+	// Retention runners (keyed by vaultID:storageID, invoked by the shared scheduler).
 	retention map[string]*retentionRunner
 
 	// Shared scheduler for all periodic tasks (cron rotation, retention, etc.).
@@ -385,7 +385,7 @@ func (o *Orchestrator) NotifyChunkChange() {
 // or "" if the inst or config is unknown. Used by RateAlerter to build
 // alert messages that say "inst ssd-hot" instead of just a UUID. Safe to
 // call from any goroutine — it acquires the orchestrator read lock.
-func (o *Orchestrator) vaultLabel(instID glid.GLID) string {
+func (o *Orchestrator) vaultLabel(vaultID glid.GLID) string {
 	if o.sysLoader == nil {
 		return ""
 	}
@@ -394,7 +394,7 @@ func (o *Orchestrator) vaultLabel(instID glid.GLID) string {
 		return ""
 	}
 	for _, v := range sys.Config.Vaults {
-		if v.ID == instID {
+		if v.ID == vaultID {
 			return v.Name
 		}
 	}
@@ -551,8 +551,8 @@ func New(cfg Config) (*Orchestrator, error) {
 	// so the rotation rate counter must be hooked from the cron manager
 	// directly. The age-based rotationsweep path increments the counter
 	// inline at its seal-trigger site.
-	o.cronRotation.onRotation = func(_, instID glid.GLID) {
-		o.rotationRates.Record(instID, o.now())
+	o.cronRotation.onRotation = func(vaultID glid.GLID) {
+		o.rotationRates.Record(vaultID, o.now())
 	}
 
 	// Register the single retention sweep that discovers all inst instances

@@ -33,15 +33,15 @@ func TestFSM_ApplyNoopAndUnknown(t *testing.T) {
 func TestFSM_OpVaultChunkFSM_delegate(t *testing.T) {
 	t.Parallel()
 	f := NewFSM()
-	instID := glid.New()
+	vaultID := glid.New()
 	cid := testChunkID(7)
 	now := time.Now().Truncate(time.Nanosecond)
 	wire := vaultctlfsm.MarshalCreateChunk(cid, now, now, now)
-	cmd := MarshalVaultChunkCommand(instID, wire)
+	cmd := MarshalVaultChunkCommand(vaultID, wire)
 	if got := f.Apply(&hraft.Log{Data: cmd}); got != nil {
 		t.Fatalf("apply: %v", got)
 	}
-	sub := f.InstanceFSM(instID)
+	sub := f.InstanceFSM(vaultID)
 	if sub == nil {
 		t.Fatal("expected instance sub-FSM")
 	}
@@ -165,18 +165,18 @@ func TestFSM_OnAfterRestoreFires_legacyEmpty(t *testing.T) {
 func TestFSM_Restore_legacyEmptyByte(t *testing.T) {
 	t.Parallel()
 	f := NewFSM()
-	instID := glid.New()
+	vaultID := glid.New()
 	now := time.Now().Truncate(time.Nanosecond)
-	if r := f.Apply(&hraft.Log{Data: MarshalVaultChunkCommand(instID, vaultctlfsm.MarshalCreateChunk(testChunkID(9), now, now, now))}); r != nil {
+	if r := f.Apply(&hraft.Log{Data: MarshalVaultChunkCommand(vaultID, vaultctlfsm.MarshalCreateChunk(testChunkID(9), now, now, now))}); r != nil {
 		t.Fatalf("apply: %v", r)
 	}
-	if f.InstanceFSM(instID) == nil {
+	if f.InstanceFSM(vaultID) == nil {
 		t.Fatal("expected instance before legacy restore")
 	}
 	if err := f.Restore(io.NopCloser(bytes.NewReader([]byte{1}))); err != nil {
 		t.Fatalf("legacy restore: %v", err)
 	}
-	if f.InstanceFSM(instID) != nil {
+	if f.InstanceFSM(vaultID) != nil {
 		t.Fatal("legacy restore should reset instance state")
 	}
 }

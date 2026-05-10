@@ -35,16 +35,15 @@ func (o *Orchestrator) ApplyVaultControlPlane(vaultID glid.GLID, data []byte) er
 	return fwd.Apply(data)
 }
 
-// vaultCtlInstApplier implements vaultctlfsm.Applier by wrapping inst commands as
-// vault control-plane OpVaultChunkFSM entries (see vaultraft.MarshalVaultChunkCommand).
+// vaultCtlInstApplier implements vaultctlfsm.Applier by wrapping vault commands
+// as vault control-plane OpVaultChunkFSM entries (see vaultraft.MarshalVaultChunkCommand).
 type vaultCtlInstApplier struct {
 	o       *Orchestrator
 	vaultID glid.GLID
-	instID  glid.GLID
 }
 
 func (a *vaultCtlInstApplier) Apply(data []byte) error {
-	return a.o.ApplyVaultControlPlane(a.vaultID, vaultraft.MarshalVaultChunkCommand(a.instID, data))
+	return a.o.ApplyVaultControlPlane(a.vaultID, vaultraft.MarshalVaultChunkCommand(a.vaultID, data))
 }
 
 var _ vaultctlfsm.Applier = (*vaultCtlInstApplier)(nil)

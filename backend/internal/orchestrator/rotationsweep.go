@@ -142,8 +142,8 @@ func (o *Orchestrator) applyRotationFromConfig(sys *system.System,
 
 	// Ensure cron job exists with the right schedule.
 	if policyCfg.Cron != nil && *policyCfg.Cron != "" {
-		jobName := cronJobName(vaultCfg.ID, inst.VaultID)
+		jobName := cronJobName(vaultCfg.ID)
 		activeCronJobs[jobName] = true
-		o.cronRotation.ensure(vaultCfg.ID, inst.VaultID, vaultCfg.Name, *policyCfg.Cron, inst.Chunks)
+		o.cronRotation.ensure(vaultCfg.ID, vaultCfg.Name, *policyCfg.Cron, inst.Chunks)
 	}
 }

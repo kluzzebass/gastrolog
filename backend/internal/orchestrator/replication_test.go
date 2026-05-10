@@ -37,7 +37,6 @@ type replicationFakeReplicator struct {
 type sealCall struct {
 	nodeID  string
 	vaultID glid.GLID
-	instID  glid.GLID
 	chunkID chunk.ChunkID
 }
 
@@ -64,7 +63,7 @@ func (m *replicationFakeReplicator) RequestReplicaCatchup(_ context.Context, _ s
 
 // ---------- helpers ----------
 
-func newReplicationInstance(t *testing.T, instID glid.GLID, followers []system.ReplicationTarget, isFollower bool, leaderNodeID string) *VaultInstance {
+func newReplicationInstance(t *testing.T, vaultID glid.GLID, followers []system.ReplicationTarget, isFollower bool, leaderNodeID string) *VaultInstance {
 	t.Helper()
 	cm, err := chunkmem.NewFactory()(nil, nil)
 	if err != nil {
@@ -75,7 +74,7 @@ func newReplicationInstance(t *testing.T, instID glid.GLID, followers []system.R
 		t.Fatal(err)
 	}
 	return &VaultInstance{
-		VaultID:          instID,
+		VaultID:          vaultID,
 		Type:            "memory",
 		Chunks:          cm,
 		Indexes:         im,
@@ -103,9 +102,8 @@ func TestSealActiveChunk(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
-	instID := glid.New()
 	vaultID := glid.New()
-	vault := NewVault(vaultID, newReplicationInstance(t, instID, nil, false, ""))
+	vault := NewVault(vaultID, newReplicationInstance(t, vaultID, nil, false, ""))
 	vault.Name = "seal-test"
 	orch.RegisterVault(vault)
 
@@ -134,9 +132,8 @@ func TestSealActiveChunkMismatchSkipsSeal(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 	orch.logger = slog.Default()
 
-	instID := glid.New()
 	vaultID := glid.New()
-	vault := NewVault(vaultID, newReplicationInstance(t, instID, nil, false, ""))
+	vault := NewVault(vaultID, newReplicationInstance(t, vaultID, nil, false, ""))
 	vault.Name = "mismatch"
 	orch.RegisterVault(vault)
 
@@ -167,9 +164,8 @@ func TestSealActiveChunkNoActiveChunk(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
-	instID := glid.New()
 	vaultID := glid.New()
-	vault := NewVault(vaultID, newReplicationInstance(t, instID, nil, false, ""))
+	vault := NewVault(vaultID, newReplicationInstance(t, vaultID, nil, false, ""))
 	orch.RegisterVault(vault)
 
 	// No records appended — no active chunk.
@@ -188,16 +184,15 @@ func TestCatchupSecondaryNoSealedChunks(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 	orch.logger = slog.Default()
 
-	instID := glid.New()
 	vaultID := glid.New()
-	vault := NewVault(vaultID, newReplicationInstance(t, instID, nil, false, ""))
+	vault := NewVault(vaultID, newReplicationInstance(t, vaultID, nil, false, ""))
 	orch.RegisterVault(vault)
 
 	mock := &replicationFakeReplicator{}
 	orch.SetChunkReplicator(mock)
 
 	// No sealed chunks — catchup should be a no-op.
-	err := orch.catchupFollower(context.Background(), vaultID, instID, "node-2")
+	err := orch.catchupFollower(context.Background(), vaultID, "node-2")
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -207,13 +202,12 @@ func TestCatchupSecondaryOnlyPrimary(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
-	instID := glid.New()
 	vaultID := glid.New()
 	// This is a follower — should not initiate catchup.
-	vault := NewVault(vaultID, newReplicationInstance(t, instID, nil, true, "node-2"))
+	vault := NewVault(vaultID, newReplicationInstance(t, vaultID, nil, true, "node-2"))
 	orch.RegisterVault(vault)
 
-	err := orch.catchupFollower(context.Background(), vaultID, instID, "node-3")
+	err := orch.catchupFollower(context.Background(), vaultID, "node-3")
 	if err != nil {
 		t.Fatalf("expected nil (no-op) for follower, got %v", err)
 	}
@@ -223,13 +217,12 @@ func TestCatchupSecondaryNoTransferrer(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
-	instID := glid.New()
 	vaultID := glid.New()
-	vault := NewVault(vaultID, newReplicationInstance(t, instID, nil, false, ""))
+	vault := NewVault(vaultID, newReplicationInstance(t, vaultID, nil, false, ""))
 	orch.RegisterVault(vault)
 	// No transferrer set.
 
-	err := orch.catchupFollower(context.Background(), vaultID, instID, "node-2")
+	err := orch.catchupFollower(context.Background(), vaultID, "node-2")
 	if err == nil {
 		t.Fatal("expected error for missing transferrer")
 	}
@@ -253,9 +246,8 @@ func TestCatchupSkipsFSMRetiredChunks(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 	orch.logger = slog.Default()
 
-	instID := glid.New()
 	vaultID := glid.New()
-	inst := newReplicationInstance(t, instID, nil, false, "")
+	inst := newReplicationInstance(t, vaultID, nil, false, "")
 	vault := NewVault(vaultID, inst)
 	orch.RegisterVault(vault)
 
@@ -304,7 +296,7 @@ func TestCatchupSkipsFSMRetiredChunks(t *testing.T) {
 		return []chunk.ChunkID{ids[0], ids[2]}
 	}
 
-	if err := orch.catchupFollower(context.Background(), vaultID, instID, "node-2"); err != nil {
+	if err := orch.catchupFollower(context.Background(), vaultID, "node-2"); err != nil {
 		t.Fatalf("catchupFollower: %v", err)
 	}
 
@@ -339,9 +331,8 @@ func TestCatchupNilManifestUsesAllChunks(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 	orch.logger = slog.Default()
 
-	instID := glid.New()
 	vaultID := glid.New()
-	inst := newReplicationInstance(t, instID, nil, false, "")
+	inst := newReplicationInstance(t, vaultID, nil, false, "")
 	vault := NewVault(vaultID, inst)
 	orch.RegisterVault(vault)
 
@@ -362,7 +353,7 @@ func TestCatchupNilManifestUsesAllChunks(t *testing.T) {
 	// ListManifest is nil — catchup must fall back to disk list.
 	inst.ListManifest = nil
 
-	if err := orch.catchupFollower(context.Background(), vaultID, instID, "node-2"); err != nil {
+	if err := orch.catchupFollower(context.Background(), vaultID, "node-2"); err != nil {
 		t.Fatalf("catchupFollower: %v", err)
 	}
 
@@ -432,7 +423,7 @@ func TestClusterReplicationSealedChunksArriveOnFollowers(t *testing.T) {
 	followerTargets := inst0.FollowerTargets
 	ctx := context.Background()
 	for _, m := range metas {
-		leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, h.instIDs[0], m.ID, followerTargets)
+		leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, m.ID, followerTargets)
 	}
 
 	// ---- Verify: each follower has all records (cursor-verified) ----
@@ -519,7 +510,7 @@ func TestClusterReplicationSealedIdxWriteTSMatchesLeader(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, h.instIDs[0], sealedID, leaderInst.FollowerTargets)
+	leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, sealedID, leaderInst.FollowerTargets)
 
 	leaderEntries := chunkRecordTimestamps(t, leaderInst.Chunks, sealedID)
 	if len(leaderEntries) != totalRecords {
@@ -688,7 +679,7 @@ func TestClusterReplicationDeletePropagation(t *testing.T) {
 	}
 	ctx := context.Background()
 	for _, m := range metas {
-		leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, h.instIDs[0], m.ID, leaderInst.FollowerTargets)
+		leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, m.ID, leaderInst.FollowerTargets)
 	}
 
 	// Verify followers have chunks.

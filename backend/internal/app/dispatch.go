@@ -33,7 +33,7 @@ type orchActions interface {
 	AddVaultInstance(ctx context.Context, vaultID glid.GLID, f orchestrator.Factories) error
 	DrainInstance(ctx context.Context, vaultID glid.GLID, mode orchestrator.DrainMode, targetNodeID string) error
 	UnregisterVault(id glid.GLID) error
-	MissingVaultInstance(vaultID glid.GLID, instIDs []glid.GLID) bool
+	MissingVaultInstance(vaultID glid.GLID, vaultIDs []glid.GLID) bool
 	LocalInstanceIDs(vaultID glid.GLID) []glid.GLID
 	DrainVault(ctx context.Context, vaultID glid.GLID, targetNodeID string) error
 	IsDraining(vaultID glid.GLID) bool
@@ -69,7 +69,7 @@ type configDispatcher struct {
 	tlsFilePath        string                                           // path to persist cluster TLS on rotation
 	configSignal       *notify.Signal                                   // broadcasts config changes to WatchConfig streams
 	managedFileHandler ManagedFileHandler                               // nil for single-node or before wiring
-	catchupScheduler   func(vaultID, instID glid.GLID, followerNodeIDs []string) // nil until orch is wired
+	catchupScheduler   func(vaultID glid.GLID, followerNodeIDs []string) // nil until orch is wired
 	placementTrigger   func()                                           // triggers immediate placement reconcile; nil for single-node
 }
 
@@ -146,7 +146,7 @@ func (d *configDispatcher) handleVaultPut(ctx context.Context, id glid.GLID) {
 
 	// The vault has exactly one inst whose ID equals the vault's ID.
 	// Every node instantiates the inst if it can serve it.
-	instIDs := []glid.GLID{id}
+	vaultIDs := []glid.GLID{id}
 
 	// Cancel any in-progress drain.
 	if d.orch.IsDraining(id) {
@@ -168,8 +168,8 @@ func (d *configDispatcher) handleVaultPut(ctx context.Context, id glid.GLID) {
 
 	// Incrementally add/remove instances that changed. Never tear down
 	// the entire vault — that causes cascading rebuilds and data warnings.
-	if d.orch.MissingVaultInstance(id, instIDs) {
-		d.reconcileVaultInstance(ctx, id, instIDs)
+	if d.orch.MissingVaultInstance(id, vaultIDs) {
+		d.reconcileVaultInstance(ctx, id, vaultIDs)
 		return
 	}
 
@@ -215,9 +215,9 @@ func (d *configDispatcher) maybeStartDrain(ctx context.Context, id glid.GLID, ta
 // reconcileVaultInstance incrementally adds missing instances and removes
 // stale ones from an existing vault, without tearing down any instances
 // that are unchanged.
-func (d *configDispatcher) reconcileVaultInstance(ctx context.Context, vaultID glid.GLID, instIDs []glid.GLID) {
-	expected := make(map[glid.GLID]bool, len(instIDs))
-	for _, id := range instIDs {
+func (d *configDispatcher) reconcileVaultInstance(ctx context.Context, vaultID glid.GLID, vaultIDs []glid.GLID) {
+	expected := make(map[glid.GLID]bool, len(vaultIDs))
+	for _, id := range vaultIDs {
 		expected[id] = true
 	}
 
@@ -229,7 +229,7 @@ func (d *configDispatcher) reconcileVaultInstance(ctx context.Context, vaultID g
 	}
 
 	// Add instances that are expected but not local.
-	for range instIDs {
+	for range vaultIDs {
 		if err := d.orch.AddVaultInstance(ctx, vaultID, d.factories); err != nil {
 			d.logger.Error("dispatch: add vault instance",
 				"vault", vaultID, "error", err)
@@ -471,22 +471,22 @@ func (d *configDispatcher) handleSettingPut(ctx context.Context, key string) {
 // Runs on ALL nodes — each node independently decides whether it gained or lost
 // ownership based on the vault's resolved node IDs vs localNodeID.
 // Also reloads rotation/retention policies when instance config changes.
-func (d *configDispatcher) handleInstancePut(ctx context.Context, instID glid.GLID) {
+func (d *configDispatcher) handleInstancePut(ctx context.Context, vaultID glid.GLID) {
 	// The vault's ID equals the instance's ID.
-	v, err := d.cfgStore.GetVault(ctx, instID)
+	v, err := d.cfgStore.GetVault(ctx, vaultID)
 	if err != nil || v == nil {
-		d.logger.Error("dispatch: get vault for inst change", "vault", instID, "error", err)
+		d.logger.Error("dispatch: get vault for inst change", "vault", vaultID, "error", err)
 		return
 	}
 
 	nscs, err := d.cfgStore.ListNodeStorageConfigs(ctx)
 	if err != nil {
-		d.logger.Error("dispatch: list node storage configs for inst change", "vault", instID, "error", err)
+		d.logger.Error("dispatch: list node storage configs for inst change", "vault", vaultID, "error", err)
 		return
 	}
 
-	leaderNodeID := system.LeaderNodeID(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, instID); return p }(), nscs)
-	followerNodeIDs := system.FollowerNodeIDs(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, instID); return p }(), nscs)
+	leaderNodeID := system.LeaderNodeID(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, vaultID); return p }(), nscs)
+	followerNodeIDs := system.FollowerNodeIDs(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, vaultID); return p }(), nscs)
 
 	// Only act on inst membership once placements are fully assigned. During
 	// cluster-init the placement manager assigns placements one-at-a-time,
@@ -498,7 +498,7 @@ func (d *configDispatcher) handleInstancePut(ctx context.Context, instID glid.GL
 	//
 	// Policy reloads (rotation/retention) still run below because they are
 	// independent of placement state.
-	d.applyInstanceMembershipChange(ctx, *v, instID, leaderNodeID, followerNodeIDs)
+	d.applyInstanceMembershipChange(ctx, *v, vaultID, leaderNodeID, followerNodeIDs)
 
 	// Reload filters so ingestion routing picks up the new placement leader
 	// immediately. Without this, records are forwarded to the old (possibly
@@ -516,9 +516,9 @@ func (d *configDispatcher) handleInstancePut(ctx context.Context, instID glid.GL
 	// When a leader changes but followers stay the same (e.g. a node dies),
 	// the surviving followers already have all chunks — no catchup needed.
 	if leaderNodeID == d.localNodeID && len(followerNodeIDs) > 0 && d.catchupScheduler != nil {
-		newFollowers := d.newFollowersForInstance(v.ID, instID, followerNodeIDs)
+		newFollowers := d.newFollowersForInstance(v.ID, followerNodeIDs)
 		if len(newFollowers) > 0 {
-			d.catchupScheduler(v.ID, instID, newFollowers)
+			d.catchupScheduler(v.ID, newFollowers)
 		}
 	}
 
@@ -533,13 +533,13 @@ func (d *configDispatcher) handleInstancePut(ctx context.Context, instID glid.GL
 // the (complete) placement state, and either adds/rebuilds it locally or
 // removes it if it no longer belongs. Deferred entirely when placements are
 // incomplete — the next CmdPutVault from the placement manager will retry.
-func (d *configDispatcher) applyInstanceMembershipChange(ctx context.Context, v system.VaultConfig, instID glid.GLID, leaderNodeID string, followerNodeIDs []string) {
+func (d *configDispatcher) applyInstanceMembershipChange(ctx context.Context, v system.VaultConfig, vaultID glid.GLID, leaderNodeID string, followerNodeIDs []string) {
 	// Placements are "complete" when they include a leader. We can't gate on
 	// len(placements) >= RF because RF may be unsatisfiable when a node is
 	// down — the placement manager writes the best it can with surviving
 	// nodes. Gating on RF caused permanent deferral after node failure:
 	// the role was never updated, rotation never ran, chunks never sealed.
-	placements, _ := d.cfgStore.GetVaultPlacements(ctx, instID)
+	placements, _ := d.cfgStore.GetVaultPlacements(ctx, vaultID)
 	hasLeader := false
 	for _, p := range placements {
 		if p.Leader {
@@ -549,7 +549,7 @@ func (d *configDispatcher) applyInstanceMembershipChange(ctx context.Context, v 
 	}
 	if !hasLeader {
 		d.logger.Debug("dispatch: vault placements have no leader, deferring rebuild",
-			"vault", instID, "placements", len(placements))
+			"vault", vaultID, "placements", len(placements))
 		return
 	}
 
@@ -567,20 +567,21 @@ func (d *configDispatcher) applyInstanceMembershipChange(ctx context.Context, v 
 			d.orch.RemoveVaultInstance(v.ID)
 		}
 	}
-	d.rebuildVaultIfInstanceMissing(ctx, v, instID)
+	d.rebuildVaultIfInstanceMissing(ctx, v, vaultID)
 }
 
-func (d *configDispatcher) registerVault(ctx context.Context, v system.VaultConfig, instID glid.GLID) {
+func (d *configDispatcher) registerVault(ctx context.Context, v system.VaultConfig, vaultID glid.GLID) {
 	if err := d.orch.AddVault(ctx, v, d.factories); err != nil {
 		d.logger.Error("dispatch: add vault for gained inst",
 			"vault", v.ID, "error", err)
 	}
 }
 
-func (d *configDispatcher) rebuildVaultIfInstanceMissing(ctx context.Context, v system.VaultConfig, instID glid.GLID) {
+func (d *configDispatcher) rebuildVaultIfInstanceMissing(ctx context.Context, v system.VaultConfig, vaultID glid.GLID) {
+	_ = vaultID // legacy parameter; instance is identified by v.ID under 1:1 collapse
 	existing := d.orch.FindLocalVaultInstance(v.ID)
 	if existing != nil {
-		d.updateInstanceRoleIfNeeded(ctx, v.ID, instID, existing)
+		d.updateInstanceRoleIfNeeded(ctx, v.ID, existing)
 		return
 	}
 	// Instance doesn't exist locally yet — add it incrementally.
@@ -590,10 +591,11 @@ func (d *configDispatcher) rebuildVaultIfInstanceMissing(ctx context.Context, v 
 	}
 }
 
-// updateInstanceRoleIfNeeded checks whether a inst's role (leader ↔ follower) has changed
-// and updates it in place — avoiding a full vault rebuild and file lock churn.
-func (d *configDispatcher) updateInstanceRoleIfNeeded(ctx context.Context, vaultID, instID glid.GLID, existing *orchestrator.VaultInstance) {
-	v, err := d.cfgStore.GetVault(ctx, instID)
+// updateInstanceRoleIfNeeded checks whether a vault instance's role
+// (leader ↔ follower) has changed and updates it in place — avoiding a full
+// vault rebuild and file lock churn.
+func (d *configDispatcher) updateInstanceRoleIfNeeded(ctx context.Context, vaultID glid.GLID, existing *orchestrator.VaultInstance) {
+	v, err := d.cfgStore.GetVault(ctx, vaultID)
 	if err != nil || v == nil {
 		return
 	}
@@ -601,8 +603,8 @@ func (d *configDispatcher) updateInstanceRoleIfNeeded(ctx context.Context, vault
 	if err != nil {
 		return
 	}
-	leaderNodeID := system.LeaderNodeID(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, instID); return p }(), nscs)
-	followerNodeIDs := system.FollowerNodeIDs(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, instID); return p }(), nscs)
+	leaderNodeID := system.LeaderNodeID(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, vaultID); return p }(), nscs)
+	followerNodeIDs := system.FollowerNodeIDs(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, vaultID); return p }(), nscs)
 	shouldBeFollower := slices.Contains(followerNodeIDs, d.localNodeID)
 	if existing.IsFollower == shouldBeFollower {
 		return // role unchanged
@@ -620,11 +622,11 @@ func (d *configDispatcher) updateInstanceRoleIfNeeded(ctx context.Context, vault
 }
 
 // newFollowersForInstance returns follower node IDs that don't already have a
-// local inst instance on this node's orchestrator. Existing followers already
+// local vault instance on this node's orchestrator. Existing followers already
 // have all chunks from normal replication — only genuinely new followers need
 // catchup. This prevents redundant chunk transfers on leader reassignment
 // (e.g. when a node dies and the leader moves but followers stay the same).
-func (d *configDispatcher) newFollowersForInstance(vaultID, instID glid.GLID, followerNodeIDs []string) []string {
+func (d *configDispatcher) newFollowersForInstance(vaultID glid.GLID, followerNodeIDs []string) []string {
 	existing := d.orch.FindLocalVaultInstance(vaultID)
 	if existing == nil {
 		// Instance was just added to this node — all followers are new.

@@ -91,9 +91,9 @@ type mockOrch struct {
 	reloadFiltersCalls int         // number of ReloadFilters calls
 
 	// Vault drain tracking.
-	instDrainCalls    []glid.GLID                                                // vault IDs passed to DrainInstance
-	removeInstanceCalls   [][2]glid.GLID                                             // [vaultID, instID] pairs passed to RemoveVaultInstance
-	localInstanceExported func(vaultID, instID glid.GLID) *orchestrator.VaultInstance // configurable return
+	instDrainCalls        []glid.GLID                                       // vault IDs passed to DrainInstance
+	removeInstanceCalls   []glid.GLID                                       // vault IDs passed to RemoveVaultInstance
+	localInstanceExported func(vaultID glid.GLID) *orchestrator.VaultInstance // configurable return
 }
 
 func (m *mockOrch) ListVaults() []glid.GLID    { return m.vaults }
@@ -121,11 +121,11 @@ func (m *mockOrch) ForceRemoveVault(id glid.GLID) error {
 	return m.forceRemoveErr
 }
 func (m *mockOrch) RemoveVaultInstance(vaultID glid.GLID) bool {
-	m.removeInstanceCalls = append(m.removeInstanceCalls, [2]glid.GLID{vaultID, vaultID})
+	m.removeInstanceCalls = append(m.removeInstanceCalls, vaultID)
 	return true
 }
 func (m *mockOrch) DeleteVaultInstance(vaultID glid.GLID) bool {
-	m.removeInstanceCalls = append(m.removeInstanceCalls, [2]glid.GLID{vaultID, vaultID})
+	m.removeInstanceCalls = append(m.removeInstanceCalls, vaultID)
 	return true
 }
 func (m *mockOrch) DrainInstance(_ context.Context, vaultID glid.GLID, _ orchestrator.DrainMode, _ string) error {
@@ -900,7 +900,7 @@ func TestHandle_VaultDrain(t *testing.T) {
 
 func (m *mockOrch) FindLocalVaultInstance(vaultID glid.GLID) *orchestrator.VaultInstance {
 	if m.localInstanceExported != nil {
-		return m.localInstanceExported(vaultID, vaultID)
+		return m.localInstanceExported(vaultID)
 	}
 	return nil
 }

@@ -23,11 +23,10 @@ import (
 // by the in-memory blobstore. Returns the orchestrator, cloud store, chunk manager,
 // vault/vault IDs, and config store.
 func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition) (
-	*Orchestrator, *blobstore.Memory, *chunkfile.Manager, glid.GLID, glid.GLID, *sysmem.Store,
+	*Orchestrator, *blobstore.Memory, *chunkfile.Manager, glid.GLID, *sysmem.Store,
 ) {
 	t.Helper()
 	vaultID := glid.New()
-	instID := glid.New()
 	csID := glid.New()
 	nodeID := "test-node"
 
@@ -46,7 +45,7 @@ func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition
 	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "archival-test", Type: system.VaultTypeFile, CloudServiceID: &csID,
 	})
-	_ = store.SetVaultPlacements(context.Background(), instID, []system.VaultPlacement{{StorageID: system.SyntheticStorageID("test-node"), Leader: true}})
+	_ = store.SetVaultPlacements(context.Background(), vaultID, []system.VaultPlacement{{StorageID: system.SyntheticStorageID("test-node"), Leader: true}})
 	_ = store.PutCloudService(context.Background(), system.CloudService{
 		ID:           csID,
 		Name:         "test-cloud",
@@ -64,14 +63,14 @@ func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition
 	_ = orch.Scheduler().Stop()
 
 	inst := &VaultInstance{
-		VaultID: instID, Type: "cloud",
+		VaultID: vaultID, Type: "cloud",
 		Chunks: cm, Indexes: im, Query: query.New(cm, im, nil),
 	}
 	orch.RegisterVault(NewVault(vaultID, inst))
 
 	t.Cleanup(func() { _ = cm.Close() })
 
-	return orch, cloudStore, cm, vaultID, instID, store
+	return orch, cloudStore, cm, vaultID, store
 }
 
 // ingestSealUpload ingests N records, seals, and runs PostSealProcess (compress + cloud upload).
@@ -104,7 +103,7 @@ func ingestSealUpload(t *testing.T, cm *chunkfile.Manager, n int) []chunk.ChunkI
 
 func TestArchivalSweepArchivesOldChunks(t *testing.T) {
 	t.Parallel()
-	orch, _, cm, _, _, _ := archivalTestSetup(t, []system.CloudStorageTransition{
+	orch, _, cm, _, _ := archivalTestSetup(t, []system.CloudStorageTransition{
 		{After: "1d", StorageClass: "GLACIER"},
 	})
 
@@ -133,7 +132,7 @@ func TestArchivalSweepArchivesOldChunks(t *testing.T) {
 
 func TestArchivalSweepDeletesExpiredChunks(t *testing.T) {
 	t.Parallel()
-	orch, _, cm, _, _, _ := archivalTestSetup(t, []system.CloudStorageTransition{
+	orch, _, cm, _, _ := archivalTestSetup(t, []system.CloudStorageTransition{
 		{After: "1d", StorageClass: ""}, // delete after 1 day
 	})
 
@@ -152,7 +151,7 @@ func TestArchivalSweepDeletesExpiredChunks(t *testing.T) {
 
 func TestArchivalSweepIgnoresInactiveServices(t *testing.T) {
 	t.Parallel()
-	orch, _, cm, _, _, store := archivalTestSetup(t, []system.CloudStorageTransition{
+	orch, _, cm, _, store := archivalTestSetup(t, []system.CloudStorageTransition{
 		{After: "1d", StorageClass: "GLACIER"},
 	})
 
@@ -175,7 +174,7 @@ func TestArchivalSweepIgnoresInactiveServices(t *testing.T) {
 
 func TestArchivalSweepMultiStepTransition(t *testing.T) {
 	t.Parallel()
-	orch, _, cm, _, _, _ := archivalTestSetup(t, []system.CloudStorageTransition{
+	orch, _, cm, _, _ := archivalTestSetup(t, []system.CloudStorageTransition{
 		{After: "1d", StorageClass: "cold"},
 		{After: "30d", StorageClass: "deep-freeze"},
 	})
@@ -196,7 +195,7 @@ func TestArchivalSweepMultiStepTransition(t *testing.T) {
 
 func TestReconcileSweepMarksSuspectOnMissing(t *testing.T) {
 	t.Parallel()
-	orch, cloudStore, cm, _, _, _ := archivalTestSetup(t, nil)
+	orch, cloudStore, cm, _, _ := archivalTestSetup(t, nil)
 
 	ids := ingestSealUpload(t, cm, 50)
 
@@ -226,7 +225,7 @@ func TestReconcileSweepMarksSuspectOnMissing(t *testing.T) {
 
 func TestReconcileSweepRemovesAfterGracePeriod(t *testing.T) {
 	t.Parallel()
-	orch, cloudStore, cm, _, _, store := archivalTestSetup(t, nil)
+	orch, cloudStore, cm, _, store := archivalTestSetup(t, nil)
 
 	ids := ingestSealUpload(t, cm, 50)
 
@@ -262,7 +261,7 @@ func TestReconcileSweepRemovesAfterGracePeriod(t *testing.T) {
 
 func TestReconcileSweepClearsSuspectWhenBlobReturns(t *testing.T) {
 	t.Parallel()
-	orch, cloudStore, cm, _, _, _ := archivalTestSetup(t, nil)
+	orch, cloudStore, cm, _, _ := archivalTestSetup(t, nil)
 
 	ids := ingestSealUpload(t, cm, 50)
 
@@ -308,7 +307,7 @@ func TestReconcileSweepClearsSuspectWhenBlobReturns(t *testing.T) {
 
 func TestArchivalFullLifecycle(t *testing.T) {
 	t.Parallel()
-	orch, _, cm, vaultID, _, _ := archivalTestSetup(t, []system.CloudStorageTransition{
+	orch, _, cm, vaultID, _ := archivalTestSetup(t, []system.CloudStorageTransition{
 		{After: "1d", StorageClass: "cold"},
 	})
 
@@ -531,7 +530,6 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 	nodeIDs := []string{"leader", "f1", "f2", "f3"}
 	leaderID := nodeIDs[0]
 	vaultID := glid.New()
-	instID := glid.New()
 	csID := glid.New()
 
 	cloudStore := blobstore.NewMemory()
@@ -545,7 +543,7 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 			StorageID: system.SyntheticStorageID(fid), Leader: false,
 		})
 	}
-	_ = store.SetVaultPlacements(context.Background(), instID, placements)
+	_ = store.SetVaultPlacements(context.Background(), vaultID, placements)
 	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "cloud-vault", Type: system.VaultTypeFile, CloudServiceID: &csID,
 	})
@@ -594,7 +592,7 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 		im := indexfile.NewManager(dir, nil, nil)
 
 		inst := &VaultInstance{
-			VaultID: instID, Type: "cloud",
+			VaultID: vaultID, Type: "cloud",
 			Chunks: cm, Indexes: im, Query: query.New(cm, im, nil),
 		}
 		if isLeader {
@@ -638,7 +636,7 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 			nodes:    nodes,
 			cfgStore: store,
 			vaultID:  vaultID,
-			instIDs:  []glid.GLID{instID},
+			vaultIDs: []glid.GLID{vaultID},
 		},
 		cloudStore: cloudStore,
 		csID:       csID,

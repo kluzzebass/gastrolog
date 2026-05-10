@@ -603,7 +603,6 @@ func TestSnapshotRestore(t *testing.T) {
 	applyCmd(t, fsm1, command.NewPutRetentionPolicy(system.RetentionPolicyConfig{ID: retID, Name: "ret1", MaxAge: &retMaxAge}))
 
 	vaultID := newID()
-	instID := vaultID
 
 	applyCmd(t, fsm1, command.NewPutVault(system.VaultConfig{
 		ID:               vaultID,
@@ -678,7 +677,7 @@ func TestSnapshotRestore(t *testing.T) {
 		t.Errorf("vault: %+v", gotVault)
 	}
 
-	_ = instID // the legacy mirror is gone — vault check above is the canonical assertion
+	_ = vaultID // the legacy mirror is gone — vault check above is the canonical assertion
 
 	gotIng, _ := fsm2.Store().GetIngester(ctx, ingID)
 	if gotIng == nil || gotIng.Name != "ing1" {

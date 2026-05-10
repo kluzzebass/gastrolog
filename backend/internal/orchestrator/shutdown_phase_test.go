@@ -68,8 +68,8 @@ func TestFireAndForgetRemoteSkipsDuringShutdown(t *testing.T) {
 	orch.SetChunkReplicator(replicator)
 
 	targets := []remoteForwardTarget{
-		{nodeID: "remote-a", vaultID: glid.New(), instID: glid.New()},
-		{nodeID: "remote-b", vaultID: glid.New(), instID: glid.New()},
+		{nodeID: "remote-a", vaultID: glid.New()},
+		{nodeID: "remote-b", vaultID: glid.New()},
 	}
 	rec := chunk.Record{Raw: []byte("payload")}
 
@@ -106,7 +106,7 @@ func TestSealRemoteFollowersSkipsDuringShutdown(t *testing.T) {
 	orch.SetChunkReplicator(replicator)
 
 	targets := []remoteForwardTarget{
-		{nodeID: "remote-a", vaultID: glid.New(), instID: glid.New()},
+		{nodeID: "remote-a", vaultID: glid.New()},
 	}
 	chunkID := chunk.ChunkID{}
 
@@ -137,7 +137,7 @@ func TestFireAndForgetRemoteNilPhaseDoesNotPanic(t *testing.T) {
 	orch.SetChunkReplicator(replicator)
 
 	targets := []remoteForwardTarget{
-		{nodeID: "remote-a", vaultID: glid.New(), instID: glid.New()},
+		{nodeID: "remote-a", vaultID: glid.New()},
 	}
 	orch.fireAndForgetRemote(targets, chunk.Record{Raw: []byte("payload")})
 

@@ -38,11 +38,11 @@ func TestRotationHookFiresRateAlerter(t *testing.T) {
 		VaultName:  orch.vaultLabel,
 	})
 	// Re-wire the cron callback against the new alerter.
-	orch.cronRotation.onRotation = func(_, instID glid.GLID) {
-		orch.rotationRates.Record(instID, orch.now())
+	orch.cronRotation.onRotation = func(vaultID glid.GLID) {
+		orch.rotationRates.Record(vaultID, orch.now())
 	}
 
-	instID := glid.New()
+	vaultID := glid.New()
 	cm := &cronFakeChunkManager{
 		active: &chunk.ChunkMeta{
 			ID:          chunkIDAt(time.Now()),
@@ -59,7 +59,7 @@ func TestRotationHookFiresRateAlerter(t *testing.T) {
 			ID:          chunkIDAt(time.Now()),
 			RecordCount: 1,
 		}
-		orch.cronRotation.rotateVault(glid.New(), instID, "test-vault", cm)
+		orch.cronRotation.rotateVault(vaultID, "test-vault", cm)
 	}
 
 	// Trigger evaluation; alerter should raise the per-vault warning.
@@ -72,8 +72,8 @@ func TestRotationHookFiresRateAlerter(t *testing.T) {
 	if calls[0].op != "set" || calls[0].severity != alert.Warning {
 		t.Errorf("expected Warning Set, got %+v", calls[0])
 	}
-	if calls[0].id != orch.rotationRates.alertID(instID) {
-		t.Errorf("alert ID mismatch: got %q want %q", calls[0].id, orch.rotationRates.alertID(instID))
+	if calls[0].id != orch.rotationRates.alertID(vaultID) {
+		t.Errorf("alert ID mismatch: got %q want %q", calls[0].id, orch.rotationRates.alertID(vaultID))
 	}
 }
 
@@ -99,7 +99,7 @@ func TestRetentionHookFiresRateAlerter(t *testing.T) {
 		VaultName:  orch.vaultLabel,
 	})
 
-	instID := glid.New()
+	vaultID := glid.New()
 
 	// Record retention events directly via the same code path the
 	// expireChunk hook uses. We don't drive a real expireChunk here
@@ -107,7 +107,7 @@ func TestRetentionHookFiresRateAlerter(t *testing.T) {
 	// invoke the orchestrator method that the hook calls. The full
 	// expireChunk path is exercised by existing retention_test.go.
 	for range 5 {
-		orch.retentionRates.Record(instID, orch.now())
+		orch.retentionRates.Record(vaultID, orch.now())
 	}
 
 	orch.retentionRates.Evaluate(orch.now())
@@ -119,8 +119,8 @@ func TestRetentionHookFiresRateAlerter(t *testing.T) {
 	if calls[0].op != "set" || calls[0].severity != alert.Warning {
 		t.Errorf("expected Warning Set, got %+v", calls[0])
 	}
-	if calls[0].id != orch.retentionRates.alertID(instID) {
-		t.Errorf("alert ID mismatch: got %q want %q", calls[0].id, orch.retentionRates.alertID(instID))
+	if calls[0].id != orch.retentionRates.alertID(vaultID) {
+		t.Errorf("alert ID mismatch: got %q want %q", calls[0].id, orch.retentionRates.alertID(vaultID))
 	}
 }
 
@@ -222,9 +222,9 @@ func TestRateAlertEvaluatorRunsPeriodically(t *testing.T) {
 	// Record several rotation events immediately so the rate is
 	// comfortably above the warning threshold. The background
 	// evaluator runs every 5s; we wait up to 7s for it to fire.
-	instID := glid.New()
+	vaultID := glid.New()
 	for range 5 {
-		orch.rotationRates.Record(instID, orch.now())
+		orch.rotationRates.Record(vaultID, orch.now())
 	}
 
 	deadline := time.Now().Add(7 * time.Second)

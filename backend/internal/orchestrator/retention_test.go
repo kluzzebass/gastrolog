@@ -331,14 +331,14 @@ func TestExpireChunkProposesRequestDelete(t *testing.T) {
 	}
 	im := &retentionFakeIndexManager{}
 
-	vaultID, instID := glid.New(), glid.New()
+	vaultID := glid.New()
 	var (
 		gotChunkID      chunk.ChunkID
 		gotReason       string
 		gotExpectedFrom []string
 	)
 	inst := &VaultInstance{
-		VaultID: instID,
+		VaultID: vaultID,
 		Chunks: cm,
 		Indexes: im,
 		FollowerTargets: []system.ReplicationTarget{
@@ -357,7 +357,6 @@ func TestExpireChunkProposesRequestDelete(t *testing.T) {
 	r := &retentionRunner{
 		isLeader:        true,
 		vaultID:         vaultID,
-		instID:          instID,
 		cm:              cm,
 		im:              im,
 		reconciler:      rec,
@@ -402,9 +401,9 @@ func TestExpireChunkSkipsLocalOnRequestDeleteFailure(t *testing.T) {
 	}
 	im := &retentionFakeIndexManager{}
 
-	vaultID, instID := glid.New(), glid.New()
+	vaultID := glid.New()
 	inst := &VaultInstance{
-		VaultID:  instID,
+		VaultID:  vaultID,
 		Chunks:  cm,
 		Indexes: im,
 		ApplyRaftRequestDelete: func(_ chunk.ChunkID, _ string, _ []string) error {
@@ -416,7 +415,6 @@ func TestExpireChunkSkipsLocalOnRequestDeleteFailure(t *testing.T) {
 	r := &retentionRunner{
 		isLeader:   true,
 		vaultID:    vaultID,
-		instID:     instID,
 		cm:         cm,
 		im:         im,
 		reconciler: rec,
@@ -496,7 +494,7 @@ func TestClusterRetentionSweepDeletesOnAllNodes(t *testing.T) {
 		if ok {
 			_ = processor.PostSealProcess(ctx, m.ID)
 		}
-		leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, h.instIDs[0], m.ID, leaderInst.FollowerTargets)
+		leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, m.ID, leaderInst.FollowerTargets)
 	}
 
 	// Verify followers have all records before sweep.
@@ -513,7 +511,7 @@ func TestClusterRetentionSweepDeletesOnAllNodes(t *testing.T) {
 		policy: chunk.NewCountRetentionPolicy(keepN),
 		
 	}}
-	runner := newClusterRetentionRunner(leaderNode.orch, h.vaultID, h.instIDs[0], leaderInst)
+	runner := newClusterRetentionRunner(leaderNode.orch, h.vaultID, leaderInst)
 	runner.sweep(rules)
 
 	// ---- Verify: leader retained exactly keepN chunks ----
@@ -583,7 +581,7 @@ func TestClusterRetentionSweepWithTTLOnAllNodes(t *testing.T) {
 		if ok {
 			_ = processor.PostSealProcess(ctx, m.ID)
 		}
-		leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, h.instIDs[0], m.ID, leaderInst.FollowerTargets)
+		leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, m.ID, leaderInst.FollowerTargets)
 	}
 
 	// Run TTL sweep with clock set 5 minutes in the future — all chunks expired.
@@ -592,7 +590,7 @@ func TestClusterRetentionSweepWithTTLOnAllNodes(t *testing.T) {
 		policy: chunk.NewTTLRetentionPolicy(1 * time.Minute),
 		
 	}}
-	runner := newClusterRetentionRunner(leaderNode.orch, h.vaultID, h.instIDs[0], leaderInst)
+	runner := newClusterRetentionRunner(leaderNode.orch, h.vaultID, leaderInst)
 	runner.now = func() time.Time { return frozenNow }
 	runner.sweep(rules)
 
@@ -616,7 +614,7 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 
 	// Vault and instance share the same ID.
 	vaultID := glid.New()
-	instID := vaultID
+	
 	policyID := glid.New()
 
 	cm1 := &retentionFakeChunkManager{}
@@ -648,14 +646,14 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 	defer orch.Stop()
 
 	// First call: creates a new runner with cm1/im1.
-	inst1 := &VaultInstance{
-		VaultID:  instID,
+	vaultA := &VaultInstance{
+		VaultID:  vaultID,
 		Chunks:  cm1,
 		Indexes: im1,
 	}
 	active := make(map[string]bool)
 	vaultCfg := cfg.Vaults[0]
-	target1 := orch.retentionTargetForInstance(cfg, vaultCfg, inst1, active)
+	target1 := orch.retentionTargetForInstance(cfg, vaultCfg, vaultA, active)
 	if target1 == nil {
 		t.Fatal("expected non-nil sweep target")
 	}
@@ -667,13 +665,13 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 	}
 
 	// Second call with different chunk manager: runner is reused, cm/im refreshed.
-	inst2 := &VaultInstance{
-		VaultID:  instID,
+	vaultB := &VaultInstance{
+		VaultID:  vaultID,
 		Chunks:  cm2,
 		Indexes: im2,
 	}
 	active2 := make(map[string]bool)
-	target2 := orch.retentionTargetForInstance(cfg, vaultCfg, inst2, active2)
+	target2 := orch.retentionTargetForInstance(cfg, vaultCfg, vaultB, active2)
 	if target2 == nil {
 		t.Fatal("expected non-nil sweep target on second call")
 	}

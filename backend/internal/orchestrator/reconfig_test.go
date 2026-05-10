@@ -923,7 +923,6 @@ func TestDisableVaultDoesNotAffectQuery(t *testing.T) {
 func TestRetentionSingleJobRegistered(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()
-	instID := glid.New()
 	retPolicyID := glid.New()
 
 	loader := &fakeSystemLoader{cfg: &system.Config{
@@ -956,7 +955,7 @@ func TestRetentionSingleJobRegistered(t *testing.T) {
 	if !sched.HasJob("retention") {
 		t.Fatal("single retention sweep job should exist")
 	}
-	perVaultJobName := "retention:" + instID.String()
+	perVaultJobName := "retention:" + vaultID.String()
 	if sched.HasJob(perVaultJobName) {
 		t.Fatal("per-vault retention job should NOT exist — retention uses a single discovery-based sweep")
 	}

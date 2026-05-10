@@ -24,7 +24,6 @@ func TestArchiveChunkViaRetentionSweep(t *testing.T) {
 	t.Parallel()
 
 	vaultID := glid.New()
-	instID := glid.New()
 	nodeID := "test-node"
 
 	cloudStore := blobstore.NewMemory()
@@ -45,7 +44,7 @@ func TestArchiveChunkViaRetentionSweep(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID, SystemLoader: &transitionSystemLoader{store: store}})
 	_ = orch.Scheduler().Stop()
 
-	inst := &VaultInstance{VaultID: instID, Type: "cloud", Chunks: cm, Indexes: im, Query: query.New(cm, im, nil)}
+	inst := &VaultInstance{VaultID: vaultID, Type: "cloud", Chunks: cm, Indexes: im, Query: query.New(cm, im, nil)}
 	orch.RegisterVault(NewVault(vaultID, inst))
 	t.Cleanup(func() { _ = cm.Close() })
 

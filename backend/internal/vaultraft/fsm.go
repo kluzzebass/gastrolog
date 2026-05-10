@@ -65,7 +65,7 @@ func (f *FSM) SetOnAfterRestore(fn func()) {
 	f.onAfterRestore = fn
 }
 
-// Instances returns a snapshot of the current (instID → sub-FSM) map.
+// Instances returns a snapshot of the current (vaultID → sub-FSM) map.
 // Safe for the orchestrator's after-restore handler to iterate
 // without holding mu.
 func (f *FSM) Instances() map[glid.GLID]*vaultctlfsm.FSM {
@@ -89,17 +89,17 @@ func (f *FSM) Apply(l *hraft.Log) any {
 		if len(l.Data) < 1+glid.Size {
 			return fmt.Errorf("vaultraft: OpVaultChunkFSM payload too short (%d bytes)", len(l.Data))
 		}
-		var instID glid.GLID
-		copy(instID[:], l.Data[1:1+glid.Size])
+		var vaultID glid.GLID
+		copy(vaultID[:], l.Data[1:1+glid.Size])
 		sub := l.Data[1+glid.Size:]
 		if len(sub) == 0 {
 			return errors.New("vaultraft: OpVaultChunkFSM missing instance command body")
 		}
 		f.mu.Lock()
-		t := f.instances[instID]
+		t := f.instances[vaultID]
 		if t == nil {
 			t = vaultctlfsm.New()
-			f.instances[instID] = t
+			f.instances[vaultID] = t
 		}
 		subFSM := t
 		f.mu.Unlock()
@@ -110,24 +110,24 @@ func (f *FSM) Apply(l *hraft.Log) any {
 	}
 }
 
-// InstanceFSM returns the vaultctlfsm sub-machine for instID, or nil if no
+// InstanceFSM returns the vaultctlfsm sub-machine for vaultID, or nil if no
 // command has been applied for that instance yet.
-func (f *FSM) InstanceFSM(instID glid.GLID) *vaultctlfsm.FSM {
+func (f *FSM) InstanceFSM(vaultID glid.GLID) *vaultctlfsm.FSM {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.instances[instID]
+	return f.instances[vaultID]
 }
 
-// EnsureInstanceFSM returns the vaultctlfsm sub-state for instID, creating
+// EnsureInstanceFSM returns the vaultctlfsm sub-state for vaultID, creating
 // an empty sub-FSM if none exists yet (for wiring OnDelete/OnUpload before
 // first Apply).
-func (f *FSM) EnsureInstanceFSM(instID glid.GLID) *vaultctlfsm.FSM {
+func (f *FSM) EnsureInstanceFSM(vaultID glid.GLID) *vaultctlfsm.FSM {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	t := f.instances[instID]
+	t := f.instances[vaultID]
 	if t == nil {
 		t = vaultctlfsm.New()
-		f.instances[instID] = t
+		f.instances[vaultID] = t
 	}
 	return t
 }
@@ -273,7 +273,7 @@ func (s *bufSink) ID() string    { return "vaultraft" }
 func (s *bufSink) Cancel() error { return nil }
 
 type vaultCtlSnapshot struct {
-	instBlobs [][]byte // each: [16 instID][instance snapshot bytes...]
+	instBlobs [][]byte // each: [16 vaultID][instance snapshot bytes...]
 }
 
 func (s *vaultCtlSnapshot) Persist(sink hraft.SnapshotSink) error {

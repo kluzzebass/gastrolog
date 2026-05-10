@@ -203,7 +203,6 @@ func TestFireRetentionEventStreamsThroughRoutingEngine(t *testing.T) {
 	// path that fireRetentionEvent exercises.
 	r := &retentionRunner{
 		vaultID: sourceID,
-		instID:  sourceID, // Vault and instance share the same ID
 		orch:    orch,
 		logger:  slog.Default(),
 	}
@@ -322,7 +321,6 @@ func TestFireRetentionEventDropsWhenNoRouteMatches(t *testing.T) {
 
 	r := &retentionRunner{
 		vaultID: sourceID,
-		instID:  sourceID,
 		orch:    orch,
 		logger:  slog.Default(),
 	}
@@ -362,7 +360,6 @@ func TestRetentionDispositionRouteFiresFanOut(t *testing.T) {
 
 	r := &retentionRunner{
 		vaultID:     fx.sourceID,
-		instID:      fx.sourceID,
 		orch:        fx.orch,
 		logger:      slog.Default(),
 		disposition: system.RetentionDispositionRoute,
@@ -386,7 +383,6 @@ func TestRetentionDispositionDeleteSkipsFanOut(t *testing.T) {
 
 	r := &retentionRunner{
 		vaultID:     fx.sourceID,
-		instID:      fx.sourceID,
 		orch:        fx.orch,
 		logger:      slog.Default(),
 		disposition: system.RetentionDispositionDelete,
@@ -409,7 +405,6 @@ func TestRetentionDispositionEmptyTreatedAsDelete(t *testing.T) {
 
 	r := &retentionRunner{
 		vaultID:     fx.sourceID,
-		instID:      fx.sourceID,
 		orch:        fx.orch,
 		logger:      slog.Default(),
 		disposition: "", // explicitly empty — what the runner sees pre-resolution
@@ -433,7 +428,7 @@ func TestRetentionTargetThreadsDispositionFromVaultConfig(t *testing.T) {
 
 	// Vault and instance share the same ID.
 	vaultID := glid.New()
-	instID := vaultID
+	
 	policyID := glid.New()
 
 	cases := []struct {
@@ -472,7 +467,7 @@ func TestRetentionTargetThreadsDispositionFromVaultConfig(t *testing.T) {
 			defer orch.Stop()
 
 			inst := &VaultInstance{
-				VaultID:  instID,
+				VaultID:  vaultID,
 				Chunks:  &retentionFakeChunkManager{},
 				Indexes: &retentionFakeIndexManager{},
 			}

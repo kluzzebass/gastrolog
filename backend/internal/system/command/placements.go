@@ -7,7 +7,7 @@ import (
 )
 
 // NewSetVaultPlacements creates a SystemCommand for SetVaultPlacements.
-func NewSetVaultPlacements(instID glid.GLID, placements []system.VaultPlacement) *gastrologv1.SystemCommand {
+func NewSetVaultPlacements(vaultID glid.GLID, placements []system.VaultPlacement) *gastrologv1.SystemCommand {
 	pbPlacements := make([]*gastrologv1.VaultPlacement, len(placements))
 	for i, p := range placements {
 		pbPlacements[i] = &gastrologv1.VaultPlacement{
@@ -18,7 +18,7 @@ func NewSetVaultPlacements(instID glid.GLID, placements []system.VaultPlacement)
 	return &gastrologv1.SystemCommand{
 		Command: &gastrologv1.SystemCommand_SetVaultPlacements{
 			SetVaultPlacements: &gastrologv1.SetVaultPlacementsCommand{
-				VaultId:     instID.ToProto(),
+				VaultId:     vaultID.ToProto(),
 				Placements: pbPlacements,
 			},
 		},
@@ -36,7 +36,7 @@ func NewSetSetupWizardDismissed(dismissed bool) *gastrologv1.SystemCommand {
 
 // ExtractSetVaultPlacements converts a SetVaultPlacementsCommand back.
 func ExtractSetVaultPlacements(cmd *gastrologv1.SetVaultPlacementsCommand) (glid.GLID, []system.VaultPlacement, error) {
-	instID := glid.FromBytes(cmd.GetVaultId())
+	vaultID := glid.FromBytes(cmd.GetVaultId())
 	placements := make([]system.VaultPlacement, len(cmd.GetPlacements()))
 	for i, p := range cmd.GetPlacements() {
 		placements[i] = system.VaultPlacement{
@@ -44,7 +44,7 @@ func ExtractSetVaultPlacements(cmd *gastrologv1.SetVaultPlacementsCommand) (glid
 			Leader:    p.GetLeader(),
 		}
 	}
-	return instID, placements, nil
+	return vaultID, placements, nil
 }
 
 // NewSetIngesterAlive creates a SystemCommand for SetIngesterAlive.

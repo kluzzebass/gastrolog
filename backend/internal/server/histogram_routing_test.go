@@ -53,15 +53,8 @@ func TestHistogramFullyLocal_RequiresLeadership(t *testing.T) {
 			t.Fatalf("PutVault: %v", err)
 		}
 	}
-	for _, tc := range []struct {
-		instID  glid.GLID
-		vaultID glid.GLID
-	}{
-		{leaderInstID, leaderVaultID},
-		{followerInstID, followerVaultID},
-	} {
-		_ = tc // legacy fixture loop — vault is registered above; orchestrator no longer reads cfgStore.GetVault
-	}
+	_ = leaderInstID
+	_ = followerInstID
 
 	qs := NewQueryServer(orch, store, nil, "node-1", nil, nil, 0, 0, 0, nil)
 
@@ -86,7 +79,7 @@ func TestHistogramFullyLocal_RequiresLeadership(t *testing.T) {
 	}
 }
 
-func mustVaultInstance(t *testing.T, instID glid.GLID, isFollower bool) *orchestrator.VaultInstance {
+func mustVaultInstance(t *testing.T, vaultID glid.GLID, isFollower bool) *orchestrator.VaultInstance {
 	t.Helper()
 	cm, err := chunkmem.NewManager(chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
@@ -101,7 +94,7 @@ func mustVaultInstance(t *testing.T, instID glid.GLID, isFollower bool) *orchest
 		t.Fatalf("indexmem factory: %v", err)
 	}
 	return &orchestrator.VaultInstance{
-		VaultID:     instID,
+		VaultID:     vaultID,
 		Type:       "memory",
 		Chunks:     cm,
 		Indexes:    im,

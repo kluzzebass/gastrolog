@@ -16,10 +16,9 @@ func TestRemoveInstanceFromVaultPreservesData(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
-	instID := glid.New()
 	vaultID := glid.New()
 
-	inst, dir := newFileInstance(t, instID)
+	inst, dir := newFileInstance(t, vaultID)
 	if _, _, err := inst.Chunks.Append(testRecord("data")); err != nil {
 		t.Fatal(err)
 	}
@@ -52,10 +51,9 @@ func TestDeleteInstanceFromVaultCleansVaultDirectory(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
-	instID := glid.New()
 	vaultID := glid.New()
 
-	inst, dir := newFileInstance(t, instID)
+	inst, dir := newFileInstance(t, vaultID)
 	if _, _, err := inst.Chunks.Append(testRecord("data")); err != nil {
 		t.Fatal(err)
 	}
@@ -86,10 +84,9 @@ func TestDeleteInstanceFromVaultCleansEmptyVaultDirectory(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
-	instID := glid.New()
 	vaultID := glid.New()
 
-	inst, dir := newFileInstance(t, instID)
+	inst, dir := newFileInstance(t, vaultID)
 
 	vault := NewVault(vaultID, inst)
 	vault.Name = "empty-delete-test"
