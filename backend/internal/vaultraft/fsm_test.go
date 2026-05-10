@@ -41,13 +41,13 @@ func TestFSM_OpVaultChunkFSM_delegate(t *testing.T) {
 	if got := f.Apply(&hraft.Log{Data: cmd}); got != nil {
 		t.Fatalf("apply: %v", got)
 	}
-	sub := f.InstanceFSM(vaultID)
+	sub := f.VaultFSM(vaultID)
 	if sub == nil {
-		t.Fatal("expected instance sub-FSM")
+		t.Fatal("expected vault sub-FSM")
 	}
 	e := sub.Get(cid)
 	if e == nil {
-		t.Fatal("expected chunk in instance FSM")
+		t.Fatal("expected chunk in vault FSM")
 	}
 	if e.ID != cid {
 		t.Fatalf("chunk id: got %v want %v", e.ID, cid)
@@ -73,18 +73,18 @@ func TestFSM_SnapshotRestore_empty(t *testing.T) {
 func TestFSM_SnapshotRestore_twoInstances(t *testing.T) {
 	t.Parallel()
 	f := NewFSM()
-	instA, instB := glid.New(), glid.New()
-	if bytes.Compare(instA[:], instB[:]) > 0 {
-		instA, instB = instB, instA
+	vaultA, vaultB := glid.New(), glid.New()
+	if bytes.Compare(vaultA[:], vaultB[:]) > 0 {
+		vaultA, vaultB = vaultB, vaultA
 	}
 	now := time.Now().Truncate(time.Nanosecond)
 	a := testChunkID(1)
 	b := testChunkID(2)
-	if r := f.Apply(&hraft.Log{Data: MarshalVaultChunkCommand(instA, vaultctlfsm.MarshalCreateChunk(a, now, now, now))}); r != nil {
-		t.Fatalf("instance A: %v", r)
+	if r := f.Apply(&hraft.Log{Data: MarshalVaultChunkCommand(vaultA, vaultctlfsm.MarshalCreateChunk(a, now, now, now))}); r != nil {
+		t.Fatalf("vault A: %v", r)
 	}
-	if r := f.Apply(&hraft.Log{Data: MarshalVaultChunkCommand(instB, vaultctlfsm.MarshalCreateChunk(b, now, now, now))}); r != nil {
-		t.Fatalf("instance B: %v", r)
+	if r := f.Apply(&hraft.Log{Data: MarshalVaultChunkCommand(vaultB, vaultctlfsm.MarshalCreateChunk(b, now, now, now))}); r != nil {
+		t.Fatalf("vault B: %v", r)
 	}
 	snap, err := f.Snapshot()
 	if err != nil {
@@ -98,11 +98,11 @@ func TestFSM_SnapshotRestore_twoInstances(t *testing.T) {
 	if err := f2.Restore(io.NopCloser(bytes.NewReader(buf.Bytes()))); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
-	if f2.InstanceFSM(instA).Get(a) == nil {
-		t.Fatal("instance A chunk missing after restore")
+	if f2.VaultFSM(vaultA).Get(a) == nil {
+		t.Fatal("vault A chunk missing after restore")
 	}
-	if f2.InstanceFSM(instB).Get(b) == nil {
-		t.Fatal("instance B chunk missing after restore")
+	if f2.VaultFSM(vaultB).Get(b) == nil {
+		t.Fatal("vault B chunk missing after restore")
 	}
 }
 
@@ -115,9 +115,9 @@ func TestFSM_OnAfterRestoreFires(t *testing.T) {
 
 	src := NewFSM()
 	now := time.Now().Truncate(time.Nanosecond)
-	instA, instB := glid.New(), glid.New()
-	_ = src.Apply(&hraft.Log{Data: MarshalVaultChunkCommand(instA, vaultctlfsm.MarshalCreateChunk(testChunkID(1), now, now, now))})
-	_ = src.Apply(&hraft.Log{Data: MarshalVaultChunkCommand(instB, vaultctlfsm.MarshalCreateChunk(testChunkID(2), now, now, now))})
+	vaultA, vaultB := glid.New(), glid.New()
+	_ = src.Apply(&hraft.Log{Data: MarshalVaultChunkCommand(vaultA, vaultctlfsm.MarshalCreateChunk(testChunkID(1), now, now, now))})
+	_ = src.Apply(&hraft.Log{Data: MarshalVaultChunkCommand(vaultB, vaultctlfsm.MarshalCreateChunk(testChunkID(2), now, now, now))})
 
 	snap, err := src.Snapshot()
 	if err != nil {
@@ -140,7 +140,7 @@ func TestFSM_OnAfterRestoreFires(t *testing.T) {
 	}
 	// Sanity: the hook fires AFTER instances were swapped in, so the
 	// orchestrator's handler can already iterate Instances() to find work.
-	if got := dst.Instances(); len(got) != 2 {
+	if got := dst.Vaults(); len(got) != 2 {
 		t.Errorf("post-restore Instances() = %d, want 2", len(got))
 	}
 }
@@ -170,13 +170,13 @@ func TestFSM_Restore_legacyEmptyByte(t *testing.T) {
 	if r := f.Apply(&hraft.Log{Data: MarshalVaultChunkCommand(vaultID, vaultctlfsm.MarshalCreateChunk(testChunkID(9), now, now, now))}); r != nil {
 		t.Fatalf("apply: %v", r)
 	}
-	if f.InstanceFSM(vaultID) == nil {
+	if f.VaultFSM(vaultID) == nil {
 		t.Fatal("expected instance before legacy restore")
 	}
 	if err := f.Restore(io.NopCloser(bytes.NewReader([]byte{1}))); err != nil {
 		t.Fatalf("legacy restore: %v", err)
 	}
-	if f.InstanceFSM(vaultID) != nil {
+	if f.VaultFSM(vaultID) != nil {
 		t.Fatal("legacy restore should reset instance state")
 	}
 }

@@ -237,14 +237,14 @@ func (o *Orchestrator) retentionSweepAll() {
 // is just the transport for the response.
 func (o *Orchestrator) vaultCatchupSweepAll() {
 	o.mu.RLock()
-	insts := make([]*VaultInstance, 0)
+	vaultInsts := make([]*VaultInstance, 0)
 	for _, vault := range o.vaults {
 		if t := vault.Instance; t != nil && t.Reconciler != nil {
-			insts = append(insts, t)
+			vaultInsts = append(vaultInsts, t)
 		}
 	}
 	o.mu.RUnlock()
-	for _, t := range insts {
+	for _, t := range vaultInsts {
 		t.Reconciler.SweepPendingObligations()
 		t.Reconciler.SweepLocalOrphans()
 		t.Reconciler.SweepMissingReplicas()

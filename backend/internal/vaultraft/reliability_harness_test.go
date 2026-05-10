@@ -311,7 +311,7 @@ func (h *reliabilityHarness) shutdown() {
 // --- Divergence assertions ---
 
 // instanceFSMFingerprint produces a deterministic, comparable snapshot of
-// an instance sub-FSM's state: sorted chunk IDs with their seal/compressed
+// an vault sub-FSM's state: sorted chunk IDs with their seal/compressed
 // state, sorted transition receipts, sorted tombstone IDs. Two fingerprints
 // that string-equal represent identical replicated state.
 func instanceFSMFingerprint(t *vaultctlfsm.FSM) string {
@@ -339,12 +339,12 @@ func instanceFSMFingerprint(t *vaultctlfsm.FSM) string {
 	return sb.String()
 }
 
-// vaultFSMFingerprint deterministically encodes every instance sub-FSM in
+// vaultFSMFingerprint deterministically encodes every vault sub-FSM in
 // the vault FSM. Two vault FSMs with equal fingerprints have converged.
 func vaultFSMFingerprint(f *FSM) string {
 	f.mu.Lock()
-	ids := make([]glid.GLID, 0, len(f.instances))
-	for id := range f.instances {
+	ids := make([]glid.GLID, 0, len(f.vaults))
+	for id := range f.vaults {
 		ids = append(ids, id)
 	}
 	f.mu.Unlock()
@@ -354,7 +354,7 @@ func vaultFSMFingerprint(f *FSM) string {
 	for _, id := range ids {
 		sb.writef("vault=%x\n", id[:])
 		f.mu.Lock()
-		sub := f.instances[id]
+		sub := f.vaults[id]
 		f.mu.Unlock()
 		if sub != nil {
 			sb.write(instanceFSMFingerprint(sub))

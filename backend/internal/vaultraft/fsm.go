@@ -35,7 +35,7 @@ const vaultSnapVersion uint32 = 1
 // orchestrator/reconfig_vaults.go for the readiness wiring.
 type FSM struct {
 	mu sync.Mutex
-	instances  map[glid.GLID]*vaultctlfsm.FSM
+	vaults     map[glid.GLID]*vaultctlfsm.FSM
 
 	// onAfterRestore fires (outside mu) once Restore() has swapped
 	// the vault-sub-FSM map. The orchestrator uses this to walk each
@@ -50,7 +50,7 @@ type FSM struct {
 // NewFSM returns a new vault control-plane FSM instance.
 func NewFSM() *FSM {
 	return &FSM{
-		instances: make(map[glid.GLID]*vaultctlfsm.FSM),
+		vaults:    make(map[glid.GLID]*vaultctlfsm.FSM),
 	}
 }
 
@@ -68,11 +68,11 @@ func (f *FSM) SetOnAfterRestore(fn func()) {
 // Instances returns a snapshot of the current (vaultID → sub-FSM) map.
 // Safe for the orchestrator's after-restore handler to iterate
 // without holding mu.
-func (f *FSM) Instances() map[glid.GLID]*vaultctlfsm.FSM {
+func (f *FSM) Vaults() map[glid.GLID]*vaultctlfsm.FSM {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	out := make(map[glid.GLID]*vaultctlfsm.FSM, len(f.instances))
-	maps.Copy(out, f.instances)
+	out := make(map[glid.GLID]*vaultctlfsm.FSM, len(f.vaults))
+	maps.Copy(out, f.vaults)
 	return out
 }
 
@@ -96,10 +96,10 @@ func (f *FSM) Apply(l *hraft.Log) any {
 			return errors.New("vaultraft: OpVaultChunkFSM missing instance command body")
 		}
 		f.mu.Lock()
-		t := f.instances[vaultID]
+		t := f.vaults[vaultID]
 		if t == nil {
 			t = vaultctlfsm.New()
-			f.instances[vaultID] = t
+			f.vaults[vaultID] = t
 		}
 		subFSM := t
 		f.mu.Unlock()
@@ -110,35 +110,35 @@ func (f *FSM) Apply(l *hraft.Log) any {
 	}
 }
 
-// InstanceFSM returns the vaultctlfsm sub-machine for vaultID, or nil if no
+// VaultFSM returns the vaultctlfsm sub-machine for vaultID, or nil if no
 // command has been applied for that instance yet.
-func (f *FSM) InstanceFSM(vaultID glid.GLID) *vaultctlfsm.FSM {
+func (f *FSM) VaultFSM(vaultID glid.GLID) *vaultctlfsm.FSM {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.instances[vaultID]
+	return f.vaults[vaultID]
 }
 
-// EnsureInstanceFSM returns the vaultctlfsm sub-state for vaultID, creating
+// EnsureVaultFSM returns the vaultctlfsm sub-state for vaultID, creating
 // an empty sub-FSM if none exists yet (for wiring OnDelete/OnUpload before
 // first Apply).
-func (f *FSM) EnsureInstanceFSM(vaultID glid.GLID) *vaultctlfsm.FSM {
+func (f *FSM) EnsureVaultFSM(vaultID glid.GLID) *vaultctlfsm.FSM {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	t := f.instances[vaultID]
+	t := f.vaults[vaultID]
 	if t == nil {
 		t = vaultctlfsm.New()
-		f.instances[vaultID] = t
+		f.vaults[vaultID] = t
 	}
 	return t
 }
 
-// Snapshot returns a snapshot of all instance sub-FSMs (versioned wire format).
+// Snapshot returns a snapshot of all vault sub-FSMs (versioned wire format).
 func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) {
 	f.mu.Lock()
-	ids := slices.SortedFunc(maps.Keys(f.instances), compareGLID)
+	ids := slices.SortedFunc(maps.Keys(f.vaults), compareGLID)
 	var vaultBlobs [][]byte
 	for _, id := range ids {
-		t := f.instances[id]
+		t := f.vaults[id]
 		if t == nil {
 			continue
 		}
@@ -184,7 +184,7 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 		var probe [1]byte
 		if n, _ := rc.Read(probe[:]); n == 0 {
 			f.mu.Lock()
-			f.instances = make(map[glid.GLID]*vaultctlfsm.FSM)
+			f.vaults = make(map[glid.GLID]*vaultctlfsm.FSM)
 			hook := f.onAfterRestore
 			f.mu.Unlock()
 			if hook != nil {
@@ -215,34 +215,34 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 
 	var countBuf [4]byte
 	if _, err := io.ReadFull(rc, countBuf[:]); err != nil {
-		return fmt.Errorf("vaultraft restore: read instance count: %w", err)
+		return fmt.Errorf("vaultraft restore: read vault count: %w", err)
 	}
 	n := int(binary.BigEndian.Uint32(countBuf[:]))
 
-	nextInstances := make(map[glid.GLID]*vaultctlfsm.FSM, n)
+	nextVaults := make(map[glid.GLID]*vaultctlfsm.FSM, n)
 	for i := range n {
-		var tid glid.GLID
-		if _, err := io.ReadFull(rc, tid[:]); err != nil {
-			return fmt.Errorf("vaultraft restore: read instance[%d] id: %w", i, err)
+		var vid glid.GLID
+		if _, err := io.ReadFull(rc, vid[:]); err != nil {
+			return fmt.Errorf("vaultraft restore: read vault[%d] id: %w", i, err)
 		}
 		var blenBuf [4]byte
 		if _, err := io.ReadFull(rc, blenBuf[:]); err != nil {
-			return fmt.Errorf("vaultraft restore: read instance[%d] blob length: %w", i, err)
+			return fmt.Errorf("vaultraft restore: read vault[%d] blob length: %w", i, err)
 		}
 		blen := int64(binary.BigEndian.Uint32(blenBuf[:]))
 		vaultReader := io.LimitReader(rc, blen)
 		t := vaultctlfsm.New()
 		if err := t.Restore(io.NopCloser(vaultReader)); err != nil {
-			return fmt.Errorf("vaultraft restore instance %x: %w", tid[:], err)
+			return fmt.Errorf("vaultraft restore vault %x: %w", vid[:], err)
 		}
 		// Drain any unread bytes so the next instance header aligns.
 		if _, err := io.Copy(io.Discard, vaultReader); err != nil {
-			return fmt.Errorf("vaultraft restore: drain instance[%d] tail: %w", i, err)
+			return fmt.Errorf("vaultraft restore: drain vault[%d] tail: %w", i, err)
 		}
-		nextInstances[tid] = t
+		nextVaults[vid] = t
 	}
 	f.mu.Lock()
-	f.instances = nextInstances
+	f.vaults = nextVaults
 	hook := f.onAfterRestore
 	f.mu.Unlock()
 	// Fire outside the mutex — the handler walks per-vault reconcilers
@@ -283,7 +283,7 @@ func (s *vaultCtlSnapshot) Persist(sink hraft.SnapshotSink) error {
 	}
 	var hdr [8]byte
 	binary.BigEndian.PutUint32(hdr[0:4], vaultSnapVersion)
-	binary.BigEndian.PutUint32(hdr[4:8], uint32(len(s.vaultBlobs))) //nolint:gosec // G115: instance count bounded in practice
+	binary.BigEndian.PutUint32(hdr[4:8], uint32(len(s.vaultBlobs))) //nolint:gosec // G115: vault count bounded in practice
 	if _, err := sink.Write(hdr[:]); err != nil {
 		_ = sink.Cancel()
 		return err
@@ -291,11 +291,11 @@ func (s *vaultCtlSnapshot) Persist(sink hraft.SnapshotSink) error {
 	for _, blob := range s.vaultBlobs {
 		if len(blob) < glid.Size {
 			_ = sink.Cancel()
-			return errors.New("vaultraft snapshot: instance blob too short")
+			return errors.New("vaultraft snapshot: vault blob too short")
 		}
-		tid := blob[:glid.Size]
+		vid := blob[:glid.Size]
 		payload := blob[glid.Size:]
-		if _, err := sink.Write(tid); err != nil {
+		if _, err := sink.Write(vid); err != nil {
 			_ = sink.Cancel()
 			return err
 		}

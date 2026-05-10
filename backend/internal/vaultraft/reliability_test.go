@@ -359,8 +359,8 @@ func TestReliability_ConcurrentWrites_NoDivergence(t *testing.T) {
 	// Cross-check: leader's FSM has exactly writers*commandsPerWriter entries.
 	leader := h.nodes[h.leaderID()]
 	total := 0
-	for _, tid := range vaultIDs {
-		if sub := leader.fsm.InstanceFSM(tid); sub != nil {
+	for _, vid := range vaultIDs {
+		if sub := leader.fsm.VaultFSM(vid); sub != nil {
 			total += len(sub.List())
 		}
 	}
@@ -563,9 +563,9 @@ func TestReliability_PipelinedApplies_SurviveLeaderKill(t *testing.T) {
 	assertSubsetConverged(t, h, liveIDs)
 
 	// Every chunk that Apply confirmed must be in the surviving leader's FSM.
-	surviving := h.nodes[newLeader].fsm.InstanceFSM(vaultID)
+	surviving := h.nodes[newLeader].fsm.VaultFSM(vaultID)
 	if surviving == nil {
-		t.Fatal("surviving leader lost instance FSM entirely")
+		t.Fatal("surviving leader lost vault FSM entirely")
 	}
 	for cid := range confirmed {
 		if surviving.Get(cid) == nil {
@@ -605,56 +605,56 @@ func TestReliability_RapidLeaderRestart_NoDivergence(t *testing.T) {
 
 	// Leader's FSM should have 3 original + 1 final = 4 entries.
 	leader := h.nodes[h.leaderID()]
-	sub := leader.fsm.InstanceFSM(vaultID)
+	sub := leader.fsm.VaultFSM(vaultID)
 	if sub == nil {
-		t.Fatal("instance FSM missing after restarts")
+		t.Fatal("vault FSM missing after restarts")
 	}
 	if got := len(sub.List()); got != 4 {
 		t.Errorf("expected 4 chunks, got %d", got)
 	}
 }
 
-// Two independent instance FSMs cohabiting the same vault FSM must
+// Two independent vault FSMs cohabiting the same vault FSM must
 // converge independently without cross-contamination. Validates the
-// instance-ID keying inside vaultraft.FSM: commands for instance A must
-// not affect instance B's sub-FSM.
+// vault-ID keying inside vaultraft.FSM: commands for vault A must
+// not affect vault B's sub-FSM.
 //
 // This is the "one vault-ctl group per vault" model in miniature — the
 // production deployment runs N vault-ctl groups per node, each with its
-// own instance sub-FSMs.
+// own vault sub-FSMs.
 func TestReliability_MultipleVaults_IsolatedAndConvergent(t *testing.T) {
 	t.Parallel()
 	h := newReliabilityHarness(t, 3)
 
-	instA := glid.New()
-	instB := glid.New()
+	vaultA := glid.New()
+	vaultB := glid.New()
 	now := time.Now().Truncate(time.Nanosecond)
 
-	h.applyInstanceCreate(instA, chunkIDWithPrefix(0xD0), now)
-	h.applyInstanceCreate(instA, chunkIDWithPrefix(0xD1), now)
-	h.applyInstanceCreate(instB, chunkIDWithPrefix(0xE0), now)
-	h.applyInstanceCreate(instB, chunkIDWithPrefix(0xE1), now)
-	h.applyInstanceCreate(instB, chunkIDWithPrefix(0xE2), now)
+	h.applyInstanceCreate(vaultA, chunkIDWithPrefix(0xD0), now)
+	h.applyInstanceCreate(vaultA, chunkIDWithPrefix(0xD1), now)
+	h.applyInstanceCreate(vaultB, chunkIDWithPrefix(0xE0), now)
+	h.applyInstanceCreate(vaultB, chunkIDWithPrefix(0xE1), now)
+	h.applyInstanceCreate(vaultB, chunkIDWithPrefix(0xE2), now)
 
 	h.assertAllFSMsConverged()
 
 	leader := h.nodes[h.leaderID()]
-	subA := leader.fsm.InstanceFSM(instA)
-	subB := leader.fsm.InstanceFSM(instB)
+	subA := leader.fsm.VaultFSM(vaultA)
+	subB := leader.fsm.VaultFSM(vaultB)
 	if subA == nil || subB == nil {
-		t.Fatal("missing instance sub-FSM")
+		t.Fatal("missing vault sub-FSM")
 	}
 	if got := len(subA.List()); got != 2 {
-		t.Errorf("instance A: expected 2 chunks, got %d", got)
+		t.Errorf("vault A: expected 2 chunks, got %d", got)
 	}
 	if got := len(subB.List()); got != 3 {
-		t.Errorf("instance B: expected 3 chunks, got %d", got)
+		t.Errorf("vault B: expected 3 chunks, got %d", got)
 	}
 
-	// Cross-check isolation: instance A must not contain instance B's chunks.
+	// Cross-check isolation: vault A must not contain vault B's chunks.
 	for _, e := range subA.List() {
 		if e.ID[0] >= 0xE0 {
-			t.Errorf("instance A leaked instance B chunk: %x", e.ID[:4])
+			t.Errorf("vault A leaked vault B chunk: %x", e.ID[:4])
 		}
 	}
 }
@@ -694,7 +694,7 @@ func TestReliability_SnapshotCycleUnderLoad_NoCorruption(t *testing.T) {
 
 	h.assertAllFSMsConverged()
 
-	leader := h.nodes[h.leaderID()].fsm.InstanceFSM(vaultID)
+	leader := h.nodes[h.leaderID()].fsm.VaultFSM(vaultID)
 	if leader == nil {
 		t.Fatal("instance missing after snapshot cycle")
 	}
@@ -725,22 +725,22 @@ func TestReliability_LargeFSM_SnapshotRestoreRoundtrip(t *testing.T) {
 	now := time.Now().Truncate(time.Nanosecond)
 
 	const (
-		numInsts         = 20
-		chunksPerInst    = 30
+		numVaults         = 20
+		chunksPerVault    = 30
 	)
-	insts := make([]glid.GLID, numInsts)
-	for i := range numInsts {
-		insts[i] = glid.New()
+	vaultIDs := make([]glid.GLID, numVaults)
+	for i := range numVaults {
+		vaultIDs[i] = glid.New()
 	}
 
-	for ti, vaultID := range insts {
-		for ci := range chunksPerInst {
+	for vi, vaultID := range vaultIDs {
+		for ci := range chunksPerVault {
 			var cid chunk.ChunkID
-			cid[0] = byte(ti)
+			cid[0] = byte(vi)
 			cid[1] = byte(ci)
 			cmd := MarshalVaultChunkCommand(vaultID, vaultctlfsm.MarshalCreateChunk(cid, now, now, now))
 			if r := src.Apply(&hraft.Log{Data: cmd}); r != nil {
-				t.Fatalf("apply vault=%d chunk=%d: %v", ti, ci, r)
+				t.Fatalf("apply vault=%d chunk=%d: %v", vi, ci, r)
 			}
 		}
 	}
@@ -770,12 +770,12 @@ func TestReliability_LargeFSM_SnapshotRestoreRoundtrip(t *testing.T) {
 
 	// Sanity: total entry count matches.
 	total := 0
-	for _, vaultID := range insts {
-		if sub := dst.InstanceFSM(vaultID); sub != nil {
+	for _, vaultID := range vaultIDs {
+		if sub := dst.VaultFSM(vaultID); sub != nil {
 			total += len(sub.List())
 		}
 	}
-	if want := numInsts * chunksPerInst; total != want {
+	if want := numVaults * chunksPerVault; total != want {
 		t.Errorf("expected %d total entries, got %d", want, total)
 	}
 }

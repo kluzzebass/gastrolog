@@ -819,7 +819,7 @@ func (o *Orchestrator) attachLifecycleReconciler(ti *VaultInstance, vaultID glid
 		return
 	}
 	if vfsm, ok := vaultGroup.FSM.(*vaultraft.FSM); ok && vfsm != nil {
-		ti.Reconciler.Wire(vfsm.EnsureInstanceFSM(vaultID))
+		ti.Reconciler.Wire(vfsm.EnsureVaultFSM(vaultID))
 	}
 }
 
@@ -1066,7 +1066,7 @@ func (o *Orchestrator) ensureVaultCtlMetadata(vaultCfg system.VaultConfig, clust
 	// boundaries (the bug gastrolog-51gme step 3 was supposed to close).
 	vaultID := vaultCfg.ID
 	vfsm.SetOnAfterRestore(func() { o.afterVaultCtlRestore(vaultID) })
-	vaultFSM := vfsm.EnsureInstanceFSM(vaultCfg.ID)
+	vaultFSM := vfsm.EnsureVaultFSM(vaultCfg.ID)
 	r := g.Raft
 	timeout := cluster.ReplicationTimeout
 
@@ -1247,7 +1247,7 @@ func (o *Orchestrator) clearVaultFSMChunkCallbacks(vaultID glid.GLID) {
 	case *vaultctlfsm.FSM:
 		fsm = raw
 	case *vaultraft.FSM:
-		fsm = raw.EnsureInstanceFSM(vaultID)
+		fsm = raw.EnsureVaultFSM(vaultID)
 	default:
 		return
 	}
@@ -1285,7 +1285,7 @@ func wireVaultFSMOnDelete(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 	case *vaultctlfsm.FSM:
 		fsm = raw
 	case *vaultraft.FSM:
-		fsm = raw.EnsureInstanceFSM(vaultID)
+		fsm = raw.EnsureVaultFSM(vaultID)
 	default:
 		return
 	}
@@ -1342,7 +1342,7 @@ func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 	case *vaultctlfsm.FSM:
 		fsm = raw
 	case *vaultraft.FSM:
-		fsm = raw.EnsureInstanceFSM(vaultID)
+		fsm = raw.EnsureVaultFSM(vaultID)
 	default:
 		return
 	}

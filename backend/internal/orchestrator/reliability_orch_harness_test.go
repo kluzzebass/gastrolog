@@ -540,7 +540,7 @@ func (h *orchRelHarness) chunkIDsOnNodeForVault(v vaultSpec, id string) map[chun
 	if !ok || vfsm == nil {
 		return nil
 	}
-	sub := vfsm.InstanceFSM(v.id)
+	sub := vfsm.VaultFSM(v.id)
 	if sub == nil {
 		return map[chunk.ChunkID]bool{}
 	}
@@ -570,7 +570,7 @@ func (h *orchRelHarness) chunkIDsOnNode(id string) map[chunk.ChunkID]bool {
 	if !ok || vfsm == nil {
 		return nil
 	}
-	sub := vfsm.InstanceFSM(h.vaultID)
+	sub := vfsm.VaultFSM(h.vaultID)
 	if sub == nil {
 		return map[chunk.ChunkID]bool{}
 	}
