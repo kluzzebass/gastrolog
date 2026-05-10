@@ -162,12 +162,12 @@ func azureBlobToInfo(item *container.BlobItem) BlobInfo {
 }
 
 // isAzureArchivedError checks if an Azure error is due to the blob being
-// in the Archive tier (409 Conflict with "BlobArchived" error code).
+// in the Archive access tier (409 Conflict with "BlobArchived" error code).
 func isAzureArchivedError(err error) bool {
 	if err == nil {
 		return false
 	}
-	// Azure returns 409 Conflict with "BlobArchived" for archive-tier blobs.
+	// Azure returns 409 Conflict with "BlobArchived" for archived blobs.
 	errStr := err.Error()
 	return strings.Contains(errStr, "BlobArchived") ||
 		strings.Contains(errStr, "This operation is not permitted on an archived blob")
@@ -193,14 +193,14 @@ func (a *AzureStore) Archive(ctx context.Context, key string, storageClass strin
 }
 
 func (a *AzureStore) Restore(ctx context.Context, key string, speed string, _ int) error {
-	// Azure restore = set tier back to Hot (or Cool). Priority via options.
-	targetTier := blob.AccessTierHot
+	// Azure restore = move blob back to Hot (or Cool). Priority via options.
+	targetAccessTier := blob.AccessTierHot
 	opts := &blob.SetTierOptions{}
 	if speed == "High" {
 		priority := blob.RehydratePriorityHigh
 		opts.RehydratePriority = &priority
 	}
-	_, err := a.client.ServiceClient().NewContainerClient(a.containerName).NewBlobClient(key).SetTier(ctx, targetTier, opts)
+	_, err := a.client.ServiceClient().NewContainerClient(a.containerName).NewBlobClient(key).SetTier(ctx, targetAccessTier, opts)
 	return err
 }
 

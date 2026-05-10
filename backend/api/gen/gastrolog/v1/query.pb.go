@@ -85,7 +85,7 @@ type SearchResponse struct {
 	// Volume histogram, set on the first response message only.
 	// Provides an approximate record count distribution by time bucket and level.
 	Histogram []*HistogramBucket `protobuf:"bytes,5,rep,name=histogram,proto3" json:"histogram,omitempty"`
-	// Number of chunks skipped because they are in an offline storage tier
+	// Number of chunks skipped because they are in an offline storage class
 	// (S3 Glacier, Azure Archive). Set on the first response message.
 	ArchivedChunks int32 `protobuf:"varint,6,opt,name=archived_chunks,json=archivedChunks,proto3" json:"archived_chunks,omitempty"`
 	// Server-side processing time in milliseconds, measured from the start of

@@ -196,7 +196,7 @@ func printCloudService(cmd *cobra.Command, cs *v1.CloudService) error {
 		pairs = append(pairs, [2]string{fmt.Sprintf("Transition %d", i+1), fmt.Sprintf("after %s → %s", tr.After, class)})
 	}
 	if cs.RestoreSpeed != "" {
-		pairs = append(pairs, [2]string{"Restore Tier", cs.RestoreSpeed})
+		pairs = append(pairs, [2]string{"Restore Speed", cs.RestoreSpeed})
 	}
 	if cs.RestoreDays > 0 {
 		pairs = append(pairs, [2]string{"Restore Days", strconv.FormatUint(uint64(cs.RestoreDays), 10)})

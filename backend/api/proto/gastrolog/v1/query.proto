@@ -62,7 +62,7 @@ message SearchResponse {
   // Provides an approximate record count distribution by time bucket and level.
   repeated HistogramBucket histogram = 5;
 
-  // Number of chunks skipped because they are in an offline storage tier
+  // Number of chunks skipped because they are in an offline storage class
   // (S3 Glacier, Azure Archive). Set on the first response message.
   int32 archived_chunks = 6;
 

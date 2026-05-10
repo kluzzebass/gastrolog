@@ -89,7 +89,7 @@ func validateS3ClassOrdering(transitions []CloudStorageTransition) []string {
 		}
 		if order <= prevOrder {
 			warnings = append(warnings, fmt.Sprintf(
-				"transition %d: S3 class %q cannot follow a higher-tier class (must move forward: IA → GLACIER_IR → GLACIER → DEEP_ARCHIVE)",
+				"transition %d: S3 class %q cannot follow a downstream class (must move forward: IA → GLACIER_IR → GLACIER → DEEP_ARCHIVE)",
 				i+1, t.StorageClass))
 		}
 		prevOrder = order

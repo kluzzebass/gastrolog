@@ -212,7 +212,7 @@ type ChunkMeta struct {
 	// and the slower full-scan bucketize path. See gastrolog-66b7x.
 	IngestTSMonotonic bool
 	CloudBacked  bool      // true = chunk lives in cloud storage, not local disk
-	Archived     bool      // true = chunk is in an offline storage tier (Glacier, Azure Archive)
+	Archived     bool      // true = chunk is in an offline storage class (Glacier, Azure Archive)
 	StorageClass string    // cloud storage class (e.g. "GLACIER", "cold", "Archive"); empty = standard
 }
 
