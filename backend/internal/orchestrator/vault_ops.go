@@ -156,7 +156,7 @@ func (o *Orchestrator) ArchiveChunk(ctx context.Context, vaultID glid.GLID, chun
 }
 
 // RestoreChunk initiates retrieval of an archived chunk.
-func (o *Orchestrator) RestoreChunk(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, inst string, days int) error {
+func (o *Orchestrator) RestoreChunk(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, speed string, days int) error {
 	cm, err := o.findChunkManagerForChunk(vaultID, chunkID)
 	if err != nil {
 		return err
@@ -165,7 +165,7 @@ func (o *Orchestrator) RestoreChunk(ctx context.Context, vaultID glid.GLID, chun
 	if !ok {
 		return errors.New("chunk manager does not support restore")
 	}
-	return archiver.RestoreChunk(ctx, chunkID, inst, days)
+	return archiver.RestoreChunk(ctx, chunkID, speed, days)
 }
 
 // --- Chunk read ---

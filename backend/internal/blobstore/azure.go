@@ -187,16 +187,16 @@ func isAzureNotFoundError(err error) bool {
 // --- Archiver implementation ---
 
 func (a *AzureStore) Archive(ctx context.Context, key string, storageClass string) error {
-	tier := blob.AccessTier(storageClass)
-	_, err := a.client.ServiceClient().NewContainerClient(a.containerName).NewBlobClient(key).SetTier(ctx, tier, nil)
+	accessTier := blob.AccessTier(storageClass)
+	_, err := a.client.ServiceClient().NewContainerClient(a.containerName).NewBlobClient(key).SetTier(ctx, accessTier, nil)
 	return err
 }
 
-func (a *AzureStore) Restore(ctx context.Context, key string, tier string, _ int) error {
+func (a *AzureStore) Restore(ctx context.Context, key string, speed string, _ int) error {
 	// Azure restore = set tier back to Hot (or Cool). Priority via options.
 	targetTier := blob.AccessTierHot
 	opts := &blob.SetTierOptions{}
-	if tier == "High" {
+	if speed == "High" {
 		priority := blob.RehydratePriorityHigh
 		opts.RehydratePriority = &priority
 	}

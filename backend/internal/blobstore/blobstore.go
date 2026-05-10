@@ -18,7 +18,8 @@ var (
 	ErrStopIteration = errors.New("stop iteration")
 
 	// ErrBlobArchived indicates the blob exists but is in an offline storage
-	// tier (S3 Glacier Flexible Retrieval/Deep Archive, Azure Archive) and
+	// offline-archive class (S3 Glacier Flexible Retrieval/Deep Archive,
+	// Azure Archive) and
 	// cannot be read without a restore operation.
 	ErrBlobArchived = errors.New("blob is archived and not immediately readable")
 
@@ -66,7 +67,7 @@ type BlobInfo struct {
 }
 
 // Archiver extends Store with storage-class lifecycle operations.
-// Not all providers support this (GCS has no offline tiers). Callers
+// Not all providers support this (GCS has no offline access tiers). Callers
 // should type-assert to check availability.
 type Archiver interface {
 	// Archive transitions a blob to an offline storage class.
@@ -77,16 +78,16 @@ type Archiver interface {
 	// Restore initiates retrieval of an archived blob. On S3 this is async
 	// (RestoreObject, takes minutes to hours). On Azure this is sync
 	// (SetBlobTier to Hot/Cool). Returns nil if already restored or not archived.
-	// tier is the restore speed ("Expedited"/"Standard"/"Bulk" for S3,
+	// speed is the restore speed ("Expedited"/"Standard"/"Bulk" for S3,
 	// "High"/"Standard" for Azure, ignored for GCS).
 	// days is how long the restored copy stays readable (S3 only, ignored elsewhere).
-	Restore(ctx context.Context, key string, tier string, days int) error
+	Restore(ctx context.Context, key string, speed string, days int) error
 
 	// IsRestoring returns true if a restore is in progress for the key.
 	IsRestoring(ctx context.Context, key string) (bool, error)
 }
 
-// IsArchived returns true if the blob is in an offline storage tier that
+// IsArchived returns true if the blob is in an offline access tier that
 // requires a restore operation before it can be read.
 // S3: GLACIER, DEEP_ARCHIVE. Azure: Archive. GCS: always false (all readable).
 func (b BlobInfo) IsArchived() bool {

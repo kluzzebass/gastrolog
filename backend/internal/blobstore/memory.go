@@ -197,9 +197,9 @@ func (m *Memory) Archive(_ context.Context, key string, storageClass string) err
 
 // Restore initiates retrieval of an archived blob. The blob becomes readable
 // after RestoreDelay elapses (0 = instant). It stays readable for RestoreExpiry
-// (0 = forever). tier and days are recorded but only affect behavior through
+// (0 = forever). speed and days are recorded but only affect behavior through
 // the configured delays.
-func (m *Memory) Restore(_ context.Context, key string, tier string, days int) error {
+func (m *Memory) Restore(_ context.Context, key string, speed string, days int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	blob, ok := m.blobs[key]

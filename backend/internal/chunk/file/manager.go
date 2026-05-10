@@ -3476,7 +3476,7 @@ func (m *Manager) ArchiveChunk(ctx context.Context, id chunk.ChunkID, storageCla
 
 // RestoreChunk initiates retrieval of an archived chunk from offline storage.
 // On completion, the Archived flag is cleared and the chunk becomes readable.
-func (m *Manager) RestoreChunk(ctx context.Context, id chunk.ChunkID, tier string, days int) error {
+func (m *Manager) RestoreChunk(ctx context.Context, id chunk.ChunkID, speed string, days int) error {
 	m.mu.Lock()
 	meta := m.lookupMeta(id)
 	if meta == nil {
@@ -3495,7 +3495,7 @@ func (m *Manager) RestoreChunk(ctx context.Context, id chunk.ChunkID, tier strin
 	}
 
 	key := m.blobKey(id)
-	if err := archiver.Restore(ctx, key, tier, days); err != nil {
+	if err := archiver.Restore(ctx, key, speed, days); err != nil {
 		return fmt.Errorf("restore blob %s: %w", key, err)
 	}
 

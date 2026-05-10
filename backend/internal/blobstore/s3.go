@@ -211,9 +211,9 @@ func (s *S3Store) Archive(ctx context.Context, key string, storageClass string) 
 	return err
 }
 
-func (s *S3Store) Restore(ctx context.Context, key string, tier string, days int) error {
-	if tier == "" {
-		tier = "Standard"
+func (s *S3Store) Restore(ctx context.Context, key string, speed string, days int) error {
+	if speed == "" {
+		speed = "Standard"
 	}
 	if days <= 0 {
 		days = 7
@@ -225,7 +225,7 @@ func (s *S3Store) Restore(ctx context.Context, key string, tier string, days int
 		RestoreRequest: &types.RestoreRequest{
 			Days: &d,
 			GlacierJobParameters: &types.GlacierJobParameters{
-				Tier: types.Tier(tier),
+				Tier: types.Tier(speed),
 			},
 		},
 	})
