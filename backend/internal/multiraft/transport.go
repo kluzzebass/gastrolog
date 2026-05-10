@@ -515,7 +515,7 @@ func (g *groupTransport[K]) AppendEntriesPipeline(id raft.ServerID, target raft.
 	// idle between bursts. DO NOT add a timeout here: hraft treats idle
 	// pipelines as healthy and a premature timeout causes cascading
 	// pipeline-reopen churn that the placement manager misreads as
-	// "peer is unreliable" and reassigns tiers away. See gastrolog-5oofa.
+	// "peer is unreliable" and reassigns vaults away. See gastrolog-5oofa.
 	//
 	// Pipeline lifecycle is hraft's responsibility: when it wants the
 	// pipeline to go away it calls pipelineAPI.Close, which invokes the

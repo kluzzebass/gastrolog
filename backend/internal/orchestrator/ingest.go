@@ -287,7 +287,7 @@ func (o *Orchestrator) postSealWork(vaultID glid.GLID, cm chunk.ChunkManager, ch
 // schedulePostSeal schedules the unified post-seal pipeline (compress → index → upload).
 // If the chunk manager implements ChunkPostSealProcessor, the entire pipeline runs
 // as one sequential job. Otherwise falls back to compress-only for non-file managers.
-// After the pipeline completes, sealed-chunk replication is triggered for leader tiers.
+// After the pipeline completes, sealed-chunk replication is triggered for leader vaults.
 func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager, chunkID chunk.ChunkID) {
 	// Resolve inst info for post-pipeline replication.
 	instID, followerTargets := o.instReplicationInfo(vaultID, cm)

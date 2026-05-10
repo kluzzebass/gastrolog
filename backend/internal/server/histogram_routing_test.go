@@ -44,8 +44,8 @@ func TestHistogramFullyLocal_RequiresLeadership(t *testing.T) {
 	leaderInstID := glid.New()
 	followerInstID := glid.New()
 
-	orch.RegisterVault(orchestrator.NewVault(leaderVaultID, mustTierInstance(t, leaderInstID, false)))
-	orch.RegisterVault(orchestrator.NewVault(followerVaultID, mustTierInstance(t, followerInstID, true)))
+	orch.RegisterVault(orchestrator.NewVault(leaderVaultID, mustVaultInstance(t, leaderInstID, false)))
+	orch.RegisterVault(orchestrator.NewVault(followerVaultID, mustVaultInstance(t, followerInstID, true)))
 
 	store := sysmem.NewStore()
 	for _, vid := range []glid.GLID{leaderVaultID, followerVaultID} {
@@ -60,7 +60,7 @@ func TestHistogramFullyLocal_RequiresLeadership(t *testing.T) {
 		{leaderInstID, leaderVaultID},
 		{followerInstID, followerVaultID},
 	} {
-		_ = tc // legacy fixture loop — vault is registered above; orchestrator no longer reads cfgStore.GetTier
+		_ = tc // legacy fixture loop — vault is registered above; orchestrator no longer reads cfgStore.GetVault
 	}
 
 	qs := NewQueryServer(orch, store, nil, "node-1", nil, nil, 0, 0, 0, nil)
@@ -86,7 +86,7 @@ func TestHistogramFullyLocal_RequiresLeadership(t *testing.T) {
 	}
 }
 
-func mustTierInstance(t *testing.T, instID glid.GLID, isFollower bool) *orchestrator.VaultInstance {
+func mustVaultInstance(t *testing.T, instID glid.GLID, isFollower bool) *orchestrator.VaultInstance {
 	t.Helper()
 	cm, err := chunkmem.NewManager(chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),

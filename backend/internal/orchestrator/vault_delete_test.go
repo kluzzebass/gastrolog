@@ -44,11 +44,11 @@ func TestRemoveInstanceFromVaultPreservesData(t *testing.T) {
 	}
 }
 
-// TestDeleteInstanceFromVaultCleansTierDirectory verifies that DeleteVaultInstance
+// TestDeleteInstanceFromVaultCleansVaultDirectory verifies that DeleteVaultInstance
 // removes the vault's data directory entirely — not just the chunk subdirs.
 // Regression test for gastrolog-42j4n: orphaned inst directories accumulate
 // on disk after inst deletion.
-func TestDeleteInstanceFromVaultCleansTierDirectory(t *testing.T) {
+func TestDeleteInstanceFromVaultCleansVaultDirectory(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
@@ -80,9 +80,9 @@ func TestDeleteInstanceFromVaultCleansTierDirectory(t *testing.T) {
 	}
 }
 
-// TestDeleteInstanceFromVaultCleansEmptyTierDirectory verifies that even an
+// TestDeleteInstanceFromVaultCleansEmptyVaultDirectory verifies that even an
 // empty inst (no chunks appended) has its directory removed on deletion.
-func TestDeleteInstanceFromVaultCleansEmptyTierDirectory(t *testing.T) {
+func TestDeleteInstanceFromVaultCleansEmptyVaultDirectory(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 

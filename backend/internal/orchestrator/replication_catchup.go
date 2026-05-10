@@ -48,7 +48,7 @@ func (o *Orchestrator) scheduleCatchupForNode(vaultID, instID glid.GLID, nodeID 
 	}
 	if err := o.scheduler.RunOnce(name, func() {
 		// On retries, wait for the recovering node to finish building
-		// its tiers. The inst appears within a few seconds as the
+		// its vaults. The inst appears within a few seconds as the
 		// dispatch processes Raft notifications after ApplyConfig.
 		if attempt > 0 {
 			<-time.After(5 * time.Second)

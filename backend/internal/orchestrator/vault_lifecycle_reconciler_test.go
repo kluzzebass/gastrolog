@@ -783,7 +783,7 @@ func (f *fakeSealEnsurerThatDemotesActive) Delete(id chunk.ChunkID) error {
 // sweep tick.
 //
 // Pre-fix: fulfillObligation called deleteLocalCopy directly;
-// receipt protocol stuck forever on tiers with no record stream
+// receipt protocol stuck forever on vaults with no record stream
 // because deleteInternal returned ErrActiveChunk.
 //
 // Post-fix: fulfillObligation calls EnsureSealed first; the

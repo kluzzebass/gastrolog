@@ -10,7 +10,7 @@ package orchestrator
 //
 // Migration roadmap status:
 //   step 4 (retention-ttl via deleteChunk): done.
-//   step 5 (drop reconcileTierDiskAgainstManifest / reconcileFollower):
+//   step 5 (disk-vs-manifest sweep removed):
 //     done. The receipt protocol's pendingDeletes (preserved across
 //     snapshot install + processed by ReconcileFromSnapshot) is the
 //     primary catchup path. SweepLocalOrphans (added after the initial
@@ -636,7 +636,7 @@ func (r *VaultLifecycleReconciler) SweepLocalOrphans() {
 		//    never finalized this chunk, but the FSM also doesn't recognize
 		//    it. Sealed long enough ago that a pending Create can't still be
 		//    in-flight. The retention sweep otherwise re-transitions these
-		//    ghosts every minute and pollutes downstream tiers. See
+		//    ghosts every minute and pollutes downstream vaults. See
 		//    gastrolog-66b7x.
 		tombstoned := r.fsm.IsTombstoned(meta.ID)
 		ghost := !tombstoned && meta.Sealed && !meta.WriteEnd.IsZero() &&

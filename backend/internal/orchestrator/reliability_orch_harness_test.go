@@ -26,12 +26,12 @@ import (
 	hraft "github.com/hashicorp/raft"
 )
 
-// tierTypeKey is the string form of the file-inst type used as a
+// instTypeKey is the string form of the file-inst type used as a
 // factory-map key. File inst is used (rather than memory inst) because
 // only the file-inst chunk Manager implements SetAnnouncer — the pathway
 // that propagates chunk metadata events through vault-ctl Raft to
 // followers. Without announcements, replication tests are vacuous.
-const tierTypeKey = string(system.VaultTypeFile)
+const instTypeKey = string(system.VaultTypeFile)
 
 // harnessStorageClass is a non-zero storage class so findLocalFileStorage
 // matches the NodeStorageConfig we seed. Value is arbitrary; zero is
@@ -65,7 +65,7 @@ type orchRelNode struct {
 // lower-level reliability harness in backend/internal/vaultraft, this one
 // exercises the full orchestrator wiring: ApplyConfig, AppendToVault,
 // ListAllChunkMetas, the scheduler, vault readiness gating, and the
-// vault-ctl Raft group built via createTierRaftGroupVaultCtl.
+// vault-ctl Raft group built via createVaultRaftGroupVaultCtl.
 //
 // Cross-node cluster RPCs (RecordForwarder, RemoteTransferrer,
 // ChunkReplicator) are left nil — scenarios that need them should stub via
@@ -332,10 +332,10 @@ func (h *orchRelHarness) startNode(id string) {
 		GroupManager:        groupMgr,
 		NodeAddressResolver: h.resolver(),
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			tierTypeKey: chunkfile.NewFactory(),
+			instTypeKey: chunkfile.NewFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			tierTypeKey: indexfile.NewFactory(),
+			instTypeKey: indexfile.NewFactory(),
 		},
 		Logger: logger,
 	}

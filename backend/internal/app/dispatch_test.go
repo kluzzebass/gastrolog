@@ -90,7 +90,7 @@ type mockOrch struct {
 	removeIngesterIDs  []glid.GLID // IDs passed to RemoveIngester
 	reloadFiltersCalls int         // number of ReloadFilters calls
 
-	// Tier drain tracking.
+	// Vault drain tracking.
 	instDrainCalls    []glid.GLID                                                // vault IDs passed to DrainInstance
 	removeInstanceCalls   [][2]glid.GLID                                             // [vaultID, instID] pairs passed to RemoveVaultInstance
 	localInstanceExported func(vaultID, instID glid.GLID) *orchestrator.VaultInstance // configurable return

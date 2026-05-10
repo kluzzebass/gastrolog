@@ -73,10 +73,9 @@ test.describe("Error states and validation", () => {
     const dialog = await openSettingsTab(page, "Vaults");
 
     await dialog.getByRole("button", { name: /Add Vault/i }).click();
-    await dialog.getByRole("button", { name: /Add Tier/i }).click();
-    const memBtn = page.getByRole("button", { name: "Memory", exact: true });
-    await memBtn.waitFor({ state: "visible", timeout: 5_000 });
-    await memBtn.click();
+    await dialog
+      .getByLabel("Storage Type")
+      .selectOption({ value: "memory" });
 
     // Create button should be enabled (generated placeholder name is used).
     const createBtn = dialog.getByRole("button", { name: "Create" });

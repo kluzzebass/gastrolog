@@ -374,15 +374,6 @@ func makeRecordWithEventID(raw string, ingesterID glid.GLID, seq uint32) chunk.R
 	}
 }
 
-// ---------- 3-transition chain transition tests ----------
-
-// TestTransitionThreeTierChainMemory verifies that a 3-transition chain
-// (memory→memory→memory) preserves exact record count with no duplication.
-
-// TestTransitionThreeTierChainFileFileCloud verifies the production-like
-// file→file→cloud chain preserves all records without N× duplication.
-// This is the exact scenario from the gastrolog-1rv42 session bugs.
-
 // ==========================================================================
 // Multi-node cluster transition tests
 //

@@ -96,7 +96,7 @@ func testRecord(raw string) chunk.Record {
 }
 
 // ================================================================
-// SEAL ACTIVE TIER TESTS
+// SEAL ACTIVE CHUNK TESTS
 // ================================================================
 
 func TestSealActiveChunk(t *testing.T) {

@@ -350,7 +350,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
           Cloud Storage
         </h3>
         <p className={`text-[0.85em] mb-4 ${c("text-text-muted", "text-light-text-muted")}`}>
-          Cluster-wide cloud storage endpoints. Tiers reference a cloud service by ID.
+          Cluster-wide cloud storage endpoints. Cloud-backed vaults reference a cloud service by ID.
         </p>
         <SettingsSection
           addLabel="Add Cloud Storage"

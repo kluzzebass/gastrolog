@@ -689,13 +689,7 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 	}
 }
 
-// (gastrolog-51gme step 5: reconcileFollower / reconcileTierDiskAgainstManifest
-// removed. The five tests that pinned the disk-vs-manifest sweep
-// (TestReconcileFollowerSkipsWhenFSMNotReady,
-//  TestReconcileFollowerDeletesOrphansWhenLeaderPresent,
-//  TestReconcileFollowerDeletesAllWhenManifestEmpty,
-//  TestReconcileFollowerSkipsWhenNilCallbacks,
-//  TestReconcileTierDiskSkipsFreshOrphans) were deleted alongside the
-// production function. The receipt protocol's catchup invariant is now
-// covered by TestReconcileFromSnapshotProcessesPendingObligations in
-// tier_lifecycle_reconciler_test.go.)
+// gastrolog-51gme step 5 removed the disk-vs-manifest sweep and the
+// tests that pinned it. The receipt protocol's catchup invariant is
+// now covered by TestReconcileFromSnapshotProcessesPendingObligations
+// in vault_lifecycle_reconciler_test.go.

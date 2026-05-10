@@ -1152,10 +1152,10 @@ func (m *Manager) cleanOrphanTempFiles(chunkDir string) {
 // split this into "steady-state skip-active" + "recovery force-demote"
 // on the theory that the leader's record-stream would swap the
 // follower's active pointer in steady state. That assumption is
-// topology-dependent — true for ingest tiers fed by continuous appends,
-// false for downstream tiers fed only by transitions. The split left
+// topology-dependent — true for ingest vaults fed by continuous appends,
+// false for downstream vaults fed only by transitions. The split left
 // receipt-protocol delete obligations bouncing off ErrActiveChunk
-// forever on transition-fed tiers (gastrolog-2yeht). Always-force-demote
+// forever on retention-fed vaults (gastrolog-2yeht). Always-force-demote
 // is the correct invariant for every topology: FSM is authoritative,
 // local active must yield. See gastrolog-51gme step 8 / gastrolog-uccg6 /
 // gastrolog-2yeht.

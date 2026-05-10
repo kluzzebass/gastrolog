@@ -956,8 +956,8 @@ func TestRetentionSingleJobRegistered(t *testing.T) {
 	if !sched.HasJob("retention") {
 		t.Fatal("single retention sweep job should exist")
 	}
-	perTierJobName := "retention:" + instID.String()
-	if sched.HasJob(perTierJobName) {
+	perVaultJobName := "retention:" + instID.String()
+	if sched.HasJob(perVaultJobName) {
 		t.Fatal("per-vault retention job should NOT exist — retention uses a single discovery-based sweep")
 	}
 }

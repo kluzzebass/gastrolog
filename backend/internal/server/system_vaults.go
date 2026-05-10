@@ -44,12 +44,12 @@ func (s *SystemServer) PutVault(
 		return nil, connErr
 	}
 
-	// Note: tier ID validation is intentionally omitted here.
+	// Note: vault ID validation is intentionally omitted here.
 	// RouteLeader RPCs run on any node with Raft writes forwarded to the leader,
-	// but reads are local. In a multi-node cluster, tiers created moments before
+	// but reads are local. In a multi-node cluster, vaults created moments before
 	// the vault may not have replicated to this node's FSM yet. The orchestrator's
-	// buildVaultInstances handles missing tiers gracefully (logs a warning, skips).
-	// Referential integrity is enforced on the delete path (DeleteTier rejects
+	// buildVaultInstances handles missing vaults gracefully (logs a warning, skips).
+	// Referential integrity is enforced on the delete path (DeleteVault rejects
 	// if any vault references the vault).
 
 	// Persist to config store. For raft stores, the FSM notification callback

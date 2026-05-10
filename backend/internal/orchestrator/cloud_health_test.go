@@ -125,7 +125,7 @@ func TestEvaluateCloudHealth_ClearsAlertWhenHealthy(t *testing.T) {
 	}
 }
 
-func TestEvaluateCloudHealth_SkipsNonCloudTiers(t *testing.T) {
+func TestEvaluateCloudHealth_SkipsNonCloudVaults(t *testing.T) {
 	t.Parallel()
 
 	ac := alert.New()
@@ -337,7 +337,7 @@ func TestBackfillCloudUploadsLeaderOnly(t *testing.T) {
 	}
 }
 
-// TestBackfillCloudUploadsSkippedOnFollower verifies non-leader tiers
+// TestBackfillCloudUploadsSkippedOnFollower verifies non-leader vaults
 // don't run backfill — the leader handles it.
 func TestBackfillCloudUploadsSkippedOnFollower(t *testing.T) {
 	t.Parallel()

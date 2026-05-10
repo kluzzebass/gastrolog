@@ -8,12 +8,12 @@ import (
 	hraft "github.com/hashicorp/raft"
 )
 
-// createTierRaft builds an in-process Raft instance for use in forwarder
+// createVaultRaft builds an in-process Raft instance for use in forwarder
 // tests. The name is historical (kept to avoid churn in existing tests);
 // in the current architecture this just builds a generic Raft group, not
 // a per-vault one. New tests should use this directly rather than inventing
 // parallel helpers.
-func createTierRaft(t *testing.T, nodeID string, fsm hraft.FSM, bootstrap bool, members []hraft.Server) *hraft.Raft {
+func createVaultRaft(t *testing.T, nodeID string, fsm hraft.FSM, bootstrap bool, members []hraft.Server) *hraft.Raft {
 	t.Helper()
 	_, trans := hraft.NewInmemTransportWithTimeout(hraft.ServerAddress(nodeID), 500*time.Millisecond)
 
@@ -45,9 +45,9 @@ func createTierRaft(t *testing.T, nodeID string, fsm hraft.FSM, bootstrap bool, 
 	return r
 }
 
-// waitTierLeader blocks until r observes itself (or any member) as leader,
+// waitVaultLeader blocks until r observes itself (or any member) as leader,
 // up to timeout.
-func waitTierLeader(t *testing.T, r *hraft.Raft, timeout time.Duration) {
+func waitVaultLeader(t *testing.T, r *hraft.Raft, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {

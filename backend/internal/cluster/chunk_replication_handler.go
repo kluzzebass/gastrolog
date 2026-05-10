@@ -13,7 +13,7 @@ import (
 	"gastrolog/internal/convert"
 )
 
-// chunkReplicationStreamHandler processes a bidirectional TierReplication
+// chunkReplicationStreamHandler processes a bidirectional VaultChunkReplication
 // stream. The leader sends ChunkReplicationCommand messages; this handler
 // processes them sequentially and replies with ChunkReplicationAck.
 //

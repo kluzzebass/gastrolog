@@ -10,7 +10,7 @@ import (
 // Vault readiness — canonical definition.
 //
 // A vault on this node is "ready" iff:
-//   1. It has at least one local inst instance (len(Vault.Tiers) > 0). A vault
+//   1. It has at least one local inst instance (its Instance is non-nil). A vault
 //      registered with zero local instances is a routing shell; it cannot serve
 //      reads or writes and callers must forward to a peer that holds the
 //      data.

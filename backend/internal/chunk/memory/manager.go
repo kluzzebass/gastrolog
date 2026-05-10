@@ -21,9 +21,9 @@ type Config struct {
 	Now       func() time.Time
 	MetaStore chunk.MetaStore
 
-	// BudgetBytes is the total memory budget for this tier. When TotalBytes
+	// BudgetBytes is the total memory budget for this vault. When TotalBytes
 	// exceeds this, the orchestrator should accelerate transitions to the
-	// next tier. Zero means unlimited.
+	// next vault. Zero means unlimited.
 	BudgetBytes uint64
 
 	// Logger for structured logging. If nil, logging is disabled.

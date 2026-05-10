@@ -100,9 +100,9 @@ type SilentDeleter interface {
 // this into "steady-state skip-active" + "recovery force-demote" on the
 // theory that the leader's record-stream would swap the follower's active
 // pointer in steady state. That assumption is topology-dependent — true for
-// ingest tiers fed by continuous appends, false for downstream tiers fed
+// ingest vaults fed by continuous appends, false for downstream vaults fed
 // only by transitions. The skip-active variant left receipt-protocol delete
-// obligations bouncing off ErrActiveChunk forever on transition-fed tiers
+// obligations bouncing off ErrActiveChunk forever on retention-fed vaults
 // (gastrolog-2yeht), and SweepLocalOrphans transitively blocked because no
 // tombstone gets created when finalize never fires. The single-method
 // always-demote contract is correct for every topology.

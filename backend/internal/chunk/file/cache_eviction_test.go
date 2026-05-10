@@ -214,7 +214,7 @@ func TestEvictCache_LRUIgnoresTTL(t *testing.T) {
 }
 
 // TestEvictCache_TTLIgnoresBudget covers the inverse: in TTL mode, the
-// budget is irrelevant. A TTL-mode tier with a tiny budget but every
+// budget is irrelevant. A TTL-mode vault with a tiny budget but every
 // entry fresh must NOT evict anything.
 func TestEvictCache_TTLIgnoresBudget(t *testing.T) {
 	t.Parallel()

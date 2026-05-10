@@ -51,9 +51,9 @@ func (r *testRegistry) IndexManager(vaultID glid.GLID) index.IndexManager {
 // each vault's chunk manager List() / Meta() to synthesize ManifestEntries.
 func (r *testRegistry) Reader() manifest.Reader { return manifest.NewProjectingReader(r) }
 
-// IndexReader returns a tier-walking IndexReader that dispatches to each
+// IndexReader returns a vault-walking IndexReader that dispatches to each
 // vault's chunk/index manager. testRegistry's "vault" map is effectively
-// flat (no tier hierarchy), so the lookup is just a linear walk.
+// flat (no inner hierarchy), so the lookup is just a linear walk.
 func (r *testRegistry) IndexReader() manifest.IndexReader { return &testIndexReader{r: r} }
 
 type testIndexReader struct{ r *testRegistry }

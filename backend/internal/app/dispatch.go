@@ -222,8 +222,8 @@ func (d *configDispatcher) reconcileVaultInstance(ctx context.Context, vaultID g
 	}
 
 	// Remove instances that are no longer expected.
-	for _, localTierID := range d.orch.LocalInstanceIDs(vaultID) {
-		if !expected[localTierID] {
+	for _, localInstID := range d.orch.LocalInstanceIDs(vaultID) {
+		if !expected[localInstID] {
 			d.orch.RemoveVaultInstance(vaultID)
 		}
 	}
@@ -490,7 +490,7 @@ func (d *configDispatcher) handleInstancePut(ctx context.Context, instID glid.GL
 
 	// Only act on inst membership once placements are fully assigned. During
 	// cluster-init the placement manager assigns placements one-at-a-time,
-	// each firing its own CmdPutTier. Building the inst locally on a partial
+	// each firing its own CmdPutVault. Building the inst locally on a partial
 	// placement state is wrong for two reasons: (1) we can't reliably answer
 	// "does this inst belong here" with incomplete placements, and (2) it
 	// would create the chunk manager (and vault-ctl Raft group) with a wrong-size
@@ -532,7 +532,7 @@ func (d *configDispatcher) handleInstancePut(ctx context.Context, instID glid.GL
 // applyInstanceMembershipChange decides whether the inst belongs here based on
 // the (complete) placement state, and either adds/rebuilds it locally or
 // removes it if it no longer belongs. Deferred entirely when placements are
-// incomplete — the next CmdPutTier from the placement manager will retry.
+// incomplete — the next CmdPutVault from the placement manager will retry.
 func (d *configDispatcher) applyInstanceMembershipChange(ctx context.Context, v system.VaultConfig, instID glid.GLID, leaderNodeID string, followerNodeIDs []string) {
 	// Placements are "complete" when they include a leader. We can't gate on
 	// len(placements) >= RF because RF may be unsatisfiable when a node is

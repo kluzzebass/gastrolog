@@ -102,7 +102,7 @@ func TestListAllChunkMetas_vaultNotReady(t *testing.T) {
 // Regression: ListChunks fans out to remote nodes; a node with the vault
 // registered but no local vault placements must not fail ListAllChunkMetas
 // with ErrVaultNotReady, or the UI sees 503 and empty chunks.
-func TestListAllChunkMetas_noLocalTiersReturnsEmpty(t *testing.T) {
+func TestListAllChunkMetas_noLocalVaultsReturnsEmpty(t *testing.T) {
 	t.Parallel()
 	o, err := New(Config{})
 	if err != nil {
@@ -148,7 +148,7 @@ func TestSearch_ErrVaultNotReady(t *testing.T) {
 	}
 }
 
-func TestAppendToTier_ErrVaultNotReady(t *testing.T) {
+func TestAppendToVault_ErrVaultNotReady(t *testing.T) {
 	t.Parallel()
 	o, err := New(Config{})
 	if err != nil {
@@ -187,7 +187,7 @@ func TestLocalVaultsReplicationReady(t *testing.T) {
 	vid := glid.New()
 	o.RegisterVault(NewVault(vid, nil))
 	if !o.LocalVaultsReplicationReady() {
-		t.Fatal("routing-only vault (no tiers) should not block readiness")
+		t.Fatal("routing-only vault (has no local vaults — should not block readiness")
 	}
 	s, err := memtest.NewVault(chunkmem.Config{})
 	if err != nil {

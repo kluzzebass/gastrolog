@@ -158,7 +158,7 @@ func TestApplyConfigNil(t *testing.T) {
 // the cluster as a non-inst-member, or a snapshot-restored node where
 // placements are reapplied via post-snapshot log replay rather than the
 // initial ApplyConfig). The vault then never made it into the
-// orchestrator, and any subsequent NotifyTierPut firing handleInstancePut
+// orchestrator, and any subsequent notification firing handleInstancePut
 // would fail with "vault not found" — and since handleVaultPut never
 // fires for snapshot-restored vaults, the cluster ends up in a permanent
 // stuck state. AddVault (the runtime path) registers empty vaults

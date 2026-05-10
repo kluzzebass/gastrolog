@@ -304,7 +304,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 	wireClusterRaftApplies(clusterSrv, groupMgr)
 
-	// Tier Raft group membership is reconciled by per-vault leader loops
+	// Vault-ctl Raft group membership is reconciled by per-vault leader loops
 	// (raftgroup.LeaderLoop) wired by reconfig_vaults.go. On snapshot
 	// restore the loops fire as soon as elections complete and reconcile
 	// from inside the leader epoch.
@@ -345,7 +345,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 				// persistent stream on the shared grpc.ClientConn, which
 				// the forwarder observes as EOF. Expiring the peer from
 				// LivePeers() on that signal causes placement to evict
-				// the node from its tiers, which in turn triggers
+				// the node from its vaults, which in turn triggers
 				// RemoveVaultInstance → sealAndDeleteAllChunks — the
 				// cluster-wide data wipe. Raft heartbeats and PeerState's
 				// stats-broadcast TTL remain the canonical liveness
@@ -480,7 +480,7 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	chunkTransferrer := cluster.NewChunkTransferrer(peerConns)
 	orch.SetRemoteTransferrer(chunkTransferrer)
 
-	// Tier replication: unified ordered stream per inst per follower.
+	// Vault replication: unified ordered stream per vault per follower.
 	chunkReplicator := cluster.NewChunkReplicator(peerConns, logger.With("component", "inst-replicator"))
 	orch.SetChunkReplicator(chunkReplicator)
 

@@ -360,7 +360,7 @@ func (o *Orchestrator) RemoveVaultInstance(vaultID glid.GLID) bool {
 
 // DeleteVaultInstance unregisters a inst instance AND permanently wipes its
 // on-disk data (chunks, indexes, and the vault directory). Used only when a
-// inst is being deliberately deleted (admin action via CmdTierDeleted, or
+// inst is being deliberately deleted (admin action via CmdDeleteVault, or
 // post-drain cleanup).
 //
 // Returns true if a inst was removed.
@@ -1096,7 +1096,7 @@ func (o *Orchestrator) ensureVaultCtlMetadata(vaultCfg system.VaultConfig, clust
 // replication alike.
 //
 // Before 5xxbd, vault-ctl FSM was a top-level Raft group whose Ready flag
-// flipped on every apply in practice, because `CmdPutTier` was a LogCommand
+// flipped on every apply in practice, because `CmdPutVault` was a LogCommand
 // that hit it. After 5xxbd the inst sub-FSM only sees OpVaultChunkFSM commands,
 // which a fresh vault with no chunks never sends — keying readiness on any
 // FSM-level signal leaves every fresh vault wedged as "not ready" until

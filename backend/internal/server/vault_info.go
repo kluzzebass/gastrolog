@@ -78,12 +78,12 @@ func (s *VaultServer) GetStats(
 		if _, local := localSet[vaultID]; !local {
 			continue // handled below via peer broadcasts
 		}
-		tieredMetas, err := s.orch.ListAllChunkMetas(vaultID)
+		instMetas, err := s.orch.ListAllChunkMetas(vaultID)
 		if err != nil {
 			continue
 		}
-		metas := make([]chunk.ChunkMeta, len(tieredMetas))
-		for i, tm := range tieredMetas {
+		metas := make([]chunk.ChunkMeta, len(instMetas))
+		for i, tm := range instMetas {
 			metas[i] = tm.ChunkMeta
 		}
 		resp.TotalVaults++
@@ -329,9 +329,9 @@ func (s *VaultServer) vaultInfoFromConfig(cfg system.VaultConfig, localSet map[g
 		Enabled: cfg.Enabled,
 	}
 
-	// Enrich with runtime stats. Local tiers are authoritative; peer
+	// Enrich with runtime stats. Local instances are authoritative; peer
 	// broadcast stats are only used for purely remote vaults where we
-	// have no local data. Mixing the two double-counts shared tiers.
+	// have no local data. Mixing the two double-counts shared instances.
 	_, registered := localSet[cfg.ID]
 	if registered {
 		info.Enabled = s.orch.IsVaultEnabled(cfg.ID)

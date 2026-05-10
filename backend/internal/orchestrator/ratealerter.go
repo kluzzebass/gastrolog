@@ -166,7 +166,7 @@ func (r *RateAlerter) message(instID glid.GLID, rate float64, count int64) strin
 		}
 	}
 	return fmt.Sprintf(
-		"Tier %s: %s rate %.2f/s (%d events in last %s) — review policy",
+		"Vault %s: %s rate %.2f/s (%d events in last %s) — review policy",
 		label, r.kind, rate, count, r.window,
 	)
 }

@@ -221,7 +221,7 @@ type Orchestrator struct {
 	// Remote transferrer for cross-node chunk migration (nil in single-node mode).
 	transferrer RemoteTransferrer
 
-	// Tier replicator: ordered stream per inst per follower (nil in single-node mode).
+	// Vault replicator: ordered stream per inst per follower (nil in single-node mode).
 	chunkReplicator ChunkReplicator
 
 	// replicaCircuit tracks per-node backoff for follower replication.
@@ -569,7 +569,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		return nil, fmt.Errorf("reconcile sweep: %w", err)
 	}
 
-	// Tier catchup sweep: every node consults its OWN replicated FSM
+	// Vault catchup sweep: every node consults its OWN replicated FSM
 	// every 20s and runs three independent reconciliation passes per
 	// inst (pending obligations, local orphans, missing replicas).
 	// Phase-offset from retention's :00 tick to avoid spikiness. See

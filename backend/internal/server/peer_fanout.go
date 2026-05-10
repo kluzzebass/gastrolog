@@ -56,7 +56,7 @@ func peerFanOut[T any](
 			val, err := fn(peerCtx, nodeID)
 			if err != nil {
 				// Demote benign placement-churn errors (peer no longer
-				// owns the vault/tier) to Debug — these fire during
+				// owns the vault) to Debug — these fire during
 				// reconfiguration and aren't operational failures. See
 				// gastrolog-5z607.
 				level := slog.LevelWarn

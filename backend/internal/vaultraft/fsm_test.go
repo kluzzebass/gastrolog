@@ -138,10 +138,10 @@ func TestFSM_OnAfterRestoreFires(t *testing.T) {
 	if fires != 1 {
 		t.Errorf("OnAfterRestore fires = %d, want 1", fires)
 	}
-	// Sanity: the hook fires AFTER tiers were swapped in, so the
-	// orchestrator's handler can already iterate Tiers() to find work.
+	// Sanity: the hook fires AFTER instances were swapped in, so the
+	// orchestrator's handler can already iterate Instances() to find work.
 	if got := dst.Instances(); len(got) != 2 {
-		t.Errorf("post-restore Tiers() = %d, want 2", len(got))
+		t.Errorf("post-restore Instances() = %d, want 2", len(got))
 	}
 }
 

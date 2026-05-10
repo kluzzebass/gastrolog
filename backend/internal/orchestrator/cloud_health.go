@@ -31,14 +31,14 @@ func (o *Orchestrator) evaluateCloudHealth() {
 		if inst == nil || inst.Type != "cloud" {
 			continue
 		}
-		o.evaluateTierCloudHealth(inst)
+		o.evaluateInstCloudHealth(inst)
 	}
 }
 
-// evaluateTierCloudHealth checks a single cloud inst's health and runs
+// evaluateInstCloudHealth checks a single cloud inst's health and runs
 // backfill on the vault leader only. Followers skip backfill — they learn
 // about cloud-backed chunks via the vault-ctl FSM.
-func (o *Orchestrator) evaluateTierCloudHealth(inst *VaultInstance) {
+func (o *Orchestrator) evaluateInstCloudHealth(inst *VaultInstance) {
 	chk, ok := inst.Chunks.(cloudHealthChecker)
 	if !ok {
 		return

@@ -12,7 +12,7 @@ import "time"
 const ReplicationTimeout = 10 * time.Second
 
 // ForwardingTimeout is the deadline for lightweight single-command
-// operations: seal commands to followers, vault/tier apply forwarding,
+// operations: seal commands to followers, vault apply forwarding,
 // and vault follower append when using bounded waits. Cross-node vault-route
 // ingestion uses RecordForwarder.ForwardSync without this cap so the
 // pipeline can backpressure.

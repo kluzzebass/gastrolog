@@ -102,10 +102,9 @@ test.describe.serial("Pipeline: full ingestion workflow", () => {
     }
 
     await dialog.getByRole("button", { name: /Add Vault/i }).click();
-    await dialog.getByRole("button", { name: /Add Tier/i }).click();
-    const memBtn = page.getByRole("button", { name: "Memory", exact: true });
-    await memBtn.waitFor({ state: "visible", timeout: 5_000 });
-    await memBtn.click();
+    await dialog
+      .getByLabel("Storage Type")
+      .selectOption({ value: "memory" });
 
     await dialog.getByLabel("Name").fill(VAULT_NAME);
 

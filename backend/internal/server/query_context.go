@@ -206,7 +206,7 @@ func drainIterToProto(it iter.Seq2[chunk.Record, error]) []*apiv1.Record {
 // remoteNodeForVault returns the owning node ID if the vault is remote,
 // or "" if the vault is local or lookup fails.
 //
-// Reads VaultConfig.Placements directly (mirrored from tier placements via
+// Reads VaultConfig.Placements directly (mirrored from vault placements via
 // the FSM bridge — gastrolog-257l7).
 func (s *QueryServer) remoteNodeForVault(ctx context.Context, vaultID glid.GLID) string {
 	// If the vault is registered locally, it's not remote.

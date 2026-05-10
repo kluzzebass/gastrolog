@@ -489,7 +489,7 @@ func (o *Orchestrator) RebuildMissingIndexes(ctx context.Context) error {
 		if vault == nil || vault.Instance == nil {
 			continue
 		}
-		if err := o.rebuildTierIndexes(ctx, vaultID, vault.Instance); err != nil {
+		if err := o.rebuildVaultIndexes(ctx, vaultID, vault.Instance); err != nil {
 			return err
 		}
 	}
@@ -497,9 +497,9 @@ func (o *Orchestrator) RebuildMissingIndexes(ctx context.Context) error {
 	return nil
 }
 
-// rebuildTierIndexes checks a single inst for sealed chunks with incomplete indexes.
-func (o *Orchestrator) rebuildTierIndexes(ctx context.Context, vaultID glid.GLID, inst *VaultInstance) error {
-	// Skip tiers where the post-seal pipeline handles indexes.
+// rebuildVaultIndexes checks a single inst for sealed chunks with incomplete indexes.
+func (o *Orchestrator) rebuildVaultIndexes(ctx context.Context, vaultID glid.GLID, inst *VaultInstance) error {
+	// Skip vaults where the post-seal pipeline handles indexes.
 	if proc, ok := inst.Chunks.(chunk.ChunkPostSealProcessor); ok {
 		if !proc.HasIndexBuilders() {
 			return nil

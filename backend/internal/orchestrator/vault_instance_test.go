@@ -232,7 +232,7 @@ func TestListAllChunkMetasOverlaysFromFSM(t *testing.T) {
 	}
 }
 
-// TestListAllChunkMetasNilOverlayPassthrough verifies that tiers without an
+// TestListAllChunkMetasNilOverlayPassthrough verifies that instances without an
 // OverlayFromFSM callback (single-node mode, memory vaults) pass the local
 // chunk manager's view through unchanged. The overlay is opt-in.
 func TestListAllChunkMetasNilOverlayPassthrough(t *testing.T) {
@@ -334,7 +334,7 @@ func TestLocalLeaderVaultIDsExcludesFollowerOnlyVaults(t *testing.T) {
 		t.Error("vault with a leader inst should be in LocalLeaderVaultIDs")
 	}
 	if ids[followerVaultID] {
-		t.Error("vault with only follower tiers should NOT be in LocalLeaderVaultIDs")
+		t.Error("vault with only follower instances should NOT be in LocalLeaderVaultIDs")
 	}
 }
 

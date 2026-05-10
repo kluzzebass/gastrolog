@@ -25,7 +25,7 @@ func (b *blockingServerStream) Context() context.Context     { return b.ctx }
 func (b *blockingServerStream) SendMsg(any) error            { return nil }
 
 // RecvMsg blocks until stop closes. This mirrors the real behaviour of
-// tierReplicationStreamHandler's RecvMsg when no peer is sending: the
+// vaultChunkStreamHandler's RecvMsg when no peer is sending: the
 // handler is parked in Recv indefinitely.
 func (b *blockingServerStream) RecvMsg(any) error {
 	<-b.stop

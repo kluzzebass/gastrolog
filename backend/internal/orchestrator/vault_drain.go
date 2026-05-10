@@ -352,7 +352,7 @@ func (o *Orchestrator) finishInstDrain(vaultID glid.GLID) {
 
 	// Drain completion no longer fires a config-mutation callback —
 	// placement updates are the source of truth for instance lifecycle
-	// with the per-vault collapse (OnTierDrainComplete dropped).
+	// under the per-vault model.
 }
 
 // cancelInstDrainState removes drain state without triggering vault config

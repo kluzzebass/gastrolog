@@ -17,7 +17,7 @@ import (
 // chunk manifests; honors the active-chunk exception by filtering on
 // Sealed=true.
 //
-// Memory-mode tiers (no FSM, no replication) are projected from the local
+// Memory-mode vaults (no FSM, no replication) are projected from the local
 // chunk manager's List() so callers see a uniform view regardless of how
 // the inst is backed.
 func (o *Orchestrator) ManifestReader() manifest.Reader {
@@ -253,7 +253,7 @@ func (r *orchestratorIndexReader) lookupVaultManagers(chunkID chunk.ChunkID) (ch
 func chunkMetaToManifestEntry(m chunk.ChunkMeta) vaultctlfsm.ManifestEntry {
 	state := m.State
 	if state == chunk.ChunkStateUnknown {
-		// Memory-mode tiers don't carry FSM state. Derive from the
+		// Memory-mode vaults don't carry FSM state. Derive from the
 		// local Sealed bool — there's no Sealing intermediate without
 		// an FSM driving the announce protocol.
 		if m.Sealed {

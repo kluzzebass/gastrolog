@@ -100,7 +100,7 @@ type VaultInstance struct {
 
 	// ManifestEntry returns the manifest entry for one chunk on this inst,
 	// or false if this inst doesn't hold the chunk. Nil for memory-mode
-	// tiers; the orchestrator falls back to the chunk manager.
+	// instances; the orchestrator falls back to the chunk manager.
 	ManifestEntry func(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool)
 
 	// IsFSMReady returns true after the vault-ctl FSM has applied at least one log

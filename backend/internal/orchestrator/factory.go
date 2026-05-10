@@ -202,7 +202,7 @@ func (o *Orchestrator) startRetentionSweep() error {
 	if err := o.scheduler.AddJob(retentionJobName, defaultRetentionSchedule, o.retentionSweepAll); err != nil {
 		return fmt.Errorf("retention sweep job: %w", err)
 	}
-	o.scheduler.Describe(retentionJobName, "Retention sweep (all tiers)")
+	o.scheduler.Describe(retentionJobName, "Retention sweep (all vaults)")
 	return nil
 }
 
@@ -218,7 +218,7 @@ func (o *Orchestrator) startInstanceCatchupSweep() error {
 	if err := o.scheduler.AddJob(instCatchupSweepJobName, instCatchupSweepSchedule, o.instCatchupSweepAll); err != nil {
 		return fmt.Errorf("inst catchup sweep job: %w", err)
 	}
-	o.scheduler.Describe(instCatchupSweepJobName, "Tier catchup sweep (delete + orphan + replica convergence)")
+	o.scheduler.Describe(instCatchupSweepJobName, "Vault catchup sweep (delete + orphan + replica convergence)")
 	return nil
 }
 
