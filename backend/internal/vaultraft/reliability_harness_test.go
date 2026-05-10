@@ -352,7 +352,7 @@ func vaultFSMFingerprint(f *FSM) string {
 
 	var sb fingerprintBuilder
 	for _, id := range ids {
-		sb.writef("inst=%x\n", id[:])
+		sb.writef("vault=%x\n", id[:])
 		f.mu.Lock()
 		sub := f.instances[id]
 		f.mu.Unlock()

@@ -15,8 +15,8 @@ type cloudHealthChecker interface {
 	CloudDegradedError() string
 }
 
-// evaluateCloudHealth checks every inst's cloud health and sets/clears
-// alerts. When a inst transitions from degraded → healthy, schedules
+// evaluateCloudHealth checks every instance's cloud health and sets/clears
+// alerts. When an instance transitions from degraded → healthy, schedules
 // post-seal work for sealed chunks that are missing their cloud upload.
 // Runs in the rate alert evaluator loop (every 5s).
 func (o *Orchestrator) evaluateCloudHealth() {
@@ -27,32 +27,32 @@ func (o *Orchestrator) evaluateCloudHealth() {
 	defer o.mu.RUnlock()
 
 	for _, vault := range o.vaults {
-		inst := vault.Instance
-		if inst == nil || inst.Type != "cloud" {
+		vaultInst := vault.Instance
+		if vaultInst == nil || vaultInst.Type != "cloud" {
 			continue
 		}
-		o.evaluateInstCloudHealth(inst)
+		o.evaluateVaultCloudHealth(vaultInst)
 	}
 }
 
-// evaluateInstCloudHealth checks a single cloud inst's health and runs
+// evaluateVaultCloudHealth checks a single cloud instance's health and runs
 // backfill on the vault leader only. Followers skip backfill — they learn
 // about cloud-backed chunks via the vault-ctl FSM.
-func (o *Orchestrator) evaluateInstCloudHealth(inst *VaultInstance) {
-	chk, ok := inst.Chunks.(cloudHealthChecker)
+func (o *Orchestrator) evaluateVaultCloudHealth(vaultInst *VaultInstance) {
+	chk, ok := vaultInst.Chunks.(cloudHealthChecker)
 	if !ok {
 		return
 	}
-	alertID := fmt.Sprintf("cloud-store:%s", inst.VaultID)
+	alertID := fmt.Sprintf("cloud-store:%s", vaultInst.VaultID)
 	if chk.CloudDegraded() {
 		o.alerts.Set(alertID, alert.Error, "cloud",
 			fmt.Sprintf("Cloud store unreachable for vault %s: %s",
-				inst.VaultID.String()[:8], chk.CloudDegradedError()))
+				vaultInst.VaultID.String()[:8], chk.CloudDegradedError()))
 	} else {
 		o.alerts.Clear(alertID)
 	}
-	if inst.IsRaftLeader != nil && inst.IsRaftLeader() {
-		o.backfillCloudUploads(inst)
+	if vaultInst.IsRaftLeader != nil && vaultInst.IsRaftLeader() {
+		o.backfillCloudUploads(vaultInst)
 	}
 }
 
@@ -64,13 +64,13 @@ func (o *Orchestrator) evaluateInstCloudHealth(inst *VaultInstance) {
 //
 // The local CloudBacked flag from List() is intentionally ignored — only
 // the FSM decides whether a chunk needs work. See gastrolog-68fqk.
-func (o *Orchestrator) backfillCloudUploads(inst *VaultInstance) {
-	uploader, ok := inst.Chunks.(chunk.ChunkCloudUploader)
+func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
+	uploader, ok := vaultInst.Chunks.(chunk.ChunkCloudUploader)
 	if !ok {
 		return
 	}
 
-	metas, err := inst.Chunks.List()
+	metas, err := vaultInst.Chunks.List()
 	if err != nil {
 		return
 	}
@@ -82,13 +82,13 @@ func (o *Orchestrator) backfillCloudUploads(inst *VaultInstance) {
 		// files but data.glcb does not exist yet — uploading would
 		// fail with no-such-file. Overlaying through the FSM makes us
 		// wait for AnnounceSeal in PostSealProcess.
-		if inst.OverlayFromFSM != nil {
-			m = inst.OverlayFromFSM(m)
+		if vaultInst.OverlayFromFSM != nil {
+			m = vaultInst.OverlayFromFSM(m)
 		}
-		if !m.Sealed || chunkIsCloudBacked(inst, m) {
+		if !m.Sealed || chunkIsCloudBacked(vaultInst, m) {
 			continue
 		}
-		name := fmt.Sprintf("cloud-backfill:%s:%s", inst.VaultID, m.ID)
+		name := fmt.Sprintf("cloud-backfill:%s:%s", vaultInst.VaultID, m.ID)
 		if o.scheduler.HasPendingPrefix(name) {
 			continue
 		}
@@ -101,15 +101,15 @@ func (o *Orchestrator) backfillCloudUploads(inst *VaultInstance) {
 	}
 	if backfilled > 0 {
 		o.logger.Debug("cloud backfill: scheduled uploads",
-			"vault", inst.VaultID, "count", backfilled)
+			"vault", vaultInst.VaultID, "count", backfilled)
 	}
 }
 
 // chunkIsCloudBacked checks the FSM (single source of truth) for CloudBacked.
 // Falls back to local state when no FSM exists (single-node / memory mode).
-func chunkIsCloudBacked(inst *VaultInstance, m chunk.ChunkMeta) bool {
-	if inst.OverlayFromFSM != nil {
-		return inst.OverlayFromFSM(m).CloudBacked
+func chunkIsCloudBacked(vaultInst *VaultInstance, m chunk.ChunkMeta) bool {
+	if vaultInst.OverlayFromFSM != nil {
+		return vaultInst.OverlayFromFSM(m).CloudBacked
 	}
 	return m.CloudBacked
 }

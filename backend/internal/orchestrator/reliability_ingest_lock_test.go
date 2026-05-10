@@ -90,7 +90,7 @@ func TestReliability_Ingest_ReleasesLockBeforeReplication(t *testing.T) {
 	cm, _ := chunkmem.NewManager(chunkmem.Config{})
 	im := indexmem.NewManager(nil, nil, nil, nil, nil)
 	qe := query.New(cm, im, nil)
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID:          vaultID,
 		Type:            "memory",
 		Chunks:          cm,
@@ -98,7 +98,7 @@ func TestReliability_Ingest_ReleasesLockBeforeReplication(t *testing.T) {
 		Query:           qe,
 		FollowerTargets: []system.ReplicationTarget{{NodeID: "node-2-paused"}},
 	}
-	vault := NewVault(vaultID, inst)
+	vault := NewVault(vaultID, vaultInst)
 	vault.Name = "5oofa-regression"
 	orch.RegisterVault(vault)
 

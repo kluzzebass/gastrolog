@@ -78,12 +78,12 @@ func (s *VaultServer) GetStats(
 		if _, local := localSet[vaultID]; !local {
 			continue // handled below via peer broadcasts
 		}
-		instMetas, err := s.orch.ListAllChunkMetas(vaultID)
+		vaultMetas, err := s.orch.ListAllChunkMetas(vaultID)
 		if err != nil {
 			continue
 		}
-		metas := make([]chunk.ChunkMeta, len(instMetas))
-		for i, tm := range instMetas {
+		metas := make([]chunk.ChunkMeta, len(vaultMetas))
+		for i, tm := range vaultMetas {
 			metas[i] = tm.ChunkMeta
 		}
 		resp.TotalVaults++
@@ -421,7 +421,7 @@ func ChunkMetaToProto(meta chunk.ChunkMeta) *apiv1.ChunkMeta {
 // VaultChunkMetaToProto converts a VaultChunkMeta to a proto ChunkMeta.
 func VaultChunkMetaToProto(meta orchestrator.VaultChunkMeta) *apiv1.ChunkMeta {
 	pb := ChunkMetaToProto(meta.ChunkMeta)
-	pb.VaultId = meta.InstanceID.ToProto()
+	pb.VaultId = meta.VaultID.ToProto()
 	pb.VaultType = meta.VaultType
 	return pb
 }

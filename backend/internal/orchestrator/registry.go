@@ -192,7 +192,7 @@ func (o *Orchestrator) MultiVaultQueryEngine() *query.Engine {
 }
 
 // searchReadyRegistry implements manifest.VaultRegistry for multi-vault search,
-// exposing only replication-ready vaults so partially applied inst metadata
+// exposing only replication-ready vaults so partially applied instance metadata
 // cannot be queried (gastrolog-4ip1o).
 type searchReadyRegistry struct {
 	o *Orchestrator

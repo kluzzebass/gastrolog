@@ -466,13 +466,13 @@ func TestRetentionTargetThreadsDispositionFromVaultConfig(t *testing.T) {
 			}
 			defer orch.Stop()
 
-			inst := &VaultInstance{
+			vaultInst := &VaultInstance{
 				VaultID:  vaultID,
 				Chunks:  &retentionFakeChunkManager{},
 				Indexes: &retentionFakeIndexManager{},
 			}
 			active := make(map[string]bool)
-			target := orch.retentionTargetForInstance(cfg, cfg.Vaults[0], inst, active)
+			target := orch.retentionTargetForInstance(cfg, cfg.Vaults[0], vaultInst, active)
 			if target == nil {
 				t.Fatal("expected non-nil sweep target")
 			}

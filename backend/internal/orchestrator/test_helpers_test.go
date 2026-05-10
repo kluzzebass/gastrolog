@@ -62,7 +62,7 @@ func (l *transitionSystemLoader) Load(ctx context.Context) (*system.System, erro
 }
 
 // newTestStore creates a memory store and populates it with config entities
-// AND runtime placements for single-node tests. Each inst gets a synthetic
+// AND runtime placements for single-node tests. Each instance gets a synthetic
 // leader placement for nodeID.
 func newTestStore(cfg *system.Config, nodeID string) *sysmem.Store {
 	store := sysmem.NewStore()
@@ -217,11 +217,11 @@ func (p *keepNPolicy) Apply(state chunk.VaultState) []chunk.ChunkID {
 	return ids
 }
 
-// ---------- cloud inst transition test ----------
+// ---------- cloud instance transition test ----------
 
 // newCloudFileInstance creates a file-backed VaultInstance with cloud storage.
 // Sealed chunks are uploaded to the in-memory blobstore and local files deleted,
-// matching production cloud inst behavior.
+// matching production cloud instance behavior.
 func newCloudFileInstance(t *testing.T, vaultID glid.GLID, store blobstore.Store) (*VaultInstance, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -375,7 +375,7 @@ func makeRecordWithEventID(raw string, ingesterID glid.GLID, seq uint32) chunk.R
 // Multi-node cluster transition tests
 //
 // These wire up multiple full orchestrators with in-process RemoteTransferrers,
-// multi-inst vaults with leader/follower replication, rotation policies that
+// multi-instance vaults with leader/follower replication, rotation policies that
 // create many sealed chunks, and burst ingestion to stress the transition +
 // replication pipeline under realistic conditions.
 // ==========================================================================
@@ -491,15 +491,15 @@ func (d *directChunkReplicator) RequestReplicaCatchup(ctx context.Context, leade
 // → CmdAckDelete from each → CmdFinalizeDelete on the leader. Without this,
 // expireChunk falls through to the legacy direct-delete fallback which
 // doesn't replicate, and the cluster retention assertions fail.
-func newClusterRetentionRunner(orch *Orchestrator, vaultID glid.GLID, inst *VaultInstance) *retentionRunner {
+func newClusterRetentionRunner(orch *Orchestrator, vaultID glid.GLID, vaultInst *VaultInstance) *retentionRunner {
 	return &retentionRunner{
 		isLeader:        true,
 		vaultID:         vaultID,
-		cm:              inst.Chunks,
-		im:              inst.Indexes,
+		cm:              vaultInst.Chunks,
+		im:              vaultInst.Indexes,
 		orch:            orch,
-		followerTargets: inst.FollowerTargets,
-		reconciler:      inst.Reconciler,
+		followerTargets: vaultInst.FollowerTargets,
+		reconciler:      vaultInst.Reconciler,
 		now:             time.Now,
 		logger:          slog.Default(),
 	}
@@ -509,8 +509,8 @@ func newClusterRetentionRunner(orch *Orchestrator, vaultID glid.GLID, inst *Vaul
 type clusterTestNode struct {
 	nodeID   string
 	orch     *Orchestrator
-	instances    []*VaultInstance // all inst instances on this node
-	instanceDirs []string        // filesystem directories, one per inst
+	instances    []*VaultInstance // all vault instances on this node
+	instanceDirs []string        // filesystem directories, one per instance
 }
 
 // clusterHarness holds the full multi-node cluster.
@@ -542,31 +542,31 @@ func (h *clusterHarness) countRecordsOnNode(t *testing.T, nodeID string) int64 {
 	t.Helper()
 	node := h.nodes[nodeID]
 	var total int64
-	for _, inst := range node.instances {
-		total += cursorCountRecords(t, inst.Chunks)
+	for _, vaultInst := range node.instances {
+		total += cursorCountRecords(t, vaultInst.Chunks)
 	}
 	return total
 }
 
-// countRecordsOnInstance counts cursor-verified records in a specific inst across ALL nodes.
-func (h *clusterHarness) countRecordsOnInstance(t *testing.T, instIdx int) map[string]int64 {
+// countRecordsOnInstance counts cursor-verified records in a specific instance across ALL nodes.
+func (h *clusterHarness) countRecordsOnInstance(t *testing.T, vaultIdx int) map[string]int64 {
 	t.Helper()
 	counts := make(map[string]int64)
 	for nodeID, node := range h.nodes {
-		if instIdx < len(node.instances) {
-			counts[nodeID] = cursorCountRecords(t, node.instances[instIdx].Chunks)
+		if vaultIdx < len(node.instances) {
+			counts[nodeID] = cursorCountRecords(t, node.instances[vaultIdx].Chunks)
 		}
 	}
 	return counts
 }
 
-// countChunksOnInstance counts sealed chunks in a specific inst across ALL nodes.
-func (h *clusterHarness) countChunksOnInstance(t *testing.T, instIdx int) map[string]int {
+// countChunksOnInstance counts sealed chunks in a specific instance across ALL nodes.
+func (h *clusterHarness) countChunksOnInstance(t *testing.T, vaultIdx int) map[string]int {
 	t.Helper()
 	counts := make(map[string]int)
 	for nodeID, node := range h.nodes {
-		if instIdx < len(node.instances) {
-			metas, _ := node.instances[instIdx].Chunks.List()
+		if vaultIdx < len(node.instances) {
+			metas, _ := node.instances[vaultIdx].Chunks.List()
 			counts[nodeID] = len(metas)
 		}
 	}
@@ -579,7 +579,7 @@ func (h *clusterHarness) countChunksOnInstance(t *testing.T, instIdx int) map[st
 // Layout:
 //   - nodeIDs[0] is the leader for all vaults
 //   - nodeIDs[1:] are followers for all vaults
-//   - Each inst gets its own TempDir per node (real filesystem I/O)
+//   - Each instance gets its own TempDir per node (real filesystem I/O)
 //   - rotationRecords controls the rotation policy (e.g., 100 = seal every 100 records)
 //   - The leader's vaults have FollowerTargets pointing to all followers
 //   - Every node has a directTransferrer wired to all other nodes
@@ -605,24 +605,24 @@ func newClusterLifecycleLogger(t *testing.T) *slog.Logger {
 	return slog.New(handler)
 }
 
-func setupCluster(t *testing.T, nodeIDs []string, instCount int, rotationRecords uint64) *clusterHarness {
+func setupCluster(t *testing.T, nodeIDs []string, vaultCount int, rotationRecords uint64) *clusterHarness {
 	t.Helper()
 	if len(nodeIDs) < 2 {
 		t.Fatal("setupCluster needs at least 2 nodes")
 	}
 	leaderID := nodeIDs[0]
 	vaultID := glid.New()
-	// Single inst per vault sharing the vault's ID. instCount is
+	// Single instance per vault sharing the vault's ID. vaultCount is
 	// always 1 in current callers; the slice survives only for legacy
 	// fixture wiring.
-	vaultIDs := make([]glid.GLID, instCount)
-	for i := range instCount {
+	vaultIDs := make([]glid.GLID, vaultCount)
+	for i := range vaultCount {
 		vaultIDs[i] = vaultID
 	}
 
 	// Create config store.
 	store := sysmem.NewStore()
-	for i := range instCount {
+	for i := range vaultCount {
 		placements := make([]system.VaultPlacement, 0, len(nodeIDs))
 		placements = append(placements, system.VaultPlacement{
 			StorageID: system.SyntheticStorageID(leaderID), Leader: true,
@@ -659,22 +659,22 @@ func setupCluster(t *testing.T, nodeIDs []string, instCount int, rotationRecords
 		orchs[nid] = orch
 
 		isLeader := nid == leaderID
-		instances := make([]*VaultInstance, instCount)
-		instanceDirs := make([]string, instCount)
-		for i := range instCount {
+		instances := make([]*VaultInstance, vaultCount)
+		instanceDirs := make([]string, vaultCount)
+		for i := range vaultCount {
 			dir := t.TempDir()
 			instanceDirs[i] = dir
 			cm, cmErr := chunkfile.NewManager(chunkfile.Config{
 				Dir:            dir,
 				Now:            time.Now,
 				RotationPolicy: chunk.NewRecordCountPolicy(rotationRecords),
-				Logger:         nodeLogger.With("inst", fmt.Sprintf("inst-%d", i)),
+				Logger:         nodeLogger.With("vault", fmt.Sprintf("vault-%d", i)),
 			})
 			if cmErr != nil {
 				t.Fatal(cmErr)
 			}
 			im := indexfile.NewManager(dir, nil, nil)
-			inst := &VaultInstance{
+			vaultInst := &VaultInstance{
 				VaultID:  vaultIDs[i],
 				Type:    "file",
 				Chunks:  cm,
@@ -682,15 +682,15 @@ func setupCluster(t *testing.T, nodeIDs []string, instCount int, rotationRecords
 				Query:   query.New(cm, im, nil),
 			}
 			if isLeader {
-				inst.FollowerTargets = followerTargets
+				vaultInst.FollowerTargets = followerTargets
 			} else {
-				inst.IsFollower = true
+				vaultInst.IsFollower = true
 			}
-			instances[i] = inst
+			instances[i] = vaultInst
 		}
 
 		// Phase 2 (gastrolog-3iy5l): vaults are single-instance. Use the
-		// first inst as the vault's instance; instCount > 1 is unused
+		// first instance as the vault's instance; vaultCount > 1 is unused
 		// post-collapse (callers that asked for it were transition tests
 		// that have been removed).
 		vault := NewVault(vaultID, instances[0])
@@ -724,8 +724,8 @@ func setupCluster(t *testing.T, nodeIDs []string, instCount int, rotationRecords
 			n.orch.Stop()
 		}
 		for _, n := range nodes {
-			for _, inst := range n.instances {
-				_ = inst.Chunks.Close()
+			for _, vaultInst := range n.instances {
+				_ = vaultInst.Chunks.Close()
 			}
 		}
 	})
@@ -747,26 +747,26 @@ func setupCluster(t *testing.T, nodeIDs []string, instCount int, rotationRecords
 // followers' active chunks would stay active, causing forwardDelete to
 // fail with ErrActiveChunk. The leader's production seal-on-rotation path
 // uses sealRemoteFollowers; tests that manually seal must do the same.
-func (h *clusterHarness) sealAndReplicate(t *testing.T, leaderNode *clusterTestNode, instIdx int) {
+func (h *clusterHarness) sealAndReplicate(t *testing.T, leaderNode *clusterTestNode, vaultIdx int) {
 	t.Helper()
-	inst := leaderNode.instances[instIdx]
-	active := inst.Chunks.Active()
+	vaultInst := leaderNode.instances[vaultIdx]
+	active := vaultInst.Chunks.Active()
 	if active == nil || active.RecordCount == 0 {
 		return
 	}
 	chunkID := active.ID
-	if err := inst.Chunks.Seal(); err != nil {
-		t.Fatalf("seal inst %d: %v", instIdx, err)
+	if err := vaultInst.Chunks.Seal(); err != nil {
+		t.Fatalf("seal vaultInst %d: %v", vaultIdx, err)
 	}
 	// Propagate seal to all follower nodes.
 	for _, nid := range h.allNodeIDs() {
 		if nid == leaderNode.nodeID {
 			continue
 		}
-		finst := h.nodes[nid].instances[instIdx]
-		if active := finst.Chunks.Active(); active != nil && active.ID == chunkID {
-			if err := finst.Chunks.Seal(); err != nil {
-				t.Fatalf("seal follower %s inst %d: %v", nid, instIdx, err)
+		followerVault := h.nodes[nid].instances[vaultIdx]
+		if active := followerVault.Chunks.Active(); active != nil && active.ID == chunkID {
+			if err := followerVault.Chunks.Seal(); err != nil {
+				t.Fatalf("seal follower %s vaultInst %d: %v", nid, vaultIdx, err)
 			}
 		}
 	}
@@ -776,18 +776,18 @@ func (h *clusterHarness) sealAndReplicate(t *testing.T, leaderNode *clusterTestN
 	leaderNode.orch.Scheduler().WaitIdle(30 * time.Second)
 }
 
-// assertInstDirEmpty verifies that a inst's filesystem directory contains no
+// assertVaultDirEmpty verifies that an instance's filesystem directory contains no
 // chunk subdirectories on ANY node. This goes below the chunk manager API —
 // it checks the actual filesystem to catch silent delete failures, leaked
 // directories, and stale files.
-func (h *clusterHarness) assertInstDirEmpty(t *testing.T, instIdx int) {
+func (h *clusterHarness) assertVaultDirEmpty(t *testing.T, vaultIdx int) {
 	t.Helper()
 	// Poll briefly — async chunk deletion may lag under CPU contention.
 	deadline := time.Now().Add(60 * time.Second)
 	for {
 		allEmpty := true
 		for _, nid := range h.allNodeIDs() {
-			if len(h.chunkDirsOnNode(nid, instIdx)) > 0 {
+			if len(h.chunkDirsOnNode(nid, vaultIdx)) > 0 {
 				allEmpty = false
 				break
 			}
@@ -801,16 +801,16 @@ func (h *clusterHarness) assertInstDirEmpty(t *testing.T, instIdx int) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	for _, nid := range h.allNodeIDs() {
-		chunkDirs := h.chunkDirsOnNode(nid, instIdx)
+		chunkDirs := h.chunkDirsOnNode(nid, vaultIdx)
 		if len(chunkDirs) > 0 {
-			t.Errorf("inst %d on %s: %d chunk directories still on disk: %v",
-				instIdx, nid, len(chunkDirs), chunkDirs)
+			t.Errorf("vault %d on %s: %d chunk directories still on disk: %v",
+				vaultIdx, nid, len(chunkDirs), chunkDirs)
 		}
 	}
 }
 
-func (h *clusterHarness) chunkDirsOnNode(nid string, instIdx int) []string {
-	dir := h.nodes[nid].instanceDirs[instIdx]
+func (h *clusterHarness) chunkDirsOnNode(nid string, vaultIdx int) []string {
+	dir := h.nodes[nid].instanceDirs[vaultIdx]
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
@@ -824,10 +824,10 @@ func (h *clusterHarness) chunkDirsOnNode(nid string, instIdx int) []string {
 	return dirs
 }
 
-// listChunkDirsOnNode returns the chunk directory names in a inst dir on a node.
-func (h *clusterHarness) listChunkDirsOnNode(t *testing.T, nodeID string, instIdx int) []string {
+// listChunkDirsOnNode returns the chunk directory names in an instance dir on a node.
+func (h *clusterHarness) listChunkDirsOnNode(t *testing.T, nodeID string, vaultIdx int) []string {
 	t.Helper()
-	dir := h.nodes[nodeID].instanceDirs[instIdx]
+	dir := h.nodes[nodeID].instanceDirs[vaultIdx]
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("ReadDir(%s): %v", dir, err)
@@ -881,7 +881,7 @@ func waitForDrainJob(t *testing.T, orch *Orchestrator, vaultID glid.GLID, timeou
 
 
 
-// TestExplicitStorageLeaderGetsRotationPolicy verifies that a inst built via
+// TestExplicitStorageLeaderGetsRotationPolicy verifies that an instance built via
 // buildInstanceForStorage (explicit placement path) applies the rotation
 // policy from system. Regression test for a gap where applyRotationPolicy was
 // only called in buildInstance but not buildInstanceForStorage.

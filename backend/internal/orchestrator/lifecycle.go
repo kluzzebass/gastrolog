@@ -497,16 +497,16 @@ func (o *Orchestrator) RebuildMissingIndexes(ctx context.Context) error {
 	return nil
 }
 
-// rebuildVaultIndexes checks a single inst for sealed chunks with incomplete indexes.
-func (o *Orchestrator) rebuildVaultIndexes(ctx context.Context, vaultID glid.GLID, inst *VaultInstance) error {
+// rebuildVaultIndexes checks a single instance for sealed chunks with incomplete indexes.
+func (o *Orchestrator) rebuildVaultIndexes(ctx context.Context, vaultID glid.GLID, vaultInst *VaultInstance) error {
 	// Skip vaults where the post-seal pipeline handles indexes.
-	if proc, ok := inst.Chunks.(chunk.ChunkPostSealProcessor); ok {
+	if proc, ok := vaultInst.Chunks.(chunk.ChunkPostSealProcessor); ok {
 		if !proc.HasIndexBuilders() {
 			return nil
 		}
 	}
 
-	metas, err := inst.Chunks.List()
+	metas, err := vaultInst.Chunks.List()
 	if err != nil {
 		return err
 	}
@@ -515,36 +515,36 @@ func (o *Orchestrator) rebuildVaultIndexes(ctx context.Context, vaultID glid.GLI
 		// Phase 3 (gastrolog-1huz5): rebuild indexes only for chunks
 		// the FSM considers Sealed — Sealing chunks have no GLCB yet,
 		// so the index builder would fail to read records.
-		if inst.OverlayFromFSM != nil {
-			meta = inst.OverlayFromFSM(meta)
+		if vaultInst.OverlayFromFSM != nil {
+			meta = vaultInst.OverlayFromFSM(meta)
 		}
 		if !meta.Sealed {
 			continue
 		}
-		if meta.CloudBacked && inst.IsFollower {
+		if meta.CloudBacked && vaultInst.IsFollower {
 			continue // no local data — adopted via RegisterCloudChunk
 		}
-		o.scheduleIndexRebuildIfNeeded(ctx, vaultID, inst, meta)
+		o.scheduleIndexRebuildIfNeeded(ctx, vaultID, vaultInst, meta)
 	}
 	return nil
 }
 
-func (o *Orchestrator) scheduleIndexRebuildIfNeeded(ctx context.Context, vaultID glid.GLID, inst *VaultInstance, meta chunk.ChunkMeta) {
-	complete, err := inst.Indexes.IndexesComplete(meta.ID)
+func (o *Orchestrator) scheduleIndexRebuildIfNeeded(ctx context.Context, vaultID glid.GLID, vaultInst *VaultInstance, meta chunk.ChunkMeta) {
+	complete, err := vaultInst.Indexes.IndexesComplete(meta.ID)
 	if err != nil || complete {
 		return
 	}
 	// Followers can host many replicated chunks; eagerly rebuilding every
 	// missing index on each follower at startup causes N-way rebuild storms.
 	// Keep bootstrap rebuilds on leaders only.
-	if inst.IsFollower {
+	if vaultInst.IsFollower {
 		return
 	}
 	o.logger.Info("rebuilding missing indexes",
 		"vault", vaultID, "chunk", meta.ID.String())
-	name := fmt.Sprintf("index-rebuild:%s:%s:%s", vaultID, inst.VaultID, meta.ID)
+	name := fmt.Sprintf("index-rebuild:%s:%s:%s", vaultID, vaultInst.VaultID, meta.ID)
 	runBuild := func(runCtx context.Context, chunkID chunk.ChunkID) error {
-		return inst.Indexes.BuildIndexes(runCtx, chunkID)
+		return vaultInst.Indexes.BuildIndexes(runCtx, chunkID)
 	}
 	if err := o.scheduler.RunOnce(name, runBuild, ctx, meta.ID); err != nil {
 		o.logger.Warn("failed to schedule index rebuild", "name", name, "error", err)

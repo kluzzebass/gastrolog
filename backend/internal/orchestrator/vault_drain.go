@@ -10,50 +10,49 @@ import (
 	"gastrolog/internal/system"
 )
 
-// DrainMode determines where chunks go during a inst drain.
+// DrainMode determines where chunks go during an instance drain.
 type DrainMode int
 
 const (
-	// DrainDecommission transitions chunks to the next inst in the vault chain.
+	// DrainDecommission transitions chunks to the next instance in the vault chain.
 	DrainDecommission DrainMode = iota
-	// DrainRebalance replicates chunks to the same inst on a different node.
+	// DrainRebalance replicates chunks to the same instance on a different node.
 	DrainRebalance
 )
 
-// instDrainState tracks an in-progress inst drain.
-type instDrainState struct {
+// vaultDrainState tracks an in-progress vault drain.
+type vaultDrainState struct {
 	VaultID      glid.GLID
-	InstanceID       glid.GLID
 	Mode         DrainMode
 	TargetNodeID string // only for rebalance mode
 	JobID        string
 	Cancel       context.CancelFunc
 }
 
-// ErrInstDraining is returned when an operation targets a inst that is mid-drain.
-var ErrInstDraining = errors.New("inst is draining")
+// ErrVaultDraining is returned when an operation targets a vault that is mid-drain.
+var ErrVaultDraining = errors.New("vault is draining")
 
-// instDrainKey returns the map key for the instDraining map.
-func instDrainKey(vaultID glid.GLID) string {
+// vaultDrainKey returns the map key for the vaultDraining map.
+func vaultDrainKey(vaultID glid.GLID) string {
 	return vaultID.String() + ":" + vaultID.String()
 }
 
-// DrainInstance starts an async drain of a inst's chunks. In decommission mode,
-// chunks transition to the next inst in the vault chain. In rebalance mode,
-// chunks replicate to the same inst on the target node.
+// DrainInstance starts an async drain of an instance's chunks. In decommission mode,
+// chunks transition to the next instance in the vault chain. In rebalance mode,
+// chunks replicate to the same instance on the target node.
 //
 // Role: **vault leader only**. The drain walks the vault's chunks and applies
 // CmdDeleteChunk / CmdTransitionStreamed to the vault control-plane Raft,
-// which only the leader may write to. Callers must check `inst.IsLeader()`
+// which only the leader may write to. Callers must check `instance.IsLeader()`
 // before invoking — callers in dispatch do so explicitly.
 //
 // Readiness: no explicit Vault.ReadinessErr gate. Drain is itself a
-// readiness-affecting state change, so it runs as soon as the inst instance
-// is present. Individual operations inside the drain use the standard inst
+// readiness-affecting state change, so it runs as soon as the vault instance
+// is present. Individual operations inside the drain use the standard instance
 // FSM gates.
 func (o *Orchestrator) DrainInstance(ctx context.Context, vaultID glid.GLID, mode DrainMode, targetNodeID string) error {
 	if _, err := o.loadSystem(ctx); err != nil {
-		return fmt.Errorf("load config for inst drain: %w", err)
+		return fmt.Errorf("load config for vault drain: %w", err)
 	}
 
 	o.mu.Lock()
@@ -63,18 +62,18 @@ func (o *Orchestrator) DrainInstance(ctx context.Context, vaultID glid.GLID, mod
 		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 
-	key := instDrainKey(vaultID)
-	if _, already := o.instDraining[key]; already {
+	key := vaultDrainKey(vaultID)
+	if _, already := o.vaultDraining[key]; already {
 		o.mu.Unlock()
 		return fmt.Errorf("vault %s in vault %s is already draining", vaultID, vaultID)
 	}
 
-	// Find the inst instance.
-	var inst *VaultInstance
+	// Find the vault instance.
+	var vaultInst *VaultInstance
 	if vault.Instance != nil && vault.Instance.VaultID == vaultID {
-		inst = vault.Instance
+		vaultInst = vault.Instance
 	}
-	if inst == nil {
+	if vaultInst == nil {
 		o.mu.Unlock()
 		return fmt.Errorf("vault %s not found in vault %s", vaultID, vaultID)
 	}
@@ -86,7 +85,7 @@ func (o *Orchestrator) DrainInstance(ctx context.Context, vaultID glid.GLID, mod
 		// collapsed it) and the transition concept is gone with it.
 		// Decommission drain just fires retention events on every chunk —
 		// the routing engine + retention path produce the same observable
-		// behavior the old "transition to next inst" produced.
+		// behavior the old "transition to next instance" produced.
 	case DrainRebalance:
 		if targetNodeID == "" {
 			o.mu.Unlock()
@@ -100,64 +99,63 @@ func (o *Orchestrator) DrainInstance(ctx context.Context, vaultID glid.GLID, mod
 
 	// Mark as draining.
 	drainCtx, cancel := context.WithCancel(context.Background())
-	ds := &instDrainState{
+	ds := &vaultDrainState{
 		VaultID:      vaultID,
-		InstanceID:       vaultID,
 		Mode:         mode,
 		TargetNodeID: targetNodeID,
 		Cancel:       cancel,
 	}
-	o.instDraining[key] = ds
+	o.vaultDraining[key] = ds
 
-	// Remove retention/rotation jobs for this inst so they don't interfere.
-	delete(o.retention, retentionKey(inst.VaultID, inst.StorageID))
+	// Remove retention/rotation jobs for this instance so they don't interfere.
+	delete(o.retention, retentionKey(vaultInst.VaultID, vaultInst.StorageID))
 
 	// Seal the active chunk.
-	cm := inst.Chunks
+	cm := vaultInst.Chunks
 	o.mu.Unlock()
 
 	if active := cm.Active(); active != nil {
 		if err := cm.Seal(); err != nil {
-			o.logger.Warn("inst drain: failed to seal active chunk",
+			o.logger.Warn("vault drain: failed to seal active chunk",
 				"vault", vaultID, "error", err)
 		}
 	}
 
 	// Submit async drain job.
-	jobName := fmt.Sprintf("drain-inst:%s:%s", vaultID, vaultID)
+	jobName := fmt.Sprintf("drain-vault:%s:%s", vaultID, vaultID)
 	jobID := o.scheduler.Submit(jobName, func(ctx2 context.Context, job *JobProgress) {
-		o.instDrainWorker(drainCtx, vaultID, mode, targetNodeID)
+		o.vaultDrainWorker(drainCtx, vaultID, mode, targetNodeID)
 	})
 	o.scheduler.Describe(jobName, fmt.Sprintf("Drain vault %s from vault", vaultID))
 
 	o.mu.Lock()
-	if d, ok := o.instDraining[key]; ok {
+	if d, ok := o.vaultDraining[key]; ok {
 		d.JobID = jobID
 	}
 	o.mu.Unlock()
 
-	o.logger.Info("inst drain started",
+	o.logger.Info("vault drain started",
 		"vault", vaultID,
 		"mode", drainModeName(mode), "target", targetNodeID)
 	return nil
 }
 
-// instDrainWorker is the async job that transfers all chunks and cleans up.
-func (o *Orchestrator) instDrainWorker(ctx context.Context, vaultID glid.GLID, mode DrainMode, targetNodeID string) {
+// vaultDrainWorker is the async job that transfers all chunks and cleans up.
+func (o *Orchestrator) vaultDrainWorker(ctx context.Context, vaultID glid.GLID, mode DrainMode, targetNodeID string) {
 	// Always clean up drain state on exit — leaked state keeps Raft groups alive.
 	// But only notify completion (vault config update) on success.
 	success := false
 	defer func() {
 		if success {
-			o.finishInstDrain(vaultID)
+			o.finishVaultDrain(vaultID)
 		} else {
-			o.cancelInstDrainState(vaultID)
+			o.cancelVaultDrainState(vaultID)
 		}
 	}()
 
 	sys, err := o.loadSystem(ctx)
 	if err != nil {
-		o.logger.Error("inst drain: failed to load config", "vault", vaultID, "error", err)
+		o.logger.Error("vault drain: failed to load config", "vault", vaultID, "error", err)
 		return
 	}
 
@@ -167,37 +165,37 @@ func (o *Orchestrator) instDrainWorker(ctx context.Context, vaultID glid.GLID, m
 		o.mu.RUnlock()
 		return
 	}
-	var inst *VaultInstance
+	var vaultInst *VaultInstance
 	if vault.Instance != nil && vault.Instance.VaultID == vaultID {
-		inst = vault.Instance
+		vaultInst = vault.Instance
 	}
 	o.mu.RUnlock()
 
-	if inst == nil {
+	if vaultInst == nil {
 		return
 	}
 
 	// Transfer all sealed chunks.
-	if !o.drainInstChunks(ctx, sys, vaultID, inst, mode, targetNodeID) {
+	if !o.drainVaultChunks(ctx, sys, vaultID, vaultInst, mode, targetNodeID) {
 		return // context cancelled or error — defer handles cleanup
 	}
 
 	// Final seal to catch any stragglers.
-	if active := inst.Chunks.Active(); active != nil {
-		if err := inst.Chunks.Seal(); err != nil {
-			o.logger.Warn("inst drain: final seal failed", "vault", vaultID, "error", err)
+	if active := vaultInst.Chunks.Active(); active != nil {
+		if err := vaultInst.Chunks.Seal(); err != nil {
+			o.logger.Warn("vault drain: final seal failed", "vault", vaultID, "error", err)
 		}
-		o.drainInstChunks(ctx, sys, vaultID, inst, mode, targetNodeID)
+		o.drainVaultChunks(ctx, sys, vaultID, vaultInst, mode, targetNodeID)
 	}
 
 	success = true
 }
 
-// drainInstChunks transfers all sealed chunks from the inst. Returns false if cancelled.
-func (o *Orchestrator) drainInstChunks(ctx context.Context, sys *system.System, vaultID glid.GLID, inst *VaultInstance, mode DrainMode, targetNodeID string) bool {
-	metas, err := inst.Chunks.List()
+// drainVaultChunks transfers all sealed chunks from the instance. Returns false if cancelled.
+func (o *Orchestrator) drainVaultChunks(ctx context.Context, sys *system.System, vaultID glid.GLID, vaultInst *VaultInstance, mode DrainMode, targetNodeID string) bool {
+	metas, err := vaultInst.Chunks.List()
 	if err != nil {
-		o.logger.Error("inst drain: list chunks failed", "vault", vaultID, "error", err)
+		o.logger.Error("vault drain: list chunks failed", "vault", vaultID, "error", err)
 		return false
 	}
 
@@ -206,8 +204,8 @@ func (o *Orchestrator) drainInstChunks(ctx context.Context, sys *system.System, 
 		// chunks (active-form sealed locally but GLCB not yet committed)
 		// are skipped. Drain ships sealed-form GLCBs; a Sealing chunk
 		// would race with concurrent PostSealProcess.
-		if inst.OverlayFromFSM != nil {
-			meta = inst.OverlayFromFSM(meta)
+		if vaultInst.OverlayFromFSM != nil {
+			meta = vaultInst.OverlayFromFSM(meta)
 		}
 		if !meta.Sealed {
 			continue
@@ -218,8 +216,8 @@ func (o *Orchestrator) drainInstChunks(ctx context.Context, sys *system.System, 
 		default:
 		}
 
-		if err := o.drainOneChunk(ctx, sys, vaultID, inst, meta.ID, mode, targetNodeID); err != nil {
-			o.logger.Error("inst drain: chunk transfer failed",
+		if err := o.drainOneChunk(ctx, sys, vaultID, vaultInst, meta.ID, mode, targetNodeID); err != nil {
+			o.logger.Error("vault drain: chunk transfer failed",
 				"vault", vaultID, "chunk", meta.ID, "error", err)
 			continue // best effort — try the rest
 		}
@@ -245,8 +243,8 @@ func drainCursorToRecords(cursor chunk.RecordCursor) ([]chunk.Record, error) {
 }
 
 // drainOneChunk transfers a single chunk and deletes the source.
-func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, vaultID glid.GLID, inst *VaultInstance, chunkID chunk.ChunkID, mode DrainMode, targetNodeID string) error {
-	cursor, err := inst.Chunks.OpenCursor(chunkID)
+func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, vaultID glid.GLID, vaultInst *VaultInstance, chunkID chunk.ChunkID, mode DrainMode, targetNodeID string) error {
+	cursor, err := vaultInst.Chunks.OpenCursor(chunkID)
 	if err != nil {
 		return fmt.Errorf("open cursor: %w", err)
 	}
@@ -264,7 +262,7 @@ func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, va
 
 	switch mode {
 	case DrainDecommission:
-		// Phase 4 (gastrolog-42f9z): no "next inst" anymore. Decommission
+		// Phase 4 (gastrolog-42f9z): no "next instance" anymore. Decommission
 		// just destroys the chunks — equivalent to firing a retention
 		// event with no matching retention-trigger routes (the legacy
 		// expire behavior). Phase 5's richer routing table will let
@@ -275,7 +273,7 @@ func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, va
 
 	case DrainRebalance:
 		if o.chunkReplicator == nil {
-			return errors.New("inst drain rebalance: inst replicator not configured")
+			return errors.New("vault drain rebalance: vaultInst replicator not configured")
 		}
 		records, err := drainCursorToRecords(cursor)
 		if err != nil {
@@ -293,13 +291,13 @@ func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, va
 
 	// Delete source chunk via the receipt protocol when wired (production)
 	// or via direct local cleanup otherwise (memory-mode vaults without a
-	// reconciler). Reason "inst-drain" lands in pendingDeletes audit. See
+	// reconciler). Reason "instance-drain" lands in pendingDeletes audit. See
 	// gastrolog-51gme.
-	if err := o.deleteDrainSource(inst, vaultID, chunkID); err != nil {
+	if err := o.deleteDrainSource(vaultInst, vaultID, chunkID); err != nil {
 		return err
 	}
 
-	o.logger.Info("inst drain: chunk transferred",
+	o.logger.Info("vault drain: chunk transferred",
 		"vault", vaultID, "chunk", chunkID, "mode", drainModeName(mode))
 	return nil
 }
@@ -308,45 +306,45 @@ func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, va
 // through the receipt protocol when a reconciler is wired; falls back to
 // the direct local delete for memory-mode vaults. Extracted from
 // drainOneChunk to keep nestif within lint thresholds.
-func (o *Orchestrator) deleteDrainSource(inst *VaultInstance, vaultID glid.GLID, chunkID chunk.ChunkID) error {
-	if inst.Reconciler != nil {
-		if err := inst.Reconciler.deleteChunk(chunkID, "inst-drain", o.placementMembership(inst)); err != nil {
+func (o *Orchestrator) deleteDrainSource(vaultInst *VaultInstance, vaultID glid.GLID, chunkID chunk.ChunkID) error {
+	if vaultInst.Reconciler != nil {
+		if err := vaultInst.Reconciler.deleteChunk(chunkID, "vault-drain", o.placementMembership(vaultInst)); err != nil {
 			return fmt.Errorf("delete source chunk: %w", err)
 		}
 		return nil
 	}
-	if inst.Indexes != nil {
-		if err := inst.Indexes.DeleteIndexes(chunkID); err != nil {
-			o.logger.Warn("inst drain: delete source indexes failed",
+	if vaultInst.Indexes != nil {
+		if err := vaultInst.Indexes.DeleteIndexes(chunkID); err != nil {
+			o.logger.Warn("vault drain: delete source indexes failed",
 				"vault", vaultID, "chunk", chunkID, "error", err)
 		}
 	}
-	if err := inst.Chunks.Delete(chunkID); err != nil {
+	if err := vaultInst.Chunks.Delete(chunkID); err != nil {
 		return fmt.Errorf("delete source chunk: %w", err)
 	}
 	return nil
 }
 
-// finishInstDrain cleans up after a completed or cancelled inst drain.
-func (o *Orchestrator) finishInstDrain(vaultID glid.GLID) {
-	key := instDrainKey(vaultID)
+// finishVaultDrain cleans up after a completed or cancelled instance drain.
+func (o *Orchestrator) finishVaultDrain(vaultID glid.GLID) {
+	key := vaultDrainKey(vaultID)
 
 	o.mu.Lock()
-	ds, ok := o.instDraining[key]
+	ds, ok := o.vaultDraining[key]
 	if ok {
-		delete(o.instDraining, key)
+		delete(o.vaultDraining, key)
 		if ds.Cancel != nil {
 			ds.Cancel()
 		}
 	}
 	o.mu.Unlock()
 
-	// Remove the inst instance (closes managers, deletes remaining data).
+	// Remove the vault instance (closes managers, deletes remaining data).
 	// Drain has already migrated chunks to the target; the destructive wipe
-	// on the source inst is the correct semantics here.
+	// on the source instance is the correct semantics here.
 	_ = vaultID
 	if o.DeleteVaultInstance(vaultID) {
-		o.logger.Info("inst drain: completed",
+		o.logger.Info("vault drain: completed",
 			"vault", vaultID)
 	}
 
@@ -355,16 +353,16 @@ func (o *Orchestrator) finishInstDrain(vaultID glid.GLID) {
 	// under the per-vault model.
 }
 
-// cancelInstDrainState removes drain state without triggering vault config
+// cancelVaultDrainState removes drain state without triggering vault config
 // updates or Raft group destruction. Used when the drain worker exits early
 // (error, vault already gone, etc.) to prevent leaked drain state.
-func (o *Orchestrator) cancelInstDrainState(vaultID glid.GLID) {
-	key := instDrainKey(vaultID)
+func (o *Orchestrator) cancelVaultDrainState(vaultID glid.GLID) {
+	key := vaultDrainKey(vaultID)
 
 	o.mu.Lock()
-	ds, ok := o.instDraining[key]
+	ds, ok := o.vaultDraining[key]
 	if ok {
-		delete(o.instDraining, key)
+		delete(o.vaultDraining, key)
 		if ds.Cancel != nil {
 			ds.Cancel()
 		}
@@ -372,37 +370,37 @@ func (o *Orchestrator) cancelInstDrainState(vaultID glid.GLID) {
 	o.mu.Unlock()
 
 	if ok {
-		o.logger.Info("inst drain: state cleaned up (drain did not complete)",
+		o.logger.Info("vault drain: state cleaned up (drain did not complete)",
 			"vault", vaultID)
 	}
 }
 
-// CancelInstanceDrain aborts an in-progress inst drain. The inst remains in the
+// CancelInstanceDrain aborts an in-progress instance drain. The instance remains in the
 // vault with whatever chunks haven't been transferred yet.
 func (o *Orchestrator) CancelInstanceDrain(vaultID glid.GLID) error {
-	key := instDrainKey(vaultID)
+	key := vaultDrainKey(vaultID)
 
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
-	ds, ok := o.instDraining[key]
+	ds, ok := o.vaultDraining[key]
 	if !ok {
 		return fmt.Errorf("vault %s in vault %s is not draining", vaultID, vaultID)
 	}
 
 	ds.Cancel()
-	delete(o.instDraining, key)
+	delete(o.vaultDraining, key)
 	o.scheduler.RemoveJob(ds.JobID)
 
-	o.logger.Info("inst drain: cancelled", "vault", vaultID)
+	o.logger.Info("vault drain: cancelled", "vault", vaultID)
 	return nil
 }
 
-// IsInstanceDraining returns true if the given inst is currently draining.
+// IsInstanceDraining returns true if the given instance is currently draining.
 func (o *Orchestrator) IsInstanceDraining(vaultID glid.GLID) bool {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	_, ok := o.instDraining[instDrainKey(vaultID)]
+	_, ok := o.vaultDraining[vaultDrainKey(vaultID)]
 	return ok
 }
 

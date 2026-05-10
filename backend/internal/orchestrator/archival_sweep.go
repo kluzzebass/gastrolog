@@ -92,8 +92,8 @@ func (o *Orchestrator) archivalSweepAll() {
 		if vault == nil {
 			continue
 		}
-		inst := vault.Instance
-		if inst == nil || !inst.IsLeader() {
+		vaultInst := vault.Instance
+		if vaultInst == nil || !vaultInst.IsLeader() {
 			continue
 		}
 		if vaultCfg.CloudServiceID == nil {
@@ -103,19 +103,19 @@ func (o *Orchestrator) archivalSweepAll() {
 		if !ok {
 			continue
 		}
-		o.archivalSweepVault(inst, cs, now)
+		o.archivalSweepVault(vaultInst, cs, now)
 	}
 }
 
 // archivalSweepVault evaluates one vault's cloud chunks against the transition chain.
-func (o *Orchestrator) archivalSweepVault(inst *VaultInstance, cs *system.CloudService, now time.Time) {
-	metas, err := inst.Chunks.List()
+func (o *Orchestrator) archivalSweepVault(vaultInst *VaultInstance, cs *system.CloudService, now time.Time) {
+	metas, err := vaultInst.Chunks.List()
 	if err != nil {
-		o.logger.Warn("archival sweep: list chunks failed", "vault", inst.VaultID, "error", err)
+		o.logger.Warn("archival sweep: list chunks failed", "vault", vaultInst.VaultID, "error", err)
 		return
 	}
 
-	archiver, ok := inst.Chunks.(chunk.ChunkArchiver)
+	archiver, ok := vaultInst.Chunks.(chunk.ChunkArchiver)
 	if !ok {
 		return
 	}
@@ -124,8 +124,8 @@ func (o *Orchestrator) archivalSweepVault(inst *VaultInstance, cs *system.CloudS
 		// Phase 3 (gastrolog-1huz5): gate on FSM-Sealed; archive only
 		// chunks whose GLCB has been committed. Sealing chunks have
 		// closed active-form files but no GLCB yet.
-		if inst.OverlayFromFSM != nil {
-			m = inst.OverlayFromFSM(m)
+		if vaultInst.OverlayFromFSM != nil {
+			m = vaultInst.OverlayFromFSM(m)
 		}
 		if !m.Sealed || !m.CloudBacked {
 			continue
@@ -142,7 +142,7 @@ func (o *Orchestrator) archivalSweepVault(inst *VaultInstance, cs *system.CloudS
 		}
 
 		if target.StorageClass == "" {
-			o.archivalExpire(inst, m.ID, age)
+			o.archivalExpire(vaultInst, m.ID, age)
 			continue
 		}
 
@@ -166,9 +166,9 @@ func (o *Orchestrator) archivalSweepVault(inst *VaultInstance, cs *system.CloudS
 // reconciler is wired (every node drops its index entry symmetrically);
 // falls back to the local Manager.Delete path for memory-mode vaults without
 // Raft. See gastrolog-51gme step 6.
-func (o *Orchestrator) archivalExpire(inst *VaultInstance, id chunk.ChunkID, age time.Duration) {
-	if inst.Reconciler != nil {
-		if err := inst.Reconciler.deleteChunk(id, "archived-to-glacier", o.placementMembership(inst)); err != nil {
+func (o *Orchestrator) archivalExpire(vaultInst *VaultInstance, id chunk.ChunkID, age time.Duration) {
+	if vaultInst.Reconciler != nil {
+		if err := vaultInst.Reconciler.deleteChunk(id, "archived-to-glacier", o.placementMembership(vaultInst)); err != nil {
 			o.logger.Warn("archival sweep: reconciler delete failed",
 				"chunk", id.String(), "error", err)
 			return
@@ -177,7 +177,7 @@ func (o *Orchestrator) archivalExpire(inst *VaultInstance, id chunk.ChunkID, age
 			"chunk", id.String(), "age", age)
 		return
 	}
-	if err := inst.Chunks.Delete(id); err != nil {
+	if err := vaultInst.Chunks.Delete(id); err != nil {
 		o.logger.Warn("archival sweep: delete failed",
 			"chunk", id.String(), "error", err)
 		return
@@ -231,8 +231,8 @@ func (o *Orchestrator) reconcileSweepAll() {
 		if vault == nil {
 			continue
 		}
-		inst := vault.Instance
-		if inst == nil || !inst.IsLeader() {
+		vaultInst := vault.Instance
+		if vaultInst == nil || !vaultInst.IsLeader() {
 			continue
 		}
 		if vaultCfg.CloudServiceID == nil {
@@ -242,13 +242,13 @@ func (o *Orchestrator) reconcileSweepAll() {
 		if cs == nil {
 			continue
 		}
-		o.reconcileVault(inst, cs, now)
+		o.reconcileVault(vaultInst, cs, now)
 	}
 }
 
 // reconcileVault checks one vault's cloud chunks against the blob store.
-func (o *Orchestrator) reconcileVault(inst *VaultInstance, cs *system.CloudService, now time.Time) {
-	metas, err := inst.Chunks.List()
+func (o *Orchestrator) reconcileVault(vaultInst *VaultInstance, cs *system.CloudService, now time.Time) {
+	metas, err := vaultInst.Chunks.List()
 	if err != nil {
 		return
 	}
@@ -268,10 +268,10 @@ func (o *Orchestrator) reconcileVault(inst *VaultInstance, cs *system.CloudServi
 		// Tombstone propagation is faster than local cloud-index purge,
 		// so checking the tombstone here catches the gap. See
 		// gastrolog-2c96i.
-		if inst.IsTombstoned != nil && inst.IsTombstoned(m.ID) {
+		if vaultInst.IsTombstoned != nil && vaultInst.IsTombstoned(m.ID) {
 			continue
 		}
-		o.reconcileCloudChunk(inst, m.ID, graceDays, now)
+		o.reconcileCloudChunk(vaultInst, m.ID, graceDays, now)
 	}
 }
 
@@ -281,12 +281,12 @@ func (o *Orchestrator) reconcileVault(inst *VaultInstance, cs *system.CloudServi
 // in-tree warm cache (gastrolog-24m1t step 7j) and miss out-of-band lifecycle
 // deletions. Falls back to OpenCursor for managers that don't implement
 // CloudBlobChecker (no cloud store configured / non-file backends).
-func (o *Orchestrator) reconcileCloudChunk(inst *VaultInstance, id chunk.ChunkID, graceDays uint32, now time.Time) {
+func (o *Orchestrator) reconcileCloudChunk(vaultInst *VaultInstance, id chunk.ChunkID, graceDays uint32, now time.Time) {
 	var readErr error
-	if checker, ok := inst.Chunks.(chunk.CloudBlobChecker); ok {
+	if checker, ok := vaultInst.Chunks.(chunk.CloudBlobChecker); ok {
 		readErr = checker.HeadCloudBlob(id)
 	} else {
-		cursor, err := inst.Chunks.OpenCursor(id)
+		cursor, err := vaultInst.Chunks.OpenCursor(id)
 		if err == nil {
 			_ = cursor.Close()
 		}
@@ -305,18 +305,18 @@ func (o *Orchestrator) reconcileCloudChunk(inst *VaultInstance, id chunk.ChunkID
 
 	since, wasSuspect := o.suspects.suspectSince(id)
 	if !wasSuspect {
-		o.markSuspect(inst, id, now)
+		o.markSuspect(vaultInst, id, now)
 		return
 	}
 
 	suspectDays := uint32(now.Sub(since).Hours() / 24)
 	if suspectDays < graceDays {
 		o.logger.Info("reconcile: chunk still suspect",
-			"vault", inst.VaultID, "chunk", id.String(),
+			"vault", vaultInst.VaultID, "chunk", id.String(),
 			"suspectDays", suspectDays, "graceDays", graceDays)
 		return
 	}
-	o.expireSuspect(inst, id, suspectDays)
+	o.expireSuspect(vaultInst, id, suspectDays)
 }
 
 // clearSuspect drops any suspect bookkeeping for a chunk that just proved
@@ -331,7 +331,7 @@ func (o *Orchestrator) clearSuspect(id chunk.ChunkID) {
 }
 
 // markSuspect records a first-time missing-blob observation.
-func (o *Orchestrator) markSuspect(inst *VaultInstance, id chunk.ChunkID, now time.Time) {
+func (o *Orchestrator) markSuspect(vaultInst *VaultInstance, id chunk.ChunkID, now time.Time) {
 	o.suspects.mark(id, now)
 	if o.alerts != nil {
 		o.alerts.Set(
@@ -342,7 +342,7 @@ func (o *Orchestrator) markSuspect(inst *VaultInstance, id chunk.ChunkID, now ti
 		)
 	}
 	o.logger.Warn("reconcile: chunk not found, marking suspect",
-		"vault", inst.VaultID, "chunk", id.String())
+		"vault", vaultInst.VaultID, "chunk", id.String())
 }
 
 // expireSuspect removes a chunk from the index after its grace period has
@@ -350,16 +350,16 @@ func (o *Orchestrator) markSuspect(inst *VaultInstance, id chunk.ChunkID, now ti
 // when a reconciler is wired (every node drops its index entry symmetrically);
 // falls back to the local Manager.Delete path for memory-mode vaults without
 // Raft. See gastrolog-51gme step 6.
-func (o *Orchestrator) expireSuspect(inst *VaultInstance, id chunk.ChunkID, suspectDays uint32) {
-	if inst.Reconciler != nil {
-		if err := inst.Reconciler.deleteChunk(id, "cloud-blob-missing", o.placementMembership(inst)); err != nil {
+func (o *Orchestrator) expireSuspect(vaultInst *VaultInstance, id chunk.ChunkID, suspectDays uint32) {
+	if vaultInst.Reconciler != nil {
+		if err := vaultInst.Reconciler.deleteChunk(id, "cloud-blob-missing", o.placementMembership(vaultInst)); err != nil {
 			o.logger.Error("reconcile: reconciler delete failed",
-				"vault", inst.VaultID, "chunk", id.String(), "error", err)
+				"vault", vaultInst.VaultID, "chunk", id.String(), "error", err)
 			return
 		}
-	} else if err := inst.Chunks.Delete(id); err != nil {
+	} else if err := vaultInst.Chunks.Delete(id); err != nil {
 		o.logger.Error("reconcile: failed to remove suspect chunk from index",
-			"vault", inst.VaultID, "chunk", id.String(), "error", err)
+			"vault", vaultInst.VaultID, "chunk", id.String(), "error", err)
 		return
 	}
 	o.suspects.clear(id)
@@ -372,7 +372,7 @@ func (o *Orchestrator) expireSuspect(inst *VaultInstance, id chunk.ChunkID, susp
 		)
 	}
 	o.logger.Warn("reconcile: removed chunk from index after grace period",
-		"vault", inst.VaultID, "chunk", id.String(), "suspectDays", suspectDays)
+		"vault", vaultInst.VaultID, "chunk", id.String(), "suspectDays", suspectDays)
 }
 
 // isChunkSuspect returns true if the error indicates a 404 (blob not found).

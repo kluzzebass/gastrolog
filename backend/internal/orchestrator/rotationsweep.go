@@ -16,7 +16,7 @@ const (
 // rotationSweep is the single scheduled rotation job. Each tick it:
 //  1. Loads current config and applies rotation policies to all leader vaults.
 //  2. Reconciles cron rotation jobs (add new, remove stale).
-//  3. Checks each leader inst's active chunk for time-based rotation triggers.
+//  3. Checks each leader instance's active chunk for time-based rotation triggers.
 func (o *Orchestrator) rotationSweep() {
 	sys, err := o.loadSystem(context.Background())
 	if err != nil {
@@ -44,36 +44,36 @@ func (o *Orchestrator) rotationSweep() {
 			vaultCfg = findVaultConfig(cfg.Vaults, vaultID)
 		}
 
-		inst := vault.Instance
-		if inst == nil {
+		vaultInst := vault.Instance
+		if vaultInst == nil {
 			continue
 		}
-		if inst.IsFollower {
-			inst.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
+		if vaultInst.IsFollower {
+			vaultInst.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
 			continue
 		}
 
 		// Apply rotation policy + reconcile cron job + refresh replication targets.
 		if cfg != nil && vaultCfg != nil {
-			o.applyRotationFromConfig(sys, cfg, *vaultCfg, inst, activeCronJobs)
+			o.applyRotationFromConfig(sys, cfg, *vaultCfg, vaultInst, activeCronJobs)
 		}
 
 		// Check for time-based rotation triggers.
-		activeBefore := inst.Chunks.Active()
-		if trigger := inst.Chunks.CheckRotation(); trigger != nil {
+		activeBefore := vaultInst.Chunks.Active()
+		if trigger := vaultInst.Chunks.CheckRotation(); trigger != nil {
 			o.logger.Debug("rotation triggered",
 				"vault", vaultID,
 				"name", vault.Name,
-				"vault", inst.VaultID,
+				"vault", vaultInst.VaultID,
 				"trigger", *trigger,
 			)
 			if activeBefore != nil {
-				seals = append(seals, sealEvent{vaultID: vaultID, cm: inst.Chunks, chunkID: activeBefore.ID})
+				seals = append(seals, sealEvent{vaultID: vaultID, cm: vaultInst.Chunks, chunkID: activeBefore.ID})
 				// Record the rotation event for the per-instance rate
 				// alerter. We do this here (under the read lock) so
 				// the count reflects every triggered rotation, not
 				// only those whose post-seal pipeline is scheduled.
-				o.rotationRates.Record(inst.VaultID, o.now())
+				o.rotationRates.Record(vaultInst.VaultID, o.now())
 			}
 		}
 	}
@@ -108,18 +108,18 @@ func (o *Orchestrator) reconcileFilters(sys *system.System) {
 	}
 }
 
-// applyRotationFromConfig refreshes the leader inst's replication targets
+// applyRotationFromConfig refreshes the leader instance's replication targets
 // and rotation policy from the current config. Called each tick by
-// rotationSweep. The function proceeds for every leader inst and
+// rotationSweep. The function proceeds for every leader instance and
 // short-circuits per-section based on the data each section needs.
 func (o *Orchestrator) applyRotationFromConfig(sys *system.System,
 	cfg *system.Config,
 	vaultCfg system.VaultConfig,
-	inst *VaultInstance,
+	vaultInst *VaultInstance,
 	activeCronJobs map[string]bool,
 ) {
 	// Refresh replication targets from current system.
-	inst.FollowerTargets = system.FollowerTargets(vaultCfg.Placements, sys.Runtime.NodeStorageConfigs)
+	vaultInst.FollowerTargets = system.FollowerTargets(vaultCfg.Placements, sys.Runtime.NodeStorageConfigs)
 
 	if vaultCfg.RotationPolicyID == nil {
 		return
@@ -137,13 +137,13 @@ func (o *Orchestrator) applyRotationFromConfig(sys *system.System,
 		return
 	}
 	if policy != nil {
-		inst.Chunks.SetRotationPolicy(policy)
+		vaultInst.Chunks.SetRotationPolicy(policy)
 	}
 
 	// Ensure cron job exists with the right schedule.
 	if policyCfg.Cron != nil && *policyCfg.Cron != "" {
 		jobName := cronJobName(vaultCfg.ID)
 		activeCronJobs[jobName] = true
-		o.cronRotation.ensure(vaultCfg.ID, vaultCfg.Name, *policyCfg.Cron, inst.Chunks)
+		o.cronRotation.ensure(vaultCfg.ID, vaultCfg.Name, *policyCfg.Cron, vaultInst.Chunks)
 	}
 }

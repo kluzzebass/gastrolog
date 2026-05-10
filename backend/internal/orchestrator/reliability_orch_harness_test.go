@@ -26,12 +26,12 @@ import (
 	hraft "github.com/hashicorp/raft"
 )
 
-// instTypeKey is the string form of the file-inst type used as a
-// factory-map key. File inst is used (rather than memory inst) because
-// only the file-inst chunk Manager implements SetAnnouncer — the pathway
+// vaultTypeKey is the string form of the file-instance type used as a
+// factory-map key. File instance is used (rather than memory instance) because
+// only the file-instance chunk Manager implements SetAnnouncer — the pathway
 // that propagates chunk metadata events through vault-ctl Raft to
 // followers. Without announcements, replication tests are vacuous.
-const instTypeKey = string(system.VaultTypeFile)
+const vaultTypeKey = string(system.VaultTypeFile)
 
 // harnessStorageClass is a non-zero storage class so findLocalFileStorage
 // matches the NodeStorageConfig we seed. Value is arbitrary; zero is
@@ -111,7 +111,7 @@ type orchRelOption func(*orchRelHarness)
 func withExtraVault(nodeIdxs []int) orchRelOption {
 	return func(h *orchRelHarness) {
 		label := string(rune('B' + len(h.vaults) - 1))
-		// Vault and instance share the same ID — inst ID equals vault ID.
+		// Vault and instance share the same ID — instance ID equals vault ID.
 		id := glid.New()
 		h.vaults = append(h.vaults, vaultSpec{
 			label:    label,
@@ -128,7 +128,7 @@ const (
 )
 
 // newOrchRelHarness boots n nodes with a shared config store, at least one
-// file-inst vault (the default), and real vault-ctl Raft. Additional vaults
+// file-instance vault (the default), and real vault-ctl Raft. Additional vaults
 // can be registered via options (see withExtraVault). Blocks until every
 // node reports LocalVaultsReplicationReady.
 func newOrchRelHarness(t *testing.T, n int, opts ...orchRelOption) *orchRelHarness {
@@ -138,7 +138,7 @@ func newOrchRelHarness(t *testing.T, n int, opts ...orchRelOption) *orchRelHarne
 	}
 
 	sharedCtx, sharedCancel := context.WithCancel(context.Background())
-	// Vault and instance share the same ID — inst ID equals vault ID.
+	// Vault and instance share the same ID — instance ID equals vault ID.
 	defaultID := glid.New()
 	h := &orchRelHarness{
 		t:            t,
@@ -206,7 +206,7 @@ func newOrchRelHarness(t *testing.T, n int, opts ...orchRelOption) *orchRelHarne
 		}
 	})
 
-	// Phase 3: seed shared config (vault + inst + placements). Every node
+	// Phase 3: seed shared config (vault + instance + placements). Every node
 	// reads the same sysmem store so ApplyConfig produces the same view.
 	h.seedSharedConfig()
 
@@ -220,7 +220,7 @@ func newOrchRelHarness(t *testing.T, n int, opts ...orchRelOption) *orchRelHarne
 	return h
 }
 
-// seedSharedConfig writes a vault, a file-backed inst, and vault placements
+// seedSharedConfig writes a vault, a file-backed instance, and vault placements
 // (one per node, first is leader) to the shared config store. Also
 // registers per-node FileStorage entries so findLocalFileStorage can
 // resolve a chunk directory on each node.
@@ -230,7 +230,7 @@ func (h *orchRelHarness) seedSharedConfig() {
 
 	// Register every node with its canonical GLID. Also register a
 	// NodeStorageConfig containing a FileStorage with a per-node chunk
-	// directory — the file-inst factory requires `dir` in its params, and
+	// directory — the file-instance factory requires `dir` in its params, and
 	// that comes from findLocalFileStorage at ApplyConfig time.
 	for _, id := range h.nodeIDs {
 		nodeGLID, err := glid.Parse(id)
@@ -261,7 +261,7 @@ func (h *orchRelHarness) seedSharedConfig() {
 		}
 	}
 
-	// Register every vault + inst + placement. vaults[0] is the default;
+	// Register every vault + instance + placement. vaults[0] is the default;
 	// additional entries come from withExtraVault options.
 	for _, v := range h.vaults {
 		if err := h.cfgStore.PutVault(ctx, system.VaultConfig{
@@ -327,10 +327,10 @@ func (h *orchRelHarness) startNode(id string) {
 		GroupManager:        groupMgr,
 		NodeAddressResolver: h.resolver(),
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			instTypeKey: chunkfile.NewFactory(),
+			vaultTypeKey: chunkfile.NewFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			instTypeKey: indexfile.NewFactory(),
+			vaultTypeKey: indexfile.NewFactory(),
 		},
 		Logger: logger,
 	}
@@ -367,7 +367,7 @@ func (h *orchRelHarness) resolver() func(string) (string, bool) {
 
 // stopNode shuts down the orchestrator, then the group manager, then the
 // WAL, then the cluster server. Order matters: orchestrator owns the
-// scheduler jobs that still touch inst managers; the group manager keeps
+// scheduler jobs that still touch instance managers; the group manager keeps
 // Raft running.
 func (h *orchRelHarness) stopNode(id string) {
 	n, ok := h.nodes[id]
@@ -675,7 +675,7 @@ func (h *orchRelHarness) appendOnLeader(rec chunk.Record) error {
 	return leader.orch.AppendToVault(h.vaultID, chunk.ChunkID{}, rec)
 }
 
-// sealOnLeader seals the active chunk on every inst of the vault, on the
+// sealOnLeader seals the active chunk on every instance of the vault, on the
 // vault-ctl Raft leader. Sealing on a non-leader would skip the CmdSealChunk
 // announcement.
 func (h *orchRelHarness) sealOnLeader() {

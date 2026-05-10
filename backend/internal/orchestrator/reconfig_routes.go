@@ -79,12 +79,12 @@ func (o *Orchestrator) reloadRoutesFromConfig(sys *system.System) error {
 			case o.draining[destID] != nil:
 				nodeID = o.draining[destID].TargetNodeID
 			case hotVaultNode == "" || hotVaultNode == o.localNodeID:
-				// Hot inst is local (or unassigned) — append locally if registered.
+				// Hot instance is local (or unassigned) — append locally if registered.
 				if _, ok := o.vaults[destID]; !ok {
 					continue // not registered locally
 				}
 			case o.forwarder != nil:
-				// Hot inst is on a remote node — forward.
+				// Hot instance is on a remote node — forward.
 				nodeID = hotVaultNode
 			default:
 				continue // single-node mode, skip remote

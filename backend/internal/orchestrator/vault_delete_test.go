@@ -9,7 +9,7 @@ import (
 )
 
 // TestRemoveInstanceFromVaultPreservesData verifies that RemoveVaultInstance is
-// non-destructive: it unregisters the inst instance but leaves chunks and
+// non-destructive: it unregisters the vault instance but leaves chunks and
 // the vault directory intact, so placement flaps don't wipe data.
 // See gastrolog-4vz40.
 func TestRemoveInstanceFromVaultPreservesData(t *testing.T) {
@@ -18,15 +18,15 @@ func TestRemoveInstanceFromVaultPreservesData(t *testing.T) {
 
 	vaultID := glid.New()
 
-	inst, dir := newFileInstance(t, vaultID)
-	if _, _, err := inst.Chunks.Append(testRecord("data")); err != nil {
+	vaultInst, dir := newFileInstance(t, vaultID)
+	if _, _, err := vaultInst.Chunks.Append(testRecord("data")); err != nil {
 		t.Fatal(err)
 	}
-	if err := inst.Chunks.Seal(); err != nil {
+	if err := vaultInst.Chunks.Seal(); err != nil {
 		t.Fatal(err)
 	}
 
-	vault := NewVault(vaultID, inst)
+	vault := NewVault(vaultID, vaultInst)
 	vault.Name = "remove-preserves"
 	orch.RegisterVault(vault)
 
@@ -45,23 +45,23 @@ func TestRemoveInstanceFromVaultPreservesData(t *testing.T) {
 
 // TestDeleteInstanceFromVaultCleansVaultDirectory verifies that DeleteVaultInstance
 // removes the vault's data directory entirely — not just the chunk subdirs.
-// Regression test for gastrolog-42j4n: orphaned inst directories accumulate
-// on disk after inst deletion.
+// Regression test for gastrolog-42j4n: orphaned instance directories accumulate
+// on disk after instance deletion.
 func TestDeleteInstanceFromVaultCleansVaultDirectory(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
 	vaultID := glid.New()
 
-	inst, dir := newFileInstance(t, vaultID)
-	if _, _, err := inst.Chunks.Append(testRecord("data")); err != nil {
+	vaultInst, dir := newFileInstance(t, vaultID)
+	if _, _, err := vaultInst.Chunks.Append(testRecord("data")); err != nil {
 		t.Fatal(err)
 	}
-	if err := inst.Chunks.Seal(); err != nil {
+	if err := vaultInst.Chunks.Seal(); err != nil {
 		t.Fatal(err)
 	}
 
-	vault := NewVault(vaultID, inst)
+	vault := NewVault(vaultID, vaultInst)
 	vault.Name = "delete-test"
 	orch.RegisterVault(vault)
 
@@ -79,16 +79,16 @@ func TestDeleteInstanceFromVaultCleansVaultDirectory(t *testing.T) {
 }
 
 // TestDeleteInstanceFromVaultCleansEmptyVaultDirectory verifies that even an
-// empty inst (no chunks appended) has its directory removed on deletion.
+// empty instance (no chunks appended) has its directory removed on deletion.
 func TestDeleteInstanceFromVaultCleansEmptyVaultDirectory(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
 	vaultID := glid.New()
 
-	inst, dir := newFileInstance(t, vaultID)
+	vaultInst, dir := newFileInstance(t, vaultID)
 
-	vault := NewVault(vaultID, inst)
+	vault := NewVault(vaultID, vaultInst)
 	vault.Name = "empty-delete-test"
 	orch.RegisterVault(vault)
 

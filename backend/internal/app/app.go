@@ -212,7 +212,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// Shared shutdown phase. Constructed once per process and threaded into
 	// every subsystem that needs to short-circuit work during drain — the
 	// orchestrator's replication fanout, the cluster server's stream
-	// handlers, the inst announcer, etc. See gastrolog-1e5ke.
+	// handlers, the vault announcer, etc. See gastrolog-1e5ke.
 	shutdownPhase := lifecycle.New()
 
 	orch, err := orchestrator.New(orchestrator.Config{
@@ -321,7 +321,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 	broadcaster, peerState, peerJobState, localStatsFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, recordForwarder, alertCollector, nodeID, cfg.ServerAddr, cfg.PprofAddr, statsSignal)
 
-	// Start inst placement manager (cluster mode only).
+	// Start vault placement manager (cluster mode only).
 	var placementReconcileFn func(ctx context.Context)
 	if clusterSrv != nil && peerState != nil {
 		pm := &placementManager{
@@ -481,7 +481,7 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	orch.SetRemoteTransferrer(chunkTransferrer)
 
 	// Vault replication: unified ordered stream per vault per follower.
-	chunkReplicator := cluster.NewChunkReplicator(peerConns, logger.With("component", "inst-replicator"))
+	chunkReplicator := cluster.NewChunkReplicator(peerConns, logger.With("component", "vault-replicator"))
 	orch.SetChunkReplicator(chunkReplicator)
 
 	// Same readiness gate for bulk chunk imports.
@@ -991,7 +991,7 @@ type serverDeps struct {
 	SetNodeSuffrageFunc func(ctx context.Context, nodeID string, voter bool) error
 	Dispatcher          *configDispatcher
 	GroupMgr            *raftgroup.GroupManager
-	WAL                 *raftwal.WAL // inst-group WAL (same file as system raft when cluster mode); nil = per-group boltdb
+	WAL                 *raftwal.WAL // vault-group WAL (same file as system raft when cluster mode); nil = per-group boltdb
 	ConfigStore         io.Closer    // rawStore — closed before gRPC for clean Raft shutdown
 	PlacementReconcile  func(ctx context.Context)
 

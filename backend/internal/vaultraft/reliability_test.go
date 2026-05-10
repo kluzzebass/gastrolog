@@ -740,7 +740,7 @@ func TestReliability_LargeFSM_SnapshotRestoreRoundtrip(t *testing.T) {
 			cid[1] = byte(ci)
 			cmd := MarshalVaultChunkCommand(vaultID, vaultctlfsm.MarshalCreateChunk(cid, now, now, now))
 			if r := src.Apply(&hraft.Log{Data: cmd}); r != nil {
-				t.Fatalf("apply inst=%d chunk=%d: %v", ti, ci, r)
+				t.Fatalf("apply vault=%d chunk=%d: %v", ti, ci, r)
 			}
 		}
 	}

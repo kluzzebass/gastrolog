@@ -38,7 +38,7 @@ func TestVaultReplicationReadinessErr_fsmNotReady(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID:     glid.New(),
 		Type:       "memory",
 		Chunks:     s.CM,
@@ -46,7 +46,7 @@ func TestVaultReplicationReadinessErr_fsmNotReady(t *testing.T) {
 		Query:      s.QE,
 		IsFSMReady: func() bool { return false },
 	}
-	v := NewVault(vid, inst)
+	v := NewVault(vid, vaultInst)
 	if err := vaultReplicationReadinessErr(vid, v); !errors.Is(err, ErrVaultNotReady) {
 		t.Fatalf("got %v, want ErrVaultNotReady", err)
 	}
@@ -59,7 +59,7 @@ func TestVaultReplicationReadinessErr_ready(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID:     glid.New(),
 		Type:       "memory",
 		Chunks:     s.CM,
@@ -67,7 +67,7 @@ func TestVaultReplicationReadinessErr_ready(t *testing.T) {
 		Query:      s.QE,
 		IsFSMReady: func() bool { return true },
 	}
-	v := NewVault(vid, inst)
+	v := NewVault(vid, vaultInst)
 	if err := vaultReplicationReadinessErr(vid, v); err != nil {
 		t.Fatalf("got %v, want nil", err)
 	}
@@ -84,7 +84,7 @@ func TestListAllChunkMetas_vaultNotReady(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID:     glid.New(),
 		Type:       "memory",
 		Chunks:     s.CM,
@@ -92,7 +92,7 @@ func TestListAllChunkMetas_vaultNotReady(t *testing.T) {
 		Query:      s.QE,
 		IsFSMReady: func() bool { return false },
 	}
-	o.RegisterVault(NewVault(vid, inst))
+	o.RegisterVault(NewVault(vid, vaultInst))
 	_, err = o.ListAllChunkMetas(vid)
 	if !errors.Is(err, ErrVaultNotReady) {
 		t.Fatalf("got %v, want ErrVaultNotReady", err)
@@ -133,7 +133,7 @@ func TestSearch_ErrVaultNotReady(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID:     glid.New(),
 		Type:       "memory",
 		Chunks:     s.CM,
@@ -141,7 +141,7 @@ func TestSearch_ErrVaultNotReady(t *testing.T) {
 		Query:      s.QE,
 		IsFSMReady: func() bool { return false },
 	}
-	o.RegisterVault(NewVault(vid, inst))
+	o.RegisterVault(NewVault(vid, vaultInst))
 	_, _, err = o.Search(context.Background(), vid, query.Query{}, nil)
 	if !errors.Is(err, ErrVaultNotReady) {
 		t.Fatalf("Search: got %v, want ErrVaultNotReady", err)
@@ -160,7 +160,7 @@ func TestAppendToVault_ErrVaultNotReady(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID:     vaultID,
 		Type:       "memory",
 		Chunks:     s.CM,
@@ -168,7 +168,7 @@ func TestAppendToVault_ErrVaultNotReady(t *testing.T) {
 		Query:      s.QE,
 		IsFSMReady: func() bool { return false },
 	}
-	o.RegisterVault(NewVault(vid, inst))
+	o.RegisterVault(NewVault(vid, vaultInst))
 	err = o.AppendToVault(vid, chunk.ChunkID{}, chunk.Record{Raw: []byte("x")})
 	if !errors.Is(err, ErrVaultNotReady) {
 		t.Fatalf("AppendToVault: got %v, want ErrVaultNotReady", err)
@@ -193,7 +193,7 @@ func TestLocalVaultsReplicationReady(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID:     glid.New(),
 		Type:       "memory",
 		Chunks:     s.CM,
@@ -201,7 +201,7 @@ func TestLocalVaultsReplicationReady(t *testing.T) {
 		Query:      s.QE,
 		IsFSMReady: func() bool { return false },
 	}
-	o.RegisterVault(NewVault(vid, inst))
+	o.RegisterVault(NewVault(vid, vaultInst))
 	if o.LocalVaultsReplicationReady() {
 		t.Fatal("expected false when local vault-ctl FSM is not ready")
 	}

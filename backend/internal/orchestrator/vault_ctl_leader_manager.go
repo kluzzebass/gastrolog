@@ -24,7 +24,7 @@ const (
 	vaultMembershipChangeTimeout = 10 * time.Second
 )
 
-// vaultCtlLeaderManager spawns and supervises per-vault leader loops. Each inst
+// vaultCtlLeaderManager spawns and supervises per-vault leader loops. Each instance
 // Raft group gets a raftgroup.LeaderLoop whose OnLead callback runs
 // membership reconciliation and leadership alignment against the
 // orchestrator's view of the desired state.
@@ -45,7 +45,7 @@ type vaultCtlLeaderManager struct {
 
 	// onMemberRemoved fires after a successful RemoveServer call from
 	// the leader's reconcile pass. The orchestrator wires this to
-	// propose CmdPruneNode on every inst sub-FSM in the vault so
+	// propose CmdPruneNode on every instance sub-FSM in the vault so
 	// pendingDeletes ExpectedFrom obligations from the decommissioned
 	// node don't block finalization. See gastrolog-51gme step 10.
 	// Nil leaves the prune as a no-op (single-node tests, etc.).
@@ -76,8 +76,8 @@ func newVaultCtlLeaderManager(logger *slog.Logger) *vaultCtlLeaderManager {
 	}
 }
 
-// Start spawns a leader loop for the given inst's Raft group if one is not
-// already running. Idempotent: re-calling for the same inst ID is a no-op.
+// Start spawns a leader loop for the given instance's Raft group if one is not
+// already running. Idempotent: re-calling for the same instance ID is a no-op.
 func (m *vaultCtlLeaderManager) Start(vaultID glid.GLID, group *raftgroup.Group) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -99,7 +99,7 @@ func (m *vaultCtlLeaderManager) Start(vaultID glid.GLID, group *raftgroup.Group)
 	go loop.Run(epochCtx)
 }
 
-// Stop cancels the leader loop for a inst and clears its desired-member
+// Stop cancels the leader loop for an instance and clears its desired-member
 // state. Safe to call even if no loop was started.
 func (m *vaultCtlLeaderManager) Stop(vaultID glid.GLID) {
 	m.mu.Lock()
@@ -122,7 +122,7 @@ func (m *vaultCtlLeaderManager) StopAll() {
 	m.rootCxl()
 }
 
-// SetDesiredMembers updates the desired member list for a inst. The next
+// SetDesiredMembers updates the desired member list for an instance. The next
 // reconcile pass on the vault-ctl Raft leader will apply the diff against the
 // current Raft configuration.
 func (m *vaultCtlLeaderManager) SetDesiredMembers(vaultID glid.GLID, members []hraft.Server) {
@@ -154,7 +154,7 @@ func (m *vaultCtlLeaderManager) runLeaderEpoch(ctx context.Context, vaultID glid
 	}
 }
 
-// reconcile compares the desired member list for a inst against the current
+// reconcile compares the desired member list for an instance against the current
 // Raft configuration and applies the diff via AddVoter / RemoveServer.
 // Bails on the first error (lost leadership, timeout, etc.) — the next pass
 // (or the next epoch on the new leader) will pick up where we left off.
@@ -300,7 +300,7 @@ func (t *vaultCtlMembershipMap) Delete(vaultID glid.GLID) {
 	delete(t.desired, vaultID)
 }
 
-// vaultCtlDesiredLeaderMap tracks which node should be the Raft leader for each inst.
+// vaultCtlDesiredLeaderMap tracks which node should be the Raft leader for each instance.
 type vaultCtlDesiredLeaderMap struct {
 	mu      sync.RWMutex
 	leaders map[glid.GLID]*hraft.Server

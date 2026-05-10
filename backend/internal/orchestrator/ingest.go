@@ -58,7 +58,7 @@ func (o *Orchestrator) ingest(rec chunk.Record) (*pendingAcks, error) {
 // (_source, _ingester, _vault, _reason) drive route evaluation.
 //
 // Returns pendingAcks bundling the sync work an ack-gated record triggers:
-// local inst replication to followers, plus cross-node forwarding of
+// local instance replication to followers, plus cross-node forwarding of
 // records matched to remote vaults. Both task kinds must complete before
 // the ack is delivered to the ingester. For non-ack-gated records that
 // match a remote vault, syncForwards is populated; the caller must run
@@ -171,7 +171,7 @@ func (o *Orchestrator) handleRemoteVaultMatch(pa *pendingAcks, t MatchResult, re
 }
 
 // pendingAcks bundles the sync work that an ack-gated record triggers —
-// local inst replication to followers and cross-node forwarding of
+// local instance replication to followers and cross-node forwarding of
 // records matched to remote vaults. Both must complete before the ack
 // is delivered to the ingester.
 //
@@ -327,8 +327,8 @@ func (o *Orchestrator) followerReplicationTargets(vaultID glid.GLID, cm chunk.Ch
 	if vault == nil {
 		return nil
 	}
-	if inst := vault.Instance; inst != nil && inst.Chunks == cm && inst.ShouldForwardToFollowers() {
-		return inst.FollowerTargets
+	if vaultInst := vault.Instance; vaultInst != nil && vaultInst.Chunks == cm && vaultInst.ShouldForwardToFollowers() {
+		return vaultInst.FollowerTargets
 	}
 	return nil
 }

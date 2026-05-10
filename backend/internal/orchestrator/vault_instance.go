@@ -24,7 +24,7 @@ type VaultInstance struct {
 	Chunks          chunk.ChunkManager
 	Indexes         index.IndexManager
 	Query           *query.Engine
-	IsFollower      bool                       // true if this node is a follower for this inst
+	IsFollower      bool                       // true if this node is a follower for this instance
 	LeaderNodeID    string                     // the leader node's ID (empty if this IS the leader)
 	FollowerTargets []system.ReplicationTarget // per-storage targets (populated on leader only)
 
@@ -43,7 +43,7 @@ type VaultInstance struct {
 	ListRetentionPending func() []chunk.ChunkID
 
 	// IsTombstoned returns true if the given chunk ID has been deleted from
-	// this inst's replicated FSM and is still within the tombstone retention
+	// this instance's replicated FSM and is still within the tombstone retention
 	// window. Used to reject stale replication commands (ImportSealed,
 	// Append, Seal) that race with retention — without this check, a late
 	// ImportSealed RPC could recreate a chunk the cluster already deleted,
@@ -72,13 +72,13 @@ type VaultInstance struct {
 	ApplyRaftFinalizeDelete func(id chunk.ChunkID) error
 
 	// ApplyRaftPruneNode proposes removal of a node from every pendingDeletes
-	// entry's ExpectedFrom set on this inst sub-FSM. Used by the leader's
+	// entry's ExpectedFrom set on this instance sub-FSM. Used by the leader's
 	// membership-change handler after RemoveServer succeeds: a decommissioned
 	// node's outstanding ack obligations would otherwise pin pendingDeletes
 	// entries forever. Nil when no Raft group exists. See gastrolog-51gme step 10.
 	ApplyRaftPruneNode func(nodeID string) error
 
-	// Reconciler owns chunk-lifecycle execution for this inst instance:
+	// Reconciler owns chunk-lifecycle execution for this vault instance:
 	// FSM-apply event handlers (seal, retention-pending, transition-streamed,
 	// transition-received, request-delete, ack-delete, finalize-delete) plus
 	// the canonical deleteChunk entry point. All cluster-wide deletes route
@@ -91,15 +91,15 @@ type VaultInstance struct {
 	ListManifest func() []chunk.ChunkID
 
 	// ManifestEntries returns every chunk's full manifest entry for this
-	// inst (sealed and active alike — callers filter on Sealed when they
+	// instance (sealed and active alike — callers filter on Sealed when they
 	// want only sealed chunks, e.g. the manifest.Reader implementation
 	// honoring the active-chunk exception). Nil for memory-mode vaults
 	// (no FSM); the orchestrator falls back to the chunk manager in
 	// that case.
 	ManifestEntries func() []vaultctlfsm.ManifestEntry
 
-	// ManifestEntry returns the manifest entry for one chunk on this inst,
-	// or false if this inst doesn't hold the chunk. Nil for memory-mode
+	// ManifestEntry returns the manifest entry for one chunk on this instance,
+	// or false if this instance doesn't hold the chunk. Nil for memory-mode
 	// instances; the orchestrator falls back to the chunk manager.
 	ManifestEntry func(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool)
 
@@ -142,10 +142,10 @@ func (t *VaultInstance) applyRaftCallbacks(cb vaultRaftCallbacks) {
 	t.ManifestEntry = cb.manifestEntry
 }
 
-// IsLeader returns true if this node is the leader for this inst.
+// IsLeader returns true if this node is the leader for this instance.
 func (t *VaultInstance) IsLeader() bool { return !t.IsFollower }
 
-// ShouldForwardToFollowers returns true if this leader inst has replication targets.
+// ShouldForwardToFollowers returns true if this leader instance has replication targets.
 func (t *VaultInstance) ShouldForwardToFollowers() bool {
 	return t.IsLeader() && len(t.FollowerTargets) > 0
 }

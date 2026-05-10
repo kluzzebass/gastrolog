@@ -73,18 +73,18 @@ func (o *Orchestrator) scheduleCatchupForNode(vaultID glid.GLID, nodeID string, 
 // to a follower node. Each chunk's records are streamed via TransferRecords,
 // producing an identical sealed chunk on the follower.
 func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID glid.GLID, nodeID string) error {
-	inst := o.findLocalVaultInstance(vaultID)
-	if inst == nil {
+	vaultInst := o.findLocalVaultInstance(vaultID)
+	if vaultInst == nil {
 		return fmt.Errorf("vault %s not found", vaultID)
 	}
-	if inst.IsFollower {
+	if vaultInst.IsFollower {
 		return nil // only leader initiates catchup
 	}
 	if o.chunkReplicator == nil {
 		return errors.New("no chunk replicator configured")
 	}
 
-	metas, err := inst.Chunks.List()
+	metas, err := vaultInst.Chunks.List()
 	if err != nil {
 		return fmt.Errorf("list chunks: %w", err)
 	}
@@ -93,13 +93,13 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID glid.GLID, n
 	// We use it to filter out chunks that have already been retired from the
 	// cluster's view of the data — there's a race window between the FSM
 	// applying a delete and the leader's local file actually being unlinked,
-	// during which inst.Chunks.List() will still return the chunk. Sending
+	// during which instance.Chunks.List() will still return the chunk. Sending
 	// such a chunk would be wasted work: the receiver would write it to disk
 	// and immediately apply the matching CmdRequestDelete (see gastrolog-5grpa
 	// and the gastrolog-51gme receipt protocol).
 	var manifestSet map[chunk.ChunkID]bool
-	if inst.ListManifest != nil {
-		ids := inst.ListManifest()
+	if vaultInst.ListManifest != nil {
+		ids := vaultInst.ListManifest()
 		manifestSet = make(map[chunk.ChunkID]bool, len(ids))
 		for _, id := range ids {
 			manifestSet[id] = true
@@ -108,12 +108,12 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID glid.GLID, n
 
 	// Phase 3 (gastrolog-1huz5): overlay through FSM so catchupCandidates'
 	// .Sealed gate excludes Sealing chunks (GLCB not yet committed).
-	if inst.OverlayFromFSM != nil {
+	if vaultInst.OverlayFromFSM != nil {
 		for i := range metas {
-			metas[i] = inst.OverlayFromFSM(metas[i])
+			metas[i] = vaultInst.OverlayFromFSM(metas[i])
 		}
 	}
-	sealed := catchupCandidates(metas, inst.Type, manifestSet)
+	sealed := catchupCandidates(metas, vaultInst.Type, manifestSet)
 
 	if len(sealed) == 0 {
 		o.logger.Debug("replication catchup: no sealed chunks to copy",
@@ -126,7 +126,7 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID glid.GLID, n
 
 	transferred := 0
 	for _, meta := range sealed {
-		if err := o.replicateToFollower(ctx, vaultID, meta.ID, inst.Chunks, nodeID); err != nil {
+		if err := o.replicateToFollower(ctx, vaultID, meta.ID, vaultInst.Chunks, nodeID); err != nil {
 			// If the follower rejected because its vault isn't built yet
 			// (recovering node still in startup), return a retryable error.
 			// The scheduler will re-run the job. Sentinel errors don't
@@ -175,15 +175,15 @@ func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID glid.G
 	if vault == nil || vault.Instance == nil {
 		return 0, fmt.Errorf("vault %s not found", vaultID)
 	}
-	inst := vault.Instance
-	if inst.IsFollower {
+	vaultInst := vault.Instance
+	if vaultInst.IsFollower {
 		return 0, fmt.Errorf("not placement leader for vault %s (follower)", vaultID)
 	}
 	if o.chunkReplicator == nil {
 		return 0, errors.New("no chunk replicator configured")
 	}
 
-	metas, err := inst.Chunks.List()
+	metas, err := vaultInst.Chunks.List()
 	if err != nil {
 		return 0, fmt.Errorf("list chunks: %w", err)
 	}
@@ -193,8 +193,8 @@ func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID glid.G
 	}
 
 	var manifestSet map[chunk.ChunkID]bool
-	if inst.ListManifest != nil {
-		ids := inst.ListManifest()
+	if vaultInst.ListManifest != nil {
+		ids := vaultInst.ListManifest()
 		manifestSet = make(map[chunk.ChunkID]bool, len(ids))
 		for _, id := range ids {
 			manifestSet[id] = true
@@ -215,8 +215,8 @@ func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID glid.G
 		// only. Sealing chunks have no GLCB yet — overlay through the
 		// FSM so we don't queue a push for a chunk that's still in
 		// assembly.
-		if inst.OverlayFromFSM != nil {
-			m = inst.OverlayFromFSM(m)
+		if vaultInst.OverlayFromFSM != nil {
+			m = vaultInst.OverlayFromFSM(m)
 		}
 		if !m.Sealed {
 			continue
@@ -250,7 +250,7 @@ func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID glid.G
 		defer cancel()
 		transferred := 0
 		for _, m := range eligible {
-			if err := o.replicateToFollower(ctxBg, vaultID, m.ID, inst.Chunks, requesterNodeID); err != nil {
+			if err := o.replicateToFollower(ctxBg, vaultID, m.ID, vaultInst.Chunks, requesterNodeID); err != nil {
 				o.logger.Warn("replica catchup: push failed",
 					"vault", vaultID, "chunk", m.ID.String(),
 					"requester", requesterNodeID, "error", err)

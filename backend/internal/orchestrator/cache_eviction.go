@@ -11,7 +11,7 @@ type CacheEvictor interface {
 
 const (
 	// cacheEvictionSchedule runs once per minute, second 23 — phase-offset
-	// from retention (second 0) and inst-catchup (13/33/53s) so the sweeps
+	// from retention (second 0) and instance-catchup (13/33/53s) so the sweeps
 	// don't pile up on the same wall-clock tick.
 	cacheEvictionSchedule = "23 * * * * *"
 	cacheEvictionJobName  = "cache-eviction"
@@ -58,7 +58,7 @@ func (o *Orchestrator) cacheEvictionSweepAll() {
 }
 
 // startCacheEvictionSweep registers the periodic warm-cache eviction
-// sweep. Each tick walks every leader inst and asks its chunk manager to
+// sweep. Each tick walks every leader instance and asks its chunk manager to
 // apply its configured eviction policies. See gastrolog-2idw8.
 func (o *Orchestrator) startCacheEvictionSweep() error {
 	if err := o.scheduler.AddJob(cacheEvictionJobName, cacheEvictionSchedule, o.cacheEvictionSweepAll); err != nil {

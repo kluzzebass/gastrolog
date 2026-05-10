@@ -10,20 +10,20 @@ import (
 // Vault readiness — canonical definition.
 //
 // A vault on this node is "ready" iff:
-//   1. It has at least one local inst instance (its Instance is non-nil). A vault
+//   1. It has at least one local vault instance (its Instance is non-nil). A vault
 //      registered with zero local instances is a routing shell; it cannot serve
 //      reads or writes and callers must forward to a peer that holds the
 //      data.
-//   2. Every local inst's FSM has applied at least one log entry (or has
-//      restored from a snapshot). Before this, the inst manifest is
+//   2. Every local instance's FSM has applied at least one log entry (or has
+//      restored from a snapshot). Before this, the instance manifest is
 //      incomplete — acting on it risks data loss or divergent state. A nil
-//      IsFSMReady callback is the single-node/memory inst case and is
+//      IsFSMReady callback is the single-node/memory instance case and is
 //      treated as always ready.
 //
 // The readiness gate applies to ingest, query, and control paths on the
 // local node. RPC-level fallbacks (forward to a peer) live above this
 // check — once a caller is certain its own node owns the vault, it must
-// pass this gate before touching inst managers or the FSM.
+// pass this gate before touching instance managers or the FSM.
 //
 // Use `Vault.ReadinessErr()` when you already hold a non-nil *Vault (e.g.
 // from a map lookup or argument) and `vaultReplicationReadinessErr(id, v)`
@@ -32,7 +32,7 @@ import (
 // Readiness was introduced in gastrolog-4ip1o.
 
 // ErrVaultNotReady is returned when the vault exists locally but replicated
-// inst metadata (vault control-plane / vault-ctl FSM) has not applied far enough
+// instance metadata (vault control-plane / vault-ctl FSM) has not applied far enough
 // for safe reads or writes. Callers should retry with backoff.
 var ErrVaultNotReady = errors.New("vault not ready")
 
@@ -61,7 +61,7 @@ func vaultReplicationReadinessErr(vaultID glid.GLID, v *Vault) error {
 }
 
 // LocalVaultsReplicationReady reports whether every vault that hosts at least
-// one local inst instance has replication metadata ready. Vaults registered
+// one local vault instance has replication metadata ready. Vaults registered
 // with zero local instances are ignored so routing-only shells do not fail
 // load-balancer readiness (gastrolog-4ip1o).
 func (o *Orchestrator) LocalVaultsReplicationReady() bool {

@@ -136,7 +136,7 @@ func (f *FSM) EnsureInstanceFSM(vaultID glid.GLID) *vaultctlfsm.FSM {
 func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) {
 	f.mu.Lock()
 	ids := slices.SortedFunc(maps.Keys(f.instances), compareGLID)
-	var instBlobs [][]byte
+	var vaultBlobs [][]byte
 	for _, id := range ids {
 		t := f.instances[id]
 		if t == nil {
@@ -155,10 +155,10 @@ func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) {
 		blob := make([]byte, 0, glid.Size+len(raw))
 		blob = append(blob, id[:]...)
 		blob = append(blob, raw...)
-		instBlobs = append(instBlobs, blob)
+		vaultBlobs = append(vaultBlobs, blob)
 	}
 	f.mu.Unlock()
-	return &vaultCtlSnapshot{instBlobs: instBlobs}, nil
+	return &vaultCtlSnapshot{vaultBlobs: vaultBlobs}, nil
 }
 
 // Restore replaces FSM state from a snapshot produced by Snapshot, or the
@@ -230,13 +230,13 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 			return fmt.Errorf("vaultraft restore: read instance[%d] blob length: %w", i, err)
 		}
 		blen := int64(binary.BigEndian.Uint32(blenBuf[:]))
-		instReader := io.LimitReader(rc, blen)
+		vaultReader := io.LimitReader(rc, blen)
 		t := vaultctlfsm.New()
-		if err := t.Restore(io.NopCloser(instReader)); err != nil {
+		if err := t.Restore(io.NopCloser(vaultReader)); err != nil {
 			return fmt.Errorf("vaultraft restore instance %x: %w", tid[:], err)
 		}
 		// Drain any unread bytes so the next instance header aligns.
-		if _, err := io.Copy(io.Discard, instReader); err != nil {
+		if _, err := io.Copy(io.Discard, vaultReader); err != nil {
 			return fmt.Errorf("vaultraft restore: drain instance[%d] tail: %w", i, err)
 		}
 		nextInstances[tid] = t
@@ -273,7 +273,7 @@ func (s *bufSink) ID() string    { return "vaultraft" }
 func (s *bufSink) Cancel() error { return nil }
 
 type vaultCtlSnapshot struct {
-	instBlobs [][]byte // each: [16 vaultID][instance snapshot bytes...]
+	vaultBlobs [][]byte // each: [16 vaultID][instance snapshot bytes...]
 }
 
 func (s *vaultCtlSnapshot) Persist(sink hraft.SnapshotSink) error {
@@ -283,12 +283,12 @@ func (s *vaultCtlSnapshot) Persist(sink hraft.SnapshotSink) error {
 	}
 	var hdr [8]byte
 	binary.BigEndian.PutUint32(hdr[0:4], vaultSnapVersion)
-	binary.BigEndian.PutUint32(hdr[4:8], uint32(len(s.instBlobs))) //nolint:gosec // G115: instance count bounded in practice
+	binary.BigEndian.PutUint32(hdr[4:8], uint32(len(s.vaultBlobs))) //nolint:gosec // G115: instance count bounded in practice
 	if _, err := sink.Write(hdr[:]); err != nil {
 		_ = sink.Cancel()
 		return err
 	}
-	for _, blob := range s.instBlobs {
+	for _, blob := range s.vaultBlobs {
 		if len(blob) < glid.Size {
 			_ = sink.Cancel()
 			return errors.New("vaultraft snapshot: instance blob too short")

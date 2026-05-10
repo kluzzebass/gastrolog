@@ -155,7 +155,7 @@ func TestApplyConfigNil(t *testing.T) {
 // silently skip registering any vault whose buildVaultInstances returned
 // zero local instances — which happens on a node that isn't a placement
 // target for any of the vault's instances (e.g. a node that joined
-// the cluster as a non-inst-member, or a snapshot-restored node where
+// the cluster as a non-instance-member, or a snapshot-restored node where
 // placements are reapplied via post-snapshot log replay rather than the
 // initial ApplyConfig). The vault then never made it into the
 // orchestrator, and any subsequent notification firing handleInstancePut
@@ -165,7 +165,7 @@ func TestApplyConfigNil(t *testing.T) {
 // correctly; initVault must do the same. This test asserts the parity.
 func TestApplyConfigVaultWithNoLocalInstance(t *testing.T) {
 	t.Parallel()
-	// Local node is "node-1". Build a vault whose only inst is placed
+	// Local node is "node-1". Build a vault whose only instance is placed
 	// exclusively on "node-2" — buildVaultInstances should return zero
 	// local instances, but the vault must still be registered so a later
 	// AddVaultInstance call can succeed.
@@ -361,7 +361,7 @@ func TestApplyConfigDuplicateVaultID(t *testing.T) {
 
 	dupID := glid.New()
 	vc1 := testVaultCfg(dupID, system.VaultTypeMemory)
-	vc2 := vc1 // duplicate ID, same inst
+	vc2 := vc1 // duplicate ID, same instance
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{vc1, vc2},
 	}
@@ -614,7 +614,7 @@ func TestApplyConfigIndexManagerReceivesChunkManager(t *testing.T) {
 	}
 }
 
-// --- gastrolog-292yi: all nodes in all inst Raft groups ---
+// --- gastrolog-292yi: all nodes in all instance Raft groups ---
 
 // TestBuildVaultRaftMembers_AllClusterNodes verifies that buildVaultRaftMembers
 // returns every cluster node as a Raft member, regardless of storage placement.

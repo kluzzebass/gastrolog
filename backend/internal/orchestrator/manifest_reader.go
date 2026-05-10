@@ -19,7 +19,7 @@ import (
 //
 // Memory-mode vaults (no FSM, no replication) are projected from the local
 // chunk manager's List() so callers see a uniform view regardless of how
-// the inst is backed.
+// the instance is backed.
 func (o *Orchestrator) ManifestReader() manifest.Reader {
 	return &orchestratorManifestReader{o: o}
 }
@@ -92,7 +92,7 @@ func (r *orchestratorManifestReader) EntriesForVault(key glid.GLID) []vaultctlfs
 // active) for the given vault, read directly from the replicated vault-ctl
 // Raft FSM rather than from local VaultInstances. Every node participates as
 // a voter in every vault-ctl Raft group (gastrolog-292yi), so the FSM is
-// authoritative cluster-wide and visible on nodes that don't host any inst
+// authoritative cluster-wide and visible on nodes that don't host any instance
 // instance for the vault — the case where ManifestReader().EntriesForVault
 // returns nil because o.vaults has no entry. Returns nil when there is no
 // GroupManager (single-node / memory mode) or when this node hasn't joined
@@ -116,12 +116,12 @@ func (o *Orchestrator) VaultManifestEntriesFromCtlFSM(vaultID glid.GLID) []vault
 	return out
 }
 
-func collectSealedEntries(inst *VaultInstance) []vaultctlfsm.ManifestEntry {
-	if inst == nil {
+func collectSealedEntries(vaultInst *VaultInstance) []vaultctlfsm.ManifestEntry {
+	if vaultInst == nil {
 		return nil
 	}
 	var out []vaultctlfsm.ManifestEntry
-	for _, e := range vaultManifestEntries(inst) {
+	for _, e := range vaultManifestEntries(vaultInst) {
 		if e.IsSealed() {
 			out = append(out, e)
 		}
@@ -179,8 +179,8 @@ func (o *Orchestrator) IndexReader() manifest.IndexReader {
 }
 
 // orchestratorIndexReader implements manifest.IndexReader by walking the
-// orchestrator's local inst instances to find the chunk's owning inst,
-// then dispatching to that inst's chunk manager (and index manager) for
+// orchestrator's local vault instances to find the chunk's owning instance,
+// then dispatching to that instance's chunk manager (and index manager) for
 // the actual rank/pos lookup. Same fallback logic as the legacy
 // findIngestRank/findIngestPos helpers in internal/query/histogram.go,
 // just behind the manifest.IndexReader interface.

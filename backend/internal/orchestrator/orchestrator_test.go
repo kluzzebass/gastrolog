@@ -977,7 +977,7 @@ func TestRebuildMissingIndexes(t *testing.T) {
 
 // cloudOverlayCM is a chunk.ChunkManager that delegates everything to an
 // embedded ChunkManager but overrides List() to mark every returned meta as
-// CloudBacked. Used to simulate a inst whose sealed chunks have already been
+// CloudBacked. Used to simulate an instance whose sealed chunks have already been
 // uploaded and pruned from local disk.
 type cloudOverlayCM struct {
 	chunk.ChunkManager

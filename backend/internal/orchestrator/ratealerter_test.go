@@ -215,7 +215,7 @@ func TestRateAlerterPerInstanceIndependence(t *testing.T) {
 		t.Fatalf("expected 1 alert (only vaultA), got %v", calls)
 	}
 	if calls[0].id != ra.alertID(vaultA) {
-		t.Errorf("wrong inst alerted: got id %q, want %q", calls[0].id, ra.alertID(vaultA))
+		t.Errorf("wrong vaultInst alerted: got id %q, want %q", calls[0].id, ra.alertID(vaultA))
 	}
 }
 

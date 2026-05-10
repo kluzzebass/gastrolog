@@ -31,11 +31,11 @@ import (
 // different invariants. SealActive (leader) fans out replication; this
 // function is the target of that fan-out on followers.
 func (o *Orchestrator) SealActiveChunk(vaultID glid.GLID, expectedChunkID chunk.ChunkID) error {
-	inst := o.findLocalVaultInstance(vaultID)
-	if inst == nil {
+	vaultInst := o.findLocalVaultInstance(vaultID)
+	if vaultInst == nil {
 		return fmt.Errorf("%w: vault %s", ErrInstanceNotLocal, vaultID)
 	}
-	active := inst.Chunks.Active()
+	active := vaultInst.Chunks.Active()
 	if active == nil {
 		return nil // nothing to seal
 	}
@@ -46,10 +46,10 @@ func (o *Orchestrator) SealActiveChunk(vaultID glid.GLID, expectedChunkID chunk.
 		return nil
 	}
 	chunkID := active.ID
-	if err := inst.Chunks.Seal(); err != nil {
+	if err := vaultInst.Chunks.Seal(); err != nil {
 		return err
 	}
-	o.postSealWork(vaultID, inst.Chunks, chunkID)
+	o.postSealWork(vaultID, vaultInst.Chunks, chunkID)
 	return nil
 }
 
@@ -134,8 +134,8 @@ func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID glid.GL
 		return
 	}
 
-	inst := o.findLocalVaultInstance(vaultID)
-	if inst == nil {
+	vaultInst := o.findLocalVaultInstance(vaultID)
+	if vaultInst == nil {
 		o.logger.Warn("replication: vault not found for sealed chunk",
 			"vault", vaultID, "chunk", chunkID.String())
 		return
@@ -147,7 +147,7 @@ func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID glid.GL
 	// cluster has already decided to forget (ghost chunk). Closes the
 	// retention-beats-replication ordering at the leader; the receiver-side
 	// tombstone check closes the reverse ordering. See gastrolog-11rzz.
-	if inst.IsTombstoned != nil && inst.IsTombstoned(chunkID) {
+	if vaultInst.IsTombstoned != nil && vaultInst.IsTombstoned(chunkID) {
 		o.logger.Debug("replication: skipping tombstoned chunk (retention beat replication)",
 			"vault", vaultID, "chunk", chunkID.String())
 		return
@@ -156,7 +156,7 @@ func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID glid.GL
 	// Cloud-backed chunks live in shared object storage (S3/GCS/Azure).
 	// Followers learn about them via the vault-ctl FSM's OnUpload callback
 	// and read directly from the bucket — no record streaming needed.
-	meta, err := inst.Chunks.Meta(chunkID)
+	meta, err := vaultInst.Chunks.Meta(chunkID)
 	if err == nil && meta.CloudBacked {
 		o.logger.Debug("replication: skipping cloud-backed chunk (shared bucket)",
 			"vault", vaultID, "chunk", chunkID.String())
@@ -172,7 +172,7 @@ func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID glid.GL
 		failedNodes []string
 	)
 	for _, tgt := range targets {
-		if err := o.replicateToTarget(ctx, vaultID, chunkID, inst.Chunks, tgt); err != nil {
+		if err := o.replicateToTarget(ctx, vaultID, chunkID, vaultInst.Chunks, tgt); err != nil {
 			failedNodes = append(failedNodes, tgt.NodeID)
 		} else {
 			succeeded++
@@ -295,8 +295,8 @@ func (o *Orchestrator) replicateToFollower(ctx context.Context, vaultID glid.GLI
 	// tombstone is on its own FSM. This leader-side recheck short-
 	// circuits the RPC entirely when the leader already knows the chunk
 	// is gone. See gastrolog-11rzz.
-	inst := o.findLocalVaultInstance(vaultID)
-	if inst != nil && inst.IsTombstoned != nil && inst.IsTombstoned(chunkID) {
+	vaultInst := o.findLocalVaultInstance(vaultID)
+	if vaultInst != nil && vaultInst.IsTombstoned != nil && vaultInst.IsTombstoned(chunkID) {
 		o.logger.Debug("replication: chunk tombstoned after cursor read, aborting send",
 			"vault", vaultID, "chunk", chunkID.String(), "node", nodeID)
 		return nil

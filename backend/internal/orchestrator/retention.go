@@ -26,7 +26,7 @@ const (
 	// collide with the retention sweep at second 0. Each node consults
 	// its OWN replicated FSM and reconciles local disk state in both
 	// directions — no leader involvement. Drives three independent
-	// catchup mechanisms per inst instance:
+	// catchup mechanisms per vault instance:
 	//
 	//   - SweepPendingObligations    receipt-protocol delete acks
 	//                                (gastrolog-51gme)
@@ -40,8 +40,8 @@ const (
 	// resolve within a sweep cycle, slow enough that a cluster of N
 	// nodes only generates N applies per cycle even when nothing is
 	// diverged.
-	instCatchupSweepJobName  = "inst-catchup-sweep"
-	instCatchupSweepSchedule = "13,33,53 * * * * *"
+	vaultCatchupSweepJobName  = "vault-catchup-sweep"
+	vaultCatchupSweepSchedule = "13,33,53 * * * * *"
 )
 
 // retentionKey returns a unique map key for a vault instance's retention state.
@@ -81,7 +81,7 @@ type retentionRunner struct {
 
 	applyRaftRetentionPending func(id chunk.ChunkID) error
 
-	// reconciler is the inst lifecycle reconciler that owns chunk-lifecycle
+	// reconciler is the instance lifecycle reconciler that owns chunk-lifecycle
 	// execution. All production deletes route through reconciler.deleteChunk
 	// → CmdRequestDelete (gastrolog-51gme steps 4-7). Nil only in older test
 	// harnesses that build VaultInstances directly without going through
@@ -90,12 +90,12 @@ type retentionRunner struct {
 	// directChunkReplicator.DeleteChunk RPC fan-out separately).
 	reconciler *VaultLifecycleReconciler
 
-	// isLeader returns true if this node is the config leader for this inst.
+	// isLeader returns true if this node is the config leader for this instance.
 	// Retention (expiry + transitions) only runs on the leader to prevent
 	// all nodes from independently transitioning the same chunks.
 	isLeader bool
 
-	// followerTargets are the remote nodes that hold replicas of this inst's
+	// followerTargets are the remote nodes that hold replicas of this instance's
 	// chunks. Used to forward chunk deletions after retention expires them.
 	followerTargets []system.ReplicationTarget
 
@@ -116,10 +116,10 @@ type sweepTarget struct {
 }
 
 // retentionSweepAll is the single scheduled retention job. Runs on every node
-// that hosts at least one inst instance.
+// that hosts at least one vault instance.
 //
-// Per-inst role and readiness:
-//   - Rule evaluation runs only when the inst is the leader (inst.IsLeader()).
+// Per-instance role and readiness:
+//   - Rule evaluation runs only when the instance is the leader (instance.IsLeader()).
 //     Followers skip rule evaluation because rule results must be applied via
 //     the vault control-plane Raft, which only the leader writes to.
 //
@@ -155,9 +155,9 @@ func (o *Orchestrator) retentionSweepAll() {
 		if vault == nil {
 			continue
 		}
-		inst := vault.Instance
-		if inst != nil && inst.IsLeader() {
-			if t := o.retentionTargetForInstance(cfg, vaultCfg, inst, active); t != nil {
+		vaultInst := vault.Instance
+		if vaultInst != nil && vaultInst.IsLeader() {
+			if t := o.retentionTargetForInstance(cfg, vaultCfg, vaultInst, active); t != nil {
 				targets = append(targets, *t)
 			}
 		}
@@ -181,8 +181,8 @@ func (o *Orchestrator) retentionSweepAll() {
 	// receipt" stage anymore.
 	//
 	// (Disk-vs-manifest orphan cleanup and missing-replica catchup are
-	// done out-of-band on the inst-catchup sweep tick — see
-	// instCatchupSweepAll. The retention sweep stays focused on rule
+	// done out-of-band on the instance-catchup sweep tick — see
+	// vaultCatchupSweepAll. The retention sweep stays focused on rule
 	// evaluation.)
 
 	// Memory budget enforcement: transition oldest chunks when over budget.
@@ -193,8 +193,8 @@ func (o *Orchestrator) retentionSweepAll() {
 	var evictors []chunk.ChunkCacheEvictor
 	o.mu.RLock()
 	for _, vault := range o.vaults {
-		if inst := vault.Instance; inst != nil {
-			if evictor, ok := inst.Chunks.(chunk.ChunkCacheEvictor); ok {
+		if vaultInst := vault.Instance; vaultInst != nil {
+			if evictor, ok := vaultInst.Chunks.(chunk.ChunkCacheEvictor); ok {
 				evictors = append(evictors, evictor)
 			}
 		}
@@ -205,9 +205,9 @@ func (o *Orchestrator) retentionSweepAll() {
 	}
 }
 
-// instCatchupSweepAll runs every 20 seconds (cron 13/33/53s, phase-
+// vaultCatchupSweepAll runs every 20 seconds (cron 13/33/53s, phase-
 // offset from the retention sweep) on every node. For each (vault,
-// inst) on this node it asks the lifecycle reconciler to run all
+// instance) on this node it asks the lifecycle reconciler to run all
 // three local-state catchup sweeps:
 //
 //  1. SweepPendingObligations — re-runs fulfillObligation for any
@@ -235,7 +235,7 @@ func (o *Orchestrator) retentionSweepAll() {
 // (1) and (2) take no remote actions. (3) sends a unary RPC to the
 // placement leader, but the *decision* to send is local — the leader
 // is just the transport for the response.
-func (o *Orchestrator) instCatchupSweepAll() {
+func (o *Orchestrator) vaultCatchupSweepAll() {
 	o.mu.RLock()
 	insts := make([]*VaultInstance, 0)
 	for _, vault := range o.vaults {
@@ -253,7 +253,7 @@ func (o *Orchestrator) instCatchupSweepAll() {
 }
 
 // enforceMemoryBudgets checks memory vaults for budget overruns and transitions
-// the oldest sealed chunks to the next inst. Only runs on leaders.
+// the oldest sealed chunks to the next instance. Only runs on leaders.
 func (o *Orchestrator) enforceMemoryBudgets(cfg *system.Config) {
 	if cfg == nil {
 		return
@@ -271,18 +271,18 @@ func (o *Orchestrator) enforceMemoryBudgets(cfg *system.Config) {
 		if vault == nil {
 			continue
 		}
-		inst := vault.Instance
-		if inst == nil || !inst.IsLeader() {
+		vaultInst := vault.Instance
+		if vaultInst == nil || !vaultInst.IsLeader() {
 			continue
 		}
-		monitor, ok := inst.Chunks.(chunk.ChunkBudgetMonitor)
+		monitor, ok := vaultInst.Chunks.(chunk.ChunkBudgetMonitor)
 		if !ok {
 			continue
 		}
 		if excess := monitor.BudgetExceeded(); excess > 0 {
 			targets = append(targets, budgetTarget{
 				vaultID: vaultCfg.ID,
-				cm:      inst.Chunks,
+				cm:      vaultInst.Chunks,
 				excess:  excess,
 			})
 		}
@@ -314,8 +314,8 @@ func (o *Orchestrator) drainExcessChunks(vaultID glid.GLID, cm chunk.ChunkManage
 	var im index.IndexManager
 	o.mu.RLock()
 	if vault := o.vaults[vaultID]; vault != nil {
-		if inst := vault.Instance; inst != nil {
-			im = inst.Indexes
+		if vaultInst := vault.Instance; vaultInst != nil {
+			im = vaultInst.Indexes
 		}
 	}
 	o.mu.RUnlock()
@@ -351,7 +351,7 @@ func (o *Orchestrator) drainExcessChunks(vaultID glid.GLID, cm chunk.ChunkManage
 }
 
 // UnreadableChunks returns chunk IDs currently flagged as unreadable
-// across all inst-instance retention runners for the vault. Used by
+// across all instance-instance retention runners for the vault. Used by
 // the inspector to surface which chunks are in retry-with-backoff and
 // by tests. Read-only accessor; safe to call from any node.
 func (o *Orchestrator) UnreadableChunks(vaultID glid.GLID) []chunk.ChunkID {
@@ -372,7 +372,7 @@ func (o *Orchestrator) UnreadableChunks(vaultID glid.GLID) []chunk.ChunkID {
 }
 
 // RetryUnreadableChunks resets every unreadable chunk's retry backoff
-// across all inst-instance retention runners for the vault, so the
+// across all instance-instance retention runners for the vault, so the
 // next retention sweep retries them all immediately. Returns the total
 // count of entries reset across runners. Operator-driven recovery
 // action exposed via the manual "Retry unreadable" inspector button
@@ -405,15 +405,15 @@ func (o *Orchestrator) RetentionPendingChunks(vaultID glid.GLID) map[chunk.Chunk
 		return nil
 	}
 	result := make(map[chunk.ChunkID]bool)
-	if inst := vault.Instance; inst != nil && inst.ListRetentionPending != nil {
-		for _, id := range inst.ListRetentionPending() {
+	if vaultInst := vault.Instance; vaultInst != nil && vaultInst.ListRetentionPending != nil {
+		for _, id := range vaultInst.ListRetentionPending() {
 			result[id] = true
 		}
 	}
 	return result
 }
 
-// PendingDeleteAcks returns, for each chunk currently in any inst's
+// PendingDeleteAcks returns, for each chunk currently in any instance's
 // receipt-protocol pendingDeletes map within the vault, the set of node
 // IDs that have NOT yet acked the delete. As nodes ack, their entry is
 // removed from ExpectedFrom; what's returned here is the still-owed
@@ -434,8 +434,8 @@ func (o *Orchestrator) PendingDeleteAcks(vaultID glid.GLID) map[chunk.ChunkID][]
 		return nil
 	}
 	result := make(map[chunk.ChunkID][]string)
-	if inst := vault.Instance; inst != nil && inst.Reconciler != nil && inst.Reconciler.fsm != nil {
-		for _, p := range inst.Reconciler.fsm.PendingDeletes() {
+	if vaultInst := vault.Instance; vaultInst != nil && vaultInst.Reconciler != nil && vaultInst.Reconciler.fsm != nil {
+		for _, p := range vaultInst.Reconciler.fsm.PendingDeletes() {
 			expected := make([]string, 0, len(p.ExpectedFrom))
 			for nodeID := range p.ExpectedFrom {
 				expected = append(expected, nodeID)
@@ -446,13 +446,13 @@ func (o *Orchestrator) PendingDeleteAcks(vaultID glid.GLID) map[chunk.ChunkID][]
 	return result
 }
 
-// retentionTargetForInstance resolves a single inst instance into a sweep target.
-// Returns nil if the inst should be skipped (no rules, no leader, etc.).
-func (o *Orchestrator) retentionTargetForInstance(cfg *system.Config, vaultCfg system.VaultConfig, inst *VaultInstance, active map[string]bool) *sweepTarget {
-	if inst.HasRaftLeader != nil && !inst.HasRaftLeader() {
+// retentionTargetForInstance resolves a single vault instance into a sweep target.
+// Returns nil if the instance should be skipped (no rules, no leader, etc.).
+func (o *Orchestrator) retentionTargetForInstance(cfg *system.Config, vaultCfg system.VaultConfig, vaultInst *VaultInstance, active map[string]bool) *sweepTarget {
+	if vaultInst.HasRaftLeader != nil && !vaultInst.HasRaftLeader() {
 		return nil
 	}
-	// IsRaftLeader check removed: the inst apply forwarder transparently
+	// IsRaftLeader check removed: the instance apply forwarder transparently
 	// routes applies to the vault-ctl Raft leader. The config placement leader
 	// always runs retention regardless of vault-ctl Raft leadership.
 	if len(vaultCfg.RetentionRules) == 0 {
@@ -468,27 +468,27 @@ func (o *Orchestrator) retentionTargetForInstance(cfg *system.Config, vaultCfg s
 		return nil
 	}
 
-	key := retentionKey(inst.VaultID, inst.StorageID)
+	key := retentionKey(vaultInst.VaultID, vaultInst.StorageID)
 	active[key] = true
 
 	runner := o.retention[key]
 	if runner == nil {
 		runner = &retentionRunner{
 			vaultID: vaultCfg.ID,
-			cm:      inst.Chunks,
-			im:      inst.Indexes,
+			cm:      vaultInst.Chunks,
+			im:      vaultInst.Indexes,
 			orch:    o,
 			now:     o.now,
 			logger:  o.logger,
 		}
 		o.retention[key] = runner
 	}
-	runner.cm = inst.Chunks
-	runner.im = inst.Indexes
-	runner.applyRaftRetentionPending = inst.ApplyRaftRetentionPending
-	runner.reconciler = inst.Reconciler
-	runner.isLeader = inst.IsLeader()
-	runner.followerTargets = inst.FollowerTargets
+	runner.cm = vaultInst.Chunks
+	runner.im = vaultInst.Indexes
+	runner.applyRaftRetentionPending = vaultInst.ApplyRaftRetentionPending
+	runner.reconciler = vaultInst.Reconciler
+	runner.isLeader = vaultInst.IsLeader()
+	runner.followerTargets = vaultInst.FollowerTargets
 	runner.vaultName = vaultCfg.Name
 	runner.vaultType = string(vaultCfg.Type)
 	runner.disposition = vaultCfg.ResolveRetentionDisposition()
@@ -528,16 +528,16 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 
 	r.mu.Lock()
 	unreadable := r.unreadable
-	inst := r.findVaultInstance()
+	vaultInst := r.findVaultInstance()
 	r.mu.Unlock()
 
 	// Phase 3 (gastrolog-1huz5): overlay each meta with FSM state so
 	// selectRetentionCandidates' meta.Sealed gate reflects cluster
 	// truth — Sealing chunks (active-form files closed locally but
 	// GLCB not yet committed) must not be eligible.
-	if inst != nil && inst.OverlayFromFSM != nil {
+	if vaultInst != nil && vaultInst.OverlayFromFSM != nil {
 		for i := range metas {
-			metas[i] = inst.OverlayFromFSM(metas[i])
+			metas[i] = vaultInst.OverlayFromFSM(metas[i])
 		}
 	}
 
@@ -554,13 +554,13 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	// unreachable destination, receipt-protocol stuck) and the same
 	// chunk gets re-evaluated every minute. See gastrolog-51gme.
 	pendingFlag := make(map[chunk.ChunkID]bool)
-	if inst != nil && inst.ListRetentionPending != nil {
-		for _, id := range inst.ListRetentionPending() {
+	if vaultInst != nil && vaultInst.ListRetentionPending != nil {
+		for _, id := range vaultInst.ListRetentionPending() {
 			pendingFlag[id] = true
 		}
 	}
 
-	manifest, manifestKnown := buildManifestSet(inst)
+	manifest, manifestKnown := buildManifestSet(vaultInst)
 
 	now := time.Now()
 	sealed := selectRetentionCandidates(metas, streamed, manifest, manifestKnown, unreadable, now)
@@ -588,19 +588,19 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 	}
 }
 
-// buildManifestSet returns the FSM-known chunk IDs for the given inst and a
+// buildManifestSet returns the FSM-known chunk IDs for the given instance and a
 // flag indicating whether the manifest is queryable. Any chunk on disk whose
 // ID is NOT in the manifest is a ghost — its FSM entry was finalize-deleted
 // but the disk file was never reaped. Filtering ghosts out of the retention
 // sweep prevents repeated no-op transitions (the apply silently no-ops when
 // f.chunks[id] is nil, the flag never sticks, and we re-stream the chunk's
-// records to the next inst on every sweep). See gastrolog-66b7x.
-func buildManifestSet(inst *VaultInstance) (map[chunk.ChunkID]bool, bool) {
+// records to the next instance on every sweep). See gastrolog-66b7x.
+func buildManifestSet(vaultInst *VaultInstance) (map[chunk.ChunkID]bool, bool) {
 	manifest := make(map[chunk.ChunkID]bool)
-	if inst == nil || inst.ListManifest == nil {
+	if vaultInst == nil || vaultInst.ListManifest == nil {
 		return manifest, false
 	}
-	ids := inst.ListManifest()
+	ids := vaultInst.ListManifest()
 	if ids == nil {
 		return manifest, false
 	}
@@ -723,12 +723,12 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) {
 	if r.orch == nil {
 		return
 	}
-	inst := r.findVaultInstance()
-	if inst == nil || inst.Chunks == nil {
+	vaultInst := r.findVaultInstance()
+	if vaultInst == nil || vaultInst.Chunks == nil {
 		return
 	}
 
-	cur, err := inst.Chunks.OpenCursor(id)
+	cur, err := vaultInst.Chunks.OpenCursor(id)
 	if err != nil {
 		r.logger.Warn("retention: open cursor for fan-out failed",
 			"vault", r.vaultID, "chunk", id, "error", err)
@@ -772,7 +772,7 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) {
 		"vault", r.vaultID, "chunk", id, "count", fanned)
 }
 
-// findVaultInstance looks up this runner's inst in the orchestrator's vault registry.
+// findVaultInstance looks up this runner's instance in the orchestrator's vault registry.
 func (r *retentionRunner) findVaultInstance() *VaultInstance {
 	if r.orch == nil {
 		return nil
@@ -910,8 +910,8 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID, reason string) {
 			return
 		}
 		if r.orch != nil && r.orch.retentionRates != nil {
-			// Per-inst rate alert (see gastrolog-47qyw). Only counted on
-			// the leader path (this function only runs on inst leaders)
+			// Per-instance rate alert (see gastrolog-47qyw). Only counted on
+			// the leader path (this function only runs on instance leaders)
 			// so the rate reflects active expiration decisions, not
 			// follower delete-cascade applications.
 			r.orch.retentionRates.Record(r.vaultID, r.orch.now())
@@ -924,7 +924,7 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID, reason string) {
 	// Reconciler-less fallback: legacy direct-delete path.
 	//
 	// Reached only by older test harnesses that build a retentionRunner
-	// without going through buildInstance (so inst.Reconciler is nil).
+	// without going through buildInstance (so instance.Reconciler is nil).
 	// They wire cross-node propagation via directChunkReplicator.DeleteChunk
 	// RPC fan-out (forwardDeletionToFollowers below) instead of vault-ctl
 	// Raft. Production has no path into here after gastrolog-51gme step 11
@@ -1023,7 +1023,7 @@ func (r *retentionRunner) forwardDeleteWithRetry(nodeID string, id chunk.ChunkID
 	}
 }
 
-// sendDeleteToFollower issues a single chunk-delete RPC via the inst
+// sendDeleteToFollower issues a single chunk-delete RPC via the instance
 // replicator. Returns nil when no replicator is configured (single-node mode).
 func (r *retentionRunner) sendDeleteToFollower(followerID string, id chunk.ChunkID) error {
 	if r.orch.chunkReplicator == nil {

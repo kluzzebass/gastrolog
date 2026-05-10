@@ -83,8 +83,8 @@ func TestEvaluateCloudHealth_SetsAlertWhenDegraded(t *testing.T) {
 
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = ac
-	inst := &VaultInstance{VaultID: vaultID, Type: "cloud", Chunks: mock}
-	orch.RegisterVault(NewVault(glid.New(), inst))
+	vaultInst := &VaultInstance{VaultID: vaultID, Type: "cloud", Chunks: mock}
+	orch.RegisterVault(NewVault(glid.New(), vaultInst))
 
 	orch.evaluateCloudHealth()
 
@@ -110,8 +110,8 @@ func TestEvaluateCloudHealth_ClearsAlertWhenHealthy(t *testing.T) {
 
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = ac
-	inst := &VaultInstance{VaultID: vaultID, Type: "cloud", Chunks: mock}
-	orch.RegisterVault(NewVault(glid.New(), inst))
+	vaultInst := &VaultInstance{VaultID: vaultID, Type: "cloud", Chunks: mock}
+	orch.RegisterVault(NewVault(glid.New(), vaultInst))
 
 	// Simulate prior degraded alert.
 	alertID := fmt.Sprintf("cloud-store:%s", vaultID)
@@ -137,13 +137,13 @@ func TestEvaluateCloudHealth_SkipsNonCloudVaults(t *testing.T) {
 	orch.alerts = ac
 
 	// Type is "file", not "cloud" — should be skipped.
-	inst := &VaultInstance{VaultID: glid.New(), Type: "file", Chunks: mock}
-	orch.RegisterVault(NewVault(glid.New(), inst))
+	vaultInst := &VaultInstance{VaultID: glid.New(), Type: "file", Chunks: mock}
+	orch.RegisterVault(NewVault(glid.New(), vaultInst))
 
 	orch.evaluateCloudHealth()
 
 	if alerts := ac.Active(); len(alerts) != 0 {
-		t.Fatalf("expected 0 alerts for non-cloud inst, got %d", len(alerts))
+		t.Fatalf("expected 0 alerts for non-cloud vaultInst, got %d", len(alerts))
 	}
 }
 
@@ -173,14 +173,14 @@ func TestBackfillCloudUploads_SchedulesSealedNonCloudBacked(t *testing.T) {
 	vaultID := glid.New()
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID:       vaultID,
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },
 	}
 
-	orch.backfillCloudUploads(inst)
+	orch.backfillCloudUploads(vaultInst)
 
 	// Wait for the scheduler job to run.
 	orch.Scheduler().Start()
@@ -207,14 +207,14 @@ func TestBackfillCloudUploads_SkipsCloudBacked(t *testing.T) {
 
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID:       glid.New(),
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },
 	}
 
-	orch.backfillCloudUploads(inst)
+	orch.backfillCloudUploads(vaultInst)
 
 	orch.Scheduler().Start()
 	defer func() { _ = orch.Scheduler().Stop() }()
@@ -237,14 +237,14 @@ func TestBackfillCloudUploads_SkipsUnsealed(t *testing.T) {
 
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID:       glid.New(),
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },
 	}
 
-	orch.backfillCloudUploads(inst)
+	orch.backfillCloudUploads(vaultInst)
 
 	orch.Scheduler().Start()
 	defer func() { _ = orch.Scheduler().Stop() }()
@@ -268,7 +268,7 @@ func TestBackfillCloudUploads_SkipsWhenFSMOverlaySaysCloudBacked(t *testing.T) {
 
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID:       glid.New(),
 		Type:         "cloud",
 		Chunks:       mock,
@@ -280,7 +280,7 @@ func TestBackfillCloudUploads_SkipsWhenFSMOverlaySaysCloudBacked(t *testing.T) {
 		},
 	}
 
-	orch.backfillCloudUploads(inst)
+	orch.backfillCloudUploads(vaultInst)
 
 	orch.Scheduler().Start()
 	defer func() { _ = orch.Scheduler().Stop() }()
@@ -291,7 +291,7 @@ func TestBackfillCloudUploads_SkipsWhenFSMOverlaySaysCloudBacked(t *testing.T) {
 	}
 }
 
-// TestBackfillCloudUploadsLeaderOnly verifies backfill runs only on the inst
+// TestBackfillCloudUploadsLeaderOnly verifies backfill runs only on the instance
 // Raft leader. See gastrolog-2nngw — followers learn about cloud-backed
 // chunks via the FSM, so duplicate backfill on every node is wasteful.
 func TestBackfillCloudUploadsLeaderOnly(t *testing.T) {
@@ -310,13 +310,13 @@ func TestBackfillCloudUploadsLeaderOnly(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = ac
 
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID:       vaultID,
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },
 	}
-	orch.RegisterVault(NewVault(glid.New(), inst))
+	orch.RegisterVault(NewVault(glid.New(), vaultInst))
 
 	orch.evaluateCloudHealth()
 
@@ -354,13 +354,13 @@ func TestBackfillCloudUploadsSkippedOnFollower(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = ac
 
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID:       glid.New(),
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return false },
 	}
-	orch.RegisterVault(NewVault(glid.New(), inst))
+	orch.RegisterVault(NewVault(glid.New(), vaultInst))
 
 	orch.evaluateCloudHealth()
 
@@ -389,7 +389,7 @@ func TestBackfillCloudUploads_DeduplicatesPendingJobs(t *testing.T) {
 	vaultID := glid.New()
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID:       vaultID,
 		Type:         "cloud",
 		Chunks:       mock,
@@ -397,8 +397,8 @@ func TestBackfillCloudUploads_DeduplicatesPendingJobs(t *testing.T) {
 	}
 
 	// Call backfill twice — should only schedule once.
-	orch.backfillCloudUploads(inst)
-	orch.backfillCloudUploads(inst)
+	orch.backfillCloudUploads(vaultInst)
+	orch.backfillCloudUploads(vaultInst)
 
 	orch.Scheduler().Start()
 	defer func() { _ = orch.Scheduler().Stop() }()

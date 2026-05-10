@@ -144,8 +144,8 @@ func (d *configDispatcher) handleVaultPut(ctx context.Context, id glid.GLID) {
 		return
 	}
 
-	// The vault has exactly one inst whose ID equals the vault's ID.
-	// Every node instantiates the inst if it can serve it.
+	// The vault has exactly one vault whose ID equals the vault's ID.
+	// Every node instantiates the vault if it can serve it.
 	vaultIDs := []glid.GLID{id}
 
 	// Cancel any in-progress drain.
@@ -222,8 +222,8 @@ func (d *configDispatcher) reconcileVaultInstance(ctx context.Context, vaultID g
 	}
 
 	// Remove instances that are no longer expected.
-	for _, localInstID := range d.orch.LocalInstanceIDs(vaultID) {
-		if !expected[localInstID] {
+	for _, localVaultID := range d.orch.LocalInstanceIDs(vaultID) {
+		if !expected[localVaultID] {
 			d.orch.RemoveVaultInstance(vaultID)
 		}
 	}
@@ -475,24 +475,24 @@ func (d *configDispatcher) handleInstancePut(ctx context.Context, vaultID glid.G
 	// The vault's ID equals the instance's ID.
 	v, err := d.cfgStore.GetVault(ctx, vaultID)
 	if err != nil || v == nil {
-		d.logger.Error("dispatch: get vault for inst change", "vault", vaultID, "error", err)
+		d.logger.Error("dispatch: get vault for vault change", "vault", vaultID, "error", err)
 		return
 	}
 
 	nscs, err := d.cfgStore.ListNodeStorageConfigs(ctx)
 	if err != nil {
-		d.logger.Error("dispatch: list node storage configs for inst change", "vault", vaultID, "error", err)
+		d.logger.Error("dispatch: list node storage configs for vault change", "vault", vaultID, "error", err)
 		return
 	}
 
 	leaderNodeID := system.LeaderNodeID(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, vaultID); return p }(), nscs)
 	followerNodeIDs := system.FollowerNodeIDs(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, vaultID); return p }(), nscs)
 
-	// Only act on inst membership once placements are fully assigned. During
+	// Only act on vault membership once placements are fully assigned. During
 	// cluster-init the placement manager assigns placements one-at-a-time,
-	// each firing its own CmdPutVault. Building the inst locally on a partial
+	// each firing its own CmdPutVault. Building the vault locally on a partial
 	// placement state is wrong for two reasons: (1) we can't reliably answer
-	// "does this inst belong here" with incomplete placements, and (2) it
+	// "does this vault belong here" with incomplete placements, and (2) it
 	// would create the chunk manager (and vault-ctl Raft group) with a wrong-size
 	// member list, which then persists in boltdb.
 	//
@@ -504,10 +504,10 @@ func (d *configDispatcher) handleInstancePut(ctx context.Context, vaultID glid.G
 	// immediately. Without this, records are forwarded to the old (possibly
 	// dead) node until the rotation sweep recompiles filters (up to 15s).
 	if err := d.orch.ReloadFilters(ctx); err != nil {
-		d.logger.Warn("dispatch: reload filters after inst change", "error", err)
+		d.logger.Warn("dispatch: reload filters after vault change", "error", err)
 	}
 
-	// Reload rotation and retention policies — inst config may have changed
+	// Reload rotation and retention policies — vault config may have changed
 	// policy references (rotation_policy_id, retention_rules).
 	d.reloadRotationPolicies(ctx)
 	d.reloadRetentionPolicies(ctx)
@@ -529,7 +529,7 @@ func (d *configDispatcher) handleInstancePut(ctx context.Context, vaultID glid.G
 	}
 }
 
-// applyInstanceMembershipChange decides whether the inst belongs here based on
+// applyInstanceMembershipChange decides whether the vault belongs here based on
 // the (complete) placement state, and either adds/rebuilds it locally or
 // removes it if it no longer belongs. Deferred entirely when placements are
 // incomplete — the next CmdPutVault from the placement manager will retry.
@@ -554,13 +554,13 @@ func (d *configDispatcher) applyInstanceMembershipChange(ctx context.Context, v 
 	}
 
 	// Every node participates in every vault-ctl Raft group (gastrolog-292yi),
-	// whether or not it has a storage placement for this inst. Non-storage
-	// nodes still need to join as voters — without that, a inst with RF
+	// whether or not it has a storage placement for this vault. Non-storage
+	// nodes still need to join as voters — without that, a vault with RF
 	// smaller than the cluster size can't reach quorum because most nodes
 	// never registered the group. AddVaultInstance handles both cases: storage
 	// nodes get a VaultInstance, non-storage nodes only get a Raft group.
-	instBelongsHere := leaderNodeID == d.localNodeID || slices.Contains(followerNodeIDs, d.localNodeID)
-	if !instBelongsHere {
+	vaultBelongsHere := leaderNodeID == d.localNodeID || slices.Contains(followerNodeIDs, d.localNodeID)
+	if !vaultBelongsHere {
 		if existing := d.orch.FindLocalVaultInstance(v.ID); existing != nil {
 			// Instance moved away from this node — drop the storage
 			// instance. The Raft group itself stays (symmetric voting).
@@ -572,7 +572,7 @@ func (d *configDispatcher) applyInstanceMembershipChange(ctx context.Context, v 
 
 func (d *configDispatcher) registerVault(ctx context.Context, v system.VaultConfig, vaultID glid.GLID) {
 	if err := d.orch.AddVault(ctx, v, d.factories); err != nil {
-		d.logger.Error("dispatch: add vault for gained inst",
+		d.logger.Error("dispatch: add vault for gained vault",
 			"vault", v.ID, "error", err)
 	}
 }
@@ -616,7 +616,7 @@ func (d *configDispatcher) updateInstanceRoleIfNeeded(ctx context.Context, vault
 	} else {
 		existing.LeaderNodeID = ""
 	}
-	d.logger.Info("dispatch: inst role updated in place",
+	d.logger.Info("dispatch: vault role updated in place",
 		"vault", vaultID,
 		"isFollower", shouldBeFollower)
 }

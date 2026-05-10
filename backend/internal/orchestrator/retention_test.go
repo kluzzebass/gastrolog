@@ -337,7 +337,7 @@ func TestExpireChunkProposesRequestDelete(t *testing.T) {
 		gotReason       string
 		gotExpectedFrom []string
 	)
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID: vaultID,
 		Chunks: cm,
 		Indexes: im,
@@ -352,7 +352,7 @@ func TestExpireChunkProposesRequestDelete(t *testing.T) {
 			return nil
 		},
 	}
-	rec := NewVaultLifecycleReconciler(nil, vaultID, inst, "node-A", slog.Default())
+	rec := NewVaultLifecycleReconciler(nil, vaultID, vaultInst, "node-A", slog.Default())
 
 	r := &retentionRunner{
 		isLeader:        true,
@@ -360,7 +360,7 @@ func TestExpireChunkProposesRequestDelete(t *testing.T) {
 		cm:              cm,
 		im:              im,
 		reconciler:      rec,
-		followerTargets: inst.FollowerTargets,
+		followerTargets: vaultInst.FollowerTargets,
 		now:             time.Now,
 		logger:          slog.Default(),
 	}
@@ -402,7 +402,7 @@ func TestExpireChunkSkipsLocalOnRequestDeleteFailure(t *testing.T) {
 	im := &retentionFakeIndexManager{}
 
 	vaultID := glid.New()
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID:  vaultID,
 		Chunks:  cm,
 		Indexes: im,
@@ -410,7 +410,7 @@ func TestExpireChunkSkipsLocalOnRequestDeleteFailure(t *testing.T) {
 			return fmt.Errorf("not leader")
 		},
 	}
-	rec := NewVaultLifecycleReconciler(nil, vaultID, inst, "node-A", slog.Default())
+	rec := NewVaultLifecycleReconciler(nil, vaultID, vaultInst, "node-A", slog.Default())
 
 	r := &retentionRunner{
 		isLeader:   true,
@@ -603,7 +603,7 @@ func TestClusterRetentionSweepWithTTLOnAllNodes(t *testing.T) {
 	}
 
 	// ---- Verify: no chunk directories on disk on ANY node ----
-	h.assertInstDirEmpty(t, 0)
+	h.assertVaultDirEmpty(t, 0)
 }
 
 // TestRetentionTargetRefreshesCmOnExistingRunner verifies that

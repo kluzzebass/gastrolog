@@ -91,7 +91,7 @@ func TestVaultCtlLeaderManager_StartStopIdempotent(t *testing.T) {
 	mgr.Start(vaultID, g)
 	mgr.Stop(vaultID)
 
-	// Stopping a inst with no loop should be safe.
+	// Stopping an instance with no loop should be safe.
 	mgr.Stop(vaultID)
 }
 
@@ -192,7 +192,7 @@ func TestVaultCtlLeaderManager_ReconcileRemovesExtras(t *testing.T) {
 	t.Fatal("doomed peer was not removed from Raft configuration within 5s")
 }
 
-// makeTwoNodeVaultGroup builds a 2-node inst Raft cluster using in-memory
+// makeTwoNodeVaultGroup builds a 2-node instance Raft cluster using in-memory
 // transport. Returns the groups (group[0] is the leader after election)
 // and a cleanup func.
 func makeTwoNodeVaultGroup(t *testing.T, id1, id2 string) ([]*raftgroup.Group, func()) {
@@ -317,7 +317,7 @@ func TestVaultMembershipMap_RoundTrip(t *testing.T) {
 
 	// Initial Get returns nil.
 	if got := m.Get(vaultID); got != nil {
-		t.Errorf("expected nil for unknown inst, got %v", got)
+		t.Errorf("expected nil for unknown vaultInst, got %v", got)
 	}
 
 	// Set + Get round-trip.

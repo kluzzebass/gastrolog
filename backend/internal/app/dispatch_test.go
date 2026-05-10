@@ -91,7 +91,7 @@ type mockOrch struct {
 	reloadFiltersCalls int         // number of ReloadFilters calls
 
 	// Vault drain tracking.
-	instDrainCalls        []glid.GLID                                       // vault IDs passed to DrainInstance
+	vaultDrainCalls        []glid.GLID                                       // vault IDs passed to DrainInstance
 	removeInstanceCalls   []glid.GLID                                       // vault IDs passed to RemoveVaultInstance
 	localInstanceExported func(vaultID glid.GLID) *orchestrator.VaultInstance // configurable return
 }
@@ -129,7 +129,7 @@ func (m *mockOrch) DeleteVaultInstance(vaultID glid.GLID) bool {
 	return true
 }
 func (m *mockOrch) DrainInstance(_ context.Context, vaultID glid.GLID, _ orchestrator.DrainMode, _ string) error {
-	m.instDrainCalls = append(m.instDrainCalls, vaultID)
+	m.vaultDrainCalls = append(m.vaultDrainCalls, vaultID)
 	return nil
 }
 func (m *mockOrch) UnregisterVault(id glid.GLID) error {

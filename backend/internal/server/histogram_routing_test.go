@@ -41,11 +41,9 @@ func TestHistogramFullyLocal_RequiresLeadership(t *testing.T) {
 
 	leaderVaultID := glid.New()
 	followerVaultID := glid.New()
-	leaderInstID := glid.New()
-	followerInstID := glid.New()
 
-	orch.RegisterVault(orchestrator.NewVault(leaderVaultID, mustVaultInstance(t, leaderInstID, false)))
-	orch.RegisterVault(orchestrator.NewVault(followerVaultID, mustVaultInstance(t, followerInstID, true)))
+	orch.RegisterVault(orchestrator.NewVault(leaderVaultID, mustVaultInstance(t, leaderVaultID, false)))
+	orch.RegisterVault(orchestrator.NewVault(followerVaultID, mustVaultInstance(t, followerVaultID, true)))
 
 	store := sysmem.NewStore()
 	for _, vid := range []glid.GLID{leaderVaultID, followerVaultID} {
@@ -53,8 +51,6 @@ func TestHistogramFullyLocal_RequiresLeadership(t *testing.T) {
 			t.Fatalf("PutVault: %v", err)
 		}
 	}
-	_ = leaderInstID
-	_ = followerInstID
 
 	qs := NewQueryServer(orch, store, nil, "node-1", nil, nil, 0, 0, 0, nil)
 

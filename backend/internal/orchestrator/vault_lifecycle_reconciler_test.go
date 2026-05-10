@@ -92,7 +92,7 @@ func TestReconcilerOnRequestDeleteDeletesLocalAndAcks(t *testing.T) {
 	var ackedID chunk.ChunkID
 	var ackedNode string
 	var ackCount atomic.Int32
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
 		Chunks: cm,
 		ApplyRaftAckDelete: func(id chunk.ChunkID, nodeID string) error {
@@ -102,7 +102,7 @@ func TestReconcilerOnRequestDeleteDeletesLocalAndAcks(t *testing.T) {
 			return nil
 		},
 	}
-	rec := NewVaultLifecycleReconciler(nil, inst.VaultID, inst, "node-A", slog.Default())
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
 	rec.Wire(fsm)
 
 	chunkID := chunk.NewChunkID()
@@ -146,7 +146,7 @@ func TestReconcilerOnRequestDeleteIgnoresNotInExpectedFrom(t *testing.T) {
 	cm := &reconcilerFakeChunkManager{}
 
 	var ackCount atomic.Int32
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
 		Chunks: cm,
 		ApplyRaftAckDelete: func(_ chunk.ChunkID, _ string) error {
@@ -154,7 +154,7 @@ func TestReconcilerOnRequestDeleteIgnoresNotInExpectedFrom(t *testing.T) {
 			return nil
 		},
 	}
-	rec := NewVaultLifecycleReconciler(nil, inst.VaultID, inst, "node-Z", slog.Default())
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-Z", slog.Default())
 	rec.Wire(fsm)
 
 	chunkID := chunk.NewChunkID()
@@ -187,7 +187,7 @@ func TestReconcilerOnAckDeleteFinalizesWhenAllAcked(t *testing.T) {
 
 	var finalizeCount atomic.Int32
 	var finalizedID chunk.ChunkID
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
 		Chunks: cm,
 		IsRaftLeader: func() bool { return true },
@@ -198,7 +198,7 @@ func TestReconcilerOnAckDeleteFinalizesWhenAllAcked(t *testing.T) {
 			return nil
 		},
 	}
-	rec := NewVaultLifecycleReconciler(nil, inst.VaultID, inst, "node-A", slog.Default())
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
 	rec.Wire(fsm)
 
 	chunkID := chunk.NewChunkID()
@@ -240,14 +240,14 @@ func TestReconcilerOnAckDeleteSkipsOnFollower(t *testing.T) {
 
 	fsm := vaultctlfsm.New()
 	var finalizeCount atomic.Int32
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID:                  glid.New(),
 		Chunks:                  &reconcilerFakeChunkManager{},
 		IsRaftLeader:            func() bool { return false },
 		ApplyRaftAckDelete:      func(_ chunk.ChunkID, _ string) error { return nil },
 		ApplyRaftFinalizeDelete: func(_ chunk.ChunkID) error { finalizeCount.Add(1); return nil },
 	}
-	rec := NewVaultLifecycleReconciler(nil, inst.VaultID, inst, "node-A", slog.Default())
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
 	rec.Wire(fsm)
 
 	chunkID := chunk.NewChunkID()
@@ -270,12 +270,12 @@ func TestReconcilerDeleteChunkSingleNodeFallback(t *testing.T) {
 	t.Parallel()
 
 	cm := &reconcilerFakeChunkManager{}
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
 		Chunks: cm,
 		// ApplyRaftRequestDelete deliberately nil — single-node mode.
 	}
-	rec := NewVaultLifecycleReconciler(nil, inst.VaultID, inst, "node-A", slog.Default())
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
 
 	chunkID := chunk.NewChunkID()
 	if err := rec.deleteChunk(chunkID, "retention-ttl", []string{"node-A"}); err != nil {
@@ -307,13 +307,13 @@ func TestReconcilerOnPruneNodeFinalizesEmptiedEntries(t *testing.T) {
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalRequestDelete(idUntouched, now, "test", []string{"node-B"})})
 
 	finalizedCh := make(chan chunk.ChunkID, 4)
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID:                  glid.New(),
 		Chunks:                  &reconcilerFakeChunkManager{},
 		IsRaftLeader:            func() bool { return true },
 		ApplyRaftFinalizeDelete: func(id chunk.ChunkID) error { finalizedCh <- id; return nil },
 	}
-	rec := NewVaultLifecycleReconciler(nil, inst.VaultID, inst, "node-B", slog.Default())
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-B", slog.Default())
 	rec.Wire(fsm)
 
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalPruneNode("node-A")}); err != nil {
@@ -355,13 +355,13 @@ func TestReconcilerOnPruneNodeSkipsOnFollower(t *testing.T) {
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalRequestDelete(id, now, "test", []string{"node-A"})})
 
 	var finalizeCount atomic.Int32
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID:                  glid.New(),
 		Chunks:                  &reconcilerFakeChunkManager{},
 		IsRaftLeader:            func() bool { return false },
 		ApplyRaftFinalizeDelete: func(_ chunk.ChunkID) error { finalizeCount.Add(1); return nil },
 	}
-	rec := NewVaultLifecycleReconciler(nil, inst.VaultID, inst, "node-Z", slog.Default())
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-Z", slog.Default())
 	rec.Wire(fsm)
 
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalPruneNode("node-A")})
@@ -384,11 +384,11 @@ func TestReconcilerOnSealProjectsToLocalManager(t *testing.T) {
 
 	fsm := vaultctlfsm.New()
 	cm := &reconcilerFakeSealEnsurerChunkManager{}
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
 		Chunks: cm,
 	}
-	rec := NewVaultLifecycleReconciler(nil, inst.VaultID, inst, "node-A", slog.Default())
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
 	rec.Wire(fsm)
 
 	id := chunk.NewChunkID()
@@ -427,11 +427,11 @@ func TestReconcileFromSnapshotProjectsAllSealedEntries(t *testing.T) {
 	_ = src.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idSealed2, now, 1, 1, now, now, now, false)})
 
 	cm := &reconcilerFakeSealEnsurerChunkManager{}
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
 		Chunks: cm,
 	}
-	rec := NewVaultLifecycleReconciler(nil, inst.VaultID, inst, "node-A", slog.Default())
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
 
 	rec.ReconcileFromSnapshot(src)
 
@@ -469,7 +469,7 @@ func TestReconcileFromSnapshotProcessesPendingObligations(t *testing.T) {
 
 	cm := &reconcilerFakeChunkManager{}
 	ackCh := make(chan chunk.ChunkID, 4)
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
 		Chunks: cm,
 		ApplyRaftAckDelete: func(id chunk.ChunkID, _ string) error {
@@ -477,7 +477,7 @@ func TestReconcileFromSnapshotProcessesPendingObligations(t *testing.T) {
 			return nil
 		},
 	}
-	rec := NewVaultLifecycleReconciler(nil, inst.VaultID, inst, "node-A", slog.Default())
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
 
 	// Reconcile from the FSM's pending state — does NOT require Wire().
 	rec.ReconcileFromSnapshot(fsm)
@@ -579,8 +579,8 @@ func TestSweepLocalOrphansDeletesOnlyTombstonedAbsentEntries(t *testing.T) {
 		{ID: idUnsealed, Sealed: false},
 	}
 
-	inst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
-	rec := NewVaultLifecycleReconciler(nil, inst.VaultID, inst, "node-A", slog.Default())
+	vaultInst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
 	rec.Wire(fsm)
 
 	rec.SweepLocalOrphans()
@@ -601,7 +601,7 @@ func TestSweepLocalOrphansDeletesOnlyTombstonedAbsentEntries(t *testing.T) {
 //   - active (unsealed) entries lack a stable on-disk identity, so we
 //     must not chase them across the wire mid-rotation
 //   - cloud-backed chunks live in shared object storage; pulling
-//     records to a follower's local disk would defeat the cloud-inst
+//     records to a follower's local disk would defeat the cloud-instance
 //     contract and waste bandwidth
 //   - chunks already present locally are not missing — re-requesting
 //     would create unbounded re-push amplification on every sweep tick
@@ -641,14 +641,14 @@ func TestSweepMissingReplicasRequestsOnlySealedAndAbsentEntries(t *testing.T) {
 	fake := &captureCatchupReplicator{scheduledRet: 1}
 	orch.SetChunkReplicator(fake)
 
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID:       glid.New(),
 		Type:         "memory",
 		Chunks:       cm,
 		IsFollower:   true,
 		LeaderNodeID: "node-leader",
 	}
-	rec := NewVaultLifecycleReconciler(orch, glid.New(), inst, "node-A", slog.Default())
+	rec := NewVaultLifecycleReconciler(orch, glid.New(), vaultInst, "node-A", slog.Default())
 	rec.Wire(fsm)
 
 	rec.SweepMissingReplicas()
@@ -691,13 +691,13 @@ func TestSweepMissingReplicasSkipsLeader(t *testing.T) {
 	fake := &captureCatchupReplicator{}
 	orch.SetChunkReplicator(fake)
 
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID:     glid.New(),
 		Type:       "memory",
 		Chunks:     cm,
 		IsFollower: false, // this node IS the placement leader
 	}
-	rec := NewVaultLifecycleReconciler(orch, glid.New(), inst, "node-A", slog.Default())
+	rec := NewVaultLifecycleReconciler(orch, glid.New(), vaultInst, "node-A", slog.Default())
 	rec.Wire(fsm)
 
 	rec.SweepMissingReplicas()
@@ -727,14 +727,14 @@ func TestSweepMissingReplicasSkipsWhenLeaderUnknown(t *testing.T) {
 	fake := &captureCatchupReplicator{}
 	orch.SetChunkReplicator(fake)
 
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID:       glid.New(),
 		Type:         "memory",
 		Chunks:       cm,
 		IsFollower:   true,
 		LeaderNodeID: "", // unknown — election in progress
 	}
-	rec := NewVaultLifecycleReconciler(orch, glid.New(), inst, "node-A", slog.Default())
+	rec := NewVaultLifecycleReconciler(orch, glid.New(), vaultInst, "node-A", slog.Default())
 	rec.Wire(fsm)
 
 	rec.SweepMissingReplicas()
@@ -777,7 +777,7 @@ func (f *fakeSealEnsurerThatDemotesActive) Delete(id chunk.ChunkID) error {
 // TestFulfillObligationDemotesLocalActiveBeforeDelete pins
 // gastrolog-2yeht: the receipt-protocol delete obligation MUST call
 // EnsureSealed before deleteLocalCopy so a chunk that's still local
-// active on a follower (downstream inst with no continuous record
+// active on a follower (downstream instance with no continuous record
 // stream → no natural active swap) gets force-demoted and then
 // deleted, instead of bouncing off ErrActiveChunk every periodic
 // sweep tick.
@@ -796,12 +796,12 @@ func TestFulfillObligationDemotesLocalActiveBeforeDelete(t *testing.T) {
 	chunkID := chunk.NewChunkID()
 
 	cm := &fakeSealEnsurerThatDemotesActive{
-		activeID: chunkID, // simulate a stuck-active chunk on a downstream-inst follower
+		activeID: chunkID, // simulate a stuck-active chunk on a downstream-instance follower
 	}
 
 	var ackedID chunk.ChunkID
 	var ackCount atomic.Int32
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
 		Chunks: cm,
 		ApplyRaftAckDelete: func(id chunk.ChunkID, _ string) error {
@@ -810,7 +810,7 @@ func TestFulfillObligationDemotesLocalActiveBeforeDelete(t *testing.T) {
 			return nil
 		},
 	}
-	rec := NewVaultLifecycleReconciler(nil, inst.VaultID, inst, "node-A", slog.Default())
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
 
 	rec.fulfillObligation(chunkID, "retention-ttl", "test")
 
@@ -871,8 +871,8 @@ func TestSweepLocalOrphansDemotesActiveTombstonedChunk(t *testing.T) {
 		{ID: idTombstoned, Sealed: false}, // active = unsealed
 	}
 
-	inst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
-	rec := NewVaultLifecycleReconciler(nil, inst.VaultID, inst, "node-A", slog.Default())
+	vaultInst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
 	rec.Wire(fsm)
 
 	rec.SweepLocalOrphans()
@@ -964,8 +964,8 @@ func TestReconcilerOnSealNotifiesChunkChange(t *testing.T) {
 
 	fsm := vaultctlfsm.New()
 	cm := &reconcilerFakeSealEnsurerChunkManager{}
-	inst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
-	rec := NewVaultLifecycleReconciler(orch, glid.New(), inst, "node-A", slog.Default())
+	vaultInst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
+	rec := NewVaultLifecycleReconciler(orch, glid.New(), vaultInst, "node-A", slog.Default())
 	rec.Wire(fsm)
 
 	id := chunk.NewChunkID()
@@ -1016,8 +1016,8 @@ func TestReconcilerOnSealNotifiesEvenWhenEnsureSealedFails(t *testing.T) {
 
 	fsm := vaultctlfsm.New()
 	cm := &reconcilerFailEnsurerChunkManager{ensureErr: errors.New("disk gone")}
-	inst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
-	rec := NewVaultLifecycleReconciler(orch, glid.New(), inst, "node-A", slog.Default())
+	vaultInst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
+	rec := NewVaultLifecycleReconciler(orch, glid.New(), vaultInst, "node-A", slog.Default())
 	rec.Wire(fsm)
 
 	id := chunk.NewChunkID()
@@ -1187,11 +1187,11 @@ func TestReconcileFromSnapshotResumesSealingChunks(t *testing.T) {
 		{ID: idSealed, Sealed: true},
 	}
 
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
 		Chunks: cm,
 	}
-	rec := NewVaultLifecycleReconciler(nil, inst.VaultID, inst, "node-A", slog.Default())
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
 
 	var scheduled []chunk.ChunkID
 	rec.postSealHook = func(_ glid.GLID, _ chunk.ChunkManager, id chunk.ChunkID) {
@@ -1230,11 +1230,11 @@ func TestReconcileFromSnapshotSkipsSealingWithNoLocalChunk(t *testing.T) {
 	}
 
 	cm := &reconcilerFakeChunkManager{}
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
 		Chunks: cm,
 	}
-	rec := NewVaultLifecycleReconciler(nil, inst.VaultID, inst, "node-A", slog.Default())
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
 
 	var calls int
 	rec.postSealHook = func(_ glid.GLID, _ chunk.ChunkManager, _ chunk.ChunkID) {
@@ -1269,11 +1269,11 @@ func TestReconcileFromSnapshotSkipsSealingWithUnsealedLocalChunk(t *testing.T) {
 
 	cm := &reconcilerFakeChunkManager{}
 	cm.chunks = []chunk.ChunkMeta{{ID: idSealing, Sealed: false}}
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID: glid.New(),
 		Chunks: cm,
 	}
-	rec := NewVaultLifecycleReconciler(nil, inst.VaultID, inst, "node-A", slog.Default())
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
 
 	var calls int
 	rec.postSealHook = func(_ glid.GLID, _ chunk.ChunkManager, _ chunk.ChunkID) {
@@ -1351,7 +1351,7 @@ func TestSweepStaleLeaderFSMEntriesProposesDeleteForStrandedSealingChunk(t *test
 
 	var deletedRequests []chunk.ChunkID
 	var deleteReasons []string
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID:     glid.New(),
 		Chunks:     cm,
 		IsFollower: false, // leader-only sweep
@@ -1362,7 +1362,7 @@ func TestSweepStaleLeaderFSMEntriesProposesDeleteForStrandedSealingChunk(t *test
 		},
 	}
 
-	rec := NewVaultLifecycleReconciler(nil, inst.VaultID, inst, "node-A", slog.Default())
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
 	rec.fsm = fsm
 
 	rec.SweepStaleLeaderFSMEntries()

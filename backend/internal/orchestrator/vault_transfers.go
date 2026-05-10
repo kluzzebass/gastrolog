@@ -157,27 +157,27 @@ func (o *Orchestrator) isRemoteVault(ctx context.Context, vaultID glid.GLID) (st
 	return nodeID, true, nil
 }
 
-// deleteSourceChunk removes the chunk from the source vault on the inst
+// deleteSourceChunk removes the chunk from the source vault on the instance
 // that owns it. Routes through the receipt protocol when a reconciler is
 // wired (production) so the source-side delete propagates cluster-wide
 // via CmdRequestDelete. Falls back to a direct local delete for
 // memory-mode vaults without Raft. Reason "vault-migrate-source-expire"
 // lands in pendingDeletes audit. See gastrolog-51gme.
 func (o *Orchestrator) deleteSourceChunk(srcID glid.GLID, chunkID chunk.ChunkID) error {
-	inst, err := o.findInstanceForChunk(srcID, chunkID)
+	vaultInst, err := o.findInstanceForChunk(srcID, chunkID)
 	if err != nil {
 		return err
 	}
-	if inst.Reconciler != nil {
-		return inst.Reconciler.deleteChunk(chunkID, "vault-migrate-source-expire", o.placementMembership(inst))
+	if vaultInst.Reconciler != nil {
+		return vaultInst.Reconciler.deleteChunk(chunkID, "vault-migrate-source-expire", o.placementMembership(vaultInst))
 	}
-	if inst.Indexes != nil {
-		if err := inst.Indexes.DeleteIndexes(chunkID); err != nil {
+	if vaultInst.Indexes != nil {
+		if err := vaultInst.Indexes.DeleteIndexes(chunkID); err != nil {
 			o.logger.Warn("retention migrate: failed to delete source indexes",
 				"chunk", chunkID.String(), "error", err)
 		}
 	}
-	if err := inst.Chunks.Delete(chunkID); err != nil {
+	if err := vaultInst.Chunks.Delete(chunkID); err != nil {
 		return fmt.Errorf("delete source chunk %s: %w", chunkID, err)
 	}
 	return nil
@@ -222,7 +222,7 @@ func (o *Orchestrator) moveChunkFS(ctx context.Context, chunkID chunk.ChunkID, s
 //
 // Role: runs on whichever node is losing the vault (source node). Dispatch
 // invokes this after config reassignment via CmdPutVault / routing changes
-// move placement to `targetNodeID`. It does not require inst leadership —
+// move placement to `targetNodeID`. It does not require instance leadership —
 // local chunks are streamed to the target regardless of leader/follower
 // role; the target decides how to integrate them.
 //
@@ -334,7 +334,7 @@ func (o *Orchestrator) drainSealed(ctx context.Context, vaultID glid.GLID, cm ch
 		return false
 	}
 
-	// Resolve the inst instance to overlay metas through the FSM.
+	// Resolve the vault instance to overlay metas through the FSM.
 	// Phase 3 (gastrolog-1huz5): a chunk's local meta.Sealed flips at
 	// sealActiveLocked time but the FSM doesn't see it as Sealed until
 	// PostSealProcess commits the GLCB. Without the overlay, drain

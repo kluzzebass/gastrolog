@@ -28,14 +28,14 @@ func findRetentionPolicy(policies []system.RetentionPolicyConfig, id glid.GLID) 
 }
 
 // ReloadRotationPolicies is a no-op — retained for interface compatibility.
-// The rotationSweep job discovers all inst instances and reconciles rotation
+// The rotationSweep job discovers all vault instances and reconciles rotation
 // policies + cron jobs from the current config every 15 seconds.
 func (o *Orchestrator) ReloadRotationPolicies(_ context.Context) error {
 	return nil
 }
 
 // ReloadRetentionPolicies is a no-op — retained for interface compatibility.
-// The single retentionSweepAll job discovers all inst instances and resolves
+// The single retentionSweepAll job discovers all vault instances and resolves
 // rules from the current config each tick. Config changes take effect on the
 // next sweep (within 1 minute).
 func (o *Orchestrator) ReloadRetentionPolicies(_ context.Context) error {

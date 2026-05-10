@@ -54,7 +54,7 @@ func TestStopWaitsForAckGoroutines(t *testing.T) {
 	cm, _ := chunkmem.NewManager(chunkmem.Config{})
 	im := indexmem.NewManager(nil, nil, nil, nil, nil)
 	qe := query.New(cm, im, nil)
-	inst := &VaultInstance{
+	vaultInst := &VaultInstance{
 		VaultID:          vaultID,
 		Type:            "memory",
 		Chunks:          cm,
@@ -62,7 +62,7 @@ func TestStopWaitsForAckGoroutines(t *testing.T) {
 		Query:           qe,
 		FollowerTargets: []system.ReplicationTarget{{NodeID: "node-2"}},
 	}
-	vault := NewVault(vaultID, inst)
+	vault := NewVault(vaultID, vaultInst)
 	vault.Name = "ack-test"
 	orch.RegisterVault(vault)
 
