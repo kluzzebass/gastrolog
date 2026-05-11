@@ -18,7 +18,6 @@ package logging
 import (
 	"context"
 	"log/slog"
-	"maps"
 	"sync/atomic"
 )
 
@@ -50,20 +49,25 @@ func Default(logger *slog.Logger) *slog.Logger {
 	return Discard()
 }
 
-// ComponentFilterHandler wraps an slog.Handler and filters log records based on
-// component-specific log levels. This enables dynamic, attribute-based logging control
-// without components needing to know about or manage log levels.
+// ComponentFilterHandler wraps an slog.Handler and gates records by the
+// component path attached to their logger.
 //
 // Design:
-//   - Each log record is inspected for a "component" attribute
-//   - A per-component minimum level map determines visibility
-//   - Records below the minimum level for their component are dropped
-//   - Components without explicit levels fall back to the default level
+//   - A single immutable RuleSet (default level + pattern→level overrides)
+//     lives behind an atomic.Pointer shared by every derived handler.
+//   - Mutation = build a new RuleSet, atomically swap the pointer. Bumps
+//     the generation counter so every derived handler invalidates its
+//     resolved-level cache on the next call.
+//   - Each derived handler captures its component path once (when
+//     comp.Path.Apply or any WithAttrs containing "component" is used)
+//     and caches the resolved level keyed on the RuleSet generation —
+//     so the hot path is two atomic loads and a compare.
 //
-// Thread-safety:
-//   - Handle() uses lock-free atomic read of levels map
-//   - SetLevel()/ClearLevel() use copy-on-write pattern
-//   - No allocations or heavy work in the hot path
+// Components SHOULD set their "component" attribute via comp.Path.Apply
+// rather than passing it as a record-level attribute. Record-level
+// "component" attributes are still supported (handlers whose captured
+// path is empty inspect the record in Handle), but they cost an
+// attribute scan per call and miss the per-handler cache.
 //
 // Usage:
 //
@@ -71,184 +75,145 @@ func Default(logger *slog.Logger) *slog.Logger {
 //	filter := logging.NewComponentFilterHandler(base, slog.LevelInfo)
 //	logger := slog.New(filter)
 //
-//	// Later, enable debug for specific component:
-//	filter.SetLevel("orchestrator", slog.LevelDebug)
+//	// later, install a new rule set (e.g. from the config store):
+//	filter.SetRuleSet(logging.NewRuleSet(slog.LevelInfo, []logging.LevelRule{
+//	    {Pattern: "orchestrator.*", Level: slog.LevelDebug},
+//	}, /* generation */ 7))
 type ComponentFilterHandler struct {
-	next         slog.Handler
-	defaultLevel slog.Level
+	next slog.Handler
 
-	// preAttrs holds attributes added via WithAttrs before any group context.
-	// These are checked for "component" in Handle().
-	preAttrs []slog.Attr
+	// state is shared with every handler derived via WithAttrs/WithGroup.
+	// Mutation is via SetRuleSet, which atomically replaces the pointer.
+	state *atomic.Pointer[RuleSet]
 
-	// levelSnapshot is a pointer to an atomic that holds the current levels map.
-	// This is a pointer so that handlers created via WithAttrs/WithGroup share
-	// the same atomic, allowing SetLevel changes to affect all derived loggers.
-	// Uses copy-on-write pattern: writes create a new map, reads see a snapshot.
-	levelSnapshot *atomic.Pointer[map[string]slog.Level]
+	// componentPath is the dotted path captured the first time a
+	// "component" attribute is set via WithAttrs (e.g. by comp.Path.Apply).
+	// Empty for handlers that never had one assigned — those defer the
+	// component decision to Handle (which inspects record attrs).
+	componentPath string
+
+	// Per-handler resolution cache. cachedGen records the RuleSet
+	// generation that produced cachedLevel; when state.Load().Generation
+	// no longer matches, Enabled re-resolves.
+	cachedGen   atomic.Uint64
+	cachedLevel atomic.Int64 // slog.Level stored as int64
 }
 
-// NewComponentFilterHandler creates a handler that filters log records based on
-// component-specific log levels.
-//
-// Parameters:
-//   - next: the wrapped handler that receives filtered records
-//   - defaultLevel: minimum level for components without explicit configuration
-//
-// The handler inspects each record for a "component" attribute (string value)
-// and compares the record's level against the configured minimum for that component.
+// NewComponentFilterHandler creates a filter handler with the given
+// fallback level and no overrides. Use SetRuleSet to install rules
+// (typically driven by the system config store).
 func NewComponentFilterHandler(next slog.Handler, defaultLevel slog.Level) *ComponentFilterHandler {
-	// Initialize with empty map snapshot.
-	snapshot := &atomic.Pointer[map[string]slog.Level]{}
-	empty := make(map[string]slog.Level)
-	snapshot.Store(&empty)
+	state := &atomic.Pointer[RuleSet]{}
+	rs := NewRuleSet(defaultLevel, nil, 1)
+	state.Store(&rs)
+	return &ComponentFilterHandler{next: next, state: state}
+}
 
-	return &ComponentFilterHandler{
-		next:          next,
-		defaultLevel:  defaultLevel,
-		levelSnapshot: snapshot,
+// SetRuleSet atomically replaces the active rule set across every
+// handler derived from this one. The new RuleSet's Generation must
+// differ from the previous one for derived handlers to notice; callers
+// usually let the system config store assign monotonic generations.
+func (h *ComponentFilterHandler) SetRuleSet(rs RuleSet) {
+	h.state.Store(&rs)
+}
+
+// RuleSet returns the currently active rule set. The returned value is
+// a snapshot — concurrent mutations don't affect it.
+func (h *ComponentFilterHandler) RuleSet() RuleSet {
+	return *h.state.Load()
+}
+
+// Enabled reports whether the given level passes the filter for this
+// handler's component path.
+//
+// When componentPath is set, this is a definitive answer keyed on the
+// cached resolution. When componentPath is empty, the handler defers to
+// Handle (returning true if any rule could conceivably allow this
+// level) so Handle can inspect record-level "component" attributes.
+func (h *ComponentFilterHandler) Enabled(_ context.Context, level slog.Level) bool {
+	s := h.state.Load()
+	if h.componentPath == "" {
+		return level >= s.MinLevel
 	}
+	if h.cachedGen.Load() != s.Generation {
+		h.cachedLevel.Store(int64(s.Resolve(h.componentPath)))
+		h.cachedGen.Store(s.Generation)
+	}
+	return level >= slog.Level(h.cachedLevel.Load())
 }
 
-// Enabled returns true to defer filtering to Handle().
-// We cannot filter here because we don't have access to the record's attributes yet.
-func (h *ComponentFilterHandler) Enabled(ctx context.Context, level slog.Level) bool {
-	// Always return true - actual filtering happens in Handle() where we can
-	// inspect the "component" attribute. The wrapped handler's Enabled() will
-	// be checked after we decide to pass the record through.
-	return true
-}
-
-// Handle filters the record based on its component attribute and configured levels.
+// Handle emits the record after a final filter check. When the handler
+// has a captured componentPath, Enabled already settled the decision
+// and Handle just forwards. When componentPath is empty, Handle scans
+// the record for a "component" attribute and applies the rule lookup
+// before forwarding.
 func (h *ComponentFilterHandler) Handle(ctx context.Context, r slog.Record) error {
-	// Fast path: get the current levels snapshot (lock-free read).
-	levels := *h.levelSnapshot.Load()
-
-	// Find the component attribute.
-	component := h.findComponent(r)
-
-	// Determine minimum level for this component.
-	minLevel := h.defaultLevel
-	if component != "" {
-		if level, ok := levels[component]; ok {
-			minLevel = level
+	if h.componentPath == "" {
+		s := h.state.Load()
+		var minLevel slog.Level
+		if component := findRecordComponent(r); component != "" {
+			minLevel = s.Resolve(component)
+		} else {
+			minLevel = s.Default
+		}
+		if r.Level < minLevel {
+			return nil
 		}
 	}
-
-	// Filter: drop records below minimum level.
-	if r.Level < minLevel {
-		return nil
-	}
-
-	// Check if the wrapped handler is enabled for this level.
 	if !h.next.Enabled(ctx, r.Level) {
 		return nil
 	}
-
 	return h.next.Handle(ctx, r)
 }
 
-// findComponent extracts the "component" attribute value from preAttrs and record.
-// Returns empty string if not found.
-func (h *ComponentFilterHandler) findComponent(r slog.Record) string {
-	// Check preAttrs first (attributes added via WithAttrs on this handler).
-	for _, attr := range h.preAttrs {
-		if attr.Key == "component" {
-			if s, ok := attr.Value.Resolve().Any().(string); ok {
-				return s
-			}
-		}
-	}
-
-	// Check record attributes.
-	var component string
-	r.Attrs(func(a slog.Attr) bool {
-		if a.Key == "component" {
-			if s, ok := a.Value.Resolve().Any().(string); ok {
-				component = s
-				return false // stop iteration
-			}
-		}
-		return true // continue
-	})
-	return component
-}
-
-// WithAttrs returns a new handler with the given attributes.
-// If attrs contains "component", it will be used for filtering.
+// WithAttrs returns a new handler with the given attributes. If the
+// attributes contain "component", the new handler captures it as its
+// componentPath — the discipline-enforcing channel for comp.Path.Apply.
 func (h *ComponentFilterHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	if len(attrs) == 0 {
 		return h
 	}
-
-	// Create new handler with combined preAttrs.
-	newPreAttrs := make([]slog.Attr, len(h.preAttrs), len(h.preAttrs)+len(attrs))
-	copy(newPreAttrs, h.preAttrs)
-	newPreAttrs = append(newPreAttrs, attrs...)
-
+	componentPath := h.componentPath
+	for _, a := range attrs {
+		if a.Key == "component" {
+			if s, ok := a.Value.Resolve().Any().(string); ok {
+				componentPath = s
+			}
+		}
+	}
 	return &ComponentFilterHandler{
 		next:          h.next.WithAttrs(attrs),
-		defaultLevel:  h.defaultLevel,
-		preAttrs:      newPreAttrs,
-		levelSnapshot: h.levelSnapshot, // Share the same atomic pointer.
+		state:         h.state,
+		componentPath: componentPath,
 	}
 }
 
-// WithGroup returns a new handler with the given group name.
+// WithGroup returns a new handler with the given group name. The
+// captured component path is preserved — group nesting does not affect
+// component filtering.
 func (h *ComponentFilterHandler) WithGroup(name string) slog.Handler {
 	if name == "" {
 		return h
 	}
 	return &ComponentFilterHandler{
 		next:          h.next.WithGroup(name),
-		defaultLevel:  h.defaultLevel,
-		preAttrs:      h.preAttrs,
-		levelSnapshot: h.levelSnapshot, // Share the same atomic pointer.
+		state:         h.state,
+		componentPath: h.componentPath,
 	}
 }
 
-// SetLevel sets the minimum log level for a specific component.
-// This can be called at runtime to dynamically adjust verbosity.
-// Thread-safe: uses copy-on-write for lock-free reads in Handle().
-func (h *ComponentFilterHandler) SetLevel(component string, level slog.Level) {
-	// Copy-on-write: create new map with updated value.
-	oldLevels := *h.levelSnapshot.Load()
-	newLevels := make(map[string]slog.Level, len(oldLevels)+1)
-	maps.Copy(newLevels, oldLevels)
-	newLevels[component] = level
-	h.levelSnapshot.Store(&newLevels)
-}
-
-// ClearLevel removes the component-specific log level, reverting to the default.
-// Thread-safe: uses copy-on-write for lock-free reads in Handle().
-func (h *ComponentFilterHandler) ClearLevel(component string) {
-	oldLevels := *h.levelSnapshot.Load()
-	if _, ok := oldLevels[component]; !ok {
-		return // Nothing to clear.
-	}
-
-	// Copy-on-write: create new map without the component.
-	newLevels := make(map[string]slog.Level, len(oldLevels))
-	for k, v := range oldLevels {
-		if k != component {
-			newLevels[k] = v
+// findRecordComponent returns the value of a record-level "component"
+// attribute, or "" if not present.
+func findRecordComponent(r slog.Record) string {
+	var out string
+	r.Attrs(func(a slog.Attr) bool {
+		if a.Key == "component" {
+			if s, ok := a.Value.Resolve().Any().(string); ok {
+				out = s
+				return false
+			}
 		}
-	}
-	h.levelSnapshot.Store(&newLevels)
-}
-
-// Level returns the current minimum level for a component.
-// Returns the default level if no component-specific level is set.
-// Thread-safe.
-func (h *ComponentFilterHandler) Level(component string) slog.Level {
-	levels := *h.levelSnapshot.Load()
-	if level, ok := levels[component]; ok {
-		return level
-	}
-	return h.defaultLevel
-}
-
-// DefaultLevel returns the default minimum level for components without explicit configuration.
-func (h *ComponentFilterHandler) DefaultLevel() slog.Level {
-	return h.defaultLevel
+		return true
+	})
+	return out
 }
