@@ -172,8 +172,8 @@ export function LogLevelsSettings({ dark }: Props) {
 
         <div
           ref={defaultSelectorRef}
-          className={`mb-4 max-w-[260px] rounded transition-colors ${
-            highlight === "default" ? "bg-copper/15" : ""
+          className={`mb-4 max-w-[260px] rounded p-2 transition-colors ${
+            highlight === "default" ? "bg-copper/20" : ""
           }`}
         >
           <FormField dark={dark} label="Default level">
@@ -187,7 +187,7 @@ export function LogLevelsSettings({ dark }: Props) {
         </div>
 
         <div className="flex flex-col gap-2">
-          <div className={`grid grid-cols-[1fr_140px_40px] gap-2 ${columnHeader}`}>
+          <div className={`grid grid-cols-[1fr_140px_40px] gap-2 px-2 ${columnHeader}`}>
             <div>Pattern</div>
             <div>Level</div>
             <div></div>
@@ -206,8 +206,8 @@ export function LogLevelsSettings({ dark }: Props) {
                   ref={(el) => {
                     if (isHighlighted) highlightedRuleRef.current = el;
                   }}
-                  className={`grid grid-cols-[1fr_140px_40px] gap-2 items-start rounded transition-colors ${
-                    isHighlighted ? "bg-copper/15" : ""
+                  className={`grid grid-cols-[1fr_140px_40px] gap-2 items-start rounded p-2 transition-colors ${
+                    isHighlighted ? "bg-copper/20" : ""
                   }`}
                 >
                   <div className="flex flex-col gap-1">
