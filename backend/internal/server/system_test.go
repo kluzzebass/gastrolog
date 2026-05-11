@@ -1398,3 +1398,58 @@ func TestValidateExpression(t *testing.T) {
 		})
 	}
 }
+
+// gastrolog-1rbuf regression: PutRotationPolicy must reject a policy with
+// no conditions set. An empty policy is a silent no-op when assigned, which
+// is almost always operator confusion rather than intent. Same for
+// PutRetentionPolicy.
+func TestPutPolicyRejectsEmpty(t *testing.T) {
+	t.Parallel()
+	client, _, _ := newConfigTestSetup(t)
+	ctx := context.Background()
+
+	t.Run("rotation_policy empty", func(t *testing.T) {
+		// All zero fields: MaxBytes=0, MaxAgeSeconds=0, MaxRecords=0, Cron="".
+		// protoToRotationPolicy treats these as unset; IsEmpty returns true.
+		_, err := client.PutRotationPolicy(ctx, connect.NewRequest(&gastrologv1.PutRotationPolicyRequest{
+			Config: &gastrologv1.RotationPolicyConfig{Name: "empty-rotation"},
+		}))
+		if err == nil {
+			t.Fatal("expected error for empty rotation policy, got nil")
+		}
+		if connect.CodeOf(err) != connect.CodeInvalidArgument {
+			t.Fatalf("expected InvalidArgument, got %v", connect.CodeOf(err))
+		}
+	})
+
+	t.Run("rotation_policy with one field is accepted", func(t *testing.T) {
+		// Confirms the rejection is targeted: any one populated field unblocks.
+		_, err := client.PutRotationPolicy(ctx, connect.NewRequest(&gastrologv1.PutRotationPolicyRequest{
+			Config: &gastrologv1.RotationPolicyConfig{Name: "one-field-rotation", MaxRecords: 1000},
+		}))
+		if err != nil {
+			t.Fatalf("unexpected error for one-field rotation policy: %v", err)
+		}
+	})
+
+	t.Run("retention_policy empty", func(t *testing.T) {
+		_, err := client.PutRetentionPolicy(ctx, connect.NewRequest(&gastrologv1.PutRetentionPolicyRequest{
+			Config: &gastrologv1.RetentionPolicyConfig{Name: "empty-retention"},
+		}))
+		if err == nil {
+			t.Fatal("expected error for empty retention policy, got nil")
+		}
+		if connect.CodeOf(err) != connect.CodeInvalidArgument {
+			t.Fatalf("expected InvalidArgument, got %v", connect.CodeOf(err))
+		}
+	})
+
+	t.Run("retention_policy with one field is accepted", func(t *testing.T) {
+		_, err := client.PutRetentionPolicy(ctx, connect.NewRequest(&gastrologv1.PutRetentionPolicyRequest{
+			Config: &gastrologv1.RetentionPolicyConfig{Name: "one-field-retention", MaxChunks: 10},
+		}))
+		if err != nil {
+			t.Fatalf("unexpected error for one-field retention policy: %v", err)
+		}
+	})
+}

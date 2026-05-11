@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
 	"time"
@@ -46,6 +47,12 @@ func (s *SystemServer) PutRotationPolicy(
 	cfg := protoToRotationPolicy(req.Msg.Config)
 	cfg.ID = id
 	cfg.Name = req.Msg.Config.Name
+
+	// Reject policies with no conditions: they're silent no-ops that almost
+	// always reflect operator confusion rather than intent. See gastrolog-1rbuf.
+	if cfg.IsEmpty() {
+		return nil, errInvalidArg(errors.New("rotation policy must set at least one of maxBytes, maxAge, maxRecords, or cron"))
+	}
 
 	// Validate by trying to convert.
 	if _, err := cfg.ToRotationPolicy(); err != nil {
@@ -138,6 +145,12 @@ func (s *SystemServer) PutRetentionPolicy(
 	cfg := protoToRetentionPolicy(req.Msg.Config)
 	cfg.ID = id
 	cfg.Name = req.Msg.Config.Name
+
+	// Reject policies with no conditions: they're silent no-ops that almost
+	// always reflect operator confusion rather than intent. See gastrolog-1rbuf.
+	if cfg.IsEmpty() {
+		return nil, errInvalidArg(errors.New("retention policy must set at least one of maxAge, maxBytes, or maxChunks"))
+	}
 
 	// Validate by trying to convert.
 	if _, err := cfg.ToRetentionPolicy(); err != nil {

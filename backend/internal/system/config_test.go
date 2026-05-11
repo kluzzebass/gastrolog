@@ -392,3 +392,61 @@ func TestToRetentionPolicy(t *testing.T) {
 		}
 	})
 }
+
+// gastrolog-1rbuf regression: IsEmpty must report true for fully-unset
+// configs and false as soon as any condition is populated. PutRotationPolicy
+// uses IsEmpty to reject silent-no-op policies at the admission boundary.
+func TestRotationPolicyConfigIsEmpty(t *testing.T) {
+	t.Parallel()
+	empty := ""
+	cases := []struct {
+		name string
+		cfg  RotationPolicyConfig
+		want bool
+	}{
+		{"zero value", RotationPolicyConfig{}, true},
+		{"empty MaxBytes string", RotationPolicyConfig{MaxBytes: &empty}, true},
+		{"empty MaxAge string", RotationPolicyConfig{MaxAge: &empty}, true},
+		{"empty Cron string", RotationPolicyConfig{Cron: &empty}, true},
+		{"all empty strings", RotationPolicyConfig{MaxBytes: &empty, MaxAge: &empty, Cron: &empty}, true},
+		{"MaxBytes set", RotationPolicyConfig{MaxBytes: new("64MB")}, false},
+		{"MaxAge set", RotationPolicyConfig{MaxAge: new("1h")}, false},
+		{"MaxRecords set", RotationPolicyConfig{MaxRecords: new(int64(1000))}, false},
+		{"Cron set", RotationPolicyConfig{Cron: new("0 * * * *")}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tc.cfg.IsEmpty(); got != tc.want {
+				t.Errorf("IsEmpty() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// gastrolog-1rbuf regression: same shape for retention policies.
+func TestRetentionPolicyConfigIsEmpty(t *testing.T) {
+	t.Parallel()
+	empty := ""
+	cases := []struct {
+		name string
+		cfg  RetentionPolicyConfig
+		want bool
+	}{
+		{"zero value", RetentionPolicyConfig{}, true},
+		{"empty MaxAge string", RetentionPolicyConfig{MaxAge: &empty}, true},
+		{"empty MaxBytes string", RetentionPolicyConfig{MaxBytes: &empty}, true},
+		{"all empty strings", RetentionPolicyConfig{MaxAge: &empty, MaxBytes: &empty}, true},
+		{"MaxAge set", RetentionPolicyConfig{MaxAge: new("24h")}, false},
+		{"MaxBytes set", RetentionPolicyConfig{MaxBytes: new("10GB")}, false},
+		{"MaxChunks set", RetentionPolicyConfig{MaxChunks: new(int64(10))}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tc.cfg.IsEmpty(); got != tc.want {
+				t.Errorf("IsEmpty() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
