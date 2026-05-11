@@ -1289,6 +1289,28 @@ func wireVaultFSMOnDelete(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 	default:
 		return
 	}
+	// Wire OnCreate alongside OnDelete: the WatchChunks event bus needs
+	// CREATED events as soon as a new active chunk is announced via
+	// CmdCreateChunk so the inspector shows the chunk immediately rather
+	// than only after seal. Fired on every node where the apply ran, same
+	// as OnDelete — followers learn about the new chunk via Raft replication.
+	// See gastrolog-3pf9w.
+	fsm.SetOnCreate(func(e vaultctlfsm.ManifestEntry) {
+		if o == nil {
+			return
+		}
+		meta := chunk.ChunkMeta{
+			ID:          e.ID,
+			WriteStart:  e.WriteStart,
+			IngestStart: e.IngestStart,
+			SourceStart: e.SourceStart,
+			RecordCount: e.RecordCount,
+			Bytes:       e.Bytes,
+			DiskBytes:   e.DiskBytes,
+			Sealed:      false,
+		}
+		o.EmitChunkCreated(vaultID, meta)
+	})
 	silent, ok := cm.(chunk.SilentDeleter)
 	if !ok {
 		return

@@ -191,6 +191,7 @@ type FSM struct {
 	// reconciler can project FSM state changes into local Manager state
 	// without polling. No callers wired yet — adding the surface here
 	// unblocks subsequent steps without requiring an FSM API churn.
+	onCreate           func(ManifestEntry) // CmdCreateChunk applied; passes the freshly-created entry
 	onSeal             func(ManifestEntry) // CmdSealChunk applied; passes the now-sealed entry
 	onRetentionPending func(chunk.ChunkID) // CmdRetentionPending applied
 
@@ -268,6 +269,17 @@ func (f *FSM) Ready() bool {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return f.ready
+}
+
+// SetOnCreate registers a callback invoked (outside the FSM lock) after
+// CmdCreateChunk applies. The callback receives the freshly-created
+// manifest entry. Used by the WatchChunks event bus to emit CREATED
+// events as soon as a new active chunk is announced across the cluster.
+// See gastrolog-3pf9w.
+func (f *FSM) SetOnCreate(fn func(ManifestEntry)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onCreate = fn
 }
 
 // SetOnDelete registers a callback that fires after CmdDeleteChunk is
@@ -432,6 +444,7 @@ func (f *FSM) Apply(log *hraft.Log) any {
 // produced the IDs/entries, so a concurrent SetOn... after Apply
 // returns can never observe a stale binding.
 type applyEffects struct {
+	createdEntry       *ManifestEntry
 	deletedID          *chunk.ChunkID
 	uploadedEntry      *ManifestEntry
 	sealedEntry        *ManifestEntry
@@ -443,6 +456,7 @@ type applyEffects struct {
 	prunedNode         string
 	prunedFinalizable  []chunk.ChunkID
 
+	onCreate           func(ManifestEntry)
 	onDelete           func(chunk.ChunkID)
 	onUpload           func(ManifestEntry)
 	onSeal             func(ManifestEntry)
@@ -454,6 +468,9 @@ type applyEffects struct {
 }
 
 func (e applyEffects) fire() {
+	if e.createdEntry != nil && e.onCreate != nil {
+		e.onCreate(*e.createdEntry)
+	}
 	if e.deletedID != nil && e.onDelete != nil {
 		e.onDelete(*e.deletedID)
 	}
@@ -493,6 +510,7 @@ func (f *FSM) applyLocked(cmd Command, payload []byte) (any, applyEffects) {
 	switch cmd {
 	case CmdCreateChunk:
 		result = f.applyCreate(payload)
+		fx.createdEntry = f.captureEntry(result, payload)
 	case CmdSealChunk:
 		result = f.applySeal(payload)
 		fx.sealedEntry = f.captureEntry(result, payload)
@@ -535,6 +553,7 @@ func (f *FSM) applyLocked(cmd Command, payload []byte) (any, applyEffects) {
 	default:
 		result = fmt.Errorf("unknown chunk FSM command: %d", cmd)
 	}
+	fx.onCreate = f.onCreate
 	fx.onDelete = f.onDelete
 	fx.onUpload = f.onUpload
 	fx.onSeal = f.onSeal

@@ -143,6 +143,15 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	// burst continued through the window. Idle cluster: zero work.
 	o.auxWg.Go(func() { o.runProgressNotifier(ctx, time.Second) })
 
+	// Active-chunk progress emitter (gastrolog-3pf9w). Polls every
+	// leader vault's active chunk record count once per second; emits a
+	// typed PROGRESS event on the chunk bus when the count has
+	// advanced since the last tick. Bounded to one event per active
+	// chunk per second regardless of append rate. WatchChunks
+	// subscribers patch their cache directly from this event instead
+	// of refetching the world.
+	o.auxWg.Go(func() { o.runChunkProgressEmitter(ctx, time.Second) })
+
 	// Job-event slog bridge (gastrolog-5mcqm follow-up). Subscribes to
 	// the scheduler's event broker and emits a structured slog entry
 	// per transition. Captured by the self ingester so job lifecycle

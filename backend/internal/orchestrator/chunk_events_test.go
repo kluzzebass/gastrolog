@@ -5,7 +5,9 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
+	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/memtest"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
 )
@@ -164,5 +166,76 @@ func TestChunkBusMonotonicVersion(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatal("timed out waiting for event")
 		}
+	}
+}
+
+// TestChunkProgressEmitterEmitsOnAdvance pins the contract that the
+// progress emitter:
+//   - Emits PROGRESS when an active chunk's record count grows since the
+//     previous tick.
+//   - Does NOT emit when the count is unchanged (idle vault stays quiet).
+//
+// Exercises emitActiveChunkProgress directly so the test isn't bound to
+// a real ticker — gives deterministic per-tick observation.
+func TestChunkProgressEmitterEmitsOnAdvance(t *testing.T) {
+	t.Parallel()
+
+	vaultID := glid.New()
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := memtest.MustNewVault(t, chunkmem.Config{
+		RotationPolicy: chunk.NeverRotatePolicy{},
+	})
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(vaultID, s.CM, s.IM, s.QE))
+
+	bus := orch.ChunkBus()
+	subID, ch, _ := bus.Subscribe()
+	defer bus.Unsubscribe(subID)
+
+	// Append 5 records → first tick should emit PROGRESS{Count: 5}.
+	for range 5 {
+		if _, _, err := s.CM.Append(chunk.Record{
+			IngestTS: time.Now(),
+			Attrs:    chunk.Attributes{},
+			Raw:      []byte("x"),
+		}); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+	}
+	last := orchestrator.NewLastSeenMap()
+	orch.EmitActiveChunkProgress(last)
+	got := receiveChunkEvent(t, ch)
+	if got.Op != orchestrator.ChunkChangeOpProgress {
+		t.Errorf("first tick: Op = %v, want Progress", got.Op)
+	}
+	if got.RecordCount != 5 {
+		t.Errorf("first tick: RecordCount = %d, want 5", got.RecordCount)
+	}
+
+	// Second tick with no new appends → no event.
+	orch.EmitActiveChunkProgress(last)
+	select {
+	case ev := <-ch:
+		t.Errorf("unexpected event on idle tick: %+v", ev.Event)
+	case <-time.After(100 * time.Millisecond):
+		// Good: idle stays quiet.
+	}
+
+	// Append 3 more → next tick should emit PROGRESS{Count: 8}.
+	for range 3 {
+		if _, _, err := s.CM.Append(chunk.Record{
+			IngestTS: time.Now(),
+			Attrs:    chunk.Attributes{},
+			Raw:      []byte("x"),
+		}); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+	}
+	orch.EmitActiveChunkProgress(last)
+	got = receiveChunkEvent(t, ch)
+	if got.RecordCount != 8 {
+		t.Errorf("third tick: RecordCount = %d, want 8 (5 prior + 3 new)", got.RecordCount)
 	}
 }
