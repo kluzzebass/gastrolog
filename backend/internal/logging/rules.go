@@ -1,9 +1,57 @@
 package logging
 
 import (
+	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 )
+
+// ValidatePattern checks that a rule pattern parses under the grammar
+// implemented by matchSegments. Returns an error with a human-readable
+// reason on failure, or nil if the pattern is well-formed.
+//
+// Allowed segment shapes:
+//   - "*"  — wildcard, exactly one segment
+//   - "**" — wildcard, zero or more segments
+//   - a literal of [a-z0-9_-]+
+//
+// Empty pattern is rejected; operators express "applies to everything"
+// through the rule set's Default level. Empty segments (leading or
+// consecutive dots) are rejected. Patterns are case-sensitive and
+// lowercase by convention.
+func ValidatePattern(pattern string) error {
+	if pattern == "" {
+		return errors.New("pattern must not be empty (use the default level instead)")
+	}
+	for seg := range strings.SplitSeq(pattern, ".") {
+		if seg == "" {
+			return fmt.Errorf("pattern %q has an empty segment", pattern)
+		}
+		if seg == "*" || seg == "**" {
+			continue
+		}
+		for _, c := range seg {
+			if !isValidSegmentChar(c) {
+				return fmt.Errorf("pattern %q segment %q contains invalid character %q (allowed: a-z 0-9 _ -)", pattern, seg, c)
+			}
+		}
+	}
+	return nil
+}
+
+func isValidSegmentChar(c rune) bool {
+	switch {
+	case c >= 'a' && c <= 'z':
+		return true
+	case c >= '0' && c <= '9':
+		return true
+	case c == '-' || c == '_':
+		return true
+	default:
+		return false
+	}
+}
 
 // LevelRule binds a component-path pattern to a minimum slog level.
 //

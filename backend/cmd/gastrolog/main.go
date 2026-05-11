@@ -101,6 +101,7 @@ func main() {
 
 				SlogCapture:        slogCaptureCh,
 				SlogCaptureHandler: captureHandler,
+				LogFilter:          filterHandler,
 			}
 
 			err := app.Run(cmd.Context(), logger, cfg)

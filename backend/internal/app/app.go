@@ -126,6 +126,11 @@ type RunConfig struct {
 	// SlogCaptureHandler is the CaptureHandler that tees slog records.
 	// Passed to the self ingester factory so it can apply the min_level param.
 	SlogCaptureHandler *logging.CaptureHandler
+
+	// LogFilter is the ComponentFilterHandler whose rule set is driven
+	// from the system config store (gastrolog-3flfp). The watcher reads
+	// LogLevelConfig and calls SetRuleSet on every configSignal fire.
+	LogFilter *logging.ComponentFilterHandler
 }
 
 // Run starts the gastrolog server. It wires all components, starts the
@@ -276,6 +281,14 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	disp.orch = orch
 	disp.cfgStore = cfgStore
 	disp.factories = factories
+
+	// Sync the ComponentFilterHandler's rule set with the system config
+	// store. Watcher runs until ctx is cancelled; on every configSignal
+	// fire it reads LogLevelConfig and atomically swaps the rule set
+	// across every derived handler in the process (gastrolog-3flfp).
+	if cfg.LogFilter != nil {
+		go WatchLogLevels(ctx, cfg.LogFilter, cfgStore, configSignal, logger)
+	}
 	disp.catchupScheduler = func(vaultID glid.GLID, followerNodeIDs []string) {
 		orch.ScheduleCatchup(vaultID, followerNodeIDs)
 	}
@@ -414,6 +427,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 		BootstrapTokenServeSecret: cfg.BootstrapTokenServeSecret,
 		BootstrapTokenFn:          makeBootstrapTokenFn(cfgStore),
+
+		LogFilter: cfg.LogFilter,
 	})
 }
 
@@ -1000,6 +1015,8 @@ type serverDeps struct {
 	// returns the cluster join token from the live config store.
 	BootstrapTokenServeSecret string
 	BootstrapTokenFn          func() (string, error)
+
+	LogFilter *logging.ComponentFilterHandler
 }
 
 func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
@@ -1024,6 +1041,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 			PlacementReconcile: deps.PlacementReconcile,
 			BootstrapTokenServeSecret: deps.BootstrapTokenServeSecret,
 			BootstrapTokenFn:          deps.BootstrapTokenFn,
+			LogFilter:                 deps.LogFilter,
 		})
 		// Provide the cluster's ForwardRPC handler with the internal mux.
 		// NoAuthInterceptor + no routing interceptor prevents loops.
