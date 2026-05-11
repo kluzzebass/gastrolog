@@ -175,20 +175,22 @@ export function LogLevelsSettings({ dark }: Props) {
             </div>
           )}
           {currentRules.map((r, idx) => (
-            <div key={idx} className="grid grid-cols-[1fr_140px_40px] gap-2 items-center">
-              <TextInput
-                dark={dark}
-                value={r.pattern}
-                onChange={(v) => updateRule(idx, { pattern: v })}
-                error={!!ruleErrors[idx]}
-                title={ruleErrors[idx]}
-                examples={[
-                  "orchestrator",
-                  "orchestrator.*",
-                  "orchestrator.**",
-                  "ingester.**.conn",
-                ]}
-              />
+            <div key={idx} className="grid grid-cols-[1fr_140px_40px] gap-2 items-start">
+              <div className="flex flex-col gap-1">
+                <TextInput
+                  dark={dark}
+                  value={r.pattern}
+                  onChange={(v) => updateRule(idx, { pattern: v })}
+                  error={!!ruleErrors[idx]}
+                  title={ruleErrors[idx]}
+                  examples={[
+                    "orchestrator",
+                    "orchestrator.*",
+                    "orchestrator.**",
+                    "ingester.**.conn",
+                  ]}
+                />
+              </div>
               <SelectInput
                 dark={dark}
                 value={String(r.level)}
