@@ -125,8 +125,11 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 	case raftfsm.NotifyCloudServicePut, raftfsm.NotifyCloudServiceDeleted,
 		raftfsm.NotifyNodeStorageConfigSet, raftfsm.NotifySetupWizardDismissedSet,
 		raftfsm.NotifyIngesterAliveSet,
-		raftfsm.NotifyIngesterCheckpointSet:
+		raftfsm.NotifyIngesterCheckpointSet,
+		raftfsm.NotifyLogLevelsSet:
 		// No orchestrator side effects; configSignal fires below.
+		// For LogLevelsSet the ComponentFilterHandler picks up the
+		// new rule set via its configSignal subscription (Phase 2c).
 	}
 
 	// Notify WatchConfig streams for all user-visible config changes.

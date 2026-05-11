@@ -79,6 +79,11 @@ type Store interface {
 	// Read via Load() → Config.ClusterTLS; PutClusterTLS is the Raft write path.
 	PutClusterTLS(ctx context.Context, tls ClusterTLS) error
 
+	// Log levels (gastrolog-3flfp). Cluster-wide per-component severity
+	// configuration. Read via Load() → Config.LogLevels.
+	GetLogLevels(ctx context.Context) (LogLevelConfig, error)
+	PutLogLevels(ctx context.Context, cfg LogLevelConfig) error
+
 	// Certificates
 	ListCertificates(ctx context.Context) ([]CertPEM, error)
 	GetCertificate(ctx context.Context, id glid.GLID) (*CertPEM, error)

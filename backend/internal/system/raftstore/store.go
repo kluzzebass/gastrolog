@@ -294,6 +294,14 @@ func (s *Store) PutClusterTLS(ctx context.Context, tls system.ClusterTLS) error 
 	return s.apply(ctx, command.NewPutClusterTLS(tls))
 }
 
+func (s *Store) GetLogLevels(ctx context.Context) (system.LogLevelConfig, error) {
+	return s.fsm.Store().GetLogLevels(ctx)
+}
+
+func (s *Store) PutLogLevels(ctx context.Context, cfg system.LogLevelConfig) error {
+	return s.apply(ctx, command.NewPutLogLevels(cfg))
+}
+
 func (s *Store) PutNode(ctx context.Context, node system.NodeConfig) error {
 	return s.apply(ctx, command.NewPutNodeConfig(node))
 }

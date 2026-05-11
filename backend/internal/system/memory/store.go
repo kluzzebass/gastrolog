@@ -63,6 +63,7 @@ type Store struct {
 	nodeStorageConfigs   map[string]system.NodeStorageConfig  // runtime: keyed by nodeID
 	clusterTLS           *system.ClusterTLS                   // runtime: cluster identity
 	setupWizardDismissed bool                                 // runtime: UI state
+	logLevels            *system.LogLevelConfig               // operator-controlled: nil until first PutLogLevels
 }
 
 var _ system.Store = (*Store)(nil)
@@ -96,7 +97,8 @@ func (s *Store) isEmpty() bool {
 		len(s.ingesters) == 0 && len(s.routes) == 0 &&
 		len(s.managedFiles) == 0 && len(s.cloudServices) == 0 &&
 		len(s.nodeStorageConfigs) == 0 &&
-		!s.ss.hasServerSettings && s.clusterTLS == nil
+		!s.ss.hasServerSettings && s.clusterTLS == nil &&
+		s.logLevels == nil
 }
 
 // Load returns the full configuration.
@@ -132,6 +134,11 @@ func (s *Store) Load(ctx context.Context) (*system.System, error) {
 		cfg.TLS = s.ss.ss.TLS
 		cfg.Lookup = s.ss.ss.Lookup
 		cfg.Cluster = s.ss.ss.Cluster
+	}
+
+	// Config: log levels (gastrolog-3flfp).
+	if s.logLevels != nil {
+		cfg.LogLevels = copyLogLevels(*s.logLevels)
 	}
 
 	// Runtime: cluster-managed state.
@@ -507,6 +514,31 @@ func (s *Store) PutClusterTLS(ctx context.Context, tls system.ClusterTLS) error 
 
 	s.clusterTLS = &tls
 	return nil
+}
+
+// Log levels
+
+func (s *Store) GetLogLevels(ctx context.Context) (system.LogLevelConfig, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.logLevels == nil {
+		return system.LogLevelConfig{}, nil
+	}
+	return copyLogLevels(*s.logLevels), nil
+}
+
+func (s *Store) PutLogLevels(ctx context.Context, cfg system.LogLevelConfig) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	copied := copyLogLevels(cfg)
+	s.logLevels = &copied
+	return nil
+}
+
+func copyLogLevels(cfg system.LogLevelConfig) system.LogLevelConfig {
+	rules := make([]system.LogLevelRule, len(cfg.Rules))
+	copy(rules, cfg.Rules)
+	return system.LogLevelConfig{Default: cfg.Default, Rules: rules}
 }
 
 // Cloud services

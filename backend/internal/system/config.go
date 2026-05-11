@@ -66,6 +66,7 @@ type Config struct {
 	Lookup    LookupConfig    `json:"lookup,omitzero"`
 	Cluster   ClusterConfig   `json:"cluster,omitzero"`
 	MaxMind   MaxMindConfig   `json:"maxmind,omitzero"`
+	LogLevels LogLevelConfig  `json:"log_levels,omitzero"`
 }
 
 // ---------------------------------------------------------------------------
@@ -213,6 +214,30 @@ type ClusterTLS struct {
 	ClusterCertPEM string `json:"cluster_cert_pem"`
 	ClusterKeyPEM  string `json:"cluster_key_pem"`
 	JoinToken      string `json:"join_token"`
+}
+
+// LogLevelConfig is the cluster-wide per-component log level configuration
+// (gastrolog-3flfp). Default is the fallback level used when no rule
+// matches a component path; Rules are pattern-keyed overrides where
+// patterns follow the gitignore-style grammar implemented in
+// internal/logging/rules.go.
+//
+// Stored atomically via PutLogLevels so a single Raft commit replaces the
+// whole rule set across every node. The empty LogLevelConfig (zero
+// Default, no Rules) means "use the binary's startup default at every
+// component" — typically INFO.
+type LogLevelConfig struct {
+	// Default is the slog severity used when no rule matches. Storing
+	// as int64 (matching slog.Level's underlying type) lets us encode
+	// future user-defined levels without proto wire churn.
+	Default int64          `json:"default,omitempty"`
+	Rules   []LogLevelRule `json:"rules,omitempty"`
+}
+
+// LogLevelRule binds a component-path pattern to a level.
+type LogLevelRule struct {
+	Pattern string `json:"pattern"`
+	Level   int64  `json:"level"`
 }
 
 // ---------------------------------------------------------------------------

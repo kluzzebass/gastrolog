@@ -278,3 +278,85 @@ func VaultTypeFromProto(t gastrologv1.VaultType) system.VaultType {
 		return ""
 	}
 }
+
+// --- Log Levels (gastrolog-3flfp) ---
+
+// LogLevelConfigToProto converts a system.LogLevelConfig to its proto form.
+// The Go side stores levels as int64 (matching slog.Level); the wire form
+// uses the LogLevel enum, mapping is purely cosmetic.
+func LogLevelConfigToProto(cfg system.LogLevelConfig) *gastrologv1.LogLevelConfig {
+	out := &gastrologv1.LogLevelConfig{
+		DefaultLevel: SlogLevelToProto(cfg.Default),
+	}
+	if len(cfg.Rules) > 0 {
+		out.Rules = make([]*gastrologv1.LogLevelRule, len(cfg.Rules))
+		for i, r := range cfg.Rules {
+			out.Rules[i] = &gastrologv1.LogLevelRule{
+				Pattern: r.Pattern,
+				Level:   SlogLevelToProto(r.Level),
+			}
+		}
+	}
+	return out
+}
+
+// LogLevelConfigFromProto converts a proto LogLevelConfig back to the Go type.
+// Nil-safe — nil proto produces the zero-value system.LogLevelConfig.
+func LogLevelConfigFromProto(p *gastrologv1.LogLevelConfig) system.LogLevelConfig {
+	if p == nil {
+		return system.LogLevelConfig{}
+	}
+	out := system.LogLevelConfig{
+		Default: SlogLevelFromProto(p.GetDefaultLevel()),
+	}
+	if len(p.GetRules()) > 0 {
+		out.Rules = make([]system.LogLevelRule, len(p.GetRules()))
+		for i, r := range p.GetRules() {
+			out.Rules[i] = system.LogLevelRule{
+				Pattern: r.GetPattern(),
+				Level:   SlogLevelFromProto(r.GetLevel()),
+			}
+		}
+	}
+	return out
+}
+
+// SlogLevelToProto maps a slog level (as int64) to the proto LogLevel enum.
+// Values outside the recognised set fall through to UNSPECIFIED rather
+// than rounding — the operator UI/CLI should not invent levels the wire
+// can't carry.
+func SlogLevelToProto(lvl int64) gastrologv1.LogLevel {
+	switch lvl {
+	case -4: // slog.LevelDebug
+		return gastrologv1.LogLevel_LOG_LEVEL_DEBUG
+	case 0: // slog.LevelInfo
+		return gastrologv1.LogLevel_LOG_LEVEL_INFO
+	case 4: // slog.LevelWarn
+		return gastrologv1.LogLevel_LOG_LEVEL_WARN
+	case 8: // slog.LevelError
+		return gastrologv1.LogLevel_LOG_LEVEL_ERROR
+	default:
+		return gastrologv1.LogLevel_LOG_LEVEL_UNSPECIFIED
+	}
+}
+
+// SlogLevelFromProto maps a proto LogLevel enum to the int64 form used in
+// system.LogLevelConfig (matching slog.Level's underlying type).
+// UNSPECIFIED falls through to 0 (INFO) — that's the documented default
+// when no rule has been set, and equals slog.LevelInfo.
+func SlogLevelFromProto(p gastrologv1.LogLevel) int64 {
+	switch p {
+	case gastrologv1.LogLevel_LOG_LEVEL_DEBUG:
+		return -4
+	case gastrologv1.LogLevel_LOG_LEVEL_INFO:
+		return 0
+	case gastrologv1.LogLevel_LOG_LEVEL_WARN:
+		return 4
+	case gastrologv1.LogLevel_LOG_LEVEL_ERROR:
+		return 8
+	case gastrologv1.LogLevel_LOG_LEVEL_UNSPECIFIED:
+		return 0
+	default:
+		return 0
+	}
+}
