@@ -4334,7 +4334,6 @@ func (m *Manager) loadCloudChunks() error {
 		// up via hasLocalGLCB. See gastrolog-24m1t step 7j.
 		m.dropLocalMetaForCloudChunks()
 	}
-	m.backfillTSOffsets()
 	return nil
 }
 
@@ -4359,11 +4358,6 @@ func (m *Manager) dropLocalMetaForCloudChunks() {
 	}
 	m.mu.Unlock()
 }
-
-// backfillTSOffsets is a no-op (gastrolog-69fd5). TS index offsets are
-// populated at GLCB upload time, so backfill is redundant. Kept as a
-// stub call site in case a future zstd-aware backfill is needed.
-func (m *Manager) backfillTSOffsets() {}
 
 // loadCloudChunksFromStore iterates blobs from the cloud store and populates
 // the local B+ tree index. Does NOT insert into m.metas.
