@@ -296,11 +296,19 @@ type Orchestrator struct {
 	// Alert collector for runtime system alerts.
 	alerts AlertCollector
 
-	// chunkSignal fires every time chunk metadata changes on this node
-	// (seal, delete, create, compress, cloud upload). The WatchChunks
-	// streaming RPC watches this signal to push notifications to
-	// connected clients. See gastrolog-1jijm.
+	// chunkSignal is the legacy bare-wake-up notifier used by the
+	// pre-gastrolog-3pf9w WatchChunks shape. New code should emit typed
+	// ChunkChangeEvent via chunkBus instead; chunkSignal stays wired so
+	// any caller that hasn't been migrated still produces a wake-up tick
+	// during the transition.
 	chunkSignal *notify.Signal
+
+	// chunkBus broadcasts typed ChunkChangeEvent values to subscribers.
+	// Replaces the chunkSignal-then-fan-out-refetch pattern: WatchChunks
+	// streams these events directly to clients so they can patch their
+	// cache via setQueryData instead of refetching the world. See
+	// gastrolog-3pf9w.
+	chunkBus *notify.Bus[ChunkChangeEvent]
 
 	// progressTrigger coalesces high-rate active-chunk-progress signals
 	// (every record append) into bounded chunkSignal notifications. Hot-
@@ -378,24 +386,92 @@ func parseNodeGLID(id string) glid.GLID {
 	return g
 }
 
-// ChunkSignal returns the signal that fires on every chunk metadata change.
-// The WatchChunks streaming handler uses this to push notifications.
+// ChunkSignal returns the legacy bare-wake-up signal. New code should
+// subscribe to ChunkBus for typed ChunkChangeEvent values; ChunkSignal
+// stays wired only for callers that haven't been migrated to typed
+// emission yet.
 func (o *Orchestrator) ChunkSignal() *notify.Signal {
 	return o.chunkSignal
 }
 
-// NotifyChunkChange records that chunk metadata visible to WatchChunks
-// subscribers has changed on this node. Called from seal, delete,
-// create, compress, cloud upload, retention, FSM apply callbacks, and
-// the per-record append path. Safe for concurrent use.
-//
-// The actual chunkSignal fan-out is throttled (gastrolog-4y03v): a
-// single goroutine consumes the trigger and fires chunkSignal at most
-// twice per window (leading edge on the first signal after quiet,
-// trailing edge if more signals arrived during the window). This
-// caps WatchChunks RPC fan-out under heavy load — chunk rotation
-// cascades (seal + compress + upload + Raft FSM apply on every peer)
-// no longer produce a flood of redundant signals.
+// ChunkBus returns the typed chunk-event bus. The WatchChunks streaming
+// handler subscribes here and translates each ChunkChangeEvent into a
+// proto WatchChunksResponse for connected clients. See gastrolog-3pf9w.
+func (o *Orchestrator) ChunkBus() *notify.Bus[ChunkChangeEvent] {
+	return o.chunkBus
+}
+
+// EmitChunkChange broadcasts a typed chunk-state event on the chunk bus
+// AND triggers the legacy bare-signal pathway for any pre-3pf9w
+// subscribers. Call sites should use the typed Emit* helpers below
+// rather than constructing events directly so the Op semantics stay
+// consistent.
+func (o *Orchestrator) EmitChunkChange(ev ChunkChangeEvent) {
+	if o.chunkBus != nil {
+		o.chunkBus.Emit(ev)
+	}
+	// Legacy wake-up — keeps the old WatchChunks shape working during
+	// the transition. Safe to remove once all subscribers have migrated
+	// to the typed bus.
+	o.progressTrigger.Signal()
+}
+
+// EmitChunkCreated emits a CREATED event with full post-open metadata.
+func (o *Orchestrator) EmitChunkCreated(vault glid.GLID, meta chunk.ChunkMeta) {
+	m := meta
+	o.EmitChunkChange(ChunkChangeEvent{
+		VaultID: vault, ChunkID: meta.ID, Op: ChunkChangeOpCreated, Meta: &m,
+	})
+}
+
+// EmitChunkProgress emits a PROGRESS event carrying the active chunk's
+// current state — recordCount, WriteEnd, IngestEnd, Bytes, etc.
+// Frontends use mergeMeta to overlay these onto the cache: subscribers
+// see WriteEnd/IngestEnd advance and Bytes grow each tick, in addition
+// to the running record count. Producer paths must coalesce
+// (runChunkProgressEmitter) so emission stays bounded.
+func (o *Orchestrator) EmitChunkProgress(vault glid.GLID, meta chunk.ChunkMeta) {
+	m := meta
+	o.EmitChunkChange(ChunkChangeEvent{
+		VaultID:     vault,
+		ChunkID:     meta.ID,
+		Op:          ChunkChangeOpProgress,
+		Meta:        &m,
+		RecordCount: uint64(meta.RecordCount), //nolint:gosec // G115: record count bounded by rotation policy
+	})
+}
+
+// EmitChunkSealed emits a SEALED event with the final post-seal metadata.
+func (o *Orchestrator) EmitChunkSealed(vault glid.GLID, meta chunk.ChunkMeta) {
+	m := meta
+	o.EmitChunkChange(ChunkChangeEvent{
+		VaultID: vault, ChunkID: meta.ID, Op: ChunkChangeOpSealed, Meta: &m,
+	})
+}
+
+// EmitChunkDeleted emits a DELETED event. Subscribers drop the entry
+// from their projection; no Meta is carried.
+func (o *Orchestrator) EmitChunkDeleted(vault glid.GLID, chunkID chunk.ChunkID) {
+	o.EmitChunkChange(ChunkChangeEvent{
+		VaultID: vault, ChunkID: chunkID, Op: ChunkChangeOpDeleted,
+	})
+}
+
+// EmitChunkUploaded emits an UPLOADED event with the post-upload metadata
+// (CloudBacked=true, DiskBytes updated to the local-cache footprint).
+func (o *Orchestrator) EmitChunkUploaded(vault glid.GLID, meta chunk.ChunkMeta) {
+	m := meta
+	o.EmitChunkChange(ChunkChangeEvent{
+		VaultID: vault, ChunkID: meta.ID, Op: ChunkChangeOpUploaded, Meta: &m,
+	})
+}
+
+// NotifyChunkChange is the legacy bare-signal entry point. Retained for
+// call sites that haven't been migrated to the typed Emit* helpers yet.
+// Prefer EmitChunk{Created,Progress,Sealed,Deleted,Uploaded} for any
+// new code — the typed events carry enough information for subscribers
+// to patch local state directly without an expensive ListChunks
+// refetch. See gastrolog-3pf9w.
 func (o *Orchestrator) NotifyChunkChange() {
 	o.progressTrigger.Signal()
 }
@@ -526,6 +602,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		alerts:               cfg.Alerts,
 		suspects:             newSuspectTracker(),
 		chunkSignal:          notify.NewSignal(),
+		chunkBus:             notify.NewBus[ChunkChangeEvent](256),
 		progressTrigger:      newProgressNotifier(),
 		vaultCtlLeaders:      newVaultCtlLeaderManager(baseLogger),
 		phase:                cfg.Phase,

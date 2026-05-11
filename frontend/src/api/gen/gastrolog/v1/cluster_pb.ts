@@ -6,7 +6,7 @@
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
 import { Job } from "./job_pb.js";
-import { ChunkAnalysis, ChunkMeta, ChunkValidation, ExportRecord, IndexInfo, VaultStats } from "./vault_pb.js";
+import { ChunkAnalysis, ChunkChangeOp, ChunkMeta, ChunkValidation, ExportRecord, IndexInfo, VaultStats } from "./vault_pb.js";
 import { PerRouteStats, VaultRouteStats } from "./system_pb.js";
 import { ChunkPlan, HistogramBucket, TableResult } from "./query_pb.js";
 
@@ -77,9 +77,18 @@ export class ForwardApplyRequest extends Message<ForwardApplyRequest> {
 }
 
 /**
+ * ForwardApplyResponse carries the Raft log index at which the leader
+ * applied the command. The follower uses this to wait for its own FSM
+ * to catch up before reading post-mutation state. See gastrolog-2nxij.
+ *
  * @generated from message gastrolog.v1.ForwardApplyResponse
  */
 export class ForwardApplyResponse extends Message<ForwardApplyResponse> {
+  /**
+   * @generated from field: uint64 applied_index = 1;
+   */
+  appliedIndex = protoInt64.zero;
+
   constructor(data?: PartialMessage<ForwardApplyResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -88,6 +97,7 @@ export class ForwardApplyResponse extends Message<ForwardApplyResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ForwardApplyResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "applied_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardApplyResponse {
@@ -1824,6 +1834,118 @@ export class ForwardListChunksResponse extends Message<ForwardListChunksResponse
 
   static equals(a: ForwardListChunksResponse | PlainMessage<ForwardListChunksResponse> | undefined, b: ForwardListChunksResponse | PlainMessage<ForwardListChunksResponse> | undefined): boolean {
     return proto3.util.equals(ForwardListChunksResponse, a, b);
+  }
+}
+
+/**
+ * ForwardWatchChunksRequest opens a peer-to-peer server-streaming
+ * subscription to a remote node's ChunkBus. The coordinating node uses
+ * this to multiplex chunk events from every cluster node into a single
+ * WatchChunks stream served to the connected client — the alternative is
+ * having the client open one stream per node, which doesn't work for
+ * browser clients that can only reach the cluster through one address.
+ * See gastrolog-3pf9w.
+ *
+ * @generated from message gastrolog.v1.ForwardWatchChunksRequest
+ */
+export class ForwardWatchChunksRequest extends Message<ForwardWatchChunksRequest> {
+  constructor(data?: PartialMessage<ForwardWatchChunksRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardWatchChunksRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardWatchChunksRequest {
+    return new ForwardWatchChunksRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardWatchChunksRequest {
+    return new ForwardWatchChunksRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardWatchChunksRequest {
+    return new ForwardWatchChunksRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardWatchChunksRequest | PlainMessage<ForwardWatchChunksRequest> | undefined, b: ForwardWatchChunksRequest | PlainMessage<ForwardWatchChunksRequest> | undefined): boolean {
+    return proto3.util.equals(ForwardWatchChunksRequest, a, b);
+  }
+}
+
+/**
+ * ForwardWatchChunksResponse mirrors the public WatchChunksResponse wire
+ * shape but is sent over the internal cluster gRPC transport. The
+ * coordinating node copies each event into its own WatchChunksResponse
+ * envelope before sending to the user-facing client, setting node_id to
+ * the peer node's identity so the client can track per-node version.
+ *
+ * @generated from message gastrolog.v1.ForwardWatchChunksResponse
+ */
+export class ForwardWatchChunksResponse extends Message<ForwardWatchChunksResponse> {
+  /**
+   * @generated from field: bytes vault_id = 1;
+   */
+  vaultId = new Uint8Array(0);
+
+  /**
+   * @generated from field: bytes chunk_id = 2;
+   */
+  chunkId = new Uint8Array(0);
+
+  /**
+   * @generated from field: gastrolog.v1.ChunkChangeOp op = 3;
+   */
+  op = ChunkChangeOp.UNSPECIFIED;
+
+  /**
+   * @generated from field: gastrolog.v1.ChunkMeta meta = 4;
+   */
+  meta?: ChunkMeta;
+
+  /**
+   * @generated from field: uint64 record_count = 5;
+   */
+  recordCount = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 version = 6;
+   */
+  version = protoInt64.zero;
+
+  constructor(data?: PartialMessage<ForwardWatchChunksResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardWatchChunksResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 3, name: "op", kind: "enum", T: proto3.getEnumType(ChunkChangeOp) },
+    { no: 4, name: "meta", kind: "message", T: ChunkMeta },
+    { no: 5, name: "record_count", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 6, name: "version", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardWatchChunksResponse {
+    return new ForwardWatchChunksResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardWatchChunksResponse {
+    return new ForwardWatchChunksResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardWatchChunksResponse {
+    return new ForwardWatchChunksResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardWatchChunksResponse | PlainMessage<ForwardWatchChunksResponse> | undefined, b: ForwardWatchChunksResponse | PlainMessage<ForwardWatchChunksResponse> | undefined): boolean {
+    return proto3.util.equals(ForwardWatchChunksResponse, a, b);
   }
 }
 

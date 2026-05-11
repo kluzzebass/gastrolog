@@ -8,12 +8,15 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"connectrpc.com/connect"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index/analyzer"
+	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/system"
 )
@@ -500,40 +503,219 @@ func validateChunk(orch *orchestrator.Orchestrator, vaultID glid.GLID, meta chun
 	return cv
 }
 
-// WatchChunks opens a server-streaming subscription that pushes a
-// notification every time chunk metadata changes on this node. The
-// client uses each notification as a signal to refetch via ListChunks —
-// no chunk data is carried in the stream itself. Same pattern as
-// WatchConfig. See gastrolog-1jijm.
+// WatchChunks opens a server-streaming subscription that pushes a typed
+// chunk-state event every time a chunk on this node changes. Each event
+// carries the vault ID, chunk ID, op, and either a full ChunkMeta (for
+// CREATED / SEALED / UPLOADED) or a record count (for PROGRESS). Clients
+// patch their local cache directly from the event payload instead of
+// refetching ListChunks on every notification — see gastrolog-3pf9w for
+// the pre-3pf9w shape and why it was replaced.
 //
-// Routing: RouteLocal — the client connects to each node independently.
-// React Query's cache invalidation covers all vaults on the connected
-// node when any chunk event fires.
+// Routing: RouteLocal — each node emits events for the vaults it hosts;
+// the client maintains one WatchChunks stream per cluster node and merges
+// events into per-vault caches. Reconnects detect dropped events by
+// comparing the first post-reconnect version against last-seen + 1.
 func (s *VaultServer) WatchChunks(
 	ctx context.Context,
 	_ *connect.Request[apiv1.WatchChunksRequest],
 	stream *connect.ServerStream[apiv1.WatchChunksResponse],
 ) error {
-	signal := s.orch.ChunkSignal()
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-	// Send one initial message so the client knows the stream is alive.
+	// Aggregated event channel. Capacity sized for moderate burstiness;
+	// producers drop on full (they'll re-emit on the next progress tick).
+	eventCh := make(chan *apiv1.WatchChunksResponse, 256)
+
+	// Local source: subscribe to this node's ChunkBus and forward typed
+	// events. Empty node_id signals "from the connected node itself."
+	bus := s.orch.ChunkBus()
+	subID, events, baseline := bus.Subscribe()
+	defer bus.Unsubscribe(subID)
+
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		s.runLocalChunkEventForwarder(streamCtx, events, eventCh)
+	})
+
+	// Peer sources: open one ForwardWatchChunks stream per cluster node
+	// the inspector might care about. Lifecycle events (CREATED / SEALED
+	// / DELETED / UPLOADED) come through every node's local bus because
+	// the vault-ctl FSM apply path fires on every cluster node — the
+	// frontend handles the harmless duplicates via per-node version
+	// tracking and idempotent setQueryData merges. PROGRESS events are
+	// only emitted on the node that hosts the active chunk's leader, so
+	// peer streaming is the only way they reach a client connected to a
+	// node that doesn't host the vault. See gastrolog-3pf9w.
+	if s.remoteChunkWatcher != nil {
+		for _, nodeID := range s.peerNodeIDs(streamCtx) {
+			nid := nodeID
+			wg.Go(func() {
+				s.runPeerChunkEventForwarder(streamCtx, nid, eventCh)
+			})
+		}
+	}
+
+	// Heartbeat carries the local baseline. Clients track per-node
+	// versions; the empty node_id matches what local-bus events carry.
 	if err := stream.Send(&apiv1.WatchChunksResponse{
-		Version: signal.Version(),
+		Op:      apiv1.ChunkChangeOp_CHUNK_CHANGE_OP_UNSPECIFIED,
+		Version: baseline,
 	}); err != nil {
 		return err
 	}
 
+	// Drain aggregated events → user-facing client stream. Producer
+	// goroutines exit via streamCtx.Done() when this loop returns.
+	defer wg.Wait()
 	for {
-		ch := signal.C()
 		select {
-		case <-ctx.Done():
+		case <-streamCtx.Done():
 			return nil
-		case <-ch:
-			if err := stream.Send(&apiv1.WatchChunksResponse{
-				Version: signal.Version(),
-			}); err != nil {
+		case msg := <-eventCh:
+			if err := stream.Send(msg); err != nil {
 				return err
 			}
 		}
+	}
+}
+
+// runLocalChunkEventForwarder drains the local ChunkBus subscription and
+// translates each event into a wire WatchChunksResponse, fed into the
+// aggregated event channel. node_id is left empty for local events.
+func (s *VaultServer) runLocalChunkEventForwarder(
+	ctx context.Context,
+	events <-chan notify.Versioned[orchestrator.ChunkChangeEvent],
+	out chan<- *apiv1.WatchChunksResponse,
+) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev, ok := <-events:
+			if !ok {
+				return
+			}
+			msg := chunkChangeEventToProto(ev.Event)
+			msg.Version = ev.Version
+			if msg.Meta != nil {
+				msg.Meta.VaultType = s.orch.VaultType(ev.Event.VaultID)
+			}
+			select {
+			case out <- msg:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
+}
+
+// runPeerChunkEventForwarder opens a ForwardWatchChunks stream to a
+// remote node and forwards each peer event into the aggregated channel,
+// tagging it with the peer's node_id so the client can track per-node
+// version. On error, retries with exponential backoff bounded by 5 s.
+// Returns when ctx is cancelled.
+func (s *VaultServer) runPeerChunkEventForwarder(
+	ctx context.Context,
+	nodeID string,
+	out chan<- *apiv1.WatchChunksResponse,
+) {
+	nodeIDBytes := []byte(nodeID)
+	backoff := 100 * time.Millisecond
+	for ctx.Err() == nil {
+		err := s.remoteChunkWatcher.WatchChunks(ctx, nodeID, func(peerMsg *apiv1.ForwardWatchChunksResponse) error {
+			msg := &apiv1.WatchChunksResponse{
+				VaultId:     peerMsg.VaultId,
+				ChunkId:     peerMsg.ChunkId,
+				Op:          peerMsg.Op,
+				Meta:        peerMsg.Meta,
+				RecordCount: peerMsg.RecordCount,
+				Version:     peerMsg.Version,
+				NodeId:      nodeIDBytes,
+			}
+			select {
+			case out <- msg:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		})
+		if ctx.Err() != nil {
+			return
+		}
+		if err != nil {
+			s.logger.Debug("watchchunks: peer stream errored, will retry",
+				"node", nodeID, "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+		if backoff < 5*time.Second {
+			backoff *= 2
+		}
+	}
+}
+
+// peerNodeIDs returns the IDs of all cluster nodes other than this one.
+// Sourced from NodeStorageConfigs (every cluster node has one); skipped
+// silently if the config store is unavailable.
+func (s *VaultServer) peerNodeIDs(ctx context.Context) []string {
+	nscs, err := s.cfgStore.ListNodeStorageConfigs(ctx)
+	if err != nil {
+		return nil
+	}
+	var nodes []string
+	for _, nsc := range nscs {
+		id := nsc.NodeID
+		if id == "" || id == s.localNodeID {
+			continue
+		}
+		nodes = append(nodes, id)
+	}
+	return nodes
+}
+
+// chunkChangeEventToProto converts an orchestrator ChunkChangeEvent into
+// the wire WatchChunksResponse. Lays out which fields are present per Op
+// so the client merge logic can rely on the same contract.
+func chunkChangeEventToProto(ev orchestrator.ChunkChangeEvent) *apiv1.WatchChunksResponse {
+	msg := &apiv1.WatchChunksResponse{
+		VaultId: ev.VaultID.ToProto(),
+		ChunkId: ev.ChunkID[:],
+		Op:      chunkOpToProto(ev.Op),
+	}
+	if ev.Meta != nil {
+		// Mirror VaultChunkMetaToProto: the inner ChunkMeta needs
+		// vault_id populated so the frontend's per-vault grouping
+		// matches against the same vaultId the ListChunks path uses.
+		// Bare ChunkMetaToProto leaves that field zero, which sends
+		// the chunk into the renderer's "unknown" group and hides it.
+		msg.Meta = ChunkMetaToProto(*ev.Meta)
+		msg.Meta.VaultId = ev.VaultID.ToProto()
+	}
+	if ev.Op == orchestrator.ChunkChangeOpProgress {
+		msg.RecordCount = ev.RecordCount
+	}
+	return msg
+}
+
+func chunkOpToProto(op orchestrator.ChunkChangeOp) apiv1.ChunkChangeOp {
+	switch op {
+	case orchestrator.ChunkChangeOpUnspecified:
+		return apiv1.ChunkChangeOp_CHUNK_CHANGE_OP_UNSPECIFIED
+	case orchestrator.ChunkChangeOpCreated:
+		return apiv1.ChunkChangeOp_CHUNK_CHANGE_OP_CREATED
+	case orchestrator.ChunkChangeOpProgress:
+		return apiv1.ChunkChangeOp_CHUNK_CHANGE_OP_PROGRESS
+	case orchestrator.ChunkChangeOpSealed:
+		return apiv1.ChunkChangeOp_CHUNK_CHANGE_OP_SEALED
+	case orchestrator.ChunkChangeOpDeleted:
+		return apiv1.ChunkChangeOp_CHUNK_CHANGE_OP_DELETED
+	case orchestrator.ChunkChangeOpUploaded:
+		return apiv1.ChunkChangeOp_CHUNK_CHANGE_OP_UPLOADED
+	default:
+		return apiv1.ChunkChangeOp_CHUNK_CHANGE_OP_UNSPECIFIED
 	}
 }

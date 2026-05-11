@@ -1289,19 +1289,31 @@ func wireVaultFSMOnDelete(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 	default:
 		return
 	}
+	// Wire OnCreate alongside OnDelete: the WatchChunks event bus needs
+	// CREATED events as soon as a new active chunk is announced via
+	// CmdCreateChunk so the inspector shows the chunk immediately rather
+	// than only after seal. Fired on every node where the apply ran, same
+	// as OnDelete — followers learn about the new chunk via Raft replication.
+	// See gastrolog-3pf9w.
+	fsm.SetOnCreate(func(e vaultctlfsm.ManifestEntry) {
+		if o == nil {
+			return
+		}
+		o.EmitChunkCreated(vaultID, manifestEntryToChunkMeta(e, false))
+	})
 	silent, ok := cm.(chunk.SilentDeleter)
 	if !ok {
 		return
 	}
 	fsm.SetOnDelete(func(id chunk.ChunkID) {
-		// Notify WatchChunks subscribers regardless of local-delete
-		// outcome: the FSM's authoritative chunks-map entry is gone,
-		// so the inspector's view on this node is stale. Fire on
-		// every node where the apply ran, even ones that never had
-		// the chunk locally (they may still have rendered it via
-		// the cluster-wide ListChunks fan-out). See gastrolog-2ob86.
+		// Emit a DELETED event regardless of local-delete outcome: the
+		// FSM's authoritative chunks-map entry is gone, so the
+		// inspector's projection on this node must drop the entry. Fire
+		// on every node where the apply ran, even ones that never had
+		// the chunk locally — they may have rendered it via the
+		// cluster-wide ListChunks fan-out. See gastrolog-2ob86.
 		if o != nil {
-			defer o.NotifyChunkChange()
+			defer o.EmitChunkDeleted(vaultID, id)
 		}
 		// Delete indexes first (they're metadata about the chunk).
 		// ErrChunkNotFound-equivalent errors are expected during log replay
@@ -1351,14 +1363,20 @@ func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 		return
 	}
 	fsm.SetOnUpload(func(e vaultctlfsm.ManifestEntry) {
-		// Notify WatchChunks subscribers: the chunk transitioned to
-		// cloud-backed (DiskBytes / CloudBacked changed
-		// in the FSM), which the inspector renders. Fire regardless
-		// of RegisterCloudChunk outcome — FSM state is authoritative.
-		// See gastrolog-2ob86.
-		if o != nil {
-			defer o.NotifyChunkChange()
-		}
+		// Emit an UPLOADED event with the FSM's authoritative state —
+		// every cluster node's FSM applies the same CmdUploadChunk
+		// payload, so every node emits the same RecordCount /
+		// DiskBytes / CloudBacked. Using local Manager.Meta instead
+		// produced per-node variance and inspector flicker. See
+		// gastrolog-3pf9w.
+		defer func() {
+			if o == nil {
+				return
+			}
+			meta := manifestEntryToChunkMeta(e, true)
+			meta.CloudBacked = true
+			o.EmitChunkUploaded(vaultID, meta)
+		}()
 		info := chunk.CloudChunkInfo{
 			WriteStart:      e.WriteStart,
 			WriteEnd:        e.WriteEnd,

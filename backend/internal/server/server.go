@@ -94,9 +94,10 @@ type Config struct {
 
 	// RemoteSearcher forwards search requests to remote cluster nodes.
 	// Nil in single-node mode.
-	RemoteSearcher    RemoteSearcher
-	RemoteChunkLister RemoteChunkLister
-	RemoteIndexer     RemoteIndexer
+	RemoteSearcher     RemoteSearcher
+	RemoteChunkLister  RemoteChunkLister
+	RemoteChunkWatcher RemoteChunkWatcher
+	RemoteIndexer      RemoteIndexer
 
 	// PeerJobs provides active jobs from peer cluster nodes.
 	// Nil in single-node mode.
@@ -183,6 +184,7 @@ type Server struct {
 	peerRouteStats     PeerRouteStatsProvider
 	remoteSearcher     RemoteSearcher
 	remoteChunkLister  RemoteChunkLister
+	remoteChunkWatcher RemoteChunkWatcher
 	remoteIndexer      RemoteIndexer
 	peerJobs           PeerJobsProvider
 	localStatsFn       func() *apiv1.NodeStats
@@ -252,6 +254,7 @@ func New(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orche
 		peerRouteStats:     cfg.PeerRouteStats,
 		remoteSearcher:     cfg.RemoteSearcher,
 		remoteChunkLister:  cfg.RemoteChunkLister,
+		remoteChunkWatcher: cfg.RemoteChunkWatcher,
 		remoteIndexer:      cfg.RemoteIndexer,
 		peerJobs:           cfg.PeerJobs,
 		localStatsFn:       cfg.LocalStats,
@@ -488,7 +491,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 
 	queryServer := NewQueryServer(s.orch, s.cfgStore, s.remoteSearcher, s.localNodeID, lookupRegistry.Resolve, lookupRegistry.Names(), queryTimeout, maxFollowDuration, maxResultCount, compQuery.Apply(s.logger))
 	s.queryServer = queryServer
-	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.peerVaultStats, s.remoteChunkLister, s.remoteIndexer, s.localNodeID, s.logger)
+	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.peerVaultStats, s.remoteChunkLister, s.remoteChunkWatcher, s.remoteIndexer, s.localNodeID, s.logger)
 	configServer := NewSystemServer(SystemServerConfig{
 		Orch:               s.orch,
 		CfgStore:           s.cfgStore,

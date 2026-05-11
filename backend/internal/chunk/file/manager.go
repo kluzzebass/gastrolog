@@ -1517,10 +1517,32 @@ func (m *Manager) loadChunkMetaFromGLCB(id chunk.ChunkID) (*chunkMeta, error) {
 	defer func() { _ = rd.Close() }()
 	bm := rd.Meta()
 
+	// The GLCB header (96 bytes, see cloud/format.go writer.go) does not
+	// persist RawBytes — it's computed at write time as sum of frame
+	// sizes but is not serialized into the file. So bm.RawBytes here is
+	// the zero value, and any chunk loaded from disk (post-restart, or
+	// for sealed chunks where the post-seal pipeline removed the raw
+	// log files) would carry bytes=0 in m.metas. Operators see "0 B" in
+	// the inspector for every sealed chunk that wasn't sealed during
+	// the current process lifetime — which is most of them.
+	//
+	// Fall back to the data.glcb file size as the bytes value. It's the
+	// on-disk size, not the original uncompressed record size, but it
+	// gives operators a real number reflecting how much storage the
+	// chunk consumes. The proper fix (persisting RawBytes in the
+	// header) needs a format revision and migration; this gets the
+	// inspector showing useful sizes immediately.
+	bytes := bm.RawBytes
+	if bytes == 0 {
+		if st, err := f.Stat(); err == nil {
+			bytes = st.Size()
+		}
+	}
+
 	return &chunkMeta{
 		id:               id,
 		recordCount:      int64(bm.RecordCount),
-		bytes:            bm.RawBytes,
+		bytes:            bytes,
 		sealed:           true,
 		writeStart:       bm.WriteStart,
 		writeEnd:         bm.WriteEnd,
@@ -1532,7 +1554,8 @@ func (m *Manager) loadChunkMetaFromGLCB(id chunk.ChunkID) (*chunkMeta, error) {
 		ingestIdxSize:    bm.IngestIdxSize,
 		sourceIdxOffset:  bm.SourceIdxOffset,
 		sourceIdxSize:    bm.SourceIdxSize,
-		logicalDataBytes: bm.RawBytes,
+		logicalDataBytes: bytes,
+		diskBytes:        bytes,
 	}, nil
 }
 

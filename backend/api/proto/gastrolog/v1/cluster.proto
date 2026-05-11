@@ -324,6 +324,29 @@ message ForwardListChunksResponse {
   repeated ChunkMeta chunks = 1;
 }
 
+// ForwardWatchChunksRequest opens a peer-to-peer server-streaming
+// subscription to a remote node's ChunkBus. The coordinating node uses
+// this to multiplex chunk events from every cluster node into a single
+// WatchChunks stream served to the connected client — the alternative is
+// having the client open one stream per node, which doesn't work for
+// browser clients that can only reach the cluster through one address.
+// See gastrolog-3pf9w.
+message ForwardWatchChunksRequest {}
+
+// ForwardWatchChunksResponse mirrors the public WatchChunksResponse wire
+// shape but is sent over the internal cluster gRPC transport. The
+// coordinating node copies each event into its own WatchChunksResponse
+// envelope before sending to the user-facing client, setting node_id to
+// the peer node's identity so the client can track per-node version.
+message ForwardWatchChunksResponse {
+  bytes vault_id = 1;
+  bytes chunk_id = 2;
+  ChunkChangeOp op = 3;
+  ChunkMeta meta = 4;
+  uint64 record_count = 5;
+  uint64 version = 6;
+}
+
 // ForwardGetIndexesRequest asks a remote node to return index status for
 // a specific chunk in one of its local vaults.
 message ForwardGetIndexesRequest {

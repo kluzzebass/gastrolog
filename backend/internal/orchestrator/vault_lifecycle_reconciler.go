@@ -401,9 +401,18 @@ func (r *VaultLifecycleReconciler) projectAllCloudBackedFromFSM(fsm *vaultctlfsm
 func (r *VaultLifecycleReconciler) onSeal(e vaultctlfsm.ManifestEntry) {
 	r.logger.Debug("onSeal", "chunk", e.ID, "records", e.RecordCount)
 	defer func() {
-		if r.orch != nil {
-			r.orch.NotifyChunkChange()
+		if r.orch == nil {
+			return
 		}
+		// Emit SEALED with the FSM ManifestEntry as the authoritative
+		// source: every cluster node's FSM applies CmdSealChunk with the
+		// same payload, so every node emits the same final RecordCount /
+		// Bytes / IngestStart / etc. Using local Manager.Meta instead
+		// would produce per-node variance (followers lag the leader's
+		// record stream), making the inspector flicker through stale
+		// counts as N+1 SEALED events arrive in sequence. See
+		// gastrolog-3pf9w.
+		r.orch.EmitChunkSealed(r.vaultID, manifestEntryToChunkMeta(e, true))
 	}()
 	if r.vaultInst == nil || r.vaultInst.Chunks == nil {
 		return
@@ -965,8 +974,8 @@ func (r *VaultLifecycleReconciler) deleteLocalCopy(chunkID chunk.ChunkID) error 
 		}
 	}
 	if r.orch != nil {
-		// Notify WatchChunks subscribers: a chunk was removed.
-		r.orch.NotifyChunkChange()
+		// Carry the DELETED op so subscribers remove the cache entry.
+		r.orch.EmitChunkDeleted(r.vaultID, chunkID)
 	}
 	return nil
 }

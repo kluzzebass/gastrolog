@@ -159,6 +159,14 @@ type Server struct {
 	// Set after the orchestrator is created, before search forwarding starts.
 	searchExecutor SearchExecutor
 
+	// chunkEventSubscriber subscribes a peer-streaming ForwardWatchChunks
+	// connection to this node's local chunk event bus. The callback
+	// runs the subscription loop, invoking sendFn for each typed event
+	// translated into the wire proto; it returns when the caller's ctx
+	// is cancelled or the send fails. Set after the orchestrator is
+	// created, before WatchChunks aggregation starts.
+	chunkEventSubscriber ChunkEventSubscriber
+
 	// contextExecutor fetches surrounding records from a local vault for
 	// remote GetContext requests.
 	contextExecutor ContextExecutor

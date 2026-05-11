@@ -520,6 +520,7 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	clusterSrv.SetValidateVaultExecutor(newValidateVaultExecutor(orch))
 	clusterSrv.SetGetChunkExecutor(newGetChunkExecutor(orch))
 	clusterSrv.SetAnalyzeChunkExecutor(newAnalyzeChunkExecutor(orch))
+	clusterSrv.SetChunkEventSubscriber(newChunkEventSubscriber(orch))
 	clusterSrv.SetSealVaultExecutor(newSealVaultExecutor(orch))
 	clusterSrv.SetChunkSealExecutor(func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID) error {
 		return orch.SealActiveChunk(vaultID, chunkID)
@@ -1031,7 +1032,8 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 			PeerVaultStats: deps.PeerState, PeerIngesterStats: deps.PeerState, PeerRouteStats: deps.PeerState,
 			PeerJobs:   deps.PeerJobState,
 			LocalStats: deps.LocalStats, RemoteSearcher: deps.SearchForwarder, RemoteChunkLister: deps.SearchForwarder,
-			RemoteIndexer: deps.SearchForwarder,
+			RemoteChunkWatcher: deps.SearchForwarder,
+			RemoteIndexer:      deps.SearchForwarder,
 			RoutingForwarder: deps.RoutingForwarder, ClusterAddress: deps.ClusterAddr,
 			JoinClusterFunc: deps.JoinClusterFunc, RemoveNodeFunc: deps.RemoveNodeFunc,
 			SetNodeSuffrageFunc: deps.SetNodeSuffrageFunc,

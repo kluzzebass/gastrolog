@@ -55,6 +55,56 @@ proto3.util.setEnumType(ChunkState, "gastrolog.v1.ChunkState", [
 ]);
 
 /**
+ * ChunkChangeOp identifies what changed about a chunk in a WatchChunks event.
+ * Clients use the op to decide how to mutate their local state: CREATED and
+ * SEALED carry a full ChunkMeta and replace the cache entry; PROGRESS carries
+ * only a new record_count and patches the active chunk in place; DELETED
+ * removes the entry; UPLOADED transitions cloud_backed to true.
+ *
+ * @generated from enum gastrolog.v1.ChunkChangeOp
+ */
+export enum ChunkChangeOp {
+  /**
+   * @generated from enum value: CHUNK_CHANGE_OP_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: CHUNK_CHANGE_OP_CREATED = 1;
+   */
+  CREATED = 1,
+
+  /**
+   * @generated from enum value: CHUNK_CHANGE_OP_PROGRESS = 2;
+   */
+  PROGRESS = 2,
+
+  /**
+   * @generated from enum value: CHUNK_CHANGE_OP_SEALED = 3;
+   */
+  SEALED = 3,
+
+  /**
+   * @generated from enum value: CHUNK_CHANGE_OP_DELETED = 4;
+   */
+  DELETED = 4,
+
+  /**
+   * @generated from enum value: CHUNK_CHANGE_OP_UPLOADED = 5;
+   */
+  UPLOADED = 5,
+}
+// Retrieve enum metadata with: proto3.getEnumType(ChunkChangeOp)
+proto3.util.setEnumType(ChunkChangeOp, "gastrolog.v1.ChunkChangeOp", [
+  { no: 0, name: "CHUNK_CHANGE_OP_UNSPECIFIED" },
+  { no: 1, name: "CHUNK_CHANGE_OP_CREATED" },
+  { no: 2, name: "CHUNK_CHANGE_OP_PROGRESS" },
+  { no: 3, name: "CHUNK_CHANGE_OP_SEALED" },
+  { no: 4, name: "CHUNK_CHANGE_OP_DELETED" },
+  { no: 5, name: "CHUNK_CHANGE_OP_UPLOADED" },
+]);
+
+/**
  * @generated from message gastrolog.v1.ListVaultsRequest
  */
 export class ListVaultsRequest extends Message<ListVaultsRequest> {
@@ -2169,18 +2219,76 @@ export class WatchChunksRequest extends Message<WatchChunksRequest> {
 }
 
 /**
+ * WatchChunksResponse carries a single chunk-state change event. Replaces the
+ * bare wake-up counter that forced clients to re-fetch ListChunks on every
+ * notification, which produced O(vaults × ticks/sec) RPCs under steady-state
+ * ingest. Each message describes exactly what changed so the client can patch
+ * its local cache via setQueryData and avoid the fan-out entirely. See
+ * gastrolog-3pf9w.
+ *
  * @generated from message gastrolog.v1.WatchChunksResponse
  */
 export class WatchChunksResponse extends Message<WatchChunksResponse> {
   /**
-   * Monotonic event counter. Increments on every chunk metadata change
-   * (seal, delete, create, compress, cloud upload). Clients can compare
-   * against the last version they processed to skip stale notifications
-   * during reconnect bursts.
+   * vault_id identifies which vault's chunk changed. Required.
    *
-   * @generated from field: uint64 version = 1;
+   * @generated from field: bytes vault_id = 1;
+   */
+  vaultId = new Uint8Array(0);
+
+  /**
+   * chunk_id identifies which chunk changed. Required for all ops except
+   * UNSPECIFIED.
+   *
+   * @generated from field: bytes chunk_id = 2;
+   */
+  chunkId = new Uint8Array(0);
+
+  /**
+   * op is the change kind. See ChunkChangeOp.
+   *
+   * @generated from field: gastrolog.v1.ChunkChangeOp op = 3;
+   */
+  op = ChunkChangeOp.UNSPECIFIED;
+
+  /**
+   * meta is the full post-change chunk metadata. Present for CREATED,
+   * SEALED, and UPLOADED. Absent for PROGRESS and DELETED.
+   *
+   * @generated from field: gastrolog.v1.ChunkMeta meta = 4;
+   */
+  meta?: ChunkMeta;
+
+  /**
+   * record_count is the post-change record count of the active chunk.
+   * Present for PROGRESS only (CREATED / SEALED include it inside meta).
+   *
+   * @generated from field: uint64 record_count = 5;
+   */
+  recordCount = protoInt64.zero;
+
+  /**
+   * version is a per-node monotonic counter, incremented for every event
+   * emitted on this node's stream. Clients track the high-watermark per
+   * node and detect dropped events on reconnect by comparing the first
+   * post-reconnect version against last_seen + 1 — a gap means the client
+   * should cold-start with ListChunks for that node's vaults before
+   * resuming.
+   *
+   * @generated from field: uint64 version = 6;
    */
   version = protoInt64.zero;
+
+  /**
+   * node_id identifies which cluster node produced this event. The API
+   * node multiplexes its own ChunkBus events plus events from every peer
+   * cluster node's bus into a single stream to the client; node_id lets
+   * the client maintain a per-node high-watermark for resync. Empty for
+   * events from the connected node itself.
+   *
+   * @generated from field: bytes node_id = 7;
+   */
+  nodeId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<WatchChunksResponse>) {
     super();
@@ -2190,7 +2298,13 @@ export class WatchChunksResponse extends Message<WatchChunksResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.WatchChunksResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "version", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 3, name: "op", kind: "enum", T: proto3.getEnumType(ChunkChangeOp) },
+    { no: 4, name: "meta", kind: "message", T: ChunkMeta },
+    { no: 5, name: "record_count", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 6, name: "version", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 7, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): WatchChunksResponse {

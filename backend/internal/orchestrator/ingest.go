@@ -281,7 +281,13 @@ func (o *Orchestrator) postSealWork(vaultID glid.GLID, cm chunk.ChunkManager, ch
 	defer o.mu.RUnlock()
 	o.schedulePostSeal(vaultID, cm, chunkID)
 	// Notify WatchChunks subscribers: the chunk's sealed flag has changed.
-	o.NotifyChunkChange()
+	// Fetch the post-seal meta so the event carries the final state instead
+	// of forcing a refetch on the client.
+	if meta, err := cm.Meta(chunkID); err == nil {
+		o.EmitChunkSealed(vaultID, meta)
+	} else {
+		o.NotifyChunkChange() // fall back to bare wake-up if meta lookup failed
+	}
 }
 
 // schedulePostSeal schedules the unified post-seal pipeline (compress → index → upload).
@@ -298,8 +304,14 @@ func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager
 			if err := processor.PostSealProcess(ctx, id); err != nil {
 				return err
 			}
-			// Notify: compression/indexing done, metadata changed again.
-			o.NotifyChunkChange()
+			// Notify: compression/indexing done, chunk meta changed again
+			// (DiskBytes, etc.). Carry the fresh meta so clients can patch
+			// their cache without a refetch.
+			if meta, err := cm.Meta(id); err == nil {
+				o.EmitChunkSealed(vaultID, meta)
+			} else {
+				o.NotifyChunkChange()
+			}
 			// Schedule replication as a separate job — never blocks the
 			// post-seal scheduler slot.
 			o.scheduleReplication(vaultID, id, followerTargets)

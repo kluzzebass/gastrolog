@@ -658,15 +658,8 @@ func (r *retentionRunner) tryRetainChunk(id chunk.ChunkID, b retentionRule, alre
 	// destination, receipt protocol stuck) avoids piling up no-op
 	// CmdRetentionPending entries on every sweep tick.
 	if r.applyRaftRetentionPending != nil && !alreadyPending {
-		if err := r.applyRaftRetentionPending(id); err != nil {
-			r.logger.Error("retention: failed to apply raft retention-pending",
-				"vault", r.vaultID, "chunk", id, "error", err)
-			r.clearInflight(id)
+		if !r.markRetentionPending(id) {
 			return
-		}
-		// Notify: retention_pending flag changed — inspector shows this.
-		if r.orch != nil {
-			r.orch.NotifyChunkChange()
 		}
 	}
 
@@ -681,6 +674,31 @@ func (r *retentionRunner) tryRetainChunk(id chunk.ChunkID, b retentionRule, alre
 	defer r.clearInflight(id)
 	r.applyRetentionDispositionToChunk(id)
 	r.expireChunk(id, "retention-trigger")
+}
+
+// markRetentionPending applies CmdRetentionPending via Raft and emits a
+// SEALED event so subscribers see the flag flip without a ListChunks
+// refetch. Returns true on success, false if the Raft apply failed (in
+// which case the caller has already been backed off by clearInflight).
+// Extracted from tryRetainChunk to keep the parent function's nesting
+// shallow.
+func (r *retentionRunner) markRetentionPending(id chunk.ChunkID) bool {
+	if err := r.applyRaftRetentionPending(id); err != nil {
+		r.logger.Error("retention: failed to apply raft retention-pending",
+			"vault", r.vaultID, "chunk", id, "error", err)
+		r.clearInflight(id)
+		return false
+	}
+	// Carry the post-flag meta so subscribers can patch their cache
+	// without a ListChunks refetch.
+	if r.orch != nil {
+		if meta, err := r.cm.Meta(id); err == nil {
+			r.orch.EmitChunkSealed(r.vaultID, meta)
+		} else {
+			r.orch.NotifyChunkChange()
+		}
+	}
+	return true
 }
 
 // applyRetentionDispositionToChunk runs the chunk's records through the
@@ -943,7 +961,8 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID, reason string) {
 		if r.orch.retentionRates != nil {
 			r.orch.retentionRates.Record(r.vaultID, r.orch.now())
 		}
-		r.orch.NotifyChunkChange()
+		// Carry the DELETED op so subscribers remove the cache entry.
+		r.orch.EmitChunkDeleted(r.vaultID, id)
 		r.orch.deleteFromFollowers(r.vaultID, id)
 		r.forwardDeletionToFollowers(id)
 	}
