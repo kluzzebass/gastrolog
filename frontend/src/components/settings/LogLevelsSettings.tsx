@@ -282,26 +282,32 @@ function ComponentsTable({ dark, components, onPathClick, existingPatterns, onSo
   const cellMono = `text-[0.85em] font-mono ${c("text-text-normal", "text-light-text-normal")}`;
   const cellMeta = `text-[0.85em] font-mono ${c("text-text-muted", "text-light-text-muted")}`;
   const cellDesc = `text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`;
+  // max-h caps how much vertical space the registry can claim so the
+  // Rules editor stays visible above it. Internal scrolling lets the
+  // operator browse the full list without pushing the editor off
+  // screen. 24rem is roughly 15 rows at the current row height.
   return (
-    <div className="grid grid-cols-[minmax(0,1.4fr)_80px_80px_minmax(0,2fr)] gap-x-4 gap-y-1.5 items-baseline">
-      <div className={header}>Path</div>
-      <div className={header}>Level</div>
-      <div className={header}>Source</div>
-      <div className={header}>Description</div>
-      {components.map((info) => (
-        <FragmentRow
-          key={info.path}
-          dark={dark}
-          pathCls={cellMono}
-          levelCls={cellMono}
-          sourceCls={cellMeta}
-          descCls={cellDesc}
-          info={info}
-          alreadyRuled={existingPatterns.has(info.path)}
-          onPathClick={onPathClick}
-          onSourceHover={onSourceHover}
-        />
-      ))}
+    <div className="max-h-96 overflow-y-auto app-scroll pr-2">
+      <div className="grid grid-cols-[minmax(0,1.4fr)_80px_80px_minmax(0,2fr)] gap-x-4 gap-y-1.5 items-baseline">
+        <div className={header}>Path</div>
+        <div className={header}>Level</div>
+        <div className={header}>Source</div>
+        <div className={header}>Description</div>
+        {components.map((info) => (
+          <FragmentRow
+            key={info.path}
+            dark={dark}
+            pathCls={cellMono}
+            levelCls={cellMono}
+            sourceCls={cellMeta}
+            descCls={cellDesc}
+            info={info}
+            alreadyRuled={existingPatterns.has(info.path)}
+            onPathClick={onPathClick}
+            onSourceHover={onSourceHover}
+          />
+        ))}
+      </div>
     </div>
   );
 }
