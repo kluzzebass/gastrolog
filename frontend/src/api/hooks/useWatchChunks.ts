@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { vaultClient, refreshAuth } from "../client";
+import { Timestamp } from "@bufbuild/protobuf";
 import {
   ChunkChangeOp,
   ChunkMeta,
@@ -276,26 +277,67 @@ function bytesToHex(bytes: Uint8Array): string {
 function mergeMeta(existing: ChunkMeta | undefined, incoming: ChunkMeta): ChunkMeta {
   if (!existing) return incoming;
   const merged = existing.clone();
-  // Event-authoritative fields (per ChunkMetaToProto + handler-side
-  // patches): lifecycle, identity, sizes, cloud state, storage class.
+  // Identity fields are always authoritative from the event.
   merged.id = incoming.id;
   merged.vaultId = incoming.vaultId;
   merged.vaultType = incoming.vaultType;
-  merged.writeStart = incoming.writeStart;
-  merged.writeEnd = incoming.writeEnd;
-  merged.ingestStart = incoming.ingestStart;
-  merged.ingestEnd = incoming.ingestEnd;
-  merged.sealed = incoming.sealed;
-  merged.recordCount = incoming.recordCount;
-  merged.bytes = incoming.bytes;
+  // Lifecycle flags: incoming wins only when it's "more advanced." Each
+  // flag transitions once and never goes backwards (active → sealed,
+  // local → cloud-backed, etc.). Critically, this means CREATED events
+  // from delayed peer FSM applies that arrive AFTER the chunk's
+  // SEALED event don't roll the chunk back to active.
+  if (incoming.sealed) merged.sealed = true;
+  if (incoming.cloudBacked) merged.cloudBacked = true;
+  if (incoming.archived) merged.archived = true;
   merged.compressed = incoming.compressed;
-  merged.diskBytes = incoming.diskBytes;
-  merged.cloudBacked = incoming.cloudBacked;
-  merged.archived = incoming.archived;
   merged.storageClass = incoming.storageClass;
+  // Monotone time-end fields: take max(existing, incoming). CREATED
+  // events have zero-value WriteEnd/IngestEnd (chunk has no records
+  // yet); if such an event arrives out of order after a SEALED event,
+  // overlaying the zero would erase the seal's final timestamps and
+  // show "January 1 1970" in the inspector.
+  merged.writeStart = pickStart(existing.writeStart, incoming.writeStart);
+  merged.writeEnd = pickEnd(existing.writeEnd, incoming.writeEnd);
+  merged.ingestStart = pickStart(existing.ingestStart, incoming.ingestStart);
+  merged.ingestEnd = pickEnd(existing.ingestEnd, incoming.ingestEnd);
+  // Monotone size fields: take max(existing, incoming) so a later
+  // event with a stale or zero value can't undo earlier authoritative
+  // data. Bytes and recordCount only grow during a chunk's lifecycle
+  // (and stay frozen post-seal). The post-seal pipeline can emit
+  // SEALED events derived from cm.Meta after local files are removed,
+  // where the local manager's view temporarily reports lower values —
+  // ignore those.
+  if (incoming.bytes > merged.bytes) merged.bytes = incoming.bytes;
+  if (incoming.recordCount > merged.recordCount) merged.recordCount = incoming.recordCount;
+  if (incoming.diskBytes > merged.diskBytes) merged.diskBytes = incoming.diskBytes;
   // Fields NOT carried by the event — preserved from existing:
-  // - replicaCount, replicaNodeIds (computed by ListChunks dedup)
+  // - replicaCount, replicaNodeIds (computed client-side from event sources)
   // - retentionPending (set by retention runner via FSM apply)
   // - pendingAckNodeIds (set by retention runner during fan-out)
   return merged;
+}
+
+/** Take the earliest non-zero start time so an event with a zero or
+ * later timestamp doesn't erase the original chunk-open time. */
+function pickStart(a: Timestamp | undefined, b: Timestamp | undefined): Timestamp | undefined {
+  if (!a || tsZero(a)) return b;
+  if (!b || tsZero(b)) return a;
+  return tsLess(a, b) ? a : b;
+}
+
+/** Take the latest end time so an event with a zero or earlier
+ * timestamp doesn't roll back the chunk-close time. */
+function pickEnd(a: Timestamp | undefined, b: Timestamp | undefined): Timestamp | undefined {
+  if (!a || tsZero(a)) return b;
+  if (!b || tsZero(b)) return a;
+  return tsLess(a, b) ? b : a;
+}
+
+function tsZero(t: Timestamp): boolean {
+  return t.seconds === 0n && t.nanos === 0;
+}
+
+function tsLess(a: Timestamp, b: Timestamp): boolean {
+  if (a.seconds !== b.seconds) return a.seconds < b.seconds;
+  return a.nanos < b.nanos;
 }
