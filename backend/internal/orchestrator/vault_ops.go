@@ -513,7 +513,7 @@ func (o *Orchestrator) sealRemoteFollowers(targets []remoteForwardTarget, chunkI
 			ctx, cancel := context.WithTimeout(context.Background(), cluster.ForwardingTimeout)
 			defer cancel()
 			if err := o.chunkReplicator.SealVault(ctx, tgt.nodeID, tgt.vaultID, chunkID); err != nil {
-				o.logger.Warn("replication: failed to seal remote follower",
+				o.vaultOpsLogger.Warn("replication: failed to seal remote follower",
 					"node", tgt.nodeID, "vault", tgt.vaultID,
 					"chunk", chunkID.String(), "error", err)
 			}
@@ -591,14 +591,14 @@ func (o *Orchestrator) bumpReplicaBackoff(nodeID string, err error) {
 
 	// Log only on the first failure and when backoff increases.
 	if rb.failures == 1 || rb.failures&(rb.failures-1) == 0 { // powers of 2
-		o.logger.Warn("replication: follower unreachable, backing off",
+		o.vaultOpsLogger.Warn("replication: follower unreachable, backing off",
 			"node", nodeID, "failures", rb.failures, "backoff", backoff, "error", err)
 	}
 }
 
 func (o *Orchestrator) clearReplicaBackoff(nodeID string) {
 	if _, loaded := o.replicaCircuit.LoadAndDelete(nodeID); loaded {
-		o.logger.Info("replication: follower recovered", "node", nodeID)
+		o.vaultOpsLogger.Info("replication: follower recovered", "node", nodeID)
 	}
 }
 
@@ -615,14 +615,14 @@ func (o *Orchestrator) appendToLocalFollower(vault *Vault, vaultID glid.GLID, st
 	if leaderChunkID != (chunk.ChunkID{}) {
 		if active := t.Chunks.Active(); active != nil && active.ID != leaderChunkID {
 			if err := t.Chunks.Seal(); err != nil {
-				o.logger.Warn("replication: local follower seal failed",
+				o.vaultOpsLogger.Warn("replication: local follower seal failed",
 					"vault", vaultID, "storage", storageID, "error", err)
 			}
 		}
 		t.Chunks.SetNextChunkID(leaderChunkID)
 	}
 	if _, _, err := t.Chunks.Append(rec); err != nil {
-		o.logger.Warn("replication: local follower append failed",
+		o.vaultOpsLogger.Warn("replication: local follower append failed",
 			"vault", vaultID, "storage", storageID, "error", err)
 		return
 	}
@@ -675,7 +675,7 @@ func (o *Orchestrator) deleteChunkFromInstance(t *VaultInstance, vaultID glid.GL
 	}
 	if t.Indexes != nil {
 		if err := t.Indexes.DeleteIndexes(chunkID); err != nil {
-			o.logger.Warn("delete chunk: delete indexes failed",
+			o.vaultOpsLogger.Warn("delete chunk: delete indexes failed",
 				"vault", vaultID, "chunk", chunkID, "error", err)
 		}
 	}
@@ -753,7 +753,7 @@ func (o *Orchestrator) afterVaultCtlRestore(vaultID glid.GLID) {
 	if t != nil && t.Reconciler != nil && t.Reconciler.fsm != nil {
 		t.Reconciler.ReconcileFromSnapshot(t.Reconciler.fsm)
 	}
-	o.logger.Info("vault-ctl after-restore reconcile complete",
+	o.vaultOpsLogger.Info("vault-ctl after-restore reconcile complete",
 		"vault", vaultID, "has_instance", t != nil)
 }
 
@@ -775,7 +775,7 @@ func (o *Orchestrator) proposePruneNodeForVault(vaultID glid.GLID, removedNodeID
 		return
 	}
 	if err := t.ApplyRaftPruneNode(removedNodeID); err != nil {
-		o.logger.Warn("prune-node propose failed",
+		o.vaultOpsLogger.Warn("prune-node propose failed",
 			"vault", vaultID,
 			"removed_node", removedNodeID, "error", err)
 	}
@@ -824,7 +824,7 @@ func (o *Orchestrator) deleteFromFollowers(vaultID glid.GLID, chunkID chunk.Chun
 	}
 	if t := vault.Instance; t != nil && t.IsFollower {
 		if err := chunk.DeleteNoAnnounce(t.Chunks, chunkID); err != nil {
-			o.logger.Warn("delete from followers: failed",
+			o.vaultOpsLogger.Warn("delete from followers: failed",
 				"vault", vaultID, "chunk", chunkID, "error", err)
 		}
 	}
@@ -1028,7 +1028,7 @@ func (o *Orchestrator) ImportToInstanceStorage(ctx context.Context, vaultID glid
 
 	// Leader: idempotent skip — canonical version is already here.
 	if chunkExists && !ref.isFollower {
-		o.logger.Debug("replication: chunk already exists, skipping import",
+		o.vaultOpsLogger.Debug("replication: chunk already exists, skipping import",
 			"vault", vaultID, "chunk", chunkID.String())
 		drainIterator(next)
 		return nil
@@ -1041,7 +1041,7 @@ func (o *Orchestrator) ImportToInstanceStorage(ctx context.Context, vaultID glid
 			drainIterator(next)
 			return err
 		}
-		o.logger.Debug("replication: replacing forwarded chunk with canonical version",
+		o.vaultOpsLogger.Debug("replication: replacing forwarded chunk with canonical version",
 			"vault", vaultID, "chunk", chunkID.String())
 	}
 
@@ -1049,7 +1049,7 @@ func (o *Orchestrator) ImportToInstanceStorage(ctx context.Context, vaultID glid
 	if err != nil {
 		return fmt.Errorf("import to vault %s: %w", vaultID, err)
 	}
-	o.logger.Debug("replication: sealed chunk imported",
+	o.vaultOpsLogger.Debug("replication: sealed chunk imported",
 		"vault", vaultID,
 		"chunk", meta.ID.String(), "records", meta.RecordCount)
 
@@ -1095,7 +1095,7 @@ func (o *Orchestrator) finalizeImportedChunk(vaultID glid.GLID, cm chunk.ChunkMa
 		} else {
 			_ = cm.Delete(meta.ID)
 		}
-		o.logger.Debug("replication: post-import tombstone detected, deleted just-created chunk",
+		o.vaultOpsLogger.Debug("replication: post-import tombstone detected, deleted just-created chunk",
 			"vault", vaultID, "chunk", meta.ID.String())
 		return nil
 	}

@@ -336,6 +336,25 @@ type Orchestrator struct {
 	// Logger for this orchestrator instance.
 	// Scoped with component="orchestrator" at construction time.
 	logger *slog.Logger
+
+	// baseLogger is the unscoped logger from which every subsystem-scoped
+	// logger is derived. Storing it separately avoids the
+	// double-component-attr problem that would arise if subsystems
+	// re-Applied on the orchestrator-scoped logger.
+	baseLogger *slog.Logger
+
+	// Per-subsystem scoped loggers (gastrolog-3flfp 3.5). Derived once
+	// at construction so log calls don't pay the per-call .With cost,
+	// and so each subsystem's emissions carry component=orchestrator.<sub>
+	// for fine-grained filter targeting.
+	replicationLogger   *slog.Logger
+	drainLogger         *slog.Logger
+	retentionLogger     *slog.Logger
+	rotationLogger      *slog.Logger
+	schedulerLogger     *slog.Logger
+	vaultOpsLogger      *slog.Logger
+	cacheEvictionLogger *slog.Logger
+	cloudHealthLogger   *slog.Logger
 }
 
 // shuttingDown reports whether the orchestrator has been told to drain.
@@ -475,8 +494,13 @@ func New(cfg Config) (*Orchestrator, error) {
 		cfg.Now = time.Now
 	}
 
-	// Scope logger with component identity.
-	logger := compOrchestrator.Apply(logging.Default(cfg.Logger))
+	// Scope logger with component identity. Each subsystem-scoped
+	// logger is derived from the unscoped base, NOT from the orchestrator
+	// root — chaining .Apply twice would emit two "component" attributes,
+	// and while the filter handler picks the last one, the text output
+	// would carry both.
+	baseLogger := logging.Default(cfg.Logger)
+	logger := compOrchestrator.Apply(baseLogger)
 
 	sched, err := newScheduler(logger, cfg.MaxConcurrentJobs, cfg.Now)
 	if err != nil {
@@ -503,12 +527,21 @@ func New(cfg Config) (*Orchestrator, error) {
 		suspects:             newSuspectTracker(),
 		chunkSignal:          notify.NewSignal(),
 		progressTrigger:      newProgressNotifier(),
-		vaultCtlLeaders:      newVaultCtlLeaderManager(logger),
+		vaultCtlLeaders:      newVaultCtlLeaderManager(baseLogger),
 		phase:                cfg.Phase,
 		onIngesterAlive:      cfg.OnIngesterAlive,
 		onIngesterCheckpoint: cfg.OnIngesterCheckpoint,
 		now:                  cfg.Now,
 		logger:               logger,
+		baseLogger:          baseLogger,
+		replicationLogger:   compReplication.Apply(baseLogger),
+		drainLogger:         compDrain.Apply(baseLogger),
+		retentionLogger:     compRetention.Apply(baseLogger),
+		rotationLogger:      compRotation.Apply(baseLogger),
+		schedulerLogger:     compScheduler.Apply(baseLogger),
+		vaultOpsLogger:      compVaultOps.Apply(baseLogger),
+		cacheEvictionLogger: compCacheEviction.Apply(baseLogger),
+		cloudHealthLogger:   compCloudHealth.Apply(baseLogger),
 	}
 
 	// Wire up post-seal callback for cron rotation so sealed chunks

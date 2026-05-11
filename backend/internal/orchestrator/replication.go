@@ -40,7 +40,7 @@ func (o *Orchestrator) SealActiveChunk(vaultID glid.GLID, expectedChunkID chunk.
 		return nil // nothing to seal
 	}
 	if active.ID != expectedChunkID {
-		o.logger.Debug("replication: seal skipped — chunk already rotated",
+		o.replicationLogger.Debug("replication: seal skipped — chunk already rotated",
 			"vault", vaultID,
 			"expected", expectedChunkID.String(), "active", active.ID.String())
 		return nil
@@ -117,7 +117,7 @@ func (o *Orchestrator) scheduleReplication(vaultID glid.GLID, chunkID chunk.Chun
 		defer cancel()
 		o.replicateSealedChunk(ctx, vaultID, chunkID, targets)
 	}); err != nil {
-		o.logger.Warn("failed to schedule replication", "name", name, "error", err)
+		o.replicationLogger.Warn("failed to schedule replication", "name", name, "error", err)
 	}
 	o.scheduler.Describe(name, fmt.Sprintf("Replicate chunk %s to %d followers", chunkID, len(targets)))
 }
@@ -136,7 +136,7 @@ func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID glid.GL
 
 	vaultInst := o.findLocalVaultInstance(vaultID)
 	if vaultInst == nil {
-		o.logger.Warn("replication: vault not found for sealed chunk",
+		o.replicationLogger.Warn("replication: vault not found for sealed chunk",
 			"vault", vaultID, "chunk", chunkID.String())
 		return
 	}
@@ -148,7 +148,7 @@ func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID glid.GL
 	// retention-beats-replication ordering at the leader; the receiver-side
 	// tombstone check closes the reverse ordering. See gastrolog-11rzz.
 	if vaultInst.IsTombstoned != nil && vaultInst.IsTombstoned(chunkID) {
-		o.logger.Debug("replication: skipping tombstoned chunk (retention beat replication)",
+		o.replicationLogger.Debug("replication: skipping tombstoned chunk (retention beat replication)",
 			"vault", vaultID, "chunk", chunkID.String())
 		return
 	}
@@ -158,7 +158,7 @@ func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID glid.GL
 	// and read directly from the bucket — no record streaming needed.
 	meta, err := vaultInst.Chunks.Meta(chunkID)
 	if err == nil && meta.CloudBacked {
-		o.logger.Debug("replication: skipping cloud-backed chunk (shared bucket)",
+		o.replicationLogger.Debug("replication: skipping cloud-backed chunk (shared bucket)",
 			"vault", vaultID, "chunk", chunkID.String())
 		return
 	}
@@ -189,12 +189,12 @@ func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID glid.GL
 		// We don't know per-target whether failure was churn-shaped here, so
 		// log at WARN with actual counts; the per-target log inside
 		// replicateToTarget already classified each individual error.
-		o.logger.Warn("replication: chunk replicated to fewer followers than expected",
+		o.replicationLogger.Warn("replication: chunk replicated to fewer followers than expected",
 			"vault", vaultID, "chunk", chunkID.String(),
 			"replicas", totalReplicas, "expected", expectedReplicas,
 			"failed_nodes", failedNodes)
 	} else {
-		o.logger.Debug("replication: chunk fully replicated",
+		o.replicationLogger.Debug("replication: chunk fully replicated",
 			"vault", vaultID, "chunk", chunkID.String(),
 			"replicas", totalReplicas)
 	}
@@ -206,12 +206,12 @@ func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID glid.GL
 func (o *Orchestrator) replicateToTarget(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, sourceCM chunk.ChunkManager, tgt system.ReplicationTarget) error {
 	if tgt.NodeID == o.localNodeID {
 		if err := o.replicateLocally(ctx, vaultID, tgt.StorageID, chunkID, sourceCM); err != nil {
-			o.logger.Warn("replication: local copy failed",
+			o.replicationLogger.Warn("replication: local copy failed",
 				"vault", vaultID, "storage", tgt.StorageID,
 				"chunk", chunkID.String(), "error", err)
 			return err
 		}
-		o.logger.Debug("replication: local copy done",
+		o.replicationLogger.Debug("replication: local copy done",
 			"vault", vaultID, "storage", tgt.StorageID,
 			"chunk", chunkID.String())
 		return nil
@@ -224,12 +224,12 @@ func (o *Orchestrator) replicateToTarget(ctx context.Context, vaultID glid.GLID,
 		if IsPlacementChurnErr(err) {
 			level = slog.LevelDebug
 		}
-		o.logger.Log(ctx, level, "replication: sealed chunk failed",
+		o.replicationLogger.Log(ctx, level, "replication: sealed chunk failed",
 			"node", tgt.NodeID, "vault", vaultID,
 			"chunk", chunkID.String(), "error", err)
 		return err
 	}
-	o.logger.Debug("replication: sealed chunk sent",
+	o.replicationLogger.Debug("replication: sealed chunk sent",
 		"node", tgt.NodeID, "vault", vaultID,
 		"chunk", chunkID.String())
 	return nil
@@ -297,7 +297,7 @@ func (o *Orchestrator) replicateToFollower(ctx context.Context, vaultID glid.GLI
 	// is gone. See gastrolog-11rzz.
 	vaultInst := o.findLocalVaultInstance(vaultID)
 	if vaultInst != nil && vaultInst.IsTombstoned != nil && vaultInst.IsTombstoned(chunkID) {
-		o.logger.Debug("replication: chunk tombstoned after cursor read, aborting send",
+		o.replicationLogger.Debug("replication: chunk tombstoned after cursor read, aborting send",
 			"vault", vaultID, "chunk", chunkID.String(), "node", nodeID)
 		return nil
 	}

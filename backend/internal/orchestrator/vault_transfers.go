@@ -65,7 +65,7 @@ func (o *Orchestrator) MoveChunk(ctx context.Context, chunkID chunk.ChunkID, src
 	}
 	if dstIM != nil && imported.ID != (chunk.ChunkID{}) {
 		if err := dstIM.BuildIndexes(ctx, imported.ID); err != nil {
-			o.logger.Warn("retention migrate: failed to build indexes for imported chunk",
+			o.drainLogger.Warn("retention migrate: failed to build indexes for imported chunk",
 				"chunk", imported.ID.String(), "error", err)
 		}
 	}
@@ -173,7 +173,7 @@ func (o *Orchestrator) deleteSourceChunk(srcID glid.GLID, chunkID chunk.ChunkID)
 	}
 	if vaultInst.Indexes != nil {
 		if err := vaultInst.Indexes.DeleteIndexes(chunkID); err != nil {
-			o.logger.Warn("retention migrate: failed to delete source indexes",
+			o.drainLogger.Warn("retention migrate: failed to delete source indexes",
 				"chunk", chunkID.String(), "error", err)
 		}
 	}
@@ -194,7 +194,7 @@ func (o *Orchestrator) moveChunkFS(ctx context.Context, chunkID chunk.ChunkID, s
 
 	if err := chunkfile.MoveDir(srcDir, dstDir); err != nil {
 		if _, adoptErr := srcMover.Adopt(chunkID); adoptErr != nil {
-			o.logger.Error("failed to restore chunk after move error",
+			o.drainLogger.Error("failed to restore chunk after move error",
 				"chunk", chunkID.String(), "error", adoptErr)
 		}
 		return fmt.Errorf("move chunk %s: %w", chunkID, err)
@@ -206,7 +206,7 @@ func (o *Orchestrator) moveChunkFS(ctx context.Context, chunkID chunk.ChunkID, s
 
 	if dstIM != nil {
 		if err := dstIM.BuildIndexes(ctx, chunkID); err != nil {
-			o.logger.Warn("retention migrate: failed to build indexes for moved chunk",
+			o.drainLogger.Warn("retention migrate: failed to build indexes for moved chunk",
 				"chunk", chunkID.String(), "error", err)
 		}
 	}
@@ -269,7 +269,7 @@ func (o *Orchestrator) DrainVault(ctx context.Context, vaultID glid.GLID, target
 
 	// Seal active chunk outside the lock — flush any locally-buffered records.
 	if _, err := o.SealActive(vaultID); err != nil {
-		o.logger.Warn("drain: failed to seal active chunk", "vault", vaultID, "error", err)
+		o.drainLogger.Warn("drain: failed to seal active chunk", "vault", vaultID, "error", err)
 	}
 
 	// Submit async job.
@@ -285,7 +285,7 @@ func (o *Orchestrator) DrainVault(ctx context.Context, vaultID glid.GLID, target
 	}
 	o.mu.Unlock()
 
-	o.logger.Info("vault drain started", "vault", vaultID, "target_node", targetNodeID, "job", jobID)
+	o.drainLogger.Info("vault drain started", "vault", vaultID, "target_node", targetNodeID, "job", jobID)
 	return nil
 }
 
@@ -316,7 +316,7 @@ func (o *Orchestrator) drainWorker(ctx context.Context, vaultID glid.GLID, targe
 	// DrainVault's SealActiveChunk and the worker starting (e.g. from
 	// ForwardRecords RPCs from nodes with stale filter sets).
 	if _, err := o.SealActive(vaultID); err != nil {
-		o.logger.Warn("drain: final seal", "vault", vaultID, "error", err)
+		o.drainLogger.Warn("drain: final seal", "vault", vaultID, "error", err)
 	}
 	if !o.drainSealed(ctx, vaultID, cm, targetNodeID, job) {
 		return
@@ -388,13 +388,13 @@ func (o *Orchestrator) finishDrain(vaultID glid.GLID) {
 	o.scheduler.RemoveJobsByPrefix("index-build:" + vaultPrefix)
 
 	if err := vault.Close(); err != nil {
-		o.logger.Warn("drain: failed to close vault", "vault", vaultID, "error", err)
+		o.drainLogger.Warn("drain: failed to close vault", "vault", vaultID, "error", err)
 	}
 
 	delete(o.vaults, vaultID)
 	o.rebuildRouteSetLocked()
 
-	o.logger.Info("vault drain completed, vault unregistered", "vault", vaultID)
+	o.drainLogger.Info("vault drain completed, vault unregistered", "vault", vaultID)
 }
 
 // CancelDrain cancels an in-progress drain and restores local routing.
@@ -415,11 +415,11 @@ func (o *Orchestrator) CancelDrain(ctx context.Context, vaultID glid.GLID) error
 	delete(o.draining, vaultID)
 
 	if err := o.reloadRoutesFromConfig(sys); err != nil {
-		o.logger.Warn("cancel drain: failed to reload routing table", "vault", vaultID, "error", err)
+		o.drainLogger.Warn("cancel drain: failed to reload routing table", "vault", vaultID, "error", err)
 	}
 	o.mu.Unlock()
 
-	o.logger.Info("vault drain cancelled", "vault", vaultID)
+	o.drainLogger.Info("vault drain cancelled", "vault", vaultID)
 	return nil
 }
 

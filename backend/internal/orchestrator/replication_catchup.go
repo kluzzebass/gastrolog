@@ -55,16 +55,16 @@ func (o *Orchestrator) scheduleCatchupForNode(vaultID glid.GLID, nodeID string, 
 		defer cancel()
 		if err := o.catchupFollower(ctx, vaultID, nodeID); err != nil {
 			if attempt < maxCatchupRetries && strings.Contains(err.Error(), "not ready") {
-				o.logger.Info("catchup: follower not ready, will retry",
+				o.replicationLogger.Info("catchup: follower not ready, will retry",
 					"vault", vaultID, "node", nodeID,
 					"attempt", attempt+1)
 				o.scheduleCatchupForNode(vaultID, nodeID, attempt+1)
 			} else {
-				o.logger.Warn("catchup failed", "vault", vaultID, "node", nodeID, "error", err)
+				o.replicationLogger.Warn("catchup failed", "vault", vaultID, "node", nodeID, "error", err)
 			}
 		}
 	}); err != nil {
-		o.logger.Warn("failed to schedule replication catchup", "name", name, "error", err)
+		o.replicationLogger.Warn("failed to schedule replication catchup", "name", name, "error", err)
 	}
 	o.scheduler.Describe(name, "Replicate sealed chunks to follower "+nodeID[:8])
 }
@@ -116,12 +116,12 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID glid.GLID, n
 	sealed := catchupCandidates(metas, vaultInst.Type, manifestSet)
 
 	if len(sealed) == 0 {
-		o.logger.Debug("replication catchup: no sealed chunks to copy",
+		o.replicationLogger.Debug("replication catchup: no sealed chunks to copy",
 			"vault", vaultID, "follower", nodeID)
 		return nil
 	}
 
-	o.logger.Info("replication catchup: starting",
+	o.replicationLogger.Info("replication catchup: starting",
 		"vault", vaultID, "follower", nodeID, "chunks", len(sealed))
 
 	transferred := 0
@@ -138,17 +138,17 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID glid.GLID, n
 			if strings.Contains(msg, "vault not found") || strings.Contains(msg, "instance not registered on this node") {
 				return fmt.Errorf("follower %s not ready for vault %s (still building): %w", nodeID, vaultID, err)
 			}
-			o.logger.Warn("replication catchup: transfer failed",
+			o.replicationLogger.Warn("replication catchup: transfer failed",
 				"chunk", meta.ID.String(), "follower", nodeID, "error", err)
 			continue
 		}
 		transferred++
-		o.logger.Debug("replication catchup: chunk transferred",
+		o.replicationLogger.Debug("replication catchup: chunk transferred",
 			"vault", vaultID, "chunk", meta.ID.String(), "follower", nodeID,
 			"records", meta.RecordCount)
 	}
 
-	o.logger.Info("replication catchup: completed",
+	o.replicationLogger.Info("replication catchup: completed",
 		"vault", vaultID, "follower", nodeID,
 		"transferred", transferred, "total", len(sealed))
 	return nil
@@ -231,13 +231,13 @@ func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID glid.G
 	}
 
 	if len(eligible) == 0 {
-		o.logger.Info("replica catchup: no eligible chunks to push",
+		o.replicationLogger.Info("replica catchup: no eligible chunks to push",
 			"vault", vaultID, "requester", requesterNodeID,
 			"requested", len(chunkIDs))
 		return 0, nil
 	}
 
-	o.logger.Info("replica catchup: scheduling pushes",
+	o.replicationLogger.Info("replica catchup: scheduling pushes",
 		"vault", vaultID, "requester", requesterNodeID,
 		"scheduled", len(eligible), "requested", len(chunkIDs))
 
@@ -251,14 +251,14 @@ func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID glid.G
 		transferred := 0
 		for _, m := range eligible {
 			if err := o.replicateToFollower(ctxBg, vaultID, m.ID, vaultInst.Chunks, requesterNodeID); err != nil {
-				o.logger.Warn("replica catchup: push failed",
+				o.replicationLogger.Warn("replica catchup: push failed",
 					"vault", vaultID, "chunk", m.ID.String(),
 					"requester", requesterNodeID, "error", err)
 				continue
 			}
 			transferred++
 		}
-		o.logger.Info("replica catchup: completed",
+		o.replicationLogger.Info("replica catchup: completed",
 			"vault", vaultID, "requester", requesterNodeID,
 			"transferred", transferred, "scheduled", len(eligible))
 	}()

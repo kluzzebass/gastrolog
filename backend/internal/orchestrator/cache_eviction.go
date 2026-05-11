@@ -48,7 +48,7 @@ func (o *Orchestrator) cacheEvictionSweepAll() {
 	for _, tgt := range targets {
 		evicted, freed := tgt.evictor.EvictCache()
 		if evicted > 0 && o.logger != nil {
-			o.logger.Debug("cache eviction sweep",
+			o.cacheEvictionLogger.Debug("cache eviction sweep",
 				"vault", tgt.vaultID,
 				"vault", tgt.vaultID,
 				"evicted", evicted,

@@ -20,7 +20,7 @@ const (
 func (o *Orchestrator) rotationSweep() {
 	sys, err := o.loadSystem(context.Background())
 	if err != nil {
-		o.logger.Error("rotation sweep: failed to load config", "error", err)
+		o.rotationLogger.Error("rotation sweep: failed to load config", "error", err)
 		// Fall through with nil sys — skip policy/cron reconciliation
 		// but still check rotation triggers with whatever policies are set.
 	}
@@ -61,7 +61,7 @@ func (o *Orchestrator) rotationSweep() {
 		// Check for time-based rotation triggers.
 		activeBefore := vaultInst.Chunks.Active()
 		if trigger := vaultInst.Chunks.CheckRotation(); trigger != nil {
-			o.logger.Debug("rotation triggered",
+			o.rotationLogger.Debug("rotation triggered",
 				"vault", vaultID,
 				"name", vault.Name,
 				"vault", vaultInst.VaultID,
@@ -104,7 +104,7 @@ func (o *Orchestrator) reconcileFilters(sys *system.System) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if err := o.reloadRoutesFromConfig(sys); err != nil {
-		o.logger.Warn("rotation sweep: routing-table reconciliation failed", "error", err)
+		o.rotationLogger.Warn("rotation sweep: routing-table reconciliation failed", "error", err)
 	}
 }
 
@@ -132,7 +132,7 @@ func (o *Orchestrator) applyRotationFromConfig(sys *system.System,
 
 	policy, err := policyCfg.ToRotationPolicy()
 	if err != nil {
-		o.logger.Warn("rotation sweep: invalid policy",
+		o.rotationLogger.Warn("rotation sweep: invalid policy",
 			"vault", vaultCfg.ID, "error", err)
 		return
 	}

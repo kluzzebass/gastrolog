@@ -116,7 +116,7 @@ func (o *Orchestrator) DrainInstance(ctx context.Context, vaultID glid.GLID, mod
 
 	if active := cm.Active(); active != nil {
 		if err := cm.Seal(); err != nil {
-			o.logger.Warn("vault drain: failed to seal active chunk",
+			o.drainLogger.Warn("vault drain: failed to seal active chunk",
 				"vault", vaultID, "error", err)
 		}
 	}
@@ -134,7 +134,7 @@ func (o *Orchestrator) DrainInstance(ctx context.Context, vaultID glid.GLID, mod
 	}
 	o.mu.Unlock()
 
-	o.logger.Info("vault drain started",
+	o.drainLogger.Info("vault drain started",
 		"vault", vaultID,
 		"mode", drainModeName(mode), "target", targetNodeID)
 	return nil
@@ -155,7 +155,7 @@ func (o *Orchestrator) vaultDrainWorker(ctx context.Context, vaultID glid.GLID, 
 
 	sys, err := o.loadSystem(ctx)
 	if err != nil {
-		o.logger.Error("vault drain: failed to load config", "vault", vaultID, "error", err)
+		o.drainLogger.Error("vault drain: failed to load config", "vault", vaultID, "error", err)
 		return
 	}
 
@@ -183,7 +183,7 @@ func (o *Orchestrator) vaultDrainWorker(ctx context.Context, vaultID glid.GLID, 
 	// Final seal to catch any stragglers.
 	if active := vaultInst.Chunks.Active(); active != nil {
 		if err := vaultInst.Chunks.Seal(); err != nil {
-			o.logger.Warn("vault drain: final seal failed", "vault", vaultID, "error", err)
+			o.drainLogger.Warn("vault drain: final seal failed", "vault", vaultID, "error", err)
 		}
 		o.drainVaultChunks(ctx, sys, vaultID, vaultInst, mode, targetNodeID)
 	}
@@ -195,7 +195,7 @@ func (o *Orchestrator) vaultDrainWorker(ctx context.Context, vaultID glid.GLID, 
 func (o *Orchestrator) drainVaultChunks(ctx context.Context, sys *system.System, vaultID glid.GLID, vaultInst *VaultInstance, mode DrainMode, targetNodeID string) bool {
 	metas, err := vaultInst.Chunks.List()
 	if err != nil {
-		o.logger.Error("vault drain: list chunks failed", "vault", vaultID, "error", err)
+		o.drainLogger.Error("vault drain: list chunks failed", "vault", vaultID, "error", err)
 		return false
 	}
 
@@ -217,7 +217,7 @@ func (o *Orchestrator) drainVaultChunks(ctx context.Context, sys *system.System,
 		}
 
 		if err := o.drainOneChunk(ctx, sys, vaultID, vaultInst, meta.ID, mode, targetNodeID); err != nil {
-			o.logger.Error("vault drain: chunk transfer failed",
+			o.drainLogger.Error("vault drain: chunk transfer failed",
 				"vault", vaultID, "chunk", meta.ID, "error", err)
 			continue // best effort — try the rest
 		}
@@ -297,7 +297,7 @@ func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, va
 		return err
 	}
 
-	o.logger.Info("vault drain: chunk transferred",
+	o.drainLogger.Info("vault drain: chunk transferred",
 		"vault", vaultID, "chunk", chunkID, "mode", drainModeName(mode))
 	return nil
 }
@@ -315,7 +315,7 @@ func (o *Orchestrator) deleteDrainSource(vaultInst *VaultInstance, vaultID glid.
 	}
 	if vaultInst.Indexes != nil {
 		if err := vaultInst.Indexes.DeleteIndexes(chunkID); err != nil {
-			o.logger.Warn("vault drain: delete source indexes failed",
+			o.drainLogger.Warn("vault drain: delete source indexes failed",
 				"vault", vaultID, "chunk", chunkID, "error", err)
 		}
 	}
@@ -344,7 +344,7 @@ func (o *Orchestrator) finishVaultDrain(vaultID glid.GLID) {
 	// on the source instance is the correct semantics here.
 	_ = vaultID
 	if o.DeleteVaultInstance(vaultID) {
-		o.logger.Info("vault drain: completed",
+		o.drainLogger.Info("vault drain: completed",
 			"vault", vaultID)
 	}
 
@@ -370,7 +370,7 @@ func (o *Orchestrator) cancelVaultDrainState(vaultID glid.GLID) {
 	o.mu.Unlock()
 
 	if ok {
-		o.logger.Info("vault drain: state cleaned up (drain did not complete)",
+		o.drainLogger.Info("vault drain: state cleaned up (drain did not complete)",
 			"vault", vaultID)
 	}
 }
@@ -392,7 +392,7 @@ func (o *Orchestrator) CancelInstanceDrain(vaultID glid.GLID) error {
 	delete(o.vaultDraining, key)
 	o.scheduler.RemoveJob(ds.JobID)
 
-	o.logger.Info("vault drain: cancelled", "vault", vaultID)
+	o.drainLogger.Info("vault drain: cancelled", "vault", vaultID)
 	return nil
 }
 
