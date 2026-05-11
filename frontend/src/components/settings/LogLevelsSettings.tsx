@@ -13,7 +13,7 @@ import {
 } from "../../api/gen/gastrolog/v1/system_pb";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useToast } from "../Toast";
-import { FormField, TextInput } from "./FormField";
+import { FormField, TextInput, SelectInput } from "./FormField";
 import { Button } from "./Buttons";
 
 interface Props {
@@ -25,11 +25,11 @@ interface DraftRule {
   level: LogLevel;
 }
 
-const LEVEL_CHOICES: { value: LogLevel; label: string }[] = [
-  { value: LogLevel.DEBUG, label: "debug" },
-  { value: LogLevel.INFO, label: "info" },
-  { value: LogLevel.WARN, label: "warn" },
-  { value: LogLevel.ERROR, label: "error" },
+const LEVEL_OPTIONS = [
+  { value: String(LogLevel.DEBUG), label: "debug" },
+  { value: String(LogLevel.INFO), label: "info" },
+  { value: String(LogLevel.WARN), label: "warn" },
+  { value: String(LogLevel.ERROR), label: "error" },
 ];
 
 export function LogLevelsSettings({ dark }: Props) {
@@ -43,7 +43,7 @@ export function LogLevelsSettings({ dark }: Props) {
   const liveDefault = liveConfig?.defaultLevel ?? LogLevel.INFO;
   const liveRules = liveConfig?.rules ?? [];
 
-  // Local draft state — only dispatched on Save.
+  // Local draft — only dispatched on Save.
   const [draftDefault, setDraftDefault] = useState<LogLevel | null>(null);
   const [draftRules, setDraftRules] = useState<DraftRule[] | null>(null);
 
@@ -56,8 +56,7 @@ export function LogLevelsSettings({ dark }: Props) {
   const dirty = draftDefault !== null || draftRules !== null;
 
   const updateRule = (idx: number, next: Partial<DraftRule>) => {
-    const rules = currentRules.map((r, i) => (i === idx ? { ...r, ...next } : r));
-    setDraftRules(rules);
+    setDraftRules(currentRules.map((r, i) => (i === idx ? { ...r, ...next } : r)));
   };
   const removeRule = (idx: number) => {
     setDraftRules(currentRules.filter((_, i) => i !== idx));
@@ -87,34 +86,40 @@ export function LogLevelsSettings({ dark }: Props) {
     }
   };
 
+  const sectionTitle = `font-display text-[1.1em] font-semibold mb-2 ${c("text-text-bright", "text-light-text-bright")}`;
+  const sectionLead = `text-[0.85em] mb-4 ${c("text-text-muted", "text-light-text-muted")}`;
+  const columnHeader = `text-[0.75em] uppercase tracking-wide ${c("text-text-muted", "text-light-text-muted")}`;
+  const emptyLine = `text-[0.85em] italic ${c("text-text-muted", "text-light-text-muted")}`;
+
   return (
     <div className="flex flex-col gap-8">
       <section>
-        <h3 className={`mb-2 text-[1.1em] font-display ${c("text-text-bright", "text-light-text-bright")}`}>Log Levels</h3>
-        <p className={`mb-4 text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}>
+        <h3 className={sectionTitle}>Log Levels</h3>
+        <p className={sectionLead}>
           Per-component log levels propagate to every node via Raft. Patterns
           are dot-separated; <code>*</code> matches one segment,{" "}
           <code>**</code> matches any depth.
         </p>
 
-        <div className="mb-4">
+        <div className="mb-4 max-w-[260px]">
           <FormField dark={dark} label="Default level">
-            <LevelSelect
+            <SelectInput
               dark={dark}
-              value={currentDefault}
-              onChange={(v) => setDraftDefault(v)}
+              value={String(currentDefault)}
+              onChange={(v) => setDraftDefault(Number(v) as LogLevel)}
+              options={LEVEL_OPTIONS}
             />
           </FormField>
         </div>
 
         <div className="flex flex-col gap-2">
-          <div className={`grid grid-cols-[1fr_140px_40px] gap-2 text-[0.75em] uppercase tracking-wide ${c("text-text-ghost", "text-light-text-ghost")}`}>
+          <div className={`grid grid-cols-[1fr_140px_40px] gap-2 ${columnHeader}`}>
             <div>Pattern</div>
             <div>Level</div>
             <div></div>
           </div>
           {currentRules.length === 0 && (
-            <div className={`text-[0.85em] italic ${c("text-text-ghost", "text-light-text-ghost")}`}>
+            <div className={emptyLine}>
               No overrides — every component falls back to the default.
             </div>
           )}
@@ -126,15 +131,16 @@ export function LogLevelsSettings({ dark }: Props) {
                 onChange={(v) => updateRule(idx, { pattern: v })}
                 placeholder="orchestrator.replication.**"
               />
-              <LevelSelect
+              <SelectInput
                 dark={dark}
-                value={r.level}
-                onChange={(v) => updateRule(idx, { level: v })}
+                value={String(r.level)}
+                onChange={(v) => updateRule(idx, { level: Number(v) as LogLevel })}
+                options={LEVEL_OPTIONS}
               />
               <button
                 type="button"
                 onClick={() => removeRule(idx)}
-                className={`px-2 py-1 ${c("text-text-muted hover:text-copper", "text-light-text-muted hover:text-copper")}`}
+                className={`px-2 py-1 rounded ${c("text-text-muted hover:text-copper hover:bg-ink-hover", "text-light-text-muted hover:text-copper hover:bg-light-hover")}`}
                 aria-label="Remove rule"
                 title="Remove rule"
               >
@@ -162,35 +168,14 @@ export function LogLevelsSettings({ dark }: Props) {
       </section>
 
       <section>
-        <h3 className={`mb-2 text-[1.1em] font-display ${c("text-text-bright", "text-light-text-bright")}`}>Components</h3>
-        <p className={`mb-4 text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}>
+        <h3 className={sectionTitle}>Components</h3>
+        <p className={sectionLead}>
           Every component path the binary registers, with the effective level
           and the rule that produced it.
         </p>
         <ComponentsTable dark={dark} components={components} />
       </section>
     </div>
-  );
-}
-
-interface LevelSelectProps {
-  dark: boolean;
-  value: LogLevel;
-  onChange: (v: LogLevel) => void;
-}
-
-function LevelSelect({ dark, value, onChange }: LevelSelectProps) {
-  const c = useThemeClass(dark);
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(Number(e.target.value) as LogLevel)}
-      className={`px-2 py-1 rounded text-[0.85em] ${c("bg-surface text-text-normal border border-border", "bg-light-surface text-light-text-normal border border-light-border")}`}
-    >
-      {LEVEL_CHOICES.map((opt) => (
-        <option key={opt.value} value={opt.value}>{opt.label}</option>
-      ))}
-    </select>
   );
 }
 
@@ -203,36 +188,48 @@ function ComponentsTable({ dark, components }: ComponentsTableProps) {
   const c = useThemeClass(dark);
   if (!components || components.length === 0) {
     return (
-      <div className={`text-[0.85em] italic ${c("text-text-ghost", "text-light-text-ghost")}`}>
+      <div className={`text-[0.85em] italic ${c("text-text-muted", "text-light-text-muted")}`}>
         No components registered yet.
       </div>
     );
   }
+  const header = `text-[0.75em] uppercase tracking-wide ${c("text-text-muted", "text-light-text-muted")}`;
+  const cell = `text-[0.85em] font-mono ${c("text-text-normal", "text-light-text-normal")}`;
+  const meta = `text-[0.85em] font-mono ${c("text-text-muted", "text-light-text-muted")}`;
   return (
-    <div className="grid grid-cols-[1fr_100px_100px] gap-x-4 gap-y-1 text-[0.85em] font-mono">
-      <div className={`text-[0.75em] uppercase tracking-wide ${c("text-text-ghost", "text-light-text-ghost")}`}>Path</div>
-      <div className={`text-[0.75em] uppercase tracking-wide ${c("text-text-ghost", "text-light-text-ghost")}`}>Level</div>
-      <div className={`text-[0.75em] uppercase tracking-wide ${c("text-text-ghost", "text-light-text-ghost")}`}>Source</div>
+    <div className="grid grid-cols-[1fr_100px_100px] gap-x-4 gap-y-1">
+      <div className={header}>Path</div>
+      <div className={header}>Level</div>
+      <div className={header}>Source</div>
       {components.map((info) => (
-        <Row key={info.path} dark={dark} info={info} />
+        <FragmentRow
+          key={info.path}
+          pathCls={cell}
+          levelCls={cell}
+          sourceCls={meta}
+          info={info}
+        />
       ))}
     </div>
   );
 }
 
-function Row({
-  dark,
+function FragmentRow({
+  pathCls,
+  levelCls,
+  sourceCls,
   info,
 }: {
-  dark: boolean;
+  pathCls: string;
+  levelCls: string;
+  sourceCls: string;
   info: NonNullable<ReturnType<typeof useLogComponents>["data"]>[number];
 }) {
-  const c = useThemeClass(dark);
   return (
     <>
-      <div className={c("text-text-normal", "text-light-text-normal")}>{info.path}</div>
-      <div className={c("text-text-normal", "text-light-text-normal")}>{levelLabel(info.effectiveLevel)}</div>
-      <div className={c("text-text-muted", "text-light-text-muted")}>{sourceLabel(info.source)}</div>
+      <div className={pathCls}>{info.path}</div>
+      <div className={levelCls}>{levelLabel(info.effectiveLevel)}</div>
+      <div className={sourceCls}>{sourceLabel(info.source)}</div>
     </>
   );
 }
