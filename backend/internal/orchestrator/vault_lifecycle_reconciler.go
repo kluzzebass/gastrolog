@@ -404,17 +404,15 @@ func (r *VaultLifecycleReconciler) onSeal(e vaultctlfsm.ManifestEntry) {
 		if r.orch == nil {
 			return
 		}
-		// Prefer a typed SEALED event with the freshest local meta so
-		// subscribers can patch their cache. Fall back to a bare wake-up
-		// if the chunk isn't (yet) present locally — followers may apply
-		// the FSM seal before the chunk file lands.
-		if r.vaultInst != nil && r.vaultInst.Chunks != nil {
-			if meta, err := r.vaultInst.Chunks.Meta(e.ID); err == nil {
-				r.orch.EmitChunkSealed(r.vaultID, meta)
-				return
-			}
-		}
-		r.orch.NotifyChunkChange()
+		// Emit SEALED with the FSM ManifestEntry as the authoritative
+		// source: every cluster node's FSM applies CmdSealChunk with the
+		// same payload, so every node emits the same final RecordCount /
+		// Bytes / IngestStart / etc. Using local Manager.Meta instead
+		// would produce per-node variance (followers lag the leader's
+		// record stream), making the inspector flicker through stale
+		// counts as N+1 SEALED events arrive in sequence. See
+		// gastrolog-3pf9w.
+		r.orch.EmitChunkSealed(r.vaultID, manifestEntryToChunkMeta(e, true))
 	}()
 	if r.vaultInst == nil || r.vaultInst.Chunks == nil {
 		return

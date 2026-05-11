@@ -51,6 +51,16 @@ export function useWatchChunks() {
     // node's bus and us, and we resync via invalidateQueries on the
     // affected vault.
     const lastVersionByNode = new Map<string, bigint>();
+    // Tracks the set of producing nodes that have emitted any event for
+    // a given chunk, keyed by chunk id (hex). Used to compute
+    // replicaCount on the client side — each cluster node only fires
+    // FSM-driven chunk events when it hosts the vault (the FSM apply
+    // callback is wired in host-only build paths), so a node appearing
+    // in the set is evidence that node has the chunk's data. Sealed
+    // chunks fetched via the cold-start ListChunks already carry the
+    // server's dedup-computed replicaCount; this state tracks only
+    // chunks where events have arrived since the inspector opened.
+    const replicaNodesByChunk = new Map<string, Set<string>>();
 
     async function connect(backoff = 0) {
       let nextBackoff = backoff;
@@ -59,7 +69,7 @@ export function useWatchChunks() {
           {},
           { signal: abort.signal },
         )) {
-          handleEvent(qc, msg, lastVersionByNode);
+          handleEvent(qc, msg, lastVersionByNode, replicaNodesByChunk);
           nextBackoff = 0;
         }
       } catch (err) {
@@ -74,6 +84,7 @@ export function useWatchChunks() {
         // refetch of all per-vault caches so any events dropped during
         // the disconnect window get reconciled.
         lastVersionByNode.clear();
+        replicaNodesByChunk.clear();
         qc.invalidateQueries({ queryKey: ["chunks"] });
         const delay = Math.min(1000 * 2 ** nextBackoff, 30_000);
         reconnectTimer = setTimeout(() => connect(nextBackoff + 1), delay);
@@ -104,6 +115,7 @@ function handleEvent(
   qc: ReturnType<typeof useQueryClient>,
   msg: WatchChunksResponse,
   lastVersionByNode: Map<string, bigint>,
+  replicaNodesByChunk: Map<string, Set<string>>,
 ) {
   // Heartbeat at stream start (and on every fresh peer subscription on
   // the API node) — no payload, just a version baseline. Record the
@@ -127,9 +139,25 @@ function handleEvent(
   }
   lastVersionByNode.set(key, msg.version);
 
+  // Track this producing node as a replica of this chunk. The set
+  // grows monotonically until the chunk is DELETED, at which point we
+  // drop the tracking. The size of the set is the client-computed
+  // replicaCount written into the cache entry below.
+  const chunkKey = bytesToHex(msg.chunkId);
+  if (msg.op === ChunkChangeOp.DELETED) {
+    replicaNodesByChunk.delete(chunkKey);
+  } else {
+    let nodes = replicaNodesByChunk.get(chunkKey);
+    if (!nodes) {
+      nodes = new Set();
+      replicaNodesByChunk.set(chunkKey, nodes);
+    }
+    nodes.add(key);
+  }
+
   const vaultId = encode(msg.vaultId);
   qc.setQueryData<ChunksCache>(["chunks", vaultId], (prev) =>
-    mutateCache(prev, msg),
+    mutateCache(prev, msg, replicaNodesByChunk.get(chunkKey)),
   );
 }
 
@@ -146,27 +174,48 @@ function nodeKey(nodeId: Uint8Array): string {
  * Pure function (no side effects on prev — returns a new array when the
  * shape changes, or prev when the event is a no-op).
  */
-function mutateCache(prev: ChunksCache, msg: WatchChunksResponse): ChunksCache {
+function mutateCache(
+  prev: ChunksCache,
+  msg: WatchChunksResponse,
+  replicaNodes: Set<string> | undefined,
+): ChunksCache {
   const next = prev ? prev.slice() : [];
   const chunkIdKey = bytesToHex(msg.chunkId);
 
   const findIdx = () =>
     next.findIndex((c) => bytesToHex(c.id) === chunkIdKey);
 
+  // applyReplicaCount overlays the client-tracked replicaCount onto a
+  // meta unless the meta already has a higher count from the server
+  // (cold-start ListChunks dedup). max() preserves the freshest signal
+  // from either source.
+  const applyReplicaCount = (meta: ChunkMeta): ChunkMeta => {
+    if (!replicaNodes) return meta;
+    const tracked = replicaNodes.size;
+    if (tracked <= meta.replicaCount) return meta;
+    const patched = meta.clone();
+    patched.replicaCount = tracked;
+    return patched;
+  };
+
   switch (msg.op) {
     case ChunkChangeOp.CREATED: {
       if (!msg.meta) return prev;
       const idx = findIdx();
-      if (idx >= 0) next[idx] = mergeMeta(next[idx], msg.meta);
-      else next.push(msg.meta);
+      const merged = idx >= 0 ? mergeMeta(next[idx], msg.meta) : msg.meta;
+      const out = applyReplicaCount(merged);
+      if (idx >= 0) next[idx] = out;
+      else next.push(out);
       return next;
     }
     case ChunkChangeOp.SEALED:
     case ChunkChangeOp.UPLOADED: {
       if (!msg.meta) return prev;
       const idx = findIdx();
-      if (idx >= 0) next[idx] = mergeMeta(next[idx], msg.meta);
-      else next.push(msg.meta);
+      const merged = idx >= 0 ? mergeMeta(next[idx], msg.meta) : msg.meta;
+      const out = applyReplicaCount(merged);
+      if (idx >= 0) next[idx] = out;
+      else next.push(out);
       return next;
     }
     case ChunkChangeOp.PROGRESS: {
@@ -178,6 +227,11 @@ function mutateCache(prev: ChunksCache, msg: WatchChunksResponse): ChunksCache {
       if (!existing || existing.recordCount === msg.recordCount) return prev;
       const patched = existing.clone();
       patched.recordCount = msg.recordCount;
+      // Also bump replicaCount if the producing node hadn't reported
+      // before — every PROGRESS counts as "this node has the chunk."
+      if (replicaNodes && replicaNodes.size > patched.replicaCount) {
+        patched.replicaCount = replicaNodes.size;
+      }
       next[idx] = patched;
       return next;
     }

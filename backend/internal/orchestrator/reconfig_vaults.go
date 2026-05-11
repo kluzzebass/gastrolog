@@ -1299,17 +1299,7 @@ func wireVaultFSMOnDelete(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 		if o == nil {
 			return
 		}
-		meta := chunk.ChunkMeta{
-			ID:          e.ID,
-			WriteStart:  e.WriteStart,
-			IngestStart: e.IngestStart,
-			SourceStart: e.SourceStart,
-			RecordCount: e.RecordCount,
-			Bytes:       e.Bytes,
-			DiskBytes:   e.DiskBytes,
-			Sealed:      false,
-		}
-		o.EmitChunkCreated(vaultID, meta)
+		o.EmitChunkCreated(vaultID, manifestEntryToChunkMeta(e, false))
 	})
 	silent, ok := cm.(chunk.SilentDeleter)
 	if !ok {
@@ -1373,19 +1363,19 @@ func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 		return
 	}
 	fsm.SetOnUpload(func(e vaultctlfsm.ManifestEntry) {
-		// Emit an UPLOADED event after the local cloud registration so
-		// the event carries the post-upload meta (CloudBacked=true).
-		// FSM state is authoritative regardless of RegisterCloudChunk
-		// outcome — fire either way. See gastrolog-2ob86.
+		// Emit an UPLOADED event with the FSM's authoritative state —
+		// every cluster node's FSM applies the same CmdUploadChunk
+		// payload, so every node emits the same RecordCount /
+		// DiskBytes / CloudBacked. Using local Manager.Meta instead
+		// produced per-node variance and inspector flicker. See
+		// gastrolog-3pf9w.
 		defer func() {
 			if o == nil {
 				return
 			}
-			if meta, err := cm.Meta(e.ID); err == nil {
-				o.EmitChunkUploaded(vaultID, meta)
-				return
-			}
-			o.NotifyChunkChange()
+			meta := manifestEntryToChunkMeta(e, true)
+			meta.CloudBacked = true
+			o.EmitChunkUploaded(vaultID, meta)
 		}()
 		info := chunk.CloudChunkInfo{
 			WriteStart:      e.WriteStart,
