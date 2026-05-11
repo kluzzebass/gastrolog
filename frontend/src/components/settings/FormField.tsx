@@ -89,6 +89,14 @@ interface TextInputProps {
   disabled?: boolean;
   mono?: boolean;
   examples?: string[];
+  // error switches the border to the severity-error variant so an
+  // invalid value is visible inline. Pair with `title` to explain why
+  // on hover; no inline message text — the page layout must not shift
+  // as the user types.
+  error?: boolean;
+  // title surfaces as the native browser tooltip on hover. Useful with
+  // error=true to explain what's wrong without changing the layout.
+  title?: string;
 }
 
 export function TextInput({
@@ -99,6 +107,8 @@ export function TextInput({
   disabled,
   mono,
   examples,
+  error,
+  title,
 }: Readonly<TextInputProps>) {
   const id = useFormFieldId();
   const c = useThemeClass(dark);
@@ -111,9 +121,13 @@ export function TextInput({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         disabled={disabled}
+        title={title}
         className={`px-2.5 py-1.5 text-[0.85em] border rounded focus:outline-none transition-colors ${
           mono ? "font-mono" : ""
-        } ${c(
+        } ${error ? c(
+          "bg-ink-surface border-severity-error/60 text-text-bright placeholder:text-text-muted focus:border-severity-error",
+          "bg-light-surface border-severity-error/60 text-light-text-bright placeholder:text-light-text-muted focus:border-severity-error",
+        ) : c(
           "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-muted focus:border-copper-dim",
           "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-muted focus:border-copper",
         )} ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}

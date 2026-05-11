@@ -175,34 +175,29 @@ export function LogLevelsSettings({ dark }: Props) {
             </div>
           )}
           {currentRules.map((r, idx) => (
-            <div key={idx} className="flex flex-col gap-1">
-              <div className="grid grid-cols-[1fr_140px_40px] gap-2 items-center">
-                <TextInput
-                  dark={dark}
-                  value={r.pattern}
-                  onChange={(v) => updateRule(idx, { pattern: v })}
-                />
-                <SelectInput
-                  dark={dark}
-                  value={String(r.level)}
-                  onChange={(v) => updateRule(idx, { level: Number(v) as LogLevel })}
-                  options={LEVEL_OPTIONS}
-                />
-                <button
-                  type="button"
-                  onClick={() => removeRule(idx)}
-                  className={`px-2 py-1 rounded ${c("text-text-muted hover:text-copper hover:bg-ink-hover", "text-light-text-muted hover:text-copper hover:bg-light-hover")}`}
-                  aria-label="Remove rule"
-                  title="Remove rule"
-                >
-                  ×
-                </button>
-              </div>
-              {ruleErrors[idx] && (
-                <div className="text-[0.75em] text-severity-error pl-1">
-                  {ruleErrors[idx]}
-                </div>
-              )}
+            <div key={idx} className="grid grid-cols-[1fr_140px_40px] gap-2 items-center">
+              <TextInput
+                dark={dark}
+                value={r.pattern}
+                onChange={(v) => updateRule(idx, { pattern: v })}
+                error={!!ruleErrors[idx]}
+                title={ruleErrors[idx]}
+              />
+              <SelectInput
+                dark={dark}
+                value={String(r.level)}
+                onChange={(v) => updateRule(idx, { level: Number(v) as LogLevel })}
+                options={LEVEL_OPTIONS}
+              />
+              <button
+                type="button"
+                onClick={() => removeRule(idx)}
+                className={`px-2 py-1 rounded ${c("text-text-muted hover:text-copper hover:bg-ink-hover", "text-light-text-muted hover:text-copper hover:bg-light-hover")}`}
+                aria-label="Remove rule"
+                title="Remove rule"
+              >
+                ×
+              </button>
             </div>
           ))}
           <div className="mt-2">
@@ -341,10 +336,8 @@ function validateRules(rules: DraftRule[]): Record<number, string> {
     }
     const prev = seen.get(p);
     if (prev !== undefined) {
-      errors[idx] = `Duplicate pattern (also in row ${String(prev + 1)})`;
-      if (!errors[prev]) {
-        errors[prev] = `Duplicate pattern (also in row ${String(idx + 1)})`;
-      }
+      errors[idx] = "Duplicate pattern";
+      errors[prev] = "Duplicate pattern";
       continue;
     }
     seen.set(p, idx);
