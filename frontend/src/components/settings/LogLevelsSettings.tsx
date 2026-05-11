@@ -13,6 +13,7 @@ import {
 } from "../../api/gen/gastrolog/v1/system_pb";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useToast } from "../Toast";
+import { SettingsCard } from "./SettingsCard";
 import { FormField, TextInput, SelectInput } from "./FormField";
 import { Button } from "./Buttons";
 
@@ -38,6 +39,9 @@ export function LogLevelsSettings({ dark }: Props) {
   const { data: config } = useConfig();
   const { data: components } = useLogComponents();
   const putLogLevels = usePutLogLevels();
+
+  const [rulesExpanded, setRulesExpanded] = useState(true);
+  const [componentsExpanded, setComponentsExpanded] = useState(false);
 
   const liveConfig: LogLevelConfig | undefined = config?.logLevels ?? undefined;
   const liveDefault = liveConfig?.defaultLevel ?? LogLevel.INFO;
@@ -79,23 +83,46 @@ export function LogLevelsSettings({ dark }: Props) {
         rules,
       } as LogLevelConfig);
       resetDraft();
-      addToast("Log levels updated");
+      addToast("Log levels updated", "info");
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       addToast(`Update failed: ${msg}`, "error");
     }
   };
 
-  const sectionTitle = `font-display text-[1.1em] font-semibold mb-2 ${c("text-text-bright", "text-light-text-bright")}`;
-  const sectionLead = `text-[0.85em] mb-4 ${c("text-text-muted", "text-light-text-muted")}`;
   const columnHeader = `text-[0.75em] uppercase tracking-wide ${c("text-text-muted", "text-light-text-muted")}`;
   const emptyLine = `text-[0.85em] italic ${c("text-text-muted", "text-light-text-muted")}`;
 
   return (
-    <div className="flex flex-col gap-8">
-      <section>
-        <h3 className={sectionTitle}>Log Levels</h3>
-        <p className={sectionLead}>
+    <div className="flex flex-col gap-3">
+      <SettingsCard
+        id="Rules"
+        dark={dark}
+        expanded={rulesExpanded}
+        onToggle={() => setRulesExpanded(!rulesExpanded)}
+        footer={
+          <>
+            {dirty && (
+              <Button
+                variant="ghost"
+                onClick={resetDraft}
+                disabled={putLogLevels.isPending}
+                dark={dark}
+              >
+                Discard
+              </Button>
+            )}
+            <Button
+              onClick={save}
+              disabled={!dirty || putLogLevels.isPending}
+              dark={dark}
+            >
+              {putLogLevels.isPending ? "Saving..." : "Save"}
+            </Button>
+          </>
+        }
+      >
+        <p className={`text-[0.85em] mb-4 ${c("text-text-muted", "text-light-text-muted")}`}>
           Per-component log levels propagate to every node via Raft. Patterns
           are dot-separated; <code>*</code> matches one segment,{" "}
           <code>**</code> matches any depth.
@@ -154,36 +181,20 @@ export function LogLevelsSettings({ dark }: Props) {
             </Button>
           </div>
         </div>
+      </SettingsCard>
 
-        <div className="flex gap-2 mt-6">
-          {dirty && (
-            <Button
-              variant="ghost"
-              onClick={resetDraft}
-              disabled={putLogLevels.isPending}
-              dark={dark}
-            >
-              Discard
-            </Button>
-          )}
-          <Button
-            onClick={save}
-            disabled={!dirty || putLogLevels.isPending}
-            dark={dark}
-          >
-            {putLogLevels.isPending ? "Saving..." : "Save"}
-          </Button>
-        </div>
-      </section>
-
-      <section>
-        <h3 className={sectionTitle}>Components</h3>
-        <p className={sectionLead}>
+      <SettingsCard
+        id="Components"
+        dark={dark}
+        expanded={componentsExpanded}
+        onToggle={() => setComponentsExpanded(!componentsExpanded)}
+      >
+        <p className={`text-[0.85em] mb-4 ${c("text-text-muted", "text-light-text-muted")}`}>
           Every component path the binary registers, with the effective level
           and the rule that produced it.
         </p>
         <ComponentsTable dark={dark} components={components} />
-      </section>
+      </SettingsCard>
     </div>
   );
 }
