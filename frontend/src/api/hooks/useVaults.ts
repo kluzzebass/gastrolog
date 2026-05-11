@@ -31,27 +31,16 @@ export function useVault(id: string) {
 }
 
 /**
- * useChunks returns the full chunk list for a vault. Discrete metadata
- * changes (seal, delete, compress) arrive instantly via the WatchChunks
- * stream which invalidates the ["chunks"] cache. Active chunk stats
- * (record count, bytes) are kept fresh by a lightweight 5-second poll
- * that fetches only unsealed chunks from the local node (no fan-out)
- * and merges them into the full cache by ID replacement.
- *
- * Net effect: instant updates for operational events, 5-second lag for
- * gradual active-chunk growth, and dramatically less network traffic
- * than polling the full fan-out list every 5 seconds.
- *
- * See gastrolog-1jijm.
+ * useChunks returns the full chunk list for a vault. The initial fetch
+ * uses ListChunks (cluster fan-out + dedup); subsequent updates arrive
+ * via the WatchChunks stream as typed diffs (created / progress / sealed
+ * / deleted / uploaded) and patch this cache in place via setQueryData
+ * — no refetch on the steady-state path. See gastrolog-3pf9w for the
+ * pre-3pf9w shape and why it was replaced.
  */
 export function useChunks(vaultId: string) {
-  // Full chunk list: stream-driven invalidation, no polling.
-  //
-  // WatchChunks pushes notifications on lifecycle events (seal / create /
-  // delete / compress / upload) AND on mid-chunk growth (a 1 Hz ticker on
-  // the backend fires NotifyChunkChange() when any active chunk's record
-  // count has advanced — see gastrolog-4y03v). The previous separate
-  // 5-second active-chunks poll is no longer needed.
+  // Initial fetch only. Subsequent updates arrive via useWatchChunks,
+  // which mutates the per-vault cache directly.
   return useQuery({
     queryKey: ["chunks", vaultId],
     queryFn: async () => {

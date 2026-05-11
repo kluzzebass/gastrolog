@@ -1294,14 +1294,14 @@ func wireVaultFSMOnDelete(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 		return
 	}
 	fsm.SetOnDelete(func(id chunk.ChunkID) {
-		// Notify WatchChunks subscribers regardless of local-delete
-		// outcome: the FSM's authoritative chunks-map entry is gone,
-		// so the inspector's view on this node is stale. Fire on
-		// every node where the apply ran, even ones that never had
-		// the chunk locally (they may still have rendered it via
-		// the cluster-wide ListChunks fan-out). See gastrolog-2ob86.
+		// Emit a DELETED event regardless of local-delete outcome: the
+		// FSM's authoritative chunks-map entry is gone, so the
+		// inspector's projection on this node must drop the entry. Fire
+		// on every node where the apply ran, even ones that never had
+		// the chunk locally — they may have rendered it via the
+		// cluster-wide ListChunks fan-out. See gastrolog-2ob86.
 		if o != nil {
-			defer o.NotifyChunkChange()
+			defer o.EmitChunkDeleted(vaultID, id)
 		}
 		// Delete indexes first (they're metadata about the chunk).
 		// ErrChunkNotFound-equivalent errors are expected during log replay
@@ -1351,14 +1351,20 @@ func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 		return
 	}
 	fsm.SetOnUpload(func(e vaultctlfsm.ManifestEntry) {
-		// Notify WatchChunks subscribers: the chunk transitioned to
-		// cloud-backed (DiskBytes / CloudBacked changed
-		// in the FSM), which the inspector renders. Fire regardless
-		// of RegisterCloudChunk outcome — FSM state is authoritative.
-		// See gastrolog-2ob86.
-		if o != nil {
-			defer o.NotifyChunkChange()
-		}
+		// Emit an UPLOADED event after the local cloud registration so
+		// the event carries the post-upload meta (CloudBacked=true).
+		// FSM state is authoritative regardless of RegisterCloudChunk
+		// outcome — fire either way. See gastrolog-2ob86.
+		defer func() {
+			if o == nil {
+				return
+			}
+			if meta, err := cm.Meta(e.ID); err == nil {
+				o.EmitChunkUploaded(vaultID, meta)
+				return
+			}
+			o.NotifyChunkChange()
+		}()
 		info := chunk.CloudChunkInfo{
 			WriteStart:      e.WriteStart,
 			WriteEnd:        e.WriteEnd,

@@ -500,40 +500,88 @@ func validateChunk(orch *orchestrator.Orchestrator, vaultID glid.GLID, meta chun
 	return cv
 }
 
-// WatchChunks opens a server-streaming subscription that pushes a
-// notification every time chunk metadata changes on this node. The
-// client uses each notification as a signal to refetch via ListChunks —
-// no chunk data is carried in the stream itself. Same pattern as
-// WatchConfig. See gastrolog-1jijm.
+// WatchChunks opens a server-streaming subscription that pushes a typed
+// chunk-state event every time a chunk on this node changes. Each event
+// carries the vault ID, chunk ID, op, and either a full ChunkMeta (for
+// CREATED / SEALED / UPLOADED) or a record count (for PROGRESS). Clients
+// patch their local cache directly from the event payload instead of
+// refetching ListChunks on every notification — see gastrolog-3pf9w for
+// the pre-3pf9w shape and why it was replaced.
 //
-// Routing: RouteLocal — the client connects to each node independently.
-// React Query's cache invalidation covers all vaults on the connected
-// node when any chunk event fires.
+// Routing: RouteLocal — each node emits events for the vaults it hosts;
+// the client maintains one WatchChunks stream per cluster node and merges
+// events into per-vault caches. Reconnects detect dropped events by
+// comparing the first post-reconnect version against last-seen + 1.
 func (s *VaultServer) WatchChunks(
 	ctx context.Context,
 	_ *connect.Request[apiv1.WatchChunksRequest],
 	stream *connect.ServerStream[apiv1.WatchChunksResponse],
 ) error {
-	signal := s.orch.ChunkSignal()
+	bus := s.orch.ChunkBus()
+	subID, events, baseline := bus.Subscribe()
+	defer bus.Unsubscribe(subID)
 
-	// Send one initial message so the client knows the stream is alive.
+	// Send a heartbeat carrying the current high-watermark so the client
+	// knows the stream is alive and what version baseline to track. The
+	// payload fields are empty / UNSPECIFIED — clients treat any event
+	// with op == UNSPECIFIED as a no-op version advance.
 	if err := stream.Send(&apiv1.WatchChunksResponse{
-		Version: signal.Version(),
+		Op:      apiv1.ChunkChangeOp_CHUNK_CHANGE_OP_UNSPECIFIED,
+		Version: baseline,
 	}); err != nil {
 		return err
 	}
 
 	for {
-		ch := signal.C()
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-ch:
-			if err := stream.Send(&apiv1.WatchChunksResponse{
-				Version: signal.Version(),
-			}); err != nil {
+		case ev, ok := <-events:
+			if !ok {
+				return nil // bus closed; orchestrator shutting down
+			}
+			msg := chunkChangeEventToProto(ev.Event)
+			msg.Version = ev.Version
+			if err := stream.Send(msg); err != nil {
 				return err
 			}
 		}
+	}
+}
+
+// chunkChangeEventToProto converts an orchestrator ChunkChangeEvent into
+// the wire WatchChunksResponse. Lays out which fields are present per Op
+// so the client merge logic can rely on the same contract.
+func chunkChangeEventToProto(ev orchestrator.ChunkChangeEvent) *apiv1.WatchChunksResponse {
+	msg := &apiv1.WatchChunksResponse{
+		VaultId: ev.VaultID.ToProto(),
+		ChunkId: ev.ChunkID[:],
+		Op:      chunkOpToProto(ev.Op),
+	}
+	if ev.Meta != nil {
+		msg.Meta = ChunkMetaToProto(*ev.Meta)
+	}
+	if ev.Op == orchestrator.ChunkChangeOpProgress {
+		msg.RecordCount = ev.RecordCount
+	}
+	return msg
+}
+
+func chunkOpToProto(op orchestrator.ChunkChangeOp) apiv1.ChunkChangeOp {
+	switch op {
+	case orchestrator.ChunkChangeOpUnspecified:
+		return apiv1.ChunkChangeOp_CHUNK_CHANGE_OP_UNSPECIFIED
+	case orchestrator.ChunkChangeOpCreated:
+		return apiv1.ChunkChangeOp_CHUNK_CHANGE_OP_CREATED
+	case orchestrator.ChunkChangeOpProgress:
+		return apiv1.ChunkChangeOp_CHUNK_CHANGE_OP_PROGRESS
+	case orchestrator.ChunkChangeOpSealed:
+		return apiv1.ChunkChangeOp_CHUNK_CHANGE_OP_SEALED
+	case orchestrator.ChunkChangeOpDeleted:
+		return apiv1.ChunkChangeOp_CHUNK_CHANGE_OP_DELETED
+	case orchestrator.ChunkChangeOpUploaded:
+		return apiv1.ChunkChangeOp_CHUNK_CHANGE_OP_UPLOADED
+	default:
+		return apiv1.ChunkChangeOp_CHUNK_CHANGE_OP_UNSPECIFIED
 	}
 }

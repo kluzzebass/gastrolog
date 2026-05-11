@@ -77,9 +77,18 @@ export class ForwardApplyRequest extends Message<ForwardApplyRequest> {
 }
 
 /**
+ * ForwardApplyResponse carries the Raft log index at which the leader
+ * applied the command. The follower uses this to wait for its own FSM
+ * to catch up before reading post-mutation state. See gastrolog-2nxij.
+ *
  * @generated from message gastrolog.v1.ForwardApplyResponse
  */
 export class ForwardApplyResponse extends Message<ForwardApplyResponse> {
+  /**
+   * @generated from field: uint64 applied_index = 1;
+   */
+  appliedIndex = protoInt64.zero;
+
   constructor(data?: PartialMessage<ForwardApplyResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -88,6 +97,7 @@ export class ForwardApplyResponse extends Message<ForwardApplyResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ForwardApplyResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "applied_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardApplyResponse {

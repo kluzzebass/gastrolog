@@ -401,9 +401,20 @@ func (r *VaultLifecycleReconciler) projectAllCloudBackedFromFSM(fsm *vaultctlfsm
 func (r *VaultLifecycleReconciler) onSeal(e vaultctlfsm.ManifestEntry) {
 	r.logger.Debug("onSeal", "chunk", e.ID, "records", e.RecordCount)
 	defer func() {
-		if r.orch != nil {
-			r.orch.NotifyChunkChange()
+		if r.orch == nil {
+			return
 		}
+		// Prefer a typed SEALED event with the freshest local meta so
+		// subscribers can patch their cache. Fall back to a bare wake-up
+		// if the chunk isn't (yet) present locally — followers may apply
+		// the FSM seal before the chunk file lands.
+		if r.vaultInst != nil && r.vaultInst.Chunks != nil {
+			if meta, err := r.vaultInst.Chunks.Meta(e.ID); err == nil {
+				r.orch.EmitChunkSealed(r.vaultID, meta)
+				return
+			}
+		}
+		r.orch.NotifyChunkChange()
 	}()
 	if r.vaultInst == nil || r.vaultInst.Chunks == nil {
 		return
@@ -965,8 +976,8 @@ func (r *VaultLifecycleReconciler) deleteLocalCopy(chunkID chunk.ChunkID) error 
 		}
 	}
 	if r.orch != nil {
-		// Notify WatchChunks subscribers: a chunk was removed.
-		r.orch.NotifyChunkChange()
+		// Carry the DELETED op so subscribers remove the cache entry.
+		r.orch.EmitChunkDeleted(r.vaultID, chunkID)
 	}
 	return nil
 }

@@ -369,10 +369,50 @@ message RestoreChunkResponse {}
 
 message WatchChunksRequest {}
 
+// ChunkChangeOp identifies what changed about a chunk in a WatchChunks event.
+// Clients use the op to decide how to mutate their local state: CREATED and
+// SEALED carry a full ChunkMeta and replace the cache entry; PROGRESS carries
+// only a new record_count and patches the active chunk in place; DELETED
+// removes the entry; UPLOADED transitions cloud_backed to true.
+enum ChunkChangeOp {
+  CHUNK_CHANGE_OP_UNSPECIFIED = 0;
+  CHUNK_CHANGE_OP_CREATED = 1;
+  CHUNK_CHANGE_OP_PROGRESS = 2;
+  CHUNK_CHANGE_OP_SEALED = 3;
+  CHUNK_CHANGE_OP_DELETED = 4;
+  CHUNK_CHANGE_OP_UPLOADED = 5;
+}
+
+// WatchChunksResponse carries a single chunk-state change event. Replaces the
+// bare wake-up counter that forced clients to re-fetch ListChunks on every
+// notification, which produced O(vaults × ticks/sec) RPCs under steady-state
+// ingest. Each message describes exactly what changed so the client can patch
+// its local cache via setQueryData and avoid the fan-out entirely. See
+// gastrolog-3pf9w.
 message WatchChunksResponse {
-  // Monotonic event counter. Increments on every chunk metadata change
-  // (seal, delete, create, compress, cloud upload). Clients can compare
-  // against the last version they processed to skip stale notifications
-  // during reconnect bursts.
-  uint64 version = 1;
+  // vault_id identifies which vault's chunk changed. Required.
+  bytes vault_id = 1;
+
+  // chunk_id identifies which chunk changed. Required for all ops except
+  // UNSPECIFIED.
+  bytes chunk_id = 2;
+
+  // op is the change kind. See ChunkChangeOp.
+  ChunkChangeOp op = 3;
+
+  // meta is the full post-change chunk metadata. Present for CREATED,
+  // SEALED, and UPLOADED. Absent for PROGRESS and DELETED.
+  ChunkMeta meta = 4;
+
+  // record_count is the post-change record count of the active chunk.
+  // Present for PROGRESS only (CREATED / SEALED include it inside meta).
+  uint64 record_count = 5;
+
+  // version is a per-node monotonic counter, incremented for every event
+  // emitted on this node's stream. Clients track the high-watermark per
+  // node and detect dropped events on reconnect by comparing the first
+  // post-reconnect version against last_seen + 1 — a gap means the client
+  // should cold-start with ListChunks for that node's vaults before
+  // resuming.
+  uint64 version = 6;
 }
