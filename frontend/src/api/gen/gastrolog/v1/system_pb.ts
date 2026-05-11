@@ -7413,6 +7413,16 @@ export class LogComponentInfo extends Message<LogComponentInfo> {
    */
   description = "";
 
+  /**
+   * matching_pattern is the rule pattern that produced effective_level.
+   * Empty when source = DEFAULT (no rule matched). For EXACT_RULE and
+   * GLOB_RULE, this is the exact text the operator typed into the rule
+   * editor, so the UI can cross-reference back to the rules list.
+   *
+   * @generated from field: string matching_pattern = 5;
+   */
+  matchingPattern = "";
+
   constructor(data?: PartialMessage<LogComponentInfo>) {
     super();
     proto3.util.initPartial(data, this);
@@ -7425,6 +7435,7 @@ export class LogComponentInfo extends Message<LogComponentInfo> {
     { no: 2, name: "effective_level", kind: "enum", T: proto3.getEnumType(LogLevel) },
     { no: 3, name: "source", kind: "enum", T: proto3.getEnumType(LogComponentLevelSource) },
     { no: 4, name: "description", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 5, name: "matching_pattern", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): LogComponentInfo {

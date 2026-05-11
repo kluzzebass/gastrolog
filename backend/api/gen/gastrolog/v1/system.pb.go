@@ -8682,8 +8682,13 @@ type LogComponentInfo struct {
 	EffectiveLevel LogLevel                `protobuf:"varint,2,opt,name=effective_level,json=effectiveLevel,proto3,enum=gastrolog.v1.LogLevel" json:"effective_level,omitempty"`
 	Source         LogComponentLevelSource `protobuf:"varint,3,opt,name=source,proto3,enum=gastrolog.v1.LogComponentLevelSource" json:"source,omitempty"`
 	Description    string                  `protobuf:"bytes,4,opt,name=description,proto3" json:"description,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// matching_pattern is the rule pattern that produced effective_level.
+	// Empty when source = DEFAULT (no rule matched). For EXACT_RULE and
+	// GLOB_RULE, this is the exact text the operator typed into the rule
+	// editor, so the UI can cross-reference back to the rules list.
+	MatchingPattern string `protobuf:"bytes,5,opt,name=matching_pattern,json=matchingPattern,proto3" json:"matching_pattern,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *LogComponentInfo) Reset() {
@@ -8740,6 +8745,13 @@ func (x *LogComponentInfo) GetSource() LogComponentLevelSource {
 func (x *LogComponentInfo) GetDescription() string {
 	if x != nil {
 		return x.Description
+	}
+	return ""
+}
+
+func (x *LogComponentInfo) GetMatchingPattern() string {
+	if x != nil {
+		return x.MatchingPattern
 	}
 	return ""
 }
@@ -9457,12 +9469,13 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x13PutLogLevelsRequest\x124\n" +
 	"\x06config\x18\x01 \x01(\v2\x1c.gastrolog.v1.LogLevelConfigR\x06config\"N\n" +
 	"\x14PutLogLevelsResponse\x126\n" +
-	"\x04echo\x18\x01 \x01(\v2\".gastrolog.v1.SettingsMutationEchoR\x04echo\"\xc8\x01\n" +
+	"\x04echo\x18\x01 \x01(\v2\".gastrolog.v1.SettingsMutationEchoR\x04echo\"\xf3\x01\n" +
 	"\x10LogComponentInfo\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12?\n" +
 	"\x0feffective_level\x18\x02 \x01(\x0e2\x16.gastrolog.v1.LogLevelR\x0eeffectiveLevel\x12=\n" +
 	"\x06source\x18\x03 \x01(\x0e2%.gastrolog.v1.LogComponentLevelSourceR\x06source\x12 \n" +
-	"\vdescription\x18\x04 \x01(\tR\vdescription\"\x1a\n" +
+	"\vdescription\x18\x04 \x01(\tR\vdescription\x12)\n" +
+	"\x10matching_pattern\x18\x05 \x01(\tR\x0fmatchingPattern\"\x1a\n" +
 	"\x18ListLogComponentsRequest\"[\n" +
 	"\x19ListLogComponentsResponse\x12>\n" +
 	"\n" +

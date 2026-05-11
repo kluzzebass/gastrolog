@@ -97,11 +97,13 @@ func (s *SystemServer) ListLogComponents(
 	out := make([]*apiv1.LogComponentInfo, 0, len(paths))
 	for _, p := range paths {
 		level := rules.Resolve(p.String())
+		source, pattern := resolutionSource(rules, p.String())
 		out = append(out, &apiv1.LogComponentInfo{
-			Path:           p.String(),
-			EffectiveLevel: convert.SlogLevelToProto(int64(level)),
-			Source:         resolutionSource(rules, p.String()),
-			Description:    p.Description(),
+			Path:            p.String(),
+			EffectiveLevel:  convert.SlogLevelToProto(int64(level)),
+			Source:          source,
+			Description:     p.Description(),
+			MatchingPattern: pattern,
 		})
 	}
 	// Defensive sort even though comp.All() already sorts — the wire
@@ -115,12 +117,18 @@ func (s *SystemServer) ListLogComponents(
 
 // resolutionSource walks the rule set the same way Resolve does to
 // report which rule (if any) produced the effective level for a path.
+// Returns the source enum and the matching pattern (empty when the
+// fallback default applied). The pattern lets the UI cross-reference
+// back to the rule editor — hovering a component's source highlights
+// the rule that won.
+//
 // Duplicates a small amount of logic from RuleSet.Resolve to avoid
-// adding a return-source variant; the cost is one extra walk per
-// component per ListLogComponents call, which is bounded.
-func resolutionSource(rs logging.RuleSet, path string) apiv1.LogComponentLevelSource {
+// adding a return-source variant on the public RuleSet API; the cost
+// is one extra walk per component per ListLogComponents call.
+func resolutionSource(rs logging.RuleSet, path string) (apiv1.LogComponentLevelSource, string) {
 	bestSpec := -1 << 30
 	bestSource := apiv1.LogComponentLevelSource_LOG_LEVEL_SOURCE_DEFAULT
+	bestPattern := ""
 	matched := false
 	for _, r := range rs.Rules {
 		if !ruleMatches(r, path) {
@@ -130,6 +138,7 @@ func resolutionSource(rs logging.RuleSet, path string) apiv1.LogComponentLevelSo
 		if !matched || spec > bestSpec {
 			matched = true
 			bestSpec = spec
+			bestPattern = r.Pattern
 			if isGlobPattern(r.Pattern) {
 				bestSource = apiv1.LogComponentLevelSource_LOG_LEVEL_SOURCE_GLOB_RULE
 			} else {
@@ -137,7 +146,7 @@ func resolutionSource(rs logging.RuleSet, path string) apiv1.LogComponentLevelSo
 			}
 		}
 	}
-	return bestSource
+	return bestSource, bestPattern
 }
 
 // ruleMatches / ruleSpecificity duplicate the logic that lives on

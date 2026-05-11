@@ -1154,6 +1154,11 @@ message LogComponentInfo {
   LogLevel effective_level = 2;
   LogComponentLevelSource source = 3;
   string description = 4;
+  // matching_pattern is the rule pattern that produced effective_level.
+  // Empty when source = DEFAULT (no rule matched). For EXACT_RULE and
+  // GLOB_RULE, this is the exact text the operator typed into the rule
+  // editor, so the UI can cross-reference back to the rules list.
+  string matching_pattern = 5;
 }
 
 message ListLogComponentsRequest {}

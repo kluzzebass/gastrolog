@@ -43,6 +43,12 @@ export function LogLevelsSettings({ dark }: Props) {
   const [rulesExpanded, setRulesExpanded] = useState(true);
   const [componentsExpanded, setComponentsExpanded] = useState(false);
 
+  // highlight is the cross-reference target driven by hovering a
+  // Components-table row's Source cell. "default" highlights the
+  // default-level selector; any other value is a pattern string that
+  // highlights the matching rule input.
+  const [highlight, setHighlight] = useState<string | null>(null);
+
   const liveConfig: LogLevelConfig | undefined = config?.logLevels ?? undefined;
   const liveDefault = liveConfig?.defaultLevel ?? LogLevel.INFO;
   const liveRules = liveConfig?.rules ?? [];
@@ -152,7 +158,11 @@ export function LogLevelsSettings({ dark }: Props) {
           <code>**</code> matches any depth. Most-specific match wins.
         </p>
 
-        <div className="mb-4 max-w-[260px]">
+        <div
+          className={`mb-4 max-w-[260px] rounded transition-colors ${
+            highlight === "default" ? "ring-2 ring-copper/60 -m-1 p-1" : ""
+          }`}
+        >
           <FormField dark={dark} label="Default level">
             <SelectInput
               dark={dark}
@@ -175,7 +185,14 @@ export function LogLevelsSettings({ dark }: Props) {
             </div>
           )}
           {currentRules.map((r, idx) => (
-            <div key={idx} className="grid grid-cols-[1fr_140px_40px] gap-2 items-start">
+            <div
+              key={idx}
+              className={`grid grid-cols-[1fr_140px_40px] gap-2 items-start rounded transition-colors ${
+                highlight !== null && highlight !== "default" && r.pattern === highlight
+                  ? "ring-2 ring-copper/60 -m-1 p-1"
+                  : ""
+              }`}
+            >
               <div className="flex flex-col gap-1">
                 <TextInput
                   dark={dark}
@@ -231,6 +248,10 @@ export function LogLevelsSettings({ dark }: Props) {
           components={components}
           onPathClick={addRuleForPath}
           existingPatterns={new Set(currentRules.map((r) => r.pattern))}
+          onSourceHover={(target) => {
+            setHighlight(target);
+            if (target !== null) setRulesExpanded(true);
+          }}
         />
       </SettingsCard>
     </div>
@@ -242,9 +263,13 @@ interface ComponentsTableProps {
   components: ReturnType<typeof useLogComponents>["data"];
   onPathClick: (path: string) => void;
   existingPatterns: Set<string>;
+  // onSourceHover fires when the mouse enters/leaves a row's Source
+  // cell. Target is "default" for the default-fallback case, the
+  // matching pattern string for an exact/glob rule, or null on leave.
+  onSourceHover: (target: string | null) => void;
 }
 
-function ComponentsTable({ dark, components, onPathClick, existingPatterns }: ComponentsTableProps) {
+function ComponentsTable({ dark, components, onPathClick, existingPatterns, onSourceHover }: ComponentsTableProps) {
   const c = useThemeClass(dark);
   if (!components || components.length === 0) {
     return (
@@ -274,6 +299,7 @@ function ComponentsTable({ dark, components, onPathClick, existingPatterns }: Co
           info={info}
           alreadyRuled={existingPatterns.has(info.path)}
           onPathClick={onPathClick}
+          onSourceHover={onSourceHover}
         />
       ))}
     </div>
@@ -289,6 +315,7 @@ function FragmentRow({
   info,
   alreadyRuled,
   onPathClick,
+  onSourceHover,
 }: {
   dark: boolean;
   pathCls: string;
@@ -298,6 +325,7 @@ function FragmentRow({
   info: NonNullable<ReturnType<typeof useLogComponents>["data"]>[number];
   alreadyRuled: boolean;
   onPathClick: (path: string) => void;
+  onSourceHover: (target: string | null) => void;
 }) {
   const c = useThemeClass(dark);
   const linkCls = alreadyRuled
@@ -306,6 +334,15 @@ function FragmentRow({
         "hover:text-copper hover:underline cursor-pointer",
         "hover:text-copper hover:underline cursor-pointer",
       );
+
+  // hoverTarget: what to highlight in the Rules editor when this row's
+  // Source cell is hovered. DEFAULT → "default" (the fallback selector);
+  // any rule match → the winning pattern string.
+  const hoverTarget =
+    info.source === LogComponentLevelSource.LOG_LEVEL_SOURCE_DEFAULT
+      ? "default"
+      : info.matchingPattern;
+
   return (
     <>
       <button
@@ -318,7 +355,18 @@ function FragmentRow({
         {info.path}
       </button>
       <div className={levelCls}>{levelLabel(info.effectiveLevel)}</div>
-      <div className={sourceCls}>{sourceLabel(info.source)}</div>
+      <div
+        className={`${sourceCls} cursor-help ${c("hover:text-copper", "hover:text-copper")}`}
+        onMouseEnter={() => onSourceHover(hoverTarget)}
+        onMouseLeave={() => onSourceHover(null)}
+        title={
+          info.source === LogComponentLevelSource.LOG_LEVEL_SOURCE_DEFAULT
+            ? "no rule matched — falling back to the default level"
+            : `matched by rule: ${info.matchingPattern}`
+        }
+      >
+        {sourceLabel(info.source)}
+      </div>
       <div className={descCls}>{info.description || "—"}</div>
     </>
   );
