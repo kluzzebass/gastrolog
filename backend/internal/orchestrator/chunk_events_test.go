@@ -122,7 +122,7 @@ func TestChunkBusEmitsProgressWithRecordCount(t *testing.T) {
 
 	vault := glid.New()
 	chunkID := chunk.NewChunkID()
-	orch.EmitChunkProgress(vault, chunkID, 42)
+	orch.EmitChunkProgress(vault, chunk.ChunkMeta{ID: chunkID, RecordCount: 42})
 
 	got := receiveChunkEvent(t, ch)
 	if got.Op != orchestrator.ChunkChangeOpProgress {
@@ -131,8 +131,11 @@ func TestChunkBusEmitsProgressWithRecordCount(t *testing.T) {
 	if got.RecordCount != 42 {
 		t.Errorf("RecordCount = %d, want 42", got.RecordCount)
 	}
-	if got.Meta != nil {
-		t.Errorf("Progress Meta must be nil, got %+v", got.Meta)
+	if got.Meta == nil {
+		t.Fatal("Progress Meta must be set so live WriteEnd/IngestEnd/Bytes flow through")
+	}
+	if got.Meta.RecordCount != 42 {
+		t.Errorf("Meta.RecordCount = %d, want 42", got.Meta.RecordCount)
 	}
 }
 
@@ -151,9 +154,9 @@ func TestChunkBusMonotonicVersion(t *testing.T) {
 	defer bus.Unsubscribe(id)
 
 	vault := glid.New()
-	orch.EmitChunkProgress(vault, chunk.NewChunkID(), 1)
-	orch.EmitChunkProgress(vault, chunk.NewChunkID(), 2)
-	orch.EmitChunkProgress(vault, chunk.NewChunkID(), 3)
+	orch.EmitChunkProgress(vault, chunk.ChunkMeta{ID: chunk.NewChunkID(), RecordCount: 1})
+	orch.EmitChunkProgress(vault, chunk.ChunkMeta{ID: chunk.NewChunkID(), RecordCount: 2})
+	orch.EmitChunkProgress(vault, chunk.ChunkMeta{ID: chunk.NewChunkID(), RecordCount: 3})
 
 	var prev uint64
 	for range 3 {

@@ -220,16 +220,24 @@ function mutateCache(
       return next;
     }
     case ChunkChangeOp.PROGRESS: {
-      // Patch the active chunk's record count in place; no allocation
-      // unless we actually find the entry.
+      // PROGRESS carries the full active-chunk meta so live updates to
+      // WriteEnd / IngestEnd / Bytes flow through to the inspector, not
+      // just record_count. Without this, an active chunk's WriteEnd
+      // stays at the zero value the FSM stamped at CREATE time
+      // (rendered as "January 1 1970" until the chunk seals).
       const idx = findIdx();
       if (idx < 0) return prev;
+      if (msg.meta) {
+        const merged = mergeMeta(next[idx], msg.meta);
+        next[idx] = applyReplicaCount(merged);
+        return next;
+      }
+      // Backward-compat for events without an inline meta — only
+      // record_count update, same as before.
       const existing = next[idx];
       if (!existing || existing.recordCount === msg.recordCount) return prev;
       const patched = existing.clone();
       patched.recordCount = msg.recordCount;
-      // Also bump replicaCount if the producing node hadn't reported
-      // before — every PROGRESS counts as "this node has the chunk."
       if (replicaNodes && replicaNodes.size > patched.replicaCount) {
         patched.replicaCount = replicaNodes.size;
       }

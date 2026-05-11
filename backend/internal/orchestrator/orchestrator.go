@@ -425,12 +425,19 @@ func (o *Orchestrator) EmitChunkCreated(vault glid.GLID, meta chunk.ChunkMeta) {
 }
 
 // EmitChunkProgress emits a PROGRESS event carrying the active chunk's
-// current record count. Producer paths that fire this on every append
-// must go through the progress coalescer (TODO: gastrolog-3pf9w phase 2)
-// to avoid event-rate blowup.
-func (o *Orchestrator) EmitChunkProgress(vault glid.GLID, chunkID chunk.ChunkID, recordCount uint64) {
+// current state — recordCount, WriteEnd, IngestEnd, Bytes, etc.
+// Frontends use mergeMeta to overlay these onto the cache: subscribers
+// see WriteEnd/IngestEnd advance and Bytes grow each tick, in addition
+// to the running record count. Producer paths must coalesce
+// (runChunkProgressEmitter) so emission stays bounded.
+func (o *Orchestrator) EmitChunkProgress(vault glid.GLID, meta chunk.ChunkMeta) {
+	m := meta
 	o.EmitChunkChange(ChunkChangeEvent{
-		VaultID: vault, ChunkID: chunkID, Op: ChunkChangeOpProgress, RecordCount: recordCount,
+		VaultID:     vault,
+		ChunkID:     meta.ID,
+		Op:          ChunkChangeOpProgress,
+		Meta:        &m,
+		RecordCount: uint64(meta.RecordCount), //nolint:gosec // G115: record count bounded by rotation policy
 	})
 }
 

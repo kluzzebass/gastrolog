@@ -45,8 +45,7 @@ func (o *Orchestrator) runChunkProgressEmitter(ctx context.Context, interval tim
 func (o *Orchestrator) emitActiveChunkProgress(last map[glid.GLID]lastSeen) {
 	type snapshot struct {
 		VaultID glid.GLID
-		ChunkID chunk.ChunkID
-		Count   uint64
+		Meta    chunk.ChunkMeta
 	}
 	var snapshots []snapshot
 
@@ -62,30 +61,30 @@ func (o *Orchestrator) emitActiveChunkProgress(last map[glid.GLID]lastSeen) {
 		}
 		snapshots = append(snapshots, snapshot{
 			VaultID: vaultID,
-			ChunkID: active.ID,
-			Count:   uint64(active.RecordCount), //nolint:gosec // G115: RecordCount is bounded by rotation policy
+			Meta:    *active,
 		})
 	}
 	o.mu.RUnlock()
 
 	for _, s := range snapshots {
+		count := uint64(s.Meta.RecordCount) //nolint:gosec // G115: bounded by rotation policy
 		prev, hadPrev := last[s.VaultID]
 		// First sighting of a new active chunk for this vault, or the
 		// chunk ID changed since the last tick (rotation happened): reset
 		// the high-watermark and emit a fresh PROGRESS so the inspector
 		// sees the post-rotation count immediately.
-		if !hadPrev || prev.ChunkID != s.ChunkID {
-			last[s.VaultID] = lastSeen{ChunkID: s.ChunkID, Count: s.Count}
-			if s.Count > 0 {
-				o.EmitChunkProgress(s.VaultID, s.ChunkID, s.Count)
+		if !hadPrev || prev.ChunkID != s.Meta.ID {
+			last[s.VaultID] = lastSeen{ChunkID: s.Meta.ID, Count: count}
+			if count > 0 {
+				o.EmitChunkProgress(s.VaultID, s.Meta)
 			}
 			continue
 		}
 		// Same active chunk: only emit when the count advanced. No
 		// emit for unchanged counts — idle vaults stay quiet.
-		if s.Count > prev.Count {
-			last[s.VaultID] = lastSeen{ChunkID: s.ChunkID, Count: s.Count}
-			o.EmitChunkProgress(s.VaultID, s.ChunkID, s.Count)
+		if count > prev.Count {
+			last[s.VaultID] = lastSeen{ChunkID: s.Meta.ID, Count: count}
+			o.EmitChunkProgress(s.VaultID, s.Meta)
 		}
 	}
 }
