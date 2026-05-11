@@ -16,6 +16,21 @@ import (
 	"gastrolog/internal/system"
 )
 
+// loadConfigLogLevels populates GetSystemResponse.LogLevels from the
+// system config store, matching the pattern used by every other
+// loadConfig* helper. Without this call wired into buildFullSystem,
+// a successful PutLogLevels appears to "vanish" from the UI on reload
+// — the rules are applied on every node's filter handler (via the
+// configSignal watcher) but never round-trip through GetSystem.
+func (s *SystemServer) loadConfigLogLevels(ctx context.Context, resp *apiv1.GetSystemResponse) error {
+	cfg, err := s.sysStore.GetLogLevels(ctx)
+	if err != nil {
+		return fmt.Errorf("get log levels: %w", err)
+	}
+	resp.LogLevels = convert.LogLevelConfigToProto(cfg)
+	return nil
+}
+
 // PutLogLevels validates and persists a new cluster-wide LogLevelConfig.
 // The mutation flows through the system config store's Raft FSM; once
 // committed, every node's ComponentFilterHandler picks up the new rule

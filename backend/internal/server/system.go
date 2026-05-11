@@ -153,6 +153,7 @@ func (s *SystemServer) buildFullSystem(ctx context.Context) (*apiv1.GetSystemRes
 			s.loadConfigManagedFiles(ctx, resp),
 			s.loadConfigCloudServices(ctx, resp),
 			s.loadConfigNodeStorageConfigs(ctx, resp),
+			s.loadConfigLogLevels(ctx, resp),
 		)
 		if err != nil {
 			return nil, err
