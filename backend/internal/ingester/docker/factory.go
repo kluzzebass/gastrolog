@@ -142,7 +142,7 @@ func parseConfig(id string, params map[string]string, cfgStore system.Store, log
 		Stdout:       stdout,
 		Stderr:       stderr,
 		StateFile:    stateFile,
-		Logger:       comp.Ingester.Sub("docker").Desc("Docker ingester — streams container stdout/stderr via the Docker engine API.").SubOpt(id).Apply(logging.Default(logger)),
+		Logger:       comp.Ingester.Sub("docker").Desc("Docker ingester — streams container stdout/stderr via the Docker engine API.").Apply(logging.Default(logger)),
 	}, nil
 }
 

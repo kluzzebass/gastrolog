@@ -93,17 +93,6 @@ func (p Path) Sub(name string) Path {
 	return child
 }
 
-// SubOpt is like Sub but returns the receiver unchanged when name is
-// empty. Use it for per-instance paths where the instance ID may not
-// always be available (tests, partially-constructed ingesters, etc.).
-// When name is non-empty, validation rules are identical to Sub.
-func (p Path) SubOpt(name string) Path {
-	if name == "" {
-		return p
-	}
-	return p.Sub(name)
-}
-
 // String returns the dotted form (e.g. "orchestrator.replication").
 func (p Path) String() string {
 	return p.s
@@ -158,28 +147,6 @@ func mustValidSegment(name string) {
 	}
 	if strings.ContainsAny(name, ".*") {
 		panic("comp: path segment must not contain '.' or '*': " + name)
-	}
-}
-
-// Unregister removes a Path from the registry. Intended for short-lived
-// per-instance paths (e.g. one per ingester instance) that should
-// disappear from ListLogComponents when the instance is destroyed.
-//
-// Idempotent — unregistering a path that was never registered, or
-// already unregistered, is a silent no-op.
-func Unregister(p Path) {
-	registryMu.Lock()
-	defer registryMu.Unlock()
-	if !registered[p.s] {
-		return
-	}
-	delete(registered, p.s)
-	delete(descriptions, p.s)
-	for i, q := range registry {
-		if q.s == p.s {
-			registry = append(registry[:i], registry[i+1:]...)
-			return
-		}
 	}
 }
 

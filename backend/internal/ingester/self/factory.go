@@ -32,7 +32,7 @@ func NewFactory(
 	alerts orchestrator.AlertCollector,
 ) orchestrator.IngesterFactory {
 	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
-		scopedLogger := comp.Ingester.Sub("self").Desc("Self ingester — captures slog records emitted by this binary into a vault, mirroring stderr.").SubOpt(id.String()).Apply(logging.Default(logger))
+		scopedLogger := comp.Ingester.Sub("self").Desc("Self ingester — captures slog records emitted by this binary into a vault, mirroring stderr.").Apply(logging.Default(logger))
 
 		// Apply min_level param to the capture handler.
 		baseLevel := slog.LevelWarn

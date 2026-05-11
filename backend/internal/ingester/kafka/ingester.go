@@ -65,7 +65,7 @@ func (ing *Ingester) SetPressureGate(gate *chanwatch.PressureGate) {
 func New(cfg Config) *Ingester {
 	return &Ingester{
 		cfg:    cfg,
-		logger: comp.Ingester.Sub("kafka").Desc("Kafka consumer ingester — pulls log messages from configured Kafka topics.").SubOpt(cfg.ID).Apply(logging.Default(cfg.Logger)),
+		logger: comp.Ingester.Sub("kafka").Desc("Kafka consumer ingester — pulls log messages from configured Kafka topics.").Apply(logging.Default(cfg.Logger)),
 	}
 }
 

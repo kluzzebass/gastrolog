@@ -80,7 +80,7 @@ func NewIngester(id glid.GLID, params map[string]string, logger *slog.Logger) (o
 		burst = n
 	}
 
-	_ = comp.Ingester.Sub("scatterbox").Desc("Scatterbox ingester — synthetic structured-events generator for testing.").SubOpt(id.String()).Apply(logging.Default(logger))
+	_ = comp.Ingester.Sub("scatterbox").Desc("Scatterbox ingester — synthetic structured-events generator for testing.").Apply(logging.Default(logger))
 
 	return &Ingester{
 		id:       id.String(),
