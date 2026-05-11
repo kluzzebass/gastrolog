@@ -105,6 +105,16 @@ export function vaultTypeEnum(t: VaultTypeLabel): VaultType {
   }
 }
 
+function cloudBindingDescription(locked: boolean, hasCloudServices: boolean): string {
+  if (locked) {
+    return "Cloud binding is fixed at vault creation. To change it, create a new vault and migrate data via retention routing.";
+  }
+  if (!hasCloudServices) {
+    return "No cloud services configured — leave empty for local-only";
+  }
+  return "Optional — select to make this vault cloud-backed";
+}
+
 function extractErrorMessage(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
 }
@@ -241,13 +251,7 @@ export function VaultStorageForm({
           <FormField
             label="Cloud Storage"
             dark={dark}
-            description={
-              cloudLocked
-                ? "Cloud binding is fixed at vault creation. To change it, create a new vault and migrate data via retention routing."
-                : cloudServiceOptions.length === 0
-                  ? "No cloud services configured — leave empty for local-only"
-                  : "Optional — select to make this vault cloud-backed"
-            }
+            description={cloudBindingDescription(!!cloudLocked, cloudServiceOptions.length > 0)}
           >
             <SelectInput
               value={storage.cloudServiceId}

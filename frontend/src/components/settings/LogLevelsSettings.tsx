@@ -105,6 +105,15 @@ export function LogLevelsSettings({ dark }: Props) {
     }
   };
 
+  // ruleErrors flags rows that the server would reject — duplicate
+  // patterns and invalid syntax. Empty patterns are not flagged because
+  // save() filters them out (the operator might be mid-edit on a new
+  // row); but they can't satisfy a save either, so the Save button
+  // disables when nothing valid remains.
+  const ruleErrors = validateRules(currentRules);
+  const hasErrors = Object.keys(ruleErrors).length > 0;
+  const hasAnyNonEmpty = currentRules.some((r) => r.pattern.trim() !== "");
+
   const columnHeader = `text-[0.75em] uppercase tracking-wide ${c("text-text-muted", "text-light-text-muted")}`;
   const emptyLine = `text-[0.85em] italic ${c("text-text-muted", "text-light-text-muted")}`;
 
@@ -129,7 +138,7 @@ export function LogLevelsSettings({ dark }: Props) {
             )}
             <Button
               onClick={save}
-              disabled={!dirty || putLogLevels.isPending}
+              disabled={!dirty || putLogLevels.isPending || hasErrors || (currentRules.length > 0 && !hasAnyNonEmpty)}
               dark={dark}
             >
               {putLogLevels.isPending ? "Saving..." : "Save"}
@@ -166,27 +175,34 @@ export function LogLevelsSettings({ dark }: Props) {
             </div>
           )}
           {currentRules.map((r, idx) => (
-            <div key={idx} className="grid grid-cols-[1fr_140px_40px] gap-2 items-center">
-              <TextInput
-                dark={dark}
-                value={r.pattern}
-                onChange={(v) => updateRule(idx, { pattern: v })}
-              />
-              <SelectInput
-                dark={dark}
-                value={String(r.level)}
-                onChange={(v) => updateRule(idx, { level: Number(v) as LogLevel })}
-                options={LEVEL_OPTIONS}
-              />
-              <button
-                type="button"
-                onClick={() => removeRule(idx)}
-                className={`px-2 py-1 rounded ${c("text-text-muted hover:text-copper hover:bg-ink-hover", "text-light-text-muted hover:text-copper hover:bg-light-hover")}`}
-                aria-label="Remove rule"
-                title="Remove rule"
-              >
-                ×
-              </button>
+            <div key={idx} className="flex flex-col gap-1">
+              <div className="grid grid-cols-[1fr_140px_40px] gap-2 items-center">
+                <TextInput
+                  dark={dark}
+                  value={r.pattern}
+                  onChange={(v) => updateRule(idx, { pattern: v })}
+                />
+                <SelectInput
+                  dark={dark}
+                  value={String(r.level)}
+                  onChange={(v) => updateRule(idx, { level: Number(v) as LogLevel })}
+                  options={LEVEL_OPTIONS}
+                />
+                <button
+                  type="button"
+                  onClick={() => removeRule(idx)}
+                  className={`px-2 py-1 rounded ${c("text-text-muted hover:text-copper hover:bg-ink-hover", "text-light-text-muted hover:text-copper hover:bg-light-hover")}`}
+                  aria-label="Remove rule"
+                  title="Remove rule"
+                >
+                  ×
+                </button>
+              </div>
+              {ruleErrors[idx] && (
+                <div className="text-[0.75em] text-severity-error pl-1">
+                  {ruleErrors[idx]}
+                </div>
+              )}
             </div>
           ))}
           <div className="mt-2">
@@ -303,6 +319,47 @@ function FragmentRow({
       <div className={descCls}>{info.description || "—"}</div>
     </>
   );
+}
+
+// validateRules mirrors the server-side validation in
+// internal/server/system_log_levels.go: rejects duplicate patterns and
+// patterns that don't parse under the logging.ValidatePattern grammar
+// (literal segments [a-z0-9_-]+, "*" for one segment, "**" for any
+// depth). Empty patterns are NOT flagged here — they're silently
+// filtered on save, since they typically mean "the operator clicked
+// Add rule and hasn't typed yet." The Save button separately disables
+// when no non-empty row exists.
+function validateRules(rules: DraftRule[]): Record<number, string> {
+  const errors: Record<number, string> = {};
+  const seen = new Map<string, number>();
+  for (const [idx, r] of rules.entries()) {
+    const p = r.pattern.trim();
+    if (p === "") continue;
+    if (!isValidPattern(p)) {
+      errors[idx] = "Invalid pattern. Use lowercase a–z, 0–9, hyphen, underscore; '*' for one segment; '**' for any depth.";
+      continue;
+    }
+    const prev = seen.get(p);
+    if (prev !== undefined) {
+      errors[idx] = `Duplicate pattern (also in row ${String(prev + 1)})`;
+      if (!errors[prev]) {
+        errors[prev] = `Duplicate pattern (also in row ${String(idx + 1)})`;
+      }
+      continue;
+    }
+    seen.set(p, idx);
+  }
+  return errors;
+}
+
+function isValidPattern(p: string): boolean {
+  if (p === "") return false;
+  for (const seg of p.split(".")) {
+    if (seg === "") return false;
+    if (seg === "*" || seg === "**") continue;
+    if (!/^[a-z0-9_-]+$/.test(seg)) return false;
+  }
+  return true;
 }
 
 function sourceLabel(s: LogComponentLevelSource): string {
