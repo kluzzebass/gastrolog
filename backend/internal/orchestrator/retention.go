@@ -138,7 +138,7 @@ type sweepTarget struct {
 func (o *Orchestrator) retentionSweepAll() {
 	sys, err := o.loadSystem(context.Background())
 	if err != nil {
-		o.logger.Error("retention: failed to load config", "error", err)
+		o.retentionLogger.Error("retention: failed to load config", "error", err)
 		return
 	}
 	if sys == nil {
@@ -344,7 +344,7 @@ func (o *Orchestrator) drainExcessChunks(vaultID glid.GLID, cm chunk.ChunkManage
 	}
 
 	if reclaimed > 0 {
-		o.logger.Info("memory budget enforcement: retention events fired",
+		o.retentionLogger.Info("memory budget enforcement: retention events fired",
 			"vault", vaultID,
 			"excess", excess, "reclaimed", reclaimed)
 	}
@@ -460,7 +460,7 @@ func (o *Orchestrator) retentionTargetForInstance(cfg *system.Config, vaultCfg s
 	}
 	rules, err := resolveRetentionRulesFromVault(cfg, vaultCfg)
 	if err != nil {
-		o.logger.Warn("retention: failed to resolve rules",
+		o.retentionLogger.Warn("retention: failed to resolve rules",
 			"vault", vaultCfg.ID, "error", err)
 		return nil
 	}

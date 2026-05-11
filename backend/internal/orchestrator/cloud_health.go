@@ -100,7 +100,7 @@ func (o *Orchestrator) backfillCloudUploads(vaultInst *VaultInstance) {
 		o.scheduler.Describe(name, fmt.Sprintf("Cloud backfill upload for chunk %s", m.ID))
 	}
 	if backfilled > 0 {
-		o.logger.Debug("cloud backfill: scheduled uploads",
+		o.cloudHealthLogger.Debug("cloud backfill: scheduled uploads",
 			"vault", vaultInst.VaultID, "count", backfilled)
 	}
 }

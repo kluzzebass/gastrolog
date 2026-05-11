@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/logging/comp"
 	"iter"
 	"log/slog"
 	"regexp"
@@ -360,7 +361,9 @@ func New(chunks chunk.ChunkManager, indexes index.IndexManager, logger *slog.Log
 	return &Engine{
 		chunks:  chunks,
 		indexes: indexes,
-		logger:  logging.Default(logger).With("component", "query-engine"),
+		logger:  comp.Root("query-engine").Desc(
+			"Local query execution engine — record/iterator pipeline that runs Search/Histogram/Explain against the local chunk and index managers.",
+		).Apply(logging.Default(logger)),
 	}
 }
 
@@ -371,7 +374,9 @@ func New(chunks chunk.ChunkManager, indexes index.IndexManager, logger *slog.Log
 func NewWithRegistry(registry manifest.VaultRegistry, logger *slog.Logger) *Engine {
 	return &Engine{
 		registry: registry,
-		logger:   logging.Default(logger).With("component", "query-engine"),
+		logger:   comp.Root("query-engine").Desc(
+			"Local query execution engine — record/iterator pipeline that runs Search/Histogram/Explain against the local chunk and index managers.",
+		).Apply(logging.Default(logger)),
 	}
 }
 
@@ -698,10 +703,10 @@ func (e *Engine) buildTSOrderedScanner(ctx context.Context, cursor chunk.RecordC
 		// reorder buffer rather than fetching the index from S3 (gastrolog-1dg3i).
 		tsEntries, err := loadTSEntries(im, meta.ID, q.OrderBy)
 		if err == nil {
-			e.logger.Debug("✅ TS index scanner activated", "chunk", meta.ID, "entries", len(tsEntries), "cloud", meta.CloudBacked)
+			e.logger.Debug("TS index scanner activated", "chunk", meta.ID, "entries", len(tsEntries), "cloud", meta.CloudBacked)
 			return buildTSIndexScanner(ctx, cursor, q, b, meta, tsEntries)
 		}
-		e.logger.Debug("❌ TS index unavailable, falling back to reorder buffer", "chunk", meta.ID, "cloud", meta.CloudBacked, "error", err, "isNotFound", errors.Is(err, index.ErrIndexNotFound))
+		e.logger.Debug("TS index unavailable, falling back to reorder buffer", "chunk", meta.ID, "cloud", meta.CloudBacked, "error", err, "isNotFound", errors.Is(err, index.ErrIndexNotFound))
 		// Fall through to buffer-and-sort if index unavailable.
 	}
 

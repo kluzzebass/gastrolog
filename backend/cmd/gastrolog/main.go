@@ -16,6 +16,7 @@ import (
 	_ "net/http/pprof" //nolint:gosec // G108: pprof is intentionally available when --pprof flag is set
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -29,15 +30,32 @@ import (
 var version = "dev"
 
 func main() {
-	// Register signal handler early, before any framework code.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
 	// Create base logger with ComponentFilterHandler for dynamic log level control.
 	baseHandler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelDebug, // Allow all levels; filtering done by ComponentFilterHandler
 	})
 	filterHandler := logging.NewComponentFilterHandler(baseHandler, slog.LevelInfo)
+
+	// Parse and install --log-level spec at boot, before the cluster's
+	// config store is available. The watcher in app.Run will replace
+	// this rule set once the FSM has loaded its persisted config; the
+	// boot-time spec is what runs from process start until that point
+	// (and persists if no cluster-level rules are ever set).
+	//
+	// Done before the signal-handling defer so a parse error exits
+	// cleanly without skipping deferred cleanup.
+	if spec := getFlagFromArgs(os.Args[1:], "log-level"); spec != "" {
+		rs, err := logging.ParseRuleSetSpec(spec)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "gastrolog: --log-level: %v\n", err)
+			os.Exit(2)
+		}
+		filterHandler.SetRuleSet(rs)
+	}
+
+	// Register signal handler early, before any framework code.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	// Install capture handler for the "self" ingester. Records from
 	// pipeline-internal components are skipped to prevent feedback loops.
@@ -71,6 +89,7 @@ func main() {
 	rootCmd.PersistentFlags().String("home", "", "home directory (default: platform config dir)")
 	rootCmd.PersistentFlags().String("config-type", "raft", "config store type: raft or memory")
 	rootCmd.PersistentFlags().String("pprof", "", "pprof HTTP server address (e.g. localhost:6060)")
+	rootCmd.PersistentFlags().String("log-level", "", "boot-time log levels, comma-separated (e.g. \"default=info,orchestrator.**=debug\"). Once the cluster config store has rules, those take precedence. Patterns follow gitignore-style globs (* = one segment, ** = any depth).")
 	cli.AddClientFlags(rootCmd)
 
 	serverCmd := &cobra.Command{
@@ -101,6 +120,7 @@ func main() {
 
 				SlogCapture:        slogCaptureCh,
 				SlogCaptureHandler: captureHandler,
+				LogFilter:          filterHandler,
 			}
 
 			err := app.Run(cmd.Context(), logger, cfg)
@@ -165,7 +185,8 @@ func main() {
 			stop()
 			return // signal-triggered shutdown is not an error
 		}
-		os.Exit(1) //nolint:gocritic // stop() is just signal cleanup; process is exiting
+		stop()
+		os.Exit(1) //nolint:gocritic // stop() called above; defer is a safety net
 	}
 }
 
@@ -177,4 +198,24 @@ func mustString(cmd *cobra.Command, name string) string {
 func mustBool(cmd *cobra.Command, name string) bool {
 	v, _ := cmd.Flags().GetBool(name)
 	return v
+}
+
+// getFlagFromArgs scans os.Args for "--<name>=<value>" or "--<name>
+// <value>" and returns the value if present. Used at main() entry to
+// read --log-level before cobra has parsed flags, so the boot-time
+// rule set is installed onto the filter handler before any logging
+// happens.
+//
+// Returns "" if the flag is not present or has no value.
+func getFlagFromArgs(args []string, name string) string {
+	prefix := "--" + name
+	for i, a := range args {
+		switch {
+		case a == prefix && i+1 < len(args):
+			return args[i+1]
+		case strings.HasPrefix(a, prefix+"="):
+			return a[len(prefix)+1:]
+		}
+	}
+	return ""
 }

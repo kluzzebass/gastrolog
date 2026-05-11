@@ -25,6 +25,7 @@ import (
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/auth"
 	"gastrolog/internal/convert"
+	"gastrolog/internal/logging"
 	"gastrolog/internal/lookup"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
@@ -68,6 +69,7 @@ type SystemServerConfig struct {
 	CloudTesters         map[string]CloudServiceTester
 	Tokens               *auth.TokenService
 	PlacementReconcile   func(ctx context.Context) // synchronous placement for RPC handlers
+	LogFilter            *logging.ComponentFilterHandler // log-level RPC handlers (gastrolog-3flfp); nil disables them
 }
 
 // SystemServer implements the ConfigService.
@@ -88,6 +90,7 @@ type SystemServer struct {
 	cloudTesters         map[string]CloudServiceTester
 	tokens               *auth.TokenService
 	placementReconcile   func(ctx context.Context) // synchronous placement, nil in non-cluster mode
+	logFilter            *logging.ComponentFilterHandler
 }
 
 var _ gastrologv1connect.SystemServiceHandler = (*SystemServer)(nil)
@@ -111,6 +114,7 @@ func NewSystemServer(cfg SystemServerConfig) *SystemServer {
 		cloudTesters:         cfg.CloudTesters,
 		tokens:               cfg.Tokens,
 		placementReconcile:   cfg.PlacementReconcile,
+		logFilter:            cfg.LogFilter,
 	}
 }
 
@@ -149,6 +153,7 @@ func (s *SystemServer) buildFullSystem(ctx context.Context) (*apiv1.GetSystemRes
 			s.loadConfigManagedFiles(ctx, resp),
 			s.loadConfigCloudServices(ctx, resp),
 			s.loadConfigNodeStorageConfigs(ctx, resp),
+			s.loadConfigLogLevels(ctx, resp),
 		)
 		if err != nil {
 			return nil, err

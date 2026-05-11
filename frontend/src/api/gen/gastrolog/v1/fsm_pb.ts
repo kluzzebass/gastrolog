@@ -5,7 +5,7 @@
 
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
-import { RouteStage, VaultConfig, VaultPlacement } from "./system_pb.js";
+import { LogLevelConfig, RouteStage, VaultConfig, VaultPlacement } from "./system_pb.js";
 import { CloudService, NodeStorageConfig } from "./storage_pb.js";
 
 /**
@@ -245,6 +245,12 @@ export class SystemCommand extends Message<SystemCommand> {
      */
     value: SetIngesterCheckpointCommand;
     case: "setIngesterCheckpoint";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.PutLogLevelsCommand put_log_levels = 38;
+     */
+    value: PutLogLevelsCommand;
+    case: "putLogLevels";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<SystemCommand>) {
@@ -292,6 +298,7 @@ export class SystemCommand extends Message<SystemCommand> {
     { no: 35, name: "set_ingester_alive", kind: "message", T: SetIngesterAliveCommand, oneof: "command" },
     { no: 36, name: "set_ingester_assignment", kind: "message", T: SetIngesterAssignmentCommand, oneof: "command" },
     { no: 37, name: "set_ingester_checkpoint", kind: "message", T: SetIngesterCheckpointCommand, oneof: "command" },
+    { no: 38, name: "put_log_levels", kind: "message", T: PutLogLevelsCommand, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemCommand {
@@ -2085,6 +2092,47 @@ export class SetIngesterCheckpointCommand extends Message<SetIngesterCheckpointC
 }
 
 /**
+ * PutLogLevelsCommand replaces the cluster-wide log-level configuration
+ * in one atomic FSM apply. Empty `config` (or all-zero defaults) resets
+ * to "default INFO, no overrides".
+ *
+ * @generated from message gastrolog.v1.PutLogLevelsCommand
+ */
+export class PutLogLevelsCommand extends Message<PutLogLevelsCommand> {
+  /**
+   * @generated from field: gastrolog.v1.LogLevelConfig config = 1;
+   */
+  config?: LogLevelConfig;
+
+  constructor(data?: PartialMessage<PutLogLevelsCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutLogLevelsCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "config", kind: "message", T: LogLevelConfig },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutLogLevelsCommand {
+    return new PutLogLevelsCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutLogLevelsCommand {
+    return new PutLogLevelsCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutLogLevelsCommand {
+    return new PutLogLevelsCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutLogLevelsCommand | PlainMessage<PutLogLevelsCommand> | undefined, b: PutLogLevelsCommand | PlainMessage<PutLogLevelsCommand> | undefined): boolean {
+    return proto3.util.equals(PutLogLevelsCommand, a, b);
+  }
+}
+
+/**
  * SystemSnapshot captures the full system state for FSM.Snapshot()/Restore().
  * Each repeated field contains one entry per entity, using the Put/Create
  * command messages to represent complete entity state.
@@ -2189,6 +2237,11 @@ export class SystemSnapshot extends Message<SystemSnapshot> {
    */
   ingesterCheckpoints: SetIngesterCheckpointCommand[] = [];
 
+  /**
+   * @generated from field: gastrolog.v1.LogLevelConfig log_levels = 20;
+   */
+  logLevels?: LogLevelConfig;
+
   constructor(data?: PartialMessage<SystemSnapshot>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2216,6 +2269,7 @@ export class SystemSnapshot extends Message<SystemSnapshot> {
     { no: 17, name: "ingester_alive", kind: "message", T: SetIngesterAliveCommand, repeated: true },
     { no: 18, name: "ingester_assignments", kind: "message", T: SetIngesterAssignmentCommand, repeated: true },
     { no: 19, name: "ingester_checkpoints", kind: "message", T: SetIngesterCheckpointCommand, repeated: true },
+    { no: 20, name: "log_levels", kind: "message", T: LogLevelConfig },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemSnapshot {

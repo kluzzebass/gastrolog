@@ -151,6 +151,11 @@ type Config struct {
 	// by the bootstrap-token endpoint on each successful auth check.
 	// Nil when the endpoint is disabled or not applicable.
 	BootstrapTokenFn func() (string, error)
+
+	// LogFilter is the ComponentFilterHandler whose rule set is driven
+	// from the system config store (gastrolog-3flfp). Used by the
+	// PutLogLevels / ListLogComponents RPC handlers. Nil disables both.
+	LogFilter *logging.ComponentFilterHandler
 }
 
 // CertManager interface for TLS certificate management.
@@ -203,6 +208,8 @@ type Server struct {
 	bootstrapTokenServeSecret string
 	bootstrapTokenFn          func() (string, error)
 
+	logFilter *logging.ComponentFilterHandler // gastrolog-3flfp; nil disables PutLogLevels/ListLogComponents
+
 	mu                 sync.Mutex
 	listener           net.Listener
 	server             *http.Server
@@ -237,7 +244,7 @@ func New(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orche
 		tokens:             tokens,
 		certManager:        cfg.CertManager,
 		noAuth:             cfg.NoAuth,
-		logger:             logging.Default(cfg.Logger).With("component", "server"),
+		logger:             compServer.Apply(logging.Default(cfg.Logger)),
 		cluster:            cfg.Cluster,
 		peerStats:          cfg.PeerStats,
 		peerVaultStats:     cfg.PeerVaultStats,
@@ -264,6 +271,7 @@ func New(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orche
 		placementReconcile: cfg.PlacementReconcile,
 		bootstrapTokenServeSecret: cfg.BootstrapTokenServeSecret,
 		bootstrapTokenFn:          cfg.BootstrapTokenFn,
+		logFilter:          cfg.LogFilter,
 		shutdown:           make(chan struct{}),
 		rl:                 newRateLimiter(5.0/60.0, 5), // 5 req/min per IP, burst of 5
 	}
@@ -478,7 +486,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 
 	s.loadInitialLookupConfig(lookupRegistry)
 
-	queryServer := NewQueryServer(s.orch, s.cfgStore, s.remoteSearcher, s.localNodeID, lookupRegistry.Resolve, lookupRegistry.Names(), queryTimeout, maxFollowDuration, maxResultCount, s.logger.With("component", "query"))
+	queryServer := NewQueryServer(s.orch, s.cfgStore, s.remoteSearcher, s.localNodeID, lookupRegistry.Resolve, lookupRegistry.Names(), queryTimeout, maxFollowDuration, maxResultCount, compQuery.Apply(s.logger))
 	s.queryServer = queryServer
 	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.peerVaultStats, s.remoteChunkLister, s.remoteIndexer, s.localNodeID, s.logger)
 	configServer := NewSystemServer(SystemServerConfig{
@@ -500,6 +508,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 		OnLookupConfigChange: func(cfg system.LookupConfig, mm system.MaxMindConfig) {
 			s.applyLookupConfig(cfg, mm, lookupRegistry)
 		},
+		LogFilter: s.logFilter,
 	})
 	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown, s.cluster, s.cfgStore, s.localNodeID, s.clusterAddress, s.peerStats, s.localStatsFn, s.logger)
 	if s.joinClusterFn != nil {

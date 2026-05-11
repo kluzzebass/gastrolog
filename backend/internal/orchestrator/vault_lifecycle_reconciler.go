@@ -131,7 +131,7 @@ func NewVaultLifecycleReconciler(orch *Orchestrator, vaultID glid.GLID, vaultIns
 		vaultInst:        vaultInst,
 		localNodeID: localNodeID,
 		orch:        orch,
-		logger:      logger.With("component", "vault-lifecycle-reconciler", "vault", vaultID),
+		logger:      compVaultLifecycle.Apply(logger).With("vault", vaultID),
 	}
 }
 

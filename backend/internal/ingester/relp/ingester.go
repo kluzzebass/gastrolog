@@ -21,6 +21,7 @@ import (
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/ingester/syslogparse"
 	"gastrolog/internal/logging"
+	"gastrolog/internal/logging/comp"
 	"gastrolog/internal/orchestrator"
 )
 
@@ -75,7 +76,7 @@ func New(cfg Config) *Ingester {
 		id:        cfg.ID,
 		addr:      cfg.Addr,
 		tlsConfig: cfg.TLSConfig,
-		logger:    logging.Default(cfg.Logger).With("component", "ingester", "type", "relp"),
+		logger:    comp.Ingester.Sub("relp").Desc("RELP ingester — TCP transport with transaction-based acknowledgments (rsyslog-compatible).").Apply(logging.Default(cfg.Logger)),
 	}
 }
 
@@ -289,7 +290,7 @@ func BuildTLSConfig(params map[string]string, certMgr *cert.Manager) (*tls.Confi
 	// Load CA for client certificate verification (mutual TLS).
 	caFile := params["tls_ca"]
 	if caFile != "" {
-		caPEM, err := os.ReadFile(caFile) //nolint:gosec // G304: CA file path from user config
+		caPEM, err := os.ReadFile(caFile) //nolint:gosec //ok:os-readfile bounded PEM at startup; x509.AppendCertsFromPEM needs full bytes
 		if err != nil {
 			return nil, fmt.Errorf("read RELP CA file: %w", err)
 		}

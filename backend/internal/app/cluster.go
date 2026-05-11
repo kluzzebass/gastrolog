@@ -59,7 +59,7 @@ func setupCluster(ctx context.Context, logger *slog.Logger, cfg RunConfig, hd ho
 		NodeID:      nodeID,
 		TLS:         clusterTLS,
 		ByteMetrics: cluster.NewPeerByteMetrics(),
-		Logger:      logger.With("component", "cluster"),
+		Logger:      compCluster.Apply(logger),
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("create cluster server: %w", err)

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"gastrolog/internal/logging"
+	"gastrolog/internal/logging/comp"
 	"gastrolog/internal/multiraft"
 	"gastrolog/internal/raftwal"
 
@@ -120,7 +121,9 @@ func NewGroupManager(cfg GroupManagerConfig) *GroupManager {
 		baseDir:      cfg.BaseDir,
 		shutdownLast: cfg.ShutdownLast,
 		wal:          cfg.WAL,
-		logger:       logging.Default(cfg.Logger).With("component", "raft-group-manager"),
+		logger: comp.Root("raft-group-manager").Desc(
+			"Per-vault Raft group manager — opens, closes, and supervises the per-vault control-plane Raft groups.",
+		).Apply(logging.Default(cfg.Logger)),
 	}
 }
 

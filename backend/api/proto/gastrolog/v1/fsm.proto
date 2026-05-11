@@ -53,6 +53,7 @@ message SystemCommand {
     SetIngesterAliveCommand set_ingester_alive = 35;
     SetIngesterAssignmentCommand set_ingester_assignment = 36;
     SetIngesterCheckpointCommand set_ingester_checkpoint = 37;
+    PutLogLevelsCommand put_log_levels = 38;
   }
 }
 
@@ -311,6 +312,15 @@ message SetIngesterCheckpointCommand {
   bytes data = 2; // Opaque checkpoint blob.
 }
 
+// --- Log Levels (gastrolog-3flfp) ---
+
+// PutLogLevelsCommand replaces the cluster-wide log-level configuration
+// in one atomic FSM apply. Empty `config` (or all-zero defaults) resets
+// to "default INFO, no overrides".
+message PutLogLevelsCommand {
+  LogLevelConfig config = 1;
+}
+
 // --- Snapshot ---
 
 // SystemSnapshot captures the full system state for FSM.Snapshot()/Restore().
@@ -337,4 +347,5 @@ message SystemSnapshot {
   repeated SetIngesterAliveCommand ingester_alive = 17;
   repeated SetIngesterAssignmentCommand ingester_assignments = 18;
   repeated SetIngesterCheckpointCommand ingester_checkpoints = 19;
+  LogLevelConfig log_levels = 20;
 }

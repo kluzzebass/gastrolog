@@ -15,7 +15,7 @@ func newRPCErrorLogInterceptor(logger *slog.Logger) connect.Interceptor {
 	if logger == nil {
 		return noopConnectInterceptor{}
 	}
-	return &rpcErrorLogInterceptor{logger: logger.With("component", "rpc_errors")}
+	return &rpcErrorLogInterceptor{logger: compRPCErrors.Apply(logger)}
 }
 
 type rpcErrorLogInterceptor struct {

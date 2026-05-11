@@ -78,6 +78,91 @@ proto3.util.setEnumType(IngesterMode, "gastrolog.v1.IngesterMode", [
 ]);
 
 /**
+ * LogLevel mirrors slog's named severities. Adding new levels here
+ * requires both ends of the wire to recognise them. Internal mapping
+ * to slog.Level happens in the server; clients render via the enum
+ * name.
+ *
+ * @generated from enum gastrolog.v1.LogLevel
+ */
+export enum LogLevel {
+  /**
+   * @generated from enum value: LOG_LEVEL_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: LOG_LEVEL_DEBUG = 1;
+   */
+  DEBUG = 1,
+
+  /**
+   * @generated from enum value: LOG_LEVEL_INFO = 2;
+   */
+  INFO = 2,
+
+  /**
+   * @generated from enum value: LOG_LEVEL_WARN = 3;
+   */
+  WARN = 3,
+
+  /**
+   * @generated from enum value: LOG_LEVEL_ERROR = 4;
+   */
+  ERROR = 4,
+}
+// Retrieve enum metadata with: proto3.getEnumType(LogLevel)
+proto3.util.setEnumType(LogLevel, "gastrolog.v1.LogLevel", [
+  { no: 0, name: "LOG_LEVEL_UNSPECIFIED" },
+  { no: 1, name: "LOG_LEVEL_DEBUG" },
+  { no: 2, name: "LOG_LEVEL_INFO" },
+  { no: 3, name: "LOG_LEVEL_WARN" },
+  { no: 4, name: "LOG_LEVEL_ERROR" },
+]);
+
+/**
+ * LogComponentLevelSource describes how a component's effective level
+ * was derived — used by the UI to render "explicit vs inherited"
+ * annotations on the path tree.
+ *
+ * @generated from enum gastrolog.v1.LogComponentLevelSource
+ */
+export enum LogComponentLevelSource {
+  /**
+   * @generated from enum value: LOG_LEVEL_SOURCE_UNSPECIFIED = 0;
+   */
+  LOG_LEVEL_SOURCE_UNSPECIFIED = 0,
+
+  /**
+   * no rule matched; fell through to default
+   *
+   * @generated from enum value: LOG_LEVEL_SOURCE_DEFAULT = 1;
+   */
+  LOG_LEVEL_SOURCE_DEFAULT = 1,
+
+  /**
+   * an exact-match rule applied
+   *
+   * @generated from enum value: LOG_LEVEL_SOURCE_EXACT_RULE = 2;
+   */
+  LOG_LEVEL_SOURCE_EXACT_RULE = 2,
+
+  /**
+   * a glob rule applied (single-* or **)
+   *
+   * @generated from enum value: LOG_LEVEL_SOURCE_GLOB_RULE = 3;
+   */
+  LOG_LEVEL_SOURCE_GLOB_RULE = 3,
+}
+// Retrieve enum metadata with: proto3.getEnumType(LogComponentLevelSource)
+proto3.util.setEnumType(LogComponentLevelSource, "gastrolog.v1.LogComponentLevelSource", [
+  { no: 0, name: "LOG_LEVEL_SOURCE_UNSPECIFIED" },
+  { no: 1, name: "LOG_LEVEL_SOURCE_DEFAULT" },
+  { no: 2, name: "LOG_LEVEL_SOURCE_EXACT_RULE" },
+  { no: 3, name: "LOG_LEVEL_SOURCE_GLOB_RULE" },
+]);
+
+/**
  * @generated from message gastrolog.v1.GetSystemRequest
  */
 export class GetSystemRequest extends Message<GetSystemRequest> {
@@ -165,6 +250,14 @@ export class GetSystemResponse extends Message<GetSystemResponse> {
    */
   nodeStorageConfigs: NodeStorageConfig[] = [];
 
+  /**
+   * Per-component log level configuration. Empty default_level means
+   * "use the binary's startup default" (typically INFO).
+   *
+   * @generated from field: gastrolog.v1.LogLevelConfig log_levels = 11;
+   */
+  logLevels?: LogLevelConfig;
+
   constructor(data?: PartialMessage<GetSystemResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -183,6 +276,7 @@ export class GetSystemResponse extends Message<GetSystemResponse> {
     { no: 8, name: "system_raft_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 9, name: "cloud_services", kind: "message", T: CloudService, repeated: true },
     { no: 10, name: "node_storage_configs", kind: "message", T: NodeStorageConfig, repeated: true },
+    { no: 11, name: "log_levels", kind: "message", T: LogLevelConfig },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetSystemResponse {
@@ -7104,6 +7198,331 @@ export class DeleteLookupResponse extends Message<DeleteLookupResponse> {
 
   static equals(a: DeleteLookupResponse | PlainMessage<DeleteLookupResponse> | undefined, b: DeleteLookupResponse | PlainMessage<DeleteLookupResponse> | undefined): boolean {
     return proto3.util.equals(DeleteLookupResponse, a, b);
+  }
+}
+
+/**
+ * LogLevelRule binds a component-path pattern to a level. Patterns are
+ * dot-separated path segments where each segment is either a literal
+ * (e.g. "orchestrator"), "*" (one segment), or "**" (zero or more
+ * segments). Wildcards may appear anywhere in the pattern.
+ *
+ * Examples:
+ *   "orchestrator"            exact match for that path
+ *   "orchestrator.*"          direct children only
+ *   "orchestrator.**"         orchestrator itself plus any descendant
+ *   "ingester.*.conn"         every ingester type's conn subsystem
+ *   "ingester.**.conn"        any conn anywhere under ingester
+ *
+ * Resolution chooses the most-specific matching pattern.
+ *
+ * @generated from message gastrolog.v1.LogLevelRule
+ */
+export class LogLevelRule extends Message<LogLevelRule> {
+  /**
+   * @generated from field: string pattern = 1;
+   */
+  pattern = "";
+
+  /**
+   * @generated from field: gastrolog.v1.LogLevel level = 2;
+   */
+  level = LogLevel.UNSPECIFIED;
+
+  constructor(data?: PartialMessage<LogLevelRule>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.LogLevelRule";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "pattern", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "level", kind: "enum", T: proto3.getEnumType(LogLevel) },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): LogLevelRule {
+    return new LogLevelRule().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): LogLevelRule {
+    return new LogLevelRule().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): LogLevelRule {
+    return new LogLevelRule().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: LogLevelRule | PlainMessage<LogLevelRule> | undefined, b: LogLevelRule | PlainMessage<LogLevelRule> | undefined): boolean {
+    return proto3.util.equals(LogLevelRule, a, b);
+  }
+}
+
+/**
+ * LogLevelConfig is the cluster-wide log level configuration: a
+ * fallback level plus a set of pattern overrides.
+ *
+ * @generated from message gastrolog.v1.LogLevelConfig
+ */
+export class LogLevelConfig extends Message<LogLevelConfig> {
+  /**
+   * The level used when no rule matches a component path. Empty
+   * (UNSPECIFIED) is treated as INFO at runtime.
+   *
+   * @generated from field: gastrolog.v1.LogLevel default_level = 1;
+   */
+  defaultLevel = LogLevel.UNSPECIFIED;
+
+  /**
+   * Pattern overrides. Order is not significant for matching; the
+   * most-specific pattern wins regardless of position.
+   *
+   * @generated from field: repeated gastrolog.v1.LogLevelRule rules = 2;
+   */
+  rules: LogLevelRule[] = [];
+
+  constructor(data?: PartialMessage<LogLevelConfig>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.LogLevelConfig";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "default_level", kind: "enum", T: proto3.getEnumType(LogLevel) },
+    { no: 2, name: "rules", kind: "message", T: LogLevelRule, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): LogLevelConfig {
+    return new LogLevelConfig().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): LogLevelConfig {
+    return new LogLevelConfig().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): LogLevelConfig {
+    return new LogLevelConfig().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: LogLevelConfig | PlainMessage<LogLevelConfig> | undefined, b: LogLevelConfig | PlainMessage<LogLevelConfig> | undefined): boolean {
+    return proto3.util.equals(LogLevelConfig, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PutLogLevelsRequest
+ */
+export class PutLogLevelsRequest extends Message<PutLogLevelsRequest> {
+  /**
+   * @generated from field: gastrolog.v1.LogLevelConfig config = 1;
+   */
+  config?: LogLevelConfig;
+
+  constructor(data?: PartialMessage<PutLogLevelsRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutLogLevelsRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "config", kind: "message", T: LogLevelConfig },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutLogLevelsRequest {
+    return new PutLogLevelsRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutLogLevelsRequest {
+    return new PutLogLevelsRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutLogLevelsRequest {
+    return new PutLogLevelsRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutLogLevelsRequest | PlainMessage<PutLogLevelsRequest> | undefined, b: PutLogLevelsRequest | PlainMessage<PutLogLevelsRequest> | undefined): boolean {
+    return proto3.util.equals(PutLogLevelsRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PutLogLevelsResponse
+ */
+export class PutLogLevelsResponse extends Message<PutLogLevelsResponse> {
+  /**
+   * @generated from field: gastrolog.v1.SettingsMutationEcho echo = 1;
+   */
+  echo?: SettingsMutationEcho;
+
+  constructor(data?: PartialMessage<PutLogLevelsResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutLogLevelsResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "echo", kind: "message", T: SettingsMutationEcho },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutLogLevelsResponse {
+    return new PutLogLevelsResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutLogLevelsResponse {
+    return new PutLogLevelsResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutLogLevelsResponse {
+    return new PutLogLevelsResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutLogLevelsResponse | PlainMessage<PutLogLevelsResponse> | undefined, b: PutLogLevelsResponse | PlainMessage<PutLogLevelsResponse> | undefined): boolean {
+    return proto3.util.equals(PutLogLevelsResponse, a, b);
+  }
+}
+
+/**
+ * LogComponentInfo is one row of the ListLogComponents response: a
+ * component path the binary has constructed, with its currently
+ * effective level, how that level was resolved, and an
+ * operator-readable description (if the path declared one).
+ *
+ * @generated from message gastrolog.v1.LogComponentInfo
+ */
+export class LogComponentInfo extends Message<LogComponentInfo> {
+  /**
+   * @generated from field: string path = 1;
+   */
+  path = "";
+
+  /**
+   * @generated from field: gastrolog.v1.LogLevel effective_level = 2;
+   */
+  effectiveLevel = LogLevel.UNSPECIFIED;
+
+  /**
+   * @generated from field: gastrolog.v1.LogComponentLevelSource source = 3;
+   */
+  source = LogComponentLevelSource.LOG_LEVEL_SOURCE_UNSPECIFIED;
+
+  /**
+   * @generated from field: string description = 4;
+   */
+  description = "";
+
+  /**
+   * matching_pattern is the rule pattern that produced effective_level.
+   * Empty when source = DEFAULT (no rule matched). For EXACT_RULE and
+   * GLOB_RULE, this is the exact text the operator typed into the rule
+   * editor, so the UI can cross-reference back to the rules list.
+   *
+   * @generated from field: string matching_pattern = 5;
+   */
+  matchingPattern = "";
+
+  constructor(data?: PartialMessage<LogComponentInfo>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.LogComponentInfo";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "effective_level", kind: "enum", T: proto3.getEnumType(LogLevel) },
+    { no: 3, name: "source", kind: "enum", T: proto3.getEnumType(LogComponentLevelSource) },
+    { no: 4, name: "description", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 5, name: "matching_pattern", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): LogComponentInfo {
+    return new LogComponentInfo().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): LogComponentInfo {
+    return new LogComponentInfo().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): LogComponentInfo {
+    return new LogComponentInfo().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: LogComponentInfo | PlainMessage<LogComponentInfo> | undefined, b: LogComponentInfo | PlainMessage<LogComponentInfo> | undefined): boolean {
+    return proto3.util.equals(LogComponentInfo, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ListLogComponentsRequest
+ */
+export class ListLogComponentsRequest extends Message<ListLogComponentsRequest> {
+  constructor(data?: PartialMessage<ListLogComponentsRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ListLogComponentsRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ListLogComponentsRequest {
+    return new ListLogComponentsRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ListLogComponentsRequest {
+    return new ListLogComponentsRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ListLogComponentsRequest {
+    return new ListLogComponentsRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ListLogComponentsRequest | PlainMessage<ListLogComponentsRequest> | undefined, b: ListLogComponentsRequest | PlainMessage<ListLogComponentsRequest> | undefined): boolean {
+    return proto3.util.equals(ListLogComponentsRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ListLogComponentsResponse
+ */
+export class ListLogComponentsResponse extends Message<ListLogComponentsResponse> {
+  /**
+   * Components are sorted by path. Discovery is per-node; binaries
+   * built from the same source produce identical sets.
+   *
+   * @generated from field: repeated gastrolog.v1.LogComponentInfo components = 1;
+   */
+  components: LogComponentInfo[] = [];
+
+  constructor(data?: PartialMessage<ListLogComponentsResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ListLogComponentsResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "components", kind: "message", T: LogComponentInfo, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ListLogComponentsResponse {
+    return new ListLogComponentsResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ListLogComponentsResponse {
+    return new ListLogComponentsResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ListLogComponentsResponse {
+    return new ListLogComponentsResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ListLogComponentsResponse | PlainMessage<ListLogComponentsResponse> | undefined, b: ListLogComponentsResponse | PlainMessage<ListLogComponentsResponse> | undefined): boolean {
+    return proto3.util.equals(ListLogComponentsResponse, a, b);
   }
 }
 

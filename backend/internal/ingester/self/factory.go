@@ -5,6 +5,7 @@ package self
 
 import (
 	"gastrolog/internal/glid"
+	"gastrolog/internal/logging/comp"
 	"log/slog"
 	"strings"
 
@@ -31,11 +32,7 @@ func NewFactory(
 	alerts orchestrator.AlertCollector,
 ) orchestrator.IngesterFactory {
 	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
-		scopedLogger := logging.Default(logger).With(
-			"component", "ingester",
-			"type", "self",
-			"instance", id.String(),
-		)
+		scopedLogger := comp.Ingester.Sub("self").Desc("Self ingester — captures slog records emitted by this binary into a vault, mirroring stderr.").Apply(logging.Default(logger))
 
 		// Apply min_level param to the capture handler.
 		baseLevel := slog.LevelWarn

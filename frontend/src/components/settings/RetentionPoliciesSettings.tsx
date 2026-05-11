@@ -111,7 +111,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
     };
   };
 
-  const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
+  const { getEdit, setEdit, isDirty } = useEditState(defaults);
 
   const { handleSave: savePolicy, handleDelete } = useCrudHandlers({
     mutation: putPolicy,

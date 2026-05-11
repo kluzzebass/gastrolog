@@ -126,6 +126,11 @@ type RunConfig struct {
 	// SlogCaptureHandler is the CaptureHandler that tees slog records.
 	// Passed to the self ingester factory so it can apply the min_level param.
 	SlogCaptureHandler *logging.CaptureHandler
+
+	// LogFilter is the ComponentFilterHandler whose rule set is driven
+	// from the system config store (gastrolog-3flfp). The watcher reads
+	// LogLevelConfig and calls SetRuleSet on every configSignal fire.
+	LogFilter *logging.ComponentFilterHandler
 }
 
 // Run starts the gastrolog server. It wires all components, starts the
@@ -157,7 +162,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 	configSignal := notify.NewSignal()
 	statsSignal := notify.NewSignal()
-	disp := &configDispatcher{localNodeID: nodeID, logger: logger.With("component", "dispatch"), clusterTLS: clusterTLS, tlsFilePath: hd.ClusterTLSPath(), configSignal: configSignal}
+	disp := &configDispatcher{localNodeID: nodeID, logger: compDispatch.Apply(logger), clusterTLS: clusterTLS, tlsFilePath: hd.ClusterTLSPath(), configSignal: configSignal}
 	rawStore, err := openConfigStore(cfg.ConfigType, raftStoreOpts{
 		Home: hd, NodeID: nodeID, JoinAddr: cfg.JoinAddr,
 		ClusterSrv: clusterSrv, ClusterTLS: clusterTLS,
@@ -276,6 +281,14 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	disp.orch = orch
 	disp.cfgStore = cfgStore
 	disp.factories = factories
+
+	// Sync the ComponentFilterHandler's rule set with the system config
+	// store. Watcher runs until ctx is cancelled; on every configSignal
+	// fire it reads LogLevelConfig and atomically swaps the rule set
+	// across every derived handler in the process (gastrolog-3flfp).
+	if cfg.LogFilter != nil {
+		go WatchLogLevels(ctx, cfg.LogFilter, cfgStore, configSignal, logger)
+	}
 	disp.catchupScheduler = func(vaultID glid.GLID, followerNodeIDs []string) {
 		orch.ScheduleCatchup(vaultID, followerNodeIDs)
 	}
@@ -331,7 +344,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 			factories:   &factories,
 			alerts:      alertCollector,
 			localNodeID: nodeID,
-			logger:      logger.With("component", "placement"),
+			logger:      compPlacement.Apply(logger),
 			triggerCh:   make(chan struct{}, 1),
 		}
 		disp.placementTrigger = pm.Trigger
@@ -414,6 +427,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 		BootstrapTokenServeSecret: cfg.BootstrapTokenServeSecret,
 		BootstrapTokenFn:          makeBootstrapTokenFn(cfgStore),
+
+		LogFilter: cfg.LogFilter,
 	})
 }
 
@@ -425,7 +440,7 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 
 	recordForwarder := cluster.NewRecordForwarder(
 		peerConns,
-		logger.With("component", "record-forwarder"),
+		compRecordForwarder.Apply(logger),
 		alerts,
 	)
 	orch.SetRecordForwarder(recordForwarder)
@@ -481,7 +496,7 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	orch.SetRemoteTransferrer(chunkTransferrer)
 
 	// Vault replication: unified ordered stream per vault per follower.
-	chunkReplicator := cluster.NewChunkReplicator(peerConns, logger.With("component", "vault-replicator"))
+	chunkReplicator := cluster.NewChunkReplicator(peerConns, compVaultReplicator.Apply(logger))
 	orch.SetChunkReplicator(chunkReplicator)
 
 	// Same readiness gate for bulk chunk imports.
@@ -533,7 +548,7 @@ func wireManagedFileTransfer(clusterSrv *cluster.Server, httpSrv *server.Server,
 		transferrer: transferrer,
 		peerIDs:     peerConns.PeerIDs,
 		fileExists:  httpSrv.ManagedFileExists,
-		logger:      logger.With("component", "managed-files"),
+		logger:      compManagedFiles.Apply(logger),
 	}
 }
 
@@ -571,7 +586,7 @@ func startOrchestrator(ctx context.Context, logger *slog.Logger, orch *orchestra
 func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, recordForwarder *cluster.RecordForwarder, alerts *alert.Collector, nodeID string, apiAddr string, pprofAddr string, statsSignal *notify.Signal) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats) {
 	var broadcaster *cluster.Broadcaster
 	if clusterSrv != nil && clusterSrv.PeerConns() != nil {
-		broadcaster = cluster.NewBroadcaster(clusterSrv.PeerConns(), logger.With("component", "broadcast"))
+		broadcaster = cluster.NewBroadcaster(clusterSrv.PeerConns(), compBroadcast.Apply(logger))
 	}
 	if broadcaster == nil || clusterSrv == nil {
 		return nil, nil, nil, nil
@@ -624,7 +639,7 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 		ApiAddress:        apiAddr,
 		PprofAddress:      pprofAddr,
 		StatsSignal:       statsSignal,
-		Logger:            logger.With("component", "stats-collector"),
+		Logger:            compStatsCollector.Apply(logger),
 	})
 
 	orch.Scheduler().SetOnJobChange(func() {
@@ -1000,6 +1015,8 @@ type serverDeps struct {
 	// returns the cluster join token from the live config store.
 	BootstrapTokenServeSecret string
 	BootstrapTokenFn          func() (string, error)
+
+	LogFilter *logging.ComponentFilterHandler
 }
 
 func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
@@ -1024,6 +1041,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 			PlacementReconcile: deps.PlacementReconcile,
 			BootstrapTokenServeSecret: deps.BootstrapTokenServeSecret,
 			BootstrapTokenFn:          deps.BootstrapTokenFn,
+			LogFilter:                 deps.LogFilter,
 		})
 		// Provide the cluster's ForwardRPC handler with the internal mux.
 		// NoAuthInterceptor + no routing interceptor prevents loops.

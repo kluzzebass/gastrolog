@@ -15,6 +15,7 @@ import (
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/ingester/bodyutil"
 	"gastrolog/internal/logging"
+	"gastrolog/internal/logging/comp"
 	"gastrolog/internal/orchestrator"
 )
 
@@ -75,7 +76,7 @@ func New(cfg Config) *Ingester {
 	return &Ingester{
 		id:     cfg.ID,
 		addr:   cfg.Addr,
-		logger: logging.Default(cfg.Logger).With("component", "ingester", "type", "http"),
+		logger: comp.Ingester.Sub("http").Desc("HTTP ingester — accepts log messages via the Loki Push API (POST /loki/api/v1/push).").Apply(logging.Default(cfg.Logger)),
 		ready:  make(chan struct{}),
 	}
 }

@@ -87,6 +87,12 @@ func DefaultRoutes() map[string]RPCRoute {
 		gastrologv1connect.SystemServiceDeleteCloudServiceProcedure:   {Strategy: RouteLeader},
 		gastrologv1connect.SystemServiceSetNodeStorageConfigProcedure: {Strategy: RouteLeader},
 		gastrologv1connect.SystemServiceDeleteLookupProcedure:         {Strategy: RouteLeader},
+		// Log levels — PutLogLevels mutates the system config (leader); the
+		// ComponentFilterHandler on every node picks up the change via
+		// the configSignal fan-out. ListLogComponents is local — every
+		// binary's comp registry is identical.
+		gastrologv1connect.SystemServicePutLogLevelsProcedure:      {Strategy: RouteLeader},
+		gastrologv1connect.SystemServiceListLogComponentsProcedure: {Strategy: RouteLocal},
 
 		// ── JobService ───────────────────────────────────────────────────
 		gastrologv1connect.JobServiceGetJobProcedure:    {Strategy: RouteLocal},

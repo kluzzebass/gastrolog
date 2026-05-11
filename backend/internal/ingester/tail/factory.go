@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/logging/comp"
 	"log/slog"
 	"path/filepath"
 	"time"
@@ -75,6 +76,6 @@ func parseConfig(id string, params map[string]string, logger *slog.Logger) (conf
 		Patterns:     patterns,
 		PollInterval: pollInterval,
 		StateFile:    stateFile,
-		Logger:       logging.Default(logger).With("component", "ingester", "type", "tail", "instance", id),
+		Logger:       comp.Ingester.Sub("tail").Desc("Tail ingester — follows local log files (rotation-aware), one instance per file path.").Apply(logging.Default(logger)),
 	}, nil
 }

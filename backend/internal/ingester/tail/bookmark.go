@@ -24,7 +24,7 @@ func loadBookmarks(path string) (bookmarks, error) {
 		return b, nil
 	}
 
-	data, err := os.ReadFile(filepath.Clean(path))
+	data, err := os.ReadFile(filepath.Clean(path)) //ok:os-readfile small JSON bookmark map; json.Unmarshal needs full bytes
 	if err != nil {
 		if os.IsNotExist(err) {
 			return b, nil

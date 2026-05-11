@@ -7,6 +7,7 @@ import (
 
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/logging"
+	"gastrolog/internal/logging/comp"
 	"gastrolog/internal/orchestrator"
 )
 
@@ -40,7 +41,7 @@ type Config struct {
 
 // New creates an MQTT ingester for the configured protocol version.
 func New(cfg Config) orchestrator.Ingester {
-	logger := logging.Default(cfg.Logger).With("component", "ingester", "type", "mqtt")
+	logger := comp.Ingester.Sub("mqtt").Desc("MQTT subscribing ingester — accepts messages from MQTT v3.1.1 and v5 brokers.").Apply(logging.Default(cfg.Logger))
 	if cfg.Version == 5 {
 		return &v5Ingester{cfg: cfg, logger: logger}
 	}

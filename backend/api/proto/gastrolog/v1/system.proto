@@ -163,6 +163,17 @@ service SystemService {
 
   // DeleteLookup removes a lookup table by name (any type).
   rpc DeleteLookup(DeleteLookupRequest) returns (DeleteLookupResponse);
+
+  // Log levels (gastrolog-3flfp). PutLogLevels replaces the cluster-wide
+  // log-level configuration; the FSM dispatcher propagates it to every
+  // node, where the ComponentFilterHandler atomically swaps its rule set.
+  rpc PutLogLevels(PutLogLevelsRequest) returns (PutLogLevelsResponse);
+
+  // ListLogComponents enumerates the component paths the receiving node's
+  // binary has constructed, with each path's effective level resolved
+  // against the current rule set. Used by the CLI (tab-completion) and
+  // UI (tree view + "explicit vs inherited" annotations).
+  rpc ListLogComponents(ListLogComponentsRequest) returns (ListLogComponentsResponse);
 }
 
 message GetSystemRequest {}
@@ -180,6 +191,9 @@ message GetSystemResponse {
   uint64 system_raft_index = 8;
   repeated CloudService cloud_services = 9;
   repeated NodeStorageConfig node_storage_configs = 10;
+  // Per-component log level configuration. Empty default_level means
+  // "use the binary's startup default" (typically INFO).
+  LogLevelConfig log_levels = 11;
 }
 
 // RetentionRule binds a retention policy to a vault. Phase 4 (gastrolog-42f9z)
@@ -1068,4 +1082,89 @@ message DeleteLookupRequest {
 
 message DeleteLookupResponse {
   SettingsMutationEcho echo = 1;
+}
+
+// --- Log Levels (gastrolog-3flfp) ---
+
+// LogLevel mirrors slog's named severities. Adding new levels here
+// requires both ends of the wire to recognise them. Internal mapping
+// to slog.Level happens in the server; clients render via the enum
+// name.
+enum LogLevel {
+  LOG_LEVEL_UNSPECIFIED = 0;
+  LOG_LEVEL_DEBUG = 1;
+  LOG_LEVEL_INFO = 2;
+  LOG_LEVEL_WARN = 3;
+  LOG_LEVEL_ERROR = 4;
+}
+
+// LogLevelRule binds a component-path pattern to a level. Patterns are
+// dot-separated path segments where each segment is either a literal
+// (e.g. "orchestrator"), "*" (one segment), or "**" (zero or more
+// segments). Wildcards may appear anywhere in the pattern.
+//
+// Examples:
+//   "orchestrator"            exact match for that path
+//   "orchestrator.*"          direct children only
+//   "orchestrator.**"         orchestrator itself plus any descendant
+//   "ingester.*.conn"         every ingester type's conn subsystem
+//   "ingester.**.conn"        any conn anywhere under ingester
+//
+// Resolution chooses the most-specific matching pattern.
+message LogLevelRule {
+  string pattern = 1;
+  LogLevel level = 2;
+}
+
+// LogLevelConfig is the cluster-wide log level configuration: a
+// fallback level plus a set of pattern overrides.
+message LogLevelConfig {
+  // The level used when no rule matches a component path. Empty
+  // (UNSPECIFIED) is treated as INFO at runtime.
+  LogLevel default_level = 1;
+  // Pattern overrides. Order is not significant for matching; the
+  // most-specific pattern wins regardless of position.
+  repeated LogLevelRule rules = 2;
+}
+
+message PutLogLevelsRequest {
+  LogLevelConfig config = 1;
+}
+
+message PutLogLevelsResponse {
+  SettingsMutationEcho echo = 1;
+}
+
+// LogComponentLevelSource describes how a component's effective level
+// was derived — used by the UI to render "explicit vs inherited"
+// annotations on the path tree.
+enum LogComponentLevelSource {
+  LOG_LEVEL_SOURCE_UNSPECIFIED = 0;
+  LOG_LEVEL_SOURCE_DEFAULT = 1;     // no rule matched; fell through to default
+  LOG_LEVEL_SOURCE_EXACT_RULE = 2;  // an exact-match rule applied
+  LOG_LEVEL_SOURCE_GLOB_RULE = 3;   // a glob rule applied (single-* or **)
+}
+
+// LogComponentInfo is one row of the ListLogComponents response: a
+// component path the binary has constructed, with its currently
+// effective level, how that level was resolved, and an
+// operator-readable description (if the path declared one).
+message LogComponentInfo {
+  string path = 1;
+  LogLevel effective_level = 2;
+  LogComponentLevelSource source = 3;
+  string description = 4;
+  // matching_pattern is the rule pattern that produced effective_level.
+  // Empty when source = DEFAULT (no rule matched). For EXACT_RULE and
+  // GLOB_RULE, this is the exact text the operator typed into the rule
+  // editor, so the UI can cross-reference back to the rules list.
+  string matching_pattern = 5;
+}
+
+message ListLogComponentsRequest {}
+
+message ListLogComponentsResponse {
+  // Components are sorted by path. Discovery is per-node; binaries
+  // built from the same source produce identical sets.
+  repeated LogComponentInfo components = 1;
 }

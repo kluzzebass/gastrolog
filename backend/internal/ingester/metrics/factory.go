@@ -3,6 +3,7 @@ package metrics
 import (
 	"fmt"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/logging/comp"
 	"log/slog"
 	"time"
 
@@ -58,11 +59,7 @@ func NewFactory(src StatsSource) orchestrator.IngesterFactory {
 			vaultInterval = d
 		}
 
-		scopedLogger := logging.Default(logger).With(
-			"component", "ingester",
-			"type", "metrics",
-			"instance", id.String(),
-		)
+		scopedLogger := comp.Ingester.Sub("metrics").Desc("Metrics ingester — emits cluster/node performance metrics as ingestable records.").Apply(logging.Default(logger))
 
 		return &ingester{
 			id:            id.String(),

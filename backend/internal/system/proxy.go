@@ -370,6 +370,24 @@ func (p *StoreProxy) PutClusterTLS(ctx context.Context, tls ClusterTLS) error {
 	return p.inner.PutClusterTLS(ctx, tls)
 }
 
+func (p *StoreProxy) GetLogLevels(ctx context.Context) (LogLevelConfig, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if err := p.check(); err != nil {
+		return LogLevelConfig{}, err
+	}
+	return p.inner.GetLogLevels(ctx)
+}
+
+func (p *StoreProxy) PutLogLevels(ctx context.Context, cfg LogLevelConfig) error {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if err := p.check(); err != nil {
+		return err
+	}
+	return p.inner.PutLogLevels(ctx, cfg)
+}
+
 func (p *StoreProxy) ListCertificates(ctx context.Context) ([]CertPEM, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()

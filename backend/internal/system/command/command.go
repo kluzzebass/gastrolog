@@ -849,6 +849,11 @@ func BuildSnapshot(sys *system.System, users []system.User, tokens []system.Refr
 
 	snap.SetupWizardDismissed = rt.SetupWizardDismissed
 
+	// Config: log levels (gastrolog-3flfp).
+	if cfg.LogLevels.Default != 0 || len(cfg.LogLevels.Rules) > 0 {
+		snap.LogLevels = convert.LogLevelConfigToProto(cfg.LogLevels)
+	}
+
 	return snap
 }
 
@@ -974,6 +979,11 @@ func RestoreSnapshot(snap *gastrologv1.SystemSnapshot) (*system.System, []system
 	if snap.ClusterTls != nil {
 		tls := ExtractPutClusterTLS(snap.ClusterTls)
 		rt.ClusterTLS = &tls
+	}
+
+	// Restore log levels (gastrolog-3flfp).
+	if snap.GetLogLevels() != nil {
+		cfg.LogLevels = convert.LogLevelConfigFromProto(snap.GetLogLevels())
 	}
 
 	// Restore vault placements.

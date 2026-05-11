@@ -15,6 +15,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/format"
 	"gastrolog/internal/logging"
+	"gastrolog/internal/logging/comp"
 	"gastrolog/internal/tokenizer"
 )
 
@@ -46,7 +47,7 @@ func NewIndexer(dir string, manager chunk.ChunkManager, logger *slog.Logger) *In
 	return &Indexer{
 		dir:     dir,
 		manager: manager,
-		logger:  logging.Default(logger).With("component", "indexer", "type", "token"),
+		logger:  comp.Indexer.Sub("token").Desc("Full-text token index — tokenized free-text search across record bodies.").Apply(logging.Default(logger)),
 	}
 }
 

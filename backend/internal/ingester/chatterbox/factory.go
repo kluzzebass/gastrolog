@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/logging/comp"
 	"log/slog"
 	"math/rand/v2"
 	"slices"
@@ -136,10 +137,7 @@ func NewIngester(id glid.GLID, params map[string]string, logger *slog.Logger) (o
 	formats, cumulativeWeights, totalWeight := buildFormats(enabledFormats, weights, pools)
 
 	// Scope logger with component identity.
-	scopedLogger := logging.Default(logger).With(
-		"component", "ingester",
-		"type", "chatterbox",
-	)
+	scopedLogger := comp.Ingester.Sub("chatterbox").Desc("Chatterbox ingester — synthetic high-volume traffic generator for load testing.").Apply(logging.Default(logger))
 
 	return &Ingester{
 		id:          id.String(),

@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { DeleteCertificateRequest, DeleteCertificateResponse, DeleteCloudServiceRequest, DeleteCloudServiceResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteLookupRequest, DeleteLookupResponse, DeleteManagedFileRequest, DeleteManagedFileResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteRouteRequest, DeleteRouteResponse, DeleteSavedQueryRequest, DeleteSavedQueryResponse, DeleteVaultRequest, DeleteVaultResponse, GenerateNameRequest, GenerateNameResponse, GetCertificateRequest, GetCertificateResponse, GetIngesterDefaultsRequest, GetIngesterDefaultsResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetPreferencesRequest, GetPreferencesResponse, GetRouteStatsRequest, GetRouteStatsResponse, GetSavedQueriesRequest, GetSavedQueriesResponse, GetSettingsRequest, GetSettingsResponse, GetSystemRequest, GetSystemResponse, ListCertificatesRequest, ListCertificatesResponse, ListIngestersRequest, ListIngestersResponse, ListManagedFilesRequest, ListManagedFilesResponse, PauseVaultRequest, PauseVaultResponse, PreviewCSVLookupRequest, PreviewCSVLookupResponse, PreviewJSONLookupRequest, PreviewJSONLookupResponse, PreviewYAMLLookupRequest, PreviewYAMLLookupResponse, PutCertificateRequest, PutCertificateResponse, PutCloudServiceRequest, PutCloudServiceResponse, PutIngesterRequest, PutIngesterResponse, PutLookupSettingsRequest, PutLookupSettingsResponse, PutMaxMindSettingsRequest, PutMaxMindSettingsResponse, PutNodeConfigRequest, PutNodeConfigResponse, PutPreferencesRequest, PutPreferencesResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutRouteRequest, PutRouteResponse, PutSavedQueryRequest, PutSavedQueryResponse, PutServiceSettingsRequest, PutServiceSettingsResponse, PutSetupSettingsRequest, PutSetupSettingsResponse, PutVaultRequest, PutVaultResponse, RegenerateJwtSecretRequest, RegenerateJwtSecretResponse, ResumeVaultRequest, ResumeVaultResponse, SetNodeStorageConfigRequest, SetNodeStorageConfigResponse, TestCloudServiceRequest, TestCloudServiceResponse, TestHTTPLookupRequest, TestHTTPLookupResponse, TestIngesterRequest, TestIngesterResponse, TriggerIngesterRequest, TriggerIngesterResponse, ValidateExpressionRequest, ValidateExpressionResponse, WatchIngesterStatusRequest, WatchIngesterStatusResponse, WatchSystemRequest, WatchSystemResponse } from "./system_pb.js";
+import { DeleteCertificateRequest, DeleteCertificateResponse, DeleteCloudServiceRequest, DeleteCloudServiceResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteLookupRequest, DeleteLookupResponse, DeleteManagedFileRequest, DeleteManagedFileResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteRouteRequest, DeleteRouteResponse, DeleteSavedQueryRequest, DeleteSavedQueryResponse, DeleteVaultRequest, DeleteVaultResponse, GenerateNameRequest, GenerateNameResponse, GetCertificateRequest, GetCertificateResponse, GetIngesterDefaultsRequest, GetIngesterDefaultsResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetPreferencesRequest, GetPreferencesResponse, GetRouteStatsRequest, GetRouteStatsResponse, GetSavedQueriesRequest, GetSavedQueriesResponse, GetSettingsRequest, GetSettingsResponse, GetSystemRequest, GetSystemResponse, ListCertificatesRequest, ListCertificatesResponse, ListIngestersRequest, ListIngestersResponse, ListLogComponentsRequest, ListLogComponentsResponse, ListManagedFilesRequest, ListManagedFilesResponse, PauseVaultRequest, PauseVaultResponse, PreviewCSVLookupRequest, PreviewCSVLookupResponse, PreviewJSONLookupRequest, PreviewJSONLookupResponse, PreviewYAMLLookupRequest, PreviewYAMLLookupResponse, PutCertificateRequest, PutCertificateResponse, PutCloudServiceRequest, PutCloudServiceResponse, PutIngesterRequest, PutIngesterResponse, PutLogLevelsRequest, PutLogLevelsResponse, PutLookupSettingsRequest, PutLookupSettingsResponse, PutMaxMindSettingsRequest, PutMaxMindSettingsResponse, PutNodeConfigRequest, PutNodeConfigResponse, PutPreferencesRequest, PutPreferencesResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutRouteRequest, PutRouteResponse, PutSavedQueryRequest, PutSavedQueryResponse, PutServiceSettingsRequest, PutServiceSettingsResponse, PutSetupSettingsRequest, PutSetupSettingsResponse, PutVaultRequest, PutVaultResponse, RegenerateJwtSecretRequest, RegenerateJwtSecretResponse, ResumeVaultRequest, ResumeVaultResponse, SetNodeStorageConfigRequest, SetNodeStorageConfigResponse, TestCloudServiceRequest, TestCloudServiceResponse, TestHTTPLookupRequest, TestHTTPLookupResponse, TestIngesterRequest, TestIngesterResponse, TriggerIngesterRequest, TriggerIngesterResponse, ValidateExpressionRequest, ValidateExpressionResponse, WatchIngesterStatusRequest, WatchIngesterStatusResponse, WatchSystemRequest, WatchSystemResponse } from "./system_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -568,6 +568,33 @@ export const SystemService = {
       name: "DeleteLookup",
       I: DeleteLookupRequest,
       O: DeleteLookupResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * Log levels (gastrolog-3flfp). PutLogLevels replaces the cluster-wide
+     * log-level configuration; the FSM dispatcher propagates it to every
+     * node, where the ComponentFilterHandler atomically swaps its rule set.
+     *
+     * @generated from rpc gastrolog.v1.SystemService.PutLogLevels
+     */
+    putLogLevels: {
+      name: "PutLogLevels",
+      I: PutLogLevelsRequest,
+      O: PutLogLevelsResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * ListLogComponents enumerates the component paths the receiving node's
+     * binary has constructed, with each path's effective level resolved
+     * against the current rule set. Used by the CLI (tab-completion) and
+     * UI (tree view + "explicit vs inherited" annotations).
+     *
+     * @generated from rpc gastrolog.v1.SystemService.ListLogComponents
+     */
+    listLogComponents: {
+      name: "ListLogComponents",
+      I: ListLogComponentsRequest,
+      O: ListLogComponentsResponse,
       kind: MethodKind.Unary,
     },
   }

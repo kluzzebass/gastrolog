@@ -3,6 +3,7 @@ package scatterbox
 import (
 	"fmt"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/logging/comp"
 	"log/slog"
 	"strconv"
 	"time"
@@ -79,10 +80,7 @@ func NewIngester(id glid.GLID, params map[string]string, logger *slog.Logger) (o
 		burst = n
 	}
 
-	_ = logging.Default(logger).With(
-		"component", "ingester",
-		"type", "scatterbox",
-	)
+	_ = comp.Ingester.Sub("scatterbox").Desc("Scatterbox ingester — synthetic structured-events generator for testing.").Apply(logging.Default(logger))
 
 	return &Ingester{
 		id:       id.String(),

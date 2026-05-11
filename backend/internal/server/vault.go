@@ -60,7 +60,7 @@ func NewVaultServer(orch *orchestrator.Orchestrator, cfgStore system.Store, fact
 		remoteChunkLister: remoteChunkLister,
 		remoteIndexer:     remoteIndexer,
 		localNodeID:       localNodeID,
-		logger:            logging.Default(logger).With("component", "vault-server"),
+		logger:            compVaultServer.Apply(logging.Default(logger)),
 	}
 }
 

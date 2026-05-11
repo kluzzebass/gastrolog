@@ -111,7 +111,7 @@ func (o *Orchestrator) archivalSweepAll() {
 func (o *Orchestrator) archivalSweepVault(vaultInst *VaultInstance, cs *system.CloudService, now time.Time) {
 	metas, err := vaultInst.Chunks.List()
 	if err != nil {
-		o.logger.Warn("archival sweep: list chunks failed", "vault", vaultInst.VaultID, "error", err)
+		o.retentionLogger.Warn("archival sweep: list chunks failed", "vault", vaultInst.VaultID, "error", err)
 		return
 	}
 
@@ -152,10 +152,10 @@ func (o *Orchestrator) archivalSweepVault(vaultInst *VaultInstance, cs *system.C
 		}
 
 		if err := archiver.ArchiveChunk(context.Background(), m.ID, target.StorageClass); err != nil {
-			o.logger.Warn("archival sweep: archive failed",
+			o.retentionLogger.Warn("archival sweep: archive failed",
 				"chunk", m.ID.String(), "class", target.StorageClass, "error", err)
 		} else {
-			o.logger.Debug("archival sweep: archived chunk",
+			o.retentionLogger.Debug("archival sweep: archived chunk",
 				"chunk", m.ID.String(), "class", target.StorageClass, "age", age)
 		}
 	}
@@ -169,20 +169,20 @@ func (o *Orchestrator) archivalSweepVault(vaultInst *VaultInstance, cs *system.C
 func (o *Orchestrator) archivalExpire(vaultInst *VaultInstance, id chunk.ChunkID, age time.Duration) {
 	if vaultInst.Reconciler != nil {
 		if err := vaultInst.Reconciler.deleteChunk(id, "archived-to-glacier", o.placementMembership(vaultInst)); err != nil {
-			o.logger.Warn("archival sweep: reconciler delete failed",
+			o.retentionLogger.Warn("archival sweep: reconciler delete failed",
 				"chunk", id.String(), "error", err)
 			return
 		}
-		o.logger.Info("archival sweep: expired chunk",
+		o.retentionLogger.Info("archival sweep: expired chunk",
 			"chunk", id.String(), "age", age)
 		return
 	}
 	if err := vaultInst.Chunks.Delete(id); err != nil {
-		o.logger.Warn("archival sweep: delete failed",
+		o.retentionLogger.Warn("archival sweep: delete failed",
 			"chunk", id.String(), "error", err)
 		return
 	}
-	o.logger.Info("archival sweep: expired chunk",
+	o.retentionLogger.Info("archival sweep: expired chunk",
 		"chunk", id.String(), "age", age)
 }
 
@@ -311,7 +311,7 @@ func (o *Orchestrator) reconcileCloudChunk(vaultInst *VaultInstance, id chunk.Ch
 
 	suspectDays := uint32(now.Sub(since).Hours() / 24)
 	if suspectDays < graceDays {
-		o.logger.Info("reconcile: chunk still suspect",
+		o.retentionLogger.Info("reconcile: chunk still suspect",
 			"vault", vaultInst.VaultID, "chunk", id.String(),
 			"suspectDays", suspectDays, "graceDays", graceDays)
 		return
@@ -341,7 +341,7 @@ func (o *Orchestrator) markSuspect(vaultInst *VaultInstance, id chunk.ChunkID, n
 			"Cloud chunk "+id.String()+" not found in blob store — monitoring",
 		)
 	}
-	o.logger.Warn("reconcile: chunk not found, marking suspect",
+	o.retentionLogger.Warn("reconcile: chunk not found, marking suspect",
 		"vault", vaultInst.VaultID, "chunk", id.String())
 }
 
@@ -353,12 +353,12 @@ func (o *Orchestrator) markSuspect(vaultInst *VaultInstance, id chunk.ChunkID, n
 func (o *Orchestrator) expireSuspect(vaultInst *VaultInstance, id chunk.ChunkID, suspectDays uint32) {
 	if vaultInst.Reconciler != nil {
 		if err := vaultInst.Reconciler.deleteChunk(id, "cloud-blob-missing", o.placementMembership(vaultInst)); err != nil {
-			o.logger.Error("reconcile: reconciler delete failed",
+			o.retentionLogger.Error("reconcile: reconciler delete failed",
 				"vault", vaultInst.VaultID, "chunk", id.String(), "error", err)
 			return
 		}
 	} else if err := vaultInst.Chunks.Delete(id); err != nil {
-		o.logger.Error("reconcile: failed to remove suspect chunk from index",
+		o.retentionLogger.Error("reconcile: failed to remove suspect chunk from index",
 			"vault", vaultInst.VaultID, "chunk", id.String(), "error", err)
 		return
 	}
@@ -371,7 +371,7 @@ func (o *Orchestrator) expireSuspect(vaultInst *VaultInstance, id chunk.ChunkID,
 			fmt.Sprintf("Cloud chunk %s removed from index after %d days missing", id, suspectDays),
 		)
 	}
-	o.logger.Warn("reconcile: removed chunk from index after grace period",
+	o.retentionLogger.Warn("reconcile: removed chunk from index after grace period",
 		"vault", vaultInst.VaultID, "chunk", id.String(), "suspectDays", suspectDays)
 }
 

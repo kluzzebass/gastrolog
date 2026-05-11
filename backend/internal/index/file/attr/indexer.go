@@ -14,6 +14,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
 	"gastrolog/internal/logging"
+	"gastrolog/internal/logging/comp"
 )
 
 // Indexer builds attribute indexes for sealed chunks.
@@ -35,7 +36,7 @@ func NewIndexer(dir string, manager chunk.ChunkManager, logger *slog.Logger) *In
 	return &Indexer{
 		dir:     dir,
 		manager: manager,
-		logger:  logging.Default(logger).With("component", "indexer", "type", "attr"),
+		logger:  comp.Indexer.Sub("attr").Desc("Per-attribute string-equality index — exact-match lookups on a single record attribute.").Apply(logging.Default(logger)),
 	}
 }
 

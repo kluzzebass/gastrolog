@@ -16,6 +16,7 @@ import (
 
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/logging"
+	"gastrolog/internal/logging/comp"
 	"gastrolog/internal/orchestrator"
 )
 
@@ -64,7 +65,7 @@ func (ing *Ingester) SetPressureGate(gate *chanwatch.PressureGate) {
 func New(cfg Config) *Ingester {
 	return &Ingester{
 		cfg:    cfg,
-		logger: logging.Default(cfg.Logger).With("component", "ingester", "type", "kafka"),
+		logger: comp.Ingester.Sub("kafka").Desc("Kafka consumer ingester — pulls log messages from configured Kafka topics.").Apply(logging.Default(cfg.Logger)),
 	}
 }
 

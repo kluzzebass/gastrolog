@@ -251,7 +251,7 @@ func buildTLSConfig(cfg *clientTLSConfig) (*tls.Config, error) {
 		}
 		tc.RootCAs = pool
 	} else if cfg.CAFile != "" {
-		caPEM, err := os.ReadFile(cfg.CAFile)
+		caPEM, err := os.ReadFile(cfg.CAFile) //ok:os-readfile bounded PEM at startup; x509.AppendCertsFromPEM needs full bytes
 		if err != nil {
 			return nil, fmt.Errorf("read CA file: %w", err)
 		}

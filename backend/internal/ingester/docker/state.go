@@ -24,7 +24,7 @@ func loadState(path string) (state, error) {
 		return s, nil
 	}
 
-	data, err := os.ReadFile(filepath.Clean(path))
+	data, err := os.ReadFile(filepath.Clean(path)) //ok:os-readfile small JSON state map; json.Unmarshal needs full bytes
 	if err != nil {
 		if os.IsNotExist(err) {
 			return s, nil

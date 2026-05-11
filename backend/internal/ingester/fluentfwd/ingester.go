@@ -21,6 +21,7 @@ import (
 
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/logging"
+	"gastrolog/internal/logging/comp"
 	"gastrolog/internal/orchestrator"
 )
 
@@ -56,7 +57,7 @@ func New(cfg Config) *Ingester {
 	return &Ingester{
 		id:     cfg.ID,
 		addr:   cfg.Addr,
-		logger: logging.Default(cfg.Logger).With("component", "ingester", "type", "fluentfwd"),
+		logger: comp.Ingester.Sub("fluentfwd").Desc("Fluent Forward ingester — accepts records from fluentd/fluent-bit using the Forward protocol.").Apply(logging.Default(cfg.Logger)),
 	}
 }
 

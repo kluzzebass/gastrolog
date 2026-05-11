@@ -49,6 +49,7 @@ const (
 	NotifyIngesterCheckpointSet
 	NotifyIngesterAssignmentSet
 	NotifySetupWizardDismissedSet
+	NotifyLogLevelsSet
 )
 
 // Notification describes a config mutation that the FSM just applied.
@@ -137,7 +138,8 @@ func (f *FSM) Apply(l *raft.Log) any {
 		*gastrologv1.SystemCommand_SetIngesterAlive,
 		*gastrologv1.SystemCommand_SetIngesterCheckpoint,
 		*gastrologv1.SystemCommand_SetIngesterAssignment,
-		*gastrologv1.SystemCommand_SetSetupWizardDismissed:
+		*gastrologv1.SystemCommand_SetSetupWizardDismissed,
+		*gastrologv1.SystemCommand_PutLogLevels:
 		return f.applyConfig(ctx, cmd, l.Index)
 
 	case *gastrologv1.SystemCommand_CreateUser,
@@ -265,6 +267,15 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.SystemCommand
 			return nil, err
 		}
 		return &Notification{Kind: NotifySetupWizardDismissedSet}, nil
+	case *gastrologv1.SystemCommand_PutLogLevels:
+		cfg, err := command.ExtractPutLogLevels(c.PutLogLevels)
+		if err != nil {
+			return nil, err
+		}
+		if err := f.store.PutLogLevels(ctx, cfg); err != nil {
+			return nil, err
+		}
+		return &Notification{Kind: NotifyLogLevelsSet}, nil
 	default:
 		return nil, fmt.Errorf("unexpected config command: %T", c)
 	}
