@@ -703,10 +703,10 @@ func (e *Engine) buildTSOrderedScanner(ctx context.Context, cursor chunk.RecordC
 		// reorder buffer rather than fetching the index from S3 (gastrolog-1dg3i).
 		tsEntries, err := loadTSEntries(im, meta.ID, q.OrderBy)
 		if err == nil {
-			e.logger.Debug("✅ TS index scanner activated", "chunk", meta.ID, "entries", len(tsEntries), "cloud", meta.CloudBacked)
+			e.logger.Debug("TS index scanner activated", "chunk", meta.ID, "entries", len(tsEntries), "cloud", meta.CloudBacked)
 			return buildTSIndexScanner(ctx, cursor, q, b, meta, tsEntries)
 		}
-		e.logger.Debug("❌ TS index unavailable, falling back to reorder buffer", "chunk", meta.ID, "cloud", meta.CloudBacked, "error", err, "isNotFound", errors.Is(err, index.ErrIndexNotFound))
+		e.logger.Debug("TS index unavailable, falling back to reorder buffer", "chunk", meta.ID, "cloud", meta.CloudBacked, "error", err, "isNotFound", errors.Is(err, index.ErrIndexNotFound))
 		// Fall through to buffer-and-sort if index unavailable.
 	}
 
