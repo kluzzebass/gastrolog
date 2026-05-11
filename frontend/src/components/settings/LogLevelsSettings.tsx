@@ -173,7 +173,7 @@ export function LogLevelsSettings({ dark }: Props) {
         <div
           ref={defaultSelectorRef}
           className={`mb-4 max-w-[260px] rounded transition-colors ${
-            highlight === "default" ? "ring-2 ring-copper/60" : ""
+            highlight === "default" ? "bg-copper/15" : ""
           }`}
         >
           <FormField dark={dark} label="Default level">
@@ -207,7 +207,7 @@ export function LogLevelsSettings({ dark }: Props) {
                     if (isHighlighted) highlightedRuleRef.current = el;
                   }}
                   className={`grid grid-cols-[1fr_140px_40px] gap-2 items-start rounded transition-colors ${
-                    isHighlighted ? "ring-2 ring-copper/60" : ""
+                    isHighlighted ? "bg-copper/15" : ""
                   }`}
                 >
                   <div className="flex flex-col gap-1">
