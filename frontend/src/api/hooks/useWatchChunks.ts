@@ -43,10 +43,14 @@ export function useWatchChunks() {
   useEffect(() => {
     const abort = new AbortController();
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    // Tracks the last per-node version we've seen. On reconnect the
-    // server sends a heartbeat (op = UNSPECIFIED) with the current
-    // high-watermark; we compare against this to detect drops.
-    let lastVersion = 0n;
+    // Tracks the last version seen per producing node. The API node
+    // multiplexes its own ChunkBus events plus peer-node events into
+    // one stream; each event carries a node_id (empty for local) and a
+    // version that's monotonic per producing node. A gap in any
+    // node's version sequence means events were dropped between that
+    // node's bus and us, and we resync via invalidateQueries on the
+    // affected vault.
+    const lastVersionByNode = new Map<string, bigint>();
 
     async function connect(backoff = 0) {
       let nextBackoff = backoff;
@@ -55,8 +59,7 @@ export function useWatchChunks() {
           {},
           { signal: abort.signal },
         )) {
-          handleEvent(qc, msg, lastVersion);
-          lastVersion = msg.version;
+          handleEvent(qc, msg, lastVersionByNode);
           nextBackoff = 0;
         }
       } catch (err) {
@@ -67,10 +70,10 @@ export function useWatchChunks() {
         ) {
           await refreshAuth();
         }
-        // Reconnect resets the per-node baseline; force a cold-start
+        // Reconnect resets every per-node baseline; force a cold-start
         // refetch of all per-vault caches so any events dropped during
         // the disconnect window get reconciled.
-        lastVersion = 0n;
+        lastVersionByNode.clear();
         qc.invalidateQueries({ queryKey: ["chunks"] });
         const delay = Math.min(1000 * 2 ** nextBackoff, 30_000);
         reconnectTimer = setTimeout(() => connect(nextBackoff + 1), delay);
@@ -91,30 +94,51 @@ type ChunksCache = ChunkMeta[] | undefined;
 /**
  * handleEvent applies a single WatchChunksResponse to the React Query
  * cache. Each op patches the per-vault chunk list via setQueryData;
- * dropped events (version gap) trigger an invalidate of the affected
- * vault key so the next render triggers a cold-start ListChunks.
+ * dropped events (per-node version gap) trigger an invalidate of the
+ * affected vault key so the next render triggers a cold-start
+ * ListChunks. Per-node versions are tracked separately because the
+ * API node multiplexes events from every cluster node's bus — each bus
+ * has its own monotonic version space.
  */
 function handleEvent(
   qc: ReturnType<typeof useQueryClient>,
   msg: WatchChunksResponse,
-  lastVersion: bigint,
+  lastVersionByNode: Map<string, bigint>,
 ) {
-  // Heartbeat at stream start — no payload, just a version baseline.
-  if (msg.op === ChunkChangeOp.UNSPECIFIED) return;
-
-  // Version-gap drop detection: any non-contiguous version step means
-  // the backend bus dropped events to this subscriber. Cold-start the
-  // affected vault so we don't trust our local projection.
-  if (lastVersion > 0n && msg.version > lastVersion + 1n) {
-    const vaultId = encode(msg.vaultId);
-    qc.invalidateQueries({ queryKey: ["chunks", vaultId] });
+  // Heartbeat at stream start (and on every fresh peer subscription on
+  // the API node) — no payload, just a version baseline. Record the
+  // baseline so subsequent events for the same node can detect gaps.
+  if (msg.op === ChunkChangeOp.UNSPECIFIED) {
+    lastVersionByNode.set(nodeKey(msg.nodeId), msg.version);
     return;
   }
+
+  // Version-gap drop detection per producing node: any non-contiguous
+  // version step means the backend bus dropped events to this
+  // subscriber for that node. Cold-start the affected vault so we
+  // don't trust our local projection.
+  const key = nodeKey(msg.nodeId);
+  const prevVer = lastVersionByNode.get(key) ?? 0n;
+  if (prevVer > 0n && msg.version > prevVer + 1n) {
+    const vaultId = encode(msg.vaultId);
+    qc.invalidateQueries({ queryKey: ["chunks", vaultId] });
+    lastVersionByNode.set(key, msg.version);
+    return;
+  }
+  lastVersionByNode.set(key, msg.version);
 
   const vaultId = encode(msg.vaultId);
   qc.setQueryData<ChunksCache>(["chunks", vaultId], (prev) =>
     mutateCache(prev, msg),
   );
+}
+
+/** nodeKey converts the producing-node id bytes to a stable map key.
+ * Empty bytes (events from the connected node itself) map to "local".
+ */
+function nodeKey(nodeId: Uint8Array): string {
+  if (nodeId.length === 0) return "local";
+  return encode(nodeId);
 }
 
 /**

@@ -384,5 +384,51 @@ func (sf *SearchForwarder) ExportToVault(ctx context.Context, nodeID string, req
 	return resp, nil
 }
 
+// WatchChunks opens a peer-to-peer streaming subscription to the given
+// node's ChunkBus and invokes onEvent for each received event. Blocks
+// until ctx is cancelled, the peer closes the stream, or onEvent returns
+// an error. The caller is responsible for any reconnect logic — this
+// function returns once on each fault. See gastrolog-3pf9w.
+func (sf *SearchForwarder) WatchChunks(ctx context.Context, nodeID string, onEvent func(*gastrologv1.ForwardWatchChunksResponse) error) error {
+	conn, err := sf.peers.Conn(nodeID)
+	if err != nil {
+		return fmt.Errorf("dial node %s: %w", nodeID, err)
+	}
+	stream, err := conn.NewStream(ctx,
+		&grpc.StreamDesc{
+			StreamName:    "ForwardWatchChunks",
+			ServerStreams: true,
+		},
+		"/gastrolog.v1.ClusterService/ForwardWatchChunks",
+	)
+	if err != nil {
+		sf.peers.Invalidate(nodeID, err)
+		return fmt.Errorf("open watchchunks stream to %s: %w", nodeID, err)
+	}
+	if err := stream.SendMsg(&gastrologv1.ForwardWatchChunksRequest{}); err != nil {
+		sf.peers.Invalidate(nodeID, err)
+		return fmt.Errorf("send watchchunks request to %s: %w", nodeID, err)
+	}
+	if err := stream.CloseSend(); err != nil {
+		return fmt.Errorf("close watchchunks send to %s: %w", nodeID, err)
+	}
+	for {
+		msg := &gastrologv1.ForwardWatchChunksResponse{}
+		if err := stream.RecvMsg(msg); err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			sf.peers.Invalidate(nodeID, err)
+			return fmt.Errorf("watchchunks stream from %s: %w", nodeID, err)
+		}
+		if err := onEvent(msg); err != nil {
+			return err
+		}
+	}
+}
+
 // Close is a no-op — connection lifecycle is managed by PeerConns.
 func (sf *SearchForwarder) Close() error { return nil }

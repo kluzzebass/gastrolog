@@ -2673,7 +2673,13 @@ type WatchChunksResponse struct {
 	// post-reconnect version against last_seen + 1 — a gap means the client
 	// should cold-start with ListChunks for that node's vaults before
 	// resuming.
-	Version       uint64 `protobuf:"varint,6,opt,name=version,proto3" json:"version,omitempty"`
+	Version uint64 `protobuf:"varint,6,opt,name=version,proto3" json:"version,omitempty"`
+	// node_id identifies which cluster node produced this event. The API
+	// node multiplexes its own ChunkBus events plus events from every peer
+	// cluster node's bus into a single stream to the client; node_id lets
+	// the client maintain a per-node high-watermark for resync. Empty for
+	// events from the connected node itself.
+	NodeId        []byte `protobuf:"bytes,7,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2748,6 +2754,13 @@ func (x *WatchChunksResponse) GetVersion() uint64 {
 		return x.Version
 	}
 	return 0
+}
+
+func (x *WatchChunksResponse) GetNodeId() []byte {
+	if x != nil {
+		return x.NodeId
+	}
+	return nil
 }
 
 var File_gastrolog_v1_vault_proto protoreflect.FileDescriptor
@@ -2951,14 +2964,15 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\rrestore_speed\x18\x03 \x01(\tR\frestoreSpeed\x12!\n" +
 	"\frestore_days\x18\x04 \x01(\x05R\vrestoreDays\"\x16\n" +
 	"\x14RestoreChunkResponse\"\x14\n" +
-	"\x12WatchChunksRequest\"\xe2\x01\n" +
+	"\x12WatchChunksRequest\"\xfb\x01\n" +
 	"\x13WatchChunksResponse\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12\x19\n" +
 	"\bchunk_id\x18\x02 \x01(\fR\achunkId\x12+\n" +
 	"\x02op\x18\x03 \x01(\x0e2\x1b.gastrolog.v1.ChunkChangeOpR\x02op\x12+\n" +
 	"\x04meta\x18\x04 \x01(\v2\x17.gastrolog.v1.ChunkMetaR\x04meta\x12!\n" +
 	"\frecord_count\x18\x05 \x01(\x04R\vrecordCount\x12\x18\n" +
-	"\aversion\x18\x06 \x01(\x04R\aversion*r\n" +
+	"\aversion\x18\x06 \x01(\x04R\aversion\x12\x17\n" +
+	"\anode_id\x18\a \x01(\fR\x06nodeId*r\n" +
 	"\n" +
 	"ChunkState\x12\x1b\n" +
 	"\x17CHUNK_STATE_UNSPECIFIED\x10\x00\x12\x16\n" +

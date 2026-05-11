@@ -134,6 +134,25 @@ func (s *Server) SetSearchExecutor(fn SearchExecutor) {
 	s.searchExecutor = fn
 }
 
+// ChunkEventSubscriber drives a peer-streaming ForwardWatchChunks
+// connection: subscribes to the local node's chunk event bus and calls
+// send for each event translated into the wire proto until ctx is
+// cancelled or send returns an error. The callback owns the loop; the
+// cluster Server just dispatches into it from the streaming handler.
+//
+// Defined as a callback rather than a typed Subscribe/Unsubscribe pair
+// to avoid exposing notify.Bus or the orchestrator's event type into
+// the cluster package — only the wire proto and the loop semantics live
+// here. See gastrolog-3pf9w.
+type ChunkEventSubscriber func(ctx context.Context, send func(*gastrologv1.ForwardWatchChunksResponse) error) error
+
+// SetChunkEventSubscriber injects the callback used by the streaming
+// ForwardWatchChunks handler to drive event delivery from this node's
+// chunk bus to a peer.
+func (s *Server) SetChunkEventSubscriber(fn ChunkEventSubscriber) {
+	s.chunkEventSubscriber = fn
+}
+
 // SetContextExecutor injects the callback for handling remote GetContext requests.
 func (s *Server) SetContextExecutor(fn ContextExecutor) {
 	s.contextExecutor = fn
@@ -384,6 +403,29 @@ func forwardFollowStreamHandler(srv any, stream grpc.ServerStream) error {
 		}
 	}
 	return nil
+}
+
+// forwardWatchChunksStreamHandler handles the peer-to-peer
+// ForwardWatchChunks RPC. The coordinating node opens one of these to
+// each peer cluster node, multiplexing all peer events into the single
+// WatchChunks stream served to the client. The handler delegates to the
+// orchestrator-supplied chunkEventSubscriber callback, which owns the
+// loop that subscribes to the local ChunkBus and pushes events through
+// stream.SendMsg until ctx is cancelled or send errors out. See
+// gastrolog-3pf9w.
+func forwardWatchChunksStreamHandler(srv any, stream grpc.ServerStream) error {
+	s := srv.(*Server)
+	if s.chunkEventSubscriber == nil {
+		return status.Error(codes.Unavailable, "chunk event subscriber not configured")
+	}
+	// Drain the (empty) request so the peer's send half can close cleanly.
+	var req gastrologv1.ForwardWatchChunksRequest
+	if err := stream.RecvMsg(&req); err != nil {
+		return status.Errorf(codes.InvalidArgument, "receive request: %v", err)
+	}
+	return s.chunkEventSubscriber(stream.Context(), func(msg *gastrologv1.ForwardWatchChunksResponse) error {
+		return stream.SendMsg(msg)
+	})
 }
 
 // forwardSearchStreamHandler handles the server-streaming ForwardSearch RPC.
@@ -972,6 +1014,11 @@ var clusterServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "ForwardFollow",
 			Handler:       forwardFollowStreamHandler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "ForwardWatchChunks",
+			Handler:       forwardWatchChunksStreamHandler,
 			ServerStreams: true,
 		},
 		{

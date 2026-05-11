@@ -29,6 +29,16 @@ type RemoteChunkLister interface {
 	ListChunks(ctx context.Context, nodeID string, req *apiv1.ForwardListChunksRequest) (*apiv1.ForwardListChunksResponse, error)
 }
 
+// RemoteChunkWatcher opens a peer-to-peer streaming subscription to a
+// remote node's chunk event bus. The WatchChunks RPC handler uses this
+// to multiplex events from every cluster node into the single stream
+// served to the inspector, so cross-node active-chunk progress reaches
+// clients without requiring per-node connections from the browser. See
+// gastrolog-3pf9w.
+type RemoteChunkWatcher interface {
+	WatchChunks(ctx context.Context, nodeID string, onEvent func(*apiv1.ForwardWatchChunksResponse) error) error
+}
+
 // RemoteIndexer queries chunk index information on a remote node.
 // Used by GetIndexes when the chunk has migrated to a vault this node
 // doesn't host. See gastrolog-3570f.
@@ -39,28 +49,30 @@ type RemoteIndexer interface {
 // VaultServer implements the VaultService.
 type VaultServer struct {
 	orch              *orchestrator.Orchestrator
-	cfgStore          system.Store
-	factories         orchestrator.Factories
-	peerStats         PeerVaultStatsProvider
-	remoteChunkLister RemoteChunkLister
-	remoteIndexer     RemoteIndexer
-	localNodeID       string
-	logger            *slog.Logger
+	cfgStore           system.Store
+	factories          orchestrator.Factories
+	peerStats          PeerVaultStatsProvider
+	remoteChunkLister  RemoteChunkLister
+	remoteChunkWatcher RemoteChunkWatcher
+	remoteIndexer      RemoteIndexer
+	localNodeID        string
+	logger             *slog.Logger
 }
 
 var _ gastrologv1connect.VaultServiceHandler = (*VaultServer)(nil)
 
 // NewVaultServer creates a new VaultServer.
-func NewVaultServer(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orchestrator.Factories, peerStats PeerVaultStatsProvider, remoteChunkLister RemoteChunkLister, remoteIndexer RemoteIndexer, localNodeID string, logger *slog.Logger) *VaultServer {
+func NewVaultServer(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orchestrator.Factories, peerStats PeerVaultStatsProvider, remoteChunkLister RemoteChunkLister, remoteChunkWatcher RemoteChunkWatcher, remoteIndexer RemoteIndexer, localNodeID string, logger *slog.Logger) *VaultServer {
 	return &VaultServer{
-		orch:              orch,
-		cfgStore:          cfgStore,
-		factories:         factories,
-		peerStats:         peerStats,
-		remoteChunkLister: remoteChunkLister,
-		remoteIndexer:     remoteIndexer,
-		localNodeID:       localNodeID,
-		logger:            compVaultServer.Apply(logging.Default(logger)),
+		orch:               orch,
+		cfgStore:           cfgStore,
+		factories:          factories,
+		peerStats:          peerStats,
+		remoteChunkLister:  remoteChunkLister,
+		remoteChunkWatcher: remoteChunkWatcher,
+		remoteIndexer:      remoteIndexer,
+		localNodeID:        localNodeID,
+		logger:             compVaultServer.Apply(logging.Default(logger)),
 	}
 }
 

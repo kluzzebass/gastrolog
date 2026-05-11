@@ -2279,6 +2279,17 @@ export class WatchChunksResponse extends Message<WatchChunksResponse> {
    */
   version = protoInt64.zero;
 
+  /**
+   * node_id identifies which cluster node produced this event. The API
+   * node multiplexes its own ChunkBus events plus events from every peer
+   * cluster node's bus into a single stream to the client; node_id lets
+   * the client maintain a per-node high-watermark for resync. Empty for
+   * events from the connected node itself.
+   *
+   * @generated from field: bytes node_id = 7;
+   */
+  nodeId = new Uint8Array(0);
+
   constructor(data?: PartialMessage<WatchChunksResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2293,6 +2304,7 @@ export class WatchChunksResponse extends Message<WatchChunksResponse> {
     { no: 4, name: "meta", kind: "message", T: ChunkMeta },
     { no: 5, name: "record_count", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 6, name: "version", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 7, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): WatchChunksResponse {

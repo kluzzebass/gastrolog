@@ -8,12 +8,15 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"connectrpc.com/connect"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index/analyzer"
+	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/system"
 )
@@ -517,14 +520,44 @@ func (s *VaultServer) WatchChunks(
 	_ *connect.Request[apiv1.WatchChunksRequest],
 	stream *connect.ServerStream[apiv1.WatchChunksResponse],
 ) error {
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// Aggregated event channel. Capacity sized for moderate burstiness;
+	// producers drop on full (they'll re-emit on the next progress tick).
+	eventCh := make(chan *apiv1.WatchChunksResponse, 256)
+
+	// Local source: subscribe to this node's ChunkBus and forward typed
+	// events. Empty node_id signals "from the connected node itself."
 	bus := s.orch.ChunkBus()
 	subID, events, baseline := bus.Subscribe()
 	defer bus.Unsubscribe(subID)
 
-	// Send a heartbeat carrying the current high-watermark so the client
-	// knows the stream is alive and what version baseline to track. The
-	// payload fields are empty / UNSPECIFIED — clients treat any event
-	// with op == UNSPECIFIED as a no-op version advance.
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		s.runLocalChunkEventForwarder(streamCtx, events, eventCh)
+	})
+
+	// Peer sources: open one ForwardWatchChunks stream per cluster node
+	// the inspector might care about. Lifecycle events (CREATED / SEALED
+	// / DELETED / UPLOADED) come through every node's local bus because
+	// the vault-ctl FSM apply path fires on every cluster node — the
+	// frontend handles the harmless duplicates via per-node version
+	// tracking and idempotent setQueryData merges. PROGRESS events are
+	// only emitted on the node that hosts the active chunk's leader, so
+	// peer streaming is the only way they reach a client connected to a
+	// node that doesn't host the vault. See gastrolog-3pf9w.
+	if s.remoteChunkWatcher != nil {
+		for _, nodeID := range s.peerNodeIDs(streamCtx) {
+			nid := nodeID
+			wg.Go(func() {
+				s.runPeerChunkEventForwarder(streamCtx, nid, eventCh)
+			})
+		}
+	}
+
+	// Heartbeat carries the local baseline. Clients track per-node
+	// versions; the empty node_id matches what local-bus events carry.
 	if err := stream.Send(&apiv1.WatchChunksResponse{
 		Op:      apiv1.ChunkChangeOp_CHUNK_CHANGE_OP_UNSPECIFIED,
 		Version: baseline,
@@ -532,30 +565,116 @@ func (s *VaultServer) WatchChunks(
 		return err
 	}
 
+	// Drain aggregated events → user-facing client stream. Producer
+	// goroutines exit via streamCtx.Done() when this loop returns.
+	defer wg.Wait()
 	for {
 		select {
-		case <-ctx.Done():
+		case <-streamCtx.Done():
 			return nil
-		case ev, ok := <-events:
-			if !ok {
-				return nil // bus closed; orchestrator shutting down
-			}
-			msg := chunkChangeEventToProto(ev.Event)
-			msg.Version = ev.Version
-			// Populate vault_type on the embedded Meta so the
-			// frontend's per-vault header (vault type badge) stays
-			// correct after an event-replace. Vault context is added
-			// here at send time using the orchestrator's vault
-			// registry — the chunk manager's ChunkMeta doesn't carry
-			// it.
-			if msg.Meta != nil {
-				msg.Meta.VaultType = s.orch.VaultType(ev.Event.VaultID)
-			}
+		case msg := <-eventCh:
 			if err := stream.Send(msg); err != nil {
 				return err
 			}
 		}
 	}
+}
+
+// runLocalChunkEventForwarder drains the local ChunkBus subscription and
+// translates each event into a wire WatchChunksResponse, fed into the
+// aggregated event channel. node_id is left empty for local events.
+func (s *VaultServer) runLocalChunkEventForwarder(
+	ctx context.Context,
+	events <-chan notify.Versioned[orchestrator.ChunkChangeEvent],
+	out chan<- *apiv1.WatchChunksResponse,
+) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev, ok := <-events:
+			if !ok {
+				return
+			}
+			msg := chunkChangeEventToProto(ev.Event)
+			msg.Version = ev.Version
+			if msg.Meta != nil {
+				msg.Meta.VaultType = s.orch.VaultType(ev.Event.VaultID)
+			}
+			select {
+			case out <- msg:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
+}
+
+// runPeerChunkEventForwarder opens a ForwardWatchChunks stream to a
+// remote node and forwards each peer event into the aggregated channel,
+// tagging it with the peer's node_id so the client can track per-node
+// version. On error, retries with exponential backoff bounded by 5 s.
+// Returns when ctx is cancelled.
+func (s *VaultServer) runPeerChunkEventForwarder(
+	ctx context.Context,
+	nodeID string,
+	out chan<- *apiv1.WatchChunksResponse,
+) {
+	nodeIDBytes := []byte(nodeID)
+	backoff := 100 * time.Millisecond
+	for ctx.Err() == nil {
+		err := s.remoteChunkWatcher.WatchChunks(ctx, nodeID, func(peerMsg *apiv1.ForwardWatchChunksResponse) error {
+			msg := &apiv1.WatchChunksResponse{
+				VaultId:     peerMsg.VaultId,
+				ChunkId:     peerMsg.ChunkId,
+				Op:          peerMsg.Op,
+				Meta:        peerMsg.Meta,
+				RecordCount: peerMsg.RecordCount,
+				Version:     peerMsg.Version,
+				NodeId:      nodeIDBytes,
+			}
+			select {
+			case out <- msg:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		})
+		if ctx.Err() != nil {
+			return
+		}
+		if err != nil {
+			s.logger.Debug("watchchunks: peer stream errored, will retry",
+				"node", nodeID, "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+		if backoff < 5*time.Second {
+			backoff *= 2
+		}
+	}
+}
+
+// peerNodeIDs returns the IDs of all cluster nodes other than this one.
+// Sourced from NodeStorageConfigs (every cluster node has one); skipped
+// silently if the config store is unavailable.
+func (s *VaultServer) peerNodeIDs(ctx context.Context) []string {
+	nscs, err := s.cfgStore.ListNodeStorageConfigs(ctx)
+	if err != nil {
+		return nil
+	}
+	var nodes []string
+	for _, nsc := range nscs {
+		id := nsc.NodeID
+		if id == "" || id == s.localNodeID {
+			continue
+		}
+		nodes = append(nodes, id)
+	}
+	return nodes
 }
 
 // chunkChangeEventToProto converts an orchestrator ChunkChangeEvent into

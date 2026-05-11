@@ -466,3 +466,81 @@ func newReindexVaultExecutor(o *orchestrator.Orchestrator) cluster.ReindexVaultE
 		return jobID, nil
 	}
 }
+
+// newChunkEventSubscriber returns a cluster.ChunkEventSubscriber that
+// subscribes to this node's orchestrator ChunkBus and translates each
+// ChunkChangeEvent into a ForwardWatchChunksResponse for the peer's
+// streaming receiver. Loop exits cleanly on ctx cancellation; falls
+// through silently if the peer's send fails (peer reconnects via its
+// own backoff loop).
+func newChunkEventSubscriber(o *orchestrator.Orchestrator) cluster.ChunkEventSubscriber {
+	return func(ctx context.Context, send func(*gastrologv1.ForwardWatchChunksResponse) error) error {
+		bus := o.ChunkBus()
+		subID, events, baseline := bus.Subscribe()
+		defer bus.Unsubscribe(subID)
+		// Initial heartbeat so the peer knows the version baseline.
+		if err := send(&gastrologv1.ForwardWatchChunksResponse{
+			Op:      gastrologv1.ChunkChangeOp_CHUNK_CHANGE_OP_UNSPECIFIED,
+			Version: baseline,
+		}); err != nil {
+			return err
+		}
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case ev, ok := <-events:
+				if !ok {
+					return nil
+				}
+				msg := chunkChangeEventToForwardProto(o, ev.Event)
+				msg.Version = ev.Version
+				if err := send(msg); err != nil {
+					return err
+				}
+			}
+		}
+	}
+}
+
+// chunkChangeEventToForwardProto mirrors server.chunkChangeEventToProto
+// but produces the cluster-internal ForwardWatchChunksResponse rather
+// than the public WatchChunksResponse. Vault type lookup happens here
+// (same orchestrator registry) so peer messages already carry the
+// inspector-required field; the API node's per-message wrap then just
+// copies fields.
+func chunkChangeEventToForwardProto(o *orchestrator.Orchestrator, ev orchestrator.ChunkChangeEvent) *gastrologv1.ForwardWatchChunksResponse {
+	msg := &gastrologv1.ForwardWatchChunksResponse{
+		VaultId: ev.VaultID.ToProto(),
+		ChunkId: ev.ChunkID[:],
+		Op:      chunkOpToForwardProto(ev.Op),
+	}
+	if ev.Meta != nil {
+		msg.Meta = server.ChunkMetaToProto(*ev.Meta)
+		msg.Meta.VaultId = ev.VaultID.ToProto()
+		msg.Meta.VaultType = o.VaultType(ev.VaultID)
+	}
+	if ev.Op == orchestrator.ChunkChangeOpProgress {
+		msg.RecordCount = ev.RecordCount
+	}
+	return msg
+}
+
+func chunkOpToForwardProto(op orchestrator.ChunkChangeOp) gastrologv1.ChunkChangeOp {
+	switch op {
+	case orchestrator.ChunkChangeOpUnspecified:
+		return gastrologv1.ChunkChangeOp_CHUNK_CHANGE_OP_UNSPECIFIED
+	case orchestrator.ChunkChangeOpCreated:
+		return gastrologv1.ChunkChangeOp_CHUNK_CHANGE_OP_CREATED
+	case orchestrator.ChunkChangeOpProgress:
+		return gastrologv1.ChunkChangeOp_CHUNK_CHANGE_OP_PROGRESS
+	case orchestrator.ChunkChangeOpSealed:
+		return gastrologv1.ChunkChangeOp_CHUNK_CHANGE_OP_SEALED
+	case orchestrator.ChunkChangeOpDeleted:
+		return gastrologv1.ChunkChangeOp_CHUNK_CHANGE_OP_DELETED
+	case orchestrator.ChunkChangeOpUploaded:
+		return gastrologv1.ChunkChangeOp_CHUNK_CHANGE_OP_UPLOADED
+	default:
+		return gastrologv1.ChunkChangeOp_CHUNK_CHANGE_OP_UNSPECIFIED
+	}
+}
