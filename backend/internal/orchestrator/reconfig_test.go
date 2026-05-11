@@ -968,3 +968,195 @@ func TestRetentionSingleJobRegistered(t *testing.T) {
 // asserts that a route carrying a bad expression fails ReloadFilters.
 
 func strPtr(s string) *string { return &s }
+
+// TestReloadRotationPolicies_AppliesSynchronously is the regression test for
+// gastrolog-1rj63: the dispatcher must hot-swap the active chunk manager's
+// rotation policy the moment the FSM commits a change, not 15 seconds later
+// on the next rotationSweep tick.
+//
+// Setup: a vault is configured with a 1000-record rotation policy and has
+// accumulated 100 records. The user then assigns a different policy with
+// max=50, which the current state already exceeds. Without the fix, the
+// chunk manager keeps the 1000-record policy and the next Append does not
+// rotate; with the fix, ReloadRotationPolicies sets the new policy and the
+// next Append seals the chunk + opens a fresh one.
+func TestReloadRotationPolicies_AppliesSynchronously(t *testing.T) {
+	t.Parallel()
+
+	vaultID := glid.New()
+	oldPolicyID := glid.New()
+	newPolicyID := glid.New()
+	oldMax := int64(1000)
+	newMax := int64(50)
+
+	loader := &fakeSystemLoader{cfg: &system.Config{
+		Vaults: []system.VaultConfig{
+			{ID: vaultID, Name: "test", Type: system.VaultTypeMemory, RotationPolicyID: &oldPolicyID, Enabled: true},
+		},
+		RotationPolicies: []system.RotationPolicyConfig{
+			{ID: oldPolicyID, Name: "loose", MaxRecords: &oldMax},
+			{ID: newPolicyID, Name: "tight", MaxRecords: &newMax},
+		},
+	}}
+
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := memtest.MustNewVault(t, chunkmem.Config{RotationPolicy: recordCountPolicy(oldMax)})
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(vaultID, s.CM, s.IM, s.QE))
+
+	// Fill the chunk with 100 records — well under the 1000-record bound.
+	for i := 0; i < 100; i++ {
+		if _, _, err := s.CM.Append(chunk.Record{
+			IngestTS: time.Now(),
+			Attrs:    chunk.Attributes{},
+			Raw:      []byte("x"),
+		}); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+	active := s.CM.Active()
+	if active == nil {
+		t.Fatal("expected an active chunk after 100 appends")
+	}
+	firstChunkID := active.ID
+	if active.RecordCount != 100 {
+		t.Fatalf("expected 100 records in active chunk, got %d", active.RecordCount)
+	}
+
+	// Reassign the vault to the tighter policy (max=50). Current state of
+	// 100 records already exceeds the new bound.
+	loader.cfg.Vaults[0].RotationPolicyID = &newPolicyID
+	if err := orch.ReloadRotationPolicies(context.Background()); err != nil {
+		t.Fatalf("ReloadRotationPolicies: %v", err)
+	}
+
+	// One more append must trigger rotation: ShouldRotate sees
+	// state.Records+1 = 101 > newMax (50) and seals before appending.
+	if _, _, err := s.CM.Append(chunk.Record{
+		IngestTS: time.Now(),
+		Attrs:    chunk.Attributes{},
+		Raw:      []byte("x"),
+	}); err != nil {
+		t.Fatalf("append after policy switch: %v", err)
+	}
+
+	active = s.CM.Active()
+	if active == nil {
+		t.Fatal("expected an active chunk after policy switch")
+	}
+	if active.ID == firstChunkID {
+		t.Errorf("expected rotation after policy switch; active chunk is still %s with %d records — new policy not applied",
+			active.ID, active.RecordCount)
+	}
+	if active.RecordCount != 1 {
+		t.Errorf("expected new chunk to have 1 record, got %d", active.RecordCount)
+	}
+}
+
+// TestReloadRotationPolicies_SkipsFollowers verifies the reload path does not
+// stomp on follower replicas — the rotationSweep is the sole authority for
+// followers (it stamps NeverRotatePolicy each tick). Without this guard a
+// follower's policy would briefly flap to a user policy between sweeps.
+func TestReloadRotationPolicies_SkipsFollowers(t *testing.T) {
+	t.Parallel()
+
+	vaultID := glid.New()
+	policyID := glid.New()
+	maxRecs := int64(50)
+
+	loader := &fakeSystemLoader{cfg: &system.Config{
+		Vaults: []system.VaultConfig{
+			{ID: vaultID, Name: "test", Type: system.VaultTypeMemory, RotationPolicyID: &policyID, Enabled: true},
+		},
+		RotationPolicies: []system.RotationPolicyConfig{
+			{ID: policyID, Name: "tight", MaxRecords: &maxRecs},
+		},
+	}}
+
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Build a follower vault: NeverRotatePolicy at the chunk manager, IsFollower
+	// flag on the orchestrator's VaultInstance.
+	s := memtest.MustNewVault(t, chunkmem.Config{RotationPolicy: chunk.NeverRotatePolicy{}})
+	v := orchestrator.NewVaultFromComponents(vaultID, s.CM, s.IM, s.QE)
+	v.Instance.IsFollower = true
+	orch.RegisterVault(v)
+
+	// Fill well past the user-policy bound. If ReloadRotationPolicies were
+	// to touch the follower, the next append would rotate.
+	for i := 0; i < 200; i++ {
+		if _, _, err := s.CM.Append(chunk.Record{
+			IngestTS: time.Now(),
+			Attrs:    chunk.Attributes{},
+			Raw:      []byte("x"),
+		}); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+
+	if err := orch.ReloadRotationPolicies(context.Background()); err != nil {
+		t.Fatalf("ReloadRotationPolicies: %v", err)
+	}
+
+	// One more append: with NeverRotatePolicy preserved, no rotation.
+	active := s.CM.Active()
+	firstID := active.ID
+	if _, _, err := s.CM.Append(chunk.Record{
+		IngestTS: time.Now(),
+		Attrs:    chunk.Attributes{},
+		Raw:      []byte("x"),
+	}); err != nil {
+		t.Fatalf("append after reload: %v", err)
+	}
+	active = s.CM.Active()
+	if active.ID != firstID {
+		t.Errorf("follower's chunk rotated unexpectedly — reload path must skip followers")
+	}
+}
+
+// TestReloadRotationPolicies_NilPolicyID is a happy-path edge case: vault has
+// no rotation policy assigned. Reload must not panic and must leave the
+// chunk manager's current policy untouched.
+func TestReloadRotationPolicies_NilPolicyID(t *testing.T) {
+	t.Parallel()
+
+	vaultID := glid.New()
+	loader := &fakeSystemLoader{cfg: &system.Config{
+		Vaults: []system.VaultConfig{
+			{ID: vaultID, Name: "test", Type: system.VaultTypeMemory, Enabled: true},
+		},
+	}}
+
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := memtest.MustNewVault(t, chunkmem.Config{RotationPolicy: recordCountPolicy(10)})
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(vaultID, s.CM, s.IM, s.QE))
+
+	if err := orch.ReloadRotationPolicies(context.Background()); err != nil {
+		t.Fatalf("ReloadRotationPolicies: %v", err)
+	}
+	// Original 10-record policy should still hold: 11th append rotates.
+	for i := 0; i < 11; i++ {
+		if _, _, err := s.CM.Append(chunk.Record{
+			IngestTS: time.Now(),
+			Attrs:    chunk.Attributes{},
+			Raw:      []byte("x"),
+		}); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+	active := s.CM.Active()
+	if active == nil {
+		t.Fatal("expected active chunk")
+	}
+	if active.RecordCount != 1 {
+		t.Errorf("expected new chunk with 1 record (rotation at 11th append), got %d", active.RecordCount)
+	}
+}
