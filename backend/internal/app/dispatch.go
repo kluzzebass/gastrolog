@@ -25,6 +25,7 @@ type orchActions interface {
 	ReloadFilters(ctx context.Context) error
 	ReloadRotationPolicies(ctx context.Context) error
 	ReloadRetentionPolicies(ctx context.Context) error
+	ApplyRotationPolicyForRole(ctx context.Context, vaultID glid.GLID) error
 	DisableVault(id glid.GLID) error
 	EnableVault(id glid.GLID) error
 	ForceRemoveVault(id glid.GLID) error
@@ -597,6 +598,15 @@ func (d *configDispatcher) rebuildVaultIfInstanceMissing(ctx context.Context, v 
 // updateInstanceRoleIfNeeded checks whether a vault instance's role
 // (leader ↔ follower) has changed and updates it in place — avoiding a full
 // vault rebuild and file lock churn.
+//
+// On a role transition, also re-applies the role-appropriate rotation
+// policy to the chunk manager: NeverRotatePolicy on follower, user policy
+// on leader. Without this, the chunk manager's policy lags the role flip
+// by up to 15 s (the rotationSweep interval). On a follower→leader flip,
+// the new leader carries NeverRotatePolicy during the gap and records pile
+// up without rotation; on a leader→follower flip, the new follower briefly
+// keeps the user policy and could rotate independently. See
+// gastrolog-50n4b.
 func (d *configDispatcher) updateInstanceRoleIfNeeded(ctx context.Context, vaultID glid.GLID, existing *orchestrator.VaultInstance) {
 	v, err := d.cfgStore.GetVault(ctx, vaultID)
 	if err != nil || v == nil {
@@ -622,6 +632,10 @@ func (d *configDispatcher) updateInstanceRoleIfNeeded(ctx context.Context, vault
 	d.logger.Info("dispatch: vault role updated in place",
 		"vault", vaultID,
 		"isFollower", shouldBeFollower)
+	if err := d.orch.ApplyRotationPolicyForRole(ctx, vaultID); err != nil {
+		d.logger.Warn("dispatch: apply rotation policy after role change",
+			"vault", vaultID, "error", err)
+	}
 }
 
 // newFollowersForInstance returns follower node IDs that don't already have a
