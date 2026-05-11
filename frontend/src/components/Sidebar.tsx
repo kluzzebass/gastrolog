@@ -132,7 +132,7 @@ export function VaultButton({
   remote?: boolean;
 }>) {
   const c = useThemeClass(dark);
-  const ghostCls = c("text-text-muted", "text-light-text-muted");
+  const mutedCls = c("text-text-muted", "text-light-text-muted");
 
   return (
     <button
@@ -150,7 +150,7 @@ export function VaultButton({
         {remote && nodeId && <NodeBadge nodeId={nodeId} dark={dark} />}
       </span>
       <span
-        className={`font-mono text-[0.8em] ${active ? "text-copper-dim" : ghostCls}`}
+        className={`font-mono text-[0.8em] ${active ? "text-copper-dim" : mutedCls}`}
       >
         {count}
       </span>
