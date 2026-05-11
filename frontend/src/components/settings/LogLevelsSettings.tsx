@@ -170,24 +170,20 @@ export function LogLevelsSettings({ dark }: Props) {
           <code>**</code> matches any depth. Most-specific match wins.
         </p>
 
-        <div
-          ref={defaultSelectorRef}
-          className={`mb-4 max-w-[260px] rounded p-2 transition-colors ${
-            highlight === "default" ? "bg-copper/20" : ""
-          }`}
-        >
+        <div ref={defaultSelectorRef} className="mb-4 max-w-[260px]">
           <FormField dark={dark} label="Default level">
             <SelectInput
               dark={dark}
               value={String(currentDefault)}
               onChange={(v) => setDraftDefault(Number(v) as LogLevel)}
               options={LEVEL_OPTIONS}
+              highlighted={highlight === "default"}
             />
           </FormField>
         </div>
 
         <div className="flex flex-col gap-2">
-          <div className={`grid grid-cols-[1fr_140px_40px] gap-2 px-2 ${columnHeader}`}>
+          <div className={`grid grid-cols-[1fr_140px_40px] gap-2 ${columnHeader}`}>
             <div>Pattern</div>
             <div>Level</div>
             <div></div>
@@ -206,9 +202,7 @@ export function LogLevelsSettings({ dark }: Props) {
                   ref={(el) => {
                     if (isHighlighted) highlightedRuleRef.current = el;
                   }}
-                  className={`grid grid-cols-[1fr_140px_40px] gap-2 items-start rounded p-2 transition-colors ${
-                    isHighlighted ? "bg-copper/20" : ""
-                  }`}
+                  className="grid grid-cols-[1fr_140px_40px] gap-2 items-start"
                 >
                   <div className="flex flex-col gap-1">
                     <TextInput
@@ -217,6 +211,7 @@ export function LogLevelsSettings({ dark }: Props) {
                       onChange={(v) => updateRule(idx, { pattern: v })}
                       error={!!ruleErrors[idx]}
                       title={ruleErrors[idx]}
+                      highlighted={isHighlighted}
                       examples={[
                         "orchestrator",
                         "orchestrator.*",
@@ -230,6 +225,7 @@ export function LogLevelsSettings({ dark }: Props) {
                     value={String(r.level)}
                     onChange={(v) => updateRule(idx, { level: Number(v) as LogLevel })}
                     options={LEVEL_OPTIONS}
+                    highlighted={isHighlighted}
                   />
                   <button
                     type="button"

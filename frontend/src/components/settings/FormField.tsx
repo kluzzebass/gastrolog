@@ -97,6 +97,12 @@ interface TextInputProps {
   // title surfaces as the native browser tooltip on hover. Useful with
   // error=true to explain what's wrong without changing the layout.
   title?: string;
+  // highlighted paints the input with the same border color it would
+  // have when focused. Used by external "this is the one you're looking
+  // at" indicators (e.g. hover-source highlighting in the log-levels
+  // editor) to reuse the focus affordance without stealing keyboard
+  // focus. Error takes precedence when both are set.
+  highlighted?: boolean;
 }
 
 export function TextInput({
@@ -109,9 +115,27 @@ export function TextInput({
   examples,
   error,
   title,
+  highlighted,
 }: Readonly<TextInputProps>) {
   const id = useFormFieldId();
   const c = useThemeClass(dark);
+  let stateClasses: string;
+  if (error) {
+    stateClasses = c(
+      "bg-ink-surface border-severity-error/60 text-text-bright placeholder:text-text-muted focus:border-severity-error",
+      "bg-light-surface border-severity-error/60 text-light-text-bright placeholder:text-light-text-muted focus:border-severity-error",
+    );
+  } else if (highlighted) {
+    stateClasses = c(
+      "bg-ink-surface border-copper-dim text-text-bright placeholder:text-text-muted",
+      "bg-light-surface border-copper text-light-text-bright placeholder:text-light-text-muted",
+    );
+  } else {
+    stateClasses = c(
+      "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-muted focus:border-copper-dim",
+      "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-muted focus:border-copper",
+    );
+  }
   return (
     <>
       <input
@@ -124,13 +148,7 @@ export function TextInput({
         title={title}
         className={`px-2.5 py-1.5 text-[0.85em] border rounded focus:outline-none transition-colors ${
           mono ? "font-mono" : ""
-        } ${error ? c(
-          "bg-ink-surface border-severity-error/60 text-text-bright placeholder:text-text-muted focus:border-severity-error",
-          "bg-light-surface border-severity-error/60 text-light-text-bright placeholder:text-light-text-muted focus:border-severity-error",
-        ) : c(
-          "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-muted focus:border-copper-dim",
-          "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-muted focus:border-copper",
-        )} ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
+        } ${stateClasses} ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
       />
       <ExampleValues examples={examples} value={value} onChange={onChange} dark={dark} />
     </>
@@ -143,6 +161,8 @@ interface SelectInputProps {
   options: { value: string; label: string }[];
   dark: boolean;
   disabled?: boolean;
+  // See TextInput.highlighted — same purpose, applied to the select border.
+  highlighted?: boolean;
 }
 
 export function SelectInput({
@@ -151,19 +171,26 @@ export function SelectInput({
   options,
   dark,
   disabled,
+  highlighted,
 }: Readonly<SelectInputProps>) {
   const id = useFormFieldId();
   const c = useThemeClass(dark);
+  const stateClasses = highlighted
+    ? c(
+        "bg-ink-surface border-copper-dim text-text-bright",
+        "bg-light-surface border-copper text-light-text-bright",
+      )
+    : c(
+        "bg-ink-surface border-ink-border text-text-bright focus:border-copper-dim",
+        "bg-light-surface border-light-border text-light-text-bright focus:border-copper",
+      );
   return (
     <select
       id={id}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}
-      className={`px-2.5 py-1.5 text-[0.85em] border rounded focus:outline-none transition-colors ${c(
-        "bg-ink-surface border-ink-border text-text-bright focus:border-copper-dim",
-        "bg-light-surface border-light-border text-light-text-bright focus:border-copper",
-      )} ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
+      className={`px-2.5 py-1.5 text-[0.85em] border rounded focus:outline-none transition-colors ${stateClasses} ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
     >
       {options.map((o) => (
         <option key={o.value} value={o.value}>
