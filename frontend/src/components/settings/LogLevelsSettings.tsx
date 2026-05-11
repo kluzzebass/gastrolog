@@ -147,9 +147,9 @@ export function LogLevelsSettings({ dark }: Props) {
         }
       >
         <p className={`text-[0.85em] mb-4 ${c("text-text-muted", "text-light-text-muted")}`}>
-          Per-component log levels propagate to every node via Raft. Patterns
-          are dot-separated; <code>*</code> matches one segment,{" "}
-          <code>**</code> matches any depth.
+          Rules propagate to every node via Raft. Patterns are
+          dot-separated; <code>*</code> matches one segment,{" "}
+          <code>**</code> matches any depth. Most-specific match wins.
         </p>
 
         <div className="mb-4 max-w-[260px]">
@@ -182,6 +182,12 @@ export function LogLevelsSettings({ dark }: Props) {
                 onChange={(v) => updateRule(idx, { pattern: v })}
                 error={!!ruleErrors[idx]}
                 title={ruleErrors[idx]}
+                examples={[
+                  "orchestrator",
+                  "orchestrator.*",
+                  "orchestrator.**",
+                  "ingester.**.conn",
+                ]}
               />
               <SelectInput
                 dark={dark}
