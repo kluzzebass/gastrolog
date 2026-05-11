@@ -161,46 +161,21 @@ func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) {
 	return &vaultCtlSnapshot{vaultBlobs: vaultBlobs}, nil
 }
 
-// Restore replaces FSM state from a snapshot produced by Snapshot, or the
-// legacy single-byte empty snapshot ({1}) written by older builds.
+// Restore replaces FSM state from a snapshot produced by Snapshot.
 //
 // Streams the snapshot incrementally rather than slurping it into memory —
 // the combined instance-state blob may be large on clusters with many vaults.
 func (f *FSM) Restore(rc io.ReadCloser) error {
 	defer func() { _ = rc.Close() }()
 
-	// Peek the first byte to distinguish the legacy single-byte empty form
-	// from the magic-prefixed format.
-	var first [1]byte
-	n1, err := rc.Read(first[:])
-	if err == io.EOF || n1 == 0 {
-		return nil
-	}
-	if err != nil && err != io.EOF {
-		return fmt.Errorf("vaultraft restore: read first byte: %w", err)
-	}
-	if first[0] == 1 {
-		// Legacy empty snapshot from the pre-composite FSM.
-		var probe [1]byte
-		if n, _ := rc.Read(probe[:]); n == 0 {
-			f.mu.Lock()
-			f.vaults = make(map[glid.GLID]*vaultctlfsm.FSM)
-			hook := f.onAfterRestore
-			f.mu.Unlock()
-			if hook != nil {
-				hook()
-			}
+	var magic [len(vaultSnapMagic)]byte
+	if _, err := io.ReadFull(rc, magic[:]); err != nil {
+		if err == io.EOF {
 			return nil
 		}
-		return errors.New("vaultraft restore: trailing bytes after legacy empty sentinel")
-	}
-
-	// Read the remainder of the magic and validate.
-	var restMagic [7]byte
-	if _, err := io.ReadFull(rc, restMagic[:]); err != nil {
 		return fmt.Errorf("vaultraft restore: read magic: %w", err)
 	}
-	if first[0] != vaultSnapMagic[0] || !bytes.Equal(restMagic[:], vaultSnapMagic[1:]) {
+	if magic != vaultSnapMagic {
 		return errors.New("vaultraft restore: bad magic")
 	}
 

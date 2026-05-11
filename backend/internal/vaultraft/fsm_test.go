@@ -145,38 +145,3 @@ func TestFSM_OnAfterRestoreFires(t *testing.T) {
 	}
 }
 
-// TestFSM_OnAfterRestoreFires_legacyEmpty pins that the legacy
-// single-byte empty-snapshot code path also fires the hook. A node
-// rejoining a freshly-bootstrapped cluster takes this path; the
-// receipt protocol's catchup needs to run there too.
-func TestFSM_OnAfterRestoreFires_legacyEmpty(t *testing.T) {
-	t.Parallel()
-	f := NewFSM()
-	var fires int32
-	f.SetOnAfterRestore(func() { fires++ })
-	if err := f.Restore(io.NopCloser(bytes.NewReader([]byte{1}))); err != nil {
-		t.Fatalf("legacy restore: %v", err)
-	}
-	if fires != 1 {
-		t.Errorf("OnAfterRestore fires = %d on legacy empty snapshot, want 1", fires)
-	}
-}
-
-func TestFSM_Restore_legacyEmptyByte(t *testing.T) {
-	t.Parallel()
-	f := NewFSM()
-	vaultID := glid.New()
-	now := time.Now().Truncate(time.Nanosecond)
-	if r := f.Apply(&hraft.Log{Data: MarshalVaultChunkCommand(vaultID, vaultctlfsm.MarshalCreateChunk(testChunkID(9), now, now, now))}); r != nil {
-		t.Fatalf("apply: %v", r)
-	}
-	if f.VaultFSM(vaultID) == nil {
-		t.Fatal("expected instance before legacy restore")
-	}
-	if err := f.Restore(io.NopCloser(bytes.NewReader([]byte{1}))); err != nil {
-		t.Fatalf("legacy restore: %v", err)
-	}
-	if f.VaultFSM(vaultID) != nil {
-		t.Fatal("legacy restore should reset instance state")
-	}
-}
