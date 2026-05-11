@@ -32,15 +32,22 @@ export function useVault(id: string) {
 
 /**
  * useChunks returns the full chunk list for a vault. The initial fetch
- * uses ListChunks (cluster fan-out + dedup); subsequent updates arrive
- * via the WatchChunks stream as typed diffs (created / progress / sealed
- * / deleted / uploaded) and patch this cache in place via setQueryData
- * — no refetch on the steady-state path. See gastrolog-3pf9w for the
- * pre-3pf9w shape and why it was replaced.
+ * uses ListChunks (cluster fan-out + dedup); subsequent lifecycle
+ * updates (created / sealed / deleted / uploaded) arrive via the
+ * WatchChunks stream as typed diffs and patch this cache in place via
+ * setQueryData. See gastrolog-3pf9w for the pre-3pf9w shape and why it
+ * was replaced.
+ *
+ * Active-chunk PROGRESS events fire on the bus of the node that hosts
+ * the vault — but the inspector may be connected to a node that doesn't
+ * host the vault (cluster RouteLocal). For that case, a slow 5-second
+ * refetchInterval keeps active-chunk record counts roughly in sync
+ * cross-node. On nodes that DO host the vault, the events handle
+ * everything and the poll is wasted work but harmless. A future
+ * improvement would push PROGRESS across nodes via the server (peer
+ * stream multiplexing) — see the gastrolog-3pf9w follow-up notes.
  */
 export function useChunks(vaultId: string) {
-  // Initial fetch only. Subsequent updates arrive via useWatchChunks,
-  // which mutates the per-vault cache directly.
   return useQuery({
     queryKey: ["chunks", vaultId],
     queryFn: async () => {
@@ -48,6 +55,7 @@ export function useChunks(vaultId: string) {
       return response.chunks;
     },
     structuralSharing: protoArraySharing(ChunkMeta.equals),
+    refetchInterval: 5000,
     enabled: !!vaultId,
   });
 }
