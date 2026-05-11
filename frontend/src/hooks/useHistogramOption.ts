@@ -280,6 +280,25 @@ export function useHistogramOption(deps: HistogramOptionDeps): HistogramOptionRe
       padding: [4, 8],
       extraCssText: "border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);",
       formatter: stableFormatter,
+      // Flip below the cursor when there isn't enough room above. ECharts'
+      // default places the tooltip above the pointer, which clips against
+      // the top of the chart area on tall bars (the typical case for this
+      // histogram). Symmetrically clamp horizontally so the tooltip doesn't
+      // slide off the right edge near the latest bar.
+      position: (point, _params, _dom, _rect, size) => {
+        const [cursorX, cursorY] = point;
+        const [tooltipW, tooltipH] = size.contentSize;
+        const [viewW] = size.viewSize;
+        const gap = 12;
+        const y = cursorY < tooltipH + gap
+          ? cursorY + gap                  // not enough room above → place below
+          : cursorY - tooltipH - gap;      // default: above
+        const x = Math.min(
+          Math.max(cursorX - tooltipW / 2, gap),
+          viewW - tooltipW - gap,
+        );
+        return [x, y];
+      },
     },
     series: seriesData,
   };
