@@ -76,7 +76,7 @@ func New(cfg Config) *Ingester {
 		id:        cfg.ID,
 		addr:      cfg.Addr,
 		tlsConfig: cfg.TLSConfig,
-		logger:    comp.Ingester.Sub("relp").Apply(logging.Default(cfg.Logger)),
+		logger:    comp.Ingester.Sub("relp").Desc("RELP ingester — TCP transport with transaction-based acknowledgments (rsyslog-compatible).").SubOpt(cfg.ID).Apply(logging.Default(cfg.Logger)),
 	}
 }
 

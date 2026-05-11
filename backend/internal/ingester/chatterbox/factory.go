@@ -137,7 +137,7 @@ func NewIngester(id glid.GLID, params map[string]string, logger *slog.Logger) (o
 	formats, cumulativeWeights, totalWeight := buildFormats(enabledFormats, weights, pools)
 
 	// Scope logger with component identity.
-	scopedLogger := comp.Ingester.Sub("chatterbox").Apply(logging.Default(logger))
+	scopedLogger := comp.Ingester.Sub("chatterbox").Desc("Chatterbox ingester — synthetic high-volume traffic generator for load testing.").SubOpt(id.String()).Apply(logging.Default(logger))
 
 	return &Ingester{
 		id:          id.String(),

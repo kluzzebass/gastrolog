@@ -59,7 +59,7 @@ func NewFactory(src StatsSource) orchestrator.IngesterFactory {
 			vaultInterval = d
 		}
 
-		scopedLogger := comp.Ingester.Sub("metrics").Apply(logging.Default(logger)).With("instance", id.String())
+		scopedLogger := comp.Ingester.Sub("metrics").Desc("Metrics ingester — emits cluster/node performance metrics as ingestable records.").SubOpt(id.String()).Apply(logging.Default(logger))
 
 		return &ingester{
 			id:            id.String(),

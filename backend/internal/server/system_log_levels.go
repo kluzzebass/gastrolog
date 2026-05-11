@@ -86,6 +86,7 @@ func (s *SystemServer) ListLogComponents(
 			Path:           p.String(),
 			EffectiveLevel: convert.SlogLevelToProto(int64(level)),
 			Source:         resolutionSource(rules, p.String()),
+			Description:    p.Description(),
 		})
 	}
 	// Defensive sort even though comp.All() already sorts — the wire

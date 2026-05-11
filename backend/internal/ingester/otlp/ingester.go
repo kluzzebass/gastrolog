@@ -67,7 +67,7 @@ func New(cfg Config) *Ingester {
 		id:       cfg.ID,
 		httpAddr: cfg.HTTPAddr,
 		grpcAddr: cfg.GRPCAddr,
-		logger:   comp.Ingester.Sub("otlp").Apply(logging.Default(cfg.Logger)),
+		logger:   comp.Ingester.Sub("otlp").Desc("OpenTelemetry Logs ingester — accepts OTLP log records via HTTP (POST /v1/logs) and gRPC.").SubOpt(cfg.ID).Apply(logging.Default(cfg.Logger)),
 	}
 }
 

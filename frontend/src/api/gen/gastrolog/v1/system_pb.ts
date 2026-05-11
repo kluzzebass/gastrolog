@@ -7387,7 +7387,8 @@ export class PutLogLevelsResponse extends Message<PutLogLevelsResponse> {
 /**
  * LogComponentInfo is one row of the ListLogComponents response: a
  * component path the binary has constructed, with its currently
- * effective level and how that level was resolved.
+ * effective level, how that level was resolved, and an
+ * operator-readable description (if the path declared one).
  *
  * @generated from message gastrolog.v1.LogComponentInfo
  */
@@ -7407,6 +7408,11 @@ export class LogComponentInfo extends Message<LogComponentInfo> {
    */
   source = LogComponentLevelSource.LOG_LEVEL_SOURCE_UNSPECIFIED;
 
+  /**
+   * @generated from field: string description = 4;
+   */
+  description = "";
+
   constructor(data?: PartialMessage<LogComponentInfo>) {
     super();
     proto3.util.initPartial(data, this);
@@ -7418,6 +7424,7 @@ export class LogComponentInfo extends Message<LogComponentInfo> {
     { no: 1, name: "path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "effective_level", kind: "enum", T: proto3.getEnumType(LogLevel) },
     { no: 3, name: "source", kind: "enum", T: proto3.getEnumType(LogComponentLevelSource) },
+    { no: 4, name: "description", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): LogComponentInfo {

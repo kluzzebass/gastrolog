@@ -70,7 +70,7 @@ func New(cfg Config) *Ingester {
 		id:      cfg.ID,
 		udpAddr: cfg.UDPAddr,
 		tcpAddr: cfg.TCPAddr,
-		logger:  comp.Ingester.Sub("syslog").Apply(logging.Default(cfg.Logger)),
+		logger:  comp.Ingester.Sub("syslog").Desc("Syslog ingester — RFC 3164 + RFC 5424 over UDP/TCP with auto-detection.").SubOpt(cfg.ID).Apply(logging.Default(cfg.Logger)),
 	}
 }
 

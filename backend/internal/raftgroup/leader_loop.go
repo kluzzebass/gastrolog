@@ -74,7 +74,9 @@ func NewLeaderLoop(cfg LeaderLoopConfig) *LeaderLoop {
 		group:          cfg.Group,
 		name:           cfg.Name,
 		onLead:         cfg.OnLead,
-		logger:         comp.Root("leader-loop").Apply(logging.Default(cfg.Logger)).With("group", cfg.Name),
+		logger: comp.Root("leader-loop").Desc(
+			"Per-Raft-group leader-loop supervisor — observes LeaderCh transitions and dispatches leader epochs.",
+		).Apply(logging.Default(cfg.Logger)).With("group", cfg.Name),
 		barrierTimeout: timeout,
 	}
 }

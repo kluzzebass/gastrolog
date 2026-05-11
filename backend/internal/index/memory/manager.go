@@ -86,7 +86,7 @@ func NewManagerWithJSON(
 		kvStore:    kvStore,
 		jsonStore:  jsonStore,
 		builder:    index.NewBuildHelper(),
-		logger:     comp.IndexManager.Sub("memory").Apply(logging.Default(logger)),
+		logger:     comp.IndexManager.Sub("memory").Desc("In-memory index manager — transient indexes for the memory chunk store.").Apply(logging.Default(logger)),
 	}
 }
 

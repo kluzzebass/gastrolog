@@ -1147,11 +1147,13 @@ enum LogComponentLevelSource {
 
 // LogComponentInfo is one row of the ListLogComponents response: a
 // component path the binary has constructed, with its currently
-// effective level and how that level was resolved.
+// effective level, how that level was resolved, and an
+// operator-readable description (if the path declared one).
 message LogComponentInfo {
   string path = 1;
   LogLevel effective_level = 2;
   LogComponentLevelSource source = 3;
+  string description = 4;
 }
 
 message ListLogComponentsRequest {}

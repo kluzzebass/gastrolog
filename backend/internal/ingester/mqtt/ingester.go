@@ -41,7 +41,7 @@ type Config struct {
 
 // New creates an MQTT ingester for the configured protocol version.
 func New(cfg Config) orchestrator.Ingester {
-	logger := comp.Ingester.Sub("mqtt").Apply(logging.Default(cfg.Logger))
+	logger := comp.Ingester.Sub("mqtt").Desc("MQTT subscribing ingester — accepts messages from MQTT v3.1.1 and v5 brokers.").SubOpt(cfg.ID).Apply(logging.Default(cfg.Logger))
 	if cfg.Version == 5 {
 		return &v5Ingester{cfg: cfg, logger: logger}
 	}

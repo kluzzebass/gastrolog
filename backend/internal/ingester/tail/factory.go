@@ -76,6 +76,6 @@ func parseConfig(id string, params map[string]string, logger *slog.Logger) (conf
 		Patterns:     patterns,
 		PollInterval: pollInterval,
 		StateFile:    stateFile,
-		Logger:       comp.Ingester.Sub("tail").Apply(logging.Default(logger)).With("instance", id),
+		Logger:       comp.Ingester.Sub("tail").Desc("Tail ingester — follows local log files (rotation-aware), one instance per file path.").SubOpt(id).Apply(logging.Default(logger)),
 	}, nil
 }

@@ -398,7 +398,7 @@ func NewManager(cfg Config) (*Manager, error) {
 	}
 
 	// Scope logger with component identity.
-	logger := comp.ChunkManager.Sub("file").Apply(logging.Default(cfg.Logger))
+	logger := comp.ChunkManager.Sub("file").Desc("On-disk chunk manager — opens, seals, queries, replicates, and retires GLCB chunk files. Includes cloud-backed mode when CloudStore is configured.").Apply(logging.Default(cfg.Logger))
 
 	zstdEnc, err := zstd.NewWriter(nil,
 		zstd.WithEncoderLevel(zstd.SpeedDefault),

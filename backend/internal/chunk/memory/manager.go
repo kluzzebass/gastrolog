@@ -71,7 +71,7 @@ func NewManager(cfg Config) (*Manager, error) {
 	}
 
 	// Scope logger with component identity.
-	logger := comp.ChunkManager.Sub("memory").Apply(logging.Default(cfg.Logger))
+	logger := comp.ChunkManager.Sub("memory").Desc("In-memory chunk manager — transient chunks for tests and ephemeral use, no persistence.").Apply(logging.Default(cfg.Logger))
 
 	manager := &Manager{
 		cfg:    cfg,

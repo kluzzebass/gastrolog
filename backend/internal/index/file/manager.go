@@ -59,7 +59,7 @@ func NewManager(dir string, indexers []index.Indexer, logger *slog.Logger) *Mana
 		dir:      dir,
 		indexers: indexers,
 		builder:  index.NewBuildHelper(),
-		logger:   comp.IndexManager.Sub("file").Apply(logging.Default(logger)),
+		logger:   comp.IndexManager.Sub("file").Desc("On-disk index manager — mmap-backed indexes living next to the chunk files.").Apply(logging.Default(logger)),
 	}
 }
 

@@ -76,7 +76,7 @@ func New(cfg Config) *Ingester {
 	return &Ingester{
 		id:     cfg.ID,
 		addr:   cfg.Addr,
-		logger: comp.Ingester.Sub("http").Apply(logging.Default(cfg.Logger)),
+		logger: comp.Ingester.Sub("http").Desc("HTTP ingester — accepts log messages via the Loki Push API (POST /loki/api/v1/push).").SubOpt(cfg.ID).Apply(logging.Default(cfg.Logger)),
 		ready:  make(chan struct{}),
 	}
 }

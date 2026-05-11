@@ -57,7 +57,7 @@ func New(cfg Config) *Ingester {
 	return &Ingester{
 		id:     cfg.ID,
 		addr:   cfg.Addr,
-		logger: comp.Ingester.Sub("fluentfwd").Apply(logging.Default(cfg.Logger)),
+		logger: comp.Ingester.Sub("fluentfwd").Desc("Fluent Forward ingester — accepts records from fluentd/fluent-bit using the Forward protocol.").SubOpt(cfg.ID).Apply(logging.Default(cfg.Logger)),
 	}
 }
 

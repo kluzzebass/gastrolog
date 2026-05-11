@@ -361,7 +361,9 @@ func New(chunks chunk.ChunkManager, indexes index.IndexManager, logger *slog.Log
 	return &Engine{
 		chunks:  chunks,
 		indexes: indexes,
-		logger:  comp.Root("query-engine").Apply(logging.Default(logger)),
+		logger:  comp.Root("query-engine").Desc(
+			"Local query execution engine — record/iterator pipeline that runs Search/Histogram/Explain against the local chunk and index managers.",
+		).Apply(logging.Default(logger)),
 	}
 }
 
@@ -372,7 +374,9 @@ func New(chunks chunk.ChunkManager, indexes index.IndexManager, logger *slog.Log
 func NewWithRegistry(registry manifest.VaultRegistry, logger *slog.Logger) *Engine {
 	return &Engine{
 		registry: registry,
-		logger:   comp.Root("query-engine").Apply(logging.Default(logger)),
+		logger:   comp.Root("query-engine").Desc(
+			"Local query execution engine — record/iterator pipeline that runs Search/Histogram/Explain against the local chunk and index managers.",
+		).Apply(logging.Default(logger)),
 	}
 }
 

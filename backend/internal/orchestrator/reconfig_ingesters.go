@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/logging/comp"
 )
 
 // AddIngester adds and starts a new ingester. If an ingester with the same ID
@@ -61,6 +62,14 @@ func (o *Orchestrator) RemoveIngester(id glid.GLID) error {
 	delete(o.ingesters, id)
 	delete(o.ingesterMeta, id)
 	o.mu.Unlock()
+
+	// Drop the per-instance comp path so ListLogComponents stops
+	// showing a path that the binary will never emit on again
+	// (gastrolog-3flfp). The type-level path stays — it's shared by
+	// every instance of that type.
+	if meta.Type != "" {
+		comp.Unregister(comp.Ingester.Sub(meta.Type).Sub(id.String()))
+	}
 
 	// Note: We don't wait for the specific ingester to finish here because
 	// ingesterWg tracks all ingesters collectively. The ingester will exit

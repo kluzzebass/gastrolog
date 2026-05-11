@@ -86,7 +86,7 @@ func NewIndexerWithConfig(dir string, manager chunk.ChunkManager, logger *slog.L
 	return &Indexer{
 		dir:        dir,
 		manager:    manager,
-		logger:     comp.Indexer.Sub("kv").Apply(logging.Default(logger)),
+		logger:     comp.Indexer.Sub("kv").Desc("Generic key/value index — used for arbitrary attribute key/value lookups.").Apply(logging.Default(logger)),
 		kvBudget:   budget,
 		extractors: extractors,
 	}

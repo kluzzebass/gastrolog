@@ -36,7 +36,7 @@ func NewIndexer(dir string, manager chunk.ChunkManager, logger *slog.Logger) *In
 	return &Indexer{
 		dir:     dir,
 		manager: manager,
-		logger:  comp.Indexer.Sub("attr").Apply(logging.Default(logger)),
+		logger:  comp.Indexer.Sub("attr").Desc("Per-attribute string-equality index — exact-match lookups on a single record attribute.").Apply(logging.Default(logger)),
 	}
 }
 

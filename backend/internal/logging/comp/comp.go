@@ -43,6 +43,32 @@ type Path struct {
 	s string
 }
 
+// Desc associates an operator-readable description with this path.
+// Idempotent — calling it more than once with the same description is a
+// no-op; calling it with a different description overwrites. Returns the
+// receiver so it can be chained at the declaration site:
+//
+//	var compOrchestrator = comp.Root("orchestrator").
+//		Desc("the orchestrator subsystem — vault lifecycle, scheduling, drain")
+//
+// Descriptions surface in the ListLogComponents RPC, the CLI
+// `gastrolog config log-level components` output, and the UI's
+// components reference table. Empty description is the default.
+func (p Path) Desc(s string) Path {
+	registryMu.Lock()
+	descriptions[p.s] = s
+	registryMu.Unlock()
+	return p
+}
+
+// Description returns the doc string attached to this path, or "" if
+// none has been set via Desc.
+func (p Path) Description() string {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	return descriptions[p.s]
+}
+
 // Root creates a top-level component path.
 //
 // name must be non-empty and must not contain "." (the path separator) or
@@ -65,6 +91,17 @@ func (p Path) Sub(name string) Path {
 	child := Path{s: p.s + "." + name}
 	register(child)
 	return child
+}
+
+// SubOpt is like Sub but returns the receiver unchanged when name is
+// empty. Use it for per-instance paths where the instance ID may not
+// always be available (tests, partially-constructed ingesters, etc.).
+// When name is non-empty, validation rules are identical to Sub.
+func (p Path) SubOpt(name string) Path {
+	if name == "" {
+		return p
+	}
+	return p.Sub(name)
 }
 
 // String returns the dotted form (e.g. "orchestrator.replication").
@@ -99,9 +136,10 @@ func All() []Path {
 }
 
 var (
-	registryMu sync.Mutex
-	registry   []Path
-	registered = map[string]bool{}
+	registryMu   sync.Mutex
+	registry     []Path
+	registered   = map[string]bool{}
+	descriptions = map[string]string{}
 )
 
 func register(p Path) {
@@ -123,6 +161,28 @@ func mustValidSegment(name string) {
 	}
 }
 
+// Unregister removes a Path from the registry. Intended for short-lived
+// per-instance paths (e.g. one per ingester instance) that should
+// disappear from ListLogComponents when the instance is destroyed.
+//
+// Idempotent — unregistering a path that was never registered, or
+// already unregistered, is a silent no-op.
+func Unregister(p Path) {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	if !registered[p.s] {
+		return
+	}
+	delete(registered, p.s)
+	delete(descriptions, p.s)
+	for i, q := range registry {
+		if q.s == p.s {
+			registry = append(registry[:i], registry[i+1:]...)
+			return
+		}
+	}
+}
+
 // resetRegistryForTest clears the registry. Intended for tests in this
 // package that exercise auto-registration; production code should never
 // call it.
@@ -131,4 +191,5 @@ func resetRegistryForTest() {
 	defer registryMu.Unlock()
 	registry = nil
 	registered = map[string]bool{}
+	descriptions = map[string]string{}
 }

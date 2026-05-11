@@ -67,7 +67,7 @@ func NewIndexerWithConfig(dir string, manager chunk.ChunkManager, logger *slog.L
 	return &Indexer{
 		dir:     dir,
 		manager: manager,
-		logger:  comp.Indexer.Sub("json").Apply(logging.Default(logger)),
+		logger:  comp.Indexer.Sub("json").Desc("Nested-JSON index — JSON-path lookups against records whose body is JSON.").Apply(logging.Default(logger)),
 		budget:  budget,
 	}
 }

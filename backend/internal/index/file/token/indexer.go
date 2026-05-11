@@ -47,7 +47,7 @@ func NewIndexer(dir string, manager chunk.ChunkManager, logger *slog.Logger) *In
 	return &Indexer{
 		dir:     dir,
 		manager: manager,
-		logger:  comp.Indexer.Sub("token").Apply(logging.Default(logger)),
+		logger:  comp.Indexer.Sub("token").Desc("Full-text token index — tokenized free-text search across record bodies.").Apply(logging.Default(logger)),
 	}
 }
 

@@ -54,7 +54,9 @@ type Config struct {
 // New creates a new Manager.
 func New(cfg Config) *Manager {
 	return &Manager{
-		logger:      comp.Root("cert").Apply(logging.Default(cfg.Logger)),
+		logger: comp.Root("cert").Desc(
+			"TLS certificate manager — loads/reloads PEM-encoded certs from the config store, serves them to the HTTPS listener.",
+		).Apply(logging.Default(cfg.Logger)),
 		certs:       make(map[string]*certEntry),
 		defaultName: "",
 	}

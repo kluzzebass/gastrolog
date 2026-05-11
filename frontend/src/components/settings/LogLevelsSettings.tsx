@@ -214,19 +214,22 @@ function ComponentsTable({ dark, components }: ComponentsTableProps) {
     );
   }
   const header = `text-[0.75em] uppercase tracking-wide ${c("text-text-muted", "text-light-text-muted")}`;
-  const cell = `text-[0.85em] font-mono ${c("text-text-normal", "text-light-text-normal")}`;
-  const meta = `text-[0.85em] font-mono ${c("text-text-muted", "text-light-text-muted")}`;
+  const cellMono = `text-[0.85em] font-mono ${c("text-text-normal", "text-light-text-normal")}`;
+  const cellMeta = `text-[0.85em] font-mono ${c("text-text-muted", "text-light-text-muted")}`;
+  const cellDesc = `text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`;
   return (
-    <div className="grid grid-cols-[1fr_100px_100px] gap-x-4 gap-y-1">
+    <div className="grid grid-cols-[minmax(0,1.4fr)_80px_80px_minmax(0,2fr)] gap-x-4 gap-y-1.5 items-baseline">
       <div className={header}>Path</div>
       <div className={header}>Level</div>
       <div className={header}>Source</div>
+      <div className={header}>Description</div>
       {components.map((info) => (
         <FragmentRow
           key={info.path}
-          pathCls={cell}
-          levelCls={cell}
-          sourceCls={meta}
+          pathCls={cellMono}
+          levelCls={cellMono}
+          sourceCls={cellMeta}
+          descCls={cellDesc}
           info={info}
         />
       ))}
@@ -238,18 +241,21 @@ function FragmentRow({
   pathCls,
   levelCls,
   sourceCls,
+  descCls,
   info,
 }: {
   pathCls: string;
   levelCls: string;
   sourceCls: string;
+  descCls: string;
   info: NonNullable<ReturnType<typeof useLogComponents>["data"]>[number];
 }) {
   return (
     <>
-      <div className={pathCls}>{info.path}</div>
+      <div className={`${pathCls} break-all`}>{info.path}</div>
       <div className={levelCls}>{levelLabel(info.effectiveLevel)}</div>
       <div className={sourceCls}>{sourceLabel(info.source)}</div>
+      <div className={descCls}>{info.description || "—"}</div>
     </>
   );
 }
