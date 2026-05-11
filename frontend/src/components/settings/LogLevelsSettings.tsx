@@ -73,6 +73,21 @@ export function LogLevelsSettings({ dark }: Props) {
     setDraftRules(null);
   };
 
+  // addRuleForPath creates a rule for a specific component path (called
+  // from a Components-table click). Auto-expands the Rules card and
+  // either focuses an existing rule for that path or appends a new
+  // draft rule at DEBUG level (the most common reason an operator
+  // would click a path is to lift its verbosity).
+  const addRuleForPath = (path: string) => {
+    setRulesExpanded(true);
+    const existing = currentRules.findIndex((r) => r.pattern === path);
+    if (existing >= 0) {
+      // Already present — leave it; the operator can edit its level.
+      return;
+    }
+    setDraftRules([...currentRules, { pattern: path, level: LogLevel.DEBUG }]);
+  };
+
   const save = async () => {
     const rules: LogLevelRule[] = currentRules
       .filter((r) => r.pattern.trim() !== "")
@@ -193,7 +208,12 @@ export function LogLevelsSettings({ dark }: Props) {
           Every component path the binary registers, with the effective level
           and the rule that produced it.
         </p>
-        <ComponentsTable dark={dark} components={components} />
+        <ComponentsTable
+          dark={dark}
+          components={components}
+          onPathClick={addRuleForPath}
+          existingPatterns={new Set(currentRules.map((r) => r.pattern))}
+        />
       </SettingsCard>
     </div>
   );
@@ -202,9 +222,11 @@ export function LogLevelsSettings({ dark }: Props) {
 interface ComponentsTableProps {
   dark: boolean;
   components: ReturnType<typeof useLogComponents>["data"];
+  onPathClick: (path: string) => void;
+  existingPatterns: Set<string>;
 }
 
-function ComponentsTable({ dark, components }: ComponentsTableProps) {
+function ComponentsTable({ dark, components, onPathClick, existingPatterns }: ComponentsTableProps) {
   const c = useThemeClass(dark);
   if (!components || components.length === 0) {
     return (
@@ -226,11 +248,14 @@ function ComponentsTable({ dark, components }: ComponentsTableProps) {
       {components.map((info) => (
         <FragmentRow
           key={info.path}
+          dark={dark}
           pathCls={cellMono}
           levelCls={cellMono}
           sourceCls={cellMeta}
           descCls={cellDesc}
           info={info}
+          alreadyRuled={existingPatterns.has(info.path)}
+          onPathClick={onPathClick}
         />
       ))}
     </div>
@@ -238,21 +263,42 @@ function ComponentsTable({ dark, components }: ComponentsTableProps) {
 }
 
 function FragmentRow({
+  dark,
   pathCls,
   levelCls,
   sourceCls,
   descCls,
   info,
+  alreadyRuled,
+  onPathClick,
 }: {
+  dark: boolean;
   pathCls: string;
   levelCls: string;
   sourceCls: string;
   descCls: string;
   info: NonNullable<ReturnType<typeof useLogComponents>["data"]>[number];
+  alreadyRuled: boolean;
+  onPathClick: (path: string) => void;
 }) {
+  const c = useThemeClass(dark);
+  const linkCls = alreadyRuled
+    ? c("text-copper-dim cursor-default", "text-copper-dim cursor-default")
+    : c(
+        "hover:text-copper hover:underline cursor-pointer",
+        "hover:text-copper hover:underline cursor-pointer",
+      );
   return (
     <>
-      <div className={`${pathCls} break-all`}>{info.path}</div>
+      <button
+        type="button"
+        onClick={() => { if (!alreadyRuled) onPathClick(info.path); }}
+        disabled={alreadyRuled}
+        title={alreadyRuled ? "rule already exists for this path" : "click to add a rule for this path"}
+        className={`${pathCls} break-all text-left ${linkCls}`}
+      >
+        {info.path}
+      </button>
       <div className={levelCls}>{levelLabel(info.effectiveLevel)}</div>
       <div className={sourceCls}>{sourceLabel(info.source)}</div>
       <div className={descCls}>{info.description || "—"}</div>
