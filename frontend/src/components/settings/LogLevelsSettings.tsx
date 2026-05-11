@@ -155,16 +155,20 @@ export function LogLevelsSettings({ dark }: Props) {
           </div>
         </div>
 
-        {dirty && (
-          <div className="mt-6 flex gap-2 justify-end">
-            <Button dark={dark} onClick={resetDraft} variant="ghost">
+        <div className="flex gap-2 mt-6">
+          <Button
+            onClick={save}
+            disabled={!dirty || putLogLevels.isPending}
+            dark={dark}
+          >
+            {putLogLevels.isPending ? "Saving..." : "Save"}
+          </Button>
+          {dirty && (
+            <Button variant="ghost" onClick={resetDraft} dark={dark}>
               Discard
             </Button>
-            <Button dark={dark} onClick={save} variant="primary" disabled={putLogLevels.isPending}>
-              {putLogLevels.isPending ? "Saving…" : "Save changes"}
-            </Button>
-          </div>
-        )}
+          )}
+        </div>
       </section>
 
       <section>

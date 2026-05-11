@@ -138,7 +138,8 @@ func (f *FSM) Apply(l *raft.Log) any {
 		*gastrologv1.SystemCommand_SetIngesterAlive,
 		*gastrologv1.SystemCommand_SetIngesterCheckpoint,
 		*gastrologv1.SystemCommand_SetIngesterAssignment,
-		*gastrologv1.SystemCommand_SetSetupWizardDismissed:
+		*gastrologv1.SystemCommand_SetSetupWizardDismissed,
+		*gastrologv1.SystemCommand_PutLogLevels:
 		return f.applyConfig(ctx, cmd, l.Index)
 
 	case *gastrologv1.SystemCommand_CreateUser,
