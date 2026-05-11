@@ -47,6 +47,28 @@ type RotationPolicyConfig struct {
 	Cron *string `json:"cron,omitempty"`
 }
 
+// IsEmpty reports whether this rotation policy has no conditions set —
+// all of MaxBytes, MaxAge, MaxRecords, and Cron are nil or empty. An
+// empty policy is a no-op when assigned to a vault (chunks never rotate),
+// which is almost certainly an operator mistake rather than an intent.
+// PutRotationPolicy uses this check to reject empty configs at the
+// admission boundary. See gastrolog-1rbuf.
+func (c RotationPolicyConfig) IsEmpty() bool {
+	if c.MaxBytes != nil && *c.MaxBytes != "" {
+		return false
+	}
+	if c.MaxAge != nil && *c.MaxAge != "" {
+		return false
+	}
+	if c.MaxRecords != nil {
+		return false
+	}
+	if c.Cron != nil && *c.Cron != "" {
+		return false
+	}
+	return true
+}
+
 // ValidateCron checks whether the Cron field contains a valid cron expression.
 // Supports both 5-field (minute-level) and 6-field (second-level) syntax.
 // Returns nil if Cron is nil or valid, an error otherwise.
@@ -120,6 +142,24 @@ type RetentionPolicyConfig struct {
 
 	// MaxChunks keeps at most this many sealed chunks, deleting the oldest.
 	MaxChunks *int64 `json:"maxChunks,omitempty"`
+}
+
+// IsEmpty reports whether this retention policy has no conditions set —
+// all of MaxAge, MaxBytes, and MaxChunks are nil or empty. An empty
+// retention policy is a no-op (chunks accumulate indefinitely), almost
+// certainly an operator mistake. PutRetentionPolicy uses this check to
+// reject empty configs at the admission boundary. See gastrolog-1rbuf.
+func (c RetentionPolicyConfig) IsEmpty() bool {
+	if c.MaxAge != nil && *c.MaxAge != "" {
+		return false
+	}
+	if c.MaxBytes != nil && *c.MaxBytes != "" {
+		return false
+	}
+	if c.MaxChunks != nil {
+		return false
+	}
+	return true
 }
 
 // ToRetentionPolicy converts a RetentionPolicyConfig to a chunk.RetentionPolicy.

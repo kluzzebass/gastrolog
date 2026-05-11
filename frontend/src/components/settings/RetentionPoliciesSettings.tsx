@@ -99,6 +99,10 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
   const effectiveName = newName.trim() || namePlaceholder || "default";
   const nameConflict = existingNames.has(effectiveName);
   const vaults = config?.vaults ?? [];
+  // gastrolog-1rbuf: at least one condition must be set, otherwise the
+  // retention policy is a silent no-op. Backend rejects empty policies
+  // with InvalidArgument; mirror the rule client-side.
+  const newPolicyEmpty = !newMaxAge.trim() && !newMaxBytes.trim() && !newMaxChunks.trim();
 
   const defaults = (id: string): PolicyEdit => {
     const pol = policies.find((p) => encode(p.id) === id);
@@ -186,7 +190,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
           onCancel={() => dispatchAdd({ type: "resetForm" })}
           onCreate={handleCreate}
           isPending={putPolicy.isPending}
-          createDisabled={nameConflict}
+          createDisabled={nameConflict || newPolicyEmpty}
         >
           <FormField label="Name" dark={dark}>
             <TextInput
@@ -239,6 +243,9 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
         const id = encode(pol.id);
         const edit = getEdit(id);
         const refs = vaultRefsForRetentionPolicy(id, vaults);
+        // gastrolog-1rbuf: backend rejects empty policies; disable Save
+        // preemptively if the operator has cleared every condition.
+        const editEmpty = !edit.maxAge.trim() && !edit.maxBytes.trim() && !edit.maxChunks.trim();
         return (
           <SettingsCard
             key={id}
@@ -250,7 +257,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
             footer={
               <Button
                 onClick={() => handleSave(id)}
-                disabled={putPolicy.isPending || !isDirty(id)}
+                disabled={putPolicy.isPending || !isDirty(id) || editEmpty}
               >
                 {putPolicy.isPending ? "Saving..." : "Save"}
               </Button>
