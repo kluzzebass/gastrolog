@@ -290,7 +290,7 @@ func BuildTLSConfig(params map[string]string, certMgr *cert.Manager) (*tls.Confi
 	// Load CA for client certificate verification (mutual TLS).
 	caFile := params["tls_ca"]
 	if caFile != "" {
-		caPEM, err := os.ReadFile(caFile) //nolint:gosec // G304: CA file path from user config
+		caPEM, err := os.ReadFile(caFile) //nolint:gosec //ok:os-readfile bounded PEM at startup; x509.AppendCertsFromPEM needs full bytes
 		if err != nil {
 			return nil, fmt.Errorf("read RELP CA file: %w", err)
 		}
