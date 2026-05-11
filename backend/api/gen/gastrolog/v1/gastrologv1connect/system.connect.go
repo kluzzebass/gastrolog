@@ -180,6 +180,12 @@ const (
 	// SystemServiceDeleteLookupProcedure is the fully-qualified name of the SystemService's
 	// DeleteLookup RPC.
 	SystemServiceDeleteLookupProcedure = "/gastrolog.v1.SystemService/DeleteLookup"
+	// SystemServicePutLogLevelsProcedure is the fully-qualified name of the SystemService's
+	// PutLogLevels RPC.
+	SystemServicePutLogLevelsProcedure = "/gastrolog.v1.SystemService/PutLogLevels"
+	// SystemServiceListLogComponentsProcedure is the fully-qualified name of the SystemService's
+	// ListLogComponents RPC.
+	SystemServiceListLogComponentsProcedure = "/gastrolog.v1.SystemService/ListLogComponents"
 )
 
 // SystemServiceClient is a client for the gastrolog.v1.SystemService service.
@@ -291,6 +297,15 @@ type SystemServiceClient interface {
 	SetNodeStorageConfig(context.Context, *connect.Request[v1.SetNodeStorageConfigRequest]) (*connect.Response[v1.SetNodeStorageConfigResponse], error)
 	// DeleteLookup removes a lookup table by name (any type).
 	DeleteLookup(context.Context, *connect.Request[v1.DeleteLookupRequest]) (*connect.Response[v1.DeleteLookupResponse], error)
+	// Log levels (gastrolog-3flfp). PutLogLevels replaces the cluster-wide
+	// log-level configuration; the FSM dispatcher propagates it to every
+	// node, where the ComponentFilterHandler atomically swaps its rule set.
+	PutLogLevels(context.Context, *connect.Request[v1.PutLogLevelsRequest]) (*connect.Response[v1.PutLogLevelsResponse], error)
+	// ListLogComponents enumerates the component paths the receiving node's
+	// binary has constructed, with each path's effective level resolved
+	// against the current rule set. Used by the CLI (tab-completion) and
+	// UI (tree view + "explicit vs inherited" annotations).
+	ListLogComponents(context.Context, *connect.Request[v1.ListLogComponentsRequest]) (*connect.Response[v1.ListLogComponentsResponse], error)
 }
 
 // NewSystemServiceClient constructs a client for the gastrolog.v1.SystemService service. By
@@ -604,6 +619,18 @@ func NewSystemServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(systemServiceMethods.ByName("DeleteLookup")),
 			connect.WithClientOptions(opts...),
 		),
+		putLogLevels: connect.NewClient[v1.PutLogLevelsRequest, v1.PutLogLevelsResponse](
+			httpClient,
+			baseURL+SystemServicePutLogLevelsProcedure,
+			connect.WithSchema(systemServiceMethods.ByName("PutLogLevels")),
+			connect.WithClientOptions(opts...),
+		),
+		listLogComponents: connect.NewClient[v1.ListLogComponentsRequest, v1.ListLogComponentsResponse](
+			httpClient,
+			baseURL+SystemServiceListLogComponentsProcedure,
+			connect.WithSchema(systemServiceMethods.ByName("ListLogComponents")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -659,6 +686,8 @@ type systemServiceClient struct {
 	deleteCloudService    *connect.Client[v1.DeleteCloudServiceRequest, v1.DeleteCloudServiceResponse]
 	setNodeStorageConfig  *connect.Client[v1.SetNodeStorageConfigRequest, v1.SetNodeStorageConfigResponse]
 	deleteLookup          *connect.Client[v1.DeleteLookupRequest, v1.DeleteLookupResponse]
+	putLogLevels          *connect.Client[v1.PutLogLevelsRequest, v1.PutLogLevelsResponse]
+	listLogComponents     *connect.Client[v1.ListLogComponentsRequest, v1.ListLogComponentsResponse]
 }
 
 // GetSystem calls gastrolog.v1.SystemService.GetSystem.
@@ -911,6 +940,16 @@ func (c *systemServiceClient) DeleteLookup(ctx context.Context, req *connect.Req
 	return c.deleteLookup.CallUnary(ctx, req)
 }
 
+// PutLogLevels calls gastrolog.v1.SystemService.PutLogLevels.
+func (c *systemServiceClient) PutLogLevels(ctx context.Context, req *connect.Request[v1.PutLogLevelsRequest]) (*connect.Response[v1.PutLogLevelsResponse], error) {
+	return c.putLogLevels.CallUnary(ctx, req)
+}
+
+// ListLogComponents calls gastrolog.v1.SystemService.ListLogComponents.
+func (c *systemServiceClient) ListLogComponents(ctx context.Context, req *connect.Request[v1.ListLogComponentsRequest]) (*connect.Response[v1.ListLogComponentsResponse], error) {
+	return c.listLogComponents.CallUnary(ctx, req)
+}
+
 // SystemServiceHandler is an implementation of the gastrolog.v1.SystemService service.
 type SystemServiceHandler interface {
 	// GetConfig returns the current configuration.
@@ -1020,6 +1059,15 @@ type SystemServiceHandler interface {
 	SetNodeStorageConfig(context.Context, *connect.Request[v1.SetNodeStorageConfigRequest]) (*connect.Response[v1.SetNodeStorageConfigResponse], error)
 	// DeleteLookup removes a lookup table by name (any type).
 	DeleteLookup(context.Context, *connect.Request[v1.DeleteLookupRequest]) (*connect.Response[v1.DeleteLookupResponse], error)
+	// Log levels (gastrolog-3flfp). PutLogLevels replaces the cluster-wide
+	// log-level configuration; the FSM dispatcher propagates it to every
+	// node, where the ComponentFilterHandler atomically swaps its rule set.
+	PutLogLevels(context.Context, *connect.Request[v1.PutLogLevelsRequest]) (*connect.Response[v1.PutLogLevelsResponse], error)
+	// ListLogComponents enumerates the component paths the receiving node's
+	// binary has constructed, with each path's effective level resolved
+	// against the current rule set. Used by the CLI (tab-completion) and
+	// UI (tree view + "explicit vs inherited" annotations).
+	ListLogComponents(context.Context, *connect.Request[v1.ListLogComponentsRequest]) (*connect.Response[v1.ListLogComponentsResponse], error)
 }
 
 // NewSystemServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -1329,6 +1377,18 @@ func NewSystemServiceHandler(svc SystemServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(systemServiceMethods.ByName("DeleteLookup")),
 		connect.WithHandlerOptions(opts...),
 	)
+	systemServicePutLogLevelsHandler := connect.NewUnaryHandler(
+		SystemServicePutLogLevelsProcedure,
+		svc.PutLogLevels,
+		connect.WithSchema(systemServiceMethods.ByName("PutLogLevels")),
+		connect.WithHandlerOptions(opts...),
+	)
+	systemServiceListLogComponentsHandler := connect.NewUnaryHandler(
+		SystemServiceListLogComponentsProcedure,
+		svc.ListLogComponents,
+		connect.WithSchema(systemServiceMethods.ByName("ListLogComponents")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.SystemService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case SystemServiceGetSystemProcedure:
@@ -1431,6 +1491,10 @@ func NewSystemServiceHandler(svc SystemServiceHandler, opts ...connect.HandlerOp
 			systemServiceSetNodeStorageConfigHandler.ServeHTTP(w, r)
 		case SystemServiceDeleteLookupProcedure:
 			systemServiceDeleteLookupHandler.ServeHTTP(w, r)
+		case SystemServicePutLogLevelsProcedure:
+			systemServicePutLogLevelsHandler.ServeHTTP(w, r)
+		case SystemServiceListLogComponentsProcedure:
+			systemServiceListLogComponentsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -1638,4 +1702,12 @@ func (UnimplementedSystemServiceHandler) SetNodeStorageConfig(context.Context, *
 
 func (UnimplementedSystemServiceHandler) DeleteLookup(context.Context, *connect.Request[v1.DeleteLookupRequest]) (*connect.Response[v1.DeleteLookupResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.DeleteLookup is not implemented"))
+}
+
+func (UnimplementedSystemServiceHandler) PutLogLevels(context.Context, *connect.Request[v1.PutLogLevelsRequest]) (*connect.Response[v1.PutLogLevelsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.PutLogLevels is not implemented"))
+}
+
+func (UnimplementedSystemServiceHandler) ListLogComponents(context.Context, *connect.Request[v1.ListLogComponentsRequest]) (*connect.Response[v1.ListLogComponentsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.ListLogComponents is not implemented"))
 }
