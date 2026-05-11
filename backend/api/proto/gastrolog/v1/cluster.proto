@@ -15,7 +15,12 @@ message ForwardApplyRequest {
   bytes command = 1;
 }
 
-message ForwardApplyResponse {}
+// ForwardApplyResponse carries the Raft log index at which the leader
+// applied the command. The follower uses this to wait for its own FSM
+// to catch up before reading post-mutation state. See gastrolog-2nxij.
+message ForwardApplyResponse {
+  uint64 applied_index = 1;
+}
 
 // EnrollRequest is sent by a joining node to the cluster leader.
 // The token_secret proves the node is authorized to join.

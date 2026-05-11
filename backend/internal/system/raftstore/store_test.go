@@ -96,15 +96,16 @@ func TestApplyBadData(t *testing.T) {
 
 // mockForwarder records Forward calls for testing.
 type mockForwarder struct {
-	called bool
-	data   []byte
-	err    error
+	called       bool
+	data         []byte
+	appliedIndex uint64
+	err          error
 }
 
-func (m *mockForwarder) Forward(ctx context.Context, data []byte) error {
+func (m *mockForwarder) Forward(ctx context.Context, data []byte) (uint64, error) {
 	m.called = true
 	m.data = data
-	return m.err
+	return m.appliedIndex, m.err
 }
 
 func TestApplyForwardsOnNotLeader(t *testing.T) {
@@ -140,7 +141,7 @@ func TestApplyForwardsOnNotLeader(t *testing.T) {
 
 	// ApplyRaw should detect ErrNotLeader and forward.
 	testData := []byte("test-command-data")
-	err = s.ApplyRaw(testData)
+	_, err = s.ApplyRaw(testData)
 	if err != nil {
 		t.Fatalf("ApplyRaw returned error: %v", err)
 	}
@@ -178,7 +179,7 @@ func TestApplyNoForwarderReturnsError(t *testing.T) {
 	s := New(r, fsm, 5*time.Second)
 	// No forwarder set.
 
-	err = s.ApplyRaw([]byte("test-command-data"))
+	_, err = s.ApplyRaw([]byte("test-command-data"))
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -214,8 +215,130 @@ func TestApplyForwarderError(t *testing.T) {
 	fwdErr := errors.New("leader unreachable")
 	s.SetForwarder(&mockForwarder{err: fwdErr})
 
-	err = s.ApplyRaw([]byte("test-data"))
+	_, err = s.ApplyRaw([]byte("test-data"))
 	if !errors.Is(err, fwdErr) {
 		t.Fatalf("expected forwarder error, got: %v", err)
 	}
+}
+
+// TestApplyReturnsAppliedIndexOnLeader pins that the leader path returns the
+// raft log index from the future, not zero. The mutation handlers in
+// SystemServer don't read this index, but the cluster ForwardApply handler
+// does (returning it to the forwarding follower) — gastrolog-2nxij.
+func TestApplyReturnsAppliedIndexOnLeader(t *testing.T) {
+	t.Parallel()
+	r, fsm := newTestRaft(t)
+	s := New(r, fsm, 5*time.Second)
+
+	// Apply a raw byte payload — FSM will reject deserialization, but
+	// future.Index() is set on the resp side regardless. The goal of this
+	// test is to pin that the leader path returns a non-zero index, which
+	// is what the cluster ForwardApply handler ships back to followers.
+	idx, _ := s.ApplyRaw([]byte("noop-command"))
+	if idx == 0 {
+		t.Errorf("expected non-zero applied index on leader path, got 0")
+	}
+}
+
+// TestApplyWaitsForLocalApplyAfterForward is the regression test for
+// gastrolog-2nxij. After Forward returns the leader's applied index, the
+// follower's applyRaw must block until its local raft.AppliedIndex catches
+// up. The mock forwarder reports an index in the future; the test asserts
+// applyRaw times out rather than returning while still behind.
+//
+// This proves the wait loop is wired and bounded, without needing a real
+// two-node cluster (which the in-process harness doesn't simulate).
+func TestApplyWaitsForLocalApplyAfterForward(t *testing.T) {
+	t.Parallel()
+	fsm := raftfsm.New()
+
+	conf := hraft.DefaultConfig()
+	conf.LocalID = "follower"
+	conf.LogOutput = io.Discard
+	conf.HeartbeatTimeout = 50 * time.Millisecond
+	conf.ElectionTimeout = 50 * time.Millisecond
+	conf.LeaderLeaseTimeout = 50 * time.Millisecond
+
+	logStore := hraft.NewInmemStore()
+	stableStore := hraft.NewInmemStore()
+	snapStore := hraft.NewInmemSnapshotStore()
+	_, transport := hraft.NewInmemTransport("follower")
+
+	r, err := hraft.NewRaft(conf, fsm, logStore, stableStore, snapStore, transport)
+	if err != nil {
+		t.Fatalf("NewRaft: %v", err)
+	}
+	t.Cleanup(func() { _ = r.Shutdown().Error() })
+
+	// Local AppliedIndex starts at 0; mock forwarder reports the leader
+	// applied at index 99 — which the follower will never reach because
+	// it has no leader.
+	s := New(r, fsm, 100*time.Millisecond)
+	s.SetForwarder(&mockForwarder{appliedIndex: 99})
+
+	start := time.Now()
+	_, err = s.ApplyRaw([]byte("forwarded-command"))
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected wait-for-local-apply timeout, got nil error")
+	}
+	if !contains(err.Error(), "wait for local FSM apply") {
+		t.Errorf("expected wait-for-local-apply timeout, got: %v", err)
+	}
+	if elapsed < 50*time.Millisecond {
+		t.Errorf("returned too fast (%s), wait loop appears bypassed", elapsed)
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("took too long (%s), timeout bound not enforced", elapsed)
+	}
+}
+
+// TestApplyReturnsImmediatelyOnZeroAppliedIndex covers the edge case where
+// the leader's response carries applied_index=0 (e.g. legacy peer that
+// hasn't been upgraded, or a synthetic command). The follower must not
+// wait — there's nothing meaningful to wait for. Returning immediately
+// preserves backward compatibility during a rolling upgrade.
+func TestApplyReturnsImmediatelyOnZeroAppliedIndex(t *testing.T) {
+	t.Parallel()
+	fsm := raftfsm.New()
+
+	conf := hraft.DefaultConfig()
+	conf.LocalID = "follower"
+	conf.LogOutput = io.Discard
+	conf.HeartbeatTimeout = 50 * time.Millisecond
+	conf.ElectionTimeout = 50 * time.Millisecond
+	conf.LeaderLeaseTimeout = 50 * time.Millisecond
+
+	logStore := hraft.NewInmemStore()
+	stableStore := hraft.NewInmemStore()
+	snapStore := hraft.NewInmemSnapshotStore()
+	_, transport := hraft.NewInmemTransport("follower")
+
+	r, err := hraft.NewRaft(conf, fsm, logStore, stableStore, snapStore, transport)
+	if err != nil {
+		t.Fatalf("NewRaft: %v", err)
+	}
+	t.Cleanup(func() { _ = r.Shutdown().Error() })
+
+	s := New(r, fsm, 5*time.Second)
+	s.SetForwarder(&mockForwarder{appliedIndex: 0})
+
+	start := time.Now()
+	_, err = s.ApplyRaw([]byte("forwarded-command"))
+	if err != nil {
+		t.Fatalf("ApplyRaw unexpectedly errored: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
+		t.Errorf("wait fired despite applied_index=0 (took %s)", elapsed)
+	}
+}
+
+func contains(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
 }

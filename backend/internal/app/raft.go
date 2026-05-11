@@ -238,7 +238,7 @@ func openRaftSystemStore(opts raftStoreOpts) (*raftSystemStore, error) {
 	store := raftstore.New(r, fsm, 10*time.Second)
 
 	opts.ClusterSrv.SetRaft(r)
-	opts.ClusterSrv.SetApplyFn(func(ctx context.Context, data []byte) error {
+	opts.ClusterSrv.SetApplyFn(func(ctx context.Context, data []byte) (uint64, error) {
 		return store.ApplyRaw(data)
 	})
 	fwd := cluster.NewForwarder(r, opts.ClusterTLS)
