@@ -48,6 +48,9 @@ export function useWatchSystem() {
             // IngesterConfig. Without this, Inspector can show stale stopped/0-of-N
             // while GetIngesterStatus counters still advance.
             qc.invalidateQueries({ queryKey: ["ingesters"] });
+            // Log component levels resolve against the current LogLevelConfig
+            // — any config commit may shift effective levels.
+            qc.invalidateQueries({ queryKey: ["log-components"] });
           }
           nextBackoff = 0; // reset backoff on successful message
         }

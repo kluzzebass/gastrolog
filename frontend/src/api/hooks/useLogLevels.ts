@@ -13,9 +13,15 @@ import { useQuery } from "@tanstack/react-query";
  * config first (via useConfig), modify locally, then dispatch.
  */
 export function usePutLogLevels() {
-  return useSystemMutation(async (config: LogLevelConfig) => {
-    return systemClient.putLogLevels({ config });
-  });
+  return useSystemMutation(
+    async (config: LogLevelConfig) => {
+      return systemClient.putLogLevels({ config });
+    },
+    // After a rule swap, every component path's effective level may
+    // have changed; invalidate the components query so the reference
+    // table re-fetches with new resolutions.
+    [["log-components"]],
+  );
 }
 
 /**
