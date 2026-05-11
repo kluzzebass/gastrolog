@@ -181,9 +181,23 @@ func dedupChunkReports(reports []chunkReport) []*apiv1.ChunkMeta {
 // moreAuthoritative reports whether a is a more-advanced view of the same
 // chunk than b. Higher authority = later in the chunk lifecycle. With the
 // Compressed flag merged into Sealed (gastrolog-24m1t step 7f), the only
-// lifecycle transition relevant here is unsealed → sealed.
+// lifecycle transition is unsealed → sealed.
+//
+// For two unsealed views of the same chunk — which happens when the leader
+// and any follower both report the active chunk in the fan-out — pick the
+// one with the higher RecordCount. RecordCount grows monotonically during
+// an active chunk's lifetime, so 'higher' means 'fresher'. Without this
+// tiebreaker, a leader-peer timeout in the parallel fan-out demotes the
+// leader's authoritative view and lets a follower's stale RecordCount
+// (followers only replicate sealed chunks, so their active-chunk count
+// lags or is zero) win the round, producing visible oscillation in the
+// inspector UI as successive ticks flip between leader-wins and
+// follower-wins rounds. See gastrolog-1bgvm.
 func moreAuthoritative(a, b *apiv1.ChunkMeta) bool {
-	return a.Sealed && !b.Sealed
+	if a.Sealed != b.Sealed {
+		return a.Sealed
+	}
+	return a.RecordCount > b.RecordCount
 }
 
 // remoteVaultNodes returns node IDs of ALL remote nodes that host this

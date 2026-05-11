@@ -2,8 +2,9 @@ package orchestrator
 
 import (
 	"context"
-	"gastrolog/internal/glid"
+	"fmt"
 
+	"gastrolog/internal/glid"
 	"gastrolog/internal/system"
 )
 
@@ -27,10 +28,51 @@ func findRetentionPolicy(policies []system.RetentionPolicyConfig, id glid.GLID) 
 	return nil
 }
 
-// ReloadRotationPolicies is a no-op — retained for interface compatibility.
-// The rotationSweep job discovers all vault instances and reconciles rotation
-// policies + cron jobs from the current config every 15 seconds.
-func (o *Orchestrator) ReloadRotationPolicies(_ context.Context) error {
+// ReloadRotationPolicies hot-swaps the rotation policy on every leader vault
+// instance's chunk manager from the current config. Invoked synchronously by
+// the FSM dispatcher when a vault's RotationPolicyID changes or when a policy's
+// contents are edited, so threshold changes take effect immediately on the
+// active chunk rather than waiting up to 15 s for the next rotationSweep tick.
+//
+// Followers are left alone — the sweep continues to stamp NeverRotatePolicy on
+// them. Cron-schedule changes still lag until the next sweep tick (they fire
+// on minute boundaries anyway).
+func (o *Orchestrator) ReloadRotationPolicies(ctx context.Context) error {
+	sys, err := o.loadSystem(ctx)
+	if err != nil {
+		return fmt.Errorf("load system for rotation policy reload: %w", err)
+	}
+	if sys == nil {
+		return nil
+	}
+	cfg := &sys.Config
+
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+
+	for vaultID, vault := range o.vaults {
+		vaultInst := vault.Instance
+		if vaultInst == nil || vaultInst.IsFollower {
+			continue
+		}
+		vaultCfg := findVaultConfig(cfg.Vaults, vaultID)
+		if vaultCfg == nil || vaultCfg.RotationPolicyID == nil {
+			continue
+		}
+		policyCfg := findRotationPolicy(cfg.RotationPolicies, *vaultCfg.RotationPolicyID)
+		if policyCfg == nil {
+			continue
+		}
+		policy, err := policyCfg.ToRotationPolicy()
+		if err != nil {
+			o.logger.Warn("reload rotation policies: invalid policy",
+				"vault", vaultID, "policy", *vaultCfg.RotationPolicyID, "error", err)
+			continue
+		}
+		if policy != nil {
+			vaultInst.Chunks.SetRotationPolicy(policy)
+		}
+	}
 	return nil
 }
 
