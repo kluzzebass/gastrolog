@@ -17,7 +17,6 @@ import (
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
 	"gastrolog/internal/querylang"
-	"gastrolog/internal/safeutf8"
 	"gastrolog/internal/system"
 
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
@@ -236,15 +235,7 @@ func (s *QueryServer) searchDirect(
 		return token
 	}
 
-	// computeDedupHistogram (record-iterating EventID dedup) is no longer
-	// needed for cross-vault transition double-counting — that's handled
-	// at the index level via per-chunk IngestTSMonotonic dispatch +
-	// ScanTSBounds + on-disk TS index rank arithmetic. The local histogram
-	// path above computes correct counts directly. Skipping the dedup
-	// avoids iterating ALL records per histogram query. See gastrolog-66b7x.
-	var streamedHistogram *streamedHistogramBuilder
-
-	return s.mergeAndStream(ctx, localIter, getToken, remoteIter, q.OrderBy, q.Reverse(), q.Limit, transform, histogram, streamedHistogram, serverStart, stream)
+	return s.mergeAndStream(ctx, localIter, getToken, remoteIter, q.OrderBy, q.Reverse(), q.Limit, transform, histogram, serverStart, stream)
 }
 
 // splitResumeToken separates a unified resume token into local positions
@@ -401,7 +392,6 @@ func (s *QueryServer) mergeAndStream(
 	limit int,
 	transform *query.RecordTransform,
 	histogram []*apiv1.HistogramBucket,
-	streamedHistogram *streamedHistogramBuilder,
 	serverStart time.Time,
 	stream *connect.ServerStream[apiv1.SearchResponse],
 ) error {
@@ -445,7 +435,7 @@ func (s *QueryServer) mergeAndStream(
 		mergeInvolved = true
 		// Two-way sorted merge of local and remote iterators.
 		captured := chunk.Record{}
-		if err := mergeIterators(ctx, sb, localIter, remoteIter, orderBy, reverse, limit, transform, streamedHistogram, &mergeHighwater, &captured, dedup, &limitHit); err != nil {
+		if err := mergeIterators(ctx, sb, localIter, remoteIter, orderBy, reverse, limit, transform, &mergeHighwater, &captured, dedup, &limitHit); err != nil {
 			return err
 		}
 		if !captured.IngestTS.IsZero() {
@@ -454,7 +444,7 @@ func (s *QueryServer) mergeAndStream(
 		}
 	} else {
 		// Fast path: no remote results, just stream local.
-		if err := streamLocal(ctx, sb, localIter, transform, streamedHistogram, &mergeHighwater, dedup); err != nil {
+		if err := streamLocal(ctx, sb, localIter, transform, &mergeHighwater, dedup); err != nil {
 			return err
 		}
 	}
@@ -466,16 +456,12 @@ func (s *QueryServer) mergeAndStream(
 	// empty stream and yield phantom duplicates.
 	synthOK := mergeInvolved && limitHit
 	tokenBytes := buildResumeTokenBytes(transform, getToken, mergeHighwater, reverse, lastLocalSet, lastLocalRec, synthOK)
-	finalHistogram := histogram
-	if streamedHistogram != nil {
-		finalHistogram = streamedHistogram.toProto()
-	}
 
 	return stream.Send(&apiv1.SearchResponse{
 		Records:         sb.pending(),
 		ResumeToken:     tokenBytes,
 		HasMore:         len(tokenBytes) > 0,
-		Histogram:       finalHistogram,
+		Histogram:       histogram,
 		ServerElapsedMs: time.Since(serverStart).Milliseconds(),
 	})
 }
@@ -536,12 +522,12 @@ func (d *dedupWindow) shouldSkip(rec chunk.Record) bool {
 }
 
 // streamLocal streams local iterator results through the batcher.
-func streamLocal(ctx context.Context, sb *streamBatcher, localIter iter.Seq2[chunk.Record, error], transform *query.RecordTransform, streamedHistogram *streamedHistogramBuilder, highwater *time.Time, dedup *dedupWindow) error {
+func streamLocal(ctx context.Context, sb *streamBatcher, localIter iter.Seq2[chunk.Record, error], transform *query.RecordTransform, highwater *time.Time, dedup *dedupWindow) error {
 	for rec, err := range localIter {
 		if err != nil {
 			return mapSearchError(err)
 		}
-		_, done, emitErr := emitRecord(ctx, sb, rec, transform, streamedHistogram, highwater, dedup)
+		_, done, emitErr := emitRecord(ctx, sb, rec, transform, highwater, dedup)
 		if emitErr != nil {
 			return emitErr
 		}
@@ -612,7 +598,6 @@ func mergeIterators(
 	reverse bool,
 	limit int,
 	transform *query.RecordTransform,
-	streamedHistogram *streamedHistogramBuilder,
 	highwater *time.Time,
 	lastLocalRec *chunk.Record,
 	dedup *dedupWindow,
@@ -647,7 +632,7 @@ func mergeIterators(
 		var fromLocal bool
 		rec, fromLocal, localPending, remotePending = pickWinner(localPending, remotePending, orderBy, reverse, localNext, remoteNext)
 
-		emittedNow, done, err := emitRecord(ctx, sb, rec, transform, streamedHistogram, highwater, dedup)
+		emittedNow, done, err := emitRecord(ctx, sb, rec, transform, highwater, dedup)
 		if err != nil {
 			return err
 		}
@@ -694,17 +679,10 @@ func mergeIterators(
 // When dedup is non-nil, the record is checked against the dedup
 // window BEFORE any transform/highwater work — duplicates short-circuit
 // without affecting state, so the highwater advances only on records
-// the client actually receives. The histogram (streamedHistogram) is
-// also bypassed on dedup-skip; histograms are computed via a separate
-// index-rank arithmetic path that intentionally does NOT dedup, so
-// this branch only matters for the rare callers that pass in a
-// streaming histogram builder.
-func emitRecord(ctx context.Context, sb *streamBatcher, rec chunk.Record, transform *query.RecordTransform, streamedHistogram *streamedHistogramBuilder, highwater *time.Time, dedup *dedupWindow) (bool, bool, error) {
+// the client actually receives.
+func emitRecord(ctx context.Context, sb *streamBatcher, rec chunk.Record, transform *query.RecordTransform, highwater *time.Time, dedup *dedupWindow) (bool, bool, error) {
 	if dedup != nil && dedup.shouldSkip(rec) {
 		return false, false, nil
-	}
-	if streamedHistogram != nil {
-		streamedHistogram.add(rec)
 	}
 	if transform != nil {
 		rec, ok := transform.Apply(ctx, rec)
@@ -894,180 +872,6 @@ func hasMultiNodeVault(byNode map[string][]glid.GLID) bool {
 		}
 	}
 	return false
-}
-
-type dedupHistogramStats struct {
-	histTotal    int64
-	uniqueCount  int64
-	dedupedCount int64
-}
-
-func (s *QueryServer) computeDedupHistogram(ctx context.Context, eng *query.Engine, q query.Query, start, end time.Time) ([]*apiv1.HistogramBucket, dedupHistogramStats, error) {
-	qHist := q
-	qHist.Limit = 0
-	builder := newStreamedHistogramBuilder(start, end, 50)
-
-	localIter, _ := eng.Search(ctx, qHist, nil)
-	remoteIter, _, _ := s.collectRemote(ctx, qHist, nil)
-
-	if remoteIter == nil {
-		for rec, err := range localIter {
-			if err != nil {
-				return nil, dedupHistogramStats{}, err
-			}
-			builder.add(rec)
-		}
-	} else {
-		if err := consumeMergedForHistogram(localIter, remoteIter, q.OrderBy, q.Reverse(), builder); err != nil {
-			return nil, dedupHistogramStats{}, err
-		}
-	}
-
-	stats := dedupHistogramStats{
-		histTotal:    builder.totalCount(),
-		uniqueCount:  builder.uniqueCount,
-		dedupedCount: builder.dedupedCount,
-	}
-
-	return builder.toProto(), stats, nil
-}
-
-func consumeMergedForHistogram(
-	localIter, remoteIter iter.Seq2[chunk.Record, error],
-	orderBy query.OrderBy,
-	reverse bool,
-	builder *streamedHistogramBuilder,
-) error {
-	localNext, stopLocal := iter.Pull2(localIter)
-	defer stopLocal()
-	remoteNext, stopRemote := iter.Pull2(remoteIter)
-	defer stopRemote()
-
-	localRec, localErr, localOK := localNext()
-	remoteRec, remoteErr, remoteOK := remoteNext()
-
-	isBefore := func(a, b time.Time) bool {
-		if reverse {
-			return a.After(b)
-		}
-		return a.Before(b)
-	}
-
-	for localOK || remoteOK {
-		if localErr != nil {
-			return localErr
-		}
-		if remoteErr != nil {
-			return remoteErr
-		}
-		switch {
-		case !localOK:
-			builder.add(remoteRec)
-			remoteRec, remoteErr, remoteOK = remoteNext()
-		case !remoteOK:
-			builder.add(localRec)
-			localRec, localErr, localOK = localNext()
-		default:
-			localTS := orderBy.RecordTS(localRec)
-			remoteTS := orderBy.RecordTS(remoteRec)
-			if isBefore(localTS, remoteTS) {
-				builder.add(localRec)
-				localRec, localErr, localOK = localNext()
-			} else {
-				builder.add(remoteRec)
-				remoteRec, remoteErr, remoteOK = remoteNext()
-			}
-		}
-	}
-
-	return nil
-}
-
-type streamedHistogramBuilder struct {
-	start        time.Time
-	end          time.Time
-	bucketWidth  time.Duration
-	counts       []int64
-	groupCounts  []map[string]int64
-	seen         map[chunk.EventID]struct{}
-	uniqueCount  int64
-	dedupedCount int64
-}
-
-func newStreamedHistogramBuilder(start, end time.Time, numBuckets int) *streamedHistogramBuilder {
-	if numBuckets <= 0 {
-		numBuckets = 50
-	}
-	width := end.Sub(start) / time.Duration(numBuckets)
-	if width <= 0 {
-		width = time.Second
-	}
-	groupCounts := make([]map[string]int64, numBuckets)
-	for i := range groupCounts {
-		groupCounts[i] = make(map[string]int64)
-	}
-	return &streamedHistogramBuilder{
-		start:       start,
-		end:         end,
-		bucketWidth: width,
-		counts:      make([]int64, numBuckets),
-		groupCounts: groupCounts,
-		seen:        make(map[chunk.EventID]struct{}),
-	}
-}
-
-func (h *streamedHistogramBuilder) add(rec chunk.Record) {
-	if rec.IngestTS.Before(h.start) || !rec.IngestTS.Before(h.end) {
-		return
-	}
-	if rec.EventID != (chunk.EventID{}) {
-		if _, exists := h.seen[rec.EventID]; exists {
-			h.dedupedCount++
-			return
-		}
-		h.seen[rec.EventID] = struct{}{}
-	}
-	idx := int(rec.IngestTS.Sub(h.start) / h.bucketWidth)
-	if idx >= len(h.counts) {
-		idx = len(h.counts) - 1
-	}
-	h.counts[idx]++
-	if lvl := rec.Attrs["level"]; lvl != "" {
-		h.groupCounts[idx][safeutf8.String(lvl)]++
-	}
-	h.uniqueCount++
-}
-
-func (h *streamedHistogramBuilder) totalCount() int64 {
-	var total int64
-	for _, c := range h.counts {
-		total += c
-	}
-	return total
-}
-
-func (h *streamedHistogramBuilder) toProto() []*apiv1.HistogramBucket {
-	out := make([]*apiv1.HistogramBucket, len(h.counts))
-	for i := range h.counts {
-		ts := h.start.Add(h.bucketWidth * time.Duration(i)).UnixMilli()
-		gc := h.groupCounts[i]
-		var known int64
-		for _, v := range gc {
-			known += v
-		}
-		if other := h.counts[i] - known; other > 0 {
-			if gc == nil {
-				gc = make(map[string]int64)
-			}
-			gc["other"] = other
-		}
-		out[i] = &apiv1.HistogramBucket{
-			TimestampMs: ts,
-			Count:       h.counts[i],
-			GroupCounts: gc,
-		}
-	}
-	return out
 }
 
 // streamBatcher accumulates records and flushes them to a server stream
