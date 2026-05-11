@@ -11,6 +11,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/logging"
+	"gastrolog/internal/logging/comp"
 )
 
 type Config struct {
@@ -70,7 +71,7 @@ func NewManager(cfg Config) (*Manager, error) {
 	}
 
 	// Scope logger with component identity.
-	logger := logging.Default(cfg.Logger).With("component", "chunk-manager", "type", "memory")
+	logger := comp.ChunkManager.Sub("memory").Apply(logging.Default(cfg.Logger))
 
 	manager := &Manager{
 		cfg:    cfg,

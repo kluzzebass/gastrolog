@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/logging/comp"
 	"iter"
 	"log/slog"
 	"regexp"
@@ -360,7 +361,7 @@ func New(chunks chunk.ChunkManager, indexes index.IndexManager, logger *slog.Log
 	return &Engine{
 		chunks:  chunks,
 		indexes: indexes,
-		logger:  logging.Default(logger).With("component", "query-engine"),
+		logger:  comp.Root("query-engine").Apply(logging.Default(logger)),
 	}
 }
 
@@ -371,7 +372,7 @@ func New(chunks chunk.ChunkManager, indexes index.IndexManager, logger *slog.Log
 func NewWithRegistry(registry manifest.VaultRegistry, logger *slog.Logger) *Engine {
 	return &Engine{
 		registry: registry,
-		logger:   logging.Default(logger).With("component", "query-engine"),
+		logger:   comp.Root("query-engine").Apply(logging.Default(logger)),
 	}
 }
 

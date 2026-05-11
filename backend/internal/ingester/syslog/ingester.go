@@ -14,6 +14,7 @@ import (
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/ingester/syslogparse"
 	"gastrolog/internal/logging"
+	"gastrolog/internal/logging/comp"
 	"gastrolog/internal/orchestrator"
 )
 
@@ -69,7 +70,7 @@ func New(cfg Config) *Ingester {
 		id:      cfg.ID,
 		udpAddr: cfg.UDPAddr,
 		tcpAddr: cfg.TCPAddr,
-		logger:  logging.Default(cfg.Logger).With("component", "ingester", "type", "syslog"),
+		logger:  comp.Ingester.Sub("syslog").Apply(logging.Default(cfg.Logger)),
 	}
 }
 

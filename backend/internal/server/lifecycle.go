@@ -70,7 +70,7 @@ func NewLifecycleServer(orch *orchestrator.Orchestrator, shutdown func(drain boo
 		clusterAddress: clusterAddress,
 		peerStats:      peerStats,
 		localStats:     localStats,
-		logger:         logging.Default(logger).With("component", "lifecycle"),
+		logger:         compLifecycle.Apply(logging.Default(logger)),
 	}
 }
 

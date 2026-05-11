@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gastrolog/internal/logging"
+	"gastrolog/internal/logging/comp"
 )
 
 // LeaderLoop runs a leader-only worker for a single Raft group. It watches
@@ -73,7 +74,7 @@ func NewLeaderLoop(cfg LeaderLoopConfig) *LeaderLoop {
 		group:          cfg.Group,
 		name:           cfg.Name,
 		onLead:         cfg.OnLead,
-		logger:         logging.Default(cfg.Logger).With("component", "leader-loop", "group", cfg.Name),
+		logger:         comp.Root("leader-loop").Apply(logging.Default(cfg.Logger)).With("group", cfg.Name),
 		barrierTimeout: timeout,
 	}
 }

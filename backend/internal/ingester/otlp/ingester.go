@@ -28,6 +28,7 @@ import (
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/ingester/bodyutil"
 	"gastrolog/internal/logging"
+	"gastrolog/internal/logging/comp"
 	"gastrolog/internal/orchestrator"
 )
 
@@ -66,7 +67,7 @@ func New(cfg Config) *Ingester {
 		id:       cfg.ID,
 		httpAddr: cfg.HTTPAddr,
 		grpcAddr: cfg.GRPCAddr,
-		logger:   logging.Default(cfg.Logger).With("component", "ingester", "type", "otlp"),
+		logger:   comp.Ingester.Sub("otlp").Apply(logging.Default(cfg.Logger)),
 	}
 }
 

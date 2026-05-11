@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/logging/comp"
 	"io"
 	"log/slog"
 	"os"
@@ -300,8 +301,6 @@ type chunkMeta struct {
 	sourceIdxOffset int64
 	sourceIdxSize   int64
 
-
-
 	// rawBytes is the uncompressed record-data size (sum of frame lengths)
 	// captured at sealToGLCB time. Distinct from logicalDataBytes which on
 	// the legacy multi-file path summed raw + attr + idx — different meaning.
@@ -319,20 +318,20 @@ type chunkMeta struct {
 
 func (m *chunkMeta) toChunkMeta() chunk.ChunkMeta {
 	return chunk.ChunkMeta{
-		ID:          m.id,
-		WriteStart:  m.writeStart,
-		WriteEnd:    m.writeEnd,
-		RecordCount: m.recordCount,
-		Bytes:       m.bytes,
-		Sealed:      m.sealed,
-		DiskBytes:   m.diskBytes,
+		ID:                m.id,
+		WriteStart:        m.writeStart,
+		WriteEnd:          m.writeEnd,
+		RecordCount:       m.recordCount,
+		Bytes:             m.bytes,
+		Sealed:            m.sealed,
+		DiskBytes:         m.diskBytes,
 		IngestStart:       m.ingestStart,
 		IngestEnd:         m.ingestEnd,
 		SourceStart:       m.sourceStart,
 		SourceEnd:         m.sourceEnd,
 		IngestTSMonotonic: m.ingestTSMonotonic,
 		CloudBacked:       m.cloudBacked,
-		Archived:    m.archived,
+		Archived:          m.archived,
 	}
 }
 
@@ -399,7 +398,7 @@ func NewManager(cfg Config) (*Manager, error) {
 	}
 
 	// Scope logger with component identity.
-	logger := logging.Default(cfg.Logger).With("component", "chunk-manager", "type", "file")
+	logger := comp.ChunkManager.Sub("file").Apply(logging.Default(cfg.Logger))
 
 	zstdEnc, err := zstd.NewWriter(nil,
 		zstd.WithEncoderLevel(zstd.SpeedDefault),
@@ -4038,7 +4037,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		m.cfg.Announcer.AnnounceUpload(id, blobSize,
 			toc.IngestIdxOffset, toc.IngestIdxSize,
 			toc.SourceIdxOffset, toc.SourceIdxSize,
-						meta.blobDigest, m.cfg.CloudServiceID, currentKeyScheme)
+			meta.blobDigest, m.cfg.CloudServiceID, currentKeyScheme)
 	}
 
 	// Delete the multi-file data artifacts (raw.log/idx.log/etc.) — they
@@ -4141,7 +4140,7 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 		m.cfg.Announcer.AnnounceUpload(id, blobSize,
 			ingestIdxOff, ingestIdxSize,
 			sourceIdxOff, sourceIdxSize,
-						blobDigest, m.cfg.CloudServiceID, currentKeyScheme)
+			blobDigest, m.cfg.CloudServiceID, currentKeyScheme)
 	}
 
 	// Delete the multi-file data artifacts (raw.log/idx.log/etc.) — same

@@ -476,7 +476,7 @@ func New(cfg Config) (*Orchestrator, error) {
 	}
 
 	// Scope logger with component identity.
-	logger := logging.Default(cfg.Logger).With("component", "orchestrator")
+	logger := compOrchestrator.Apply(logging.Default(cfg.Logger))
 
 	sched, err := newScheduler(logger, cfg.MaxConcurrentJobs, cfg.Now)
 	if err != nil {

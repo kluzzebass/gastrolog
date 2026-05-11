@@ -8,6 +8,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
 	"gastrolog/internal/logging"
+	"gastrolog/internal/logging/comp"
 )
 
 type IndexStore[T any] interface {
@@ -85,7 +86,7 @@ func NewManagerWithJSON(
 		kvStore:    kvStore,
 		jsonStore:  jsonStore,
 		builder:    index.NewBuildHelper(),
-		logger:     logging.Default(logger).With("component", "index-manager", "type", "memory"),
+		logger:     comp.IndexManager.Sub("memory").Apply(logging.Default(logger)),
 	}
 }
 

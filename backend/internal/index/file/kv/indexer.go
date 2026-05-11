@@ -15,6 +15,7 @@ import (
 	"gastrolog/internal/index"
 	"gastrolog/internal/index/inverted"
 	"gastrolog/internal/logging"
+	"gastrolog/internal/logging/comp"
 	"gastrolog/internal/tokenizer"
 )
 
@@ -85,7 +86,7 @@ func NewIndexerWithConfig(dir string, manager chunk.ChunkManager, logger *slog.L
 	return &Indexer{
 		dir:        dir,
 		manager:    manager,
-		logger:     logging.Default(logger).With("component", "indexer", "type", "kv"),
+		logger:     comp.Indexer.Sub("kv").Apply(logging.Default(logger)),
 		kvBudget:   budget,
 		extractors: extractors,
 	}

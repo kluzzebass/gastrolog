@@ -162,7 +162,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 	configSignal := notify.NewSignal()
 	statsSignal := notify.NewSignal()
-	disp := &configDispatcher{localNodeID: nodeID, logger: logger.With("component", "dispatch"), clusterTLS: clusterTLS, tlsFilePath: hd.ClusterTLSPath(), configSignal: configSignal}
+	disp := &configDispatcher{localNodeID: nodeID, logger: compDispatch.Apply(logger), clusterTLS: clusterTLS, tlsFilePath: hd.ClusterTLSPath(), configSignal: configSignal}
 	rawStore, err := openConfigStore(cfg.ConfigType, raftStoreOpts{
 		Home: hd, NodeID: nodeID, JoinAddr: cfg.JoinAddr,
 		ClusterSrv: clusterSrv, ClusterTLS: clusterTLS,
@@ -344,7 +344,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 			factories:   &factories,
 			alerts:      alertCollector,
 			localNodeID: nodeID,
-			logger:      logger.With("component", "placement"),
+			logger:      compPlacement.Apply(logger),
 			triggerCh:   make(chan struct{}, 1),
 		}
 		disp.placementTrigger = pm.Trigger
@@ -440,7 +440,7 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 
 	recordForwarder := cluster.NewRecordForwarder(
 		peerConns,
-		logger.With("component", "record-forwarder"),
+		compRecordForwarder.Apply(logger),
 		alerts,
 	)
 	orch.SetRecordForwarder(recordForwarder)
@@ -496,7 +496,7 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	orch.SetRemoteTransferrer(chunkTransferrer)
 
 	// Vault replication: unified ordered stream per vault per follower.
-	chunkReplicator := cluster.NewChunkReplicator(peerConns, logger.With("component", "vault-replicator"))
+	chunkReplicator := cluster.NewChunkReplicator(peerConns, compVaultReplicator.Apply(logger))
 	orch.SetChunkReplicator(chunkReplicator)
 
 	// Same readiness gate for bulk chunk imports.
@@ -548,7 +548,7 @@ func wireManagedFileTransfer(clusterSrv *cluster.Server, httpSrv *server.Server,
 		transferrer: transferrer,
 		peerIDs:     peerConns.PeerIDs,
 		fileExists:  httpSrv.ManagedFileExists,
-		logger:      logger.With("component", "managed-files"),
+		logger:      compManagedFiles.Apply(logger),
 	}
 }
 
@@ -586,7 +586,7 @@ func startOrchestrator(ctx context.Context, logger *slog.Logger, orch *orchestra
 func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, recordForwarder *cluster.RecordForwarder, alerts *alert.Collector, nodeID string, apiAddr string, pprofAddr string, statsSignal *notify.Signal) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats) {
 	var broadcaster *cluster.Broadcaster
 	if clusterSrv != nil && clusterSrv.PeerConns() != nil {
-		broadcaster = cluster.NewBroadcaster(clusterSrv.PeerConns(), logger.With("component", "broadcast"))
+		broadcaster = cluster.NewBroadcaster(clusterSrv.PeerConns(), compBroadcast.Apply(logger))
 	}
 	if broadcaster == nil || clusterSrv == nil {
 		return nil, nil, nil, nil
@@ -639,7 +639,7 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 		ApiAddress:        apiAddr,
 		PprofAddress:      pprofAddr,
 		StatsSignal:       statsSignal,
-		Logger:            logger.With("component", "stats-collector"),
+		Logger:            compStatsCollector.Apply(logger),
 	})
 
 	orch.Scheduler().SetOnJobChange(func() {

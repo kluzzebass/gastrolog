@@ -244,7 +244,7 @@ func New(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orche
 		tokens:             tokens,
 		certManager:        cfg.CertManager,
 		noAuth:             cfg.NoAuth,
-		logger:             logging.Default(cfg.Logger).With("component", "server"),
+		logger:             compServer.Apply(logging.Default(cfg.Logger)),
 		cluster:            cfg.Cluster,
 		peerStats:          cfg.PeerStats,
 		peerVaultStats:     cfg.PeerVaultStats,
@@ -486,7 +486,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 
 	s.loadInitialLookupConfig(lookupRegistry)
 
-	queryServer := NewQueryServer(s.orch, s.cfgStore, s.remoteSearcher, s.localNodeID, lookupRegistry.Resolve, lookupRegistry.Names(), queryTimeout, maxFollowDuration, maxResultCount, s.logger.With("component", "query"))
+	queryServer := NewQueryServer(s.orch, s.cfgStore, s.remoteSearcher, s.localNodeID, lookupRegistry.Resolve, lookupRegistry.Names(), queryTimeout, maxFollowDuration, maxResultCount, compQuery.Apply(s.logger))
 	s.queryServer = queryServer
 	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.peerVaultStats, s.remoteChunkLister, s.remoteIndexer, s.localNodeID, s.logger)
 	configServer := NewSystemServer(SystemServerConfig{

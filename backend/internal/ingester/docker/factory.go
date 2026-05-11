@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/logging/comp"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -141,7 +142,7 @@ func parseConfig(id string, params map[string]string, cfgStore system.Store, log
 		Stdout:       stdout,
 		Stderr:       stderr,
 		StateFile:    stateFile,
-		Logger:       logging.Default(logger).With("component", "ingester", "type", "docker", "instance", id),
+		Logger:       comp.Ingester.Sub("docker").Apply(logging.Default(logger)).With("instance", id),
 	}, nil
 }
 

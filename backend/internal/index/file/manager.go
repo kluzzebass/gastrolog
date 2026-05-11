@@ -18,6 +18,7 @@ import (
 	filetoken "gastrolog/internal/index/file/token"
 	filetsidx "gastrolog/internal/index/file/tsidx"
 	"gastrolog/internal/logging"
+	"gastrolog/internal/logging/comp"
 )
 
 // Manager manages file-based index storage.
@@ -58,7 +59,7 @@ func NewManager(dir string, indexers []index.Indexer, logger *slog.Logger) *Mana
 		dir:      dir,
 		indexers: indexers,
 		builder:  index.NewBuildHelper(),
-		logger:   logging.Default(logger).With("component", "index-manager", "type", "file"),
+		logger:   comp.IndexManager.Sub("file").Apply(logging.Default(logger)),
 	}
 }
 

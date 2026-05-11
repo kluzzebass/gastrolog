@@ -72,7 +72,7 @@ func newVaultCtlLeaderManager(logger *slog.Logger) *vaultCtlLeaderManager {
 		desiredLeader: newVaultCtlDesiredLeaderMap(),
 		rootCtx:       ctx,
 		rootCxl:       cancel,
-		logger:        logger.With("component", "vault-ctl-leader-manager"),
+		logger:        compVaultCtlLeader.Apply(logger),
 	}
 }
 
