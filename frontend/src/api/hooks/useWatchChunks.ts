@@ -133,7 +133,7 @@ function mutateCache(prev: ChunksCache, msg: WatchChunksResponse): ChunksCache {
     case ChunkChangeOp.CREATED: {
       if (!msg.meta) return prev;
       const idx = findIdx();
-      if (idx >= 0) next[idx] = msg.meta;
+      if (idx >= 0) next[idx] = mergeMeta(next[idx], msg.meta);
       else next.push(msg.meta);
       return next;
     }
@@ -141,7 +141,7 @@ function mutateCache(prev: ChunksCache, msg: WatchChunksResponse): ChunksCache {
     case ChunkChangeOp.UPLOADED: {
       if (!msg.meta) return prev;
       const idx = findIdx();
-      if (idx >= 0) next[idx] = msg.meta;
+      if (idx >= 0) next[idx] = mergeMeta(next[idx], msg.meta);
       else next.push(msg.meta);
       return next;
     }
@@ -175,4 +175,49 @@ function bytesToHex(bytes: Uint8Array): string {
     hex += b.toString(16).padStart(2, "0");
   }
   return hex;
+}
+
+/**
+ * mergeMeta returns a ChunkMeta with the event's authoritative fields
+ * (Sealed, RecordCount, Bytes, DiskBytes, CloudBacked, etc. — every
+ * field ChunkMetaToProto knows about on the backend) overlaid on top
+ * of the existing cache entry. The merge preserves fields that the
+ * event does NOT carry — replica_count, replica_node_ids, retention_
+ * pending, pending_ack_node_ids — which are populated by ListChunks'
+ * cluster-side dedup pass, not by the chunk manager's per-chunk
+ * snapshot.
+ *
+ * Without this merge, the first event for an existing chunk would
+ * zero out those server-computed fields, hiding important operator
+ * signal (replica count, retention-pending) from the inspector until
+ * the next ListChunks refetch.
+ *
+ * If there's no existing entry to merge against, returns the event
+ * meta unchanged — fresh chunks won't have replica info yet anyway.
+ */
+function mergeMeta(existing: ChunkMeta | undefined, incoming: ChunkMeta): ChunkMeta {
+  if (!existing) return incoming;
+  const merged = existing.clone();
+  // Event-authoritative fields (per ChunkMetaToProto + handler-side
+  // patches): lifecycle, identity, sizes, cloud state, storage class.
+  merged.id = incoming.id;
+  merged.vaultId = incoming.vaultId;
+  merged.vaultType = incoming.vaultType;
+  merged.writeStart = incoming.writeStart;
+  merged.writeEnd = incoming.writeEnd;
+  merged.ingestStart = incoming.ingestStart;
+  merged.ingestEnd = incoming.ingestEnd;
+  merged.sealed = incoming.sealed;
+  merged.recordCount = incoming.recordCount;
+  merged.bytes = incoming.bytes;
+  merged.compressed = incoming.compressed;
+  merged.diskBytes = incoming.diskBytes;
+  merged.cloudBacked = incoming.cloudBacked;
+  merged.archived = incoming.archived;
+  merged.storageClass = incoming.storageClass;
+  // Fields NOT carried by the event — preserved from existing:
+  // - replicaCount, replicaNodeIds (computed by ListChunks dedup)
+  // - retentionPending (set by retention runner via FSM apply)
+  // - pendingAckNodeIds (set by retention runner during fan-out)
+  return merged;
 }

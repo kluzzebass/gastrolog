@@ -542,6 +542,15 @@ func (s *VaultServer) WatchChunks(
 			}
 			msg := chunkChangeEventToProto(ev.Event)
 			msg.Version = ev.Version
+			// Populate vault_type on the embedded Meta so the
+			// frontend's per-vault header (vault type badge) stays
+			// correct after an event-replace. Vault context is added
+			// here at send time using the orchestrator's vault
+			// registry — the chunk manager's ChunkMeta doesn't carry
+			// it.
+			if msg.Meta != nil {
+				msg.Meta.VaultType = s.orch.VaultType(ev.Event.VaultID)
+			}
 			if err := stream.Send(msg); err != nil {
 				return err
 			}
@@ -559,7 +568,13 @@ func chunkChangeEventToProto(ev orchestrator.ChunkChangeEvent) *apiv1.WatchChunk
 		Op:      chunkOpToProto(ev.Op),
 	}
 	if ev.Meta != nil {
+		// Mirror VaultChunkMetaToProto: the inner ChunkMeta needs
+		// vault_id populated so the frontend's per-vault grouping
+		// matches against the same vaultId the ListChunks path uses.
+		// Bare ChunkMetaToProto leaves that field zero, which sends
+		// the chunk into the renderer's "unknown" group and hides it.
 		msg.Meta = ChunkMetaToProto(*ev.Meta)
+		msg.Meta.VaultId = ev.VaultID.ToProto()
 	}
 	if ev.Op == orchestrator.ChunkChangeOpProgress {
 		msg.RecordCount = ev.RecordCount
