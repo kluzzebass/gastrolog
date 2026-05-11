@@ -220,3 +220,141 @@ func TestNewRuleSet_DefensiveCopy(t *testing.T) {
 		t.Errorf("input mutation leaked into RuleSet")
 	}
 }
+
+func TestParseRuleSetSpec_BasicCases(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		spec       string
+		wantDefault slog.Level
+		wantRules  []LevelRule
+	}{
+		{
+			name:        "empty spec",
+			spec:        "",
+			wantDefault: slog.LevelInfo,
+		},
+		{
+			name:        "default only",
+			spec:        "default=warn",
+			wantDefault: slog.LevelWarn,
+		},
+		{
+			name:        "single pattern",
+			spec:        "orchestrator.**=debug",
+			wantDefault: slog.LevelInfo,
+			wantRules:   []LevelRule{{Pattern: "orchestrator.**", Level: slog.LevelDebug}},
+		},
+		{
+			name:        "mixed default plus patterns",
+			spec:        "default=info,orchestrator.**=debug,ingester.relp=warn",
+			wantDefault: slog.LevelInfo,
+			wantRules: []LevelRule{
+				{Pattern: "orchestrator.**", Level: slog.LevelDebug},
+				{Pattern: "ingester.relp", Level: slog.LevelWarn},
+			},
+		},
+		{
+			name:        "whitespace trimmed",
+			spec:        "  default = warn ,  ingester.* = debug  ",
+			wantDefault: slog.LevelWarn,
+			wantRules:   []LevelRule{{Pattern: "ingester.*", Level: slog.LevelDebug}},
+		},
+		{
+			name:        "warning alias",
+			spec:        "default=warning",
+			wantDefault: slog.LevelWarn,
+		},
+		{
+			name:        "case insensitive levels",
+			spec:        "default=ERROR,foo=Debug",
+			wantDefault: slog.LevelError,
+			wantRules:   []LevelRule{{Pattern: "foo", Level: slog.LevelDebug}},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			rs, err := ParseRuleSetSpec(c.spec)
+			if err != nil {
+				t.Fatalf("ParseRuleSetSpec(%q): %v", c.spec, err)
+			}
+			if rs.Default != c.wantDefault {
+				t.Errorf("Default = %v, want %v", rs.Default, c.wantDefault)
+			}
+			if len(rs.Rules) != len(c.wantRules) {
+				t.Fatalf("Rules len = %d, want %d (got %+v)", len(rs.Rules), len(c.wantRules), rs.Rules)
+			}
+			for i, r := range c.wantRules {
+				if rs.Rules[i] != r {
+					t.Errorf("Rules[%d] = %+v, want %+v", i, rs.Rules[i], r)
+				}
+			}
+		})
+	}
+}
+
+func TestParseRuleSetSpec_Errors(t *testing.T) {
+	t.Parallel()
+	cases := []string{
+		"foo",                        // no equals
+		"default=trace",              // unknown level
+		"default=info,default=warn",  // duplicate default
+		"foo=info,foo=warn",          // duplicate pattern
+		".=info",                     // pattern starts with dot
+		"foo..bar=info",              // double dot
+		"FOO=info",                   // uppercase literal
+	}
+	for _, spec := range cases {
+		t.Run(spec, func(t *testing.T) {
+			t.Parallel()
+			if _, err := ParseRuleSetSpec(spec); err == nil {
+				t.Errorf("ParseRuleSetSpec(%q) returned no error", spec)
+			}
+		})
+	}
+}
+
+func TestValidatePattern_Rejects(t *testing.T) {
+	t.Parallel()
+	cases := []string{
+		"",          // empty
+		".",         // empty segments
+		".foo",      // leading dot
+		"foo.",      // trailing dot
+		"foo..bar",  // consecutive dots
+		"foo.BAR",   // uppercase literal
+		"foo.b@r",   // invalid char
+		"foo.b*r",   // partial wildcard (must be whole-segment)
+	}
+	for _, p := range cases {
+		t.Run(p, func(t *testing.T) {
+			t.Parallel()
+			if err := ValidatePattern(p); err == nil {
+				t.Errorf("ValidatePattern(%q) returned no error", p)
+			}
+		})
+	}
+}
+
+func TestValidatePattern_Accepts(t *testing.T) {
+	t.Parallel()
+	cases := []string{
+		"foo",
+		"foo.bar",
+		"foo-bar.baz",
+		"foo_bar",
+		"orchestrator.**",
+		"ingester.*.conn",
+		"ingester.**.conn",
+		"a1.b2-c3.**",
+	}
+	for _, p := range cases {
+		t.Run(p, func(t *testing.T) {
+			t.Parallel()
+			if err := ValidatePattern(p); err != nil {
+				t.Errorf("ValidatePattern(%q) returned %v", p, err)
+			}
+		})
+	}
+}

@@ -40,6 +40,86 @@ func ValidatePattern(pattern string) error {
 	return nil
 }
 
+// ParseRuleSetSpec parses a comma-separated DSL into a RuleSet.
+//
+// Grammar:
+//
+//	spec       := entry ("," entry)*
+//	entry      := key "=" level
+//	key        := "default" | pattern
+//	pattern    := one or more dotted segments, validated by ValidatePattern
+//	level      := "debug" | "info" | "warn" | "warning" | "error" (case-insensitive)
+//
+// "default=info,orchestrator.**=debug,ingester.relp=warn" parses to
+// {Default: INFO, Rules: [{orchestrator.**, DEBUG}, {ingester.relp, WARN}]}
+// (declaration order preserved in Rules).
+//
+// Whitespace around entries, keys, and levels is trimmed. Empty entries
+// (consecutive commas, trailing comma) are skipped.
+//
+// Generation is drawn from NextGeneration so the returned RuleSet can
+// be installed directly via SetRuleSet without colliding with any
+// previously-installed rule set in the process.
+func ParseRuleSetSpec(spec string) (RuleSet, error) {
+	defaultLevel := slog.LevelInfo
+	var rules []LevelRule
+	seenDefault := false
+	seenPattern := map[string]bool{}
+
+	for entry := range strings.SplitSeq(spec, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		keyRaw, valRaw, ok := strings.Cut(entry, "=")
+		if !ok {
+			return RuleSet{}, fmt.Errorf("log level spec %q: entry %q missing '='", spec, entry)
+		}
+		key := strings.TrimSpace(keyRaw)
+		valStr := strings.TrimSpace(valRaw)
+		level, err := parseLevelName(valStr)
+		if err != nil {
+			return RuleSet{}, fmt.Errorf("log level spec %q: entry %q: %w", spec, entry, err)
+		}
+		if key == "default" {
+			if seenDefault {
+				return RuleSet{}, fmt.Errorf("log level spec %q: 'default' specified more than once", spec)
+			}
+			defaultLevel = level
+			seenDefault = true
+			continue
+		}
+		if err := ValidatePattern(key); err != nil {
+			return RuleSet{}, fmt.Errorf("log level spec %q: %w", spec, err)
+		}
+		if seenPattern[key] {
+			return RuleSet{}, fmt.Errorf("log level spec %q: pattern %q specified more than once", spec, key)
+		}
+		seenPattern[key] = true
+		rules = append(rules, LevelRule{Pattern: key, Level: level})
+	}
+
+	return NewRuleSet(defaultLevel, rules, NextGeneration()), nil
+}
+
+// parseLevelName maps slog level names (case-insensitive, "warning"
+// allowed as an alias for "warn") to slog.Level. Unknown names return
+// an error.
+func parseLevelName(s string) (slog.Level, error) {
+	switch strings.ToLower(s) {
+	case "debug":
+		return slog.LevelDebug, nil
+	case "info":
+		return slog.LevelInfo, nil
+	case "warn", "warning":
+		return slog.LevelWarn, nil
+	case "error":
+		return slog.LevelError, nil
+	default:
+		return 0, fmt.Errorf("unknown level %q (allowed: debug, info, warn, error)", s)
+	}
+}
+
 func isValidSegmentChar(c rune) bool {
 	switch {
 	case c >= 'a' && c <= 'z':
