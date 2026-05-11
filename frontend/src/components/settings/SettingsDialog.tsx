@@ -29,6 +29,7 @@ import { FilesSettings } from "./FilesSettings";
 import { NodesSettings } from "./NodesSettings";
 import { StorageSettings } from "./StorageSettings";
 import { ServiceSettings } from "./ServiceSettings";
+import { LogLevelsSettings } from "./LogLevelsSettings";
 import { HelpButton } from "../HelpButton";
 
 export type SettingsTab =
@@ -43,7 +44,8 @@ export type SettingsTab =
   | "routes"
   | "policies"
   | "retention"
-  | "users";
+  | "users"
+  | "logLevels";
 
 interface SettingsDialogProps {
   dark: boolean;
@@ -77,6 +79,7 @@ const allTabs: TabDef[] = [
   { id: "retention", label: "Retention Policies", icon: RetentionIcon, helpTopicId: "policy-retention" },
   { id: "vaults", label: "Vaults", icon: VaultsIcon, helpTopicId: "storage-engines" },
   { id: "routes", label: "Routes", icon: RouteIcon, helpTopicId: "routing" },
+  { id: "logLevels", label: "Log Levels", icon: ServiceIcon, helpTopicId: "log-levels" },
 ];
 
 /** Parse tab param — may include `:entityName` for deep-linking (e.g. "vaults:myVault"). */
@@ -175,6 +178,7 @@ export function SettingsDialog({
           {tab === "policies" && <PoliciesSettings dark={dark} onNavigateTo={navigateTo} />}
           {tab === "retention" && <RetentionPoliciesSettings dark={dark} onNavigateTo={navigateTo} />}
           {tab === "vaults" && <VaultsSettings dark={dark} expandTarget={expandTarget} onExpandTargetConsumed={clearExpandTarget} onOpenInspector={onOpenInspector} />}
+          {tab === "logLevels" && <LogLevelsSettings dark={dark} />}
         </div>
       </div>
     </Dialog>
