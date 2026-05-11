@@ -50,6 +50,7 @@ func NewConfigCommand() *cobra.Command {
 		newMaxMindCmd(),
 		newExportCmd(),
 		newImportCmd(),
+		newLogLevelCmd(),
 	)
 
 	return cmd
