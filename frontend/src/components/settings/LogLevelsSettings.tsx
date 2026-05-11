@@ -171,7 +171,6 @@ export function LogLevelsSettings({ dark }: Props) {
                 dark={dark}
                 value={r.pattern}
                 onChange={(v) => updateRule(idx, { pattern: v })}
-                placeholder="orchestrator.replication.**"
               />
               <SelectInput
                 dark={dark}
