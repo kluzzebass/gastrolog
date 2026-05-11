@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useConfig } from "../../api/hooks";
 import {
   useLogComponents,
@@ -48,6 +48,18 @@ export function LogLevelsSettings({ dark }: Props) {
   // default-level selector; any other value is a pattern string that
   // highlights the matching rule input.
   const [highlight, setHighlight] = useState<string | null>(null);
+
+  // Refs to the highlighted controls so we can scroll them into view
+  // when hover lands — operators don't have to manually scroll the
+  // rules list to see what got highlighted.
+  const highlightedRuleRef = useRef<HTMLDivElement | null>(null);
+  const defaultSelectorRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (highlight === null) return;
+    const target = highlight === "default" ? defaultSelectorRef.current : highlightedRuleRef.current;
+    target?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [highlight]);
 
   const liveConfig: LogLevelConfig | undefined = config?.logLevels ?? undefined;
   const liveDefault = liveConfig?.defaultLevel ?? LogLevel.INFO;
@@ -159,6 +171,7 @@ export function LogLevelsSettings({ dark }: Props) {
         </p>
 
         <div
+          ref={defaultSelectorRef}
           className={`mb-4 max-w-[260px] rounded transition-colors ${
             highlight === "default" ? "ring-2 ring-copper/60 -m-1 p-1" : ""
           }`}
@@ -184,47 +197,53 @@ export function LogLevelsSettings({ dark }: Props) {
               No overrides — every component falls back to the default.
             </div>
           )}
-          {currentRules.map((r, idx) => (
-            <div
-              key={idx}
-              className={`grid grid-cols-[1fr_140px_40px] gap-2 items-start rounded transition-colors ${
-                highlight !== null && highlight !== "default" && r.pattern === highlight
-                  ? "ring-2 ring-copper/60 -m-1 p-1"
-                  : ""
-              }`}
-            >
-              <div className="flex flex-col gap-1">
-                <TextInput
-                  dark={dark}
-                  value={r.pattern}
-                  onChange={(v) => updateRule(idx, { pattern: v })}
-                  error={!!ruleErrors[idx]}
-                  title={ruleErrors[idx]}
-                  examples={[
-                    "orchestrator",
-                    "orchestrator.*",
-                    "orchestrator.**",
-                    "ingester.**.conn",
-                  ]}
-                />
-              </div>
-              <SelectInput
-                dark={dark}
-                value={String(r.level)}
-                onChange={(v) => updateRule(idx, { level: Number(v) as LogLevel })}
-                options={LEVEL_OPTIONS}
-              />
-              <button
-                type="button"
-                onClick={() => removeRule(idx)}
-                className={`px-2 py-1 rounded ${c("text-text-muted hover:text-copper hover:bg-ink-hover", "text-light-text-muted hover:text-copper hover:bg-light-hover")}`}
-                aria-label="Remove rule"
-                title="Remove rule"
-              >
-                ×
-              </button>
-            </div>
-          ))}
+          <div className="max-h-96 overflow-y-auto app-scroll pr-2 flex flex-col gap-2">
+            {currentRules.map((r, idx) => {
+              const isHighlighted = highlight !== null && highlight !== "default" && r.pattern === highlight;
+              return (
+                <div
+                  key={idx}
+                  ref={(el) => {
+                    if (isHighlighted) highlightedRuleRef.current = el;
+                  }}
+                  className={`grid grid-cols-[1fr_140px_40px] gap-2 items-start rounded transition-colors ${
+                    isHighlighted ? "ring-2 ring-copper/60 -m-1 p-1" : ""
+                  }`}
+                >
+                  <div className="flex flex-col gap-1">
+                    <TextInput
+                      dark={dark}
+                      value={r.pattern}
+                      onChange={(v) => updateRule(idx, { pattern: v })}
+                      error={!!ruleErrors[idx]}
+                      title={ruleErrors[idx]}
+                      examples={[
+                        "orchestrator",
+                        "orchestrator.*",
+                        "orchestrator.**",
+                        "ingester.**.conn",
+                      ]}
+                    />
+                  </div>
+                  <SelectInput
+                    dark={dark}
+                    value={String(r.level)}
+                    onChange={(v) => updateRule(idx, { level: Number(v) as LogLevel })}
+                    options={LEVEL_OPTIONS}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeRule(idx)}
+                    className={`px-2 py-1 rounded ${c("text-text-muted hover:text-copper hover:bg-ink-hover", "text-light-text-muted hover:text-copper hover:bg-light-hover")}`}
+                    aria-label="Remove rule"
+                    title="Remove rule"
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })}
+          </div>
           <div className="mt-2">
             <Button dark={dark} onClick={addRule} variant="ghost">
               + Add rule
