@@ -7,16 +7,25 @@ import (
 
 // LevelRule binds a component-path pattern to a minimum slog level.
 //
-// Two pattern shapes are recognised:
+// Patterns are dot-separated, like the component paths they match. Each
+// segment is either a literal (e.g. "orchestrator") or a wildcard:
 //
-//   - Exact: a dotted path with no wildcard, e.g. "orchestrator.replication".
-//     Matches only that component path, never descendants.
-//   - Subtree glob: a path ending in ".*", e.g. "orchestrator.*". Matches
-//     the prefix path itself AND every descendant.
+//   - "*"  matches exactly one path segment (not zero, not multiple).
+//   - "**" matches zero or more path segments.
 //
-// The empty pattern is invalid. Operators express the "applies to
-// everything" rule through RuleSet.Default, not via a synthetic "*"
-// pattern.
+// Wildcards may appear anywhere in the pattern, not just at the end.
+//
+// Examples:
+//
+//	"orchestrator"                  exact, matches only that path
+//	"orchestrator.*"                direct children (one segment deep)
+//	"orchestrator.**"               orchestrator itself + any descendant
+//	"ingester.*.conn"               every ingester type's conn subsystem
+//	"ingester.**.conn"              any conn anywhere under ingester
+//	"**"                            everything (use RuleSet.Default instead)
+//
+// Empty pattern is invalid. Operators express the "applies to everything"
+// rule through RuleSet.Default, not via "**".
 type LevelRule struct {
 	Pattern string
 	Level   slog.Level
@@ -24,28 +33,78 @@ type LevelRule struct {
 
 // matches reports whether the rule's pattern covers the given component path.
 func (r LevelRule) matches(path string) bool {
-	if strings.HasSuffix(r.Pattern, ".*") {
-		prefix := r.Pattern[:len(r.Pattern)-2]
-		return path == prefix || strings.HasPrefix(path, prefix+".")
+	if r.Pattern == "" || path == "" {
+		return false
 	}
-	return r.Pattern == path
+	return matchSegments(strings.Split(r.Pattern, "."), strings.Split(path, "."))
 }
 
-// specificity returns an ordering key: higher = more specific. Used by
-// Resolve to pick the right rule when several match.
+// matchSegments is a recursive backtracking matcher.
 //
-// Convention: exact-match patterns beat any glob with the same prefix
-// length. So "orchestrator.replication" wins over "orchestrator.*" when
-// both apply to path "orchestrator.replication".
-func (r LevelRule) specificity() int {
-	if strings.HasSuffix(r.Pattern, ".*") {
-		return len(r.Pattern) - 2 // discount the trailing ".*"
+// "*" consumes exactly one path segment; "**" tries every possible
+// consumption from 0 to len(path) and recurses. The greedy backtracking
+// is fine for the pattern lengths we expect (a handful of segments) —
+// no need for a compiled NFA.
+func matchSegments(pat, path []string) bool {
+	for len(pat) > 0 {
+		head := pat[0]
+		switch head {
+		case "**":
+			// Zero-or-more segments: try every split point and recurse on the tail.
+			rest := pat[1:]
+			for i := 0; i <= len(path); i++ {
+				if matchSegments(rest, path[i:]) {
+					return true
+				}
+			}
+			return false
+		case "*":
+			if len(path) == 0 {
+				return false
+			}
+			pat = pat[1:]
+			path = path[1:]
+		default:
+			if len(path) == 0 || path[0] != head {
+				return false
+			}
+			pat = pat[1:]
+			path = path[1:]
+		}
 	}
-	return len(r.Pattern) + 1 // bonus to outrank a same-length glob
+	return len(path) == 0
+}
+
+// specificity returns an ordering key: higher = more specific.
+//
+// Scoring (per segment, summed):
+//
+//   - literal: +10000   (most specific; a concrete name commits to one value)
+//   - "*":     +100     (committed to exactly one segment, value unconstrained)
+//   - "**":    -10      (uncommitted across any number of segments)
+//
+// Then +len(Pattern) as a final discriminator so longer-named patterns
+// outrank shorter ones at the same shape (e.g. "orchestrator.*" outranks
+// "x.*"). Ties beyond that are broken in Resolve by declaration order
+// (strict > on the specificity check, so the first equally-specific
+// rule encountered wins).
+func (r LevelRule) specificity() int {
+	score := len(r.Pattern)
+	for seg := range strings.SplitSeq(r.Pattern, ".") {
+		switch seg {
+		case "**":
+			score -= 10
+		case "*":
+			score += 100
+		default:
+			score += 10000
+		}
+	}
+	return score
 }
 
 // RuleSet is the immutable resolution state of the filter handler:
-// a fallback level plus an ordered list of overrides.
+// a fallback level plus an ordered list of rules.
 //
 // RuleSet values are swapped atomically — every derived handler reads
 // the same shared pointer, so a single store propagates the new rules
@@ -54,8 +113,9 @@ type RuleSet struct {
 	// Default is the level used when no rule matches a component path
 	// (or when the component path itself is empty).
 	Default slog.Level
-	// Rules are pattern -> level overrides. Order is not significant;
-	// Resolve picks the most-specific match.
+	// Rules are pattern -> level mappings. Order is significant only as
+	// a tiebreaker when two rules have identical specificity scores; the
+	// most-specific match always wins regardless of position.
 	Rules []LevelRule
 	// Generation increments on every rule-set replacement. Derived
 	// handlers compare against their cached generation to know when to
@@ -91,18 +151,23 @@ func NewRuleSet(defaultLevel slog.Level, rules []LevelRule, generation uint64) R
 // Resolve returns the minimum level that applies to the given component
 // path. Path "" returns Default.
 //
-// Resolution: the most-specific matching rule wins. See LevelRule.specificity.
+// Resolution: the most-specific matching rule wins. See specificity for
+// the scoring. Ties are broken by declaration order in the Rules slice
+// (first one encountered wins).
 func (rs RuleSet) Resolve(path string) slog.Level {
 	if path == "" {
 		return rs.Default
 	}
-	bestSpec := -1
+	bestSpec := -1 << 30
 	bestLevel := rs.Default
+	matched := false
 	for _, r := range rs.Rules {
 		if !r.matches(path) {
 			continue
 		}
-		if s := r.specificity(); s > bestSpec {
+		s := r.specificity()
+		if !matched || s > bestSpec {
+			matched = true
 			bestSpec = s
 			bestLevel = r.Level
 		}

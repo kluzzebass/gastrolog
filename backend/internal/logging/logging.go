@@ -104,9 +104,25 @@ type ComponentFilterHandler struct {
 // (typically driven by the system config store).
 func NewComponentFilterHandler(next slog.Handler, defaultLevel slog.Level) *ComponentFilterHandler {
 	state := &atomic.Pointer[RuleSet]{}
-	rs := NewRuleSet(defaultLevel, nil, 1)
+	rs := NewRuleSet(defaultLevel, nil, NextGeneration())
 	state.Store(&rs)
 	return &ComponentFilterHandler{next: next, state: state}
+}
+
+// generationCounter is a process-wide monotonic source used by every
+// caller that builds a RuleSet (the constructor here and any code that
+// derives a new RuleSet from the config store). Using a single source
+// is what prevents the cache-invalidation hazard where a handler's
+// constructor-supplied generation collides with a later caller's
+// freshly-assigned generation, causing derived handlers to think their
+// cached level is still valid.
+var generationCounter atomic.Uint64
+
+// NextGeneration returns the next monotonically-increasing generation
+// value. Always use this when constructing a RuleSet that will be
+// installed via SetRuleSet, including from the config-store wiring.
+func NextGeneration() uint64 {
+	return generationCounter.Add(1)
 }
 
 // SetRuleSet atomically replaces the active rule set across every

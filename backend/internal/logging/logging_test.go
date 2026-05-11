@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 )
 
@@ -87,12 +86,13 @@ func (h *captureHandler) count() int {
 }
 
 // setRules is a test helper that installs a fresh rule set with the
-// next generation. Production callers go through the config store; in
-// tests we keep a monotonic counter local to the test process.
-var genCounter atomic.Uint64
-
+// next generation drawn from the production-shared NextGeneration counter.
+// Sharing the counter is critical: if tests had their own counter
+// starting at 1 and the constructor also started at 1, the first
+// installed rule set would match the constructor's cached generation
+// and the filter would silently keep its stale resolved level.
 func setRules(filter *ComponentFilterHandler, defaultLevel slog.Level, rules ...LevelRule) {
-	filter.SetRuleSet(NewRuleSet(defaultLevel, rules, genCounter.Add(1)))
+	filter.SetRuleSet(NewRuleSet(defaultLevel, rules, NextGeneration()))
 }
 
 func TestComponentFilterHandler_DefaultLevel_FiltersBelow(t *testing.T) {
@@ -141,19 +141,22 @@ func TestComponentFilterHandler_SubtreeGlob(t *testing.T) {
 	filter := NewComponentFilterHandler(capture, slog.LevelInfo)
 
 	setRules(filter, slog.LevelInfo,
-		LevelRule{Pattern: "orchestrator.*", Level: slog.LevelDebug},
+		LevelRule{Pattern: "orchestrator.**", Level: slog.LevelDebug},
 	)
 
-	// Use Apply-style: pin componentPath via WithAttrs.
-	subLogger := slog.New(filter).With("component", "orchestrator.replication.catchup")
-	subLogger.Debug("deep")
+	// ** matches the root itself plus any descendant.
+	slog.New(filter).With("component", "orchestrator").Debug("root")
 	if capture.count() != 1 {
-		t.Errorf("subtree glob should cover descendants: count = %d, want 1", capture.count())
+		t.Errorf("** should match the root: count = %d, want 1", capture.count())
+	}
+	slog.New(filter).With("component", "orchestrator.replication.catchup").Debug("deep")
+	if capture.count() != 2 {
+		t.Errorf("** should cover deep descendants: count = %d, want 2", capture.count())
 	}
 	// Unrelated component still filtered.
 	slog.New(filter).With("component", "cluster").Debug("nope")
-	if capture.count() != 1 {
-		t.Errorf("unrelated path: count = %d, want 1", capture.count())
+	if capture.count() != 2 {
+		t.Errorf("unrelated path: count = %d, want 2", capture.count())
 	}
 }
 
