@@ -250,7 +250,7 @@ func makeJoinRollback(
 			return
 		}
 		proxy.Swap(oldStore)
-		clusterSrv.SetApplyFn(func(ctx context.Context, data []byte) error {
+		clusterSrv.SetApplyFn(func(ctx context.Context, data []byte) (uint64, error) {
 			return oldStore.raftStore.ApplyRaw(data)
 		})
 		clusterSrv.SetEnrollHandler(makeEnrollHandler(proxy, logger))
@@ -277,7 +277,7 @@ func cleanOrchestrator(orch *orchestrator.Orchestrator, logger *slog.Logger) {
 // restartClusterWithStore configures the cluster server to use the given config
 // store's raft instance and starts the gRPC server.
 func restartClusterWithStore(store *raftSystemStore, proxy *system.StoreProxy, clusterSrv *cluster.Server, logger *slog.Logger) error {
-	clusterSrv.SetApplyFn(func(ctx context.Context, data []byte) error {
+	clusterSrv.SetApplyFn(func(ctx context.Context, data []byte) (uint64, error) {
 		return store.raftStore.ApplyRaw(data)
 	})
 	clusterSrv.SetEnrollHandler(makeEnrollHandler(proxy, logger))

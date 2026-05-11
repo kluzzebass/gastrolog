@@ -91,8 +91,11 @@ type Server struct {
 	// Set after Raft is created, before Start().
 	raft *hraft.Raft
 
-	// applyFn applies a pre-marshaled ConfigCommand on the leader.
-	applyFn func(ctx context.Context, data []byte) error
+	// applyFn applies a pre-marshaled ConfigCommand on the leader and returns
+	// the Raft log index at which the command was applied. Followers use the
+	// index to wait for their own FSM to catch up before reading post-mutation
+	// state. See gastrolog-2nxij.
+	applyFn func(ctx context.Context, data []byte) (uint64, error)
 
 	// groupApplyFn applies a pre-marshaled command to the multiraft group
 	// identified by groupID. Used by ForwardVaultApply for both the
@@ -437,8 +440,10 @@ func (s *Server) SetInternalHandler(h http.Handler) {
 }
 
 // SetApplyFn sets the function used by the ForwardApply handler to apply
-// commands on the leader node.
-func (s *Server) SetApplyFn(fn func(ctx context.Context, data []byte) error) {
+// commands on the leader node. The function returns the Raft log index at
+// which the command was applied so followers can wait for their own FSM
+// to catch up before reading post-mutation state (gastrolog-2nxij).
+func (s *Server) SetApplyFn(fn func(ctx context.Context, data []byte) (uint64, error)) {
 	s.applyFn = fn
 }
 

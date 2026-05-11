@@ -698,14 +698,19 @@ func (s *Server) forwardExplain(ctx context.Context, req *gastrologv1.ForwardExp
 
 // forwardApply handles the ForwardApply RPC on the leader.
 // Followers call this to proxy config writes through the leader's raft.Apply().
+//
+// The response carries the Raft log index at which the command was applied;
+// the follower uses it to wait for its own FSM to catch up before reading
+// post-mutation state in its mutation handler. See gastrolog-2nxij.
 func (s *Server) forwardApply(ctx context.Context, req *gastrologv1.ForwardApplyRequest) (*gastrologv1.ForwardApplyResponse, error) {
 	if s.applyFn == nil {
 		return nil, status.Error(codes.Unavailable, "apply function not configured")
 	}
-	if err := s.applyFn(ctx, req.GetCommand()); err != nil {
+	appliedIndex, err := s.applyFn(ctx, req.GetCommand())
+	if err != nil {
 		return nil, status.Errorf(codes.Internal, "apply: %v", err)
 	}
-	return &gastrologv1.ForwardApplyResponse{}, nil
+	return &gastrologv1.ForwardApplyResponse{AppliedIndex: appliedIndex}, nil
 }
 
 // forwardVaultApply handles the ForwardVaultApply RPC. The payload is a

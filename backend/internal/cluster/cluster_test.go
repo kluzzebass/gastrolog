@@ -88,7 +88,7 @@ func newTestNode(t *testing.T, nodeID string, bootstrap bool) *testNode {
 
 	// Wire the cluster server.
 	srv.SetRaft(r)
-	srv.SetApplyFn(func(ctx context.Context, data []byte) error {
+	srv.SetApplyFn(func(ctx context.Context, data []byte) (uint64, error) {
 		return store.ApplyRaw(data)
 	})
 
@@ -267,5 +267,32 @@ func TestThreeNodeCluster(t *testing.T) {
 	}
 	if leaderGot.Name != "follower-probe" {
 		t.Errorf("got name %q, want follower-probe", leaderGot.Name)
+	}
+
+	// gastrolog-2nxij regression: after PutRotationPolicy returns on a
+	// follower, the follower's OWN local FSM must already reflect the
+	// write — no polling. Before the fix, the follower's Forward returned
+	// as soon as the leader applied, and the follower's local FSM caught
+	// up asynchronously; a read on the follower could miss its own write
+	// for several milliseconds (longer under load), producing the stale
+	// snapshot that caused the settings UI to display pre-mutation state.
+	readBackProbeID := glid.New()
+	if err := node2.store.PutRotationPolicy(ctx, system.RotationPolicyConfig{
+		ID:     readBackProbeID,
+		Name:   "read-back-probe",
+		MaxAge: &dummyMaxAge,
+	}); err != nil {
+		t.Fatalf("PutRotationPolicy on follower for read-back: %v", err)
+	}
+	// No sleep, no polling — read immediately on the same follower that wrote.
+	followerSelfRead, err := node2.store.GetRotationPolicy(ctx, readBackProbeID)
+	if err != nil {
+		t.Fatalf("immediate GetRotationPolicy on follower: %v", err)
+	}
+	if followerSelfRead == nil {
+		t.Fatal("follower's local FSM did not reflect its own write — read-after-write race not fixed")
+	}
+	if followerSelfRead.Name != "read-back-probe" {
+		t.Errorf("got name %q, want read-back-probe", followerSelfRead.Name)
 	}
 }

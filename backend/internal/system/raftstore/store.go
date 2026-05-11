@@ -25,9 +25,12 @@ import (
 var _ system.Store = (*Store)(nil)
 
 // Forwarder forwards pre-marshaled config commands to the Raft leader.
-// Implemented by cluster.Forwarder in multi-node mode.
+// Implemented by cluster.Forwarder in multi-node mode. Returns the Raft
+// log index at which the leader applied the command so the follower can
+// wait for its own FSM to catch up before reading post-mutation state
+// (gastrolog-2nxij).
 type Forwarder interface {
-	Forward(ctx context.Context, data []byte) error
+	Forward(ctx context.Context, data []byte) (uint64, error)
 }
 
 // Store implements system.Store by routing writes through raft.Apply() for
@@ -57,7 +60,8 @@ func (s *Store) SetForwarder(f Forwarder) {
 
 // apply serializes a ConfigCommand and submits it through raft.Apply().
 // If this node is not the leader and a forwarder is configured, the command
-// is forwarded to the leader transparently.
+// is forwarded to the leader transparently. The applied Raft log index is
+// discarded here — callers that need it use applyRaw directly.
 //
 // The effective timeout is min(ctx deadline, s.applyTimeout). Callers that
 // want a tighter bound (e.g. orchestrator shutdown under lost quorum) pass
@@ -67,27 +71,87 @@ func (s *Store) apply(ctx context.Context, cmd *gastrologv1.SystemCommand) error
 	if err != nil {
 		return fmt.Errorf("marshal command: %w", err)
 	}
-	return s.applyRaw(ctx, data)
+	_, err = s.applyRaw(ctx, data)
+	return err
 }
 
 // applyRaw submits pre-marshaled command bytes through raft.Apply(),
-// forwarding to the leader if this node is a follower.
-func (s *Store) applyRaw(ctx context.Context, data []byte) error {
+// forwarding to the leader if this node is a follower. Returns the Raft
+// log index at which the command was applied.
+//
+// On the leader, raft.Apply is synchronous w.r.t. local FSM Apply, so the
+// returned index is already reflected in the local FSM by the time this
+// returns. On a follower, the command is forwarded to the leader for
+// commit, and the follower then waits for its own local FSM to apply up
+// to the returned index before returning. This guarantees that the caller
+// can read post-mutation state from the local FSM immediately — fixes the
+// read-after-write race described in gastrolog-2nxij.
+func (s *Store) applyRaw(ctx context.Context, data []byte) (uint64, error) {
 	future := s.raft.Apply(data, s.effectiveTimeout(ctx))
 	if err := future.Error(); err != nil {
 		if errors.Is(err, raft.ErrNotLeader) && s.forwarder != nil {
-			fwdCtx, cancel := context.WithTimeout(ctx, s.effectiveTimeout(ctx))
-			defer cancel()
-			return s.forwarder.Forward(fwdCtx, data)
+			return s.forwardAndWait(ctx, data)
 		}
-		return fmt.Errorf("raft apply: %w", err)
+		return 0, fmt.Errorf("raft apply: %w", err)
 	}
 	if resp := future.Response(); resp != nil {
 		if err, ok := resp.(error); ok {
-			return err
+			return future.Index(), err
 		}
 	}
-	return nil
+	return future.Index(), nil
+}
+
+// forwardAndWait sends the command to the leader and blocks until the local
+// FSM has applied up to the leader's index. Splits the follower-forward path
+// out of applyRaw to keep nesting shallow.
+func (s *Store) forwardAndWait(ctx context.Context, data []byte) (uint64, error) {
+	fwdCtx, cancel := context.WithTimeout(ctx, s.effectiveTimeout(ctx))
+	defer cancel()
+	appliedIndex, err := s.forwarder.Forward(fwdCtx, data)
+	if err != nil {
+		return 0, err
+	}
+	if err := s.waitForLocalApply(ctx, appliedIndex); err != nil {
+		return appliedIndex, err
+	}
+	return appliedIndex, nil
+}
+
+// waitForLocalApply blocks until the local Raft FSM has applied at least
+// the given index, bounded by the effective timeout. Used on followers
+// after Forward to ensure post-mutation reads see the new state.
+//
+// Polls raft.AppliedIndex at a short interval — the local Raft worker
+// applies committed entries asynchronously after Forward returns from
+// the leader, so this typically returns within a few milliseconds. Times
+// out if the follower never catches up (partitioned, log truncated,
+// etc.) so a stuck cluster surfaces as a client-visible error rather
+// than a hang. See gastrolog-2nxij.
+func (s *Store) waitForLocalApply(ctx context.Context, target uint64) error {
+	if target == 0 {
+		return nil
+	}
+	if s.raft.AppliedIndex() >= target {
+		return nil
+	}
+	const pollInterval = 5 * time.Millisecond
+	deadline := time.Now().Add(s.effectiveTimeout(ctx))
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if s.raft.AppliedIndex() >= target {
+				return nil
+			}
+			if time.Now().After(deadline) {
+				return fmt.Errorf("wait for local FSM apply at index %d: timeout (last applied %d)", target, s.raft.AppliedIndex())
+			}
+		}
+	}
 }
 
 // effectiveTimeout returns min(ctx deadline, s.applyTimeout). Raft.Apply
@@ -104,9 +168,12 @@ func (s *Store) effectiveTimeout(ctx context.Context) time.Duration {
 	return s.applyTimeout
 }
 
-// ApplyRaw applies pre-marshaled command bytes. Used by the cluster
-// ForwardApply handler on the leader to apply commands received from followers.
-func (s *Store) ApplyRaw(data []byte) error {
+// ApplyRaw applies pre-marshaled command bytes and returns the Raft log
+// index at which the command was applied. Used by the cluster ForwardApply
+// handler on the leader to apply commands received from followers; the
+// returned index is sent back to the follower so it can wait for its own
+// FSM to catch up. See gastrolog-2nxij.
+func (s *Store) ApplyRaw(data []byte) (uint64, error) {
 	return s.applyRaw(context.Background(), data)
 }
 

@@ -117,8 +117,12 @@ func (x *ForwardApplyRequest) GetCommand() []byte {
 	return nil
 }
 
+// ForwardApplyResponse carries the Raft log index at which the leader
+// applied the command. The follower uses this to wait for its own FSM
+// to catch up before reading post-mutation state. See gastrolog-2nxij.
 type ForwardApplyResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	AppliedIndex  uint64                 `protobuf:"varint,1,opt,name=applied_index,json=appliedIndex,proto3" json:"applied_index,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -151,6 +155,13 @@ func (x *ForwardApplyResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ForwardApplyResponse.ProtoReflect.Descriptor instead.
 func (*ForwardApplyResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ForwardApplyResponse) GetAppliedIndex() uint64 {
+	if x != nil {
+		return x.AppliedIndex
+	}
+	return 0
 }
 
 // EnrollRequest is sent by a joining node to the cluster leader.
@@ -3709,8 +3720,9 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\n" +
 	"\x1agastrolog/v1/cluster.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x16gastrolog/v1/job.proto\x1a\x18gastrolog/v1/query.proto\x1a\x19gastrolog/v1/system.proto\x1a\x18gastrolog/v1/vault.proto\"/\n" +
 	"\x13ForwardApplyRequest\x12\x18\n" +
-	"\acommand\x18\x01 \x01(\fR\acommand\"\x16\n" +
-	"\x14ForwardApplyResponse\"h\n" +
+	"\acommand\x18\x01 \x01(\fR\acommand\";\n" +
+	"\x14ForwardApplyResponse\x12#\n" +
+	"\rapplied_index\x18\x01 \x01(\x04R\fappliedIndex\"h\n" +
 	"\rEnrollRequest\x12!\n" +
 	"\ftoken_secret\x18\x01 \x01(\tR\vtokenSecret\x12\x17\n" +
 	"\anode_id\x18\x02 \x01(\fR\x06nodeId\x12\x1b\n" +
