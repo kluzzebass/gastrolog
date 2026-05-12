@@ -33,6 +33,7 @@ export {
   useChangePassword,
 } from "./useAuth";
 export {
+  useIngesters,
   useIngesterStatus,
   usePutIngester,
   useDeleteIngester,

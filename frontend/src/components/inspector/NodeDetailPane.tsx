@@ -1,7 +1,8 @@
 import { encode } from "../../api/glid";
+import { type EntityID, idFromBytes } from "../../api/model/id";
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { useVaults } from "../../api/hooks";
+import { useVaults, useIngesters } from "../../api/hooks";
 import { useWatchJobs } from "../../api/hooks";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
 import { useConfig } from "../../api/hooks/useSystem";
@@ -27,8 +28,9 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
 
   const { data: cluster } = useClusterStatus();
   const { data: config } = useConfig();
-  const nodeInfo = cluster?.nodes.find((n) => encode(n.id) === nodeId);
-  const liveNodeIds = new Set((cluster?.nodes ?? []).map((n) => encode(n.id)));
+  const nodeIdTyped = nodeId as EntityID;
+  const nodeInfo = cluster?.nodes.find((n) => idFromBytes(n.id) === nodeIdTyped);
+  const liveNodeIds: ReadonlySet<EntityID> = new Set((cluster?.nodes ?? []).map((n) => idFromBytes(n.id)));
 
   // Node ID → display name lookup for the Network section. Falls back to
   // the raw ID when no name is set.
@@ -50,11 +52,11 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
 
   // Data for all entity types, filtered by this node.
   const { data: allVaults } = useVaults();
-  const allIngesters = config?.ingesters ?? [];
+  const allIngesters = useIngesters();
   const { jobs } = useWatchJobs({ onError: toastError });
 
   const vaults = (allVaults ?? []).filter((v) => (encode(v.nodeId) || localNodeId) === nodeId);
-  const ingesters = allIngesters.filter((i) => i.allNodes || i.nodeIds.length === 0 || i.nodeIds.some((n) => encode(n) === nodeId));
+  const ingesters = allIngesters.filter((i) => i.isEligibleOn(nodeIdTyped));
   const nodeJobs = jobs.filter((j) => (encode(j.nodeId) || localNodeId) === nodeId);
   const tasks = nodeJobs.filter((j) => j.kind === JobKind.TASK);
   const scheduled = nodeJobs.filter((j) => j.kind === JobKind.SCHEDULED);
@@ -106,21 +108,18 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
           <EmptyMessage dark={dark}>No ingesters on this node.</EmptyMessage>
         ) : (
           <div className="flex flex-col gap-2">
-            {ingesters.map((ing) => {
-              const iid = encode(ing.id);
-              return (
+            {ingesters.map((ing) => (
               <IngesterCard
-                key={iid}
+                key={ing.id}
                 ingester={ing}
                 liveNodeIds={liveNodeIds}
                 dark={dark}
-                expanded={!!expandedIngesters[iid]}
-                onToggle={() => setExpandedIngesters((prev) => ({ ...prev, [iid]: !prev[iid] }))}
+                expanded={!!expandedIngesters[ing.id]}
+                onToggle={() => setExpandedIngesters((prev) => ({ ...prev, [ing.id]: !prev[ing.id] }))}
                 showNodeBadge={false}
-                onOpenSettings={onOpenSettings ? () => onOpenSettings("ingesters", ing.name || iid) : undefined}
+                onOpenSettings={onOpenSettings ? () => onOpenSettings("ingesters", ing.displayLabel) : undefined}
               />
-              );
-            })}
+            ))}
           </div>
         )}
       </Section>

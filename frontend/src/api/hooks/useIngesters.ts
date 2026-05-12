@@ -3,8 +3,21 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { systemClient } from "../client";
 import { WatchIngesterStatusResponse } from "../gen/gastrolog/v1/system_pb";
-import { useSystemMutation } from "./useSystem";
+import { useSystemMutation, useConfig } from "./useSystem";
 import { decode, encodeString } from "../glid";
+import { Ingester } from "../model/ingester";
+
+/**
+ * Returns the cluster's configured ingesters as model instances. Derived
+ * from the cached `GetSystem` config — no extra RPC, no separate cache key.
+ * Runtime overlay (per-node alive map) is queried separately via
+ * `useIngesterAlive`; the model's methods accept it as an argument so
+ * callers stay in control of when they need it.
+ */
+export function useIngesters(): Ingester[] {
+  const { data: config } = useConfig();
+  return (config?.ingesters ?? []).map((c) => new Ingester(c));
+}
 
 // useIngesterStatus returns a live view of a single ingester's status.
 // Event-driven via the WatchIngesterStatus server stream — no polling.
