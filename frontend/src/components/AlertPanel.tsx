@@ -1,4 +1,5 @@
 import { useThemeClass } from "../hooks/useThemeClass";
+// eslint-disable-next-line no-restricted-imports -- no Alert model yet (gastrolog-2e2qs follow-up)
 import { AlertSeverity } from "../api/gen/gastrolog/v1/cluster_pb";
 import type { NodeAlert } from "../api/hooks/useAlerts";
 import { encode } from "../api/glid";

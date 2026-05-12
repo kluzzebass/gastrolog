@@ -7,6 +7,7 @@
  */
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { formatBytes } from "../../utils";
+// eslint-disable-next-line no-restricted-imports -- NodeStats / PeerBytesStat are passthrough types from Node.stats; no model wrap planned
 import type {
   NodeStats,
   PeerBytesStat,

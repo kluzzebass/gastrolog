@@ -1,6 +1,8 @@
 import { encode } from "../../api/glid";
 import { useThemeClass } from "../../hooks/useThemeClass";
+// eslint-disable-next-line no-restricted-imports -- ClusterSummaryView still takes raw ClusterNode for the multi-node cluster summary; deferred migration
 import type { ClusterNode } from "../../api/gen/gastrolog/v1/lifecycle_pb";
+// eslint-disable-next-line no-restricted-imports -- NodeStats is a passthrough type from Node.stats; no model wrap planned
 import type { NodeStats } from "../../api/gen/gastrolog/v1/cluster_pb";
 import { formatBytes } from "../../utils/units";
 
