@@ -2,12 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { StatPill } from "./StatPill";
 import { UserMenu } from "./UserMenu";
 import { AlertPanel } from "./AlertPanel";
-import { EnvironmentBanner } from "./EnvironmentBanner";
 import { SlidersIcon } from "./icons";
 import { useThemeClass } from "../hooks/useThemeClass";
 import { useClusterStatus } from "../api/hooks/useClusterStatus";
 import { useAlerts } from "../api/hooks/useAlerts";
-import { useConfig } from "../api/hooks/useSystem";
 // eslint-disable-next-line no-restricted-imports -- no Alert model yet (gastrolog-2e2qs follow-up)
 import { AlertSeverity } from "../api/gen/gastrolog/v1/cluster_pb";
 import { formatBytes } from "../utils/units";
@@ -71,9 +69,6 @@ export function HeaderBar({
 }: Readonly<HeaderBarProps>) {
   const c = useThemeClass(dark);
   const { data: cluster, isLoading } = useClusterStatus();
-  const { data: system } = useConfig();
-  const envLabel = system?.environmentLabel ?? "";
-  const envColor = system?.environmentColor ?? "";
   const nodes = sortNodesByName(cluster?.nodes ?? []);
 
   // Inspector glow: briefly flash when system status data arrives.
@@ -109,9 +104,9 @@ export function HeaderBar({
 
   return (
     <header
-      className={`flex items-center px-4 lg:px-7 py-3.5 border-b ${c("border-ink-border-subtle bg-ink", "border-light-border-subtle bg-light-raised")}`}
+      className={`flex items-center justify-between px-4 lg:px-7 py-3.5 border-b ${c("border-ink-border-subtle bg-ink", "border-light-border-subtle bg-light-raised")}`}
     >
-      <div className="flex items-center gap-3 flex-1">
+      <div className="flex items-center gap-3">
         <img src="/favicon.svg" alt="GastroLog" className="w-6 h-6" />
         <h1
           className={`font-display text-[1.6em] font-semibold tracking-tight leading-none ${c("text-text-bright", "text-light-text-bright")}`}
@@ -146,13 +141,7 @@ export function HeaderBar({
         )}
       </div>
 
-      {envLabel && (
-        <div className="flex-1 flex items-center justify-center">
-          <EnvironmentBanner label={envLabel} color={envColor} dark={dark} />
-        </div>
-      )}
-
-      <div className="flex items-center gap-3 lg:gap-6 flex-1 justify-end">
+      <div className="flex items-center gap-3 lg:gap-6">
         {/* Stats ribbon */}
         <div className="hidden lg:flex items-center gap-5">
           <HoverStat

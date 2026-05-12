@@ -35,6 +35,9 @@ x-gastrolog-base: &base
   image: gastrolog:test # change to ghcr.io/kluzzebass/gastrolog:latest for a release image
   environment:
     GASTROLOG_INITIAL_ADMIN_FILE: /run/secrets/admin_creds
+    # Environment banner (gastrolog-4vr0l). Bottom-left ribbon in the UI.
+    GASTROLOG_ENVIRONMENT_LABEL: Compose
+    GASTROLOG_ENVIRONMENT_COLOR: dodgerblue
   secrets:
     - admin_creds
   restart: unless-stopped

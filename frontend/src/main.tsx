@@ -1,7 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { RouterProvider } from "@tanstack/react-router";
 import { router } from "./router";
 import { toastError } from "./components/Toast";
@@ -25,7 +24,6 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <WatchStreamsHost />
     <React.StrictMode>
       <RouterProvider router={router} />
-      <ReactQueryDevtools buttonPosition="bottom-left" />
     </React.StrictMode>
   </QueryClientProvider>,
 );

@@ -40,7 +40,7 @@ PPROF="${GLOG_PPROF:-false}"
 # the local dev deployment in the UI header so operators don't confuse it
 # with a K8s/staging instance. Single token only (no spaces).
 ENV_LABEL="${GLOG_ENV_LABEL:-Development}"
-ENV_COLOR="${GLOG_ENV_COLOR:-}"
+ENV_COLOR="${GLOG_ENV_COLOR:-limegreen}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
