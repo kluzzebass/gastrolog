@@ -11,6 +11,8 @@ import type {
   NodeStats,
   PeerBytesStat,
 } from "../../api/gen/gastrolog/v1/cluster_pb";
+import { asEntityID } from "../../api/model/id";
+import type { NodeRegistry } from "../../api/hooks";
 
 // peerKey returns the peer identifier used as the state-map key. Uses the
 // proto-defined peer string (node ID) directly.
@@ -20,13 +22,13 @@ function peerKey(p: PeerBytesStat): string {
 
 export interface PeerBytesSectionProps {
   readonly nodeStats: NodeStats | null | undefined;
-  readonly peerNameById: ReadonlyMap<string, string>;
+  readonly nodes: NodeRegistry;
   readonly dark: boolean;
 }
 
 export function PeerBytesSection({
   nodeStats,
-  peerNameById,
+  nodes,
   dark,
 }: PeerBytesSectionProps) {
   const c = useThemeClass(dark);
@@ -44,8 +46,8 @@ export function PeerBytesSection({
   }
 
   const rows = [...peerBytes].sort((a, b) => {
-    const na = peerNameById.get(a.peer) ?? a.peer;
-    const nb = peerNameById.get(b.peer) ?? b.peer;
+    const na = nodes.nameOf(asEntityID(a.peer));
+    const nb = nodes.nameOf(asEntityID(b.peer));
     return na.localeCompare(nb);
   });
 
@@ -82,7 +84,7 @@ export function PeerBytesSection({
         <tbody>
           {rows.map((p) => {
             const k = peerKey(p);
-            const name = peerNameById.get(p.peer) ?? p.peer;
+            const name = nodes.nameOf(asEntityID(p.peer));
             const tx = p.txBytesPerSec;
             const rx = p.rxBytesPerSec;
             const txSpark = p.txSpark;

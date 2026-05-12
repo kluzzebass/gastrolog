@@ -1,12 +1,11 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
-import { useVaults, useIngesters } from "../../api/hooks";
+import { useVaults, useIngesters, useNodeRegistry } from "../../api/hooks";
 import { type EntityID, idFromBytes } from "../../api/model/id";
 import { useWatchJobs } from "../../api/hooks";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
 import { useConfig } from "../../api/hooks/useSystem";
-import { useSettings } from "../../api/hooks/useSettings";
 import { JobKind, JobStatus } from "../../api/gen/gastrolog/v1/job_pb";
 import type { Job } from "../../api/gen/gastrolog/v1/job_pb";
 import { toastError } from "../Toast";
@@ -65,28 +64,23 @@ function useToggleSet() {
 }
 
 // ---- Node context helper ----
+//
+// Now a thin shim over useNodeRegistry. Kept for the legacy `nodeNames`
+// shape that the JobsList helper passes into groupByNode (string → string
+// Map). Once the Job entity issue migrates that helper, this shim can go.
 
 function useNodeContext() {
-  const { data: settingsData } = useSettings();
-  const { data: config } = useConfig();
-  const { data: cluster } = useClusterStatus();
-  const localNodeId = settingsData?.nodeId ? encode(settingsData.nodeId) : "";
-  const clusterEnabled = cluster?.clusterEnabled ?? false;
-  const multiNode = clusterEnabled || (config?.nodeConfigs && config.nodeConfigs.length > 1);
-
+  const registry = useNodeRegistry();
   const nodeNames = new Map<string, string>();
-  if (config?.nodeConfigs) {
-    for (const nc of config.nodeConfigs) {
-      if (nc.name) nodeNames.set(encode(nc.id), nc.name);
-    }
+  for (const n of registry.all) {
+    if (n.cluster?.name) nodeNames.set(n.id, n.cluster.name);
+    else if (n.config?.name) nodeNames.set(n.id, n.config.name);
   }
-  if (cluster?.nodes) {
-    for (const n of cluster.nodes) {
-      if (n.name) nodeNames.set(encode(n.id), n.name);
-    }
-  }
-
-  return { localNodeId, multiNode, nodeNames, cluster };
+  return {
+    localNodeId: registry.localNodeId,
+    multiNode: registry.multiNode,
+    nodeNames,
+  };
 }
 
 /** Build vault ID → "cloud" map from VaultConfig.cloudServiceId. */
@@ -399,12 +393,14 @@ function JobStatusBadge({ status, dark }: Readonly<{ status: JobStatus; dark: bo
 // ---- System ----
 
 function SystemList({ dark }: Readonly<{ dark: boolean }>) {
-  const { localNodeId, multiNode, cluster } = useNodeContext();
+  const { localNodeId, multiNode } = useNodeContext();
+  const { data: cluster } = useClusterStatus();
+  const registry = useNodeRegistry();
   const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({});
 
   // Single-node: show local stats directly.
   if (!multiNode) {
-    const localStats = cluster?.nodes.find((n) => encode(n.id) === localNodeId)?.stats ?? null;
+    const localStats = registry.byId.get(localNodeId)?.stats ?? null;
     return (
       <div className="flex flex-col gap-3">
         <EntityHeader title="System" helpTopicId="inspector-system" dark={dark} />
@@ -416,8 +412,8 @@ function SystemList({ dark }: Readonly<{ dark: boolean }>) {
   // Multi-node: one ExpandableCard per node.
   const nodes = cluster?.nodes
     ? [...cluster.nodes].sort((a, b) => {
-        if (encode(a.id) === localNodeId) return -1;
-        if (encode(b.id) === localNodeId) return 1;
+        if (idFromBytes(a.id) === localNodeId) return -1;
+        if (idFromBytes(b.id) === localNodeId) return 1;
         return (a.name || "").localeCompare(b.name || "");
       })
     : [];
@@ -443,7 +439,7 @@ function SystemList({ dark }: Readonly<{ dark: boolean }>) {
       )}
       {nodes.length === 0 && <Empty dark={dark}>No cluster data available.</Empty>}
       {nodes.map((node) => {
-        const nid = encode(node.id);
+        const nid = idFromBytes(node.id);
         const isLocal = nid === localNodeId;
         return (
           <ExpandableCard

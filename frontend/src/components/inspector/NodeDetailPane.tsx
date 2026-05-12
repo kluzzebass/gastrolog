@@ -2,7 +2,7 @@ import { encode } from "../../api/glid";
 import { type EntityID, idFromBytes } from "../../api/model/id";
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { useVaults, useIngesters } from "../../api/hooks";
+import { useVaults, useIngesters, useNodeRegistry } from "../../api/hooks";
 import { useWatchJobs } from "../../api/hooks";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
 import { useConfig } from "../../api/hooks/useSystem";
@@ -28,17 +28,11 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
 
   const { data: cluster } = useClusterStatus();
   const { data: config } = useConfig();
+  const registry = useNodeRegistry();
   const nodeIdTyped = nodeId as EntityID;
-  const nodeInfo = cluster?.nodes.find((n) => idFromBytes(n.id) === nodeIdTyped);
-  const liveNodeIds: ReadonlySet<EntityID> = new Set((cluster?.nodes ?? []).map((n) => idFromBytes(n.id)));
-
-  // Node ID → display name lookup for the Network section. Falls back to
-  // the raw ID when no name is set.
-  const peerNameById = new Map<string, string>();
-  for (const n of cluster?.nodes ?? []) {
-    const id = encode(n.id);
-    peerNameById.set(id, n.name || id);
-  }
+  const node = registry.byId.get(nodeIdTyped) ?? null;
+  const nodeInfo = node?.cluster ?? null;
+  const liveNodeIds: ReadonlySet<EntityID> = new Set(registry.all.filter((n) => n.isLive).map((n) => n.id));
 
   // Build vault ID → "cloud" map from VaultConfig.cloudServiceId.
   const cloudProviders = new Map<string, string>();
@@ -128,7 +122,7 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
       <Section title="Network" dark={dark}>
         <PeerBytesSection
           nodeStats={nodeInfo?.stats ?? null}
-          peerNameById={peerNameById}
+          nodes={registry}
           dark={dark}
         />
       </Section>

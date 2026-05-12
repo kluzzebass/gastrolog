@@ -1,4 +1,5 @@
 import { encode } from "../../api/glid";
+import { idFromBytes } from "../../api/model/id";
 import { useState, useEffect } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { JobStatus } from "../../api/gen/gastrolog/v1/job_pb";
@@ -47,7 +48,7 @@ export function JobCard({
       status={
         <span className="flex items-center gap-1.5">
           <StatusBadge status={job.status} dark={dark} />
-          {showNodeBadge && <NodeBadge nodeId={encode(job.nodeId)} dark={dark} />}
+          {showNodeBadge && <NodeBadge nodeId={idFromBytes(job.nodeId)} dark={dark} />}
         </span>
       }
       headerRight={<TaskProgress job={job} dark={dark} />}
@@ -107,7 +108,7 @@ export function ScheduledJobsTable({
             <span className="font-mono truncate" title={job.description || job.name || encode(job.id)}>
               {job.description || job.name || encode(job.id)}
             </span>
-            {showNodeBadge && <NodeBadge nodeId={encode(job.nodeId)} dark={dark} />}
+            {showNodeBadge && <NodeBadge nodeId={idFromBytes(job.nodeId)} dark={dark} />}
           </span>
           <span
             className={`font-mono text-[0.9em] ${c("text-text-muted", "text-light-text-muted")}`}
