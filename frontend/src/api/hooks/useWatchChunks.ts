@@ -52,16 +52,6 @@ export function useWatchChunks() {
     // node's bus and us, and we resync via invalidateQueries on the
     // affected vault.
     const lastVersionByNode = new Map<string, bigint>();
-    // Tracks the set of producing nodes that have emitted any event for
-    // a given chunk, keyed by chunk id (hex). Used to compute
-    // replicaCount on the client side — each cluster node only fires
-    // FSM-driven chunk events when it hosts the vault (the FSM apply
-    // callback is wired in host-only build paths), so a node appearing
-    // in the set is evidence that node has the chunk's data. Sealed
-    // chunks fetched via the cold-start ListChunks already carry the
-    // server's dedup-computed replicaCount; this state tracks only
-    // chunks where events have arrived since the inspector opened.
-    const replicaNodesByChunk = new Map<string, Set<string>>();
 
     async function connect(backoff = 0) {
       let nextBackoff = backoff;
@@ -70,7 +60,7 @@ export function useWatchChunks() {
           {},
           { signal: abort.signal },
         )) {
-          handleEvent(qc, msg, lastVersionByNode, replicaNodesByChunk);
+          handleEvent(qc, msg, lastVersionByNode);
           nextBackoff = 0;
         }
       } catch (err) {
@@ -85,7 +75,6 @@ export function useWatchChunks() {
         // refetch of all per-vault caches so any events dropped during
         // the disconnect window get reconciled.
         lastVersionByNode.clear();
-        replicaNodesByChunk.clear();
         qc.invalidateQueries({ queryKey: ["chunks"] });
         const delay = Math.min(1000 * 2 ** nextBackoff, 30_000);
         reconnectTimer = setTimeout(() => connect(nextBackoff + 1), delay);
@@ -116,7 +105,6 @@ function handleEvent(
   qc: ReturnType<typeof useQueryClient>,
   msg: WatchChunksResponse,
   lastVersionByNode: Map<string, bigint>,
-  replicaNodesByChunk: Map<string, Set<string>>,
 ) {
   // Heartbeat at stream start (and on every fresh peer subscription on
   // the API node) — no payload, just a version baseline. Record the
@@ -140,26 +128,23 @@ function handleEvent(
   }
   lastVersionByNode.set(key, msg.version);
 
-  // Track this producing node as a replica of this chunk. The set
-  // grows monotonically until the chunk is DELETED, at which point we
-  // drop the tracking. The size of the set is the client-computed
-  // replicaCount written into the cache entry below.
-  const chunkKey = bytesToHex(msg.chunkId);
-  if (msg.op === ChunkChangeOp.DELETED) {
-    replicaNodesByChunk.delete(chunkKey);
-  } else {
-    let nodes = replicaNodesByChunk.get(chunkKey);
-    if (!nodes) {
-      nodes = new Set();
-      replicaNodesByChunk.set(chunkKey, nodes);
-    }
-    nodes.add(key);
-  }
-
   const vaultId = encode(msg.vaultId);
   qc.setQueryData<ChunksCache>(["chunks", vaultId], (prev) =>
-    mutateCache(prev, msg, replicaNodesByChunk.get(chunkKey)),
+    mutateCache(prev, msg),
   );
+
+  // Indexes for a chunk are built by a post-seal background job on the
+  // backend and surfaced via the separate GetIndexes RPC (sibling query
+  // key ["indexes", vaultId, chunkId]). A user who expands the chunk
+  // detail panel while the chunk is still active gets an "all indexes
+  // missing" snapshot; without explicit invalidation the SEALED event
+  // refreshes the chunk meta but leaves that stale snapshot in place
+  // forever. Invalidate on every seal/upload transition so the detail
+  // pane refetches once the indexes actually exist. See gastrolog-4zy8a.
+  if (msg.op === ChunkChangeOp.SEALED || msg.op === ChunkChangeOp.UPLOADED) {
+    const chunkIdStr = encode(msg.chunkId);
+    qc.invalidateQueries({ queryKey: ["indexes", vaultId, chunkIdStr] });
+  }
 }
 
 /** nodeKey converts the producing-node id bytes to a stable map key.
@@ -174,11 +159,23 @@ function nodeKey(nodeId: Uint8Array): string {
  * mutateCache applies one event to the in-memory chunk list for a vault.
  * Pure function (no side effects on prev — returns a new array when the
  * shape changes, or prev when the event is a no-op).
+ *
+ * Replica tracking model (gastrolog-4zy8a): each event records evidence
+ * that one specific node hosts the chunk. We persist that evidence by
+ * merging msg.nodeId into the cache's replica_node_ids list and deriving
+ * replicaCount from the list length. This:
+ *   - GROWS the count when catchup replicates an existing chunk to a new
+ *     follower (CREATED/SEALED event from that follower).
+ *   - SHRINKS the count when a cold-start ListChunks refetch returns a
+ *     smaller replica_node_ids (e.g. after RF decrease) — the next
+ *     watch event merges against the new shorter list, so additions stay
+ *     proportionally small.
+ *   - Avoids the original monotonic-grow accumulator anti-pattern that
+ *     produced stale-high counts on RF decrease and never freed entries.
  */
 function mutateCache(
   prev: ChunksCache,
   msg: WatchChunksResponse,
-  replicaNodes: Set<string> | undefined,
 ): ChunksCache {
   const next = prev ? prev.slice() : [];
   const chunkIdKey = bytesToHex(msg.chunkId);
@@ -186,35 +183,35 @@ function mutateCache(
   const findIdx = () =>
     next.findIndex((c) => bytesToHex(c.id) === chunkIdKey);
 
-  // applyReplicaCount overlays the client-tracked replicaCount onto a
-  // meta unless the meta already has a higher count from the server
-  // (cold-start ListChunks dedup). max() preserves the freshest signal
-  // from either source.
-  const applyReplicaCount = (meta: ChunkMeta): ChunkMeta => {
-    if (!replicaNodes) return meta;
-    const tracked = replicaNodes.size;
-    if (tracked <= meta.replicaCount) return meta;
+  // applyEventNode merges the event's source nodeId into meta's
+  // replica_node_ids (if not already present) and refreshes replicaCount
+  // to match the list length. Only fires for non-empty nodeIds — local
+  // events (empty bytes) would otherwise duplicate the connected node.
+  const applyEventNode = (meta: ChunkMeta): ChunkMeta => {
+    if (msg.nodeId.length === 0) return meta;
+    const sourceID = encode(msg.nodeId);
+    if (meta.replicaNodeIds.includes(sourceID)) {
+      // Already counted — ensure replicaCount matches list length
+      // (handles cases where the server set count==len already).
+      if (meta.replicaCount === meta.replicaNodeIds.length) return meta;
+      const patched = meta.clone();
+      patched.replicaCount = patched.replicaNodeIds.length;
+      return patched;
+    }
     const patched = meta.clone();
-    patched.replicaCount = tracked;
+    patched.replicaNodeIds = [...patched.replicaNodeIds, sourceID];
+    patched.replicaCount = patched.replicaNodeIds.length;
     return patched;
   };
 
   switch (msg.op) {
-    case ChunkChangeOp.CREATED: {
-      if (!msg.meta) return prev;
-      const idx = findIdx();
-      const merged = idx >= 0 ? mergeMeta(next[idx], msg.meta) : msg.meta;
-      const out = applyReplicaCount(merged);
-      if (idx >= 0) next[idx] = out;
-      else next.push(out);
-      return next;
-    }
+    case ChunkChangeOp.CREATED:
     case ChunkChangeOp.SEALED:
     case ChunkChangeOp.UPLOADED: {
       if (!msg.meta) return prev;
       const idx = findIdx();
       const merged = idx >= 0 ? mergeMeta(next[idx], msg.meta) : msg.meta;
-      const out = applyReplicaCount(merged);
+      const out = applyEventNode(merged);
       if (idx >= 0) next[idx] = out;
       else next.push(out);
       return next;
@@ -222,26 +219,22 @@ function mutateCache(
     case ChunkChangeOp.PROGRESS: {
       // PROGRESS carries the full active-chunk meta so live updates to
       // WriteEnd / IngestEnd / Bytes flow through to the inspector, not
-      // just record_count. Without this, an active chunk's WriteEnd
-      // stays at the zero value the FSM stamped at CREATE time
-      // (rendered as "January 1 1970" until the chunk seals).
+      // just record_count.
       const idx = findIdx();
       if (idx < 0) return prev;
       if (msg.meta) {
         const merged = mergeMeta(next[idx], msg.meta);
-        next[idx] = applyReplicaCount(merged);
+        next[idx] = applyEventNode(merged);
         return next;
       }
-      // Backward-compat for events without an inline meta — only
-      // record_count update, same as before.
+      // Backward-compat for events without an inline meta — record_count
+      // update only. Still merge the source node so the count grows when
+      // a new follower starts receiving records on the active chunk.
       const existing = next[idx];
-      if (!existing || existing.recordCount === msg.recordCount) return prev;
+      if (!existing) return prev;
       const patched = existing.clone();
       patched.recordCount = msg.recordCount;
-      if (replicaNodes && replicaNodes.size > patched.replicaCount) {
-        patched.replicaCount = replicaNodes.size;
-      }
-      next[idx] = patched;
+      next[idx] = applyEventNode(patched);
       return next;
     }
     case ChunkChangeOp.DELETED: {

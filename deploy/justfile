@@ -489,6 +489,17 @@ kubernetes-contract count="1":
     echo "Cluster state from gastrolog-0:"
     kubectl -n gastrolog exec gastrolog-0 -- /gastrolog --home /config cluster status | tail -10
 
+# Rebuild gastrolog:test and roll the StatefulSet so pods pick up the new binary (PVCs and cluster state preserved).
+kubernetes-redeploy: image
+    #!/usr/bin/env bash
+    set -euo pipefail
+    kubectl -n gastrolog get sts gastrolog >/dev/null 2>&1 || { echo "K8s cluster not running — run kubernetes-up first"; exit 1; }
+    total=$(kubectl -n gastrolog get sts gastrolog -o jsonpath='{.spec.replicas}')
+    echo "Rolling $total pods to gastrolog:test..."
+    kubectl -n gastrolog rollout restart statefulset/gastrolog >/dev/null
+    kubectl -n gastrolog rollout status statefulset/gastrolog --timeout=180s
+    kubectl -n gastrolog get pods
+
 # Delete the K8s manifests, PVCs, and the namespace.
 kubernetes-down:
     #!/usr/bin/env bash

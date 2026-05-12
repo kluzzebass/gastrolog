@@ -138,6 +138,58 @@ func TestVaultCtlLeaderManager_ReconcileAddsMissingMember(t *testing.T) {
 	t.Fatal("synthetic peer was not added to Raft configuration within 5s")
 }
 
+// gastrolog-4zy8a: when a known voter's address changes (e.g. a K8s pod gets
+// a new IP after a rolling restart), the reconcile pass must rewrite the
+// stored address via AddVoter. Without this, the vault-ctl Raft group keeps
+// the old IP and the rebooted pod is unreachable forever.
+//
+// Uses a 2-real-node cluster (so the 2 reachable members form a 2-of-3
+// majority for config changes) plus a synthetic 3rd voter "peer-rolled"
+// whose address we want to update from oldAddr to newAddr. The cluster's
+// 2 alive nodes commit the config change without needing the synthetic
+// peer to acknowledge.
+func TestVaultCtlLeaderManager_ReconcileRefreshesStaleAddress(t *testing.T) {
+	t.Parallel()
+
+	groups, cleanup := makeTwoNodeVaultGroup(t, "alive-1", "alive-2")
+	defer cleanup()
+	leader := groups[0]
+
+	const oldAddr = "10.0.0.5:4566"
+	if err := leader.Raft.AddVoter("peer-rolled", oldAddr, 0, 5*time.Second).Error(); err != nil {
+		t.Fatalf("seed AddVoter with old addr: %v", err)
+	}
+
+	mgr := newVaultCtlLeaderManager(discardLogger())
+	defer mgr.StopAll()
+
+	vaultID := glid.New()
+
+	// SetDesiredMembers with peer-rolled at the NEW address.
+	const newAddr = "10.0.0.42:4566"
+	mgr.SetDesiredMembers(vaultID, []hraft.Server{
+		{ID: "alive-1", Address: "alive-1"},
+		{ID: "alive-2", Address: "alive-2"},
+		{ID: "peer-rolled", Address: newAddr},
+	})
+
+	mgr.Start(vaultID, leader)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		future := leader.Raft.GetConfiguration()
+		if err := future.Error(); err == nil {
+			for _, srv := range future.Configuration().Servers {
+				if string(srv.ID) == "peer-rolled" && string(srv.Address) == newAddr {
+					return // success
+				}
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("peer-rolled address was not updated to %s within 5s", newAddr)
+}
+
 // TestVaultCtlLeaderManager_ReconcileRemovesExtras verifies that the leader
 // epoch's reconcile pass calls RemoveServer when a member is in the current
 // configuration but not in the desired set. We need a real 2-voter cluster

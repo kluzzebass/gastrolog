@@ -71,9 +71,17 @@ type RunConfig struct {
 	ServerAddr  string
 	NoAuth      bool
 	ClusterAddr string
-	JoinAddr    string
-	JoinToken   string
-	NodeName    string
+	// ClusterAdvertise is the address peers store and dial to reach this
+	// node (Raft transport target). When empty, the bound listen address
+	// is used — but in environments where the pod's bound IP can change
+	// across restarts (Kubernetes pod IP rotation, Docker network
+	// rescheduling), the advertised address MUST be a stable identifier
+	// (DNS name) so peers reconnect after IP changes without manual
+	// reconfiguration. See gastrolog-4zy8a.
+	ClusterAdvertise string
+	JoinAddr         string
+	JoinToken        string
+	NodeName         string
 
 	// PprofAddr is the pprof HTTP server address (e.g. "localhost:6060").
 	// Empty if pprof is disabled. Advertised to cluster peers via broadcast.
@@ -131,6 +139,17 @@ type RunConfig struct {
 	// from the system config store (gastrolog-3flfp). The watcher reads
 	// LogLevelConfig and calls SetRuleSet on every configSignal fire.
 	LogFilter *logging.ComponentFilterHandler
+}
+
+// advertisedClusterAddr returns the address peers should store and dial to
+// reach this node. Prefers ClusterAdvertise (stable identifier such as a
+// Kubernetes headless-service DNS name) when set, falling back to
+// ClusterAddr for single-host / non-clustered scenarios.
+func (c RunConfig) advertisedClusterAddr() string {
+	if c.ClusterAdvertise != "" {
+		return c.ClusterAdvertise
+	}
+	return c.ClusterAddr
 }
 
 // Run starts the gastrolog server. It wires all components, starts the
@@ -386,9 +405,10 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	var joinClusterFn func(ctx context.Context, leaderAddr, joinToken string) error
 	var removeNodeFn func(ctx context.Context, nodeID string) error
 	var setNodeSuffrageFn func(ctx context.Context, nodeID string, voter bool) error
+	advertisedAddr := cfg.advertisedClusterAddr()
 	if cfg.ConfigType == "raft" && clusterSrv != nil {
-		joinClusterFn = makeJoinClusterFunc(proxy, clusterSrv, clusterTLS, hd, nodeID, cfg.ClusterAddr, orch, disp, logger)
-		removeNodeFn = makeRemoveNodeFunc(clusterSrv, nodeID, logger)
+		joinClusterFn = makeJoinClusterFunc(proxy, clusterSrv, clusterTLS, hd, nodeID, advertisedAddr, orch, disp, logger)
+		removeNodeFn = makeRemoveNodeFunc(clusterSrv, cfgStore, nodeID, logger)
 		setNodeSuffrageFn = makeSetNodeSuffrageFunc(clusterSrv, nodeID, orch.Scheduler(), logger)
 
 		// Register eviction handler: reinitialize as a fresh single-node cluster.
@@ -401,7 +421,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		HomeDir:             homeDir,
 		NodeID:              nodeID,
 		SocketPath:          socketPath,
-		ClusterAddr:         cfg.ClusterAddr,
+		ClusterAddr:         advertisedAddr,
 		Orch:                orch,
 		CfgStore:            cfgStore,
 		Factories:           factories,
@@ -715,17 +735,18 @@ func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cf
 	return appSys, false, nil
 }
 
-// requestClusterMembership asks the cluster leader to add this node as a Raft
-// requestClusterMembership asks the leader to add this node as a voter.
+// requestClusterMembership asks the cluster leader to add this node as a
+// voter, advertising the stable address peers should use to reach us.
 // No-op if join parameters are not set.
 func requestClusterMembership(ctx context.Context, logger *slog.Logger, cfg RunConfig, clusterTLS *cluster.ClusterTLS, nodeID string) error {
-	if cfg.JoinAddr == "" || clusterTLS == nil || cfg.ClusterAddr == "" {
+	advertise := cfg.advertisedClusterAddr()
+	if cfg.JoinAddr == "" || clusterTLS == nil || advertise == "" {
 		return nil
 	}
-	logger.Info("requesting voter membership from leader", "leader_addr", cfg.JoinAddr)
+	logger.Info("requesting voter membership from leader", "leader_addr", cfg.JoinAddr, "advertise", advertise)
 	joinCtx, joinCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer joinCancel()
-	if err := cluster.JoinCluster(joinCtx, cfg.JoinAddr, nodeID, cfg.ClusterAddr, clusterTLS, true); err != nil {
+	if err := cluster.JoinCluster(joinCtx, cfg.JoinAddr, nodeID, advertise, clusterTLS, true); err != nil {
 		return fmt.Errorf("join cluster: %w", err)
 	}
 	logger.Info("voter membership granted by leader")

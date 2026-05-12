@@ -41,13 +41,13 @@ export function useWatchSystem() {
             // systemRaftIndex, so a refetch that returns the new index will be accepted.
             qc.invalidateQueries({ queryKey: ["system"] });
             // Settings are not on GetSystem; refresh when the raft index advances.
-            // Vaults/stats/chunks are not driven by WatchSystem: WatchSystemStatus
-            // pushes vaults+stats snapshots and the ingester alive map, and
-            // WatchChunks covers chunk metadata.
             qc.invalidateQueries({ queryKey: ["settings"] });
             // Log component levels resolve against the current LogLevelConfig
             // — any config commit may shift effective levels.
             qc.invalidateQueries({ queryKey: ["log-components"] });
+            // Chunks are driven by WatchChunks; not invalidating here so
+            // event-applied replica info (additions from catchup) survives
+            // unrelated system raft commits like ingester checkpoints.
           }
           nextBackoff = 0; // reset backoff on successful message
         }

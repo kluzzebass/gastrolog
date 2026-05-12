@@ -582,12 +582,18 @@ func (s *VaultServer) WatchChunks(
 
 // runLocalChunkEventForwarder drains the local ChunkBus subscription and
 // translates each event into a wire WatchChunksResponse, fed into the
-// aggregated event channel. node_id is left empty for local events.
+// aggregated event channel. The local node's ID is stamped onto every
+// event so subscribers can attribute the source consistently with peer
+// events — without it, the client can't tell which node produced a
+// CREATED/SEALED/PROGRESS event and replica-count tracking that derives
+// from per-node attribution undercounts the connected node. See
+// gastrolog-4zy8a.
 func (s *VaultServer) runLocalChunkEventForwarder(
 	ctx context.Context,
 	events <-chan notify.Versioned[orchestrator.ChunkChangeEvent],
 	out chan<- *apiv1.WatchChunksResponse,
 ) {
+	localNodeIDBytes := []byte(s.localNodeID)
 	for {
 		select {
 		case <-ctx.Done():
@@ -598,6 +604,7 @@ func (s *VaultServer) runLocalChunkEventForwarder(
 			}
 			msg := chunkChangeEventToProto(ev.Event)
 			msg.Version = ev.Version
+			msg.NodeId = localNodeIDBytes
 			if msg.Meta != nil {
 				msg.Meta.VaultType = s.orch.VaultType(ev.Event.VaultID)
 			}
