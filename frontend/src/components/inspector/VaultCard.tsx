@@ -5,7 +5,8 @@ import { clickableProps } from "../../utils";
 import { useChunks, useIndexes, useValidateVault, useConfig, useArchiveChunk, useRestoreChunk } from "../../api/hooks";
 import { useToast } from "../Toast";
 import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
-import type { VaultInfo, ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
+import type { ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
+import type { Vault } from "../../api/model/vault";
 import { protoToInstant, instantToMs, instantToDate, formatDateTimeShort } from "../../utils/temporal";
 import { formatBytes } from "../../utils/units";
 import { middleTruncate } from "../../utils/middleTruncate";
@@ -16,8 +17,7 @@ import { ExpandableCard } from "../settings/ExpandableCard";
 import { CrossLinkBadge } from "./CrossLinkBadge";
 
 interface VaultCardProps {
-  vault: VaultInfo;
-  cloudProvider?: string;
+  vault: Vault;
   dark: boolean;
   expanded: boolean;
   onToggle: () => void;
@@ -26,7 +26,6 @@ interface VaultCardProps {
 
 export function VaultCard({
   vault,
-  cloudProvider,
   dark,
   expanded,
   onToggle,
@@ -34,16 +33,16 @@ export function VaultCard({
 }: Readonly<VaultCardProps>) {
   // Use ListChunks data (fans out to leader nodes, authoritative per chunk).
   // ListVaults stats rely on periodic peer broadcasts and flicker.
-  const { data: chunks } = useChunks(encode(vault.id));
+  const { data: chunks } = useChunks(vault.id);
   const chunkCount = chunks?.length ?? 0;
   const recordCount = (chunks ?? []).reduce((sum, c) => sum + Number(c.recordCount), 0);
 
   return (
     <ExpandableCard
-      key={encode(vault.id)}
-      id={vault.name || encode(vault.id)}
-      typeBadge={vault.type}
-      secondaryBadge={cloudProvider}
+      key={vault.id}
+      id={vault.displayLabel}
+      typeBadge={vault.typeLabel}
+      secondaryBadge={vault.isCloudBacked ? "cloud" : undefined}
       dark={dark}
       expanded={expanded}
       onToggle={onToggle}
@@ -66,8 +65,8 @@ export function VaultCard({
         </span>
       }
     >
-      <VaultActions vaultId={encode(vault.id)} dark={dark} />
-      <ChunkList vaultId={encode(vault.id)} dark={dark} />
+      <VaultActions vaultId={vault.id} dark={dark} />
+      <ChunkList vaultId={vault.id} dark={dark} />
     </ExpandableCard>
   );
 }

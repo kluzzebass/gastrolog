@@ -34,22 +34,12 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
   const nodeInfo = node?.cluster ?? null;
   const liveNodeIds: ReadonlySet<EntityID> = new Set(registry.all.filter((n) => n.isLive).map((n) => n.id));
 
-  // Build vault ID → "cloud" map from VaultConfig.cloudServiceId.
-  const cloudProviders = new Map<string, string>();
-  if (config) {
-    for (const v of config.vaults) {
-      if (encode(v.cloudServiceId)) {
-        cloudProviders.set(encode(v.id), "cloud");
-      }
-    }
-  }
-
   // Data for all entity types, filtered by this node.
   const { data: allVaults } = useVaults();
   const allIngesters = useIngesters();
   const { jobs } = useWatchJobs({ onError: toastError });
 
-  const vaults = (allVaults ?? []).filter((v) => (encode(v.nodeId) || localNodeId) === nodeId);
+  const vaults = allVaults.filter((v) => v.isOn(nodeIdTyped, registry.localNodeId));
   const ingesters = allIngesters.filter((i) => i.isEligibleOn(nodeIdTyped));
   const nodeJobs = jobs.filter((j) => (encode(j.nodeId) || localNodeId) === nodeId);
   const tasks = nodeJobs.filter((j) => j.kind === JobKind.TASK);
@@ -77,21 +67,17 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
         ) : (
           <div className="flex flex-col gap-2">
             {[...vaults]
-              .sort((a, b) => (a.name || encode(a.id)).localeCompare(b.name || encode(b.id)))
-              .map((vault) => {
-                const vid = encode(vault.id);
-                return (
+              .sort((a, b) => a.displayLabel.localeCompare(b.displayLabel))
+              .map((vault) => (
                 <VaultCard
-                  key={vid}
+                  key={vault.id}
                   vault={vault}
-                  cloudProvider={cloudProviders.get(vid)}
                   dark={dark}
-                  expanded={!!expandedVaults[vid]}
-                  onToggle={() => setExpandedVaults((prev) => ({ ...prev, [vid]: !prev[vid] }))}
-                  onOpenSettings={onOpenSettings ? () => onOpenSettings("vaults", vault.name || vid) : undefined}
+                  expanded={!!expandedVaults[vault.id]}
+                  onToggle={() => setExpandedVaults((prev) => ({ ...prev, [vault.id]: !prev[vault.id] }))}
+                  onOpenSettings={onOpenSettings ? () => onOpenSettings("vaults", vault.displayLabel) : undefined}
                 />
-                );
-              })}
+              ))}
           </div>
         )}
       </Section>

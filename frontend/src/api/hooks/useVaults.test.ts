@@ -18,7 +18,7 @@ beforeEach(() => {
 });
 
 describe("useVaults", () => {
-  test("fetches vault list", async () => {
+  test("fetches vault list and wraps in Vault models", async () => {
     const vaults = [
       new VaultInfo({ id: decode("v1"), name: "logs", type: "file", enabled: true }),
       new VaultInfo({ id: decode("v2"), name: "metrics", type: "file", enabled: false }),
@@ -27,9 +27,9 @@ describe("useVaults", () => {
 
     const { result } = renderHook(() => useVaults(), { wrapper: wrapper() });
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toHaveLength(2);
-    expect(result.current.data?.[0]?.name).toBe("logs");
+    await waitFor(() => expect(result.current.data.length).toBe(2));
+    expect(result.current.data[0]?.name).toBe("logs");
+    expect(result.current.data[0]?.typeLabel).toBe("file");
   });
 });
 
