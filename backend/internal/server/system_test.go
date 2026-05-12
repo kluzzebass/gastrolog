@@ -209,6 +209,136 @@ func TestDeleteVaultNotFound(t *testing.T) {
 	}
 }
 
+// TestPutVaultRejectsTypeChange covers the gastrolog-3ul0s guard: changing
+// `type` on an existing vault would leave the running orchestrator on the
+// old manager while the next restart rebuilds with the new type, silently
+// reinterpreting on-disk layout. PutVault must reject.
+func TestPutVaultRejectsTypeChange(t *testing.T) {
+	client, _, _ := newConfigTestSetup(t)
+	ctx := context.Background()
+	vaultID := glid.New()
+
+	_, err := client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+		Config: &gastrologv1.VaultConfig{
+			Id:      vaultID.Bytes(),
+			Name:    "v",
+			Enabled: true,
+			Type:    gastrologv1.VaultType_VAULT_TYPE_MEMORY,
+		},
+	}))
+	if err != nil {
+		t.Fatalf("initial PutVault: %v", err)
+	}
+
+	// Same id, different type. Must be rejected.
+	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+		Config: &gastrologv1.VaultConfig{
+			Id:      vaultID.Bytes(),
+			Name:    "v",
+			Enabled: true,
+			Type:    gastrologv1.VaultType_VAULT_TYPE_FILE,
+		},
+	}))
+	if err == nil {
+		t.Fatal("expected FailedPrecondition for vault-type change, got nil")
+	}
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Errorf("expected FailedPrecondition, got %v: %v", connect.CodeOf(err), err)
+	}
+}
+
+// TestPutVaultRejectsCloudServiceIDChange covers the gastrolog-3ul0s guard
+// for the cloud-binding field: swapping cloud_service_id would orphan blobs
+// in the original bucket while pointing the manager at a different one.
+func TestPutVaultRejectsCloudServiceIDChange(t *testing.T) {
+	client, _, _ := newConfigTestSetup(t)
+	ctx := context.Background()
+	vaultID := glid.New()
+	cloudA := glid.New()
+	cloudB := glid.New()
+
+	_, err := client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+		Config: &gastrologv1.VaultConfig{
+			Id:             vaultID.Bytes(),
+			Name:           "cloud-v",
+			Enabled:        true,
+			Type:           gastrologv1.VaultType_VAULT_TYPE_FILE,
+			CloudServiceId: cloudA.Bytes(),
+		},
+	}))
+	if err != nil {
+		t.Fatalf("initial PutVault: %v", err)
+	}
+
+	// Swap cloud_service_id. Must be rejected.
+	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+		Config: &gastrologv1.VaultConfig{
+			Id:             vaultID.Bytes(),
+			Name:           "cloud-v",
+			Enabled:        true,
+			Type:           gastrologv1.VaultType_VAULT_TYPE_FILE,
+			CloudServiceId: cloudB.Bytes(),
+		},
+	}))
+	if err == nil {
+		t.Fatal("expected FailedPrecondition for cloud_service_id change, got nil")
+	}
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Errorf("expected FailedPrecondition, got %v: %v", connect.CodeOf(err), err)
+	}
+
+	// Also reject add (nil → A) and remove (A → nil) — both are shape
+	// changes; a non-cloud vault is structurally different from a
+	// cloud-backed one even though the proto type stays VAULT_TYPE_FILE.
+	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+		Config: &gastrologv1.VaultConfig{
+			Id:      vaultID.Bytes(),
+			Name:    "cloud-v",
+			Enabled: true,
+			Type:    gastrologv1.VaultType_VAULT_TYPE_FILE,
+			// CloudServiceId omitted → would remove cloud binding.
+		},
+	}))
+	if err == nil || connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Errorf("expected FailedPrecondition for cloud_service_id removal, got %v", err)
+	}
+}
+
+// TestPutVaultAllowsTuningChanges confirms the guard is precise: legitimate
+// tuning fields (name, enabled, rotation/retention bindings) remain mutable
+// on an existing vault. Without this, the guard regression would be hidden
+// behind the shape-change tests.
+func TestPutVaultAllowsTuningChanges(t *testing.T) {
+	client, _, _ := newConfigTestSetup(t)
+	ctx := context.Background()
+	vaultID := glid.New()
+
+	_, err := client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+		Config: &gastrologv1.VaultConfig{
+			Id:      vaultID.Bytes(),
+			Name:    "original",
+			Enabled: true,
+			Type:    gastrologv1.VaultType_VAULT_TYPE_MEMORY,
+		},
+	}))
+	if err != nil {
+		t.Fatalf("initial PutVault: %v", err)
+	}
+
+	// Rename + toggle enabled — same shape, must succeed.
+	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+		Config: &gastrologv1.VaultConfig{
+			Id:      vaultID.Bytes(),
+			Name:    "renamed",
+			Enabled: false,
+			Type:    gastrologv1.VaultType_VAULT_TYPE_MEMORY,
+		},
+	}))
+	if err != nil {
+		t.Fatalf("tuning-only PutVault rejected: %v", err)
+	}
+}
+
 func TestPauseResumeVaultRPC(t *testing.T) {
 	client, _, orch := newConfigTestSetup(t)
 	ctx := context.Background()

@@ -415,9 +415,11 @@ export function VaultSettingsCard({
 
         {/* Storage shape edit — same form the Add flow uses, with type
             and cloud binding locked because the backend rejects those
-            mutations on existing vaults (gastrolog-4k5mg). To change
-            type or cloud binding, create a new vault and migrate via
-            retention routing. */}
+            mutations on existing vaults (gastrolog-3ul0s). The Storage
+            Type selector is hidden entirely (no onTypeChange passed);
+            the Cloud Storage selector is disabled via cloudLocked. To
+            change type or cloud binding, create a new vault and migrate
+            via retention routing. */}
         <VaultStorageForm
           storage={edit.storage}
           dark={dark}

@@ -15,6 +15,43 @@ import (
 	"gastrolog/internal/system/raftfsm"
 )
 
+// checkVaultShapeImmutable rejects PutVault when an existing vault's shape
+// fields (type, cloud_service_id) would change. New vaults pass through —
+// the existing-vault lookup returns nil and we have nothing to compare.
+// See gastrolog-3ul0s for the failure mode this guards against.
+func checkVaultShapeImmutable(ctx context.Context, store system.Store, incoming system.VaultConfig) *connect.Error {
+	existing, err := store.GetVault(ctx, incoming.ID)
+	if err != nil {
+		return errInternal(err)
+	}
+	if existing == nil {
+		return nil // creating a new vault — no shape to preserve
+	}
+	if existing.Type != incoming.Type {
+		return connect.NewError(connect.CodeFailedPrecondition,
+			fmt.Errorf("vault type is immutable: cannot change %s → %s on existing vault %q (create a new vault and migrate)",
+				existing.Type, incoming.Type, incoming.Name))
+	}
+	if !cloudServiceIDEqual(existing.CloudServiceID, incoming.CloudServiceID) {
+		return connect.NewError(connect.CodeFailedPrecondition,
+			fmt.Errorf("vault cloud_service_id is immutable on existing vault %q: changing it would orphan blobs in the old bucket (create a new vault and migrate)",
+				incoming.Name))
+	}
+	return nil
+}
+
+// cloudServiceIDEqual compares two optional *glid.GLID values. Both nil and
+// both pointing at the same GLID are equal; everything else is a change.
+func cloudServiceIDEqual(a, b *glid.GLID) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}
+
 // PutVault creates or updates a vault.
 func (s *SystemServer) PutVault(
 	ctx context.Context,
@@ -41,6 +78,19 @@ func (s *SystemServer) PutVault(
 		return nil, errInternal(err)
 	}
 	if connErr := checkNameConflict("vault", vaultCfg.ID, vaultCfg.Name, vaults, func(v system.VaultConfig) (glid.GLID, string) { return v.ID, v.Name }); connErr != nil {
+		return nil, connErr
+	}
+
+	// Shape immutability: `type` and `cloud_service_id` determine *where*
+	// and *how* this vault's chunks are stored. Changing either on a vault
+	// with existing chunks would either reinterpret on-disk layout with
+	// the wrong manager (type swap) or orphan blobs in the old cloud
+	// bucket while pointing the new manager at an empty one (cloud-service
+	// swap). The running orchestrator's applyExistingVaultChanges only
+	// reloads filters / rotation / retention, so the change looks like a
+	// no-op in dev — until the next restart rebuilds the manager from the
+	// updated config. See gastrolog-3ul0s.
+	if connErr := checkVaultShapeImmutable(ctx, s.sysStore, vaultCfg); connErr != nil {
 		return nil, connErr
 	}
 

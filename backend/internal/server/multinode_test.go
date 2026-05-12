@@ -2385,6 +2385,58 @@ func TestMultiNode_GetIndexesRemote(t *testing.T) {
 	_ = resp.Msg.Sealed // proves the response was populated
 }
 
+// TestMultiNode_PutVaultRejectsShapeChange covers gastrolog-3ul0s through
+// the cluster forwarding path. The guard runs at the Raft leader; rejected
+// writes never replicate. We hit a follower node so the request goes
+// through the leader-routing interceptor before reaching PutVault.
+func TestMultiNode_PutVaultRejectsShapeChange(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"node-A", "node-B"})
+	ctx := context.Background()
+
+	vaultID := glid.New()
+
+	if _, err := h.configClient.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+		Config: &gastrologv1.VaultConfig{
+			Id:      vaultID.Bytes(),
+			Name:    "shape-v",
+			Enabled: true,
+			Type:    gastrologv1.VaultType_VAULT_TYPE_MEMORY,
+		},
+	})); err != nil {
+		t.Fatalf("initial PutVault: %v", err)
+	}
+
+	_, err := h.configClient.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+		Config: &gastrologv1.VaultConfig{
+			Id:      vaultID.Bytes(),
+			Name:    "shape-v",
+			Enabled: true,
+			Type:    gastrologv1.VaultType_VAULT_TYPE_FILE,
+		},
+	}))
+	if err == nil {
+		t.Fatal("expected FailedPrecondition for vault-type change across cluster, got nil")
+	}
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Errorf("expected FailedPrecondition, got %v: %v", connect.CodeOf(err), err)
+	}
+
+	// Verify the FSM still holds the original type — the rejected write
+	// must not have landed. (The in-process harness uses a single shared
+	// cfgStore across nodes, so one read is enough.)
+	stored, gErr := h.cfgStore.GetVault(ctx, vaultID)
+	if gErr != nil {
+		t.Fatalf("GetVault: %v", gErr)
+	}
+	if stored == nil {
+		t.Fatal("vault missing after rejected update")
+	}
+	if stored.Type != system.VaultTypeMemory {
+		t.Errorf("vault type = %v after rejected change, want MEMORY", stored.Type)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Tests — Ingester stats across cluster nodes
 // ---------------------------------------------------------------------------
