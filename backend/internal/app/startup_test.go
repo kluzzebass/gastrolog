@@ -294,7 +294,7 @@ func TestWaitForServerSettings_ContextCancel(t *testing.T) {
 // loadLocalConfig
 // ---------------------------------------------------------------------------
 
-func TestLoadLocalConfig_JoinAddrReturnsNil(t *testing.T) {
+func TestLoadLocalConfig_JoinAddrFreshJoinReturnsNil(t *testing.T) {
 	t.Parallel()
 	cfg := RunConfig{JoinAddr: "leader:9876", ConfigType: "raft", ClusterAddr: ""}
 
@@ -303,7 +303,63 @@ func TestLoadLocalConfig_JoinAddrReturnsNil(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if appCfg != nil || fromFSM {
-		t.Fatalf("expected nil config and fromFSM=false when joining")
+		t.Fatalf("expected nil config and fromFSM=false on fresh join (no local FSM state)")
+	}
+}
+
+// TestLoadLocalConfig_JoinAddrRestartUsesLocalFSM covers gastrolog-1gh5s.
+// A pod restart (K8s rolling upgrade, reschedule, etc.) is indistinguishable
+// from a fresh join at the pod level — JoinAddr is set in both cases — but
+// the restart case has an already-populated local FSM that was just restored
+// from snapshot. Returning nil here would leave the orchestrator with
+// vaults=0 forever (snapshot restore does not fire NotifyVaultConfigPut),
+// so no vault-ctl Raft groups would ever be created on this node.
+func TestLoadLocalConfig_JoinAddrRestartUsesLocalFSM(t *testing.T) {
+	t.Parallel()
+	existingCfg := &system.Config{
+		Vaults: []system.VaultConfig{
+			{ID: glid.New(), Name: "hot-vault", Type: system.VaultTypeFile},
+			{ID: glid.New(), Name: "warm-vault", Type: system.VaultTypeFile},
+		},
+	}
+	store := &startupStub{
+		cfg:      existingCfg,
+		settings: system.ServerSettings{Auth: system.AuthConfig{JWTSecret: "already-bootstrapped"}},
+	}
+	cfg := RunConfig{JoinAddr: "leader:9876", ConfigType: "raft"}
+
+	appCfg, fromFSM, err := loadLocalConfig(context.Background(), discardLogger(), cfg, store, nil, "node1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if appCfg == nil {
+		t.Fatal("expected local FSM config on restart of existing voter; got nil")
+	}
+	if !fromFSM {
+		t.Fatal("expected fromFSM=true on restart of existing voter")
+	}
+	if len(appCfg.Config.Vaults) != 2 {
+		t.Errorf("expected 2 vaults from local FSM, got %d", len(appCfg.Config.Vaults))
+	}
+}
+
+// TestLoadLocalConfig_JoinAddrRestartWithOnlyJWTUsesLocalFSM covers the case
+// where the local FSM has no vaults yet but is past the bootstrap point
+// (JWT secret is set). Still a restart, still uses local FSM.
+func TestLoadLocalConfig_JoinAddrRestartWithOnlyJWTUsesLocalFSM(t *testing.T) {
+	t.Parallel()
+	store := &startupStub{
+		cfg:      &system.Config{},
+		settings: system.ServerSettings{Auth: system.AuthConfig{JWTSecret: "already-bootstrapped"}},
+	}
+	cfg := RunConfig{JoinAddr: "leader:9876", ConfigType: "raft"}
+
+	appCfg, fromFSM, err := loadLocalConfig(context.Background(), discardLogger(), cfg, store, nil, "node1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if appCfg == nil || !fromFSM {
+		t.Fatalf("expected local FSM config (appCfg=%v, fromFSM=%v)", appCfg, fromFSM)
 	}
 }
 
