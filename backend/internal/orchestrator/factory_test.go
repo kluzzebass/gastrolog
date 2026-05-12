@@ -276,6 +276,63 @@ func TestApplyConfigIngesters(t *testing.T) {
 	}
 }
 
+// TestApplyConfigIngesterEligibility covers the cold-start eligibility gate
+// in applyIngester. The runtime path (app/dispatch.go shouldRunIngester) and
+// the cold-start path must agree, or AllNodes ingesters with a non-empty
+// NodeIDs list (typical legacy shape: NodeIDs holds the creator's node)
+// only start on the creator node after a cluster restart.
+func TestApplyConfigIngesterEligibility(t *testing.T) {
+	const localNode = "node-B"
+
+	factories := Factories{
+		IngesterTypes: map[string]IngesterRegistration{
+			"test": {Factory: func(id glid.GLID, params map[string]string, logger *slog.Logger) (Ingester, error) {
+				return &fakeIngester{}, nil
+			}},
+		},
+	}
+
+	tests := []struct {
+		name      string
+		allNodes  bool
+		nodeIDs   []string
+		wantStart bool
+	}{
+		{name: "all_nodes overrides legacy NodeIDs from another node", allNodes: true, nodeIDs: []string{"node-A"}, wantStart: true},
+		{name: "all_nodes with empty NodeIDs", allNodes: true, nodeIDs: nil, wantStart: true},
+		{name: "all_nodes with local node in NodeIDs", allNodes: true, nodeIDs: []string{localNode}, wantStart: true},
+		{name: "node-pinned to other node", allNodes: false, nodeIDs: []string{"node-A"}, wantStart: false},
+		{name: "node-pinned to local node", allNodes: false, nodeIDs: []string{localNode}, wantStart: true},
+		{name: "empty NodeIDs (legacy: match all)", allNodes: false, nodeIDs: nil, wantStart: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			orch := newTestOrch(t, Config{LocalNodeID: localNode})
+
+			ingID := glid.New()
+			cfg := &system.Config{
+				Ingesters: []system.IngesterConfig{{
+					ID:       ingID,
+					Type:     "test",
+					Enabled:  true,
+					AllNodes: tc.allNodes,
+					NodeIDs:  tc.nodeIDs,
+				}},
+			}
+
+			if err := orch.ApplyConfig(&system.System{Config: *cfg}, factories); err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+
+			_, got := orch.ingesters[ingID]
+			if got != tc.wantStart {
+				t.Errorf("ingester registered = %v, want %v", got, tc.wantStart)
+			}
+		})
+	}
+}
+
 func TestApplyConfigUnknownChunkManagerType(t *testing.T) {
 	orch := newTestOrch(t, Config{})
 

@@ -295,8 +295,12 @@ func (s *SystemServer) validateIngester(ingCfg system.IngesterConfig, existing [
 	if !ok {
 		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("unknown ingester type: %s", ingCfg.Type))
 	}
-	if len(ingCfg.NodeIDs) > 0 && !slices.Contains(ingCfg.NodeIDs, s.localNodeID) {
-		return nil // skip construction test — this node isn't in the allowed set
+	// Skip construction test only when this node isn't in the eligible set.
+	// AllNodes=true makes every node eligible regardless of NodeIDs, so honor
+	// that first; otherwise we'd skip validation on nodes that will run the
+	// ingester after a restart.
+	if !ingCfg.AllNodes && len(ingCfg.NodeIDs) > 0 && !slices.Contains(ingCfg.NodeIDs, s.localNodeID) {
+		return nil
 	}
 	params := ingCfg.Params
 	if s.factories.HomeDir != "" {
