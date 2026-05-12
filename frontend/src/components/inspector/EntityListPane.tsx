@@ -83,52 +83,36 @@ function useNodeContext() {
   };
 }
 
-/** Build vault ID → "cloud" map from VaultConfig.cloudServiceId. */
-function buildCloudProviderMap(config: { vaults: { id: Uint8Array; cloudServiceId: Uint8Array }[] } | undefined): Map<string, string> {
-  const map = new Map<string, string>();
-  if (!config) return map;
-  for (const v of config.vaults) {
-    if (encode(v.cloudServiceId)) {
-      map.set(encode(v.id), "cloud");
-    }
-  }
-  return map;
-}
-
 // ---- Vaults ----
 
 function VaultsList({ dark, onOpenSettings, expandTarget }: Readonly<{ dark: boolean; onOpenSettings?: (tab: string, entityName?: string) => void; expandTarget?: string | null }>) {
   const { data: vaults, isLoading } = useVaults();
-  const { data: config } = useConfig();
   const { expanded, toggle, add } = useToggleSet();
-
-  const cloudProviders = buildCloudProviderMap(config);
 
   // Auto-expand a vault when deep-linked from settings.
   const [consumedTarget, setConsumedTarget] = useState<string | null>(null);
-  if (expandTarget && expandTarget !== consumedTarget && vaults && vaults.length > 0) {
+  if (expandTarget && expandTarget !== consumedTarget && vaults.length > 0) {
     setConsumedTarget(expandTarget);
-    const match = vaults.find((v) => (v.name || encode(v.id)) === expandTarget);
-    if (match) add(encode(match.id));
+    const match = vaults.find((v) => v.displayLabel === expandTarget);
+    if (match) add(match.id);
   }
 
   if (isLoading) return <Loading dark={dark} />;
-  if (!vaults || vaults.length === 0) return <Empty dark={dark}>No vaults configured.</Empty>;
+  if (vaults.length === 0) return <Empty dark={dark}>No vaults configured.</Empty>;
 
-  const sorted = [...vaults].sort((a, b) => (a.name || encode(a.id)).localeCompare(b.name || encode(b.id)));
+  const sorted = [...vaults].sort((a, b) => a.displayLabel.localeCompare(b.displayLabel));
 
   return (
     <div className="flex flex-col gap-3">
       <EntityHeader title="Vaults" helpTopicId="inspector-vaults" dark={dark} />
       {sorted.map((vault) => (
         <VaultCard
-          key={encode(vault.id)}
+          key={vault.id}
           vault={vault}
-          cloudProvider={cloudProviders.get(encode(vault.id))}
           dark={dark}
-          expanded={expanded.has(encode(vault.id))}
-          onToggle={() => toggle(encode(vault.id))}
-          onOpenSettings={onOpenSettings ? () => onOpenSettings("vaults", vault.name || encode(vault.id)) : undefined}
+          expanded={expanded.has(vault.id)}
+          onToggle={() => toggle(vault.id)}
+          onOpenSettings={onOpenSettings ? () => onOpenSettings("vaults", vault.displayLabel) : undefined}
         />
       ))}
     </div>

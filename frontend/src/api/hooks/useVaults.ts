@@ -3,11 +3,20 @@ import { vaultClient, systemClient } from "../client";
 import { VaultInfo, ChunkMeta, GetStatsResponse } from "../gen/gastrolog/v1/vault_pb";
 import { VaultConfig } from "../gen/gastrolog/v1/system_pb";
 import { protoSharing, protoArraySharing } from "./protoSharing";
-import { useSystemMutation } from "./useSystem";
+import { useSystemMutation, useConfig } from "./useSystem";
 import { decode } from "../glid";
+import { Vault } from "../model/vault";
+import { type EntityID, idFromBytes } from "../model/id";
 
-export function useVaults() {
-  return useQuery({
+/**
+ * Returns the cluster's vaults as model instances. Joins the runtime
+ * VaultInfo overlay (from ListVaults — chunk/record counts, current
+ * placement nodeId) with the durable VaultConfig (from GetSystem — typed
+ * enum, cloud-service binding, retention rules). Either side may be
+ * missing during transient states; the Vault constructor handles both.
+ */
+export function useVaults(): { data: Vault[]; isLoading: boolean } {
+  const { data: infos, isLoading } = useQuery({
     queryKey: ["vaults"],
     queryFn: async () => {
       const response = await vaultClient.listVaults({});
@@ -16,6 +25,15 @@ export function useVaults() {
     structuralSharing: protoArraySharing(VaultInfo.equals),
     staleTime: 60_000, // push-invalidated by WatchConfig on config changes
   });
+  const { data: config } = useConfig();
+
+  const configById = new Map<EntityID, VaultConfig>();
+  for (const c of config?.vaults ?? []) {
+    configById.set(idFromBytes(c.id), c);
+  }
+
+  const data = (infos ?? []).map((info) => new Vault(info, configById.get(idFromBytes(info.id)) ?? null));
+  return { data, isLoading };
 }
 
 export function useVault(id: string) {

@@ -4,14 +4,14 @@ import {
   FieldExplorer,
   VaultButton,
 } from "./Sidebar";
-import type { VaultInfo } from "../api/gen/gastrolog/v1/vault_pb";
+import type { Vault } from "../api/model/vault";
 import type { FieldSummary } from "../utils";
 import type { ResizeProps } from "../hooks/usePanelResize";
 import { useThemeClass } from "../hooks/useThemeClass";
 import { SEVERITY_LEVELS, SEVERITIES } from "../lib/severity";
 import { LoadingPlaceholder } from "./LoadingPlaceholder";
 import { encode } from "../api/glid";
-import { idFromBytes } from "../api/model/id";
+import { EMPTY_ID } from "../api/model/id";
 
 interface SearchSidebarProps {
   dark: boolean;
@@ -26,7 +26,7 @@ interface SearchSidebarProps {
   timeRange: string;
   onTimeRangeChange: (range: string) => void;
   onCustomRange: (start: Date, end: Date) => void;
-  vaults: VaultInfo[] | undefined;
+  vaults: Vault[] | undefined;
   vaultsLoading: boolean;
   statsLoading: boolean;
   totalRecords: bigint;
@@ -121,16 +121,16 @@ export function SearchSidebar({
             {vaultsLoading ? (
               <LoadingPlaceholder dark={dark} className="px-2.5 py-1.5" />
             ) : (
-              vaults?.toSorted((a, b) => (a.name || encode(a.id)).localeCompare(b.name || encode(b.id))).map((vault) => (
+              vaults?.toSorted((a, b) => a.displayLabel.localeCompare(b.displayLabel)).map((vault) => (
                 <VaultButton
-                  key={encode(vault.id)}
-                  label={vault.name || encode(vault.id)}
+                  key={vault.id}
+                  label={vault.displayLabel}
                   count={vault.recordCount.toLocaleString()}
-                  active={selectedVault === encode(vault.id)}
-                  onClick={() => onVaultSelect(encode(vault.id))}
+                  active={selectedVault === vault.id}
+                  onClick={() => onVaultSelect(vault.id)}
                   dark={dark}
-                  nodeId={idFromBytes(vault.nodeId)}
-                  remote={vault.remote}
+                  nodeId={vault.placementNodeId(EMPTY_ID)}
+                  remote={vault.isRemote}
                 />
               ))
             )}
