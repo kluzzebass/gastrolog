@@ -220,6 +220,14 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// handlers, the vault announcer, etc. See gastrolog-1e5ke.
 	shutdownPhase := lifecycle.New()
 
+	// Async reconciler for SetIngesterAlive Raft applies. Decouples the
+	// orchestrator's runIngester goroutine from Raft latency and retries
+	// transient failures (gastrolog-1ox8z). Without this, an unlucky
+	// startup race drops the apply, the error is silently swallowed, and
+	// the FSM alive map stays empty for the lifetime of the goroutine.
+	aliveReconciler := NewAliveReconciler(cfgStore, nodeID, logger)
+	go aliveReconciler.Run(ctx)
+
 	orch, err := orchestrator.New(orchestrator.Config{
 		Logger:            logger,
 		MaxConcurrentJobs: loadMaxConcurrentJobs(ctx, cfgStore),
@@ -228,13 +236,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		Alerts:            alertCollector,
 		Phase:             shutdownPhase,
 		OnIngesterAlive: func(ingesterID glid.GLID, alive bool) {
-			// Bounded timeout so that if quorum is lost during shutdown, the
-			// orchestrator's Stop path doesn't hang 10s per running ingester
-			// waiting for a raft apply that can never land. Normal case
-			// (quorum intact) completes in milliseconds.
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-			_ = cfgStore.SetIngesterAlive(ctx, ingesterID, nodeID, alive)
+			aliveReconciler.Enqueue(ingesterID, alive)
 		},
 		OnIngesterCheckpoint: func(ingesterID glid.GLID, data []byte) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
