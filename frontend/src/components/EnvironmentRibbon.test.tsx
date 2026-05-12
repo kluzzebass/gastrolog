@@ -23,7 +23,7 @@ describe("EnvironmentRibbon", () => {
     const { getByText } = render(
       <EnvironmentRibbon label="Production" color="#c4302b" />,
     );
-    const stripe = getByText("Production") as HTMLElement;
+    const stripe = (getByText("Production").parentElement) as HTMLElement;
     // happy-dom / jsdom may serialize hex vs rgb() differently; both forms
     // are valid as long as the operator's input reached the style attribute.
     expect(stripe.getAttribute("style") ?? "").toContain("#c4302b");
@@ -33,7 +33,7 @@ describe("EnvironmentRibbon", () => {
     const { getByText } = render(
       <EnvironmentRibbon label="K8s" color="red" />,
     );
-    const stripe = getByText("K8s") as HTMLElement;
+    const stripe = (getByText("K8s").parentElement) as HTMLElement;
     expect(stripe.style.color).toBe("white");
   });
 
@@ -41,7 +41,7 @@ describe("EnvironmentRibbon", () => {
     const { getByText } = render(
       <EnvironmentRibbon label="Staging" color="yellow" />,
     );
-    const stripe = getByText("Staging") as HTMLElement;
+    const stripe = (getByText("Staging").parentElement) as HTMLElement;
     expect(stripe.style.color).toBe("black");
   });
 
@@ -49,7 +49,7 @@ describe("EnvironmentRibbon", () => {
     const { getByText } = render(
       <EnvironmentRibbon label="Wat" color="not-a-real-color" />,
     );
-    const stripe = getByText("Wat") as HTMLElement;
+    const stripe = (getByText("Wat").parentElement) as HTMLElement;
     expect(stripe.style.color).toBe("white");
   });
 
@@ -65,7 +65,7 @@ describe("EnvironmentRibbon", () => {
     const { getByText } = render(
       <EnvironmentRibbon label="Staging" color="lime" />,
     );
-    const stripe = getByText("Staging") as HTMLElement;
+    const stripe = (getByText("Staging").parentElement) as HTMLElement;
     expect(stripe.title).toBe("Environment: Staging");
   });
 });

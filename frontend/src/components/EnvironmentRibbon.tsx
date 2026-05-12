@@ -19,17 +19,25 @@ export function EnvironmentRibbon({ label, color }: Readonly<EnvironmentRibbonPr
   if (!label) return null;
   const textColor = pickContrastingTextColor(color);
   return (
-    <div className="fixed bottom-0 left-0 w-32 h-32 overflow-hidden pointer-events-none z-50 select-none">
+    <div className="fixed bottom-0 left-0 w-72 h-72 overflow-hidden pointer-events-none z-50 select-none">
       <div
-        className="absolute -left-10 bottom-7 w-44 text-center font-display font-bold text-[0.85em] py-1 tracking-wider uppercase shadow-md"
+        className="absolute -left-14 bottom-10 w-96 text-center font-display font-black text-xl py-2 tracking-wider uppercase shadow-lg"
         style={{
-          transform: "rotate(45deg)",
+          transform: "rotate(30deg)",
           backgroundColor: color,
           color: textColor,
         }}
         title={`Environment: ${label}`}
       >
-        {label}
+        {/* The stripe's geometric center is not the same as the visible
+            diagonal's midpoint (the clip is asymmetric: ~30px past the left
+            edge of the container vs ~32px past the bottom edge, and the
+            visible exit point on the bottom edge is at x≈244, not 384).
+            Shifting the label -16px along the stripe's local x-axis lands
+            it on the visible midpoint. */}
+        <span className="inline-block" style={{ transform: "translateX(-16px)" }}>
+          {label}
+        </span>
       </div>
     </div>
   );
