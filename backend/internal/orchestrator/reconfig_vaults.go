@@ -1401,6 +1401,51 @@ func wireVaultFSMOnUpload(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 	})
 }
 
+// RefreshVaultCtlMembers re-derives the desired vault-ctl Raft group member
+// list from the current cluster node list and applies it to every local
+// vault's leader manager. The next reconcile pass on each vault-ctl Raft
+// leader then AddVoter's new members and RemoveServer's departed ones.
+//
+// Called by the config dispatcher on NotifyNodeConfigPut / NotifyNodeConfigDeleted
+// so cluster scale-out and scale-in propagate into per-vault Raft groups.
+// Without this, vault-ctl groups stay frozen at their bootstrap membership
+// and a freshly-joined node loops forever in pre-vote campaigns rejected
+// by the original members with "node is not in configuration", blocking
+// chunk catchup and RF expansion. See gastrolog-4zy8a.
+//
+// Partial resolution short-circuits: if any cluster node's address can't
+// be resolved (transient — the cluster Raft config hasn't caught up yet),
+// the refresh is skipped rather than passing a partial set to the
+// reconciler, which would otherwise RemoveServer the missing entries.
+// The next NotifyNodeConfigPut retries once the address is in cluster Raft.
+func (o *Orchestrator) RefreshVaultCtlMembers(clusterNodes []system.NodeConfig, factories Factories) {
+	if o.vaultCtlLeaders == nil {
+		return
+	}
+	members := o.buildVaultRaftMembers(clusterNodes, factories)
+	if len(members) == 0 {
+		// Single-node mode (nil NodeAddressResolver) or empty node list —
+		// no vault-ctl groups to refresh.
+		return
+	}
+	if len(members) < len(clusterNodes) {
+		o.logger.Debug("refresh vault-ctl members: not all nodes resolvable, skipping",
+			"have", len(members), "want", len(clusterNodes))
+		return
+	}
+
+	o.mu.RLock()
+	vaultIDs := make([]glid.GLID, 0, len(o.vaults))
+	for id := range o.vaults {
+		vaultIDs = append(vaultIDs, id)
+	}
+	o.mu.RUnlock()
+
+	for _, vaultID := range vaultIDs {
+		o.vaultCtlLeaders.SetDesiredMembers(vaultID, members)
+	}
+}
+
 // buildVaultRaftMembers returns ALL cluster nodes as Raft members for a vault
 // control-plane Raft group. Every node participates regardless of which vaults
 // it stores — nodes without local instance data still replicate instance metadata.

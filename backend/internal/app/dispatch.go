@@ -45,6 +45,7 @@ type orchActions interface {
 	UpdateMaxConcurrentJobs(n int) error
 	MaxConcurrentJobs() int
 	FindLocalVaultInstance(vaultID glid.GLID) *orchestrator.VaultInstance
+	RefreshVaultCtlMembers(clusterNodes []system.NodeConfig, f orchestrator.Factories)
 }
 
 // ManagedFileHandler handles managed file lifecycle events from the FSM.
@@ -104,7 +105,14 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 	case raftfsm.NotifyClusterTLSPut:
 		d.handleClusterTLSPut(ctx)
 	case raftfsm.NotifyNodeConfigPut, raftfsm.NotifyNodeConfigDeleted:
-		// No orchestrator side effects; configSignal fires below.
+		// Cluster membership changed — refresh every local vault's
+		// vault-ctl Raft group desired-member set. The vault-ctl leader's
+		// reconcile pass (next tick, or sooner on a leader transition)
+		// then issues AddVoter / RemoveServer to converge the per-group
+		// configuration. Without this, vault-ctl groups stay frozen at
+		// bootstrap membership and a scaled-in node loops forever in
+		// pre-vote campaigns. See gastrolog-4zy8a.
+		d.handleNodeConfigChange(ctx)
 	case raftfsm.NotifyManagedFilePut:
 		if d.managedFileHandler != nil {
 			d.managedFileHandler.OnPut(ctx, n.ID)
@@ -619,16 +627,26 @@ func (d *configDispatcher) updateInstanceRoleIfNeeded(ctx context.Context, vault
 	leaderNodeID := system.LeaderNodeID(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, vaultID); return p }(), nscs)
 	followerNodeIDs := system.FollowerNodeIDs(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, vaultID); return p }(), nscs)
 	shouldBeFollower := slices.Contains(followerNodeIDs, d.localNodeID)
-	if existing.IsFollower == shouldBeFollower {
-		return // role unchanged
-	}
-	existing.IsFollower = shouldBeFollower
-	// FollowerTargets are refreshed by the rotation sweep every 15s.
+	roleChanged := existing.IsFollower != shouldBeFollower
+
+	// Always refresh LeaderNodeID, even when this node's role is unchanged.
+	// The placement leader can transfer between two other nodes (e.g. an
+	// existing leader fails over to a different node) while this follower
+	// stays a follower. Without this refresh, the local instance's leader
+	// pointer freezes at the original leader and the lifecycle reconciler's
+	// RequestReplicaCatchup loops forever against a stale target that
+	// rejects every request with "not placement leader". See gastrolog-4zy8a.
 	if shouldBeFollower {
 		existing.LeaderNodeID = leaderNodeID
 	} else {
 		existing.LeaderNodeID = ""
 	}
+
+	if !roleChanged {
+		return
+	}
+	existing.IsFollower = shouldBeFollower
+	// FollowerTargets are refreshed by the rotation sweep every 15s.
 	d.logger.Info("dispatch: vault role updated in place",
 		"vault", vaultID,
 		"isFollower", shouldBeFollower)
@@ -683,4 +701,16 @@ func (d *configDispatcher) handleClusterTLSPut(ctx context.Context) {
 		}
 	}
 	d.logger.Info("dispatch: cluster TLS reloaded")
+}
+
+// handleNodeConfigChange reads the current cluster node list and refreshes
+// every local vault's vault-ctl Raft group desired-member set so the leader
+// manager's reconcile pass can AddVoter / RemoveServer the diff.
+func (d *configDispatcher) handleNodeConfigChange(ctx context.Context) {
+	nodes, err := d.cfgStore.ListNodes(ctx)
+	if err != nil {
+		d.logger.Error("dispatch: list nodes for vault-ctl membership refresh", "error", err)
+		return
+	}
+	d.orch.RefreshVaultCtlMembers(nodes, d.factories)
 }

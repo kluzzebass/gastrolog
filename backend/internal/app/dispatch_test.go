@@ -94,6 +94,8 @@ type mockOrch struct {
 	vaultDrainCalls        []glid.GLID                                       // vault IDs passed to DrainInstance
 	removeInstanceCalls   []glid.GLID                                       // vault IDs passed to RemoveVaultInstance
 	localInstanceExported func(vaultID glid.GLID) *orchestrator.VaultInstance // configurable return
+
+	refreshVaultCtlCalls [][]system.NodeConfig // node lists passed to RefreshVaultCtlMembers
 }
 
 func (m *mockOrch) ListVaults() []glid.GLID    { return m.vaults }
@@ -187,6 +189,12 @@ type stubCfgStore struct {
 	loadErr      error
 
 	ingesterAssignments map[glid.GLID]string // ingester ID → assigned node
+
+	nodes    []system.NodeConfig
+	nodesErr error
+
+	placements map[glid.GLID][]system.VaultPlacement
+	nscs       []system.NodeStorageConfig
 }
 
 func (s *stubCfgStore) GetVault(context.Context, glid.GLID) (*system.VaultConfig, error) {
@@ -215,6 +223,15 @@ func (s *stubCfgStore) GetIngesterAssignment(_ context.Context, id glid.GLID) (s
 }
 func (s *stubCfgStore) GetIngesterCheckpoint(context.Context, glid.GLID) ([]byte, error) {
 	return nil, nil
+}
+func (s *stubCfgStore) ListNodes(context.Context) ([]system.NodeConfig, error) {
+	return s.nodes, s.nodesErr
+}
+func (s *stubCfgStore) GetVaultPlacements(_ context.Context, vaultID glid.GLID) ([]system.VaultPlacement, error) {
+	return s.placements[vaultID], nil
+}
+func (s *stubCfgStore) ListNodeStorageConfigs(context.Context) ([]system.NodeStorageConfig, error) {
+	return s.nscs, nil
 }
 
 // noopIngester satisfies orchestrator.Ingester.
@@ -907,6 +924,135 @@ func (m *mockOrch) FindLocalVaultInstance(vaultID glid.GLID) *orchestrator.Vault
 	}
 	return nil
 }
+
+func (m *mockOrch) RefreshVaultCtlMembers(nodes []system.NodeConfig, _ orchestrator.Factories) {
+	m.refreshVaultCtlCalls = append(m.refreshVaultCtlCalls, nodes)
+}
+
+// gastrolog-4zy8a: every cluster membership change (NodeConfig add/remove)
+// must propagate into per-vault vault-ctl Raft groups via RefreshVaultCtlMembers.
+// Without this, vault-ctl groups stay frozen at bootstrap membership and
+// scaled-in nodes loop forever in pre-vote campaigns.
+func TestHandle_NodeConfigChange_RefreshesVaultCtlMembers(t *testing.T) {
+	t.Parallel()
+
+	nodes := []system.NodeConfig{
+		{ID: glid.New(), Name: "node-a"},
+		{ID: glid.New(), Name: "node-b"},
+		{ID: glid.New(), Name: "node-c"},
+	}
+
+	t.Run("put_refreshes_with_current_node_list", func(t *testing.T) {
+		t.Parallel()
+		h := &captureHandler{}
+		mo := &mockOrch{}
+		d := newTestDispatcher(mo, &stubCfgStore{nodes: nodes}, h)
+
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyNodeConfigPut, ID: nodes[0].ID})
+
+		if len(mo.refreshVaultCtlCalls) != 1 {
+			t.Fatalf("expected 1 RefreshVaultCtlMembers call, got %d", len(mo.refreshVaultCtlCalls))
+		}
+		if got := len(mo.refreshVaultCtlCalls[0]); got != 3 {
+			t.Fatalf("expected 3 nodes in refresh payload, got %d", got)
+		}
+	})
+
+	t.Run("delete_also_refreshes", func(t *testing.T) {
+		t.Parallel()
+		h := &captureHandler{}
+		mo := &mockOrch{}
+		d := newTestDispatcher(mo, &stubCfgStore{nodes: nodes[:2]}, h)
+
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyNodeConfigDeleted, ID: nodes[2].ID})
+
+		if len(mo.refreshVaultCtlCalls) != 1 {
+			t.Fatalf("expected 1 RefreshVaultCtlMembers call on delete, got %d", len(mo.refreshVaultCtlCalls))
+		}
+		if got := len(mo.refreshVaultCtlCalls[0]); got != 2 {
+			t.Fatalf("expected 2 nodes after delete, got %d", got)
+		}
+	})
+
+	t.Run("list_error_logs_and_skips", func(t *testing.T) {
+		t.Parallel()
+		h := &captureHandler{}
+		mo := &mockOrch{}
+		d := newTestDispatcher(mo, &stubCfgStore{nodesErr: errors.New("store down")}, h)
+
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyNodeConfigPut, ID: nodes[0].ID})
+
+		if len(mo.refreshVaultCtlCalls) != 0 {
+			t.Fatalf("expected no refresh on list error, got %d", len(mo.refreshVaultCtlCalls))
+		}
+		if !h.hasMessage("dispatch: list nodes for vault-ctl membership refresh") {
+			t.Fatal("expected error log for ListNodes failure")
+		}
+	})
+}
+
+// gastrolog-4zy8a: when the placement leader transfers but this node stays
+// a follower, the local VaultInstance.LeaderNodeID must be refreshed so the
+// lifecycle reconciler's RequestReplicaCatchup targets the new leader
+// instead of looping forever against the old (stale) one.
+func TestHandle_PlacementsSet_RefreshesLeaderPointerWhenRoleUnchanged(t *testing.T) {
+	t.Parallel()
+
+	vaultID := glid.New()
+	oldLeaderID := glid.New().String()
+	newLeaderID := glid.New().String()
+	localID := glid.New().String()
+
+	// Storage IDs as real GLIDs (placements store them as base32 strings).
+	oldLeaderStorage := glid.New()
+	newLeaderStorage := glid.New()
+	localStorage := glid.New()
+
+	nscs := []system.NodeStorageConfig{
+		{NodeID: oldLeaderID, FileStorages: []system.FileStorage{{ID: oldLeaderStorage, StorageClass: 1}}},
+		{NodeID: newLeaderID, FileStorages: []system.FileStorage{{ID: newLeaderStorage, StorageClass: 1}}},
+		{NodeID: localID, FileStorages: []system.FileStorage{{ID: localStorage, StorageClass: 1}}},
+	}
+
+	// New placement: new leader is on newLeaderID; local stays a follower.
+	placements := []system.VaultPlacement{
+		{StorageID: newLeaderStorage.String(), Leader: true},
+		{StorageID: localStorage.String(), Leader: false},
+	}
+
+	// Existing in-memory vault instance: still pointing at the OLD leader.
+	existing := &orchestrator.VaultInstance{
+		VaultID:      vaultID,
+		IsFollower:   true,
+		LeaderNodeID: oldLeaderID,
+	}
+
+	h := &captureHandler{}
+	mo := &mockOrch{
+		localInstanceExported: func(id glid.GLID) *orchestrator.VaultInstance {
+			if id == vaultID {
+				return existing
+			}
+			return nil
+		},
+	}
+	d := newTestDispatcher(mo, &stubCfgStore{
+		vault:      &system.VaultConfig{ID: vaultID, Enabled: true, Type: system.VaultTypeFile, StorageClass: 1},
+		nscs:       nscs,
+		placements: map[glid.GLID][]system.VaultPlacement{vaultID: placements},
+	}, h)
+	d.localNodeID = localID
+
+	d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPlacementsSet, ID: vaultID})
+
+	if existing.LeaderNodeID != newLeaderID {
+		t.Fatalf("LeaderNodeID not refreshed: want %q, got %q", newLeaderID, existing.LeaderNodeID)
+	}
+	if !existing.IsFollower {
+		t.Fatal("IsFollower should still be true (role didn't change)")
+	}
+}
+
 
 func TestShouldRunIngesterParallelOnSelectedNode(t *testing.T) {
 	t.Parallel()

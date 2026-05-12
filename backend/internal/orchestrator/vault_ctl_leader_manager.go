@@ -179,24 +179,36 @@ func (m *vaultCtlLeaderManager) reconcile(vaultID glid.GLID, group *raftgroup.Gr
 	for _, srv := range desired {
 		desiredByID[srv.ID] = srv.Address
 	}
-	currentByID := make(map[hraft.ServerID]bool, len(current))
+	currentByID := make(map[hraft.ServerID]hraft.ServerAddress, len(current))
 	for _, srv := range current {
-		currentByID[srv.ID] = true
+		currentByID[srv.ID] = srv.Address
 	}
 
-	// Add missing voters.
+	// Add missing voters AND refresh stale addresses for known voters.
+	// AddVoter on hashicorp/raft is idempotent for an unchanged (ID, address)
+	// pair and rewrites the address when the ID is already present but the
+	// address differs — exactly what we need when a K8s pod gets a new IP
+	// after a rolling restart. Without this, a pod that came back at a new
+	// address stays unreachable to the vault-ctl Raft group forever because
+	// the configuration still points at the old IP. See gastrolog-4zy8a.
 	for _, srv := range desired {
-		if currentByID[srv.ID] {
+		curAddr, present := currentByID[srv.ID]
+		if present && curAddr == srv.Address {
 			continue
 		}
 		fut := group.Raft.AddVoter(srv.ID, srv.Address, 0, vaultMembershipChangeTimeout)
 		if err := fut.Error(); err != nil {
 			m.logger.Warn("AddVoter failed",
-				"vault", vaultID, "node", srv.ID, "error", err)
+				"vault", vaultID, "node", srv.ID, "addr", srv.Address, "error", err)
 			return // bail; next epoch will retry
 		}
-		m.logger.Info("added voter",
-			"vault", vaultID, "node", srv.ID, "addr", srv.Address)
+		if present {
+			m.logger.Info("voter address updated",
+				"vault", vaultID, "node", srv.ID, "old_addr", curAddr, "new_addr", srv.Address)
+		} else {
+			m.logger.Info("added voter",
+				"vault", vaultID, "node", srv.ID, "addr", srv.Address)
+		}
 	}
 
 	// Remove extras (voters or nonvoters that aren't in the desired set).

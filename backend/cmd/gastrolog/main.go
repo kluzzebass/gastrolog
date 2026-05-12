@@ -102,8 +102,9 @@ func main() {
 				ConfigType:  mustString(cmd, "config-type"),
 				ServerAddr:  mustString(cmd, "listen"),
 				NoAuth:      mustBool(cmd, "no-auth"),
-				ClusterAddr: mustString(cmd, "cluster-addr"),
-				JoinAddr:    mustString(cmd, "join-addr"),
+				ClusterAddr:      mustString(cmd, "cluster-addr"),
+				ClusterAdvertise: mustString(cmd, "cluster-advertise"),
+				JoinAddr:         mustString(cmd, "join-addr"),
 				JoinToken:   mustString(cmd, "join-token"),
 				NodeName:    mustString(cmd, "name"),
 				PprofAddr:   mustString(cmd, "pprof"),
@@ -135,6 +136,7 @@ func main() {
 	serverCmd.Flags().String("vaults", "", "vault storage directory (default: <home>/vaults)")
 	serverCmd.Flags().Bool("no-auth", false, "disable authentication (all requests treated as admin)")
 	serverCmd.Flags().String("cluster-addr", ":4566", "cluster gRPC listen address")
+	serverCmd.Flags().String("cluster-advertise", "", "address peers store and dial to reach this node (empty = use bind address); set to a stable DNS name in environments with rotating pod IPs (e.g. Kubernetes)")
 	serverCmd.Flags().String("join-addr", "", "leader's cluster address to join an existing cluster")
 	serverCmd.Flags().String("join-token", "", "join token for cluster enrollment (from cluster-init node)")
 	serverCmd.Flags().String("name", "", "node name (default: random petname)")

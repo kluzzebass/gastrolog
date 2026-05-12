@@ -40,6 +40,13 @@ metadata:
   namespace: gastrolog
 spec:
   clusterIP: None
+  # Publish DNS records for pods even before they pass the readiness probe.
+  # Pods depend on each other's DNS being resolvable during startup — Raft
+  # quorum can't form until peer addresses resolve, but readiness depends
+  # on Raft being functional. Without this flag, headless DNS only returns
+  # Ready pods, creating a chicken-and-egg deadlock on cluster bootstrap
+  # and on rolling restarts. See gastrolog-4zy8a.
+  publishNotReadyAddresses: true
   selector:
     app: gastrolog
   ports:
@@ -152,6 +159,12 @@ spec:
             - -c
             - |
               export GASTROLOG_NAME=$HOSTNAME
+              # Advertise via the per-pod headless-service DNS name so peers
+              # store a stable identifier and reconnect through DNS after
+              # the pod IP rotates on restart. Without this, the cluster
+              # Raft pins the original pod IP and a rolled pod is
+              # unreachable forever. See gastrolog-4zy8a.
+              export GASTROLOG_CLUSTER_ADVERTISE=$HOSTNAME.gastrolog-headless.gastrolog.svc.cluster.local:4566
               ord=${HOSTNAME##*-}
               if [ "$ord" = "0" ]; then
                 export GASTROLOG_BOOTSTRAP_TOKEN_SERVE_SECRET=$BOOTSTRAP_TOKEN_SHARED_SECRET

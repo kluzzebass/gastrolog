@@ -51,8 +51,9 @@ auto_cluster_addr() {
 if [ "$GASTROLOG_CLUSTER_ADDR" = "auto" ]; then
   GASTROLOG_CLUSTER_ADDR="$(auto_cluster_addr)"
 fi
-[ -n "$GASTROLOG_CLUSTER_ADDR" ] && args="$args --cluster-addr $GASTROLOG_CLUSTER_ADDR"
-[ -n "$GASTROLOG_NAME" ]         && args="$args --name $GASTROLOG_NAME"
+[ -n "$GASTROLOG_CLUSTER_ADDR" ]      && args="$args --cluster-addr $GASTROLOG_CLUSTER_ADDR"
+[ -n "$GASTROLOG_CLUSTER_ADVERTISE" ] && args="$args --cluster-advertise $GASTROLOG_CLUSTER_ADVERTISE"
+[ -n "$GASTROLOG_NAME" ]              && args="$args --name $GASTROLOG_NAME"
 [ -n "$GASTROLOG_JOIN_ADDR" ]    && args="$args --join-addr $GASTROLOG_JOIN_ADDR"
 [ -n "$GASTROLOG_JOIN_TOKEN" ]   && args="$args --join-token $GASTROLOG_JOIN_TOKEN"
 [ -n "$GASTROLOG_PPROF" ]        && args="$args --pprof $GASTROLOG_PPROF"

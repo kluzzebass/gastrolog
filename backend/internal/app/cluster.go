@@ -13,6 +13,7 @@ import (
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/cluster/tlsutil"
+	"gastrolog/internal/glid"
 	"gastrolog/internal/home"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/system"
@@ -56,6 +57,7 @@ func setupCluster(ctx context.Context, logger *slog.Logger, cfg RunConfig, hd ho
 
 	clusterSrv, err := cluster.New(cluster.Config{
 		ClusterAddr: cfg.ClusterAddr,
+		LocalAddr:   cfg.ClusterAdvertise,
 		NodeID:      nodeID,
 		TLS:         clusterTLS,
 		ByteMetrics: cluster.NewPeerByteMetrics(),
@@ -77,7 +79,7 @@ func enrollInCluster(ctx context.Context, logger *slog.Logger, cfg RunConfig, hd
 
 	logger.Info("enrolling with cluster leader", "leader_addr", cfg.JoinAddr)
 	enrollCtx, enrollCancel := context.WithTimeout(ctx, 30*time.Second)
-	result, err := cluster.Enroll(enrollCtx, cfg.JoinAddr, tokenSecret, caHash, nodeID, cfg.ClusterAddr)
+	result, err := cluster.Enroll(enrollCtx, cfg.JoinAddr, tokenSecret, caHash, nodeID, cfg.advertisedClusterAddr())
 	enrollCancel()
 	if err != nil {
 		return nil, fmt.Errorf("cluster enrollment: %w", err)
@@ -516,6 +518,7 @@ func makeEvictionHandler(
 // makeRemoveNodeFunc creates the callback for the RemoveNode RPC.
 func makeRemoveNodeFunc(
 	clusterSrv *cluster.Server,
+	cfgStore system.Store,
 	nodeID string,
 	logger *slog.Logger,
 ) func(ctx context.Context, targetNodeID string) error {
@@ -535,6 +538,20 @@ func makeRemoveNodeFunc(
 			return fmt.Errorf("remove server: %w", err)
 		}
 		logger.Info("node removed from cluster", "node_id", targetNodeID)
+
+		// Also delete the system-FSM NodeConfig so that downstream consumers
+		// (placement manager, RefreshVaultCtlMembers, ListNodes RPC) stop
+		// treating the removed node as a cluster member. Without this, a
+		// scale-down leaves stale NodeConfig entries that keep vault-ctl Raft
+		// groups attempting to talk to defunct pod IPs. See gastrolog-4zy8a.
+		if cfgStore != nil {
+			targetGLID, err := glid.Parse(targetNodeID)
+			if err != nil {
+				logger.Warn("delete node config: parse node ID failed", "node_id", targetNodeID, "error", err)
+			} else if err := cfgStore.DeleteNode(ctx, targetGLID); err != nil {
+				logger.Warn("delete node config failed", "node_id", targetNodeID, "error", err)
+			}
+		}
 
 		if evictConn != nil {
 			go func() {

@@ -774,3 +774,161 @@ func TestBuildVaultRaftMembers_EmptyNodes(t *testing.T) {
 		t.Fatalf("expected nil members for empty nodes, got %v", members)
 	}
 }
+
+// --- gastrolog-4zy8a: vault-ctl group membership must follow cluster growth ---
+
+// allResolveFactories returns a Factories whose NodeAddressResolver maps every
+// node ID to a deterministic "<id>:7946" address. Used by the
+// RefreshVaultCtlMembers tests below.
+func allResolveFactories() Factories {
+	return Factories{
+		NodeAddressResolver: func(nodeID string) (string, bool) {
+			return nodeID + ":7946", true
+		},
+	}
+}
+
+// TestRefreshVaultCtlMembers_FansOutToEveryLocalVault verifies that the
+// orchestrator updates the desired-member set on every registered vault when
+// the cluster node list changes. Without this, vault-ctl Raft groups stay
+// frozen at bootstrap membership and a scaled-in node loops forever in
+// pre-vote campaigns rejected with "node is not in configuration".
+func TestRefreshVaultCtlMembers_FansOutToEveryLocalVault(t *testing.T) {
+	t.Parallel()
+
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
+
+	vaultA := glid.New()
+	vaultB := glid.New()
+	orch.RegisterVault(&Vault{ID: vaultA})
+	orch.RegisterVault(&Vault{ID: vaultB})
+
+	clusterNodes := []system.NodeConfig{
+		{ID: glid.New(), Name: "node-1"},
+		{ID: glid.New(), Name: "node-2"},
+		{ID: glid.New(), Name: "node-3"},
+	}
+
+	orch.RefreshVaultCtlMembers(clusterNodes, allResolveFactories())
+
+	for _, id := range []glid.GLID{vaultA, vaultB} {
+		desired := orch.vaultCtlLeaders.desired.Get(id)
+		if len(desired) != 3 {
+			t.Fatalf("vault %s: expected 3 desired members, got %d", id, len(desired))
+		}
+	}
+}
+
+// TestRefreshVaultCtlMembers_GrowsExistingDesiredSet verifies the scale-out
+// scenario: a vault was registered when the cluster had N nodes, then the
+// cluster grew. The next refresh must include all N+M nodes.
+func TestRefreshVaultCtlMembers_GrowsExistingDesiredSet(t *testing.T) {
+	t.Parallel()
+
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
+
+	vaultID := glid.New()
+	orch.RegisterVault(&Vault{ID: vaultID})
+
+	// Initial cluster: 3 nodes.
+	initial := []system.NodeConfig{
+		{ID: glid.New(), Name: "node-1"},
+		{ID: glid.New(), Name: "node-2"},
+		{ID: glid.New(), Name: "node-3"},
+	}
+	orch.RefreshVaultCtlMembers(initial, allResolveFactories())
+
+	if got := len(orch.vaultCtlLeaders.desired.Get(vaultID)); got != 3 {
+		t.Fatalf("after initial refresh: expected 3 members, got %d", got)
+	}
+
+	// Scale out: add 2 more nodes.
+	scaled := append([]system.NodeConfig(nil), initial...)
+	scaled = append(scaled,
+		system.NodeConfig{ID: glid.New(), Name: "node-4"},
+		system.NodeConfig{ID: glid.New(), Name: "node-5"},
+	)
+	orch.RefreshVaultCtlMembers(scaled, allResolveFactories())
+
+	if got := len(orch.vaultCtlLeaders.desired.Get(vaultID)); got != 5 {
+		t.Fatalf("after scale-out refresh: expected 5 members, got %d", got)
+	}
+}
+
+// TestRefreshVaultCtlMembers_PartialResolutionSkips verifies that when one
+// or more cluster nodes aren't yet resolvable (e.g. their cluster-Raft
+// address hasn't propagated), the refresh is a no-op rather than passing a
+// partial set to the reconciler — which would otherwise RemoveServer the
+// missing entries. The next NotifyNodeConfigPut retries.
+func TestRefreshVaultCtlMembers_PartialResolutionSkips(t *testing.T) {
+	t.Parallel()
+
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
+
+	vaultID := glid.New()
+	orch.RegisterVault(&Vault{ID: vaultID})
+
+	// Seed a baseline desired set first.
+	baseline := []system.NodeConfig{
+		{ID: glid.New(), Name: "node-1"},
+		{ID: glid.New(), Name: "node-2"},
+	}
+	orch.RefreshVaultCtlMembers(baseline, allResolveFactories())
+
+	// Now refresh with 3 nodes but only 2 resolvable. Refresh must skip
+	// (leaving baseline intact), not write a 2-member set that omits the
+	// unresolvable third node.
+	expanded := []system.NodeConfig{
+		{ID: glid.New(), Name: "node-1"},
+		{ID: glid.New(), Name: "node-2"},
+		{ID: glid.New(), Name: "node-3-not-yet-in-raft"},
+	}
+	partial := Factories{
+		NodeAddressResolver: func(nodeID string) (string, bool) {
+			if nodeID == expanded[2].ID.String() {
+				return "", false
+			}
+			return nodeID + ":7946", true
+		},
+	}
+	orch.RefreshVaultCtlMembers(expanded, partial)
+
+	if got := len(orch.vaultCtlLeaders.desired.Get(vaultID)); got != 2 {
+		t.Fatalf("partial resolution should leave baseline (2) intact, got %d", got)
+	}
+}
+
+// TestRefreshVaultCtlMembers_NoVaults verifies the no-vault case is a safe
+// no-op (e.g. a coordinator-only node, or a node before any vault has been
+// built locally).
+func TestRefreshVaultCtlMembers_NoVaults(t *testing.T) {
+	t.Parallel()
+
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
+	clusterNodes := []system.NodeConfig{
+		{ID: glid.New(), Name: "node-1"},
+		{ID: glid.New(), Name: "node-2"},
+	}
+	orch.RefreshVaultCtlMembers(clusterNodes, allResolveFactories())
+	// Nothing to assert — should not panic and is a safe no-op.
+}
+
+// TestRefreshVaultCtlMembers_NilResolverNoOp verifies the single-node /
+// non-cluster path: a nil resolver produces zero members, and the function
+// returns without touching any vault's desired set.
+func TestRefreshVaultCtlMembers_NilResolverNoOp(t *testing.T) {
+	t.Parallel()
+
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
+	vaultID := glid.New()
+	orch.RegisterVault(&Vault{ID: vaultID})
+
+	orch.RefreshVaultCtlMembers(
+		[]system.NodeConfig{{ID: glid.New()}},
+		Factories{}, // nil NodeAddressResolver → buildVaultRaftMembers returns nil
+	)
+
+	if got := len(orch.vaultCtlLeaders.desired.Get(vaultID)); got != 0 {
+		t.Fatalf("single-node mode should leave desired set empty, got %d", got)
+	}
+}

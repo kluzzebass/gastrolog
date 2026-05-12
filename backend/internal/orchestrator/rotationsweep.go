@@ -108,6 +108,36 @@ func (o *Orchestrator) reconcileFilters(sys *system.System) {
 	}
 }
 
+// replicationTargetsEqual compares two ReplicationTarget slices by (NodeID,
+// StorageID) pairs. Order-insensitive. Used to detect FollowerTargets changes
+// across rotationSweep ticks so the audit log only fires when something
+// actually moved.
+func replicationTargetsEqual(a, b []system.ReplicationTarget) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := make(map[string]string, len(a))
+	for _, t := range a {
+		seen[t.NodeID] = t.StorageID
+	}
+	for _, t := range b {
+		if got, ok := seen[t.NodeID]; !ok || got != t.StorageID {
+			return false
+		}
+	}
+	return true
+}
+
+// replicationTargetNodes returns the NodeIDs of a ReplicationTarget slice for
+// log lines.
+func replicationTargetNodes(targets []system.ReplicationTarget) []string {
+	ids := make([]string, 0, len(targets))
+	for _, t := range targets {
+		ids = append(ids, t.NodeID)
+	}
+	return ids
+}
+
 // applyRotationFromConfig refreshes the leader instance's replication targets
 // and rotation policy from the current config. Called each tick by
 // rotationSweep. The function proceeds for every leader instance and
@@ -119,7 +149,16 @@ func (o *Orchestrator) applyRotationFromConfig(sys *system.System,
 	activeCronJobs map[string]bool,
 ) {
 	// Refresh replication targets from current system.
-	vaultInst.FollowerTargets = system.FollowerTargets(vaultCfg.Placements, sys.Runtime.NodeStorageConfigs)
+	newTargets := system.FollowerTargets(vaultCfg.Placements, sys.Runtime.NodeStorageConfigs)
+	// Log only on change so reconfiguration is auditable without per-tick noise.
+	if !replicationTargetsEqual(vaultInst.FollowerTargets, newTargets) {
+		o.rotationLogger.Info("FollowerTargets refreshed",
+			"vault", vaultCfg.ID,
+			"name", vaultCfg.Name,
+			"old", replicationTargetNodes(vaultInst.FollowerTargets),
+			"new", replicationTargetNodes(newTargets))
+	}
+	vaultInst.FollowerTargets = newTargets
 
 	if vaultCfg.RotationPolicyID == nil {
 		return
