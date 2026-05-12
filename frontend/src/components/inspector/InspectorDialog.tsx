@@ -1,12 +1,8 @@
-import { encode } from "../../api/glid";
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { useClusterStatus } from "../../api/hooks/useClusterStatus";
 import { useConfig } from "../../api/hooks/useSystem";
-import { useSettings } from "../../api/hooks/useSettings";
-import { useVaults } from "../../api/hooks";
+import { useVaults, useNodeRegistry } from "../../api/hooks";
 import { useWatchJobs } from "../../api/hooks";
 import { toastError } from "../Toast";
-import { ClusterNodeRole, ClusterNodeSuffrage } from "../../api/gen/gastrolog/v1/lifecycle_pb";
 import { Dialog } from "../Dialog";
 import { VaultsIcon, IngestersIcon, JobsIcon, MetricsIcon, ClusterIcon, RouteIcon } from "../icons";
 import { Badge } from "../Badge";
@@ -99,12 +95,10 @@ export function InspectorDialog({
   const c = useThemeClass(dark);
 
   // Cluster/node context.
-  const { data: cluster } = useClusterStatus();
-  const { data: settingsData } = useSettings();
+  const registry = useNodeRegistry();
   const { data: config } = useConfig();
-  const localNodeId = settingsData?.nodeId ? encode(settingsData.nodeId) : "";
-  const clusterEnabled = cluster?.clusterEnabled ?? false;
-  const multiNode = clusterEnabled || (config?.nodeConfigs && config.nodeConfigs.length > 1);
+  const localNodeId = registry.localNodeId;
+  const multiNode = registry.multiNode;
 
   // Entity counts for nav badges.
   const { data: vaults } = useVaults();
@@ -116,7 +110,7 @@ export function InspectorDialog({
     ingesters: config?.ingesters.length ?? 0,
     routes: routeCount,
     jobs: jobs.length,
-    system: cluster?.nodes.length ?? 1,
+    system: registry.all.filter((n) => n.isLive).length || 1,
   };
 
   // Parse URL state, forcing entities mode in single-node.
@@ -131,14 +125,12 @@ export function InspectorDialog({
   const selectedNodeId =
     parsed.mode === "nodes" ? (parsed.nodeId || localNodeId) : "";
 
-  // Node list for node names.
-  const nodes = cluster?.nodes
-    ? [...cluster.nodes].sort((a, b) => {
-        if (encode(a.id) === localNodeId) return -1;
-        if (encode(b.id) === localNodeId) return 1;
-        return (a.name || "").localeCompare(b.name || "");
-      })
-    : [];
+  // Node list sorted with local first, then alphabetically.
+  const nodes = [...registry.all].filter((n) => n.isLive).sort((a, b) => {
+    if (a.id === localNodeId) return -1;
+    if (b.id === localNodeId) return 1;
+    return a.name.localeCompare(b.name);
+  });
 
   return (
     <Dialog onClose={onClose} ariaLabel="Inspector" dark={dark}>
@@ -177,13 +169,12 @@ export function InspectorDialog({
           {mode === "nodes" ? (
             // Nodes mode: show node list.
             nodes.map((node) => {
-              const nid = encode(node.id);
-              const isActive = selectedNodeId === nid;
-              const isLocal = nid === localNodeId;
+              const isActive = selectedNodeId === node.id;
+              const isLocal = registry.isLocal(node.id);
               return (
                 <button
-                  key={nid}
-                  onClick={() => onNavigate(encodeParam({ mode: "nodes", nodeId: nid }))}
+                  key={node.id}
+                  onClick={() => onNavigate(encodeParam({ mode: "nodes", nodeId: node.id }))}
                   className={`flex items-center gap-2 w-full text-left px-2 py-1.5 rounded text-[0.85em] transition-colors ${
                     isActive
                       ? "bg-copper/15 text-copper"
@@ -195,16 +186,16 @@ export function InspectorDialog({
                 >
                   <ClusterIcon className="w-3.5 h-3.5 shrink-0" />
                   <span className="whitespace-nowrap truncate">
-                    {node.name || nid.slice(0, 8)}
+                    {node.name}
                   </span>
                   <span className="ml-auto flex items-center gap-1">
-                    {!isLocal && !node.stats && (
+                    {!isLocal && !node.isOnline && (
                       <Badge variant="error" dark={dark}>offline</Badge>
                     )}
-                    {node.role === ClusterNodeRole.LEADER && (
+                    {node.isLeader && (
                       <Badge variant="copper" dark={dark}>leader</Badge>
                     )}
-                    {node.suffrage === ClusterNodeSuffrage.NONVOTER && (
+                    {node.isNonvoter && (
                       <Badge variant="muted" dark={dark}>nonvoter</Badge>
                     )}
                     {isLocal && (

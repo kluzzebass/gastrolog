@@ -7,7 +7,7 @@
 // `ClusterNode` before its `NodeConfig` is replicated; a stopped node
 // remains in `NodeConfig` after dropping out of `ClusterNode`.
 
-import type { ClusterNode, ClusterNodeRole, ClusterNodeSuffrage } from "../gen/gastrolog/v1/lifecycle_pb";
+import { ClusterNodeRole, ClusterNodeSuffrage, type ClusterNode } from "../gen/gastrolog/v1/lifecycle_pb";
 import type { NodeStats } from "../gen/gastrolog/v1/cluster_pb";
 import type { NodeConfig } from "../gen/gastrolog/v1/system_pb";
 import { type EntityID, idFromBytes } from "./id";
@@ -37,6 +37,16 @@ export class Node {
 
   get isLeader(): boolean {
     return this.cluster?.isLeader ?? false;
+  }
+
+  /** True when this node is a non-voting member of the cluster. */
+  get isNonvoter(): boolean {
+    return this.cluster?.suffrage === ClusterNodeSuffrage.NONVOTER;
+  }
+
+  /** True when the node is reachable (we have stats from it). */
+  get isOnline(): boolean {
+    return this.cluster?.stats != null;
   }
 
   /** Undefined when the node isn't live. */

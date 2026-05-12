@@ -6,9 +6,11 @@ import { SlidersIcon } from "./icons";
 import { useThemeClass } from "../hooks/useThemeClass";
 import { useClusterStatus } from "../api/hooks/useClusterStatus";
 import { useAlerts } from "../api/hooks/useAlerts";
+// eslint-disable-next-line no-restricted-imports -- no Alert model yet (gastrolog-2e2qs follow-up)
 import { AlertSeverity } from "../api/gen/gastrolog/v1/cluster_pb";
 import { formatBytes } from "../utils/units";
 import { middleTruncate } from "../utils/middleTruncate";
+// eslint-disable-next-line no-restricted-imports -- HeaderBar still iterates raw ClusterNode for sum/sort; deferred migration (gastrolog-2e2qs follow-up)
 import type { ClusterNode } from "../api/gen/gastrolog/v1/lifecycle_pb";
 import { encode } from "../api/glid";
 

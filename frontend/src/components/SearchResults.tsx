@@ -1,5 +1,6 @@
 import type { RefObject } from "react";
 import { Record as ProtoRecord } from "../api/client";
+// eslint-disable-next-line no-restricted-imports -- no query-result model yet (gastrolog-2e2qs follow-up)
 import { TableResult } from "../api/gen/gastrolog/v1/query_pb";
 import { sameRecord } from "../utils";
 import { encode } from "../api/glid";

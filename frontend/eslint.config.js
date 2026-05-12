@@ -129,4 +129,39 @@ export default tseslint.config(
   {
     ignores: ["src/api/gen/**", "dist/**"],
   },
+  // gastrolog-2e2qs guard: read-side components consume entities through
+  // src/api/model/ and src/api/hooks/, not from the generated proto layer.
+  // Drift across read sites is what made the AllNodes / nodeIds /
+  // node-name-lookup fixes necessary three times this week; the guard
+  // prevents new code from re-introducing the same flatness.
+  //
+  // Carve-outs:
+  //   - src/api/model/** and src/api/hooks/** are the bridge; they must
+  //     import from api/gen.
+  //   - src/components/settings/** and src/components/setup/** edit proto
+  //     values directly via PutXxx forms — that's the form contract.
+  //   - Individual components that need a proto type with no model yet
+  //     (SavedQuery, AlertSeverity, ChunkMeta, etc.) can disable per-line
+  //     with `// eslint-disable-next-line no-restricted-imports`.
+  {
+    files: ["src/components/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": ["error", {
+        patterns: [{
+          group: ["**/api/gen/**"],
+          message:
+            "Components must consume proto entities through src/api/model/ or src/api/hooks/, not directly from src/api/gen/. See gastrolog-2e2qs. Settings/setup forms editing proto values are exempt via directory override; ad-hoc proto types with no model can disable per-line.",
+        }],
+      }],
+    },
+  },
+  {
+    files: [
+      "src/components/settings/**/*.{ts,tsx}",
+      "src/components/setup/**/*.{ts,tsx}",
+      // Tests legitimately construct proto messages for fixtures.
+      "src/components/**/*.test.{ts,tsx}",
+    ],
+    rules: { "no-restricted-imports": "off" },
+  },
 );
