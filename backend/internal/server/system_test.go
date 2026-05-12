@@ -104,6 +104,7 @@ func newConfigTestSetup(t *testing.T) (gastrologv1connect.SystemServiceClient, s
 	}
 
 	factories := orchestrator.Factories{
+		VaultsDir: t.TempDir(),
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			"memory": chunkmem.NewFactory(),
 			"file":   chunkfile.NewFactory(),
@@ -521,6 +522,7 @@ func newConfigTestSetupWithIngesters(t *testing.T) (gastrologv1connect.SystemSer
 	}
 
 	factories := orchestrator.Factories{
+		VaultsDir: t.TempDir(),
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			"memory": chunkmem.NewFactory(),
 			"file":   chunkfile.NewFactory(),
