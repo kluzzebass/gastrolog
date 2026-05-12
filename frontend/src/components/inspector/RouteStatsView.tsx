@@ -1,7 +1,7 @@
-import { encode } from "../../api/glid";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useRouteStats } from "../../api/hooks/useRouteStats";
-import { useConfig } from "../../api/hooks/useSystem";
+import { useRoutes, useVaults } from "../../api/hooks";
+import { idFromBytes, type EntityID } from "../../api/model/id";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { Badge } from "../Badge";
 
@@ -12,25 +12,20 @@ interface RouteStatsViewProps {
 export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
   const c = useThemeClass(dark);
   const { data: stats, isLoading } = useRouteStats();
-  const { data: config } = useConfig();
+  const routes = useRoutes();
+  const { data: vaults } = useVaults();
 
   if (isLoading) return <LoadingPlaceholder dark={dark} />;
   if (!stats) return null;
 
-  const vaultNames = new Map<string, string>();
-  if (config?.vaults) {
-    for (const v of config.vaults) {
-      const vid = encode(v.id);
-      vaultNames.set(vid, v.name || vid.slice(0, 8));
-    }
+  const vaultLabelById = new Map<EntityID, string>();
+  for (const v of vaults) {
+    vaultLabelById.set(v.id, v.displayLabel);
   }
 
-  const routeNames = new Map<string, string>();
-  if (config?.routes) {
-    for (const r of config.routes) {
-      const rid = encode(r.id);
-      routeNames.set(rid, r.name || rid.slice(0, 8));
-    }
+  const routeLabelById = new Map<EntityID, string>();
+  for (const r of routes) {
+    routeLabelById.set(r.id, r.displayLabel);
   }
 
   const dropRate =
@@ -42,7 +37,9 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
     (a, b) => Number(b.recordsMatched) - Number(a.recordsMatched),
   );
 
-  const sortedRoutes = [...stats.routeStats].sort(
+  // Per-route view comes from the Route models (config joined with stats),
+  // so even unmatched routes show up as zero rows when stats lag.
+  const sortedRoutes = [...routes].sort(
     (a, b) => Number(b.recordsMatched) - Number(a.recordsMatched),
   );
 
@@ -102,35 +99,36 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
               <span className="text-right">Forwarded</span>
             </div>
             {sorted.map((vs) => {
-              const vsId = encode(vs.vaultId);
+              const vsId = idFromBytes(vs.vaultId);
+              const label = vaultLabelById.get(vsId) ?? vsId.slice(0, 8);
               return (
-              <div
-                key={vsId}
-                className={`grid grid-cols-[1fr_7rem_7rem] gap-3 px-4 py-2.5 text-[0.85em] border-b last:border-b-0 ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
-              >
-                <span
-                  className={`font-mono truncate ${c("text-text-bright", "text-light-text-bright")}`}
-                  title={vsId}
+                <div
+                  key={vsId}
+                  className={`grid grid-cols-[1fr_7rem_7rem] gap-3 px-4 py-2.5 text-[0.85em] border-b last:border-b-0 ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
                 >
-                  {vaultNames.get(vsId) ?? vsId.slice(0, 8)}
-                </span>
-                <span
-                  className={`font-mono text-right ${c("text-text-muted", "text-light-text-muted")}`}
-                >
-                  {formatCount(vs.recordsMatched)}
-                </span>
-                <span className="font-mono text-right">
-                  {Number(vs.recordsForwarded) > 0 ? (
-                    <Badge variant="info" dark={dark}>
-                      {formatCount(vs.recordsForwarded)}
-                    </Badge>
-                  ) : (
-                    <span className={c("text-text-muted", "text-light-text-muted")}>
-                      0
-                    </span>
-                  )}
-                </span>
-              </div>
+                  <span
+                    className={`font-mono truncate ${c("text-text-bright", "text-light-text-bright")}`}
+                    title={vsId}
+                  >
+                    {label}
+                  </span>
+                  <span
+                    className={`font-mono text-right ${c("text-text-muted", "text-light-text-muted")}`}
+                  >
+                    {formatCount(vs.recordsMatched)}
+                  </span>
+                  <span className="font-mono text-right">
+                    {Number(vs.recordsForwarded) > 0 ? (
+                      <Badge variant="info" dark={dark}>
+                        {formatCount(vs.recordsForwarded)}
+                      </Badge>
+                    ) : (
+                      <span className={c("text-text-muted", "text-light-text-muted")}>
+                        0
+                      </span>
+                    )}
+                  </span>
+                </div>
               );
             })}
           </div>
@@ -155,28 +153,26 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
               <span className="text-right">Matched</span>
               <span className="text-right">Forwarded</span>
             </div>
-            {sortedRoutes.map((rs) => {
-              const rsId = encode(rs.routeId);
-              return (
+            {sortedRoutes.map((route) => (
               <div
-                key={rsId}
+                key={route.id}
                 className={`grid grid-cols-[1fr_7rem_7rem] gap-3 px-4 py-2.5 text-[0.85em] border-b last:border-b-0 ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
               >
                 <span
                   className={`font-mono truncate ${c("text-text-bright", "text-light-text-bright")}`}
-                  title={rsId}
+                  title={route.id}
                 >
-                  {routeNames.get(rsId) ?? rsId.slice(0, 8)}
+                  {routeLabelById.get(route.id) ?? route.id.slice(0, 8)}
                 </span>
                 <span
                   className={`font-mono text-right ${c("text-text-muted", "text-light-text-muted")}`}
                 >
-                  {formatCount(rs.recordsMatched)}
+                  {formatCount(route.recordsMatched)}
                 </span>
                 <span className="font-mono text-right">
-                  {Number(rs.recordsForwarded) > 0 ? (
+                  {Number(route.recordsForwarded) > 0 ? (
                     <Badge variant="info" dark={dark}>
-                      {formatCount(rs.recordsForwarded)}
+                      {formatCount(route.recordsForwarded)}
                     </Badge>
                   ) : (
                     <span className={c("text-text-muted", "text-light-text-muted")}>
@@ -185,8 +181,7 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
                   )}
                 </span>
               </div>
-              );
-            })}
+            ))}
           </div>
         </div>
       )}

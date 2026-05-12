@@ -1,7 +1,28 @@
 import { systemClient } from "../client";
-import { useSystemMutation } from "./useSystem";
+import { useSystemMutation, useConfig } from "./useSystem";
+import { useRouteStats } from "./useRouteStats";
 import { decode } from "../glid";
 import { RouteStage, MatchStage } from "../gen/gastrolog/v1/system_pb";
+import type { PerRouteStats } from "../gen/gastrolog/v1/system_pb";
+import { Route } from "../model/route";
+import { type EntityID, idFromBytes } from "../model/id";
+
+/**
+ * Returns the cluster's routes as model instances, joined with their
+ * runtime stats overlay. Derives from cached GetSystem config +
+ * GetRouteStats; no separate cache key.
+ */
+export function useRoutes(): Route[] {
+  const { data: config } = useConfig();
+  const { data: stats } = useRouteStats();
+
+  const statsByRouteId = new Map<EntityID, PerRouteStats>();
+  for (const rs of stats?.routeStats ?? []) {
+    statsByRouteId.set(idFromBytes(rs.routeId), rs);
+  }
+
+  return (config?.routes ?? []).map((cfg) => new Route(cfg, statsByRouteId.get(idFromBytes(cfg.id)) ?? null));
+}
 
 export function usePutRoute() {
   return useSystemMutation(

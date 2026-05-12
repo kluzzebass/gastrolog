@@ -21,7 +21,7 @@ export { useConfig, useGenerateName, useValidateExpression } from "./useSystem";
 // gastrolog-4kkoo (Phase 5): useFilters removed; expressions live inline on routes.
 export { usePutRotationPolicy, useDeleteRotationPolicy } from "./useRotationPolicies";
 export { usePutRetentionPolicy, useDeleteRetentionPolicy } from "./useRetentionPolicies";
-export { usePutRoute, useDeleteRoute } from "./useRoutes";
+export { useRoutes, usePutRoute, useDeleteRoute } from "./useRoutes";
 export { useSettings } from "./useSettings";
 export { useCertificates } from "./useCertificates";
 export {
