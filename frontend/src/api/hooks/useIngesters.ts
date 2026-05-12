@@ -2,25 +2,9 @@ import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { systemClient } from "../client";
-import { IngesterInfo, WatchIngesterStatusResponse } from "../gen/gastrolog/v1/system_pb";
-import { protoArraySharing } from "./protoSharing";
+import { WatchIngesterStatusResponse } from "../gen/gastrolog/v1/system_pb";
 import { useSystemMutation } from "./useSystem";
 import { decode, encodeString } from "../glid";
-
-export function useIngesters() {
-  return useQuery({
-    queryKey: ["ingesters"],
-    queryFn: async () => {
-      const response = await systemClient.listIngesters({});
-      return response.ingesters;
-    },
-    // Must match the response element type (IngesterInfo, not IngesterConfig)
-    // or proto.equals walks the wrong field list and silently ignores
-    // nodeStatus/running deltas — alive-map updates would then be suppressed.
-    structuralSharing: protoArraySharing(IngesterInfo.equals),
-    staleTime: 60_000, // push-invalidated by WatchConfig on config changes
-  });
-}
 
 // useIngesterStatus returns a live view of a single ingester's status.
 // Event-driven via the WatchIngesterStatus server stream — no polling.
@@ -106,7 +90,6 @@ export function usePutIngester() {
         },
       });
     },
-    [["ingesters"]],
   );
 }
 
@@ -115,7 +98,6 @@ export function useDeleteIngester() {
     async (id: string) => {
       return systemClient.deleteIngester({ id: decode(id) });
     },
-    [["ingesters"]],
   );
 }
 

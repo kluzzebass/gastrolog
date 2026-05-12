@@ -6,36 +6,18 @@ import { createTestQueryClient, wrapper } from "../../../test/render";
 const mocks = installMockClients();
 
 import {
-  useIngesters,
   useIngesterStatus,
   usePutIngester,
   useDeleteIngester,
   useTestIngester,
 } from "./useIngesters";
-import { IngesterConfig } from "../gen/gastrolog/v1/system_pb";
 import { decode } from "../glid";
 
 beforeEach(() => {
-  m(mocks.systemClient, "listIngesters").mockClear();
   m(mocks.systemClient, "getIngesterStatus").mockClear();
   m(mocks.systemClient, "putIngester").mockClear();
   m(mocks.systemClient, "deleteIngester").mockClear();
   m(mocks.systemClient, "testIngester").mockClear();
-});
-
-describe("useIngesters", () => {
-  test("fetches ingester list", async () => {
-    const ingesters = [
-      new IngesterConfig({ id: decode("i1"), name: "syslog", type: "syslog", enabled: true }),
-    ];
-    m(mocks.systemClient, "listIngesters").mockResolvedValueOnce({ ingesters });
-
-    const { result } = renderHook(() => useIngesters(), { wrapper: wrapper() });
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toHaveLength(1);
-    expect(result.current.data?.[0]?.name).toBe("syslog");
-  });
 });
 
 describe("useIngesterStatus", () => {
@@ -84,11 +66,12 @@ describe("usePutIngester", () => {
 });
 
 describe("useDeleteIngester", () => {
-  test("deletes and invalidates config", async () => {
+  test("deletes and invalidates config when response lacks system payload", async () => {
+    // Mock returns {} (no system field) — useSystemMutation falls back to
+    // invalidateQueries(["system"]) since there's no fresh config to write.
     m(mocks.systemClient, "deleteIngester").mockResolvedValueOnce({});
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], {});
-    qc.setQueryData(["ingesters"], []);
 
     const { result } = renderHook(() => useDeleteIngester(), { wrapper: wrapper(qc) });
 
@@ -98,7 +81,6 @@ describe("useDeleteIngester", () => {
 
     expect(m(mocks.systemClient, "deleteIngester")).toHaveBeenCalledWith({ id: decode("i1") });
     expect(qc.getQueryState(["system"])?.isInvalidated).toBe(true);
-    expect(qc.getQueryState(["ingesters"])?.isInvalidated).toBe(true);
   });
 });
 

@@ -1,6 +1,6 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
-import { useIngesterStatus, useConfig } from "../../api/hooks";
+import { useIngesterStatus, useConfig, useIngesterAlive } from "../../api/hooks";
 import { formatBytes } from "../../utils/units";
 import { Badge } from "../Badge";
 import { CogIcon } from "../icons";
@@ -13,7 +13,7 @@ import type { BadgeVariant } from "../Badge";
 type StatusVariant = Extract<BadgeVariant, "info" | "warn" | "error">;
 
 interface IngesterCardProps {
-  ingester: { id: Uint8Array; name: string; type: string; running: boolean; enabled: boolean; nodeIds: Uint8Array[]; allNodes: boolean; nodeStatus: { [key: string]: boolean } };
+  ingester: { id: Uint8Array; name: string; type: string; enabled: boolean; nodeIds: Uint8Array[]; allNodes: boolean };
   liveNodeIds: Set<string>;
   dark: boolean;
   expanded: boolean;
@@ -32,10 +32,13 @@ export function IngesterCard({
   onOpenSettings,
 }: Readonly<IngesterCardProps>) {
   const ingId = encode(ingester.id);
+  const aliveMap = useIngesterAlive();
+  const nodeStatus = aliveMap.get(ingId) ?? {};
+
   // Eligible-set size: with AllNodes, every live cluster node is eligible;
   // otherwise it's the literal nodeIds list.
   const selected = ingester.allNodes ? liveNodeIds.size : ingester.nodeIds.length;
-  const running = Object.values(ingester.nodeStatus).filter(Boolean).length;
+  const running = Object.values(nodeStatus).filter(Boolean).length;
 
   let statusVariant: StatusVariant = "info";
   if (selected > 0 && running < selected) {
@@ -52,7 +55,7 @@ export function IngesterCard({
       onToggle={onToggle}
       headerRight={
         <span className="flex items-center gap-1.5">
-          {showNodeBadge && ingester.nodeIds.length > 0 && <NodeBadge nodeId={encode(ingester.nodeIds[0]!)} dark={dark} />}
+          {showNodeBadge && !ingester.allNodes && ingester.nodeIds.length > 0 && <NodeBadge nodeId={encode(ingester.nodeIds[0]!)} dark={dark} />}
           <IngesterStatusBadge selected={selected} running={running} variant={statusVariant} enabled={ingester.enabled} dark={dark} />
           {onOpenSettings && (
             <CrossLinkBadge dark={dark} title="Open in Settings" onClick={onOpenSettings}>
@@ -62,7 +65,7 @@ export function IngesterCard({
         </span>
       }
     >
-      <IngesterDetail id={ingId} nodeIds={ingester.nodeIds} allNodes={ingester.allNodes} nodeStatus={ingester.nodeStatus} liveNodeIds={liveNodeIds} dark={dark} />
+      <IngesterDetail id={ingId} nodeIds={ingester.nodeIds} allNodes={ingester.allNodes} nodeStatus={nodeStatus} liveNodeIds={liveNodeIds} dark={dark} />
     </ExpandableCard>
   );
 }

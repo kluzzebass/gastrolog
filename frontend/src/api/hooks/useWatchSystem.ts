@@ -42,12 +42,9 @@ export function useWatchSystem() {
             qc.invalidateQueries({ queryKey: ["system"] });
             // Settings are not on GetSystem; refresh when the raft index advances.
             // Vaults/stats/chunks are not driven by WatchSystem: WatchSystemStatus
-            // pushes vaults+stats snapshots, and WatchChunks covers chunk metadata.
+            // pushes vaults+stats snapshots and the ingester alive map, and
+            // WatchChunks covers chunk metadata.
             qc.invalidateQueries({ queryKey: ["settings"] });
-            // ListIngesters carries runtime node_status + enabled; GetSystem only has
-            // IngesterConfig. Without this, Inspector can show stale stopped/0-of-N
-            // while GetIngesterStatus counters still advance.
-            qc.invalidateQueries({ queryKey: ["ingesters"] });
             // Log component levels resolve against the current LogLevelConfig
             // — any config commit may shift effective levels.
             qc.invalidateQueries({ queryKey: ["log-components"] });

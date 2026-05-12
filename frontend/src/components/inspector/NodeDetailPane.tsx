@@ -1,7 +1,7 @@
 import { encode } from "../../api/glid";
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { useVaults, useIngesters } from "../../api/hooks";
+import { useVaults } from "../../api/hooks";
 import { useWatchJobs } from "../../api/hooks";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
 import { useConfig } from "../../api/hooks/useSystem";
@@ -50,11 +50,11 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
 
   // Data for all entity types, filtered by this node.
   const { data: allVaults } = useVaults();
-  const { data: allIngesters } = useIngesters();
+  const allIngesters = config?.ingesters ?? [];
   const { jobs } = useWatchJobs({ onError: toastError });
 
   const vaults = (allVaults ?? []).filter((v) => (encode(v.nodeId) || localNodeId) === nodeId);
-  const ingesters = (allIngesters ?? []).filter((i) => i.allNodes || i.nodeIds.length === 0 || i.nodeIds.some((n) => encode(n) === nodeId));
+  const ingesters = allIngesters.filter((i) => i.allNodes || i.nodeIds.length === 0 || i.nodeIds.some((n) => encode(n) === nodeId));
   const nodeJobs = jobs.filter((j) => (encode(j.nodeId) || localNodeId) === nodeId);
   const tasks = nodeJobs.filter((j) => j.kind === JobKind.TASK);
   const scheduled = nodeJobs.filter((j) => j.kind === JobKind.SCHEDULED);

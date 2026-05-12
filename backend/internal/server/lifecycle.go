@@ -401,12 +401,38 @@ func (s *LifecycleServer) buildSystemStatus(ctx context.Context) *apiv1.WatchSys
 	}
 
 	return &apiv1.WatchSystemStatusResponse{
-		Cluster:    cluster,
-		Health:     health,
-		RouteStats: routeStats,
-		Vaults:     vaults,
-		Stats:      stats,
+		Cluster:       cluster,
+		Health:        health,
+		RouteStats:    routeStats,
+		Vaults:        vaults,
+		Stats:         stats,
+		IngesterAlive: s.buildIngesterAlive(ctx),
 	}
+}
+
+// buildIngesterAlive snapshots the FSM ingester-alive map for every configured
+// ingester. The inspector uses this to render per-card running/selected badges
+// and per-node ingester filters without polling ListIngesters.
+func (s *LifecycleServer) buildIngesterAlive(ctx context.Context) []*apiv1.IngesterAlive {
+	if s.cfgStore == nil {
+		return nil
+	}
+	ingesters, err := s.cfgStore.ListIngesters(ctx)
+	if err != nil {
+		return nil
+	}
+	out := make([]*apiv1.IngesterAlive, 0, len(ingesters))
+	for _, ing := range ingesters {
+		alive, err := s.cfgStore.GetIngesterAlive(ctx, ing.ID)
+		if err != nil {
+			continue
+		}
+		out = append(out, &apiv1.IngesterAlive{
+			Id:         ing.ID.ToProto(),
+			NodeStatus: alive,
+		})
+	}
+	return out
 }
 
 // buildRouteStats aggregates route statistics from local + peer sources.

@@ -33,13 +33,14 @@ export {
   useChangePassword,
 } from "./useAuth";
 export {
-  useIngesters,
   useIngesterStatus,
   usePutIngester,
   useDeleteIngester,
   useTestIngester,
   useCheckListenAddrs,
 } from "./useIngesters";
+export { useIngesterAlive } from "./useIngesterAlive";
+export type { IngesterAliveMap } from "./useIngesterAlive";
 export { useJob, useWatchJobs } from "./useJobs";
 export { useWatchSystem } from "./useWatchSystem";
 export { useWatchChunks } from "./useWatchChunks";

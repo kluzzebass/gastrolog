@@ -18,50 +18,6 @@ import (
 	"gastrolog/internal/system/raftfsm"
 )
 
-// ListIngesters returns all configured ingesters across the cluster.
-// Running status is only known for ingesters on the local node.
-func (s *SystemServer) ListIngesters(
-	ctx context.Context,
-	req *connect.Request[apiv1.ListIngestersRequest],
-) (*connect.Response[apiv1.ListIngestersResponse], error) {
-	// Config store is the source of truth for all ingesters (cluster-wide).
-	var allIngesters []system.IngesterConfig
-	if s.sysStore != nil {
-		var err error
-		allIngesters, err = s.sysStore.ListIngesters(ctx)
-		if err != nil {
-			return nil, errInternal(err)
-		}
-	}
-
-	resp := &apiv1.ListIngestersResponse{
-		Ingesters: make([]*apiv1.IngesterInfo, 0, len(allIngesters)),
-	}
-
-	for _, ing := range allIngesters {
-		info := &apiv1.IngesterInfo{
-			Id:         ing.ID.ToProto(),
-			Name:       ing.Name,
-			Type:       ing.Type,
-			Enabled:    ing.Enabled,
-			NodeIds:    stringsToBytes(ing.NodeIDs),
-			Singleton:  ing.Singleton,
-			AllNodes:   ing.AllNodes,
-			NodeStatus: s.collectIngesterNodeStatus(ing.ID),
-		}
-		// Backwards compat: running = at least one node is alive.
-		for _, alive := range info.NodeStatus {
-			if alive {
-				info.Running = true
-				break
-			}
-		}
-		resp.Ingesters = append(resp.Ingesters, info)
-	}
-
-	return connect.NewResponse(resp), nil
-}
-
 // GetIngesterStatus returns status for a specific ingester.
 // Works for any configured ingester, not just locally running ones.
 func (s *SystemServer) GetIngesterStatus(

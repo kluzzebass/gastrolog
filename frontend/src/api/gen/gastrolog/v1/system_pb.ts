@@ -992,176 +992,54 @@ export class RetentionPolicyConfig extends Message<RetentionPolicyConfig> {
 }
 
 /**
- * @generated from message gastrolog.v1.ListIngestersRequest
+ * IngesterAlive carries the per-node alive map for a single ingester, as
+ * replicated through the FSM. Embedded in the WatchSystemStatus push stream
+ * so the inspector can derive "running/selected" badges and per-node filters
+ * without polling ListIngesters.
+ *
+ * @generated from message gastrolog.v1.IngesterAlive
  */
-export class ListIngestersRequest extends Message<ListIngestersRequest> {
-  constructor(data?: PartialMessage<ListIngestersRequest>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.ListIngestersRequest";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ListIngestersRequest {
-    return new ListIngestersRequest().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ListIngestersRequest {
-    return new ListIngestersRequest().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ListIngestersRequest {
-    return new ListIngestersRequest().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: ListIngestersRequest | PlainMessage<ListIngestersRequest> | undefined, b: ListIngestersRequest | PlainMessage<ListIngestersRequest> | undefined): boolean {
-    return proto3.util.equals(ListIngestersRequest, a, b);
-  }
-}
-
-/**
- * @generated from message gastrolog.v1.ListIngestersResponse
- */
-export class ListIngestersResponse extends Message<ListIngestersResponse> {
-  /**
-   * @generated from field: repeated gastrolog.v1.IngesterInfo ingesters = 1;
-   */
-  ingesters: IngesterInfo[] = [];
-
-  constructor(data?: PartialMessage<ListIngestersResponse>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.ListIngestersResponse";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "ingesters", kind: "message", T: IngesterInfo, repeated: true },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ListIngestersResponse {
-    return new ListIngestersResponse().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ListIngestersResponse {
-    return new ListIngestersResponse().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ListIngestersResponse {
-    return new ListIngestersResponse().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: ListIngestersResponse | PlainMessage<ListIngestersResponse> | undefined, b: ListIngestersResponse | PlainMessage<ListIngestersResponse> | undefined): boolean {
-    return proto3.util.equals(ListIngestersResponse, a, b);
-  }
-}
-
-/**
- * @generated from message gastrolog.v1.IngesterInfo
- */
-export class IngesterInfo extends Message<IngesterInfo> {
+export class IngesterAlive extends Message<IngesterAlive> {
   /**
    * @generated from field: bytes id = 1;
    */
   id = new Uint8Array(0);
 
   /**
-   * @generated from field: string type = 2;
-   */
-  type = "";
-
-  /**
-   * Deprecated: use node_status for per-node detail.
+   * nodeID → alive. Empty map (or absent entry) means "no node has reported
+   * alive" — typically because the ingester was just configured and hasn't
+   * been dispatched yet.
    *
-   * @generated from field: bool running = 3;
-   */
-  running = false;
-
-  /**
-   * @generated from field: string name = 4;
-   */
-  name = "";
-
-  /**
-   * Legacy. Use node_ids.
-   *
-   * @generated from field: bytes node_id = 5 [deprecated = true];
-   * @deprecated
-   */
-  nodeId = new Uint8Array(0);
-
-  /**
-   * Eligible nodes from config (honored when all_nodes=false).
-   *
-   * @generated from field: repeated bytes node_ids = 6;
-   */
-  nodeIds: Uint8Array[] = [];
-
-  /**
-   * Per-node running status: nodeID → alive.
-   *
-   * @generated from field: map<string, bool> node_status = 8;
+   * @generated from field: map<string, bool> node_status = 2;
    */
   nodeStatus: { [key: string]: boolean } = {};
 
-  /**
-   * Whether the ingester is enabled in config.
-   *
-   * @generated from field: bool enabled = 9;
-   */
-  enabled = false;
-
-  /**
-   * HA semantics: false = parallel (every eligible node), true = Raft-assigned singleton.
-   *
-   * @generated from field: bool singleton = 10;
-   */
-  singleton = false;
-
-  /**
-   * When true, eligibility is the entire current cluster (re-evaluated on membership change).
-   *
-   * @generated from field: bool all_nodes = 11;
-   */
-  allNodes = false;
-
-  constructor(data?: PartialMessage<IngesterInfo>) {
+  constructor(data?: PartialMessage<IngesterAlive>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.IngesterInfo";
+  static readonly typeName = "gastrolog.v1.IngesterAlive";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 2, name: "type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "running", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 4, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 5, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 6, name: "node_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
-    { no: 8, name: "node_status", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 8 /* ScalarType.BOOL */} },
-    { no: 9, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 10, name: "singleton", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 11, name: "all_nodes", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 2, name: "node_status", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 8 /* ScalarType.BOOL */} },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): IngesterInfo {
-    return new IngesterInfo().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): IngesterAlive {
+    return new IngesterAlive().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): IngesterInfo {
-    return new IngesterInfo().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): IngesterAlive {
+    return new IngesterAlive().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): IngesterInfo {
-    return new IngesterInfo().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): IngesterAlive {
+    return new IngesterAlive().fromJsonString(jsonString, options);
   }
 
-  static equals(a: IngesterInfo | PlainMessage<IngesterInfo> | undefined, b: IngesterInfo | PlainMessage<IngesterInfo> | undefined): boolean {
-    return proto3.util.equals(IngesterInfo, a, b);
+  static equals(a: IngesterAlive | PlainMessage<IngesterAlive> | undefined, b: IngesterAlive | PlainMessage<IngesterAlive> | undefined): boolean {
+    return proto3.util.equals(IngesterAlive, a, b);
   }
 }
 

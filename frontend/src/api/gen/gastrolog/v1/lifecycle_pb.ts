@@ -6,7 +6,7 @@
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
 import { Message, proto3, protoInt64 } from "@bufbuild/protobuf";
 import { NodeStats } from "./cluster_pb.js";
-import { GetRouteStatsResponse } from "./system_pb.js";
+import { GetRouteStatsResponse, IngesterAlive } from "./system_pb.js";
 import { GetStatsResponse, VaultInfo } from "./vault_pb.js";
 
 /**
@@ -856,6 +856,15 @@ export class WatchSystemStatusResponse extends Message<WatchSystemStatusResponse
    */
   stats?: GetStatsResponse;
 
+  /**
+   * Per-ingester runtime alive map, replicated from the FSM. Sent on every
+   * stats tick so the inspector's per-card "running/selected" badge can
+   * derive node_status without a separate ListIngesters round-trip.
+   *
+   * @generated from field: repeated gastrolog.v1.IngesterAlive ingester_alive = 6;
+   */
+  ingesterAlive: IngesterAlive[] = [];
+
   constructor(data?: PartialMessage<WatchSystemStatusResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -869,6 +878,7 @@ export class WatchSystemStatusResponse extends Message<WatchSystemStatusResponse
     { no: 3, name: "route_stats", kind: "message", T: GetRouteStatsResponse },
     { no: 4, name: "vaults", kind: "message", T: VaultInfo, repeated: true },
     { no: 5, name: "stats", kind: "message", T: GetStatsResponse },
+    { no: 6, name: "ingester_alive", kind: "message", T: IngesterAlive, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): WatchSystemStatusResponse {
