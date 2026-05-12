@@ -1,8 +1,8 @@
 import { useState, useCallback, useRef, useEffect, useMemo, type MutableRefObject } from "react";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { jobClient } from "../client";
-import type { Job } from "../gen/gastrolog/v1/job_pb";
-import { encode } from "../glid";
+import type { Job as JobProto } from "../gen/gastrolog/v1/job_pb";
+import { Job } from "../model/job";
 
 const INITIAL_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 30_000;
@@ -15,7 +15,7 @@ function isAbortError(err: unknown): boolean {
 }
 
 interface WatchJobsState {
-  jobs: Job[];
+  jobs: Job[]; // Job model, not proto.
   connected: boolean;
   reconnecting: boolean;
   error: Error | null;
@@ -36,7 +36,7 @@ export function useWatchJobs(options?: { onError?: (err: Error) => void }) {
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flushRef = useRef<number | null>(null);
   const dirtyRef = useRef(false);
-  const jobsRef = useRef<Job[]>([]);
+  const jobsRef = useRef<JobProto[]>([]);
 
   const cancelReconnect = useCallback(() => {
     if (reconnectTimer.current !== null) {
@@ -70,7 +70,7 @@ export function useWatchJobs(options?: { onError?: (err: Error) => void }) {
               if (dirtyRef.current) {
                 dirtyRef.current = false;
                 setState({
-                  jobs: [...jobsRef.current],
+                  jobs: jobsRef.current.map((p) => new Job(p)),
                   connected: true,
                   reconnecting: false,
                   error: null,
@@ -159,7 +159,7 @@ export function useJob(jobId: string | null) {
   const { jobs } = useWatchJobs();
   const data = useMemo(() => {
     if (!jobId) return undefined;
-    return jobs.find((j) => encode(j.id) === jobId);
+    return jobs.find((j) => j.id === jobId);
   }, [jobs, jobId]);
   return { data };
 }

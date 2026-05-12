@@ -2,10 +2,9 @@ import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useJob } from "../../api/hooks";
-import { JobStatus } from "../../api/client";
 import { FormField, SelectInput } from "./FormField";
 import { Button } from "./Buttons";
-import type { Job } from "../../api/gen/gastrolog/v1/job_pb";
+import type { Job } from "../../api/model/job";
 
 // Phase 4 (gastrolog-42f9z): retention rules collapsed to just a policy
 // trigger. The action / eject-route-ids fields are gone — the routing
@@ -40,14 +39,14 @@ export function JobProgress({
 
   useEffect(() => {
     if (!job || handledRef.current) return;
-    if (job.status === JobStatus.COMPLETED) {
+    if (job.isCompleted) {
       handledRef.current = true;
       qc.invalidateQueries({ queryKey: ["vaults"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
       qc.invalidateQueries({ queryKey: ["indexes"] });
       qc.invalidateQueries({ queryKey: ["system"] });
       onComplete(job);
-    } else if (job.status === JobStatus.FAILED) {
+    } else if (job.isFailed) {
       handledRef.current = true;
       onFailed(job);
     }
@@ -55,12 +54,10 @@ export function JobProgress({
 
   if (!job) return null;
 
-  const isRunning =
-    job.status === JobStatus.RUNNING || job.status === JobStatus.PENDING;
-  if (!isRunning) return null;
+  if (!job.isActive) return null;
 
   const progress =
-    job.chunksTotal > 0
+    job.chunksTotal > 0n
       ? `${job.chunksDone}/${job.chunksTotal} chunks`
       : "starting...";
 

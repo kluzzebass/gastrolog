@@ -1,25 +1,26 @@
-import { encode, isZero } from "../../api/glid";
+import { type EntityID, isEmptyID } from "../../api/model/id";
 
 interface NodeGroup<T> {
-  nodeId: string;
+  nodeId: EntityID;
   nodeName: string;
   items: T[];
 }
 
 /**
  * Groups items by nodeId, resolving display names from the provided map.
- * Items with empty nodeId fall back to localNodeId (defensive; backend should always populate).
- * Groups are sorted with local node first, then alphabetically by name.
+ * Items with empty nodeId fall back to localNodeId (defensive; backend
+ * should always populate). Groups are sorted with local node first, then
+ * alphabetically by name.
  */
-export function groupByNode<T extends { nodeId: Uint8Array }>(
+export function groupByNode<T extends { nodeId: EntityID }>(
   items: T[],
-  nodeNames: Map<string, string>,
-  localNodeId: string,
+  nodeNames: ReadonlyMap<EntityID, string>,
+  localNodeId: EntityID,
 ): NodeGroup<T>[] {
-  const groups = new Map<string, T[]>();
+  const groups = new Map<EntityID, T[]>();
 
   for (const item of items) {
-    const nodeId = isZero(item.nodeId) ? localNodeId : encode(item.nodeId);
+    const nodeId = isEmptyID(item.nodeId) ? localNodeId : item.nodeId;
     let group = groups.get(nodeId);
     if (!group) {
       group = [];
