@@ -6,8 +6,7 @@ import { type EntityID, idFromBytes } from "../../api/model/id";
 import { useWatchJobs } from "../../api/hooks";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
 import { useConfig } from "../../api/hooks/useSystem";
-import { JobKind, JobStatus } from "../../api/gen/gastrolog/v1/job_pb";
-import type { Job } from "../../api/gen/gastrolog/v1/job_pb";
+import type { Job } from "../../api/model/job";
 import { toastError } from "../Toast";
 import { Badge } from "../Badge";
 import { ExpandableCard } from "../settings/ExpandableCard";
@@ -65,13 +64,12 @@ function useToggleSet() {
 
 // ---- Node context helper ----
 //
-// Now a thin shim over useNodeRegistry. Kept for the legacy `nodeNames`
-// shape that the JobsList helper passes into groupByNode (string → string
-// Map). Once the Job entity issue migrates that helper, this shim can go.
+// Thin shim over useNodeRegistry that exposes the legacy `nodeNames` Map
+// shape (EntityID → display name) used by `groupByNode`.
 
 function useNodeContext() {
   const registry = useNodeRegistry();
-  const nodeNames = new Map<string, string>();
+  const nodeNames = new Map<EntityID, string>();
   for (const n of registry.all) {
     if (n.cluster?.name) nodeNames.set(n.id, n.cluster.name);
     else if (n.config?.name) nodeNames.set(n.id, n.config.name);
@@ -180,8 +178,8 @@ function JobsList({ dark }: Readonly<{ dark: boolean }>) {
 
   if (!connected && !reconnecting && jobs.length === 0) return <Loading dark={dark} />;
 
-  const tasks = jobs.filter((j) => j.kind === JobKind.TASK);
-  const scheduled = jobs.filter((j) => j.kind === JobKind.SCHEDULED);
+  const tasks = jobs.filter((j) => j.isTask);
+  const scheduled = jobs.filter((j) => j.isScheduled);
 
   // Single-node: flat list.
   if (!multiNode) {
@@ -197,7 +195,7 @@ function JobsList({ dark }: Readonly<{ dark: boolean }>) {
             <ScheduledHeader dark={dark} />
             <div className="flex flex-col">
               {scheduled.map((job) => (
-                <ScheduledRow key={encode(job.id)} job={job} dark={dark} />
+                <ScheduledRow key={job.id} job={job} dark={dark} />
               ))}
             </div>
           </section>
@@ -207,7 +205,7 @@ function JobsList({ dark }: Readonly<{ dark: boolean }>) {
             <SectionLabel dark={dark}>Tasks</SectionLabel>
             <div className="flex flex-col gap-1">
               {tasks.map((job) => (
-                <JobRow key={encode(job.id)} job={job} dark={dark} />
+                <JobRow key={job.id} job={job} dark={dark} />
               ))}
             </div>
           </section>
@@ -234,8 +232,8 @@ function JobsList({ dark }: Readonly<{ dark: boolean }>) {
       {groups.length === 0 && <Empty dark={dark}>No active or scheduled jobs.</Empty>}
 
       {groups.map((group) => {
-        const nodeTasks = group.items.filter((j) => j.kind === JobKind.TASK);
-        const nodeScheduled = group.items.filter((j) => j.kind === JobKind.SCHEDULED);
+        const nodeTasks = group.items.filter((j) => j.isTask);
+        const nodeScheduled = group.items.filter((j) => j.isScheduled);
 
         return (
           <ExpandableCard
@@ -263,7 +261,7 @@ function JobsList({ dark }: Readonly<{ dark: boolean }>) {
               {nodeScheduled.length > 0 && <ScheduledHeader dark={dark} />}
               {nodeScheduled.map((job, i) => (
                 <div
-                  key={encode(job.id)}
+                  key={job.id}
                   className={i > 0 ? `border-t ${c("border-ink-border-subtle", "border-light-border-subtle")}` : ""}
                 >
                   <ScheduledRow job={job} dark={dark} />
@@ -276,7 +274,7 @@ function JobsList({ dark }: Readonly<{ dark: boolean }>) {
               )}
               {nodeTasks.map((job, i) => (
                 <div
-                  key={encode(job.id)}
+                  key={job.id}
                   className={i > 0 ? `border-t ${c("border-ink-border-subtle", "border-light-border-subtle")}` : ""}
                 >
                   <JobRow job={job} dark={dark} />
@@ -296,9 +294,9 @@ function JobRow({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
   return (
     <div className="flex items-center gap-3 px-4 py-2.5 text-[0.85em]">
       <span className={`font-mono font-medium truncate ${c("text-text-bright", "text-light-text-bright")}`}>
-        {job.description || job.name || encode(job.id)}
+        {job.displayLabel}
       </span>
-      <JobStatusBadge status={job.status} dark={dark} />
+      <JobStatusBadge job={job} dark={dark} />
       {Number(job.chunksTotal) > 0 && (
         <span className={`font-mono text-[0.9em] shrink-0 ${c("text-text-muted", "text-light-text-muted")}`}>
           {Number(job.chunksDone)}/{Number(job.chunksTotal)} chunks
@@ -336,9 +334,9 @@ function ScheduledRow({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
     <div className={`${scheduledGrid} px-4 py-2 text-[0.85em]`}>
       <span
         className={`font-mono truncate ${c("text-text-bright", "text-light-text-bright")}`}
-        title={job.description || job.name || encode(job.id)}
+        title={job.displayLabel}
       >
-        {job.description || job.name || encode(job.id)}
+        {job.displayLabel}
       </span>
       <span className={`font-mono text-[0.9em] ${c("text-text-muted", "text-light-text-muted")}`}>
         {job.schedule}
@@ -359,19 +357,10 @@ function ScheduledRow({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
   );
 }
 
-function JobStatusBadge({ status, dark }: Readonly<{ status: JobStatus; dark: boolean }>) {
-  switch (status) {
-    case JobStatus.PENDING:
-      return <Badge variant="muted" dark={dark}>pending</Badge>;
-    case JobStatus.RUNNING:
-      return <Badge variant="info" dark={dark}>running</Badge>;
-    case JobStatus.COMPLETED:
-      return <Badge variant="copper" dark={dark}>completed</Badge>;
-    case JobStatus.FAILED:
-      return <Badge variant="error" dark={dark}>failed</Badge>;
-    default:
-      return null;
-  }
+function JobStatusBadge({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
+  const label = job.statusLabel;
+  if (!label) return null;
+  return <Badge variant={job.statusVariant} dark={dark}>{label}</Badge>;
 }
 
 // ---- System ----

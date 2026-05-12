@@ -1,9 +1,6 @@
-import { encode } from "../../api/glid";
-import { idFromBytes } from "../../api/model/id";
 import { useState, useEffect } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { JobStatus } from "../../api/gen/gastrolog/v1/job_pb";
-import type { Job } from "../../api/gen/gastrolog/v1/job_pb";
+import type { Job } from "../../api/model/job";
 import { protoToInstant, formatTimestamp, elapsed, countdown } from "../../utils/temporal";
 import { Badge } from "../Badge";
 import { ExpandableCard } from "../settings/ExpandableCard";
@@ -41,14 +38,14 @@ export function JobCard({
 }: Readonly<JobCardProps>) {
   return (
     <ExpandableCard
-      id={job.description || job.name || encode(job.id)}
+      id={job.displayLabel}
       dark={dark}
       expanded={expanded}
       onToggle={onToggle}
       status={
         <span className="flex items-center gap-1.5">
-          <StatusBadge status={job.status} dark={dark} />
-          {showNodeBadge && <NodeBadge nodeId={idFromBytes(job.nodeId)} dark={dark} />}
+          <StatusBadge job={job} dark={dark} />
+          {showNodeBadge && <NodeBadge nodeId={job.nodeId} dark={dark} />}
         </span>
       }
       headerRight={<TaskProgress job={job} dark={dark} />}
@@ -96,7 +93,7 @@ export function ScheduledJobsTable({
 
       {jobs.map((job) => (
         <div
-          key={encode(job.id)}
+          key={job.id}
           className={`grid grid-cols-[1fr_8rem_9rem_9rem] gap-3 px-4 py-2 text-[0.85em] border-b last:border-b-0 ${c(
             "border-ink-border-subtle",
             "border-light-border-subtle",
@@ -105,10 +102,10 @@ export function ScheduledJobsTable({
           <span
             className={`flex items-center gap-2 min-w-0 ${c("text-text-bright", "text-light-text-bright")}`}
           >
-            <span className="font-mono truncate" title={job.description || job.name || encode(job.id)}>
-              {job.description || job.name || encode(job.id)}
+            <span className="font-mono truncate" title={job.displayLabel}>
+              {job.displayLabel}
             </span>
-            {showNodeBadge && <NodeBadge nodeId={idFromBytes(job.nodeId)} dark={dark} />}
+            {showNodeBadge && <NodeBadge nodeId={job.nodeId} dark={dark} />}
           </span>
           <span
             className={`font-mono text-[0.9em] ${c("text-text-muted", "text-light-text-muted")}`}
@@ -119,13 +116,13 @@ export function ScheduledJobsTable({
             className={`font-mono text-[0.9em] ${c("text-text-muted", "text-light-text-muted")}`}
             title={job.lastRun ? formatTimestamp(protoToInstant(job.lastRun)) : ""}
           >
-            {job.lastRun ? elapsed(protoToInstant(job.lastRun), now) : "\u2014"}
+            {job.lastRun ? elapsed(protoToInstant(job.lastRun), now) : "—"}
           </span>
           <span
             className={`font-mono text-[0.9em] ${c("text-text-muted", "text-light-text-muted")}`}
             title={job.nextRun ? formatTimestamp(protoToInstant(job.nextRun)) : ""}
           >
-            {job.nextRun ? countdown(protoToInstant(job.nextRun), now) : "\u2014"}
+            {job.nextRun ? countdown(protoToInstant(job.nextRun), now) : "—"}
           </span>
         </div>
       ))}
@@ -133,37 +130,16 @@ export function ScheduledJobsTable({
   );
 }
 
-function StatusBadge({
-  status,
-  dark,
-}: Readonly<{
-  status: JobStatus;
-  dark: boolean;
-}>) {
-  switch (status) {
-    case JobStatus.PENDING:
-      return <Badge variant="muted" dark={dark}>pending</Badge>;
-    case JobStatus.RUNNING:
-      return <Badge variant="info" dark={dark}>running</Badge>;
-    case JobStatus.COMPLETED:
-      return <Badge variant="copper" dark={dark}>completed</Badge>;
-    case JobStatus.FAILED:
-      return <Badge variant="error" dark={dark}>failed</Badge>;
-    default:
-      return null;
-  }
+function StatusBadge({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
+  const label = job.statusLabel;
+  if (!label) return null;
+  return <Badge variant={job.statusVariant} dark={dark}>{label}</Badge>;
 }
 
 function TaskProgress({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
   const c = useThemeClass(dark);
 
-  if (
-    job.status !== JobStatus.RUNNING &&
-    job.status !== JobStatus.COMPLETED &&
-    job.status !== JobStatus.FAILED
-  ) {
-    return null;
-  }
+  if (!job.hasProgressSurface) return null;
 
   const chunksTotal = Number(job.chunksTotal);
   const chunksDone = Number(job.chunksDone);
@@ -182,7 +158,7 @@ function TaskProgress({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
       )}
       {recordsDone > 0 && (
         <>
-          {chunksTotal > 0 && " \u00B7 "}
+          {chunksTotal > 0 && " · "}
           {recordsDone.toLocaleString()} records
         </>
       )}

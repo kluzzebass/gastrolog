@@ -7,7 +7,6 @@ import { useWatchJobs } from "../../api/hooks";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
 import { useConfig } from "../../api/hooks/useSystem";
 import { useSettings } from "../../api/hooks/useSettings";
-import { JobKind } from "../../api/gen/gastrolog/v1/job_pb";
 import { toastError } from "../Toast";
 import { VaultCard } from "./VaultCard";
 import { IngesterCard } from "./IngesterCard";
@@ -41,9 +40,9 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
 
   const vaults = allVaults.filter((v) => v.isOn(nodeIdTyped, registry.localNodeId));
   const ingesters = allIngesters.filter((i) => i.isEligibleOn(nodeIdTyped));
-  const nodeJobs = jobs.filter((j) => (encode(j.nodeId) || localNodeId) === nodeId);
-  const tasks = nodeJobs.filter((j) => j.kind === JobKind.TASK);
-  const scheduled = nodeJobs.filter((j) => j.kind === JobKind.SCHEDULED);
+  const nodeJobs = jobs.filter((j) => (j.nodeId || registry.localNodeId) === nodeIdTyped);
+  const tasks = nodeJobs.filter((j) => j.isTask);
+  const scheduled = nodeJobs.filter((j) => j.isScheduled);
 
   // Expanded states per section (multi-expand).
   const [expandedVaults, setExpandedVaults] = useState<Record<string, boolean>>({});
@@ -128,19 +127,16 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
           <EmptyMessage dark={dark}>No tasks on this node.</EmptyMessage>
         ) : (
           <div className="flex flex-col gap-2">
-            {tasks.map((job) => {
-              const jid = encode(job.id);
-              return (
+            {tasks.map((job) => (
               <JobCard
-                key={jid}
+                key={job.id}
                 job={job}
                 dark={dark}
-                expanded={!!expandedJobs[jid]}
-                onToggle={() => setExpandedJobs((prev) => ({ ...prev, [jid]: !prev[jid] }))}
+                expanded={!!expandedJobs[job.id]}
+                onToggle={() => setExpandedJobs((prev) => ({ ...prev, [job.id]: !prev[job.id] }))}
                 showNodeBadge={false}
               />
-              );
-            })}
+            ))}
           </div>
         )}
       </Section>
