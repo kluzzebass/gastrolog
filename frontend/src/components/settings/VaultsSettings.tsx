@@ -206,7 +206,7 @@ export function VaultStorageForm({
   vaultName: string;
   maxRF?: number;
   // cloudLocked freezes the Cloud Storage selector. The backend rejects
-  // cloud_service_id changes on existing vaults (gastrolog-4k5mg) — to
+  // cloud_service_id changes on existing vaults (gastrolog-3ul0s) — to
   // change cloud binding, create a new vault and route data via
   // retention. The Add form leaves this false; edit-existing passes true.
   cloudLocked?: boolean;
