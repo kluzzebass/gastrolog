@@ -35,9 +35,6 @@ const (
 const (
 	// SystemServiceGetSystemProcedure is the fully-qualified name of the SystemService's GetSystem RPC.
 	SystemServiceGetSystemProcedure = "/gastrolog.v1.SystemService/GetSystem"
-	// SystemServiceListIngestersProcedure is the fully-qualified name of the SystemService's
-	// ListIngesters RPC.
-	SystemServiceListIngestersProcedure = "/gastrolog.v1.SystemService/ListIngesters"
 	// SystemServiceGetIngesterStatusProcedure is the fully-qualified name of the SystemService's
 	// GetIngesterStatus RPC.
 	SystemServiceGetIngesterStatusProcedure = "/gastrolog.v1.SystemService/GetIngesterStatus"
@@ -192,8 +189,6 @@ const (
 type SystemServiceClient interface {
 	// GetConfig returns the current configuration.
 	GetSystem(context.Context, *connect.Request[v1.GetSystemRequest]) (*connect.Response[v1.GetSystemResponse], error)
-	// ListIngesters returns all registered ingesters.
-	ListIngesters(context.Context, *connect.Request[v1.ListIngestersRequest]) (*connect.Response[v1.ListIngestersResponse], error)
 	// GetIngesterStatus returns status for a specific ingester.
 	GetIngesterStatus(context.Context, *connect.Request[v1.GetIngesterStatusRequest]) (*connect.Response[v1.GetIngesterStatusResponse], error)
 	// PutRotationPolicy creates or updates a rotation policy.
@@ -323,12 +318,6 @@ func NewSystemServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			httpClient,
 			baseURL+SystemServiceGetSystemProcedure,
 			connect.WithSchema(systemServiceMethods.ByName("GetSystem")),
-			connect.WithClientOptions(opts...),
-		),
-		listIngesters: connect.NewClient[v1.ListIngestersRequest, v1.ListIngestersResponse](
-			httpClient,
-			baseURL+SystemServiceListIngestersProcedure,
-			connect.WithSchema(systemServiceMethods.ByName("ListIngesters")),
 			connect.WithClientOptions(opts...),
 		),
 		getIngesterStatus: connect.NewClient[v1.GetIngesterStatusRequest, v1.GetIngesterStatusResponse](
@@ -637,7 +626,6 @@ func NewSystemServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 // systemServiceClient implements SystemServiceClient.
 type systemServiceClient struct {
 	getSystem             *connect.Client[v1.GetSystemRequest, v1.GetSystemResponse]
-	listIngesters         *connect.Client[v1.ListIngestersRequest, v1.ListIngestersResponse]
 	getIngesterStatus     *connect.Client[v1.GetIngesterStatusRequest, v1.GetIngesterStatusResponse]
 	putRotationPolicy     *connect.Client[v1.PutRotationPolicyRequest, v1.PutRotationPolicyResponse]
 	deleteRotationPolicy  *connect.Client[v1.DeleteRotationPolicyRequest, v1.DeleteRotationPolicyResponse]
@@ -693,11 +681,6 @@ type systemServiceClient struct {
 // GetSystem calls gastrolog.v1.SystemService.GetSystem.
 func (c *systemServiceClient) GetSystem(ctx context.Context, req *connect.Request[v1.GetSystemRequest]) (*connect.Response[v1.GetSystemResponse], error) {
 	return c.getSystem.CallUnary(ctx, req)
-}
-
-// ListIngesters calls gastrolog.v1.SystemService.ListIngesters.
-func (c *systemServiceClient) ListIngesters(ctx context.Context, req *connect.Request[v1.ListIngestersRequest]) (*connect.Response[v1.ListIngestersResponse], error) {
-	return c.listIngesters.CallUnary(ctx, req)
 }
 
 // GetIngesterStatus calls gastrolog.v1.SystemService.GetIngesterStatus.
@@ -954,8 +937,6 @@ func (c *systemServiceClient) ListLogComponents(ctx context.Context, req *connec
 type SystemServiceHandler interface {
 	// GetConfig returns the current configuration.
 	GetSystem(context.Context, *connect.Request[v1.GetSystemRequest]) (*connect.Response[v1.GetSystemResponse], error)
-	// ListIngesters returns all registered ingesters.
-	ListIngesters(context.Context, *connect.Request[v1.ListIngestersRequest]) (*connect.Response[v1.ListIngestersResponse], error)
 	// GetIngesterStatus returns status for a specific ingester.
 	GetIngesterStatus(context.Context, *connect.Request[v1.GetIngesterStatusRequest]) (*connect.Response[v1.GetIngesterStatusResponse], error)
 	// PutRotationPolicy creates or updates a rotation policy.
@@ -1081,12 +1062,6 @@ func NewSystemServiceHandler(svc SystemServiceHandler, opts ...connect.HandlerOp
 		SystemServiceGetSystemProcedure,
 		svc.GetSystem,
 		connect.WithSchema(systemServiceMethods.ByName("GetSystem")),
-		connect.WithHandlerOptions(opts...),
-	)
-	systemServiceListIngestersHandler := connect.NewUnaryHandler(
-		SystemServiceListIngestersProcedure,
-		svc.ListIngesters,
-		connect.WithSchema(systemServiceMethods.ByName("ListIngesters")),
 		connect.WithHandlerOptions(opts...),
 	)
 	systemServiceGetIngesterStatusHandler := connect.NewUnaryHandler(
@@ -1393,8 +1368,6 @@ func NewSystemServiceHandler(svc SystemServiceHandler, opts ...connect.HandlerOp
 		switch r.URL.Path {
 		case SystemServiceGetSystemProcedure:
 			systemServiceGetSystemHandler.ServeHTTP(w, r)
-		case SystemServiceListIngestersProcedure:
-			systemServiceListIngestersHandler.ServeHTTP(w, r)
 		case SystemServiceGetIngesterStatusProcedure:
 			systemServiceGetIngesterStatusHandler.ServeHTTP(w, r)
 		case SystemServicePutRotationPolicyProcedure:
@@ -1506,10 +1479,6 @@ type UnimplementedSystemServiceHandler struct{}
 
 func (UnimplementedSystemServiceHandler) GetSystem(context.Context, *connect.Request[v1.GetSystemRequest]) (*connect.Response[v1.GetSystemResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.GetSystem is not implemented"))
-}
-
-func (UnimplementedSystemServiceHandler) ListIngesters(context.Context, *connect.Request[v1.ListIngestersRequest]) (*connect.Response[v1.ListIngestersResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.ListIngesters is not implemented"))
 }
 
 func (UnimplementedSystemServiceHandler) GetIngesterStatus(context.Context, *connect.Request[v1.GetIngesterStatusRequest]) (*connect.Response[v1.GetIngesterStatusResponse], error) {

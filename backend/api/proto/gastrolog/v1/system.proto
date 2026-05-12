@@ -11,9 +11,6 @@ service SystemService {
   // GetConfig returns the current configuration.
   rpc GetSystem(GetSystemRequest) returns (GetSystemResponse);
 
-  // ListIngesters returns all registered ingesters.
-  rpc ListIngesters(ListIngestersRequest) returns (ListIngestersResponse);
-
   // GetIngesterStatus returns status for a specific ingester.
   rpc GetIngesterStatus(GetIngesterStatusRequest) returns (GetIngesterStatusResponse);
 
@@ -344,23 +341,16 @@ message RetentionPolicyConfig {
   string name = 5;
 }
 
-message ListIngestersRequest {}
-
-message ListIngestersResponse {
-  repeated IngesterInfo ingesters = 1;
-}
-
-message IngesterInfo {
+// IngesterAlive carries the per-node alive map for a single ingester, as
+// replicated through the FSM. Embedded in the WatchSystemStatus push stream
+// so the inspector can derive "running/selected" badges and per-node filters
+// without polling ListIngesters.
+message IngesterAlive {
   bytes id = 1;
-  string type = 2;
-  bool running = 3;                       // Deprecated: use node_status for per-node detail.
-  string name = 4;
-  bytes node_id = 5 [deprecated = true]; // Legacy. Use node_ids.
-  repeated bytes node_ids = 6;           // Eligible nodes from config (honored when all_nodes=false).
-  map<string, bool> node_status = 8;     // Per-node running status: nodeID → alive.
-  bool enabled = 9;                      // Whether the ingester is enabled in config.
-  bool singleton = 10;                   // HA semantics: false = parallel (every eligible node), true = Raft-assigned singleton.
-  bool all_nodes = 11;                   // When true, eligibility is the entire current cluster (re-evaluated on membership change).
+  // nodeID → alive. Empty map (or absent entry) means "no node has reported
+  // alive" — typically because the ingester was just configured and hasn't
+  // been dispatched yet.
+  map<string, bool> node_status = 2;
 }
 
 message GetIngesterStatusRequest {

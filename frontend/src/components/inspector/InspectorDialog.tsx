@@ -3,7 +3,7 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
 import { useConfig } from "../../api/hooks/useSystem";
 import { useSettings } from "../../api/hooks/useSettings";
-import { useVaults, useIngesters } from "../../api/hooks";
+import { useVaults } from "../../api/hooks";
 import { useWatchJobs } from "../../api/hooks";
 import { toastError } from "../Toast";
 import { ClusterNodeRole, ClusterNodeSuffrage } from "../../api/gen/gastrolog/v1/lifecycle_pb";
@@ -108,13 +108,12 @@ export function InspectorDialog({
 
   // Entity counts for nav badges.
   const { data: vaults } = useVaults();
-  const { data: ingesters } = useIngesters();
   const { jobs } = useWatchJobs({ onError: toastError });
 
   const routeCount = config?.routes.length ?? 0;
   const entityCounts: Record<EntityType, number> = {
     vaults: vaults?.length ?? 0,
-    ingesters: ingesters?.length ?? 0,
+    ingesters: config?.ingesters.length ?? 0,
     routes: routeCount,
     jobs: jobs.length,
     system: cluster?.nodes.length ?? 1,

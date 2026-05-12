@@ -36,7 +36,6 @@ func DefaultRoutes() map[string]RPCRoute {
 		// ── ConfigService ────────────────────────────────────────────────
 		// Reads — every node has a full Raft replica.
 		gastrologv1connect.SystemServiceGetSystemProcedure:            {Strategy: RouteLocal},
-		gastrologv1connect.SystemServiceListIngestersProcedure:        {Strategy: RouteLocal},
 		gastrologv1connect.SystemServiceGetIngesterStatusProcedure:    {Strategy: RouteLocal},
 		gastrologv1connect.SystemServiceGetSettingsProcedure:          {Strategy: RouteLocal},
 		gastrologv1connect.SystemServiceGetPreferencesProcedure:       {Strategy: RouteLocal},

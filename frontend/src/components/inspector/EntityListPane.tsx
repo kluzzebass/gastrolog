@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
-import { useVaults, useIngesters } from "../../api/hooks";
+import { useVaults } from "../../api/hooks";
 import { useWatchJobs } from "../../api/hooks";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
 import { useConfig } from "../../api/hooks/useSystem";
@@ -143,21 +143,22 @@ function VaultsList({ dark, onOpenSettings, expandTarget }: Readonly<{ dark: boo
 // ---- Ingesters ----
 
 function IngestersList({ dark, onOpenSettings, expandTarget }: Readonly<{ dark: boolean; onOpenSettings?: (tab: string, entityName?: string) => void; expandTarget?: string | null }>) {
-  const { data: ingesters, isLoading } = useIngesters();
+  const { data: config, isLoading } = useConfig();
+  const ingesters = config?.ingesters ?? [];
   const { data: cluster } = useClusterStatus();
   const liveNodeIds = new Set((cluster?.nodes ?? []).map((n) => encode(n.id)));
   const { expanded, toggle, add } = useToggleSet();
 
   // Auto-expand an ingester when deep-linked from settings.
   const [consumedTarget, setConsumedTarget] = useState<string | null>(null);
-  if (expandTarget && expandTarget !== consumedTarget && ingesters && ingesters.length > 0) {
+  if (expandTarget && expandTarget !== consumedTarget && ingesters.length > 0) {
     setConsumedTarget(expandTarget);
     const match = ingesters.find((i) => (i.name || encode(i.id)) === expandTarget);
     if (match) add(encode(match.id));
   }
 
   if (isLoading) return <Loading dark={dark} />;
-  if (!ingesters || ingesters.length === 0) return <Empty dark={dark}>No ingesters configured.</Empty>;
+  if (ingesters.length === 0) return <Empty dark={dark}>No ingesters configured.</Empty>;
 
   const sorted = [...ingesters].sort((a, b) => (a.name || encode(a.id)).localeCompare(b.name || encode(b.id)));
 

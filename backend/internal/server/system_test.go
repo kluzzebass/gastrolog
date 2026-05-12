@@ -677,47 +677,9 @@ func (m *mockPeerIngesterStats) CollectIngesterAlive(id string) map[string]bool 
 	return nil
 }
 
-func TestListIngestersRemoteRunning(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-
-	cfgStore := sysmem.NewStore()
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: cfgStore, LocalNodeID: "node-A"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	remoteIngID := glid.New()
-	_ = cfgStore.PutIngester(ctx, system.IngesterConfig{
-		ID: remoteIngID, Name: "remote-syslog", Enabled: true,
-	})
-	// Simulate remote node reporting alive via Raft store.
-	_ = cfgStore.SetIngesterAlive(ctx, remoteIngID, "node-B", true)
-
-	srv := server.New(orch, cfgStore, orchestrator.Factories{}, nil, server.Config{
-		NodeID: "node-A",
-	})
-	httpClient := &http.Client{Transport: &embeddedTransport{handler: srv.Handler()}}
-	client := gastrologv1connect.NewSystemServiceClient(httpClient, "http://embedded")
-
-	resp, err := client.ListIngesters(ctx, connect.NewRequest(&gastrologv1.ListIngestersRequest{}))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var found *gastrologv1.IngesterInfo
-	for _, ing := range resp.Msg.Ingesters {
-		if glid.FromBytes(ing.Id) == remoteIngID {
-			found = ing
-		}
-	}
-	if found == nil {
-		t.Fatal("remote ingester not found in list")
-	}
-	if !found.Running {
-		t.Error("expected Running=true for remote ingester")
-	}
-}
+// Aggregation of running state across the cluster moved from the
+// (now-removed) ListIngesters RPC into the WatchSystemStatus push stream's
+// IngesterAlive map; coverage for that lives in TestBuildIngesterAlive.
 
 func TestGetIngesterStatusRemote(t *testing.T) {
 	t.Parallel()
@@ -817,7 +779,7 @@ func TestGetIngesterStatusLocal(t *testing.T) {
 	}
 }
 
-func TestListIngestersNoPeerStats(t *testing.T) {
+func TestIngesterAliveNoSetAlive(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
@@ -827,39 +789,20 @@ func TestListIngestersNoPeerStats(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	remoteIngID := glid.New()
+	ingID := glid.New()
 	_ = cfgStore.PutIngester(ctx, system.IngesterConfig{
-		ID: remoteIngID, Name: "remote-syslog", Enabled: true,
+		ID: ingID, Name: "syslog-x", Enabled: true,
 	})
 
-	// No PeerIngesterStats provided (single-node mode).
+	// No SetIngesterAlive call and no peer stats: Running must be false.
 	srv := server.New(orch, cfgStore, orchestrator.Factories{}, nil, server.Config{
 		NodeID: "node-A",
 	})
 	httpClient := &http.Client{Transport: &embeddedTransport{handler: srv.Handler()}}
 	client := gastrologv1connect.NewSystemServiceClient(httpClient, "http://embedded")
 
-	resp, err := client.ListIngesters(ctx, connect.NewRequest(&gastrologv1.ListIngestersRequest{}))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var found *gastrologv1.IngesterInfo
-	for _, ing := range resp.Msg.Ingesters {
-		if glid.FromBytes(ing.Id) == remoteIngID {
-			found = ing
-		}
-	}
-	if found == nil {
-		t.Fatal("remote ingester not found in list")
-	}
-	if found.Running {
-		t.Error("expected Running=false when no peer stats available")
-	}
-
-	// GetIngesterStatus should also work without error.
 	statusResp, err := client.GetIngesterStatus(ctx, connect.NewRequest(&gastrologv1.GetIngesterStatusRequest{
-		Id: remoteIngID.Bytes(),
+		Id: ingID.Bytes(),
 	}))
 	if err != nil {
 		t.Fatal(err)

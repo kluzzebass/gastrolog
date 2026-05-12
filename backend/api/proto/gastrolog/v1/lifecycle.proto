@@ -142,4 +142,8 @@ message WatchSystemStatusResponse {
   GetRouteStatsResponse route_stats = 3;
   repeated VaultInfo vaults = 4;
   GetStatsResponse stats = 5;
+  // Per-ingester runtime alive map, replicated from the FSM. Sent on every
+  // stats tick so the inspector's per-card "running/selected" badge can
+  // derive node_status without a separate ListIngesters round-trip.
+  repeated IngesterAlive ingester_alive = 6;
 }

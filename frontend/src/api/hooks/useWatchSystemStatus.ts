@@ -3,6 +3,7 @@ import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { lifecycleClient, refreshAuth } from "../client";
 import type { WatchSystemStatusResponse } from "../gen/gastrolog/v1/lifecycle_pb";
+import { ingesterAliveListToMap } from "./useIngesterAlive";
 
 /** Apply a single WatchSystemStatus message to the query cache. */
 function applyStatusMessage(qc: QueryClient, msg: WatchSystemStatusResponse) {
@@ -20,6 +21,10 @@ function applyStatusMessage(qc: QueryClient, msg: WatchSystemStatusResponse) {
   if (msg.stats) {
     qc.setQueryData(["stats", "all"], msg.stats);
   }
+  // Ingester alive map — push the FSM state straight into the cache so the
+  // inspector's per-card running/selected badges and per-node ingester
+  // filters stay coherent with config edits without a separate refetch.
+  qc.setQueryData(["ingester-alive"], ingesterAliveListToMap(msg.ingesterAlive));
 }
 
 /**

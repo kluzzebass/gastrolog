@@ -2389,7 +2389,7 @@ func TestMultiNode_GetIndexesRemote(t *testing.T) {
 // Tests — Ingester stats across cluster nodes
 // ---------------------------------------------------------------------------
 
-func TestMultiNode_ListIngestersCrossNode(t *testing.T) {
+func TestMultiNode_IngesterConfigCrossNode(t *testing.T) {
 	t.Parallel()
 	h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"))
 	ctx := context.Background()
@@ -2398,7 +2398,7 @@ func TestMultiNode_ListIngestersCrossNode(t *testing.T) {
 	ingID := glid.New()
 	h.Node(t, "data-1").orch.RegisterIngester(ingID, "test-ing", "mqtt", nil)
 
-	// Also register it in the config store so ListIngesters can find it.
+	// Also register it in the config store so GetSystem reflects it cluster-wide.
 	_ = h.cfgStore.PutIngester(ctx, system.IngesterConfig{
 		ID:      ingID,
 		Name:    "test-ing",
@@ -2406,23 +2406,25 @@ func TestMultiNode_ListIngestersCrossNode(t *testing.T) {
 		NodeIDs: []string{"data-1"},
 	})
 
-	resp, err := h.configClient.ListIngesters(ctx, connect.NewRequest(&gastrologv1.ListIngestersRequest{}))
+	resp, err := h.configClient.GetSystem(ctx, connect.NewRequest(&gastrologv1.GetSystemRequest{}))
 	if err != nil {
-		t.Fatalf("ListIngesters: %v", err)
+		t.Fatalf("GetSystem: %v", err)
 	}
 
-	if len(resp.Msg.Ingesters) != 1 {
-		t.Fatalf("expected 1 ingester, got %d", len(resp.Msg.Ingesters))
+	var found *gastrologv1.IngesterConfig
+	for _, ing := range resp.Msg.Ingesters {
+		if glid.FromBytes(ing.Id) == ingID {
+			found = ing
+		}
 	}
-	ing := resp.Msg.Ingesters[0]
-	if glid.FromBytes(ing.Id) != ingID {
-		t.Errorf("ingester ID = %q, want %q", glid.FromBytes(ing.Id), ingID)
+	if found == nil {
+		t.Fatalf("ingester %s not present in GetSystem response", ingID)
 	}
-	if len(ing.NodeIds) != 1 || string(ing.NodeIds[0]) != "data-1" {
-		t.Errorf("ingester NodeIds = %v, want [data-1]", ing.NodeIds)
+	if len(found.NodeIds) != 1 || string(found.NodeIds[0]) != "data-1" {
+		t.Errorf("ingester NodeIds = %v, want [data-1]", found.NodeIds)
 	}
-	if ing.Name != "test-ing" {
-		t.Errorf("ingester Name = %q, want test-ing", ing.Name)
+	if found.Name != "test-ing" {
+		t.Errorf("ingester Name = %q, want test-ing", found.Name)
 	}
 }
 
