@@ -251,8 +251,12 @@ func (o *Orchestrator) applyIngester(recvCfg system.IngesterConfig, assignments 
 		return fmt.Errorf("unknown ingester type: %s", recvCfg.Type)
 	}
 
-	// Selected-node gate: if NodeIDs is non-empty, this node must be in it.
-	if len(recvCfg.NodeIDs) > 0 && !slices.Contains(recvCfg.NodeIDs, o.localNodeID) {
+	// Selected-node gate: NodeIDs only restricts placement when AllNodes is
+	// false. AllNodes=true means every cluster node is eligible regardless of
+	// the (legacy) NodeIDs list. Mirrors shouldRunIngester in app/dispatch.go;
+	// without the AllNodes short-circuit, cold restart only starts the
+	// ingester on whichever node happens to be in NodeIDs.
+	if !recvCfg.AllNodes && len(recvCfg.NodeIDs) > 0 && !slices.Contains(recvCfg.NodeIDs, o.localNodeID) {
 		return nil
 	}
 
