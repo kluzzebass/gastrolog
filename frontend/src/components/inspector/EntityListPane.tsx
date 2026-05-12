@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
-import { useVaults } from "../../api/hooks";
+import { useVaults, useIngesters } from "../../api/hooks";
+import { type EntityID, idFromBytes } from "../../api/model/id";
 import { useWatchJobs } from "../../api/hooks";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
 import { useConfig } from "../../api/hooks/useSystem";
@@ -143,37 +144,37 @@ function VaultsList({ dark, onOpenSettings, expandTarget }: Readonly<{ dark: boo
 // ---- Ingesters ----
 
 function IngestersList({ dark, onOpenSettings, expandTarget }: Readonly<{ dark: boolean; onOpenSettings?: (tab: string, entityName?: string) => void; expandTarget?: string | null }>) {
-  const { data: config, isLoading } = useConfig();
-  const ingesters = config?.ingesters ?? [];
+  const { isLoading } = useConfig();
+  const ingesters = useIngesters();
   const { data: cluster } = useClusterStatus();
-  const liveNodeIds = new Set((cluster?.nodes ?? []).map((n) => encode(n.id)));
+  const liveNodeIds: ReadonlySet<EntityID> = new Set((cluster?.nodes ?? []).map((n) => idFromBytes(n.id)));
   const { expanded, toggle, add } = useToggleSet();
 
   // Auto-expand an ingester when deep-linked from settings.
   const [consumedTarget, setConsumedTarget] = useState<string | null>(null);
   if (expandTarget && expandTarget !== consumedTarget && ingesters.length > 0) {
     setConsumedTarget(expandTarget);
-    const match = ingesters.find((i) => (i.name || encode(i.id)) === expandTarget);
-    if (match) add(encode(match.id));
+    const match = ingesters.find((i) => i.displayLabel === expandTarget);
+    if (match) add(match.id);
   }
 
   if (isLoading) return <Loading dark={dark} />;
   if (ingesters.length === 0) return <Empty dark={dark}>No ingesters configured.</Empty>;
 
-  const sorted = [...ingesters].sort((a, b) => (a.name || encode(a.id)).localeCompare(b.name || encode(b.id)));
+  const sorted = [...ingesters].sort((a, b) => a.displayLabel.localeCompare(b.displayLabel));
 
   return (
     <div className="flex flex-col gap-3">
       <EntityHeader title="Ingesters" helpTopicId="inspector-ingesters" dark={dark} />
       {sorted.map((ing) => (
         <IngesterCard
-          key={encode(ing.id)}
+          key={ing.id}
           ingester={ing}
           liveNodeIds={liveNodeIds}
           dark={dark}
-          expanded={expanded.has(encode(ing.id))}
-          onToggle={() => toggle(encode(ing.id))}
-          onOpenSettings={onOpenSettings ? () => onOpenSettings("ingesters", ing.name || encode(ing.id)) : undefined}
+          expanded={expanded.has(ing.id)}
+          onToggle={() => toggle(ing.id)}
+          onOpenSettings={onOpenSettings ? () => onOpenSettings("ingesters", ing.displayLabel) : undefined}
         />
       ))}
     </div>
