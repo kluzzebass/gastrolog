@@ -71,6 +71,12 @@ fi
 [ -n "$GASTROLOG_INITIAL_ADMIN_USER" ]     && args="$args --initial-admin-user $GASTROLOG_INITIAL_ADMIN_USER"
 [ -n "$GASTROLOG_INITIAL_ADMIN_PASSWORD" ] && args="$args --initial-admin-password $GASTROLOG_INITIAL_ADMIN_PASSWORD"
 
+# Environment banner (gastrolog-4vr0l). Display-only UI metadata. The label
+# must not contain spaces — $args is word-split on exec; pick a single token
+# like "Kubernetes" or "Production". Wrap in your CSS color of choice.
+[ -n "$GASTROLOG_ENVIRONMENT_LABEL" ] && args="$args --environment-label $GASTROLOG_ENVIRONMENT_LABEL"
+[ -n "$GASTROLOG_ENVIRONMENT_COLOR" ] && args="$args --environment-color $GASTROLOG_ENVIRONMENT_COLOR"
+
 # Bool env vars use truthy semantics: only 1/true/yes/y/on enable the flag.
 is_truthy "$GASTROLOG_NO_AUTH" && args="$args --no-auth"
 

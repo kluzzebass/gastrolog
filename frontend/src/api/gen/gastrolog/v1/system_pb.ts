@@ -258,6 +258,21 @@ export class GetSystemResponse extends Message<GetSystemResponse> {
    */
   logLevels?: LogLevelConfig;
 
+  /**
+   * Display-only deploy metadata surfaced to the UI header banner so
+   * operators can tell at a glance which deployment they are looking at
+   * (gastrolog-4vr0l). Set via the api node's --environment-label and
+   * --environment-color flags. Empty label hides the banner.
+   *
+   * @generated from field: string environment_label = 12;
+   */
+  environmentLabel = "";
+
+  /**
+   * @generated from field: string environment_color = 13;
+   */
+  environmentColor = "";
+
   constructor(data?: PartialMessage<GetSystemResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -277,6 +292,8 @@ export class GetSystemResponse extends Message<GetSystemResponse> {
     { no: 9, name: "cloud_services", kind: "message", T: CloudService, repeated: true },
     { no: 10, name: "node_storage_configs", kind: "message", T: NodeStorageConfig, repeated: true },
     { no: 11, name: "log_levels", kind: "message", T: LogLevelConfig },
+    { no: 12, name: "environment_label", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 13, name: "environment_color", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetSystemResponse {

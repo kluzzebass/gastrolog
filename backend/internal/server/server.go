@@ -157,6 +157,13 @@ type Config struct {
 	// from the system config store (gastrolog-3flfp). Used by the
 	// PutLogLevels / ListLogComponents RPC handlers. Nil disables both.
 	LogFilter *logging.ComponentFilterHandler
+
+	// EnvironmentLabel and EnvironmentColor are display-only deploy
+	// metadata surfaced to the UI header so operators can tell at a
+	// glance which deployment they are looking at (gastrolog-4vr0l).
+	// Empty label hides the banner.
+	EnvironmentLabel string
+	EnvironmentColor string
 }
 
 // CertManager interface for TLS certificate management.
@@ -211,6 +218,10 @@ type Server struct {
 	bootstrapTokenFn          func() (string, error)
 
 	logFilter *logging.ComponentFilterHandler // gastrolog-3flfp; nil disables PutLogLevels/ListLogComponents
+
+	// Environment banner (gastrolog-4vr0l). Empty label hides the banner.
+	environmentLabel string
+	environmentColor string
 
 	mu                 sync.Mutex
 	listener           net.Listener
@@ -275,6 +286,8 @@ func New(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orche
 		bootstrapTokenServeSecret: cfg.BootstrapTokenServeSecret,
 		bootstrapTokenFn:          cfg.BootstrapTokenFn,
 		logFilter:          cfg.LogFilter,
+		environmentLabel:   cfg.EnvironmentLabel,
+		environmentColor:   cfg.EnvironmentColor,
 		shutdown:           make(chan struct{}),
 		rl:                 newRateLimiter(5.0/60.0, 5), // 5 req/min per IP, burst of 5
 	}
@@ -511,7 +524,9 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 		OnLookupConfigChange: func(cfg system.LookupConfig, mm system.MaxMindConfig) {
 			s.applyLookupConfig(cfg, mm, lookupRegistry)
 		},
-		LogFilter: s.logFilter,
+		LogFilter:        s.logFilter,
+		EnvironmentLabel: s.environmentLabel,
+		EnvironmentColor: s.environmentColor,
 	})
 	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown, s.cluster, s.cfgStore, s.localNodeID, s.clusterAddress, s.peerStats, s.localStatsFn, s.logger)
 	if s.joinClusterFn != nil {

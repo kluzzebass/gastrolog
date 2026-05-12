@@ -70,6 +70,12 @@ type SystemServerConfig struct {
 	Tokens               *auth.TokenService
 	PlacementReconcile   func(ctx context.Context) // synchronous placement for RPC handlers
 	LogFilter            *logging.ComponentFilterHandler // log-level RPC handlers (gastrolog-3flfp); nil disables them
+
+	// Environment banner (gastrolog-4vr0l). Display-only metadata
+	// surfaced on GetSystem so the UI header can render a per-deployment
+	// label. Empty label hides the banner.
+	EnvironmentLabel string
+	EnvironmentColor string
 }
 
 // SystemServer implements the ConfigService.
@@ -91,6 +97,8 @@ type SystemServer struct {
 	tokens               *auth.TokenService
 	placementReconcile   func(ctx context.Context) // synchronous placement, nil in non-cluster mode
 	logFilter            *logging.ComponentFilterHandler
+	environmentLabel     string
+	environmentColor     string
 }
 
 var _ gastrologv1connect.SystemServiceHandler = (*SystemServer)(nil)
@@ -115,6 +123,8 @@ func NewSystemServer(cfg SystemServerConfig) *SystemServer {
 		tokens:               cfg.Tokens,
 		placementReconcile:   cfg.PlacementReconcile,
 		logFilter:            cfg.LogFilter,
+		environmentLabel:     cfg.EnvironmentLabel,
+		environmentColor:     cfg.EnvironmentColor,
 	}
 }
 
@@ -162,6 +172,8 @@ func (s *SystemServer) buildFullSystem(ctx context.Context) (*apiv1.GetSystemRes
 	if s.configSignal != nil {
 		resp.SystemRaftIndex = s.configSignal.Version()
 	}
+	resp.EnvironmentLabel = s.environmentLabel
+	resp.EnvironmentColor = s.environmentColor
 	return resp, nil
 }
 

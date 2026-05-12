@@ -36,6 +36,11 @@ ADMIN_USER="${GLOG_ADMIN_USER:-admin}"
 ADMIN_PASS="${GLOG_ADMIN_PASS:-admin123}"
 BASE_PORT="${GLOG_BASE_PORT:-4564}"
 PPROF="${GLOG_PPROF:-false}"
+# Environment banner (gastrolog-4vr0l). Tags every node in this cluster as
+# the local dev deployment in the UI header so operators don't confuse it
+# with a K8s/staging instance. Single token only (no spaces).
+ENV_LABEL="${GLOG_ENV_LABEL:-Development}"
+ENV_COLOR="${GLOG_ENV_COLOR:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -63,6 +68,16 @@ cluster_port() { echo $((BASE_PORT + ($1 - 1) * 10 + 2)); }
 node_dir()     { echo "${DATA_DIR}/node${1}"; }
 node_sock()    { echo "${DATA_DIR}/node${1}/gastrolog.sock"; }
 
+# env_flags emits the --environment-label / --environment-color arguments
+# when configured. Empty values produce no output, so unflagged invocations
+# look identical to before.
+env_flags() {
+  local flags=""
+  [[ -n "$ENV_LABEL" ]] && flags=" --environment-label $ENV_LABEL"
+  [[ -n "$ENV_COLOR" ]] && flags="${flags} --environment-color $ENV_COLOR"
+  echo "$flags"
+}
+
 # Build the imux command for running all nodes (no join flags).
 build_imux_cmd() {
   local names=""
@@ -74,7 +89,7 @@ build_imux_cmd() {
     if [[ "$PPROF" == true ]]; then
       extra=" --pprof localhost:$((6059 + i))"
     fi
-    cmds+=("$GLOG server --home $(node_dir "$i") --listen :$(http_port "$i") --cluster-addr :$(cluster_port "$i")${extra}")
+    cmds+=("$GLOG server --home $(node_dir "$i") --listen :$(http_port "$i") --cluster-addr :$(cluster_port "$i")${extra}$(env_flags)")
   done
   # TUI: plain `imux` (flags + commands). `imux run` is non-interactive batch mode.
   echo "imux --name ${names} --tee ${DATA_DIR}/cluster.log $(printf ' "%s"' "${cmds[@]}")"
@@ -143,7 +158,7 @@ enroll_nodes() {
       --name "node-1" \
       --home "$(node_dir 1)" \
       --listen ":$(http_port 1)" \
-      --cluster-addr ":$(cluster_port 1)" > "${DATA_DIR}/init-1.log" 2>&1 &
+      --cluster-addr ":$(cluster_port 1)" $(env_flags) > "${DATA_DIR}/init-1.log" 2>&1 &
     PIDS+=($!)
 
     for _ in $(seq 1 60); do
@@ -160,7 +175,7 @@ enroll_nodes() {
     --name "node-1" \
     --home "$(node_dir 1)" \
     --listen ":$(http_port 1)" \
-    --cluster-addr ":$(cluster_port 1)" 2>&1 | tee "${DATA_DIR}/init-1.log" | while IFS= read -r line; do
+    --cluster-addr ":$(cluster_port 1)" $(env_flags) 2>&1 | tee "${DATA_DIR}/init-1.log" | while IFS= read -r line; do
       if [[ "$line" == *"cluster join token"*"token="* ]]; then
         token="${line##*token=}"
         token="${token%% *}"
@@ -194,7 +209,7 @@ enroll_nodes() {
       --listen ":$(http_port "$i")" \
       --cluster-addr ":$(cluster_port "$i")" \
       --join-addr "localhost:$(cluster_port 1)" \
-      --join-token "$TOKEN" > "${DATA_DIR}/init-${i}.log" 2>&1 &
+      --join-token "$TOKEN" $(env_flags) > "${DATA_DIR}/init-${i}.log" 2>&1 &
     PIDS+=($!)
   done
 

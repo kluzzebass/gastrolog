@@ -127,6 +127,13 @@ type RunConfig struct {
 	InitialAdminUser     string
 	InitialAdminPassword string
 
+	// Environment banner (gastrolog-4vr0l). Display-only metadata surfaced
+	// to the UI header so operators can tell which deployment they are
+	// looking at without inspecting hostnames or URLs. Both empty by
+	// default; empty label hides the banner entirely.
+	EnvironmentLabel string
+	EnvironmentColor string
+
 	// SlogCapture receives copies of slog records for the "self" ingester.
 	// Created by main and shared with the CaptureHandler. Nil disables capture.
 	SlogCapture <-chan logging.CapturedRecord
@@ -449,6 +456,9 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 		BootstrapTokenServeSecret: cfg.BootstrapTokenServeSecret,
 		BootstrapTokenFn:          makeBootstrapTokenFn(cfgStore),
+
+		EnvironmentLabel: cfg.EnvironmentLabel,
+		EnvironmentColor: cfg.EnvironmentColor,
 
 		LogFilter: cfg.LogFilter,
 	})
@@ -1040,6 +1050,10 @@ type serverDeps struct {
 	BootstrapTokenServeSecret string
 	BootstrapTokenFn          func() (string, error)
 
+	// Environment banner (gastrolog-4vr0l). Display-only metadata.
+	EnvironmentLabel string
+	EnvironmentColor string
+
 	LogFilter *logging.ComponentFilterHandler
 }
 
@@ -1066,6 +1080,8 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 			PlacementReconcile: deps.PlacementReconcile,
 			BootstrapTokenServeSecret: deps.BootstrapTokenServeSecret,
 			BootstrapTokenFn:          deps.BootstrapTokenFn,
+			EnvironmentLabel:          deps.EnvironmentLabel,
+			EnvironmentColor:          deps.EnvironmentColor,
 			LogFilter:                 deps.LogFilter,
 		})
 		// Provide the cluster's ForwardRPC handler with the internal mux.
