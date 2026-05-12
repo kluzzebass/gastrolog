@@ -1,13 +1,13 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
-import { useIngesterStatus, useConfig, useIngesterAlive } from "../../api/hooks";
+import { useIngesterStatus, useIngesterAlive, useNodeRegistry } from "../../api/hooks";
 import { formatBytes } from "../../utils/units";
 import { Badge } from "../Badge";
 import { CogIcon } from "../icons";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { NodeBadge } from "../settings/NodeBadge";
 import { CrossLinkBadge } from "./CrossLinkBadge";
-import { type EntityID, idFromBytes } from "../../api/model/id";
+import { type EntityID } from "../../api/model/id";
 import type { Ingester, NodeStatusMap } from "../../api/model/ingester";
 
 interface IngesterCardProps {
@@ -77,7 +77,7 @@ function IngesterDetail({ ingester, nodeStatus, liveNodeIds, dark }: Readonly<{
 }>) {
   const c = useThemeClass(dark);
   const { data, isLoading } = useIngesterStatus(ingester.id);
-  const { data: config } = useConfig();
+  const nodes = useNodeRegistry();
 
   if (isLoading) {
     return <LoadingPlaceholder dark={dark} className="px-4 py-3" />;
@@ -157,8 +157,7 @@ function IngesterDetail({ ingester, nodeStatus, liveNodeIds, dark }: Readonly<{
             {nodesToShow.map((nodeId) => {
               const alive = nodeStatus[nodeId] ?? false;
               const dead = !liveNodeIds.has(nodeId);
-              const nodeCfg = config?.nodeConfigs.find((n) => idFromBytes(n.id) === nodeId);
-              const label = nodeCfg?.name || nodeId;
+              const label = nodes.nameOf(nodeId);
               let variant: "info" | "warn" | "error" = "info";
               if (dead) variant = "error";
               else if (!alive) variant = "warn";

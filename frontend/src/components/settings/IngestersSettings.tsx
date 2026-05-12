@@ -1,4 +1,5 @@
 import { encode } from "../../api/glid";
+import { idFromBytes } from "../../api/model/id";
 import { useState, useReducer } from "react";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
 import { useConfig, usePutIngester, useDeleteIngester, useGenerateName, useIngesterDefaults, useCheckListenAddrs } from "../../api/hooks";
@@ -261,7 +262,7 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
 function IngesterNodeBadge({ nodeIds, allNodes, mode, dark }: Readonly<{ nodeIds: Uint8Array[]; allNodes: boolean; mode: IngesterMode; dark: boolean }>) {
   if (allNodes || mode === IngesterMode.PASSIVE) return <Badge variant="info" dark={dark}>all nodes</Badge>;
   if (nodeIds.length > 1) return <Badge variant="muted" dark={dark}>{String(nodeIds.length)} nodes</Badge>;
-  if (nodeIds.length === 1) return <NodeBadge nodeId={encode(nodeIds[0]!)} dark={dark} />; // NOSONAR — length check guards access
+  if (nodeIds.length === 1) return <NodeBadge nodeId={idFromBytes(nodeIds[0]!)} dark={dark} />; // NOSONAR — length check guards access
   return null;
 }
 

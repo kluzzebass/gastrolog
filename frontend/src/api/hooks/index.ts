@@ -42,6 +42,8 @@ export {
 } from "./useIngesters";
 export { useIngesterAlive } from "./useIngesterAlive";
 export type { IngesterAliveMap } from "./useIngesterAlive";
+export { useNodeRegistry } from "./useNodes";
+export type { NodeRegistry } from "./useNodes";
 export { useJob, useWatchJobs } from "./useJobs";
 export { useWatchSystem } from "./useWatchSystem";
 export { useWatchChunks } from "./useWatchChunks";

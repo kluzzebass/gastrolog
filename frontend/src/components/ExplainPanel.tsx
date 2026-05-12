@@ -3,6 +3,7 @@ import { useThemeClass } from "../hooks/useThemeClass";
 import { ChunkPlan, BranchPlan, PipelineStep, QueryPipelineStage } from "../api/client";
 import { formatChunkId } from "../utils";
 import { encode } from "../api/glid";
+import { idFromBytes } from "../api/model/id";
 import { NodeBadge } from "./settings/NodeBadge";
 import {
   type Range,
@@ -429,7 +430,7 @@ function ExplainChunk({
               {encode(plan.vaultId)}
             </span>
           )}
-          {encode(plan.nodeId) && <NodeBadge nodeId={encode(plan.nodeId)} dark={dark} />}
+          {encode(plan.nodeId) && <NodeBadge nodeId={idFromBytes(plan.nodeId)} dark={dark} />}
           <span
             className={`font-mono text-sm font-medium ${
               isSkipped

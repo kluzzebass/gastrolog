@@ -11,6 +11,7 @@ import { useThemeClass } from "../hooks/useThemeClass";
 import { SEVERITY_LEVELS, SEVERITIES } from "../lib/severity";
 import { LoadingPlaceholder } from "./LoadingPlaceholder";
 import { encode } from "../api/glid";
+import { idFromBytes } from "../api/model/id";
 
 interface SearchSidebarProps {
   dark: boolean;
@@ -128,7 +129,7 @@ export function SearchSidebar({
                   active={selectedVault === encode(vault.id)}
                   onClick={() => onVaultSelect(encode(vault.id))}
                   dark={dark}
-                  nodeId={encode(vault.nodeId)}
+                  nodeId={idFromBytes(vault.nodeId)}
                   remote={vault.remote}
                 />
               ))

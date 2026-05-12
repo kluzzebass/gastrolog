@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { FieldSummary } from "../utils";
 import { useThemeClass } from "../hooks/useThemeClass";
 import { NodeBadge } from "./settings/NodeBadge";
+import type { EntityID } from "../api/model/id";
 
 export function SidebarSection({
   title,
@@ -128,7 +129,7 @@ export function VaultButton({
   active: boolean;
   onClick: () => void;
   dark: boolean;
-  nodeId?: string;
+  nodeId?: EntityID;
   remote?: boolean;
 }>) {
   const c = useThemeClass(dark);
