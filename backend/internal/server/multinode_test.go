@@ -168,10 +168,11 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 	peerIngesterStats := &mnPeerIngesterStats{nodes: peerRouteNodes}
 	peerVaultStats := &mnPeerVaultStats{nodes: peerRouteNodes}
 
-	routingFwd := newDirectUnaryForwarder(nodes, cfgStore, coordinatorID)
+	vaultsDir := t.TempDir()
+	routingFwd := newDirectUnaryForwarder(t, nodes, cfgStore, coordinatorID, vaultsDir)
 
 	coordNode := nodes[coordinatorID]
-	srv := server.New(coordNode.orch, cfgStore, orchestrator.Factories{}, nil, server.Config{
+	srv := server.New(coordNode.orch, cfgStore, orchestrator.Factories{VaultsDir: vaultsDir}, nil, server.Config{
 		NodeID:            coordinatorID,
 		RemoteSearcher:    remoteSearcher,
 		RemoteIndexer:     remoteIndexer,
@@ -829,7 +830,8 @@ type directUnaryForwarder struct {
 	handlers map[string]http.Handler // nodeID → Connect mux handler
 }
 
-func newDirectUnaryForwarder(nodes map[string]multinodeTestNode, cfgStore system.Store, coordinatorID string) *directUnaryForwarder {
+func newDirectUnaryForwarder(t *testing.T, nodes map[string]multinodeTestNode, cfgStore system.Store, coordinatorID, vaultsDir string) *directUnaryForwarder {
+	t.Helper()
 	handlers := make(map[string]http.Handler)
 	for id, node := range nodes {
 		if id == coordinatorID {
@@ -837,7 +839,7 @@ func newDirectUnaryForwarder(nodes map[string]multinodeTestNode, cfgStore system
 		}
 		// BuildInternalHandler returns a mux with NoAuthInterceptor and
 		// NO routing interceptor — same as the real ForwardRPC dispatch path.
-		remoteSrv := server.New(node.orch, cfgStore, orchestrator.Factories{}, nil, server.Config{
+		remoteSrv := server.New(node.orch, cfgStore, orchestrator.Factories{VaultsDir: vaultsDir}, nil, server.Config{
 			NodeID: id,
 			NoAuth: true,
 		})
