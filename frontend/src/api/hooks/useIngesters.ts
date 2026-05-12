@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { systemClient } from "../client";
-import { IngesterConfig, WatchIngesterStatusResponse } from "../gen/gastrolog/v1/system_pb";
+import { IngesterInfo, WatchIngesterStatusResponse } from "../gen/gastrolog/v1/system_pb";
 import { protoArraySharing } from "./protoSharing";
 import { useSystemMutation } from "./useSystem";
 import { decode, encodeString } from "../glid";
@@ -14,7 +14,10 @@ export function useIngesters() {
       const response = await systemClient.listIngesters({});
       return response.ingesters;
     },
-    structuralSharing: protoArraySharing(IngesterConfig.equals),
+    // Must match the response element type (IngesterInfo, not IngesterConfig)
+    // or proto.equals walks the wrong field list and silently ignores
+    // nodeStatus/running deltas — alive-map updates would then be suppressed.
+    structuralSharing: protoArraySharing(IngesterInfo.equals),
     staleTime: 60_000, // push-invalidated by WatchConfig on config changes
   });
 }
