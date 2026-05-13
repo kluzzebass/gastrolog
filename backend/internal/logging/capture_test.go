@@ -18,6 +18,9 @@ func newTestCaptureHandler(t *testing.T, capSize int) (*CaptureHandler, chan Cap
 	h := NewCaptureHandler(inner, ch, nil)
 	// Default threshold is Warn — lower so tests can emit Info records.
 	h.SetMinCaptureLevel(slog.LevelDebug)
+	// Default gate is OFF (gastrolog-6bvu6) — open it so tests that
+	// exercise the capture path actually see records on the channel.
+	h.SetEnabled(true)
 	return h, ch
 }
 
@@ -94,6 +97,102 @@ func TestCaptureHandlerWithAttrsClonesShareDroppedCounter(t *testing.T) {
 	}
 }
 
+// TestCaptureHandlerDefaultGateClosed verifies that a freshly constructed
+// CaptureHandler does NOT tee records into the channel until SetEnabled(true)
+// is called. This is the steady-state behavior when the self ingester is
+// disabled — producers must not fill the channel without a consumer.
+// See gastrolog-6bvu6.
+func TestCaptureHandlerDefaultGateClosed(t *testing.T) {
+	t.Parallel()
+	ch := make(chan CapturedRecord, 16)
+	inner := slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug})
+	h := NewCaptureHandler(inner, ch, nil)
+	h.SetMinCaptureLevel(slog.LevelDebug)
+	// Note: NOT calling SetEnabled — exercising the default closed state.
+
+	for range 50 {
+		emitRecord(t, h, "would-overflow-if-gate-leaked")
+	}
+
+	if got := len(ch); got != 0 {
+		t.Errorf("len(ch) with gate closed = %d, want 0", got)
+	}
+	if got := h.DroppedCount(); got != 0 {
+		t.Errorf("DroppedCount with gate closed = %d, want 0", got)
+	}
+	if h.IsEnabled() {
+		t.Error("IsEnabled() = true on fresh handler, want false")
+	}
+}
+
+// TestCaptureHandlerGateToggle verifies that flipping the gate at runtime
+// starts and stops the capture path without reinstalling the handler chain.
+// Models the self-ingester enable/disable cycle.
+func TestCaptureHandlerGateToggle(t *testing.T) {
+	t.Parallel()
+	ch := make(chan CapturedRecord, 16)
+	inner := slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug})
+	h := NewCaptureHandler(inner, ch, nil)
+	h.SetMinCaptureLevel(slog.LevelDebug)
+
+	// Gate closed: records discarded.
+	emitRecord(t, h, "closed")
+	if got := len(ch); got != 0 {
+		t.Fatalf("len(ch) before open = %d, want 0", got)
+	}
+
+	// Gate open: records flow.
+	h.SetEnabled(true)
+	emitRecord(t, h, "open")
+	if got := len(ch); got != 1 {
+		t.Fatalf("len(ch) after open = %d, want 1", got)
+	}
+	<-ch // drain
+
+	// Gate closed again: records discarded.
+	h.SetEnabled(false)
+	emitRecord(t, h, "closed-again")
+	if got := len(ch); got != 0 {
+		t.Errorf("len(ch) after re-close = %d, want 0", got)
+	}
+}
+
+// TestCaptureHandlerGateSharedAcrossClones verifies that WithAttrs/WithGroup
+// clones share the gate atomic with the parent — toggling on the parent
+// must take effect on scoped loggers too, and vice versa. Without this,
+// component-tagged loggers would have a stale gate.
+func TestCaptureHandlerGateSharedAcrossClones(t *testing.T) {
+	t.Parallel()
+	ch := make(chan CapturedRecord, 16)
+	inner := slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug})
+	h := NewCaptureHandler(inner, ch, nil)
+	h.SetMinCaptureLevel(slog.LevelDebug)
+
+	scoped := h.WithAttrs([]slog.Attr{slog.String("k", "v")}).(*CaptureHandler)
+	grouped := h.WithGroup("g").(*CaptureHandler)
+
+	// All gates start closed.
+	emitRecord(t, scoped, "scoped-closed")
+	emitRecord(t, grouped, "grouped-closed")
+	if got := len(ch); got != 0 {
+		t.Fatalf("len(ch) with parent gate closed = %d, want 0", got)
+	}
+
+	// Open via the parent — clones must observe the change.
+	h.SetEnabled(true)
+	if !scoped.IsEnabled() {
+		t.Error("scoped clone reports gate closed after parent opened")
+	}
+	if !grouped.IsEnabled() {
+		t.Error("grouped clone reports gate closed after parent opened")
+	}
+	emitRecord(t, scoped, "scoped-open")
+	emitRecord(t, grouped, "grouped-open")
+	if got := len(ch); got != 2 {
+		t.Errorf("len(ch) after parent opened = %d, want 2", got)
+	}
+}
+
 // TestCaptureHandlerSkipComponentNotCounted verifies that records from
 // skip-listed components (pipeline-internal goroutines) are never sent
 // to the channel and therefore never contribute to the drop count, even
@@ -104,6 +203,7 @@ func TestCaptureHandlerSkipComponentNotCounted(t *testing.T) {
 	inner := slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug})
 	h := NewCaptureHandler(inner, ch, []string{"chunk"})
 	h.SetMinCaptureLevel(slog.LevelDebug)
+	h.SetEnabled(true)
 
 	scoped := h.WithAttrs([]slog.Attr{slog.String("component", "chunk")}).(*CaptureHandler)
 

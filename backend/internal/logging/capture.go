@@ -29,6 +29,15 @@ type CaptureHandler struct {
 	skip     map[string]struct{}
 	minLevel *atomic.Int64 // minimum severity for capture (hot-reloadable)
 
+	// enabled gates whether records are teed to ch at all. When false,
+	// Handle short-circuits to the inner handler without touching the
+	// channel — so the capture channel stays empty when there is no
+	// consumer (self ingester disabled). Shared across WithAttrs/WithGroup
+	// clones via pointer semantics. Flipped by the self ingester at
+	// Run/teardown so a runtime enable/disable toggles the gate without
+	// reinstalling the slog handler chain. See gastrolog-6bvu6.
+	enabled *atomic.Bool
+
 	// dropped counts records that tried to enter the capture channel but
 	// were rejected because the buffer was full. Shared across all
 	// WithAttrs/WithGroup clones via pointer semantics so every handler
@@ -54,8 +63,24 @@ func NewCaptureHandler(inner slog.Handler, ch chan<- CapturedRecord, skipCompone
 		ch:       ch,
 		skip:     skip,
 		minLevel: lvl,
+		enabled:  &atomic.Bool{}, // default: disabled, flipped on by self ingester Run
 		dropped:  &atomic.Int64{},
 	}
+}
+
+// SetEnabled toggles whether captured records are teed into the channel.
+// When false, Handle skips the send entirely — records still reach the
+// inner handler (console output) but never enter the capture channel.
+// The self ingester flips this on at the top of Run and off in the
+// deferred teardown, so the channel only fills while there is a
+// consumer. Safe for concurrent use.
+func (h *CaptureHandler) SetEnabled(on bool) {
+	h.enabled.Store(on)
+}
+
+// Enabled reports whether the capture path is currently teeing records.
+func (h *CaptureHandler) IsEnabled() bool {
+	return h.enabled.Load()
 }
 
 // SetMinCaptureLevel sets the minimum severity for captured records.
@@ -76,6 +101,15 @@ func (h *CaptureHandler) Enabled(ctx context.Context, level slog.Level) bool {
 }
 
 func (h *CaptureHandler) Handle(ctx context.Context, r slog.Record) error {
+	// Gate: skip the capture path entirely when no consumer is draining
+	// the channel (self ingester disabled). Without this gate every
+	// WARN+ record would accumulate monotonically in the capture
+	// channel; the chanwatch monitor would eventually trip and drops
+	// would start — even though nothing is wrong. See gastrolog-6bvu6.
+	if !h.enabled.Load() {
+		return h.inner.Handle(ctx, r)
+	}
+
 	// Check if this record's component is in the skip set.
 	if comp := h.findComponent(r); comp != "" {
 		if _, skip := h.skip[comp]; skip {
@@ -123,6 +157,7 @@ func (h *CaptureHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 		preAttrs: newPre,
 		skip:     h.skip,     // shared (read-only)
 		minLevel: h.minLevel, // shared (atomic)
+		enabled:  h.enabled,  // shared (atomic)
 		dropped:  h.dropped,  // shared (atomic)
 	}
 }
@@ -137,6 +172,7 @@ func (h *CaptureHandler) WithGroup(name string) slog.Handler {
 		preAttrs: h.preAttrs,
 		skip:     h.skip,
 		minLevel: h.minLevel,
+		enabled:  h.enabled,
 		dropped:  h.dropped,
 	}
 }

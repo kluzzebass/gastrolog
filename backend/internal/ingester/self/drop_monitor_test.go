@@ -59,6 +59,11 @@ func newTestIngester(t *testing.T) (*ingester, *logging.CaptureHandler, *fakeAle
 	inner := slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelDebug})
 	capture := logging.NewCaptureHandler(inner, ch, nil)
 	capture.SetMinCaptureLevel(slog.LevelDebug)
+	// These tests call evaluateDrops directly without going through
+	// Run, so flip the gate open here (Run is what opens it in
+	// production). Without this the gate (gastrolog-6bvu6) would
+	// short-circuit Handle and no drops would be observed.
+	capture.SetEnabled(true)
 
 	alerts := &fakeAlerts{}
 	return &ingester{
