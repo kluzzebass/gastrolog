@@ -712,6 +712,38 @@ func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cf
 	}
 
 	if cfg.JoinAddr != "" {
+		// JoinAddr is set in two scenarios that look identical at the
+		// pod level:
+		//   1. Fresh join — new voter, no local FSM state. Config must
+		//      replicate from the leader; we return nil and let the
+		//      dispatcher's Notify path create vault-ctl Raft groups as
+		//      vault configs apply.
+		//   2. Restart of an existing voter (K8s rolling upgrade, pod
+		//      reschedule, etc.) — local FSM was just restored from a
+		//      snapshot at the previous incarnation's commit index, and
+		//      already contains the full system config. Snapshot restore
+		//      goes through fsm.Restore() (NOT fsm.Apply()), so no
+		//      NotifyVaultConfigPut events fire for the existing vaults.
+		//      If we return nil here, the orchestrator boots with vaults=0
+		//      forever and no vault-ctl Raft groups ever start on this
+		//      node. See gastrolog-1gh5s — operator-visible symptom was
+		//      vault-ctl groups stuck without a leader after every
+		//      rolling upgrade.
+		//
+		// Distinguish the two by probing the local FSM. If it already has
+		// vault configs or a bootstrapped server-settings JWT secret,
+		// this is a restart — use the local state directly. Otherwise
+		// fall through to the fresh-join return.
+		if cfg.ConfigType == "raft" {
+			localCfg, _ := cfgStore.Load(ctx)
+			ss, _ := cfgStore.LoadServerSettings(ctx)
+			if localCfg != nil && (len(localCfg.Config.Vaults) > 0 || ss.Auth.JWTSecret != "") {
+				logger.Info("restart of existing voter detected; using local FSM config",
+					"vaults", len(localCfg.Config.Vaults),
+					"ingesters", len(localCfg.Config.Ingesters))
+				return localCfg, true, nil
+			}
+		}
 		logger.Info("joining cluster, config will replicate from leader")
 		return nil, false, nil
 	}
