@@ -1,2 +1,8 @@
+[install]
+# Block npm package versions younger than 7 days from being resolved.
+# Defends against fast supply-chain attacks (publish → harvest → yank window).
+# Already-locked versions in bun.lock are unaffected.
+minimumReleaseAge = 604800
+
 [test]
 preload = ["./test/setup.ts"]
