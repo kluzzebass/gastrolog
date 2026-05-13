@@ -21,7 +21,7 @@ export function EnvironmentRibbon({ label, color }: Readonly<EnvironmentRibbonPr
   return (
     <div className="fixed bottom-0 left-0 w-72 h-72 overflow-hidden pointer-events-none z-50 select-none">
       <div
-        className="absolute -left-14 bottom-9 w-96 text-center font-body font-black text-2xl py-2 tracking-wider uppercase"
+        className="absolute -left-16 bottom-9 w-96 text-center font-body font-black text-2xl py-2 tracking-wider uppercase"
         style={{
           transform: "rotate(30deg)",
           color: textColor,
