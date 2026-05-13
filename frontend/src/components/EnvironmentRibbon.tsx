@@ -24,8 +24,19 @@ export function EnvironmentRibbon({ label, color }: Readonly<EnvironmentRibbonPr
         className="absolute -left-14 bottom-9 w-96 text-center font-body font-black text-2xl py-2 tracking-wider uppercase"
         style={{
           transform: "rotate(30deg)",
-          backgroundColor: color,
           color: textColor,
+          // Layered background: a linear-gradient with alternating low-alpha
+          // white / black stops simulates the highlights and shadows of
+          // fabric folds; the solid operator color sits underneath so it
+          // shows through. Gradient runs `to right` in the ribbon's local
+          // frame, which after rotation runs along the ribbon's length —
+          // the direction folds in real fabric would catch light.
+          background: `linear-gradient(75deg,
+              rgba(255, 255, 255, 0.18) 0%,
+              rgba(0, 0, 0, 0.12) 25%,
+              rgba(255, 255, 255, 0.18) 50%,
+              rgba(0, 0, 0, 0.12) 75%,
+              rgba(255, 255, 255, 0.18) 100%), ${color}`,
           // Saturate dims the color; drop-shadow adds a soft dark halo
           // that traces the ribbon's outline so it reads as a piece of
           // fabric wrapped around the viewport corner rather than a flat
