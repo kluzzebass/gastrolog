@@ -39,6 +39,8 @@ When creating a **question** issue, always draft the title and description first
 
 **Always create new branches before picking up issues.** Branch names **must** include the issue ID.
 
+**Stacked branches are allowed** when a follow-up issue naturally builds on an in-review branch (e.g. you discover a related bug while validating the parent fix and don't want to wait for merge). Branch the child off the parent's HEAD, keep each branch single-issue, and either (a) merge the stack as one when both close together, or (b) merge the parent first and rebase the child onto main. What is NOT allowed is **lumping** — multiple issues' commits intermixed on a single branch with no clean revertable history. Stacking ≠ lumping: each branch still owns exactly one issue's work.
+
 ### Closing issues
 
 **NEVER** close issues without explicit user approval:
