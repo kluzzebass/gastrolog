@@ -363,6 +363,46 @@ func TestCatchupNilManifestUsesAllChunks(t *testing.T) {
 	}
 }
 
+// gastrolog-19241: symmetric peer-to-peer catchup. A follower with the
+// chunk locally must be allowed to push it to a requester that lacks it,
+// regardless of which side is the placement leader. Pre-fix this errored
+// with "not placement leader for vault X (follower)", which is exactly
+// what blocked the leader-from-follower backfill path needed to recover
+// after leadership transferred to a node that didn't have historical
+// chunks.
+func TestCatchupSelectedChunksFromFollowerSucceeds(t *testing.T) {
+	t.Parallel()
+	orch := newTestOrch(t, Config{LocalNodeID: "node-follower"})
+	orch.logger = slog.Default()
+
+	vaultID := glid.New()
+	// Build the instance as a FOLLOWER. Pre-fix, this would cause
+	// CatchupSelectedChunks to reject the request outright.
+	vaultInst := newReplicationInstance(t, vaultID, nil, true, "node-leader")
+	vault := NewVault(vaultID, vaultInst)
+	orch.RegisterVault(vault)
+
+	mock := &replicationFakeReplicator{}
+	orch.SetChunkReplicator(mock)
+
+	if _, _, err := orch.Append(vaultID, testRecord("rec-0")); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	active := vaultInst.Chunks.Active()
+	if err := orch.SealActiveChunk(vaultID, active.ID); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	scheduled, err := orch.CatchupSelectedChunks(
+		context.Background(), vaultID, "node-leader-requester", []chunk.ChunkID{active.ID})
+	if err != nil {
+		t.Fatalf("expected nil error from follower-side catchup, got %v", err)
+	}
+	if scheduled != 1 {
+		t.Errorf("scheduled = %d, want 1 (the single sealed chunk)", scheduled)
+	}
+}
+
 // ==========================================================================
 // Multi-node file-backed replication tests
 //
