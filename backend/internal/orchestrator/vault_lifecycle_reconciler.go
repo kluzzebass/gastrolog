@@ -687,7 +687,7 @@ func (r *VaultLifecycleReconciler) SweepLocalOrphans() {
 }
 
 // SweepMissingReplicas walks the FSM's sealed-chunk manifest and asks
-// the placement leader to re-push any sealed chunks this node should
+// every placement peer to re-push any sealed chunks this node should
 // have but doesn't. This is the create-side mirror of SweepLocalOrphans:
 // where SweepLocalOrphans cleans up local files the FSM has tombstoned,
 // SweepMissingReplicas pulls in local files the FSM expects but the
@@ -695,33 +695,39 @@ func (r *VaultLifecycleReconciler) SweepLocalOrphans() {
 // give a node "every 20s, reconcile my local store against my replicated
 // FSM in both directions."
 //
-// Failure mode this sweep recovers from: leader sealed a chunk while
-// this node was offline; replicateToFollower's gRPC push to this node
-// failed; no retry queue exists at the leader. Vault-ctl Raft caught
-// our FSM up via snapshot install or log replay on rejoin so the
-// manifest entry is present, but the actual chunk records aren't on
-// disk. SweepMissingReplicas detects the gap and asks the leader to
-// re-push via the existing RequestReplicaCatchup RPC.
+// Failure modes this sweep recovers from:
 //
-// Only follower TIs perform this sweep. The leader's own local store
-// is, by definition, the source of truth — if a chunk is in its FSM
-// but not on its disk, the chunk has already been lost and no peer
-// catchup will recover it. (That scenario is a leader-side disk
-// failure outside this sweep's scope.) Cloud-backed chunks live in
-// shared object storage and are skipped: they are not a local-replica
-// concern. See gastrolog-2dgvj.
+//   - Leader sealed a chunk while a follower was offline;
+//     replicateToFollower's gRPC push failed; no retry queue exists at
+//     the leader. Vault-ctl Raft caught the follower's FSM up via
+//     snapshot install or log replay on rejoin so the manifest entry is
+//     present, but the actual chunk records aren't on disk
+//     (gastrolog-2dgvj).
+//
+//   - Leadership transferred to a node that joined the placement set
+//     after some chunks were written. The new leader's FSM has the
+//     manifest entry (replicated via vault-ctl Raft) but its local
+//     chunk manager never received the bytes. The old chunks live on
+//     the prior replica set; the new leader must pull them from a peer
+//     instead of declaring them lost to the stale-fsm sweep
+//     (gastrolog-19241).
+//
+// Both roles run this sweep. The peer set is asymmetric by role:
+// followers ask the leader (FollowerTargets is empty on followers,
+// LeaderNodeID points at the leader); the leader asks every follower
+// (FollowerTargets enumerates them). Cloud-backed chunks live in shared
+// object storage and are skipped — they are not a local-replica concern.
 func (r *VaultLifecycleReconciler) SweepMissingReplicas() {
 	if r.fsm == nil || r.vaultInst == nil || r.vaultInst.Chunks == nil {
 		return
 	}
-	if !r.vaultInst.IsFollower {
-		return // leader's own disk is the source of truth
-	}
-	if r.vaultInst.LeaderNodeID == "" {
-		return // no known placement leader; nowhere to send the request
-	}
 	if r.orch == nil || r.orch.chunkReplicator == nil {
 		return // no transport wired; cluster mode requires a replicator
+	}
+
+	peers := r.replicationPeers()
+	if len(peers) == 0 {
+		return // nothing to ask
 	}
 
 	// Local index of what's on disk so the diff is O(N+M) not O(N×M).
@@ -755,24 +761,56 @@ func (r *VaultLifecycleReconciler) SweepMissingReplicas() {
 	}
 
 	r.logger.Info("missing-replica sweep: requesting catchup",
-		"leader", r.vaultInst.LeaderNodeID, "missing", len(missing))
+		"peers", peers, "missing", len(missing))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	scheduled, err := r.orch.chunkReplicator.RequestReplicaCatchup(
-		ctx, r.vaultInst.LeaderNodeID, r.vaultID, missing, r.localNodeID)
-	if err != nil {
-		// The next sweep tick will retry. Possible causes: leader changed
-		// after we resolved instance.LeaderNodeID, leader is unreachable, peer
-		// connection still warming up. None of these are terminal — the
-		// FSM diff is local state, so we converge on the next tick.
-		r.logger.Warn("missing-replica sweep: request failed",
-			"leader", r.vaultInst.LeaderNodeID, "missing", len(missing), "error", err)
-		return
+	// Ask every peer. Whichever peer has a given chunk schedules the
+	// push; peers that don't have it return scheduled=0 silently. The
+	// receiver dedupes if multiple peers push the same chunk because
+	// the second arrival hits the local-already-present gate.
+	for _, peerNodeID := range peers {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		scheduled, err := r.orch.chunkReplicator.RequestReplicaCatchup(
+			ctx, peerNodeID, r.vaultID, missing, r.localNodeID)
+		cancel()
+		if err != nil {
+			// The next sweep tick will retry. Causes: peer changed after
+			// we resolved placement state, peer unreachable, peer connection
+			// warming up. None terminal — the FSM diff is local state, so
+			// we converge on the next tick.
+			r.logger.Warn("missing-replica sweep: request failed",
+				"peer", peerNodeID, "missing", len(missing), "error", err)
+			continue
+		}
+		r.logger.Info("missing-replica sweep: peer scheduled pushes",
+			"peer", peerNodeID, "scheduled", scheduled, "requested", len(missing))
 	}
-	r.logger.Info("missing-replica sweep: leader scheduled pushes",
-		"leader", r.vaultInst.LeaderNodeID, "scheduled", scheduled, "requested", len(missing))
+}
+
+// replicationPeers returns the placement-peer node IDs this reconciler
+// should ask for missing chunks. Followers ask the leader; leaders ask
+// every follower target. Self is always excluded. Empty IDs (transient
+// unknown state during placement transitions) are filtered so we don't
+// dial nowhere.
+func (r *VaultLifecycleReconciler) replicationPeers() []string {
+	if r.vaultInst == nil {
+		return nil
+	}
+	if r.vaultInst.IsFollower {
+		if r.vaultInst.LeaderNodeID == "" || r.vaultInst.LeaderNodeID == r.localNodeID {
+			return nil
+		}
+		return []string{r.vaultInst.LeaderNodeID}
+	}
+	peers := make([]string, 0, len(r.vaultInst.FollowerTargets))
+	seen := map[string]bool{r.localNodeID: true}
+	for _, t := range r.vaultInst.FollowerTargets {
+		if t.NodeID == "" || seen[t.NodeID] {
+			continue
+		}
+		peers = append(peers, t.NodeID)
+		seen[t.NodeID] = true
+	}
+	return peers
 }
 
 // staleLeaderFSMGracePeriod is how long a sealed-but-not-on-disk-locally

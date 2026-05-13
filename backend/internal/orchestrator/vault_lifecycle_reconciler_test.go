@@ -11,6 +11,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/raftgroup"
+	"gastrolog/internal/system"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 
 	hraft "github.com/hashicorp/raft"
@@ -668,42 +669,169 @@ func TestSweepMissingReplicasRequestsOnlySealedAndAbsentEntries(t *testing.T) {
 	}
 }
 
-// TestSweepMissingReplicasSkipsLeader pins that the sweep is a
-// follower-only operation. The leader's local store is by definition
-// the source of truth — if a chunk is in its FSM but not on its disk,
-// the chunk has been lost and no peer catchup will recover it. Running
-// the sweep on the leader would waste an RPC and could mask a real
-// disk-failure incident.
-func TestSweepMissingReplicasSkipsLeader(t *testing.T) {
+// gastrolog-19241: when leadership transfers to a node that doesn't
+// have historical sealed chunks (e.g. a scale-out joiner that became
+// leader), SweepMissingReplicas on the LEADER must ask its follower
+// targets to push the missing chunks back. Without this, the new
+// leader is permanently under-replicated until the stale-fsm sweep
+// deletes the chunks as "unrecoverable" — silent data loss.
+//
+// This test pins the leader-side direction of the now-symmetric peer-
+// to-peer catchup: leader has empty disk, FollowerTargets enumerates
+// two peers, the sweep must dial both.
+func TestSweepMissingReplicasFromLeaderAsksEveryFollower(t *testing.T) {
 	t.Parallel()
 
 	fsm := vaultctlfsm.New()
 	cm := &reconcilerFakeChunkManager{}
 	now := time.Now()
 
-	// Sealed in FSM, missing on disk — the same shape that would trigger
-	// a request on a follower. On a leader, the sweep must skip entirely.
 	idMissing := chunk.NewChunkID()
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idMissing, now, now, now)})
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idMissing, now, 1, 1, now, now, now, false)})
 
-	orch := newTestOrch(t, Config{LocalNodeID: "node-A"})
-	fake := &captureCatchupReplicator{}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-leader"})
+	fake := &captureCatchupReplicator{scheduledRet: 1}
 	orch.SetChunkReplicator(fake)
 
 	vaultInst := &VaultInstance{
-		VaultID:     glid.New(),
+		VaultID:    glid.New(),
 		Type:       "memory",
 		Chunks:     cm,
-		IsFollower: false, // this node IS the placement leader
+		IsFollower: false, // this node IS the leader
+		FollowerTargets: []system.ReplicationTarget{
+			{NodeID: "node-follower-1"},
+			{NodeID: "node-follower-2"},
+		},
 	}
-	rec := NewVaultLifecycleReconciler(orch, glid.New(), vaultInst, "node-A", slog.Default())
+	rec := NewVaultLifecycleReconciler(orch, glid.New(), vaultInst, "node-leader", slog.Default())
 	rec.Wire(fsm)
 
 	rec.SweepMissingReplicas()
 
-	if fake.calls.Load() != 0 {
-		t.Errorf("leader must not request catchup, got %d call(s)", fake.calls.Load())
+	if got := fake.calls.Load(); got != 2 {
+		t.Fatalf("leader must request catchup from every follower target, got %d call(s)", got)
+	}
+	// Last-call wins on the recorder; that's fine — both peers were called
+	// with the same chunk set, and the test asserts the count + the chunk
+	// identity. (Per-call ordering is exercised separately if it matters.)
+	if len(fake.lastChunks) != 1 || fake.lastChunks[0] != idMissing {
+		t.Errorf("requested chunks = %v, want only [%s]", fake.lastChunks, idMissing)
+	}
+	if fake.lastRequester != "node-leader" {
+		t.Errorf("requester = %q, want %q", fake.lastRequester, "node-leader")
+	}
+}
+
+// gastrolog-19241: a leader with no FollowerTargets (single-node
+// placement, or placement just collapsed mid-failover) must not dial
+// anywhere. The next placement tick will re-populate FollowerTargets.
+func TestSweepMissingReplicasFromLeaderWithNoFollowersIsNoOp(t *testing.T) {
+	t.Parallel()
+
+	fsm := vaultctlfsm.New()
+	cm := &reconcilerFakeChunkManager{}
+	now := time.Now()
+
+	idMissing := chunk.NewChunkID()
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idMissing, now, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idMissing, now, 1, 1, now, now, now, false)})
+
+	orch := newTestOrch(t, Config{LocalNodeID: "node-leader"})
+	fake := &captureCatchupReplicator{}
+	orch.SetChunkReplicator(fake)
+
+	vaultInst := &VaultInstance{
+		VaultID:         glid.New(),
+		Type:            "memory",
+		Chunks:          cm,
+		IsFollower:      false,
+		FollowerTargets: nil, // RF=1, or placement in flux
+	}
+	rec := NewVaultLifecycleReconciler(orch, glid.New(), vaultInst, "node-leader", slog.Default())
+	rec.Wire(fsm)
+
+	rec.SweepMissingReplicas()
+
+	if got := fake.calls.Load(); got != 0 {
+		t.Errorf("leader with no follower targets must not dial; got %d call(s)", got)
+	}
+}
+
+// gastrolog-19241: a transient failure to reach one peer must not
+// short-circuit the sweep. The leader keeps dialing remaining peers;
+// the next sweep tick retries the failed one. This is the failure-path
+// mirror of TestSweepMissingReplicasFromLeaderAsksEveryFollower.
+func TestSweepMissingReplicasFromLeaderContinuesPastPeerError(t *testing.T) {
+	t.Parallel()
+
+	fsm := vaultctlfsm.New()
+	cm := &reconcilerFakeChunkManager{}
+	now := time.Now()
+
+	idMissing := chunk.NewChunkID()
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idMissing, now, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idMissing, now, 1, 1, now, now, now, false)})
+
+	orch := newTestOrch(t, Config{LocalNodeID: "node-leader"})
+	fake := &captureCatchupReplicator{scheduledRet: 1, failNextWith: errors.New("transient")}
+	orch.SetChunkReplicator(fake)
+
+	vaultInst := &VaultInstance{
+		VaultID:    glid.New(),
+		Type:       "memory",
+		Chunks:     cm,
+		IsFollower: false,
+		FollowerTargets: []system.ReplicationTarget{
+			{NodeID: "node-follower-1"}, // first call fails
+			{NodeID: "node-follower-2"}, // sweep must still try this one
+		},
+	}
+	rec := NewVaultLifecycleReconciler(orch, glid.New(), vaultInst, "node-leader", slog.Default())
+	rec.Wire(fsm)
+
+	rec.SweepMissingReplicas()
+
+	if got := fake.calls.Load(); got != 2 {
+		t.Errorf("after one peer error, sweep must still dial the rest; got %d call(s)", got)
+	}
+}
+
+// FollowerTargets containing the leader's own ID (a placement-state
+// edge during reconfiguration) must be filtered out — the leader must
+// not ask itself.
+func TestSweepMissingReplicasFromLeaderSkipsSelfInFollowerTargets(t *testing.T) {
+	t.Parallel()
+
+	fsm := vaultctlfsm.New()
+	cm := &reconcilerFakeChunkManager{}
+	now := time.Now()
+
+	idMissing := chunk.NewChunkID()
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idMissing, now, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idMissing, now, 1, 1, now, now, now, false)})
+
+	orch := newTestOrch(t, Config{LocalNodeID: "node-leader"})
+	fake := &captureCatchupReplicator{scheduledRet: 1}
+	orch.SetChunkReplicator(fake)
+
+	vaultInst := &VaultInstance{
+		VaultID:    glid.New(),
+		Type:       "memory",
+		Chunks:     cm,
+		IsFollower: false,
+		FollowerTargets: []system.ReplicationTarget{
+			{NodeID: "node-leader"}, // self — must be skipped
+			{NodeID: "node-follower-1"},
+		},
+	}
+	rec := NewVaultLifecycleReconciler(orch, glid.New(), vaultInst, "node-leader", slog.Default())
+	rec.Wire(fsm)
+
+	rec.SweepMissingReplicas()
+
+	if got := fake.calls.Load(); got != 1 {
+		t.Errorf("must skip self in FollowerTargets, got %d call(s)", got)
 	}
 }
 

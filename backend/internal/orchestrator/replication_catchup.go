@@ -154,20 +154,29 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID glid.GLID, n
 	return nil
 }
 
-// CatchupSelectedChunks is the placement-leader-side handler for the
-// follower-driven RequestReplicaCatchup RPC. The follower's lifecycle
-// reconciler (SweepMissingReplicas) computes its FSM-vs-disk diff and
-// sends the requested chunk IDs to the leader; this method validates
-// each chunk against catchupCandidates' filters (sealed locally,
-// cloud-backed exclusion, FSM manifest membership) and fans pushes out
-// asynchronously via the existing replicateToFollower machinery.
+// CatchupSelectedChunks is the receiver-side handler for the
+// RequestReplicaCatchup RPC. A peer's lifecycle reconciler
+// (SweepMissingReplicas) computes its FSM-vs-disk diff and sends the
+// requested chunk IDs to any peer that might have them; this method
+// validates each chunk against catchupCandidates' filters (sealed
+// locally, cloud-backed exclusion, FSM manifest membership) and fans
+// pushes out asynchronously via the existing replicateToFollower
+// machinery.
 //
-// Returns the count of pushes scheduled — not delivered. The follower
+// Returns the count of pushes scheduled — not delivered. The requester
 // will re-request anything still missing on its next sweep tick if a
 // push fails after this call returns. Asynchronous fan-out is a
 // deliberate choice: the RPC stays cheap, the slow per-chunk transfers
 // run on a single goroutine sequentially per (vault, requester) to
-// avoid storming the bandwidth path. See gastrolog-2dgvj.
+// avoid storming the bandwidth path.
+//
+// Symmetric peer-to-peer (gastrolog-19241): both followers and leaders
+// can be requesters AND responders. The receiver doesn't need to be the
+// placement leader — it just needs to have the chunks locally. This
+// enables a newly-elected leader to backfill historical chunks from
+// followers that still have them, instead of waiting for the stale-fsm
+// sweep to declare the chunks unrecoverable. See gastrolog-2dgvj for
+// the original (follower→leader) design.
 func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID glid.GLID, requesterNodeID string, chunkIDs []chunk.ChunkID) (uint32, error) {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
@@ -176,9 +185,6 @@ func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID glid.G
 		return 0, fmt.Errorf("vault %s not found", vaultID)
 	}
 	vaultInst := vault.Instance
-	if vaultInst.IsFollower {
-		return 0, fmt.Errorf("not placement leader for vault %s (follower)", vaultID)
-	}
 	if o.chunkReplicator == nil {
 		return 0, errors.New("no chunk replicator configured")
 	}
