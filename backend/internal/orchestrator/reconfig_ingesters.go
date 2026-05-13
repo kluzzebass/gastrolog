@@ -12,7 +12,7 @@ func (o *Orchestrator) AddIngester(id glid.GLID, name, ingType string, passive b
 	o.mu.Lock()
 
 	// Stop existing ingester if present (idempotent replace).
-	if cancel, ok := o.ingesterCancels[id]; ok && o.running {
+	if cancel, ok := o.ingesterCancels[id]; ok && o.running.Load() {
 		cancel()
 		delete(o.ingesterCancels, id)
 	}
@@ -25,7 +25,7 @@ func (o *Orchestrator) AddIngester(id glid.GLID, name, ingType string, passive b
 	}
 
 	// If running, start the ingester immediately.
-	if o.running && o.ingestCh != nil {
+	if o.running.Load() && o.ingestCh != nil {
 		ctx, cancel := context.WithCancel(context.Background())
 		o.ingesterCancels[id] = cancel
 
@@ -52,7 +52,7 @@ func (o *Orchestrator) RemoveIngester(id glid.GLID) error {
 
 	// If running, cancel the ingester's context.
 	cancel, hasCancel := o.ingesterCancels[id]
-	if o.running && hasCancel {
+	if o.running.Load() && hasCancel {
 		cancel()
 		delete(o.ingesterCancels, id)
 	}

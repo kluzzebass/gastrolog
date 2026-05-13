@@ -1449,6 +1449,17 @@ func (o *Orchestrator) RefreshVaultCtlMembers(clusterNodes []system.NodeConfig, 
 	o.mu.RUnlock()
 
 	for _, vaultID := range vaultIDs {
+		// Joiners can land here with a vault that was registered before
+		// their own NodeConfig had propagated into the cluster FSM —
+		// tryStartClusterRaftGroup returned nil on the original
+		// AddVault and the vault-ctl Raft group was never created on
+		// this node. Re-attempt creation now that we have a complete
+		// resolvable member set; the call is idempotent and returns
+		// the existing group when it's already up. Without this,
+		// joiners stay permanently missing from every vault-ctl group,
+		// blocking AddVoter commits cluster-wide once quorum starts
+		// requiring an ACK from a new voter. See gastrolog-5n6xz.
+		o.ensureVaultControlPlaneRaftGroup(vaultID, clusterNodes, factories)
 		o.vaultCtlLeaders.SetDesiredMembers(vaultID, members)
 	}
 }

@@ -1,11 +1,19 @@
 package orchestrator
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"gastrolog/internal/glid"
 )
+
+// readinessRefreshInterval governs how often the orchestrator recomputes
+// the cached LocalVaultsReplicationReady value. 500 ms keeps staleness well
+// under the default K8s readiness probe period (10 s) while letting the
+// /readyz handler stay strictly lock-free. See gastrolog-5n6xz.
+const readinessRefreshInterval = 500 * time.Millisecond
 
 // Vault readiness — canonical definition.
 //
@@ -61,12 +69,71 @@ func vaultReplicationReadinessErr(vaultID glid.GLID, v *Vault) error {
 }
 
 // LocalVaultsReplicationReady reports whether every vault that hosts at least
-// one local vault instance has replication metadata ready. Vaults registered
-// with zero local instances are ignored so routing-only shells do not fail
-// load-balancer readiness (gastrolog-4ip1o).
+// one local vault instance has replication metadata ready. Returns the value
+// cached by the readiness refresher goroutine — never blocks on o.mu, so the
+// /readyz HTTP handler stays responsive during long-held writer activity
+// (vault-ctl AddVoter bursts on K8s scale-out, vault registration, etc.).
+//
+// Staleness is bounded by readinessRefreshInterval (typically ~500 ms),
+// which is well under the K8s readiness probe period. The cache is seeded
+// true at construction so newly-created orchestrators with empty vault maps
+// match legacy synchronous semantics.
+//
+// Tests that need a synchronous result (RegisterVault → assert ready in the
+// same step, without spinning up the refresher) should call
+// liveReplicationReady. See gastrolog-5n6xz, gastrolog-4ip1o.
 func (o *Orchestrator) LocalVaultsReplicationReady() bool {
+	return o.cachedReplicationReady.Load()
+}
+
+// liveReplicationReady computes the same predicate synchronously by walking
+// the vault map under o.mu.RLock. The cached LocalVaultsReplicationReady
+// uses this on each refresher tick; tests use it directly when they need
+// an immediate answer after a registry mutation.
+func (o *Orchestrator) liveReplicationReady() bool {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
+	for _, v := range o.vaults {
+		if v.Instance == nil {
+			continue
+		}
+		if err := v.ReadinessErr(); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// runReadinessRefresher periodically recomputes liveReplicationReady and
+// publishes the result into cachedReplicationReady. Uses TryRLock so a
+// writer holding o.mu cannot starve the refresher itself — when the lock
+// is unavailable, the cache stays at its last-good value and the next tick
+// retries. This is the second half of the /readyz responsiveness fix: even
+// if computing the live value would block, the cache continues to reflect
+// the last successful observation rather than freezing the HTTP handler.
+//
+// Exits when ctx is cancelled. See gastrolog-5n6xz.
+func (o *Orchestrator) runReadinessRefresher(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		if o.mu.TryRLock() {
+			ready := o.liveReplicationReadyLocked()
+			o.mu.RUnlock()
+			o.cachedReplicationReady.Store(ready)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// liveReplicationReadyLocked is the lock-free body of liveReplicationReady,
+// extracted so the readiness refresher can compute the predicate after
+// acquiring o.mu via TryRLock without re-entering the lock.
+func (o *Orchestrator) liveReplicationReadyLocked() bool {
 	for _, v := range o.vaults {
 		if v.Instance == nil {
 			continue

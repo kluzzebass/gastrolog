@@ -246,7 +246,14 @@ type Orchestrator struct {
 	pressureGate *chanwatch.PressureGate // shared signal for ingester throttling
 	cancel       context.CancelFunc
 	done         chan struct{}
-	running      bool
+	// running is an atomic so IsRunning() — read by the /readyz HTTP
+	// handler on every probe — never blocks on o.mu. Holding it as a
+	// plain bool guarded by o.mu reintroduced the original gastrolog-5n6xz
+	// freeze through the back door: kubelet's probe took o.mu.RLock,
+	// which starved behind any long-held o.mu.Lock writer regardless of
+	// the cached replication-ready flag. Start/Stop use CompareAndSwap
+	// to preserve the prior check-then-set mutual exclusion.
+	running      atomic.Bool
 	ingesterWg   sync.WaitGroup // tracks ingester goroutines
 	digestWg     sync.WaitGroup // tracks digest goroutine
 	writeWg      sync.WaitGroup // tracks write goroutine
@@ -327,6 +334,15 @@ type Orchestrator struct {
 	// chunk metadata when multiraft is enabled). Membership reconciliation
 	// runs on the vault ctl Raft leader inside its leader epoch.
 	vaultCtlLeaders *vaultCtlLeaderManager
+
+	// cachedReplicationReady mirrors liveReplicationReady, updated by the
+	// readiness refresher goroutine (~500 ms cadence). LocalVaultsReplicationReady
+	// reads this atomic so the /readyz HTTP handler stays responsive even
+	// when o.mu is contended by a vault-ctl AddVoter burst or other
+	// long-held write lock. See gastrolog-5n6xz. Seeded true in New so
+	// orchestrators that have not yet started still report ready when their
+	// vault map is empty (matches legacy semantics).
+	cachedReplicationReady atomic.Bool
 
 	// Shutdown phase (nil in tests / single-node setups without a
 	// Phase wired). When non-nil, hot-path replication helpers like
@@ -659,6 +675,12 @@ func New(cfg Config) (*Orchestrator, error) {
 		cacheEvictionLogger: compCacheEviction.Apply(baseLogger),
 		cloudHealthLogger:   compCloudHealth.Apply(baseLogger),
 	}
+
+	// Seed the cached readiness flag so /readyz reports true while the
+	// vault map is still empty (matches the legacy live-check semantics)
+	// even before the readiness refresher goroutine has run a tick. The
+	// refresher starts in Start() and overwrites this on its first pass.
+	o.cachedReplicationReady.Store(true)
 
 	// Wire up post-seal callback for cron rotation so sealed chunks
 	// get compressed and indexed (same pipeline as ingest-triggered seals).
