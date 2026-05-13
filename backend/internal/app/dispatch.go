@@ -596,6 +596,22 @@ func (d *configDispatcher) rebuildVaultIfInstanceMissing(ctx context.Context, v 
 		d.updateInstanceRoleIfNeeded(ctx, v.ID, existing)
 		return
 	}
+	// The vault may not be registered in the orchestrator yet — typically
+	// because we got here via a NotifyVaultPlacementsSet that came in over
+	// post-snapshot Raft log replay while the corresponding NotifyVaultPut
+	// was inside the snapshot itself. Snapshot restore (fsm.Restore) does
+	// NOT fire onApply notifications, so the dispatcher never saw the
+	// vault-put for this vault. Without this guard, AddVaultInstance below
+	// fails with ErrVaultNotFound and the orchestrator permanently lacks
+	// the vault until the operator forces a config write. See gastrolog-3idjc.
+	if !slices.Contains(d.orch.ListVaults(), v.ID) {
+		if err := d.orch.AddVault(ctx, v, d.factories); err != nil &&
+			!errors.Is(err, orchestrator.ErrDuplicateID) {
+			d.logger.Error("dispatch: add vault before instance",
+				"vault", v.ID, "error", err)
+			return
+		}
+	}
 	// Instance doesn't exist locally yet — add it incrementally.
 	if err := d.orch.AddVaultInstance(ctx, v.ID, d.factories); err != nil {
 		d.logger.Error("dispatch: add vault instance",

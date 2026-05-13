@@ -88,6 +88,7 @@ type mockOrch struct {
 	unregisterIDs      []glid.GLID // IDs passed to UnregisterVault
 	unregisterErr      error
 	removeIngesterIDs  []glid.GLID // IDs passed to RemoveIngester
+	addVaultCalls      []glid.GLID // IDs passed to AddVault
 	reloadFiltersCalls int         // number of ReloadFilters calls
 
 	// Vault drain tracking.
@@ -107,7 +108,14 @@ func (m *mockOrch) VaultType(id glid.GLID) string {
 	return ""
 }
 
-func (m *mockOrch) AddVault(context.Context, system.VaultConfig, orchestrator.Factories) error {
+func (m *mockOrch) AddVault(_ context.Context, cfg system.VaultConfig, _ orchestrator.Factories) error {
+	m.addVaultCalls = append(m.addVaultCalls, cfg.ID)
+	if m.addVaultErr == nil {
+		// Mirror real-orchestrator behavior: register the vault so subsequent
+		// ListVaults() reflects it and the dispatcher's "is it registered?"
+		// check succeeds.
+		m.vaults = append(m.vaults, cfg.ID)
+	}
 	return m.addVaultErr
 }
 func (m *mockOrch) ReloadFilters(context.Context) error {
@@ -1053,6 +1061,89 @@ func TestHandle_PlacementsSet_RefreshesLeaderPointerWhenRoleUnchanged(t *testing
 	}
 }
 
+
+// gastrolog-3idjc: when a fresh joiner replays the cluster's post-snapshot
+// log, NotifyVaultPlacementsSet for a vault can arrive before the dispatcher
+// has ever seen a NotifyVaultPut for that vault — because the vault-put
+// landed inside the snapshot and snapshot restore does NOT fire onApply
+// notifications. The orchestrator's vault list is therefore empty for this
+// vault, and a naive AddVaultInstance fails with ErrVaultNotFound, leaving
+// the joiner permanently without the vault.
+//
+// rebuildVaultIfInstanceMissing must detect this and call AddVault first,
+// so the placement notification self-heals the missing registration instead
+// of erroring out forever.
+func TestHandle_PlacementsSet_RegistersVaultWhenMissing(t *testing.T) {
+	t.Parallel()
+
+	vaultID := glid.New()
+	localID := glid.New().String()
+	localStorage := glid.New()
+
+	nscs := []system.NodeStorageConfig{
+		{NodeID: localID, FileStorages: []system.FileStorage{{ID: localStorage, StorageClass: 1}}},
+	}
+	// Local node IS the leader → vaultBelongsHere true → rebuild path runs.
+	placements := []system.VaultPlacement{
+		{StorageID: localStorage.String(), Leader: true},
+	}
+
+	h := &captureHandler{}
+	mo := &mockOrch{} // empty vaults slice — simulates the missing-after-snapshot state
+	d := newTestDispatcher(mo, &stubCfgStore{
+		vault:      &system.VaultConfig{ID: vaultID, Enabled: true, Type: system.VaultTypeFile, StorageClass: 1},
+		nscs:       nscs,
+		placements: map[glid.GLID][]system.VaultPlacement{vaultID: placements},
+	}, h)
+	d.localNodeID = localID
+
+	d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPlacementsSet, ID: vaultID})
+
+	if len(mo.addVaultCalls) != 1 || mo.addVaultCalls[0] != vaultID {
+		t.Fatalf("expected defensive AddVault(%s), got %v", vaultID, mo.addVaultCalls)
+	}
+	if h.hasMessage("dispatch: add vault instance") {
+		t.Fatal("AddVaultInstance should not error: AddVault must run first when the vault is missing from the orchestrator")
+	}
+	if h.hasMessage("dispatch: add vault before instance") {
+		t.Fatal("defensive AddVault should succeed; got an error log")
+	}
+}
+
+// gastrolog-3idjc: when the vault IS already registered (steady state),
+// rebuildVaultIfInstanceMissing must not redundantly call AddVault — only
+// AddVaultInstance.
+func TestHandle_PlacementsSet_DoesNotReregisterExistingVault(t *testing.T) {
+	t.Parallel()
+
+	vaultID := glid.New()
+	localID := glid.New().String()
+	localStorage := glid.New()
+
+	nscs := []system.NodeStorageConfig{
+		{NodeID: localID, FileStorages: []system.FileStorage{{ID: localStorage, StorageClass: 1}}},
+	}
+	placements := []system.VaultPlacement{
+		{StorageID: localStorage.String(), Leader: true},
+	}
+
+	h := &captureHandler{}
+	mo := &mockOrch{
+		vaults: []glid.GLID{vaultID}, // vault already in orchestrator's list
+	}
+	d := newTestDispatcher(mo, &stubCfgStore{
+		vault:      &system.VaultConfig{ID: vaultID, Enabled: true, Type: system.VaultTypeFile, StorageClass: 1},
+		nscs:       nscs,
+		placements: map[glid.GLID][]system.VaultPlacement{vaultID: placements},
+	}, h)
+	d.localNodeID = localID
+
+	d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPlacementsSet, ID: vaultID})
+
+	if len(mo.addVaultCalls) != 0 {
+		t.Fatalf("AddVault should NOT be called when vault is already registered, got %v", mo.addVaultCalls)
+	}
+}
 
 func TestShouldRunIngesterParallelOnSelectedNode(t *testing.T) {
 	t.Parallel()
