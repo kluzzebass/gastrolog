@@ -191,6 +191,13 @@ message GetSystemResponse {
   // Per-component log level configuration. Empty default_level means
   // "use the binary's startup default" (typically INFO).
   LogLevelConfig log_levels = 11;
+
+  // Display-only deploy metadata surfaced to the UI header banner so
+  // operators can tell at a glance which deployment they are looking at
+  // (gastrolog-4vr0l). Set via the api node's --environment-label and
+  // --environment-color flags. Empty label hides the banner.
+  string environment_label = 12;
+  string environment_color = 13;
 }
 
 // RetentionRule binds a retention policy to a vault. Phase 4 (gastrolog-42f9z)

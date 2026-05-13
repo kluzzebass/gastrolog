@@ -119,6 +119,9 @@ func main() {
 				InitialAdminUser:     mustString(cmd, "initial-admin-user"),
 				InitialAdminPassword: mustString(cmd, "initial-admin-password"),
 
+				EnvironmentLabel: mustString(cmd, "environment-label"),
+				EnvironmentColor: mustString(cmd, "environment-color"),
+
 				SlogCapture:        slogCaptureCh,
 				SlogCaptureHandler: captureHandler,
 				LogFilter:          filterHandler,
@@ -153,6 +156,12 @@ func main() {
 	serverCmd.Flags().String("initial-admin-file", "", "bootstrap node only: read initial admin credentials from this file (JSON {\"username\":..., \"password\":...} or \"username:password\" line)")
 	serverCmd.Flags().String("initial-admin-user", "", "bootstrap node only: initial admin username (paired with --initial-admin-password); ignored if --initial-admin-file is set")
 	serverCmd.Flags().String("initial-admin-password", "", "bootstrap node only: initial admin password (paired with --initial-admin-user); ignored if --initial-admin-file is set")
+
+	// Environment banner (gastrolog-4vr0l). Displayed in the UI header so
+	// operators can tell at a glance which deployment they are looking at.
+	// Both are display-only metadata; empty label hides the banner entirely.
+	serverCmd.Flags().String("environment-label", "", "label rendered in the UI header banner (e.g. \"Kubernetes\", \"Development\"); empty hides the banner")
+	serverCmd.Flags().String("environment-color", "", "CSS color for the UI header banner (e.g. \"red\", \"#c4302b\"); empty uses the palette default")
 
 	versionCmd := &cobra.Command{
 		Use:   "version",

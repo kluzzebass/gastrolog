@@ -82,6 +82,11 @@ metadata:
 data:
   GASTROLOG_LISTEN: ":4564"
   GASTROLOG_CLUSTER_ADDR: "auto"
+  # Environment banner (gastrolog-4vr0l). Displayed in the UI header so
+  # operators can tell at a glance which deployment they're connected to.
+  # Single token only (no spaces). Color accepts any CSS color value.
+  GASTROLOG_ENVIRONMENT_LABEL: "Kubernetes"
+  GASTROLOG_ENVIRONMENT_COLOR: "red"
 
 ---
 # Secret for admin credentials + the bootstrap-token shared secret.

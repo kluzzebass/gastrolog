@@ -294,9 +294,15 @@ type GetSystemResponse struct {
 	NodeStorageConfigs []*NodeStorageConfig `protobuf:"bytes,10,rep,name=node_storage_configs,json=nodeStorageConfigs,proto3" json:"node_storage_configs,omitempty"`
 	// Per-component log level configuration. Empty default_level means
 	// "use the binary's startup default" (typically INFO).
-	LogLevels     *LogLevelConfig `protobuf:"bytes,11,opt,name=log_levels,json=logLevels,proto3" json:"log_levels,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	LogLevels *LogLevelConfig `protobuf:"bytes,11,opt,name=log_levels,json=logLevels,proto3" json:"log_levels,omitempty"`
+	// Display-only deploy metadata surfaced to the UI header banner so
+	// operators can tell at a glance which deployment they are looking at
+	// (gastrolog-4vr0l). Set via the api node's --environment-label and
+	// --environment-color flags. Empty label hides the banner.
+	EnvironmentLabel string `protobuf:"bytes,12,opt,name=environment_label,json=environmentLabel,proto3" json:"environment_label,omitempty"`
+	EnvironmentColor string `protobuf:"bytes,13,opt,name=environment_color,json=environmentColor,proto3" json:"environment_color,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *GetSystemResponse) Reset() {
@@ -404,6 +410,20 @@ func (x *GetSystemResponse) GetLogLevels() *LogLevelConfig {
 		return x.LogLevels
 	}
 	return nil
+}
+
+func (x *GetSystemResponse) GetEnvironmentLabel() string {
+	if x != nil {
+		return x.EnvironmentLabel
+	}
+	return ""
+}
+
+func (x *GetSystemResponse) GetEnvironmentColor() string {
+	if x != nil {
+		return x.EnvironmentColor
+	}
+	return ""
 }
 
 // RetentionRule binds a retention policy to a vault. Phase 4 (gastrolog-42f9z)
@@ -8704,7 +8724,7 @@ var File_gastrolog_v1_system_proto protoreflect.FileDescriptor
 const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\n" +
 	"\x19gastrolog/v1/system.proto\x12\fgastrolog.v1\x1a\x1agastrolog/v1/storage.proto\"\x12\n" +
-	"\x10GetSystemRequest\"\xda\x05\n" +
+	"\x10GetSystemRequest\"\xb4\x06\n" +
 	"\x11GetSystemResponse\x121\n" +
 	"\x06vaults\x18\x01 \x03(\v2\x19.gastrolog.v1.VaultConfigR\x06vaults\x12:\n" +
 	"\tingesters\x18\x02 \x03(\v2\x1c.gastrolog.v1.IngesterConfigR\tingesters\x12O\n" +
@@ -8718,7 +8738,9 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x14node_storage_configs\x18\n" +
 	" \x03(\v2\x1f.gastrolog.v1.NodeStorageConfigR\x12nodeStorageConfigs\x12;\n" +
 	"\n" +
-	"log_levels\x18\v \x01(\v2\x1c.gastrolog.v1.LogLevelConfigR\tlogLevels\"?\n" +
+	"log_levels\x18\v \x01(\v2\x1c.gastrolog.v1.LogLevelConfigR\tlogLevels\x12+\n" +
+	"\x11environment_label\x18\f \x01(\tR\x10environmentLabel\x12+\n" +
+	"\x11environment_color\x18\r \x01(\tR\x10environmentColor\"?\n" +
 	"\rRetentionRule\x12.\n" +
 	"\x13retention_policy_id\x18\x01 \x01(\fR\x11retentionPolicyId\"G\n" +
 	"\x0eVaultPlacement\x12\x1d\n" +

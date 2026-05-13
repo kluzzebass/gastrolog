@@ -42,6 +42,9 @@ services:
       # and per-task DNS only registers after the first task is healthy
       # (chicken-and-egg with the listener startup).
       GASTROLOG_CLUSTER_ADDR: auto
+      # Environment banner (gastrolog-4vr0l). Bottom-left ribbon in the UI.
+      GASTROLOG_ENVIRONMENT_LABEL: Swarm
+      GASTROLOG_ENVIRONMENT_COLOR: orange
       GASTROLOG_WRITE_BOOTSTRAP_TOKEN: /shared/token
       GASTROLOG_INITIAL_ADMIN_FILE: /run/secrets/admin_creds
     secrets:
@@ -82,6 +85,9 @@ services:
       GASTROLOG_JOIN_ADDR: tasks.gastrolog_bootstrap:4566
       GASTROLOG_BOOTSTRAP_TOKEN_FILE: /shared/token
       GASTROLOG_INITIAL_ADMIN_FILE: /run/secrets/admin_creds
+      # Environment banner (gastrolog-4vr0l). Bottom-left ribbon in the UI.
+      GASTROLOG_ENVIRONMENT_LABEL: Swarm
+      GASTROLOG_ENVIRONMENT_COLOR: orange
     secrets:
       - source: gastrolog_admin_creds
         target: admin_creds

@@ -91,6 +91,11 @@ type mnOption func(*mnConfig)
 type mnConfig struct {
 	// noVault is a set of node IDs that should have no vault.
 	noVault map[string]bool
+	// environmentLabel / environmentColor are set on the coordinator's
+	// server.Config to exercise the env-banner field propagation through
+	// GetSystem (gastrolog-4vr0l).
+	environmentLabel string
+	environmentColor string
 }
 
 // WithoutVault creates a node that has an orchestrator but no vault.
@@ -100,6 +105,15 @@ func WithoutVault(nodeIDs ...string) mnOption {
 		for _, id := range nodeIDs {
 			c.noVault[id] = true
 		}
+	}
+}
+
+// WithEnvironment sets the coordinator's environment banner label and
+// color so tests can assert they reach GetSystem (gastrolog-4vr0l).
+func WithEnvironment(label, color string) mnOption {
+	return func(c *mnConfig) {
+		c.environmentLabel = label
+		c.environmentColor = color
 	}
 }
 
@@ -181,6 +195,8 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		PeerRouteStats:    peerRouteStats,
 		PeerIngesterStats: peerIngesterStats,
 		PeerVaultStats:    peerVaultStats,
+		EnvironmentLabel:  cfg.environmentLabel,
+		EnvironmentColor:  cfg.environmentColor,
 	})
 
 	handler := srv.Handler()
@@ -2694,5 +2710,69 @@ func TestMultiNode_LookupDeletePropagation(t *testing.T) {
 	}
 	if len(ss.Lookup.HTTPLookups) != 0 {
 		t.Fatalf("expected 0 HTTP lookups after delete, got %d", len(ss.Lookup.HTTPLookups))
+	}
+}
+
+// TestEnvironmentBannerPropagates covers gastrolog-4vr0l: the api node's
+// --environment-label / --environment-color flags reach the frontend
+// through GetSystem.
+func TestEnvironmentBannerPropagates(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t,
+		[]string{"coord", "data-1"},
+		WithoutVault("coord"),
+		WithEnvironment("Kubernetes", "red"),
+	)
+
+	resp, err := h.configClient.GetSystem(context.Background(), connect.NewRequest(&gastrologv1.GetSystemRequest{}))
+	if err != nil {
+		t.Fatalf("GetSystem: %v", err)
+	}
+	if resp.Msg.EnvironmentLabel != "Kubernetes" {
+		t.Errorf("EnvironmentLabel = %q, want %q", resp.Msg.EnvironmentLabel, "Kubernetes")
+	}
+	if resp.Msg.EnvironmentColor != "red" {
+		t.Errorf("EnvironmentColor = %q, want %q", resp.Msg.EnvironmentColor, "red")
+	}
+}
+
+// TestEnvironmentBannerDefaultsEmpty covers the unconfigured path: when
+// neither flag is set, GetSystem returns empty strings so the frontend
+// renders no banner at all.
+func TestEnvironmentBannerDefaultsEmpty(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"))
+
+	resp, err := h.configClient.GetSystem(context.Background(), connect.NewRequest(&gastrologv1.GetSystemRequest{}))
+	if err != nil {
+		t.Fatalf("GetSystem: %v", err)
+	}
+	if resp.Msg.EnvironmentLabel != "" {
+		t.Errorf("EnvironmentLabel = %q, want empty (no flag set)", resp.Msg.EnvironmentLabel)
+	}
+	if resp.Msg.EnvironmentColor != "" {
+		t.Errorf("EnvironmentColor = %q, want empty (no flag set)", resp.Msg.EnvironmentColor)
+	}
+}
+
+// TestEnvironmentBannerLabelWithoutColor: setting just the label is a
+// valid configuration (color falls back to the palette default in the UI).
+func TestEnvironmentBannerLabelWithoutColor(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t,
+		[]string{"coord", "data-1"},
+		WithoutVault("coord"),
+		WithEnvironment("Development", ""),
+	)
+
+	resp, err := h.configClient.GetSystem(context.Background(), connect.NewRequest(&gastrologv1.GetSystemRequest{}))
+	if err != nil {
+		t.Fatalf("GetSystem: %v", err)
+	}
+	if resp.Msg.EnvironmentLabel != "Development" {
+		t.Errorf("EnvironmentLabel = %q, want %q", resp.Msg.EnvironmentLabel, "Development")
+	}
+	if resp.Msg.EnvironmentColor != "" {
+		t.Errorf("EnvironmentColor = %q, want empty", resp.Msg.EnvironmentColor)
 	}
 }
