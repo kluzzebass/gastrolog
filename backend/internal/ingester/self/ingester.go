@@ -80,6 +80,15 @@ func (ing *ingester) SetPressureGate(gate *chanwatch.PressureGate) {
 func (ing *ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
 	ing.logger.Info("started")
 
+	// Open the capture gate so slog records start flowing into ing.ch.
+	// Closed in the deferred teardown so the channel stops filling the
+	// moment this ingester goes away — otherwise producers would keep
+	// teeing into a channel with no consumer (gastrolog-6bvu6).
+	if ing.capture != nil {
+		ing.capture.SetEnabled(true)
+		defer ing.capture.SetEnabled(false)
+	}
+
 	// Drop monitor state (only active when both capture and alerts
 	// are wired). Polls CaptureHandler.DroppedCount on every tick and
 	// raises/clears the "self-ingester-drops" alert as the counter
