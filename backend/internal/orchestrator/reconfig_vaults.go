@@ -1023,6 +1023,7 @@ type vaultRaftCallbacks struct {
 	listChunks          func() []chunk.ChunkID
 	listRetPending      func() []chunk.ChunkID
 	overlayFromFSM      func(chunk.ChunkMeta) chunk.ChunkMeta
+	chunkResidency      func(id chunk.ChunkID, placementNodeIDs []string) []string
 	manifestEntries     func() []vaultctlfsm.ManifestEntry
 	manifestEntry       func(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool)
 }
@@ -1163,6 +1164,12 @@ func buildVaultRaftCallbacks(r *hraft.Raft, fsm *vaultctlfsm.FSM, applier vaultc
 			// not-yet-sealed.
 			m.Sealed = e.State == chunk.ChunkStateSealed
 			return m
+		},
+		chunkResidency: func(id chunk.ChunkID, placementNodeIDs []string) []string {
+			if fsm == nil {
+				return nil
+			}
+			return fsm.ChunkResidency(id, placementNodeIDs)
 		},
 		manifestEntries: func() []vaultctlfsm.ManifestEntry {
 			if fsm == nil {

@@ -90,7 +90,7 @@ export function useWatchChunks() {
   }, [qc]);
 }
 
-type ChunksCache = ChunkMeta[] | undefined;
+export type ChunksCache = ChunkMeta[] | undefined;
 
 /**
  * handleEvent applies a single WatchChunksResponse to the React Query
@@ -160,20 +160,20 @@ function nodeKey(nodeId: Uint8Array): string {
  * Pure function (no side effects on prev — returns a new array when the
  * shape changes, or prev when the event is a no-op).
  *
- * Replica tracking model (gastrolog-4zy8a): each event records evidence
- * that one specific node hosts the chunk. We persist that evidence by
- * merging msg.nodeId into the cache's replica_node_ids list and deriving
- * replicaCount from the list length. This:
- *   - GROWS the count when catchup replicates an existing chunk to a new
- *     follower (CREATED/SEALED event from that follower).
- *   - SHRINKS the count when a cold-start ListChunks refetch returns a
- *     smaller replica_node_ids (e.g. after RF decrease) — the next
- *     watch event merges against the new shorter list, so additions stay
- *     proportionally small.
- *   - Avoids the original monotonic-grow accumulator anti-pattern that
- *     produced stale-high counts on RF decrease and never freed entries.
+ * Replica tracking model (gastrolog-66vmg): the server stamps
+ * authoritative `replica_count` + `replica_node_ids` on every event,
+ * computed from the vault-ctl FSM (placement set minus in-flight
+ * delete-acks). The client trusts that overlay verbatim. The previous
+ * per-node-attribution accumulator drifted on leadership transfer and
+ * during active-chunk catchup because it only grew — that whole
+ * approach is replaced by server-authoritative push.
+ *
+ * If the server omits replica fields (zero count) — e.g. memory-mode
+ * vault, single-node, or the chunk has been finalized — mergeMeta
+ * preserves the existing cache value, so the cold-start ListChunks
+ * snapshot remains visible until something authoritative supersedes it.
  */
-function mutateCache(
+export function mutateCache(
   prev: ChunksCache,
   msg: WatchChunksResponse,
 ): ChunksCache {
@@ -183,27 +183,6 @@ function mutateCache(
   const findIdx = () =>
     next.findIndex((c) => bytesToHex(c.id) === chunkIdKey);
 
-  // applyEventNode merges the event's source nodeId into meta's
-  // replica_node_ids (if not already present) and refreshes replicaCount
-  // to match the list length. Only fires for non-empty nodeIds — local
-  // events (empty bytes) would otherwise duplicate the connected node.
-  const applyEventNode = (meta: ChunkMeta): ChunkMeta => {
-    if (msg.nodeId.length === 0) return meta;
-    const sourceID = encode(msg.nodeId);
-    if (meta.replicaNodeIds.includes(sourceID)) {
-      // Already counted — ensure replicaCount matches list length
-      // (handles cases where the server set count==len already).
-      if (meta.replicaCount === meta.replicaNodeIds.length) return meta;
-      const patched = meta.clone();
-      patched.replicaCount = patched.replicaNodeIds.length;
-      return patched;
-    }
-    const patched = meta.clone();
-    patched.replicaNodeIds = [...patched.replicaNodeIds, sourceID];
-    patched.replicaCount = patched.replicaNodeIds.length;
-    return patched;
-  };
-
   switch (msg.op) {
     case ChunkChangeOp.CREATED:
     case ChunkChangeOp.SEALED:
@@ -211,9 +190,8 @@ function mutateCache(
       if (!msg.meta) return prev;
       const idx = findIdx();
       const merged = idx >= 0 ? mergeMeta(next[idx], msg.meta) : msg.meta;
-      const out = applyEventNode(merged);
-      if (idx >= 0) next[idx] = out;
-      else next.push(out);
+      if (idx >= 0) next[idx] = merged;
+      else next.push(merged);
       return next;
     }
     case ChunkChangeOp.PROGRESS: {
@@ -223,18 +201,16 @@ function mutateCache(
       const idx = findIdx();
       if (idx < 0) return prev;
       if (msg.meta) {
-        const merged = mergeMeta(next[idx], msg.meta);
-        next[idx] = applyEventNode(merged);
+        next[idx] = mergeMeta(next[idx], msg.meta);
         return next;
       }
       // Backward-compat for events without an inline meta — record_count
-      // update only. Still merge the source node so the count grows when
-      // a new follower starts receiving records on the active chunk.
+      // update only.
       const existing = next[idx];
       if (!existing) return prev;
       const patched = existing.clone();
       patched.recordCount = msg.recordCount;
-      next[idx] = applyEventNode(patched);
+      next[idx] = patched;
       return next;
     }
     case ChunkChangeOp.DELETED: {
@@ -275,7 +251,7 @@ function bytesToHex(bytes: Uint8Array): string {
  * If there's no existing entry to merge against, returns the event
  * meta unchanged — fresh chunks won't have replica info yet anyway.
  */
-function mergeMeta(existing: ChunkMeta | undefined, incoming: ChunkMeta): ChunkMeta {
+export function mergeMeta(existing: ChunkMeta | undefined, incoming: ChunkMeta): ChunkMeta {
   if (!existing) return incoming;
   const merged = existing.clone();
   // Identity fields are always authoritative from the event.
@@ -311,8 +287,19 @@ function mergeMeta(existing: ChunkMeta | undefined, incoming: ChunkMeta): ChunkM
   if (incoming.bytes > merged.bytes) merged.bytes = incoming.bytes;
   if (incoming.recordCount > merged.recordCount) merged.recordCount = incoming.recordCount;
   if (incoming.diskBytes > merged.diskBytes) merged.diskBytes = incoming.diskBytes;
+  // Replica info is authoritative when present on the event: the
+  // backend stamps cluster-wide residency from the vault-ctl FSM
+  // (placement set minus in-flight delete-acks) on every CREATED /
+  // SEALED / UPLOADED / PROGRESS event. A zero replicaCount means the
+  // server didn't stamp anything (memory-mode vault, chunk finalized,
+  // or a transient FSM gap) — preserve the existing cached value so
+  // we don't flicker to zero between an authoritative snapshot and
+  // the next one. See gastrolog-66vmg.
+  if (incoming.replicaCount > 0) {
+    merged.replicaCount = incoming.replicaCount;
+    merged.replicaNodeIds = incoming.replicaNodeIds;
+  }
   // Fields NOT carried by the event — preserved from existing:
-  // - replicaCount, replicaNodeIds (computed client-side from event sources)
   // - retentionPending (set by retention runner via FSM apply)
   // - pendingAckNodeIds (set by retention runner during fan-out)
   return merged;
