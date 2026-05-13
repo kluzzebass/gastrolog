@@ -21,12 +21,16 @@ export function EnvironmentRibbon({ label, color }: Readonly<EnvironmentRibbonPr
   return (
     <div className="fixed bottom-0 left-0 w-72 h-72 overflow-hidden pointer-events-none z-50 select-none">
       <div
-        className="absolute -left-14 bottom-9 w-96 text-center font-body font-black text-2xl py-2 tracking-wider uppercase shadow-lg"
+        className="absolute -left-14 bottom-9 w-96 text-center font-body font-black text-2xl py-2 tracking-wider uppercase"
         style={{
           transform: "rotate(30deg)",
           backgroundColor: color,
           color: textColor,
-          filter: "saturate(0.7)",
+          // Saturate dims the color; drop-shadow adds a soft dark halo
+          // that traces the ribbon's outline so it reads as a piece of
+          // fabric wrapped around the viewport corner rather than a flat
+          // overlay. Filters are space-separated.
+          filter: "saturate(0.7) drop-shadow(0 0 3px rgba(0, 0, 0, 0.5))",
         }}
         title={`Environment: ${label}`}
       >
