@@ -12,7 +12,7 @@ build:
 
 # Runs the gastrolog backend with raft config (default).
 run-raft:
-  go run ./cmd/gastrolog server --home data
+  go run ./cmd/gastrolog server --home "${GLOG_DATA_DIR:-data}"
 
 # Runs the gastrolog backend with in-memory config (no persistence).
 run-memory:
@@ -22,23 +22,23 @@ alias run := run-raft
 
 # Runs the gastrolog backend with full bootstrap (memory store + chatterbox).
 run-bootstrap:
-  go run ./cmd/gastrolog server --bootstrap --home data
+  go run ./cmd/gastrolog server --bootstrap --home "${GLOG_DATA_DIR:-data}"
 
 # Runs the gastrolog backend with authentication disabled (all requests treated as admin).
 run-noauth:
-  go run ./cmd/gastrolog server --no-auth --home data
+  go run ./cmd/gastrolog server --no-auth --home "${GLOG_DATA_DIR:-data}"
 
 # Runs the gastrolog backend with pprof server.
 pprof:
-  go run ./cmd/gastrolog server --home data --pprof localhost:6060
+  go run ./cmd/gastrolog server --home "${GLOG_DATA_DIR:-data}" --pprof localhost:6060
 
 # Runs a config CLI command against the local server. Usage: just cfg filter list
 conf *args:
-  go run ./cmd/gastrolog --home data config {{args}}
+  go run ./cmd/gastrolog --home "${GLOG_DATA_DIR:-data}" config {{args}}
 
 # Runs a query against node 1. Usage: just query 'level=error last=5m' --limit 10
 query +args:
-  go run ./cmd/gastrolog --home data/node1 query {{args}}
+  go run ./cmd/gastrolog --home "${GLOG_DATA_DIR:-/tmp/gastrolog}/node1" query {{args}}
 
 # Cross-compiles for a specific OS/arch. Usage: just build-cross linux amd64
 build-cross os arch:
@@ -125,9 +125,10 @@ cluster-init:
 # Kills all stuck gastrolog cluster processes.
 cluster-kill:
   #!/usr/bin/env bash
-  pkill -INT -f 'gastrolog.*--home data/node' 2>/dev/null || true
+  data_dir="${GLOG_DATA_DIR:-/tmp/gastrolog}"
+  pkill -INT -f "gastrolog.*--home ${data_dir}/node" 2>/dev/null || true
   sleep 2
-  pkill -KILL -f 'gastrolog.*--home data/node' 2>/dev/null || true
+  pkill -KILL -f "gastrolog.*--home ${data_dir}/node" 2>/dev/null || true
   pkill -KILL -f 'imux.*gastrolog' 2>/dev/null || true
   echo "Cluster processes killed."
 
