@@ -1,15 +1,18 @@
 // Vault domain model.
 //
 // Joins the runtime `VaultInfo` (from ListVaults — has chunk/record counts
-// and the current placement nodeId) with the durable `VaultConfig` (from
-// GetSystem — has the typed enum, cloud-service binding, retention rules).
-// Either side may be missing during transient states (e.g. a newly created
-// vault arrives in config before its first ListVaults entry).
+// and the cluster-visible flags) with the durable `VaultConfig` (from
+// GetSystem — has the typed enum, cloud-service binding, retention rules,
+// and the authoritative placement set). Either side may be missing during
+// transient states (e.g. a newly created vault arrives in config before
+// its first ListVaults entry).
 
 import type { VaultInfo } from "../gen/gastrolog/v1/vault_pb";
 import type { VaultConfig } from "../gen/gastrolog/v1/system_pb";
+import type { NodeStorageConfig } from "../gen/gastrolog/v1/storage_pb";
 import { VaultType } from "../gen/gastrolog/v1/system_pb";
-import { type EntityID, idFromBytes, EMPTY_ID, isEmptyID } from "./id";
+import { type EntityID, idFromBytes, isEmptyID } from "./id";
+import { leaderNodeId, followerNodeIds } from "../../utils/placement";
 
 export class Vault {
   readonly id: EntityID;
@@ -75,17 +78,49 @@ export class Vault {
   }
 
   /**
-   * Placement node ID. Vaults without an explicit nodeId (e.g. memory vaults
-   * that haven't been pinned) fall back to the supplied local node ID — the
-   * same convention the inspector's filters used inline.
+   * Leader node ID, resolved from `config.placements` against the cluster's
+   * NodeStorageConfig array. Returns the supplied fallback for vaults with
+   * no placements yet (memory vaults, freshly created vaults before the
+   * placement manager has assigned storage).
    */
-  placementNodeId(localFallback: EntityID): EntityID {
-    const fromInfo = idFromBytes(this.info?.nodeId);
-    return isEmptyID(fromInfo) ? localFallback : fromInfo;
+  placementNodeId(nscs: readonly NodeStorageConfig[], localFallback: EntityID): EntityID {
+    if (this.config?.placements && this.config.placements.length > 0) {
+      const leader = leaderNodeId(this.config, nscs);
+      if (leader !== "") return leader as EntityID;
+    }
+    return localFallback;
   }
 
-  /** True when this vault is placed on (or implicitly belongs to) the target node. */
-  isOn(targetNodeId: EntityID, localFallback: EntityID): boolean {
-    return this.placementNodeId(localFallback) === targetNodeId;
+  /**
+   * All member node IDs for this vault (leader + followers), resolved from
+   * `config.placements`. Returns `[localFallback]` when no placements are
+   * registered yet, so the locally-connected node tab still shows
+   * pre-placement vaults instead of going empty.
+   */
+  placementNodeIds(nscs: readonly NodeStorageConfig[], localFallback: EntityID): EntityID[] {
+    if (this.config?.placements && this.config.placements.length > 0) {
+      const ids: EntityID[] = [];
+      const leader = leaderNodeId(this.config, nscs);
+      if (leader !== "") ids.push(leader as EntityID);
+      for (const f of followerNodeIds(this.config, nscs)) {
+        ids.push(f as EntityID);
+      }
+      if (ids.length > 0) return ids;
+    }
+    return isEmptyID(localFallback) ? [] : [localFallback];
+  }
+
+  /**
+   * True when this vault has a placement (leader OR follower) on the target
+   * node. Uses the placement set from `config.placements`, NOT the legacy
+   * `info.nodeId` single-field model that the backend stopped populating
+   * when placements landed (gastrolog-4zy8a).
+   */
+  isOn(
+    targetNodeId: EntityID,
+    nscs: readonly NodeStorageConfig[],
+    localFallback: EntityID,
+  ): boolean {
+    return this.placementNodeIds(nscs, localFallback).includes(targetNodeId);
   }
 }
