@@ -313,6 +313,105 @@ func TestPruneNodeIdempotent(t *testing.T) {
 	}
 }
 
+// gastrolog-66vmg: ChunkResidency is the authoritative cluster-wide
+// residency view used by WatchChunks event enrichment so clients
+// never have to reconstruct replica counts from per-node event
+// evidence. The three branches under test pin the three states the
+// FSM can be in for a given chunk.
+func TestChunkResidencyForUnknownChunkReturnsNil(t *testing.T) {
+	t.Parallel()
+
+	f := New()
+	id := chunk.NewChunkID()
+
+	got := f.ChunkResidency(id, []string{"node-A", "node-B", "node-C"})
+	if got != nil {
+		t.Errorf("ChunkResidency on unknown chunk should be nil, got %v", got)
+	}
+}
+
+// Sealed chunk with no in-flight delete: residency = the supplied
+// placement set, because every placement member is expected to hold
+// the chunk once catchup has converged.
+func TestChunkResidencyForLiveChunkReturnsPlacement(t *testing.T) {
+	t.Parallel()
+
+	f := New()
+	id := chunk.NewChunkID()
+	now := time.Now()
+
+	if err := f.Apply(&hraft.Log{Data: MarshalCreateChunk(id, now, now, now)}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := f.Apply(&hraft.Log{Data: MarshalSealChunk(id, now, 1, 1, now, now, now, false)}); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	placement := []string{"node-A", "node-B", "node-C"}
+	got := f.ChunkResidency(id, placement)
+	if len(got) != 3 {
+		t.Fatalf("residency len = %d, want 3 (full placement set)", len(got))
+	}
+	// Compare as sets — ChunkResidency does not promise ordering.
+	gotSet := map[string]bool{}
+	for _, n := range got {
+		gotSet[n] = true
+	}
+	for _, n := range placement {
+		if !gotSet[n] {
+			t.Errorf("placement member %q missing from residency", n)
+		}
+	}
+}
+
+// Chunk with an in-flight delete: residency = ExpectedFrom (nodes
+// that haven't acked yet still hold their local copy). Acked nodes
+// are correctly excluded because they have already deleted locally.
+func TestChunkResidencyForPendingDeleteReturnsExpectedFrom(t *testing.T) {
+	t.Parallel()
+
+	f := New()
+	id := chunk.NewChunkID()
+	now := time.Now()
+
+	if err := f.Apply(&hraft.Log{Data: MarshalCreateChunk(id, now, now, now)}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := f.Apply(&hraft.Log{Data: MarshalSealChunk(id, now, 1, 1, now, now, now, false)}); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	if err := f.Apply(&hraft.Log{Data: MarshalRequestDelete(id, now, "retention-ttl", []string{"node-A", "node-B", "node-C"})}); err != nil {
+		t.Fatalf("request delete: %v", err)
+	}
+
+	placement := []string{"node-A", "node-B", "node-C"}
+
+	// Before any acks: residency = full expected-from = full placement.
+	got := f.ChunkResidency(id, placement)
+	if len(got) != 3 {
+		t.Errorf("pre-ack residency len = %d, want 3", len(got))
+	}
+
+	// One ack: residency shrinks. node-A has deleted its copy.
+	if err := f.Apply(&hraft.Log{Data: MarshalAckDelete(id, "node-A")}); err != nil {
+		t.Fatalf("ack delete: %v", err)
+	}
+	got = f.ChunkResidency(id, placement)
+	if len(got) != 2 {
+		t.Fatalf("post-one-ack residency len = %d, want 2 (node-A acked); got %v", len(got), got)
+	}
+	gotSet := map[string]bool{}
+	for _, n := range got {
+		gotSet[n] = true
+	}
+	if gotSet["node-A"] {
+		t.Errorf("node-A should be excluded from residency after its ack; got %v", got)
+	}
+	if !gotSet["node-B"] || !gotSet["node-C"] {
+		t.Errorf("node-B and node-C should still be in residency; got %v", got)
+	}
+}
+
 func TestIsExpectedToAck(t *testing.T) {
 	t.Parallel()
 

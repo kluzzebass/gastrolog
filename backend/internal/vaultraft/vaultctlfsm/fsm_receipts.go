@@ -106,6 +106,56 @@ func (f *FSM) IsExpectedToAck(chunkID chunk.ChunkID, nodeID string) bool {
 	return p.ExpectedFrom[nodeID]
 }
 
+// ChunkResidency returns the set of node IDs that currently hold the
+// chunk's bytes, sourced authoritatively from the vault-ctl FSM state.
+//
+// For chunks WITHOUT an in-flight delete: residency = the supplied
+// placement set. Every placement member is expected to hold the chunk
+// once catchup has converged; transient under-replication windows
+// during catchup are bounded by the missing-replica sweep
+// (gastrolog-19241).
+//
+// For chunks WITH an in-flight delete (entry exists in pendingDeletes):
+// residency = ExpectedFrom — the nodes that still owe a CmdAckDelete.
+// A node remains in ExpectedFrom until its CmdAckDelete is applied to
+// the FSM; until then, it still holds its local copy. Acknowledged
+// nodes have already deleted the chunk locally and are correctly
+// excluded.
+//
+// For chunks not in the FSM at all: returns nil. The chunk either
+// never existed, was tombstoned, or finalized.
+//
+// Used by the WatchChunks server handler to stamp authoritative
+// replica info on outbound events so clients never have to reconstruct
+// it from per-node event evidence. See gastrolog-66vmg.
+func (f *FSM) ChunkResidency(chunkID chunk.ChunkID, placementNodeIDs []string) []string {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if _, ok := f.chunks[chunkID]; !ok {
+		// Chunk gone from the FSM — fully deleted or never existed.
+		// pendingDeletes entries are removed by applyFinalizeDelete
+		// before the FSM tombstone, so this branch covers both the
+		// "never existed" and "finalized and tombstoned" cases.
+		if _, tombstoned := f.tombstones[chunkID]; tombstoned {
+			return nil
+		}
+		return nil
+	}
+	if p, ok := f.pendingDeletes[chunkID]; ok {
+		out := make([]string, 0, len(p.ExpectedFrom))
+		for nid := range p.ExpectedFrom {
+			out = append(out, nid)
+		}
+		return out
+	}
+	if len(placementNodeIDs) == 0 {
+		return nil
+	}
+	out := make([]string, len(placementNodeIDs))
+	copy(out, placementNodeIDs)
+	return out
+}
+
 // ---------- Apply functions (caller MUST hold f.mu) ----------
 
 // CmdRequestDelete payload:

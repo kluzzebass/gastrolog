@@ -22,6 +22,8 @@ import (
 	"gastrolog/internal/notify"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/system"
+	"gastrolog/internal/vaultraft"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
 // IngesterStats tracks per-ingester metrics using atomic counters.
@@ -474,6 +476,43 @@ func (o *Orchestrator) EmitChunkUploaded(vault glid.GLID, meta chunk.ChunkMeta) 
 // refetch. See gastrolog-3pf9w.
 func (o *Orchestrator) NotifyChunkChange() {
 	o.progressTrigger.Signal()
+}
+
+// ChunkResidency returns the cluster-wide node IDs that currently hold
+// a chunk's bytes, computed authoritatively from the vault's vault-ctl
+// FSM. Works for any vault this node participates in as a vault-ctl
+// voter, regardless of whether the local node has a storage placement
+// for that vault (per gastrolog-292yi every cluster node is a voter in
+// every vault-ctl Raft group).
+//
+// Used by the WatchChunks event-relay path to stamp authoritative
+// replica info on outbound events so clients see correct counts
+// without reconstructing them from per-node event evidence. See
+// gastrolog-66vmg.
+//
+// Returns nil if the local node has no FSM for the vault (single-node /
+// memory mode), or if the chunk is unknown to the FSM. Callers in that
+// case should leave replica info absent from the outbound event so the
+// client preserves its existing cache value via mergeMeta.
+func (o *Orchestrator) ChunkResidency(vaultID glid.GLID, chunkID chunk.ChunkID, placementNodeIDs []string) []string {
+	if o.groupMgr == nil {
+		return nil
+	}
+	g := o.groupMgr.GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
+	if g == nil {
+		return nil
+	}
+	var fsm *vaultctlfsm.FSM
+	switch raw := g.FSM.(type) {
+	case *vaultctlfsm.FSM:
+		fsm = raw
+	case *vaultraft.FSM:
+		fsm = raw.EnsureVaultFSM(vaultID)
+	}
+	if fsm == nil {
+		return nil
+	}
+	return fsm.ChunkResidency(chunkID, placementNodeIDs)
 }
 
 // vaultLabel returns the operator-friendly name for an instance as configured,

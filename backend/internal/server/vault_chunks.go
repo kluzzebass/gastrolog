@@ -573,11 +573,87 @@ func (s *VaultServer) WatchChunks(
 		case <-streamCtx.Done():
 			return nil
 		case msg := <-eventCh:
+			s.stampReplicaInfo(streamCtx, msg)
 			if err := stream.Send(msg); err != nil {
 				return err
 			}
 		}
 	}
+}
+
+// stampReplicaInfo overlays authoritative cluster-wide replica info on
+// the outbound event's chunk meta, sourced from the vault-ctl FSM
+// (placement set minus in-flight delete-acks). Without this, the
+// client has to reconstruct replica counts from per-node event
+// attribution, which drifts on leadership transfer and during the
+// active-chunk catchup window because the accumulator only grows. See
+// gastrolog-66vmg.
+//
+// Silently no-ops when the FSM doesn't know about the chunk (single-
+// node mode, memory vault, or the chunk has been finalized between
+// event emit and relay): leaving the fields zero on the wire signals
+// "no authoritative value" to the client, which preserves whatever it
+// already has cached via mergeMeta. The cold-start ListChunks fetch
+// still produces correct counts on first observation.
+func (s *VaultServer) stampReplicaInfo(ctx context.Context, msg *apiv1.WatchChunksResponse) {
+	if msg == nil || msg.Meta == nil {
+		return
+	}
+	if len(msg.VaultId) == 0 || len(msg.ChunkId) == 0 {
+		return
+	}
+	vid := glid.FromBytes(msg.VaultId)
+	if len(msg.ChunkId) != len(chunk.ChunkID{}) {
+		return
+	}
+	var cid chunk.ChunkID
+	copy(cid[:], msg.ChunkId)
+
+	placement := s.vaultPlacementNodeIDs(ctx, vid)
+	residency := s.orch.ChunkResidency(vid, cid, placement)
+	if residency == nil {
+		return
+	}
+	sort.Strings(residency)
+	msg.Meta.ReplicaNodeIds = residency
+	if len(residency) > math.MaxInt32 {
+		msg.Meta.ReplicaCount = math.MaxInt32
+	} else {
+		msg.Meta.ReplicaCount = int32(len(residency)) //nolint:gosec // G115: bounded by branch above
+	}
+}
+
+// vaultPlacementNodeIDs resolves a vault's placement set to the node
+// IDs that hold (or should hold) its chunks. Mirrors remoteVaultNodes
+// but includes the local node — used by stampReplicaInfo to derive
+// authoritative residency from the FSM. Per-call cfgStore lookup is
+// cheap (in-memory backed by Raft FSM); cache later if it becomes a
+// hot path.
+func (s *VaultServer) vaultPlacementNodeIDs(ctx context.Context, vaultID glid.GLID) []string {
+	cfg, err := s.cfgStore.GetVault(ctx, vaultID)
+	if err != nil || cfg == nil {
+		return nil
+	}
+	if len(cfg.Placements) == 0 {
+		return nil
+	}
+	nscs, err := s.cfgStore.ListNodeStorageConfigs(ctx)
+	if err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var nodes []string
+	if leader := system.LeaderNodeID(cfg.Placements, nscs); leader != "" && !seen[leader] {
+		seen[leader] = true
+		nodes = append(nodes, leader)
+	}
+	for _, nid := range system.FollowerNodeIDs(cfg.Placements, nscs) {
+		if !seen[nid] {
+			seen[nid] = true
+			nodes = append(nodes, nid)
+		}
+	}
+	return nodes
 }
 
 // runLocalChunkEventForwarder drains the local ChunkBus subscription and
