@@ -38,7 +38,8 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
   const allIngesters = useIngesters();
   const { jobs } = useWatchJobs({ onError: toastError });
 
-  const vaults = allVaults.filter((v) => v.isOn(nodeIdTyped, registry.localNodeId));
+  const nscs = config?.nodeStorageConfigs ?? [];
+  const vaults = allVaults.filter((v) => v.isOn(nodeIdTyped, nscs, registry.localNodeId));
   const ingesters = allIngesters.filter((i) => i.isEligibleOn(nodeIdTyped));
   const nodeJobs = jobs.filter((j) => (j.nodeId || registry.localNodeId) === nodeIdTyped);
   const tasks = nodeJobs.filter((j) => j.isTask);

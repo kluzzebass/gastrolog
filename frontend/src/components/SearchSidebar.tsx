@@ -12,6 +12,7 @@ import { SEVERITY_LEVELS, SEVERITIES } from "../lib/severity";
 import { LoadingPlaceholder } from "./LoadingPlaceholder";
 import { encode } from "../api/glid";
 import { EMPTY_ID } from "../api/model/id";
+import { useConfig } from "../api/hooks";
 
 interface SearchSidebarProps {
   dark: boolean;
@@ -67,6 +68,8 @@ export function SearchSidebar({
   activeQuery,
 }: Readonly<SearchSidebarProps>) {
   const c = useThemeClass(dark);
+  const { data: config } = useConfig();
+  const nscs = config?.nodeStorageConfigs ?? [];
 
   const allSeverities = SEVERITY_LEVELS.map((l) => ({
     label: SEVERITIES[l].label,
@@ -129,7 +132,7 @@ export function SearchSidebar({
                   active={selectedVault === vault.id}
                   onClick={() => onVaultSelect(vault.id)}
                   dark={dark}
-                  nodeId={vault.placementNodeId(EMPTY_ID)}
+                  nodeId={vault.placementNodeId(nscs, EMPTY_ID)}
                   remote={vault.isRemote}
                 />
               ))
