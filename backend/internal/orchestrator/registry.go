@@ -103,11 +103,12 @@ func (o *Orchestrator) TriggerIngester(id glid.GLID) error {
 	return nil
 }
 
-// IsRunning returns true if the orchestrator is running.
+// IsRunning returns true if the orchestrator is running. Lock-free so the
+// /readyz HTTP handler stays responsive under any o.mu contention pattern
+// (vault registration, vault-ctl AddVoter burst, retention sweep, etc.).
+// See gastrolog-5n6xz.
 func (o *Orchestrator) IsRunning() bool {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	return o.running
+	return o.running.Load()
 }
 
 // ListVaults returns all registered vault IDs in deterministic order.

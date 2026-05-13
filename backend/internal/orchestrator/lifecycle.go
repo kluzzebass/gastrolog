@@ -29,7 +29,7 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
-	if o.running {
+	if !o.running.CompareAndSwap(false, true) {
 		return ErrAlreadyRunning
 	}
 
@@ -37,7 +37,6 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	o.cancel = cancel
 	o.done = make(chan struct{})
-	o.running = true
 
 	// Create ingest and intermediate channels.
 	o.ingestCh = make(chan IngestMessage, o.ingestSize)
@@ -158,6 +157,12 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	// is searchable like any other log.
 	o.auxWg.Go(func() { o.runJobEventLogBridge(ctx) })
 
+	// Readiness refresher (gastrolog-5n6xz). Publishes the cached
+	// LocalVaultsReplicationReady value the /readyz handler reads, so
+	// kubelet's probe stays responsive when o.mu is contended by a
+	// vault-ctl AddVoter burst on K8s scale-out.
+	o.auxWg.Go(func() { o.runReadinessRefresher(ctx, readinessRefreshInterval) })
+
 	return nil
 }
 
@@ -190,11 +195,10 @@ func (o *Orchestrator) runRateAlertEvaluator(ctx context.Context, interval time.
 //  2. digestWg.Wait() (drains remaining messages) → close digestedCh
 //  3. writeWg.Wait() (drains remaining records) → close done
 func (o *Orchestrator) Stop() error {
-	o.mu.Lock()
-	if !o.running {
-		o.mu.Unlock()
+	if !o.running.CompareAndSwap(true, false) {
 		return ErrNotRunning
 	}
+	o.mu.Lock()
 	cancel := o.cancel
 	ingestCh := o.ingestCh
 	digestedCh := o.digestedCh
@@ -245,7 +249,6 @@ func (o *Orchestrator) Stop() error {
 	o.vaultCtlLeaders.StopAll()
 
 	o.mu.Lock()
-	o.running = false
 	o.cancel = nil
 	o.done = nil
 	o.ingestCh = nil

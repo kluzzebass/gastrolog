@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"fmt"
 	"gastrolog/internal/glid"
 	"io"
 	"log/slog"
@@ -403,4 +404,126 @@ func TestVaultMembershipMap_RoundTrip(t *testing.T) {
 	if got := m.Get(vaultID); got != nil {
 		t.Errorf("expected nil after Delete, got %v", got)
 	}
+}
+
+// TestVaultCtlLeaderManager_SetDesiredMembersWakesEpoch is the
+// gastrolog-5n6xz regression for the desiredChanged signal path. Before
+// the fix the leader-epoch reconcile loop only woke on the 30 s
+// safety-net ticker, so a SetDesiredMembers call that arrived mid-burst
+// had to wait up to half a minute before its diff was applied. After
+// the fix, SetDesiredMembers fires desiredChanged and the next reconcile
+// pass runs within a select-iteration of the goroutine scheduler.
+//
+// Uses a 2-real-node cluster so the AddVoter for a third (synthetic)
+// peer commits via the two live nodes — exercising the full reconcile
+// path including the post-AddVoter signal re-fire.
+func TestVaultCtlLeaderManager_SetDesiredMembersWakesEpoch(t *testing.T) {
+	t.Parallel()
+
+	groups, cleanup := makeTwoNodeVaultGroup(t, "wake-1", "wake-2")
+	defer cleanup()
+	leader := groups[0]
+
+	mgr := newVaultCtlLeaderManager(discardLogger())
+	defer mgr.StopAll()
+
+	vaultID := glid.New()
+
+	// Initial desired = current config (both reals, no diff). Start the
+	// epoch and let the initial reconcile complete as a no-op.
+	mgr.SetDesiredMembers(vaultID, []hraft.Server{
+		{ID: "wake-1", Address: "wake-1"},
+		{ID: "wake-2", Address: "wake-2"},
+	})
+	mgr.Start(vaultID, leader)
+	time.Sleep(200 * time.Millisecond)
+
+	// Now fire a real diff. With the wake-on-signal path, the synthetic
+	// peer should land in the configuration within ~1 s. Without it,
+	// convergence would wait for vaultMembershipReconcileInterval (30 s)
+	// — well past this deadline.
+	mgr.SetDesiredMembers(vaultID, []hraft.Server{
+		{ID: "wake-1", Address: "wake-1"},
+		{ID: "wake-2", Address: "wake-2"},
+		{ID: "wake-synth", Address: "wake-synth"},
+	})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		fut := leader.Raft.GetConfiguration()
+		if err := fut.Error(); err == nil {
+			for _, srv := range fut.Configuration().Servers {
+				if srv.ID == "wake-synth" {
+					return
+				}
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("synthetic peer did not converge within 2 s — wake signal not driving reconcile")
+}
+
+// TestVaultCtlLeaderManager_BurstYieldsAndResumes is the gastrolog-5n6xz
+// regression for the cap-per-pass + signal-rewake path. We submit a
+// desired set with more peers than vaultMembershipMaxPerPass and verify
+// the burst converges fully via multiple short passes driven by the
+// re-fired desiredChanged signal. A regression to the pre-fix "serialize
+// the whole burst" or "wait 30 s for next tick" behavior would fail this
+// test on either correctness (incomplete config) or timing (deadline).
+//
+// vaultMembershipCommitTimeout is shortened so the bail path is fast
+// when individual commits stall on the unreachable synthetic peers
+// past the second one (quorum maths: 2 reals + 1 synth = 3-of-3 commits;
+// 2 reals + 2 synth needs 3-of-4 = one synth must ACK, which never
+// happens). The bail itself feeds the re-fire path under test.
+func TestVaultCtlLeaderManager_BurstYieldsAndResumes(t *testing.T) {
+	t.Parallel()
+
+	groups, cleanup := makeTwoNodeVaultGroup(t, "burst-1", "burst-2")
+	defer cleanup()
+	leader := groups[0]
+
+	mgr := newVaultCtlLeaderManager(discardLogger())
+	// Shorten the bail timeout so the test doesn't sit through a 15 s
+	// stall when individual commits can't form quorum past the first
+	// synthetic peer. Per-manager (not package-global), so parallel
+	// tests don't see this override.
+	mgr.commitTimeout = 200 * time.Millisecond
+	defer mgr.StopAll()
+
+	vaultID := glid.New()
+
+	// Desired = 2 reals + 5 synthetic peers. Each reconcile pass commits
+	// at most one new voter (next pass's AddVoter for a second synth
+	// can't commit because the first synth never ACKs), so convergence
+	// to "synth-0 in log" is the testable signal that yield+resume works.
+	desired := []hraft.Server{
+		{ID: "burst-1", Address: "burst-1"},
+		{ID: "burst-2", Address: "burst-2"},
+	}
+	for i := range 5 {
+		desired = append(desired, hraft.Server{
+			ID:      hraft.ServerID(fmt.Sprintf("burst-synth-%d", i)),
+			Address: hraft.ServerAddress(fmt.Sprintf("burst-synth-addr-%d", i)),
+		})
+	}
+	mgr.SetDesiredMembers(vaultID, desired)
+	mgr.Start(vaultID, leader)
+
+	// At minimum, the first synthetic peer must converge well inside the
+	// 30 s safety-net window — proving the re-fired signal drives the
+	// next pass without waiting for the periodic tick after the bail.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		fut := leader.Raft.GetConfiguration()
+		if err := fut.Error(); err == nil {
+			for _, srv := range fut.Configuration().Servers {
+				if srv.ID == "burst-synth-0" {
+					return
+				}
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("first synthetic peer did not converge within 3 s after burst")
 }

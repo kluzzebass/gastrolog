@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
@@ -181,12 +182,16 @@ func TestLocalVaultsReplicationReady(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !o.LocalVaultsReplicationReady() {
+	// liveReplicationReady is used here because the cached
+	// LocalVaultsReplicationReady is only refreshed by the goroutine
+	// started in Start(), which this test does not call. See
+	// gastrolog-5n6xz for the rationale behind splitting the methods.
+	if !o.liveReplicationReady() {
 		t.Fatal("empty orchestrator should be replication-ready")
 	}
 	vid := glid.New()
 	o.RegisterVault(NewVault(vid, nil))
-	if !o.LocalVaultsReplicationReady() {
+	if !o.liveReplicationReady() {
 		t.Fatal("routing-only vault (has no local vaults — should not block readiness")
 	}
 	s, err := memtest.NewVault(chunkmem.Config{})
@@ -202,8 +207,81 @@ func TestLocalVaultsReplicationReady(t *testing.T) {
 		IsFSMReady: func() bool { return false },
 	}
 	o.RegisterVault(NewVault(vid, vaultInst))
-	if o.LocalVaultsReplicationReady() {
+	if o.liveReplicationReady() {
 		t.Fatal("expected false when local vault-ctl FSM is not ready")
+	}
+}
+
+// TestReadyzPathNotBlockedByWriter is the gastrolog-5n6xz regression for
+// the full /readyz handler responsiveness fix. Every method the handler
+// invokes — IsRunning, draining.Load, LocalVaultsReplicationReady — must
+// return immediately even while another goroutine is holding o.mu.Lock().
+// kubelet's probe times out otherwise, which is the original failure mode
+// from the K8s burst scale-out report.
+//
+// The test acquires o.mu.Lock() directly and asserts that each probe-path
+// method completes within a tight deadline. Catching IsRunning here is the
+// reason an earlier draft of this fix still produced stuck leader pods —
+// the cached LocalVaultsReplicationReady alone wasn't enough; IsRunning
+// was also taking o.mu.RLock and starving behind the writer.
+func TestReadyzPathNotBlockedByWriter(t *testing.T) {
+	t.Parallel()
+	o, err := New(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Pretend Start() ran: IsRunning must report true so the /readyz
+	// handler's conjunction evaluates the rest. CompareAndSwap is used
+	// instead of a raw Store to mirror the lifecycle code path.
+	if !o.running.CompareAndSwap(false, true) {
+		t.Fatal("running flag should have been false on a fresh orchestrator")
+	}
+
+	// Cache is seeded true on construction so the empty orchestrator
+	// reports ready without needing Start() to run the refresher.
+	if !o.LocalVaultsReplicationReady() {
+		t.Fatal("freshly-constructed orchestrator should report ready")
+	}
+	if !o.IsRunning() {
+		t.Fatal("IsRunning should report true after CompareAndSwap")
+	}
+
+	// Hold the write lock from a background goroutine for longer than
+	// any individual /readyz call should ever wait on the probe path.
+	released := make(chan struct{})
+	holding := make(chan struct{})
+	go func() {
+		o.mu.Lock()
+		close(holding)
+		<-released
+		o.mu.Unlock()
+	}()
+	<-holding
+	defer close(released)
+
+	// Each /readyz probe-path method must respond promptly regardless
+	// of the held writer. 200 ms is generous — every method is an
+	// atomic load — but cleanly distinguishes "lock-free" from
+	// "starved behind the writer".
+	type probe struct {
+		name string
+		fn   func() bool
+	}
+	probes := []probe{
+		{"IsRunning", o.IsRunning},
+		{"LocalVaultsReplicationReady", o.LocalVaultsReplicationReady},
+	}
+	for _, p := range probes {
+		done := make(chan bool, 1)
+		go func() { done <- p.fn() }()
+		select {
+		case got := <-done:
+			if !got {
+				t.Fatalf("%s returned false under contention; should reflect last-good value", p.name)
+			}
+		case <-time.After(200 * time.Millisecond):
+			t.Fatalf("%s blocked while o.mu.Lock was held — /readyz handler would starve", p.name)
+		}
 	}
 }
 
