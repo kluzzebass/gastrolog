@@ -495,6 +495,17 @@ func (e applyEffects) fire() {
 	if e.prunedNode != "" && e.onPruneNode != nil {
 		e.onPruneNode(e.prunedNode, e.prunedFinalizable)
 	}
+	// gastrolog-15fm8: applyPruneNode now finalizes drained-ExpectedFrom
+	// chunks atomically inside the same apply. Fire onFinalizeDelete
+	// per chunk so audit / cache-eviction subscribers see the same
+	// stream of finalize signals they would have if a CmdFinalizeDelete
+	// had applied per chunk. Skip if onPruneNode was the subscriber's
+	// only hook (they get the same information through the slice).
+	if e.onFinalizeDelete != nil {
+		for _, id := range e.prunedFinalizable {
+			e.onFinalizeDelete(id)
+		}
+	}
 }
 
 // applyLocked dispatches to the per-command apply function under the
@@ -530,12 +541,20 @@ func (f *FSM) applyLocked(cmd Command, payload []byte) (any, applyEffects) {
 		fx.requestedDelete = entry
 	case CmdAckDelete:
 		var (
-			id     *chunk.ChunkID
-			nodeID string
+			id        *chunk.ChunkID
+			nodeID    string
+			finalized bool
 		)
-		id, nodeID, result = f.applyAckDelete(payload)
+		id, nodeID, finalized, result = f.applyAckDelete(payload)
 		fx.ackedDeleteID = id
 		fx.ackedDeleteNodeID = nodeID
+		// gastrolog-15fm8: a draining ack atomically finalizes inside
+		// the same apply. Surface the finalize to subscribers via the
+		// existing onFinalizeDelete callback so audit / cache-eviction
+		// paths fire identically to an explicit CmdFinalizeDelete.
+		if finalized {
+			fx.finalizedDeleteID = id
+		}
 	case CmdFinalizeDelete:
 		fx.finalizedDeleteID, result = f.applyFinalizeDelete(payload)
 	case CmdPruneNode:

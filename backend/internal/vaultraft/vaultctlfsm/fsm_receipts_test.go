@@ -442,19 +442,141 @@ func TestIsExpectedToAck(t *testing.T) {
 	}
 }
 
+// gastrolog-15fm8: applyAckDelete atomically finalizes when its
+// mutation drains ExpectedFrom to empty. The pendingDeletes entry,
+// the manifest entry, and the tombstone all update inside the same
+// apply that recorded the last ack — no leader-only callback in the
+// loop, so a leader transfer between the ack apply and a follow-up
+// proposal can't strand the entry.
+func TestAckDeleteAutoFinalizesOnEmptyExpectedFrom(t *testing.T) {
+	t.Parallel()
+
+	f := New()
+	id := chunk.NewChunkID()
+	now := time.Now()
+
+	var (
+		ackFires      int32
+		finalizeFires int32
+	)
+	f.SetOnAckDelete(func(chunk.ChunkID, string) { ackFires++ })
+	f.SetOnFinalizeDelete(func(chunk.ChunkID) { finalizeFires++ })
+
+	// Create + seal so the chunk is in f.chunks at finalize time.
+	f.Apply(&hraft.Log{Data: MarshalCreateChunk(id, now, now, now)})
+	f.Apply(&hraft.Log{Data: MarshalSealChunk(id, now, 1, 1, now, now, now, false)})
+	f.Apply(&hraft.Log{Data: MarshalRequestDelete(id, now, "retention-ttl", []string{"node-A", "node-B"})})
+
+	// Pre-conditions: entry exists, expects two nodes, manifest has chunk.
+	if got := f.PendingDelete(id); got == nil || len(got.ExpectedFrom) != 2 {
+		t.Fatalf("setup: pending delete shape wrong: %+v", got)
+	}
+	if e := f.Get(id); e == nil {
+		t.Fatal("setup: manifest entry missing before acks")
+	}
+
+	// First ack: drains to one expected. No finalize yet.
+	f.Apply(&hraft.Log{Data: MarshalAckDelete(id, "node-A")})
+	if got := f.PendingDelete(id); got == nil || len(got.ExpectedFrom) != 1 {
+		t.Fatalf("after first ack: pending shape wrong: %+v", got)
+	}
+	if finalizeFires != 0 {
+		t.Errorf("after first ack: onFinalizeDelete fires = %d, want 0", finalizeFires)
+	}
+
+	// Second ack: drains to empty. The same apply MUST finalize:
+	// tombstone, no pending entry, no manifest entry. The fire()
+	// dispatch must surface this as both an onAckDelete and an
+	// onFinalizeDelete.
+	f.Apply(&hraft.Log{Data: MarshalAckDelete(id, "node-B")})
+
+	if got := f.PendingDelete(id); got != nil {
+		t.Errorf("after draining ack: pendingDeletes entry should be gone, got %+v", got)
+	}
+	if e := f.Get(id); e != nil {
+		t.Errorf("after draining ack: manifest entry should be gone, got %+v", e)
+	}
+	if !f.IsTombstoned(id) {
+		t.Error("after draining ack: tombstone should be present")
+	}
+	if ackFires != 2 {
+		t.Errorf("onAckDelete fires = %d, want 2 (one per ack)", ackFires)
+	}
+	if finalizeFires != 1 {
+		t.Errorf("onFinalizeDelete fires = %d, want 1 (from the draining ack's atomic finalize)", finalizeFires)
+	}
+}
+
+// gastrolog-15fm8: applyPruneNode atomically finalizes every chunk
+// whose ExpectedFrom became empty as a result of the prune. The
+// per-chunk fire dispatch surfaces an onFinalizeDelete callback for
+// each finalized chunk.
+func TestPruneNodeAutoFinalizesDrainedChunks(t *testing.T) {
+	t.Parallel()
+
+	f := New()
+	now := time.Now()
+
+	// id1: {A, B} — pruning A leaves {B}, NOT finalized.
+	// id2: {A}    — pruning A drains to empty, FINALIZED.
+	// id3: {A, C} — pruning A leaves {C}, NOT finalized.
+	id1 := chunk.NewChunkID()
+	id2 := chunk.NewChunkID()
+	id3 := chunk.NewChunkID()
+	for _, id := range []chunk.ChunkID{id1, id2, id3} {
+		f.Apply(&hraft.Log{Data: MarshalCreateChunk(id, now, now, now)})
+		f.Apply(&hraft.Log{Data: MarshalSealChunk(id, now, 1, 1, now, now, now, false)})
+	}
+	f.Apply(&hraft.Log{Data: MarshalRequestDelete(id1, now, "test", []string{"node-A", "node-B"})})
+	f.Apply(&hraft.Log{Data: MarshalRequestDelete(id2, now, "test", []string{"node-A"})})
+	f.Apply(&hraft.Log{Data: MarshalRequestDelete(id3, now, "test", []string{"node-A", "node-C"})})
+
+	finalizeFires := map[chunk.ChunkID]int{}
+	f.SetOnFinalizeDelete(func(id chunk.ChunkID) { finalizeFires[id]++ })
+
+	f.Apply(&hraft.Log{Data: MarshalPruneNode("node-A")})
+
+	// id1, id3: still pending with their non-A node owed an ack.
+	if got := f.PendingDelete(id1); got == nil || len(got.ExpectedFrom) != 1 || !got.ExpectedFrom["node-B"] {
+		t.Errorf("id1: expected {node-B}, got %+v", got)
+	}
+	if got := f.PendingDelete(id3); got == nil || len(got.ExpectedFrom) != 1 || !got.ExpectedFrom["node-C"] {
+		t.Errorf("id3: expected {node-C}, got %+v", got)
+	}
+	// id2: drained → finalized atomically.
+	if got := f.PendingDelete(id2); got != nil {
+		t.Errorf("id2: pending entry should be gone post-prune, got %+v", got)
+	}
+	if e := f.Get(id2); e != nil {
+		t.Errorf("id2: manifest entry should be gone post-prune, got %+v", e)
+	}
+	if !f.IsTombstoned(id2) {
+		t.Error("id2: tombstone should be present post-prune")
+	}
+	if finalizeFires[id2] != 1 {
+		t.Errorf("id2: onFinalizeDelete fires = %d, want 1", finalizeFires[id2])
+	}
+	if finalizeFires[id1] != 0 || finalizeFires[id3] != 0 {
+		t.Errorf("non-drained chunks must not fire onFinalizeDelete: id1=%d id3=%d", finalizeFires[id1], finalizeFires[id3])
+	}
+}
+
 func TestPendingDeletesSurviveSnapshotRoundtrip(t *testing.T) {
 	t.Parallel()
 
 	src := New()
 	now := time.Now()
 
-	// Three pending deletes in different stages of progress.
+	// Three pending deletes in different stages of progress. Each entry
+	// keeps at least one node in ExpectedFrom after any acks, so the
+	// gastrolog-15fm8 auto-finalize-on-drain path doesn't reduce the
+	// fixture to fewer than 3 entries.
 	for i, cfg := range []struct {
 		reason string
 		expect []string
 	}{
 		{"retention-ttl", []string{"node-A", "node-B", "node-C"}},
-		{"transition-source-expire", []string{"node-A"}},
+		{"transition-source-expire", []string{"node-A", "node-B"}},
 		{"manual-delete-rpc", []string{"node-A", "node-B"}},
 	} {
 		id := chunk.NewChunkID()

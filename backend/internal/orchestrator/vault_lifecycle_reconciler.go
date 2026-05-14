@@ -455,34 +455,15 @@ func (r *VaultLifecycleReconciler) onRequestDelete(p vaultctlfsm.PendingDelete) 
 	go r.fulfillObligation(p.ChunkID, p.Reason, "request-delete")
 }
 
-// onAckDelete fires on every node when CmdAckDelete commits. Only the
-// vault-ctl Raft leader proposes CmdFinalizeDelete; followers ignore
-// the event. Reading the remaining ExpectedFrom set is safe because
-// applyAckDelete fires the callback after the set has been mutated
-// inside the FSM lock; the FSM read here just sees the post-state.
+// onAckDelete fires on every node when CmdAckDelete commits.
 //
-// The finalize Apply MUST happen in a goroutine — same reason as
-// onRequestDelete's ack: posting CmdFinalizeDelete on the leader from
-// inside the FSM apply pump would deadlock waiting for our own queued
-// command to apply.
+// Audit-only post gastrolog-15fm8: applyAckDelete now finalizes the
+// delete atomically inside the same apply when ExpectedFrom drains to
+// empty. The FSM's onFinalizeDelete callback fires from the same
+// apply dispatch, so post-finalize bookkeeping happens through that
+// path. This callback retains only the per-ack observability signal.
 func (r *VaultLifecycleReconciler) onAckDelete(chunkID chunk.ChunkID, ackingNodeID string) {
 	r.logger.Debug("onAckDelete", "chunk", chunkID, "node", ackingNodeID)
-	if r.vaultInst == nil || r.vaultInst.IsRaftLeader == nil || !r.vaultInst.IsRaftLeader() {
-		return
-	}
-	if r.fsm == nil || r.vaultInst.ApplyRaftFinalizeDelete == nil {
-		return
-	}
-	p := r.fsm.PendingDelete(chunkID)
-	if p == nil || len(p.ExpectedFrom) > 0 {
-		return // still owed acks, or already finalized
-	}
-	go func() {
-		if err := r.vaultInst.ApplyRaftFinalizeDelete(chunkID); err != nil {
-			r.logger.Warn("onAckDelete: finalize failed",
-				"chunk", chunkID, "error", err)
-		}
-	}()
 }
 
 func (r *VaultLifecycleReconciler) onFinalizeDelete(chunkID chunk.ChunkID) {
@@ -491,38 +472,23 @@ func (r *VaultLifecycleReconciler) onFinalizeDelete(chunkID chunk.ChunkID) {
 	// before this callback fired.
 }
 
-// onPruneNode fires on every node when CmdPruneNode commits. Only the
-// vault-ctl Raft leader proposes CmdFinalizeDelete for the chunkIDs
-// whose ExpectedFrom became empty as a result of the prune. Followers
-// observe the event but take no action — finalization is leader-only,
-// matching onAckDelete.
+// onPruneNode fires on every node when CmdPruneNode commits.
 //
-// Without the post-prune finalize, deletes proposed before the
-// decommissioned node left would stay in pendingDeletes forever: the
-// FSM had already removed the node from ExpectedFrom (the prune did
-// that synchronously), so onAckDelete never re-fires for those chunks.
-// See gastrolog-51gme step 10.
+// Audit-only post gastrolog-15fm8: applyPruneNode now finalizes
+// chunks whose ExpectedFrom drained as a result of the prune
+// atomically inside the same apply. The FSM's onFinalizeDelete
+// callback fires per chunk from the same apply dispatch. This
+// callback retains only the per-prune observability signal.
+//
+// Pre-fix (gastrolog-51gme step 10), the leader proposed
+// CmdFinalizeDelete for each chunk in a goroutine; leadership
+// transfer between the prune apply and the goroutine running could
+// strand pendingDeletes entries forever. Folding the finalize into
+// applyPruneNode closes that leak — see gastrolog-3qr8z for the
+// disease pattern.
 func (r *VaultLifecycleReconciler) onPruneNode(prunedNodeID string, finalizable []chunk.ChunkID) {
 	r.logger.Debug("onPruneNode",
 		"node", prunedNodeID, "finalizable_count", len(finalizable))
-	if r.vaultInst == nil || r.vaultInst.IsRaftLeader == nil || !r.vaultInst.IsRaftLeader() {
-		return
-	}
-	if r.vaultInst.ApplyRaftFinalizeDelete == nil || len(finalizable) == 0 {
-		return
-	}
-	// Finalize Applies MUST run off the FSM apply pump — same reason as
-	// onAckDelete's goroutine. Snapshot the slice so the goroutine doesn't
-	// race with a future re-use of the underlying array.
-	ids := append([]chunk.ChunkID(nil), finalizable...)
-	go func() {
-		for _, id := range ids {
-			if err := r.vaultInst.ApplyRaftFinalizeDelete(id); err != nil {
-				r.logger.Warn("onPruneNode: post-prune finalize failed",
-					"chunk", id, "node", prunedNodeID, "error", err)
-			}
-		}
-	}()
 }
 
 // SweepPendingObligations walks the FSM's pendingDeletes and runs

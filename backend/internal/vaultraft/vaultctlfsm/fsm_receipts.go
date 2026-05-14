@@ -204,20 +204,42 @@ func (f *FSM) applyRequestDelete(data []byte) (*PendingDelete, error) {
 // callback. If the entry is gone (already finalized) or the node was
 // never expected, the apply succeeds but returns nil — Raft has the
 // entry, the FSM is consistent, and the callback is suppressed.
-func (f *FSM) applyAckDelete(data []byte) (*chunk.ChunkID, string, error) {
+//
+// gastrolog-15fm8: when this ack drains ExpectedFrom to empty, the
+// apply ALSO finalizes the delete atomically — removing the
+// pendingDeletes entry, removing the manifest entry, and writing the
+// tombstone. This is the same FSM-local mutation that
+// applyFinalizeDelete performs; folding it in here closes the
+// leader-only "natural finalize" leak where leadership transfer
+// between the last ack apply and the leader's onAckDelete callback
+// dropped the CmdFinalizeDelete proposal. CmdFinalizeDelete stays in
+// the protocol for explicit external triggers (operator-initiated
+// cleanup) but the receipt protocol's natural completion no longer
+// depends on a leader-only post-apply callback. See gastrolog-3qr8z.
+func (f *FSM) applyAckDelete(data []byte) (*chunk.ChunkID, string, bool, error) {
 	id, nodeID, err := decodeAckDelete(data)
 	if err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
 	p, ok := f.pendingDeletes[id]
 	if !ok {
-		return nil, "", nil
+		return nil, "", false, nil
 	}
 	if !p.ExpectedFrom[nodeID] {
-		return nil, "", nil
+		return nil, "", false, nil
 	}
 	delete(p.ExpectedFrom, nodeID)
-	return &id, nodeID, nil
+
+	if len(p.ExpectedFrom) > 0 {
+		return &id, nodeID, false, nil
+	}
+	// Natural finalize: every node has acked. Atomically tombstone the
+	// chunk, remove the pendingDeletes entry, and remove the manifest
+	// entry. Matches applyFinalizeDelete's mutation exactly.
+	f.tombstones[id] = time.Now()
+	delete(f.pendingDeletes, id)
+	delete(f.chunks, id)
+	return &id, nodeID, true, nil
 }
 
 // CmdFinalizeDelete payload:
@@ -266,14 +288,27 @@ func (f *FSM) applyFinalizeDelete(data []byte) (*chunk.ChunkID, error) {
 
 // applyPruneNode removes nodeID from every pendingDeletes entry's
 // ExpectedFrom set. Returns the prunedNodeID and the slice of chunkIDs
-// whose ExpectedFrom became empty as a result of the prune (i.e.,
-// chunks that are now ready for the leader to propose CmdFinalizeDelete).
+// whose ExpectedFrom became empty as a result of the prune — those
+// chunks are atomically finalized in the same apply (gastrolog-15fm8).
 //
 // Wire format: [1 byte cmd][2 bytes nodeID-len][nodeID-bytes].
 //
 // Idempotent: pruning a node that no entry expected from is a no-op.
 // Pruning twice yields the same final state (the second pass finds
 // nothing to remove and returns an empty finalizable list).
+//
+// gastrolog-15fm8: the pre-fix shape returned `finalizable` and
+// relied on the leader's onPruneNode callback to propose
+// CmdFinalizeDelete for each chunk in a goroutine. That goroutine
+// dropped on leadership transfer between the prune apply and the
+// callback firing, leaving pendingDeletes entries with empty
+// ExpectedFrom stranded forever. The fix folds the finalize INTO this
+// apply: chunks with drained ExpectedFrom are tombstoned, removed from
+// pendingDeletes, and removed from f.chunks atomically before this
+// function returns. The `finalizable` slice is still returned for the
+// onPruneNode callback's audit / observability use; subscribers
+// expecting onFinalizeDelete for each chunk receive it via the
+// per-chunk firing in fsm.go's applyLocked dispatch.
 func (f *FSM) applyPruneNode(data []byte) (string, []chunk.ChunkID, error) {
 	if len(data) < 2 {
 		return "", nil, fmt.Errorf("prune node: payload too short (%d bytes)", len(data))
@@ -296,6 +331,12 @@ func (f *FSM) applyPruneNode(data []byte) (string, []chunk.ChunkID, error) {
 		if len(p.ExpectedFrom) == 0 {
 			finalizable = append(finalizable, chunkID)
 		}
+	}
+	now := time.Now()
+	for _, chunkID := range finalizable {
+		f.tombstones[chunkID] = now
+		delete(f.pendingDeletes, chunkID)
+		delete(f.chunks, chunkID)
 	}
 	return nodeID, finalizable, nil
 }
