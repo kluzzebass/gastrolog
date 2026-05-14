@@ -672,8 +672,23 @@ func (r *retentionRunner) tryRetainChunk(id chunk.ChunkID, b retentionRule, alre
 	// `_source = "retention"`, so operator-configured routes can forward
 	// them to archive vaults, cold storage, etc. The original chunk is
 	// always destroyed regardless of disposition.
+	//
+	// Gate routing on !alreadyPending: routing is a one-shot fire-and-
+	// forget per chunk. When the source delete fails (receipt protocol
+	// stuck, unreachable destination), subsequent sweeps re-enter this
+	// path and must NOT re-route the records — without this guard, every
+	// retention tick re-streams the same chunk's records to the
+	// destination, multiplying storage at the route target each cycle.
+	// Operator footgun from gastrolog-2eclw-fix: hot-vault with route
+	// `_source="retention" AND _vault="<hot>"` → warm-vault grew 50-100
+	// MB/s with no active ingesters because every sweep re-routed the
+	// 11 stuck retention-pending chunks. Routing once + retrying only
+	// the delete is the correct shape: the chunk gets routed exactly
+	// once at the moment retention decides it should be retired.
 	defer r.clearInflight(id)
-	r.applyRetentionDispositionToChunk(id)
+	if !alreadyPending {
+		r.applyRetentionDispositionToChunk(id)
+	}
 	r.expireChunk(id, "retention-trigger")
 }
 
