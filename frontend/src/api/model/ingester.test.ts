@@ -76,12 +76,24 @@ describe("runningCount", () => {
   test("counts only true entries in the alive map", () => {
     const i = makeIngester({});
     const alive = new Map<EntityID, NodeStatusMap>([[i.id, { [NODE_A]: true, [NODE_B]: false }]]);
-    expect(i.runningCount(alive)).toBe(1);
+    expect(i.runningCount(alive, liveNodes)).toBe(1);
   });
 
   test("absent id → 0", () => {
     const i = makeIngester({});
-    expect(i.runningCount(new Map())).toBe(0);
+    expect(i.runningCount(new Map(), liveNodes)).toBe(0);
+  });
+
+  // gastrolog-485u1: defense-in-depth filter — alive flags for nodes
+  // that aren't in the cluster's current live-node set don't count.
+  // Pre-filter, a stale FSM IngesterAlive entry left over from a
+  // pre-fix backend would inflate the badge to "10/3".
+  test("ignores alive flags for nodes not in liveNodes", () => {
+    const i = makeIngester({});
+    const alive = new Map<EntityID, NodeStatusMap>([
+      [i.id, { [NODE_A]: true, [NODE_B]: true, [NODE_DEAD]: true }],
+    ]);
+    expect(i.runningCount(alive, liveNodes)).toBe(2);
   });
 });
 

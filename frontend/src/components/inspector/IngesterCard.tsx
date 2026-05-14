@@ -33,7 +33,7 @@ export function IngesterCard({
   const nodeStatus: NodeStatusMap = aliveMap.get(ingester.id) ?? {};
 
   const selected = ingester.selectedCount(liveNodeIds);
-  const running = ingester.runningCount(aliveMap);
+  const running = ingester.runningCount(aliveMap, liveNodeIds);
   const variant = ingester.statusVariant(aliveMap, liveNodeIds);
 
   return (

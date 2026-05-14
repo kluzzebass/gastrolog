@@ -498,11 +498,50 @@ func (s *Store) PutNode(ctx context.Context, node system.NodeConfig) error {
 	return nil
 }
 
+// DeleteNode removes a node from the cluster and atomically sweeps
+// every other FSM map that references the deleted node ID. Without
+// the sweep, scale-down + cluster.RemoveNode leaves stale IngesterAlive
+// flags (badge reads "10/3" forever), stale NodeStorageConfig entries
+// (ghost storages in placement helpers), and stale IngesterAssignment
+// pointers at decommissioned nodes (singleton ingesters pinned to a
+// dead host). See gastrolog-485u1 / gastrolog-3qr8z.
+//
+// All mutations happen under s.mu so the post-delete state is
+// consistent: no surviving FSM map carries a reference to the deleted
+// node ID by the time the lock releases.
 func (s *Store) DeleteNode(ctx context.Context, id glid.GLID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	delete(s.nodes, id)
+
+	nodeIDStr := id.String()
+
+	// IngesterAlive: every ingester's per-node alive flag map carries
+	// an entry keyed by the departed node. Drop the entry from each;
+	// collapse the ingester's whole entry if no nodes remain.
+	for ingesterID, ns := range s.ingesterAlive {
+		delete(ns, nodeIDStr)
+		if len(ns) == 0 {
+			delete(s.ingesterAlive, ingesterID)
+		}
+	}
+
+	// NodeStorageConfig: the per-node storage layout is keyed by
+	// stringified node ID. The placement helpers walk this map to
+	// resolve storage_id → node_id; a stale entry would resolve to a
+	// node that no longer exists.
+	delete(s.nodeStorageConfigs, nodeIDStr)
+
+	// IngesterAssignment: singleton ingester placement points at one
+	// node per ingester. If that node is the one being deleted, drop
+	// the assignment so the placement manager reassigns on next tick.
+	for ingesterID, assignedNodeID := range s.ingesterAssignment {
+		if assignedNodeID == nodeIDStr {
+			delete(s.ingesterAssignment, ingesterID)
+		}
+	}
+
 	return nil
 }
 

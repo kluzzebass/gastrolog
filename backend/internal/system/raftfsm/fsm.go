@@ -818,7 +818,20 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit,gocyclo // sna
 			return fmt.Errorf("restore node %s: %w", n.ID, err)
 		}
 	}
+	// gastrolog-485u1: build a set of valid node IDs once so the per-
+	// node maps below can skip entries that reference nodes which no
+	// longer exist in NodeConfigs. Snapshots captured before the
+	// DeleteNode-sweeps-stale-state fix landed carry leaked entries;
+	// dropping them at Restore time is a one-time migration safety net.
+	// Steady-state snapshots (post-fix) won't have orphans to skip.
+	validNodes := make(map[string]struct{}, len(rt.Nodes))
+	for _, n := range rt.Nodes {
+		validNodes[n.ID.String()] = struct{}{}
+	}
 	for _, nsc := range rt.NodeStorageConfigs {
+		if _, ok := validNodes[nsc.NodeID]; !ok {
+			continue // stranded storage config for a deleted node
+		}
 		if err := newStore.SetNodeStorageConfig(ctx, nsc); err != nil {
 			return fmt.Errorf("restore node storage config %s: %w", nsc.NodeID, err)
 		}
@@ -835,6 +848,9 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit,gocyclo // sna
 	}
 	for ingesterID, nodes := range rt.IngesterAlive {
 		for nodeID, alive := range nodes {
+			if _, ok := validNodes[nodeID]; !ok {
+				continue // stranded alive flag for a deleted node
+			}
 			if err := newStore.SetIngesterAlive(ctx, ingesterID, nodeID, alive); err != nil {
 				return fmt.Errorf("restore ingester alive %s: %w", ingesterID, err)
 			}
@@ -846,6 +862,9 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit,gocyclo // sna
 		}
 	}
 	for ingesterID, nodeID := range rt.IngesterAssignment {
+		if _, ok := validNodes[nodeID]; !ok {
+			continue // stranded assignment pointing at a deleted node
+		}
 		if err := newStore.SetIngesterAssignment(ctx, ingesterID, nodeID); err != nil {
 			return fmt.Errorf("restore ingester assignment %s: %w", ingesterID, err)
 		}
