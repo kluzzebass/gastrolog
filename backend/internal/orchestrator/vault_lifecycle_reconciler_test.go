@@ -1500,6 +1500,138 @@ func TestSweepStaleLeaderFSMEntriesProposesDeleteForStrandedSealingChunk(t *test
 	}
 }
 
+// TestSweepStalePendingDeleteAcksPrunesNonPlacementNodes pins the
+// self-healing receipt-protocol-unstick path: after a vault placement
+// change (kubectl scale, vault rebalance), pendingDelete entries can
+// carry stale ExpectedFrom node IDs for nodes no longer in the
+// placement set. Those nodes have no vault instance running so they
+// can never ack the delete. The sweep proposes CmdPruneNode to drop
+// them from every entry's ExpectedFrom; the FSM's applyPruneNode then
+// atomically finalizes any entries whose ExpectedFrom drained.
+//
+// Setup mirrors the live K8s incident from gastrolog-2eclw-cascade-fix
+// follow-up: hot-vault has chunks stuck retention-pending with
+// ExpectedFrom containing only stale-node, while current placement is
+// {leader-node + follower-node}.
+func TestSweepStalePendingDeleteAcksPrunesNonPlacementNodes(t *testing.T) {
+	t.Parallel()
+
+	fsm := vaultctlfsm.New()
+	chunkID := chunk.NewChunkID()
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(chunkID, time.Now(), time.Now(), time.Now())}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := fsm.Apply(&hraft.Log{
+		Data: vaultctlfsm.MarshalRequestDelete(chunkID, time.Now(), "retention-ttl",
+			[]string{"leader-node", "follower-node", "stale-node"}),
+	}); err != nil {
+		t.Fatalf("request delete: %v", err)
+	}
+
+	var prunedNodes []string
+	vaultInst := &VaultInstance{
+		VaultID:    glid.New(),
+		IsFollower: false,
+		FollowerTargets: []system.ReplicationTarget{
+			{NodeID: "follower-node"},
+		},
+		ApplyRaftPruneNode: func(nodeID string) error {
+			prunedNodes = append(prunedNodes, nodeID)
+			return nil
+		},
+	}
+
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "leader-node", slog.Default())
+	rec.fsm = fsm
+
+	rec.SweepStalePendingDeleteAcks()
+
+	if len(prunedNodes) != 1 {
+		t.Fatalf("expected 1 prune proposal for stale-node, got %d (%v)", len(prunedNodes), prunedNodes)
+	}
+	if prunedNodes[0] != "stale-node" {
+		t.Errorf("expected prune for stale-node, got %q", prunedNodes[0])
+	}
+}
+
+// TestSweepStalePendingDeleteAcksSkipsCurrentPlacementMembers pins the
+// negative case: nodes in the current placement (leader + followers)
+// MUST NOT be pruned, even if they haven't acked yet. Live deletes
+// in-flight to current placement members are the receipt protocol's
+// normal operation, not stale references.
+func TestSweepStalePendingDeleteAcksSkipsCurrentPlacementMembers(t *testing.T) {
+	t.Parallel()
+
+	fsm := vaultctlfsm.New()
+	chunkID := chunk.NewChunkID()
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(chunkID, time.Now(), time.Now(), time.Now())}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := fsm.Apply(&hraft.Log{
+		Data: vaultctlfsm.MarshalRequestDelete(chunkID, time.Now(), "retention-ttl",
+			[]string{"leader-node", "follower-node"}),
+	}); err != nil {
+		t.Fatalf("request delete: %v", err)
+	}
+
+	var prunedNodes []string
+	vaultInst := &VaultInstance{
+		VaultID:    glid.New(),
+		IsFollower: false,
+		FollowerTargets: []system.ReplicationTarget{
+			{NodeID: "follower-node"},
+		},
+		ApplyRaftPruneNode: func(nodeID string) error {
+			prunedNodes = append(prunedNodes, nodeID)
+			return nil
+		},
+	}
+
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "leader-node", slog.Default())
+	rec.fsm = fsm
+
+	rec.SweepStalePendingDeleteAcks()
+
+	if len(prunedNodes) != 0 {
+		t.Errorf("MUST NOT prune current placement members; got %v", prunedNodes)
+	}
+}
+
+// TestSweepStalePendingDeleteAcksFollowersAreNoOp pins the leader-only
+// gate: only the vault-ctl leader should propose CmdPruneNode, mirroring
+// SweepStaleLeaderFSMEntries' leader-only design. Without this, every
+// node would race to propose the same prune on every sweep tick.
+func TestSweepStalePendingDeleteAcksFollowersAreNoOp(t *testing.T) {
+	t.Parallel()
+
+	fsm := vaultctlfsm.New()
+	chunkID := chunk.NewChunkID()
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(chunkID, time.Now(), time.Now(), time.Now())})
+	_ = fsm.Apply(&hraft.Log{
+		Data: vaultctlfsm.MarshalRequestDelete(chunkID, time.Now(), "retention-ttl",
+			[]string{"leader-node", "stale-node"}),
+	})
+
+	var prunedNodes []string
+	vaultInst := &VaultInstance{
+		VaultID:    glid.New(),
+		IsFollower: true, // follower
+		ApplyRaftPruneNode: func(nodeID string) error {
+			prunedNodes = append(prunedNodes, nodeID)
+			return nil
+		},
+	}
+
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-X", slog.Default())
+	rec.fsm = fsm
+
+	rec.SweepStalePendingDeleteAcks()
+
+	if len(prunedNodes) != 0 {
+		t.Errorf("followers MUST NOT propose CmdPruneNode; got %v", prunedNodes)
+	}
+}
+
 // idleActiveSweepFakeManager extends the fake chunk manager with the
 // surface the idle-active sweep needs: per-id Meta lookups, a Seal()
 // counter that records which m.active was sealed, an EnsureSealed
