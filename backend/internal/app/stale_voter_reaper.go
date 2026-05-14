@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"log/slog"
+	"os"
 	"time"
 
 	"gastrolog/internal/cluster"
@@ -78,14 +79,43 @@ func newStaleVoterReaper(
 	localNodeID string,
 	logger *slog.Logger,
 ) *staleVoterReaper {
+	threshold := defaultStaleVoterThreshold
+	interval := staleVoterReapInterval
+
+	// GASTROLOG_STALE_VOTER_THRESHOLD overrides the default 10-minute
+	// eviction window. Useful for test clusters and operators who
+	// want different patience for transient partitions. Parse as a
+	// Go duration ("30s", "5m", "2h"); silently ignore malformed
+	// values so a typo can't take down the reaper.
+	if raw := os.Getenv("GASTROLOG_STALE_VOTER_THRESHOLD"); raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+			threshold = d
+		} else {
+			logger.Warn("stale-voter reaper: ignoring invalid GASTROLOG_STALE_VOTER_THRESHOLD",
+				"raw", raw, "err", err)
+		}
+	}
+	// GASTROLOG_STALE_VOTER_INTERVAL similarly overrides the 60-second
+	// tick cadence. Coupled with threshold mostly for testing — in
+	// production the interval can stay coarse because the threshold
+	// dominates the response time.
+	if raw := os.Getenv("GASTROLOG_STALE_VOTER_INTERVAL"); raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+			interval = d
+		} else {
+			logger.Warn("stale-voter reaper: ignoring invalid GASTROLOG_STALE_VOTER_INTERVAL",
+				"raw", raw, "err", err)
+		}
+	}
+
 	return &staleVoterReaper{
 		clusterSrv:  clusterSrv,
 		peerState:   peerState,
 		removeNode:  removeNode,
 		localNodeID: localNodeID,
-		threshold:   defaultStaleVoterThreshold,
-		interval:    staleVoterReapInterval,
-		logger:      logger.With("component", "stale-voter-reaper"),
+		threshold:   threshold,
+		interval:    interval,
+		logger:      logger.With("component", "stale-voter-reaper", "threshold", threshold, "interval", interval),
 	}
 }
 
