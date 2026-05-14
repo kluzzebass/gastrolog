@@ -420,6 +420,13 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 		// Register eviction handler: reinitialize as a fresh single-node cluster.
 		clusterSrv.SetEvictionHandler(makeEvictionHandler(proxy, clusterSrv, clusterTLS, hd, nodeID, orch, disp, logger))
+
+		// gastrolog-6bfwk: leader-side safety net that evicts voters
+		// whose last contact has aged past the threshold. Catches the
+		// K8s-scale-down case where `kubectl scale` terminates pods
+		// without firing cluster.RemoveNode.
+		reaper := newStaleVoterReaper(clusterSrv, peerState, removeNodeFn, nodeID, logger)
+		go reaper.Run(ctx)
 	}
 
 	return serveAndAwaitShutdown(ctx, serverDeps{

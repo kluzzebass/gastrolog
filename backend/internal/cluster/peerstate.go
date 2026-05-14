@@ -216,6 +216,25 @@ func (p *PeerState) AggregateRouteStats() (ingested, dropped, routed int64, filt
 	return
 }
 
+// LastSeen returns the timestamp of the most recent broadcast received
+// from the named peer, or the zero time if no broadcast has ever been
+// observed. Used by the stale-voter reaper (gastrolog-6bfwk) to detect
+// voters that have been unreachable for longer than the eviction
+// threshold — distinct from LivePeers which only answers the
+// short-window "is it currently reachable" question (~TTL seconds).
+//
+// A zero return is a deliberate "no positive evidence" signal: the
+// reaper must NOT evict on it. Genuinely-never-up nodes are operator
+// territory (manual cluster remove-node), not automatic.
+func (p *PeerState) LastSeen(nodeID string) time.Time {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if e, ok := p.entries[nodeID]; ok {
+		return e.received
+	}
+	return time.Time{}
+}
+
 // LivePeers returns the node IDs of all peers whose stats have not expired.
 func (p *PeerState) LivePeers() []string {
 	p.mu.RLock()
