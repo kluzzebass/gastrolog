@@ -186,18 +186,28 @@ func TestStaleVoterReaperSkipsNonVoters(t *testing.T) {
 func TestStaleVoterReaperContinuesPastEvictionError(t *testing.T) {
 	t.Parallel()
 
+	// Five-voter cluster so the quorum-preservation gate
+	// (gastrolog-24iv4) allows both evictions. With N=5,
+	// canSafelyEvict permits stepping down to 4 (failure tolerance 1);
+	// the second tick would step to 3 (still failure tolerance 1).
+	// The error path under test is "one transient eviction failure
+	// does not abort the rest of the tick" — unrelated to the gate.
 	cs := &fakeMembership{
 		leader: true,
 		servers: []cluster.RaftServer{
 			voter("local"),
+			voter("healthy-a"),
+			voter("healthy-b"),
 			voter("stale-1"),
 			voter("stale-2"),
 		},
 	}
 	now := time.Now()
 	ps := &fakePeerState{lastSeen: map[string]time.Time{
-		"stale-1": now.Add(-10 * time.Minute),
-		"stale-2": now.Add(-10 * time.Minute),
+		"healthy-a": now.Add(-30 * time.Second),
+		"healthy-b": now.Add(-30 * time.Second),
+		"stale-1":   now.Add(-10 * time.Minute),
+		"stale-2":   now.Add(-10 * time.Minute),
 	}}
 	cap := &captureRemove{err: errors.New("transient")}
 	r := &staleVoterReaper{
@@ -215,5 +225,150 @@ func TestStaleVoterReaperContinuesPastEvictionError(t *testing.T) {
 	defer cap.mu.Unlock()
 	if len(cap.called) != 2 {
 		t.Errorf("error on first eviction must not abort the tick; got %v", cap.called)
+	}
+}
+
+// gastrolog-24iv4: 3-voter cluster (the bare-metal trio case). Even
+// when a voter has been silent past the threshold, the reaper must NOT
+// evict — doing so reduces the cluster to N=2 / quorum=2 / zero
+// failure tolerance, which strictly worsens availability for a node
+// that may be in maintenance. The dead voter sticks around as a ghost
+// until an operator explicitly removes it via `cluster remove-node`.
+func TestStaleVoterReaperSkipsEvictionAtThreeVoters(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	cs := &fakeMembership{
+		leader: true,
+		servers: []cluster.RaftServer{
+			voter("local"),
+			voter("healthy"),
+			voter("stale"),
+		},
+	}
+	ps := &fakePeerState{lastSeen: map[string]time.Time{
+		"healthy": now.Add(-30 * time.Second),
+		"stale":   now.Add(-10 * time.Minute),
+	}}
+	cap := &captureRemove{}
+	r := &staleVoterReaper{
+		clusterSrv:  cs,
+		peerState:   ps,
+		removeNode:  cap.fn,
+		localNodeID: "local",
+		threshold:   5 * time.Minute,
+		logger:      slog.Default(),
+	}
+
+	r.tick(context.Background())
+
+	cap.mu.Lock()
+	defer cap.mu.Unlock()
+	if len(cap.called) != 0 {
+		t.Errorf("3-voter cluster: reaper must skip eviction to preserve failure tolerance; got %v", cap.called)
+	}
+}
+
+// gastrolog-24iv4: same gate logic, 2-voter edge case. Refuse
+// eviction even though the cluster is already at zero failure
+// tolerance — making it worse (1 voter, can't form quorum at all) is
+// strictly bad. Operator must explicitly intervene.
+func TestStaleVoterReaperSkipsEvictionAtTwoVoters(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	cs := &fakeMembership{
+		leader: true,
+		servers: []cluster.RaftServer{
+			voter("local"),
+			voter("stale"),
+		},
+	}
+	ps := &fakePeerState{lastSeen: map[string]time.Time{
+		"stale": now.Add(-10 * time.Minute),
+	}}
+	cap := &captureRemove{}
+	r := &staleVoterReaper{
+		clusterSrv:  cs,
+		peerState:   ps,
+		removeNode:  cap.fn,
+		localNodeID: "local",
+		threshold:   5 * time.Minute,
+		logger:      slog.Default(),
+	}
+
+	r.tick(context.Background())
+
+	cap.mu.Lock()
+	defer cap.mu.Unlock()
+	if len(cap.called) != 0 {
+		t.Errorf("2-voter cluster: reaper must skip eviction; got %v", cap.called)
+	}
+}
+
+// gastrolog-24iv4: 4-voter cluster IS eligible for eviction — post
+// eviction leaves 3 voters with failure tolerance 1, which is the
+// boundary the gate allows. Verifies the gate doesn't over-block
+// larger clusters.
+func TestStaleVoterReaperEvictsAtFourVoters(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	cs := &fakeMembership{
+		leader: true,
+		servers: []cluster.RaftServer{
+			voter("local"),
+			voter("healthy-a"),
+			voter("healthy-b"),
+			voter("stale"),
+		},
+	}
+	ps := &fakePeerState{lastSeen: map[string]time.Time{
+		"healthy-a": now.Add(-30 * time.Second),
+		"healthy-b": now.Add(-30 * time.Second),
+		"stale":     now.Add(-10 * time.Minute),
+	}}
+	cap := &captureRemove{}
+	r := &staleVoterReaper{
+		clusterSrv:  cs,
+		peerState:   ps,
+		removeNode:  cap.fn,
+		localNodeID: "local",
+		threshold:   5 * time.Minute,
+		logger:      slog.Default(),
+	}
+
+	r.tick(context.Background())
+
+	cap.mu.Lock()
+	defer cap.mu.Unlock()
+	if len(cap.called) != 1 || cap.called[0] != "stale" {
+		t.Errorf("4-voter cluster: expected single eviction of 'stale'; got %v", cap.called)
+	}
+}
+
+// gastrolog-24iv4: pure-function unit test for the gate predicate.
+// Pins the boundary between "safe to evict" and "refuse to evict"
+// against future intent changes.
+func TestCanSafelyEvict(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		voters int
+		want   bool
+	}{
+		{0, false}, // empty cluster (defensive)
+		{1, false}, // single voter
+		{2, false}, // pair, evicting leaves a useless 1-voter cluster
+		{3, false}, // trio, evicting leaves N=2/quorum=2/failure=0
+		{4, true},  // N=4 → N=3, quorum=2, failure=1 — boundary
+		{5, true},  // N=5 → N=4, quorum=3, failure=1
+		{10, true}, // large clusters comfortably allow eviction
+		{100, true},
+	}
+	for _, c := range cases {
+		got := canSafelyEvict(c.voters)
+		if got != c.want {
+			t.Errorf("canSafelyEvict(%d) = %v, want %v", c.voters, got, c.want)
+		}
 	}
 }

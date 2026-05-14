@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
+	"os"
 	"strconv"
 	"strings"
 
@@ -25,6 +26,7 @@ func newClusterCmd() *cobra.Command {
 		newClusterJoinTokenCmd(),
 		newClusterShutdownCmd(),
 		newClusterRemoveNodeCmd(),
+		newClusterDemoteSelfCmd(),
 		newClusterPromoteCmd(),
 		newClusterDemoteCmd(),
 		newClusterJoinCmd(),
@@ -184,6 +186,91 @@ func newClusterRemoveNodeCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// newClusterDemoteSelfCmd is the preStop-hook command for K8s
+// rolling-restart / scale-down (gastrolog-24iv4 Step A): the pod tells
+// the cluster to remove this node from Raft membership before SIGTERM
+// arrives. Returns success once the RemoveServer commit has propagated,
+// so the pod terminates without leaving a stranded voter behind.
+//
+// Distinct from `cluster remove-node`: that requires an operator to
+// specify the target node by name. demote-self looks up its own name
+// via os.Hostname() and resolves that name through the existing
+// NodeConfig → ID mapping (newResolver / resolve) — the same code
+// path the operator-facing `cluster remove-node <hostname>` already
+// uses. Sharing the resolver matters: GetClusterStatus's LocalNodeId
+// is in a different encoding than the raft.ServerID strings the
+// leader compares against, so a naive "look up my own ID locally"
+// approach yields a string raft can't match and the RemoveServer
+// silently no-ops.
+//
+// Idempotent: if the node has already been removed (we're not in the
+// cluster's config), the command logs that fact and returns success.
+// preStop hooks must not block pod termination on a "node already
+// gone" race (operator-driven removal happened first, or a previous
+// preStop already fired).
+func newClusterDemoteSelfCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "demote-self",
+		Short: "Remove this node from the cluster (for preStop hooks)",
+		Long: "Looks up this node's own name via os.Hostname() and calls " +
+			"cluster.RemoveNode against it, returning when the membership " +
+			"change has committed. Intended as a Kubernetes preStop lifecycle " +
+			"hook so pods leaving via `kubectl scale` / rolling restart / " +
+			"voluntary eviction take themselves out of the Raft voter set " +
+			"before SIGTERM. See gastrolog-24iv4.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			hostname, err := os.Hostname()
+			if err != nil {
+				return fmt.Errorf("read hostname: %w", err)
+			}
+			if hostname == "" {
+				return errors.New("hostname is empty; demote-self requires a hostname matching the node's NodeConfig.Name")
+			}
+
+			client := clientFromCmd(cmd)
+			r, err := newResolver(context.Background(), client)
+			if err != nil {
+				return fmt.Errorf("build node resolver: %w", err)
+			}
+			// Direct map lookup rather than resolve() so the
+			// hostname-not-found case is a clean "no-op success"
+			// instead of an err-but-return-nil pattern. preStop must
+			// not block pod termination just because the node has
+			// already been removed.
+			id, ok := r.nodes[strings.ToLower(hostname)]
+			if !ok {
+				fmt.Printf("demote-self: node %q not in cluster config (no-op)\n", hostname)
+				return nil
+			}
+
+			_, err = client.Lifecycle.RemoveNode(context.Background(), connect.NewRequest(&v1.RemoveNodeRequest{NodeId: []byte(id)}))
+			if err != nil {
+				if isAlreadyRemoved(err) {
+					fmt.Printf("demote-self: node %s (%s) already removed from cluster (no-op)\n", hostname, id)
+					return nil
+				}
+				return fmt.Errorf("remove self %s (%s): %w", hostname, id, err)
+			}
+			fmt.Printf("demote-self: removed node %s (%s) from cluster\n", hostname, id)
+			return nil
+		},
+	}
+}
+
+// isAlreadyRemoved reports whether err from RemoveNode indicates the
+// target was already absent from the cluster. preStop hooks must
+// treat these as benign success.
+func isAlreadyRemoved(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "not in cluster") ||
+		strings.Contains(msg, "not a voter") ||
+		strings.Contains(msg, "already removed") ||
+		strings.Contains(msg, "not in configuration")
 }
 
 func newClusterPromoteCmd() *cobra.Command {

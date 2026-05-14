@@ -150,6 +150,18 @@ func (r *staleVoterReaper) tick(ctx context.Context) {
 		r.logger.Warn("list servers failed", "error", err)
 		return
 	}
+
+	// Count current voters so we can gate evictions on quorum-preservation
+	// (gastrolog-24iv4): refuse to evict if doing so would reduce the
+	// cluster's failure tolerance to zero. Decremented after each
+	// successful eviction within this tick.
+	voterCount := 0
+	for _, srv := range servers {
+		if srv.Suffrage == "Voter" {
+			voterCount++
+		}
+	}
+
 	now := time.Now()
 	for _, srv := range servers {
 		if srv.ID == r.localNodeID {
@@ -168,6 +180,20 @@ func (r *staleVoterReaper) tick(ctx context.Context) {
 		if age < r.threshold {
 			continue
 		}
+		// gastrolog-24iv4 quorum-preservation gate. On small clusters
+		// (N≤3), reaper-driven eviction takes the cluster from
+		// "1 voter unreachable but recoverable" to "1 voter
+		// permanently removed AND zero failure tolerance" — strictly
+		// worse than just waiting for the unreachable node to return.
+		// We'd rather keep a ghost voter than auto-destroy the
+		// cluster's redundancy for a node that may be in maintenance.
+		// Operators with permanently-dead hardware still have manual
+		// `cluster remove-node`.
+		if !canSafelyEvict(voterCount) {
+			r.logger.Info("skipping eviction — would reduce failure tolerance to zero",
+				"node_id", srv.ID, "last_seen_ago", age, "voter_count", voterCount)
+			continue
+		}
 		r.logger.Warn("evicting unreachable voter",
 			"node_id", srv.ID, "last_seen_ago", age, "threshold", r.threshold)
 		if err := r.removeNode(ctx, srv.ID); err != nil {
@@ -177,5 +203,32 @@ func (r *staleVoterReaper) tick(ctx context.Context) {
 		}
 		r.logger.Info("voter evicted",
 			"node_id", srv.ID, "last_seen_ago", age)
+		voterCount--
 	}
+}
+
+// canSafelyEvict reports whether the reaper can remove one voter from
+// a cluster of `voterCount` without driving failure tolerance to zero.
+//
+// Raft voter count N → quorum = floor(N/2)+1 → failure tolerance =
+// N − quorum. After eviction the cluster has N−1 voters with quorum =
+// floor((N−1)/2)+1 and failure tolerance = (N−1) − quorum.
+//
+//	N=2: after=1, quorum=1, failure=0. Refuse.
+//	N=3: after=2, quorum=2, failure=0. Refuse.
+//	N=4: after=3, quorum=2, failure=1. Allow.
+//	N=5: after=4, quorum=3, failure=1. Allow.
+//	N≥4: always safe — at worst we step from N failure-tolerance to
+//	N-1, never to 0.
+//
+// See gastrolog-24iv4 for the threat model and the alternative fixes
+// considered (preStop hook, demote-to-non-voter, boot-time auto-rejoin).
+func canSafelyEvict(voterCount int) bool {
+	afterN := voterCount - 1
+	if afterN < 2 {
+		return false
+	}
+	quorumAfter := afterN/2 + 1
+	failureToleranceAfter := afterN - quorumAfter
+	return failureToleranceAfter >= 1
 }

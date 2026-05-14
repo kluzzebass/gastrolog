@@ -206,6 +206,33 @@ spec:
               port: 4564
             initialDelaySeconds: 5
             periodSeconds: 5
+          # preStop hook: tell the cluster to remove this node from the
+          # Raft voter set before SIGTERM. Fires for every K8s-managed
+          # termination (scale-down, rolling restart, voluntary
+          # eviction, drain) — but NOT on crash, OOM, or hardware
+          # failure, which is exactly the policy we want: graceful
+          # exits cleanly remove themselves; abrupt exits remain in the
+          # voter set until either the operator removes them or the
+          # node returns (and goes through the boot-time auto-rejoin
+          # path if it had been evicted in the interim).
+          #
+          # Without this, scale-down via `kubectl scale` would strand
+          # ghost voters in Raft forever, eventually relying on the
+          # stale-voter-reaper — which was the original gastrolog-6bfwk
+          # workaround. See gastrolog-24iv4 for the design rationale
+          # and gastrolog-6bfwk for the failure mode this fixes.
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - /gastrolog --home /config cluster demote-self || true
+      # terminationGracePeriodSeconds bounds the total preStop +
+      # SIGTERM-handling window. 30s is generous: demote-self normally
+      # completes within a few hundred ms, and the shutdown drain
+      # itself is bounded by the orchestrator's own internal timeouts.
+      terminationGracePeriodSeconds: 30
       volumes:
         - name: secrets
           secret:

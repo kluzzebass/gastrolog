@@ -186,6 +186,18 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		return err
 	}
 
+	// gastrolog-24iv4 Step C: if this node previously ran as a voter
+	// but the cluster has since removed it (reaper or operator), wipe
+	// the stale Raft directory before opening the raft store. Otherwise
+	// the subsequent raft init would replay a snapshot that lists this
+	// node as a voter, send pre-votes at a stale term, and crashloop
+	// on FSM catchup. Boot-time peer query — companion to the runtime
+	// NotifyEviction handler which only fires when the node is alive
+	// at eviction time.
+	if err := autoRejoinIfEvicted(ctx, logger, cfg, clusterTLS, hd, nodeID); err != nil {
+		return err
+	}
+
 	configSignal := notify.NewSignal()
 	statsSignal := notify.NewSignal()
 	disp := &configDispatcher{localNodeID: nodeID, logger: compDispatch.Apply(logger), clusterTLS: clusterTLS, tlsFilePath: hd.ClusterTLSPath(), configSignal: configSignal}
