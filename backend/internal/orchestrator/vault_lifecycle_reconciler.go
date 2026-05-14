@@ -968,16 +968,35 @@ func (r *VaultLifecycleReconciler) SweepIdleActiveChunks() {
 }
 
 // sealIfIdleActive seals a single FSM Active entry if this node holds
-// it locally and its local WriteEnd has been frozen past the idle
-// threshold. Returns true on a successful seal. Extracted from
-// SweepIdleActiveChunks to keep cyclomatic / cognitive complexity
-// manageable now that the sweep has two distinct seal paths.
+// it locally, hasn't already locally sealed it, and its local WriteEnd
+// has been frozen past the idle threshold. Returns true on a successful
+// seal. Extracted from SweepIdleActiveChunks to keep cyclomatic /
+// cognitive complexity manageable now that the sweep has two distinct
+// seal paths.
+//
+// CRITICAL: the localMeta.Sealed guard breaks the runaway-loop the
+// first implementation hit in K8s. Without it, every 20s tick re-fired
+// AnnounceSeal AND postSealWork — which re-ran the full GLCB assembly
+// + index rebuild every tick. On a 20MB orphan, that's ~60s of GC
+// churn per tick and pushed RSS into the multi-GB range. The guard
+// makes the sweep one-shot per orphan: EnsureSealed flips the local
+// flag, the announce+post-seal fire once, and subsequent ticks
+// short-circuit even if the FSM hasn't reached Sealed yet (which can
+// happen when Apply forwards to a leader that's lost track of this
+// vault-ctl group's membership).
 func (r *VaultLifecycleReconciler) sealIfIdleActive(e vaultctlfsm.ManifestEntry, localActiveID chunk.ChunkID, announcer chunk.MetadataAnnouncer) bool {
 	if e.State != chunk.ChunkStateActive {
 		return false
 	}
 	localMeta, err := r.vaultInst.Chunks.Meta(e.ID)
 	if err != nil {
+		return false
+	}
+	if localMeta.Sealed {
+		// Already sealed locally on a prior tick (or by some other path).
+		// FSM is still Active either because the AnnounceSeal Apply
+		// failed silently or the vault-ctl group's leader hasn't fully
+		// converged. Either way, do NOT re-run the post-seal pipeline.
 		return false
 	}
 	if localMeta.WriteEnd.IsZero() {

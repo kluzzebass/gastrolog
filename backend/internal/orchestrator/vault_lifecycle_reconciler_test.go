@@ -1737,6 +1737,60 @@ func TestSweepIdleActiveSkipsChunksNotHeldLocally(t *testing.T) {
 	}
 }
 
+// TestSweepIdleActiveSkipsAlreadyLocallySealedChunks pins the
+// idempotency invariant that caught us in K8s: after the first sweep
+// flips the local sealed flag (via EnsureSealed or sealActiveLocked),
+// subsequent ticks MUST NOT re-fire AnnounceSeal or postSealWork even
+// though the FSM may still say Active.
+//
+// Why this happens: AnnounceSeal forwards Apply to the vault-ctl
+// leader. If the leader doesn't fully converge the apply (forward
+// RPCs failing, "no raft leader", a stale group member etc.), the
+// FSM stays Active on this node forever. Without this guard, the
+// sweep re-runs the entire post-seal pipeline (sealToGLCB +
+// index rebuild + replication) every 20s on each orphan — multi-GB
+// memory churn per tick.
+//
+// gastrolog-2eclw follow-up: the first implementation shipped without
+// this check and was caught live by 2866 sweep firings on a single
+// chunk on gastrolog-6, peaking VmRSS at 15GB.
+func TestSweepIdleActiveSkipsAlreadyLocallySealedChunks(t *testing.T) {
+	t.Parallel()
+
+	fsm := vaultctlfsm.New()
+	now := time.Now()
+	idleStart := now.Add(-2 * time.Hour)
+
+	id := chunk.NewChunkID()
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(id, idleStart, idleStart, idleStart)}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// FSM stays Active — Apply did not converge on this node.
+
+	staleEnd := now.Add(-30 * time.Minute)
+	cm := &idleActiveSweepFakeManager{
+		metas: map[chunk.ChunkID]chunk.ChunkMeta{
+			// Crucially, Sealed=true: a prior tick already sealed it
+			// locally; FSM hasn't caught up.
+			id: {ID: id, WriteEnd: staleEnd, RecordCount: 50, Bytes: 2048, Sealed: true},
+		},
+		// Not the m.active (would otherwise hit the m.active branch).
+		active:    nil,
+		announcer: &captureAnnouncer{},
+	}
+
+	vaultInst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
+	rec.fsm = fsm
+
+	rec.SweepIdleActiveChunks()
+
+	if len(cm.sealCalls)+len(cm.ensured)+len(cm.announcer.sealed) != 0 {
+		t.Errorf("locally-sealed chunk with FSM still Active MUST short-circuit; seal=%v ensure=%v announce=%v",
+			cm.sealCalls, cm.ensured, cm.announcer.sealed)
+	}
+}
+
 // TestSweepIdleActiveSkipsSealingAndSealedEntries pins state-filter
 // scope: only state=Active is in scope. Sealing entries are recovered
 // by resumeSealingFromFSM; Sealed entries are out of the seal lifecycle
