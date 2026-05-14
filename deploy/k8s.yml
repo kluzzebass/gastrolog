@@ -87,6 +87,13 @@ data:
   # Single token only (no spaces). Color accepts any CSS color value.
   GASTROLOG_ENVIRONMENT_LABEL: "Kubernetes"
   GASTROLOG_ENVIRONMENT_COLOR: "red"
+  # gastrolog-6bfwk: stale-voter reaper threshold + interval — both
+  # overrideable for test scenarios (env vars are read at process
+  # startup). Leave unset in the deployed manifest to inherit the
+  # safe defaults (10m / 60s). The 2m threshold we tried during
+  # initial verification was BELOW the rolling-redeploy window and
+  # caused the reaper to evict voters mid-rollout; the rule of thumb
+  # is threshold >= 5 × (pod_count × per_pod_restart_window).
 
 ---
 # Secret for admin credentials + the bootstrap-token shared secret.
