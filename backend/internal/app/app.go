@@ -433,12 +433,17 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		// Register eviction handler: reinitialize as a fresh single-node cluster.
 		clusterSrv.SetEvictionHandler(makeEvictionHandler(proxy, clusterSrv, clusterTLS, hd, nodeID, orch, disp, logger))
 
-		// gastrolog-6bfwk: leader-side safety net that evicts voters
-		// whose last contact has aged past the threshold. Catches the
-		// K8s-scale-down case where `kubectl scale` terminates pods
-		// without firing cluster.RemoveNode.
-		reaper := newStaleVoterReaper(clusterSrv, peerState, removeNodeFn, nodeID, logger)
-		go reaper.Run(ctx)
+		// gastrolog-24iv4: the stale-voter-reaper that previously lived
+		// here is gone. Its only role was cleaning up after operators
+		// who used `kubectl scale` directly instead of the supported
+		// `cluster remove-node` path (gastrolog-6bfwk). The preStop
+		// hook + `cluster demote-self` CLI in this same PR makes every
+		// K8s-managed termination call cluster.RemoveNode cleanly,
+		// closing that operator-discipline gap at the source. Raft
+		// handles unreachable voters correctly without intervention;
+		// auto-eviction added risk (maintenance-window evictions,
+		// no-quorum-gate cascades) without solving any problem the
+		// preStop hook doesn't already solve.
 	}
 
 	return serveAndAwaitShutdown(ctx, serverDeps{
