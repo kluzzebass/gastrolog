@@ -64,12 +64,26 @@ export class Ingester {
     return this.pinnedNodeIds.length;
   }
 
-  /** Number of nodes that have reported alive=true in the FSM map. */
-  runningCount(aliveMap: ReadonlyMap<EntityID, NodeStatusMap>): number {
+  /**
+   * Number of nodes that have reported alive=true in the FSM map AND
+   * are still present in the cluster's current live-node set.
+   *
+   * gastrolog-485u1: the backend's IngesterAlive map can carry stale
+   * flags for nodes that have been removed via `cluster remove-node`
+   * (the FSM apply path used to leak per-node references on
+   * DeleteNode). Filtering by `liveNodes` here is defense-in-depth: a
+   * snapshot captured before the backend sweep landed, or a backend
+   * still on the pre-fix binary, won't produce an inflated badge.
+   * Steady-state post-fix this filter is a no-op because the backend
+   * keeps the FSM clean.
+   */
+  runningCount(aliveMap: ReadonlyMap<EntityID, NodeStatusMap>, liveNodes: ReadonlySet<EntityID>): number {
     const ns = aliveMap.get(this.id);
     if (!ns) return 0;
     let n = 0;
-    for (const v of Object.values(ns)) if (v) n++;
+    for (const [nodeID, alive] of Object.entries(ns)) {
+      if (alive && liveNodes.has(nodeID as EntityID)) n++;
+    }
     return n;
   }
 
@@ -95,7 +109,7 @@ export class Ingester {
     if (!this.enabled) return "muted";
     const selected = this.selectedCount(liveNodes);
     if (selected === 0) return "muted";
-    const running = this.runningCount(aliveMap);
+    const running = this.runningCount(aliveMap, liveNodes);
     if (running >= selected) return "info";
     const hasDeadPin = !this.allNodes && this.pinnedNodeIds.some((id) => !liveNodes.has(id));
     return hasDeadPin ? "error" : "warn";
