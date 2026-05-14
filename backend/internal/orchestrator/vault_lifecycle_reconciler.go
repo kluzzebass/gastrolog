@@ -883,6 +883,87 @@ func (r *VaultLifecycleReconciler) SweepStaleLeaderFSMEntries() {
 	}
 }
 
+// SweepStalePendingDeleteAcks walks every pendingDelete entry and proposes
+// CmdPruneNode for any node in ExpectedFrom that's no longer in the vault's
+// current placement set. This unsticks retention-deletes whose ExpectedFrom
+// references nodes removed from the vault's placement (e.g., after a
+// kubernetes-contract or vault rebalance): those nodes can never ack
+// because they have no vault instance running locally.
+//
+// Without this sweep, the receipt protocol deadlocks: g-1 was in the
+// placement when CmdRequestDelete was proposed, the placement later
+// changed to exclude g-1, g-1 lost its vault instance, the ExpectedFrom
+// entry survives, and nothing can drive an ack. The retention-pending
+// chunks sit forever, the receipt-protocol's stuck observation surfaces
+// in the inspector as `pending-ack: gastrolog-1`, but no automatic
+// recovery fires.
+//
+// Why use CmdPruneNode (not CmdAckDelete) for the cleanup: CmdPruneNode
+// has the exact semantic we need — "node X is no longer in scope; drop
+// it from every entry's ExpectedFrom, finalize entries whose Expected
+// From drained as a result". CmdAckDelete would also work but requires
+// per-chunk proposals; CmdPruneNode batches the whole prune into one
+// apply per stale node.
+//
+// Leader-only (the same gate as SweepStaleLeaderFSMEntries): only one
+// node should propose, and the vault-ctl leader is the natural single
+// point because retention itself is leader-only.
+//
+// See gastrolog-2eclw follow-up: the live K8s cluster ended up with
+// 8 stuck chunks whose ExpectedFrom contained only gastrolog-1 — a
+// former placement member with no current vault instance. This sweep
+// is the self-healing path.
+func (r *VaultLifecycleReconciler) SweepStalePendingDeleteAcks() {
+	if r.fsm == nil || r.vaultInst == nil {
+		return
+	}
+	if r.vaultInst.IsFollower {
+		return
+	}
+	if r.vaultInst.ApplyRaftPruneNode == nil {
+		return
+	}
+
+	// Build the current-placement set: this node (always the leader
+	// for the sweep — see follower gate above) plus every follower
+	// target. Any nodeID in pendingDeletes ExpectedFrom that's NOT in
+	// this set is stale.
+	placement := make(map[string]bool, 1+len(r.vaultInst.FollowerTargets))
+	if r.localNodeID != "" {
+		placement[r.localNodeID] = true
+	}
+	for _, t := range r.vaultInst.FollowerTargets {
+		if t.NodeID != "" {
+			placement[t.NodeID] = true
+		}
+	}
+
+	staleNodes := make(map[string]bool)
+	for _, p := range r.fsm.PendingDeletes() {
+		for nodeID := range p.ExpectedFrom {
+			if !placement[nodeID] {
+				staleNodes[nodeID] = true
+			}
+		}
+	}
+	if len(staleNodes) == 0 {
+		return
+	}
+
+	for nodeID := range staleNodes {
+		r.logger.Warn("stale-pending-ack sweep: proposing CmdPruneNode for stale ExpectedFrom",
+			"vault", r.vaultID, "stale_node", nodeID,
+			"current_placement_size", len(placement))
+		if err := r.vaultInst.ApplyRaftPruneNode(nodeID); err != nil {
+			r.logger.Warn("stale-pending-ack sweep: CmdPruneNode apply failed",
+				"vault", r.vaultID, "stale_node", nodeID, "error", err)
+			continue
+		}
+	}
+	r.logger.Info("stale-pending-ack sweep: pruned stale ExpectedFrom",
+		"vault", r.vaultID, "stale_count", len(staleNodes))
+}
+
 // idleActiveThreshold is how long an FSM-Active chunk can sit without
 // receiving record appends (i.e., local WriteEnd hasn't advanced)
 // before SweepIdleActiveChunks seals it. Targets the orphan-active
