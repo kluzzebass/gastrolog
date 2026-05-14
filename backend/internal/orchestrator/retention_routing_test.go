@@ -416,6 +416,69 @@ func TestRetentionDispositionEmptyTreatedAsDelete(t *testing.T) {
 	}
 }
 
+// TestTryRetainChunkSkipsDispositionWhenAlreadyPending pins the
+// regression fix from the gastrolog-2eclw-follow-up live incident: when
+// retention sweeps re-evaluate a chunk that's already retention-pending
+// (because the source delete is stuck — receipt protocol stalled,
+// destination unreachable, etc.), the disposition action MUST NOT fire
+// again. Otherwise every sweep re-streams the same records to the
+// route destination, multiplying storage at the target each cycle.
+//
+// In the K8s test cluster this manifested as 11 stuck hot-vault
+// chunks re-routing through `_source="retention"` → warm-vault on
+// every 60s sweep, growing warm-vault by ~50-100 MB/s with zero
+// active ingesters.
+func TestTryRetainChunkSkipsDispositionWhenAlreadyPending(t *testing.T) {
+	t.Parallel()
+
+	fx := newDispositionFixture(t)
+
+	r := &retentionRunner{
+		vaultID:     fx.sourceID,
+		orch:        fx.orch,
+		logger:      slog.Default(),
+		disposition: system.RetentionDispositionRoute,
+		inflight:    make(map[chunk.ChunkID]bool),
+		// No applyRaftRetentionPending stub — when nil, tryRetainChunk
+		// skips the FSM mark and proceeds directly to the disposition
+		// + expire path. The alreadyPending gate is independent of the
+		// FSM-mark gate, so this is sufficient to exercise it.
+		// No reconciler / no im / no cm — expireChunk will hit nil
+		// derefs in the reconciler-less fallback, which is fine: the
+		// gate runs BEFORE expireChunk, so the assertions complete
+		// before any nil-deref. We recover the panic to prove the
+		// gate ran.
+	}
+
+	// First call: alreadyPending=false → must fire routing (3 records
+	// into archive). expireChunk panics from nil cm — caught.
+	func() {
+		defer func() { _ = recover() }()
+		r.tryRetainChunk(fx.sealedID, retentionRule{}, false)
+	}()
+
+	got := countArchiveRecords(t, fx.archiveCM)
+	if got != 3 {
+		t.Fatalf("first sweep (alreadyPending=false) must route 3 records to archive, got %d", got)
+	}
+
+	// Re-arm inflight for the second call.
+	r.mu.Lock()
+	r.inflight = make(map[chunk.ChunkID]bool)
+	r.mu.Unlock()
+
+	// Second call: alreadyPending=true → must NOT fire routing.
+	// Archive count stays at 3.
+	func() {
+		defer func() { _ = recover() }()
+		r.tryRetainChunk(fx.sealedID, retentionRule{}, true)
+	}()
+
+	if got := countArchiveRecords(t, fx.archiveCM); got != 3 {
+		t.Errorf("second sweep (alreadyPending=true) MUST NOT re-route; archive grew from 3 to %d records (the storage-eating cascade bug)", got)
+	}
+}
+
 // TestRetentionTargetThreadsDispositionFromVaultConfig verifies that
 // retentionTargetForInstance reads VaultConfig.RetentionDisposition (via
 // ResolveRetentionDisposition) and writes the resolved value to the
