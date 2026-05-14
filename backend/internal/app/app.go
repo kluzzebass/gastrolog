@@ -795,7 +795,7 @@ func requestClusterMembership(ctx context.Context, logger *slog.Logger, cfg RunC
 	logger.Info("requesting voter membership from leader", "leader_addr", cfg.JoinAddr, "advertise", advertise)
 	joinCtx, joinCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer joinCancel()
-	if err := cluster.JoinCluster(joinCtx, cfg.JoinAddr, nodeID, advertise, clusterTLS, true); err != nil {
+	if err := cluster.JoinCluster(joinCtx, logger, cfg.JoinAddr, nodeID, advertise, clusterTLS, true); err != nil {
 		return fmt.Errorf("join cluster: %w", err)
 	}
 	logger.Info("voter membership granted by leader")
