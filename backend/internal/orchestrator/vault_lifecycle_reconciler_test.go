@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -175,90 +176,78 @@ func TestReconcilerOnRequestDeleteIgnoresNotInExpectedFrom(t *testing.T) {
 	}
 }
 
-// TestReconcilerOnAckDeleteFinalizesWhenAllAcked pins the leader-side
-// invariant: when CmdAckDelete commits and the FSM's expectedFrom set
-// becomes empty, the leader proposes CmdFinalizeDelete. Followers
-// (IsRaftLeader == false) must NOT propose finalize — that's the
-// leader-only convergence point.
-func TestReconcilerOnAckDeleteFinalizesWhenAllAcked(t *testing.T) {
+// TestReconcilerOnAckDeleteAutoFinalizesInsideApply pins the
+// gastrolog-15fm8 invariant: when CmdAckDelete drains ExpectedFrom to
+// empty, the FSM finalizes atomically inside the same apply — no
+// leader-only callback proposes CmdFinalizeDelete. The reconciler's
+// onAckDelete is audit-only post-fix; any leader-only proposal would
+// re-introduce the leader-transfer leak the fix closes.
+func TestReconcilerOnAckDeleteAutoFinalizesInsideApply(t *testing.T) {
 	t.Parallel()
 
 	fsm := vaultctlfsm.New()
-	cm := &reconcilerFakeChunkManager{}
 
-	var finalizeCount atomic.Int32
-	var finalizedID chunk.ChunkID
+	var (
+		proposedFinalize atomic.Int32
+		fsmFinalized     atomic.Int32
+		finalizedID      chunk.ChunkID
+		idMu             sync.Mutex
+	)
 	vaultInst := &VaultInstance{
-		VaultID: glid.New(),
-		Chunks: cm,
-		IsRaftLeader: func() bool { return true },
+		VaultID:            glid.New(),
+		Chunks:             &reconcilerFakeChunkManager{},
+		IsRaftLeader:       func() bool { return true },
 		ApplyRaftAckDelete: func(_ chunk.ChunkID, _ string) error { return nil },
-		ApplyRaftFinalizeDelete: func(id chunk.ChunkID) error {
-			finalizedID = id
-			finalizeCount.Add(1)
+		// ApplyRaftFinalizeDelete MUST NOT be called by the post-fix
+		// onAckDelete — finalize happens inline in applyAckDelete.
+		ApplyRaftFinalizeDelete: func(_ chunk.ChunkID) error {
+			proposedFinalize.Add(1)
 			return nil
 		},
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
 	rec.Wire(fsm)
+	// Set the test hook AFTER Wire so the reconciler's audit-only
+	// onFinalizeDelete doesn't steal the callback.
+	fsm.SetOnFinalizeDelete(func(id chunk.ChunkID) {
+		idMu.Lock()
+		finalizedID = id
+		idMu.Unlock()
+		fsmFinalized.Add(1)
+	})
 
 	chunkID := chunk.NewChunkID()
+	now := time.Now()
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(chunkID, now, now, now)})
+	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(chunkID, now, 1, 1, now, now, now, false)})
 	_ = fsm.Apply(&hraft.Log{
-		Data: vaultctlfsm.MarshalRequestDelete(chunkID, time.Now(), "retention-ttl",
+		Data: vaultctlfsm.MarshalRequestDelete(chunkID, now, "retention-ttl",
 			[]string{"node-A", "node-B"}),
 	})
-	// node-A acks (this fires through the local applier stub above and
-	// also via direct Apply for node-B simulation below).
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalAckDelete(chunkID, "node-A")})
 
-	if finalizeCount.Load() != 0 {
-		t.Errorf("must not finalize while node-B still owes ack, got %d", finalizeCount.Load())
+	if fsmFinalized.Load() != 0 {
+		t.Errorf("must not finalize while node-B still owes ack, got %d", fsmFinalized.Load())
 	}
 
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalAckDelete(chunkID, "node-B")})
 
-	// onAckDelete dispatches the finalize Apply in a goroutine to avoid
-	// deadlocking the FSM apply pump. Wait for the goroutine to drain.
-	deadline := time.After(2 * time.Second)
-	for finalizeCount.Load() < 1 {
-		select {
-		case <-deadline:
-			t.Fatalf("finalize did not fire within deadline (count=%d)", finalizeCount.Load())
-		case <-time.After(10 * time.Millisecond):
-		}
+	// FSM-side finalize is synchronous within applyAckDelete; the
+	// onFinalizeDelete callback fires inside fire() right after apply
+	// returns. No goroutine to wait for; either it fired or it didn't.
+	if fsmFinalized.Load() != 1 {
+		t.Errorf("FSM onFinalizeDelete fires = %d, want 1 (atomic finalize on draining ack)", fsmFinalized.Load())
 	}
-
+	idMu.Lock()
 	if finalizedID != chunkID {
 		t.Errorf("finalize id = %s, want %s", finalizedID, chunkID)
 	}
-}
+	idMu.Unlock()
 
-// TestReconcilerOnAckDeleteSkipsOnFollower verifies that a non-leader
-// reconciler observing CmdAckDelete does NOT propose CmdFinalizeDelete.
-// Only one node at a time may cleanly drive finalization — the leader.
-func TestReconcilerOnAckDeleteSkipsOnFollower(t *testing.T) {
-	t.Parallel()
-
-	fsm := vaultctlfsm.New()
-	var finalizeCount atomic.Int32
-	vaultInst := &VaultInstance{
-		VaultID:                  glid.New(),
-		Chunks:                  &reconcilerFakeChunkManager{},
-		IsRaftLeader:            func() bool { return false },
-		ApplyRaftAckDelete:      func(_ chunk.ChunkID, _ string) error { return nil },
-		ApplyRaftFinalizeDelete: func(_ chunk.ChunkID) error { finalizeCount.Add(1); return nil },
-	}
-	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
-	rec.Wire(fsm)
-
-	chunkID := chunk.NewChunkID()
-	_ = fsm.Apply(&hraft.Log{
-		Data: vaultctlfsm.MarshalRequestDelete(chunkID, time.Now(), "test", []string{"node-A"}),
-	})
-	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalAckDelete(chunkID, "node-A")})
-
-	if finalizeCount.Load() != 0 {
-		t.Errorf("follower must not finalize, got %d finalize calls", finalizeCount.Load())
+	// The reconciler must NOT propose CmdFinalizeDelete in any branch —
+	// that's the leader-only-callback shape the fix eliminated.
+	if proposedFinalize.Load() != 0 {
+		t.Errorf("ApplyRaftFinalizeDelete must not be called from onAckDelete post-fix, got %d", proposedFinalize.Load())
 	}
 }
 
@@ -287,91 +276,83 @@ func TestReconcilerDeleteChunkSingleNodeFallback(t *testing.T) {
 	}
 }
 
-// TestReconcilerOnPruneNodeFinalizesEmptiedEntries pins the gastrolog-51gme
-// step 10 invariant: when CmdPruneNode commits and the FSM reports a list
-// of chunks whose ExpectedFrom became empty, the reconciler (leader-only)
-// proposes CmdFinalizeDelete for each. Without this, removing a node from
-// the voter set would orphan its outstanding deletes — onAckDelete only
-// fires for actual CmdAckDelete applies, not for prune-induced empties.
-func TestReconcilerOnPruneNodeFinalizesEmptiedEntries(t *testing.T) {
+// TestReconcilerOnPruneNodeAutoFinalizesInsideApply pins the
+// gastrolog-15fm8 invariant: when CmdPruneNode drains a pendingDelete's
+// ExpectedFrom to empty, the FSM finalizes atomically inside the same
+// apply — no leader-only callback proposes CmdFinalizeDelete. The
+// onFinalizeDelete callback fires once per finalized chunk through the
+// FSM's apply dispatch; the reconciler's onPruneNode is audit-only
+// post-fix. Pre-fix, the leader proposed finalize in a goroutine that
+// could drop on leadership transfer mid-prune.
+func TestReconcilerOnPruneNodeAutoFinalizesInsideApply(t *testing.T) {
 	t.Parallel()
 
 	fsm := vaultctlfsm.New()
 	now := time.Now()
 
-	// Three pendingDeletes; pruning node-A empties the second.
+	// Three pendingDeletes; pruning node-A drains the second.
 	idStillOwed := chunk.NewChunkID()
 	idEmptied := chunk.NewChunkID()
 	idUntouched := chunk.NewChunkID()
+	for _, id := range []chunk.ChunkID{idStillOwed, idEmptied, idUntouched} {
+		_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(id, now, now, now)})
+		_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(id, now, 1, 1, now, now, now, false)})
+	}
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalRequestDelete(idStillOwed, now, "test", []string{"node-A", "node-B"})})
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalRequestDelete(idEmptied, now, "test", []string{"node-A"})})
 	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalRequestDelete(idUntouched, now, "test", []string{"node-B"})})
 
-	finalizedCh := make(chan chunk.ChunkID, 4)
+	var proposedFinalize atomic.Int32
 	vaultInst := &VaultInstance{
-		VaultID:                  glid.New(),
-		Chunks:                  &reconcilerFakeChunkManager{},
-		IsRaftLeader:            func() bool { return true },
-		ApplyRaftFinalizeDelete: func(id chunk.ChunkID) error { finalizedCh <- id; return nil },
+		VaultID:      glid.New(),
+		Chunks:       &reconcilerFakeChunkManager{},
+		IsRaftLeader: func() bool { return true },
+		// ApplyRaftFinalizeDelete MUST NOT be called by the post-fix
+		// onPruneNode — finalize happens inline in applyPruneNode.
+		ApplyRaftFinalizeDelete: func(_ chunk.ChunkID) error {
+			proposedFinalize.Add(1)
+			return nil
+		},
 	}
 	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-B", slog.Default())
 	rec.Wire(fsm)
+	// Set the test hook AFTER Wire so the reconciler's audit-only
+	// onFinalizeDelete doesn't steal the callback.
+	finalized := map[chunk.ChunkID]int{}
+	var finalizedMu sync.Mutex
+	fsm.SetOnFinalizeDelete(func(id chunk.ChunkID) {
+		finalizedMu.Lock()
+		finalized[id]++
+		finalizedMu.Unlock()
+	})
 
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalPruneNode("node-A")}); err != nil {
 		t.Fatalf("apply prune: %v", err)
 	}
 
-	// onPruneNode dispatches finalize Applies in a goroutine to avoid
-	// deadlocking the FSM apply pump (CmdFinalizeDelete on the leader
-	// posts to the same Raft apply queue we're currently draining). The
-	// test must wait for that goroutine to drain before asserting.
-	var finalized []chunk.ChunkID
-	deadline := time.After(2 * time.Second)
-	for {
-		select {
-		case id := <-finalizedCh:
-			finalized = append(finalized, id)
-			if len(finalized) >= 1 {
-				goto done
-			}
-		case <-deadline:
-			goto done
-		}
+	finalizedMu.Lock()
+	defer finalizedMu.Unlock()
+	if finalized[idEmptied] != 1 {
+		t.Errorf("onFinalizeDelete for idEmptied = %d, want 1", finalized[idEmptied])
 	}
-done:
-	if len(finalized) != 1 || finalized[0] != idEmptied {
-		t.Errorf("finalized = %v, want [%s] (idEmptied only)", finalized, idEmptied)
+	if finalized[idStillOwed] != 0 || finalized[idUntouched] != 0 {
+		t.Errorf("non-drained chunks must not fire onFinalizeDelete: idStillOwed=%d idUntouched=%d",
+			finalized[idStillOwed], finalized[idUntouched])
 	}
-}
-
-// TestReconcilerOnPruneNodeSkipsOnFollower pins that a non-leader reconciler
-// observing CmdPruneNode does NOT propose CmdFinalizeDelete — finalization
-// is leader-only, matching onAckDelete.
-func TestReconcilerOnPruneNodeSkipsOnFollower(t *testing.T) {
-	t.Parallel()
-
-	fsm := vaultctlfsm.New()
-	now := time.Now()
-	id := chunk.NewChunkID()
-	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalRequestDelete(id, now, "test", []string{"node-A"})})
-
-	var finalizeCount atomic.Int32
-	vaultInst := &VaultInstance{
-		VaultID:                  glid.New(),
-		Chunks:                  &reconcilerFakeChunkManager{},
-		IsRaftLeader:            func() bool { return false },
-		ApplyRaftFinalizeDelete: func(_ chunk.ChunkID) error { finalizeCount.Add(1); return nil },
+	// FSM state must reflect the atomic finalize.
+	if got := fsm.PendingDelete(idEmptied); got != nil {
+		t.Errorf("idEmptied: pendingDeletes entry should be gone post-prune, got %+v", got)
 	}
-	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-Z", slog.Default())
-	rec.Wire(fsm)
-
-	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalPruneNode("node-A")})
-
-	// Give a goroutine a chance to fire if the follower-skip check fails.
-	time.Sleep(50 * time.Millisecond)
-
-	if finalizeCount.Load() != 0 {
-		t.Errorf("follower must not finalize after prune, got %d calls", finalizeCount.Load())
+	if e := fsm.Get(idEmptied); e != nil {
+		t.Errorf("idEmptied: manifest entry should be gone post-prune, got %+v", e)
+	}
+	if !fsm.IsTombstoned(idEmptied) {
+		t.Error("idEmptied: tombstone should be present post-prune")
+	}
+	// The reconciler must NOT propose CmdFinalizeDelete — that's the
+	// leader-only-callback shape the fix eliminated.
+	if proposedFinalize.Load() != 0 {
+		t.Errorf("ApplyRaftFinalizeDelete must not be called from onPruneNode post-fix, got %d", proposedFinalize.Load())
 	}
 }
 
