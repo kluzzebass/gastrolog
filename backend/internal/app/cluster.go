@@ -408,7 +408,7 @@ func makeJoinClusterFunc(
 		// 12. Request membership
 		logger.Info("requesting cluster membership", "leader_addr", leaderAddr)
 		joinCtx, joinCancel := context.WithTimeout(ctx, 30*time.Second)
-		err = cluster.JoinCluster(joinCtx, leaderAddr, nodeID, clusterAddr, clusterTLS, true)
+		err = cluster.JoinCluster(joinCtx, logger, leaderAddr, nodeID, clusterAddr, clusterTLS, true)
 		joinCancel()
 		if err != nil {
 			return fmt.Errorf("join cluster: %w", err)
