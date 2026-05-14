@@ -883,6 +883,173 @@ func (r *VaultLifecycleReconciler) SweepStaleLeaderFSMEntries() {
 	}
 }
 
+// idleActiveThreshold is how long an FSM-Active chunk can sit without
+// receiving record appends (i.e., local WriteEnd hasn't advanced)
+// before SweepIdleActiveChunks seals it. Targets the orphan-active
+// case from gastrolog-2eclw: when leadership for a vault transfers
+// to a new node, the previous leader's active chunk stops receiving
+// appends and becomes permanently stranded — no rotation triggers
+// (record-count / size) ever fire on a chunk that's frozen, retention
+// skips !Sealed chunks, and the FSM keeps the active entry forever.
+//
+// Setting this threshold higher than the leader's typical
+// rotation-policy MaxAge ensures the leader's own active chunk rotates
+// via the normal rotation path first, leaving this fallback to catch
+// ONLY orphans the rotation path no longer covers (chunks left in the
+// FSM as Active after a leader transfer or after a missed AnnounceSeal
+// on shutdown).
+const idleActiveThreshold = 10 * time.Minute
+
+// SweepIdleActiveChunks walks the FSM's Active manifest entries and
+// seals any whose local copy has been idle (no record appends) for
+// longer than idleActiveThreshold. Drives from the FSM rather than the
+// chunk manager's singular m.active because multiple Active entries
+// can exist simultaneously:
+//
+//   - On restart, file.Manager recovers all unsealed chunks into
+//     m.metas but only opens the newest as m.active. Older unsealed
+//     chunks sit in m.metas waiting for FSM projection — which never
+//     comes if the FSM also says they're Active.
+//   - Leader transfers and lost AnnounceSeal calls (the announcer
+//     short-circuits during shutdown, see announcer.go) leave the FSM
+//     with stale Active entries that no node's m.active is currently
+//     advancing.
+//
+// Algorithm per FSM Active entry e:
+//
+//  1. Skip if this node doesn't hold the chunk locally. Some other
+//     holder will run the same sweep and propose the seal — every
+//     node runs this on every tick.
+//  2. Require positive WriteEnd. A zero WriteEnd is a freshly-created
+//     chunk that never saw an append; this isn't the orphan case.
+//  3. Require age > threshold. Live chunks rotate via the normal
+//     rotation path; only frozen WriteEnd indicates orphaning.
+//  4. If the chunk is the local m.active, call Chunks.Seal() — that
+//     fires AnnounceSeal cluster-wide and rotates a fresh active.
+//     Otherwise EnsureSealed the local files and manually call the
+//     announcer with the local metadata to propose CmdSealChunk.
+//
+// Idempotency: CmdSealChunk applies on every replica. If two holders
+// race (both have local copies of the same Active entry and both
+// detect it as idle), both propose; the FSM's applySeal overwrites
+// with the second metadata. Metadata is consistent across replicas
+// because the active was replicated when it was the leader's, so the
+// race is harmless.
+//
+// See gastrolog-2eclw / gastrolog-3qr8z.
+func (r *VaultLifecycleReconciler) SweepIdleActiveChunks() {
+	if r.fsm == nil || r.vaultInst == nil || r.vaultInst.Chunks == nil {
+		return
+	}
+	announcerGetter, ok := r.vaultInst.Chunks.(chunk.AnnouncerGetter)
+	if !ok {
+		return
+	}
+	announcer := announcerGetter.GetAnnouncer()
+	if announcer == nil {
+		return
+	}
+
+	var localActiveID chunk.ChunkID
+	if a := r.vaultInst.Chunks.Active(); a != nil {
+		localActiveID = a.ID
+	}
+
+	sealed := 0
+	for _, e := range r.fsm.List() {
+		if r.sealIfIdleActive(e, localActiveID, announcer) {
+			sealed++
+		}
+	}
+	if sealed > 0 {
+		r.logger.Info("idle-active sweep: sealed stranded orphans",
+			"vault", r.vaultID, "count", sealed)
+	}
+}
+
+// sealIfIdleActive seals a single FSM Active entry if this node holds
+// it locally and its local WriteEnd has been frozen past the idle
+// threshold. Returns true on a successful seal. Extracted from
+// SweepIdleActiveChunks to keep cyclomatic / cognitive complexity
+// manageable now that the sweep has two distinct seal paths.
+func (r *VaultLifecycleReconciler) sealIfIdleActive(e vaultctlfsm.ManifestEntry, localActiveID chunk.ChunkID, announcer chunk.MetadataAnnouncer) bool {
+	if e.State != chunk.ChunkStateActive {
+		return false
+	}
+	localMeta, err := r.vaultInst.Chunks.Meta(e.ID)
+	if err != nil {
+		return false
+	}
+	if localMeta.WriteEnd.IsZero() {
+		return false
+	}
+	age := time.Since(localMeta.WriteEnd)
+	if age < idleActiveThreshold {
+		return false
+	}
+
+	r.logger.Warn("idle-active sweep: sealing stranded orphan",
+		"chunk", e.ID, "vault", r.vaultID,
+		"is_m_active", e.ID == localActiveID,
+		"write_end", localMeta.WriteEnd, "age", age)
+
+	if e.ID == localActiveID {
+		return r.sealLocalActive(e.ID)
+	}
+	return r.sealMetadataOnlyOrphan(e.ID, localMeta, announcer)
+}
+
+// sealLocalActive seals the current m.active via Chunks.Seal(), which
+// fires AnnounceSeal internally and rotates a fresh active. Used when
+// the FSM Active entry matches the chunk manager's local m.active
+// pointer (the steady-state orphan: this node's active stream
+// stopped after a leader transfer).
+func (r *VaultLifecycleReconciler) sealLocalActive(id chunk.ChunkID) bool {
+	if err := r.vaultInst.Chunks.Seal(); err != nil {
+		r.logger.Warn("idle-active sweep: local seal failed",
+			"chunk", id, "error", err)
+		return false
+	}
+	if r.orch != nil {
+		r.orch.postSealWork(r.vaultID, r.vaultInst.Chunks, id)
+	}
+	return true
+}
+
+// sealMetadataOnlyOrphan handles the FSM-Active entry whose local
+// copy exists in m.metas but isn't the m.active pointer (file.Manager
+// startup recovery opens only the newest unsealed chunk as m.active;
+// older unsealed chunks sit metadata-only). EnsureSealed flips the
+// on-disk sealed flag so receipt-protocol deletes don't bounce off
+// ErrActiveChunk; AnnounceSeal then proposes CmdSealChunk manually
+// with the local metadata.
+func (r *VaultLifecycleReconciler) sealMetadataOnlyOrphan(id chunk.ChunkID, localMeta chunk.ChunkMeta, announcer chunk.MetadataAnnouncer) bool {
+	if ensurer, ok := r.vaultInst.Chunks.(chunk.SealEnsurer); ok {
+		if err := ensurer.EnsureSealed(id); err != nil {
+			r.logger.Warn("idle-active sweep: EnsureSealed failed",
+				"chunk", id, "error", err)
+			return false
+		}
+		if m, err := r.vaultInst.Chunks.Meta(id); err == nil {
+			localMeta = m
+		}
+	}
+	announcer.AnnounceSeal(
+		id,
+		localMeta.WriteEnd,
+		localMeta.RecordCount,
+		localMeta.Bytes,
+		localMeta.IngestStart,
+		localMeta.IngestEnd,
+		localMeta.SourceEnd,
+		localMeta.IngestTSMonotonic,
+	)
+	if r.orch != nil {
+		r.orch.postSealWork(r.vaultID, r.vaultInst.Chunks, id)
+	}
+	return true
+}
+
 // placementMembership returns the expectedFrom set for delete
 // proposals: the local node plus every replication target. Mirrored
 // from orchestrator.placementMembership which takes an instance as input

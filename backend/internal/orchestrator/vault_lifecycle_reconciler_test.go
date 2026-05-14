@@ -1499,3 +1499,287 @@ func TestSweepStaleLeaderFSMEntriesProposesDeleteForStrandedSealingChunk(t *test
 		}
 	}
 }
+
+// idleActiveSweepFakeManager extends the fake chunk manager with the
+// surface the idle-active sweep needs: per-id Meta lookups, a Seal()
+// counter that records which m.active was sealed, an EnsureSealed
+// counter for the metadata-only-unsealed branch, and an AnnouncerGetter
+// for the manual CmdSealChunk path. The announcer captures every
+// AnnounceSeal call for assertion.
+type idleActiveSweepFakeManager struct {
+	retentionFakeChunkManager
+
+	metas       map[chunk.ChunkID]chunk.ChunkMeta
+	active      *chunk.ChunkMeta
+	sealCalls   []chunk.ChunkID
+	ensured     []chunk.ChunkID
+	announcer   *captureAnnouncer
+}
+
+func (f *idleActiveSweepFakeManager) Meta(id chunk.ChunkID) (chunk.ChunkMeta, error) {
+	if m, ok := f.metas[id]; ok {
+		return m, nil
+	}
+	return chunk.ChunkMeta{}, chunk.ErrChunkNotFound
+}
+func (f *idleActiveSweepFakeManager) Active() *chunk.ChunkMeta {
+	return f.active
+}
+func (f *idleActiveSweepFakeManager) Seal() error {
+	if f.active == nil {
+		return nil
+	}
+	f.sealCalls = append(f.sealCalls, f.active.ID)
+	return nil
+}
+func (f *idleActiveSweepFakeManager) EnsureSealed(id chunk.ChunkID) error {
+	f.ensured = append(f.ensured, id)
+	if m, ok := f.metas[id]; ok {
+		m.Sealed = true
+		f.metas[id] = m
+	}
+	return nil
+}
+func (f *idleActiveSweepFakeManager) GetAnnouncer() chunk.MetadataAnnouncer {
+	return f.announcer
+}
+
+// captureAnnouncer records every AnnounceSeal payload. Other methods
+// are no-ops — the sweep only calls AnnounceSeal.
+type captureAnnouncer struct {
+	sealed []capturedSeal
+}
+
+type capturedSeal struct {
+	id          chunk.ChunkID
+	writeEnd    time.Time
+	recordCount int64
+	bytes       int64
+}
+
+func (a *captureAnnouncer) AnnounceCreate(chunk.ChunkID, time.Time, time.Time, time.Time) {}
+func (a *captureAnnouncer) AnnounceBeginSeal(chunk.ChunkID)                                {}
+func (a *captureAnnouncer) AnnounceSeal(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64, _ time.Time, _ time.Time, _ time.Time, _ bool) {
+	a.sealed = append(a.sealed, capturedSeal{id: id, writeEnd: writeEnd, recordCount: recordCount, bytes: bytes})
+}
+func (a *captureAnnouncer) AnnounceCompress(chunk.ChunkID, int64) {}
+func (a *captureAnnouncer) AnnounceAttachOffsets(chunk.ChunkID, int64, int64, int64, int64) {
+}
+func (a *captureAnnouncer) AnnounceUpload(chunk.ChunkID, int64, int64, int64, int64, int64, [32]byte, glid.GLID, uint8) {
+}
+func (a *captureAnnouncer) AnnounceDelete(chunk.ChunkID) {}
+
+// TestSweepIdleActiveSealsLocalActivePastThreshold pins the m.active
+// branch: when an FSM-Active entry is the local m.active and has been
+// idle past the threshold, the sweep calls Chunks.Seal() (which the
+// chunk manager turns into AnnounceSeal internally). No manual
+// announcer call from the sweep in this branch.
+func TestSweepIdleActiveSealsLocalActivePastThreshold(t *testing.T) {
+	t.Parallel()
+
+	fsm := vaultctlfsm.New()
+	now := time.Now()
+	idleStart := now.Add(-2 * time.Hour)
+
+	id := chunk.NewChunkID()
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(id, idleStart, idleStart, idleStart)}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	staleEnd := now.Add(-30 * time.Minute) // > idleActiveThreshold (10m)
+	cm := &idleActiveSweepFakeManager{
+		metas: map[chunk.ChunkID]chunk.ChunkMeta{
+			id: {ID: id, WriteEnd: staleEnd, RecordCount: 10, Bytes: 1024},
+		},
+		active:    &chunk.ChunkMeta{ID: id, WriteEnd: staleEnd, RecordCount: 10, Bytes: 1024},
+		announcer: &captureAnnouncer{},
+	}
+
+	vaultInst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
+	rec.fsm = fsm
+
+	rec.SweepIdleActiveChunks()
+
+	if len(cm.sealCalls) != 1 || cm.sealCalls[0] != id {
+		t.Errorf("expected Chunks.Seal() once for %s, got %v", id, cm.sealCalls)
+	}
+	if len(cm.announcer.sealed) != 0 {
+		t.Errorf("m.active path must not fire AnnounceSeal directly; got %d announces", len(cm.announcer.sealed))
+	}
+}
+
+// TestSweepIdleActiveSealsMetadataOnlyOrphan pins the non-m.active
+// branch: when an FSM-Active entry exists locally but isn't m.active
+// (multiple unsealed local chunks on startup: only the newest opens
+// as m.active, the rest sit in m.metas), the sweep must EnsureSealed
+// the local files AND manually fire AnnounceSeal so CmdSealChunk
+// propagates cluster-wide.
+func TestSweepIdleActiveSealsMetadataOnlyOrphan(t *testing.T) {
+	t.Parallel()
+
+	fsm := vaultctlfsm.New()
+	now := time.Now()
+	idleStart := now.Add(-2 * time.Hour)
+
+	orphanID := chunk.NewChunkID()
+	currentID := chunk.NewChunkID()
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(orphanID, idleStart, idleStart, idleStart)}); err != nil {
+		t.Fatalf("create orphan: %v", err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(currentID, now, now, now)}); err != nil {
+		t.Fatalf("create current: %v", err)
+	}
+
+	staleEnd := now.Add(-30 * time.Minute)
+	cm := &idleActiveSweepFakeManager{
+		metas: map[chunk.ChunkID]chunk.ChunkMeta{
+			orphanID:  {ID: orphanID, WriteEnd: staleEnd, RecordCount: 100, Bytes: 4096},
+			currentID: {ID: currentID, WriteEnd: now, RecordCount: 1, Bytes: 32},
+		},
+		// m.active is the current (newest) chunk; the orphan is
+		// metadata-only-unsealed in m.metas.
+		active:    &chunk.ChunkMeta{ID: currentID, WriteEnd: now, RecordCount: 1, Bytes: 32},
+		announcer: &captureAnnouncer{},
+	}
+
+	vaultInst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
+	rec.fsm = fsm
+
+	rec.SweepIdleActiveChunks()
+
+	if len(cm.sealCalls) != 0 {
+		t.Errorf("metadata-only orphan must not call Chunks.Seal() (that targets m.active); got %v", cm.sealCalls)
+	}
+	if len(cm.ensured) != 1 || cm.ensured[0] != orphanID {
+		t.Errorf("expected EnsureSealed for orphan %s, got %v", orphanID, cm.ensured)
+	}
+	if len(cm.announcer.sealed) != 1 || cm.announcer.sealed[0].id != orphanID {
+		t.Errorf("expected manual AnnounceSeal for orphan %s, got %v", orphanID, cm.announcer.sealed)
+	}
+	if got := cm.announcer.sealed[0].recordCount; got != 100 {
+		t.Errorf("AnnounceSeal carried recordCount=%d, want 100 (from local meta)", got)
+	}
+}
+
+// TestSweepIdleActiveSkipsFreshActiveEntries pins the negative
+// case — an FSM-Active chunk whose local WriteEnd is recent must NOT
+// be sealed (it's a live, currently-being-appended-to chunk).
+func TestSweepIdleActiveSkipsFreshActiveEntries(t *testing.T) {
+	t.Parallel()
+
+	fsm := vaultctlfsm.New()
+	now := time.Now()
+
+	id := chunk.NewChunkID()
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(id, now, now, now)}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	cm := &idleActiveSweepFakeManager{
+		metas: map[chunk.ChunkID]chunk.ChunkMeta{
+			id: {ID: id, WriteEnd: now.Add(-30 * time.Second), RecordCount: 50, Bytes: 2048},
+		},
+		active:    &chunk.ChunkMeta{ID: id, WriteEnd: now.Add(-30 * time.Second), RecordCount: 50, Bytes: 2048},
+		announcer: &captureAnnouncer{},
+	}
+
+	vaultInst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
+	rec.fsm = fsm
+
+	rec.SweepIdleActiveChunks()
+
+	if len(cm.sealCalls) != 0 {
+		t.Errorf("fresh Active must not be sealed; got %v", cm.sealCalls)
+	}
+	if len(cm.ensured) != 0 {
+		t.Errorf("fresh Active must not be EnsureSealed; got %v", cm.ensured)
+	}
+	if len(cm.announcer.sealed) != 0 {
+		t.Errorf("fresh Active must not fire AnnounceSeal; got %v", cm.announcer.sealed)
+	}
+}
+
+// TestSweepIdleActiveSkipsChunksNotHeldLocally pins the cross-node
+// invariant: an FSM-Active entry whose chunk this node doesn't hold
+// locally must be skipped silently. Some other holder will propose
+// the seal — every node runs this sweep on every tick.
+func TestSweepIdleActiveSkipsChunksNotHeldLocally(t *testing.T) {
+	t.Parallel()
+
+	fsm := vaultctlfsm.New()
+	now := time.Now()
+	idleStart := now.Add(-2 * time.Hour)
+
+	id := chunk.NewChunkID()
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(id, idleStart, idleStart, idleStart)}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	cm := &idleActiveSweepFakeManager{
+		// Empty metas — this node doesn't hold the chunk.
+		metas:     map[chunk.ChunkID]chunk.ChunkMeta{},
+		active:    nil,
+		announcer: &captureAnnouncer{},
+	}
+
+	vaultInst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
+	rec.fsm = fsm
+
+	rec.SweepIdleActiveChunks()
+
+	if len(cm.sealCalls)+len(cm.ensured)+len(cm.announcer.sealed) != 0 {
+		t.Errorf("must not touch a chunk this node doesn't hold; seal=%v ensure=%v announce=%v",
+			cm.sealCalls, cm.ensured, cm.announcer.sealed)
+	}
+}
+
+// TestSweepIdleActiveSkipsSealingAndSealedEntries pins state-filter
+// scope: only state=Active is in scope. Sealing entries are recovered
+// by resumeSealingFromFSM; Sealed entries are out of the seal lifecycle
+// entirely.
+func TestSweepIdleActiveSkipsSealingAndSealedEntries(t *testing.T) {
+	t.Parallel()
+
+	fsm := vaultctlfsm.New()
+	now := time.Now()
+	idleStart := now.Add(-2 * time.Hour)
+
+	idSealing := chunk.NewChunkID()
+	idSealed := chunk.NewChunkID()
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idSealing, idleStart, idleStart, idleStart)}); err != nil {
+		t.Fatalf("create sealing: %v", err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalBeginSeal(idSealing)}); err != nil {
+		t.Fatalf("begin-seal: %v", err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idSealed, idleStart, idleStart, idleStart)}); err != nil {
+		t.Fatalf("create sealed: %v", err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idSealed, idleStart, 1, 1, idleStart, idleStart, idleStart, false)}); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	staleEnd := now.Add(-30 * time.Minute)
+	cm := &idleActiveSweepFakeManager{
+		metas: map[chunk.ChunkID]chunk.ChunkMeta{
+			idSealing: {ID: idSealing, WriteEnd: staleEnd},
+			idSealed:  {ID: idSealed, WriteEnd: staleEnd, Sealed: true},
+		},
+		announcer: &captureAnnouncer{},
+	}
+
+	vaultInst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
+	rec.fsm = fsm
+
+	rec.SweepIdleActiveChunks()
+
+	if len(cm.sealCalls)+len(cm.ensured)+len(cm.announcer.sealed) != 0 {
+		t.Errorf("non-Active entries must be skipped; seal=%v ensure=%v announce=%v",
+			cm.sealCalls, cm.ensured, cm.announcer.sealed)
+	}
+}

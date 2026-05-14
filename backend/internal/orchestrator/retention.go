@@ -249,6 +249,7 @@ func (o *Orchestrator) vaultCatchupSweepAll() {
 		t.Reconciler.SweepLocalOrphans()
 		t.Reconciler.SweepMissingReplicas()
 		t.Reconciler.SweepStaleLeaderFSMEntries()
+		t.Reconciler.SweepIdleActiveChunks()
 	}
 }
 
