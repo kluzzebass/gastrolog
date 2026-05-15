@@ -737,6 +737,18 @@ export class RemoveNodeRequest extends Message<RemoveNodeRequest> {
    */
   nodeId = new Uint8Array(0);
 
+  /**
+   * allow_self lets the caller remove the node the RPC is served by.
+   * Default false because operator-driven removal almost always targets
+   * a different node, and accidentally removing the node you're
+   * currently connected to is hazardous. Set to true ONLY by the
+   * `gastrolog cluster demote-self` preStop hook path (gastrolog-24iv4)
+   * where self-removal is the intent.
+   *
+   * @generated from field: bool allow_self = 2;
+   */
+  allowSelf = false;
+
   constructor(data?: PartialMessage<RemoveNodeRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -746,6 +758,7 @@ export class RemoveNodeRequest extends Message<RemoveNodeRequest> {
   static readonly typeName = "gastrolog.v1.RemoveNodeRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "allow_self", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RemoveNodeRequest {

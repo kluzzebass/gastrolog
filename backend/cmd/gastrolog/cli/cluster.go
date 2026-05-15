@@ -245,7 +245,10 @@ func newClusterDemoteSelfCmd() *cobra.Command {
 				return nil
 			}
 
-			_, err = client.Lifecycle.RemoveNode(context.Background(), connect.NewRequest(&v1.RemoveNodeRequest{NodeId: []byte(id)}))
+			_, err = client.Lifecycle.RemoveNode(context.Background(), connect.NewRequest(&v1.RemoveNodeRequest{
+				NodeId:    []byte(id),
+				AllowSelf: true, // gastrolog-24iv4: opt out of the operator-typo guard; this RPC IS the self-remove path.
+			}))
 			if err != nil {
 				if isAlreadyRemoved(err) {
 					fmt.Printf("demote-self: node %s (%s) already removed from cluster (no-op)\n", hostname, id)

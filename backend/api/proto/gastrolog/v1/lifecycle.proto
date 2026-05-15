@@ -130,6 +130,13 @@ message JoinClusterResponse {}
 
 message RemoveNodeRequest {
   bytes node_id = 1; // ID of the node to evict from the cluster
+  // allow_self lets the caller remove the node the RPC is served by.
+  // Default false because operator-driven removal almost always targets
+  // a different node, and accidentally removing the node you're
+  // currently connected to is hazardous. Set to true ONLY by the
+  // `gastrolog cluster demote-self` preStop hook path (gastrolog-24iv4)
+  // where self-removal is the intent.
+  bool allow_self = 2;
 }
 
 message RemoveNodeResponse {}

@@ -921,8 +921,15 @@ func (*JoinClusterResponse) Descriptor() ([]byte, []int) {
 }
 
 type RemoveNodeRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	NodeId        []byte                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"` // ID of the node to evict from the cluster
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	NodeId []byte                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"` // ID of the node to evict from the cluster
+	// allow_self lets the caller remove the node the RPC is served by.
+	// Default false because operator-driven removal almost always targets
+	// a different node, and accidentally removing the node you're
+	// currently connected to is hazardous. Set to true ONLY by the
+	// `gastrolog cluster demote-self` preStop hook path (gastrolog-24iv4)
+	// where self-removal is the intent.
+	AllowSelf     bool `protobuf:"varint,2,opt,name=allow_self,json=allowSelf,proto3" json:"allow_self,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -962,6 +969,13 @@ func (x *RemoveNodeRequest) GetNodeId() []byte {
 		return x.NodeId
 	}
 	return nil
+}
+
+func (x *RemoveNodeRequest) GetAllowSelf() bool {
+	if x != nil {
+		return x.AllowSelf
+	}
+	return false
 }
 
 type RemoveNodeResponse struct {
@@ -1184,9 +1198,11 @@ const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"\x0eleader_address\x18\x01 \x01(\tR\rleaderAddress\x12\x1d\n" +
 	"\n" +
 	"join_token\x18\x02 \x01(\tR\tjoinToken\"\x15\n" +
-	"\x13JoinClusterResponse\",\n" +
+	"\x13JoinClusterResponse\"K\n" +
 	"\x11RemoveNodeRequest\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\fR\x06nodeId\"\x14\n" +
+	"\anode_id\x18\x01 \x01(\fR\x06nodeId\x12\x1d\n" +
+	"\n" +
+	"allow_self\x18\x02 \x01(\bR\tallowSelf\"\x14\n" +
 	"\x12RemoveNodeResponse\"\x1a\n" +
 	"\x18WatchSystemStatusRequest\"\x84\x03\n" +
 	"\x19WatchSystemStatusResponse\x12@\n" +
