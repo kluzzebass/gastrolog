@@ -323,8 +323,12 @@ func (s *LifecycleServer) RemoveNode(
 	if nodeID == "" {
 		return nil, errRequired("node_id")
 	}
-	if nodeID == s.nodeID {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("cannot remove self from cluster"))
+	// gastrolog-24iv4: operator-driven removal must not accidentally
+	// remove the node the operator is connected to (typo, wrong copy-
+	// paste). preStop's `cluster demote-self` sets AllowSelf=true to
+	// opt out of this guard — that path's whole purpose is self-removal.
+	if nodeID == s.nodeID && !req.Msg.AllowSelf {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("cannot remove self from cluster (set allow_self=true to override)"))
 	}
 
 	s.logger.Info("removing node from cluster", "node_id", nodeID)

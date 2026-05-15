@@ -87,13 +87,18 @@ data:
   # Single token only (no spaces). Color accepts any CSS color value.
   GASTROLOG_ENVIRONMENT_LABEL: "Kubernetes"
   GASTROLOG_ENVIRONMENT_COLOR: "red"
-  # gastrolog-6bfwk: stale-voter reaper threshold + interval — both
-  # overrideable for test scenarios (env vars are read at process
-  # startup). Leave unset in the deployed manifest to inherit the
-  # safe defaults (10m / 60s). The 2m threshold we tried during
-  # initial verification was BELOW the rolling-redeploy window and
-  # caused the reaper to evict voters mid-rollout; the rule of thumb
-  # is threshold >= 5 × (pod_count × per_pod_restart_window).
+  # gastrolog-24iv4: the stale-voter-reaper that gastrolog-6bfwk
+  # added has been removed. Operator-driven termination flows
+  # (kubernetes-contract, manual `cluster remove-node`) explicitly
+  # clean up Raft + NodeConfig. K8s-managed termination flows
+  # (`kubectl scale`, rolling restart, voluntary eviction) trigger
+  # the preStop hook below, which runs `cluster demote-self` before
+  # SIGTERM. Crashes / OOM / hardware failure don't fire preStop —
+  # the surviving voter cluster keeps running, and the operator
+  # explicitly cleans up with `cluster remove-node` when they know
+  # the node isn't coming back. GASTROLOG_STALE_VOTER_THRESHOLD /
+  # GASTROLOG_STALE_VOTER_INTERVAL env vars are gone; nothing reads
+  # them anymore.
 
 ---
 # Secret for admin credentials + the bootstrap-token shared secret.
@@ -206,6 +211,45 @@ spec:
               port: 4564
             initialDelaySeconds: 5
             periodSeconds: 5
+          # preStop hook: tell the cluster to remove this node from the
+          # Raft voter set before SIGTERM. Fires for every K8s-managed
+          # termination (scale-down, rolling restart, voluntary
+          # eviction, drain) — but NOT on crash, OOM, or hardware
+          # failure, which is exactly the policy we want: graceful
+          # exits cleanly remove themselves; abrupt exits remain in the
+          # voter set until either the operator removes them or the
+          # node returns (and goes through the boot-time auto-rejoin
+          # path if it had been evicted in the interim).
+          #
+          # Without this, scale-down via `kubectl scale` would strand
+          # ghost voters in Raft forever. gastrolog-24iv4 deletes the
+          # stale-voter-reaper that gastrolog-6bfwk introduced as a
+          # workaround for that bug — preStop closes the gap at the
+          # source, so no auto-eviction safety net is needed.
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  # Skip demote-self for the bootstrap node (ord=0):
+                  # it has no JoinAddr at boot, so it can't auto-rejoin
+                  # after demotion — and on rolling restart it doesn't
+                  # need to be demoted anyway. SIGTERM cleanly; /config
+                  # remains intact; new pod reconnects via normal Raft
+                  # heartbeats. True scale-down of the bootstrap node is
+                  # operator-territory (cluster needs re-bootstrap).
+                  - |
+                    ord=${HOSTNAME##*-}
+                    if [ "$ord" = "0" ]; then
+                      exit 0
+                    fi
+                    /gastrolog --home /config cluster demote-self || true
+      # terminationGracePeriodSeconds bounds the total preStop +
+      # SIGTERM-handling window. 30s is generous: demote-self normally
+      # completes within a few hundred ms, and the shutdown drain
+      # itself is bounded by the orchestrator's own internal timeouts.
+      terminationGracePeriodSeconds: 30
       volumes:
         - name: secrets
           secret:
