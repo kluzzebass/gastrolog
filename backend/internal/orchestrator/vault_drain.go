@@ -225,23 +225,6 @@ func (o *Orchestrator) drainVaultChunks(ctx context.Context, sys *system.System,
 	return true
 }
 
-// drainCursorToRecords consumes all records from a cursor into a slice.
-// Used to convert a chunk cursor to the record slice expected by
-// ChunkReplicator.ImportSealedChunk.
-func drainCursorToRecords(cursor chunk.RecordCursor) ([]chunk.Record, error) {
-	var records []chunk.Record
-	for {
-		rec, _, err := cursor.Next()
-		if errors.Is(err, chunk.ErrNoMoreRecords) {
-			return records, nil
-		}
-		if err != nil {
-			return nil, err
-		}
-		records = append(records, rec)
-	}
-}
-
 // drainOneChunk transfers a single chunk and deletes the source.
 func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, vaultID glid.GLID, vaultInst *VaultInstance, chunkID chunk.ChunkID, mode DrainMode, targetNodeID string) error {
 	cursor, err := vaultInst.Chunks.OpenCursor(chunkID)
@@ -275,11 +258,7 @@ func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, va
 		if o.chunkReplicator == nil {
 			return errors.New("vault drain rebalance: vaultInst replicator not configured")
 		}
-		records, err := drainCursorToRecords(cursor)
-		if err != nil {
-			return fmt.Errorf("read chunk for rebalance: %w", err)
-		}
-		if err := o.chunkReplicator.ImportSealedChunk(ctx, targetNodeID, vaultID, chunkID, records); err != nil {
+		if err := o.chunkReplicator.ImportSealedChunk(ctx, targetNodeID, vaultID, chunkID, chunk.CursorIterator(cursor)); err != nil {
 			return fmt.Errorf("replicate to target node: %w", err)
 		}
 	}

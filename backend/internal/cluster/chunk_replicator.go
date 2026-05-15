@@ -2,16 +2,29 @@ package cluster
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
 	"log/slog"
 	"sync"
 
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/convert"
+)
+
+// Per-frame caps for streaming sealed-chunk imports. Both bound the
+// gRPC message size of an ImportRecords frame so a single send never
+// approaches the receive cap, regardless of chunk size. The byte budget
+// dominates for realistic record sizes; the record-count cap covers the
+// pathological case of many tiny records inflating per-record proto
+// framing overhead. See gastrolog-4yvhh.
+const (
+	importRecordsMaxBytes   = 8 * 1024 * 1024
+	importRecordsMaxRecords = 4096
 )
 
 // streamKey identifies a replication stream to a specific follower for a
@@ -203,21 +216,90 @@ func (tr *ChunkReplicator) SealVault(ctx context.Context, nodeID string, vaultID
 	})
 }
 
-// ImportSealedChunk sends a canonical sealed chunk to a follower.
-func (tr *ChunkReplicator) ImportSealedChunk(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
-	exports := make([]*gastrologv1.ExportRecord, len(records))
-	for i, rec := range records {
-		exports[i] = convert.RecordToExport(rec)
-	}
-	return tr.send(ctx, vaultID, nodeID, &gastrologv1.ChunkReplicationCommand{
+// ImportSealedChunk streams a canonical sealed chunk to a follower as a
+// bounded sequence of frames: Begin → 1..N Records → Commit. The caller
+// passes a RecordIterator so the chunk is consumed lazily; nothing
+// proportional to chunk size is materialized on the leader's heap.
+//
+// Per-frame size is capped by importRecordsMaxBytes / importRecordsMaxRecords
+// so individual gRPC messages always fit under the receive cap regardless
+// of how large the chunk grows. See gastrolog-4yvhh.
+func (tr *ChunkReplicator) ImportSealedChunk(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
+	chunkIDProto := glid.GLID(chunkID).ToProto()
+
+	if err := tr.send(ctx, vaultID, nodeID, &gastrologv1.ChunkReplicationCommand{
 		VaultId: vaultID.ToProto(),
-		Command: &gastrologv1.ChunkReplicationCommand_ImportSealed{
-			ImportSealed: &gastrologv1.ChunkReplicationImport{
-				ChunkId: glid.GLID(chunkID).ToProto(),
-				Records: exports,
-			},
+		Command: &gastrologv1.ChunkReplicationCommand_ImportBegin{
+			ImportBegin: &gastrologv1.ChunkReplicationImportBegin{ChunkId: chunkIDProto},
 		},
-	})
+	}); err != nil {
+		return fmt.Errorf("import begin: %w", err)
+	}
+
+	batch := make([]*gastrologv1.ExportRecord, 0, 64)
+	batchBytes := 0
+
+	flush := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		err := tr.send(ctx, vaultID, nodeID, &gastrologv1.ChunkReplicationCommand{
+			VaultId: vaultID.ToProto(),
+			Command: &gastrologv1.ChunkReplicationCommand_ImportRecords{
+				ImportRecords: &gastrologv1.ChunkReplicationImportRecords{Records: batch},
+			},
+		})
+		// Drop the slice contents before the next batch so per-record
+		// allocations don't accumulate across frames; the underlying
+		// proto messages are no longer needed once the send returns.
+		for i := range batch {
+			batch[i] = nil
+		}
+		batch = batch[:0]
+		batchBytes = 0
+		return err
+	}
+
+	for {
+		rec, err := next()
+		if errors.Is(err, chunk.ErrNoMoreRecords) {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("read record: %w", err)
+		}
+		ex := convert.RecordToExport(rec)
+		exSize := proto.Size(ex)
+		// Flush BEFORE appending if this record would push us past the
+		// byte budget, otherwise we'd accumulate one over-budget frame.
+		// An empty batch is always allowed to take one oversized record
+		// so a single huge record can still make progress.
+		if len(batch) > 0 && batchBytes+exSize > importRecordsMaxBytes {
+			if err := flush(); err != nil {
+				return fmt.Errorf("import records: %w", err)
+			}
+		}
+		batch = append(batch, ex)
+		batchBytes += exSize
+		if len(batch) >= importRecordsMaxRecords {
+			if err := flush(); err != nil {
+				return fmt.Errorf("import records: %w", err)
+			}
+		}
+	}
+	if err := flush(); err != nil {
+		return fmt.Errorf("import records (final): %w", err)
+	}
+
+	if err := tr.send(ctx, vaultID, nodeID, &gastrologv1.ChunkReplicationCommand{
+		VaultId: vaultID.ToProto(),
+		Command: &gastrologv1.ChunkReplicationCommand_ImportCommit{
+			ImportCommit: &gastrologv1.ChunkReplicationImportCommit{ChunkId: chunkIDProto},
+		},
+	}); err != nil {
+		return fmt.Errorf("import commit: %w", err)
+	}
+	return nil
 }
 
 // DeleteChunk tells a follower to delete a sealed chunk.

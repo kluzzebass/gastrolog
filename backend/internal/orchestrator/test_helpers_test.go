@@ -450,21 +450,12 @@ func (d *directChunkReplicator) SealVault(_ context.Context, nodeID string, vaul
 	return orch.SealActiveChunk(vaultID, chunkID)
 }
 
-func (d *directChunkReplicator) ImportSealedChunk(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
+func (d *directChunkReplicator) ImportSealedChunk(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
 		return fmt.Errorf("directChunkReplicator: unknown node %q", nodeID)
 	}
-	i := 0
-	iter := func() (chunk.Record, error) {
-		if i >= len(records) {
-			return chunk.Record{}, chunk.ErrNoMoreRecords
-		}
-		rec := records[i]
-		i++
-		return rec, nil
-	}
-	return orch.ImportToVault(ctx, vaultID, chunkID, iter)
+	return orch.ImportToVault(ctx, vaultID, chunkID, next)
 }
 
 func (d *directChunkReplicator) DeleteChunk(_ context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID) error {

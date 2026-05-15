@@ -28,7 +28,7 @@ func (r *recordingChunkReplicator) SealVault(_ context.Context, _ string, _ glid
 	return nil
 }
 
-func (r *recordingChunkReplicator) ImportSealedChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
+func (r *recordingChunkReplicator) ImportSealedChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
 	return nil
 }
 

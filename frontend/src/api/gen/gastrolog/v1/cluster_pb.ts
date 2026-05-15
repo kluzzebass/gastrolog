@@ -1150,16 +1150,34 @@ export class ChunkReplicationCommand extends Message<ChunkReplicationCommand> {
     case: "seal";
   } | {
     /**
-     * @generated from field: gastrolog.v1.ChunkReplicationImport import_sealed = 12;
-     */
-    value: ChunkReplicationImport;
-    case: "importSealed";
-  } | {
-    /**
-     * @generated from field: gastrolog.v1.ChunkReplicationDelete delete_chunk = 13;
+     * @generated from field: gastrolog.v1.ChunkReplicationDelete delete_chunk = 12;
      */
     value: ChunkReplicationDelete;
     case: "deleteChunk";
+  } | {
+    /**
+     * Sealed-chunk import is a three-phase sequence on the same stream:
+     * ImportBegin → 1..N ImportRecords frames → ImportCommit. Replaces
+     * a legacy single-frame ChunkReplicationImport that packed the whole
+     * chunk into one message; chunks past the gRPC receive cap wedged
+     * the catchup path forever. See gastrolog-4yvhh.
+     *
+     * @generated from field: gastrolog.v1.ChunkReplicationImportBegin import_begin = 13;
+     */
+    value: ChunkReplicationImportBegin;
+    case: "importBegin";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.ChunkReplicationImportRecords import_records = 14;
+     */
+    value: ChunkReplicationImportRecords;
+    case: "importRecords";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.ChunkReplicationImportCommit import_commit = 15;
+     */
+    value: ChunkReplicationImportCommit;
+    case: "importCommit";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<ChunkReplicationCommand>) {
@@ -1173,8 +1191,10 @@ export class ChunkReplicationCommand extends Message<ChunkReplicationCommand> {
     { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 10, name: "append", kind: "message", T: ChunkReplicationAppend, oneof: "command" },
     { no: 11, name: "seal", kind: "message", T: ChunkReplicationSeal, oneof: "command" },
-    { no: 12, name: "import_sealed", kind: "message", T: ChunkReplicationImport, oneof: "command" },
-    { no: 13, name: "delete_chunk", kind: "message", T: ChunkReplicationDelete, oneof: "command" },
+    { no: 12, name: "delete_chunk", kind: "message", T: ChunkReplicationDelete, oneof: "command" },
+    { no: 13, name: "import_begin", kind: "message", T: ChunkReplicationImportBegin, oneof: "command" },
+    { no: 14, name: "import_records", kind: "message", T: ChunkReplicationImportRecords, oneof: "command" },
+    { no: 15, name: "import_commit", kind: "message", T: ChunkReplicationImportCommit, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkReplicationCommand {
@@ -1283,48 +1303,131 @@ export class ChunkReplicationSeal extends Message<ChunkReplicationSeal> {
 }
 
 /**
- * ChunkReplicationImport sends the canonical sealed chunk. The follower
- * replaces any forwarded version with this authoritative copy.
+ * ChunkReplicationImportBegin opens a streaming sealed-chunk import.
+ * The follower stages an import context keyed by chunk_id and ack's
+ * success; subsequent ImportRecords frames push batches of records
+ * into that staged context until ImportCommit finalizes the import.
+ * Each (vault, follower) stream allows at most one import in flight.
  *
- * @generated from message gastrolog.v1.ChunkReplicationImport
+ * @generated from message gastrolog.v1.ChunkReplicationImportBegin
  */
-export class ChunkReplicationImport extends Message<ChunkReplicationImport> {
+export class ChunkReplicationImportBegin extends Message<ChunkReplicationImportBegin> {
   /**
    * @generated from field: bytes chunk_id = 1;
    */
   chunkId = new Uint8Array(0);
 
-  /**
-   * @generated from field: repeated gastrolog.v1.ExportRecord records = 2;
-   */
-  records: ExportRecord[] = [];
-
-  constructor(data?: PartialMessage<ChunkReplicationImport>) {
+  constructor(data?: PartialMessage<ChunkReplicationImportBegin>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.ChunkReplicationImport";
+  static readonly typeName = "gastrolog.v1.ChunkReplicationImportBegin";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 2, name: "records", kind: "message", T: ExportRecord, repeated: true },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkReplicationImport {
-    return new ChunkReplicationImport().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkReplicationImportBegin {
+    return new ChunkReplicationImportBegin().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ChunkReplicationImport {
-    return new ChunkReplicationImport().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ChunkReplicationImportBegin {
+    return new ChunkReplicationImportBegin().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ChunkReplicationImport {
-    return new ChunkReplicationImport().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ChunkReplicationImportBegin {
+    return new ChunkReplicationImportBegin().fromJsonString(jsonString, options);
   }
 
-  static equals(a: ChunkReplicationImport | PlainMessage<ChunkReplicationImport> | undefined, b: ChunkReplicationImport | PlainMessage<ChunkReplicationImport> | undefined): boolean {
-    return proto3.util.equals(ChunkReplicationImport, a, b);
+  static equals(a: ChunkReplicationImportBegin | PlainMessage<ChunkReplicationImportBegin> | undefined, b: ChunkReplicationImportBegin | PlainMessage<ChunkReplicationImportBegin> | undefined): boolean {
+    return proto3.util.equals(ChunkReplicationImportBegin, a, b);
+  }
+}
+
+/**
+ * ChunkReplicationImportRecords carries one bounded batch of records
+ * for the in-flight import. Frame size is capped on the leader side so
+ * no individual gRPC message exceeds the receive limit regardless of
+ * chunk size. The follower consumes records record-by-record and
+ * applies backpressure: the ack is not sent until the importer has
+ * pulled every record in the frame.
+ *
+ * @generated from message gastrolog.v1.ChunkReplicationImportRecords
+ */
+export class ChunkReplicationImportRecords extends Message<ChunkReplicationImportRecords> {
+  /**
+   * @generated from field: repeated gastrolog.v1.ExportRecord records = 1;
+   */
+  records: ExportRecord[] = [];
+
+  constructor(data?: PartialMessage<ChunkReplicationImportRecords>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ChunkReplicationImportRecords";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "records", kind: "message", T: ExportRecord, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkReplicationImportRecords {
+    return new ChunkReplicationImportRecords().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ChunkReplicationImportRecords {
+    return new ChunkReplicationImportRecords().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ChunkReplicationImportRecords {
+    return new ChunkReplicationImportRecords().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ChunkReplicationImportRecords | PlainMessage<ChunkReplicationImportRecords> | undefined, b: ChunkReplicationImportRecords | PlainMessage<ChunkReplicationImportRecords> | undefined): boolean {
+    return proto3.util.equals(ChunkReplicationImportRecords, a, b);
+  }
+}
+
+/**
+ * ChunkReplicationImportCommit finalizes the in-flight import. The
+ * follower closes its record-source channel, waits for the importer
+ * goroutine to drain and return, and acks with the importer's result.
+ * chunk_id is echoed for sanity-checking against ImportBegin.
+ *
+ * @generated from message gastrolog.v1.ChunkReplicationImportCommit
+ */
+export class ChunkReplicationImportCommit extends Message<ChunkReplicationImportCommit> {
+  /**
+   * @generated from field: bytes chunk_id = 1;
+   */
+  chunkId = new Uint8Array(0);
+
+  constructor(data?: PartialMessage<ChunkReplicationImportCommit>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ChunkReplicationImportCommit";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkReplicationImportCommit {
+    return new ChunkReplicationImportCommit().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ChunkReplicationImportCommit {
+    return new ChunkReplicationImportCommit().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ChunkReplicationImportCommit {
+    return new ChunkReplicationImportCommit().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ChunkReplicationImportCommit | PlainMessage<ChunkReplicationImportCommit> | undefined, b: ChunkReplicationImportCommit | PlainMessage<ChunkReplicationImportCommit> | undefined): boolean {
+    return proto3.util.equals(ChunkReplicationImportCommit, a, b);
   }
 }
 
@@ -1425,9 +1528,9 @@ export class ChunkReplicationAck extends Message<ChunkReplicationAck> {
  * RequestReplicaCatchupRequest is sent follower → placement leader. The
  * follower computes the local FSM-vs-disk diff in its lifecycle reconciler
  * (SweepMissingReplicas) and asks the leader to re-push specific sealed
- * chunks via the existing ChunkReplication.ImportSealed path. Used to
- * recover from replication pushes that failed during a follower pause /
- * partition / rejoin window — see gastrolog-2dgvj.
+ * chunks via the streaming ChunkReplicationImport{Begin,Records,Commit}
+ * path. Used to recover from replication pushes that failed during a
+ * follower pause / partition / rejoin window — see gastrolog-2dgvj.
  *
  * @generated from message gastrolog.v1.RequestReplicaCatchupRequest
  */

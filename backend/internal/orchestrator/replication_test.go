@@ -50,7 +50,7 @@ func (m *replicationFakeReplicator) SealVault(_ context.Context, nodeID string, 
 	m.sealCalls = append(m.sealCalls, sealCall{nodeID: nodeID, vaultID: vaultID, chunkID: chunkID})
 	return nil
 }
-func (m *replicationFakeReplicator) ImportSealedChunk(_ context.Context, _ string, _ glid.GLID, chunkID chunk.ChunkID, _ []chunk.Record) error {
+func (m *replicationFakeReplicator) ImportSealedChunk(_ context.Context, _ string, _ glid.GLID, chunkID chunk.ChunkID, _ chunk.RecordIterator) error {
 	m.replicatedChunks = append(m.replicatedChunks, chunkID)
 	return nil
 }

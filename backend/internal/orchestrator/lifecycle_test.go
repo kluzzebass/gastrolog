@@ -29,7 +29,7 @@ func (m *slowAckReplicator) AppendRecords(_ context.Context, _ string, _ glid.GL
 func (m *slowAckReplicator) SealVault(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
 }
-func (m *slowAckReplicator) ImportSealedChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
+func (m *slowAckReplicator) ImportSealedChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
 	return nil
 }
 func (m *slowAckReplicator) DeleteChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {

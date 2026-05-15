@@ -38,7 +38,7 @@ func (c *captureCatchupReplicator) AppendRecords(_ context.Context, _ string, _ 
 func (c *captureCatchupReplicator) SealVault(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
 }
-func (c *captureCatchupReplicator) ImportSealedChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
+func (c *captureCatchupReplicator) ImportSealedChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
 	return nil
 }
 func (c *captureCatchupReplicator) DeleteChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
