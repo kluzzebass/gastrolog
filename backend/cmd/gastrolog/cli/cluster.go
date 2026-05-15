@@ -27,6 +27,7 @@ func newClusterCmd() *cobra.Command {
 		newClusterShutdownCmd(),
 		newClusterRemoveNodeCmd(),
 		newClusterDemoteSelfCmd(),
+		newClusterYieldLeadershipCmd(),
 		newClusterPromoteCmd(),
 		newClusterDemoteCmd(),
 		newClusterJoinCmd(),
@@ -257,6 +258,40 @@ func newClusterDemoteSelfCmd() *cobra.Command {
 				return fmt.Errorf("remove self %s (%s): %w", hostname, id, err)
 			}
 			fmt.Printf("demote-self: removed node %s (%s) from cluster\n", hostname, id)
+			return nil
+		},
+	}
+}
+
+// newClusterYieldLeadershipCmd is the membership-preserving preStop
+// counterpart to demote-self. It asks the local node to transfer Raft
+// leadership if it holds it, and is a no-op otherwise. The node stays
+// in the cluster's voter set; the brief absence during pod restart is
+// handled by normal Raft heartbeat timeout, and the node rejoins as a
+// known follower when it comes back. See gastrolog-2yeie.
+//
+// Use this for k8s preStop hooks where the pod is being restarted, not
+// permanently removed. For true scale-down, the operator should call
+// `cluster remove-node <hostname>` explicitly.
+func newClusterYieldLeadershipCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "yield-leadership",
+		Short: "Transfer Raft leadership to another voter if this node is leader",
+		Long: "Asks the local node to hand off Raft leadership if it currently " +
+			"holds it; no-op if it's already a follower. Designed for Kubernetes " +
+			"preStop hooks so a pod restart triggers a clean leadership transfer " +
+			"without removing the node from cluster membership. See gastrolog-2yeie.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := clientFromCmd(cmd)
+			resp, err := client.Lifecycle.YieldLeadership(context.Background(), connect.NewRequest(&v1.YieldLeadershipRequest{}))
+			if err != nil {
+				return fmt.Errorf("yield-leadership: %w", err)
+			}
+			if resp.Msg.Transferred {
+				fmt.Println("yield-leadership: leadership transferred")
+			} else {
+				fmt.Println("yield-leadership: not leader, no-op")
+			}
 			return nil
 		},
 	}

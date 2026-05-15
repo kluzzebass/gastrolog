@@ -87,18 +87,16 @@ data:
   # Single token only (no spaces). Color accepts any CSS color value.
   GASTROLOG_ENVIRONMENT_LABEL: "Kubernetes"
   GASTROLOG_ENVIRONMENT_COLOR: "red"
-  # gastrolog-24iv4: the stale-voter-reaper that gastrolog-6bfwk
-  # added has been removed. Operator-driven termination flows
-  # (kubernetes-contract, manual `cluster remove-node`) explicitly
-  # clean up Raft + NodeConfig. K8s-managed termination flows
-  # (`kubectl scale`, rolling restart, voluntary eviction) trigger
-  # the preStop hook below, which runs `cluster demote-self` before
-  # SIGTERM. Crashes / OOM / hardware failure don't fire preStop —
-  # the surviving voter cluster keeps running, and the operator
-  # explicitly cleans up with `cluster remove-node` when they know
-  # the node isn't coming back. GASTROLOG_STALE_VOTER_THRESHOLD /
-  # GASTROLOG_STALE_VOTER_INTERVAL env vars are gone; nothing reads
-  # them anymore.
+  # gastrolog-2yeie: the preStop hook below is membership-preserving
+  # — `cluster yield-leadership` hands off Raft leadership if this pod
+  # holds it, but leaves the node in the voter set. K8s rolling
+  # restart then looks like a transient absence to the cluster, the
+  # node rejoins as a known follower when it comes back, and storage
+  # IDs / vault placements stay intact. The old `cluster demote-self`
+  # hook treated rolling restart and scale-down identically, which
+  # regenerated identity on every restart and orphaned chunks on the
+  # PVC. For permanent removal (true scale-down) operators run
+  # `cluster remove-node <hostname>` explicitly.
 
 ---
 # Secret for admin credentials + the bootstrap-token shared secret.
@@ -211,44 +209,42 @@ spec:
               port: 4564
             initialDelaySeconds: 5
             periodSeconds: 5
-          # preStop hook: tell the cluster to remove this node from the
-          # Raft voter set before SIGTERM. Fires for every K8s-managed
-          # termination (scale-down, rolling restart, voluntary
-          # eviction, drain) — but NOT on crash, OOM, or hardware
-          # failure, which is exactly the policy we want: graceful
-          # exits cleanly remove themselves; abrupt exits remain in the
-          # voter set until either the operator removes them or the
-          # node returns (and goes through the boot-time auto-rejoin
-          # path if it had been evicted in the interim).
+          # preStop hook: hand off Raft leadership if this pod holds
+          # it, then let SIGTERM proceed. The node STAYS in the voter
+          # set across the restart — k8s rolling restart is just a
+          # transient absence, handled by normal Raft heartbeat
+          # timeout. Node ID, storage IDs, and vault placements are
+          # preserved end-to-end across the restart, so chunks on the
+          # PVC stay valid and no manual re-add is needed when the
+          # pod comes back. See gastrolog-2yeie.
           #
-          # Without this, scale-down via `kubectl scale` would strand
-          # ghost voters in Raft forever. gastrolog-24iv4 deletes the
-          # stale-voter-reaper that gastrolog-6bfwk introduced as a
-          # workaround for that bug — preStop closes the gap at the
-          # source, so no auto-eviction safety net is needed.
+          # Bootstrap pod (ord=0) is skipped: it doesn't get into
+          # leader-holds-it states the same way (it's the only voter
+          # at boot) and there's no peer to transfer to during the
+          # gap. Plain SIGTERM is fine.
+          #
+          # For permanent removal (true scale-down): the operator runs
+          # `gastrolog cluster remove-node <hostname>` against the
+          # cluster leader, then waits for the membership change to
+          # commit before deleting the pod. This is a deliberate
+          # operator action, not something preStop should be doing.
           lifecycle:
             preStop:
               exec:
                 command:
                   - /bin/sh
                   - -c
-                  # Skip demote-self for the bootstrap node (ord=0):
-                  # it has no JoinAddr at boot, so it can't auto-rejoin
-                  # after demotion — and on rolling restart it doesn't
-                  # need to be demoted anyway. SIGTERM cleanly; /config
-                  # remains intact; new pod reconnects via normal Raft
-                  # heartbeats. True scale-down of the bootstrap node is
-                  # operator-territory (cluster needs re-bootstrap).
                   - |
                     ord=${HOSTNAME##*-}
                     if [ "$ord" = "0" ]; then
                       exit 0
                     fi
-                    /gastrolog --home /config cluster demote-self || true
+                    /gastrolog --home /config cluster yield-leadership || true
       # terminationGracePeriodSeconds bounds the total preStop +
-      # SIGTERM-handling window. 30s is generous: demote-self normally
-      # completes within a few hundred ms, and the shutdown drain
-      # itself is bounded by the orchestrator's own internal timeouts.
+      # SIGTERM-handling window. 30s is generous: leadership transfer
+      # normally completes within a few hundred ms, and the shutdown
+      # drain itself is bounded by the orchestrator's own internal
+      # timeouts.
       terminationGracePeriodSeconds: 30
       volumes:
         - name: secrets
