@@ -131,8 +131,20 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 		// failure mode that left node3 with only 1 of 3 instances after
 		// a snapshot/replication catchup. See gastrolog-51gme.
 		d.handleInstancePut(ctx, n.ID)
+	case raftfsm.NotifyNodeStorageConfigSet:
+		// NSC changes the universe of eligible placement candidates —
+		// either by adding a storage (new follower slot opens up) or
+		// removing one (existing placements may need to migrate). The
+		// 15s placement ticker would eventually pick this up, but
+		// operators expect `gastrolog config node add-storage` to take
+		// effect immediately; without a trigger the vault stays at its
+		// stale placement count for up to 15s and looks broken. See
+		// gastrolog-2yeie.
+		if d.placementTrigger != nil {
+			d.placementTrigger()
+		}
 	case raftfsm.NotifyCloudServicePut, raftfsm.NotifyCloudServiceDeleted,
-		raftfsm.NotifyNodeStorageConfigSet, raftfsm.NotifySetupWizardDismissedSet,
+		raftfsm.NotifySetupWizardDismissedSet,
 		raftfsm.NotifyIngesterAliveSet,
 		raftfsm.NotifyIngesterCheckpointSet,
 		raftfsm.NotifyLogLevelsSet:

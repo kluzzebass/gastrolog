@@ -30,6 +30,13 @@ service LifecycleService {
   // The evicted node receives a best-effort shutdown notification.
   rpc RemoveNode(RemoveNodeRequest) returns (RemoveNodeResponse);
 
+  // YieldLeadership asks this node to transfer Raft leadership to another
+  // voter, if it currently holds leadership. Non-leaders no-op. Intended
+  // as a Kubernetes preStop hook so a pod that's about to be terminated
+  // hands off leadership cleanly without disturbing cluster membership.
+  // See gastrolog-2yeie.
+  rpc YieldLeadership(YieldLeadershipRequest) returns (YieldLeadershipResponse);
+
   // WatchSystemStatus streams combined system status (cluster, health, route
   // stats) whenever stats are updated. Replaces polling GetClusterStatus,
   // Health, and GetRouteStats.
@@ -140,6 +147,15 @@ message RemoveNodeRequest {
 }
 
 message RemoveNodeResponse {}
+
+message YieldLeadershipRequest {}
+
+message YieldLeadershipResponse {
+  // True if this node was the cluster leader at call time and the
+  // transfer was initiated. False if the call was a no-op because the
+  // node wasn't leader.
+  bool transferred = 1;
+}
 
 message WatchSystemStatusRequest {}
 

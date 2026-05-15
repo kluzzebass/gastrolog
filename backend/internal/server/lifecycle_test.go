@@ -26,14 +26,22 @@ import (
 
 // mockCluster implements ClusterStatusProvider for testing.
 type mockCluster struct {
-	leaderAddr string
-	leaderID   string
-	servers    []cluster.RaftServer
+	leaderAddr    string
+	leaderID      string
+	servers       []cluster.RaftServer
+	isLeader      bool
+	transferErr   error
+	transferCalls int
 }
 
 func (m *mockCluster) LeaderInfo() (string, string)           { return m.leaderAddr, m.leaderID }
 func (m *mockCluster) Servers() ([]cluster.RaftServer, error) { return m.servers, nil }
 func (m *mockCluster) LocalStats() map[string]string          { return nil }
+func (m *mockCluster) IsLeader() bool                         { return m.isLeader }
+func (m *mockCluster) LeadershipTransfer() error {
+	m.transferCalls++
+	return m.transferErr
+}
 
 func TestDrainWaitsForInFlightRequests(t *testing.T) {
 	// Create orchestrator with a vault

@@ -223,8 +223,15 @@ message ChunkReplicationCommand {
   oneof command {
     ChunkReplicationAppend append = 10;
     ChunkReplicationSeal seal = 11;
-    ChunkReplicationImport import_sealed = 12;
-    ChunkReplicationDelete delete_chunk = 13;
+    ChunkReplicationDelete delete_chunk = 12;
+    // Sealed-chunk import is a three-phase sequence on the same stream:
+    // ImportBegin → 1..N ImportRecords frames → ImportCommit. Replaces
+    // a legacy single-frame ChunkReplicationImport that packed the whole
+    // chunk into one message; chunks past the gRPC receive cap wedged
+    // the catchup path forever. See gastrolog-4yvhh.
+    ChunkReplicationImportBegin import_begin = 13;
+    ChunkReplicationImportRecords import_records = 14;
+    ChunkReplicationImportCommit import_commit = 15;
   }
 }
 
@@ -239,11 +246,31 @@ message ChunkReplicationSeal {
   bytes chunk_id = 1; // expected active chunk ID
 }
 
-// ChunkReplicationImport sends the canonical sealed chunk. The follower
-// replaces any forwarded version with this authoritative copy.
-message ChunkReplicationImport {
+// ChunkReplicationImportBegin opens a streaming sealed-chunk import.
+// The follower stages an import context keyed by chunk_id and ack's
+// success; subsequent ImportRecords frames push batches of records
+// into that staged context until ImportCommit finalizes the import.
+// Each (vault, follower) stream allows at most one import in flight.
+message ChunkReplicationImportBegin {
   bytes chunk_id = 1;
-  repeated ExportRecord records = 2;
+}
+
+// ChunkReplicationImportRecords carries one bounded batch of records
+// for the in-flight import. Frame size is capped on the leader side so
+// no individual gRPC message exceeds the receive limit regardless of
+// chunk size. The follower consumes records record-by-record and
+// applies backpressure: the ack is not sent until the importer has
+// pulled every record in the frame.
+message ChunkReplicationImportRecords {
+  repeated ExportRecord records = 1;
+}
+
+// ChunkReplicationImportCommit finalizes the in-flight import. The
+// follower closes its record-source channel, waits for the importer
+// goroutine to drain and return, and acks with the importer's result.
+// chunk_id is echoed for sanity-checking against ImportBegin.
+message ChunkReplicationImportCommit {
+  bytes chunk_id = 1;
 }
 
 // ChunkReplicationDelete tells the follower to delete a sealed chunk
@@ -262,9 +289,9 @@ message ChunkReplicationAck {
 // RequestReplicaCatchupRequest is sent follower → placement leader. The
 // follower computes the local FSM-vs-disk diff in its lifecycle reconciler
 // (SweepMissingReplicas) and asks the leader to re-push specific sealed
-// chunks via the existing ChunkReplication.ImportSealed path. Used to
-// recover from replication pushes that failed during a follower pause /
-// partition / rejoin window — see gastrolog-2dgvj.
+// chunks via the streaming ChunkReplicationImport{Begin,Records,Commit}
+// path. Used to recover from replication pushes that failed during a
+// follower pause / partition / rejoin window — see gastrolog-2dgvj.
 message RequestReplicaCatchupRequest {
   bytes vault_id = 1;
   repeated bytes chunk_ids = 2;        // 16-byte ChunkIDs

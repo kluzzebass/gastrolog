@@ -269,38 +269,29 @@ func (o *Orchestrator) replicateToFollower(ctx context.Context, vaultID glid.GLI
 	}
 
 	// Chunk is readable — open a fresh cursor for the actual transfer.
+	// The cursor streams records on demand; ImportSealedChunk consumes it
+	// via a RecordIterator, so nothing proportional to chunk size lands on
+	// the leader's heap during the push. See gastrolog-4yvhh.
 	cursor, err := cm.OpenCursor(chunkID)
 	if err != nil {
 		return fmt.Errorf("open cursor: %w", err)
 	}
 	defer func() { _ = cursor.Close() }()
 
-	var records []chunk.Record
-	for {
-		rec, _, recErr := cursor.Next()
-		if errors.Is(recErr, chunk.ErrNoMoreRecords) {
-			break
-		}
-		if recErr != nil {
-			return fmt.Errorf("read chunk: %w", recErr)
-		}
-		records = append(records, rec)
-	}
-
 	// Final tombstone check right before sending: retention may have
-	// deleted this chunk while we were reading records. Without the
-	// recheck, a late ImportSealed would still land on the follower after
-	// the follower has already processed the delete via vault-ctl Raft, and
-	// the follower's post-import cleanup only catches the case where the
-	// tombstone is on its own FSM. This leader-side recheck short-
-	// circuits the RPC entirely when the leader already knows the chunk
-	// is gone. See gastrolog-11rzz.
+	// deleted this chunk while we were validating readability. Without
+	// the recheck, a late ImportSealed would still land on the follower
+	// after the follower has already processed the delete via vault-ctl
+	// Raft, and the follower's post-import cleanup only catches the
+	// case where the tombstone is on its own FSM. This leader-side
+	// recheck short-circuits the RPC entirely when the leader already
+	// knows the chunk is gone. See gastrolog-11rzz.
 	vaultInst := o.findLocalVaultInstance(vaultID)
 	if vaultInst != nil && vaultInst.IsTombstoned != nil && vaultInst.IsTombstoned(chunkID) {
-		o.replicationLogger.Debug("replication: chunk tombstoned after cursor read, aborting send",
+		o.replicationLogger.Debug("replication: chunk tombstoned after probe, aborting send",
 			"vault", vaultID, "chunk", chunkID.String(), "node", nodeID)
 		return nil
 	}
 
-	return o.chunkReplicator.ImportSealedChunk(ctx, nodeID, vaultID, chunkID, records)
+	return o.chunkReplicator.ImportSealedChunk(ctx, nodeID, vaultID, chunkID, chunk.CursorIterator(cursor))
 }

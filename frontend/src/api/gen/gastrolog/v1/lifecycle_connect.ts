@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { GetClusterStatusRequest, GetClusterStatusResponse, HealthRequest, HealthResponse, JoinClusterRequest, JoinClusterResponse, RemoveNodeRequest, RemoveNodeResponse, SetNodeSuffrageRequest, SetNodeSuffrageResponse, ShutdownRequest, ShutdownResponse, WatchSystemStatusRequest, WatchSystemStatusResponse } from "./lifecycle_pb.js";
+import { GetClusterStatusRequest, GetClusterStatusResponse, HealthRequest, HealthResponse, JoinClusterRequest, JoinClusterResponse, RemoveNodeRequest, RemoveNodeResponse, SetNodeSuffrageRequest, SetNodeSuffrageResponse, ShutdownRequest, ShutdownResponse, WatchSystemStatusRequest, WatchSystemStatusResponse, YieldLeadershipRequest, YieldLeadershipResponse } from "./lifecycle_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -80,6 +80,21 @@ export const LifecycleService = {
       name: "RemoveNode",
       I: RemoveNodeRequest,
       O: RemoveNodeResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * YieldLeadership asks this node to transfer Raft leadership to another
+     * voter, if it currently holds leadership. Non-leaders no-op. Intended
+     * as a Kubernetes preStop hook so a pod that's about to be terminated
+     * hands off leadership cleanly without disturbing cluster membership.
+     * See gastrolog-2yeie.
+     *
+     * @generated from rpc gastrolog.v1.LifecycleService.YieldLeadership
+     */
+    yieldLeadership: {
+      name: "YieldLeadership",
+      I: YieldLeadershipRequest,
+      O: YieldLeadershipResponse,
       kind: MethodKind.Unary,
     },
     /**

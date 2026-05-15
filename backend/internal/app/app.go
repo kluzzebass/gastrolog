@@ -186,17 +186,18 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		return err
 	}
 
-	// gastrolog-24iv4 Step C: if this node previously ran as a voter
-	// but the cluster has since removed it (reaper or operator), wipe
-	// the stale Raft directory before opening the raft store. Otherwise
-	// the subsequent raft init would replay a snapshot that lists this
-	// node as a voter, send pre-votes at a stale term, and crashloop
-	// on FSM catchup. Boot-time peer query — companion to the runtime
-	// NotifyEviction handler which only fires when the node is alive
-	// at eviction time.
-	if err := autoRejoinIfEvicted(ctx, logger, cfg, clusterTLS, hd, nodeID); err != nil {
-		return err
-	}
+	// gastrolog-2yeie: the boot-time auto-rejoin path (gastrolog-24iv4
+	// Step C) used to fire here, asking the cluster "do you still have
+	// me?" and renaming raftDir away if not. That mechanism was
+	// destructive (wiped node identity + cluster state) and racy (a
+	// startup-time GetConfiguration RPC could return stale data and
+	// trigger a spurious wipe). With yield-leadership preStop preserving
+	// membership across restart, the recovery path that motivated this
+	// code is no longer needed — raft loads its WAL, heartbeats with
+	// peers, and resumes. If a node IS truly evicted and the operator
+	// wants to bring it back fresh, that's an explicit operator action
+	// (delete /config/raft/ before starting the pod), not a silent
+	// boot-time decision.
 
 	configSignal := notify.NewSignal()
 	statsSignal := notify.NewSignal()

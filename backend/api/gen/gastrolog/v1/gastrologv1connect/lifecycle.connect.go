@@ -50,6 +50,9 @@ const (
 	// LifecycleServiceRemoveNodeProcedure is the fully-qualified name of the LifecycleService's
 	// RemoveNode RPC.
 	LifecycleServiceRemoveNodeProcedure = "/gastrolog.v1.LifecycleService/RemoveNode"
+	// LifecycleServiceYieldLeadershipProcedure is the fully-qualified name of the LifecycleService's
+	// YieldLeadership RPC.
+	LifecycleServiceYieldLeadershipProcedure = "/gastrolog.v1.LifecycleService/YieldLeadership"
 	// LifecycleServiceWatchSystemStatusProcedure is the fully-qualified name of the LifecycleService's
 	// WatchSystemStatus RPC.
 	LifecycleServiceWatchSystemStatusProcedure = "/gastrolog.v1.LifecycleService/WatchSystemStatus"
@@ -71,6 +74,12 @@ type LifecycleServiceClient interface {
 	// RemoveNode evicts a node from the cluster. Must be called on the leader.
 	// The evicted node receives a best-effort shutdown notification.
 	RemoveNode(context.Context, *connect.Request[v1.RemoveNodeRequest]) (*connect.Response[v1.RemoveNodeResponse], error)
+	// YieldLeadership asks this node to transfer Raft leadership to another
+	// voter, if it currently holds leadership. Non-leaders no-op. Intended
+	// as a Kubernetes preStop hook so a pod that's about to be terminated
+	// hands off leadership cleanly without disturbing cluster membership.
+	// See gastrolog-2yeie.
+	YieldLeadership(context.Context, *connect.Request[v1.YieldLeadershipRequest]) (*connect.Response[v1.YieldLeadershipResponse], error)
 	// WatchSystemStatus streams combined system status (cluster, health, route
 	// stats) whenever stats are updated. Replaces polling GetClusterStatus,
 	// Health, and GetRouteStats.
@@ -124,6 +133,12 @@ func NewLifecycleServiceClient(httpClient connect.HTTPClient, baseURL string, op
 			connect.WithSchema(lifecycleServiceMethods.ByName("RemoveNode")),
 			connect.WithClientOptions(opts...),
 		),
+		yieldLeadership: connect.NewClient[v1.YieldLeadershipRequest, v1.YieldLeadershipResponse](
+			httpClient,
+			baseURL+LifecycleServiceYieldLeadershipProcedure,
+			connect.WithSchema(lifecycleServiceMethods.ByName("YieldLeadership")),
+			connect.WithClientOptions(opts...),
+		),
 		watchSystemStatus: connect.NewClient[v1.WatchSystemStatusRequest, v1.WatchSystemStatusResponse](
 			httpClient,
 			baseURL+LifecycleServiceWatchSystemStatusProcedure,
@@ -141,6 +156,7 @@ type lifecycleServiceClient struct {
 	setNodeSuffrage   *connect.Client[v1.SetNodeSuffrageRequest, v1.SetNodeSuffrageResponse]
 	joinCluster       *connect.Client[v1.JoinClusterRequest, v1.JoinClusterResponse]
 	removeNode        *connect.Client[v1.RemoveNodeRequest, v1.RemoveNodeResponse]
+	yieldLeadership   *connect.Client[v1.YieldLeadershipRequest, v1.YieldLeadershipResponse]
 	watchSystemStatus *connect.Client[v1.WatchSystemStatusRequest, v1.WatchSystemStatusResponse]
 }
 
@@ -174,6 +190,11 @@ func (c *lifecycleServiceClient) RemoveNode(ctx context.Context, req *connect.Re
 	return c.removeNode.CallUnary(ctx, req)
 }
 
+// YieldLeadership calls gastrolog.v1.LifecycleService.YieldLeadership.
+func (c *lifecycleServiceClient) YieldLeadership(ctx context.Context, req *connect.Request[v1.YieldLeadershipRequest]) (*connect.Response[v1.YieldLeadershipResponse], error) {
+	return c.yieldLeadership.CallUnary(ctx, req)
+}
+
 // WatchSystemStatus calls gastrolog.v1.LifecycleService.WatchSystemStatus.
 func (c *lifecycleServiceClient) WatchSystemStatus(ctx context.Context, req *connect.Request[v1.WatchSystemStatusRequest]) (*connect.ServerStreamForClient[v1.WatchSystemStatusResponse], error) {
 	return c.watchSystemStatus.CallServerStream(ctx, req)
@@ -195,6 +216,12 @@ type LifecycleServiceHandler interface {
 	// RemoveNode evicts a node from the cluster. Must be called on the leader.
 	// The evicted node receives a best-effort shutdown notification.
 	RemoveNode(context.Context, *connect.Request[v1.RemoveNodeRequest]) (*connect.Response[v1.RemoveNodeResponse], error)
+	// YieldLeadership asks this node to transfer Raft leadership to another
+	// voter, if it currently holds leadership. Non-leaders no-op. Intended
+	// as a Kubernetes preStop hook so a pod that's about to be terminated
+	// hands off leadership cleanly without disturbing cluster membership.
+	// See gastrolog-2yeie.
+	YieldLeadership(context.Context, *connect.Request[v1.YieldLeadershipRequest]) (*connect.Response[v1.YieldLeadershipResponse], error)
 	// WatchSystemStatus streams combined system status (cluster, health, route
 	// stats) whenever stats are updated. Replaces polling GetClusterStatus,
 	// Health, and GetRouteStats.
@@ -244,6 +271,12 @@ func NewLifecycleServiceHandler(svc LifecycleServiceHandler, opts ...connect.Han
 		connect.WithSchema(lifecycleServiceMethods.ByName("RemoveNode")),
 		connect.WithHandlerOptions(opts...),
 	)
+	lifecycleServiceYieldLeadershipHandler := connect.NewUnaryHandler(
+		LifecycleServiceYieldLeadershipProcedure,
+		svc.YieldLeadership,
+		connect.WithSchema(lifecycleServiceMethods.ByName("YieldLeadership")),
+		connect.WithHandlerOptions(opts...),
+	)
 	lifecycleServiceWatchSystemStatusHandler := connect.NewServerStreamHandler(
 		LifecycleServiceWatchSystemStatusProcedure,
 		svc.WatchSystemStatus,
@@ -264,6 +297,8 @@ func NewLifecycleServiceHandler(svc LifecycleServiceHandler, opts ...connect.Han
 			lifecycleServiceJoinClusterHandler.ServeHTTP(w, r)
 		case LifecycleServiceRemoveNodeProcedure:
 			lifecycleServiceRemoveNodeHandler.ServeHTTP(w, r)
+		case LifecycleServiceYieldLeadershipProcedure:
+			lifecycleServiceYieldLeadershipHandler.ServeHTTP(w, r)
 		case LifecycleServiceWatchSystemStatusProcedure:
 			lifecycleServiceWatchSystemStatusHandler.ServeHTTP(w, r)
 		default:
@@ -297,6 +332,10 @@ func (UnimplementedLifecycleServiceHandler) JoinCluster(context.Context, *connec
 
 func (UnimplementedLifecycleServiceHandler) RemoveNode(context.Context, *connect.Request[v1.RemoveNodeRequest]) (*connect.Response[v1.RemoveNodeResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.LifecycleService.RemoveNode is not implemented"))
+}
+
+func (UnimplementedLifecycleServiceHandler) YieldLeadership(context.Context, *connect.Request[v1.YieldLeadershipRequest]) (*connect.Response[v1.YieldLeadershipResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.LifecycleService.YieldLeadership is not implemented"))
 }
 
 func (UnimplementedLifecycleServiceHandler) WatchSystemStatus(context.Context, *connect.Request[v1.WatchSystemStatusRequest], *connect.ServerStream[v1.WatchSystemStatusResponse]) error {

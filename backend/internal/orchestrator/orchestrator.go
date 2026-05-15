@@ -126,7 +126,7 @@ type RecordForwarder interface {
 type ChunkReplicator interface {
 	AppendRecords(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error
 	SealVault(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID) error
-	ImportSealedChunk(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error
+	ImportSealedChunk(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error
 	DeleteChunk(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID) error
 
 	// RequestReplicaCatchup is the follower→leader inverse of the other

@@ -810,6 +810,78 @@ export class RemoveNodeResponse extends Message<RemoveNodeResponse> {
 }
 
 /**
+ * @generated from message gastrolog.v1.YieldLeadershipRequest
+ */
+export class YieldLeadershipRequest extends Message<YieldLeadershipRequest> {
+  constructor(data?: PartialMessage<YieldLeadershipRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.YieldLeadershipRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): YieldLeadershipRequest {
+    return new YieldLeadershipRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): YieldLeadershipRequest {
+    return new YieldLeadershipRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): YieldLeadershipRequest {
+    return new YieldLeadershipRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: YieldLeadershipRequest | PlainMessage<YieldLeadershipRequest> | undefined, b: YieldLeadershipRequest | PlainMessage<YieldLeadershipRequest> | undefined): boolean {
+    return proto3.util.equals(YieldLeadershipRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.YieldLeadershipResponse
+ */
+export class YieldLeadershipResponse extends Message<YieldLeadershipResponse> {
+  /**
+   * True if this node was the cluster leader at call time and the
+   * transfer was initiated. False if the call was a no-op because the
+   * node wasn't leader.
+   *
+   * @generated from field: bool transferred = 1;
+   */
+  transferred = false;
+
+  constructor(data?: PartialMessage<YieldLeadershipResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.YieldLeadershipResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "transferred", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): YieldLeadershipResponse {
+    return new YieldLeadershipResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): YieldLeadershipResponse {
+    return new YieldLeadershipResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): YieldLeadershipResponse {
+    return new YieldLeadershipResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: YieldLeadershipResponse | PlainMessage<YieldLeadershipResponse> | undefined, b: YieldLeadershipResponse | PlainMessage<YieldLeadershipResponse> | undefined): boolean {
+    return proto3.util.equals(YieldLeadershipResponse, a, b);
+  }
+}
+
+/**
  * @generated from message gastrolog.v1.WatchSystemStatusRequest
  */
 export class WatchSystemStatusRequest extends Message<WatchSystemStatusRequest> {

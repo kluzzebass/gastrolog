@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -25,86 +24,6 @@ import (
 )
 
 const errFmtSaveClusterTLS = "save cluster TLS file: %w"
-
-// autoRejoinIfEvicted is the boot-time half of the gastrolog-24iv4
-// reaper-recovery story (Step C). When a joiner pod boots and finds
-// that:
-//
-//   - It has local Raft state (a WAL exists), meaning it ran as a
-//     voter previously, AND
-//   - The cluster's current Raft configuration does NOT include this
-//     node's ID, meaning the cluster considers it removed,
-//
-// then this function backs up the stale Raft directory so the
-// subsequent raft init treats the node as a fresh joiner. Without this
-// step, the node would re-enter Raft with a snapshot that lists itself
-// as a voter, send pre-votes at a stale term, be refused as "not in
-// configuration", and crashloop indefinitely on `wait for FSM catchup`.
-//
-// The function is a no-op when:
-//   - Not in raft mode (configType != "raft").
-//   - No cfg.JoinAddr (bootstrap node — operator must explicitly
-//     re-bootstrap if a bootstrap node's data is wiped).
-//   - No clusterTLS yet (couldn't authenticate to query the peer).
-//   - No local Raft state on disk (fresh boot — normal joiner flow).
-//   - Peer unreachable or query fails (don't block boot on a network
-//     blip; the existing failure modes still apply).
-//
-// Companion to the runtime NotifyEviction handler
-// (makeEvictionHandler): that path fires when the eviction RPC reaches
-// us while we're alive; this path covers the case where the eviction
-// happens while we're already dead and we'd otherwise come back
-// permanently broken. See gastrolog-24iv4 for the full design.
-func autoRejoinIfEvicted(ctx context.Context, logger *slog.Logger, cfg RunConfig, clusterTLS *cluster.ClusterTLS, hd home.Dir, nodeID string) error {
-	if cfg.ConfigType != "raft" || cfg.JoinAddr == "" || clusterTLS == nil {
-		return nil
-	}
-	raftDir := hd.RaftDir()
-	if !hasLocalRaftState(raftDir) {
-		// Fresh boot — nothing to wipe; normal joiner flow applies.
-		return nil
-	}
-
-	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	inCluster, err := cluster.IsNodeInClusterConfig(queryCtx, cfg.JoinAddr, nodeID, clusterTLS)
-	if err != nil {
-		// Couldn't reach the peer or query failed. Don't block boot —
-		// if we WERE evicted, the existing failure modes (FSM-catchup
-		// timeout, etc.) will fire and kubelet will retry. If we
-		// WEREN'T evicted, we don't want to wipe state on a transient
-		// network issue.
-		logger.Info("auto-rejoin: could not query cluster configuration, proceeding with normal boot",
-			"join_addr", cfg.JoinAddr, "error", err)
-		return nil
-	}
-	if inCluster {
-		// Still a member. Normal voter-restart flow.
-		return nil
-	}
-
-	backupDir := raftDir + ".evicted." + strconv.FormatInt(time.Now().UnixMilli(), 10)
-	logger.Warn("auto-rejoin: cluster considers this node not a member; backing up stale raft state for fresh rejoin",
-		"node_id", nodeID, "join_addr", cfg.JoinAddr, "backup_dir", backupDir)
-	if err := os.Rename(raftDir, backupDir); err != nil {
-		return fmt.Errorf("auto-rejoin: backup stale raft dir: %w", err)
-	}
-	return nil
-}
-
-// hasLocalRaftState returns true when raftDir contains a WAL
-// subdirectory — the canonical signal that this node has previously
-// run as a Raft voter. Empty raftDir or missing raftDir means fresh
-// boot; auto-rejoin treats that as no-op.
-func hasLocalRaftState(raftDir string) bool {
-	walDir := filepath.Join(raftDir, "wal")
-	info, err := os.Stat(walDir)
-	if err != nil {
-		return false
-	}
-	return info.IsDir()
-}
 
 // setupCluster handles cluster enrollment and cluster server creation.
 // Always creates cluster infra for raft mode. Returns nil for non-raft modes.

@@ -415,7 +415,7 @@ func (r *vaultTestReplicator) SealVault(_ context.Context, _ string, _ glid.GLID
 	return nil
 }
 
-func (r *vaultTestReplicator) ImportSealedChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
+func (r *vaultTestReplicator) ImportSealedChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
 	return nil
 }
 
@@ -829,7 +829,7 @@ func (m *ackTestReplicator) AppendRecords(_ context.Context, _ string, _ glid.GL
 func (m *ackTestReplicator) SealVault(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
 }
-func (m *ackTestReplicator) ImportSealedChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
+func (m *ackTestReplicator) ImportSealedChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
 	return nil
 }
 func (m *ackTestReplicator) DeleteChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
@@ -1187,7 +1187,7 @@ func (f *failingForwarder) SealVault(_ context.Context, _ string, _ glid.GLID, _
 	return nil
 }
 
-func (f *failingForwarder) ImportSealedChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
+func (f *failingForwarder) ImportSealedChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
 	return nil
 }
 

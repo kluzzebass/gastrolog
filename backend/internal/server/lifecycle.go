@@ -27,6 +27,8 @@ type ClusterStatusProvider interface {
 	LeaderInfo() (address string, id string)
 	Servers() ([]cluster.RaftServer, error)
 	LocalStats() map[string]string
+	IsLeader() bool
+	LeadershipTransfer() error
 }
 
 // NodeStatsProvider returns the latest stats for a given cluster node.
@@ -338,6 +340,34 @@ func (s *LifecycleServer) RemoveNode(
 	}
 	s.logger.Info("node removed from cluster", "node_id", nodeID)
 	return connect.NewResponse(&apiv1.RemoveNodeResponse{}), nil
+}
+
+// YieldLeadership asks this node to transfer Raft leadership to another
+// voter if it currently holds leadership. Non-leaders return success
+// with transferred=false. Used as a Kubernetes preStop hook so a pod
+// about to terminate hands off leadership cleanly without removing
+// itself from the voter set — the absence is then handled by normal
+// Raft heartbeat timeout and the node rejoins as a known follower when
+// it comes back up. See gastrolog-2yeie.
+func (s *LifecycleServer) YieldLeadership(
+	_ context.Context,
+	_ *connect.Request[apiv1.YieldLeadershipRequest],
+) (*connect.Response[apiv1.YieldLeadershipResponse], error) {
+	if s.cluster == nil {
+		// Single-node mode: nothing to yield, no error.
+		return connect.NewResponse(&apiv1.YieldLeadershipResponse{Transferred: false}), nil
+	}
+	if !s.cluster.IsLeader() {
+		s.logger.Info("YieldLeadership: not leader, no-op")
+		return connect.NewResponse(&apiv1.YieldLeadershipResponse{Transferred: false}), nil
+	}
+	s.logger.Info("YieldLeadership: transferring leadership")
+	if err := s.cluster.LeadershipTransfer(); err != nil {
+		s.logger.Error("YieldLeadership: transfer failed", "error", err)
+		return nil, errInternal(err)
+	}
+	s.logger.Info("YieldLeadership: leadership transferred")
+	return connect.NewResponse(&apiv1.YieldLeadershipResponse{Transferred: true}), nil
 }
 
 // WatchSystemStatus streams combined system status whenever stats update.
