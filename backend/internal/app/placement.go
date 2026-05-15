@@ -529,20 +529,29 @@ func slicesEqual(a, b []string) bool {
 }
 
 // handleUnplaceable clears a vault's assignment when no eligible node exists.
-func (pm *placementManager) handleUnplaceable(ctx context.Context, v system.VaultConfig, alertKey string, nscs []system.NodeStorageConfig, vaultCount map[string]int) {
+func (pm *placementManager) handleUnplaceable(_ context.Context, v system.VaultConfig, alertKey string, nscs []system.NodeStorageConfig, _ map[string]int) {
+	// "Zero eligible nodes" is almost always transient — peer state
+	// hasn't broadcast in yet, the FSM snapshot is still being replayed,
+	// or the cluster just bootstrapped and NSCs haven't propagated to
+	// the placement view. Wiping placements on every such tick would
+	// destroy valid leader+follower assignments that already exist on
+	// disk and never recover them once the cluster stabilizes — the
+	// next tick sees no current leader, has to re-elect from scratch,
+	// and loses any follower history. See gastrolog-2yeie: before
+	// yield-leadership preStop preserved cluster state across pod
+	// restart, demote-self was wiping state on every restart anyway so
+	// the destructive branch here was a no-op. Now that state survives,
+	// the wipe is visible.
+	//
+	// Keep current placements intact; raise the alert so the operator
+	// sees the degraded condition; let the next reconcile tick promote
+	// peers back into the alive set and extend followers naturally.
 	currentLeader := system.LeaderNodeID(func() []system.VaultPlacement {
 		p, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
 		return p
 	}(), nscs)
-	if currentLeader != "" {
-		old := currentLeader
-		if err := pm.cfgStore.SetVaultPlacements(ctx, v.ID, nil); err != nil {
-			pm.logger.Error("placement: clear vault assignment", "vault", v.ID, "name", v.Name, "error", err)
-		} else {
-			pm.logger.Warn("placement: vault unplaced, no eligible nodes", "vault", v.ID, "name", v.Name)
-		}
-		vaultCount[old]--
-	}
+	pm.logger.Warn("placement: vault has no currently-eligible node, retaining existing placements",
+		"vault", v.ID, "name", v.Name, "current_leader", currentLeader)
 	if pm.alerts != nil {
 		pm.alerts.Set(alertKey, alert.Warning, "placement",
 			fmt.Sprintf("Vault %q has no eligible node", v.Name))
