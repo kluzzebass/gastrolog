@@ -87,13 +87,18 @@ data:
   # Single token only (no spaces). Color accepts any CSS color value.
   GASTROLOG_ENVIRONMENT_LABEL: "Kubernetes"
   GASTROLOG_ENVIRONMENT_COLOR: "red"
-  # gastrolog-6bfwk: stale-voter reaper threshold + interval — both
-  # overrideable for test scenarios (env vars are read at process
-  # startup). Leave unset in the deployed manifest to inherit the
-  # safe defaults (10m / 60s). The 2m threshold we tried during
-  # initial verification was BELOW the rolling-redeploy window and
-  # caused the reaper to evict voters mid-rollout; the rule of thumb
-  # is threshold >= 5 × (pod_count × per_pod_restart_window).
+  # gastrolog-24iv4: the stale-voter-reaper that gastrolog-6bfwk
+  # added has been removed. Operator-driven termination flows
+  # (kubernetes-contract, manual `cluster remove-node`) explicitly
+  # clean up Raft + NodeConfig. K8s-managed termination flows
+  # (`kubectl scale`, rolling restart, voluntary eviction) trigger
+  # the preStop hook below, which runs `cluster demote-self` before
+  # SIGTERM. Crashes / OOM / hardware failure don't fire preStop —
+  # the surviving voter cluster keeps running, and the operator
+  # explicitly cleans up with `cluster remove-node` when they know
+  # the node isn't coming back. GASTROLOG_STALE_VOTER_THRESHOLD /
+  # GASTROLOG_STALE_VOTER_INTERVAL env vars are gone; nothing reads
+  # them anymore.
 
 ---
 # Secret for admin credentials + the bootstrap-token shared secret.
@@ -217,10 +222,10 @@ spec:
           # path if it had been evicted in the interim).
           #
           # Without this, scale-down via `kubectl scale` would strand
-          # ghost voters in Raft forever, eventually relying on the
-          # stale-voter-reaper — which was the original gastrolog-6bfwk
-          # workaround. See gastrolog-24iv4 for the design rationale
-          # and gastrolog-6bfwk for the failure mode this fixes.
+          # ghost voters in Raft forever. gastrolog-24iv4 deletes the
+          # stale-voter-reaper that gastrolog-6bfwk introduced as a
+          # workaround for that bug — preStop closes the gap at the
+          # source, so no auto-eviction safety net is needed.
           lifecycle:
             preStop:
               exec:
