@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -29,7 +31,7 @@ import (
 //      still make progress.
 
 func newImportTestServer(importer VaultRecordImporter) *Server {
-	s := &Server{}
+	s := &Server{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	s.stopCtx, s.stopCancel = context.WithCancel(context.Background())
 	s.SetVaultRecordImporter(importer)
 	return s
@@ -206,42 +208,71 @@ func TestImportStreaming_RecordsBeforeBegin(t *testing.T) {
 	}
 }
 
-func TestImportStreaming_DoubleBegin(t *testing.T) {
+// A new ImportBegin while a previous import is pending preempts the
+// previous one. Without this, a leader that gave up between Begin and
+// Commit (orchestrator restart, cursor read error, ctx cancel) would
+// leave the follower wedged forever — every subsequent ImportSealed
+// for the same (vault, follower) stream got rejected with "ImportBegin
+// while import for chunk X already in flight". Regression test for
+// gastrolog-5z7l8.
+func TestImportStreaming_BeginPreemptsStuckPending(t *testing.T) {
 	t.Parallel()
 	// Block the importer so the first Begin is still in-flight when the
-	// second arrives.
-	stall := make(chan struct{})
-	defer close(stall)
+	// second arrives — simulates a leader that started an import and
+	// never sent Commit.
 	importer := func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
-		<-stall
-		return nil
+		_, err := next() // blocks until ctx cancels or channel closes
+		return err
 	}
 	s := newImportTestServer(importer)
 	defer s.stopCancel()
 
 	vaultID := glid.New()
-	chunkIDProto := glid.GLID(chunk.ChunkID(glid.New())).ToProto()
+	firstChunkIDProto := glid.GLID(chunk.ChunkID(glid.New())).ToProto()
+	secondChunkIDProto := glid.GLID(chunk.ChunkID(glid.New())).ToProto()
+
 	var pending *pendingImport
 	first := s.handleReplicationCommand(context.Background(),
 		&gastrologv1.ChunkReplicationCommand{
 			VaultId: vaultID.ToProto(),
 			Command: &gastrologv1.ChunkReplicationCommand_ImportBegin{
-				ImportBegin: &gastrologv1.ChunkReplicationImportBegin{ChunkId: chunkIDProto},
+				ImportBegin: &gastrologv1.ChunkReplicationImportBegin{ChunkId: firstChunkIDProto},
 			},
 		}, &pending)
 	if !first.Ok {
 		t.Fatalf("first Begin: %s", first.Error)
 	}
+
+	// Second Begin (different chunk) should preempt the first, not be
+	// rejected. The leader has clearly moved on from the first chunk.
 	second := s.handleReplicationCommand(context.Background(),
 		&gastrologv1.ChunkReplicationCommand{
 			VaultId: vaultID.ToProto(),
 			Command: &gastrologv1.ChunkReplicationCommand_ImportBegin{
-				ImportBegin: &gastrologv1.ChunkReplicationImportBegin{ChunkId: chunkIDProto},
+				ImportBegin: &gastrologv1.ChunkReplicationImportBegin{ChunkId: secondChunkIDProto},
 			},
 		}, &pending)
-	if second.Ok {
-		t.Fatal("second Begin should be rejected while first is in flight")
+	if !second.Ok {
+		t.Fatalf("second Begin should preempt stuck pending, got rejection: %s", second.Error)
 	}
+	if pending == nil {
+		t.Fatal("pending nil after second Begin")
+	}
+	if got := glid.GLID(pending.chunkID).ToProto(); !bytesEqual(got, secondChunkIDProto) {
+		t.Errorf("pending chunkID = %x, want %x", got, secondChunkIDProto)
+	}
+}
+
+func bytesEqual(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestImportStreaming_CommitChunkIDMismatch(t *testing.T) {

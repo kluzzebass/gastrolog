@@ -171,12 +171,23 @@ func (s *Server) handleReplicationImportBegin(ctx context.Context, vaultID glid.
 	if s.vaultRecordImporter == nil {
 		return &gastrologv1.ChunkReplicationAck{Ok: false, Error: "vault importer not configured"}
 	}
-	if *pending != nil {
-		return &gastrologv1.ChunkReplicationAck{
-			Ok:      false,
-			Error:   fmt.Sprintf("ImportBegin while import for chunk %s already in flight", (*pending).chunkID),
-			ChunkId: cmd.GetChunkId(),
-		}
+	// If a previous import is stuck pending (leader gave up between Begin
+	// and Commit — orchestrator restart, cursor read error, ctx cancel),
+	// the per-stream state would wedge every subsequent ImportSealed for
+	// this (vault, follower) pair until the stream itself tore down. Treat
+	// a fresh ImportBegin as the leader's signal that it has moved on:
+	// cancel the wedged import, drain its result, and accept the new one.
+	// See gastrolog-5z7l8 — without this, partial imports leave sealed
+	// chunks permanently under-replicated, with the leader logging
+	// "ImportBegin while import for chunk X already in flight" forever.
+	if p := *pending; p != nil {
+		s.logger.Warn("ImportBegin while previous import in flight — preempting",
+			"vault", vaultID, "prev_chunk", p.chunkID, "new_chunk",
+			chunk.ChunkID(glid.FromBytes(cmd.GetChunkId())))
+		p.cancel()
+		close(p.recordCh)
+		<-p.resultCh
+		*pending = nil
 	}
 
 	chunkID := chunk.ChunkID(glid.FromBytes(cmd.GetChunkId()))
