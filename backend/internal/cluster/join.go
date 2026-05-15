@@ -188,33 +188,3 @@ func queryLeader(ctx context.Context, addr string, creds credentials.TransportCr
 	return resp.GetAddress(), nil
 }
 
-// IsNodeInClusterConfig dials a known cluster peer over mTLS and asks
-// for the current Raft configuration via raftadmin.GetConfiguration.
-// Returns (true, nil) if nodeID appears as a voter or non-voter in the
-// returned server list, (false, nil) if the cluster is reachable but
-// the node is not in the configuration, or (false, err) if the cluster
-// is unreachable.
-//
-// Used at boot time (gastrolog-24iv4 Step C) to detect the "evicted
-// voter returning" case: if the local Raft snapshot lists this node
-// as a voter but the cluster's current configuration does not, the
-// node must wipe its stale Raft state and rejoin as a fresh node
-// instead of crashlooping on FSM catchup.
-func IsNodeInClusterConfig(ctx context.Context, addr, nodeID string, ctls *ClusterTLS) (bool, error) {
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(ctls.TransportCredentials()))
-	if err != nil {
-		return false, fmt.Errorf("dial %s: %w", addr, err)
-	}
-	defer func() { _ = conn.Close() }()
-
-	resp, err := pb.NewRaftAdminClient(conn).GetConfiguration(ctx, &pb.GetConfigurationRequest{})
-	if err != nil {
-		return false, fmt.Errorf("get cluster configuration: %w", err)
-	}
-	for _, srv := range resp.GetServers() {
-		if srv.GetId() == nodeID {
-			return true, nil
-		}
-	}
-	return false, nil
-}
