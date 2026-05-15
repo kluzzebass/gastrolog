@@ -232,7 +232,19 @@ spec:
                 command:
                   - /bin/sh
                   - -c
-                  - /gastrolog --home /config cluster demote-self || true
+                  # Skip demote-self for the bootstrap node (ord=0):
+                  # it has no JoinAddr at boot, so it can't auto-rejoin
+                  # after demotion — and on rolling restart it doesn't
+                  # need to be demoted anyway. SIGTERM cleanly; /config
+                  # remains intact; new pod reconnects via normal Raft
+                  # heartbeats. True scale-down of the bootstrap node is
+                  # operator-territory (cluster needs re-bootstrap).
+                  - |
+                    ord=${HOSTNAME##*-}
+                    if [ "$ord" = "0" ]; then
+                      exit 0
+                    fi
+                    /gastrolog --home /config cluster demote-self || true
       # terminationGracePeriodSeconds bounds the total preStop +
       # SIGTERM-handling window. 30s is generous: demote-self normally
       # completes within a few hundred ms, and the shutdown drain
