@@ -2,6 +2,8 @@
 
 **Status:** Audit deliverable for [gastrolog-5dfv7](dcat://gastrolog-5dfv7) under epic [gastrolog-2i1g9](dcat://gastrolog-2i1g9). This document inventories code paths that treat local disk state as authoritative for information that has migrated (or is migrating) to the vault-ctl FSM. Each entry becomes a cleanup target tracked as its own implementation issue under the migration epic.
 
+The findings target code paths that need to consult FSM authority instead of disk. The specific FSM field they consult differs between epics: `placement_set − pendingDeletes.ExpectedFrom` under [gastrolog-2i1g9](dcat://gastrolog-2i1g9) (current epic), and the `Holding` set under [gastrolog-2ujjh](dcat://gastrolog-2ujjh) (data-plane redesign epic, lands afterward). The cleanup target — the code path that reframes from disk-as-authority to FSM-as-authority — is the same in both; only the field consulted in the rewrite differs. Each cleanup implementation issue, when drafted, references whichever FSM mechanism is current at that time.
+
 ## What this audits
 
 For each candidate site, the test is:
