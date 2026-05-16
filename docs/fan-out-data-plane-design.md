@@ -166,9 +166,9 @@ Two-tier reconcile: a fast set-equality check that handles the common case, and 
 **Fast path — single set-hash:**
 
 1. When `CmdBeginSeal` applies on a replica, no new records can be accepted into the chunk locally. The local EventID set is stable from that moment.
-2. Each replica computes a set-hash over its chunk's EventIDs immediately after `CmdBeginSeal` apply. Two options for the hash function:
-   - **Order-independent hash**: XOR (or other commutative aggregation) of `hash(EventID)` per record. Same set produces the same hash regardless of traversal order. O(N), no sort.
-   - **Canonical-sort hash**: walk the `ingestBT` and tiebreak collision buckets by full EventID (IngestTS alone isn't unique under load; EventID is). Compute a chained hash. O(N log K) where K is the average collision-bucket size (typically 1). Produces a Merkle root the slow path can reuse without recomputation.
+2. Each replica computes a set-hash over its chunk's EventIDs immediately after `CmdBeginSeal` apply. `chunk.EventID` is fully unique by construction (`IngesterID + NodeID + IngestTS + IngestSeq`; `IngestSeq` is the per-ingester rolling sequence that guarantees uniqueness even at colliding IngestTS values — see [chunk/types.go#L219-L234](backend/internal/chunk/types.go#L219)), so the hash can be order-independent or order-dependent and either works:
+   - **Order-independent hash**: XOR (or other commutative aggregation) of `hash(EventID)` per record. Same set → same XOR regardless of any traversal order. O(N), no sort, no tiebreaker.
+   - **Canonical-sort hash**: sort by full EventID, compute a chained hash. O(N log N) for the sort but produces a Merkle root the slow path can reuse without recomputation.
 3. Replicas exchange set-hashes (32 bytes per replica per seal).
 4. **If hashes match**: the chunk is set-equivalent across replicas. Seal completes (`Sealing → Sealed`). No Merkle work performed.
 5. **If hashes differ**: fall back to the Merkle slow path.
