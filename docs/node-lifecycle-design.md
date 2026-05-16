@@ -177,7 +177,7 @@ The enablers for the future feature, when it gets scoped, are limited to:
 1. **Placement schema extension** — support multiple "active leader" placements per vault, keyed by ChunkID. The current schema has a single `Leader: true` entry per vault; the extension is either multiple Leader entries or an explicit per-chunk placement variant.
 2. **Ingester forwarder routing** — pick any active leader (round-robin, hash-based, or load-aware) instead of "the" leader. Producer-side API does not change.
 3. **Read routing** — fan out to all active leaders for live-tail reads. Sealed chunks are unaffected; their residency is already per-chunk and the read path already routes per-chunk for sealed content.
-4. **Rotation policy** — confirm that rotation fires per-active-chunk independently. The chunk manager already tracks per-chunk state, so this is likely already correct; needs verification when implementing.
+4. **Per-active-chunk rotation** — the rotation policy interface ([`chunk/rotation.go`](backend/internal/chunk/rotation.go) `ShouldRotate(state ActiveChunkState, next Record)`) is per-chunk by construction; each active's state is evaluated independently against the same policy. The chunk manager's single `m.active` slot ([`chunk/file/manager.go`](backend/internal/chunk/file/manager.go)) needs to become a per-chunk slot (e.g., `m.actives map[ChunkID]*activeChunk`) and append routing needs to pick the destination, but the policy mechanism itself is unaffected.
 
 The feature is **not** in scope for this design. It is noted here as a non-foreclosure statement so future readers can confirm the design did not paint multi-active into a corner. Picking this up later does not require revisiting the lifecycle, residency, or learner work in this document.
 
