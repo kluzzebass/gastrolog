@@ -926,3 +926,155 @@ func TestPlacementSingletonIngesterUnknownType(t *testing.T) {
 		t.Fatalf("expected no assignment for unknown type, got %q", assigned)
 	}
 }
+
+// ---------- State-driven placement guard (gastrolog-slc6l) ----------
+
+// setupStateGuardTest creates a placement manager with two nodes (the
+// local node and a peer) registered as real NodeConfig records in the
+// system store, so cfgStore.ListNodes() returns them and placeVault's
+// state-based gate fires. Returns the IDs for use as placement keys.
+func setupStateGuardTest(t *testing.T, peerState system.NodeState) (pm *placementManager, store *sysmem.Store, alerts *alert.Collector, localID, peerID glid.GLID) {
+	t.Helper()
+	localID = glid.New()
+	peerID = glid.New()
+	pm, store, alerts = newTestPlacement(t, localID.String(), []string{peerID.String()})
+	now := time.Now()
+	if err := store.PutNode(context.Background(), system.NodeConfig{
+		ID: localID, Name: "local", State: system.NodeStateLive, StateSince: now,
+	}); err != nil {
+		t.Fatalf("PutNode local: %v", err)
+	}
+	if err := store.PutNode(context.Background(), system.NodeConfig{
+		ID: peerID, Name: "peer", State: peerState, StateSince: now,
+	}); err != nil {
+		t.Fatalf("PutNode peer: %v", err)
+	}
+	return pm, store, alerts, localID, peerID
+}
+
+// seedVaultWithLeader creates a memory vault whose leader storage
+// points at the given node ID.
+func seedVaultWithLeader(t *testing.T, store *sysmem.Store, leaderNodeID string) glid.GLID {
+	t.Helper()
+	ctx := context.Background()
+	vaultID := glid.New()
+	if err := store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v", Type: system.VaultTypeMemory}); err != nil {
+		t.Fatalf("PutVault: %v", err)
+	}
+	if err := store.SetVaultPlacements(ctx, vaultID, leaderPlacement(leaderNodeID)); err != nil {
+		t.Fatalf("SetVaultPlacements: %v", err)
+	}
+	return vaultID
+}
+
+func TestPlacement_MaintenanceLeader_RetainsPlacement(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pm, store, alerts, _, peerID := setupStateGuardTest(t, system.NodeStateMaintenance)
+	vaultID := seedVaultWithLeader(t, store, peerID.String())
+
+	pm.reconcile(ctx)
+
+	// Placement should remain on the Maintenance node despite the local
+	// node being alive and eligible.
+	if got := vaultNode(t, store, vaultID); got != peerID.String() {
+		t.Errorf("placement rotated off Maintenance leader: got %q, want %q", got, peerID.String())
+	}
+	if !hasAlert(alerts, "vault-soft-offline-leader:") {
+		t.Errorf("expected soft-offline-leader alert, got none")
+	}
+}
+
+func TestPlacement_UnreachableLeader_RetainsPlacement(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	// Unreachable peer is NOT in livePeers (heartbeats lapsed). Without
+	// the state guard, placement would rotate off it.
+	pm, store, alerts := newTestPlacement(t, glid.New().String(), nil /* no live peers */)
+	peerID := glid.New()
+	now := time.Now()
+	_ = store.PutNode(ctx, system.NodeConfig{
+		ID: peerID, Name: "peer", State: system.NodeStateUnreachable, StateSince: now,
+	})
+	vaultID := seedVaultWithLeader(t, store, peerID.String())
+
+	pm.reconcile(ctx)
+
+	// State guard refuses rotation off Unreachable nodes — the placement
+	// guard's load-bearing case for the RF=1 redeploy bug.
+	if got := vaultNode(t, store, vaultID); got != peerID.String() {
+		t.Errorf("placement rotated off Unreachable leader: got %q, want %q", got, peerID.String())
+	}
+	if !hasAlert(alerts, "vault-soft-offline-leader:") {
+		t.Errorf("expected soft-offline-leader alert, got none")
+	}
+}
+
+func TestPlacement_DrainingLeader_RetainsPlacement_NoSoftOfflineAlert(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pm, store, alerts, _, peerID := setupStateGuardTest(t, system.NodeStateDraining)
+	vaultID := seedVaultWithLeader(t, store, peerID.String())
+
+	pm.reconcile(ctx)
+
+	// Draining: placement reconcile is a no-op for the vault — the
+	// drain orchestrator is the authority for moving placements off.
+	if got := vaultNode(t, store, vaultID); got != peerID.String() {
+		t.Errorf("placement rotated off Draining leader: got %q, want %q", got, peerID.String())
+	}
+	// Draining is a deliberate operator transition — no soft-offline
+	// alert (the operator already knows).
+	if hasAlert(alerts, "vault-soft-offline-leader:") {
+		t.Errorf("Draining state should not raise soft-offline alert")
+	}
+}
+
+func TestPlacement_LiveLeader_NoStateGuard(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	// Live peer with NO live heartbeats — existing rotate-on-not-alive
+	// behavior should fire. State guard does not apply.
+	localID := glid.New()
+	peerID := glid.New()
+	pm, store, _ := newTestPlacement(t, localID.String(), nil /* no live peers */)
+	now := time.Now()
+	_ = store.PutNode(ctx, system.NodeConfig{ID: localID, Name: "local", State: system.NodeStateLive, StateSince: now})
+	_ = store.PutNode(ctx, system.NodeConfig{ID: peerID, Name: "peer", State: system.NodeStateLive, StateSince: now})
+	vaultID := seedVaultWithLeader(t, store, peerID.String())
+
+	pm.reconcile(ctx)
+
+	// Live + not heartbeating → existing rotate behavior. Until the
+	// auto-trigger sweep (gastrolog-39m2k) transitions this to
+	// Unreachable, the state guard doesn't catch it.
+	if got := vaultNode(t, store, vaultID); got != localID.String() {
+		t.Errorf("Live-but-not-alive leader should have rotated: got %q, want %q", got, localID.String())
+	}
+}
+
+func TestPlacement_SoftOfflineCleared_OnReturnToLive(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	// Start with peer in Maintenance, soft-offline alert raised.
+	pm, store, alerts, _, peerID := setupStateGuardTest(t, system.NodeStateMaintenance)
+	vaultID := seedVaultWithLeader(t, store, peerID.String())
+
+	pm.reconcile(ctx)
+	if !hasAlert(alerts, "vault-soft-offline-leader:") {
+		t.Fatalf("setup: expected soft-offline alert after first reconcile")
+	}
+	_ = vaultID
+
+	// Operator returns peer to Live.
+	peer, _ := store.GetNode(ctx, peerID)
+	peer.State = system.NodeStateLive
+	peer.StateSince = time.Now()
+	_ = store.PutNode(ctx, *peer)
+
+	pm.reconcile(ctx)
+
+	if hasAlert(alerts, "vault-soft-offline-leader:") {
+		t.Errorf("soft-offline alert should clear after transition to Live")
+	}
+}
