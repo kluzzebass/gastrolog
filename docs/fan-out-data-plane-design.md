@@ -111,17 +111,28 @@ The triggering replica is whichever's `ShouldRotate` happened to fire first — 
 
 A replica receiving very few records under load-balanced routing might never see its `ShouldRotate` fire before others propose. That is fine — it just observes the seal command and catches up via reconcile. No requirement that the deciding replica be the most-loaded one; the system needs *some* replica to notice.
 
-### In-flight records at seal time: ingester chunk-ID stamping
+### In-flight records at seal time: append to local current active
 
-Records the ingester sends just before `CmdBeginSeal` commits land on different replicas at different times — some land in the sealing chunk, others might be told the chunk is already sealed. To resolve this:
+Records the ingester sends just before `CmdBeginSeal` commits land on different replicas at different times. Each replica accepts the record into whatever its locally-current active chunk is at receive time:
 
-**Records carry a chunk-ID stamp from the ingester.** The ingester maintains a per-vault current-active-chunk-ID, learned from a watch stream over the vault-ctl FSM (same mechanism as `WatchConfig`'s server-stream pattern from gastrolog-4oc3). On each record send:
+- Replica with `CmdBeginSeal` already applied: record lands in the new active chunk.
+- Replica without `CmdBeginSeal` applied yet: record lands in the old (now-sealing) chunk.
 
-1. Ingester stamps the record with the current active chunk ID.
-2. Each receiving replica validates: if the stamped chunk ID is the current active locally, accept. If the chunk is sealed locally (`CmdBeginSeal` has applied), reject with a "chunk sealed, retry" response.
-3. On rejection, ingester re-reads the current active chunk ID (the watch stream has already delivered the update, or the rejection response carries the new ID) and retries the record with the new stamp.
+The ingester is oblivious to chunk lifecycle. It sends records to replicas; each replica's local FSM state determines which chunk receives the record. Reconcile + `dedupWindow` at query time absorb the consequence (see "Accepted tradeoffs vs leader-driven sealing" below).
 
-This is how the FSM-serialized chunk lifecycle and the ingester's "what's the current chunk" lookup stay synchronized. The ingester is the source of chunk assignment per record; the FSM is the source of "what's the current active chunk." The chunk-ID stamp closes the loop.
+#### Considered and rejected: ingester chunk-ID stamping
+
+An earlier design pass proposed the ingester carry a chunk-ID stamp on each record, learned from a watch stream over the vault-ctl FSM, with replicas rejecting records stamped with sealed chunk IDs. The intent was to reduce the cross-chunk-duplicate window from the full Raft commit duration to just the watch-stream propagation lag.
+
+Rejected because the marginal benefit doesn't justify the complexity:
+
+- The cross-chunk-duplicate window is already bounded by Raft commit latency (~10ms). At even 1M records/sec, ~10K records per seal could be cross-chunk — about 1% of a 1M-record chunk, well within compression-ratio noise.
+- Stamping introduces chunk-lifecycle awareness in the ingester layer, which was previously oblivious. Ingester must now track current-active-chunk-ID per vault, watch FSM for updates, handle rejection responses, and retry.
+- New failure modes: watch-stream disconnect → stale chunk IDs → rejection storms → ingester retry pressure.
+- Cross-ingester coordination: if multiple ingester instances exist with different watch-update timing, records from different ingesters carry different chunk IDs during a transition, multiplying the race.
+- The reconcile + dedupWindow mechanism already handles cross-chunk duplicates correctly — adding stamping is solving a problem we said was fine to live with.
+
+The simpler model (ingester just sends; replicas accept into local current active) is structurally cleaner and the storage cost is negligible.
 
 ### Why not a single rotation coordinator
 
