@@ -90,6 +90,51 @@ The choice is per-vault config, not per-record. Operator sets it based on the va
 
 When multiple ingester instances exist and the chunk's Receiving set has N nodes, ingesters distribute writes by consulting `chanwatch.PressureGate`'s per-node pressure metric. The signal is already in the codebase ([record_forwarder.go#L90](backend/internal/cluster/record_forwarder.go#L90)), already broadcast on 1-second cadence, already used by ingesters for upstream backpressure throttling. Fan-out routing reuses the same data: prefer Receiving nodes with lower pressure when N > W.
 
+## Mechanism: Sealing under fan-out
+
+The leader-driven model has a clean rotation decision: the leader's local chunk state is canonical, and `ShouldRotate` evaluated against it gives the authoritative answer. Under fan-out, no replica has canonical state — each replica's local view of records-received, bytes-accumulated, and age differs due to per-record arrival timing.
+
+The mechanism: **first replica whose local state fires `ShouldRotate` proposes the seal; vault-ctl Raft serializes; first proposal wins.**
+
+1. Each replica evaluates `ShouldRotate` locally on every append, against its own `ActiveChunkState` ([chunk/rotation.go#L46](backend/internal/chunk/rotation.go#L46)). The interface is already a pure function of one chunk's state — no cross-replica coordination required to evaluate.
+2. The replica whose state hits the threshold first proposes `CmdBeginSeal` (+ `CmdCreateActive` for the successor chunk) via vault-ctl Raft.
+3. Other replicas observe the apply, transition the chunk to `Sealing`, and direct new appends to the new active chunk.
+4. Reconcile at seal time converges record sets across replicas before the chunk transitions from `Sealing` to `Sealed`.
+
+The triggering replica is whichever's `ShouldRotate` happened to fire first — under load-balanced fan-out routing, that's usually the most-loaded replica, which varies dynamically. Multiple replicas can race; vault-ctl Raft serializes; first to commit wins.
+
+### Why this works for each rotation policy
+
+- **`SizePolicy` / `RecordCountPolicy`**: per-replica state differs (different replicas got different records under fan-out). One replica hits the threshold first and proposes. The triggering count or size is *that* replica's local state; the chunk's final record set comes from reconcile, not the trigger count. The trigger is just the signal.
+- **`AgePolicy`**: each replica opens the chunk at slightly different wall-clock times (when `CmdCreateActive` applied locally). Age-based rotation fires at slightly different absolute times across replicas. First to fire proposes; Raft serializes. The chunk's age boundary is determined by whichever replica's clock got there first, not by a synchronized cluster-wide timer.
+- **`HardLimitPolicy`** ([chunk/rotation.go#L170](backend/internal/chunk/rotation.go#L170)): caps raw.log at the uint32-offset limit (~4GB). If any replica hits this, seal is required — the file format can't represent more. First-to-fire-proposes handles this naturally; hard-limit on any replica triggers seal cluster-wide.
+
+A replica receiving very few records under load-balanced routing might never see its `ShouldRotate` fire before others propose. That is fine — it just observes the seal command and catches up via reconcile. No requirement that the deciding replica be the most-loaded one; the system needs *some* replica to notice.
+
+### In-flight records at seal time: ingester chunk-ID stamping
+
+Records the ingester sends just before `CmdBeginSeal` commits land on different replicas at different times — some land in the sealing chunk, others might be told the chunk is already sealed. To resolve this:
+
+**Records carry a chunk-ID stamp from the ingester.** The ingester maintains a per-vault current-active-chunk-ID, learned from a watch stream over the vault-ctl FSM (same mechanism as `WatchConfig`'s server-stream pattern from gastrolog-4oc3). On each record send:
+
+1. Ingester stamps the record with the current active chunk ID.
+2. Each receiving replica validates: if the stamped chunk ID is the current active locally, accept. If the chunk is sealed locally (`CmdBeginSeal` has applied), reject with a "chunk sealed, retry" response.
+3. On rejection, ingester re-reads the current active chunk ID (the watch stream has already delivered the update, or the rejection response carries the new ID) and retries the record with the new stamp.
+
+This is how the FSM-serialized chunk lifecycle and the ingester's "what's the current chunk" lookup stay synchronized. The ingester is the source of chunk assignment per record; the FSM is the source of "what's the current active chunk." The chunk-ID stamp closes the loop.
+
+### Why not a single rotation coordinator
+
+A reasonable alternative: designate the vault-ctl Raft leader as the rotation decision-maker. Only the leader proposes seals; followers just receive records.
+
+This would work, but it reintroduces a soft leader concept the fan-out model otherwise avoids:
+
+- It's another piece of state to track and a failure mode to handle (rotation coordinator unavailable → no seals fire → chunks grow unbounded → hits hard limit → emergency mode)
+- It privileges one replica's view as "the" rotation-triggering state, even though every replica has equally valid local state
+- It re-creates the leader-failure-stalls-rotation problem in miniature
+
+The first-to-fire mechanism is more uniform: every replica participates symmetrically; Raft already handles the "multiple proposals, one wins" semantic; no extra coordinator role.
+
 ## Mechanism: Set-diff reconcile via EventID Merkle summaries
 
 **Why set-diff and not hash-chain:**
