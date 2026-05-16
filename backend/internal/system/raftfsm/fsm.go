@@ -50,6 +50,7 @@ const (
 	NotifyIngesterAssignmentSet
 	NotifySetupWizardDismissedSet
 	NotifyLogLevelsSet
+	NotifyNodeStateChanged
 )
 
 // Notification describes a config mutation that the FSM just applied.
@@ -126,6 +127,7 @@ func (f *FSM) Apply(l *raft.Log) any {
 		*gastrologv1.SystemCommand_DeleteCertificate,
 		*gastrologv1.SystemCommand_PutNodeConfig,
 		*gastrologv1.SystemCommand_DeleteNodeConfig,
+		*gastrologv1.SystemCommand_SetNodeState,
 		*gastrologv1.SystemCommand_PutClusterTls,
 		*gastrologv1.SystemCommand_PutRoute,
 		*gastrologv1.SystemCommand_DeleteRoute,
@@ -180,7 +182,7 @@ func (f *FSM) applyConfig(ctx context.Context, cmd *gastrologv1.SystemCommand, r
 // dispatchConfig routes a config command to the store and returns a
 // notification describing the mutation, or nil for commands that don't
 // need orchestrator side effects (settings delete, certificates).
-func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.SystemCommand) (*Notification, error) { //nolint:gocyclo // flat dispatch, grows linearly with command count
+func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.SystemCommand) (*Notification, error) { //nolint:gocyclo,gocognit // flat dispatch, grows linearly with command count
 	switch c := cmd.Command.(type) {
 	case *gastrologv1.SystemCommand_PutRotationPolicy:
 		return f.applyPutRotationPolicy(ctx, c.PutRotationPolicy)
@@ -234,6 +236,33 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.SystemCommand
 			return nil, err
 		}
 		return &Notification{Kind: NotifyNodeConfigDeleted, ID: id}, nil
+	case *gastrologv1.SystemCommand_SetNodeState:
+		id, newState, since, err := command.ExtractSetNodeState(c.SetNodeState)
+		if err != nil {
+			return nil, err
+		}
+		node, err := f.store.GetNode(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if node == nil {
+			return nil, fmt.Errorf("set node state: node %s not found", id)
+		}
+		if err := system.ValidateNodeStateTransition(node.State, newState); err != nil {
+			return nil, err
+		}
+		// Idempotent — re-applying the same state is a no-op success
+		// per ValidateNodeStateTransition. Skip the store write to
+		// avoid spurious notifications.
+		if node.EffectiveState() == newState {
+			return nil, nil
+		}
+		node.State = newState
+		node.StateSince = since
+		if err := f.store.PutNode(ctx, *node); err != nil {
+			return nil, err
+		}
+		return &Notification{Kind: NotifyNodeStateChanged, ID: id}, nil
 	case *gastrologv1.SystemCommand_PutClusterTls:
 		tls := command.ExtractPutClusterTLS(c.PutClusterTls)
 		if err := f.store.PutClusterTLS(ctx, tls); err != nil {

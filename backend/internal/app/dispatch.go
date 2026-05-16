@@ -113,6 +113,16 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 		// bootstrap membership and a scaled-in node loops forever in
 		// pre-vote campaigns. See gastrolog-4zy8a.
 		d.handleNodeConfigChange(ctx)
+	case raftfsm.NotifyNodeStateChanged:
+		// Node lifecycle state transitioned (e.g., Live → Unreachable,
+		// Maintenance → Live, etc.). The placement guard (gastrolog-slc6l)
+		// gates rotation on the soft-offline states, so a state change
+		// can flip a node from "rotation-permitted" to "rotation-gated"
+		// or vice versa. Wake the placement reconciler so the gate
+		// re-evaluates without waiting for the 15s ticker.
+		if d.placementTrigger != nil {
+			d.placementTrigger()
+		}
 	case raftfsm.NotifyManagedFilePut:
 		if d.managedFileHandler != nil {
 			d.managedFileHandler.OnPut(ctx, n.ID)

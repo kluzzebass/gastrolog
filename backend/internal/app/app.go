@@ -915,7 +915,12 @@ func ensureNodeConfig(ctx context.Context, cfgStore system.Store, nodeID, prefer
 	if name == "" {
 		name = petname.Generate(2, "-")
 	}
-	if err := cfgStore.PutNode(ctx, system.NodeConfig{ID: nodeUUID, Name: name}); err != nil {
+	if err := cfgStore.PutNode(ctx, system.NodeConfig{
+		ID:         nodeUUID,
+		Name:       name,
+		State:      system.NodeStateLive,
+		StateSince: time.Now(),
+	}); err != nil {
 		return "", err
 	}
 	return name, nil

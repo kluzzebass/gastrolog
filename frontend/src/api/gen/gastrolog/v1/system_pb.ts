@@ -4,7 +4,7 @@
 // @ts-nocheck
 
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
-import { Message, proto3, protoInt64 } from "@bufbuild/protobuf";
+import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
 import { CloudService, NodeStorageConfig } from "./storage_pb.js";
 
 /**
@@ -75,6 +75,72 @@ proto3.util.setEnumType(IngesterMode, "gastrolog.v1.IngesterMode", [
   { no: 0, name: "INGESTER_MODE_UNSPECIFIED" },
   { no: 1, name: "INGESTER_MODE_PASSIVE" },
   { no: 2, name: "INGESTER_MODE_ACTIVE" },
+]);
+
+/**
+ * NodeState is the lifecycle stage of a cluster node.
+ *
+ * @generated from enum gastrolog.v1.NodeState
+ */
+export enum NodeState {
+  /**
+   * Unspecified means "no opinion in the FSM record" — treated as LIVE
+   * by consumers for backward compatibility with records minted before
+   * the State field existed.
+   *
+   * @generated from enum value: NODE_STATE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * Live: heartbeats current; full participation.
+   *
+   * @generated from enum value: NODE_STATE_LIVE = 1;
+   */
+  LIVE = 1,
+
+  /**
+   * Unreachable: cluster auto-detected absence (heartbeat lapse past
+   * threshold). Placement does NOT rotate off this state. Auto-clears
+   * on heartbeat resume.
+   *
+   * @generated from enum value: NODE_STATE_UNREACHABLE = 2;
+   */
+  UNREACHABLE = 2,
+
+  /**
+   * Maintenance: operator-declared absence. Placement does NOT rotate
+   * off this state. Sticky — requires `cluster online` to clear.
+   *
+   * @generated from enum value: NODE_STATE_MAINTENANCE = 3;
+   */
+  MAINTENANCE = 3,
+
+  /**
+   * Draining: operator-initiated; chunks being transferred off the node
+   * in preparation for removal.
+   *
+   * @generated from enum value: NODE_STATE_DRAINING = 4;
+   */
+  DRAINING = 4,
+
+  /**
+   * Decommissioning: chunks moved; voter being removed from system Raft
+   * and vault-ctl groups. Transitions to absence-from-FSM (= Removed)
+   * when removal completes.
+   *
+   * @generated from enum value: NODE_STATE_DECOMMISSIONING = 5;
+   */
+  DECOMMISSIONING = 5,
+}
+// Retrieve enum metadata with: proto3.getEnumType(NodeState)
+proto3.util.setEnumType(NodeState, "gastrolog.v1.NodeState", [
+  { no: 0, name: "NODE_STATE_UNSPECIFIED" },
+  { no: 1, name: "NODE_STATE_LIVE" },
+  { no: 2, name: "NODE_STATE_UNREACHABLE" },
+  { no: 3, name: "NODE_STATE_MAINTENANCE" },
+  { no: 4, name: "NODE_STATE_DRAINING" },
+  { no: 5, name: "NODE_STATE_DECOMMISSIONING" },
 ]);
 
 /**
@@ -5424,6 +5490,24 @@ export class NodeConfig extends Message<NodeConfig> {
    */
   name = "";
 
+  /**
+   * Lifecycle state. Zero value (NODE_STATE_UNSPECIFIED) is treated as
+   * LIVE for backward compatibility with records minted before this
+   * field existed. See docs/node-lifecycle-design.md.
+   *
+   * @generated from field: gastrolog.v1.NodeState state = 3;
+   */
+  state = NodeState.UNSPECIFIED;
+
+  /**
+   * Wall-clock instant the current state was entered. Zero if unknown
+   * (e.g., legacy record that has never had a state transition since
+   * the field was introduced).
+   *
+   * @generated from field: google.protobuf.Timestamp state_since = 4;
+   */
+  stateSince?: Timestamp;
+
   constructor(data?: PartialMessage<NodeConfig>) {
     super();
     proto3.util.initPartial(data, this);
@@ -5434,6 +5518,8 @@ export class NodeConfig extends Message<NodeConfig> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "state", kind: "enum", T: proto3.getEnumType(NodeState) },
+    { no: 4, name: "state_since", kind: "message", T: Timestamp },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NodeConfig {

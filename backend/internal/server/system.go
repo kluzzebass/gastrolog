@@ -19,10 +19,12 @@ import (
 
 	"connectrpc.com/connect"
 	petname "github.com/dustinkirkland/golang-petname"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"sigs.k8s.io/yaml"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
+	"gastrolog/internal/system/command"
 	"gastrolog/internal/auth"
 	"gastrolog/internal/convert"
 	"gastrolog/internal/logging"
@@ -371,10 +373,15 @@ func (s *SystemServer) loadConfigNodeConfigs(ctx context.Context, resp *apiv1.Ge
 		return fmt.Errorf("list nodes: %w", err)
 	}
 	for _, n := range nodes {
-		resp.NodeConfigs = append(resp.NodeConfigs, &apiv1.NodeConfig{
-			Id:   n.ID.ToProto(),
-			Name: n.Name,
-		})
+		nc := &apiv1.NodeConfig{
+			Id:    n.ID.ToProto(),
+			Name:  n.Name,
+			State: command.NodeStateToProto(n.EffectiveState()),
+		}
+		if !n.StateSince.IsZero() {
+			nc.StateSince = timestamppb.New(n.StateSince)
+		}
+		resp.NodeConfigs = append(resp.NodeConfigs, nc)
 	}
 	return nil
 }
@@ -754,7 +761,12 @@ func (s *SystemServer) PutNodeConfig(
 		return nil, connErr
 	}
 
-	if err := s.sysStore.PutNode(ctx, system.NodeConfig{ID: nodeUUID, Name: name}); err != nil {
+	if err := s.sysStore.PutNode(ctx, system.NodeConfig{
+		ID:         nodeUUID,
+		Name:       name,
+		State:      system.NodeStateLive,
+		StateSince: time.Now(),
+	}); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("put node config: %w", err))
 	}
 

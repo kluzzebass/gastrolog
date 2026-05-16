@@ -4,6 +4,7 @@ package gastrolog.v1;
 
 option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
 
+import "google/protobuf/timestamp.proto";
 import "gastrolog/v1/storage.proto";
 
 // SystemService provides configuration management.
@@ -882,6 +883,38 @@ message GetIngesterDefaultsResponse {
 message NodeConfig {
   bytes id = 1;
   string name = 2;
+  // Lifecycle state. Zero value (NODE_STATE_UNSPECIFIED) is treated as
+  // LIVE for backward compatibility with records minted before this
+  // field existed. See docs/node-lifecycle-design.md.
+  NodeState state = 3;
+  // Wall-clock instant the current state was entered. Zero if unknown
+  // (e.g., legacy record that has never had a state transition since
+  // the field was introduced).
+  google.protobuf.Timestamp state_since = 4;
+}
+
+// NodeState is the lifecycle stage of a cluster node.
+enum NodeState {
+  // Unspecified means "no opinion in the FSM record" — treated as LIVE
+  // by consumers for backward compatibility with records minted before
+  // the State field existed.
+  NODE_STATE_UNSPECIFIED = 0;
+  // Live: heartbeats current; full participation.
+  NODE_STATE_LIVE = 1;
+  // Unreachable: cluster auto-detected absence (heartbeat lapse past
+  // threshold). Placement does NOT rotate off this state. Auto-clears
+  // on heartbeat resume.
+  NODE_STATE_UNREACHABLE = 2;
+  // Maintenance: operator-declared absence. Placement does NOT rotate
+  // off this state. Sticky — requires `cluster online` to clear.
+  NODE_STATE_MAINTENANCE = 3;
+  // Draining: operator-initiated; chunks being transferred off the node
+  // in preparation for removal.
+  NODE_STATE_DRAINING = 4;
+  // Decommissioning: chunks moved; voter being removed from system Raft
+  // and vault-ctl groups. Transitions to absence-from-FSM (= Removed)
+  // when removal completes.
+  NODE_STATE_DECOMMISSIONING = 5;
 }
 
 message PutNodeConfigRequest {

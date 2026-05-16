@@ -582,6 +582,216 @@ func TestCompoundDeleteRetentionPolicy(t *testing.T) {
 	}
 }
 
+// applyCmdExpectError marshals a ConfigCommand, applies it, and returns
+// the resulting error (or nil). Unlike applyCmd, it does NOT fail the
+// test on apply error — that's the point.
+func applyCmdExpectError(t *testing.T, fsm *FSM, cmd *gastrologv1.SystemCommand) error {
+	t.Helper()
+	data, err := command.Marshal(cmd)
+	if err != nil {
+		t.Fatalf("marshal command: %v", err)
+	}
+	result := fsm.Apply(&raft.Log{Data: data})
+	if err, ok := result.(error); ok {
+		return err
+	}
+	return nil
+}
+
+func putNode(t *testing.T, fsm *FSM, id glid.GLID, name string, state system.NodeState, since time.Time) {
+	t.Helper()
+	applyCmd(t, fsm, command.NewPutNodeConfig(system.NodeConfig{
+		ID:         id,
+		Name:       name,
+		State:      state,
+		StateSince: since,
+	}))
+}
+
+func TestApplyPutNodeConfig(t *testing.T) {
+	t.Parallel()
+	fsm := New()
+	id := newID()
+	now := time.Now().UTC().Truncate(time.Second)
+	putNode(t, fsm, id, "node-1", system.NodeStateLive, now)
+
+	got, err := fsm.Store().GetNode(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("expected node, got nil")
+	}
+	if got.Name != "node-1" {
+		t.Errorf("name: got %q, want %q", got.Name, "node-1")
+	}
+	if got.State != system.NodeStateLive {
+		t.Errorf("state: got %s, want %s", got.State, system.NodeStateLive)
+	}
+	if !got.StateSince.Equal(now) {
+		t.Errorf("state_since: got %v, want %v", got.StateSince, now)
+	}
+}
+
+func TestApplyDeleteNodeConfig(t *testing.T) {
+	t.Parallel()
+	fsm := New()
+	id := newID()
+	putNode(t, fsm, id, "n", system.NodeStateLive, time.Now().UTC().Truncate(time.Second))
+	applyCmd(t, fsm, command.NewDeleteNodeConfig(id))
+
+	got, err := fsm.Store().GetNode(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != nil {
+		t.Fatalf("expected nil after delete, got %+v", got)
+	}
+}
+
+func TestApplySetNodeState_LegalTransition(t *testing.T) {
+	t.Parallel()
+	fsm := New()
+	id := newID()
+	start := time.Now().UTC().Truncate(time.Second)
+	putNode(t, fsm, id, "n", system.NodeStateLive, start)
+
+	transitionAt := start.Add(5 * time.Minute)
+	applyCmd(t, fsm, command.NewSetNodeState(id, system.NodeStateMaintenance, transitionAt))
+
+	got, err := fsm.Store().GetNode(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != system.NodeStateMaintenance {
+		t.Errorf("state: got %s, want maintenance", got.State)
+	}
+	if !got.StateSince.Equal(transitionAt) {
+		t.Errorf("state_since: got %v, want %v", got.StateSince, transitionAt)
+	}
+}
+
+func TestApplySetNodeState_IllegalTransition(t *testing.T) {
+	t.Parallel()
+	fsm := New()
+	id := newID()
+	now := time.Now().UTC().Truncate(time.Second)
+	putNode(t, fsm, id, "n", system.NodeStateLive, now)
+
+	// Live → Decommissioning is illegal (must go through Draining first).
+	err := applyCmdExpectError(t, fsm, command.NewSetNodeState(id, system.NodeStateDecommissioning, now))
+	if err == nil {
+		t.Fatal("expected error for illegal transition Live → Decommissioning, got nil")
+	}
+
+	// State should not have changed.
+	got, err := fsm.Store().GetNode(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != system.NodeStateLive {
+		t.Errorf("state after rejected transition: got %s, want live", got.State)
+	}
+}
+
+func TestApplySetNodeState_NotFound(t *testing.T) {
+	t.Parallel()
+	fsm := New()
+	id := newID() // never Put
+
+	err := applyCmdExpectError(t, fsm, command.NewSetNodeState(id, system.NodeStateMaintenance, time.Now()))
+	if err == nil {
+		t.Fatal("expected error for missing node, got nil")
+	}
+}
+
+func TestApplySetNodeState_Idempotent(t *testing.T) {
+	t.Parallel()
+	fsm := New()
+	id := newID()
+	now := time.Now().UTC().Truncate(time.Second)
+	putNode(t, fsm, id, "n", system.NodeStateLive, now)
+
+	// Re-applying the same state is a no-op success — StateSince should
+	// NOT be updated on the no-op path.
+	later := now.Add(10 * time.Minute)
+	applyCmd(t, fsm, command.NewSetNodeState(id, system.NodeStateLive, later))
+
+	got, err := fsm.Store().GetNode(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.StateSince.Equal(now) {
+		t.Errorf("idempotent re-set bumped StateSince: got %v, want %v (unchanged)",
+			got.StateSince, now)
+	}
+}
+
+func TestApplySetNodeState_LegacyMigration(t *testing.T) {
+	t.Parallel()
+	fsm := New()
+	id := newID()
+	// Simulate a legacy record by putting State=Unknown directly via
+	// the store.
+	if err := fsm.Store().PutNode(context.Background(), system.NodeConfig{
+		ID:   id,
+		Name: "legacy",
+	}); err != nil {
+		t.Fatalf("seed legacy node: %v", err)
+	}
+
+	// Legacy Unknown is treated as Live for transition checks, so
+	// transitioning to Maintenance should succeed.
+	at := time.Now().UTC().Truncate(time.Second)
+	applyCmd(t, fsm, command.NewSetNodeState(id, system.NodeStateMaintenance, at))
+
+	got, err := fsm.Store().GetNode(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != system.NodeStateMaintenance {
+		t.Errorf("state after legacy migration: got %s, want maintenance", got.State)
+	}
+}
+
+func TestSnapshotRestore_NodeStatePreserved(t *testing.T) {
+	t.Parallel()
+	fsm1 := New()
+	id := newID()
+	at := time.Now().UTC().Truncate(time.Second)
+	putNode(t, fsm1, id, "node-snap", system.NodeStateMaintenance, at)
+
+	// Take snapshot.
+	snap, err := fsm1.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := snap.Persist(&bufSink{buf: &buf}); err != nil {
+		t.Fatalf("Persist: %v", err)
+	}
+
+	// Restore into fresh FSM.
+	fsm2 := New()
+	if err := fsm2.Restore(io.NopCloser(&buf)); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	got, err := fsm2.Store().GetNode(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("expected node after restore, got nil")
+	}
+	if got.State != system.NodeStateMaintenance {
+		t.Errorf("state after restore: got %s, want maintenance", got.State)
+	}
+	if !got.StateSince.Equal(at) {
+		t.Errorf("state_since after restore: got %v, want %v", got.StateSince, at)
+	}
+}
+
 // TestSnapshotRestore verifies the full round-trip: populate an FSM, snapshot,
 // restore into a new FSM, and verify identical state.
 func TestSnapshotRestore(t *testing.T) {
