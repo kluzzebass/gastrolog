@@ -161,7 +161,7 @@ Option B (`pendingCatchups` twin) and Option C (explicit `Holders` field) remain
 A possible future feature places multiple concurrent active chunks for a single vault on different nodes. The benefits are three distinct properties of "use the available capacity better":
 
 - **Static parallel throughput** — N actives ≈ N× per-vault write capacity when writes distribute evenly (each active leader's append+replicate pipeline is independent).
-- **Dynamic load balancing** — when one active's node is struggling (slow disk, GC pause, network saturation, CPU pressure from another process), the forwarder shifts new writes to the healthier active. Average throughput may be the same but variance drops sharply.
+- **Dynamic load balancing** — when one active's node is struggling (slow disk, GC pause, network saturation, CPU pressure from another process), the forwarder shifts new writes to the healthier active. Average throughput may be the same but variance drops sharply. The signal is already in the codebase: [`chanwatch.PressureGate`](backend/internal/cluster/record_forwarder.go#L90) tracks per-node forward-channel pressure on a 1-second cadence and is already consulted by ingesters for backpressure. Multi-active routing reuses that same per-node pressure data; no new signal mechanism is needed.
 - **Failure isolation for writes** — if one active's node hard-fails, the other active(s) keep accepting writes for the vault. With single-active, writes stall until failover/election completes.
 
 This design does not preclude that extension:
