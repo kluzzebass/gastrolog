@@ -9,6 +9,7 @@ package gastrologv1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -128,6 +129,79 @@ func (IngesterMode) EnumDescriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{1}
 }
 
+// NodeState is the lifecycle stage of a cluster node.
+type NodeState int32
+
+const (
+	// Unspecified means "no opinion in the FSM record" — treated as LIVE
+	// by consumers for backward compatibility with records minted before
+	// the State field existed.
+	NodeState_NODE_STATE_UNSPECIFIED NodeState = 0
+	// Live: heartbeats current; full participation.
+	NodeState_NODE_STATE_LIVE NodeState = 1
+	// Unreachable: cluster auto-detected absence (heartbeat lapse past
+	// threshold). Placement does NOT rotate off this state. Auto-clears
+	// on heartbeat resume.
+	NodeState_NODE_STATE_UNREACHABLE NodeState = 2
+	// Maintenance: operator-declared absence. Placement does NOT rotate
+	// off this state. Sticky — requires `cluster online` to clear.
+	NodeState_NODE_STATE_MAINTENANCE NodeState = 3
+	// Draining: operator-initiated; chunks being transferred off the node
+	// in preparation for removal.
+	NodeState_NODE_STATE_DRAINING NodeState = 4
+	// Decommissioning: chunks moved; voter being removed from system Raft
+	// and vault-ctl groups. Transitions to absence-from-FSM (= Removed)
+	// when removal completes.
+	NodeState_NODE_STATE_DECOMMISSIONING NodeState = 5
+)
+
+// Enum value maps for NodeState.
+var (
+	NodeState_name = map[int32]string{
+		0: "NODE_STATE_UNSPECIFIED",
+		1: "NODE_STATE_LIVE",
+		2: "NODE_STATE_UNREACHABLE",
+		3: "NODE_STATE_MAINTENANCE",
+		4: "NODE_STATE_DRAINING",
+		5: "NODE_STATE_DECOMMISSIONING",
+	}
+	NodeState_value = map[string]int32{
+		"NODE_STATE_UNSPECIFIED":     0,
+		"NODE_STATE_LIVE":            1,
+		"NODE_STATE_UNREACHABLE":     2,
+		"NODE_STATE_MAINTENANCE":     3,
+		"NODE_STATE_DRAINING":        4,
+		"NODE_STATE_DECOMMISSIONING": 5,
+	}
+)
+
+func (x NodeState) Enum() *NodeState {
+	p := new(NodeState)
+	*p = x
+	return p
+}
+
+func (x NodeState) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (NodeState) Descriptor() protoreflect.EnumDescriptor {
+	return file_gastrolog_v1_system_proto_enumTypes[2].Descriptor()
+}
+
+func (NodeState) Type() protoreflect.EnumType {
+	return &file_gastrolog_v1_system_proto_enumTypes[2]
+}
+
+func (x NodeState) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use NodeState.Descriptor instead.
+func (NodeState) EnumDescriptor() ([]byte, []int) {
+	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{2}
+}
+
 // LogLevel mirrors slog's named severities. Adding new levels here
 // requires both ends of the wire to recognise them. Internal mapping
 // to slog.Level happens in the server; clients render via the enum
@@ -171,11 +245,11 @@ func (x LogLevel) String() string {
 }
 
 func (LogLevel) Descriptor() protoreflect.EnumDescriptor {
-	return file_gastrolog_v1_system_proto_enumTypes[2].Descriptor()
+	return file_gastrolog_v1_system_proto_enumTypes[3].Descriptor()
 }
 
 func (LogLevel) Type() protoreflect.EnumType {
-	return &file_gastrolog_v1_system_proto_enumTypes[2]
+	return &file_gastrolog_v1_system_proto_enumTypes[3]
 }
 
 func (x LogLevel) Number() protoreflect.EnumNumber {
@@ -184,7 +258,7 @@ func (x LogLevel) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use LogLevel.Descriptor instead.
 func (LogLevel) EnumDescriptor() ([]byte, []int) {
-	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{2}
+	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{3}
 }
 
 // LogComponentLevelSource describes how a component's effective level
@@ -226,11 +300,11 @@ func (x LogComponentLevelSource) String() string {
 }
 
 func (LogComponentLevelSource) Descriptor() protoreflect.EnumDescriptor {
-	return file_gastrolog_v1_system_proto_enumTypes[3].Descriptor()
+	return file_gastrolog_v1_system_proto_enumTypes[4].Descriptor()
 }
 
 func (LogComponentLevelSource) Type() protoreflect.EnumType {
-	return &file_gastrolog_v1_system_proto_enumTypes[3]
+	return &file_gastrolog_v1_system_proto_enumTypes[4]
 }
 
 func (x LogComponentLevelSource) Number() protoreflect.EnumNumber {
@@ -239,7 +313,7 @@ func (x LogComponentLevelSource) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use LogComponentLevelSource.Descriptor instead.
 func (LogComponentLevelSource) EnumDescriptor() ([]byte, []int) {
-	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{3}
+	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{4}
 }
 
 type GetSystemRequest struct {
@@ -6437,9 +6511,17 @@ func (x *GetIngesterDefaultsResponse) GetTypes() map[string]*IngesterTypeDefault
 }
 
 type NodeConfig struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Id    []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name  string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	// Lifecycle state. Zero value (NODE_STATE_UNSPECIFIED) is treated as
+	// LIVE for backward compatibility with records minted before this
+	// field existed. See docs/node-lifecycle-design.md.
+	State NodeState `protobuf:"varint,3,opt,name=state,proto3,enum=gastrolog.v1.NodeState" json:"state,omitempty"`
+	// Wall-clock instant the current state was entered. Zero if unknown
+	// (e.g., legacy record that has never had a state transition since
+	// the field was introduced).
+	StateSince    *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=state_since,json=stateSince,proto3" json:"state_since,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6486,6 +6568,20 @@ func (x *NodeConfig) GetName() string {
 		return x.Name
 	}
 	return ""
+}
+
+func (x *NodeConfig) GetState() NodeState {
+	if x != nil {
+		return x.State
+	}
+	return NodeState_NODE_STATE_UNSPECIFIED
+}
+
+func (x *NodeConfig) GetStateSince() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StateSince
+	}
+	return nil
 }
 
 type PutNodeConfigRequest struct {
@@ -8723,7 +8819,7 @@ var File_gastrolog_v1_system_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\n" +
-	"\x19gastrolog/v1/system.proto\x12\fgastrolog.v1\x1a\x1agastrolog/v1/storage.proto\"\x12\n" +
+	"\x19gastrolog/v1/system.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1agastrolog/v1/storage.proto\"\x12\n" +
 	"\x10GetSystemRequest\"\xb4\x06\n" +
 	"\x11GetSystemResponse\x121\n" +
 	"\x06vaults\x18\x01 \x03(\v2\x19.gastrolog.v1.VaultConfigR\x06vaults\x12:\n" +
@@ -9191,11 +9287,14 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\n" +
 	"TypesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x128\n" +
-	"\x05value\x18\x02 \x01(\v2\".gastrolog.v1.IngesterTypeDefaultsR\x05value:\x028\x01\"0\n" +
+	"\x05value\x18\x02 \x01(\v2\".gastrolog.v1.IngesterTypeDefaultsR\x05value:\x028\x01\"\x9c\x01\n" +
 	"\n" +
 	"NodeConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\"H\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12-\n" +
+	"\x05state\x18\x03 \x01(\x0e2\x17.gastrolog.v1.NodeStateR\x05state\x12;\n" +
+	"\vstate_since\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"stateSince\"H\n" +
 	"\x14PutNodeConfigRequest\x120\n" +
 	"\x06config\x18\x01 \x01(\v2\x18.gastrolog.v1.NodeConfigR\x06config\"P\n" +
 	"\x15PutNodeConfigResponse\x127\n" +
@@ -9360,7 +9459,14 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\fIngesterMode\x12\x1d\n" +
 	"\x19INGESTER_MODE_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15INGESTER_MODE_PASSIVE\x10\x01\x12\x18\n" +
-	"\x14INGESTER_MODE_ACTIVE\x10\x02*w\n" +
+	"\x14INGESTER_MODE_ACTIVE\x10\x02*\xad\x01\n" +
+	"\tNodeState\x12\x1a\n" +
+	"\x16NODE_STATE_UNSPECIFIED\x10\x00\x12\x13\n" +
+	"\x0fNODE_STATE_LIVE\x10\x01\x12\x1a\n" +
+	"\x16NODE_STATE_UNREACHABLE\x10\x02\x12\x1a\n" +
+	"\x16NODE_STATE_MAINTENANCE\x10\x03\x12\x17\n" +
+	"\x13NODE_STATE_DRAINING\x10\x04\x12\x1e\n" +
+	"\x1aNODE_STATE_DECOMMISSIONING\x10\x05*w\n" +
 	"\bLogLevel\x12\x19\n" +
 	"\x15LOG_LEVEL_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fLOG_LEVEL_DEBUG\x10\x01\x12\x12\n" +
@@ -9438,400 +9544,404 @@ func file_gastrolog_v1_system_proto_rawDescGZIP() []byte {
 	return file_gastrolog_v1_system_proto_rawDescData
 }
 
-var file_gastrolog_v1_system_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
+var file_gastrolog_v1_system_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
 var file_gastrolog_v1_system_proto_msgTypes = make([]protoimpl.MessageInfo, 163)
 var file_gastrolog_v1_system_proto_goTypes = []any{
 	(VaultType)(0),                        // 0: gastrolog.v1.VaultType
 	(IngesterMode)(0),                     // 1: gastrolog.v1.IngesterMode
-	(LogLevel)(0),                         // 2: gastrolog.v1.LogLevel
-	(LogComponentLevelSource)(0),          // 3: gastrolog.v1.LogComponentLevelSource
-	(*GetSystemRequest)(nil),              // 4: gastrolog.v1.GetSystemRequest
-	(*GetSystemResponse)(nil),             // 5: gastrolog.v1.GetSystemResponse
-	(*RetentionRule)(nil),                 // 6: gastrolog.v1.RetentionRule
-	(*VaultPlacement)(nil),                // 7: gastrolog.v1.VaultPlacement
-	(*VaultConfig)(nil),                   // 8: gastrolog.v1.VaultConfig
-	(*RouteDestination)(nil),              // 9: gastrolog.v1.RouteDestination
-	(*RouteConfig)(nil),                   // 10: gastrolog.v1.RouteConfig
-	(*RouteStage)(nil),                    // 11: gastrolog.v1.RouteStage
-	(*MatchStage)(nil),                    // 12: gastrolog.v1.MatchStage
-	(*IngesterConfig)(nil),                // 13: gastrolog.v1.IngesterConfig
-	(*RotationPolicyConfig)(nil),          // 14: gastrolog.v1.RotationPolicyConfig
-	(*RetentionPolicyConfig)(nil),         // 15: gastrolog.v1.RetentionPolicyConfig
-	(*IngesterAlive)(nil),                 // 16: gastrolog.v1.IngesterAlive
-	(*GetIngesterStatusRequest)(nil),      // 17: gastrolog.v1.GetIngesterStatusRequest
-	(*GetIngesterStatusResponse)(nil),     // 18: gastrolog.v1.GetIngesterStatusResponse
-	(*WatchIngesterStatusRequest)(nil),    // 19: gastrolog.v1.WatchIngesterStatusRequest
-	(*WatchIngesterStatusResponse)(nil),   // 20: gastrolog.v1.WatchIngesterStatusResponse
-	(*PutRotationPolicyRequest)(nil),      // 21: gastrolog.v1.PutRotationPolicyRequest
-	(*PutRotationPolicyResponse)(nil),     // 22: gastrolog.v1.PutRotationPolicyResponse
-	(*DeleteRotationPolicyRequest)(nil),   // 23: gastrolog.v1.DeleteRotationPolicyRequest
-	(*DeleteRotationPolicyResponse)(nil),  // 24: gastrolog.v1.DeleteRotationPolicyResponse
-	(*PutRetentionPolicyRequest)(nil),     // 25: gastrolog.v1.PutRetentionPolicyRequest
-	(*PutRetentionPolicyResponse)(nil),    // 26: gastrolog.v1.PutRetentionPolicyResponse
-	(*DeleteRetentionPolicyRequest)(nil),  // 27: gastrolog.v1.DeleteRetentionPolicyRequest
-	(*DeleteRetentionPolicyResponse)(nil), // 28: gastrolog.v1.DeleteRetentionPolicyResponse
-	(*PutVaultRequest)(nil),               // 29: gastrolog.v1.PutVaultRequest
-	(*PutVaultResponse)(nil),              // 30: gastrolog.v1.PutVaultResponse
-	(*DeleteVaultRequest)(nil),            // 31: gastrolog.v1.DeleteVaultRequest
-	(*DeleteVaultResponse)(nil),           // 32: gastrolog.v1.DeleteVaultResponse
-	(*PutRouteRequest)(nil),               // 33: gastrolog.v1.PutRouteRequest
-	(*PutRouteResponse)(nil),              // 34: gastrolog.v1.PutRouteResponse
-	(*DeleteRouteRequest)(nil),            // 35: gastrolog.v1.DeleteRouteRequest
-	(*DeleteRouteResponse)(nil),           // 36: gastrolog.v1.DeleteRouteResponse
-	(*PutIngesterRequest)(nil),            // 37: gastrolog.v1.PutIngesterRequest
-	(*PutIngesterResponse)(nil),           // 38: gastrolog.v1.PutIngesterResponse
-	(*DeleteIngesterRequest)(nil),         // 39: gastrolog.v1.DeleteIngesterRequest
-	(*DeleteIngesterResponse)(nil),        // 40: gastrolog.v1.DeleteIngesterResponse
-	(*GetSettingsRequest)(nil),            // 41: gastrolog.v1.GetSettingsRequest
-	(*PasswordPolicySettings)(nil),        // 42: gastrolog.v1.PasswordPolicySettings
-	(*MaxMindSettings)(nil),               // 43: gastrolog.v1.MaxMindSettings
-	(*AuthSettings)(nil),                  // 44: gastrolog.v1.AuthSettings
-	(*QuerySettings)(nil),                 // 45: gastrolog.v1.QuerySettings
-	(*SchedulerSettings)(nil),             // 46: gastrolog.v1.SchedulerSettings
-	(*TLSSettings)(nil),                   // 47: gastrolog.v1.TLSSettings
-	(*LookupSettings)(nil),                // 48: gastrolog.v1.LookupSettings
-	(*MMDBLookupEntry)(nil),               // 49: gastrolog.v1.MMDBLookupEntry
-	(*HTTPLookupParam)(nil),               // 50: gastrolog.v1.HTTPLookupParam
-	(*HTTPLookupEntry)(nil),               // 51: gastrolog.v1.HTTPLookupEntry
-	(*JSONFileLookupEntry)(nil),           // 52: gastrolog.v1.JSONFileLookupEntry
-	(*YAMLFileLookupEntry)(nil),           // 53: gastrolog.v1.YAMLFileLookupEntry
-	(*CSVLookupEntry)(nil),                // 54: gastrolog.v1.CSVLookupEntry
-	(*StaticLookupEntry)(nil),             // 55: gastrolog.v1.StaticLookupEntry
-	(*StaticLookupRow)(nil),               // 56: gastrolog.v1.StaticLookupRow
-	(*ClusterSettings)(nil),               // 57: gastrolog.v1.ClusterSettings
-	(*GetSettingsResponse)(nil),           // 58: gastrolog.v1.GetSettingsResponse
-	(*PutPasswordPolicySettings)(nil),     // 59: gastrolog.v1.PutPasswordPolicySettings
-	(*PutAuthSettings)(nil),               // 60: gastrolog.v1.PutAuthSettings
-	(*PutQuerySettings)(nil),              // 61: gastrolog.v1.PutQuerySettings
-	(*PutSchedulerSettings)(nil),          // 62: gastrolog.v1.PutSchedulerSettings
-	(*PutTLSSettings)(nil),                // 63: gastrolog.v1.PutTLSSettings
-	(*PutMaxMindSettings)(nil),            // 64: gastrolog.v1.PutMaxMindSettings
-	(*PutLookupSettings)(nil),             // 65: gastrolog.v1.PutLookupSettings
-	(*PutClusterSettings)(nil),            // 66: gastrolog.v1.PutClusterSettings
-	(*PutServiceSettingsRequest)(nil),     // 67: gastrolog.v1.PutServiceSettingsRequest
-	(*SettingsMutationEcho)(nil),          // 68: gastrolog.v1.SettingsMutationEcho
-	(*PutServiceSettingsResponse)(nil),    // 69: gastrolog.v1.PutServiceSettingsResponse
-	(*PutLookupSettingsRequest)(nil),      // 70: gastrolog.v1.PutLookupSettingsRequest
-	(*PutLookupSettingsResponse)(nil),     // 71: gastrolog.v1.PutLookupSettingsResponse
-	(*PutMaxMindSettingsRequest)(nil),     // 72: gastrolog.v1.PutMaxMindSettingsRequest
-	(*PutMaxMindSettingsResponse)(nil),    // 73: gastrolog.v1.PutMaxMindSettingsResponse
-	(*PutSetupSettingsRequest)(nil),       // 74: gastrolog.v1.PutSetupSettingsRequest
-	(*PutSetupSettingsResponse)(nil),      // 75: gastrolog.v1.PutSetupSettingsResponse
-	(*RegenerateJwtSecretRequest)(nil),    // 76: gastrolog.v1.RegenerateJwtSecretRequest
-	(*RegenerateJwtSecretResponse)(nil),   // 77: gastrolog.v1.RegenerateJwtSecretResponse
-	(*MmdbValidation)(nil),                // 78: gastrolog.v1.MmdbValidation
-	(*GetPreferencesRequest)(nil),         // 79: gastrolog.v1.GetPreferencesRequest
-	(*GetPreferencesResponse)(nil),        // 80: gastrolog.v1.GetPreferencesResponse
-	(*PutPreferencesRequest)(nil),         // 81: gastrolog.v1.PutPreferencesRequest
-	(*PutPreferencesResponse)(nil),        // 82: gastrolog.v1.PutPreferencesResponse
-	(*SavedQuery)(nil),                    // 83: gastrolog.v1.SavedQuery
-	(*GetSavedQueriesRequest)(nil),        // 84: gastrolog.v1.GetSavedQueriesRequest
-	(*GetSavedQueriesResponse)(nil),       // 85: gastrolog.v1.GetSavedQueriesResponse
-	(*PutSavedQueryRequest)(nil),          // 86: gastrolog.v1.PutSavedQueryRequest
-	(*PutSavedQueryResponse)(nil),         // 87: gastrolog.v1.PutSavedQueryResponse
-	(*DeleteSavedQueryRequest)(nil),       // 88: gastrolog.v1.DeleteSavedQueryRequest
-	(*DeleteSavedQueryResponse)(nil),      // 89: gastrolog.v1.DeleteSavedQueryResponse
-	(*ListCertificatesRequest)(nil),       // 90: gastrolog.v1.ListCertificatesRequest
-	(*ListCertificatesResponse)(nil),      // 91: gastrolog.v1.ListCertificatesResponse
-	(*CertificateInfo)(nil),               // 92: gastrolog.v1.CertificateInfo
-	(*GetCertificateRequest)(nil),         // 93: gastrolog.v1.GetCertificateRequest
-	(*GetCertificateResponse)(nil),        // 94: gastrolog.v1.GetCertificateResponse
-	(*PutCertificateRequest)(nil),         // 95: gastrolog.v1.PutCertificateRequest
-	(*PutCertificateResponse)(nil),        // 96: gastrolog.v1.PutCertificateResponse
-	(*DeleteCertificateRequest)(nil),      // 97: gastrolog.v1.DeleteCertificateRequest
-	(*DeleteCertificateResponse)(nil),     // 98: gastrolog.v1.DeleteCertificateResponse
-	(*PauseVaultRequest)(nil),             // 99: gastrolog.v1.PauseVaultRequest
-	(*PauseVaultResponse)(nil),            // 100: gastrolog.v1.PauseVaultResponse
-	(*ResumeVaultRequest)(nil),            // 101: gastrolog.v1.ResumeVaultRequest
-	(*ResumeVaultResponse)(nil),           // 102: gastrolog.v1.ResumeVaultResponse
-	(*TestIngesterRequest)(nil),           // 103: gastrolog.v1.TestIngesterRequest
-	(*TestIngesterResponse)(nil),          // 104: gastrolog.v1.TestIngesterResponse
-	(*TriggerIngesterRequest)(nil),        // 105: gastrolog.v1.TriggerIngesterRequest
-	(*TriggerIngesterResponse)(nil),       // 106: gastrolog.v1.TriggerIngesterResponse
-	(*TestCloudServiceRequest)(nil),       // 107: gastrolog.v1.TestCloudServiceRequest
-	(*TestCloudServiceResponse)(nil),      // 108: gastrolog.v1.TestCloudServiceResponse
-	(*GetIngesterDefaultsRequest)(nil),    // 109: gastrolog.v1.GetIngesterDefaultsRequest
-	(*IngesterTypeDefaults)(nil),          // 110: gastrolog.v1.IngesterTypeDefaults
-	(*GetIngesterDefaultsResponse)(nil),   // 111: gastrolog.v1.GetIngesterDefaultsResponse
-	(*NodeConfig)(nil),                    // 112: gastrolog.v1.NodeConfig
-	(*PutNodeConfigRequest)(nil),          // 113: gastrolog.v1.PutNodeConfigRequest
-	(*PutNodeConfigResponse)(nil),         // 114: gastrolog.v1.PutNodeConfigResponse
-	(*GenerateNameRequest)(nil),           // 115: gastrolog.v1.GenerateNameRequest
-	(*GenerateNameResponse)(nil),          // 116: gastrolog.v1.GenerateNameResponse
-	(*ValidateExpressionRequest)(nil),     // 117: gastrolog.v1.ValidateExpressionRequest
-	(*ValidateExpressionResponse)(nil),    // 118: gastrolog.v1.ValidateExpressionResponse
-	(*WatchSystemRequest)(nil),            // 119: gastrolog.v1.WatchSystemRequest
-	(*WatchSystemResponse)(nil),           // 120: gastrolog.v1.WatchSystemResponse
-	(*GetRouteStatsRequest)(nil),          // 121: gastrolog.v1.GetRouteStatsRequest
-	(*GetRouteStatsResponse)(nil),         // 122: gastrolog.v1.GetRouteStatsResponse
-	(*VaultRouteStats)(nil),               // 123: gastrolog.v1.VaultRouteStats
-	(*PerRouteStats)(nil),                 // 124: gastrolog.v1.PerRouteStats
-	(*ManagedFileInfo)(nil),               // 125: gastrolog.v1.ManagedFileInfo
-	(*ListManagedFilesRequest)(nil),       // 126: gastrolog.v1.ListManagedFilesRequest
-	(*ListManagedFilesResponse)(nil),      // 127: gastrolog.v1.ListManagedFilesResponse
-	(*DeleteManagedFileRequest)(nil),      // 128: gastrolog.v1.DeleteManagedFileRequest
-	(*DeleteManagedFileResponse)(nil),     // 129: gastrolog.v1.DeleteManagedFileResponse
-	(*TestHTTPLookupRequest)(nil),         // 130: gastrolog.v1.TestHTTPLookupRequest
-	(*TestHTTPLookupResponse)(nil),        // 131: gastrolog.v1.TestHTTPLookupResponse
-	(*TestHTTPLookupResult)(nil),          // 132: gastrolog.v1.TestHTTPLookupResult
-	(*PreviewCSVLookupRequest)(nil),       // 133: gastrolog.v1.PreviewCSVLookupRequest
-	(*PreviewCSVLookupResponse)(nil),      // 134: gastrolog.v1.PreviewCSVLookupResponse
-	(*CSVPreviewRow)(nil),                 // 135: gastrolog.v1.CSVPreviewRow
-	(*PreviewJSONLookupRequest)(nil),      // 136: gastrolog.v1.PreviewJSONLookupRequest
-	(*PreviewJSONLookupResponse)(nil),     // 137: gastrolog.v1.PreviewJSONLookupResponse
-	(*PreviewYAMLLookupRequest)(nil),      // 138: gastrolog.v1.PreviewYAMLLookupRequest
-	(*PreviewYAMLLookupResponse)(nil),     // 139: gastrolog.v1.PreviewYAMLLookupResponse
-	(*PutCloudServiceRequest)(nil),        // 140: gastrolog.v1.PutCloudServiceRequest
-	(*PutCloudServiceResponse)(nil),       // 141: gastrolog.v1.PutCloudServiceResponse
-	(*DeleteCloudServiceRequest)(nil),     // 142: gastrolog.v1.DeleteCloudServiceRequest
-	(*DeleteCloudServiceResponse)(nil),    // 143: gastrolog.v1.DeleteCloudServiceResponse
-	(*SetNodeStorageConfigRequest)(nil),   // 144: gastrolog.v1.SetNodeStorageConfigRequest
-	(*SetNodeStorageConfigResponse)(nil),  // 145: gastrolog.v1.SetNodeStorageConfigResponse
-	(*DeleteLookupRequest)(nil),           // 146: gastrolog.v1.DeleteLookupRequest
-	(*DeleteLookupResponse)(nil),          // 147: gastrolog.v1.DeleteLookupResponse
-	(*LogLevelRule)(nil),                  // 148: gastrolog.v1.LogLevelRule
-	(*LogLevelConfig)(nil),                // 149: gastrolog.v1.LogLevelConfig
-	(*PutLogLevelsRequest)(nil),           // 150: gastrolog.v1.PutLogLevelsRequest
-	(*PutLogLevelsResponse)(nil),          // 151: gastrolog.v1.PutLogLevelsResponse
-	(*LogComponentInfo)(nil),              // 152: gastrolog.v1.LogComponentInfo
-	(*ListLogComponentsRequest)(nil),      // 153: gastrolog.v1.ListLogComponentsRequest
-	(*ListLogComponentsResponse)(nil),     // 154: gastrolog.v1.ListLogComponentsResponse
-	nil,                                   // 155: gastrolog.v1.IngesterConfig.ParamsEntry
-	nil,                                   // 156: gastrolog.v1.IngesterAlive.NodeStatusEntry
-	nil,                                   // 157: gastrolog.v1.HTTPLookupEntry.HeadersEntry
-	nil,                                   // 158: gastrolog.v1.StaticLookupRow.ValuesEntry
-	nil,                                   // 159: gastrolog.v1.TestIngesterRequest.ParamsEntry
-	nil,                                   // 160: gastrolog.v1.TestCloudServiceRequest.ParamsEntry
-	nil,                                   // 161: gastrolog.v1.IngesterTypeDefaults.ParamsEntry
-	nil,                                   // 162: gastrolog.v1.GetIngesterDefaultsResponse.TypesEntry
-	nil,                                   // 163: gastrolog.v1.TestHTTPLookupRequest.ValuesEntry
-	nil,                                   // 164: gastrolog.v1.TestHTTPLookupResult.FieldsEntry
-	nil,                                   // 165: gastrolog.v1.PreviewJSONLookupRequest.ParametersEntry
-	nil,                                   // 166: gastrolog.v1.PreviewYAMLLookupRequest.ParametersEntry
-	(*CloudService)(nil),                  // 167: gastrolog.v1.CloudService
-	(*NodeStorageConfig)(nil),             // 168: gastrolog.v1.NodeStorageConfig
+	(NodeState)(0),                        // 2: gastrolog.v1.NodeState
+	(LogLevel)(0),                         // 3: gastrolog.v1.LogLevel
+	(LogComponentLevelSource)(0),          // 4: gastrolog.v1.LogComponentLevelSource
+	(*GetSystemRequest)(nil),              // 5: gastrolog.v1.GetSystemRequest
+	(*GetSystemResponse)(nil),             // 6: gastrolog.v1.GetSystemResponse
+	(*RetentionRule)(nil),                 // 7: gastrolog.v1.RetentionRule
+	(*VaultPlacement)(nil),                // 8: gastrolog.v1.VaultPlacement
+	(*VaultConfig)(nil),                   // 9: gastrolog.v1.VaultConfig
+	(*RouteDestination)(nil),              // 10: gastrolog.v1.RouteDestination
+	(*RouteConfig)(nil),                   // 11: gastrolog.v1.RouteConfig
+	(*RouteStage)(nil),                    // 12: gastrolog.v1.RouteStage
+	(*MatchStage)(nil),                    // 13: gastrolog.v1.MatchStage
+	(*IngesterConfig)(nil),                // 14: gastrolog.v1.IngesterConfig
+	(*RotationPolicyConfig)(nil),          // 15: gastrolog.v1.RotationPolicyConfig
+	(*RetentionPolicyConfig)(nil),         // 16: gastrolog.v1.RetentionPolicyConfig
+	(*IngesterAlive)(nil),                 // 17: gastrolog.v1.IngesterAlive
+	(*GetIngesterStatusRequest)(nil),      // 18: gastrolog.v1.GetIngesterStatusRequest
+	(*GetIngesterStatusResponse)(nil),     // 19: gastrolog.v1.GetIngesterStatusResponse
+	(*WatchIngesterStatusRequest)(nil),    // 20: gastrolog.v1.WatchIngesterStatusRequest
+	(*WatchIngesterStatusResponse)(nil),   // 21: gastrolog.v1.WatchIngesterStatusResponse
+	(*PutRotationPolicyRequest)(nil),      // 22: gastrolog.v1.PutRotationPolicyRequest
+	(*PutRotationPolicyResponse)(nil),     // 23: gastrolog.v1.PutRotationPolicyResponse
+	(*DeleteRotationPolicyRequest)(nil),   // 24: gastrolog.v1.DeleteRotationPolicyRequest
+	(*DeleteRotationPolicyResponse)(nil),  // 25: gastrolog.v1.DeleteRotationPolicyResponse
+	(*PutRetentionPolicyRequest)(nil),     // 26: gastrolog.v1.PutRetentionPolicyRequest
+	(*PutRetentionPolicyResponse)(nil),    // 27: gastrolog.v1.PutRetentionPolicyResponse
+	(*DeleteRetentionPolicyRequest)(nil),  // 28: gastrolog.v1.DeleteRetentionPolicyRequest
+	(*DeleteRetentionPolicyResponse)(nil), // 29: gastrolog.v1.DeleteRetentionPolicyResponse
+	(*PutVaultRequest)(nil),               // 30: gastrolog.v1.PutVaultRequest
+	(*PutVaultResponse)(nil),              // 31: gastrolog.v1.PutVaultResponse
+	(*DeleteVaultRequest)(nil),            // 32: gastrolog.v1.DeleteVaultRequest
+	(*DeleteVaultResponse)(nil),           // 33: gastrolog.v1.DeleteVaultResponse
+	(*PutRouteRequest)(nil),               // 34: gastrolog.v1.PutRouteRequest
+	(*PutRouteResponse)(nil),              // 35: gastrolog.v1.PutRouteResponse
+	(*DeleteRouteRequest)(nil),            // 36: gastrolog.v1.DeleteRouteRequest
+	(*DeleteRouteResponse)(nil),           // 37: gastrolog.v1.DeleteRouteResponse
+	(*PutIngesterRequest)(nil),            // 38: gastrolog.v1.PutIngesterRequest
+	(*PutIngesterResponse)(nil),           // 39: gastrolog.v1.PutIngesterResponse
+	(*DeleteIngesterRequest)(nil),         // 40: gastrolog.v1.DeleteIngesterRequest
+	(*DeleteIngesterResponse)(nil),        // 41: gastrolog.v1.DeleteIngesterResponse
+	(*GetSettingsRequest)(nil),            // 42: gastrolog.v1.GetSettingsRequest
+	(*PasswordPolicySettings)(nil),        // 43: gastrolog.v1.PasswordPolicySettings
+	(*MaxMindSettings)(nil),               // 44: gastrolog.v1.MaxMindSettings
+	(*AuthSettings)(nil),                  // 45: gastrolog.v1.AuthSettings
+	(*QuerySettings)(nil),                 // 46: gastrolog.v1.QuerySettings
+	(*SchedulerSettings)(nil),             // 47: gastrolog.v1.SchedulerSettings
+	(*TLSSettings)(nil),                   // 48: gastrolog.v1.TLSSettings
+	(*LookupSettings)(nil),                // 49: gastrolog.v1.LookupSettings
+	(*MMDBLookupEntry)(nil),               // 50: gastrolog.v1.MMDBLookupEntry
+	(*HTTPLookupParam)(nil),               // 51: gastrolog.v1.HTTPLookupParam
+	(*HTTPLookupEntry)(nil),               // 52: gastrolog.v1.HTTPLookupEntry
+	(*JSONFileLookupEntry)(nil),           // 53: gastrolog.v1.JSONFileLookupEntry
+	(*YAMLFileLookupEntry)(nil),           // 54: gastrolog.v1.YAMLFileLookupEntry
+	(*CSVLookupEntry)(nil),                // 55: gastrolog.v1.CSVLookupEntry
+	(*StaticLookupEntry)(nil),             // 56: gastrolog.v1.StaticLookupEntry
+	(*StaticLookupRow)(nil),               // 57: gastrolog.v1.StaticLookupRow
+	(*ClusterSettings)(nil),               // 58: gastrolog.v1.ClusterSettings
+	(*GetSettingsResponse)(nil),           // 59: gastrolog.v1.GetSettingsResponse
+	(*PutPasswordPolicySettings)(nil),     // 60: gastrolog.v1.PutPasswordPolicySettings
+	(*PutAuthSettings)(nil),               // 61: gastrolog.v1.PutAuthSettings
+	(*PutQuerySettings)(nil),              // 62: gastrolog.v1.PutQuerySettings
+	(*PutSchedulerSettings)(nil),          // 63: gastrolog.v1.PutSchedulerSettings
+	(*PutTLSSettings)(nil),                // 64: gastrolog.v1.PutTLSSettings
+	(*PutMaxMindSettings)(nil),            // 65: gastrolog.v1.PutMaxMindSettings
+	(*PutLookupSettings)(nil),             // 66: gastrolog.v1.PutLookupSettings
+	(*PutClusterSettings)(nil),            // 67: gastrolog.v1.PutClusterSettings
+	(*PutServiceSettingsRequest)(nil),     // 68: gastrolog.v1.PutServiceSettingsRequest
+	(*SettingsMutationEcho)(nil),          // 69: gastrolog.v1.SettingsMutationEcho
+	(*PutServiceSettingsResponse)(nil),    // 70: gastrolog.v1.PutServiceSettingsResponse
+	(*PutLookupSettingsRequest)(nil),      // 71: gastrolog.v1.PutLookupSettingsRequest
+	(*PutLookupSettingsResponse)(nil),     // 72: gastrolog.v1.PutLookupSettingsResponse
+	(*PutMaxMindSettingsRequest)(nil),     // 73: gastrolog.v1.PutMaxMindSettingsRequest
+	(*PutMaxMindSettingsResponse)(nil),    // 74: gastrolog.v1.PutMaxMindSettingsResponse
+	(*PutSetupSettingsRequest)(nil),       // 75: gastrolog.v1.PutSetupSettingsRequest
+	(*PutSetupSettingsResponse)(nil),      // 76: gastrolog.v1.PutSetupSettingsResponse
+	(*RegenerateJwtSecretRequest)(nil),    // 77: gastrolog.v1.RegenerateJwtSecretRequest
+	(*RegenerateJwtSecretResponse)(nil),   // 78: gastrolog.v1.RegenerateJwtSecretResponse
+	(*MmdbValidation)(nil),                // 79: gastrolog.v1.MmdbValidation
+	(*GetPreferencesRequest)(nil),         // 80: gastrolog.v1.GetPreferencesRequest
+	(*GetPreferencesResponse)(nil),        // 81: gastrolog.v1.GetPreferencesResponse
+	(*PutPreferencesRequest)(nil),         // 82: gastrolog.v1.PutPreferencesRequest
+	(*PutPreferencesResponse)(nil),        // 83: gastrolog.v1.PutPreferencesResponse
+	(*SavedQuery)(nil),                    // 84: gastrolog.v1.SavedQuery
+	(*GetSavedQueriesRequest)(nil),        // 85: gastrolog.v1.GetSavedQueriesRequest
+	(*GetSavedQueriesResponse)(nil),       // 86: gastrolog.v1.GetSavedQueriesResponse
+	(*PutSavedQueryRequest)(nil),          // 87: gastrolog.v1.PutSavedQueryRequest
+	(*PutSavedQueryResponse)(nil),         // 88: gastrolog.v1.PutSavedQueryResponse
+	(*DeleteSavedQueryRequest)(nil),       // 89: gastrolog.v1.DeleteSavedQueryRequest
+	(*DeleteSavedQueryResponse)(nil),      // 90: gastrolog.v1.DeleteSavedQueryResponse
+	(*ListCertificatesRequest)(nil),       // 91: gastrolog.v1.ListCertificatesRequest
+	(*ListCertificatesResponse)(nil),      // 92: gastrolog.v1.ListCertificatesResponse
+	(*CertificateInfo)(nil),               // 93: gastrolog.v1.CertificateInfo
+	(*GetCertificateRequest)(nil),         // 94: gastrolog.v1.GetCertificateRequest
+	(*GetCertificateResponse)(nil),        // 95: gastrolog.v1.GetCertificateResponse
+	(*PutCertificateRequest)(nil),         // 96: gastrolog.v1.PutCertificateRequest
+	(*PutCertificateResponse)(nil),        // 97: gastrolog.v1.PutCertificateResponse
+	(*DeleteCertificateRequest)(nil),      // 98: gastrolog.v1.DeleteCertificateRequest
+	(*DeleteCertificateResponse)(nil),     // 99: gastrolog.v1.DeleteCertificateResponse
+	(*PauseVaultRequest)(nil),             // 100: gastrolog.v1.PauseVaultRequest
+	(*PauseVaultResponse)(nil),            // 101: gastrolog.v1.PauseVaultResponse
+	(*ResumeVaultRequest)(nil),            // 102: gastrolog.v1.ResumeVaultRequest
+	(*ResumeVaultResponse)(nil),           // 103: gastrolog.v1.ResumeVaultResponse
+	(*TestIngesterRequest)(nil),           // 104: gastrolog.v1.TestIngesterRequest
+	(*TestIngesterResponse)(nil),          // 105: gastrolog.v1.TestIngesterResponse
+	(*TriggerIngesterRequest)(nil),        // 106: gastrolog.v1.TriggerIngesterRequest
+	(*TriggerIngesterResponse)(nil),       // 107: gastrolog.v1.TriggerIngesterResponse
+	(*TestCloudServiceRequest)(nil),       // 108: gastrolog.v1.TestCloudServiceRequest
+	(*TestCloudServiceResponse)(nil),      // 109: gastrolog.v1.TestCloudServiceResponse
+	(*GetIngesterDefaultsRequest)(nil),    // 110: gastrolog.v1.GetIngesterDefaultsRequest
+	(*IngesterTypeDefaults)(nil),          // 111: gastrolog.v1.IngesterTypeDefaults
+	(*GetIngesterDefaultsResponse)(nil),   // 112: gastrolog.v1.GetIngesterDefaultsResponse
+	(*NodeConfig)(nil),                    // 113: gastrolog.v1.NodeConfig
+	(*PutNodeConfigRequest)(nil),          // 114: gastrolog.v1.PutNodeConfigRequest
+	(*PutNodeConfigResponse)(nil),         // 115: gastrolog.v1.PutNodeConfigResponse
+	(*GenerateNameRequest)(nil),           // 116: gastrolog.v1.GenerateNameRequest
+	(*GenerateNameResponse)(nil),          // 117: gastrolog.v1.GenerateNameResponse
+	(*ValidateExpressionRequest)(nil),     // 118: gastrolog.v1.ValidateExpressionRequest
+	(*ValidateExpressionResponse)(nil),    // 119: gastrolog.v1.ValidateExpressionResponse
+	(*WatchSystemRequest)(nil),            // 120: gastrolog.v1.WatchSystemRequest
+	(*WatchSystemResponse)(nil),           // 121: gastrolog.v1.WatchSystemResponse
+	(*GetRouteStatsRequest)(nil),          // 122: gastrolog.v1.GetRouteStatsRequest
+	(*GetRouteStatsResponse)(nil),         // 123: gastrolog.v1.GetRouteStatsResponse
+	(*VaultRouteStats)(nil),               // 124: gastrolog.v1.VaultRouteStats
+	(*PerRouteStats)(nil),                 // 125: gastrolog.v1.PerRouteStats
+	(*ManagedFileInfo)(nil),               // 126: gastrolog.v1.ManagedFileInfo
+	(*ListManagedFilesRequest)(nil),       // 127: gastrolog.v1.ListManagedFilesRequest
+	(*ListManagedFilesResponse)(nil),      // 128: gastrolog.v1.ListManagedFilesResponse
+	(*DeleteManagedFileRequest)(nil),      // 129: gastrolog.v1.DeleteManagedFileRequest
+	(*DeleteManagedFileResponse)(nil),     // 130: gastrolog.v1.DeleteManagedFileResponse
+	(*TestHTTPLookupRequest)(nil),         // 131: gastrolog.v1.TestHTTPLookupRequest
+	(*TestHTTPLookupResponse)(nil),        // 132: gastrolog.v1.TestHTTPLookupResponse
+	(*TestHTTPLookupResult)(nil),          // 133: gastrolog.v1.TestHTTPLookupResult
+	(*PreviewCSVLookupRequest)(nil),       // 134: gastrolog.v1.PreviewCSVLookupRequest
+	(*PreviewCSVLookupResponse)(nil),      // 135: gastrolog.v1.PreviewCSVLookupResponse
+	(*CSVPreviewRow)(nil),                 // 136: gastrolog.v1.CSVPreviewRow
+	(*PreviewJSONLookupRequest)(nil),      // 137: gastrolog.v1.PreviewJSONLookupRequest
+	(*PreviewJSONLookupResponse)(nil),     // 138: gastrolog.v1.PreviewJSONLookupResponse
+	(*PreviewYAMLLookupRequest)(nil),      // 139: gastrolog.v1.PreviewYAMLLookupRequest
+	(*PreviewYAMLLookupResponse)(nil),     // 140: gastrolog.v1.PreviewYAMLLookupResponse
+	(*PutCloudServiceRequest)(nil),        // 141: gastrolog.v1.PutCloudServiceRequest
+	(*PutCloudServiceResponse)(nil),       // 142: gastrolog.v1.PutCloudServiceResponse
+	(*DeleteCloudServiceRequest)(nil),     // 143: gastrolog.v1.DeleteCloudServiceRequest
+	(*DeleteCloudServiceResponse)(nil),    // 144: gastrolog.v1.DeleteCloudServiceResponse
+	(*SetNodeStorageConfigRequest)(nil),   // 145: gastrolog.v1.SetNodeStorageConfigRequest
+	(*SetNodeStorageConfigResponse)(nil),  // 146: gastrolog.v1.SetNodeStorageConfigResponse
+	(*DeleteLookupRequest)(nil),           // 147: gastrolog.v1.DeleteLookupRequest
+	(*DeleteLookupResponse)(nil),          // 148: gastrolog.v1.DeleteLookupResponse
+	(*LogLevelRule)(nil),                  // 149: gastrolog.v1.LogLevelRule
+	(*LogLevelConfig)(nil),                // 150: gastrolog.v1.LogLevelConfig
+	(*PutLogLevelsRequest)(nil),           // 151: gastrolog.v1.PutLogLevelsRequest
+	(*PutLogLevelsResponse)(nil),          // 152: gastrolog.v1.PutLogLevelsResponse
+	(*LogComponentInfo)(nil),              // 153: gastrolog.v1.LogComponentInfo
+	(*ListLogComponentsRequest)(nil),      // 154: gastrolog.v1.ListLogComponentsRequest
+	(*ListLogComponentsResponse)(nil),     // 155: gastrolog.v1.ListLogComponentsResponse
+	nil,                                   // 156: gastrolog.v1.IngesterConfig.ParamsEntry
+	nil,                                   // 157: gastrolog.v1.IngesterAlive.NodeStatusEntry
+	nil,                                   // 158: gastrolog.v1.HTTPLookupEntry.HeadersEntry
+	nil,                                   // 159: gastrolog.v1.StaticLookupRow.ValuesEntry
+	nil,                                   // 160: gastrolog.v1.TestIngesterRequest.ParamsEntry
+	nil,                                   // 161: gastrolog.v1.TestCloudServiceRequest.ParamsEntry
+	nil,                                   // 162: gastrolog.v1.IngesterTypeDefaults.ParamsEntry
+	nil,                                   // 163: gastrolog.v1.GetIngesterDefaultsResponse.TypesEntry
+	nil,                                   // 164: gastrolog.v1.TestHTTPLookupRequest.ValuesEntry
+	nil,                                   // 165: gastrolog.v1.TestHTTPLookupResult.FieldsEntry
+	nil,                                   // 166: gastrolog.v1.PreviewJSONLookupRequest.ParametersEntry
+	nil,                                   // 167: gastrolog.v1.PreviewYAMLLookupRequest.ParametersEntry
+	(*CloudService)(nil),                  // 168: gastrolog.v1.CloudService
+	(*NodeStorageConfig)(nil),             // 169: gastrolog.v1.NodeStorageConfig
+	(*timestamppb.Timestamp)(nil),         // 170: google.protobuf.Timestamp
 }
 var file_gastrolog_v1_system_proto_depIdxs = []int32{
-	8,   // 0: gastrolog.v1.GetSystemResponse.vaults:type_name -> gastrolog.v1.VaultConfig
-	13,  // 1: gastrolog.v1.GetSystemResponse.ingesters:type_name -> gastrolog.v1.IngesterConfig
-	14,  // 2: gastrolog.v1.GetSystemResponse.rotation_policies:type_name -> gastrolog.v1.RotationPolicyConfig
-	15,  // 3: gastrolog.v1.GetSystemResponse.retention_policies:type_name -> gastrolog.v1.RetentionPolicyConfig
-	112, // 4: gastrolog.v1.GetSystemResponse.node_configs:type_name -> gastrolog.v1.NodeConfig
-	10,  // 5: gastrolog.v1.GetSystemResponse.routes:type_name -> gastrolog.v1.RouteConfig
-	125, // 6: gastrolog.v1.GetSystemResponse.managed_files:type_name -> gastrolog.v1.ManagedFileInfo
-	167, // 7: gastrolog.v1.GetSystemResponse.cloud_services:type_name -> gastrolog.v1.CloudService
-	168, // 8: gastrolog.v1.GetSystemResponse.node_storage_configs:type_name -> gastrolog.v1.NodeStorageConfig
-	149, // 9: gastrolog.v1.GetSystemResponse.log_levels:type_name -> gastrolog.v1.LogLevelConfig
+	9,   // 0: gastrolog.v1.GetSystemResponse.vaults:type_name -> gastrolog.v1.VaultConfig
+	14,  // 1: gastrolog.v1.GetSystemResponse.ingesters:type_name -> gastrolog.v1.IngesterConfig
+	15,  // 2: gastrolog.v1.GetSystemResponse.rotation_policies:type_name -> gastrolog.v1.RotationPolicyConfig
+	16,  // 3: gastrolog.v1.GetSystemResponse.retention_policies:type_name -> gastrolog.v1.RetentionPolicyConfig
+	113, // 4: gastrolog.v1.GetSystemResponse.node_configs:type_name -> gastrolog.v1.NodeConfig
+	11,  // 5: gastrolog.v1.GetSystemResponse.routes:type_name -> gastrolog.v1.RouteConfig
+	126, // 6: gastrolog.v1.GetSystemResponse.managed_files:type_name -> gastrolog.v1.ManagedFileInfo
+	168, // 7: gastrolog.v1.GetSystemResponse.cloud_services:type_name -> gastrolog.v1.CloudService
+	169, // 8: gastrolog.v1.GetSystemResponse.node_storage_configs:type_name -> gastrolog.v1.NodeStorageConfig
+	150, // 9: gastrolog.v1.GetSystemResponse.log_levels:type_name -> gastrolog.v1.LogLevelConfig
 	0,   // 10: gastrolog.v1.VaultConfig.type:type_name -> gastrolog.v1.VaultType
-	6,   // 11: gastrolog.v1.VaultConfig.retention_rules:type_name -> gastrolog.v1.RetentionRule
-	7,   // 12: gastrolog.v1.VaultConfig.placements:type_name -> gastrolog.v1.VaultPlacement
-	11,  // 13: gastrolog.v1.RouteConfig.stages:type_name -> gastrolog.v1.RouteStage
-	9,   // 14: gastrolog.v1.RouteConfig.destinations:type_name -> gastrolog.v1.RouteDestination
-	12,  // 15: gastrolog.v1.RouteStage.match:type_name -> gastrolog.v1.MatchStage
-	155, // 16: gastrolog.v1.IngesterConfig.params:type_name -> gastrolog.v1.IngesterConfig.ParamsEntry
-	156, // 17: gastrolog.v1.IngesterAlive.node_status:type_name -> gastrolog.v1.IngesterAlive.NodeStatusEntry
-	14,  // 18: gastrolog.v1.PutRotationPolicyRequest.config:type_name -> gastrolog.v1.RotationPolicyConfig
-	5,   // 19: gastrolog.v1.PutRotationPolicyResponse.system:type_name -> gastrolog.v1.GetSystemResponse
-	5,   // 20: gastrolog.v1.DeleteRotationPolicyResponse.system:type_name -> gastrolog.v1.GetSystemResponse
-	15,  // 21: gastrolog.v1.PutRetentionPolicyRequest.config:type_name -> gastrolog.v1.RetentionPolicyConfig
-	5,   // 22: gastrolog.v1.PutRetentionPolicyResponse.system:type_name -> gastrolog.v1.GetSystemResponse
-	5,   // 23: gastrolog.v1.DeleteRetentionPolicyResponse.system:type_name -> gastrolog.v1.GetSystemResponse
-	8,   // 24: gastrolog.v1.PutVaultRequest.config:type_name -> gastrolog.v1.VaultConfig
-	5,   // 25: gastrolog.v1.PutVaultResponse.system:type_name -> gastrolog.v1.GetSystemResponse
-	5,   // 26: gastrolog.v1.DeleteVaultResponse.system:type_name -> gastrolog.v1.GetSystemResponse
-	10,  // 27: gastrolog.v1.PutRouteRequest.config:type_name -> gastrolog.v1.RouteConfig
-	5,   // 28: gastrolog.v1.PutRouteResponse.system:type_name -> gastrolog.v1.GetSystemResponse
-	5,   // 29: gastrolog.v1.DeleteRouteResponse.system:type_name -> gastrolog.v1.GetSystemResponse
-	13,  // 30: gastrolog.v1.PutIngesterRequest.config:type_name -> gastrolog.v1.IngesterConfig
-	5,   // 31: gastrolog.v1.PutIngesterResponse.system:type_name -> gastrolog.v1.GetSystemResponse
-	5,   // 32: gastrolog.v1.DeleteIngesterResponse.system:type_name -> gastrolog.v1.GetSystemResponse
-	42,  // 33: gastrolog.v1.AuthSettings.password_policy:type_name -> gastrolog.v1.PasswordPolicySettings
-	51,  // 34: gastrolog.v1.LookupSettings.http_lookups:type_name -> gastrolog.v1.HTTPLookupEntry
-	52,  // 35: gastrolog.v1.LookupSettings.json_file_lookups:type_name -> gastrolog.v1.JSONFileLookupEntry
-	49,  // 36: gastrolog.v1.LookupSettings.mmdb_lookups:type_name -> gastrolog.v1.MMDBLookupEntry
-	54,  // 37: gastrolog.v1.LookupSettings.csv_lookups:type_name -> gastrolog.v1.CSVLookupEntry
-	55,  // 38: gastrolog.v1.LookupSettings.static_lookups:type_name -> gastrolog.v1.StaticLookupEntry
-	53,  // 39: gastrolog.v1.LookupSettings.yaml_file_lookups:type_name -> gastrolog.v1.YAMLFileLookupEntry
-	157, // 40: gastrolog.v1.HTTPLookupEntry.headers:type_name -> gastrolog.v1.HTTPLookupEntry.HeadersEntry
-	50,  // 41: gastrolog.v1.HTTPLookupEntry.parameters:type_name -> gastrolog.v1.HTTPLookupParam
-	56,  // 42: gastrolog.v1.StaticLookupEntry.rows:type_name -> gastrolog.v1.StaticLookupRow
-	158, // 43: gastrolog.v1.StaticLookupRow.values:type_name -> gastrolog.v1.StaticLookupRow.ValuesEntry
-	44,  // 44: gastrolog.v1.GetSettingsResponse.auth:type_name -> gastrolog.v1.AuthSettings
-	45,  // 45: gastrolog.v1.GetSettingsResponse.query:type_name -> gastrolog.v1.QuerySettings
-	46,  // 46: gastrolog.v1.GetSettingsResponse.scheduler:type_name -> gastrolog.v1.SchedulerSettings
-	47,  // 47: gastrolog.v1.GetSettingsResponse.tls:type_name -> gastrolog.v1.TLSSettings
-	48,  // 48: gastrolog.v1.GetSettingsResponse.lookup:type_name -> gastrolog.v1.LookupSettings
-	57,  // 49: gastrolog.v1.GetSettingsResponse.cluster:type_name -> gastrolog.v1.ClusterSettings
-	43,  // 50: gastrolog.v1.GetSettingsResponse.maxmind:type_name -> gastrolog.v1.MaxMindSettings
-	59,  // 51: gastrolog.v1.PutAuthSettings.password_policy:type_name -> gastrolog.v1.PutPasswordPolicySettings
-	51,  // 52: gastrolog.v1.PutLookupSettings.http_lookups:type_name -> gastrolog.v1.HTTPLookupEntry
-	52,  // 53: gastrolog.v1.PutLookupSettings.json_file_lookups:type_name -> gastrolog.v1.JSONFileLookupEntry
-	49,  // 54: gastrolog.v1.PutLookupSettings.mmdb_lookups:type_name -> gastrolog.v1.MMDBLookupEntry
-	54,  // 55: gastrolog.v1.PutLookupSettings.csv_lookups:type_name -> gastrolog.v1.CSVLookupEntry
-	55,  // 56: gastrolog.v1.PutLookupSettings.static_lookups:type_name -> gastrolog.v1.StaticLookupEntry
-	53,  // 57: gastrolog.v1.PutLookupSettings.yaml_file_lookups:type_name -> gastrolog.v1.YAMLFileLookupEntry
-	60,  // 58: gastrolog.v1.PutServiceSettingsRequest.auth:type_name -> gastrolog.v1.PutAuthSettings
-	61,  // 59: gastrolog.v1.PutServiceSettingsRequest.query:type_name -> gastrolog.v1.PutQuerySettings
-	62,  // 60: gastrolog.v1.PutServiceSettingsRequest.scheduler:type_name -> gastrolog.v1.PutSchedulerSettings
-	63,  // 61: gastrolog.v1.PutServiceSettingsRequest.tls:type_name -> gastrolog.v1.PutTLSSettings
-	66,  // 62: gastrolog.v1.PutServiceSettingsRequest.cluster:type_name -> gastrolog.v1.PutClusterSettings
-	58,  // 63: gastrolog.v1.SettingsMutationEcho.settings:type_name -> gastrolog.v1.GetSettingsResponse
-	68,  // 64: gastrolog.v1.PutServiceSettingsResponse.echo:type_name -> gastrolog.v1.SettingsMutationEcho
-	65,  // 65: gastrolog.v1.PutLookupSettingsRequest.lookup:type_name -> gastrolog.v1.PutLookupSettings
-	68,  // 66: gastrolog.v1.PutLookupSettingsResponse.echo:type_name -> gastrolog.v1.SettingsMutationEcho
-	64,  // 67: gastrolog.v1.PutMaxMindSettingsRequest.maxmind:type_name -> gastrolog.v1.PutMaxMindSettings
-	68,  // 68: gastrolog.v1.PutMaxMindSettingsResponse.echo:type_name -> gastrolog.v1.SettingsMutationEcho
-	68,  // 69: gastrolog.v1.PutSetupSettingsResponse.echo:type_name -> gastrolog.v1.SettingsMutationEcho
-	68,  // 70: gastrolog.v1.RegenerateJwtSecretResponse.echo:type_name -> gastrolog.v1.SettingsMutationEcho
-	80,  // 71: gastrolog.v1.PutPreferencesResponse.preferences:type_name -> gastrolog.v1.GetPreferencesResponse
-	83,  // 72: gastrolog.v1.GetSavedQueriesResponse.queries:type_name -> gastrolog.v1.SavedQuery
-	83,  // 73: gastrolog.v1.PutSavedQueryRequest.query:type_name -> gastrolog.v1.SavedQuery
-	85,  // 74: gastrolog.v1.PutSavedQueryResponse.saved_queries:type_name -> gastrolog.v1.GetSavedQueriesResponse
-	85,  // 75: gastrolog.v1.DeleteSavedQueryResponse.saved_queries:type_name -> gastrolog.v1.GetSavedQueriesResponse
-	92,  // 76: gastrolog.v1.ListCertificatesResponse.certificates:type_name -> gastrolog.v1.CertificateInfo
-	5,   // 77: gastrolog.v1.PutCertificateResponse.system:type_name -> gastrolog.v1.GetSystemResponse
-	5,   // 78: gastrolog.v1.DeleteCertificateResponse.system:type_name -> gastrolog.v1.GetSystemResponse
-	5,   // 79: gastrolog.v1.PauseVaultResponse.system:type_name -> gastrolog.v1.GetSystemResponse
-	5,   // 80: gastrolog.v1.ResumeVaultResponse.system:type_name -> gastrolog.v1.GetSystemResponse
-	159, // 81: gastrolog.v1.TestIngesterRequest.params:type_name -> gastrolog.v1.TestIngesterRequest.ParamsEntry
-	160, // 82: gastrolog.v1.TestCloudServiceRequest.params:type_name -> gastrolog.v1.TestCloudServiceRequest.ParamsEntry
-	161, // 83: gastrolog.v1.IngesterTypeDefaults.params:type_name -> gastrolog.v1.IngesterTypeDefaults.ParamsEntry
+	7,   // 11: gastrolog.v1.VaultConfig.retention_rules:type_name -> gastrolog.v1.RetentionRule
+	8,   // 12: gastrolog.v1.VaultConfig.placements:type_name -> gastrolog.v1.VaultPlacement
+	12,  // 13: gastrolog.v1.RouteConfig.stages:type_name -> gastrolog.v1.RouteStage
+	10,  // 14: gastrolog.v1.RouteConfig.destinations:type_name -> gastrolog.v1.RouteDestination
+	13,  // 15: gastrolog.v1.RouteStage.match:type_name -> gastrolog.v1.MatchStage
+	156, // 16: gastrolog.v1.IngesterConfig.params:type_name -> gastrolog.v1.IngesterConfig.ParamsEntry
+	157, // 17: gastrolog.v1.IngesterAlive.node_status:type_name -> gastrolog.v1.IngesterAlive.NodeStatusEntry
+	15,  // 18: gastrolog.v1.PutRotationPolicyRequest.config:type_name -> gastrolog.v1.RotationPolicyConfig
+	6,   // 19: gastrolog.v1.PutRotationPolicyResponse.system:type_name -> gastrolog.v1.GetSystemResponse
+	6,   // 20: gastrolog.v1.DeleteRotationPolicyResponse.system:type_name -> gastrolog.v1.GetSystemResponse
+	16,  // 21: gastrolog.v1.PutRetentionPolicyRequest.config:type_name -> gastrolog.v1.RetentionPolicyConfig
+	6,   // 22: gastrolog.v1.PutRetentionPolicyResponse.system:type_name -> gastrolog.v1.GetSystemResponse
+	6,   // 23: gastrolog.v1.DeleteRetentionPolicyResponse.system:type_name -> gastrolog.v1.GetSystemResponse
+	9,   // 24: gastrolog.v1.PutVaultRequest.config:type_name -> gastrolog.v1.VaultConfig
+	6,   // 25: gastrolog.v1.PutVaultResponse.system:type_name -> gastrolog.v1.GetSystemResponse
+	6,   // 26: gastrolog.v1.DeleteVaultResponse.system:type_name -> gastrolog.v1.GetSystemResponse
+	11,  // 27: gastrolog.v1.PutRouteRequest.config:type_name -> gastrolog.v1.RouteConfig
+	6,   // 28: gastrolog.v1.PutRouteResponse.system:type_name -> gastrolog.v1.GetSystemResponse
+	6,   // 29: gastrolog.v1.DeleteRouteResponse.system:type_name -> gastrolog.v1.GetSystemResponse
+	14,  // 30: gastrolog.v1.PutIngesterRequest.config:type_name -> gastrolog.v1.IngesterConfig
+	6,   // 31: gastrolog.v1.PutIngesterResponse.system:type_name -> gastrolog.v1.GetSystemResponse
+	6,   // 32: gastrolog.v1.DeleteIngesterResponse.system:type_name -> gastrolog.v1.GetSystemResponse
+	43,  // 33: gastrolog.v1.AuthSettings.password_policy:type_name -> gastrolog.v1.PasswordPolicySettings
+	52,  // 34: gastrolog.v1.LookupSettings.http_lookups:type_name -> gastrolog.v1.HTTPLookupEntry
+	53,  // 35: gastrolog.v1.LookupSettings.json_file_lookups:type_name -> gastrolog.v1.JSONFileLookupEntry
+	50,  // 36: gastrolog.v1.LookupSettings.mmdb_lookups:type_name -> gastrolog.v1.MMDBLookupEntry
+	55,  // 37: gastrolog.v1.LookupSettings.csv_lookups:type_name -> gastrolog.v1.CSVLookupEntry
+	56,  // 38: gastrolog.v1.LookupSettings.static_lookups:type_name -> gastrolog.v1.StaticLookupEntry
+	54,  // 39: gastrolog.v1.LookupSettings.yaml_file_lookups:type_name -> gastrolog.v1.YAMLFileLookupEntry
+	158, // 40: gastrolog.v1.HTTPLookupEntry.headers:type_name -> gastrolog.v1.HTTPLookupEntry.HeadersEntry
+	51,  // 41: gastrolog.v1.HTTPLookupEntry.parameters:type_name -> gastrolog.v1.HTTPLookupParam
+	57,  // 42: gastrolog.v1.StaticLookupEntry.rows:type_name -> gastrolog.v1.StaticLookupRow
+	159, // 43: gastrolog.v1.StaticLookupRow.values:type_name -> gastrolog.v1.StaticLookupRow.ValuesEntry
+	45,  // 44: gastrolog.v1.GetSettingsResponse.auth:type_name -> gastrolog.v1.AuthSettings
+	46,  // 45: gastrolog.v1.GetSettingsResponse.query:type_name -> gastrolog.v1.QuerySettings
+	47,  // 46: gastrolog.v1.GetSettingsResponse.scheduler:type_name -> gastrolog.v1.SchedulerSettings
+	48,  // 47: gastrolog.v1.GetSettingsResponse.tls:type_name -> gastrolog.v1.TLSSettings
+	49,  // 48: gastrolog.v1.GetSettingsResponse.lookup:type_name -> gastrolog.v1.LookupSettings
+	58,  // 49: gastrolog.v1.GetSettingsResponse.cluster:type_name -> gastrolog.v1.ClusterSettings
+	44,  // 50: gastrolog.v1.GetSettingsResponse.maxmind:type_name -> gastrolog.v1.MaxMindSettings
+	60,  // 51: gastrolog.v1.PutAuthSettings.password_policy:type_name -> gastrolog.v1.PutPasswordPolicySettings
+	52,  // 52: gastrolog.v1.PutLookupSettings.http_lookups:type_name -> gastrolog.v1.HTTPLookupEntry
+	53,  // 53: gastrolog.v1.PutLookupSettings.json_file_lookups:type_name -> gastrolog.v1.JSONFileLookupEntry
+	50,  // 54: gastrolog.v1.PutLookupSettings.mmdb_lookups:type_name -> gastrolog.v1.MMDBLookupEntry
+	55,  // 55: gastrolog.v1.PutLookupSettings.csv_lookups:type_name -> gastrolog.v1.CSVLookupEntry
+	56,  // 56: gastrolog.v1.PutLookupSettings.static_lookups:type_name -> gastrolog.v1.StaticLookupEntry
+	54,  // 57: gastrolog.v1.PutLookupSettings.yaml_file_lookups:type_name -> gastrolog.v1.YAMLFileLookupEntry
+	61,  // 58: gastrolog.v1.PutServiceSettingsRequest.auth:type_name -> gastrolog.v1.PutAuthSettings
+	62,  // 59: gastrolog.v1.PutServiceSettingsRequest.query:type_name -> gastrolog.v1.PutQuerySettings
+	63,  // 60: gastrolog.v1.PutServiceSettingsRequest.scheduler:type_name -> gastrolog.v1.PutSchedulerSettings
+	64,  // 61: gastrolog.v1.PutServiceSettingsRequest.tls:type_name -> gastrolog.v1.PutTLSSettings
+	67,  // 62: gastrolog.v1.PutServiceSettingsRequest.cluster:type_name -> gastrolog.v1.PutClusterSettings
+	59,  // 63: gastrolog.v1.SettingsMutationEcho.settings:type_name -> gastrolog.v1.GetSettingsResponse
+	69,  // 64: gastrolog.v1.PutServiceSettingsResponse.echo:type_name -> gastrolog.v1.SettingsMutationEcho
+	66,  // 65: gastrolog.v1.PutLookupSettingsRequest.lookup:type_name -> gastrolog.v1.PutLookupSettings
+	69,  // 66: gastrolog.v1.PutLookupSettingsResponse.echo:type_name -> gastrolog.v1.SettingsMutationEcho
+	65,  // 67: gastrolog.v1.PutMaxMindSettingsRequest.maxmind:type_name -> gastrolog.v1.PutMaxMindSettings
+	69,  // 68: gastrolog.v1.PutMaxMindSettingsResponse.echo:type_name -> gastrolog.v1.SettingsMutationEcho
+	69,  // 69: gastrolog.v1.PutSetupSettingsResponse.echo:type_name -> gastrolog.v1.SettingsMutationEcho
+	69,  // 70: gastrolog.v1.RegenerateJwtSecretResponse.echo:type_name -> gastrolog.v1.SettingsMutationEcho
+	81,  // 71: gastrolog.v1.PutPreferencesResponse.preferences:type_name -> gastrolog.v1.GetPreferencesResponse
+	84,  // 72: gastrolog.v1.GetSavedQueriesResponse.queries:type_name -> gastrolog.v1.SavedQuery
+	84,  // 73: gastrolog.v1.PutSavedQueryRequest.query:type_name -> gastrolog.v1.SavedQuery
+	86,  // 74: gastrolog.v1.PutSavedQueryResponse.saved_queries:type_name -> gastrolog.v1.GetSavedQueriesResponse
+	86,  // 75: gastrolog.v1.DeleteSavedQueryResponse.saved_queries:type_name -> gastrolog.v1.GetSavedQueriesResponse
+	93,  // 76: gastrolog.v1.ListCertificatesResponse.certificates:type_name -> gastrolog.v1.CertificateInfo
+	6,   // 77: gastrolog.v1.PutCertificateResponse.system:type_name -> gastrolog.v1.GetSystemResponse
+	6,   // 78: gastrolog.v1.DeleteCertificateResponse.system:type_name -> gastrolog.v1.GetSystemResponse
+	6,   // 79: gastrolog.v1.PauseVaultResponse.system:type_name -> gastrolog.v1.GetSystemResponse
+	6,   // 80: gastrolog.v1.ResumeVaultResponse.system:type_name -> gastrolog.v1.GetSystemResponse
+	160, // 81: gastrolog.v1.TestIngesterRequest.params:type_name -> gastrolog.v1.TestIngesterRequest.ParamsEntry
+	161, // 82: gastrolog.v1.TestCloudServiceRequest.params:type_name -> gastrolog.v1.TestCloudServiceRequest.ParamsEntry
+	162, // 83: gastrolog.v1.IngesterTypeDefaults.params:type_name -> gastrolog.v1.IngesterTypeDefaults.ParamsEntry
 	1,   // 84: gastrolog.v1.IngesterTypeDefaults.mode:type_name -> gastrolog.v1.IngesterMode
-	162, // 85: gastrolog.v1.GetIngesterDefaultsResponse.types:type_name -> gastrolog.v1.GetIngesterDefaultsResponse.TypesEntry
-	112, // 86: gastrolog.v1.PutNodeConfigRequest.config:type_name -> gastrolog.v1.NodeConfig
-	5,   // 87: gastrolog.v1.PutNodeConfigResponse.system:type_name -> gastrolog.v1.GetSystemResponse
-	123, // 88: gastrolog.v1.GetRouteStatsResponse.vault_stats:type_name -> gastrolog.v1.VaultRouteStats
-	124, // 89: gastrolog.v1.GetRouteStatsResponse.route_stats:type_name -> gastrolog.v1.PerRouteStats
-	125, // 90: gastrolog.v1.ListManagedFilesResponse.files:type_name -> gastrolog.v1.ManagedFileInfo
-	51,  // 91: gastrolog.v1.TestHTTPLookupRequest.config:type_name -> gastrolog.v1.HTTPLookupEntry
-	163, // 92: gastrolog.v1.TestHTTPLookupRequest.values:type_name -> gastrolog.v1.TestHTTPLookupRequest.ValuesEntry
-	132, // 93: gastrolog.v1.TestHTTPLookupResponse.results:type_name -> gastrolog.v1.TestHTTPLookupResult
-	164, // 94: gastrolog.v1.TestHTTPLookupResult.fields:type_name -> gastrolog.v1.TestHTTPLookupResult.FieldsEntry
-	135, // 95: gastrolog.v1.PreviewCSVLookupResponse.rows:type_name -> gastrolog.v1.CSVPreviewRow
-	165, // 96: gastrolog.v1.PreviewJSONLookupRequest.parameters:type_name -> gastrolog.v1.PreviewJSONLookupRequest.ParametersEntry
-	166, // 97: gastrolog.v1.PreviewYAMLLookupRequest.parameters:type_name -> gastrolog.v1.PreviewYAMLLookupRequest.ParametersEntry
-	167, // 98: gastrolog.v1.PutCloudServiceRequest.config:type_name -> gastrolog.v1.CloudService
-	5,   // 99: gastrolog.v1.PutCloudServiceResponse.system:type_name -> gastrolog.v1.GetSystemResponse
-	5,   // 100: gastrolog.v1.DeleteCloudServiceResponse.system:type_name -> gastrolog.v1.GetSystemResponse
-	168, // 101: gastrolog.v1.SetNodeStorageConfigRequest.config:type_name -> gastrolog.v1.NodeStorageConfig
-	5,   // 102: gastrolog.v1.SetNodeStorageConfigResponse.system:type_name -> gastrolog.v1.GetSystemResponse
-	68,  // 103: gastrolog.v1.DeleteLookupResponse.echo:type_name -> gastrolog.v1.SettingsMutationEcho
-	2,   // 104: gastrolog.v1.LogLevelRule.level:type_name -> gastrolog.v1.LogLevel
-	2,   // 105: gastrolog.v1.LogLevelConfig.default_level:type_name -> gastrolog.v1.LogLevel
-	148, // 106: gastrolog.v1.LogLevelConfig.rules:type_name -> gastrolog.v1.LogLevelRule
-	149, // 107: gastrolog.v1.PutLogLevelsRequest.config:type_name -> gastrolog.v1.LogLevelConfig
-	68,  // 108: gastrolog.v1.PutLogLevelsResponse.echo:type_name -> gastrolog.v1.SettingsMutationEcho
-	2,   // 109: gastrolog.v1.LogComponentInfo.effective_level:type_name -> gastrolog.v1.LogLevel
-	3,   // 110: gastrolog.v1.LogComponentInfo.source:type_name -> gastrolog.v1.LogComponentLevelSource
-	152, // 111: gastrolog.v1.ListLogComponentsResponse.components:type_name -> gastrolog.v1.LogComponentInfo
-	110, // 112: gastrolog.v1.GetIngesterDefaultsResponse.TypesEntry.value:type_name -> gastrolog.v1.IngesterTypeDefaults
-	4,   // 113: gastrolog.v1.SystemService.GetSystem:input_type -> gastrolog.v1.GetSystemRequest
-	17,  // 114: gastrolog.v1.SystemService.GetIngesterStatus:input_type -> gastrolog.v1.GetIngesterStatusRequest
-	21,  // 115: gastrolog.v1.SystemService.PutRotationPolicy:input_type -> gastrolog.v1.PutRotationPolicyRequest
-	23,  // 116: gastrolog.v1.SystemService.DeleteRotationPolicy:input_type -> gastrolog.v1.DeleteRotationPolicyRequest
-	25,  // 117: gastrolog.v1.SystemService.PutRetentionPolicy:input_type -> gastrolog.v1.PutRetentionPolicyRequest
-	27,  // 118: gastrolog.v1.SystemService.DeleteRetentionPolicy:input_type -> gastrolog.v1.DeleteRetentionPolicyRequest
-	29,  // 119: gastrolog.v1.SystemService.PutVault:input_type -> gastrolog.v1.PutVaultRequest
-	31,  // 120: gastrolog.v1.SystemService.DeleteVault:input_type -> gastrolog.v1.DeleteVaultRequest
-	37,  // 121: gastrolog.v1.SystemService.PutIngester:input_type -> gastrolog.v1.PutIngesterRequest
-	39,  // 122: gastrolog.v1.SystemService.DeleteIngester:input_type -> gastrolog.v1.DeleteIngesterRequest
-	41,  // 123: gastrolog.v1.SystemService.GetSettings:input_type -> gastrolog.v1.GetSettingsRequest
-	67,  // 124: gastrolog.v1.SystemService.PutServiceSettings:input_type -> gastrolog.v1.PutServiceSettingsRequest
-	70,  // 125: gastrolog.v1.SystemService.PutLookupSettings:input_type -> gastrolog.v1.PutLookupSettingsRequest
-	72,  // 126: gastrolog.v1.SystemService.PutMaxMindSettings:input_type -> gastrolog.v1.PutMaxMindSettingsRequest
-	74,  // 127: gastrolog.v1.SystemService.PutSetupSettings:input_type -> gastrolog.v1.PutSetupSettingsRequest
-	76,  // 128: gastrolog.v1.SystemService.RegenerateJwtSecret:input_type -> gastrolog.v1.RegenerateJwtSecretRequest
-	79,  // 129: gastrolog.v1.SystemService.GetPreferences:input_type -> gastrolog.v1.GetPreferencesRequest
-	81,  // 130: gastrolog.v1.SystemService.PutPreferences:input_type -> gastrolog.v1.PutPreferencesRequest
-	84,  // 131: gastrolog.v1.SystemService.GetSavedQueries:input_type -> gastrolog.v1.GetSavedQueriesRequest
-	86,  // 132: gastrolog.v1.SystemService.PutSavedQuery:input_type -> gastrolog.v1.PutSavedQueryRequest
-	88,  // 133: gastrolog.v1.SystemService.DeleteSavedQuery:input_type -> gastrolog.v1.DeleteSavedQueryRequest
-	90,  // 134: gastrolog.v1.SystemService.ListCertificates:input_type -> gastrolog.v1.ListCertificatesRequest
-	93,  // 135: gastrolog.v1.SystemService.GetCertificate:input_type -> gastrolog.v1.GetCertificateRequest
-	95,  // 136: gastrolog.v1.SystemService.PutCertificate:input_type -> gastrolog.v1.PutCertificateRequest
-	97,  // 137: gastrolog.v1.SystemService.DeleteCertificate:input_type -> gastrolog.v1.DeleteCertificateRequest
-	99,  // 138: gastrolog.v1.SystemService.PauseVault:input_type -> gastrolog.v1.PauseVaultRequest
-	101, // 139: gastrolog.v1.SystemService.ResumeVault:input_type -> gastrolog.v1.ResumeVaultRequest
-	103, // 140: gastrolog.v1.SystemService.TestIngester:input_type -> gastrolog.v1.TestIngesterRequest
-	109, // 141: gastrolog.v1.SystemService.GetIngesterDefaults:input_type -> gastrolog.v1.GetIngesterDefaultsRequest
-	105, // 142: gastrolog.v1.SystemService.TriggerIngester:input_type -> gastrolog.v1.TriggerIngesterRequest
-	113, // 143: gastrolog.v1.SystemService.PutNodeConfig:input_type -> gastrolog.v1.PutNodeConfigRequest
-	33,  // 144: gastrolog.v1.SystemService.PutRoute:input_type -> gastrolog.v1.PutRouteRequest
-	35,  // 145: gastrolog.v1.SystemService.DeleteRoute:input_type -> gastrolog.v1.DeleteRouteRequest
-	115, // 146: gastrolog.v1.SystemService.GenerateName:input_type -> gastrolog.v1.GenerateNameRequest
-	117, // 147: gastrolog.v1.SystemService.ValidateExpression:input_type -> gastrolog.v1.ValidateExpressionRequest
-	119, // 148: gastrolog.v1.SystemService.WatchSystem:input_type -> gastrolog.v1.WatchSystemRequest
-	121, // 149: gastrolog.v1.SystemService.GetRouteStats:input_type -> gastrolog.v1.GetRouteStatsRequest
-	126, // 150: gastrolog.v1.SystemService.ListManagedFiles:input_type -> gastrolog.v1.ListManagedFilesRequest
-	128, // 151: gastrolog.v1.SystemService.DeleteManagedFile:input_type -> gastrolog.v1.DeleteManagedFileRequest
-	107, // 152: gastrolog.v1.SystemService.TestCloudService:input_type -> gastrolog.v1.TestCloudServiceRequest
-	130, // 153: gastrolog.v1.SystemService.TestHTTPLookup:input_type -> gastrolog.v1.TestHTTPLookupRequest
-	133, // 154: gastrolog.v1.SystemService.PreviewCSVLookup:input_type -> gastrolog.v1.PreviewCSVLookupRequest
-	136, // 155: gastrolog.v1.SystemService.PreviewJSONLookup:input_type -> gastrolog.v1.PreviewJSONLookupRequest
-	138, // 156: gastrolog.v1.SystemService.PreviewYAMLLookup:input_type -> gastrolog.v1.PreviewYAMLLookupRequest
-	19,  // 157: gastrolog.v1.SystemService.WatchIngesterStatus:input_type -> gastrolog.v1.WatchIngesterStatusRequest
-	140, // 158: gastrolog.v1.SystemService.PutCloudService:input_type -> gastrolog.v1.PutCloudServiceRequest
-	142, // 159: gastrolog.v1.SystemService.DeleteCloudService:input_type -> gastrolog.v1.DeleteCloudServiceRequest
-	144, // 160: gastrolog.v1.SystemService.SetNodeStorageConfig:input_type -> gastrolog.v1.SetNodeStorageConfigRequest
-	146, // 161: gastrolog.v1.SystemService.DeleteLookup:input_type -> gastrolog.v1.DeleteLookupRequest
-	150, // 162: gastrolog.v1.SystemService.PutLogLevels:input_type -> gastrolog.v1.PutLogLevelsRequest
-	153, // 163: gastrolog.v1.SystemService.ListLogComponents:input_type -> gastrolog.v1.ListLogComponentsRequest
-	5,   // 164: gastrolog.v1.SystemService.GetSystem:output_type -> gastrolog.v1.GetSystemResponse
-	18,  // 165: gastrolog.v1.SystemService.GetIngesterStatus:output_type -> gastrolog.v1.GetIngesterStatusResponse
-	22,  // 166: gastrolog.v1.SystemService.PutRotationPolicy:output_type -> gastrolog.v1.PutRotationPolicyResponse
-	24,  // 167: gastrolog.v1.SystemService.DeleteRotationPolicy:output_type -> gastrolog.v1.DeleteRotationPolicyResponse
-	26,  // 168: gastrolog.v1.SystemService.PutRetentionPolicy:output_type -> gastrolog.v1.PutRetentionPolicyResponse
-	28,  // 169: gastrolog.v1.SystemService.DeleteRetentionPolicy:output_type -> gastrolog.v1.DeleteRetentionPolicyResponse
-	30,  // 170: gastrolog.v1.SystemService.PutVault:output_type -> gastrolog.v1.PutVaultResponse
-	32,  // 171: gastrolog.v1.SystemService.DeleteVault:output_type -> gastrolog.v1.DeleteVaultResponse
-	38,  // 172: gastrolog.v1.SystemService.PutIngester:output_type -> gastrolog.v1.PutIngesterResponse
-	40,  // 173: gastrolog.v1.SystemService.DeleteIngester:output_type -> gastrolog.v1.DeleteIngesterResponse
-	58,  // 174: gastrolog.v1.SystemService.GetSettings:output_type -> gastrolog.v1.GetSettingsResponse
-	69,  // 175: gastrolog.v1.SystemService.PutServiceSettings:output_type -> gastrolog.v1.PutServiceSettingsResponse
-	71,  // 176: gastrolog.v1.SystemService.PutLookupSettings:output_type -> gastrolog.v1.PutLookupSettingsResponse
-	73,  // 177: gastrolog.v1.SystemService.PutMaxMindSettings:output_type -> gastrolog.v1.PutMaxMindSettingsResponse
-	75,  // 178: gastrolog.v1.SystemService.PutSetupSettings:output_type -> gastrolog.v1.PutSetupSettingsResponse
-	77,  // 179: gastrolog.v1.SystemService.RegenerateJwtSecret:output_type -> gastrolog.v1.RegenerateJwtSecretResponse
-	80,  // 180: gastrolog.v1.SystemService.GetPreferences:output_type -> gastrolog.v1.GetPreferencesResponse
-	82,  // 181: gastrolog.v1.SystemService.PutPreferences:output_type -> gastrolog.v1.PutPreferencesResponse
-	85,  // 182: gastrolog.v1.SystemService.GetSavedQueries:output_type -> gastrolog.v1.GetSavedQueriesResponse
-	87,  // 183: gastrolog.v1.SystemService.PutSavedQuery:output_type -> gastrolog.v1.PutSavedQueryResponse
-	89,  // 184: gastrolog.v1.SystemService.DeleteSavedQuery:output_type -> gastrolog.v1.DeleteSavedQueryResponse
-	91,  // 185: gastrolog.v1.SystemService.ListCertificates:output_type -> gastrolog.v1.ListCertificatesResponse
-	94,  // 186: gastrolog.v1.SystemService.GetCertificate:output_type -> gastrolog.v1.GetCertificateResponse
-	96,  // 187: gastrolog.v1.SystemService.PutCertificate:output_type -> gastrolog.v1.PutCertificateResponse
-	98,  // 188: gastrolog.v1.SystemService.DeleteCertificate:output_type -> gastrolog.v1.DeleteCertificateResponse
-	100, // 189: gastrolog.v1.SystemService.PauseVault:output_type -> gastrolog.v1.PauseVaultResponse
-	102, // 190: gastrolog.v1.SystemService.ResumeVault:output_type -> gastrolog.v1.ResumeVaultResponse
-	104, // 191: gastrolog.v1.SystemService.TestIngester:output_type -> gastrolog.v1.TestIngesterResponse
-	111, // 192: gastrolog.v1.SystemService.GetIngesterDefaults:output_type -> gastrolog.v1.GetIngesterDefaultsResponse
-	106, // 193: gastrolog.v1.SystemService.TriggerIngester:output_type -> gastrolog.v1.TriggerIngesterResponse
-	114, // 194: gastrolog.v1.SystemService.PutNodeConfig:output_type -> gastrolog.v1.PutNodeConfigResponse
-	34,  // 195: gastrolog.v1.SystemService.PutRoute:output_type -> gastrolog.v1.PutRouteResponse
-	36,  // 196: gastrolog.v1.SystemService.DeleteRoute:output_type -> gastrolog.v1.DeleteRouteResponse
-	116, // 197: gastrolog.v1.SystemService.GenerateName:output_type -> gastrolog.v1.GenerateNameResponse
-	118, // 198: gastrolog.v1.SystemService.ValidateExpression:output_type -> gastrolog.v1.ValidateExpressionResponse
-	120, // 199: gastrolog.v1.SystemService.WatchSystem:output_type -> gastrolog.v1.WatchSystemResponse
-	122, // 200: gastrolog.v1.SystemService.GetRouteStats:output_type -> gastrolog.v1.GetRouteStatsResponse
-	127, // 201: gastrolog.v1.SystemService.ListManagedFiles:output_type -> gastrolog.v1.ListManagedFilesResponse
-	129, // 202: gastrolog.v1.SystemService.DeleteManagedFile:output_type -> gastrolog.v1.DeleteManagedFileResponse
-	108, // 203: gastrolog.v1.SystemService.TestCloudService:output_type -> gastrolog.v1.TestCloudServiceResponse
-	131, // 204: gastrolog.v1.SystemService.TestHTTPLookup:output_type -> gastrolog.v1.TestHTTPLookupResponse
-	134, // 205: gastrolog.v1.SystemService.PreviewCSVLookup:output_type -> gastrolog.v1.PreviewCSVLookupResponse
-	137, // 206: gastrolog.v1.SystemService.PreviewJSONLookup:output_type -> gastrolog.v1.PreviewJSONLookupResponse
-	139, // 207: gastrolog.v1.SystemService.PreviewYAMLLookup:output_type -> gastrolog.v1.PreviewYAMLLookupResponse
-	20,  // 208: gastrolog.v1.SystemService.WatchIngesterStatus:output_type -> gastrolog.v1.WatchIngesterStatusResponse
-	141, // 209: gastrolog.v1.SystemService.PutCloudService:output_type -> gastrolog.v1.PutCloudServiceResponse
-	143, // 210: gastrolog.v1.SystemService.DeleteCloudService:output_type -> gastrolog.v1.DeleteCloudServiceResponse
-	145, // 211: gastrolog.v1.SystemService.SetNodeStorageConfig:output_type -> gastrolog.v1.SetNodeStorageConfigResponse
-	147, // 212: gastrolog.v1.SystemService.DeleteLookup:output_type -> gastrolog.v1.DeleteLookupResponse
-	151, // 213: gastrolog.v1.SystemService.PutLogLevels:output_type -> gastrolog.v1.PutLogLevelsResponse
-	154, // 214: gastrolog.v1.SystemService.ListLogComponents:output_type -> gastrolog.v1.ListLogComponentsResponse
-	164, // [164:215] is the sub-list for method output_type
-	113, // [113:164] is the sub-list for method input_type
-	113, // [113:113] is the sub-list for extension type_name
-	113, // [113:113] is the sub-list for extension extendee
-	0,   // [0:113] is the sub-list for field type_name
+	163, // 85: gastrolog.v1.GetIngesterDefaultsResponse.types:type_name -> gastrolog.v1.GetIngesterDefaultsResponse.TypesEntry
+	2,   // 86: gastrolog.v1.NodeConfig.state:type_name -> gastrolog.v1.NodeState
+	170, // 87: gastrolog.v1.NodeConfig.state_since:type_name -> google.protobuf.Timestamp
+	113, // 88: gastrolog.v1.PutNodeConfigRequest.config:type_name -> gastrolog.v1.NodeConfig
+	6,   // 89: gastrolog.v1.PutNodeConfigResponse.system:type_name -> gastrolog.v1.GetSystemResponse
+	124, // 90: gastrolog.v1.GetRouteStatsResponse.vault_stats:type_name -> gastrolog.v1.VaultRouteStats
+	125, // 91: gastrolog.v1.GetRouteStatsResponse.route_stats:type_name -> gastrolog.v1.PerRouteStats
+	126, // 92: gastrolog.v1.ListManagedFilesResponse.files:type_name -> gastrolog.v1.ManagedFileInfo
+	52,  // 93: gastrolog.v1.TestHTTPLookupRequest.config:type_name -> gastrolog.v1.HTTPLookupEntry
+	164, // 94: gastrolog.v1.TestHTTPLookupRequest.values:type_name -> gastrolog.v1.TestHTTPLookupRequest.ValuesEntry
+	133, // 95: gastrolog.v1.TestHTTPLookupResponse.results:type_name -> gastrolog.v1.TestHTTPLookupResult
+	165, // 96: gastrolog.v1.TestHTTPLookupResult.fields:type_name -> gastrolog.v1.TestHTTPLookupResult.FieldsEntry
+	136, // 97: gastrolog.v1.PreviewCSVLookupResponse.rows:type_name -> gastrolog.v1.CSVPreviewRow
+	166, // 98: gastrolog.v1.PreviewJSONLookupRequest.parameters:type_name -> gastrolog.v1.PreviewJSONLookupRequest.ParametersEntry
+	167, // 99: gastrolog.v1.PreviewYAMLLookupRequest.parameters:type_name -> gastrolog.v1.PreviewYAMLLookupRequest.ParametersEntry
+	168, // 100: gastrolog.v1.PutCloudServiceRequest.config:type_name -> gastrolog.v1.CloudService
+	6,   // 101: gastrolog.v1.PutCloudServiceResponse.system:type_name -> gastrolog.v1.GetSystemResponse
+	6,   // 102: gastrolog.v1.DeleteCloudServiceResponse.system:type_name -> gastrolog.v1.GetSystemResponse
+	169, // 103: gastrolog.v1.SetNodeStorageConfigRequest.config:type_name -> gastrolog.v1.NodeStorageConfig
+	6,   // 104: gastrolog.v1.SetNodeStorageConfigResponse.system:type_name -> gastrolog.v1.GetSystemResponse
+	69,  // 105: gastrolog.v1.DeleteLookupResponse.echo:type_name -> gastrolog.v1.SettingsMutationEcho
+	3,   // 106: gastrolog.v1.LogLevelRule.level:type_name -> gastrolog.v1.LogLevel
+	3,   // 107: gastrolog.v1.LogLevelConfig.default_level:type_name -> gastrolog.v1.LogLevel
+	149, // 108: gastrolog.v1.LogLevelConfig.rules:type_name -> gastrolog.v1.LogLevelRule
+	150, // 109: gastrolog.v1.PutLogLevelsRequest.config:type_name -> gastrolog.v1.LogLevelConfig
+	69,  // 110: gastrolog.v1.PutLogLevelsResponse.echo:type_name -> gastrolog.v1.SettingsMutationEcho
+	3,   // 111: gastrolog.v1.LogComponentInfo.effective_level:type_name -> gastrolog.v1.LogLevel
+	4,   // 112: gastrolog.v1.LogComponentInfo.source:type_name -> gastrolog.v1.LogComponentLevelSource
+	153, // 113: gastrolog.v1.ListLogComponentsResponse.components:type_name -> gastrolog.v1.LogComponentInfo
+	111, // 114: gastrolog.v1.GetIngesterDefaultsResponse.TypesEntry.value:type_name -> gastrolog.v1.IngesterTypeDefaults
+	5,   // 115: gastrolog.v1.SystemService.GetSystem:input_type -> gastrolog.v1.GetSystemRequest
+	18,  // 116: gastrolog.v1.SystemService.GetIngesterStatus:input_type -> gastrolog.v1.GetIngesterStatusRequest
+	22,  // 117: gastrolog.v1.SystemService.PutRotationPolicy:input_type -> gastrolog.v1.PutRotationPolicyRequest
+	24,  // 118: gastrolog.v1.SystemService.DeleteRotationPolicy:input_type -> gastrolog.v1.DeleteRotationPolicyRequest
+	26,  // 119: gastrolog.v1.SystemService.PutRetentionPolicy:input_type -> gastrolog.v1.PutRetentionPolicyRequest
+	28,  // 120: gastrolog.v1.SystemService.DeleteRetentionPolicy:input_type -> gastrolog.v1.DeleteRetentionPolicyRequest
+	30,  // 121: gastrolog.v1.SystemService.PutVault:input_type -> gastrolog.v1.PutVaultRequest
+	32,  // 122: gastrolog.v1.SystemService.DeleteVault:input_type -> gastrolog.v1.DeleteVaultRequest
+	38,  // 123: gastrolog.v1.SystemService.PutIngester:input_type -> gastrolog.v1.PutIngesterRequest
+	40,  // 124: gastrolog.v1.SystemService.DeleteIngester:input_type -> gastrolog.v1.DeleteIngesterRequest
+	42,  // 125: gastrolog.v1.SystemService.GetSettings:input_type -> gastrolog.v1.GetSettingsRequest
+	68,  // 126: gastrolog.v1.SystemService.PutServiceSettings:input_type -> gastrolog.v1.PutServiceSettingsRequest
+	71,  // 127: gastrolog.v1.SystemService.PutLookupSettings:input_type -> gastrolog.v1.PutLookupSettingsRequest
+	73,  // 128: gastrolog.v1.SystemService.PutMaxMindSettings:input_type -> gastrolog.v1.PutMaxMindSettingsRequest
+	75,  // 129: gastrolog.v1.SystemService.PutSetupSettings:input_type -> gastrolog.v1.PutSetupSettingsRequest
+	77,  // 130: gastrolog.v1.SystemService.RegenerateJwtSecret:input_type -> gastrolog.v1.RegenerateJwtSecretRequest
+	80,  // 131: gastrolog.v1.SystemService.GetPreferences:input_type -> gastrolog.v1.GetPreferencesRequest
+	82,  // 132: gastrolog.v1.SystemService.PutPreferences:input_type -> gastrolog.v1.PutPreferencesRequest
+	85,  // 133: gastrolog.v1.SystemService.GetSavedQueries:input_type -> gastrolog.v1.GetSavedQueriesRequest
+	87,  // 134: gastrolog.v1.SystemService.PutSavedQuery:input_type -> gastrolog.v1.PutSavedQueryRequest
+	89,  // 135: gastrolog.v1.SystemService.DeleteSavedQuery:input_type -> gastrolog.v1.DeleteSavedQueryRequest
+	91,  // 136: gastrolog.v1.SystemService.ListCertificates:input_type -> gastrolog.v1.ListCertificatesRequest
+	94,  // 137: gastrolog.v1.SystemService.GetCertificate:input_type -> gastrolog.v1.GetCertificateRequest
+	96,  // 138: gastrolog.v1.SystemService.PutCertificate:input_type -> gastrolog.v1.PutCertificateRequest
+	98,  // 139: gastrolog.v1.SystemService.DeleteCertificate:input_type -> gastrolog.v1.DeleteCertificateRequest
+	100, // 140: gastrolog.v1.SystemService.PauseVault:input_type -> gastrolog.v1.PauseVaultRequest
+	102, // 141: gastrolog.v1.SystemService.ResumeVault:input_type -> gastrolog.v1.ResumeVaultRequest
+	104, // 142: gastrolog.v1.SystemService.TestIngester:input_type -> gastrolog.v1.TestIngesterRequest
+	110, // 143: gastrolog.v1.SystemService.GetIngesterDefaults:input_type -> gastrolog.v1.GetIngesterDefaultsRequest
+	106, // 144: gastrolog.v1.SystemService.TriggerIngester:input_type -> gastrolog.v1.TriggerIngesterRequest
+	114, // 145: gastrolog.v1.SystemService.PutNodeConfig:input_type -> gastrolog.v1.PutNodeConfigRequest
+	34,  // 146: gastrolog.v1.SystemService.PutRoute:input_type -> gastrolog.v1.PutRouteRequest
+	36,  // 147: gastrolog.v1.SystemService.DeleteRoute:input_type -> gastrolog.v1.DeleteRouteRequest
+	116, // 148: gastrolog.v1.SystemService.GenerateName:input_type -> gastrolog.v1.GenerateNameRequest
+	118, // 149: gastrolog.v1.SystemService.ValidateExpression:input_type -> gastrolog.v1.ValidateExpressionRequest
+	120, // 150: gastrolog.v1.SystemService.WatchSystem:input_type -> gastrolog.v1.WatchSystemRequest
+	122, // 151: gastrolog.v1.SystemService.GetRouteStats:input_type -> gastrolog.v1.GetRouteStatsRequest
+	127, // 152: gastrolog.v1.SystemService.ListManagedFiles:input_type -> gastrolog.v1.ListManagedFilesRequest
+	129, // 153: gastrolog.v1.SystemService.DeleteManagedFile:input_type -> gastrolog.v1.DeleteManagedFileRequest
+	108, // 154: gastrolog.v1.SystemService.TestCloudService:input_type -> gastrolog.v1.TestCloudServiceRequest
+	131, // 155: gastrolog.v1.SystemService.TestHTTPLookup:input_type -> gastrolog.v1.TestHTTPLookupRequest
+	134, // 156: gastrolog.v1.SystemService.PreviewCSVLookup:input_type -> gastrolog.v1.PreviewCSVLookupRequest
+	137, // 157: gastrolog.v1.SystemService.PreviewJSONLookup:input_type -> gastrolog.v1.PreviewJSONLookupRequest
+	139, // 158: gastrolog.v1.SystemService.PreviewYAMLLookup:input_type -> gastrolog.v1.PreviewYAMLLookupRequest
+	20,  // 159: gastrolog.v1.SystemService.WatchIngesterStatus:input_type -> gastrolog.v1.WatchIngesterStatusRequest
+	141, // 160: gastrolog.v1.SystemService.PutCloudService:input_type -> gastrolog.v1.PutCloudServiceRequest
+	143, // 161: gastrolog.v1.SystemService.DeleteCloudService:input_type -> gastrolog.v1.DeleteCloudServiceRequest
+	145, // 162: gastrolog.v1.SystemService.SetNodeStorageConfig:input_type -> gastrolog.v1.SetNodeStorageConfigRequest
+	147, // 163: gastrolog.v1.SystemService.DeleteLookup:input_type -> gastrolog.v1.DeleteLookupRequest
+	151, // 164: gastrolog.v1.SystemService.PutLogLevels:input_type -> gastrolog.v1.PutLogLevelsRequest
+	154, // 165: gastrolog.v1.SystemService.ListLogComponents:input_type -> gastrolog.v1.ListLogComponentsRequest
+	6,   // 166: gastrolog.v1.SystemService.GetSystem:output_type -> gastrolog.v1.GetSystemResponse
+	19,  // 167: gastrolog.v1.SystemService.GetIngesterStatus:output_type -> gastrolog.v1.GetIngesterStatusResponse
+	23,  // 168: gastrolog.v1.SystemService.PutRotationPolicy:output_type -> gastrolog.v1.PutRotationPolicyResponse
+	25,  // 169: gastrolog.v1.SystemService.DeleteRotationPolicy:output_type -> gastrolog.v1.DeleteRotationPolicyResponse
+	27,  // 170: gastrolog.v1.SystemService.PutRetentionPolicy:output_type -> gastrolog.v1.PutRetentionPolicyResponse
+	29,  // 171: gastrolog.v1.SystemService.DeleteRetentionPolicy:output_type -> gastrolog.v1.DeleteRetentionPolicyResponse
+	31,  // 172: gastrolog.v1.SystemService.PutVault:output_type -> gastrolog.v1.PutVaultResponse
+	33,  // 173: gastrolog.v1.SystemService.DeleteVault:output_type -> gastrolog.v1.DeleteVaultResponse
+	39,  // 174: gastrolog.v1.SystemService.PutIngester:output_type -> gastrolog.v1.PutIngesterResponse
+	41,  // 175: gastrolog.v1.SystemService.DeleteIngester:output_type -> gastrolog.v1.DeleteIngesterResponse
+	59,  // 176: gastrolog.v1.SystemService.GetSettings:output_type -> gastrolog.v1.GetSettingsResponse
+	70,  // 177: gastrolog.v1.SystemService.PutServiceSettings:output_type -> gastrolog.v1.PutServiceSettingsResponse
+	72,  // 178: gastrolog.v1.SystemService.PutLookupSettings:output_type -> gastrolog.v1.PutLookupSettingsResponse
+	74,  // 179: gastrolog.v1.SystemService.PutMaxMindSettings:output_type -> gastrolog.v1.PutMaxMindSettingsResponse
+	76,  // 180: gastrolog.v1.SystemService.PutSetupSettings:output_type -> gastrolog.v1.PutSetupSettingsResponse
+	78,  // 181: gastrolog.v1.SystemService.RegenerateJwtSecret:output_type -> gastrolog.v1.RegenerateJwtSecretResponse
+	81,  // 182: gastrolog.v1.SystemService.GetPreferences:output_type -> gastrolog.v1.GetPreferencesResponse
+	83,  // 183: gastrolog.v1.SystemService.PutPreferences:output_type -> gastrolog.v1.PutPreferencesResponse
+	86,  // 184: gastrolog.v1.SystemService.GetSavedQueries:output_type -> gastrolog.v1.GetSavedQueriesResponse
+	88,  // 185: gastrolog.v1.SystemService.PutSavedQuery:output_type -> gastrolog.v1.PutSavedQueryResponse
+	90,  // 186: gastrolog.v1.SystemService.DeleteSavedQuery:output_type -> gastrolog.v1.DeleteSavedQueryResponse
+	92,  // 187: gastrolog.v1.SystemService.ListCertificates:output_type -> gastrolog.v1.ListCertificatesResponse
+	95,  // 188: gastrolog.v1.SystemService.GetCertificate:output_type -> gastrolog.v1.GetCertificateResponse
+	97,  // 189: gastrolog.v1.SystemService.PutCertificate:output_type -> gastrolog.v1.PutCertificateResponse
+	99,  // 190: gastrolog.v1.SystemService.DeleteCertificate:output_type -> gastrolog.v1.DeleteCertificateResponse
+	101, // 191: gastrolog.v1.SystemService.PauseVault:output_type -> gastrolog.v1.PauseVaultResponse
+	103, // 192: gastrolog.v1.SystemService.ResumeVault:output_type -> gastrolog.v1.ResumeVaultResponse
+	105, // 193: gastrolog.v1.SystemService.TestIngester:output_type -> gastrolog.v1.TestIngesterResponse
+	112, // 194: gastrolog.v1.SystemService.GetIngesterDefaults:output_type -> gastrolog.v1.GetIngesterDefaultsResponse
+	107, // 195: gastrolog.v1.SystemService.TriggerIngester:output_type -> gastrolog.v1.TriggerIngesterResponse
+	115, // 196: gastrolog.v1.SystemService.PutNodeConfig:output_type -> gastrolog.v1.PutNodeConfigResponse
+	35,  // 197: gastrolog.v1.SystemService.PutRoute:output_type -> gastrolog.v1.PutRouteResponse
+	37,  // 198: gastrolog.v1.SystemService.DeleteRoute:output_type -> gastrolog.v1.DeleteRouteResponse
+	117, // 199: gastrolog.v1.SystemService.GenerateName:output_type -> gastrolog.v1.GenerateNameResponse
+	119, // 200: gastrolog.v1.SystemService.ValidateExpression:output_type -> gastrolog.v1.ValidateExpressionResponse
+	121, // 201: gastrolog.v1.SystemService.WatchSystem:output_type -> gastrolog.v1.WatchSystemResponse
+	123, // 202: gastrolog.v1.SystemService.GetRouteStats:output_type -> gastrolog.v1.GetRouteStatsResponse
+	128, // 203: gastrolog.v1.SystemService.ListManagedFiles:output_type -> gastrolog.v1.ListManagedFilesResponse
+	130, // 204: gastrolog.v1.SystemService.DeleteManagedFile:output_type -> gastrolog.v1.DeleteManagedFileResponse
+	109, // 205: gastrolog.v1.SystemService.TestCloudService:output_type -> gastrolog.v1.TestCloudServiceResponse
+	132, // 206: gastrolog.v1.SystemService.TestHTTPLookup:output_type -> gastrolog.v1.TestHTTPLookupResponse
+	135, // 207: gastrolog.v1.SystemService.PreviewCSVLookup:output_type -> gastrolog.v1.PreviewCSVLookupResponse
+	138, // 208: gastrolog.v1.SystemService.PreviewJSONLookup:output_type -> gastrolog.v1.PreviewJSONLookupResponse
+	140, // 209: gastrolog.v1.SystemService.PreviewYAMLLookup:output_type -> gastrolog.v1.PreviewYAMLLookupResponse
+	21,  // 210: gastrolog.v1.SystemService.WatchIngesterStatus:output_type -> gastrolog.v1.WatchIngesterStatusResponse
+	142, // 211: gastrolog.v1.SystemService.PutCloudService:output_type -> gastrolog.v1.PutCloudServiceResponse
+	144, // 212: gastrolog.v1.SystemService.DeleteCloudService:output_type -> gastrolog.v1.DeleteCloudServiceResponse
+	146, // 213: gastrolog.v1.SystemService.SetNodeStorageConfig:output_type -> gastrolog.v1.SetNodeStorageConfigResponse
+	148, // 214: gastrolog.v1.SystemService.DeleteLookup:output_type -> gastrolog.v1.DeleteLookupResponse
+	152, // 215: gastrolog.v1.SystemService.PutLogLevels:output_type -> gastrolog.v1.PutLogLevelsResponse
+	155, // 216: gastrolog.v1.SystemService.ListLogComponents:output_type -> gastrolog.v1.ListLogComponentsResponse
+	166, // [166:217] is the sub-list for method output_type
+	115, // [115:166] is the sub-list for method input_type
+	115, // [115:115] is the sub-list for extension type_name
+	115, // [115:115] is the sub-list for extension extendee
+	0,   // [0:115] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_system_proto_init() }
@@ -9856,7 +9966,7 @@ func file_gastrolog_v1_system_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_system_proto_rawDesc), len(file_gastrolog_v1_system_proto_rawDesc)),
-			NumEnums:      4,
+			NumEnums:      5,
 			NumMessages:   163,
 			NumExtensions: 0,
 			NumServices:   1,

@@ -5,7 +5,7 @@
 
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
-import { LogLevelConfig, RouteStage, VaultConfig, VaultPlacement } from "./system_pb.js";
+import { LogLevelConfig, NodeState, RouteStage, VaultConfig, VaultPlacement } from "./system_pb.js";
 import { CloudService, NodeStorageConfig } from "./storage_pb.js";
 
 /**
@@ -251,6 +251,12 @@ export class SystemCommand extends Message<SystemCommand> {
      */
     value: PutLogLevelsCommand;
     case: "putLogLevels";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.SetNodeStateCommand set_node_state = 39;
+     */
+    value: SetNodeStateCommand;
+    case: "setNodeState";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<SystemCommand>) {
@@ -299,6 +305,7 @@ export class SystemCommand extends Message<SystemCommand> {
     { no: 36, name: "set_ingester_assignment", kind: "message", T: SetIngesterAssignmentCommand, oneof: "command" },
     { no: 37, name: "set_ingester_checkpoint", kind: "message", T: SetIngesterCheckpointCommand, oneof: "command" },
     { no: 38, name: "put_log_levels", kind: "message", T: PutLogLevelsCommand, oneof: "command" },
+    { no: 39, name: "set_node_state", kind: "message", T: SetNodeStateCommand, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemCommand {
@@ -1412,6 +1419,22 @@ export class PutNodeConfigCommand extends Message<PutNodeConfigCommand> {
    */
   name = "";
 
+  /**
+   * Lifecycle state. Proposer-supplied; the FSM apply records it as
+   * given. For new-node registration (JoinCluster), proposer sets
+   * state = LIVE and state_since = time.Now() so replicas apply the
+   * same deterministic value. Snapshot serialization round-trips
+   * these fields so post-restore nodes preserve their state.
+   *
+   * @generated from field: gastrolog.v1.NodeState state = 3;
+   */
+  state = NodeState.UNSPECIFIED;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp state_since = 4;
+   */
+  stateSince?: Timestamp;
+
   constructor(data?: PartialMessage<PutNodeConfigCommand>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1422,6 +1445,8 @@ export class PutNodeConfigCommand extends Message<PutNodeConfigCommand> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "state", kind: "enum", T: proto3.getEnumType(NodeState) },
+    { no: 4, name: "state_since", kind: "message", T: Timestamp },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutNodeConfigCommand {
@@ -1475,6 +1500,62 @@ export class DeleteNodeConfigCommand extends Message<DeleteNodeConfigCommand> {
 
   static equals(a: DeleteNodeConfigCommand | PlainMessage<DeleteNodeConfigCommand> | undefined, b: DeleteNodeConfigCommand | PlainMessage<DeleteNodeConfigCommand> | undefined): boolean {
     return proto3.util.equals(DeleteNodeConfigCommand, a, b);
+  }
+}
+
+/**
+ * SetNodeStateCommand transitions a node from its current lifecycle
+ * state to the given state. The since field is the wall-clock instant
+ * captured by the proposer at propose-time; replicas apply it
+ * deterministically. Illegal transitions are rejected by the FSM
+ * apply validator (see docs/node-lifecycle-design.md "Transitions in
+ * detail").
+ *
+ * @generated from message gastrolog.v1.SetNodeStateCommand
+ */
+export class SetNodeStateCommand extends Message<SetNodeStateCommand> {
+  /**
+   * @generated from field: bytes id = 1;
+   */
+  id = new Uint8Array(0);
+
+  /**
+   * @generated from field: gastrolog.v1.NodeState state = 2;
+   */
+  state = NodeState.UNSPECIFIED;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp since = 3;
+   */
+  since?: Timestamp;
+
+  constructor(data?: PartialMessage<SetNodeStateCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.SetNodeStateCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "state", kind: "enum", T: proto3.getEnumType(NodeState) },
+    { no: 3, name: "since", kind: "message", T: Timestamp },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SetNodeStateCommand {
+    return new SetNodeStateCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SetNodeStateCommand {
+    return new SetNodeStateCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SetNodeStateCommand {
+    return new SetNodeStateCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SetNodeStateCommand | PlainMessage<SetNodeStateCommand> | undefined, b: SetNodeStateCommand | PlainMessage<SetNodeStateCommand> | undefined): boolean {
+    return proto3.util.equals(SetNodeStateCommand, a, b);
   }
 }
 

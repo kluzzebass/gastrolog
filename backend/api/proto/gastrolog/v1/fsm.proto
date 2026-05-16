@@ -54,6 +54,7 @@ message SystemCommand {
     SetIngesterAssignmentCommand set_ingester_assignment = 36;
     SetIngesterCheckpointCommand set_ingester_checkpoint = 37;
     PutLogLevelsCommand put_log_levels = 38;
+    SetNodeStateCommand set_node_state = 39;
   }
 }
 
@@ -215,10 +216,29 @@ message DeleteUserRefreshTokensCommand {
 message PutNodeConfigCommand {
   bytes id = 1;
   string name = 2;
+  // Lifecycle state. Proposer-supplied; the FSM apply records it as
+  // given. For new-node registration (JoinCluster), proposer sets
+  // state = LIVE and state_since = time.Now() so replicas apply the
+  // same deterministic value. Snapshot serialization round-trips
+  // these fields so post-restore nodes preserve their state.
+  NodeState state = 3;
+  google.protobuf.Timestamp state_since = 4;
 }
 
 message DeleteNodeConfigCommand {
   bytes id = 1;
+}
+
+// SetNodeStateCommand transitions a node from its current lifecycle
+// state to the given state. The since field is the wall-clock instant
+// captured by the proposer at propose-time; replicas apply it
+// deterministically. Illegal transitions are rejected by the FSM
+// apply validator (see docs/node-lifecycle-design.md "Transitions in
+// detail").
+message SetNodeStateCommand {
+  bytes id = 1;
+  NodeState state = 2;
+  google.protobuf.Timestamp since = 3;
 }
 
 // --- Cluster TLS ---

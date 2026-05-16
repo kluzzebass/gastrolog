@@ -1,15 +1,120 @@
 package system
 
 import (
+	"fmt"
 	"gastrolog/internal/glid"
 	"slices"
 	"strings"
+	"time"
 )
 
-// NodeConfig represents a cluster node configuration with its human-readable name.
+// NodeState is the lifecycle stage of a cluster node. See
+// docs/node-lifecycle-design.md for the full state machine.
+type NodeState uint8
+
+const (
+	// NodeStateUnknown is the zero value, present on legacy records
+	// minted before the State field existed. Treat as NodeStateLive
+	// via EffectiveState() for backward compatibility.
+	NodeStateUnknown NodeState = iota
+	NodeStateLive
+	NodeStateUnreachable
+	NodeStateMaintenance
+	NodeStateDraining
+	NodeStateDecommissioning
+)
+
+// String returns the human-readable label.
+func (s NodeState) String() string {
+	switch s {
+	case NodeStateUnknown:
+		return "unknown"
+	case NodeStateLive:
+		return "live"
+	case NodeStateUnreachable:
+		return "unreachable"
+	case NodeStateMaintenance:
+		return "maintenance"
+	case NodeStateDraining:
+		return "draining"
+	case NodeStateDecommissioning:
+		return "decommissioning"
+	default:
+		return fmt.Sprintf("nodestate(%d)", uint8(s))
+	}
+}
+
+// ValidateNodeStateTransition returns nil if `to` is a legal successor
+// of `from`, or an error describing the illegal transition. Legacy
+// records with NodeStateUnknown are treated as NodeStateLive for the
+// transition check.
+//
+// Legal transitions (see docs/node-lifecycle-design.md "Transitions in detail"):
+//
+//	Live           → Unreachable | Maintenance | Draining
+//	Unreachable    → Live | Maintenance | Draining
+//	Maintenance    → Live | Draining
+//	Draining       → Decommissioning | Live (cancel)
+//	Decommissioning → (Removed via DeleteNode; no in-FSM successor)
+func ValidateNodeStateTransition(from, to NodeState) error {
+	effFrom := from
+	if effFrom == NodeStateUnknown {
+		effFrom = NodeStateLive
+	}
+	if effFrom == to {
+		// Idempotent — re-applying the same state is a no-op success.
+		return nil
+	}
+	var legal []NodeState
+	switch effFrom {
+	case NodeStateUnknown:
+		// Unreachable: effFrom was remapped to Live above; this branch
+		// is unreachable but present to satisfy exhaustive-switch
+		// linting.
+		legal = nil
+	case NodeStateLive:
+		legal = []NodeState{NodeStateUnreachable, NodeStateMaintenance, NodeStateDraining}
+	case NodeStateUnreachable:
+		legal = []NodeState{NodeStateLive, NodeStateMaintenance, NodeStateDraining}
+	case NodeStateMaintenance:
+		legal = []NodeState{NodeStateLive, NodeStateDraining}
+	case NodeStateDraining:
+		legal = []NodeState{NodeStateDecommissioning, NodeStateLive}
+	case NodeStateDecommissioning:
+		// No in-FSM successor — Decommissioning → Removed happens via
+		// DeleteNode, not a state transition.
+		legal = nil
+	}
+	if slices.Contains(legal, to) {
+		return nil
+	}
+	return fmt.Errorf("illegal node state transition: %s → %s", from, to)
+}
+
+// NodeConfig represents a cluster node configuration with its
+// human-readable name and lifecycle state.
 type NodeConfig struct {
 	ID   glid.GLID `json:"id"`
 	Name string    `json:"name"`
+	// State is the node's lifecycle stage. Zero value (NodeStateUnknown)
+	// is treated as NodeStateLive via EffectiveState() for backward
+	// compatibility with records minted before this field existed.
+	State NodeState `json:"state,omitempty"`
+	// StateSince is the wall-clock instant the current State was
+	// entered. Zero if the State has never been explicitly set (e.g.,
+	// legacy record).
+	StateSince time.Time `json:"stateSince,omitzero"`
+}
+
+// EffectiveState returns the node's State with the legacy/zero-value
+// case (NodeStateUnknown) mapped to NodeStateLive. Use this for any
+// behavioral decision that consults State; the raw `State` field
+// preserves the FSM record's actual value for round-tripping.
+func (n NodeConfig) EffectiveState() NodeState {
+	if n.State == NodeStateUnknown {
+		return NodeStateLive
+	}
+	return n.State
 }
 
 // FileStorage defines a local file storage on a node.

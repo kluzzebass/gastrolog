@@ -685,11 +685,54 @@ func ExtractDeleteUserRefreshTokens(cmd *gastrologv1.DeleteUserRefreshTokensComm
 // Nodes
 // ---------------------------------------------------------------------------
 
-func putNodeConfigCmd(node system.NodeConfig) *gastrologv1.PutNodeConfigCommand {
-	return &gastrologv1.PutNodeConfigCommand{
-		Id:   node.ID.ToProto(),
-		Name: node.Name,
+func NodeStateToProto(s system.NodeState) gastrologv1.NodeState {
+	switch s {
+	case system.NodeStateUnknown:
+		return gastrologv1.NodeState_NODE_STATE_UNSPECIFIED
+	case system.NodeStateLive:
+		return gastrologv1.NodeState_NODE_STATE_LIVE
+	case system.NodeStateUnreachable:
+		return gastrologv1.NodeState_NODE_STATE_UNREACHABLE
+	case system.NodeStateMaintenance:
+		return gastrologv1.NodeState_NODE_STATE_MAINTENANCE
+	case system.NodeStateDraining:
+		return gastrologv1.NodeState_NODE_STATE_DRAINING
+	case system.NodeStateDecommissioning:
+		return gastrologv1.NodeState_NODE_STATE_DECOMMISSIONING
+	default:
+		return gastrologv1.NodeState_NODE_STATE_UNSPECIFIED
 	}
+}
+
+func NodeStateFromProto(s gastrologv1.NodeState) system.NodeState {
+	switch s {
+	case gastrologv1.NodeState_NODE_STATE_UNSPECIFIED:
+		return system.NodeStateUnknown
+	case gastrologv1.NodeState_NODE_STATE_LIVE:
+		return system.NodeStateLive
+	case gastrologv1.NodeState_NODE_STATE_UNREACHABLE:
+		return system.NodeStateUnreachable
+	case gastrologv1.NodeState_NODE_STATE_MAINTENANCE:
+		return system.NodeStateMaintenance
+	case gastrologv1.NodeState_NODE_STATE_DRAINING:
+		return system.NodeStateDraining
+	case gastrologv1.NodeState_NODE_STATE_DECOMMISSIONING:
+		return system.NodeStateDecommissioning
+	default:
+		return system.NodeStateUnknown
+	}
+}
+
+func putNodeConfigCmd(node system.NodeConfig) *gastrologv1.PutNodeConfigCommand {
+	cmd := &gastrologv1.PutNodeConfigCommand{
+		Id:    node.ID.ToProto(),
+		Name:  node.Name,
+		State: NodeStateToProto(node.State),
+	}
+	if !node.StateSince.IsZero() {
+		cmd.StateSince = timestamppb.New(node.StateSince)
+	}
+	return cmd
 }
 
 // NewPutNodeConfig creates a ConfigCommand for PutNodeConfig.
@@ -708,17 +751,49 @@ func NewDeleteNodeConfig(id glid.GLID) *gastrologv1.SystemCommand {
 	}
 }
 
+// NewSetNodeState creates a ConfigCommand for SetNodeState. The
+// `since` argument is captured by the proposer at propose-time and
+// applied deterministically by all replicas.
+func NewSetNodeState(id glid.GLID, state system.NodeState, since time.Time) *gastrologv1.SystemCommand {
+	return &gastrologv1.SystemCommand{
+		Command: &gastrologv1.SystemCommand_SetNodeState{
+			SetNodeState: &gastrologv1.SetNodeStateCommand{
+				Id:    id.ToProto(),
+				State: NodeStateToProto(state),
+				Since: timestamppb.New(since),
+			},
+		},
+	}
+}
+
 // ExtractPutNodeConfig converts a PutNodeConfigCommand back to a NodeConfig.
 func ExtractPutNodeConfig(cmd *gastrologv1.PutNodeConfigCommand) (system.NodeConfig, error) {
-	return system.NodeConfig{
-		ID:   glid.FromBytes(cmd.GetId()),
-		Name: cmd.GetName(),
-	}, nil
+	out := system.NodeConfig{
+		ID:    glid.FromBytes(cmd.GetId()),
+		Name:  cmd.GetName(),
+		State: NodeStateFromProto(cmd.GetState()),
+	}
+	if ts := cmd.GetStateSince(); ts != nil {
+		out.StateSince = ts.AsTime()
+	}
+	return out, nil
 }
 
 // ExtractDeleteNodeConfig extracts the UUID from a DeleteNodeConfigCommand.
 func ExtractDeleteNodeConfig(cmd *gastrologv1.DeleteNodeConfigCommand) (glid.GLID, error) {
 	return glid.FromBytes(cmd.GetId()), nil
+}
+
+// ExtractSetNodeState converts a SetNodeStateCommand into its
+// (id, state, since) tuple for the FSM apply path.
+func ExtractSetNodeState(cmd *gastrologv1.SetNodeStateCommand) (glid.GLID, system.NodeState, time.Time, error) {
+	id := glid.FromBytes(cmd.GetId())
+	state := NodeStateFromProto(cmd.GetState())
+	var since time.Time
+	if ts := cmd.GetSince(); ts != nil {
+		since = ts.AsTime()
+	}
+	return id, state, since, nil
 }
 
 // ---------------------------------------------------------------------------

@@ -97,6 +97,7 @@ func (s *Store) isEmpty() bool {
 		len(s.ingesters) == 0 && len(s.routes) == 0 &&
 		len(s.managedFiles) == 0 && len(s.cloudServices) == 0 &&
 		len(s.nodeStorageConfigs) == 0 &&
+		len(s.nodes) == 0 &&
 		!s.ss.hasServerSettings && s.clusterTLS == nil &&
 		s.logLevels == nil
 }
