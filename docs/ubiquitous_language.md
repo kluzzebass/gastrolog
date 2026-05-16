@@ -712,7 +712,8 @@ Live on `Config` directly (not as entities):
 | sealed chunk     | closed chunk, finalized chunk | "Sealed" is what the chunk manager actually calls it.  |
 | cloud-backed     | cloud chunk       | Cloud-backed describes storage; "cloud chunk" conflates with archival state. |
 | archived         | cold              | "Archived" is the canonical flag; cloud storage-class is orthogonal. |
-| vault-ctl Raft   |                   | One Raft group per vault, authoritative for that vault's chunk metadata. |
+| vault-ctl Raft   |                   | One Raft group per vault, authoritative for that vault's chunk metadata. Follows the `{scope}-ctl` naming pattern for control-plane Raft groups. |
+| cluster-ctl Raft | system Raft, config Raft, cluster Raft | One Raft group per cluster, authoritative for cluster-wide configuration. Establishes the `{scope}-ctl` pattern in pair with `vault-ctl Raft`. Rename of the on-disk identifier queued via gastrolog-5eu6v. |
 | instance FSM     |                   | Per-vault chunk-metadata sub-FSM in `vaultctlfsm`. |
 | vault replication |                  | Record streams from leader to follower, per vault. |
 | ingester         | source, collector | "Ingester" is the proto name; "source" leaks from UI copy.          |
