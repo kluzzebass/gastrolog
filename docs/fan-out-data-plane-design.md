@@ -97,11 +97,11 @@ The leader-driven model has a clean rotation decision: the leader's local chunk 
 The mechanism: **first replica whose local state fires `ShouldRotate` proposes the seal; vault-ctl Raft serializes; first proposal wins.**
 
 1. Each replica evaluates `ShouldRotate` locally on every append, against its own `ActiveChunkState` ([chunk/rotation.go#L46](backend/internal/chunk/rotation.go#L46)). The interface is already a pure function of one chunk's state — no cross-replica coordination required to evaluate.
-2. The replica whose state hits the threshold first proposes `CmdBeginSeal` (+ `CmdCreateActive` for the successor chunk) via vault-ctl Raft.
-3. Other replicas observe the apply, transition the chunk to `Sealing`, and direct new appends to the new active chunk.
-4. Reconcile at seal time converges record sets across replicas before the chunk transitions from `Sealing` to `Sealed`.
+2. The replica whose state hits the threshold first mints a fresh ChunkID via [`glid.New()`](backend/internal/glid/glid.go#L32) (UUIDv7-based, locally unique by construction — no coordination needed) and proposes `CmdBeginSeal(oldChunkID) + CmdCreateActive(newChunkID)` via vault-ctl Raft.
+3. Other replicas observe the apply, transition the old chunk to `Sealing`, and start directing new appends to the new active chunk identified by `newChunkID`.
+4. Reconcile at seal time converges record sets across replicas before the old chunk transitions from `Sealing` to `Sealed`.
 
-The triggering replica is whichever's `ShouldRotate` happened to fire first — under load-balanced fan-out routing, that's usually the most-loaded replica, which varies dynamically. Multiple replicas can race; vault-ctl Raft serializes; first to commit wins.
+The triggering replica is whichever's `ShouldRotate` happened to fire first — under load-balanced fan-out routing, that's usually the most-loaded replica, which varies dynamically. Multiple replicas can race; each mints its own candidate ChunkID via `glid.New()`; vault-ctl Raft serializes the proposals; the first-to-commit's ChunkID becomes the new active. Losing proposals are discarded; their candidate ChunkIDs are just unused GLIDs and don't leak (no records were associated with them).
 
 ### Why this works for each rotation policy
 
