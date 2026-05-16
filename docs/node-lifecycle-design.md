@@ -158,7 +158,11 @@ Option B (`pendingCatchups` twin) and Option C (explicit `Holders` field) remain
 
 ## Forward compatibility: multi-active-chunk-per-vault
 
-A possible future feature places multiple concurrent active chunks for a single vault on different nodes, enabling per-vault write throughput to scale roughly linearly with the active-chunk count (each active leader's append+replicate pipeline is independent of the others).
+A possible future feature places multiple concurrent active chunks for a single vault on different nodes. The benefits are three distinct properties of "use the available capacity better":
+
+- **Static parallel throughput** — N actives ≈ N× per-vault write capacity when writes distribute evenly (each active leader's append+replicate pipeline is independent).
+- **Dynamic load balancing** — when one active's node is struggling (slow disk, GC pause, network saturation, CPU pressure from another process), the forwarder shifts new writes to the healthier active. Average throughput may be the same but variance drops sharply.
+- **Failure isolation for writes** — if one active's node hard-fails, the other active(s) keep accepting writes for the vault. With single-active, writes stall until failover/election completes.
 
 This design does not preclude that extension:
 
