@@ -10,6 +10,8 @@ This design introduces six explicit node states with deliberate transitions, sep
 
 The category "soft-offline" describes any state where the cluster considers the node temporarily not-fully-participating without considering it removed. Two concrete states fall in this category: `Unreachable` (cluster's automatic detection) and `Maintenance` (operator's deliberate declaration). They share the placement-rotation gate but differ in their entry/exit semantics and operator UX.
 
+A companion epic, [gastrolog-2ujjh](dcat://gastrolog-2ujjh) (Fan-out data-plane architecture), reshapes the record write path, reconcile mechanism, and chunk residency model afterward. This document covers the control-plane work that lands first. Three pieces of this design are transitional under that future architecture — see "Relationship to the data-plane epic" below.
+
 ## States
 
 ```mermaid
@@ -158,41 +160,17 @@ A new background sweep runs per vault-ctl group **on the group's leader**. When 
 
 Learners can become `Unreachable` (heartbeats lapsed) or be placed in `Maintenance` (operator) the same way voters can. A learner in either soft-offline state is not promoted while in that state. State transition back to `Live` unlocks promotion on the next sweep tick.
 
-## How this design resolves [gastrolog-5rh68](dcat://gastrolog-5rh68)
+## Relationship to the data-plane epic
 
-The companion design issue for residency tracking offered three options. Empirical investigation of read routing (see [query_remote.go#L105-L142](backend/internal/server/query_remote.go#L105) `remoteVaultsByNodeFiltered`) showed:
+This design's lifecycle work — states, transitions, learner promotion, placement guard, CLI surface — ships under the FSM-authority migration epic. The companion epic [gastrolog-2ujjh](dcat://gastrolog-2ujjh) (Fan-out data-plane architecture) lands afterward and reshapes the record write path, reconcile mechanism, and chunk residency model.
 
-- Read fan-out routes to the placement leader's node only
-- No consultation of `LivePeers`, no follower fallback, no `ChunkResidency` consultation
+Three pieces of this design are **transitional**: they correctly fix pre-fan-out bugs but become unnecessary or reframed under the data-plane redesign.
 
-Given that read routing does not consult residency, **Option A (constrained placement, no new FSM state)** is sufficient. Residency continues to derive from `placement_set - pendingDeletes.ExpectedFrom`. The placement guard above prevents placement from rotating off a node in either soft-offline state (`Unreachable` or `Maintenance`) — the only path through which placement could lie about residency.
+- **The placement-rotation gate on soft-offline states.** Under the current placement-as-residency model, the gate prevents placement from rotating off `Unreachable` or `Maintenance` nodes, fixing the RF=1 redeploy bug. Under fan-out's Receiving/Holding split, placement editing is confined to the Receiving set; removal from Holding requires explicit confirmation that other holders have the records. The gate dissolves into the Holding-set semantics.
+- **The `Draining` state with its drain orchestrator.** Today (under this epic): Draining is an explicit state with a worker that transfers chunks off the node before transitioning to Decommissioning. Under fan-out: drain becomes a placement edit (remove from Receiving); Holding shrinks naturally as records propagate; the node becomes safe to remove when Holding no longer references it. The orchestrator goes away.
+- **Active-chunk seal on preStop drain.** Today the leader holds unsealed state that must be flushed before SIGTERM to avoid losing records. Under fan-out there is no leader-only unsealed state; records exist on all Receiving replicas at write time. The preStop seal step becomes unnecessary.
 
-Option B (`pendingCatchups` twin) and Option C (explicit `Holders` field) remain available as escalation paths if a future design adds read routing that consults residency (e.g., follower-based read fallback).
-
-## Forward compatibility: multi-active-chunk-per-vault
-
-A possible future feature places multiple concurrent active chunks for a single vault on different nodes. The benefits are three distinct properties of "use the available capacity better":
-
-- **Static parallel throughput** — N actives ≈ N× per-vault write capacity when writes distribute evenly (each active leader's append+replicate pipeline is independent).
-- **Dynamic load balancing** — when one active's node is struggling (slow disk, GC pause, network saturation, CPU pressure from another process), the forwarder shifts new writes to the healthier active. Average throughput may be the same but variance drops sharply. The signal is already in the codebase: [`chanwatch.PressureGate`](backend/internal/cluster/record_forwarder.go#L90) tracks per-node forward-channel pressure on a 1-second cadence and is already consulted by ingesters for backpressure. Multi-active routing reuses that same per-node pressure data; no new signal mechanism is needed.
-- **Failure isolation for writes** — if one active's node hard-fails, the other active(s) keep accepting writes for the vault. With single-active, writes stall until failover/election completes.
-
-This design does not preclude that extension:
-
-- **Node lifecycle states** are per-node, not per-vault structure. Whether a vault has one active chunk or many is invisible to `Live` / `Unreachable` / `Maintenance` / `Draining` / `Decommissioning` / `Removed`.
-- **The placement guard** on `Unreachable` and `Maintenance` fires per-placement; if a vault carries multiple active-leader placements, each has its own independent guard.
-- **Residency derivation** (`placement_set - pendingDeletes.ExpectedFrom`) is per-chunk, not per-vault. Each active chunk's residency answer is self-contained.
-- **Vault-ctl Raft groups** serialize chunk-lifecycle events only (`CmdBeginSeal`, `CmdSealChunk`, `CmdAckDelete`, etc.); record appends flow through stream replication ([orchestrator/replication.go](backend/internal/orchestrator/replication.go) `replicateToFollower`) and are not gated by Raft consensus. Multiplying active chunks does not multiply Raft load proportional to write rate — only the chunk-lifecycle event rate, which is essentially unchanged (same number of seals per unit time whether they happen serially or in parallel).
-- **Learner promotion** is per-vault-ctl-group and per-system-Raft, unaffected by active-chunk count.
-
-The enablers for the future feature, when it gets scoped, are limited to:
-
-1. **Placement schema extension** — support multiple "active leader" placements per vault, keyed by ChunkID. The current schema has a single `Leader: true` entry per vault; the extension is either multiple Leader entries or an explicit per-chunk placement variant.
-2. **Ingester forwarder routing** — pick any active leader (round-robin, hash-based, or load-aware) instead of "the" leader. Producer-side API does not change.
-3. **Read routing** — fan out to all active leaders for live-tail reads. Sealed chunks are unaffected; their residency is already per-chunk and the read path already routes per-chunk for sealed content.
-4. **Per-active-chunk rotation** — the rotation policy interface ([`chunk/rotation.go`](backend/internal/chunk/rotation.go) `ShouldRotate(state ActiveChunkState, next Record)`) is per-chunk by construction; each active's state is evaluated independently against the same policy. The chunk manager's single `m.active` slot ([`chunk/file/manager.go`](backend/internal/chunk/file/manager.go)) needs to become a per-chunk slot (e.g., `m.actives map[ChunkID]*activeChunk`) and append routing needs to pick the destination, but the policy mechanism itself is unaffected.
-
-The feature is **not** in scope for this design. It is noted here as a non-foreclosure statement so future readers can confirm the design did not paint multi-active into a corner. Picking this up later does not require revisiting the lifecycle, residency, or learner work in this document.
+These transitional pieces ship as part of the current epic, then get removed or reframed when the data-plane epic lands. The lifecycle states themselves, learner-based join, soft-offline category (`Unreachable` + `Maintenance`), API surface principles, and operator CLI verbs all survive the transition unchanged.
 
 ## Out of scope (deferred to implementation issues)
 
@@ -220,7 +198,7 @@ Each implementation issue inherits its acceptance criteria from the correspondin
 
 ## Relationship to other work
 
-- Parent epic: [gastrolog-2i1g9](dcat://gastrolog-2i1g9) (FSM-authority migration)
-- Companion design: [gastrolog-5rh68](dcat://gastrolog-5rh68) (residency tracking — resolved to Option A by this document)
-- Companion audit: [gastrolog-5dfv7](dcat://gastrolog-5dfv7) (subsystems treating disk as authority — independent, runs in parallel)
-- Superseded context (preserved as deferred reminders): [gastrolog-3xmtk](dcat://gastrolog-3xmtk), [gastrolog-3qr8z](dcat://gastrolog-3qr8z) — capture the symptom set this design eliminates by construction.
+- Parent epic: [gastrolog-2i1g9](dcat://gastrolog-2i1g9) (FSM-authority migration: lifecycle, learners, audit cleanup)
+- Companion epic: [gastrolog-2ujjh](dcat://gastrolog-2ujjh) (Fan-out data-plane architecture) — lands after this epic; reframes the three transitional pieces above.
+- Companion design: [gastrolog-5dfv7](dcat://gastrolog-5dfv7) (audit of disk-as-authority subsystems — independent, runs in parallel)
+- Superseded context (preserved as deferred reminders): [gastrolog-3xmtk](dcat://gastrolog-3xmtk), [gastrolog-3qr8z](dcat://gastrolog-3qr8z) — capture the symptom set the migration eliminates by construction.
