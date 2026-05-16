@@ -110,6 +110,19 @@ gastrolog cluster remove-node <node>     # convenience: drain + decommission + r
 
 Cluster-detected soft-offline (`Unreachable`) is not something the operator manually invokes; the cluster auto-detects it via heartbeat lapse, and the operator promotes it to `Maintenance` via `cluster maintenance` if sticky operator control is desired.
 
+## API surface principles
+
+The CLI verbs and status RPCs above must satisfy these properties:
+
+- **Idempotent verbs.** Calling `cluster maintenance <node>` twice has the same effect as calling it once: the second call returns success with no state change, not an error. Same for `cluster drain`, `cluster online`, `cluster cancel-drain`, `cluster promote-learner`. A consumer that retries on transient failure must be safe to do so.
+- **Watchable status.** Node states and per-node metadata (state, `StateSince`, last-heartbeat, etc.) are accessible via a server-stream RPC, not just point-in-time queries. Consumers can react to state transitions without polling.
+- **Machine-readable output.** Every state-querying CLI verb supports `--output json` (or equivalent structured output) for parseable consumption.
+- **Stable state names.** `Live` / `Unreachable` / `Maintenance` / `Draining` / `Decommissioning` are part of the API contract once released. Renaming or splitting them post-release is a breaking change.
+- **No hidden state.** Every operationally-relevant fact about a node (current state, entry timestamp, transition history, alert-relevant counters) is observable via the status API. Decisions made by external systems cannot rely on state that the API doesn't surface.
+- **Command/query separation.** Verbs that mutate state (`maintenance`, `drain`, `online`) are distinct from verbs that read state (`status`, `inspect`). Mutating verbs return the new state; querying verbs do not mutate.
+
+These are good properties for any cluster CLI regardless of whether an external orchestrator (Kubernetes operator, deployment automation, runbook script) ever consumes them. Designing for them up front avoids retrofitting if an external controller is added later.
+
 ## UI surface
 
 Cluster overview shows per-node state with color/icon coding. The two soft-offline states are visually distinguishable: `Unreachable` uses a warning tone (cluster noticed a problem), `Maintenance` uses an informational tone (operator action). Duration is shown for both. Alerts trigger with operator-action suggestions when `Unreachable` duration exceeds an operator-tuned threshold; `Maintenance` alerts are silent or low-priority. `Draining` shows transfer progress (chunks remaining).
