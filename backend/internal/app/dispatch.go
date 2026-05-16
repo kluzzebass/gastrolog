@@ -752,3 +752,45 @@ func (d *configDispatcher) handleNodeConfigChange(ctx context.Context) {
 	}
 	d.orch.RefreshVaultCtlMembers(nodes, d.factories)
 }
+
+// ReplayConfigFromStore walks the FSM-backed config store and re-fires
+// every per-entity handler the orchestrator depends on for local
+// registration. Use after a fresh joiner has finished snapshot
+// replication: FSM.Restore does not fire onApply notifications (only
+// FSM.Apply does), so without this the orchestrator sees an empty
+// vault/ingester registry even though the FSM is fully populated.
+//
+// Per-entity handlers are idempotent — AddIngester replaces existing
+// registrations, handleVaultPut checks ListVaults first, and the
+// reload helpers swap a complete rule set rather than mutating in
+// place — so calling this on the bootstrap path (where ApplyConfig
+// already registered everything) is a no-op modulo log volume. We
+// only call it on the joiner path. See gastrolog-3hcfm.
+func (d *configDispatcher) ReplayConfigFromStore(ctx context.Context) {
+	if d.orch == nil || d.cfgStore == nil {
+		return
+	}
+
+	vaults, err := d.cfgStore.ListVaults(ctx)
+	if err != nil {
+		d.logger.Error("dispatch: list vaults for replay", "error", err)
+	}
+	for _, v := range vaults {
+		d.handleVaultPut(ctx, v.ID)
+	}
+
+	ingesters, err := d.cfgStore.ListIngesters(ctx)
+	if err != nil {
+		d.logger.Error("dispatch: list ingesters for replay", "error", err)
+	}
+	for _, ing := range ingesters {
+		d.handleIngesterPut(ctx, ing.ID)
+	}
+
+	// Routes / rotation / retention load as a whole set per call. One
+	// invocation pulls the snapshot-deposited entries into the
+	// orchestrator's filter and policy tables.
+	d.reloadFilters(ctx)
+	d.reloadRotationPolicies(ctx)
+	d.reloadRetentionPolicies(ctx)
+}

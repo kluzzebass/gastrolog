@@ -5,6 +5,7 @@ import (
 	"errors"
 	"gastrolog/internal/glid"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -88,6 +89,7 @@ type mockOrch struct {
 	unregisterIDs      []glid.GLID // IDs passed to UnregisterVault
 	unregisterErr      error
 	removeIngesterIDs  []glid.GLID // IDs passed to RemoveIngester
+	addIngesterCalls   []glid.GLID // IDs passed to AddIngester
 	addVaultCalls      []glid.GLID // IDs passed to AddVault
 	reloadFiltersCalls int         // number of ReloadFilters calls
 
@@ -165,6 +167,14 @@ func (m *mockOrch) CancelDrain(_ context.Context, id glid.GLID) error {
 }
 func (m *mockOrch) RemoveIngester(id glid.GLID) error {
 	m.removeIngesterIDs = append(m.removeIngesterIDs, id)
+	if m.removeIngesterErr == nil {
+		for i, existing := range m.ingesters {
+			if existing == id {
+				m.ingesters = append(m.ingesters[:i], m.ingesters[i+1:]...)
+				break
+			}
+		}
+	}
 	return m.removeIngesterErr
 }
 func (m *mockOrch) UpdateMaxConcurrentJobs(n int) error {
@@ -175,7 +185,11 @@ func (m *mockOrch) UpdateMaxConcurrentJobs(n int) error {
 }
 func (m *mockOrch) MaxConcurrentJobs() int { return m.currentMaxJobs }
 
-func (m *mockOrch) AddIngester(glid.GLID, string, string, bool, orchestrator.Ingester) error {
+func (m *mockOrch) AddIngester(id glid.GLID, _, _ string, _ bool, _ orchestrator.Ingester) error {
+	m.addIngesterCalls = append(m.addIngesterCalls, id)
+	if m.addIngesterErr == nil {
+		m.ingesters = append(m.ingesters, id)
+	}
 	return m.addIngesterErr
 }
 
@@ -185,12 +199,18 @@ func (m *mockOrch) AddIngester(glid.GLID, string, string, bool, orchestrator.Ing
 type stubCfgStore struct {
 	system.Store // nil embed — panics on uncalled methods
 
-	vault        *system.VaultConfig
-	vaultErr     error
-	vaultList    []system.VaultConfig
-	vaultListErr error
-	ingester     *system.IngesterConfig
-	ingesterErr  error
+	vault           *system.VaultConfig
+	vaultErr        error
+	vaultList       []system.VaultConfig
+	vaultListErr    error
+	ingester        *system.IngesterConfig
+	ingesterErr     error
+	ingesterList    []system.IngesterConfig
+	ingesterListErr error
+	// ingestersByID lets ReplayConfigFromStore-style tests register the
+	// per-ingester `GetIngester` lookups that handleIngesterPut performs
+	// after iterating the list. Falls back to `ingester` when nil.
+	ingestersByID map[glid.GLID]system.IngesterConfig
 	settings     system.ServerSettings
 	settingsErr  error
 	cfg          *system.Config
@@ -211,8 +231,17 @@ func (s *stubCfgStore) GetVault(context.Context, glid.GLID) (*system.VaultConfig
 func (s *stubCfgStore) ListVaults(context.Context) ([]system.VaultConfig, error) {
 	return s.vaultList, s.vaultListErr
 }
-func (s *stubCfgStore) GetIngester(context.Context, glid.GLID) (*system.IngesterConfig, error) {
+func (s *stubCfgStore) GetIngester(_ context.Context, id glid.GLID) (*system.IngesterConfig, error) {
+	if s.ingestersByID != nil {
+		if cfg, ok := s.ingestersByID[id]; ok {
+			c := cfg
+			return &c, s.ingesterErr
+		}
+	}
 	return s.ingester, s.ingesterErr
+}
+func (s *stubCfgStore) ListIngesters(context.Context) ([]system.IngesterConfig, error) {
+	return s.ingesterList, s.ingesterListErr
 }
 func (s *stubCfgStore) LoadServerSettings(context.Context) (system.ServerSettings, error) {
 	return s.settings, s.settingsErr
@@ -1446,4 +1475,182 @@ func TestHandleIngesterAssignmentIgnoresParallel(t *testing.T) {
 	if len(mo.removeIngesterIDs) != 0 {
 		t.Fatalf("parallel ingester must not be removed on assignment change, got %v", mo.removeIngesterIDs)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// ReplayConfigFromStore — gastrolog-3hcfm: post-snapshot-replication catchup
+// ---------------------------------------------------------------------------
+
+// dispatcherForReplay creates a configDispatcher with the chatterbox-style
+// ingester type registered, so handleIngesterPut can build an ingester from
+// the snapshot-deposited config during a replay run.
+func dispatcherForReplay(orch orchActions, store system.Store, h *captureHandler) *configDispatcher {
+	d := newTestDispatcher(orch, store, h)
+	d.factories.IngesterTypes = map[string]orchestrator.IngesterRegistration{
+		"chatterbox-test": {
+			Factory: func(_ glid.GLID, _ map[string]string, _ *slog.Logger) (orchestrator.Ingester, error) {
+				return noopIngester{}, nil
+			},
+		},
+	}
+	return d
+}
+
+func TestReplayConfigFromStore_RegistersIngestersFromSnapshot(t *testing.T) {
+	t.Parallel()
+	h := &captureHandler{}
+	orch := &mockOrch{}
+
+	ingID := glid.New()
+	cfg := system.IngesterConfig{
+		ID: ingID, Name: "chatterbox", Type: "chatterbox-test",
+		AllNodes: true, Enabled: true,
+	}
+	store := &stubCfgStore{
+		ingesterList:  []system.IngesterConfig{cfg},
+		ingestersByID: map[glid.GLID]system.IngesterConfig{ingID: cfg},
+	}
+
+	d := dispatcherForReplay(orch, store, h)
+	d.ReplayConfigFromStore(context.Background())
+
+	if !slices.Contains(orch.addIngesterCalls, ingID) {
+		t.Fatalf("expected AddIngester for snapshot-deposited ingester %s, got %v",
+			ingID, orch.addIngesterCalls)
+	}
+}
+
+func TestReplayConfigFromStore_SkipsIngesterPinnedToOtherNode(t *testing.T) {
+	t.Parallel()
+	h := &captureHandler{}
+	orch := &mockOrch{}
+
+	otherNode := glid.New().String()
+	ingID := glid.New()
+	cfg := system.IngesterConfig{
+		ID: ingID, Name: "pinned", Type: "chatterbox-test",
+		AllNodes: false, NodeIDs: []string{otherNode}, Enabled: true,
+	}
+	store := &stubCfgStore{
+		ingesterList:  []system.IngesterConfig{cfg},
+		ingestersByID: map[glid.GLID]system.IngesterConfig{ingID: cfg},
+	}
+
+	d := dispatcherForReplay(orch, store, h)
+	d.ReplayConfigFromStore(context.Background())
+
+	if len(orch.addIngesterCalls) != 0 {
+		t.Fatalf("expected no AddIngester (pinned to %s, local=%s), got %v",
+			otherNode, d.localNodeID, orch.addIngesterCalls)
+	}
+}
+
+func TestReplayConfigFromStore_SkipsDisabledIngester(t *testing.T) {
+	t.Parallel()
+	h := &captureHandler{}
+	orch := &mockOrch{}
+
+	ingID := glid.New()
+	cfg := system.IngesterConfig{
+		ID: ingID, Name: "off", Type: "chatterbox-test",
+		AllNodes: true, Enabled: false,
+	}
+	store := &stubCfgStore{
+		ingesterList:  []system.IngesterConfig{cfg},
+		ingestersByID: map[glid.GLID]system.IngesterConfig{ingID: cfg},
+	}
+
+	d := dispatcherForReplay(orch, store, h)
+	d.ReplayConfigFromStore(context.Background())
+
+	if len(orch.addIngesterCalls) != 0 {
+		t.Fatalf("expected no AddIngester for disabled ingester, got %v",
+			orch.addIngesterCalls)
+	}
+}
+
+func TestReplayConfigFromStore_RegistersVaultsFromSnapshot(t *testing.T) {
+	t.Parallel()
+	h := &captureHandler{}
+	orch := &mockOrch{}
+
+	vaultID := glid.New()
+	v := system.VaultConfig{ID: vaultID, Name: "v", Type: system.VaultTypeMemory}
+	store := &stubCfgStore{
+		vault:     &v,
+		vaultList: []system.VaultConfig{v},
+	}
+
+	d := dispatcherForReplay(orch, store, h)
+	d.ReplayConfigFromStore(context.Background())
+
+	if !slices.Contains(orch.addVaultCalls, vaultID) {
+		t.Fatalf("expected AddVault for snapshot-deposited vault %s, got %v",
+			vaultID, orch.addVaultCalls)
+	}
+}
+
+func TestReplayConfigFromStore_ReloadsRoutesAndPolicies(t *testing.T) {
+	t.Parallel()
+	h := &captureHandler{}
+	orch := &mockOrch{}
+	store := &stubCfgStore{}
+
+	d := dispatcherForReplay(orch, store, h)
+	d.ReplayConfigFromStore(context.Background())
+
+	if orch.reloadFiltersCalls == 0 {
+		t.Fatal("expected ReloadFilters to be called at least once during replay")
+	}
+}
+
+// TestReplayConfigFromStore_Idempotent verifies that a second invocation
+// against a store with the same entities does not add duplicates. The
+// real-world failure mode this prevents: a joiner's dispatcher catching
+// a NotifyIngesterPut for a fresh PUT while the replay is still in
+// flight — both code paths must converge to a single registration.
+func TestReplayConfigFromStore_Idempotent(t *testing.T) {
+	t.Parallel()
+	h := &captureHandler{}
+	orch := &mockOrch{}
+
+	ingID := glid.New()
+	cfg := system.IngesterConfig{
+		ID: ingID, Name: "chatterbox", Type: "chatterbox-test",
+		AllNodes: true, Enabled: true,
+	}
+	store := &stubCfgStore{
+		ingesterList:  []system.IngesterConfig{cfg},
+		ingestersByID: map[glid.GLID]system.IngesterConfig{ingID: cfg},
+	}
+
+	d := dispatcherForReplay(orch, store, h)
+	d.ReplayConfigFromStore(context.Background())
+	d.ReplayConfigFromStore(context.Background())
+
+	// AddIngester is called for every replay (the handler routes through
+	// AddIngester which is itself idempotent — it stops the old instance
+	// and replaces it). What we assert is that the orchestrator's
+	// post-state contains exactly one entry, not two.
+	count := 0
+	for _, id := range orch.ingesters {
+		if id == ingID {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly one ingester registration after double-replay, got %d (ingesters=%v)",
+			count, orch.ingesters)
+	}
+}
+
+// TestReplayConfigFromStore_NoOpWhenOrchUnwired verifies the guard at the
+// top of ReplayConfigFromStore: calling it on a dispatcher whose orch
+// hasn't been wired yet is silent (no panic, no calls). This matters
+// because the dispatcher is constructed before orch in app.go.
+func TestReplayConfigFromStore_NoOpWhenOrchUnwired(t *testing.T) {
+	t.Parallel()
+	d := &configDispatcher{logger: slog.Default()}
+	// Should not panic and should not call into any store.
+	d.ReplayConfigFromStore(context.Background())
 }

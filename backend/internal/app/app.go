@@ -416,6 +416,19 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		return err
 	}
 
+	// Fresh joiner: the FSM has been populated by snapshot replication,
+	// but FSM.Restore (unlike FSM.Apply) does not fire onApply
+	// notifications. The dispatcher therefore never saw the existing
+	// vaults / ingesters / routes / policies during boot, and
+	// orch.ApplyConfig was called with appSys=nil (a no-op). Without
+	// this replay, every AllNodes:true ingester would never register
+	// or run on the joiner — even though the dashboard correctly lists
+	// it as a target. See gastrolog-3hcfm. No-op for restart-of-voter
+	// and bootstrap paths because appSys is non-nil there.
+	if appSys == nil {
+		disp.ReplayConfigFromStore(ctx)
+	}
+
 	tokens, err := buildAuthTokens(ctx, logger, cfgStore, cfg.NoAuth)
 	if err != nil {
 		return err
