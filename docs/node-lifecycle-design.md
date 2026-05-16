@@ -158,6 +158,27 @@ Given that read routing does not consult residency, **Option A (constrained plac
 
 Option B (`pendingCatchups` twin) and Option C (explicit `Holders` field) remain available as escalation paths if a future design adds read routing that consults residency (e.g., follower-based read fallback).
 
+## Forward compatibility: multi-active-chunk-per-vault
+
+A possible future feature places multiple concurrent active chunks for a single vault on different nodes, enabling per-vault write throughput to scale roughly linearly with the active-chunk count (each active leader's append+replicate pipeline is independent of the others).
+
+This design does not preclude that extension:
+
+- **Node lifecycle states** are per-node, not per-vault structure. Whether a vault has one active chunk or many is invisible to `Live` / `Unreachable` / `Maintenance` / `Draining` / `Decommissioning` / `Removed`.
+- **The placement guard** on `Unreachable` and `Maintenance` fires per-placement; if a vault carries multiple active-leader placements, each has its own independent guard.
+- **Residency derivation** (`placement_set - pendingDeletes.ExpectedFrom`) is per-chunk, not per-vault. Each active chunk's residency answer is self-contained.
+- **Vault-ctl Raft groups** serialize chunk-lifecycle events only (`CmdBeginSeal`, `CmdSealChunk`, `CmdAckDelete`, etc.); record appends flow through stream replication ([orchestrator/replication.go](backend/internal/orchestrator/replication.go) `replicateToFollower`) and are not gated by Raft consensus. Multiplying active chunks does not multiply Raft load proportional to write rate — only the chunk-lifecycle event rate, which is essentially unchanged (same number of seals per unit time whether they happen serially or in parallel).
+- **Learner promotion** is per-vault-ctl-group and per-system-Raft, unaffected by active-chunk count.
+
+The enablers for the future feature, when it gets scoped, are limited to:
+
+1. **Placement schema extension** — support multiple "active leader" placements per vault, keyed by ChunkID. The current schema has a single `Leader: true` entry per vault; the extension is either multiple Leader entries or an explicit per-chunk placement variant.
+2. **Ingester forwarder routing** — pick any active leader (round-robin, hash-based, or load-aware) instead of "the" leader. Producer-side API does not change.
+3. **Read routing** — fan out to all active leaders for live-tail reads. Sealed chunks are unaffected; their residency is already per-chunk and the read path already routes per-chunk for sealed content.
+4. **Rotation policy** — confirm that rotation fires per-active-chunk independently. The chunk manager already tracks per-chunk state, so this is likely already correct; needs verification when implementing.
+
+The feature is **not** in scope for this design. It is noted here as a non-foreclosure statement so future readers can confirm the design did not paint multi-active into a corner. Picking this up later does not require revisiting the lifecycle, residency, or learner work in this document.
+
 ## Out of scope (deferred to implementation issues)
 
 - Specific threshold values (5 min default for `Unreachable` auto-trigger is provisional; tune operationally)
