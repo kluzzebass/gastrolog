@@ -159,22 +159,34 @@ Order-different is the common case under fan-out (parallel ingester writes compl
 
 **Mechanism:**
 
-Each replica maintains its records in the existing IngestTS B+ tree ([backend/internal/chunk/file/manager.go#L345](backend/internal/chunk/file/manager.go#L345) `ingestBT`). Index gives canonical per-replica ordering. The set of EventIDs in this tree IS the set of records this replica holds for the chunk.
+Each replica maintains its records in the existing IngestTS B+ tree ([backend/internal/chunk/file/manager.go#L345](backend/internal/chunk/file/manager.go#L345) `ingestBT`). Index gives canonical per-replica traversal order. The set of EventIDs in this tree IS the set of records this replica holds for the chunk.
 
-Reconcile cycle:
+Two-tier reconcile: a fast set-equality check that handles the common case, and a Merkle slow path that pinpoints divergence when it exists.
 
-1. Each replica computes a Merkle tree over its sorted EventID set for the chunk. Tree summary is ~few KB regardless of K (record count).
-2. At reconcile time (seal time, or on missed-ack trigger), replicas exchange root hashes.
-3. If root hashes match: replicas are set-equivalent. No further work.
-4. If root hashes differ: descend into divergent subtrees until divergent EventIDs are identified. Cost is `O(d × log K)` for `d` differences.
-5. Each replica fetches the records it's missing by EventID. Existing replication primitives handle the transfer.
-6. After fetch, recompute root hashes; verify convergence.
+**Fast path — single set-hash:**
+
+1. When `CmdBeginSeal` applies on a replica, no new records can be accepted into the chunk locally. The local EventID set is stable from that moment.
+2. Each replica computes a set-hash over its chunk's EventIDs immediately after `CmdBeginSeal` apply. Two options for the hash function:
+   - **Order-independent hash**: XOR (or other commutative aggregation) of `hash(EventID)` per record. Same set produces the same hash regardless of traversal order. O(N), no sort.
+   - **Canonical-sort hash**: walk the `ingestBT` and tiebreak collision buckets by full EventID (IngestTS alone isn't unique under load; EventID is). Compute a chained hash. O(N log K) where K is the average collision-bucket size (typically 1). Produces a Merkle root the slow path can reuse without recomputation.
+3. Replicas exchange set-hashes (32 bytes per replica per seal).
+4. **If hashes match**: the chunk is set-equivalent across replicas. Seal completes (`Sealing → Sealed`). No Merkle work performed.
+5. **If hashes differ**: fall back to the Merkle slow path.
+
+**Slow path — Merkle divergence pinpointing:**
+
+6. Each replica's Merkle tree (built lazily during fast-path computation, or eagerly under the canonical-sort hash option) is exchanged level-by-level.
+7. Descend into divergent subtrees until divergent EventIDs are identified. Cost is `O(d × log K)` for `d` differences.
+8. Each replica fetches the records it's missing by EventID. Existing replication primitives handle the transfer.
+9. Recompute set-hash; verify convergence. Retry the fast-path comparison.
 
 **Cost shape:**
 
-- Steady state (no divergence): one hash comparison per replica pair. Effectively free.
-- Realistic divergence (0.01–0.1% missed sends): `d × log K × hash_size` for identification + `d × avg_record_size` for transfer. For K=1M, d=1000: ~640KB metadata + ~200KB record-bytes. Negligible compared to chunk size.
-- Worst case (replica returns from long absence with 50% missing): `O(K)` for full set comparison + `O(0.5K × avg_record_size)` for transfer. Bounded by actual missing-record count.
+- **Fast-path computation**: O(N) per chunk per replica at seal time. ~100ms for a 1M-record chunk at typical hash rates. One-time.
+- **Fast-path exchange**: ~32 bytes per replica per seal. Effectively free.
+- **Steady state (no divergence)**: fast path resolves; slow path doesn't activate. Most seals.
+- **Realistic divergence (0.01–0.1% missed sends)**: slow path activates. `d × log K × hash_size` for Merkle identification + `d × avg_record_size` for transfer. For K=1M, d=1000: ~640KB metadata + ~200KB record-bytes.
+- **Worst case (replica returns from long absence with 50% missing)**: slow path runs to completion. O(K) for full set comparison + O(0.5K × avg_record_size) for transfer.
 
 **When reconcile runs:**
 
