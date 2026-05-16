@@ -111,6 +111,22 @@ func (pm *placementManager) reconcile(ctx context.Context) {
 		}
 	}
 
+	// Build node-state map from FSM authority. placeVault uses this to
+	// gate leader rotation: soft-offline (Unreachable, Maintenance) and
+	// in-transition (Draining, Decommissioning) states refuse rotation.
+	// Only Live state permits the existing rotate-on-unreachable
+	// behavior. See docs/node-lifecycle-design.md "Behavior gates by
+	// state" and gastrolog-slc6l.
+	nodeConfigs, err := pm.cfgStore.ListNodes(ctx)
+	if err != nil {
+		pm.logger.Error("placement: list nodes", "error", err)
+		return
+	}
+	nodeStates := make(map[string]system.NodeState, len(nodeConfigs))
+	for _, n := range nodeConfigs {
+		nodeStates[n.ID.String()] = n.EffectiveState()
+	}
+
 	// Count current vault assignments per node (for load balancing).
 	// Counts both leaders and followers.
 	vaultCount := make(map[string]int)
@@ -128,7 +144,7 @@ func (pm *placementManager) reconcile(ctx context.Context) {
 	}
 
 	for _, v := range vaults {
-		pm.placeVault(ctx, v, alive, nscs, vaultCount)
+		pm.placeVault(ctx, v, alive, nodeStates, nscs, vaultCount)
 	}
 
 	pm.reconcileSingletonIngesters(ctx, alive)
@@ -241,13 +257,52 @@ func (pm *placementManager) isSingletonIngester(ing system.IngesterConfig) bool 
 }
 
 // placeVault evaluates a single vault and assigns it to an eligible node if needed.
-func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig, alive map[string]bool, nscs []system.NodeStorageConfig, vaultCount map[string]int) {
+func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig, alive map[string]bool, nodeStates map[string]system.NodeState, nscs []system.NodeStorageConfig, vaultCount map[string]int) {
 	alertKey := fmt.Sprintf("vault-unplaced:%s", v.ID)
+	softOfflineAlertKey := fmt.Sprintf("vault-soft-offline-leader:%s", v.ID)
 
 	currentLeader := system.LeaderNodeID(func() []system.VaultPlacement {
 		p, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
 		return p
 	}(), nscs)
+
+	// State-driven placement guard (gastrolog-slc6l). Rotation is
+	// permitted only when the current leader's node is in the Live
+	// state. Any other state refuses rotation:
+	//   - Unreachable / Maintenance (soft-offline): retain placement,
+	//     raise warning alert. Closes the RF=1 redeploy bug — placement
+	//     can't move chunks off a transiently-absent node and orphan
+	//     them on its disk.
+	//   - Draining / Decommissioning (in-transition): retain placement;
+	//     the explicit drain orchestrator / decommission flow is the
+	//     authority for moving placements off these nodes, not this
+	//     reconcile loop. No alert — these are deliberate operator
+	//     states, not unexpected absences.
+	// See docs/node-lifecycle-design.md "Behavior gates by state".
+	if currentLeader != "" {
+		switch nodeStates[currentLeader] {
+		case system.NodeStateUnknown, system.NodeStateLive:
+			// Live state (and legacy Unknown which maps to Live via
+			// EffectiveState during nodeStates construction): fall
+			// through to the existing alive/eligible checks below.
+		case system.NodeStateUnreachable, system.NodeStateMaintenance:
+			if pm.alerts != nil {
+				pm.alerts.Set(softOfflineAlertKey, alert.Warning, "placement",
+					fmt.Sprintf("Vault %q leader on %s node %s — placement retained, rotation gated",
+						v.Name, nodeStates[currentLeader], currentLeader))
+			}
+			pm.placeFollowers(ctx, &v, alive, nscs, vaultCount)
+			return
+		case system.NodeStateDraining, system.NodeStateDecommissioning:
+			// Drain / decommission flow is the authority; reconcile is a
+			// no-op for this vault while the node is in transition.
+			pm.placeFollowers(ctx, &v, alive, nscs, vaultCount)
+			return
+		}
+	}
+	if pm.alerts != nil {
+		pm.alerts.Clear(softOfflineAlertKey)
+	}
 
 	// Current leader assignment still valid — check followers too.
 	if currentLeader != "" && alive[currentLeader] && pm.nodeEligible(v, currentLeader, nscs) {
