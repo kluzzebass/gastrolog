@@ -11,6 +11,20 @@ For each candidate site, the test is:
 
 Sites that pass (1) but fail (2) — purely local operations like file-handle management, GLCB existence checks, temp-file cleanup — are not findings. They legitimately operate on local-only concerns.
 
+## Invariant: unknown orphans are never auto-deleted
+
+A chunk on local disk falls into one of three categories against the vault-ctl FSM:
+
+- **Known** — present in `f.chunks[chunkID]`. Normal case.
+- **Tombstoned** — present in `f.tombstones`. FSM explicitly says delete. [`SweepLocalOrphans`](backend/internal/orchestrator/vault_lifecycle_reconciler.go#L580) handles this — auto-delete is safe because the FSM made the decision explicitly.
+- **Unknown** — neither in `f.chunks` nor in `f.tombstones`. The FSM has no opinion.
+
+**No sweep, startup pass, or reconciliation loop introduced by this migration may delete an unknown orphan.** The default for unknown orphans is preserve-and-alert; operator-driven recovery via the repatriation feature ([gastrolog-32bf2](dcat://gastrolog-32bf2)) is the only path that converts an unknown orphan into either a re-known chunk or a deleted one. Only explicit FSM tombstones authorize deletion.
+
+This invariant is load-bearing for FSM-glitch recovery: if the FSM ever loses entries due to bugs, operator error, or restore-from-backup desync, the data substrate (local chunk files) is the layer of last resort. Auto-deleting unknown orphans removes the recovery surface; preserving them keeps the door open for repatriation.
+
+The findings below describe code paths that need reframing. None of them should be reframed in a way that infers "delete me" from FSM absence — every reframing must preserve the unknown-orphan default of keep-and-alert.
+
 ## Findings
 
 ### F1 — `loadExisting` is the root disk-authority site
