@@ -82,8 +82,6 @@ type NodeConfig struct {
 
 `Removed` is not a stored state; it is the absence of the NodeConfig entry. Transition `Decommissioning → Removed` happens via `DeleteNode`.
 
-An earlier draft of this design proposed a single `SoftOffline` state with a `StateSource` field (Auto / Operator) to distinguish the two flavors. That approach was replaced with two distinct states (`Unreachable` and `Maintenance`) because the difference between the source-flavors is real state — exit semantics, alert behavior, and operator intent all differ — and a field-controlled state machine inside a single state is harder to reason about than two named states. No `StateSource` field is needed.
-
 ## Transitions in detail
 
 | From → To | Trigger | Mechanism |
@@ -110,7 +108,7 @@ gastrolog cluster cancel-drain <node>    # Draining → Live (rare; only while t
 gastrolog cluster remove-node <node>     # convenience: drain + decommission + remove (must pass orphan gate)
 ```
 
-A previous draft included a `cluster soft-offline <node>` verb to manually trigger a soft-offline state. That verb is removed: an operator who wants to take responsibility for a node uses `cluster maintenance` directly. Cluster-detected soft-offline (`Unreachable`) is no longer something the operator manually invokes; the cluster auto-detects it, and the operator can promote it to `Maintenance` if they want sticky operator control.
+Cluster-detected soft-offline (`Unreachable`) is not something the operator manually invokes; the cluster auto-detects it via heartbeat lapse, and the operator promotes it to `Maintenance` via `cluster maintenance` if sticky operator control is desired.
 
 ## UI surface
 
