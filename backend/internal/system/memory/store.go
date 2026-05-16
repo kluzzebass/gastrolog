@@ -499,6 +499,31 @@ func (s *Store) PutNode(ctx context.Context, node system.NodeConfig) error {
 	return nil
 }
 
+// SetNodeState applies the same validation the FSM apply path uses
+// (ValidateNodeStateTransition + idempotent-skip on equal effective
+// state) directly against the in-memory store. Tests that exercise
+// the Store interface without standing up the FSM rely on this to
+// produce equivalent semantics.
+func (s *Store) SetNodeState(_ context.Context, id glid.GLID, state system.NodeState, since time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	node, ok := s.nodes[id]
+	if !ok {
+		return fmt.Errorf("set node state: node %s not found", id)
+	}
+	if err := system.ValidateNodeStateTransition(node.State, state); err != nil {
+		return err
+	}
+	if node.EffectiveState() == state {
+		return nil
+	}
+	node.State = state
+	node.StateSince = since
+	s.nodes[id] = node
+	return nil
+}
+
 // DeleteNode removes a node from the cluster and atomically sweeps
 // every other FSM map that references the deleted node ID. Without
 // the sweep, scale-down + cluster.RemoveNode leaves stale IngesterAlive
