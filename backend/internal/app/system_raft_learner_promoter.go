@@ -11,10 +11,14 @@ import (
 )
 
 const (
-	// systemLearnerPromoterInterval is the leader-side tick cadence.
-	// Mirrors the unreachable sweep (30s); both are slow, leader-only
-	// scans that consult Raft membership state.
-	systemLearnerPromoterInterval = 30 * time.Second
+	// systemLearnerPromoterJobName is the operator-visible name shown
+	// in the inspector's Scheduled view. Keep stable across releases.
+	systemLearnerPromoterJobName = "system-learner-promoter"
+
+	// systemLearnerPromoterSchedule runs every 30 seconds. Mirrors the
+	// unreachable sweep cadence; both are slow, leader-only scans that
+	// consult Raft membership state. 6-field cron (with-seconds).
+	systemLearnerPromoterSchedule = "*/30 * * * * *"
 
 	// systemLearnerStabilityTicks is the number of consecutive ticks a
 	// learner must be observed at caught-up state before promotion.
@@ -68,7 +72,6 @@ type systemLearnerPromoter struct {
 	cluster           raftMembership
 	peerState         peerStatsReader
 	logger            *slog.Logger
-	interval          time.Duration
 	stabilityRequired int
 
 	// catchupTicks tracks consecutive caught-up observations per
@@ -83,31 +86,37 @@ func newSystemLearnerPromoter(c raftMembership, ps peerStatsReader, logger *slog
 		cluster:           c,
 		peerState:         ps,
 		logger:            logger,
-		interval:          systemLearnerPromoterInterval,
 		stabilityRequired: systemLearnerStabilityTicks,
 		catchupTicks:      make(map[string]int),
 		now:               time.Now,
 	}
 }
 
-// Run blocks until ctx is cancelled. Non-leader ticks are no-ops so
-// the same goroutine runs harmlessly on every node — only the current
-// system-Raft leader proposes AddVoter, preventing concurrent
+// tickOnce is the scheduled task body. Non-leader ticks are no-ops
+// so the scheduler can fire the same job on every node — only the
+// current system-Raft leader proposes AddVoter, preventing concurrent
 // membership change attempts that would fight Raft's single-mutation
 // invariant.
-func (p *systemLearnerPromoter) Run(ctx context.Context) {
-	ticker := time.NewTicker(p.interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if p.cluster.IsLeader() {
-				p.tick(ctx)
-			}
-		}
+func (p *systemLearnerPromoter) tickOnce(ctx context.Context) {
+	if !p.cluster.IsLeader() {
+		return
 	}
+	p.tick(ctx)
+}
+
+// startSystemLearnerPromoter registers the promoter with the supplied
+// scheduler as a recurring job. Returns the AddJob error if any. On
+// success, attaches a Describe text for the inspector's Scheduled
+// view so the operator sees what the job does plus its leader-only
+// semantics.
+func startSystemLearnerPromoter(ctx context.Context, scheduler scheduledJobRegistry, promoter *systemLearnerPromoter) error {
+	task := func() { promoter.tickOnce(ctx) }
+	if err := scheduler.AddJob(systemLearnerPromoterJobName, systemLearnerPromoterSchedule, task); err != nil {
+		return err
+	}
+	scheduler.Describe(systemLearnerPromoterJobName,
+		"System-Raft learner promotion. Leader-only: scans the Raft configuration for Nonvoter / Staging members and promotes them to Voter once their broadcast RaftAppliedIndex has matched the leader's for a stability window. Companion to gastrolog-41sut (JoinCluster-as-learner) and gastrolog-gcbx7 (per-vault-ctl promoter). Original implementation gastrolog-2czh9.")
+	return nil
 }
 
 // tick scans the current Raft configuration once. For each learner it

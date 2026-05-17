@@ -434,9 +434,12 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		// their broadcast RaftAppliedIndex has matched the leader's
 		// for a stability window. Companion to the JoinCluster-as-
 		// learner change (gastrolog-41sut) and the per-vault-ctl
-		// promoter below.
+		// promoter below. Registered with the orchestrator job
+		// scheduler (gastrolog-5npek) so it appears in the inspector.
 		learnerPromoter := newSystemLearnerPromoter(clusterSrv, peerState, compCluster.Apply(logger))
-		go learnerPromoter.Run(ctx)
+		if err := startSystemLearnerPromoter(ctx, orch.Scheduler(), learnerPromoter); err != nil {
+			logger.Warn("schedule system-learner-promoter job", "error", err)
+		}
 
 		// Per-vault-ctl learner promoter (gastrolog-gcbx7). Same
 		// shape as the system-Raft promoter but iterates every vault
