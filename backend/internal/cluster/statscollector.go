@@ -161,6 +161,29 @@ func NewStatsCollector(cfg StatsCollectorConfig) *StatsCollector {
 	}
 }
 
+// Delete drops the per-peer rate window for a removed node. Called
+// from the peer-removal observer (raft.go runPeerRemovalLoop) so the
+// peerBytes map doesn't accumulate dead entries forever. Naming
+// aligns with the peerEvictor interface.
+func (c *StatsCollector) Delete(peer string) {
+	c.mu.Lock()
+	delete(c.peerBytes, peer)
+	c.mu.Unlock()
+}
+
+// ReconcilePeers drops any rate window whose peer is not in keep.
+// Backstop for the observer path when hraft delivers a config
+// change via snapshot install (no PeerObservation fires).
+func (c *StatsCollector) ReconcilePeers(keep map[string]struct{}) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for p := range c.peerBytes {
+		if _, ok := keep[p]; !ok {
+			delete(c.peerBytes, p)
+		}
+	}
+}
+
 // Run starts the periodic broadcast loops. Blocks until ctx is cancelled.
 //
 // Two cadences run in parallel:

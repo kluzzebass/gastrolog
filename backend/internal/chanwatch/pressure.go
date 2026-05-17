@@ -113,6 +113,22 @@ func (g *PressureGate) AddProbe(name string, probe Probe) {
 	g.probes = append(g.probes, pressureProbe{name: name, probe: probe})
 }
 
+// RemoveProbe drops a previously-registered probe by name. Safe to
+// call after Run has started, and idempotent — unknown names are
+// a no-op. Used by callers that stop owning a channel (e.g.
+// RecordForwarder.Delete on peer removal) so the gate doesn't keep
+// sampling a stale channel.
+func (g *PressureGate) RemoveProbe(name string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for i, p := range g.probes {
+		if p.name == name {
+			g.probes = append(g.probes[:i], g.probes[i+1:]...)
+			return
+		}
+	}
+}
+
 // AddOnChange registers a callback fired (outside the gate lock) on every
 // aggregate pressure transition. Multiple callbacks can be registered;
 // each is invoked in registration order on every transition. Use this to

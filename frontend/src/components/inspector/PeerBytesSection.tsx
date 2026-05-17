@@ -46,11 +46,28 @@ export function PeerBytesSection({
     );
   }
 
-  const rows = [...peerBytes].sort((a, b) => {
-    const na = nodes.nameOf(asEntityID(a.peer));
-    const nb = nodes.nameOf(asEntityID(b.peer));
-    return na.localeCompare(nb);
-  });
+  // Defensive: drop rows whose peer is no longer in the cluster
+  // registry (gastrolog-9ohip). Backend cleanup on PeerObservation.Removed
+  // now evicts PeerByteMetrics, but the UI should also guard against a
+  // stale broadcast arriving after the removal observer fired — or against
+  // any future backend leak that escapes the eviction path.
+  const rows = [...peerBytes]
+    .filter((p) => nodes.byId.has(asEntityID(p.peer)))
+    .sort((a, b) => {
+      const na = nodes.nameOf(asEntityID(a.peer));
+      const nb = nodes.nameOf(asEntityID(b.peer));
+      return na.localeCompare(nb);
+    });
+
+  if (rows.length === 0) {
+    return (
+      <div
+        className={`text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}
+      >
+        No inter-node traffic recorded for this node.
+      </div>
+    );
+  }
 
   return (
     <div

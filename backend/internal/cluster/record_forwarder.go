@@ -49,6 +49,11 @@ type forwardEntry struct {
 type nodeForwarder struct {
 	ch   chan forwardEntry // ingestion forwarding (best-effort, drops on full)
 	done chan struct{}
+	// quit is closed by Delete() to signal a single-node shutdown
+	// (e.g. peer removed from the cluster) without tearing down the
+	// whole forwarder. streamLoop treats it the same as rf.stop:
+	// drain remaining entries, close the stream, exit.
+	quit chan struct{}
 
 	// Backoff state — only accessed from the streamLoop goroutine.
 	failures int
@@ -207,6 +212,7 @@ func (rf *RecordForwarder) startNode(nodeID string) *nodeForwarder {
 	nf := &nodeForwarder{
 		ch:   make(chan forwardEntry, forwardChanCap),
 		done: make(chan struct{}),
+		quit: make(chan struct{}),
 	}
 	rf.nodes[nodeID] = nf
 	probe := func() (int, int) {
@@ -257,12 +263,14 @@ func (rf *RecordForwarder) streamLoop(nodeID string, nf *nodeForwarder) {
 			case <-time.After(nf.backoff):
 			case <-rf.stop:
 				return
+			case <-nf.quit:
+				return
 			}
 		}
 
 		stream, err := rf.openStream(nodeID)
 		if err != nil {
-			if rf.stopping() {
+			if rf.stopping() || nf.stopping() {
 				return
 			}
 			rf.bumpBackoff(nodeID, nf, err)
@@ -277,6 +285,18 @@ func (rf *RecordForwarder) streamLoop(nodeID string, nf *nodeForwarder) {
 			return
 		}
 		// Stream error — reconnect.
+	}
+}
+
+// stopping reports whether this specific nodeForwarder has been
+// asked to exit via Delete(). Independent from rf.stopping(), which
+// covers forwarder-wide shutdown.
+func (nf *nodeForwarder) stopping() bool {
+	select {
+	case <-nf.quit:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -307,6 +327,11 @@ func (rf *RecordForwarder) drainToStream(nodeID string, nf *nodeForwarder, strea
 		case first = <-nf.ch:
 		case <-rf.stop:
 			// Best-effort flush of remaining buffered entries before exiting.
+			rf.flushRemaining(nodeID, nf, stream)
+			return true
+		case <-nf.quit:
+			// Per-node shutdown via Delete(). Flush whatever is queued
+			// for this peer one last time, then exit.
 			rf.flushRemaining(nodeID, nf, stream)
 			return true
 		}
@@ -496,6 +521,60 @@ done:
 
 	rf.logger.Info("redirected queued records",
 		"from", fromNodeID, "to", toNodeID, "count", len(drained))
+}
+
+// ReconcilePeers calls Delete for each node not in keep. Backstop
+// for the observer path when hraft delivers a config change via
+// snapshot install (no PeerObservation fires).
+func (rf *RecordForwarder) ReconcilePeers(keep map[string]struct{}) {
+	rf.mu.Lock()
+	stale := make([]string, 0)
+	for nodeID := range rf.nodes {
+		if _, ok := keep[nodeID]; !ok {
+			stale = append(stale, nodeID)
+		}
+	}
+	rf.mu.Unlock()
+	for _, nodeID := range stale {
+		rf.Delete(nodeID)
+	}
+}
+
+// Delete drops the per-node forwarder for a removed peer. Signals
+// the streamLoop goroutine to drain remaining buffered records and
+// exit, then cleans up the chanwatch / pressureGate probes and any
+// forwarder-overflow alert that was attached to this node.
+//
+// Idempotent: calling Delete twice for the same node is a no-op on
+// the second call. Safe to call before Close(); the goroutine wait
+// is unconditional, so the rf.wg.Wait() inside Close() will not
+// double-wait for already-exited goroutines.
+//
+// Called from the peer-removal observer (raft.go runPeerRemovalLoop)
+// so a removed node's resources don't leak.
+func (rf *RecordForwarder) Delete(nodeID string) {
+	rf.mu.Lock()
+	nf, ok := rf.nodes[nodeID]
+	if !ok {
+		rf.mu.Unlock()
+		return
+	}
+	delete(rf.nodes, nodeID)
+	rf.mu.Unlock()
+
+	close(nf.quit)
+	// Wait for the streamLoop goroutine to exit so we know any
+	// in-flight records were flushed and the goroutine is no longer
+	// holding the per-node channel.
+	<-nf.done
+
+	rf.cw.Unwatch(probeNamePrefix + nodeID)
+	if rf.pressureGate != nil {
+		rf.pressureGate.RemoveProbe(probeNamePrefix + nodeID)
+	}
+	if rf.alerts != nil {
+		rf.alerts.Clear("forwarder-overflow:" + nodeID)
+	}
 }
 
 // Close shuts down all per-node forwarders. Connection cleanup is handled

@@ -57,6 +57,24 @@ func (p *PeerJobState) Delete(senderID string) {
 	p.changes.Notify()
 }
 
+// ReconcilePeers drops any entry whose peer is not in keep. Backstop
+// for the observer path when hraft delivers a config change via
+// snapshot install (no PeerObservation fires).
+func (p *PeerJobState) ReconcilePeers(keep map[string]struct{}) {
+	p.mu.Lock()
+	removed := false
+	for id := range p.entries {
+		if _, ok := keep[id]; !ok {
+			delete(p.entries, id)
+			removed = true
+		}
+	}
+	p.mu.Unlock()
+	if removed {
+		p.changes.Notify()
+	}
+}
+
 // GetAll returns all non-expired peer job lists, keyed by sender node ID.
 func (p *PeerJobState) GetAll() map[string][]*gastrologv1.Job {
 	p.mu.RLock()

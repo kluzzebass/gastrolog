@@ -63,6 +63,25 @@ func (w *Watcher) Watch(name string, probe Probe, threshold float64) {
 	})
 }
 
+// Unwatch removes a previously-added channel by name. Safe to call
+// after Run has started, and idempotent — unknown names are a no-op.
+// Clears any active pressure alert for the channel before removing
+// it so a removed peer doesn't leave a stuck alert behind.
+func (w *Watcher) Unwatch(name string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for i, ch := range w.channels {
+		if ch.name != name {
+			continue
+		}
+		if ch.pressured && w.alerts != nil {
+			w.alerts.Clear("channel-pressure:" + name)
+		}
+		w.channels = append(w.channels[:i], w.channels[i+1:]...)
+		return
+	}
+}
+
 // Run polls all channels until ctx is cancelled. Blocks.
 func (w *Watcher) Run(ctx context.Context) {
 	ticker := time.NewTicker(w.interval)

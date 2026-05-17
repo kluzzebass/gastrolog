@@ -154,6 +154,81 @@ func TestForwardEnqueuesAndCloses(t *testing.T) {
 	}
 }
 
+// TestDeleteDrainsAndExitsGoroutine verifies that Delete signals the
+// per-node streamLoop to exit, waits for the goroutine, and cleans up
+// the chanwatch + alert state — gastrolog-9ohip RecordForwarder fix.
+func TestDeleteDrainsAndExitsGoroutine(t *testing.T) {
+	t.Parallel()
+	stopCtx, stopCancel := context.WithCancel(context.Background())
+	cwCtx, cwCancel := context.WithCancel(context.Background())
+	rf := &RecordForwarder{
+		logger:     discardLogger(),
+		nodes:      make(map[string]*nodeForwarder),
+		stop:       make(chan struct{}),
+		stopCtx:    stopCtx,
+		stopCancel: stopCancel,
+		cwCancel:   cwCancel,
+		cw:         chanwatch.New(discardLogger(), 1*time.Second),
+	}
+	rf.wg.Add(1)
+	go func() {
+		defer rf.wg.Done()
+		rf.cw.Run(cwCtx)
+	}()
+
+	// Set up a per-node forwarder with a goroutine that exits when
+	// either rf.stop or nf.quit closes — exactly the production
+	// streamLoop shape (minus the actual stream).
+	nodeID := "going-away"
+	nf := &nodeForwarder{
+		ch:   make(chan forwardEntry, forwardChanCap),
+		done: make(chan struct{}),
+		quit: make(chan struct{}),
+	}
+	rf.nodes[nodeID] = nf
+	rf.cw.Watch(probeNamePrefix+nodeID, func() (int, int) {
+		return len(nf.ch), cap(nf.ch)
+	}, 0.9)
+
+	rf.wg.Add(1)
+	go func() {
+		defer rf.wg.Done()
+		defer close(nf.done)
+		for {
+			select {
+			case <-nf.ch:
+			case <-rf.stop:
+				return
+			case <-nf.quit:
+				return
+			}
+		}
+	}()
+
+	rf.Delete(nodeID)
+
+	// After Delete returns, the node is no longer in the map and the
+	// goroutine has exited (Delete waits on nf.done).
+	rf.mu.Lock()
+	_, present := rf.nodes[nodeID]
+	rf.mu.Unlock()
+	if present {
+		t.Fatal("expected node entry removed from rf.nodes")
+	}
+	select {
+	case <-nf.done:
+	default:
+		t.Fatal("expected nf.done closed before Delete returns")
+	}
+
+	// Idempotent: deleting an unknown node is a no-op.
+	rf.Delete("never-seen")
+
+	if err := rf.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+}
+
 func TestForwardClosedReturnsError(t *testing.T) {
 	t.Parallel()
 	rf := &RecordForwarder{

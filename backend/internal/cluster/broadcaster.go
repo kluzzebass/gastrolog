@@ -145,3 +145,26 @@ func (b *Broadcaster) sendOne(ctx context.Context, conn *grpc.ClientConn, req *g
 
 // Close is a no-op — connection lifecycle is managed by PeerConns.
 func (b *Broadcaster) Close() error { return nil }
+
+// Delete drops the failure-suppression entry for a removed peer.
+// Called from the peer-removal observer so the `failed` map doesn't
+// accumulate dead entries forever. Naming aligns with the
+// peerEvictor interface used elsewhere in cluster removal.
+func (b *Broadcaster) Delete(peer string) {
+	b.mu.Lock()
+	delete(b.failed, peer)
+	b.mu.Unlock()
+}
+
+// ReconcilePeers drops any failure-suppression entry whose peer is
+// not in keep. Backstop for the observer path when hraft delivers a
+// config change via snapshot install (no PeerObservation fires).
+func (b *Broadcaster) ReconcilePeers(keep map[string]struct{}) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for p := range b.failed {
+		if _, ok := keep[p]; !ok {
+			delete(b.failed, p)
+		}
+	}
+}

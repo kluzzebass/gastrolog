@@ -2,18 +2,23 @@ package app
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
+	"sort"
 	"sync"
 	"testing"
 	"time"
 
+	"gastrolog/internal/cluster"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/system"
 	sysmem "gastrolog/internal/system/memory"
 
 	hraft "github.com/hashicorp/raft"
 )
+
+var errFakeMember = errors.New("fake Servers() error")
 
 // fakeEvictor records Delete calls for later assertion.
 type fakeEvictor struct {
@@ -73,7 +78,7 @@ func TestRunPeerRemovalLoop_DeletesOnRemoval(t *testing.T) {
 	ch := make(chan hraft.Observation, 4)
 	ps, pjs := &fakeEvictor{}, &fakeEvictor{}
 
-	go runPeerRemovalLoop(ctx, ch, ps, pjs, quietAppLogger())
+	go runPeerRemovalLoop(ctx, ch, quietAppLogger(), ps, pjs)
 
 	ch <- peerObs("dead-node", true)
 
@@ -90,7 +95,7 @@ func TestRunPeerRemovalLoop_IgnoresAddEvents(t *testing.T) {
 	ch := make(chan hraft.Observation, 4)
 	ps, pjs := &fakeEvictor{}, &fakeEvictor{}
 
-	go runPeerRemovalLoop(ctx, ch, ps, pjs, quietAppLogger())
+	go runPeerRemovalLoop(ctx, ch, quietAppLogger(), ps, pjs)
 
 	ch <- peerObs("new-node", false)
 	// Give the goroutine a chance to process.
@@ -113,7 +118,7 @@ func TestRunPeerRemovalLoop_IgnoresNonPeerObservations(t *testing.T) {
 	ch := make(chan hraft.Observation, 4)
 	ps, pjs := &fakeEvictor{}, &fakeEvictor{}
 
-	go runPeerRemovalLoop(ctx, ch, ps, pjs, quietAppLogger())
+	go runPeerRemovalLoop(ctx, ch, quietAppLogger(), ps, pjs)
 
 	ch <- hraft.Observation{Data: hraft.LeaderObservation{LeaderID: "leader"}}
 	time.Sleep(50 * time.Millisecond)
@@ -132,7 +137,7 @@ func TestRunPeerRemovalLoop_StopsOnCtxDone(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		runPeerRemovalLoop(ctx, ch, ps, pjs, quietAppLogger())
+		runPeerRemovalLoop(ctx, ch, quietAppLogger(), ps, pjs)
 		close(done)
 	}()
 
@@ -153,7 +158,7 @@ func TestRunPeerRemovalLoop_MultipleRemovals(t *testing.T) {
 	ch := make(chan hraft.Observation, 8)
 	ps, pjs := &fakeEvictor{}, &fakeEvictor{}
 
-	go runPeerRemovalLoop(ctx, ch, ps, pjs, quietAppLogger())
+	go runPeerRemovalLoop(ctx, ch, quietAppLogger(), ps, pjs)
 
 	for _, id := range []string{"a", "b", "c"} {
 		ch <- peerObs(id, true)
@@ -161,6 +166,233 @@ func TestRunPeerRemovalLoop_MultipleRemovals(t *testing.T) {
 	for _, id := range []string{"a", "b", "c"} {
 		ps.wait(t, id, time.Second)
 		pjs.wait(t, id, time.Second)
+	}
+}
+
+// TestRunPeerRemovalLoop_VariadicEvictors verifies that every supplied
+// evictor is called on a removal — the variadic signature is what lets
+// the production wiring (app.go) thread all six per-peer caches through
+// the same loop (gastrolog-9ohip).
+func TestRunPeerRemovalLoop_VariadicEvictors(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ch := make(chan hraft.Observation, 4)
+	// Six fake evictors — matches production's actual fan-out:
+	// PeerState, PeerJobState, PeerByteMetrics, Broadcaster,
+	// StatsCollector, RecordForwarder.
+	evictors := []*fakeEvictor{{}, {}, {}, {}, {}, {}}
+	args := make([]peerEvictor, len(evictors))
+	for i, e := range evictors {
+		args[i] = e
+	}
+
+	go runPeerRemovalLoop(ctx, ch, quietAppLogger(), args...)
+
+	ch <- peerObs("dead-node", true)
+
+	for i, e := range evictors {
+		e.wait(t, "dead-node", time.Second)
+		if got := e.snapshot(); len(got) != 1 {
+			t.Errorf("evictor[%d]: expected 1 Delete, got %v", i, got)
+		}
+	}
+}
+
+// fakeReconcilable records ReconcilePeers calls + a tiny internal map
+// so tests can assert what was actually removed.
+type fakeReconcilable struct {
+	mu      sync.Mutex
+	entries map[string]struct{}
+	calls   int
+}
+
+func newFakeReconcilable(initial ...string) *fakeReconcilable {
+	f := &fakeReconcilable{entries: make(map[string]struct{})}
+	for _, id := range initial {
+		f.entries[id] = struct{}{}
+	}
+	return f
+}
+
+func (f *fakeReconcilable) ReconcilePeers(keep map[string]struct{}) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	for id := range f.entries {
+		if _, ok := keep[id]; !ok {
+			delete(f.entries, id)
+		}
+	}
+}
+
+func (f *fakeReconcilable) snapshot() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, 0, len(f.entries))
+	for id := range f.entries {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// fakeMemberSource implements memberSource with a swappable membership list.
+type fakeMemberSource struct {
+	mu      sync.Mutex
+	servers []cluster.RaftServer
+	err     error
+}
+
+func (f *fakeMemberSource) Servers() ([]cluster.RaftServer, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := make([]cluster.RaftServer, len(f.servers))
+	copy(out, f.servers)
+	return out, nil
+}
+
+func (f *fakeMemberSource) set(ids ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.servers = make([]cluster.RaftServer, len(ids))
+	for i, id := range ids {
+		f.servers[i] = cluster.RaftServer{ID: id}
+	}
+}
+
+// TestReconcilePeerCachesOnce_PurgesNonMembers verifies the happy
+// path: caches contain some entries; the reconcile pass drops any
+// whose peer isn't in the current Raft membership set, keeps the
+// rest.
+func TestReconcilePeerCachesOnce_PurgesNonMembers(t *testing.T) {
+	src := &fakeMemberSource{}
+	src.set("alive-1", "alive-2")
+	cache := newFakeReconcilable("alive-1", "alive-2", "ghost-1", "ghost-2")
+
+	reconcilePeerCachesOnce(src, quietAppLogger(), cache)
+
+	got := cache.snapshot()
+	if len(got) != 2 || got[0] != "alive-1" || got[1] != "alive-2" {
+		t.Fatalf("expected only alive-1 + alive-2 preserved, got %v", got)
+	}
+}
+
+// TestReconcilePeerCachesOnce_NoOpWhenAllMembersPresent verifies
+// stable state: every cache entry matches a current member, no
+// deletions.
+func TestReconcilePeerCachesOnce_NoOpWhenAllMembersPresent(t *testing.T) {
+	src := &fakeMemberSource{}
+	src.set("a", "b", "c")
+	cache := newFakeReconcilable("a", "b", "c")
+
+	reconcilePeerCachesOnce(src, quietAppLogger(), cache)
+
+	if got := cache.snapshot(); len(got) != 3 {
+		t.Errorf("expected 3 members preserved, got %v", got)
+	}
+}
+
+// TestReconcilePeerCachesOnce_SkipsOnSourceError verifies that a
+// Servers() failure does NOT wipe caches — the reconciler logs and
+// returns without touching them. Without this, a transient cluster
+// hiccup could empty every peer cache cluster-wide.
+func TestReconcilePeerCachesOnce_SkipsOnSourceError(t *testing.T) {
+	src := &fakeMemberSource{err: errFakeMember}
+	cache := newFakeReconcilable("only-entry")
+
+	reconcilePeerCachesOnce(src, quietAppLogger(), cache)
+
+	if got := cache.snapshot(); len(got) != 1 {
+		t.Errorf("expected entry preserved on Servers() error, got %v", got)
+	}
+}
+
+// fakeScheduler implements peerReconcileScheduler — just records
+// what AddJob and Describe were called with so we can assert the job
+// got registered with the right name + cron and a non-empty
+// description (i.e. visible in the operator inspector).
+type fakeScheduler struct {
+	mu               sync.Mutex
+	addJobName       string
+	addJobCron       string
+	addJobTaskFn     any
+	addJobErr        error
+	describeName     string
+	describeMessage  string
+}
+
+func (f *fakeScheduler) AddJob(name, cronExpr string, taskFn any, _ ...any) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.addJobName = name
+	f.addJobCron = cronExpr
+	f.addJobTaskFn = taskFn
+	return f.addJobErr
+}
+
+func (f *fakeScheduler) Describe(name, description string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.describeName = name
+	f.describeMessage = description
+}
+
+// TestStartPeerCacheReconcile_RegistersOperatorVisibleJob verifies
+// that startPeerCacheReconcile registers the reconcile work as a
+// proper scheduled job (visible in the inspector's Scheduled view)
+// rather than a hidden goroutine. The job MUST get a non-empty
+// Describe() so operators can see what it does. Calling the
+// captured taskFn should drive the cache reconcile end-to-end.
+func TestStartPeerCacheReconcile_RegistersOperatorVisibleJob(t *testing.T) {
+	src := &fakeMemberSource{}
+	src.set("alive-1")
+	cache := newFakeReconcilable("alive-1", "ghost-1")
+	sched := &fakeScheduler{}
+
+	if err := startPeerCacheReconcile(sched, src, quietAppLogger(), cache); err != nil {
+		t.Fatalf("startPeerCacheReconcile: %v", err)
+	}
+
+	if sched.addJobName != peerCacheReconcileJobName {
+		t.Errorf("AddJob name: got %q, want %q", sched.addJobName, peerCacheReconcileJobName)
+	}
+	if sched.addJobCron != peerCacheReconcileSchedule {
+		t.Errorf("AddJob cron: got %q, want %q", sched.addJobCron, peerCacheReconcileSchedule)
+	}
+	if sched.describeName != peerCacheReconcileJobName {
+		t.Errorf("Describe name: got %q, want %q", sched.describeName, peerCacheReconcileJobName)
+	}
+	if sched.describeMessage == "" {
+		t.Error("Describe message empty — operator inspector will show no context")
+	}
+
+	// Run the captured task as the scheduler would.
+	if task, ok := sched.addJobTaskFn.(func()); ok {
+		task()
+	} else {
+		t.Fatalf("expected captured task of type func(), got %T", sched.addJobTaskFn)
+	}
+
+	if got := cache.snapshot(); len(got) != 1 || got[0] != "alive-1" {
+		t.Errorf("after task run: expected alive-1 only, got %v", got)
+	}
+}
+
+// TestStartPeerCacheReconcile_PropagatesAddJobError verifies the
+// caller sees the AddJob failure (e.g. duplicate name) so it can
+// log or fatal.
+func TestStartPeerCacheReconcile_PropagatesAddJobError(t *testing.T) {
+	sched := &fakeScheduler{addJobErr: errFakeMember}
+	src := &fakeMemberSource{}
+	cache := newFakeReconcilable()
+
+	err := startPeerCacheReconcile(sched, src, quietAppLogger(), cache)
+	if err == nil {
+		t.Fatal("expected AddJob error to propagate")
 	}
 }
 

@@ -20,6 +20,29 @@ func TestPeerByteMetrics_EmptySnapshot(t *testing.T) {
 	}
 }
 
+func TestPeerByteMetrics_Delete(t *testing.T) {
+	m := NewPeerByteMetrics()
+	m.TrackSent("node-a", 100)
+	m.TrackReceived("node-a", 200)
+	m.TrackSent("node-b", 50)
+
+	m.Delete("node-a")
+
+	got := m.Snapshot()
+	if len(got) != 1 {
+		t.Fatalf("expected 1 entry after Delete, got %d: %+v", len(got), got)
+	}
+	if got[0].Peer != "node-b" {
+		t.Errorf("expected node-b to remain, got %s", got[0].Peer)
+	}
+
+	// Idempotent: deleting an unknown peer is a no-op.
+	m.Delete("node-never-seen")
+	if got2 := m.Snapshot(); len(got2) != 1 {
+		t.Fatalf("expected snapshot unchanged after no-op Delete, got %+v", got2)
+	}
+}
+
 func TestPeerByteMetrics_TrackAndSnapshot(t *testing.T) {
 	m := NewPeerByteMetrics()
 	m.TrackSent("node-a", 100)
