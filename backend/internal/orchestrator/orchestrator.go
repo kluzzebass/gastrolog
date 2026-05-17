@@ -894,29 +894,37 @@ type VaultSnapshot struct {
 }
 
 // VaultSnapshots returns a snapshot of stats for all registered vaults.
+// Vaults without a local chunk instance (e.g. placement excludes this
+// node) are still reported with zero chunk/byte counts so consumers
+// that key off (vaultID → some field) — notably the per-vault-ctl
+// learner promoter, which reads RaftAppliedIndex — get a row for
+// every vault this node knows about, not only the ones it stores
+// data for.
 func (o *Orchestrator) VaultSnapshots() []VaultSnapshot {
 	vaultIDs := o.ListVaults()
 	snapshots := make([]VaultSnapshot, 0, len(vaultIDs))
 	for _, id := range vaultIDs {
-		metas, err := o.ListChunkMetas(id)
-		if err != nil {
-			continue
-		}
 		snap := VaultSnapshot{
 			ID:               id,
-			ChunkCount:       len(metas),
 			Enabled:          o.IsVaultEnabled(id),
 			RaftAppliedIndex: o.vaultCtlAppliedIndex(id),
 		}
-		for _, m := range metas {
-			if m.Sealed {
-				snap.SealedChunks++
-			}
-			snap.RecordCount += m.RecordCount
-			if m.DiskBytes > 0 {
-				snap.DataBytes += m.DiskBytes
-			} else {
-				snap.DataBytes += m.Bytes
+		// Chunk-derived fields are best-effort. ListChunkMetas fails
+		// for vaults without an active local chunk manager (no
+		// placement on this node); that's a legitimate state, not an
+		// error — leave the fields at zero.
+		if metas, err := o.ListChunkMetas(id); err == nil {
+			snap.ChunkCount = len(metas)
+			for _, m := range metas {
+				if m.Sealed {
+					snap.SealedChunks++
+				}
+				snap.RecordCount += m.RecordCount
+				if m.DiskBytes > 0 {
+					snap.DataBytes += m.DiskBytes
+				} else {
+					snap.DataBytes += m.Bytes
+				}
 			}
 		}
 		snapshots = append(snapshots, snap)
