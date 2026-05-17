@@ -30,6 +30,17 @@ const (
 	// vaultCtlLearnerPromoteTimeout bounds each AddVoter membership
 	// commit on a vault-ctl group.
 	vaultCtlLearnerPromoteTimeout = 5 * time.Second
+
+	// vaultCtlLearnerCatchupTolerance accommodates the ~half-tick
+	// staleness between the follower's last NodeStats broadcast and
+	// the leader's live applied index. A healthy follower lags the
+	// leader by typically <10 entries; the broadcast itself adds at
+	// most one broadcast-interval's worth of new commits to the gap
+	// (~50-100 entries at typical rates). Sized small on purpose:
+	// genuinely-behind followers should NOT be promoted, and a larger
+	// budget here would silently mask plumbing bugs rather than
+	// surface them.
+	vaultCtlLearnerCatchupTolerance uint64 = 100
 )
 
 // vaultCtlRaftGroupAccess is the subset of raftgroup.GroupManager the
@@ -172,11 +183,37 @@ func (p *vaultCtlLearnerPromoter) evaluateVault(vaultID glid.GLID, seen map[catc
 // preserves the counter so the next tick retries without forcing
 // another full window — same rationale as the system promoter.
 func (p *vaultCtlLearnerPromoter) evaluateLearner(g *raftgroup.Group, vaultID glid.GLID, nodeID, addr string, leaderApplied uint64, key catchupKey) {
-	applied, ok := peerVaultAppliedIndex(p.peerState, nodeID, vaultID)
-	if !ok || applied < leaderApplied {
+	obs := observePeerVault(p.peerState, nodeID, vaultID)
+	if !obs.hasVaultEntry {
+		p.logger.Info("vault_ctl_learner_promoter: peer not yet reporting this vault",
+			"vault", vaultID, "node", nodeID,
+			"has_peer_stats", obs.hasPeerStats,
+			"vaults_in_peer_broadcast", obs.totalVaults)
 		p.catchupTicks[key] = 0
 		return
 	}
+	applied := obs.appliedIndex
+	// Tolerance: an active vault-ctl group commits entries faster
+	// than the NodeStats broadcast interval, so the follower's last
+	// broadcast lags the leader's live applied by some delta.
+	// vaultCtlLearnerCatchupTolerance is the budget — applied within
+	// this many entries of leaderApplied counts as caught up.
+	caughtUp := applied+vaultCtlLearnerCatchupTolerance >= leaderApplied
+	if !caughtUp {
+		// lag uint64-subtracts safely because !caughtUp guarantees
+		// leaderApplied > applied + tolerance (in particular,
+		// leaderApplied > applied).
+		p.logger.Info("vault_ctl_learner_promoter: learner lagging",
+			"vault", vaultID, "node", nodeID,
+			"learner_applied", applied, "leader_applied", leaderApplied,
+			"lag", leaderApplied-applied, "tolerance", vaultCtlLearnerCatchupTolerance)
+		p.catchupTicks[key] = 0
+		return
+	}
+	p.logger.Info("vault_ctl_learner_promoter: learner caught up",
+		"vault", vaultID, "node", nodeID,
+		"learner_applied", applied, "leader_applied", leaderApplied,
+		"ticks", p.catchupTicks[key]+1, "needed", p.stabilityRequired)
 	p.catchupTicks[key]++
 	if p.catchupTicks[key] < p.stabilityRequired {
 		p.logger.Debug("vault_ctl_learner_promoter: learner caught up, awaiting stability",
@@ -198,31 +235,48 @@ func (p *vaultCtlLearnerPromoter) evaluateLearner(g *raftgroup.Group, vaultID gl
 	delete(p.catchupTicks, key)
 }
 
-// peerVaultAppliedIndex looks up the named peer's broadcast
-// vault-ctl applied index for a specific vault. Returns (0, false)
-// when the peer has no recent NodeStats (no PeerState entry) or
-// hasn't reported VaultStats for this vault. The boolean
-// distinguishes "no evidence" from a legitimate zero — the promoter
-// uses it to skip rather than treat absence as lag.
-func peerVaultAppliedIndex(ps peerStatsReader, nodeID string, vaultID glid.GLID) (uint64, bool) {
+// peerVaultObservation describes what the leader knows about a peer's
+// vault-ctl state from broadcasts. Used by the promoter to choose
+// between "wait" (no evidence) and "evaluate catchup" (have evidence).
+type peerVaultObservation struct {
+	hasPeerStats   bool   // PeerState had an entry at all
+	hasVaultEntry  bool   // peer's NodeStats included this vault
+	totalVaults    int    // number of vault entries the peer broadcast (diagnostic)
+	appliedIndex   uint64 // raft applied index for this vault (only valid when hasVaultEntry)
+}
+
+// observePeerVault looks up the named peer's broadcast vault-ctl
+// applied index for a specific vault. The observation distinguishes
+// "peer hasn't broadcast at all" from "peer broadcast but didn't
+// include this vault" — the latter usually means the peer's
+// orchestrator hasn't registered the vault yet, which is a real
+// catchup-side condition rather than a stats-lag.
+func observePeerVault(ps peerStatsReader, nodeID string, vaultID glid.GLID) peerVaultObservation {
 	stats := ps.Get(nodeID)
 	if stats == nil {
-		return 0, false
+		return peerVaultObservation{}
 	}
+	obs := peerVaultObservation{hasPeerStats: true, totalVaults: len(stats.Vaults)}
 	idStr := vaultID.String()
 	for _, vs := range stats.Vaults {
 		if vs == nil {
 			continue
 		}
-		// VaultStats.Id is the raw byte form of the GLID. Compare via
-		// the canonical string form. FromBytes returns Nil on short
-		// input (so the .String() comparison naturally rejects
-		// malformed entries).
 		if glid.FromBytes(vs.Id).String() == idStr {
-			return vs.GetRaftAppliedIndex(), true
+			obs.hasVaultEntry = true
+			obs.appliedIndex = vs.GetRaftAppliedIndex()
+			return obs
 		}
 	}
-	return 0, false
+	return obs
+}
+
+// peerVaultAppliedIndex is the old shape, retained for the existing
+// unit tests. Callers that need to distinguish the absence reasons
+// should use observePeerVault directly.
+func peerVaultAppliedIndex(ps peerStatsReader, nodeID string, vaultID glid.GLID) (uint64, bool) {
+	obs := observePeerVault(ps, nodeID, vaultID)
+	return obs.appliedIndex, obs.hasVaultEntry
 }
 
 // Compile-time check that *cluster.PeerState satisfies peerStatsReader.

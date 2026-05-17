@@ -247,57 +247,79 @@ func (m *vaultCtlLeaderManager) reconcile(vaultID glid.GLID, group *raftgroup.Gr
 	for _, srv := range desired {
 		desiredByID[srv.ID] = srv.Address
 	}
-	currentByID := make(map[hraft.ServerID]hraft.ServerAddress, len(current))
+	type memberState struct {
+		addr     hraft.ServerAddress
+		suffrage hraft.ServerSuffrage
+	}
+	currentByID := make(map[hraft.ServerID]memberState, len(current))
 	for _, srv := range current {
-		currentByID[srv.ID] = srv.Address
+		currentByID[srv.ID] = memberState{addr: srv.Address, suffrage: srv.Suffrage}
 	}
 
-	// Add missing voters AND refresh stale addresses for known voters.
-	// AddVoter on hashicorp/raft is idempotent for an unchanged (ID, address)
-	// pair and rewrites the address when the ID is already present but the
-	// address differs — exactly what we need when a K8s pod gets a new IP
-	// after a rolling restart. Without this, a pod that came back at a new
-	// address stays unreachable to the vault-ctl Raft group forever because
-	// the configuration still points at the old IP. See gastrolog-4zy8a.
+	// Three cases per desired member:
+	//   1. Not present → AddNonvoter (new joiner enters as learner;
+	//      gastrolog-gcbx7 promotes once caught up).
+	//   2. Present as Nonvoter, same address → skip; let the promoter
+	//      handle it. Even on address drift we leave it alone — once
+	//      promoted the next reconcile pass picks up address refresh
+	//      via the case-3 path below.
+	//   3. Present as Voter:
+	//        - same address → skip (no-op).
+	//        - different address → AddVoter to refresh (K8s pod IP
+	//          change after rolling restart). See gastrolog-4zy8a.
 	//
-	// Membership changes are capped at vaultMembershipMaxPerPass per pass.
-	// hashicorp/raft serializes configuration log entries; on burst K8s
-	// scale-out the leader epoch used to issue 7+ AddVoter calls back-to-
-	// back, each blocking on the previous voter to catch up before quorum
-	// could commit the next entry. The cap yields after a small batch and
-	// re-fires desiredChanged so the next batch starts immediately on the
-	// same epoch (no 30 s wait). See gastrolog-5n6xz.
+	// Membership changes are capped at vaultMembershipMaxPerPass per
+	// pass. hashicorp/raft serializes configuration log entries; on
+	// burst K8s scale-out the leader epoch used to issue 7+ AddVoter
+	// calls back-to-back, each blocking on the previous to catch up
+	// before quorum could commit the next entry. The cap yields after
+	// a small batch and re-fires desiredChanged so the next batch
+	// starts immediately on the same epoch. See gastrolog-5n6xz.
 	added := 0
 	moreToDo := false
 	for _, srv := range desired {
-		curAddr, present := currentByID[srv.ID]
-		if present && curAddr == srv.Address {
+		cur, present := currentByID[srv.ID]
+		// Already a voter at the right address — nothing to do.
+		if present && cur.suffrage == hraft.Voter && cur.addr == srv.Address {
+			continue
+		}
+		// Already a nonvoter — leave to the per-vault-ctl learner
+		// promoter (gastrolog-gcbx7).
+		if present && cur.suffrage == hraft.Nonvoter {
 			continue
 		}
 		if added >= vaultMembershipMaxPerPass {
 			moreToDo = true
 			break
 		}
-		fut := group.Raft.AddVoter(srv.ID, srv.Address, 0, vaultMembershipChangeTimeout)
+		var fut hraft.IndexFuture
+		var action string
+		if present {
+			// Present as Voter at a different address → idempotent
+			// refresh via AddVoter (rewrites the address).
+			fut = group.Raft.AddVoter(srv.ID, srv.Address, 0, vaultMembershipChangeTimeout)
+			action = "voter address updated"
+		} else {
+			// Genuinely new member → enters as learner. The
+			// gastrolog-gcbx7 promoter upgrades once apply-index
+			// catches up.
+			fut = group.Raft.AddNonvoter(srv.ID, srv.Address, 0, vaultMembershipChangeTimeout)
+			action = "added learner"
+		}
 		if err := awaitFutureWithTimeout(fut, m.commitTimeout); err != nil {
-			// On commit timeout, the previous AddVoter is still pending
-			// in hashicorp/raft's serialized configuration channel — a
-			// burst of immediate retries just produces "timed out
-			// enqueuing operation" errors at the log-append boundary
-			// (vaultMembershipChangeTimeout). Yield to the 30 s
-			// safety-net tick instead; by then the in-flight AddVoter
-			// has either committed or errored, freeing the channel.
-			m.logger.Warn("AddVoter failed",
-				"vault", vaultID, "node", srv.ID, "addr", srv.Address, "error", err)
+			// On commit timeout, the previous membership change is
+			// still pending in hashicorp/raft's serialized
+			// configuration channel — a burst of immediate retries
+			// just produces "timed out enqueuing operation" errors at
+			// the log-append boundary. Yield to the 30 s safety-net
+			// tick instead; by then the in-flight call has either
+			// committed or errored, freeing the channel.
+			m.logger.Warn("membership change failed",
+				"vault", vaultID, "node", srv.ID, "addr", srv.Address, "action", action, "error", err)
 			return
 		}
-		if present {
-			m.logger.Info("voter address updated",
-				"vault", vaultID, "node", srv.ID, "old_addr", curAddr, "new_addr", srv.Address)
-		} else {
-			m.logger.Info("added voter",
-				"vault", vaultID, "node", srv.ID, "addr", srv.Address)
-		}
+		m.logger.Info(action,
+			"vault", vaultID, "node", srv.ID, "addr", srv.Address)
 		added++
 	}
 

@@ -19,8 +19,14 @@ import (
 
 // StatsVaultSnapshot is the stats collector's view of a vault.
 // Mirrors orchestrator.VaultSnapshot without importing it.
+//
+// ID is the canonical glid.GLID. Earlier shapes stored it as the
+// String() form and then cast `[]byte(s.ID)` for the broadcast,
+// which silently encoded the ASCII bytes of the base32 string —
+// breaking round-trip on the receiver. The canonical type closes
+// that hole; statscollector emits the raw proto bytes via ToProto().
 type StatsVaultSnapshot struct {
-	ID               string
+	ID               glid.GLID
 	Name             string
 	RecordCount      int64
 	ChunkCount       int
@@ -243,7 +249,7 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 		// Vault snapshots.
 		for _, v := range c.cfg.Stats.VaultSnapshots() {
 			stats.Vaults = append(stats.Vaults, &gastrologv1.VaultStats{
-				Id:               []byte(v.ID),
+				Id:               v.ID.ToProto(),
 				Name:             v.Name,
 				RecordCount:      v.RecordCount,
 				ChunkCount:       int64(v.ChunkCount),

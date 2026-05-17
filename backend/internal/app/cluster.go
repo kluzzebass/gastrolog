@@ -406,15 +406,20 @@ func makeJoinClusterFunc(
 			return err
 		}
 
-		// 12. Request membership
-		logger.Info("requesting cluster membership", "leader_addr", leaderAddr)
+		// 12. Request membership as a nonvoter (learner). This is a
+		// runtime single-node-to-cluster join — the joining node is
+		// new to the target cluster's Raft membership regardless of
+		// its own local state, so the safe shape is to enter as a
+		// learner and let the system-Raft promoter (gastrolog-2czh9)
+		// upgrade to voter once caught up.
+		logger.Info("requesting cluster membership (as learner)", "leader_addr", leaderAddr)
 		joinCtx, joinCancel := context.WithTimeout(ctx, 30*time.Second)
-		err = cluster.JoinCluster(joinCtx, logger, leaderAddr, nodeID, clusterAddr, clusterTLS, true)
+		err = cluster.JoinCluster(joinCtx, logger, leaderAddr, nodeID, clusterAddr, clusterTLS, false)
 		joinCancel()
 		if err != nil {
 			return fmt.Errorf("join cluster: %w", err)
 		}
-		logger.Info("cluster membership granted")
+		logger.Info("cluster membership granted (as learner; promoter will upgrade once caught up)")
 
 		// 13. Wait for config replication
 		logger.Info("waiting for config replication from leader")
