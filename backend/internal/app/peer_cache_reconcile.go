@@ -32,10 +32,11 @@ const (
 	peerCacheReconcileSchedule = "*/30 * * * * *"
 )
 
-// peerReconcileScheduler is the minimal contract the registrar
-// needs from a scheduler — narrow interface so tests can fake it
-// without depending on the orchestrator package.
-type peerReconcileScheduler interface {
+// scheduledJobRegistry is the minimal contract this package needs
+// from a scheduler — narrow interface so each migration's registrar
+// can fake it in tests without depending on the orchestrator package.
+// Satisfied by *orchestrator.Scheduler.
+type scheduledJobRegistry interface {
 	AddJob(name, cronExpr string, taskFn any, args ...any) error
 	Describe(name, description string)
 }
@@ -49,7 +50,7 @@ type peerReconcileScheduler interface {
 // satisfies memberSource via its Servers() method); `caches` is the
 // same set passed to observePeerRemovals so the observer (fast
 // path) and the reconciler (backstop) operate on identical state.
-func startPeerCacheReconcile(scheduler peerReconcileScheduler, src memberSource, logger *slog.Logger, caches ...peerCacheReconciler) error {
+func startPeerCacheReconcile(scheduler scheduledJobRegistry, src memberSource, logger *slog.Logger, caches ...peerCacheReconciler) error {
 	task := func() {
 		reconcilePeerCachesOnce(src, logger, caches...)
 	}

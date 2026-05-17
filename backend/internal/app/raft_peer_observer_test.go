@@ -311,7 +311,7 @@ func TestReconcilePeerCachesOnce_SkipsOnSourceError(t *testing.T) {
 	}
 }
 
-// fakeScheduler implements peerReconcileScheduler — just records
+// fakeScheduler implements scheduledJobRegistry — just records
 // what AddJob and Describe were called with so we can assert the job
 // got registered with the right name + cron and a non-empty
 // description (i.e. visible in the operator inspector).

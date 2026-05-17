@@ -26,11 +26,15 @@ const (
 	// GLOG_UNREACHABLE_ALERT_THRESHOLD.
 	defaultUnreachableAlertThreshold = 5 * time.Minute
 
-	// unreachableSweepInterval is the tick cadence on the system-Raft
-	// leader. Low frequency by design — the sweep proposes Raft commands,
-	// so faster ticks just add log churn without helping detection
-	// (PeerState's TTL is the actual detection floor).
-	unreachableSweepInterval = 30 * time.Second
+	// unreachableSweepJobName is the operator-visible name shown in
+	// the inspector's Scheduled view. Keep stable across releases.
+	unreachableSweepJobName = "node-unreachable-sweep"
+
+	// unreachableSweepSchedule runs every 30 seconds. Low frequency by
+	// design — the transition phase proposes Raft commands, so faster
+	// ticks just add log churn without helping detection (PeerState's
+	// TTL is the actual detection floor). 6-field cron (with-seconds).
+	unreachableSweepSchedule = "*/30 * * * * *"
 
 	// unreachableAlertID is the stable per-node alert ID prefix. Format:
 	// "node-unreachable:<nodeID>". One Set/Clear pair per node.
@@ -65,7 +69,6 @@ type unreachableSweep struct {
 	threshold      time.Duration
 	alertThreshold time.Duration
 	alerts         *alert.Collector
-	interval       time.Duration
 	logger         *slog.Logger
 	now            func() time.Time
 }
@@ -86,10 +89,28 @@ func newUnreachableSweep(cfgStore system.Store, clusterSrv *cluster.Server, peer
 		threshold:      threshold,
 		alertThreshold: alertThreshold,
 		alerts:         alerts,
-		interval:       unreachableSweepInterval,
 		logger:         logger,
 		now:            time.Now,
 	}
+}
+
+// startUnreachableSweep registers the sweep with the supplied
+// scheduler as a recurring job. Returns the scheduler's AddJob
+// error if any. On success, attaches a Describe text for the
+// inspector's Scheduled view so the operator can see what the job
+// does + which phases run on which nodes.
+//
+// The job task closes over ctx so the per-tick FSM reads and
+// proposals share the app's lifetime context; the scheduler handles
+// cadence and singleton concurrency.
+func startUnreachableSweep(ctx context.Context, scheduler scheduledJobRegistry, sweep *unreachableSweep) error {
+	task := func() { sweep.tickOnce(ctx) }
+	if err := scheduler.AddJob(unreachableSweepJobName, unreachableSweepSchedule, task); err != nil {
+		return err
+	}
+	scheduler.Describe(unreachableSweepJobName,
+		"Heartbeat-driven Live↔Unreachable node-state sweep. Two phases per tick: (1) transitions — leader-only, proposes SetNodeState commands when PeerState lastSeen crosses the threshold; (2) alerts — every node, raises a warning when a node has been Unreachable for longer than the alert threshold. Tunable via GLOG_UNREACHABLE_THRESHOLD and GLOG_UNREACHABLE_ALERT_THRESHOLD (gastrolog-39m2k, gastrolog-cku75).")
+	return nil
 }
 
 func durationFromEnv(logger *slog.Logger, key string, fallback time.Duration) time.Duration {
@@ -106,8 +127,8 @@ func durationFromEnv(logger *slog.Logger, key string, fallback time.Duration) ti
 	return d
 }
 
-// Run blocks until ctx is cancelled. Ticks every interval; per tick,
-// two phases run:
+// tickOnce runs both phases of the sweep — the scheduler handles
+// cadence, so the loop and ticker that used to live here are gone.
 //
 //   - Transition phase (leader-only): scans NodeConfig records and
 //     proposes Live↔Unreachable transitions based on PeerState
@@ -117,20 +138,11 @@ func durationFromEnv(logger *slog.Logger, key string, fallback time.Duration) ti
 //     or clears the per-node warning alert based on time-in-Unreachable.
 //     Runs on every node because alerts live in the local
 //     alert.Collector — the UI on each node needs its own copy.
-func (s *unreachableSweep) Run(ctx context.Context) {
-	ticker := time.NewTicker(s.interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if s.clusterSrv.IsLeader() {
-				s.tick(ctx)
-			}
-			s.alertTick(ctx)
-		}
+func (s *unreachableSweep) tickOnce(ctx context.Context) {
+	if s.clusterSrv != nil && s.clusterSrv.IsLeader() {
+		s.tick(ctx)
 	}
+	s.alertTick(ctx)
 }
 
 // alertTick evaluates Unreachable-duration alerts on every node. The
