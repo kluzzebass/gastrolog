@@ -106,6 +106,7 @@ func DefaultRoutes() map[string]RPCRoute {
 		gastrologv1connect.LifecycleServiceWatchSystemStatusProcedure: {Strategy: RouteLocal, IsStreaming: true},
 		// Cluster mutations — need the Raft leader.
 		gastrologv1connect.LifecycleServiceSetNodeSuffrageProcedure: {Strategy: RouteLeader},
+		gastrologv1connect.LifecycleServiceSetNodeStateProcedure:    {Strategy: RouteLeader},
 		gastrologv1connect.LifecycleServiceRemoveNodeProcedure:      {Strategy: RouteLeader},
 
 		// ── QueryService ─────────────────────────────────────────────────

@@ -832,6 +832,94 @@ func (*SetNodeSuffrageResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{9}
 }
 
+type SetNodeStateRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	NodeId        []byte                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	State         NodeState              `protobuf:"varint,2,opt,name=state,proto3,enum=gastrolog.v1.NodeState" json:"state,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetNodeStateRequest) Reset() {
+	*x = SetNodeStateRequest{}
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetNodeStateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetNodeStateRequest) ProtoMessage() {}
+
+func (x *SetNodeStateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetNodeStateRequest.ProtoReflect.Descriptor instead.
+func (*SetNodeStateRequest) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *SetNodeStateRequest) GetNodeId() []byte {
+	if x != nil {
+		return x.NodeId
+	}
+	return nil
+}
+
+func (x *SetNodeStateRequest) GetState() NodeState {
+	if x != nil {
+		return x.State
+	}
+	return NodeState_NODE_STATE_UNSPECIFIED
+}
+
+type SetNodeStateResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetNodeStateResponse) Reset() {
+	*x = SetNodeStateResponse{}
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetNodeStateResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetNodeStateResponse) ProtoMessage() {}
+
+func (x *SetNodeStateResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetNodeStateResponse.ProtoReflect.Descriptor instead.
+func (*SetNodeStateResponse) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{11}
+}
+
 type JoinClusterRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	LeaderAddress string                 `protobuf:"bytes,1,opt,name=leader_address,json=leaderAddress,proto3" json:"leader_address,omitempty"` // cluster address of the leader to join (e.g., "10.0.0.1:4566")
@@ -842,7 +930,7 @@ type JoinClusterRequest struct {
 
 func (x *JoinClusterRequest) Reset() {
 	*x = JoinClusterRequest{}
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[10]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -854,7 +942,7 @@ func (x *JoinClusterRequest) String() string {
 func (*JoinClusterRequest) ProtoMessage() {}
 
 func (x *JoinClusterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[10]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -867,7 +955,7 @@ func (x *JoinClusterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JoinClusterRequest.ProtoReflect.Descriptor instead.
 func (*JoinClusterRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{10}
+	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *JoinClusterRequest) GetLeaderAddress() string {
@@ -892,7 +980,7 @@ type JoinClusterResponse struct {
 
 func (x *JoinClusterResponse) Reset() {
 	*x = JoinClusterResponse{}
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[11]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -904,7 +992,7 @@ func (x *JoinClusterResponse) String() string {
 func (*JoinClusterResponse) ProtoMessage() {}
 
 func (x *JoinClusterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[11]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -917,7 +1005,7 @@ func (x *JoinClusterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JoinClusterResponse.ProtoReflect.Descriptor instead.
 func (*JoinClusterResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{11}
+	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{13}
 }
 
 type RemoveNodeRequest struct {
@@ -942,7 +1030,7 @@ type RemoveNodeRequest struct {
 
 func (x *RemoveNodeRequest) Reset() {
 	*x = RemoveNodeRequest{}
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[12]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -954,7 +1042,7 @@ func (x *RemoveNodeRequest) String() string {
 func (*RemoveNodeRequest) ProtoMessage() {}
 
 func (x *RemoveNodeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[12]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -967,7 +1055,7 @@ func (x *RemoveNodeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveNodeRequest.ProtoReflect.Descriptor instead.
 func (*RemoveNodeRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{12}
+	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *RemoveNodeRequest) GetNodeId() []byte {
@@ -999,7 +1087,7 @@ type RemoveNodeResponse struct {
 
 func (x *RemoveNodeResponse) Reset() {
 	*x = RemoveNodeResponse{}
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[13]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1011,7 +1099,7 @@ func (x *RemoveNodeResponse) String() string {
 func (*RemoveNodeResponse) ProtoMessage() {}
 
 func (x *RemoveNodeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[13]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1024,7 +1112,7 @@ func (x *RemoveNodeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveNodeResponse.ProtoReflect.Descriptor instead.
 func (*RemoveNodeResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{13}
+	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{15}
 }
 
 type YieldLeadershipRequest struct {
@@ -1035,7 +1123,7 @@ type YieldLeadershipRequest struct {
 
 func (x *YieldLeadershipRequest) Reset() {
 	*x = YieldLeadershipRequest{}
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[14]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1047,7 +1135,7 @@ func (x *YieldLeadershipRequest) String() string {
 func (*YieldLeadershipRequest) ProtoMessage() {}
 
 func (x *YieldLeadershipRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[14]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1060,7 +1148,7 @@ func (x *YieldLeadershipRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use YieldLeadershipRequest.ProtoReflect.Descriptor instead.
 func (*YieldLeadershipRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{14}
+	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{16}
 }
 
 type YieldLeadershipResponse struct {
@@ -1075,7 +1163,7 @@ type YieldLeadershipResponse struct {
 
 func (x *YieldLeadershipResponse) Reset() {
 	*x = YieldLeadershipResponse{}
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[15]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1087,7 +1175,7 @@ func (x *YieldLeadershipResponse) String() string {
 func (*YieldLeadershipResponse) ProtoMessage() {}
 
 func (x *YieldLeadershipResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[15]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1100,7 +1188,7 @@ func (x *YieldLeadershipResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use YieldLeadershipResponse.ProtoReflect.Descriptor instead.
 func (*YieldLeadershipResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{15}
+	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *YieldLeadershipResponse) GetTransferred() bool {
@@ -1118,7 +1206,7 @@ type WatchSystemStatusRequest struct {
 
 func (x *WatchSystemStatusRequest) Reset() {
 	*x = WatchSystemStatusRequest{}
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[16]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1130,7 +1218,7 @@ func (x *WatchSystemStatusRequest) String() string {
 func (*WatchSystemStatusRequest) ProtoMessage() {}
 
 func (x *WatchSystemStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[16]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1143,7 +1231,7 @@ func (x *WatchSystemStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchSystemStatusRequest.ProtoReflect.Descriptor instead.
 func (*WatchSystemStatusRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{16}
+	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{18}
 }
 
 type WatchSystemStatusResponse struct {
@@ -1163,7 +1251,7 @@ type WatchSystemStatusResponse struct {
 
 func (x *WatchSystemStatusResponse) Reset() {
 	*x = WatchSystemStatusResponse{}
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[17]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1175,7 +1263,7 @@ func (x *WatchSystemStatusResponse) String() string {
 func (*WatchSystemStatusResponse) ProtoMessage() {}
 
 func (x *WatchSystemStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[17]
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1188,7 +1276,7 @@ func (x *WatchSystemStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchSystemStatusResponse.ProtoReflect.Descriptor instead.
 func (*WatchSystemStatusResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{17}
+	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *WatchSystemStatusResponse) GetCluster() *GetClusterStatusResponse {
@@ -1289,7 +1377,11 @@ const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"\x16SetNodeSuffrageRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\fR\x06nodeId\x12\x14\n" +
 	"\x05voter\x18\x02 \x01(\bR\x05voter\"\x19\n" +
-	"\x17SetNodeSuffrageResponse\"Z\n" +
+	"\x17SetNodeSuffrageResponse\"]\n" +
+	"\x13SetNodeStateRequest\x12\x17\n" +
+	"\anode_id\x18\x01 \x01(\fR\x06nodeId\x12-\n" +
+	"\x05state\x18\x02 \x01(\x0e2\x17.gastrolog.v1.NodeStateR\x05state\"\x16\n" +
+	"\x14SetNodeStateResponse\"Z\n" +
 	"\x12JoinClusterRequest\x12%\n" +
 	"\x0eleader_address\x18\x01 \x01(\tR\rleaderAddress\x12\x1d\n" +
 	"\n" +
@@ -1326,12 +1418,13 @@ const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"!CLUSTER_NODE_SUFFRAGE_UNSPECIFIED\x10\x00\x12\x1f\n" +
 	"\x1bCLUSTER_NODE_SUFFRAGE_VOTER\x10\x01\x12\"\n" +
 	"\x1eCLUSTER_NODE_SUFFRAGE_NONVOTER\x10\x02\x12!\n" +
-	"\x1dCLUSTER_NODE_SUFFRAGE_STAGING\x10\x032\xd2\x05\n" +
+	"\x1dCLUSTER_NODE_SUFFRAGE_STAGING\x10\x032\xa9\x06\n" +
 	"\x10LifecycleService\x12C\n" +
 	"\x06Health\x12\x1b.gastrolog.v1.HealthRequest\x1a\x1c.gastrolog.v1.HealthResponse\x12I\n" +
 	"\bShutdown\x12\x1d.gastrolog.v1.ShutdownRequest\x1a\x1e.gastrolog.v1.ShutdownResponse\x12a\n" +
 	"\x10GetClusterStatus\x12%.gastrolog.v1.GetClusterStatusRequest\x1a&.gastrolog.v1.GetClusterStatusResponse\x12^\n" +
-	"\x0fSetNodeSuffrage\x12$.gastrolog.v1.SetNodeSuffrageRequest\x1a%.gastrolog.v1.SetNodeSuffrageResponse\x12R\n" +
+	"\x0fSetNodeSuffrage\x12$.gastrolog.v1.SetNodeSuffrageRequest\x1a%.gastrolog.v1.SetNodeSuffrageResponse\x12U\n" +
+	"\fSetNodeState\x12!.gastrolog.v1.SetNodeStateRequest\x1a\".gastrolog.v1.SetNodeStateResponse\x12R\n" +
 	"\vJoinCluster\x12 .gastrolog.v1.JoinClusterRequest\x1a!.gastrolog.v1.JoinClusterResponse\x12O\n" +
 	"\n" +
 	"RemoveNode\x12\x1f.gastrolog.v1.RemoveNodeRequest\x1a .gastrolog.v1.RemoveNodeResponse\x12^\n" +
@@ -1351,7 +1444,7 @@ func file_gastrolog_v1_lifecycle_proto_rawDescGZIP() []byte {
 }
 
 var file_gastrolog_v1_lifecycle_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_gastrolog_v1_lifecycle_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_gastrolog_v1_lifecycle_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_gastrolog_v1_lifecycle_proto_goTypes = []any{
 	(Status)(0),                       // 0: gastrolog.v1.Status
 	(ClusterNodeRole)(0),              // 1: gastrolog.v1.ClusterNodeRole
@@ -1366,19 +1459,22 @@ var file_gastrolog_v1_lifecycle_proto_goTypes = []any{
 	(*ClusterNode)(nil),               // 10: gastrolog.v1.ClusterNode
 	(*SetNodeSuffrageRequest)(nil),    // 11: gastrolog.v1.SetNodeSuffrageRequest
 	(*SetNodeSuffrageResponse)(nil),   // 12: gastrolog.v1.SetNodeSuffrageResponse
-	(*JoinClusterRequest)(nil),        // 13: gastrolog.v1.JoinClusterRequest
-	(*JoinClusterResponse)(nil),       // 14: gastrolog.v1.JoinClusterResponse
-	(*RemoveNodeRequest)(nil),         // 15: gastrolog.v1.RemoveNodeRequest
-	(*RemoveNodeResponse)(nil),        // 16: gastrolog.v1.RemoveNodeResponse
-	(*YieldLeadershipRequest)(nil),    // 17: gastrolog.v1.YieldLeadershipRequest
-	(*YieldLeadershipResponse)(nil),   // 18: gastrolog.v1.YieldLeadershipResponse
-	(*WatchSystemStatusRequest)(nil),  // 19: gastrolog.v1.WatchSystemStatusRequest
-	(*WatchSystemStatusResponse)(nil), // 20: gastrolog.v1.WatchSystemStatusResponse
-	(*NodeStats)(nil),                 // 21: gastrolog.v1.NodeStats
-	(*GetRouteStatsResponse)(nil),     // 22: gastrolog.v1.GetRouteStatsResponse
-	(*VaultInfo)(nil),                 // 23: gastrolog.v1.VaultInfo
-	(*GetStatsResponse)(nil),          // 24: gastrolog.v1.GetStatsResponse
-	(*IngesterAlive)(nil),             // 25: gastrolog.v1.IngesterAlive
+	(*SetNodeStateRequest)(nil),       // 13: gastrolog.v1.SetNodeStateRequest
+	(*SetNodeStateResponse)(nil),      // 14: gastrolog.v1.SetNodeStateResponse
+	(*JoinClusterRequest)(nil),        // 15: gastrolog.v1.JoinClusterRequest
+	(*JoinClusterResponse)(nil),       // 16: gastrolog.v1.JoinClusterResponse
+	(*RemoveNodeRequest)(nil),         // 17: gastrolog.v1.RemoveNodeRequest
+	(*RemoveNodeResponse)(nil),        // 18: gastrolog.v1.RemoveNodeResponse
+	(*YieldLeadershipRequest)(nil),    // 19: gastrolog.v1.YieldLeadershipRequest
+	(*YieldLeadershipResponse)(nil),   // 20: gastrolog.v1.YieldLeadershipResponse
+	(*WatchSystemStatusRequest)(nil),  // 21: gastrolog.v1.WatchSystemStatusRequest
+	(*WatchSystemStatusResponse)(nil), // 22: gastrolog.v1.WatchSystemStatusResponse
+	(*NodeStats)(nil),                 // 23: gastrolog.v1.NodeStats
+	(NodeState)(0),                    // 24: gastrolog.v1.NodeState
+	(*GetRouteStatsResponse)(nil),     // 25: gastrolog.v1.GetRouteStatsResponse
+	(*VaultInfo)(nil),                 // 26: gastrolog.v1.VaultInfo
+	(*GetStatsResponse)(nil),          // 27: gastrolog.v1.GetStatsResponse
+	(*IngesterAlive)(nil),             // 28: gastrolog.v1.IngesterAlive
 }
 var file_gastrolog_v1_lifecycle_proto_depIdxs = []int32{
 	0,  // 0: gastrolog.v1.HealthResponse.status:type_name -> gastrolog.v1.Status
@@ -1386,34 +1482,37 @@ var file_gastrolog_v1_lifecycle_proto_depIdxs = []int32{
 	9,  // 2: gastrolog.v1.GetClusterStatusResponse.local_stats:type_name -> gastrolog.v1.RaftStats
 	1,  // 3: gastrolog.v1.ClusterNode.role:type_name -> gastrolog.v1.ClusterNodeRole
 	2,  // 4: gastrolog.v1.ClusterNode.suffrage:type_name -> gastrolog.v1.ClusterNodeSuffrage
-	21, // 5: gastrolog.v1.ClusterNode.stats:type_name -> gastrolog.v1.NodeStats
-	8,  // 6: gastrolog.v1.WatchSystemStatusResponse.cluster:type_name -> gastrolog.v1.GetClusterStatusResponse
-	4,  // 7: gastrolog.v1.WatchSystemStatusResponse.health:type_name -> gastrolog.v1.HealthResponse
-	22, // 8: gastrolog.v1.WatchSystemStatusResponse.route_stats:type_name -> gastrolog.v1.GetRouteStatsResponse
-	23, // 9: gastrolog.v1.WatchSystemStatusResponse.vaults:type_name -> gastrolog.v1.VaultInfo
-	24, // 10: gastrolog.v1.WatchSystemStatusResponse.stats:type_name -> gastrolog.v1.GetStatsResponse
-	25, // 11: gastrolog.v1.WatchSystemStatusResponse.ingester_alive:type_name -> gastrolog.v1.IngesterAlive
-	3,  // 12: gastrolog.v1.LifecycleService.Health:input_type -> gastrolog.v1.HealthRequest
-	5,  // 13: gastrolog.v1.LifecycleService.Shutdown:input_type -> gastrolog.v1.ShutdownRequest
-	7,  // 14: gastrolog.v1.LifecycleService.GetClusterStatus:input_type -> gastrolog.v1.GetClusterStatusRequest
-	11, // 15: gastrolog.v1.LifecycleService.SetNodeSuffrage:input_type -> gastrolog.v1.SetNodeSuffrageRequest
-	13, // 16: gastrolog.v1.LifecycleService.JoinCluster:input_type -> gastrolog.v1.JoinClusterRequest
-	15, // 17: gastrolog.v1.LifecycleService.RemoveNode:input_type -> gastrolog.v1.RemoveNodeRequest
-	17, // 18: gastrolog.v1.LifecycleService.YieldLeadership:input_type -> gastrolog.v1.YieldLeadershipRequest
-	19, // 19: gastrolog.v1.LifecycleService.WatchSystemStatus:input_type -> gastrolog.v1.WatchSystemStatusRequest
-	4,  // 20: gastrolog.v1.LifecycleService.Health:output_type -> gastrolog.v1.HealthResponse
-	6,  // 21: gastrolog.v1.LifecycleService.Shutdown:output_type -> gastrolog.v1.ShutdownResponse
-	8,  // 22: gastrolog.v1.LifecycleService.GetClusterStatus:output_type -> gastrolog.v1.GetClusterStatusResponse
-	12, // 23: gastrolog.v1.LifecycleService.SetNodeSuffrage:output_type -> gastrolog.v1.SetNodeSuffrageResponse
-	14, // 24: gastrolog.v1.LifecycleService.JoinCluster:output_type -> gastrolog.v1.JoinClusterResponse
-	16, // 25: gastrolog.v1.LifecycleService.RemoveNode:output_type -> gastrolog.v1.RemoveNodeResponse
-	18, // 26: gastrolog.v1.LifecycleService.YieldLeadership:output_type -> gastrolog.v1.YieldLeadershipResponse
-	20, // 27: gastrolog.v1.LifecycleService.WatchSystemStatus:output_type -> gastrolog.v1.WatchSystemStatusResponse
-	20, // [20:28] is the sub-list for method output_type
-	12, // [12:20] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	23, // 5: gastrolog.v1.ClusterNode.stats:type_name -> gastrolog.v1.NodeStats
+	24, // 6: gastrolog.v1.SetNodeStateRequest.state:type_name -> gastrolog.v1.NodeState
+	8,  // 7: gastrolog.v1.WatchSystemStatusResponse.cluster:type_name -> gastrolog.v1.GetClusterStatusResponse
+	4,  // 8: gastrolog.v1.WatchSystemStatusResponse.health:type_name -> gastrolog.v1.HealthResponse
+	25, // 9: gastrolog.v1.WatchSystemStatusResponse.route_stats:type_name -> gastrolog.v1.GetRouteStatsResponse
+	26, // 10: gastrolog.v1.WatchSystemStatusResponse.vaults:type_name -> gastrolog.v1.VaultInfo
+	27, // 11: gastrolog.v1.WatchSystemStatusResponse.stats:type_name -> gastrolog.v1.GetStatsResponse
+	28, // 12: gastrolog.v1.WatchSystemStatusResponse.ingester_alive:type_name -> gastrolog.v1.IngesterAlive
+	3,  // 13: gastrolog.v1.LifecycleService.Health:input_type -> gastrolog.v1.HealthRequest
+	5,  // 14: gastrolog.v1.LifecycleService.Shutdown:input_type -> gastrolog.v1.ShutdownRequest
+	7,  // 15: gastrolog.v1.LifecycleService.GetClusterStatus:input_type -> gastrolog.v1.GetClusterStatusRequest
+	11, // 16: gastrolog.v1.LifecycleService.SetNodeSuffrage:input_type -> gastrolog.v1.SetNodeSuffrageRequest
+	13, // 17: gastrolog.v1.LifecycleService.SetNodeState:input_type -> gastrolog.v1.SetNodeStateRequest
+	15, // 18: gastrolog.v1.LifecycleService.JoinCluster:input_type -> gastrolog.v1.JoinClusterRequest
+	17, // 19: gastrolog.v1.LifecycleService.RemoveNode:input_type -> gastrolog.v1.RemoveNodeRequest
+	19, // 20: gastrolog.v1.LifecycleService.YieldLeadership:input_type -> gastrolog.v1.YieldLeadershipRequest
+	21, // 21: gastrolog.v1.LifecycleService.WatchSystemStatus:input_type -> gastrolog.v1.WatchSystemStatusRequest
+	4,  // 22: gastrolog.v1.LifecycleService.Health:output_type -> gastrolog.v1.HealthResponse
+	6,  // 23: gastrolog.v1.LifecycleService.Shutdown:output_type -> gastrolog.v1.ShutdownResponse
+	8,  // 24: gastrolog.v1.LifecycleService.GetClusterStatus:output_type -> gastrolog.v1.GetClusterStatusResponse
+	12, // 25: gastrolog.v1.LifecycleService.SetNodeSuffrage:output_type -> gastrolog.v1.SetNodeSuffrageResponse
+	14, // 26: gastrolog.v1.LifecycleService.SetNodeState:output_type -> gastrolog.v1.SetNodeStateResponse
+	16, // 27: gastrolog.v1.LifecycleService.JoinCluster:output_type -> gastrolog.v1.JoinClusterResponse
+	18, // 28: gastrolog.v1.LifecycleService.RemoveNode:output_type -> gastrolog.v1.RemoveNodeResponse
+	20, // 29: gastrolog.v1.LifecycleService.YieldLeadership:output_type -> gastrolog.v1.YieldLeadershipResponse
+	22, // 30: gastrolog.v1.LifecycleService.WatchSystemStatus:output_type -> gastrolog.v1.WatchSystemStatusResponse
+	22, // [22:31] is the sub-list for method output_type
+	13, // [13:22] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_lifecycle_proto_init() }
@@ -1430,7 +1529,7 @@ func file_gastrolog_v1_lifecycle_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_lifecycle_proto_rawDesc), len(file_gastrolog_v1_lifecycle_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   18,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

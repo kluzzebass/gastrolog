@@ -44,6 +44,9 @@ const (
 	// LifecycleServiceSetNodeSuffrageProcedure is the fully-qualified name of the LifecycleService's
 	// SetNodeSuffrage RPC.
 	LifecycleServiceSetNodeSuffrageProcedure = "/gastrolog.v1.LifecycleService/SetNodeSuffrage"
+	// LifecycleServiceSetNodeStateProcedure is the fully-qualified name of the LifecycleService's
+	// SetNodeState RPC.
+	LifecycleServiceSetNodeStateProcedure = "/gastrolog.v1.LifecycleService/SetNodeState"
 	// LifecycleServiceJoinClusterProcedure is the fully-qualified name of the LifecycleService's
 	// JoinCluster RPC.
 	LifecycleServiceJoinClusterProcedure = "/gastrolog.v1.LifecycleService/JoinCluster"
@@ -68,6 +71,12 @@ type LifecycleServiceClient interface {
 	GetClusterStatus(context.Context, *connect.Request[v1.GetClusterStatusRequest]) (*connect.Response[v1.GetClusterStatusResponse], error)
 	// SetNodeSuffrage promotes or demotes a node's voting status.
 	SetNodeSuffrage(context.Context, *connect.Request[v1.SetNodeSuffrageRequest]) (*connect.Response[v1.SetNodeSuffrageResponse], error)
+	// SetNodeState transitions a node between lifecycle states (Live,
+	// Maintenance, Draining, etc.). Idempotent — re-applying the same
+	// state is a no-op success. Illegal transitions return
+	// FailedPrecondition with the FSM's transition-validation error.
+	// See docs/node-lifecycle-design.md.
+	SetNodeState(context.Context, *connect.Request[v1.SetNodeStateRequest]) (*connect.Response[v1.SetNodeStateResponse], error)
 	// JoinCluster joins a running single-node server to an existing cluster at runtime.
 	// The node's Raft state is replaced by the remote cluster's state via replication.
 	JoinCluster(context.Context, *connect.Request[v1.JoinClusterRequest]) (*connect.Response[v1.JoinClusterResponse], error)
@@ -121,6 +130,12 @@ func NewLifecycleServiceClient(httpClient connect.HTTPClient, baseURL string, op
 			connect.WithSchema(lifecycleServiceMethods.ByName("SetNodeSuffrage")),
 			connect.WithClientOptions(opts...),
 		),
+		setNodeState: connect.NewClient[v1.SetNodeStateRequest, v1.SetNodeStateResponse](
+			httpClient,
+			baseURL+LifecycleServiceSetNodeStateProcedure,
+			connect.WithSchema(lifecycleServiceMethods.ByName("SetNodeState")),
+			connect.WithClientOptions(opts...),
+		),
 		joinCluster: connect.NewClient[v1.JoinClusterRequest, v1.JoinClusterResponse](
 			httpClient,
 			baseURL+LifecycleServiceJoinClusterProcedure,
@@ -154,6 +169,7 @@ type lifecycleServiceClient struct {
 	shutdown          *connect.Client[v1.ShutdownRequest, v1.ShutdownResponse]
 	getClusterStatus  *connect.Client[v1.GetClusterStatusRequest, v1.GetClusterStatusResponse]
 	setNodeSuffrage   *connect.Client[v1.SetNodeSuffrageRequest, v1.SetNodeSuffrageResponse]
+	setNodeState      *connect.Client[v1.SetNodeStateRequest, v1.SetNodeStateResponse]
 	joinCluster       *connect.Client[v1.JoinClusterRequest, v1.JoinClusterResponse]
 	removeNode        *connect.Client[v1.RemoveNodeRequest, v1.RemoveNodeResponse]
 	yieldLeadership   *connect.Client[v1.YieldLeadershipRequest, v1.YieldLeadershipResponse]
@@ -178,6 +194,11 @@ func (c *lifecycleServiceClient) GetClusterStatus(ctx context.Context, req *conn
 // SetNodeSuffrage calls gastrolog.v1.LifecycleService.SetNodeSuffrage.
 func (c *lifecycleServiceClient) SetNodeSuffrage(ctx context.Context, req *connect.Request[v1.SetNodeSuffrageRequest]) (*connect.Response[v1.SetNodeSuffrageResponse], error) {
 	return c.setNodeSuffrage.CallUnary(ctx, req)
+}
+
+// SetNodeState calls gastrolog.v1.LifecycleService.SetNodeState.
+func (c *lifecycleServiceClient) SetNodeState(ctx context.Context, req *connect.Request[v1.SetNodeStateRequest]) (*connect.Response[v1.SetNodeStateResponse], error) {
+	return c.setNodeState.CallUnary(ctx, req)
 }
 
 // JoinCluster calls gastrolog.v1.LifecycleService.JoinCluster.
@@ -210,6 +231,12 @@ type LifecycleServiceHandler interface {
 	GetClusterStatus(context.Context, *connect.Request[v1.GetClusterStatusRequest]) (*connect.Response[v1.GetClusterStatusResponse], error)
 	// SetNodeSuffrage promotes or demotes a node's voting status.
 	SetNodeSuffrage(context.Context, *connect.Request[v1.SetNodeSuffrageRequest]) (*connect.Response[v1.SetNodeSuffrageResponse], error)
+	// SetNodeState transitions a node between lifecycle states (Live,
+	// Maintenance, Draining, etc.). Idempotent — re-applying the same
+	// state is a no-op success. Illegal transitions return
+	// FailedPrecondition with the FSM's transition-validation error.
+	// See docs/node-lifecycle-design.md.
+	SetNodeState(context.Context, *connect.Request[v1.SetNodeStateRequest]) (*connect.Response[v1.SetNodeStateResponse], error)
 	// JoinCluster joins a running single-node server to an existing cluster at runtime.
 	// The node's Raft state is replaced by the remote cluster's state via replication.
 	JoinCluster(context.Context, *connect.Request[v1.JoinClusterRequest]) (*connect.Response[v1.JoinClusterResponse], error)
@@ -259,6 +286,12 @@ func NewLifecycleServiceHandler(svc LifecycleServiceHandler, opts ...connect.Han
 		connect.WithSchema(lifecycleServiceMethods.ByName("SetNodeSuffrage")),
 		connect.WithHandlerOptions(opts...),
 	)
+	lifecycleServiceSetNodeStateHandler := connect.NewUnaryHandler(
+		LifecycleServiceSetNodeStateProcedure,
+		svc.SetNodeState,
+		connect.WithSchema(lifecycleServiceMethods.ByName("SetNodeState")),
+		connect.WithHandlerOptions(opts...),
+	)
 	lifecycleServiceJoinClusterHandler := connect.NewUnaryHandler(
 		LifecycleServiceJoinClusterProcedure,
 		svc.JoinCluster,
@@ -293,6 +326,8 @@ func NewLifecycleServiceHandler(svc LifecycleServiceHandler, opts ...connect.Han
 			lifecycleServiceGetClusterStatusHandler.ServeHTTP(w, r)
 		case LifecycleServiceSetNodeSuffrageProcedure:
 			lifecycleServiceSetNodeSuffrageHandler.ServeHTTP(w, r)
+		case LifecycleServiceSetNodeStateProcedure:
+			lifecycleServiceSetNodeStateHandler.ServeHTTP(w, r)
 		case LifecycleServiceJoinClusterProcedure:
 			lifecycleServiceJoinClusterHandler.ServeHTTP(w, r)
 		case LifecycleServiceRemoveNodeProcedure:
@@ -324,6 +359,10 @@ func (UnimplementedLifecycleServiceHandler) GetClusterStatus(context.Context, *c
 
 func (UnimplementedLifecycleServiceHandler) SetNodeSuffrage(context.Context, *connect.Request[v1.SetNodeSuffrageRequest]) (*connect.Response[v1.SetNodeSuffrageResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.LifecycleService.SetNodeSuffrage is not implemented"))
+}
+
+func (UnimplementedLifecycleServiceHandler) SetNodeState(context.Context, *connect.Request[v1.SetNodeStateRequest]) (*connect.Response[v1.SetNodeStateResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.LifecycleService.SetNodeState is not implemented"))
 }
 
 func (UnimplementedLifecycleServiceHandler) JoinCluster(context.Context, *connect.Request[v1.JoinClusterRequest]) (*connect.Response[v1.JoinClusterResponse], error) {

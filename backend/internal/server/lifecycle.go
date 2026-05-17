@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -13,10 +14,12 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/cluster"
+	"gastrolog/internal/glid"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/system"
+	"gastrolog/internal/system/command"
 )
 
 // Version is set at build time.
@@ -259,6 +262,43 @@ func (s *LifecycleServer) SetNodeSuffrage(
 		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.SetNodeSuffrageResponse{}), nil
+}
+
+// SetNodeState transitions a node between lifecycle states (see
+// docs/node-lifecycle-design.md). Routes through cfgStore.SetNodeState
+// which proposes the FSM command via Raft, replacing legality
+// checks deterministically inside the apply path.
+//
+// Idempotent: re-applying the same state is a no-op success (per
+// system.ValidateNodeStateTransition). Illegal transitions surface
+// as FailedPrecondition so the CLI can distinguish operator-fixable
+// errors from genuine internal failures.
+func (s *LifecycleServer) SetNodeState(
+	ctx context.Context,
+	req *connect.Request[apiv1.SetNodeStateRequest],
+) (*connect.Response[apiv1.SetNodeStateResponse], error) {
+	if s.cfgStore == nil {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("cluster not enabled"))
+	}
+	rawID := req.Msg.GetNodeId()
+	if len(rawID) == 0 {
+		return nil, errRequired("node_id")
+	}
+	id, err := glid.ParseAny(string(rawID))
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("parse node_id: %w", err))
+	}
+	state := command.NodeStateFromProto(req.Msg.GetState())
+	if state == system.NodeStateUnknown {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("state is required (one of LIVE, UNREACHABLE, MAINTENANCE, DRAINING, DECOMMISSIONING)"))
+	}
+	if err := s.cfgStore.SetNodeState(ctx, id, state, time.Now()); err != nil {
+		if strings.Contains(err.Error(), "illegal node state transition") || strings.Contains(err.Error(), "not found") {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+		}
+		return nil, errInternal(err)
+	}
+	return connect.NewResponse(&apiv1.SetNodeStateResponse{}), nil
 }
 
 // buildRaftStats converts the raw Hashicorp Raft Stats() map into a typed proto message.

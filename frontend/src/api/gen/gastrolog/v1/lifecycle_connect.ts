@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { GetClusterStatusRequest, GetClusterStatusResponse, HealthRequest, HealthResponse, JoinClusterRequest, JoinClusterResponse, RemoveNodeRequest, RemoveNodeResponse, SetNodeSuffrageRequest, SetNodeSuffrageResponse, ShutdownRequest, ShutdownResponse, WatchSystemStatusRequest, WatchSystemStatusResponse, YieldLeadershipRequest, YieldLeadershipResponse } from "./lifecycle_pb.js";
+import { GetClusterStatusRequest, GetClusterStatusResponse, HealthRequest, HealthResponse, JoinClusterRequest, JoinClusterResponse, RemoveNodeRequest, RemoveNodeResponse, SetNodeStateRequest, SetNodeStateResponse, SetNodeSuffrageRequest, SetNodeSuffrageResponse, ShutdownRequest, ShutdownResponse, WatchSystemStatusRequest, WatchSystemStatusResponse, YieldLeadershipRequest, YieldLeadershipResponse } from "./lifecycle_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -56,6 +56,21 @@ export const LifecycleService = {
       name: "SetNodeSuffrage",
       I: SetNodeSuffrageRequest,
       O: SetNodeSuffrageResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * SetNodeState transitions a node between lifecycle states (Live,
+     * Maintenance, Draining, etc.). Idempotent — re-applying the same
+     * state is a no-op success. Illegal transitions return
+     * FailedPrecondition with the FSM's transition-validation error.
+     * See docs/node-lifecycle-design.md.
+     *
+     * @generated from rpc gastrolog.v1.LifecycleService.SetNodeState
+     */
+    setNodeState: {
+      name: "SetNodeState",
+      I: SetNodeStateRequest,
+      O: SetNodeStateResponse,
       kind: MethodKind.Unary,
     },
     /**

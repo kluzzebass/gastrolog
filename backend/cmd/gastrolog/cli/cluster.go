@@ -31,6 +31,10 @@ func newClusterCmd() *cobra.Command {
 		newClusterPromoteCmd(),
 		newClusterDemoteCmd(),
 		newClusterJoinCmd(),
+		newClusterMaintenanceCmd(),
+		newClusterOnlineCmd(),
+		newClusterDrainCmd(),
+		newClusterCancelDrainCmd(),
 	)
 	return cmd
 }
@@ -349,6 +353,100 @@ func newClusterDemoteCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return setNodeSuffrage(cmd, args[0], false)
+		},
+	}
+}
+
+// setNodeState resolves a node name/ID and proposes a SetNodeState
+// transition through the Lifecycle RPC. Shared by the four operator
+// verbs (maintenance / online / drain / cancel-drain) so each verb
+// stays a one-liner around the state argument. Idempotent per the
+// FSM contract: re-applying the same state is a no-op success.
+//
+// Honors --output json: emits a single-line JSON object instead of
+// the human-friendly print so automation can consume the result.
+func setNodeState(cmd *cobra.Command, nameOrID string, state v1.NodeState, action string) error {
+	client := clientFromCmd(cmd)
+	r, err := newResolver(context.Background(), client)
+	if err != nil {
+		return err
+	}
+	id, err := resolve(nameOrID, r.nodes, "node")
+	if err != nil {
+		return err
+	}
+	_, err = client.Lifecycle.SetNodeState(context.Background(), connect.NewRequest(&v1.SetNodeStateRequest{
+		NodeId: []byte(id),
+		State:  state,
+	}))
+	if err != nil {
+		return err
+	}
+	if outputFormat(cmd) == "json" {
+		p := newPrinter("json")
+		return p.json(map[string]string{
+			"node":  nameOrID,
+			"id":    id,
+			"state": strings.TrimPrefix(state.String(), "NODE_STATE_"),
+		})
+	}
+	fmt.Printf("%s node %s\n", action, nameOrID)
+	return nil
+}
+
+func newClusterMaintenanceCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "maintenance <node-name-or-id>",
+		Short: "Put a node into Maintenance (operator-sticky offline)",
+		Long: "Transition a node to Maintenance state. The placement guard " +
+			"retains existing placements on the node and refuses to rotate " +
+			"leadership off it; the unreachable sweep does NOT auto-clear " +
+			"this state — only `cluster online` returns the node to Live.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return setNodeState(cmd, args[0], v1.NodeState_NODE_STATE_MAINTENANCE, "Maintenance")
+		},
+	}
+}
+
+func newClusterOnlineCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "online <node-name-or-id>",
+		Short: "Return a node to Live state (clear Maintenance / Draining)",
+		Long: "Transition a node from Maintenance or Draining back to Live. " +
+			"Cancels an in-flight drain when applied to a Draining node.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return setNodeState(cmd, args[0], v1.NodeState_NODE_STATE_LIVE, "Onlined")
+		},
+	}
+}
+
+func newClusterDrainCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "drain <node-name-or-id>",
+		Short: "Mark a node as Draining (preparing for decommission)",
+		Long: "Transition a node to Draining state. The placement guard " +
+			"retains existing placements and treats drain as authoritative " +
+			"(no automatic rotation). To return the node to service before " +
+			"decommission completes, run `cluster online`.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return setNodeState(cmd, args[0], v1.NodeState_NODE_STATE_DRAINING, "Draining")
+		},
+	}
+}
+
+func newClusterCancelDrainCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "cancel-drain <node-name-or-id>",
+		Short: "Cancel a drain in progress (Draining → Live)",
+		Long: "Alias for `cluster online` when the target is currently " +
+			"Draining; named for operator intent. Refuses if the node has " +
+			"already progressed to Decommissioning.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return setNodeState(cmd, args[0], v1.NodeState_NODE_STATE_LIVE, "Drain cancelled — onlined")
 		},
 	}
 }
