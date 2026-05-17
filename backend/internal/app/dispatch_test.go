@@ -1604,12 +1604,20 @@ func TestReplayConfigFromStore_ReloadsRoutesAndPolicies(t *testing.T) {
 	}
 }
 
-// TestReplayConfigFromStore_Idempotent verifies that a second invocation
-// against a store with the same entities does not add duplicates. The
-// real-world failure mode this prevents: a joiner's dispatcher catching
-// a NotifyIngesterPut for a fresh PUT while the replay is still in
-// flight — both code paths must converge to a single registration.
-func TestReplayConfigFromStore_Idempotent(t *testing.T) {
+// TestReplayConfigFromStore_SkipsAlreadyRegistered verifies that the
+// replay does NOT re-fire handleIngesterPut for ingesters the
+// orchestrator already has. This is load-bearing: re-firing trips the
+// orchestrator's remove+re-add idempotent-replace path, which races
+// the new goroutine's setIngesterAlive(true) against the old
+// goroutine's setIngesterAlive(false). Observed in k8s as "7/10
+// alive" after a scale-up where 3 joiners lost the race.
+//
+// The real-world scenario this guards against: a joiner whose
+// post-snapshot Raft log still contains the PutIngester entry — the
+// live dispatcher catches the Apply and registers the ingester before
+// awaitReplication returns. ReplayConfigFromStore then runs and must
+// see the orchestrator already has it, and NOT re-fire.
+func TestReplayConfigFromStore_SkipsAlreadyRegistered(t *testing.T) {
 	t.Parallel()
 	h := &captureHandler{}
 	orch := &mockOrch{}
@@ -1624,23 +1632,46 @@ func TestReplayConfigFromStore_Idempotent(t *testing.T) {
 		ingestersByID: map[glid.GLID]system.IngesterConfig{ingID: cfg},
 	}
 
+	// Pre-register the ingester to simulate a joiner that already got
+	// the PutIngester Apply notification via the live dispatcher.
+	orch.ingesters = []glid.GLID{ingID}
+
 	d := dispatcherForReplay(orch, store, h)
 	d.ReplayConfigFromStore(context.Background())
+
+	if len(orch.addIngesterCalls) != 0 {
+		t.Fatalf("expected zero AddIngester calls for pre-registered ingester (would trigger remove+re-add race), got %v",
+			orch.addIngesterCalls)
+	}
+	if len(orch.removeIngesterIDs) != 0 {
+		t.Fatalf("expected zero RemoveIngester calls (would trigger setIngesterAlive(false) race), got %v",
+			orch.removeIngesterIDs)
+	}
+}
+
+// TestReplayConfigFromStore_SkipsAlreadyRegisteredVaults mirrors the
+// ingester check for vaults — replay must not call AddVault on a
+// vault the orchestrator already holds.
+func TestReplayConfigFromStore_SkipsAlreadyRegisteredVaults(t *testing.T) {
+	t.Parallel()
+	h := &captureHandler{}
+	orch := &mockOrch{}
+
+	vaultID := glid.New()
+	v := system.VaultConfig{ID: vaultID, Name: "v", Type: system.VaultTypeMemory}
+	store := &stubCfgStore{
+		vault:     &v,
+		vaultList: []system.VaultConfig{v},
+	}
+
+	orch.vaults = []glid.GLID{vaultID}
+
+	d := dispatcherForReplay(orch, store, h)
 	d.ReplayConfigFromStore(context.Background())
 
-	// AddIngester is called for every replay (the handler routes through
-	// AddIngester which is itself idempotent — it stops the old instance
-	// and replaces it). What we assert is that the orchestrator's
-	// post-state contains exactly one entry, not two.
-	count := 0
-	for _, id := range orch.ingesters {
-		if id == ingID {
-			count++
-		}
-	}
-	if count != 1 {
-		t.Fatalf("expected exactly one ingester registration after double-replay, got %d (ingesters=%v)",
-			count, orch.ingesters)
+	if len(orch.addVaultCalls) != 0 {
+		t.Fatalf("expected zero AddVault calls for pre-registered vault, got %v",
+			orch.addVaultCalls)
 	}
 }
 
