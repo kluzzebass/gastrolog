@@ -350,19 +350,36 @@ swarm-down:
 # ---------------------------------------------------------------------------
 
 # Apply the K8s StatefulSet (requires OrbStack/kind/minikube/real K8s context).
-kubernetes-up: image
+#
+# Idempotent: re-running updates manifests in place; PVCs and FSM state
+# are preserved. The optional SIZE arg (>= 3, default 3) is the desired
+# pod count — but kubernetes-up only ever GROWS the cluster: if a
+# scaled-up cluster already exists, the live replica count is used as a
+# floor so a stale default never accidentally shrinks the StatefulSet.
+# To shrink, use `kubernetes-scale N`; to wipe and rebuild, run
+# `kubernetes-down` first.
+kubernetes-up size="3": image
     #!/usr/bin/env bash
     set -euo pipefail
+    size={{size}}
+    [[ "$size" =~ ^[1-9][0-9]*$ && $size -ge 3 ]] || { echo "size must be an integer >= 3, got '$size'"; exit 1; }
     kubectl config current-context >/dev/null 2>&1 || { echo "no K8s context active — enable OrbStack/kind/minikube first"; exit 1; }
-    kubectl delete -f k8s.yml --ignore-not-found 2>/dev/null
-    kubectl delete -f k8s-deps.yml --ignore-not-found 2>/dev/null
-    kubectl -n gastrolog delete pvc --all --ignore-not-found 2>/dev/null
-    kubectl apply -f k8s.yml
+    # Floor: never shrink. If the live StatefulSet already has more
+    # replicas than the requested size, keep the live count — otherwise
+    # `kubectl apply` would snap the spec back to the manifest's default
+    # and start terminating pods.
+    current=$(kubectl -n gastrolog get sts gastrolog -o jsonpath='{.spec.replicas}' 2>/dev/null || true)
+    if [[ -n "$current" && "$current" -gt "$size" ]]; then
+      target=$current
+    else
+      target=$size
+    fi
+    sed "s/^  replicas:.*/  replicas: $target/" k8s.yml | kubectl apply -f -
     kubectl apply -f k8s-deps.yml
-    echo "Waiting for gastrolog cluster (3 pods) ready..."
-    for i in $(seq 1 60); do
+    echo "Waiting for gastrolog cluster ($target pods) ready..."
+    for i in $(seq 1 120); do
       ready=$(kubectl -n gastrolog get pods -l app=gastrolog -o jsonpath='{range .items[*]}{.status.containerStatuses[0].ready}{"\n"}{end}' 2>/dev/null | grep -c '^true$' || true)
-      [[ $ready == 3 ]] && break
+      [[ $ready == $target ]] && break
       sleep 3
     done
     kubectl -n gastrolog get pods
@@ -370,7 +387,11 @@ kubernetes-up: image
     curl -s -o /dev/null -w "  login=%{http_code}\n" -X POST -H 'Content-Type: application/json' \
       http://localhost:30564/gastrolog.v1.AuthService/Login \
       -d '{"username":"admin","password":"change-me"}'
+    # setup-deps and add-storage are both upsert-by-name idempotent —
+    # safe to run on every kubernetes-up invocation. add-storage covers
+    # any joiner pods that came up since the last invocation.
     kubectl -n gastrolog exec -i gastrolog-0 -- sh < setup-deps.sh
+    kubectl -n gastrolog exec -i gastrolog-0 -- sh < add-storage.sh
     echo ""
     echo "K8s cluster running at http://localhost:30564 (admin/change-me)"
     echo "Cloud storage + ingester sources reachable on the in-cluster service network only."
