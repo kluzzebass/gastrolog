@@ -4,7 +4,7 @@
 // @ts-nocheck
 
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
-import { Message, proto3, protoInt64 } from "@bufbuild/protobuf";
+import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
 import { NodeStats } from "./cluster_pb.js";
 import { GetRouteStatsResponse, IngesterAlive, NodeState } from "./system_pb.js";
 import { GetStatsResponse, VaultInfo } from "./vault_pb.js";
@@ -536,6 +536,23 @@ export class ClusterNode extends Message<ClusterNode> {
    */
   pprofAddress = "";
 
+  /**
+   * Lifecycle state from NodeConfig. NODE_STATE_UNSPECIFIED is treated
+   * as LIVE by the UI for back-compat with legacy records minted before
+   * the State field existed.
+   *
+   * @generated from field: gastrolog.v1.NodeState state = 10;
+   */
+  state = NodeState.UNSPECIFIED;
+
+  /**
+   * Wall-clock instant the current state was entered. Zero if the
+   * node has never had State explicitly set.
+   *
+   * @generated from field: google.protobuf.Timestamp state_since = 11;
+   */
+  stateSince?: Timestamp;
+
   constructor(data?: PartialMessage<ClusterNode>) {
     super();
     proto3.util.initPartial(data, this);
@@ -553,6 +570,8 @@ export class ClusterNode extends Message<ClusterNode> {
     { no: 7, name: "stats", kind: "message", T: NodeStats },
     { no: 8, name: "api_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 9, name: "pprof_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 10, name: "state", kind: "enum", T: proto3.getEnumType(NodeState) },
+    { no: 11, name: "state_since", kind: "message", T: Timestamp },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ClusterNode {

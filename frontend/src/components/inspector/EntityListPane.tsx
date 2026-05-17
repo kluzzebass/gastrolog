@@ -9,6 +9,7 @@ import { useConfig } from "../../api/hooks/useSystem";
 import type { Job } from "../../api/model/job";
 import { toastError } from "../Toast";
 import { Badge } from "../Badge";
+import { NodeStateBadge } from "../NodeStateBadge";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { HelpButton } from "../HelpButton";
 import { VaultCard } from "./VaultCard";
@@ -425,7 +426,10 @@ function SystemList({ dark }: Readonly<{ dark: boolean }>) {
               setExpandedNodes((prev) => ({ ...prev, [nid]: !(prev[nid] ?? isLocal) }))
             }
             headerRight={
-              isLocal ? <Badge variant="copper" dark={dark}>this node</Badge> : undefined
+              <div className="flex items-center gap-1.5">
+                <NodeStateBadge state={node.state} stateSince={node.stateSince} dark={dark} />
+                {isLocal && <Badge variant="copper" dark={dark}>this node</Badge>}
+              </div>
             }
           >
             <div className="p-3">

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/alert"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/system"
@@ -260,7 +261,7 @@ func TestUnreachableSweep_EnvVarThresholdOverride(t *testing.T) {
 	store := sysmem.NewStore()
 	peerState := cluster.NewPeerState(10 * time.Second)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	sweep := newUnreachableSweep(store, nil, peerState, "local", logger)
+	sweep := newUnreachableSweep(store, nil, peerState, "local", nil, logger)
 	if sweep.threshold != 2*time.Second {
 		t.Fatalf("expected threshold=2s from env var, got %v", sweep.threshold)
 	}
@@ -272,9 +273,150 @@ func TestUnreachableSweep_EnvVarInvalidFallsBack(t *testing.T) {
 	store := sysmem.NewStore()
 	peerState := cluster.NewPeerState(10 * time.Second)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	sweep := newUnreachableSweep(store, nil, peerState, "local", logger)
+	sweep := newUnreachableSweep(store, nil, peerState, "local", nil, logger)
 	if sweep.threshold != defaultUnreachableThreshold {
 		t.Fatalf("expected default threshold on invalid env, got %v", sweep.threshold)
+	}
+}
+
+// newAlertSweepTest stands up an unreachableSweep wired to an
+// alert.Collector and a peer node that the test can directly mutate
+// via the store. The clusterSrv field stays nil — alertTick does not
+// touch it (the alert phase is not leader-gated).
+func newAlertSweepTest(t *testing.T, alertThreshold time.Duration) (*unreachableSweep, *sysmem.Store, *alert.Collector, glid.GLID) {
+	t.Helper()
+	store := sysmem.NewStore()
+	peerState := cluster.NewPeerState(time.Hour)
+	collector := alert.New()
+	peerID := glid.New()
+	now := time.Now()
+	if err := store.PutNode(context.Background(), system.NodeConfig{
+		ID: peerID, Name: "peer", State: system.NodeStateLive, StateSince: now,
+	}); err != nil {
+		t.Fatalf("PutNode peer: %v", err)
+	}
+	sweep := &unreachableSweep{
+		cfgStore:       store,
+		peerState:      peerState,
+		localNodeID:    glid.New().String(),
+		threshold:      time.Minute,
+		alertThreshold: alertThreshold,
+		alerts:         collector,
+		interval:       time.Hour,
+		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		now:            time.Now,
+	}
+	return sweep, store, collector, peerID
+}
+
+func findAlert(collector *alert.Collector, id string) *alert.Alert {
+	for _, a := range collector.Active() {
+		if a.ID == id {
+			return a
+		}
+	}
+	return nil
+}
+
+func TestUnreachableSweep_AlertFiresAfterThreshold(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	threshold := time.Minute
+	sweep, store, collector, peerID := newAlertSweepTest(t, threshold)
+
+	// Mark peer Unreachable with StateSince 2 minutes in the past.
+	stateSince := time.Unix(1000, 0)
+	sweep.now = func() time.Time { return stateSince.Add(2 * time.Minute) }
+	if err := store.PutNode(ctx, system.NodeConfig{
+		ID: peerID, Name: "peer", State: system.NodeStateUnreachable, StateSince: stateSince,
+	}); err != nil {
+		t.Fatalf("PutNode peer: %v", err)
+	}
+
+	sweep.alertTick(ctx)
+
+	a := findAlert(collector, unreachableAlertIDPrefix+peerID.String())
+	if a == nil {
+		t.Fatal("expected unreachable alert to fire after sustained duration")
+	}
+	if a.Severity != alert.Warning {
+		t.Fatalf("expected Warning severity, got %v", a.Severity)
+	}
+}
+
+func TestUnreachableSweep_AlertSuppressedWithinThreshold(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	threshold := 5 * time.Minute
+	sweep, store, collector, peerID := newAlertSweepTest(t, threshold)
+
+	// Mark peer Unreachable just now — well below the alert threshold.
+	stateSince := time.Unix(1000, 0)
+	sweep.now = func() time.Time { return stateSince.Add(30 * time.Second) }
+	if err := store.PutNode(ctx, system.NodeConfig{
+		ID: peerID, Name: "peer", State: system.NodeStateUnreachable, StateSince: stateSince,
+	}); err != nil {
+		t.Fatalf("PutNode peer: %v", err)
+	}
+
+	sweep.alertTick(ctx)
+
+	if a := findAlert(collector, unreachableAlertIDPrefix+peerID.String()); a != nil {
+		t.Fatalf("expected no alert within threshold window, got %+v", a)
+	}
+}
+
+func TestUnreachableSweep_AlertClearsOnRecovery(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	threshold := time.Minute
+	sweep, store, collector, peerID := newAlertSweepTest(t, threshold)
+
+	// First, fire the alert: peer Unreachable for 2× the threshold.
+	stateSince := time.Unix(1000, 0)
+	sweep.now = func() time.Time { return stateSince.Add(2 * time.Minute) }
+	if err := store.PutNode(ctx, system.NodeConfig{
+		ID: peerID, Name: "peer", State: system.NodeStateUnreachable, StateSince: stateSince,
+	}); err != nil {
+		t.Fatalf("PutNode peer: %v", err)
+	}
+	sweep.alertTick(ctx)
+	if a := findAlert(collector, unreachableAlertIDPrefix+peerID.String()); a == nil {
+		t.Fatal("preconditions: alert should have fired")
+	}
+
+	// Peer recovers to Live; alert must clear on next tick.
+	if err := store.PutNode(ctx, system.NodeConfig{
+		ID: peerID, Name: "peer", State: system.NodeStateLive, StateSince: sweep.now(),
+	}); err != nil {
+		t.Fatalf("PutNode peer: %v", err)
+	}
+	sweep.alertTick(ctx)
+
+	if a := findAlert(collector, unreachableAlertIDPrefix+peerID.String()); a != nil {
+		t.Fatalf("expected alert cleared after recovery, got %+v", a)
+	}
+}
+
+func TestUnreachableSweep_AlertSilentInMaintenance(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	threshold := time.Minute
+	sweep, store, collector, peerID := newAlertSweepTest(t, threshold)
+
+	// Operator set node to Maintenance — even with old StateSince, no alert.
+	stateSince := time.Unix(1000, 0)
+	sweep.now = func() time.Time { return stateSince.Add(time.Hour) }
+	if err := store.PutNode(ctx, system.NodeConfig{
+		ID: peerID, Name: "peer", State: system.NodeStateMaintenance, StateSince: stateSince,
+	}); err != nil {
+		t.Fatalf("PutNode peer: %v", err)
+	}
+
+	sweep.alertTick(ctx)
+
+	if a := findAlert(collector, unreachableAlertIDPrefix+peerID.String()); a != nil {
+		t.Fatalf("expected no alert for Maintenance state, got %+v", a)
 	}
 }
 
