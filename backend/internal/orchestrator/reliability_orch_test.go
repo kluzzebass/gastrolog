@@ -7,6 +7,9 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/raftgroup"
+
+	hraft "github.com/hashicorp/raft"
 )
 
 // Reliability matrix at the orchestrator layer. Complements the vault-FSM-
@@ -413,6 +416,148 @@ func TestOrchRel_PausedPeer_Restart_Recovers(t *testing.T) {
 	h.startNode(victim)
 	h.waitForAllReady()
 	h.assertAllNodesSee(baseline)
+}
+
+// TestOrchRel_NodeRestartCatchupReplication is the regression for
+// gastrolog-4g9i6: a node going briefly offline and coming back must
+// rejoin its vault-ctl Raft group under the same identity and catch up
+// on missed chunk seals via Raft log replication. Closes the bug class
+// that motivated the FSM-authority migration epic — operators perform
+// rolling redeploys, and a brief node absence must not result in lost
+// chunks, lost membership, or stale state.
+//
+// Distinct from PausedPeer_Restart (which seeds state first and asserts
+// pre-pause records are still visible after restart): this test appends
+// a second batch of records WHILE the victim is offline, then asserts
+// the restarted victim catches up to the new state. The catch-up path
+// exercises vault-ctl Raft log replication of post-snapshot entries
+// (CmdSealChunk for chunks the victim never saw) — the dimension that
+// the FSM-authority migration was designed to make survivable.
+//
+// Companion to the placement-guard chain test in
+// internal/app/unreachable_sweep_test.go::TestUnreachableSweep_PlacementGuardChain,
+// which covers the FSM-state side of the redeploy story
+// (heartbeat-driven sweep + placement guard refusing rotation). This
+// harness lacks the placement manager, so we focus on the
+// replication-catchup half — the two together cover the closed loop.
+func TestOrchRel_NodeRestartCatchupReplication(t *testing.T) {
+	t.Parallel()
+	h := newOrchRelHarness(t, 3)
+
+	now := time.Now()
+
+	// Batch 1: append + seal while all 3 nodes are up.
+	for i := range 5 {
+		if err := h.appendOnLeader(chunk.Record{
+			SourceTS: now,
+			IngestTS: now,
+			Raw:      []byte("pre-" + strconv.Itoa(i)),
+		}); err != nil {
+			t.Fatalf("batch 1 append %d: %v", i, err)
+		}
+	}
+	h.sealOnLeader()
+	h.eventuallyAllSeeSealedChunk(t)
+	preChunks := h.chunkIDsOnLeader()
+	if len(preChunks) == 0 {
+		t.Fatal("expected at least one sealed chunk after batch 1")
+	}
+
+	// Pick a vault-ctl follower (NOT the leader) and stop it. Keeping
+	// the leader running ensures the remaining 2-node majority can
+	// continue accepting writes while the victim is offline.
+	leader := h.waitForVaultCtlLeader()
+	var victim string
+	for _, id := range h.nodeIDs {
+		if id != leader.id {
+			victim = id
+			break
+		}
+	}
+	if victim == "" {
+		t.Fatal("no follower available to stop")
+	}
+	victimHome := h.nodes[victim].home
+	h.stopNode(victim)
+
+	// Batch 2: append + seal while the victim is down. The remaining
+	// 2-of-3 majority is enough for vault-ctl Raft to commit, so these
+	// records and the resulting seal are accepted by the leader. The
+	// victim sees none of this until it rejoins.
+	for i := range 5 {
+		if err := h.appendOnLeader(chunk.Record{
+			SourceTS: now,
+			IngestTS: now,
+			Raw:      []byte("post-" + strconv.Itoa(i)),
+		}); err != nil {
+			t.Fatalf("batch 2 append %d: %v", i, err)
+		}
+	}
+	h.sealOnLeader()
+
+	// Restart the victim. raftwal replays from the preserved home dir,
+	// so the node returns under its existing GLID — no new ID minted.
+	h.startNode(victim)
+	h.waitForAllReady()
+	if got := h.nodes[victim].home; got != victimHome {
+		t.Fatalf("restart changed home dir: was %q, now %q", victimHome, got)
+	}
+
+	// Vault-ctl Raft must still list the returning node as a voter.
+	// The Raft GetConfiguration call returns the live cluster
+	// membership as seen by THIS node — if the victim was evicted
+	// during downtime, the assertion fails here, not at chunk
+	// convergence.
+	if !nodeIsVoterInVaultCtl(t, h, victim) {
+		t.Fatalf("victim %s is no longer a voter in the vault-ctl group", victim)
+	}
+
+	// Catchup assertion: the returning node must converge to the full
+	// chunk set (batch 1 + batch 2). assertAllNodesSee polls every
+	// node — if the victim is missing batch 2, convergence fails and
+	// the snapshot diff is printed for diagnosis.
+	finalChunks := h.chunkIDsOnLeader()
+	if len(finalChunks) <= len(preChunks) {
+		t.Fatalf("expected new chunks after batch 2; got pre=%d final=%d",
+			len(preChunks), len(finalChunks))
+	}
+	h.assertAllNodesSee(finalChunks)
+}
+
+// nodeIsVoterInVaultCtl returns true when the named node appears as a
+// Voter in the vault-ctl Raft group's current configuration, as
+// observed from any live node. Voter status is the explicit Raft
+// guarantee the redeploy story relies on — a non-voter (or evicted)
+// returner would never receive commits via AppendEntries and would
+// silently lag the leader forever.
+func nodeIsVoterInVaultCtl(t *testing.T, h *orchRelHarness, nodeID string) bool {
+	t.Helper()
+	// Pick any live node to read Raft config from. The vault-ctl
+	// configuration is replicated, so any node's view is valid.
+	var observer *orchRelNode
+	for _, id := range h.nodeIDs {
+		if n := h.nodes[id]; n != nil && n.groupMgr != nil {
+			observer = n
+			break
+		}
+	}
+	if observer == nil {
+		t.Fatal("no live node to read vault-ctl configuration from")
+	}
+	g := observer.groupMgr.GetGroup(raftgroup.VaultControlPlaneGroupID(h.vaultID))
+	if g == nil {
+		t.Fatalf("vault-ctl group not present on observer %s", observer.id)
+	}
+	cfgFuture := g.Raft.GetConfiguration()
+	if err := cfgFuture.Error(); err != nil {
+		t.Fatalf("GetConfiguration on observer %s: %v", observer.id, err)
+	}
+	for _, srv := range cfgFuture.Configuration().Servers {
+		if string(srv.ID) == nodeID && srv.Suffrage == hraft.Voter {
+			return true
+		}
+	}
+	return false
 }
 
 // Slow peer (not paused): add ~200ms of per-handler latency to one
