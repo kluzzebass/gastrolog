@@ -75,19 +75,22 @@ quickstart-down:
 # Docker Compose 3-node cluster
 # ---------------------------------------------------------------------------
 
-# Idempotent: re-run reconciles services in place; volumes and FSM state are preserved; to wipe + rebuild, `compose-down` first.
+# Idempotent: no-op if the cluster is already running; to wipe + rebuild, `compose-down` first.
 # Start a 3-node Docker Compose cluster + bundled deps (deps internal-only, no host ports).
 compose-up: image
     #!/usr/bin/env bash
     set -euo pipefail
+    if [[ "$(docker compose -p gastrolog-deploy -f compose.yml ps -q 2>/dev/null | wc -l | tr -d ' ')" -gt 0 ]]; then
+      echo "compose cluster already running"
+      curl -s -o /dev/null -w "  /readyz=%{http_code}\n" http://localhost:4564/readyz
+      echo "Tear down with: just deploy compose-down"
+      exit 0
+    fi
     # Push-service configs (rsyslog/otel/fluent-bit) reference
     # `host.docker.internal` in the source files under
     # test/ingester-integration/; we sed-substitute them to `gastrolog-0`
     # (the bootstrap node's service-name) and write the result to
-    # /tmp/gastrolog-deploy/ where compose.yml bind-mounts them. Same
-    # approach as swarm-up's docker-config-create. Re-running the sed
-    # is cheap and picks up edits to the source configs on the next
-    # `compose up -d` reconcile.
+    # /tmp/gastrolog-deploy/ where compose.yml bind-mounts them.
     mkdir -p /tmp/gastrolog-deploy
     sed 's/host\.docker\.internal/gastrolog-0/g' ../test/ingester-integration/rsyslog/rsyslog.conf  > /tmp/gastrolog-deploy/rsyslog.conf
     sed 's/host\.docker\.internal/gastrolog-0/g' ../test/ingester-integration/otel/config.yaml      > /tmp/gastrolog-deploy/otel-config.yaml
@@ -131,28 +134,29 @@ compose-down:
 # '{{.Replicas}}'` can't be used inside recipes. We skip --format and grep
 # the human-readable table instead — same signal, no escaping headaches.
 #
-# Idempotent: re-run reconciles services in place; volumes preserved; secrets/configs only created if missing (Swarm makes them immutable — refresh via `swarm-down`).
+# Idempotent: no-op if the stack already exists; to wipe + rebuild, `swarm-down` first.
 # Start a Docker Swarm stack (init swarm if needed, create admin secret, deploy).
 swarm-up: image
     #!/usr/bin/env bash
     set -euo pipefail
-    docker swarm init 2>/dev/null || true
-    if ! docker secret inspect gastrolog_admin_creds >/dev/null 2>&1; then
-      echo '{"username":"admin","password":"change-me"}' | docker secret create gastrolog_admin_creds - >/dev/null
+    # Skip --format here for the same reason as elsewhere in this file:
+    # `just` intercepts the double-brace template. tail -n +2 skips the
+    # header row and awk pulls the first column (stack name).
+    if docker stack ls 2>/dev/null | tail -n +2 | awk '{print $1}' | grep -q '^gastrolog$'; then
+      echo "swarm stack already deployed"
+      curl -s -o /dev/null -w "  /readyz=%{http_code}\n" http://localhost:4564/readyz
+      echo "Tear down with: just deploy swarm-down"
+      exit 0
     fi
+    docker swarm init 2>/dev/null || true
+    echo '{"username":"admin","password":"change-me"}' | docker secret create gastrolog_admin_creds - >/dev/null
     # Push-target host: bootstrap pod's overlay-resolvable name. Substituted
     # into the rsyslog / otel / fluent-bit configs as docker configs so the
     # ingester sources actually target the bundled gastrolog cluster.
     target=tasks.gastrolog_bootstrap
-    if ! docker config inspect gastrolog_rsyslog_conf >/dev/null 2>&1; then
-      sed "s/host\.docker\.internal/$target/g" ../test/ingester-integration/rsyslog/rsyslog.conf | docker config create gastrolog_rsyslog_conf - >/dev/null
-    fi
-    if ! docker config inspect gastrolog_otel_conf >/dev/null 2>&1; then
-      sed "s/host\.docker\.internal/$target/g" ../test/ingester-integration/otel/config.yaml | docker config create gastrolog_otel_conf - >/dev/null
-    fi
-    if ! docker config inspect gastrolog_fluent_bit_conf >/dev/null 2>&1; then
-      sed "s/host\.docker\.internal/$target/g" ../test/ingester-integration/fluent-bit/fluent-bit.conf | docker config create gastrolog_fluent_bit_conf - >/dev/null
-    fi
+    sed "s/host\.docker\.internal/$target/g" ../test/ingester-integration/rsyslog/rsyslog.conf | docker config create gastrolog_rsyslog_conf - >/dev/null
+    sed "s/host\.docker\.internal/$target/g" ../test/ingester-integration/otel/config.yaml | docker config create gastrolog_otel_conf - >/dev/null
+    sed "s/host\.docker\.internal/$target/g" ../test/ingester-integration/fluent-bit/fluent-bit.conf | docker config create gastrolog_fluent_bit_conf - >/dev/null
     docker stack deploy -c stack.yml gastrolog
     echo "Waiting for gastrolog services + deps to come up..."
     for i in $(seq 1 90); do
@@ -541,13 +545,19 @@ kubernetes-down:
 # Requires podman installed and `podman machine start` to be running.
 # Loads the docker-built gastrolog:test image into Podman's VM via save | load.
 #
-# Idempotent: re-run reconciles services in place; volumes and FSM state are preserved; to wipe + rebuild, `podman-down` first.
+# Idempotent: no-op if the cluster is already running; to wipe + rebuild, `podman-down` first.
 # Start a 3-node Podman cluster + bundled deps (deps internal-only, no host ports).
 podman-up: image
     #!/usr/bin/env bash
     set -euo pipefail
     command -v podman >/dev/null || { echo "podman not installed — \`brew install podman\` first"; exit 1; }
     podman machine list 2>/dev/null | grep -q 'Currently running' || { echo "no running podman machine — \`podman machine init && podman machine start\` first"; exit 1; }
+    if [[ "$(podman compose -p gastrolog-deploy ps -q 2>/dev/null | wc -l | tr -d ' ')" -gt 0 ]]; then
+      echo "podman cluster already running"
+      curl -s -o /dev/null -w "  /readyz=%{http_code}\n" http://localhost:4564/readyz
+      echo "Tear down with: just deploy podman-down"
+      exit 0
+    fi
     docker save gastrolog:test | podman load >/dev/null
     mkdir -p /tmp/gastrolog-deploy
     sed 's/host\.docker\.internal/gastrolog-0/g' ../test/ingester-integration/rsyslog/rsyslog.conf  > /tmp/gastrolog-deploy/rsyslog.conf
