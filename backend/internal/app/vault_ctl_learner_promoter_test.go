@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"sync"
 	"testing"
-	"time"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/glid"
@@ -52,9 +51,7 @@ func (fakeGroupMgr) GetGroup(_ string) *raftgroup.Group { return nil }
 func newVaultPromoterForTest(t *testing.T, cfgStore system.Store, ps peerStatsReader) *vaultCtlLearnerPromoter {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	p := newVaultCtlLearnerPromoter(cfgStore, fakeGroupMgr{}, ps, "local-node", logger)
-	p.interval = time.Hour // never tick on its own in tests
-	return p
+	return newVaultCtlLearnerPromoter(cfgStore, fakeGroupMgr{}, ps, "local-node", logger)
 }
 
 func TestPeerVaultAppliedIndex_MatchByGLIDBytes(t *testing.T) {
@@ -164,5 +161,58 @@ func TestVaultCtlPromoter_StaleCounterPruning(t *testing.T) {
 
 	if len(p.catchupTicks) != 0 {
 		t.Fatalf("expected stale counters pruned, got %v", p.catchupTicks)
+	}
+}
+
+// TestStartVaultCtlLearnerPromoter_RegistersOperatorVisibleJob
+// verifies the promoter ships as a proper scheduled job: name + cron
+// set, a non-empty Describe text so the inspector shows context to
+// the operator, and the captured task drives a real tick.
+func TestStartVaultCtlLearnerPromoter_RegistersOperatorVisibleJob(t *testing.T) {
+	t.Parallel()
+	store := sysmem.NewStore()
+	// One vault in the store so tickOnce → tick has something to iterate.
+	v := system.VaultConfig{ID: glid.New(), Name: "v1"}
+	if err := store.PutVault(context.Background(), v); err != nil {
+		t.Fatalf("PutVault: %v", err)
+	}
+	ps := &mockPeerStats{}
+	p := newVaultPromoterForTest(t, store, ps)
+	sched := &fakeScheduler{}
+
+	if err := startVaultCtlLearnerPromoter(context.Background(), sched, p); err != nil {
+		t.Fatalf("startVaultCtlLearnerPromoter: %v", err)
+	}
+	if sched.addJobName != vaultCtlLearnerPromoterJobName {
+		t.Errorf("AddJob name: got %q, want %q", sched.addJobName, vaultCtlLearnerPromoterJobName)
+	}
+	if sched.addJobCron != vaultCtlLearnerPromoterSchedule {
+		t.Errorf("AddJob cron: got %q, want %q", sched.addJobCron, vaultCtlLearnerPromoterSchedule)
+	}
+	if sched.describeMessage == "" {
+		t.Error("Describe message empty — operator inspector will show no context")
+	}
+
+	// Run the captured task — fakeGroupMgr returns nil for GetGroup so
+	// the per-vault evaluation short-circuits before any AddVoter
+	// attempt. The task should still execute end-to-end without panic.
+	if task, ok := sched.addJobTaskFn.(func()); ok {
+		task()
+	} else {
+		t.Fatalf("expected captured task of type func(), got %T", sched.addJobTaskFn)
+	}
+}
+
+// TestStartVaultCtlLearnerPromoter_PropagatesAddJobError verifies the
+// caller sees an AddJob failure (e.g. duplicate name).
+func TestStartVaultCtlLearnerPromoter_PropagatesAddJobError(t *testing.T) {
+	t.Parallel()
+	store := sysmem.NewStore()
+	ps := &mockPeerStats{}
+	p := newVaultPromoterForTest(t, store, ps)
+	sched := &fakeScheduler{addJobErr: errFakeMember}
+
+	if err := startVaultCtlLearnerPromoter(context.Background(), sched, p); err == nil {
+		t.Fatal("expected AddJob error to propagate")
 	}
 }

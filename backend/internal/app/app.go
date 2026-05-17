@@ -417,6 +417,15 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		}
 		go pm.Run(ctx)
 
+		// register flattens the standard register-or-warn pattern so
+		// the cluster-mode init block stays linear at the top level
+		// (nestif lint).
+		register := func(jobLabel string, err error) {
+			if err != nil {
+				logger.Warn("schedule "+jobLabel+" job", "error", err)
+			}
+		}
+
 		// Heartbeat-driven node-state sweep (gastrolog-39m2k). Flips
 		// NodeConfig.State between Live and Unreachable based on
 		// PeerState freshness so the placement guard sees soft-offline
@@ -425,9 +434,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		// Scheduled view alongside the rest of the periodic work
 		// (gastrolog-28o8p).
 		sweep := newUnreachableSweep(cfgStore, clusterSrv, peerState, nodeID, alertCollector, compPlacement.Apply(logger))
-		if err := startUnreachableSweep(ctx, orch.Scheduler(), sweep); err != nil {
-			logger.Warn("schedule unreachable-sweep job", "error", err)
-		}
+		register("unreachable-sweep", startUnreachableSweep(ctx, orch.Scheduler(), sweep))
 
 		// System-Raft learner promoter (gastrolog-2czh9). Watches for
 		// Nonvoter / Staging members and promotes them to voters once
@@ -437,18 +444,17 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		// promoter below. Registered with the orchestrator job
 		// scheduler (gastrolog-5npek) so it appears in the inspector.
 		learnerPromoter := newSystemLearnerPromoter(clusterSrv, peerState, compCluster.Apply(logger))
-		if err := startSystemLearnerPromoter(ctx, orch.Scheduler(), learnerPromoter); err != nil {
-			logger.Warn("schedule system-learner-promoter job", "error", err)
-		}
+		register("system-learner-promoter", startSystemLearnerPromoter(ctx, orch.Scheduler(), learnerPromoter))
 
 		// Per-vault-ctl learner promoter (gastrolog-gcbx7). Same
 		// shape as the system-Raft promoter but iterates every vault
 		// on each tick; only acts on groups this node leads. Catchup
 		// signal comes from VaultStats.RaftAppliedIndex in the
-		// existing NodeStats broadcast.
+		// existing NodeStats broadcast. Registered with the
+		// orchestrator job scheduler (gastrolog-4icsr).
 		if groupMgr != nil {
 			vaultLearnerPromoter := newVaultCtlLearnerPromoter(cfgStore, groupMgr, peerState, nodeID, compCluster.Apply(logger))
-			go vaultLearnerPromoter.Run(ctx)
+			register("vault-ctl-learner-promoter", startVaultCtlLearnerPromoter(ctx, orch.Scheduler(), vaultLearnerPromoter))
 		}
 	}
 

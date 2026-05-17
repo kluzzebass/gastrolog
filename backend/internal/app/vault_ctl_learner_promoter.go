@@ -15,10 +15,15 @@ import (
 )
 
 const (
-	// vaultCtlLearnerPromoterInterval is the leader-side tick cadence
-	// per-vault-ctl group. Mirrors the system-Raft learner promoter
-	// (gastrolog-2czh9): slow, leader-only, low-churn.
-	vaultCtlLearnerPromoterInterval = 30 * time.Second
+	// vaultCtlLearnerPromoterJobName is the operator-visible name
+	// shown in the inspector's Scheduled view. Keep stable across
+	// releases.
+	vaultCtlLearnerPromoterJobName = "vault-ctl-learner-promoter"
+
+	// vaultCtlLearnerPromoterSchedule runs every 30 seconds. Mirrors
+	// the system-Raft learner promoter (gastrolog-2czh9): slow,
+	// per-vault-leader-only, low-churn. 6-field cron (with-seconds).
+	vaultCtlLearnerPromoterSchedule = "*/30 * * * * *"
 
 	// vaultCtlLearnerStabilityTicks is the number of consecutive ticks
 	// a learner must be observed at caught-up state before promotion.
@@ -73,7 +78,6 @@ type vaultCtlLearnerPromoter struct {
 	peerState         peerStatsReader
 	localNodeID       string
 	logger            *slog.Logger
-	interval          time.Duration
 	stabilityRequired int
 
 	// catchupTicks tracks consecutive caught-up observations keyed by
@@ -94,27 +98,33 @@ func newVaultCtlLearnerPromoter(cfgStore system.Store, groupMgr vaultCtlRaftGrou
 		peerState:         peerState,
 		localNodeID:       localNodeID,
 		logger:            logger,
-		interval:          vaultCtlLearnerPromoterInterval,
 		stabilityRequired: vaultCtlLearnerStabilityTicks,
 		catchupTicks:      make(map[catchupKey]int),
 	}
 }
 
-// Run blocks until ctx is cancelled. Ticks every interval; per tick,
-// iterates every vault in the config store, checks if this node is
-// the leader of that vault's vault-ctl group, and if so evaluates
-// learners for promotion.
-func (p *vaultCtlLearnerPromoter) Run(ctx context.Context) {
-	ticker := time.NewTicker(p.interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			p.tick(ctx)
-		}
+// tickOnce is the scheduled task body. Unlike the system-Raft
+// promoter, there's no top-level leader gate: every node may lead
+// some vault-ctl groups and follow others, so the iteration runs
+// everywhere and the per-group leader check sits inside
+// evaluateVault (line ~155).
+func (p *vaultCtlLearnerPromoter) tickOnce(ctx context.Context) {
+	p.tick(ctx)
+}
+
+// startVaultCtlLearnerPromoter registers the promoter with the
+// supplied scheduler as a recurring job. Returns the AddJob error if
+// any. Describes the per-group-leader semantics so the operator
+// understands why the job fires on every node (not just the system-
+// Raft leader).
+func startVaultCtlLearnerPromoter(ctx context.Context, scheduler scheduledJobRegistry, promoter *vaultCtlLearnerPromoter) error {
+	task := func() { promoter.tickOnce(ctx) }
+	if err := scheduler.AddJob(vaultCtlLearnerPromoterJobName, vaultCtlLearnerPromoterSchedule, task); err != nil {
+		return err
 	}
+	scheduler.Describe(vaultCtlLearnerPromoterJobName,
+		"Per-vault-ctl learner promotion. Runs on every node and iterates every vault-ctl group; the per-group leader gate inside the tick body only proposes AddVoter for groups this node currently leads. Each learner must hold its broadcast RaftAppliedIndex within tolerance of the group leader's applied index for a stability window before promotion. Companion to gastrolog-2czh9 (system-Raft promoter) and gastrolog-41sut (JoinCluster-as-learner). Original implementation gastrolog-gcbx7.")
+	return nil
 }
 
 // tick scans every configured vault. For each one, if the local node
