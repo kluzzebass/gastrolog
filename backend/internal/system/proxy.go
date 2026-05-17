@@ -361,6 +361,15 @@ func (p *StoreProxy) DeleteNode(ctx context.Context, id glid.GLID) error {
 	return p.inner.DeleteNode(ctx, id)
 }
 
+func (p *StoreProxy) SetNodeState(ctx context.Context, id glid.GLID, state NodeState, since time.Time) error {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if err := p.check(); err != nil {
+		return err
+	}
+	return p.inner.SetNodeState(ctx, id, state, since)
+}
+
 func (p *StoreProxy) PutClusterTLS(ctx context.Context, tls ClusterTLS) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()

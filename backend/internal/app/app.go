@@ -409,6 +409,14 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 			})
 		}
 		go pm.Run(ctx)
+
+		// Heartbeat-driven node-state sweep (gastrolog-39m2k). Flips
+		// NodeConfig.State between Live and Unreachable based on
+		// PeerState freshness so the placement guard sees soft-offline
+		// nodes without operator intervention. Runs alongside the
+		// placement manager: same leader gating, separate concern.
+		sweep := newUnreachableSweep(cfgStore, clusterSrv, peerState, nodeID, compPlacement.Apply(logger))
+		go sweep.Run(ctx)
 	}
 
 	// For replication cases: block until server settings replicate from the leader.

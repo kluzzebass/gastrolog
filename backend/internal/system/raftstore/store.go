@@ -377,6 +377,10 @@ func (s *Store) DeleteNode(ctx context.Context, id glid.GLID) error {
 	return s.apply(ctx, command.NewDeleteNodeConfig(id))
 }
 
+func (s *Store) SetNodeState(ctx context.Context, id glid.GLID, state system.NodeState, since time.Time) error {
+	return s.apply(ctx, command.NewSetNodeState(id, state, since))
+}
+
 func (s *Store) PutCertificate(ctx context.Context, cert system.CertPEM) error {
 	return s.apply(ctx, command.NewPutCertificate(cert))
 }

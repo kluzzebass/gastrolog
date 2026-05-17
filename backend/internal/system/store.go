@@ -74,6 +74,11 @@ type Store interface {
 	ListNodes(ctx context.Context) ([]NodeConfig, error)
 	PutNode(ctx context.Context, node NodeConfig) error
 	DeleteNode(ctx context.Context, id glid.GLID) error
+	// SetNodeState proposes a lifecycle-state transition for a node.
+	// `since` is captured by the proposer so all replicas write the same
+	// StateSince during deterministic apply. Returns the FSM error
+	// (illegal-transition, missing node, etc.) if validation fails.
+	SetNodeState(ctx context.Context, id glid.GLID, state NodeState, since time.Time) error
 
 	// Cluster TLS (mTLS material for cluster port).
 	// Read via Load() → Config.ClusterTLS; PutClusterTLS is the Raft write path.
