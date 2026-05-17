@@ -420,10 +420,14 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		// Heartbeat-driven node-state sweep (gastrolog-39m2k). Flips
 		// NodeConfig.State between Live and Unreachable based on
 		// PeerState freshness so the placement guard sees soft-offline
-		// nodes without operator intervention. Runs alongside the
-		// placement manager: same leader gating, separate concern.
+		// nodes without operator intervention. Registered with the
+		// orchestrator's job scheduler so it shows up in the inspector's
+		// Scheduled view alongside the rest of the periodic work
+		// (gastrolog-28o8p).
 		sweep := newUnreachableSweep(cfgStore, clusterSrv, peerState, nodeID, alertCollector, compPlacement.Apply(logger))
-		go sweep.Run(ctx)
+		if err := startUnreachableSweep(ctx, orch.Scheduler(), sweep); err != nil {
+			logger.Warn("schedule unreachable-sweep job", "error", err)
+		}
 
 		// System-Raft learner promoter (gastrolog-2czh9). Watches for
 		// Nonvoter / Staging members and promotes them to voters once

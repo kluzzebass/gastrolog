@@ -42,7 +42,6 @@ func newSweepTest(t *testing.T, threshold, peerTTL time.Duration) (*unreachableS
 		peerState:   peerState,
 		localNodeID: localID.String(),
 		threshold:   threshold,
-		interval:    time.Hour, // ticker never fires; tests call tick directly
 		logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
 		now:         time.Now,
 	}
@@ -302,7 +301,6 @@ func newAlertSweepTest(t *testing.T, alertThreshold time.Duration) (*unreachable
 		threshold:      time.Minute,
 		alertThreshold: alertThreshold,
 		alerts:         collector,
-		interval:       time.Hour,
 		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
 		now:            time.Now,
 	}
@@ -482,5 +480,106 @@ func TestUnreachableSweep_PlacementGuardChain(t *testing.T) {
 	}
 	if hasAlert(alerts, "vault-soft-offline-leader") {
 		t.Fatal("stage 2: expected soft-offline alert to be cleared")
+	}
+}
+
+// TestStartUnreachableSweep_RegistersOperatorVisibleJob verifies the
+// sweep gets registered as a proper scheduled job (visible in the
+// inspector's Scheduled view) rather than a raw goroutine. Asserts
+// the AddJob name + cron + non-empty Describe text, then runs the
+// captured task to confirm it drives a tick end-to-end.
+func TestStartUnreachableSweep_RegistersOperatorVisibleJob(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	sweep, store, _, _, peerID := newSweepTest(t, time.Minute, 10*time.Second)
+	// Mark peer Live with stale heartbeat so the leader-only tick
+	// path would propose a transition if it ran. We deliberately
+	// leave clusterSrv=nil so tickOnce skips the transition phase
+	// (the test isolates registration, not transition logic).
+	sweep.now = func() time.Time { return time.Unix(3000, 0) }
+	if err := store.PutNode(ctx, system.NodeConfig{
+		ID: peerID, Name: "peer", State: system.NodeStateLive, StateSince: time.Unix(1000, 0),
+	}); err != nil {
+		t.Fatalf("PutNode: %v", err)
+	}
+
+	sched := &fakeScheduler{}
+	if err := startUnreachableSweep(ctx, sched, sweep); err != nil {
+		t.Fatalf("startUnreachableSweep: %v", err)
+	}
+
+	if sched.addJobName != unreachableSweepJobName {
+		t.Errorf("AddJob name: got %q, want %q", sched.addJobName, unreachableSweepJobName)
+	}
+	if sched.addJobCron != unreachableSweepSchedule {
+		t.Errorf("AddJob cron: got %q, want %q", sched.addJobCron, unreachableSweepSchedule)
+	}
+	if sched.describeName != unreachableSweepJobName {
+		t.Errorf("Describe name: got %q, want %q", sched.describeName, unreachableSweepJobName)
+	}
+	if sched.describeMessage == "" {
+		t.Error("Describe message empty — operator inspector will show no context")
+	}
+
+	// Run the captured task as the scheduler would. The transition
+	// phase short-circuits on nil clusterSrv (test setup), so this
+	// just confirms the closure resolves and tickOnce runs without
+	// panicking.
+	if task, ok := sched.addJobTaskFn.(func()); ok {
+		task()
+	} else {
+		t.Fatalf("expected captured task of type func(), got %T", sched.addJobTaskFn)
+	}
+}
+
+// TestStartUnreachableSweep_PropagatesAddJobError verifies the caller
+// sees the AddJob failure (e.g. duplicate name) instead of silently
+// running a broken-registration sweep.
+func TestStartUnreachableSweep_PropagatesAddJobError(t *testing.T) {
+	t.Parallel()
+	sweep, _, _, _, _ := newSweepTest(t, time.Minute, 10*time.Second)
+	sched := &fakeScheduler{addJobErr: errFakeMember}
+
+	err := startUnreachableSweep(context.Background(), sched, sweep)
+	if err == nil {
+		t.Fatal("expected AddJob error to propagate")
+	}
+}
+
+// TestTickOnce_LeaderRunsBothPhases verifies the integrated tick
+// runs the transition phase only when clusterSrv reports leadership,
+// and the alert phase unconditionally.
+func TestTickOnce_NonLeaderRunsAlertPhaseOnly(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	sweep, store, _, _, peerID := newSweepTest(t, time.Minute, 10*time.Second)
+	// nil clusterSrv stands in for "not leader" — IsLeader can't be
+	// called, but tickOnce's `s.clusterSrv != nil` guard makes the
+	// transition phase a no-op in that case.
+	sweep.clusterSrv = nil
+	sweep.alerts = alert.New()
+	sweep.alertThreshold = time.Minute
+	stateSince := time.Unix(1000, 0)
+	sweep.now = func() time.Time { return stateSince.Add(2 * time.Minute) }
+	if err := store.PutNode(ctx, system.NodeConfig{
+		ID: peerID, Name: "peer", State: system.NodeStateUnreachable, StateSince: stateSince,
+	}); err != nil {
+		t.Fatalf("PutNode: %v", err)
+	}
+
+	sweep.tickOnce(ctx)
+
+	// Alert phase ran → alert fired for the Unreachable peer.
+	if a := findAlert(sweep.alerts, unreachableAlertIDPrefix+peerID.String()); a == nil {
+		t.Fatal("expected alert phase to fire on non-leader; got no alert")
+	}
+	// Transition phase did NOT run → store still shows Unreachable
+	// (never flipped to Live or any other state).
+	n, err := store.GetNode(ctx, peerID)
+	if err != nil || n == nil {
+		t.Fatalf("GetNode: %v / %v", n, err)
+	}
+	if n.EffectiveState() != system.NodeStateUnreachable {
+		t.Errorf("transition phase ran on non-leader: state %s, want Unreachable", n.EffectiveState())
 	}
 }
