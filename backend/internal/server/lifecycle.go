@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
@@ -163,12 +164,13 @@ func (s *LifecycleServer) GetClusterStatus(
 		return nil, errInternal(err)
 	}
 
-	// Build a name lookup from the config store's node list.
-	nameByID := make(map[string]string)
+	// Build a node-config lookup keyed by ID so we can attach name +
+	// lifecycle state to each ClusterNode.
+	cfgByID := make(map[string]system.NodeConfig)
 	if s.cfgStore != nil {
 		if nodes, err := s.cfgStore.ListNodes(ctx); err == nil {
 			for _, n := range nodes {
-				nameByID[n.ID.String()] = n.Name
+				cfgByID[n.ID.String()] = n
 			}
 		}
 	}
@@ -191,13 +193,18 @@ func (s *LifecycleServer) GetClusterStatus(
 			suffrage = apiv1.ClusterNodeSuffrage_CLUSTER_NODE_SUFFRAGE_STAGING
 		}
 
+		cfg := cfgByID[srv.ID]
 		node := &apiv1.ClusterNode{
 			Id:       []byte(srv.ID),
-			Name:     nameByID[srv.ID],
+			Name:     cfg.Name,
 			Address:  srv.Address,
 			Role:     role,
 			Suffrage: suffrage,
 			IsLeader: isLeader,
+			State:    command.NodeStateToProto(cfg.EffectiveState()),
+		}
+		if !cfg.StateSince.IsZero() {
+			node.StateSince = timestamppb.New(cfg.StateSince)
 		}
 
 		// Attach per-node stats: real-time for local, last broadcast for peers.

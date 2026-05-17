@@ -422,7 +422,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		// PeerState freshness so the placement guard sees soft-offline
 		// nodes without operator intervention. Runs alongside the
 		// placement manager: same leader gating, separate concern.
-		sweep := newUnreachableSweep(cfgStore, clusterSrv, peerState, nodeID, compPlacement.Apply(logger))
+		sweep := newUnreachableSweep(cfgStore, clusterSrv, peerState, nodeID, alertCollector, compPlacement.Apply(logger))
 		go sweep.Run(ctx)
 
 		// System-Raft learner promoter (gastrolog-2czh9). Watches for

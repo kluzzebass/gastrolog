@@ -10,7 +10,15 @@
 import { ClusterNodeRole, ClusterNodeSuffrage, type ClusterNode } from "../gen/gastrolog/v1/lifecycle_pb";
 import type { NodeStats } from "../gen/gastrolog/v1/cluster_pb";
 import type { NodeConfig } from "../gen/gastrolog/v1/system_pb";
+import { NodeState } from "../gen/gastrolog/v1/system_pb";
+import type { Timestamp } from "@bufbuild/protobuf";
 import { type EntityID, idFromBytes } from "./id";
+
+// Re-export proto-layer types that the model exposes through its API,
+// so components can consume them without reaching into src/api/gen
+// (lint rule: components import from src/api/model/ or src/api/hooks/).
+export { NodeState };
+export type { Timestamp };
 
 export class Node {
   readonly id: EntityID;
@@ -68,5 +76,16 @@ export class Node {
 
   get pprofAddress(): string {
     return this.cluster?.pprofAddress ?? "";
+  }
+
+  /** Lifecycle state. UNSPECIFIED is treated as LIVE per the proto contract. */
+  get state(): NodeState {
+    const raw = this.cluster?.state ?? NodeState.UNSPECIFIED;
+    return raw === NodeState.UNSPECIFIED ? NodeState.LIVE : raw;
+  }
+
+  /** Wall-clock instant the current state was entered, or undefined. */
+  get stateSince(): Timestamp | undefined {
+    return this.cluster?.stateSince;
   }
 }

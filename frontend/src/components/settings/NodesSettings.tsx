@@ -8,6 +8,8 @@ import { useSetNodeSuffrage } from "../../api/hooks/useSetNodeSuffrage";
 import { useJoinCluster } from "../../api/hooks/useJoinCluster";
 import { useRemoveNode } from "../../api/hooks/useRemoveNode";
 import { ClusterNodeRole, ClusterNodeSuffrage } from "../../api/gen/gastrolog/v1/lifecycle_pb";
+import { NodeState, type Timestamp } from "../../api/model/node";
+import { NodeStateBadge } from "../NodeStateBadge";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { useEditState } from "../../hooks/useEditState";
@@ -53,7 +55,7 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
     (configData?.nodeConfigs ?? []).map((nc) => [encode(nc.id), nc]),
   );
 
-  let nodes: { id: string; name: string; role: ClusterNodeRole; suffrage: ClusterNodeSuffrage; isLeader: boolean; hasStats: boolean }[];
+  let nodes: { id: string; name: string; role: ClusterNodeRole; suffrage: ClusterNodeSuffrage; isLeader: boolean; hasStats: boolean; state: NodeState; stateSince?: Timestamp }[];
   if (clusterEnabled) {
     nodes = (clusterData?.nodes ?? []).map((cn) => ({
       id: encode(cn.id),
@@ -62,6 +64,8 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
       suffrage: cn.suffrage,
       isLeader: cn.isLeader,
       hasStats: !!cn.stats,
+      state: cn.state,
+      stateSince: cn.stateSince,
     }));
   } else if (localNodeId) {
     nodes = [{
@@ -71,6 +75,8 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
       suffrage: ClusterNodeSuffrage.UNSPECIFIED,
       isLeader: false,
       hasStats: true,
+      state: NodeState.LIVE,
+      stateSince: undefined,
     }];
   } else {
     nodes = [];
@@ -124,6 +130,9 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
               onToggle={() => toggle(node.id)}
               headerRight={
                 <div className="flex items-center gap-1.5">
+                  {clusterEnabled && (
+                    <NodeStateBadge state={node.state} stateSince={node.stateSince} dark={dark} />
+                  )}
                   {clusterEnabled && !isLocal && !node.hasStats && (
                     <Badge variant="error" dark={dark}>offline</Badge>
                   )}

@@ -2,10 +2,12 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"time"
 
+	"gastrolog/internal/alert"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/system"
 )
@@ -16,11 +18,23 @@ const (
 	// via GLOG_UNREACHABLE_THRESHOLD (any time.ParseDuration string).
 	defaultUnreachableThreshold = 5 * time.Minute
 
+	// defaultUnreachableAlertThreshold is the time-in-Unreachable window
+	// after which a warning alert fires for the node. Independent from
+	// the detection threshold because operators want a separate dial:
+	// "flip to Unreachable quickly so placement reroutes, but only page
+	// us when it stays Unreachable for longer." Overridable via
+	// GLOG_UNREACHABLE_ALERT_THRESHOLD.
+	defaultUnreachableAlertThreshold = 5 * time.Minute
+
 	// unreachableSweepInterval is the tick cadence on the system-Raft
 	// leader. Low frequency by design — the sweep proposes Raft commands,
 	// so faster ticks just add log churn without helping detection
 	// (PeerState's TTL is the actual detection floor).
 	unreachableSweepInterval = 30 * time.Second
+
+	// unreachableAlertID is the stable per-node alert ID prefix. Format:
+	// "node-unreachable:<nodeID>". One Set/Clear pair per node.
+	unreachableAlertIDPrefix = "node-unreachable:"
 )
 
 // unreachableSweep transitions nodes between Live and Unreachable based
@@ -44,47 +58,65 @@ const (
 // auto-set vs operator-set distinction is implicit in the state name:
 // no StateSource field is needed.
 type unreachableSweep struct {
-	cfgStore    system.Store
-	clusterSrv  *cluster.Server
-	peerState   *cluster.PeerState
-	localNodeID string
-	threshold   time.Duration
-	interval    time.Duration
-	logger      *slog.Logger
-	now         func() time.Time
+	cfgStore       system.Store
+	clusterSrv     *cluster.Server
+	peerState      *cluster.PeerState
+	localNodeID    string
+	threshold      time.Duration
+	alertThreshold time.Duration
+	alerts         *alert.Collector
+	interval       time.Duration
+	logger         *slog.Logger
+	now            func() time.Time
 }
 
-// newUnreachableSweep wires the sweep with the configured threshold.
-// Threshold comes from GLOG_UNREACHABLE_THRESHOLD if set and parseable
-// as a positive time.ParseDuration string; otherwise it falls back to
-// defaultUnreachableThreshold.
-func newUnreachableSweep(cfgStore system.Store, clusterSrv *cluster.Server, peerState *cluster.PeerState, localNodeID string, logger *slog.Logger) *unreachableSweep {
-	threshold := defaultUnreachableThreshold
-	if v := os.Getenv("GLOG_UNREACHABLE_THRESHOLD"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil && d > 0 {
-			threshold = d
-		} else {
-			logger.Warn("unreachable_sweep: invalid GLOG_UNREACHABLE_THRESHOLD, using default",
-				"value", v, "default", defaultUnreachableThreshold)
-		}
-	}
+// newUnreachableSweep wires the sweep with the configured thresholds.
+// `threshold` (GLOG_UNREACHABLE_THRESHOLD) gates Live↔Unreachable
+// transitions; `alertThreshold` (GLOG_UNREACHABLE_ALERT_THRESHOLD)
+// gates the per-node warning alert. Both fall back to their defaults
+// if the env var is missing or unparseable.
+func newUnreachableSweep(cfgStore system.Store, clusterSrv *cluster.Server, peerState *cluster.PeerState, localNodeID string, alerts *alert.Collector, logger *slog.Logger) *unreachableSweep {
+	threshold := durationFromEnv(logger, "GLOG_UNREACHABLE_THRESHOLD", defaultUnreachableThreshold)
+	alertThreshold := durationFromEnv(logger, "GLOG_UNREACHABLE_ALERT_THRESHOLD", defaultUnreachableAlertThreshold)
 	return &unreachableSweep{
-		cfgStore:    cfgStore,
-		clusterSrv:  clusterSrv,
-		peerState:   peerState,
-		localNodeID: localNodeID,
-		threshold:   threshold,
-		interval:    unreachableSweepInterval,
-		logger:      logger,
-		now:         time.Now,
+		cfgStore:       cfgStore,
+		clusterSrv:     clusterSrv,
+		peerState:      peerState,
+		localNodeID:    localNodeID,
+		threshold:      threshold,
+		alertThreshold: alertThreshold,
+		alerts:         alerts,
+		interval:       unreachableSweepInterval,
+		logger:         logger,
+		now:            time.Now,
 	}
+}
+
+func durationFromEnv(logger *slog.Logger, key string, fallback time.Duration) time.Duration {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		logger.Warn("unreachable_sweep: invalid env override, using default",
+			"key", key, "value", v, "default", fallback)
+		return fallback
+	}
+	return d
 }
 
 // Run blocks until ctx is cancelled. Ticks every interval; per tick,
-// scans NodeConfig records and proposes state transitions when the
-// leader observes a heartbeat lapse or resume. Non-leader ticks are
-// no-ops — only the system-Raft leader proposes commands so concurrent
-// followers don't issue duplicate transitions.
+// two phases run:
+//
+//   - Transition phase (leader-only): scans NodeConfig records and
+//     proposes Live↔Unreachable transitions based on PeerState
+//     heartbeat freshness. Only the system-Raft leader proposes so
+//     concurrent followers don't issue duplicate transitions.
+//   - Alert phase (every node): scans NodeConfig records and raises
+//     or clears the per-node warning alert based on time-in-Unreachable.
+//     Runs on every node because alerts live in the local
+//     alert.Collector — the UI on each node needs its own copy.
 func (s *unreachableSweep) Run(ctx context.Context) {
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
@@ -96,7 +128,51 @@ func (s *unreachableSweep) Run(ctx context.Context) {
 			if s.clusterSrv.IsLeader() {
 				s.tick(ctx)
 			}
+			s.alertTick(ctx)
 		}
+	}
+}
+
+// alertTick evaluates Unreachable-duration alerts on every node. The
+// FSM-replicated NodeConfig (with StateSince set by every transition
+// command) is the source of truth, so every node sees the same value
+// and arrives at the same alert decision — no leader gating required.
+//
+// Maintenance, Draining, and Decommissioning intentionally do not
+// alert: operators set those deliberately, so the UI tone alone
+// (informational badge, no warning) communicates intent without
+// pestering them.
+func (s *unreachableSweep) alertTick(ctx context.Context) {
+	if s.alerts == nil {
+		return
+	}
+	nodes, err := s.cfgStore.ListNodes(ctx)
+	if err != nil {
+		s.logger.Debug("unreachable_sweep: alert list nodes", "error", err)
+		return
+	}
+	now := s.now()
+	for _, n := range nodes {
+		alertID := unreachableAlertIDPrefix + n.ID.String()
+		state := n.EffectiveState()
+		if state != system.NodeStateUnreachable {
+			s.alerts.Clear(alertID)
+			continue
+		}
+		if n.StateSince.IsZero() {
+			continue
+		}
+		elapsed := now.Sub(n.StateSince)
+		if elapsed < s.alertThreshold {
+			s.alerts.Clear(alertID)
+			continue
+		}
+		label := n.Name
+		if label == "" {
+			label = n.ID.String()
+		}
+		s.alerts.Set(alertID, alert.Warning, "node-lifecycle",
+			fmt.Sprintf("node %s has been Unreachable for %s", label, elapsed.Round(time.Second)))
 	}
 }
 
