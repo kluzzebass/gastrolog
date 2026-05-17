@@ -80,9 +80,7 @@ func (m *mockPeerStats) Get(senderID string) *gastrologv1.NodeStats {
 
 func newPromoterForTest(srv raftMembership, ps peerStatsReader) *systemLearnerPromoter {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	p := newSystemLearnerPromoter(srv, ps, logger)
-	p.interval = time.Hour // never tick on its own in tests
-	return p
+	return newSystemLearnerPromoter(srv, ps, logger)
 }
 
 func TestSystemLearnerPromoter_NoLearners_NoOp(t *testing.T) {
@@ -348,5 +346,89 @@ func TestLocalAppliedIndex_ParsesStats(t *testing.T) {
 
 	if got := localAppliedIndex(nil); got != 0 {
 		t.Fatalf("expected 0 for nil membership, got %d", got)
+	}
+}
+
+// TestTickOnce_NonLeaderIsNoOp verifies the scheduler can fire the
+// promoter task on every node — only the system-Raft leader runs the
+// actual promotion logic. Followers must short-circuit before any
+// catchup bookkeeping or AddVoter call.
+func TestTickOnce_NonLeaderIsNoOp(t *testing.T) {
+	t.Parallel()
+	srv := &mockRaftMembership{
+		isLeader:     false,
+		appliedIndex: 100,
+		servers: []cluster.RaftServer{
+			{ID: "n1", Address: "addr-1", Suffrage: "Nonvoter"},
+		},
+	}
+	ps := &mockPeerStats{byNode: map[string]uint64{"n1": 100}}
+	p := newPromoterForTest(srv, ps)
+
+	p.tickOnce(context.Background())
+
+	if len(srv.addVoterCalls) != 0 {
+		t.Errorf("non-leader: AddVoter called %v", srv.addVoterCalls)
+	}
+	if got := p.catchupTicks["n1"]; got != 0 {
+		t.Errorf("non-leader: catchup advanced (got %d) — leader gate failed", got)
+	}
+}
+
+// TestStartSystemLearnerPromoter_RegistersOperatorVisibleJob verifies
+// the promoter ships as a proper scheduled job: name + cron set, and
+// a non-empty Describe text so the inspector shows context to the
+// operator.
+func TestStartSystemLearnerPromoter_RegistersOperatorVisibleJob(t *testing.T) {
+	t.Parallel()
+	srv := &mockRaftMembership{
+		isLeader:     true,
+		appliedIndex: 100,
+		servers: []cluster.RaftServer{
+			{ID: "leader", Address: "addr-l", Suffrage: "Voter"},
+			{ID: "n1", Address: "addr-1", Suffrage: "Nonvoter"},
+		},
+	}
+	ps := &mockPeerStats{byNode: map[string]uint64{"n1": 100}}
+	p := newPromoterForTest(srv, ps)
+	sched := &fakeScheduler{}
+
+	if err := startSystemLearnerPromoter(context.Background(), sched, p); err != nil {
+		t.Fatalf("startSystemLearnerPromoter: %v", err)
+	}
+	if sched.addJobName != systemLearnerPromoterJobName {
+		t.Errorf("AddJob name: got %q, want %q", sched.addJobName, systemLearnerPromoterJobName)
+	}
+	if sched.addJobCron != systemLearnerPromoterSchedule {
+		t.Errorf("AddJob cron: got %q, want %q", sched.addJobCron, systemLearnerPromoterSchedule)
+	}
+	if sched.describeMessage == "" {
+		t.Error("Describe message empty — operator inspector will show no context")
+	}
+
+	// Run the captured task as the scheduler would. A single tick on
+	// a caught-up learner advances catchupTicks to 1 (stability=2);
+	// no promotion yet, but proof the leader-side tick ran.
+	if task, ok := sched.addJobTaskFn.(func()); ok {
+		task()
+	} else {
+		t.Fatalf("expected captured task of type func(), got %T", sched.addJobTaskFn)
+	}
+	if got := p.catchupTicks["n1"]; got != 1 {
+		t.Errorf("after task run: expected catchupTicks[n1]=1, got %d", got)
+	}
+}
+
+// TestStartSystemLearnerPromoter_PropagatesAddJobError verifies the
+// caller sees an AddJob failure (e.g. duplicate name).
+func TestStartSystemLearnerPromoter_PropagatesAddJobError(t *testing.T) {
+	t.Parallel()
+	srv := &mockRaftMembership{isLeader: true, appliedIndex: 1}
+	ps := &mockPeerStats{byNode: map[string]uint64{}}
+	p := newPromoterForTest(srv, ps)
+	sched := &fakeScheduler{addJobErr: errFakeMember}
+
+	if err := startSystemLearnerPromoter(context.Background(), sched, p); err == nil {
+		t.Fatal("expected AddJob error to propagate")
 	}
 }
