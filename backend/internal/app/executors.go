@@ -357,7 +357,7 @@ func newGetIndexesExecutor(o *orchestrator.Orchestrator) cluster.GetIndexesExecu
 
 func newValidateVaultExecutor(o *orchestrator.Orchestrator) cluster.ValidateVaultExecutor {
 	return func(_ context.Context, vaultID glid.GLID) (*gastrologv1.ValidateVaultResponse, error) {
-		metas, err := o.ListChunkMetas(vaultID)
+		metas, err := o.ListLocalChunkMetas(vaultID)
 		if err != nil {
 			return nil, err
 		}
@@ -437,7 +437,7 @@ func newReindexVaultExecutor(o *orchestrator.Orchestrator) cluster.ReindexVaultE
 		}
 		jobName := "reindex:" + vaultID.String()
 		jobID := o.Scheduler().Submit(jobName, func(ctx context.Context, job *orchestrator.JobProgress) {
-			metas, err := o.ListChunkMetas(vaultID)
+			metas, err := o.ListLocalChunkMetas(vaultID)
 			if err != nil {
 				job.Fail(time.Now(), err.Error())
 				return

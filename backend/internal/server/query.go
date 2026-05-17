@@ -735,9 +735,9 @@ func normalizedRange(start, end time.Time) (time.Time, time.Time, bool) {
 // is a voter of every vault-ctl group (gastrolog-292yi), so the FSM is
 // authoritative cluster-wide regardless of which node hosts the vault — a
 // coordinator that runs no vault replicas still sees the full sealed manifest.
-// Falls back to ListChunkMetas for the legacy memory-mode path (no GroupManager,
-// no FSM); that path also picks up the active chunk for vaults that have not
-// yet sealed any data.
+// Falls back to ListLocalChunkMetas for the legacy memory-mode path (no
+// GroupManager, no FSM); that path also picks up the active chunk for vaults
+// that have not yet sealed any data.
 func (s *QueryServer) resolveUnboundedQuery(ctx context.Context, q query.Query) query.Query {
 	if !q.Start.IsZero() && !q.End.IsZero() {
 		return q
@@ -807,7 +807,7 @@ func (s *QueryServer) aggregateVaultBounds(vaults []glid.GLID) (time.Time, time.
 			}
 			track(e.IngestStart, e.IngestEnd)
 		}
-		metas, err := s.orch.ListChunkMetas(vid)
+		metas, err := s.orch.ListLocalChunkMetas(vid)
 		if err != nil {
 			continue
 		}

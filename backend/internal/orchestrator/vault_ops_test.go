@@ -52,27 +52,27 @@ func TestVaultExists(t *testing.T) {
 	}
 }
 
-func TestListChunkMetas(t *testing.T) {
+func TestListLocalChunkMetas(t *testing.T) {
 	t.Parallel()
 	orch, id := newFacadeSetup(t)
 	appendRecords(t, orch, id, 3)
 
-	metas, err := orch.ListChunkMetas(id)
+	metas, err := orch.ListLocalChunkMetas(id)
 	if err != nil {
-		t.Fatalf("ListChunkMetas: %v", err)
+		t.Fatalf("ListLocalChunkMetas: %v", err)
 	}
 	if len(metas) == 0 {
 		t.Fatal("expected at least one chunk")
 	}
 }
 
-func TestListChunkMetas_UnknownVault(t *testing.T) {
+func TestListLocalChunkMetas_UnknownVault(t *testing.T) {
 	t.Parallel()
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = orch.ListChunkMetas(glid.New())
+	_, err = orch.ListLocalChunkMetas(glid.New())
 	if !errors.Is(err, orchestrator.ErrVaultNotFound) {
 		t.Fatalf("expected ErrVaultNotFound, got %v", err)
 	}
@@ -83,9 +83,9 @@ func TestGetChunkMeta(t *testing.T) {
 	orch, id := newFacadeSetup(t)
 	appendRecords(t, orch, id, 1)
 
-	metas, err := orch.ListChunkMetas(id)
+	metas, err := orch.ListLocalChunkMetas(id)
 	if err != nil {
-		t.Fatalf("ListChunkMetas: %v", err)
+		t.Fatalf("ListLocalChunkMetas: %v", err)
 	}
 
 	meta, err := orch.GetChunkMeta(id, metas[0].ID)
@@ -106,7 +106,7 @@ func TestSealActive(t *testing.T) {
 		t.Fatalf("SealActiveChunk: %v", err)
 	}
 
-	metas, err := orch.ListChunkMetas(id)
+	metas, err := orch.ListLocalChunkMetas(id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestOpenCursor(t *testing.T) {
 	orch, id := newFacadeSetup(t)
 	appendRecords(t, orch, id, 2)
 
-	metas, _ := orch.ListChunkMetas(id)
+	metas, _ := orch.ListLocalChunkMetas(id)
 	cursor, err := orch.OpenCursor(id, metas[0].ID)
 	if err != nil {
 		t.Fatalf("OpenCursor: %v", err)
@@ -196,7 +196,7 @@ func TestIndexOps(t *testing.T) {
 	// Append enough to trigger rotation (policy is 5 records).
 	appendRecords(t, orch, id, 6)
 
-	metas, _ := orch.ListChunkMetas(id)
+	metas, _ := orch.ListLocalChunkMetas(id)
 	var sealedID chunk.ChunkID
 	for _, m := range metas {
 		if m.Sealed {
@@ -247,7 +247,7 @@ func TestChunkIndexInfos(t *testing.T) {
 	orch, id := newFacadeSetup(t)
 	appendRecords(t, orch, id, 6)
 
-	metas, _ := orch.ListChunkMetas(id)
+	metas, _ := orch.ListLocalChunkMetas(id)
 	var sealedID chunk.ChunkID
 	for _, m := range metas {
 		if m.Sealed {
@@ -304,7 +304,7 @@ func TestNewAnalyzerForChunk(t *testing.T) {
 	t.Parallel()
 	orch, id := newFacadeSetup(t)
 	appendRecords(t, orch, id, 6)
-	metas, _ := orch.ListChunkMetas(id)
+	metas, _ := orch.ListLocalChunkMetas(id)
 	var sealedID chunk.ChunkID
 	for _, m := range metas {
 		if m.Sealed {

@@ -430,7 +430,7 @@ func (s *VaultServer) ValidateVault(
 		return nil, connErr
 	}
 
-	metas, err := s.orch.ListChunkMetas(vaultID)
+	metas, err := s.orch.ListLocalChunkMetas(vaultID)
 	if err != nil {
 		return nil, mapVaultError(err)
 	}

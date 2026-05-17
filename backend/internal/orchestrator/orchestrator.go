@@ -909,11 +909,13 @@ func (o *Orchestrator) VaultSnapshots() []VaultSnapshot {
 			Enabled:          o.IsVaultEnabled(id),
 			RaftAppliedIndex: o.vaultCtlAppliedIndex(id),
 		}
-		// Chunk-derived fields are best-effort. ListChunkMetas fails
+		// Chunk-derived fields are best-effort. The local view fails
 		// for vaults without an active local chunk manager (no
 		// placement on this node); that's a legitimate state, not an
-		// error — leave the fields at zero.
-		if metas, err := o.ListChunkMetas(id); err == nil {
+		// error — leave the fields at zero. The broadcast purpose is
+		// per-node stats (THIS node's disk view), so local is the
+		// correct API choice here, not cluster.
+		if metas, err := o.ListLocalChunkMetas(id); err == nil {
 			snap.ChunkCount = len(metas)
 			for _, m := range metas {
 				if m.Sealed {

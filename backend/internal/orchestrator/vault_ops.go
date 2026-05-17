@@ -12,7 +12,10 @@ import (
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/index"
 	"gastrolog/internal/index/analyzer"
+	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/system"
+	"gastrolog/internal/vaultraft"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
 // IndexInfo describes a single index for a chunk.
@@ -177,14 +180,70 @@ type VaultChunkMeta struct {
 	VaultType string
 }
 
-// ListChunkMetas returns all chunk metadata for a vault (active instance only).
-// Use ListAllChunkMetas for a multi-instance view.
-func (o *Orchestrator) ListChunkMetas(vaultID glid.GLID) ([]chunk.ChunkMeta, error) {
+// ListLocalChunkMetas returns chunk metadata from the active local
+// chunk manager — the per-node disk-derived view. Use this for
+// per-node operations: search engine chunk discovery, retention
+// sweeps, anything that needs to know "what chunks does THIS node
+// hold on disk."
+//
+// For the cluster-authoritative view ("what chunks exist for this
+// vault according to the FSM"), use ListClusterChunkMetas — disk
+// is only one node's slice of cluster reality.
+//
+// Renamed from ListChunkMetas per audit finding F5
+// (docs/disk-authority-audit.md, gastrolog-3alnf). Old name removed
+// so every caller is forced to choose local-vs-cluster explicitly.
+func (o *Orchestrator) ListLocalChunkMetas(vaultID glid.GLID) ([]chunk.ChunkMeta, error) {
 	cm, err := o.activeChunkManager(vaultID)
 	if err != nil {
 		return nil, err
 	}
 	return cm.List()
+}
+
+// ListClusterChunkMetas returns chunk metadata from the vault-ctl
+// FSM manifest — the cluster-authoritative view. Use this for RPC
+// surfaces and display: anything that needs to answer "what chunks
+// does this vault have, cluster-wide?" regardless of which node
+// happens to be serving the query.
+//
+// The FSM is keyed per-vault and replicated across every vault-ctl
+// group member; reading it on any node returns the same set
+// (modulo replication lag). Sealed-state is FSM-authoritative;
+// per-chunk fields like RecordCount/DataBytes come from the FSM
+// manifest entry, which the leader populated at seal time.
+//
+// Returns (nil, nil) when this node has no vault-ctl group for the
+// vault (placement excludes it, or single-node mode without
+// GroupManager). Callers that need cluster-coverage in that case
+// must fan out via the server's directRemoteSearcher / forwarder
+// surfaces.
+//
+// Added per audit finding F5 (docs/disk-authority-audit.md,
+// gastrolog-3alnf).
+func (o *Orchestrator) ListClusterChunkMetas(vaultID glid.GLID) ([]chunk.ChunkMeta, error) {
+	if o.groupMgr == nil {
+		return nil, nil
+	}
+	g := o.groupMgr.GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
+	if g == nil {
+		return nil, nil
+	}
+	var fsm *vaultctlfsm.FSM
+	switch raw := g.FSM.(type) {
+	case *vaultctlfsm.FSM:
+		fsm = raw
+	case *vaultraft.FSM:
+		fsm = raw.EnsureVaultFSM(vaultID)
+	default:
+		return nil, nil
+	}
+	entries := fsm.List()
+	out := make([]chunk.ChunkMeta, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, manifestEntryToChunkMeta(e, e.IsSealed()))
+	}
+	return out, nil
 }
 
 // ListAllChunkMetas returns chunk metadata from ALL local instances of a vault,
