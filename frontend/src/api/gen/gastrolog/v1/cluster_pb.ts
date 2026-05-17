@@ -2709,6 +2709,13 @@ export class ForwardRemoveNodeRequest extends Message<ForwardRemoveNodeRequest> 
    */
   nodeId = new Uint8Array(0);
 
+  /**
+   * force bypasses the orphan-refusal gate (see RemoveNodeRequest.force).
+   *
+   * @generated from field: bool force = 2;
+   */
+  force = false;
+
   constructor(data?: PartialMessage<ForwardRemoveNodeRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2718,6 +2725,7 @@ export class ForwardRemoveNodeRequest extends Message<ForwardRemoveNodeRequest> 
   static readonly typeName = "gastrolog.v1.ForwardRemoveNodeRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "force", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardRemoveNodeRequest {

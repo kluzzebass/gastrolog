@@ -749,6 +749,17 @@ export class RemoveNodeRequest extends Message<RemoveNodeRequest> {
    */
   allowSelf = false;
 
+  /**
+   * force bypasses the orphan-refusal gate: when true, removal proceeds
+   * even if it would leave a vault with zero placements (data loss).
+   * Default false — the gate refuses removal of the sole holder of any
+   * vault. Operators set this only with explicit data-loss
+   * acknowledgement. See gastrolog-2ch9y.
+   *
+   * @generated from field: bool force = 3;
+   */
+  force = false;
+
   constructor(data?: PartialMessage<RemoveNodeRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -759,6 +770,7 @@ export class RemoveNodeRequest extends Message<RemoveNodeRequest> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "allow_self", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 3, name: "force", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RemoveNodeRequest {

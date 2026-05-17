@@ -459,6 +459,8 @@ message NotifyEvictionResponse {}
 // and sends the eviction notification.
 message ForwardRemoveNodeRequest {
   bytes node_id = 1;
+  // force bypasses the orphan-refusal gate (see RemoveNodeRequest.force).
+  bool force = 2;
 }
 
 message ForwardRemoveNodeResponse {}
