@@ -1278,25 +1278,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 		// Wire managed file transfer handlers on the cluster server. The HTTP
 		// server owns the managed files on disk; the cluster server streams them
 		// to peers. Must happen after server creation but before serving starts.
-		if deps.ClusterSrv != nil && deps.Dispatcher != nil {
-			mgr := wireManagedFileTransfer(deps.ClusterSrv, srv, deps.CfgStore, deps.HomeDir, deps.Logger)
-			deps.Dispatcher.managedFileHandler = mgr
-
-			// Wire on-demand repair: when the server resolves a manifest
-			// entry but the file is missing from disk, it calls this to
-			// pull the file from a peer before returning "not found".
-			srv.SetManagedFileRepair(mgr.RepairFile)
-
-			// Wire export-to-vault executor so remote nodes can forward
-			// export jobs to the node that owns the target vault.
-			deps.ClusterSrv.SetExportToVaultExecutor(srv.ExportToVaultFunc())
-
-			// Startup reconciliation with backoff, then periodic drift check.
-			go func() {
-				reconcileManagedFilesStartup(ctx, mgr)
-				mgr.RunPeriodicReconciliation(ctx)
-			}()
-		}
+		wireManagedFiles(ctx, deps, srv)
 
 		serverWg.Go(func() {
 			if err := srv.ServeTCP(deps.ServerAddr); err != nil {

@@ -2,22 +2,32 @@ package app
 
 import (
 	"context"
-	"gastrolog/internal/glid"
 	"log/slog"
 	"os"
 	"time"
 
 	"gastrolog/internal/cluster"
+	"gastrolog/internal/glid"
 	"gastrolog/internal/home"
+	"gastrolog/internal/server"
 	"gastrolog/internal/system"
 )
 
 const (
-	pullTimeout            = 2 * time.Minute // per-peer pull timeout
-	reconcileBaseDelay     = 5 * time.Second // initial retry delay
-	reconcileMaxDelay      = 2 * time.Minute // max retry delay
-	reconcileMaxAttempts   = 10              // give up after this many rounds
-	periodicReconcileEvery = 5 * time.Minute // drift check interval
+	pullTimeout          = 2 * time.Minute // per-peer pull timeout
+	reconcileBaseDelay   = 5 * time.Second // initial retry delay
+	reconcileMaxDelay    = 2 * time.Minute // max retry delay
+	reconcileMaxAttempts = 10              // give up after this many rounds
+
+	// managedFilesReconcileJobName is the operator-visible name shown
+	// in the inspector's Scheduled view. Keep stable across releases.
+	managedFilesReconcileJobName = "managed-files-reconcile"
+
+	// managedFilesReconcileSchedule runs every 5 minutes on the
+	// minute. 6-field cron (with-seconds). The drift check is
+	// inexpensive — a manifest list + per-missing-file repair — so
+	// minute-level cadence is plenty.
+	managedFilesReconcileSchedule = "0 */5 * * * *"
 )
 
 // managedFileManager handles managed file distribution across cluster nodes.
@@ -92,20 +102,52 @@ func (m *managedFileManager) RepairFile(fileID string) bool {
 	return m.pullFromPeer(context.Background(), fileID)
 }
 
-// RunPeriodicReconciliation checks for manifest-vs-disk drift on a timer.
-// Runs until ctx is cancelled.
-func (m *managedFileManager) RunPeriodicReconciliation(ctx context.Context) {
-	ticker := time.NewTicker(periodicReconcileEvery)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			m.reconcileOnce(ctx)
-		}
+// wireManagedFiles wires the managed-file transfer handlers + the
+// startup and periodic reconcile work. Called from app.go server
+// setup; lives here to keep the orchestration code beside the
+// related implementation and to keep the call site in app.go at a
+// single line (flattens an otherwise nested guard block — nestif).
+func wireManagedFiles(ctx context.Context, deps serverDeps, srv *server.Server) {
+	if deps.ClusterSrv == nil || deps.Dispatcher == nil {
+		return
 	}
+	mgr := wireManagedFileTransfer(deps.ClusterSrv, srv, deps.CfgStore, deps.HomeDir, deps.Logger)
+	deps.Dispatcher.managedFileHandler = mgr
+
+	// On-demand repair: when the server resolves a manifest entry
+	// but the file is missing from disk, this pulls it from a peer
+	// before returning "not found".
+	srv.SetManagedFileRepair(mgr.RepairFile)
+
+	// Export-to-vault: remote nodes can forward export jobs to the
+	// node that owns the target vault.
+	deps.ClusterSrv.SetExportToVaultExecutor(srv.ExportToVaultFunc())
+
+	// Startup reconciliation with backoff — one-shot, retries
+	// internally, not periodic. The periodic drift check below is
+	// registered with the orchestrator job scheduler so the operator
+	// sees it in the inspector (gastrolog-2gmpf).
+	go reconcileManagedFilesStartup(ctx, mgr)
+	if err := startManagedFilesReconcile(ctx, deps.Orch.Scheduler(), mgr); err != nil {
+		deps.Logger.Warn("schedule managed-files-reconcile job", "error", err)
+	}
+}
+
+// startManagedFilesReconcile registers the drift-check task with
+// the supplied scheduler as a recurring job. Returns the AddJob
+// error if any. Attaches a Describe text for the inspector's
+// Scheduled view so the operator can see what the job does + its
+// every-node semantics (each node compares the FSM-replicated
+// manifest against its own disk and pulls any missing files from
+// peers).
+func startManagedFilesReconcile(ctx context.Context, scheduler scheduledJobRegistry, mgr *managedFileManager) error {
+	task := func() { mgr.reconcileOnce(ctx) }
+	if err := scheduler.AddJob(managedFilesReconcileJobName, managedFilesReconcileSchedule, task); err != nil {
+		return err
+	}
+	scheduler.Describe(managedFilesReconcileJobName,
+		"Managed-files drift check. Runs on every node, every 5 minutes: lists the FSM-replicated managed-file manifest, compares against the local on-disk inventory, and pulls any missing files from peers via the ManagedFileTransferrer. Catches divergence between the manifest and the local disk that the OnPut/OnDelete hooks may have missed (e.g. a pull that failed during initial replication).")
+	return nil
 }
 
 // reconcileOnce does a single manifest-vs-disk pass, pulling any missing files.
