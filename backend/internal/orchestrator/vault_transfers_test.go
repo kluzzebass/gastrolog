@@ -143,7 +143,7 @@ func seedAndSeal(t *testing.T, orch *orchestrator.Orchestrator, vaultID glid.GLI
 	if _, err := orch.SealActive(vaultID); err != nil {
 		t.Fatalf("seal: %v", err)
 	}
-	metas, err := orch.ListChunkMetas(vaultID)
+	metas, err := orch.ListLocalChunkMetas(vaultID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,13 +213,13 @@ func TestMoveChunkLocalImportFallback(t *testing.T) {
 	}
 
 	// Source should be empty.
-	srcMetas, _ := orch.ListChunkMetas(srcID)
+	srcMetas, _ := orch.ListLocalChunkMetas(srcID)
 	if len(srcMetas) != 0 {
 		t.Errorf("source has %d chunks, want 0", len(srcMetas))
 	}
 
 	// Destination should have exactly 1 sealed chunk with 5 records.
-	dstMetas, _ := orch.ListChunkMetas(dstID)
+	dstMetas, _ := orch.ListLocalChunkMetas(dstID)
 	if len(dstMetas) != 1 {
 		t.Fatalf("destination has %d chunks, want 1", len(dstMetas))
 	}
@@ -562,7 +562,7 @@ func TestDrainVault_CancelDrain(t *testing.T) {
 	}
 
 	// Remaining chunks should still be local.
-	metas, err := orch.ListChunkMetas(vaultID)
+	metas, err := orch.ListLocalChunkMetas(vaultID)
 	if err != nil {
 		t.Fatal(err)
 	}

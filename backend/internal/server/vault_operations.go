@@ -91,7 +91,7 @@ func (s *VaultServer) ReindexVault(
 
 	jobName := "reindex:" + vaultID.String()
 	jobID := s.orch.Scheduler().Submit(jobName, func(ctx context.Context, job *orchestrator.JobProgress) {
-		metas, err := s.orch.ListChunkMetas(vaultID)
+		metas, err := s.orch.ListLocalChunkMetas(vaultID)
 		if err != nil {
 			job.Fail(s.now(), err.Error())
 			return
@@ -139,7 +139,7 @@ func (s *VaultServer) ExportVault(
 		return connErr
 	}
 
-	metas, err := s.orch.ListChunkMetas(vaultID)
+	metas, err := s.orch.ListLocalChunkMetas(vaultID)
 	if err != nil {
 		return mapVaultError(err)
 	}

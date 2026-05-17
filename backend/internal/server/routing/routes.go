@@ -104,6 +104,9 @@ func DefaultRoutes() map[string]RPCRoute {
 		gastrologv1connect.LifecycleServiceGetClusterStatusProcedure:  {Strategy: RouteLocal},
 		gastrologv1connect.LifecycleServiceJoinClusterProcedure:       {Strategy: RouteLocal},
 		gastrologv1connect.LifecycleServiceWatchSystemStatusProcedure: {Strategy: RouteLocal, IsStreaming: true},
+		// YieldLeadership is invoked on the terminating node by its own preStop
+		// hook; forwarding to the leader would defeat the purpose. Route local.
+		gastrologv1connect.LifecycleServiceYieldLeadershipProcedure: {Strategy: RouteLocal},
 		// Cluster mutations — need the Raft leader.
 		gastrologv1connect.LifecycleServiceSetNodeSuffrageProcedure: {Strategy: RouteLeader},
 		gastrologv1connect.LifecycleServiceSetNodeStateProcedure:    {Strategy: RouteLeader},

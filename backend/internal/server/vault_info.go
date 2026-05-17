@@ -380,7 +380,7 @@ func (s *VaultServer) vaultInfoFromLocal(ctx context.Context, id glid.GLID) *api
 		info.Name = cfg.Name
 	}
 
-	if metas, err := s.orch.ListChunkMetas(id); err == nil {
+	if metas, err := s.orch.ListLocalChunkMetas(id); err == nil {
 		info.ChunkCount = int64(len(metas))
 		for _, m := range metas {
 			info.RecordCount += m.RecordCount

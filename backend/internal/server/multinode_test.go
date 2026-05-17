@@ -409,7 +409,7 @@ func (p *mnPeerVaultStats) FindVaultStats(vaultID string) *gastrologv1.VaultStat
 			if vid != id {
 				continue
 			}
-			metas, err := orch.ListChunkMetas(vid)
+			metas, err := orch.ListLocalChunkMetas(vid)
 			if err != nil {
 				return nil
 			}
@@ -1806,9 +1806,9 @@ func TestMultiNode_GetChunkRemote(t *testing.T) {
 	remoteVaultID := dataNode.vaultID.String()
 
 	// Get chunk ID from the data node's orchestrator (ListChunks is RouteLocal).
-	metas, err := dataNode.orch.ListChunkMetas(dataNode.vaultID)
+	metas, err := dataNode.orch.ListLocalChunkMetas(dataNode.vaultID)
 	if err != nil {
-		t.Fatalf("ListChunkMetas: %v", err)
+		t.Fatalf("ListLocalChunkMetas: %v", err)
 	}
 	if len(metas) == 0 {
 		t.Fatal("no chunks to test GetChunk with")
@@ -1868,9 +1868,9 @@ func TestMultiNode_SealVaultRemote(t *testing.T) {
 
 	// Verify the chunk is now sealed (query the data node directly since ListChunks is RouteLocal).
 	dataNode := h.Node(t, "data-1")
-	metas, err := dataNode.orch.ListChunkMetas(dataNode.vaultID)
+	metas, err := dataNode.orch.ListLocalChunkMetas(dataNode.vaultID)
 	if err != nil {
-		t.Fatalf("ListChunkMetas after seal: %v", err)
+		t.Fatalf("ListLocalChunkMetas after seal: %v", err)
 	}
 	sealedCount := 0
 	for _, m := range metas {
@@ -2333,9 +2333,9 @@ func TestMultiNode_GetIndexesLocalFastPath(t *testing.T) {
 	addMNRecords(t, h.Node(t, "coord"), "L", 2, nil)
 	coordVaultID := h.Node(t, "coord").vaultID.String()
 
-	metas, err := h.Node(t, "coord").orch.ListChunkMetas(h.Node(t, "coord").vaultID)
+	metas, err := h.Node(t, "coord").orch.ListLocalChunkMetas(h.Node(t, "coord").vaultID)
 	if err != nil {
-		t.Fatalf("ListChunkMetas: %v", err)
+		t.Fatalf("ListLocalChunkMetas: %v", err)
 	}
 	if len(metas) == 0 {
 		t.Fatal("no chunks to test GetIndexes with")
@@ -2385,9 +2385,9 @@ func TestMultiNode_GetIndexesRemote(t *testing.T) {
 	remoteVaultID := dataNode.vaultID.String()
 
 	// Get chunk ID from the data node directly (ListChunks is RouteLocal).
-	metas, err := dataNode.orch.ListChunkMetas(dataNode.vaultID)
+	metas, err := dataNode.orch.ListLocalChunkMetas(dataNode.vaultID)
 	if err != nil {
-		t.Fatalf("ListChunkMetas: %v", err)
+		t.Fatalf("ListLocalChunkMetas: %v", err)
 	}
 	if len(metas) == 0 {
 		t.Fatal("no chunks to test GetIndexes with")
