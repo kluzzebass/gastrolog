@@ -814,7 +814,7 @@ func (s *Server) forwardRemoveNode(ctx context.Context, req *gastrologv1.Forward
 	if s.removeNodeFn == nil {
 		return nil, status.Error(codes.Unavailable, "remove node not configured")
 	}
-	if err := s.removeNodeFn(ctx, string(req.GetNodeId())); err != nil {
+	if err := s.removeNodeFn(ctx, string(req.GetNodeId()), req.GetForce()); err != nil {
 		return nil, status.Errorf(codes.Internal, "remove node: %v", err)
 	}
 	return &gastrologv1.ForwardRemoveNodeResponse{}, nil
@@ -1470,8 +1470,9 @@ func NewForwardRemoveNodeClient(cc grpc.ClientConnInterface) *ForwardRemoveNodeC
 }
 
 // ForwardRemoveNode asks the leader to remove a node from the cluster.
-func (c *ForwardRemoveNodeClient) ForwardRemoveNode(ctx context.Context, nodeID string) error {
-	req := &gastrologv1.ForwardRemoveNodeRequest{NodeId: []byte(nodeID)}
+// The force flag bypasses the orphan-refusal gate (gastrolog-2ch9y).
+func (c *ForwardRemoveNodeClient) ForwardRemoveNode(ctx context.Context, nodeID string, force bool) error {
+	req := &gastrologv1.ForwardRemoveNodeRequest{NodeId: []byte(nodeID), Force: force}
 	out := &gastrologv1.ForwardRemoveNodeResponse{}
 	return c.cc.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardRemoveNode", req, out)
 }

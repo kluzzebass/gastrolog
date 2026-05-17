@@ -3266,8 +3266,10 @@ func (*NotifyEvictionResponse) Descriptor() ([]byte, []int) {
 // a node from the cluster. The leader executes the Raft membership change
 // and sends the eviction notification.
 type ForwardRemoveNodeRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	NodeId        []byte                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	NodeId []byte                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	// force bypasses the orphan-refusal gate (see RemoveNodeRequest.force).
+	Force         bool `protobuf:"varint,2,opt,name=force,proto3" json:"force,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3307,6 +3309,13 @@ func (x *ForwardRemoveNodeRequest) GetNodeId() []byte {
 		return x.NodeId
 	}
 	return nil
+}
+
+func (x *ForwardRemoveNodeRequest) GetForce() bool {
+	if x != nil {
+		return x.Force
+	}
+	return false
 }
 
 type ForwardRemoveNodeResponse struct {
@@ -4190,9 +4199,10 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x06job_id\x18\x01 \x01(\fR\x05jobId\"/\n" +
 	"\x15NotifyEvictionRequest\x12\x16\n" +
 	"\x06reason\x18\x01 \x01(\tR\x06reason\"\x18\n" +
-	"\x16NotifyEvictionResponse\"3\n" +
+	"\x16NotifyEvictionResponse\"I\n" +
 	"\x18ForwardRemoveNodeRequest\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\fR\x06nodeId\"\x1b\n" +
+	"\anode_id\x18\x01 \x01(\fR\x06nodeId\x12\x14\n" +
+	"\x05force\x18\x02 \x01(\bR\x05force\"\x1b\n" +
 	"\x19ForwardRemoveNodeResponse\"k\n" +
 	"\x1dForwardSetNodeSuffrageRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\fR\x06nodeId\x12\x1b\n" +

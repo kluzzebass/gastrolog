@@ -165,10 +165,14 @@ func newClusterShutdownCmd() *cobra.Command {
 }
 
 func newClusterRemoveNodeCmd() *cobra.Command {
-	return &cobra.Command{
+	var force bool
+	cmd := &cobra.Command{
 		Use:   "remove-node <node-name-or-id>",
 		Short: "Remove a node from the cluster",
-		Args:  cobra.ExactArgs(1),
+		Long: "Remove a node from the cluster. Refuses by default if removal " +
+			"would orphan any vault (sole-replica-on-this-node case); use " +
+			"--force to override with explicit data-loss acknowledgement.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := clientFromCmd(cmd)
 			r, err := newResolver(context.Background(), client)
@@ -179,7 +183,10 @@ func newClusterRemoveNodeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, err = client.Lifecycle.RemoveNode(context.Background(), connect.NewRequest(&v1.RemoveNodeRequest{NodeId: []byte(id)}))
+			_, err = client.Lifecycle.RemoveNode(context.Background(), connect.NewRequest(&v1.RemoveNodeRequest{
+				NodeId: []byte(id),
+				Force:  force,
+			}))
 			if err != nil {
 				return err
 			}
@@ -187,6 +194,9 @@ func newClusterRemoveNodeCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&force, "force", false,
+		"bypass the orphan-refusal gate (acknowledges potential data loss)")
+	return cmd
 }
 
 // newClusterDemoteSelfCmd is the preStop-hook command for K8s
@@ -249,6 +259,16 @@ func newClusterDemoteSelfCmd() *cobra.Command {
 			_, err = client.Lifecycle.RemoveNode(context.Background(), connect.NewRequest(&v1.RemoveNodeRequest{
 				NodeId:    []byte(id),
 				AllowSelf: true, // gastrolog-24iv4: opt out of the operator-typo guard; this RPC IS the self-remove path.
+				// Force bypasses the orphan-refusal gate (gastrolog-2ch9y).
+				// demote-self runs from K8s preStop, where the pod is
+				// terminating regardless — refusing here would leave the
+				// Raft membership stale (the very hazard 24iv4 + 6bfwk
+				// were designed to close) without preventing the orphan,
+				// since the pod still goes away when SIGKILL hits the
+				// preStop deadline. The operator-facing `cluster remove-node`
+				// path keeps the gate; demote-self is the programmatic
+				// shutdown sequence and runs unconditionally.
+				Force: true,
 			}))
 			if err != nil {
 				if isAlreadyRemoved(err) {

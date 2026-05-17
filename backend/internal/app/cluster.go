@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -515,14 +516,35 @@ func makeEvictionHandler(
 	}
 }
 
-// makeRemoveNodeFunc creates the callback for the RemoveNode RPC.
+// makeRemoveNodeFunc creates the callback for the RemoveNode RPC. The
+// returned function gates removal on the orphan-refusal check
+// (gastrolog-2ch9y): if removing the target would leave any vault with
+// zero placements, the call fails with an operator-actionable error
+// listing the affected vaults. force=true skips the gate.
+//nolint:gocognit // composition root for remove-node: holds the
+// leader-side orphan gate, eviction notification, FSM cleanup, and
+// follower-forward fallback in one function. Splitting them would
+// require threading clusterSrv, cfgStore, and logger through three
+// helpers without any reuse — net negative readability.
 func makeRemoveNodeFunc(
 	clusterSrv *cluster.Server,
 	cfgStore system.Store,
 	nodeID string,
 	logger *slog.Logger,
-) func(ctx context.Context, targetNodeID string) error {
-	removeOnLeader := func(ctx context.Context, targetNodeID string) error {
+) func(ctx context.Context, targetNodeID string, force bool) error {
+	removeOnLeader := func(ctx context.Context, targetNodeID string, force bool) error {
+		// Orphan-refusal gate. Runs on the leader so the placement
+		// snapshot it reads is the cluster's authoritative view, not a
+		// stale follower copy.
+		if orphans := vaultsOrphanedByRemoval(ctx, cfgStore, targetNodeID); len(orphans) > 0 {
+			if !force {
+				return orphanRefusalError(targetNodeID, orphans)
+			}
+			logger.Warn("FORCE REMOVE: bypassing orphan-refusal gate — data loss",
+				"node_id", targetNodeID,
+				"orphaned_vaults", orphans)
+		}
+
 		peerConns := clusterSrv.PeerConns()
 		var evictConn *cluster.NotifyEvictionClient
 		if peerConns != nil {
@@ -533,7 +555,7 @@ func makeRemoveNodeFunc(
 			}
 		}
 
-		logger.Info("removing node from cluster", "node_id", targetNodeID)
+		logger.Info("removing node from cluster", "node_id", targetNodeID, "force", force)
 		if err := clusterSrv.RemoveServer(targetNodeID, 10*time.Second); err != nil {
 			return fmt.Errorf("remove server: %w", err)
 		}
@@ -571,11 +593,11 @@ func makeRemoveNodeFunc(
 
 	clusterSrv.SetRemoveNodeFn(removeOnLeader)
 
-	return func(ctx context.Context, targetNodeID string) error {
+	return func(ctx context.Context, targetNodeID string, force bool) error {
 		_, leaderID := clusterSrv.LeaderInfo()
 
 		if leaderID == nodeID {
-			return removeOnLeader(ctx, targetNodeID)
+			return removeOnLeader(ctx, targetNodeID, force)
 		}
 
 		if leaderID == "" {
@@ -589,10 +611,81 @@ func makeRemoveNodeFunc(
 		if err != nil {
 			return fmt.Errorf("connect to leader %s: %w", leaderID, err)
 		}
-		logger.Info("forwarding node removal to leader", "leader_id", leaderID, "target_node_id", targetNodeID)
+		logger.Info("forwarding node removal to leader", "leader_id", leaderID, "target_node_id", targetNodeID, "force", force)
 		client := cluster.NewForwardRemoveNodeClient(conn)
-		return client.ForwardRemoveNode(ctx, targetNodeID)
+		return client.ForwardRemoveNode(ctx, targetNodeID, force)
 	}
+}
+
+// orphanedVault describes one vault that would be orphaned by removing a
+// node from the cluster. Carried through the error so the operator
+// sees exactly which vaults are at risk.
+type orphanedVault struct {
+	ID   glid.GLID
+	Name string
+}
+
+// vaultsOrphanedByRemoval returns the vaults whose entire placement set
+// lives on targetNodeID — removing the node would leave them with zero
+// surviving placements (i.e. data loss). Used by the orphan-refusal
+// gate. An empty return means the removal is safe to proceed.
+//
+// Operates on placement-level granularity: if a vault's placements list
+// contains only storages on targetNodeID, the vault is orphaned. This
+// is conservative compared to a chunk-level check (which would walk
+// every vault-ctl FSM manifest), but it catches the bug class the
+// gate is designed for: RF=1 vaults whose sole holder is being
+// decommissioned. Higher-RF vaults with all placements alive elsewhere
+// are correctly allowed through.
+func vaultsOrphanedByRemoval(ctx context.Context, cfgStore system.Store, targetNodeID string) []orphanedVault {
+	if cfgStore == nil {
+		return nil
+	}
+	vaults, err := cfgStore.ListVaults(ctx)
+	if err != nil {
+		return nil
+	}
+	nscs, err := cfgStore.ListNodeStorageConfigs(ctx)
+	if err != nil {
+		return nil
+	}
+	var orphans []orphanedVault
+	for _, v := range vaults {
+		placements, err := cfgStore.GetVaultPlacements(ctx, v.ID)
+		if err != nil || len(placements) == 0 {
+			continue
+		}
+		// Build the set of distinct nodes holding any placement for
+		// this vault. If the only node in the set is the one being
+		// removed, the vault is orphaned.
+		holders := make(map[string]bool, len(placements))
+		for _, p := range placements {
+			nid := system.NodeIDForStorage(p.StorageID, nscs)
+			if nid != "" {
+				holders[nid] = true
+			}
+		}
+		if len(holders) == 1 && holders[targetNodeID] {
+			orphans = append(orphans, orphanedVault{ID: v.ID, Name: v.Name})
+		}
+	}
+	return orphans
+}
+
+// orphanRefusalError builds the operator-actionable error message
+// returned when the orphan-refusal gate refuses removal. Lists each
+// affected vault by name and ID so the operator can either drain
+// those vaults to other nodes (preferred) or re-run with --force
+// (acknowledged data loss).
+func orphanRefusalError(targetNodeID string, orphans []orphanedVault) error {
+	names := make([]string, 0, len(orphans))
+	for _, v := range orphans {
+		names = append(names, fmt.Sprintf("%q (%s)", v.Name, v.ID))
+	}
+	return fmt.Errorf(
+		"refusing to remove node %s: would orphan %d vault(s): %s — "+
+			"drain these vaults to other nodes first, or re-run with --force to acknowledge data loss",
+		targetNodeID, len(orphans), strings.Join(names, ", "))
 }
 
 // makeSetNodeSuffrageFunc creates the callback for the SetNodeSuffrage RPC.

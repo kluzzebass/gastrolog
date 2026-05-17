@@ -123,8 +123,9 @@ type Config struct {
 	JoinClusterFunc func(ctx context.Context, leaderAddr, joinToken string) error
 
 	// RemoveNodeFunc is called by the RemoveNode RPC to evict a node from the
-	// cluster. Nil disables.
-	RemoveNodeFunc func(ctx context.Context, nodeID string) error
+	// cluster. The force flag bypasses the orphan-refusal gate (gastrolog-2ch9y).
+	// Nil disables.
+	RemoveNodeFunc func(ctx context.Context, nodeID string, force bool) error
 
 	// SetNodeSuffrageFunc is called by the SetNodeSuffrage RPC to promote or
 	// demote a node. Handles leader-forwarding internally. Nil disables.
@@ -198,7 +199,7 @@ type Server struct {
 	localNodeID        string
 	clusterAddress     string
 	joinClusterFn      func(ctx context.Context, leaderAddr, joinToken string) error
-	removeNodeFn       func(ctx context.Context, nodeID string) error
+	removeNodeFn       func(ctx context.Context, nodeID string, force bool) error
 	setNodeSuffrageFn  func(ctx context.Context, nodeID string, voter bool) error
 	startTime          time.Time
 	homeDir            string                     // gastrolog home directory; empty for in-memory config

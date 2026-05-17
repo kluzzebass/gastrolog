@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -48,7 +49,7 @@ type LifecycleServer struct {
 	peerStats         NodeStatsProvider
 	localStats        func() *apiv1.NodeStats
 	joinClusterFn     func(ctx context.Context, leaderAddr, joinToken string) error
-	removeNodeFn      func(ctx context.Context, nodeID string) error
+	removeNodeFn      func(ctx context.Context, nodeID string, force bool) error
 	setNodeSuffrageFn func(ctx context.Context, nodeID string, voter bool) error
 	statsSignal       *notify.Signal         // fired by stats collector on each broadcast tick
 	peerRouteStats    PeerRouteStatsProvider // for aggregating route stats across cluster
@@ -82,8 +83,9 @@ func (s *LifecycleServer) SetJoinClusterFunc(fn func(ctx context.Context, leader
 	s.joinClusterFn = fn
 }
 
-// SetRemoveNodeFunc sets the callback for the RemoveNode RPC.
-func (s *LifecycleServer) SetRemoveNodeFunc(fn func(ctx context.Context, nodeID string) error) {
+// SetRemoveNodeFunc sets the callback for the RemoveNode RPC. The force
+// flag bypasses the orphan-refusal gate (gastrolog-2ch9y).
+func (s *LifecycleServer) SetRemoveNodeFunc(fn func(ctx context.Context, nodeID string, force bool) error) {
 	s.removeNodeFn = fn
 }
 
@@ -333,9 +335,15 @@ func (s *LifecycleServer) RemoveNode(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("cannot remove self from cluster (set allow_self=true to override)"))
 	}
 
-	s.logger.Info("removing node from cluster", "node_id", nodeID)
-	if err := s.removeNodeFn(ctx, nodeID); err != nil {
+	s.logger.Info("removing node from cluster", "node_id", nodeID, "force", req.Msg.Force)
+	if err := s.removeNodeFn(ctx, nodeID, req.Msg.Force); err != nil {
 		s.logger.Error("node removal failed", "node_id", nodeID, "error", err)
+		// Orphan-refusal rejections are operator-correctable (drain
+		// the vault, or re-run with --force). Surface as FailedPrecondition
+		// so the CLI can treat them differently from genuine internal errors.
+		if strings.Contains(err.Error(), "refusing to remove node") {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+		}
 		return nil, errInternal(err)
 	}
 	s.logger.Info("node removed from cluster", "node_id", nodeID)

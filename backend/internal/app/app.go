@@ -444,7 +444,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 	// Build cluster operation callbacks (raft mode only).
 	var joinClusterFn func(ctx context.Context, leaderAddr, joinToken string) error
-	var removeNodeFn func(ctx context.Context, nodeID string) error
+	var removeNodeFn func(ctx context.Context, nodeID string, force bool) error
 	var setNodeSuffrageFn func(ctx context.Context, nodeID string, voter bool) error
 	advertisedAddr := cfg.advertisedClusterAddr()
 	if cfg.ConfigType == "raft" && clusterSrv != nil {
@@ -1119,7 +1119,7 @@ type serverDeps struct {
 	SearchForwarder     *cluster.SearchForwarder
 	RoutingForwarder    routing.UnaryForwarder
 	JoinClusterFunc     func(ctx context.Context, leaderAddr, joinToken string) error
-	RemoveNodeFunc      func(ctx context.Context, nodeID string) error
+	RemoveNodeFunc      func(ctx context.Context, nodeID string, force bool) error
 	SetNodeSuffrageFunc func(ctx context.Context, nodeID string, voter bool) error
 	Dispatcher          *configDispatcher
 	GroupMgr            *raftgroup.GroupManager

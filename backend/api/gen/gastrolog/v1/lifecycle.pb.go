@@ -929,7 +929,13 @@ type RemoveNodeRequest struct {
 	// currently connected to is hazardous. Set to true ONLY by the
 	// `gastrolog cluster demote-self` preStop hook path (gastrolog-24iv4)
 	// where self-removal is the intent.
-	AllowSelf     bool `protobuf:"varint,2,opt,name=allow_self,json=allowSelf,proto3" json:"allow_self,omitempty"`
+	AllowSelf bool `protobuf:"varint,2,opt,name=allow_self,json=allowSelf,proto3" json:"allow_self,omitempty"`
+	// force bypasses the orphan-refusal gate: when true, removal proceeds
+	// even if it would leave a vault with zero placements (data loss).
+	// Default false — the gate refuses removal of the sole holder of any
+	// vault. Operators set this only with explicit data-loss
+	// acknowledgement. See gastrolog-2ch9y.
+	Force         bool `protobuf:"varint,3,opt,name=force,proto3" json:"force,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -974,6 +980,13 @@ func (x *RemoveNodeRequest) GetNodeId() []byte {
 func (x *RemoveNodeRequest) GetAllowSelf() bool {
 	if x != nil {
 		return x.AllowSelf
+	}
+	return false
+}
+
+func (x *RemoveNodeRequest) GetForce() bool {
+	if x != nil {
+		return x.Force
 	}
 	return false
 }
@@ -1281,11 +1294,12 @@ const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"\x0eleader_address\x18\x01 \x01(\tR\rleaderAddress\x12\x1d\n" +
 	"\n" +
 	"join_token\x18\x02 \x01(\tR\tjoinToken\"\x15\n" +
-	"\x13JoinClusterResponse\"K\n" +
+	"\x13JoinClusterResponse\"a\n" +
 	"\x11RemoveNodeRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\fR\x06nodeId\x12\x1d\n" +
 	"\n" +
-	"allow_self\x18\x02 \x01(\bR\tallowSelf\"\x14\n" +
+	"allow_self\x18\x02 \x01(\bR\tallowSelf\x12\x14\n" +
+	"\x05force\x18\x03 \x01(\bR\x05force\"\x14\n" +
 	"\x12RemoveNodeResponse\"\x18\n" +
 	"\x16YieldLeadershipRequest\";\n" +
 	"\x17YieldLeadershipResponse\x12 \n" +

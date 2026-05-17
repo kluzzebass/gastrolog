@@ -115,8 +115,10 @@ type Server struct {
 	evictionHandler func()
 
 	// removeNodeFn handles the full node removal on the leader: Raft membership
-	// change + eviction notification. Set by the composition root in main.go.
-	removeNodeFn func(ctx context.Context, nodeID string) error
+	// change + eviction notification. The force flag bypasses the
+	// orphan-refusal gate (see gastrolog-2ch9y). Set by the composition
+	// root in main.go.
+	removeNodeFn func(ctx context.Context, nodeID string, force bool) error
 
 	// setNodeSuffrageFn handles promote/demote on the leader. Set by main.go.
 	setNodeSuffrageFn func(ctx context.Context, nodeID, nodeAddr string, voter bool) error
@@ -472,7 +474,8 @@ func (s *Server) SetEvictionHandler(fn func()) {
 
 // SetRemoveNodeFn registers the callback for the ForwardRemoveNode RPC.
 // This is called on the leader to execute the Raft removal + notification.
-func (s *Server) SetRemoveNodeFn(fn func(ctx context.Context, nodeID string) error) {
+// The force flag bypasses the orphan-refusal gate (gastrolog-2ch9y).
+func (s *Server) SetRemoveNodeFn(fn func(ctx context.Context, nodeID string, force bool) error) {
 	s.removeNodeFn = fn
 }
 
