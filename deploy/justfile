@@ -35,17 +35,21 @@ image:
 # Single-node `docker run` quickstart
 # ---------------------------------------------------------------------------
 
+# Idempotent: re-run is a no-op if the container is already running; to wipe + rebuild, `quickstart-down` first.
 # Start a single-node `docker run` cluster on host port 5564 with persistent volumes.
 quickstart-up: image
     #!/usr/bin/env bash
     set -euo pipefail
-    docker rm -f gtest-quickstart 2>/dev/null || true
-    docker volume rm gtest-quickstart-config gtest-quickstart-vaults 2>/dev/null || true
-    docker run --rm -d --name gtest-quickstart -p 5564:4564 \
-      -v gtest-quickstart-config:/config -v gtest-quickstart-vaults:/vaults \
-      -e GASTROLOG_INITIAL_ADMIN_USER=admin \
-      -e GASTROLOG_INITIAL_ADMIN_PASSWORD=change-me \
-      gastrolog:test >/dev/null
+    if docker ps --filter name=gtest-quickstart --filter status=running -q | grep -q .; then
+      echo "quickstart already running"
+    else
+      docker rm gtest-quickstart 2>/dev/null || true
+      docker run --rm -d --name gtest-quickstart -p 5564:4564 \
+        -v gtest-quickstart-config:/config -v gtest-quickstart-vaults:/vaults \
+        -e GASTROLOG_INITIAL_ADMIN_USER=admin \
+        -e GASTROLOG_INITIAL_ADMIN_PASSWORD=change-me \
+        gastrolog:test >/dev/null
+    fi
     echo "Waiting for /readyz=200..."
     for i in $(seq 1 30); do
       [[ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:5564/readyz)" == "200" ]] && break
@@ -71,21 +75,26 @@ quickstart-down:
 # Docker Compose 3-node cluster
 # ---------------------------------------------------------------------------
 
+# Idempotent: no-op if the cluster is already running; to wipe + rebuild, `compose-down` first.
 # Start a 3-node Docker Compose cluster + bundled deps (deps internal-only, no host ports).
 compose-up: image
     #!/usr/bin/env bash
     set -euo pipefail
+    if [[ "$(docker compose -p gastrolog-deploy -f compose.yml ps -q 2>/dev/null | wc -l | tr -d ' ')" -gt 0 ]]; then
+      echo "compose cluster already running"
+      curl -s -o /dev/null -w "  /readyz=%{http_code}\n" http://localhost:4564/readyz
+      echo "Tear down with: just deploy compose-down"
+      exit 0
+    fi
     # Push-service configs (rsyslog/otel/fluent-bit) reference
     # `host.docker.internal` in the source files under
     # test/ingester-integration/; we sed-substitute them to `gastrolog-0`
     # (the bootstrap node's service-name) and write the result to
-    # /tmp/gastrolog-deploy/ where compose.yml bind-mounts them. Same
-    # approach as swarm-up's docker-config-create.
+    # /tmp/gastrolog-deploy/ where compose.yml bind-mounts them.
     mkdir -p /tmp/gastrolog-deploy
     sed 's/host\.docker\.internal/gastrolog-0/g' ../test/ingester-integration/rsyslog/rsyslog.conf  > /tmp/gastrolog-deploy/rsyslog.conf
     sed 's/host\.docker\.internal/gastrolog-0/g' ../test/ingester-integration/otel/config.yaml      > /tmp/gastrolog-deploy/otel-config.yaml
     sed 's/host\.docker\.internal/gastrolog-0/g' ../test/ingester-integration/fluent-bit/fluent-bit.conf > /tmp/gastrolog-deploy/fluent-bit.conf
-    docker compose -p gastrolog-deploy -f compose.yml down -v 2>/dev/null || true
     docker compose -p gastrolog-deploy -f compose.yml up -d
     echo "Waiting for all 3 nodes ready..."
     for i in $(seq 1 60); do
@@ -125,29 +134,29 @@ compose-down:
 # '{{.Replicas}}'` can't be used inside recipes. We skip --format and grep
 # the human-readable table instead — same signal, no escaping headaches.
 #
+# Idempotent: no-op if the stack already exists; to wipe + rebuild, `swarm-down` first.
 # Start a Docker Swarm stack (init swarm if needed, create admin secret, deploy).
 swarm-up: image
     #!/usr/bin/env bash
     set -euo pipefail
+    # Skip --format here for the same reason as elsewhere in this file:
+    # `just` intercepts the double-brace template. tail -n +2 skips the
+    # header row and awk pulls the first column (stack name).
+    if docker stack ls 2>/dev/null | tail -n +2 | awk '{print $1}' | grep -q '^gastrolog$'; then
+      echo "swarm stack already deployed"
+      curl -s -o /dev/null -w "  /readyz=%{http_code}\n" http://localhost:4564/readyz
+      echo "Tear down with: just deploy swarm-down"
+      exit 0
+    fi
     docker swarm init 2>/dev/null || true
-    docker secret rm gastrolog_admin_creds 2>/dev/null || true
     echo '{"username":"admin","password":"change-me"}' | docker secret create gastrolog_admin_creds - >/dev/null
     # Push-target host: bootstrap pod's overlay-resolvable name. Substituted
     # into the rsyslog / otel / fluent-bit configs as docker configs so the
     # ingester sources actually target the bundled gastrolog cluster.
     target=tasks.gastrolog_bootstrap
-    for c in gastrolog_rsyslog_conf gastrolog_otel_conf gastrolog_fluent_bit_conf; do
-      docker config rm $c 2>/dev/null || true
-    done
     sed "s/host\.docker\.internal/$target/g" ../test/ingester-integration/rsyslog/rsyslog.conf | docker config create gastrolog_rsyslog_conf - >/dev/null
     sed "s/host\.docker\.internal/$target/g" ../test/ingester-integration/otel/config.yaml | docker config create gastrolog_otel_conf - >/dev/null
     sed "s/host\.docker\.internal/$target/g" ../test/ingester-integration/fluent-bit/fluent-bit.conf | docker config create gastrolog_fluent_bit_conf - >/dev/null
-    docker stack rm gastrolog 2>/dev/null || true
-    for i in $(seq 1 30); do
-      [[ "$(docker ps -a --filter label=com.docker.stack.namespace=gastrolog -q | wc -l | tr -d ' ')" == "0" ]] && break
-      sleep 2
-    done
-    docker volume ls -q | grep '^gastrolog_' | xargs -r docker volume rm 2>/dev/null || true
     docker stack deploy -c stack.yml gastrolog
     echo "Waiting for gastrolog services + deps to come up..."
     for i in $(seq 1 90); do
@@ -349,20 +358,35 @@ swarm-down:
 # Kubernetes (requires an active kubectl context)
 # ---------------------------------------------------------------------------
 
-# Apply the K8s StatefulSet (requires OrbStack/kind/minikube/real K8s context).
-kubernetes-up: image
+# Optional SIZE arg (>= 3, default 3) is a FLOOR — kubernetes-up only
+# ever grows the cluster, never shrinks. If a scaled-up cluster already
+# exists, the live replica count is used as the floor so kubectl apply
+# can't snap the StatefulSet back to the manifest's default size. To
+# shrink, use `kubernetes-scale N`; to wipe and rebuild, run
+# `kubernetes-down` first.
+# Idempotent: re-run updates manifests in place; PVCs and FSM state preserved; SIZE arg (>= 3, default 3) acts as a grow-only floor.
+kubernetes-up size="3": image
     #!/usr/bin/env bash
     set -euo pipefail
+    size={{size}}
+    [[ "$size" =~ ^[1-9][0-9]*$ && $size -ge 3 ]] || { echo "size must be an integer >= 3, got '$size'"; exit 1; }
     kubectl config current-context >/dev/null 2>&1 || { echo "no K8s context active — enable OrbStack/kind/minikube first"; exit 1; }
-    kubectl delete -f k8s.yml --ignore-not-found 2>/dev/null
-    kubectl delete -f k8s-deps.yml --ignore-not-found 2>/dev/null
-    kubectl -n gastrolog delete pvc --all --ignore-not-found 2>/dev/null
-    kubectl apply -f k8s.yml
+    # Floor: never shrink. If the live StatefulSet already has more
+    # replicas than the requested size, keep the live count — otherwise
+    # `kubectl apply` would snap the spec back to the manifest's default
+    # and start terminating pods.
+    current=$(kubectl -n gastrolog get sts gastrolog -o jsonpath='{.spec.replicas}' 2>/dev/null || true)
+    if [[ -n "$current" && "$current" -gt "$size" ]]; then
+      target=$current
+    else
+      target=$size
+    fi
+    sed "s/^  replicas:.*/  replicas: $target/" k8s.yml | kubectl apply -f -
     kubectl apply -f k8s-deps.yml
-    echo "Waiting for gastrolog cluster (3 pods) ready..."
-    for i in $(seq 1 60); do
+    echo "Waiting for gastrolog cluster ($target pods) ready..."
+    for i in $(seq 1 120); do
       ready=$(kubectl -n gastrolog get pods -l app=gastrolog -o jsonpath='{range .items[*]}{.status.containerStatuses[0].ready}{"\n"}{end}' 2>/dev/null | grep -c '^true$' || true)
-      [[ $ready == 3 ]] && break
+      [[ $ready == $target ]] && break
       sleep 3
     done
     kubectl -n gastrolog get pods
@@ -370,7 +394,11 @@ kubernetes-up: image
     curl -s -o /dev/null -w "  login=%{http_code}\n" -X POST -H 'Content-Type: application/json' \
       http://localhost:30564/gastrolog.v1.AuthService/Login \
       -d '{"username":"admin","password":"change-me"}'
+    # setup-deps and add-storage are both upsert-by-name idempotent —
+    # safe to run on every kubernetes-up invocation. add-storage covers
+    # any joiner pods that came up since the last invocation.
     kubectl -n gastrolog exec -i gastrolog-0 -- sh < setup-deps.sh
+    kubectl -n gastrolog exec -i gastrolog-0 -- sh < add-storage.sh
     echo ""
     echo "K8s cluster running at http://localhost:30564 (admin/change-me)"
     echo "Cloud storage + ingester sources reachable on the in-cluster service network only."
@@ -517,18 +545,24 @@ kubernetes-down:
 # Requires podman installed and `podman machine start` to be running.
 # Loads the docker-built gastrolog:test image into Podman's VM via save | load.
 #
+# Idempotent: no-op if the cluster is already running; to wipe + rebuild, `podman-down` first.
 # Start a 3-node Podman cluster + bundled deps (deps internal-only, no host ports).
 podman-up: image
     #!/usr/bin/env bash
     set -euo pipefail
     command -v podman >/dev/null || { echo "podman not installed — \`brew install podman\` first"; exit 1; }
     podman machine list 2>/dev/null | grep -q 'Currently running' || { echo "no running podman machine — \`podman machine init && podman machine start\` first"; exit 1; }
+    if [[ "$(podman compose -p gastrolog-deploy ps -q 2>/dev/null | wc -l | tr -d ' ')" -gt 0 ]]; then
+      echo "podman cluster already running"
+      curl -s -o /dev/null -w "  /readyz=%{http_code}\n" http://localhost:4564/readyz
+      echo "Tear down with: just deploy podman-down"
+      exit 0
+    fi
     docker save gastrolog:test | podman load >/dev/null
     mkdir -p /tmp/gastrolog-deploy
     sed 's/host\.docker\.internal/gastrolog-0/g' ../test/ingester-integration/rsyslog/rsyslog.conf  > /tmp/gastrolog-deploy/rsyslog.conf
     sed 's/host\.docker\.internal/gastrolog-0/g' ../test/ingester-integration/otel/config.yaml      > /tmp/gastrolog-deploy/otel-config.yaml
     sed 's/host\.docker\.internal/gastrolog-0/g' ../test/ingester-integration/fluent-bit/fluent-bit.conf > /tmp/gastrolog-deploy/fluent-bit.conf
-    podman compose -p gastrolog-deploy down -v 2>/dev/null || true
     podman compose -p gastrolog-deploy up -d
     echo "Waiting for all 3 nodes ready..."
     for i in $(seq 1 60); do
