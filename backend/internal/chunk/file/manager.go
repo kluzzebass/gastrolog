@@ -1034,6 +1034,36 @@ func scanAttrsViaGLCB(m *Manager, id chunk.ChunkID, startPos uint64, fn func(wri
 	}
 }
 
+// loadExisting builds m.metas from the disk view at Manager construction
+// time. The disk view is TENTATIVE: at this boot phase the vault-ctl
+// FSM is not yet loaded, so this function cannot consult cluster
+// authority. Sealed/unsealed state in particular is fixed up later via
+// VaultLifecycleReconciler.ReconcileFromSnapshot →
+// projectAllSealedFromFSM, which projects FSM state onto m.metas (see
+// the comment block below).
+//
+// After FSM loads, the disk view becomes reconciliation evidence
+// rather than authority:
+//   - chunks present in the FSM manifest: load normally; m.metas
+//     entry survives as the local cache of the FSM-authoritative
+//     record.
+//   - chunks present on disk but absent from the FSM manifest and
+//     not in pendingDeletes:
+//       * tombstoned in the FSM → SweepLocalOrphans deletes (positive
+//         proof of finalize-delete);
+//       * RecordCount == 0 ghost (rotation artifact never received
+//         records) → SweepLocalOrphans deletes per gastrolog-66b7x;
+//       * RecordCount > 0 unknown orphan → SweepLocalOrphans alerts
+//         and PRESERVES the on-disk files per the no-auto-delete-of-
+//         unknown-orphans invariant (docs/disk-authority-audit.md;
+//         gastrolog-3y8py).
+//   - chunks present in the FSM manifest but absent on disk:
+//     SweepMissingReplicas requests catchup from a peer.
+//
+// The whole "m.metas as in-memory cache of the reconciled-against-
+// FSM view" framing is F1/F2 in the audit doc. Callers of m.metas
+// (HasLocalContent, query paths, etc.) inherit this lineage — they
+// read what the reconciler approved, not raw disk.
 func (m *Manager) loadExisting() error {
 	entries, err := os.ReadDir(m.cfg.Dir)
 	if err != nil {

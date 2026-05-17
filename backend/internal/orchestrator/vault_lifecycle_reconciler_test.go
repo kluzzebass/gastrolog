@@ -573,6 +573,84 @@ func TestSweepLocalOrphansDeletesOnlyTombstonedAbsentEntries(t *testing.T) {
 	}
 }
 
+// TestSweepLocalOrphansPreservesDataBearingUnknownOrphans pins the
+// no-auto-delete-of-unknown-orphans invariant from
+// docs/disk-authority-audit.md / gastrolog-3y8py. A sealed chunk with
+// real records but no FSM record, no tombstone, and no pendingDelete
+// is exactly the recovery surface FSM-glitch scenarios need preserved.
+// The sweep must alert (the alert side is exercised in
+// TestAlertUnknownOrphanRaisesAlert below) and MUST NOT delete.
+//
+// Distinct from idUnknown in the previous test, which has
+// RecordCount=0 and WriteEnd zero — that's an announce-in-flight or
+// rotation artifact, handled by SweepLocalOrphans's rotation-ghost
+// branch (gastrolog-66b7x). Data-bearing chunks are different.
+func TestSweepLocalOrphansPreservesDataBearingUnknownOrphans(t *testing.T) {
+	t.Parallel()
+
+	fsm := vaultctlfsm.New()
+	cm := &reconcilerFakeChunkManager{}
+	now := time.Now()
+
+	// Sealed locally, records on disk, FSM doesn't recognize it
+	// (no Create, no Seal, no Delete, no tombstone).
+	idUnknown := chunk.NewChunkID()
+
+	cm.chunks = []chunk.ChunkMeta{
+		{
+			ID:          idUnknown,
+			Sealed:      true,
+			RecordCount: 42,                       // load-bearing: > 0 triggers the preserve path
+			WriteEnd:    now.Add(-1 * time.Hour),  // old enough to be a "ghost" if records were 0
+		},
+	}
+
+	vaultInst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
+	rec.Wire(fsm)
+
+	rec.SweepLocalOrphans()
+
+	if len(cm.deleted) != 0 {
+		t.Errorf("expected unknown orphan with records to be preserved, but sweep deleted %v",
+			cm.deleted)
+	}
+}
+
+// TestSweepLocalOrphansDeletesEmptyRotationGhost verifies the
+// rotation-artifact branch still fires for chunks with zero records
+// (gastrolog-66b7x). Required because the split in
+// gastrolog-3y8py is "preserve data, delete artifacts" — and the
+// artifact path must not regress under the new guard.
+func TestSweepLocalOrphansDeletesEmptyRotationGhost(t *testing.T) {
+	t.Parallel()
+
+	fsm := vaultctlfsm.New()
+	cm := &reconcilerFakeChunkManager{}
+	now := time.Now()
+
+	idGhost := chunk.NewChunkID()
+
+	cm.chunks = []chunk.ChunkMeta{
+		{
+			ID:          idGhost,
+			Sealed:      true,
+			RecordCount: 0,                       // artifact: never received records
+			WriteEnd:    now.Add(-1 * time.Hour), // old enough to be past the ghost threshold
+		},
+	}
+
+	vaultInst := &VaultInstance{VaultID: glid.New(), Chunks: cm}
+	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
+	rec.Wire(fsm)
+
+	rec.SweepLocalOrphans()
+
+	if len(cm.deleted) != 1 || cm.deleted[0] != idGhost {
+		t.Errorf("expected empty rotation ghost to be deleted; got deleted=%v", cm.deleted)
+	}
+}
+
 // TestSweepMissingReplicasRequestsOnlySealedAndAbsentEntries pins the
 // invariant that the missing-replica sweep filters the FSM-vs-disk diff
 // to exactly the chunks a follower is allowed to request: sealed, not
