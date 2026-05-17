@@ -22,6 +22,13 @@ service LifecycleService {
   // SetNodeSuffrage promotes or demotes a node's voting status.
   rpc SetNodeSuffrage(SetNodeSuffrageRequest) returns (SetNodeSuffrageResponse);
 
+  // SetNodeState transitions a node between lifecycle states (Live,
+  // Maintenance, Draining, etc.). Idempotent — re-applying the same
+  // state is a no-op success. Illegal transitions return
+  // FailedPrecondition with the FSM's transition-validation error.
+  // See docs/node-lifecycle-design.md.
+  rpc SetNodeState(SetNodeStateRequest) returns (SetNodeStateResponse);
+
   // JoinCluster joins a running single-node server to an existing cluster at runtime.
   // The node's Raft state is replaced by the remote cluster's state via replication.
   rpc JoinCluster(JoinClusterRequest) returns (JoinClusterResponse);
@@ -127,6 +134,13 @@ message SetNodeSuffrageRequest {
 }
 
 message SetNodeSuffrageResponse {}
+
+message SetNodeStateRequest {
+  bytes node_id = 1;
+  NodeState state = 2;
+}
+
+message SetNodeStateResponse {}
 
 message JoinClusterRequest {
   string leader_address = 1; // cluster address of the leader to join (e.g., "10.0.0.1:4566")

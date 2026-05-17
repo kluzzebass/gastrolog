@@ -6,7 +6,7 @@
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
 import { Message, proto3, protoInt64 } from "@bufbuild/protobuf";
 import { NodeStats } from "./cluster_pb.js";
-import { GetRouteStatsResponse, IngesterAlive } from "./system_pb.js";
+import { GetRouteStatsResponse, IngesterAlive, NodeState } from "./system_pb.js";
 import { GetStatsResponse, VaultInfo } from "./vault_pb.js";
 
 /**
@@ -645,6 +645,80 @@ export class SetNodeSuffrageResponse extends Message<SetNodeSuffrageResponse> {
 
   static equals(a: SetNodeSuffrageResponse | PlainMessage<SetNodeSuffrageResponse> | undefined, b: SetNodeSuffrageResponse | PlainMessage<SetNodeSuffrageResponse> | undefined): boolean {
     return proto3.util.equals(SetNodeSuffrageResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.SetNodeStateRequest
+ */
+export class SetNodeStateRequest extends Message<SetNodeStateRequest> {
+  /**
+   * @generated from field: bytes node_id = 1;
+   */
+  nodeId = new Uint8Array(0);
+
+  /**
+   * @generated from field: gastrolog.v1.NodeState state = 2;
+   */
+  state = NodeState.UNSPECIFIED;
+
+  constructor(data?: PartialMessage<SetNodeStateRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.SetNodeStateRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "state", kind: "enum", T: proto3.getEnumType(NodeState) },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SetNodeStateRequest {
+    return new SetNodeStateRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SetNodeStateRequest {
+    return new SetNodeStateRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SetNodeStateRequest {
+    return new SetNodeStateRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SetNodeStateRequest | PlainMessage<SetNodeStateRequest> | undefined, b: SetNodeStateRequest | PlainMessage<SetNodeStateRequest> | undefined): boolean {
+    return proto3.util.equals(SetNodeStateRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.SetNodeStateResponse
+ */
+export class SetNodeStateResponse extends Message<SetNodeStateResponse> {
+  constructor(data?: PartialMessage<SetNodeStateResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.SetNodeStateResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SetNodeStateResponse {
+    return new SetNodeStateResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SetNodeStateResponse {
+    return new SetNodeStateResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SetNodeStateResponse {
+    return new SetNodeStateResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SetNodeStateResponse | PlainMessage<SetNodeStateResponse> | undefined, b: SetNodeStateResponse | PlainMessage<SetNodeStateResponse> | undefined): boolean {
+    return proto3.util.equals(SetNodeStateResponse, a, b);
   }
 }
 
