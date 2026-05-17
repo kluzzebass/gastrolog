@@ -711,12 +711,6 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 	peerJobState := cluster.NewPeerJobState(20 * time.Second)
 	clusterSrv.Subscribe(peerJobState.HandleBroadcast)
 
-	// Evict peer-cache entries immediately when a node is removed from the
-	// Raft configuration. Without this the TTL-only expiry leaves zombie
-	// entries for nodes that were permanently decommissioned — the maps
-	// grow unboundedly on clusters that churn nodes. See gastrolog-19bq4.
-	observePeerRemovals(ctx, clusterSrv, peerState, peerJobState, logger)
-
 	// Write a placeholder NodeConfig for every newly admitted peer so
 	// fresh joiners never display as raw GLIDs in the UI while their
 	// own async ensureNodeConfig write is in flight (gastrolog-4dqfs).
@@ -759,6 +753,38 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 	})
 
 	go collector.Run(ctx)
+
+	// Evict per-peer satellite state the moment a node is removed
+	// from the Raft configuration. Without this the various caches
+	// grow unboundedly on clusters that churn nodes. See gastrolog-9ohip
+	// for the inventory; predecessor gastrolog-19bq4 covered the first
+	// two (PeerState, PeerJobState) but missed the rest.
+	observePeerRemovals(ctx, clusterSrv, logger,
+		peerState,
+		peerJobState,
+		clusterSrv.ByteMetrics(),
+		broadcaster,
+		collector,
+		recordForwarder,
+	)
+	// Belt-and-suspenders: periodic reconcile against current Raft
+	// membership covers the edge case where a follower receives the
+	// config change via snapshot install (which doesn't fire
+	// PeerObservation) and would otherwise leave the observer-based
+	// eviction stranded. Same six caches as the observer above.
+	// Registration + cron lives in peer_cache_reconcile.go so the
+	// job is discoverable alongside the orchestrator's other
+	// scheduled sweeps in the inspector's Scheduled view.
+	if err := startPeerCacheReconcile(orch.Scheduler(), clusterSrv, compCluster.Apply(logger),
+		peerState,
+		peerJobState,
+		clusterSrv.ByteMetrics(),
+		broadcaster,
+		collector,
+		recordForwarder,
+	); err != nil {
+		logger.Warn("schedule peer-cache reconcile job", "error", err)
+	}
 
 	return broadcaster, peerState, peerJobState, collector.CollectLocalSnapshot
 }

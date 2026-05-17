@@ -368,8 +368,10 @@ func observeLeaderChanges(r *hraft.Raft, logger *slog.Logger) {
 }
 
 // peerEvictor is the minimal contract the peer-removal observer needs —
-// anything with a Delete(nodeID string) method. Both cluster.PeerState and
-// cluster.PeerJobState satisfy it.
+// anything with a Delete(nodeID string) method. Many cluster-local caches
+// satisfy it: PeerState, PeerJobState, PeerByteMetrics, Broadcaster (the
+// failure-suppression map), StatsCollector (per-peer rate windows), and
+// RecordForwarder (per-node goroutine + channel + alert).
 type peerEvictor interface {
 	Delete(nodeID string)
 }
@@ -377,16 +379,20 @@ type peerEvictor interface {
 // observePeerRemovals registers a Raft observer for PeerObservation events
 // and drives the removal loop. Blocking-mode observer so removals can't be
 // silently dropped. Stops when ctx is cancelled.
-func observePeerRemovals(ctx context.Context, clusterSrv *cluster.Server, peerState, peerJobState peerEvictor, logger *slog.Logger) {
+//
+// Every supplied evictor is called on every removal so per-peer satellite
+// state can't outlive cluster membership — see gastrolog-9ohip for the
+// inventory of caches that previously leaked.
+func observePeerRemovals(ctx context.Context, clusterSrv *cluster.Server, logger *slog.Logger, evictors ...peerEvictor) {
 	ch := make(chan hraft.Observation, 16)
 	clusterSrv.RegisterPeerObserver(ch)
-	go runPeerRemovalLoop(ctx, ch, peerState, peerJobState, logger)
+	go runPeerRemovalLoop(ctx, ch, logger, evictors...)
 }
 
 // runPeerRemovalLoop consumes observations from ch and evicts each removed
-// peer from both caches. Exposed for tests so the loop can be driven by
-// synthetic observations without standing up a real Raft cluster.
-func runPeerRemovalLoop(ctx context.Context, ch <-chan hraft.Observation, peerState, peerJobState peerEvictor, logger *slog.Logger) {
+// peer from every supplied cache. Exposed for tests so the loop can be
+// driven by synthetic observations without standing up a real Raft cluster.
+func runPeerRemovalLoop(ctx context.Context, ch <-chan hraft.Observation, logger *slog.Logger, evictors ...peerEvictor) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -400,10 +406,54 @@ func runPeerRemovalLoop(ctx context.Context, ch <-chan hraft.Observation, peerSt
 				continue
 			}
 			id := string(po.Peer.ID)
-			peerState.Delete(id)
-			peerJobState.Delete(id)
-			logger.Info("cluster peer removed, evicted from peer caches", "node_id", id)
+			for _, e := range evictors {
+				e.Delete(id)
+			}
+			logger.Info("cluster peer removed, evicted from peer caches", "node_id", id, "evictors", len(evictors))
 		}
+	}
+}
+
+// peerCacheReconciler is the contract the periodic peer-cache
+// reconciler needs — a cache that can purge its own entries against
+// an authoritative membership set. Implementations: PeerState,
+// PeerJobState, PeerByteMetrics, Broadcaster, StatsCollector,
+// RecordForwarder.
+type peerCacheReconciler interface {
+	ReconcilePeers(keep map[string]struct{})
+}
+
+// memberSource is the minimal contract the reconciler needs from
+// cluster.Server to enumerate current Raft membership.
+type memberSource interface {
+	Servers() ([]cluster.RaftServer, error)
+}
+
+// reconcilePeerCachesOnce lists current Raft membership and asks
+// every supplied cache to purge entries whose peer is no longer a
+// member. Belt-and-suspenders for the observer path — hraft does
+// not fire PeerObservation when a config change is delivered via
+// snapshot install (only on log apply), so a follower behind by a
+// snapshot can miss removal events.
+//
+// Independent of leadership: every node runs the sweep against its
+// own caches. Wired into the job scheduler by the caller (see
+// app.go startPeerCacheReconcile) so it shares the same scheduler
+// infrastructure as the rest of the project's housekeeping work
+// (cache eviction, retention, archival, etc.) rather than running
+// in a hand-rolled goroutine.
+func reconcilePeerCachesOnce(src memberSource, logger *slog.Logger, caches ...peerCacheReconciler) {
+	servers, err := src.Servers()
+	if err != nil {
+		logger.Debug("peer-cache reconcile: list servers", "error", err)
+		return
+	}
+	keep := make(map[string]struct{}, len(servers))
+	for _, s := range servers {
+		keep[s.ID] = struct{}{}
+	}
+	for _, c := range caches {
+		c.ReconcilePeers(keep)
 	}
 }
 

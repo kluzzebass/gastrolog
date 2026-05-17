@@ -43,6 +43,19 @@ func (p *PeerState) Delete(nodeID string) {
 	p.mu.Unlock()
 }
 
+// ReconcilePeers drops any entry whose peer is not in keep. Backstop
+// for the observer path when hraft delivers a config change via
+// snapshot install (no PeerObservation fires).
+func (p *PeerState) ReconcilePeers(keep map[string]struct{}) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for id := range p.entries {
+		if _, ok := keep[id]; !ok {
+			delete(p.entries, id)
+		}
+	}
+}
+
 // NewPeerState creates a PeerState with the given TTL.
 func NewPeerState(ttl time.Duration) *PeerState {
 	return &PeerState{

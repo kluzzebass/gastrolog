@@ -390,6 +390,34 @@ func TestSend_ErrorSuppressionAndRecovery(t *testing.T) {
 	}, "peer should be cleared after successful send")
 }
 
+func TestBroadcaster_DeleteClearsFailureSuppression(t *testing.T) {
+	fp := newFakePeerSource()
+	fp.addPeer(t, "going-away", func(_ context.Context, _ *gastrologv1.BroadcastMessage) error {
+		return errors.New("simulated peer error")
+	})
+
+	b := newBroadcaster(fp, quietLogger(), time.Second)
+
+	b.Send(context.Background(), testMsg())
+	waitFor(t, time.Second, func() bool {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		return b.failed["going-away"]
+	}, "peer not marked failed before Delete")
+
+	b.Delete("going-away")
+
+	b.mu.Lock()
+	_, present := b.failed["going-away"]
+	b.mu.Unlock()
+	if present {
+		t.Fatal("expected failure suppression entry cleared after Delete")
+	}
+
+	// Idempotent.
+	b.Delete("never-seen")
+}
+
 // waitFor polls cond every 10ms until it returns true or the deadline
 // expires. Useful for async assertions after fire-and-forget calls.
 func waitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string) {

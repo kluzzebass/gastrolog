@@ -62,6 +62,37 @@ func (m *PeerByteMetrics) TrackReceived(peer string, n int) {
 	m.mu.Unlock()
 }
 
+// Delete drops both counters for a peer. Called from the peer-removal
+// observer (raft.go runPeerRemovalLoop) when a node leaves the Raft
+// configuration permanently — without this the maps would grow
+// unboundedly on clusters that churn nodes. Naming aligns with the
+// peerEvictor interface used elsewhere in cluster removal.
+func (m *PeerByteMetrics) Delete(peer string) {
+	m.mu.Lock()
+	delete(m.sent, peer)
+	delete(m.recv, peer)
+	m.mu.Unlock()
+}
+
+// ReconcilePeers drops any counter whose peer is not in keep. Used by
+// the periodic peer-cache reconciler — backstop for the observer
+// path when hraft delivers a config change via snapshot install
+// (which doesn't fire PeerObservation).
+func (m *PeerByteMetrics) ReconcilePeers(keep map[string]struct{}) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for p := range m.sent {
+		if _, ok := keep[p]; !ok {
+			delete(m.sent, p)
+		}
+	}
+	for p := range m.recv {
+		if _, ok := keep[p]; !ok {
+			delete(m.recv, p)
+		}
+	}
+}
+
 // PeerByteCounter is a (peer, sent, received) triplet returned by Snapshot.
 type PeerByteCounter struct {
 	Peer     string
