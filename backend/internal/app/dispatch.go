@@ -752,3 +752,64 @@ func (d *configDispatcher) handleNodeConfigChange(ctx context.Context) {
 	}
 	d.orch.RefreshVaultCtlMembers(nodes, d.factories)
 }
+
+// ReplayConfigFromStore walks the FSM-backed config store and registers
+// any vault or ingester the orchestrator is missing. Use after a fresh
+// joiner has finished snapshot replication: FSM.Restore does not fire
+// onApply notifications (only FSM.Apply does), so a joiner whose state
+// arrived purely via snapshot would otherwise see an empty
+// vault/ingester registry. See gastrolog-3hcfm.
+//
+// Crucially, we only call the per-entity handler for entities the
+// orchestrator does NOT already have. A joiner whose state arrived via
+// post-snapshot Apply (chatterbox PUT after a snapshot, but log entries
+// covered the rest) ALREADY received the notification through the live
+// dispatcher; re-firing handleIngesterPut for it would trip the
+// orchestrator's remove+re-add idempotent-replace path. That path
+// races the new ingester goroutine's setIngesterAlive(true) against
+// the old goroutine's setIngesterAlive(false): when the stale false
+// lands in Raft after the new true, the FSM ends up showing the node
+// as not-alive even though chatterbox is happily running. The
+// dashboard then displays "7/10" instead of "10/10".
+//
+// Routes / rotation / retention reload as a whole set per call —
+// idempotent and goroutine-free — so they run unconditionally.
+func (d *configDispatcher) ReplayConfigFromStore(ctx context.Context) {
+	if d.orch == nil || d.cfgStore == nil {
+		return
+	}
+
+	registeredVaults := make(map[glid.GLID]bool)
+	for _, id := range d.orch.ListVaults() {
+		registeredVaults[id] = true
+	}
+	vaults, err := d.cfgStore.ListVaults(ctx)
+	if err != nil {
+		d.logger.Error("dispatch: list vaults for replay", "error", err)
+	}
+	for _, v := range vaults {
+		if registeredVaults[v.ID] {
+			continue
+		}
+		d.handleVaultPut(ctx, v.ID)
+	}
+
+	registeredIngesters := make(map[glid.GLID]bool)
+	for _, id := range d.orch.ListIngesters() {
+		registeredIngesters[id] = true
+	}
+	ingesters, err := d.cfgStore.ListIngesters(ctx)
+	if err != nil {
+		d.logger.Error("dispatch: list ingesters for replay", "error", err)
+	}
+	for _, ing := range ingesters {
+		if registeredIngesters[ing.ID] {
+			continue
+		}
+		d.handleIngesterPut(ctx, ing.ID)
+	}
+
+	d.reloadFilters(ctx)
+	d.reloadRotationPolicies(ctx)
+	d.reloadRetentionPolicies(ctx)
+}
