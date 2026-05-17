@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"gastrolog/internal/cluster"
+	"gastrolog/internal/glid"
 	"gastrolog/internal/home"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/raftwal"
@@ -19,6 +20,7 @@ import (
 	"gastrolog/internal/system/raftfsm"
 	"gastrolog/internal/system/raftstore"
 
+	petname "github.com/dustinkirkland/golang-petname"
 	hraft "github.com/hashicorp/raft"
 )
 
@@ -403,4 +405,90 @@ func runPeerRemovalLoop(ctx context.Context, ch <-chan hraft.Observation, peerSt
 			logger.Info("cluster peer removed, evicted from peer caches", "node_id", id)
 		}
 	}
+}
+
+// leaderChecker is the minimal contract observePeerAdditions needs —
+// just an "am I currently the system-Raft leader?" predicate so the
+// addition loop can gate FSM writes. cluster.Server.IsLeader satisfies it.
+type leaderChecker interface {
+	IsLeader() bool
+}
+
+// observePeerAdditions registers a Raft observer that writes a
+// placeholder NodeConfig for every freshly admitted peer. Without this,
+// new joiners briefly appear as raw GLIDs in the UI because they are
+// admitted to Raft membership BEFORE their own async ensureNodeConfig
+// write commits — see gastrolog-4dqfs.
+//
+// Strategy: the leader observes every PeerObservation.Removed==false
+// event, looks up the peer's NodeConfig, and writes a petname-bearing
+// placeholder if none exists yet. Followers see the same observation
+// but defer to the leader — only the leader proposes Raft commands.
+// The joiner's own ensureNodeConfig later updates Name to its preferred
+// value (e.g. pod hostname) once it has caught up to quorum.
+//
+// Blocking-mode observer so additions can't be silently dropped while
+// the addition loop is busy on the previous event.
+func observePeerAdditions(ctx context.Context, clusterSrv *cluster.Server, cfgStore system.Store, logger *slog.Logger) {
+	ch := make(chan hraft.Observation, 16)
+	clusterSrv.RegisterPeerObserver(ch)
+	go runPeerAdditionLoop(ctx, ch, clusterSrv, cfgStore, logger)
+}
+
+// runPeerAdditionLoop consumes observations from ch and writes a
+// placeholder NodeConfig for each newly added peer when this node
+// is the system-Raft leader. Exposed for tests so the loop can be
+// driven by synthetic observations.
+func runPeerAdditionLoop(ctx context.Context, ch <-chan hraft.Observation, leader leaderChecker, cfgStore system.Store, logger *slog.Logger) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case obs, ok := <-ch:
+			if !ok {
+				return
+			}
+			po, ok := obs.Data.(hraft.PeerObservation)
+			if !ok || po.Removed {
+				continue
+			}
+			if !leader.IsLeader() {
+				continue
+			}
+			id := string(po.Peer.ID)
+			handlePeerAddition(ctx, cfgStore, id, logger)
+		}
+	}
+}
+
+// handlePeerAddition writes a placeholder NodeConfig for nodeID if
+// none exists. Idempotent: existing records are left untouched so the
+// joiner's own ensureNodeConfig keeps authority over the Name field.
+func handlePeerAddition(ctx context.Context, cfgStore system.Store, nodeID string, logger *slog.Logger) {
+	id, err := glid.ParseAny(nodeID)
+	if err != nil {
+		logger.Warn("peer addition: parse node ID", "node_id", nodeID, "error", err)
+		return
+	}
+	existing, err := cfgStore.GetNode(ctx, id)
+	if err != nil {
+		logger.Warn("peer addition: lookup NodeConfig", "node_id", nodeID, "error", err)
+		return
+	}
+	if existing != nil {
+		// Already has a NodeConfig (rejoin, or this node won the race
+		// against the joiner's own write). Nothing to do.
+		return
+	}
+	name := petname.Generate(2, "-")
+	if err := cfgStore.PutNode(ctx, system.NodeConfig{
+		ID:         id,
+		Name:       name,
+		State:      system.NodeStateLive,
+		StateSince: time.Now(),
+	}); err != nil {
+		logger.Warn("peer addition: write placeholder NodeConfig", "node_id", nodeID, "error", err)
+		return
+	}
+	logger.Info("peer addition: wrote placeholder NodeConfig", "node_id", nodeID, "name", name)
 }
