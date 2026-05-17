@@ -321,7 +321,7 @@ function HoverStat({
         >
           {nodes.map((node) => (
             <div key={encode(node.id)} className="flex items-baseline justify-between gap-4 py-0.5">
-              <span className={`text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}>
+              <span className={`text-[0.75em] whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}>
                 {middleTruncate(node.name || encode(node.id).slice(0, 8), 14)}
               </span>
               <span className={`text-[0.75em] font-mono shrink-0 ${c("text-text-bright", "text-light-text-bright")}`}>
