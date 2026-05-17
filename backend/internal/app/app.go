@@ -717,6 +717,13 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 	// grow unboundedly on clusters that churn nodes. See gastrolog-19bq4.
 	observePeerRemovals(ctx, clusterSrv, peerState, peerJobState, logger)
 
+	// Write a placeholder NodeConfig for every newly admitted peer so
+	// fresh joiners never display as raw GLIDs in the UI while their
+	// own async ensureNodeConfig write is in flight (gastrolog-4dqfs).
+	// Leader-only; the joiner's own write later updates Name to its
+	// preferred value (e.g. pod hostname).
+	observePeerAdditions(ctx, clusterSrv, cfgStore, logger)
+
 	collector := cluster.NewStatsCollector(cluster.StatsCollectorConfig{
 		Broadcaster: broadcaster,
 		RaftStats:   clusterSrv,
