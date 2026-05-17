@@ -161,6 +161,13 @@ func (c RunConfig) advertisedClusterAddr() string {
 
 // Run starts the gastrolog server. It wires all components, starts the
 // orchestrator and HTTP server, and blocks until ctx is cancelled.
+//
+//nolint:gocognit,gocyclo // composition root: wires every subsystem at
+// boot. Splitting this into helpers per subsystem has been tried in
+// past passes and produced worse readability — each subsystem's
+// wiring depends on every earlier one and threading 15+ parameters
+// into helpers obscures the dataflow. Accept the linear complexity
+// here; individual subsystem logic lives in dedicated files.
 func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	hd, err := resolveHome(cfg.HomeFlag)
 	if err != nil {
@@ -423,9 +430,19 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		// their broadcast RaftAppliedIndex has matched the leader's
 		// for a stability window. Companion to the JoinCluster-as-
 		// learner change (gastrolog-41sut) and the per-vault-ctl
-		// promoter (gastrolog-gcbx7).
+		// promoter below.
 		learnerPromoter := newSystemLearnerPromoter(clusterSrv, peerState, compCluster.Apply(logger))
 		go learnerPromoter.Run(ctx)
+
+		// Per-vault-ctl learner promoter (gastrolog-gcbx7). Same
+		// shape as the system-Raft promoter but iterates every vault
+		// on each tick; only acts on groups this node leads. Catchup
+		// signal comes from VaultStats.RaftAppliedIndex in the
+		// existing NodeStats broadcast.
+		if groupMgr != nil {
+			vaultLearnerPromoter := newVaultCtlLearnerPromoter(cfgStore, groupMgr, peerState, nodeID, compCluster.Apply(logger))
+			go vaultLearnerPromoter.Run(ctx)
+		}
 	}
 
 	// For replication cases: block until server settings replicate from the leader.

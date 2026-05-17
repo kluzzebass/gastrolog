@@ -1349,6 +1349,18 @@ export class VaultStats extends Message<VaultStats> {
    */
   name = "";
 
+  /**
+   * raft_applied_index is the local node's vault-ctl Raft applied
+   * index for this vault. Broadcast in NodeStats so the per-vault-ctl
+   * learner promoter (gastrolog-gcbx7) can observe each follower's
+   * catchup progress without a dedicated RPC. Zero if the local node
+   * has no vault-ctl group for this vault (e.g. vault placed
+   * elsewhere) or Raft is not yet initialized.
+   *
+   * @generated from field: uint64 raft_applied_index = 13;
+   */
+  raftAppliedIndex = protoInt64.zero;
+
   constructor(data?: PartialMessage<VaultStats>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1369,6 +1381,7 @@ export class VaultStats extends Message<VaultStats> {
     { no: 10, name: "newest_record", kind: "message", T: Timestamp },
     { no: 11, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 12, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 13, name: "raft_applied_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultStats {

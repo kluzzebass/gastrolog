@@ -885,6 +885,12 @@ type VaultSnapshot struct {
 	SealedChunks int
 	DataBytes    int64
 	Enabled      bool
+	// RaftAppliedIndex is the local node's vault-ctl Raft applied
+	// index for this vault. Zero if this node has no vault-ctl group
+	// (or its Raft instance hasn't initialized). Broadcast in
+	// NodeStats so the per-vault-ctl learner promoter
+	// (gastrolog-gcbx7) can observe each follower's catchup progress.
+	RaftAppliedIndex uint64
 }
 
 // VaultSnapshots returns a snapshot of stats for all registered vaults.
@@ -897,9 +903,10 @@ func (o *Orchestrator) VaultSnapshots() []VaultSnapshot {
 			continue
 		}
 		snap := VaultSnapshot{
-			ID:         id,
-			ChunkCount: len(metas),
-			Enabled:    o.IsVaultEnabled(id),
+			ID:               id,
+			ChunkCount:       len(metas),
+			Enabled:          o.IsVaultEnabled(id),
+			RaftAppliedIndex: o.vaultCtlAppliedIndex(id),
 		}
 		for _, m := range metas {
 			if m.Sealed {
@@ -915,4 +922,21 @@ func (o *Orchestrator) VaultSnapshots() []VaultSnapshot {
 		snapshots = append(snapshots, snap)
 	}
 	return snapshots
+}
+
+// vaultCtlAppliedIndex returns this node's local vault-ctl Raft
+// applied index for the given vault. Zero if the vault has no
+// vault-ctl group on this node (e.g. placement excludes it) or the
+// GroupManager isn't wired (single-node test). Read at snapshot time
+// so the value reflects the latest committed-and-applied entry on
+// this node.
+func (o *Orchestrator) vaultCtlAppliedIndex(vaultID glid.GLID) uint64 {
+	if o.groupMgr == nil {
+		return 0
+	}
+	g := o.groupMgr.GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
+	if g == nil || g.Raft == nil {
+		return 0
+	}
+	return g.Raft.AppliedIndex()
 }
