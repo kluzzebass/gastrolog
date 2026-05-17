@@ -266,6 +266,13 @@ message VaultStats {
   google.protobuf.Timestamp newest_record = 10;
   bool enabled = 11;
   string name = 12;
+  // raft_applied_index is the local node's vault-ctl Raft applied
+  // index for this vault. Broadcast in NodeStats so the per-vault-ctl
+  // learner promoter (gastrolog-gcbx7) can observe each follower's
+  // catchup progress without a dedicated RPC. Zero if the local node
+  // has no vault-ctl group for this vault (e.g. vault placed
+  // elsewhere) or Raft is not yet initialized.
+  uint64 raft_applied_index = 13;
 }
 
 message ReindexVaultRequest {

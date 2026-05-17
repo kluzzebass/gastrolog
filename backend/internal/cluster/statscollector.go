@@ -20,13 +20,14 @@ import (
 // StatsVaultSnapshot is the stats collector's view of a vault.
 // Mirrors orchestrator.VaultSnapshot without importing it.
 type StatsVaultSnapshot struct {
-	ID           string
-	Name         string
-	RecordCount  int64
-	ChunkCount   int
-	SealedChunks int
-	DataBytes    int64
-	Enabled      bool
+	ID               string
+	Name             string
+	RecordCount      int64
+	ChunkCount       int
+	SealedChunks     int
+	DataBytes        int64
+	Enabled          bool
+	RaftAppliedIndex uint64
 }
 
 // StatsRouteSnapshot captures route stats for broadcast.
@@ -242,13 +243,14 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 		// Vault snapshots.
 		for _, v := range c.cfg.Stats.VaultSnapshots() {
 			stats.Vaults = append(stats.Vaults, &gastrologv1.VaultStats{
-				Id:           []byte(v.ID),
-				Name:         v.Name,
-				RecordCount:  v.RecordCount,
-				ChunkCount:   int64(v.ChunkCount),
-				SealedChunks: int64(v.SealedChunks),
-				DataBytes:    v.DataBytes,
-				Enabled:      v.Enabled,
+				Id:               []byte(v.ID),
+				Name:             v.Name,
+				RecordCount:      v.RecordCount,
+				ChunkCount:       int64(v.ChunkCount),
+				SealedChunks:     int64(v.SealedChunks),
+				DataBytes:        v.DataBytes,
+				Enabled:          v.Enabled,
+				RaftAppliedIndex: v.RaftAppliedIndex,
 			})
 		}
 

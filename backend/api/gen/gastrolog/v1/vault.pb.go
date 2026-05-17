@@ -1542,21 +1542,28 @@ func (x *ProcessMemoryStats) GetNumGc() uint32 {
 
 // VaultStats provides per-vault statistics.
 type VaultStats struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
-	ChunkCount    int64                  `protobuf:"varint,3,opt,name=chunk_count,json=chunkCount,proto3" json:"chunk_count,omitempty"`
-	SealedChunks  int64                  `protobuf:"varint,4,opt,name=sealed_chunks,json=sealedChunks,proto3" json:"sealed_chunks,omitempty"`
-	ActiveChunks  int64                  `protobuf:"varint,5,opt,name=active_chunks,json=activeChunks,proto3" json:"active_chunks,omitempty"`
-	RecordCount   int64                  `protobuf:"varint,6,opt,name=record_count,json=recordCount,proto3" json:"record_count,omitempty"`
-	DataBytes     int64                  `protobuf:"varint,7,opt,name=data_bytes,json=dataBytes,proto3" json:"data_bytes,omitempty"`
-	IndexBytes    int64                  `protobuf:"varint,8,opt,name=index_bytes,json=indexBytes,proto3" json:"index_bytes,omitempty"`
-	OldestRecord  *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=oldest_record,json=oldestRecord,proto3" json:"oldest_record,omitempty"`
-	NewestRecord  *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=newest_record,json=newestRecord,proto3" json:"newest_record,omitempty"`
-	Enabled       bool                   `protobuf:"varint,11,opt,name=enabled,proto3" json:"enabled,omitempty"`
-	Name          string                 `protobuf:"bytes,12,opt,name=name,proto3" json:"name,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Id           []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Type         string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
+	ChunkCount   int64                  `protobuf:"varint,3,opt,name=chunk_count,json=chunkCount,proto3" json:"chunk_count,omitempty"`
+	SealedChunks int64                  `protobuf:"varint,4,opt,name=sealed_chunks,json=sealedChunks,proto3" json:"sealed_chunks,omitempty"`
+	ActiveChunks int64                  `protobuf:"varint,5,opt,name=active_chunks,json=activeChunks,proto3" json:"active_chunks,omitempty"`
+	RecordCount  int64                  `protobuf:"varint,6,opt,name=record_count,json=recordCount,proto3" json:"record_count,omitempty"`
+	DataBytes    int64                  `protobuf:"varint,7,opt,name=data_bytes,json=dataBytes,proto3" json:"data_bytes,omitempty"`
+	IndexBytes   int64                  `protobuf:"varint,8,opt,name=index_bytes,json=indexBytes,proto3" json:"index_bytes,omitempty"`
+	OldestRecord *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=oldest_record,json=oldestRecord,proto3" json:"oldest_record,omitempty"`
+	NewestRecord *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=newest_record,json=newestRecord,proto3" json:"newest_record,omitempty"`
+	Enabled      bool                   `protobuf:"varint,11,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Name         string                 `protobuf:"bytes,12,opt,name=name,proto3" json:"name,omitempty"`
+	// raft_applied_index is the local node's vault-ctl Raft applied
+	// index for this vault. Broadcast in NodeStats so the per-vault-ctl
+	// learner promoter (gastrolog-gcbx7) can observe each follower's
+	// catchup progress without a dedicated RPC. Zero if the local node
+	// has no vault-ctl group for this vault (e.g. vault placed
+	// elsewhere) or Raft is not yet initialized.
+	RaftAppliedIndex uint64 `protobuf:"varint,13,opt,name=raft_applied_index,json=raftAppliedIndex,proto3" json:"raft_applied_index,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *VaultStats) Reset() {
@@ -1671,6 +1678,13 @@ func (x *VaultStats) GetName() string {
 		return x.Name
 	}
 	return ""
+}
+
+func (x *VaultStats) GetRaftAppliedIndex() uint64 {
+	if x != nil {
+		return x.RaftAppliedIndex
+	}
+	return 0
 }
 
 type ReindexVaultRequest struct {
@@ -2885,7 +2899,7 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x11stack_inuse_bytes\x18\x06 \x01(\x03R\x0fstackInuseBytes\x12\x1b\n" +
 	"\tsys_bytes\x18\a \x01(\x03R\bsysBytes\x12!\n" +
 	"\fheap_objects\x18\b \x01(\x04R\vheapObjects\x12\x15\n" +
-	"\x06num_gc\x18\t \x01(\rR\x05numGc\"\xae\x03\n" +
+	"\x06num_gc\x18\t \x01(\rR\x05numGc\"\xdc\x03\n" +
 	"\n" +
 	"VaultStats\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
@@ -2903,7 +2917,8 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\rnewest_record\x18\n" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\fnewestRecord\x12\x18\n" +
 	"\aenabled\x18\v \x01(\bR\aenabled\x12\x12\n" +
-	"\x04name\x18\f \x01(\tR\x04name\"+\n" +
+	"\x04name\x18\f \x01(\tR\x04name\x12,\n" +
+	"\x12raft_applied_index\x18\r \x01(\x04R\x10raftAppliedIndex\"+\n" +
 	"\x13ReindexVaultRequest\x12\x14\n" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\"-\n" +
 	"\x14ReindexVaultResponse\x12\x15\n" +
