@@ -417,6 +417,15 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		// placement manager: same leader gating, separate concern.
 		sweep := newUnreachableSweep(cfgStore, clusterSrv, peerState, nodeID, compPlacement.Apply(logger))
 		go sweep.Run(ctx)
+
+		// System-Raft learner promoter (gastrolog-2czh9). Watches for
+		// Nonvoter / Staging members and promotes them to voters once
+		// their broadcast RaftAppliedIndex has matched the leader's
+		// for a stability window. Companion to the JoinCluster-as-
+		// learner change (gastrolog-41sut) and the per-vault-ctl
+		// promoter (gastrolog-gcbx7).
+		learnerPromoter := newSystemLearnerPromoter(clusterSrv, peerState, compCluster.Apply(logger))
+		go learnerPromoter.Run(ctx)
 	}
 
 	// For replication cases: block until server settings replicate from the leader.
