@@ -440,7 +440,7 @@ func TestVaultCtlLeaderManager_SetDesiredMembersWakesEpoch(t *testing.T) {
 
 	// Now fire a real diff. With the wake-on-signal path, the synthetic
 	// peer should land in the configuration within ~1 s. Without it,
-	// convergence would wait for vaultMembershipReconcileInterval (30 s)
+	// convergence would wait for vaultCtlMembershipReconcileSchedule (30 s)
 	// — well past this deadline.
 	mgr.SetDesiredMembers(vaultID, []hraft.Server{
 		{ID: "wake-1", Address: "wake-1"},
