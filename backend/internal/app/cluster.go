@@ -242,7 +242,7 @@ func makeJoinRollback(
 			logger.Error("rollback: restore raft dir failed", "error", err)
 			return
 		}
-		oldStore, err := openRaftSystemStore(raftStoreOpts{
+		oldStore, err := openRaftClusterCtlStore(raftStoreOpts{
 			Home: hd, NodeID: nodeID,
 			ClusterSrv: clusterSrv, ClusterTLS: clusterTLS,
 			Logger: logger, FSMOpts: []raftfsm.Option{raftfsm.WithOnApply(disp.Handle)},
@@ -279,7 +279,7 @@ func cleanOrchestrator(orch *orchestrator.Orchestrator, logger *slog.Logger) {
 
 // restartClusterWithStore configures the cluster server to use the given config
 // store's raft instance and starts the gRPC server.
-func restartClusterWithStore(store *raftSystemStore, proxy *system.StoreProxy, clusterSrv *cluster.Server, logger *slog.Logger) error {
+func restartClusterWithStore(store *raftClusterCtlStore, proxy *system.StoreProxy, clusterSrv *cluster.Server, logger *slog.Logger) error {
 	clusterSrv.SetApplyFn(func(ctx context.Context, data []byte) (uint64, error) {
 		return store.raftStore.ApplyRaw(data)
 	})
@@ -293,8 +293,8 @@ func restartClusterWithStore(store *raftSystemStore, proxy *system.StoreProxy, c
 
 // validateSingleNodeCluster checks that the proxy wraps a raft store and
 // the cluster has exactly one node (self).
-func validateSingleNodeCluster(proxy *system.StoreProxy, clusterSrv *cluster.Server, nodeID string) (*raftSystemStore, error) {
-	rcs, ok := proxy.Inner().(*raftSystemStore)
+func validateSingleNodeCluster(proxy *system.StoreProxy, clusterSrv *cluster.Server, nodeID string) (*raftClusterCtlStore, error) {
+	rcs, ok := proxy.Inner().(*raftClusterCtlStore)
 	if !ok {
 		return nil, errors.New("runtime cluster join requires raft system store")
 	}
@@ -383,7 +383,7 @@ func makeJoinClusterFunc(
 
 		// 8. Open new raft system store
 		logger.Info("opening new raft system store")
-		newStore, err := openRaftSystemStore(raftStoreOpts{
+		newStore, err := openRaftClusterCtlStore(raftStoreOpts{
 			Home: hd, NodeID: nodeID, JoinAddr: leaderAddr,
 			ClusterSrv: clusterSrv, ClusterTLS: clusterTLS,
 			Logger: logger, FSMOpts: []raftfsm.Option{raftfsm.WithOnApply(disp.Handle)},
@@ -410,7 +410,7 @@ func makeJoinClusterFunc(
 		// runtime single-node-to-cluster join — the joining node is
 		// new to the target cluster's Raft membership regardless of
 		// its own local state, so the safe shape is to enter as a
-		// learner and let the system-Raft promoter (gastrolog-2czh9)
+		// learner and let the cluster-ctl promoter (gastrolog-2czh9)
 		// upgrade to voter once caught up.
 		logger.Info("requesting cluster membership (as learner)", "leader_addr", leaderAddr)
 		joinCtx, joinCancel := context.WithTimeout(ctx, 30*time.Second)
@@ -452,7 +452,7 @@ func makeEvictionHandler(
 	return func() {
 		logger.Warn("evicted from cluster — reinitializing as single-node")
 
-		rcs, ok := proxy.Inner().(*raftSystemStore)
+		rcs, ok := proxy.Inner().(*raftClusterCtlStore)
 		if !ok {
 			logger.Error("eviction reinit: config store is not raft-backed, shutting down instead")
 			p, _ := os.FindProcess(os.Getpid())
@@ -492,7 +492,7 @@ func makeEvictionHandler(
 		}
 
 		logger.Info("eviction reinit: opening fresh raft system store")
-		newStore, err := openRaftSystemStore(raftStoreOpts{
+		newStore, err := openRaftClusterCtlStore(raftStoreOpts{
 			Home: hd, NodeID: nodeID,
 			ClusterSrv: clusterSrv, ClusterTLS: clusterTLS,
 			Logger: logger, FSMOpts: []raftfsm.Option{raftfsm.WithOnApply(disp.Handle)},

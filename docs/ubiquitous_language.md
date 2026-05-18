@@ -307,7 +307,7 @@ Nodes agreeing on what the cluster believes, via Raft.
   participates in Raft groups.
 
 - **NodeConfig** — the declarative (`ID`, `Name`) record for a node. Lives
-  in the system Raft's config. The `Name` is for humans; `ID` is canonical.
+  in the cluster-ctl Raft's config. The `Name` is for humans; `ID` is canonical.
 
 - **Peer** — another node, from this node's perspective. "Peer" is always
   relative; the same node is "local" to itself and "peer" to everyone else.
@@ -360,7 +360,7 @@ gRPC transport:
 ### Placement & membership
 
 - **VaultPlacement** — covered under [Storage](#1-storage); also a cluster
-  concept because the placement manager (in system Raft) decides which
+  concept because the placement manager (in cluster-ctl Raft) decides which
   nodes host each vault.
 
 - **Ingester placement** — the singleton-ingester assignment map in
@@ -368,11 +368,11 @@ gRPC transport:
   ingester; failover is automatic.
 
 - **Placement manager** — the subsystem that owns placement decisions. Runs
-  on the system Raft leader, reacts to node join/leave, vault create/delete,
+  on the cluster-ctl Raft leader, reacts to node join/leave, vault create/delete,
   and ingester changes.
 
 - **Dispatcher** — the subsystem that reacts to *applied* config changes
-  (from system Raft FSM) and drives their side effects into the local
+  (from cluster-ctl Raft FSM) and drives their side effects into the local
   orchestrator (register vault, build vault instance, start ingester, etc.).
 
 ### Transport
@@ -638,7 +638,7 @@ config store.
   - **Runtime** — cluster-managed (node membership, vault placements,
     ingester assignments, setup wizard dismissal).
 
-  Both are replicated via the system Raft group.
+  Both are replicated via the cluster-ctl Raft group.
 
 - **Store** (`system.Store`) — the read/write interface over `System`.
   Two implementations: in-memory (`sysmem`, for tests) and Raft-backed
@@ -713,7 +713,7 @@ Live on `Config` directly (not as entities):
 | cloud-backed     | cloud chunk       | Cloud-backed describes storage; "cloud chunk" conflates with archival state. |
 | archived         | cold              | "Archived" is the canonical flag; cloud storage-class is orthogonal. |
 | vault-ctl Raft   |                   | One Raft group per vault, authoritative for that vault's chunk metadata. Follows the `{scope}-ctl` naming pattern for control-plane Raft groups. |
-| cluster-ctl Raft | system Raft, config Raft, cluster Raft | One Raft group per cluster, authoritative for cluster-wide configuration. Establishes the `{scope}-ctl` pattern in pair with `vault-ctl Raft`. Rename of the on-disk identifier queued via gastrolog-5eu6v. |
+| cluster-ctl Raft | system Raft, config Raft, cluster Raft | One Raft group per cluster, authoritative for cluster-wide configuration. Pairs with `vault-ctl Raft` to form the `{scope}-ctl` pattern. The on-disk Raft group ID and type names were renamed from `system` → `cluster-ctl` in gastrolog-5eu6v. |
 | instance FSM     |                   | Per-vault chunk-metadata sub-FSM in `vaultctlfsm`. |
 | vault replication |                  | Record streams from leader to follower, per vault. |
 | ingester         | source, collector | "Ingester" is the proto name; "source" leaks from UI copy.          |

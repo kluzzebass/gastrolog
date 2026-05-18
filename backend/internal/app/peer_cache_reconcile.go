@@ -46,7 +46,7 @@ type scheduledJobRegistry interface {
 // whether to fatal or log-and-continue. On success, attaches a
 // human-readable description for the inspector's Scheduled view.
 //
-// `src` is typically the system-Raft cluster.Server (which
+// `src` is typically the cluster-ctl cluster.Server (which
 // satisfies memberSource via its Servers() method); `caches` is the
 // same set passed to observePeerRemovals so the observer (fast
 // path) and the reconciler (backstop) operate on identical state.

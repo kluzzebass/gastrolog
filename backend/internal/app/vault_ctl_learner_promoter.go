@@ -21,13 +21,13 @@ const (
 	vaultCtlLearnerPromoterJobName = "vault-ctl-learner-promoter"
 
 	// vaultCtlLearnerPromoterSchedule runs every 30 seconds. Mirrors
-	// the system-Raft learner promoter (gastrolog-2czh9): slow,
+	// the cluster-ctl learner promoter (gastrolog-2czh9): slow,
 	// per-vault-leader-only, low-churn. 6-field cron (with-seconds).
 	vaultCtlLearnerPromoterSchedule = "*/30 * * * * *"
 
 	// vaultCtlLearnerStabilityTicks is the number of consecutive ticks
 	// a learner must be observed at caught-up state before promotion.
-	// Same rationale as the system-Raft promoter: guards against
+	// Same rationale as the cluster-ctl promoter: guards against
 	// transient apply-index parity caused by gossip lag or a brief
 	// stall in the local apply pipeline.
 	vaultCtlLearnerStabilityTicks = 2
@@ -60,9 +60,9 @@ type vaultCtlRaftGroupAccess interface {
 // index for a stability window. Runs on every node; only proposes
 // AddVoter when this node is the leader of the per-vault group.
 //
-// Companion to the system-Raft learner promoter (gastrolog-2czh9)
+// Companion to the cluster-ctl learner promoter (gastrolog-2czh9)
 // and the JoinCluster-as-learner change (gastrolog-41sut). Unlike the
-// system promoter (single group, single leader), vault-ctl groups are
+// cluster-ctl promoter (single group, single leader), vault-ctl groups are
 // per-vault — each vault has its own leader, and any node might be
 // the leader for some vaults and a follower for others. The promoter
 // iterates every vault on each tick and only acts on groups it
@@ -82,7 +82,7 @@ type vaultCtlLearnerPromoter struct {
 
 	// catchupTicks tracks consecutive caught-up observations keyed by
 	// (vaultID, nodeID). A flicker on either dimension resets the
-	// count to zero — same contract as the system promoter.
+	// count to zero — same contract as the cluster-ctl promoter.
 	catchupTicks map[catchupKey]int
 }
 
@@ -103,7 +103,7 @@ func newVaultCtlLearnerPromoter(cfgStore system.Store, groupMgr vaultCtlRaftGrou
 	}
 }
 
-// tickOnce is the scheduled task body. Unlike the system-Raft
+// tickOnce is the scheduled task body. Unlike the cluster-ctl
 // promoter, there's no top-level leader gate: every node may lead
 // some vault-ctl groups and follow others, so the iteration runs
 // everywhere and the per-group leader check sits inside
@@ -123,7 +123,7 @@ func startVaultCtlLearnerPromoter(ctx context.Context, scheduler scheduledJobReg
 		return err
 	}
 	scheduler.Describe(vaultCtlLearnerPromoterJobName,
-		"Per-vault-ctl learner promotion. Runs on every node and iterates every vault-ctl group; the per-group leader gate inside the tick body only proposes AddVoter for groups this node currently leads. Each learner must hold its broadcast RaftAppliedIndex within tolerance of the group leader's applied index for a stability window before promotion. Companion to gastrolog-2czh9 (system-Raft promoter) and gastrolog-41sut (JoinCluster-as-learner). Original implementation gastrolog-gcbx7.")
+		"Per-vault-ctl learner promotion. Runs on every node and iterates every vault-ctl group; the per-group leader gate inside the tick body only proposes AddVoter for groups this node currently leads. Each learner must hold its broadcast RaftAppliedIndex within tolerance of the group leader's applied index for a stability window before promotion. Companion to gastrolog-2czh9 (cluster-ctl promoter) and gastrolog-41sut (JoinCluster-as-learner). Original implementation gastrolog-gcbx7.")
 	return nil
 }
 
@@ -191,7 +191,7 @@ func (p *vaultCtlLearnerPromoter) evaluateVault(vaultID glid.GLID, seen map[catc
 // counter for one vault-ctl group's learner. Promotes via AddVoter
 // when the counter reaches stabilityRequired. AddVoter failure
 // preserves the counter so the next tick retries without forcing
-// another full window — same rationale as the system promoter.
+// another full window — same rationale as the cluster-ctl promoter.
 func (p *vaultCtlLearnerPromoter) evaluateLearner(g *raftgroup.Group, vaultID glid.GLID, nodeID, addr string, leaderApplied uint64, key catchupKey) {
 	obs := observePeerVault(p.peerState, nodeID, vaultID)
 	if !obs.hasVaultEntry {
@@ -290,7 +290,7 @@ func peerVaultAppliedIndex(ps peerStatsReader, nodeID string, vaultID glid.GLID)
 }
 
 // Compile-time check that *cluster.PeerState satisfies peerStatsReader.
-// peerStatsReader is defined in system_raft_learner_promoter.go.
+// peerStatsReader is defined in cluster_ctl_learner_promoter.go.
 var _ peerStatsReader = (*cluster.PeerState)(nil)
 
 // vaultStatsByID is exported so tests can construct a NodeStats with

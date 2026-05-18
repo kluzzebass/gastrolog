@@ -179,7 +179,7 @@ func (s *SystemServer) buildFullSystem(ctx context.Context) (*apiv1.GetSystemRes
 	return resp, nil
 }
 
-// currentSystemRaftIndex returns the committed system Raft log index exposed on GetSystem.
+// currentSystemRaftIndex returns the committed cluster-ctl Raft log index exposed on GetSystem.
 func (s *SystemServer) currentSystemRaftIndex() uint64 {
 	if s.configSignal == nil {
 		return 0

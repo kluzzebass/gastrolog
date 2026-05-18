@@ -78,12 +78,12 @@ func (m *mockPeerStats) Get(senderID string) *gastrologv1.NodeStats {
 	return nil
 }
 
-func newPromoterForTest(srv raftMembership, ps peerStatsReader) *systemLearnerPromoter {
+func newPromoterForTest(srv raftMembership, ps peerStatsReader) *clusterCtlLearnerPromoter {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return newSystemLearnerPromoter(srv, ps, logger)
+	return newClusterCtlLearnerPromoter(srv, ps, logger)
 }
 
-func TestSystemLearnerPromoter_NoLearners_NoOp(t *testing.T) {
+func TestClusterCtlLearnerPromoter_NoLearners_NoOp(t *testing.T) {
 	t.Parallel()
 	srv := &mockRaftMembership{
 		isLeader:     true,
@@ -103,7 +103,7 @@ func TestSystemLearnerPromoter_NoLearners_NoOp(t *testing.T) {
 	}
 }
 
-func TestSystemLearnerPromoter_CaughtUpLearnerPromotedAfterStabilityWindow(t *testing.T) {
+func TestClusterCtlLearnerPromoter_CaughtUpLearnerPromotedAfterStabilityWindow(t *testing.T) {
 	t.Parallel()
 	srv := &mockRaftMembership{
 		isLeader:     true,
@@ -140,7 +140,7 @@ func TestSystemLearnerPromoter_CaughtUpLearnerPromotedAfterStabilityWindow(t *te
 	}
 }
 
-func TestSystemLearnerPromoter_LaggingLearnerHeldOff(t *testing.T) {
+func TestClusterCtlLearnerPromoter_LaggingLearnerHeldOff(t *testing.T) {
 	t.Parallel()
 	srv := &mockRaftMembership{
 		isLeader:     true,
@@ -165,12 +165,12 @@ func TestSystemLearnerPromoter_LaggingLearnerHeldOff(t *testing.T) {
 	}
 }
 
-// TestSystemLearnerPromoter_TransientLagResets verifies the stability
+// TestClusterCtlLearnerPromoter_TransientLagResets verifies the stability
 // counter resets to zero on a single non-caught-up tick. A flaky
 // learner that flickers between caught-up and lagging must complete
 // a CONTIGUOUS stability window — never sneaking promotion via
 // intermittent observations.
-func TestSystemLearnerPromoter_TransientLagResets(t *testing.T) {
+func TestClusterCtlLearnerPromoter_TransientLagResets(t *testing.T) {
 	t.Parallel()
 	srv := &mockRaftMembership{
 		isLeader:     true,
@@ -210,12 +210,12 @@ func TestSystemLearnerPromoter_TransientLagResets(t *testing.T) {
 	}
 }
 
-// TestSystemLearnerPromoter_NoPeerStatsBlocksPromotion verifies that a
+// TestClusterCtlLearnerPromoter_NoPeerStatsBlocksPromotion verifies that a
 // learner with no recent NodeStats broadcast (no PeerState entry) is
 // never promoted — even if the leader's own applied_index is 0 (which
 // the early-out for "no log applied yet" guards), the absent stats
 // imply the leader has no evidence to act on.
-func TestSystemLearnerPromoter_NoPeerStatsBlocksPromotion(t *testing.T) {
+func TestClusterCtlLearnerPromoter_NoPeerStatsBlocksPromotion(t *testing.T) {
 	t.Parallel()
 	srv := &mockRaftMembership{
 		isLeader:     true,
@@ -237,13 +237,13 @@ func TestSystemLearnerPromoter_NoPeerStatsBlocksPromotion(t *testing.T) {
 	}
 }
 
-// TestSystemLearnerPromoter_StagingTreatedAsLearner verifies the
+// TestClusterCtlLearnerPromoter_StagingTreatedAsLearner verifies the
 // "Staging" suffrage (hraft's transient state during AddVoter) is
 // treated as a learner — Staging is what hashicorp/raft reports
 // during the brief window between AddNonvoter and the membership
 // commit landing. The promoter must not race itself by skipping
 // these and then re-issuing AddVoter.
-func TestSystemLearnerPromoter_StagingTreatedAsLearner(t *testing.T) {
+func TestClusterCtlLearnerPromoter_StagingTreatedAsLearner(t *testing.T) {
 	t.Parallel()
 	srv := &mockRaftMembership{
 		isLeader:     true,
@@ -262,11 +262,11 @@ func TestSystemLearnerPromoter_StagingTreatedAsLearner(t *testing.T) {
 	}
 }
 
-// TestSystemLearnerPromoter_GoneLearnerCounterCleaned verifies that
+// TestClusterCtlLearnerPromoter_GoneLearnerCounterCleaned verifies that
 // when a learner leaves the configuration (promoted via another path,
 // or removed entirely) its tick-counter entry is cleaned up — the
 // map must not grow unboundedly across cluster scale-ups.
-func TestSystemLearnerPromoter_GoneLearnerCounterCleaned(t *testing.T) {
+func TestClusterCtlLearnerPromoter_GoneLearnerCounterCleaned(t *testing.T) {
 	t.Parallel()
 	srv := &mockRaftMembership{
 		isLeader:     true,
@@ -294,11 +294,11 @@ func TestSystemLearnerPromoter_GoneLearnerCounterCleaned(t *testing.T) {
 	}
 }
 
-// TestSystemLearnerPromoter_AddVoterFailDoesNotResetCounter verifies
+// TestClusterCtlLearnerPromoter_AddVoterFailDoesNotResetCounter verifies
 // that a transient AddVoter failure (Raft quorum hiccup, slow commit)
 // leaves the catchup-tick counter intact so the next tick can retry
 // without forcing the operator through another full stability window.
-func TestSystemLearnerPromoter_AddVoterFailDoesNotResetCounter(t *testing.T) {
+func TestClusterCtlLearnerPromoter_AddVoterFailDoesNotResetCounter(t *testing.T) {
 	t.Parallel()
 	srv := &mockRaftMembership{
 		isLeader:     true,
@@ -350,7 +350,7 @@ func TestLocalAppliedIndex_ParsesStats(t *testing.T) {
 }
 
 // TestTickOnce_NonLeaderIsNoOp verifies the scheduler can fire the
-// promoter task on every node — only the system-Raft leader runs the
+// promoter task on every node — only the cluster-ctl leader runs the
 // actual promotion logic. Followers must short-circuit before any
 // catchup bookkeeping or AddVoter call.
 func TestTickOnce_NonLeaderIsNoOp(t *testing.T) {
@@ -375,11 +375,11 @@ func TestTickOnce_NonLeaderIsNoOp(t *testing.T) {
 	}
 }
 
-// TestStartSystemLearnerPromoter_RegistersOperatorVisibleJob verifies
+// TestStartClusterCtlLearnerPromoter_RegistersOperatorVisibleJob verifies
 // the promoter ships as a proper scheduled job: name + cron set, and
 // a non-empty Describe text so the inspector shows context to the
 // operator.
-func TestStartSystemLearnerPromoter_RegistersOperatorVisibleJob(t *testing.T) {
+func TestStartClusterCtlLearnerPromoter_RegistersOperatorVisibleJob(t *testing.T) {
 	t.Parallel()
 	srv := &mockRaftMembership{
 		isLeader:     true,
@@ -393,14 +393,14 @@ func TestStartSystemLearnerPromoter_RegistersOperatorVisibleJob(t *testing.T) {
 	p := newPromoterForTest(srv, ps)
 	sched := &fakeScheduler{}
 
-	if err := startSystemLearnerPromoter(context.Background(), sched, p); err != nil {
-		t.Fatalf("startSystemLearnerPromoter: %v", err)
+	if err := startClusterCtlLearnerPromoter(context.Background(), sched, p); err != nil {
+		t.Fatalf("startClusterCtlLearnerPromoter: %v", err)
 	}
-	if sched.addJobName != systemLearnerPromoterJobName {
-		t.Errorf("AddJob name: got %q, want %q", sched.addJobName, systemLearnerPromoterJobName)
+	if sched.addJobName != clusterCtlLearnerPromoterJobName {
+		t.Errorf("AddJob name: got %q, want %q", sched.addJobName, clusterCtlLearnerPromoterJobName)
 	}
-	if sched.addJobCron != systemLearnerPromoterSchedule {
-		t.Errorf("AddJob cron: got %q, want %q", sched.addJobCron, systemLearnerPromoterSchedule)
+	if sched.addJobCron != clusterCtlLearnerPromoterSchedule {
+		t.Errorf("AddJob cron: got %q, want %q", sched.addJobCron, clusterCtlLearnerPromoterSchedule)
 	}
 	if sched.describeMessage == "" {
 		t.Error("Describe message empty — operator inspector will show no context")
@@ -419,16 +419,16 @@ func TestStartSystemLearnerPromoter_RegistersOperatorVisibleJob(t *testing.T) {
 	}
 }
 
-// TestStartSystemLearnerPromoter_PropagatesAddJobError verifies the
+// TestStartClusterCtlLearnerPromoter_PropagatesAddJobError verifies the
 // caller sees an AddJob failure (e.g. duplicate name).
-func TestStartSystemLearnerPromoter_PropagatesAddJobError(t *testing.T) {
+func TestStartClusterCtlLearnerPromoter_PropagatesAddJobError(t *testing.T) {
 	t.Parallel()
 	srv := &mockRaftMembership{isLeader: true, appliedIndex: 1}
 	ps := &mockPeerStats{byNode: map[string]uint64{}}
 	p := newPromoterForTest(srv, ps)
 	sched := &fakeScheduler{addJobErr: errFakeMember}
 
-	if err := startSystemLearnerPromoter(context.Background(), sched, p); err == nil {
+	if err := startClusterCtlLearnerPromoter(context.Background(), sched, p); err == nil {
 		t.Fatal("expected AddJob error to propagate")
 	}
 }

@@ -24,7 +24,7 @@ import (
 // have the most subtle behavior: the peerVaultAppliedIndex helper
 // (which has to match VaultStats.Id bytes against a glid.GLID),
 // vault-list enumeration, and stale-counter cleanup. The catchup +
-// stability machinery is identical to the system-Raft promoter
+// stability machinery is identical to the cluster-ctl promoter
 // (already exhaustively tested in system_raft_learner_promoter_test.go).
 
 // fakePeerStats implements peerStatsReader with configurable returns.

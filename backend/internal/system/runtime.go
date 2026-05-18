@@ -3,7 +3,7 @@ package system
 import "gastrolog/internal/glid"
 
 // Runtime holds cluster-managed state — things the system controls
-// autonomously, not the operator. Replicated via the system Raft group
+// autonomously, not the operator. Replicated via the cluster-ctl Raft group
 // alongside Config, but logically separate: an operator never edits
 // Runtime directly.
 type Runtime struct {
