@@ -65,6 +65,15 @@ service VaultService {
   // is carried in the stream itself. Same pattern as WatchConfig.
   // See gastrolog-1jijm.
   rpc WatchChunks(WatchChunksRequest) returns (stream WatchChunksResponse);
+
+  // RepatriateOrphan re-introduces a sealed local chunk into the
+  // vault-ctl FSM manifest. Operator-driven recovery for "unknown
+  // orphans" — sealed chunks present on local disk but absent from
+  // the FSM (post-restore-from-backup, FSM-glitch, etc.). Reconstructs
+  // the ManifestEntry from the local chunk's idx.log headers and
+  // proposes CmdRepatriateChunk to the vault-ctl FSM. Refuses if the
+  // chunk is already FSM-tracked or tombstoned. See gastrolog-32bf2.
+  rpc RepatriateOrphan(RepatriateOrphanRequest) returns (RepatriateOrphanResponse);
 }
 
 message ListVaultsRequest {}
@@ -430,3 +439,14 @@ message WatchChunksResponse {
   // events from the connected node itself.
   bytes node_id = 7;
 }
+
+// RepatriateOrphanRequest names a sealed local chunk to re-introduce
+// into the vault-ctl FSM manifest. The chunk must exist on the
+// receiving node's local disk for the named vault; the call is rejected
+// otherwise. See gastrolog-32bf2.
+message RepatriateOrphanRequest {
+  string vault = 1;
+  bytes chunk_id = 2;
+}
+
+message RepatriateOrphanResponse {}

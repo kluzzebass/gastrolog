@@ -317,6 +317,43 @@ func (s *VaultServer) RestoreChunk(
 	return connect.NewResponse(&apiv1.RestoreChunkResponse{}), nil
 }
 
+// RepatriateOrphan re-introduces a sealed local chunk into the vault-ctl
+// FSM manifest. Routing: RouteTargeted — the interceptor forwards to the
+// vault-owning node. Orphan chunks are local to a specific node's disk,
+// so the FSM proposal has to originate from that node.
+//
+// Maps orchestrator-level errors to Connect codes:
+//   - ErrVaultNotFound, ErrOrphanNotFound → CodeNotFound
+//   - ErrOrphanNotEligible              → CodeFailedPrecondition
+//   - anything else                      → CodeInternal
+//
+// See gastrolog-32bf2.
+func (s *VaultServer) RepatriateOrphan(
+	ctx context.Context,
+	req *connect.Request[apiv1.RepatriateOrphanRequest],
+) (*connect.Response[apiv1.RepatriateOrphanResponse], error) {
+	vaultID, connErr := parseUUID(req.Msg.Vault)
+	if connErr != nil {
+		return nil, connErr
+	}
+	chunkID, err := parseProtoChunkID(req.Msg.ChunkId)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid chunk_id: %w", err))
+	}
+
+	if err := s.orch.RepatriateOrphan(vaultID, chunkID); err != nil {
+		switch {
+		case errors.Is(err, orchestrator.ErrVaultNotFound), errors.Is(err, orchestrator.ErrOrphanNotFound):
+			return nil, connect.NewError(connect.CodeNotFound, err)
+		case errors.Is(err, orchestrator.ErrOrphanNotEligible):
+			return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+		default:
+			return nil, errInternal(err)
+		}
+	}
+	return connect.NewResponse(&apiv1.RepatriateOrphanResponse{}), nil
+}
+
 // resolveRestoreDefaults fills in restore speed and days from cloud service system.
 func (s *VaultServer) resolveRestoreDefaults(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, reqSpeed string, reqDays int) (string, int) {
 	speed, days := reqSpeed, reqDays

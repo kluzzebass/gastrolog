@@ -1,6 +1,7 @@
 package vaultctlfsm
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -78,6 +79,15 @@ const (
 	// State == Sealed; the Sealing entry is not yet a finished chunk
 	// even though it's no longer accepting writes. See gastrolog-1huz5.
 	CmdBeginSeal Command = 12
+
+	// CmdRepatriateChunk re-introduces a sealed chunk's manifest entry
+	// when the FSM has lost it but a local replica still exists on
+	// disk (operator-driven recovery from FSM glitches, restore-from-
+	// backup desync, etc.). Payload is the full ManifestEntry
+	// reconstructed from the local chunk's idx.log headers. Apply
+	// inserts the entry in Sealed state, refusing if the entry
+	// already exists or is tombstoned. See gastrolog-32bf2.
+	CmdRepatriateChunk Command = 13
 )
 
 // ManifestEntry holds the full metadata for one chunk in this vault's
@@ -569,6 +579,12 @@ func (f *FSM) applyLocked(cmd Command, payload []byte) (any, applyEffects) {
 		result = f.applyAttachOffsets(payload)
 	case CmdBeginSeal:
 		result = f.applyBeginSeal(payload)
+	case CmdRepatriateChunk:
+		result = f.applyRepatriate(payload)
+		// Surface to onCreate subscribers so post-create wiring
+		// (retention, indexes, etc.) reacts identically to a normal
+		// CmdCreateChunk path.
+		fx.createdEntry = f.captureEntry(result, payload)
 	default:
 		result = fmt.Errorf("unknown chunk FSM command: %d", cmd)
 	}
@@ -755,6 +771,52 @@ func (f *FSM) applyBeginSeal(data []byte) error {
 		return nil
 	}
 	e.State = chunk.ChunkStateSealing
+	return nil
+}
+
+// RepatriateChunk payload: a full ManifestEntry encoded via
+// encodeEntry's 123-byte fixed layout. Reuses the snapshot entry
+// format so this command and snapshot replay share one schema —
+// any field added to ManifestEntry only needs the entry codec
+// updated once.
+//
+// Apply semantics:
+//   - Refuse if the chunk is already in the manifest. Repatriation
+//     is a recovery path for orphan files the FSM has lost; if the
+//     entry exists, normal lifecycle commands should handle it.
+//   - Refuse if tombstoned. The cluster has explicitly forgotten
+//     this chunk; recreating it would resurrect a finalize-deleted
+//     entry, the exact failure mode CmdCreateChunk's tombstone
+//     guard prevents. Operators must clear the tombstone (out of
+//     scope here — likely a separate `cluster purge-tombstone`
+//     verb or a destructive `--force` flag).
+//   - Otherwise insert the entry verbatim, with State forced to
+//     Sealed regardless of what the payload says — repatriation
+//     only handles sealed chunks (active-chunk state is in-memory
+//     on the leader, not reconstructable from idx.log alone).
+//
+// See gastrolog-32bf2.
+func (f *FSM) applyRepatriate(data []byte) error {
+	if len(data) < entrySize {
+		return fmt.Errorf("repatriate chunk: payload too short (%d bytes)", len(data))
+	}
+	entries, err := readEntriesSection(bytes.NewReader(data[:entrySize]), entrySize)
+	if err != nil {
+		return fmt.Errorf("repatriate chunk: decode entry: %w", err)
+	}
+	if len(entries) != 1 {
+		return fmt.Errorf("repatriate chunk: expected 1 entry, got %d", len(entries))
+	}
+	e := entries[0]
+	if _, dead := f.tombstones[e.ID]; dead {
+		return fmt.Errorf("repatriate chunk %s: refused (tombstoned)", e.ID)
+	}
+	if _, exists := f.chunks[e.ID]; exists {
+		return fmt.Errorf("repatriate chunk %s: refused (already in manifest)", e.ID)
+	}
+	e.State = chunk.ChunkStateSealed
+	entry := e
+	f.chunks[entry.ID] = &entry
 	return nil
 }
 
@@ -980,6 +1042,23 @@ func MarshalRetentionPending(id chunk.ChunkID) []byte {
 	buf[0] = byte(CmdRetentionPending)
 	copy(buf[1:17], id[:])
 	return buf
+}
+
+// MarshalRepatriateChunk builds the Raft log data for a
+// RepatriateChunk command. Payload is the full ManifestEntry
+// encoded via the same fixed-size layout the snapshot uses (123
+// bytes), so the FSM apply path and snapshot replay share one
+// schema. State is forced to ChunkStateSealed on apply regardless
+// of what `entry.State` says — only sealed chunks are
+// repatriatable. See gastrolog-32bf2.
+func MarshalRepatriateChunk(entry ManifestEntry) ([]byte, error) {
+	buf := make([]byte, 1, 1+entrySize)
+	buf[0] = byte(CmdRepatriateChunk)
+	w := bytes.NewBuffer(buf)
+	if err := encodeEntry(w, &entry); err != nil {
+		return nil, fmt.Errorf("encode manifest entry: %w", err)
+	}
+	return w.Bytes(), nil
 }
 
 // ---------- Snapshot ----------

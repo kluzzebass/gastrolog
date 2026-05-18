@@ -185,6 +185,7 @@ func main() {
 		cli.NewInspectCommand(),
 		cli.NewArchiveCommand(),
 		cli.NewRestoreCommand(),
+		cli.NewRepatriateCommand(),
 		cli.NewSealCommand(),
 		cli.NewReindexCommand(),
 		cli.NewPauseCommand(),

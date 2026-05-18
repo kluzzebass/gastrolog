@@ -282,6 +282,8 @@ func commandName(cmd vaultctlfsm.Command) string {
 		return "CmdAttachOffsets"
 	case vaultctlfsm.CmdBeginSeal:
 		return "CmdBeginSeal"
+	case vaultctlfsm.CmdRepatriateChunk:
+		return "CmdRepatriateChunk"
 	default:
 		return fmt.Sprintf("CmdUnknown(%d)", cmd)
 	}
