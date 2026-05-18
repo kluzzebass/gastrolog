@@ -11,7 +11,9 @@ import (
 	"gastrolog/internal/glid"
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -721,11 +723,18 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 
 	// PeerState TTL must be a multiple of the **heartbeat** cadence (not
 	// the heavy NodeStats cadence) so paused-peer detection is fast.
-	// 4× heartbeat: tolerate up to 3 missed heartbeats before offline,
-	// matching the safety factor 5oofa established for the 5s broadcast.
-	// Default: 1s heartbeat × 4 = 4s detection (was 20s when keyed off
-	// the 5s NodeStats broadcast). See gastrolog-2kio8.
-	peerState := cluster.NewPeerState(4 * heartbeatInterval)
+	// Default 8× heartbeat: tolerate up to 7 missed heartbeats before
+	// offline. The previous 4× setting caused user-visible UI flapping
+	// (gastrolog-4iacg): a single late broadcast — network blip, GC
+	// pause, scheduler hiccup — would lapse the TTL, the inspector
+	// would flip the peer offline, the next broadcast would restore
+	// it, and the cycle repeated every ~5 seconds. 8× absorbs single
+	// missed broadcasts; networks with worse jitter can tune via
+	// GLOG_PEER_TTL_MULTIPLIER. Original 4× rationale was the safety
+	// factor from gastrolog-2kio8's 5s broadcast / 20s shape — that
+	// matched theoretical missed-broadcast math but underestimated
+	// real-world jitter on 1s heartbeats.
+	peerState := cluster.NewPeerState(peerTTLMultiplier(logger) * heartbeatInterval)
 	clusterSrv.Subscribe(peerState.HandleBroadcast)
 
 	peerJobState := cluster.NewPeerJobState(20 * time.Second)
@@ -1149,11 +1158,36 @@ func loadMaxConcurrentJobs(ctx context.Context, cfgStore system.Store) int {
 	return ss.Scheduler.MaxConcurrentJobs
 }
 
+// defaultPeerTTLMultiplier is the multiplier applied to the heartbeat
+// interval to compute the PeerState TTL. 8× tolerates up to 7 missed
+// heartbeats; raised from the original 4× in gastrolog-4iacg because
+// the tighter window caused UI flapping on single late broadcasts.
+const defaultPeerTTLMultiplier = 8
+
+// peerTTLMultiplier returns the PeerState TTL multiplier, sourced
+// from GLOG_PEER_TTL_MULTIPLIER if set to a positive integer,
+// otherwise defaultPeerTTLMultiplier. Operators on pathological
+// networks can raise this to absorb worse jitter without paying
+// proportional detection latency on healthy clusters.
+func peerTTLMultiplier(logger *slog.Logger) time.Duration {
+	v := os.Getenv("GLOG_PEER_TTL_MULTIPLIER")
+	if v == "" {
+		return defaultPeerTTLMultiplier
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		logger.Warn("invalid GLOG_PEER_TTL_MULTIPLIER, using default",
+			"value", v, "default", defaultPeerTTLMultiplier)
+		return defaultPeerTTLMultiplier
+	}
+	return time.Duration(n)
+}
+
 // loadClusterIntervals reads the broadcast and heartbeat intervals from
 // configured server settings. Either may be zero on return — the
 // StatsCollector applies its own defaults (5s broadcast, 1s heartbeat).
 // The heartbeat is forced to a sane minimum here too so the PeerState
-// TTL (4× heartbeat) never collapses to 0.
+// TTL (multiplier × heartbeat) never collapses to 0.
 func loadClusterIntervals(ctx context.Context, cfgStore system.Store) (broadcast, heartbeat time.Duration) {
 	ss, err := cfgStore.LoadServerSettings(ctx)
 	if err != nil {
