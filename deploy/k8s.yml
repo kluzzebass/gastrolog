@@ -269,3 +269,29 @@ spec:
         resources:
           requests:
             storage: 10Gi
+# PodDisruptionBudget caps voluntary pod disruptions so a rolling
+# restart or node drain can't take the cluster below Raft quorum.
+# maxUnavailable: 1 is the conservative default — safe for any N≥3,
+# since losing 1 voter leaves (N-1) ≥ ceil(N/2) for the minimum
+# replica set this manifest supports. Operators with higher
+# replication factor can raise this to floor((N-1)/2) to drain
+# faster:
+#   3 nodes → 1 (the default)
+#   5 nodes → 2
+#   7 nodes → 3
+#   9 nodes → 4
+# See gastrolog-57u9l, part of the FSM-authority migration epic
+# (gastrolog-2i1g9). Note this protects against voluntary
+# disruptions only (operator-initiated drains, rolling restarts);
+# involuntary loss — node crash, network partition — is governed
+# by the cluster's own quorum semantics.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: gastrolog
+  namespace: gastrolog
+spec:
+  selector:
+    matchLabels:
+      app: gastrolog
+  maxUnavailable: 1
