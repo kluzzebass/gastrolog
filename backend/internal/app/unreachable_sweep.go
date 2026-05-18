@@ -231,13 +231,18 @@ func (s *unreachableSweep) tick(ctx context.Context) {
 			if elapsed <= s.threshold {
 				continue
 			}
-			if err := s.cfgStore.SetNodeState(ctx, n.ID, system.NodeStateUnreachable, now); err != nil {
+			// StateSince records when the node actually went silent,
+			// not when the sweep noticed. Anchors the inspector's
+			// "unreachable Xm" duration to the same moment the
+			// client-side offline tracker started counting
+			// (gastrolog-778iv) so the badge transition is seamless.
+			if err := s.cfgStore.SetNodeState(ctx, n.ID, system.NodeStateUnreachable, lastSeen); err != nil {
 				s.logger.Warn("unreachable_sweep: propose Unreachable",
 					"node", id, "elapsed", elapsed, "error", err)
 				continue
 			}
 			s.logger.Info("unreachable_sweep: node → Unreachable",
-				"node", id, "elapsed", elapsed)
+				"node", id, "elapsed", elapsed, "state_since", lastSeen)
 		case system.NodeStateUnreachable:
 			if lastSeen.IsZero() {
 				continue
