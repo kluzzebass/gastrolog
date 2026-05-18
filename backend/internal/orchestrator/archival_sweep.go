@@ -108,23 +108,69 @@ func (o *Orchestrator) archivalSweepAll() {
 }
 
 // archivalSweepVault evaluates one vault's cloud chunks against the transition chain.
+//
+// Iteration domain: the vault-ctl FSM manifest (cluster-coordinated
+// truth). The local Chunks.List() view is the per-chunk routing
+// input — "does this node hold a replica of this chunk?" — not the
+// iteration source. This closes audit finding F4 (gastrolog-b0o94):
+// previously the sweep walked local disk and overlaid FSM, which
+// could skip chunks the FSM knows about but local disk lost (post-
+// recovery, partial repatriation), or process chunks the local
+// disk has but the FSM no longer recognizes (orphans).
+//
+// Memory-mode vaults / no GroupManager have no FSM manifest at all
+// (ListClusterChunkMetas returns nil); fall back to the legacy
+// local-iteration + OverlayFromFSM path so single-node tests stay
+// unchanged.
 func (o *Orchestrator) archivalSweepVault(vaultInst *VaultInstance, cs *system.CloudService, now time.Time) {
-	metas, err := vaultInst.Chunks.List()
-	if err != nil {
-		o.retentionLogger.Warn("archival sweep: list chunks failed", "vault", vaultInst.VaultID, "error", err)
-		return
-	}
-
 	archiver, ok := vaultInst.Chunks.(chunk.ChunkArchiver)
 	if !ok {
 		return
 	}
 
+	fsmMetas, err := o.ListClusterChunkMetas(vaultInst.VaultID)
+	if err != nil {
+		o.retentionLogger.Warn("archival sweep: list FSM chunks failed", "vault", vaultInst.VaultID, "error", err)
+		return
+	}
+
+	var metas []chunk.ChunkMeta
+	var localIDs map[chunk.ChunkID]struct{}
+	if fsmMetas != nil {
+		// FSM is the iteration domain. Build a local-holder set so
+		// the per-chunk routing decision is a quick map lookup.
+		metas = fsmMetas
+		localMetas, err := vaultInst.Chunks.List()
+		if err != nil {
+			o.retentionLogger.Warn("archival sweep: list local chunks failed", "vault", vaultInst.VaultID, "error", err)
+			return
+		}
+		localIDs = make(map[chunk.ChunkID]struct{}, len(localMetas))
+		for _, lm := range localMetas {
+			localIDs[lm.ID] = struct{}{}
+		}
+	} else {
+		// No FSM available (memory mode / no GroupManager). Iterate
+		// local disk and overlay FSM per-chunk, preserving the legacy
+		// path so single-node test setups stay unchanged.
+		metas, err = vaultInst.Chunks.List()
+		if err != nil {
+			o.retentionLogger.Warn("archival sweep: list chunks failed", "vault", vaultInst.VaultID, "error", err)
+			return
+		}
+	}
+
 	for _, m := range metas {
-		// Phase 3 (gastrolog-1huz5): gate on FSM-Sealed; archive only
-		// chunks whose GLCB has been committed. Sealing chunks have
-		// closed active-form files but no GLCB yet.
-		if vaultInst.OverlayFromFSM != nil {
+		if localIDs != nil {
+			// FSM-iteration path: skip chunks this node doesn't hold —
+			// another replica node will archive its own copy.
+			if _, holdsLocally := localIDs[m.ID]; !holdsLocally {
+				continue
+			}
+		} else if vaultInst.OverlayFromFSM != nil {
+			// Legacy path: overlay FSM truth onto disk-derived meta.
+			// gastrolog-1huz5 phase 3: gate on FSM-Sealed; archive only
+			// chunks whose GLCB has been committed.
 			m = vaultInst.OverlayFromFSM(m)
 		}
 		if !m.Sealed || !m.CloudBacked {
