@@ -72,8 +72,11 @@ func TestUnreachableSweep_LiveToUnreachable(t *testing.T) {
 	if n.EffectiveState() != system.NodeStateUnreachable {
 		t.Fatalf("expected Unreachable, got %s", n.EffectiveState())
 	}
-	if !n.StateSince.Equal(time.Unix(2000, 0)) {
-		t.Fatalf("expected StateSince=2000, got %v", n.StateSince)
+	// gastrolog-778iv: StateSince anchors to lastSeen, not now, so the
+	// inspector's "unreachable Xm" duration matches the moment the
+	// peer actually went silent.
+	if !n.StateSince.Equal(time.Unix(1000, 0)) {
+		t.Fatalf("expected StateSince=lastSeen=1000, got %v", n.StateSince)
 	}
 }
 

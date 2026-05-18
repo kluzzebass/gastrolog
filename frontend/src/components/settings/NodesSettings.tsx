@@ -10,6 +10,7 @@ import { useRemoveNode } from "../../api/hooks/useRemoveNode";
 import { ClusterNodeRole, ClusterNodeSuffrage } from "../../api/gen/gastrolog/v1/lifecycle_pb";
 import { NodeState, type Timestamp } from "../../api/model/node";
 import { NodeStateBadge } from "../NodeStateBadge";
+import { OfflineBadge } from "../OfflineBadge";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { useEditState } from "../../hooks/useEditState";
@@ -133,8 +134,8 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
                   {clusterEnabled && (
                     <NodeStateBadge state={node.state} stateSince={node.stateSince} dark={dark} />
                   )}
-                  {clusterEnabled && !isLocal && !node.hasStats && (
-                    <Badge variant="error" dark={dark}>offline</Badge>
+                  {clusterEnabled && !isLocal && node.state === NodeState.LIVE && (
+                    <OfflineBadge nodeId={node.id} isOffline={!node.hasStats} dark={dark} />
                   )}
                   {clusterEnabled && node.role !== ClusterNodeRole.UNSPECIFIED && (
                     <Badge variant={node.isLeader ? "copper" : "muted"} dark={dark}>

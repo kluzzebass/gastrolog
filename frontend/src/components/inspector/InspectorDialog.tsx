@@ -6,6 +6,8 @@ import { toastError } from "../Toast";
 import { Dialog } from "../Dialog";
 import { VaultsIcon, IngestersIcon, JobsIcon, MetricsIcon, ClusterIcon, RouteIcon } from "../icons";
 import { Badge } from "../Badge";
+import { OfflineBadge } from "../OfflineBadge";
+import { NodeState } from "../../api/model/node";
 import { ModeToggle } from "./ModeToggle";
 import type { InspectorMode } from "./ModeToggle";
 import { NodeDetailPane } from "./NodeDetailPane";
@@ -189,8 +191,8 @@ export function InspectorDialog({
                     {node.name}
                   </span>
                   <span className="ml-auto flex items-center gap-1">
-                    {!isLocal && !node.isOnline && (
-                      <Badge variant="error" dark={dark}>offline</Badge>
+                    {!isLocal && node.state === NodeState.LIVE && (
+                      <OfflineBadge nodeId={node.id} isOffline={!node.isOnline} dark={dark} />
                     )}
                     {node.isLeader && (
                       <Badge variant="copper" dark={dark}>leader</Badge>
