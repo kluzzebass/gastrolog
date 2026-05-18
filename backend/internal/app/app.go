@@ -426,6 +426,13 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 			}
 		}
 
+		// Periodic placement-reconcile fallback (gastrolog-1ia46). The
+		// event-driven reconciles (leadership change, manual Trigger
+		// from RPC handlers) stay in pm.Run above; this scheduled
+		// job pokes pm.Trigger() as the periodic safety net so the
+		// fallback cadence is visible in the inspector.
+		register("vault-placement-reconcile", startPlacementReconcile(ctx, orch.Scheduler(), pm))
+
 		// Heartbeat-driven node-state sweep (gastrolog-39m2k). Flips
 		// NodeConfig.State between Live and Unreachable based on
 		// PeerState freshness so the placement guard sees soft-offline

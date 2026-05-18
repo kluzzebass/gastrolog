@@ -7,7 +7,6 @@ import (
 	"math/rand"
 	"slices"
 	"strings"
-	"time"
 
 	"gastrolog/internal/alert"
 	"gastrolog/internal/cluster"
@@ -17,7 +16,18 @@ import (
 	hraft "github.com/hashicorp/raft"
 )
 
-const placementInterval = 15 * time.Second
+const (
+	// placementReconcileJobName is the operator-visible name for the
+	// periodic placement-reconcile fallback shown in the inspector's
+	// Scheduled view. Keep stable across releases.
+	placementReconcileJobName = "vault-placement-reconcile"
+
+	// placementReconcileSchedule runs every 15 seconds. 6-field cron
+	// (with-seconds). The leadership-change observer + manual Trigger
+	// channel handle event-driven reconciles; this scheduled tick is
+	// the periodic safety net for cases neither path catches.
+	placementReconcileSchedule = "*/15 * * * * *"
+)
 
 // placementManager assigns vaults to nodes automatically.
 // Runs on every node but only acts when this node is the Raft leader.
@@ -33,14 +43,15 @@ type placementManager struct {
 	triggerCh   chan struct{} // poked to run reconcile immediately
 }
 
-// Run blocks until ctx is cancelled. When this node is leader, it runs
-// reconcile periodically and on leadership transitions.
+// Run blocks until ctx is cancelled. Handles the two event-driven
+// reconcile sources — leadership transitions (via the Raft observer
+// channel) and manual triggers (Trigger() / RPC handlers via
+// triggerCh). The periodic-fallback cadence is NOT in this loop
+// anymore; that piece lives in startPlacementReconcile so it shows
+// up in the inspector's Scheduled view (gastrolog-1ia46).
 func (pm *placementManager) Run(ctx context.Context) {
 	leaderCh := make(chan hraft.Observation, 4)
 	pm.clusterSrv.RegisterLeaderObserver(leaderCh)
-
-	ticker := time.NewTicker(placementInterval)
-	defer ticker.Stop()
 
 	for {
 		select {
@@ -51,10 +62,6 @@ func (pm *placementManager) Run(ctx context.Context) {
 				pm.reconcile(ctx)
 			}
 		case <-pm.triggerCh:
-			if pm.clusterSrv.IsLeader() {
-				pm.reconcile(ctx)
-			}
-		case <-ticker.C:
 			if pm.clusterSrv.IsLeader() {
 				pm.reconcile(ctx)
 			}
@@ -69,6 +76,23 @@ func (pm *placementManager) Trigger() {
 	case pm.triggerCh <- struct{}{}:
 	default:
 	}
+}
+
+// startPlacementReconcile registers the periodic-fallback placement
+// reconcile with the supplied scheduler. The scheduled task just
+// pokes pm.Trigger() — the actual reconcile work still runs in
+// pm.Run's goroutine via triggerCh, preserving the existing
+// serialization. Only the leadership-change observer + manual
+// trigger paths can produce reconciles; this is the safety net for
+// edge cases that neither catches.
+func startPlacementReconcile(_ context.Context, scheduler scheduledJobRegistry, pm *placementManager) error {
+	task := func() { pm.Trigger() }
+	if err := scheduler.AddJob(placementReconcileJobName, placementReconcileSchedule, task); err != nil {
+		return err
+	}
+	scheduler.Describe(placementReconcileJobName,
+		"Vault placement reconcile — periodic safety net. Runs on every node, every 15 seconds; the task pokes the placement manager's trigger channel, which only acts when this node is the Raft leader. Event-driven reconciles (leadership change, manual Trigger from RPC handlers) remain in pm.Run's goroutine; this scheduled tick is the fallback for edge cases neither catches.")
+	return nil
 }
 
 // Reconcile runs placement synchronously. Safe to call from RPC handlers

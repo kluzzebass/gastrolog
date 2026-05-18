@@ -1078,3 +1078,54 @@ func TestPlacement_SoftOfflineCleared_OnReturnToLive(t *testing.T) {
 		t.Errorf("soft-offline alert should clear after transition to Live")
 	}
 }
+
+// TestStartPlacementReconcile_RegistersOperatorVisibleJob verifies
+// the periodic-fallback ships as a proper scheduled job: name + cron
+// set, non-empty Describe text, and the captured task pokes the
+// placement manager's trigger channel (no direct reconcile call —
+// the goroutine handles serialization).
+func TestStartPlacementReconcile_RegistersOperatorVisibleJob(t *testing.T) {
+	t.Parallel()
+	pm, _, _ := newTestPlacement(t, "node-1", nil)
+	sched := &fakeScheduler{}
+
+	if err := startPlacementReconcile(context.Background(), sched, pm); err != nil {
+		t.Fatalf("startPlacementReconcile: %v", err)
+	}
+	if sched.addJobName != placementReconcileJobName {
+		t.Errorf("AddJob name: got %q, want %q", sched.addJobName, placementReconcileJobName)
+	}
+	if sched.addJobCron != placementReconcileSchedule {
+		t.Errorf("AddJob cron: got %q, want %q", sched.addJobCron, placementReconcileSchedule)
+	}
+	if sched.describeMessage == "" {
+		t.Error("Describe message empty — operator inspector will show no context")
+	}
+
+	// Run the captured task. It pokes triggerCh (non-blocking). We
+	// then read from triggerCh and assert one trigger was queued —
+	// that's the contract this job upholds.
+	if task, ok := sched.addJobTaskFn.(func()); ok {
+		task()
+	} else {
+		t.Fatalf("expected captured task of type func(), got %T", sched.addJobTaskFn)
+	}
+	select {
+	case <-pm.triggerCh:
+		// expected: task fired Trigger() which queued a poke
+	default:
+		t.Error("expected task to enqueue a trigger; triggerCh was empty")
+	}
+}
+
+// TestStartPlacementReconcile_PropagatesAddJobError verifies the
+// caller sees an AddJob failure.
+func TestStartPlacementReconcile_PropagatesAddJobError(t *testing.T) {
+	t.Parallel()
+	pm, _, _ := newTestPlacement(t, "node-1", nil)
+	sched := &fakeScheduler{addJobErr: errFakeMember}
+
+	if err := startPlacementReconcile(context.Background(), sched, pm); err == nil {
+		t.Fatal("expected AddJob error to propagate")
+	}
+}
