@@ -74,6 +74,9 @@ const (
 	// VaultServiceWatchChunksProcedure is the fully-qualified name of the VaultService's WatchChunks
 	// RPC.
 	VaultServiceWatchChunksProcedure = "/gastrolog.v1.VaultService/WatchChunks"
+	// VaultServiceRepatriateOrphanProcedure is the fully-qualified name of the VaultService's
+	// RepatriateOrphan RPC.
+	VaultServiceRepatriateOrphanProcedure = "/gastrolog.v1.VaultService/RepatriateOrphan"
 )
 
 // VaultServiceClient is a client for the gastrolog.v1.VaultService service.
@@ -120,6 +123,14 @@ type VaultServiceClient interface {
 	// is carried in the stream itself. Same pattern as WatchConfig.
 	// See gastrolog-1jijm.
 	WatchChunks(context.Context, *connect.Request[v1.WatchChunksRequest]) (*connect.ServerStreamForClient[v1.WatchChunksResponse], error)
+	// RepatriateOrphan re-introduces a sealed local chunk into the
+	// vault-ctl FSM manifest. Operator-driven recovery for "unknown
+	// orphans" — sealed chunks present on local disk but absent from
+	// the FSM (post-restore-from-backup, FSM-glitch, etc.). Reconstructs
+	// the ManifestEntry from the local chunk's idx.log headers and
+	// proposes CmdRepatriateChunk to the vault-ctl FSM. Refuses if the
+	// chunk is already FSM-tracked or tombstoned. See gastrolog-32bf2.
+	RepatriateOrphan(context.Context, *connect.Request[v1.RepatriateOrphanRequest]) (*connect.Response[v1.RepatriateOrphanResponse], error)
 }
 
 // NewVaultServiceClient constructs a client for the gastrolog.v1.VaultService service. By default,
@@ -229,6 +240,12 @@ func NewVaultServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(vaultServiceMethods.ByName("WatchChunks")),
 			connect.WithClientOptions(opts...),
 		),
+		repatriateOrphan: connect.NewClient[v1.RepatriateOrphanRequest, v1.RepatriateOrphanResponse](
+			httpClient,
+			baseURL+VaultServiceRepatriateOrphanProcedure,
+			connect.WithSchema(vaultServiceMethods.ByName("RepatriateOrphan")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -250,6 +267,7 @@ type vaultServiceClient struct {
 	archiveChunk          *connect.Client[v1.ArchiveChunkRequest, v1.ArchiveChunkResponse]
 	restoreChunk          *connect.Client[v1.RestoreChunkRequest, v1.RestoreChunkResponse]
 	watchChunks           *connect.Client[v1.WatchChunksRequest, v1.WatchChunksResponse]
+	repatriateOrphan      *connect.Client[v1.RepatriateOrphanRequest, v1.RepatriateOrphanResponse]
 }
 
 // ListVaults calls gastrolog.v1.VaultService.ListVaults.
@@ -332,6 +350,11 @@ func (c *vaultServiceClient) WatchChunks(ctx context.Context, req *connect.Reque
 	return c.watchChunks.CallServerStream(ctx, req)
 }
 
+// RepatriateOrphan calls gastrolog.v1.VaultService.RepatriateOrphan.
+func (c *vaultServiceClient) RepatriateOrphan(ctx context.Context, req *connect.Request[v1.RepatriateOrphanRequest]) (*connect.Response[v1.RepatriateOrphanResponse], error) {
+	return c.repatriateOrphan.CallUnary(ctx, req)
+}
+
 // VaultServiceHandler is an implementation of the gastrolog.v1.VaultService service.
 type VaultServiceHandler interface {
 	// ListVaults returns all registered vaults.
@@ -376,6 +399,14 @@ type VaultServiceHandler interface {
 	// is carried in the stream itself. Same pattern as WatchConfig.
 	// See gastrolog-1jijm.
 	WatchChunks(context.Context, *connect.Request[v1.WatchChunksRequest], *connect.ServerStream[v1.WatchChunksResponse]) error
+	// RepatriateOrphan re-introduces a sealed local chunk into the
+	// vault-ctl FSM manifest. Operator-driven recovery for "unknown
+	// orphans" — sealed chunks present on local disk but absent from
+	// the FSM (post-restore-from-backup, FSM-glitch, etc.). Reconstructs
+	// the ManifestEntry from the local chunk's idx.log headers and
+	// proposes CmdRepatriateChunk to the vault-ctl FSM. Refuses if the
+	// chunk is already FSM-tracked or tombstoned. See gastrolog-32bf2.
+	RepatriateOrphan(context.Context, *connect.Request[v1.RepatriateOrphanRequest]) (*connect.Response[v1.RepatriateOrphanResponse], error)
 }
 
 // NewVaultServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -481,6 +512,12 @@ func NewVaultServiceHandler(svc VaultServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(vaultServiceMethods.ByName("WatchChunks")),
 		connect.WithHandlerOptions(opts...),
 	)
+	vaultServiceRepatriateOrphanHandler := connect.NewUnaryHandler(
+		VaultServiceRepatriateOrphanProcedure,
+		svc.RepatriateOrphan,
+		connect.WithSchema(vaultServiceMethods.ByName("RepatriateOrphan")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.VaultService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case VaultServiceListVaultsProcedure:
@@ -515,6 +552,8 @@ func NewVaultServiceHandler(svc VaultServiceHandler, opts ...connect.HandlerOpti
 			vaultServiceRestoreChunkHandler.ServeHTTP(w, r)
 		case VaultServiceWatchChunksProcedure:
 			vaultServiceWatchChunksHandler.ServeHTTP(w, r)
+		case VaultServiceRepatriateOrphanProcedure:
+			vaultServiceRepatriateOrphanHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -586,4 +625,8 @@ func (UnimplementedVaultServiceHandler) RestoreChunk(context.Context, *connect.R
 
 func (UnimplementedVaultServiceHandler) WatchChunks(context.Context, *connect.Request[v1.WatchChunksRequest], *connect.ServerStream[v1.WatchChunksResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.VaultService.WatchChunks is not implemented"))
+}
+
+func (UnimplementedVaultServiceHandler) RepatriateOrphan(context.Context, *connect.Request[v1.RepatriateOrphanRequest]) (*connect.Response[v1.RepatriateOrphanResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.VaultService.RepatriateOrphan is not implemented"))
 }

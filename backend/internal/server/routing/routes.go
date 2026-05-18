@@ -144,7 +144,8 @@ func DefaultRoutes() map[string]RPCRoute {
 		gastrologv1connect.VaultServiceExportVaultProcedure:   {Strategy: RouteTargeted, IsStreaming: true}, // streaming — handler manages routing
 		gastrologv1connect.VaultServiceImportRecordsProcedure: {Strategy: RouteTargeted, WrapResponse: NewRespWrapper[apiv1.ImportRecordsResponse]()},
 		gastrologv1connect.VaultServiceArchiveChunkProcedure:  {Strategy: RouteTargeted, WrapResponse: NewRespWrapper[apiv1.ArchiveChunkResponse]()},
-		gastrologv1connect.VaultServiceRestoreChunkProcedure: {Strategy: RouteTargeted, WrapResponse: NewRespWrapper[apiv1.RestoreChunkResponse]()},
-		gastrologv1connect.VaultServiceWatchChunksProcedure:  {Strategy: RouteLocal, IsStreaming: true},
+		gastrologv1connect.VaultServiceRestoreChunkProcedure:     {Strategy: RouteTargeted, WrapResponse: NewRespWrapper[apiv1.RestoreChunkResponse]()},
+		gastrologv1connect.VaultServiceWatchChunksProcedure:      {Strategy: RouteLocal, IsStreaming: true},
+		gastrologv1connect.VaultServiceRepatriateOrphanProcedure: {Strategy: RouteTargeted, WrapResponse: NewRespWrapper[apiv1.RepatriateOrphanResponse]()},
 	}
 }

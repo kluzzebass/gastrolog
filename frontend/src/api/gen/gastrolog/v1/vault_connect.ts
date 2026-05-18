@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { AnalyzeChunkRequest, AnalyzeChunkResponse, ArchiveChunkRequest, ArchiveChunkResponse, ExportVaultRequest, ExportVaultResponse, GetChunkRequest, GetChunkResponse, GetIndexesRequest, GetIndexesResponse, GetStatsRequest, GetStatsResponse, GetVaultRequest, GetVaultResponse, ImportRecordsRequest, ImportRecordsResponse, ListChunksRequest, ListChunksResponse, ListVaultsRequest, ListVaultsResponse, ReindexVaultRequest, ReindexVaultResponse, RestoreChunkRequest, RestoreChunkResponse, RetryUnreadableChunksRequest, RetryUnreadableChunksResponse, SealVaultRequest, SealVaultResponse, ValidateVaultRequest, ValidateVaultResponse, WatchChunksRequest, WatchChunksResponse } from "./vault_pb.js";
+import { AnalyzeChunkRequest, AnalyzeChunkResponse, ArchiveChunkRequest, ArchiveChunkResponse, ExportVaultRequest, ExportVaultResponse, GetChunkRequest, GetChunkResponse, GetIndexesRequest, GetIndexesResponse, GetStatsRequest, GetStatsResponse, GetVaultRequest, GetVaultResponse, ImportRecordsRequest, ImportRecordsResponse, ListChunksRequest, ListChunksResponse, ListVaultsRequest, ListVaultsResponse, ReindexVaultRequest, ReindexVaultResponse, RepatriateOrphanRequest, RepatriateOrphanResponse, RestoreChunkRequest, RestoreChunkResponse, RetryUnreadableChunksRequest, RetryUnreadableChunksResponse, SealVaultRequest, SealVaultResponse, ValidateVaultRequest, ValidateVaultResponse, WatchChunksRequest, WatchChunksResponse } from "./vault_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -199,6 +199,23 @@ export const VaultService = {
       I: WatchChunksRequest,
       O: WatchChunksResponse,
       kind: MethodKind.ServerStreaming,
+    },
+    /**
+     * RepatriateOrphan re-introduces a sealed local chunk into the
+     * vault-ctl FSM manifest. Operator-driven recovery for "unknown
+     * orphans" — sealed chunks present on local disk but absent from
+     * the FSM (post-restore-from-backup, FSM-glitch, etc.). Reconstructs
+     * the ManifestEntry from the local chunk's idx.log headers and
+     * proposes CmdRepatriateChunk to the vault-ctl FSM. Refuses if the
+     * chunk is already FSM-tracked or tombstoned. See gastrolog-32bf2.
+     *
+     * @generated from rpc gastrolog.v1.VaultService.RepatriateOrphan
+     */
+    repatriateOrphan: {
+      name: "RepatriateOrphan",
+      I: RepatriateOrphanRequest,
+      O: RepatriateOrphanResponse,
+      kind: MethodKind.Unary,
     },
   }
 } as const;

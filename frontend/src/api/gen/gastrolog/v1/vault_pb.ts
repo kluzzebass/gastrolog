@@ -2337,3 +2337,82 @@ export class WatchChunksResponse extends Message<WatchChunksResponse> {
   }
 }
 
+/**
+ * RepatriateOrphanRequest names a sealed local chunk to re-introduce
+ * into the vault-ctl FSM manifest. The chunk must exist on the
+ * receiving node's local disk for the named vault; the call is rejected
+ * otherwise. See gastrolog-32bf2.
+ *
+ * @generated from message gastrolog.v1.RepatriateOrphanRequest
+ */
+export class RepatriateOrphanRequest extends Message<RepatriateOrphanRequest> {
+  /**
+   * @generated from field: string vault = 1;
+   */
+  vault = "";
+
+  /**
+   * @generated from field: bytes chunk_id = 2;
+   */
+  chunkId = new Uint8Array(0);
+
+  constructor(data?: PartialMessage<RepatriateOrphanRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.RepatriateOrphanRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RepatriateOrphanRequest {
+    return new RepatriateOrphanRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RepatriateOrphanRequest {
+    return new RepatriateOrphanRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RepatriateOrphanRequest {
+    return new RepatriateOrphanRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RepatriateOrphanRequest | PlainMessage<RepatriateOrphanRequest> | undefined, b: RepatriateOrphanRequest | PlainMessage<RepatriateOrphanRequest> | undefined): boolean {
+    return proto3.util.equals(RepatriateOrphanRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.RepatriateOrphanResponse
+ */
+export class RepatriateOrphanResponse extends Message<RepatriateOrphanResponse> {
+  constructor(data?: PartialMessage<RepatriateOrphanResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.RepatriateOrphanResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RepatriateOrphanResponse {
+    return new RepatriateOrphanResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RepatriateOrphanResponse {
+    return new RepatriateOrphanResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RepatriateOrphanResponse {
+    return new RepatriateOrphanResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RepatriateOrphanResponse | PlainMessage<RepatriateOrphanResponse> | undefined, b: RepatriateOrphanResponse | PlainMessage<RepatriateOrphanResponse> | undefined): boolean {
+    return proto3.util.equals(RepatriateOrphanResponse, a, b);
+  }
+}
+
