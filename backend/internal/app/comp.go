@@ -9,7 +9,7 @@ var (
 		"Cluster server — peer connection management, broadcast/heartbeat tick, cross-node RPC forwarding.")
 
 	compRaft = comp.Root("raft").Desc(
-		"System Raft group — log replication, snapshots, leader elections for cluster-wide config state.")
+		"Cluster-ctl Raft group — log replication, snapshots, leader elections for cluster-wide config state.")
 
 	compDispatch = comp.Root("dispatch").Desc(
 		"Config FSM dispatcher — fires orchestrator side effects + configSignal broadcasts after every committed mutation.")

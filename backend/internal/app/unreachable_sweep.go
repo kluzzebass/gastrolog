@@ -42,7 +42,7 @@ const (
 )
 
 // unreachableSweep transitions nodes between Live and Unreachable based
-// on PeerState heartbeat freshness. Runs on the system-Raft leader only.
+// on PeerState heartbeat freshness. Runs on the cluster-ctl leader only.
 //
 // Heartbeat-driven gating closes the RF=1 redeploy bug (gastrolog-2i1g9):
 // when a node briefly disappears (pod restart, network blip), the sweep
@@ -132,7 +132,7 @@ func durationFromEnv(logger *slog.Logger, key string, fallback time.Duration) ti
 //
 //   - Transition phase (leader-only): scans NodeConfig records and
 //     proposes Live↔Unreachable transitions based on PeerState
-//     heartbeat freshness. Only the system-Raft leader proposes so
+//     heartbeat freshness. Only the cluster-ctl leader proposes so
 //     concurrent followers don't issue duplicate transitions.
 //   - Alert phase (every node): scans NodeConfig records and raises
 //     or clears the per-node warning alert based on time-in-Unreachable.

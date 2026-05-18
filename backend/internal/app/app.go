@@ -231,7 +231,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		_ = proxy.Close()
 		return err
 	}
-	// Shutdown order matters: system Raft must stop BEFORE the cluster
+	// Shutdown order matters: cluster-ctl Raft must stop BEFORE the cluster
 	// server, because the Raft follower reads from the transport's rpcChan.
 	// Closing the transport first causes a nil-channel deadlock in Raft.
 	// Defers run LIFO, so cluster Stop is registered first (runs last).
@@ -322,7 +322,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	var searchForwarder *cluster.SearchForwarder
 	var recordForwarder *cluster.RecordForwarder
 	var routingForwarder *routing.Forwarder
-	if _, ok := rawStore.(*raftSystemStore); ok && clusterSrv != nil {
+	if _, ok := rawStore.(*raftClusterCtlStore); ok && clusterSrv != nil {
 		searchForwarder, recordForwarder = wireClusterForwarding(clusterSrv, orch, orchReady, nodeID, logger, alertCollector)
 		routingForwarder = routing.NewForwarder(clusterSrv.PeerConns())
 	}
@@ -445,18 +445,18 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		sweep := newUnreachableSweep(cfgStore, clusterSrv, peerState, nodeID, alertCollector, compPlacement.Apply(logger))
 		register("unreachable-sweep", startUnreachableSweep(ctx, orch.Scheduler(), sweep))
 
-		// System-Raft learner promoter (gastrolog-2czh9). Watches for
+		// Cluster-ctl learner promoter (gastrolog-2czh9). Watches for
 		// Nonvoter / Staging members and promotes them to voters once
 		// their broadcast RaftAppliedIndex has matched the leader's
 		// for a stability window. Companion to the JoinCluster-as-
 		// learner change (gastrolog-41sut) and the per-vault-ctl
 		// promoter below. Registered with the orchestrator job
 		// scheduler (gastrolog-5npek) so it appears in the inspector.
-		learnerPromoter := newSystemLearnerPromoter(clusterSrv, peerState, compCluster.Apply(logger))
-		register("system-learner-promoter", startSystemLearnerPromoter(ctx, orch.Scheduler(), learnerPromoter))
+		learnerPromoter := newClusterCtlLearnerPromoter(clusterSrv, peerState, compCluster.Apply(logger))
+		register("cluster-ctl-learner-promoter", startClusterCtlLearnerPromoter(ctx, orch.Scheduler(), learnerPromoter))
 
 		// Per-vault-ctl learner promoter (gastrolog-gcbx7). Same
-		// shape as the system-Raft promoter but iterates every vault
+		// shape as the cluster-ctl promoter but iterates every vault
 		// on each tick; only acts on groups this node leads. Catchup
 		// signal comes from VaultStats.RaftAppliedIndex in the
 		// existing NodeStats broadcast. Registered with the
@@ -913,7 +913,7 @@ func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cf
 
 // requestClusterMembership asks the cluster leader to add this node to
 // the Raft configuration. Fresh joiners enter as nonvoters (learners)
-// and get promoted by the system-Raft learner promoter (gastrolog-2czh9)
+// and get promoted by the cluster-ctl learner promoter (gastrolog-2czh9)
 // once caught up; restart-of-existing-voter requests use AddVoter for
 // idempotent address refresh. The fresh-vs-restart decision probes the
 // local FSM (presence of vault configs or a JWT secret).
@@ -1070,7 +1070,7 @@ func waitForQuorum(ctx context.Context, cfgStore system.Store, logger *slog.Logg
 	if p, ok := cfgStore.(*system.StoreProxy); ok {
 		inner = p.Inner()
 	}
-	rcs, ok := inner.(*raftSystemStore)
+	rcs, ok := inner.(*raftClusterCtlStore)
 	if !ok {
 		return nil
 	}
@@ -1089,7 +1089,7 @@ func waitForFSMCatchup(ctx context.Context, cfgStore system.Store, timeout time.
 	if p, ok := cfgStore.(*system.StoreProxy); ok {
 		inner = p.Inner()
 	}
-	rcs, ok := inner.(*raftSystemStore)
+	rcs, ok := inner.(*raftClusterCtlStore)
 	if !ok {
 		return nil
 	}
@@ -1341,7 +1341,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 		_ = deps.Broadcaster.Close()
 	}
 
-	// Shutdown order: vault multiraft (control-plane) → system Raft → WAL → gRPC server.
+	// Shutdown order: vault multiraft (control-plane) → cluster-ctl Raft → WAL → gRPC server.
 	// Vault multiraft and system raft both use the same raftwal when cluster mode is on;
 	// system raft must stop before WAL.Close. Raft must shut down WHILE the
 	// transport is alive, otherwise the leader's replication goroutines block
@@ -1403,7 +1403,7 @@ func setupMultiRaft(clusterSrv *cluster.Server, rawStore system.Store, nodeID, h
 	// Prefer the system store's WAL (opened first in Run) so we never attach
 	// two raftwal instances to the same on-disk directory.
 	var wal *raftwal.WAL
-	if rcs, ok := rawStore.(*raftSystemStore); ok && !rcs.ownsWAL {
+	if rcs, ok := rawStore.(*raftClusterCtlStore); ok && !rcs.ownsWAL {
 		wal = rcs.wal
 	}
 	if wal == nil {
@@ -1429,7 +1429,7 @@ func setupMultiRaft(clusterSrv *cluster.Server, rawStore system.Store, nodeID, h
 	})
 
 	var resolver func(string) (string, bool)
-	if rcs, ok := rawStore.(*raftSystemStore); ok {
+	if rcs, ok := rawStore.(*raftClusterCtlStore); ok {
 		resolver = func(nodeID string) (string, bool) {
 			future := rcs.raft.GetConfiguration()
 			if future.Error() != nil {
@@ -1553,7 +1553,7 @@ func openConfigStore(configType string, opts raftStoreOpts) (system.Store, error
 	case "memory":
 		return sysmem.NewStore(), nil
 	case "raft":
-		return openRaftSystemStore(opts)
+		return openRaftClusterCtlStore(opts)
 	default:
 		return nil, fmt.Errorf("unknown config store type: %q", configType)
 	}

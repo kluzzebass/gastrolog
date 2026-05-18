@@ -36,7 +36,7 @@ func resolveNodeID(hd home.Dir, logger *slog.Logger) (glid.GLID, error) {
 	}
 	defer func() { _ = wal.Close() }()
 
-	gs := wal.GroupStore("system")
+	gs := wal.GroupStore("cluster-ctl")
 
 	raw, err := gs.Get([]byte(nodeIDKey))
 	if err != nil {

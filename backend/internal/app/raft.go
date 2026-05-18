@@ -47,9 +47,9 @@ type raftStoreOpts struct {
 	VaultCtlRaftSharesWAL bool
 }
 
-// raftSystemStore wraps a raftstore.Store with cleanup logic for the
+// raftClusterCtlStore wraps a raftstore.Store with cleanup logic for the
 // underlying raft instance, forwarder, and boltdb store.
-type raftSystemStore struct {
+type raftClusterCtlStore struct {
 	system.Store
 	raftStore *raftstore.Store
 	raft      *hraft.Raft
@@ -60,7 +60,7 @@ type raftSystemStore struct {
 
 // WaitForLeader polls until any node in the cluster becomes leader or the
 // context is cancelled.
-func (s *raftSystemStore) WaitForLeader(ctx context.Context, logger *slog.Logger) error {
+func (s *raftClusterCtlStore) WaitForLeader(ctx context.Context, logger *slog.Logger) error {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	remind := time.NewTicker(10 * time.Second)
@@ -111,7 +111,7 @@ func (s *raftSystemStore) WaitForLeader(ctx context.Context, logger *slog.Logger
 //     in steady state) and accept any value as long as it's stable.
 //
 // Assumes a leader has already been elected (call WaitForLeader first).
-func (s *raftSystemStore) WaitForFSMCatchup(ctx context.Context, timeout time.Duration, logger *slog.Logger) error {
+func (s *raftClusterCtlStore) WaitForFSMCatchup(ctx context.Context, timeout time.Duration, logger *slog.Logger) error {
 	if s.raft.State() == hraft.Leader {
 		return s.raft.Barrier(timeout).Error()
 	}
@@ -173,7 +173,7 @@ func (s *raftSystemStore) WaitForFSMCatchup(ctx context.Context, timeout time.Du
 	}
 }
 
-func (s *raftSystemStore) Close() error {
+func (s *raftClusterCtlStore) Close() error {
 	if s.forwarder != nil {
 		_ = s.forwarder.Close()
 	}
@@ -191,8 +191,8 @@ func (s *raftSystemStore) Close() error {
 	return err
 }
 
-// openRaftSystemStore creates a raft-backed system store with WAL persistence.
-func openRaftSystemStore(opts raftStoreOpts) (*raftSystemStore, error) {
+// openRaftClusterCtlStore creates a raft-backed system store with WAL persistence.
+func openRaftClusterCtlStore(opts raftStoreOpts) (*raftClusterCtlStore, error) {
 	raftDir := opts.Home.RaftDir()
 	if err := os.MkdirAll(raftDir, 0o750); err != nil {
 		return nil, fmt.Errorf("create raft directory: %w", err)
@@ -202,14 +202,14 @@ func openRaftSystemStore(opts raftStoreOpts) (*raftSystemStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open system raft WAL: %w", err)
 	}
-	gs := wal.GroupStore("system")
+	gs := wal.GroupStore("cluster-ctl")
 
-	systemSnapDir := opts.Home.RaftGroupDir("system")
-	if err := os.MkdirAll(systemSnapDir, 0o750); err != nil {
+	clusterCtlSnapDir := opts.Home.RaftGroupDir("cluster-ctl")
+	if err := os.MkdirAll(clusterCtlSnapDir, 0o750); err != nil {
 		_ = wal.Close()
 		return nil, fmt.Errorf("create system snapshot dir: %w", err)
 	}
-	snapStore, err := hraft.NewFileSnapshotStore(systemSnapDir, 2, io.Discard)
+	snapStore, err := hraft.NewFileSnapshotStore(clusterCtlSnapDir, 2, io.Discard)
 	if err != nil {
 		_ = wal.Close()
 		return nil, fmt.Errorf("create snapshot store: %w", err)
@@ -235,7 +235,7 @@ func openRaftSystemStore(opts raftStoreOpts) (*raftSystemStore, error) {
 		return nil, err
 	}
 
-	opts.Logger.Info("raft system store ready", "wal_dir", filepath.Join(raftDir, "wal"), "snapshots", systemSnapDir)
+	opts.Logger.Info("raft system store ready", "wal_dir", filepath.Join(raftDir, "wal"), "snapshots", clusterCtlSnapDir)
 
 	store := raftstore.New(r, fsm, 10*time.Second)
 
@@ -247,7 +247,7 @@ func openRaftSystemStore(opts raftStoreOpts) (*raftSystemStore, error) {
 	store.SetForwarder(fwd)
 
 	ownsWAL := !opts.VaultCtlRaftSharesWAL
-	return &raftSystemStore{
+	return &raftClusterCtlStore{
 		Store:     store,
 		raftStore: store,
 		raft:      r,
@@ -458,7 +458,7 @@ func reconcilePeerCachesOnce(src memberSource, logger *slog.Logger, caches ...pe
 }
 
 // leaderChecker is the minimal contract observePeerAdditions needs —
-// just an "am I currently the system-Raft leader?" predicate so the
+// just an "am I currently the cluster-ctl leader?" predicate so the
 // addition loop can gate FSM writes. cluster.Server.IsLeader satisfies it.
 type leaderChecker interface {
 	IsLeader() bool
@@ -487,7 +487,7 @@ func observePeerAdditions(ctx context.Context, clusterSrv *cluster.Server, cfgSt
 
 // runPeerAdditionLoop consumes observations from ch and writes a
 // placeholder NodeConfig for each newly added peer when this node
-// is the system-Raft leader. Exposed for tests so the loop can be
+// is the cluster-ctl leader. Exposed for tests so the loop can be
 // driven by synthetic observations.
 func runPeerAdditionLoop(ctx context.Context, ch <-chan hraft.Observation, leader leaderChecker, cfgStore system.Store, logger *slog.Logger) {
 	for {

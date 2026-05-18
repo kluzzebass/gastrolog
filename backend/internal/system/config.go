@@ -37,7 +37,7 @@ type ClusterConfig struct {
 // live directly on Config rather than in a separate wrapper.
 // The Store interface provides typed Load/SaveServerSettings methods for
 // persisting these fields independently of entity CRUD.
-// System is the top-level state managed by the system Raft group.
+// System is the top-level state managed by the cluster-ctl Raft group.
 // Config holds operator-controlled settings. Runtime holds cluster-managed state.
 type System struct {
 	Config  Config  `json:"config"`

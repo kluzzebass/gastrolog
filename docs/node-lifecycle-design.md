@@ -32,7 +32,7 @@ stateDiagram-v2
     Draining --> Decommissioning: all chunks transferred off
     Draining --> Live: cluster cancel-drain (operator, rare)
 
-    Decommissioning --> Removed: voter removed from system Raft and all vault-ctl groups
+    Decommissioning --> Removed: voter removed from cluster-ctl Raft and all vault-ctl groups
 
     Removed --> [*]
 ```
@@ -47,9 +47,9 @@ stateDiagram-v2
 
 **Draining** — operator-initiated via `cluster drain <node>`. Active chunk transfers OUT to remaining holders. Placement updates only after the destination has the bytes (coordinated migration, not a flip-and-hope). No new placements assigned. Reads and writes still served while transfers run. Operator can cancel while in progress. Transitions to Decommissioning automatically once all chunks for which this node is in the placement set have moved AND the under-RF refusal check passes.
 
-**Decommissioning** — all chunks moved; node holds no data the cluster needs. Membership removal in progress: voter removed from system Raft, then from each vault-ctl group. Reads and writes refused. The decommission gate (separate implementation issue) has already verified no orphaning would result.
+**Decommissioning** — all chunks moved; node holds no data the cluster needs. Membership removal in progress: voter removed from cluster-ctl Raft, then from each vault-ctl group. Reads and writes refused. The decommission gate (separate implementation issue) has already verified no orphaning would result.
 
-**Removed** — voter removed from system Raft and all vault-ctl groups; NodeConfig deleted from system FSM. Node is no longer addressable. Any files remaining on retained PVCs are orphaned and handled by the orphaned-PVC sweep (separate issue).
+**Removed** — voter removed from cluster-ctl Raft and all vault-ctl groups; NodeConfig deleted from cluster-ctl FSM. Node is no longer addressable. Any files remaining on retained PVCs are orphaned and handled by the orphaned-PVC sweep (separate issue).
 
 ## Behavior gates by state
 
@@ -98,7 +98,7 @@ type NodeConfig struct {
 | Maintenance → Draining | `cluster drain <node>` CLI | Operator begins removal |
 | Draining → Decommissioning | all chunks where this node is in placement set have been transferred AND verified | Drain orchestrator proposes `CmdSetNodeState{node, Decommissioning}` once verification passes |
 | Draining → Live | `cluster cancel-drain <node>` CLI | Rare; only while transfers still running |
-| Decommissioning → Removed | voter removed from system Raft + every vault-ctl group | Cluster removal sweep calls `RemoveServer` for each group, then `DeleteNode` on system FSM |
+| Decommissioning → Removed | voter removed from cluster-ctl Raft + every vault-ctl group | Cluster removal sweep calls `RemoveServer` for each group, then `DeleteNode` on cluster-ctl FSM |
 
 ## Operator CLI surface
 
