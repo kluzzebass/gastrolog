@@ -15,12 +15,18 @@ import (
 )
 
 const (
-	// vaultMembershipReconcileInterval is how often the leader epoch's
-	// reconcile callback re-runs as a safety net. The primary trigger
-	// for reconciliation is leadership gain (after raft.Barrier returns)
-	// and explicit calls to SetDesiredMembers; the periodic tick catches
-	// transient transitions where the explicit triggers were missed.
-	vaultMembershipReconcileInterval = 30 * time.Second
+	// vaultCtlMembershipReconcileJobName is the operator-visible
+	// name for the per-vault-ctl membership-reconcile safety net.
+	// Keep stable across releases.
+	vaultCtlMembershipReconcileJobName = "vault-ctl-membership-reconcile"
+
+	// vaultCtlMembershipReconcileSchedule runs every 30 seconds.
+	// 6-field cron (with-seconds). Primary triggers for reconcile
+	// are leadership-gain (after raft.Barrier) and explicit
+	// SetDesiredMembers; this scheduled tick is the periodic safety
+	// net that wakes every active leader epoch via desiredChanged
+	// for cases where the explicit triggers were missed.
+	vaultCtlMembershipReconcileSchedule = "*/30 * * * * *"
 
 	// vaultMembershipChangeTimeout bounds the *log append* portion of
 	// AddVoter / RemoveServer — the hashicorp/raft API treats this
@@ -195,27 +201,51 @@ func (m *vaultCtlLeaderManager) SetDesiredLeader(vaultID glid.GLID, server *hraf
 	m.desiredLeader.Set(vaultID, server)
 }
 
+// safetyTick is the task fn invoked by the
+// vault-ctl-membership-reconcile scheduled job. Pokes
+// desiredChanged, which wakes every active leader epoch goroutine.
+// Each woken epoch runs reconcile in its OWN goroutine — that
+// preserves the existing single-reconciler-per-vault invariant
+// (event-driven loop in runLeaderEpoch is the sole reconcile
+// driver, the scheduler just wakes it). See gastrolog-11bla.
+func (m *vaultCtlLeaderManager) safetyTick() {
+	m.desiredChanged.Notify()
+}
+
+// startVaultCtlMembershipReconcile registers the membership-
+// reconcile safety net with the orchestrator's job scheduler.
+// Returns an error if AddJob fails. The Describe text explains
+// the every-node + per-group-leader semantics for the operator.
+// See gastrolog-11bla.
+func (o *Orchestrator) startVaultCtlMembershipReconcile() error {
+	if err := o.scheduler.AddJob(vaultCtlMembershipReconcileJobName, vaultCtlMembershipReconcileSchedule, o.vaultCtlLeaders.safetyTick); err != nil {
+		return err
+	}
+	o.scheduler.Describe(vaultCtlMembershipReconcileJobName,
+		"Per-vault-ctl membership reconcile safety net. Runs on every node every 30 seconds; wakes every active leader-epoch goroutine via the desiredChanged signal. The actual reconcile work runs in each epoch's existing goroutine (one per vault this node leads), so the single-reconciler-per-vault invariant is preserved. Primary triggers (leadership gain, SetDesiredMembers) remain event-driven; this is the fallback for cases neither catches.")
+	return nil
+}
+
 // runLeaderEpoch runs the per-epoch reconcile loop. Called after Barrier()
 // returns successfully on the leader. Exits when ctx is cancelled.
 //
-// The loop wakes on three events: ctx cancellation, the 30 s safety-net
-// ticker, and the desiredChanged signal fired by SetDesiredMembers or by
-// a reconcile pass that yielded mid-burst. The desiredChanged path is what
-// keeps burst scale-out responsive — without it, a leftover voter would
-// wait up to 30 s for the next tick. See gastrolog-5n6xz.
+// The loop is event-driven: it wakes on ctx cancellation or on the
+// desiredChanged signal (fired by SetDesiredMembers, by a reconcile
+// pass that yielded mid-burst, OR by the periodic safety-net
+// vault-ctl-membership-reconcile scheduled job — see
+// startVaultCtlMembershipReconcile + gastrolog-11bla). The
+// desiredChanged path is what keeps burst scale-out responsive —
+// without it, a leftover voter would wait up to the scheduler tick
+// to be picked up. See gastrolog-5n6xz.
 func (m *vaultCtlLeaderManager) runLeaderEpoch(ctx context.Context, vaultID glid.GLID, group *raftgroup.Group) {
 	// Initial reconcile immediately after barrier.
 	m.reconcile(vaultID, group)
 
-	ticker := time.NewTicker(vaultMembershipReconcileInterval)
-	defer ticker.Stop()
 	for {
 		wakeCh := m.desiredChanged.C()
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
-			m.reconcile(vaultID, group)
 		case <-wakeCh:
 			m.reconcile(vaultID, group)
 		}
@@ -357,7 +387,7 @@ func (m *vaultCtlLeaderManager) reconcile(vaultID glid.GLID, group *raftgroup.Gr
 	}
 
 	// Wake the next pass right away when we yielded mid-burst. Without
-	// this, leftovers wait up to vaultMembershipReconcileInterval (30 s)
+	// this, leftovers wait up to vaultCtlMembershipReconcileSchedule (30 s)
 	// even though everything they need is already in the desired map.
 	if moreToDo {
 		m.desiredChanged.Notify()

@@ -757,6 +757,14 @@ func New(cfg Config) (*Orchestrator, error) {
 		return nil, fmt.Errorf("cache eviction sweep: %w", err)
 	}
 
+	// Vault-ctl membership reconcile safety net (gastrolog-11bla):
+	// wakes every active leader-epoch goroutine via desiredChanged
+	// every 30 s as a fallback for primary triggers (leadership
+	// gain, SetDesiredMembers) that may have missed firing.
+	if err := o.startVaultCtlMembershipReconcile(); err != nil {
+		return nil, fmt.Errorf("vault-ctl membership reconcile: %w", err)
+	}
+
 	return o, nil
 }
 
