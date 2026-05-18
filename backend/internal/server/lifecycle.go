@@ -500,8 +500,19 @@ func (s *LifecycleServer) buildSystemStatus(ctx context.Context) *apiv1.WatchSys
 }
 
 // buildIngesterAlive snapshots the FSM ingester-alive map for every configured
-// ingester. The inspector uses this to render per-card running/selected badges
-// and per-node ingester filters without polling ListIngesters.
+// ingester, intersected with the set of nodes currently in NodeStateLive.
+// The inspector uses this to render per-card running/selected badges and
+// per-node ingester filters without polling ListIngesters.
+//
+// gastrolog-2kzb4: the raw FSM alive map records "this node started this
+// ingester" — a bit that stays set after a clean shutdown notification
+// but lingers when a node goes Unreachable / Maintenance / Decommissioning
+// or just crashes. Surfacing the raw map made the inspector report N/N
+// healthy even when a node was clearly offline. The fix is to filter by
+// NodeConfig.EffectiveState() == NodeStateLive at the server boundary,
+// so every UI surface (this proto, downstream caches, defensive
+// frontend filters) sees only nodes whose ingester is actually expected
+// to be running right now.
 func (s *LifecycleServer) buildIngesterAlive(ctx context.Context) []*apiv1.IngesterAlive {
 	if s.cfgStore == nil {
 		return nil
@@ -510,16 +521,44 @@ func (s *LifecycleServer) buildIngesterAlive(ctx context.Context) []*apiv1.Inges
 	if err != nil {
 		return nil
 	}
+	liveNodes := s.listLiveNodes(ctx)
 	out := make([]*apiv1.IngesterAlive, 0, len(ingesters))
 	for _, ing := range ingesters {
 		alive, err := s.cfgStore.GetIngesterAlive(ctx, ing.ID)
 		if err != nil {
 			continue
 		}
+		filtered := make(map[string]bool, len(alive))
+		for nodeID, a := range alive {
+			if _, isLive := liveNodes[nodeID]; isLive {
+				filtered[nodeID] = a
+			}
+		}
 		out = append(out, &apiv1.IngesterAlive{
 			Id:         ing.ID.ToProto(),
-			NodeStatus: alive,
+			NodeStatus: filtered,
 		})
+	}
+	return out
+}
+
+// listLiveNodes returns the set of node IDs whose NodeConfig
+// EffectiveState() is NodeStateLive. Returns an empty (non-nil)
+// set on cfgStore failure so callers treat all nodes as
+// non-live rather than fall through to the un-filtered map.
+func (s *LifecycleServer) listLiveNodes(ctx context.Context) map[string]struct{} {
+	out := make(map[string]struct{})
+	if s.cfgStore == nil {
+		return out
+	}
+	nodes, err := s.cfgStore.ListNodes(ctx)
+	if err != nil {
+		return out
+	}
+	for _, n := range nodes {
+		if n.EffectiveState() == system.NodeStateLive {
+			out[n.ID.String()] = struct{}{}
+		}
 	}
 	return out
 }
