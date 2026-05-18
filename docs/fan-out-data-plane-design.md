@@ -4,6 +4,8 @@
 
 ## Context
 
+**The change in one line:** today the orchestrator forwards each record to the single node holding the vault's placement leader. Under fan-out, the orchestrator forwards each record to every node listed in the vault's active chunk's `Receiving` set. Same forwarder, different topology source.
+
 The current cluster data-plane is leader-driven and uses two distinct replication paths:
 
 - **Per-record real-time replication.** Records arrive at the placement leader's node, which appends locally and forwards each record to followers via `ChunkReplicator.AppendRecords` ([backend/internal/cluster/chunk_replicator.go#L190](backend/internal/cluster/chunk_replicator.go#L190)) over one bidirectional gRPC stream per (vault, follower).
@@ -18,38 +20,77 @@ This model has known pain:
 - **Placement-as-residency lies during transitions.** When placement rotates off an unreachable node, residency answers shift before any catchup has occurred — the cluster claims data exists where it doesn't, until catchup converges (the RF=1 redeploy bug).
 - **Single-replica reads assume consistency that isn't guaranteed.** Real-time replication has backpressure, transient drops, and leader-transfer windows during which the queried replica may be missing records.
 
-This design replaces the leader-driven data-plane with three coupled mechanisms: cluster-side fan-out writes from the entry node, set-diff reconcile via EventID Merkle summaries over sealed chunks, and a receiving/holding placement split that decouples write intent from data residency.
+This design replaces the leader-driven data-plane with three coupled mechanisms: orchestrator-driven fan-out to Receiving, set-diff reconcile via EventID Merkle summaries over sealed chunks, and a receiving/holding placement split that decouples write intent from data residency.
 
-**Ingesters are dumb pipes.** An ingester sends a record to any cluster node it has a connection to and gets back a single ack. It has no knowledge of Receiving sets, replica health, chunk lifecycle, or W-of-N policy. All fan-out, ack aggregation, and durability accounting are cluster-internal — owned by the node that receives the ingester's send (the "entry node").
+**Ingesters are dumb pipes.** An ingester is a cluster-side protocol parser (syslog, HTTP, OTLP, Kafka, etc.) placed on a node by the orchestrator. Its job ends at "parse the wire protocol → produce an `IngestMessage` → send it on `o.ingestCh`." Everything downstream — the digester pipeline, EventID stamping, RouteSet matching, per-vault append, fan-out to Receiving, W-of-N accounting, replication — is owned by the per-node `*orchestrator.Orchestrator` ([backend/internal/orchestrator/orchestrator.go](backend/internal/orchestrator/orchestrator.go)). The ingester-to-orchestrator boundary is an in-process channel, not a network hop.
 
 ## Architecture overview
 
+Every node runs an orchestrator. The orchestrator is the per-node central component; "originating" and "Receiving" below are roles relative to a single record write, not separate kinds of node.
+
+### Write path: ingestion and fan-out
+
+A producer connects to the node where the relevant ingester is placed. The ingester on that node parses the protocol and hands the resulting `IngestMessage` to the local orchestrator. The orchestrator runs its digester chain (stamping EventID and enriching attrs), matches the record against its `RouteSet`, and for each matched vault sends the record in parallel to every member of that vault's active chunk's `Receiving` set. If the orchestrator's own node is in `Receiving`, one of those parallel writes is a local append.
+
 ```mermaid
 flowchart LR
-    I[Ingester] -->|send record<br/>single response| E[Entry node]
-    E -->|fan-out N parallel writes<br/>W-of-N ack accounting| R1[Receiving 1]
-    E --> R2[Receiving 2]
-    E --> R3[Receiving 3]
-    R1 <-->|set-hash + Merkle<br/>at seal time + on-demand<br/>sealed chunks only| R2
-    R2 <--> R3
-    R1 <--> R3
-    R1 -.holds:.-> S1[Sealed chunks<br/>byte-different across replicas<br/>set-equivalent]
-    R2 -.holds:.-> S2
-    R3 -.holds:.-> S3
+    P[Producer]
+
+    subgraph N0 [Originating node]
+        I0[Ingester] --> O0[Orchestrator<br/>digesters + RouteSet]
+    end
+
+    subgraph N1 [Node in Receiving]
+        O1[Orchestrator] --> C1[Active chunk]
+    end
+    subgraph N2 [Node in Receiving]
+        O2[Orchestrator] --> C2[Active chunk]
+    end
+    subgraph N3 [Node in Receiving]
+        O3[Orchestrator] --> C3[Active chunk]
+    end
+
+    P -->|protocol| I0
+    O0 -->|fan-out parallel,<br/>W-of-N ack| O1
+    O0 --> O2
+    O0 --> O3
 ```
 
-The entry node may itself be in the chunk's `Receiving` set (in which case it appends locally as one of the N) or not (in which case it forwards to all N peers).
+The originating node may itself be one of N1/N2/N3 — in which case the corresponding arrow is a local in-process call rather than a network hop, and the orchestrator counts that as one of the W-of-N acks. When it is not in `Receiving`, the fan-out is purely cross-node.
 
-Three mechanisms compose:
+### Seal-time path: reconcile across Receiving
 
-1. **Cluster-side fan-out writes.** The entry node looks up the chunk's `Receiving` set and sends the record in parallel to every member. Operator chooses W-of-N ack semantics per vault (e.g., "any 2 of 3 acks before durable"). The entry node aggregates acks and reports a single result to the ingester.
-2. **Set-diff reconcile via EventID Merkle summaries.** Sealed chunks converge on set-equality across replicas, not byte-identity. Order-different is not divergence; only actual missing EventIDs are. Reconcile operates on sealed chunks only — active chunks are mutating and not reconciled.
+When the active chunk on some Receiving member crosses a rotation threshold, that member proposes the seal via vault-ctl Raft. Receiving members observe the apply, freeze the chunk's local record set, and exchange a set-hash. Matching set-hashes finalize the seal. Differing set-hashes drop into a Merkle descent that identifies missing EventIDs; missing records are pulled directly between Receiving members.
+
+```mermaid
+flowchart LR
+    subgraph N1 [Receiving member]
+        S1[Sealing chunk]
+    end
+    subgraph N2 [Receiving member]
+        S2[Sealing chunk]
+    end
+    subgraph N3 [Receiving member]
+        S3[Sealing chunk]
+    end
+
+    S1 <-->|set-hash exchange,<br/>Merkle on mismatch,<br/>missing-record pull| S2
+    S2 <--> S3
+    S1 <--> S3
+```
+
+The seal-time exchange shown above is the main reconcile case. The one active-chunk exception is placement-change catch-up: when a node enters `Receiving` (or `Holding`) for an active chunk, it must iteratively pull records into a still-mutating set until it converges with the existing members. The originating node is not involved in either flow; reconcile is among Receiving members.
+
+### Three coupled mechanisms
+
+1. **Orchestrator-driven fan-out to Receiving.** After RouteSet matches a record to vault V, the orchestrator on the originating node sends the record in parallel to every member of V's active chunk's `Receiving` set, using the existing `o.forwarder`. The operator chooses W-of-N ack semantics per vault (e.g., "any 2 of 3 acks before durable"). The orchestrator aggregates acks and resolves the per-record write inside its `writeLoop`.
+2. **Set-diff reconcile via EventID Merkle summaries.** Sealed chunks converge on set-equality across Receiving members, not byte-identity. Order-different is not divergence; only actual missing EventIDs are. The same mechanism, applied iteratively, catches up a new joiner against an active chunk after a placement change.
 3. **Receiving/Holding placement split.** `Receiving` = where new records should land. `Holding` = where records actually exist. `Holding ⊇ Receiving` by invariant; placement edits affect Receiving immediately; nodes leave Holding only after explicit confirmation that other holders have their records.
 
 ## Benefits
 
 1. **Static parallel throughput.** N actives ≈ N× per-vault write capacity when writes distribute across the Receiving set. The leader-bandwidth ceiling is eliminated.
-2. **Dynamic load balancing.** The entry node's cluster-side forwarder shifts writes toward less-pressured replicas using [`chanwatch.PressureGate`](backend/internal/cluster/record_forwarder.go#L102), the existing per-node forward-channel pressure signal. Variance in write throughput drops sharply even at the same average rate.
+2. **Dynamic load balancing.** The orchestrator's forwarder shifts writes toward less-pressured replicas using [`chanwatch.PressureGate`](backend/internal/cluster/record_forwarder.go#L102), the existing per-node forward-channel pressure signal. Variance in write throughput drops sharply even at the same average rate.
 3. **Failure isolation for writes.** Node failure removes the failed replica from W-of-N ack accounting but does not stall writes — other replicas continue accepting. Single-leader failover gap is gone.
 4. **Tunable durability per vault.** W-of-N lets the operator pick the durability/throughput tradeoff explicitly. A compliance vault sets `W = N` (all replicas must ack); a metrics firehose sets `W = 1` (any single ack).
 5. **Honest consistency story.** Cross-replica divergence is explicit (via set-diff reconcile) instead of assumed-away. The `dedupWindow` mechanism collapses cross-replica duplicates in search results.
@@ -67,11 +108,13 @@ type ChunkPlacement struct {
 
 **Invariants:**
 
-- `Holding ⊇ Receiving` (Receiving is a subset of Holding; nodes that should receive must also hold)
-- Adding to Receiving: immediate (placement edit). The node starts receiving new records on the next entry-node fan-out cycle.
-- Removing from Receiving: immediate (placement edit). The node stops receiving new records but stays in Holding until other holders have its records.
-- Adding to Holding: requires the node to have received bytes for at least one record of this chunk (initial entry on first record receipt, or via reconcile).
-- Removing from Holding: requires explicit ack that every remaining Receiving member holds the EventIDs this node held. Tracked **per-chunk** in FSM state (cheapest apply cost; mirrors `pendingDeletes.ExpectedFrom` shape, inverted; resolves [gastrolog-3r38a](dcat://gastrolog-3r38a)).
+- `Holding ⊇ Receiving` (nodes that should receive must also hold)
+- `Receiving ⊆ {nodes with a vault instance for this vault}` — only nodes with storage placement (a `VaultPlacement` in the vault config) can be in Receiving, because only those nodes have a chunk manager / instance to append into. Verified against [`buildVaultInstance`](backend/internal/orchestrator/reconfig_vaults.go#L660): nodes without placement participate in the vault-ctl Raft group only and have no VaultInstance.
+- One-replica-per-node invariant (Phase 2): a node hosts at most one instance per vault. Receiving is therefore `[]NodeID`, not `[]ReplicationTarget` — storage is resolved locally per-node via `StorageIDForNode`.
+- Adding to Receiving: immediate (placement edit). The node starts receiving new records on the next orchestrator fan-out cycle. **Atomically adds to Holding too** in the same FSM apply (Holding ⊇ Receiving invariant). Pattern matches `applyAckDelete` ([fsm_receipts.go:219-243](backend/internal/vaultraft/vaultctlfsm/fsm_receipts.go#L219)), which mutates `tombstones`, `pendingDeletes`, and `chunks` in one apply.
+- Removing from Receiving: immediate (placement edit). The node stops receiving new records but stays in Holding until PendingPulls drains.
+- Adding to Holding (standalone, no Receiving change): fires on **reconcile catch-up completion** for a node that acquired the chunk's bytes without being in Receiving (e.g., orphan repatriation, snapshot restore). One apply per chunk, not per record.
+- Removing from Holding: requires explicit ack that every remaining Receiving member holds the EventIDs this node held. Tracked **per-chunk** in FSM state via PendingPulls (resolves [gastrolog-3r38a](dcat://gastrolog-3r38a)).
 
 `ChunkResidency` (consumed by read routing and operator queries) returns `Holding` directly. The placement-derived derivation (`placement_set - pendingDeletes.ExpectedFrom`) under the current architecture is replaced.
 
@@ -79,13 +122,13 @@ type ChunkPlacement struct {
 
 ## Mechanism: Fan-out writes with W-of-N ack
 
-The ingester sends a record to any cluster node it has a connection to (the **entry node**) and waits for a single ack. The entry node, given a record to write to vault V:
+The orchestrator's `writeLoop` ([backend/internal/orchestrator/lifecycle.go#L425](backend/internal/orchestrator/lifecycle.go#L425)) drains digested records and calls `ingestWithSource` → `ingestLocked`, which matches the record against the `RouteSet` and yields one or more vault destinations. For each destination vault V:
 
-1. Look up the chunk that should receive this record (active chunk for V; FSM-determined).
+1. Look up the active chunk for V (FSM-determined).
 2. Snapshot that chunk's `Receiving` set at this moment. The snapshot is the fan-out target list for this write; subsequent placement edits do not retroactively change which nodes count toward W-of-N for this write (resolves [gastrolog-16msa](dcat://gastrolog-16msa)).
-3. Send the record in parallel to each node in the snapshot. Each receiving node appends to its local active chunk file and acks back to the entry node. If the entry node is itself in the snapshot, it appends locally as one of the parallel writes.
-4. Wait for `W` acks (per-vault configured). Return success to the ingester once W acks arrive.
-5. Remaining acks complete in the background. If fewer than W ever arrive within the write deadline, the entry node returns failure to the ingester. Records that DID land remain valid in their local chunks; at seal time, the set-diff reconcile pass converges all replicas. (There is no in-flight, active-chunk reconcile triggered by missed acks — see "When reconcile runs" below.)
+3. Send the record in parallel to each node in the snapshot. Each Receiving member's local orchestrator appends to its active chunk file and acks. If the originating orchestrator's node is itself in the snapshot, it appends locally as one of the parallel writes.
+4. Wait for `W` acks (per-vault configured). Once W acks arrive, the per-vault write resolves successfully inside `writeLoop`; for ack-gated records (`WaitForReplica = true`), the ack is delivered to the ingester via `dr.ack`.
+5. Remaining acks complete in the background. If fewer than W ever arrive within the write deadline, the per-vault write fails. Records that DID land remain valid in their local chunks; at seal time, the set-diff reconcile pass converges all replicas. (There is no in-flight, active-chunk reconcile triggered by missed acks — see "When reconcile runs" below.)
 
 **W-of-N policy per vault:**
 
@@ -96,9 +139,29 @@ The ingester sends a record to any cluster node it has a connection to (the **en
 
 The choice is per-vault config, not per-record. Operator sets it based on the vault's purpose.
 
+**When the originating orchestrator's node is NOT in Receiving** — the fan-out is purely cross-node: every parallel write goes through the existing forwarder (`o.forwarder`). When the node IS in Receiving, the local append covers its slot and the forwarder handles the remaining N-1. Same mechanism; the topology source is the active chunk's Receiving set instead of the historical follower list.
+
 **Load balancing within Receiving:**
 
-The entry node sends to all N members of the Receiving snapshot in parallel and returns success once W acks arrive — straggler tolerance is built in (slow replicas simply lose the race; their writes still complete in the background). The entry node biases its scheduling against high-pressure replicas via [`chanwatch.PressureGate`](backend/internal/cluster/record_forwarder.go#L102), the existing per-node forward-channel pressure signal — already broadcast on 1-second cadence, already used by the cluster-side forwarder for upstream backpressure throttling. PressureGate is a cluster-internal signal; ingesters are unaware of it.
+The orchestrator sends to all N members of the Receiving snapshot in parallel and resolves the write once W acks arrive — straggler tolerance is built in (slow replicas simply lose the race; their writes still complete in the background). The orchestrator's forwarder biases its scheduling against high-pressure replicas via [`chanwatch.PressureGate`](backend/internal/cluster/record_forwarder.go#L102), the existing per-node forward-channel pressure signal — already broadcast on 1-second cadence, already used by the forwarder for upstream backpressure throttling. PressureGate is a cluster-internal signal; ingesters are unaware of it.
+
+### W-of-N implementation: new primitive needed
+
+The existing ack-gated path [`ackAfterReplication`](backend/internal/orchestrator/replication.go#L69) uses `errgroup.WithContext` to launch parallel goroutines and waits for **all** of them — `g.Wait()` returns when every goroutine finishes, with the first error winning. That pattern does not support W-of-N (succeed-on-first-W).
+
+A new W-of-N coordinator is required. Shape:
+
+1. Launch N goroutines, one per Receiving member from the snapshot. Each performs its `ChunkReplicator.AppendRecords`-equivalent and reports outcome on a shared result channel.
+2. A coordinator goroutine reads outcomes:
+   - On success: increment `acks`; if `acks >= W`, return success to the caller (`writeLoop` resolves the per-vault write or `dr.ack` is delivered to the ingester).
+   - On failure or timeout from a snapshot member: **re-check that node's live Receiving membership.** If the node has since been removed from Receiving (a concurrent `CmdRemoveReceiving` applied during this write), treat the non-response as "not required" rather than "failure" — the node legitimately rejected because its local FSM transitioned out of Receiving. If the node IS still in live Receiving, count it as a failure; if `N - failures < W`, return failure.
+   - The live-membership check is a local FSM read (every orchestrator has the state — see "Vault-ctl FSM substrate"), so the cost is negligible.
+3. After the coordinator returns, the remaining goroutines keep running until completion or `cluster.ReplicationTimeout`. Their outcomes are not awaited by the caller, but their writes still land on those replicas — late acks contribute to background convergence, not the per-record W-of-N decision.
+4. The Receiving snapshot taken at fan-out time is the immutable denominator for ack accounting (snapshot-at-fan-out, [gastrolog-16msa](dcat://gastrolog-16msa)); the live-membership check at failure time only reclassifies a non-response from "failure" to "not required" for nodes that have legitimately left Receiving. The denominator never grows; never shrinks the *snapshot*; only the *failure count* gets the de-escalation.
+
+Implementation note: the coordinator can be a small dedicated helper (e.g., `waitWOfN(ctx, n, w, snapshot []NodeID, results <-chan nodeResult) error`) rather than reaching for a sync primitive. The helper closes over the FSM-state accessor for the live-Receiving check. The existing `pendingAcks` shape (`pa.replication`, `pa.forwards`) gets a third field for `pa.fanOut` carrying the Receiving snapshot + W parameter, dispatched from `writeLoop` (non-ack-gated) or from `ackAfterReplication` (ack-gated). For ack-gated records, the coordinator's result feeds `dr.ack <- err` exactly like the existing path.
+
+**Failure-mode rationale.** Without the live-membership check, a roll-out that drains multiple nodes simultaneously (drain N1, drain N2, drain N3) produces spurious W-of-N failures for in-flight writes whose snapshot still references those nodes — every drained node is a "failure" in the coordinator's eyes even though the cluster legitimately decided those nodes should stop accepting writes. The live-membership de-escalation closes that hole. It does not weaken durability: a node that has left Receiving is not a record-holding peer, so requiring its ack would be requiring an ack from outside the new write quorum.
 
 ## Mechanism: Sealing under fan-out
 
@@ -123,12 +186,12 @@ A replica receiving very few records under load-balanced routing might never see
 
 ### In-flight records at seal time: append to local current active
 
-Records the entry node fans out just before `CmdBeginSeal` commits land on different replicas at different times. Each replica accepts the record into whatever its locally-current active chunk is at receive time:
+Records the originating orchestrator fans out just before `CmdBeginSeal` commits land on different replicas at different times. Each replica accepts the record into whatever its locally-current active chunk is at receive time:
 
 - Replica with `CmdBeginSeal` already applied: record lands in the new active chunk.
 - Replica without `CmdBeginSeal` applied yet: record lands in the old (now-sealing) chunk.
 
-The ingester is oblivious to chunk lifecycle. So is the entry node, beyond looking up the Receiving set: it does not coordinate chunk-ID stamping or rotation gates. Each replica's local FSM state determines which chunk receives the record. Reconcile + `dedupWindow` at query time absorb the consequence (see "Accepted tradeoffs vs leader-driven sealing" below).
+The ingester is oblivious to chunk lifecycle, and so is the originating orchestrator beyond looking up the Receiving set — it does not coordinate chunk-ID stamping or rotation gates. Each replica's local FSM state determines which chunk receives the record. Reconcile + `dedupWindow` at query time absorb the consequence (see "Accepted tradeoffs vs leader-driven sealing" below).
 
 #### Considered and rejected: ingester chunk-ID stamping
 
@@ -142,7 +205,7 @@ Rejected because the marginal benefit doesn't justify the complexity:
 - Cross-ingester coordination: if multiple ingester instances exist with different watch-update timing, records from different ingesters carry different chunk IDs during a transition, multiplying the race.
 - The reconcile + dedupWindow mechanism already handles cross-chunk duplicates correctly — adding stamping is solving a problem we said was fine to live with.
 
-The simpler model (ingester just sends to an entry node; the entry node fans out; each Receiving replica accepts into its local current active chunk) is structurally cleaner and the storage cost is negligible.
+The simpler model (ingester hands the IngestMessage to its node's orchestrator; the orchestrator runs digesters, matches the RouteSet, and fans out to Receiving; each Receiving member accepts into its local current active chunk) is structurally cleaner and the storage cost is negligible.
 
 ### Why not a single rotation coordinator
 
@@ -176,7 +239,7 @@ For most workloads this is invisible. Operators who set strict count limits for 
 
 **Why set-diff and not hash-chain:**
 
-Order-different is the common case under fan-out (parallel entry-node fan-outs complete at different times per replica; multiple entry nodes for the same vault interleave records non-deterministically). Set-different (actual missing EventIDs) is rare (only when an entry node's fan-out to a specific Receiving member fails past retry, or when a replica was unreachable during a write). Hash-chain reconcile would false-positive on order differences; set-diff handles them naturally.
+Order-different is the common case under fan-out (parallel writes from an orchestrator complete at different times per Receiving member; multiple orchestrators routing into the same vault — different nodes' RouteSet matches — interleave records non-deterministically). Set-different (actual missing EventIDs) is rare (only when an orchestrator's fan-out to a specific Receiving member fails past retry, or when a replica was unreachable during a write). Hash-chain reconcile would false-positive on order differences; set-diff handles them naturally.
 
 **Mechanism:**
 
@@ -211,17 +274,23 @@ Two-tier reconcile: a fast set-equality check that handles the common case, and 
 
 **When reconcile runs:**
 
-Reconcile operates on **sealed chunks only**. Active chunks are mutating; their record sets are not stable; reconcile of an active chunk does not make sense and is not designed.
+Reconcile normally operates on **sealed chunks**, where the record set is stable and a one-shot pass converges all members. The one exception is **placement-change catch-up against an active chunk**, where a newly-added member must pull existing records into a still-mutating set.
 
 - **At seal time.** Before transitioning a chunk from `ChunkStateSealing` to `ChunkStateSealed`, run one reconcile pass to converge all Receiving members. After seal, the chunk's record set is fixed; later replicas in Holding pull via the same mechanism.
-- **On node return.** When a node re-enters `Live` from `Unreachable`, schedule reconcile for the **sealed** chunks where the node appears in Receiving or Holding. Catches up missed records during absence. The node simply rejoins the Receiving set for currently-active chunks going forward; no active-chunk reconcile is performed.
-- **Operator on-demand.** `gastrolog cluster reconcile <vault>` triggers reconcile for all sealed chunks in the vault.
+- **On placement change against an active chunk.** When a node is added to `Receiving` (or `Holding`) for an active chunk, the joining member must catch up to records that were appended before it joined. Because the set is still moving, catch-up is iterative — the joining member pulls everything an existing Receiving member has up to some EventID watermark, then resumes from there while new fan-out writes continue to land. Convergence is eventual; the joining member is considered fully caught up only once a pull pass returns "no new EventIDs since the prior watermark." This is the only active-chunk reconcile case.
+
+  **Convergence invariant and escape hatch.** Iterative catch-up has an unbounded-delta failure mode: if the catch-up node is slow or the write rate is high, the per-pass delta can grow faster than pulls drain. To prevent a joining node from sitting in a liminal state forever (not in Receiving for fan-out yet, not cleanly failed), the catch-up loop enforces a convergence-progress contract:
+   - **Progress invariant:** each pull pass must reduce the delta-to-watermark by at least a constant fraction (e.g., 50%) compared to the previous pass, OR the absolute delta must stay below a configured threshold (e.g., 10× the typical Raft commit batch size). If neither holds for K consecutive passes (K configurable, default 5), the joiner has not converged and the escape hatch fires.
+   - **Escape hatch:** the joining orchestrator emits an `alert.Collector` entry (operator-visible: "active-chunk catch-up not converging for chunk X, vault Y, node Z; consider deferring this node's Receiving promotion until current chunk seals") and the joining node stays out of fan-out for that chunk. The chunk's natural seal boundary becomes the catch-up boundary: once the chunk transitions to `Sealing`, the EventID set freezes and the one-shot seal-time reconcile takes over (which has a bounded cost). The node enters Receiving for the NEXT chunk created in this vault.
+   - This contract is the precondition for `CmdAddReceiving`: the proposer must be prepared for the joining node to skip the current active chunk and catch up at seal time instead. The FSM doesn't need to know the difference — it just records the joiner as a Receiving member; whether the joiner uses iterative catch-up or seal-time reconcile is a runtime choice made by the joiner's orchestrator based on the convergence-progress contract.
+- **On node return.** When a node re-enters `Live` from `Unreachable`, schedule reconcile for the **sealed** chunks where the node appears in Receiving or Holding. Catches up missed records during absence. For any active chunk where the returning node is still in Receiving, the active-chunk placement-change mechanism applies (treat the return as effectively a re-add to Receiving for that chunk).
+- **Operator on-demand.** `gastrolog cluster reconcile <vault>` triggers reconcile for sealed chunks in the vault.
 
 Missed acks during fan-out writes do NOT trigger reconcile. A missed ack is W-of-N accounting business; the records that landed on responding replicas remain valid, and the seal-time pass converges everything. Polling-based or compensation-driven reconcile is the kind of half-assing the engineering principles call out — events trigger it, and there is no periodic sweep.
 
 ## Mechanism: Fan-out reads for active chunks
 
-Under fan-out writes, each Receiving replica may be missing records the others have. Since active chunks are never reconciled, this divergence persists for the lifetime of the active chunk — only the seal-time reconcile pass converges replicas. For active-chunk queries, a single-replica read therefore returns incomplete results; read fan-out + dedup is the mechanism that completes the picture.
+Under fan-out writes, each Receiving replica may be missing records the others have. This divergence persists for the lifetime of the active chunk — the seal-time pass is what converges replicas; the placement-change active-chunk reconcile only catches up new joiners and doesn't try to converge all members continuously. For active-chunk queries, a single-replica read therefore returns incomplete results; read fan-out + dedup is the mechanism that completes the picture.
 
 The read path for vault V:
 
@@ -231,7 +300,7 @@ The read path for vault V:
 
 The dedup substrate is already in place — `dedupWindow` is keyed on `chunk.EventID`, exactly the right granularity. Currently used for cross-vault dedup; extending to cross-replica dedup needs no key-logic changes.
 
-**Cost:** active-chunk searches do `RF×` the network bytes (most are duplicates that dedup discards). For typical workloads where active windows are minutes and sealed history is days, this overhead applies to a small fraction of total search bytes.
+**Cost:** active-chunk searches do `|Receiving|×` the network bytes (most are duplicates that dedup discards). For typical workloads where active windows are minutes and sealed history is days, this overhead applies to a small fraction of total search bytes — but it IS a real read-amplification factor, not a steady-state target. Treat fan-out reads as a **correctness floor** that the mitigations below should chip away from once basic functionality lands; do not assume the |Receiving|× cost is acceptable indefinitely as cluster scale grows.
 
 **Mitigations** (not required at first ship; available later if needed):
 
@@ -239,30 +308,154 @@ The dedup substrate is already in place — `dedupWindow` is keyed on `chunk.Eve
 - **Per-vault read-consistency tier.** Operator picks "strong (fan-out)" or "best-effort (single replica)" per vault.
 - **Sample-and-merge.** First response answers fast; remaining replicas merge in for completeness. Latency stays low; bandwidth stays high; completeness opt-in.
 
+## Vault-ctl FSM substrate (reference)
+
+The fan-out epic builds directly on the existing vault-ctl Raft FSM. This section captures what already exists so future work doesn't reinvent it.
+
+### Group membership
+
+- One vault-ctl Raft group **per vault**, identified by `raftgroup.VaultControlPlaneGroupID(vaultCfg.ID)`.
+- The group is seeded symmetrically across **every cluster node** that resolves at startup ([`tryStartClusterRaftGroup`](backend/internal/orchestrator/reconfig_vaults.go#L1031)). It is NOT restricted to nodes hosting an instance of the vault.
+- `RefreshVaultCtlMembers` re-derives the desired voter list from the current cluster node list on node-config changes ([`reconfig_vaults.go`](backend/internal/orchestrator/reconfig_vaults.go) — see the comment block above the function).
+- Consequence: **every orchestrator has a local copy of the FSM state for every vault.** Receiving/Holding lookups are always a local read; no cluster-wide coordination required to route a record.
+
+### FSM layering
+
+Two FSMs compose:
+
+- **`vaultraft.FSM`** ([backend/internal/vaultraft/fsm.go](backend/internal/vaultraft/fsm.go)): the outer Raft FSM. Holds `vaults map[GLID]*vaultctlfsm.FSM`. Commands carry a vault GLID prefix (`OpVaultChunkFSM`) and dispatch to the per-vault sub-FSM. Owns the cross-vault snapshot/restore format and the `onAfterRestore` hook used to wake reconcilers after snapshot install.
+- **`vaultctlfsm.FSM`** ([backend/internal/vaultraft/vaultctlfsm/fsm.go](backend/internal/vaultraft/vaultctlfsm/fsm.go)): the per-vault sub-FSM. Holds `chunks map[ChunkID]*ManifestEntry` + `pendingDeletes map[ChunkID]*PendingDelete` + `tombstones map[ChunkID]time.Time`. All reads are lock-protected local; writes go through Raft.Apply.
+
+### Existing FSM commands
+
+| Command | Purpose |
+|---|---|
+| `CmdCreateChunk` | Create a new chunk (Active state) |
+| `CmdBeginSeal` | Active → Sealing transition; stops local appends |
+| `CmdSealChunk` | Sealing → Sealed transition; sets final counts/bounds |
+| `CmdAttachOffsets` | Attach GLCB section offsets after `sealToGLCB` |
+| `CmdCompressChunk` | Mark chunk as compressed (state metadata only) |
+| `CmdUploadChunk` | Mark sealed chunk as cloud-backed |
+| `CmdRequestDelete` | Receipt protocol: propose delete with `ExpectedFrom` set |
+| `CmdAckDelete` | Receipt protocol: per-node ack; auto-finalizes when drained |
+| `CmdFinalizeDelete` | Receipt protocol: explicit external finalize trigger |
+| `CmdPruneNode` | Drop departed node's slot from every `ExpectedFrom` |
+| `CmdRepatriateChunk` | Operator-driven recovery: re-introduce a chunk's manifest entry |
+| `CmdRetentionPending` | Mark chunk as retention-pending |
+| `CmdDeleteChunk` (legacy) | Pre-receipt-protocol delete; WAL-replay only |
+
+### Key types
+
+```go
+// ManifestEntry — per-chunk metadata in the FSM
+type ManifestEntry struct {
+    ID                chunk.ChunkID
+    WriteStart, WriteEnd, IngestStart, IngestEnd, SourceStart, SourceEnd time.Time
+    RecordCount, Bytes, DiskBytes int64
+    State             chunk.ChunkState // Active | Sealing | Sealed
+    IngestTSMonotonic bool
+    CloudBacked, Archived, RetentionPending bool
+    // ... cloud TOC offsets, integrity hash, key scheme
+}
+
+// PendingDelete — receipt-protocol in-flight delete (the shape the new
+// PendingPulls schema mirrors, inverted)
+type PendingDelete struct {
+    ChunkID      chunk.ChunkID
+    Reason       string
+    ProposedAt   time.Time
+    ExpectedFrom map[string]bool // nodeIDs that still owe a CmdAckDelete
+}
+```
+
+### Callbacks
+
+The FSM exposes hooks the orchestrator wires to project FSM state changes into the local manager + reconciler:
+
+- `onCreate(ManifestEntry)` — CmdCreateChunk applied
+- `onSeal(ManifestEntry)` — CmdSealChunk applied
+- `onUpload(ManifestEntry)` — CmdUploadChunk applied
+- `onRetentionPending(ChunkID)` — CmdRetentionPending applied
+- `onRequestDelete(PendingDelete)` — receipt protocol started
+- `onAckDelete(ChunkID, nodeID)` — receipt protocol per-node ack
+- `onFinalizeDelete(ChunkID)` — receipt protocol finalize (explicit OR natural)
+- `onPruneNode(nodeID, []ChunkID)` — node-departure ExpectedFrom drain
+- `onDelete(ChunkID)` — legacy CmdDeleteChunk applied
+- `onAfterRestore()` (on outer `vaultraft.FSM`) — fires once after snapshot install for catch-up reconcile
+
+### Authoritative residency function
+
+`ChunkResidency(chunkID, placementNodeIDs)` ([fsm_receipts.go:131](backend/internal/vaultraft/vaultctlfsm/fsm_receipts.go#L131)) returns the set of nodes that hold the chunk's bytes:
+
+- Chunk not in FSM (never existed, fully finalized, tombstoned) → `nil`
+- Chunk in `pendingDeletes` → `ExpectedFrom` (acked nodes have already deleted; remaining nodes still hold)
+- Otherwise → the passed-in `placementNodeIDs`
+
+Under fan-out, residency = `Holding` directly. The placement-derived derivation becomes unnecessary.
+
+### Tombstones
+
+`tombstones map[ChunkID]time.Time` records chunk deletions. The receive side of vault replication rejects stale Append/ImportSealed RPCs for tombstoned chunks (closes the retention-vs-late-replication race; see `gastrolog-11rzz`). Pruned periodically by the orchestrator (entries older than the replication-job deadline are safe to drop).
+
 ## Storage layout: FSM schema additions
 
-The vault-ctl FSM gains a per-chunk placement record:
+Under fan-out, the vault-ctl FSM gains a per-chunk placement record on top of `ManifestEntry`:
 
 ```go
 type ChunkPlacement struct {
     Receiving       []NodeID
-    Holding         []NodeID
-    PendingPulls    map[NodeID]ExpectedFromSet  // who owes a pull from each holder before removal
+    Holding         []NodeID                       // invariant: Holding ⊇ Receiving
+    PendingPulls    map[NodeID]ExpectedFromSet     // who owes a pull from each holder before removal
 }
 ```
 
-`PendingPulls` mirrors the `pendingDeletes.ExpectedFrom` pattern: when removing a node from Holding, every remaining Receiving member must ack having pulled the records that node held. Existing FSM apply machinery for `pendingDeletes` adapts directly.
+`PendingPulls` mirrors `pendingDeletes.ExpectedFrom`, inverted: when removing a node from Holding, every remaining Receiving member must ack having pulled the records that node held. The existing FSM apply machinery for `pendingDeletes` (lock discipline, snapshot encoding, `CmdPruneNode` cleanup, `onAfterRestore` catch-up) adapts directly.
 
-New FSM commands:
+### Extended commands
 
-- `CmdAddReceiving(chunkID, nodeID)` — placement-manager edit
-- `CmdRemoveReceiving(chunkID, nodeID)` — placement-manager edit
-- `CmdAddHolding(chunkID, nodeID)` — replica's first-record receipt for this chunk
-- `CmdBeginHoldingRemoval(chunkID, nodeID)` — placement-manager begins removing a node from Holding; populates PendingPulls
-- `CmdAckPull(chunkID, fromNode, toNode)` — toNode acks having pulled records from fromNode; when PendingPulls drains, fromNode is removed from Holding
-- `CmdRecordReceived(chunkID, nodeID, eventID)` — optional; tracks per-replica record receipt for cross-validation (could be omitted if Merkle summaries are authoritative)
+- `CmdCreateChunk` (extended): payload gains an initial `Receiving []NodeID` field. The set is populated by the proposer (rotation triggerer) from the current `placements` — i.e., every node with a `VaultPlacement` for this vault, derived via `system.FollowerNodeIDs(placements, nscs)` + the leader's own node under the current architecture, or the full union under fan-out (the leader/follower distinction in `VaultPlacement.Leader` becomes meaningless for FanOut-mode vaults but the field stays present for `LeaderDriven` migration coexistence).
+- `CmdSealChunk` (extended): payload gains an optional `FinalSet` (set-hash result) so the apply records the converged set-hash alongside the existing final counts / bounds. Replicas observing the apply compare against their local set-hash to detect post-seal divergence (defense-in-depth).
 
-Most commands are structurally similar to existing ones. Lock discipline, snapshot/restore, prune-on-node-removal all follow established patterns.
+### New FSM commands
+
+The implicit-multi-mutation pattern is established by `applyAckDelete` ([fsm_receipts.go:219-243](backend/internal/vaultraft/vaultctlfsm/fsm_receipts.go#L219)), which mutates `tombstones`, `pendingDeletes`, and `chunks` in one apply.
+
+- `CmdAddReceiving(chunkID, nodeID)` — placement-manager edit. The apply mutates **both** the chunk's Receiving and Holding sets atomically (Holding ⊇ Receiving invariant), in the same shape as `applyAckDelete`'s multi-map mutation. No separate CmdAddHolding is needed for nodes entering Receiving.
+- `CmdRemoveReceiving(chunkID, nodeID)` — placement-manager edit. Node stops accepting new records but stays in Holding until PendingPulls drains.
+- `CmdAddHolding(chunkID, nodeID)` — fires on **reconcile catch-up completion** for a node that acquired the chunk's bytes without being in Receiving (e.g., orphan-repatriation, snapshot restore). One apply per chunk, not per record.
+- `CmdBeginHoldingRemoval(chunkID, nodeID)` — placement-manager begins removing a node from Holding; populates PendingPulls.
+- `CmdAckPull(chunkID, fromNode, toNode)` — toNode acks having pulled records from fromNode; when PendingPulls drains, fromNode is removed from Holding. Auto-finalize on drain follows the `applyAckDelete` "natural finalize" pattern (no separate CmdFinalizeHoldingRemoval needed).
+
+Most commands are structurally similar to existing ones. Lock discipline, snapshot/restore, prune-on-node-removal all follow the patterns established by `pendingDeletes`.
+
+### Callbacks to wire
+
+New callbacks parallel the existing pattern:
+
+- `onAddReceiving(chunkID, nodeID)` — fires after CmdAddReceiving applies (every node observes; the joining node triggers reconcile catch-up from this hook).
+- `onRemoveReceiving(chunkID, nodeID)` — fires after CmdRemoveReceiving applies.
+- `onAddHolding(chunkID, nodeID)` — fires after CmdAddHolding applies.
+- `onBeginHoldingRemoval(chunkID, nodeID)` — fires after CmdBeginHoldingRemoval applies; each remaining Receiving member that owes a pull schedules it.
+- `onAckPull(chunkID, fromNode, toNode)` — fires after CmdAckPull applies.
+
+### Routing-layer simplification
+
+The current `MatchResult.NodeID` ([routing.go:113](backend/internal/orchestrator/routing.go#L113)) names the leader's node, and `ingestLocked` branches on `t.NodeID != ""` to send the record either through `appendLocal` or `handleRemoteVaultMatch`. Under fan-out the leader concept disappears, and the branch becomes a per-vault FSM lookup of the active chunk's Receiving set. The renamed-or-deleted `appendLocal`/`forwardToFollowers` path fans out via `o.forwarder` against Receiving directly; `handleRemoteVaultMatch` is no longer a separate code path because there is no privileged "owning" node to forward to.
+
+### `replicaCircuit`
+
+`o.replicaCircuit` is a per-peer circuit breaker over `forwarder`/`chunkReplicator` calls. It tracks every node the orchestrator talks to and skips unreachable peers on subsequent calls (`bumpReplicaBackoff`). Under fan-out it works unchanged — Receiving members are just the new set of peers it sees per write. No abstraction change required.
+
+### Snapshot extensions: new sections, no version bump
+
+The snapshot format ([fsm.go:1064-1104](backend/internal/vaultraft/vaultctlfsm/fsm.go#L1064)) uses TLV sections after a 12-byte versioned header. The decoder explicitly skips unknown section kinds: `// Unknown section — skip. Forward-compat for new sections in the same format version.` ([fsm.go:1296-1300](backend/internal/vaultraft/vaultctlfsm/fsm.go#L1296)).
+
+Adding fan-out state to snapshots therefore requires no version bump — just two new section kinds:
+
+- `sectionChunkPlacement sectionKind = 4` — per-chunk `Receiving []NodeID` + `Holding []NodeID`. Keyed by ChunkID; one entry per chunk.
+- `sectionPendingPulls sectionKind = 5` — per-chunk `PendingPulls map[NodeID]ExpectedFromSet`. Same shape as `sectionPendingDeletes` (id 3), parameterized differently.
+
+Existing `ManifestEntry` encoding (the 126-byte fixed-size entry) is unchanged. Placement state lives in its own section, parallel to the chunk-entries section, keyed by ChunkID. This avoids breaking the entry-size invariant and lets the decoder ignore placement data entirely when restoring on a node that doesn't yet have fan-out code (graceful rolling-restart story during migration).
 
 ## Existing primitives this builds on
 
@@ -270,7 +463,7 @@ Most commands are structurally similar to existing ones. Lock discipline, snapsh
 |---|---|---|
 | `chunk.EventID` | [chunk/types.go#L219](backend/internal/chunk/types.go#L219) | Cluster-wide unique record identifier; the key for set-diff reconcile and dedup |
 | `ingestBT` (IngestTS B+ tree) | [chunk/file/manager.go#L345](backend/internal/chunk/file/manager.go#L345) | Per-replica canonical ordering for queries; the source of EventID lists for Merkle summaries |
-| `chanwatch.PressureGate` | [cluster/record_forwarder.go#L102](backend/internal/cluster/record_forwarder.go#L102) | Per-node forward-channel pressure signal; consulted by the entry node's cluster-side forwarder for load-balancing within Receiving. Cluster-internal; not exposed to ingesters |
+| `chanwatch.PressureGate` | [cluster/record_forwarder.go#L102](backend/internal/cluster/record_forwarder.go#L102) | Per-node forward-channel pressure signal; consulted by the orchestrator's forwarder for load-balancing within Receiving. Cluster-internal; not exposed to ingesters |
 | `dedupWindow` | [server/query.go#L485](backend/internal/server/query.go#L485) | EventID-keyed cross-source dedup; extends to cross-replica dedup for active-chunk searches |
 | `pendingDeletes.ExpectedFrom` pattern | [vaultraft/vaultctlfsm/fsm.go#L209](backend/internal/vaultraft/vaultctlfsm/fsm.go#L209) | Template for `PendingPulls` (Holding-removal acks). Same lock/snapshot/prune semantics |
 | Vault-ctl Raft group | [orchestrator/reconfig_vaults.go#L1091](backend/internal/orchestrator/reconfig_vaults.go#L1091) `ensureVaultCtlMetadata` | Serializes chunk-lifecycle and placement-edit commands (unchanged from current architecture) |
@@ -294,11 +487,24 @@ The control-plane epic provided the substrate (states, authority discipline, lea
 The current `ChunkReplicator.AppendRecords` (per-record real-time) and `replicateToFollower` → `ImportSealedChunk` (at-seal re-ship) mechanisms cannot be removed mid-flight without breaking existing clusters. Migration approach:
 
 1. **Flag-gated rollout.** Per-vault config: `WriteModel = LeaderDriven` (current) or `FanOut` (new). Default LeaderDriven during transition.
-2. **Implement fan-out alongside existing.** New `Receive` RPC per replica (replaces leader's per-record `ChunkReplicator.AppendRecords` push); new FSM commands for Receiving/Holding; new reconcile mechanism. Old mechanisms remain operational for vaults still in LeaderDriven mode.
+2. **Implement fan-out alongside existing.** New W-of-N coordinator in the orchestrator; new FSM commands for Receiving/Holding (snapshot sections 4 and 5); new reconcile mechanism. Old mechanisms remain operational for vaults still in LeaderDriven mode.
 3. **Per-vault opt-in.** Operator switches vaults to FanOut individually after observing the mechanism works for less-critical vaults.
-4. **Remove old mechanism.** Once all clusters have migrated all vaults, `ChunkReplicator.AppendRecords`, `replicateToFollower`, and `ImportSealedChunk` paths get deleted ([gastrolog-1bd56](dcat://gastrolog-1bd56) had already flagged the sealed-chunk re-ship for removal).
+4. **Remove old mechanism.** Once all clusters have migrated all vaults, `ChunkReplicator.AppendRecords`, `replicateToFollower`, `ImportSealedChunk`, the `MatchResult.NodeID` branch in `ingestLocked`, and the `VaultPlacement.Leader` field all get deleted ([gastrolog-1bd56](dcat://gastrolog-1bd56) had already flagged the sealed-chunk re-ship for removal).
 
-Per-vault rollout means the cluster runs both data-plane models simultaneously during the transition. The FSM commands are disjoint (Receiving/Holding for new mode; placement for old mode), so there's no consistency risk between them.
+### Per-chunk cutover semantics
+
+The WriteModel is per-vault config but **per-chunk in effect**: each chunk's WriteModel is fixed at creation time and immutable for the chunk's lifetime. Concretely:
+
+- `CmdCreateChunk` payload carries a `WriteModel` enum (alongside the new `Receiving []NodeID` field). The proposer reads the vault config at proposal time and stamps the new chunk accordingly.
+- A vault transitioning from LeaderDriven to FanOut: in-flight active chunks complete under LeaderDriven (`forwardToFollowers` → followers; standard at-seal re-ship). New chunks created after the config change are FanOut (orchestrator fan-out against Receiving + W-of-N).
+- The orchestrator's `writeLoop` reads each chunk's WriteModel and dispatches accordingly: LeaderDriven → existing `appendLocal`/`forwardToFollowers` path; FanOut → new fan-out path.
+- No mid-chunk transition. No active-chunk reconcile across WriteModels. Each chunk is self-consistent.
+
+This avoids the complexity of mid-chunk cutover and keeps the migration commit-by-commit safe to revert if a vault's first FanOut chunk surfaces a problem.
+
+Per-vault rollout means the cluster runs both data-plane models simultaneously during the transition. The FSM commands are disjoint (Receiving/Holding/PendingPulls for FanOut chunks; placement + FollowerTargets for LeaderDriven chunks), so there's no consistency risk between them.
+
+**Dual-path obligation.** Running both write paths in `writeLoop` doubles the surface area for write-path bugs: every regression must be reproduced under both `LeaderDriven` and `FanOut`. This is the unavoidable cost of a per-vault migration, but it also makes it tempting to defer issue #7 (legacy removal) indefinitely once FanOut "works for most vaults." The migration is not complete until #7 lands and the dual dispatch in `writeLoop` is gone — operators carrying the dual-path tax accumulate it across every future write-path change. Treat the migration as a single sustained effort, not a phase that ends when the first FanOut vault is healthy.
 
 ## Out of scope (deferred to implementation issues)
 
@@ -314,30 +520,32 @@ Per-vault rollout means the cluster runs both data-plane models simultaneously d
 
 - **PendingPulls granularity** ([gastrolog-3r38a](dcat://gastrolog-3r38a), closed): per-chunk. Cheapest FSM apply cost; mirrors `pendingDeletes.ExpectedFrom`; Holding-removal is rare, so "one straggler blocks chunk removal" is acceptable.
 - **W-of-N under partial Receiving** ([gastrolog-16msa](dcat://gastrolog-16msa), closed): snapshot-at-fan-out. Each write freezes the Receiving membership at fan-out time and finalizes ack accounting against that snapshot. Topology churn does not reach in-flight writes.
+- **Cross-node delivery strategy** ([gastrolog-3e571](dcat://gastrolog-3e571), [gastrolog-5gkxp](dcat://gastrolog-5gkxp), both closed as misframed): not a design question. The existing `o.forwarder` already handles parallel cross-node record transmission; under fan-out it is invoked with the active chunk's Receiving set as the target list — same mechanism, different topology source.
+- **Holding entry granularity** (resolved by substrate analysis above): `CmdAddReceiving` atomically mutates both Receiving and Holding in one apply (matches the `applyAckDelete` multi-map mutation pattern). `CmdAddHolding` only fires for reconcile catch-up completion — that's per-chunk by nature, not per-record.
+- **W-of-N implementation primitive**: the existing `ackAfterReplication` uses `errgroup` (wait-for-all). A new W-of-N coordinator is needed — small dedicated helper consuming a result channel from N goroutines, returning success at `acks ≥ W` or failure at `N - failures < W`. Background goroutines keep running; their writes land regardless of the W-of-N decision.
+- **Initial Receiving population**: `CmdCreateChunk` payload extended with `Receiving []NodeID` and a `WriteModel` enum; proposer reads vault config at proposal time to populate. The receiving set is derived from the vault's `Placements` (`system.FollowerNodeIDs` + leader's node, or the union under FanOut).
+- **Receiving membership constraint**: `Receiving ⊆ {nodes with a vault placement}`. Verified against [`buildVaultInstance`](backend/internal/orchestrator/reconfig_vaults.go#L660): nodes without placement participate in the Raft group only and have no VaultInstance, so they cannot append. Combined with the Phase 2 one-replica-per-node invariant, Receiving is `[]NodeID`.
+- **Snapshot extension shape**: no version bump. The snapshot format ([fsm.go:1064](backend/internal/vaultraft/vaultctlfsm/fsm.go#L1064)) skips unknown section kinds — adding `sectionChunkPlacement = 4` and `sectionPendingPulls = 5` is forward-compat within version 1.
+- **Per-vault cutover semantics**: chunk-immutable WriteModel stamped at `CmdCreateChunk` time. In-flight chunks complete under their original model; new chunks pick up the new model. No mid-chunk transition.
 
 ## Open design questions
 
-These remain real forks that need a decision before implementation:
-
-1. **Entry-node fan-out semantics** ([gastrolog-5gkxp](dcat://gastrolog-5gkxp)). The ingester sends to a single entry node; the entry node fans out to Receiving. Sub-questions: how is the entry node chosen by the ingester (round-robin? sticky? topology-aware?); what does the entry node do if it loses connection to the ingester mid-write; should ingesters retry against a different entry node on failure, and if so how does that interact with W-of-N already partially completed on the first entry node? (Replacement for the closed-as-misframed [gastrolog-3e571](dcat://gastrolog-3e571).)
-2. **Holding entry on first record receipt — atomic or batched?** Each `CmdAddHolding` is an FSM apply; per-record could be expensive. Batched (first record in a "batch" triggers AddHolding) loses some precision. Worth exploring.
+No fan-out-specific design questions remain. Implementation can proceed from the substrate already in place plus the FSM additions enumerated above.
 
 ## Acceptance for this design
 
-This document is sufficient to open the following design and implementation issues under this epic:
+This document is sufficient to open the following implementation issues under this epic:
 
-1. **Design (open question)**: Entry-node fan-out semantics ([gastrolog-5gkxp](dcat://gastrolog-5gkxp); replacement for the closed-as-misframed [gastrolog-3e571](dcat://gastrolog-3e571))
-2. **Design (open question)**: Holding entry on first record receipt — atomic or batched
-3. **Implement**: Receiving/Holding FSM schema + commands + apply handlers
-4. **Implement**: Cluster-side entry-node fan-out with W-of-N ack accounting (snapshot-at-fan-out semantics)
-5. **Implement**: Set-diff reconcile mechanism with Merkle summaries (sealed chunks only)
-6. **Implement**: Read fan-out for active chunks; dedupWindow extension
-7. **Implement**: Per-vault W-of-N configuration (system FSM + UI + CLI)
-8. **Implement**: Migration flag for per-vault opt-in
-9. **Implement**: Removal of `ChunkReplicator.AppendRecords`, `replicateToFollower`, and `ImportSealedChunk` after migration complete
-10. **Test**: Multi-node fan-out write + reconcile integration test (umbrella; complements per-feature multi-dimensional test coverage required on each implement issue)
+1. **Implement**: Receiving/Holding FSM schema (`ChunkPlacement`, `PendingPulls`) + commands (`CmdAddReceiving`, `CmdRemoveReceiving`, `CmdAddHolding`, `CmdBeginHoldingRemoval`, `CmdAckPull`) + apply handlers + callbacks (`onAddReceiving`, `onRemoveReceiving`, `onAddHolding`, `onBeginHoldingRemoval`, `onAckPull`) + snapshot/restore extensions
+2. **Implement**: Orchestrator-driven fan-out to Receiving with W-of-N ack accounting (snapshot-at-fan-out semantics; replaces the current `forwardToFollowers` + `MatchResult.NodeID`-based local/remote split with a Receiving-set FSM lookup; reuses `o.forwarder` against Receiving)
+3. **Implement**: Set-diff reconcile mechanism with Merkle summaries (seal-time pass + iterative active-chunk catch-up on placement change; new joiner pulls from existing Receiving member until watermark stabilizes)
+4. **Implement**: Read fan-out for active chunks; extend `dedupWindow` ([server/query.go#L485](backend/internal/server/query.go#L485)) to absorb cross-replica duplicates
+5. **Implement**: Per-vault W-of-N configuration (system FSM + UI + CLI)
+6. **Implement**: Migration flag for per-vault opt-in (`WriteModel = LeaderDriven | FanOut`)
+7. **Implement**: Removal of `ChunkReplicator.AppendRecords`, `replicateToFollower`, `ImportSealedChunk`, and the `MatchResult.NodeID` routing branch after migration complete
+8. **Test**: Multi-node fan-out write + reconcile integration test (umbrella; complements per-feature multi-dimensional test coverage required on each implement issue)
 
-Implementation issues are sequenced after the remaining design issues close.
+The implementation issues can be drafted in dependency order: the FSM-schema issue (#1) unblocks fan-out writes (#2), which unblocks reconcile (#3) and read fan-out (#4); migration flag (#6) and W-of-N config (#5) can land alongside the writes work; removal (#7) is last.
 
 ## Relationship to other work
 
