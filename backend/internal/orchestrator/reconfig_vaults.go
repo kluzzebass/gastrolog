@@ -137,6 +137,15 @@ func resolveRetentionRulesFromVault(cfg *system.Config, vaultCfg system.VaultCon
 // RemoveVault removes a vault if it's empty (no chunks with data).
 // Returns ErrVaultNotFound if the vault doesn't exist.
 // Returns ErrVaultNotEmpty if the vault has any chunks.
+//
+// Authority: the vault-ctl FSM manifest is canonical for whether a
+// vault holds data. Per audit finding F3 (gastrolog-4vym6), the
+// emptiness check consults the FSM first; the local Chunks.List()
+// view is corroborating evidence at most (a sync-lagged follower
+// or post-recovery node may have less on disk than the FSM
+// records). If either source reports non-empty, removal is refused
+// — defense in depth against either an FSM read failure or a
+// stale-disk-but-fresh-FSM state.
 func (o *Orchestrator) RemoveVault(id glid.GLID) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -145,6 +154,27 @@ func (o *Orchestrator) RemoveVault(id glid.GLID) error {
 	if !exists {
 		return fmt.Errorf("%w: %s", ErrVaultNotFound, id)
 	}
+
+	// Primary: FSM manifest. Returns (nil, nil) when the FSM isn't
+	// reachable from this node (memory-mode or no GroupManager); we
+	// fall through to the local check in that case rather than
+	// quietly allowing removal of a vault we can't authoritatively
+	// inspect.
+	fsmMetas, err := o.listClusterChunkMetasLocked(id)
+	if err != nil {
+		return fmt.Errorf("list FSM chunks for vault %s: %w", id, err)
+	}
+	for _, m := range fsmMetas {
+		if m.RecordCount > 0 || !m.Sealed {
+			return fmt.Errorf("%w: vault %s has data in FSM manifest", ErrVaultNotEmpty, id)
+		}
+	}
+
+	// Corroborating: local disk view. Catches the inverse case where
+	// the FSM has caught up to empty but residual chunks linger on
+	// disk (orphans, partial repatriation, etc.) — gastrolog-3y8py
+	// already preserves data-bearing orphans, so this is the operator-
+	// safe stance.
 	if vaultInst := vault.Instance; vaultInst != nil {
 		metas, err := vaultInst.Chunks.List()
 		if err != nil {
@@ -152,7 +182,7 @@ func (o *Orchestrator) RemoveVault(id glid.GLID) error {
 		}
 		for _, m := range metas {
 			if m.RecordCount > 0 || !m.Sealed {
-				return fmt.Errorf("%w: vault %s has data", ErrVaultNotEmpty, id)
+				return fmt.Errorf("%w: vault %s has data on local disk", ErrVaultNotEmpty, id)
 			}
 		}
 		if active := vaultInst.Chunks.Active(); active != nil {
@@ -163,6 +193,36 @@ func (o *Orchestrator) RemoveVault(id glid.GLID) error {
 	o.teardownVault(id, vault)
 	o.logger.Info("vault removed", "id", id, "name", vault.Name, "type", vault.Type())
 	return nil
+}
+
+// listClusterChunkMetasLocked is the FSM-manifest variant of
+// ListClusterChunkMetas — same body, but assumes the orchestrator
+// mutex is already held (RemoveVault holds o.mu for the full
+// duration). Inlined to avoid a recursive lock when reading FSM
+// chunk metadata as part of mutation guards.
+func (o *Orchestrator) listClusterChunkMetasLocked(vaultID glid.GLID) ([]chunk.ChunkMeta, error) {
+	if o.groupMgr == nil {
+		return nil, nil
+	}
+	g := o.groupMgr.GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
+	if g == nil {
+		return nil, nil
+	}
+	var fsm *vaultctlfsm.FSM
+	switch raw := g.FSM.(type) {
+	case *vaultctlfsm.FSM:
+		fsm = raw
+	case *vaultraft.FSM:
+		fsm = raw.EnsureVaultFSM(vaultID)
+	default:
+		return nil, nil
+	}
+	entries := fsm.List()
+	out := make([]chunk.ChunkMeta, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, manifestEntryToChunkMeta(e, e.IsSealed()))
+	}
+	return out, nil
 }
 
 // removeVaultJobs removes retention runners and cron rotation jobs for a vault
