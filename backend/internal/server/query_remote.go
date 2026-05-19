@@ -96,9 +96,14 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, remoteTo
 	return merged, allHist, getRemoteTokens
 }
 
-// remoteVaultsByNode groups remote vault IDs by their owning node.
+// remoteVaultsByNode groups remote vault IDs by their owning nodes.
 // When selectedVaults is non-nil, only vaults in that set are included
 // (used when the query contains a vault_id=X filter).
+//
+// Under fan-out the same vault appears under every placement member that
+// isn't this node — each member is a peer Receiver and may hold records
+// the others don't. The k-way merge + dedupWindow on the coordinator
+// collapses cross-replica duplicates by EventID.
 //
 // Reads VaultConfig.Placements directly (mirrored from vault placements
 // via the FSM bridge — gastrolog-257l7).
@@ -132,11 +137,18 @@ func (s *QueryServer) remoteVaultsByNodeFiltered(ctx context.Context, selectedVa
 		if len(v.Placements) == 0 {
 			continue
 		}
-		leaderNodeID := system.LeaderNodeID(v.Placements, nscs)
-		if leaderNodeID == "" || leaderNodeID == s.localNodeID {
-			continue
+		// Fan-out reads: route to every placement member, not just the
+		// leader. Each member may hold records the others don't (post-
+		// senderChunkID-strip), and the existing dedupWindow at the
+		// merge boundary collapses cross-replica duplicates by EventID.
+		// Bandwidth cost is N× per query — acceptable trade for
+		// correctness under fan-out divergence.
+		for _, nodeID := range system.PlacementNodeIDs(v.Placements, nscs) {
+			if nodeID == "" || nodeID == s.localNodeID {
+				continue
+			}
+			byNode[nodeID] = append(byNode[nodeID], v.ID)
 		}
-		byNode[leaderNodeID] = append(byNode[leaderNodeID], v.ID)
 	}
 	return byNode
 }

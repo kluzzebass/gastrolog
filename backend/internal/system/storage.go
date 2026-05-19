@@ -307,6 +307,23 @@ func FollowerNodeIDs(placements []VaultPlacement, nscs []NodeStorageConfig) []st
 	return nodeIDs
 }
 
+// PlacementNodeIDs returns every unique node ID across the vault's placements.
+// Under fan-out, every placement member is a peer Receiver — no leader/follower
+// distinction. Order matches the placement order with the leader (if any)
+// listed first, then followers; duplicates removed.
+func PlacementNodeIDs(placements []VaultPlacement, nscs []NodeStorageConfig) []string {
+	var nodeIDs []string
+	seen := make(map[string]bool)
+	for _, storageID := range StorageIDs(placements) {
+		nid := NodeIDForStorage(storageID, nscs)
+		if nid != "" && !seen[nid] {
+			seen[nid] = true
+			nodeIDs = append(nodeIDs, nid)
+		}
+	}
+	return nodeIDs
+}
+
 // ReplicationTarget identifies a specific storage on a specific node.
 type ReplicationTarget struct {
 	NodeID    string
