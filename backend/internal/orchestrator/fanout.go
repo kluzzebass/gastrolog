@@ -12,9 +12,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/system"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
 // NodeResult carries the outcome of a single per-Receiving-member
@@ -222,6 +225,130 @@ func (o *Orchestrator) fanOutAppend(
 		go o.fanOutOne(ctx, vaultID, chunkID, rec, nodeID, localCM, results)
 	}
 	return waitWOfN(ctx, len(snapshot), w, results, isStillReceiving)
+}
+
+// fanOutTask captures the per-record fan-out work the writeLoop /
+// ackAfterReplication needs to execute against the active chunk's
+// Receiving set under FanOut WriteModel. Built in appendRecord (under
+// o.mu.RLock) and dispatched after the lock is released so the
+// snapshot-at-fan-out denominator is frozen at append time.
+//
+// Self-already-appended semantics: when this node is in Receiving for
+// the chunk, the local cm.Append already ran in appendRecord and
+// counts as one of the W-of-N acks. The peers slice carries only the
+// OTHER Receiving members; w is the original W minus 1 (clamped at 0).
+// If w == 0 after the clamp, the dispatcher fires the remaining peers
+// fire-and-forget; durability is already satisfied by the local
+// append.
+type fanOutTask struct {
+	vaultID  glid.GLID
+	chunkID  chunk.ChunkID
+	peers    []string // Receiving members other than self
+	w        int      // remaining acks needed from peers (W - 1 if self acked, else W)
+	snapshot []string // full Receiving snapshot for the live-membership classifier
+}
+
+// buildFanOutTask reads the active chunk's Receiving from the
+// supplied placement, resolves the per-vault WOfN policy against the
+// snapshot size, and returns a task carrying the snapshot-minus-self
+// peer list + remaining W. Returns nil if the chunk has no
+// Receiving (defensive: an empty FanOut snapshot is a config bug).
+//
+// Caller MUST hold o.mu.RLock.
+func (o *Orchestrator) buildFanOutTask(vaultID glid.GLID, chunkID chunk.ChunkID, placement *vaultctlfsm.ChunkPlacement, rec chunk.Record) *fanOutTask {
+	if placement == nil || len(placement.Receiving) == 0 {
+		return nil
+	}
+	snapshot := append([]string(nil), placement.Receiving...)
+	// Default to Full policy. VaultConfig.WOfN lookup lives at a
+	// higher layer (cfgStore on the QueryServer side) and isn't
+	// threaded into the orchestrator yet — TODO under
+	// gastrolog-nd6sz follow-up. Full preserves LeaderDriven's
+	// wait-for-all semantics by default, matching the doc's
+	// conservative-migration stance.
+	w, err := system.WOfNPolicyFull.Resolve(len(snapshot))
+	if err != nil {
+		o.logger.Warn("fan-out: WOfN resolve failed", "vault", vaultID, "error", err)
+		return nil
+	}
+	peers := make([]string, 0, len(snapshot))
+	selfInSnapshot := false
+	for _, n := range snapshot {
+		if n == o.localNodeID {
+			selfInSnapshot = true
+			continue
+		}
+		peers = append(peers, n)
+	}
+	// Self auto-acks via the cm.Append that already ran in
+	// appendRecord (when self is in Receiving). Remaining W is
+	// W − 1, clamped at 0. When self isn't in Receiving (rare —
+	// the node has a vault instance but isn't currently receiving
+	// for this chunk), W stays at the resolved value.
+	if selfInSnapshot {
+		w--
+	}
+	if w < 0 {
+		w = 0
+	}
+	return &fanOutTask{
+		vaultID:  vaultID,
+		chunkID:  chunkID,
+		peers:    peers,
+		w:        w,
+		snapshot: snapshot,
+	}
+}
+
+// runFanOut dispatches a fanOutTask through the W-of-N coordinator.
+// Used by ackAfterReplication for ack-gated records; the non-ack-gated
+// path lets the goroutines run fire-and-forget without waiting.
+//
+// isStillReceiving consults the FSM at failure-classification time so
+// nodes that have since left Receiving via concurrent CmdRemoveReceiving
+// are de-escalated to "not required" rather than counted as failures
+// (closes the multi-node-drain spurious-failure hole, see fanout.go).
+func (o *Orchestrator) runFanOut(ctx context.Context, t *fanOutTask, rec chunk.Record) error {
+	if t == nil {
+		return nil
+	}
+	if t.w == 0 || len(t.peers) == 0 {
+		// Durability already satisfied by self's local append, or
+		// no remote peers to send to. Spawn the peer writes
+		// fire-and-forget so the records still land for
+		// background convergence; don't wait.
+		for _, peer := range t.peers {
+			go func(p string) {
+				if o.chunkReplicator != nil {
+					_ = o.chunkReplicator.AppendRecords(ctx, p, t.vaultID, t.chunkID, []chunk.Record{rec})
+				}
+			}(peer)
+		}
+		return nil
+	}
+	classifier := o.fanOutLiveReceivingClassifier(t.vaultID, t.chunkID, t.snapshot)
+	return o.fanOutAppend(ctx, t.vaultID, t.chunkID, rec, t.peers, t.w, classifier, nil)
+}
+
+// fanOutLiveReceivingClassifier returns the IsStillReceivingFn that
+// waitWOfN consults on failure. Reads from the local vault-ctl FSM
+// (every orchestrator has the state — see
+// project_vault_ctl_raft_membership), so the lookup is cheap.
+func (o *Orchestrator) fanOutLiveReceivingClassifier(vaultID glid.GLID, chunkID chunk.ChunkID, snapshot []string) IsStillReceivingFn {
+	return func(nodeID string) bool {
+		v, ok := o.vaults[vaultID]
+		if !ok || v == nil || v.Instance == nil || v.Instance.ChunkPlacement == nil {
+			// FSM accessor unavailable: fall back to "still in
+			// Receiving per the snapshot" so we don't spuriously
+			// de-escalate.
+			return slices.Contains(snapshot, nodeID)
+		}
+		p := v.Instance.ChunkPlacement(chunkID)
+		if p == nil {
+			return false
+		}
+		return slices.Contains(p.Receiving, nodeID)
+	}
 }
 
 // fanOutOne is the per-snapshot-member worker: appends locally if the

@@ -854,7 +854,7 @@ func TestAppendRecordWaitForReplicaReturnsTask(t *testing.T) {
 	rec.WaitForReplica = true
 
 	orch.mu.RLock()
-	_, _, task, _, err := orch.appendRecord(vaultID, rec)
+	_, _, task, _, _, err := orch.appendRecord(vaultID, rec)
 	orch.mu.RUnlock()
 
 	if err != nil {
@@ -893,7 +893,7 @@ func TestAppendRecordNoWaitForReplicaFiresAndForgets(t *testing.T) {
 	rec.WaitForReplica = false
 
 	orch.mu.RLock()
-	_, _, task, remotes, err := orch.appendRecord(vaultID, rec)
+	_, _, task, remotes, _, err := orch.appendRecord(vaultID, rec)
 	orch.mu.RUnlock()
 
 	if err != nil {

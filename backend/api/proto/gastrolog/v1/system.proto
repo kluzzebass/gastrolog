@@ -251,6 +251,17 @@ message VaultConfig {
   string cache_budget = 14;                  // max cache size (e.g. "1GB", "500MB"; default: "1GiB")
   string cache_ttl = 15;                     // eviction TTL duration (e.g. "1h", "7d"); only for ttl mode
   string retention_disposition = 16;         // "delete" (default) or "route" — what retention does with aged-out records
+  // Fan-out data-plane fields (gastrolog-2ujjh / gastrolog-nd6sz).
+  // write_model: "" / "leader-driven" (default) or "fanout".
+  // Per-chunk immutable: stamped at CmdCreateChunk time; in-flight
+  // chunks finish under their original model. See
+  // docs/fan-out-data-plane-design.md § "Per-chunk cutover semantics".
+  string write_model = 17;
+  // w_of_n: "" / "full" (default) / "minus-one" / "quorum" / "one".
+  // Resolves to a concrete W at write time against the active chunk's
+  // Receiving size. Meaningless for LeaderDriven chunks; load-bearing
+  // for FanOut chunks. See system.WOfNPolicy.Resolve.
+  string w_of_n = 18;
 }
 
 message RouteDestination {

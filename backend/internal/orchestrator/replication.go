@@ -100,6 +100,20 @@ func (o *Orchestrator) ackAfterReplication(ack chan<- error, pa *pendingAcks, re
 		}
 	}
 
+	// Fan-out W-of-N tasks (gastrolog-nd6sz). Each task waits in
+	// its own errgroup goroutine; runFanOut internally launches the
+	// per-peer goroutines + the waitWOfN coordinator. A failure
+	// (ErrWOfNUnreachable) propagates to the ack channel like any
+	// other replication error.
+	for _, t := range pa.fanOut {
+		g.Go(func() error {
+			if err := o.runFanOut(ctx, &t, rec); err != nil {
+				return fmt.Errorf("ack-gated fan-out vault=%s chunk=%s: %w", t.vaultID, t.chunkID, err)
+			}
+			return nil
+		})
+	}
+
 	ack <- g.Wait()
 }
 

@@ -47,6 +47,21 @@ func (a *Announcer) AnnounceCreate(id chunk.ChunkID, writeStart, ingestStart, so
 	a.apply("create", id, MarshalCreateChunk(id, writeStart, ingestStart, sourceStart))
 }
 
+// AnnounceCreateFanOut implements chunk.FanOutAnnouncer (gastrolog-nd6sz).
+// The chunk manager calls this when the vault's WriteModel has been
+// wired to a non-empty value (typically "fanout" + the placement
+// member list as the initial Receiving set). The payload routes via
+// the extended CmdCreateChunk: the legacy 40-byte prefix carries the
+// chunk identity + timestamps, the trailing fields stamp WriteModel
+// + initial Receiving on the new ChunkPlacement entry.
+func (a *Announcer) AnnounceCreateFanOut(id chunk.ChunkID, writeStart, ingestStart, sourceStart time.Time, writeModel string, receiving []string) {
+	wm := WriteModelLeaderDriven
+	if writeModel == "fanout" {
+		wm = WriteModelFanOut
+	}
+	a.apply("create-fanout", id, MarshalCreateChunkFanOut(id, writeStart, ingestStart, sourceStart, wm, receiving))
+}
+
 // AnnounceBeginSeal fires the Active → Sealing transition before the
 // leader starts assembling the sealed-form GLCB. Lets followers and
 // retention/upload code observe the in-flight assembly window

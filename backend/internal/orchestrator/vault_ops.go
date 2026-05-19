@@ -899,9 +899,16 @@ func (o *Orchestrator) deleteFromFollowers(vaultID glid.GLID, chunkID chunk.Chun
 // cluster-forwarded records, and the ImportRecords API.
 func (o *Orchestrator) Append(vaultID glid.GLID, rec chunk.Record) (chunk.ChunkID, uint64, error) {
 	o.mu.RLock()
-	cid, pos, _, remotes, err := o.appendRecord(vaultID, rec)
+	cid, pos, _, remotes, fanOut, err := o.appendRecord(vaultID, rec)
 	o.mu.RUnlock()
 	o.fireAndForgetRemote(remotes, rec)
+	if fanOut != nil {
+		// Fire-and-forget the fan-out: the caller of Append doesn't
+		// wait for replicas (this entry point is non-ack-gated).
+		// Records still land on Receiving via the background
+		// goroutines; durability convergence happens at seal time.
+		_ = o.runFanOut(context.Background(), fanOut, rec)
+	}
 	return cid, pos, err
 }
 
@@ -920,26 +927,26 @@ type replicationTask struct {
 // Returns a replicationTask when the record has WaitForReplica set and
 // the instance has secondaries. Also returns remoteForwardTargets for
 // fire-and-forget forwarding — the caller fires these AFTER releasing the lock.
-func (o *Orchestrator) appendRecord(vaultID glid.GLID, rec chunk.Record) (chunk.ChunkID, uint64, *replicationTask, []remoteForwardTarget, error) {
+func (o *Orchestrator) appendRecord(vaultID glid.GLID, rec chunk.Record) (chunk.ChunkID, uint64, *replicationTask, []remoteForwardTarget, *fanOutTask, error) {
 	vault := o.vaults[vaultID]
 	if vault == nil {
-		return chunk.ChunkID{}, 0, nil, nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+		return chunk.ChunkID{}, 0, nil, nil, nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 	if !vault.Enabled {
-		return chunk.ChunkID{}, 0, nil, nil, fmt.Errorf("%w: %s", ErrVaultDisabled, vaultID)
+		return chunk.ChunkID{}, 0, nil, nil, nil, fmt.Errorf("%w: %s", ErrVaultDisabled, vaultID)
 	}
 	if err := vaultReplicationReadinessErr(vaultID, vault); err != nil {
-		return chunk.ChunkID{}, 0, nil, nil, err
+		return chunk.ChunkID{}, 0, nil, nil, nil, err
 	}
 
 	cm := vault.ChunkManager()
 	if cm == nil {
-		return chunk.ChunkID{}, 0, nil, nil, fmt.Errorf("%w: %s (no instance)", ErrVaultNotFound, vaultID)
+		return chunk.ChunkID{}, 0, nil, nil, nil, fmt.Errorf("%w: %s (no instance)", ErrVaultNotFound, vaultID)
 	}
 	activeBefore := cm.Active()
 	cid, pos, err := cm.Append(rec)
 	if err != nil {
-		return cid, pos, nil, nil, err
+		return cid, pos, nil, nil, nil, err
 	}
 	o.progressTrigger.Signal()
 
@@ -952,7 +959,21 @@ func (o *Orchestrator) appendRecord(vaultID glid.GLID, rec chunk.Record) (chunk.
 	activeInst := vault.Instance
 	var task *replicationTask
 	var remotes []remoteForwardTarget
-	if activeInst != nil && activeInst.ShouldForwardToFollowers() {
+	var fanOut *fanOutTask
+
+	// Fan-out dispatch (gastrolog-nd6sz): if the active chunk has a
+	// FanOut WriteModel, the per-chunk Receiving set is the
+	// replication target list — not the legacy FollowerTargets. Build
+	// a fanOutTask and skip the LeaderDriven follower path entirely.
+	// The fanOutTask is processed by ackAfterReplication (ack-gated)
+	// or fired and forgotten via the same dispatcher (non-ack-gated).
+	if activeInst != nil && cid != (chunk.ChunkID{}) && activeInst.ChunkPlacement != nil {
+		if p := activeInst.ChunkPlacement(cid); p != nil && p.WriteModel == vaultctlfsm.WriteModelFanOut {
+			fanOut = o.buildFanOutTask(vaultID, cid, p, rec)
+		}
+	}
+
+	if fanOut == nil && activeInst != nil && activeInst.ShouldForwardToFollowers() {
 		if rec.WaitForReplica {
 			activeNow := cm.Active()
 			var activeChunkID chunk.ChunkID
@@ -983,7 +1004,7 @@ func (o *Orchestrator) appendRecord(vaultID glid.GLID, rec chunk.Record) (chunk.
 		o.schedulePostSeal(vaultID, cm, activeBefore.ID)
 	}
 
-	return cid, pos, task, remotes, nil
+	return cid, pos, task, remotes, fanOut, nil
 }
 
 // ImportChunkRecords creates a new sealed chunk from the given records in the

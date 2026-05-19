@@ -120,7 +120,7 @@ func (o *Orchestrator) ingestLocked(rec chunk.Record, src SourceContext) (*pendi
 			routed = true
 			continue
 		}
-		task, remotes, err := o.appendLocal(t.VaultID, rec)
+		task, remotes, fanOut, err := o.appendLocal(t.VaultID, rec)
 		if err != nil {
 			if errors.Is(err, ErrVaultDisabled) {
 				continue // Skip disabled vaults during ingestion.
@@ -129,6 +129,9 @@ func (o *Orchestrator) ingestLocked(rec chunk.Record, src SourceContext) (*pendi
 		}
 		if task != nil {
 			pa = pa.addReplication(*task)
+		}
+		if fanOut != nil {
+			pa = pa.addFanOut(*fanOut)
 		}
 		if len(remotes) > 0 {
 			deferredRemotes = append(deferredRemotes, remotes)
@@ -181,6 +184,7 @@ type pendingAcks struct {
 	replication  []replicationTask
 	forwards     []forwardTask // ack-gated cross-node; ackAfterReplication
 	syncForwards []forwardTask // non-ack cross-node; flushRecordRouteForwards
+	fanOut       []fanOutTask  // fan-out W-of-N (gastrolog-nd6sz); ackAfterReplication
 }
 
 func (p *pendingAcks) addReplication(t replicationTask) *pendingAcks {
@@ -207,9 +211,17 @@ func (p *pendingAcks) addSyncForward(t forwardTask) *pendingAcks {
 	return p
 }
 
+func (p *pendingAcks) addFanOut(t fanOutTask) *pendingAcks {
+	if p == nil {
+		p = &pendingAcks{}
+	}
+	p.fanOut = append(p.fanOut, t)
+	return p
+}
+
 // isEmpty reports whether there is any sync work to wait on before acking.
 func (p *pendingAcks) isEmpty() bool {
-	return p == nil || (len(p.replication) == 0 && len(p.forwards) == 0)
+	return p == nil || (len(p.replication) == 0 && len(p.forwards) == 0 && len(p.fanOut) == 0)
 }
 
 // forwardTask is a pending cross-node forward for a record that matched
@@ -245,12 +257,12 @@ func (o *Orchestrator) getOrCreatePerRouteStats(routeID glid.GLID) *PerRouteStat
 // MUST be called with o.mu held. The caller is responsible for dispatching
 // remotes AFTER releasing o.mu (fireAndForgetRemote waits for per-target
 // RPCs to complete and must not starve writers). See gastrolog-5oofa.
-func (o *Orchestrator) appendLocal(vaultID glid.GLID, rec chunk.Record) (*replicationTask, []remoteForwardTarget, error) {
-	_, _, task, remotes, err := o.appendRecord(vaultID, rec)
+func (o *Orchestrator) appendLocal(vaultID glid.GLID, rec chunk.Record) (*replicationTask, []remoteForwardTarget, *fanOutTask, error) {
+	_, _, task, remotes, fanOut, err := o.appendRecord(vaultID, rec)
 	if err != nil {
 		o.logger.Error("append to vault failed", "vault", vaultID, "error", err)
 	}
-	return task, remotes, err
+	return task, remotes, fanOut, err
 }
 
 // flushRecordRouteForwards delivers non-ack-gated cross-node vault routes

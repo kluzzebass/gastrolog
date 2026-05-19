@@ -685,6 +685,10 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 			return nil, nil
 		}
 		ti.FollowerTargets = system.FollowerTargets(placements, nscs)
+		// Fan-out plumb (gastrolog-nd6sz): push the per-vault
+		// WriteModel + initial Receiving snapshot to the chunk
+		// manager. Empty values preserve LeaderDriven semantics.
+		applyFanOutConfig(ti.Chunks, vaultCfg, placements, nscs)
 		return ti, nil
 	}
 
@@ -1086,6 +1090,7 @@ type vaultRaftCallbacks struct {
 	chunkResidency      func(id chunk.ChunkID, placementNodeIDs []string) []string
 	manifestEntries     func() []vaultctlfsm.ManifestEntry
 	manifestEntry       func(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool)
+	chunkPlacement      func(id chunk.ChunkID) *vaultctlfsm.ChunkPlacement
 }
 
 // ensureVaultCtlMetadata joins this node to the vault control-plane
@@ -1246,6 +1251,12 @@ func buildVaultRaftCallbacks(r *hraft.Raft, fsm *vaultctlfsm.FSM, applier vaultc
 				return vaultctlfsm.ManifestEntry{}, false
 			}
 			return *e, true
+		},
+		chunkPlacement: func(id chunk.ChunkID) *vaultctlfsm.ChunkPlacement {
+			if fsm == nil {
+				return nil
+			}
+			return fsm.Placement(id)
 		},
 	}
 }
