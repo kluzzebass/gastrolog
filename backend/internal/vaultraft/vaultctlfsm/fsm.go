@@ -255,11 +255,11 @@ type FSM struct {
 	tombstones map[chunk.ChunkID]time.Time
 
 	// Fan-out placement state — gastrolog-2ujjh / gastrolog-4cxw0.
-	// Per-chunk Receiving/Holding/PendingPulls + WriteModel +
-	// FinalSetHash. Lives parallel to chunks (not on ManifestEntry)
-	// so the 123-byte fixed entry encoding stays unchanged and the
-	// placement section can be skipped by decoders without fan-out
-	// awareness. See fsm_placement.go.
+	// Per-chunk Receiving/Holding/PendingPulls + FinalSetHash. Lives
+	// parallel to chunks (not on ManifestEntry) so the 123-byte fixed
+	// entry encoding stays unchanged and the placement section can be
+	// skipped by decoders without fan-out awareness. See
+	// fsm_placement.go.
 	placements map[chunk.ChunkID]*ChunkPlacement
 
 	// Placement callbacks (gastrolog-4cxw0). Fired outside f.mu after
@@ -861,18 +861,17 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 
 // CreateChunk wire format:
 //
-//	Legacy (40 bytes): [16 ChunkID][8 WriteStart nanos][8 IngestStart nanos][8 SourceStart nanos]
+//	Bare (40 bytes): [16 ChunkID][8 WriteStart nanos][8 IngestStart nanos][8 SourceStart nanos]
 //
-//	Extended (gastrolog-4cxw0, ≥41 bytes): legacy 40 bytes ++
-//	    [1 byte WriteModel]
+//	With Receiving (gastrolog-4cxw0, ≥44 bytes): bare 40 bytes ++
 //	    [4 bytes Receiving count (BE uint32)]
 //	    repeated:
 //	       2 bytes nodeID length (BE uint16)
 //	       N bytes nodeID
 //
-// Legacy payloads decode as WriteModel=LeaderDriven with empty
-// Receiving (and so produce no ChunkPlacement entry, keeping the
-// snapshot byte-identical to pre-fan-out for migration-cold clusters).
+// Bare payloads produce no ChunkPlacement entry — used by
+// single-node/memory/jsonl chunk managers that have no cross-node
+// fan-out target list to stamp.
 func (f *FSM) applyCreate(data []byte) error {
 	if len(data) < 40 {
 		return fmt.Errorf("create chunk: payload too short (%d bytes)", len(data))
@@ -1175,9 +1174,9 @@ func (f *FSM) applyRetentionPending(data []byte) error {
 // ---------- Command builders (used by callers before Raft.Apply) ----------
 
 // MarshalCreateChunk builds the Raft log data for a CreateChunk
-// command in the legacy (LeaderDriven) shape. WriteModel defaults to
-// LeaderDriven and Receiving is empty for chunks created with this
-// helper. FanOut chunks must use MarshalCreateChunkFanOut so the
+// command in the bare (no-Receiving) shape, used by single-node /
+// memory / jsonl chunk managers that have no cross-node fan-out.
+// Multi-node vaults use MarshalCreateChunkWithReceiving so the
 // initial Receiving set is stamped at chunk creation time.
 func MarshalCreateChunk(id chunk.ChunkID, writeStart, ingestStart, sourceStart time.Time) []byte {
 	buf := make([]byte, 1+40)
@@ -1454,8 +1453,8 @@ func (s *fsmSnapshot) Persist(sink hraft.SnapshotSink) error {
 	}
 
 	// Sections: chunkPlacement (4) + pendingPulls (5) — gastrolog-4cxw0.
-	// Each function omits its section entirely when empty so
-	// LeaderDriven-only clusters get a snapshot byte-identical to the
+	// Each function omits its section entirely when empty so single-
+	// node / memory-mode clusters get a snapshot byte-identical to the
 	// pre-fan-out format.
 	if err := encodeChunkPlacementSection(sink, s.placements); err != nil {
 		_ = sink.Cancel()

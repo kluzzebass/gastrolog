@@ -1,7 +1,7 @@
-// Fan-out write coordinator for the FanOut WriteModel (gastrolog-2ujjh /
-// gastrolog-5pn44). Implements W-of-N ack accounting with the live-
-// Receiving membership de-escalation that closes the spurious-failure
-// hole during multi-node drains.
+// Fan-out write coordinator (gastrolog-2ujjh / gastrolog-5pn44).
+// Implements W-of-N ack accounting with the live-Receiving membership
+// de-escalation that closes the spurious-failure hole during
+// multi-node drains.
 //
 // See docs/fan-out-data-plane-design.md § "W-of-N implementation: new
 // primitive needed" for the full design rationale.
@@ -229,9 +229,9 @@ func (o *Orchestrator) fanOutAppend(
 
 // fanOutTask captures the per-record fan-out work the writeLoop /
 // ackAfterReplication needs to execute against the active chunk's
-// Receiving set under FanOut WriteModel. Built in appendRecord (under
-// o.mu.RLock) and dispatched after the lock is released so the
-// snapshot-at-fan-out denominator is frozen at append time.
+// Receiving set. Built in appendRecord (under o.mu.RLock) and
+// dispatched after the lock is released so the snapshot-at-fan-out
+// denominator is frozen at append time.
 //
 // Self-already-appended semantics: when this node is in Receiving for
 // the chunk, the local cm.Append already ran in appendRecord and
@@ -263,9 +263,8 @@ func (o *Orchestrator) buildFanOutTask(vaultID glid.GLID, chunkID chunk.ChunkID,
 	// Default to Full policy. VaultConfig.WOfN lookup lives at a
 	// higher layer (cfgStore on the QueryServer side) and isn't
 	// threaded into the orchestrator yet — TODO under
-	// gastrolog-nd6sz follow-up. Full preserves LeaderDriven's
-	// wait-for-all semantics by default, matching the doc's
-	// conservative-migration stance.
+	// gastrolog-nd6sz follow-up. Full = wait-for-all, the
+	// highest-durability tier.
 	w, err := system.WOfNPolicyFull.Resolve(len(snapshot))
 	if err != nil {
 		o.logger.Warn("fan-out: WOfN resolve failed", "vault", vaultID, "error", err)

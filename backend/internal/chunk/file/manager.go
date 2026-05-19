@@ -3634,21 +3634,17 @@ func (m *Manager) SetAnnouncer(a chunk.MetadataAnnouncer) {
 	m.cfg.Announcer = a
 }
 
-// SetFanOutConfig wires the per-vault WriteModel + initial Receiving
-// snapshot the next CmdCreateChunk announcement will stamp on the new
-// chunk. Implements chunk.FanOutConfigSetter (gastrolog-nd6sz). The
-// orchestrator calls this from buildVaultInstance + on every placement
-// change, so the in-flight active chunk's metadata stays consistent
-// with the operator's most recent VaultConfig + Placements.
+// SetFanOutConfig wires the initial Receiving snapshot the next
+// CmdCreateChunk announcement will stamp on the new chunk. Implements
+// chunk.FanOutConfigSetter. The orchestrator calls this from
+// buildVaultInstance + on every placement change, so the in-flight
+// active chunk's metadata stays consistent with the operator's most
+// recent VaultConfig + Placements.
 //
 // Empty receiving falls back to the unextended CmdCreateChunk announce
 // path (single-node / memory / JSONL chunk managers that don't have a
 // Receiving set to stamp).
-//
-// The writeModel parameter is vestigial (gastrolog-hshgl removed
-// WriteModel as a runtime concept; FanOut is the only path) and may
-// be dropped from the interface in a follow-up.
-func (m *Manager) SetFanOutConfig(_ string, receiving []string) {
+func (m *Manager) SetFanOutConfig(receiving []string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if len(receiving) == 0 {

@@ -67,11 +67,9 @@ type ReceivingAnnouncer interface {
 // FanOutConfigSetter is the optional interface for chunk managers
 // that can be told which Receiving snapshot to stamp on new chunks.
 // The orchestrator wires this from VaultConfig at instance build
-// time + on every placement change. The writeModel parameter is
-// vestigial (gastrolog-hshgl removed WriteModel as a runtime concept;
-// FanOut is the only path) and may be dropped in a follow-up.
+// time + on every placement change.
 type FanOutConfigSetter interface {
-	SetFanOutConfig(writeModel string, receiving []string)
+	SetFanOutConfig(receiving []string)
 }
 
 // IntegrityVerifier reports the expected GLCB whole-blob digest for a chunk

@@ -6,13 +6,6 @@
 // active chunk's Receiving snapshot size. Resolution lives here so
 // every caller (orchestrator's fan-out write, integration tests, CLI
 // preview, UI display) gets the same number.
-//
-// The wire-level field on VaultConfig and the corresponding proto
-// changes land alongside gastrolog-nd6sz, where the per-vault
-// WriteModel flag and the proto regen both happen. This file ships
-// the policy values + resolver as a stand-alone unit so the
-// orchestrator's W-of-N coordinator (gastrolog-5pn44) has a stable
-// type to consume.
 
 package system
 
@@ -23,16 +16,15 @@ import (
 
 var errEmptyReceivingSnapshot = errors.New("W-of-N: empty Receiving snapshot")
 
-// WOfNPolicy selects the durability tier for a FanOut vault. The
-// value resolves to a concrete W integer at write time against the
-// active chunk's Receiving snapshot size.
+// WOfNPolicy selects the durability tier for a vault. The value
+// resolves to a concrete W integer at write time against the active
+// chunk's Receiving snapshot size.
 type WOfNPolicy string
 
 const (
 	// WOfNPolicyFull demands every Receiving member ack before a
 	// write is durable. The default for high-durability vaults
-	// (compliance, audit logs). Equivalent to LeaderDriven's
-	// wait-for-all semantics, scaled to the Receiving set.
+	// (compliance, audit logs).
 	WOfNPolicyFull WOfNPolicy = "full"
 	// WOfNPolicyMinusOne tolerates one straggler. W = max(1, N − 1).
 	// Useful when the operator wants high durability but accepts a
@@ -65,14 +57,6 @@ func (p WOfNPolicy) String() string { return string(p) }
 // snapshot size. Always returns at least 1 — a 0-ack write is never
 // durable, even when the Receiving set is empty by accident. Returns
 // an error iff the policy value is unrecognized.
-//
-// Resolution is independent of WriteModel; LeaderDriven vaults
-// resolve to N (the legacy "wait for all followers" semantics) so
-// callers that switch a vault from LeaderDriven to FanOut see the
-// same effective W until they change the policy explicitly. That
-// keeps the migration semantically conservative — flipping
-// WriteModel without touching WOfN does NOT silently weaken
-// durability.
 func (p WOfNPolicy) Resolve(n int) (int, error) {
 	if n <= 0 {
 		// Caller bug / config error — preserved as a defensive guard

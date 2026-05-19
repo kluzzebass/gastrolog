@@ -13,7 +13,6 @@
 //     the standalone CmdAddHolding adds to Holding without Receiving).
 //   - PendingPulls keys are nodes that have been BeginHoldingRemoval'd
 //     but not yet drained of acks.
-//   - WriteModel is set once at CmdCreateChunk time and never mutated.
 //   - FinalSetHash is set once at CmdSealChunk time (or stays zero).
 //
 // Idempotency: every apply* is a no-op when the requested state is
@@ -93,9 +92,8 @@ func (p *ChunkPlacement) Copy() ChunkPlacement {
 // ---------- Reads (local, no Raft) ----------
 
 // Placement returns a copy of the per-chunk placement state, or nil if
-// no placement entry exists (LeaderDriven chunks created before the
-// fan-out epic land, or chunks that have never had a placement
-// command applied).
+// no placement entry exists (single-node / memory-mode chunks, or
+// chunks that have never had a placement command applied).
 func (f *FSM) Placement(id chunk.ChunkID) *ChunkPlacement {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -124,9 +122,10 @@ func (f *FSM) ReceivingFor(id chunk.ChunkID) []string {
 }
 
 // HoldingFor returns a copy of the Holding slice for chunkID, or nil
-// if no placement exists. Authoritative residency under the fan-out
-// model (vs. the placement-derived residency the existing
-// ChunkResidency function returns for LeaderDriven chunks).
+// if no placement exists. Authoritative cluster-wide residency for
+// chunks that have crossed the fan-out path (the placement-derived
+// ChunkResidency closure is the fallback for chunks without
+// placement state, e.g. single-node and memory-mode vaults).
 func (f *FSM) HoldingFor(id chunk.ChunkID) []string {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -487,18 +486,17 @@ func decodeChunkNode(data []byte, opName string) (chunk.ChunkID, string, error) 
 
 // ---------- Snapshot encode / decode ----------
 //
-// Two new sections (gastrolog-4cxw0):
+// Two sections (gastrolog-4cxw0):
 //
 //	sectionChunkPlacement = 4
-//	  Per-chunk WriteModel + Receiving + Holding + FinalSetHash.
-//	  PendingPulls live in section 5 to keep the placement section
-//	  fixed-shape and cheap to scan.
+//	  Per-chunk Receiving + Holding + FinalSetHash. PendingPulls live
+//	  in section 5 to keep the placement section fixed-shape and cheap
+//	  to scan.
 //
 //	  Layout:
 //	    4 bytes  count of entries (BE uint32)
 //	    repeated per entry:
 //	      16 bytes  chunk ID
-//	       1 byte   WriteModel
 //	      32 bytes  FinalSetHash
 //	       4 bytes  Receiving count (BE uint32)
 //	       repeated:
@@ -527,8 +525,8 @@ func decodeChunkNode(data []byte, opName string) (chunk.ChunkID, string, error) 
 
 func encodeChunkPlacementSection(w io.Writer, placements map[chunk.ChunkID]*ChunkPlacement) error {
 	// Only emit entries that have any state worth serializing — empty
-	// placements (WriteModel == 0, no nodes, no hash) get omitted to
-	// keep the section small for LeaderDriven-only clusters.
+	// placements (no nodes, no hash) get omitted to keep the section
+	// small for single-node / memory-mode clusters.
 	type pair struct {
 		id chunk.ChunkID
 		p  *ChunkPlacement

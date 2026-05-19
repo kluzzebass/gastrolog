@@ -1,17 +1,8 @@
-// Fan-out chunk-manager configuration plumbing (gastrolog-nd6sz /
-// gastrolog-hshgl).
+// Fan-out chunk-manager configuration plumbing (gastrolog-hshgl).
 //
-// applyFanOutConfig writes the FanOut WriteModel + initial Receiving
-// snapshot to every chunk manager that supports it. Called from
-// buildVaultInstance at instance-build time + on every placement
-// change.
-//
-// Under gastrolog-hshgl, FanOut is the only WriteModel — every chunk
-// gets a placement entry. VaultConfig.WriteModel becomes informational
-// (still validated as "fanout" or empty/default-fanout); the empty
-// value resolves to fanout, not leader-driven. The legacy
-// LeaderDriven branch in the orchestrator dispatch is dead code that
-// follow-on commits delete.
+// applyFanOutConfig writes the initial Receiving snapshot to every
+// chunk manager that supports it. Called from buildVaultInstance at
+// instance-build time + on every placement change.
 //
 // The chunk-manager exposes the config setter via
 // chunk.FanOutConfigSetter (optional interface). Implementations
@@ -43,9 +34,5 @@ func applyFanOutConfig(cm chunk.ChunkManager, _ system.VaultConfig, placements [
 			nodeIDs = append(nodeIDs, nid)
 		}
 	}
-	// First arg historically encoded the chunk's write-model; post-
-	// gastrolog-hshgl it is unused but still part of the
-	// FanOutConfigSetter interface (callers may still check non-empty
-	// to gate behavior).
-	setter.SetFanOutConfig("fanout", nodeIDs)
+	setter.SetFanOutConfig(nodeIDs)
 }

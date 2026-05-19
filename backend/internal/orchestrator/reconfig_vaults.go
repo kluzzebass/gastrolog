@@ -685,9 +685,9 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 			return nil, nil
 		}
 		ti.FollowerTargets = system.FollowerTargets(placements, nscs)
-		// Fan-out plumb (gastrolog-nd6sz): push the per-vault
-		// WriteModel + initial Receiving snapshot to the chunk
-		// manager. Empty values preserve LeaderDriven semantics.
+		// Fan-out plumb: push the initial Receiving snapshot to the
+		// chunk manager so the next CmdCreateChunk stamps the placement
+		// member set on the new chunk.
 		applyFanOutConfig(ti.Chunks, vaultCfg, placements, nscs)
 		return ti, nil
 	}
