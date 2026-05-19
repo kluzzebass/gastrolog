@@ -338,6 +338,12 @@ func (f *FSM) applyPruneNode(data []byte) (string, []chunk.ChunkID, error) {
 		delete(f.pendingDeletes, chunkID)
 		delete(f.chunks, chunkID)
 	}
+	// Gastrolog-4cxw0: also drain the pruned node from every chunk's
+	// fan-out placement state (Receiving, Holding, PendingPulls).
+	// Without this, a node leaving the vault-ctl Raft group would pin
+	// Holding-removal receipts forever — same hazard CmdPruneNode
+	// closes for pendingDeletes.ExpectedFrom.
+	f.pruneNodeFromPlacements(nodeID)
 	return nodeID, finalizable, nil
 }
 
