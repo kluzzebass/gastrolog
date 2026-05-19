@@ -167,8 +167,3 @@ func (t *VaultInstance) applyRaftCallbacks(cb vaultRaftCallbacks) {
 
 // IsLeader returns true if this node is the leader for this instance.
 func (t *VaultInstance) IsLeader() bool { return !t.IsFollower }
-
-// ShouldForwardToFollowers returns true if this leader instance has replication targets.
-func (t *VaultInstance) ShouldForwardToFollowers() bool {
-	return t.IsLeader() && len(t.FollowerTargets) > 0
-}
