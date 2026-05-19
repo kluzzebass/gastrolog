@@ -17,6 +17,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,6 +28,7 @@ import (
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/lifecycle"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
 // allReceiving is the no-op live-membership oracle: every node stays
@@ -300,8 +302,12 @@ func TestFanOutAppendHappyPathAllAck(t *testing.T) {
 	chunkID := chunk.NewChunkID()
 	rec := testFanOutRecord(t)
 
+	// W=N=3 so waitWOfN waits for all three goroutines to complete;
+	// otherwise the third straggler races the test's call-count
+	// assertion (waitWOfN returns at W acks; remaining goroutines
+	// complete asynchronously).
 	snapshot := []string{"node-a", "node-b", "node-c"}
-	err := orch.fanOutAppend(context.Background(), vaultID, chunkID, rec, snapshot, 2, allReceiving, nil)
+	err := orch.fanOutAppend(context.Background(), vaultID, chunkID, rec, snapshot, 3, allReceiving, nil)
 	if err != nil {
 		t.Fatalf("fanOutAppend: %v", err)
 	}
@@ -390,5 +396,126 @@ func TestFanOutAppendRejectsEmptySnapshot(t *testing.T) {
 		testFanOutRecord(t), nil, 1, allReceiving, nil)
 	if err == nil {
 		t.Fatal("expected error for empty snapshot")
+	}
+}
+
+// ---------- buildFanOutTask / runFanOut wiring tests ----------
+
+func TestBuildFanOutTaskClampsWForSelfInReceiving(t *testing.T) {
+	t.Parallel()
+	orch, _ := newFanOutTestOrch(t)
+	vaultID := glid.New()
+	chunkID := chunk.NewChunkID()
+
+	// Self in Receiving + 2 peers, default Full policy → W=3.
+	// After self-auto-ack clamp: peers W = 2.
+	placement := &vaultctlfsm.ChunkPlacement{
+		WriteModel: vaultctlfsm.WriteModelFanOut,
+		Receiving:  []string{orch.localNodeID, "node-b", "node-c"},
+	}
+	task := orch.buildFanOutTask(vaultID, chunkID, placement, testFanOutRecord(t))
+	if task == nil {
+		t.Fatal("buildFanOutTask returned nil")
+	}
+	if len(task.peers) != 2 || slices.Contains(task.peers, orch.localNodeID) {
+		t.Errorf("peers should exclude self; got %v", task.peers)
+	}
+	if task.w != 2 {
+		t.Errorf("W=2 expected (Full=3 minus self auto-ack); got %d", task.w)
+	}
+	if !slices.Equal(task.snapshot, placement.Receiving) {
+		t.Errorf("snapshot mismatch: got %v want %v", task.snapshot, placement.Receiving)
+	}
+}
+
+func TestBuildFanOutTaskWhenSelfNotInReceiving(t *testing.T) {
+	t.Parallel()
+	orch, _ := newFanOutTestOrch(t)
+	vaultID := glid.New()
+	chunkID := chunk.NewChunkID()
+
+	// 3 peers, self NOT in Receiving. No self-ack credit.
+	placement := &vaultctlfsm.ChunkPlacement{
+		WriteModel: vaultctlfsm.WriteModelFanOut,
+		Receiving:  []string{"node-a", "node-b", "node-c"},
+	}
+	task := orch.buildFanOutTask(vaultID, chunkID, placement, testFanOutRecord(t))
+	if task == nil {
+		t.Fatal("buildFanOutTask returned nil")
+	}
+	if len(task.peers) != 3 {
+		t.Errorf("peers should be all 3 (self not in snapshot); got %v", task.peers)
+	}
+	if task.w != 3 {
+		t.Errorf("W=3 expected (Full, no self-ack credit); got %d", task.w)
+	}
+}
+
+func TestBuildFanOutTaskNilWhenReceivingEmpty(t *testing.T) {
+	t.Parallel()
+	orch, _ := newFanOutTestOrch(t)
+	placement := &vaultctlfsm.ChunkPlacement{
+		WriteModel: vaultctlfsm.WriteModelFanOut,
+		Receiving:  nil,
+	}
+	if task := orch.buildFanOutTask(glid.New(), chunk.NewChunkID(), placement, testFanOutRecord(t)); task != nil {
+		t.Errorf("expected nil task for empty Receiving; got %+v", task)
+	}
+}
+
+func TestRunFanOutHappyPathWithSelfAutoAcked(t *testing.T) {
+	t.Parallel()
+	orch, rep := newFanOutTestOrch(t)
+
+	// Snapshot {self, node-b, node-c}; W=3; clamped to peers W=2.
+	// Both peers ack via mock replicator → success.
+	task := &fanOutTask{
+		vaultID:  glid.New(),
+		chunkID:  chunk.NewChunkID(),
+		peers:    []string{"node-b", "node-c"},
+		w:        2,
+		snapshot: []string{orch.localNodeID, "node-b", "node-c"},
+	}
+	if err := orch.runFanOut(context.Background(), task, testFanOutRecord(t)); err != nil {
+		t.Fatalf("runFanOut: %v", err)
+	}
+	if rep.callsFor("node-b") != 1 || rep.callsFor("node-c") != 1 {
+		t.Errorf("each peer should see 1 AppendRecords call; got b=%d c=%d",
+			rep.callsFor("node-b"), rep.callsFor("node-c"))
+	}
+}
+
+func TestRunFanOutZeroWIsFireAndForget(t *testing.T) {
+	t.Parallel()
+	orch, rep := newFanOutTestOrch(t)
+	// W=0 means durability already satisfied by self (e.g., W=1 + self
+	// in Receiving). Peers still get the record fire-and-forget; the
+	// caller doesn't wait.
+	task := &fanOutTask{
+		vaultID:  glid.New(),
+		chunkID:  chunk.NewChunkID(),
+		peers:    []string{"node-b"},
+		w:        0,
+		snapshot: []string{orch.localNodeID, "node-b"},
+	}
+	if err := orch.runFanOut(context.Background(), task, testFanOutRecord(t)); err != nil {
+		t.Fatalf("runFanOut: %v", err)
+	}
+	// Give the fire-and-forget goroutine a moment to land.
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if rep.callsFor("node-b") == 1 {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Errorf("fire-and-forget peer write didn't land; got %d calls", rep.callsFor("node-b"))
+}
+
+func TestRunFanOutNilTaskIsNoOp(t *testing.T) {
+	t.Parallel()
+	orch, _ := newFanOutTestOrch(t)
+	if err := orch.runFanOut(context.Background(), nil, testFanOutRecord(t)); err != nil {
+		t.Errorf("nil task should be no-op: %v", err)
 	}
 }
