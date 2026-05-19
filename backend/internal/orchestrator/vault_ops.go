@@ -494,13 +494,8 @@ func (o *Orchestrator) AppendToVault(vaultID glid.GLID, senderChunkID chunk.Chun
 	return nil
 }
 
-// deleteFromFollowers removes a chunk from all same-node follower instances
-// of an instance. Called by retention after deleting from the leader.
-// DeleteChunk deletes a specific chunk from an instance. If the chunk is
-// currently the vault's active chunk, it is sealed first so the delete can
-// proceed. This handles the follower case where the leader has moved on to a
-// new active chunk but the follower still has the old ID as active (records
-// sync via ChunkReplicator.AppendRecords preserves the leader's chunk ID).
+// DeleteChunk deletes a specific chunk from a vault instance. If the chunk
+// is the active chunk, it is sealed first so the delete can proceed.
 func (o *Orchestrator) DeleteChunk(vaultID glid.GLID, chunkID chunk.ChunkID) error {
 	vaultInst, err := o.findInstanceForDelete(vaultID)
 	if err != nil {
@@ -671,28 +666,6 @@ func (o *Orchestrator) placementMembership(vaultInst *VaultInstance) []string {
 		expected = append(expected, t.NodeID)
 	}
 	return expected
-}
-
-// deleteFromFollowers removes a chunk from same-node follower vault instances.
-// Called from the reconciler-less fallback in retention's expireChunk after
-// applyRaftDelete has already fired the global CmdDeleteChunk. Uses
-// DeleteNoAnnounce to avoid a redundant second Raft-wide announce (the
-// first one already propagated via OnDelete). The reconciler-driven
-// production path (gastrolog-51gme) walks same-node siblings itself in
-// VaultLifecycleReconciler.deleteLocalCopy.
-func (o *Orchestrator) deleteFromFollowers(vaultID glid.GLID, chunkID chunk.ChunkID) {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	vault := o.vaults[vaultID]
-	if vault == nil {
-		return
-	}
-	if t := vault.Instance; t != nil && t.IsFollower {
-		if err := chunk.DeleteNoAnnounce(t.Chunks, chunkID); err != nil {
-			o.vaultOpsLogger.Warn("delete from followers: failed",
-				"vault", vaultID, "chunk", chunkID, "error", err)
-		}
-	}
 }
 
 // --- Chunk write ---
