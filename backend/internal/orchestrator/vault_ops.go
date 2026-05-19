@@ -13,7 +13,6 @@ import (
 	"gastrolog/internal/index"
 	"gastrolog/internal/index/analyzer"
 	"gastrolog/internal/raftgroup"
-	"gastrolog/internal/system"
 	"gastrolog/internal/vaultraft"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
@@ -899,9 +898,8 @@ func (o *Orchestrator) deleteFromFollowers(vaultID glid.GLID, chunkID chunk.Chun
 // cluster-forwarded records, and the ImportRecords API.
 func (o *Orchestrator) Append(vaultID glid.GLID, rec chunk.Record) (chunk.ChunkID, uint64, error) {
 	o.mu.RLock()
-	cid, pos, _, remotes, fanOut, err := o.appendRecord(vaultID, rec)
+	cid, pos, fanOut, err := o.appendRecord(vaultID, rec)
 	o.mu.RUnlock()
-	o.fireAndForgetRemote(remotes, rec)
 	if fanOut != nil {
 		// Fire-and-forget the fan-out: the caller of Append doesn't
 		// wait for replicas (this entry point is non-ack-gated).
@@ -912,83 +910,48 @@ func (o *Orchestrator) Append(vaultID glid.GLID, rec chunk.Record) (chunk.ChunkI
 	return cid, pos, err
 }
 
-// replicationTask describes a pending sync forward for ack-gated ingestion.
-// Returned by appendRecord when rec.WaitForReplica is true, consumed by
-// ackAfterReplication outside the orchestrator lock.
-type replicationTask struct {
-	vaultID glid.GLID
-	chunkID chunk.ChunkID
-	targets []system.ReplicationTarget
-}
+// (replicationTask + leader-driven ack-gated replication path removed
+// under gastrolog-hshgl. FanOut via fanOutTask + waitWOfN handles
+// ack-gated durability now.)
 
 // appendRecord is the unified append-with-seal-detection path.
 // Caller MUST hold o.mu.RLock.
 //
-// Returns a replicationTask when the record has WaitForReplica set and
-// the instance has secondaries. Also returns remoteForwardTargets for
-// fire-and-forget forwarding — the caller fires these AFTER releasing the lock.
-func (o *Orchestrator) appendRecord(vaultID glid.GLID, rec chunk.Record) (chunk.ChunkID, uint64, *replicationTask, []remoteForwardTarget, *fanOutTask, error) {
+// Returns a fanOutTask when the chunk has a non-empty Receiving placement;
+// the caller dispatches the fan-out AFTER releasing the lock.
+func (o *Orchestrator) appendRecord(vaultID glid.GLID, rec chunk.Record) (chunk.ChunkID, uint64, *fanOutTask, error) {
 	vault := o.vaults[vaultID]
 	if vault == nil {
-		return chunk.ChunkID{}, 0, nil, nil, nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+		return chunk.ChunkID{}, 0, nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 	if !vault.Enabled {
-		return chunk.ChunkID{}, 0, nil, nil, nil, fmt.Errorf("%w: %s", ErrVaultDisabled, vaultID)
+		return chunk.ChunkID{}, 0, nil, fmt.Errorf("%w: %s", ErrVaultDisabled, vaultID)
 	}
 	if err := vaultReplicationReadinessErr(vaultID, vault); err != nil {
-		return chunk.ChunkID{}, 0, nil, nil, nil, err
+		return chunk.ChunkID{}, 0, nil, err
 	}
 
 	cm := vault.ChunkManager()
 	if cm == nil {
-		return chunk.ChunkID{}, 0, nil, nil, nil, fmt.Errorf("%w: %s (no instance)", ErrVaultNotFound, vaultID)
+		return chunk.ChunkID{}, 0, nil, fmt.Errorf("%w: %s (no instance)", ErrVaultNotFound, vaultID)
 	}
 	activeBefore := cm.Active()
 	cid, pos, err := cm.Append(rec)
 	if err != nil {
-		return cid, pos, nil, nil, nil, err
+		return cid, pos, nil, err
 	}
 	o.progressTrigger.Signal()
 
-	// Forward record to followers for active-chunk durability.
-	// Followers append to their ChunkManager — real, queryable chunks
-	// that allow immediate promotion if the leader dies.
-	//
-	// When WaitForReplica is set, skip fire-and-forget — the caller does
-	// sync forwarding outside the lock via ackAfterReplication.
+	// Replication dispatch: every chunk with a non-empty Receiving
+	// placement fans out via fanOutAppend (gastrolog-2ujjh /
+	// gastrolog-hshgl). Single-node / memory / JSONL chunks have no
+	// placement and no cross-node replication; they're durable on
+	// the local cm.Append above.
 	activeInst := vault.Instance
-	var task *replicationTask
-	var remotes []remoteForwardTarget
 	var fanOut *fanOutTask
-
-	// Fan-out dispatch (gastrolog-nd6sz / gastrolog-hshgl): if the
-	// active chunk has a placement with a non-empty Receiving set,
-	// the per-chunk Receiving set IS the replication target list.
-	// Build a fanOutTask; the fanOutTask is processed by
-	// ackAfterReplication (ack-gated) or fired and forgotten via
-	// the same dispatcher (non-ack-gated). Single-node / memory /
-	// JSONL chunks have no placement and skip the fan-out path
-	// entirely (no cross-node replication exists for them).
 	if activeInst != nil && cid != (chunk.ChunkID{}) && activeInst.ChunkPlacement != nil {
 		if p := activeInst.ChunkPlacement(cid); p != nil && len(p.Receiving) > 0 {
 			fanOut = o.buildFanOutTask(vaultID, cid, p, rec)
-		}
-	}
-
-	if fanOut == nil && activeInst != nil && activeInst.ShouldForwardToFollowers() {
-		if rec.WaitForReplica {
-			activeNow := cm.Active()
-			var activeChunkID chunk.ChunkID
-			if activeNow != nil {
-				activeChunkID = activeNow.ID
-			}
-			task = &replicationTask{
-				vaultID: vaultID,
-				chunkID: activeChunkID,
-				targets: activeInst.FollowerTargets,
-			}
-		} else {
-			remotes = o.forwardToFollowers(vault, vaultID, activeInst, cm, rec)
 		}
 	}
 
@@ -1006,7 +969,7 @@ func (o *Orchestrator) appendRecord(vaultID glid.GLID, rec chunk.Record) (chunk.
 		o.schedulePostSeal(vaultID, cm, activeBefore.ID)
 	}
 
-	return cid, pos, task, remotes, fanOut, nil
+	return cid, pos, fanOut, nil
 }
 
 // ImportChunkRecords creates a new sealed chunk from the given records in the

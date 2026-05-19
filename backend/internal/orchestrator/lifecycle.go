@@ -455,13 +455,17 @@ func (o *Orchestrator) writeLoop() {
 				// Write failed or no sync work — ack immediately.
 				dr.ack <- err
 			} else {
-				// Ack-gated: run the sync work (local follower
-				// replication + cross-node forward) in a goroutine
-				// so the writeLoop isn't blocked by network round-trips.
+				// Ack-gated: run the sync work (fan-out W-of-N +
+				// cross-node forward) in a goroutine so the writeLoop
+				// isn't blocked by network round-trips.
 				o.ackWg.Go(func() {
 					o.ackAfterReplication(dr.ack, pa, dr.rec)
 				})
 			}
+		} else {
+			// Non-ack ingest still needs the fan-out to fire so peers
+			// receive the records. Fire-and-forget: caller doesn't wait.
+			o.dispatchFanOutAsync(pa, dr.rec)
 		}
 	}
 }

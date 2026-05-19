@@ -11,7 +11,7 @@ import (
 	chunkmem "gastrolog/internal/chunk/memory"
 	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/query"
-	"gastrolog/internal/system"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
 // slowAckReplicator delays AppendRecords so the ack goroutine is still
@@ -55,12 +55,16 @@ func TestStopWaitsForAckGoroutines(t *testing.T) {
 	im := indexmem.NewManager(nil, nil, nil, nil, nil)
 	qe := query.New(cm, im, nil)
 	vaultInst := &VaultInstance{
-		VaultID:          vaultID,
-		Type:            "memory",
-		Chunks:          cm,
-		Indexes:         im,
-		Query:           qe,
-		FollowerTargets: []system.ReplicationTarget{{NodeID: "node-2"}},
+		VaultID: vaultID,
+		Type:    "memory",
+		Chunks:  cm,
+		Indexes: im,
+		Query:   qe,
+		ChunkPlacement: func(_ chunk.ChunkID) *vaultctlfsm.ChunkPlacement {
+			return &vaultctlfsm.ChunkPlacement{
+				Receiving: []string{"node-1", "node-2"},
+			}
+		},
 	}
 	vault := NewVault(vaultID, vaultInst)
 	vault.Name = "ack-test"

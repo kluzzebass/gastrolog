@@ -76,19 +76,6 @@ func (o *Orchestrator) ackAfterReplication(ack chan<- error, pa *pendingAcks, re
 
 	g, ctx := errgroup.WithContext(ctx)
 
-	if o.chunkReplicator != nil {
-		for _, t := range pa.replication {
-			for _, tgt := range t.targets {
-				g.Go(func() error {
-					if err := o.chunkReplicator.AppendRecords(ctx, tgt.NodeID, t.vaultID, t.chunkID, []chunk.Record{rec}); err != nil {
-						return fmt.Errorf("ack-gated replication to %s: %w", tgt.NodeID, err)
-					}
-					return nil
-				})
-			}
-		}
-	}
-
 	if o.forwarder != nil {
 		for _, f := range pa.forwards {
 			g.Go(func() error {
