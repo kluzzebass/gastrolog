@@ -59,33 +59,24 @@ func (o *Orchestrator) ingest(rec chunk.Record) (*pendingAcks, error) {
 // (_source, _ingester, _vault, _reason) drive route evaluation.
 //
 // Returns pendingAcks bundling the sync work an ack-gated record triggers:
-// local instance replication to followers, plus cross-node forwarding of
-// records matched to remote vaults. Both task kinds must complete before
-// the ack is delivered to the ingester. For non-ack-gated records that
-// match a remote vault, syncForwards is populated; the caller must run
+// fan-out W-of-N to chunk receivers, plus cross-node forwarding of records
+// matched to remote vaults. Both task kinds must complete before the ack
+// is delivered to the ingester. For non-ack-gated records that match a
+// remote vault, syncForwards is populated; the caller must run
 // flushRecordRouteForwards (outside o.mu) so the forward buffer can apply
 // backpressure instead of dropping. See gastrolog-27zvt.
 func (o *Orchestrator) ingestWithSource(rec chunk.Record, src SourceContext) (*pendingAcks, error) {
-	pa, deferredRemotes, err := o.ingestLocked(rec, src)
-	// Fire-and-forget remote replication happens OUTSIDE the orchestrator
-	// lock so a slow or paused follower cannot starve writers (retention,
-	// reconfig). See gastrolog-5oofa.
-	for _, remotes := range deferredRemotes {
-		o.fireAndForgetRemote(remotes, rec)
-	}
-	return pa, err
+	return o.ingestLocked(rec, src)
 }
 
 // ingestLocked is the mu-protected portion of ingest. It returns the
-// pendingAcks for ack-gated sync work and a list of remote-target sets
-// (one per local vault append) that the caller must dispatch via
-// fireAndForgetRemote AFTER releasing the lock.
+// pendingAcks for ack-gated sync work.
 //
 // gastrolog-4kkoo (Phase 5): src carries the synthetic-attribute fields
 // (_source, _ingester, _vault, _reason) that route expressions can
 // match against. The synthetic overlay is applied per match call —
 // rec.Attrs itself is not mutated.
-func (o *Orchestrator) ingestLocked(rec chunk.Record, src SourceContext) (*pendingAcks, [][]remoteForwardTarget, error) {
+func (o *Orchestrator) ingestLocked(rec chunk.Record, src SourceContext) (*pendingAcks, error) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
@@ -93,30 +84,29 @@ func (o *Orchestrator) ingestLocked(rec chunk.Record, src SourceContext) (*pendi
 
 	if len(o.vaults) == 0 && o.forwarder == nil {
 		o.routeStats.Dropped.Add(1)
-		return nil, nil, ErrNoChunkManagers
+		return nil, ErrNoChunkManagers
 	}
 
 	if o.routeSet == nil {
 		o.routeStats.Dropped.Add(1)
-		return nil, nil, nil // No routes configured — drop the record.
+		return nil, nil // No routes configured — drop the record.
 	}
 
 	matches := o.routeSet.MatchWithSource(rec.Attrs, src)
 	if len(matches) == 0 {
 		o.routeStats.Dropped.Add(1)
-		return nil, nil, nil
+		return nil, nil
 	}
 
 	// Write records first, then update stats only on success.
 	routed := false
 	var pa *pendingAcks
-	var deferredRemotes [][]remoteForwardTarget
 	for _, t := range matches {
 		if t.NodeID != "" {
 			var err error
 			pa, err = o.handleRemoteVaultMatch(pa, t, rec)
 			if err != nil {
-				return pa, deferredRemotes, err
+				return pa, err
 			}
 			routed = true
 			continue
@@ -126,7 +116,7 @@ func (o *Orchestrator) ingestLocked(rec chunk.Record, src SourceContext) (*pendi
 			if errors.Is(err, ErrVaultDisabled) {
 				continue // Skip disabled vaults during ingestion.
 			}
-			return pa, deferredRemotes, err
+			return pa, err
 		}
 		if fanOut != nil {
 			pa = pa.addFanOut(*fanOut)
@@ -142,7 +132,7 @@ func (o *Orchestrator) ingestLocked(rec chunk.Record, src SourceContext) (*pendi
 	if routed {
 		o.routeStats.Routed.Add(1)
 	}
-	return pa, deferredRemotes, nil
+	return pa, nil
 }
 
 // handleRemoteVaultMatch updates route stats and queues cross-node forwarding

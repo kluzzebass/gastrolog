@@ -431,54 +431,20 @@ func (r *vaultTestReplicator) getCalls() []vaultForwardCall {
 	return append([]vaultForwardCall(nil), r.calls...)
 }
 
-func TestAppendToInstanceLeaderForwardsToFollowers(t *testing.T) {
-	t.Parallel()
-	fwd := &vaultTestReplicator{}
-	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetChunkReplicator(fwd)
-
-	vaultID := glid.New()
-	vaultInst := newMemInstance(t, vaultID, false, []system.ReplicationTarget{{NodeID: "node-2"}, {NodeID: "node-3"}})
-	vault := NewVault(vaultID, vaultInst)
-	vault.Name = "fwd-test"
-	orch.RegisterVault(vault)
-
-	rec := testRecord("hello")
-	if err := orch.AppendToVault(vaultID, chunk.ChunkID{}, rec); err != nil {
-		t.Fatal(err)
-	}
-
-	calls := fwd.getCalls()
-	if len(calls) != 2 {
-		t.Fatalf("expected 2 AppendRecords calls (one per follower), got %d", len(calls))
-	}
-	nodes := map[string]bool{}
-	for _, c := range calls {
-		nodes[c.NodeID] = true
-		if c.VaultID != vaultID {
-			t.Errorf("call.VaultID = %s, want %s", c.VaultID, vaultID)
-		}
-		if c.ChunkID == (chunk.ChunkID{}) {
-			t.Error("call.ChunkID should be non-zero (active chunk ID)")
-		}
-		if len(c.Records) != 1 {
-			t.Errorf("expected 1 record per call, got %d", len(c.Records))
-		}
-	}
-	if !nodes["node-2"] || !nodes["node-3"] {
-		t.Errorf("expected forwards to node-2 and node-3, got %v", nodes)
-	}
-}
-
-func TestAppendToInstanceSecondaryDoesNotForward(t *testing.T) {
+// TestAppendToVaultDoesNotForward verifies that AppendToVault — the
+// receiver-side handler for cross-node fan-out RPCs — appends locally
+// only and never re-forwards. Loops would otherwise be possible: peer A
+// fans out to peer B, B's AppendToVault calls something that fans out
+// to A, and the record bounces. The fan-out dispatcher on the sender
+// side is the sole forwarding origin.
+func TestAppendToVaultDoesNotForward(t *testing.T) {
 	t.Parallel()
 	fwd := &vaultTestReplicator{}
 	orch := newTestOrch(t, Config{LocalNodeID: "node-2"})
 	orch.SetChunkReplicator(fwd)
 
 	vaultID := glid.New()
-	// Follower instance — should NOT re-forward.
-	vaultInst := newMemInstance(t, vaultID, true, nil)
+	vaultInst := newMemInstance(t, vaultID, false, nil)
 	vault := NewVault(vaultID, vaultInst)
 	vault.Name = "no-reforward"
 	orch.RegisterVault(vault)
@@ -488,7 +454,7 @@ func TestAppendToInstanceSecondaryDoesNotForward(t *testing.T) {
 	}
 
 	if len(fwd.getCalls()) != 0 {
-		t.Error("follower should NOT forward to other nodes (prevents loops)")
+		t.Error("AppendToVault must NOT forward to other nodes (prevents fan-out loops)")
 	}
 }
 
@@ -756,60 +722,6 @@ func TestImportToInstanceDrainsIteratorOnSkip(t *testing.T) {
 	}
 }
 
-func TestAppendToInstanceForwardLifecycle(t *testing.T) {
-	t.Parallel()
-	fwd := &vaultTestReplicator{}
-	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetChunkReplicator(fwd)
-
-	vaultID := glid.New()
-	vaultInst := newMemInstance(t, vaultID, false, []system.ReplicationTarget{{NodeID: "node-2"}})
-	vault := NewVault(vaultID, vaultInst)
-	vault.Name = "forward-lifecycle"
-	orch.RegisterVault(vault)
-
-	// Append 3 records.
-	for i := range 3 {
-		rec := testRecord("rec-" + string(rune('a'+i)))
-		if err := orch.AppendToVault(vaultID, chunk.ChunkID{}, rec); err != nil {
-			t.Fatalf("append %d: %v", i, err)
-		}
-	}
-
-	// Verify 3 AppendRecords calls.
-	calls := fwd.getCalls()
-	if len(calls) != 3 {
-		t.Fatalf("expected 3 AppendRecords calls, got %d", len(calls))
-	}
-
-	// All calls should target the same vault, instance, and chunk ID.
-	firstChunkID := calls[0].ChunkID
-	if firstChunkID == (chunk.ChunkID{}) {
-		t.Fatal("expected non-zero chunk ID in forward calls")
-	}
-	for i, c := range calls {
-		if c.VaultID != vaultID {
-			t.Errorf("call %d: VaultID = %s, want %s", i, c.VaultID, vaultID)
-		}
-		if c.ChunkID != firstChunkID {
-			t.Errorf("call %d: ChunkID = %s, want consistent %s", i, c.ChunkID, firstChunkID)
-		}
-		if c.NodeID != "node-2" {
-			t.Errorf("call %d: NodeID = %s, want node-2", i, c.NodeID)
-		}
-	}
-
-	// Verify local instance has 3 records in active chunk.
-	active := vaultInst.Chunks.Active()
-	if active == nil {
-		t.Fatal("expected active chunk")
-	}
-	if active.RecordCount != 3 {
-		t.Errorf("expected 3 records in active chunk, got %d", active.RecordCount)
-	}
-}
-
-
 // ================================================================
 // HIGH-VOLUME STRESS TESTS
 // ================================================================
@@ -915,88 +827,3 @@ func (c *errorCursor) Close() error { return nil }
 // returns an unexpected error (not ErrNoMoreRecords), streamLocal propagates
 // it so transitionChunk does NOT call expireChunk — the source chunk is retained.
 
-// failingForwarder is a ChunkReplicator that records AppendRecords calls and
-// returns configurable errors. Used to verify fire-and-forget error handling
-// on the replication path.
-type failingForwarder struct {
-	mu        sync.Mutex
-	calls     int
-	returnErr error
-}
-
-func (f *failingForwarder) AppendRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.calls++
-	return f.returnErr
-}
-
-func (f *failingForwarder) SealVault(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
-	return nil
-}
-
-func (f *failingForwarder) ImportSealedChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
-	return nil
-}
-
-func (f *failingForwarder) RequestReplicaCatchup(_ context.Context, _ string, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {
-	return 0, nil
-}
-
-func (f *failingForwarder) DeleteChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
-	return nil
-}
-
-func (f *failingForwarder) callCount() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.calls
-}
-
-// TestAppendToInstanceForwardingDoesNotBlockOnFullChannel verifies fire-and-forget
-// semantics: AppendToVault commits the record locally and succeeds even when
-// the forwarder returns errors. The local append must not be rolled back, and
-// high-volume ingestion (exceeding typical queue capacity) must complete
-// without error regardless of forwarder failures.
-func TestAppendToInstanceForwardingDoesNotBlockOnFullChannel(t *testing.T) {
-	t.Parallel()
-
-	fwd := &failingForwarder{
-		returnErr: errors.New("simulated network partition"),
-	}
-
-	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetChunkReplicator(fwd)
-
-	vaultID := glid.New()
-	vaultInst := newMemInstance(t, vaultID, false, []system.ReplicationTarget{{NodeID: "node-2"}, {NodeID: "node-3"}})
-	vault := NewVault(vaultID, vaultInst)
-	vault.Name = "non-blocking"
-	orch.RegisterVault(vault)
-
-	// Append 200 records — well above typical queue capacity.
-	// Every forwarder call fails, but AppendToVault must still succeed.
-	const total = 200
-	for i := 0; i < total; i++ {
-		if err := orch.AppendToVault(vaultID, chunk.ChunkID{}, testRecord("burst")); err != nil {
-			t.Fatalf("AppendToVault %d: %v", i, err)
-		}
-	}
-
-	// Verify all records committed locally despite forwarder failures.
-	active := vaultInst.Chunks.Active()
-	if active == nil {
-		t.Fatal("expected active chunk after appends")
-	}
-	if active.RecordCount != total {
-		t.Errorf("expected %d records in active chunk, got %d", total, active.RecordCount)
-	}
-
-	// The circuit breaker stops forwarding after consecutive failures,
-	// so we expect at least 1 call per follower (to detect the failure)
-	// but not necessarily all 400. The important thing: local records
-	// are committed and the forwarder was attempted.
-	if got := fwd.callCount(); got < 2 {
-		t.Errorf("expected at least 2 AppendRecords calls (one per follower), got %d", got)
-	}
-}

@@ -189,8 +189,8 @@ func (o *Orchestrator) runRateAlertEvaluator(ctx context.Context, interval time.
 //
 // Ordered shutdown:
 //  0. BeginShutdown on the shared phase (if wired) → fast-path skip in
-//     fireAndForgetRemote / sealRemoteFollowers so the drain pipeline
-//     doesn't spam peers that are going down alongside us.
+//     dispatchFanOutAsync so the drain pipeline doesn't spam peers that
+//     are going down alongside us.
 //  1. Cancel ingester contexts → ingesterWg.Wait() → close ingestCh
 //  2. digestWg.Wait() (drains remaining messages) → close digestedCh
 //  3. writeWg.Wait() (drains remaining records) → close done
@@ -205,10 +205,10 @@ func (o *Orchestrator) Stop() error {
 	o.mu.Unlock()
 
 	// Stage 0: flip the shutdown phase BEFORE any drain work so that
-	// fireAndForgetRemote / sealRemoteFollowers skip their remote calls
-	// while we drain buffered records through the pipeline. Idempotent
-	// if the top-level shutdown already flipped it; safe to call with a
-	// nil phase (single-node tests). See gastrolog-1e5ke.
+	// fan-out dispatch helpers skip their remote calls while we drain
+	// buffered records through the pipeline. Idempotent if the top-level
+	// shutdown already flipped it; safe to call with a nil phase
+	// (single-node tests). See gastrolog-1e5ke.
 	if o.phase != nil {
 		o.phase.BeginShutdown("orchestrator: cancelling ingesters")
 	}

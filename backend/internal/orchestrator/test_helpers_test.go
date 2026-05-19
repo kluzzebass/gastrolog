@@ -736,8 +736,7 @@ func setupCluster(t *testing.T, nodeIDs []string, vaultCount int, rotationRecord
 // drain, a late ImportSealedChunk would recreate the chunk on the follower
 // after retention deleted it. Plain Chunks.Seal() only seals the leader —
 // followers' active chunks would stay active, causing forwardDelete to
-// fail with ErrActiveChunk. The leader's production seal-on-rotation path
-// uses sealRemoteFollowers; tests that manually seal must do the same.
+// fail with ErrActiveChunk.
 func (h *clusterHarness) sealAndReplicate(t *testing.T, leaderNode *clusterTestNode, vaultIdx int) {
 	t.Helper()
 	vaultInst := leaderNode.instances[vaultIdx]

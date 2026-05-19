@@ -106,10 +106,9 @@ type VaultInstance struct {
 	// ChunkPlacement returns the per-chunk Receiving/Holding placement
 	// from the vault-ctl FSM (gastrolog-nd6sz). Nil when no Raft group
 	// exists; nil-returning closure when the chunk has no placement
-	// entry (LeaderDriven chunks pre-fan-out have no placement at
-	// all, while FanOut chunks always have one). Used by appendRecord
-	// to dispatch FanOut chunks to fanOutAppend rather than the
-	// legacy forwardToFollowers path.
+	// entry (memory/jsonl-mode chunks have no placement and no
+	// cross-node fan-out). Used by appendRecord to dispatch the chunk
+	// through fanOutAppend.
 	ChunkPlacement func(id chunk.ChunkID) *vaultctlfsm.ChunkPlacement
 
 	// IsFSMReady returns true after the vault-ctl FSM has applied at least one log

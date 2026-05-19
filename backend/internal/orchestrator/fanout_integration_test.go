@@ -24,10 +24,9 @@
 //     live Receiving mid-write. The isStillReceiving classifier
 //     de-escalates the removed peer's failure, the write still
 //     succeeds against the (now-shrunken) effective W.
-//   - LeaderDriven vault unaffected: a vault without FanOut placement
-//     uses the legacy forwardToFollowers path; no fanOutTask is
-//     built; chunkReplicator.AppendRecords is NOT called via the
-//     fan-out path.
+//   - Vault without placement: no fanOutTask is built; the chunk
+//     stays local-only (memory/jsonl-mode behavior) and
+//     chunkReplicator.AppendRecords is NOT called.
 
 package orchestrator
 
@@ -190,25 +189,24 @@ func TestFanOutIntegrationDeescalatesRemovedReceiver(t *testing.T) {
 	}
 }
 
-func TestFanOutIntegrationLeaderDrivenVaultDoesNotFanOut(t *testing.T) {
+func TestFanOutIntegrationNoPlacementDoesNotFanOut(t *testing.T) {
 	t.Parallel()
 	orch, rep := newFanOutTestOrch(t)
 
 	vaultID := glid.New()
-	// No placement (LeaderDriven) — ChunkPlacement returns nil.
+	// No placement — ChunkPlacement returns nil (memory/jsonl-mode vault).
 	vault := (&fanOutVaultBuilder{vaultID: vaultID, placement: nil}).build(t)
 	orch.RegisterVault(vault)
 
 	if _, _, err := orch.Append(vaultID, testFanOutRecord(t)); err != nil {
 		t.Fatalf("Append: %v", err)
 	}
-	// Mock replicator should see ZERO calls — LeaderDriven path with
-	// no FollowerTargets is a no-op for replication; fan-out path
-	// never fires because ChunkPlacement returned nil.
+	// Mock replicator should see ZERO calls — fan-out path never
+	// fires because ChunkPlacement returned nil.
 	time.Sleep(50 * time.Millisecond) // brief window for any stray goroutine
 	for _, n := range []string{"node-b", "node-c", orch.localNodeID} {
 		if rep.callsFor(n) != 0 {
-			t.Errorf("LeaderDriven vault should not hit chunkReplicator; got %s=%d calls", n, rep.callsFor(n))
+			t.Errorf("vault without placement should not hit chunkReplicator; got %s=%d calls", n, rep.callsFor(n))
 		}
 	}
 }
