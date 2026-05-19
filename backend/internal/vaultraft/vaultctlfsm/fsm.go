@@ -16,6 +16,17 @@ import (
 	hraft "github.com/hashicorp/raft"
 )
 
+// ErrActiveChunkExists is returned by applyCreate when an existing
+// Active chunk for the vault would be displaced. Under the fan-out
+// data plane (gastrolog-hshgl) every replica can fire CmdCreateChunk
+// concurrently when its local rotation policy trips; Raft serializes
+// the entries and the first-to-commit's chunk ID wins. Subsequent
+// CmdCreateChunk entries that would introduce a second Active are
+// rejected with this error so the FSM never carries more than one
+// Active chunk per vault. The losing proposer learns the canonical
+// Active ID via the OnCreate callback fired for the winning entry.
+var ErrActiveChunkExists = errors.New("vaultctlfsm: active chunk already exists for vault")
+
 // Command identifies the type of chunk metadata mutation.
 type Command byte
 
@@ -890,6 +901,28 @@ func (f *FSM) applyCreate(data []byte) error {
 	// files via the tombstone re-check after announce.
 	if _, dead := f.tombstones[id]; dead {
 		return nil
+	}
+
+	// Idempotent re-apply for the same ID (e.g. WAL replay) is a
+	// no-op: keep the existing entry untouched.
+	if _, present := f.chunks[id]; present {
+		return nil
+	}
+
+	// Single-Active invariant (gastrolog-hshgl): under fan-out every
+	// replica can fire CmdCreateChunk concurrently. Raft serializes
+	// the entries, but without FSM-side enforcement multiple replicas'
+	// proposals would all succeed and the FSM would carry several
+	// Active chunks per vault. First-to-commit wins; the FSM rejects
+	// any subsequent proposal that would introduce a second Active.
+	// Losing proposers have no records attached to their candidate ID,
+	// so the unused IDs are leak-free. Their chunk managers align to
+	// the winning ID via OnCreate when the winning entry replicates
+	// here.
+	for _, e := range f.chunks {
+		if e.State == chunk.ChunkStateActive {
+			return ErrActiveChunkExists
+		}
 	}
 
 	f.chunks[id] = &ManifestEntry{

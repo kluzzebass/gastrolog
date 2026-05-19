@@ -43,11 +43,16 @@ func applyResult(f *FSM, data []byte) any {
 
 // applyCreateFanOut creates a chunk via the extended CmdCreateChunk
 // payload that stamps the initial Receiving set on a new
-// ChunkPlacement entry.
+// ChunkPlacement entry, then transitions the chunk to Sealing so
+// subsequent applyCreateFanOut calls don't trip the single-Active
+// invariant. The Receiving / Holding / PendingPulls state on the
+// placement entry survives the state transition, which is what these
+// tests assert against.
 func applyCreateFanOut(t *testing.T, f *FSM, id chunk.ChunkID, receiving []string) {
 	t.Helper()
 	now := time.Now().Truncate(time.Nanosecond)
 	applyOK(t, f, MarshalCreateChunkWithReceiving(id, now, now, now, receiving))
+	applyOK(t, f, MarshalBeginSeal(id))
 }
 
 // ---------- CmdAddReceiving ----------

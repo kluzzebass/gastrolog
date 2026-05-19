@@ -214,19 +214,34 @@ func (h *reliabilityHarness) leader() *reliabilityNode {
 	return h.nodes[h.waitForLeader()]
 }
 
-// applyInstanceCreate submits a CmdCreateChunk to the vault FSM via the current
-// leader. Used by scenarios that want to populate FSM state.
+// applyInstanceCreate submits a CmdCreateChunk to the vault FSM via the
+// current leader and then transitions the chunk to Sealing via
+// CmdBeginSeal so subsequent applyInstanceCreate calls for the same
+// vault don't trip the single-Active invariant. Used by scenarios
+// that want to populate FSM state with multiple chunks per vault.
 func (h *reliabilityHarness) applyInstanceCreate(vaultID glid.GLID, chunkID chunk.ChunkID, at time.Time) {
 	h.t.Helper()
 	leader := h.leader()
-	wire := vaultctlfsm.MarshalCreateChunk(chunkID, at, at, at)
-	cmd := MarshalVaultChunkCommand(vaultID, wire)
-	fut := leader.raft.Apply(cmd, 2*time.Second)
+
+	createCmd := MarshalVaultChunkCommand(vaultID, vaultctlfsm.MarshalCreateChunk(chunkID, at, at, at))
+	fut := leader.raft.Apply(createCmd, 2*time.Second)
 	if err := fut.Error(); err != nil {
 		h.t.Fatalf("apply instance create: %v", err)
 	}
 	if r, ok := fut.Response().(error); ok && r != nil {
 		h.t.Fatalf("apply instance create FSM error: %v", r)
+	}
+
+	// Free the single-Active slot for the next create so reliability
+	// fixtures can populate many chunks per vault without manual
+	// rotation sequencing.
+	sealCmd := MarshalVaultChunkCommand(vaultID, vaultctlfsm.MarshalBeginSeal(chunkID))
+	fut = leader.raft.Apply(sealCmd, 2*time.Second)
+	if err := fut.Error(); err != nil {
+		h.t.Fatalf("apply instance begin-seal: %v", err)
+	}
+	if r, ok := fut.Response().(error); ok && r != nil {
+		h.t.Fatalf("apply instance begin-seal FSM error: %v", r)
 	}
 }
 

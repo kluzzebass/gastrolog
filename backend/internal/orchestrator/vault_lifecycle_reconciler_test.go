@@ -398,15 +398,21 @@ func TestReconcileFromSnapshotProjectsAllSealedEntries(t *testing.T) {
 	src := vaultctlfsm.New()
 
 	// Seed the source FSM: 3 chunks created, 2 sealed, 1 still active.
+	// Single-Active invariant: fully retire each chunk before creating
+	// the next, leaving the last one as the lone Active.
 	now := time.Now()
 	idSealed1 := chunk.NewChunkID()
 	idSealed2 := chunk.NewChunkID()
 	idActive := chunk.NewChunkID()
-	for _, id := range []chunk.ChunkID{idSealed1, idSealed2, idActive} {
-		_ = src.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(id, now, now, now)})
-	}
+	_ = src.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idSealed1, now, now, now)})
+	_ = src.Apply(&hraft.Log{Data: vaultctlfsm.MarshalBeginSeal(idSealed1)})
 	_ = src.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idSealed1, now, 1, 1, now, now, now, false)})
+
+	_ = src.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idSealed2, now, now, now)})
+	_ = src.Apply(&hraft.Log{Data: vaultctlfsm.MarshalBeginSeal(idSealed2)})
 	_ = src.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idSealed2, now, 1, 1, now, now, now, false)})
+
+	_ = src.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idActive, now, now, now)})
 
 	cm := &reconcilerFakeSealEnsurerChunkManager{}
 	vaultInst := &VaultInstance{
@@ -1352,19 +1358,26 @@ func TestReconcileFromSnapshotResumesSealingChunks(t *testing.T) {
 	idActive := chunk.NewChunkID()
 	idSealing := chunk.NewChunkID()
 	idSealed := chunk.NewChunkID()
-	for _, id := range []chunk.ChunkID{idActive, idSealing, idSealed} {
-		if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(id, now, now, now)}); err != nil {
-			t.Fatalf("create %s: %v", id, err)
-		}
-	}
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalBeginSeal(idSealing)}); err != nil {
-		t.Fatalf("begin-seal sealing: %v", err)
+	// Single-Active invariant: retire each non-Active chunk before
+	// creating the next; leave the chunk that should remain Active for
+	// last.
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idSealed, now, now, now)}); err != nil {
+		t.Fatalf("create sealed: %v", err)
 	}
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalBeginSeal(idSealed)}); err != nil {
 		t.Fatalf("begin-seal sealed: %v", err)
 	}
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idSealed, now, 1, 1, now, now, now, false)}); err != nil {
 		t.Fatalf("seal-chunk sealed: %v", err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idSealing, now, now, now)}); err != nil {
+		t.Fatalf("create sealing: %v", err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalBeginSeal(idSealing)}); err != nil {
+		t.Fatalf("begin-seal sealing: %v", err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idActive, now, now, now)}); err != nil {
+		t.Fatalf("create active: %v", err)
 	}
 
 	cm := &reconcilerFakeChunkManager{}
@@ -1834,11 +1847,15 @@ func TestSweepIdleActiveSealsMetadataOnlyOrphan(t *testing.T) {
 
 	orphanID := chunk.NewChunkID()
 	currentID := chunk.NewChunkID()
+	// Single-Active invariant: the FSM never holds two Active entries
+	// in production. The scenario this test exercises — local m.active
+	// points at one chunk while a stale Active entry sits in the FSM —
+	// arises when leader transfer interrupts post-seal pipeline before
+	// CmdBeginSeal applied. Only orphanID needs to be in the FSM for
+	// the sweep to see it; currentID lives in the local chunk manager
+	// only (its lack of FSM presence isn't material to this test).
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(orphanID, idleStart, idleStart, idleStart)}); err != nil {
 		t.Fatalf("create orphan: %v", err)
-	}
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(currentID, now, now, now)}); err != nil {
-		t.Fatalf("create current: %v", err)
 	}
 
 	staleEnd := now.Add(-30 * time.Minute)
