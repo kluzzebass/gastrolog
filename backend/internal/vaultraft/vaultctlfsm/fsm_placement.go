@@ -34,46 +34,12 @@ import (
 	"gastrolog/internal/chunk"
 )
 
-// WriteModel selects the per-chunk replication mode.
-//
-// The value is fixed at CmdCreateChunk time and immutable for the
-// chunk's lifetime. A vault transitioning between modes only affects
-// newly-created chunks; in-flight chunks finish under their original
-// model. See docs/fan-out-data-plane-design.md § "Per-chunk cutover
-// semantics".
-type WriteModel uint8
-
-const (
-	// WriteModelLeaderDriven is the pre-fan-out replication model:
-	// leader appends locally + replicates to follower targets via
-	// ChunkReplicator.AppendRecords. Default for chunks created before
-	// the migration completes.
-	WriteModelLeaderDriven WriteModel = 0
-	// WriteModelFanOut is the post-fan-out model: the orchestrator
-	// fans out to every member of Receiving in parallel under W-of-N
-	// ack accounting (gastrolog-5pn44).
-	WriteModelFanOut WriteModel = 1
-)
-
-// String returns a human-readable label for the model.
-func (m WriteModel) String() string {
-	switch m {
-	case WriteModelLeaderDriven:
-		return "LeaderDriven"
-	case WriteModelFanOut:
-		return "FanOut"
-	default:
-		return fmt.Sprintf("WriteModel(%d)", m)
-	}
-}
-
-// ChunkPlacement carries the per-chunk fan-out state — write-mode
-// designation, the membership sets, and the in-flight Holding-removal
+// ChunkPlacement carries the per-chunk membership state — the
+// Receiving / Holding sets and the in-flight Holding-removal
 // receipts. Stored in its own per-vault map alongside chunks and
 // pendingDeletes; serialized in its own snapshot section so the
 // existing ManifestEntry encoding stays unchanged.
 type ChunkPlacement struct {
-	WriteModel WriteModel
 	// Receiving is the set of nodes that should receive new fan-out
 	// writes for this chunk's active window. Empty after Sealing.
 	Receiving []string
@@ -90,9 +56,9 @@ type ChunkPlacement struct {
 	PendingPulls map[string]map[string]bool
 	// FinalSetHash is the converged set-hash at seal time, populated
 	// by CmdSealChunk's optional FinalSet argument (gastrolog-37k2b).
-	// Zero value means unset (LeaderDriven chunks, or FanOut chunks
-	// pre-seal). Receiving members compare their local set-hash
-	// against this value as defense-in-depth divergence detection.
+	// Zero value means unset (chunks pre-seal). Receiving members
+	// compare their local set-hash against this value as
+	// defense-in-depth divergence detection.
 	FinalSetHash [32]byte
 }
 
@@ -109,7 +75,6 @@ func (p *ChunkPlacement) HasHolding(nodeID string) bool {
 // Copy returns a deep copy safe to hand outside the FSM lock.
 func (p *ChunkPlacement) Copy() ChunkPlacement {
 	out := ChunkPlacement{
-		WriteModel:   p.WriteModel,
 		Receiving:    append([]string(nil), p.Receiving...),
 		Holding:      append([]string(nil), p.Holding...),
 		FinalSetHash: p.FinalSetHash,
@@ -573,7 +538,7 @@ func encodeChunkPlacementSection(w io.Writer, placements map[chunk.ChunkID]*Chun
 		if p == nil {
 			continue
 		}
-		if p.WriteModel == WriteModelLeaderDriven && len(p.Receiving) == 0 && len(p.Holding) == 0 && p.FinalSetHash == [32]byte{} {
+		if len(p.Receiving) == 0 && len(p.Holding) == 0 && p.FinalSetHash == [32]byte{} {
 			continue
 		}
 		live = append(live, pair{id, p})
@@ -583,7 +548,7 @@ func encodeChunkPlacementSection(w io.Writer, placements map[chunk.ChunkID]*Chun
 	}
 	payloadLen := 4
 	for _, e := range live {
-		payloadLen += 16 + 1 + 32 + 4 + 4
+		payloadLen += 16 + 32 + 4 + 4
 		for _, n := range e.p.Receiving {
 			payloadLen += 2 + len(n)
 		}
@@ -611,10 +576,9 @@ func encodeChunkPlacementSection(w io.Writer, placements map[chunk.ChunkID]*Chun
 }
 
 func encodeChunkPlacementEntry(w io.Writer, id chunk.ChunkID, p *ChunkPlacement) error {
-	var hdr [16 + 1 + 32]byte
+	var hdr [16 + 32]byte
 	copy(hdr[0:16], id[:])
-	hdr[16] = byte(p.WriteModel)
-	copy(hdr[17:49], p.FinalSetHash[:])
+	copy(hdr[16:48], p.FinalSetHash[:])
 	if _, err := w.Write(hdr[:]); err != nil {
 		return fmt.Errorf("write chunkPlacement header: %w", err)
 	}
@@ -737,14 +701,14 @@ func readChunkPlacementSection(r io.Reader) (map[chunk.ChunkID]*ChunkPlacement, 
 	count := binary.BigEndian.Uint32(countBuf[:])
 	out := make(map[chunk.ChunkID]*ChunkPlacement, count)
 	for i := range count {
-		var hdr [16 + 1 + 32]byte
+		var hdr [16 + 32]byte
 		if _, err := io.ReadFull(r, hdr[:]); err != nil {
 			return nil, fmt.Errorf("read chunkPlacement %d header: %w", i, err)
 		}
 		var id chunk.ChunkID
 		copy(id[:], hdr[0:16])
-		p := &ChunkPlacement{WriteModel: WriteModel(hdr[16])}
-		copy(p.FinalSetHash[:], hdr[17:49])
+		p := &ChunkPlacement{}
+		copy(p.FinalSetHash[:], hdr[16:48])
 		var err error
 		p.Receiving, err = readNodeList(r)
 		if err != nil {

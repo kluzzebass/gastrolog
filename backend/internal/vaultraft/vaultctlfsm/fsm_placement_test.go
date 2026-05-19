@@ -41,31 +41,13 @@ func applyResult(f *FSM, data []byte) any {
 	return f.Apply(&hraft.Log{Data: data})
 }
 
-// applyCreateFanOut creates a fan-out chunk via the extended payload
-// and asserts the resulting placement state.
+// applyCreateFanOut creates a chunk via the extended CmdCreateChunk
+// payload that stamps the initial Receiving set on a new
+// ChunkPlacement entry.
 func applyCreateFanOut(t *testing.T, f *FSM, id chunk.ChunkID, receiving []string) {
 	t.Helper()
 	now := time.Now().Truncate(time.Nanosecond)
-	applyOK(t, f, MarshalCreateChunkFanOut(id, now, now, now, WriteModelFanOut, receiving))
-}
-
-// ---------- WriteModel ----------
-
-func TestWriteModelString(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		m    WriteModel
-		want string
-	}{
-		{WriteModelLeaderDriven, "LeaderDriven"},
-		{WriteModelFanOut, "FanOut"},
-		{WriteModel(42), "WriteModel(42)"},
-	}
-	for _, c := range cases {
-		if got := c.m.String(); got != c.want {
-			t.Errorf("WriteModel(%d).String() = %q, want %q", c.m, got, c.want)
-		}
-	}
+	applyOK(t, f, MarshalCreateChunkWithReceiving(id, now, now, now, receiving))
 }
 
 // ---------- CmdAddReceiving ----------
@@ -362,9 +344,6 @@ func TestFanOutCreateChunkStampsPlacement(t *testing.T) {
 	if p == nil {
 		t.Fatal("Placement: nil after fan-out create")
 	}
-	if p.WriteModel != WriteModelFanOut {
-		t.Errorf("WriteModel = %v, want FanOut", p.WriteModel)
-	}
 	if !slices.Equal(p.Receiving, []string{"node-A", "node-B"}) {
 		t.Errorf("Receiving = %v, want [node-A node-B]", p.Receiving)
 	}
@@ -386,9 +365,6 @@ func TestFanOutCreateChunkWithEmptyReceiving(t *testing.T) {
 	}
 	if len(p.Receiving) != 0 || len(p.Holding) != 0 {
 		t.Errorf("empty Receiving stamp: got Receiving=%v Holding=%v", p.Receiving, p.Holding)
-	}
-	if p.WriteModel != WriteModelFanOut {
-		t.Errorf("WriteModel = %v, want FanOut", p.WriteModel)
 	}
 }
 
@@ -589,9 +565,6 @@ func TestPlacementSurvivesSnapshotRoundtrip(t *testing.T) {
 	p1 := dst.Placement(id1)
 	if p1 == nil {
 		t.Fatal("id1 placement missing after restore")
-	}
-	if p1.WriteModel != WriteModelFanOut {
-		t.Errorf("id1 WriteModel = %v, want FanOut", p1.WriteModel)
 	}
 	if !slices.Equal(p1.Receiving, []string{"node-A", "node-B", "node-C"}) {
 		t.Errorf("id1 Receiving = %v", p1.Receiving)

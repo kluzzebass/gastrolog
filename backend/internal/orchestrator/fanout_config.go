@@ -1,25 +1,22 @@
-// Fan-out chunk-manager configuration plumbing (gastrolog-nd6sz).
+// Fan-out chunk-manager configuration plumbing (gastrolog-nd6sz /
+// gastrolog-hshgl).
 //
-// applyFanOutConfig writes the per-vault WriteModel + initial
-// Receiving snapshot to the chunk manager so the NEXT CmdCreateChunk
-// announcement stamps both onto the new ChunkPlacement entry. Called
-// from buildVaultInstance at instance-build time (and re-called on
-// every placement-change reconfig to keep the active chunk-manager's
-// snapshot consistent with the operator's current VaultConfig).
+// applyFanOutConfig writes the FanOut WriteModel + initial Receiving
+// snapshot to every chunk manager that supports it. Called from
+// buildVaultInstance at instance-build time + on every placement
+// change.
 //
-// LeaderDriven vaults (WriteModel unset or "leader-driven"): pushes
-// empty values, leaving the chunk-manager's announce path on the
-// legacy CmdCreateChunk codepath unchanged.
+// Under gastrolog-hshgl, FanOut is the only WriteModel — every chunk
+// gets a placement entry. VaultConfig.WriteModel becomes informational
+// (still validated as "fanout" or empty/default-fanout); the empty
+// value resolves to fanout, not leader-driven. The legacy
+// LeaderDriven branch in the orchestrator dispatch is dead code that
+// follow-on commits delete.
 //
-// FanOut vaults: pushes "fanout" + the placement member node-ID list
-// as the initial Receiving snapshot. Both fields are immutable on
-// the chunk once stamped (per-chunk cutover semantics).
-//
-// Implementation note: the chunk-manager exposes the config setter
-// via chunk.FanOutConfigSetter (optional interface). Implementations
+// The chunk-manager exposes the config setter via
+// chunk.FanOutConfigSetter (optional interface). Implementations
 // that don't support it (memory / jsonl chunk managers) silently
-// skip the call — those vaults can't be FanOut anyway because they
-// have no cross-node replication path.
+// skip the call — those vaults have no cross-node replication anyway.
 
 package orchestrator
 
@@ -30,22 +27,14 @@ import (
 	"gastrolog/internal/system"
 )
 
-func applyFanOutConfig(cm chunk.ChunkManager, vaultCfg system.VaultConfig, placements []system.VaultPlacement, nscs []system.NodeStorageConfig) {
+func applyFanOutConfig(cm chunk.ChunkManager, _ system.VaultConfig, placements []system.VaultPlacement, nscs []system.NodeStorageConfig) {
 	setter, ok := cm.(chunk.FanOutConfigSetter)
 	if !ok {
 		return
 	}
-	writeModel := string(vaultCfg.WriteModel.Resolve())
-	if writeModel == string(system.WriteModelLeaderDriven) {
-		// LeaderDriven (or unset): no per-chunk placement to stamp.
-		// Push empty values so a vault that flips FanOut → LeaderDriven
-		// stops emitting FanOut create payloads on subsequent chunks.
-		setter.SetFanOutConfig("", nil)
-		return
-	}
-	// FanOut: initial Receiving = every node that has a placement
-	// for this vault, deduplicated. The placement list itself encodes
-	// the candidate pool (Receiving ⊆ placements per
+	// Initial Receiving = every node that has a placement for this
+	// vault, deduplicated. The placement list itself encodes the
+	// candidate pool (Receiving ⊆ placements per
 	// docs/fan-out-data-plane-design.md).
 	nodeIDs := make([]string, 0, len(placements))
 	for _, sid := range system.StorageIDs(placements) {
@@ -54,5 +43,9 @@ func applyFanOutConfig(cm chunk.ChunkManager, vaultCfg system.VaultConfig, place
 			nodeIDs = append(nodeIDs, nid)
 		}
 	}
-	setter.SetFanOutConfig(writeModel, nodeIDs)
+	// First arg historically encoded the chunk's write-model; post-
+	// gastrolog-hshgl it is unused but still part of the
+	// FanOutConfigSetter interface (callers may still check non-empty
+	// to gate behavior).
+	setter.SetFanOutConfig("fanout", nodeIDs)
 }

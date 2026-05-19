@@ -94,8 +94,7 @@ func TestFanOutIntegrationHappyPath(t *testing.T) {
 
 	vaultID := glid.New()
 	placement := &vaultctlfsm.ChunkPlacement{
-		WriteModel: vaultctlfsm.WriteModelFanOut,
-		Receiving:  []string{orch.localNodeID, "node-b", "node-c"},
+			Receiving:  []string{orch.localNodeID, "node-b", "node-c"},
 	}
 	vault := (&fanOutVaultBuilder{vaultID: vaultID, placement: placement}).build(t)
 	orch.RegisterVault(vault)
@@ -137,8 +136,7 @@ func TestFanOutIntegrationDeescalatesRemovedReceiver(t *testing.T) {
 
 	vaultID := glid.New()
 	placement := &vaultctlfsm.ChunkPlacement{
-		WriteModel: vaultctlfsm.WriteModelFanOut,
-		Receiving:  []string{orch.localNodeID, "node-b", "node-c"},
+			Receiving:  []string{orch.localNodeID, "node-b", "node-c"},
 	}
 	vault := &Vault{
 		ID:      vaultID,
@@ -157,8 +155,7 @@ func TestFanOutIntegrationDeescalatesRemovedReceiver(t *testing.T) {
 	// Live-Receiving lookup: drops node-b once classifier flips.
 	vault.Instance.ChunkPlacement = func(_ chunk.ChunkID) *vaultctlfsm.ChunkPlacement {
 		p := &vaultctlfsm.ChunkPlacement{
-			WriteModel: vaultctlfsm.WriteModelFanOut,
-			Receiving:  []string{orch.localNodeID, "node-c"},
+					Receiving:  []string{orch.localNodeID, "node-c"},
 		}
 		if !classifierShouldExcludeB.Load() {
 			p.Receiving = placement.Receiving

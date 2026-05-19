@@ -50,30 +50,26 @@ type AnnouncerSetter interface {
 	SetAnnouncer(MetadataAnnouncer)
 }
 
-// FanOutAnnouncer is the optional extension of MetadataAnnouncer that
-// carries the per-vault WriteModel + initial Receiving set when
-// announcing a new chunk under the fan-out data-plane
-// (gastrolog-2ujjh / gastrolog-nd6sz). Announcers that do not
-// implement this interface effectively pin every chunk they create
-// to LeaderDriven (the legacy path).
-//
-// writeModel is the per-vault VaultConfig.WriteModel value at the
-// moment of chunk creation. The chunk inherits the value for its
-// lifetime — per-chunk-immutable cutover semantics (see
-// docs/fan-out-data-plane-design.md).
+// ReceivingAnnouncer is the optional extension of MetadataAnnouncer
+// that carries the initial Receiving set when announcing a new chunk
+// under the fan-out data-plane (gastrolog-2ujjh / gastrolog-nd6sz /
+// gastrolog-hshgl). Announcers that do not implement this interface
+// produce CmdCreateChunk without an initial Receiving snapshot —
+// suitable for single-node / memory / JSONL chunk managers that have
+// no cross-node replication path.
 //
 // receiving is the initial Receiving set: the full placement member
-// list for the vault. Empty for LeaderDriven chunks (the legacy
-// announcer's behavior is unchanged when the slice is empty).
-type FanOutAnnouncer interface {
-	AnnounceCreateFanOut(id ChunkID, writeStart, ingestStart, sourceStart time.Time, writeModel string, receiving []string)
+// list for the vault.
+type ReceivingAnnouncer interface {
+	AnnounceCreateWithReceiving(id ChunkID, writeStart, ingestStart, sourceStart time.Time, receiving []string)
 }
 
 // FanOutConfigSetter is the optional interface for chunk managers
-// that can be told which WriteModel + Receiving to stamp on new
-// chunks. The orchestrator wires this from VaultConfig at instance
-// build time + on every placement change. Empty values mean
-// LeaderDriven (no behavioral change vs the pre-fan-out path).
+// that can be told which Receiving snapshot to stamp on new chunks.
+// The orchestrator wires this from VaultConfig at instance build
+// time + on every placement change. The writeModel parameter is
+// vestigial (gastrolog-hshgl removed WriteModel as a runtime concept;
+// FanOut is the only path) and may be dropped in a follow-up.
 type FanOutConfigSetter interface {
 	SetFanOutConfig(writeModel string, receiving []string)
 }

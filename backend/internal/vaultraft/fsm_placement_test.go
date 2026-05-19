@@ -27,8 +27,8 @@ func TestFSM_PlacementCommandsRouteToVaultSubFSM(t *testing.T) {
 
 	// Create a fan-out chunk via the outer FSM with an initial
 	// Receiving set.
-	wire := vaultctlfsm.MarshalCreateChunkFanOut(cid, now, now, now,
-		vaultctlfsm.WriteModelFanOut, []string{"node-A", "node-B"})
+	wire := vaultctlfsm.MarshalCreateChunkWithReceiving(cid, now, now, now,
+		[]string{"node-A", "node-B"})
 	if err := f.Apply(&hraft.Log{Data: MarshalVaultChunkCommand(vaultID, wire)}); err != nil {
 		t.Fatalf("apply create: %v", err)
 	}
@@ -70,10 +70,10 @@ func TestFSM_PlacementSurvivesOuterSnapshotRoundtrip(t *testing.T) {
 	cidB := testChunkID(21)
 	now := time.Now().Truncate(time.Nanosecond)
 
-	createA := vaultctlfsm.MarshalCreateChunkFanOut(cidA, now, now, now,
-		vaultctlfsm.WriteModelFanOut, []string{"node-A", "node-B", "node-C"})
-	createB := vaultctlfsm.MarshalCreateChunkFanOut(cidB, now, now, now,
-		vaultctlfsm.WriteModelFanOut, []string{"node-A", "node-B"})
+	createA := vaultctlfsm.MarshalCreateChunkWithReceiving(cidA, now, now, now,
+		[]string{"node-A", "node-B", "node-C"})
+	createB := vaultctlfsm.MarshalCreateChunkWithReceiving(cidB, now, now, now,
+		[]string{"node-A", "node-B"})
 	beginRemoval := vaultctlfsm.MarshalBeginHoldingRemoval(cidA, "node-A", []string{"node-B", "node-C"})
 	ack := vaultctlfsm.MarshalAckPull(cidA, "node-A", "node-B")
 

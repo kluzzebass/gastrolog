@@ -961,14 +961,16 @@ func (o *Orchestrator) appendRecord(vaultID glid.GLID, rec chunk.Record) (chunk.
 	var remotes []remoteForwardTarget
 	var fanOut *fanOutTask
 
-	// Fan-out dispatch (gastrolog-nd6sz): if the active chunk has a
-	// FanOut WriteModel, the per-chunk Receiving set is the
-	// replication target list — not the legacy FollowerTargets. Build
-	// a fanOutTask and skip the LeaderDriven follower path entirely.
-	// The fanOutTask is processed by ackAfterReplication (ack-gated)
-	// or fired and forgotten via the same dispatcher (non-ack-gated).
+	// Fan-out dispatch (gastrolog-nd6sz / gastrolog-hshgl): if the
+	// active chunk has a placement with a non-empty Receiving set,
+	// the per-chunk Receiving set IS the replication target list.
+	// Build a fanOutTask; the fanOutTask is processed by
+	// ackAfterReplication (ack-gated) or fired and forgotten via
+	// the same dispatcher (non-ack-gated). Single-node / memory /
+	// JSONL chunks have no placement and skip the fan-out path
+	// entirely (no cross-node replication exists for them).
 	if activeInst != nil && cid != (chunk.ChunkID{}) && activeInst.ChunkPlacement != nil {
-		if p := activeInst.ChunkPlacement(cid); p != nil && p.WriteModel == vaultctlfsm.WriteModelFanOut {
+		if p := activeInst.ChunkPlacement(cid); p != nil && len(p.Receiving) > 0 {
 			fanOut = o.buildFanOutTask(vaultID, cid, p, rec)
 		}
 	}

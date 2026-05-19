@@ -47,19 +47,15 @@ func (a *Announcer) AnnounceCreate(id chunk.ChunkID, writeStart, ingestStart, so
 	a.apply("create", id, MarshalCreateChunk(id, writeStart, ingestStart, sourceStart))
 }
 
-// AnnounceCreateFanOut implements chunk.FanOutAnnouncer (gastrolog-nd6sz).
-// The chunk manager calls this when the vault's WriteModel has been
-// wired to a non-empty value (typically "fanout" + the placement
-// member list as the initial Receiving set). The payload routes via
-// the extended CmdCreateChunk: the legacy 40-byte prefix carries the
-// chunk identity + timestamps, the trailing fields stamp WriteModel
-// + initial Receiving on the new ChunkPlacement entry.
-func (a *Announcer) AnnounceCreateFanOut(id chunk.ChunkID, writeStart, ingestStart, sourceStart time.Time, writeModel string, receiving []string) {
-	wm := WriteModelLeaderDriven
-	if writeModel == "fanout" {
-		wm = WriteModelFanOut
-	}
-	a.apply("create-fanout", id, MarshalCreateChunkFanOut(id, writeStart, ingestStart, sourceStart, wm, receiving))
+// AnnounceCreateWithReceiving implements chunk.ReceivingAnnouncer
+// (gastrolog-nd6sz / gastrolog-hshgl). The chunk manager calls this
+// for every new chunk when it has been wired with a non-empty
+// Receiving snapshot. The payload routes via the extended
+// CmdCreateChunk: the legacy 40-byte prefix carries the chunk
+// identity + timestamps, the trailing fields stamp the initial
+// Receiving set on the new ChunkPlacement entry.
+func (a *Announcer) AnnounceCreateWithReceiving(id chunk.ChunkID, writeStart, ingestStart, sourceStart time.Time, receiving []string) {
+	a.apply("create-receiving", id, MarshalCreateChunkWithReceiving(id, writeStart, ingestStart, sourceStart, receiving))
 }
 
 // AnnounceBeginSeal fires the Active → Sealing transition before the

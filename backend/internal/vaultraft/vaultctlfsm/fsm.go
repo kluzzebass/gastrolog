@@ -901,14 +901,14 @@ func (f *FSM) applyCreate(data []byte) error {
 		State:       chunk.ChunkStateActive,
 	}
 
-	// Extended payload (gastrolog-4cxw0): parse WriteModel + Receiving
-	// and create a ChunkPlacement entry. Legacy 40-byte payloads exit
-	// here and produce no placement (LeaderDriven default).
+	// Extended payload (gastrolog-4cxw0): parse the initial Receiving
+	// list and create a ChunkPlacement entry. Legacy 40-byte payloads
+	// (single-node tests / pre-fan-out WAL replay) exit here and
+	// produce no placement entry.
 	if len(data) <= 40 {
 		return nil
 	}
-	wm := WriteModel(data[40])
-	off := 41
+	off := 40
 	if len(data) < off+4 {
 		return fmt.Errorf("create chunk: truncated Receiving count (%d bytes)", len(data))
 	}
@@ -931,9 +931,8 @@ func (f *FSM) applyCreate(data []byte) error {
 	// Holding from the moment the chunk is created.
 	holding := append([]string(nil), receiving...)
 	f.placements[id] = &ChunkPlacement{
-		WriteModel: wm,
-		Receiving:  receiving,
-		Holding:    holding,
+		Receiving: receiving,
+		Holding:   holding,
 	}
 	return nil
 }
@@ -1190,14 +1189,13 @@ func MarshalCreateChunk(id chunk.ChunkID, writeStart, ingestStart, sourceStart t
 	return buf
 }
 
-// MarshalCreateChunkFanOut builds the Raft log data for a CreateChunk
-// command that stamps the chunk with WriteModel and an initial
-// Receiving set (gastrolog-4cxw0). The legacy 40-byte prefix is
-// preserved so an FSM without fan-out awareness still applies the
-// chunk's identity + timestamps correctly (it just ignores the
-// trailing placement data — see applyCreate).
-func MarshalCreateChunkFanOut(id chunk.ChunkID, writeStart, ingestStart, sourceStart time.Time, model WriteModel, receiving []string) []byte {
-	size := 1 + 40 + 1 + 4
+// MarshalCreateChunkWithReceiving builds the Raft log data for a
+// CreateChunk command that stamps the chunk with its initial
+// Receiving set (gastrolog-4cxw0 / gastrolog-hshgl). The legacy
+// 40-byte prefix is preserved so single-node + WAL-replay paths that
+// produce the unextended form still apply correctly.
+func MarshalCreateChunkWithReceiving(id chunk.ChunkID, writeStart, ingestStart, sourceStart time.Time, receiving []string) []byte {
+	size := 1 + 40 + 4
 	for _, n := range receiving {
 		size += 2 + len(n)
 	}
@@ -1211,7 +1209,6 @@ func MarshalCreateChunkFanOut(id chunk.ChunkID, writeStart, ingestStart, sourceS
 	buf = append(buf, ws[:]...)
 	buf = append(buf, is[:]...)
 	buf = append(buf, ss[:]...)
-	buf = append(buf, byte(model))
 	var rc [4]byte
 	binary.BigEndian.PutUint32(rc[:], uint32(len(receiving))) //nolint:gosec // G115: cluster size fits uint32
 	buf = append(buf, rc[:]...)

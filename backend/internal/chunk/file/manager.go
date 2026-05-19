@@ -191,13 +191,15 @@ type Manager struct {
 	postSealActive sync.Map       // chunk.ChunkID → chan struct{} — closed when PostSealProcess finishes
 	postSealWg     sync.WaitGroup // tracks in-flight PostSealProcess calls (for Close only)
 
-	// Fan-out chunk creation state (gastrolog-nd6sz). When the orchestrator
-	// wires VaultConfig.WriteModel = "fanout" via SetFanOutConfig, the
-	// next CmdCreateChunk fires via the FanOutAnnouncer path with the
-	// stamped WriteModel + initial Receiving snapshot. Empty values
-	// preserve the legacy LeaderDriven announce path verbatim.
-	fanOutWriteModel string
-	fanOutReceiving  []string
+	// Fan-out chunk creation state (gastrolog-nd6sz / gastrolog-hshgl).
+	// The orchestrator wires the initial Receiving snapshot via
+	// SetFanOutConfig at instance build time and on every placement
+	// change. The next CmdCreateChunk fires via the
+	// ReceivingAnnouncer path with the snapshot stamped on the new
+	// ChunkPlacement. Empty Receiving means the chunk manager
+	// produces unextended CmdCreateChunk payloads (single-node /
+	// memory / JSONL).
+	fanOutReceiving []string
 
 	// chunkLocks protects each chunk's file lifetime against concurrent
 	// mutation: cursor reads (mmap'd raw.log/idx.log/attr.log regions)
@@ -1856,15 +1858,14 @@ func (m *Manager) openLocked() error {
 
 	if m.cfg.Announcer != nil {
 		ann := m.cfg.Announcer
-		// Snapshot WriteModel + Receiving so the deferred announcement
-		// uses the same values seen at create time (avoids races with
-		// a SetFanOutConfig that lands between the chunk's local
+		// Snapshot Receiving so the deferred announcement uses the
+		// same value seen at create time (avoids races with a
+		// SetFanOutConfig that lands between the chunk's local
 		// creation and the deferred Raft apply).
-		wm := m.fanOutWriteModel
 		rcv := append([]string(nil), m.fanOutReceiving...)
 		m.pendingAnnouncements = append(m.pendingAnnouncements, func() {
-			if fo, ok := ann.(chunk.FanOutAnnouncer); ok && (wm != "" || len(rcv) > 0) {
-				fo.AnnounceCreateFanOut(id, createdAt, createdAt, createdAt, wm, rcv)
+			if r, ok := ann.(chunk.ReceivingAnnouncer); ok && len(rcv) > 0 {
+				r.AnnounceCreateWithReceiving(id, createdAt, createdAt, createdAt, rcv)
 				return
 			}
 			ann.AnnounceCreate(id, createdAt, createdAt, createdAt)
@@ -3640,13 +3641,16 @@ func (m *Manager) SetAnnouncer(a chunk.MetadataAnnouncer) {
 // change, so the in-flight active chunk's metadata stays consistent
 // with the operator's most recent VaultConfig + Placements.
 //
-// Empty writeModel + empty receiving preserves legacy LeaderDriven
-// announce behavior verbatim — the legacy path takes the
-// AnnounceCreate branch in the chunk-creation hook.
-func (m *Manager) SetFanOutConfig(writeModel string, receiving []string) {
+// Empty receiving falls back to the unextended CmdCreateChunk announce
+// path (single-node / memory / JSONL chunk managers that don't have a
+// Receiving set to stamp).
+//
+// The writeModel parameter is vestigial (gastrolog-hshgl removed
+// WriteModel as a runtime concept; FanOut is the only path) and may
+// be dropped from the interface in a follow-up.
+func (m *Manager) SetFanOutConfig(_ string, receiving []string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.fanOutWriteModel = writeModel
 	if len(receiving) == 0 {
 		m.fanOutReceiving = nil
 		return

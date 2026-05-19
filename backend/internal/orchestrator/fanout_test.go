@@ -410,8 +410,7 @@ func TestBuildFanOutTaskClampsWForSelfInReceiving(t *testing.T) {
 	// Self in Receiving + 2 peers, default Full policy → W=3.
 	// After self-auto-ack clamp: peers W = 2.
 	placement := &vaultctlfsm.ChunkPlacement{
-		WriteModel: vaultctlfsm.WriteModelFanOut,
-		Receiving:  []string{orch.localNodeID, "node-b", "node-c"},
+			Receiving:  []string{orch.localNodeID, "node-b", "node-c"},
 	}
 	task := orch.buildFanOutTask(vaultID, chunkID, placement, testFanOutRecord(t))
 	if task == nil {
@@ -436,8 +435,7 @@ func TestBuildFanOutTaskWhenSelfNotInReceiving(t *testing.T) {
 
 	// 3 peers, self NOT in Receiving. No self-ack credit.
 	placement := &vaultctlfsm.ChunkPlacement{
-		WriteModel: vaultctlfsm.WriteModelFanOut,
-		Receiving:  []string{"node-a", "node-b", "node-c"},
+			Receiving:  []string{"node-a", "node-b", "node-c"},
 	}
 	task := orch.buildFanOutTask(vaultID, chunkID, placement, testFanOutRecord(t))
 	if task == nil {
@@ -455,8 +453,7 @@ func TestBuildFanOutTaskNilWhenReceivingEmpty(t *testing.T) {
 	t.Parallel()
 	orch, _ := newFanOutTestOrch(t)
 	placement := &vaultctlfsm.ChunkPlacement{
-		WriteModel: vaultctlfsm.WriteModelFanOut,
-		Receiving:  nil,
+			Receiving:  nil,
 	}
 	if task := orch.buildFanOutTask(glid.New(), chunk.NewChunkID(), placement, testFanOutRecord(t)); task != nil {
 		t.Errorf("expected nil task for empty Receiving; got %+v", task)

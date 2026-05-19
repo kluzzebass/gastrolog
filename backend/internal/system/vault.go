@@ -68,66 +68,12 @@ type VaultConfig struct {
 	// explicitly. See gastrolog-18du3.
 	RetentionDisposition string `json:"retentionDisposition,omitempty"`
 
-	// WriteModel selects the per-vault replication path. Default is
-	// "" (resolves to LeaderDriven), preserving pre-fan-out behavior.
-	// Operators flip a vault to "fanout" via CLI / UI; the next chunk
-	// created in this vault is stamped with the new model at
-	// CmdCreateChunk time and immutable thereafter. In-flight chunks
-	// finish under their original model — no mid-chunk transition.
-	// See docs/fan-out-data-plane-design.md § "Per-chunk cutover
-	// semantics" (gastrolog-2ujjh / gastrolog-nd6sz).
-	WriteModel WriteModel `json:"writeModel,omitempty"`
-
-	// WOfN is the per-vault W-of-N durability policy for FanOut
-	// chunks. One of "full" (default; W = N), "minus-one", "quorum",
-	// "one". Meaningless for LeaderDriven chunks (their replication
-	// path is wait-for-all by definition). The orchestrator's
-	// fan-out coordinator resolves this against the active chunk's
-	// Receiving size at write time. See system.WOfNPolicy.Resolve
-	// (gastrolog-4xdvm).
+	// WOfN is the per-vault W-of-N durability policy. One of "full"
+	// (default; W = N), "minus-one", "quorum", "one". The
+	// orchestrator's fan-out coordinator resolves this against the
+	// active chunk's Receiving size at write time. See
+	// system.WOfNPolicy.Resolve (gastrolog-4xdvm).
 	WOfN WOfNPolicy `json:"wOfN,omitempty"`
-}
-
-// WriteModel mirrors vaultctlfsm.WriteModel at the system-config
-// layer so VaultConfig consumers don't pull the FSM package. The
-// canonical wire form is the lower-case string; values must round-trip
-// through JSON.
-type WriteModel string
-
-const (
-	// WriteModelUnset is the JSON empty-string value. Resolves to
-	// LeaderDriven, preserving pre-fan-out durability semantics for
-	// vaults that haven't been explicitly switched.
-	WriteModelUnset WriteModel = ""
-	// WriteModelLeaderDriven is the pre-fan-out replication path:
-	// leader appends locally + replicates to follower targets.
-	WriteModelLeaderDriven WriteModel = "leader-driven"
-	// WriteModelFanOut is the new fan-out path: orchestrator fans
-	// out to every Receiving member in parallel under W-of-N
-	// (resolved from VaultConfig.WOfN).
-	WriteModelFanOut WriteModel = "fanout"
-)
-
-// Resolve returns the effective write model, mapping the empty-string
-// default to LeaderDriven. Use this when reading the field rather
-// than comparing against the raw value, so the empty-string sentinel
-// is centralized in one place (same pattern as
-// ResolveRetentionDisposition).
-func (w WriteModel) Resolve() WriteModel {
-	if w == WriteModelUnset {
-		return WriteModelLeaderDriven
-	}
-	return w
-}
-
-// IsValid reports whether w is one of the canonical wire values
-// (empty-string is valid — resolves to LeaderDriven).
-func (w WriteModel) IsValid() bool {
-	switch w {
-	case WriteModelUnset, WriteModelLeaderDriven, WriteModelFanOut:
-		return true
-	}
-	return false
 }
 
 // Canonical values for VaultConfig.RetentionDisposition.

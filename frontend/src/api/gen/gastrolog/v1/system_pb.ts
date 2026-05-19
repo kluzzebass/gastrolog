@@ -577,23 +577,12 @@ export class VaultConfig extends Message<VaultConfig> {
   retentionDisposition = "";
 
   /**
-   * Fan-out data-plane fields (gastrolog-2ujjh / gastrolog-nd6sz).
-   * write_model: "" / "leader-driven" (default) or "fanout".
-   * Per-chunk immutable: stamped at CmdCreateChunk time; in-flight
-   * chunks finish under their original model. See
-   * docs/fan-out-data-plane-design.md § "Per-chunk cutover semantics".
+   * Fan-out W-of-N durability policy (gastrolog-nd6sz / gastrolog-4xdvm):
+   * "" / "full" (default) / "minus-one" / "quorum" / "one". Resolves
+   * to a concrete W at write time against the active chunk's
+   * Receiving size. See system.WOfNPolicy.Resolve.
    *
-   * @generated from field: string write_model = 17;
-   */
-  writeModel = "";
-
-  /**
-   * w_of_n: "" / "full" (default) / "minus-one" / "quorum" / "one".
-   * Resolves to a concrete W at write time against the active chunk's
-   * Receiving size. Meaningless for LeaderDriven chunks; load-bearing
-   * for FanOut chunks. See system.WOfNPolicy.Resolve.
-   *
-   * @generated from field: string w_of_n = 18;
+   * @generated from field: string w_of_n = 17;
    */
   wOfN = "";
 
@@ -621,8 +610,7 @@ export class VaultConfig extends Message<VaultConfig> {
     { no: 14, name: "cache_budget", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 15, name: "cache_ttl", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 16, name: "retention_disposition", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 17, name: "write_model", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 18, name: "w_of_n", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 17, name: "w_of_n", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultConfig {
