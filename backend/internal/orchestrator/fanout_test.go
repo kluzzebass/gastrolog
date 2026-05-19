@@ -18,8 +18,15 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"gastrolog/internal/chunk"
+	chunkmem "gastrolog/internal/chunk/memory"
+	"gastrolog/internal/glid"
+	"gastrolog/internal/lifecycle"
 )
 
 // allReceiving is the no-op live-membership oracle: every node stays
@@ -216,5 +223,172 @@ func TestWaitWOfNStragglersAfterSuccessAreSafe(t *testing.T) {
 	case <-done:
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("straggler blocked on buffered channel")
+	}
+}
+
+// ---------- fanOutAppend tests ----------
+
+// fakeReplicator is a per-call configurable ChunkReplicator stub. Each
+// AppendRecords call routes through a closure so a test can return
+// nil/err per node and count calls.
+type fakeReplicator struct {
+	mu          sync.Mutex
+	calls       map[string]int
+	appendStub  func(nodeID string) error
+	sealCount   atomic.Int32
+}
+
+func newFakeReplicator() *fakeReplicator {
+	return &fakeReplicator{calls: make(map[string]int)}
+}
+
+func (f *fakeReplicator) AppendRecords(_ context.Context, nodeID string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
+	f.mu.Lock()
+	f.calls[nodeID]++
+	stub := f.appendStub
+	f.mu.Unlock()
+	if stub != nil {
+		return stub(nodeID)
+	}
+	return nil
+}
+
+func (f *fakeReplicator) SealVault(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
+	f.sealCount.Add(1)
+	return nil
+}
+func (f *fakeReplicator) ImportSealedChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
+	return nil
+}
+func (f *fakeReplicator) DeleteChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
+	return nil
+}
+func (f *fakeReplicator) RequestReplicaCatchup(_ context.Context, _ string, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {
+	return 0, nil
+}
+
+func (f *fakeReplicator) callsFor(nodeID string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls[nodeID]
+}
+
+func testFanOutRecord(t *testing.T) chunk.Record {
+	t.Helper()
+	now := time.Now()
+	return chunk.Record{
+		SourceTS: now,
+		IngestTS: now,
+		Attrs:    chunk.Attributes{"msg": "fanout-test"},
+		Raw:      []byte("fanout-test"),
+	}
+}
+
+func newFanOutTestOrch(t *testing.T) (*Orchestrator, *fakeReplicator) {
+	t.Helper()
+	orch := newTestOrch(t, Config{LocalNodeID: "node-local", Phase: lifecycle.New()})
+	rep := newFakeReplicator()
+	orch.SetChunkReplicator(rep)
+	return orch, rep
+}
+
+func TestFanOutAppendHappyPathAllAck(t *testing.T) {
+	t.Parallel()
+	orch, rep := newFanOutTestOrch(t)
+
+	vaultID := glid.New()
+	chunkID := chunk.NewChunkID()
+	rec := testFanOutRecord(t)
+
+	snapshot := []string{"node-a", "node-b", "node-c"}
+	err := orch.fanOutAppend(context.Background(), vaultID, chunkID, rec, snapshot, 2, allReceiving, nil)
+	if err != nil {
+		t.Fatalf("fanOutAppend: %v", err)
+	}
+	for _, n := range snapshot {
+		if rep.callsFor(n) != 1 {
+			t.Errorf("AppendRecords(%s) called %d times, want 1", n, rep.callsFor(n))
+		}
+	}
+}
+
+func TestFanOutAppendLocalMemberAppendsToCM(t *testing.T) {
+	t.Parallel()
+	orch, rep := newFanOutTestOrch(t)
+
+	vaultID := glid.New()
+	chunkID := chunk.NewChunkID()
+	rec := testFanOutRecord(t)
+
+	cmFactory, _ := chunkmem.NewFactory(), error(nil)
+	cm, err := cmFactory(nil, nil)
+	if err != nil {
+		t.Fatalf("create chunk manager: %v", err)
+	}
+
+	// snapshot includes the orchestrator's own node-local; local
+	// member should hit the cm path, not chunkReplicator.AppendRecords.
+	snapshot := []string{"node-local", "node-remote"}
+	err = orch.fanOutAppend(context.Background(), vaultID, chunkID, rec, snapshot, 2, allReceiving, cm)
+	if err != nil {
+		t.Fatalf("fanOutAppend: %v", err)
+	}
+	if rep.callsFor("node-local") != 0 {
+		t.Errorf("local member should not hit chunkReplicator; got %d calls", rep.callsFor("node-local"))
+	}
+	if rep.callsFor("node-remote") != 1 {
+		t.Errorf("remote member should hit chunkReplicator once; got %d", rep.callsFor("node-remote"))
+	}
+}
+
+func TestFanOutAppendReportsFailureWhenWUnreachable(t *testing.T) {
+	t.Parallel()
+	orch, rep := newFanOutTestOrch(t)
+	rep.appendStub = func(_ string) error { return errors.New("peer down") }
+
+	vaultID := glid.New()
+	chunkID := chunk.NewChunkID()
+	rec := testFanOutRecord(t)
+
+	snapshot := []string{"node-a", "node-b", "node-c"}
+	err := orch.fanOutAppend(context.Background(), vaultID, chunkID, rec, snapshot, 2, allReceiving, nil)
+	if !errors.Is(err, ErrWOfNUnreachable) {
+		t.Fatalf("expected ErrWOfNUnreachable, got %v", err)
+	}
+}
+
+func TestFanOutAppendDeescalatesRemovedReceivers(t *testing.T) {
+	t.Parallel()
+	orch, rep := newFanOutTestOrch(t)
+	// Both b and c fail (e.g., drained mid-write). a succeeds. With
+	// the de-escalation, effectiveW shrinks and the lone ack from a
+	// is enough.
+	rep.appendStub = func(nodeID string) error {
+		if nodeID == "node-a" {
+			return nil
+		}
+		return errors.New("drained")
+	}
+	removed := map[string]bool{"node-b": true, "node-c": true}
+	classifier := func(nodeID string) bool { return !removed[nodeID] }
+
+	vaultID := glid.New()
+	chunkID := chunk.NewChunkID()
+	rec := testFanOutRecord(t)
+
+	snapshot := []string{"node-a", "node-b", "node-c"}
+	err := orch.fanOutAppend(context.Background(), vaultID, chunkID, rec, snapshot, 2, classifier, nil)
+	if err != nil {
+		t.Fatalf("multi-node drain produced spurious fan-out failure: %v", err)
+	}
+}
+
+func TestFanOutAppendRejectsEmptySnapshot(t *testing.T) {
+	t.Parallel()
+	orch, _ := newFanOutTestOrch(t)
+	err := orch.fanOutAppend(context.Background(), glid.New(), chunk.NewChunkID(),
+		testFanOutRecord(t), nil, 1, allReceiving, nil)
+	if err == nil {
+		t.Fatal("expected error for empty snapshot")
 	}
 }

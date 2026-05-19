@@ -12,6 +12,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"gastrolog/internal/chunk"
+	"gastrolog/internal/glid"
 )
 
 // NodeResult carries the outcome of a single per-Receiving-member
@@ -176,4 +179,73 @@ func (s *wofnState) verdictOnClose() error {
 		return fmt.Errorf("%w: results channel closed with acks=%d (effective W=%d); first error: %w", ErrWOfNUnreachable, s.acks, s.effectiveW(), s.firstErr)
 	}
 	return fmt.Errorf("%w: results channel closed with acks=%d (effective W=%d)", ErrWOfNUnreachable, s.acks, s.effectiveW())
+}
+
+// fanOutAppend dispatches one record to every member of snapshot in
+// parallel and resolves W-of-N via waitWOfN. The local-node member (if
+// present in snapshot) appends to localCM directly; remote members go
+// through o.chunkReplicator.AppendRecords.
+//
+// snapshot is the active chunk's Receiving set, captured at the moment
+// the fan-out begins (snapshot-at-fan-out semantics, gastrolog-16msa).
+// isStillReceiving is the failure-de-escalation hook — a snapshot
+// member whose write fails but has since left Receiving is classified
+// as "not required" rather than as a failure (gastrolog-5pn44
+// challenge-me tweak #1).
+//
+// localCM is non-nil iff o.localNodeID is in snapshot. The caller
+// (typically appendRecord under the placement lookup) is responsible
+// for that pairing — fanOutAppend does NOT consult o.vaults to derive
+// it, so it can be called from contexts that already hold o.mu or that
+// have a pre-resolved chunk manager.
+//
+// Stragglers: goroutines that complete after waitWOfN returns send
+// into a buffered channel (cap = len(snapshot)) so they don't block.
+// Their writes still land — late acks contribute to background
+// convergence; the seal-time set-diff reconcile (gastrolog-37k2b)
+// catches any remaining divergence.
+func (o *Orchestrator) fanOutAppend(
+	ctx context.Context,
+	vaultID glid.GLID,
+	chunkID chunk.ChunkID,
+	rec chunk.Record,
+	snapshot []string,
+	w int,
+	isStillReceiving IsStillReceivingFn,
+	localCM chunk.ChunkManager,
+) error {
+	if len(snapshot) == 0 {
+		return errors.New("fan-out: empty Receiving snapshot")
+	}
+	results := make(chan NodeResult, len(snapshot))
+	for _, nodeID := range snapshot {
+		go o.fanOutOne(ctx, vaultID, chunkID, rec, nodeID, localCM, results)
+	}
+	return waitWOfN(ctx, len(snapshot), w, results, isStillReceiving)
+}
+
+// fanOutOne is the per-snapshot-member worker: appends locally if the
+// member is self (and localCM is non-nil), otherwise sends the record
+// to the remote member via o.chunkReplicator.AppendRecords. Always
+// reports its outcome on results — the buffered channel ensures sends
+// after waitWOfN returns don't block.
+func (o *Orchestrator) fanOutOne(
+	ctx context.Context,
+	vaultID glid.GLID,
+	chunkID chunk.ChunkID,
+	rec chunk.Record,
+	nodeID string,
+	localCM chunk.ChunkManager,
+	results chan<- NodeResult,
+) {
+	var err error
+	switch {
+	case nodeID == o.localNodeID && localCM != nil:
+		_, _, err = localCM.Append(rec)
+	case o.chunkReplicator != nil:
+		err = o.chunkReplicator.AppendRecords(ctx, nodeID, vaultID, chunkID, []chunk.Record{rec})
+	default:
+		err = fmt.Errorf("fan-out: no chunkReplicator configured for remote node %s", nodeID)
+	}
+	results <- NodeResult{NodeID: nodeID, Err: err}
 }
