@@ -805,20 +805,20 @@ func (r *VaultLifecycleReconciler) SweepMissingReplicas() {
 // scheduled=0 silently.
 //
 // Empty IDs and self are filtered. The peer list is built from the
-// placement metadata the FSM publishes via VaultInstance.LeaderNodeID
-// + VaultInstance.FollowerTargets — together those enumerate the
+// placement metadata the FSM publishes via VaultInstance.PrimaryPlacementNodeID
+// + VaultInstance.PeerPlacementTargets — together those enumerate the
 // complete placement set.
 func (r *VaultLifecycleReconciler) replicationPeers() []string {
 	if r.vaultInst == nil {
 		return nil
 	}
-	peers := make([]string, 0, 1+len(r.vaultInst.FollowerTargets))
+	peers := make([]string, 0, 1+len(r.vaultInst.PeerPlacementTargets))
 	seen := map[string]bool{r.localNodeID: true}
-	if leader := r.vaultInst.LeaderNodeID; leader != "" && !seen[leader] {
+	if leader := r.vaultInst.PrimaryPlacementNodeID; leader != "" && !seen[leader] {
 		peers = append(peers, leader)
 		seen[leader] = true
 	}
-	for _, t := range r.vaultInst.FollowerTargets {
+	for _, t := range r.vaultInst.PeerPlacementTargets {
 		if t.NodeID == "" || seen[t.NodeID] {
 			continue
 		}
@@ -985,11 +985,11 @@ func (r *VaultLifecycleReconciler) SweepStalePendingDeleteAcks() {
 	// for the sweep — see follower gate above) plus every follower
 	// target. Any nodeID in pendingDeletes ExpectedFrom that's NOT in
 	// this set is stale.
-	placement := make(map[string]bool, 1+len(r.vaultInst.FollowerTargets))
+	placement := make(map[string]bool, 1+len(r.vaultInst.PeerPlacementTargets))
 	if r.localNodeID != "" {
 		placement[r.localNodeID] = true
 	}
-	for _, t := range r.vaultInst.FollowerTargets {
+	for _, t := range r.vaultInst.PeerPlacementTargets {
 		if t.NodeID != "" {
 			placement[t.NodeID] = true
 		}
@@ -1213,13 +1213,13 @@ func (r *VaultLifecycleReconciler) sealMetadataOnlyOrphan(id chunk.ChunkID, loca
 // and is wired through r.instance directly here so the reconciler doesn't
 // need an orchestrator back-pointer for this.
 func (r *VaultLifecycleReconciler) placementMembership() []string {
-	expected := make([]string, 0, 1+len(r.vaultInst.FollowerTargets))
+	expected := make([]string, 0, 1+len(r.vaultInst.PeerPlacementTargets))
 	seen := map[string]bool{}
 	if r.localNodeID != "" {
 		expected = append(expected, r.localNodeID)
 		seen[r.localNodeID] = true
 	}
-	for _, t := range r.vaultInst.FollowerTargets {
+	for _, t := range r.vaultInst.PeerPlacementTargets {
 		if t.NodeID == "" || seen[t.NodeID] {
 			continue
 		}

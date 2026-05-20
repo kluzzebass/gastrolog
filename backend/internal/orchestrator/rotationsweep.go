@@ -109,7 +109,7 @@ func (o *Orchestrator) reconcileFilters(sys *system.System) {
 }
 
 // replicationTargetsEqual compares two ReplicationTarget slices by (NodeID,
-// StorageID) pairs. Order-insensitive. Used to detect FollowerTargets changes
+// StorageID) pairs. Order-insensitive. Used to detect PeerPlacementTargets changes
 // across rotationSweep ticks so the audit log only fires when something
 // actually moved.
 func replicationTargetsEqual(a, b []system.ReplicationTarget) bool {
@@ -149,16 +149,16 @@ func (o *Orchestrator) applyRotationFromConfig(sys *system.System,
 	activeCronJobs map[string]bool,
 ) {
 	// Refresh replication targets from current system.
-	newTargets := system.FollowerTargets(vaultCfg.Placements, sys.Runtime.NodeStorageConfigs)
+	newTargets := system.PeerPlacementTargets(vaultCfg.Placements, sys.Runtime.NodeStorageConfigs)
 	// Log only on change so reconfiguration is auditable without per-tick noise.
-	if !replicationTargetsEqual(vaultInst.FollowerTargets, newTargets) {
-		o.rotationLogger.Info("FollowerTargets refreshed",
+	if !replicationTargetsEqual(vaultInst.PeerPlacementTargets, newTargets) {
+		o.rotationLogger.Info("PeerPlacementTargets refreshed",
 			"vault", vaultCfg.ID,
 			"name", vaultCfg.Name,
-			"old", replicationTargetNodes(vaultInst.FollowerTargets),
+			"old", replicationTargetNodes(vaultInst.PeerPlacementTargets),
 			"new", replicationTargetNodes(newTargets))
 	}
-	vaultInst.FollowerTargets = newTargets
+	vaultInst.PeerPlacementTargets = newTargets
 
 	if vaultCfg.RotationPolicyID == nil {
 		return

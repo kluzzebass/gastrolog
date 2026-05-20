@@ -77,8 +77,8 @@ func newReplicationInstance(t *testing.T, vaultID glid.GLID, followers []system.
 		Chunks:          cm,
 		Indexes:         im,
 		Query:           query.New(cm, im, nil),
-		LeaderNodeID:    leaderNodeID,
-		FollowerTargets: followers,
+		PrimaryPlacementNodeID:    leaderNodeID,
+		PeerPlacementTargets: followers,
 	}
 }
 

@@ -711,7 +711,7 @@ func TestSweepMissingReplicasRequestsOnlySealedAndAbsentEntries(t *testing.T) {
 		VaultID:       glid.New(),
 		Type:         "memory",
 		Chunks:       cm,
-		LeaderNodeID: "node-leader",
+		PrimaryPlacementNodeID: "node-leader",
 	}
 	rec := NewVaultLifecycleReconciler(orch, glid.New(), vaultInst, "node-A", slog.Default())
 	rec.Wire(fsm)
@@ -741,7 +741,7 @@ func TestSweepMissingReplicasRequestsOnlySealedAndAbsentEntries(t *testing.T) {
 // deletes the chunks as "unrecoverable" — silent data loss.
 //
 // This test pins the leader-side direction of the now-symmetric peer-
-// to-peer catchup: leader has empty disk, FollowerTargets enumerates
+// to-peer catchup: leader has empty disk, PeerPlacementTargets enumerates
 // two peers, the sweep must dial both.
 func TestSweepMissingReplicasFromLeaderAsksEveryFollower(t *testing.T) {
 	t.Parallel()
@@ -762,7 +762,7 @@ func TestSweepMissingReplicasFromLeaderAsksEveryFollower(t *testing.T) {
 		VaultID:    glid.New(),
 		Type:       "memory",
 		Chunks:     cm,
-		FollowerTargets: []system.ReplicationTarget{
+		PeerPlacementTargets: []system.ReplicationTarget{
 			{NodeID: "node-follower-1"},
 			{NodeID: "node-follower-2"},
 		},
@@ -786,9 +786,9 @@ func TestSweepMissingReplicasFromLeaderAsksEveryFollower(t *testing.T) {
 	}
 }
 
-// gastrolog-19241: a leader with no FollowerTargets (single-node
+// gastrolog-19241: a leader with no PeerPlacementTargets (single-node
 // placement, or placement just collapsed mid-failover) must not dial
-// anywhere. The next placement tick will re-populate FollowerTargets.
+// anywhere. The next placement tick will re-populate PeerPlacementTargets.
 func TestSweepMissingReplicasFromLeaderWithNoFollowersIsNoOp(t *testing.T) {
 	t.Parallel()
 
@@ -808,7 +808,7 @@ func TestSweepMissingReplicasFromLeaderWithNoFollowersIsNoOp(t *testing.T) {
 		VaultID:         glid.New(),
 		Type:            "memory",
 		Chunks:          cm,
-		FollowerTargets: nil, // RF=1, or placement in flux
+		PeerPlacementTargets: nil, // RF=1, or placement in flux
 	}
 	rec := NewVaultLifecycleReconciler(orch, glid.New(), vaultInst, "node-leader", slog.Default())
 	rec.Wire(fsm)
@@ -843,7 +843,7 @@ func TestSweepMissingReplicasFromLeaderContinuesPastPeerError(t *testing.T) {
 		VaultID:    glid.New(),
 		Type:       "memory",
 		Chunks:     cm,
-		FollowerTargets: []system.ReplicationTarget{
+		PeerPlacementTargets: []system.ReplicationTarget{
 			{NodeID: "node-follower-1"}, // first call fails
 			{NodeID: "node-follower-2"}, // sweep must still try this one
 		},
@@ -858,7 +858,7 @@ func TestSweepMissingReplicasFromLeaderContinuesPastPeerError(t *testing.T) {
 	}
 }
 
-// FollowerTargets containing the leader's own ID (a placement-state
+// PeerPlacementTargets containing the leader's own ID (a placement-state
 // edge during reconfiguration) must be filtered out — the leader must
 // not ask itself.
 func TestSweepMissingReplicasFromLeaderSkipsSelfInFollowerTargets(t *testing.T) {
@@ -880,7 +880,7 @@ func TestSweepMissingReplicasFromLeaderSkipsSelfInFollowerTargets(t *testing.T) 
 		VaultID:    glid.New(),
 		Type:       "memory",
 		Chunks:     cm,
-		FollowerTargets: []system.ReplicationTarget{
+		PeerPlacementTargets: []system.ReplicationTarget{
 			{NodeID: "node-leader"}, // self — must be skipped
 			{NodeID: "node-follower-1"},
 		},
@@ -891,12 +891,12 @@ func TestSweepMissingReplicasFromLeaderSkipsSelfInFollowerTargets(t *testing.T) 
 	rec.SweepMissingReplicas()
 
 	if got := fake.calls.Load(); got != 1 {
-		t.Errorf("must skip self in FollowerTargets, got %d call(s)", got)
+		t.Errorf("must skip self in PeerPlacementTargets, got %d call(s)", got)
 	}
 }
 
 // TestSweepMissingReplicasSkipsWhenLeaderUnknown pins the early-exit
-// when LeaderNodeID is empty. This happens during placement transitions
+// when PrimaryPlacementNodeID is empty. This happens during placement transitions
 // where a follower has lost its leader (election in progress, leader
 // just demoted) — sending a catchup request would land on no one.
 // The next sweep tick runs after the new leader is observed.
@@ -919,7 +919,7 @@ func TestSweepMissingReplicasSkipsWhenLeaderUnknown(t *testing.T) {
 		VaultID:       glid.New(),
 		Type:         "memory",
 		Chunks:       cm,
-		LeaderNodeID: "", // unknown — election in progress
+		PrimaryPlacementNodeID: "", // unknown — election in progress
 	}
 	rec := NewVaultLifecycleReconciler(orch, glid.New(), vaultInst, "node-A", slog.Default())
 	rec.Wire(fsm)
@@ -1615,7 +1615,7 @@ func TestSweepStalePendingDeleteAcksPrunesNonPlacementNodes(t *testing.T) {
 	var prunedNodes []string
 	vaultInst := &VaultInstance{
 		VaultID:    glid.New(),
-		FollowerTargets: []system.ReplicationTarget{
+		PeerPlacementTargets: []system.ReplicationTarget{
 			{NodeID: "follower-node"},
 		},
 		ApplyRaftPruneNode: func(nodeID string) error {
@@ -1660,7 +1660,7 @@ func TestSweepStalePendingDeleteAcksSkipsCurrentPlacementMembers(t *testing.T) {
 	var prunedNodes []string
 	vaultInst := &VaultInstance{
 		VaultID:    glid.New(),
-		FollowerTargets: []system.ReplicationTarget{
+		PeerPlacementTargets: []system.ReplicationTarget{
 			{NodeID: "follower-node"},
 		},
 		ApplyRaftPruneNode: func(nodeID string) error {

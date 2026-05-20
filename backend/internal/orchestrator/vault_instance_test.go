@@ -32,7 +32,7 @@ func newMemInstance(t *testing.T, vaultID glid.GLID, isFollower bool, followers 
 		Chunks:          cm,
 		Indexes:         im,
 		Query:           query.New(cm, im, nil),
-		FollowerTargets: followers,
+		PeerPlacementTargets: followers,
 	}
 }
 

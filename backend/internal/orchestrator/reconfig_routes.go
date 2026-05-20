@@ -23,7 +23,7 @@ func resolveVaultNodeID(sys *system.System, vaultID glid.GLID) string {
 		if len(v.Placements) == 0 {
 			return ""
 		}
-		return system.LeaderNodeID(v.Placements, rt.NodeStorageConfigs)
+		return system.PrimaryPlacementNodeID(v.Placements, rt.NodeStorageConfigs)
 	}
 	return ""
 }

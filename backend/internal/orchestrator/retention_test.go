@@ -341,7 +341,7 @@ func TestExpireChunkProposesRequestDelete(t *testing.T) {
 		VaultID: vaultID,
 		Chunks: cm,
 		Indexes: im,
-		FollowerTargets: []system.ReplicationTarget{
+		PeerPlacementTargets: []system.ReplicationTarget{
 			{NodeID: "node-B", StorageID: "s-B"},
 			{NodeID: "node-C", StorageID: "s-C"},
 		},
@@ -360,7 +360,7 @@ func TestExpireChunkProposesRequestDelete(t *testing.T) {
 		cm:              cm,
 		im:              im,
 		reconciler:      rec,
-		followerTargets: vaultInst.FollowerTargets,
+		followerTargets: vaultInst.PeerPlacementTargets,
 		now:             time.Now,
 		logger:          slog.Default(),
 	}

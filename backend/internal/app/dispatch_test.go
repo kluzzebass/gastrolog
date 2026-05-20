@@ -1029,7 +1029,7 @@ func TestHandle_NodeConfigChange_RefreshesVaultCtlMembers(t *testing.T) {
 }
 
 // gastrolog-4zy8a: when the placement leader transfers but this node stays
-// a follower, the local VaultInstance.LeaderNodeID must be refreshed so the
+// a follower, the local VaultInstance.PrimaryPlacementNodeID must be refreshed so the
 // lifecycle reconciler's RequestReplicaCatchup targets the new leader
 // instead of looping forever against the old (stale) one.
 func TestHandle_PlacementsSet_RefreshesLeaderPointerWhenRoleUnchanged(t *testing.T) {
@@ -1060,7 +1060,7 @@ func TestHandle_PlacementsSet_RefreshesLeaderPointerWhenRoleUnchanged(t *testing
 	// Existing in-memory vault instance: still pointing at the OLD leader.
 	existing := &orchestrator.VaultInstance{
 		VaultID:      vaultID,
-		LeaderNodeID: oldLeaderID,
+		PrimaryPlacementNodeID: oldLeaderID,
 	}
 
 	h := &captureHandler{}
@@ -1081,8 +1081,8 @@ func TestHandle_PlacementsSet_RefreshesLeaderPointerWhenRoleUnchanged(t *testing
 
 	d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPlacementsSet, ID: vaultID})
 
-	if existing.LeaderNodeID != newLeaderID {
-		t.Fatalf("LeaderNodeID not refreshed: want %q, got %q", newLeaderID, existing.LeaderNodeID)
+	if existing.PrimaryPlacementNodeID != newLeaderID {
+		t.Fatalf("PrimaryPlacementNodeID not refreshed: want %q, got %q", newLeaderID, existing.PrimaryPlacementNodeID)
 	}
 }
 

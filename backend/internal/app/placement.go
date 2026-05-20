@@ -156,11 +156,11 @@ func (pm *placementManager) reconcile(ctx context.Context) {
 	vaultCount := make(map[string]int)
 	for _, v := range vaults {
 		placements, _ := pm.cfgStore.GetVaultPlacements(ctx, v.ID)
-		leaderNodeID := system.LeaderNodeID(placements, nscs)
+		leaderNodeID := system.PrimaryPlacementNodeID(placements, nscs)
 		if leaderNodeID != "" && alive[leaderNodeID] {
 			vaultCount[leaderNodeID]++
 		}
-		for _, sid := range system.FollowerNodeIDs(placements, nscs) {
+		for _, sid := range system.PeerPlacementNodeIDs(placements, nscs) {
 			if alive[sid] {
 				vaultCount[sid]++
 			}
@@ -285,7 +285,7 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 	alertKey := fmt.Sprintf("vault-unplaced:%s", v.ID)
 	softOfflineAlertKey := fmt.Sprintf("vault-soft-offline-leader:%s", v.ID)
 
-	currentLeader := system.LeaderNodeID(func() []system.VaultPlacement {
+	currentLeader := system.PrimaryPlacementNodeID(func() []system.VaultPlacement {
 		p, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
 		return p
 	}(), nscs)
@@ -401,7 +401,7 @@ func (pm *placementManager) placeFollowers(ctx context.Context, v *system.VaultC
 		return
 	}
 
-	leaderStorageID := system.LeaderStorageID(func() []system.VaultPlacement {
+	leaderStorageID := system.PrimaryPlacementStorageID(func() []system.VaultPlacement {
 		p, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
 		return p
 	}())
@@ -432,7 +432,7 @@ func (pm *placementManager) placeFollowers(ctx context.Context, v *system.VaultC
 
 // clearStaleFollowers removes leftover follower placements when RF <= 1.
 func (pm *placementManager) clearStaleFollowers(ctx context.Context, v *system.VaultConfig, nscs []system.NodeStorageConfig, vaultCount map[string]int) {
-	currentFollowers := system.FollowerStorageIDs(func() []system.VaultPlacement {
+	currentFollowers := system.PeerPlacementStorageIDs(func() []system.VaultPlacement {
 		p, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
 		return p
 	}())
@@ -631,7 +631,7 @@ func (pm *placementManager) handleUnplaceable(_ context.Context, v system.VaultC
 	// Keep current placements intact; raise the alert so the operator
 	// sees the degraded condition; let the next reconcile tick promote
 	// peers back into the alive set and extend followers naturally.
-	currentLeader := system.LeaderNodeID(func() []system.VaultPlacement {
+	currentLeader := system.PrimaryPlacementNodeID(func() []system.VaultPlacement {
 		p, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
 		return p
 	}(), nscs)
@@ -652,7 +652,7 @@ func (pm *placementManager) nodeEligible(v system.VaultConfig, nodeID string, ns
 		return nodeHasStorageClass(nscs, nodeID, v.StorageClass)
 	case system.VaultTypeJSONL:
 		// JSONL vaults have explicit node assignment via Path.
-		leaderNodeID := system.LeaderNodeID(func() []system.VaultPlacement {
+		leaderNodeID := system.PrimaryPlacementNodeID(func() []system.VaultPlacement {
 			p, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
 			return p
 		}(), nscs)

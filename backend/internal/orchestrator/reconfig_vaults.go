@@ -529,8 +529,8 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 
 	nscs := rt.NodeStorageConfigs
 	placements := vaultCfg.Placements
-	leaderNodeID := system.LeaderNodeID(placements, nscs)
-	followerNodeIDs := system.FollowerNodeIDs(placements, nscs)
+	leaderNodeID := system.PrimaryPlacementNodeID(placements, nscs)
+	followerNodeIDs := system.PeerPlacementNodeIDs(placements, nscs)
 	isLeader := leaderNodeID == "" || leaderNodeID == o.localNodeID
 	isFollower := slices.Contains(followerNodeIDs, o.localNodeID)
 	if !isLeader && !isFollower {
@@ -546,10 +546,10 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 		if err != nil {
 			return fmt.Errorf("build vault %s: %w", vaultID, err)
 		}
-		t.FollowerTargets = system.FollowerTargets(placements, nscs)
+		t.PeerPlacementTargets = system.PeerPlacementTargets(placements, nscs)
 		ti = t
 	} else {
-		for _, tgt := range system.FollowerTargets(placements, nscs) {
+		for _, tgt := range system.PeerPlacementTargets(placements, nscs) {
 			if tgt.NodeID != o.localNodeID {
 				continue
 			}
@@ -557,7 +557,7 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 			if err != nil {
 				return fmt.Errorf("build vault %s storage %s: %w", vaultID, tgt.StorageID, err)
 			}
-			t.LeaderNodeID = leaderNodeID
+			t.PrimaryPlacementNodeID = leaderNodeID
 			t.StorageID = tgt.StorageID
 			// Fan-out (gastrolog-2hjfm): every Receiver — leader or
 			// follower — rotates locally through the FSM-mediated
@@ -673,8 +673,8 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 	// (Phase 2 invariant) the node is at most one of: leader, follower, neither.
 	nscs := rt.NodeStorageConfigs
 	placements := vaultCfg.Placements
-	leaderNodeID := system.LeaderNodeID(placements, nscs)
-	followerNodeIDs := system.FollowerNodeIDs(placements, nscs)
+	leaderNodeID := system.PrimaryPlacementNodeID(placements, nscs)
+	followerNodeIDs := system.PeerPlacementNodeIDs(placements, nscs)
 	isLeader := leaderNodeID == "" || leaderNodeID == o.localNodeID
 	isFollower := slices.Contains(followerNodeIDs, o.localNodeID)
 	if !isLeader && !isFollower {
@@ -690,7 +690,7 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 			o.alertVaultInitFailed(vaultID, vaultCfg.Name, err)
 			return nil, nil
 		}
-		ti.FollowerTargets = system.FollowerTargets(placements, nscs)
+		ti.PeerPlacementTargets = system.PeerPlacementTargets(placements, nscs)
 		// Fan-out plumb: push the initial Receiving snapshot to the
 		// chunk manager so the next CmdCreateChunk stamps the placement
 		// member set on the new chunk.
@@ -706,7 +706,7 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 	}
 
 	// Follower: build the instance for this node's placement.
-	for _, tgt := range system.FollowerTargets(placements, nscs) {
+	for _, tgt := range system.PeerPlacementTargets(placements, nscs) {
 		if tgt.NodeID != o.localNodeID {
 			continue
 		}
@@ -715,7 +715,7 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 			o.alertVaultInitFailed(vaultID, vaultCfg.Name, err)
 			return nil, nil
 		}
-		sti.LeaderNodeID = leaderNodeID
+		sti.PrimaryPlacementNodeID = leaderNodeID
 		sti.StorageID = tgt.StorageID
 		// Fan-out (gastrolog-2hjfm): every Receiver rotates locally
 		// via the FSM-mediated coordinator. NeverRotatePolicy is
@@ -751,7 +751,7 @@ func (o *Orchestrator) alertVaultInitFailed(vaultID glid.GLID, vaultName string,
 func (o *Orchestrator) buildLeaderInstance(sys *system.System, vaultCfg system.VaultConfig, factories Factories) (*VaultInstance, error) {
 	// Read placements from VaultConfig (mirrored from vault placements via
 	// the FSM bridge — gastrolog-257l7).
-	storageID := system.LeaderStorageID(vaultCfg.Placements)
+	storageID := system.PrimaryPlacementStorageID(vaultCfg.Placements)
 	if storageID != "" && !strings.HasPrefix(storageID, system.SyntheticStoragePrefix) {
 		ti, err := o.buildInstanceForStorage(sys, vaultCfg, factories, storageID, false)
 		if err != nil {

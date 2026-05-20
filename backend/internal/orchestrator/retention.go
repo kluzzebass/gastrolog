@@ -501,7 +501,7 @@ func (o *Orchestrator) retentionTargetForInstance(cfg *system.Config, vaultCfg s
 	// avoid duplicate proposals. The runner consumes isLeader via the
 	// callback; nil callback => single-node => treat as leader.
 	runner.isLeader = vaultInst.IsRaftLeader == nil || vaultInst.IsRaftLeader()
-	runner.followerTargets = vaultInst.FollowerTargets
+	runner.followerTargets = vaultInst.PeerPlacementTargets
 	runner.vaultName = vaultCfg.Name
 	runner.vaultType = string(vaultCfg.Type)
 	runner.disposition = vaultCfg.ResolveRetentionDisposition()

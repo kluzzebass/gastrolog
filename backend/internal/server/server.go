@@ -390,7 +390,7 @@ func (c *configVaultOwner) ResolveVaultOwner(ctx context.Context, vaultID string
 	if err != nil {
 		return ""
 	}
-	leaderNodeID := system.LeaderNodeID(vaultCfg.Placements, nscs)
+	leaderNodeID := system.PrimaryPlacementNodeID(vaultCfg.Placements, nscs)
 	if leaderNodeID == "" || leaderNodeID == c.localNodeID {
 		return ""
 	}

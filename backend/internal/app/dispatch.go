@@ -519,8 +519,8 @@ func (d *configDispatcher) handleInstancePut(ctx context.Context, vaultID glid.G
 		return
 	}
 
-	leaderNodeID := system.LeaderNodeID(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, vaultID); return p }(), nscs)
-	followerNodeIDs := system.FollowerNodeIDs(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, vaultID); return p }(), nscs)
+	leaderNodeID := system.PrimaryPlacementNodeID(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, vaultID); return p }(), nscs)
+	followerNodeIDs := system.PeerPlacementNodeIDs(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, vaultID); return p }(), nscs)
 
 	// Only act on vault membership once placements are fully assigned. During
 	// cluster-init the placement manager assigns placements one-at-a-time,
@@ -638,12 +638,12 @@ func (d *configDispatcher) rebuildVaultIfInstanceMissing(ctx context.Context, v 
 }
 
 // updateInstanceRoleIfNeeded checks whether a vault instance's role
-// has changed and refreshes the LeaderNodeID pointer in place —
+// has changed and refreshes the PrimaryPlacementNodeID pointer in place —
 // avoiding a full vault rebuild and file lock churn.
 //
 // Under fan-out (gastrolog-hshgl) the leader/follower distinction at
 // the data-path level is gone, so the leader/follower role flip no
-// longer triggers a rotation-policy change. LeaderNodeID survives as
+// longer triggers a rotation-policy change. PrimaryPlacementNodeID survives as
 // a routing hint for the lifecycle reconciler's RequestReplicaCatchup
 // peer set.
 func (d *configDispatcher) updateInstanceRoleIfNeeded(ctx context.Context, vaultID glid.GLID, existing *orchestrator.VaultInstance) {
@@ -655,18 +655,18 @@ func (d *configDispatcher) updateInstanceRoleIfNeeded(ctx context.Context, vault
 	if err != nil {
 		return
 	}
-	leaderNodeID := system.LeaderNodeID(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, vaultID); return p }(), nscs)
-	followerNodeIDs := system.FollowerNodeIDs(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, vaultID); return p }(), nscs)
+	leaderNodeID := system.PrimaryPlacementNodeID(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, vaultID); return p }(), nscs)
+	followerNodeIDs := system.PeerPlacementNodeIDs(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, vaultID); return p }(), nscs)
 	shouldBeFollower := slices.Contains(followerNodeIDs, d.localNodeID)
 
-	// Refresh LeaderNodeID for the reconciler's peer-set construction.
+	// Refresh PrimaryPlacementNodeID for the reconciler's peer-set construction.
 	// The placement leader can transfer between two other nodes while
 	// this node's placement membership doesn't change; the local
 	// pointer must follow. See gastrolog-4zy8a.
 	if shouldBeFollower {
-		existing.LeaderNodeID = leaderNodeID
+		existing.PrimaryPlacementNodeID = leaderNodeID
 	} else {
-		existing.LeaderNodeID = ""
+		existing.PrimaryPlacementNodeID = ""
 	}
 }
 
@@ -682,8 +682,8 @@ func (d *configDispatcher) newFollowersForInstance(vaultID glid.GLID, followerNo
 		return followerNodeIDs
 	}
 	// Build set of follower node IDs that were already being replicated to.
-	prev := make(map[string]bool, len(existing.FollowerTargets))
-	for _, tgt := range existing.FollowerTargets {
+	prev := make(map[string]bool, len(existing.PeerPlacementTargets))
+	for _, tgt := range existing.PeerPlacementTargets {
 		prev[tgt.NodeID] = true
 	}
 	var added []string

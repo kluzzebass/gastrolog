@@ -192,7 +192,7 @@ type VaultPlacement struct {
 // by routing-layer code that needs to pick one placement member as a
 // stable target — every other placement member is an equally valid
 // alternative.
-func LeaderStorageID(placements []VaultPlacement) string {
+func PrimaryPlacementStorageID(placements []VaultPlacement) string {
 	if len(placements) == 0 {
 		return ""
 	}
@@ -203,7 +203,7 @@ func LeaderStorageID(placements []VaultPlacement) string {
 // except the first. Under fan-out the "leader" / "follower" distinction
 // is gone — these are just "the other placement members" for symmetric
 // peer enumeration.
-func FollowerStorageIDs(placements []VaultPlacement) []string {
+func PeerPlacementStorageIDs(placements []VaultPlacement) []string {
 	if len(placements) <= 1 {
 		return nil
 	}
@@ -287,9 +287,9 @@ func StorageIDForNode(nodeID string, v VaultConfig, nscs []NodeStorageConfig) st
 	return SyntheticStorageID(nodeID)
 }
 
-// LeaderNodeID derives the leader node from placements + storage configs.
-func LeaderNodeID(placements []VaultPlacement, nscs []NodeStorageConfig) string {
-	storageID := LeaderStorageID(placements)
+// PrimaryPlacementNodeID derives the leader node from placements + storage configs.
+func PrimaryPlacementNodeID(placements []VaultPlacement, nscs []NodeStorageConfig) string {
+	storageID := PrimaryPlacementStorageID(placements)
 	if storageID == "" {
 		return ""
 	}
@@ -297,12 +297,12 @@ func LeaderNodeID(placements []VaultPlacement, nscs []NodeStorageConfig) string 
 }
 
 // FollowerNodeIDs derives unique follower node IDs from placements + storage configs.
-// Multiple same-node placements are deduplicated. Use FollowerTargets for
+// Multiple same-node placements are deduplicated. Use PeerPlacementTargets for
 // storage-level granularity.
-func FollowerNodeIDs(placements []VaultPlacement, nscs []NodeStorageConfig) []string {
+func PeerPlacementNodeIDs(placements []VaultPlacement, nscs []NodeStorageConfig) []string {
 	var nodeIDs []string
 	seen := make(map[string]bool)
-	for _, storageID := range FollowerStorageIDs(placements) {
+	for _, storageID := range PeerPlacementStorageIDs(placements) {
 		nid := NodeIDForStorage(storageID, nscs)
 		if nid != "" && !seen[nid] {
 			seen[nid] = true
@@ -335,12 +335,12 @@ type ReplicationTarget struct {
 	StorageID string
 }
 
-// FollowerTargets returns one target per follower placement — NOT deduplicated
+// PeerPlacementTargets returns one target per follower placement — NOT deduplicated
 // by node. Multiple placements on the same node produce multiple targets,
 // enabling same-node replication across different file storages.
-func FollowerTargets(placements []VaultPlacement, nscs []NodeStorageConfig) []ReplicationTarget {
+func PeerPlacementTargets(placements []VaultPlacement, nscs []NodeStorageConfig) []ReplicationTarget {
 	var targets []ReplicationTarget
-	for _, storageID := range FollowerStorageIDs(placements) {
+	for _, storageID := range PeerPlacementStorageIDs(placements) {
 		nid := NodeIDForStorage(storageID, nscs)
 		if nid != "" {
 			targets = append(targets, ReplicationTarget{NodeID: nid, StorageID: storageID})

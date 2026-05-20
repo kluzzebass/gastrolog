@@ -24,16 +24,20 @@ type VaultInstance struct {
 	Chunks          chunk.ChunkManager
 	Indexes         index.IndexManager
 	Query           *query.Engine
-	// Under the fan-out data plane (gastrolog-hshgl) the leader/
-	// follower distinction is gone at the data-path level. The
-	// remaining role-shaped state is FollowerTargets — kept as the
-	// "other placement members" enumeration consumed by the
-	// reconciler's replicationPeers() — and LeaderNodeID, kept for
-	// inspector-display + routing-interceptor compatibility while
-	// the system.LeaderNodeID helpers are still referenced. Both
-	// retire when those callers are migrated.
-	LeaderNodeID    string                     // any placement member designated as the canonical writer (legacy)
-	FollowerTargets []system.ReplicationTarget // other placement members (populated on leader build path; nil on followers)
+	// Under the fan-out data plane (gastrolog-hshgl) every placement
+	// member is symmetric — no leader/follower asymmetry at the
+	// data-path level. The fields below are routing-layer hints:
+	//
+	//   PrimaryPlacementNodeID: the canonical placement node (first
+	//   placement in the vault's Placements slice). Used by routing
+	//   code that needs to pick a deterministic single target;
+	//   every other placement member is an equally authoritative peer.
+	//
+	//   PeerPlacementTargets: every OTHER placement member's
+	//   ReplicationTarget. Consumed by the reconciler's
+	//   replicationPeers() enumeration for missing-replica catchup.
+	PrimaryPlacementNodeID string
+	PeerPlacementTargets   []system.ReplicationTarget
 
 	// HasRaftLeader returns true if the vault control-plane Raft group has an elected leader (cluster mode).
 	// Nil when no Raft group exists (single-node / memory mode).

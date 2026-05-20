@@ -661,13 +661,13 @@ func (o *Orchestrator) proposePruneNodeForVault(vaultID glid.GLID, removedNodeID
 // runs even though the FSM-side encoding stores expectedFrom as a map.
 // See gastrolog-51gme.
 func (o *Orchestrator) placementMembership(vaultInst *VaultInstance) []string {
-	expected := make([]string, 0, 1+len(vaultInst.FollowerTargets))
+	expected := make([]string, 0, 1+len(vaultInst.PeerPlacementTargets))
 	seen := map[string]bool{}
 	if o.localNodeID != "" {
 		expected = append(expected, o.localNodeID)
 		seen[o.localNodeID] = true
 	}
-	for _, t := range vaultInst.FollowerTargets {
+	for _, t := range vaultInst.PeerPlacementTargets {
 		if t.NodeID == "" || seen[t.NodeID] {
 			continue
 		}

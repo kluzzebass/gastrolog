@@ -489,7 +489,7 @@ func newClusterRetentionRunner(orch *Orchestrator, vaultID glid.GLID, vaultInst 
 		cm:              vaultInst.Chunks,
 		im:              vaultInst.Indexes,
 		orch:            orch,
-		followerTargets: vaultInst.FollowerTargets,
+		followerTargets: vaultInst.PeerPlacementTargets,
 		reconciler:      vaultInst.Reconciler,
 		now:             time.Now,
 		logger:          slog.Default(),
@@ -572,7 +572,7 @@ func (h *clusterHarness) countChunksOnInstance(t *testing.T, vaultIdx int) map[s
 //   - nodeIDs[1:] are followers for all vaults
 //   - Each instance gets its own TempDir per node (real filesystem I/O)
 //   - rotationRecords controls the rotation policy (e.g., 100 = seal every 100 records)
-//   - The leader's vaults have FollowerTargets pointing to all followers
+//   - The leader's vaults have PeerPlacementTargets pointing to all followers
 //   - Every node has a directTransferrer wired to all other nodes
 //
 // newClusterLifecycleLogger returns a slog.Logger that writes ALL levels
@@ -673,7 +673,7 @@ func setupCluster(t *testing.T, nodeIDs []string, vaultCount int, rotationRecord
 				Query:   query.New(cm, im, nil),
 			}
 			if isLeader {
-				vaultInst.FollowerTargets = followerTargets
+				vaultInst.PeerPlacementTargets = followerTargets
 			}
 			instances[i] = vaultInst
 		}
