@@ -810,7 +810,6 @@ func (o *Orchestrator) ImportToInstanceStorage(ctx context.Context, vaultID glid
 	// deadlocks the entire orchestrator.
 	type vaultRef struct {
 		cm           chunk.ChunkManager
-		isFollower   bool
 		isTombstoned func(chunk.ChunkID) bool
 	}
 	ref := func() *vaultRef {
@@ -821,7 +820,7 @@ func (o *Orchestrator) ImportToInstanceStorage(ctx context.Context, vaultID glid
 			return nil
 		}
 		if t := vault.Instance; t != nil && (storageID == "" || t.StorageID == storageID) {
-			return &vaultRef{cm: t.Chunks, isFollower: t.IsFollower, isTombstoned: t.IsTombstoned}
+			return &vaultRef{cm: t.Chunks, isTombstoned: t.IsTombstoned}
 		}
 		return nil
 	}()
@@ -852,30 +851,33 @@ func (o *Orchestrator) ImportToInstanceStorage(ctx context.Context, vaultID glid
 	defer vaultMu.Unlock()
 
 	// Check if this chunk already exists (sealed or active).
-	_, metaErr := cm.Meta(chunkID)
+	existingMeta, metaErr := cm.Meta(chunkID)
 	activeIsChunk := false
 	if active := cm.Active(); active != nil && active.ID == chunkID {
 		activeIsChunk = true
 	}
-
 	chunkExists := metaErr == nil || activeIsChunk
 
-	// Leader: idempotent skip — canonical version is already here.
-	if chunkExists && !ref.isFollower {
-		o.vaultOpsLogger.Debug("replication: chunk already exists, skipping import",
+	// If a fully sealed local copy already exists, treat the import
+	// as idempotent — the canonical bytes are here. Under fan-out
+	// every Receiver may receive ImportSealedChunk from any peer;
+	// the seal-state gate replaces the legacy leader/follower
+	// distinction (sealed-locally = canonical).
+	if chunkExists && metaErr == nil && existingMeta.Sealed {
+		o.vaultOpsLogger.Debug("replication: chunk already sealed locally, skipping import",
 			"vault", vaultID, "chunk", chunkID.String())
 		drainIterator(next)
 		return nil
 	}
 
-	// Follower: replace the forwarded version (may be incomplete due to
-	// fire-and-forget drops) with the canonical sealed chunk.
+	// Local copy is partial (in-flight fan-out or active state):
+	// replace with the canonical sealed stream.
 	if chunkExists {
 		if err := replaceForwardedChunk(cm, chunkID, activeIsChunk); err != nil {
 			drainIterator(next)
 			return err
 		}
-		o.vaultOpsLogger.Debug("replication: replacing forwarded chunk with canonical version",
+		o.vaultOpsLogger.Debug("replication: replacing partial chunk with canonical version",
 			"vault", vaultID, "chunk", chunkID.String())
 	}
 

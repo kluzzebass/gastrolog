@@ -674,8 +674,6 @@ func setupCluster(t *testing.T, nodeIDs []string, vaultCount int, rotationRecord
 			}
 			if isLeader {
 				vaultInst.FollowerTargets = followerTargets
-			} else {
-				vaultInst.IsFollower = true
 			}
 			instances[i] = vaultInst
 		}

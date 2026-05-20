@@ -859,8 +859,13 @@ func (r *VaultLifecycleReconciler) SweepStaleLeaderFSMEntries() {
 	if r.fsm == nil || r.vaultInst == nil || r.vaultInst.Chunks == nil {
 		return
 	}
-	if r.vaultInst.IsFollower {
-		return // followers use SweepMissingReplicas to pull from leader
+	// Gate to the current vault-ctl Raft leader: under fan-out every
+	// Receiver runs the reconciler, but receipt-protocol delete
+	// proposals must come from a single source so Raft can serialize
+	// them. Non-leader Receivers rely on SweepMissingReplicas to
+	// pull whatever they're missing rather than proposing deletes.
+	if r.vaultInst.IsRaftLeader != nil && !r.vaultInst.IsRaftLeader() {
+		return
 	}
 	if r.vaultInst.ApplyRaftRequestDelete == nil {
 		return // single-node / no Raft; no receipt protocol
@@ -966,7 +971,10 @@ func (r *VaultLifecycleReconciler) SweepStalePendingDeleteAcks() {
 	if r.fsm == nil || r.vaultInst == nil {
 		return
 	}
-	if r.vaultInst.IsFollower {
+	// Single proposer gate (vault-ctl Raft leader). Same rationale as
+	// SweepStaleLeaderFSMEntries: pendingDelete-prune proposals need
+	// one origin so Raft can serialize.
+	if r.vaultInst.IsRaftLeader != nil && !r.vaultInst.IsRaftLeader() {
 		return
 	}
 	if r.vaultInst.ApplyRaftPruneNode == nil {

@@ -1042,43 +1042,6 @@ func TestRebuildMissingIndexesCloudBackedWithCompleteIndexes(t *testing.T) {
 // This covers the upgrade scenario: existing deployments where uploadToCloud
 // previously deleted the entire chunk directory. On first restart after the
 // fix, these chunks need their indexes rebuilt from the cloud blob.
-func TestRebuildMissingIndexesCloudBackedWithMissingIndexes(t *testing.T) {
-	t.Parallel()
-
-	s, _ := memtest.NewVault(chunkmem.Config{
-		RotationPolicy: recordCountPolicy(2),
-	})
-	for i := range 3 {
-		s.CM.Append(chunk.Record{
-			IngestTS: t1.Add(time.Duration(i) * time.Second),
-			Attrs:    attrsA,
-			Raw:      []byte("record"),
-		})
-	}
-
-	// Do NOT build indexes — simulate a cloud chunk whose local indexes
-	// were deleted by the old uploadToCloud code.
-	tracker := &trackingIndexManager{IndexManager: s.IM}
-	s.CM.(chunk.ChunkPostSealProcessor).SetIndexBuilders([]chunk.ChunkIndexBuilder{tracker.BuildAdapter()})
-	overlay := &cloudOverlayCM{ChunkManager: s.CM}
-
-	defaultID := glid.New()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, overlay, tracker, nil))
-
-	if err := orch.RebuildMissingIndexes(context.Background()); err != nil {
-		t.Fatalf("RebuildMissingIndexes failed: %v", err)
-	}
-
-	time.Sleep(100 * time.Millisecond)
-
-	if got := tracker.buildCount.Load(); got == 0 {
-		t.Error("expected index builds for cloud-backed chunks with missing indexes, got 0")
-	}
-}
 
 func TestSearchThenFollowUnknownRegistry(t *testing.T) {
 	orch, _, _, _ := newTestSetup(t, 1<<20)

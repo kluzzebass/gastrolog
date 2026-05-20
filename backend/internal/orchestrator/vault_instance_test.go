@@ -32,7 +32,6 @@ func newMemInstance(t *testing.T, vaultID glid.GLID, isFollower bool, followers 
 		Chunks:          cm,
 		Indexes:         im,
 		Query:           query.New(cm, im, nil),
-		IsFollower:      isFollower,
 		FollowerTargets: followers,
 	}
 }
@@ -302,33 +301,6 @@ func TestListAllChunkMetasIncludesFollowerOnlyInstances(t *testing.T) {
 
 // --- LocalLeaderVaultIDs ---
 
-func TestLocalLeaderVaultIDsExcludesFollowerOnlyVaults(t *testing.T) {
-	t.Parallel()
-	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-
-	leaderVaultID := glid.New()
-	followerVaultID := glid.New()
-
-	// Vault with a leader instance on this node — should be in the result.
-	leader := newMemInstance(t, leaderVaultID, false, nil)
-	leaderVault := NewVault(leaderVaultID, leader)
-	leaderVault.Name = "leader-vault"
-	orch.RegisterVault(leaderVault)
-
-	// Vault with only a follower instance on this node — should NOT be in result.
-	follower := newMemInstance(t, followerVaultID, true, nil)
-	followerVault := NewVault(followerVaultID, follower)
-	followerVault.Name = "follower-vault"
-	orch.RegisterVault(followerVault)
-
-	ids := orch.LocalLeaderVaultIDs()
-	if !ids[leaderVaultID] {
-		t.Error("vault with a leader vaultInst should be in LocalLeaderVaultIDs")
-	}
-	if ids[followerVaultID] {
-		t.Error("vault with only follower instances should NOT be in LocalLeaderVaultIDs")
-	}
-}
 
 // --- followerReplicationTargets ---
 
@@ -504,7 +476,6 @@ func TestAppendToInstanceSecondarySkipsPostSeal(t *testing.T) {
 		Chunks:     cm,
 		Indexes:    im,
 		Query:      query.New(cm, im, nil),
-		IsFollower: true,
 	}
 	vault := NewVault(vaultID, vaultInst)
 	vault.Name = "skip-postseal"
@@ -581,57 +552,6 @@ func TestImportToInstanceSecondarySealsActiveAndKeeps(t *testing.T) {
 	}
 }
 
-func TestImportToInstanceSecondaryKeepsSealedForwarded(t *testing.T) {
-	t.Parallel()
-	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-
-	vaultID := glid.New()
-	vaultInst := newMemInstance(t, vaultID, true, nil)
-	vault := NewVault(vaultID, vaultInst)
-	vault.Name = "keep-sealed"
-	orch.RegisterVault(vault)
-
-	chunkID := chunk.NewChunkID()
-
-	// Simulate: forwarded version is already sealed (e.g., follower
-	// received SealActiveChunk before the canonical import arrives).
-	vaultInst.Chunks.SetNextChunkID(chunkID)
-	for range 3 {
-		if _, _, err := vaultInst.Chunks.Append(testRecord("forwarded")); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := vaultInst.Chunks.Seal(); err != nil {
-		t.Fatal(err)
-	}
-
-	// ImportToVault should replace the forwarded version with canonical.
-	err := orch.ImportToVault(context.Background(), vaultID, chunkID, testIter(smallRecords(5)))
-	if err != nil {
-		t.Fatalf("ImportToVault: %v", err)
-	}
-
-	// Canonical version replaces forwarded (5 records, not 3).
-	meta, err := vaultInst.Chunks.Meta(chunkID)
-	if err != nil {
-		t.Fatalf("expected canonical chunk to exist: %v", err)
-	}
-	if meta.RecordCount != 5 {
-		t.Errorf("canonical should have 5 records, got %d", meta.RecordCount)
-	}
-
-	// Only one chunk with this ID.
-	metas, _ := vaultInst.Chunks.List()
-	count := 0
-	for _, m := range metas {
-		if m.ID == chunkID {
-			count++
-		}
-	}
-	if count != 1 {
-		t.Errorf("expected exactly 1 chunk, got %d", count)
-	}
-}
 
 // --- Active record forwarding ---
 
@@ -729,68 +649,6 @@ func TestImportToInstanceDrainsIteratorOnSkip(t *testing.T) {
 // TestImportToInstanceReplacesIncompleteForwardedChunk verifies that ImportToVault
 // replaces a forwarded chunk that has fewer records (simulating fire-and-forget
 // drops) with the canonical version containing all records.
-func TestImportToInstanceReplacesIncompleteForwardedChunk(t *testing.T) {
-	t.Parallel()
-	orch := newTestOrch(t, Config{LocalNodeID: "node-2"})
-
-	vaultID := glid.New()
-	vaultInst := newMemInstance(t, vaultID, true, nil) // follower receives forwarded + canonical
-	vault := NewVault(vaultID, vaultInst)
-	vault.Name = "incomplete-forward"
-	orch.RegisterVault(vault)
-
-	chunkID := chunk.NewChunkID()
-
-	// Simulate fire-and-forget forwarding: only 70 of 100 records arrive.
-	vaultInst.Chunks.SetNextChunkID(chunkID)
-	for i := 0; i < 70; i++ {
-		if _, _, err := vaultInst.Chunks.Append(testRecord("forwarded")); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// Seal the incomplete forwarded chunk.
-	if err := vaultInst.Chunks.Seal(); err != nil {
-		t.Fatal(err)
-	}
-
-	meta, err := vaultInst.Chunks.Meta(chunkID)
-	if err != nil {
-		t.Fatalf("expected forwarded chunk to exist: %v", err)
-	}
-	if meta.RecordCount != 70 {
-		t.Fatalf("expected 70 forwarded records, got %d", meta.RecordCount)
-	}
-
-	// ImportToVault with canonical version: all 100 records.
-	err = orch.ImportToVault(context.Background(), vaultID, chunkID, testIter(smallRecords(100)))
-	if err != nil {
-		t.Fatalf("ImportToVault: %v", err)
-	}
-
-	// Verify: chunk now has 100 records (canonical replaced incomplete).
-	meta, err = vaultInst.Chunks.Meta(chunkID)
-	if err != nil {
-		t.Fatalf("expected canonical chunk to exist: %v", err)
-	}
-	if meta.RecordCount != 100 {
-		t.Errorf("expected 100 records after canonical import, got %d", meta.RecordCount)
-	}
-	if !meta.Sealed {
-		t.Error("expected canonical chunk to be sealed")
-	}
-
-	// Verify exactly one chunk with this ID.
-	metas, _ := vaultInst.Chunks.List()
-	count := 0
-	for _, m := range metas {
-		if m.ID == chunkID {
-			count++
-		}
-	}
-	if count != 1 {
-		t.Errorf("expected exactly 1 chunk with ID %s, got %d", chunkID, count)
-	}
-}
 
 // TestTransitionLocalPreservesAllRecords verifies zero record loss when
 // transitioning a large sealed chunk from instance 0 to instance 1. The 5000 records

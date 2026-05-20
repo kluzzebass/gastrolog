@@ -155,7 +155,10 @@ func (o *Orchestrator) retentionSweepAll() {
 			continue
 		}
 		vaultInst := vault.Instance
-		if vaultInst != nil && vaultInst.IsLeader() {
+		// Retention proposes CmdRequestDelete via Raft and so must
+		// come from a single source per vault. Gate to the current
+		// vault-ctl Raft leader.
+		if vaultInst != nil && (vaultInst.IsRaftLeader == nil || vaultInst.IsRaftLeader()) {
 			if t := o.retentionTargetForInstance(cfg, vaultCfg, vaultInst, active); t != nil {
 				targets = append(targets, *t)
 			}
@@ -273,7 +276,12 @@ func (o *Orchestrator) enforceMemoryBudgets(cfg *system.Config) {
 			continue
 		}
 		vaultInst := vault.Instance
-		if vaultInst == nil || !vaultInst.IsLeader() {
+		if vaultInst == nil {
+			continue
+		}
+		// Budget-driven retention is leader-gated (same rationale as
+		// the rule-driven sweep above).
+		if vaultInst.IsRaftLeader != nil && !vaultInst.IsRaftLeader() {
 			continue
 		}
 		monitor, ok := vaultInst.Chunks.(chunk.ChunkBudgetMonitor)
@@ -488,7 +496,11 @@ func (o *Orchestrator) retentionTargetForInstance(cfg *system.Config, vaultCfg s
 	runner.im = vaultInst.Indexes
 	runner.applyRaftRetentionPending = vaultInst.ApplyRaftRetentionPending
 	runner.reconciler = vaultInst.Reconciler
-	runner.isLeader = vaultInst.IsLeader()
+	// Under fan-out every Receiver could in principle run retention,
+	// but only the vault-ctl Raft leader proposes CmdRequestDelete to
+	// avoid duplicate proposals. The runner consumes isLeader via the
+	// callback; nil callback => single-node => treat as leader.
+	runner.isLeader = vaultInst.IsRaftLeader == nil || vaultInst.IsRaftLeader()
 	runner.followerTargets = vaultInst.FollowerTargets
 	runner.vaultName = vaultCfg.Name
 	runner.vaultType = string(vaultCfg.Type)

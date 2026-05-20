@@ -557,7 +557,6 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 			if err != nil {
 				return fmt.Errorf("build vault %s storage %s: %w", vaultID, tgt.StorageID, err)
 			}
-			t.IsFollower = true
 			t.LeaderNodeID = leaderNodeID
 			t.StorageID = tgt.StorageID
 			// Fan-out (gastrolog-2hjfm): every Receiver — leader or
@@ -716,7 +715,6 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 			o.alertVaultInitFailed(vaultID, vaultCfg.Name, err)
 			return nil, nil
 		}
-		sti.IsFollower = true
 		sti.LeaderNodeID = leaderNodeID
 		sti.StorageID = tgt.StorageID
 		// Fan-out (gastrolog-2hjfm): every Receiver rotates locally

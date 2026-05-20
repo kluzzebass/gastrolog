@@ -597,8 +597,6 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 		}
 		if isLeader {
 			vaultInst.FollowerTargets = followerTargets
-		} else {
-			vaultInst.IsFollower = true
 		}
 
 		orch.RegisterVault(NewVault(vaultID, vaultInst))

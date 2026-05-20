@@ -24,9 +24,16 @@ type VaultInstance struct {
 	Chunks          chunk.ChunkManager
 	Indexes         index.IndexManager
 	Query           *query.Engine
-	IsFollower      bool                       // true if this node is a follower for this instance
-	LeaderNodeID    string                     // the leader node's ID (empty if this IS the leader)
-	FollowerTargets []system.ReplicationTarget // per-storage targets (populated on leader only)
+	// Under the fan-out data plane (gastrolog-hshgl) the leader/
+	// follower distinction is gone at the data-path level. The
+	// remaining role-shaped state is FollowerTargets — kept as the
+	// "other placement members" enumeration consumed by the
+	// reconciler's replicationPeers() — and LeaderNodeID, kept for
+	// inspector-display + routing-interceptor compatibility while
+	// the system.LeaderNodeID helpers are still referenced. Both
+	// retire when those callers are migrated.
+	LeaderNodeID    string                     // any placement member designated as the canonical writer (legacy)
+	FollowerTargets []system.ReplicationTarget // other placement members (populated on leader build path; nil on followers)
 
 	// HasRaftLeader returns true if the vault control-plane Raft group has an elected leader (cluster mode).
 	// Nil when no Raft group exists (single-node / memory mode).
@@ -165,5 +172,3 @@ func (t *VaultInstance) applyRaftCallbacks(cb vaultRaftCallbacks) {
 	t.ChunkPlacement = cb.chunkPlacement
 }
 
-// IsLeader returns true if this node is the leader for this instance.
-func (t *VaultInstance) IsLeader() bool { return !t.IsFollower }

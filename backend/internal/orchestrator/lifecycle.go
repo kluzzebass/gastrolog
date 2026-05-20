@@ -537,8 +537,11 @@ func (o *Orchestrator) rebuildVaultIndexes(ctx context.Context, vaultID glid.GLI
 		if !meta.Sealed {
 			continue
 		}
-		if meta.CloudBacked && vaultInst.IsFollower {
-			continue // no local data — adopted via RegisterCloudChunk
+		// Cloud-backed chunks owned exclusively by S3 — adopted via
+		// RegisterCloudChunk when CmdUploadChunk propagates — never
+		// need a local index rebuild.
+		if meta.CloudBacked && (vaultInst.IsRaftLeader == nil || !vaultInst.IsRaftLeader()) {
+			continue
 		}
 		o.scheduleIndexRebuildIfNeeded(ctx, vaultID, vaultInst, meta)
 	}
@@ -550,10 +553,12 @@ func (o *Orchestrator) scheduleIndexRebuildIfNeeded(ctx context.Context, vaultID
 	if err != nil || complete {
 		return
 	}
-	// Followers can host many replicated chunks; eagerly rebuilding every
-	// missing index on each follower at startup causes N-way rebuild storms.
-	// Keep bootstrap rebuilds on leaders only.
-	if vaultInst.IsFollower {
+	// Gate bootstrap rebuilds to the current vault-ctl Raft leader to
+	// avoid every Receiver rebuilding every missing index at startup
+	// (N-way rebuild storms). Non-leader Receivers backfill indexes
+	// lazily via the on-demand cursor path or via the next sweep tick
+	// after a leadership change reassigns them.
+	if vaultInst.IsRaftLeader != nil && !vaultInst.IsRaftLeader() {
 		return
 	}
 	o.logger.Info("rebuilding missing indexes",

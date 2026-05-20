@@ -1060,7 +1060,6 @@ func TestHandle_PlacementsSet_RefreshesLeaderPointerWhenRoleUnchanged(t *testing
 	// Existing in-memory vault instance: still pointing at the OLD leader.
 	existing := &orchestrator.VaultInstance{
 		VaultID:      vaultID,
-		IsFollower:   true,
 		LeaderNodeID: oldLeaderID,
 	}
 
@@ -1084,9 +1083,6 @@ func TestHandle_PlacementsSet_RefreshesLeaderPointerWhenRoleUnchanged(t *testing
 
 	if existing.LeaderNodeID != newLeaderID {
 		t.Fatalf("LeaderNodeID not refreshed: want %q, got %q", newLeaderID, existing.LeaderNodeID)
-	}
-	if !existing.IsFollower {
-		t.Fatal("IsFollower should still be true (role didn't change)")
 	}
 }
 

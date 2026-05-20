@@ -642,17 +642,14 @@ func (d *configDispatcher) rebuildVaultIfInstanceMissing(ctx context.Context, v 
 }
 
 // updateInstanceRoleIfNeeded checks whether a vault instance's role
-// (leader ↔ follower) has changed and updates it in place — avoiding a full
-// vault rebuild and file lock churn.
+// has changed and refreshes the LeaderNodeID pointer in place —
+// avoiding a full vault rebuild and file lock churn.
 //
-// On a role transition, also re-applies the role-appropriate rotation
-// policy to the chunk manager: NeverRotatePolicy on follower, user policy
-// on leader. Without this, the chunk manager's policy lags the role flip
-// by up to 15 s (the rotationSweep interval). On a follower→leader flip,
-// the new leader carries NeverRotatePolicy during the gap and records pile
-// up without rotation; on a leader→follower flip, the new follower briefly
-// keeps the user policy and could rotate independently. See
-// gastrolog-50n4b.
+// Under fan-out (gastrolog-hshgl) the leader/follower distinction at
+// the data-path level is gone, so the leader/follower role flip no
+// longer triggers a rotation-policy change. LeaderNodeID survives as
+// a routing hint for the lifecycle reconciler's RequestReplicaCatchup
+// peer set.
 func (d *configDispatcher) updateInstanceRoleIfNeeded(ctx context.Context, vaultID glid.GLID, existing *orchestrator.VaultInstance) {
 	v, err := d.cfgStore.GetVault(ctx, vaultID)
 	if err != nil || v == nil {
@@ -665,32 +662,15 @@ func (d *configDispatcher) updateInstanceRoleIfNeeded(ctx context.Context, vault
 	leaderNodeID := system.LeaderNodeID(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, vaultID); return p }(), nscs)
 	followerNodeIDs := system.FollowerNodeIDs(func() []system.VaultPlacement { p, _ := d.cfgStore.GetVaultPlacements(ctx, vaultID); return p }(), nscs)
 	shouldBeFollower := slices.Contains(followerNodeIDs, d.localNodeID)
-	roleChanged := existing.IsFollower != shouldBeFollower
 
-	// Always refresh LeaderNodeID, even when this node's role is unchanged.
-	// The placement leader can transfer between two other nodes (e.g. an
-	// existing leader fails over to a different node) while this follower
-	// stays a follower. Without this refresh, the local instance's leader
-	// pointer freezes at the original leader and the lifecycle reconciler's
-	// RequestReplicaCatchup loops forever against a stale target that
-	// rejects every request with "not placement leader". See gastrolog-4zy8a.
+	// Refresh LeaderNodeID for the reconciler's peer-set construction.
+	// The placement leader can transfer between two other nodes while
+	// this node's placement membership doesn't change; the local
+	// pointer must follow. See gastrolog-4zy8a.
 	if shouldBeFollower {
 		existing.LeaderNodeID = leaderNodeID
 	} else {
 		existing.LeaderNodeID = ""
-	}
-
-	if !roleChanged {
-		return
-	}
-	existing.IsFollower = shouldBeFollower
-	// FollowerTargets are refreshed by the rotation sweep every 15s.
-	d.logger.Info("dispatch: vault role updated in place",
-		"vault", vaultID,
-		"isFollower", shouldBeFollower)
-	if err := d.orch.ApplyRotationPolicyForRole(ctx, vaultID); err != nil {
-		d.logger.Warn("dispatch: apply rotation policy after role change",
-			"vault", vaultID, "error", err)
 	}
 }
 

@@ -711,7 +711,6 @@ func TestSweepMissingReplicasRequestsOnlySealedAndAbsentEntries(t *testing.T) {
 		VaultID:       glid.New(),
 		Type:         "memory",
 		Chunks:       cm,
-		IsFollower:   true,
 		LeaderNodeID: "node-leader",
 	}
 	rec := NewVaultLifecycleReconciler(orch, glid.New(), vaultInst, "node-A", slog.Default())
@@ -763,7 +762,6 @@ func TestSweepMissingReplicasFromLeaderAsksEveryFollower(t *testing.T) {
 		VaultID:    glid.New(),
 		Type:       "memory",
 		Chunks:     cm,
-		IsFollower: false, // this node IS the leader
 		FollowerTargets: []system.ReplicationTarget{
 			{NodeID: "node-follower-1"},
 			{NodeID: "node-follower-2"},
@@ -810,7 +808,6 @@ func TestSweepMissingReplicasFromLeaderWithNoFollowersIsNoOp(t *testing.T) {
 		VaultID:         glid.New(),
 		Type:            "memory",
 		Chunks:          cm,
-		IsFollower:      false,
 		FollowerTargets: nil, // RF=1, or placement in flux
 	}
 	rec := NewVaultLifecycleReconciler(orch, glid.New(), vaultInst, "node-leader", slog.Default())
@@ -846,7 +843,6 @@ func TestSweepMissingReplicasFromLeaderContinuesPastPeerError(t *testing.T) {
 		VaultID:    glid.New(),
 		Type:       "memory",
 		Chunks:     cm,
-		IsFollower: false,
 		FollowerTargets: []system.ReplicationTarget{
 			{NodeID: "node-follower-1"}, // first call fails
 			{NodeID: "node-follower-2"}, // sweep must still try this one
@@ -884,7 +880,6 @@ func TestSweepMissingReplicasFromLeaderSkipsSelfInFollowerTargets(t *testing.T) 
 		VaultID:    glid.New(),
 		Type:       "memory",
 		Chunks:     cm,
-		IsFollower: false,
 		FollowerTargets: []system.ReplicationTarget{
 			{NodeID: "node-leader"}, // self — must be skipped
 			{NodeID: "node-follower-1"},
@@ -924,7 +919,6 @@ func TestSweepMissingReplicasSkipsWhenLeaderUnknown(t *testing.T) {
 		VaultID:       glid.New(),
 		Type:         "memory",
 		Chunks:       cm,
-		IsFollower:   true,
 		LeaderNodeID: "", // unknown — election in progress
 	}
 	rec := NewVaultLifecycleReconciler(orch, glid.New(), vaultInst, "node-A", slog.Default())
@@ -1554,7 +1548,6 @@ func TestSweepStaleLeaderFSMEntriesProposesDeleteForStrandedSealingChunk(t *test
 	vaultInst := &VaultInstance{
 		VaultID:     glid.New(),
 		Chunks:     cm,
-		IsFollower: false, // leader-only sweep
 		ApplyRaftRequestDelete: func(id chunk.ChunkID, reason string, _ []string) error {
 			deletedRequests = append(deletedRequests, id)
 			deleteReasons = append(deleteReasons, reason)
@@ -1622,7 +1615,6 @@ func TestSweepStalePendingDeleteAcksPrunesNonPlacementNodes(t *testing.T) {
 	var prunedNodes []string
 	vaultInst := &VaultInstance{
 		VaultID:    glid.New(),
-		IsFollower: false,
 		FollowerTargets: []system.ReplicationTarget{
 			{NodeID: "follower-node"},
 		},
@@ -1668,7 +1660,6 @@ func TestSweepStalePendingDeleteAcksSkipsCurrentPlacementMembers(t *testing.T) {
 	var prunedNodes []string
 	vaultInst := &VaultInstance{
 		VaultID:    glid.New(),
-		IsFollower: false,
 		FollowerTargets: []system.ReplicationTarget{
 			{NodeID: "follower-node"},
 		},
@@ -1692,36 +1683,6 @@ func TestSweepStalePendingDeleteAcksSkipsCurrentPlacementMembers(t *testing.T) {
 // gate: only the vault-ctl leader should propose CmdPruneNode, mirroring
 // SweepStaleLeaderFSMEntries' leader-only design. Without this, every
 // node would race to propose the same prune on every sweep tick.
-func TestSweepStalePendingDeleteAcksFollowersAreNoOp(t *testing.T) {
-	t.Parallel()
-
-	fsm := vaultctlfsm.New()
-	chunkID := chunk.NewChunkID()
-	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(chunkID, time.Now(), time.Now(), time.Now())})
-	_ = fsm.Apply(&hraft.Log{
-		Data: vaultctlfsm.MarshalRequestDelete(chunkID, time.Now(), "retention-ttl",
-			[]string{"leader-node", "stale-node"}),
-	})
-
-	var prunedNodes []string
-	vaultInst := &VaultInstance{
-		VaultID:    glid.New(),
-		IsFollower: true, // follower
-		ApplyRaftPruneNode: func(nodeID string) error {
-			prunedNodes = append(prunedNodes, nodeID)
-			return nil
-		},
-	}
-
-	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-X", slog.Default())
-	rec.fsm = fsm
-
-	rec.SweepStalePendingDeleteAcks()
-
-	if len(prunedNodes) != 0 {
-		t.Errorf("followers MUST NOT propose CmdPruneNode; got %v", prunedNodes)
-	}
-}
 
 // idleActiveSweepFakeManager extends the fake chunk manager with the
 // surface the idle-active sweep needs: per-id Meta lookups, a Seal()

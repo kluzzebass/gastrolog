@@ -93,7 +93,13 @@ func (o *Orchestrator) archivalSweepAll() {
 			continue
 		}
 		vaultInst := vault.Instance
-		if vaultInst == nil || !vaultInst.IsLeader() {
+		if vaultInst == nil {
+			continue
+		}
+		// Archival decisions propose CmdArchiveChunk via Raft and so
+		// must come from a single source per vault to avoid duplicate
+		// proposals. Gate to the current vault-ctl Raft leader.
+		if vaultInst.IsRaftLeader != nil && !vaultInst.IsRaftLeader() {
 			continue
 		}
 		if vaultCfg.CloudServiceID == nil {
@@ -278,7 +284,13 @@ func (o *Orchestrator) reconcileSweepAll() {
 			continue
 		}
 		vaultInst := vault.Instance
-		if vaultInst == nil || !vaultInst.IsLeader() {
+		if vaultInst == nil {
+			continue
+		}
+		// Archival decisions propose CmdArchiveChunk via Raft and so
+		// must come from a single source per vault to avoid duplicate
+		// proposals. Gate to the current vault-ctl Raft leader.
+		if vaultInst.IsRaftLeader != nil && !vaultInst.IsRaftLeader() {
 			continue
 		}
 		if vaultCfg.CloudServiceID == nil {
