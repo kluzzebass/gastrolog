@@ -48,10 +48,10 @@ func (o *Orchestrator) rotationSweep() {
 		if vaultInst == nil {
 			continue
 		}
-		if vaultInst.IsFollower {
-			vaultInst.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
-			continue
-		}
+		// gastrolog-2hjfm: every Receiver rotates locally via the
+		// FSM-mediated coordinator (gastrolog-3yre7). The legacy
+		// "only the placement leader rotates" gate (NeverRotatePolicy
+		// on followers) is gone.
 
 		// Apply rotation policy + reconcile cron job + refresh replication targets.
 		if cfg != nil && vaultCfg != nil {

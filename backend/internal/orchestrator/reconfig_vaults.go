@@ -560,7 +560,13 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 			t.IsFollower = true
 			t.LeaderNodeID = leaderNodeID
 			t.StorageID = tgt.StorageID
-			t.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
+			// Fan-out (gastrolog-2hjfm): every Receiver — leader or
+			// follower — rotates locally through the FSM-mediated
+			// coordinator. NeverRotatePolicy is gone; the rotation
+			// policy lands via applyRotationPolicy inside
+			// buildInstanceForStorage like every other instance.
+			applyFanOutConfig(t.Chunks, *vaultCfg, placements, nscs)
+			o.wireRotationCoordinator(t.Chunks, vaultCfg.ID, placements, nscs, factories)
 			ti = t
 			break
 		}
@@ -709,7 +715,11 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 		sti.IsFollower = true
 		sti.LeaderNodeID = leaderNodeID
 		sti.StorageID = tgt.StorageID
-		sti.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
+		// Fan-out (gastrolog-2hjfm): every Receiver rotates locally
+		// via the FSM-mediated coordinator. NeverRotatePolicy is
+		// gone; the standard policy from applyRotationPolicy stands.
+		applyFanOutConfig(sti.Chunks, vaultCfg, placements, nscs)
+		o.wireRotationCoordinator(sti.Chunks, vaultCfg.ID, placements, nscs, factories)
 		return sti, nil
 	}
 	return nil, nil

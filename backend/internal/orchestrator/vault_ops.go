@@ -437,10 +437,22 @@ func (o *Orchestrator) findLocalVaultInstance(vaultID glid.GLID) *VaultInstance 
 
 // AppendToVault appends a record to a specific instance's chunk manager.
 // Used by the receiving side of cross-node fan-out (chunkReplicator.
-// AppendRecords lands here) and by inter-instance transition. The sender
-// stamps the chunk ID via senderChunkID so peers share chunk identity.
-// Includes seal detection but performs NO further fan-out: this is the
-// terminus on the receiver.
+// AppendRecords lands here) and by inter-instance transition.
+//
+// Under the fan-out data plane (gastrolog-2hjfm) the receiver writes
+// to its OWN locally-current active chunk. Chunk-ID alignment across
+// replicas happens at rotation time via the FSM-mediated rotation
+// coordinator (gastrolog-3yre7), not per-record on the receive side.
+// The senderChunkID parameter survives only as a tombstone gate —
+// reject late RPCs whose target chunk the cluster has already
+// retired — and as a courtesy hint when the receiver has no active
+// chunk yet (first-append-on-this-replica): in that narrow case
+// SetNextChunkID lines up the receiver's freshly-created chunk with
+// the sender's, avoiding a transient divergence the reconcile pass
+// would have to fix.
+//
+// Includes seal detection but performs NO further fan-out: this is
+// the terminus on the receiver.
 func (o *Orchestrator) AppendToVault(vaultID glid.GLID, senderChunkID chunk.ChunkID, rec chunk.Record) error {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
@@ -462,22 +474,19 @@ func (o *Orchestrator) AppendToVault(vaultID glid.GLID, senderChunkID chunk.Chun
 	}
 	cm := vaultInst.Chunks
 
-	// Reject writes targeting a tombstoned chunk ID — a stale replication
-	// RPC that would otherwise recreate a chunk the cluster has already
-	// deleted. Caller translates this into a benign ack on the receive
-	// path. See gastrolog-11rzz.
+	// Tombstone gate: reject writes targeting a chunk ID the cluster
+	// already retired. Caller translates this into a benign ack — the
+	// goal (chunk gone) is already achieved. See gastrolog-11rzz.
 	if senderChunkID != (chunk.ChunkID{}) && vaultInst.IsTombstoned != nil && vaultInst.IsTombstoned(senderChunkID) {
 		return fmt.Errorf("%w: append to tombstoned chunk %s", chunk.ErrChunkTombstoned, senderChunkID)
 	}
 
-	// Sync chunk ID with the sender: receivers in the fan-out world share
-	// chunk identity with the writer that fanned out to them. Seal a
-	// stale active chunk first so the next append opens a new chunk
-	// with the synced ID.
-	if senderChunkID != (chunk.ChunkID{}) {
-		if active := cm.Active(); active != nil && active.ID != senderChunkID {
-			_ = cm.Seal()
-		}
+	// First-append hint: if the receiver has no active chunk yet,
+	// nudge it to open one with the sender's ID so the bootstrap
+	// case doesn't burn a reconcile round-trip. Once an active exists
+	// locally, the receiver keeps writing to it — rotation alignment
+	// is the coordinator's job, not AppendToVault's.
+	if senderChunkID != (chunk.ChunkID{}) && cm.Active() == nil {
 		cm.SetNextChunkID(senderChunkID)
 	}
 
