@@ -21,6 +21,8 @@ import (
 	"sync"
 	"time"
 
+	hraft "github.com/hashicorp/raft"
+
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/raftgroup"
@@ -225,4 +227,40 @@ func (o *Orchestrator) wireRotationCoordinator(cm chunk.ChunkManager, vaultID gl
 
 	coord := newRotationCoordinator(vaultID, applier, fsm, o.now, receiving)
 	setter.SetRotationCoordinator(coord)
+}
+
+// wireUploadGate injects a cloud-upload gate that returns true iff
+// this node is the current vault-ctl Raft leader for the given vault.
+// Under the fan-out data plane every Receiver runs PostSealProcess
+// locally but only the Raft leader pushes the sealed GLCB to the
+// shared blob store; the other Receivers adopt the blob when
+// CmdUploadChunk propagates via OnUpload's RegisterCloudChunk
+// projection. See gastrolog-4t3rs.
+//
+// Skipped silently when the chunk manager doesn't implement
+// UploadGateSetter (memory / jsonl managers — no cloud upload),
+// when no vault-ctl Raft group exists for this vault (single-node
+// setups), or when the orchestrator has no GroupManager factory
+// (test harnesses).
+func (o *Orchestrator) wireUploadGate(cm chunk.ChunkManager, vaultID glid.GLID, factories Factories) {
+	setter, ok := cm.(chunk.UploadGateSetter)
+	if !ok {
+		return
+	}
+	if factories.GroupManager == nil {
+		return
+	}
+	groupID := raftgroup.VaultControlPlaneGroupID(vaultID)
+	g := factories.GroupManager.GetGroup(groupID)
+	if g == nil {
+		return
+	}
+	r := g.Raft
+	if r == nil {
+		return
+	}
+	gate := func() bool {
+		return r.State() == hraft.Leader
+	}
+	setter.SetUploadGate(gate)
 }

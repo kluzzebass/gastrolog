@@ -164,6 +164,19 @@ type Config struct {
 	// synchronization.
 	RotationCoordinator chunk.RotationCoordinator
 
+	// UploadGate, when non-nil, decides per-call whether THIS
+	// replica should push the sealed chunk to the shared cloud blob
+	// store. PostSealProcess always runs compress + index locally;
+	// the gate only governs the upload step. Wired by the
+	// orchestrator to return IsRaftLeader for the vault-ctl Raft
+	// group so only one replica uploads per vault. See
+	// gastrolog-4t3rs.
+	//
+	// When nil, every PostSealProcess that has a CloudStore configured
+	// uploads — the single-node default that legacy CloudReadOnly
+	// gating used to control.
+	UploadGate chunk.UploadGate
+
 	// IntegrityVerifier, when non-nil, is consulted on every cold-cache
 	// cloud download to verify the GLCB whole-blob digest matches the
 	// FSM-recorded value (gastrolog-grnc3). A mismatch causes the
@@ -3197,9 +3210,15 @@ func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
 	}
 
 	// 5. Upload to cloud and delete local if cloud-backed.
-	// CloudReadOnly followers skip upload — they adopt the leader's blob
-	// via RegisterCloudChunk when the vault FSM propagates the upload.
-	if m.cfg.CloudStore != nil && !m.cfg.CloudReadOnly {
+	// Under the fan-out data plane (gastrolog-4t3rs) every Receiver
+	// runs PostSealProcess locally but only the UploadGate-permitted
+	// replica pushes the GLCB to the shared blob store. The vault-ctl
+	// Raft leader is the gated uploader; the other Receivers wait for
+	// CmdUploadChunk to propagate and adopt the blob via OnUpload's
+	// RegisterCloudChunk projection. CloudReadOnly is the legacy gate
+	// for the static single-uploader configuration and is honored
+	// when UploadGate is nil.
+	if m.cfg.CloudStore != nil && m.shouldUploadLocally() {
 		if err := m.uploadToCloud(id); err != nil {
 			m.logger.Warn("cloud upload failed, keeping local", "chunk", id, "error", err)
 		}
@@ -3715,6 +3734,32 @@ func (m *Manager) SetRotationCoordinator(c chunk.RotationCoordinator) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.cfg.RotationCoordinator = c
+}
+
+// SetUploadGate injects the cloud-upload gating callback used by
+// PostSealProcess to decide whether THIS replica should push the
+// sealed chunk to the shared blob store. Implements
+// chunk.UploadGateSetter. Wired by the orchestrator to return
+// IsRaftLeader for the vault-ctl Raft group so only one replica
+// uploads per vault. Safe to call with nil — every replica uploads
+// in that fallback mode (the legacy single-node default).
+//
+// See gastrolog-4t3rs.
+func (m *Manager) SetUploadGate(g chunk.UploadGate) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.cfg.UploadGate = g
+}
+
+// shouldUploadLocally evaluates the upload gate stack: explicit
+// UploadGate first, then the legacy CloudReadOnly bool. When both
+// are unset, defaults to true (every replica uploads — the single-
+// node / fresh-test path).
+func (m *Manager) shouldUploadLocally() bool {
+	if m.cfg.UploadGate != nil {
+		return m.cfg.UploadGate()
+	}
+	return !m.cfg.CloudReadOnly
 }
 
 // SetFanOutConfig wires the initial Receiving snapshot the next

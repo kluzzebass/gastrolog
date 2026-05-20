@@ -60,6 +60,32 @@ type RotationCoordinatorSetter interface {
 	SetRotationCoordinator(RotationCoordinator)
 }
 
+// UploadGate decides whether THIS replica should upload a sealed
+// chunk to the shared cloud blob store. Under the fan-out data plane
+// every Receiver runs PostSealProcess locally (compress + index),
+// but only one replica per vault should actually push to S3 —
+// otherwise N replicas race on the same vaultID/chunkID.glcb path,
+// multiplying cluster egress bandwidth and risking last-writer-wins
+// corruption if any GLCB digest differs.
+//
+// The orchestrator wires a gate that returns IsRaftLeader() for the
+// vault-ctl Raft group: only the elected Raft leader uploads.
+// Subsequent CmdUploadChunk applies on every replica, OnUpload fires,
+// and the non-uploading replicas mark their local chunks CloudBacked
+// without re-uploading.
+//
+// When nil on the chunk manager Config, all replicas upload — the
+// legacy / single-node default.
+type UploadGate func() bool
+
+// UploadGateSetter is the optional interface for chunk managers that
+// support post-construction injection of an UploadGate. Mirrors
+// AnnouncerSetter — the orchestrator wires the gate after build so
+// it can close over the vault-ctl Raft leadership callback.
+type UploadGateSetter interface {
+	SetUploadGate(UploadGate)
+}
+
 // ReceivingAnnouncer is the optional extension of MetadataAnnouncer
 // that carries the initial Receiving set when announcing a new chunk
 // under the fan-out data-plane (gastrolog-2ujjh / gastrolog-nd6sz /

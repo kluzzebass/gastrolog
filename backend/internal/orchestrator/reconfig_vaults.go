@@ -567,6 +567,7 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 			// buildInstanceForStorage like every other instance.
 			applyFanOutConfig(t.Chunks, *vaultCfg, placements, nscs)
 			o.wireRotationCoordinator(t.Chunks, vaultCfg.ID, placements, nscs, factories)
+			o.wireUploadGate(t.Chunks, vaultCfg.ID, factories)
 			ti = t
 			break
 		}
@@ -697,8 +698,11 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 		applyFanOutConfig(ti.Chunks, vaultCfg, placements, nscs)
 		// Wire the FSM-mediated rotation coordinator so rotation
 		// proposals round-trip through vault-ctl Raft and align chunk
-		// IDs across replicas (gastrolog-3yre7).
+		// IDs across replicas (gastrolog-3yre7). The upload gate
+		// keeps cloud writes single-uploader by routing the push
+		// through the current vault-ctl Raft leader (gastrolog-4t3rs).
 		o.wireRotationCoordinator(ti.Chunks, vaultCfg.ID, placements, nscs, factories)
+		o.wireUploadGate(ti.Chunks, vaultCfg.ID, factories)
 		return ti, nil
 	}
 
@@ -718,8 +722,11 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 		// Fan-out (gastrolog-2hjfm): every Receiver rotates locally
 		// via the FSM-mediated coordinator. NeverRotatePolicy is
 		// gone; the standard policy from applyRotationPolicy stands.
+		// The upload gate keeps cloud writes single-uploader
+		// (gastrolog-4t3rs).
 		applyFanOutConfig(sti.Chunks, vaultCfg, placements, nscs)
 		o.wireRotationCoordinator(sti.Chunks, vaultCfg.ID, placements, nscs, factories)
+		o.wireUploadGate(sti.Chunks, vaultCfg.ID, factories)
 		return sti, nil
 	}
 	return nil, nil
@@ -765,15 +772,18 @@ func (o *Orchestrator) buildLeaderInstance(sys *system.System, vaultCfg system.V
 }
 
 // buildInstance creates a single VaultInstance from a VaultConfig.
-// When isFollower is true, cloud backing params are stripped so the follower's
-// PostSealProcess only runs compress + index without uploading to cloud storage.
-// Cloud-backed vaults share a blob key (vault-ID/chunk-ID.glcb) — if the follower
-// also uploads, it overwrites the leader's blob with a different-sized version,
-// corrupting the leader's stored diskBytes and breaking all future cloud reads.
+// Under the fan-out data plane (gastrolog-4t3rs) every replica gets
+// full read AND write cloud configuration; the per-call UploadGate
+// (wired post-construction from the vault-ctl Raft leader callback)
+// decides at upload time whether this replica actually pushes to S3.
+// The isFollower flag survives only for downstream wiring that still
+// distinguishes leader from follower instances — it no longer affects
+// the chunk manager's cloud parameters.
 func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultConfig, factories Factories, isFollower bool) (*VaultInstance, error) {
 	cfg := &sys.Config
 	rt := &sys.Runtime
 	factoryName := mapVaultTypeToFactory(vaultCfg.Type)
+	_ = isFollower // wired by callers for non-cloud-related branching
 
 	// Create the vault-ctl Raft group BEFORE the chunk manager. Group creation is
 	// fast (Raft log replay). Chunk manager creation is slow (scans disk for
@@ -781,15 +791,9 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 	// a leader and catch up while the chunk manager is loading.
 	vaultGroup, applier, raftCB := o.ensureVaultCtlMetadata(vaultCfg, rt.Nodes, factories)
 
-	// Build params from instance system.
+	// Build params from instance system. Cloud upload gating happens
+	// per-call via SetUploadGate (wired below), not via param stripping.
 	params := buildVaultParams(sys, vaultCfg, o.localNodeID)
-
-	// Followers keep cloud store access for reads (queries) but skip uploads.
-	// The leader owns the blob; the follower adopts it via RegisterCloudChunk
-	// when the vault-ctl FSM propagates the upload announcement.
-	if isFollower {
-		params["_cloud_read_only"] = "true"
-	}
 
 	cmFactory, ok := factories.ChunkManagers[factoryName]
 	if !ok {
@@ -917,11 +921,12 @@ func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg syst
 	vaultGroup, applier, raftCB := o.ensureVaultCtlMetadata(vaultCfg, rt.Nodes, factories)
 
 	// Build params normally, then override the dir with this storage's path.
+	// Under the fan-out data plane (gastrolog-4t3rs) every replica
+	// retains full cloud configuration — read AND write capable. The
+	// per-call upload gate (SetUploadGate, wired below from the
+	// vault-ctl Raft leader callback) is what stops N replicas from
+	// racing on the shared blob path.
 	params := buildVaultParams(sys, vaultCfg, o.localNodeID)
-	// Followers keep cloud store access for reads but skip uploads.
-	if isFollower {
-		params["_cloud_read_only"] = "true"
-	}
 	params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), vaultCfg.ID.String())
 
 	factoryName := mapVaultTypeToFactory(vaultCfg.Type)
