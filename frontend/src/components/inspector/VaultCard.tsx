@@ -175,7 +175,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
     const nscs = config?.nodeStorageConfigs ?? [];
     return vaultMatches
       .filter((v: { id: Uint8Array }) => !localVaultIds.has(encode(v.id)))
-      .map((v: { id: Uint8Array; type: number; cloudServiceId: Uint8Array; replicationFactor: number; storageClass: number; placements: { storageId: Uint8Array; leader: boolean }[] }) => {
+      .map((v: { id: Uint8Array; type: number; cloudServiceId: Uint8Array; replicationFactor: number; storageClass: number; placements: { storageId: Uint8Array }[] }) => {
         const pnId = leaderNodeId(v, nscs);
         return {
           id: encode(v.id),

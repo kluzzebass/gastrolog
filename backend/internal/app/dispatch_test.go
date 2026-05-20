@@ -1053,8 +1053,8 @@ func TestHandle_PlacementsSet_RefreshesLeaderPointerWhenRoleUnchanged(t *testing
 
 	// New placement: new leader is on newLeaderID; local stays a follower.
 	placements := []system.VaultPlacement{
-		{StorageID: newLeaderStorage.String(), Leader: true},
-		{StorageID: localStorage.String(), Leader: false},
+		{StorageID: newLeaderStorage.String()},
+		{StorageID: localStorage.String()},
 	}
 
 	// Existing in-memory vault instance: still pointing at the OLD leader.
@@ -1110,7 +1110,7 @@ func TestHandle_PlacementsSet_RegistersVaultWhenMissing(t *testing.T) {
 	}
 	// Local node IS the leader → vaultBelongsHere true → rebuild path runs.
 	placements := []system.VaultPlacement{
-		{StorageID: localStorage.String(), Leader: true},
+		{StorageID: localStorage.String()},
 	}
 
 	h := &captureHandler{}
@@ -1149,7 +1149,7 @@ func TestHandle_PlacementsSet_DoesNotReregisterExistingVault(t *testing.T) {
 		{NodeID: localID, FileStorages: []system.FileStorage{{ID: localStorage, StorageClass: 1}}},
 	}
 	placements := []system.VaultPlacement{
-		{StorageID: localStorage.String(), Leader: true},
+		{StorageID: localStorage.String()},
 	}
 
 	h := &captureHandler{}

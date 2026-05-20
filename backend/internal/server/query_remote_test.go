@@ -66,8 +66,8 @@ func TestRemoteVaultsByNodeFanOutsToAllPlacementMembers(t *testing.T) {
 	// local's perspective.
 	vaultID := glid.New()
 	placements := []system.VaultPlacement{
-		{StorageID: storageA.String(), Leader: true},
-		{StorageID: storageB.String(), Leader: false},
+		{StorageID: storageA.String()},
+		{StorageID: storageB.String()},
 	}
 	if err := store.PutVault(ctx, system.VaultConfig{
 		ID:           vaultID,
@@ -132,8 +132,8 @@ func TestRemoteVaultsByNodeSkipsLocalVaults(t *testing.T) {
 
 	vaultID := glid.New()
 	placements := []system.VaultPlacement{
-		{StorageID: storageLocal.String(), Leader: true},
-		{StorageID: storagePeer.String(), Leader: false},
+		{StorageID: storageLocal.String()},
+		{StorageID: storagePeer.String()},
 	}
 	if err := store.PutVault(ctx, system.VaultConfig{
 		ID: vaultID, Name: "skip-local", Type: system.VaultTypeFile, StorageClass: 0, Placements: placements,

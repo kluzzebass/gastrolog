@@ -145,7 +145,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 			// Write VaultConfig directly with all storage fields, plus a
 			// synthetic placement for this node.
 			placements := []system.VaultPlacement{
-				{StorageID: system.SyntheticStorageID(id), Leader: true},
+				{StorageID: system.SyntheticStorageID(id)},
 			}
 			_ = cfgStore.PutVault(ctx, system.VaultConfig{
 				ID:         node.vaultID,

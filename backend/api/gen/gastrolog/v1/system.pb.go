@@ -553,11 +553,12 @@ func (x *RetentionRule) GetRetentionPolicyId() []byte {
 }
 
 // VaultPlacement assigns one replica of a vault to a specific file storage.
-// The node is derived from the file storage's NodeStorageConfig.
+// The node is derived from the file storage's NodeStorageConfig. Under the
+// fan-out data plane every placement member is symmetric — the legacy
+// "leader" bool that singled out one canonical writer is gone (gastrolog-hshgl).
 type VaultPlacement struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	StorageId     []byte                 `protobuf:"bytes,1,opt,name=storage_id,json=storageId,proto3" json:"storage_id,omitempty"` // references FileStorage.id
-	Leader        bool                   `protobuf:"varint,2,opt,name=leader,proto3" json:"leader,omitempty"`                       // true = this storage bootstraps the Raft group (initial leader)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -597,13 +598,6 @@ func (x *VaultPlacement) GetStorageId() []byte {
 		return x.StorageId
 	}
 	return nil
-}
-
-func (x *VaultPlacement) GetLeader() bool {
-	if x != nil {
-		return x.Leader
-	}
-	return false
 }
 
 // VaultConfig defines a vault — the unit of independent storage and the
@@ -8850,11 +8844,10 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x11environment_label\x18\f \x01(\tR\x10environmentLabel\x12+\n" +
 	"\x11environment_color\x18\r \x01(\tR\x10environmentColor\"?\n" +
 	"\rRetentionRule\x12.\n" +
-	"\x13retention_policy_id\x18\x01 \x01(\fR\x11retentionPolicyId\"G\n" +
+	"\x13retention_policy_id\x18\x01 \x01(\fR\x11retentionPolicyId\"/\n" +
 	"\x0eVaultPlacement\x12\x1d\n" +
 	"\n" +
-	"storage_id\x18\x01 \x01(\fR\tstorageId\x12\x16\n" +
-	"\x06leader\x18\x02 \x01(\bR\x06leader\"\x9e\x05\n" +
+	"storage_id\x18\x01 \x01(\fR\tstorageId\"\x9e\x05\n" +
 	"\vVaultConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +

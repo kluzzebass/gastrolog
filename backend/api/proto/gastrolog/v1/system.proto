@@ -226,10 +226,11 @@ enum VaultType {
 }
 
 // VaultPlacement assigns one replica of a vault to a specific file storage.
-// The node is derived from the file storage's NodeStorageConfig.
+// The node is derived from the file storage's NodeStorageConfig. Under the
+// fan-out data plane every placement member is symmetric — the legacy
+// "leader" bool that singled out one canonical writer is gone (gastrolog-hshgl).
 message VaultPlacement {
   bytes storage_id = 1;   // references FileStorage.id
-  bool leader = 2;         // true = this storage bootstraps the Raft group (initial leader)
 }
 
 // VaultConfig defines a vault — the unit of independent storage and the

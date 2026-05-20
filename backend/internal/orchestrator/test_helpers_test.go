@@ -28,7 +28,7 @@ import (
 
 // syntheticPlacements creates a Placements slice with a leader using a synthetic storage ID.
 func syntheticPlacements(nodeID string) []system.VaultPlacement {
-	return []system.VaultPlacement{{StorageID: system.SyntheticStorageID(nodeID), Leader: true}}
+	return []system.VaultPlacement{{StorageID: system.SyntheticStorageID(nodeID)}}
 }
 
 // ---------- config loader adapter ----------
@@ -54,7 +54,7 @@ func (l *transitionSystemLoader) Load(ctx context.Context) (*system.System, erro
 	for _, v := range sys.Config.Vaults {
 		if _, ok := sys.Runtime.VaultPlacements[v.ID]; !ok {
 			sys.Runtime.VaultPlacements[v.ID] = []system.VaultPlacement{
-				{StorageID: system.SyntheticStorageID(nodeID), Leader: true},
+				{StorageID: system.SyntheticStorageID(nodeID)},
 			}
 		}
 	}
@@ -72,7 +72,7 @@ func newTestStore(cfg *system.Config, nodeID string) *sysmem.Store {
 	}
 	for _, v := range cfg.Vaults {
 		_ = store.SetVaultPlacements(ctx, v.ID, []system.VaultPlacement{
-			{StorageID: system.SyntheticStorageID(nodeID), Leader: true},
+			{StorageID: system.SyntheticStorageID(nodeID)},
 		})
 	}
 	for _, rt := range cfg.Routes {
@@ -131,7 +131,7 @@ func setupTestStoreRuntime(store *sysmem.Store, nodeID string, vaultIDs ...glid.
 	ctx := context.Background()
 	for _, tid := range vaultIDs {
 		_ = store.SetVaultPlacements(ctx, tid, []system.VaultPlacement{
-			{StorageID: system.SyntheticStorageID(nodeID), Leader: true},
+			{StorageID: system.SyntheticStorageID(nodeID)},
 		})
 	}
 }
@@ -616,11 +616,11 @@ func setupCluster(t *testing.T, nodeIDs []string, vaultCount int, rotationRecord
 	for i := range vaultCount {
 		placements := make([]system.VaultPlacement, 0, len(nodeIDs))
 		placements = append(placements, system.VaultPlacement{
-			StorageID: system.SyntheticStorageID(leaderID), Leader: true,
+			StorageID: system.SyntheticStorageID(leaderID),
 		})
 		for _, fid := range nodeIDs[1:] {
 			placements = append(placements, system.VaultPlacement{
-				StorageID: system.SyntheticStorageID(fid), Leader: false,
+				StorageID: system.SyntheticStorageID(fid),
 			})
 		}
 		_ = store.SetVaultPlacements(context.Background(), vaultIDs[i], placements)

@@ -135,7 +135,6 @@ func VaultConfigToProto(v system.VaultConfig) *gastrologv1.VaultConfig {
 	for i, p := range v.Placements {
 		pbPlacements[i] = &gastrologv1.VaultPlacement{
 			StorageId: []byte(p.StorageID),
-			Leader:    p.Leader,
 		}
 	}
 	rules := make([]*gastrologv1.RetentionRule, len(v.RetentionRules))
@@ -200,7 +199,6 @@ func VaultConfigFromProto(p *gastrologv1.VaultConfig) (system.VaultConfig, error
 	for _, pp := range p.GetPlacements() {
 		cfg.Placements = append(cfg.Placements, system.VaultPlacement{
 			StorageID: string(pp.GetStorageId()),
-			Leader:    pp.GetLeader(),
 		})
 	}
 

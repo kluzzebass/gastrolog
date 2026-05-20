@@ -16,7 +16,7 @@ import (
 
 // leaderPlacement creates a Placements slice with a single leader using a synthetic storage ID.
 func leaderPlacement(nodeID string) []system.VaultPlacement {
-	return []system.VaultPlacement{{StorageID: system.SyntheticStorageID(nodeID), Leader: true}}
+	return []system.VaultPlacement{{StorageID: system.SyntheticStorageID(nodeID)}}
 }
 
 func newTestPlacement(t *testing.T, localNodeID string, livePeers []string) (*placementManager, *sysmem.Store, *alert.Collector) {

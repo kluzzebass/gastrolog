@@ -377,15 +377,18 @@ func (pm *placementManager) placeVault(ctx context.Context, v system.VaultConfig
 	pm.placeFollowers(ctx, &v, alive, nscs, vaultCount)
 }
 
-// replaceLeaderPlacement returns a new Placements slice with the leader set to storageID.
+// replaceLeaderPlacement returns a new Placements slice with storageID
+// as the first placement. Under fan-out the "leader" position has no
+// data-path meaning; the first placement is the deterministic canonical
+// used by routing-layer code that needs to pick a stable target.
 func replaceLeaderPlacement(placements []system.VaultPlacement, storageID string) []system.VaultPlacement {
-	var result []system.VaultPlacement
+	result := make([]system.VaultPlacement, 0, len(placements))
 	for _, p := range placements {
-		if !p.Leader {
+		if p.StorageID != storageID {
 			result = append(result, p)
 		}
 	}
-	return append([]system.VaultPlacement{{StorageID: storageID, Leader: true}}, result...)
+	return append([]system.VaultPlacement{{StorageID: storageID}}, result...)
 }
 
 // placeFollowers assigns follower file storages for a vault based on its ReplicationFactor.
@@ -406,8 +409,10 @@ func (pm *placementManager) placeFollowers(ctx context.Context, v *system.VaultC
 	candidates := pm.followerCandidates(*v, leaderStorageID, leaderNodeID, alive, nscs, vaultCount)
 	kept := pm.selectFollowers(v, desired, leaderStorageID, leaderNodeID, candidates, nscs, alive, vaultCount)
 
-	// Build new placements.
-	newPlacements := []system.VaultPlacement{{StorageID: leaderStorageID, Leader: true}}
+	// Build new placements. The first placement is the deterministic
+	// canonical used by routing — every other placement is an
+	// equally-authoritative peer under fan-out.
+	newPlacements := []system.VaultPlacement{{StorageID: leaderStorageID}}
 	newPlacements = append(newPlacements, kept...)
 
 	if !placementsEqual(func() []system.VaultPlacement {
@@ -477,10 +482,11 @@ func (pm *placementManager) selectFollowers(v *system.VaultConfig, desired int, 
 	usedStorages := map[string]bool{leaderStorageID: true}
 	usedNodes := map[string]bool{leaderNodeID: true} // 1:1:1: one store per vault per node
 
-	// Keep existing valid follower placements.
+	// Keep existing valid follower placements (everything past the
+	// canonical first placement, which the caller installs separately).
 	current, _ := pm.cfgStore.GetVaultPlacements(context.Background(), v.ID)
-	for _, p := range current {
-		if p.Leader || len(kept) >= desired {
+	for i, p := range current {
+		if i == 0 || len(kept) >= desired {
 			continue
 		}
 		nid := system.NodeIDForStorage(p.StorageID, nscs)
@@ -499,7 +505,7 @@ func (pm *placementManager) selectFollowers(v *system.VaultConfig, desired int, 
 		if usedStorages[ea.storageID] || usedNodes[ea.nodeID] {
 			continue
 		}
-		kept = append(kept, system.VaultPlacement{StorageID: ea.storageID, Leader: false})
+		kept = append(kept, system.VaultPlacement{StorageID: ea.storageID})
 		usedStorages[ea.storageID] = true
 		usedNodes[ea.nodeID] = true
 		vaultCount[ea.nodeID]++
@@ -572,15 +578,15 @@ func (pm *placementManager) storageEligible(storageID string, v system.VaultConf
 	return false
 }
 
-// clearFollowerPlacements removes all non-leader placements.
+// clearFollowerPlacements keeps only the canonical first placement,
+// dropping every follower entry. Under fan-out the first placement
+// is the routing-deterministic canonical; the rest are equally
+// authoritative peers that get repopulated by selectFollowers.
 func clearFollowerPlacements(placements []system.VaultPlacement) []system.VaultPlacement {
-	var result []system.VaultPlacement
-	for _, p := range placements {
-		if p.Leader {
-			result = append(result, p)
-		}
+	if len(placements) == 0 {
+		return nil
 	}
-	return result
+	return []system.VaultPlacement{placements[0]}
 }
 
 func placementsEqual(a, b []system.VaultPlacement) bool {
@@ -588,7 +594,7 @@ func placementsEqual(a, b []system.VaultPlacement) bool {
 		return false
 	}
 	for i := range a {
-		if a[i].StorageID != b[i].StorageID || a[i].Leader != b[i].Leader {
+		if a[i].StorageID != b[i].StorageID {
 			return false
 		}
 	}

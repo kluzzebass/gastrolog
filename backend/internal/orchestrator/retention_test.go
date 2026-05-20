@@ -418,8 +418,8 @@ func TestExpireChunkSkipsLocalOnRequestDeleteFailure(t *testing.T) {
 		cm:         cm,
 		im:         im,
 		reconciler: rec,
-		now:    time.Now,
-		logger: slog.Default(),
+		now:        time.Now,
+		logger:     slog.Default(),
 	}
 
 	r.expireChunk(id, "retention-ttl")

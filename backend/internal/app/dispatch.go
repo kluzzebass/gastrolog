@@ -574,16 +574,12 @@ func (d *configDispatcher) applyInstanceMembershipChange(ctx context.Context, v 
 	// nodes. Gating on RF caused permanent deferral after node failure:
 	// the role was never updated, rotation never ran, chunks never sealed.
 	placements, _ := d.cfgStore.GetVaultPlacements(ctx, vaultID)
-	hasLeader := false
-	for _, p := range placements {
-		if p.Leader {
-			hasLeader = true
-			break
-		}
-	}
-	if !hasLeader {
-		d.logger.Debug("dispatch: vault placements have no leader, deferring rebuild",
-			"vault", vaultID, "placements", len(placements))
+	if len(placements) == 0 {
+		// No placements yet — the placement manager hasn't run.
+		// Defer the rebuild; we'll be re-notified on the next
+		// SetVaultPlacements.
+		d.logger.Debug("dispatch: vault has no placements, deferring rebuild",
+			"vault", vaultID)
 		return
 	}
 

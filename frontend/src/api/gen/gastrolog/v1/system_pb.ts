@@ -427,7 +427,9 @@ export class RetentionRule extends Message<RetentionRule> {
 
 /**
  * VaultPlacement assigns one replica of a vault to a specific file storage.
- * The node is derived from the file storage's NodeStorageConfig.
+ * The node is derived from the file storage's NodeStorageConfig. Under the
+ * fan-out data plane every placement member is symmetric — the legacy
+ * "leader" bool that singled out one canonical writer is gone (gastrolog-hshgl).
  *
  * @generated from message gastrolog.v1.VaultPlacement
  */
@@ -439,13 +441,6 @@ export class VaultPlacement extends Message<VaultPlacement> {
    */
   storageId = new Uint8Array(0);
 
-  /**
-   * true = this storage bootstraps the Raft group (initial leader)
-   *
-   * @generated from field: bool leader = 2;
-   */
-  leader = false;
-
   constructor(data?: PartialMessage<VaultPlacement>) {
     super();
     proto3.util.initPartial(data, this);
@@ -455,7 +450,6 @@ export class VaultPlacement extends Message<VaultPlacement> {
   static readonly typeName = "gastrolog.v1.VaultPlacement";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "storage_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 2, name: "leader", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultPlacement {

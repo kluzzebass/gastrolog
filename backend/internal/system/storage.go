@@ -178,42 +178,47 @@ const (
 )
 
 // VaultPlacement assigns one replica of a vault to a specific file storage.
-// The node is derived from the file storage's NodeStorageConfig.
+// The node is derived from the file storage's NodeStorageConfig. Under the
+// fan-out data plane (gastrolog-hshgl) every placement member is symmetric:
+// the legacy Leader bool that distinguished one canonical writer is gone,
+// and routing-layer "pick a canonical member" decisions take the first
+// placement deterministically.
 type VaultPlacement struct {
 	StorageID string `json:"storageId"`
-	Leader    bool   `json:"leader"`
 }
 
-// LeaderStorageID returns the storage ID of the leader placement, or empty if unplaced.
+// LeaderStorageID returns the storage ID of the first placement, or empty
+// if unplaced. Under fan-out this is the "deterministic canonical" used
+// by routing-layer code that needs to pick one placement member as a
+// stable target — every other placement member is an equally valid
+// alternative.
 func LeaderStorageID(placements []VaultPlacement) string {
-	for _, p := range placements {
-		if p.Leader {
-			return p.StorageID
-		}
+	if len(placements) == 0 {
+		return ""
 	}
-	return ""
+	return placements[0].StorageID
 }
 
-// FollowerStorageIDs returns the storage IDs of all follower placements.
+// FollowerStorageIDs returns the storage IDs of every placement member
+// except the first. Under fan-out the "leader" / "follower" distinction
+// is gone — these are just "the other placement members" for symmetric
+// peer enumeration.
 func FollowerStorageIDs(placements []VaultPlacement) []string {
-	var ids []string
-	for _, p := range placements {
-		if !p.Leader {
-			ids = append(ids, p.StorageID)
-		}
+	if len(placements) <= 1 {
+		return nil
+	}
+	ids := make([]string, 0, len(placements)-1)
+	for _, p := range placements[1:] {
+		ids = append(ids, p.StorageID)
 	}
 	return ids
 }
 
-// StorageIDs returns all placed storage IDs (leader first, then followers).
+// StorageIDs returns every placement storage ID in source order.
 func StorageIDs(placements []VaultPlacement) []string {
-	var ids []string
+	ids := make([]string, 0, len(placements))
 	for _, p := range placements {
-		if p.Leader {
-			ids = append([]string{p.StorageID}, ids...)
-		} else {
-			ids = append(ids, p.StorageID)
-		}
+		ids = append(ids, p.StorageID)
 	}
 	return ids
 }

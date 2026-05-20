@@ -279,9 +279,9 @@ func (h *orchRelHarness) seedSharedConfig() {
 				h.t.Fatalf("vault %s: invalid node index %d (have %d nodes)", v.label, idx, len(h.nodeIDs))
 			}
 			n := h.nodes[h.nodeIDs[idx]]
+			_ = pos
 			placements = append(placements, system.VaultPlacement{
 				StorageID: n.fileStorageID.String(),
-				Leader:    pos == 0,
 			})
 		}
 		if err := h.cfgStore.SetVaultPlacements(ctx, v.id, placements); err != nil {
