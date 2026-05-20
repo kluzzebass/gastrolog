@@ -50,6 +50,16 @@ type AnnouncerSetter interface {
 	SetAnnouncer(MetadataAnnouncer)
 }
 
+// RotationCoordinatorSetter is an optional interface for chunk
+// managers that support post-construction injection of a
+// RotationCoordinator. Mirrors AnnouncerSetter — the orchestrator
+// wires the coordinator after the chunk Manager is built so the
+// coordinator can close over per-vault state (FSM, applier, current
+// Receiving) without the chunk package depending on the orchestrator.
+type RotationCoordinatorSetter interface {
+	SetRotationCoordinator(RotationCoordinator)
+}
+
 // ReceivingAnnouncer is the optional extension of MetadataAnnouncer
 // that carries the initial Receiving set when announcing a new chunk
 // under the fan-out data-plane (gastrolog-2ujjh / gastrolog-nd6sz /
@@ -70,6 +80,36 @@ type ReceivingAnnouncer interface {
 // time + on every placement change.
 type FanOutConfigSetter interface {
 	SetFanOutConfig(receiving []string)
+}
+
+// RotationCoordinator drives FSM-mediated rotation under the fan-out
+// data plane (gastrolog-3yre7). When the chunk manager's rotation
+// policy fires, it hands the rotation moment to the coordinator,
+// which round-trips through vault-ctl Raft and returns the canonical
+// new chunk ID. The chunk manager then seals its current local chunk
+// and opens a new one with the returned ID — same ID across every
+// replica because Raft serializes proposals and the FSM single-Active
+// invariant (vaultctlfsm.ErrActiveChunkExists) discriminates winners
+// from losers.
+//
+// When this interface is nil on the chunk manager Config, the manager
+// falls back to the legacy local-mint flow: each rotation picks a
+// locally-fresh chunk ID and the announcer proposes via Raft after
+// the seal+open completes. Used by single-node, memory, and JSONL
+// chunk managers that have no cross-replica synchronization
+// requirement.
+type RotationCoordinator interface {
+	// BeginRotation transitions the FSM from "oldID is Active" to a
+	// new Active. Returns the canonical new chunk ID after the
+	// underlying Raft entries commit. The caller's candidate ID
+	// proposal may or may not win; either way the returned ID is the
+	// canonical Active and the caller must use it for the local seal+
+	// open.
+	//
+	// oldID may be the zero value when there's no current Active to
+	// transition (e.g., the chunk manager is opening its very first
+	// chunk for a vault).
+	BeginRotation(oldID ChunkID) (ChunkID, error)
 }
 
 // IntegrityVerifier reports the expected GLCB whole-blob digest for a chunk

@@ -149,6 +149,21 @@ type Config struct {
 	// (create, seal, compress, upload, delete) for cluster-wide visibility.
 	Announcer chunk.MetadataAnnouncer
 
+	// RotationCoordinator, when non-nil, drives FSM-mediated rotation.
+	// rotateIfNeeded hands the rotation moment to the coordinator,
+	// which round-trips through vault-ctl Raft and returns the
+	// canonical new chunk ID. The chunk manager seals its current
+	// active and opens a new local chunk with the returned ID — no
+	// separate AnnounceBeginSeal/AnnounceCreate queued for this path
+	// because the coordinator already proposed both. See
+	// gastrolog-3yre7.
+	//
+	// When nil, the manager falls back to the legacy flow: local mint
+	// + announcer-driven propose-after-the-fact. Used by single-node /
+	// memory / jsonl managers that need no cross-replica
+	// synchronization.
+	RotationCoordinator chunk.RotationCoordinator
+
 	// IntegrityVerifier, when non-nil, is consulted on every cold-cache
 	// cloud download to verify the GLCB whole-blob digest matches the
 	// FSM-recorded value (gastrolog-grnc3). A mismatch causes the
@@ -187,6 +202,12 @@ type Manager struct {
 	cloudListCache []chunk.ChunkMeta         // cached List() result for cloud chunks; nil = stale
 	storageClasses map[chunk.ChunkID]string  // in-memory cache of cloud storage class per chunk
 	nextChunkID    *chunk.ChunkID            // if set, used instead of NewChunkID() on next open
+	// nextChunkIDPreAnnounced flags that nextChunkID was set via the
+	// FSM-mediated rotation path (RotationCoordinator). openLocked
+	// SKIPS the AnnounceCreate queue for this ID because the
+	// coordinator already proposed CmdCreateChunk via Raft. The flag
+	// resets after consumption. See gastrolog-3yre7.
+	nextChunkIDPreAnnounced bool
 
 	postSealActive sync.Map       // chunk.ChunkID → chan struct{} — closed when PostSealProcess finishes
 	postSealWg     sync.WaitGroup // tracks in-flight PostSealProcess calls (for Close only)
@@ -616,14 +637,56 @@ func (m *Manager) rotateIfNeeded(record chunk.Record, attrBytes []byte, newKeys 
 		"records", state.Records,
 		"age", m.cfg.Now().Sub(state.CreatedAt),
 	)
-	if err := m.sealLocked(); err != nil {
-		return nil, nil, err
+
+	if m.cfg.RotationCoordinator != nil {
+		if err := m.rotateViaCoordinator(state.ChunkID); err != nil {
+			return nil, nil, err
+		}
+	} else {
+		if err := m.rotateLocallyLegacy(); err != nil {
+			return nil, nil, err
+		}
 	}
-	if err := m.openLocked(); err != nil {
-		return nil, nil, err
-	}
+
 	attrBytes, newKeys, err := chunk.EncodeWithDict(record.Attrs, m.active.dict)
 	return attrBytes, newKeys, err
+}
+
+// rotateViaCoordinator hands the rotation moment to the FSM-mediated
+// coordinator (gastrolog-3yre7). The coordinator proposes
+// CmdBeginSeal(oldID) + CmdCreateChunk(newID) via vault-ctl Raft and
+// returns the canonical new ID after both entries commit. If this
+// replica's proposal lost the race against another replica that
+// rotated first, the returned ID is the winner's — so the local seal+
+// open produces a chunk whose ID matches every other replica.
+//
+// Both Raft entries are already applied by the time the coordinator
+// returns, so the local seal + open suppress their announce-queue
+// entries (sealActiveLocked(false), nextChunkIDPreAnnounced=true);
+// re-announcing would duplicate Raft entries and the FSM single-
+// Active invariant would reject the second CmdCreateChunk anyway.
+func (m *Manager) rotateViaCoordinator(oldID chunk.ChunkID) error {
+	newID, err := m.cfg.RotationCoordinator.BeginRotation(oldID)
+	if err != nil {
+		return fmt.Errorf("rotation coordinator: %w", err)
+	}
+	if err := m.sealActiveLocked(false); err != nil {
+		return err
+	}
+	m.nextChunkID = &newID
+	m.nextChunkIDPreAnnounced = true
+	return m.openLocked()
+}
+
+// rotateLocallyLegacy is the pre-fan-out rotation flow: local mint +
+// announcer-driven propose-after-the-fact. Used by memory / jsonl
+// chunk managers (and unit tests) that have no cross-replica
+// synchronization requirement and no RotationCoordinator wired.
+func (m *Manager) rotateLocallyLegacy() error {
+	if err := m.sealLocked(); err != nil {
+		return err
+	}
+	return m.openLocked()
 }
 
 func writeAll(f *os.File, data []byte) error {
@@ -1772,9 +1835,12 @@ func (m *Manager) SetNextChunkID(id chunk.ChunkID) {
 
 func (m *Manager) openLocked() error {
 	var id chunk.ChunkID
+	preAnnounced := false
 	if m.nextChunkID != nil {
 		id = *m.nextChunkID
 		m.nextChunkID = nil
+		preAnnounced = m.nextChunkIDPreAnnounced
+		m.nextChunkIDPreAnnounced = false
 	} else {
 		id = chunk.NewChunkID()
 	}
@@ -1856,7 +1922,12 @@ func (m *Manager) openLocked() error {
 	initWriteOrder(m.active, 0)
 	m.metas[id] = meta
 
-	if m.cfg.Announcer != nil {
+	// Skip the AnnounceCreate queue entirely when this open came in
+	// via the FSM-mediated rotation path: the RotationCoordinator
+	// already proposed CmdCreateChunk via Raft and the FSM apply has
+	// already committed by the time we get here. Queueing another
+	// announce would double-propose with a duplicate Raft entry.
+	if m.cfg.Announcer != nil && !preAnnounced {
 		ann := m.cfg.Announcer
 		// Snapshot Receiving so the deferred announcement uses the
 		// same value seen at create time (avoids races with a
@@ -3632,6 +3703,18 @@ func (m *Manager) SetAnnouncer(a chunk.MetadataAnnouncer) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.cfg.Announcer = a
+}
+
+// SetRotationCoordinator injects the FSM-mediated rotation coordinator
+// for cluster-wide chunk-ID alignment under the fan-out data plane
+// (gastrolog-3yre7). Implements chunk.RotationCoordinatorSetter. Must
+// be called before any Append/Seal operations that might trigger
+// rotation. Safe to call with nil to disable the coordinator and fall
+// back to the legacy local-mint rotation flow.
+func (m *Manager) SetRotationCoordinator(c chunk.RotationCoordinator) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.cfg.RotationCoordinator = c
 }
 
 // SetFanOutConfig wires the initial Receiving snapshot the next

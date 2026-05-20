@@ -689,6 +689,10 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 		// chunk manager so the next CmdCreateChunk stamps the placement
 		// member set on the new chunk.
 		applyFanOutConfig(ti.Chunks, vaultCfg, placements, nscs)
+		// Wire the FSM-mediated rotation coordinator so rotation
+		// proposals round-trip through vault-ctl Raft and align chunk
+		// IDs across replicas (gastrolog-3yre7).
+		o.wireRotationCoordinator(ti.Chunks, vaultCfg.ID, placements, nscs, factories)
 		return ti, nil
 	}
 
