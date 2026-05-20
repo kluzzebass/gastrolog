@@ -4,16 +4,16 @@
 
 ## Context
 
-**The change in one line:** today the orchestrator forwards each record to the single node holding the vault's placement leader. Under fan-out, the orchestrator forwards each record to every node listed in the vault's active chunk's `Receiving` set. Same forwarder, different topology source.
+**The change in one line:** under fan-out the orchestrator forwards each record to every node listed in the vault's active chunk's `Receiving` set. Same forwarder, different topology source — the legacy "forward to the single placement-leader node" path is gone.
 
-The current cluster data-plane is leader-driven and uses two distinct replication paths:
+The pre-fan-out data-plane was leader-driven with two distinct replication paths:
 
-- **Per-record real-time replication.** Records arrive at the placement leader's node, which appends locally and forwards each record to followers via `ChunkReplicator.AppendRecords` ([backend/internal/cluster/chunk_replicator.go#L190](backend/internal/cluster/chunk_replicator.go#L190)) over one bidirectional gRPC stream per (vault, follower).
-- **At-seal sealed-chunk re-ship.** Once a chunk seals, the canonical sealed chunk is re-shipped to followers via `replicateToFollower` → `ImportSealedChunk` ([backend/internal/orchestrator/replication.go#L252](backend/internal/orchestrator/replication.go#L252)). This subsystem is already tagged for removal under [gastrolog-1bd56](dcat://gastrolog-1bd56) and falls out naturally once fan-out lands.
+- **Per-record real-time replication.** Records arrived at the placement leader's node, which appended locally and forwarded each record to followers via `ChunkReplicator.AppendRecords` over one bidirectional gRPC stream per (vault, follower).
+- **At-seal sealed-chunk re-ship.** Once a chunk sealed, the canonical sealed chunk was re-shipped to followers via `replicateToFollower` → `ImportSealedChunk`.
 
-Reads route to the placement leader only ([backend/internal/server/query_remote.go#L109](backend/internal/server/query_remote.go#L109) `remoteVaultsByNodeFiltered`); followers don't serve reads.
+Reads routed to the placement leader only via `remoteVaultsByNodeFiltered`; followers didn't serve reads.
 
-This model has known pain:
+That model had known pain:
 
 - **Leader bandwidth ceiling.** Each vault's per-write outbound replication traffic is concentrated on one node. The leader's NIC is the per-vault scaling bottleneck.
 - **Leader-failure stalls writes.** When the leader's node fails, writes to that vault halt until vault-ctl elects a new leader.
@@ -482,29 +482,39 @@ No new primitives are invented. The architecture is built on existing well-shape
 
 The control-plane epic provided the substrate (states, authority discipline, learner mechanism); this epic redesigns the data-plane on top.
 
-## Migration from current architecture
+## Status
 
-The current `ChunkReplicator.AppendRecords` (per-record real-time) and `replicateToFollower` → `ImportSealedChunk` (at-seal re-ship) mechanisms cannot be removed mid-flight without breaking existing clusters. Migration approach:
+This design has shipped. The fan-out data plane is the only write path
+on `main`. The legacy LeaderDriven dispatch (`ChunkReplicator.AppendRecords`
+per-record forwarding, `replicateToFollower` → `ImportSealedChunk`
+at-seal re-ship, leader-only rotation, follower NeverRotatePolicy,
+senderChunkID stamping, VaultPlacement.Leader, IsFollower asymmetry)
+is fully removed under epic [gastrolog-2ujjh](dcat://gastrolog-2ujjh).
+The history is in commits b7d54a87..9b9af0ff on
+[gastrolog-hshgl](dcat://gastrolog-hshgl).
 
-1. **Flag-gated rollout.** Per-vault config: `WriteModel = LeaderDriven` (current) or `FanOut` (new). Default LeaderDriven during transition.
-2. **Implement fan-out alongside existing.** New W-of-N coordinator in the orchestrator; new FSM commands for Receiving/Holding (snapshot sections 4 and 5); new reconcile mechanism. Old mechanisms remain operational for vaults still in LeaderDriven mode.
-3. **Per-vault opt-in.** Operator switches vaults to FanOut individually after observing the mechanism works for less-critical vaults.
-4. **Remove old mechanism.** Once all clusters have migrated all vaults, `ChunkReplicator.AppendRecords`, `replicateToFollower`, `ImportSealedChunk`, the `MatchResult.NodeID` branch in `ingestLocked`, and the `VaultPlacement.Leader` field all get deleted ([gastrolog-1bd56](dcat://gastrolog-1bd56) had already flagged the sealed-chunk re-ship for removal).
+What survives under fan-out vocabulary:
 
-### Per-chunk cutover semantics
-
-The WriteModel is per-vault config but **per-chunk in effect**: each chunk's WriteModel is fixed at creation time and immutable for the chunk's lifetime. Concretely:
-
-- `CmdCreateChunk` payload carries a `WriteModel` enum (alongside the new `Receiving []NodeID` field). The proposer reads the vault config at proposal time and stamps the new chunk accordingly.
-- A vault transitioning from LeaderDriven to FanOut: in-flight active chunks complete under LeaderDriven (`forwardToFollowers` → followers; standard at-seal re-ship). New chunks created after the config change are FanOut (orchestrator fan-out against Receiving + W-of-N).
-- The orchestrator's `writeLoop` reads each chunk's WriteModel and dispatches accordingly: LeaderDriven → existing `appendLocal`/`forwardToFollowers` path; FanOut → new fan-out path.
-- No mid-chunk transition. No active-chunk reconcile across WriteModels. Each chunk is self-consistent.
-
-This avoids the complexity of mid-chunk cutover and keeps the migration commit-by-commit safe to revert if a vault's first FanOut chunk surfaces a problem.
-
-Per-vault rollout means the cluster runs both data-plane models simultaneously during the transition. The FSM commands are disjoint (Receiving/Holding/PendingPulls for FanOut chunks; placement + FollowerTargets for LeaderDriven chunks), so there's no consistency risk between them.
-
-**Dual-path obligation.** Running both write paths in `writeLoop` doubles the surface area for write-path bugs: every regression must be reproduced under both `LeaderDriven` and `FanOut`. This is the unavoidable cost of a per-vault migration, but it also makes it tempting to defer issue #7 (legacy removal) indefinitely once FanOut "works for most vaults." The migration is not complete until #7 lands and the dual dispatch in `writeLoop` is gone — operators carrying the dual-path tax accumulate it across every future write-path change. Treat the migration as a single sustained effort, not a phase that ends when the first FanOut vault is healthy.
+- `system.PrimaryPlacementNodeID` (formerly `LeaderNodeID`): deterministic
+  first-placement target used by the routing-layer interceptor. The
+  routed-to node fans out internally; every other placement member is
+  an equally authoritative peer.
+- `system.PeerPlacementTargets` (formerly `FollowerTargets`):
+  enumeration of every OTHER placement member, consumed by the
+  reconciler's symmetric peer set for missing-replica catchup.
+- `chunk.RotationCoordinator`: FSM-mediated rotation hook — every
+  replica's chunk manager hands rotation to the coordinator, which
+  proposes `CmdBeginSeal + CmdCreateChunk` via vault-ctl Raft and
+  returns the canonical new chunk ID. The FSM single-Active invariant
+  (`ErrActiveChunkExists`) discriminates winners from losers; losing
+  proposers align to the canonical via OnCreate.
+- `chunk.UploadGate`: cloud-upload gating callback. PostSealProcess
+  runs locally on every Receiver but only the vault-ctl Raft leader
+  pushes the GLCB to the shared blob store.
+- `ImportSealedChunk` / `replicateToFollower`: still live, used by
+  the receiver-driven catchup path (`SweepMissingReplicas` →
+  `RequestReplicaCatchup`) and by vault drain. The push direction
+  inverted but the streaming primitive itself is unchanged.
 
 ## Out of scope (deferred to implementation issues)
 
