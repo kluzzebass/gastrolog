@@ -82,7 +82,9 @@ for append-heavy write patterns and time-ordered reads.
 
 ### States a chunk passes through
 
-- **Active** — open for writes; lives only on the vault leader.
+- **Active** — open for writes; under fan-out lives on every node in the
+  chunk's `Receiving` set simultaneously, with FSM-mediated rotation
+  keeping the chunk ID aligned across replicas.
 - **Sealed** — immutable; eligible for compression/indexing/replication.
 - **Compressed** — `raw.log`/`attr.log` encoded zstd; `DiskBytes ≠ Bytes`.
 - **Cloud-backed** — record bytes live in S3/Azure/GCS, not local disk; marked
@@ -496,9 +498,12 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
 - **Drain** — move all of a vault's chunks off this node, then remove the
   local instance. Used for decommission.
 
-- **Catchup** — replicate sealed chunks from a leader to a follower that
-  just joined or restarted. Distinct from live replication (which happens
-  per-record).
+- **Catchup** — receiver-driven sealed-chunk pull. Every Receiver's
+  reconciler periodically diffs its FSM manifest against local disk
+  and asks every other placement member to push any chunks it's
+  missing. Distinct from live replication, which under fan-out is
+  the orchestrator's per-record fan-out to the active chunk's
+  Receiving set.
 
 ---
 
@@ -510,10 +515,14 @@ Cross-node data movement. Three distinct mechanisms; do not confuse them.
   events). Flows through hraft via the multiraft transport. Committed only
   when a majority acks. This is the **authoritative** metadata replication.
 
-- **Vault replication** — actual chunk content (records) from a vault leader
-  to its followers. Uses ordered streams per `(vaultID, followerNodeID)`
-  via the **ChunkReplicator**. Does NOT use Raft; uses gRPC streams with
-  application-level acks.
+- **Vault replication** — actual chunk content (records) from one
+  placement member to another. Under fan-out (gastrolog-hshgl) the
+  per-record path goes through the orchestrator's writeLoop, which
+  fans out each record to every node in the active chunk's
+  `Receiving` set via the **RecordForwarder**. The sealed-chunk pull
+  path (catchup, drain) uses the **ChunkReplicator** for streamed
+  `ImportSealedChunk` transfers. Neither uses Raft; both use gRPC
+  streams with application-level acks.
 
 - **Cross-vault record forwarding** — at ingestion time, a record that
   matches a vault owned by another node is forwarded via the
@@ -522,9 +531,11 @@ Cross-node data movement. Three distinct mechanisms; do not confuse them.
 
 ### The actors
 
-- **ChunkReplicator** — per-node manager of replication streams to follower
-  vaults. Methods: `AppendRecords`, `SealVault`, `ImportSealedChunk`,
-  `DeleteChunk`. Always invoked on the **vault leader**.
+- **ChunkReplicator** — per-node manager of cross-node chunk RPCs.
+  Methods: `AppendRecords` (per-record fan-out RPC), `SealVault`,
+  `ImportSealedChunk` (sealed-chunk push for catchup / drain),
+  `DeleteChunk`, `RequestReplicaCatchup`. Under fan-out invoked
+  symmetrically by every Receiver — no leader gate.
   [`cluster/chunk_replicator.go`](../backend/internal/cluster/chunk_replicator.go).
 
 - **RecordForwarder** — per-node ingestion forwarder. Batches records by
@@ -546,19 +557,17 @@ Cross-node data movement. Three distinct mechanisms; do not confuse them.
 
 ### The verbs
 
-- **`fireAndForgetRemote`** — called from the ingest and append paths:
-  dispatches per-follower replication goroutines. MUST be called
-  *outside* `o.mu`; holding the lock across this call cascades into
-  cluster-wide deadlock on a paused peer
-  ([`gastrolog-5oofa`](../backend/internal/orchestrator/reliability_orch_test.go)).
+- **`runFanOut` / `dispatchFanOutAsync`** — orchestrator entry points
+  for the fan-out write path. `runFanOut` blocks until the W-of-N
+  coordinator returns (ack-gated writes); `dispatchFanOutAsync`
+  fires per-peer goroutines without waiting (non-ack-gated). Both
+  consult `o.shuttingDown()` and skip during drain to avoid the
+  paused-peer deadlock that `gastrolog-5oofa` originally
+  documented for the legacy `fireAndForgetRemote` path.
 
-- **Replica backoff circuit breaker** — `o.replicaCircuit`: per-node
-  `failures`/`skipUntil` state. After consecutive failures to a node,
-  subsequent replication attempts skip that node for an exponentially
-  growing window (2s → 4s → 16s → ...).
-
-- **Replica count** — how many nodes are known to have this chunk
-  (leader + caught-up followers). Surfaced on `ChunkMeta.ReplicaCount`.
+- **Replica count** — how many nodes hold this chunk's bytes
+  according to the FSM's `ChunkPlacement.Holding`. Surfaced on
+  `ChunkMeta.ReplicaCount`.
 
 ### Connection management
 
@@ -706,8 +715,12 @@ Live on `Config` directly (not as entities):
 
 | Canonical        | Do not use        | Rationale                                                          |
 |------------------|-------------------|--------------------------------------------------------------------|
-| leader           | primary           | Raft terminology is consistent across the industry.                |
-| follower         | secondary, replica| "replica" is ambiguous with the separate concept of chunk replica. |
+| leader (Raft)    | primary           | Raft terminology — vault-ctl / cluster-ctl Raft leader, naturally elected. |
+| follower (Raft)  | secondary, replica| Raft terminology — non-leader Raft members. NOT a vault-chunk concept. |
+| primary placement member | leader (vault), placement leader | Under fan-out the canonical placement is just the first member; no data-path leader. |
+| peer placement member | follower (vault) | Every other placement member is equally authoritative under fan-out. |
+| Receiver         | replica, follower | A node currently in a chunk's `Receiving` set. The fan-out write target. |
+| Holder           | replica, follower | A node currently in a chunk's `Holding` set. Authoritative residency. |
 | active chunk     | open chunk        | "Active" matches `ChunkMeta.Sealed = false`.                       |
 | sealed chunk     | closed chunk, finalized chunk | "Sealed" is what the chunk manager actually calls it.  |
 | cloud-backed     | cloud chunk       | Cloud-backed describes storage; "cloud chunk" conflates with archival state. |
@@ -715,7 +728,7 @@ Live on `Config` directly (not as entities):
 | vault-ctl Raft   |                   | One Raft group per vault, authoritative for that vault's chunk metadata. Follows the `{scope}-ctl` naming pattern for control-plane Raft groups. |
 | cluster-ctl Raft | system Raft, config Raft, cluster Raft | One Raft group per cluster, authoritative for cluster-wide configuration. Pairs with `vault-ctl Raft` to form the `{scope}-ctl` pattern. The on-disk Raft group ID and type names were renamed from `system` → `cluster-ctl` in gastrolog-5eu6v. |
 | instance FSM     |                   | Per-vault chunk-metadata sub-FSM in `vaultctlfsm`. |
-| vault replication |                  | Record streams from leader to follower, per vault. |
+| vault replication |                  | Per-record streams from the originating orchestrator to every node in the chunk's Receiving set (fan-out). |
 | ingester         | source, collector | "Ingester" is the proto name; "source" leaks from UI copy.          |
 | route            | pipeline (at ingest) | Ingestion "route" ≠ query "pipeline"; use "route pipeline" or "ingestion pipeline" to bridge. |
 | record           | event, message    | "Event" conflates with `EventID`; "message" conflates with ingester internals. |
@@ -768,9 +781,11 @@ Error values that cross bounded contexts:
 
 ### What "replication" means in which context
 
-- **Record replication** (vault layer) — copying record bytes from the
-  vault leader to vault followers. Done by `ChunkReplicator`. Acked by
-  a per-vault application-level ack; bounded by `ForwardingTimeout`.
+- **Record replication** (vault layer) — under fan-out, the orchestrator
+  forwards each record to every node in the active chunk's `Receiving`
+  set via `runFanOut`. Per-peer RPC goes through `ChunkReplicator.
+  AppendRecords`. W-of-N ack accounting bounds latency; the per-peer
+  RPC is bounded by `ForwardingTimeout`.
 - **Metadata replication** (vault-ctl Raft) — propagating chunk-create /
   seal / delete / upload events. Done by hraft via multiraft transport.
   Acked by Raft majority; bounded by `ReplicationTimeout`.
