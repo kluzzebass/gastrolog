@@ -349,6 +349,82 @@ func (tr *ChunkReplicator) RequestReplicaCatchup(ctx context.Context, leaderNode
 	return resp.GetScheduled(), nil
 }
 
+// PullRecords is the puller→source pull-by-EventID request. Sent by the
+// requesting node to a peer that may hold records the requester needs (for
+// reconcile slow path, drain Holding drain, node-return catchup, etc.).
+// The source's handler filters its local chunk by the EventID set and
+// asynchronously pushes matching records back to the requester via Fill
+// frames on the existing per-vault ChunkReplication stream. Returns
+// (scheduled, missing) so the requester knows what to expect and which
+// EventIDs to seek elsewhere. See gastrolog-4t3y4 and
+// docs/pull-records-design.md.
+//
+// Unary RPC (not on the bidirectional stream) for the same reason as
+// RequestReplicaCatchup — request is small, the actual data transfer is
+// the asynchronous Fill push.
+func (tr *ChunkReplicator) PullRecords(ctx context.Context, sourceNodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, eventIDs []chunk.EventID, requesterNodeID string) (scheduled, missing uint32, err error) {
+	conn, err := tr.peers.Conn(sourceNodeID)
+	if err != nil {
+		return 0, 0, fmt.Errorf("dial source %s: %w", sourceNodeID, err)
+	}
+	rawIDs := make([][]byte, len(eventIDs))
+	for i := range eventIDs {
+		buf := eventIDs[i].Bytes()
+		rawIDs[i] = buf[:]
+	}
+	req := &gastrologv1.PullRecordsRequest{
+		VaultId:         vaultID.ToProto(),
+		ChunkId:         chunkID[:],
+		EventIds:        rawIDs,
+		RequesterNodeId: []byte(requesterNodeID),
+	}
+	resp := &gastrologv1.PullRecordsResponse{}
+	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/PullRecords", req, resp); err != nil {
+		return 0, 0, err
+	}
+	return resp.GetScheduled(), resp.GetMissing(), nil
+}
+
+// SendFillRecords pushes a batch of records to the puller as part of a
+// PullRecords-initiated fill sequence. Sent source → puller over the
+// existing per-vault chunk-replication stream. lastBatch=true on the
+// final frame triggers the puller's CmdAckPull dispatch (wiring lands
+// in gastrolog-37k2b-e). See gastrolog-4t3y4.
+func (tr *ChunkReplicator) SendFillRecords(ctx context.Context, pullerNodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record, lastBatch bool) error {
+	exports := make([]*gastrologv1.ExportRecord, len(records))
+	for i, rec := range records {
+		exports[i] = convert.RecordToExport(rec)
+	}
+	return tr.send(ctx, vaultID, pullerNodeID, &gastrologv1.ChunkReplicationCommand{
+		VaultId: vaultID.ToProto(),
+		Command: &gastrologv1.ChunkReplicationCommand_FillRecords{
+			FillRecords: &gastrologv1.ChunkReplicationFillRecords{
+				ChunkId:   glid.GLID(chunkID).ToProto(),
+				Records:   exports,
+				LastBatch: lastBatch,
+			},
+		},
+	})
+}
+
+// SendFillComplete signals end-of-stream for a fill sequence to the puller.
+// Used when (a) the source had no matching records to send (records_sent=0,
+// no FillRecords frames sent), or (b) the source aborted mid-stream and
+// wants to surface the error to the puller's reconcile loop. errMsg should
+// be empty on the clean-completion path. See gastrolog-4t3y4.
+func (tr *ChunkReplicator) SendFillComplete(ctx context.Context, pullerNodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, recordsSent uint32, errMsg string) error {
+	return tr.send(ctx, vaultID, pullerNodeID, &gastrologv1.ChunkReplicationCommand{
+		VaultId: vaultID.ToProto(),
+		Command: &gastrologv1.ChunkReplicationCommand_FillComplete{
+			FillComplete: &gastrologv1.ChunkReplicationFillComplete{
+				ChunkId:     glid.GLID(chunkID).ToProto(),
+				RecordsSent: recordsSent,
+				Error:       errMsg,
+			},
+		},
+	})
+}
+
 // CloseStream closes the stream for a specific vault+follower.
 func (tr *ChunkReplicator) CloseStream(vaultID glid.GLID, nodeID string) {
 	tr.closeStream(vaultID, nodeID)
