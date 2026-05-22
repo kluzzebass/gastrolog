@@ -182,14 +182,23 @@ func TestRouteSetMultiDestination(t *testing.T) {
 	}
 }
 
-func TestRouteSetMatchPreservesNodeIDAndDistribution(t *testing.T) {
+// TestRouteSetMatchPreservesRouteIDAndDistribution verifies that
+// MatchResult carries the RouteID + Distribution from the compiled
+// route through to the dispatch layer.
+//
+// Pre-mqxo4 this test also asserted MatchResult.NodeID echoed the
+// per-destination NodeID from route compilation; under fan-out the
+// destination's owning node isn't a property of the match (the
+// dispatcher reads the active chunk's Receiving from the FSM at
+// dispatch time), so the NodeID assertions are gone.
+func TestRouteSetMatchPreservesRouteIDAndDistribution(t *testing.T) {
 	t.Parallel()
-	localID := glid.New()
-	remoteID := glid.New()
+	vaultA := glid.New()
+	vaultB := glid.New()
 
 	r, _ := CompileRoute(glid.New(), "mixed", 0, "*", []RouteDestination{
-		{VaultID: localID},
-		{VaultID: remoteID, NodeID: "node-B"},
+		{VaultID: vaultA},
+		{VaultID: vaultB},
 	}, "round-robin")
 	rs := NewRouteSet([]*CompiledRoute{r})
 
@@ -203,12 +212,6 @@ func TestRouteSetMatchPreservesNodeIDAndDistribution(t *testing.T) {
 		}
 		if m.Distribution != "round-robin" {
 			t.Errorf("expected round-robin, got %q", m.Distribution)
-		}
-		if m.VaultID == localID && m.NodeID != "" {
-			t.Errorf("local vault should have empty NodeID, got %q", m.NodeID)
-		}
-		if m.VaultID == remoteID && m.NodeID != "node-B" {
-			t.Errorf("remote vault NodeID = %q, want node-B", m.NodeID)
 		}
 	}
 }

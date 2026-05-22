@@ -3,30 +3,14 @@ package orchestrator
 import (
 	"context"
 	"fmt"
-	"gastrolog/internal/glid"
 
+	"gastrolog/internal/glid"
 	"gastrolog/internal/system"
 )
 
-// resolveVaultNodeID finds the node that owns the vault. Returns empty
-// string if the vault has no placements (unassigned).
-//
-// Reads VaultConfig.Placements directly (mirrored from vault placements
-// via the FSM bridge — gastrolog-257l7).
-func resolveVaultNodeID(sys *system.System, vaultID glid.GLID) string {
-	cfg := &sys.Config
-	rt := &sys.Runtime
-	for _, v := range cfg.Vaults {
-		if v.ID != vaultID {
-			continue
-		}
-		if len(v.Placements) == 0 {
-			return ""
-		}
-		return system.PrimaryPlacementNodeID(v.Placements, rt.NodeStorageConfigs)
-	}
-	return ""
-}
+// resolveVaultNodeID was deleted with gastrolog-mqxo4. Route destinations
+// no longer carry an owning node ID — every record dispatches directly
+// to the active chunk's Receiving members via the per-vault FSM.
 
 // ReloadFilters loads the full config and rebuilds the routing table
 // from the current route set. Renamed from the Phase-4 "filter reload"
@@ -70,26 +54,17 @@ func (o *Orchestrator) reloadRoutesFromConfig(sys *system.System) error {
 			continue
 		}
 
+		// Under fan-out (gastrolog-mqxo4) route destinations carry only
+		// the vault ID. The dispatcher resolves the active chunk's
+		// Receiving members at dispatch time via the per-vault FSM —
+		// every node has the FSM state, so every node can dispatch to
+		// any vault. Pre-mqxo4 this loop resolved the destination's
+		// "hot" node and stamped it on RouteDestination.NodeID so the
+		// ingest path could route remote-vault records via the
+		// forwarder; that distinction is gone.
 		dests := make([]RouteDestination, 0, len(route.Destinations))
 		for _, destID := range route.Destinations {
-			hotVaultNode := resolveVaultNodeID(sys, destID)
-
-			nodeID := ""
-			switch {
-			case o.draining[destID] != nil:
-				nodeID = o.draining[destID].TargetNodeID
-			case hotVaultNode == "" || hotVaultNode == o.localNodeID:
-				// Hot instance is local (or unassigned) — append locally if registered.
-				if _, ok := o.vaults[destID]; !ok {
-					continue // not registered locally
-				}
-			case o.forwarder != nil:
-				// Hot instance is on a remote node — forward.
-				nodeID = hotVaultNode
-			default:
-				continue // single-node mode, skip remote
-			}
-			dests = append(dests, RouteDestination{VaultID: destID, NodeID: nodeID})
+			dests = append(dests, RouteDestination{VaultID: destID})
 		}
 
 		if len(dests) == 0 {

@@ -43,7 +43,7 @@ func (o *Orchestrator) IngestWithSource(rec chunk.Record, src SourceContext) err
 		return err
 	}
 	o.dispatchFanOutAsync(pa, rec)
-	return o.flushRecordRouteForwards(context.Background(), pa, rec)
+	return nil
 }
 
 // ingest is the internal ingest implementation. Backwards-compatible
@@ -101,24 +101,15 @@ func (o *Orchestrator) ingestLocked(rec chunk.Record, src SourceContext) (*pendi
 	routed := false
 	var pa *pendingAcks
 	for _, t := range matches {
-		if t.NodeID != "" {
-			var err error
-			pa, err = o.handleRemoteVaultMatch(pa, t, rec)
-			if err != nil {
-				return pa, err
-			}
-			routed = true
-			continue
-		}
-		fanOut, err := o.appendLocal(t.VaultID, rec)
+		taskAdded, err := o.dispatchRouted(&pa, t.VaultID, rec)
 		if err != nil {
 			if errors.Is(err, ErrVaultDisabled) {
 				continue // Skip disabled vaults during ingestion.
 			}
 			return pa, err
 		}
-		if fanOut != nil {
-			pa = pa.addFanOut(*fanOut)
+		if !taskAdded {
+			continue
 		}
 		vs := o.getOrCreateVaultRouteStats(t.VaultID)
 		vs.Matched.Add(1)
@@ -134,56 +125,91 @@ func (o *Orchestrator) ingestLocked(rec chunk.Record, src SourceContext) (*pendi
 	return pa, nil
 }
 
-// handleRemoteVaultMatch updates route stats and queues cross-node forwarding
-// for a filter match whose vault lives on another node. Caller holds o.mu.RLock.
-func (o *Orchestrator) handleRemoteVaultMatch(pa *pendingAcks, t MatchResult, rec chunk.Record) (*pendingAcks, error) {
-	if rec.WaitForReplica {
-		pa = pa.addForward(forwardTask{nodeID: t.NodeID, vaultID: t.VaultID})
-	} else {
-		if o.forwarder == nil {
+// dispatchRouted resolves a routed record to its destination under the
+// fan-out data plane (gastrolog-4w8sv resolution): the originator
+// dispatches directly to every Receiving member of the vault's active
+// chunk, regardless of whether this node has a local vault instance.
+//
+//   - When self is in Receiving for the active chunk: local append happens
+//     via appendLocal (which also builds the fan-out task targeting the
+//     remaining Receiving members and accounts for self-ack via W-1).
+//   - When self is NOT in Receiving (this node is just the ingest entry
+//     point, or has no placement for the vault): buildFanOutTask is called
+//     directly so the dispatch targets every Receiving member with full W.
+//
+// Returns (true, nil) when a fan-out task (with or without local append)
+// was added to pendingAcks; (false, nil) when the record can't be
+// dispatched (no active chunk in the FSM yet) and the caller should
+// continue to the next match. Errors propagate from the local-append
+// path.
+//
+// Caller holds o.mu.RLock.
+func (o *Orchestrator) dispatchRouted(pa **pendingAcks, vaultID glid.GLID, rec chunk.Record) (bool, error) {
+	chunkID, placement := o.lookupActivePlacement(vaultID)
+	if chunkID == (chunk.ChunkID{}) || placement == nil {
+		// No active chunk yet in the FSM. Falls back to local append
+		// only when this node has a vault instance; that path opens
+		// the first chunk via RotationCoordinator and Raft-mediates
+		// the chunk-ID assignment. If this node has no local instance
+		// either, the record has nowhere to land — drop.
+		if _, ok := o.vaults[vaultID]; !ok {
 			o.routeStats.Dropped.Add(1)
-			return pa, errors.New("remote vault route requires record forwarder")
+			return false, nil
 		}
-		pa = pa.addSyncForward(forwardTask{nodeID: t.NodeID, vaultID: t.VaultID})
+		fanOut, err := o.appendLocal(vaultID, rec)
+		if err != nil {
+			return false, err
+		}
+		if fanOut != nil {
+			*pa = (*pa).addFanOut(*fanOut)
+		}
+		return true, nil
 	}
-	vs := o.getOrCreateVaultRouteStats(t.VaultID)
-	vs.Matched.Add(1)
-	vs.Forwarded.Add(1)
-	if t.RouteID != glid.Nil {
-		rs := o.getOrCreatePerRouteStats(t.RouteID)
-		rs.Matched.Add(1)
-		rs.Forwarded.Add(1)
+
+	if placement.HasReceiving(o.localNodeID) {
+		// Self is in Receiving — local append + fan-out to the other
+		// Receiving members. appendLocal calls buildFanOutTask
+		// internally and the resulting task has W decremented to
+		// reflect the self-ack.
+		fanOut, err := o.appendLocal(vaultID, rec)
+		if err != nil {
+			return false, err
+		}
+		if fanOut != nil {
+			*pa = (*pa).addFanOut(*fanOut)
+		}
+		return true, nil
 	}
-	return pa, nil
+
+	// Self is NOT in Receiving for this chunk — pure cross-node fan-out.
+	// Build the task externally with the looked-up placement so the
+	// dispatcher targets every Receiving member with full W (no self-ack
+	// to subtract).
+	fanOut := o.buildFanOutTask(vaultID, chunkID, placement, rec)
+	if fanOut == nil {
+		// Defensive: lookupActivePlacement returned a placement with
+		// an empty Receiving. Drop — there's nobody to send to.
+		o.routeStats.Dropped.Add(1)
+		return false, nil
+	}
+	*pa = (*pa).addFanOut(*fanOut)
+	return true, nil
 }
 
 // pendingAcks bundles the sync work that an ack-gated record triggers —
-// cross-node forwarding of records matched to remote vaults plus
-// fan-out W-of-N writes. Both must complete before the ack is delivered
-// to the ingester.
+// the fan-out W-of-N writes to the active chunk's Receiving members.
+// Must complete before the ack is delivered to the ingester.
+//
+// Under fan-out (gastrolog-mqxo4) cross-node forwarding via the legacy
+// forwarder is no longer used in the routing path: every record goes
+// through fan-out, whether or not the originating node has a local
+// vault instance. The old pa.forwards / pa.syncForwards fields and the
+// forwardTask type are gone with this refactor.
 //
 // Nil receiver is treated as empty; helpers lazy-init so callers don't
 // have to check before appending.
 type pendingAcks struct {
-	forwards     []forwardTask // ack-gated cross-node; ackAfterReplication
-	syncForwards []forwardTask // non-ack cross-node; flushRecordRouteForwards
-	fanOut       []fanOutTask  // fan-out W-of-N (gastrolog-nd6sz); ackAfterReplication
-}
-
-func (p *pendingAcks) addForward(t forwardTask) *pendingAcks {
-	if p == nil {
-		p = &pendingAcks{}
-	}
-	p.forwards = append(p.forwards, t)
-	return p
-}
-
-func (p *pendingAcks) addSyncForward(t forwardTask) *pendingAcks {
-	if p == nil {
-		p = &pendingAcks{}
-	}
-	p.syncForwards = append(p.syncForwards, t)
-	return p
+	fanOut []fanOutTask // fan-out W-of-N; ackAfterReplication waits on these
 }
 
 func (p *pendingAcks) addFanOut(t fanOutTask) *pendingAcks {
@@ -196,15 +222,7 @@ func (p *pendingAcks) addFanOut(t fanOutTask) *pendingAcks {
 
 // isEmpty reports whether there is any sync work to wait on before acking.
 func (p *pendingAcks) isEmpty() bool {
-	return p == nil || (len(p.forwards) == 0 && len(p.fanOut) == 0)
-}
-
-// forwardTask is a pending cross-node forward for a record that matched
-// a filter targeting a vault on another node. Ack-gated: ackAfterReplication
-// runs ForwardSync. Non-ack: flushRecordRouteForwards runs ForwardSync.
-type forwardTask struct {
-	nodeID  string
-	vaultID glid.GLID
+	return p == nil || len(p.fanOut) == 0
 }
 
 // getOrCreateVaultRouteStats returns the per-vault route stats, creating if needed.
@@ -235,26 +253,6 @@ func (o *Orchestrator) appendLocal(vaultID glid.GLID, rec chunk.Record) (*fanOut
 		o.logger.Error("append to vault failed", "vault", vaultID, "error", err)
 	}
 	return fanOut, err
-}
-
-// flushRecordRouteForwards delivers non-ack-gated cross-node vault routes
-// queued in pa.syncForwards. Must run outside o.mu (after ingest returns).
-// Blocks until each record is accepted by the per-node forward buffer or
-// ctx / forwarder shutdown. Skips silently during drain shutdown — local
-// durability is already settled.
-func (o *Orchestrator) flushRecordRouteForwards(ctx context.Context, pa *pendingAcks, rec chunk.Record) error {
-	if pa == nil || len(pa.syncForwards) == 0 || o.forwarder == nil {
-		return nil
-	}
-	if o.shuttingDown() {
-		return nil
-	}
-	for _, f := range pa.syncForwards {
-		if err := o.forwarder.ForwardSync(ctx, f.nodeID, f.vaultID, []chunk.Record{rec}); err != nil {
-			return fmt.Errorf("forward to %s: %w", f.nodeID, err)
-		}
-	}
-	return nil
 }
 
 // dispatchFanOutAsync fires pa.fanOut tasks in the background. Used by

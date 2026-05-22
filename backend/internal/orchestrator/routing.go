@@ -105,14 +105,13 @@ const (
 	synthAttrReason    = "_reason"
 )
 
-// MatchResult pairs a destination vault with the node that owns it,
-// the route that fired the match, and the route's distribution mode.
-// Returned by RouteSet.Match — kept as a wire-stable shape so per-route
-// stats and forward decisions stay unchanged across the Phase 5
-// refactor.
+// MatchResult pairs a destination vault with the route that fired the
+// match and the route's distribution mode. Under fan-out
+// (gastrolog-mqxo4) the destination's owning node is no longer carried
+// in the match — every routed record dispatches directly to the active
+// chunk's Receiving set, read from the per-vault FSM at dispatch time.
 type MatchResult struct {
 	VaultID      glid.GLID
-	NodeID       string
 	RouteID      glid.GLID
 	Distribution string
 }
@@ -238,7 +237,6 @@ func (rs *RouteSet) matchAttrs(attrs chunk.Attributes) []MatchResult {
 		for _, d := range r.Destinations {
 			out = append(out, MatchResult{
 				VaultID:      d.VaultID,
-				NodeID:       d.NodeID,
 				RouteID:      r.RouteID,
 				Distribution: r.Distribution,
 			})

@@ -436,12 +436,6 @@ func (o *Orchestrator) writeLoop() {
 			}
 		}
 		pa, err := o.ingestWithSource(dr.rec, src)
-		if fwErr := o.flushRecordRouteForwards(context.Background(), pa, dr.rec); fwErr != nil {
-			if err == nil {
-				err = fwErr
-			}
-			o.logger.Warn("record route forward failed", "error", fwErr, "ingester", dr.ingesterID)
-		}
 		if err != nil {
 			o.logger.Error("write failed", "error", err, "ingester", dr.ingesterID)
 		}

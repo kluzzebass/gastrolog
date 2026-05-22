@@ -526,6 +526,20 @@ func (o *Orchestrator) NotifyChunkChange() {
 // case should leave replica info absent from the outbound event so the
 // client preserves its existing cache value via mergeMeta.
 func (o *Orchestrator) ChunkResidency(vaultID glid.GLID, chunkID chunk.ChunkID, placementNodeIDs []string) []string {
+	fsm := o.vaultFSM(vaultID)
+	if fsm == nil {
+		return nil
+	}
+	return fsm.ChunkResidency(chunkID, placementNodeIDs)
+}
+
+// vaultFSM returns the per-vault control-plane FSM, or nil if the
+// orchestrator has no GroupManager (single-node / memory mode), if
+// the vault-ctl Raft group hasn't been created yet, or if the group's
+// FSM is the wrong shape. Folded out from ChunkResidency so other
+// FSM-reading helpers (lookupActivePlacement, etc.) share the same
+// resolve path.
+func (o *Orchestrator) vaultFSM(vaultID glid.GLID) *vaultctlfsm.FSM {
 	if o.groupMgr == nil {
 		return nil
 	}
@@ -533,17 +547,38 @@ func (o *Orchestrator) ChunkResidency(vaultID glid.GLID, chunkID chunk.ChunkID, 
 	if g == nil {
 		return nil
 	}
-	var fsm *vaultctlfsm.FSM
 	switch raw := g.FSM.(type) {
 	case *vaultctlfsm.FSM:
-		fsm = raw
+		return raw
 	case *vaultraft.FSM:
-		fsm = raw.EnsureVaultFSM(vaultID)
+		return raw.EnsureVaultFSM(vaultID)
 	}
+	return nil
+}
+
+// lookupActivePlacement returns the active chunk's ID and placement
+// for the named vault, read from this node's local copy of the vault-
+// ctl FSM. Returns (zero ChunkID, nil) when there's no active chunk
+// or the FSM isn't available — callers in that state typically drop
+// the record (no place to send it) and bump the dropped counter.
+//
+// Used by the routing layer's unified fan-out dispatcher
+// (gastrolog-mqxo4): every record under fan-out flows directly to the
+// chunk's Receiving members, regardless of whether the originating
+// node has a local vault instance.
+func (o *Orchestrator) lookupActivePlacement(vaultID glid.GLID) (chunk.ChunkID, *vaultctlfsm.ChunkPlacement) {
+	fsm := o.vaultFSM(vaultID)
 	if fsm == nil {
-		return nil
+		return chunk.ChunkID{}, nil
 	}
-	return fsm.ChunkResidency(chunkID, placementNodeIDs)
+	for _, e := range fsm.List() {
+		if e.State != chunk.ChunkStateActive {
+			continue
+		}
+		placement := fsm.Placement(e.ID)
+		return e.ID, placement
+	}
+	return chunk.ChunkID{}, nil
 }
 
 // vaultLabel returns the operator-friendly name for an instance as configured,
