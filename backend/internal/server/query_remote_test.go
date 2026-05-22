@@ -84,7 +84,7 @@ func TestRemoteVaultsByNodeFanOutsToAllPlacementMembers(t *testing.T) {
 
 	qs := &QueryServer{cfgStore: store, localNodeID: local}
 
-	got := qs.remoteVaultsByNodeFiltered(ctx, nil, nil)
+	got := qs.remoteVaultsByNodeFiltered(ctx, nil)
 
 	// Both peers should appear, each mapped to the vault ID. Pre-fan-out
 	// only peerA (the leader) would have appeared.
@@ -106,7 +106,14 @@ func TestRemoteVaultsByNodeFanOutsToAllPlacementMembers(t *testing.T) {
 	}
 }
 
-func TestRemoteVaultsByNodeSkipsLocalVaults(t *testing.T) {
+// Under fan-out a local vault must STILL fan out to its peer placement
+// members because every Receiver has independent active-chunk state and
+// a peer can hold records this node hasn't received yet
+// (gastrolog-hshgl). The local engine runs in parallel; dedupWindow
+// at the merge boundary collapses cross-replica duplicates by EventID.
+// Pre-fan-out the function skipped local vaults entirely — that
+// assumed a single canonical leader copy, which no longer holds.
+func TestRemoteVaultsByNodeFansOutLocalVaultsToPeers(t *testing.T) {
 	t.Parallel()
 
 	store := sysmem.NewStore()
@@ -136,7 +143,7 @@ func TestRemoteVaultsByNodeSkipsLocalVaults(t *testing.T) {
 		{StorageID: storagePeer.String()},
 	}
 	if err := store.PutVault(ctx, system.VaultConfig{
-		ID: vaultID, Name: "skip-local", Type: system.VaultTypeFile, StorageClass: 0, Placements: placements,
+		ID: vaultID, Name: "fanout-local", Type: system.VaultTypeFile, StorageClass: 0, Placements: placements,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -146,12 +153,15 @@ func TestRemoteVaultsByNodeSkipsLocalVaults(t *testing.T) {
 
 	qs := &QueryServer{cfgStore: store, localNodeID: local}
 
-	// Mark the vault as locally-handled — the search node queries its
-	// engine directly for these, so remote routing must skip them
-	// entirely (avoids double-counting + redundant RPCs).
-	localVaults := map[glid.GLID]bool{vaultID: true}
-	got := qs.remoteVaultsByNodeFiltered(ctx, nil, localVaults)
-	if len(got) != 0 {
-		t.Errorf("vault marked local must produce no remote entries, got %v", got)
+	got := qs.remoteVaultsByNodeFiltered(ctx, nil)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 peer entry, got %d: %v", len(got), got)
+	}
+	vaults, ok := got[peer]
+	if !ok || len(vaults) != 1 || vaults[0] != vaultID {
+		t.Errorf("expected peer %s mapped to %s, got %v", peer, vaultID, got)
+	}
+	if _, self := got[local]; self {
+		t.Errorf("local node must not appear in remote byNode map even when it is a placement member")
 	}
 }
