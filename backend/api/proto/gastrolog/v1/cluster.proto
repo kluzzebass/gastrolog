@@ -232,6 +232,13 @@ message ChunkReplicationCommand {
     ChunkReplicationImportBegin import_begin = 13;
     ChunkReplicationImportRecords import_records = 14;
     ChunkReplicationImportCommit import_commit = 15;
+    // Pull-by-EventID receive path (gastrolog-4t3y4). FillRecords carries
+    // a batch of records destined for a NAMED chunk (not the receiver's
+    // current active). FillComplete signals end-of-stream for a pull
+    // sequence — receiver fires CmdAckPull when all expected records
+    // have landed. See docs/pull-records-design.md.
+    ChunkReplicationFillRecords fill_records = 16;
+    ChunkReplicationFillComplete fill_complete = 17;
   }
 }
 
@@ -306,6 +313,68 @@ message RequestReplicaCatchupRequest {
 // sweep tick if the leader's pushes fail.
 message RequestReplicaCatchupResponse {
   uint32 scheduled = 1; // number of chunk pushes scheduled (after leader-side filtering)
+}
+
+// PullRecordsRequest is sent puller → source (S). Asks S to push the
+// records matching the given EventIDs from S's local copy of the named
+// chunk back over the existing per-vault chunk-replication stream via
+// ChunkReplicationFillRecords frames. Unary ack-style — flow shape
+// mirrors RequestReplicaCatchupRequest but at EventID granularity
+// instead of chunk granularity. See docs/pull-records-design.md and
+// gastrolog-4t3y4.
+message PullRecordsRequest {
+  bytes vault_id = 1;
+  bytes chunk_id = 2;
+  // 32-byte EventIDs (chunk.EventID encoding: IngesterID + NodeID +
+  // IngestTS + IngestSeq packed). The source filters its local chunk
+  // by this set and pushes matching records back asynchronously.
+  repeated bytes event_ids = 3;
+  // utf-8 node ID of the requester. Source validates authorization and
+  // selects the appropriate outbound chunk-replication stream to push
+  // fills on.
+  bytes requester_node_id = 4;
+}
+
+// PullRecordsResponse acknowledges receipt of the pull request. The
+// source pushes the actual records asynchronously via FillRecords
+// frames, so success here means "request accepted, fills scheduled" —
+// not "all records delivered". scheduled + missing = len(event_ids)
+// of the request.
+message PullRecordsResponse {
+  uint32 scheduled = 1; // EventIDs the source has locally and will push
+  uint32 missing = 2;   // EventIDs the source does NOT have locally;
+                        // puller should try another peer for these
+}
+
+// ChunkReplicationFillRecords carries one bounded batch of records for
+// a pull-by-EventID sequence (gastrolog-4t3y4). Pushed source → puller
+// over the existing per-vault chunk-replication stream. Receiver
+// dispatches by the local chunk's lifecycle state:
+//   - Active/Sealing locally → standard append path
+//   - Sealed-not-reconciled locally → SealedRepairer write path
+//   - Sealed-and-reconciled locally → reject (already converged)
+//   - Not present locally → reject (placement-state divergence)
+// Frame size capped by importRecordsMaxBytes / importRecordsMaxRecords
+// (same limits as ChunkReplicationImportRecords).
+message ChunkReplicationFillRecords {
+  bytes chunk_id = 1;
+  repeated ExportRecord records = 2;
+  // Set true on the final frame for this PullRecordsRequest. Receiver
+  // fires CmdAckPull when last_batch=true AND all expected records
+  // (per PullRecordsResponse.scheduled) have landed.
+  bool last_batch = 3;
+}
+
+// ChunkReplicationFillComplete defensively signals end-of-stream for a
+// pull sequence. Sent source → puller when the source either (a) had
+// no local records matching the requested EventIDs (records_sent = 0,
+// no FillRecords frames were sent), or (b) aborted mid-stream due to
+// an error. Without this, the puller can't distinguish "source still
+// working on it" from "source done, had nothing".
+message ChunkReplicationFillComplete {
+  bytes chunk_id = 1;
+  uint32 records_sent = 2; // total FillRecords records pushed in this sequence
+  string error = 3;         // non-empty if source aborted mid-stream
 }
 
 // ForwardSearchRequest is sent to the node that owns a remote vault,

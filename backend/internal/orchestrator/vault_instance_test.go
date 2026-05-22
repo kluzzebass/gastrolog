@@ -396,6 +396,15 @@ func (r *vaultTestReplicator) DeleteChunk(_ context.Context, _ string, _ glid.GL
 func (r *vaultTestReplicator) RequestReplicaCatchup(_ context.Context, _ string, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {
 	return 0, nil
 }
+func (r *vaultTestReplicator) SendFillRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record, _ bool) error {
+	return nil
+}
+func (r *vaultTestReplicator) SendFillComplete(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ uint32, _ string) error {
+	return nil
+}
+func (r *vaultTestReplicator) PullRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.EventID, _ string) (uint32, uint32, error) {
+	return 0, 0, nil
+}
 
 func (r *vaultTestReplicator) getCalls() []vaultForwardCall {
 	r.mu.Lock()

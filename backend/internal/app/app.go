@@ -352,6 +352,26 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 			n, err := orch.CatchupSelectedChunks(ctx, vaultID, requesterNodeID, chunkIDs)
 			return int(n), err
 		})
+
+		// Wire pull-by-EventID source-side handler (gastrolog-4t3y4). The
+		// cluster server's PullRecords handler delegates here; the
+		// orchestrator opens a local cursor on the named chunk, partitions
+		// records by the requested EventID set, returns scheduled/missing
+		// synchronously, and dispatches the async fill push to the puller
+		// via the existing per-vault chunk-replication stream.
+		clusterSrv.SetPullRecordsFn(func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, eventIDs []chunk.EventID, requesterNodeID string) (uint32, uint32, error) {
+			return orch.PullSelectedRecords(ctx, vaultID, chunkID, eventIDs, requesterNodeID)
+		})
+		// Sealed-fill receiver path (gastrolog-4t3y4 step 4b). The cluster
+		// receiver's FillRecords handler falls back here when the active-
+		// append path rejects with ErrChunkSealed. The orchestrator's
+		// implementation type-asserts the vault's chunk manager to
+		// chunk.SealedRepairer; file.Manager satisfies the interface but
+		// returns ErrNotImplemented until the file-reopen-for-append
+		// write path lands.
+		clusterSrv.SetVaultSealedFiller(func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
+			return orch.FillSealedRecords(ctx, vaultID, chunkID, records)
+		})
 	}
 
 	if err := startOrchestrator(ctx, logger, orch, appSys, factories); err != nil {

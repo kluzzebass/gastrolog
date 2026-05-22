@@ -94,9 +94,108 @@ func (s *Server) handleReplicationCommand(ctx context.Context, msg *gastrologv1.
 		return s.handleReplicationImportCommit(cmd.ImportCommit, pending)
 	case *gastrologv1.ChunkReplicationCommand_DeleteChunk:
 		return s.handleReplicationDelete(ctx, vaultID, cmd.DeleteChunk)
+	case *gastrologv1.ChunkReplicationCommand_FillRecords:
+		return s.handleReplicationFillRecords(ctx, vaultID, cmd.FillRecords)
+	case *gastrologv1.ChunkReplicationCommand_FillComplete:
+		return s.handleReplicationFillComplete(ctx, vaultID, cmd.FillComplete)
 	default:
 		return &gastrologv1.ChunkReplicationAck{Ok: false, Error: "unknown command type"}
 	}
+}
+
+// handleReplicationFillRecords accepts records destined for a NAMED chunk
+// from a pull-by-EventID sequence (gastrolog-4t3y4). The receiver dispatches
+// by the local chunk's lifecycle state:
+//
+//   - Active or Sealing locally: append via the standard recordAppenderForVault
+//     path. EventID dedup at the chunk-manager level (gastrolog-66b7x's
+//     IngestTSMonotonic + per-EventID idempotency at the file-manager) makes
+//     re-arrivals safe.
+//   - Sealed-not-reconciled locally: routed through the SealedRepairer
+//     interface via sealedFillerForVault. When the chunk manager doesn't
+//     implement SealedRepairer or its FillSealed is a stub, returns
+//     ErrNotImplemented which surfaces to the puller as a transient
+//     reconcile failure.
+//   - Sealed-and-reconciled locally: rejected by FillSealed with
+//     ErrChunkReconciled (already converged; the puller has a stale view).
+//   - Unknown chunk: rejected by FillSealed with ErrChunkNotFound.
+//
+// The dispatch logic is "try active-append first, fall back to sealed-fill
+// on ErrChunkSealed." This keeps active/sealing pulls on the existing fast
+// path without an FSM lookup, and only walks the slower SealedRepairer
+// path when the chunk is verifiably sealed locally.
+func (s *Server) handleReplicationFillRecords(ctx context.Context, vaultID glid.GLID, cmd *gastrologv1.ChunkReplicationFillRecords) *gastrologv1.ChunkReplicationAck {
+	if s.recordAppenderForVault == nil {
+		return &gastrologv1.ChunkReplicationAck{Ok: false, Error: "vault appender not configured"}
+	}
+	if len(cmd.GetChunkId()) < glid.Size {
+		return &gastrologv1.ChunkReplicationAck{Ok: false, Error: "fill_records: chunk_id missing"}
+	}
+	chunkID := chunk.ChunkID(glid.FromBytes(cmd.GetChunkId()))
+
+	// Try the active/sealing append path first. If the chunk is locally
+	// Sealed, recordAppenderForVault returns ErrChunkSealed and we fall
+	// back to the SealedRepairer path below. Other errors propagate as a
+	// failed ack so the puller can retry against a different peer.
+	var sealedRecords []chunk.Record
+	for _, er := range cmd.GetRecords() {
+		rec := convert.ExportToRecord(er)
+		if err := s.recordAppenderForVault(ctx, vaultID, chunkID, rec); err != nil {
+			if isTombstonedErr(err) {
+				return &gastrologv1.ChunkReplicationAck{Ok: true, ChunkId: cmd.GetChunkId()}
+			}
+			if errors.Is(err, chunk.ErrChunkSealed) {
+				// Defer this record (and any remaining) to the sealed-fill
+				// path. Accumulate the rest of the batch so we make one
+				// SealedRepairer call per FillRecords frame instead of one
+				// call per record.
+				sealedRecords = append(sealedRecords, rec)
+				continue
+			}
+			return &gastrologv1.ChunkReplicationAck{
+				Ok:      false,
+				Error:   "fill_records append failed: " + err.Error(),
+				ChunkId: cmd.GetChunkId(),
+			}
+		}
+	}
+
+	if len(sealedRecords) > 0 {
+		if s.sealedFillerForVault == nil {
+			return &gastrologv1.ChunkReplicationAck{
+				Ok:      false,
+				Error:   "fill_records: sealed chunk path requires SealedRepairer (gastrolog-4t3y4 step 4b); none configured",
+				ChunkId: cmd.GetChunkId(),
+			}
+		}
+		if err := s.sealedFillerForVault(ctx, vaultID, chunkID, sealedRecords); err != nil {
+			return &gastrologv1.ChunkReplicationAck{
+				Ok:      false,
+				Error:   "fill_records sealed-repair failed: " + err.Error(),
+				ChunkId: cmd.GetChunkId(),
+			}
+		}
+	}
+	return &gastrologv1.ChunkReplicationAck{Ok: true, ChunkId: cmd.GetChunkId()}
+}
+
+// handleReplicationFillComplete signals end-of-stream for a pull-by-EventID
+// sequence. The receiver uses this signal to fire CmdAckPull and clear the
+// PendingSealReconcile entry — but that wiring depends on the FSM machinery
+// from gastrolog-4zbxk (37k2b-a) which isn't landed yet, so this handler
+// currently acks the frame without further action. Step 4 / 37k2b-e wires
+// the actual CmdAckPull dispatch.
+func (s *Server) handleReplicationFillComplete(_ context.Context, _ glid.GLID, cmd *gastrologv1.ChunkReplicationFillComplete) *gastrologv1.ChunkReplicationAck {
+	if cmd.GetError() != "" {
+		// Source reported an error mid-stream; surface it back to the
+		// reconcile loop via the ack rather than swallowing.
+		return &gastrologv1.ChunkReplicationAck{
+			Ok:      false,
+			Error:   "source aborted fill: " + cmd.GetError(),
+			ChunkId: cmd.GetChunkId(),
+		}
+	}
+	return &gastrologv1.ChunkReplicationAck{Ok: true, ChunkId: cmd.GetChunkId()}
 }
 
 func (s *Server) handleReplicationAppend(ctx context.Context, vaultID glid.GLID, cmd *gastrologv1.ChunkReplicationAppend) *gastrologv1.ChunkReplicationAck {

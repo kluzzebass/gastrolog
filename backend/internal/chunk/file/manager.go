@@ -3868,6 +3868,48 @@ func (m *Manager) CheckRotation() *string {
 
 var _ chunk.ChunkManager = (*Manager)(nil)
 var _ chunk.ChunkMover = (*Manager)(nil)
+var _ chunk.SealedRepairer = (*Manager)(nil)
+
+// FillSealed implements chunk.SealedRepairer. Appends records into a
+// Sealed-not-reconciled chunk under the pull-by-EventID reconcile flow
+// (gastrolog-4t3y4 / 37k2b-e).
+//
+// Currently a stub: returns ErrNotImplemented to lock in the interface
+// shape without committing to the underlying file-reopen mechanics. The
+// full implementation requires reopening the chunk's idx.log / raw.log
+// / attr.log for append, writing the new records past current EOF,
+// re-flushing the sealed header markers, and coordinating with the
+// PostSealProcess gate so the chunk doesn't compress (and thus lock its
+// record set) before reconcile completes locally. Both pieces depend on
+// FSM state additions from gastrolog-37k2b-a (PendingSealReconcile).
+//
+// Callers in the pull-by-EventID receiver path (cluster's
+// handleReplicationFillRecords) treat ErrNotImplemented as a transient
+// failure with a TODO marker; the per-vault reconcile loop will surface
+// this to the operator via alert.Collector when 37k2b-e wires up.
+func (m *Manager) FillSealed(id chunk.ChunkID, records []chunk.Record) error {
+	if len(records) == 0 {
+		// Allow zero-record fills as a no-op idempotency case.
+		return nil
+	}
+	m.mu.Lock()
+	meta := m.lookupMeta(id)
+	m.mu.Unlock()
+	if meta == nil {
+		return chunk.ErrChunkNotFound
+	}
+	if !meta.sealed {
+		// Caller should have routed to the active/sealing append path
+		// (recordAppenderForVault). FillSealed is only for sealed chunks.
+		return chunk.ErrChunkNotSealed
+	}
+	// TODO(gastrolog-4t3y4 step 4b.2): implement the file-reopen-for-append
+	// write path. Requires PendingSealReconcile FSM field (37k2b-a) so we
+	// can reject FillSealed for already-reconciled chunks via
+	// ErrChunkReconciled.
+	_ = records
+	return chunk.ErrNotImplemented
+}
 
 // ChunkDir returns the filesystem path for a chunk's directory.
 func (m *Manager) ChunkDir(id chunk.ChunkID) string {

@@ -268,6 +268,15 @@ func (f *fakeReplicator) DeleteChunk(_ context.Context, _ string, _ glid.GLID, _
 func (f *fakeReplicator) RequestReplicaCatchup(_ context.Context, _ string, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {
 	return 0, nil
 }
+func (f *fakeReplicator) SendFillRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record, _ bool) error {
+	return nil
+}
+func (f *fakeReplicator) SendFillComplete(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ uint32, _ string) error {
+	return nil
+}
+func (f *fakeReplicator) PullRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.EventID, _ string) (uint32, uint32, error) {
+	return 0, 0, nil
+}
 
 func (f *fakeReplicator) callsFor(nodeID string) int {
 	f.mu.Lock()

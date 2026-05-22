@@ -233,6 +233,43 @@ type EventID struct {
 	IngestSeq  uint32
 }
 
+// EventIDByteSize is the canonical wire-format size of an EventID.
+// Layout:
+//
+//	[16 bytes IngesterID][16 bytes NodeID][8 bytes IngestTS nanos][4 bytes IngestSeq]
+//
+// IngestTS is encoded as int64 nanoseconds since the Unix epoch in
+// big-endian byte order — same encoding the set-hash machinery uses
+// (gastrolog-37k2b) so cross-component byte identity is preserved.
+const EventIDByteSize = 16 + 16 + 8 + 4
+
+// Bytes encodes the EventID into a 44-byte big-endian wire form. The
+// encoding is the same one set-hash and PullRecords agree on; keeping
+// it on EventID itself avoids divergent encoders across packages.
+func (e EventID) Bytes() [EventIDByteSize]byte {
+	var buf [EventIDByteSize]byte
+	copy(buf[0:16], e.IngesterID[:])
+	copy(buf[16:32], e.NodeID[:])
+	binary.BigEndian.PutUint64(buf[32:40], uint64(e.IngestTS.UnixNano()))
+	binary.BigEndian.PutUint32(buf[40:44], e.IngestSeq)
+	return buf
+}
+
+// EventIDFromBytes decodes the 44-byte wire form back into an EventID.
+// Returns an error if buf is the wrong length.
+func EventIDFromBytes(buf []byte) (EventID, error) {
+	if len(buf) != EventIDByteSize {
+		return EventID{}, fmt.Errorf("event id: expected %d bytes, got %d", EventIDByteSize, len(buf))
+	}
+	var e EventID
+	copy(e.IngesterID[:], buf[0:16])
+	copy(e.NodeID[:], buf[16:32])
+	nanos := int64(binary.BigEndian.Uint64(buf[32:40])) //nolint:gosec // G115: round-trips own encoding
+	e.IngestTS = time.Unix(0, nanos)
+	e.IngestSeq = binary.BigEndian.Uint32(buf[40:44])
+	return e, nil
+}
+
 // Record is a single log entry.
 //
 // Timestamps:

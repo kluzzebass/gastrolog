@@ -229,6 +229,38 @@ type SealEnsurer interface {
 	EnsureSealed(id ChunkID) error
 }
 
+// SealedRepairer is the optional interface for chunk managers that support
+// appending records into a Sealed chunk under the pull-by-EventID reconcile
+// flow (gastrolog-4t3y4). The Sealed-not-reconciled state — chunk has
+// transitioned Sealing → Sealed with W-quorum agreement, but this replica
+// was absent at seal time and owes asynchronous catch-up per the FSM's
+// PendingSealReconcile field — requires writing additional records into a
+// chunk whose normal Append path rejects writes (ErrChunkSealed).
+//
+// FillSealed reopens the chunk's file artifacts (idx.log + raw.log +
+// attr.log) for append, writes the new records, then re-flushes the
+// sealed header markers. The chunk's record set grows toward the
+// FinalSetHash the FSM committed at seal time; once the local set-hash
+// matches FinalSetHash, the caller fires CmdAckPull to clear the
+// PendingSealReconcile entry (wiring in gastrolog-37k2b-e).
+//
+// Coordination with PostSealProcess: a divergent replica must NOT
+// compress its chunk into a GLCB blob until reconcile completes locally,
+// because compression locks in the current record set. The chunk
+// manager's PostSealProcess implementation checks PendingSealReconcile
+// (via a callback wired by the orchestrator) before scheduling
+// compression. This constraint also extends to cloud upload — the
+// UploadGate composes with the PendingSealReconcile gate.
+//
+// Returns ErrChunkNotFound if the chunk isn't present locally; returns
+// ErrChunkSealedReconciled (new sentinel) if the chunk is Sealed AND
+// reconciled (FinalSetHash matches local set-hash) — in that case the
+// caller has a stale view and should refuse the pull. Returns a plain
+// error if the underlying file I/O fails.
+type SealedRepairer interface {
+	FillSealed(id ChunkID, records []Record) error
+}
+
 // DeleteNoAnnounce deletes a chunk from the local store without firing the
 // metadata announcer. Used by LOCAL cleanup paths (e.g. replacing a
 // forwarded-but-not-yet-canonical chunk, cleaning up orphaned follower
