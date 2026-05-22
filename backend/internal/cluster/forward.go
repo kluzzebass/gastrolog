@@ -28,6 +28,16 @@ type RecordAppender func(ctx context.Context, vaultID glid.GLID, rec chunk.Recor
 // per-record replication from a leader to its followers.
 type VaultRecordAppender func(ctx context.Context, vaultID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error
 
+// VaultSealedFiller appends pull-by-EventID records into a Sealed-not-
+// reconciled chunk via the chunk manager's SealedRepairer interface
+// (gastrolog-4t3y4). The cluster receiver routes FillRecords frames
+// here when the local chunk is Sealed; the orchestrator implementation
+// type-asserts the vault's chunk manager to chunk.SealedRepairer and
+// dispatches. Returns chunk.ErrNotImplemented when the underlying
+// chunk manager doesn't implement SealedRepairer (memory / jsonl) or
+// when the FillSealed write path itself is still a stub.
+type VaultSealedFiller func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error
+
 // SearchExecutor runs a search on a local vault and returns results.
 // For regular searches, it returns an iterator over records (the caller
 // streams them as they arrive). For pipeline queries (stats, timechart),
@@ -116,6 +126,15 @@ func (s *Server) SetRecordAppender(fn RecordAppender) {
 // SetVaultRecordAppender injects the callback for chunk-ID-preserving forwarding.
 func (s *Server) SetVaultRecordAppender(fn VaultRecordAppender) {
 	s.recordAppenderForVault = fn
+}
+
+// SetVaultSealedFiller injects the callback for pull-by-EventID writes into
+// Sealed-not-reconciled chunks (gastrolog-4t3y4). The cluster receiver's
+// FillRecords handler falls back to this callback when the active-append
+// path rejects with ErrChunkSealed. Optional: when nil, sealed-chunk
+// fills are rejected with a clear ack error.
+func (s *Server) SetVaultSealedFiller(fn VaultSealedFiller) {
+	s.sealedFillerForVault = fn
 }
 
 // SetRecordImporter injects the callback for importing transferred records.

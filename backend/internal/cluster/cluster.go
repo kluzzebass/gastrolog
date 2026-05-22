@@ -141,6 +141,15 @@ type Server struct {
 	// docs/pull-records-design.md.
 	pullRecordsFn func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, eventIDs []chunk.EventID, requesterNodeID string) (scheduled uint32, missing uint32, err error)
 
+	// sealedFillerForVault appends pull-by-EventID records into a
+	// Sealed-not-reconciled chunk via the chunk manager's SealedRepairer
+	// interface (gastrolog-4t3y4). The cluster receiver routes FillRecords
+	// frames here when the local chunk is Sealed and the append path
+	// would otherwise reject with ErrChunkSealed. Set by the composition
+	// root; the orchestrator implementation type-asserts the chunk
+	// manager to chunk.SealedRepairer and dispatches.
+	sealedFillerForVault VaultSealedFiller
+
 	// recordAppender writes forwarded records into local vaults.
 	// Set after the orchestrator is created, before forwarding starts.
 	recordAppender RecordAppender

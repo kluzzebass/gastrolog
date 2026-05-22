@@ -120,6 +120,35 @@ func (o *Orchestrator) PullSelectedRecords(ctx context.Context, vaultID glid.GLI
 	return scheduled, missing, nil
 }
 
+// FillSealedRecords is the receiver-side handler for FillRecords frames
+// targeting Sealed-not-reconciled chunks (gastrolog-4t3y4). The cluster
+// server's chunk-replication handler falls back here when the
+// active/sealing append path rejects with ErrChunkSealed. This routine
+// type-asserts the vault's chunk manager to chunk.SealedRepairer and
+// dispatches; returns chunk.ErrNotImplemented when the manager doesn't
+// implement SealedRepairer (e.g., memory / jsonl) so the puller's
+// reconcile loop can log a TODO marker.
+func (o *Orchestrator) FillSealedRecords(_ context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
+	o.mu.RLock()
+	vault := o.vaults[vaultID]
+	o.mu.RUnlock()
+	if vault == nil || vault.Instance == nil {
+		return fmt.Errorf("vault %s not found", vaultID)
+	}
+	cm := vault.Instance.Chunks
+	if cm == nil {
+		return fmt.Errorf("vault %s has no chunk manager", vaultID)
+	}
+	repairer, ok := cm.(chunk.SealedRepairer)
+	if !ok {
+		// Memory / jsonl chunk managers don't implement SealedRepairer;
+		// surface ErrNotImplemented so the caller knows this isn't a
+		// transient failure but a structural mismatch.
+		return chunk.ErrNotImplemented
+	}
+	return repairer.FillSealed(chunkID, records)
+}
+
 // dispatchFillRecords pushes matched records to the puller in bounded
 // batches followed by a FillComplete signal. Errors are logged but not
 // surfaced to the synchronous PullRecords caller — they reach the puller

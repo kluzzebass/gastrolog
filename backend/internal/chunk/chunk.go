@@ -25,6 +25,19 @@ var (
 	// fresh active chunk instead of silently extending a chunk the
 	// cluster has frozen. See gastrolog-uccg6.
 	ErrChunkSealed = errors.New("chunk is sealed; cannot append")
+
+	// ErrChunkReconciled signals that a SealedRepairer.FillSealed was called
+	// against a chunk that's already locally reconciled (FinalSetHash
+	// matches local set-hash, PendingSealReconcile empty for self). The
+	// caller has a stale view; the pull-by-EventID flow rejects rather
+	// than corrupting an immutable state. See gastrolog-4t3y4.
+	ErrChunkReconciled = errors.New("chunk is already reconciled locally; cannot pull-fill")
+
+	// ErrNotImplemented signals a deferred-implementation stub. Used as a
+	// placeholder return for SealedRepairer.FillSealed until the full
+	// pull-into-sealed write path lands. Callers (the reconcile loop)
+	// treat this as a transient failure and log a TODO marker.
+	ErrNotImplemented = errors.New("not implemented")
 )
 
 // TSEntry is a (timestamp, position) pair from a timestamp index.
