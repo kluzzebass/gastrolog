@@ -1390,11 +1390,38 @@ func wireVaultFSMOnDelete(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 	// than only after seal. Fired on every node where the apply ran, same
 	// as OnDelete — followers learn about the new chunk via Raft replication.
 	// See gastrolog-3pf9w.
+	//
+	// gastrolog-3yre7: also fire ActiveChunkAligner.AlignActive so every
+	// replica's chunk manager opens the FSM-canonical chunk locally.
+	// On the proposing replica (the one whose RotationCoordinator
+	// proposed CmdCreateChunk) the local cm is already aligned, so
+	// AlignActive is a no-op. On every other replica — losing race
+	// proposers and pure Receivers — this seals the local active
+	// (silently — CmdBeginSeal already applied) and opens the
+	// announced ID. The first-to-fire-proposes rotation protocol
+	// only converges if this hook fires across all replicas.
+	//
+	// Skipped for non-Active entries (e.g., CmdRepatriateChunk's
+	// onCreate fires for a freshly-restored Sealed entry — that's
+	// not a rotation event and must not displace the local active).
+	//
+	// AlignActive runs in a goroutine to avoid deadlocking against
+	// an in-flight rotation that holds the chunk manager mutex while
+	// waiting on the Raft round-trip.
+	aligner, alignerOK := cm.(chunk.ActiveChunkAligner)
 	fsm.SetOnCreate(func(e vaultctlfsm.ManifestEntry) {
 		if o == nil {
 			return
 		}
 		o.EmitChunkCreated(vaultID, manifestEntryToChunkMeta(e, false))
+		if alignerOK && e.State == chunk.ChunkStateActive {
+			go func() {
+				if err := aligner.AlignActive(e.ID); err != nil && logger != nil {
+					logger.Warn("FSM onCreate: AlignActive failed",
+						"vault", vaultID, "chunk", e.ID, "error", err)
+				}
+			}()
+		}
 	})
 	silent, ok := cm.(chunk.SilentDeleter)
 	if !ok {

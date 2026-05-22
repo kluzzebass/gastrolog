@@ -86,6 +86,34 @@ type UploadGateSetter interface {
 	SetUploadGate(UploadGate)
 }
 
+// ActiveChunkAligner is the optional interface implemented by chunk
+// managers that participate in FSM-mediated rotation
+// (gastrolog-3yre7). When the vault-ctl FSM applies CmdCreateChunk
+// for a new Active chunk, the orchestrator fires OnCreate which
+// calls AlignActive on every replica's local chunk manager.
+//
+// On the proposing replica, the chunk manager already opened the
+// announced ID via the RotationCoordinator path (rotateViaCoordinator)
+// before the FSM apply returned, so AlignActive is a no-op (current
+// active == announced ID).
+//
+// On non-proposing replicas (including losing race proposers and
+// pure Receivers that didn't fire their own rotation), the local
+// active chunk still holds the previous chunk's ID. AlignActive
+// seals it (silently — the FSM has already received CmdBeginSeal
+// via the proposer's coordinator) and opens a new local chunk with
+// the announced ID. The two-phase apply (CmdBeginSeal then
+// CmdCreateChunk) means by the time AlignActive runs, the FSM has
+// already transitioned the old chunk out of Active.
+//
+// Must run outside the chunk manager's append/rotate critical
+// section to avoid deadlocking against an in-flight rotation that
+// holds the manager mutex while waiting on the Raft round-trip.
+// Wire OnCreate via a goroutine.
+type ActiveChunkAligner interface {
+	AlignActive(id ChunkID) error
+}
+
 // ReceivingAnnouncer is the optional extension of MetadataAnnouncer
 // that carries the initial Receiving set when announcing a new chunk
 // under the fan-out data-plane (gastrolog-2ujjh / gastrolog-nd6sz /

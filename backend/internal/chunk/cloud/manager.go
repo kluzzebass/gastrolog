@@ -147,8 +147,11 @@ func (c *glcbCursor) Prev() (chunk.Record, chunk.RecordRef, error) {
 }
 
 func (c *glcbCursor) Seek(ref chunk.RecordRef) error {
-	c.fwdIndex = ref.Pos
-	c.revIndex = ref.Pos
+	// Clamp to the GLCB blob's actual record count — see mmapCursor.Seek
+	// for the fan-out-divergence reasoning (gastrolog-hshgl).
+	pos := min(ref.Pos, c.recordCount)
+	c.fwdIndex = pos
+	c.revIndex = pos
 	c.fwdDone = false
 	c.revDone = false
 	return nil

@@ -206,8 +206,17 @@ func (c *mmapCursor) Prev() (chunk.Record, chunk.RecordRef, error) {
 }
 
 func (c *mmapCursor) Seek(ref chunk.RecordRef) error {
-	c.fwdIndex = ref.Pos
-	c.revIndex = ref.Pos
+	// Clamp to the cursor's actual record count. Under fan-out
+	// (gastrolog-hshgl) a Receiver's local idx.log can hold fewer
+	// records than meta.RecordCount (FSM-stamped to the proposer's
+	// final count) until set-diff reconcile (gastrolog-37k2b) catches
+	// up. Callers like positionCursor seek to meta.RecordCount to
+	// position-past-end for reverse iteration; clamping makes that
+	// safe regardless of divergence — Prev returns ErrNoMoreRecords
+	// once the local subset is exhausted.
+	pos := min(ref.Pos, c.recordCount)
+	c.fwdIndex = pos
+	c.revIndex = pos
 	c.fwdDone = false
 	c.revDone = false
 	return nil
@@ -453,8 +462,15 @@ func (c *stdioCursor) Prev() (chunk.Record, chunk.RecordRef, error) {
 }
 
 func (c *stdioCursor) Seek(ref chunk.RecordRef) error {
-	c.fwdIndex = ref.Pos
-	c.revIndex = ref.Pos
+	// Clamp to the live idx.log size — see mmapCursor.Seek for the
+	// fan-out-divergence reasoning. Active cursors re-stat per Next()
+	// so we re-stat here too to know the actual local end at seek time.
+	pos := ref.Pos
+	if idxInfo, err := c.idxFile.Stat(); err == nil {
+		pos = min(pos, RecordCount(idxInfo.Size()))
+	}
+	c.fwdIndex = pos
+	c.revIndex = pos
 	c.fwdDone = false
 	c.revDone = false
 	return nil

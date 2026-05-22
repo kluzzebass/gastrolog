@@ -235,6 +235,27 @@ func (m *Manager) SetNextChunkID(id chunk.ChunkID) {
 	m.mu.Unlock()
 }
 
+// AlignActive forces the local active chunk to match the announced ID.
+// See chunk.ActiveChunkAligner for the full contract (gastrolog-3yre7).
+//
+// Memory variant: silently seals the current active (no on-disk artifacts
+// to flush, no announcer to suppress — the memory manager has no announcer
+// wired) and opens a new active with the requested ID.
+func (m *Manager) AlignActive(id chunk.ChunkID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.active != nil && m.active.meta.ID == id {
+		return nil
+	}
+	if m.active != nil {
+		if err := m.sealLocked(); err != nil {
+			return err
+		}
+	}
+	m.nextChunkID = &id
+	return m.openLocked()
+}
+
 func (m *Manager) openLocked() error {
 	var id chunk.ChunkID
 	if m.nextChunkID != nil {
@@ -683,4 +704,5 @@ func (m *Manager) Close() error {
 var (
 	_ chunk.ChunkManager           = (*Manager)(nil)
 	_ chunk.ChunkPostSealProcessor = (*Manager)(nil)
+	_ chunk.ActiveChunkAligner     = (*Manager)(nil)
 )
