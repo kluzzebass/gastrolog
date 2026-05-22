@@ -94,9 +94,77 @@ func (s *Server) handleReplicationCommand(ctx context.Context, msg *gastrologv1.
 		return s.handleReplicationImportCommit(cmd.ImportCommit, pending)
 	case *gastrologv1.ChunkReplicationCommand_DeleteChunk:
 		return s.handleReplicationDelete(ctx, vaultID, cmd.DeleteChunk)
+	case *gastrologv1.ChunkReplicationCommand_FillRecords:
+		return s.handleReplicationFillRecords(ctx, vaultID, cmd.FillRecords)
+	case *gastrologv1.ChunkReplicationCommand_FillComplete:
+		return s.handleReplicationFillComplete(ctx, vaultID, cmd.FillComplete)
 	default:
 		return &gastrologv1.ChunkReplicationAck{Ok: false, Error: "unknown command type"}
 	}
+}
+
+// handleReplicationFillRecords accepts records destined for a NAMED chunk
+// from a pull-by-EventID sequence (gastrolog-4t3y4). The receiver dispatches
+// by the local chunk's lifecycle state:
+//
+//   - Active or Sealing locally: append via the standard recordAppenderForVault
+//     path. EventID dedup at the chunk-manager level (gastrolog-66b7x's
+//     IngestTSMonotonic + per-EventID idempotency at the file-manager) makes
+//     re-arrivals safe.
+//   - Sealed-not-reconciled locally: routed through the SealedRepairer
+//     interface that lands in step 4 of gastrolog-4t3y4. This handler returns
+//     a clear "not yet supported" ack until step 4 wires it.
+//   - Sealed-and-reconciled locally / unknown chunk: reject.
+//
+// For now this lands the dispatcher shape; the active/sealing path reuses the
+// existing append plumbing, and the sealed-not-reconciled path returns a
+// well-named error so step 4's wiring has a single point to redirect.
+func (s *Server) handleReplicationFillRecords(ctx context.Context, vaultID glid.GLID, cmd *gastrologv1.ChunkReplicationFillRecords) *gastrologv1.ChunkReplicationAck {
+	if s.recordAppenderForVault == nil {
+		return &gastrologv1.ChunkReplicationAck{Ok: false, Error: "vault appender not configured"}
+	}
+	if len(cmd.GetChunkId()) < glid.Size {
+		return &gastrologv1.ChunkReplicationAck{Ok: false, Error: "fill_records: chunk_id missing"}
+	}
+	chunkID := chunk.ChunkID(glid.FromBytes(cmd.GetChunkId()))
+
+	// Step 2 scope: route fills through the active/sealing append path. The
+	// chunk manager rejects appends to sealed chunks via ErrChunkSealed; that
+	// rejection surfaces here as a clear ack error pointing at the SealedRepairer
+	// follow-up.
+	for _, er := range cmd.GetRecords() {
+		rec := convert.ExportToRecord(er)
+		if err := s.recordAppenderForVault(ctx, vaultID, chunkID, rec); err != nil {
+			if isTombstonedErr(err) {
+				return &gastrologv1.ChunkReplicationAck{Ok: true, ChunkId: cmd.GetChunkId()}
+			}
+			return &gastrologv1.ChunkReplicationAck{
+				Ok:      false,
+				Error:   "fill_records append failed (sealed-not-reconciled path pending gastrolog-4t3y4 step 4): " + err.Error(),
+				ChunkId: cmd.GetChunkId(),
+			}
+		}
+	}
+	return &gastrologv1.ChunkReplicationAck{Ok: true, ChunkId: cmd.GetChunkId()}
+}
+
+// handleReplicationFillComplete signals end-of-stream for a pull-by-EventID
+// sequence. The receiver uses this signal to fire CmdAckPull and clear the
+// PendingSealReconcile entry — but that wiring depends on the FSM machinery
+// from gastrolog-4zbxk (37k2b-a) which isn't landed yet, so this handler
+// currently acks the frame without further action. Step 4 / 37k2b-e wires
+// the actual CmdAckPull dispatch.
+func (s *Server) handleReplicationFillComplete(_ context.Context, _ glid.GLID, cmd *gastrologv1.ChunkReplicationFillComplete) *gastrologv1.ChunkReplicationAck {
+	if cmd.GetError() != "" {
+		// Source reported an error mid-stream; surface it back to the
+		// reconcile loop via the ack rather than swallowing.
+		return &gastrologv1.ChunkReplicationAck{
+			Ok:      false,
+			Error:   "source aborted fill: " + cmd.GetError(),
+			ChunkId: cmd.GetChunkId(),
+		}
+	}
+	return &gastrologv1.ChunkReplicationAck{Ok: true, ChunkId: cmd.GetChunkId()}
 }
 
 func (s *Server) handleReplicationAppend(ctx context.Context, vaultID glid.GLID, cmd *gastrologv1.ChunkReplicationAppend) *gastrologv1.ChunkReplicationAck {

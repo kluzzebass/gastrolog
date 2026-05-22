@@ -131,6 +131,16 @@ type Server struct {
 	// Set by the composition root in app.go. See gastrolog-2dgvj.
 	replicaCatchupFn func(ctx context.Context, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (int, error)
 
+	// pullRecordsFn handles PullRecords on the source node: filters the
+	// local copy of (vault, chunk) by the requested EventID set and
+	// asynchronously pushes matching records back to the requester via
+	// the existing per-vault chunk-replication stream's
+	// ChunkReplicationFillRecords frames. Returns (scheduled, missing):
+	// how many EventIDs were found locally and how many were not.
+	// Set by the composition root. See gastrolog-4t3y4 and
+	// docs/pull-records-design.md.
+	pullRecordsFn func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, eventIDs []chunk.EventID, requesterNodeID string) (scheduled uint32, missing uint32, err error)
+
 	// recordAppender writes forwarded records into local vaults.
 	// Set after the orchestrator is created, before forwarding starts.
 	recordAppender RecordAppender
@@ -493,6 +503,16 @@ func (s *Server) SetNodeSuffrageFn(fn func(ctx context.Context, nodeID, nodeAddr
 // missing chunks). See gastrolog-2dgvj.
 func (s *Server) SetReplicaCatchupFn(fn func(ctx context.Context, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (int, error)) {
 	s.replicaCatchupFn = fn
+}
+
+// SetPullRecordsFn registers the callback for the PullRecords RPC. Called
+// on the source node to filter its local chunk by the requested EventID
+// set and asynchronously push matching records back to the requester via
+// the existing per-vault chunk-replication stream. Returns (scheduled,
+// missing): how many EventIDs the source has locally vs. doesn't. See
+// gastrolog-4t3y4.
+func (s *Server) SetPullRecordsFn(fn func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, eventIDs []chunk.EventID, requesterNodeID string) (scheduled uint32, missing uint32, err error)) {
+	s.pullRecordsFn = fn
 }
 
 // Pause installs a gate that causes every subsequent gRPC handler on this

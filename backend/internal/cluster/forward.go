@@ -808,6 +808,50 @@ func (s *Server) requestReplicaCatchup(ctx context.Context, req *gastrologv1.Req
 	return &gastrologv1.RequestReplicaCatchupResponse{Scheduled: uint32(scheduled)}, nil //nolint:gosec // G115: bounded by request slice length
 }
 
+// pullRecords handles the PullRecords RPC. Sent puller → source: the
+// puller's reconcile/drain/catchup loop has identified a set of EventIDs
+// it needs from this node's local copy of the named chunk. The source
+// filters its local chunk by the EventID set and asynchronously pushes
+// matching records back via the existing per-vault chunk-replication
+// stream's ChunkReplicationFillRecords frames. Returns (scheduled,
+// missing): how many EventIDs the source has locally vs. doesn't. See
+// gastrolog-4t3y4 and docs/pull-records-design.md.
+func (s *Server) pullRecords(ctx context.Context, req *gastrologv1.PullRecordsRequest) (*gastrologv1.PullRecordsResponse, error) {
+	if s.pullRecordsFn == nil {
+		return nil, status.Error(codes.Unavailable, "pull records function not configured")
+	}
+	if len(req.GetVaultId()) != glid.Size {
+		return nil, status.Errorf(codes.InvalidArgument, "vault_id: expected %d bytes, got %d", glid.Size, len(req.GetVaultId()))
+	}
+	vaultID := glid.FromBytes(req.GetVaultId())
+	if len(req.GetChunkId()) != 16 {
+		return nil, status.Errorf(codes.InvalidArgument, "chunk_id: expected 16 bytes, got %d", len(req.GetChunkId()))
+	}
+	var chunkID chunk.ChunkID
+	copy(chunkID[:], req.GetChunkId())
+	rawEventIDs := req.GetEventIds()
+	eventIDs := make([]chunk.EventID, 0, len(rawEventIDs))
+	for i, raw := range rawEventIDs {
+		id, err := chunk.EventIDFromBytes(raw)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "event_ids[%d]: %v", i, err)
+		}
+		eventIDs = append(eventIDs, id)
+	}
+	requesterNodeID := string(req.GetRequesterNodeId())
+	if requesterNodeID == "" {
+		return nil, status.Error(codes.InvalidArgument, "requester_node_id is required")
+	}
+	scheduled, missing, err := s.pullRecordsFn(ctx, vaultID, chunkID, eventIDs, requesterNodeID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "pull records: %v", err)
+	}
+	return &gastrologv1.PullRecordsResponse{
+		Scheduled: scheduled,
+		Missing:   missing,
+	}, nil
+}
+
 // forwardRemoveNode handles the ForwardRemoveNode RPC on the leader.
 // Followers call this to proxy node removal through the leader.
 func (s *Server) forwardRemoveNode(ctx context.Context, req *gastrologv1.ForwardRemoveNodeRequest) (*gastrologv1.ForwardRemoveNodeResponse, error) {
@@ -1007,6 +1051,10 @@ var clusterServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RequestReplicaCatchup",
 			Handler:    requestReplicaCatchupHandler,
+		},
+		{
+			MethodName: "PullRecords",
+			Handler:    pullRecordsHandler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
@@ -1244,6 +1292,25 @@ func requestReplicaCatchupHandler(srv any, ctx context.Context, dec func(any) er
 	}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return s.requestReplicaCatchup(ctx, req.(*gastrologv1.RequestReplicaCatchupRequest))
+	}
+	return interceptor(ctx, req, info, handler)
+}
+
+func pullRecordsHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	req := &gastrologv1.PullRecordsRequest{}
+	if err := dec(req); err != nil {
+		return nil, err
+	}
+	s := srv.(*Server)
+	if interceptor == nil {
+		return s.pullRecords(ctx, req)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gastrolog.v1.ClusterService/PullRecords",
+	}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return s.pullRecords(ctx, req.(*gastrologv1.PullRecordsRequest))
 	}
 	return interceptor(ctx, req, info, handler)
 }
