@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/system"
 )
@@ -53,7 +52,7 @@ func (o *Orchestrator) ReloadRotationPolicies(ctx context.Context) error {
 
 	for vaultID, vault := range o.vaults {
 		vaultInst := vault.Instance
-		if vaultInst == nil || vaultInst.IsFollower {
+		if vaultInst == nil {
 			continue
 		}
 		vaultCfg := findVaultConfig(cfg.Vaults, vaultID)
@@ -85,24 +84,16 @@ func (o *Orchestrator) ReloadRetentionPolicies(_ context.Context) error {
 	return nil
 }
 
-// ApplyRotationPolicyForRole sets the role-appropriate rotation policy on a
-// single vault instance's chunk manager:
+// ApplyRotationPolicyForRole applies the user-configured rotation
+// policy to a vault instance's chunk manager. Invoked by the
+// dispatcher immediately after a placement edit so the policy
+// tracks config changes without waiting for the next rotationSweep
+// tick (~15 s).
 //
-//   - Follower → NeverRotatePolicy.
-//   - Leader   → the user-configured policy resolved from current config.
-//
-// Invoked by the dispatcher immediately after a role transition (updated by
-// updateInstanceRoleIfNeeded) so the chunk manager's policy tracks the role
-// flip without waiting for the next rotationSweep tick (~15 s).
-//
-// Without this, fresh-cluster warm-up exhibits intermittent flakiness: on a
-// follower→leader transition, the chunk manager carries NeverRotatePolicy
-// for up to 15 s, during which user policy changes that fire ReloadRotation
-// policies land on a manager that's about to be overwritten by the sweep
-// with whatever the prior policy was. The leader's records pile up without
-// rotation in the meantime. See gastrolog-50n4b.
-//
-// Idempotent and safe to call when no role change occurred.
+// Under fan-out (gastrolog-hshgl) every Receiver runs the same
+// rotation policy — the legacy "follower → NeverRotatePolicy"
+// branch is gone. Idempotent and safe to call when no role change
+// occurred.
 func (o *Orchestrator) ApplyRotationPolicyForRole(ctx context.Context, vaultID glid.GLID) error {
 	sys, err := o.loadSystem(ctx)
 	if err != nil {
@@ -118,10 +109,6 @@ func (o *Orchestrator) ApplyRotationPolicyForRole(ctx context.Context, vaultID g
 
 	vault, ok := o.vaults[vaultID]
 	if !ok || vault.Instance == nil {
-		return nil
-	}
-	if vault.Instance.IsFollower {
-		vault.Instance.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
 		return nil
 	}
 	vaultCfg := findVaultConfig(cfg.Vaults, vaultID)

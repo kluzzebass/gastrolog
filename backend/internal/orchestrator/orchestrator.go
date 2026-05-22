@@ -223,13 +223,8 @@ type Orchestrator struct {
 	// Remote transferrer for cross-node chunk migration (nil in single-node mode).
 	transferrer RemoteTransferrer
 
-	// Vault replicator: ordered stream per instance per follower (nil in single-node mode).
+	// Vault replicator: cross-node fan-out dispatcher (nil in single-node mode).
 	chunkReplicator ChunkReplicator
-
-	// replicaCircuit tracks per-node backoff for follower replication.
-	// After consecutive failures, the node is skipped until the backoff
-	// expires. Prevents log spam when a follower is down.
-	replicaCircuit sync.Map // nodeID (string) → *replicaBackoff
 
 	// groupMgr is the shared multi-group Raft manager (system, vault ctl, …).
 	// Set from factories during ApplyConfig; used to tear down vault ctl groups.
@@ -345,12 +340,11 @@ type Orchestrator struct {
 	cachedReplicationReady atomic.Bool
 
 	// Shutdown phase (nil in tests / single-node setups without a
-	// Phase wired). When non-nil, hot-path replication helpers like
-	// fireAndForgetRemote and sealRemoteFollowers consult
-	// phase.ShuttingDown() and skip the remote call during drain, so
-	// the orchestrator's pipeline flush does not spam the log with
-	// "connection refused" warnings for peers that are going down
-	// alongside this node. See gastrolog-1e5ke.
+	// Phase wired). When non-nil, hot-path dispatchers (fan-out
+	// dispatch, etc.) consult phase.ShuttingDown() and skip the
+	// remote call during drain so the pipeline flush does not spam
+	// the log with "connection refused" warnings for peers that are
+	// going down alongside this node. See gastrolog-1e5ke.
 	phase *lifecycle.Phase
 
 	// onIngesterAlive is called when an ingester's alive state changes.

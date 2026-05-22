@@ -154,14 +154,18 @@ func TestFSMSnapshotPreservesState(t *testing.T) {
 	idSealing := testChunkID(51)
 	idSealed := testChunkID(52)
 
-	applyCmd(t, fsm, MarshalCreateChunk(idActive, now, now, now))
+	// Single-Active invariant: each new CmdCreateChunk requires the
+	// previous Active to have transitioned to Sealing first. Build the
+	// fixture by fully retiring each chunk before creating the next,
+	// finishing with the chunk we want to remain Active.
+	applyCmd(t, fsm, MarshalCreateChunk(idSealed, now, now, now))
+	applyCmd(t, fsm, MarshalBeginSeal(idSealed))
+	applyCmd(t, fsm, MarshalSealChunk(idSealed, end, 1, 1, end, end, end, false))
 
 	applyCmd(t, fsm, MarshalCreateChunk(idSealing, now, now, now))
 	applyCmd(t, fsm, MarshalBeginSeal(idSealing))
 
-	applyCmd(t, fsm, MarshalCreateChunk(idSealed, now, now, now))
-	applyCmd(t, fsm, MarshalBeginSeal(idSealed))
-	applyCmd(t, fsm, MarshalSealChunk(idSealed, end, 1, 1, end, end, end, false))
+	applyCmd(t, fsm, MarshalCreateChunk(idActive, now, now, now))
 
 	snap, err := fsm.Snapshot()
 	if err != nil {
@@ -445,8 +449,13 @@ func TestFSMListReturnsAll(t *testing.T) {
 	fsm := New()
 
 	now := time.Now().Truncate(time.Nanosecond)
+	// Single-Active invariant: pair each create with begin-seal so the
+	// next iteration's create doesn't reject. List() still returns the
+	// entries regardless of state.
 	for i := range byte(5) {
-		applyCmd(t, fsm, MarshalCreateChunk(testChunkID(i), now, now, now))
+		id := testChunkID(i)
+		applyCmd(t, fsm, MarshalCreateChunk(id, now, now, now))
+		applyCmd(t, fsm, MarshalBeginSeal(id))
 	}
 
 	list := fsm.List()

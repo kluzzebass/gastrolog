@@ -149,7 +149,7 @@ const (
 	// Draining: operator-initiated; chunks being transferred off the node
 	// in preparation for removal.
 	NodeState_NODE_STATE_DRAINING NodeState = 4
-	// Decommissioning: chunks moved; voter being removed from system Raft
+	// Decommissioning: chunks moved; voter being removed from cluster-ctl Raft
 	// and vault-ctl groups. Transitions to absence-from-FSM (= Removed)
 	// when removal completes.
 	NodeState_NODE_STATE_DECOMMISSIONING NodeState = 5
@@ -361,7 +361,7 @@ type GetSystemResponse struct {
 	NodeConfigs       []*NodeConfig            `protobuf:"bytes,5,rep,name=node_configs,json=nodeConfigs,proto3" json:"node_configs,omitempty"`
 	Routes            []*RouteConfig           `protobuf:"bytes,6,rep,name=routes,proto3" json:"routes,omitempty"`
 	ManagedFiles      []*ManagedFileInfo       `protobuf:"bytes,7,rep,name=managed_files,json=managedFiles,proto3" json:"managed_files,omitempty"`
-	// Committed log index on the system Raft group (monotonic). Used by clients
+	// Committed log index on the cluster-ctl Raft group (monotonic). Used by clients
 	// to avoid regressing cached replicated state with stale reads.
 	SystemRaftIndex    uint64               `protobuf:"varint,8,opt,name=system_raft_index,json=systemRaftIndex,proto3" json:"system_raft_index,omitempty"`
 	CloudServices      []*CloudService      `protobuf:"bytes,9,rep,name=cloud_services,json=cloudServices,proto3" json:"cloud_services,omitempty"`
@@ -553,11 +553,12 @@ func (x *RetentionRule) GetRetentionPolicyId() []byte {
 }
 
 // VaultPlacement assigns one replica of a vault to a specific file storage.
-// The node is derived from the file storage's NodeStorageConfig.
+// The node is derived from the file storage's NodeStorageConfig. Under the
+// fan-out data plane every placement member is symmetric — the legacy
+// "leader" bool that singled out one canonical writer is gone (gastrolog-hshgl).
 type VaultPlacement struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	StorageId     []byte                 `protobuf:"bytes,1,opt,name=storage_id,json=storageId,proto3" json:"storage_id,omitempty"` // references FileStorage.id
-	Leader        bool                   `protobuf:"varint,2,opt,name=leader,proto3" json:"leader,omitempty"`                       // true = this storage bootstraps the Raft group (initial leader)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -599,13 +600,6 @@ func (x *VaultPlacement) GetStorageId() []byte {
 	return nil
 }
 
-func (x *VaultPlacement) GetLeader() bool {
-	if x != nil {
-		return x.Leader
-	}
-	return false
-}
-
 // VaultConfig defines a vault — the unit of independent storage and the
 // only abstraction over the chunk layer.
 type VaultConfig struct {
@@ -626,8 +620,13 @@ type VaultConfig struct {
 	CacheBudget          string                 `protobuf:"bytes,14,opt,name=cache_budget,json=cacheBudget,proto3" json:"cache_budget,omitempty"`                            // max cache size (e.g. "1GB", "500MB"; default: "1GiB")
 	CacheTtl             string                 `protobuf:"bytes,15,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`                                     // eviction TTL duration (e.g. "1h", "7d"); only for ttl mode
 	RetentionDisposition string                 `protobuf:"bytes,16,opt,name=retention_disposition,json=retentionDisposition,proto3" json:"retention_disposition,omitempty"` // "delete" (default) or "route" — what retention does with aged-out records
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// Fan-out W-of-N durability policy (gastrolog-nd6sz / gastrolog-4xdvm):
+	// "" / "full" (default) / "minus-one" / "quorum" / "one". Resolves
+	// to a concrete W at write time against the active chunk's
+	// Receiving size. See system.WOfNPolicy.Resolve.
+	WOfN          string `protobuf:"bytes,17,opt,name=w_of_n,json=wOfN,proto3" json:"w_of_n,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *VaultConfig) Reset() {
@@ -768,6 +767,13 @@ func (x *VaultConfig) GetCacheTtl() string {
 func (x *VaultConfig) GetRetentionDisposition() string {
 	if x != nil {
 		return x.RetentionDisposition
+	}
+	return ""
+}
+
+func (x *VaultConfig) GetWOfN() string {
+	if x != nil {
+		return x.WOfN
 	}
 	return ""
 }
@@ -6897,7 +6903,7 @@ func (*WatchSystemRequest) Descriptor() ([]byte, []int) {
 
 type WatchSystemResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Committed log index on the system Raft group when this notification fired.
+	// Committed log index on the cluster-ctl Raft group when this notification fired.
 	// Clients should only invalidate or refetch when this index exceeds the
 	// highest system_raft_index they already hold from a fetch or mutation.
 	SystemRaftIndex uint64 `protobuf:"varint,1,opt,name=system_raft_index,json=systemRaftIndex,proto3" json:"system_raft_index,omitempty"`
@@ -8838,11 +8844,10 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x11environment_label\x18\f \x01(\tR\x10environmentLabel\x12+\n" +
 	"\x11environment_color\x18\r \x01(\tR\x10environmentColor\"?\n" +
 	"\rRetentionRule\x12.\n" +
-	"\x13retention_policy_id\x18\x01 \x01(\fR\x11retentionPolicyId\"G\n" +
+	"\x13retention_policy_id\x18\x01 \x01(\fR\x11retentionPolicyId\"/\n" +
 	"\x0eVaultPlacement\x12\x1d\n" +
 	"\n" +
-	"storage_id\x18\x01 \x01(\fR\tstorageId\x12\x16\n" +
-	"\x06leader\x18\x02 \x01(\bR\x06leader\"\x88\x05\n" +
+	"storage_id\x18\x01 \x01(\fR\tstorageId\"\x9e\x05\n" +
 	"\vVaultConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
@@ -8862,7 +8867,8 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x0ecache_eviction\x18\r \x01(\tR\rcacheEviction\x12!\n" +
 	"\fcache_budget\x18\x0e \x01(\tR\vcacheBudget\x12\x1b\n" +
 	"\tcache_ttl\x18\x0f \x01(\tR\bcacheTtl\x123\n" +
-	"\x15retention_disposition\x18\x10 \x01(\tR\x14retentionDisposition\"-\n" +
+	"\x15retention_disposition\x18\x10 \x01(\tR\x14retentionDisposition\x12\x14\n" +
+	"\x06w_of_n\x18\x11 \x01(\tR\x04wOfN\"-\n" +
 	"\x10RouteDestination\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\"\x81\x02\n" +
 	"\vRouteConfig\x12\x0e\n" +

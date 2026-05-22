@@ -222,12 +222,12 @@ func (s *VaultServer) remoteVaultNodes(ctx context.Context, vaultID glid.GLID) [
 	}
 	seen := make(map[string]bool)
 	var nodes []string
-	leaderNodeID := system.LeaderNodeID(vaultCfg.Placements, nscs)
+	leaderNodeID := system.PrimaryPlacementNodeID(vaultCfg.Placements, nscs)
 	if leaderNodeID != "" && leaderNodeID != s.localNodeID {
 		seen[leaderNodeID] = true
 		nodes = append(nodes, leaderNodeID)
 	}
-	for _, sid := range system.FollowerNodeIDs(vaultCfg.Placements, nscs) {
+	for _, sid := range system.PeerPlacementNodeIDs(vaultCfg.Placements, nscs) {
 		if sid != s.localNodeID && !seen[sid] {
 			seen[sid] = true
 			nodes = append(nodes, sid)
@@ -643,11 +643,11 @@ func (s *VaultServer) vaultPlacementNodeIDs(ctx context.Context, vaultID glid.GL
 	}
 	seen := map[string]bool{}
 	var nodes []string
-	if leader := system.LeaderNodeID(cfg.Placements, nscs); leader != "" && !seen[leader] {
+	if leader := system.PrimaryPlacementNodeID(cfg.Placements, nscs); leader != "" && !seen[leader] {
 		seen[leader] = true
 		nodes = append(nodes, leader)
 	}
-	for _, nid := range system.FollowerNodeIDs(cfg.Placements, nscs) {
+	for _, nid := range system.PeerPlacementNodeIDs(cfg.Placements, nscs) {
 		if !seen[nid] {
 			seen[nid] = true
 			nodes = append(nodes, nid)

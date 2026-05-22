@@ -36,7 +36,7 @@ func TestVaultsOrphanedByRemoval_RF1_SoleHolderRefused(t *testing.T) {
 		t.Fatalf("PutVault: %v", err)
 	}
 	if err := store.SetVaultPlacements(ctx, vaultID, []system.VaultPlacement{
-		{StorageID: system.SyntheticStorageID(target), Leader: true},
+		{StorageID: system.SyntheticStorageID(target)},
 	}); err != nil {
 		t.Fatalf("SetVaultPlacements: %v", err)
 	}
@@ -62,8 +62,8 @@ func TestVaultsOrphanedByRemoval_RF2_OtherHolderSurvives(t *testing.T) {
 		t.Fatalf("PutVault: %v", err)
 	}
 	if err := store.SetVaultPlacements(ctx, vaultID, []system.VaultPlacement{
-		{StorageID: system.SyntheticStorageID("node-A"), Leader: true},
-		{StorageID: system.SyntheticStorageID("node-B"), Leader: false},
+		{StorageID: system.SyntheticStorageID("node-A")},
+		{StorageID: system.SyntheticStorageID("node-B")},
 	}); err != nil {
 		t.Fatalf("SetVaultPlacements: %v", err)
 	}
@@ -83,9 +83,9 @@ func TestVaultsOrphanedByRemoval_RF3_AllPlacementsHealthy(t *testing.T) {
 		t.Fatalf("PutVault: %v", err)
 	}
 	if err := store.SetVaultPlacements(ctx, vaultID, []system.VaultPlacement{
-		{StorageID: system.SyntheticStorageID("node-A"), Leader: true},
-		{StorageID: system.SyntheticStorageID("node-B"), Leader: false},
-		{StorageID: system.SyntheticStorageID("node-C"), Leader: false},
+		{StorageID: system.SyntheticStorageID("node-A")},
+		{StorageID: system.SyntheticStorageID("node-B")},
+		{StorageID: system.SyntheticStorageID("node-C")},
 	}); err != nil {
 		t.Fatalf("SetVaultPlacements: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestVaultsOrphanedByRemoval_MixedVaults(t *testing.T) {
 		t.Fatalf("PutVault solo: %v", err)
 	}
 	if err := store.SetVaultPlacements(ctx, soloID, []system.VaultPlacement{
-		{StorageID: system.SyntheticStorageID("node-A"), Leader: true},
+		{StorageID: system.SyntheticStorageID("node-A")},
 	}); err != nil {
 		t.Fatalf("SetVaultPlacements solo: %v", err)
 	}
@@ -120,8 +120,8 @@ func TestVaultsOrphanedByRemoval_MixedVaults(t *testing.T) {
 		t.Fatalf("PutVault ha: %v", err)
 	}
 	if err := store.SetVaultPlacements(ctx, haID, []system.VaultPlacement{
-		{StorageID: system.SyntheticStorageID("node-A"), Leader: true},
-		{StorageID: system.SyntheticStorageID("node-B"), Leader: false},
+		{StorageID: system.SyntheticStorageID("node-A")},
+		{StorageID: system.SyntheticStorageID("node-B")},
 	}); err != nil {
 		t.Fatalf("SetVaultPlacements ha: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestVaultsOrphanedByRemoval_FileStorageResolution(t *testing.T) {
 		t.Fatalf("PutVault: %v", err)
 	}
 	if err := store.SetVaultPlacements(ctx, vaultID, []system.VaultPlacement{
-		{StorageID: storageID.String(), Leader: true},
+		{StorageID: storageID.String()},
 	}); err != nil {
 		t.Fatalf("SetVaultPlacements: %v", err)
 	}

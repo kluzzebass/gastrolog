@@ -16,7 +16,7 @@ import (
 
 // leaderPlacement creates a Placements slice with a single leader using a synthetic storage ID.
 func leaderPlacement(nodeID string) []system.VaultPlacement {
-	return []system.VaultPlacement{{StorageID: system.SyntheticStorageID(nodeID), Leader: true}}
+	return []system.VaultPlacement{{StorageID: system.SyntheticStorageID(nodeID)}}
 }
 
 func newTestPlacement(t *testing.T, localNodeID string, livePeers []string) (*placementManager, *sysmem.Store, *alert.Collector) {
@@ -47,7 +47,7 @@ func vaultNode(t *testing.T, store *sysmem.Store, vaultID glid.GLID) string {
 		t.Fatalf("ListNodeStorageConfigs: %v", err)
 	}
 	placements, _ := store.GetVaultPlacements(ctx, vaultID)
-	return system.LeaderNodeID(placements, nscs)
+	return system.PrimaryPlacementNodeID(placements, nscs)
 }
 
 func hasAlert(alerts *alert.Collector, prefix string) bool {
@@ -637,14 +637,14 @@ func TestPlacementRF2AssignsSecondary(t *testing.T) {
 
 	nscs, _ := store.ListNodeStorageConfigs(ctx)
 	placements, _ := store.GetVaultPlacements(ctx, vaultID)
-	if system.LeaderNodeID(placements, nscs) == "" {
+	if system.PrimaryPlacementNodeID(placements, nscs) == "" {
 		t.Fatal("expected leader assigned")
 	}
-	followers := system.FollowerNodeIDs(placements, nscs)
+	followers := system.PeerPlacementNodeIDs(placements, nscs)
 	if len(followers) != 1 {
 		t.Fatalf("expected 1 follower, got %d", len(followers))
 	}
-	if followers[0] == system.LeaderNodeID(placements, nscs) {
+	if followers[0] == system.PrimaryPlacementNodeID(placements, nscs) {
 		t.Error("follower should not be the same as leader")
 	}
 }
@@ -661,7 +661,7 @@ func TestPlacementRF1NoSecondaries(t *testing.T) {
 
 	nscs, _ := store.ListNodeStorageConfigs(ctx)
 	placements, _ := store.GetVaultPlacements(ctx, vaultID)
-	if followers := system.FollowerNodeIDs(placements, nscs); len(followers) != 0 {
+	if followers := system.PeerPlacementNodeIDs(placements, nscs); len(followers) != 0 {
 		t.Errorf("expected 0 followers for RF=1, got %d", len(followers))
 	}
 }
@@ -679,7 +679,7 @@ func TestPlacementRF3InsufficientNodes(t *testing.T) {
 	nscs, _ := store.ListNodeStorageConfigs(ctx)
 	placements, _ := store.GetVaultPlacements(ctx, vaultID)
 	// RF=3 needs 2 followers, but only 1 other node available.
-	if followers := system.FollowerNodeIDs(placements, nscs); len(followers) != 1 {
+	if followers := system.PeerPlacementNodeIDs(placements, nscs); len(followers) != 1 {
 		t.Errorf("expected 1 follower (max available), got %d", len(followers))
 	}
 	if !hasAlert(alerts, "vault-underreplicated:") {

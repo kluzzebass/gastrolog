@@ -720,11 +720,12 @@ func (r *VaultLifecycleReconciler) alertUnknownOrphan(meta chunk.ChunkMeta) {
 //     instead of declaring them lost to the stale-fsm sweep
 //     (gastrolog-19241).
 //
-// Both roles run this sweep. The peer set is asymmetric by role:
-// followers ask the leader (FollowerTargets is empty on followers,
-// LeaderNodeID points at the leader); the leader asks every follower
-// (FollowerTargets enumerates them). Cloud-backed chunks live in shared
-// object storage and are skipped — they are not a local-replica concern.
+// Every Receiver runs this sweep symmetrically (gastrolog-3vhu4):
+// each replica asks every OTHER placement member for the missing
+// chunks; whichever peer happens to have a chunk schedules the push.
+// Receivers that don't have a requested chunk return scheduled=0
+// silently. Cloud-backed chunks live in shared object storage and
+// are skipped — they are not a local-replica concern.
 func (r *VaultLifecycleReconciler) SweepMissingReplicas() {
 	if r.fsm == nil || r.vaultInst == nil || r.vaultInst.Chunks == nil {
 		return
@@ -794,24 +795,30 @@ func (r *VaultLifecycleReconciler) SweepMissingReplicas() {
 	}
 }
 
-// replicationPeers returns the placement-peer node IDs this reconciler
-// should ask for missing chunks. Followers ask the leader; leaders ask
-// every follower target. Self is always excluded. Empty IDs (transient
-// unknown state during placement transitions) are filtered so we don't
-// dial nowhere.
+// replicationPeers returns every OTHER placement-member node ID this
+// reconciler can ask for missing chunks. Under the fan-out data plane
+// (gastrolog-3vhu4) every Receiver is a symmetric peer — the legacy
+// asymmetry (followers ask the leader; leader asks every follower)
+// collapses into "ask every placement member except self." Each
+// Receiver runs SweepMissingReplicas locally and pulls from whichever
+// peer responds; receivers that don't have the chunk return
+// scheduled=0 silently.
+//
+// Empty IDs and self are filtered. The peer list is built from the
+// placement metadata the FSM publishes via VaultInstance.PrimaryPlacementNodeID
+// + VaultInstance.PeerPlacementTargets — together those enumerate the
+// complete placement set.
 func (r *VaultLifecycleReconciler) replicationPeers() []string {
 	if r.vaultInst == nil {
 		return nil
 	}
-	if r.vaultInst.IsFollower {
-		if r.vaultInst.LeaderNodeID == "" || r.vaultInst.LeaderNodeID == r.localNodeID {
-			return nil
-		}
-		return []string{r.vaultInst.LeaderNodeID}
-	}
-	peers := make([]string, 0, len(r.vaultInst.FollowerTargets))
+	peers := make([]string, 0, 1+len(r.vaultInst.PeerPlacementTargets))
 	seen := map[string]bool{r.localNodeID: true}
-	for _, t := range r.vaultInst.FollowerTargets {
+	if leader := r.vaultInst.PrimaryPlacementNodeID; leader != "" && !seen[leader] {
+		peers = append(peers, leader)
+		seen[leader] = true
+	}
+	for _, t := range r.vaultInst.PeerPlacementTargets {
 		if t.NodeID == "" || seen[t.NodeID] {
 			continue
 		}
@@ -852,8 +859,13 @@ func (r *VaultLifecycleReconciler) SweepStaleLeaderFSMEntries() {
 	if r.fsm == nil || r.vaultInst == nil || r.vaultInst.Chunks == nil {
 		return
 	}
-	if r.vaultInst.IsFollower {
-		return // followers use SweepMissingReplicas to pull from leader
+	// Gate to the current vault-ctl Raft leader: under fan-out every
+	// Receiver runs the reconciler, but receipt-protocol delete
+	// proposals must come from a single source so Raft can serialize
+	// them. Non-leader Receivers rely on SweepMissingReplicas to
+	// pull whatever they're missing rather than proposing deletes.
+	if r.vaultInst.IsRaftLeader != nil && !r.vaultInst.IsRaftLeader() {
+		return
 	}
 	if r.vaultInst.ApplyRaftRequestDelete == nil {
 		return // single-node / no Raft; no receipt protocol
@@ -959,7 +971,10 @@ func (r *VaultLifecycleReconciler) SweepStalePendingDeleteAcks() {
 	if r.fsm == nil || r.vaultInst == nil {
 		return
 	}
-	if r.vaultInst.IsFollower {
+	// Single proposer gate (vault-ctl Raft leader). Same rationale as
+	// SweepStaleLeaderFSMEntries: pendingDelete-prune proposals need
+	// one origin so Raft can serialize.
+	if r.vaultInst.IsRaftLeader != nil && !r.vaultInst.IsRaftLeader() {
 		return
 	}
 	if r.vaultInst.ApplyRaftPruneNode == nil {
@@ -970,11 +985,11 @@ func (r *VaultLifecycleReconciler) SweepStalePendingDeleteAcks() {
 	// for the sweep — see follower gate above) plus every follower
 	// target. Any nodeID in pendingDeletes ExpectedFrom that's NOT in
 	// this set is stale.
-	placement := make(map[string]bool, 1+len(r.vaultInst.FollowerTargets))
+	placement := make(map[string]bool, 1+len(r.vaultInst.PeerPlacementTargets))
 	if r.localNodeID != "" {
 		placement[r.localNodeID] = true
 	}
-	for _, t := range r.vaultInst.FollowerTargets {
+	for _, t := range r.vaultInst.PeerPlacementTargets {
 		if t.NodeID != "" {
 			placement[t.NodeID] = true
 		}
@@ -1198,13 +1213,13 @@ func (r *VaultLifecycleReconciler) sealMetadataOnlyOrphan(id chunk.ChunkID, loca
 // and is wired through r.instance directly here so the reconciler doesn't
 // need an orchestrator back-pointer for this.
 func (r *VaultLifecycleReconciler) placementMembership() []string {
-	expected := make([]string, 0, 1+len(r.vaultInst.FollowerTargets))
+	expected := make([]string, 0, 1+len(r.vaultInst.PeerPlacementTargets))
 	seen := map[string]bool{}
 	if r.localNodeID != "" {
 		expected = append(expected, r.localNodeID)
 		seen[r.localNodeID] = true
 	}
-	for _, t := range r.vaultInst.FollowerTargets {
+	for _, t := range r.vaultInst.PeerPlacementTargets {
 		if t.NodeID == "" || seen[t.NodeID] {
 			continue
 		}

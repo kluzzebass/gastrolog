@@ -28,7 +28,7 @@ import (
 
 // syntheticPlacements creates a Placements slice with a leader using a synthetic storage ID.
 func syntheticPlacements(nodeID string) []system.VaultPlacement {
-	return []system.VaultPlacement{{StorageID: system.SyntheticStorageID(nodeID), Leader: true}}
+	return []system.VaultPlacement{{StorageID: system.SyntheticStorageID(nodeID)}}
 }
 
 // ---------- config loader adapter ----------
@@ -54,7 +54,7 @@ func (l *transitionSystemLoader) Load(ctx context.Context) (*system.System, erro
 	for _, v := range sys.Config.Vaults {
 		if _, ok := sys.Runtime.VaultPlacements[v.ID]; !ok {
 			sys.Runtime.VaultPlacements[v.ID] = []system.VaultPlacement{
-				{StorageID: system.SyntheticStorageID(nodeID), Leader: true},
+				{StorageID: system.SyntheticStorageID(nodeID)},
 			}
 		}
 	}
@@ -72,7 +72,7 @@ func newTestStore(cfg *system.Config, nodeID string) *sysmem.Store {
 	}
 	for _, v := range cfg.Vaults {
 		_ = store.SetVaultPlacements(ctx, v.ID, []system.VaultPlacement{
-			{StorageID: system.SyntheticStorageID(nodeID), Leader: true},
+			{StorageID: system.SyntheticStorageID(nodeID)},
 		})
 	}
 	for _, rt := range cfg.Routes {
@@ -131,7 +131,7 @@ func setupTestStoreRuntime(store *sysmem.Store, nodeID string, vaultIDs ...glid.
 	ctx := context.Background()
 	for _, tid := range vaultIDs {
 		_ = store.SetVaultPlacements(ctx, tid, []system.VaultPlacement{
-			{StorageID: system.SyntheticStorageID(nodeID), Leader: true},
+			{StorageID: system.SyntheticStorageID(nodeID)},
 		})
 	}
 }
@@ -489,7 +489,7 @@ func newClusterRetentionRunner(orch *Orchestrator, vaultID glid.GLID, vaultInst 
 		cm:              vaultInst.Chunks,
 		im:              vaultInst.Indexes,
 		orch:            orch,
-		followerTargets: vaultInst.FollowerTargets,
+		followerTargets: vaultInst.PeerPlacementTargets,
 		reconciler:      vaultInst.Reconciler,
 		now:             time.Now,
 		logger:          slog.Default(),
@@ -572,7 +572,7 @@ func (h *clusterHarness) countChunksOnInstance(t *testing.T, vaultIdx int) map[s
 //   - nodeIDs[1:] are followers for all vaults
 //   - Each instance gets its own TempDir per node (real filesystem I/O)
 //   - rotationRecords controls the rotation policy (e.g., 100 = seal every 100 records)
-//   - The leader's vaults have FollowerTargets pointing to all followers
+//   - The leader's vaults have PeerPlacementTargets pointing to all followers
 //   - Every node has a directTransferrer wired to all other nodes
 //
 // newClusterLifecycleLogger returns a slog.Logger that writes ALL levels
@@ -616,11 +616,11 @@ func setupCluster(t *testing.T, nodeIDs []string, vaultCount int, rotationRecord
 	for i := range vaultCount {
 		placements := make([]system.VaultPlacement, 0, len(nodeIDs))
 		placements = append(placements, system.VaultPlacement{
-			StorageID: system.SyntheticStorageID(leaderID), Leader: true,
+			StorageID: system.SyntheticStorageID(leaderID),
 		})
 		for _, fid := range nodeIDs[1:] {
 			placements = append(placements, system.VaultPlacement{
-				StorageID: system.SyntheticStorageID(fid), Leader: false,
+				StorageID: system.SyntheticStorageID(fid),
 			})
 		}
 		_ = store.SetVaultPlacements(context.Background(), vaultIDs[i], placements)
@@ -673,9 +673,7 @@ func setupCluster(t *testing.T, nodeIDs []string, vaultCount int, rotationRecord
 				Query:   query.New(cm, im, nil),
 			}
 			if isLeader {
-				vaultInst.FollowerTargets = followerTargets
-			} else {
-				vaultInst.IsFollower = true
+				vaultInst.PeerPlacementTargets = followerTargets
 			}
 			instances[i] = vaultInst
 		}
@@ -736,8 +734,7 @@ func setupCluster(t *testing.T, nodeIDs []string, vaultCount int, rotationRecord
 // drain, a late ImportSealedChunk would recreate the chunk on the follower
 // after retention deleted it. Plain Chunks.Seal() only seals the leader —
 // followers' active chunks would stay active, causing forwardDelete to
-// fail with ErrActiveChunk. The leader's production seal-on-rotation path
-// uses sealRemoteFollowers; tests that manually seal must do the same.
+// fail with ErrActiveChunk.
 func (h *clusterHarness) sealAndReplicate(t *testing.T, leaderNode *clusterTestNode, vaultIdx int) {
 	t.Helper()
 	vaultInst := leaderNode.instances[vaultIdx]

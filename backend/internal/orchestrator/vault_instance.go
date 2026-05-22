@@ -24,9 +24,20 @@ type VaultInstance struct {
 	Chunks          chunk.ChunkManager
 	Indexes         index.IndexManager
 	Query           *query.Engine
-	IsFollower      bool                       // true if this node is a follower for this instance
-	LeaderNodeID    string                     // the leader node's ID (empty if this IS the leader)
-	FollowerTargets []system.ReplicationTarget // per-storage targets (populated on leader only)
+	// Under the fan-out data plane (gastrolog-hshgl) every placement
+	// member is symmetric — no leader/follower asymmetry at the
+	// data-path level. The fields below are routing-layer hints:
+	//
+	//   PrimaryPlacementNodeID: the canonical placement node (first
+	//   placement in the vault's Placements slice). Used by routing
+	//   code that needs to pick a deterministic single target;
+	//   every other placement member is an equally authoritative peer.
+	//
+	//   PeerPlacementTargets: every OTHER placement member's
+	//   ReplicationTarget. Consumed by the reconciler's
+	//   replicationPeers() enumeration for missing-replica catchup.
+	PrimaryPlacementNodeID string
+	PeerPlacementTargets   []system.ReplicationTarget
 
 	// HasRaftLeader returns true if the vault control-plane Raft group has an elected leader (cluster mode).
 	// Nil when no Raft group exists (single-node / memory mode).
@@ -103,6 +114,14 @@ type VaultInstance struct {
 	// instances; the orchestrator falls back to the chunk manager.
 	ManifestEntry func(id chunk.ChunkID) (vaultctlfsm.ManifestEntry, bool)
 
+	// ChunkPlacement returns the per-chunk Receiving/Holding placement
+	// from the vault-ctl FSM (gastrolog-nd6sz). Nil when no Raft group
+	// exists; nil-returning closure when the chunk has no placement
+	// entry (memory/jsonl-mode chunks have no placement and no
+	// cross-node fan-out). Used by appendRecord to dispatch the chunk
+	// through fanOutAppend.
+	ChunkPlacement func(id chunk.ChunkID) *vaultctlfsm.ChunkPlacement
+
 	// IsFSMReady returns true after the vault-ctl FSM has applied at least one log
 	// entry or restored from a snapshot. Before that, the manifest is incomplete
 	// and must not be used for reconciliation decisions.
@@ -154,12 +173,6 @@ func (t *VaultInstance) applyRaftCallbacks(cb vaultRaftCallbacks) {
 	t.ChunkResidency = cb.chunkResidency
 	t.ManifestEntries = cb.manifestEntries
 	t.ManifestEntry = cb.manifestEntry
+	t.ChunkPlacement = cb.chunkPlacement
 }
 
-// IsLeader returns true if this node is the leader for this instance.
-func (t *VaultInstance) IsLeader() bool { return !t.IsFollower }
-
-// ShouldForwardToFollowers returns true if this leader instance has replication targets.
-func (t *VaultInstance) ShouldForwardToFollowers() bool {
-	return t.IsLeader() && len(t.FollowerTargets) > 0
-}

@@ -36,8 +36,11 @@ func (r *recordReader) Prev() (chunk.Record, chunk.RecordRef, error) {
 }
 
 func (r *recordReader) Seek(ref chunk.RecordRef) error {
-	r.fwdIndex = int(ref.Pos) //nolint:gosec // G115: Pos is bounded by slice length
-	r.revIndex = int(ref.Pos) //nolint:gosec // G115: Pos is bounded by slice length
+	// Clamp to the slice length — see file/record_reader.go mmapCursor.Seek
+	// for the fan-out-divergence reasoning (gastrolog-hshgl).
+	pos := min(int(ref.Pos), len(r.records)) //nolint:gosec // G115: Pos clamped by len
+	r.fwdIndex = pos
+	r.revIndex = pos
 	return nil
 }
 

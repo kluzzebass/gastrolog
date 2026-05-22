@@ -195,16 +195,13 @@ func (s *QueryServer) searchDirect(
 	//      histogram, making it report fewer records as the user scrolls.
 	var histogram []*apiv1.HistogramBucket
 	if resume == nil {
-		if s.histogramFullyLocal(ctx, histogramQ) {
-			localEng := s.orch.LocalVaultQueryEngine()
-			if s.lookupResolver != nil {
-				localEng.SetLookupResolver(s.lookupResolver)
-			}
-			histogram = HistogramToProto(localEng.ComputeHistogram(ctx, histogramQ, 50))
-		} else {
-			localHist := HistogramToProto(eng.ComputeHistogram(ctx, histogramQ, 50))
-			histogram = mergeHistogramBuckets(localHist, remoteHist)
-		}
+		// Under fan-out (gastrolog-hshgl) every Receiver's active-chunk
+		// view can diverge from peers' until catchup converges them,
+		// so a local-only histogram drops records that a peer holds.
+		// Always merge local + remote: the local engine answers for
+		// this node's data; remoteHist already covers every peer.
+		localHist := HistogramToProto(eng.ComputeHistogram(ctx, histogramQ, 50))
+		histogram = mergeHistogramBuckets(localHist, remoteHist)
 	}
 
 	localIter, getLocalToken := eng.Search(ctx, q, localResume)
@@ -819,43 +816,6 @@ func (s *QueryServer) aggregateVaultBounds(vaults []glid.GLID) (time.Time, time.
 		}
 	}
 	return earliest, latest
-}
-
-// histogramFullyLocal returns true when this node is the leader of every
-// queried vault. When true, the histogram can be computed entirely from
-// local chunks without any cross-node fan-out. Follower replicas are NOT
-// sufficient: the active (un-sealed) chunk lives only on the leader and
-// is never replicated, so a follower-only view drops every record currently
-// in the active chunk and produces an empty right edge on the histogram
-// (last bars cut off at the last-sealed-chunk boundary instead of running
-// up to "now"). Falls back conservatively to false on any config store
-// error or when this node holds no leader vaults. See gastrolog-2g334
-// (regression of the gastrolog-66b7x optimization).
-func (s *QueryServer) histogramFullyLocal(ctx context.Context, q query.Query) bool {
-	if s.cfgStore == nil {
-		return false
-	}
-	localLeaders := s.orch.LocalLeaderVaultIDs()
-	if len(localLeaders) == 0 {
-		return false
-	}
-	selectedVaults, _ := query.ExtractVaultFilter(q.Normalize().BoolExpr, nil)
-	if len(selectedVaults) == 0 {
-		// No vault filter — consider every vault we know about.
-		vaults, err := s.cfgStore.ListVaults(ctx)
-		if err != nil {
-			return false
-		}
-		for _, v := range vaults {
-			selectedVaults = append(selectedVaults, v.ID)
-		}
-	}
-	for _, vid := range selectedVaults {
-		if !localLeaders[vid] {
-			return false
-		}
-	}
-	return true
 }
 
 func hasMultiNodeVault(byNode map[string][]glid.GLID) bool {

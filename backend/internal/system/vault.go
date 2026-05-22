@@ -67,6 +67,13 @@ type VaultConfig struct {
 	// the next sweep). Operators who want forwarding must opt in
 	// explicitly. See gastrolog-18du3.
 	RetentionDisposition string `json:"retentionDisposition,omitempty"`
+
+	// WOfN is the per-vault W-of-N durability policy. One of "full"
+	// (default; W = N), "minus-one", "quorum", "one". The
+	// orchestrator's fan-out coordinator resolves this against the
+	// active chunk's Receiving size at write time. See
+	// system.WOfNPolicy.Resolve (gastrolog-4xdvm).
+	WOfN WOfNPolicy `json:"wOfN,omitempty"`
 }
 
 // Canonical values for VaultConfig.RetentionDisposition.

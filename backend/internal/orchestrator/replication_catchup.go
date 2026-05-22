@@ -12,10 +12,14 @@ import (
 	"gastrolog/internal/cluster"
 )
 
-// ScheduleCatchup schedules catchup replication for newly added followers of
-// the given vault. Must be called on the node that holds the vault leader
-// replica — no-op if this node is a follower or does not host the vault.
-func (o *Orchestrator) ScheduleCatchup(vaultID glid.GLID, followerNodeIDs []string) {
+// ScheduleCatchup schedules catchup replication pushes for the given
+// peer node IDs. Called when peers join a placement and the local
+// node wants to proactively push sealed chunks rather than wait for
+// the peers' periodic SweepMissingReplicas tick. No-op if this node
+// has no vault instance (nothing to push). Under fan-out every
+// Receiver can drive a push; the legacy "only the leader can drive
+// catchup" gate is gone (gastrolog-3vhu4).
+func (o *Orchestrator) ScheduleCatchup(vaultID glid.GLID, peerNodeIDs []string) {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
 	var found *VaultInstance
@@ -23,10 +27,10 @@ func (o *Orchestrator) ScheduleCatchup(vaultID glid.GLID, followerNodeIDs []stri
 		found = vault.Instance
 	}
 	o.mu.RUnlock()
-	if found == nil || found.IsFollower {
+	if found == nil {
 		return
 	}
-	o.scheduleCatchup(vaultID, followerNodeIDs)
+	o.scheduleCatchup(vaultID, peerNodeIDs)
 }
 
 // scheduleCatchup schedules background jobs to replicate existing sealed chunks
@@ -76,9 +80,6 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID glid.GLID, n
 	vaultInst := o.findLocalVaultInstance(vaultID)
 	if vaultInst == nil {
 		return fmt.Errorf("vault %s not found", vaultID)
-	}
-	if vaultInst.IsFollower {
-		return nil // only leader initiates catchup
 	}
 	if o.chunkReplicator == nil {
 		return errors.New("no chunk replicator configured")

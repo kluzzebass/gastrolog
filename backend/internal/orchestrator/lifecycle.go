@@ -189,8 +189,8 @@ func (o *Orchestrator) runRateAlertEvaluator(ctx context.Context, interval time.
 //
 // Ordered shutdown:
 //  0. BeginShutdown on the shared phase (if wired) → fast-path skip in
-//     fireAndForgetRemote / sealRemoteFollowers so the drain pipeline
-//     doesn't spam peers that are going down alongside us.
+//     dispatchFanOutAsync so the drain pipeline doesn't spam peers that
+//     are going down alongside us.
 //  1. Cancel ingester contexts → ingesterWg.Wait() → close ingestCh
 //  2. digestWg.Wait() (drains remaining messages) → close digestedCh
 //  3. writeWg.Wait() (drains remaining records) → close done
@@ -205,10 +205,10 @@ func (o *Orchestrator) Stop() error {
 	o.mu.Unlock()
 
 	// Stage 0: flip the shutdown phase BEFORE any drain work so that
-	// fireAndForgetRemote / sealRemoteFollowers skip their remote calls
-	// while we drain buffered records through the pipeline. Idempotent
-	// if the top-level shutdown already flipped it; safe to call with a
-	// nil phase (single-node tests). See gastrolog-1e5ke.
+	// fan-out dispatch helpers skip their remote calls while we drain
+	// buffered records through the pipeline. Idempotent if the top-level
+	// shutdown already flipped it; safe to call with a nil phase
+	// (single-node tests). See gastrolog-1e5ke.
 	if o.phase != nil {
 		o.phase.BeginShutdown("orchestrator: cancelling ingesters")
 	}
@@ -455,13 +455,17 @@ func (o *Orchestrator) writeLoop() {
 				// Write failed or no sync work — ack immediately.
 				dr.ack <- err
 			} else {
-				// Ack-gated: run the sync work (local follower
-				// replication + cross-node forward) in a goroutine
-				// so the writeLoop isn't blocked by network round-trips.
+				// Ack-gated: run the sync work (fan-out W-of-N +
+				// cross-node forward) in a goroutine so the writeLoop
+				// isn't blocked by network round-trips.
 				o.ackWg.Go(func() {
 					o.ackAfterReplication(dr.ack, pa, dr.rec)
 				})
 			}
+		} else {
+			// Non-ack ingest still needs the fan-out to fire so peers
+			// receive the records. Fire-and-forget: caller doesn't wait.
+			o.dispatchFanOutAsync(pa, dr.rec)
 		}
 	}
 }
@@ -533,8 +537,11 @@ func (o *Orchestrator) rebuildVaultIndexes(ctx context.Context, vaultID glid.GLI
 		if !meta.Sealed {
 			continue
 		}
-		if meta.CloudBacked && vaultInst.IsFollower {
-			continue // no local data — adopted via RegisterCloudChunk
+		// Cloud-backed chunks owned exclusively by S3 — adopted via
+		// RegisterCloudChunk when CmdUploadChunk propagates — never
+		// need a local index rebuild.
+		if meta.CloudBacked && (vaultInst.IsRaftLeader == nil || !vaultInst.IsRaftLeader()) {
+			continue
 		}
 		o.scheduleIndexRebuildIfNeeded(ctx, vaultID, vaultInst, meta)
 	}
@@ -546,10 +553,12 @@ func (o *Orchestrator) scheduleIndexRebuildIfNeeded(ctx context.Context, vaultID
 	if err != nil || complete {
 		return
 	}
-	// Followers can host many replicated chunks; eagerly rebuilding every
-	// missing index on each follower at startup causes N-way rebuild storms.
-	// Keep bootstrap rebuilds on leaders only.
-	if vaultInst.IsFollower {
+	// Gate bootstrap rebuilds to the current vault-ctl Raft leader to
+	// avoid every Receiver rebuilding every missing index at startup
+	// (N-way rebuild storms). Non-leader Receivers backfill indexes
+	// lazily via the on-demand cursor path or via the next sweep tick
+	// after a leadership change reassigns them.
+	if vaultInst.IsRaftLeader != nil && !vaultInst.IsRaftLeader() {
 		return
 	}
 	o.logger.Info("rebuilding missing indexes",

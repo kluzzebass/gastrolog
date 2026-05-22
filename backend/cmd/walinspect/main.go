@@ -284,6 +284,16 @@ func commandName(cmd vaultctlfsm.Command) string {
 		return "CmdBeginSeal"
 	case vaultctlfsm.CmdRepatriateChunk:
 		return "CmdRepatriateChunk"
+	case vaultctlfsm.CmdAddReceiving:
+		return "CmdAddReceiving"
+	case vaultctlfsm.CmdRemoveReceiving:
+		return "CmdRemoveReceiving"
+	case vaultctlfsm.CmdAddHolding:
+		return "CmdAddHolding"
+	case vaultctlfsm.CmdBeginHoldingRemoval:
+		return "CmdBeginHoldingRemoval"
+	case vaultctlfsm.CmdAckPull:
+		return "CmdAckPull"
 	default:
 		return fmt.Sprintf("CmdUnknown(%d)", cmd)
 	}

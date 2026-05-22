@@ -226,10 +226,11 @@ enum VaultType {
 }
 
 // VaultPlacement assigns one replica of a vault to a specific file storage.
-// The node is derived from the file storage's NodeStorageConfig.
+// The node is derived from the file storage's NodeStorageConfig. Under the
+// fan-out data plane every placement member is symmetric — the legacy
+// "leader" bool that singled out one canonical writer is gone (gastrolog-hshgl).
 message VaultPlacement {
   bytes storage_id = 1;   // references FileStorage.id
-  bool leader = 2;         // true = this storage bootstraps the Raft group (initial leader)
 }
 
 // VaultConfig defines a vault — the unit of independent storage and the
@@ -251,6 +252,11 @@ message VaultConfig {
   string cache_budget = 14;                  // max cache size (e.g. "1GB", "500MB"; default: "1GiB")
   string cache_ttl = 15;                     // eviction TTL duration (e.g. "1h", "7d"); only for ttl mode
   string retention_disposition = 16;         // "delete" (default) or "route" — what retention does with aged-out records
+  // Fan-out W-of-N durability policy (gastrolog-nd6sz / gastrolog-4xdvm):
+  // "" / "full" (default) / "minus-one" / "quorum" / "one". Resolves
+  // to a concrete W at write time against the active chunk's
+  // Receiving size. See system.WOfNPolicy.Resolve.
+  string w_of_n = 17;
 }
 
 message RouteDestination {

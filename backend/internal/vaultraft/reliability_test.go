@@ -337,10 +337,16 @@ func TestReliability_ConcurrentWrites_NoDivergence(t *testing.T) {
 				var cid chunk.ChunkID
 				cid[0] = byte(writerIdx)
 				cid[1] = byte(c)
-				wire := vaultctlfsm.MarshalCreateChunk(cid, now, now, now)
-				cmd := MarshalVaultChunkCommand(vaultID, wire)
-				if err := applyWithLeaderRetry(h, cmd, 5, 3*time.Second); err != nil {
-					errCh <- fmt.Errorf("writer %d cmd %d: %w", writerIdx, c, err)
+				createCmd := MarshalVaultChunkCommand(vaultID, vaultctlfsm.MarshalCreateChunk(cid, now, now, now))
+				if err := applyWithLeaderRetry(h, createCmd, 5, 3*time.Second); err != nil {
+					errCh <- fmt.Errorf("writer %d cmd %d create: %w", writerIdx, c, err)
+					return
+				}
+				// Free the single-Active slot so the next iteration's
+				// CmdCreateChunk succeeds.
+				sealCmd := MarshalVaultChunkCommand(vaultID, vaultctlfsm.MarshalBeginSeal(cid))
+				if err := applyWithLeaderRetry(h, sealCmd, 5, 3*time.Second); err != nil {
+					errCh <- fmt.Errorf("writer %d cmd %d begin-seal: %w", writerIdx, c, err)
 					return
 				}
 			}
@@ -738,9 +744,17 @@ func TestReliability_LargeFSM_SnapshotRestoreRoundtrip(t *testing.T) {
 			var cid chunk.ChunkID
 			cid[0] = byte(vi)
 			cid[1] = byte(ci)
-			cmd := MarshalVaultChunkCommand(vaultID, vaultctlfsm.MarshalCreateChunk(cid, now, now, now))
-			if r := src.Apply(&hraft.Log{Data: cmd}); r != nil {
-				t.Fatalf("apply vault=%d chunk=%d: %v", vi, ci, r)
+			// Create then begin-seal so the next chunk in the loop
+			// doesn't trip the single-Active invariant. Result: every
+			// fixture chunk lands in Sealing state, which is fine for
+			// snapshot/restore round-trip assertions.
+			createCmd := MarshalVaultChunkCommand(vaultID, vaultctlfsm.MarshalCreateChunk(cid, now, now, now))
+			if r := src.Apply(&hraft.Log{Data: createCmd}); r != nil {
+				t.Fatalf("apply create vault=%d chunk=%d: %v", vi, ci, r)
+			}
+			sealCmd := MarshalVaultChunkCommand(vaultID, vaultctlfsm.MarshalBeginSeal(cid))
+			if r := src.Apply(&hraft.Log{Data: sealCmd}); r != nil {
+				t.Fatalf("apply begin-seal vault=%d chunk=%d: %v", vi, ci, r)
 			}
 		}
 	}

@@ -1029,7 +1029,7 @@ func TestHandle_NodeConfigChange_RefreshesVaultCtlMembers(t *testing.T) {
 }
 
 // gastrolog-4zy8a: when the placement leader transfers but this node stays
-// a follower, the local VaultInstance.LeaderNodeID must be refreshed so the
+// a follower, the local VaultInstance.PrimaryPlacementNodeID must be refreshed so the
 // lifecycle reconciler's RequestReplicaCatchup targets the new leader
 // instead of looping forever against the old (stale) one.
 func TestHandle_PlacementsSet_RefreshesLeaderPointerWhenRoleUnchanged(t *testing.T) {
@@ -1053,15 +1053,14 @@ func TestHandle_PlacementsSet_RefreshesLeaderPointerWhenRoleUnchanged(t *testing
 
 	// New placement: new leader is on newLeaderID; local stays a follower.
 	placements := []system.VaultPlacement{
-		{StorageID: newLeaderStorage.String(), Leader: true},
-		{StorageID: localStorage.String(), Leader: false},
+		{StorageID: newLeaderStorage.String()},
+		{StorageID: localStorage.String()},
 	}
 
 	// Existing in-memory vault instance: still pointing at the OLD leader.
 	existing := &orchestrator.VaultInstance{
 		VaultID:      vaultID,
-		IsFollower:   true,
-		LeaderNodeID: oldLeaderID,
+		PrimaryPlacementNodeID: oldLeaderID,
 	}
 
 	h := &captureHandler{}
@@ -1082,11 +1081,8 @@ func TestHandle_PlacementsSet_RefreshesLeaderPointerWhenRoleUnchanged(t *testing
 
 	d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPlacementsSet, ID: vaultID})
 
-	if existing.LeaderNodeID != newLeaderID {
-		t.Fatalf("LeaderNodeID not refreshed: want %q, got %q", newLeaderID, existing.LeaderNodeID)
-	}
-	if !existing.IsFollower {
-		t.Fatal("IsFollower should still be true (role didn't change)")
+	if existing.PrimaryPlacementNodeID != newLeaderID {
+		t.Fatalf("PrimaryPlacementNodeID not refreshed: want %q, got %q", newLeaderID, existing.PrimaryPlacementNodeID)
 	}
 }
 
@@ -1114,7 +1110,7 @@ func TestHandle_PlacementsSet_RegistersVaultWhenMissing(t *testing.T) {
 	}
 	// Local node IS the leader → vaultBelongsHere true → rebuild path runs.
 	placements := []system.VaultPlacement{
-		{StorageID: localStorage.String(), Leader: true},
+		{StorageID: localStorage.String()},
 	}
 
 	h := &captureHandler{}
@@ -1153,7 +1149,7 @@ func TestHandle_PlacementsSet_DoesNotReregisterExistingVault(t *testing.T) {
 		{NodeID: localID, FileStorages: []system.FileStorage{{ID: localStorage, StorageClass: 1}}},
 	}
 	placements := []system.VaultPlacement{
-		{StorageID: localStorage.String(), Leader: true},
+		{StorageID: localStorage.String()},
 	}
 
 	h := &captureHandler{}

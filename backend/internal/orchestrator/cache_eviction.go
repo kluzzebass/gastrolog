@@ -31,7 +31,13 @@ func (o *Orchestrator) cacheEvictionSweepAll() {
 	var targets []evictTarget
 	for _, v := range o.vaults {
 		t := v.Instance
-		if t == nil || !t.IsLeader() {
+		if t == nil {
+			continue
+		}
+		// Cache eviction is a single-source operation per vault to
+		// avoid every Receiver racing on the same cache budget.
+		// Gate to the current vault-ctl Raft leader.
+		if t.IsRaftLeader != nil && !t.IsRaftLeader() {
 			continue
 		}
 		ev, ok := t.Chunks.(CacheEvictor)

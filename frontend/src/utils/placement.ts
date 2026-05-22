@@ -1,13 +1,18 @@
 /**
- * Placement helpers: resolve leader / follower node IDs from
+ * Placement helpers: resolve canonical / peer node IDs from
  * VaultConfig.placements and the cluster's NodeStorageConfig array.
+ *
+ * Under the fan-out data plane every placement member is symmetric — the
+ * "leader" / "follower" distinction at the data-path level is gone. The
+ * first placement in the slice is the deterministic canonical used by
+ * routing-layer code that needs to pick a stable target; every other
+ * placement is an equally authoritative peer.
  */
 
 import { encode } from "../api/glid";
 
 interface Placement {
   storageId: Uint8Array;
-  leader: boolean;
 }
 
 interface StorageRef {
@@ -34,23 +39,24 @@ export function nodeIdForStorage(storageId: string, nscs: readonly NSC[]): strin
   return "";
 }
 
-/** Returns the encoded node ID of the leader placement, or "" if none. */
+/** Returns the encoded node ID of the first (canonical) placement, or "" if none. */
 export function leaderNodeId(
   vault: { placements: readonly Placement[] },
   nscs: readonly NSC[],
 ): string {
-  const p = vault.placements.find((pl) => pl.leader);
-  if (!p) return "";
-  return nodeIdForStorage(encode(p.storageId), nscs);
+  const first = vault.placements[0];
+  if (!first) return "";
+  return nodeIdForStorage(encode(first.storageId), nscs);
 }
 
-/** Returns the encoded node IDs of all follower (non-leader) placements. */
+/** Returns the encoded node IDs of every placement except the first (canonical). */
 export function followerNodeIds(
   vault: { placements: readonly Placement[] },
   nscs: readonly NSC[],
 ): string[] {
+  if (vault.placements.length <= 1) return [];
   return vault.placements
-    .filter((pl) => !pl.leader)
+    .slice(1)
     .map((pl) => nodeIdForStorage(encode(pl.storageId), nscs))
     .filter((id) => id !== "");
 }

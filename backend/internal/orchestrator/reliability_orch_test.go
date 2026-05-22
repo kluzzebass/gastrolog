@@ -134,12 +134,11 @@ func TestOrchRel_Restart_SealedChunkSurvives(t *testing.T) {
 // stall the rest of the cluster. Pause the third node's gRPC handlers
 // (TCP stays up; app-level frozen), then exercise the ingest + seal
 // path on node1. With the 5oofa fix, append/seal complete normally:
-// fireAndForgetRemote's per-target goroutine against the paused node
-// times out via the ChunkReplicator.send ctx deadline, the circuit
-// breaker trips, and ingest proceeds. Without the fix, the ingest path
-// would hold o.mu.RLock indefinitely waiting on the paused peer, every
-// orchestrator operation would queue behind it, and the test would hit
-// its timeout.
+// the fan-out dispatcher's per-target goroutine against the paused node
+// times out via the ChunkReplicator.send ctx deadline and ingest
+// proceeds. Without the fix, the ingest path would hold o.mu.RLock
+// indefinitely waiting on the paused peer, every orchestrator operation
+// would queue behind it, and the test would hit its timeout.
 //
 // The test asserts:
 //   - append + seal on the leader completes within a bounded time

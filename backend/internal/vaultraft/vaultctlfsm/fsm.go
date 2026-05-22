@@ -16,6 +16,17 @@ import (
 	hraft "github.com/hashicorp/raft"
 )
 
+// ErrActiveChunkExists is returned by applyCreate when an existing
+// Active chunk for the vault would be displaced. Under the fan-out
+// data plane (gastrolog-hshgl) every replica can fire CmdCreateChunk
+// concurrently when its local rotation policy trips; Raft serializes
+// the entries and the first-to-commit's chunk ID wins. Subsequent
+// CmdCreateChunk entries that would introduce a second Active are
+// rejected with this error so the FSM never carries more than one
+// Active chunk per vault. The losing proposer learns the canonical
+// Active ID via the OnCreate callback fired for the winning entry.
+var ErrActiveChunkExists = errors.New("vaultctlfsm: active chunk already exists for vault")
+
 // Command identifies the type of chunk metadata mutation.
 type Command byte
 
@@ -88,6 +99,31 @@ const (
 	// inserts the entry in Sealed state, refusing if the entry
 	// already exists or is tombstoned. See gastrolog-32bf2.
 	CmdRepatriateChunk Command = 13
+
+	// Fan-out placement commands — gastrolog-2ujjh / gastrolog-4cxw0.
+	// CmdAddReceiving atomically inserts a node into both Receiving
+	// and Holding (Holding ⊇ Receiving invariant). The implicit dual
+	// mutation matches applyAckDelete's multi-map pattern.
+	CmdAddReceiving Command = 14
+	// CmdRemoveReceiving removes a node from Receiving. The node
+	// stays in Holding until a paired CmdBeginHoldingRemoval +
+	// drained PendingPulls finishes the receipt protocol.
+	CmdRemoveReceiving Command = 15
+	// CmdAddHolding adds a node to Holding without touching
+	// Receiving. Fires on reconcile catch-up completion for nodes
+	// that acquired the chunk's records without joining Receiving
+	// (orphan repatriation, snapshot restore). Per-chunk, not
+	// per-record.
+	CmdAddHolding Command = 16
+	// CmdBeginHoldingRemoval populates PendingPulls for a fromNode
+	// leaving Holding. expectedFrom is the set of toNodes that owe a
+	// CmdAckPull before the removal finalizes.
+	CmdBeginHoldingRemoval Command = 17
+	// CmdAckPull records a toNode's ack that it pulled fromNode's
+	// records. When the PendingPulls[fromNode] set drains, fromNode
+	// is atomically removed from Holding ("natural finalize" pattern
+	// mirroring applyAckDelete).
+	CmdAckPull Command = 18
 )
 
 // ManifestEntry holds the full metadata for one chunk in this vault's
@@ -228,6 +264,23 @@ type FSM struct {
 	// replication-job deadline, typically a few minutes, cannot still be
 	// in flight and are safe to drop).
 	tombstones map[chunk.ChunkID]time.Time
+
+	// Fan-out placement state — gastrolog-2ujjh / gastrolog-4cxw0.
+	// Per-chunk Receiving/Holding/PendingPulls + FinalSetHash. Lives
+	// parallel to chunks (not on ManifestEntry) so the 123-byte fixed
+	// entry encoding stays unchanged and the placement section can be
+	// skipped by decoders without fan-out awareness. See
+	// fsm_placement.go.
+	placements map[chunk.ChunkID]*ChunkPlacement
+
+	// Placement callbacks (gastrolog-4cxw0). Fired outside f.mu after
+	// the corresponding Cmd applies — reconciler hooks for the
+	// orchestrator's catch-up / fan-out wiring.
+	onAddReceiving        func(chunk.ChunkID, string)
+	onRemoveReceiving     func(chunk.ChunkID, string)
+	onAddHolding          func(chunk.ChunkID, string)
+	onBeginHoldingRemoval func(chunk.ChunkID, string)
+	onAckPull             func(chunkID chunk.ChunkID, fromNode, toNode string, finalized bool)
 }
 
 // New creates an empty chunk metadata FSM.
@@ -236,6 +289,7 @@ func New() *FSM {
 		chunks:         make(map[chunk.ChunkID]*ManifestEntry),
 		tombstones:     make(map[chunk.ChunkID]time.Time),
 		pendingDeletes: make(map[chunk.ChunkID]*PendingDelete),
+		placements:     make(map[chunk.ChunkID]*ChunkPlacement),
 	}
 }
 
@@ -395,6 +449,56 @@ func (f *FSM) SetOnPruneNode(fn func(prunedNodeID string, finalizable []chunk.Ch
 	f.onPruneNode = fn
 }
 
+// SetOnAddReceiving registers a callback invoked (outside the FSM
+// lock) after CmdAddReceiving applies. Receives the chunkID and the
+// joining nodeID. Gastrolog-4cxw0: orchestrator hooks this to start
+// reconcile catch-up for the joining member if the chunk is still
+// active.
+func (f *FSM) SetOnAddReceiving(fn func(chunk.ChunkID, string)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onAddReceiving = fn
+}
+
+// SetOnRemoveReceiving registers a callback for CmdRemoveReceiving
+// applies. Receives the chunkID and the leaving nodeID. The leaving
+// node stays in Holding until a paired CmdBeginHoldingRemoval drains.
+func (f *FSM) SetOnRemoveReceiving(fn func(chunk.ChunkID, string)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onRemoveReceiving = fn
+}
+
+// SetOnAddHolding registers a callback for CmdAddHolding applies.
+// Fires on reconcile catch-up completion for nodes that acquired the
+// chunk's records without joining Receiving (orphan repatriation,
+// snapshot restore).
+func (f *FSM) SetOnAddHolding(fn func(chunk.ChunkID, string)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onAddHolding = fn
+}
+
+// SetOnBeginHoldingRemoval registers a callback for
+// CmdBeginHoldingRemoval applies. Each remaining Receiving member uses
+// this to learn that a pull-ack obligation has been recorded and
+// schedule its CmdAckPull when the records are pulled.
+func (f *FSM) SetOnBeginHoldingRemoval(fn func(chunk.ChunkID, string)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onBeginHoldingRemoval = fn
+}
+
+// SetOnAckPull registers a callback for CmdAckPull applies. The
+// finalized flag is true when this ack drained the PendingPulls entry
+// (the natural-finalize path; mirrors applyAckDelete's drained-ack
+// finalize).
+func (f *FSM) SetOnAckPull(fn func(chunkID chunk.ChunkID, fromNode, toNode string, finalized bool)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onAckPull = fn
+}
+
 // ---------- Reads (local, no Raft) ----------
 
 // Get returns a copy of a chunk's metadata, or nil if not found.
@@ -466,6 +570,20 @@ type applyEffects struct {
 	prunedNode         string
 	prunedFinalizable  []chunk.ChunkID
 
+	// Fan-out placement effects — gastrolog-4cxw0.
+	addReceivingChunkID        *chunk.ChunkID
+	addReceivingNodeID         string
+	removeReceivingChunkID     *chunk.ChunkID
+	removeReceivingNodeID      string
+	addHoldingChunkID          *chunk.ChunkID
+	addHoldingNodeID           string
+	beginHoldingRemovalChunkID *chunk.ChunkID
+	beginHoldingRemovalNodeID  string
+	ackPullChunkID             *chunk.ChunkID
+	ackPullFromNode            string
+	ackPullToNode              string
+	ackPullFinalized           bool
+
 	onCreate           func(ManifestEntry)
 	onDelete           func(chunk.ChunkID)
 	onUpload           func(ManifestEntry)
@@ -475,9 +593,21 @@ type applyEffects struct {
 	onAckDelete        func(chunk.ChunkID, string)
 	onFinalizeDelete   func(chunk.ChunkID)
 	onPruneNode        func(string, []chunk.ChunkID)
+
+	onAddReceiving        func(chunk.ChunkID, string)
+	onRemoveReceiving     func(chunk.ChunkID, string)
+	onAddHolding          func(chunk.ChunkID, string)
+	onBeginHoldingRemoval func(chunk.ChunkID, string)
+	onAckPull             func(chunkID chunk.ChunkID, fromNode, toNode string, finalized bool)
 }
 
 func (e applyEffects) fire() {
+	e.fireLifecycle()
+	e.fireDeletes()
+	e.firePlacement()
+}
+
+func (e applyEffects) fireLifecycle() {
 	if e.createdEntry != nil && e.onCreate != nil {
 		e.onCreate(*e.createdEntry)
 	}
@@ -493,6 +623,9 @@ func (e applyEffects) fire() {
 	if e.retentionPendingID != nil && e.onRetentionPending != nil {
 		e.onRetentionPending(*e.retentionPendingID)
 	}
+}
+
+func (e applyEffects) fireDeletes() {
 	if e.requestedDelete != nil && e.onRequestDelete != nil {
 		e.onRequestDelete(*e.requestedDelete)
 	}
@@ -515,6 +648,24 @@ func (e applyEffects) fire() {
 		for _, id := range e.prunedFinalizable {
 			e.onFinalizeDelete(id)
 		}
+	}
+}
+
+func (e applyEffects) firePlacement() {
+	if e.addReceivingChunkID != nil && e.onAddReceiving != nil {
+		e.onAddReceiving(*e.addReceivingChunkID, e.addReceivingNodeID)
+	}
+	if e.removeReceivingChunkID != nil && e.onRemoveReceiving != nil {
+		e.onRemoveReceiving(*e.removeReceivingChunkID, e.removeReceivingNodeID)
+	}
+	if e.addHoldingChunkID != nil && e.onAddHolding != nil {
+		e.onAddHolding(*e.addHoldingChunkID, e.addHoldingNodeID)
+	}
+	if e.beginHoldingRemovalChunkID != nil && e.onBeginHoldingRemoval != nil {
+		e.onBeginHoldingRemoval(*e.beginHoldingRemovalChunkID, e.beginHoldingRemovalNodeID)
+	}
+	if e.ackPullChunkID != nil && e.onAckPull != nil {
+		e.onAckPull(*e.ackPullChunkID, e.ackPullFromNode, e.ackPullToNode, e.ackPullFinalized)
 	}
 }
 
@@ -585,6 +736,16 @@ func (f *FSM) applyLocked(cmd Command, payload []byte) (any, applyEffects) {
 		// (retention, indexes, etc.) reacts identically to a normal
 		// CmdCreateChunk path.
 		fx.createdEntry = f.captureEntry(result, payload)
+	case CmdAddReceiving:
+		fx.addReceivingChunkID, fx.addReceivingNodeID, result = f.applyAddReceiving(payload)
+	case CmdRemoveReceiving:
+		fx.removeReceivingChunkID, fx.removeReceivingNodeID, result = f.applyRemoveReceiving(payload)
+	case CmdAddHolding:
+		fx.addHoldingChunkID, fx.addHoldingNodeID, result = f.applyAddHolding(payload)
+	case CmdBeginHoldingRemoval:
+		fx.beginHoldingRemovalChunkID, fx.beginHoldingRemovalNodeID, result = f.applyBeginHoldingRemoval(payload)
+	case CmdAckPull:
+		fx.ackPullChunkID, fx.ackPullFromNode, fx.ackPullToNode, fx.ackPullFinalized, result = f.applyAckPull(payload)
 	default:
 		result = fmt.Errorf("unknown chunk FSM command: %d", cmd)
 	}
@@ -597,6 +758,11 @@ func (f *FSM) applyLocked(cmd Command, payload []byte) (any, applyEffects) {
 	fx.onAckDelete = f.onAckDelete
 	fx.onFinalizeDelete = f.onFinalizeDelete
 	fx.onPruneNode = f.onPruneNode
+	fx.onAddReceiving = f.onAddReceiving
+	fx.onRemoveReceiving = f.onRemoveReceiving
+	fx.onAddHolding = f.onAddHolding
+	fx.onBeginHoldingRemoval = f.onBeginHoldingRemoval
+	fx.onAckPull = f.onAckPull
 	f.mu.Unlock()
 
 	return result, fx
@@ -644,10 +810,16 @@ func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) {
 	for _, p := range f.pendingDeletes {
 		pendingDeletes = append(pendingDeletes, p.Copy())
 	}
+	placements := make(map[chunk.ChunkID]*ChunkPlacement, len(f.placements))
+	for id, p := range f.placements {
+		cp := p.Copy()
+		placements[id] = &cp
+	}
 	return &fsmSnapshot{
 		entries:        entries,
 		tombstones:     tombstones,
 		pendingDeletes: pendingDeletes,
+		placements:     placements,
 	}, nil
 }
 
@@ -674,13 +846,43 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 	if f.pendingDeletes == nil {
 		f.pendingDeletes = make(map[chunk.ChunkID]*PendingDelete)
 	}
+	// Fold pendingPulls (section 5) into placements (section 4). The
+	// two sections serialize separately for layout cleanliness but
+	// live on the same ChunkPlacement at runtime. Order of section
+	// arrival is not guaranteed, so we may need to create empty
+	// placements if pendingPulls arrived first or for chunks that
+	// only carry PendingPulls state.
+	f.placements = snap.placements
+	if f.placements == nil {
+		f.placements = make(map[chunk.ChunkID]*ChunkPlacement)
+	}
+	for id, pulls := range snap.pendingPulls {
+		p, ok := f.placements[id]
+		if !ok {
+			p = &ChunkPlacement{}
+			f.placements[id] = p
+		}
+		p.PendingPulls = pulls
+	}
 	f.ready = true
 	return nil
 }
 
 // ---------- Command application ----------
 
-// CreateChunk: [16 bytes ChunkID][8 bytes WriteStart nanos][8 bytes IngestStart nanos][8 bytes SourceStart nanos]
+// CreateChunk wire format:
+//
+//	Bare (40 bytes): [16 ChunkID][8 WriteStart nanos][8 IngestStart nanos][8 SourceStart nanos]
+//
+//	With Receiving (gastrolog-4cxw0, ≥44 bytes): bare 40 bytes ++
+//	    [4 bytes Receiving count (BE uint32)]
+//	    repeated:
+//	       2 bytes nodeID length (BE uint16)
+//	       N bytes nodeID
+//
+// Bare payloads produce no ChunkPlacement entry — used by
+// single-node/memory/jsonl chunk managers that have no cross-node
+// fan-out target list to stamp.
 func (f *FSM) applyCreate(data []byte) error {
 	if len(data) < 40 {
 		return fmt.Errorf("create chunk: payload too short (%d bytes)", len(data))
@@ -701,12 +903,68 @@ func (f *FSM) applyCreate(data []byte) error {
 		return nil
 	}
 
+	// Idempotent re-apply for the same ID (e.g. WAL replay) is a
+	// no-op: keep the existing entry untouched.
+	if _, present := f.chunks[id]; present {
+		return nil
+	}
+
+	// Single-Active invariant (gastrolog-hshgl): under fan-out every
+	// replica can fire CmdCreateChunk concurrently. Raft serializes
+	// the entries, but without FSM-side enforcement multiple replicas'
+	// proposals would all succeed and the FSM would carry several
+	// Active chunks per vault. First-to-commit wins; the FSM rejects
+	// any subsequent proposal that would introduce a second Active.
+	// Losing proposers have no records attached to their candidate ID,
+	// so the unused IDs are leak-free. Their chunk managers align to
+	// the winning ID via OnCreate when the winning entry replicates
+	// here.
+	for _, e := range f.chunks {
+		if e.State == chunk.ChunkStateActive {
+			return ErrActiveChunkExists
+		}
+	}
+
 	f.chunks[id] = &ManifestEntry{
 		ID:          id,
 		WriteStart:  writeStart,
 		IngestStart: ingestStart,
 		SourceStart: sourceStart,
 		State:       chunk.ChunkStateActive,
+	}
+
+	// Extended payload (gastrolog-4cxw0): parse the initial Receiving
+	// list and create a ChunkPlacement entry. Legacy 40-byte payloads
+	// (single-node tests / pre-fan-out WAL replay) exit here and
+	// produce no placement entry.
+	if len(data) <= 40 {
+		return nil
+	}
+	off := 40
+	if len(data) < off+4 {
+		return fmt.Errorf("create chunk: truncated Receiving count (%d bytes)", len(data))
+	}
+	rc := int(binary.BigEndian.Uint32(data[off : off+4]))
+	off += 4
+	receiving := make([]string, 0, rc)
+	for i := range rc {
+		if len(data) < off+2 {
+			return fmt.Errorf("create chunk: truncated Receiving node %d length", i)
+		}
+		nl := int(binary.BigEndian.Uint16(data[off : off+2]))
+		off += 2
+		if len(data) < off+nl {
+			return fmt.Errorf("create chunk: truncated Receiving node %d body", i)
+		}
+		receiving = append(receiving, string(data[off:off+nl]))
+		off += nl
+	}
+	// Holding ⊇ Receiving: every initial Receiving member is also in
+	// Holding from the moment the chunk is created.
+	holding := append([]string(nil), receiving...)
+	f.placements[id] = &ChunkPlacement{
+		Receiving: receiving,
+		Holding:   holding,
 	}
 	return nil
 }
@@ -745,6 +1003,17 @@ func (f *FSM) applySeal(data []byte) error {
 		e.IngestTSMonotonic = data[64]&1 != 0
 	}
 	e.State = chunk.ChunkStateSealed
+	// Optional FinalSetHash trailer (gastrolog-4cxw0 / gastrolog-37k2b):
+	// FanOut chunks may include the 32-byte converged set-hash at the
+	// end of the payload as defense-in-depth divergence detection.
+	if len(data) >= 65+32 {
+		p, ok := f.placements[id]
+		if !ok {
+			p = &ChunkPlacement{}
+			f.placements[id] = p
+		}
+		copy(p.FinalSetHash[:], data[65:97])
+	}
 	return nil
 }
 
@@ -937,7 +1206,11 @@ func (f *FSM) applyRetentionPending(data []byte) error {
 
 // ---------- Command builders (used by callers before Raft.Apply) ----------
 
-// MarshalCreateChunk builds the Raft log data for a CreateChunk command.
+// MarshalCreateChunk builds the Raft log data for a CreateChunk
+// command in the bare (no-Receiving) shape, used by single-node /
+// memory / jsonl chunk managers that have no cross-node fan-out.
+// Multi-node vaults use MarshalCreateChunkWithReceiving so the
+// initial Receiving set is stamped at chunk creation time.
 func MarshalCreateChunk(id chunk.ChunkID, writeStart, ingestStart, sourceStart time.Time) []byte {
 	buf := make([]byte, 1+40)
 	buf[0] = byte(CmdCreateChunk)
@@ -945,6 +1218,41 @@ func MarshalCreateChunk(id chunk.ChunkID, writeStart, ingestStart, sourceStart t
 	binary.BigEndian.PutUint64(buf[17:25], uint64(writeStart.UnixNano()))
 	binary.BigEndian.PutUint64(buf[25:33], uint64(ingestStart.UnixNano()))
 	binary.BigEndian.PutUint64(buf[33:41], uint64(sourceStart.UnixNano()))
+	return buf
+}
+
+// MarshalCreateChunkWithReceiving builds the Raft log data for a
+// CreateChunk command that stamps the chunk with its initial
+// Receiving set (gastrolog-4cxw0 / gastrolog-hshgl). The legacy
+// 40-byte prefix is preserved so single-node + WAL-replay paths that
+// produce the unextended form still apply correctly.
+func MarshalCreateChunkWithReceiving(id chunk.ChunkID, writeStart, ingestStart, sourceStart time.Time, receiving []string) []byte {
+	size := 1 + 40 + 4
+	for _, n := range receiving {
+		size += 2 + len(n)
+	}
+	buf := make([]byte, 0, size)
+	buf = append(buf, byte(CmdCreateChunk))
+	buf = append(buf, id[:]...)
+	var ws, is, ss [8]byte
+	binary.BigEndian.PutUint64(ws[:], uint64(writeStart.UnixNano()))
+	binary.BigEndian.PutUint64(is[:], uint64(ingestStart.UnixNano()))
+	binary.BigEndian.PutUint64(ss[:], uint64(sourceStart.UnixNano()))
+	buf = append(buf, ws[:]...)
+	buf = append(buf, is[:]...)
+	buf = append(buf, ss[:]...)
+	var rc [4]byte
+	binary.BigEndian.PutUint32(rc[:], uint32(len(receiving))) //nolint:gosec // G115: cluster size fits uint32
+	buf = append(buf, rc[:]...)
+	for _, n := range receiving {
+		if len(n) > 0xFFFF {
+			n = n[:0xFFFF]
+		}
+		var nl [2]byte
+		binary.BigEndian.PutUint16(nl[:], uint16(len(n))) //nolint:gosec // G115: node ID strings <64KB
+		buf = append(buf, nl[:]...)
+		buf = append(buf, n...)
+	}
 	return buf
 }
 
@@ -963,6 +1271,16 @@ func MarshalSealChunk(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes i
 		buf[65] = 1
 	}
 	return buf
+}
+
+// MarshalSealChunkFanOut builds the Raft log data for a SealChunk
+// command with the optional FinalSetHash trailer (gastrolog-4cxw0 /
+// gastrolog-37k2b). Receiving members compare their local set-hash
+// against the FinalSetHash carried on the apply as defense-in-depth
+// divergence detection. The legacy 65-byte prefix is preserved.
+func MarshalSealChunkFanOut(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64, ingestStart, ingestEnd, sourceEnd time.Time, ingestTSMonotonic bool, finalSetHash [32]byte) []byte {
+	buf := MarshalSealChunk(id, writeEnd, recordCount, bytes, ingestStart, ingestEnd, sourceEnd, ingestTSMonotonic)
+	return append(buf, finalSetHash[:]...)
 }
 
 // MarshalBeginSeal builds the Raft log data for a BeginSeal command.
@@ -1101,12 +1419,19 @@ const (
 	sectionEntries        sectionKind = 1
 	sectionTombstones     sectionKind = 2
 	sectionPendingDeletes sectionKind = 3 // gastrolog-51gme step 2
+	// Fan-out placement sections — gastrolog-2ujjh / gastrolog-4cxw0.
+	// Both parallel to the chunk-entries section, keyed by ChunkID.
+	// Decoders without fan-out support skip these unknown kinds
+	// (forward-compat by design — see decodeSnapshot default branch).
+	sectionChunkPlacement sectionKind = 4
+	sectionPendingPulls   sectionKind = 5
 )
 
 type fsmSnapshot struct {
 	entries        []ManifestEntry
 	tombstones     map[chunk.ChunkID]time.Time
-	pendingDeletes []PendingDelete // gastrolog-51gme step 2
+	pendingDeletes []PendingDelete                       // gastrolog-51gme step 2
+	placements     map[chunk.ChunkID]*ChunkPlacement     // gastrolog-4cxw0
 }
 
 func (s *fsmSnapshot) Persist(sink hraft.SnapshotSink) error {
@@ -1156,6 +1481,19 @@ func (s *fsmSnapshot) Persist(sink hraft.SnapshotSink) error {
 	// per entry; encoder writes the section header with the precomputed
 	// payload size.
 	if err := encodePendingDeletesSection(sink, s.pendingDeletes); err != nil {
+		_ = sink.Cancel()
+		return err
+	}
+
+	// Sections: chunkPlacement (4) + pendingPulls (5) — gastrolog-4cxw0.
+	// Each function omits its section entirely when empty so single-
+	// node / memory-mode clusters get a snapshot byte-identical to the
+	// pre-fan-out format.
+	if err := encodeChunkPlacementSection(sink, s.placements); err != nil {
+		_ = sink.Cancel()
+		return err
+	}
+	if err := encodePendingPullsSection(sink, s.placements); err != nil {
 		_ = sink.Cancel()
 		return err
 	}
@@ -1260,7 +1598,9 @@ func encodeEntry(w io.Writer, e *ManifestEntry) error {
 type decodedSnapshot struct {
 	entries        []ManifestEntry
 	tombstones     map[chunk.ChunkID]time.Time
-	pendingDeletes map[chunk.ChunkID]*PendingDelete // gastrolog-51gme step 2
+	pendingDeletes map[chunk.ChunkID]*PendingDelete                  // gastrolog-51gme step 2
+	placements     map[chunk.ChunkID]*ChunkPlacement                 // gastrolog-4cxw0
+	pendingPulls   map[chunk.ChunkID]map[string]map[string]bool      // gastrolog-4cxw0 (folded into placements after decode)
 }
 
 // decodeSnapshot reads a versioned snapshot. Unknown section kinds are
@@ -1293,6 +1633,10 @@ func decodeSnapshot(r io.Reader) (*decodedSnapshot, error) {
 			out.tombstones, err = readTombstonesSection(section)
 		case sectionPendingDeletes:
 			out.pendingDeletes, err = readPendingDeletesSection(section)
+		case sectionChunkPlacement:
+			out.placements, err = readChunkPlacementSection(section)
+		case sectionPendingPulls:
+			out.pendingPulls, err = readPendingPullsSection(section)
 		default:
 			// Unknown section — skip. Forward-compat for new sections in
 			// the same format version.

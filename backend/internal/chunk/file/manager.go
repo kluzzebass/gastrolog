@@ -149,6 +149,34 @@ type Config struct {
 	// (create, seal, compress, upload, delete) for cluster-wide visibility.
 	Announcer chunk.MetadataAnnouncer
 
+	// RotationCoordinator, when non-nil, drives FSM-mediated rotation.
+	// Append checks this and dispatches to rotateViaCoordinator, which
+	// round-trips CmdBeginSeal+CmdCreateChunk through vault-ctl Raft
+	// and returns the canonical new chunk ID. The chunk manager seals
+	// its current active and opens a new local chunk with the returned
+	// ID — no separate AnnounceBeginSeal/AnnounceCreate queued for this
+	// path because the coordinator already proposed both. See
+	// gastrolog-3yre7.
+	//
+	// When nil, the manager falls back to the legacy flow: local mint
+	// + announcer-driven propose-after-the-fact. Used by single-node /
+	// memory / jsonl managers that need no cross-replica
+	// synchronization.
+	RotationCoordinator chunk.RotationCoordinator
+
+	// UploadGate, when non-nil, decides per-call whether THIS
+	// replica should push the sealed chunk to the shared cloud blob
+	// store. PostSealProcess always runs compress + index locally;
+	// the gate only governs the upload step. Wired by the
+	// orchestrator to return IsRaftLeader for the vault-ctl Raft
+	// group so only one replica uploads per vault. See
+	// gastrolog-4t3rs.
+	//
+	// When nil, every PostSealProcess that has a CloudStore configured
+	// uploads — the single-node default that legacy CloudReadOnly
+	// gating used to control.
+	UploadGate chunk.UploadGate
+
 	// IntegrityVerifier, when non-nil, is consulted on every cold-cache
 	// cloud download to verify the GLCB whole-blob digest matches the
 	// FSM-recorded value (gastrolog-grnc3). A mismatch causes the
@@ -187,9 +215,25 @@ type Manager struct {
 	cloudListCache []chunk.ChunkMeta         // cached List() result for cloud chunks; nil = stale
 	storageClasses map[chunk.ChunkID]string  // in-memory cache of cloud storage class per chunk
 	nextChunkID    *chunk.ChunkID            // if set, used instead of NewChunkID() on next open
+	// nextChunkIDPreAnnounced flags that nextChunkID was set via the
+	// FSM-mediated rotation path (RotationCoordinator). openLocked
+	// SKIPS the AnnounceCreate queue for this ID because the
+	// coordinator already proposed CmdCreateChunk via Raft. The flag
+	// resets after consumption. See gastrolog-3yre7.
+	nextChunkIDPreAnnounced bool
 
 	postSealActive sync.Map       // chunk.ChunkID → chan struct{} — closed when PostSealProcess finishes
 	postSealWg     sync.WaitGroup // tracks in-flight PostSealProcess calls (for Close only)
+
+	// Fan-out chunk creation state (gastrolog-nd6sz / gastrolog-hshgl).
+	// The orchestrator wires the initial Receiving snapshot via
+	// SetFanOutConfig at instance build time and on every placement
+	// change. The next CmdCreateChunk fires via the
+	// ReceivingAnnouncer path with the snapshot stamped on the new
+	// ChunkPlacement. Empty Receiving means the chunk manager
+	// produces unextended CmdCreateChunk payloads (single-node /
+	// memory / JSONL).
+	fanOutReceiving []string
 
 	// chunkLocks protects each chunk's file lifetime against concurrent
 	// mutation: cursor reads (mmap'd raw.log/idx.log/attr.log regions)
@@ -493,11 +537,7 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 			"records", m.active.recordCount,
 			"age", m.cfg.Now().Sub(m.active.createdAt),
 		)
-		if err := m.sealLocked(); err != nil {
-			m.mu.Unlock()
-			return chunk.ChunkID{}, 0, err
-		}
-		if err := m.openLocked(); err != nil {
+		if err := m.rotateActive(m.active.meta.id); err != nil {
 			m.mu.Unlock()
 			return chunk.ChunkID{}, 0, err
 		}
@@ -592,28 +632,51 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 	return chunkID, recordIndex, nil
 }
 
-func (m *Manager) rotateIfNeeded(record chunk.Record, attrBytes []byte, newKeys []string) ([]byte, []string, error) {
-	state := m.activeChunkState()
-	trigger := m.cfg.RotationPolicy.ShouldRotate(state, record)
-	if trigger == nil {
-		return attrBytes, newKeys, nil
+// rotateViaCoordinator hands the rotation moment to the FSM-mediated
+// coordinator (gastrolog-3yre7). The coordinator proposes
+// CmdBeginSeal(oldID) + CmdCreateChunk(newID) via vault-ctl Raft and
+// returns the canonical new ID after both entries commit. If this
+// replica's proposal lost the race against another replica that
+// rotated first, the returned ID is the winner's — so the local seal+
+// open produces a chunk whose ID matches every other replica.
+//
+// Both Raft entries are already applied by the time the coordinator
+// returns, so the local seal + open suppress their announce-queue
+// entries (sealActiveLocked(false), nextChunkIDPreAnnounced=true);
+// re-announcing would duplicate Raft entries and the FSM single-
+// Active invariant would reject the second CmdCreateChunk anyway.
+func (m *Manager) rotateViaCoordinator(oldID chunk.ChunkID) error {
+	newID, err := m.cfg.RotationCoordinator.BeginRotation(oldID)
+	if err != nil {
+		return fmt.Errorf("rotation coordinator: %w", err)
 	}
+	if err := m.sealActiveLocked(false); err != nil {
+		return err
+	}
+	m.nextChunkID = &newID
+	m.nextChunkIDPreAnnounced = true
+	return m.openLocked()
+}
 
-	m.logger.Debug("rotating chunk",
-		"trigger", *trigger,
-		"chunk", state.ChunkID.String(),
-		"bytes", state.Bytes,
-		"records", state.Records,
-		"age", m.cfg.Now().Sub(state.CreatedAt),
-	)
+// rotateActive dispatches the rotation moment to the FSM-mediated
+// coordinator when wired, or to the legacy local-mint path when not.
+// FSM-mediated rotation (gastrolog-3yre7) round-trips CmdBeginSeal +
+// CmdCreateChunk through vault-ctl Raft and returns the canonical new
+// chunk ID; every replica then converges via OnCreate→AlignActive.
+// The legacy path mints a per-node ID and announces after the fact —
+// suitable only for managers with no cross-replica synchronization
+// requirement (e.g., a chunk manager constructed without a coordinator
+// because there's no vault-ctl Raft group).
+//
+// Caller must hold m.mu.
+func (m *Manager) rotateActive(oldID chunk.ChunkID) error {
+	if m.cfg.RotationCoordinator != nil {
+		return m.rotateViaCoordinator(oldID)
+	}
 	if err := m.sealLocked(); err != nil {
-		return nil, nil, err
+		return err
 	}
-	if err := m.openLocked(); err != nil {
-		return nil, nil, err
-	}
-	attrBytes, newKeys, err := chunk.EncodeWithDict(record.Attrs, m.active.dict)
-	return attrBytes, newKeys, err
+	return m.openLocked()
 }
 
 func writeAll(f *os.File, data []byte) error {
@@ -1762,9 +1825,12 @@ func (m *Manager) SetNextChunkID(id chunk.ChunkID) {
 
 func (m *Manager) openLocked() error {
 	var id chunk.ChunkID
+	preAnnounced := false
 	if m.nextChunkID != nil {
 		id = *m.nextChunkID
 		m.nextChunkID = nil
+		preAnnounced = m.nextChunkIDPreAnnounced
+		m.nextChunkIDPreAnnounced = false
 	} else {
 		id = chunk.NewChunkID()
 	}
@@ -1846,9 +1912,23 @@ func (m *Manager) openLocked() error {
 	initWriteOrder(m.active, 0)
 	m.metas[id] = meta
 
-	if m.cfg.Announcer != nil {
+	// Skip the AnnounceCreate queue entirely when this open came in
+	// via the FSM-mediated rotation path: the RotationCoordinator
+	// already proposed CmdCreateChunk via Raft and the FSM apply has
+	// already committed by the time we get here. Queueing another
+	// announce would double-propose with a duplicate Raft entry.
+	if m.cfg.Announcer != nil && !preAnnounced {
 		ann := m.cfg.Announcer
+		// Snapshot Receiving so the deferred announcement uses the
+		// same value seen at create time (avoids races with a
+		// SetFanOutConfig that lands between the chunk's local
+		// creation and the deferred Raft apply).
+		rcv := append([]string(nil), m.fanOutReceiving...)
 		m.pendingAnnouncements = append(m.pendingAnnouncements, func() {
+			if r, ok := ann.(chunk.ReceivingAnnouncer); ok && len(rcv) > 0 {
+				r.AnnounceCreateWithReceiving(id, createdAt, createdAt, createdAt, rcv)
+				return
+			}
 			ann.AnnounceCreate(id, createdAt, createdAt, createdAt)
 		})
 	}
@@ -3107,9 +3187,15 @@ func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
 	}
 
 	// 5. Upload to cloud and delete local if cloud-backed.
-	// CloudReadOnly followers skip upload — they adopt the leader's blob
-	// via RegisterCloudChunk when the vault FSM propagates the upload.
-	if m.cfg.CloudStore != nil && !m.cfg.CloudReadOnly {
+	// Under the fan-out data plane (gastrolog-4t3rs) every Receiver
+	// runs PostSealProcess locally but only the UploadGate-permitted
+	// replica pushes the GLCB to the shared blob store. The vault-ctl
+	// Raft leader is the gated uploader; the other Receivers wait for
+	// CmdUploadChunk to propagate and adopt the blob via OnUpload's
+	// RegisterCloudChunk projection. CloudReadOnly is the legacy gate
+	// for the static single-uploader configuration and is honored
+	// when UploadGate is nil.
+	if m.cfg.CloudStore != nil && m.shouldUploadLocally() {
 		if err := m.uploadToCloud(id); err != nil {
 			m.logger.Warn("cloud upload failed, keeping local", "chunk", id, "error", err)
 		}
@@ -3613,6 +3699,115 @@ func (m *Manager) SetAnnouncer(a chunk.MetadataAnnouncer) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.cfg.Announcer = a
+}
+
+// SetRotationCoordinator injects the FSM-mediated rotation coordinator
+// for cluster-wide chunk-ID alignment under the fan-out data plane
+// (gastrolog-3yre7). Implements chunk.RotationCoordinatorSetter. Must
+// be called before any Append/Seal operations that might trigger
+// rotation. Safe to call with nil to disable the coordinator and fall
+// back to the legacy local-mint rotation flow.
+func (m *Manager) SetRotationCoordinator(c chunk.RotationCoordinator) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.cfg.RotationCoordinator = c
+}
+
+// SetUploadGate injects the cloud-upload gating callback used by
+// PostSealProcess to decide whether THIS replica should push the
+// sealed chunk to the shared blob store. Implements
+// chunk.UploadGateSetter. Wired by the orchestrator to return
+// IsRaftLeader for the vault-ctl Raft group so only one replica
+// uploads per vault. Safe to call with nil — every replica uploads
+// in that fallback mode (the legacy single-node default).
+//
+// See gastrolog-4t3rs.
+func (m *Manager) SetUploadGate(g chunk.UploadGate) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.cfg.UploadGate = g
+}
+
+// AlignActive ensures the local active chunk matches the given ID,
+// sealing the current active (silently — no announce) and opening
+// a new chunk with the supplied ID when they differ. Implements
+// chunk.ActiveChunkAligner.
+//
+// The orchestrator fires this from the FSM's OnCreate callback on
+// every replica when CmdCreateChunk applies. On the proposing
+// replica the local cm is already aligned (the RotationCoordinator
+// path set the active ID directly), so this is a no-op. On every
+// other replica — losing race proposers and pure Receivers — this
+// is the path that re-points the local active to the FSM-canonical
+// chunk ID, completing the first-to-fire-proposes rotation
+// protocol from docs/fan-out-data-plane-design.md § "Sealing under
+// fan-out". See gastrolog-3yre7.
+func (m *Manager) AlignActive(id chunk.ChunkID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return ErrManagerClosed
+	}
+	if m.active != nil && m.active.meta.id == id {
+		return nil // already aligned
+	}
+	if m.active != nil {
+		// Seal the current active without announcing — the FSM
+		// already received CmdBeginSeal for it via the proposer's
+		// coordinator round-trip. Re-announcing would duplicate a
+		// Raft entry the single-Active invariant would reject.
+		if err := m.sealActiveLocked(false); err != nil {
+			return err
+		}
+	}
+	// Defer announcement of the new chunk too — CmdCreateChunk has
+	// already applied (we're being called FROM that apply's
+	// OnCreate callback).
+	m.nextChunkID = &id
+	m.nextChunkIDPreAnnounced = true
+	pendingAnnounces := m.takePendingAnnouncements()
+	if err := m.openLocked(); err != nil {
+		return err
+	}
+	// Drain any announces queued before this call (shouldn't be
+	// any in the AlignActive flow, but stay defensive).
+	m.mu.Unlock()
+	runPendingAnnouncements(pendingAnnounces)
+	m.mu.Lock()
+	return nil
+}
+
+// shouldUploadLocally evaluates the upload gate stack: explicit
+// UploadGate first, then the legacy CloudReadOnly bool. When both
+// are unset, defaults to true (every replica uploads — the single-
+// node / fresh-test path).
+func (m *Manager) shouldUploadLocally() bool {
+	if m.cfg.UploadGate != nil {
+		return m.cfg.UploadGate()
+	}
+	return !m.cfg.CloudReadOnly
+}
+
+// SetFanOutConfig wires the initial Receiving snapshot the next
+// CmdCreateChunk announcement will stamp on the new chunk. Implements
+// chunk.FanOutConfigSetter. The orchestrator calls this from
+// buildVaultInstance + on every placement change, so the in-flight
+// active chunk's metadata stays consistent with the operator's most
+// recent VaultConfig + Placements.
+//
+// Empty receiving falls back to the unextended CmdCreateChunk announce
+// path (single-node / memory / JSONL chunk managers that don't have a
+// Receiving set to stamp).
+func (m *Manager) SetFanOutConfig(receiving []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(receiving) == 0 {
+		m.fanOutReceiving = nil
+		return
+	}
+	cp := make([]string, len(receiving))
+	copy(cp, receiving)
+	m.fanOutReceiving = cp
 }
 
 func (m *Manager) GetAnnouncer() chunk.MetadataAnnouncer {

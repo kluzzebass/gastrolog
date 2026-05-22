@@ -86,7 +86,7 @@ func newPromoterForTest(srv raftMembership, ps peerStatsReader) *clusterCtlLearn
 func TestClusterCtlLearnerPromoter_NoLearners_NoOp(t *testing.T) {
 	t.Parallel()
 	srv := &mockRaftMembership{
-		isLeader:     true,
+		isLeader:    true,
 		appliedIndex: 100,
 		servers: []cluster.RaftServer{
 			{ID: "n1", Address: "addr-1", Suffrage: "Voter"},
@@ -106,7 +106,7 @@ func TestClusterCtlLearnerPromoter_NoLearners_NoOp(t *testing.T) {
 func TestClusterCtlLearnerPromoter_CaughtUpLearnerPromotedAfterStabilityWindow(t *testing.T) {
 	t.Parallel()
 	srv := &mockRaftMembership{
-		isLeader:     true,
+		isLeader:    true,
 		appliedIndex: 100,
 		servers: []cluster.RaftServer{
 			{ID: "leader", Address: "addr-l", Suffrage: "Voter"},
@@ -143,7 +143,7 @@ func TestClusterCtlLearnerPromoter_CaughtUpLearnerPromotedAfterStabilityWindow(t
 func TestClusterCtlLearnerPromoter_LaggingLearnerHeldOff(t *testing.T) {
 	t.Parallel()
 	srv := &mockRaftMembership{
-		isLeader:     true,
+		isLeader:    true,
 		appliedIndex: 100,
 		servers: []cluster.RaftServer{
 			{ID: "leader", Address: "addr-l", Suffrage: "Voter"},
@@ -173,7 +173,7 @@ func TestClusterCtlLearnerPromoter_LaggingLearnerHeldOff(t *testing.T) {
 func TestClusterCtlLearnerPromoter_TransientLagResets(t *testing.T) {
 	t.Parallel()
 	srv := &mockRaftMembership{
-		isLeader:     true,
+		isLeader:    true,
 		appliedIndex: 100,
 		servers: []cluster.RaftServer{
 			{ID: "leader", Address: "addr-l", Suffrage: "Voter"},
@@ -218,7 +218,7 @@ func TestClusterCtlLearnerPromoter_TransientLagResets(t *testing.T) {
 func TestClusterCtlLearnerPromoter_NoPeerStatsBlocksPromotion(t *testing.T) {
 	t.Parallel()
 	srv := &mockRaftMembership{
-		isLeader:     true,
+		isLeader:    true,
 		appliedIndex: 100,
 		servers: []cluster.RaftServer{
 			{ID: "leader", Address: "addr-l", Suffrage: "Voter"},
@@ -246,7 +246,7 @@ func TestClusterCtlLearnerPromoter_NoPeerStatsBlocksPromotion(t *testing.T) {
 func TestClusterCtlLearnerPromoter_StagingTreatedAsLearner(t *testing.T) {
 	t.Parallel()
 	srv := &mockRaftMembership{
-		isLeader:     true,
+		isLeader:    true,
 		appliedIndex: 100,
 		servers: []cluster.RaftServer{
 			{ID: "leader", Address: "addr-l", Suffrage: "Voter"},
@@ -269,7 +269,7 @@ func TestClusterCtlLearnerPromoter_StagingTreatedAsLearner(t *testing.T) {
 func TestClusterCtlLearnerPromoter_GoneLearnerCounterCleaned(t *testing.T) {
 	t.Parallel()
 	srv := &mockRaftMembership{
-		isLeader:     true,
+		isLeader:    true,
 		appliedIndex: 100,
 		servers: []cluster.RaftServer{
 			{ID: "leader", Address: "addr-l", Suffrage: "Voter"},
@@ -301,7 +301,7 @@ func TestClusterCtlLearnerPromoter_GoneLearnerCounterCleaned(t *testing.T) {
 func TestClusterCtlLearnerPromoter_AddVoterFailDoesNotResetCounter(t *testing.T) {
 	t.Parallel()
 	srv := &mockRaftMembership{
-		isLeader:     true,
+		isLeader:    true,
 		appliedIndex: 100,
 		addVoterErr:  context.DeadlineExceeded,
 		servers: []cluster.RaftServer{
@@ -356,7 +356,6 @@ func TestLocalAppliedIndex_ParsesStats(t *testing.T) {
 func TestTickOnce_NonLeaderIsNoOp(t *testing.T) {
 	t.Parallel()
 	srv := &mockRaftMembership{
-		isLeader:     false,
 		appliedIndex: 100,
 		servers: []cluster.RaftServer{
 			{ID: "n1", Address: "addr-1", Suffrage: "Nonvoter"},
@@ -382,7 +381,7 @@ func TestTickOnce_NonLeaderIsNoOp(t *testing.T) {
 func TestStartClusterCtlLearnerPromoter_RegistersOperatorVisibleJob(t *testing.T) {
 	t.Parallel()
 	srv := &mockRaftMembership{
-		isLeader:     true,
+		isLeader:    true,
 		appliedIndex: 100,
 		servers: []cluster.RaftServer{
 			{ID: "leader", Address: "addr-l", Suffrage: "Voter"},

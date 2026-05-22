@@ -8,7 +8,6 @@ import (
 	"gastrolog/internal/glid"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/system"
 )
 
 // Ingest filters a record to matching chunk managers.
@@ -43,6 +42,7 @@ func (o *Orchestrator) IngestWithSource(rec chunk.Record, src SourceContext) err
 	if err != nil {
 		return err
 	}
+	o.dispatchFanOutAsync(pa, rec)
 	return o.flushRecordRouteForwards(context.Background(), pa, rec)
 }
 
@@ -58,33 +58,24 @@ func (o *Orchestrator) ingest(rec chunk.Record) (*pendingAcks, error) {
 // (_source, _ingester, _vault, _reason) drive route evaluation.
 //
 // Returns pendingAcks bundling the sync work an ack-gated record triggers:
-// local instance replication to followers, plus cross-node forwarding of
-// records matched to remote vaults. Both task kinds must complete before
-// the ack is delivered to the ingester. For non-ack-gated records that
-// match a remote vault, syncForwards is populated; the caller must run
+// fan-out W-of-N to chunk receivers, plus cross-node forwarding of records
+// matched to remote vaults. Both task kinds must complete before the ack
+// is delivered to the ingester. For non-ack-gated records that match a
+// remote vault, syncForwards is populated; the caller must run
 // flushRecordRouteForwards (outside o.mu) so the forward buffer can apply
 // backpressure instead of dropping. See gastrolog-27zvt.
 func (o *Orchestrator) ingestWithSource(rec chunk.Record, src SourceContext) (*pendingAcks, error) {
-	pa, deferredRemotes, err := o.ingestLocked(rec, src)
-	// Fire-and-forget remote replication happens OUTSIDE the orchestrator
-	// lock so a slow or paused follower cannot starve writers (retention,
-	// reconfig). See gastrolog-5oofa.
-	for _, remotes := range deferredRemotes {
-		o.fireAndForgetRemote(remotes, rec)
-	}
-	return pa, err
+	return o.ingestLocked(rec, src)
 }
 
 // ingestLocked is the mu-protected portion of ingest. It returns the
-// pendingAcks for ack-gated sync work and a list of remote-target sets
-// (one per local vault append) that the caller must dispatch via
-// fireAndForgetRemote AFTER releasing the lock.
+// pendingAcks for ack-gated sync work.
 //
 // gastrolog-4kkoo (Phase 5): src carries the synthetic-attribute fields
 // (_source, _ingester, _vault, _reason) that route expressions can
 // match against. The synthetic overlay is applied per match call —
 // rec.Attrs itself is not mutated.
-func (o *Orchestrator) ingestLocked(rec chunk.Record, src SourceContext) (*pendingAcks, [][]remoteForwardTarget, error) {
+func (o *Orchestrator) ingestLocked(rec chunk.Record, src SourceContext) (*pendingAcks, error) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
@@ -92,46 +83,42 @@ func (o *Orchestrator) ingestLocked(rec chunk.Record, src SourceContext) (*pendi
 
 	if len(o.vaults) == 0 && o.forwarder == nil {
 		o.routeStats.Dropped.Add(1)
-		return nil, nil, ErrNoChunkManagers
+		return nil, ErrNoChunkManagers
 	}
 
 	if o.routeSet == nil {
 		o.routeStats.Dropped.Add(1)
-		return nil, nil, nil // No routes configured — drop the record.
+		return nil, nil // No routes configured — drop the record.
 	}
 
 	matches := o.routeSet.MatchWithSource(rec.Attrs, src)
 	if len(matches) == 0 {
 		o.routeStats.Dropped.Add(1)
-		return nil, nil, nil
+		return nil, nil
 	}
 
 	// Write records first, then update stats only on success.
 	routed := false
 	var pa *pendingAcks
-	var deferredRemotes [][]remoteForwardTarget
 	for _, t := range matches {
 		if t.NodeID != "" {
 			var err error
 			pa, err = o.handleRemoteVaultMatch(pa, t, rec)
 			if err != nil {
-				return pa, deferredRemotes, err
+				return pa, err
 			}
 			routed = true
 			continue
 		}
-		task, remotes, err := o.appendLocal(t.VaultID, rec)
+		fanOut, err := o.appendLocal(t.VaultID, rec)
 		if err != nil {
 			if errors.Is(err, ErrVaultDisabled) {
 				continue // Skip disabled vaults during ingestion.
 			}
-			return pa, deferredRemotes, err
+			return pa, err
 		}
-		if task != nil {
-			pa = pa.addReplication(*task)
-		}
-		if len(remotes) > 0 {
-			deferredRemotes = append(deferredRemotes, remotes)
+		if fanOut != nil {
+			pa = pa.addFanOut(*fanOut)
 		}
 		vs := o.getOrCreateVaultRouteStats(t.VaultID)
 		vs.Matched.Add(1)
@@ -144,7 +131,7 @@ func (o *Orchestrator) ingestLocked(rec chunk.Record, src SourceContext) (*pendi
 	if routed {
 		o.routeStats.Routed.Add(1)
 	}
-	return pa, deferredRemotes, nil
+	return pa, nil
 }
 
 // handleRemoteVaultMatch updates route stats and queues cross-node forwarding
@@ -171,24 +158,16 @@ func (o *Orchestrator) handleRemoteVaultMatch(pa *pendingAcks, t MatchResult, re
 }
 
 // pendingAcks bundles the sync work that an ack-gated record triggers —
-// local instance replication to followers and cross-node forwarding of
-// records matched to remote vaults. Both must complete before the ack
-// is delivered to the ingester.
+// cross-node forwarding of records matched to remote vaults plus
+// fan-out W-of-N writes. Both must complete before the ack is delivered
+// to the ingester.
 //
-// Nil receiver is treated as empty; addReplication/addForward lazy-init
-// so callers don't have to check before appending.
+// Nil receiver is treated as empty; helpers lazy-init so callers don't
+// have to check before appending.
 type pendingAcks struct {
-	replication  []replicationTask
 	forwards     []forwardTask // ack-gated cross-node; ackAfterReplication
 	syncForwards []forwardTask // non-ack cross-node; flushRecordRouteForwards
-}
-
-func (p *pendingAcks) addReplication(t replicationTask) *pendingAcks {
-	if p == nil {
-		p = &pendingAcks{}
-	}
-	p.replication = append(p.replication, t)
-	return p
+	fanOut       []fanOutTask  // fan-out W-of-N (gastrolog-nd6sz); ackAfterReplication
 }
 
 func (p *pendingAcks) addForward(t forwardTask) *pendingAcks {
@@ -207,9 +186,17 @@ func (p *pendingAcks) addSyncForward(t forwardTask) *pendingAcks {
 	return p
 }
 
+func (p *pendingAcks) addFanOut(t fanOutTask) *pendingAcks {
+	if p == nil {
+		p = &pendingAcks{}
+	}
+	p.fanOut = append(p.fanOut, t)
+	return p
+}
+
 // isEmpty reports whether there is any sync work to wait on before acking.
 func (p *pendingAcks) isEmpty() bool {
-	return p == nil || (len(p.replication) == 0 && len(p.forwards) == 0)
+	return p == nil || (len(p.forwards) == 0 && len(p.fanOut) == 0)
 }
 
 // forwardTask is a pending cross-node forward for a record that matched
@@ -238,26 +225,23 @@ func (o *Orchestrator) getOrCreatePerRouteStats(routeID glid.GLID) *PerRouteStat
 	return v.(*PerRouteStats)
 }
 
-// appendLocal appends a record to a local vault. Returns the task (non-nil
-// when an ack-gated record needs sync forwarding) and the remote targets
-// that must be notified via fireAndForgetRemote.
+// appendLocal appends a record to a local vault and returns the
+// fanOutTask the caller threads through to ackAfterReplication.
 //
-// MUST be called with o.mu held. The caller is responsible for dispatching
-// remotes AFTER releasing o.mu (fireAndForgetRemote waits for per-target
-// RPCs to complete and must not starve writers). See gastrolog-5oofa.
-func (o *Orchestrator) appendLocal(vaultID glid.GLID, rec chunk.Record) (*replicationTask, []remoteForwardTarget, error) {
-	_, _, task, remotes, err := o.appendRecord(vaultID, rec)
+// MUST be called with o.mu held.
+func (o *Orchestrator) appendLocal(vaultID glid.GLID, rec chunk.Record) (*fanOutTask, error) {
+	_, _, fanOut, err := o.appendRecord(vaultID, rec)
 	if err != nil {
 		o.logger.Error("append to vault failed", "vault", vaultID, "error", err)
 	}
-	return task, remotes, err
+	return fanOut, err
 }
 
 // flushRecordRouteForwards delivers non-ack-gated cross-node vault routes
 // queued in pa.syncForwards. Must run outside o.mu (after ingest returns).
 // Blocks until each record is accepted by the per-node forward buffer or
-// ctx / forwarder shutdown. Skips silently during drain shutdown (same
-// rationale as fireAndForgetRemote — local durability is already settled).
+// ctx / forwarder shutdown. Skips silently during drain shutdown — local
+// durability is already settled.
 func (o *Orchestrator) flushRecordRouteForwards(ctx context.Context, pa *pendingAcks, rec chunk.Record) error {
 	if pa == nil || len(pa.syncForwards) == 0 || o.forwarder == nil {
 		return nil
@@ -271,6 +255,26 @@ func (o *Orchestrator) flushRecordRouteForwards(ctx context.Context, pa *pending
 		}
 	}
 	return nil
+}
+
+// dispatchFanOutAsync fires pa.fanOut tasks in the background. Used by
+// non-ack-gated ingest paths: the caller does not wait for replicas, but
+// receivers still need the records or seal-time reconcile becomes the
+// only path to durability. Ack-gated callers fire the same tasks through
+// ackAfterReplication and BLOCK on completion before signalling the ack
+// channel — this helper is the fire-and-forget twin.
+func (o *Orchestrator) dispatchFanOutAsync(pa *pendingAcks, rec chunk.Record) {
+	if pa == nil || len(pa.fanOut) == 0 {
+		return
+	}
+	if o.shuttingDown() {
+		return
+	}
+	for _, t := range pa.fanOut {
+		o.ackWg.Go(func() {
+			_ = o.runFanOut(context.Background(), &t, rec)
+		})
+	}
 }
 
 // postSealWork schedules the post-seal pipeline for a newly sealed chunk.
@@ -290,57 +294,36 @@ func (o *Orchestrator) postSealWork(vaultID glid.GLID, cm chunk.ChunkManager, ch
 	}
 }
 
-// schedulePostSeal schedules the unified post-seal pipeline (compress → index → upload).
-// If the chunk manager implements ChunkPostSealProcessor, the entire pipeline runs
-// as one sequential job. Otherwise falls back to compress-only for non-file managers.
-// After the pipeline completes, sealed-chunk replication is triggered for leader vaults.
+// schedulePostSeal schedules the post-seal pipeline (compress → index →
+// upload) for a chunk that just rotated. The fan-out data plane already
+// replicated every record to each Receiver as it was appended, so seal
+// time does not need to push the chunk anywhere — peers seal their own
+// copy when they apply CmdSealChunk from vault-ctl Raft.
 func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager, chunkID chunk.ChunkID) {
-	followerTargets := o.followerReplicationTargets(vaultID, cm)
-
 	processor, ok := cm.(chunk.ChunkPostSealProcessor)
-	if ok {
-		name := fmt.Sprintf("post-seal:%s:%s", vaultID, chunkID)
-		wrappedFn := func(ctx context.Context, id chunk.ChunkID) error {
-			if err := processor.PostSealProcess(ctx, id); err != nil {
-				return err
-			}
-			// Notify: compression/indexing done, chunk meta changed again
-			// (DiskBytes, etc.). Carry the fresh meta so clients can patch
-			// their cache without a refetch.
-			if meta, err := cm.Meta(id); err == nil {
-				o.EmitChunkSealed(vaultID, meta)
-			} else {
-				o.NotifyChunkChange()
-			}
-			// Schedule replication as a separate job — never blocks the
-			// post-seal scheduler slot.
-			o.scheduleReplication(vaultID, id, followerTargets)
-			return nil
-		}
-		if err := o.scheduler.RunOnce(name, wrappedFn, context.Background(), chunkID); err != nil {
-			o.logger.Warn("failed to schedule post-seal", "name", name, "error", err)
-		}
-		o.scheduler.Describe(name, fmt.Sprintf("Post-seal pipeline for chunk %s", chunkID))
+	if !ok {
+		// No post-processing — chunk manager doesn't implement the
+		// processor interface (memory / jsonl). Records are already
+		// durable on the local manager; no further work needed.
 		return
 	}
-
-	// No post-processing — schedule replication directly. The legacy
-	// ChunkCompressor fallback is gone (gastrolog-24m1t step 7e); only
-	// chunkfile.Manager implemented it, and it now goes through the
-	// PostSealProcess branch above.
-	o.scheduleReplication(vaultID, chunkID, followerTargets)
-}
-
-// followerReplicationTargets returns the follower targets for the vault that
-// owns the given ChunkManager. Returns nil if not found or if the vault is a
-// follower (followers don't replicate further).
-func (o *Orchestrator) followerReplicationTargets(vaultID glid.GLID, cm chunk.ChunkManager) []system.ReplicationTarget {
-	vault := o.vaults[vaultID]
-	if vault == nil {
+	name := fmt.Sprintf("post-seal:%s:%s", vaultID, chunkID)
+	wrappedFn := func(ctx context.Context, id chunk.ChunkID) error {
+		if err := processor.PostSealProcess(ctx, id); err != nil {
+			return err
+		}
+		// Notify: compression/indexing done, chunk meta changed again
+		// (DiskBytes, etc.). Carry the fresh meta so clients can patch
+		// their cache without a refetch.
+		if meta, err := cm.Meta(id); err == nil {
+			o.EmitChunkSealed(vaultID, meta)
+		} else {
+			o.NotifyChunkChange()
+		}
 		return nil
 	}
-	if vaultInst := vault.Instance; vaultInst != nil && vaultInst.Chunks == cm && vaultInst.ShouldForwardToFollowers() {
-		return vaultInst.FollowerTargets
+	if err := o.scheduler.RunOnce(name, wrappedFn, context.Background(), chunkID); err != nil {
+		o.logger.Warn("failed to schedule post-seal", "name", name, "error", err)
 	}
-	return nil
+	o.scheduler.Describe(name, fmt.Sprintf("Post-seal pipeline for chunk %s", chunkID))
 }

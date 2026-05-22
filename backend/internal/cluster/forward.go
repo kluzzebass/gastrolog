@@ -23,10 +23,14 @@ import (
 // Used by the ForwardRecords handler to write received records.
 type RecordAppender func(ctx context.Context, vaultID glid.GLID, rec chunk.Record) error
 
-// VaultRecordAppender appends a single record to a local vault, preserving
-// the leader's chunk-ID assignment. Used by the ForwardRecords handler for
-// per-record replication from a leader to its followers.
-type VaultRecordAppender func(ctx context.Context, vaultID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error
+// VaultRecordAppender appends a single record to a local vault. The
+// senderChunkID parameter is a hint from the originating node that
+// fanned out this record (used as a tombstone gate and as a
+// first-append chunk-ID nudge — see AppendToVault). Under fan-out
+// every Receiver appends to its own active; rotation-time alignment
+// is handled by the RotationCoordinator (gastrolog-3yre7), not by
+// this callback.
+type VaultRecordAppender func(ctx context.Context, vaultID glid.GLID, senderChunkID chunk.ChunkID, rec chunk.Record) error
 
 // SearchExecutor runs a search on a local vault and returns results.
 // For regular searches, it returns an iterator over records (the caller

@@ -52,7 +52,13 @@ func (o *Orchestrator) emitActiveChunkProgress(last map[glid.GLID]lastSeen) {
 	o.mu.RLock()
 	for vaultID, vault := range o.vaults {
 		vaultInst := vault.Instance
-		if vaultInst == nil || vaultInst.IsFollower || vaultInst.Chunks == nil {
+		if vaultInst == nil || vaultInst.Chunks == nil {
+			continue
+		}
+		// Only the vault-ctl Raft leader emits chunk-progress events
+		// so the inspector doesn't double-count active-chunk record
+		// counts across every Receiver under fan-out.
+		if vaultInst.IsRaftLeader != nil && !vaultInst.IsRaftLeader() {
 			continue
 		}
 		active := vaultInst.Chunks.Active()

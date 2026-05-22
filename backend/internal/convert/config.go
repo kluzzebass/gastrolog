@@ -135,7 +135,6 @@ func VaultConfigToProto(v system.VaultConfig) *gastrologv1.VaultConfig {
 	for i, p := range v.Placements {
 		pbPlacements[i] = &gastrologv1.VaultPlacement{
 			StorageId: []byte(p.StorageID),
-			Leader:    p.Leader,
 		}
 	}
 	rules := make([]*gastrologv1.RetentionRule, len(v.RetentionRules))
@@ -160,6 +159,7 @@ func VaultConfigToProto(v system.VaultConfig) *gastrologv1.VaultConfig {
 		CacheBudget:          v.CacheBudget,
 		CacheTtl:             v.CacheTTL,
 		RetentionDisposition: v.RetentionDisposition,
+		WOfN:                 string(v.WOfN),
 	}
 	pb.RotationPolicyId = glid.OptionalToProto(v.RotationPolicyID)
 	pb.CloudServiceId = glid.OptionalToProto(v.CloudServiceID)
@@ -184,6 +184,7 @@ func VaultConfigFromProto(p *gastrologv1.VaultConfig) (system.VaultConfig, error
 		CacheBudget:          p.GetCacheBudget(),
 		CacheTTL:             p.GetCacheTtl(),
 		RetentionDisposition: p.GetRetentionDisposition(),
+		WOfN:                 system.WOfNPolicy(p.GetWOfN()),
 		RotationPolicyID:     glid.OptionalFromProto(p.GetRotationPolicyId()),
 		CloudServiceID:       glid.OptionalFromProto(p.GetCloudServiceId()),
 	}
@@ -198,7 +199,6 @@ func VaultConfigFromProto(p *gastrologv1.VaultConfig) (system.VaultConfig, error
 	for _, pp := range p.GetPlacements() {
 		cfg.Placements = append(cfg.Placements, system.VaultPlacement{
 			StorageID: string(pp.GetStorageId()),
-			Leader:    pp.GetLeader(),
 		})
 	}
 

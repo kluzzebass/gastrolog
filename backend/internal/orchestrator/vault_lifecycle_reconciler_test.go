@@ -398,15 +398,21 @@ func TestReconcileFromSnapshotProjectsAllSealedEntries(t *testing.T) {
 	src := vaultctlfsm.New()
 
 	// Seed the source FSM: 3 chunks created, 2 sealed, 1 still active.
+	// Single-Active invariant: fully retire each chunk before creating
+	// the next, leaving the last one as the lone Active.
 	now := time.Now()
 	idSealed1 := chunk.NewChunkID()
 	idSealed2 := chunk.NewChunkID()
 	idActive := chunk.NewChunkID()
-	for _, id := range []chunk.ChunkID{idSealed1, idSealed2, idActive} {
-		_ = src.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(id, now, now, now)})
-	}
+	_ = src.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idSealed1, now, now, now)})
+	_ = src.Apply(&hraft.Log{Data: vaultctlfsm.MarshalBeginSeal(idSealed1)})
 	_ = src.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idSealed1, now, 1, 1, now, now, now, false)})
+
+	_ = src.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idSealed2, now, now, now)})
+	_ = src.Apply(&hraft.Log{Data: vaultctlfsm.MarshalBeginSeal(idSealed2)})
 	_ = src.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idSealed2, now, 1, 1, now, now, now, false)})
+
+	_ = src.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idActive, now, now, now)})
 
 	cm := &reconcilerFakeSealEnsurerChunkManager{}
 	vaultInst := &VaultInstance{
@@ -705,8 +711,7 @@ func TestSweepMissingReplicasRequestsOnlySealedAndAbsentEntries(t *testing.T) {
 		VaultID:       glid.New(),
 		Type:         "memory",
 		Chunks:       cm,
-		IsFollower:   true,
-		LeaderNodeID: "node-leader",
+		PrimaryPlacementNodeID: "node-leader",
 	}
 	rec := NewVaultLifecycleReconciler(orch, glid.New(), vaultInst, "node-A", slog.Default())
 	rec.Wire(fsm)
@@ -736,7 +741,7 @@ func TestSweepMissingReplicasRequestsOnlySealedAndAbsentEntries(t *testing.T) {
 // deletes the chunks as "unrecoverable" — silent data loss.
 //
 // This test pins the leader-side direction of the now-symmetric peer-
-// to-peer catchup: leader has empty disk, FollowerTargets enumerates
+// to-peer catchup: leader has empty disk, PeerPlacementTargets enumerates
 // two peers, the sweep must dial both.
 func TestSweepMissingReplicasFromLeaderAsksEveryFollower(t *testing.T) {
 	t.Parallel()
@@ -757,8 +762,7 @@ func TestSweepMissingReplicasFromLeaderAsksEveryFollower(t *testing.T) {
 		VaultID:    glid.New(),
 		Type:       "memory",
 		Chunks:     cm,
-		IsFollower: false, // this node IS the leader
-		FollowerTargets: []system.ReplicationTarget{
+		PeerPlacementTargets: []system.ReplicationTarget{
 			{NodeID: "node-follower-1"},
 			{NodeID: "node-follower-2"},
 		},
@@ -782,9 +786,9 @@ func TestSweepMissingReplicasFromLeaderAsksEveryFollower(t *testing.T) {
 	}
 }
 
-// gastrolog-19241: a leader with no FollowerTargets (single-node
+// gastrolog-19241: a leader with no PeerPlacementTargets (single-node
 // placement, or placement just collapsed mid-failover) must not dial
-// anywhere. The next placement tick will re-populate FollowerTargets.
+// anywhere. The next placement tick will re-populate PeerPlacementTargets.
 func TestSweepMissingReplicasFromLeaderWithNoFollowersIsNoOp(t *testing.T) {
 	t.Parallel()
 
@@ -804,8 +808,7 @@ func TestSweepMissingReplicasFromLeaderWithNoFollowersIsNoOp(t *testing.T) {
 		VaultID:         glid.New(),
 		Type:            "memory",
 		Chunks:          cm,
-		IsFollower:      false,
-		FollowerTargets: nil, // RF=1, or placement in flux
+		PeerPlacementTargets: nil, // RF=1, or placement in flux
 	}
 	rec := NewVaultLifecycleReconciler(orch, glid.New(), vaultInst, "node-leader", slog.Default())
 	rec.Wire(fsm)
@@ -840,8 +843,7 @@ func TestSweepMissingReplicasFromLeaderContinuesPastPeerError(t *testing.T) {
 		VaultID:    glid.New(),
 		Type:       "memory",
 		Chunks:     cm,
-		IsFollower: false,
-		FollowerTargets: []system.ReplicationTarget{
+		PeerPlacementTargets: []system.ReplicationTarget{
 			{NodeID: "node-follower-1"}, // first call fails
 			{NodeID: "node-follower-2"}, // sweep must still try this one
 		},
@@ -856,7 +858,7 @@ func TestSweepMissingReplicasFromLeaderContinuesPastPeerError(t *testing.T) {
 	}
 }
 
-// FollowerTargets containing the leader's own ID (a placement-state
+// PeerPlacementTargets containing the leader's own ID (a placement-state
 // edge during reconfiguration) must be filtered out — the leader must
 // not ask itself.
 func TestSweepMissingReplicasFromLeaderSkipsSelfInFollowerTargets(t *testing.T) {
@@ -878,8 +880,7 @@ func TestSweepMissingReplicasFromLeaderSkipsSelfInFollowerTargets(t *testing.T) 
 		VaultID:    glid.New(),
 		Type:       "memory",
 		Chunks:     cm,
-		IsFollower: false,
-		FollowerTargets: []system.ReplicationTarget{
+		PeerPlacementTargets: []system.ReplicationTarget{
 			{NodeID: "node-leader"}, // self — must be skipped
 			{NodeID: "node-follower-1"},
 		},
@@ -890,12 +891,12 @@ func TestSweepMissingReplicasFromLeaderSkipsSelfInFollowerTargets(t *testing.T) 
 	rec.SweepMissingReplicas()
 
 	if got := fake.calls.Load(); got != 1 {
-		t.Errorf("must skip self in FollowerTargets, got %d call(s)", got)
+		t.Errorf("must skip self in PeerPlacementTargets, got %d call(s)", got)
 	}
 }
 
 // TestSweepMissingReplicasSkipsWhenLeaderUnknown pins the early-exit
-// when LeaderNodeID is empty. This happens during placement transitions
+// when PrimaryPlacementNodeID is empty. This happens during placement transitions
 // where a follower has lost its leader (election in progress, leader
 // just demoted) — sending a catchup request would land on no one.
 // The next sweep tick runs after the new leader is observed.
@@ -918,8 +919,7 @@ func TestSweepMissingReplicasSkipsWhenLeaderUnknown(t *testing.T) {
 		VaultID:       glid.New(),
 		Type:         "memory",
 		Chunks:       cm,
-		IsFollower:   true,
-		LeaderNodeID: "", // unknown — election in progress
+		PrimaryPlacementNodeID: "", // unknown — election in progress
 	}
 	rec := NewVaultLifecycleReconciler(orch, glid.New(), vaultInst, "node-A", slog.Default())
 	rec.Wire(fsm)
@@ -1352,19 +1352,26 @@ func TestReconcileFromSnapshotResumesSealingChunks(t *testing.T) {
 	idActive := chunk.NewChunkID()
 	idSealing := chunk.NewChunkID()
 	idSealed := chunk.NewChunkID()
-	for _, id := range []chunk.ChunkID{idActive, idSealing, idSealed} {
-		if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(id, now, now, now)}); err != nil {
-			t.Fatalf("create %s: %v", id, err)
-		}
-	}
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalBeginSeal(idSealing)}); err != nil {
-		t.Fatalf("begin-seal sealing: %v", err)
+	// Single-Active invariant: retire each non-Active chunk before
+	// creating the next; leave the chunk that should remain Active for
+	// last.
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idSealed, now, now, now)}); err != nil {
+		t.Fatalf("create sealed: %v", err)
 	}
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalBeginSeal(idSealed)}); err != nil {
 		t.Fatalf("begin-seal sealed: %v", err)
 	}
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(idSealed, now, 1, 1, now, now, now, false)}); err != nil {
 		t.Fatalf("seal-chunk sealed: %v", err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idSealing, now, now, now)}); err != nil {
+		t.Fatalf("create sealing: %v", err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalBeginSeal(idSealing)}); err != nil {
+		t.Fatalf("begin-seal sealing: %v", err)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(idActive, now, now, now)}); err != nil {
+		t.Fatalf("create active: %v", err)
 	}
 
 	cm := &reconcilerFakeChunkManager{}
@@ -1541,7 +1548,6 @@ func TestSweepStaleLeaderFSMEntriesProposesDeleteForStrandedSealingChunk(t *test
 	vaultInst := &VaultInstance{
 		VaultID:     glid.New(),
 		Chunks:     cm,
-		IsFollower: false, // leader-only sweep
 		ApplyRaftRequestDelete: func(id chunk.ChunkID, reason string, _ []string) error {
 			deletedRequests = append(deletedRequests, id)
 			deleteReasons = append(deleteReasons, reason)
@@ -1609,8 +1615,7 @@ func TestSweepStalePendingDeleteAcksPrunesNonPlacementNodes(t *testing.T) {
 	var prunedNodes []string
 	vaultInst := &VaultInstance{
 		VaultID:    glid.New(),
-		IsFollower: false,
-		FollowerTargets: []system.ReplicationTarget{
+		PeerPlacementTargets: []system.ReplicationTarget{
 			{NodeID: "follower-node"},
 		},
 		ApplyRaftPruneNode: func(nodeID string) error {
@@ -1655,8 +1660,7 @@ func TestSweepStalePendingDeleteAcksSkipsCurrentPlacementMembers(t *testing.T) {
 	var prunedNodes []string
 	vaultInst := &VaultInstance{
 		VaultID:    glid.New(),
-		IsFollower: false,
-		FollowerTargets: []system.ReplicationTarget{
+		PeerPlacementTargets: []system.ReplicationTarget{
 			{NodeID: "follower-node"},
 		},
 		ApplyRaftPruneNode: func(nodeID string) error {
@@ -1679,36 +1683,6 @@ func TestSweepStalePendingDeleteAcksSkipsCurrentPlacementMembers(t *testing.T) {
 // gate: only the vault-ctl leader should propose CmdPruneNode, mirroring
 // SweepStaleLeaderFSMEntries' leader-only design. Without this, every
 // node would race to propose the same prune on every sweep tick.
-func TestSweepStalePendingDeleteAcksFollowersAreNoOp(t *testing.T) {
-	t.Parallel()
-
-	fsm := vaultctlfsm.New()
-	chunkID := chunk.NewChunkID()
-	_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(chunkID, time.Now(), time.Now(), time.Now())})
-	_ = fsm.Apply(&hraft.Log{
-		Data: vaultctlfsm.MarshalRequestDelete(chunkID, time.Now(), "retention-ttl",
-			[]string{"leader-node", "stale-node"}),
-	})
-
-	var prunedNodes []string
-	vaultInst := &VaultInstance{
-		VaultID:    glid.New(),
-		IsFollower: true, // follower
-		ApplyRaftPruneNode: func(nodeID string) error {
-			prunedNodes = append(prunedNodes, nodeID)
-			return nil
-		},
-	}
-
-	rec := NewVaultLifecycleReconciler(nil, vaultInst.VaultID, vaultInst, "node-X", slog.Default())
-	rec.fsm = fsm
-
-	rec.SweepStalePendingDeleteAcks()
-
-	if len(prunedNodes) != 0 {
-		t.Errorf("followers MUST NOT propose CmdPruneNode; got %v", prunedNodes)
-	}
-}
 
 // idleActiveSweepFakeManager extends the fake chunk manager with the
 // surface the idle-active sweep needs: per-id Meta lookups, a Seal()
@@ -1834,11 +1808,15 @@ func TestSweepIdleActiveSealsMetadataOnlyOrphan(t *testing.T) {
 
 	orphanID := chunk.NewChunkID()
 	currentID := chunk.NewChunkID()
+	// Single-Active invariant: the FSM never holds two Active entries
+	// in production. The scenario this test exercises — local m.active
+	// points at one chunk while a stale Active entry sits in the FSM —
+	// arises when leader transfer interrupts post-seal pipeline before
+	// CmdBeginSeal applied. Only orphanID needs to be in the FSM for
+	// the sweep to see it; currentID lives in the local chunk manager
+	// only (its lack of FSM presence isn't material to this test).
 	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(orphanID, idleStart, idleStart, idleStart)}); err != nil {
 		t.Fatalf("create orphan: %v", err)
-	}
-	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(currentID, now, now, now)}); err != nil {
-		t.Fatalf("create current: %v", err)
 	}
 
 	staleEnd := now.Add(-30 * time.Minute)

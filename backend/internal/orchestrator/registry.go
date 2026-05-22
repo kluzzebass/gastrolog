@@ -123,11 +123,13 @@ func (o *Orchestrator) ListVaults() []glid.GLID {
 	return keys
 }
 
-// LocalLeaderVaultIDs returns the set of vault IDs where this node is
-// the leader for the vault. Used by search fan-out and remote-vault
-// resolution: follower-only vaults are NOT included because their
-// replicas may be incomplete (missing active chunk, replication lag);
-// search always fans out to the leader for authoritative results.
+// LocalLeaderVaultIDs returns the set of vault IDs this node holds a
+// readiness-passing instance for. Under fan-out every Receiver can
+// answer queries from its local engine; the legacy "leader-only"
+// gate is gone. The function name is retained for caller compatibility
+// (it still answers "is THIS vault locally serviceable") while the
+// semantics expand from "this node is the leader" to "this node has
+// a usable instance."
 func (o *Orchestrator) LocalLeaderVaultIDs() map[glid.GLID]bool {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
@@ -136,7 +138,7 @@ func (o *Orchestrator) LocalLeaderVaultIDs() map[glid.GLID]bool {
 		if err := vaultReplicationReadinessErr(v.ID, v); err != nil {
 			continue
 		}
-		if t := v.Instance; t != nil && !t.IsFollower {
+		if v.Instance != nil {
 			ids[v.ID] = true
 		}
 	}
@@ -325,8 +327,11 @@ type leaderVaultRegistry struct {
 	o *Orchestrator
 }
 
-// findLeaderInstance returns the leader VaultInstance for the given vault
-// ID, or nil if the vault is unknown / unready / has no leader instance.
+// findLeaderInstance returns this node's VaultInstance for the given
+// vault ID, or nil if the vault is unknown / unready / has no
+// instance. Under fan-out every Receiver can serve queries; the
+// legacy "leader-only" restriction is gone (gastrolog-hshgl). The
+// function name is retained for caller compatibility.
 func (r *leaderVaultRegistry) findLeaderInstance(vaultID glid.GLID) *VaultInstance {
 	v := r.o.vaults[vaultID]
 	if v == nil {
@@ -335,7 +340,7 @@ func (r *leaderVaultRegistry) findLeaderInstance(vaultID glid.GLID) *VaultInstan
 	if err := vaultReplicationReadinessErr(vaultID, v); err != nil {
 		return nil
 	}
-	if v.Instance != nil && !v.Instance.IsFollower && v.Instance.Query != nil {
+	if v.Instance != nil && v.Instance.Query != nil {
 		return v.Instance
 	}
 	return nil
@@ -349,7 +354,7 @@ func (r *leaderVaultRegistry) ListVaults() []glid.GLID {
 		if err := vaultReplicationReadinessErr(vid, v); err != nil {
 			continue
 		}
-		if v.Instance != nil && !v.Instance.IsFollower && v.Instance.Query != nil {
+		if v.Instance != nil && v.Instance.Query != nil {
 			ids = append(ids, vid)
 		}
 	}
@@ -390,7 +395,7 @@ func (o *Orchestrator) LeaderQueryEngineForVault(vaultID glid.GLID) (*query.Engi
 	if err := vaultReplicationReadinessErr(vaultID, v); err != nil {
 		return nil, err
 	}
-	if v == nil || v.Instance == nil || v.Instance.IsFollower || v.Instance.Query == nil {
+	if v == nil || v.Instance == nil || v.Instance.Query == nil {
 		return nil, nil
 	}
 	return query.NewWithRegistry(&singleVaultRegistry{o: o, vaultID: vaultID}, o.logger), nil
@@ -413,7 +418,7 @@ func (r *singleVaultRegistry) ChunkManager(key glid.GLID) chunk.ChunkManager {
 		return nil
 	}
 	v := r.o.vaults[r.vaultID]
-	if v == nil || v.Instance == nil || v.Instance.IsFollower {
+	if v == nil || v.Instance == nil {
 		return nil
 	}
 	return v.Instance.Chunks
@@ -426,7 +431,7 @@ func (r *singleVaultRegistry) IndexManager(key glid.GLID) index.IndexManager {
 		return nil
 	}
 	v := r.o.vaults[r.vaultID]
-	if v == nil || v.Instance == nil || v.Instance.IsFollower {
+	if v == nil || v.Instance == nil {
 		return nil
 	}
 	return v.Instance.Indexes

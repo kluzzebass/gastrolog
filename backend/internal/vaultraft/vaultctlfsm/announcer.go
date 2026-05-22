@@ -47,6 +47,17 @@ func (a *Announcer) AnnounceCreate(id chunk.ChunkID, writeStart, ingestStart, so
 	a.apply("create", id, MarshalCreateChunk(id, writeStart, ingestStart, sourceStart))
 }
 
+// AnnounceCreateWithReceiving implements chunk.ReceivingAnnouncer
+// (gastrolog-nd6sz / gastrolog-hshgl). The chunk manager calls this
+// for every new chunk when it has been wired with a non-empty
+// Receiving snapshot. The payload routes via the extended
+// CmdCreateChunk: the legacy 40-byte prefix carries the chunk
+// identity + timestamps, the trailing fields stamp the initial
+// Receiving set on the new ChunkPlacement entry.
+func (a *Announcer) AnnounceCreateWithReceiving(id chunk.ChunkID, writeStart, ingestStart, sourceStart time.Time, receiving []string) {
+	a.apply("create-receiving", id, MarshalCreateChunkWithReceiving(id, writeStart, ingestStart, sourceStart, receiving))
+}
+
 // AnnounceBeginSeal fires the Active → Sealing transition before the
 // leader starts assembling the sealed-form GLCB. Lets followers and
 // retention/upload code observe the in-flight assembly window

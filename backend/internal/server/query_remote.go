@@ -96,17 +96,29 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, remoteTo
 	return merged, allHist, getRemoteTokens
 }
 
-// remoteVaultsByNode groups remote vault IDs by their owning node.
+// remoteVaultsByNode groups remote vault IDs by their owning nodes.
 // When selectedVaults is non-nil, only vaults in that set are included
 // (used when the query contains a vault_id=X filter).
+//
+// Under fan-out the same vault appears under every placement member that
+// isn't this node — each member is a peer Receiver and may hold records
+// the others don't. The k-way merge + dedupWindow on the coordinator
+// collapses cross-replica duplicates by EventID.
+//
+// Local-vault note: when this node is itself a placement member, we
+// STILL enumerate peers. Pre-fan-out the local engine held canonical
+// data so peers were redundant; under fan-out every Receiver's active
+// chunk diverges until catchup converges them (gastrolog-hshgl), so
+// peers can hold records this node hasn't seen yet. The local engine
+// runs in parallel via the search path; dedupWindow folds the streams.
 //
 // Reads VaultConfig.Placements directly (mirrored from vault placements
 // via the FSM bridge — gastrolog-257l7).
 func (s *QueryServer) remoteVaultsByNode(ctx context.Context, selectedVaults []glid.GLID) map[string][]glid.GLID {
-	return s.remoteVaultsByNodeFiltered(ctx, selectedVaults, s.orch.LocalLeaderVaultIDs())
+	return s.remoteVaultsByNodeFiltered(ctx, selectedVaults)
 }
 
-func (s *QueryServer) remoteVaultsByNodeFiltered(ctx context.Context, selectedVaults []glid.GLID, localVaultIDs map[glid.GLID]bool) map[string][]glid.GLID {
+func (s *QueryServer) remoteVaultsByNodeFiltered(ctx context.Context, selectedVaults []glid.GLID) map[string][]glid.GLID {
 	vaults, err := s.cfgStore.ListVaults(ctx)
 	if err != nil {
 		return nil
@@ -126,17 +138,25 @@ func (s *QueryServer) remoteVaultsByNodeFiltered(ctx context.Context, selectedVa
 		if len(selected) > 0 && !selected[v.ID] {
 			continue
 		}
-		if localVaultIDs[v.ID] {
-			continue // searched locally, skip remote
-		}
 		if len(v.Placements) == 0 {
 			continue
 		}
-		leaderNodeID := system.LeaderNodeID(v.Placements, nscs)
-		if leaderNodeID == "" || leaderNodeID == s.localNodeID {
-			continue
+		// Fan-out reads: route to every placement member, not just the
+		// leader. Each member may hold records the others don't (post-
+		// senderChunkID-strip), and the existing dedupWindow at the
+		// merge boundary collapses cross-replica duplicates by EventID.
+		// Bandwidth cost is N× per query — acceptable trade for
+		// correctness under fan-out divergence.
+		//
+		// Self is excluded by the nodeID == s.localNodeID check: the
+		// local engine path handles this node's data directly. Local
+		// vaults are NOT skipped at the vault level (see godoc above).
+		for _, nodeID := range system.PlacementNodeIDs(v.Placements, nscs) {
+			if nodeID == "" || nodeID == s.localNodeID {
+				continue
+			}
+			byNode[nodeID] = append(byNode[nodeID], v.ID)
 		}
-		byNode[leaderNodeID] = append(byNode[leaderNodeID], v.ID)
 	}
 	return byNode
 }

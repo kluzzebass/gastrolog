@@ -86,7 +86,7 @@ describe("Vault.placementNodeId", () => {
     const config = new VaultConfig({
       id: idBytes(30),
       placements: [
-        new VaultPlacement({ storageId: f.storageB, leader: true }),
+        new VaultPlacement({ storageId: f.storageB }),
         new VaultPlacement({ storageId: f.storageA }),
         new VaultPlacement({ storageId: f.storageC }),
       ],
@@ -121,7 +121,7 @@ describe("Vault.placementNodeIds", () => {
     const config = new VaultConfig({
       id: idBytes(35),
       placements: [
-        new VaultPlacement({ storageId: f.storageB, leader: true }),
+        new VaultPlacement({ storageId: f.storageB }),
         new VaultPlacement({ storageId: f.storageA }),
         new VaultPlacement({ storageId: f.storageC }),
       ],
@@ -165,7 +165,7 @@ describe("Vault.isOn", () => {
     const config = new VaultConfig({
       id: idBytes(40),
       placements: [
-        new VaultPlacement({ storageId: f.storageA, leader: true }),
+        new VaultPlacement({ storageId: f.storageA }),
         new VaultPlacement({ storageId: f.storageB }),
         new VaultPlacement({ storageId: f.storageC }),
       ],
@@ -179,7 +179,7 @@ describe("Vault.isOn", () => {
     const f = clusterFixture();
     const config = new VaultConfig({
       id: idBytes(41),
-      placements: [new VaultPlacement({ storageId: f.storageA, leader: true })],
+      placements: [new VaultPlacement({ storageId: f.storageA })],
     });
     expect(new Vault(null, config).isOn(f.nodeA, f.nscs, EMPTY_ID)).toBe(true);
   });
@@ -188,7 +188,7 @@ describe("Vault.isOn", () => {
     const f = clusterFixture();
     const config = new VaultConfig({
       id: idBytes(42),
-      placements: [new VaultPlacement({ storageId: f.storageA, leader: true })],
+      placements: [new VaultPlacement({ storageId: f.storageA })],
     });
     expect(new Vault(null, config).isOn(f.nodeB, f.nscs, EMPTY_ID)).toBe(false);
     expect(new Vault(null, config).isOn(f.nodeC, f.nscs, EMPTY_ID)).toBe(false);
@@ -208,7 +208,7 @@ describe("Vault.isOn", () => {
     const info = new VaultInfo({ id: idBytes(44), nodeId: idBytes(99) });
     const config = new VaultConfig({
       id: idBytes(44),
-      placements: [new VaultPlacement({ storageId: f.storageA, leader: true })],
+      placements: [new VaultPlacement({ storageId: f.storageA })],
     });
     expect(new Vault(info, config).isOn(f.nodeA, f.nscs, EMPTY_ID)).toBe(true);
     // node 99 from info.nodeId must NOT match.

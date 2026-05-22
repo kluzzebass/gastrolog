@@ -615,7 +615,7 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 				}},
 			}},
 			VaultPlacements: map[glid.GLID][]system.VaultPlacement{
-				vaultID: {{StorageID: storageID.String(), Leader: true}},
+				vaultID: {{StorageID: storageID.String()}},
 			},
 		},
 	}

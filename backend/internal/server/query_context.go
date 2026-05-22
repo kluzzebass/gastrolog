@@ -229,7 +229,7 @@ func (s *QueryServer) remoteNodeForVault(ctx context.Context, vaultID glid.GLID)
 	if err != nil {
 		return ""
 	}
-	leaderNodeID := system.LeaderNodeID(vaultCfg.Placements, nscs)
+	leaderNodeID := system.PrimaryPlacementNodeID(vaultCfg.Placements, nscs)
 	if leaderNodeID == "" || leaderNodeID == s.localNodeID {
 		return ""
 	}

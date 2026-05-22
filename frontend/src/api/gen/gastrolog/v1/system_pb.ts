@@ -125,7 +125,7 @@ export enum NodeState {
   DRAINING = 4,
 
   /**
-   * Decommissioning: chunks moved; voter being removed from system Raft
+   * Decommissioning: chunks moved; voter being removed from cluster-ctl Raft
    * and vault-ctl groups. Transitions to absence-from-FSM (= Removed)
    * when removal completes.
    *
@@ -299,7 +299,7 @@ export class GetSystemResponse extends Message<GetSystemResponse> {
   managedFiles: ManagedFileInfo[] = [];
 
   /**
-   * Committed log index on the system Raft group (monotonic). Used by clients
+   * Committed log index on the cluster-ctl Raft group (monotonic). Used by clients
    * to avoid regressing cached replicated state with stale reads.
    *
    * @generated from field: uint64 system_raft_index = 8;
@@ -427,7 +427,9 @@ export class RetentionRule extends Message<RetentionRule> {
 
 /**
  * VaultPlacement assigns one replica of a vault to a specific file storage.
- * The node is derived from the file storage's NodeStorageConfig.
+ * The node is derived from the file storage's NodeStorageConfig. Under the
+ * fan-out data plane every placement member is symmetric — the legacy
+ * "leader" bool that singled out one canonical writer is gone (gastrolog-hshgl).
  *
  * @generated from message gastrolog.v1.VaultPlacement
  */
@@ -439,13 +441,6 @@ export class VaultPlacement extends Message<VaultPlacement> {
    */
   storageId = new Uint8Array(0);
 
-  /**
-   * true = this storage bootstraps the Raft group (initial leader)
-   *
-   * @generated from field: bool leader = 2;
-   */
-  leader = false;
-
   constructor(data?: PartialMessage<VaultPlacement>) {
     super();
     proto3.util.initPartial(data, this);
@@ -455,7 +450,6 @@ export class VaultPlacement extends Message<VaultPlacement> {
   static readonly typeName = "gastrolog.v1.VaultPlacement";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "storage_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 2, name: "leader", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultPlacement {
@@ -576,6 +570,16 @@ export class VaultConfig extends Message<VaultConfig> {
    */
   retentionDisposition = "";
 
+  /**
+   * Fan-out W-of-N durability policy (gastrolog-nd6sz / gastrolog-4xdvm):
+   * "" / "full" (default) / "minus-one" / "quorum" / "one". Resolves
+   * to a concrete W at write time against the active chunk's
+   * Receiving size. See system.WOfNPolicy.Resolve.
+   *
+   * @generated from field: string w_of_n = 17;
+   */
+  wOfN = "";
+
   constructor(data?: PartialMessage<VaultConfig>) {
     super();
     proto3.util.initPartial(data, this);
@@ -600,6 +604,7 @@ export class VaultConfig extends Message<VaultConfig> {
     { no: 14, name: "cache_budget", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 15, name: "cache_ttl", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 16, name: "retention_disposition", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 17, name: "w_of_n", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultConfig {
@@ -5813,7 +5818,7 @@ export class WatchSystemRequest extends Message<WatchSystemRequest> {
  */
 export class WatchSystemResponse extends Message<WatchSystemResponse> {
   /**
-   * Committed log index on the system Raft group when this notification fired.
+   * Committed log index on the cluster-ctl Raft group when this notification fired.
    * Clients should only invalidate or refetch when this index exceeds the
    * highest system_raft_index they already hold from a fetch or mutation.
    *

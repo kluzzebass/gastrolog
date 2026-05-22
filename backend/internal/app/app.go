@@ -606,11 +606,11 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 		}
 		return err
 	})
-	clusterSrv.SetVaultRecordAppender(func(ctx context.Context, vaultID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error {
+	clusterSrv.SetVaultRecordAppender(func(ctx context.Context, vaultID glid.GLID, senderChunkID chunk.ChunkID, rec chunk.Record) error {
 		if err := waitForOrch(ctx); err != nil {
 			return err
 		}
-		err := orch.AppendToVault(vaultID, leaderChunkID, rec)
+		err := orch.AppendToVault(vaultID, senderChunkID, rec)
 		if err != nil && errors.Is(err, orchestrator.ErrVaultNotReady) {
 			return errors.Join(cluster.ErrForwardTargetNotReady, err)
 		}

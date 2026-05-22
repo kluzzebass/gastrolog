@@ -373,8 +373,8 @@ func TestNonAckRemoteVaultDefersForwardSyncUntilFlush(t *testing.T) {
 		t.Fatalf("expected 1 sync forward task, got %+v", pa)
 	}
 	if !pa.isEmpty() {
-		t.Fatalf("expected no ack-gated work (isEmpty), got rep=%d fwd=%d",
-			len(pa.replication), len(pa.forwards))
+		t.Fatalf("expected no ack-gated work (isEmpty), got fwd=%d fanout=%d",
+			len(pa.forwards), len(pa.fanOut))
 	}
 	if got := len(fwd.getCalls()); got != 0 {
 		t.Fatalf("expected no forwarder calls during ingest, got %d", got)

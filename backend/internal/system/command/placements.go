@@ -12,7 +12,6 @@ func NewSetVaultPlacements(vaultID glid.GLID, placements []system.VaultPlacement
 	for i, p := range placements {
 		pbPlacements[i] = &gastrologv1.VaultPlacement{
 			StorageId: []byte(p.StorageID),
-			Leader:    p.Leader,
 		}
 	}
 	return &gastrologv1.SystemCommand{
@@ -41,7 +40,6 @@ func ExtractSetVaultPlacements(cmd *gastrologv1.SetVaultPlacementsCommand) (glid
 	for i, p := range cmd.GetPlacements() {
 		placements[i] = system.VaultPlacement{
 			StorageID: string(p.GetStorageId()),
-			Leader:    p.GetLeader(),
 		}
 	}
 	return vaultID, placements, nil

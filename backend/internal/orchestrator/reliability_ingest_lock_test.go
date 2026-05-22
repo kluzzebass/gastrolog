@@ -11,14 +11,14 @@ import (
 	"gastrolog/internal/glid"
 	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/query"
-	"gastrolog/internal/system"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
 // blockingReplicator blocks AppendRecords until released. Models a
-// SIGSTOPed or frozen follower: the TCP stream stays open, the caller
+// SIGSTOPed or frozen receiver: the TCP stream stays open, the caller
 // waits for an ack that never arrives. Used to reproduce gastrolog-5oofa:
-// if ingest() held o.mu.RLock across fireAndForgetRemote (the bug),
-// concurrent orchestrator operations would deadlock.
+// if ingest() held o.mu.RLock across the fan-out RPC, concurrent
+// orchestrator operations would deadlock.
 type blockingReplicator struct {
 	release     chan struct{}
 	entered     chan struct{} // closed on first AppendRecords entry
@@ -91,12 +91,16 @@ func TestReliability_Ingest_ReleasesLockBeforeReplication(t *testing.T) {
 	im := indexmem.NewManager(nil, nil, nil, nil, nil)
 	qe := query.New(cm, im, nil)
 	vaultInst := &VaultInstance{
-		VaultID:          vaultID,
-		Type:            "memory",
-		Chunks:          cm,
-		Indexes:         im,
-		Query:           qe,
-		FollowerTargets: []system.ReplicationTarget{{NodeID: "node-2-paused"}},
+		VaultID: vaultID,
+		Type:    "memory",
+		Chunks:  cm,
+		Indexes: im,
+		Query:   qe,
+		ChunkPlacement: func(_ chunk.ChunkID) *vaultctlfsm.ChunkPlacement {
+			return &vaultctlfsm.ChunkPlacement{
+				Receiving: []string{"node-1", "node-2-paused"},
+			}
+		},
 	}
 	vault := NewVault(vaultID, vaultInst)
 	vault.Name = "5oofa-regression"
@@ -111,7 +115,7 @@ func TestReliability_Ingest_ReleasesLockBeforeReplication(t *testing.T) {
 	}
 
 	// Ingest a record in the background. With a blocking replicator, this
-	// will get stuck in fireAndForgetRemote → wg.Wait → replicator.
+	// will get stuck in runFanOut → fanOutAppend → replicator.AppendRecords.
 	ingestDone := make(chan error, 1)
 	go func() {
 		ingestDone <- orch.Ingest(chunk.Record{
@@ -121,7 +125,7 @@ func TestReliability_Ingest_ReleasesLockBeforeReplication(t *testing.T) {
 	}()
 
 	// Wait until the replicator entered AppendRecords — i.e., the ingest
-	// path is now inside fireAndForgetRemote. This is the critical window:
+	// path is now inside runFanOut. This is the critical window:
 	// if the orchestrator mutex were held, every other RPC would queue.
 	select {
 	case <-replicator.entered:
@@ -131,7 +135,7 @@ func TestReliability_Ingest_ReleasesLockBeforeReplication(t *testing.T) {
 
 	// Fire an operation that takes the write lock. If ingest is holding
 	// o.mu.RLock, this will block until the replicator is unblocked.
-	// With the fix, the lock was released before fireAndForgetRemote and
+	// With the fix, the lock was released before runFanOut and
 	// UnregisterVault should return quickly.
 	done := make(chan error, 1)
 	go func() {

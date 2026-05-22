@@ -50,6 +50,122 @@ type AnnouncerSetter interface {
 	SetAnnouncer(MetadataAnnouncer)
 }
 
+// RotationCoordinatorSetter is an optional interface for chunk
+// managers that support post-construction injection of a
+// RotationCoordinator. Mirrors AnnouncerSetter — the orchestrator
+// wires the coordinator after the chunk Manager is built so the
+// coordinator can close over per-vault state (FSM, applier, current
+// Receiving) without the chunk package depending on the orchestrator.
+type RotationCoordinatorSetter interface {
+	SetRotationCoordinator(RotationCoordinator)
+}
+
+// UploadGate decides whether THIS replica should upload a sealed
+// chunk to the shared cloud blob store. Under the fan-out data plane
+// every Receiver runs PostSealProcess locally (compress + index),
+// but only one replica per vault should actually push to S3 —
+// otherwise N replicas race on the same vaultID/chunkID.glcb path,
+// multiplying cluster egress bandwidth and risking last-writer-wins
+// corruption if any GLCB digest differs.
+//
+// The orchestrator wires a gate that returns IsRaftLeader() for the
+// vault-ctl Raft group: only the elected Raft leader uploads.
+// Subsequent CmdUploadChunk applies on every replica, OnUpload fires,
+// and the non-uploading replicas mark their local chunks CloudBacked
+// without re-uploading.
+//
+// When nil on the chunk manager Config, all replicas upload — the
+// legacy / single-node default.
+type UploadGate func() bool
+
+// UploadGateSetter is the optional interface for chunk managers that
+// support post-construction injection of an UploadGate. Mirrors
+// AnnouncerSetter — the orchestrator wires the gate after build so
+// it can close over the vault-ctl Raft leadership callback.
+type UploadGateSetter interface {
+	SetUploadGate(UploadGate)
+}
+
+// ActiveChunkAligner is the optional interface implemented by chunk
+// managers that participate in FSM-mediated rotation
+// (gastrolog-3yre7). When the vault-ctl FSM applies CmdCreateChunk
+// for a new Active chunk, the orchestrator fires OnCreate which
+// calls AlignActive on every replica's local chunk manager.
+//
+// On the proposing replica, the chunk manager already opened the
+// announced ID via the RotationCoordinator path (rotateViaCoordinator)
+// before the FSM apply returned, so AlignActive is a no-op (current
+// active == announced ID).
+//
+// On non-proposing replicas (including losing race proposers and
+// pure Receivers that didn't fire their own rotation), the local
+// active chunk still holds the previous chunk's ID. AlignActive
+// seals it (silently — the FSM has already received CmdBeginSeal
+// via the proposer's coordinator) and opens a new local chunk with
+// the announced ID. The two-phase apply (CmdBeginSeal then
+// CmdCreateChunk) means by the time AlignActive runs, the FSM has
+// already transitioned the old chunk out of Active.
+//
+// Must run outside the chunk manager's append/rotate critical
+// section to avoid deadlocking against an in-flight rotation that
+// holds the manager mutex while waiting on the Raft round-trip.
+// Wire OnCreate via a goroutine.
+type ActiveChunkAligner interface {
+	AlignActive(id ChunkID) error
+}
+
+// ReceivingAnnouncer is the optional extension of MetadataAnnouncer
+// that carries the initial Receiving set when announcing a new chunk
+// under the fan-out data-plane (gastrolog-2ujjh / gastrolog-nd6sz /
+// gastrolog-hshgl). Announcers that do not implement this interface
+// produce CmdCreateChunk without an initial Receiving snapshot —
+// suitable for single-node / memory / JSONL chunk managers that have
+// no cross-node replication path.
+//
+// receiving is the initial Receiving set: the full placement member
+// list for the vault.
+type ReceivingAnnouncer interface {
+	AnnounceCreateWithReceiving(id ChunkID, writeStart, ingestStart, sourceStart time.Time, receiving []string)
+}
+
+// FanOutConfigSetter is the optional interface for chunk managers
+// that can be told which Receiving snapshot to stamp on new chunks.
+// The orchestrator wires this from VaultConfig at instance build
+// time + on every placement change.
+type FanOutConfigSetter interface {
+	SetFanOutConfig(receiving []string)
+}
+
+// RotationCoordinator drives FSM-mediated rotation under the fan-out
+// data plane (gastrolog-3yre7). When the chunk manager's rotation
+// policy fires, it hands the rotation moment to the coordinator,
+// which round-trips through vault-ctl Raft and returns the canonical
+// new chunk ID. The chunk manager then seals its current local chunk
+// and opens a new one with the returned ID — same ID across every
+// replica because Raft serializes proposals and the FSM single-Active
+// invariant (vaultctlfsm.ErrActiveChunkExists) discriminates winners
+// from losers.
+//
+// When this interface is nil on the chunk manager Config, the manager
+// falls back to the legacy local-mint flow: each rotation picks a
+// locally-fresh chunk ID and the announcer proposes via Raft after
+// the seal+open completes. Used by single-node, memory, and JSONL
+// chunk managers that have no cross-replica synchronization
+// requirement.
+type RotationCoordinator interface {
+	// BeginRotation transitions the FSM from "oldID is Active" to a
+	// new Active. Returns the canonical new chunk ID after the
+	// underlying Raft entries commit. The caller's candidate ID
+	// proposal may or may not win; either way the returned ID is the
+	// canonical Active and the caller must use it for the local seal+
+	// open.
+	//
+	// oldID may be the zero value when there's no current Active to
+	// transition (e.g., the chunk manager is opening its very first
+	// chunk for a vault).
+	BeginRotation(oldID ChunkID) (ChunkID, error)
+}
+
 // IntegrityVerifier reports the expected GLCB whole-blob digest for a chunk
 // (the value the FSM stamped onto CmdUploadChunk via gastrolog-grnc3). The
 // chunk manager calls ExpectedDigest after every cold-cache cloud download

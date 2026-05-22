@@ -178,42 +178,47 @@ const (
 )
 
 // VaultPlacement assigns one replica of a vault to a specific file storage.
-// The node is derived from the file storage's NodeStorageConfig.
+// The node is derived from the file storage's NodeStorageConfig. Under the
+// fan-out data plane (gastrolog-hshgl) every placement member is symmetric:
+// the legacy Leader bool that distinguished one canonical writer is gone,
+// and routing-layer "pick a canonical member" decisions take the first
+// placement deterministically.
 type VaultPlacement struct {
 	StorageID string `json:"storageId"`
-	Leader    bool   `json:"leader"`
 }
 
-// LeaderStorageID returns the storage ID of the leader placement, or empty if unplaced.
-func LeaderStorageID(placements []VaultPlacement) string {
-	for _, p := range placements {
-		if p.Leader {
-			return p.StorageID
-		}
+// LeaderStorageID returns the storage ID of the first placement, or empty
+// if unplaced. Under fan-out this is the "deterministic canonical" used
+// by routing-layer code that needs to pick one placement member as a
+// stable target — every other placement member is an equally valid
+// alternative.
+func PrimaryPlacementStorageID(placements []VaultPlacement) string {
+	if len(placements) == 0 {
+		return ""
 	}
-	return ""
+	return placements[0].StorageID
 }
 
-// FollowerStorageIDs returns the storage IDs of all follower placements.
-func FollowerStorageIDs(placements []VaultPlacement) []string {
-	var ids []string
-	for _, p := range placements {
-		if !p.Leader {
-			ids = append(ids, p.StorageID)
-		}
+// FollowerStorageIDs returns the storage IDs of every placement member
+// except the first. Under fan-out the "leader" / "follower" distinction
+// is gone — these are just "the other placement members" for symmetric
+// peer enumeration.
+func PeerPlacementStorageIDs(placements []VaultPlacement) []string {
+	if len(placements) <= 1 {
+		return nil
+	}
+	ids := make([]string, 0, len(placements)-1)
+	for _, p := range placements[1:] {
+		ids = append(ids, p.StorageID)
 	}
 	return ids
 }
 
-// StorageIDs returns all placed storage IDs (leader first, then followers).
+// StorageIDs returns every placement storage ID in source order.
 func StorageIDs(placements []VaultPlacement) []string {
-	var ids []string
+	ids := make([]string, 0, len(placements))
 	for _, p := range placements {
-		if p.Leader {
-			ids = append([]string{p.StorageID}, ids...)
-		} else {
-			ids = append(ids, p.StorageID)
-		}
+		ids = append(ids, p.StorageID)
 	}
 	return ids
 }
@@ -282,9 +287,9 @@ func StorageIDForNode(nodeID string, v VaultConfig, nscs []NodeStorageConfig) st
 	return SyntheticStorageID(nodeID)
 }
 
-// LeaderNodeID derives the leader node from placements + storage configs.
-func LeaderNodeID(placements []VaultPlacement, nscs []NodeStorageConfig) string {
-	storageID := LeaderStorageID(placements)
+// PrimaryPlacementNodeID derives the leader node from placements + storage configs.
+func PrimaryPlacementNodeID(placements []VaultPlacement, nscs []NodeStorageConfig) string {
+	storageID := PrimaryPlacementStorageID(placements)
 	if storageID == "" {
 		return ""
 	}
@@ -292,12 +297,29 @@ func LeaderNodeID(placements []VaultPlacement, nscs []NodeStorageConfig) string 
 }
 
 // FollowerNodeIDs derives unique follower node IDs from placements + storage configs.
-// Multiple same-node placements are deduplicated. Use FollowerTargets for
+// Multiple same-node placements are deduplicated. Use PeerPlacementTargets for
 // storage-level granularity.
-func FollowerNodeIDs(placements []VaultPlacement, nscs []NodeStorageConfig) []string {
+func PeerPlacementNodeIDs(placements []VaultPlacement, nscs []NodeStorageConfig) []string {
 	var nodeIDs []string
 	seen := make(map[string]bool)
-	for _, storageID := range FollowerStorageIDs(placements) {
+	for _, storageID := range PeerPlacementStorageIDs(placements) {
+		nid := NodeIDForStorage(storageID, nscs)
+		if nid != "" && !seen[nid] {
+			seen[nid] = true
+			nodeIDs = append(nodeIDs, nid)
+		}
+	}
+	return nodeIDs
+}
+
+// PlacementNodeIDs returns every unique node ID across the vault's placements.
+// Under fan-out, every placement member is a peer Receiver — no leader/follower
+// distinction. Order matches the placement order with the leader (if any)
+// listed first, then followers; duplicates removed.
+func PlacementNodeIDs(placements []VaultPlacement, nscs []NodeStorageConfig) []string {
+	var nodeIDs []string
+	seen := make(map[string]bool)
+	for _, storageID := range StorageIDs(placements) {
 		nid := NodeIDForStorage(storageID, nscs)
 		if nid != "" && !seen[nid] {
 			seen[nid] = true
@@ -313,12 +335,12 @@ type ReplicationTarget struct {
 	StorageID string
 }
 
-// FollowerTargets returns one target per follower placement — NOT deduplicated
+// PeerPlacementTargets returns one target per follower placement — NOT deduplicated
 // by node. Multiple placements on the same node produce multiple targets,
 // enabling same-node replication across different file storages.
-func FollowerTargets(placements []VaultPlacement, nscs []NodeStorageConfig) []ReplicationTarget {
+func PeerPlacementTargets(placements []VaultPlacement, nscs []NodeStorageConfig) []ReplicationTarget {
 	var targets []ReplicationTarget
-	for _, storageID := range FollowerStorageIDs(placements) {
+	for _, storageID := range PeerPlacementStorageIDs(placements) {
 		nid := NodeIDForStorage(storageID, nscs)
 		if nid != "" {
 			targets = append(targets, ReplicationTarget{NodeID: nid, StorageID: storageID})

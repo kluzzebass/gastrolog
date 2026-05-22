@@ -6,14 +6,11 @@ import (
 	"fmt"
 	"gastrolog/internal/glid"
 	"sync"
-	"time"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/cluster"
 	"gastrolog/internal/index"
 	"gastrolog/internal/index/analyzer"
 	"gastrolog/internal/raftgroup"
-	"gastrolog/internal/system"
 	"gastrolog/internal/vaultraft"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
@@ -439,262 +436,75 @@ func (o *Orchestrator) findLocalVaultInstance(vaultID glid.GLID) *VaultInstance 
 }
 
 // AppendToVault appends a record to a specific instance's chunk manager.
-// Used by inter-instance transition to target a downstream instance directly,
-// bypassing the vault's active instance. Includes seal detection.
-// AppendToVault appends a record to a specific instance. leaderChunkID, when
-// non-zero on followers, syncs the chunk ID with the leader so the
-// follower has real, queryable, promotable chunks.
-func (o *Orchestrator) AppendToVault(vaultID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error {
+// Used by the receiving side of cross-node fan-out (chunkReplicator.
+// AppendRecords lands here) and by inter-instance transition.
+//
+// Under the fan-out data plane (gastrolog-2hjfm) the receiver writes
+// to its OWN locally-current active chunk. Chunk-ID alignment across
+// replicas happens at rotation time via the FSM-mediated rotation
+// coordinator (gastrolog-3yre7), not per-record on the receive side.
+// The senderChunkID parameter survives only as a tombstone gate —
+// reject late RPCs whose target chunk the cluster has already
+// retired — and as a courtesy hint when the receiver has no active
+// chunk yet (first-append-on-this-replica): in that narrow case
+// SetNextChunkID lines up the receiver's freshly-created chunk with
+// the sender's, avoiding a transient divergence the reconcile pass
+// would have to fix.
+//
+// Includes seal detection but performs NO further fan-out: this is
+// the terminus on the receiver.
+func (o *Orchestrator) AppendToVault(vaultID glid.GLID, senderChunkID chunk.ChunkID, rec chunk.Record) error {
 	o.mu.RLock()
-	// NOTE: manually unlocked below — remote forwards happen outside the lock.
+	defer o.mu.RUnlock()
 
 	vault := o.vaults[vaultID]
 	if vault == nil {
-		o.mu.RUnlock()
 		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 	if err := vaultReplicationReadinessErr(vaultID, vault); err != nil {
-		o.mu.RUnlock()
 		return err
 	}
 
 	vaultInst := vault.Instance
 	if vaultInst == nil {
-		o.mu.RUnlock()
 		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
-	// Block appends to vaults that are draining.
 	if _, draining := o.vaultDraining[vaultDrainKey(vaultID)]; draining {
-		o.mu.RUnlock()
 		return ErrVaultDraining
 	}
 	cm := vaultInst.Chunks
 
-	// Reject writes targeting a tombstoned chunk ID — a stale replication
-	// RPC that would otherwise recreate a chunk the cluster has already
-	// deleted. Caller translates this into a benign ack on the receive
-	// path. See gastrolog-11rzz.
-	if leaderChunkID != (chunk.ChunkID{}) && vaultInst.IsTombstoned != nil && vaultInst.IsTombstoned(leaderChunkID) {
-		o.mu.RUnlock()
-		return fmt.Errorf("%w: append to tombstoned chunk %s", chunk.ErrChunkTombstoned, leaderChunkID)
+	// Tombstone gate: reject writes targeting a chunk ID the cluster
+	// already retired. Caller translates this into a benign ack — the
+	// goal (chunk gone) is already achieved. See gastrolog-11rzz.
+	if senderChunkID != (chunk.ChunkID{}) && vaultInst.IsTombstoned != nil && vaultInst.IsTombstoned(senderChunkID) {
+		return fmt.Errorf("%w: append to tombstoned chunk %s", chunk.ErrChunkTombstoned, senderChunkID)
 	}
 
-	// On followers, sync chunk ID with the leader. If the active
-	// chunk has a different ID (left over from a previous leader cycle),
-	// seal it so the next append opens a new chunk with the synced ID.
-	if vaultInst.IsFollower && leaderChunkID != (chunk.ChunkID{}) {
-		if active := cm.Active(); active != nil && active.ID != leaderChunkID {
-			_ = cm.Seal()
-		}
-		cm.SetNextChunkID(leaderChunkID)
+	// First-append hint: if the receiver has no active chunk yet,
+	// nudge it to open one with the sender's ID so the bootstrap
+	// case doesn't burn a reconcile round-trip. Once an active exists
+	// locally, the receiver keeps writing to it — rotation alignment
+	// is the coordinator's job, not AppendToVault's.
+	if senderChunkID != (chunk.ChunkID{}) && cm.Active() == nil {
+		cm.SetNextChunkID(senderChunkID)
 	}
 
 	activeBefore := cm.Active()
 	if _, _, err := cm.Append(rec); err != nil {
-		o.mu.RUnlock()
 		return err
 	}
 	o.progressTrigger.Signal()
 
-	// Leader: collect remote forward targets (local appends happen under lock).
-	var remotes []remoteForwardTarget
-	if vaultInst.ShouldForwardToFollowers() {
-		remotes = o.forwardToFollowers(vault, vaultID, vaultInst, cm, rec)
-	}
-
 	activeAfter := cm.Active()
-	sealed := activeBefore != nil && (activeAfter == nil || activeAfter.ID != activeBefore.ID)
-	if sealed && !vaultInst.IsFollower {
+	if activeBefore != nil && (activeAfter == nil || activeAfter.ID != activeBefore.ID) {
 		o.schedulePostSeal(vaultID, cm, activeBefore.ID)
 	}
-	o.mu.RUnlock()
-
-	// Post-rotation: seal followers, then forward the record.
-	if sealed {
-		o.sealRemoteFollowers(remotes, activeBefore.ID)
-	}
-	o.fireAndForgetRemote(remotes, rec)
 	return nil
 }
 
-// remoteForwardTarget captures the parameters for a fire-and-forget forward
-// to a cross-node follower. Collected under o.mu.RLock, executed after release.
-type remoteForwardTarget struct {
-	nodeID        string
-	vaultID       glid.GLID
-	activeChunkID chunk.ChunkID
-}
-
-// forwardToFollowers forwards a record to all follower targets for active-chunk
-// durability. Same-node targets use direct append (under lock); cross-node targets
-// are collected and returned for the caller to forward AFTER releasing the lock.
-// Called under o.mu.RLock.
-func (o *Orchestrator) forwardToFollowers(vault *Vault, vaultID glid.GLID, vaultInst *VaultInstance, cm chunk.ChunkManager, rec chunk.Record) []remoteForwardTarget {
-	activeNow := cm.Active()
-	var activeChunkID chunk.ChunkID
-	if activeNow != nil {
-		activeChunkID = activeNow.ID
-	}
-	var remotes []remoteForwardTarget
-	for _, tgt := range vaultInst.FollowerTargets {
-		if tgt.NodeID == o.localNodeID {
-			o.appendToLocalFollower(vault, vaultInst.VaultID, tgt.StorageID, activeChunkID, rec)
-		} else {
-			remotes = append(remotes, remoteForwardTarget{
-				nodeID: tgt.NodeID, vaultID: vaultID,
-				activeChunkID: activeChunkID,
-			})
-		}
-	}
-	return remotes
-}
-
-// sealRemoteFollowers sends seal commands to remote followers through the
-// instance replication stream, ensuring they seal at the same boundary as the
-// leader. Must be called BEFORE the next record's append to maintain ordering.
-// Seal RPCs to distinct followers run in parallel so the leader does not pay
-// sum(latency) per seal boundary (important for remote instance transition streams
-// that append one record at a time). Ordering per follower stream is still
-// sequential because each follower receives at most one in-flight seal here.
-//
-// During shutdown (o.shuttingDown()) this is a silent no-op: the local
-// chunk is already sealed on disk, peers are racing to shut down alongside
-// us, and their replication-catchup on next startup will reseal to the
-// same boundary. Trying to push the seal command now would just add noise
-// from peers that are unreachable. See gastrolog-1e5ke.
-func (o *Orchestrator) sealRemoteFollowers(targets []remoteForwardTarget, chunkID chunk.ChunkID) {
-	if o.chunkReplicator == nil || len(targets) == 0 || o.shuttingDown() {
-		return
-	}
-	var wg sync.WaitGroup
-	for _, tgt := range targets {
-		wg.Go(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), cluster.ForwardingTimeout)
-			defer cancel()
-			if err := o.chunkReplicator.SealVault(ctx, tgt.nodeID, tgt.vaultID, chunkID); err != nil {
-				o.vaultOpsLogger.Warn("replication: failed to seal remote follower",
-					"node", tgt.nodeID, "vault", tgt.vaultID,
-					"chunk", chunkID.String(), "error", err)
-			}
-		})
-	}
-	wg.Wait()
-}
-
-// fireAndForgetRemote sends records to remote followers outside any lock.
-// Appends to distinct followers run in parallel (WaitGroup) so per-record
-// latency is bounded by the slowest follower, not the sum — same ordering
-// guarantee as sealRemoteFollowers: each follower instance stream still processes
-// one RPC at a time, and AppendToVault does not start the next record until
-// this function returns.
-//
-// During shutdown (o.shuttingDown()) this is a silent no-op: the record
-// is already durable on the local leader's disk; peers that are also
-// shutting down will reconcile via replication-catchup on next startup.
-// Skipping the fanout avoids the log spam storm where each buffered
-// record in the drain pipeline tries to reach peers that are gone. This
-// is the single biggest source of shutdown noise before the fix —
-// see gastrolog-1e5ke.
-// fireAndForgetRemote dispatches record replication to each remote follower
-// target in parallel and waits for all of them (bounded by ForwardingTimeout
-// per target). "Fire and forget" in the sense that the caller does not
-// observe per-target errors — failures feed the per-node backoff circuit
-// breaker (bumpReplicaBackoff) which skips unreachable nodes on subsequent
-// calls. Callers MUST invoke this outside the orchestrator mutex: holding
-// o.mu.RLock across this call would starve writers when any follower is
-// slow or paused. See gastrolog-5oofa.
-func (o *Orchestrator) fireAndForgetRemote(targets []remoteForwardTarget, rec chunk.Record) {
-	if len(targets) == 0 || o.shuttingDown() || o.chunkReplicator == nil {
-		return
-	}
-	var wg sync.WaitGroup
-	for _, tgt := range targets {
-		if rb := o.getReplicaBackoff(tgt.nodeID); rb != nil && rb.skipUntil.After(o.now()) {
-			continue
-		}
-		wg.Go(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), cluster.ForwardingTimeout)
-			defer cancel()
-			err := o.chunkReplicator.AppendRecords(ctx, tgt.nodeID, tgt.vaultID, tgt.activeChunkID, []chunk.Record{rec})
-			if err != nil {
-				o.bumpReplicaBackoff(tgt.nodeID, err)
-			} else {
-				o.clearReplicaBackoff(tgt.nodeID)
-			}
-		})
-	}
-	wg.Wait()
-}
-
-// replicaBackoff tracks consecutive failures and exponential backoff for
-// a follower node's replication stream.
-type replicaBackoff struct {
-	failures  int
-	skipUntil time.Time
-}
-
-func (o *Orchestrator) getReplicaBackoff(nodeID string) *replicaBackoff {
-	v, ok := o.replicaCircuit.Load(nodeID)
-	if !ok {
-		return nil
-	}
-	return v.(*replicaBackoff)
-}
-
-func (o *Orchestrator) bumpReplicaBackoff(nodeID string, err error) {
-	v, _ := o.replicaCircuit.LoadOrStore(nodeID, &replicaBackoff{})
-	rb := v.(*replicaBackoff)
-	rb.failures++
-	backoff := time.Duration(1<<min(rb.failures, 5)) * time.Second // 2s, 4s, 8s, 16s, 32s cap
-	rb.skipUntil = o.now().Add(backoff)
-
-	// Log only on the first failure and when backoff increases.
-	if rb.failures == 1 || rb.failures&(rb.failures-1) == 0 { // powers of 2
-		o.vaultOpsLogger.Warn("replication: follower unreachable, backing off",
-			"node", nodeID, "failures", rb.failures, "backoff", backoff, "error", err)
-	}
-}
-
-func (o *Orchestrator) clearReplicaBackoff(nodeID string) {
-	if _, loaded := o.replicaCircuit.LoadAndDelete(nodeID); loaded {
-		o.vaultOpsLogger.Info("replication: follower recovered", "node", nodeID)
-	}
-}
-
-// appendToLocalFollower appends a record to the local follower instance
-// (identified by storageID). With one-instance-per-vault, leader and
-// follower never coexist on the same node, so this is a no-op in
-// practice — the function survives only as a defensive shim until
-// followerTargets stops listing the local node. Called under o.mu.RLock.
-func (o *Orchestrator) appendToLocalFollower(vault *Vault, vaultID glid.GLID, storageID string, leaderChunkID chunk.ChunkID, rec chunk.Record) {
-	t := vault.Instance
-	if t == nil || t.VaultID != vaultID || t.StorageID != storageID || !t.IsFollower {
-		return
-	}
-	if leaderChunkID != (chunk.ChunkID{}) {
-		if active := t.Chunks.Active(); active != nil && active.ID != leaderChunkID {
-			if err := t.Chunks.Seal(); err != nil {
-				o.vaultOpsLogger.Warn("replication: local follower seal failed",
-					"vault", vaultID, "storage", storageID, "error", err)
-			}
-		}
-		t.Chunks.SetNextChunkID(leaderChunkID)
-	}
-	if _, _, err := t.Chunks.Append(rec); err != nil {
-		o.vaultOpsLogger.Warn("replication: local follower append failed",
-			"vault", vaultID, "storage", storageID, "error", err)
-		return
-	}
-	o.progressTrigger.Signal()
-}
-
-// deleteFromFollowers removes a chunk from all same-node follower instances
-// of an instance. Called by retention after deleting from the leader.
-// DeleteChunk deletes a specific chunk from an instance. If the chunk is
-// currently the vault's active chunk, it is sealed first so the delete can
-// proceed. This handles the follower case where the leader has moved on to a
-// new active chunk but the follower still has the old ID as active (records
-// sync via ChunkReplicator.AppendRecords preserves the leader's chunk ID).
+// DeleteChunk deletes a specific chunk from a vault instance. If the chunk
+// is the active chunk, it is sealed first so the delete can proceed.
 func (o *Orchestrator) DeleteChunk(vaultID glid.GLID, chunkID chunk.ChunkID) error {
 	vaultInst, err := o.findInstanceForDelete(vaultID)
 	if err != nil {
@@ -851,13 +661,13 @@ func (o *Orchestrator) proposePruneNodeForVault(vaultID glid.GLID, removedNodeID
 // runs even though the FSM-side encoding stores expectedFrom as a map.
 // See gastrolog-51gme.
 func (o *Orchestrator) placementMembership(vaultInst *VaultInstance) []string {
-	expected := make([]string, 0, 1+len(vaultInst.FollowerTargets))
+	expected := make([]string, 0, 1+len(vaultInst.PeerPlacementTargets))
 	seen := map[string]bool{}
 	if o.localNodeID != "" {
 		expected = append(expected, o.localNodeID)
 		seen[o.localNodeID] = true
 	}
-	for _, t := range vaultInst.FollowerTargets {
+	for _, t := range vaultInst.PeerPlacementTargets {
 		if t.NodeID == "" || seen[t.NodeID] {
 			continue
 		}
@@ -865,28 +675,6 @@ func (o *Orchestrator) placementMembership(vaultInst *VaultInstance) []string {
 		expected = append(expected, t.NodeID)
 	}
 	return expected
-}
-
-// deleteFromFollowers removes a chunk from same-node follower vault instances.
-// Called from the reconciler-less fallback in retention's expireChunk after
-// applyRaftDelete has already fired the global CmdDeleteChunk. Uses
-// DeleteNoAnnounce to avoid a redundant second Raft-wide announce (the
-// first one already propagated via OnDelete). The reconciler-driven
-// production path (gastrolog-51gme) walks same-node siblings itself in
-// VaultLifecycleReconciler.deleteLocalCopy.
-func (o *Orchestrator) deleteFromFollowers(vaultID glid.GLID, chunkID chunk.ChunkID) {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	vault := o.vaults[vaultID]
-	if vault == nil {
-		return
-	}
-	if t := vault.Instance; t != nil && t.IsFollower {
-		if err := chunk.DeleteNoAnnounce(t.Chunks, chunkID); err != nil {
-			o.vaultOpsLogger.Warn("delete from followers: failed",
-				"vault", vaultID, "chunk", chunkID, "error", err)
-		}
-	}
 }
 
 // --- Chunk write ---
@@ -899,73 +687,60 @@ func (o *Orchestrator) deleteFromFollowers(vaultID glid.GLID, chunkID chunk.Chun
 // cluster-forwarded records, and the ImportRecords API.
 func (o *Orchestrator) Append(vaultID glid.GLID, rec chunk.Record) (chunk.ChunkID, uint64, error) {
 	o.mu.RLock()
-	cid, pos, _, remotes, err := o.appendRecord(vaultID, rec)
+	cid, pos, fanOut, err := o.appendRecord(vaultID, rec)
 	o.mu.RUnlock()
-	o.fireAndForgetRemote(remotes, rec)
+	if fanOut != nil {
+		// Fire-and-forget the fan-out: the caller of Append doesn't
+		// wait for replicas (this entry point is non-ack-gated).
+		// Records still land on Receiving via the background
+		// goroutines; durability convergence happens at seal time.
+		_ = o.runFanOut(context.Background(), fanOut, rec)
+	}
 	return cid, pos, err
 }
 
-// replicationTask describes a pending sync forward for ack-gated ingestion.
-// Returned by appendRecord when rec.WaitForReplica is true, consumed by
-// ackAfterReplication outside the orchestrator lock.
-type replicationTask struct {
-	vaultID glid.GLID
-	chunkID chunk.ChunkID
-	targets []system.ReplicationTarget
-}
+// (replicationTask + leader-driven ack-gated replication path removed
+// under gastrolog-hshgl. FanOut via fanOutTask + waitWOfN handles
+// ack-gated durability now.)
 
 // appendRecord is the unified append-with-seal-detection path.
 // Caller MUST hold o.mu.RLock.
 //
-// Returns a replicationTask when the record has WaitForReplica set and
-// the instance has secondaries. Also returns remoteForwardTargets for
-// fire-and-forget forwarding — the caller fires these AFTER releasing the lock.
-func (o *Orchestrator) appendRecord(vaultID glid.GLID, rec chunk.Record) (chunk.ChunkID, uint64, *replicationTask, []remoteForwardTarget, error) {
+// Returns a fanOutTask when the chunk has a non-empty Receiving placement;
+// the caller dispatches the fan-out AFTER releasing the lock.
+func (o *Orchestrator) appendRecord(vaultID glid.GLID, rec chunk.Record) (chunk.ChunkID, uint64, *fanOutTask, error) {
 	vault := o.vaults[vaultID]
 	if vault == nil {
-		return chunk.ChunkID{}, 0, nil, nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+		return chunk.ChunkID{}, 0, nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 	if !vault.Enabled {
-		return chunk.ChunkID{}, 0, nil, nil, fmt.Errorf("%w: %s", ErrVaultDisabled, vaultID)
+		return chunk.ChunkID{}, 0, nil, fmt.Errorf("%w: %s", ErrVaultDisabled, vaultID)
 	}
 	if err := vaultReplicationReadinessErr(vaultID, vault); err != nil {
-		return chunk.ChunkID{}, 0, nil, nil, err
+		return chunk.ChunkID{}, 0, nil, err
 	}
 
 	cm := vault.ChunkManager()
 	if cm == nil {
-		return chunk.ChunkID{}, 0, nil, nil, fmt.Errorf("%w: %s (no instance)", ErrVaultNotFound, vaultID)
+		return chunk.ChunkID{}, 0, nil, fmt.Errorf("%w: %s (no instance)", ErrVaultNotFound, vaultID)
 	}
 	activeBefore := cm.Active()
 	cid, pos, err := cm.Append(rec)
 	if err != nil {
-		return cid, pos, nil, nil, err
+		return cid, pos, nil, err
 	}
 	o.progressTrigger.Signal()
 
-	// Forward record to followers for active-chunk durability.
-	// Followers append to their ChunkManager — real, queryable chunks
-	// that allow immediate promotion if the leader dies.
-	//
-	// When WaitForReplica is set, skip fire-and-forget — the caller does
-	// sync forwarding outside the lock via ackAfterReplication.
+	// Replication dispatch: every chunk with a non-empty Receiving
+	// placement fans out via fanOutAppend (gastrolog-2ujjh /
+	// gastrolog-hshgl). Single-node / memory / JSONL chunks have no
+	// placement and no cross-node replication; they're durable on
+	// the local cm.Append above.
 	activeInst := vault.Instance
-	var task *replicationTask
-	var remotes []remoteForwardTarget
-	if activeInst != nil && activeInst.ShouldForwardToFollowers() {
-		if rec.WaitForReplica {
-			activeNow := cm.Active()
-			var activeChunkID chunk.ChunkID
-			if activeNow != nil {
-				activeChunkID = activeNow.ID
-			}
-			task = &replicationTask{
-				vaultID: vaultID,
-				chunkID: activeChunkID,
-				targets: activeInst.FollowerTargets,
-			}
-		} else {
-			remotes = o.forwardToFollowers(vault, vaultID, activeInst, cm, rec)
+	var fanOut *fanOutTask
+	if activeInst != nil && cid != (chunk.ChunkID{}) && activeInst.ChunkPlacement != nil {
+		if p := activeInst.ChunkPlacement(cid); p != nil && len(p.Receiving) > 0 {
+			fanOut = o.buildFanOutTask(vaultID, cid, p, rec)
 		}
 	}
 
@@ -983,7 +758,7 @@ func (o *Orchestrator) appendRecord(vaultID glid.GLID, rec chunk.Record) (chunk.
 		o.schedulePostSeal(vaultID, cm, activeBefore.ID)
 	}
 
-	return cid, pos, task, remotes, nil
+	return cid, pos, fanOut, nil
 }
 
 // ImportChunkRecords creates a new sealed chunk from the given records in the
@@ -1035,7 +810,6 @@ func (o *Orchestrator) ImportToInstanceStorage(ctx context.Context, vaultID glid
 	// deadlocks the entire orchestrator.
 	type vaultRef struct {
 		cm           chunk.ChunkManager
-		isFollower   bool
 		isTombstoned func(chunk.ChunkID) bool
 	}
 	ref := func() *vaultRef {
@@ -1046,7 +820,7 @@ func (o *Orchestrator) ImportToInstanceStorage(ctx context.Context, vaultID glid
 			return nil
 		}
 		if t := vault.Instance; t != nil && (storageID == "" || t.StorageID == storageID) {
-			return &vaultRef{cm: t.Chunks, isFollower: t.IsFollower, isTombstoned: t.IsTombstoned}
+			return &vaultRef{cm: t.Chunks, isTombstoned: t.IsTombstoned}
 		}
 		return nil
 	}()
@@ -1077,30 +851,33 @@ func (o *Orchestrator) ImportToInstanceStorage(ctx context.Context, vaultID glid
 	defer vaultMu.Unlock()
 
 	// Check if this chunk already exists (sealed or active).
-	_, metaErr := cm.Meta(chunkID)
+	existingMeta, metaErr := cm.Meta(chunkID)
 	activeIsChunk := false
 	if active := cm.Active(); active != nil && active.ID == chunkID {
 		activeIsChunk = true
 	}
-
 	chunkExists := metaErr == nil || activeIsChunk
 
-	// Leader: idempotent skip — canonical version is already here.
-	if chunkExists && !ref.isFollower {
-		o.vaultOpsLogger.Debug("replication: chunk already exists, skipping import",
+	// If a fully sealed local copy already exists, treat the import
+	// as idempotent — the canonical bytes are here. Under fan-out
+	// every Receiver may receive ImportSealedChunk from any peer;
+	// the seal-state gate replaces the legacy leader/follower
+	// distinction (sealed-locally = canonical).
+	if chunkExists && metaErr == nil && existingMeta.Sealed {
+		o.vaultOpsLogger.Debug("replication: chunk already sealed locally, skipping import",
 			"vault", vaultID, "chunk", chunkID.String())
 		drainIterator(next)
 		return nil
 	}
 
-	// Follower: replace the forwarded version (may be incomplete due to
-	// fire-and-forget drops) with the canonical sealed chunk.
+	// Local copy is partial (in-flight fan-out or active state):
+	// replace with the canonical sealed stream.
 	if chunkExists {
 		if err := replaceForwardedChunk(cm, chunkID, activeIsChunk); err != nil {
 			drainIterator(next)
 			return err
 		}
-		o.vaultOpsLogger.Debug("replication: replacing forwarded chunk with canonical version",
+		o.vaultOpsLogger.Debug("replication: replacing partial chunk with canonical version",
 			"vault", vaultID, "chunk", chunkID.String())
 	}
 
