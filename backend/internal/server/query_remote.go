@@ -141,17 +141,30 @@ func (s *QueryServer) remoteVaultsByNodeFiltered(ctx context.Context, selectedVa
 		if len(v.Placements) == 0 {
 			continue
 		}
-		// Fan-out reads: route to every placement member, not just the
-		// leader. Each member may hold records the others don't (post-
-		// senderChunkID-strip), and the existing dedupWindow at the
-		// merge boundary collapses cross-replica duplicates by EventID.
-		// Bandwidth cost is N× per query — acceptable trade for
-		// correctness under fan-out divergence.
+		// Fan-out reads: route to every Receiving member of the vault's
+		// active chunk, not just the leader. Each member may hold records
+		// the others don't (post-senderChunkID-strip), and the existing
+		// dedupWindow at the merge boundary collapses cross-replica
+		// duplicates by EventID. Bandwidth cost is N× per query —
+		// acceptable trade for correctness under fan-out divergence.
 		//
 		// Self is excluded by the nodeID == s.localNodeID check: the
 		// local engine path handles this node's data directly. Local
 		// vaults are NOT skipped at the vault level (see godoc above).
-		for _, nodeID := range system.PlacementNodeIDs(v.Placements, nscs) {
+		//
+		// Prefer the active chunk's Receiving set from the FSM
+		// (gastrolog-6bt8s): under fan-out, Receiving is the
+		// authoritative "where records currently land" set, and a node
+		// can be in placement without being in Receiving (e.g. mid-drain
+		// once gastrolog-68cfq wires CmdRemoveReceiving). Falls back to
+		// placement-derived nodes when there's no active chunk yet
+		// (first record into a new vault) or when this node has no
+		// FSM access (single-node / memory mode).
+		nodes := s.activeReceivingNodes(v.ID)
+		if len(nodes) == 0 {
+			nodes = system.PlacementNodeIDs(v.Placements, nscs)
+		}
+		for _, nodeID := range nodes {
 			if nodeID == "" || nodeID == s.localNodeID {
 				continue
 			}
@@ -159,6 +172,17 @@ func (s *QueryServer) remoteVaultsByNodeFiltered(ctx context.Context, selectedVa
 		}
 	}
 	return byNode
+}
+
+// activeReceivingNodes wraps the orchestrator's ActiveReceivingNodes for
+// safe call sites where the orchestrator may not be wired (tests,
+// single-node bootstrap). Returns nil when unavailable so the caller
+// falls back to placement-derived nodes.
+func (s *QueryServer) activeReceivingNodes(vaultID glid.GLID) []string {
+	if s.orch == nil {
+		return nil
+	}
+	return s.orch.ActiveReceivingNodes(vaultID)
 }
 
 // mergeHistogramBuckets sums two histogram bucket slices by matching timestamp.

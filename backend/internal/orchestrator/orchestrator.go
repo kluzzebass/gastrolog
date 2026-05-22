@@ -581,6 +581,24 @@ func (o *Orchestrator) lookupActivePlacement(vaultID glid.GLID) (chunk.ChunkID, 
 	return chunk.ChunkID{}, nil
 }
 
+// ActiveReceivingNodes returns the active chunk's Receiving set for the
+// named vault, read from the per-vault FSM. Returns nil if no active
+// chunk exists or the chunk has no Receiving entry yet. Used by the
+// read-fan-out path (gastrolog-6bt8s) to target the right peers
+// instead of the static vault placement list.
+//
+// Exported so the QueryServer (separate package) can call it; falls
+// through to lookupActivePlacement which is the canonical implementation.
+func (o *Orchestrator) ActiveReceivingNodes(vaultID glid.GLID) []string {
+	_, placement := o.lookupActivePlacement(vaultID)
+	if placement == nil || len(placement.Receiving) == 0 {
+		return nil
+	}
+	out := make([]string, len(placement.Receiving))
+	copy(out, placement.Receiving)
+	return out
+}
+
 // vaultLabel returns the operator-friendly name for an instance as configured,
 // or "" if the instance or config is unknown. Used by RateAlerter to build
 // alert messages that say "instance ssd-hot" instead of just a UUID. Safe to
