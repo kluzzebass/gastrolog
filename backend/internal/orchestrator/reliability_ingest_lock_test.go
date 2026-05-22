@@ -64,6 +64,9 @@ func (m *blockingReplicator) SendFillRecords(_ context.Context, _ string, _ glid
 func (m *blockingReplicator) SendFillComplete(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ uint32, _ string) error {
 	return nil
 }
+func (m *blockingReplicator) PullRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.EventID, _ string) (uint32, uint32, error) {
+	return 0, 0, nil
+}
 
 // TestReliability_Ingest_ReleasesLockBeforeReplication is the regression
 // test for gastrolog-5oofa. Reproduces the exact deadlock: an ingest

@@ -473,11 +473,39 @@ func (d *directChunkReplicator) RequestReplicaCatchup(ctx context.Context, leade
 	}
 	return orch.CatchupSelectedChunks(ctx, vaultID, requesterNodeID, chunkIDs)
 }
-func (d *directChunkReplicator) SendFillRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record, _ bool) error {
+// SendFillRecords forwards a fill batch into the puller's local vault
+// via AppendToVault — the in-process equivalent of the cluster's
+// ChunkReplicationFillRecords stream frame routed through the puller's
+// receiver dispatch. Active/sealing chunks accept the appends through
+// the chunk manager's normal path. Sealed chunks would route to
+// FillSealedRecords; the test directly inspects this surface.
+// See gastrolog-4t3y4.
+func (d *directChunkReplicator) SendFillRecords(_ context.Context, pullerNodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record, _ bool) error {
+	orch, ok := d.nodes[pullerNodeID]
+	if !ok {
+		return fmt.Errorf("directChunkReplicator: unknown puller %q", pullerNodeID)
+	}
+	for _, rec := range records {
+		if err := orch.AppendToVault(vaultID, chunkID, rec); err != nil {
+			return err
+		}
+	}
 	return nil
 }
+
 func (d *directChunkReplicator) SendFillComplete(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ uint32, _ string) error {
 	return nil
+}
+
+// PullRecords forwards the puller→source pull request to the source's
+// PullSelectedRecords handler, which then dispatches Fill frames back
+// via this same replicator's SendFillRecords. See gastrolog-4t3y4.
+func (d *directChunkReplicator) PullRecords(ctx context.Context, sourceNodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, eventIDs []chunk.EventID, requesterNodeID string) (uint32, uint32, error) {
+	orch, ok := d.nodes[sourceNodeID]
+	if !ok {
+		return 0, 0, fmt.Errorf("directChunkReplicator: unknown source %q", sourceNodeID)
+	}
+	return orch.PullSelectedRecords(ctx, vaultID, chunkID, eventIDs, requesterNodeID)
 }
 
 // newClusterRetentionRunner creates a retention runner with follower targets

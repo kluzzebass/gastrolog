@@ -66,6 +66,9 @@ func (m *replicationFakeReplicator) SendFillRecords(_ context.Context, _ string,
 func (m *replicationFakeReplicator) SendFillComplete(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ uint32, _ string) error {
 	return nil
 }
+func (m *replicationFakeReplicator) PullRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.EventID, _ string) (uint32, uint32, error) {
+	return 0, 0, nil
+}
 
 // ---------- helpers ----------
 

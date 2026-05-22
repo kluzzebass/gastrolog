@@ -44,6 +44,9 @@ func (m *slowAckReplicator) SendFillRecords(_ context.Context, _ string, _ glid.
 func (m *slowAckReplicator) SendFillComplete(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ uint32, _ string) error {
 	return nil
 }
+func (m *slowAckReplicator) PullRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.EventID, _ string) (uint32, uint32, error) {
+	return 0, 0, nil
+}
 
 // TestStopWaitsForAckGoroutines verifies that Stop() blocks until all
 // in-flight ack-gated replication goroutines have completed.

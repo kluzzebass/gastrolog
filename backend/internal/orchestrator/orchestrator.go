@@ -148,6 +148,15 @@ type ChunkReplicator interface {
 	// the source had no matching records (recordsSent=0) or aborted mid-
 	// stream (errMsg non-empty). See gastrolog-4t3y4.
 	SendFillComplete(ctx context.Context, pullerNodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, recordsSent uint32, errMsg string) error
+
+	// PullRecords is the puller→source pull-by-EventID request. Reconcile
+	// loops, drain, node-return catchup, and retention transfer use this to
+	// request specific EventIDs from a peer's local copy of a chunk. The
+	// source pushes matching records back asynchronously via SendFillRecords;
+	// (scheduled, missing) returned here lets the caller know what to
+	// expect on the Fill stream and which EventIDs to seek elsewhere.
+	// See gastrolog-4t3y4.
+	PullRecords(ctx context.Context, sourceNodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, eventIDs []chunk.EventID, requesterNodeID string) (scheduled, missing uint32, err error)
 }
 
 // RemoteTransferrer sends records to a remote node for cross-node chunk

@@ -70,6 +70,9 @@ func (r *fillRecorder) SendFillComplete(_ context.Context, _ string, _ glid.GLID
 	r.completeErr = errMsg
 	return nil
 }
+func (r *fillRecorder) PullRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.EventID, _ string) (uint32, uint32, error) {
+	return 0, 0, nil
+}
 
 func (r *fillRecorder) totalRecords() int {
 	r.mu.Lock()

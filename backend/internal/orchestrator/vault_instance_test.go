@@ -432,6 +432,9 @@ func (r *vaultTestReplicator) SendFillRecords(_ context.Context, _ string, _ gli
 func (r *vaultTestReplicator) SendFillComplete(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ uint32, _ string) error {
 	return nil
 }
+func (r *vaultTestReplicator) PullRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.EventID, _ string) (uint32, uint32, error) {
+	return 0, 0, nil
+}
 
 func (r *vaultTestReplicator) getCalls() []vaultForwardCall {
 	r.mu.Lock()
@@ -850,6 +853,9 @@ func (m *ackTestReplicator) SendFillRecords(_ context.Context, _ string, _ glid.
 func (m *ackTestReplicator) SendFillComplete(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ uint32, _ string) error {
 	return nil
 }
+func (m *ackTestReplicator) PullRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.EventID, _ string) (uint32, uint32, error) {
+	return 0, 0, nil
+}
 func TestAppendRecordWaitForReplicaReturnsTask(t *testing.T) {
 	t.Parallel()
 	fwd := &vaultTestReplicator{}
@@ -1213,6 +1219,10 @@ func (f *failingForwarder) SendFillRecords(_ context.Context, _ string, _ glid.G
 
 func (f *failingForwarder) SendFillComplete(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ uint32, _ string) error {
 	return nil
+}
+
+func (f *failingForwarder) PullRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.EventID, _ string) (uint32, uint32, error) {
+	return 0, 0, nil
 }
 
 func (f *failingForwarder) DeleteChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
