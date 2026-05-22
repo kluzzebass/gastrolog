@@ -1178,6 +1178,24 @@ export class ChunkReplicationCommand extends Message<ChunkReplicationCommand> {
      */
     value: ChunkReplicationImportCommit;
     case: "importCommit";
+  } | {
+    /**
+     * Pull-by-EventID receive path (gastrolog-4t3y4). FillRecords carries
+     * a batch of records destined for a NAMED chunk (not the receiver's
+     * current active). FillComplete signals end-of-stream for a pull
+     * sequence — receiver fires CmdAckPull when all expected records
+     * have landed. See docs/pull-records-design.md.
+     *
+     * @generated from field: gastrolog.v1.ChunkReplicationFillRecords fill_records = 16;
+     */
+    value: ChunkReplicationFillRecords;
+    case: "fillRecords";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.ChunkReplicationFillComplete fill_complete = 17;
+     */
+    value: ChunkReplicationFillComplete;
+    case: "fillComplete";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<ChunkReplicationCommand>) {
@@ -1195,6 +1213,8 @@ export class ChunkReplicationCommand extends Message<ChunkReplicationCommand> {
     { no: 13, name: "import_begin", kind: "message", T: ChunkReplicationImportBegin, oneof: "command" },
     { no: 14, name: "import_records", kind: "message", T: ChunkReplicationImportRecords, oneof: "command" },
     { no: 15, name: "import_commit", kind: "message", T: ChunkReplicationImportCommit, oneof: "command" },
+    { no: 16, name: "fill_records", kind: "message", T: ChunkReplicationFillRecords, oneof: "command" },
+    { no: 17, name: "fill_complete", kind: "message", T: ChunkReplicationFillComplete, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkReplicationCommand {
@@ -1627,6 +1647,254 @@ export class RequestReplicaCatchupResponse extends Message<RequestReplicaCatchup
 
   static equals(a: RequestReplicaCatchupResponse | PlainMessage<RequestReplicaCatchupResponse> | undefined, b: RequestReplicaCatchupResponse | PlainMessage<RequestReplicaCatchupResponse> | undefined): boolean {
     return proto3.util.equals(RequestReplicaCatchupResponse, a, b);
+  }
+}
+
+/**
+ * PullRecordsRequest is sent puller → source (S). Asks S to push the
+ * records matching the given EventIDs from S's local copy of the named
+ * chunk back over the existing per-vault chunk-replication stream via
+ * ChunkReplicationFillRecords frames. Unary ack-style — flow shape
+ * mirrors RequestReplicaCatchupRequest but at EventID granularity
+ * instead of chunk granularity. See docs/pull-records-design.md and
+ * gastrolog-4t3y4.
+ *
+ * @generated from message gastrolog.v1.PullRecordsRequest
+ */
+export class PullRecordsRequest extends Message<PullRecordsRequest> {
+  /**
+   * @generated from field: bytes vault_id = 1;
+   */
+  vaultId = new Uint8Array(0);
+
+  /**
+   * @generated from field: bytes chunk_id = 2;
+   */
+  chunkId = new Uint8Array(0);
+
+  /**
+   * 32-byte EventIDs (chunk.EventID encoding: IngesterID + NodeID +
+   * IngestTS + IngestSeq packed). The source filters its local chunk
+   * by this set and pushes matching records back asynchronously.
+   *
+   * @generated from field: repeated bytes event_ids = 3;
+   */
+  eventIds: Uint8Array[] = [];
+
+  /**
+   * utf-8 node ID of the requester. Source validates authorization and
+   * selects the appropriate outbound chunk-replication stream to push
+   * fills on.
+   *
+   * @generated from field: bytes requester_node_id = 4;
+   */
+  requesterNodeId = new Uint8Array(0);
+
+  constructor(data?: PartialMessage<PullRecordsRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PullRecordsRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 3, name: "event_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 4, name: "requester_node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PullRecordsRequest {
+    return new PullRecordsRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PullRecordsRequest {
+    return new PullRecordsRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PullRecordsRequest {
+    return new PullRecordsRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PullRecordsRequest | PlainMessage<PullRecordsRequest> | undefined, b: PullRecordsRequest | PlainMessage<PullRecordsRequest> | undefined): boolean {
+    return proto3.util.equals(PullRecordsRequest, a, b);
+  }
+}
+
+/**
+ * PullRecordsResponse acknowledges receipt of the pull request. The
+ * source pushes the actual records asynchronously via FillRecords
+ * frames, so success here means "request accepted, fills scheduled" —
+ * not "all records delivered". scheduled + missing = len(event_ids)
+ * of the request.
+ *
+ * @generated from message gastrolog.v1.PullRecordsResponse
+ */
+export class PullRecordsResponse extends Message<PullRecordsResponse> {
+  /**
+   * EventIDs the source has locally and will push
+   *
+   * @generated from field: uint32 scheduled = 1;
+   */
+  scheduled = 0;
+
+  /**
+   * EventIDs the source does NOT have locally;
+   *
+   * @generated from field: uint32 missing = 2;
+   */
+  missing = 0;
+
+  constructor(data?: PartialMessage<PullRecordsResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PullRecordsResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "scheduled", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 2, name: "missing", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PullRecordsResponse {
+    return new PullRecordsResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PullRecordsResponse {
+    return new PullRecordsResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PullRecordsResponse {
+    return new PullRecordsResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PullRecordsResponse | PlainMessage<PullRecordsResponse> | undefined, b: PullRecordsResponse | PlainMessage<PullRecordsResponse> | undefined): boolean {
+    return proto3.util.equals(PullRecordsResponse, a, b);
+  }
+}
+
+/**
+ * ChunkReplicationFillRecords carries one bounded batch of records for
+ * a pull-by-EventID sequence (gastrolog-4t3y4). Pushed source → puller
+ * over the existing per-vault chunk-replication stream. Receiver
+ * dispatches by the local chunk's lifecycle state:
+ *   - Active/Sealing locally → standard append path
+ *   - Sealed-not-reconciled locally → SealedRepairer write path
+ *   - Sealed-and-reconciled locally → reject (already converged)
+ *   - Not present locally → reject (placement-state divergence)
+ * Frame size capped by importRecordsMaxBytes / importRecordsMaxRecords
+ * (same limits as ChunkReplicationImportRecords).
+ *
+ * @generated from message gastrolog.v1.ChunkReplicationFillRecords
+ */
+export class ChunkReplicationFillRecords extends Message<ChunkReplicationFillRecords> {
+  /**
+   * @generated from field: bytes chunk_id = 1;
+   */
+  chunkId = new Uint8Array(0);
+
+  /**
+   * @generated from field: repeated gastrolog.v1.ExportRecord records = 2;
+   */
+  records: ExportRecord[] = [];
+
+  /**
+   * Set true on the final frame for this PullRecordsRequest. Receiver
+   * fires CmdAckPull when last_batch=true AND all expected records
+   * (per PullRecordsResponse.scheduled) have landed.
+   *
+   * @generated from field: bool last_batch = 3;
+   */
+  lastBatch = false;
+
+  constructor(data?: PartialMessage<ChunkReplicationFillRecords>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ChunkReplicationFillRecords";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "records", kind: "message", T: ExportRecord, repeated: true },
+    { no: 3, name: "last_batch", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkReplicationFillRecords {
+    return new ChunkReplicationFillRecords().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ChunkReplicationFillRecords {
+    return new ChunkReplicationFillRecords().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ChunkReplicationFillRecords {
+    return new ChunkReplicationFillRecords().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ChunkReplicationFillRecords | PlainMessage<ChunkReplicationFillRecords> | undefined, b: ChunkReplicationFillRecords | PlainMessage<ChunkReplicationFillRecords> | undefined): boolean {
+    return proto3.util.equals(ChunkReplicationFillRecords, a, b);
+  }
+}
+
+/**
+ * ChunkReplicationFillComplete defensively signals end-of-stream for a
+ * pull sequence. Sent source → puller when the source either (a) had
+ * no local records matching the requested EventIDs (records_sent = 0,
+ * no FillRecords frames were sent), or (b) aborted mid-stream due to
+ * an error. Without this, the puller can't distinguish "source still
+ * working on it" from "source done, had nothing".
+ *
+ * @generated from message gastrolog.v1.ChunkReplicationFillComplete
+ */
+export class ChunkReplicationFillComplete extends Message<ChunkReplicationFillComplete> {
+  /**
+   * @generated from field: bytes chunk_id = 1;
+   */
+  chunkId = new Uint8Array(0);
+
+  /**
+   * total FillRecords records pushed in this sequence
+   *
+   * @generated from field: uint32 records_sent = 2;
+   */
+  recordsSent = 0;
+
+  /**
+   * non-empty if source aborted mid-stream
+   *
+   * @generated from field: string error = 3;
+   */
+  error = "";
+
+  constructor(data?: PartialMessage<ChunkReplicationFillComplete>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ChunkReplicationFillComplete";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "records_sent", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 3, name: "error", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkReplicationFillComplete {
+    return new ChunkReplicationFillComplete().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ChunkReplicationFillComplete {
+    return new ChunkReplicationFillComplete().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ChunkReplicationFillComplete {
+    return new ChunkReplicationFillComplete().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ChunkReplicationFillComplete | PlainMessage<ChunkReplicationFillComplete> | undefined, b: ChunkReplicationFillComplete | PlainMessage<ChunkReplicationFillComplete> | undefined): boolean {
+    return proto3.util.equals(ChunkReplicationFillComplete, a, b);
   }
 }
 
