@@ -260,12 +260,20 @@ func (o *Orchestrator) buildFanOutTask(vaultID glid.GLID, chunkID chunk.ChunkID,
 		return nil
 	}
 	snapshot := append([]string(nil), placement.Receiving...)
-	// Default to Full policy. VaultConfig.WOfN lookup lives at a
-	// higher layer (cfgStore on the QueryServer side) and isn't
-	// threaded into the orchestrator yet — TODO under
-	// gastrolog-nd6sz follow-up. Full = wait-for-all, the
-	// highest-durability tier.
-	w, err := system.WOfNPolicyFull.Resolve(len(snapshot))
+	// Resolve the W-of-N policy from the vault config snapshot stamped
+	// on the local VaultInstance at build time. Falls back to Full when
+	// the vault doesn't have a local instance on this node (rare:
+	// pure-cross-node fan-out from a non-placement member) or the
+	// snapshot is the zero value — Full is the safe default since it
+	// preserves the pre-4xdvm behaviour. See gastrolog-4xdvm.
+	//
+	// Caller holds o.mu.RLock per this function's contract, so we read
+	// o.vaults directly without re-locking.
+	policy := system.WOfNPolicyFull
+	if v := o.vaults[vaultID]; v != nil && v.Instance != nil && v.Instance.WOfN != "" {
+		policy = v.Instance.WOfN
+	}
+	w, err := policy.Resolve(len(snapshot))
 	if err != nil {
 		o.logger.Warn("fan-out: WOfN resolve failed", "vault", vaultID, "error", err)
 		return nil

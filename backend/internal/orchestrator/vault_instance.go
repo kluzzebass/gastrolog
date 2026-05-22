@@ -39,6 +39,14 @@ type VaultInstance struct {
 	PrimaryPlacementNodeID string
 	PeerPlacementTargets   []system.ReplicationTarget
 
+	// WOfN is the per-vault W-of-N durability policy snapshot at
+	// instance build time. Read by buildFanOutTask to resolve W against
+	// the active chunk's Receiving size on each record. Mirrored from
+	// VaultConfig.WOfN; refreshed on placement-reconfig events. Zero
+	// value (WOfNPolicy("")) resolves to "full" via the policy's own
+	// Resolve fallback. See gastrolog-4xdvm.
+	WOfN system.WOfNPolicy
+
 	// HasRaftLeader returns true if the vault control-plane Raft group has an elected leader (cluster mode).
 	// Nil when no Raft group exists (single-node / memory mode).
 	HasRaftLeader func() bool

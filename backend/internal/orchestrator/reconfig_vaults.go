@@ -875,6 +875,7 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 		Chunks:  cm,
 		Indexes: im,
 		Query:   qe,
+		WOfN:    vaultCfg.WOfN,
 	}
 	ti.applyRaftCallbacks(raftCB)
 	o.attachLifecycleReconciler(ti, vaultCfg.ID, vaultGroup)
@@ -987,6 +988,7 @@ func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg syst
 		Chunks:  cm,
 		Indexes: im,
 		Query:   qe,
+		WOfN:    vaultCfg.WOfN,
 	}
 	ti.applyRaftCallbacks(raftCB)
 	o.attachLifecycleReconciler(ti, vaultCfg.ID, vaultGroup)
