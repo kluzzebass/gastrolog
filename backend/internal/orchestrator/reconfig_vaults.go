@@ -1423,6 +1423,8 @@ func wireVaultFSMOnDelete(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 			}()
 		}
 	})
+
+	wirePlacementCallbacks(fsm, vaultID, o, logger)
 	silent, ok := cm.(chunk.SilentDeleter)
 	if !ok {
 		return
@@ -1598,6 +1600,56 @@ func (o *Orchestrator) buildVaultRaftMembers(clusterNodes []system.NodeConfig, f
 		}
 	}
 	return members
+}
+
+// wirePlacementCallbacks registers handlers for the five placement-edit
+// callbacks the FSM emits after CmdAddReceiving / CmdRemoveReceiving /
+// CmdAddHolding / CmdBeginHoldingRemoval / CmdAckPull apply. Today the
+// handlers are observational (debug/info log + self-flag); richer
+// behaviors that react to these events (active-chunk catch-up on
+// onAddReceiving, pull scheduling on onBeginHoldingRemoval, finalization
+// on onAckPull) belong to gastrolog-37k2b-d / 37k2b-e once the reconcile
+// machinery lands. See gastrolog-4cxw0.
+func wirePlacementCallbacks(fsm *vaultctlfsm.FSM, vaultID glid.GLID, o *Orchestrator, logger *slog.Logger) {
+	if fsm == nil || o == nil {
+		return
+	}
+	selfNodeID := o.localNodeID
+	fsm.SetOnAddReceiving(func(chunkID chunk.ChunkID, nodeID string) {
+		if logger != nil {
+			logger.Debug("FSM onAddReceiving",
+				"vault", vaultID, "chunk", chunkID, "node", nodeID,
+				"self", nodeID == selfNodeID)
+		}
+	})
+	fsm.SetOnRemoveReceiving(func(chunkID chunk.ChunkID, nodeID string) {
+		if logger != nil {
+			logger.Debug("FSM onRemoveReceiving",
+				"vault", vaultID, "chunk", chunkID, "node", nodeID,
+				"self", nodeID == selfNodeID)
+		}
+	})
+	fsm.SetOnAddHolding(func(chunkID chunk.ChunkID, nodeID string) {
+		if logger != nil {
+			logger.Debug("FSM onAddHolding",
+				"vault", vaultID, "chunk", chunkID, "node", nodeID,
+				"self", nodeID == selfNodeID)
+		}
+	})
+	fsm.SetOnBeginHoldingRemoval(func(chunkID chunk.ChunkID, nodeID string) {
+		if logger != nil {
+			logger.Info("FSM onBeginHoldingRemoval",
+				"vault", vaultID, "chunk", chunkID, "node", nodeID,
+				"self", nodeID == selfNodeID)
+		}
+	})
+	fsm.SetOnAckPull(func(chunkID chunk.ChunkID, fromNode, toNode string, finalized bool) {
+		if logger != nil {
+			logger.Debug("FSM onAckPull",
+				"vault", vaultID, "chunk", chunkID,
+				"from", fromNode, "to", toNode, "finalized", finalized)
+		}
+	})
 }
 
 func mapVaultTypeToFactory(t system.VaultType) string {

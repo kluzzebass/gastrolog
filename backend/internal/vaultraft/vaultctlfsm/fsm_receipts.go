@@ -148,6 +148,20 @@ func (f *FSM) ChunkResidency(chunkID chunk.ChunkID, placementNodeIDs []string) [
 		}
 		return out
 	}
+	// Under fan-out (gastrolog-4cxw0) residency reads directly from the
+	// chunk's per-FSM Holding set when one exists. Pre-fan-out residency
+	// fell back to the caller-supplied placementNodeIDs (i.e., "every
+	// node with a placement for this vault"); under fan-out the Holding
+	// set is the authoritative answer (`Holding ⊇ Receiving` by
+	// invariant; nodes leave Holding only after PendingPulls confirms
+	// peers have their records). Falls back to the placement list when
+	// the chunk has no placement entry yet (single-node mode, memory
+	// vaults, chunks created before the FSM placement work landed).
+	if p, ok := f.placements[chunkID]; ok && len(p.Holding) > 0 {
+		out := make([]string, len(p.Holding))
+		copy(out, p.Holding)
+		return out
+	}
 	if len(placementNodeIDs) == 0 {
 		return nil
 	}
