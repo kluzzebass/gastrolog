@@ -308,6 +308,18 @@ The dedup substrate is already in place — `dedupWindow` is keyed on `chunk.Eve
 - **Per-vault read-consistency tier.** Operator picks "strong (fan-out)" or "best-effort (single replica)" per vault.
 - **Sample-and-merge.** First response answers fast; remaining replicas merge in for completeness. Latency stays low; bandwidth stays high; completeness opt-in.
 
+### Divergence tolerance: contracts that survive the pre-reconcile window
+
+Reconcile ([gastrolog-37k2b](dcat://gastrolog-37k2b)) eventually makes sealed-chunk record sets converge across replicas, but there's always an in-between period — between a record's W-of-N ack landing and reconcile firing — where a Receiver's local `idx.log` can hold fewer records than `meta.RecordCount` (which the FSM stamps to the proposer's count). The read path crosses this window on every query; the cursor contract has to tolerate it without crashing.
+
+The contracts:
+
+- **Cursor `Seek(Pos)` clamps to the cursor's actual record count.** All four `chunk.RecordCursor` implementations (mmap, stdio, GLCB, memory) silently bound an over-large `Pos` argument to their local end. `Prev()` from a clamped `revIndex` returns local data; `Next()` from a clamped `fwdIndex` returns `ErrNoMoreRecords` immediately. Callers like reverse-mode search at [`positionCursor`](backend/internal/orchestrator/query/query.go) Seek to `meta.RecordCount` and trust the cursor to behave; without clamping they'd compute positions past the local mmap end and surface `ErrInvalidRecordIdx`.
+- **Read paths must tolerate early `ErrNoMoreRecords`.** Code computing positions from `meta.RecordCount` (`positionCursor`, `query/context.go`'s chunk walk) must accept that the cursor may terminate before reaching the FSM-stamped count. The defensive shape is fan-out + dedup at the merge layer, which is already in place for active chunks and is the de-facto fallback for sealed chunks until [gastrolog-4m68m](dcat://gastrolog-4m68m)'s reconcile-completion signal lands.
+- **The contract is permanent, not transitional.** Even after reconcile lands, the cursor-clamp contract should stay. It covers transient cases like a chunk being mid-pull when a query arrives, a node recovering from disk corruption that lost records, etc. Divergence tolerance is a permanent property of distributed storage, not a migration-period workaround.
+
+The cursor-clamp implementation landed under [gastrolog-hshgl](dcat://gastrolog-hshgl) (cluster-test fixes). Read-path callers should NOT add their own bounds-checking against `meta.RecordCount` — the cursor is the single source of truth for "what I can serve."
+
 ## Vault-ctl FSM substrate (reference)
 
 The fan-out epic builds directly on the existing vault-ctl Raft FSM. This section captures what already exists so future work doesn't reinvent it.
