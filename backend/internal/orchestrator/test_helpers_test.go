@@ -473,6 +473,12 @@ func (d *directChunkReplicator) RequestReplicaCatchup(ctx context.Context, leade
 	}
 	return orch.CatchupSelectedChunks(ctx, vaultID, requesterNodeID, chunkIDs)
 }
+func (d *directChunkReplicator) SendFillRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record, _ bool) error {
+	return nil
+}
+func (d *directChunkReplicator) SendFillComplete(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ uint32, _ string) error {
+	return nil
+}
 
 // newClusterRetentionRunner creates a retention runner with follower targets
 // for proper cross-node delete forwarding.

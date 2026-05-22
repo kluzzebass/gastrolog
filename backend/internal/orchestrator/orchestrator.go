@@ -136,6 +136,18 @@ type ChunkReplicator interface {
 	// existing replicateToFollower machinery. Returns the count of
 	// pushes scheduled (after leader-side filtering). See gastrolog-2dgvj.
 	RequestReplicaCatchup(ctx context.Context, leaderNodeID string, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error)
+
+	// SendFillRecords pushes a batch of records to the puller as part of a
+	// pull-by-EventID fill sequence (gastrolog-4t3y4). Sent source → puller
+	// over the existing per-vault chunk-replication stream. lastBatch=true
+	// on the final frame triggers the puller's CmdAckPull dispatch (wiring
+	// in gastrolog-37k2b-e).
+	SendFillRecords(ctx context.Context, pullerNodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record, lastBatch bool) error
+
+	// SendFillComplete signals end-of-stream for a fill sequence. Used when
+	// the source had no matching records (recordsSent=0) or aborted mid-
+	// stream (errMsg non-empty). See gastrolog-4t3y4.
+	SendFillComplete(ctx context.Context, pullerNodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, recordsSent uint32, errMsg string) error
 }
 
 // RemoteTransferrer sends records to a remote node for cross-node chunk

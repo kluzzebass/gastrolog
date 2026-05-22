@@ -57,6 +57,12 @@ func (c *captureCatchupReplicator) RequestReplicaCatchup(_ context.Context, lead
 	}
 	return c.scheduledRet, nil
 }
+func (c *captureCatchupReplicator) SendFillRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record, _ bool) error {
+	return nil
+}
+func (c *captureCatchupReplicator) SendFillComplete(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ uint32, _ string) error {
+	return nil
+}
 
 // gastrolog-51gme step 4 — receipt protocol integration via reconciler.
 

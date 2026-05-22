@@ -38,6 +38,12 @@ func (m *slowAckReplicator) DeleteChunk(_ context.Context, _ string, _ glid.GLID
 func (m *slowAckReplicator) RequestReplicaCatchup(_ context.Context, _ string, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {
 	return 0, nil
 }
+func (m *slowAckReplicator) SendFillRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record, _ bool) error {
+	return nil
+}
+func (m *slowAckReplicator) SendFillComplete(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ uint32, _ string) error {
+	return nil
+}
 
 // TestStopWaitsForAckGoroutines verifies that Stop() blocks until all
 // in-flight ack-gated replication goroutines have completed.

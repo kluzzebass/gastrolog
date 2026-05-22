@@ -39,6 +39,12 @@ func (r *recordingChunkReplicator) DeleteChunk(_ context.Context, _ string, _ gl
 func (r *recordingChunkReplicator) RequestReplicaCatchup(_ context.Context, _ string, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {
 	return 0, nil
 }
+func (r *recordingChunkReplicator) SendFillRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record, _ bool) error {
+	return nil
+}
+func (r *recordingChunkReplicator) SendFillComplete(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ uint32, _ string) error {
+	return nil
+}
 
 // TestFireAndForgetRemoteSkipsDuringShutdown is the regression test for the
 // orchestrator half of gastrolog-1e5ke. Before the fix, the orchestrator's
