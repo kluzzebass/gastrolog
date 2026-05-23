@@ -45,6 +45,13 @@ func (f *VaultApplyForwarder) Apply(data []byte) error {
 		}
 		return err
 	}
+	// FSM-returned errors come through future.Response(), not .Error().
+	// See gastrolog-3sr88 for the full diagnosis.
+	if resp := future.Response(); resp != nil {
+		if err, ok := resp.(error); ok {
+			return err
+		}
+	}
 	return nil
 }
 

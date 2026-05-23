@@ -29,7 +29,18 @@ func (o *Orchestrator) ApplyVaultControlPlane(vaultID glid.GLID, data []byte) er
 		return fmt.Errorf("vault control-plane raft group %q not running on this node", gid)
 	}
 	if o.peerConns == nil {
-		return g.Raft.Apply(data, cluster.ReplicationTimeout).Error()
+		future := g.Raft.Apply(data, cluster.ReplicationTimeout)
+		if err := future.Error(); err != nil {
+			return err
+		}
+		// FSM-returned errors come through future.Response(); .Error()
+		// only catches Raft-level failures. See gastrolog-3sr88.
+		if resp := future.Response(); resp != nil {
+			if err, ok := resp.(error); ok {
+				return err
+			}
+		}
+		return nil
 	}
 	fwd := cluster.NewVaultApplyForwarder(g.Raft, gid, o.peerConns, cluster.ReplicationTimeout)
 	return fwd.Apply(data)

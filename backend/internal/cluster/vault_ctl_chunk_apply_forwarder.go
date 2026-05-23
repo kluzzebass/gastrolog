@@ -55,6 +55,17 @@ func (f *VaultCtlChunkApplyForwarder) Apply(data []byte) error {
 		}
 		return err
 	}
+	// FSM-returned errors come through future.Response(), not .Error()
+	// (which catches only Raft-level failures). Without this check, the
+	// vault-ctl FSM's rejection of e.g. CmdCreateChunk against an
+	// existing Active (vaultctlfsm.ErrActiveChunkExists) was silently
+	// dropped and the caller treated every proposal as successful. See
+	// gastrolog-3sr88.
+	if resp := future.Response(); resp != nil {
+		if err, ok := resp.(error); ok {
+			return err
+		}
+	}
 	return nil
 }
 

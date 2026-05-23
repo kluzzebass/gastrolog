@@ -1530,7 +1530,22 @@ func wireClusterRaftApplies(clusterSrv *cluster.Server, groupMgr *raftgroup.Grou
 		if g == nil {
 			return fmt.Errorf("raft group %s not found", groupID)
 		}
-		return g.Raft.Apply(data, cluster.ReplicationTimeout).Error()
+		future := g.Raft.Apply(data, cluster.ReplicationTimeout)
+		if err := future.Error(); err != nil {
+			return err
+		}
+		// FSM-returned errors arrive via future.Response(), not .Error()
+		// (.Error() catches only Raft-level failures like timeout /
+		// not-leader). Without this, vault-ctl FSM rejections like
+		// vaultctlfsm.ErrActiveChunkExists are silently dropped — every
+		// proposal looks like it succeeded even when the FSM rejected
+		// it. See gastrolog-3sr88.
+		if resp := future.Response(); resp != nil {
+			if err, ok := resp.(error); ok {
+				return err
+			}
+		}
+		return nil
 	}
 	clusterSrv.SetGroupApplyFn(fn)
 }
