@@ -160,6 +160,19 @@ func (o *Orchestrator) applyRotationFromConfig(sys *system.System,
 	}
 	vaultInst.PeerPlacementTargets = newTargets
 
+	// Refresh the fan-out Receiving snapshots from current placements +
+	// NSCs. Both Manager.fanOutReceiving (deferred AnnounceCreateWithReceiving
+	// path) and rotationCoordinator.c.receiving (CmdCreateChunk Raft
+	// payload) are otherwise pinned at instance-build time, so an NSC
+	// that hadn't replicated yet at build would pin every new chunk's
+	// FSM placement.Holding to an incomplete node set forever. See
+	// gastrolog-2oav7.
+	applyFanOutConfig(vaultInst.Chunks, vaultCfg, vaultCfg.Placements, sys.Runtime.NodeStorageConfigs)
+	if vaultInst.RotationCoordinator != nil {
+		vaultInst.RotationCoordinator.SetReceiving(
+			system.PlacementNodeIDs(vaultCfg.Placements, sys.Runtime.NodeStorageConfigs))
+	}
+
 	if vaultCfg.RotationPolicyID == nil {
 		return
 	}

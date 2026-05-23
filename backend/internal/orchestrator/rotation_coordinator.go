@@ -181,20 +181,19 @@ func receivingFromPlacement(nodeIDs []string) []string {
 // wireRotationCoordinator builds a rotationCoordinator for the given
 // vault and injects it into the chunk manager via the optional
 // chunk.RotationCoordinatorSetter interface. Called from
-// buildVaultInstance immediately after applyFanOutConfig.
+// buildVaultInstance immediately after applyFanOutConfig. Also stashes
+// the coordinator on vaultInst.RotationCoordinator so the rotationSweep
+// can later refresh its Receiving snapshot from current cluster state
+// (placements + nscs change without an instance rebuild). See
+// gastrolog-2oav7.
 //
 // Skipped silently when:
 //   - The chunk manager doesn't implement RotationCoordinatorSetter
 //     (memory / jsonl managers — no cross-replica state to align).
 //   - No vault-ctl Raft group exists for this vault (single-node
 //     setups, or test harnesses without a GroupManager).
-//
-// The coordinator captures references to the FSM + applier at build
-// time. Subsequent placement edits should call SetReceiving on the
-// coordinator (looked up via the chunk manager's getter — Phase 6 of
-// gastrolog-3yre7) to keep the snapshot fresh.
-func (o *Orchestrator) wireRotationCoordinator(cm chunk.ChunkManager, vaultID glid.GLID, placements []system.VaultPlacement, nscs []system.NodeStorageConfig, factories Factories) {
-	setter, ok := cm.(chunk.RotationCoordinatorSetter)
+func (o *Orchestrator) wireRotationCoordinator(vaultInst *VaultInstance, vaultID glid.GLID, placements []system.VaultPlacement, nscs []system.NodeStorageConfig, factories Factories) {
+	setter, ok := vaultInst.Chunks.(chunk.RotationCoordinatorSetter)
 	if !ok {
 		return
 	}
@@ -216,17 +215,11 @@ func (o *Orchestrator) wireRotationCoordinator(cm chunk.ChunkManager, vaultID gl
 	}
 
 	applier := vaultctlfsm.Applier(&vaultCtlApplier{o: o, vaultID: vaultID})
-
-	receiving := make([]string, 0, len(placements))
-	for _, sid := range system.StorageIDs(placements) {
-		nid := system.NodeIDForStorage(sid, nscs)
-		if nid != "" && !slices.Contains(receiving, nid) {
-			receiving = append(receiving, nid)
-		}
-	}
+	receiving := system.PlacementNodeIDs(placements, nscs)
 
 	coord := newRotationCoordinator(vaultID, applier, fsm, o.now, receiving)
 	setter.SetRotationCoordinator(coord)
+	vaultInst.RotationCoordinator = coord
 }
 
 // wireUploadGate injects a cloud-upload gate that returns true iff

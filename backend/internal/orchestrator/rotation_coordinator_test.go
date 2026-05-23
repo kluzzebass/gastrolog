@@ -170,3 +170,68 @@ func TestRotationCoordinator_PropagatesCreateError(t *testing.T) {
 type alwaysFailApplier struct{ err error }
 
 func (a *alwaysFailApplier) Apply(_ []byte) error { return a.err }
+
+// TestRotationCoordinator_SetReceivingRefreshesNextCreatePayload verifies the
+// fix for gastrolog-2oav7: a coordinator built with a stale (incomplete)
+// receiving snapshot must pick up the refreshed list on the next
+// BeginRotation. Pre-fix, c.receiving was set once at wireRotationCoordinator
+// and never updated, so a node missing from the initial snapshot would be
+// permanently absent from every subsequent CmdCreateChunk's placement.Holding.
+func TestRotationCoordinator_SetReceivingRefreshesNextCreatePayload(t *testing.T) {
+	t.Parallel()
+
+	fsm := vaultctlfsm.New()
+	applier := &captureApplier{fsm: fsm}
+	now := time.Now()
+
+	// Seed an Active chunk so BeginRotation has something to seal.
+	seedID := chunk.NewChunkID()
+	if err := applier.Apply(vaultctlfsm.MarshalCreateChunkWithReceiving(
+		seedID, now, now, now, []string{"node-A", "node-B"})); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// Stale snapshot: two of the three placement nodes (node-C is
+	// missing — simulating an NSC that hadn't replicated yet at
+	// instance-build time).
+	coord := newRotationCoordinator(glid.New(), applier, fsm,
+		func() time.Time { return now }, []string{"node-A", "node-B"})
+
+	firstID, err := coord.BeginRotation(seedID)
+	if err != nil {
+		t.Fatalf("first BeginRotation: %v", err)
+	}
+	if p := fsm.Placement(firstID); p == nil {
+		t.Fatal("first chunk has no placement entry")
+	} else if len(p.Receiving) != 2 {
+		t.Errorf("first chunk Receiving = %v, want 2 nodes (stale snapshot reproduces bug)", p.Receiving)
+	}
+
+	// Operator/sweep refreshes the snapshot — node-C joins the placement.
+	coord.SetReceiving([]string{"node-A", "node-B", "node-C"})
+
+	secondID, err := coord.BeginRotation(firstID)
+	if err != nil {
+		t.Fatalf("second BeginRotation: %v", err)
+	}
+	p := fsm.Placement(secondID)
+	if p == nil {
+		t.Fatal("second chunk has no placement entry")
+	}
+	if len(p.Receiving) != 3 {
+		t.Errorf("second chunk Receiving = %v, want 3 nodes (refresh didn't take effect)", p.Receiving)
+	}
+	if len(p.Holding) != 3 {
+		t.Errorf("second chunk Holding = %v, want 3 nodes (Holding should mirror Receiving at create time)", p.Holding)
+	}
+	wantSet := map[string]bool{"node-A": true, "node-B": true, "node-C": true}
+	for _, n := range p.Receiving {
+		if !wantSet[n] {
+			t.Errorf("unexpected node %q in Receiving", n)
+		}
+		delete(wantSet, n)
+	}
+	if len(wantSet) > 0 {
+		t.Errorf("missing nodes after refresh: %v", wantSet)
+	}
+}
