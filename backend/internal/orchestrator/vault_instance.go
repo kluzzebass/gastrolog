@@ -105,6 +105,16 @@ type VaultInstance struct {
 	// (no FSM, no replication).
 	Reconciler *VaultLifecycleReconciler
 
+	// RotationCoordinator is the FSM-mediated rotation coordinator wired
+	// into Chunks at instance build via wireRotationCoordinator. Exposed
+	// on the instance so rotationSweep can refresh the cached Receiving
+	// snapshot when placements or NSCs change; without that refresh, a
+	// stale snapshot captured at build time would pin every new chunk's
+	// FSM placement.Holding to an incomplete node set. Nil when there's
+	// no chunk.RotationCoordinatorSetter (memory/jsonl) or no
+	// GroupManager (single-node / test harnesses). See gastrolog-2oav7.
+	RotationCoordinator *rotationCoordinator
+
 	// ListManifest returns all chunk IDs in the vault-ctl FSM view — the authoritative
 	// set of chunks that should exist. Nil when no Raft group exists.
 	ListManifest func() []chunk.ChunkID

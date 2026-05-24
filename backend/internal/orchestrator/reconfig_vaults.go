@@ -565,7 +565,7 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 			// policy lands via applyRotationPolicy inside
 			// buildInstanceForStorage like every other instance.
 			applyFanOutConfig(t.Chunks, *vaultCfg, placements, nscs)
-			o.wireRotationCoordinator(t.Chunks, vaultCfg.ID, placements, nscs, factories)
+			o.wireRotationCoordinator(t, vaultCfg.ID, placements, nscs, factories)
 			o.wireUploadGate(t.Chunks, vaultCfg.ID, factories)
 			ti = t
 			break
@@ -700,7 +700,7 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 		// IDs across replicas (gastrolog-3yre7). The upload gate
 		// keeps cloud writes single-uploader by routing the push
 		// through the current vault-ctl Raft leader (gastrolog-4t3rs).
-		o.wireRotationCoordinator(ti.Chunks, vaultCfg.ID, placements, nscs, factories)
+		o.wireRotationCoordinator(ti, vaultCfg.ID, placements, nscs, factories)
 		o.wireUploadGate(ti.Chunks, vaultCfg.ID, factories)
 		return ti, nil
 	}
@@ -723,7 +723,7 @@ func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.Va
 		// The upload gate keeps cloud writes single-uploader
 		// (gastrolog-4t3rs).
 		applyFanOutConfig(sti.Chunks, vaultCfg, placements, nscs)
-		o.wireRotationCoordinator(sti.Chunks, vaultCfg.ID, placements, nscs, factories)
+		o.wireRotationCoordinator(sti, vaultCfg.ID, placements, nscs, factories)
 		o.wireUploadGate(sti.Chunks, vaultCfg.ID, factories)
 		return sti, nil
 	}
