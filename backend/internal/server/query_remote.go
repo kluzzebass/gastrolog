@@ -220,6 +220,57 @@ func mergeHistogramBuckets(a, b []*apiv1.HistogramBucket) []*apiv1.HistogramBuck
 	return a
 }
 
+// normalizeHistogramGroupCounts forces every bucket's per-level GroupCounts to
+// sum to that bucket's authoritative Count. The Count is rank-arithmetic over
+// the deduplicated chunk set (and matches `| stats count`); the level
+// breakdown is a sampled estimate produced by a parallel path that does NOT
+// share the record stream's cross-vault/cross-replica dedup, so summing
+// per-source breakdowns at the merge boundary can overshoot Count (the
+// inspector "spike" bug — the volume bar is a stack of GroupCounts, so an
+// overshoot renders as a too-tall bar). Re-projecting the breakdown onto the
+// authoritative Count makes the bar height honest while preserving the
+// sampled level *proportions*. Applied once, on the coordinator, after the
+// cross-node + cross-vault merge — the single point where Count is final.
+//
+// Buckets where the breakdown already sums to Count are untouched (the common
+// case). A bucket with Count > 0 but no breakdown at all is left alone: the
+// caller's downstream "other" handling owns that case.
+func normalizeHistogramGroupCounts(buckets []*apiv1.HistogramBucket) {
+	for _, b := range buckets {
+		if b == nil || b.Count <= 0 || len(b.GroupCounts) == 0 {
+			continue
+		}
+		var sum int64
+		for _, v := range b.GroupCounts {
+			sum += v
+		}
+		if sum == b.Count || sum <= 0 {
+			continue
+		}
+		// Scale each level proportionally to the authoritative Count.
+		// Integer division drops fractional remainder; assign the leftover
+		// to the largest level so the rendered segments sum to exactly Count
+		// (no thin sliver bar, no overshoot).
+		scaled := make(map[string]int64, len(b.GroupCounts))
+		var assigned int64
+		var largestKey string
+		var largestVal int64
+		for k, v := range b.GroupCounts {
+			s := v * b.Count / sum
+			scaled[k] = s
+			assigned += s
+			if v > largestVal {
+				largestVal = v
+				largestKey = k
+			}
+		}
+		if rem := b.Count - assigned; rem != 0 && largestKey != "" {
+			scaled[largestKey] += rem
+		}
+		b.GroupCounts = scaled
+	}
+}
+
 // HistogramToProto converts internal histogram buckets to the proto type.
 func HistogramToProto(buckets []query.HistogramBucket) []*apiv1.HistogramBucket {
 	if len(buckets) == 0 {

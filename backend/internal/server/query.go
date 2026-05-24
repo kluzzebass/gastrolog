@@ -202,6 +202,11 @@ func (s *QueryServer) searchDirect(
 		// this node's data; remoteHist already covers every peer.
 		localHist := HistogramToProto(eng.ComputeHistogram(ctx, histogramQ, 50))
 		histogram = mergeHistogramBuckets(localHist, remoteHist)
+		// Re-project the sampled level breakdown onto the authoritative
+		// (deduped) per-bucket Count so the stacked volume bar can't
+		// overshoot the true record count. See gastrolog-2oav7 follow-up /
+		// normalizeHistogramGroupCounts.
+		normalizeHistogramGroupCounts(histogram)
 	}
 
 	localIter, getLocalToken := eng.Search(ctx, q, localResume)
