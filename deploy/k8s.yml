@@ -285,6 +285,7 @@ spec:
 # disruptions only (operator-initiated drains, rolling restarts);
 # involuntary loss — node crash, network partition — is governed
 # by the cluster's own quorum semantics.
+---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
