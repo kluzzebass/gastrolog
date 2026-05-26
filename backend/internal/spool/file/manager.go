@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -19,10 +20,11 @@ import (
 const lockFileName = ".spool.lock"
 
 var (
-	ErrVaultSeqRequired   = errors.New("spool: record missing vault_seq")
-	ErrSegmentSealed      = errors.New("spool: segment is sealed")
-	ErrNoActiveSegment    = errors.New("spool: no active segment")
-	ErrActiveSegmentEmpty = errors.New("spool: active segment empty")
+	ErrVaultSeqRequired = errors.New("spool: record missing vault_seq")
+	ErrWindowNotFound   = errors.New("spool: no window covers vault_seq")
+	ErrSeqOutOfWindow   = errors.New("spool: vault_seq outside window bounds")
+	ErrWindowSealed     = errors.New("spool: window is sealed")
+	ErrWindowEmpty      = errors.New("spool: window empty")
 )
 
 // Config configures a file-backed spool manager root directory.
@@ -31,30 +33,30 @@ type Config struct {
 	FileMode os.FileMode
 }
 
-// Manager stores spool segments on disk under Config.Dir.
+// Manager stores spool windows on disk under Config.Dir.
 type Manager struct {
 	cfg               Config
 	mu                sync.Mutex
 	lock              *os.File
-	byID              map[spool.SegmentID]*Segment
-	active            spool.SegmentID
+	windows           map[spool.WindowID]*window
 	reclaimThroughSeq uint64
 }
 
-type segmentFiles struct {
+type windowFiles struct {
 	raw  *os.File
 	attr *os.File
 	idx  *os.File
 }
 
-// Segment is one first_seq-addressable spool segment directory.
-type Segment struct {
+// window is one allocator-aligned sequence window directory.
+type window struct {
 	dir          string
-	files        segmentFiles
+	id           spool.WindowID
+	files        windowFiles
+	present      map[uint64]struct{}
 	recordCount  uint64
 	rawOffset    uint64
 	attrOffset   uint64
-	firstSeq     uint64
 	lastSeq      uint64
 	sealed       bool
 	createdAt    time.Time
@@ -77,7 +79,7 @@ func NewManager(cfg Config) (*Manager, error) {
 	if err != nil {
 		return nil, fmt.Errorf("spool: open lock: %w", err)
 	}
-	m := &Manager{cfg: cfg, lock: lock, byID: make(map[spool.SegmentID]*Segment)}
+	m := &Manager{cfg: cfg, lock: lock, windows: make(map[spool.WindowID]*window)}
 	if err := m.loadExisting(); err != nil {
 		_ = lock.Close()
 		return nil, err
@@ -89,8 +91,8 @@ func NewManager(cfg Config) (*Manager, error) {
 func (m *Manager) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for _, seg := range m.byID {
-		seg.closeFiles()
+	for _, win := range m.windows {
+		win.closeFiles()
 	}
 	if m.lock != nil {
 		return m.lock.Close()
@@ -107,93 +109,92 @@ func (m *Manager) loadExisting() error {
 		if !ent.IsDir() {
 			continue
 		}
-		id, err := spool.ParseSegmentID(ent.Name())
+		id, err := spool.ParseWindowDirName(ent.Name())
 		if err != nil {
 			continue
 		}
-		seg, err := openSegment(filepath.Join(m.cfg.Dir, ent.Name()), m.cfg.FileMode)
+		win, err := openWindow(filepath.Join(m.cfg.Dir, ent.Name()), id, m.cfg.FileMode)
 		if err != nil {
-			return fmt.Errorf("spool: open segment %s: %w", ent.Name(), err)
+			return fmt.Errorf("spool: open window %s: %w", ent.Name(), err)
 		}
-		if spool.SegmentID(seg.firstSeq) != id {
-			seg.closeFiles()
-			return fmt.Errorf("spool: segment dir %s first_seq mismatch (%d vs %d)", ent.Name(), seg.firstSeq, id)
+		if win.id != id {
+			win.closeFiles()
+			return fmt.Errorf("spool: window dir %s id mismatch", ent.Name())
 		}
-		m.byID[id] = seg
-		if !seg.sealed && (m.active == 0 || id > m.active) {
-			m.active = id
+		m.windows[id] = win
+	}
+	return nil
+}
+
+// EnsureWindow creates a window [start..end] when absent.
+func (m *Manager) EnsureWindow(start, end uint64) error {
+	if start == 0 || end == 0 || start > end {
+		return fmt.Errorf("spool: invalid window bounds %d..%d", start, end)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	id := spool.WindowID{Start: start, End: end}
+	if _, ok := m.windows[id]; ok {
+		return nil
+	}
+	win, err := createWindow(filepath.Join(m.cfg.Dir, id.DirName()), id, m.cfg.FileMode)
+	if err != nil {
+		return err
+	}
+	m.windows[id] = win
+	return nil
+}
+
+// PutSlot durably writes one window slot keyed by rec.VaultSeq.
+func (m *Manager) PutSlot(rec chunk.Record) error {
+	if rec.VaultSeq == 0 {
+		return ErrVaultSeqRequired
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	win := m.windowForSeqLocked(rec.VaultSeq)
+	if win == nil {
+		return fmt.Errorf("%w: seq %d", ErrWindowNotFound, rec.VaultSeq)
+	}
+	if rec.VaultSeq < win.id.Start || rec.VaultSeq > win.id.End {
+		return ErrSeqOutOfWindow
+	}
+	return win.putSlotDurable(rec)
+}
+
+func (m *Manager) windowForSeqLocked(seq uint64) *window {
+	for _, win := range m.windows {
+		if seq >= win.id.Start && seq <= win.id.End {
+			return win
 		}
 	}
 	return nil
 }
 
-// Append appends one record to the active segment (creating it from record.VaultSeq when needed).
-func (m *Manager) Append(rec chunk.Record) (spool.SegmentMeta, error) {
-	if rec.VaultSeq == 0 {
-		return spool.SegmentMeta{}, ErrVaultSeqRequired
-	}
+// SealWindow seals one writable window.
+func (m *Manager) SealWindow(id spool.WindowID) (spool.SegmentMeta, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	seg, err := m.activeSegmentLocked(rec.VaultSeq)
-	if err != nil {
+	win, ok := m.windows[id]
+	if !ok {
+		return spool.SegmentMeta{}, spool.ErrSegmentNotFound
+	}
+	if win.recordCount == 0 {
+		return spool.SegmentMeta{}, ErrWindowEmpty
+	}
+	if err := win.seal(); err != nil {
 		return spool.SegmentMeta{}, err
 	}
-	if err := seg.appendDurable(rec); err != nil {
-		return spool.SegmentMeta{}, err
-	}
-	return seg.meta(), nil
+	return win.meta(), nil
 }
 
-func (m *Manager) activeSegmentLocked(firstSeq uint64) (*Segment, error) {
-	if m.active != 0 {
-		if seg := m.byID[m.active]; seg != nil && !seg.sealed {
-			return seg, nil
-		}
-	}
-	id := spool.SegmentID(firstSeq)
-	if seg := m.byID[id]; seg != nil {
-		if seg.sealed {
-			return nil, ErrSegmentSealed
-		}
-		m.active = id
-		return seg, nil
-	}
-	seg, err := createSegment(filepath.Join(m.cfg.Dir, id.DirName()), firstSeq, m.cfg.FileMode)
-	if err != nil {
-		return nil, err
-	}
-	m.byID[id] = seg
-	m.active = id
-	return seg, nil
-}
-
-// SealActive seals the writable segment.
-func (m *Manager) SealActive() (spool.SegmentMeta, error) {
+// ListWindows returns window metadata sorted by first_seq.
+func (m *Manager) ListWindows() []spool.SegmentMeta {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.active == 0 {
-		return spool.SegmentMeta{}, ErrNoActiveSegment
-	}
-	seg := m.byID[m.active]
-	if seg == nil || seg.recordCount == 0 {
-		return spool.SegmentMeta{}, ErrActiveSegmentEmpty
-	}
-	if err := seg.seal(); err != nil {
-		return spool.SegmentMeta{}, err
-	}
-	meta := seg.meta()
-	m.active = 0
-	return meta, nil
-}
-
-// ListSegments returns segment metadata sorted by first_seq.
-func (m *Manager) ListSegments() []spool.SegmentMeta {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := make([]spool.SegmentMeta, 0, len(m.byID))
-	for _, seg := range m.byID {
-		out = append(out, seg.meta())
+	out := make([]spool.SegmentMeta, 0, len(m.windows))
+	for _, win := range m.windows {
+		out = append(out, win.meta())
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].FirstSeq < out[j].FirstSeq
@@ -201,15 +202,20 @@ func (m *Manager) ListSegments() []spool.SegmentMeta {
 	return out
 }
 
-// Meta returns metadata for one segment.
-func (m *Manager) Meta(id spool.SegmentID) (spool.SegmentMeta, bool) {
+// ListSegments aliases ListWindows for compatibility with existing tests.
+func (m *Manager) ListSegments() []spool.SegmentMeta {
+	return m.ListWindows()
+}
+
+// Meta returns metadata for one window.
+func (m *Manager) Meta(id spool.WindowID) (spool.SegmentMeta, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	seg, ok := m.byID[id]
+	win, ok := m.windows[id]
 	if !ok {
 		return spool.SegmentMeta{}, false
 	}
-	return seg.meta(), true
+	return win.meta(), true
 }
 
 // SetReclaimThroughSeq sets the materialization safety watermark. Segments with
@@ -227,14 +233,14 @@ func (m *Manager) ReclaimThroughSeq() uint64 {
 	return m.reclaimThroughSeq
 }
 
-// ListReclaimable returns sealed segments eligible for reclaim at the current watermark.
+// ListReclaimable returns sealed windows eligible for reclaim at the current watermark.
 func (m *Manager) ListReclaimable() []spool.SegmentMeta {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []spool.SegmentMeta
-	for _, seg := range m.byID {
-		meta := seg.meta()
-		if spool.Reclaimable(meta, m.reclaimThroughSeq, m.active) == nil {
+	for _, win := range m.windows {
+		meta := win.meta()
+		if spool.Reclaimable(meta, m.reclaimThroughSeq, spool.WindowID{}) == nil {
 			out = append(out, meta)
 		}
 	}
@@ -244,41 +250,40 @@ func (m *Manager) ListReclaimable() []spool.SegmentMeta {
 	return out
 }
 
-// Reclaim deletes a sealed segment directory when it is at or below the safety watermark.
-func (m *Manager) Reclaim(id spool.SegmentID) error {
+// Reclaim deletes a sealed window directory when it is at or below the safety watermark.
+func (m *Manager) Reclaim(id spool.WindowID) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	seg, ok := m.byID[id]
+	win, ok := m.windows[id]
 	if !ok {
 		return fmt.Errorf("%w: %s", spool.ErrSegmentNotFound, id.DirName())
 	}
-	meta := seg.meta()
-	if err := spool.Reclaimable(meta, m.reclaimThroughSeq, m.active); err != nil {
+	meta := win.meta()
+	if err := spool.Reclaimable(meta, m.reclaimThroughSeq, spool.WindowID{}); err != nil {
 		return err
 	}
-	dir := seg.dir
-	seg.closeFiles()
+	dir := win.dir
+	win.closeFiles()
 	if err := os.RemoveAll(dir); err != nil {
-		return fmt.Errorf("spool: remove segment %s: %w", id.DirName(), err)
+		return fmt.Errorf("spool: remove window %s: %w", id.DirName(), err)
 	}
-	delete(m.byID, id)
-	if m.active == id {
-		m.active = 0
-	}
+	delete(m.windows, id)
 	return nil
 }
 
-func (s *Segment) meta() spool.SegmentMeta {
+func (w *window) meta() spool.SegmentMeta {
 	return spool.SegmentMeta{
-		ID:          spool.SegmentID(s.firstSeq),
-		FirstSeq:    s.firstSeq,
-		LastSeq:     s.lastSeq,
-		RecordCount: s.recordCount,
-		Sealed:      s.sealed,
+		ID:          spool.SegmentID(w.id.Start),
+		Window:      w.id,
+		FirstSeq:    w.id.Start,
+		EndSeq:      w.id.End,
+		LastSeq:     w.lastSeq,
+		RecordCount: w.recordCount,
+		Sealed:      w.sealed,
 	}
 }
 
-func createSegment(dir string, firstSeq uint64, mode os.FileMode) (*Segment, error) {
+func createWindow(dir string, id spool.WindowID, mode os.FileMode) (*window, error) {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, err
 	}
@@ -298,16 +303,17 @@ func createSegment(dir string, firstSeq uint64, mode os.FileMode) (*Segment, err
 		_ = attr.Close()
 		return nil, err
 	}
-	return &Segment{
+	return &window{
 		dir:       dir,
-		files:     segmentFiles{raw: raw, attr: attr, idx: idx},
-		firstSeq:  firstSeq,
+		id:        id,
+		files:     windowFiles{raw: raw, attr: attr, idx: idx},
+		present:   make(map[uint64]struct{}),
 		createdAt: now,
 		fileMode:  mode,
 	}, nil
 }
 
-func openSegment(dir string, mode os.FileMode) (*Segment, error) {
+func openWindow(dir string, id spool.WindowID, mode os.FileMode) (*window, error) {
 	raw, err := os.OpenFile(filepath.Clean(filepath.Join(dir, "raw.log")), os.O_RDWR, mode)
 	if err != nil {
 		return nil, err
@@ -323,134 +329,159 @@ func openSegment(dir string, mode os.FileMode) (*Segment, error) {
 		_ = attr.Close()
 		return nil, err
 	}
-	seg := &Segment{dir: dir, files: segmentFiles{raw: raw, attr: attr, idx: idx}, fileMode: mode}
-	if err := seg.recover(); err != nil {
-		seg.closeFiles()
+	win := &window{
+		dir:      dir,
+		id:       id,
+		files:    windowFiles{raw: raw, attr: attr, idx: idx},
+		present:  make(map[uint64]struct{}),
+		fileMode: mode,
+	}
+	if err := win.recover(); err != nil {
+		win.closeFiles()
 		return nil, err
 	}
-	return seg, nil
+	return win, nil
 }
 
-func (s *Segment) recover() error {
+func (w *window) recover() error {
 	var headerBuf [spool.IdxHeaderSize]byte
-	if _, err := s.files.idx.ReadAt(headerBuf[:], 0); err != nil {
+	if _, err := w.files.idx.ReadAt(headerBuf[:], 0); err != nil {
 		return fmt.Errorf("read idx header: %w", err)
 	}
 	h, err := format.DecodeAndValidate(headerBuf[:format.HeaderSize], format.TypeIdxLog, chunkfile.IdxLogVersion)
 	if err != nil {
 		return err
 	}
-	s.sealed = h.Flags&format.FlagSealed != 0
+	w.sealed = h.Flags&format.FlagSealed != 0
 	createdAtNanos := binary.LittleEndian.Uint64(headerBuf[format.HeaderSize:])
-	s.createdAt = time.Unix(0, int64(createdAtNanos)).UTC() //nolint:gosec // G115: nanosecond timestamp fits in int64
+	w.createdAt = time.Unix(0, int64(createdAtNanos)).UTC() //nolint:gosec // G115: nanosecond timestamp fits in int64
 
-	idxCount, err := s.committedRecordCount()
+	if err := w.truncatePartialIdxTail(); err != nil {
+		return err
+	}
+	rawInfo, err := w.files.raw.Stat()
 	if err != nil {
 		return err
 	}
-	idxInfo, err := s.files.idx.Stat()
+	attrInfo, err := w.files.attr.Stat()
 	if err != nil {
 		return err
 	}
-	if spool.RecordCount(idxInfo.Size()) != idxCount {
-		if err := truncateFileTo(s.files.idx, idxEndOffset(idxCount)); err != nil {
-			return fmt.Errorf("truncate idx.log: %w", err)
-		}
-	} else if end := idxEndOffset(idxCount); idxInfo.Size() > end {
-		// Drop a partial trailing idx entry from a torn crash write.
-		if err := truncateFileTo(s.files.idx, end); err != nil {
-			return fmt.Errorf("truncate partial idx tail: %w", err)
-		}
-	}
-	s.recordCount = idxCount
-
-	var expectedRawSize, expectedAttrSize int64
-	if s.recordCount > 0 {
-		last, err := s.readIdxEntry(s.recordCount - 1)
-		if err != nil {
-			return err
-		}
-		expectedRawSize = dataEndOffset(last.RawOffset, last.RawSize)
-		expectedAttrSize = dataEndOffset(last.AttrOffset, uint32(last.AttrSize))
-		s.lastSeq = last.VaultSeq
-		first, err := s.readIdxEntry(0)
-		if err != nil {
-			return err
-		}
-		s.firstSeq = first.VaultSeq
-	} else {
-		expectedRawSize = int64(format.HeaderSize)
-		expectedAttrSize = int64(format.HeaderSize)
-		id, err := spool.ParseSegmentID(filepath.Base(s.dir))
-		if err != nil {
-			return err
-		}
-		s.firstSeq = uint64(id)
-	}
-
-	if err := truncateFileTo(s.files.raw, expectedRawSize); err != nil {
+	maxRawEnd, maxAttrEnd, err := w.scanCommittedSlots(rawInfo.Size(), attrInfo.Size())
+	if err != nil {
 		return err
 	}
-	if err := truncateFileTo(s.files.attr, expectedAttrSize); err != nil {
+	if err := truncateFileTo(w.files.raw, maxRawEnd); err != nil {
 		return err
 	}
-	s.rawOffset = uint64(expectedRawSize) - uint64(format.HeaderSize)
-	s.attrOffset = uint64(expectedAttrSize) - uint64(format.HeaderSize)
+	if err := truncateFileTo(w.files.attr, maxAttrEnd); err != nil {
+		return err
+	}
+	w.rawOffset = uint64(maxRawEnd - int64(format.HeaderSize))   //nolint:gosec // G115: offsets bounded by file size
+	w.attrOffset = uint64(maxAttrEnd - int64(format.HeaderSize)) //nolint:gosec // G115: offsets bounded by file size
 	return nil
 }
 
-// committedRecordCount walks idx entries from the tail until raw and attr
-// files contain the bytes referenced by each entry. Trailing idx entries
-// without durable data (crash between idx and data flush ordering) are excluded.
-func (s *Segment) committedRecordCount() (uint64, error) {
-	idxInfo, err := s.files.idx.Stat()
+func (w *window) truncatePartialIdxTail() error {
+	idxInfo, err := w.files.idx.Stat()
 	if err != nil {
-		return 0, err
+		return err
 	}
-	count := spool.RecordCount(idxInfo.Size())
-	if count == 0 {
-		return 0, nil
-	}
-	rawInfo, err := s.files.raw.Stat()
-	if err != nil {
-		return 0, err
-	}
-	attrInfo, err := s.files.attr.Stat()
-	if err != nil {
-		return 0, err
-	}
-	rawSize := rawInfo.Size()
-	attrSize := attrInfo.Size()
-
-	for count > 0 {
-		entry, err := s.readIdxEntry(count - 1)
-		if err != nil {
-			return 0, err
+	if end := spool.WindowIdxFileSize(w.id.Start, w.id.End); idxInfo.Size() > end {
+		if err := truncateFileTo(w.files.idx, end); err != nil {
+			return fmt.Errorf("truncate partial idx tail: %w", err)
 		}
-		needRaw := dataEndOffset(entry.RawOffset, entry.RawSize)
-		needAttr := dataEndOffset(entry.AttrOffset, uint32(entry.AttrSize))
-		if rawSize >= needRaw && attrSize >= needAttr {
-			break
-		}
-		count--
 	}
-	return count, nil
+	return nil
 }
 
-func (s *Segment) readIdxEntry(index uint64) (spool.IdxEntry, error) {
-	var entryBuf [spool.SpoolIdxEntrySize]byte
-	if _, err := s.files.idx.ReadAt(entryBuf[:], spool.IdxFileOffset(index)); err != nil {
-		return spool.IdxEntry{}, err
+func (w *window) scanCommittedSlots(rawSize, attrSize int64) (maxRawEnd, maxAttrEnd int64, err error) {
+	maxRawEnd = int64(format.HeaderSize)
+	maxAttrEnd = int64(format.HeaderSize)
+	w.recordCount = 0
+	w.lastSeq = 0
+	w.present = make(map[uint64]struct{})
+
+	for seq := w.id.Start; ; seq++ {
+		entry, ok, slotErr := w.readSlotEntry(seq)
+		if slotErr != nil {
+			return 0, 0, slotErr
+		}
+		if ok {
+			maxRawEnd, maxAttrEnd, err = w.commitRecoveredSlot(seq, entry, rawSize, attrSize, maxRawEnd, maxAttrEnd)
+			if err != nil {
+				return 0, 0, err
+			}
+		}
+		if seq == w.id.End {
+			break
+		}
 	}
-	return spool.DecodeIdxEntry(entryBuf[:]), nil
+	return maxRawEnd, maxAttrEnd, nil
+}
+
+func (w *window) commitRecoveredSlot(seq uint64, entry spool.IdxEntry, rawSize, attrSize, maxRawEnd, maxAttrEnd int64) (int64, int64, error) {
+	needRaw := dataEndOffset(entry.RawOffset, entry.RawSize)
+	needAttr := dataEndOffset(entry.AttrOffset, uint32(entry.AttrSize))
+	if entry.VaultSeq != seq || rawSize < needRaw || attrSize < needAttr {
+		if err := w.clearSlot(seq); err != nil {
+			return 0, 0, err
+		}
+		return maxRawEnd, maxAttrEnd, nil
+	}
+	w.recordCount++
+	w.present[seq] = struct{}{}
+	if seq > w.lastSeq {
+		w.lastSeq = seq
+	}
+	if needRaw > maxRawEnd {
+		maxRawEnd = needRaw
+	}
+	if needAttr > maxAttrEnd {
+		maxAttrEnd = needAttr
+	}
+	return maxRawEnd, maxAttrEnd, nil
+}
+
+func (w *window) readSlotEntry(seq uint64) (spool.IdxEntry, bool, error) {
+	var entryBuf [spool.SpoolIdxEntrySize]byte
+	offset := spool.SlotIdxFileOffset(w.id.Start, seq)
+	_, err := w.files.idx.ReadAt(entryBuf[:], offset)
+	if err != nil {
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			return spool.IdxEntry{}, false, nil
+		}
+		return spool.IdxEntry{}, false, err
+	}
+	if isZeroSlot(entryBuf[:]) {
+		return spool.IdxEntry{}, false, nil
+	}
+	entry := spool.DecodeIdxEntry(entryBuf[:])
+	if entry.VaultSeq == 0 {
+		return spool.IdxEntry{}, false, nil
+	}
+	return entry, true, nil
+}
+
+func isZeroSlot(buf []byte) bool {
+	for _, b := range buf {
+		if b != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func (w *window) clearSlot(seq uint64) error {
+	var zero [spool.SpoolIdxEntrySize]byte
+	if _, err := w.files.idx.WriteAt(zero[:], spool.SlotIdxFileOffset(w.id.Start, seq)); err != nil {
+		return err
+	}
+	return w.files.idx.Sync()
 }
 
 func dataEndOffset(offset uint32, size uint32) int64 {
 	return int64(format.HeaderSize) + int64(offset) + int64(size)
-}
-
-func idxEndOffset(recordCount uint64) int64 {
-	return int64(spool.IdxHeaderSize) + int64(recordCount)*int64(spool.SpoolIdxEntrySize) //nolint:gosec // G115: bounded by segment size limits
 }
 
 func truncateFileTo(f *os.File, expectedSize int64) error {
@@ -464,11 +495,14 @@ func truncateFileTo(f *os.File, expectedSize int64) error {
 	return nil
 }
 
-// appendDurable appends one record with idx-as-commit-marker crash safety:
+// putSlotDurable writes one record with idx-as-commit-marker crash safety:
 // raw and attr are fsynced before idx is written, then idx is fsynced before return.
-func (s *Segment) appendDurable(rec chunk.Record) error {
-	if s.sealed {
-		return ErrSegmentSealed
+func (w *window) putSlotDurable(rec chunk.Record) error {
+	if w.sealed {
+		return ErrWindowSealed
+	}
+	if rec.VaultSeq < w.id.Start || rec.VaultSeq > w.id.End {
+		return ErrSeqOutOfWindow
 	}
 	attrBytes, err := rec.Attrs.Encode()
 	if err != nil {
@@ -476,52 +510,54 @@ func (s *Segment) appendDurable(rec chunk.Record) error {
 	}
 	rawSize := uint32(len(rec.Raw))     //nolint:gosec // G115: individual record size bounded by protocol
 	attrSize := uint16(len(attrBytes)) //nolint:gosec // G115: attribute size bounded by protocol
-	if int64(s.rawOffset)+int64(rawSize) > chunkfile.MaxRawLogSize { //nolint:gosec // G115: bounded
+	if int64(w.rawOffset)+int64(rawSize) > chunkfile.MaxRawLogSize { //nolint:gosec // G115: bounded
 		return chunkfile.ErrRawTooLarge
 	}
-	if int64(s.attrOffset)+int64(attrSize) > chunkfile.MaxAttrLogSize { //nolint:gosec // G115: bounded
+	if int64(w.attrOffset)+int64(attrSize) > chunkfile.MaxAttrLogSize { //nolint:gosec // G115: bounded
 		return chunkfile.ErrAttrTooLarge
 	}
 
-	entry := spool.EntryFromRecord(rec, uint32(s.rawOffset), uint32(s.attrOffset), rawSize, attrSize) //nolint:gosec // G115: offsets bounded by segment size limits
-	rawPos := int64(format.HeaderSize) + int64(s.rawOffset)                                           //nolint:gosec // G115: bounded
-	attrPos := int64(format.HeaderSize) + int64(s.attrOffset)                                         //nolint:gosec // G115: bounded
-	idxPos := spool.IdxFileOffset(s.recordCount)
+	entry := spool.EntryFromRecord(rec, uint32(w.rawOffset), uint32(w.attrOffset), rawSize, attrSize) //nolint:gosec // G115: offsets bounded by window size limits
+	rawPos := int64(format.HeaderSize) + int64(w.rawOffset)                                             //nolint:gosec // G115: bounded
+	attrPos := int64(format.HeaderSize) + int64(w.attrOffset)                                           //nolint:gosec // G115: bounded
+	idxPos := spool.SlotIdxFileOffset(w.id.Start, rec.VaultSeq)
 
-	if _, err := s.files.raw.WriteAt(rec.Raw, rawPos); err != nil {
+	if _, err := w.files.raw.WriteAt(rec.Raw, rawPos); err != nil {
 		return err
 	}
-	if _, err := s.files.attr.WriteAt(attrBytes, attrPos); err != nil {
+	if _, err := w.files.attr.WriteAt(attrBytes, attrPos); err != nil {
 		return err
 	}
-	if err := s.files.raw.Sync(); err != nil {
+	if err := w.files.raw.Sync(); err != nil {
 		return fmt.Errorf("fsync raw.log: %w", err)
 	}
-	if err := s.files.attr.Sync(); err != nil {
+	if err := w.files.attr.Sync(); err != nil {
 		return fmt.Errorf("fsync attr.log: %w", err)
 	}
 
 	var idxBuf [spool.SpoolIdxEntrySize]byte
 	spool.EncodeIdxEntry(entry, idxBuf[:])
-	if _, err := s.files.idx.WriteAt(idxBuf[:], idxPos); err != nil {
+	if _, err := w.files.idx.WriteAt(idxBuf[:], idxPos); err != nil {
 		return err
 	}
-	if err := s.files.idx.Sync(); err != nil {
+	if err := w.files.idx.Sync(); err != nil {
 		return fmt.Errorf("fsync idx.log: %w", err)
 	}
 
-	s.rawOffset += uint64(rawSize)
-	s.attrOffset += uint64(attrSize)
-	s.recordCount++
-	if s.recordCount == 1 {
-		s.firstSeq = rec.VaultSeq
+	w.rawOffset += uint64(rawSize)
+	w.attrOffset += uint64(attrSize)
+	if _, had := w.present[rec.VaultSeq]; !had {
+		w.present[rec.VaultSeq] = struct{}{}
+		w.recordCount++
 	}
-	s.lastSeq = rec.VaultSeq
+	if rec.VaultSeq > w.lastSeq {
+		w.lastSeq = rec.VaultSeq
+	}
 	return nil
 }
 
-func (s *Segment) seal() error {
-	if s.sealed {
+func (w *window) seal() error {
+	if w.sealed {
 		return nil
 	}
 	for _, pair := range []struct {
@@ -529,9 +565,9 @@ func (s *Segment) seal() error {
 		typ byte
 		ver byte
 	}{
-		{s.files.idx, format.TypeIdxLog, chunkfile.IdxLogVersion},
-		{s.files.raw, format.TypeRawLog, chunkfile.RawLogVersion},
-		{s.files.attr, format.TypeAttrLog, chunkfile.AttrLogVersion},
+		{w.files.idx, format.TypeIdxLog, chunkfile.IdxLogVersion},
+		{w.files.raw, format.TypeRawLog, chunkfile.RawLogVersion},
+		{w.files.attr, format.TypeAttrLog, chunkfile.AttrLogVersion},
 	} {
 		if err := setHeaderSealed(pair.f, pair.typ, pair.ver); err != nil {
 			return err
@@ -540,7 +576,7 @@ func (s *Segment) seal() error {
 			return fmt.Errorf("fsync sealed %s: %w", pair.f.Name(), err)
 		}
 	}
-	s.sealed = true
+	w.sealed = true
 	return nil
 }
 
@@ -557,8 +593,8 @@ func setHeaderSealed(f *os.File, typ, ver byte) error {
 	return err
 }
 
-func (s *Segment) closeFiles() {
-	for _, f := range []*os.File{s.files.raw, s.files.attr, s.files.idx} {
+func (w *window) closeFiles() {
+	for _, f := range []*os.File{w.files.raw, w.files.attr, w.files.idx} {
 		if f != nil {
 			_ = f.Close()
 		}
@@ -639,22 +675,28 @@ func createIdxFile(path string, createdAt time.Time, mode os.FileMode) (*os.File
 	return f, nil
 }
 
-// ReadRecord reads one record by index within the segment (test/diagnostic helper).
-func (s *Segment) ReadRecord(index uint64) (chunk.Record, error) {
-	if index >= s.recordCount {
+// ReadRecord reads one record by slot index within the window (test helper).
+func (w *window) ReadRecord(index uint64) (chunk.Record, error) {
+	if index >= spool.WindowSlotCount(w.id.Start, w.id.End) {
 		return chunk.Record{}, spool.ErrInvalidSpoolEntry
 	}
-	var entryBuf [spool.SpoolIdxEntrySize]byte
-	if _, err := s.files.idx.ReadAt(entryBuf[:], spool.IdxFileOffset(index)); err != nil {
+	return w.readRecordBySeq(w.id.Start + index)
+}
+
+func (w *window) readRecordBySeq(seq uint64) (chunk.Record, error) {
+	entry, ok, err := w.readSlotEntry(seq)
+	if err != nil {
 		return chunk.Record{}, err
 	}
-	entry := spool.DecodeIdxEntry(entryBuf[:])
+	if !ok {
+		return chunk.Record{}, spool.ErrInvalidSpoolEntry
+	}
 	raw := make([]byte, entry.RawSize)
-	if _, err := s.files.raw.ReadAt(raw, int64(format.HeaderSize)+int64(entry.RawOffset)); err != nil {
+	if _, err := w.files.raw.ReadAt(raw, int64(format.HeaderSize)+int64(entry.RawOffset)); err != nil {
 		return chunk.Record{}, err
 	}
 	attrBytes := make([]byte, entry.AttrSize)
-	if _, err := s.files.attr.ReadAt(attrBytes, int64(format.HeaderSize)+int64(entry.AttrOffset)); err != nil {
+	if _, err := w.files.attr.ReadAt(attrBytes, int64(format.HeaderSize)+int64(entry.AttrOffset)); err != nil {
 		return chunk.Record{}, err
 	}
 	attrs, err := decodePlainAttributes(attrBytes)
@@ -664,11 +706,15 @@ func (s *Segment) ReadRecord(index uint64) (chunk.Record, error) {
 	return spool.BuildRecord(entry, raw, attrs), nil
 }
 
-// ReadAll loads all records in segment order (test helper).
-func (s *Segment) ReadAll() ([]chunk.Record, error) {
-	out := make([]chunk.Record, 0, s.recordCount)
-	for i := range s.recordCount {
-		rec, err := s.ReadRecord(i)
+// ReadAllSlots loads all occupied slots in slot order (test helper).
+func (w *window) ReadAllSlots() ([]chunk.Record, error) {
+	count := spool.WindowSlotCount(w.id.Start, w.id.End)
+	out := make([]chunk.Record, 0, w.recordCount)
+	for i := range count {
+		rec, err := w.ReadRecord(i)
+		if errors.Is(err, spool.ErrInvalidSpoolEntry) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -677,56 +723,55 @@ func (s *Segment) ReadAll() ([]chunk.Record, error) {
 	return out, nil
 }
 
-// OpenSegmentForTest opens one segment directory (exported for tests in this package).
-func OpenSegmentForTest(dir string, mode os.FileMode) (*Segment, error) {
-	return openSegment(dir, mode)
+// OpenWindowForTest opens one window directory (exported for tests).
+func OpenWindowForTest(dir string, mode os.FileMode) (*window, error) {
+	id, err := spool.ParseWindowDirName(filepath.Base(dir))
+	if err != nil {
+		return nil, err
+	}
+	return openWindow(dir, id, mode)
 }
 
 // WriteOrphanRaw appends bytes past the indexed tail (crash simulation helper).
-func WriteOrphanRaw(s *Segment, data []byte) error {
-	info, err := s.files.raw.Stat()
+func WriteOrphanRaw(w *window, data []byte) error {
+	info, err := w.files.raw.Stat()
 	if err != nil {
 		return err
 	}
-	_, err = s.files.raw.WriteAt(data, info.Size())
+	_, err = w.files.raw.WriteAt(data, info.Size())
 	return err
 }
 
 // WriteOrphanIdxEntry appends an idx entry without writing the referenced raw/attr
 // payload (simulates idx flushed ahead of data).
-func WriteOrphanIdxEntry(s *Segment, entry spool.IdxEntry) error {
-	idxInfo, err := s.files.idx.Stat()
-	if err != nil {
-		return err
-	}
-	count := spool.RecordCount(idxInfo.Size())
-	pos := spool.IdxFileOffset(count)
+func WriteOrphanIdxEntry(w *window, entry spool.IdxEntry) error {
+	pos := spool.SlotIdxFileOffset(w.id.Start, entry.VaultSeq)
 	var buf [spool.SpoolIdxEntrySize]byte
 	spool.EncodeIdxEntry(entry, buf[:])
-	_, err = s.files.idx.WriteAt(buf[:], pos)
+	_, err := w.files.idx.WriteAt(buf[:], pos)
 	if err != nil {
 		return err
 	}
-	return s.files.idx.Sync()
+	return w.files.idx.Sync()
 }
 
 // WritePartialIdxTail appends incomplete idx bytes (simulates torn idx write).
-func WritePartialIdxTail(s *Segment, nbytes int) error {
+func WritePartialIdxTail(w *window, nbytes int) error {
 	if nbytes <= 0 {
 		return nil
 	}
-	info, err := s.files.idx.Stat()
+	info, err := w.files.idx.Stat()
 	if err != nil {
 		return err
 	}
 	buf := make([]byte, nbytes)
-	_, err = s.files.idx.WriteAt(buf, info.Size())
+	_, err = w.files.idx.WriteAt(buf, info.Size())
 	return err
 }
 
-// Sync flushes segment files.
-func (s *Segment) Sync() error {
-	for _, f := range []*os.File{s.files.raw, s.files.attr, s.files.idx} {
+// Sync flushes window files.
+func (w *window) Sync() error {
+	for _, f := range []*os.File{w.files.raw, w.files.attr, w.files.idx} {
 		if err := f.Sync(); err != nil {
 			return err
 		}
@@ -734,51 +779,54 @@ func (s *Segment) Sync() error {
 	return nil
 }
 
-// Dir returns the segment directory path.
-func (s *Segment) Dir() string { return s.dir }
+// Dir returns the window directory path.
+func (w *window) Dir() string { return w.dir }
 
-func ReopenSegment(dir string, mode os.FileMode) (*Segment, error) {
-	return openSegment(dir, mode)
+// ReopenWindow reopens an existing window (test helper).
+func ReopenWindow(dir string, mode os.FileMode) (*window, error) {
+	id, err := spool.ParseWindowDirName(filepath.Base(dir))
+	if err != nil {
+		return nil, err
+	}
+	return openWindow(dir, id, mode)
 }
 
 // ReadByVaultSeq returns the record with the given acceptance sequence if present.
 func (m *Manager) ReadByVaultSeq(seq uint64) (chunk.Record, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for _, seg := range m.byID {
-		meta := seg.meta()
-		if !meta.CoversSeq(seq) {
-			continue
-		}
-		for i := range seg.recordCount {
-			rec, err := seg.ReadRecord(i)
-			if err != nil {
-				continue
-			}
-			if rec.VaultSeq == seq {
-				return rec, true
-			}
-		}
+	win := m.windowForSeqLocked(seq)
+	if win == nil {
+		return chunk.Record{}, false
 	}
-	return chunk.Record{}, false
+	rec, err := win.readRecordBySeq(seq)
+	if err != nil {
+		return chunk.Record{}, false
+	}
+	return rec, true
 }
 
-// LookupEventID scans spool segments for a prior assignment of eventID.
+// LookupEventID scans spool windows for a prior assignment of eventID.
 func (m *Manager) LookupEventID(id chunk.EventID) (uint64, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for _, seg := range m.byID {
-		for i := range seg.recordCount {
-			rec, err := seg.ReadRecord(i)
-			if err != nil {
-				continue
-			}
+	var latest uint64
+	found := false
+	for _, win := range m.windows {
+		recs, err := win.ReadAllSlots()
+		if err != nil {
+			continue
+		}
+		for _, rec := range recs {
 			if rec.EventID == id {
-				return rec.VaultSeq, true
+				if !found || rec.VaultSeq > latest {
+					latest = rec.VaultSeq
+					found = true
+				}
 			}
 		}
 	}
-	return 0, false
+	return latest, found
 }
 
 // DurableWatermark returns the highest vault_seq durably present in spool (S_r).
@@ -786,9 +834,9 @@ func (m *Manager) DurableWatermark() uint64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var maxSeq uint64
-	for _, seg := range m.byID {
-		if seg.lastSeq > maxSeq {
-			maxSeq = seg.lastSeq
+	for _, win := range m.windows {
+		if win.lastSeq > maxSeq {
+			maxSeq = win.lastSeq
 		}
 	}
 	return maxSeq

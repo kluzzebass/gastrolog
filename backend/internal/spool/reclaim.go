@@ -15,13 +15,19 @@ var (
 // Reclaimable reports whether a sealed segment may be deleted given the
 // materialization safety watermark. reclaimThroughSeq is the highest vault_seq
 // whose spool bytes are no longer required as a materialize/reconcile source.
-// active is the manager's writable segment slot; it is always unsealed when set.
-func Reclaimable(meta SegmentMeta, reclaimThroughSeq uint64, active SegmentID) error {
-	if active != 0 && meta.ID == active {
+// active is the manager's currently writable window; it is unsealed when set.
+func Reclaimable(meta SegmentMeta, reclaimThroughSeq uint64, active WindowID) error {
+	if active.Start != 0 && active.End != 0 && meta.Window == active {
 		return ErrReclaimBlocked
 	}
 	if !meta.Sealed {
 		return ErrSegmentNotSealed
+	}
+	if meta.EndSeq > 0 {
+		if meta.EndSeq > reclaimThroughSeq {
+			return ErrReclaimBlocked
+		}
+		return nil
 	}
 	if meta.LastSeq > reclaimThroughSeq {
 		return ErrReclaimBlocked

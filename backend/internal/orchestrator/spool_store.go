@@ -73,7 +73,7 @@ func (s *vaultSpoolStore) LookupSeq(eventID chunk.EventID) (uint64, bool) {
 	return s.store.LookupEventID(eventID)
 }
 
-// AppendTentative durably appends to spool without advancing H.
+// AppendTentative durably stores one vault_seq slot in spool without advancing H.
 func (s *vaultSpoolStore) AppendTentative(rec chunk.Record) error {
 	if rec.EventID == (chunk.EventID{}) {
 		return ErrSpoolMissingEventID
@@ -86,13 +86,20 @@ func (s *vaultSpoolStore) AppendTentative(rec chunk.Record) error {
 	if err := s.checkSeqAssignmentLocked(rec); err != nil {
 		return err
 	}
-	_, err := s.store.Append(rec)
-	return err
+	return s.store.PutSlot(rec)
 }
 
 // PutReplicaWrite stores a follower-originated spool append.
 func (s *vaultSpoolStore) PutReplicaWrite(rec chunk.Record) error {
 	return s.AppendTentative(rec)
+}
+
+// EnsureSwathWindow ensures the local spool contains a window for allocator swath bounds.
+func (s *vaultSpoolStore) EnsureSwathWindow(start, end uint64) error {
+	if s == nil || s.store == nil {
+		return ErrSpoolStoreUnavailable
+	}
+	return s.store.EnsureWindow(start, end)
 }
 
 func (s *vaultSpoolStore) checkSeqAssignmentLocked(rec chunk.Record) error {

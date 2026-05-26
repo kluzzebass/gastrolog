@@ -5,7 +5,31 @@ import (
 	"fmt"
 )
 
+// WindowID identifies a sequence window by allocator swath bounds [Start..End].
+type WindowID struct {
+	Start, End uint64
+}
+
+// DirName returns the on-disk directory name for this window.
+func (w WindowID) DirName() string {
+	return fmt.Sprintf("w-%020d-%020d", w.Start, w.End)
+}
+
+// ParseWindowDirName parses a window directory name back to WindowID.
+func ParseWindowDirName(name string) (WindowID, error) {
+	var start, end uint64
+	if _, err := fmt.Sscanf(name, "w-%020d-%020d", &start, &end); err != nil {
+		return WindowID{}, fmt.Errorf("spool: invalid window dir %q: %w", name, err)
+	}
+	if start == 0 || end == 0 || start > end {
+		return WindowID{}, errors.New("spool: invalid window bounds")
+	}
+	return WindowID{Start: start, End: end}, nil
+}
+
 // SegmentID identifies a spool segment by the vault_seq of its first accepted record.
+//
+// Deprecated: new spool writes use WindowID; SegmentID remains for legacy segment dirs.
 type SegmentID uint64
 
 // DirName returns the on-disk directory name for this segment (sortable decimal).
@@ -25,10 +49,12 @@ func ParseSegmentID(name string) (SegmentID, error) {
 	return SegmentID(n), nil
 }
 
-// SegmentMeta describes sequence bounds for one spool segment.
+// SegmentMeta describes sequence bounds for one spool segment or window.
 type SegmentMeta struct {
 	ID          SegmentID
+	Window      WindowID
 	FirstSeq    uint64
+	EndSeq      uint64 // inclusive window upper bound from allocator swath
 	LastSeq     uint64
 	RecordCount uint64
 	Sealed      bool
@@ -39,8 +65,11 @@ func (m SegmentMeta) Bounds() (first, last uint64) {
 	return m.FirstSeq, m.LastSeq
 }
 
-// CoversSeq reports whether seq falls within this segment's inclusive bounds.
+// CoversSeq reports whether seq falls within this window/segment bounds.
 func (m SegmentMeta) CoversSeq(seq uint64) bool {
+	if m.EndSeq > 0 {
+		return seq >= m.FirstSeq && seq <= m.EndSeq
+	}
 	if m.RecordCount == 0 || m.FirstSeq == 0 {
 		return false
 	}

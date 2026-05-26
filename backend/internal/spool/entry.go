@@ -80,6 +80,21 @@ func DecodeIdxEntry(buf []byte) IdxEntry {
 // IdxHeaderSize is idx.log header size (format header + createdAt).
 const IdxHeaderSize = chunkfile.IdxHeaderSize
 
+// SlotIdxFileOffset returns the byte offset of the idx slot for vaultSeq within a window.
+func SlotIdxFileOffset(windowStart, vaultSeq uint64) int64 {
+	return int64(IdxHeaderSize) + int64(vaultSeq-windowStart)*int64(SpoolIdxEntrySize) //nolint:gosec // G115: bounded by window size
+}
+
+// WindowSlotCount returns the number of idx slots in a window [start..end] inclusive.
+func WindowSlotCount(start, end uint64) uint64 {
+	return end - start + 1
+}
+
+// WindowIdxFileSize returns the idx.log size for a fully allocated window index.
+func WindowIdxFileSize(start, end uint64) int64 {
+	return int64(IdxHeaderSize) + int64(WindowSlotCount(start, end))*int64(SpoolIdxEntrySize) //nolint:gosec // G115: bounded
+}
+
 // IdxFileOffset returns the byte offset of recordIndex in idx.log.
 func IdxFileOffset(recordIndex uint64) int64 {
 	return int64(IdxHeaderSize) + int64(recordIndex)*int64(SpoolIdxEntrySize) //nolint:gosec // G115: record index bounded by segment size

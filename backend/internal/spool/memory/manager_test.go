@@ -27,44 +27,46 @@ func spoolRecord(seq uint32, vaultSeq uint64) chunk.Record {
 	}
 }
 
-func TestAppendOpensSegmentByFirstSeq(t *testing.T) {
+func TestPutSlotStoresWindowSlot(t *testing.T) {
 	t.Parallel()
 	m := NewManager()
-	meta, err := m.Append(spoolRecord(1, 100))
-	if err != nil {
+	if err := m.EnsureWindow(100, 110); err != nil {
 		t.Fatal(err)
 	}
-	if meta.ID != spool.SegmentID(100) || meta.FirstSeq != 100 || meta.LastSeq != 100 {
+	if err := m.PutSlot(spoolRecord(1, 100)); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.PutSlot(spoolRecord(2, 101)); err != nil {
+		t.Fatal(err)
+	}
+	meta, ok := m.Meta(spool.WindowID{Start: 100, End: 110})
+	if !ok {
+		t.Fatal("window metadata missing")
+	}
+	if meta.FirstSeq != 100 || meta.EndSeq != 110 || meta.LastSeq != 101 || meta.RecordCount != 2 {
 		t.Fatalf("meta = %+v", meta)
-	}
-	meta2, err := m.Append(spoolRecord(2, 101))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if meta2.FirstSeq != 100 || meta2.LastSeq != 101 || meta2.RecordCount != 2 {
-		t.Fatalf("after second append meta = %+v", meta2)
 	}
 }
 
-func TestSealStartsNewSegment(t *testing.T) {
+func TestSealWindowMarksWindowSealed(t *testing.T) {
 	t.Parallel()
 	m := NewManager()
-	if _, err := m.Append(spoolRecord(1, 50)); err != nil {
+	id := spool.WindowID{Start: 50, End: 60}
+	if err := m.EnsureWindow(id.Start, id.End); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.SealActive(); err != nil {
+	if err := m.PutSlot(spoolRecord(1, 50)); err != nil {
 		t.Fatal(err)
 	}
-	meta, err := m.Append(spoolRecord(2, 200))
+	meta, err := m.SealWindow(id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if meta.ID != spool.SegmentID(200) || meta.FirstSeq != 200 {
-		t.Fatalf("new segment meta = %+v", meta)
+	if !meta.Sealed {
+		t.Fatalf("sealed meta = %+v", meta)
 	}
-	segs := m.ListSegments()
-	if len(segs) != 2 || segs[0].FirstSeq != 50 || segs[1].FirstSeq != 200 {
-		t.Fatalf("segments = %+v", segs)
+	if err := m.PutSlot(spoolRecord(2, 51)); err != ErrWindowSealed {
+		t.Fatalf("PutSlot on sealed window err = %v, want %v", err, ErrWindowSealed)
 	}
 }
 
@@ -72,7 +74,10 @@ func TestReadByVaultSeq(t *testing.T) {
 	t.Parallel()
 	m := NewManager()
 	rec := spoolRecord(1, 7)
-	if _, err := m.Append(rec); err != nil {
+	if err := m.EnsureWindow(1, 10); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.PutSlot(rec); err != nil {
 		t.Fatal(err)
 	}
 	got, ok := m.ReadByVaultSeq(7)
@@ -84,13 +89,48 @@ func TestReadByVaultSeq(t *testing.T) {
 func TestSegmentMetaCoversSeqAcrossRecords(t *testing.T) {
 	t.Parallel()
 	m := NewManager()
+	id := spool.WindowID{Start: 10, End: 20}
+	if err := m.EnsureWindow(id.Start, id.End); err != nil {
+		t.Fatal(err)
+	}
 	for seq := uint64(10); seq <= 12; seq++ {
-		if _, err := m.Append(spoolRecord(uint32(seq), seq)); err != nil {
+		if err := m.PutSlot(spoolRecord(uint32(seq), seq)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	meta, _ := m.Meta(spool.SegmentID(10))
+	meta, _ := m.Meta(id)
 	if !meta.CoversSeq(11) {
 		t.Fatal("segment should cover interior seq")
+	}
+}
+
+func TestPutSlotOutOfOrder(t *testing.T) {
+	t.Parallel()
+	m := NewManager()
+	id := spool.WindowID{Start: 100, End: 110}
+	if err := m.EnsureWindow(id.Start, id.End); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.PutSlot(spoolRecord(2, 103)); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.PutSlot(spoolRecord(1, 101)); err != nil {
+		t.Fatal(err)
+	}
+	meta, ok := m.Meta(id)
+	if !ok {
+		t.Fatal("window missing")
+	}
+	if meta.RecordCount != 2 || meta.LastSeq != 103 {
+		t.Fatalf("meta = %+v", meta)
+	}
+}
+
+func TestPutSlotRequiresWindow(t *testing.T) {
+	t.Parallel()
+	m := NewManager()
+	err := m.PutSlot(spoolRecord(1, 9))
+	if err == nil {
+		t.Fatal("expected error")
 	}
 }

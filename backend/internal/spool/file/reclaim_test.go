@@ -37,21 +37,29 @@ func TestReclaimBlockedAboveWatermark(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = m.Close() })
 
-	if _, err := m.Append(spoolRec(100, "a")); err != nil {
+	w1 := spool.WindowID{Start: 100, End: 150}
+	w2 := spool.WindowID{Start: 200, End: 250}
+	if err := m.EnsureWindow(w1.Start, w1.End); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.SealActive(); err != nil {
+	if err := m.EnsureWindow(w2.Start, w2.End); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.Append(spoolRec(200, "b")); err != nil {
+	if err := m.PutSlot(spoolRec(100, "a")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.SealActive(); err != nil {
+	if _, err := m.SealWindow(w1); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.PutSlot(spoolRec(200, "b")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.SealWindow(w2); err != nil {
 		t.Fatal(err)
 	}
 
 	m.SetReclaimThroughSeq(150)
-	if err := m.Reclaim(spool.SegmentID(200)); err != spool.ErrReclaimBlocked {
+	if err := m.Reclaim(w2); err != spool.ErrReclaimBlocked {
 		t.Fatalf("reclaim high segment err = %v, want %v", err, spool.ErrReclaimBlocked)
 	}
 	if reclaimable := m.ListReclaimable(); len(reclaimable) != 1 || reclaimable[0].FirstSeq != 100 {
@@ -59,7 +67,7 @@ func TestReclaimBlockedAboveWatermark(t *testing.T) {
 	}
 }
 
-func TestReclaimRemovesSegmentOnDisk(t *testing.T) {
+func TestReclaimRemovesWindowOnDisk(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	m, err := NewManager(Config{Dir: dir})
@@ -67,29 +75,37 @@ func TestReclaimRemovesSegmentOnDisk(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := m.Append(spoolRec(100, "a")); err != nil {
+	w1 := spool.WindowID{Start: 100, End: 150}
+	w2 := spool.WindowID{Start: 200, End: 250}
+	if err := m.EnsureWindow(w1.Start, w1.End); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.SealActive(); err != nil {
+	if err := m.EnsureWindow(w2.Start, w2.End); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.Append(spoolRec(200, "b")); err != nil {
+	if err := m.PutSlot(spoolRec(100, "a")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.SealActive(); err != nil {
+	if _, err := m.SealWindow(w1); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.PutSlot(spoolRec(200, "b")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.SealWindow(w2); err != nil {
 		t.Fatal(err)
 	}
 
 	m.SetReclaimThroughSeq(150)
-	if err := m.Reclaim(spool.SegmentID(100)); err != nil {
+	if err := m.Reclaim(w1); err != nil {
 		t.Fatal(err)
 	}
-	segDir := filepath.Join(dir, spool.SegmentID(100).DirName())
-	if _, err := os.Stat(segDir); !os.IsNotExist(err) {
-		t.Fatalf("segment dir still exists: %v", err)
+	windowDir := filepath.Join(dir, w1.DirName())
+	if _, err := os.Stat(windowDir); !os.IsNotExist(err) {
+		t.Fatalf("window dir still exists: %v", err)
 	}
-	if segs := m.ListSegments(); len(segs) != 1 || segs[0].FirstSeq != 200 {
-		t.Fatalf("segments after reclaim = %+v", segs)
+	if wins := m.ListWindows(); len(wins) != 1 || wins[0].FirstSeq != 200 {
+		t.Fatalf("windows after reclaim = %+v", wins)
 	}
 	_ = m.Close()
 
@@ -98,8 +114,8 @@ func TestReclaimRemovesSegmentOnDisk(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = m2.Close() })
-	if segs := m2.ListSegments(); len(segs) != 1 || segs[0].FirstSeq != 200 {
-		t.Fatalf("reopened segments = %+v", segs)
+	if wins := m2.ListWindows(); len(wins) != 1 || wins[0].FirstSeq != 200 {
+		t.Fatalf("reopened windows = %+v", wins)
 	}
 }
 
@@ -111,12 +127,16 @@ func TestReclaimBlockedOnActiveSegment(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = m.Close() })
 
-	if _, err := m.Append(spoolRec(300, "live")); err != nil {
+	w1 := spool.WindowID{Start: 300, End: 350}
+	if err := m.EnsureWindow(w1.Start, w1.End); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.PutSlot(spoolRec(300, "live")); err != nil {
 		t.Fatal(err)
 	}
 	m.SetReclaimThroughSeq(500)
-	if err := m.Reclaim(spool.SegmentID(300)); err != spool.ErrReclaimBlocked {
-		t.Fatalf("reclaim active err = %v, want %v", err, spool.ErrReclaimBlocked)
+	if err := m.Reclaim(w1); err != spool.ErrSegmentNotSealed {
+		t.Fatalf("reclaim active err = %v, want %v", err, spool.ErrSegmentNotSealed)
 	}
 }
 
@@ -127,33 +147,37 @@ func TestRecoverTruncatesPartialIdxTail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.Append(spoolRec(1000, "ok")); err != nil {
+	id := spool.WindowID{Start: 1000, End: 1050}
+	if err := m.EnsureWindow(id.Start, id.End); err != nil {
 		t.Fatal(err)
 	}
-	segDir := filepath.Join(dir, spool.SegmentID(1000).DirName())
-	seg, err := OpenSegmentForTest(segDir, 0o640)
+	if err := m.PutSlot(spoolRec(1000, "ok")); err != nil {
+		t.Fatal(err)
+	}
+	windowDir := filepath.Join(dir, id.DirName())
+	win, err := OpenWindowForTest(windowDir, 0o640)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := WritePartialIdxTail(seg, 40); err != nil {
+	if err := WritePartialIdxTail(win, 40); err != nil {
 		t.Fatal(err)
 	}
-	seg.closeFiles()
+	win.closeFiles()
 
-	seg2, err := ReopenSegment(segDir, 0o640)
+	win2, err := ReopenWindow(windowDir, 0o640)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer seg2.closeFiles()
-	if seg2.recordCount != 1 {
-		t.Fatalf("recordCount = %d, want 1", seg2.recordCount)
+	defer win2.closeFiles()
+	if win2.recordCount != 1 {
+		t.Fatalf("recordCount = %d, want 1", win2.recordCount)
 	}
-	idxInfo, err := os.Stat(filepath.Join(segDir, "idx.log"))
+	idxInfo, err := os.Stat(filepath.Join(windowDir, "idx.log"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantSize := int64(spool.IdxHeaderSize) + int64(spool.SpoolIdxEntrySize)
-	if idxInfo.Size() != wantSize {
-		t.Fatalf("idx.log size = %d, want %d", idxInfo.Size(), wantSize)
+	wantMax := spool.WindowIdxFileSize(id.Start, id.End)
+	if idxInfo.Size() > wantMax {
+		t.Fatalf("idx.log size = %d, want <= %d", idxInfo.Size(), wantMax)
 	}
 }

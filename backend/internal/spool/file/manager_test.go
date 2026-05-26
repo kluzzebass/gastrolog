@@ -11,7 +11,7 @@ import (
 	"gastrolog/internal/spool"
 )
 
-func TestFileSpoolSegmentIdentityAndBounds(t *testing.T) {
+func TestFileSpoolWindowIdentityAndBounds(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	m, err := NewManager(Config{Dir: dir})
@@ -36,22 +36,36 @@ func TestFileSpoolSegmentIdentityAndBounds(t *testing.T) {
 			VaultSeq: seq,
 		}
 	}
-	meta, err := m.Append(rec(500))
-	if err != nil {
+	id := spool.WindowID{Start: 500, End: 520}
+	if err := m.EnsureWindow(id.Start, id.End); err != nil {
 		t.Fatal(err)
 	}
-	if meta.ID != spool.SegmentID(500) || meta.FirstSeq != 500 {
-		t.Fatalf("first append meta = %+v", meta)
-	}
-	if _, err := m.Append(rec(501)); err != nil {
+	if err := m.PutSlot(rec(500)); err != nil {
 		t.Fatal(err)
 	}
-	meta, err = m.Append(rec(502))
-	if err != nil {
+	if err := m.PutSlot(rec(501)); err != nil {
 		t.Fatal(err)
+	}
+	if err := m.PutSlot(rec(502)); err != nil {
+		t.Fatal(err)
+	}
+	meta, ok := m.Meta(id)
+	if !ok {
+		t.Fatal("window metadata missing")
+	}
+	if meta.Window != id || meta.FirstSeq != 500 || meta.EndSeq != 520 {
+		t.Fatalf("window meta = %+v", meta)
 	}
 	if meta.LastSeq != 502 || meta.RecordCount != 3 {
-		t.Fatalf("third append meta = %+v", meta)
+		t.Fatalf("third put meta = %+v", meta)
+	}
+
+	sealed, err := m.SealWindow(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sealed.Sealed {
+		t.Fatalf("sealed meta = %+v", sealed)
 	}
 
 	m2, err := NewManager(Config{Dir: dir})
@@ -59,20 +73,20 @@ func TestFileSpoolSegmentIdentityAndBounds(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = m2.Close() })
-	reopened, ok := m2.Meta(spool.SegmentID(500))
+	reopened, ok := m2.Meta(id)
 	if !ok {
-		t.Fatal("segment missing after reopen")
+		t.Fatal("window missing after reopen")
 	}
 	if reopened.FirstSeq != 500 || reopened.LastSeq != 502 || reopened.RecordCount != 3 {
 		t.Fatalf("reopened meta = %+v", reopened)
 	}
-	segDir := filepath.Join(dir, spool.SegmentID(500).DirName())
-	seg, err := ReopenSegment(segDir, 0o640)
+	windowDir := filepath.Join(dir, id.DirName())
+	win, err := ReopenWindow(windowDir, 0o640)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { seg.closeFiles() })
-	recs, err := seg.ReadAll()
+	t.Cleanup(func() { win.closeFiles() })
+	recs, err := win.ReadAllSlots()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,28 +114,32 @@ func TestFileSpoolCrashTruncatesOrphanRawTail(t *testing.T) {
 		Raw:      []byte("ok"),
 		VaultSeq: 1000,
 	}
-	if _, err := m.Append(rec); err != nil {
+	id := spool.WindowID{Start: 1000, End: 1020}
+	if err := m.EnsureWindow(id.Start, id.End); err != nil {
 		t.Fatal(err)
 	}
-	segDir := filepath.Join(dir, spool.SegmentID(1000).DirName())
-	seg, err := OpenSegmentForTest(segDir, 0o640)
+	if err := m.PutSlot(rec); err != nil {
+		t.Fatal(err)
+	}
+	windowDir := filepath.Join(dir, id.DirName())
+	win, err := OpenWindowForTest(windowDir, 0o640)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteOrphanRaw(seg, []byte("orphan-bytes")); err != nil {
+	if err := WriteOrphanRaw(win, []byte("orphan-bytes")); err != nil {
 		t.Fatal(err)
 	}
-	seg.closeFiles()
+	win.closeFiles()
 
-	seg2, err := ReopenSegment(segDir, 0o640)
+	win2, err := ReopenWindow(windowDir, 0o640)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer seg2.closeFiles()
-	if seg2.recordCount != 1 {
-		t.Fatalf("recordCount = %d, want 1 after truncate", seg2.recordCount)
+	defer win2.closeFiles()
+	if win2.recordCount != 1 {
+		t.Fatalf("recordCount = %d, want 1 after truncate", win2.recordCount)
 	}
-	recs, err := seg2.ReadAll()
+	recs, err := win2.ReadAllSlots()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,11 +170,15 @@ func TestFileSpoolCrashTruncatesOrphanIdxTail(t *testing.T) {
 		Raw:      []byte("first"),
 		VaultSeq: 2000,
 	}
-	if _, err := m.Append(rec); err != nil {
+	id := spool.WindowID{Start: 2000, End: 2020}
+	if err := m.EnsureWindow(id.Start, id.End); err != nil {
 		t.Fatal(err)
 	}
-	segDir := filepath.Join(dir, spool.SegmentID(2000).DirName())
-	seg, err := OpenSegmentForTest(segDir, 0o640)
+	if err := m.PutSlot(rec); err != nil {
+		t.Fatal(err)
+	}
+	windowDir := filepath.Join(dir, id.DirName())
+	win, err := OpenWindowForTest(windowDir, 0o640)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,46 +202,102 @@ func TestFileSpoolCrashTruncatesOrphanIdxTail(t *testing.T) {
 		17,
 		4,
 	)
-	if err := WriteOrphanIdxEntry(seg, orphan); err != nil {
+	if err := WriteOrphanIdxEntry(win, orphan); err != nil {
 		t.Fatal(err)
 	}
-	seg.closeFiles()
+	win.closeFiles()
 
-	seg2, err := ReopenSegment(segDir, 0o640)
+	win2, err := ReopenWindow(windowDir, 0o640)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer seg2.closeFiles()
-	if seg2.recordCount != 1 {
-		t.Fatalf("recordCount = %d, want 1 after idx tail rollback", seg2.recordCount)
+	defer win2.closeFiles()
+	if win2.recordCount != 1 {
+		t.Fatalf("recordCount = %d, want 1 after idx tail rollback", win2.recordCount)
 	}
-	recs, err := seg2.ReadAll()
+	recs, err := win2.ReadAllSlots()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(recs) != 1 || recs[0].VaultSeq != 2000 || string(recs[0].Raw) != "first" {
 		t.Fatalf("records after recovery = %+v", recs)
 	}
-	idxInfo, err := os.Stat(filepath.Join(segDir, "idx.log"))
+	idxInfo, err := os.Stat(filepath.Join(windowDir, "idx.log"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantIdxSize := int64(spool.IdxHeaderSize) + int64(spool.SpoolIdxEntrySize)
-	if idxInfo.Size() != wantIdxSize {
-		t.Fatalf("idx.log size = %d, want %d", idxInfo.Size(), wantIdxSize)
+	wantIdxSize := spool.WindowIdxFileSize(id.Start, id.End)
+	if idxInfo.Size() > wantIdxSize {
+		t.Fatalf("idx.log size = %d, want <= %d", idxInfo.Size(), wantIdxSize)
 	}
 }
 
-func TestParseSegmentDirName(t *testing.T) {
+func TestPutSlotOutOfOrder(t *testing.T) {
 	t.Parallel()
-	id, err := spool.ParseSegmentID("00000000000000000123")
+	dir := t.TempDir()
+	m, err := NewManager(Config{Dir: dir})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if id != spool.SegmentID(123) {
-		t.Fatalf("id = %d", id)
+	t.Cleanup(func() { _ = m.Close() })
+	id := spool.WindowID{Start: 3000, End: 3010}
+	if err := m.EnsureWindow(id.Start, id.End); err != nil {
+		t.Fatal(err)
 	}
-	if spool.SegmentID(123).DirName() != "00000000000000000123" {
+	if err := m.PutSlot(spoolRecForWindow(3002, "late")); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.PutSlot(spoolRecForWindow(3001, "early")); err != nil {
+		t.Fatal(err)
+	}
+	meta, ok := m.Meta(id)
+	if !ok {
+		t.Fatal("window metadata missing")
+	}
+	if meta.RecordCount != 2 || meta.LastSeq != 3002 {
+		t.Fatalf("meta = %+v", meta)
+	}
+}
+
+func TestPutSlotRequiresWindow(t *testing.T) {
+	t.Parallel()
+	m, err := NewManager(Config{Dir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = m.Close() })
+	if err := m.PutSlot(spoolRecForWindow(9999, "missing-window")); err == nil {
+		t.Fatal("expected PutSlot to fail without EnsureWindow")
+	}
+}
+
+func TestParseWindowDirName(t *testing.T) {
+	t.Parallel()
+	id, err := spool.ParseWindowDirName("w-00000000000000000123-00000000000000000199")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != (spool.WindowID{Start: 123, End: 199}) {
+		t.Fatalf("id = %+v", id)
+	}
+	if (spool.WindowID{Start: 123, End: 199}).DirName() != "w-00000000000000000123-00000000000000000199" {
 		t.Fatal("DirName mismatch")
+	}
+}
+
+func spoolRecForWindow(seq uint64, raw string) chunk.Record {
+	ts := time.Unix(int64(seq), 0).UTC()
+	return chunk.Record{
+		IngestTS: ts,
+		WriteTS:  ts,
+		EventID: chunk.EventID{
+			IngesterID: glid.New(),
+			NodeID:     glid.New(),
+			IngestTS:   ts,
+			IngestSeq:  uint32(seq),
+		},
+		Attrs:    chunk.Attributes{"k": "v"},
+		Raw:      []byte(raw),
+		VaultSeq: seq,
 	}
 }

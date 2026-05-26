@@ -85,6 +85,11 @@ func (o *Orchestrator) renewLocalSeqLease(vaultID glid.GLID, lease *vaultSeqLeas
 	lease.epoch = grant.Epoch
 	lease.next = grant.Start
 	lease.end = grant.End
+	if v := o.vaults[vaultID]; v != nil {
+		if err := v.ensureSpoolStore(o).EnsureSwathWindow(grant.Start, grant.End); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

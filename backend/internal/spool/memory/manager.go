@@ -11,109 +11,120 @@ import (
 )
 
 var (
-	ErrVaultSeqRequired   = errors.New("spool: record missing vault_seq")
-	ErrSegmentSealed      = errors.New("spool: segment is sealed")
-	ErrNoActiveSegment    = errors.New("spool: no active segment")
-	ErrActiveSegmentEmpty = errors.New("spool: active segment empty")
+	ErrVaultSeqRequired = errors.New("spool: record missing vault_seq")
+	ErrWindowNotFound   = errors.New("spool: no window covers vault_seq")
+	ErrSeqOutOfWindow   = errors.New("spool: vault_seq outside window bounds")
+	ErrWindowSealed     = errors.New("spool: window is sealed")
 )
 
-// Manager holds in-memory spool segments keyed by first_seq identity.
+// Manager holds in-memory spool sequence windows keyed by allocator swath bounds.
 type Manager struct {
-	mu       sync.RWMutex
-	segments map[spool.SegmentID]*segment
-	active   spool.SegmentID
+	mu      sync.RWMutex
+	windows map[spool.WindowID]*window
 }
 
-type segment struct {
-	meta    spool.SegmentMeta
-	records []chunk.Record
+type window struct {
+	meta  spool.SegmentMeta
+	slots map[uint64]chunk.Record
 }
 
 // NewManager returns an empty spool manager.
 func NewManager() *Manager {
-	return &Manager{segments: make(map[spool.SegmentID]*segment)}
+	return &Manager{windows: make(map[spool.WindowID]*window)}
 }
 
-// Append stores a record in the active segment, opening one keyed by record.VaultSeq when needed.
-func (m *Manager) Append(rec chunk.Record) (spool.SegmentMeta, error) {
-	if rec.VaultSeq == 0 {
-		return spool.SegmentMeta{}, ErrVaultSeqRequired
+// EnsureWindow creates a writable sequence window when absent.
+func (m *Manager) EnsureWindow(start, end uint64) error {
+	if start == 0 || end == 0 || start > end {
+		return fmt.Errorf("spool: invalid window bounds %d..%d", start, end)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	seg := m.activeSegmentLocked(rec.VaultSeq)
-	if seg.meta.Sealed {
-		return spool.SegmentMeta{}, ErrSegmentSealed
+	id := spool.WindowID{Start: start, End: end}
+	if _, ok := m.windows[id]; ok {
+		return nil
 	}
-	if len(seg.records) > 0 && rec.VaultSeq < seg.meta.LastSeq {
-		return spool.SegmentMeta{}, fmt.Errorf("spool: vault_seq %d precedes segment last %d", rec.VaultSeq, seg.meta.LastSeq)
+	m.windows[id] = &window{
+		meta: spool.SegmentMeta{
+			ID:       spool.SegmentID(start),
+			Window:   id,
+			FirstSeq: start,
+			EndSeq:   end,
+		},
+		slots: make(map[uint64]chunk.Record),
 	}
-	stored := rec.Copy()
-	seg.records = append(seg.records, stored)
-	seg.meta.RecordCount++
-	seg.meta.LastSeq = rec.VaultSeq
-	return seg.meta, nil
+	return nil
 }
 
-func (m *Manager) activeSegmentLocked(firstSeq uint64) *segment {
-	id := spool.SegmentID(firstSeq)
-	if m.active != 0 {
-		if seg, ok := m.segments[m.active]; ok && !seg.meta.Sealed {
-			return seg
+// PutSlot stores one record at rec.VaultSeq inside its covering window.
+func (m *Manager) PutSlot(rec chunk.Record) error {
+	if rec.VaultSeq == 0 {
+		return ErrVaultSeqRequired
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	win := m.windowForSeqLocked(rec.VaultSeq)
+	if win == nil {
+		return fmt.Errorf("%w: seq %d", ErrWindowNotFound, rec.VaultSeq)
+	}
+	if win.meta.Sealed {
+		return ErrWindowSealed
+	}
+	if rec.VaultSeq < win.meta.FirstSeq || rec.VaultSeq > win.meta.EndSeq {
+		return ErrSeqOutOfWindow
+	}
+	if _, had := win.slots[rec.VaultSeq]; !had {
+		win.meta.RecordCount++
+	}
+	win.slots[rec.VaultSeq] = rec.Copy()
+	if rec.VaultSeq > win.meta.LastSeq {
+		win.meta.LastSeq = rec.VaultSeq
+	}
+	return nil
+}
+
+func (m *Manager) windowForSeqLocked(seq uint64) *window {
+	for _, win := range m.windows {
+		if seq >= win.meta.FirstSeq && seq <= win.meta.EndSeq {
+			return win
 		}
 	}
-	if seg, ok := m.segments[id]; ok && !seg.meta.Sealed {
-		m.active = id
-		return seg
-	}
-	seg := &segment{
-		meta: spool.SegmentMeta{
-			ID:       id,
-			FirstSeq: firstSeq,
-			LastSeq:  firstSeq,
-		},
-	}
-	m.segments[id] = seg
-	m.active = id
-	return seg
+	return nil
 }
 
-// SealActive marks the active segment immutable and clears the active pointer.
-func (m *Manager) SealActive() (spool.SegmentMeta, error) {
+// SealWindow marks a window immutable.
+func (m *Manager) SealWindow(id spool.WindowID) (spool.SegmentMeta, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.active == 0 {
-		return spool.SegmentMeta{}, ErrNoActiveSegment
+	win, ok := m.windows[id]
+	if !ok {
+		return spool.SegmentMeta{}, spool.ErrSegmentNotFound
 	}
-	seg := m.segments[m.active]
-	if seg == nil || seg.meta.RecordCount == 0 {
-		return spool.SegmentMeta{}, ErrActiveSegmentEmpty
+	if win.meta.RecordCount == 0 {
+		return spool.SegmentMeta{}, errors.New("spool: window empty")
 	}
-	seg.meta.Sealed = true
-	meta := seg.meta
-	m.active = 0
-	return meta, nil
+	win.meta.Sealed = true
+	return win.meta, nil
 }
 
-// Meta returns metadata for a segment by first_seq identity.
-func (m *Manager) Meta(id spool.SegmentID) (spool.SegmentMeta, bool) {
+// Meta returns metadata for a window.
+func (m *Manager) Meta(id spool.WindowID) (spool.SegmentMeta, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	seg, ok := m.segments[id]
+	win, ok := m.windows[id]
 	if !ok {
 		return spool.SegmentMeta{}, false
 	}
-	return seg.meta, true
+	return win.meta, true
 }
 
-// ListSegments returns segment metadata sorted by first_seq ascending.
-func (m *Manager) ListSegments() []spool.SegmentMeta {
+// ListWindows returns window metadata sorted by start seq ascending.
+func (m *Manager) ListWindows() []spool.SegmentMeta {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	out := make([]spool.SegmentMeta, 0, len(m.segments))
-	for _, seg := range m.segments {
-		out = append(out, seg.meta)
+	out := make([]spool.SegmentMeta, 0, len(m.windows))
+	for _, win := range m.windows {
+		out = append(out, win.meta)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].FirstSeq < out[j].FirstSeq
@@ -129,9 +140,11 @@ func (m *Manager) DurableWatermark() uint64 {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	var maxSeq uint64
-	for _, seg := range m.segments {
-		if seg.meta.LastSeq > maxSeq {
-			maxSeq = seg.meta.LastSeq
+	for _, win := range m.windows {
+		for seq := range win.slots {
+			if seq > maxSeq {
+				maxSeq = seq
+			}
 		}
 	}
 	return maxSeq
@@ -141,29 +154,32 @@ func (m *Manager) DurableWatermark() uint64 {
 func (m *Manager) ReadByVaultSeq(seq uint64) (chunk.Record, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	for _, seg := range m.segments {
-		if !seg.meta.CoversSeq(seq) {
-			continue
-		}
-		for _, rec := range seg.records {
-			if rec.VaultSeq == seq {
-				return rec.Copy(), true
-			}
-		}
+	win := m.windowForSeqLocked(seq)
+	if win == nil {
+		return chunk.Record{}, false
 	}
-	return chunk.Record{}, false
+	rec, ok := win.slots[seq]
+	if !ok {
+		return chunk.Record{}, false
+	}
+	return rec.Copy(), true
 }
 
-// LookupEventID scans spool segments for a prior assignment of eventID.
+// LookupEventID scans spool windows for a prior assignment of eventID.
 func (m *Manager) LookupEventID(id chunk.EventID) (uint64, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	for _, seg := range m.segments {
-		for _, rec := range seg.records {
+	var latest uint64
+	found := false
+	for _, win := range m.windows {
+		for seq, rec := range win.slots {
 			if rec.EventID == id {
-				return rec.VaultSeq, true
+				if !found || seq > latest {
+					latest = seq
+					found = true
+				}
 			}
 		}
 	}
-	return 0, false
+	return latest, found
 }
