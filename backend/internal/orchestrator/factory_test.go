@@ -11,6 +11,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
+	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/system"
 
 	hraft "github.com/hashicorp/raft"
@@ -147,6 +148,20 @@ func TestApplyConfigNil(t *testing.T) {
 	err := orch.ApplyConfig(nil, Factories{})
 	if err != nil {
 		t.Errorf("expected nil error for nil config, got %v", err)
+	}
+}
+
+func TestApplyConfigNilWiresGroupManager(t *testing.T) {
+	t.Parallel()
+	orch := newTestOrch(t, Config{})
+	groupMgr := raftgroup.NewGroupManager(raftgroup.GroupManagerConfig{
+		NodeID: "node-1",
+	})
+	if err := orch.ApplyConfig(nil, Factories{GroupManager: groupMgr}); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
+	}
+	if orch.groupMgr != groupMgr {
+		t.Fatal("ApplyConfig(nil) must still wire GroupManager for joiner replay path")
 	}
 }
 
