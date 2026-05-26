@@ -96,15 +96,6 @@ func (s *vaultSpoolStore) PutReplicaWrite(rec chunk.Record) error {
 }
 
 func (s *vaultSpoolStore) checkSeqAssignmentLocked(rec chunk.Record) error {
-	if existing, ok := s.byEventID[rec.EventID]; ok {
-		if existing != rec.VaultSeq {
-			return ErrSpoolSeqConflict
-		}
-		return nil
-	}
-	if prev, ok := s.store.LookupEventID(rec.EventID); ok && prev != rec.VaultSeq {
-		return ErrSpoolSeqConflict
-	}
 	if prev, ok := s.bySeq[rec.VaultSeq]; ok && prev.EventID != rec.EventID {
 		return ErrSpoolSeqConflict
 	}
@@ -124,12 +115,6 @@ func (s *vaultSpoolStore) CommitAcceptance(rec chunk.Record) error {
 	defer s.mu.Unlock()
 	if err := s.checkSeqAssignmentLocked(rec); err != nil {
 		return err
-	}
-	if existing, ok := s.byEventID[rec.EventID]; ok {
-		if existing != rec.VaultSeq {
-			return ErrSpoolSeqConflict
-		}
-		return nil
 	}
 	stored := rec.Copy()
 	s.byEventID[rec.EventID] = rec.VaultSeq

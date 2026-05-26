@@ -113,7 +113,7 @@ func (o *Orchestrator) ingestLocked(rec *chunk.Record, src SourceContext) (*pend
 	var pa *pendingAcks
 	var deferredRemotes [][]remoteForwardTarget
 	for _, t := range matches {
-		if t.NodeID != "" {
+		if t.NodeID != "" && o.vaultWriteModel(t.VaultID) != system.VaultWriteModelSequenced {
 			var err error
 			pa, err = o.handleRemoteVaultMatch(pa, t, *rec)
 			if err != nil {

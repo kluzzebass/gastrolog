@@ -120,6 +120,56 @@ func TestSequencedWriteGateRejectsWithoutAllocator(t *testing.T) {
 	}
 }
 
+func TestSequencedChunkAppendForbiddenWithoutVaultSeq(t *testing.T) {
+	t.Parallel()
+
+	vaultID := glid.New()
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
+	cm, _ := chunkmem.NewManager(chunkmem.Config{})
+	counting := &countingChunkManager{ChunkManager: cm}
+	im := indexmem.NewManager(nil, nil, nil, nil, nil)
+	qe := query.New(counting, im, nil)
+	v := NewVault(vaultID, &VaultInstance{
+		VaultID: vaultID,
+		Type:   "memory",
+		Chunks: counting,
+		Indexes: im,
+		Query:  qe,
+	})
+	v.WriteModel = system.VaultWriteModelSequenced
+	orch.RegisterVault(v)
+	wireTestSeqAllocator(orch, vaultID)
+
+	rec := sequencedTestRecord("no-seq", glid.New(), 1)
+	_, _, err := orch.Append(vaultID, rec)
+	if !errors.Is(err, ErrSequencedChunkAppendForbidden) {
+		t.Fatalf("Append err = %v, want %v", err, ErrSequencedChunkAppendForbidden)
+	}
+	if counting.appends != 0 {
+		t.Fatalf("sequenced vault must not chunk-append without VaultSeq; appends=%d", counting.appends)
+	}
+}
+
+func TestSequencedRemoteRouteAssignsOnIngestingNode(t *testing.T) {
+	t.Parallel()
+
+	vaultID := glid.New()
+	orch := newTestOrch(t, Config{LocalNodeID: "node-ingest"})
+	registerSequencedTestVault(t, orch, vaultID, nil)
+
+	cr, _ := CompileRoute(glid.New(), "all", 0, "*",
+		[]RouteDestination{{VaultID: vaultID, NodeID: "node-residency"}}, "fanout")
+	orch.SetRouteSet(NewRouteSet([]*CompiledRoute{cr}))
+
+	rec := sequencedTestRecord("local-assign", glid.New(), 1)
+	if err := orch.Ingest(rec); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	if got := orch.vaultSpoolStore(vaultID).IngestHighWatermark(); got != 1 {
+		t.Fatalf("H = %d, want 1 (assigned on ingesting router)", got)
+	}
+}
+
 func TestDefaultChunkAppendWriteModelUnchanged(t *testing.T) {
 	t.Parallel()
 

@@ -86,7 +86,7 @@ func TestIngestAssignsMonotonicDestinationSeq(t *testing.T) {
 	}
 }
 
-func TestIngestRetryIdempotentDestinationSeq(t *testing.T) {
+func TestIngestRetryConsumesNewDestinationSeq(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
@@ -99,18 +99,13 @@ func TestIngestRetryIdempotentDestinationSeq(t *testing.T) {
 	if err := orch.Ingest(rec); err != nil {
 		t.Fatalf("first ingest: %v", err)
 	}
-	hBefore := orch.vaultSpoolStore(vaultID).IngestHighWatermark()
 	if err := orch.Ingest(rec); err != nil {
 		t.Fatalf("retry ingest: %v", err)
 	}
 
 	store := orch.vaultSpoolStore(vaultID)
-	seq, ok := store.LookupSeq(rec.EventID)
-	if !ok || seq != 1 {
-		t.Fatalf("seq after retry = %d ok=%v", seq, ok)
-	}
-	if got := store.IngestHighWatermark(); got != hBefore {
-		t.Fatalf("H after retry = %d, want unchanged %d", got, hBefore)
+	if got := store.IngestHighWatermark(); got != 2 {
+		t.Fatalf("H after retry = %d, want 2 (each accept consumes a seq)", got)
 	}
 }
 

@@ -915,6 +915,10 @@ func (o *Orchestrator) deleteFromFollowers(vaultID glid.GLID, chunkID chunk.Chun
 // cluster-forwarded records, and the ImportRecords API.
 func (o *Orchestrator) Append(vaultID glid.GLID, rec chunk.Record) (chunk.ChunkID, uint64, error) {
 	o.mu.RLock()
+	if o.vaultWriteModel(vaultID) == system.VaultWriteModelSequenced && rec.VaultSeq == 0 {
+		o.mu.RUnlock()
+		return chunk.ChunkID{}, 0, ErrSequencedChunkAppendForbidden
+	}
 	cid, pos, _, remotes, err := o.appendRecord(vaultID, rec)
 	o.mu.RUnlock()
 	o.fireAndForgetRemote(remotes, rec)

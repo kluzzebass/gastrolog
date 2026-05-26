@@ -30,14 +30,11 @@ var ErrSeqAssignUnavailable = errors.New("seq assign: vault-ctl allocator unavai
 // ErrSeqAssignNoActiveLease is returned when reserve succeeds but FSM state lacks a lease.
 var ErrSeqAssignNoActiveLease = errors.New("seq assign: reserve applied but no active lease")
 
-func (o *Orchestrator) assignDestinationVaultSeq(vaultID glid.GLID, eventID chunk.EventID) (uint64, error) {
-	if eventID == (chunk.EventID{}) {
-		return 0, ErrSpoolMissingEventID
-	}
-	store := o.vaultSpoolStore(vaultID)
-	if seq, ok := store.LookupSeq(eventID); ok {
-		return seq, nil
-	}
+// ErrSequencedChunkAppendForbidden is returned when a sequenced vault record
+// reaches the chunk Append entry point without a pre-assigned VaultSeq.
+var ErrSequencedChunkAppendForbidden = errors.New("sequenced vault: chunk append forbidden; assign VaultSeq on ingesting router")
+
+func (o *Orchestrator) assignDestinationVaultSeq(vaultID glid.GLID, _ chunk.EventID) (uint64, error) {
 	return o.consumeNextVaultSeq(vaultID)
 }
 
