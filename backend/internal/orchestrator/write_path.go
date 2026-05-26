@@ -30,7 +30,7 @@ func (o *Orchestrator) vaultWriteModel(vaultID glid.GLID) system.VaultWriteModel
 //
 // Sequenced writes must not gate on VaultPlacement.Leader (Phase 0.6);
 // uses vault-ctl leader in later phases.
-func (o *Orchestrator) dispatchDestinationWrite(vaultID glid.GLID, rec chunk.Record) (*replicationTask, []remoteForwardTarget, error) {
+func (o *Orchestrator) dispatchDestinationWrite(vaultID glid.GLID, rec *chunk.Record) (*replicationTask, []remoteForwardTarget, error) {
 	switch wm := o.vaultWriteModel(vaultID); wm {
 	case system.VaultWriteModelSequenced:
 		if o.seqAssignReady(vaultID) {
@@ -40,15 +40,14 @@ func (o *Orchestrator) dispatchDestinationWrite(vaultID glid.GLID, rec chunk.Rec
 	case system.VaultWriteModelChunkAppend:
 		return o.appendLocalChunk(vaultID, rec)
 	default:
-		// Defensive: vault shells should only carry resolved models.
 		return o.appendLocalChunk(vaultID, rec)
 	}
 }
 
 // appendLocalChunk is the chunk-append destination write path: synchronous
 // active-chunk append, then optional replica fan-out to RF followers.
-func (o *Orchestrator) appendLocalChunk(vaultID glid.GLID, rec chunk.Record) (*replicationTask, []remoteForwardTarget, error) {
-	return o.appendLocal(vaultID, rec)
+func (o *Orchestrator) appendLocalChunk(vaultID glid.GLID, rec *chunk.Record) (*replicationTask, []remoteForwardTarget, error) {
+	return o.appendLocal(vaultID, *rec)
 }
 
 func (o *Orchestrator) seqAssignReady(vaultID glid.GLID) bool {
@@ -71,5 +70,9 @@ func (o *Orchestrator) SyncVaultConfig(cfg system.VaultConfig) error {
 	vault.Enabled = cfg.Enabled
 	vault.StorageType = string(cfg.Type)
 	vault.WriteModel = cfg.ResolveWriteModel()
+	vault.ReplicationFactor = cfg.ReplicationFactor
+	if vault.ReplicationFactor == 0 {
+		vault.ReplicationFactor = 1
+	}
 	return nil
 }

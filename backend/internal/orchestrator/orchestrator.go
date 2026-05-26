@@ -897,6 +897,10 @@ type VaultSnapshot struct {
 	SealedChunks int
 	DataBytes    int64
 	Enabled      bool
+	// SpoolWatermark is S_r — highest vault_seq durably present in local spool.
+	SpoolWatermark uint64
+	// IngestHighWatermark is H — highest accepted vault_seq on this node.
+	IngestHighWatermark uint64
 	// RaftAppliedIndex is the local node's vault-ctl Raft applied
 	// index for this vault. Zero if this node has no vault-ctl group
 	// (or its Raft instance hasn't initialized). Broadcast in
@@ -941,6 +945,14 @@ func (o *Orchestrator) VaultSnapshots() []VaultSnapshot {
 				}
 			}
 		}
+		o.mu.RLock()
+		if v := o.vaults[id]; v != nil && v.WriteModel == system.VaultWriteModelSequenced {
+			if ss := v.spool; ss != nil {
+				snap.SpoolWatermark = ss.SpoolDurableWatermark()
+				snap.IngestHighWatermark = ss.IngestHighWatermark()
+			}
+		}
+		o.mu.RUnlock()
 		snapshots = append(snapshots, snap)
 	}
 	return snapshots

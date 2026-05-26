@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"gastrolog/internal/glid"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gastrolog/internal/chunk"
@@ -470,7 +471,7 @@ func (o *Orchestrator) AppendToVault(vaultID glid.GLID, leaderChunkID chunk.Chun
 	}
 
 	if vault.WriteModel == system.VaultWriteModelSequenced && rec.VaultSeq > 0 {
-		if err := o.applyInterimReplicaWrite(vaultID, rec); err != nil {
+		if err := o.applySpoolReplicaWrite(vaultID, rec); err != nil {
 			o.mu.RUnlock()
 			return err
 		}
@@ -618,6 +619,7 @@ func (o *Orchestrator) fireAndForgetRemote(targets []remoteForwardTarget, rec ch
 		return
 	}
 	var wg sync.WaitGroup
+	var remoteOK atomic.Int32
 	for _, tgt := range targets {
 		if rb := o.getReplicaBackoff(tgt.nodeID); rb != nil && rb.skipUntil.After(o.now()) {
 			continue
@@ -630,10 +632,14 @@ func (o *Orchestrator) fireAndForgetRemote(targets []remoteForwardTarget, rec ch
 				o.bumpReplicaBackoff(tgt.nodeID, err)
 			} else {
 				o.clearReplicaBackoff(tgt.nodeID)
+				remoteOK.Add(1)
 			}
 		})
 	}
 	wg.Wait()
+	if rec.VaultSeq > 0 && rec.VaultID != (glid.GLID{}) {
+		o.tryCommitSequencedAcceptance(rec.VaultID, rec, int(remoteOK.Load())+o.sequencedLocalFollowerWrites(rec.VaultID, rec))
+	}
 }
 
 // replicaBackoff tracks consecutive failures and exponential backoff for

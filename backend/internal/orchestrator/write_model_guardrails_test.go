@@ -69,7 +69,7 @@ func TestRouteFanOutSeparateFromReplicaFanOut(t *testing.T) {
 
 	rec := testRecord("fan-out-boundary")
 	rec.WaitForReplica = true
-	pa, err := orch.ingestWithSource(rec, SourceContext{Kind: SourceIngest})
+	pa, err := orch.ingestWithSource(&rec, SourceContext{Kind: SourceIngest})
 	if err != nil {
 		t.Fatalf("ingest: %v", err)
 	}
@@ -110,7 +110,8 @@ func TestSequencedWriteGateRejectsWithoutAllocator(t *testing.T) {
 	cr, _ := CompileRoute(glid.New(), "all", 0, "*", []RouteDestination{{VaultID: vaultID}}, "fanout")
 	orch.SetRouteSet(NewRouteSet([]*CompiledRoute{cr}))
 
-	_, err := orch.ingestWithSource(sequencedTestRecord("v2-gated", glid.New(), 1), SourceContext{Kind: SourceIngest})
+	rec := sequencedTestRecord("v2-gated", glid.New(), 1)
+	_, err := orch.ingestWithSource(&rec, SourceContext{Kind: SourceIngest})
 	if !errors.Is(err, ErrSequencedWriteUnavailable) {
 		t.Fatalf("ingest err = %v, want %v", err, ErrSequencedWriteUnavailable)
 	}

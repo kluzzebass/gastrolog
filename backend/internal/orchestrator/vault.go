@@ -21,10 +21,11 @@ type Vault struct {
 	WriteModel  system.VaultWriteModel
 	Instance    *VaultInstance
 
-	// interimSeq holds Phase 2 destination-vault (EventID, seq) assignments
-	// until Phase 3 spool migration. Nil for chunk-append vaults.
-	interimSeq *interimSeqStore
-	seqLease   vaultSeqLease
+	// spool holds sequenced write-path spool bytes and accepted-write metadata.
+	spool *vaultSpoolStore
+	seqLease vaultSeqLease
+	// ReplicationFactor is the desired total replica count (leader included).
+	ReplicationFactor uint32
 }
 
 // NewVault creates a Vault with a single instance.

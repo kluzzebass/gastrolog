@@ -851,11 +851,12 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 	}
 
 	ti := &VaultInstance{
-		VaultID: vaultCfg.ID,
-		Type:    string(vaultCfg.Type),
-		Chunks:  cm,
-		Indexes: im,
-		Query:   qe,
+		VaultID:  vaultCfg.ID,
+		Type:     string(vaultCfg.Type),
+		Chunks:   cm,
+		Indexes:  im,
+		Query:    qe,
+		SpoolDir: vaultSpoolDir(vaultCfg, cmParams["dir"]),
 	}
 	ti.applyRaftCallbacks(raftCB)
 	o.attachLifecycleReconciler(ti, vaultCfg.ID, vaultGroup)
@@ -962,11 +963,12 @@ func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg syst
 	}
 
 	ti := &VaultInstance{
-		VaultID: vaultCfg.ID,
-		Type:    string(vaultCfg.Type),
-		Chunks:  cm,
-		Indexes: im,
-		Query:   qe,
+		VaultID:  vaultCfg.ID,
+		Type:     string(vaultCfg.Type),
+		Chunks:   cm,
+		Indexes:  im,
+		Query:    qe,
+		SpoolDir: vaultSpoolDir(vaultCfg, cmParams["dir"]),
 	}
 	ti.applyRaftCallbacks(raftCB)
 	o.attachLifecycleReconciler(ti, vaultCfg.ID, vaultGroup)
@@ -1557,6 +1559,13 @@ func mapVaultTypeToFactory(t system.VaultType) string {
 	default:
 		return string(t)
 	}
+}
+
+func vaultSpoolDir(vaultCfg system.VaultConfig, dataDir string) string {
+	if !vaultCfg.UsesSequencedWriteModel() || dataDir == "" {
+		return ""
+	}
+	return filepath.Join(dataDir, "spool")
 }
 
 // buildVaultParams builds a params map from a VaultConfig suitable for factory consumption.

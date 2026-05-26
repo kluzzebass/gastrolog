@@ -39,7 +39,7 @@ func (o *Orchestrator) Ingest(rec chunk.Record) error {
 // callers without source context fall through to Ingest with
 // {Kind: SourceIngest, IngesterID: zero}.
 func (o *Orchestrator) IngestWithSource(rec chunk.Record, src SourceContext) error {
-	pa, err := o.ingestWithSource(rec, src)
+	pa, err := o.ingestWithSource(&rec, src)
 	if err != nil {
 		return err
 	}
@@ -50,7 +50,7 @@ func (o *Orchestrator) IngestWithSource(rec chunk.Record, src SourceContext) err
 // shim — defaults source to {Kind: SourceIngest} for callers that
 // haven't migrated to ingestWithSource.
 func (o *Orchestrator) ingest(rec chunk.Record) (*pendingAcks, error) {
-	return o.ingestWithSource(rec, SourceContext{Kind: SourceIngest})
+	return o.ingestWithSource(&rec, SourceContext{Kind: SourceIngest})
 }
 
 // ingestWithSource is the source-aware ingest path. It threads a
@@ -64,13 +64,15 @@ func (o *Orchestrator) ingest(rec chunk.Record) (*pendingAcks, error) {
 // match a remote vault, syncForwards is populated; the caller must run
 // flushRecordRouteForwards (outside o.mu) so the forward buffer can apply
 // backpressure instead of dropping. See gastrolog-27zvt.
-func (o *Orchestrator) ingestWithSource(rec chunk.Record, src SourceContext) (*pendingAcks, error) {
+//
+// rec is updated in place (for example destination VaultSeq on sequenced writes).
+func (o *Orchestrator) ingestWithSource(rec *chunk.Record, src SourceContext) (*pendingAcks, error) {
 	pa, deferredRemotes, err := o.ingestLocked(rec, src)
 	// Fire-and-forget remote replication happens OUTSIDE the orchestrator
 	// lock so a slow or paused follower cannot starve writers (retention,
 	// reconfig). See gastrolog-5oofa.
 	for _, remotes := range deferredRemotes {
-		o.fireAndForgetRemote(remotes, rec)
+		o.fireAndForgetRemote(remotes, *rec)
 	}
 	return pa, err
 }
@@ -84,7 +86,7 @@ func (o *Orchestrator) ingestWithSource(rec chunk.Record, src SourceContext) (*p
 // (_source, _ingester, _vault, _reason) that route expressions can
 // match against. The synthetic overlay is applied per match call —
 // rec.Attrs itself is not mutated.
-func (o *Orchestrator) ingestLocked(rec chunk.Record, src SourceContext) (*pendingAcks, [][]remoteForwardTarget, error) {
+func (o *Orchestrator) ingestLocked(rec *chunk.Record, src SourceContext) (*pendingAcks, [][]remoteForwardTarget, error) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
@@ -113,7 +115,7 @@ func (o *Orchestrator) ingestLocked(rec chunk.Record, src SourceContext) (*pendi
 	for _, t := range matches {
 		if t.NodeID != "" {
 			var err error
-			pa, err = o.handleRemoteVaultMatch(pa, t, rec)
+			pa, err = o.handleRemoteVaultMatch(pa, t, *rec)
 			if err != nil {
 				return pa, deferredRemotes, err
 			}

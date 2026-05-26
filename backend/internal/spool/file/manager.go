@@ -740,3 +740,56 @@ func (s *Segment) Dir() string { return s.dir }
 func ReopenSegment(dir string, mode os.FileMode) (*Segment, error) {
 	return openSegment(dir, mode)
 }
+
+// ReadByVaultSeq returns the record with the given acceptance sequence if present.
+func (m *Manager) ReadByVaultSeq(seq uint64) (chunk.Record, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, seg := range m.byID {
+		meta := seg.meta()
+		if !meta.CoversSeq(seq) {
+			continue
+		}
+		for i := range seg.recordCount {
+			rec, err := seg.ReadRecord(i)
+			if err != nil {
+				continue
+			}
+			if rec.VaultSeq == seq {
+				return rec, true
+			}
+		}
+	}
+	return chunk.Record{}, false
+}
+
+// LookupEventID scans spool segments for a prior assignment of eventID.
+func (m *Manager) LookupEventID(id chunk.EventID) (uint64, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, seg := range m.byID {
+		for i := range seg.recordCount {
+			rec, err := seg.ReadRecord(i)
+			if err != nil {
+				continue
+			}
+			if rec.EventID == id {
+				return rec.VaultSeq, true
+			}
+		}
+	}
+	return 0, false
+}
+
+// DurableWatermark returns the highest vault_seq durably present in spool (S_r).
+func (m *Manager) DurableWatermark() uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var maxSeq uint64
+	for _, seg := range m.byID {
+		if seg.lastSeq > maxSeq {
+			maxSeq = seg.lastSeq
+		}
+	}
+	return maxSeq
+}

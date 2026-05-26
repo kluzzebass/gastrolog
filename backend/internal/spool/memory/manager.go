@@ -121,6 +121,22 @@ func (m *Manager) ListSegments() []spool.SegmentMeta {
 	return out
 }
 
+// Close releases in-memory spool state.
+func (m *Manager) Close() error { return nil }
+
+// DurableWatermark returns the highest vault_seq durably present in spool (S_r).
+func (m *Manager) DurableWatermark() uint64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var maxSeq uint64
+	for _, seg := range m.segments {
+		if seg.meta.LastSeq > maxSeq {
+			maxSeq = seg.meta.LastSeq
+		}
+	}
+	return maxSeq
+}
+
 // ReadByVaultSeq returns the record with the given acceptance sequence if present.
 func (m *Manager) ReadByVaultSeq(seq uint64) (chunk.Record, bool) {
 	m.mu.RLock()
@@ -136,4 +152,18 @@ func (m *Manager) ReadByVaultSeq(seq uint64) (chunk.Record, bool) {
 		}
 	}
 	return chunk.Record{}, false
+}
+
+// LookupEventID scans spool segments for a prior assignment of eventID.
+func (m *Manager) LookupEventID(id chunk.EventID) (uint64, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, seg := range m.segments {
+		for _, rec := range seg.records {
+			if rec.EventID == id {
+				return rec.VaultSeq, true
+			}
+		}
+	}
+	return 0, false
 }

@@ -126,12 +126,14 @@ func (m *ingester) collectVaults() []orchestrator.IngestMessage {
 	msgs := make([]orchestrator.IngestMessage, 0, len(snapshots))
 	for _, snap := range snapshots {
 		raw := fmt.Sprintf(
-			"record_count=%d chunk_count=%d sealed_chunks=%d data_bytes=%d enabled=%t",
+			"record_count=%d chunk_count=%d sealed_chunks=%d data_bytes=%d enabled=%t vault_replica_spool_watermark=%d vault_ingest_high_watermark=%d",
 			snap.RecordCount,
 			snap.ChunkCount,
 			snap.SealedChunks,
 			snap.DataBytes,
 			snap.Enabled,
+			snap.SpoolWatermark,
+			snap.IngestHighWatermark,
 		)
 		msgs = append(msgs, orchestrator.IngestMessage{
 			Attrs: map[string]string{

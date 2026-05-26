@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -42,6 +43,10 @@ func registerSequencedTestVault(t *testing.T, orch *Orchestrator, vaultID glid.G
 		FollowerTargets: followers,
 	})
 	v.WriteModel = system.VaultWriteModelSequenced
+	v.ReplicationFactor = 1
+	if len(followers) > 0 {
+		v.ReplicationFactor = uint32(len(followers) + 1)
+	}
 	orch.RegisterVault(v)
 	wireTestSeqAllocator(orch, vaultID)
 	return cm
@@ -67,7 +72,7 @@ func TestIngestAssignsMonotonicDestinationSeq(t *testing.T) {
 		t.Fatalf("ingest 2: %v", err)
 	}
 
-	store := orch.vaultInterimSeqStore(vaultID)
+	store := orch.vaultSpoolStore(vaultID)
 	seq1, ok := store.LookupSeq(rec1.EventID)
 	if !ok || seq1 != 1 {
 		t.Fatalf("seq1 = %d, ok=%v", seq1, ok)
@@ -75,6 +80,9 @@ func TestIngestAssignsMonotonicDestinationSeq(t *testing.T) {
 	seq2, ok := store.LookupSeq(rec2.EventID)
 	if !ok || seq2 != 2 {
 		t.Fatalf("seq2 = %d, ok=%v", seq2, ok)
+	}
+	if got := store.IngestHighWatermark(); got != 2 {
+		t.Fatalf("H = %d, want 2", got)
 	}
 }
 
@@ -91,20 +99,20 @@ func TestIngestRetryIdempotentDestinationSeq(t *testing.T) {
 	if err := orch.Ingest(rec); err != nil {
 		t.Fatalf("first ingest: %v", err)
 	}
+	hBefore := orch.vaultSpoolStore(vaultID).IngestHighWatermark()
 	if err := orch.Ingest(rec); err != nil {
 		t.Fatalf("retry ingest: %v", err)
 	}
 
-	store := orch.vaultInterimSeqStore(vaultID)
+	store := orch.vaultSpoolStore(vaultID)
 	seq, ok := store.LookupSeq(rec.EventID)
 	if !ok || seq != 1 {
 		t.Fatalf("seq after retry = %d ok=%v", seq, ok)
 	}
-	if len(store.bySeq) != 1 {
-		t.Fatalf("expected one assigned seq, got %d", len(store.bySeq))
+	if got := store.IngestHighWatermark(); got != hBefore {
+		t.Fatalf("H after retry = %d, want unchanged %d", got, hBefore)
 	}
 }
-
 
 func TestRetentionRouteAssignsDestinationSeq(t *testing.T) {
 	t.Parallel()
@@ -149,12 +157,12 @@ func TestRetentionRouteAssignsDestinationSeq(t *testing.T) {
 	}
 	runner.fireRetentionEvent(sealedID)
 
-	store := orch.vaultInterimSeqStore(archiveID)
-	if len(store.bySeq) != 2 {
-		t.Fatalf("archive assignments = %d, want 2", len(store.bySeq))
+	store := orch.vaultSpoolStore(archiveID)
+	if store.IngestHighWatermark() != 2 {
+		t.Fatalf("archive H = %d, want 2", store.IngestHighWatermark())
 	}
-	if store.bySeq[1].Raw == nil || store.bySeq[2].Raw == nil {
-		t.Fatal("expected stored records at seq 1 and 2")
+	if store.SpoolDurableWatermark() != 2 {
+		t.Fatalf("archive spool watermark = %d, want 2", store.SpoolDurableWatermark())
 	}
 }
 
@@ -163,28 +171,18 @@ func TestReplicaFanOutPreservesDestinationSeq(t *testing.T) {
 	vaultID := glid.New()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
-	followerCM, _ := chunkmem.NewManager(chunkmem.Config{})
-	followerVaultID := vaultID
-	followerInst := &VaultInstance{
-		VaultID: followerVaultID,
-		Type:   "memory",
-		Chunks: followerCM,
-	}
-	followerVault := NewVault(followerVaultID, followerInst)
-	followerVault.WriteModel = system.VaultWriteModelSequenced
-	orch.RegisterVault(followerVault)
-	wireTestSeqAllocator(orch, followerVaultID)
-
 	registerSequencedTestVault(t, orch, vaultID, []system.ReplicationTarget{
 		{NodeID: "node-1", StorageID: system.SyntheticStorageID("node-1")},
 	})
+	v := orch.vaults[vaultID]
+	v.ReplicationFactor = 2
 
 	cr, _ := CompileRoute(glid.New(), "all", 0, "*", []RouteDestination{{VaultID: vaultID}}, "fanout")
 	orch.SetRouteSet(NewRouteSet([]*CompiledRoute{cr}))
 
 	rec := sequencedTestRecord("rf", glid.New(), 1)
 	rec.WaitForReplica = true
-	pa, err := orch.ingestWithSource(rec, SourceContext{Kind: SourceIngest})
+	pa, err := orch.ingestWithSource(&rec, SourceContext{Kind: SourceIngest})
 	if err != nil {
 		t.Fatalf("ingest: %v", err)
 	}
@@ -192,17 +190,85 @@ func TestReplicaFanOutPreservesDestinationSeq(t *testing.T) {
 		t.Fatalf("replication tasks = %v", pa)
 	}
 
-	leaderStore := orch.vaultInterimSeqStore(vaultID)
+	leaderStore := orch.vaultSpoolStore(vaultID)
 	seq, ok := leaderStore.LookupSeq(rec.EventID)
 	if !ok || seq != 1 {
 		t.Fatalf("leader seq = %d ok=%v", seq, ok)
 	}
+	if leaderStore.IngestHighWatermark() != 0 {
+		t.Fatalf("H before replication = %d, want 0", leaderStore.IngestHighWatermark())
+	}
 
-	if err := orch.applyInterimReplicaWrite(vaultID, leaderStore.bySeq[seq]); err != nil {
+	stored, err := leaderStore.ReadByVaultSeq(nil, vaultID, seq)
+	if err != nil {
+		t.Fatalf("read spool: %v", err)
+	}
+	if err := orch.applySpoolReplicaWrite(vaultID, stored); err != nil {
 		t.Fatalf("local replica apply: %v", err)
 	}
-	followerStore := orch.vaultInterimSeqStore(vaultID)
-	if got, ok := followerStore.LookupSeq(rec.EventID); !ok || got != seq {
-		t.Fatalf("follower seq = %d ok=%v want %d", got, ok, seq)
+
+	ack := make(chan error, 1)
+	orch.ackAfterReplication(ack, pa, rec)
+	if err := <-ack; err != nil {
+		t.Fatalf("ack replication: %v", err)
 	}
+	if got := leaderStore.IngestHighWatermark(); got != seq {
+		t.Fatalf("H after replication = %d, want %d", got, seq)
+	}
+}
+
+func TestIngestHighWatermarkBlockedOnFailedReplication(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
+	orch.chunkReplicator = &failAllReplicator{}
+	registerSequencedTestVault(t, orch, vaultID, []system.ReplicationTarget{
+		{NodeID: "node-2", StorageID: system.SyntheticStorageID("node-2")},
+	})
+	v := orch.vaults[vaultID]
+	v.ReplicationFactor = 2
+
+	cr, _ := CompileRoute(glid.New(), "all", 0, "*", []RouteDestination{{VaultID: vaultID}}, "fanout")
+	orch.SetRouteSet(NewRouteSet([]*CompiledRoute{cr}))
+
+	rec := sequencedTestRecord("fail-rf", glid.New(), 1)
+	rec.WaitForReplica = true
+	pa, err := orch.ingestWithSource(&rec, SourceContext{Kind: SourceIngest})
+	if err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	ack := make(chan error, 1)
+	orch.ackAfterReplication(ack, pa, rec)
+	if err := <-ack; err == nil {
+		t.Fatal("expected replication failure")
+	}
+	if got := orch.vaultSpoolStore(vaultID).IngestHighWatermark(); got != 0 {
+		t.Fatalf("H after failed replication = %d, want 0", got)
+	}
+	if got := orch.vaultSpoolStore(vaultID).SpoolDurableWatermark(); got != 1 {
+		t.Fatalf("spool watermark = %d, want 1 (local spool only)", got)
+	}
+}
+
+type failAllReplicator struct{}
+
+func (f *failAllReplicator) AppendRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
+	return chunk.ErrChunkNotFound
+}
+
+func (f *failAllReplicator) ImportSealedChunk(context.Context, string, glid.GLID, chunk.ChunkID, chunk.RecordIterator) error {
+	return nil
+}
+
+func (f *failAllReplicator) SealVault(context.Context, string, glid.GLID, chunk.ChunkID) error {
+	return nil
+}
+
+func (f *failAllReplicator) DeleteChunk(context.Context, string, glid.GLID, chunk.ChunkID) error {
+	return nil
+}
+
+func (f *failAllReplicator) RequestReplicaCatchup(context.Context, string, glid.GLID, []chunk.ChunkID, string) (uint32, error) {
+	return 0, nil
 }

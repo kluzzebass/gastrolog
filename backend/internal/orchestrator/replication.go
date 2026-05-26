@@ -100,7 +100,11 @@ func (o *Orchestrator) ackAfterReplication(ack chan<- error, pa *pendingAcks, re
 		}
 	}
 
-	ack <- g.Wait()
+	err := g.Wait()
+	if err == nil {
+		o.commitSequencedPendingAcks(pa, rec)
+	}
+	ack <- err
 }
 
 // scheduleReplication schedules a separate job to replicate a sealed chunk.

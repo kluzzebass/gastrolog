@@ -435,7 +435,7 @@ func (o *Orchestrator) writeLoop() {
 				src.IngesterID = id
 			}
 		}
-		pa, err := o.ingestWithSource(dr.rec, src)
+		pa, err := o.ingestWithSource(&dr.rec, src)
 		if fwErr := o.flushRecordRouteForwards(context.Background(), pa, dr.rec); fwErr != nil {
 			if err == nil {
 				err = fwErr

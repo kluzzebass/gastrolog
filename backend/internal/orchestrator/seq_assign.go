@@ -32,9 +32,9 @@ var ErrSeqAssignNoActiveLease = errors.New("seq assign: reserve applied but no a
 
 func (o *Orchestrator) assignDestinationVaultSeq(vaultID glid.GLID, eventID chunk.EventID) (uint64, error) {
 	if eventID == (chunk.EventID{}) {
-		return 0, ErrInterimMissingEventID
+		return 0, ErrSpoolMissingEventID
 	}
-	store := o.vaultInterimSeqStore(vaultID)
+	store := o.vaultSpoolStore(vaultID)
 	if seq, ok := store.LookupSeq(eventID); ok {
 		return seq, nil
 	}
