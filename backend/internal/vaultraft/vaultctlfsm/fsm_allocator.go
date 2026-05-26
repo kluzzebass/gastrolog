@@ -36,7 +36,7 @@ type SeqLeaseGrant struct {
 	Epoch uint64
 }
 
-// SeqActiveLease is the single outstanding leased range for one holder.
+// SeqActiveLease is one outstanding swath granted to a holder node.
 type SeqActiveLease struct {
 	HolderID   string
 	Epoch      uint64
@@ -53,16 +53,16 @@ type SeqBurnedTail struct {
 
 // SeqAllocatorSnapshot is a point-in-time copy of allocator control state.
 type SeqAllocatorSnapshot struct {
-	NextSeq     uint64
-	Epoch       uint64
-	ActiveLease *SeqActiveLease
-	BurnedTails []SeqBurnedTail
+	NextSeq      uint64
+	Epoch        uint64
+	ActiveSwaths []SeqActiveLease
+	BurnedTails  []SeqBurnedTail
 }
 
 var (
 	ErrSeqAllocatorStaleEpoch    = errors.New("seq allocator: stale epoch")
-	ErrSeqAllocatorActiveLease   = errors.New("seq allocator: active lease blocks reservation")
-	ErrSeqAllocatorNoActiveLease = errors.New("seq allocator: no matching active lease")
+	ErrSeqAllocatorActiveLease   = errors.New("seq allocator: holder already has active swath")
+	ErrSeqAllocatorNoActiveLease = errors.New("seq allocator: no matching active swath")
 	ErrSeqAllocatorInvalidCount  = errors.New("seq allocator: invalid reservation count")
 	ErrSeqAllocatorInvalidHolder = errors.New("seq allocator: invalid holder id")
 	ErrSeqAllocatorInvalidRange  = errors.New("seq allocator: consumed end outside lease range")
@@ -94,18 +94,20 @@ func (f *FSM) seqAllocatorSnapshotLocked() SeqAllocatorSnapshot {
 	if epoch == SeqSentinel {
 		epoch = initialSeqEpoch
 	}
-	var lease *SeqActiveLease
-	if f.seqActiveLease != nil {
-		cp := *f.seqActiveLease
-		lease = &cp
+	swaths := make([]SeqActiveLease, 0, len(f.seqActiveSwaths))
+	for _, lease := range f.seqActiveSwaths {
+		if lease == nil {
+			continue
+		}
+		swaths = append(swaths, *lease)
 	}
 	tails := make([]SeqBurnedTail, len(f.seqBurnedTails))
 	copy(tails, f.seqBurnedTails)
 	return SeqAllocatorSnapshot{
-		NextSeq:     nextSeq,
-		Epoch:       epoch,
-		ActiveLease: lease,
-		BurnedTails: tails,
+		NextSeq:      nextSeq,
+		Epoch:        epoch,
+		ActiveSwaths: swaths,
+		BurnedTails:  tails,
 	}
 }
 
@@ -122,7 +124,10 @@ func (f *FSM) applyReserveSeqRange(payload []byte) (any, error) {
 	if epoch != f.seqEpoch {
 		return nil, ErrSeqAllocatorStaleEpoch
 	}
-	if f.seqActiveLease != nil {
+	if f.seqActiveSwaths == nil {
+		f.seqActiveSwaths = make(map[string]*SeqActiveLease)
+	}
+	if _, ok := f.seqActiveSwaths[holderID]; ok {
 		return nil, ErrSeqAllocatorActiveLease
 	}
 
@@ -136,7 +141,7 @@ func (f *FSM) applyReserveSeqRange(payload []byte) (any, error) {
 		return nil, err
 	}
 
-	f.seqActiveLease = &SeqActiveLease{
+	f.seqActiveSwaths[holderID] = &SeqActiveLease{
 		HolderID:   holderID,
 		Epoch:      epoch,
 		RangeStart: start,
@@ -154,8 +159,8 @@ func (f *FSM) applyBurnSeqLeaseTail(payload []byte) error {
 	}
 
 	f.ensureSeqAllocatorDefaultsLocked()
-	lease := f.seqActiveLease
-	if lease == nil || lease.HolderID != holderID || lease.Epoch != epoch {
+	lease := f.seqActiveSwaths[holderID]
+	if lease == nil || lease.Epoch != epoch {
 		return ErrSeqAllocatorNoActiveLease
 	}
 	if consumedEnd < lease.RangeStart || consumedEnd > lease.RangeEnd {
@@ -169,21 +174,26 @@ func (f *FSM) applyBurnSeqLeaseTail(payload []byte) error {
 			Epoch: epoch,
 		})
 	}
-	f.seqActiveLease = nil
+	delete(f.seqActiveSwaths, holderID)
 	return nil
 }
 
 func (f *FSM) applyBumpSeqAllocatorEpoch(_ []byte) (uint64, error) {
 	f.ensureSeqAllocatorDefaultsLocked()
-	if f.seqActiveLease != nil {
-		lease := f.seqActiveLease
+	if f.seqActiveSwaths == nil {
+		f.seqActiveSwaths = make(map[string]*SeqActiveLease)
+	}
+	for _, lease := range f.seqActiveSwaths {
+		if lease == nil {
+			continue
+		}
 		f.appendBurnedTailLocked(SeqBurnedTail{
 			Start: lease.RangeStart,
 			End:   lease.RangeEnd,
 			Epoch: f.seqEpoch,
 		})
-		f.seqActiveLease = nil
 	}
+	clear(f.seqActiveSwaths)
 	f.seqEpoch++
 	return f.seqEpoch, nil
 }
@@ -281,9 +291,9 @@ func encodeSeqAllocatorSection(w io.Writer, snap SeqAllocatorSnapshot) error {
 	binary.BigEndian.PutUint64(numBuf[:], snap.Epoch)
 	payload.Write(numBuf[:])
 
-	if snap.ActiveLease != nil {
-		payload.WriteByte(1)
-		lease := snap.ActiveLease
+	binary.BigEndian.PutUint32(numBuf[:4], uint32(len(snap.ActiveSwaths))) //nolint:gosec // G115
+	payload.Write(numBuf[:4])
+	for _, lease := range snap.ActiveSwaths {
 		if len(lease.HolderID) > maxSeqHolderIDLen {
 			return ErrSeqAllocatorInvalidHolder
 		}
@@ -296,8 +306,6 @@ func encodeSeqAllocatorSection(w io.Writer, snap SeqAllocatorSnapshot) error {
 		payload.Write(numBuf[:])
 		binary.BigEndian.PutUint64(numBuf[:], lease.Epoch)
 		payload.Write(numBuf[:])
-	} else {
-		payload.WriteByte(0)
 	}
 
 	binary.BigEndian.PutUint32(numBuf[:4], uint32(len(snap.BurnedTails))) //nolint:gosec // G115
@@ -330,21 +338,11 @@ func readSeqAllocatorSection(r io.Reader) (SeqAllocatorSnapshot, error) {
 	}
 	snap.Epoch = binary.BigEndian.Uint64(numBuf[:])
 
-	var hasLease [1]byte
-	if _, err := io.ReadFull(r, hasLease[:]); err != nil {
-		return snap, fmt.Errorf("read active lease flag: %w", err)
+	swaths, err := readSeqActiveSwaths(r)
+	if err != nil {
+		return snap, err
 	}
-	switch hasLease[0] {
-	case 0:
-	case 1:
-		lease, err := readSeqActiveLease(r)
-		if err != nil {
-			return snap, err
-		}
-		snap.ActiveLease = lease
-	default:
-		return snap, fmt.Errorf("seq allocator snapshot: invalid active lease flag %d", hasLease[0])
-	}
+	snap.ActiveSwaths = swaths
 
 	tails, err := readSeqBurnedTails(r)
 	if err != nil {
@@ -352,6 +350,23 @@ func readSeqAllocatorSection(r io.Reader) (SeqAllocatorSnapshot, error) {
 	}
 	snap.BurnedTails = tails
 	return snap, nil
+}
+
+func readSeqActiveSwaths(r io.Reader) ([]SeqActiveLease, error) {
+	var countBuf [4]byte
+	if _, err := io.ReadFull(r, countBuf[:]); err != nil {
+		return nil, fmt.Errorf("read active swath count: %w", err)
+	}
+	n := int(binary.BigEndian.Uint32(countBuf[:]))
+	swaths := make([]SeqActiveLease, 0, n)
+	for i := range n {
+		lease, err := readSeqActiveLease(r)
+		if err != nil {
+			return nil, fmt.Errorf("read active swath[%d]: %w", i, err)
+		}
+		swaths = append(swaths, *lease)
+	}
+	return swaths, nil
 }
 
 func readSeqActiveLease(r io.Reader) (*SeqActiveLease, error) {
@@ -414,11 +429,10 @@ func readSeqBurnedTails(r io.Reader) ([]SeqBurnedTail, error) {
 func applySeqAllocatorSnapshotLocked(f *FSM, snap SeqAllocatorSnapshot) {
 	f.seqNextSeq = snap.NextSeq
 	f.seqEpoch = snap.Epoch
-	if snap.ActiveLease != nil {
-		cp := *snap.ActiveLease
-		f.seqActiveLease = &cp
-	} else {
-		f.seqActiveLease = nil
+	f.seqActiveSwaths = make(map[string]*SeqActiveLease, len(snap.ActiveSwaths))
+	for i := range snap.ActiveSwaths {
+		cp := snap.ActiveSwaths[i]
+		f.seqActiveSwaths[cp.HolderID] = &cp
 	}
 	f.seqBurnedTails = append([]SeqBurnedTail(nil), snap.BurnedTails...)
 	f.ensureSeqAllocatorDefaultsLocked()

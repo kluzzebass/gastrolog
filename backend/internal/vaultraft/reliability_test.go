@@ -990,26 +990,20 @@ func TestReliability_SeqAllocator_FailoverNoOverlap(t *testing.T) {
 	h.waitForLeader()
 	h.assertAllFSMsConverged()
 
-	// Active lease from pre-failover writer is still outstanding — new
-	// reservations must fail until epoch bump burns the abandoned tail.
-	cmd, err := MarshalVaultReserveSeqRange(vaultID, "writer-b", epoch, 10)
-	if err != nil {
-		t.Fatal(err)
+	// After failover writer-b may reserve a disjoint swath while writer-a's
+	// abandoned swath is still outstanding.
+	grant2 := h.applyReserveSeqRange(vaultID, "writer-b", epoch, 10)
+	if grant2.Start != grant1.End+1 {
+		t.Fatalf("overlap/regression: grant1=%+v grant2=%+v", grant1, grant2)
 	}
-	fut := h.leader().raft.Apply(cmd, 2*time.Second)
-	if err := fut.Error(); err != nil {
-		t.Fatalf("apply: %v", err)
-	}
-	if !errors.Is(fut.Response().(error), vaultctlfsm.ErrSeqAllocatorActiveLease) {
-		t.Fatalf("expected active lease error, got %v", fut.Response())
-	}
+	h.assertAllFSMsConverged()
 
 	h.applyVaultSeqCommand(vaultID, vaultctlfsm.MarshalBumpSeqAllocatorEpoch())
 	h.assertAllFSMsConverged()
 
-	grant2 := h.applyReserveSeqRange(vaultID, "writer-b", epoch+1, 10)
-	if grant2.Start != grant1.End+1 {
-		t.Fatalf("overlap/regression: grant1=%+v grant2=%+v", grant1, grant2)
+	grant3 := h.applyReserveSeqRange(vaultID, "writer-b", epoch+1, 10)
+	if grant3.Start != grant2.End+1 {
+		t.Fatalf("post-bump overlap: grant2=%+v grant3=%+v", grant2, grant3)
 	}
 	h.assertAllFSMsConverged()
 }

@@ -231,18 +231,19 @@ type FSM struct {
 
 	// Destination-vault sequence allocator control state (gastrolog-16w8x).
 	// Owned by vault-ctl Raft; per-record acceptance metadata lives off Raft.
-	seqNextSeq     uint64
-	seqEpoch       uint64
-	seqActiveLease *SeqActiveLease
-	seqBurnedTails []SeqBurnedTail
+	seqNextSeq      uint64
+	seqEpoch        uint64
+	seqActiveSwaths map[string]*SeqActiveLease // holder ID -> outstanding swath
+	seqBurnedTails  []SeqBurnedTail
 }
 
 // New creates an empty chunk metadata FSM.
 func New() *FSM {
 	return &FSM{
-		chunks:         make(map[chunk.ChunkID]*ManifestEntry),
-		tombstones:     make(map[chunk.ChunkID]time.Time),
-		pendingDeletes: make(map[chunk.ChunkID]*PendingDelete),
+		chunks:          make(map[chunk.ChunkID]*ManifestEntry),
+		tombstones:      make(map[chunk.ChunkID]time.Time),
+		pendingDeletes:  make(map[chunk.ChunkID]*PendingDelete),
+		seqActiveSwaths: make(map[string]*SeqActiveLease),
 	}
 }
 

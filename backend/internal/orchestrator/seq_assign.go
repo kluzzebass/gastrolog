@@ -48,27 +48,17 @@ func (o *Orchestrator) consumeNextVaultSeq(vaultID glid.GLID) (uint64, error) {
 	}
 	lease := &v.seqLease
 
-	for attempt := range 2 {
-		if err := o.ensureLocalSeqLease(vaultID, lease); err != nil {
-			if attempt == 0 && errors.Is(err, vaultctlfsm.ErrSeqAllocatorActiveLease) {
-				if bumpErr := o.bumpVaultSeqAllocatorEpoch(vaultID); bumpErr != nil {
-					return 0, bumpErr
-				}
-				*lease = vaultSeqLease{}
-				continue
-			}
+	if err := o.ensureLocalSeqLease(vaultID, lease); err != nil {
+		return 0, err
+	}
+	if lease.next == 0 || lease.next > lease.end {
+		if err := o.renewLocalSeqLease(vaultID, lease); err != nil {
 			return 0, err
 		}
-		if lease.next == 0 || lease.next > lease.end {
-			if err := o.renewLocalSeqLease(vaultID, lease); err != nil {
-				return 0, err
-			}
-		}
-		seq := lease.next
-		lease.next++
-		return seq, nil
 	}
-	return 0, vaultctlfsm.ErrSeqAllocatorActiveLease
+	seq := lease.next
+	lease.next++
+	return seq, nil
 }
 
 func (o *Orchestrator) ensureLocalSeqLease(vaultID glid.GLID, lease *vaultSeqLease) error {
@@ -146,11 +136,16 @@ func (o *Orchestrator) reserveVaultSeqRange(vaultID glid.GLID, epoch, count uint
 		return vaultctlfsm.SeqLeaseGrant{}, ErrSeqAssignUnavailable
 	}
 	st := sub.SeqAllocatorState()
-	if st.ActiveLease == nil {
-		return vaultctlfsm.SeqLeaseGrant{}, ErrSeqAssignNoActiveLease
+	for _, sw := range st.ActiveSwaths {
+		if sw.HolderID == holder && sw.Epoch == epoch {
+			return vaultctlfsm.SeqLeaseGrant{
+				Start: sw.RangeStart,
+				End:   sw.RangeEnd,
+				Epoch: sw.Epoch,
+			}, nil
+		}
 	}
-	l := st.ActiveLease
-	return vaultctlfsm.SeqLeaseGrant{Start: l.RangeStart, End: l.RangeEnd, Epoch: l.Epoch}, nil
+	return vaultctlfsm.SeqLeaseGrant{}, ErrSeqAssignNoActiveLease
 }
 
 func (o *Orchestrator) burnVaultSeqLeaseTail(vaultID glid.GLID, epoch, consumedEnd uint64) error {

@@ -74,7 +74,7 @@ func TestSeqAllocatorRejectStaleEpoch(t *testing.T) {
 	applySeqCmdExpectErr(t, fsm, wire, ErrSeqAllocatorStaleEpoch)
 }
 
-func TestSeqAllocatorRejectOverlapWhileActive(t *testing.T) {
+func TestSeqAllocatorRejectSecondSwathSameHolder(t *testing.T) {
 	fsm := New()
 	const holder = "node-1"
 
@@ -116,8 +116,8 @@ func TestSeqAllocatorBurnTailRecordsGap(t *testing.T) {
 	if tail.Start != 8 || tail.End != 10 || tail.Epoch != epoch {
 		t.Fatalf("tail: %+v", tail)
 	}
-	if st.ActiveLease != nil {
-		t.Fatal("expected active lease cleared")
+	if st.ActiveSwaths != nil && len(st.ActiveSwaths) != 0 {
+		t.Fatal("expected active swaths cleared")
 	}
 }
 
@@ -158,6 +158,28 @@ func TestSeqAllocatorBumpEpochBurnsActiveLease(t *testing.T) {
 	grant := applySeqCmd(t, fsm, wireOK).(SeqLeaseGrant)
 	if grant.Start != 6 || grant.End != 8 {
 		t.Fatalf("grant after bump: %+v", grant)
+	}
+}
+
+func TestSeqAllocatorConcurrentHolders(t *testing.T) {
+	fsm := New()
+	const epoch = initialSeqEpoch
+
+	grantA := applySeqCmd(t, fsm, mustMarshalReserve(t, "node-a", epoch, 10)).(SeqLeaseGrant)
+	grantB := applySeqCmd(t, fsm, mustMarshalReserve(t, "node-b", epoch, 10)).(SeqLeaseGrant)
+	if grantA.Start != 1 || grantA.End != 10 {
+		t.Fatalf("grantA: %+v", grantA)
+	}
+	if grantB.Start != 11 || grantB.End != 20 {
+		t.Fatalf("grantB: %+v", grantB)
+	}
+
+	st := fsm.SeqAllocatorState()
+	if len(st.ActiveSwaths) != 2 {
+		t.Fatalf("active swaths: %+v", st.ActiveSwaths)
+	}
+	if st.NextSeq != 21 {
+		t.Fatalf("next_seq: got %d want 21", st.NextSeq)
 	}
 }
 

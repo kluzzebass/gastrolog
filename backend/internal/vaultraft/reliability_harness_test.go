@@ -372,10 +372,9 @@ func instanceFSMFingerprint(t *vaultctlfsm.FSM) string {
 	}
 	alloc := t.SeqAllocatorState()
 	sb.writef("seq next=%d epoch=%d\n", alloc.NextSeq, alloc.Epoch)
-	if alloc.ActiveLease != nil {
-		l := alloc.ActiveLease
-		sb.writef("lease holder=%s range=%d-%d epoch=%d\n",
-			l.HolderID, l.RangeStart, l.RangeEnd, l.Epoch)
+	for _, sw := range alloc.ActiveSwaths {
+		sb.writef("swath holder=%s range=%d-%d epoch=%d\n",
+			sw.HolderID, sw.RangeStart, sw.RangeEnd, sw.Epoch)
 	}
 	for _, tail := range alloc.BurnedTails {
 		sb.writef("burned=%d-%d epoch=%d\n", tail.Start, tail.End, tail.Epoch)
