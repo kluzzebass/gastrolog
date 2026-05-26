@@ -31,22 +31,18 @@ func (s *QueryServer) GetContext(
 		defer cancel()
 	}
 
-	ref := req.Msg.Ref
-	if ref == nil || len(ref.VaultId) == 0 || len(ref.ChunkId) == 0 {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("ref must include vault_id, chunk_id, and pos"))
+	ref, err := query.ContextRefFromProto(req.Msg.Ref)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
-
-	vaultID := glid.FromBytes(ref.VaultId)
-
-	if len(ref.ChunkId) != glid.Size {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid chunk_id: expected %d bytes, got %d", glid.Size, len(ref.ChunkId)))
-	}
-	chunkID := chunk.ChunkID(glid.FromBytes(ref.ChunkId))
 
 	// Step 1: Read the anchor record from its owning vault.
-	anchor, err := s.readAnchor(ctx, vaultID, chunkID, ref.Pos)
+	anchor, anchorRec, err := s.readAnchorRecord(ctx, ref)
 	if err != nil {
 		return nil, errInternal(err)
+	}
+	if anchor == nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("anchor record not found"))
 	}
 
 	// Step 2: Collect context using the full cluster-wide search path.
@@ -60,10 +56,10 @@ func (s *QueryServer) GetContext(
 	}
 
 	isAnchor := func(rec *apiv1.Record) bool {
-		return rec.Ref != nil &&
-			string(rec.Ref.VaultId) == string(ref.VaultId) &&
-			string(rec.Ref.ChunkId) == string(ref.ChunkId) &&
-			rec.Ref.Pos == ref.Pos
+		if rec == nil {
+			return false
+		}
+		return protoRecordMatchesAnchor(rec, anchorRec)
 	}
 
 	anchorTS := anchor.GetWriteTs().AsTime()
@@ -93,35 +89,47 @@ func (s *QueryServer) GetContext(
 	}), nil
 }
 
-// readAnchor reads a single record by its ref. If the vault is local, reads
-// via cursor. If remote, forwards to the owning node.
-func (s *QueryServer) readAnchor(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, pos uint64) (*apiv1.Record, error) {
-	if nodeID := s.remoteNodeForVault(ctx, vaultID); nodeID != "" {
-		resp, err := s.remoteSearcher.GetContext(ctx, nodeID, &apiv1.ForwardGetContextRequest{
-			VaultId: vaultID.ToProto(),
-			ChunkId: glid.GLID(chunkID).ToProto(),
-			Pos:     pos,
-		})
+// readAnchorRecord reads the anchor for GetContext (materialized or vault_seq).
+func (s *QueryServer) readAnchorRecord(ctx context.Context, ref query.ContextRef) (*apiv1.Record, chunk.Record, error) {
+	if nodeID := s.remoteNodeForVault(ctx, ref.VaultID); nodeID != "" {
+		fwd := &apiv1.ForwardGetContextRequest{
+			VaultId: ref.VaultID.ToProto(),
+			Pos:     ref.Pos,
+			VaultSeq: ref.VaultSeq,
+		}
+		if ref.IsMaterialized() {
+			fwd.ChunkId = glid.GLID(ref.ChunkID).ToProto()
+		}
+		resp, err := s.remoteSearcher.GetContext(ctx, nodeID, fwd)
 		if err != nil {
-			return nil, fmt.Errorf("remote anchor read: %w", err)
+			return nil, chunk.Record{}, fmt.Errorf("remote anchor read: %w", err)
 		}
 		if resp.Anchor == nil {
-			return nil, errors.New("remote anchor not found")
+			return nil, chunk.Record{}, nil
 		}
-		return exportToRecord(resp.Anchor), nil
+		proto := exportToRecord(resp.Anchor)
+		return proto, protoToChunkRecord(proto), nil
 	}
 
 	eng := s.orch.LeaderVaultQueryEngine()
-	anchor, err := eng.ReadRecord(ctx, vaultID, chunkID, pos)
+	anchorRec, err := eng.ReadAnchor(ctx, ref)
 	if err != nil {
-		// Chunk may have been deleted by retention between search and context read.
-		// Return nil anchor instead of erroring — the caller handles missing anchors.
 		if errors.Is(err, chunk.ErrVaultNotFound) || errors.Is(err, chunk.ErrChunkNotFound) {
-			return nil, nil
+			return nil, chunk.Record{}, nil
 		}
-		return nil, fmt.Errorf("read anchor vault=%s chunk=%s pos=%d: %w", vaultID, chunkID, pos, err)
+		return nil, chunk.Record{}, fmt.Errorf("read anchor vault=%s: %w", ref.VaultID, err)
 	}
-	return recordToProto(anchor), nil
+	return recordToProto(anchorRec), anchorRec, nil
+}
+
+// readAnchor reads a single materialized record by chunk ref. Prefer readAnchorRecord.
+func (s *QueryServer) readAnchor(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, pos uint64) (*apiv1.Record, error) {
+	proto, _, err := s.readAnchorRecord(ctx, query.ContextRef{
+		VaultID: vaultID,
+		ChunkID: chunkID,
+		Pos:     pos,
+	})
+	return proto, err
 }
 
 // searchContext runs a full cluster-wide search (local engine + remote vaults)

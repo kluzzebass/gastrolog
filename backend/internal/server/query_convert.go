@@ -297,6 +297,52 @@ func exportToRecord(er *apiv1.ExportRecord) *apiv1.Record {
 	return rec
 }
 
+// protoToChunkRecord converts a query API record to the internal chunk record shape.
+func protoToChunkRecord(r *apiv1.Record) chunk.Record {
+	if r == nil {
+		return chunk.Record{}
+	}
+	rec := chunk.Record{
+		IngestTS: r.GetIngestTs().AsTime(),
+		WriteTS:  r.GetWriteTs().AsTime(),
+		Raw:      r.GetRaw(),
+	}
+	if src := r.GetSourceTs(); src != nil {
+		rec.SourceTS = src.AsTime()
+	}
+	if len(r.GetAttrs()) > 0 {
+		rec.Attrs = make(chunk.Attributes, len(r.GetAttrs()))
+		maps.Copy(rec.Attrs, r.GetAttrs())
+	}
+	if ref := r.GetRef(); ref != nil {
+		rec.VaultID = glid.FromBytes(ref.GetVaultId())
+		rec.Ref = chunk.RecordRef{
+			ChunkID: chunk.ChunkID(glid.FromBytes(ref.GetChunkId())),
+			Pos:     ref.GetPos(),
+		}
+	}
+	if len(r.GetIngesterId()) > 0 {
+		rec.EventID.IngesterID = glid.FromBytes(r.GetIngesterId())
+	}
+	if len(r.GetNodeId()) > 0 {
+		rec.EventID.NodeID = glid.FromBytes(r.GetNodeId())
+	}
+	rec.EventID.IngestSeq = r.GetIngestSeq()
+	if rec.EventID.IngestTS.IsZero() {
+		rec.EventID.IngestTS = rec.IngestTS
+	}
+	return rec
+}
+
+// protoRecordMatchesAnchor compares API records to an anchor using EventID identity.
+func protoRecordMatchesAnchor(rec *apiv1.Record, anchor chunk.Record) bool {
+	other := protoToChunkRecord(rec)
+	if !other.VaultID.IsZero() && other.VaultID != anchor.VaultID {
+		return false
+	}
+	return other.EventID == anchor.EventID
+}
+
 // ProtoToResumeToken converts a proto resume token to the internal type.
 func ProtoToResumeToken(data []byte) (*query.ResumeToken, error) {
 	if len(data) == 0 {

@@ -2154,12 +2154,14 @@ func (x *ForwardSearchResponse) GetHistogram() []*HistogramBucket {
 // ForwardGetContextRequest asks a remote node to return records surrounding
 // a specific record in one of its local vaults.
 type ForwardGetContextRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	VaultId       []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
-	ChunkId       []byte                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
-	Pos           uint64                 `protobuf:"varint,3,opt,name=pos,proto3" json:"pos,omitempty"`
-	Before        int32                  `protobuf:"varint,4,opt,name=before,proto3" json:"before,omitempty"`
-	After         int32                  `protobuf:"varint,5,opt,name=after,proto3" json:"after,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	VaultId []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
+	ChunkId []byte                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
+	Pos     uint64                 `protobuf:"varint,3,opt,name=pos,proto3" json:"pos,omitempty"`
+	Before  int32                  `protobuf:"varint,4,opt,name=before,proto3" json:"before,omitempty"`
+	After   int32                  `protobuf:"varint,5,opt,name=after,proto3" json:"after,omitempty"`
+	// V2 spool anchor when chunk_id is empty (see docs/fan-out/v2/anchor-model.md).
+	VaultSeq      uint64 `protobuf:"varint,6,opt,name=vault_seq,json=vaultSeq,proto3" json:"vault_seq,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2225,6 +2227,13 @@ func (x *ForwardGetContextRequest) GetBefore() int32 {
 func (x *ForwardGetContextRequest) GetAfter() int32 {
 	if x != nil {
 		return x.After
+	}
+	return 0
+}
+
+func (x *ForwardGetContextRequest) GetVaultSeq() uint64 {
+	if x != nil {
+		return x.VaultSeq
 	}
 	return 0
 }
@@ -4139,13 +4148,14 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\fresume_token\x18\x02 \x01(\fR\vresumeToken\x12\x19\n" +
 	"\bhas_more\x18\x03 \x01(\bR\ahasMore\x12<\n" +
 	"\ftable_result\x18\x04 \x01(\v2\x19.gastrolog.v1.TableResultR\vtableResult\x12;\n" +
-	"\thistogram\x18\x05 \x03(\v2\x1d.gastrolog.v1.HistogramBucketR\thistogram\"\x90\x01\n" +
+	"\thistogram\x18\x05 \x03(\v2\x1d.gastrolog.v1.HistogramBucketR\thistogram\"\xad\x01\n" +
 	"\x18ForwardGetContextRequest\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12\x19\n" +
 	"\bchunk_id\x18\x02 \x01(\fR\achunkId\x12\x10\n" +
 	"\x03pos\x18\x03 \x01(\x04R\x03pos\x12\x16\n" +
 	"\x06before\x18\x04 \x01(\x05R\x06before\x12\x14\n" +
-	"\x05after\x18\x05 \x01(\x05R\x05after\"\xb5\x01\n" +
+	"\x05after\x18\x05 \x01(\x05R\x05after\x12\x1b\n" +
+	"\tvault_seq\x18\x06 \x01(\x04R\bvaultSeq\"\xb5\x01\n" +
 	"\x19ForwardGetContextResponse\x122\n" +
 	"\x06before\x18\x01 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\x06before\x122\n" +
 	"\x06anchor\x18\x02 \x01(\v2\x1a.gastrolog.v1.ExportRecordR\x06anchor\x120\n" +

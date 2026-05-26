@@ -167,6 +167,10 @@ message RecordRef {
   bytes chunk_id = 1;
   uint64 pos = 2;
   bytes vault_id = 3; // Vault this record belongs to
+  // V2 pre-materialized anchor axis (destination-vault sequence). Set when
+  // chunk_id is empty; mutual exclusion enforced server-side. See
+  // docs/fan-out/v2/anchor-model.md.
+  uint64 vault_seq = 4;
 }
 
 // ResumeToken encodes pagination state for multi-vault queries.
@@ -237,7 +241,8 @@ message PipelineStep {
 }
 
 message GetContextRequest {
-  RecordRef ref = 1;   // The anchor record
+  // Anchor record: materialized (chunk_id+pos) or V2 spool (vault_seq only).
+  RecordRef ref = 1;
   int32 before = 2;    // Number of records before anchor (default 5, max 50)
   int32 after = 3;     // Number of records after anchor (default 5, max 50)
 }

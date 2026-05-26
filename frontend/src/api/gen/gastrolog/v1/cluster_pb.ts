@@ -1781,6 +1781,13 @@ export class ForwardGetContextRequest extends Message<ForwardGetContextRequest> 
    */
   after = 0;
 
+  /**
+   * V2 spool anchor when chunk_id is empty (see docs/fan-out/v2/anchor-model.md).
+   *
+   * @generated from field: uint64 vault_seq = 6;
+   */
+  vaultSeq = protoInt64.zero;
+
   constructor(data?: PartialMessage<ForwardGetContextRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1794,6 +1801,7 @@ export class ForwardGetContextRequest extends Message<ForwardGetContextRequest> 
     { no: 3, name: "pos", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 4, name: "before", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
     { no: 5, name: "after", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 6, name: "vault_seq", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardGetContextRequest {

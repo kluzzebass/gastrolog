@@ -647,17 +647,19 @@ func (d *directRemoteSearcher) GetContext(ctx context.Context, nodeID string, re
 	if vaultID.IsZero() {
 		return nil, fmt.Errorf("invalid vault_id: empty or too short")
 	}
-	chunkID := chunk.ChunkID(glid.FromBytes(req.GetChunkId()))
-	if glid.GLID(chunkID).IsZero() {
-		return nil, fmt.Errorf("invalid chunk_id: empty or too short")
+
+	ref := query.ContextRef{
+		VaultID:  vaultID,
+		ChunkID:  chunk.ChunkID(glid.FromBytes(req.GetChunkId())),
+		Pos:      req.GetPos(),
+		VaultSeq: req.GetVaultSeq(),
+	}
+	if err := query.ValidateContextRef(ref); err != nil {
+		return nil, err
 	}
 
 	eng := orch.MultiVaultQueryEngine()
-	result, err := eng.GetContext(ctx, query.ContextRef{
-		VaultID: vaultID,
-		ChunkID: chunkID,
-		Pos:     req.GetPos(),
-	}, int(req.GetBefore()), int(req.GetAfter()))
+	result, err := eng.GetContext(ctx, ref, int(req.GetBefore()), int(req.GetAfter()))
 	if err != nil {
 		return nil, err
 	}

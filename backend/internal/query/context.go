@@ -10,13 +10,6 @@ import (
 	"gastrolog/internal/chunk"
 )
 
-// ContextRef identifies the anchor record.
-type ContextRef struct {
-	VaultID glid.GLID
-	ChunkID chunk.ChunkID
-	Pos     uint64
-}
-
 // ContextResult holds the anchor and surrounding records.
 type ContextResult struct {
 	Anchor chunk.Record
@@ -68,7 +61,7 @@ func (e *Engine) GetContext(ctx context.Context, ref ContextRef, before, after i
 		after = 50
 	}
 
-	anchorRec, err := e.ReadRecord(ctx, ref.VaultID, ref.ChunkID, ref.Pos)
+	anchorRec, err := e.resolveAnchor(ctx, ref)
 	if err != nil {
 		return nil, err
 	}
@@ -76,9 +69,7 @@ func (e *Engine) GetContext(ctx context.Context, ref ContextRef, before, after i
 	anchorTS := anchorRec.IngestTS
 
 	isAnchor := func(rec chunk.Record) bool {
-		return rec.VaultID == ref.VaultID &&
-			rec.Ref.ChunkID == ref.ChunkID &&
-			rec.Ref.Pos == ref.Pos
+		return recordMatchesAnchor(rec, anchorRec, ref)
 	}
 
 	// Fetch records before: search backward from anchor timestamp.

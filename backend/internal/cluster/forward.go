@@ -11,6 +11,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/convert"
+	"gastrolog/internal/query"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 
@@ -38,9 +39,9 @@ type VaultRecordAppender func(ctx context.Context, vaultID glid.GLID, leaderChun
 // getToken function returns a resume token for the next page (nil if exhausted).
 type SearchExecutor func(ctx context.Context, vaultID glid.GLID, queryExpr string, resumeToken []byte) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error)
 
-// ContextExecutor fetches records surrounding a specific position in a local vault.
+// ContextExecutor fetches records surrounding an anchor in a local vault.
 // Used by the ForwardGetContext handler to serve remote context requests.
-type ContextExecutor func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, pos uint64, before, after int) ([]chunk.Record, chunk.Record, []chunk.Record, error)
+type ContextExecutor func(ctx context.Context, ref query.ContextRef, before, after int) ([]chunk.Record, chunk.Record, []chunk.Record, error)
 
 // ListChunksExecutor lists chunks in a local vault for remote requests.
 type ListChunksExecutor func(ctx context.Context, vaultID glid.GLID) ([]*gastrologv1.ChunkMeta, error)
@@ -529,12 +530,23 @@ func (s *Server) forwardGetContext(ctx context.Context, req *gastrologv1.Forward
 	if err != nil {
 		return nil, err
 	}
-	chunkID, err := parseChunkID(req.GetChunkId())
-	if err != nil {
-		return nil, err
+	ref := query.ContextRef{
+		VaultID:  vaultID,
+		Pos:      req.GetPos(),
+		VaultSeq: req.GetVaultSeq(),
+	}
+	if len(req.GetChunkId()) > 0 {
+		chunkID, err := parseChunkID(req.GetChunkId())
+		if err != nil {
+			return nil, err
+		}
+		ref.ChunkID = chunkID
+	}
+	if err := query.ValidateContextRef(ref); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
-	before, anchor, after, err := s.contextExecutor(ctx, vaultID, chunkID, req.GetPos(), int(req.GetBefore()), int(req.GetAfter()))
+	before, anchor, after, err := s.contextExecutor(ctx, ref, int(req.GetBefore()), int(req.GetAfter()))
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "get context: %v", err)
 	}

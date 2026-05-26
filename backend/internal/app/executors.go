@@ -294,19 +294,15 @@ func newFollowExecutor(o *orchestrator.Orchestrator) cluster.FollowExecutor {
 }
 
 func newContextExecutor(o *orchestrator.Orchestrator) cluster.ContextExecutor {
-	return func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, pos uint64, before, after int) ([]chunk.Record, chunk.Record, []chunk.Record, error) {
-		eng, err := o.LeaderQueryEngineForVault(vaultID)
+	return func(ctx context.Context, ref query.ContextRef, before, after int) ([]chunk.Record, chunk.Record, []chunk.Record, error) {
+		eng, err := o.LeaderQueryEngineForVault(ref.VaultID)
 		if err != nil {
 			return nil, chunk.Record{}, nil, err
 		}
 		if eng == nil {
-			return nil, chunk.Record{}, nil, fmt.Errorf("no leader instance for vault %s", vaultID)
+			return nil, chunk.Record{}, nil, fmt.Errorf("no leader instance for vault %s", ref.VaultID)
 		}
-		result, err := eng.GetContext(ctx, query.ContextRef{
-			VaultID: vaultID,
-			ChunkID: chunkID,
-			Pos:     pos,
-		}, before, after)
+		result, err := eng.GetContext(ctx, ref, before, after)
 		if err != nil {
 			return nil, chunk.Record{}, nil, err
 		}

@@ -125,7 +125,7 @@ export enum NodeState {
   DRAINING = 4,
 
   /**
-   * Decommissioning: chunks moved; voter being removed from system Raft
+   * Decommissioning: chunks moved; voter being removed from cluster-ctl Raft
    * and vault-ctl groups. Transitions to absence-from-FSM (= Removed)
    * when removal completes.
    *
@@ -299,7 +299,7 @@ export class GetSystemResponse extends Message<GetSystemResponse> {
   managedFiles: ManagedFileInfo[] = [];
 
   /**
-   * Committed log index on the system Raft group (monotonic). Used by clients
+   * Committed log index on the cluster-ctl Raft group (monotonic). Used by clients
    * to avoid regressing cached replicated state with stale reads.
    *
    * @generated from field: uint64 system_raft_index = 8;
@@ -576,6 +576,13 @@ export class VaultConfig extends Message<VaultConfig> {
    */
   retentionDisposition = "";
 
+  /**
+   * "" or "v1" (default): leader-driven chunk path; "v2": fan-out V2 spool path
+   *
+   * @generated from field: string write_model = 17;
+   */
+  writeModel = "";
+
   constructor(data?: PartialMessage<VaultConfig>) {
     super();
     proto3.util.initPartial(data, this);
@@ -600,6 +607,7 @@ export class VaultConfig extends Message<VaultConfig> {
     { no: 14, name: "cache_budget", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 15, name: "cache_ttl", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 16, name: "retention_disposition", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 17, name: "write_model", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultConfig {
@@ -5813,7 +5821,7 @@ export class WatchSystemRequest extends Message<WatchSystemRequest> {
  */
 export class WatchSystemResponse extends Message<WatchSystemResponse> {
   /**
-   * Committed log index on the system Raft group when this notification fired.
+   * Committed log index on the cluster-ctl Raft group when this notification fired.
    * Clients should only invalidate or refetch when this index exceeds the
    * highest system_raft_index they already hold from a fetch or mutation.
    *
