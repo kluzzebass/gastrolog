@@ -26,6 +26,9 @@ type Vault struct {
 	seqLease vaultSeqLease
 	// ReplicationFactor is the desired total replica count (leader included).
 	ReplicationFactor uint32
+	// seqFanOutTargets lists every other placement replica for sequenced
+	// ingest fan-out from this node (leader and follower ingesters).
+	seqFanOutTargets []system.ReplicationTarget
 }
 
 // NewVault creates a Vault with a single instance.

@@ -62,6 +62,25 @@ func (o *Orchestrator) vaultSpoolStore(vaultID glid.GLID) *vaultSpoolStore {
 	return newVaultSpoolStore(vaultID, spoolmem.NewManager())
 }
 
+// ReadVaultSpoolSeq reads one accepted or tentative spool slot by VaultSeq on
+// this node. Used by cluster write-path gate tests and inspect tooling.
+func (o *Orchestrator) ReadVaultSpoolSeq(vaultID glid.GLID, seq uint64) (chunk.Record, error) {
+	ss := o.vaultSpoolStore(vaultID)
+	if ss == nil {
+		return chunk.Record{}, ErrSpoolStoreUnavailable
+	}
+	return ss.ReadByVaultSeq(context.Background(), vaultID, seq)
+}
+
+// VaultSpoolIngestH returns ingest high watermark H for a vault on this node.
+func (o *Orchestrator) VaultSpoolIngestH(vaultID glid.GLID) uint64 {
+	ss := o.vaultSpoolStore(vaultID)
+	if ss == nil {
+		return 0
+	}
+	return ss.IngestHighWatermark()
+}
+
 // LookupSeq returns a previously assigned destination sequence for eventID,
 // including tentative spool assignments not yet accepted into H.
 func (s *vaultSpoolStore) LookupSeq(eventID chunk.EventID) (uint64, bool) {

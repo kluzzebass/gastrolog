@@ -658,6 +658,23 @@ func (o *Orchestrator) VaultConfig(id glid.GLID) (system.VaultConfig, error) {
 // Every node joins every instance's Raft group regardless of storage placement
 // (gastrolog-292yi). Nodes with storage placements also get a VaultInstance with
 // a chunk manager; nodes without storage only participate in the Raft group.
+func sequencedFanOutTargets(localNodeID string, placements []system.VaultPlacement, nscs []system.NodeStorageConfig) []system.ReplicationTarget {
+	var targets []system.ReplicationTarget
+	leaderNode := system.LeaderNodeID(placements, nscs)
+	if leaderNode != "" && leaderNode != localNodeID {
+		targets = append(targets, system.ReplicationTarget{
+			NodeID:    leaderNode,
+			StorageID: system.LeaderStorageID(placements),
+		})
+	}
+	for _, tgt := range system.FollowerTargets(placements, nscs) {
+		if tgt.NodeID != localNodeID {
+			targets = append(targets, tgt)
+		}
+	}
+	return targets
+}
+
 func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.VaultConfig, factories Factories) (*VaultInstance, error) {
 	rt := &sys.Runtime
 	o.ensureVaultControlPlaneRaftGroup(vaultCfg.ID, rt.Nodes, factories)

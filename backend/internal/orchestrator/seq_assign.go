@@ -3,8 +3,10 @@ package orchestrator
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/cluster"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/vaultraft"
@@ -114,40 +116,58 @@ func (o *Orchestrator) reserveVaultSeqRange(vaultID glid.GLID, epoch, count uint
 		return vaultctlfsm.SeqLeaseGrant{}, err
 	}
 	if o.groupMgr != nil {
-		if err := o.ApplyVaultControlPlane(vaultID, wire); err != nil {
-			return vaultctlfsm.SeqLeaseGrant{}, err
-		}
-	} else if fsm := o.testSeqFSM[vaultID]; fsm != nil {
-		result := fsm.Apply(&hraft.Log{Data: wire[1+glid.Size:]})
-		switch r := result.(type) {
-		case vaultctlfsm.SeqLeaseGrant:
-			return r, nil
-		case error:
-			return vaultctlfsm.SeqLeaseGrant{}, r
-		default:
-			return vaultctlfsm.SeqLeaseGrant{}, fmt.Errorf("seq assign: unexpected reserve response %T", result)
-		}
-	} else {
-		return vaultctlfsm.SeqLeaseGrant{}, ErrSeqAssignUnavailable
+		return o.reserveVaultSeqRangeRaft(vaultID, wire, holder, epoch)
 	}
-	sub, err := o.vaultCtlSubFSM(vaultID)
-	if err != nil {
+	if fsm := o.testSeqFSM[vaultID]; fsm != nil {
+		return o.reserveVaultSeqRangeTestFSM(fsm, wire)
+	}
+	return vaultctlfsm.SeqLeaseGrant{}, ErrSeqAssignUnavailable
+}
+
+func (o *Orchestrator) reserveVaultSeqRangeRaft(vaultID glid.GLID, wire []byte, holder string, epoch uint64) (vaultctlfsm.SeqLeaseGrant, error) {
+	if err := o.ApplyVaultControlPlane(vaultID, wire); err != nil {
 		return vaultctlfsm.SeqLeaseGrant{}, err
 	}
-	if sub == nil {
-		return vaultctlfsm.SeqLeaseGrant{}, ErrSeqAssignUnavailable
+	if grant, ok := o.lookupSeqLeaseGrant(vaultID, holder, epoch); ok {
+		return grant, nil
 	}
-	st := sub.SeqAllocatorState()
-	for _, sw := range st.ActiveSwaths {
+	deadline := time.Now().Add(cluster.ReplicationTimeout)
+	for time.Now().Before(deadline) {
+		if grant, ok := o.lookupSeqLeaseGrant(vaultID, holder, epoch); ok {
+			return grant, nil
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return vaultctlfsm.SeqLeaseGrant{}, ErrSeqAssignNoActiveLease
+}
+
+func (o *Orchestrator) reserveVaultSeqRangeTestFSM(fsm *vaultctlfsm.FSM, wire []byte) (vaultctlfsm.SeqLeaseGrant, error) {
+	result := fsm.Apply(&hraft.Log{Data: wire[1+glid.Size:]})
+	switch r := result.(type) {
+	case vaultctlfsm.SeqLeaseGrant:
+		return r, nil
+	case error:
+		return vaultctlfsm.SeqLeaseGrant{}, r
+	default:
+		return vaultctlfsm.SeqLeaseGrant{}, fmt.Errorf("seq assign: unexpected reserve response %T", result)
+	}
+}
+
+func (o *Orchestrator) lookupSeqLeaseGrant(vaultID glid.GLID, holder string, epoch uint64) (vaultctlfsm.SeqLeaseGrant, bool) {
+	sub, err := o.vaultCtlSubFSM(vaultID)
+	if err != nil || sub == nil {
+		return vaultctlfsm.SeqLeaseGrant{}, false
+	}
+	for _, sw := range sub.SeqAllocatorState().ActiveSwaths {
 		if sw.HolderID == holder && sw.Epoch == epoch {
 			return vaultctlfsm.SeqLeaseGrant{
 				Start: sw.RangeStart,
 				End:   sw.RangeEnd,
 				Epoch: sw.Epoch,
-			}, nil
+			}, true
 		}
 	}
-	return vaultctlfsm.SeqLeaseGrant{}, ErrSeqAssignNoActiveLease
+	return vaultctlfsm.SeqLeaseGrant{}, false
 }
 
 func (o *Orchestrator) burnVaultSeqLeaseTail(vaultID glid.GLID, epoch, consumedEnd uint64) error {

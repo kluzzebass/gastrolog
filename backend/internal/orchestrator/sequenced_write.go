@@ -48,8 +48,19 @@ func (o *Orchestrator) appendLocalSequenced(vaultID glid.GLID, rec *chunk.Record
 	return task, remotes, nil
 }
 
+func (o *Orchestrator) sequencedFanOutTargets(vault *Vault, vaultInst *VaultInstance) []system.ReplicationTarget {
+	if vault != nil && len(vault.seqFanOutTargets) > 0 {
+		return vault.seqFanOutTargets
+	}
+	if vaultInst != nil && vaultInst.IsLeader() {
+		return vaultInst.FollowerTargets
+	}
+	return nil
+}
+
 func (o *Orchestrator) sequencedFollowerFanOut(vault *Vault, vaultID glid.GLID, vaultInst *VaultInstance, store *vaultSpoolStore, rec *chunk.Record) (*replicationTask, []remoteForwardTarget, error) {
-	if !vaultInst.ShouldForwardToFollowers() {
+	targets := o.sequencedFanOutTargets(vault, vaultInst)
+	if len(targets) == 0 {
 		if err := store.CommitAcceptance(*rec); err != nil {
 			return nil, nil, err
 		}
@@ -58,10 +69,10 @@ func (o *Orchestrator) sequencedFollowerFanOut(vault *Vault, vaultID glid.GLID, 
 	if rec.WaitForReplica {
 		return &replicationTask{
 			vaultID: vaultID,
-			targets: vaultInst.FollowerTargets,
+			targets: targets,
 		}, nil, nil
 	}
-	remotes := o.forwardSequencedToFollowers(vault, vaultID, vaultInst, *rec)
+	remotes := o.forwardSequencedToFollowers(vault, vaultID, targets, *rec)
 	if len(remotes) == 0 {
 		localOK := o.sequencedLocalFollowerWrites(vaultID, *rec)
 		o.tryCommitSequencedAcceptance(vaultID, *rec, localOK)
@@ -69,9 +80,9 @@ func (o *Orchestrator) sequencedFollowerFanOut(vault *Vault, vaultID glid.GLID, 
 	return nil, remotes, nil
 }
 
-func (o *Orchestrator) forwardSequencedToFollowers(_ *Vault, vaultID glid.GLID, vaultInst *VaultInstance, rec chunk.Record) []remoteForwardTarget {
+func (o *Orchestrator) forwardSequencedToFollowers(_ *Vault, vaultID glid.GLID, targets []system.ReplicationTarget, rec chunk.Record) []remoteForwardTarget {
 	var remotes []remoteForwardTarget
-	for _, tgt := range vaultInst.FollowerTargets {
+	for _, tgt := range targets {
 		if tgt.NodeID == o.localNodeID {
 			if err := o.applySpoolReplicaWrite(vaultID, rec); err != nil {
 				o.vaultOpsLogger.Warn("sequenced replication: local follower spool write failed",
@@ -87,6 +98,25 @@ func (o *Orchestrator) forwardSequencedToFollowers(_ *Vault, vaultID glid.GLID, 
 	return remotes
 }
 
+func (o *Orchestrator) ensureSpoolWindowForVaultSeq(vaultID glid.GLID, seq uint64) error {
+	v := o.vaults[vaultID]
+	if v == nil {
+		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+	}
+	store := v.ensureSpoolStore(o)
+	if sub, err := o.vaultCtlSubFSM(vaultID); err == nil && sub != nil {
+		for _, lease := range sub.SeqAllocatorState().ActiveSwaths {
+			if seq >= lease.RangeStart && seq <= lease.RangeEnd {
+				return store.EnsureSwathWindow(lease.RangeStart, lease.RangeEnd)
+			}
+		}
+	}
+	batch := uint64(defaultSeqLeaseBatch)
+	start := ((seq-1)/batch)*batch + 1
+	end := start + batch - 1
+	return store.EnsureSwathWindow(start, end)
+}
+
 func (o *Orchestrator) applySpoolReplicaWrite(vaultID glid.GLID, rec chunk.Record) error {
 	vault := o.vaults[vaultID]
 	if vault == nil {
@@ -94,6 +124,9 @@ func (o *Orchestrator) applySpoolReplicaWrite(vaultID glid.GLID, rec chunk.Recor
 	}
 	if vault.WriteModel != system.VaultWriteModelSequenced {
 		return errors.New("spool replica write on vault without sequenced write model")
+	}
+	if err := o.ensureSpoolWindowForVaultSeq(vaultID, rec.VaultSeq); err != nil {
+		return err
 	}
 	return vault.ensureSpoolStore(o).PutReplicaWrite(rec)
 }

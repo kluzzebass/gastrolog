@@ -239,6 +239,10 @@ type Orchestrator struct {
 	// when groupMgr is nil. Keyed by vault ID.
 	testSeqFSM map[glid.GLID]*vaultctlfsm.FSM
 
+	// testVaultCtlApplyHook, when set, replaces ApplyVaultControlPlane in tests
+	// (in-process vault-ctl forward to leader without gRPC).
+	testVaultCtlApplyHook func(vaultID glid.GLID, data []byte) error
+
 	// fenceCoords holds per-vault ephemeral hint state for the fence coordinator.
 	fenceCoords sync.Map
 
@@ -794,6 +798,12 @@ func (o *Orchestrator) SetRemoteTransferrer(t RemoteTransferrer) {
 // SetChunkReplicator injects the ordered instance replication client.
 func (o *Orchestrator) SetChunkReplicator(tr ChunkReplicator) {
 	o.chunkReplicator = tr
+}
+
+// SetVaultCtlApplyHookForTest replaces ApplyVaultControlPlane with an
+// in-process implementation (multi-node harness without gRPC peer pool).
+func (o *Orchestrator) SetVaultCtlApplyHookForTest(hook func(vaultID glid.GLID, data []byte) error) {
+	o.testVaultCtlApplyHook = hook
 }
 
 // Logger returns a child logger scoped for a subcomponent.

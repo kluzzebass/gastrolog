@@ -212,6 +212,50 @@ func TestReplicaFanOutPreservesDestinationSeq(t *testing.T) {
 	}
 }
 
+func TestSequencedFollowerIngestFansOutToPeers(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	leaderOrch := newTestOrch(t, Config{LocalNodeID: "node-leader"})
+	followerOrch := newTestOrch(t, Config{LocalNodeID: "node-follower"})
+
+	registerSequencedTestVault(t, leaderOrch, vaultID, []system.ReplicationTarget{
+		{NodeID: "node-follower", StorageID: system.SyntheticStorageID("node-follower")},
+	})
+	registerSequencedTestVault(t, followerOrch, vaultID, nil)
+	leaderOrch.vaults[vaultID].seqFanOutTargets = []system.ReplicationTarget{
+		{NodeID: "node-follower", StorageID: system.SyntheticStorageID("node-follower")},
+	}
+	followerOrch.vaults[vaultID].seqFanOutTargets = []system.ReplicationTarget{
+		{NodeID: "node-leader", StorageID: system.SyntheticStorageID("node-leader")},
+	}
+	leaderOrch.vaults[vaultID].ReplicationFactor = 2
+	followerOrch.vaults[vaultID].ReplicationFactor = 2
+	followerOrch.vaults[vaultID].Instance.IsFollower = true
+	followerOrch.vaults[vaultID].Instance.LeaderNodeID = "node-leader"
+
+	remotes := map[string]*Orchestrator{"node-leader": leaderOrch}
+	followerOrch.SetChunkReplicator(&directChunkReplicator{nodes: remotes})
+
+	cr, _ := CompileRoute(glid.New(), "all", 0, "*", []RouteDestination{{VaultID: vaultID}}, "fanout")
+	followerOrch.SetRouteSet(NewRouteSet([]*CompiledRoute{cr}))
+
+	rec := sequencedTestRecord("follower-ingest", glid.New(), 1)
+	if err := followerOrch.Ingest(rec); err != nil {
+		t.Fatalf("follower ingest: %v", err)
+	}
+	seq, ok := followerOrch.vaultSpoolStore(vaultID).LookupSeq(rec.EventID)
+	if !ok || seq != 1 {
+		t.Fatalf("follower seq = %d ok=%v", seq, ok)
+	}
+	leaderRec, err := leaderOrch.ReadVaultSpoolSeq(vaultID, seq)
+	if err != nil {
+		t.Fatalf("leader spool missing follower-originated seq: %v", err)
+	}
+	if leaderRec.EventID != rec.EventID {
+		t.Fatal("leader replica EventID mismatch")
+	}
+}
+
 func TestIngestHighWatermarkBlockedOnFailedReplication(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()

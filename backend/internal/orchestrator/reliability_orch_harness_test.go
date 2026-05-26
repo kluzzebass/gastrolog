@@ -2,6 +2,7 @@ package orchestrator_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -86,6 +87,7 @@ type orchRelHarness struct {
 	vaults       []vaultSpec
 	sharedCtx    context.Context
 	sharedCancel context.CancelFunc
+	sequencedRF  uint32
 }
 
 // vaultSpec identifies one vault in the harness along with which nodes
@@ -118,6 +120,15 @@ func withExtraVault(nodeIdxs []int) orchRelOption {
 			id:       id,
 			nodeIdxs: nodeIdxs,
 		})
+	}
+}
+
+// withSequencedWritePath configures the default vault for the locked V2
+// sequenced write model with the given replication factor (minimum 3 for
+// the write-path gate).
+func withSequencedWritePath(rf uint32) orchRelOption {
+	return func(h *orchRelHarness) {
+		h.sequencedRF = rf
 	}
 }
 
@@ -215,6 +226,11 @@ func newOrchRelHarness(t *testing.T, n int, opts ...orchRelOption) *orchRelHarne
 		h.startNode(id)
 	}
 
+	if h.sequencedRF > 0 {
+		h.wireCrossNodeReplication()
+		h.wireInProcessVaultCtlApply()
+	}
+
 	// Phase 5: wait for vault-ctl Raft to bootstrap on every node.
 	h.waitForAllReady()
 	return h
@@ -264,12 +280,18 @@ func (h *orchRelHarness) seedSharedConfig() {
 	// Register every vault + instance + placement. vaults[0] is the default;
 	// additional entries come from withExtraVault options.
 	for _, v := range h.vaults {
-		if err := h.cfgStore.PutVault(ctx, system.VaultConfig{
+		cfg := system.VaultConfig{
 			ID:           v.id,
 			Name:         "orch-rel-vault-" + v.label,
 			Type:         system.VaultTypeFile,
 			StorageClass: harnessStorageClass,
-		}); err != nil {
+			Enabled:      true,
+		}
+		if h.sequencedRF > 0 {
+			cfg.WriteModel = string(system.VaultWriteModelSequenced)
+			cfg.ReplicationFactor = h.sequencedRF
+		}
+		if err := h.cfgStore.PutVault(ctx, cfg); err != nil {
 			h.t.Fatalf("PutVault %s: %v", v.label, err)
 		}
 		// Placements: one per participating node. First listed is leader.
@@ -710,5 +732,156 @@ func (h *orchRelHarness) waitForVaultCtlLeader() *orchRelNode {
 	}
 	h.t.Fatalf("no vault-ctl Raft leader within %s", orchHarnessLeaderWait)
 	return nil
+}
+
+// wireCrossNodeReplication connects in-process RemoteTransferrers and
+// ChunkReplicators so sequenced spool fan-out and chunk replication RPCs
+// reach peer orchestrators without gRPC.
+func (h *orchRelHarness) wireCrossNodeReplication() {
+	h.t.Helper()
+	orchs := make(map[string]*orchestrator.Orchestrator, len(h.nodes))
+	for id, n := range h.nodes {
+		orchs[id] = n.orch
+	}
+	for id, n := range h.nodes {
+		remotes := make(map[string]*orchestrator.Orchestrator, len(orchs)-1)
+		for oid, o := range orchs {
+			if oid != id {
+				remotes[oid] = o
+			}
+		}
+		n.orch.SetRemoteTransferrer(&orchRelDirectTransferrer{nodes: remotes})
+		n.orch.SetChunkReplicator(&orchRelDirectChunkReplicator{nodes: remotes})
+	}
+}
+
+func (h *orchRelHarness) wireInProcessVaultCtlApply() {
+	h.t.Helper()
+	applyOnLeader := func(vaultID glid.GLID, data []byte) error {
+		leader := h.waitForVaultCtlLeader()
+		g := leader.groupMgr.GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
+		if g == nil {
+			return fmt.Errorf("vault-ctl group not running on leader")
+		}
+		return g.Raft.Apply(data, cluster.ReplicationTimeout).Error()
+	}
+	for _, id := range h.nodeIDs {
+		h.nodes[id].orch.SetVaultCtlApplyHookForTest(applyOnLeader)
+	}
+}
+
+// setDefaultIngestRoute installs a catch-all ingest route to the harness
+// default vault on every node.
+func (h *orchRelHarness) setDefaultIngestRoute(t *testing.T) {
+	t.Helper()
+	cr, err := orchestrator.CompileRoute(glid.New(), "all", 0, "*",
+		[]orchestrator.RouteDestination{{VaultID: h.vaultID}}, "write-path-gate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs := orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{cr})
+	for _, id := range h.nodeIDs {
+		h.nodes[id].orch.SetRouteSet(rs)
+	}
+}
+
+// ingestOnNode ingests one record through a specific node's router.
+func (h *orchRelHarness) ingestOnNode(nodeID string, rec chunk.Record) error {
+	h.t.Helper()
+	n := h.nodes[nodeID]
+	if n == nil || n.orch == nil {
+		return fmt.Errorf("node %q not running", nodeID)
+	}
+	return n.orch.Ingest(rec)
+}
+
+type orchRelDirectTransferrer struct {
+	nodes map[string]*orchestrator.Orchestrator
+}
+
+func (d *orchRelDirectTransferrer) ForwardAppend(_ context.Context, nodeID string, vaultID glid.GLID, records []chunk.Record) error {
+	orch, ok := d.nodes[nodeID]
+	if !ok {
+		return fmt.Errorf("orchRelDirectTransferrer: unknown node %q", nodeID)
+	}
+	for _, rec := range records {
+		if _, _, err := orch.Append(vaultID, rec); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (d *orchRelDirectTransferrer) TransferRecords(ctx context.Context, nodeID string, vaultID glid.GLID, next chunk.RecordIterator) error {
+	orch, ok := d.nodes[nodeID]
+	if !ok {
+		return fmt.Errorf("orchRelDirectTransferrer: unknown node %q", nodeID)
+	}
+	for {
+		rec, err := next()
+		if errors.Is(err, chunk.ErrNoMoreRecords) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if _, _, err := orch.Append(vaultID, rec); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (d *orchRelDirectTransferrer) WaitVaultReady(_ context.Context, _ string, _ glid.GLID) error {
+	return nil
+}
+
+type orchRelDirectChunkReplicator struct {
+	nodes map[string]*orchestrator.Orchestrator
+}
+
+func (d *orchRelDirectChunkReplicator) AppendRecords(_ context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
+	orch, ok := d.nodes[nodeID]
+	if !ok {
+		return fmt.Errorf("orchRelDirectChunkReplicator: unknown node %q", nodeID)
+	}
+	for _, rec := range records {
+		if err := orch.AppendToVault(vaultID, chunkID, rec); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (d *orchRelDirectChunkReplicator) SealVault(_ context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID) error {
+	orch, ok := d.nodes[nodeID]
+	if !ok {
+		return fmt.Errorf("orchRelDirectChunkReplicator: unknown node %q", nodeID)
+	}
+	return orch.SealActiveChunk(vaultID, chunkID)
+}
+
+func (d *orchRelDirectChunkReplicator) ImportSealedChunk(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
+	orch, ok := d.nodes[nodeID]
+	if !ok {
+		return fmt.Errorf("orchRelDirectChunkReplicator: unknown node %q", nodeID)
+	}
+	return orch.ImportToVault(ctx, vaultID, chunkID, next)
+}
+
+func (d *orchRelDirectChunkReplicator) DeleteChunk(_ context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID) error {
+	orch, ok := d.nodes[nodeID]
+	if !ok {
+		return fmt.Errorf("orchRelDirectChunkReplicator: unknown node %q", nodeID)
+	}
+	return orch.DeleteChunk(vaultID, chunkID)
+}
+
+func (d *orchRelDirectChunkReplicator) RequestReplicaCatchup(ctx context.Context, leaderNodeID string, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (uint32, error) {
+	orch, ok := d.nodes[leaderNodeID]
+	if !ok {
+		return 0, fmt.Errorf("orchRelDirectChunkReplicator: unknown leader %q", leaderNodeID)
+	}
+	return orch.CatchupSelectedChunks(ctx, vaultID, requesterNodeID, chunkIDs)
 }
 

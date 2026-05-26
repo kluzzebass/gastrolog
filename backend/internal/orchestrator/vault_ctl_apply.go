@@ -20,6 +20,9 @@ var ErrVaultCtlRaftUnavailable = errors.New("vault control-plane raft: group man
 // for the given vault. Uses VaultApplyForwarder when PeerConns is configured
 // so followers forward to the vault Raft leader; otherwise applies locally.
 func (o *Orchestrator) ApplyVaultControlPlane(vaultID glid.GLID, data []byte) error {
+	if o.testVaultCtlApplyHook != nil {
+		return o.testVaultCtlApplyHook(vaultID, data)
+	}
 	if o.groupMgr == nil {
 		return ErrVaultCtlRaftUnavailable
 	}
