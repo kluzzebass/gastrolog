@@ -806,6 +806,37 @@ func (o *Orchestrator) SetVaultCtlApplyHookForTest(hook func(vaultID glid.GLID, 
 	o.testVaultCtlApplyHook = hook
 }
 
+// MaterializeFenceForTest runs the sequenced materializer for tests and harnesses.
+func (o *Orchestrator) MaterializeFenceForTest(vaultID glid.GLID, fence vaultctlfsm.FenceRecord) (*FenceMaterializationCoverage, error) {
+	return o.materializeFence(vaultID, fence)
+}
+
+// ConvergenceWatermark returns local C_r for a vault (zero when unknown).
+func (o *Orchestrator) ConvergenceWatermark(vaultID glid.GLID) uint64 {
+	return o.convergenceWatermark(vaultID)
+}
+
+// BurnActiveSeqLeaseTailForTest records a burned tail for the local holder's active
+// lease through vault-ctl allocator authority (seq assign path).
+func (o *Orchestrator) BurnActiveSeqLeaseTailForTest(vaultID glid.GLID, consumedEnd uint64) error {
+	o.mu.RLock()
+	v := o.vaults[vaultID]
+	epoch := uint64(0)
+	if v != nil {
+		epoch = v.seqLease.epoch
+	}
+	o.mu.RUnlock()
+	if epoch == 0 {
+		epoch = vaultctlfsm.InitialSeqEpoch
+	}
+	return o.burnVaultSeqLeaseTail(vaultID, epoch, consumedEnd)
+}
+
+// VaultCtlSubFSMForTest exposes vault-ctl allocator state for multinode harness tests.
+func (o *Orchestrator) VaultCtlSubFSMForTest(vaultID glid.GLID) (*vaultctlfsm.FSM, error) {
+	return o.vaultCtlSubFSM(vaultID)
+}
+
 // Logger returns a child logger scoped for a subcomponent.
 // Use this when passing loggers to components created by the orchestrator.
 func (o *Orchestrator) Logger() *slog.Logger {

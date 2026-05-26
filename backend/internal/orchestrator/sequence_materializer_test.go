@@ -97,6 +97,12 @@ func TestSequenceMaterializerSkipsBurnedTailGaps(t *testing.T) {
 	if got := orch.materializationWatermark(vaultID); got != 10 {
 		t.Fatalf("M_r = %d, want 10", got)
 	}
+	if got := orch.convergenceWatermark(vaultID); got != 10 {
+		t.Fatalf("C_r = %d, want 10 after materialize across burned tail", got)
+	}
+	if !orch.IsFenceConvergeSealed(vaultID, fence) {
+		t.Fatal("expected converge-sealed after materialize with burned-tail gaps")
+	}
 	metas, err := orch.ListLocalChunkMetas(vaultID)
 	if err != nil {
 		t.Fatal(err)
@@ -140,6 +146,81 @@ func TestSequenceMaterializerFailsAssignedMissingNotGap(t *testing.T) {
 	}
 }
 
+func TestSequenceMaterializerOnlyBurnedTailGapAdvancesWatermarks(t *testing.T) {
+	t.Parallel()
+	orch, vaultID := newSequencedFenceTestOrch(t, 0)
+	reserveSeqAllocatorRange(t, orch, vaultID, 10)
+	if err := orch.bumpVaultSeqAllocatorEpoch(vaultID); err != nil {
+		t.Fatal(err)
+	}
+
+	fence := vaultctlfsm.FenceRecord{ID: 1, UpperBoundSeq: 10, PrevBoundSeq: 0}
+	cov, err := orch.materializeFence(vaultID, fence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cov == nil || cov.RecordCount != 0 {
+		t.Fatalf("coverage = %+v, want zero assigned records", cov)
+	}
+	if got := orch.materializationWatermark(vaultID); got != 10 {
+		t.Fatalf("M_r = %d, want 10", got)
+	}
+	if got := orch.convergenceWatermark(vaultID); got != 10 {
+		t.Fatalf("C_r = %d, want 10 for fence spanning only unassigned gaps", got)
+	}
+}
+
+func TestSequenceMaterializerBurnedTailViaSeqAssignBurn(t *testing.T) {
+	t.Parallel()
+	orch, vaultID := newSequencedFenceTestOrch(t, 0)
+	grant, err := orch.reserveVaultSeqRange(vaultID, vaultctlfsm.InitialSeqEpoch, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if grant.Start != 1 || grant.End != 10 {
+		t.Fatalf("grant = %+v, want [1,10]", grant)
+	}
+
+	store := orch.vaultSpoolStore(vaultID)
+	if err := store.EnsureSwathWindow(1, 512); err != nil {
+		t.Fatal(err)
+	}
+	ingesterID := glid.New()
+	for _, seq := range []uint64{1, 2, 3, 4, 5, 6, 7} {
+		rec := sequencedTestRecord("assign-burn", ingesterID, uint32(seq))
+		rec.VaultSeq = seq
+		if err := store.AppendTentative(rec); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.CommitAcceptance(rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := orch.burnVaultSeqLeaseTail(vaultID, grant.Epoch, 7); err != nil {
+		t.Fatal(err)
+	}
+	sub, err := orch.vaultCtlSubFSM(vaultID)
+	if err != nil || sub == nil {
+		t.Fatal("vault ctl sub FSM required")
+	}
+	alloc := sub.SeqAllocatorState()
+	if len(alloc.BurnedTails) != 1 || alloc.BurnedTails[0].Start != 8 || alloc.BurnedTails[0].End != 10 {
+		t.Fatalf("BurnedTails = %+v, want [{8 10 ...}]", alloc.BurnedTails)
+	}
+
+	fence := vaultctlfsm.FenceRecord{ID: 1, UpperBoundSeq: 10, PrevBoundSeq: 0}
+	cov, err := orch.materializeFence(vaultID, fence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cov == nil || cov.RecordCount != 7 {
+		t.Fatalf("coverage = %+v, want 7 records", cov)
+	}
+	if got := orch.convergenceWatermark(vaultID); got != 10 {
+		t.Fatalf("C_r = %d, want 10 after seq-assign burned tail", got)
+	}
+}
+
 func TestSequenceMaterializerDedupEventIDByLowestSeq(t *testing.T) {
 	t.Parallel()
 	orch, vaultID := newSequencedFenceTestOrch(t, 0)
@@ -180,21 +261,13 @@ func TestSequenceMaterializerDedupEventIDByLowestSeq(t *testing.T) {
 
 func burnSeqAllocatorTail(t *testing.T, orch *Orchestrator, vaultID glid.GLID, reserveEnd, burnThrough uint64) {
 	t.Helper()
+	reserveSeqAllocatorRange(t, orch, vaultID, reserveEnd)
 	fsm, err := orch.vaultCtlSubFSM(vaultID)
 	if err != nil || fsm == nil {
 		t.Fatal("vault ctl sub FSM required for burned tail test")
 	}
 	const holder = "test-holder"
 	const epoch = vaultctlfsm.InitialSeqEpoch
-	reserve, err := vaultctlfsm.MarshalReserveSeqRange(holder, epoch, reserveEnd)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result := fsm.Apply(&hraft.Log{Data: reserve}); result != nil {
-		if applyErr, ok := result.(error); ok && applyErr != nil {
-			t.Fatalf("reserve: %v", applyErr)
-		}
-	}
 	burn, err := vaultctlfsm.MarshalBurnSeqLeaseTail(holder, epoch, burnThrough)
 	if err != nil {
 		t.Fatal(err)
@@ -202,6 +275,25 @@ func burnSeqAllocatorTail(t *testing.T, orch *Orchestrator, vaultID glid.GLID, r
 	if result := fsm.Apply(&hraft.Log{Data: burn}); result != nil {
 		if applyErr, ok := result.(error); ok && applyErr != nil {
 			t.Fatalf("burn tail: %v", applyErr)
+		}
+	}
+}
+
+func reserveSeqAllocatorRange(t *testing.T, orch *Orchestrator, vaultID glid.GLID, count uint64) {
+	t.Helper()
+	fsm, err := orch.vaultCtlSubFSM(vaultID)
+	if err != nil || fsm == nil {
+		t.Fatal("vault ctl sub FSM required for allocator test")
+	}
+	const holder = "test-holder"
+	const epoch = vaultctlfsm.InitialSeqEpoch
+	reserve, err := vaultctlfsm.MarshalReserveSeqRange(holder, epoch, count)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := fsm.Apply(&hraft.Log{Data: reserve}); result != nil {
+		if applyErr, ok := result.(error); ok && applyErr != nil {
+			t.Fatalf("reserve: %v", applyErr)
 		}
 	}
 }

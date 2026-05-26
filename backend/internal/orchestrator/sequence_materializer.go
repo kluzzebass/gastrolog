@@ -87,6 +87,13 @@ func (o *Orchestrator) materializeFence(vaultID glid.GLID, fence vaultctlfsm.Fen
 	if len(records) == 0 {
 		store.setMaterializationWatermark(fence.UpperBoundSeq)
 		o.advanceSpoolReclaimWatermark(vault, fence.UpperBoundSeq)
+		o.recordMaterializationCoverage(vaultID, coverage)
+		if err := o.reconcileFenceConvergence(vaultID, fence); err != nil {
+			o.vaultOpsLogger.Warn("sequenced reconcile after materialize",
+				"vault", vaultID,
+				"fence", fence.ID,
+				"error", err)
+		}
 		return coverage, nil
 	}
 
