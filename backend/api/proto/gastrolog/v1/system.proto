@@ -229,7 +229,7 @@ enum VaultType {
 // The node is derived from the file storage's NodeStorageConfig.
 message VaultPlacement {
   bytes storage_id = 1;   // references FileStorage.id
-  bool leader = 2;         // true = this storage bootstraps the Raft group (initial leader)
+  bool leader = 2;         // bootstrap/residency primary; V1 write-path authority, not V2 — see docs/fan-out/v2/placement-leader-migration.md
 }
 
 // VaultConfig defines a vault — the unit of independent storage and the

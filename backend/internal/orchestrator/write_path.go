@@ -27,6 +27,9 @@ func (o *Orchestrator) vaultWriteModel(vaultID glid.GLID) system.VaultWriteModel
 // dispatchDestinationWrite appends one record to a local destination vault.
 // Route fan-out may invoke this once per destination; replica fan-out is
 // handled inside the V1 path after the local append succeeds.
+//
+// V2 path must not gate on VaultPlacement.Leader (Phase 0.6); coordination
+// uses vault-ctl leader in later phases.
 func (o *Orchestrator) dispatchDestinationWrite(vaultID glid.GLID, rec chunk.Record) (*replicationTask, []remoteForwardTarget, error) {
 	switch wm := o.vaultWriteModel(vaultID); wm {
 	case system.VaultWriteModelV2:

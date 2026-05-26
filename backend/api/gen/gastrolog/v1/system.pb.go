@@ -557,7 +557,7 @@ func (x *RetentionRule) GetRetentionPolicyId() []byte {
 type VaultPlacement struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	StorageId     []byte                 `protobuf:"bytes,1,opt,name=storage_id,json=storageId,proto3" json:"storage_id,omitempty"` // references FileStorage.id
-	Leader        bool                   `protobuf:"varint,2,opt,name=leader,proto3" json:"leader,omitempty"`                       // true = this storage bootstraps the Raft group (initial leader)
+	Leader        bool                   `protobuf:"varint,2,opt,name=leader,proto3" json:"leader,omitempty"`                       // bootstrap/residency primary; V1 write-path authority, not V2 — see docs/fan-out/v2/placement-leader-migration.md
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
