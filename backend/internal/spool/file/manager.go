@@ -33,11 +33,12 @@ type Config struct {
 
 // Manager stores spool segments on disk under Config.Dir.
 type Manager struct {
-	cfg    Config
-	mu     sync.Mutex
-	lock   *os.File
-	byID   map[spool.SegmentID]*Segment
-	active spool.SegmentID
+	cfg               Config
+	mu                sync.Mutex
+	lock              *os.File
+	byID              map[spool.SegmentID]*Segment
+	active            spool.SegmentID
+	reclaimThroughSeq uint64
 }
 
 type segmentFiles struct {
@@ -211,6 +212,62 @@ func (m *Manager) Meta(id spool.SegmentID) (spool.SegmentMeta, bool) {
 	return seg.meta(), true
 }
 
+// SetReclaimThroughSeq sets the materialization safety watermark. Segments with
+// last_seq above this value cannot be reclaimed.
+func (m *Manager) SetReclaimThroughSeq(seq uint64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reclaimThroughSeq = seq
+}
+
+// ReclaimThroughSeq returns the current materialization safety watermark.
+func (m *Manager) ReclaimThroughSeq() uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.reclaimThroughSeq
+}
+
+// ListReclaimable returns sealed segments eligible for reclaim at the current watermark.
+func (m *Manager) ListReclaimable() []spool.SegmentMeta {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []spool.SegmentMeta
+	for _, seg := range m.byID {
+		meta := seg.meta()
+		if spool.Reclaimable(meta, m.reclaimThroughSeq, m.active) == nil {
+			out = append(out, meta)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].FirstSeq < out[j].FirstSeq
+	})
+	return out
+}
+
+// Reclaim deletes a sealed segment directory when it is at or below the safety watermark.
+func (m *Manager) Reclaim(id spool.SegmentID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	seg, ok := m.byID[id]
+	if !ok {
+		return fmt.Errorf("%w: %s", spool.ErrSegmentNotFound, id.DirName())
+	}
+	meta := seg.meta()
+	if err := spool.Reclaimable(meta, m.reclaimThroughSeq, m.active); err != nil {
+		return err
+	}
+	dir := seg.dir
+	seg.closeFiles()
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("spool: remove segment %s: %w", id.DirName(), err)
+	}
+	delete(m.byID, id)
+	if m.active == id {
+		m.active = 0
+	}
+	return nil
+}
+
 func (s *Segment) meta() spool.SegmentMeta {
 	return spool.SegmentMeta{
 		ID:          spool.SegmentID(s.firstSeq),
@@ -298,6 +355,11 @@ func (s *Segment) recover() error {
 	if spool.RecordCount(idxInfo.Size()) != idxCount {
 		if err := truncateFileTo(s.files.idx, idxEndOffset(idxCount)); err != nil {
 			return fmt.Errorf("truncate idx.log: %w", err)
+		}
+	} else if end := idxEndOffset(idxCount); idxInfo.Size() > end {
+		// Drop a partial trailing idx entry from a torn crash write.
+		if err := truncateFileTo(s.files.idx, end); err != nil {
+			return fmt.Errorf("truncate partial idx tail: %w", err)
 		}
 	}
 	s.recordCount = idxCount
@@ -646,6 +708,20 @@ func WriteOrphanIdxEntry(s *Segment, entry spool.IdxEntry) error {
 		return err
 	}
 	return s.files.idx.Sync()
+}
+
+// WritePartialIdxTail appends incomplete idx bytes (simulates torn idx write).
+func WritePartialIdxTail(s *Segment, nbytes int) error {
+	if nbytes <= 0 {
+		return nil
+	}
+	info, err := s.files.idx.Stat()
+	if err != nil {
+		return err
+	}
+	buf := make([]byte, nbytes)
+	_, err = s.files.idx.WriteAt(buf, info.Size())
+	return err
 }
 
 // Sync flushes segment files.
