@@ -15,8 +15,9 @@ var (
 // Reclaimable reports whether a sealed segment may be deleted given the
 // materialization safety watermark. reclaimThroughSeq is the highest vault_seq
 // whose spool bytes are no longer required as a materialize/reconcile source.
+// active is the manager's writable segment slot; it is always unsealed when set.
 func Reclaimable(meta SegmentMeta, reclaimThroughSeq uint64, active SegmentID) error {
-	if meta.ID == active && !meta.Sealed {
+	if active != 0 && meta.ID == active {
 		return ErrReclaimBlocked
 	}
 	if !meta.Sealed {
