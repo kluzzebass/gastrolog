@@ -33,6 +33,10 @@ type vaultSpoolStore struct {
 	byEventID map[chunk.EventID]uint64
 	bySeq     map[uint64]chunk.Record
 	ingestH   uint64
+	// materializationH is M_r — highest vault_seq fully materialized locally.
+	materializationH uint64
+	// convergenceH is C_r — highest fence upper bound converge-sealed locally.
+	convergenceH uint64
 }
 
 func newVaultSpoolStore(vaultID glid.GLID, store spool.Store) *vaultSpoolStore {
@@ -145,6 +149,49 @@ func (s *vaultSpoolStore) SpoolDurableWatermark() uint64 {
 		return 0
 	}
 	return s.store.DurableWatermark()
+}
+
+// MaterializationWatermark returns M_r — highest vault_seq fully materialized locally.
+func (s *vaultSpoolStore) MaterializationWatermark() uint64 {
+	if s == nil {
+		return 0
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.materializationH
+}
+
+// setMaterializationWatermark advances M_r monotonically.
+func (s *vaultSpoolStore) setMaterializationWatermark(seq uint64) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	if seq > s.materializationH {
+		s.materializationH = seq
+	}
+	s.mu.Unlock()
+}
+
+// ConvergenceWatermark returns C_r — highest fence upper bound converge-sealed locally.
+func (s *vaultSpoolStore) ConvergenceWatermark() uint64 {
+	if s == nil {
+		return 0
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.convergenceH
+}
+
+func (s *vaultSpoolStore) setConvergenceWatermark(seq uint64) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	if seq > s.convergenceH {
+		s.convergenceH = seq
+	}
+	s.mu.Unlock()
 }
 
 // ReadByVaultSeq implements query.SpoolAnchorReader.

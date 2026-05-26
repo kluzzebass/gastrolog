@@ -237,20 +237,25 @@ func (o *Orchestrator) retentionSweepAll() {
 // is just the transport for the response.
 func (o *Orchestrator) vaultCatchupSweepAll() {
 	o.mu.RLock()
-	vaultInsts := make([]*VaultInstance, 0)
-	for _, vault := range o.vaults {
+	type sweepTarget struct {
+		inst    *VaultInstance
+		vaultID glid.GLID
+	}
+	targets := make([]sweepTarget, 0)
+	for vaultID, vault := range o.vaults {
 		if t := vault.Instance; t != nil && t.Reconciler != nil {
-			vaultInsts = append(vaultInsts, t)
+			targets = append(targets, sweepTarget{inst: t, vaultID: vaultID})
 		}
 	}
 	o.mu.RUnlock()
-	for _, t := range vaultInsts {
-		t.Reconciler.SweepPendingObligations()
-		t.Reconciler.SweepLocalOrphans()
-		t.Reconciler.SweepMissingReplicas()
-		t.Reconciler.SweepStaleLeaderFSMEntries()
-		t.Reconciler.SweepStalePendingDeleteAcks()
-		t.Reconciler.SweepIdleActiveChunks()
+	for _, target := range targets {
+		target.inst.Reconciler.SweepPendingObligations()
+		target.inst.Reconciler.SweepLocalOrphans()
+		target.inst.Reconciler.SweepMissingReplicas()
+		target.inst.Reconciler.SweepStaleLeaderFSMEntries()
+		target.inst.Reconciler.SweepStalePendingDeleteAcks()
+		target.inst.Reconciler.SweepIdleActiveChunks()
+		o.sweepSequencedMaterialization(target.vaultID)
 	}
 }
 

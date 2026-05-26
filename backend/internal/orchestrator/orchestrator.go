@@ -242,6 +242,9 @@ type Orchestrator struct {
 	// fenceCoords holds per-vault ephemeral hint state for the fence coordinator.
 	fenceCoords sync.Map
 
+	// materializationCoverage stores the latest local fence materialization summary.
+	materializationCoverage sync.Map
+
 	// peerConns is the shared gRPC pool for cluster peers. Set from factories
 	// during ApplyConfig; used by ApplyVaultControlPlane forwarding.
 	peerConns *cluster.PeerConns
@@ -907,6 +910,10 @@ type VaultSnapshot struct {
 	IngestHighWatermark uint64
 	// FenceHighWatermark is F_n — latest durable fence upper bound from vault-ctl Raft.
 	FenceHighWatermark uint64
+	// MaterializationWatermark is M_r — highest vault_seq fully materialized locally.
+	MaterializationWatermark uint64
+	// ConvergenceWatermark is C_r — highest fence upper bound converge-sealed locally.
+	ConvergenceWatermark uint64
 	// RaftAppliedIndex is the local node's vault-ctl Raft applied
 	// index for this vault. Zero if this node has no vault-ctl group
 	// (or its Raft instance hasn't initialized). Broadcast in
@@ -958,6 +965,8 @@ func (o *Orchestrator) VaultSnapshots() []VaultSnapshot {
 				snap.IngestHighWatermark = ss.IngestHighWatermark()
 			}
 			snap.FenceHighWatermark = o.vaultFenceHighWatermark(id)
+			snap.MaterializationWatermark = o.materializationWatermark(id)
+			snap.ConvergenceWatermark = o.convergenceWatermark(id)
 		}
 		o.mu.RUnlock()
 		snapshots = append(snapshots, snap)

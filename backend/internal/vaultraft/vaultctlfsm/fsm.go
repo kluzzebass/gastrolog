@@ -215,6 +215,7 @@ type FSM struct {
 	onAckDelete      func(chunk.ChunkID, string)   // CmdAckDelete applied; (chunkID, ackingNodeID)
 	onFinalizeDelete func(chunk.ChunkID)           // CmdFinalizeDelete applied; expectedFrom was empty
 	onPruneNode      func(string, []chunk.ChunkID) // CmdPruneNode applied; (prunedNodeID, finalizableChunks)
+	onPublishFence   func(FenceRecord)             // CmdPublishFence applied
 
 	// tombstones records chunk IDs that have been deleted, with the apply
 	// timestamp of the delete. Consulted by the receive side of vault
@@ -406,6 +407,14 @@ func (f *FSM) SetOnPruneNode(fn func(prunedNodeID string, finalizable []chunk.Ch
 	f.onPruneNode = fn
 }
 
+// SetOnPublishFence registers a callback invoked (outside the FSM lock)
+// after CmdPublishFence applies successfully.
+func (f *FSM) SetOnPublishFence(fn func(FenceRecord)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onPublishFence = fn
+}
+
 // ---------- Reads (local, no Raft) ----------
 
 // Get returns a copy of a chunk's metadata, or nil if not found.
@@ -476,6 +485,7 @@ type applyEffects struct {
 	finalizedDeleteID  *chunk.ChunkID
 	prunedNode         string
 	prunedFinalizable  []chunk.ChunkID
+	publishedFence     *FenceRecord
 
 	onCreate           func(ManifestEntry)
 	onDelete           func(chunk.ChunkID)
@@ -486,6 +496,7 @@ type applyEffects struct {
 	onAckDelete        func(chunk.ChunkID, string)
 	onFinalizeDelete   func(chunk.ChunkID)
 	onPruneNode        func(string, []chunk.ChunkID)
+	onPublishFence     func(FenceRecord)
 }
 
 func (e applyEffects) fire() {
@@ -515,6 +526,9 @@ func (e applyEffects) fire() {
 	}
 	if e.prunedNode != "" && e.onPruneNode != nil {
 		e.onPruneNode(e.prunedNode, e.prunedFinalizable)
+	}
+	if e.publishedFence != nil && e.onPublishFence != nil {
+		e.onPublishFence(*e.publishedFence)
 	}
 	// gastrolog-15fm8: applyPruneNode now finalizes drained-ExpectedFrom
 	// chunks atomically inside the same apply. Fire onFinalizeDelete
@@ -618,6 +632,7 @@ func (f *FSM) applyLocked(cmd Command, payload []byte) (any, applyEffects) {
 			result = fenceErr
 		} else {
 			result = rec
+			fx.publishedFence = rec
 		}
 	default:
 		result = fmt.Errorf("unknown chunk FSM command: %d", cmd)
@@ -631,6 +646,7 @@ func (f *FSM) applyLocked(cmd Command, payload []byte) (any, applyEffects) {
 	fx.onAckDelete = f.onAckDelete
 	fx.onFinalizeDelete = f.onFinalizeDelete
 	fx.onPruneNode = f.onPruneNode
+	fx.onPublishFence = f.onPublishFence
 	f.mu.Unlock()
 
 	return result, fx
