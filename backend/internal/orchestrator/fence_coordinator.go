@@ -130,6 +130,13 @@ func (c *vaultFenceCoordinator) publishFence(upperBoundSeq uint64, at time.Time)
 	return ErrSeqAssignUnavailable
 }
 
+// EvaluateVaultFenceAfterHint re-runs fence publication for vault-ctl leaders
+// after accepting remote replica hint evidence. Avoids waiting for the next
+// rotation-sweep tick when cross-node hints arrive via NodeStats broadcast.
+func (o *Orchestrator) EvaluateVaultFenceAfterHint(vaultID glid.GLID) error {
+	return o.evaluateVaultFence(vaultID, o.now(), false)
+}
+
 func (o *Orchestrator) evaluateVaultFence(vaultID glid.GLID, at time.Time, timeTriggered bool) error {
 	if o.vaultWriteModel(vaultID) != system.VaultWriteModelSequenced {
 		return nil

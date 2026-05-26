@@ -282,6 +282,11 @@ message VaultStats {
   // has no vault-ctl group for this vault (e.g. vault placed
   // elsewhere) or Raft is not yet initialized.
   uint64 raft_applied_index = 13;
+  // ingest_high_watermark is H — highest accepted vault_seq on this
+  // node. Broadcast in NodeStats as ephemeral fence-hint evidence for
+  // vault-ctl leaders (gastrolog-4vkm2). Zero when this node has no
+  // local spool state for the vault or the vault is not sequenced.
+  uint64 ingest_high_watermark = 14;
 }
 
 message ReindexVaultRequest {

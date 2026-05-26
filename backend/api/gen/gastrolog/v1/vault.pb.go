@@ -1562,8 +1562,13 @@ type VaultStats struct {
 	// has no vault-ctl group for this vault (e.g. vault placed
 	// elsewhere) or Raft is not yet initialized.
 	RaftAppliedIndex uint64 `protobuf:"varint,13,opt,name=raft_applied_index,json=raftAppliedIndex,proto3" json:"raft_applied_index,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// ingest_high_watermark is H — highest accepted vault_seq on this
+	// node. Broadcast in NodeStats as ephemeral fence-hint evidence for
+	// vault-ctl leaders (gastrolog-4vkm2). Zero when this node has no
+	// local spool state for the vault or the vault is not sequenced.
+	IngestHighWatermark uint64 `protobuf:"varint,14,opt,name=ingest_high_watermark,json=ingestHighWatermark,proto3" json:"ingest_high_watermark,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *VaultStats) Reset() {
@@ -1683,6 +1688,13 @@ func (x *VaultStats) GetName() string {
 func (x *VaultStats) GetRaftAppliedIndex() uint64 {
 	if x != nil {
 		return x.RaftAppliedIndex
+	}
+	return 0
+}
+
+func (x *VaultStats) GetIngestHighWatermark() uint64 {
+	if x != nil {
+		return x.IngestHighWatermark
 	}
 	return 0
 }
@@ -3000,7 +3012,7 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x11stack_inuse_bytes\x18\x06 \x01(\x03R\x0fstackInuseBytes\x12\x1b\n" +
 	"\tsys_bytes\x18\a \x01(\x03R\bsysBytes\x12!\n" +
 	"\fheap_objects\x18\b \x01(\x04R\vheapObjects\x12\x15\n" +
-	"\x06num_gc\x18\t \x01(\rR\x05numGc\"\xdc\x03\n" +
+	"\x06num_gc\x18\t \x01(\rR\x05numGc\"\x90\x04\n" +
 	"\n" +
 	"VaultStats\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
@@ -3019,7 +3031,8 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\fnewestRecord\x12\x18\n" +
 	"\aenabled\x18\v \x01(\bR\aenabled\x12\x12\n" +
 	"\x04name\x18\f \x01(\tR\x04name\x12,\n" +
-	"\x12raft_applied_index\x18\r \x01(\x04R\x10raftAppliedIndex\"+\n" +
+	"\x12raft_applied_index\x18\r \x01(\x04R\x10raftAppliedIndex\x122\n" +
+	"\x15ingest_high_watermark\x18\x0e \x01(\x04R\x13ingestHighWatermark\"+\n" +
 	"\x13ReindexVaultRequest\x12\x14\n" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\"-\n" +
 	"\x14ReindexVaultResponse\x12\x15\n" +

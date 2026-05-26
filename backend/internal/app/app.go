@@ -748,6 +748,7 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 
 	peerJobState := cluster.NewPeerJobState(20 * time.Second)
 	clusterSrv.Subscribe(peerJobState.HandleBroadcast)
+	clusterSrv.Subscribe(newFenceHintIngestor(orch, nodeID, compCluster.Apply(logger)).HandleBroadcast)
 
 	// Write a placeholder NodeConfig for every newly admitted peer so
 	// fresh joiners never display as raw GLIDs in the UI while their

@@ -223,6 +223,12 @@ func (o *Orchestrator) vaultCtlSubFSM(vaultID glid.GLID) (*vaultctlfsm.FSM, erro
 	}
 }
 
+// WireTestSeqAllocator attaches a local vault-ctl FSM for seq assignment and
+// fence publication in unit tests without a full vault-ctl Raft group.
+func (o *Orchestrator) WireTestSeqAllocator(vaultID glid.GLID) {
+	wireTestSeqAllocator(o, vaultID)
+}
+
 // wireTestSeqAllocator attaches a local vaultctl FSM for seq assignment in
 // unit tests without a full vault-ctl Raft group.
 func wireTestSeqAllocator(o *Orchestrator, vaultID glid.GLID) *vaultctlfsm.FSM {

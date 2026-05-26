@@ -1361,6 +1361,16 @@ export class VaultStats extends Message<VaultStats> {
    */
   raftAppliedIndex = protoInt64.zero;
 
+  /**
+   * ingest_high_watermark is H — highest accepted vault_seq on this
+   * node. Broadcast in NodeStats as ephemeral fence-hint evidence for
+   * vault-ctl leaders (gastrolog-4vkm2). Zero when this node has no
+   * local spool state for the vault or the vault is not sequenced.
+   *
+   * @generated from field: uint64 ingest_high_watermark = 14;
+   */
+  ingestHighWatermark = protoInt64.zero;
+
   constructor(data?: PartialMessage<VaultStats>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1382,6 +1392,7 @@ export class VaultStats extends Message<VaultStats> {
     { no: 11, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 12, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 13, name: "raft_applied_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 14, name: "ingest_high_watermark", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultStats {
