@@ -260,16 +260,26 @@ func recordToProto(rec chunk.Record) *apiv1.Record {
 		IngestSeq:  rec.EventID.IngestSeq,
 		IngesterId: rec.EventID.IngesterID[:],
 		NodeId:     rec.EventID.NodeID[:],
-		Ref: &apiv1.RecordRef{
-			ChunkId: glid.GLID(rec.Ref.ChunkID).ToProto(),
-			Pos:     rec.Ref.Pos,
-			VaultId: rec.VaultID.ToProto(),
-		},
+		Ref:        recordRefFromChunk(rec),
 	}
 	if !rec.SourceTS.IsZero() {
 		r.SourceTs = timestamppb.New(rec.SourceTS)
 	}
 	return r
+}
+
+// recordRefFromChunk builds a query RecordRef per docs/fan-out/v2/anchor-model.md.
+func recordRefFromChunk(rec chunk.Record) *apiv1.RecordRef {
+	ref := &apiv1.RecordRef{VaultId: rec.VaultID.ToProto()}
+	if rec.Ref.ChunkID != (chunk.ChunkID{}) {
+		ref.ChunkId = glid.GLID(rec.Ref.ChunkID).ToProto()
+		ref.Pos = rec.Ref.Pos
+		return ref
+	}
+	if rec.VaultSeq > 0 {
+		ref.VaultSeq = rec.VaultSeq
+	}
+	return ref
 }
 
 // exportToRecord converts an ExportRecord to a Record proto.
@@ -288,13 +298,22 @@ func exportToRecord(er *apiv1.ExportRecord) *apiv1.Record {
 		maps.Copy(rec.Attrs, er.Attrs)
 	}
 	if len(er.VaultId) != 0 {
-		rec.Ref = &apiv1.RecordRef{
-			VaultId: er.VaultId,
-			ChunkId: er.ChunkId,
-			Pos:     er.Pos,
-		}
+		rec.Ref = recordRefFromExport(er)
 	}
 	return rec
+}
+
+func recordRefFromExport(er *apiv1.ExportRecord) *apiv1.RecordRef {
+	ref := &apiv1.RecordRef{VaultId: er.VaultId}
+	if len(er.ChunkId) >= glid.Size {
+		ref.ChunkId = er.ChunkId
+		ref.Pos = er.Pos
+		return ref
+	}
+	if er.GetVaultSeq() > 0 {
+		ref.VaultSeq = er.GetVaultSeq()
+	}
+	return ref
 }
 
 // protoToChunkRecord converts a query API record to the internal chunk record shape.
@@ -320,6 +339,7 @@ func protoToChunkRecord(r *apiv1.Record) chunk.Record {
 			ChunkID: chunk.ChunkID(glid.FromBytes(ref.GetChunkId())),
 			Pos:     ref.GetPos(),
 		}
+		rec.VaultSeq = ref.GetVaultSeq()
 	}
 	if len(r.GetIngesterId()) > 0 {
 		rec.EventID.IngesterID = glid.FromBytes(r.GetIngesterId())

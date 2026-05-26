@@ -17,7 +17,6 @@ var ErrInvalidContextAnchor = errors.New("invalid context anchor")
 var ErrSpoolAnchorNotAvailable = errors.New("vault_seq anchor requires spool reader (pre-materialized record)")
 
 // SpoolAnchorReader resolves pre-materialized records by destination-vault sequence.
-// Wired during Phase 6 rollout; optional until then.
 type SpoolAnchorReader interface {
 	ReadByVaultSeq(ctx context.Context, vaultID glid.GLID, seq uint64) (chunk.Record, error)
 }
