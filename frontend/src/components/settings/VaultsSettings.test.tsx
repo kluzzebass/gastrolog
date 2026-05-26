@@ -240,6 +240,57 @@ describe("VaultsSettings", () => {
       expect(m(mocks.systemClient, "putVault")).toHaveBeenCalledTimes(1);
     });
   });
+
+  test("shows sequenced badge for sequenced vaults", () => {
+    const qc = createTestQueryClient();
+    qc.setQueryData(["system"], {
+      ...sampleConfig,
+      vaults: [
+        new VaultConfig({
+          id: testId(3),
+          name: "seq-vault",
+          enabled: true,
+          type: VaultType.FILE,
+          storageClass: 1,
+          replicationFactor: 1,
+          writeModel: "sequenced",
+        }),
+      ],
+    });
+
+    const { getByText } = render(<VaultsSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    expect(getByText("seq-vault")).toBeTruthy();
+    expect(getByText("sequenced")).toBeTruthy();
+  });
+
+  test("create sequenced file vault sends writeModel in PutVault", async () => {
+    m(mocks.systemClient, "generateName").mockResolvedValueOnce({ name: "happy-fox" });
+    m(mocks.systemClient, "putVault").mockResolvedValueOnce({});
+    const qc = createTestQueryClient();
+    qc.setQueryData(["system"], { ...sampleConfig, vaults: [] });
+
+    const { getByText, getByLabelText } = render(<VaultsSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    fireEvent.click(getByText("Add Vault"));
+    await waitFor(() => expect(getByText("Create")).toBeTruthy());
+
+    fireEvent.change(getByLabelText("Storage Class"), { target: { value: "1" } });
+    fireEvent.change(getByLabelText("Write Model"), { target: { value: "sequenced" } });
+
+    fireEvent.click(getByText("Create").closest("button")!);
+
+    await waitFor(() => {
+      expect(m(mocks.systemClient, "putVault")).toHaveBeenCalledTimes(1);
+      const call = m(mocks.systemClient, "putVault").mock.calls[0]! as unknown[];
+      const arg = call[0] as Record<string, Record<string, unknown>>;
+      expect(arg.config!.writeModel).toBe("sequenced");
+    });
+  });
 });
 
 // ── Vault-level save tests ───────────────────────────────────────────
@@ -295,12 +346,6 @@ describe("vault edit save", () => {
 
     expandVault(getByText);
 
-    // Toggle the Enabled checkbox to dirty the vault. (fireEvent.change
-    // on <select> is known unreliable under happy-dom + React 19, so the
-    // checkbox path is the one we exercise here. The save handler builds
-    // the full VaultConfig from the edit state regardless of which field
-    // was dirtied — asserting the resulting payload covers the storage
-    // shape preservation we care about.)
     const enabledCheckbox = container.querySelector('[aria-checked="true"][role="checkbox"]')!;
     fireEvent.click(enabledCheckbox);
 
@@ -317,11 +362,35 @@ describe("vault edit save", () => {
       const arg = call[0] as Record<string, Record<string, unknown>>;
       const cfg = arg.config!;
       expect(cfg.enabled).toBe(false);
-      // Storage shape preserved through the round-trip: type, RF, and
-      // storage class come back unchanged from the source VaultConfig.
       expect(cfg.type).toBe(VaultType.FILE);
       expect((cfg.replicationFactor as number) || 1).toBe(1);
       expect(cfg.storageClass).toBe(1);
+    });
+  });
+
+  test("save write model change sends sequenced in PutVault", async () => {
+    m(mocks.systemClient, "putVault").mockResolvedValue({});
+    const qc = createTestQueryClient();
+    qc.setQueryData(["system"], oneVaultConfig);
+
+    const { getByText, getByLabelText } = render(<VaultsSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    expandVault(getByText);
+    fireEvent.change(getByLabelText("Write Model"), { target: { value: "sequenced" } });
+
+    await waitFor(() => {
+      expect(getByText("Save").closest("button")!.disabled).toBe(false);
+    });
+
+    fireEvent.click(getByText("Save").closest("button")!);
+
+    await waitFor(() => {
+      expect(m(mocks.systemClient, "putVault")).toHaveBeenCalledTimes(1);
+      const call = m(mocks.systemClient, "putVault").mock.calls[0]! as unknown[];
+      const arg = call[0] as Record<string, Record<string, unknown>>;
+      expect(arg.config!.writeModel).toBe("sequenced");
     });
   });
 

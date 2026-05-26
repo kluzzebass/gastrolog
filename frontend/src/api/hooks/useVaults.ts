@@ -143,6 +143,18 @@ export function useRetryUnreadableChunks() {
   });
 }
 
+export function useSequencedVaultDiagnostics(vaultId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["sequencedVaultDiagnostics", vaultId],
+    queryFn: async () => {
+      return vaultClient.getSequencedVaultDiagnostics({ vault: vaultId });
+    },
+    enabled: enabled && !!vaultId,
+    staleTime: 10_000,
+    retry: false,
+  });
+}
+
 export function useValidateVault() {
   const qc = useQueryClient();
   return useMutation({

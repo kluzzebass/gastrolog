@@ -35,6 +35,7 @@ import {
   type StorageEntry,
   type VaultTypeLabel,
 } from "./VaultsSettings";
+import { normalizeWriteModel, usesSequencedWriteModel } from "../../utils/writeModel";
 
 interface VaultSettingsCardProps {
   vault: VaultConfig;
@@ -81,6 +82,7 @@ function vaultToEntry(v: VaultConfig): StorageEntry {
     retentionPolicyId: v.retentionRules[0] ? encode(v.retentionRules[0].retentionPolicyId) : "",
     retentionDisposition: v.retentionDisposition || "delete",
     replicationFactor: String(v.replicationFactor || 1),
+    writeModel: normalizeWriteModel(v.writeModel),
     path: v.path || "",
     nodeId: "",
   };
@@ -113,6 +115,7 @@ function entryToVault(
       : [],
     retentionDisposition: entry.type !== "jsonl" ? (entry.retentionDisposition || "delete") : "",
     replicationFactor: entry.type === "jsonl" ? 1 : parseInt(entry.replicationFactor, 10) || 1,
+    writeModel: entry.type !== "jsonl" ? entry.writeModel : "",
     path: entry.type === "jsonl" ? entry.path : "",
     placements: vault.placements,
   });
@@ -343,6 +346,9 @@ export function VaultSettingsCard({
           {!vault.enabled && (
             <Badge variant="muted" dark={dark}>disabled</Badge>
           )}
+          {usesSequencedWriteModel(vault.writeModel) && (
+            <Badge variant="info" dark={dark} title="Sequenced write path">sequenced</Badge>
+          )}
           {csName && (
             <Badge variant="muted" dark={dark} title="Cloud-backed">{csName}</Badge>
           )}
@@ -393,6 +399,9 @@ export function VaultSettingsCard({
           )}
           {vault.type === VaultType.MEMORY && vault.memoryBudgetBytes > 0 && (
             <span className="font-mono">{formatBytes(vault.memoryBudgetBytes)}</span>
+          )}
+          {vault.type !== VaultType.JSONL && vault.writeModel && vault.writeModel !== "chunk_append" && (
+            <span className="font-mono">{`write ${vault.writeModel}`}</span>
           )}
           {vault.type !== VaultType.JSONL && (
             <span>{`RF=${String(rfActual)}`}</span>

@@ -16,6 +16,7 @@ import { FormField, TextInput, SelectInput, SpinnerInput } from "./FormField";
 import { Checkbox } from "./Checkbox";
 import { sortByName } from "../../lib/sort";
 import { VaultSettingsCard } from "./VaultSettingsCard";
+import { normalizeWriteModel, type WriteModel, writeModelSelectOptions } from "../../utils/writeModel";
 
 // ---------------------------------------------------------------------------
 // Vault storage form types
@@ -44,6 +45,7 @@ export interface StorageEntry {
   retentionPolicyId: string;
   retentionDisposition: string; // "delete" (default) | "route"
   replicationFactor: string;
+  writeModel: WriteModel;
   path: string;
   nodeId: string;
 }
@@ -62,6 +64,7 @@ export function emptyStorageEntry(type: VaultTypeLabel): StorageEntry {
     retentionPolicyId: "",
     retentionDisposition: "delete",
     replicationFactor: "1",
+    writeModel: "chunk_append",
     path: "",
     nodeId: "",
   };
@@ -401,6 +404,21 @@ export function VaultStorageForm({
       )}
 
       {storage.type !== "jsonl" && (
+        <FormField
+          label="Write Model"
+          dark={dark}
+          description="Chunk append uses the leader-driven active-chunk path. Sequenced enables destination-vault sequencing and spool-first ingest."
+        >
+          <SelectInput
+            value={storage.writeModel}
+            onChange={(v) => onUpdate({ writeModel: normalizeWriteModel(v) })}
+            options={writeModelSelectOptions()}
+            dark={dark}
+          />
+        </FormField>
+      )}
+
+      {storage.type !== "jsonl" && (
         <FormField label="Replication Factor" dark={dark} description="1 = none, 2 = redundant, 3+ = fault tolerant">
           <SpinnerInput
             value={storage.replicationFactor}
@@ -536,6 +554,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
         : [],
       retentionDisposition: storage.type !== "jsonl" ? (storage.retentionDisposition || "delete") : "",
       replicationFactor: parseInt(storage.replicationFactor, 10) || 1,
+      writeModel: storage.type !== "jsonl" ? storage.writeModel : "",
       path: storage.type === "jsonl" ? storage.path : "",
     });
 

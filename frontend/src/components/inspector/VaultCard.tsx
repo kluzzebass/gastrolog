@@ -12,10 +12,12 @@ import { protoToInstant, instantToMs, instantToDate, formatDateTimeShort } from 
 import { formatBytes } from "../../utils/units";
 import { middleTruncate } from "../../utils/middleTruncate";
 import { leaderNodeId, followerNodeIds } from "../../utils/placement";
+import { usesSequencedWriteModel } from "../../utils/writeModel";
 import { Badge } from "../Badge";
 import { CogIcon } from "../icons";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { CrossLinkBadge } from "./CrossLinkBadge";
+import { SequencedVaultDiagnosticsPanel } from "./SequencedVaultDiagnosticsPanel";
 
 interface VaultCardProps {
   vault: Vault;
@@ -37,6 +39,7 @@ export function VaultCard({
   const { data: chunks } = useChunks(vault.id);
   const chunkCount = chunks?.length ?? 0;
   const recordCount = (chunks ?? []).reduce((sum, c) => sum + Number(c.recordCount), 0);
+  const isSequenced = usesSequencedWriteModel(vault.config?.writeModel);
 
   return (
     <ExpandableCard
@@ -52,6 +55,9 @@ export function VaultCard({
           {!vault.enabled && (
             <Badge variant="warn" dark={dark}>disabled</Badge>
           )}
+          {isSequenced && (
+            <Badge variant="info" dark={dark}>sequenced</Badge>
+          )}
           <Badge variant="muted" dark={dark}>
             {chunkCount.toLocaleString()} chunks
           </Badge>
@@ -66,6 +72,9 @@ export function VaultCard({
         </span>
       }
     >
+      {expanded && isSequenced && (
+        <SequencedVaultDiagnosticsPanel vaultId={vault.id} dark={dark} />
+      )}
       <VaultActions vaultId={vault.id} dark={dark} />
       <ChunkList vaultId={vault.id} dark={dark} />
     </ExpandableCard>

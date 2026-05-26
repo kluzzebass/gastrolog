@@ -4,7 +4,18 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import type { ClusterNode } from "../../api/gen/gastrolog/v1/lifecycle_pb";
 // eslint-disable-next-line no-restricted-imports -- NodeStats is a passthrough type from Node.stats; no model wrap planned
 import type { NodeStats } from "../../api/gen/gastrolog/v1/cluster_pb";
+import { useConfig } from "../../api/hooks/useSystem";
+import { buildNodeNameMap } from "../../utils/nodeNames";
 import { formatBytes } from "../../utils/units";
+import { usesSequencedWriteModel } from "../../utils/writeModel";
+import {
+  extractPeerSequencedWatermarks,
+  formatSeq,
+  hasVaultStatsEvidence,
+  sequencedLagWarnings,
+  watermarksFromStats,
+} from "../../utils/sequencedDiagnostics";
+import { SequencedVaultWatermarksTable } from "./SequencedVaultDiagnosticsPanel";
 
 /**
  * System stats view for a single node, using gossip-broadcast NodeStats.
@@ -37,6 +48,8 @@ function CompactView({
   stats,
   dark,
 }: Readonly<{ stats: NodeStats; dark: boolean }>) {
+  const sequencedVaults = stats.vaults.filter(hasVaultStatsEvidence);
+
   return (
     <div className="flex flex-col gap-4">
       {/* System stats */}
@@ -119,6 +132,36 @@ function CompactView({
         </section>
       )}
 
+      {/* Sequenced vault watermarks from gossip stats */}
+      {sequencedVaults.length > 0 && (
+        <section>
+          <CompactDivider dark={dark} />
+          <CompactSectionLabel label="Sequenced Vault Watermarks" dark={dark} />
+          <div className="flex flex-col gap-2">
+            {sequencedVaults.map((vs) => {
+              const warnings = sequencedLagWarnings(watermarksFromStats(vs));
+              return (
+                <div key={encode(vs.id)} className="flex flex-col gap-1">
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+                    <CompactStatRow label="Vault" value={vs.name || encode(vs.id).slice(0, 8)} dark={dark} />
+                    <CompactStatRow label="H" value={formatSeq(vs.ingestHighWatermark)} mono dark={dark} />
+                    <CompactStatRow label="S_r" value={formatSeq(vs.spoolWatermark)} mono dark={dark} />
+                    <CompactStatRow label="F_n" value={formatSeq(vs.fenceHighWatermark)} mono dark={dark} />
+                    <CompactStatRow label="M_r" value={formatSeq(vs.materializationWatermark)} mono dark={dark} />
+                    <CompactStatRow label="C_r" value={formatSeq(vs.convergenceWatermark)} mono dark={dark} />
+                  </div>
+                  {warnings.map((msg) => (
+                    <div key={msg} className="text-[0.75em] text-severity-warn">
+                      {msg}
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
     </div>
   );
 }
@@ -195,6 +238,12 @@ export function ClusterSummaryView({
   nodes,
   dark,
 }: Readonly<{ nodes: ClusterNode[]; dark: boolean }>) {
+  const { data: config } = useConfig();
+  const nodeNames = buildNodeNameMap(config?.nodeConfigs ?? []);
+  const sequencedVaults = (config?.vaults ?? []).filter((v) =>
+    usesSequencedWriteModel(v.writeModel),
+  );
+
   let totalVaults = 0;
   let totalRecords = 0;
   let totalBytes = 0;
@@ -265,6 +314,31 @@ export function ClusterSummaryView({
                 mono
                 dark={dark}
               />
+            </div>
+          </section>
+        </>
+      )}
+
+      {sequencedVaults.length > 0 && (
+        <>
+          <CompactDivider dark={dark} />
+          <section>
+            <CompactSectionLabel label="Sequenced Vault Watermarks" dark={dark} />
+            <div className="flex flex-col gap-3">
+              {sequencedVaults.map((vault) => {
+                const vaultId = encode(vault.id);
+                const peers = extractPeerSequencedWatermarks(vaultId, nodes, nodeNames);
+                if (peers.length === 0) return null;
+                return (
+                  <SequencedVaultWatermarksTable
+                    key={vaultId}
+                    vaultName={vault.name || vaultId}
+                    vaultId={vaultId}
+                    peers={peers}
+                    dark={dark}
+                  />
+                );
+              })}
             </div>
           </section>
         </>
