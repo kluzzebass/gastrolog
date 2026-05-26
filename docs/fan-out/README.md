@@ -58,6 +58,8 @@ Do not use these interchangeably.
 
 ### Current v2 set
 
+- [v2/write-path-lock.md](v2/write-path-lock.md) — **locked** write path (swaths, slots, fan-out)
+- [v2/phase-rework-map.md](v2/phase-rework-map.md) — phase/branch rework order
 - [v2/architecture-overview.md](v2/architecture-overview.md) — canonical v2
   architecture narrative and authority map.
 - [v2/feasibility-gate.md](v2/feasibility-gate.md) — v2 go/no-go gate and

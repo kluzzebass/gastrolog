@@ -6,6 +6,7 @@ This is the gate document for deciding whether v2 is ready to split into impleme
 
 For architecture and mechanics:
 
+- [write-path-lock.md](write-path-lock.md) — **locked write path**
 - [architecture-overview.md](architecture-overview.md)
 - [high-watermark-contract.md](high-watermark-contract.md)
 - [spool-state-machine.md](spool-state-machine.md)
@@ -35,9 +36,10 @@ V2 resolves this with:
 All must be explicit in design text:
 
 - Write durability: per destination vault `W-of-N`, snapshot-at-dispatch.
-- Identity/idempotency: `EventID` is canonical dedup key.
-- Ordering: `seq` is vault-scoped ordering key, not `EventID.IngestSeq`.
-- Seq timing: assign `seq` before replica fan-out; advance `H` only on `W-of-N` success.
+- Identity: `EventID` is canonical identity; dedup at materialize, search, and other choke points — **not** ingest idempotency.
+- Ordering: `VaultSeq` is vault-scoped accept label, not `EventID.IngestSeq`.
+- Seq timing: assign `VaultSeq` on ingesting router from local swath before replica fan-out.
+- Spool accept: slot write by `VaultSeq` within sequence windows; OOO arrival required.
 - Convergence: sealed semantics requiring reconcile completion marker.
 - Read semantics: explicit behavior before convergence.
 - Measurement semantics: authoritative vs provisional values separated.
@@ -48,8 +50,8 @@ All must be explicit in design text:
 V2 must keep this split:
 
 - route fan-out decisions in routing layer,
-- sequence range authority at vault-ctl leader,
-- per-record destination `seq` assignment in destination write pipeline,
+- sequence swath authority at vault-ctl leader (multi-holder grants),
+- per-record `VaultSeq` assignment on ingesting router (local swath consume),
 - fence cut authority at vault-ctl leader (with replica hints),
 - materialization local per replica,
 - converge-sealed marker from reconcile completion.
@@ -85,6 +87,7 @@ Reject v2 issue decomposition if any of the following are true:
 Required before merge-to-main planning:
 
 - single-node baseline correctness,
+- **4+ node write-path gate** (write-path-lock.md) with asymmetric ingesters,
 - 4+ node tests with churn and burst load,
 - node loss/return with catch-up verification,
 - repeated fence/materialize/reconcile cycles,

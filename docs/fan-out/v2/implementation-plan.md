@@ -31,6 +31,8 @@ Use stacked phase branches, not a single long-running epic branch.
 
 - Implement V2 in phases behind explicit feature gates so each phase is testable and revertable.
 - Keep one authoritative source for V2 architecture/contracts in:
+  - [write-path-lock.md](write-path-lock.md) — **locked write path**
+  - [phase-rework-map.md](phase-rework-map.md) — stack rework order
   - [architecture-overview.md](architecture-overview.md)
   - [high-watermark-contract.md](high-watermark-contract.md)
   - [spool-state-machine.md](spool-state-machine.md)
@@ -42,23 +44,30 @@ Use stacked phase branches, not a single long-running epic branch.
 
 ## Implementation invariants checklist (with phase gate)
 
+**Authoritative ingest/spool accept:** [write-path-lock.md](write-path-lock.md). Items below reflect the locked model (2026-05-26).
+
 - **Branch isolation** (from Phase 0): all V2 work stays on dedicated V2 stack branches; no partial merge to `main`.
 - **Feature gate ownership** (from Phase 0): per-vault write-model flag lives in config schema and is read on hot path.
 - **Two fan-outs stay distinct** (from Phase 0): route fan-out and replica fan-out are separate operations.
 - **Anchor model decision is explicit** (from Phase 0.5): no implicit reliance on synchronous `ChunkID` for new writes.
-- **Per-destination sequencing** (from Phase 2): `seq` assignment is destination-vault scoped, after destination selection, before replica fan-out.
-- **Durability ordering** (from Phase 3): `H` advances only on destination-vault `W-of-N` durable success.
-- **Identity ordering split** (from Phase 2): `EventID` is dedup identity; `seq` is ordering/fence axis.
-- **Fence determinism** (from Phase 4): inclusion rule remains `prev_fence < seq <= curr_fence`.
-- **Allocator authority** (from Phase 1): sequence range allocation authority is vault-ctl leader; no overlapping ranges.
+- **Per-router swath assign** (from Phase 1–2): vault-ctl leader grants seq swaths per node; ingesting router assigns **`VaultSeq`** locally before fan-out.
+- **Direct sequenced replica fan-out** (from Phase 2): ingesting router fans out labeled writes to all replicas; no chunk-append forward landing.
+- **Durability ordering** (from Phase 3): write ack after destination-vault `W-of-N` slot durability success.
+- **Identity vs ordering** (from Phase 2+): `EventID` identity dedup at materialize/search choke points; **`VaultSeq`** for fences; ingest idempotency **not** required.
+- **Spool slots in windows** (from Phase 3): OOO slot arrival required; no RAM reorder buffer.
+- **Fence determinism** (from Phase 4): inclusion rule remains `prev_fence < VaultSeq <= curr_fence`.
+- **Multi-swath allocator** (from Phase 1 rework): non-overlapping concurrent swaths per node; burned tails → unassigned gaps.
 - **No per-record Raft logging** (from Phase 1): allocator control state on Raft, per-record accepted data off Raft.
-- **Hole discipline** (from Phase 5): reconcile distinguishes assigned-missing holes vs unassigned gaps.
-- **Retention re-sequencing** (from Phase 2): routed retention records always receive destination-vault sequence.
-- **Crash model carry-over** (from Phase 3): log append first, index commit last, unindexed tails truncated on restart.
-- **Segment lifecycle safety** (from Phase 3/5): segment reclaim only after materialization + reconcile safety watermark.
+- **Hole discipline** (from Phase 5): assigned-missing vs unassigned-gap; materialize **`EventID`** dedup.
+- **Retention re-sequencing** (from Phase 2): routed retention records receive new destination-vault **`VaultSeq`**.
+- **Crash model carry-over** (from Phase 3): slot/window index-last commit; uncommitted tails truncated on restart.
+- **Window reclaim safety** (from Phase 3/5): reclaim only after materialization + reconcile safety watermark.
 - **Convergence gate** (from Phase 5): full sealed semantics require converge-sealed marker.
 - **Pre-convergence read policy** (from Phase 5): coverage/visibility/labeling explicitly defined and observable.
 - **Operator parity** (from Phase 8/9): CLI and UI both support config and inspection for verification workflows.
+- **P0 write-path gate** (before Phase 10 sign-off): 4+ node asymmetric-ingest test per write-path-lock.md.
+
+See [phase-rework-map.md](phase-rework-map.md) for branch restack after design merge.
 
 ## Phase dependency graph
 
@@ -127,65 +136,56 @@ Deliver:
 - Early migration decision: `VaultPlacement.Leader` is not V2 write-path authority.
 - Transitional coexistence rule for legacy non-V2 code paths.
 
-## Phase 1: Allocator leases on vault-ctl Raft
+## Phase 1: Allocator swaths on vault-ctl Raft
 
 Deliver:
 
-- Allocator control state + commands (`next_seq`, epoch, range reservations):
+- Multi-holder swath grants (concurrent non-overlapping ranges per node) — **rework** from single `ActiveLease`:
   - [backend/internal/vaultraft/vaultctlfsm/fsm.go](/Users/kluzz/Code/gastrolog/backend/internal/vaultraft/vaultctlfsm/fsm.go)
   - [backend/internal/vaultraft/cmd.go](/Users/kluzz/Code/gastrolog/backend/internal/vaultraft/cmd.go)
-- Burned-tail semantics for abandoned leases.
+- Burned-tail semantics for abandoned swaths.
 - No per-record Raft entries.
 
 Verify:
 
-- [backend/internal/vaultraft/vaultctlfsm/fsm_test.go](/Users/kluzz/Code/gastrolog/backend/internal/vaultraft/vaultctlfsm/fsm_test.go)
-- [backend/internal/vaultraft/fsm_test.go](/Users/kluzz/Code/gastrolog/backend/internal/vaultraft/fsm_test.go)
-- [backend/internal/vaultraft/reliability_test.go](/Users/kluzz/Code/gastrolog/backend/internal/vaultraft/reliability_test.go)
-- WAL invariants/replay:
-  - [backend/internal/raftwal/wal_invariants_test.go](/Users/kluzz/Code/gastrolog/backend/internal/raftwal/wal_invariants_test.go)
-  - [backend/internal/raftwal/wal_test.go](/Users/kluzz/Code/gastrolog/backend/internal/raftwal/wal_test.go)
-  - [backend/internal/raftwal/integration_test.go](/Users/kluzz/Code/gastrolog/backend/internal/raftwal/integration_test.go)
+- Concurrent swath grants to multiple nodes without overlap.
+- Burn on node loss / epoch bump.
+- WAL replay tests unchanged in intent.
 
-## Phase 2: Destination-vault sequencing in routing
+## Phase 2: Router swath assign and sequenced fan-out
 
 Deliver:
 
-- Assign destination-vault `seq` after destination selection, before replica fan-out:
-  - [backend/internal/orchestrator/routing.go](/Users/kluzz/Code/gastrolog/backend/internal/orchestrator/routing.go)
-  - [backend/internal/orchestrator/ingest.go](/Users/kluzz/Code/gastrolog/backend/internal/orchestrator/ingest.go)
-- Apply same rule for retention-route writes.
-- Persist `(EventID, destinationVault, seq)` to interim append metadata (migration input for Phase 3).
+- Per-node swath cache per destination vault; refill from allocator leader.
+- Assign **`VaultSeq`** on ingesting router (`swath.next++`); attach before fan-out.
+- Direct sequenced replica fan-out from ingesting node (all RF members).
+- **Remove** sequenced vault landing on chunk `Append` / residency relay.
+- Same rule for retention-route writes.
 
 Verify:
 
-- Route fan-out correctness and seq uniqueness.
-- [backend/internal/orchestrator/retention_routing_test.go](/Users/kluzz/Code/gastrolog/backend/internal/orchestrator/retention_routing_test.go)
+- Asymmetric multi-ingester scenario (see write-path-lock.md validation gate).
+- Same **`VaultSeq`** on all replicas per write.
+- Multi-vault route fan-out assigns independent seq per vault.
 
-## Phase 3: Spool substrate and accepted-write semantics
+## Phase 3: Spool windows, slots, and accepted-write semantics
 
 Deliver:
 
-- Spool segments with `first_seq` identity and sequence-bounds metadata:
-  - [backend/internal/chunk/file/manager.go](/Users/kluzz/Code/gastrolog/backend/internal/chunk/file/manager.go)
-  - [backend/internal/chunk/memory/manager.go](/Users/kluzz/Code/gastrolog/backend/internal/chunk/memory/manager.go)
-- Migrate interim metadata from Phase 2 into spool records.
-- Crash model carry-over:
-  - log append first,
-  - index commit last,
-  - unindexed tail truncated on recovery.
-- Accepted-write behavior:
-  - `H` advances only on `W-of-N` success.
-- Metrics:
-  - `vault_replica_spool_watermark{node}`.
+- Sequence **windows** (allocator swath range) containing **slots** keyed by **`VaultSeq`**:
+  - [backend/internal/spool/file/manager.go](/Users/kluzz/Code/gastrolog/backend/internal/spool/file/manager.go)
+  - [backend/internal/spool/memory/manager.go](/Users/kluzz/Code/gastrolog/backend/internal/spool/memory/manager.go)
+- OOO slot arrival required; no monotonic-tail reject.
+- Crash model: index-last commit per slot/window.
+- W-of-N ack after slot durability.
+- Metrics: `vault_replica_spool_watermark{node}`.
 
 Verify:
 
-- Duplicate retry idempotency.
-- No `H` advance on failed fan-out.
-- Hole classification stability with burned tails.
-- Segment rollover/reopen.
-- Crash/restart tail-truncation cases.
+- OOO slot write tests.
+- Crash/restart at slot boundary.
+- No write ack on failed fan-out.
+- Window reclaim gated on materialization watermark.
 
 ## Phase 4: Fence coordinator + hint protocol
 
@@ -205,25 +205,21 @@ Verify:
 - Leader-not-holder + stale hint suppression:
   - [backend/internal/orchestrator/reliability_orch_harness_test.go](/Users/kluzz/Code/gastrolog/backend/internal/orchestrator/reliability_orch_harness_test.go)
 
-## Phase 5: Materialization + reconcile
+## Phase 5: Materialize and reconcile
 
 Deliver:
 
-- Reconciler strategy: single reconciler, dispatch by write-model flag (V1/V2 side-by-side paths).
-- Sequence-range materializer + reconcile by assigned coverage:
-  - [backend/internal/orchestrator/vault_lifecycle_reconciler.go](/Users/kluzz/Code/gastrolog/backend/internal/orchestrator/vault_lifecycle_reconciler.go)
-  - [backend/internal/orchestrator/manifest_reader.go](/Users/kluzz/Code/gastrolog/backend/internal/orchestrator/manifest_reader.go)
+- Materializer reads spool **slots** by **`VaultSeq`**; **dedup by `EventID`** at emit.
+- Hole classification: assigned-missing vs unassigned gap (burned swaths).
 - Converge-sealed gating.
-- Metrics:
-  - `vault_replica_materialization_watermark{node}`
-  - `vault_replica_convergence_watermark{node}`
+- Re-evaluate peer-pull heal work against slot model (see phase-rework-map.md).
 
 Verify:
 
-- Assigned-missing holes heal.
-- Unassigned gaps are not healed.
-- Convergence marker gates sealed semantics.
-- [backend/internal/server/multinode_test.go](/Users/kluzz/Code/gastrolog/backend/internal/server/multinode_test.go)
+- Duplicate `EventID` at two seqs in one fence → one sealed record.
+- Assigned-missing holes heal when applicable.
+- Unassigned gaps untouched.
+- 4+ node write-path gate passes before full ladder.
 
 ## Phase 6: Anchor rollout completion
 

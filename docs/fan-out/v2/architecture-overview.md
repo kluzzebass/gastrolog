@@ -1,6 +1,6 @@
-# Fan-out V2 Architecture Overview
+# Fan-Out V2 Architecture Overview
 
-Status: draft, untracked design note.
+Status: draft. **Write-path ingest/assign/spool accept:** see locked [write-path-lock.md](write-path-lock.md).
 
 This document is the single architectural overview for fan-out v2.
 
@@ -10,10 +10,13 @@ V2 keeps the leaderless traffic shape and removes hot-path synchronization on ch
 
 The write path is:
 
-- route fan-out (source record -> destination vault set),
-- per-destination sequence assignment,
+- route fan-out (source record → destination vault set),
+- per-router **seq swath** from vault-ctl allocator leader,
+- local **`VaultSeq` assign** and attach before replica fan-out,
 - per-destination replica fan-out with `W-of-N` durability,
-- asynchronous fence/materialize/reconcile for sealed output.
+- asynchronous fence / materialize / reconcile for sealed output.
+
+**Identity:** strong `EventID`; dedup at materialize, search, and other choke points — **not** assign-time ingest idempotency.
 
 ## V1 vs V2 At A Glance
 
@@ -21,16 +24,16 @@ The write path is:
 |---|---|---|
 | Hot-path chunk identity | Coordinated on write path | Removed from write path; handled asynchronously at seal/materialize time |
 | Canonical inclusion boundary | Ambiguous under churn | Deterministic sequence-range fences (`prev < seq <= curr`) |
-| Ordering model | Emergent from local timing/state | Vault-wide acceptance sequence + high watermark |
+| Ordering model | Emergent from local timing/state | Vault-wide **`VaultSeq`** from allocator swaths |
 | Fan-out semantics | Mechanically present but overloaded with synchronous invariants | Route fan-out and replica fan-out explicitly separated |
-| Reconcile role | Correctness + ambiguity cleanup | Coverage healing against explicit assigned sequence/fence expectations |
-| Decision ownership | Mixed/implicit in places | Explicit authority map (router, destination pipeline, vault-ctl leader, materializer, reconciler) |
-| Implementation posture | Implementation-first, discover issues late | Design-first with gate + contract + lifecycle docs |
+| Reconcile role | Correctness + ambiguity cleanup | Coverage healing + **EventID** canonicalization at seal |
+| Decision ownership | Mixed/implicit in places | Explicit authority map (router, allocator leader, materializer, reconciler) |
+| Implementation posture | Design-first with gate + contract + lifecycle docs | Write-path lock + phase rework (see [phase-rework-map.md](phase-rework-map.md)) |
 
 ## Two fan-outs (different layers)
 
-- **Route fan-out**: router sends one source record to multiple destination vaults.
-- **Replica fan-out**: destination write pipeline replicates one destination-vault write to that vault's replicas.
+- **Route fan-out**: router sends one source record to multiple destination vaults (each vault gets its own `VaultSeq`).
+- **Replica fan-out**: ingesting router sends one labeled write to **all** replicas of a destination vault (same `VaultSeq` everywhere).
 
 These are separate operations and must not be conflated.
 
@@ -45,51 +48,50 @@ V2 implementation scope must include one explicit migration decision:
 - remove the write-path meaning of `VaultPlacement.Leader`, or
 - redefine it to a non-write-path role with clear semantics.
 
-This is a migration-scope item, not a feasibility blocker, but it must be named before issue decomposition.
+Sequenced vaults **do not** relay full records through placement residency for assign/spool accept. See [write-path-lock.md](write-path-lock.md).
 
 ## Core pipeline
 
-For each source record:
+For each source record on the ingesting node:
 
 1. Router computes destination vault set.
 2. For each destination vault:
-   - assign destination-vault `seq` (from leased range),
-   - dispatch replica fan-out to destination replica set,
+   - ensure local seq swath (refill from vault-ctl allocator leader when empty),
+   - assign `VaultSeq` locally (`swath.next++`),
+   - attach `VaultSeq` to record,
+   - replica fan-out in parallel to all vault replicas,
    - resolve write success/failure from `W-of-N`.
-3. Accepted writes advance destination vault high watermark (`H`).
-4. Fence coordinator cuts fence boundaries (`F_n`) by policy.
-5. Materializer converts fenced spool ranges into local sealed chunks.
-6. Reconcile converges sealed record sets by `EventID`.
+3. Fence coordinator cuts fence boundaries (`F_n`) by policy on assigned seq space.
+4. Materializer reads spool slots by `VaultSeq`, **dedups by `EventID`**, writes sealed chunks.
+5. Reconcile converges sealed record sets by `EventID`.
 
-Spool implementation note:
+Spool implementation note (locked):
 
-- spool segments are identified by `first_seq`,
-- write durability visibility follows index-last commit semantics (same crash model as active chunks),
-- restart recovery drops unindexed tail bytes.
+- spool stores **slots** keyed by `VaultSeq` inside **sequence windows** (allocator swath ranges),
+- out-of-order slot arrival is normal; no RAM reorder buffer,
+- write durability visibility follows index-last commit semantics per slot/window,
+- restart recovery truncates uncommitted tails per window crash rules.
 
 ## Locked sequencing rule
 
-V2 uses one explicit timing rule:
-
-- destination-vault `seq` is assigned in destination write pipeline before replica fan-out,
-- `H` advances only after `W-of-N` durable success for that `(EventID, seq)` write.
-
-Replicas and materializer treat `seq` as part of the write payload, not a local post-write annotation.
+- `VaultSeq` is assigned on the **ingesting router** from a local swath **before** replica fan-out.
+- The same `VaultSeq` is carried on the wire to every replica.
+- Replicas and materializer treat `VaultSeq` as part of the write payload, not a local post-write annotation.
 
 ## Decision Authority Matrix
 
 | Decision | Decisionmaker | Execution location | Decision time | Durable source of truth |
 |---|---|---|---|---|
 | Route destination vault set | Router on the node processing the source record | Routing evaluation pipeline on processing node | During ingest or retention-route evaluation | Route config + per-write routing context |
-| Destination-vault sequence range allocation | Vault-ctl leader for that destination vault | Vault-ctl allocator endpoint | On lease request / lease renewal | Vault-ctl Raft log (allocator state + range reservations) |
-| Destination-vault per-record `seq` assignment | Destination write pipeline (using leased range) | Router-side destination write stage | After destination selection, before replica fan-out | Destination append metadata (`EventID`, destination vault, `seq`) |
-| Destination-vault replica fan-out target snapshot (`N`) | Destination write pipeline | Replica dispatch coordinator | At write dispatch | In-flight write context + responder append metadata |
-| Destination-vault write success/failure (`W-of-N`) | Destination write pipeline coordinator | Replica fan-out result aggregator | After responses or timeout | Ack outcome + durability/error telemetry |
+| Destination-vault seq swath allocation | Vault-ctl leader for that destination vault | Allocator on vault-ctl leader | On swath request / refill | Vault-ctl Raft log (allocator state + grants) |
+| Destination-vault per-record `VaultSeq` assignment | Ing ingesting router (using local swath) | Router on processing node | After destination selection, before replica fan-out | Attached to fan-out payload; spool slot on each replica |
+| Destination-vault replica fan-out target snapshot (`N`) | Ing ingesting router | Replica dispatch on processing node | At write dispatch | In-flight write context + replica slot writes |
+| Destination-vault write success/failure (`W-of-N`) | Ing ingesting router | Fan-out result aggregator | After responses or timeout | Ack outcome + durability/error telemetry |
 | Fence cut boundary (`F_n`) | Vault-ctl leader (authoritative fence coordinator) | Fence coordinator path on vault-ctl leader | On policy trigger evaluation (count/time/age) | Vault-ctl Raft log + persisted fence record |
 | Fence trigger evidence (`FenceHint`) | Data-bearing replica nodes | Replica hint emitter path | When local policy evidence crosses trigger threshold | Ephemeral hint channel only (not authoritative) |
 | Materialization progression (`M_r`) | Local materializer on each replica | Local spool-to-chunk materializer | During batch materialization | Local durable checkpoint/watermark state |
 | Reconcile completion (`ConvergeSealed`) | Reconcile coordinator + participating replicas | Reconcile worker + local apply paths | After hole classification + fill completion | Convergence marker / reconcile completion metadata |
-| Retention-route destination sequencing | Router-side destination write pipeline for destination vault | Retention route -> destination write path | When routing retained records into destination vault(s) | Destination append metadata (new destination `seq`) |
+| Retention-route destination sequencing | Ing ingesting router for destination vault | Retention route → same write path | When routing retained records into destination vault(s) | New `VaultSeq` per destination vault accept |
 
 ## Why this fixes v1 failure mode
 
@@ -97,15 +99,16 @@ V1 failed primarily on ambiguous chunk membership under churn.
 
 V2 makes membership explicit:
 
-- deterministic inclusion rule: `prev_fence < seq <= curr_fence`,
+- deterministic inclusion rule: `prev_fence < VaultSeq <= curr_fence`,
 - chunk naming moved off hot path,
-- reconcile heals replica coverage gaps against known sequence/fence boundaries.
+- **EventID** canonicalization at materialize/search, not synchronous ingest agreement.
 
 ## What remains asynchronous by design
 
-- per-replica arrival timing,
+- per-replica slot arrival timing (OOO within seq space),
 - per-replica spool/materialization progress,
-- reconcile completion timing.
+- reconcile completion timing,
+- duplicate accepts at different seq until materialize/search dedup.
 
 These are expected and modeled; they are not correctness failures by default.
 
@@ -120,6 +123,8 @@ Before `ConvergeSealed`, the system policy must specify:
 
 ## Source docs
 
+- [write-path-lock.md](write-path-lock.md) — **authoritative write path**
+- [phase-rework-map.md](phase-rework-map.md) — stack/branch rework order
 - [feasibility-gate.md](feasibility-gate.md)
 - [high-watermark-contract.md](high-watermark-contract.md)
 - [spool-state-machine.md](spool-state-machine.md)

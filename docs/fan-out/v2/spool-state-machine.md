@@ -1,15 +1,13 @@
 # Fan-Out V2 Spool State Machine
 
-Status: draft, untracked design note.
+Status: draft. Spool **accept model** locked in [write-path-lock.md](write-path-lock.md).
 
 This document defines a strict lifecycle for spool-based ingestion so V2 can be split into implementation issues without ambiguity.
 
 Related:
 
-- `docs/fan-out/v2/architecture-overview.md`
-- `docs/fan-out/v2/feasibility-gate.md`
-- `docs/fan-out/v2/high-watermark-contract.md`
-- `docs/fan-out/obsoleted/fan-out-data-plane-design.md`
+- [write-path-lock.md](write-path-lock.md)
+- [phase-rework-map.md](phase-rework-map.md)
 
 ## Scope
 
@@ -40,39 +38,47 @@ This is a migration-scope item to plan explicitly before issue decomposition.
 
 ## Terms
 
-- **Spool segment**: append-only local storage for incoming records before chunk materialization.
-- **Spool segment ID**: derived from the first accepted sequence in the segment (`first_seq`) for stable ordering and debugging.
-- **Fence**: immutable upper bound over accepted sequence space (`seq`) that defines a materialization batch.
-- **Ingest high watermark (`H`)**: highest logical accepted-write sequence for a vault.
-- **Acceptance sequence (`seq`)**: vault-wide logical order key assigned on durable write acceptance; distinct from `EventID` fields such as `IngestSeq`.
-- **Materialization watermark**: durable pointer indicating highest accepted `seq` fully materialized on this replica.
-- **Converge-sealed**: sealed chunk whose record set is confirmed equivalent (by `EventID`) across required replicas.
+- **Spool**: pre-chunk durable store on each replica (lifecycle container).
+- **Sequence window**: on-disk unit covering one allocator swath range `[start..end]` for a vault on this replica.
+- **Slot**: one `(VaultSeq, record)` write inside a sequence window — the spool accept primitive.
+- **Fence**: immutable upper bound over assigned **`VaultSeq`** space that defines a materialization batch.
+- **Ingest high watermark (`H`)**: highest accepted **`VaultSeq`** on the reference acceptance view (see high-watermark-contract.md).
+- **Acceptance sequence (`VaultSeq`)**: vault-wide accept label assigned on the ingesting router before replica fan-out; distinct from `EventID`.
+- **Materialization watermark (`M_r`)**: highest **`VaultSeq`** fully materialized on this replica.
+- **Converge-sealed**: sealed chunk whose canonical record set (by **`EventID`**) matches across required replicas.
 
-## Spool segmenting and crash-safety carry-over
+## Spool windows, slots, and crash-safety
 
-V2 spool should reuse the same crash model already used by active chunks:
+Spool reuse the chunk crash model **per slot/window**:
 
-- Data log is append-first.
-- Index entry is written last and is the commit marker.
-- Recovery trusts index as authority for visible records.
-- Any trailing bytes in data log beyond the last indexed record are discarded/truncated on restart.
+- payload bytes written before index commit marker for the slot,
+- recovery trusts index; truncate uncommitted tails on restart.
 
-Segmenting requirements:
+Window layout (file-backed example):
 
-- spool is split into immutable segments plus one active segment,
-- segment identity is `first_seq` (local file identity), while cross-replica correctness uses sequence ranges from metadata,
-- segment metadata records at least `first_seq`, `last_seq`, and durability footer/checksum.
+```text
+spool/windows/w-<start>-<end>/
+  idx    # VaultSeq → offset (sparse within window)
+  raw / attr
+```
+
+Requirements:
+
+- slot write keyed by **`VaultSeq`**; **out-of-order** arrival within a window is required behavior,
+- window identity follows **allocator swath range**, not ingesting node,
+- window metadata records at least `start`, `end`, and durability footer/checksum,
+- **`ReadByVaultSeq`** resolves through slot index (plus optional in-memory cache).
 
 Reclaim rule:
 
-- segment is reclaimable only when `segment.last_seq <= reclaim_watermark_seq`,
-- reclaim watermark must be gated by materialization + reconcile safety (do not delete data still needed as reconcile source).
+- window reclaimable when `window.end <= reclaim_watermark_seq`,
+- gated by materialization + reconcile safety (do not delete slots still needed as reconcile source).
 
 ## Invariants
 
-- Hot-path write acknowledgement is based on spool durability (`W-of-N`), not chunk creation.
+- Hot-path write acknowledgement is based on spool **slot** durability (`W-of-N`), not chunk creation.
 - Fence ordering is monotonic per vault replica.
-- A record is materialized into local chunk set at most once (idempotent by `EventID`).
+- A logical record is materialized into local chunk set at most once (**`EventID`** canonicalization at materialize).
 - Watermark never moves backwards.
 - Upload/archive/final sealed-read shortcuts require converge-sealed state.
 
@@ -96,10 +102,10 @@ Error and retry substates:
 
 ## `SpoolOpen`
 
-The replica accepts new records into spool segments.
+The replica accepts new records into spool **slots** (within sequence windows).
 
 - Entry: vault initialized or previous fence batch completed.
-- Exit trigger: rotation policy decides to cut a fence.
+- Exit trigger: rotation policy decides to cut a fence (does not require stopping slot writes globally).
 
 ## `Fenced`
 
@@ -111,10 +117,10 @@ A fence is durably recorded. It freezes the upper bound for one batch.
 
 ## `Materializing`
 
-Background worker reads sequence range `(prev_watermark_seq, fence.upper_bound_seq]` from local spool and writes chunk records locally.
+Background worker reads **`VaultSeq` range** `(prev_watermark_seq, fence.upper_bound_seq]` via **`ReadByVaultSeq`**, writes chunk records locally.
 
 - Chunk IDs are minted here, not on ingest hot path.
-- Writes are idempotent by `EventID`.
+- **Dedup by `EventID`** when emitting sealed output (default: lowest **`VaultSeq`** wins).
 - Partial progress is allowed; restart resumes from durable watermark/checkpoint.
 
 ## `MaterializedLocal`
@@ -142,7 +148,7 @@ Reconcile confirms record-set equivalence by `EventID` across required replicas.
 
 | From | Event | To | Durable write required before ack |
 |---|---|---|---|
-| `SpoolOpen` | record appended and fsynced | `SpoolOpen` | spool append durability |
+| `SpoolOpen` | slot fsynced | `SpoolOpen` | spool slot durability |
 | `SpoolOpen` | rotation policy emits fence | `Fenced` | fence metadata persisted |
 | `Fenced` | materializer worker starts | `Materializing` | worker lease/checkpoint persisted |
 | `Materializing` | local batch complete | `MaterializedLocal` | watermark advanced to fence |
@@ -161,18 +167,18 @@ On restart, recovery logic must:
 1. Reload last durable materialization watermark.
 2. Reload outstanding fences ordered by creation.
 3. Re-enter `Materializing` for any fence with `upper_bound_seq > watermark_seq`.
-4. Keep idempotent writes by `EventID`; replay must not duplicate logical records.
+4. Resume materialize for outstanding fences; **dedup by `EventID`** at emit time.
 5. Re-enter `SealedPendingReconcile` for locally sealed batches missing convergence marker.
 
 Never infer success from in-memory progress; only durable markers drive recovery.
 
 ## Write Acknowledgement Contract
 
-Write path remains:
+Write path:
 
-- append record to local spool,
-- dispatch to peer replicas,
-- acknowledge success only after configured `W-of-N` replicas report durable spool append.
+- ingesting router assigns **`VaultSeq`**, fans out to peer replicas,
+- each replica **slot-writes** on arrival,
+- acknowledge success only after configured `W-of-N` replicas report durable slot write.
 
 No fence, chunk naming, or reconcile action may block this hot-path acknowledgement.
 
