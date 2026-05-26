@@ -1,6 +1,6 @@
-# Fan-out data-plane design
+# Fan-out data-plane docs
 
-Design documents for the fan-out data-plane architecture — the leaderless
+Design set for the fan-out data-plane architecture — the leaderless
 "every Receiving replica appends + fans out" write model for vault chunks.
 
 ## Status: v1 archived, v2 pending
@@ -36,7 +36,7 @@ EventIDs, so identity needs no agreement → chunks can be node-local, multiple
 actives can coexist, and durability + dedup become **reconciled,
 eventually-consistent** properties computed asynchronously rather than
 invariants enforced synchronously. The reconcile path in
-[fan-out-data-plane-design.md](fan-out-data-plane-design.md) (EventID Merkle
+[obsoleted/fan-out-data-plane-design.md](obsoleted/fan-out-data-plane-design.md) (EventID Merkle
 summaries, divergence-tolerance contracts) already leans this way; v2 extends
 the same async treatment to sealing, acks, and counting.
 
@@ -45,11 +45,34 @@ async design and its failure modes out on an epic branch *before* any code, and
 merges to `main` only when the whole system is validated (repeated-burst
 survival + a durable-count measurement that agrees with the FSM manifest).
 
+## Terminology note
+
+V2 documents use two different fan-out terms:
+
+- **Route fan-out**: one source record routed into multiple destination vaults.
+- **Replica fan-out**: one destination-vault write replicated to that vault's replicas under `W-of-N`.
+
+Do not use these interchangeably.
+
 ## Documents
 
-- [fan-out-data-plane-design.md](fan-out-data-plane-design.md) — the v1 proposed
-  architecture (write path, seal-time reconcile, Receiving/Holding FSM split,
-  W-of-N, set-diff reconcile, divergence tolerance). The starting point for v2;
-  read it knowing the synchronous mechanisms are what v2 must redesign.
-- [pull-records-design.md](pull-records-design.md) — the pull-based record
-  catch-up / reconcile mechanism.
+### Current v2 set
+
+- [v2/architecture-overview.md](v2/architecture-overview.md) — canonical v2
+  architecture narrative and authority map.
+- [v2/feasibility-gate.md](v2/feasibility-gate.md) — v2 go/no-go gate and
+  validation checklist.
+- [v2/high-watermark-contract.md](v2/high-watermark-contract.md) — sequence
+  allocation, high watermark/fence semantics, hole classification, and
+  retention-route destination sequencing.
+- [v2/spool-state-machine.md](v2/spool-state-machine.md) — spool lifecycle,
+  transitions, recovery rules, and issue-splitting boundaries.
+
+### Obsoleted v1 design
+
+- [obsoleted/fan-out-data-plane-design.md](obsoleted/fan-out-data-plane-design.md)
+  — v1 proposed architecture (write path, seal-time reconcile,
+  Receiving/Holding FSM split, W-of-N, set-diff reconcile, divergence
+  tolerance). Kept for historical context.
+- [obsoleted/pull-records-design.md](obsoleted/pull-records-design.md) — v1-era
+  pull-based record catch-up/reconcile design notes.
