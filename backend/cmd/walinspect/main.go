@@ -290,6 +290,8 @@ func commandName(cmd vaultctlfsm.Command) string {
 		return "CmdBurnSeqLeaseTail"
 	case vaultctlfsm.CmdBumpSeqAllocatorEpoch:
 		return "CmdBumpSeqAllocatorEpoch"
+	case vaultctlfsm.CmdPublishFence:
+		return "CmdPublishFence"
 	default:
 		return fmt.Sprintf("CmdUnknown(%d)", cmd)
 	}

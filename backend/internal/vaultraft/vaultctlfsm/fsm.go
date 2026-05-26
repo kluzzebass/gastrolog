@@ -235,6 +235,9 @@ type FSM struct {
 	seqEpoch        uint64
 	seqActiveSwaths map[string]*SeqActiveLease // holder ID -> outstanding swath
 	seqBurnedTails  []SeqBurnedTail
+
+	// Published fence history (F_1..F_n) for sequenced write-model vaults.
+	fences []FenceRecord
 }
 
 // New creates an empty chunk metadata FSM.
@@ -609,6 +612,13 @@ func (f *FSM) applyLocked(cmd Command, payload []byte) (any, applyEffects) {
 		} else {
 			result = newEpoch
 		}
+	case CmdPublishFence:
+		rec, fenceErr := f.applyPublishFence(payload)
+		if fenceErr != nil {
+			result = fenceErr
+		} else {
+			result = rec
+		}
 	default:
 		result = fmt.Errorf("unknown chunk FSM command: %d", cmd)
 	}
@@ -669,11 +679,13 @@ func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) {
 		pendingDeletes = append(pendingDeletes, p.Copy())
 	}
 	seqSnap := f.seqAllocatorSnapshotLocked()
+	fenceSnap := f.fenceSnapshotLocked()
 	return &fsmSnapshot{
 		entries:        entries,
 		tombstones:     tombstones,
 		pendingDeletes: pendingDeletes,
 		seqAllocator:   seqSnap,
+		fences:         fenceSnap,
 	}, nil
 }
 
@@ -701,6 +713,7 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 		f.pendingDeletes = make(map[chunk.ChunkID]*PendingDelete)
 	}
 	applySeqAllocatorSnapshotLocked(f, snap.seqAllocator)
+	applyFenceSnapshotLocked(f, snap.fences)
 	f.ready = true
 	return nil
 }
@@ -1104,6 +1117,7 @@ func MarshalRepatriateChunk(entry ManifestEntry) ([]byte, error) {
 //	2 = tombstones      (payload: 4 byte count + N×(16 ID + 8 nanos))
 //	3 = pendingDeletes  (gastrolog-51gme step 2)
 //	4 = seqAllocator    (gastrolog-16w8x lease control state)
+//	5 = fences          (gastrolog-qzguu published fence history)
 //
 // Section kind 2 was previously "transition receipts" and is renumbered
 // here after gastrolog-5sywa removed the receipt protocol entirely.
@@ -1136,6 +1150,7 @@ type fsmSnapshot struct {
 	tombstones     map[chunk.ChunkID]time.Time
 	pendingDeletes []PendingDelete // gastrolog-51gme step 2
 	seqAllocator   SeqAllocatorSnapshot
+	fences         FenceSnapshot
 }
 
 func (s *fsmSnapshot) Persist(sink hraft.SnapshotSink) error {
@@ -1190,6 +1205,11 @@ func (s *fsmSnapshot) Persist(sink hraft.SnapshotSink) error {
 	}
 
 	if err := encodeSeqAllocatorSection(sink, s.seqAllocator); err != nil {
+		_ = sink.Cancel()
+		return err
+	}
+
+	if err := encodeFencesSection(sink, s.fences); err != nil {
 		_ = sink.Cancel()
 		return err
 	}
@@ -1296,6 +1316,7 @@ type decodedSnapshot struct {
 	tombstones     map[chunk.ChunkID]time.Time
 	pendingDeletes map[chunk.ChunkID]*PendingDelete // gastrolog-51gme step 2
 	seqAllocator   SeqAllocatorSnapshot
+	fences         FenceSnapshot
 }
 
 // decodeSnapshot reads a versioned snapshot. Unknown section kinds are
@@ -1330,6 +1351,8 @@ func decodeSnapshot(r io.Reader) (*decodedSnapshot, error) {
 			out.pendingDeletes, err = readPendingDeletesSection(section)
 		case sectionSeqAllocator:
 			out.seqAllocator, err = readSeqAllocatorSection(section)
+		case sectionFences:
+			out.fences, err = readFencesSection(section)
 		default:
 			// Unknown section — skip. Forward-compat for new sections in
 			// the same format version.

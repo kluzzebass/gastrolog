@@ -2,6 +2,7 @@ package vaultraft
 
 import (
 	"errors"
+	"time"
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
@@ -62,4 +63,9 @@ func MarshalVaultBurnSeqLeaseTail(vaultID glid.GLID, holderID string, holderEpoc
 // outstanding active lease tail (failover safety).
 func MarshalVaultBumpSeqAllocatorEpoch(vaultID glid.GLID) []byte {
 	return MarshalVaultChunkCommand(vaultID, vaultctlfsm.MarshalBumpSeqAllocatorEpoch())
+}
+
+// MarshalVaultPublishFence durably records one fence cut (F_n) for vaultID.
+func MarshalVaultPublishFence(vaultID glid.GLID, upperBoundSeq uint64, createdAt time.Time) []byte {
+	return MarshalVaultChunkCommand(vaultID, vaultctlfsm.MarshalPublishFence(upperBoundSeq, createdAt))
 }

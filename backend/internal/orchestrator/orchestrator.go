@@ -239,6 +239,9 @@ type Orchestrator struct {
 	// when groupMgr is nil. Keyed by vault ID.
 	testSeqFSM map[glid.GLID]*vaultctlfsm.FSM
 
+	// fenceCoords holds per-vault ephemeral hint state for the fence coordinator.
+	fenceCoords sync.Map
+
 	// peerConns is the shared gRPC pool for cluster peers. Set from factories
 	// during ApplyConfig; used by ApplyVaultControlPlane forwarding.
 	peerConns *cluster.PeerConns
@@ -697,6 +700,7 @@ func New(cfg Config) (*Orchestrator, error) {
 	// reconciler's onPruneNode handler will then propose
 	// CmdFinalizeDelete for any chunk whose ExpectedFrom became empty.
 	o.vaultCtlLeaders.SetOnMemberRemoved(o.proposePruneNodeForVault)
+	o.vaultCtlLeaders.SetOnLeaderEpoch(o.onVaultCtlLeaderEpoch)
 
 	// Per-instance rate alerters. Thresholds are taken from gastrolog-47qyw:
 	//   rotation: warn at >1/sec, error at >5/sec, sustained over 30s
@@ -901,6 +905,8 @@ type VaultSnapshot struct {
 	SpoolWatermark uint64
 	// IngestHighWatermark is H — highest accepted vault_seq on this node.
 	IngestHighWatermark uint64
+	// FenceHighWatermark is F_n — latest durable fence upper bound from vault-ctl Raft.
+	FenceHighWatermark uint64
 	// RaftAppliedIndex is the local node's vault-ctl Raft applied
 	// index for this vault. Zero if this node has no vault-ctl group
 	// (or its Raft instance hasn't initialized). Broadcast in
@@ -951,6 +957,7 @@ func (o *Orchestrator) VaultSnapshots() []VaultSnapshot {
 				snap.SpoolWatermark = ss.SpoolDurableWatermark()
 				snap.IngestHighWatermark = ss.IngestHighWatermark()
 			}
+			snap.FenceHighWatermark = o.vaultFenceHighWatermark(id)
 		}
 		o.mu.RUnlock()
 		snapshots = append(snapshots, snap)

@@ -44,6 +44,19 @@ func (o *Orchestrator) rotationSweep() {
 			vaultCfg = findVaultConfig(cfg.Vaults, vaultID)
 		}
 
+		if vault.WriteModel == system.VaultWriteModelSequenced {
+			o.submitLocalFenceHint(vaultID, o.now())
+			timeTriggered := false
+			vaultInst := vault.Instance
+			if vaultInst != nil && vaultCfg != nil && vaultCfg.RotationPolicyID != nil {
+				if trigger := vaultInst.Chunks.CheckRotation(); trigger != nil {
+					timeTriggered = true
+				}
+			}
+			_ = o.evaluateVaultFence(vaultID, o.now(), timeTriggered)
+			continue
+		}
+
 		vaultInst := vault.Instance
 		if vaultInst == nil {
 			continue
