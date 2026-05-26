@@ -8,11 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
+	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/index"
@@ -59,6 +61,14 @@ type orchRelNode struct {
 	groupMgr      *raftgroup.GroupManager
 	orch          *orchestrator.Orchestrator
 	cancel        context.CancelFunc
+	recordAppender cluster.RecordAppender
+}
+
+// orchRelForwardTracker counts cross-node route forwards and SetRecordAppender
+// landings — the legacy chunk-append path sequenced vaults must not use.
+type orchRelForwardTracker struct {
+	recordForwardCalls  atomic.Int64
+	recordAppenderCalls atomic.Int64
 }
 
 // orchRelHarness boots N in-process nodes, each running a real orchestrator
@@ -85,9 +95,10 @@ type orchRelHarness struct {
 	// vaults[0]. Multi-vault scenarios use addVaultSpec during setup to
 	// add more, each with its own node subset.
 	vaults       []vaultSpec
-	sharedCtx    context.Context
-	sharedCancel context.CancelFunc
-	sequencedRF  uint32
+	sharedCtx       context.Context
+	sharedCancel    context.CancelFunc
+	sequencedRF     uint32
+	forwardTracker  *orchRelForwardTracker
 }
 
 // vaultSpec identifies one vault in the harness along with which nodes
@@ -229,6 +240,7 @@ func newOrchRelHarness(t *testing.T, n int, opts ...orchRelOption) *orchRelHarne
 	if h.sequencedRF > 0 {
 		h.wireCrossNodeReplication()
 		h.wireInProcessVaultCtlApply()
+		h.wireClusterRecordForwarding()
 	}
 
 	// Phase 5: wait for vault-ctl Raft to bootstrap on every node.
@@ -754,6 +766,75 @@ func (h *orchRelHarness) wireCrossNodeReplication() {
 		n.orch.SetChunkReplicator(&orchRelDirectChunkReplicator{nodes: remotes})
 	}
 }
+
+// wireClusterRecordForwarding mirrors app.go SetRecordAppender + RecordForwarder
+// wiring so guardrail tests can assert sequenced cross-node routes never land via
+// forward→Append (write-path-lock.md).
+func (h *orchRelHarness) wireClusterRecordForwarding() {
+	h.t.Helper()
+	tracker := &orchRelForwardTracker{}
+	h.forwardTracker = tracker
+	fwd := &orchRelRecordForwarder{tracker: tracker, nodes: h.nodes}
+	for _, n := range h.nodes {
+		orch := n.orch
+		n.recordAppender = func(ctx context.Context, vaultID glid.GLID, rec chunk.Record) error {
+			tracker.recordAppenderCalls.Add(1)
+			_, _, err := orch.Append(vaultID, rec)
+			return err
+		}
+		n.clusterSrv.SetRecordAppender(n.recordAppender)
+		n.orch.SetRecordForwarder(fwd)
+	}
+}
+
+func (h *orchRelHarness) assertGuardrailNoRecordForwardAppend(t *testing.T) {
+	t.Helper()
+	if h.forwardTracker == nil {
+		t.Fatal("forward tracker not wired")
+	}
+	if got := h.forwardTracker.recordForwardCalls.Load(); got != 0 {
+		t.Fatalf("sequenced cross-node route invoked RecordForwarder %d times, want 0", got)
+	}
+	if got := h.forwardTracker.recordAppenderCalls.Load(); got != 0 {
+		t.Fatalf("SetRecordAppender→Append invoked %d times, want 0 (use spool assign on ingesting router)", got)
+	}
+	for _, id := range h.nodeIDs {
+		if got := h.nodes[id].clusterSrv.ForwardedReceived(); got != 0 {
+			t.Fatalf("node %s: ForwardRecords received %d records, want 0",
+				h.nodes[id].label, got)
+		}
+	}
+}
+
+type orchRelRecordForwarder struct {
+	tracker *orchRelForwardTracker
+	nodes   map[string]*orchRelNode
+}
+
+func (f *orchRelRecordForwarder) Forward(ctx context.Context, nodeID string, vaultID glid.GLID, records []chunk.Record) error {
+	return f.ForwardSync(ctx, nodeID, vaultID, records)
+}
+
+func (f *orchRelRecordForwarder) ForwardSync(ctx context.Context, nodeID string, vaultID glid.GLID, records []chunk.Record) error {
+	f.tracker.recordForwardCalls.Add(1)
+	n, ok := f.nodes[nodeID]
+	if !ok {
+		return fmt.Errorf("orchRelRecordForwarder: unknown node %q", nodeID)
+	}
+	if n.recordAppender == nil {
+		return fmt.Errorf("record appender not wired on node %q", nodeID)
+	}
+	for _, rec := range records {
+		if err := n.recordAppender(ctx, vaultID, rec); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (f *orchRelRecordForwarder) RegisterPressureGate(_ *chanwatch.PressureGate) {}
+
+func (f *orchRelRecordForwarder) RedirectNode(string, string) {}
 
 func (h *orchRelHarness) wireInProcessVaultCtlApply() {
 	h.t.Helper()

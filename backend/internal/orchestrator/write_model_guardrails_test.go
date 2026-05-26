@@ -155,7 +155,20 @@ func TestSequencedRemoteRouteAssignsOnIngestingNode(t *testing.T) {
 
 	vaultID := glid.New()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-ingest"})
-	registerSequencedTestVault(t, orch, vaultID, nil)
+	cm, _ := chunkmem.NewManager(chunkmem.Config{})
+	counting := &countingChunkManager{ChunkManager: cm}
+	im := indexmem.NewManager(nil, nil, nil, nil, nil)
+	qe := query.New(counting, im, nil)
+	v := NewVault(vaultID, &VaultInstance{
+		VaultID: vaultID,
+		Type:   "memory",
+		Chunks: counting,
+		Indexes: im,
+		Query:  qe,
+	})
+	v.WriteModel = system.VaultWriteModelSequenced
+	orch.RegisterVault(v)
+	wireTestSeqAllocator(orch, vaultID)
 
 	cr, _ := CompileRoute(glid.New(), "all", 0, "*",
 		[]RouteDestination{{VaultID: vaultID, NodeID: "node-residency"}}, "fanout")
@@ -167,6 +180,9 @@ func TestSequencedRemoteRouteAssignsOnIngestingNode(t *testing.T) {
 	}
 	if got := orch.vaultSpoolStore(vaultID).IngestHighWatermark(); got != 1 {
 		t.Fatalf("H = %d, want 1 (assigned on ingesting router)", got)
+	}
+	if counting.appends != 0 {
+		t.Fatalf("sequenced remote-route ingest must not chunk-append; appends=%d", counting.appends)
 	}
 }
 
