@@ -76,6 +76,7 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg system.VaultConfig
 	vault := NewVault(vaultCfg.ID, instance)
 	vault.Name = vaultCfg.Name
 	vault.StorageType = string(vaultCfg.Type)
+	vault.WriteModel = vaultCfg.ResolveWriteModel()
 	o.vaults[vaultCfg.ID] = vault
 
 	// Recompile the routing table immediately so the vault can receive

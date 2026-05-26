@@ -5,6 +5,7 @@ import (
 	"gastrolog/internal/glid"
 	"gastrolog/internal/index"
 	"gastrolog/internal/query"
+	"gastrolog/internal/system"
 )
 
 // Vault is the node-local materialization of a VaultConfig: identity plus
@@ -17,6 +18,7 @@ type Vault struct {
 	Name        string
 	Enabled     bool
 	StorageType string // mirrored from VaultConfig.Type
+	WriteModel  system.VaultWriteModel
 	Instance    *VaultInstance
 }
 

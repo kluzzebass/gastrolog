@@ -100,7 +100,7 @@ func (o *Orchestrator) ingestLocked(rec chunk.Record, src SourceContext) (*pendi
 		return nil, nil, nil // No routes configured — drop the record.
 	}
 
-	matches := o.routeSet.MatchWithSource(rec.Attrs, src)
+	matches := RouteFanOutMatches(o.routeSet, rec.Attrs, src)
 	if len(matches) == 0 {
 		o.routeStats.Dropped.Add(1)
 		return nil, nil, nil
@@ -120,7 +120,7 @@ func (o *Orchestrator) ingestLocked(rec chunk.Record, src SourceContext) (*pendi
 			routed = true
 			continue
 		}
-		task, remotes, err := o.appendLocal(t.VaultID, rec)
+		task, remotes, err := o.dispatchDestinationWrite(t.VaultID, rec)
 		if err != nil {
 			if errors.Is(err, ErrVaultDisabled) {
 				continue // Skip disabled vaults during ingestion.

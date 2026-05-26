@@ -115,6 +115,21 @@ func TestPutVaultNilOptionals(t *testing.T) {
 	}
 }
 
+func TestPutVaultWriteModel(t *testing.T) {
+	t.Parallel()
+	want := system.VaultConfig{
+		ID:         glid.New(),
+		Name:       "v2-vault",
+		WriteModel: string(system.VaultWriteModelV2),
+	}
+	got := roundTripCommand(t, NewPutVault(want), func(cmd *gastrologv1.SystemCommand) (system.VaultConfig, error) {
+		return ExtractPutVault(cmd.GetPutVault())
+	})
+	if got.WriteModel != want.WriteModel {
+		t.Fatalf("WriteModel = %q, want %q", got.WriteModel, want.WriteModel)
+	}
+}
+
 func TestPutIngester(t *testing.T) {
 	t.Parallel()
 	want := system.IngesterConfig{

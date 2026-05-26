@@ -1,6 +1,8 @@
 package system
 
 import (
+	"fmt"
+
 	"gastrolog/internal/glid"
 )
 
@@ -54,6 +56,12 @@ type VaultConfig struct {
 	// CacheTTL is the eviction TTL duration (e.g. "1h", "7d") for ttl mode.
 	CacheTTL string `json:"cacheTtl,omitempty"`
 
+	// WriteModel selects the vault data-plane write path. Empty and "v1" use
+	// the current leader-driven active-chunk path (default). "v2" opts into
+	// destination-vault sequencing and spool-first accepted writes (fan-out V2).
+	// Per-vault opt-in; see docs/fan-out/v2/implementation-plan.md.
+	WriteModel string `json:"writeModel,omitempty"`
+
 	// RetentionDisposition decides what happens to records as retention
 	// ages chunks out of this vault. "delete" (default) drops the records
 	// and frees storage immediately, never touching the routing engine.
@@ -67,6 +75,47 @@ type VaultConfig struct {
 	// the next sweep). Operators who want forwarding must opt in
 	// explicitly. See gastrolog-18du3.
 	RetentionDisposition string `json:"retentionDisposition,omitempty"`
+}
+
+// VaultWriteModel names a vault's data-plane write path.
+type VaultWriteModel string
+
+const (
+	// VaultWriteModelV1 is the default: synchronous active-chunk append with
+	// leader-coordinated chunk identity on the write path.
+	VaultWriteModelV1 VaultWriteModel = "v1"
+	// VaultWriteModelV2 is fan-out V2: destination-vault sequencing, spool
+	// segments, and asynchronous materialization (gated per vault).
+	VaultWriteModelV2 VaultWriteModel = "v2"
+)
+
+// ResolveWriteModel returns the effective write model for this vault.
+// Empty and unrecognized values resolve to V1 so existing configs stay stable.
+func (v VaultConfig) ResolveWriteModel() VaultWriteModel {
+	switch v.WriteModel {
+	case string(VaultWriteModelV2):
+		return VaultWriteModelV2
+	case "", string(VaultWriteModelV1):
+		return VaultWriteModelV1
+	default:
+		return VaultWriteModelV1
+	}
+}
+
+// UsesV2WriteModel reports whether this vault is opted into the V2 write path.
+func (v VaultConfig) UsesV2WriteModel() bool {
+	return v.ResolveWriteModel() == VaultWriteModelV2
+}
+
+// ValidateWriteModel rejects unknown writeModel config values.
+func (v VaultConfig) ValidateWriteModel() error {
+	switch v.WriteModel {
+	case "", string(VaultWriteModelV1), string(VaultWriteModelV2):
+		return nil
+	default:
+		return fmt.Errorf("vault %q: invalid writeModel %q (want %q, %q, or empty)",
+			v.Name, v.WriteModel, VaultWriteModelV1, VaultWriteModelV2)
+	}
 }
 
 // Canonical values for VaultConfig.RetentionDisposition.

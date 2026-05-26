@@ -262,3 +262,14 @@ func routeMatches(r *CompiledRoute, attrs chunk.Attributes) bool {
 	}
 	return false
 }
+
+// RouteFanOutMatches evaluates routing for a source record and returns all
+// destination vault matches. This is route fan-out: one source record may
+// fan out to multiple destination vaults. Replica fan-out within each
+// destination vault is owned by dispatchDestinationWrite (V1 today).
+func RouteFanOutMatches(rs *RouteSet, attrs chunk.Attributes, src SourceContext) []MatchResult {
+	if rs == nil {
+		return nil
+	}
+	return rs.MatchWithSource(attrs, src)
+}

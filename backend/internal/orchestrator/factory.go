@@ -188,6 +188,7 @@ func (o *Orchestrator) initVault(sys *system.System, vaultCfg system.VaultConfig
 	vault.Name = vaultCfg.Name
 	vault.Enabled = vaultCfg.Enabled
 	vault.StorageType = string(vaultCfg.Type)
+	vault.WriteModel = vaultCfg.ResolveWriteModel()
 	o.RegisterVault(vault)
 	if o.alerts != nil {
 		o.alerts.Clear(alertKey)
