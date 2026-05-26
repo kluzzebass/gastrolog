@@ -77,6 +77,9 @@ const (
 	// VaultServiceRepatriateOrphanProcedure is the fully-qualified name of the VaultService's
 	// RepatriateOrphan RPC.
 	VaultServiceRepatriateOrphanProcedure = "/gastrolog.v1.VaultService/RepatriateOrphan"
+	// VaultServiceGetSequencedVaultDiagnosticsProcedure is the fully-qualified name of the
+	// VaultService's GetSequencedVaultDiagnostics RPC.
+	VaultServiceGetSequencedVaultDiagnosticsProcedure = "/gastrolog.v1.VaultService/GetSequencedVaultDiagnostics"
 )
 
 // VaultServiceClient is a client for the gastrolog.v1.VaultService service.
@@ -131,6 +134,9 @@ type VaultServiceClient interface {
 	// proposes CmdRepatriateChunk to the vault-ctl FSM. Refuses if the
 	// chunk is already FSM-tracked or tombstoned. See gastrolog-32bf2.
 	RepatriateOrphan(context.Context, *connect.Request[v1.RepatriateOrphanRequest]) (*connect.Response[v1.RepatriateOrphanResponse], error)
+	// GetSequencedVaultDiagnostics returns local sequenced write-path
+	// watermarks, allocator leases, and fence history for operator inspection.
+	GetSequencedVaultDiagnostics(context.Context, *connect.Request[v1.GetSequencedVaultDiagnosticsRequest]) (*connect.Response[v1.GetSequencedVaultDiagnosticsResponse], error)
 }
 
 // NewVaultServiceClient constructs a client for the gastrolog.v1.VaultService service. By default,
@@ -246,28 +252,35 @@ func NewVaultServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(vaultServiceMethods.ByName("RepatriateOrphan")),
 			connect.WithClientOptions(opts...),
 		),
+		getSequencedVaultDiagnostics: connect.NewClient[v1.GetSequencedVaultDiagnosticsRequest, v1.GetSequencedVaultDiagnosticsResponse](
+			httpClient,
+			baseURL+VaultServiceGetSequencedVaultDiagnosticsProcedure,
+			connect.WithSchema(vaultServiceMethods.ByName("GetSequencedVaultDiagnostics")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // vaultServiceClient implements VaultServiceClient.
 type vaultServiceClient struct {
-	listVaults            *connect.Client[v1.ListVaultsRequest, v1.ListVaultsResponse]
-	getVault              *connect.Client[v1.GetVaultRequest, v1.GetVaultResponse]
-	listChunks            *connect.Client[v1.ListChunksRequest, v1.ListChunksResponse]
-	getChunk              *connect.Client[v1.GetChunkRequest, v1.GetChunkResponse]
-	getIndexes            *connect.Client[v1.GetIndexesRequest, v1.GetIndexesResponse]
-	analyzeChunk          *connect.Client[v1.AnalyzeChunkRequest, v1.AnalyzeChunkResponse]
-	getStats              *connect.Client[v1.GetStatsRequest, v1.GetStatsResponse]
-	reindexVault          *connect.Client[v1.ReindexVaultRequest, v1.ReindexVaultResponse]
-	validateVault         *connect.Client[v1.ValidateVaultRequest, v1.ValidateVaultResponse]
-	exportVault           *connect.Client[v1.ExportVaultRequest, v1.ExportVaultResponse]
-	importRecords         *connect.Client[v1.ImportRecordsRequest, v1.ImportRecordsResponse]
-	sealVault             *connect.Client[v1.SealVaultRequest, v1.SealVaultResponse]
-	retryUnreadableChunks *connect.Client[v1.RetryUnreadableChunksRequest, v1.RetryUnreadableChunksResponse]
-	archiveChunk          *connect.Client[v1.ArchiveChunkRequest, v1.ArchiveChunkResponse]
-	restoreChunk          *connect.Client[v1.RestoreChunkRequest, v1.RestoreChunkResponse]
-	watchChunks           *connect.Client[v1.WatchChunksRequest, v1.WatchChunksResponse]
-	repatriateOrphan      *connect.Client[v1.RepatriateOrphanRequest, v1.RepatriateOrphanResponse]
+	listVaults                   *connect.Client[v1.ListVaultsRequest, v1.ListVaultsResponse]
+	getVault                     *connect.Client[v1.GetVaultRequest, v1.GetVaultResponse]
+	listChunks                   *connect.Client[v1.ListChunksRequest, v1.ListChunksResponse]
+	getChunk                     *connect.Client[v1.GetChunkRequest, v1.GetChunkResponse]
+	getIndexes                   *connect.Client[v1.GetIndexesRequest, v1.GetIndexesResponse]
+	analyzeChunk                 *connect.Client[v1.AnalyzeChunkRequest, v1.AnalyzeChunkResponse]
+	getStats                     *connect.Client[v1.GetStatsRequest, v1.GetStatsResponse]
+	reindexVault                 *connect.Client[v1.ReindexVaultRequest, v1.ReindexVaultResponse]
+	validateVault                *connect.Client[v1.ValidateVaultRequest, v1.ValidateVaultResponse]
+	exportVault                  *connect.Client[v1.ExportVaultRequest, v1.ExportVaultResponse]
+	importRecords                *connect.Client[v1.ImportRecordsRequest, v1.ImportRecordsResponse]
+	sealVault                    *connect.Client[v1.SealVaultRequest, v1.SealVaultResponse]
+	retryUnreadableChunks        *connect.Client[v1.RetryUnreadableChunksRequest, v1.RetryUnreadableChunksResponse]
+	archiveChunk                 *connect.Client[v1.ArchiveChunkRequest, v1.ArchiveChunkResponse]
+	restoreChunk                 *connect.Client[v1.RestoreChunkRequest, v1.RestoreChunkResponse]
+	watchChunks                  *connect.Client[v1.WatchChunksRequest, v1.WatchChunksResponse]
+	repatriateOrphan             *connect.Client[v1.RepatriateOrphanRequest, v1.RepatriateOrphanResponse]
+	getSequencedVaultDiagnostics *connect.Client[v1.GetSequencedVaultDiagnosticsRequest, v1.GetSequencedVaultDiagnosticsResponse]
 }
 
 // ListVaults calls gastrolog.v1.VaultService.ListVaults.
@@ -355,6 +368,11 @@ func (c *vaultServiceClient) RepatriateOrphan(ctx context.Context, req *connect.
 	return c.repatriateOrphan.CallUnary(ctx, req)
 }
 
+// GetSequencedVaultDiagnostics calls gastrolog.v1.VaultService.GetSequencedVaultDiagnostics.
+func (c *vaultServiceClient) GetSequencedVaultDiagnostics(ctx context.Context, req *connect.Request[v1.GetSequencedVaultDiagnosticsRequest]) (*connect.Response[v1.GetSequencedVaultDiagnosticsResponse], error) {
+	return c.getSequencedVaultDiagnostics.CallUnary(ctx, req)
+}
+
 // VaultServiceHandler is an implementation of the gastrolog.v1.VaultService service.
 type VaultServiceHandler interface {
 	// ListVaults returns all registered vaults.
@@ -407,6 +425,9 @@ type VaultServiceHandler interface {
 	// proposes CmdRepatriateChunk to the vault-ctl FSM. Refuses if the
 	// chunk is already FSM-tracked or tombstoned. See gastrolog-32bf2.
 	RepatriateOrphan(context.Context, *connect.Request[v1.RepatriateOrphanRequest]) (*connect.Response[v1.RepatriateOrphanResponse], error)
+	// GetSequencedVaultDiagnostics returns local sequenced write-path
+	// watermarks, allocator leases, and fence history for operator inspection.
+	GetSequencedVaultDiagnostics(context.Context, *connect.Request[v1.GetSequencedVaultDiagnosticsRequest]) (*connect.Response[v1.GetSequencedVaultDiagnosticsResponse], error)
 }
 
 // NewVaultServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -518,6 +539,12 @@ func NewVaultServiceHandler(svc VaultServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(vaultServiceMethods.ByName("RepatriateOrphan")),
 		connect.WithHandlerOptions(opts...),
 	)
+	vaultServiceGetSequencedVaultDiagnosticsHandler := connect.NewUnaryHandler(
+		VaultServiceGetSequencedVaultDiagnosticsProcedure,
+		svc.GetSequencedVaultDiagnostics,
+		connect.WithSchema(vaultServiceMethods.ByName("GetSequencedVaultDiagnostics")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.VaultService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case VaultServiceListVaultsProcedure:
@@ -554,6 +581,8 @@ func NewVaultServiceHandler(svc VaultServiceHandler, opts ...connect.HandlerOpti
 			vaultServiceWatchChunksHandler.ServeHTTP(w, r)
 		case VaultServiceRepatriateOrphanProcedure:
 			vaultServiceRepatriateOrphanHandler.ServeHTTP(w, r)
+		case VaultServiceGetSequencedVaultDiagnosticsProcedure:
+			vaultServiceGetSequencedVaultDiagnosticsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -629,4 +658,8 @@ func (UnimplementedVaultServiceHandler) WatchChunks(context.Context, *connect.Re
 
 func (UnimplementedVaultServiceHandler) RepatriateOrphan(context.Context, *connect.Request[v1.RepatriateOrphanRequest]) (*connect.Response[v1.RepatriateOrphanResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.VaultService.RepatriateOrphan is not implemented"))
+}
+
+func (UnimplementedVaultServiceHandler) GetSequencedVaultDiagnostics(context.Context, *connect.Request[v1.GetSequencedVaultDiagnosticsRequest]) (*connect.Response[v1.GetSequencedVaultDiagnosticsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.VaultService.GetSequencedVaultDiagnostics is not implemented"))
 }

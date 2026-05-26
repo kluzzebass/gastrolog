@@ -33,14 +33,18 @@ func (a *orchStatsAdapter) VaultSnapshots() []cluster.StatsVaultSnapshot {
 	out := make([]cluster.StatsVaultSnapshot, len(snaps))
 	for i, s := range snaps {
 		out[i] = cluster.StatsVaultSnapshot{
-			ID:                  s.ID,
-			RecordCount:         s.RecordCount,
-			ChunkCount:          s.ChunkCount,
-			SealedChunks:        s.SealedChunks,
-			DataBytes:           s.DataBytes,
-			Enabled:             s.Enabled,
-			RaftAppliedIndex:    s.RaftAppliedIndex,
-			IngestHighWatermark: s.IngestHighWatermark,
+			ID:                       s.ID,
+			RecordCount:              s.RecordCount,
+			ChunkCount:               s.ChunkCount,
+			SealedChunks:             s.SealedChunks,
+			DataBytes:                s.DataBytes,
+			Enabled:                  s.Enabled,
+			RaftAppliedIndex:         s.RaftAppliedIndex,
+			IngestHighWatermark:      s.IngestHighWatermark,
+			SpoolWatermark:           s.SpoolWatermark,
+			FenceHighWatermark:       s.FenceHighWatermark,
+			MaterializationWatermark: s.MaterializationWatermark,
+			ConvergenceWatermark:     s.ConvergenceWatermark,
 		}
 	}
 	return out

@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { AnalyzeChunkRequest, AnalyzeChunkResponse, ArchiveChunkRequest, ArchiveChunkResponse, ExportVaultRequest, ExportVaultResponse, GetChunkRequest, GetChunkResponse, GetIndexesRequest, GetIndexesResponse, GetStatsRequest, GetStatsResponse, GetVaultRequest, GetVaultResponse, ImportRecordsRequest, ImportRecordsResponse, ListChunksRequest, ListChunksResponse, ListVaultsRequest, ListVaultsResponse, ReindexVaultRequest, ReindexVaultResponse, RepatriateOrphanRequest, RepatriateOrphanResponse, RestoreChunkRequest, RestoreChunkResponse, RetryUnreadableChunksRequest, RetryUnreadableChunksResponse, SealVaultRequest, SealVaultResponse, ValidateVaultRequest, ValidateVaultResponse, WatchChunksRequest, WatchChunksResponse } from "./vault_pb.js";
+import { AnalyzeChunkRequest, AnalyzeChunkResponse, ArchiveChunkRequest, ArchiveChunkResponse, ExportVaultRequest, ExportVaultResponse, GetChunkRequest, GetChunkResponse, GetIndexesRequest, GetIndexesResponse, GetSequencedVaultDiagnosticsRequest, GetSequencedVaultDiagnosticsResponse, GetStatsRequest, GetStatsResponse, GetVaultRequest, GetVaultResponse, ImportRecordsRequest, ImportRecordsResponse, ListChunksRequest, ListChunksResponse, ListVaultsRequest, ListVaultsResponse, ReindexVaultRequest, ReindexVaultResponse, RepatriateOrphanRequest, RepatriateOrphanResponse, RestoreChunkRequest, RestoreChunkResponse, RetryUnreadableChunksRequest, RetryUnreadableChunksResponse, SealVaultRequest, SealVaultResponse, ValidateVaultRequest, ValidateVaultResponse, WatchChunksRequest, WatchChunksResponse } from "./vault_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -215,6 +215,18 @@ export const VaultService = {
       name: "RepatriateOrphan",
       I: RepatriateOrphanRequest,
       O: RepatriateOrphanResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * GetSequencedVaultDiagnostics returns local sequenced write-path
+     * watermarks, allocator leases, and fence history for operator inspection.
+     *
+     * @generated from rpc gastrolog.v1.VaultService.GetSequencedVaultDiagnostics
+     */
+    getSequencedVaultDiagnostics: {
+      name: "GetSequencedVaultDiagnostics",
+      I: GetSequencedVaultDiagnosticsRequest,
+      O: GetSequencedVaultDiagnosticsResponse,
       kind: MethodKind.Unary,
     },
   }

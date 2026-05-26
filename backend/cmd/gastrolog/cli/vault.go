@@ -47,10 +47,11 @@ func newVaultListCmd() *cobra.Command {
 				rows = append(rows, []string{
 					glid.FromBytes(v.Id).String(), v.Name,
 					vaultTypeName(v.Type),
+					writeModelDisplay(v.WriteModel),
 					strconv.FormatBool(v.Enabled),
 				})
 			}
-			p.table([]string{"ID", "NAME", "TYPE", "ENABLED"}, rows)
+			p.table([]string{"ID", "NAME", "TYPE", "WRITE MODEL", "ENABLED"}, rows)
 			return nil
 		},
 	}
@@ -96,6 +97,7 @@ func vaultDetailPairs(v *v1.VaultConfig) [][2]string {
 		{"ID", glid.FromBytes(v.Id).String()},
 		{"Name", v.Name},
 		{"Type", vaultTypeName(v.Type)},
+		{"Write Model", writeModelDisplay(v.WriteModel)},
 		{"Enabled", strconv.FormatBool(v.Enabled)},
 		{"Storage Class", strconv.FormatUint(uint64(v.StorageClass), 10)},
 		{"Replication Factor", strconv.FormatUint(uint64(v.ReplicationFactor), 10)},
@@ -202,6 +204,7 @@ shape (memory, file, file+cloud, JSONL) defined by --type, --storage-class
 	cmd.Flags().String("cache-budget", "", "max cache size (e.g. 1GB, 500MB, 1GiB)")
 	cmd.Flags().String("cache-ttl", "", "cache TTL duration for ttl eviction mode (e.g. 1h, 7d)")
 	cmd.Flags().String("retention-disposition", "delete", "what retention does with aged-out records: delete (drop) or route (send through routing engine)")
+	cmd.Flags().String("write-model", "chunk_append", "write path: chunk_append (default) or sequenced")
 	cmd.Flags().String("path", "", "direct path for JSONL sinks")
 	cmd.Flags().Uint64("memory-budget", 0, "memory budget in bytes (memory vaults)")
 	_ = cmd.MarkFlagRequired("name")
@@ -265,6 +268,14 @@ func applyVaultFlags(ctx context.Context, cmd *cobra.Command, client *server.Cli
 		if err := resolveVaultRetentionPolicy(ctx, cmd, client, cfg); err != nil {
 			return err
 		}
+	}
+	if cmd.Flags().Changed("write-model") {
+		wm, _ := cmd.Flags().GetString("write-model")
+		parsed, err := parseWriteModel(wm)
+		if err != nil {
+			return err
+		}
+		cfg.WriteModel = parsed
 	}
 	return nil
 }

@@ -70,11 +70,35 @@ func runInspectVault(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	var seqDiag *v1.GetSequencedVaultDiagnosticsResponse
+	if usesSequencedWriteModel(vault.WriteModel) {
+		diagResp, diagErr := client.Vault.GetSequencedVaultDiagnostics(context.Background(),
+			connect.NewRequest(&v1.GetSequencedVaultDiagnosticsRequest{Vault: vaultID}))
+		if diagErr == nil {
+			seqDiag = diagResp.Msg
+		}
+	}
+
+	var clusterNodes []*v1.ClusterNode
+	if usesSequencedWriteModel(vault.WriteModel) {
+		if clusterResp, clusterErr := client.Lifecycle.GetClusterStatus(context.Background(),
+			connect.NewRequest(&v1.GetClusterStatusRequest{})); clusterErr == nil {
+			clusterNodes = clusterResp.Msg.Nodes
+		}
+	}
+
 	if outputFormat(cmd) == "json" {
-		return newPrinter("json").json(map[string]any{
+		payload := map[string]any{
 			"vault":  vault,
 			"chunks": chunksResp.Msg.Chunks,
-		})
+		}
+		if seqDiag != nil {
+			payload["sequenced_diagnostics"] = seqDiag
+		}
+		if len(clusterNodes) > 0 {
+			payload["cluster_watermarks"] = clusterNodes
+		}
+		return newPrinter("json").json(payload)
 	}
 
 	chunksByVault := make(map[string][]*v1.ChunkMeta)
@@ -88,6 +112,10 @@ func runInspectVault(cmd *cobra.Command, args []string) error {
 
 	nodeNames := nodeIDToNameMap(cfgResp.Msg.NodeConfigs)
 	printVaultSection(vault, chunksByVault[glid.FromBytes(vault.Id).String()], nodeNames)
+
+	if usesSequencedWriteModel(vault.WriteModel) {
+		printSequencedInspectSection(seqDiag, vaultID, clusterNodes, nodeNames)
+	}
 
 	return nil
 }
@@ -134,8 +162,8 @@ func printVaultSection(vault *v1.VaultConfig, chunks []*v1.ChunkMeta, nodeNames 
 		totalBytes += c.DiskBytes
 	}
 
-	fmt.Printf("  STORAGE: %s  %q  %d chunks  %d records  %s\n",
-		vaultType, vault.Name,
+	fmt.Printf("  STORAGE: %s  %q  write_model=%s  %d chunks  %d records  %s\n",
+		vaultType, vault.Name, writeModelDisplay(vault.WriteModel),
 		len(chunks), totalRecords, units.FormatBytesDisplay(totalBytes))
 
 	sort.Slice(chunks, func(i, j int) bool {
@@ -152,6 +180,37 @@ func printVaultSection(vault *v1.VaultConfig, chunks []*v1.ChunkMeta, nodeNames 
 			short, chunkBadges(c), c.RecordCount, units.FormatBytesDisplay(c.DiskBytes),
 			renderReplicaResidency(c.ReplicaNodeIds, nodeNames),
 			renderPendingAcks(c.PendingAckNodeIds, nodeNames))
+	}
+	fmt.Println()
+}
+
+func printSequencedInspectSection(diag *v1.GetSequencedVaultDiagnosticsResponse, vaultID string, nodes []*v1.ClusterNode, nodeNames map[string]string) {
+	fmt.Println("Sequenced diagnostics (local node):")
+	if diag == nil {
+		fmt.Println("  (unavailable — vault may not be registered on this node)")
+	} else {
+		for _, line := range formatSequencedWatermarkLines(diag) {
+			fmt.Println(line)
+		}
+		fmt.Println()
+		fmt.Println("Allocator:")
+		for _, line := range formatSeqAllocatorLines(diag.Allocator) {
+			fmt.Println(line)
+		}
+		fmt.Println()
+		fmt.Println("Fences:")
+		for _, line := range formatFenceLines(diag.Fences) {
+			fmt.Println(line)
+		}
+	}
+
+	peerLines := formatPeerSequencedWatermarkLines(vaultID, nodes, nodeNames)
+	if len(peerLines) > 0 {
+		fmt.Println()
+		fmt.Println("Cluster replica watermarks:")
+		for _, line := range peerLines {
+			fmt.Println(line)
+		}
 	}
 	fmt.Println()
 }

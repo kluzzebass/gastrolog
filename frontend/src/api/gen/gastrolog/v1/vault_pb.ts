@@ -1371,6 +1371,34 @@ export class VaultStats extends Message<VaultStats> {
    */
   ingestHighWatermark = protoInt64.zero;
 
+  /**
+   * spool_watermark is S_r — highest vault_seq durably present in local spool.
+   *
+   * @generated from field: uint64 spool_watermark = 15;
+   */
+  spoolWatermark = protoInt64.zero;
+
+  /**
+   * fence_high_watermark is F_n — latest durable fence upper bound from vault-ctl Raft.
+   *
+   * @generated from field: uint64 fence_high_watermark = 16;
+   */
+  fenceHighWatermark = protoInt64.zero;
+
+  /**
+   * materialization_watermark is M_r — highest vault_seq fully materialized locally.
+   *
+   * @generated from field: uint64 materialization_watermark = 17;
+   */
+  materializationWatermark = protoInt64.zero;
+
+  /**
+   * convergence_watermark is C_r — highest fence upper bound converge-sealed locally.
+   *
+   * @generated from field: uint64 convergence_watermark = 18;
+   */
+  convergenceWatermark = protoInt64.zero;
+
   constructor(data?: PartialMessage<VaultStats>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1393,6 +1421,10 @@ export class VaultStats extends Message<VaultStats> {
     { no: 12, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 13, name: "raft_applied_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 14, name: "ingest_high_watermark", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 15, name: "spool_watermark", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 16, name: "fence_high_watermark", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 17, name: "materialization_watermark", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 18, name: "convergence_watermark", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultStats {
@@ -2432,6 +2464,342 @@ export class RepatriateOrphanResponse extends Message<RepatriateOrphanResponse> 
 
   static equals(a: RepatriateOrphanResponse | PlainMessage<RepatriateOrphanResponse> | undefined, b: RepatriateOrphanResponse | PlainMessage<RepatriateOrphanResponse> | undefined): boolean {
     return proto3.util.equals(RepatriateOrphanResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.GetSequencedVaultDiagnosticsRequest
+ */
+export class GetSequencedVaultDiagnosticsRequest extends Message<GetSequencedVaultDiagnosticsRequest> {
+  /**
+   * @generated from field: string vault = 1;
+   */
+  vault = "";
+
+  constructor(data?: PartialMessage<GetSequencedVaultDiagnosticsRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.GetSequencedVaultDiagnosticsRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetSequencedVaultDiagnosticsRequest {
+    return new GetSequencedVaultDiagnosticsRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetSequencedVaultDiagnosticsRequest {
+    return new GetSequencedVaultDiagnosticsRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetSequencedVaultDiagnosticsRequest {
+    return new GetSequencedVaultDiagnosticsRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetSequencedVaultDiagnosticsRequest | PlainMessage<GetSequencedVaultDiagnosticsRequest> | undefined, b: GetSequencedVaultDiagnosticsRequest | PlainMessage<GetSequencedVaultDiagnosticsRequest> | undefined): boolean {
+    return proto3.util.equals(GetSequencedVaultDiagnosticsRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.GetSequencedVaultDiagnosticsResponse
+ */
+export class GetSequencedVaultDiagnosticsResponse extends Message<GetSequencedVaultDiagnosticsResponse> {
+  /**
+   * @generated from field: string write_model = 1;
+   */
+  writeModel = "";
+
+  /**
+   * @generated from field: string node_id = 2;
+   */
+  nodeId = "";
+
+  /**
+   * @generated from field: uint64 spool_watermark = 3;
+   */
+  spoolWatermark = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 ingest_high_watermark = 4;
+   */
+  ingestHighWatermark = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 fence_high_watermark = 5;
+   */
+  fenceHighWatermark = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 materialization_watermark = 6;
+   */
+  materializationWatermark = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 convergence_watermark = 7;
+   */
+  convergenceWatermark = protoInt64.zero;
+
+  /**
+   * @generated from field: gastrolog.v1.SeqAllocatorDiagnostics allocator = 8;
+   */
+  allocator?: SeqAllocatorDiagnostics;
+
+  /**
+   * @generated from field: repeated gastrolog.v1.FenceRecordDiagnostics fences = 9;
+   */
+  fences: FenceRecordDiagnostics[] = [];
+
+  constructor(data?: PartialMessage<GetSequencedVaultDiagnosticsResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.GetSequencedVaultDiagnosticsResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "write_model", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "spool_watermark", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 4, name: "ingest_high_watermark", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 5, name: "fence_high_watermark", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 6, name: "materialization_watermark", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 7, name: "convergence_watermark", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 8, name: "allocator", kind: "message", T: SeqAllocatorDiagnostics },
+    { no: 9, name: "fences", kind: "message", T: FenceRecordDiagnostics, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetSequencedVaultDiagnosticsResponse {
+    return new GetSequencedVaultDiagnosticsResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetSequencedVaultDiagnosticsResponse {
+    return new GetSequencedVaultDiagnosticsResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetSequencedVaultDiagnosticsResponse {
+    return new GetSequencedVaultDiagnosticsResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetSequencedVaultDiagnosticsResponse | PlainMessage<GetSequencedVaultDiagnosticsResponse> | undefined, b: GetSequencedVaultDiagnosticsResponse | PlainMessage<GetSequencedVaultDiagnosticsResponse> | undefined): boolean {
+    return proto3.util.equals(GetSequencedVaultDiagnosticsResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.SeqAllocatorDiagnostics
+ */
+export class SeqAllocatorDiagnostics extends Message<SeqAllocatorDiagnostics> {
+  /**
+   * @generated from field: uint64 next_seq = 1;
+   */
+  nextSeq = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 epoch = 2;
+   */
+  epoch = protoInt64.zero;
+
+  /**
+   * @generated from field: repeated gastrolog.v1.SeqActiveLeaseDiagnostics active_swaths = 3;
+   */
+  activeSwaths: SeqActiveLeaseDiagnostics[] = [];
+
+  /**
+   * @generated from field: repeated gastrolog.v1.SeqBurnedTailDiagnostics burned_tails = 4;
+   */
+  burnedTails: SeqBurnedTailDiagnostics[] = [];
+
+  constructor(data?: PartialMessage<SeqAllocatorDiagnostics>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.SeqAllocatorDiagnostics";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "next_seq", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 2, name: "epoch", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 3, name: "active_swaths", kind: "message", T: SeqActiveLeaseDiagnostics, repeated: true },
+    { no: 4, name: "burned_tails", kind: "message", T: SeqBurnedTailDiagnostics, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SeqAllocatorDiagnostics {
+    return new SeqAllocatorDiagnostics().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SeqAllocatorDiagnostics {
+    return new SeqAllocatorDiagnostics().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SeqAllocatorDiagnostics {
+    return new SeqAllocatorDiagnostics().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SeqAllocatorDiagnostics | PlainMessage<SeqAllocatorDiagnostics> | undefined, b: SeqAllocatorDiagnostics | PlainMessage<SeqAllocatorDiagnostics> | undefined): boolean {
+    return proto3.util.equals(SeqAllocatorDiagnostics, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.SeqActiveLeaseDiagnostics
+ */
+export class SeqActiveLeaseDiagnostics extends Message<SeqActiveLeaseDiagnostics> {
+  /**
+   * @generated from field: string holder_id = 1;
+   */
+  holderId = "";
+
+  /**
+   * @generated from field: uint64 epoch = 2;
+   */
+  epoch = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 range_start = 3;
+   */
+  rangeStart = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 range_end = 4;
+   */
+  rangeEnd = protoInt64.zero;
+
+  constructor(data?: PartialMessage<SeqActiveLeaseDiagnostics>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.SeqActiveLeaseDiagnostics";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "holder_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "epoch", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 3, name: "range_start", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 4, name: "range_end", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SeqActiveLeaseDiagnostics {
+    return new SeqActiveLeaseDiagnostics().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SeqActiveLeaseDiagnostics {
+    return new SeqActiveLeaseDiagnostics().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SeqActiveLeaseDiagnostics {
+    return new SeqActiveLeaseDiagnostics().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SeqActiveLeaseDiagnostics | PlainMessage<SeqActiveLeaseDiagnostics> | undefined, b: SeqActiveLeaseDiagnostics | PlainMessage<SeqActiveLeaseDiagnostics> | undefined): boolean {
+    return proto3.util.equals(SeqActiveLeaseDiagnostics, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.SeqBurnedTailDiagnostics
+ */
+export class SeqBurnedTailDiagnostics extends Message<SeqBurnedTailDiagnostics> {
+  /**
+   * @generated from field: uint64 start = 1;
+   */
+  start = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 end = 2;
+   */
+  end = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 epoch = 3;
+   */
+  epoch = protoInt64.zero;
+
+  constructor(data?: PartialMessage<SeqBurnedTailDiagnostics>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.SeqBurnedTailDiagnostics";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "start", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 2, name: "end", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 3, name: "epoch", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SeqBurnedTailDiagnostics {
+    return new SeqBurnedTailDiagnostics().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SeqBurnedTailDiagnostics {
+    return new SeqBurnedTailDiagnostics().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SeqBurnedTailDiagnostics {
+    return new SeqBurnedTailDiagnostics().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SeqBurnedTailDiagnostics | PlainMessage<SeqBurnedTailDiagnostics> | undefined, b: SeqBurnedTailDiagnostics | PlainMessage<SeqBurnedTailDiagnostics> | undefined): boolean {
+    return proto3.util.equals(SeqBurnedTailDiagnostics, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.FenceRecordDiagnostics
+ */
+export class FenceRecordDiagnostics extends Message<FenceRecordDiagnostics> {
+  /**
+   * @generated from field: uint64 id = 1;
+   */
+  id = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 upper_bound_seq = 2;
+   */
+  upperBoundSeq = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 prev_bound_seq = 3;
+   */
+  prevBoundSeq = protoInt64.zero;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp created_at = 4;
+   */
+  createdAt?: Timestamp;
+
+  constructor(data?: PartialMessage<FenceRecordDiagnostics>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.FenceRecordDiagnostics";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "id", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 2, name: "upper_bound_seq", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 3, name: "prev_bound_seq", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 4, name: "created_at", kind: "message", T: Timestamp },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): FenceRecordDiagnostics {
+    return new FenceRecordDiagnostics().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): FenceRecordDiagnostics {
+    return new FenceRecordDiagnostics().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): FenceRecordDiagnostics {
+    return new FenceRecordDiagnostics().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: FenceRecordDiagnostics | PlainMessage<FenceRecordDiagnostics> | undefined, b: FenceRecordDiagnostics | PlainMessage<FenceRecordDiagnostics> | undefined): boolean {
+    return proto3.util.equals(FenceRecordDiagnostics, a, b);
   }
 }
 
