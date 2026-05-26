@@ -27,6 +27,9 @@ func TestReconcileBlocksOnAssignedMissing(t *testing.T) {
 	t.Parallel()
 	orch, vaultID := newSequencedFenceTestOrch(t, 0)
 	store := orch.vaultSpoolStore(vaultID)
+	if err := store.EnsureSwathWindow(1, 512); err != nil {
+		t.Fatal(err)
+	}
 	ingesterID := glid.New()
 	rec1 := sequencedTestRecord("a", ingesterID, 1)
 	rec1.VaultSeq = 1
@@ -60,6 +63,9 @@ func TestLocalSeqPresentFallsBackToMaterializationWatermark(t *testing.T) {
 	t.Parallel()
 	orch, vaultID := newSequencedFenceTestOrch(t, 0)
 	store := orch.vaultSpoolStore(vaultID)
+	if err := store.EnsureSwathWindow(1, 512); err != nil {
+		t.Fatal(err)
+	}
 	fence := vaultctlfsm.FenceRecord{ID: 1, UpperBoundSeq: 3, PrevBoundSeq: 0}
 
 	if orch.localSeqPresentForReconcile(vaultID, fence, 2) {
@@ -69,6 +75,9 @@ func TestLocalSeqPresentFallsBackToMaterializationWatermark(t *testing.T) {
 	ingesterID := glid.New()
 	rec := sequencedTestRecord("x", ingesterID, 2)
 	rec.VaultSeq = 2
+	if err := store.AppendTentative(rec); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.CommitAcceptance(rec); err != nil {
 		t.Fatal(err)
 	}

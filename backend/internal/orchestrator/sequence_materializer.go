@@ -33,7 +33,8 @@ type spoolReclaimSetter interface {
 }
 
 // materializeFence reads (M_r, F_n] from local spool, writes a sealed chunk,
-// and advances M_r to fence.UpperBoundSeq.
+// and advances M_r to fence.UpperBoundSeq. Duplicate EventIDs in the fence
+// range collapse to one chunk row (lowest VaultSeq wins).
 func (o *Orchestrator) materializeFence(vaultID glid.GLID, fence vaultctlfsm.FenceRecord) (*FenceMaterializationCoverage, error) {
 	if o.vaultWriteModel(vaultID) != system.VaultWriteModelSequenced {
 		return nil, nil
@@ -64,6 +65,7 @@ func (o *Orchestrator) materializeFence(vaultID glid.GLID, fence vaultctlfsm.Fen
 		alloc = sub.SeqAllocatorState()
 	}
 	var records []chunk.Record
+	seenEventID := make(map[chunk.EventID]struct{})
 	for seq := start + 1; seq <= fence.UpperBoundSeq; seq++ {
 		rec, err := store.ReadByVaultSeq(context.Background(), vaultID, seq)
 		if err != nil {
@@ -73,6 +75,10 @@ func (o *Orchestrator) materializeFence(vaultID glid.GLID, fence vaultctlfsm.Fen
 			coverage.MissingSeqs = append(coverage.MissingSeqs, seq)
 			continue
 		}
+		if _, dup := seenEventID[rec.EventID]; dup {
+			continue // lowest VaultSeq wins (fence iteration is ascending)
+		}
+		seenEventID[rec.EventID] = struct{}{}
 		records = append(records, rec)
 	}
 	if len(coverage.MissingSeqs) > 0 {

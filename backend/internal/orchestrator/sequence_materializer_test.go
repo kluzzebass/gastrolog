@@ -68,6 +68,9 @@ func TestSequenceMaterializerSkipsBurnedTailGaps(t *testing.T) {
 	burnSeqAllocatorTail(t, orch, vaultID, 10, 7) // unassigned gap seq 8-10
 
 	store := orch.vaultSpoolStore(vaultID)
+	if err := store.EnsureSwathWindow(1, 512); err != nil {
+		t.Fatal(err)
+	}
 	ingesterID := glid.New()
 	for _, seq := range []uint64{1, 2, 3, 4, 5, 6, 7} {
 		rec := sequencedTestRecord("x", ingesterID, uint32(seq))
@@ -109,6 +112,9 @@ func TestSequenceMaterializerFailsAssignedMissingNotGap(t *testing.T) {
 	burnSeqAllocatorTail(t, orch, vaultID, 10, 7)
 
 	store := orch.vaultSpoolStore(vaultID)
+	if err := store.EnsureSwathWindow(1, 512); err != nil {
+		t.Fatal(err)
+	}
 	ingesterID := glid.New()
 	for _, seq := range []uint64{1, 2, 4, 5, 6, 7} { // assigned-missing at seq 3
 		rec := sequencedTestRecord("x", ingesterID, uint32(seq))
@@ -131,6 +137,44 @@ func TestSequenceMaterializerFailsAssignedMissingNotGap(t *testing.T) {
 	}
 	if cov == nil || len(cov.MissingSeqs) != 1 || cov.MissingSeqs[0] != 3 {
 		t.Fatalf("MissingSeqs = %v, want [3]", cov)
+	}
+}
+
+func TestSequenceMaterializerDedupEventIDByLowestSeq(t *testing.T) {
+	t.Parallel()
+	orch, vaultID := newSequencedFenceTestOrch(t, 0)
+	store := orch.vaultSpoolStore(vaultID)
+	if err := store.EnsureSwathWindow(1, 512); err != nil {
+		t.Fatal(err)
+	}
+	ingesterID := glid.New()
+	eventID := sequencedTestRecord("dup", ingesterID, 1).EventID
+	for _, seq := range []uint64{1, 2} {
+		rec := sequencedTestRecord("dup", ingesterID, uint32(seq))
+		rec.EventID = eventID
+		rec.VaultSeq = seq
+		if err := store.AppendTentative(rec); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.CommitAcceptance(rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	fence := vaultctlfsm.FenceRecord{ID: 1, UpperBoundSeq: 2, PrevBoundSeq: 0}
+	cov, err := orch.materializeFence(vaultID, fence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cov == nil || cov.RecordCount != 1 {
+		t.Fatalf("coverage = %+v, want one canonical row", cov)
+	}
+	metas, err := orch.ListLocalChunkMetas(vaultID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(metas) != 1 || metas[0].RecordCount != 1 {
+		t.Fatalf("chunk metas = %+v, want single deduped record", metas)
 	}
 }
 
