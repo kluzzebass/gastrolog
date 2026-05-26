@@ -77,6 +77,9 @@ type ReindexVaultExecutor func(ctx context.Context, vaultID glid.GLID) (string, 
 // Returns the job ID.
 type ExportToVaultExecutor func(ctx context.Context, expression string, targetVaultID glid.GLID) (string, error)
 
+// SpoolSeqReader reads one local spool slot for remote recovery heal RPCs.
+type SpoolSeqReader func(ctx context.Context, vaultID glid.GLID, seq uint64) (chunk.Record, bool, error)
+
 // RecordImporter imports records as a new sealed chunk in a vault.
 // Used by the ForwardImportRecords handler for cross-node chunk migration.
 type RecordImporter func(ctx context.Context, vaultID glid.GLID, next chunk.RecordIterator) error
@@ -157,6 +160,11 @@ func (s *Server) SetChunkEventSubscriber(fn ChunkEventSubscriber) {
 // SetContextExecutor injects the callback for handling remote GetContext requests.
 func (s *Server) SetContextExecutor(fn ContextExecutor) {
 	s.contextExecutor = fn
+}
+
+// SetSpoolSeqReader injects the callback for ForwardReadSpoolSeq RPCs.
+func (s *Server) SetSpoolSeqReader(fn SpoolSeqReader) {
+	s.spoolSeqReader = fn
 }
 
 // SetListChunksExecutor injects the callback for handling remote ListChunks requests.
@@ -565,6 +573,28 @@ func (s *Server) forwardGetContext(ctx context.Context, req *gastrologv1.Forward
 	return resp, nil
 }
 
+func (s *Server) forwardReadSpoolSeq(ctx context.Context, req *gastrologv1.ForwardReadSpoolSeqRequest) (*gastrologv1.ForwardReadSpoolSeqResponse, error) {
+	if s.spoolSeqReader == nil {
+		return nil, status.Error(codes.Unavailable, "spool seq reader not configured")
+	}
+	vaultID, err := parseVaultID(req.GetVaultId())
+	if err != nil {
+		return nil, err
+	}
+	if req.GetVaultSeq() == 0 {
+		return nil, status.Error(codes.InvalidArgument, "vault_seq required")
+	}
+	rec, found, err := s.spoolSeqReader(ctx, vaultID, req.GetVaultSeq())
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "read spool seq: %v", err)
+	}
+	resp := &gastrologv1.ForwardReadSpoolSeqResponse{Found: found}
+	if found {
+		resp.Record = convert.RecordToExport(rec)
+	}
+	return resp, nil
+}
+
 // forwardListChunks handles the ForwardListChunks RPC. Lists chunks in a
 // local vault and returns them to the requesting node.
 func (s *Server) forwardListChunks(ctx context.Context, req *gastrologv1.ForwardListChunksRequest) (*gastrologv1.ForwardListChunksResponse, error) {
@@ -961,6 +991,10 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			Handler:    forwardGetContextHandler,
 		},
 		{
+			MethodName: "ForwardReadSpoolSeq",
+			Handler:    forwardReadSpoolSeqHandler,
+		},
+		{
 			MethodName: "ForwardListChunks",
 			Handler:    forwardListChunksHandler,
 		},
@@ -1161,6 +1195,25 @@ func forwardGetContextHandler(srv any, ctx context.Context, dec func(any) error,
 	}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return s.forwardGetContext(ctx, req.(*gastrologv1.ForwardGetContextRequest))
+	}
+	return interceptor(ctx, req, info, handler)
+}
+
+func forwardReadSpoolSeqHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	req := &gastrologv1.ForwardReadSpoolSeqRequest{}
+	if err := dec(req); err != nil {
+		return nil, err
+	}
+	s := srv.(*Server)
+	if interceptor == nil {
+		return s.forwardReadSpoolSeq(ctx, req)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gastrolog.v1.ClusterService/ForwardReadSpoolSeq",
+	}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return s.forwardReadSpoolSeq(ctx, req.(*gastrologv1.ForwardReadSpoolSeqRequest))
 	}
 	return interceptor(ctx, req, info, handler)
 }

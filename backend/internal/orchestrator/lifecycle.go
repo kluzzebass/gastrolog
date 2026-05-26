@@ -248,6 +248,10 @@ func (o *Orchestrator) Stop() error {
 	// passes don't fight retention deletes during shutdown).
 	o.vaultCtlLeaders.StopAll()
 
+	// Release file-backed spool and chunk handles so a subsequent Start
+	// (or harness restart) can reopen the same directories.
+	o.closeLocalVaultStorage()
+
 	o.mu.Lock()
 	o.cancel = nil
 	o.done = nil
@@ -258,6 +262,23 @@ func (o *Orchestrator) Stop() error {
 	o.mu.Unlock()
 
 	return nil
+}
+
+// closeLocalVaultStorage closes durable spool and chunk managers for every
+// registered vault without removing registry entries so a subsequent Start
+// or process restart can reopen the same directories.
+func (o *Orchestrator) closeLocalVaultStorage() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for _, v := range o.vaults {
+		if v.spool != nil {
+			_ = v.spool.close()
+			v.spool = nil
+		}
+		if v.Instance != nil && v.Instance.Chunks != nil {
+			_ = v.Instance.Chunks.Close()
+		}
+	}
 }
 
 // Close releases scheduler resources without requiring a prior Start().

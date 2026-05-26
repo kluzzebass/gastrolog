@@ -241,6 +241,7 @@ func newOrchRelHarness(t *testing.T, n int, opts ...orchRelOption) *orchRelHarne
 		h.wireCrossNodeReplication()
 		h.wireInProcessVaultCtlApply()
 		h.wireClusterRecordForwarding()
+		h.wireSpoolSlotHeal()
 	}
 
 	// Phase 5: wait for vault-ctl Raft to bootstrap on every node.
@@ -770,6 +771,38 @@ func (h *orchRelHarness) wireCrossNodeReplication() {
 // wireClusterRecordForwarding mirrors app.go SetRecordAppender + RecordForwarder
 // wiring so guardrail tests can assert sequenced cross-node routes never land via
 // forward→Append (write-path-lock.md).
+func (h *orchRelHarness) wireSpoolSlotHeal() {
+	h.t.Helper()
+	fetcher := &orchRelDirectSpoolFetcher{nodes: h.nodes}
+	for _, n := range h.nodes {
+		n.orch.SetSpoolSlotFetcher(fetcher)
+		orch := n.orch
+		n.clusterSrv.SetSpoolSeqReader(func(_ context.Context, vaultID glid.GLID, seq uint64) (chunk.Record, bool, error) {
+			rec, err := orch.ReadVaultSpoolSeq(vaultID, seq)
+			if err != nil {
+				return chunk.Record{}, false, nil
+			}
+			return rec, true, nil
+		})
+	}
+}
+
+type orchRelDirectSpoolFetcher struct {
+	nodes map[string]*orchRelNode
+}
+
+func (d *orchRelDirectSpoolFetcher) ReadSpoolSeq(_ context.Context, nodeID string, vaultID glid.GLID, seq uint64) (chunk.Record, bool, error) {
+	n, ok := d.nodes[nodeID]
+	if !ok {
+		return chunk.Record{}, false, fmt.Errorf("orchRelDirectSpoolFetcher: unknown node %q", nodeID)
+	}
+	rec, err := n.orch.ReadVaultSpoolSeq(vaultID, seq)
+	if err != nil {
+		return chunk.Record{}, false, nil
+	}
+	return rec, true, nil
+}
+
 func (h *orchRelHarness) wireClusterRecordForwarding() {
 	h.t.Helper()
 	tracker := &orchRelForwardTracker{}

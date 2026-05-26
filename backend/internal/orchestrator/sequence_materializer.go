@@ -11,8 +11,6 @@ import (
 	"gastrolog/internal/glid"
 	"gastrolog/internal/system"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
-
-	spoolfile "gastrolog/internal/spool/file"
 )
 
 // ErrMaterializeMissingSeq is returned when spool lacks a sequence in the
@@ -26,10 +24,6 @@ type FenceMaterializationCoverage struct {
 	Fence       vaultctlfsm.FenceRecord
 	RecordCount int
 	MissingSeqs []uint64
-}
-
-type spoolReclaimSetter interface {
-	SetReclaimThroughSeq(seq uint64)
 }
 
 // materializeFence reads (M_r, F_n] from local spool, writes a sealed chunk,
@@ -135,13 +129,7 @@ func (o *Orchestrator) advanceSpoolReclaimWatermark(vault *Vault, seq uint64) {
 	if store == nil || store.store == nil {
 		return
 	}
-	if rs, ok := store.store.(*spoolfile.Manager); ok {
-		rs.SetReclaimThroughSeq(seq)
-		return
-	}
-	if rs, ok := store.store.(spoolReclaimSetter); ok {
-		rs.SetReclaimThroughSeq(seq)
-	}
+	store.PersistReclaimWatermark(seq)
 }
 
 func (o *Orchestrator) recordMaterializationCoverage(vaultID glid.GLID, cov *FenceMaterializationCoverage) {

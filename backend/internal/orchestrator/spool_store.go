@@ -40,12 +40,14 @@ type vaultSpoolStore struct {
 }
 
 func newVaultSpoolStore(vaultID glid.GLID, store spool.Store) *vaultSpoolStore {
-	return &vaultSpoolStore{
+	s := &vaultSpoolStore{
 		vaultID:   vaultID,
 		store:     store,
 		byEventID: make(map[chunk.EventID]uint64),
 		bySeq:     make(map[uint64]chunk.Record),
 	}
+	s.loadReplicaCheckpoint()
+	return s
 }
 
 func (v *Vault) ensureSpoolStore(o *Orchestrator) *vaultSpoolStore {
@@ -56,7 +58,10 @@ func (v *Vault) ensureSpoolStore(o *Orchestrator) *vaultSpoolStore {
 }
 
 func (o *Orchestrator) vaultSpoolStore(vaultID glid.GLID) *vaultSpoolStore {
-	if v := o.vaults[vaultID]; v != nil {
+	o.mu.RLock()
+	v := o.vaults[vaultID]
+	o.mu.RUnlock()
+	if v != nil {
 		return v.ensureSpoolStore(o)
 	}
 	return newVaultSpoolStore(vaultID, spoolmem.NewManager())
@@ -186,10 +191,16 @@ func (s *vaultSpoolStore) setMaterializationWatermark(seq uint64) {
 		return
 	}
 	s.mu.Lock()
+	advanced := false
 	if seq > s.materializationH {
 		s.materializationH = seq
+		advanced = true
 	}
+	mr := s.materializationH
 	s.mu.Unlock()
+	if advanced {
+		s.persistReplicaCheckpoint(mr, 0, 0)
+	}
 }
 
 // ConvergenceWatermark returns C_r — highest fence upper bound converge-sealed locally.
@@ -207,10 +218,74 @@ func (s *vaultSpoolStore) setConvergenceWatermark(seq uint64) {
 		return
 	}
 	s.mu.Lock()
+	advanced := false
 	if seq > s.convergenceH {
 		s.convergenceH = seq
+		advanced = true
+	}
+	cr := s.convergenceH
+	s.mu.Unlock()
+	if advanced {
+		s.persistReplicaCheckpoint(0, cr, 0)
+	}
+}
+
+func (s *vaultSpoolStore) loadReplicaCheckpoint() {
+	cp, ok := s.store.(spool.CheckpointPersistence)
+	if !ok {
+		return
+	}
+	ckpt, err := cp.LoadReplicaCheckpoint()
+	if err != nil {
+		return
+	}
+	s.mu.Lock()
+	if ckpt.MaterializationH > s.materializationH {
+		s.materializationH = ckpt.MaterializationH
+	}
+	if ckpt.ConvergenceH > s.convergenceH {
+		s.convergenceH = ckpt.ConvergenceH
 	}
 	s.mu.Unlock()
+	if rs, ok := s.store.(spool.ReclaimWatermarkSetter); ok && ckpt.ReclaimThroughSeq > 0 {
+		rs.SetReclaimThroughSeq(ckpt.ReclaimThroughSeq)
+	}
+}
+
+func (s *vaultSpoolStore) persistReplicaCheckpoint(mr, cr, reclaim uint64) {
+	cp, ok := s.store.(spool.CheckpointPersistence)
+	if !ok {
+		return
+	}
+	s.mu.RLock()
+	ckpt := spool.ReplicaCheckpoint{
+		MaterializationH: s.materializationH,
+		ConvergenceH:     s.convergenceH,
+	}
+	s.mu.RUnlock()
+	if mr > 0 {
+		ckpt.MaterializationH = mr
+	}
+	if cr > 0 {
+		ckpt.ConvergenceH = cr
+	}
+	if reclaim > 0 {
+		ckpt.ReclaimThroughSeq = reclaim
+	} else if rr, ok := s.store.(spool.ReclaimWatermarkReader); ok {
+		ckpt.ReclaimThroughSeq = rr.ReclaimThroughSeq()
+	}
+	_ = cp.SaveReplicaCheckpoint(ckpt)
+}
+
+// PersistReclaimWatermark durably records the spool reclaim safety watermark.
+func (s *vaultSpoolStore) PersistReclaimWatermark(seq uint64) {
+	if s == nil {
+		return
+	}
+	if rs, ok := s.store.(spool.ReclaimWatermarkSetter); ok {
+		rs.SetReclaimThroughSeq(seq)
+	}
+	s.persistReplicaCheckpoint(0, 0, seq)
 }
 
 // ReadByVaultSeq implements query.SpoolAnchorReader.

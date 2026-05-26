@@ -1871,6 +1871,94 @@ export class ForwardGetContextResponse extends Message<ForwardGetContextResponse
 }
 
 /**
+ * ForwardReadSpoolSeqRequest fetches one accepted spool slot from a peer replica.
+ *
+ * @generated from message gastrolog.v1.ForwardReadSpoolSeqRequest
+ */
+export class ForwardReadSpoolSeqRequest extends Message<ForwardReadSpoolSeqRequest> {
+  /**
+   * @generated from field: bytes vault_id = 1;
+   */
+  vaultId = new Uint8Array(0);
+
+  /**
+   * @generated from field: uint64 vault_seq = 2;
+   */
+  vaultSeq = protoInt64.zero;
+
+  constructor(data?: PartialMessage<ForwardReadSpoolSeqRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardReadSpoolSeqRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "vault_seq", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardReadSpoolSeqRequest {
+    return new ForwardReadSpoolSeqRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardReadSpoolSeqRequest {
+    return new ForwardReadSpoolSeqRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardReadSpoolSeqRequest {
+    return new ForwardReadSpoolSeqRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardReadSpoolSeqRequest | PlainMessage<ForwardReadSpoolSeqRequest> | undefined, b: ForwardReadSpoolSeqRequest | PlainMessage<ForwardReadSpoolSeqRequest> | undefined): boolean {
+    return proto3.util.equals(ForwardReadSpoolSeqRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ForwardReadSpoolSeqResponse
+ */
+export class ForwardReadSpoolSeqResponse extends Message<ForwardReadSpoolSeqResponse> {
+  /**
+   * @generated from field: bool found = 1;
+   */
+  found = false;
+
+  /**
+   * @generated from field: gastrolog.v1.ExportRecord record = 2;
+   */
+  record?: ExportRecord;
+
+  constructor(data?: PartialMessage<ForwardReadSpoolSeqResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardReadSpoolSeqResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "found", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 2, name: "record", kind: "message", T: ExportRecord },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardReadSpoolSeqResponse {
+    return new ForwardReadSpoolSeqResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardReadSpoolSeqResponse {
+    return new ForwardReadSpoolSeqResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardReadSpoolSeqResponse {
+    return new ForwardReadSpoolSeqResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardReadSpoolSeqResponse | PlainMessage<ForwardReadSpoolSeqResponse> | undefined, b: ForwardReadSpoolSeqResponse | PlainMessage<ForwardReadSpoolSeqResponse> | undefined): boolean {
+    return proto3.util.equals(ForwardReadSpoolSeqResponse, a, b);
+  }
+}
+
+/**
  * ForwardListChunksRequest asks a remote node to list chunks in one of its
  * local vaults. Used by the coordinating node to show chunk details for
  * remote vaults in the inspector.

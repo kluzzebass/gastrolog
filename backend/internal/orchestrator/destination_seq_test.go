@@ -47,6 +47,18 @@ func registerSequencedTestVault(t *testing.T, orch *Orchestrator, vaultID glid.G
 	if len(followers) > 0 {
 		v.ReplicationFactor = uint32(len(followers) + 1)
 	}
+	inst := v.Instance
+	inst.ListManifest = func() []chunk.ChunkID {
+		metas, err := cm.List()
+		if err != nil {
+			return nil
+		}
+		ids := make([]chunk.ChunkID, len(metas))
+		for i, meta := range metas {
+			ids[i] = meta.ID
+		}
+		return ids
+	}
 	orch.RegisterVault(v)
 	wireTestSeqAllocator(orch, vaultID)
 	return cm

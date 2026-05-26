@@ -84,6 +84,11 @@ func NewManager(cfg Config) (*Manager, error) {
 		_ = lock.Close()
 		return nil, err
 	}
+	if ckpt, err := m.loadReplicaCheckpointLocked(); err == nil {
+		if ckpt.ReclaimThroughSeq > m.reclaimThroughSeq {
+			m.reclaimThroughSeq = ckpt.ReclaimThroughSeq
+		}
+	}
 	return m, nil
 }
 

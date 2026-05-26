@@ -118,6 +118,9 @@ func (o *Orchestrator) ensureSpoolWindowForVaultSeq(vaultID glid.GLID, seq uint6
 }
 
 func (o *Orchestrator) applySpoolReplicaWrite(vaultID glid.GLID, rec chunk.Record) error {
+	if o.spoolReplicaWriteFilter != nil && o.spoolReplicaWriteFilter(vaultID, rec) {
+		return nil
+	}
 	vault := o.vaults[vaultID]
 	if vault == nil {
 		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)

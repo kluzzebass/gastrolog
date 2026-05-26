@@ -226,6 +226,12 @@ type Orchestrator struct {
 	// Vault replicator: ordered stream per instance per follower (nil in single-node mode).
 	chunkReplicator ChunkReplicator
 
+	// spoolSlotFetcher pulls peer spool slots for assigned-missing recovery heal.
+	spoolSlotFetcher SpoolSlotFetcher
+
+	// spoolReplicaWriteFilter is a test hook to simulate dropped replica fan-out.
+	spoolReplicaWriteFilter func(vaultID glid.GLID, rec chunk.Record) bool
+
 	// replicaCircuit tracks per-node backoff for follower replication.
 	// After consecutive failures, the node is skipped until the backoff
 	// expires. Prevents log spam when a follower is down.
@@ -809,6 +815,22 @@ func (o *Orchestrator) SetVaultCtlApplyHookForTest(hook func(vaultID glid.GLID, 
 // MaterializeFenceForTest runs the sequenced materializer for tests and harnesses.
 func (o *Orchestrator) MaterializeFenceForTest(vaultID glid.GLID, fence vaultctlfsm.FenceRecord) (*FenceMaterializationCoverage, error) {
 	return o.materializeFence(vaultID, fence)
+}
+
+// SetReplicaWatermarksForTest seeds durable M_r/C_r in harness recovery scenarios.
+func (o *Orchestrator) SetReplicaWatermarksForTest(vaultID glid.GLID, mr, cr uint64) {
+	store := o.vaultSpoolStore(vaultID)
+	if mr > 0 {
+		store.setMaterializationWatermark(mr)
+	}
+	if cr > 0 {
+		store.setConvergenceWatermark(cr)
+	}
+}
+
+// ReconcileFenceForTest runs reconcile convergence for harness recovery scenarios.
+func (o *Orchestrator) ReconcileFenceForTest(vaultID glid.GLID, fence vaultctlfsm.FenceRecord) error {
+	return o.reconcileFenceConvergence(vaultID, fence)
 }
 
 // ConvergenceWatermark returns local C_r for a vault (zero when unknown).

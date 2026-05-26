@@ -19,8 +19,10 @@ var (
 
 // Manager holds in-memory spool sequence windows keyed by allocator swath bounds.
 type Manager struct {
-	mu      sync.RWMutex
-	windows map[spool.WindowID]*window
+	mu                sync.RWMutex
+	windows           map[spool.WindowID]*window
+	checkpoint        spool.ReplicaCheckpoint
+	reclaimThroughSeq uint64
 }
 
 type window struct {
@@ -182,4 +184,38 @@ func (m *Manager) LookupEventID(id chunk.EventID) (uint64, bool) {
 		}
 	}
 	return latest, found
+}
+
+// LoadReplicaCheckpoint returns the in-memory replica checkpoint.
+func (m *Manager) LoadReplicaCheckpoint() (spool.ReplicaCheckpoint, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.checkpoint, nil
+}
+
+// SaveReplicaCheckpoint merges and stores replica watermarks in memory.
+func (m *Manager) SaveReplicaCheckpoint(ckpt spool.ReplicaCheckpoint) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.checkpoint = m.checkpoint.MergeMonotonic(ckpt)
+	if ckpt.ReclaimThroughSeq > m.reclaimThroughSeq {
+		m.reclaimThroughSeq = ckpt.ReclaimThroughSeq
+	}
+	return nil
+}
+
+// SetReclaimThroughSeq sets the materialization safety watermark.
+func (m *Manager) SetReclaimThroughSeq(seq uint64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if seq > m.reclaimThroughSeq {
+		m.reclaimThroughSeq = seq
+	}
+}
+
+// ReclaimThroughSeq returns the current materialization safety watermark.
+func (m *Manager) ReclaimThroughSeq() uint64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.reclaimThroughSeq
 }

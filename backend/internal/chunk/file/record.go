@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/format"
 )
 
 // idx.log entry layout (74 bytes):
@@ -23,6 +24,14 @@ import (
 //	nodeID      (16 bytes, GLID binary — emitting node; disambiguates parallel ingesters)
 const (
 	IdxEntrySize = 74
+
+	// IdxEntrySizeV2 extends v1 entries with destination-vault sequence (materialize path).
+	IdxEntrySizeV2 = 82
+
+	// IdxLogVersionV2 stores VaultSeq in idx.log entries.
+	IdxLogVersionV2 = 0x02
+
+	idxVaultSeqOffset = 74
 
 	idxSourceTSOffset   = 0
 	idxIngestTSOffset   = 8
@@ -73,6 +82,7 @@ type IdxEntry struct {
 	IngestSeq  uint32    // Per-ingester rolling sequence counter
 	IngesterID glid.GLID // Ingester identity (16-byte GLID)
 	NodeID     glid.GLID // Emitting node identity (16-byte GLID)
+	VaultSeq   uint64    // Destination-vault accept label (v2 idx only; 0 when unset)
 }
 
 // EncodeIdxEntry encodes an idx.log entry into a 74-byte buffer.
@@ -88,6 +98,17 @@ func EncodeIdxEntry(e IdxEntry, buf []byte) {
 	binary.LittleEndian.PutUint32(buf[idxIngestSeqOffset:], e.IngestSeq)
 	copy(buf[idxIngesterIDOffset:idxIngesterIDOffset+16], e.IngesterID[:])
 	copy(buf[idxNodeIDOffset:idxNodeIDOffset+16], e.NodeID[:])
+	if len(buf) >= IdxEntrySizeV2 {
+		binary.LittleEndian.PutUint64(buf[idxVaultSeqOffset:], e.VaultSeq)
+	}
+}
+
+// IdxEntryStride returns the byte width of one idx entry for the given log version.
+func IdxEntryStride(version byte) int {
+	if version >= IdxLogVersionV2 {
+		return IdxEntrySizeV2
+	}
+	return IdxEntrySize
 }
 
 // DecodeIdxEntry decodes an idx.log entry from a 74-byte buffer.
@@ -108,7 +129,7 @@ func DecodeIdxEntry(buf []byte) IdxEntry {
 	var ingesterID, nodeID glid.GLID
 	copy(ingesterID[:], buf[idxIngesterIDOffset:idxIngesterIDOffset+16])
 	copy(nodeID[:], buf[idxNodeIDOffset:idxNodeIDOffset+16])
-	return IdxEntry{
+	entry := IdxEntry{
 		SourceTS:   sourceTS,
 		IngestTS:   time.Unix(0, int64(binary.LittleEndian.Uint64(buf[idxIngestTSOffset:]))).UTC(), //nolint:gosec // G115: nanosecond timestamps fit in int64
 		WriteTS:    time.Unix(0, int64(binary.LittleEndian.Uint64(buf[idxWriteTSOffset:]))).UTC(),  //nolint:gosec // G115: nanosecond timestamps fit in int64
@@ -120,19 +141,49 @@ func DecodeIdxEntry(buf []byte) IdxEntry {
 		IngesterID: ingesterID,
 		NodeID:     nodeID,
 	}
+	if len(buf) >= IdxEntrySizeV2 {
+		entry.VaultSeq = binary.LittleEndian.Uint64(buf[idxVaultSeqOffset:])
+	}
+	return entry
 }
 
-// IdxFileOffset returns the byte offset in idx.log for a given record index.
+// IdxFileOffset returns the byte offset in idx.log for a given record index (v1 stride).
 func IdxFileOffset(recordIndex uint64) int64 {
-	return int64(IdxHeaderSize) + int64(recordIndex)*int64(IdxEntrySize) //nolint:gosec // G115: record index fits in int64
+	return IdxFileOffsetForVersion(recordIndex, IdxLogVersion)
 }
 
-// RecordCount returns the number of records in an idx.log file given its size.
+// IdxFileOffsetForVersion returns the byte offset for a record index using the log version stride.
+func IdxFileOffsetForVersion(recordIndex uint64, version byte) int64 {
+	return int64(IdxHeaderSize) + int64(recordIndex)*int64(IdxEntryStride(version)) //nolint:gosec // G115: record index fits in int64
+}
+
+// DecodeIdxLogHeader validates an idx.log header, accepting v1 or v2.
+func DecodeIdxLogHeader(buf []byte) (format.Header, error) {
+	h, err := format.Decode(buf)
+	if err != nil {
+		return format.Header{}, err
+	}
+	if h.Type != format.TypeIdxLog {
+		return h, format.ErrTypeMismatch
+	}
+	if h.Version != IdxLogVersion && h.Version != IdxLogVersionV2 {
+		return h, format.ErrVersionMismatch
+	}
+	return h, nil
+}
+
+// RecordCount returns the number of records in a v1 idx.log file given its size.
 func RecordCount(idxFileSize int64) uint64 {
+	return RecordCountForVersion(idxFileSize, IdxLogVersion)
+}
+
+// RecordCountForVersion returns record count for the given idx.log version stride.
+func RecordCountForVersion(idxFileSize int64, version byte) uint64 {
+	stride := IdxEntryStride(version)
 	if idxFileSize <= int64(IdxHeaderSize) {
 		return 0
 	}
-	return uint64(idxFileSize-int64(IdxHeaderSize)) / uint64(IdxEntrySize)
+	return uint64(idxFileSize-int64(IdxHeaderSize)) / uint64(stride) //nolint:gosec // G115: stride is 74 or 82
 }
 
 // BuildRecord constructs a chunk.Record from an IdxEntry, raw data, and attributes.
@@ -150,6 +201,7 @@ func BuildRecord(entry IdxEntry, raw []byte, attrs chunk.Attributes) chunk.Recor
 		},
 		Attrs: attrs,
 		Raw:   raw,
+		VaultSeq: entry.VaultSeq,
 	}
 }
 
@@ -170,5 +222,6 @@ func BuildRecordCopy(entry IdxEntry, raw []byte, attrs chunk.Attributes) chunk.R
 		},
 		Attrs: attrs.Copy(),
 		Raw:   rawCopy,
+		VaultSeq: entry.VaultSeq,
 	}
 }

@@ -44,9 +44,11 @@ func TestReconcileBlocksOnAssignedMissing(t *testing.T) {
 		}
 	}
 	fence := vaultctlfsm.FenceRecord{ID: 1, UpperBoundSeq: 3, PrevBoundSeq: 0}
-	store.setMaterializationWatermark(3)
+	if _, err := orch.materializeFence(vaultID, fence); err == nil {
+		t.Fatal("expected materialize failure for assigned-missing hole at seq 2")
+	}
 	if err := orch.reconcileFenceConvergence(vaultID, fence); err == nil {
-		t.Fatal("expected reconcile error for assigned-missing hole at seq 2")
+		t.Fatal("expected reconcile error when fence not materialized locally")
 	}
 }
 
