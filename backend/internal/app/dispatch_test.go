@@ -157,6 +157,8 @@ func (m *mockOrch) LocalInstanceIDs(_ glid.GLID) []glid.GLID            { return
 func (m *mockOrch) AddVaultInstance(_ context.Context, _ glid.GLID, _ orchestrator.Factories) error {
 	return nil
 }
+func (m *mockOrch) RefreshSeqFanOutTargets(_ glid.GLID, _ []system.VaultPlacement, _ []system.NodeStorageConfig) {
+}
 func (m *mockOrch) DrainVault(_ context.Context, id glid.GLID, _ string) error {
 	m.drainCalls = append(m.drainCalls, id)
 	return m.drainVaultErr

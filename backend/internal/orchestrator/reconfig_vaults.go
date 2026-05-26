@@ -585,8 +585,28 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 		return nil
 	}
 	vault.Instance = ti
+	o.refreshSeqFanOutTargetsLocked(vault, placements, nscs)
 	o.logger.Info("vault placement added", "vault", vaultID)
 	return nil
+}
+
+// RefreshSeqFanOutTargets recomputes sequenced replica fan-out peers from
+// current placements. Safe to call after placement reconcile or role refresh.
+func (o *Orchestrator) RefreshSeqFanOutTargets(vaultID glid.GLID, placements []system.VaultPlacement, nscs []system.NodeStorageConfig) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	v := o.vaults[vaultID]
+	if v == nil {
+		return
+	}
+	o.refreshSeqFanOutTargetsLocked(v, placements, nscs)
+}
+
+func (o *Orchestrator) refreshSeqFanOutTargetsLocked(v *Vault, placements []system.VaultPlacement, nscs []system.NodeStorageConfig) {
+	if v == nil || v.WriteModel != system.VaultWriteModelSequenced {
+		return
+	}
+	v.seqFanOutTargets = sequencedFanOutTargets(o.localNodeID, placements, nscs)
 }
 
 // UnregisterVault removes a vault from the orchestrator without deleting any

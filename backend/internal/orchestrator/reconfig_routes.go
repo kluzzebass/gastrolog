@@ -28,6 +28,35 @@ func resolveVaultNodeID(sys *system.System, vaultID glid.GLID) string {
 	return ""
 }
 
+// resolveRouteDestinationNodeID decides whether destID is routable from this
+// node and which remote node (if any) should receive forwarded records.
+func (o *Orchestrator) resolveRouteDestinationNodeID(sys *system.System, cfg *system.Config, destID glid.GLID) (nodeID string, ok bool) {
+	if o.draining[destID] != nil {
+		return o.draining[destID].TargetNodeID, true
+	}
+	hotVaultNode := resolveVaultNodeID(sys, destID)
+	vaultCfg := findVaultConfig(cfg.Vaults, destID)
+	if vaultCfg != nil && vaultCfg.ResolveWriteModel() == system.VaultWriteModelSequenced {
+		if _, local := o.vaults[destID]; local {
+			return "", true
+		}
+		if hotVaultNode != "" && hotVaultNode != o.localNodeID && o.forwarder != nil {
+			return hotVaultNode, true
+		}
+		return "", false
+	}
+	if hotVaultNode == "" || hotVaultNode == o.localNodeID {
+		if _, local := o.vaults[destID]; !local {
+			return "", false
+		}
+		return "", true
+	}
+	if o.forwarder == nil {
+		return "", false
+	}
+	return hotVaultNode, true
+}
+
 // ReloadFilters loads the full config and rebuilds the routing table
 // from the current route set. Renamed from the Phase-4 "filter reload"
 // concept but kept under the same method name so existing dispatch
@@ -72,22 +101,9 @@ func (o *Orchestrator) reloadRoutesFromConfig(sys *system.System) error {
 
 		dests := make([]RouteDestination, 0, len(route.Destinations))
 		for _, destID := range route.Destinations {
-			hotVaultNode := resolveVaultNodeID(sys, destID)
-
-			nodeID := ""
-			switch {
-			case o.draining[destID] != nil:
-				nodeID = o.draining[destID].TargetNodeID
-			case hotVaultNode == "" || hotVaultNode == o.localNodeID:
-				// Hot instance is local (or unassigned) — append locally if registered.
-				if _, ok := o.vaults[destID]; !ok {
-					continue // not registered locally
-				}
-			case o.forwarder != nil:
-				// Hot instance is on a remote node — forward.
-				nodeID = hotVaultNode
-			default:
-				continue // single-node mode, skip remote
+			nodeID, ok := o.resolveRouteDestinationNodeID(sys, cfg, destID)
+			if !ok {
+				continue
 			}
 			dests = append(dests, RouteDestination{VaultID: destID, NodeID: nodeID})
 		}

@@ -52,10 +52,21 @@ func (o *Orchestrator) sequencedFanOutTargets(vault *Vault, vaultInst *VaultInst
 	if vault != nil && len(vault.seqFanOutTargets) > 0 {
 		return vault.seqFanOutTargets
 	}
-	if vaultInst != nil && vaultInst.IsLeader() {
-		return vaultInst.FollowerTargets
+	if vaultInst == nil {
+		return nil
 	}
-	return nil
+	// Fallback when seqFanOutTargets is stale or unset. V2 ingest authority is
+	// not placement-leader residency — fan out to every other replica.
+	var out []system.ReplicationTarget
+	if vaultInst.LeaderNodeID != "" && vaultInst.LeaderNodeID != o.localNodeID {
+		out = append(out, system.ReplicationTarget{NodeID: vaultInst.LeaderNodeID})
+	}
+	for _, tgt := range vaultInst.FollowerTargets {
+		if tgt.NodeID != "" && tgt.NodeID != o.localNodeID {
+			out = append(out, tgt)
+		}
+	}
+	return out
 }
 
 func (o *Orchestrator) sequencedFollowerFanOut(vault *Vault, vaultID glid.GLID, vaultInst *VaultInstance, store *vaultSpoolStore, rec *chunk.Record) (*replicationTask, []remoteForwardTarget, error) {

@@ -195,7 +195,7 @@ func (o *Orchestrator) initVault(sys *system.System, vaultCfg system.VaultConfig
 	}
 	o.RegisterVault(vault)
 	if instance != nil {
-		vault.seqFanOutTargets = sequencedFanOutTargets(o.localNodeID, vaultCfg.Placements, sys.Runtime.NodeStorageConfigs)
+		o.refreshSeqFanOutTargetsLocked(vault, vaultCfg.Placements, sys.Runtime.NodeStorageConfigs)
 	}
 	if o.alerts != nil {
 		o.alerts.Clear(alertKey)
