@@ -54,6 +54,12 @@ func (f *FSM) LatestFenceUpperBound() uint64 {
 	return f.fences[len(f.fences)-1].UpperBoundSeq
 }
 
+// FenceContainsSeq reports deterministic fence membership: prev < seq <= upper.
+// Missing assigned or unassigned seq values inside the range are allowed.
+func FenceContainsSeq(prevBound, upperBound, seq uint64) bool {
+	return seq > prevBound && seq <= upperBound
+}
+
 func (f *FSM) applyPublishFence(payload []byte) (*FenceRecord, error) {
 	if len(payload) < 16 {
 		return nil, ErrFenceEmptyPayload

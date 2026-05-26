@@ -87,7 +87,9 @@ func (c *vaultFenceCoordinator) countFenceTarget(maxRecords int64, prev, h uint6
 }
 
 // evaluateAndPublish applies rotation-policy fence rules and durably publishes
-// when H (local or hinted) satisfies the next fence boundary.
+// when H (local or hinted) satisfies the next fence boundary. Fence cuts use
+// accepted seq labels (H), not contiguous slot presence — unassigned gaps from
+// burned swaths do not block publication.
 func (c *vaultFenceCoordinator) evaluateAndPublish(at time.Time, policy *system.RotationPolicyConfig, timeTriggered bool) error {
 	if policy == nil {
 		return nil
