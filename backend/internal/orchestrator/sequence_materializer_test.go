@@ -1,9 +1,11 @@
 package orchestrator
 
 import (
+	"errors"
 	"testing"
 	"time"
 
+	"gastrolog/internal/glid"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 
 	hraft "github.com/hashicorp/raft"
@@ -57,6 +59,106 @@ func TestSequenceMaterializerDeterministicReplay(t *testing.T) {
 	bCount, bMr := run()
 	if aCount != bCount || aMr != bMr {
 		t.Fatalf("replay diverged: (%d,%d) vs (%d,%d)", aCount, aMr, bCount, bMr)
+	}
+}
+
+func TestSequenceMaterializerSkipsBurnedTailGaps(t *testing.T) {
+	t.Parallel()
+	orch, vaultID := newSequencedFenceTestOrch(t, 0)
+	burnSeqAllocatorTail(t, orch, vaultID, 10, 7) // unassigned gap seq 8-10
+
+	store := orch.vaultSpoolStore(vaultID)
+	ingesterID := glid.New()
+	for _, seq := range []uint64{1, 2, 3, 4, 5, 6, 7} {
+		rec := sequencedTestRecord("x", ingesterID, uint32(seq))
+		rec.VaultSeq = seq
+		if err := store.AppendTentative(rec); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.CommitAcceptance(rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	fence := vaultctlfsm.FenceRecord{ID: 1, UpperBoundSeq: 10, PrevBoundSeq: 0}
+	cov, err := orch.materializeFence(vaultID, fence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cov == nil || cov.RecordCount != 7 {
+		t.Fatalf("coverage = %+v, want 7 records", cov)
+	}
+	if len(cov.MissingSeqs) != 0 {
+		t.Fatalf("MissingSeqs = %v, want none (gaps are unassigned)", cov.MissingSeqs)
+	}
+	if got := orch.materializationWatermark(vaultID); got != 10 {
+		t.Fatalf("M_r = %d, want 10", got)
+	}
+	metas, err := orch.ListLocalChunkMetas(vaultID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(metas) != 1 || metas[0].RecordCount != 7 {
+		t.Fatalf("chunk metas = %+v", metas)
+	}
+}
+
+func TestSequenceMaterializerFailsAssignedMissingNotGap(t *testing.T) {
+	t.Parallel()
+	orch, vaultID := newSequencedFenceTestOrch(t, 0)
+	burnSeqAllocatorTail(t, orch, vaultID, 10, 7)
+
+	store := orch.vaultSpoolStore(vaultID)
+	ingesterID := glid.New()
+	for _, seq := range []uint64{1, 2, 4, 5, 6, 7} { // assigned-missing at seq 3
+		rec := sequencedTestRecord("x", ingesterID, uint32(seq))
+		rec.VaultSeq = seq
+		if err := store.AppendTentative(rec); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.CommitAcceptance(rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	fence := vaultctlfsm.FenceRecord{ID: 1, UpperBoundSeq: 10, PrevBoundSeq: 0}
+	cov, err := orch.materializeFence(vaultID, fence)
+	if err == nil {
+		t.Fatal("expected materialize error for assigned-missing seq 3")
+	}
+	if !errors.Is(err, ErrMaterializeMissingSeq) {
+		t.Fatalf("err = %v, want ErrMaterializeMissingSeq", err)
+	}
+	if cov == nil || len(cov.MissingSeqs) != 1 || cov.MissingSeqs[0] != 3 {
+		t.Fatalf("MissingSeqs = %v, want [3]", cov)
+	}
+}
+
+func burnSeqAllocatorTail(t *testing.T, orch *Orchestrator, vaultID glid.GLID, reserveEnd, burnThrough uint64) {
+	t.Helper()
+	fsm, err := orch.vaultCtlSubFSM(vaultID)
+	if err != nil || fsm == nil {
+		t.Fatal("vault ctl sub FSM required for burned tail test")
+	}
+	const holder = "test-holder"
+	const epoch = vaultctlfsm.InitialSeqEpoch
+	reserve, err := vaultctlfsm.MarshalReserveSeqRange(holder, epoch, reserveEnd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := fsm.Apply(&hraft.Log{Data: reserve}); result != nil {
+		if applyErr, ok := result.(error); ok && applyErr != nil {
+			t.Fatalf("reserve: %v", applyErr)
+		}
+	}
+	burn, err := vaultctlfsm.MarshalBurnSeqLeaseTail(holder, epoch, burnThrough)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := fsm.Apply(&hraft.Log{Data: burn}); result != nil {
+		if applyErr, ok := result.(error); ok && applyErr != nil {
+			t.Fatalf("burn tail: %v", applyErr)
+		}
 	}
 }
 

@@ -59,10 +59,17 @@ func (o *Orchestrator) materializeFence(vaultID glid.GLID, fence vaultctlfsm.Fen
 	}
 
 	coverage := &FenceMaterializationCoverage{Fence: fence}
+	alloc := vaultctlfsm.SeqAllocatorSnapshot{}
+	if sub, err := o.vaultCtlSubFSM(vaultID); err == nil && sub != nil {
+		alloc = sub.SeqAllocatorState()
+	}
 	var records []chunk.Record
 	for seq := start + 1; seq <= fence.UpperBoundSeq; seq++ {
 		rec, err := store.ReadByVaultSeq(context.Background(), vaultID, seq)
 		if err != nil {
+			if seqInBurnedTail(seq, alloc.BurnedTails) {
+				continue
+			}
 			coverage.MissingSeqs = append(coverage.MissingSeqs, seq)
 			continue
 		}
