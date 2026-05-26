@@ -8,23 +8,23 @@ import (
 
 func TestPlacementLeaderIsWriteAuthority(t *testing.T) {
 	t.Parallel()
-	if !PlacementLeaderIsWriteAuthority(system.VaultWriteModelV1) {
-		t.Fatal("V1 must treat placement leader as write authority during transition")
+	if !PlacementLeaderIsWriteAuthority(system.VaultWriteModelChunkAppend) {
+		t.Fatal("chunk_append must treat placement leader as write authority during transition")
 	}
-	if PlacementLeaderIsWriteAuthority(system.VaultWriteModelV2) {
-		t.Fatal("V2 must not treat placement leader as write authority")
+	if PlacementLeaderIsWriteAuthority(system.VaultWriteModelSequenced) {
+		t.Fatal("sequenced write model must not treat placement leader as write authority")
 	}
 }
 
 func TestPlacementLeaderIsWriteAuthorityForVault(t *testing.T) {
 	t.Parallel()
-	v1 := &Vault{WriteModel: system.VaultWriteModelV1}
-	if !PlacementLeaderIsWriteAuthorityForVault(v1) {
-		t.Fatal("V1 vault shell")
+	chunkAppend := &Vault{WriteModel: system.VaultWriteModelChunkAppend}
+	if !PlacementLeaderIsWriteAuthorityForVault(chunkAppend) {
+		t.Fatal("chunk_append vault shell")
 	}
-	v2 := &Vault{WriteModel: system.VaultWriteModelV2}
-	if PlacementLeaderIsWriteAuthorityForVault(v2) {
-		t.Fatal("V2 vault shell")
+	sequenced := &Vault{WriteModel: system.VaultWriteModelSequenced}
+	if PlacementLeaderIsWriteAuthorityForVault(sequenced) {
+		t.Fatal("sequenced vault shell")
 	}
 	if !PlacementLeaderIsWriteAuthorityForVault(nil) {
 		t.Fatal("nil vault defaults to legacy authority until registered")

@@ -14,9 +14,9 @@ import (
 var ErrInvalidContextAnchor = errors.New("invalid context anchor")
 
 // ErrSpoolAnchorNotAvailable is returned for vault_seq anchors when no spool reader is wired.
-var ErrSpoolAnchorNotAvailable = errors.New("vault_seq anchor requires spool reader (V2 pre-materialized record)")
+var ErrSpoolAnchorNotAvailable = errors.New("vault_seq anchor requires spool reader (pre-materialized record)")
 
-// SpoolAnchorReader resolves V2 pre-materialized records by destination-vault sequence.
+// SpoolAnchorReader resolves pre-materialized records by destination-vault sequence.
 // Wired during Phase 6 rollout; optional until then.
 type SpoolAnchorReader interface {
 	ReadByVaultSeq(ctx context.Context, vaultID glid.GLID, seq uint64) (chunk.Record, error)
@@ -24,8 +24,8 @@ type SpoolAnchorReader interface {
 
 // ContextRef identifies the GetContext anchor record.
 //
-// Materialized anchors use ChunkID+Pos. Pre-materialized V2 anchors use VaultSeq
-// with zero ChunkID — see docs/fan-out/v2/anchor-model.md.
+// Materialized anchors use ChunkID+Pos. Pre-materialized (sequenced write path)
+// anchors use VaultSeq with zero ChunkID — see docs/fan-out/v2/anchor-model.md.
 type ContextRef struct {
 	VaultID  glid.GLID
 	ChunkID  chunk.ChunkID
@@ -38,7 +38,7 @@ func (r ContextRef) IsMaterialized() bool {
 	return r.ChunkID != chunk.ChunkID{}
 }
 
-// IsVaultSequence reports whether the anchor targets a V2 spool/pre-materialized record.
+// IsVaultSequence reports whether the anchor targets a spool/pre-materialized record.
 func (r ContextRef) IsVaultSequence() bool {
 	return !r.IsMaterialized() && r.VaultSeq > 0
 }
@@ -74,7 +74,7 @@ func ContextRefFromProto(p *apiv1.RecordRef) (ContextRef, error) {
 	return ref, nil
 }
 
-// SetSpoolAnchorReader wires optional V2 spool anchor resolution.
+// SetSpoolAnchorReader wires optional spool anchor resolution.
 func (e *Engine) SetSpoolAnchorReader(r SpoolAnchorReader) {
 	e.spoolAnchorReader = r
 }

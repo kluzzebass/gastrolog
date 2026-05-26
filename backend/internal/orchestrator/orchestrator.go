@@ -235,6 +235,10 @@ type Orchestrator struct {
 	// Set from factories during ApplyConfig; used to tear down vault ctl groups.
 	groupMgr *raftgroup.GroupManager
 
+	// testSeqFSM provides local vaultctl allocator FSM state for unit tests
+	// when groupMgr is nil. Keyed by vault ID.
+	testSeqFSM map[glid.GLID]*vaultctlfsm.FSM
+
 	// peerConns is the shared gRPC pool for cluster peers. Set from factories
 	// during ApplyConfig; used by ApplyVaultControlPlane forwarding.
 	peerConns *cluster.PeerConns

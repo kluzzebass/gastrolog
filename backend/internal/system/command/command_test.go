@@ -120,7 +120,7 @@ func TestPutVaultWriteModel(t *testing.T) {
 	want := system.VaultConfig{
 		ID:         glid.New(),
 		Name:       "v2-vault",
-		WriteModel: string(system.VaultWriteModelV2),
+		WriteModel: string(system.VaultWriteModelSequenced),
 	}
 	got := roundTripCommand(t, NewPutVault(want), func(cmd *gastrologv1.SystemCommand) (system.VaultConfig, error) {
 		return ExtractPutVault(cmd.GetPutVault())

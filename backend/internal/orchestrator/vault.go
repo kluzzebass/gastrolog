@@ -20,6 +20,11 @@ type Vault struct {
 	StorageType string // mirrored from VaultConfig.Type
 	WriteModel  system.VaultWriteModel
 	Instance    *VaultInstance
+
+	// interimSeq holds Phase 2 destination-vault (EventID, seq) assignments
+	// until Phase 3 spool migration. Nil for chunk-append vaults.
+	interimSeq *interimSeqStore
+	seqLease   vaultSeqLease
 }
 
 // NewVault creates a Vault with a single instance.

@@ -56,9 +56,9 @@ type VaultConfig struct {
 	// CacheTTL is the eviction TTL duration (e.g. "1h", "7d") for ttl mode.
 	CacheTTL string `json:"cacheTtl,omitempty"`
 
-	// WriteModel selects the vault data-plane write path. Empty and "v1" use
-	// the current leader-driven active-chunk path (default). "v2" opts into
-	// destination-vault sequencing and spool-first accepted writes (fan-out V2).
+	// WriteModel selects the vault data-plane write path. Empty and
+	// chunk_append use synchronous active-chunk append (default). sequenced
+	// opts into destination-vault sequencing and spool-first accepted writes.
 	// Per-vault opt-in; see docs/fan-out/v2/implementation-plan.md.
 	WriteModel string `json:"writeModel,omitempty"`
 
@@ -81,40 +81,43 @@ type VaultConfig struct {
 type VaultWriteModel string
 
 const (
-	// VaultWriteModelV1 is the default: synchronous active-chunk append with
-	// leader-coordinated chunk identity on the write path.
-	VaultWriteModelV1 VaultWriteModel = "v1"
-	// VaultWriteModelV2 is fan-out V2: destination-vault sequencing, spool
-	// segments, and asynchronous materialization (gated per vault).
-	VaultWriteModelV2 VaultWriteModel = "v2"
+	// VaultWriteModelChunkAppend is the default: synchronous active-chunk
+	// append with leader-coordinated chunk identity on the write path.
+	VaultWriteModelChunkAppend VaultWriteModel = "chunk_append"
+	// VaultWriteModelSequenced assigns destination-vault sequences, persists
+	// spool segments, and materializes chunks asynchronously (gated per vault).
+	VaultWriteModelSequenced VaultWriteModel = "sequenced"
 )
 
 // ResolveWriteModel returns the effective write model for this vault.
-// Empty and unrecognized values resolve to V1 so existing configs stay stable.
+// Empty and unrecognized values resolve to chunk_append.
 func (v VaultConfig) ResolveWriteModel() VaultWriteModel {
 	switch v.WriteModel {
-	case string(VaultWriteModelV2):
-		return VaultWriteModelV2
-	case "", string(VaultWriteModelV1):
-		return VaultWriteModelV1
+	case string(VaultWriteModelSequenced):
+		return VaultWriteModelSequenced
+	case "", string(VaultWriteModelChunkAppend):
+		return VaultWriteModelChunkAppend
 	default:
-		return VaultWriteModelV1
+		return VaultWriteModelChunkAppend
 	}
 }
 
-// UsesV2WriteModel reports whether this vault is opted into the V2 write path.
-func (v VaultConfig) UsesV2WriteModel() bool {
-	return v.ResolveWriteModel() == VaultWriteModelV2
+// UsesSequencedWriteModel reports whether this vault is opted into the
+// sequenced write path.
+func (v VaultConfig) UsesSequencedWriteModel() bool {
+	return v.ResolveWriteModel() == VaultWriteModelSequenced
 }
 
 // ValidateWriteModel rejects unknown writeModel config values.
 func (v VaultConfig) ValidateWriteModel() error {
 	switch v.WriteModel {
-	case "", string(VaultWriteModelV1), string(VaultWriteModelV2):
+	case "",
+		string(VaultWriteModelChunkAppend),
+		string(VaultWriteModelSequenced):
 		return nil
 	default:
 		return fmt.Errorf("vault %q: invalid writeModel %q (want %q, %q, or empty)",
-			v.Name, v.WriteModel, VaultWriteModelV1, VaultWriteModelV2)
+			v.Name, v.WriteModel, VaultWriteModelChunkAppend, VaultWriteModelSequenced)
 	}
 }
 

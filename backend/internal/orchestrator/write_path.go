@@ -9,43 +9,53 @@ import (
 	"gastrolog/internal/system"
 )
 
-// ErrV2WritePathNotImplemented is returned when a vault is opted into write
-// model v2 before later phases implement spool ingestion.
-var ErrV2WritePathNotImplemented = errors.New("v2 write model is not implemented yet")
+// ErrSequencedWriteUnavailable is returned when a vault uses the sequenced
+// write model but allocator authority is not wired on this node.
+var ErrSequencedWriteUnavailable = errors.New("sequenced write path unavailable: vault-ctl allocator not wired")
 
 // vaultWriteModel returns the resolved write model for a registered vault.
-// Unknown vault IDs default to V1.
+// Unknown vault IDs default to the chunk-append write model.
 func (o *Orchestrator) vaultWriteModel(vaultID glid.GLID) system.VaultWriteModel {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	if v := o.vaults[vaultID]; v != nil {
 		return v.WriteModel
 	}
-	return system.VaultWriteModelV1
+	return system.VaultWriteModelChunkAppend
 }
 
 // dispatchDestinationWrite appends one record to a local destination vault.
 // Route fan-out may invoke this once per destination; replica fan-out is
-// handled inside the V1 path after the local append succeeds.
+// handled inside the chunk-append path after the local append succeeds.
 //
-// V2 path must not gate on VaultPlacement.Leader (Phase 0.6); coordination
+// Sequenced writes must not gate on VaultPlacement.Leader (Phase 0.6);
 // uses vault-ctl leader in later phases.
 func (o *Orchestrator) dispatchDestinationWrite(vaultID glid.GLID, rec chunk.Record) (*replicationTask, []remoteForwardTarget, error) {
 	switch wm := o.vaultWriteModel(vaultID); wm {
-	case system.VaultWriteModelV2:
-		return nil, nil, ErrV2WritePathNotImplemented
-	case system.VaultWriteModelV1:
-		return o.appendLocalV1(vaultID, rec)
+	case system.VaultWriteModelSequenced:
+		if o.seqAssignReady(vaultID) {
+			return o.appendLocalSequenced(vaultID, rec)
+		}
+		return nil, nil, ErrSequencedWriteUnavailable
+	case system.VaultWriteModelChunkAppend:
+		return o.appendLocalChunk(vaultID, rec)
 	default:
 		// Defensive: vault shells should only carry resolved models.
-		return o.appendLocalV1(vaultID, rec)
+		return o.appendLocalChunk(vaultID, rec)
 	}
 }
 
-// appendLocalV1 is the V1 destination write path: synchronous active-chunk
-// append, then optional replica fan-out to RF followers.
-func (o *Orchestrator) appendLocalV1(vaultID glid.GLID, rec chunk.Record) (*replicationTask, []remoteForwardTarget, error) {
+// appendLocalChunk is the chunk-append destination write path: synchronous
+// active-chunk append, then optional replica fan-out to RF followers.
+func (o *Orchestrator) appendLocalChunk(vaultID glid.GLID, rec chunk.Record) (*replicationTask, []remoteForwardTarget, error) {
 	return o.appendLocal(vaultID, rec)
+}
+
+func (o *Orchestrator) seqAssignReady(vaultID glid.GLID) bool {
+	if o.groupMgr != nil {
+		return true
+	}
+	return o.testSeqFSM[vaultID] != nil
 }
 
 // SyncVaultConfig mirrors operator-facing vault config onto the registered

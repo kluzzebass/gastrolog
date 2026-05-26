@@ -332,7 +332,7 @@ message ForwardGetContextRequest {
   uint64 pos = 3;
   int32 before = 4;
   int32 after = 5;
-  // V2 spool anchor when chunk_id is empty (see docs/fan-out/v2/anchor-model.md).
+  // Spool anchor when chunk_id is empty (see docs/fan-out/v2/anchor-model.md).
   uint64 vault_seq = 6;
 }
 

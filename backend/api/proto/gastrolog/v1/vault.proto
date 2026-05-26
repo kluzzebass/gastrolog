@@ -338,6 +338,9 @@ message ExportRecord {
   uint32 ingest_seq = 9;   // Per-ingester rolling sequence counter
   bytes ingester_id = 10;  // 16-byte GLID
   bytes node_id = 11;      // 16-byte GLID — emitting node, disambiguates parallel ingesters
+
+  // Destination-vault acceptance sequence (sequenced write path). Zero when unset.
+  uint64 vault_seq = 12;
 }
 
 // ImportRecords appends a batch of records to a vault.

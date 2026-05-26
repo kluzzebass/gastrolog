@@ -1756,6 +1756,13 @@ export class ExportRecord extends Message<ExportRecord> {
    */
   nodeId = new Uint8Array(0);
 
+  /**
+   * Destination-vault acceptance sequence (sequenced write path). Zero when unset.
+   *
+   * @generated from field: uint64 vault_seq = 12;
+   */
+  vaultSeq = protoInt64.zero;
+
   constructor(data?: PartialMessage<ExportRecord>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1775,6 +1782,7 @@ export class ExportRecord extends Message<ExportRecord> {
     { no: 9, name: "ingest_seq", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 10, name: "ingester_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 11, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 12, name: "vault_seq", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ExportRecord {

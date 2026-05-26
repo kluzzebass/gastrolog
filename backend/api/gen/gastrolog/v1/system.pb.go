@@ -557,7 +557,7 @@ func (x *RetentionRule) GetRetentionPolicyId() []byte {
 type VaultPlacement struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	StorageId     []byte                 `protobuf:"bytes,1,opt,name=storage_id,json=storageId,proto3" json:"storage_id,omitempty"` // references FileStorage.id
-	Leader        bool                   `protobuf:"varint,2,opt,name=leader,proto3" json:"leader,omitempty"`                       // bootstrap/residency primary; V1 write-path authority, not V2 — see docs/fan-out/v2/placement-leader-migration.md
+	Leader        bool                   `protobuf:"varint,2,opt,name=leader,proto3" json:"leader,omitempty"`                       // bootstrap/residency primary; chunk_append write-path authority, not sequenced — see docs/fan-out/v2/placement-leader-migration.md
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -626,7 +626,7 @@ type VaultConfig struct {
 	CacheBudget          string                 `protobuf:"bytes,14,opt,name=cache_budget,json=cacheBudget,proto3" json:"cache_budget,omitempty"`                            // max cache size (e.g. "1GB", "500MB"; default: "1GiB")
 	CacheTtl             string                 `protobuf:"bytes,15,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`                                     // eviction TTL duration (e.g. "1h", "7d"); only for ttl mode
 	RetentionDisposition string                 `protobuf:"bytes,16,opt,name=retention_disposition,json=retentionDisposition,proto3" json:"retention_disposition,omitempty"` // "delete" (default) or "route" — what retention does with aged-out records
-	WriteModel           string                 `protobuf:"bytes,17,opt,name=write_model,json=writeModel,proto3" json:"write_model,omitempty"`                               // "" or "v1" (default): leader-driven chunk path; "v2": fan-out V2 spool path
+	WriteModel           string                 `protobuf:"bytes,17,opt,name=write_model,json=writeModel,proto3" json:"write_model,omitempty"`                               // "" or "chunk_append" (default): active-chunk append; "sequenced": destination-vault sequencing + spool path
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
 }

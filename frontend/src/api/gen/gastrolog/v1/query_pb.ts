@@ -833,7 +833,7 @@ export class RecordRef extends Message<RecordRef> {
   vaultId = new Uint8Array(0);
 
   /**
-   * V2 pre-materialized anchor axis (destination-vault sequence). Set when
+   * Pre-materialized anchor axis (destination-vault sequence). Set when
    * chunk_id is empty; mutual exclusion enforced server-side. See
    * docs/fan-out/v2/anchor-model.md.
    *
@@ -1299,7 +1299,7 @@ export class PipelineStep extends Message<PipelineStep> {
  */
 export class GetContextRequest extends Message<GetContextRequest> {
   /**
-   * Anchor record: materialized (chunk_id+pos) or V2 spool (vault_seq only).
+   * Anchor record: materialized (chunk_id+pos) or spool (vault_seq only).
    *
    * @generated from field: gastrolog.v1.RecordRef ref = 1;
    */

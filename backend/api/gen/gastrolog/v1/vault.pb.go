@@ -2037,9 +2037,11 @@ type ExportRecord struct {
 	// preserve chunk ordering on the destination node.
 	WriteTs *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=write_ts,json=writeTs,proto3" json:"write_ts,omitempty"`
 	// EventID fields for record identity and deduplication.
-	IngestSeq     uint32 `protobuf:"varint,9,opt,name=ingest_seq,json=ingestSeq,proto3" json:"ingest_seq,omitempty"`    // Per-ingester rolling sequence counter
-	IngesterId    []byte `protobuf:"bytes,10,opt,name=ingester_id,json=ingesterId,proto3" json:"ingester_id,omitempty"` // 16-byte GLID
-	NodeId        []byte `protobuf:"bytes,11,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`             // 16-byte GLID — emitting node, disambiguates parallel ingesters
+	IngestSeq  uint32 `protobuf:"varint,9,opt,name=ingest_seq,json=ingestSeq,proto3" json:"ingest_seq,omitempty"`    // Per-ingester rolling sequence counter
+	IngesterId []byte `protobuf:"bytes,10,opt,name=ingester_id,json=ingesterId,proto3" json:"ingester_id,omitempty"` // 16-byte GLID
+	NodeId     []byte `protobuf:"bytes,11,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`             // 16-byte GLID — emitting node, disambiguates parallel ingesters
+	// Destination-vault acceptance sequence (sequenced write path). Zero when unset.
+	VaultSeq      uint64 `protobuf:"varint,12,opt,name=vault_seq,json=vaultSeq,proto3" json:"vault_seq,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2149,6 +2151,13 @@ func (x *ExportRecord) GetNodeId() []byte {
 		return x.NodeId
 	}
 	return nil
+}
+
+func (x *ExportRecord) GetVaultSeq() uint64 {
+	if x != nil {
+		return x.VaultSeq
+	}
+	return 0
 }
 
 // ImportRecords appends a batch of records to a vault.
@@ -3027,7 +3036,7 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x12ExportVaultRequest\x12\x14\n" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\"K\n" +
 	"\x13ExportVaultResponse\x124\n" +
-	"\arecords\x18\x01 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\"\xe1\x03\n" +
+	"\arecords\x18\x01 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\"\xfe\x03\n" +
 	"\fExportRecord\x127\n" +
 	"\tsource_ts\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\bsourceTs\x127\n" +
 	"\tingest_ts\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\bingestTs\x12;\n" +
@@ -3042,7 +3051,8 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\vingester_id\x18\n" +
 	" \x01(\fR\n" +
 	"ingesterId\x12\x17\n" +
-	"\anode_id\x18\v \x01(\fR\x06nodeId\x1a8\n" +
+	"\anode_id\x18\v \x01(\fR\x06nodeId\x12\x1b\n" +
+	"\tvault_seq\x18\f \x01(\x04R\bvaultSeq\x1a8\n" +
 	"\n" +
 	"AttrsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +

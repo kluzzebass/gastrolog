@@ -941,7 +941,7 @@ type RecordRef struct {
 	ChunkId []byte                 `protobuf:"bytes,1,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
 	Pos     uint64                 `protobuf:"varint,2,opt,name=pos,proto3" json:"pos,omitempty"`
 	VaultId []byte                 `protobuf:"bytes,3,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"` // Vault this record belongs to
-	// V2 pre-materialized anchor axis (destination-vault sequence). Set when
+	// Pre-materialized anchor axis (destination-vault sequence). Set when
 	// chunk_id is empty; mutual exclusion enforced server-side. See
 	// docs/fan-out/v2/anchor-model.md.
 	VaultSeq      uint64 `protobuf:"varint,4,opt,name=vault_seq,json=vaultSeq,proto3" json:"vault_seq,omitempty"`
@@ -1512,7 +1512,7 @@ func (x *PipelineStep) GetPredicate() string {
 
 type GetContextRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Anchor record: materialized (chunk_id+pos) or V2 spool (vault_seq only).
+	// Anchor record: materialized (chunk_id+pos) or spool (vault_seq only).
 	Ref           *RecordRef `protobuf:"bytes,1,opt,name=ref,proto3" json:"ref,omitempty"`
 	Before        int32      `protobuf:"varint,2,opt,name=before,proto3" json:"before,omitempty"` // Number of records before anchor (default 5, max 50)
 	After         int32      `protobuf:"varint,3,opt,name=after,proto3" json:"after,omitempty"`   // Number of records after anchor (default 5, max 50)

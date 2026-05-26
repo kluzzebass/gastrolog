@@ -5,10 +5,10 @@ import "gastrolog/internal/system"
 // PlacementLeaderIsWriteAuthority reports whether ingest hot-path code may gate
 // writes on VaultPlacement.Leader / VaultInstance.IsFollower for this vault.
 //
-// Locked Phase 0.6 (gastrolog-3c35d): V1 yes, V2 no — see
+// Locked Phase 0.6 (gastrolog-3c35d): chunk_append yes, sequenced no — see
 // docs/fan-out/v2/placement-leader-migration.md.
 func PlacementLeaderIsWriteAuthority(writeModel system.VaultWriteModel) bool {
-	return writeModel == system.VaultWriteModelV1
+	return writeModel == system.VaultWriteModelChunkAppend
 }
 
 // PlacementLeaderIsWriteAuthorityForVault resolves the vault shell write model.

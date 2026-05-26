@@ -256,6 +256,10 @@ type Record struct {
 	Ref      RecordRef
 	VaultID  glid.GLID
 
+	// VaultSeq is the destination-vault acceptance sequence (sequenced write path).
+	// Zero means unset (chunk-append path or pre-assignment).
+	VaultSeq uint64
+
 	// WaitForReplica signals that the caller wants confirmation that
 	// secondaries received this record before acking. Set by ack-gated
 	// ingesters (RELP, HTTP X-Wait-Ack). When true, appendRecord skips
@@ -277,5 +281,6 @@ func (r Record) Copy() Record {
 		Raw:      raw,
 		Ref:      r.Ref,
 		VaultID:  r.VaultID,
+		VaultSeq: r.VaultSeq,
 	}
 }

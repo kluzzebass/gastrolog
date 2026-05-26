@@ -52,7 +52,7 @@ type Config struct {
 	RotationPolicies []RotationPolicyConfig `json:"rotationPolicies,omitempty"`
 	RetentionPolicies []RetentionPolicyConfig `json:"retentionPolicies,omitempty"`
 	Ingesters         []IngesterConfig        `json:"ingesters,omitempty"`
-	// Vaults carry per-vault settings including WriteModel (V1 default, V2 opt-in).
+	// Vaults carry per-vault settings including WriteModel (chunk_append default, sequenced opt-in).
 	Vaults            []VaultConfig           `json:"vaults,omitempty"`
 	Routes            []RouteConfig           `json:"routes,omitempty"`
 	Certs             []CertPEM               `json:"certs,omitempty"`

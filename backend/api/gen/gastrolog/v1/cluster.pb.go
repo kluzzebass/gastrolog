@@ -2160,7 +2160,7 @@ type ForwardGetContextRequest struct {
 	Pos     uint64                 `protobuf:"varint,3,opt,name=pos,proto3" json:"pos,omitempty"`
 	Before  int32                  `protobuf:"varint,4,opt,name=before,proto3" json:"before,omitempty"`
 	After   int32                  `protobuf:"varint,5,opt,name=after,proto3" json:"after,omitempty"`
-	// V2 spool anchor when chunk_id is empty (see docs/fan-out/v2/anchor-model.md).
+	// Spool anchor when chunk_id is empty (see docs/fan-out/v2/anchor-model.md).
 	VaultSeq      uint64 `protobuf:"varint,6,opt,name=vault_seq,json=vaultSeq,proto3" json:"vault_seq,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

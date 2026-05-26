@@ -8,10 +8,10 @@ func TestVaultConfigResolveWriteModel(t *testing.T) {
 		in   string
 		want VaultWriteModel
 	}{
-		{in: "", want: VaultWriteModelV1},
-		{in: "v1", want: VaultWriteModelV1},
-		{in: "v2", want: VaultWriteModelV2},
-		{in: "bogus", want: VaultWriteModelV1},
+		{in: "", want: VaultWriteModelChunkAppend},
+		{in: "chunk_append", want: VaultWriteModelChunkAppend},
+		{in: "sequenced", want: VaultWriteModelSequenced},
+		{in: "bogus", want: VaultWriteModelChunkAppend},
 	}
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {
@@ -20,8 +20,8 @@ func TestVaultConfigResolveWriteModel(t *testing.T) {
 			if got := v.ResolveWriteModel(); got != tt.want {
 				t.Fatalf("ResolveWriteModel() = %q, want %q", got, tt.want)
 			}
-			if v.UsesV2WriteModel() != (tt.want == VaultWriteModelV2) {
-				t.Fatalf("UsesV2WriteModel() = %v, want %v", v.UsesV2WriteModel(), tt.want == VaultWriteModelV2)
+			if v.UsesSequencedWriteModel() != (tt.want == VaultWriteModelSequenced) {
+				t.Fatalf("UsesSequencedWriteModel() = %v, want %v", v.UsesSequencedWriteModel(), tt.want == VaultWriteModelSequenced)
 			}
 		})
 	}
@@ -29,10 +29,14 @@ func TestVaultConfigResolveWriteModel(t *testing.T) {
 
 func TestVaultConfigValidateWriteModel(t *testing.T) {
 	t.Parallel()
-	if err := (VaultConfig{Name: "ok", WriteModel: "v2"}).ValidateWriteModel(); err != nil {
-		t.Fatalf("v2: %v", err)
+	for _, wm := range []string{"sequenced", "chunk_append", ""} {
+		if err := (VaultConfig{Name: "ok", WriteModel: wm}).ValidateWriteModel(); err != nil {
+			t.Fatalf("writeModel %q: %v", wm, err)
+		}
 	}
-	if err := (VaultConfig{Name: "bad", WriteModel: "v3"}).ValidateWriteModel(); err == nil {
-		t.Fatal("expected error for unknown write model")
+	for _, wm := range []string{"v1", "v2", "v3"} {
+		if err := (VaultConfig{Name: "bad", WriteModel: wm}).ValidateWriteModel(); err == nil {
+			t.Fatalf("expected error for writeModel %q", wm)
+		}
 	}
 }

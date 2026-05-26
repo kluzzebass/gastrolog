@@ -1782,7 +1782,7 @@ export class ForwardGetContextRequest extends Message<ForwardGetContextRequest> 
   after = 0;
 
   /**
-   * V2 spool anchor when chunk_id is empty (see docs/fan-out/v2/anchor-model.md).
+   * Spool anchor when chunk_id is empty (see docs/fan-out/v2/anchor-model.md).
    *
    * @generated from field: uint64 vault_seq = 6;
    */

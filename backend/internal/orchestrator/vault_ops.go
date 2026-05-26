@@ -468,6 +468,16 @@ func (o *Orchestrator) AppendToVault(vaultID glid.GLID, leaderChunkID chunk.Chun
 		o.mu.RUnlock()
 		return ErrVaultDraining
 	}
+
+	if vault.WriteModel == system.VaultWriteModelSequenced && rec.VaultSeq > 0 {
+		if err := o.applyInterimReplicaWrite(vaultID, rec); err != nil {
+			o.mu.RUnlock()
+			return err
+		}
+		o.mu.RUnlock()
+		return nil
+	}
+
 	cm := vaultInst.Chunks
 
 	// Reject writes targeting a tombstoned chunk ID — a stale replication

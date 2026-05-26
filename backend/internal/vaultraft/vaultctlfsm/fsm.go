@@ -229,7 +229,7 @@ type FSM struct {
 	// in flight and are safe to drop).
 	tombstones map[chunk.ChunkID]time.Time
 
-	// V2 destination-vault sequence allocator control state (gastrolog-16w8x).
+	// Destination-vault sequence allocator control state (gastrolog-16w8x).
 	// Owned by vault-ctl Raft; per-record acceptance metadata lives off Raft.
 	seqNextSeq     uint64
 	seqEpoch       uint64
@@ -1102,7 +1102,7 @@ func MarshalRepatriateChunk(entry ManifestEntry) ([]byte, error) {
 //	1 = chunk entries   (payload: N×126 byte fixed entries)
 //	2 = tombstones      (payload: 4 byte count + N×(16 ID + 8 nanos))
 //	3 = pendingDeletes  (gastrolog-51gme step 2)
-//	4 = seqAllocator    (gastrolog-16w8x V2 lease control state)
+//	4 = seqAllocator    (gastrolog-16w8x lease control state)
 //
 // Section kind 2 was previously "transition receipts" and is renumbered
 // here after gastrolog-5sywa removed the receipt protocol entirely.

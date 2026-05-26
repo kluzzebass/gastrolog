@@ -440,7 +440,7 @@ export class VaultPlacement extends Message<VaultPlacement> {
   storageId = new Uint8Array(0);
 
   /**
-   * true = this storage bootstraps the Raft group (initial leader)
+   * bootstrap/residency primary; chunk_append write-path authority, not sequenced — see docs/fan-out/v2/placement-leader-migration.md
    *
    * @generated from field: bool leader = 2;
    */
@@ -577,7 +577,7 @@ export class VaultConfig extends Message<VaultConfig> {
   retentionDisposition = "";
 
   /**
-   * "" or "v1" (default): leader-driven chunk path; "v2": fan-out V2 spool path
+   * "" or "chunk_append" (default): active-chunk append; "sequenced": destination-vault sequencing + spool path
    *
    * @generated from field: string write_model = 17;
    */

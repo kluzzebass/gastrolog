@@ -87,7 +87,7 @@ func TestRouteFanOutSeparateFromReplicaFanOut(t *testing.T) {
 	}
 }
 
-func TestV2WriteModelGateRejectsIngest(t *testing.T) {
+func TestSequencedWriteGateRejectsWithoutAllocator(t *testing.T) {
 	t.Parallel()
 
 	vaultID := glid.New()
@@ -103,22 +103,23 @@ func TestV2WriteModelGateRejectsIngest(t *testing.T) {
 		Indexes: im,
 		Query:  qe,
 	})
-	v.WriteModel = system.VaultWriteModelV2
+	v.WriteModel = system.VaultWriteModelSequenced
 	orch.RegisterVault(v)
+	// No wireTestSeqAllocator — sequenced ingest stays gated until allocator is wired.
 
 	cr, _ := CompileRoute(glid.New(), "all", 0, "*", []RouteDestination{{VaultID: vaultID}}, "fanout")
 	orch.SetRouteSet(NewRouteSet([]*CompiledRoute{cr}))
 
-	_, err := orch.ingestWithSource(testRecord("v2-gated"), SourceContext{Kind: SourceIngest})
-	if !errors.Is(err, ErrV2WritePathNotImplemented) {
-		t.Fatalf("ingest err = %v, want %v", err, ErrV2WritePathNotImplemented)
+	_, err := orch.ingestWithSource(sequencedTestRecord("v2-gated", glid.New(), 1), SourceContext{Kind: SourceIngest})
+	if !errors.Is(err, ErrSequencedWriteUnavailable) {
+		t.Fatalf("ingest err = %v, want %v", err, ErrSequencedWriteUnavailable)
 	}
 	if counting.appends != 0 {
-		t.Fatalf("V2 path must not append to active chunk synchronously; appends=%d", counting.appends)
+		t.Fatalf("sequenced path must not append to active chunk synchronously; appends=%d", counting.appends)
 	}
 }
 
-func TestV1DefaultWriteModelUnchanged(t *testing.T) {
+func TestDefaultChunkAppendWriteModelUnchanged(t *testing.T) {
 	t.Parallel()
 
 	vaultID := glid.New()
@@ -127,7 +128,7 @@ func TestV1DefaultWriteModelUnchanged(t *testing.T) {
 	im := indexmem.NewManager(nil, nil, nil, nil, nil)
 	qe := query.New(cm, im, nil)
 	v := NewVault(vaultID, &VaultInstance{VaultID: vaultID, Type: "memory", Chunks: cm, Indexes: im, Query: qe})
-	v.WriteModel = system.VaultWriteModelV1
+	v.WriteModel = system.VaultWriteModelChunkAppend
 	orch.RegisterVault(v)
 
 	cr, _ := CompileRoute(glid.New(), "all", 0, "*", []RouteDestination{{VaultID: vaultID}}, "fanout")
@@ -165,11 +166,11 @@ func TestSyncVaultConfigUpdatesWriteModel(t *testing.T) {
 	orch.RegisterVault(NewVault(vaultID, &VaultInstance{VaultID: vaultID, Type: "memory", Chunks: cm}))
 
 	if err := orch.SyncVaultConfig(system.VaultConfig{
-		ID: vaultID, Name: "t", Enabled: true, WriteModel: string(system.VaultWriteModelV2),
+		ID: vaultID, Name: "t", Enabled: true, WriteModel: string(system.VaultWriteModelSequenced),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if got := orch.vaultWriteModel(vaultID); got != system.VaultWriteModelV2 {
-		t.Fatalf("write model = %q, want v2", got)
+	if got := orch.vaultWriteModel(vaultID); got != system.VaultWriteModelSequenced {
+		t.Fatalf("write model = %q, want %q", got, system.VaultWriteModelSequenced)
 	}
 }
