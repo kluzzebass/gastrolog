@@ -284,6 +284,12 @@ func commandName(cmd vaultctlfsm.Command) string {
 		return "CmdBeginSeal"
 	case vaultctlfsm.CmdRepatriateChunk:
 		return "CmdRepatriateChunk"
+	case vaultctlfsm.CmdReserveSeqRange:
+		return "CmdReserveSeqRange"
+	case vaultctlfsm.CmdBurnSeqLeaseTail:
+		return "CmdBurnSeqLeaseTail"
+	case vaultctlfsm.CmdBumpSeqAllocatorEpoch:
+		return "CmdBumpSeqAllocatorEpoch"
 	default:
 		return fmt.Sprintf("CmdUnknown(%d)", cmd)
 	}

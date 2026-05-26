@@ -1,6 +1,11 @@
 package vaultraft
 
-import "gastrolog/internal/glid"
+import (
+	"errors"
+
+	"gastrolog/internal/glid"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
+)
 
 // Vault control-plane FSM command opcodes (first byte of Apply payload).
 const (
@@ -24,4 +29,37 @@ func MarshalVaultChunkCommand(vaultID glid.GLID, chunkWire []byte) []byte {
 	out = append(out, vaultID[:]...)
 	out = append(out, chunkWire...)
 	return out
+}
+
+func marshalVaultSubCommand(vaultID glid.GLID, wire []byte) ([]byte, error) {
+	if len(wire) == 0 {
+		return nil, errors.New("vaultraft: empty vault sub-command")
+	}
+	return MarshalVaultChunkCommand(vaultID, wire), nil
+}
+
+// MarshalVaultReserveSeqRange replicates a destination-vault sequence lease
+// reservation for vaultID. holderEpoch must match the current allocator epoch.
+func MarshalVaultReserveSeqRange(vaultID glid.GLID, holderID string, holderEpoch, count uint64) ([]byte, error) {
+	wire, err := vaultctlfsm.MarshalReserveSeqRange(holderID, holderEpoch, count)
+	if err != nil {
+		return nil, err
+	}
+	return marshalVaultSubCommand(vaultID, wire)
+}
+
+// MarshalVaultBurnSeqLeaseTail records the consumed prefix of the holder's
+// active lease and burns any remaining tail as an unassigned gap.
+func MarshalVaultBurnSeqLeaseTail(vaultID glid.GLID, holderID string, holderEpoch, consumedEnd uint64) ([]byte, error) {
+	wire, err := vaultctlfsm.MarshalBurnSeqLeaseTail(holderID, holderEpoch, consumedEnd)
+	if err != nil {
+		return nil, err
+	}
+	return marshalVaultSubCommand(vaultID, wire)
+}
+
+// MarshalVaultBumpSeqAllocatorEpoch bumps allocator epoch and burns any
+// outstanding active lease tail (failover safety).
+func MarshalVaultBumpSeqAllocatorEpoch(vaultID glid.GLID) []byte {
+	return MarshalVaultChunkCommand(vaultID, vaultctlfsm.MarshalBumpSeqAllocatorEpoch())
 }

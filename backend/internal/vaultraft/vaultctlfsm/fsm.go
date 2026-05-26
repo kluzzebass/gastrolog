@@ -228,6 +228,13 @@ type FSM struct {
 	// replication-job deadline, typically a few minutes, cannot still be
 	// in flight and are safe to drop).
 	tombstones map[chunk.ChunkID]time.Time
+
+	// V2 destination-vault sequence allocator control state (gastrolog-16w8x).
+	// Owned by vault-ctl Raft; per-record acceptance metadata lives off Raft.
+	seqNextSeq     uint64
+	seqEpoch       uint64
+	seqActiveLease *SeqActiveLease
+	seqBurnedTails []SeqBurnedTail
 }
 
 // New creates an empty chunk metadata FSM.
@@ -585,6 +592,22 @@ func (f *FSM) applyLocked(cmd Command, payload []byte) (any, applyEffects) {
 		// (retention, indexes, etc.) reacts identically to a normal
 		// CmdCreateChunk path.
 		fx.createdEntry = f.captureEntry(result, payload)
+	case CmdReserveSeqRange:
+		grant, reserveErr := f.applyReserveSeqRange(payload)
+		if reserveErr != nil {
+			result = reserveErr
+		} else {
+			result = grant
+		}
+	case CmdBurnSeqLeaseTail:
+		result = f.applyBurnSeqLeaseTail(payload)
+	case CmdBumpSeqAllocatorEpoch:
+		newEpoch, bumpErr := f.applyBumpSeqAllocatorEpoch(payload)
+		if bumpErr != nil {
+			result = bumpErr
+		} else {
+			result = newEpoch
+		}
 	default:
 		result = fmt.Errorf("unknown chunk FSM command: %d", cmd)
 	}
@@ -644,10 +667,12 @@ func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) {
 	for _, p := range f.pendingDeletes {
 		pendingDeletes = append(pendingDeletes, p.Copy())
 	}
+	seqSnap := f.seqAllocatorSnapshotLocked()
 	return &fsmSnapshot{
 		entries:        entries,
 		tombstones:     tombstones,
 		pendingDeletes: pendingDeletes,
+		seqAllocator:   seqSnap,
 	}, nil
 }
 
@@ -674,6 +699,7 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 	if f.pendingDeletes == nil {
 		f.pendingDeletes = make(map[chunk.ChunkID]*PendingDelete)
 	}
+	applySeqAllocatorSnapshotLocked(f, snap.seqAllocator)
 	f.ready = true
 	return nil
 }
@@ -1076,6 +1102,7 @@ func MarshalRepatriateChunk(entry ManifestEntry) ([]byte, error) {
 //	1 = chunk entries   (payload: N×126 byte fixed entries)
 //	2 = tombstones      (payload: 4 byte count + N×(16 ID + 8 nanos))
 //	3 = pendingDeletes  (gastrolog-51gme step 2)
+//	4 = seqAllocator    (gastrolog-16w8x V2 lease control state)
 //
 // Section kind 2 was previously "transition receipts" and is renumbered
 // here after gastrolog-5sywa removed the receipt protocol entirely.
@@ -1107,6 +1134,7 @@ type fsmSnapshot struct {
 	entries        []ManifestEntry
 	tombstones     map[chunk.ChunkID]time.Time
 	pendingDeletes []PendingDelete // gastrolog-51gme step 2
+	seqAllocator   SeqAllocatorSnapshot
 }
 
 func (s *fsmSnapshot) Persist(sink hraft.SnapshotSink) error {
@@ -1156,6 +1184,11 @@ func (s *fsmSnapshot) Persist(sink hraft.SnapshotSink) error {
 	// per entry; encoder writes the section header with the precomputed
 	// payload size.
 	if err := encodePendingDeletesSection(sink, s.pendingDeletes); err != nil {
+		_ = sink.Cancel()
+		return err
+	}
+
+	if err := encodeSeqAllocatorSection(sink, s.seqAllocator); err != nil {
 		_ = sink.Cancel()
 		return err
 	}
@@ -1261,6 +1294,7 @@ type decodedSnapshot struct {
 	entries        []ManifestEntry
 	tombstones     map[chunk.ChunkID]time.Time
 	pendingDeletes map[chunk.ChunkID]*PendingDelete // gastrolog-51gme step 2
+	seqAllocator   SeqAllocatorSnapshot
 }
 
 // decodeSnapshot reads a versioned snapshot. Unknown section kinds are
@@ -1293,6 +1327,8 @@ func decodeSnapshot(r io.Reader) (*decodedSnapshot, error) {
 			out.tombstones, err = readTombstonesSection(section)
 		case sectionPendingDeletes:
 			out.pendingDeletes, err = readPendingDeletesSection(section)
+		case sectionSeqAllocator:
+			out.seqAllocator, err = readSeqAllocatorSection(section)
 		default:
 			// Unknown section — skip. Forward-compat for new sections in
 			// the same format version.

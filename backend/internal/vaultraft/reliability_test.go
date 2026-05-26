@@ -963,3 +963,112 @@ var _ = func(r *hraft.Raft) {
 	_ = r.State()
 	_ = r.AppliedIndex()
 }
+
+func TestReliability_SeqAllocator_ReserveReplicates(t *testing.T) {
+	t.Parallel()
+	h := newReliabilityHarness(t, 3)
+	vaultID := glid.New()
+	grant := h.applyReserveSeqRange(vaultID, "node-1", vaultctlfsm.InitialSeqEpoch, 100)
+	if grant.Start != 1 || grant.End != 100 {
+		t.Fatalf("grant: %+v", grant)
+	}
+	h.assertAllFSMsConverged()
+}
+
+func TestReliability_SeqAllocator_FailoverNoOverlap(t *testing.T) {
+	t.Parallel()
+	h := newReliabilityHarness(t, 3)
+	vaultID := glid.New()
+	const holder = "writer-a"
+	const epoch = vaultctlfsm.InitialSeqEpoch
+
+	grant1 := h.applyReserveSeqRange(vaultID, holder, epoch, 50)
+	h.assertAllFSMsConverged()
+
+	leaderID := h.leaderID()
+	h.stopNode(leaderID)
+	h.waitForLeader()
+	h.assertAllFSMsConverged()
+
+	// Active lease from pre-failover writer is still outstanding — new
+	// reservations must fail until epoch bump burns the abandoned tail.
+	cmd, err := MarshalVaultReserveSeqRange(vaultID, "writer-b", epoch, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fut := h.leader().raft.Apply(cmd, 2*time.Second)
+	if err := fut.Error(); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if !errors.Is(fut.Response().(error), vaultctlfsm.ErrSeqAllocatorActiveLease) {
+		t.Fatalf("expected active lease error, got %v", fut.Response())
+	}
+
+	h.applyVaultSeqCommand(vaultID, vaultctlfsm.MarshalBumpSeqAllocatorEpoch())
+	h.assertAllFSMsConverged()
+
+	grant2 := h.applyReserveSeqRange(vaultID, "writer-b", epoch+1, 10)
+	if grant2.Start != grant1.End+1 {
+		t.Fatalf("overlap/regression: grant1=%+v grant2=%+v", grant1, grant2)
+	}
+	h.assertAllFSMsConverged()
+}
+
+func TestReliability_SeqAllocator_RestartPreservesState(t *testing.T) {
+	t.Parallel()
+	h := newReliabilityHarness(t, 3)
+	vaultID := glid.New()
+	const holder = "node-1"
+	const epoch = vaultctlfsm.InitialSeqEpoch
+
+	h.applyReserveSeqRange(vaultID, holder, epoch, 20)
+	burn, err := vaultctlfsm.MarshalBurnSeqLeaseTail(holder, epoch, 15)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.applyVaultSeqCommand(vaultID, burn)
+	h.assertAllFSMsConverged()
+
+	before := vaultFSMFingerprint(h.leader().fsm)
+	h.restartNode(h.nodeIDs[1])
+	h.assertAllFSMsConverged()
+	after := vaultFSMFingerprint(h.nodes[h.nodeIDs[1]].fsm)
+	if before != after {
+		t.Fatalf("allocator diverged after restart:\nbefore=%q\nafter=%q", before, after)
+	}
+}
+
+func TestReliability_SeqAllocator_SnapshotInstallPreservesState(t *testing.T) {
+	t.Parallel()
+	h := newReliabilityHarness(t, 3)
+	vaultID := glid.New()
+	const holder = "node-1"
+	const epoch = vaultctlfsm.InitialSeqEpoch
+
+	h.applyReserveSeqRange(vaultID, holder, epoch, 30)
+	h.applyVaultSeqCommand(vaultID, vaultctlfsm.MarshalBumpSeqAllocatorEpoch())
+	h.applyReserveSeqRange(vaultID, holder, epoch+1, 5)
+	h.assertAllFSMsConverged()
+
+	leaderPrint := vaultFSMFingerprint(h.leader().fsm)
+	wiped := h.nodeIDs[2]
+	h.stopNode(wiped)
+	h.startNode(wiped)
+	h.wireTransports()
+
+	deadline := time.Now().Add(harnessConvergeWait)
+	for time.Now().Before(deadline) {
+		n := h.nodes[wiped]
+		n.mu.Lock()
+		fsm := n.fsm
+		r := n.raft
+		n.mu.Unlock()
+		if fsm != nil && r != nil && r.AppliedIndex() >= h.leader().raft.LastIndex() {
+			if vaultFSMFingerprint(fsm) == leaderPrint {
+				return
+			}
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	t.Fatalf("wiped follower did not converge allocator state")
+}

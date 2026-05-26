@@ -230,6 +230,40 @@ func (h *reliabilityHarness) applyInstanceCreate(vaultID glid.GLID, chunkID chun
 	}
 }
 
+func (h *reliabilityHarness) applyReserveSeqRange(vaultID glid.GLID, holderID string, epoch, count uint64) vaultctlfsm.SeqLeaseGrant {
+	h.t.Helper()
+	cmd, err := MarshalVaultReserveSeqRange(vaultID, holderID, epoch, count)
+	if err != nil {
+		h.t.Fatalf("marshal reserve seq range: %v", err)
+	}
+	fut := h.leader().raft.Apply(cmd, 2*time.Second)
+	if err := fut.Error(); err != nil {
+		h.t.Fatalf("apply reserve seq range: %v", err)
+	}
+	switch r := fut.Response().(type) {
+	case vaultctlfsm.SeqLeaseGrant:
+		return r
+	case error:
+		h.t.Fatalf("apply reserve seq range FSM error: %v", r)
+	default:
+		h.t.Fatalf("apply reserve seq range: unexpected response %T", fut.Response())
+	}
+	return vaultctlfsm.SeqLeaseGrant{}
+}
+
+func (h *reliabilityHarness) applyVaultSeqCommand(vaultID glid.GLID, wire []byte) any {
+	h.t.Helper()
+	cmd := MarshalVaultChunkCommand(vaultID, wire)
+	fut := h.leader().raft.Apply(cmd, 2*time.Second)
+	if err := fut.Error(); err != nil {
+		h.t.Fatalf("apply vault seq command: %v", err)
+	}
+	if r, ok := fut.Response().(error); ok && r != nil {
+		h.t.Fatalf("apply vault seq command FSM error: %v", r)
+	}
+	return fut.Response()
+}
+
 // stopNode shuts down a node's Raft and WAL (persistent state stays on
 // disk). Use for restart scenarios: stopNode + startNode(sameID) +
 // wireTransports reloads from WAL.
@@ -335,6 +369,16 @@ func instanceFSMFingerprint(t *vaultctlfsm.FSM) string {
 		e := byID[id]
 		sb.writef("chunk=%x sealed=%t ret=%t archived=%t\n",
 			id[:], e.IsSealed(), e.RetentionPending, e.Archived)
+	}
+	alloc := t.SeqAllocatorState()
+	sb.writef("seq next=%d epoch=%d\n", alloc.NextSeq, alloc.Epoch)
+	if alloc.ActiveLease != nil {
+		l := alloc.ActiveLease
+		sb.writef("lease holder=%s range=%d-%d epoch=%d\n",
+			l.HolderID, l.RangeStart, l.RangeEnd, l.Epoch)
+	}
+	for _, tail := range alloc.BurnedTails {
+		sb.writef("burned=%d-%d epoch=%d\n", tail.Start, tail.End, tail.Epoch)
 	}
 	return sb.String()
 }
