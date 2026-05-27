@@ -540,14 +540,16 @@ func (h *orchRelHarness) sealOnLeaderForVault(v vaultSpec) {
 }
 
 // waitForVaultCtlLeaderForVault returns the node that currently holds
-// leadership of the given vault's vault-ctl Raft group.
+// leadership of the given vault's vault-ctl Raft group. Every cluster node
+// joins every vault-ctl group regardless of storage placement, so poll all
+// nodes — not just v.nodeIdxs (partial placements can leave the leader off-placement).
 func (h *orchRelHarness) waitForVaultCtlLeaderForVault(v vaultSpec) *orchRelNode {
 	h.t.Helper()
 	gid := raftgroup.VaultControlPlaneGroupID(v.id)
 	deadline := time.Now().Add(orchHarnessLeaderWait)
 	for time.Now().Before(deadline) {
-		for _, idx := range v.nodeIdxs {
-			n := h.nodes[h.nodeIDs[idx]]
+		for _, id := range h.nodeIDs {
+			n := h.nodes[id]
 			if n == nil || n.groupMgr == nil {
 				continue
 			}
