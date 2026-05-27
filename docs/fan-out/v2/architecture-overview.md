@@ -8,9 +8,20 @@ This document is the single architectural overview for fan-out v2.
 
 V2 keeps the leaderless traffic shape and removes hot-path synchronization on chunk identity.
 
+### System contract (ingest)
+
+Nothing that is ingested is lost — **provided a route destination captures the record.** No matching route → intentional drop (unchanged). Once routed, transient delivery failure (partition, vault-not-ready, no local replica, restart mid-write) must not drop the record.
+
+That contract requires a **persistent router delivery queue** on each node (pre-vault, not RF) — see [router-delivery-queue.md](router-delivery-queue.md). Today this layer does not exist; routed records are dropped after a single failed delivery attempt.
+
+### Design rule: cluster-first
+
+Every feature must work on every node — no assumption that the user or upstream is connected to a particular node or vault replica holder. This is an **architectural design rule**, not the ingest durability contract itself. It explains why delivery buffering is per-node rather than centralized.
+
 The write path is:
 
-- route fan-out (source record → destination vault set),
+- digest → **persist to router delivery queue** (survives restart; bounded on disk),
+- drain → route fan-out (source record → destination vault set),
 - per-router **seq swath** from vault-ctl allocator leader,
 - local **`VaultSeq` assign** and attach before replica fan-out,
 - per-destination replica fan-out with `W-of-N` durability,
@@ -54,16 +65,18 @@ Sequenced vaults **do not** relay full records through placement residency for a
 
 For each source record on the ingesting node:
 
-1. Router computes destination vault set.
-2. For each destination vault:
+1. Router **persists** the digested record to the local delivery queue (fsync before upstream ack unless weak-ack policy).
+2. Drain worker computes destination vault set and attempts delivery.
+3. For each destination vault:
    - ensure local seq swath (refill from vault-ctl allocator leader when empty),
    - assign `VaultSeq` locally (`swath.next++`),
    - attach `VaultSeq` to record,
    - replica fan-out in parallel to all vault replicas,
    - resolve write success/failure from `W-of-N`.
-3. Fence coordinator cuts fence boundaries (`F_n`) by policy on assigned seq space.
-4. Materializer reads spool slots by `VaultSeq`, **dedups by `EventID`**, writes sealed chunks.
-5. Reconcile converges sealed record sets by `EventID`.
+4. On delivery success, dequeue; on transient failure, retain in queue for retry.
+5. Fence coordinator cuts fence boundaries (`F_n`) by policy on assigned seq space.
+6. Materializer reads spool slots by `VaultSeq`, **dedups by `EventID`**, writes sealed chunks.
+7. Reconcile converges sealed record sets by `EventID`.
 
 Spool implementation note (locked):
 
@@ -82,6 +95,7 @@ Spool implementation note (locked):
 
 | Decision | Decisionmaker | Execution location | Decision time | Durable source of truth |
 |---|---|---|---|---|
+| Pre-vault ingest persistence | Orchestrator on ingesting node | Router delivery queue (node-local disk) | Before delivery attempt; before upstream ack (default) | Node-local queue log + cursors |
 | Route destination vault set | Router on the node processing the source record | Routing evaluation pipeline on processing node | During ingest or retention-route evaluation | Route config + per-write routing context |
 | Destination-vault seq swath allocation | Vault-ctl leader for that destination vault | Allocator on vault-ctl leader | On swath request / refill | Vault-ctl Raft log (allocator state + grants) |
 | Destination-vault per-record `VaultSeq` assignment | Ing ingesting router (using local swath) | Router on processing node | After destination selection, before replica fan-out | Attached to fan-out payload; spool slot on each replica |
@@ -124,6 +138,7 @@ Before `ConvergeSealed`, the system policy must specify:
 ## Source docs
 
 - [write-path-lock.md](write-path-lock.md) — **authoritative write path**
+- [router-delivery-queue.md](router-delivery-queue.md) — Phase 12 persistent pre-vault buffer (post-cutover)
 - [phase-rework-map.md](phase-rework-map.md) — stack/branch rework order
 - [feasibility-gate.md](feasibility-gate.md)
 - [high-watermark-contract.md](high-watermark-contract.md)

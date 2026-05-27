@@ -40,7 +40,7 @@ flowchart TD
 
 P0 / P0.5 / P0.6 docs: terminology and authority matrix updates only (gates unchanged).
 
-P6–P11: downstream of corrected spool/materialize semantics; no write-path hot-path changes except inspect labels.
+P6–P12: P6–P11 downstream of corrected spool/materialize semantics; **P12** (router delivery queue) post-cutover, not gating P10/P11.
 
 ## Phase-by-phase impact
 
@@ -157,6 +157,12 @@ Add burst asymmetric ingesters scenario (A @ 1/s, B @ 1000/s, same vault).
 ### Phase 11 — `gastrolog-390uk` (cutover)
 
 Unchanged process; cutover only after new P0 gate + ladder.
+
+### Phase 12 — `gastrolog-2qrec` (router delivery queue)
+
+**After P11.** Persistent pre-vault buffer on every ingest-capable node; satisfies ingest durability system contract for routed records. Design: [router-delivery-queue.md](router-delivery-queue.md).
+
+Not gating P10/P11 — isolated from locked write-path accept semantics.
 
 ## Issues to file (suggested)
 

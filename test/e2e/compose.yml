@@ -122,7 +122,7 @@ services:
 
   # ── Playwright test runner (containerized mode) ──
   playwright:
-    image: mcr.microsoft.com/playwright:v1.52.0-noble
+    image: mcr.microsoft.com/playwright:v1.58.2-noble
     container_name: gastrolog-e2e-playwright
     profiles: ["test"]
     working_dir: /e2e

@@ -69,6 +69,8 @@ Do not use these interchangeably.
   retention-route destination sequencing.
 - [v2/spool-state-machine.md](v2/spool-state-machine.md) — spool lifecycle,
   transitions, recovery rules, and issue-splitting boundaries.
+- [v2/router-delivery-queue.md](v2/router-delivery-queue.md) — persistent
+  per-node pre-vault buffer (nothing ingested is lost once routed).
 
 ### Obsoleted v1 design
 

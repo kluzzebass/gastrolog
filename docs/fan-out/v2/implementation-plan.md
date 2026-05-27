@@ -315,6 +315,19 @@ Required k8s scenarios:
   - [frontend/src/help](/Users/kluzz/Code/gastrolog/frontend/src/help)
   - [docs/fan-out/v2](/Users/kluzz/Code/gastrolog/docs/fan-out/v2)
 
+## Phase 12: Router delivery queue (`gastrolog-2qrec`)
+
+**After P11 cutover.** Closes the ingest durability gap for routed records that cannot deliver immediately (vault-not-ready, partition, no local replica, restart mid-write).
+
+Deliver:
+
+- Persistent per-node **router delivery queue** (pre-vault, not RF) — design: [router-delivery-queue.md](router-delivery-queue.md).
+- Drain worker: retry assign + replica fan-out (sequenced) or forward (chunk-append) until success.
+- Sequenced delivery from nodes **without** vault replicas (W-of-N without local spool slot).
+- PressureGate + inspect surfaces; full test matrix per design doc.
+
+**Not gating P10 or P11.** P10/P11 proceed with asymmetric ingest on delivery-capable nodes; P12 satisfies the full system contract afterward.
+
 ## Acceptance criteria
 
 - V2 passes local + multinode + e2e + live 4+ node k8s verification.

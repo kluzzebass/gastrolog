@@ -219,6 +219,60 @@ transferred:
 	}
 }
 
+// TestSequencedRepeatedFenceMaterializeReconcileCycles runs multiple
+// ingest→fence→materialize cycles and verifies C_r advances on every replica.
+func TestSequencedRepeatedFenceMaterializeReconcileCycles(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping repeated fence cycle capstone in short mode")
+	}
+	h := newOrchRelHarness(t, 4, withSequencedWritePath(3))
+	h.setDefaultIngestRoute(t)
+
+	nodeA := h.nodeIDs[0]
+	ingester := glid.New()
+	now := time.Now().Truncate(time.Nanosecond)
+
+	cycles := []struct {
+		records    int
+		upperBound uint64
+		prevBound  uint64
+		fenceID    uint64
+	}{
+		{records: 4, upperBound: 4, prevBound: 0, fenceID: 1},
+		{records: 3, upperBound: 7, prevBound: 4, fenceID: 2},
+		{records: 2, upperBound: 9, prevBound: 7, fenceID: 3},
+	}
+
+	nextIngestSeq := uint32(0)
+	for _, cycle := range cycles {
+		for range cycle.records {
+			nextIngestSeq++
+			rec := gateSequencedRecord("cycle-", ingester, now, nextIngestSeq)
+			if err := h.ingestOnNode(nodeA, rec); err != nil {
+				t.Fatalf("ingest before fence %d: %v", cycle.fenceID, err)
+			}
+			seq := h.lastAssignedSeq(t, nodeA, rec.EventID)
+			h.assertSpoolSlotOnAllReplicas(t, seq, rec)
+		}
+
+		fence := vaultctlfsm.FenceRecord{
+			ID:            cycle.fenceID,
+			UpperBoundSeq: cycle.upperBound,
+			PrevBoundSeq:  cycle.prevBound,
+		}
+		for _, id := range h.nodeIDs {
+			n := h.nodes[id]
+			if _, err := n.orch.MaterializeFenceForTest(h.vaultID, fence); err != nil {
+				t.Fatalf("node %s materialize fence %d: %v", n.label, cycle.fenceID, err)
+			}
+			if got := n.orch.ConvergenceWatermark(h.vaultID); got != cycle.upperBound {
+				t.Fatalf("node %s after fence %d: C_r = %d, want %d", n.label, cycle.fenceID, got, cycle.upperBound)
+			}
+		}
+	}
+	h.assertNoChunkAppendLanding(t)
+}
+
 func (h *orchRelHarness) waitForConvergence(t *testing.T, nodeID string, want uint64) {
 	t.Helper()
 	deadline := time.Now().Add(orchHarnessConvWait)
@@ -232,8 +286,12 @@ func (h *orchRelHarness) waitForConvergence(t *testing.T, nodeID string, want ui
 }
 
 func (h *orchRelHarness) waitForSpoolThroughAllReplicas(t *testing.T, through uint64) {
+	h.waitForSpoolThroughAllReplicasExtended(t, through, 10*time.Second)
+}
+
+func (h *orchRelHarness) waitForSpoolThroughAllReplicasExtended(t *testing.T, through uint64, timeout time.Duration) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		allPresent := true
 		for seq := uint64(1); seq <= through; seq++ {

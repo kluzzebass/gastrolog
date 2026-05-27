@@ -71,6 +71,8 @@ test-reliability *args:
   go test -run 'TestReliability_' -count=1 -timeout 300s ./internal/vaultraft/ {{args}}
   echo "=== orchestrator-backed reliability matrix ==="
   go test -run 'TestOrchRel_' -count=1 -timeout 600s ./internal/orchestrator/ {{args}}
+  echo "=== V2 sequenced write-path verification ==="
+  go test -run 'TestWritePathGate|TestSequenced|TestBurnedTail' -count=1 -timeout 600s ./internal/orchestrator/ {{args}}
   echo "=== 5oofa lock + ctx regressions ==="
   go test -run 'TestReliability_Ingest_|TestRunWithCtx_' -count=1 -timeout 60s ./internal/orchestrator/ ./internal/cluster/ {{args}}
 

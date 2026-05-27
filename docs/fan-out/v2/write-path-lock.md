@@ -7,9 +7,16 @@ This document is the authoritative write-path contract. If another v2 doc disagr
 Related:
 
 - [architecture-overview.md](architecture-overview.md)
+- [router-delivery-queue.md](router-delivery-queue.md) — persistent pre-vault buffer (**upstream** of this contract; ingest durability prerequisite)
 - [high-watermark-contract.md](high-watermark-contract.md) (seq/fence/watermark semantics; ingest sections superseded here)
 - [spool-state-machine.md](spool-state-machine.md)
 - [phase-rework-map.md](phase-rework-map.md)
+
+## Pre-vault delivery (ingest durability)
+
+**System contract:** nothing ingested is lost once a route destination captures the record. Unrouted records may still be dropped silently.
+
+Routed-but-undelivered ingest must persist in a **router delivery queue** (node-local disk, not vault spool) until delivery into the locked path below succeeds. See [router-delivery-queue.md](router-delivery-queue.md). This document governs accept **after** delivery, not the queue itself.
 
 ## Premise (unchanged product story)
 
