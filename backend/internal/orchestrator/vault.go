@@ -1,6 +1,8 @@
 package orchestrator
 
 import (
+	"sync"
+
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/index"
@@ -23,7 +25,8 @@ type Vault struct {
 
 	// spool holds sequenced write-path spool bytes and accepted-write metadata.
 	spool *vaultSpoolStore
-	seqLease vaultSeqLease
+	seqLease   vaultSeqLease
+	seqAssignMu sync.Mutex // serializes local swath consume + renew (not o.mu — ingest holds RLock)
 	// ReplicationFactor is the desired total replica count (leader included).
 	ReplicationFactor uint32
 	// seqFanOutTargets lists every other placement replica for sequenced

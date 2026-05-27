@@ -173,7 +173,7 @@ func TestSequenceMaterializerOnlyBurnedTailGapAdvancesWatermarks(t *testing.T) {
 func TestSequenceMaterializerBurnedTailViaSeqAssignBurn(t *testing.T) {
 	t.Parallel()
 	orch, vaultID := newSequencedFenceTestOrch(t, 0)
-	grant, err := orch.reserveVaultSeqRange(vaultID, vaultctlfsm.InitialSeqEpoch, 10)
+	grant, err := orch.reserveVaultSeqRange(vaultID, vaultctlfsm.InitialSeqEpoch, 10, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

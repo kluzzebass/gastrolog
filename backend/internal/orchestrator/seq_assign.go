@@ -40,11 +40,24 @@ func (o *Orchestrator) assignDestinationVaultSeq(vaultID glid.GLID, _ chunk.Even
 	return o.consumeNextVaultSeq(vaultID)
 }
 
+func (o *Orchestrator) seqHolderID() string {
+	if o.localNodeID != "" {
+		return o.localNodeID
+	}
+	return "local"
+}
+
 func (o *Orchestrator) consumeNextVaultSeq(vaultID glid.GLID) (uint64, error) {
+	o.mu.RLock()
 	v := o.vaults[vaultID]
+	o.mu.RUnlock()
 	if v == nil {
 		return 0, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
+
+	v.seqAssignMu.Lock()
+	defer v.seqAssignMu.Unlock()
+
 	lease := &v.seqLease
 
 	if err := o.ensureLocalSeqLease(vaultID, lease); err != nil {
@@ -74,13 +87,34 @@ func (o *Orchestrator) ensureLocalSeqLease(vaultID glid.GLID, lease *vaultSeqLea
 	return nil
 }
 
+// consumedSeqLeaseEnd returns the highest vault_seq consumed in the active
+// local swath, for burn-before-renew. ok is false when no swath is active.
+func consumedSeqLeaseEnd(lease *vaultSeqLease) (consumedEnd uint64, ok bool) {
+	if lease.end == 0 {
+		return 0, false
+	}
+	consumedEnd = lease.end
+	if lease.next == 0 {
+		return consumedEnd, true
+	}
+	if last := lease.next - 1; last < consumedEnd {
+		consumedEnd = last
+	}
+	if lease.next > lease.end {
+		consumedEnd = lease.end
+	}
+	return consumedEnd, true
+}
+
 func (o *Orchestrator) renewLocalSeqLease(vaultID glid.GLID, lease *vaultSeqLease) error {
-	if lease.end > 0 && lease.next <= lease.end {
-		if err := o.burnVaultSeqLeaseTail(vaultID, lease.epoch, lease.end); err != nil {
+	var minGrantStart uint64
+	if consumedEnd, ok := consumedSeqLeaseEnd(lease); ok {
+		minGrantStart = consumedEnd
+		if err := o.burnVaultSeqLeaseTail(vaultID, lease.epoch, consumedEnd); err != nil {
 			return err
 		}
 	}
-	grant, err := o.reserveVaultSeqRange(vaultID, lease.epoch, defaultSeqLeaseBatch)
+	grant, err := o.reserveVaultSeqRange(vaultID, lease.epoch, defaultSeqLeaseBatch, minGrantStart)
 	if err != nil {
 		return err
 	}
@@ -106,17 +140,14 @@ func (o *Orchestrator) currentAllocatorEpoch(vaultID glid.GLID) (uint64, error) 
 	return sub.SeqAllocatorState().Epoch, nil
 }
 
-func (o *Orchestrator) reserveVaultSeqRange(vaultID glid.GLID, epoch, count uint64) (vaultctlfsm.SeqLeaseGrant, error) {
-	holder := o.localNodeID
-	if holder == "" {
-		holder = "local"
-	}
+func (o *Orchestrator) reserveVaultSeqRange(vaultID glid.GLID, epoch, count, minGrantStart uint64) (vaultctlfsm.SeqLeaseGrant, error) {
+	holder := o.seqHolderID()
 	wire, err := vaultraft.MarshalVaultReserveSeqRange(vaultID, holder, epoch, count)
 	if err != nil {
 		return vaultctlfsm.SeqLeaseGrant{}, err
 	}
 	if o.groupMgr != nil {
-		return o.reserveVaultSeqRangeRaft(vaultID, wire, holder, epoch)
+		return o.reserveVaultSeqRangeRaft(vaultID, wire, holder, epoch, minGrantStart)
 	}
 	if fsm := o.testSeqFSM[vaultID]; fsm != nil {
 		return o.reserveVaultSeqRangeTestFSM(fsm, wire)
@@ -124,17 +155,24 @@ func (o *Orchestrator) reserveVaultSeqRange(vaultID glid.GLID, epoch, count uint
 	return vaultctlfsm.SeqLeaseGrant{}, ErrSeqAssignUnavailable
 }
 
-func (o *Orchestrator) reserveVaultSeqRangeRaft(vaultID glid.GLID, wire []byte, holder string, epoch uint64) (vaultctlfsm.SeqLeaseGrant, error) {
+func (o *Orchestrator) reserveVaultSeqRangeRaft(vaultID glid.GLID, wire []byte, holder string, epoch, minGrantStart uint64) (vaultctlfsm.SeqLeaseGrant, error) {
 	if err := o.ApplyVaultControlPlane(vaultID, wire); err != nil {
 		return vaultctlfsm.SeqLeaseGrant{}, err
 	}
-	if grant, ok := o.lookupSeqLeaseGrant(vaultID, holder, epoch); ok {
-		return grant, nil
-	}
+	return o.waitSeqLeaseGrant(vaultID, holder, epoch, minGrantStart)
+}
+
+// waitSeqLeaseGrant polls the local vault-ctl FSM until the holder's active
+// swath is visible. After a forwarded apply (follower → leader), the local
+// FSM can briefly still show the pre-burn swath; accepting that stale grant
+// would re-assign already-committed vault_seq values and trip seq conflicts.
+func (o *Orchestrator) waitSeqLeaseGrant(vaultID glid.GLID, holder string, epoch, minGrantStart uint64) (vaultctlfsm.SeqLeaseGrant, error) {
 	deadline := time.Now().Add(cluster.ReplicationTimeout)
 	for time.Now().Before(deadline) {
 		if grant, ok := o.lookupSeqLeaseGrant(vaultID, holder, epoch); ok {
-			return grant, nil
+			if minGrantStart == 0 || grant.Start > minGrantStart {
+				return grant, nil
+			}
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -171,10 +209,7 @@ func (o *Orchestrator) lookupSeqLeaseGrant(vaultID glid.GLID, holder string, epo
 }
 
 func (o *Orchestrator) burnVaultSeqLeaseTail(vaultID glid.GLID, epoch, consumedEnd uint64) error {
-	holder := o.localNodeID
-	if holder == "" {
-		holder = "local"
-	}
+	holder := o.seqHolderID()
 	wire, err := vaultraft.MarshalVaultBurnSeqLeaseTail(vaultID, holder, epoch, consumedEnd)
 	if err != nil {
 		return err

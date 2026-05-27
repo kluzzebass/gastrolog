@@ -146,7 +146,7 @@ func withSequencedWritePath(rf uint32) orchRelOption {
 const (
 	orchHarnessReadyWait  = 8 * time.Second
 	orchHarnessConvWait   = 60 * time.Second
-	orchHarnessLeaderWait = 5 * time.Second
+	orchHarnessLeaderWait = 15 * time.Second
 )
 
 // newOrchRelHarness boots n nodes with a shared config store, at least one
@@ -246,6 +246,11 @@ func newOrchRelHarness(t *testing.T, n int, opts ...orchRelOption) *orchRelHarne
 
 	// Phase 5: wait for vault-ctl Raft to bootstrap on every node.
 	h.waitForAllReady()
+	if h.sequencedRF > 0 {
+		for _, v := range h.vaults {
+			h.waitForVaultCtlLeaderForVault(v)
+		}
+	}
 	return h
 }
 
@@ -871,8 +876,16 @@ func (f *orchRelRecordForwarder) RedirectNode(string, string) {}
 
 func (h *orchRelHarness) wireInProcessVaultCtlApply() {
 	h.t.Helper()
+	vaultByID := make(map[glid.GLID]vaultSpec, len(h.vaults))
+	for _, v := range h.vaults {
+		vaultByID[v.id] = v
+	}
 	applyOnLeader := func(vaultID glid.GLID, data []byte) error {
-		leader := h.waitForVaultCtlLeader()
+		v, ok := vaultByID[vaultID]
+		if !ok {
+			v = h.vaults[0]
+		}
+		leader := h.waitForVaultCtlLeaderForVault(v)
 		g := leader.groupMgr.GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
 		if g == nil {
 			return fmt.Errorf("vault-ctl group not running on leader")
