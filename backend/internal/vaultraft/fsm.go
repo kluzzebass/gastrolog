@@ -13,10 +13,12 @@ import (
 	"slices"
 	"sync"
 
+	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 
 	hraft "github.com/hashicorp/raft"
+	"google.golang.org/protobuf/proto"
 )
 
 var vaultSnapMagic = [8]byte{'G', 'L', 'V', 'C', 'T', 'L', 'S', '1'}
@@ -34,8 +36,8 @@ const vaultSnapVersion uint32 = 1
 // never reach FSM.Apply. See buildVaultRaftCallbacks in
 // orchestrator/reconfig_vaults.go for the readiness wiring.
 type FSM struct {
-	mu sync.Mutex
-	vaults     map[glid.GLID]*vaultctlfsm.FSM
+	mu     sync.Mutex
+	vaults map[glid.GLID]*vaultctlfsm.FSM
 
 	// onAfterRestore fires (outside mu) once Restore() has swapped
 	// the vault-sub-FSM map. The orchestrator uses this to walk each
@@ -50,7 +52,7 @@ type FSM struct {
 // NewFSM returns a new vault control-plane FSM instance.
 func NewFSM() *FSM {
 	return &FSM{
-		vaults:    make(map[glid.GLID]*vaultctlfsm.FSM),
+		vaults: make(map[glid.GLID]*vaultctlfsm.FSM),
 	}
 }
 
@@ -77,23 +79,28 @@ func (f *FSM) Vaults() map[glid.GLID]*vaultctlfsm.FSM {
 }
 
 // Apply executes vault control-plane commands. Empty payloads are ignored.
-// The first byte selects the opcode; see cmd.go.
+// The log data is a marshaled gastrologv1.VaultRaftCommand; see cmd.go.
 func (f *FSM) Apply(l *hraft.Log) any {
 	if l == nil || len(l.Data) == 0 {
 		return nil
 	}
-	switch l.Data[0] {
-	case OpNoop:
+	var cmd gastrologv1.VaultRaftCommand
+	if err := proto.Unmarshal(l.Data, &cmd); err != nil {
+		return fmt.Errorf("vaultraft: decode command: %w", err)
+	}
+	switch c := cmd.GetCommand().(type) {
+	case *gastrologv1.VaultRaftCommand_Noop:
 		return nil
-	case OpVaultChunkFSM:
-		if len(l.Data) < 1+glid.Size {
-			return fmt.Errorf("vaultraft: OpVaultChunkFSM payload too short (%d bytes)", len(l.Data))
+	case *gastrologv1.VaultRaftCommand_VaultScoped:
+		vsc := c.VaultScoped
+		if len(vsc.GetVaultId()) < glid.Size {
+			return fmt.Errorf("vaultraft: vault-scoped command missing vault id (%d bytes)", len(vsc.GetVaultId()))
 		}
 		var vaultID glid.GLID
-		copy(vaultID[:], l.Data[1:1+glid.Size])
-		sub := l.Data[1+glid.Size:]
-		if len(sub) == 0 {
-			return errors.New("vaultraft: OpVaultChunkFSM missing instance command body")
+		copy(vaultID[:], vsc.GetVaultId())
+		inner := vsc.GetCommand()
+		if inner == nil || inner.GetCommand() == nil {
+			return errors.New("vaultraft: vault-scoped command missing instance command body")
 		}
 		f.mu.Lock()
 		t := f.vaults[vaultID]
@@ -103,10 +110,9 @@ func (f *FSM) Apply(l *hraft.Log) any {
 		}
 		subFSM := t
 		f.mu.Unlock()
-		inner := &hraft.Log{Index: l.Index, Term: l.Term, Type: l.Type, Data: sub}
-		return subFSM.Apply(inner)
+		return subFSM.ApplyCommand(inner)
 	default:
-		return fmt.Errorf("vaultraft: unknown opcode %d", l.Data[0])
+		return fmt.Errorf("vaultraft: unknown command %T", cmd.GetCommand())
 	}
 }
 

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"time"
+
+	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 )
 
 // CmdPublishFence durably records one fence cut (F_n) on vault-ctl Raft.
@@ -26,8 +28,8 @@ type FenceSnapshot struct {
 }
 
 var (
-	ErrFenceRegression  = errors.New("fence: upper bound must exceed previous fence")
-	ErrFenceInvalidSeq  = errors.New("fence: upper bound seq must be non-zero")
+	ErrFenceRegression   = errors.New("fence: upper bound must exceed previous fence")
+	ErrFenceInvalidSeq   = errors.New("fence: upper bound seq must be non-zero")
 	ErrFenceEmptyPayload = errors.New("fence: publish payload too short")
 )
 
@@ -60,12 +62,9 @@ func FenceContainsSeq(prevBound, upperBound, seq uint64) bool {
 	return seq > prevBound && seq <= upperBound
 }
 
-func (f *FSM) applyPublishFence(payload []byte) (*FenceRecord, error) {
-	if len(payload) < 16 {
-		return nil, ErrFenceEmptyPayload
-	}
-	upper := binary.BigEndian.Uint64(payload[0:8])
-	createdNanos := int64(binary.BigEndian.Uint64(payload[8:16])) //nolint:gosec // G115: nanosecond timestamp fits in int64
+func (f *FSM) applyPublishFence(c *gastrologv1.PublishFenceCommand) (*FenceRecord, error) {
+	upper := c.GetUpperBoundSeq()
+	createdNanos := c.GetCreatedAtNanos()
 	if upper == 0 {
 		return nil, ErrFenceInvalidSeq
 	}
@@ -86,13 +85,17 @@ func (f *FSM) applyPublishFence(payload []byte) (*FenceRecord, error) {
 	return &rec, nil
 }
 
+// NewPublishFence builds a CmdPublishFence command message.
+func NewPublishFence(upperBoundSeq uint64, createdAt time.Time) *gastrologv1.VaultCtlCommand {
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_PublishFence{PublishFence: &gastrologv1.PublishFenceCommand{
+		UpperBoundSeq:  upperBoundSeq,
+		CreatedAtNanos: createdAt.UTC().UnixNano(),
+	}}}
+}
+
 // MarshalPublishFence builds CmdPublishFence wire bytes.
 func MarshalPublishFence(upperBoundSeq uint64, createdAt time.Time) []byte {
-	var buf [17]byte
-	buf[0] = byte(CmdPublishFence)
-	binary.BigEndian.PutUint64(buf[1:9], upperBoundSeq)
-	binary.BigEndian.PutUint64(buf[9:17], uint64(createdAt.UTC().UnixNano()))
-	return buf[:]
+	return mustMarshalCommand(NewPublishFence(upperBoundSeq, createdAt))
 }
 
 const sectionFences sectionKind = 5

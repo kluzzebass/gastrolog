@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 )
 
 // SeqSentinel is reserved; destination-vault acceptance sequences start at 1.
@@ -24,9 +26,9 @@ const maxSeqHolderIDLen = 256
 
 // Seq allocator command opcodes (vaultctlfsm wire format).
 const (
-	CmdReserveSeqRange        Command = 14
-	CmdBurnSeqLeaseTail       Command = 15
-	CmdBumpSeqAllocatorEpoch  Command = 16
+	CmdReserveSeqRange       Command = 14
+	CmdBurnSeqLeaseTail      Command = 15
+	CmdBumpSeqAllocatorEpoch Command = 16
 )
 
 // SeqLeaseGrant is returned from CmdReserveSeqRange on successful apply.
@@ -111,11 +113,13 @@ func (f *FSM) seqAllocatorSnapshotLocked() SeqAllocatorSnapshot {
 	}
 }
 
-func (f *FSM) applyReserveSeqRange(payload []byte) (any, error) {
-	holderID, epoch, count, err := decodeSeqHolderEpochCount(payload)
-	if err != nil {
+func (f *FSM) applyReserveSeqRange(c *gastrologv1.ReserveSeqRangeCommand) (any, error) {
+	holderID := c.GetHolderId()
+	if err := validateSeqHolder(holderID); err != nil {
 		return nil, err
 	}
+	epoch := c.GetEpoch()
+	count := c.GetCount()
 	if count == 0 {
 		return nil, ErrSeqAllocatorInvalidCount
 	}
@@ -152,11 +156,13 @@ func (f *FSM) applyReserveSeqRange(payload []byte) (any, error) {
 	return SeqLeaseGrant{Start: start, End: end, Epoch: epoch}, nil
 }
 
-func (f *FSM) applyBurnSeqLeaseTail(payload []byte) error {
-	holderID, epoch, consumedEnd, err := decodeSeqHolderEpochCount(payload)
-	if err != nil {
+func (f *FSM) applyBurnSeqLeaseTail(c *gastrologv1.BurnSeqLeaseTailCommand) error {
+	holderID := c.GetHolderId()
+	if err := validateSeqHolder(holderID); err != nil {
 		return err
 	}
+	epoch := c.GetEpoch()
+	consumedEnd := c.GetConsumedEnd()
 
 	f.ensureSeqAllocatorDefaultsLocked()
 	lease := f.seqActiveSwaths[holderID]
@@ -178,7 +184,7 @@ func (f *FSM) applyBurnSeqLeaseTail(payload []byte) error {
 	return nil
 }
 
-func (f *FSM) applyBumpSeqAllocatorEpoch(_ []byte) (uint64, error) {
+func (f *FSM) applyBumpSeqAllocatorEpoch(_ *gastrologv1.BumpSeqAllocatorEpochCommand) (uint64, error) {
 	f.ensureSeqAllocatorDefaultsLocked()
 	if f.seqActiveSwaths == nil {
 		f.seqActiveSwaths = make(map[string]*SeqActiveLease)
@@ -224,61 +230,65 @@ func addSeqExclusive(v, delta uint64) (uint64, error) {
 	return next, nil
 }
 
-func decodeSeqHolderEpochCount(payload []byte) (holderID string, epoch, third uint64, err error) {
-	if len(payload) < 2+8+8 {
-		return "", 0, 0, fmt.Errorf("seq allocator: payload too short (%d bytes)", len(payload))
+// validateSeqHolder enforces the holder-ID bounds (1..maxSeqHolderIDLen)
+// the hand-rolled codec used to enforce via length framing.
+func validateSeqHolder(holderID string) error {
+	if len(holderID) == 0 || len(holderID) > maxSeqHolderIDLen {
+		return ErrSeqAllocatorInvalidHolder
 	}
-	holderLen := int(binary.BigEndian.Uint16(payload[0:2]))
-	if holderLen < 0 || holderLen > maxSeqHolderIDLen || len(payload) < 2+holderLen+8+8 {
-		return "", 0, 0, ErrSeqAllocatorInvalidHolder
-	}
-	holderID = string(payload[2 : 2+holderLen])
-	epoch = binary.BigEndian.Uint64(payload[2+holderLen : 2+holderLen+8])
-	third = binary.BigEndian.Uint64(payload[2+holderLen+8 : 2+holderLen+16])
-	return holderID, epoch, third, nil
+	return nil
 }
 
-func encodeSeqHolderEpochCount(holderID string, epoch, third uint64) ([]byte, error) {
-	if len(holderID) == 0 || len(holderID) > maxSeqHolderIDLen {
-		return nil, ErrSeqAllocatorInvalidHolder
+// NewReserveSeqRange builds a CmdReserveSeqRange command message.
+func NewReserveSeqRange(holderID string, epoch, count uint64) (*gastrologv1.VaultCtlCommand, error) {
+	if err := validateSeqHolder(holderID); err != nil {
+		return nil, err
 	}
-	out := make([]byte, 0, 1+2+len(holderID)+16)
-	out = append(out, byte(CmdReserveSeqRange)) // placeholder overwritten by callers
-	var lenBuf [2]byte
-	binary.BigEndian.PutUint16(lenBuf[:], uint16(len(holderID))) //nolint:gosec // G115: bounded by maxSeqHolderIDLen
-	out = append(out, lenBuf[:]...)
-	out = append(out, holderID...)
-	var numBuf [8]byte
-	binary.BigEndian.PutUint64(numBuf[:], epoch)
-	out = append(out, numBuf[:]...)
-	binary.BigEndian.PutUint64(numBuf[:], third)
-	out = append(out, numBuf[:]...)
-	return out, nil
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_ReserveSeqRange{ReserveSeqRange: &gastrologv1.ReserveSeqRangeCommand{
+		HolderId: holderID,
+		Epoch:    epoch,
+		Count:    count,
+	}}}, nil
 }
 
 // MarshalReserveSeqRange builds CmdReserveSeqRange wire bytes.
 func MarshalReserveSeqRange(holderID string, epoch, count uint64) ([]byte, error) {
-	wire, err := encodeSeqHolderEpochCount(holderID, epoch, count)
+	cmd, err := NewReserveSeqRange(holderID, epoch, count)
 	if err != nil {
 		return nil, err
 	}
-	wire[0] = byte(CmdReserveSeqRange)
-	return wire, nil
+	return mustMarshalCommand(cmd), nil
+}
+
+// NewBurnSeqLeaseTail builds a CmdBurnSeqLeaseTail command message.
+func NewBurnSeqLeaseTail(holderID string, epoch, consumedEnd uint64) (*gastrologv1.VaultCtlCommand, error) {
+	if err := validateSeqHolder(holderID); err != nil {
+		return nil, err
+	}
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_BurnSeqLeaseTail{BurnSeqLeaseTail: &gastrologv1.BurnSeqLeaseTailCommand{
+		HolderId:    holderID,
+		Epoch:       epoch,
+		ConsumedEnd: consumedEnd,
+	}}}, nil
 }
 
 // MarshalBurnSeqLeaseTail builds CmdBurnSeqLeaseTail wire bytes.
 func MarshalBurnSeqLeaseTail(holderID string, epoch, consumedEnd uint64) ([]byte, error) {
-	wire, err := encodeSeqHolderEpochCount(holderID, epoch, consumedEnd)
+	cmd, err := NewBurnSeqLeaseTail(holderID, epoch, consumedEnd)
 	if err != nil {
 		return nil, err
 	}
-	wire[0] = byte(CmdBurnSeqLeaseTail)
-	return wire, nil
+	return mustMarshalCommand(cmd), nil
+}
+
+// NewBumpSeqAllocatorEpoch builds a CmdBumpSeqAllocatorEpoch command message.
+func NewBumpSeqAllocatorEpoch() *gastrologv1.VaultCtlCommand {
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_BumpSeqAllocatorEpoch{BumpSeqAllocatorEpoch: &gastrologv1.BumpSeqAllocatorEpochCommand{}}}
 }
 
 // MarshalBumpSeqAllocatorEpoch builds CmdBumpSeqAllocatorEpoch wire bytes.
 func MarshalBumpSeqAllocatorEpoch() []byte {
-	return []byte{byte(CmdBumpSeqAllocatorEpoch)}
+	return mustMarshalCommand(NewBumpSeqAllocatorEpoch())
 }
 
 const sectionSeqAllocator sectionKind = 4
