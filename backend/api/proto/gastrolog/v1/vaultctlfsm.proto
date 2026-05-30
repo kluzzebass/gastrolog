@@ -1,0 +1,267 @@
+syntax = "proto3";
+
+package gastrolog.v1;
+
+import "gastrolog/v1/vault.proto";
+
+option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
+
+// Wire types for the vault-control-plane Raft FSM (backend/internal/vaultraft
+// and backend/internal/vaultraft/vaultctlfsm). These replace the hand-rolled
+// binary command + snapshot encodings. See gastrolog-5lrg7.
+//
+// Encoding notes that the Go layer relies on:
+//   - 16-byte GLIDs (chunk IDs, vault IDs, cloud service IDs) are `bytes`.
+//   - The 32-byte GLCB whole-blob digest is `bytes`.
+//   - Timestamps are Unix nanoseconds as int64 (time.Time.UnixNano()), which
+//     round-trips the zero time exactly; google.protobuf.Timestamp is
+//     deliberately NOT used because the FSM persists raw nanos including the
+//     sentinel zero-time value.
+
+// ---------- Outer envelope (replaces vaultraft/cmd.go opcode byte) ----------
+
+// VaultRaftCommand is the top-level Raft log payload for the vault-ctl group.
+// Replaces the leading opcode byte (OpNoop / OpVaultChunkFSM).
+message VaultRaftCommand {
+  oneof command {
+    NoopCommand noop = 1;
+    VaultScopedCommand vault_scoped = 2;
+  }
+}
+
+// NoopCommand is a replicated no-op for tests and liveness checks (OpNoop).
+message NoopCommand {}
+
+// VaultScopedCommand wraps a vaultctlfsm command scoped to one vault-instance
+// GLID (OpVaultChunkFSM).
+message VaultScopedCommand {
+  bytes vault_id = 1;
+  VaultCtlCommand command = 2;
+}
+
+// ---------- Inner command (replaces vaultctlfsm Command opcodes 1-17) -------
+
+// VaultCtlCommand is one chunk-metadata mutation applied to a single vault's
+// manifest FSM. Field numbers match the legacy Command opcodes 1-17.
+message VaultCtlCommand {
+  oneof command {
+    CreateChunkCommand create_chunk = 1;
+    SealChunkCommand seal_chunk = 2;
+    CompressChunkCommand compress_chunk = 3;
+    UploadChunkCommand upload_chunk = 4;
+    // delete_chunk (5) is retained for WAL replay only; no current producer
+    // emits it (see CmdDeleteChunk in fsm.go).
+    DeleteChunkCommand delete_chunk = 5;
+    RetentionPendingCommand retention_pending = 6;
+    RequestDeleteCommand request_delete = 7;
+    AckDeleteCommand ack_delete = 8;
+    FinalizeDeleteCommand finalize_delete = 9;
+    PruneNodeCommand prune_node = 10;
+    AttachOffsetsCommand attach_offsets = 11;
+    BeginSealCommand begin_seal = 12;
+    RepatriateChunkCommand repatriate_chunk = 13;
+    ReserveSeqRangeCommand reserve_seq_range = 14;
+    BurnSeqLeaseTailCommand burn_seq_lease_tail = 15;
+    BumpSeqAllocatorEpochCommand bump_seq_allocator_epoch = 16;
+    PublishFenceCommand publish_fence = 17;
+  }
+}
+
+message CreateChunkCommand {
+  bytes id = 1;
+  int64 write_start_nanos = 2;
+  int64 ingest_start_nanos = 3;
+  int64 source_start_nanos = 4;
+}
+
+message SealChunkCommand {
+  bytes id = 1;
+  int64 write_end_nanos = 2;
+  int64 record_count = 3;
+  int64 bytes = 4;
+  int64 ingest_end_nanos = 5;
+  int64 source_end_nanos = 6;
+  int64 ingest_start_nanos = 7;
+  bool ingest_ts_monotonic = 8;
+}
+
+message CompressChunkCommand {
+  bytes id = 1;
+  int64 disk_bytes = 2;
+}
+
+message UploadChunkCommand {
+  bytes id = 1;
+  int64 disk_bytes = 2;
+  int64 ingest_idx_offset = 3;
+  int64 ingest_idx_size = 4;
+  int64 source_idx_offset = 5;
+  int64 source_idx_size = 6;
+  // Integrity fields (gastrolog-grnc3); optional, present on the extended form.
+  bytes hash = 7;
+  bytes cloud_service_id = 8;
+  uint32 key_scheme = 9;
+}
+
+message DeleteChunkCommand {
+  bytes id = 1;
+}
+
+message RetentionPendingCommand {
+  bytes id = 1;
+}
+
+message RequestDeleteCommand {
+  bytes id = 1;
+  int64 proposed_at_nanos = 2;
+  string reason = 3;
+  repeated string expected_from = 4;
+}
+
+message AckDeleteCommand {
+  bytes id = 1;
+  string node_id = 2;
+}
+
+message FinalizeDeleteCommand {
+  bytes id = 1;
+}
+
+message PruneNodeCommand {
+  string node_id = 1;
+}
+
+message AttachOffsetsCommand {
+  bytes id = 1;
+  int64 ingest_idx_offset = 2;
+  int64 ingest_idx_size = 3;
+  int64 source_idx_offset = 4;
+  int64 source_idx_size = 5;
+}
+
+message BeginSealCommand {
+  bytes id = 1;
+}
+
+// RepatriateChunkCommand carries a full manifest entry to re-introduce a
+// sealed chunk's metadata. Apply forces state to SEALED. See gastrolog-32bf2.
+message RepatriateChunkCommand {
+  ManifestEntry entry = 1;
+}
+
+message ReserveSeqRangeCommand {
+  string holder_id = 1;
+  uint64 epoch = 2;
+  uint64 count = 3;
+}
+
+message BurnSeqLeaseTailCommand {
+  string holder_id = 1;
+  uint64 epoch = 2;
+  uint64 consumed_end = 3;
+}
+
+message BumpSeqAllocatorEpochCommand {}
+
+message PublishFenceCommand {
+  uint64 upper_bound_seq = 1;
+  int64 created_at_nanos = 2;
+}
+
+// ---------- Snapshot (replaces the 5 hand-rolled sections) ------------------
+
+// ManifestEntry is the full metadata for one chunk in a vault's manifest. The
+// proto carries every field of the Go ManifestEntry, including Hash /
+// CloudServiceID / KeyScheme which the legacy 123-byte snapshot codec dropped.
+message ManifestEntry {
+  bytes id = 1;
+  int64 write_start_nanos = 2;
+  int64 write_end_nanos = 3;
+  int64 record_count = 4;
+  int64 bytes = 5;
+  ChunkState state = 6;
+  int64 disk_bytes = 7;
+  int64 ingest_start_nanos = 8;
+  int64 ingest_end_nanos = 9;
+  int64 source_start_nanos = 10;
+  int64 source_end_nanos = 11;
+  bool ingest_ts_monotonic = 12;
+  bool cloud_backed = 13;
+  bool archived = 14;
+  bool retention_pending = 15;
+  int64 ingest_idx_offset = 16;
+  int64 ingest_idx_size = 17;
+  int64 source_idx_offset = 18;
+  int64 source_idx_size = 19;
+  bytes hash = 20;
+  bytes cloud_service_id = 21;
+  uint32 key_scheme = 22;
+}
+
+// Tombstone records a deleted chunk ID and the apply time of the delete.
+message Tombstone {
+  bytes chunk_id = 1;
+  int64 deleted_at_nanos = 2;
+}
+
+// PendingDelete is one in-flight receipt-based deletion (gastrolog-51gme).
+message PendingDelete {
+  bytes chunk_id = 1;
+  string reason = 2;
+  int64 proposed_at_nanos = 3;
+  repeated string expected_from = 4;
+}
+
+// SeqActiveLease is one outstanding sequence swath granted to a holder node.
+message SeqActiveLease {
+  string holder_id = 1;
+  uint64 epoch = 2;
+  uint64 range_start = 3;
+  uint64 range_end = 4;
+}
+
+// SeqBurnedTail records an unassigned gap from an abandoned lease tail.
+message SeqBurnedTail {
+  uint64 start = 1;
+  uint64 end = 2;
+  uint64 epoch = 3;
+}
+
+// SeqAllocatorSnapshot is the destination-vault sequence allocator control
+// state (gastrolog-16w8x).
+message SeqAllocatorSnapshot {
+  uint64 next_seq = 1;
+  uint64 epoch = 2;
+  repeated SeqActiveLease active_swaths = 3;
+  repeated SeqBurnedTail burned_tails = 4;
+}
+
+// FenceRecord is one immutable fence boundary for sequenced vault inclusion.
+message FenceRecord {
+  uint64 id = 1;
+  uint64 upper_bound_seq = 2;
+  uint64 prev_bound_seq = 3;
+  int64 created_at_nanos = 4;
+}
+
+// VaultCtlSnapshot is the full point-in-time state of one vault's manifest FSM
+// (replaces the 5 hand-rolled snapshot sections).
+message VaultCtlSnapshot {
+  repeated ManifestEntry entries = 1;
+  repeated Tombstone tombstones = 2;
+  repeated PendingDelete pending_deletes = 3;
+  SeqAllocatorSnapshot seq_allocator = 4;
+  repeated FenceRecord fences = 5;
+}
+
+// VaultGroupSnapshot is the snapshot of the whole vault-ctl Raft group: one
+// VaultCtlSnapshot per vault instance (replaces the GLVCTLS1 magic + per-vault
+// blob framing in vaultraft/fsm.go).
+message VaultGroupSnapshot {
+  repeated VaultGroupSnapshotEntry vaults = 1;
+}
+
+message VaultGroupSnapshotEntry {
+  bytes vault_id = 1;
+  VaultCtlSnapshot snapshot = 2;
+}
