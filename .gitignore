@@ -8,6 +8,9 @@
 *.so
 *.dylib
 
+# Repo-root build of the gastrolog binary
+/gastrolog
+
 # Test binary, built with `go test -c`
 *.test
 
