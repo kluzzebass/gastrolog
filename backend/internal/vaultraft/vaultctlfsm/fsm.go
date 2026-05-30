@@ -20,9 +20,11 @@ import (
 
 // Command identifies the type of chunk metadata mutation. Since the
 // gastrolog-5lrg7 protobuf migration, commands are encoded as
-// gastrologv1.VaultCtlCommand (a oneof) rather than an opcode byte; these
-// constants are retained as the canonical opcode↔proto-field mapping and are
-// still used by the WAL inspector tooling.
+// gastrologv1.VaultCtlCommand (a oneof) rather than an opcode byte. These
+// constants are no longer part of any wire encoding; they are retained as the
+// canonical record of the opcode→proto-field tag mapping (the oneof field
+// numbers in vaultctlfsm.proto deliberately match these values) and as the
+// anchor for the domain documentation below.
 type Command byte
 
 const (
