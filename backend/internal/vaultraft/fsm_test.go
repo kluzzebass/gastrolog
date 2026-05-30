@@ -19,6 +19,14 @@ func testChunkID(b byte) chunk.ChunkID {
 	return id
 }
 
+// bufSink adapts an io.Writer to hraft.SnapshotSink for snapshot round-trip
+// tests (the production snapshot path writes straight to the Raft sink).
+type bufSink struct{ io.Writer }
+
+func (s *bufSink) Close() error  { return nil }
+func (s *bufSink) ID() string    { return "test" }
+func (s *bufSink) Cancel() error { return nil }
+
 func TestFSM_ApplyNoopAndUnknown(t *testing.T) {
 	t.Parallel()
 	f := NewFSM()

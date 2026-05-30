@@ -1,0 +1,189 @@
+package vaultctlfsm
+
+import (
+	"bytes"
+	"io"
+	"testing"
+	"time"
+
+	hraft "github.com/hashicorp/raft"
+	"google.golang.org/protobuf/proto"
+)
+
+// buildRichFSM populates an FSM with state in all five snapshot sections plus
+// tombstones, including a chunk carrying the Hash / CloudServiceID / KeyScheme
+// fields that the legacy 123-byte entry codec dropped (gastrolog-5lrg7).
+func buildRichFSM(t *testing.T) *FSM {
+	t.Helper()
+	f := New()
+	now := time.Unix(0, 1_700_000_000_000_000_000)
+
+	// entries: an active chunk and a fully uploaded chunk with extra fields.
+	active := testChunkID(10)
+	applyCmd(t, f, MarshalCreateChunk(active, now, now, now))
+
+	uploaded := testChunkID(11)
+	var hash [32]byte
+	hash[0], hash[31] = 0x11, 0xFF
+	cloud := glidFromByte(0x42)
+	applyCmd(t, f, MarshalCreateChunk(uploaded, now, now, now))
+	applyCmd(t, f, MarshalSealChunk(uploaded, now.Add(time.Second), 7, 700, now, now, now, true))
+	applyCmd(t, f, MarshalCompressChunk(uploaded, 350))
+	applyCmd(t, f, MarshalUploadChunk(uploaded, 300, 1, 2, 3, 4, hash, cloud, 2))
+
+	// tombstones: deleted chunk + a ghost tombstone for a never-seen chunk.
+	dead := testChunkID(12)
+	applyCmd(t, f, MarshalCreateChunk(dead, now, now, now))
+	applyCmd(t, f, MarshalDeleteChunk(dead))
+	applyCmd(t, f, MarshalDeleteChunk(testChunkID(13)))
+
+	// pending deletes: an in-flight delete with several expected-from nodes.
+	applyCmd(t, f, MarshalRequestDelete(testChunkID(14), now, "retention-ttl", []string{"n3", "n1", "n2"}))
+
+	// seq allocator: two active leases + a burned tail.
+	mustMarshalSeq := func(b []byte, err error) []byte {
+		t.Helper()
+		if err != nil {
+			t.Fatalf("marshal seq command: %v", err)
+		}
+		return b
+	}
+	applyCmd(t, f, mustMarshalSeq(MarshalReserveSeqRange("holder-b", InitialSeqEpoch, 50)))
+	applyCmd(t, f, mustMarshalSeq(MarshalReserveSeqRange("holder-a", InitialSeqEpoch, 30)))
+	applyCmd(t, f, mustMarshalSeq(MarshalBurnSeqLeaseTail("holder-b", InitialSeqEpoch, InitialSeqNext+10)))
+
+	// fences: two published fence cuts.
+	applyCmd(t, f, MarshalPublishFence(100, now))
+	applyCmd(t, f, MarshalPublishFence(250, now.Add(time.Minute)))
+
+	return f
+}
+
+// TestSnapshotProtoRoundTripAllSections verifies every snapshot section
+// round-trips through SnapshotProto/RestoreProto with identical proto state,
+// and that the manifest extra fields survive (gastrolog-5lrg7 Phase C).
+func TestSnapshotProtoRoundTripAllSections(t *testing.T) {
+	t.Parallel()
+	src := buildRichFSM(t)
+
+	dst := New()
+	dst.RestoreProto(src.SnapshotProto())
+
+	if !proto.Equal(src.SnapshotProto(), dst.SnapshotProto()) {
+		t.Fatalf("snapshot proto state differs after restore")
+	}
+
+	// Spot-check the extra fields the legacy codec dropped.
+	got := dst.Get(testChunkID(11))
+	if got == nil {
+		t.Fatal("uploaded chunk missing after restore")
+	}
+	if got.Hash[0] != 0x11 || got.Hash[31] != 0xFF {
+		t.Errorf("hash not preserved: %x", got.Hash)
+	}
+	if got.KeyScheme != 2 {
+		t.Errorf("key scheme: got %d want 2", got.KeyScheme)
+	}
+	if got.CloudServiceID != glidFromByte(0x42) {
+		t.Errorf("cloud service id not preserved: %v", got.CloudServiceID)
+	}
+
+	// Pending delete obligations survive the boundary.
+	pd := dst.PendingDelete(testChunkID(14))
+	if pd == nil || len(pd.ExpectedFrom) != 3 {
+		t.Errorf("pending delete not preserved: %+v", pd)
+	}
+
+	// Fence history survives.
+	if dst.LatestFenceUpperBound() != 250 {
+		t.Errorf("latest fence upper bound: got %d want 250", dst.LatestFenceUpperBound())
+	}
+}
+
+// TestSnapshotProtoDeterministic verifies that two snapshots of equal FSM
+// state marshal to byte-identical payloads, despite the map-backed sections
+// (tombstones, pending deletes, active swaths) having nondeterministic Go
+// iteration order. InstallSnapshot does not require this, but determinism
+// keeps snapshot diffing and debugging sane (gastrolog-5lrg7 Phase C).
+func TestSnapshotProtoDeterministic(t *testing.T) {
+	t.Parallel()
+	f := buildRichFSM(t)
+
+	first, err := proto.Marshal(f.SnapshotProto())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 16 {
+		next, err := proto.Marshal(f.SnapshotProto())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(first, next) {
+			t.Fatalf("snapshot %d not byte-stable", i)
+		}
+	}
+}
+
+// TestSnapshotPersistRestoreFullRoundTrip exercises the hraft FSMSnapshot
+// Persist path and the marshaled Restore path end-to-end (gastrolog-5lrg7).
+func TestSnapshotPersistRestoreFullRoundTrip(t *testing.T) {
+	t.Parallel()
+	src := buildRichFSM(t)
+
+	snap, err := src.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := snap.Persist(&bufSink{Writer: &buf}); err != nil {
+		t.Fatalf("Persist: %v", err)
+	}
+
+	dst := New()
+	if err := dst.Restore(io.NopCloser(bytes.NewReader(buf.Bytes()))); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if !proto.Equal(src.SnapshotProto(), dst.SnapshotProto()) {
+		t.Fatalf("state differs after Persist/Restore round trip")
+	}
+}
+
+// TestRestoreRejectsMalformedSnapshot verifies Restore returns an error (not a
+// panic) for undecodable snapshot bytes (gastrolog-5lrg7 unhappy path).
+func TestRestoreRejectsMalformedSnapshot(t *testing.T) {
+	t.Parallel()
+	f := New()
+	// Field 1 declared as varint but truncated — invalid VaultCtlSnapshot.
+	garbage := []byte{0x08}
+	if err := f.Restore(io.NopCloser(bytes.NewReader(garbage))); err == nil {
+		t.Error("expected error restoring malformed snapshot")
+	}
+}
+
+// TestRestoreEmptySnapshotIsZeroState verifies an empty (zero-entry) snapshot
+// restores to a clean, ready FSM (gastrolog-5lrg7 edge case).
+func TestRestoreEmptySnapshotIsZeroState(t *testing.T) {
+	t.Parallel()
+	src := New()
+	dst := New()
+	raw, err := proto.Marshal(src.SnapshotProto())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dst.Restore(io.NopCloser(bytes.NewReader(raw))); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if dst.Count() != 0 {
+		t.Errorf("expected empty FSM, got %d chunks", dst.Count())
+	}
+	// A restored FSM must accept fresh seq reservations at the initial epoch.
+	data, err := MarshalReserveSeqRange("holder", InitialSeqEpoch, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := dst.Apply(&hraft.Log{Data: data}); got != nil {
+		if _, isErr := got.(error); isErr {
+			t.Errorf("reserve after empty restore failed: %v", got)
+		}
+	}
+}

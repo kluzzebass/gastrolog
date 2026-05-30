@@ -2,21 +2,29 @@ package vaultctlfsm
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"maps"
+	"slices"
 	"sync"
 	"time"
 
+	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 
 	hraft "github.com/hashicorp/raft"
+	"google.golang.org/protobuf/proto"
 )
 
-// Command identifies the type of chunk metadata mutation.
+// Command identifies the type of chunk metadata mutation. Since the
+// gastrolog-5lrg7 protobuf migration, commands are encoded as
+// gastrologv1.VaultCtlCommand (a oneof) rather than an opcode byte. These
+// constants are no longer part of any wire encoding; they are retained as the
+// canonical record of the opcode→proto-field tag mapping (the oneof field
+// numbers in vaultctlfsm.proto deliberately match these values) and as the
+// anchor for the domain documentation below.
 type Command byte
 
 const (
@@ -449,8 +457,8 @@ func (f *FSM) Count() int {
 
 // ---------- Raft FSM interface ----------
 
-// Apply handles a Raft log entry. The log data is a command byte followed
-// by the command-specific payload.
+// Apply handles a Raft log entry. The log data is a marshaled
+// gastrologv1.VaultCtlCommand (gastrolog-5lrg7).
 //
 // The OnDelete callback (set via SetOnDelete) is invoked OUTSIDE the FSM
 // mutex so that potentially-slow filesystem operations don't block other
@@ -459,10 +467,18 @@ func (f *FSM) Apply(log *hraft.Log) any {
 	if len(log.Data) == 0 {
 		return errors.New("empty chunk FSM command")
 	}
-	cmd := Command(log.Data[0])
-	payload := log.Data[1:]
+	var cmd gastrologv1.VaultCtlCommand
+	if err := proto.Unmarshal(log.Data, &cmd); err != nil {
+		return fmt.Errorf("vaultctlfsm: decode command: %w", err)
+	}
+	return f.ApplyCommand(&cmd)
+}
 
-	result, fx := f.applyLocked(cmd, payload)
+// ApplyCommand applies an already-decoded VaultCtlCommand. The outer
+// vaultraft FSM calls this directly with the nested command from a
+// VaultScopedCommand, avoiding a redundant re-marshal/unmarshal round-trip.
+func (f *FSM) ApplyCommand(cmd *gastrologv1.VaultCtlCommand) any {
+	result, fx := f.applyLocked(cmd)
 	fx.fire()
 	return result
 }
@@ -545,7 +561,7 @@ func (e applyEffects) fire() {
 
 // applyLocked dispatches to the per-command apply function under the
 // FSM mutex and gathers the post-apply effects.
-func (f *FSM) applyLocked(cmd Command, payload []byte) (any, applyEffects) {
+func (f *FSM) applyLocked(cmd *gastrologv1.VaultCtlCommand) (any, applyEffects) {
 	var (
 		result any
 		fx     applyEffects
@@ -553,34 +569,34 @@ func (f *FSM) applyLocked(cmd Command, payload []byte) (any, applyEffects) {
 
 	f.mu.Lock()
 	f.ready = true
-	switch cmd {
-	case CmdCreateChunk:
-		result = f.applyCreate(payload)
-		fx.createdEntry = f.captureEntry(result, payload)
-	case CmdSealChunk:
-		result = f.applySeal(payload)
-		fx.sealedEntry = f.captureEntry(result, payload)
-	case CmdCompressChunk:
-		result = f.applyCompress(payload)
-	case CmdUploadChunk:
-		result = f.applyUpload(payload)
-		fx.uploadedEntry = f.captureEntry(result, payload)
-	case CmdDeleteChunk:
-		fx.deletedID, result = f.applyDelete(payload)
-	case CmdRetentionPending:
-		result = f.applyRetentionPending(payload)
-		fx.retentionPendingID = captureID(result, payload)
-	case CmdRequestDelete:
+	switch c := cmd.GetCommand().(type) {
+	case *gastrologv1.VaultCtlCommand_CreateChunk:
+		result = f.applyCreate(c.CreateChunk)
+		fx.createdEntry = f.captureEntry(result, chunkIDFromProto(c.CreateChunk.GetId()))
+	case *gastrologv1.VaultCtlCommand_SealChunk:
+		result = f.applySeal(c.SealChunk)
+		fx.sealedEntry = f.captureEntry(result, chunkIDFromProto(c.SealChunk.GetId()))
+	case *gastrologv1.VaultCtlCommand_CompressChunk:
+		result = f.applyCompress(c.CompressChunk)
+	case *gastrologv1.VaultCtlCommand_UploadChunk:
+		result = f.applyUpload(c.UploadChunk)
+		fx.uploadedEntry = f.captureEntry(result, chunkIDFromProto(c.UploadChunk.GetId()))
+	case *gastrologv1.VaultCtlCommand_DeleteChunk:
+		fx.deletedID, result = f.applyDelete(c.DeleteChunk)
+	case *gastrologv1.VaultCtlCommand_RetentionPending:
+		result = f.applyRetentionPending(c.RetentionPending)
+		fx.retentionPendingID = captureID(result, chunkIDFromProto(c.RetentionPending.GetId()))
+	case *gastrologv1.VaultCtlCommand_RequestDelete:
 		var entry *PendingDelete
-		entry, result = f.applyRequestDelete(payload)
+		entry, result = f.applyRequestDelete(c.RequestDelete)
 		fx.requestedDelete = entry
-	case CmdAckDelete:
+	case *gastrologv1.VaultCtlCommand_AckDelete:
 		var (
 			id        *chunk.ChunkID
 			nodeID    string
 			finalized bool
 		)
-		id, nodeID, finalized, result = f.applyAckDelete(payload)
+		id, nodeID, finalized, result = f.applyAckDelete(c.AckDelete)
 		fx.ackedDeleteID = id
 		fx.ackedDeleteNodeID = nodeID
 		// gastrolog-15fm8: a draining ack atomically finalizes inside
@@ -590,44 +606,44 @@ func (f *FSM) applyLocked(cmd Command, payload []byte) (any, applyEffects) {
 		if finalized {
 			fx.finalizedDeleteID = id
 		}
-	case CmdFinalizeDelete:
-		fx.finalizedDeleteID, result = f.applyFinalizeDelete(payload)
-	case CmdPruneNode:
+	case *gastrologv1.VaultCtlCommand_FinalizeDelete:
+		fx.finalizedDeleteID, result = f.applyFinalizeDelete(c.FinalizeDelete)
+	case *gastrologv1.VaultCtlCommand_PruneNode:
 		var (
 			node        string
 			finalizable []chunk.ChunkID
 		)
-		node, finalizable, result = f.applyPruneNode(payload)
+		node, finalizable, result = f.applyPruneNode(c.PruneNode)
 		fx.prunedNode = node
 		fx.prunedFinalizable = finalizable
-	case CmdAttachOffsets:
-		result = f.applyAttachOffsets(payload)
-	case CmdBeginSeal:
-		result = f.applyBeginSeal(payload)
-	case CmdRepatriateChunk:
-		result = f.applyRepatriate(payload)
+	case *gastrologv1.VaultCtlCommand_AttachOffsets:
+		result = f.applyAttachOffsets(c.AttachOffsets)
+	case *gastrologv1.VaultCtlCommand_BeginSeal:
+		result = f.applyBeginSeal(c.BeginSeal)
+	case *gastrologv1.VaultCtlCommand_RepatriateChunk:
+		result = f.applyRepatriate(c.RepatriateChunk)
 		// Surface to onCreate subscribers so post-create wiring
 		// (retention, indexes, etc.) reacts identically to a normal
 		// CmdCreateChunk path.
-		fx.createdEntry = f.captureEntry(result, payload)
-	case CmdReserveSeqRange:
-		grant, reserveErr := f.applyReserveSeqRange(payload)
+		fx.createdEntry = f.captureEntry(result, chunkIDFromProto(c.RepatriateChunk.GetEntry().GetId()))
+	case *gastrologv1.VaultCtlCommand_ReserveSeqRange:
+		grant, reserveErr := f.applyReserveSeqRange(c.ReserveSeqRange)
 		if reserveErr != nil {
 			result = reserveErr
 		} else {
 			result = grant
 		}
-	case CmdBurnSeqLeaseTail:
-		result = f.applyBurnSeqLeaseTail(payload)
-	case CmdBumpSeqAllocatorEpoch:
-		newEpoch, bumpErr := f.applyBumpSeqAllocatorEpoch(payload)
+	case *gastrologv1.VaultCtlCommand_BurnSeqLeaseTail:
+		result = f.applyBurnSeqLeaseTail(c.BurnSeqLeaseTail)
+	case *gastrologv1.VaultCtlCommand_BumpSeqAllocatorEpoch:
+		newEpoch, bumpErr := f.applyBumpSeqAllocatorEpoch(c.BumpSeqAllocatorEpoch)
 		if bumpErr != nil {
 			result = bumpErr
 		} else {
 			result = newEpoch
 		}
-	case CmdPublishFence:
-		rec, fenceErr := f.applyPublishFence(payload)
+	case *gastrologv1.VaultCtlCommand_PublishFence:
+		rec, fenceErr := f.applyPublishFence(c.PublishFence)
 		if fenceErr != nil {
 			result = fenceErr
 		} else {
@@ -635,7 +651,7 @@ func (f *FSM) applyLocked(cmd Command, payload []byte) (any, applyEffects) {
 			fx.publishedFence = rec
 		}
 	default:
-		result = fmt.Errorf("unknown chunk FSM command: %d", cmd)
+		result = fmt.Errorf("unknown chunk FSM command: %T", cmd.GetCommand())
 	}
 	fx.onCreate = f.onCreate
 	fx.onDelete = f.onDelete
@@ -652,15 +668,19 @@ func (f *FSM) applyLocked(cmd Command, payload []byte) (any, applyEffects) {
 	return result, fx
 }
 
-// captureEntry returns a copy of the chunk entry whose ID is the first
-// 16 bytes of payload, or nil if the apply errored or the entry is
-// absent. Caller MUST hold f.mu.
-func (f *FSM) captureEntry(applyResult any, payload []byte) *ManifestEntry {
-	if applyResult != nil || len(payload) < 16 {
+// chunkIDFromProto converts a 16-byte proto field to a chunk.ChunkID. A
+// missing or short field yields the zero ID (handled downstream as "not
+// found" by the apply* functions).
+func chunkIDFromProto(b []byte) chunk.ChunkID {
+	return chunk.ChunkID(glid.FromBytes(b))
+}
+
+// captureEntry returns a copy of the chunk entry for id, or nil if the
+// apply errored or the entry is absent. Caller MUST hold f.mu.
+func (f *FSM) captureEntry(applyResult any, id chunk.ChunkID) *ManifestEntry {
+	if applyResult != nil {
 		return nil
 	}
-	var id chunk.ChunkID
-	copy(id[:], payload[:16])
 	e := f.chunks[id]
 	if e == nil {
 		return nil
@@ -669,83 +689,123 @@ func (f *FSM) captureEntry(applyResult any, payload []byte) *ManifestEntry {
 	return &cp
 }
 
-// captureID returns the chunk ID at the start of payload, or nil if the
-// apply errored or the payload is too short for an ID. Lock-free.
-func captureID(applyResult any, payload []byte) *chunk.ChunkID {
-	if applyResult != nil || len(payload) < 16 {
+// captureID returns id, or nil if the apply errored. Lock-free.
+func captureID(applyResult any, id chunk.ChunkID) *chunk.ChunkID {
+	if applyResult != nil {
 		return nil
 	}
-	var id chunk.ChunkID
-	copy(id[:], payload[:16])
 	return &id
+}
+
+// SnapshotProto builds the proto representation of all FSM state. Exported
+// so the outer vaultraft FSM can embed it in a VaultGroupSnapshot without a
+// re-marshal round-trip (gastrolog-5lrg7).
+func (f *FSM) SnapshotProto() *gastrologv1.VaultCtlSnapshot {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.snapshotProtoLocked()
+}
+
+// snapshotProtoLocked builds the proto snapshot. Map-backed sections (entries,
+// tombstones, pending deletes) are emitted in chunk-ID order so equal FSM
+// state always yields a byte-identical snapshot. InstallSnapshot does not
+// require canonical bytes, but determinism keeps snapshot diffing, debugging,
+// and round-trip equality checks sane (gastrolog-5lrg7).
+func (f *FSM) snapshotProtoLocked() *gastrologv1.VaultCtlSnapshot {
+	snap := &gastrologv1.VaultCtlSnapshot{
+		Entries:        make([]*gastrologv1.ManifestEntry, 0, len(f.chunks)),
+		Tombstones:     make([]*gastrologv1.Tombstone, 0, len(f.tombstones)),
+		PendingDeletes: make([]*gastrologv1.PendingDelete, 0, len(f.pendingDeletes)),
+	}
+
+	entryIDs := slices.SortedFunc(maps.Keys(f.chunks), compareChunkID)
+	for _, id := range entryIDs {
+		snap.Entries = append(snap.Entries, entryToProto(f.chunks[id]))
+	}
+
+	tombIDs := slices.SortedFunc(maps.Keys(f.tombstones), compareChunkID)
+	for _, id := range tombIDs {
+		idCopy := id
+		snap.Tombstones = append(snap.Tombstones, &gastrologv1.Tombstone{
+			ChunkId:        idCopy[:],
+			DeletedAtNanos: f.tombstones[id].UnixNano(),
+		})
+	}
+
+	pdIDs := slices.SortedFunc(maps.Keys(f.pendingDeletes), compareChunkID)
+	for _, id := range pdIDs {
+		snap.PendingDeletes = append(snap.PendingDeletes, pendingDeleteToProto(f.pendingDeletes[id]))
+	}
+
+	snap.SeqAllocator = seqAllocatorToProto(f.seqAllocatorSnapshotLocked())
+	snap.Fences = fenceSnapshotToProto(f.fenceSnapshotLocked())
+	return snap
+}
+
+// compareChunkID orders chunk IDs by their raw bytes for deterministic
+// snapshot section ordering.
+func compareChunkID(a, b chunk.ChunkID) int {
+	return bytes.Compare(a[:], b[:])
 }
 
 // Snapshot returns a point-in-time snapshot of all chunk metadata.
 func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	entries := make([]ManifestEntry, 0, len(f.chunks))
-	for _, e := range f.chunks {
-		entries = append(entries, *e)
-	}
-	tombstones := make(map[chunk.ChunkID]time.Time, len(f.tombstones))
-	maps.Copy(tombstones, f.tombstones)
-	pendingDeletes := make([]PendingDelete, 0, len(f.pendingDeletes))
-	for _, p := range f.pendingDeletes {
-		pendingDeletes = append(pendingDeletes, p.Copy())
-	}
-	seqSnap := f.seqAllocatorSnapshotLocked()
-	fenceSnap := f.fenceSnapshotLocked()
-	return &fsmSnapshot{
-		entries:        entries,
-		tombstones:     tombstones,
-		pendingDeletes: pendingDeletes,
-		seqAllocator:   seqSnap,
-		fences:         fenceSnap,
-	}, nil
+	return &fsmSnapshot{snap: f.SnapshotProto()}, nil
 }
 
-// Restore replaces FSM state from a snapshot.
+// RestoreProto replaces FSM state from a decoded VaultCtlSnapshot.
+func (f *FSM) RestoreProto(snap *gastrologv1.VaultCtlSnapshot) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.restoreFromProtoLocked(snap)
+}
+
+// Restore replaces FSM state from a snapshot (marshaled VaultCtlSnapshot).
 func (f *FSM) Restore(rc io.ReadCloser) error {
 	defer func() { _ = rc.Close() }()
 
-	snap, err := decodeSnapshot(rc)
+	raw, err := io.ReadAll(rc)
 	if err != nil {
-		return fmt.Errorf("restore chunk FSM: %w", err)
+		return fmt.Errorf("restore chunk FSM: read: %w", err)
 	}
-
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.chunks = make(map[chunk.ChunkID]*ManifestEntry, len(snap.entries))
-	for i := range snap.entries {
-		f.chunks[snap.entries[i].ID] = &snap.entries[i]
+	var snap gastrologv1.VaultCtlSnapshot
+	if err := proto.Unmarshal(raw, &snap); err != nil {
+		return fmt.Errorf("restore chunk FSM: decode: %w", err)
 	}
-	f.tombstones = snap.tombstones
-	if f.tombstones == nil {
-		f.tombstones = make(map[chunk.ChunkID]time.Time)
-	}
-	f.pendingDeletes = snap.pendingDeletes
-	if f.pendingDeletes == nil {
-		f.pendingDeletes = make(map[chunk.ChunkID]*PendingDelete)
-	}
-	applySeqAllocatorSnapshotLocked(f, snap.seqAllocator)
-	applyFenceSnapshotLocked(f, snap.fences)
-	f.ready = true
+	f.RestoreProto(&snap)
 	return nil
+}
+
+// restoreFromProtoLocked repopulates FSM state from a decoded snapshot.
+// Caller MUST hold f.mu.
+func (f *FSM) restoreFromProtoLocked(snap *gastrologv1.VaultCtlSnapshot) {
+	f.chunks = make(map[chunk.ChunkID]*ManifestEntry, len(snap.GetEntries()))
+	for _, pe := range snap.GetEntries() {
+		e := entryFromProto(pe)
+		f.chunks[e.ID] = &e
+	}
+	f.tombstones = make(map[chunk.ChunkID]time.Time, len(snap.GetTombstones()))
+	for _, ts := range snap.GetTombstones() {
+		f.tombstones[chunkIDFromProto(ts.GetChunkId())] = time.Unix(0, ts.GetDeletedAtNanos())
+	}
+	f.pendingDeletes = make(map[chunk.ChunkID]*PendingDelete, len(snap.GetPendingDeletes()))
+	for _, pp := range snap.GetPendingDeletes() {
+		p := pendingDeleteFromProto(pp)
+		f.pendingDeletes[p.ChunkID] = &p
+	}
+	applySeqAllocatorSnapshotLocked(f, seqAllocatorFromProto(snap.GetSeqAllocator()))
+	applyFenceSnapshotLocked(f, fenceSnapshotFromProto(snap.GetFences()))
+	f.ready = true
 }
 
 // ---------- Command application ----------
 
-// CreateChunk: [16 bytes ChunkID][8 bytes WriteStart nanos][8 bytes IngestStart nanos][8 bytes SourceStart nanos]
-func (f *FSM) applyCreate(data []byte) error {
-	if len(data) < 40 {
-		return fmt.Errorf("create chunk: payload too short (%d bytes)", len(data))
-	}
-	var id chunk.ChunkID
-	copy(id[:], data[:16])
-	writeStart := time.Unix(0, int64(binary.BigEndian.Uint64(data[16:24])))   //nolint:gosec // G115: safe round-trip from uint64 nano timestamp
-	ingestStart := time.Unix(0, int64(binary.BigEndian.Uint64(data[24:32]))) //nolint:gosec // G115: safe round-trip from uint64 nano timestamp
-	sourceStart := time.Unix(0, int64(binary.BigEndian.Uint64(data[32:40]))) //nolint:gosec // G115: safe round-trip from uint64 nano timestamp
+// CreateChunk inserts a new Active chunk entry.
+func (f *FSM) applyCreate(c *gastrologv1.CreateChunkCommand) error {
+	id := chunkIDFromProto(c.GetId())
+	writeStart := time.Unix(0, c.GetWriteStartNanos())
+	ingestStart := time.Unix(0, c.GetIngestStartNanos())
+	sourceStart := time.Unix(0, c.GetSourceStartNanos())
 
 	// Reject creates for tombstoned chunk IDs. If the vault already applied
 	// a DeleteChunk for this ID, a later CreateChunk (late replication /
@@ -767,9 +827,9 @@ func (f *FSM) applyCreate(data []byte) error {
 	return nil
 }
 
-// SealChunk: [16 bytes ChunkID][8 WriteEnd][8 RecordCount][8 Bytes][8 IngestEnd][8 SourceEnd][8 IngestStart][1 flags]
+// SealChunk records the final sealed-form metadata for a chunk.
 //
-// IngestStart and the flags byte are SealChunk additions: the chunk
+// IngestStart and the monotonic flag are SealChunk fields: the chunk
 // manager tracks the actual min IngestTS as records are appended (vs.
 // the wall-clock createdAt that CmdCreateChunk seeded), and only the
 // chunk manager knows whether the appended sequence stayed in
@@ -777,46 +837,31 @@ func (f *FSM) applyCreate(data []byte) error {
 // the manifest carries authoritative TS bounds and monotonicity for
 // every reader (notably the histogram bucket math, which mis-renders
 // non-monotonic chunks if it gets either field wrong).
-//
-// Flag bit 0 = IngestTSMonotonic. Older 56-byte payloads still apply
-// (the trailing fields default to zero / false).
-func (f *FSM) applySeal(data []byte) error {
-	if len(data) < 56 {
-		return fmt.Errorf("seal chunk: payload too short (%d bytes)", len(data))
-	}
-	var id chunk.ChunkID
-	copy(id[:], data[:16])
+func (f *FSM) applySeal(c *gastrologv1.SealChunkCommand) error {
+	id := chunkIDFromProto(c.GetId())
 
 	e := f.chunks[id]
 	if e == nil {
 		return fmt.Errorf("seal chunk: %s not found", id)
 	}
-	e.WriteEnd = time.Unix(0, int64(binary.BigEndian.Uint64(data[16:24])))   //nolint:gosec // G115: nano timestamp round-trip
-	e.RecordCount = int64(binary.BigEndian.Uint64(data[24:32]))             //nolint:gosec // G115: record count round-trip
-	e.Bytes = int64(binary.BigEndian.Uint64(data[32:40]))                   //nolint:gosec // G115: byte count round-trip
-	e.IngestEnd = time.Unix(0, int64(binary.BigEndian.Uint64(data[40:48]))) //nolint:gosec // G115: nano timestamp round-trip
-	e.SourceEnd = time.Unix(0, int64(binary.BigEndian.Uint64(data[48:56]))) //nolint:gosec // G115: nano timestamp round-trip
-	if len(data) >= 65 {
-		e.IngestStart = time.Unix(0, int64(binary.BigEndian.Uint64(data[56:64]))) //nolint:gosec // G115: nano timestamp round-trip
-		e.IngestTSMonotonic = data[64]&1 != 0
-	}
+	e.WriteEnd = time.Unix(0, c.GetWriteEndNanos())
+	e.RecordCount = c.GetRecordCount()
+	e.Bytes = c.GetBytes()
+	e.IngestEnd = time.Unix(0, c.GetIngestEndNanos())
+	e.SourceEnd = time.Unix(0, c.GetSourceEndNanos())
+	e.IngestStart = time.Unix(0, c.GetIngestStartNanos())
+	e.IngestTSMonotonic = c.GetIngestTsMonotonic()
 	e.State = chunk.ChunkStateSealed
 	return nil
 }
 
-// BeginSeal: [16 bytes ChunkID]
-//
-// Active → Sealing transition. The leader proposes this when its
+// BeginSeal: Active → Sealing transition. The leader proposes this when its
 // rotation policy fires and before sealed-form assembly begins. The
 // chunk's metadata still reflects active-form bookkeeping (no WriteEnd
 // / final RecordCount yet — those come in CmdSealChunk). Idempotent:
 // repeated BeginSeals on the same chunk are harmless. See gastrolog-1huz5.
-func (f *FSM) applyBeginSeal(data []byte) error {
-	if len(data) < 16 {
-		return fmt.Errorf("begin seal: payload too short (%d bytes)", len(data))
-	}
-	var id chunk.ChunkID
-	copy(id[:], data[:16])
+func (f *FSM) applyBeginSeal(c *gastrologv1.BeginSealCommand) error {
+	id := chunkIDFromProto(c.GetId())
 
 	e := f.chunks[id]
 	if e == nil {
@@ -852,18 +897,11 @@ func (f *FSM) applyBeginSeal(data []byte) error {
 //     on the leader, not reconstructable from idx.log alone).
 //
 // See gastrolog-32bf2.
-func (f *FSM) applyRepatriate(data []byte) error {
-	if len(data) < entrySize {
-		return fmt.Errorf("repatriate chunk: payload too short (%d bytes)", len(data))
+func (f *FSM) applyRepatriate(c *gastrologv1.RepatriateChunkCommand) error {
+	if c.GetEntry() == nil {
+		return errors.New("repatriate chunk: missing entry")
 	}
-	entries, err := readEntriesSection(bytes.NewReader(data[:entrySize]), entrySize)
-	if err != nil {
-		return fmt.Errorf("repatriate chunk: decode entry: %w", err)
-	}
-	if len(entries) != 1 {
-		return fmt.Errorf("repatriate chunk: expected 1 entry, got %d", len(entries))
-	}
-	e := entries[0]
+	e := entryFromProto(c.GetEntry())
 	if _, dead := f.tombstones[e.ID]; dead {
 		return fmt.Errorf("repatriate chunk %s: refused (tombstoned)", e.ID)
 	}
@@ -876,13 +914,9 @@ func (f *FSM) applyRepatriate(data []byte) error {
 	return nil
 }
 
-// CompressChunk: [16 bytes ChunkID][8 DiskBytes]
-func (f *FSM) applyCompress(data []byte) error {
-	if len(data) < 24 {
-		return fmt.Errorf("compress chunk: payload too short (%d bytes)", len(data))
-	}
-	var id chunk.ChunkID
-	copy(id[:], data[:16])
+// CompressChunk records the on-disk size of a sealed chunk.
+func (f *FSM) applyCompress(c *gastrologv1.CompressChunkCommand) error {
+	id := chunkIDFromProto(c.GetId())
 
 	e := f.chunks[id]
 	if e == nil {
@@ -892,7 +926,7 @@ func (f *FSM) applyCompress(data []byte) error {
 	// are GLCB which is zstd-compressed by construction. CmdCompressChunk
 	// stays as a no-op apply* handler for WAL-replay backward compat;
 	// only DiskBytes still carries useful information.
-	e.DiskBytes = int64(binary.BigEndian.Uint64(data[16:24])) //nolint:gosec // G115: round-trip
+	e.DiskBytes = c.GetDiskBytes()
 	return nil
 }
 
@@ -903,66 +937,49 @@ func (f *FSM) applyCompress(data []byte) error {
 // reaches the FSM, not just cloud-uploaded ones. The histogram's GLCB
 // section-reader uses these offsets to mmap the IngestTS index out of
 // data.glcb directly, eliminating the .ts-cache download path.
-func (f *FSM) applyAttachOffsets(data []byte) error {
-	if len(data) < 48 {
-		return fmt.Errorf("attach offsets: payload too short (%d bytes)", len(data))
-	}
-	var id chunk.ChunkID
-	copy(id[:], data[:16])
+func (f *FSM) applyAttachOffsets(c *gastrologv1.AttachOffsetsCommand) error {
+	id := chunkIDFromProto(c.GetId())
 
 	e := f.chunks[id]
 	if e == nil {
 		return fmt.Errorf("attach offsets: %s not found", id)
 	}
-	e.IngestIdxOffset = int64(binary.BigEndian.Uint64(data[16:24])) //nolint:gosec // G115: round-trip
-	e.IngestIdxSize = int64(binary.BigEndian.Uint64(data[24:32]))   //nolint:gosec // G115: round-trip
-	e.SourceIdxOffset = int64(binary.BigEndian.Uint64(data[32:40])) //nolint:gosec // G115: round-trip
-	e.SourceIdxSize = int64(binary.BigEndian.Uint64(data[40:48]))   //nolint:gosec // G115: round-trip
+	e.IngestIdxOffset = c.GetIngestIdxOffset()
+	e.IngestIdxSize = c.GetIngestIdxSize()
+	e.SourceIdxOffset = c.GetSourceIdxOffset()
+	e.SourceIdxSize = c.GetSourceIdxSize()
 	return nil
 }
 
-// UploadChunk: [16 ChunkID][8 DiskBytes][8 IngestIdxOff][8 IngestIdxSize][8 SourceIdxOff][8 SourceIdxSize]
-//                                                                                                          [32 Hash][16 CloudServiceID][1 KeyScheme]
-func (f *FSM) applyUpload(data []byte) error {
-	// Phase-6 (gastrolog-69fd5) drops NumFrames; payload is now 56 bytes
-	// for the base form and 105 bytes for the grnc3-extended form
-	// (56 + 32 hash + 16 cloud service ID + 1 key scheme byte). Wire format
-	// breaks acceptable per redesign decision 11 (atomic refactor).
-	if len(data) < 56 {
-		return fmt.Errorf("upload chunk: payload too short (%d bytes)", len(data))
-	}
-	var id chunk.ChunkID
-	copy(id[:], data[:16])
+// UploadChunk records cloud-upload metadata and integrity fields.
+func (f *FSM) applyUpload(c *gastrologv1.UploadChunkCommand) error {
+	id := chunkIDFromProto(c.GetId())
 
 	e := f.chunks[id]
 	if e == nil {
 		return fmt.Errorf("upload chunk: %s not found", id)
 	}
-	e.DiskBytes = int64(binary.BigEndian.Uint64(data[16:24]))       //nolint:gosec // G115: round-trip
-	e.IngestIdxOffset = int64(binary.BigEndian.Uint64(data[24:32])) //nolint:gosec // G115: round-trip
-	e.IngestIdxSize = int64(binary.BigEndian.Uint64(data[32:40]))   //nolint:gosec // G115: round-trip
-	e.SourceIdxOffset = int64(binary.BigEndian.Uint64(data[40:48])) //nolint:gosec // G115: round-trip
-	e.SourceIdxSize = int64(binary.BigEndian.Uint64(data[48:56]))   //nolint:gosec // G115: round-trip
+	e.DiskBytes = c.GetDiskBytes()
+	e.IngestIdxOffset = c.GetIngestIdxOffset()
+	e.IngestIdxSize = c.GetIngestIdxSize()
+	e.SourceIdxOffset = c.GetSourceIdxOffset()
+	e.SourceIdxSize = c.GetSourceIdxSize()
 	e.CloudBacked = true
 
-	// Integrity fields (gastrolog-grnc3) — present only on the extended payload.
-	if len(data) >= 105 {
-		copy(e.Hash[:], data[56:88])
-		copy(e.CloudServiceID[:], data[88:104])
-		e.KeyScheme = data[104]
+	// Integrity fields (gastrolog-grnc3) — present only on the extended form.
+	if h := c.GetHash(); len(h) > 0 {
+		copy(e.Hash[:], h)
+		e.CloudServiceID = glid.FromBytes(c.GetCloudServiceId())
+		e.KeyScheme = uint8(c.GetKeyScheme()) //nolint:gosec // G115: key scheme is a small enum; round-trips a uint8
 	}
 	return nil
 }
 
-// DeleteChunk: [16 bytes ChunkID]. Returns the deleted ID (or nil if the
+// DeleteChunk removes a chunk entry. Returns the deleted ID (or nil if the
 // chunk wasn't present, e.g. on a replayed delete) so Apply can fire the
 // onDelete callback exactly once per actual deletion.
-func (f *FSM) applyDelete(data []byte) (*chunk.ChunkID, error) {
-	if len(data) < 16 {
-		return nil, fmt.Errorf("delete chunk: payload too short (%d bytes)", len(data))
-	}
-	var id chunk.ChunkID
-	copy(id[:], data[:16])
+func (f *FSM) applyDelete(c *gastrologv1.DeleteChunkCommand) (*chunk.ChunkID, error) {
+	id := chunkIDFromProto(c.GetId())
 	// Always record the tombstone — even when the chunk isn't currently in
 	// the map. A CmdDeleteChunk that races with a pre-delete CmdCreateChunk
 	// (via retry or reordered apply) could arrive first; the tombstone
@@ -978,13 +995,9 @@ func (f *FSM) applyDelete(data []byte) (*chunk.ChunkID, error) {
 	return &id, nil
 }
 
-// RetentionPending: [16 bytes ChunkID]
-func (f *FSM) applyRetentionPending(data []byte) error {
-	if len(data) < 16 {
-		return fmt.Errorf("retention pending: payload too short (%d bytes)", len(data))
-	}
-	var id chunk.ChunkID
-	copy(id[:], data[:16])
+// RetentionPending marks a chunk as pending retention deletion.
+func (f *FSM) applyRetentionPending(c *gastrologv1.RetentionPendingCommand) error {
+	id := chunkIDFromProto(c.GetId())
 	if e := f.chunks[id]; e != nil {
 		e.RetentionPending = true
 	}
@@ -992,488 +1005,230 @@ func (f *FSM) applyRetentionPending(data []byte) error {
 }
 
 // ---------- Command builders (used by callers before Raft.Apply) ----------
+//
+// Each Marshal* returns a marshaled gastrologv1.VaultCtlCommand. The
+// New* builders return the typed message so the outer vaultraft envelope
+// can wrap it without a re-marshal round-trip (gastrolog-5lrg7).
+
+// mustMarshalCommand marshals a VaultCtlCommand. proto.Marshal of these
+// in-memory messages cannot fail; a non-nil error indicates a programmer
+// error (e.g. a nil oneof) and panics rather than returning corrupt bytes.
+func mustMarshalCommand(cmd *gastrologv1.VaultCtlCommand) []byte {
+	b, err := proto.Marshal(cmd)
+	if err != nil {
+		panic(fmt.Sprintf("vaultctlfsm: marshal command: %v", err))
+	}
+	return b
+}
+
+// NewCreateChunk builds a CreateChunk command message.
+func NewCreateChunk(id chunk.ChunkID, writeStart, ingestStart, sourceStart time.Time) *gastrologv1.VaultCtlCommand {
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_CreateChunk{CreateChunk: &gastrologv1.CreateChunkCommand{
+		Id:               id[:],
+		WriteStartNanos:  writeStart.UnixNano(),
+		IngestStartNanos: ingestStart.UnixNano(),
+		SourceStartNanos: sourceStart.UnixNano(),
+	}}}
+}
 
 // MarshalCreateChunk builds the Raft log data for a CreateChunk command.
 func MarshalCreateChunk(id chunk.ChunkID, writeStart, ingestStart, sourceStart time.Time) []byte {
-	buf := make([]byte, 1+40)
-	buf[0] = byte(CmdCreateChunk)
-	copy(buf[1:17], id[:])
-	binary.BigEndian.PutUint64(buf[17:25], uint64(writeStart.UnixNano()))
-	binary.BigEndian.PutUint64(buf[25:33], uint64(ingestStart.UnixNano()))
-	binary.BigEndian.PutUint64(buf[33:41], uint64(sourceStart.UnixNano()))
-	return buf
+	return mustMarshalCommand(NewCreateChunk(id, writeStart, ingestStart, sourceStart))
+}
+
+// NewSealChunk builds a SealChunk command message.
+func NewSealChunk(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64, ingestStart, ingestEnd, sourceEnd time.Time, ingestTSMonotonic bool) *gastrologv1.VaultCtlCommand {
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_SealChunk{SealChunk: &gastrologv1.SealChunkCommand{
+		Id:                id[:],
+		WriteEndNanos:     writeEnd.UnixNano(),
+		RecordCount:       recordCount,
+		Bytes:             bytes,
+		IngestEndNanos:    ingestEnd.UnixNano(),
+		SourceEndNanos:    sourceEnd.UnixNano(),
+		IngestStartNanos:  ingestStart.UnixNano(),
+		IngestTsMonotonic: ingestTSMonotonic,
+	}}}
 }
 
 // MarshalSealChunk builds the Raft log data for a SealChunk command.
 func MarshalSealChunk(id chunk.ChunkID, writeEnd time.Time, recordCount, bytes int64, ingestStart, ingestEnd, sourceEnd time.Time, ingestTSMonotonic bool) []byte {
-	buf := make([]byte, 1+65)
-	buf[0] = byte(CmdSealChunk)
-	copy(buf[1:17], id[:])
-	binary.BigEndian.PutUint64(buf[17:25], uint64(writeEnd.UnixNano()))
-	binary.BigEndian.PutUint64(buf[25:33], uint64(recordCount)) //nolint:gosec // G115: safe round-trip for record count
-	binary.BigEndian.PutUint64(buf[33:41], uint64(bytes))     //nolint:gosec // G115: safe round-trip for byte count
-	binary.BigEndian.PutUint64(buf[41:49], uint64(ingestEnd.UnixNano()))
-	binary.BigEndian.PutUint64(buf[49:57], uint64(sourceEnd.UnixNano()))
-	binary.BigEndian.PutUint64(buf[57:65], uint64(ingestStart.UnixNano()))
-	if ingestTSMonotonic {
-		buf[65] = 1
-	}
-	return buf
+	return mustMarshalCommand(NewSealChunk(id, writeEnd, recordCount, bytes, ingestStart, ingestEnd, sourceEnd, ingestTSMonotonic))
+}
+
+// NewBeginSeal builds a BeginSeal command message. gastrolog-1huz5.
+func NewBeginSeal(id chunk.ChunkID) *gastrologv1.VaultCtlCommand {
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_BeginSeal{BeginSeal: &gastrologv1.BeginSealCommand{Id: id[:]}}}
 }
 
 // MarshalBeginSeal builds the Raft log data for a BeginSeal command.
-// gastrolog-1huz5.
 func MarshalBeginSeal(id chunk.ChunkID) []byte {
-	buf := make([]byte, 1+16)
-	buf[0] = byte(CmdBeginSeal)
-	copy(buf[1:17], id[:])
-	return buf
+	return mustMarshalCommand(NewBeginSeal(id))
+}
+
+// NewCompressChunk builds a CompressChunk command message.
+func NewCompressChunk(id chunk.ChunkID, diskBytes int64) *gastrologv1.VaultCtlCommand {
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_CompressChunk{CompressChunk: &gastrologv1.CompressChunkCommand{Id: id[:], DiskBytes: diskBytes}}}
 }
 
 // MarshalCompressChunk builds the Raft log data for a CompressChunk command.
 func MarshalCompressChunk(id chunk.ChunkID, diskBytes int64) []byte {
-	buf := make([]byte, 1+24)
-	buf[0] = byte(CmdCompressChunk)
-	copy(buf[1:17], id[:])
-	binary.BigEndian.PutUint64(buf[17:25], uint64(diskBytes)) //nolint:gosec // G115: safe round-trip for disk bytes
-	return buf
+	return mustMarshalCommand(NewCompressChunk(id, diskBytes))
+}
+
+// NewUploadChunk builds an UploadChunk command message. The integrity
+// fields (hash, cloud service ID, key scheme) are gastrolog-grnc3 additions.
+func NewUploadChunk(id chunk.ChunkID, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, hash [32]byte, cloudServiceID glid.GLID, keyScheme uint8) *gastrologv1.VaultCtlCommand {
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_UploadChunk{UploadChunk: &gastrologv1.UploadChunkCommand{
+		Id:              id[:],
+		DiskBytes:       diskBytes,
+		IngestIdxOffset: ingestIdxOff,
+		IngestIdxSize:   ingestIdxSize,
+		SourceIdxOffset: sourceIdxOff,
+		SourceIdxSize:   sourceIdxSize,
+		Hash:            hash[:],
+		CloudServiceId:  cloudServiceID[:],
+		KeyScheme:       uint32(keyScheme),
+	}}}
 }
 
 // MarshalUploadChunk builds the Raft log data for an UploadChunk command.
-//
-// Payload layout:
-//
-//	[0]      command byte
-//	[1:17]   chunk ID (16 bytes)
-//	[17:25]  disk bytes (uint64 BE)
-//	[25:33]  ingest index offset (uint64 BE)
-//	[33:41]  ingest index size (uint64 BE)
-//	[41:49]  source index offset (uint64 BE)
-//	[49:57]  source index size (uint64 BE)
-//	[57:89]  GLCB whole-blob digest (32 bytes)             // gastrolog-grnc3
-//	[89:105] cloud service ID snapshot (16 bytes)          // gastrolog-grnc3
-//	[105]    key scheme byte                                // gastrolog-grnc3
-//
-// Total: 106 bytes payload (1 cmd + 105 fields). Phase-6 (gastrolog-69fd5)
-// dropped the legacy num_frames slot.
 func MarshalUploadChunk(id chunk.ChunkID, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, hash [32]byte, cloudServiceID glid.GLID, keyScheme uint8) []byte {
-	buf := make([]byte, 1+105)
-	buf[0] = byte(CmdUploadChunk)
-	copy(buf[1:17], id[:])
-	binary.BigEndian.PutUint64(buf[17:25], uint64(diskBytes))     //nolint:gosec // G115: round-trip
-	binary.BigEndian.PutUint64(buf[25:33], uint64(ingestIdxOff))  //nolint:gosec // G115: round-trip
-	binary.BigEndian.PutUint64(buf[33:41], uint64(ingestIdxSize)) //nolint:gosec // G115: round-trip
-	binary.BigEndian.PutUint64(buf[41:49], uint64(sourceIdxOff))  //nolint:gosec // G115: round-trip
-	binary.BigEndian.PutUint64(buf[49:57], uint64(sourceIdxSize)) //nolint:gosec // G115: round-trip
-	copy(buf[57:89], hash[:])
-	copy(buf[89:105], cloudServiceID[:])
-	buf[105] = keyScheme
-	return buf
+	return mustMarshalCommand(NewUploadChunk(id, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize, hash, cloudServiceID, keyScheme))
 }
 
-// MarshalAttachOffsets builds the Raft log data for a CmdAttachOffsets
-// command. See applyAttachOffsets for layout.
+// NewAttachOffsets builds a CmdAttachOffsets command message.
+func NewAttachOffsets(id chunk.ChunkID, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64) *gastrologv1.VaultCtlCommand {
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_AttachOffsets{AttachOffsets: &gastrologv1.AttachOffsetsCommand{
+		Id:              id[:],
+		IngestIdxOffset: ingestIdxOff,
+		IngestIdxSize:   ingestIdxSize,
+		SourceIdxOffset: sourceIdxOff,
+		SourceIdxSize:   sourceIdxSize,
+	}}}
+}
+
+// MarshalAttachOffsets builds the Raft log data for a CmdAttachOffsets command.
 func MarshalAttachOffsets(id chunk.ChunkID, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64) []byte {
-	buf := make([]byte, 1+48)
-	buf[0] = byte(CmdAttachOffsets)
-	copy(buf[1:17], id[:])
-	binary.BigEndian.PutUint64(buf[17:25], uint64(ingestIdxOff))  //nolint:gosec // G115: round-trip
-	binary.BigEndian.PutUint64(buf[25:33], uint64(ingestIdxSize)) //nolint:gosec // G115: round-trip
-	binary.BigEndian.PutUint64(buf[33:41], uint64(sourceIdxOff))  //nolint:gosec // G115: round-trip
-	binary.BigEndian.PutUint64(buf[41:49], uint64(sourceIdxSize)) //nolint:gosec // G115: round-trip
-	return buf
+	return mustMarshalCommand(NewAttachOffsets(id, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize))
+}
+
+// NewDeleteChunk builds a DeleteChunk command message.
+func NewDeleteChunk(id chunk.ChunkID) *gastrologv1.VaultCtlCommand {
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_DeleteChunk{DeleteChunk: &gastrologv1.DeleteChunkCommand{Id: id[:]}}}
 }
 
 // MarshalDeleteChunk builds the Raft log data for a DeleteChunk command.
 func MarshalDeleteChunk(id chunk.ChunkID) []byte {
-	buf := make([]byte, 1+16)
-	buf[0] = byte(CmdDeleteChunk)
-	copy(buf[1:17], id[:])
-	return buf
+	return mustMarshalCommand(NewDeleteChunk(id))
+}
+
+// NewRetentionPending builds a RetentionPending command message.
+func NewRetentionPending(id chunk.ChunkID) *gastrologv1.VaultCtlCommand {
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_RetentionPending{RetentionPending: &gastrologv1.RetentionPendingCommand{Id: id[:]}}}
 }
 
 // MarshalRetentionPending builds the Raft log data for a RetentionPending command.
 func MarshalRetentionPending(id chunk.ChunkID) []byte {
-	buf := make([]byte, 1+16)
-	buf[0] = byte(CmdRetentionPending)
-	copy(buf[1:17], id[:])
-	return buf
+	return mustMarshalCommand(NewRetentionPending(id))
 }
 
-// MarshalRepatriateChunk builds the Raft log data for a
-// RepatriateChunk command. Payload is the full ManifestEntry
-// encoded via the same fixed-size layout the snapshot uses (123
-// bytes), so the FSM apply path and snapshot replay share one
-// schema. State is forced to ChunkStateSealed on apply regardless
-// of what `entry.State` says — only sealed chunks are
+// NewRepatriateChunk builds a RepatriateChunk command message carrying the
+// full ManifestEntry. State is forced to ChunkStateSealed on apply
+// regardless of what entry.State says — only sealed chunks are
 // repatriatable. See gastrolog-32bf2.
+func NewRepatriateChunk(entry ManifestEntry) *gastrologv1.VaultCtlCommand {
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_RepatriateChunk{RepatriateChunk: &gastrologv1.RepatriateChunkCommand{Entry: entryToProto(&entry)}}}
+}
+
+// MarshalRepatriateChunk builds the Raft log data for a RepatriateChunk
+// command. Returns an error for signature compatibility with callers; the
+// proto build cannot fail.
 func MarshalRepatriateChunk(entry ManifestEntry) ([]byte, error) {
-	buf := make([]byte, 1, 1+entrySize)
-	buf[0] = byte(CmdRepatriateChunk)
-	w := bytes.NewBuffer(buf)
-	if err := encodeEntry(w, &entry); err != nil {
-		return nil, fmt.Errorf("encode manifest entry: %w", err)
+	return mustMarshalCommand(NewRepatriateChunk(entry)), nil
+}
+
+// entryToProto converts a ManifestEntry to its proto representation,
+// carrying every field including Hash / CloudServiceID / KeyScheme.
+func entryToProto(e *ManifestEntry) *gastrologv1.ManifestEntry {
+	return &gastrologv1.ManifestEntry{
+		Id:                e.ID[:],
+		WriteStartNanos:   e.WriteStart.UnixNano(),
+		WriteEndNanos:     e.WriteEnd.UnixNano(),
+		RecordCount:       e.RecordCount,
+		Bytes:             e.Bytes,
+		State:             gastrologv1.ChunkState(e.State),
+		DiskBytes:         e.DiskBytes,
+		IngestStartNanos:  e.IngestStart.UnixNano(),
+		IngestEndNanos:    e.IngestEnd.UnixNano(),
+		SourceStartNanos:  e.SourceStart.UnixNano(),
+		SourceEndNanos:    e.SourceEnd.UnixNano(),
+		IngestTsMonotonic: e.IngestTSMonotonic,
+		CloudBacked:       e.CloudBacked,
+		Archived:          e.Archived,
+		RetentionPending:  e.RetentionPending,
+		IngestIdxOffset:   e.IngestIdxOffset,
+		IngestIdxSize:     e.IngestIdxSize,
+		SourceIdxOffset:   e.SourceIdxOffset,
+		SourceIdxSize:     e.SourceIdxSize,
+		Hash:              e.Hash[:],
+		CloudServiceId:    e.CloudServiceID[:],
+		KeyScheme:         uint32(e.KeyScheme),
 	}
-	return w.Bytes(), nil
+}
+
+// entryFromProto converts a proto ManifestEntry back to the Go struct.
+func entryFromProto(p *gastrologv1.ManifestEntry) ManifestEntry {
+	e := ManifestEntry{
+		ID:                chunkIDFromProto(p.GetId()),
+		WriteStart:        time.Unix(0, p.GetWriteStartNanos()),
+		WriteEnd:          time.Unix(0, p.GetWriteEndNanos()),
+		RecordCount:       p.GetRecordCount(),
+		Bytes:             p.GetBytes(),
+		State:             chunk.ChunkState(p.GetState()), //nolint:gosec // G115: ChunkState enum values are 0-3, round-trips a uint8
+		DiskBytes:         p.GetDiskBytes(),
+		IngestStart:       time.Unix(0, p.GetIngestStartNanos()),
+		IngestEnd:         time.Unix(0, p.GetIngestEndNanos()),
+		SourceStart:       time.Unix(0, p.GetSourceStartNanos()),
+		SourceEnd:         time.Unix(0, p.GetSourceEndNanos()),
+		IngestTSMonotonic: p.GetIngestTsMonotonic(),
+		CloudBacked:       p.GetCloudBacked(),
+		Archived:          p.GetArchived(),
+		RetentionPending:  p.GetRetentionPending(),
+		IngestIdxOffset:   p.GetIngestIdxOffset(),
+		IngestIdxSize:     p.GetIngestIdxSize(),
+		SourceIdxOffset:   p.GetSourceIdxOffset(),
+		SourceIdxSize:     p.GetSourceIdxSize(),
+		CloudServiceID:    glid.FromBytes(p.GetCloudServiceId()),
+		KeyScheme:         uint8(p.GetKeyScheme()), //nolint:gosec // G115: key scheme is a small enum; round-trips a uint8
+	}
+	copy(e.Hash[:], p.GetHash())
+	return e
 }
 
 // ---------- Snapshot ----------
 //
-// Format (version 1):
-//
-//	[8 bytes magic "GLTRSNAP"]
-//	[4 bytes version: uint32 big-endian]
-//	[repeating sections until EOF:]
-//	  [1 byte sectionKind]
-//	  [4 bytes payload length: uint32 big-endian]
-//	  [payload bytes]
-//
-// Section kinds:
-//	1 = chunk entries   (payload: N×126 byte fixed entries)
-//	2 = tombstones      (payload: 4 byte count + N×(16 ID + 8 nanos))
-//	3 = pendingDeletes  (gastrolog-51gme step 2)
-//	4 = seqAllocator    (gastrolog-16w8x lease control state)
-//	5 = fences          (gastrolog-qzguu published fence history)
-//
-// Section kind 2 was previously "transition receipts" and is renumbered
-// here after gastrolog-5sywa removed the receipt protocol entirely.
-// User-authorized cluster reinitialization applies — old snapshots
-// aren't expected to replay after this change.
-//
-// Replaces an older sentinel-based layout that read 126-byte entries until
-// EOF and used impossible-ChunkID markers to in-band the extra sections.
-// The sentinel approach worked but grew brittle with each new section and
-// assumed first-byte values that new identity schemes could eventually
-// violate. Versioned header lets the decoder switch cleanly and gives us
-// real room to evolve. Old snapshots that predate this format are NOT
-// backward-readable by design; Raft will regenerate snapshots from the
-// log on next apply cycle, and pre-production data dirs get wiped anyway.
-
-var snapshotMagic = [8]byte{'G', 'L', 'T', 'R', 'S', 'N', 'A', 'P'}
-
-const snapshotVersion uint32 = 1
-
-type sectionKind byte
-
-const (
-	sectionEntries        sectionKind = 1
-	sectionTombstones     sectionKind = 2
-	sectionPendingDeletes sectionKind = 3 // gastrolog-51gme step 2
-)
+// The snapshot is a marshaled gastrologv1.VaultCtlSnapshot (gastrolog-5lrg7).
+// It replaced a hand-rolled versioned section format (magic "GLTRSNAP" +
+// per-kind length-prefixed sections). Old snapshots that predate the proto
+// format are NOT backward-readable by design; the project permits cluster
+// re-initialization (zero deployments) and Raft regenerates snapshots from
+// the log on the next apply cycle.
 
 type fsmSnapshot struct {
-	entries        []ManifestEntry
-	tombstones     map[chunk.ChunkID]time.Time
-	pendingDeletes []PendingDelete // gastrolog-51gme step 2
-	seqAllocator   SeqAllocatorSnapshot
-	fences         FenceSnapshot
+	snap *gastrologv1.VaultCtlSnapshot
 }
 
 func (s *fsmSnapshot) Persist(sink hraft.SnapshotSink) error {
-	if err := writeSnapshotHeader(sink); err != nil {
+	b, err := proto.Marshal(s.snap)
+	if err != nil {
+		_ = sink.Cancel()
+		return fmt.Errorf("persist chunk FSM snapshot: %w", err)
+	}
+	if _, err := sink.Write(b); err != nil {
 		_ = sink.Cancel()
 		return err
 	}
-
-	// Section: entries. Payload is N×entrySize bytes.
-	entriesPayloadLen := uint32(len(s.entries)) * entrySize //nolint:gosec // G115: entry count fits uint32
-	if err := writeSectionHeader(sink, sectionEntries, entriesPayloadLen); err != nil {
-		_ = sink.Cancel()
-		return err
-	}
-	for i := range s.entries {
-		if err := encodeEntry(sink, &s.entries[i]); err != nil {
-			_ = sink.Cancel()
-			return err
-		}
-	}
-
-	// Section: tombstones. Payload is 4-byte count + N×(16 ID + 8 nanos).
-	if len(s.tombstones) > 0 {
-		payloadLen := uint32(4 + len(s.tombstones)*24) //nolint:gosec // G115: fits uint32
-		if err := writeSectionHeader(sink, sectionTombstones, payloadLen); err != nil {
-			_ = sink.Cancel()
-			return err
-		}
-		var countBuf [4]byte
-		binary.BigEndian.PutUint32(countBuf[:], uint32(len(s.tombstones))) //nolint:gosec // G115: fits uint32
-		if _, err := sink.Write(countBuf[:]); err != nil {
-			_ = sink.Cancel()
-			return err
-		}
-		var tsBuf [24]byte
-		for id, ts := range s.tombstones {
-			copy(tsBuf[0:16], id[:])
-			binary.BigEndian.PutUint64(tsBuf[16:24], uint64(ts.UnixNano()))
-			if _, err := sink.Write(tsBuf[:]); err != nil {
-				_ = sink.Cancel()
-				return err
-			}
-		}
-	}
-
-	// Section: pendingDeletes (gastrolog-51gme step 2). Variable-length
-	// per entry; encoder writes the section header with the precomputed
-	// payload size.
-	if err := encodePendingDeletesSection(sink, s.pendingDeletes); err != nil {
-		_ = sink.Cancel()
-		return err
-	}
-
-	if err := encodeSeqAllocatorSection(sink, s.seqAllocator); err != nil {
-		_ = sink.Cancel()
-		return err
-	}
-
-	if err := encodeFencesSection(sink, s.fences); err != nil {
-		_ = sink.Cancel()
-		return err
-	}
-
 	return sink.Close()
 }
 
-// writeSnapshotHeader writes the 12-byte header (8 magic + 4 version).
-func writeSnapshotHeader(w io.Writer) error {
-	if _, err := w.Write(snapshotMagic[:]); err != nil {
-		return fmt.Errorf("write snapshot magic: %w", err)
-	}
-	var verBuf [4]byte
-	binary.BigEndian.PutUint32(verBuf[:], snapshotVersion)
-	if _, err := w.Write(verBuf[:]); err != nil {
-		return fmt.Errorf("write snapshot version: %w", err)
-	}
-	return nil
-}
-
-// writeSectionHeader writes the 5-byte section header (1 kind + 4 length).
-func writeSectionHeader(w io.Writer, kind sectionKind, payloadLen uint32) error {
-	var buf [5]byte
-	buf[0] = byte(kind)
-	binary.BigEndian.PutUint32(buf[1:5], payloadLen)
-	if _, err := w.Write(buf[:]); err != nil {
-		return fmt.Errorf("write section header (kind=%d): %w", kind, err)
-	}
-	return nil
-}
-
 func (s *fsmSnapshot) Release() {}
-
-// Snapshot encoding: each entry is a fixed-size binary record.
-// Layout per entry (123 bytes):
-//   16  ChunkID
-//   8   WriteStart (nanos)
-//   8   WriteEnd (nanos)
-//   8   RecordCount
-//   8   Bytes
-//   8   DiskBytes
-//   8   IngestStart (nanos)
-//   8   IngestEnd (nanos)
-//   8   SourceStart (nanos)
-//   8   SourceEnd (nanos)
-//   8   IngestIdxOffset
-//   8   IngestIdxSize
-//   8   SourceIdxOffset
-//   8   SourceIdxSize
-//   2   Flags (bit 0=reserved (formerly Sealed; replaced by State byte
-//                in Phase 3, gastrolog-1huz5),
-//              1=reserved (formerly Compressed),
-//              2=cloudBacked, 3=archived,
-//              4=retentionPending, 5=transitionStreamed, 6=ingestTSMonotonic)
-//   1   State (chunk.ChunkState — Active/Sealing/Sealed). gastrolog-1huz5.
-// Total: 123 bytes.
-
-const entrySize = 123
-
-func encodeEntry(w io.Writer, e *ManifestEntry) error {
-	var buf [entrySize]byte
-	copy(buf[0:16], e.ID[:])
-	binary.BigEndian.PutUint64(buf[16:24], uint64(e.WriteStart.UnixNano()))
-	binary.BigEndian.PutUint64(buf[24:32], uint64(e.WriteEnd.UnixNano()))
-	binary.BigEndian.PutUint64(buf[32:40], uint64(e.RecordCount)) //nolint:gosec // G115: round-trip
-	binary.BigEndian.PutUint64(buf[40:48], uint64(e.Bytes))       //nolint:gosec // G115: round-trip
-	binary.BigEndian.PutUint64(buf[48:56], uint64(e.DiskBytes))   //nolint:gosec // G115: round-trip
-	binary.BigEndian.PutUint64(buf[56:64], uint64(e.IngestStart.UnixNano()))
-	binary.BigEndian.PutUint64(buf[64:72], uint64(e.IngestEnd.UnixNano()))
-	binary.BigEndian.PutUint64(buf[72:80], uint64(e.SourceStart.UnixNano()))
-	binary.BigEndian.PutUint64(buf[80:88], uint64(e.SourceEnd.UnixNano()))
-	binary.BigEndian.PutUint64(buf[88:96], uint64(e.IngestIdxOffset))   //nolint:gosec // G115: round-trip
-	binary.BigEndian.PutUint64(buf[96:104], uint64(e.IngestIdxSize))    //nolint:gosec // G115: round-trip
-	binary.BigEndian.PutUint64(buf[104:112], uint64(e.SourceIdxOffset)) //nolint:gosec // G115: round-trip
-	binary.BigEndian.PutUint64(buf[112:120], uint64(e.SourceIdxSize))   //nolint:gosec // G115: round-trip
-	var flags uint16
-	// flag bit 0 (formerly Sealed) is reserved — replaced by the State
-	// byte in Phase 3 (gastrolog-1huz5).
-	// flag bit 1 (formerly Compressed) is reserved — see gastrolog-24m1t
-	// step 7f.
-	if e.CloudBacked {
-		flags |= 1 << 2
-	}
-	if e.Archived {
-		flags |= 1 << 3
-	}
-	if e.RetentionPending {
-		flags |= 1 << 4
-	}
-	if e.IngestTSMonotonic {
-		flags |= 1 << 5
-	}
-	binary.BigEndian.PutUint16(buf[120:122], flags)
-	buf[122] = byte(e.State)
-	_, err := w.Write(buf[:])
-	return err
-}
-
-// decodedSnapshot bundles every section the snapshot decoder can
-// produce. New sections add a field here rather than churning the
-// decodeSnapshot return signature.
-type decodedSnapshot struct {
-	entries        []ManifestEntry
-	tombstones     map[chunk.ChunkID]time.Time
-	pendingDeletes map[chunk.ChunkID]*PendingDelete // gastrolog-51gme step 2
-	seqAllocator   SeqAllocatorSnapshot
-	fences         FenceSnapshot
-}
-
-// decodeSnapshot reads a versioned snapshot. Unknown section kinds are
-// skipped (forward compatibility within the same version); unknown
-// versions are rejected.
-func decodeSnapshot(r io.Reader) (*decodedSnapshot, error) {
-	if err := readSnapshotHeader(r); err != nil {
-		return nil, err
-	}
-
-	out := &decodedSnapshot{}
-
-	var hdr [5]byte
-	for {
-		n, err := io.ReadFull(r, hdr[:])
-		if n == 0 {
-			break // clean end-of-stream
-		}
-		if err != nil {
-			return nil, fmt.Errorf("read section header: %w", err)
-		}
-		kind := sectionKind(hdr[0])
-		payloadLen := binary.BigEndian.Uint32(hdr[1:5])
-
-		section := io.LimitReader(r, int64(payloadLen))
-		switch kind {
-		case sectionEntries:
-			out.entries, err = readEntriesSection(section, payloadLen)
-		case sectionTombstones:
-			out.tombstones, err = readTombstonesSection(section)
-		case sectionPendingDeletes:
-			out.pendingDeletes, err = readPendingDeletesSection(section)
-		case sectionSeqAllocator:
-			out.seqAllocator, err = readSeqAllocatorSection(section)
-		case sectionFences:
-			out.fences, err = readFencesSection(section)
-		default:
-			// Unknown section — skip. Forward-compat for new sections in
-			// the same format version.
-			_, err = io.Copy(io.Discard, section)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("section kind=%d: %w", kind, err)
-		}
-		// Drain any bytes the section reader didn't consume (defensive).
-		if _, err := io.Copy(io.Discard, section); err != nil {
-			return nil, fmt.Errorf("drain section kind=%d: %w", kind, err)
-		}
-	}
-
-	return out, nil
-}
-
-// readSnapshotHeader validates the magic and version. Returns an error if
-// the magic is wrong (corrupt or old-format snapshot) or version is not
-// recognized.
-func readSnapshotHeader(r io.Reader) error {
-	var magic [8]byte
-	if _, err := io.ReadFull(r, magic[:]); err != nil {
-		return fmt.Errorf("read snapshot magic: %w", err)
-	}
-	if magic != snapshotMagic {
-		return errors.New("snapshot magic mismatch — incompatible or corrupt format")
-	}
-	var verBuf [4]byte
-	if _, err := io.ReadFull(r, verBuf[:]); err != nil {
-		return fmt.Errorf("read snapshot version: %w", err)
-	}
-	version := binary.BigEndian.Uint32(verBuf[:])
-	if version != snapshotVersion {
-		return fmt.Errorf("snapshot version %d unsupported (this build handles %d)", version, snapshotVersion)
-	}
-	return nil
-}
-
-func readEntriesSection(r io.Reader, payloadLen uint32) ([]ManifestEntry, error) {
-	if payloadLen%entrySize != 0 {
-		return nil, fmt.Errorf("entries payload %d bytes not a multiple of %d", payloadLen, entrySize)
-	}
-	count := payloadLen / entrySize
-	entries := make([]ManifestEntry, 0, count)
-	var buf [entrySize]byte
-	for i := range count {
-		if _, err := io.ReadFull(r, buf[:]); err != nil {
-			return nil, fmt.Errorf("read entry %d: %w", i, err)
-		}
-		var id chunk.ChunkID
-		copy(id[:], buf[0:16])
-		flags := binary.BigEndian.Uint16(buf[120:122])
-		entries = append(entries, ManifestEntry{
-			ID:              id,
-			WriteStart:      time.Unix(0, int64(binary.BigEndian.Uint64(buf[16:24]))),  //nolint:gosec // G115: round-trip
-			WriteEnd:        time.Unix(0, int64(binary.BigEndian.Uint64(buf[24:32]))),  //nolint:gosec // G115: round-trip
-			RecordCount:     int64(binary.BigEndian.Uint64(buf[32:40])),                //nolint:gosec // G115: round-trip
-			Bytes:           int64(binary.BigEndian.Uint64(buf[40:48])),                //nolint:gosec // G115: round-trip
-			DiskBytes:       int64(binary.BigEndian.Uint64(buf[48:56])),                //nolint:gosec // G115: round-trip
-			IngestStart:     time.Unix(0, int64(binary.BigEndian.Uint64(buf[56:64]))),  //nolint:gosec // G115: round-trip
-			IngestEnd:       time.Unix(0, int64(binary.BigEndian.Uint64(buf[64:72]))),  //nolint:gosec // G115: round-trip
-			SourceStart:     time.Unix(0, int64(binary.BigEndian.Uint64(buf[72:80]))),  //nolint:gosec // G115: round-trip
-			SourceEnd:       time.Unix(0, int64(binary.BigEndian.Uint64(buf[80:88]))),  //nolint:gosec // G115: round-trip
-			IngestIdxOffset: int64(binary.BigEndian.Uint64(buf[88:96])),                //nolint:gosec // G115: round-trip
-			IngestIdxSize:   int64(binary.BigEndian.Uint64(buf[96:104])),               //nolint:gosec // G115: round-trip
-			SourceIdxOffset: int64(binary.BigEndian.Uint64(buf[104:112])),              //nolint:gosec // G115: round-trip
-			SourceIdxSize:   int64(binary.BigEndian.Uint64(buf[112:120])),              //nolint:gosec // G115: round-trip
-			// flag bit 0 reserved (formerly Sealed) — replaced by State byte in
-			// Phase 3 (gastrolog-1huz5).
-			// flag bit 1 reserved (formerly Compressed) — see gastrolog-24m1t step 7f.
-			// flag bits 5 (TransitionStreamed) and the prior 6 are renumbered:
-			// gastrolog-5sywa removed the receipt protocol entirely, so the
-			// IngestTSMonotonic flag moves down to bit 5. User-authorized
-			// cluster reinitialization applies — old snapshots aren't expected
-			// to replay after this change.
-			CloudBacked:       flags&(1<<2) != 0,
-			Archived:          flags&(1<<3) != 0,
-			RetentionPending:  flags&(1<<4) != 0,
-			IngestTSMonotonic: flags&(1<<5) != 0,
-			State:             chunk.ChunkState(buf[122]),
-		})
-	}
-	return entries, nil
-}
-
-func readTombstonesSection(r io.Reader) (map[chunk.ChunkID]time.Time, error) {
-	var countBuf [4]byte
-	if _, err := io.ReadFull(r, countBuf[:]); err != nil {
-		return nil, fmt.Errorf("read tombstones count: %w", err)
-	}
-	count := binary.BigEndian.Uint32(countBuf[:])
-	if count == 0 {
-		return nil, nil
-	}
-	out := make(map[chunk.ChunkID]time.Time, count)
-	var entry [24]byte
-	for i := range count {
-		if _, err := io.ReadFull(r, entry[:]); err != nil {
-			return nil, fmt.Errorf("read tombstone %d: %w", i, err)
-		}
-		var id chunk.ChunkID
-		copy(id[:], entry[0:16])
-		ns := int64(binary.BigEndian.Uint64(entry[16:24])) //nolint:gosec // G115: nano timestamp round-trip
-		out[id] = time.Unix(0, ns)
-	}
-	return out, nil
-}

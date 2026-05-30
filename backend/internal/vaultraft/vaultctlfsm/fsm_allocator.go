@@ -1,11 +1,11 @@
 package vaultctlfsm
 
 import (
-	"bytes"
-	"encoding/binary"
 	"errors"
-	"fmt"
-	"io"
+	"slices"
+	"strings"
+
+	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 )
 
 // SeqSentinel is reserved; destination-vault acceptance sequences start at 1.
@@ -24,9 +24,9 @@ const maxSeqHolderIDLen = 256
 
 // Seq allocator command opcodes (vaultctlfsm wire format).
 const (
-	CmdReserveSeqRange        Command = 14
-	CmdBurnSeqLeaseTail       Command = 15
-	CmdBumpSeqAllocatorEpoch  Command = 16
+	CmdReserveSeqRange       Command = 14
+	CmdBurnSeqLeaseTail      Command = 15
+	CmdBumpSeqAllocatorEpoch Command = 16
 )
 
 // SeqLeaseGrant is returned from CmdReserveSeqRange on successful apply.
@@ -111,11 +111,13 @@ func (f *FSM) seqAllocatorSnapshotLocked() SeqAllocatorSnapshot {
 	}
 }
 
-func (f *FSM) applyReserveSeqRange(payload []byte) (any, error) {
-	holderID, epoch, count, err := decodeSeqHolderEpochCount(payload)
-	if err != nil {
+func (f *FSM) applyReserveSeqRange(c *gastrologv1.ReserveSeqRangeCommand) (any, error) {
+	holderID := c.GetHolderId()
+	if err := validateSeqHolder(holderID); err != nil {
 		return nil, err
 	}
+	epoch := c.GetEpoch()
+	count := c.GetCount()
 	if count == 0 {
 		return nil, ErrSeqAllocatorInvalidCount
 	}
@@ -152,11 +154,13 @@ func (f *FSM) applyReserveSeqRange(payload []byte) (any, error) {
 	return SeqLeaseGrant{Start: start, End: end, Epoch: epoch}, nil
 }
 
-func (f *FSM) applyBurnSeqLeaseTail(payload []byte) error {
-	holderID, epoch, consumedEnd, err := decodeSeqHolderEpochCount(payload)
-	if err != nil {
+func (f *FSM) applyBurnSeqLeaseTail(c *gastrologv1.BurnSeqLeaseTailCommand) error {
+	holderID := c.GetHolderId()
+	if err := validateSeqHolder(holderID); err != nil {
 		return err
 	}
+	epoch := c.GetEpoch()
+	consumedEnd := c.GetConsumedEnd()
 
 	f.ensureSeqAllocatorDefaultsLocked()
 	lease := f.seqActiveSwaths[holderID]
@@ -178,7 +182,7 @@ func (f *FSM) applyBurnSeqLeaseTail(payload []byte) error {
 	return nil
 }
 
-func (f *FSM) applyBumpSeqAllocatorEpoch(_ []byte) (uint64, error) {
+func (f *FSM) applyBumpSeqAllocatorEpoch(_ *gastrologv1.BumpSeqAllocatorEpochCommand) (uint64, error) {
 	f.ensureSeqAllocatorDefaultsLocked()
 	if f.seqActiveSwaths == nil {
 		f.seqActiveSwaths = make(map[string]*SeqActiveLease)
@@ -224,206 +228,122 @@ func addSeqExclusive(v, delta uint64) (uint64, error) {
 	return next, nil
 }
 
-func decodeSeqHolderEpochCount(payload []byte) (holderID string, epoch, third uint64, err error) {
-	if len(payload) < 2+8+8 {
-		return "", 0, 0, fmt.Errorf("seq allocator: payload too short (%d bytes)", len(payload))
+// validateSeqHolder enforces the holder-ID bounds (1..maxSeqHolderIDLen)
+// the hand-rolled codec used to enforce via length framing.
+func validateSeqHolder(holderID string) error {
+	if len(holderID) == 0 || len(holderID) > maxSeqHolderIDLen {
+		return ErrSeqAllocatorInvalidHolder
 	}
-	holderLen := int(binary.BigEndian.Uint16(payload[0:2]))
-	if holderLen < 0 || holderLen > maxSeqHolderIDLen || len(payload) < 2+holderLen+8+8 {
-		return "", 0, 0, ErrSeqAllocatorInvalidHolder
-	}
-	holderID = string(payload[2 : 2+holderLen])
-	epoch = binary.BigEndian.Uint64(payload[2+holderLen : 2+holderLen+8])
-	third = binary.BigEndian.Uint64(payload[2+holderLen+8 : 2+holderLen+16])
-	return holderID, epoch, third, nil
+	return nil
 }
 
-func encodeSeqHolderEpochCount(holderID string, epoch, third uint64) ([]byte, error) {
-	if len(holderID) == 0 || len(holderID) > maxSeqHolderIDLen {
-		return nil, ErrSeqAllocatorInvalidHolder
+// NewReserveSeqRange builds a CmdReserveSeqRange command message.
+func NewReserveSeqRange(holderID string, epoch, count uint64) (*gastrologv1.VaultCtlCommand, error) {
+	if err := validateSeqHolder(holderID); err != nil {
+		return nil, err
 	}
-	out := make([]byte, 0, 1+2+len(holderID)+16)
-	out = append(out, byte(CmdReserveSeqRange)) // placeholder overwritten by callers
-	var lenBuf [2]byte
-	binary.BigEndian.PutUint16(lenBuf[:], uint16(len(holderID))) //nolint:gosec // G115: bounded by maxSeqHolderIDLen
-	out = append(out, lenBuf[:]...)
-	out = append(out, holderID...)
-	var numBuf [8]byte
-	binary.BigEndian.PutUint64(numBuf[:], epoch)
-	out = append(out, numBuf[:]...)
-	binary.BigEndian.PutUint64(numBuf[:], third)
-	out = append(out, numBuf[:]...)
-	return out, nil
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_ReserveSeqRange{ReserveSeqRange: &gastrologv1.ReserveSeqRangeCommand{
+		HolderId: holderID,
+		Epoch:    epoch,
+		Count:    count,
+	}}}, nil
 }
 
 // MarshalReserveSeqRange builds CmdReserveSeqRange wire bytes.
 func MarshalReserveSeqRange(holderID string, epoch, count uint64) ([]byte, error) {
-	wire, err := encodeSeqHolderEpochCount(holderID, epoch, count)
+	cmd, err := NewReserveSeqRange(holderID, epoch, count)
 	if err != nil {
 		return nil, err
 	}
-	wire[0] = byte(CmdReserveSeqRange)
-	return wire, nil
+	return mustMarshalCommand(cmd), nil
+}
+
+// NewBurnSeqLeaseTail builds a CmdBurnSeqLeaseTail command message.
+func NewBurnSeqLeaseTail(holderID string, epoch, consumedEnd uint64) (*gastrologv1.VaultCtlCommand, error) {
+	if err := validateSeqHolder(holderID); err != nil {
+		return nil, err
+	}
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_BurnSeqLeaseTail{BurnSeqLeaseTail: &gastrologv1.BurnSeqLeaseTailCommand{
+		HolderId:    holderID,
+		Epoch:       epoch,
+		ConsumedEnd: consumedEnd,
+	}}}, nil
 }
 
 // MarshalBurnSeqLeaseTail builds CmdBurnSeqLeaseTail wire bytes.
 func MarshalBurnSeqLeaseTail(holderID string, epoch, consumedEnd uint64) ([]byte, error) {
-	wire, err := encodeSeqHolderEpochCount(holderID, epoch, consumedEnd)
+	cmd, err := NewBurnSeqLeaseTail(holderID, epoch, consumedEnd)
 	if err != nil {
 		return nil, err
 	}
-	wire[0] = byte(CmdBurnSeqLeaseTail)
-	return wire, nil
+	return mustMarshalCommand(cmd), nil
+}
+
+// NewBumpSeqAllocatorEpoch builds a CmdBumpSeqAllocatorEpoch command message.
+func NewBumpSeqAllocatorEpoch() *gastrologv1.VaultCtlCommand {
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_BumpSeqAllocatorEpoch{BumpSeqAllocatorEpoch: &gastrologv1.BumpSeqAllocatorEpochCommand{}}}
 }
 
 // MarshalBumpSeqAllocatorEpoch builds CmdBumpSeqAllocatorEpoch wire bytes.
 func MarshalBumpSeqAllocatorEpoch() []byte {
-	return []byte{byte(CmdBumpSeqAllocatorEpoch)}
+	return mustMarshalCommand(NewBumpSeqAllocatorEpoch())
 }
 
-const sectionSeqAllocator sectionKind = 4
+// ---------- Snapshot proto converters ----------
 
-func encodeSeqAllocatorSection(w io.Writer, snap SeqAllocatorSnapshot) error {
-	var payload bytes.Buffer
-	var numBuf [8]byte
-	binary.BigEndian.PutUint64(numBuf[:], snap.NextSeq)
-	payload.Write(numBuf[:])
-	binary.BigEndian.PutUint64(numBuf[:], snap.Epoch)
-	payload.Write(numBuf[:])
-
-	binary.BigEndian.PutUint32(numBuf[:4], uint32(len(snap.ActiveSwaths))) //nolint:gosec // G115
-	payload.Write(numBuf[:4])
-	for _, lease := range snap.ActiveSwaths {
-		if len(lease.HolderID) > maxSeqHolderIDLen {
-			return ErrSeqAllocatorInvalidHolder
-		}
-		binary.BigEndian.PutUint16(numBuf[:2], uint16(len(lease.HolderID))) //nolint:gosec // G115
-		payload.Write(numBuf[:2])
-		payload.WriteString(lease.HolderID)
-		binary.BigEndian.PutUint64(numBuf[:], lease.RangeStart)
-		payload.Write(numBuf[:])
-		binary.BigEndian.PutUint64(numBuf[:], lease.RangeEnd)
-		payload.Write(numBuf[:])
-		binary.BigEndian.PutUint64(numBuf[:], lease.Epoch)
-		payload.Write(numBuf[:])
+// seqAllocatorToProto converts allocator control state to its snapshot proto.
+// Active swaths are emitted in HolderID order for deterministic encoding.
+func seqAllocatorToProto(snap SeqAllocatorSnapshot) *gastrologv1.SeqAllocatorSnapshot {
+	out := &gastrologv1.SeqAllocatorSnapshot{
+		NextSeq:      snap.NextSeq,
+		Epoch:        snap.Epoch,
+		ActiveSwaths: make([]*gastrologv1.SeqActiveLease, 0, len(snap.ActiveSwaths)),
+		BurnedTails:  make([]*gastrologv1.SeqBurnedTail, 0, len(snap.BurnedTails)),
 	}
-
-	binary.BigEndian.PutUint32(numBuf[:4], uint32(len(snap.BurnedTails))) //nolint:gosec // G115
-	payload.Write(numBuf[:4])
+	swaths := append([]SeqActiveLease(nil), snap.ActiveSwaths...)
+	slices.SortFunc(swaths, func(a, b SeqActiveLease) int { return strings.Compare(a.HolderID, b.HolderID) })
+	for _, lease := range swaths {
+		out.ActiveSwaths = append(out.ActiveSwaths, &gastrologv1.SeqActiveLease{
+			HolderId:   lease.HolderID,
+			Epoch:      lease.Epoch,
+			RangeStart: lease.RangeStart,
+			RangeEnd:   lease.RangeEnd,
+		})
+	}
 	for _, tail := range snap.BurnedTails {
-		binary.BigEndian.PutUint64(numBuf[:], tail.Start)
-		payload.Write(numBuf[:])
-		binary.BigEndian.PutUint64(numBuf[:], tail.End)
-		payload.Write(numBuf[:])
-		binary.BigEndian.PutUint64(numBuf[:], tail.Epoch)
-		payload.Write(numBuf[:])
+		out.BurnedTails = append(out.BurnedTails, &gastrologv1.SeqBurnedTail{
+			Start: tail.Start,
+			End:   tail.End,
+			Epoch: tail.Epoch,
+		})
 	}
-
-	if err := writeSectionHeader(w, sectionSeqAllocator, uint32(payload.Len())); err != nil { //nolint:gosec // G115
-		return err
-	}
-	_, err := payload.WriteTo(w)
-	return err
+	return out
 }
 
-func readSeqAllocatorSection(r io.Reader) (SeqAllocatorSnapshot, error) {
-	var snap SeqAllocatorSnapshot
-	var numBuf [8]byte
-	if _, err := io.ReadFull(r, numBuf[:]); err != nil {
-		return snap, fmt.Errorf("read next_seq: %w", err)
+// seqAllocatorFromProto converts a snapshot proto back to allocator state.
+func seqAllocatorFromProto(p *gastrologv1.SeqAllocatorSnapshot) SeqAllocatorSnapshot {
+	snap := SeqAllocatorSnapshot{
+		NextSeq:      p.GetNextSeq(),
+		Epoch:        p.GetEpoch(),
+		ActiveSwaths: make([]SeqActiveLease, 0, len(p.GetActiveSwaths())),
+		BurnedTails:  make([]SeqBurnedTail, 0, len(p.GetBurnedTails())),
 	}
-	snap.NextSeq = binary.BigEndian.Uint64(numBuf[:])
-	if _, err := io.ReadFull(r, numBuf[:]); err != nil {
-		return snap, fmt.Errorf("read epoch: %w", err)
+	for _, lease := range p.GetActiveSwaths() {
+		snap.ActiveSwaths = append(snap.ActiveSwaths, SeqActiveLease{
+			HolderID:   lease.GetHolderId(),
+			Epoch:      lease.GetEpoch(),
+			RangeStart: lease.GetRangeStart(),
+			RangeEnd:   lease.GetRangeEnd(),
+		})
 	}
-	snap.Epoch = binary.BigEndian.Uint64(numBuf[:])
-
-	swaths, err := readSeqActiveSwaths(r)
-	if err != nil {
-		return snap, err
+	for _, tail := range p.GetBurnedTails() {
+		snap.BurnedTails = append(snap.BurnedTails, SeqBurnedTail{
+			Start: tail.GetStart(),
+			End:   tail.GetEnd(),
+			Epoch: tail.GetEpoch(),
+		})
 	}
-	snap.ActiveSwaths = swaths
-
-	tails, err := readSeqBurnedTails(r)
-	if err != nil {
-		return snap, err
-	}
-	snap.BurnedTails = tails
-	return snap, nil
-}
-
-func readSeqActiveSwaths(r io.Reader) ([]SeqActiveLease, error) {
-	var countBuf [4]byte
-	if _, err := io.ReadFull(r, countBuf[:]); err != nil {
-		return nil, fmt.Errorf("read active swath count: %w", err)
-	}
-	n := int(binary.BigEndian.Uint32(countBuf[:]))
-	swaths := make([]SeqActiveLease, 0, n)
-	for i := range n {
-		lease, err := readSeqActiveLease(r)
-		if err != nil {
-			return nil, fmt.Errorf("read active swath[%d]: %w", i, err)
-		}
-		swaths = append(swaths, *lease)
-	}
-	return swaths, nil
-}
-
-func readSeqActiveLease(r io.Reader) (*SeqActiveLease, error) {
-	var lenBuf [2]byte
-	if _, err := io.ReadFull(r, lenBuf[:]); err != nil {
-		return nil, fmt.Errorf("read holder len: %w", err)
-	}
-	holderLen := int(binary.BigEndian.Uint16(lenBuf[:]))
-	if holderLen <= 0 || holderLen > maxSeqHolderIDLen {
-		return nil, ErrSeqAllocatorInvalidHolder
-	}
-	holder := make([]byte, holderLen)
-	if _, err := io.ReadFull(r, holder); err != nil {
-		return nil, fmt.Errorf("read holder id: %w", err)
-	}
-	lease := &SeqActiveLease{HolderID: string(holder)}
-	var numBuf [8]byte
-	if _, err := io.ReadFull(r, numBuf[:]); err != nil {
-		return nil, fmt.Errorf("read range start: %w", err)
-	}
-	lease.RangeStart = binary.BigEndian.Uint64(numBuf[:])
-	if _, err := io.ReadFull(r, numBuf[:]); err != nil {
-		return nil, fmt.Errorf("read range end: %w", err)
-	}
-	lease.RangeEnd = binary.BigEndian.Uint64(numBuf[:])
-	if _, err := io.ReadFull(r, numBuf[:]); err != nil {
-		return nil, fmt.Errorf("read lease epoch: %w", err)
-	}
-	lease.Epoch = binary.BigEndian.Uint64(numBuf[:])
-	return lease, nil
-}
-
-func readSeqBurnedTails(r io.Reader) ([]SeqBurnedTail, error) {
-	var countBuf [4]byte
-	if _, err := io.ReadFull(r, countBuf[:]); err != nil {
-		return nil, fmt.Errorf("read burned tail count: %w", err)
-	}
-	n := int(binary.BigEndian.Uint32(countBuf[:]))
-	tails := make([]SeqBurnedTail, 0, n)
-	var numBuf [8]byte
-	for i := range n {
-		var tail SeqBurnedTail
-		if _, err := io.ReadFull(r, numBuf[:]); err != nil {
-			return nil, fmt.Errorf("read burned tail[%d] start: %w", i, err)
-		}
-		tail.Start = binary.BigEndian.Uint64(numBuf[:])
-		if _, err := io.ReadFull(r, numBuf[:]); err != nil {
-			return nil, fmt.Errorf("read burned tail[%d] end: %w", i, err)
-		}
-		tail.End = binary.BigEndian.Uint64(numBuf[:])
-		if _, err := io.ReadFull(r, numBuf[:]); err != nil {
-			return nil, fmt.Errorf("read burned tail[%d] epoch: %w", i, err)
-		}
-		tail.Epoch = binary.BigEndian.Uint64(numBuf[:])
-		tails = append(tails, tail)
-	}
-	return tails, nil
+	return snap
 }
 
 func applySeqAllocatorSnapshotLocked(f *FSM, snap SeqAllocatorSnapshot) {

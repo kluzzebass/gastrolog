@@ -19,10 +19,11 @@ import (
 	"sort"
 	"strings"
 
+	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/glid"
-	"gastrolog/internal/vaultraft/vaultctlfsm"
 
 	hraft "github.com/hashicorp/raft"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -244,56 +245,77 @@ func tryDecodeLog(data []byte, lg *hraft.Log) bool {
 	return decodeLog(data, lg) == nil
 }
 
+// decodeFSMCmd decodes a Raft log payload as a protobuf VaultRaftCommand
+// (gastrolog-5lrg7) and returns a human-readable command name plus the most
+// useful identifier for that command (chunk ID, holder, or node ID). Returns
+// empty strings for non-command entries or payloads that do not decode.
 func decodeFSMCmd(data []byte, logType hraft.LogType) (string, string) {
-	if logType != hraft.LogCommand || len(data) < 1 {
+	if logType != hraft.LogCommand || len(data) == 0 {
 		return "", ""
 	}
-	cmd := vaultctlfsm.Command(data[0])
-	cmdName := commandName(cmd)
-	if len(data) < 1+glid.Size {
-		return cmdName, ""
+	var outer gastrologv1.VaultRaftCommand
+	if err := proto.Unmarshal(data, &outer); err != nil {
+		return "", ""
 	}
-	return cmdName, glid.FromBytes(data[1 : 1+glid.Size]).String()
+	switch c := outer.GetCommand().(type) {
+	case *gastrologv1.VaultRaftCommand_Noop:
+		return "OpNoop", ""
+	case *gastrologv1.VaultRaftCommand_VaultScoped:
+		return innerCommandNameAndID(c.VaultScoped.GetCommand())
+	default:
+		return "", ""
+	}
 }
 
-func commandName(cmd vaultctlfsm.Command) string {
-	switch cmd {
-	case vaultctlfsm.CmdCreateChunk:
-		return "CmdCreateChunk"
-	case vaultctlfsm.CmdSealChunk:
-		return "CmdSealChunk"
-	case vaultctlfsm.CmdCompressChunk:
-		return "CmdCompressChunk"
-	case vaultctlfsm.CmdUploadChunk:
-		return "CmdUploadChunk"
-	case vaultctlfsm.CmdDeleteChunk:
-		return "CmdDeleteChunk"
-	case vaultctlfsm.CmdRetentionPending:
-		return "CmdRetentionPending"
-	case vaultctlfsm.CmdRequestDelete:
-		return "CmdRequestDelete"
-	case vaultctlfsm.CmdAckDelete:
-		return "CmdAckDelete"
-	case vaultctlfsm.CmdFinalizeDelete:
-		return "CmdFinalizeDelete"
-	case vaultctlfsm.CmdPruneNode:
-		return "CmdPruneNode"
-	case vaultctlfsm.CmdAttachOffsets:
-		return "CmdAttachOffsets"
-	case vaultctlfsm.CmdBeginSeal:
-		return "CmdBeginSeal"
-	case vaultctlfsm.CmdRepatriateChunk:
-		return "CmdRepatriateChunk"
-	case vaultctlfsm.CmdReserveSeqRange:
-		return "CmdReserveSeqRange"
-	case vaultctlfsm.CmdBurnSeqLeaseTail:
-		return "CmdBurnSeqLeaseTail"
-	case vaultctlfsm.CmdBumpSeqAllocatorEpoch:
-		return "CmdBumpSeqAllocatorEpoch"
-	case vaultctlfsm.CmdPublishFence:
-		return "CmdPublishFence"
+// chunkIDStr renders a 16-byte chunk/GLID field, or "" when absent.
+func chunkIDStr(b []byte) string {
+	if len(b) != glid.Size {
+		return ""
+	}
+	return glid.FromBytes(b).String()
+}
+
+// innerCommandNameAndID maps a VaultCtlCommand oneof to its CmdXxx name and a
+// best-effort identifier. The Cmd* names match the historical opcode names so
+// --filter-cmd keeps working across the protobuf migration.
+func innerCommandNameAndID(cmd *gastrologv1.VaultCtlCommand) (string, string) {
+	switch c := cmd.GetCommand().(type) {
+	case *gastrologv1.VaultCtlCommand_CreateChunk:
+		return "CmdCreateChunk", chunkIDStr(c.CreateChunk.GetId())
+	case *gastrologv1.VaultCtlCommand_SealChunk:
+		return "CmdSealChunk", chunkIDStr(c.SealChunk.GetId())
+	case *gastrologv1.VaultCtlCommand_CompressChunk:
+		return "CmdCompressChunk", chunkIDStr(c.CompressChunk.GetId())
+	case *gastrologv1.VaultCtlCommand_UploadChunk:
+		return "CmdUploadChunk", chunkIDStr(c.UploadChunk.GetId())
+	case *gastrologv1.VaultCtlCommand_DeleteChunk:
+		return "CmdDeleteChunk", chunkIDStr(c.DeleteChunk.GetId())
+	case *gastrologv1.VaultCtlCommand_RetentionPending:
+		return "CmdRetentionPending", chunkIDStr(c.RetentionPending.GetId())
+	case *gastrologv1.VaultCtlCommand_RequestDelete:
+		return "CmdRequestDelete", chunkIDStr(c.RequestDelete.GetId())
+	case *gastrologv1.VaultCtlCommand_AckDelete:
+		return "CmdAckDelete", chunkIDStr(c.AckDelete.GetId())
+	case *gastrologv1.VaultCtlCommand_FinalizeDelete:
+		return "CmdFinalizeDelete", chunkIDStr(c.FinalizeDelete.GetId())
+	case *gastrologv1.VaultCtlCommand_PruneNode:
+		return "CmdPruneNode", c.PruneNode.GetNodeId()
+	case *gastrologv1.VaultCtlCommand_AttachOffsets:
+		return "CmdAttachOffsets", chunkIDStr(c.AttachOffsets.GetId())
+	case *gastrologv1.VaultCtlCommand_BeginSeal:
+		return "CmdBeginSeal", chunkIDStr(c.BeginSeal.GetId())
+	case *gastrologv1.VaultCtlCommand_RepatriateChunk:
+		return "CmdRepatriateChunk", chunkIDStr(c.RepatriateChunk.GetEntry().GetId())
+	case *gastrologv1.VaultCtlCommand_ReserveSeqRange:
+		return "CmdReserveSeqRange", c.ReserveSeqRange.GetHolderId()
+	case *gastrologv1.VaultCtlCommand_BurnSeqLeaseTail:
+		return "CmdBurnSeqLeaseTail", c.BurnSeqLeaseTail.GetHolderId()
+	case *gastrologv1.VaultCtlCommand_BumpSeqAllocatorEpoch:
+		return "CmdBumpSeqAllocatorEpoch", ""
+	case *gastrologv1.VaultCtlCommand_PublishFence:
+		return "CmdPublishFence", ""
 	default:
-		return fmt.Sprintf("CmdUnknown(%d)", cmd)
+		return "CmdUnknown", ""
 	}
 }
 

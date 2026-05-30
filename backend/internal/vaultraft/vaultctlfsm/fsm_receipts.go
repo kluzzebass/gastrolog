@@ -30,13 +30,12 @@ package vaultctlfsm
 // — no special catchup path.
 
 import (
-	"encoding/binary"
 	"errors"
-	"fmt"
-	"io"
 	"maps"
+	"slices"
 	"time"
 
+	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
 )
 
@@ -158,47 +157,36 @@ func (f *FSM) ChunkResidency(chunkID chunk.ChunkID, placementNodeIDs []string) [
 
 // ---------- Apply functions (caller MUST hold f.mu) ----------
 
-// CmdRequestDelete payload:
-//
-//	16 bytes  chunk ID
-//	 8 bytes  proposedAt nanos (BE int64)
-//	 2 bytes  reason length (BE uint16)
-//	 N bytes  reason string
-//	 4 bytes  expectedFrom count (BE uint32)
-//	repeated:
-//	   2 bytes  node ID length (BE uint16)
-//	   M bytes  node ID string
-func (f *FSM) applyRequestDelete(data []byte) (*PendingDelete, error) {
-	entry, err := decodeRequestDelete(data)
-	if err != nil {
-		return nil, err
-	}
+// applyRequestDelete records a new in-flight delete with the expected-acks
+// set captured at proposal time.
+func (f *FSM) applyRequestDelete(c *gastrologv1.RequestDeleteCommand) (*PendingDelete, error) {
+	chunkID := chunkIDFromProto(c.GetId())
 
 	// Idempotency: if this chunk already has a pending entry, treat
 	// the second request as a no-op (and don't fire the callback).
 	// Re-proposing CmdRequestDelete would otherwise reset the
 	// expectedFrom set and erase any acks already in-flight.
-	if _, exists := f.pendingDeletes[entry.ChunkID]; exists {
+	if _, exists := f.pendingDeletes[chunkID]; exists {
 		return nil, nil
 	}
 
-	p := &PendingDelete{
-		ChunkID:      entry.ChunkID,
-		Reason:       entry.Reason,
-		ProposedAt:   entry.ProposedAt,
-		ExpectedFrom: entry.ExpectedFrom,
+	expectedFrom := make(map[string]bool, len(c.GetExpectedFrom()))
+	for _, n := range c.GetExpectedFrom() {
+		expectedFrom[n] = true
 	}
-	f.pendingDeletes[entry.ChunkID] = p
+	p := &PendingDelete{
+		ChunkID:      chunkID,
+		Reason:       c.GetReason(),
+		ProposedAt:   time.Unix(0, c.GetProposedAtNanos()),
+		ExpectedFrom: expectedFrom,
+	}
+	f.pendingDeletes[chunkID] = p
 
 	cp := p.Copy()
 	return &cp, nil
 }
 
-// CmdAckDelete payload:
-//
-//	16 bytes  chunk ID
-//	 2 bytes  node ID length (BE uint16)
-//	 N bytes  node ID string
+// applyAckDelete removes the acking node from a pending delete's expected set.
 //
 // Returns the chunk ID and the acking node ID for the post-apply
 // callback. If the entry is gone (already finalized) or the node was
@@ -216,11 +204,9 @@ func (f *FSM) applyRequestDelete(data []byte) (*PendingDelete, error) {
 // the protocol for explicit external triggers (operator-initiated
 // cleanup) but the receipt protocol's natural completion no longer
 // depends on a leader-only post-apply callback. See gastrolog-3qr8z.
-func (f *FSM) applyAckDelete(data []byte) (*chunk.ChunkID, string, bool, error) {
-	id, nodeID, err := decodeAckDelete(data)
-	if err != nil {
-		return nil, "", false, err
-	}
+func (f *FSM) applyAckDelete(c *gastrologv1.AckDeleteCommand) (*chunk.ChunkID, string, bool, error) {
+	id := chunkIDFromProto(c.GetId())
+	nodeID := c.GetNodeId()
 	p, ok := f.pendingDeletes[id]
 	if !ok {
 		return nil, "", false, nil
@@ -242,24 +228,16 @@ func (f *FSM) applyAckDelete(data []byte) (*chunk.ChunkID, string, bool, error) 
 	return &id, nodeID, true, nil
 }
 
-// CmdFinalizeDelete payload:
-//
-//	16 bytes  chunk ID
-//
-// The leader proposes this once expectedFrom is empty for an entry.
-// Apply removes the entry from pendingDeletes, removes the chunk
-// metadata from the manifest (f.chunks), and records a tombstone —
-// matching the legacy CmdDeleteChunk apply contract. Without the
+// applyFinalizeDelete removes the entry from pendingDeletes, removes the
+// chunk metadata from the manifest (f.chunks), and records a tombstone —
+// matching the legacy CmdDeleteChunk apply contract. The leader proposes
+// this once expectedFrom is empty for an entry. Without the
 // chunks/tombstone updates the manifest carries dead entries forever
 // and stale ImportSealed RPCs could re-create the chunk after the
 // cluster believed it deleted. Idempotent: re-applying for an entry
 // already finalized is a no-op (tombstone update aside).
-func (f *FSM) applyFinalizeDelete(data []byte) (*chunk.ChunkID, error) {
-	if len(data) < 16 {
-		return nil, fmt.Errorf("finalize delete: payload too short (%d bytes)", len(data))
-	}
-	var id chunk.ChunkID
-	copy(id[:], data[:16])
+func (f *FSM) applyFinalizeDelete(c *gastrologv1.FinalizeDeleteCommand) (*chunk.ChunkID, error) {
+	id := chunkIDFromProto(c.GetId())
 
 	// Tombstone unconditionally so a stale ImportSealed/Append/Seal
 	// command racing the receipt protocol can be rejected even if the
@@ -291,8 +269,6 @@ func (f *FSM) applyFinalizeDelete(data []byte) (*chunk.ChunkID, error) {
 // whose ExpectedFrom became empty as a result of the prune — those
 // chunks are atomically finalized in the same apply (gastrolog-15fm8).
 //
-// Wire format: [1 byte cmd][2 bytes nodeID-len][nodeID-bytes].
-//
 // Idempotent: pruning a node that no entry expected from is a no-op.
 // Pruning twice yields the same final state (the second pass finds
 // nothing to remove and returns an empty finalizable list).
@@ -309,15 +285,8 @@ func (f *FSM) applyFinalizeDelete(data []byte) (*chunk.ChunkID, error) {
 // onPruneNode callback's audit / observability use; subscribers
 // expecting onFinalizeDelete for each chunk receive it via the
 // per-chunk firing in fsm.go's applyLocked dispatch.
-func (f *FSM) applyPruneNode(data []byte) (string, []chunk.ChunkID, error) {
-	if len(data) < 2 {
-		return "", nil, fmt.Errorf("prune node: payload too short (%d bytes)", len(data))
-	}
-	nodeLen := int(binary.BigEndian.Uint16(data[0:2]))
-	if len(data) < 2+nodeLen {
-		return "", nil, fmt.Errorf("prune node: truncated node ID (%d bytes for %d)", len(data)-2, nodeLen)
-	}
-	nodeID := string(data[2 : 2+nodeLen])
+func (f *FSM) applyPruneNode(c *gastrologv1.PruneNodeCommand) (string, []chunk.ChunkID, error) {
+	nodeID := c.GetNodeId()
 	if nodeID == "" {
 		return "", nil, errors.New("prune node: empty node ID")
 	}
@@ -343,248 +312,86 @@ func (f *FSM) applyPruneNode(data []byte) (string, []chunk.ChunkID, error) {
 
 // ---------- Command builders (used by callers before Raft.Apply) ----------
 
-// MarshalRequestDelete builds the Raft log data for CmdRequestDelete.
+// NewRequestDelete builds a CmdRequestDelete command message.
 // expectedFrom is the set of node IDs expected to ack; reason is a
 // short free-form string identifying why the chunk is being deleted
 // (e.g. "retention-ttl", "transition-source-expire", "manual-delete-rpc").
+func NewRequestDelete(id chunk.ChunkID, proposedAt time.Time, reason string, expectedFrom []string) *gastrologv1.VaultCtlCommand {
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_RequestDelete{RequestDelete: &gastrologv1.RequestDeleteCommand{
+		Id:              id[:],
+		ProposedAtNanos: proposedAt.UnixNano(),
+		Reason:          reason,
+		ExpectedFrom:    expectedFrom,
+	}}}
+}
+
+// MarshalRequestDelete builds the Raft log data for CmdRequestDelete.
 func MarshalRequestDelete(id chunk.ChunkID, proposedAt time.Time, reason string, expectedFrom []string) []byte {
-	if len(reason) > 0xFFFF {
-		reason = reason[:0xFFFF] // defensive truncate; reasons are short
-	}
-	size := 1 + 16 + 8 + 2 + len(reason) + 4
-	for _, n := range expectedFrom {
-		size += 2 + len(n)
-	}
-	buf := make([]byte, 0, size)
-	buf = append(buf, byte(CmdRequestDelete))
-	buf = append(buf, id[:]...)
-	var nanos [8]byte
-	binary.BigEndian.PutUint64(nanos[:], uint64(proposedAt.UnixNano()))
-	buf = append(buf, nanos[:]...)
-	var rl [2]byte
-	binary.BigEndian.PutUint16(rl[:], uint16(len(reason))) //nolint:gosec // G115: bounded above
-	buf = append(buf, rl[:]...)
-	buf = append(buf, reason...)
-	var efc [4]byte
-	binary.BigEndian.PutUint32(efc[:], uint32(len(expectedFrom))) //nolint:gosec // G115: cluster size fits uint32
-	buf = append(buf, efc[:]...)
-	for _, n := range expectedFrom {
-		var nl [2]byte
-		binary.BigEndian.PutUint16(nl[:], uint16(len(n))) //nolint:gosec // G115: node ID strings are <64KB
-		buf = append(buf, nl[:]...)
-		buf = append(buf, n...)
-	}
-	return buf
+	return mustMarshalCommand(NewRequestDelete(id, proposedAt, reason, expectedFrom))
+}
+
+// NewAckDelete builds a CmdAckDelete command message.
+func NewAckDelete(id chunk.ChunkID, nodeID string) *gastrologv1.VaultCtlCommand {
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_AckDelete{AckDelete: &gastrologv1.AckDeleteCommand{Id: id[:], NodeId: nodeID}}}
 }
 
 // MarshalAckDelete builds the Raft log data for CmdAckDelete.
 func MarshalAckDelete(id chunk.ChunkID, nodeID string) []byte {
-	buf := make([]byte, 0, 1+16+2+len(nodeID))
-	buf = append(buf, byte(CmdAckDelete))
-	buf = append(buf, id[:]...)
-	var nl [2]byte
-	binary.BigEndian.PutUint16(nl[:], uint16(len(nodeID))) //nolint:gosec // G115: node ID strings are <64KB
-	buf = append(buf, nl[:]...)
-	buf = append(buf, nodeID...)
-	return buf
+	return mustMarshalCommand(NewAckDelete(id, nodeID))
+}
+
+// NewFinalizeDelete builds a CmdFinalizeDelete command message.
+func NewFinalizeDelete(id chunk.ChunkID) *gastrologv1.VaultCtlCommand {
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_FinalizeDelete{FinalizeDelete: &gastrologv1.FinalizeDeleteCommand{Id: id[:]}}}
 }
 
 // MarshalFinalizeDelete builds the Raft log data for CmdFinalizeDelete.
 func MarshalFinalizeDelete(id chunk.ChunkID) []byte {
-	buf := make([]byte, 1+16)
-	buf[0] = byte(CmdFinalizeDelete)
-	copy(buf[1:17], id[:])
-	return buf
+	return mustMarshalCommand(NewFinalizeDelete(id))
 }
 
-// MarshalPruneNode builds the Raft log data for CmdPruneNode. Wire
-// format: [1 byte cmd][2 bytes nodeID-len][nodeID-bytes]. The leader
+// NewPruneNode builds a CmdPruneNode command message. The leader
 // proposes this after a node is removed from the vault-ctl Raft group
 // (decommissioned or rebalanced away) so its outstanding ack obligations
 // don't pin pendingDeletes entries forever. See gastrolog-51gme step 10.
+func NewPruneNode(nodeID string) *gastrologv1.VaultCtlCommand {
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_PruneNode{PruneNode: &gastrologv1.PruneNodeCommand{NodeId: nodeID}}}
+}
+
+// MarshalPruneNode builds the Raft log data for CmdPruneNode.
 func MarshalPruneNode(nodeID string) []byte {
-	if len(nodeID) > 0xFFFF {
-		nodeID = nodeID[:0xFFFF]
-	}
-	buf := make([]byte, 0, 1+2+len(nodeID))
-	buf = append(buf, byte(CmdPruneNode))
-	var nl [2]byte
-	binary.BigEndian.PutUint16(nl[:], uint16(len(nodeID))) //nolint:gosec // G115: node ID strings are <64KB
-	buf = append(buf, nl[:]...)
-	buf = append(buf, nodeID...)
-	return buf
+	return mustMarshalCommand(NewPruneNode(nodeID))
 }
 
-// ---------- Wire decoders (shared between Apply and snapshot Restore) ----------
+// ---------- Snapshot proto converters ----------
 
-func decodeRequestDelete(data []byte) (PendingDelete, error) {
-	if len(data) < 16+8+2+4 {
-		return PendingDelete{}, fmt.Errorf("request delete: payload too short (%d bytes)", len(data))
-	}
-	var entry PendingDelete
-	copy(entry.ChunkID[:], data[:16])
-	entry.ProposedAt = time.Unix(0, int64(binary.BigEndian.Uint64(data[16:24]))) //nolint:gosec // G115: nano timestamp round-trip
-
-	off := 24
-	reasonLen := int(binary.BigEndian.Uint16(data[off : off+2]))
-	off += 2
-	if len(data) < off+reasonLen+4 {
-		return PendingDelete{}, errors.New("request delete: payload truncated in reason")
-	}
-	entry.Reason = string(data[off : off+reasonLen])
-	off += reasonLen
-
-	expectedCount := int(binary.BigEndian.Uint32(data[off : off+4]))
-	off += 4
-	entry.ExpectedFrom = make(map[string]bool, expectedCount)
-	for i := range expectedCount {
-		if len(data) < off+2 {
-			return PendingDelete{}, fmt.Errorf("request delete: payload truncated reading node id %d length", i)
-		}
-		nl := int(binary.BigEndian.Uint16(data[off : off+2]))
-		off += 2
-		if len(data) < off+nl {
-			return PendingDelete{}, fmt.Errorf("request delete: payload truncated reading node id %d body", i)
-		}
-		entry.ExpectedFrom[string(data[off:off+nl])] = true
-		off += nl
-	}
-	return entry, nil
-}
-
-func decodeAckDelete(data []byte) (chunk.ChunkID, string, error) {
-	if len(data) < 16+2 {
-		return chunk.ChunkID{}, "", fmt.Errorf("ack delete: payload too short (%d bytes)", len(data))
-	}
-	var id chunk.ChunkID
-	copy(id[:], data[:16])
-	nl := int(binary.BigEndian.Uint16(data[16:18]))
-	if len(data) < 18+nl {
-		return chunk.ChunkID{}, "", errors.New("ack delete: payload truncated in node id")
-	}
-	return id, string(data[18 : 18+nl]), nil
-}
-
-// ---------- Snapshot encode / decode ----------
-//
-// Section format (sectionPendingDeletes = 4):
-//
-//	4 bytes  count of entries (BE uint32)
-//	repeated per entry:
-//	  16 bytes  chunk ID
-//	   8 bytes  proposedAt nanos (BE int64)
-//	   2 bytes  reason length (BE uint16)
-//	   N bytes  reason
-//	   4 bytes  expectedFrom count (BE uint32)
-//	   repeated:
-//	      2 bytes  node ID length (BE uint16)
-//	      M bytes  node ID
-
-func encodePendingDeletesSection(w io.Writer, entries []PendingDelete) error {
-	if len(entries) == 0 {
-		return nil // omit section entirely when empty
-	}
-	// Compute payload length up front so writeSectionHeader sees the
-	// correct figure (defensive: snapshot writer expects fixed-length
-	// sections so a partial truncation can be detected).
-	payloadLen := 4
-	for i := range entries {
-		payloadLen += 16 + 8 + 2 + len(entries[i].Reason) + 4
-		for n := range entries[i].ExpectedFrom {
-			payloadLen += 2 + len(n)
-		}
-	}
-	if payloadLen > 0xFFFFFFFF {
-		return errors.New("pendingDeletes section exceeds 4 GiB; corruption suspected")
-	}
-	if err := writeSectionHeader(w, sectionPendingDeletes, uint32(payloadLen)); err != nil {
-		return err
-	}
-	var countBuf [4]byte
-	binary.BigEndian.PutUint32(countBuf[:], uint32(len(entries))) //nolint:gosec // G115: count fits uint32
-	if _, err := w.Write(countBuf[:]); err != nil {
-		return fmt.Errorf("write pending-deletes count: %w", err)
-	}
-	for i := range entries {
-		if err := encodePendingDeleteEntry(w, &entries[i]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func encodePendingDeleteEntry(w io.Writer, p *PendingDelete) error {
-	var hdr [16 + 8 + 2]byte
-	copy(hdr[0:16], p.ChunkID[:])
-	binary.BigEndian.PutUint64(hdr[16:24], uint64(p.ProposedAt.UnixNano()))
-	binary.BigEndian.PutUint16(hdr[24:26], uint16(len(p.Reason)))           //nolint:gosec // G115: reason length bounded
-	if _, err := w.Write(hdr[:]); err != nil {
-		return fmt.Errorf("write pending-delete header: %w", err)
-	}
-	if _, err := w.Write([]byte(p.Reason)); err != nil {
-		return fmt.Errorf("write pending-delete reason: %w", err)
-	}
-	var efc [4]byte
-	binary.BigEndian.PutUint32(efc[:], uint32(len(p.ExpectedFrom))) //nolint:gosec // G115: cluster size fits uint32
-	if _, err := w.Write(efc[:]); err != nil {
-		return fmt.Errorf("write pending-delete expected-from count: %w", err)
-	}
+// pendingDeleteToProto converts an in-flight delete to its snapshot proto.
+// ExpectedFrom map keys are emitted in sorted order so the encoding is
+// deterministic across snapshots of equal FSM state.
+func pendingDeleteToProto(p *PendingDelete) *gastrologv1.PendingDelete {
+	expected := make([]string, 0, len(p.ExpectedFrom))
 	for n := range p.ExpectedFrom {
-		var nl [2]byte
-		binary.BigEndian.PutUint16(nl[:], uint16(len(n))) //nolint:gosec // G115: node ID strings are <64KB
-		if _, err := w.Write(nl[:]); err != nil {
-			return fmt.Errorf("write pending-delete node id length: %w", err)
-		}
-		if _, err := w.Write([]byte(n)); err != nil {
-			return fmt.Errorf("write pending-delete node id: %w", err)
-		}
+		expected = append(expected, n)
 	}
-	return nil
+	slices.Sort(expected)
+	return &gastrologv1.PendingDelete{
+		ChunkId:         p.ChunkID[:],
+		Reason:          p.Reason,
+		ProposedAtNanos: p.ProposedAt.UnixNano(),
+		ExpectedFrom:    expected,
+	}
 }
 
-func readPendingDeletesSection(r io.Reader) (map[chunk.ChunkID]*PendingDelete, error) {
-	var countBuf [4]byte
-	if _, err := io.ReadFull(r, countBuf[:]); err != nil {
-		return nil, fmt.Errorf("read pending-deletes count: %w", err)
+// pendingDeleteFromProto converts a snapshot proto back to a PendingDelete.
+func pendingDeleteFromProto(p *gastrologv1.PendingDelete) PendingDelete {
+	out := PendingDelete{
+		ChunkID:      chunkIDFromProto(p.GetChunkId()),
+		Reason:       p.GetReason(),
+		ProposedAt:   time.Unix(0, p.GetProposedAtNanos()),
+		ExpectedFrom: make(map[string]bool, len(p.GetExpectedFrom())),
 	}
-	count := binary.BigEndian.Uint32(countBuf[:])
-	out := make(map[chunk.ChunkID]*PendingDelete, count)
-	for i := range count {
-		var hdr [16 + 8 + 2]byte
-		if _, err := io.ReadFull(r, hdr[:]); err != nil {
-			return nil, fmt.Errorf("read pending-delete %d header: %w", i, err)
-		}
-		var p PendingDelete
-		copy(p.ChunkID[:], hdr[0:16])
-		p.ProposedAt = time.Unix(0, int64(binary.BigEndian.Uint64(hdr[16:24]))) //nolint:gosec // G115: round-trip
-		reasonLen := int(binary.BigEndian.Uint16(hdr[24:26]))
-		if reasonLen > 0 {
-			reasonBuf := make([]byte, reasonLen)
-			if _, err := io.ReadFull(r, reasonBuf); err != nil {
-				return nil, fmt.Errorf("read pending-delete %d reason: %w", i, err)
-			}
-			p.Reason = string(reasonBuf)
-		}
-		var efcBuf [4]byte
-		if _, err := io.ReadFull(r, efcBuf[:]); err != nil {
-			return nil, fmt.Errorf("read pending-delete %d expected-from count: %w", i, err)
-		}
-		efc := binary.BigEndian.Uint32(efcBuf[:])
-		p.ExpectedFrom = make(map[string]bool, efc)
-		for j := range efc {
-			var nlBuf [2]byte
-			if _, err := io.ReadFull(r, nlBuf[:]); err != nil {
-				return nil, fmt.Errorf("read pending-delete %d node %d length: %w", i, j, err)
-			}
-			nl := int(binary.BigEndian.Uint16(nlBuf[:]))
-			nbuf := make([]byte, nl)
-			if _, err := io.ReadFull(r, nbuf); err != nil {
-				return nil, fmt.Errorf("read pending-delete %d node %d body: %w", i, j, err)
-			}
-			p.ExpectedFrom[string(nbuf)] = true
-		}
-		pp := p
-		out[p.ChunkID] = &pp
+	for _, n := range p.GetExpectedFrom() {
+		out.ExpectedFrom[n] = true
 	}
-	return out, nil
+	return out
 }
