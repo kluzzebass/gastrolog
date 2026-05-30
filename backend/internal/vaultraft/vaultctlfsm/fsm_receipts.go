@@ -30,11 +30,9 @@ package vaultctlfsm
 // — no special catchup path.
 
 import (
-	"encoding/binary"
 	"errors"
-	"fmt"
-	"io"
 	"maps"
+	"slices"
 	"time"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
@@ -365,126 +363,35 @@ func MarshalPruneNode(nodeID string) []byte {
 	return mustMarshalCommand(NewPruneNode(nodeID))
 }
 
-// ---------- Snapshot encode / decode ----------
-//
-// Section format (sectionPendingDeletes = 4):
-//
-//	4 bytes  count of entries (BE uint32)
-//	repeated per entry:
-//	  16 bytes  chunk ID
-//	   8 bytes  proposedAt nanos (BE int64)
-//	   2 bytes  reason length (BE uint16)
-//	   N bytes  reason
-//	   4 bytes  expectedFrom count (BE uint32)
-//	   repeated:
-//	      2 bytes  node ID length (BE uint16)
-//	      M bytes  node ID
+// ---------- Snapshot proto converters ----------
 
-func encodePendingDeletesSection(w io.Writer, entries []PendingDelete) error {
-	if len(entries) == 0 {
-		return nil // omit section entirely when empty
-	}
-	// Compute payload length up front so writeSectionHeader sees the
-	// correct figure (defensive: snapshot writer expects fixed-length
-	// sections so a partial truncation can be detected).
-	payloadLen := 4
-	for i := range entries {
-		payloadLen += 16 + 8 + 2 + len(entries[i].Reason) + 4
-		for n := range entries[i].ExpectedFrom {
-			payloadLen += 2 + len(n)
-		}
-	}
-	if payloadLen > 0xFFFFFFFF {
-		return errors.New("pendingDeletes section exceeds 4 GiB; corruption suspected")
-	}
-	if err := writeSectionHeader(w, sectionPendingDeletes, uint32(payloadLen)); err != nil {
-		return err
-	}
-	var countBuf [4]byte
-	binary.BigEndian.PutUint32(countBuf[:], uint32(len(entries))) //nolint:gosec // G115: count fits uint32
-	if _, err := w.Write(countBuf[:]); err != nil {
-		return fmt.Errorf("write pending-deletes count: %w", err)
-	}
-	for i := range entries {
-		if err := encodePendingDeleteEntry(w, &entries[i]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func encodePendingDeleteEntry(w io.Writer, p *PendingDelete) error {
-	var hdr [16 + 8 + 2]byte
-	copy(hdr[0:16], p.ChunkID[:])
-	binary.BigEndian.PutUint64(hdr[16:24], uint64(p.ProposedAt.UnixNano()))
-	binary.BigEndian.PutUint16(hdr[24:26], uint16(len(p.Reason))) //nolint:gosec // G115: reason length bounded
-	if _, err := w.Write(hdr[:]); err != nil {
-		return fmt.Errorf("write pending-delete header: %w", err)
-	}
-	if _, err := w.Write([]byte(p.Reason)); err != nil {
-		return fmt.Errorf("write pending-delete reason: %w", err)
-	}
-	var efc [4]byte
-	binary.BigEndian.PutUint32(efc[:], uint32(len(p.ExpectedFrom))) //nolint:gosec // G115: cluster size fits uint32
-	if _, err := w.Write(efc[:]); err != nil {
-		return fmt.Errorf("write pending-delete expected-from count: %w", err)
-	}
+// pendingDeleteToProto converts an in-flight delete to its snapshot proto.
+// ExpectedFrom map keys are emitted in sorted order so the encoding is
+// deterministic across snapshots of equal FSM state.
+func pendingDeleteToProto(p *PendingDelete) *gastrologv1.PendingDelete {
+	expected := make([]string, 0, len(p.ExpectedFrom))
 	for n := range p.ExpectedFrom {
-		var nl [2]byte
-		binary.BigEndian.PutUint16(nl[:], uint16(len(n))) //nolint:gosec // G115: node ID strings are <64KB
-		if _, err := w.Write(nl[:]); err != nil {
-			return fmt.Errorf("write pending-delete node id length: %w", err)
-		}
-		if _, err := w.Write([]byte(n)); err != nil {
-			return fmt.Errorf("write pending-delete node id: %w", err)
-		}
+		expected = append(expected, n)
 	}
-	return nil
+	slices.Sort(expected)
+	return &gastrologv1.PendingDelete{
+		ChunkId:         p.ChunkID[:],
+		Reason:          p.Reason,
+		ProposedAtNanos: p.ProposedAt.UnixNano(),
+		ExpectedFrom:    expected,
+	}
 }
 
-func readPendingDeletesSection(r io.Reader) (map[chunk.ChunkID]*PendingDelete, error) {
-	var countBuf [4]byte
-	if _, err := io.ReadFull(r, countBuf[:]); err != nil {
-		return nil, fmt.Errorf("read pending-deletes count: %w", err)
+// pendingDeleteFromProto converts a snapshot proto back to a PendingDelete.
+func pendingDeleteFromProto(p *gastrologv1.PendingDelete) PendingDelete {
+	out := PendingDelete{
+		ChunkID:      chunkIDFromProto(p.GetChunkId()),
+		Reason:       p.GetReason(),
+		ProposedAt:   time.Unix(0, p.GetProposedAtNanos()),
+		ExpectedFrom: make(map[string]bool, len(p.GetExpectedFrom())),
 	}
-	count := binary.BigEndian.Uint32(countBuf[:])
-	out := make(map[chunk.ChunkID]*PendingDelete, count)
-	for i := range count {
-		var hdr [16 + 8 + 2]byte
-		if _, err := io.ReadFull(r, hdr[:]); err != nil {
-			return nil, fmt.Errorf("read pending-delete %d header: %w", i, err)
-		}
-		var p PendingDelete
-		copy(p.ChunkID[:], hdr[0:16])
-		p.ProposedAt = time.Unix(0, int64(binary.BigEndian.Uint64(hdr[16:24]))) //nolint:gosec // G115: round-trip
-		reasonLen := int(binary.BigEndian.Uint16(hdr[24:26]))
-		if reasonLen > 0 {
-			reasonBuf := make([]byte, reasonLen)
-			if _, err := io.ReadFull(r, reasonBuf); err != nil {
-				return nil, fmt.Errorf("read pending-delete %d reason: %w", i, err)
-			}
-			p.Reason = string(reasonBuf)
-		}
-		var efcBuf [4]byte
-		if _, err := io.ReadFull(r, efcBuf[:]); err != nil {
-			return nil, fmt.Errorf("read pending-delete %d expected-from count: %w", i, err)
-		}
-		efc := binary.BigEndian.Uint32(efcBuf[:])
-		p.ExpectedFrom = make(map[string]bool, efc)
-		for j := range efc {
-			var nlBuf [2]byte
-			if _, err := io.ReadFull(r, nlBuf[:]); err != nil {
-				return nil, fmt.Errorf("read pending-delete %d node %d length: %w", i, j, err)
-			}
-			nl := int(binary.BigEndian.Uint16(nlBuf[:]))
-			nbuf := make([]byte, nl)
-			if _, err := io.ReadFull(r, nbuf); err != nil {
-				return nil, fmt.Errorf("read pending-delete %d node %d body: %w", i, j, err)
-			}
-			p.ExpectedFrom[string(nbuf)] = true
-		}
-		pp := p
-		out[p.ChunkID] = &pp
+	for _, n := range p.GetExpectedFrom() {
+		out.ExpectedFrom[n] = true
 	}
-	return out, nil
+	return out
 }

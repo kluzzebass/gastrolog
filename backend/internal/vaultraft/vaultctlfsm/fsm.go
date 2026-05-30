@@ -1,11 +1,12 @@
 package vaultctlfsm
 
 import (
-	"encoding/binary"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"maps"
+	"slices"
 	"sync"
 	"time"
 
@@ -694,58 +695,105 @@ func captureID(applyResult any, id chunk.ChunkID) *chunk.ChunkID {
 	return &id
 }
 
-// Snapshot returns a point-in-time snapshot of all chunk metadata.
-func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) {
+// SnapshotProto builds the proto representation of all FSM state. Exported
+// so the outer vaultraft FSM can embed it in a VaultGroupSnapshot without a
+// re-marshal round-trip (gastrolog-5lrg7).
+func (f *FSM) SnapshotProto() *gastrologv1.VaultCtlSnapshot {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	entries := make([]ManifestEntry, 0, len(f.chunks))
-	for _, e := range f.chunks {
-		entries = append(entries, *e)
-	}
-	tombstones := make(map[chunk.ChunkID]time.Time, len(f.tombstones))
-	maps.Copy(tombstones, f.tombstones)
-	pendingDeletes := make([]PendingDelete, 0, len(f.pendingDeletes))
-	for _, p := range f.pendingDeletes {
-		pendingDeletes = append(pendingDeletes, p.Copy())
-	}
-	seqSnap := f.seqAllocatorSnapshotLocked()
-	fenceSnap := f.fenceSnapshotLocked()
-	return &fsmSnapshot{
-		entries:        entries,
-		tombstones:     tombstones,
-		pendingDeletes: pendingDeletes,
-		seqAllocator:   seqSnap,
-		fences:         fenceSnap,
-	}, nil
+	return f.snapshotProtoLocked()
 }
 
-// Restore replaces FSM state from a snapshot.
+// snapshotProtoLocked builds the proto snapshot. Map-backed sections (entries,
+// tombstones, pending deletes) are emitted in chunk-ID order so equal FSM
+// state always yields a byte-identical snapshot. InstallSnapshot does not
+// require canonical bytes, but determinism keeps snapshot diffing, debugging,
+// and round-trip equality checks sane (gastrolog-5lrg7).
+func (f *FSM) snapshotProtoLocked() *gastrologv1.VaultCtlSnapshot {
+	snap := &gastrologv1.VaultCtlSnapshot{
+		Entries:        make([]*gastrologv1.ManifestEntry, 0, len(f.chunks)),
+		Tombstones:     make([]*gastrologv1.Tombstone, 0, len(f.tombstones)),
+		PendingDeletes: make([]*gastrologv1.PendingDelete, 0, len(f.pendingDeletes)),
+	}
+
+	entryIDs := slices.SortedFunc(maps.Keys(f.chunks), compareChunkID)
+	for _, id := range entryIDs {
+		snap.Entries = append(snap.Entries, entryToProto(f.chunks[id]))
+	}
+
+	tombIDs := slices.SortedFunc(maps.Keys(f.tombstones), compareChunkID)
+	for _, id := range tombIDs {
+		idCopy := id
+		snap.Tombstones = append(snap.Tombstones, &gastrologv1.Tombstone{
+			ChunkId:        idCopy[:],
+			DeletedAtNanos: f.tombstones[id].UnixNano(),
+		})
+	}
+
+	pdIDs := slices.SortedFunc(maps.Keys(f.pendingDeletes), compareChunkID)
+	for _, id := range pdIDs {
+		snap.PendingDeletes = append(snap.PendingDeletes, pendingDeleteToProto(f.pendingDeletes[id]))
+	}
+
+	snap.SeqAllocator = seqAllocatorToProto(f.seqAllocatorSnapshotLocked())
+	snap.Fences = fenceSnapshotToProto(f.fenceSnapshotLocked())
+	return snap
+}
+
+// compareChunkID orders chunk IDs by their raw bytes for deterministic
+// snapshot section ordering.
+func compareChunkID(a, b chunk.ChunkID) int {
+	return bytes.Compare(a[:], b[:])
+}
+
+// Snapshot returns a point-in-time snapshot of all chunk metadata.
+func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) {
+	return &fsmSnapshot{snap: f.SnapshotProto()}, nil
+}
+
+// RestoreProto replaces FSM state from a decoded VaultCtlSnapshot.
+func (f *FSM) RestoreProto(snap *gastrologv1.VaultCtlSnapshot) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.restoreFromProtoLocked(snap)
+}
+
+// Restore replaces FSM state from a snapshot (marshaled VaultCtlSnapshot).
 func (f *FSM) Restore(rc io.ReadCloser) error {
 	defer func() { _ = rc.Close() }()
 
-	snap, err := decodeSnapshot(rc)
+	raw, err := io.ReadAll(rc)
 	if err != nil {
-		return fmt.Errorf("restore chunk FSM: %w", err)
+		return fmt.Errorf("restore chunk FSM: read: %w", err)
 	}
-
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.chunks = make(map[chunk.ChunkID]*ManifestEntry, len(snap.entries))
-	for i := range snap.entries {
-		f.chunks[snap.entries[i].ID] = &snap.entries[i]
+	var snap gastrologv1.VaultCtlSnapshot
+	if err := proto.Unmarshal(raw, &snap); err != nil {
+		return fmt.Errorf("restore chunk FSM: decode: %w", err)
 	}
-	f.tombstones = snap.tombstones
-	if f.tombstones == nil {
-		f.tombstones = make(map[chunk.ChunkID]time.Time)
-	}
-	f.pendingDeletes = snap.pendingDeletes
-	if f.pendingDeletes == nil {
-		f.pendingDeletes = make(map[chunk.ChunkID]*PendingDelete)
-	}
-	applySeqAllocatorSnapshotLocked(f, snap.seqAllocator)
-	applyFenceSnapshotLocked(f, snap.fences)
-	f.ready = true
+	f.RestoreProto(&snap)
 	return nil
+}
+
+// restoreFromProtoLocked repopulates FSM state from a decoded snapshot.
+// Caller MUST hold f.mu.
+func (f *FSM) restoreFromProtoLocked(snap *gastrologv1.VaultCtlSnapshot) {
+	f.chunks = make(map[chunk.ChunkID]*ManifestEntry, len(snap.GetEntries()))
+	for _, pe := range snap.GetEntries() {
+		e := entryFromProto(pe)
+		f.chunks[e.ID] = &e
+	}
+	f.tombstones = make(map[chunk.ChunkID]time.Time, len(snap.GetTombstones()))
+	for _, ts := range snap.GetTombstones() {
+		f.tombstones[chunkIDFromProto(ts.GetChunkId())] = time.Unix(0, ts.GetDeletedAtNanos())
+	}
+	f.pendingDeletes = make(map[chunk.ChunkID]*PendingDelete, len(snap.GetPendingDeletes()))
+	for _, pp := range snap.GetPendingDeletes() {
+		p := pendingDeleteFromProto(pp)
+		f.pendingDeletes[p.ChunkID] = &p
+	}
+	applySeqAllocatorSnapshotLocked(f, seqAllocatorFromProto(snap.GetSeqAllocator()))
+	applyFenceSnapshotLocked(f, fenceSnapshotFromProto(snap.GetFences()))
+	f.ready = true
 }
 
 // ---------- Command application ----------
@@ -1157,361 +1205,28 @@ func entryFromProto(p *gastrologv1.ManifestEntry) ManifestEntry {
 
 // ---------- Snapshot ----------
 //
-// Format (version 1):
-//
-//	[8 bytes magic "GLTRSNAP"]
-//	[4 bytes version: uint32 big-endian]
-//	[repeating sections until EOF:]
-//	  [1 byte sectionKind]
-//	  [4 bytes payload length: uint32 big-endian]
-//	  [payload bytes]
-//
-// Section kinds:
-//	1 = chunk entries   (payload: N×126 byte fixed entries)
-//	2 = tombstones      (payload: 4 byte count + N×(16 ID + 8 nanos))
-//	3 = pendingDeletes  (gastrolog-51gme step 2)
-//	4 = seqAllocator    (gastrolog-16w8x lease control state)
-//	5 = fences          (gastrolog-qzguu published fence history)
-//
-// Section kind 2 was previously "transition receipts" and is renumbered
-// here after gastrolog-5sywa removed the receipt protocol entirely.
-// User-authorized cluster reinitialization applies — old snapshots
-// aren't expected to replay after this change.
-//
-// Replaces an older sentinel-based layout that read 126-byte entries until
-// EOF and used impossible-ChunkID markers to in-band the extra sections.
-// The sentinel approach worked but grew brittle with each new section and
-// assumed first-byte values that new identity schemes could eventually
-// violate. Versioned header lets the decoder switch cleanly and gives us
-// real room to evolve. Old snapshots that predate this format are NOT
-// backward-readable by design; Raft will regenerate snapshots from the
-// log on next apply cycle, and pre-production data dirs get wiped anyway.
-
-var snapshotMagic = [8]byte{'G', 'L', 'T', 'R', 'S', 'N', 'A', 'P'}
-
-const snapshotVersion uint32 = 1
-
-type sectionKind byte
-
-const (
-	sectionEntries        sectionKind = 1
-	sectionTombstones     sectionKind = 2
-	sectionPendingDeletes sectionKind = 3 // gastrolog-51gme step 2
-)
+// The snapshot is a marshaled gastrologv1.VaultCtlSnapshot (gastrolog-5lrg7).
+// It replaced a hand-rolled versioned section format (magic "GLTRSNAP" +
+// per-kind length-prefixed sections). Old snapshots that predate the proto
+// format are NOT backward-readable by design; the project permits cluster
+// re-initialization (zero deployments) and Raft regenerates snapshots from
+// the log on the next apply cycle.
 
 type fsmSnapshot struct {
-	entries        []ManifestEntry
-	tombstones     map[chunk.ChunkID]time.Time
-	pendingDeletes []PendingDelete // gastrolog-51gme step 2
-	seqAllocator   SeqAllocatorSnapshot
-	fences         FenceSnapshot
+	snap *gastrologv1.VaultCtlSnapshot
 }
 
 func (s *fsmSnapshot) Persist(sink hraft.SnapshotSink) error {
-	if err := writeSnapshotHeader(sink); err != nil {
+	b, err := proto.Marshal(s.snap)
+	if err != nil {
+		_ = sink.Cancel()
+		return fmt.Errorf("persist chunk FSM snapshot: %w", err)
+	}
+	if _, err := sink.Write(b); err != nil {
 		_ = sink.Cancel()
 		return err
 	}
-
-	// Section: entries. Payload is N×entrySize bytes.
-	entriesPayloadLen := uint32(len(s.entries)) * entrySize //nolint:gosec // G115: entry count fits uint32
-	if err := writeSectionHeader(sink, sectionEntries, entriesPayloadLen); err != nil {
-		_ = sink.Cancel()
-		return err
-	}
-	for i := range s.entries {
-		if err := encodeEntry(sink, &s.entries[i]); err != nil {
-			_ = sink.Cancel()
-			return err
-		}
-	}
-
-	// Section: tombstones. Payload is 4-byte count + N×(16 ID + 8 nanos).
-	if len(s.tombstones) > 0 {
-		payloadLen := uint32(4 + len(s.tombstones)*24) //nolint:gosec // G115: fits uint32
-		if err := writeSectionHeader(sink, sectionTombstones, payloadLen); err != nil {
-			_ = sink.Cancel()
-			return err
-		}
-		var countBuf [4]byte
-		binary.BigEndian.PutUint32(countBuf[:], uint32(len(s.tombstones))) //nolint:gosec // G115: fits uint32
-		if _, err := sink.Write(countBuf[:]); err != nil {
-			_ = sink.Cancel()
-			return err
-		}
-		var tsBuf [24]byte
-		for id, ts := range s.tombstones {
-			copy(tsBuf[0:16], id[:])
-			binary.BigEndian.PutUint64(tsBuf[16:24], uint64(ts.UnixNano()))
-			if _, err := sink.Write(tsBuf[:]); err != nil {
-				_ = sink.Cancel()
-				return err
-			}
-		}
-	}
-
-	// Section: pendingDeletes (gastrolog-51gme step 2). Variable-length
-	// per entry; encoder writes the section header with the precomputed
-	// payload size.
-	if err := encodePendingDeletesSection(sink, s.pendingDeletes); err != nil {
-		_ = sink.Cancel()
-		return err
-	}
-
-	if err := encodeSeqAllocatorSection(sink, s.seqAllocator); err != nil {
-		_ = sink.Cancel()
-		return err
-	}
-
-	if err := encodeFencesSection(sink, s.fences); err != nil {
-		_ = sink.Cancel()
-		return err
-	}
-
 	return sink.Close()
 }
 
-// writeSnapshotHeader writes the 12-byte header (8 magic + 4 version).
-func writeSnapshotHeader(w io.Writer) error {
-	if _, err := w.Write(snapshotMagic[:]); err != nil {
-		return fmt.Errorf("write snapshot magic: %w", err)
-	}
-	var verBuf [4]byte
-	binary.BigEndian.PutUint32(verBuf[:], snapshotVersion)
-	if _, err := w.Write(verBuf[:]); err != nil {
-		return fmt.Errorf("write snapshot version: %w", err)
-	}
-	return nil
-}
-
-// writeSectionHeader writes the 5-byte section header (1 kind + 4 length).
-func writeSectionHeader(w io.Writer, kind sectionKind, payloadLen uint32) error {
-	var buf [5]byte
-	buf[0] = byte(kind)
-	binary.BigEndian.PutUint32(buf[1:5], payloadLen)
-	if _, err := w.Write(buf[:]); err != nil {
-		return fmt.Errorf("write section header (kind=%d): %w", kind, err)
-	}
-	return nil
-}
-
 func (s *fsmSnapshot) Release() {}
-
-// Snapshot encoding: each entry is a fixed-size binary record.
-// Layout per entry (123 bytes):
-//   16  ChunkID
-//   8   WriteStart (nanos)
-//   8   WriteEnd (nanos)
-//   8   RecordCount
-//   8   Bytes
-//   8   DiskBytes
-//   8   IngestStart (nanos)
-//   8   IngestEnd (nanos)
-//   8   SourceStart (nanos)
-//   8   SourceEnd (nanos)
-//   8   IngestIdxOffset
-//   8   IngestIdxSize
-//   8   SourceIdxOffset
-//   8   SourceIdxSize
-//   2   Flags (bit 0=reserved (formerly Sealed; replaced by State byte
-//                in Phase 3, gastrolog-1huz5),
-//              1=reserved (formerly Compressed),
-//              2=cloudBacked, 3=archived,
-//              4=retentionPending, 5=transitionStreamed, 6=ingestTSMonotonic)
-//   1   State (chunk.ChunkState — Active/Sealing/Sealed). gastrolog-1huz5.
-// Total: 123 bytes.
-
-const entrySize = 123
-
-func encodeEntry(w io.Writer, e *ManifestEntry) error {
-	var buf [entrySize]byte
-	copy(buf[0:16], e.ID[:])
-	binary.BigEndian.PutUint64(buf[16:24], uint64(e.WriteStart.UnixNano()))
-	binary.BigEndian.PutUint64(buf[24:32], uint64(e.WriteEnd.UnixNano()))
-	binary.BigEndian.PutUint64(buf[32:40], uint64(e.RecordCount)) //nolint:gosec // G115: round-trip
-	binary.BigEndian.PutUint64(buf[40:48], uint64(e.Bytes))       //nolint:gosec // G115: round-trip
-	binary.BigEndian.PutUint64(buf[48:56], uint64(e.DiskBytes))   //nolint:gosec // G115: round-trip
-	binary.BigEndian.PutUint64(buf[56:64], uint64(e.IngestStart.UnixNano()))
-	binary.BigEndian.PutUint64(buf[64:72], uint64(e.IngestEnd.UnixNano()))
-	binary.BigEndian.PutUint64(buf[72:80], uint64(e.SourceStart.UnixNano()))
-	binary.BigEndian.PutUint64(buf[80:88], uint64(e.SourceEnd.UnixNano()))
-	binary.BigEndian.PutUint64(buf[88:96], uint64(e.IngestIdxOffset))   //nolint:gosec // G115: round-trip
-	binary.BigEndian.PutUint64(buf[96:104], uint64(e.IngestIdxSize))    //nolint:gosec // G115: round-trip
-	binary.BigEndian.PutUint64(buf[104:112], uint64(e.SourceIdxOffset)) //nolint:gosec // G115: round-trip
-	binary.BigEndian.PutUint64(buf[112:120], uint64(e.SourceIdxSize))   //nolint:gosec // G115: round-trip
-	var flags uint16
-	// flag bit 0 (formerly Sealed) is reserved — replaced by the State
-	// byte in Phase 3 (gastrolog-1huz5).
-	// flag bit 1 (formerly Compressed) is reserved — see gastrolog-24m1t
-	// step 7f.
-	if e.CloudBacked {
-		flags |= 1 << 2
-	}
-	if e.Archived {
-		flags |= 1 << 3
-	}
-	if e.RetentionPending {
-		flags |= 1 << 4
-	}
-	if e.IngestTSMonotonic {
-		flags |= 1 << 5
-	}
-	binary.BigEndian.PutUint16(buf[120:122], flags)
-	buf[122] = byte(e.State)
-	_, err := w.Write(buf[:])
-	return err
-}
-
-// decodedSnapshot bundles every section the snapshot decoder can
-// produce. New sections add a field here rather than churning the
-// decodeSnapshot return signature.
-type decodedSnapshot struct {
-	entries        []ManifestEntry
-	tombstones     map[chunk.ChunkID]time.Time
-	pendingDeletes map[chunk.ChunkID]*PendingDelete // gastrolog-51gme step 2
-	seqAllocator   SeqAllocatorSnapshot
-	fences         FenceSnapshot
-}
-
-// decodeSnapshot reads a versioned snapshot. Unknown section kinds are
-// skipped (forward compatibility within the same version); unknown
-// versions are rejected.
-func decodeSnapshot(r io.Reader) (*decodedSnapshot, error) {
-	if err := readSnapshotHeader(r); err != nil {
-		return nil, err
-	}
-
-	out := &decodedSnapshot{}
-
-	var hdr [5]byte
-	for {
-		n, err := io.ReadFull(r, hdr[:])
-		if n == 0 {
-			break // clean end-of-stream
-		}
-		if err != nil {
-			return nil, fmt.Errorf("read section header: %w", err)
-		}
-		kind := sectionKind(hdr[0])
-		payloadLen := binary.BigEndian.Uint32(hdr[1:5])
-
-		section := io.LimitReader(r, int64(payloadLen))
-		switch kind {
-		case sectionEntries:
-			out.entries, err = readEntriesSection(section, payloadLen)
-		case sectionTombstones:
-			out.tombstones, err = readTombstonesSection(section)
-		case sectionPendingDeletes:
-			out.pendingDeletes, err = readPendingDeletesSection(section)
-		case sectionSeqAllocator:
-			out.seqAllocator, err = readSeqAllocatorSection(section)
-		case sectionFences:
-			out.fences, err = readFencesSection(section)
-		default:
-			// Unknown section — skip. Forward-compat for new sections in
-			// the same format version.
-			_, err = io.Copy(io.Discard, section)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("section kind=%d: %w", kind, err)
-		}
-		// Drain any bytes the section reader didn't consume (defensive).
-		if _, err := io.Copy(io.Discard, section); err != nil {
-			return nil, fmt.Errorf("drain section kind=%d: %w", kind, err)
-		}
-	}
-
-	return out, nil
-}
-
-// readSnapshotHeader validates the magic and version. Returns an error if
-// the magic is wrong (corrupt or old-format snapshot) or version is not
-// recognized.
-func readSnapshotHeader(r io.Reader) error {
-	var magic [8]byte
-	if _, err := io.ReadFull(r, magic[:]); err != nil {
-		return fmt.Errorf("read snapshot magic: %w", err)
-	}
-	if magic != snapshotMagic {
-		return errors.New("snapshot magic mismatch — incompatible or corrupt format")
-	}
-	var verBuf [4]byte
-	if _, err := io.ReadFull(r, verBuf[:]); err != nil {
-		return fmt.Errorf("read snapshot version: %w", err)
-	}
-	version := binary.BigEndian.Uint32(verBuf[:])
-	if version != snapshotVersion {
-		return fmt.Errorf("snapshot version %d unsupported (this build handles %d)", version, snapshotVersion)
-	}
-	return nil
-}
-
-func readEntriesSection(r io.Reader, payloadLen uint32) ([]ManifestEntry, error) {
-	if payloadLen%entrySize != 0 {
-		return nil, fmt.Errorf("entries payload %d bytes not a multiple of %d", payloadLen, entrySize)
-	}
-	count := payloadLen / entrySize
-	entries := make([]ManifestEntry, 0, count)
-	var buf [entrySize]byte
-	for i := range count {
-		if _, err := io.ReadFull(r, buf[:]); err != nil {
-			return nil, fmt.Errorf("read entry %d: %w", i, err)
-		}
-		var id chunk.ChunkID
-		copy(id[:], buf[0:16])
-		flags := binary.BigEndian.Uint16(buf[120:122])
-		entries = append(entries, ManifestEntry{
-			ID:              id,
-			WriteStart:      time.Unix(0, int64(binary.BigEndian.Uint64(buf[16:24]))), //nolint:gosec // G115: round-trip
-			WriteEnd:        time.Unix(0, int64(binary.BigEndian.Uint64(buf[24:32]))), //nolint:gosec // G115: round-trip
-			RecordCount:     int64(binary.BigEndian.Uint64(buf[32:40])),               //nolint:gosec // G115: round-trip
-			Bytes:           int64(binary.BigEndian.Uint64(buf[40:48])),               //nolint:gosec // G115: round-trip
-			DiskBytes:       int64(binary.BigEndian.Uint64(buf[48:56])),               //nolint:gosec // G115: round-trip
-			IngestStart:     time.Unix(0, int64(binary.BigEndian.Uint64(buf[56:64]))), //nolint:gosec // G115: round-trip
-			IngestEnd:       time.Unix(0, int64(binary.BigEndian.Uint64(buf[64:72]))), //nolint:gosec // G115: round-trip
-			SourceStart:     time.Unix(0, int64(binary.BigEndian.Uint64(buf[72:80]))), //nolint:gosec // G115: round-trip
-			SourceEnd:       time.Unix(0, int64(binary.BigEndian.Uint64(buf[80:88]))), //nolint:gosec // G115: round-trip
-			IngestIdxOffset: int64(binary.BigEndian.Uint64(buf[88:96])),               //nolint:gosec // G115: round-trip
-			IngestIdxSize:   int64(binary.BigEndian.Uint64(buf[96:104])),              //nolint:gosec // G115: round-trip
-			SourceIdxOffset: int64(binary.BigEndian.Uint64(buf[104:112])),             //nolint:gosec // G115: round-trip
-			SourceIdxSize:   int64(binary.BigEndian.Uint64(buf[112:120])),             //nolint:gosec // G115: round-trip
-			// flag bit 0 reserved (formerly Sealed) — replaced by State byte in
-			// Phase 3 (gastrolog-1huz5).
-			// flag bit 1 reserved (formerly Compressed) — see gastrolog-24m1t step 7f.
-			// flag bits 5 (TransitionStreamed) and the prior 6 are renumbered:
-			// gastrolog-5sywa removed the receipt protocol entirely, so the
-			// IngestTSMonotonic flag moves down to bit 5. User-authorized
-			// cluster reinitialization applies — old snapshots aren't expected
-			// to replay after this change.
-			CloudBacked:       flags&(1<<2) != 0,
-			Archived:          flags&(1<<3) != 0,
-			RetentionPending:  flags&(1<<4) != 0,
-			IngestTSMonotonic: flags&(1<<5) != 0,
-			State:             chunk.ChunkState(buf[122]),
-		})
-	}
-	return entries, nil
-}
-
-func readTombstonesSection(r io.Reader) (map[chunk.ChunkID]time.Time, error) {
-	var countBuf [4]byte
-	if _, err := io.ReadFull(r, countBuf[:]); err != nil {
-		return nil, fmt.Errorf("read tombstones count: %w", err)
-	}
-	count := binary.BigEndian.Uint32(countBuf[:])
-	if count == 0 {
-		return nil, nil
-	}
-	out := make(map[chunk.ChunkID]time.Time, count)
-	var entry [24]byte
-	for i := range count {
-		if _, err := io.ReadFull(r, entry[:]); err != nil {
-			return nil, fmt.Errorf("read tombstone %d: %w", i, err)
-		}
-		var id chunk.ChunkID
-		copy(id[:], entry[0:16])
-		ns := int64(binary.BigEndian.Uint64(entry[16:24])) //nolint:gosec // G115: nano timestamp round-trip
-		out[id] = time.Unix(0, ns)
-	}
-	return out, nil
-}

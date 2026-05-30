@@ -5,7 +5,6 @@ package vaultraft
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -20,10 +19,6 @@ import (
 	hraft "github.com/hashicorp/raft"
 	"google.golang.org/protobuf/proto"
 )
-
-var vaultSnapMagic = [8]byte{'G', 'L', 'V', 'C', 'T', 'L', 'S', '1'}
-
-const vaultSnapVersion uint32 = 1
 
 // FSM implements the vault control-plane replicated state machine: no-ops,
 // vault-scoped vaultctlfsm commands, and snapshot/restore across vaults.
@@ -138,87 +133,53 @@ func (f *FSM) EnsureVaultFSM(vaultID glid.GLID) *vaultctlfsm.FSM {
 	return t
 }
 
-// Snapshot returns a snapshot of all vault sub-FSMs (versioned wire format).
+// Snapshot returns a snapshot of all vault sub-FSMs as a VaultGroupSnapshot
+// proto (gastrolog-5lrg7). Vaults are emitted in GLID order so equal FSM
+// state yields a byte-stable group snapshot.
 func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) {
 	f.mu.Lock()
+	defer f.mu.Unlock()
 	ids := slices.SortedFunc(maps.Keys(f.vaults), compareGLID)
-	var vaultBlobs [][]byte
+	group := &gastrologv1.VaultGroupSnapshot{
+		Vaults: make([]*gastrologv1.VaultGroupSnapshotEntry, 0, len(ids)),
+	}
 	for _, id := range ids {
 		t := f.vaults[id]
 		if t == nil {
 			continue
 		}
-		snap, err := t.Snapshot()
-		if err != nil {
-			f.mu.Unlock()
-			return nil, err
-		}
-		raw, err := persistSnapshotToBytes(snap)
-		if err != nil {
-			f.mu.Unlock()
-			return nil, err
-		}
-		blob := make([]byte, 0, glid.Size+len(raw))
-		blob = append(blob, id[:]...)
-		blob = append(blob, raw...)
-		vaultBlobs = append(vaultBlobs, blob)
+		idCopy := id
+		group.Vaults = append(group.Vaults, &gastrologv1.VaultGroupSnapshotEntry{
+			VaultId:  idCopy[:],
+			Snapshot: t.SnapshotProto(),
+		})
 	}
-	f.mu.Unlock()
-	return &vaultCtlSnapshot{vaultBlobs: vaultBlobs}, nil
+	return &vaultCtlSnapshot{group: group}, nil
 }
 
 // Restore replaces FSM state from a snapshot produced by Snapshot.
-//
-// Streams the snapshot incrementally rather than slurping it into memory —
-// the combined instance-state blob may be large on clusters with many vaults.
 func (f *FSM) Restore(rc io.ReadCloser) error {
 	defer func() { _ = rc.Close() }()
 
-	var magic [len(vaultSnapMagic)]byte
-	if _, err := io.ReadFull(rc, magic[:]); err != nil {
-		if err == io.EOF {
-			return nil
-		}
-		return fmt.Errorf("vaultraft restore: read magic: %w", err)
+	raw, err := io.ReadAll(rc)
+	if err != nil {
+		return fmt.Errorf("vaultraft restore: read: %w", err)
 	}
-	if magic != vaultSnapMagic {
-		return errors.New("vaultraft restore: bad magic")
+	if len(raw) == 0 {
+		return nil
 	}
-
-	var verBuf [4]byte
-	if _, err := io.ReadFull(rc, verBuf[:]); err != nil {
-		return fmt.Errorf("vaultraft restore: read version: %w", err)
-	}
-	ver := binary.BigEndian.Uint32(verBuf[:])
-	if ver != vaultSnapVersion {
-		return fmt.Errorf("vaultraft restore: unsupported snapshot version %d", ver)
+	var group gastrologv1.VaultGroupSnapshot
+	if err := proto.Unmarshal(raw, &group); err != nil {
+		return fmt.Errorf("vaultraft restore: decode: %w", err)
 	}
 
-	var countBuf [4]byte
-	if _, err := io.ReadFull(rc, countBuf[:]); err != nil {
-		return fmt.Errorf("vaultraft restore: read vault count: %w", err)
-	}
-	n := int(binary.BigEndian.Uint32(countBuf[:]))
-
-	nextVaults := make(map[glid.GLID]*vaultctlfsm.FSM, n)
-	for i := range n {
-		var vid glid.GLID
-		if _, err := io.ReadFull(rc, vid[:]); err != nil {
-			return fmt.Errorf("vaultraft restore: read vault[%d] id: %w", i, err)
-		}
-		var blenBuf [4]byte
-		if _, err := io.ReadFull(rc, blenBuf[:]); err != nil {
-			return fmt.Errorf("vaultraft restore: read vault[%d] blob length: %w", i, err)
-		}
-		blen := int64(binary.BigEndian.Uint32(blenBuf[:]))
-		vaultReader := io.LimitReader(rc, blen)
+	nextVaults := make(map[glid.GLID]*vaultctlfsm.FSM, len(group.GetVaults()))
+	for i, entry := range group.GetVaults() {
+		vid := glid.FromBytes(entry.GetVaultId())
 		t := vaultctlfsm.New()
-		if err := t.Restore(io.NopCloser(vaultReader)); err != nil {
-			return fmt.Errorf("vaultraft restore vault %x: %w", vid[:], err)
-		}
-		// Drain any unread bytes so the next instance header aligns.
-		if _, err := io.Copy(io.Discard, vaultReader); err != nil {
-			return fmt.Errorf("vaultraft restore: drain vault[%d] tail: %w", i, err)
+		t.RestoreProto(entry.GetSnapshot())
+		if _, dup := nextVaults[vid]; dup {
+			return fmt.Errorf("vaultraft restore: duplicate vault[%d] id %x", i, vid[:])
 		}
 		nextVaults[vid] = t
 	}
@@ -238,58 +199,19 @@ func compareGLID(a, b glid.GLID) int {
 	return bytes.Compare(a[:], b[:])
 }
 
-func persistSnapshotToBytes(snap hraft.FSMSnapshot) ([]byte, error) {
-	var buf bytes.Buffer
-	sink := &bufSink{Writer: &buf}
-	if err := snap.Persist(sink); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-type bufSink struct{ io.Writer }
-
-func (s *bufSink) Close() error  { return nil }
-func (s *bufSink) ID() string    { return "vaultraft" }
-func (s *bufSink) Cancel() error { return nil }
-
 type vaultCtlSnapshot struct {
-	vaultBlobs [][]byte // each: [16 vaultID][instance snapshot bytes...]
+	group *gastrologv1.VaultGroupSnapshot
 }
 
 func (s *vaultCtlSnapshot) Persist(sink hraft.SnapshotSink) error {
-	if _, err := sink.Write(vaultSnapMagic[:]); err != nil {
+	b, err := proto.Marshal(s.group)
+	if err != nil {
+		_ = sink.Cancel()
+		return fmt.Errorf("vaultraft snapshot: marshal: %w", err)
+	}
+	if _, err := sink.Write(b); err != nil {
 		_ = sink.Cancel()
 		return err
-	}
-	var hdr [8]byte
-	binary.BigEndian.PutUint32(hdr[0:4], vaultSnapVersion)
-	binary.BigEndian.PutUint32(hdr[4:8], uint32(len(s.vaultBlobs))) //nolint:gosec // G115: vault count bounded in practice
-	if _, err := sink.Write(hdr[:]); err != nil {
-		_ = sink.Cancel()
-		return err
-	}
-	for _, blob := range s.vaultBlobs {
-		if len(blob) < glid.Size {
-			_ = sink.Cancel()
-			return errors.New("vaultraft snapshot: vault blob too short")
-		}
-		vid := blob[:glid.Size]
-		payload := blob[glid.Size:]
-		if _, err := sink.Write(vid); err != nil {
-			_ = sink.Cancel()
-			return err
-		}
-		var lenBuf [4]byte
-		binary.BigEndian.PutUint32(lenBuf[:], uint32(len(payload))) //nolint:gosec // G115
-		if _, err := sink.Write(lenBuf[:]); err != nil {
-			_ = sink.Cancel()
-			return err
-		}
-		if _, err := sink.Write(payload); err != nil {
-			_ = sink.Cancel()
-			return err
-		}
 	}
 	return sink.Close()
 }
