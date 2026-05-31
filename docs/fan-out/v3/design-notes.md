@@ -176,7 +176,8 @@ supplies one (see the durable layer below), reusing the generic
 ## Where the thinking leans (provisional)
 
 1. Cardinal rule: once a record matches a route, it must never be lost. The only
-   valid drop is a record that matches no route.
+   valid drop is a record that matches no route — and that discard is intentional
+   and counted, surfaced as a tally in the router inspector, not a silent loss.
 2. Two separate acks: an **ingestion ack** (faced at the ingester, only some want
    it) and a **replication ack** (internal, about durability across nodes).
 3. The pipeline is: ingest → digest → route → per-destination segment write →
@@ -200,8 +201,14 @@ supplies one (see the durable layer below), reusing the generic
 11. The write path is lock-free: each stage owns its step, ownership moves through
     channels, no shared mutable state.
 12. Segments are durable on-disk files, written in the per-destination write path.
-13. The ingestion ack fires when the record is durably written into its
-    destination segment.
+13. The ingestion ack fires when the record is fsync'd into its destination
+    segment — one on-disk copy on the origin, replica or not. Segments are written
+    post-routing, so a routed record is durable as the immediate consequence of
+    routing: no "routed but not durable" gap, cardinal rule holds by construction.
+    That single on-disk copy is the bar (durable storage, not surviving node loss);
+    RF coverage is the background replication climb, never an ack precondition. The
+    local segment is itself the durable capture buffer — no separate durable router
+    queue is needed for ack durability.
 14. Replication is pull, not push: completing a segment publishes its metadata to
     the control-plane log; home nodes roll the log, notice segments they lack, and
     pull them from any current holder. The origin serves pulls and does not forward.
@@ -228,9 +235,11 @@ supplies one (see the durable layer below), reusing the generic
     ingest. The only backpressure is slow local disk.
 22. Segments are ephemeral build inputs; the chunk is the durable artifact.
     Durability responsibility moves at that boundary.
-23. A vault control plane plans chunks from segment metadata alone (destination,
-    record count, byte size, first/last IngestTS, holder). Segment bodies move
-    lazily — only once a builder is ready.
+23. Two roles, paired: a vault control plane plans chunks from segment metadata
+    alone (destination, record count, byte size, first/last IngestTS, holder); a
+    per-home vault manager executes — it owns that vault's chunk store and staging
+    tier and builds chunks in place. Segment bodies move lazily, only once a vault
+    manager is ready to build.
 24. Segment metadata is published at completion (the working→completed rename); a
     still-growing segment's header is provisional and not yet eligible.
 25. A chunk is a deterministic, ordered list of segment spans
@@ -238,7 +247,9 @@ supplies one (see the durable layer below), reusing the generic
     partial-segment cut resumes in the next chunk. The offsets are positions in the
     segment's EventID order (see 36), not on-disk positions.
 26. Builds are reproducible: the same plan over the same immutable segments yields
-    a byte-identical chunk on every builder.
+    a byte-identical chunk on every builder. So every home builds its own chunk
+    independently — no designated builder, no build-then-replicate, no
+    leader-dies-mid-build failover (a crash just re-runs the fixed plan).
 27. Completeness is binary: a builder either holds the named segments or it does
     not. No time-window closure, and no straggler can belong inside an
     already-built chunk.
@@ -261,10 +272,10 @@ supplies one (see the durable layer below), reusing the generic
 33. Staging (completed segments awaiting chunking) is the recent, hot, queryable
     tier — the role active chunks fill today. Chunks are therefore always built
     complete and immutable; there is no open or growing chunk state.
-34. Queries read staging and chunks together, merging/dedup by EventID. Staging
-    carries only the ordered (EventID/IngestTS) `backend/internal/btree` index —
-    fast by time/EventID, scanned for field/content. The richer field/token indexes
-    are built at chunk construction (see the indexing rewrite).
+34. Queries read staging and chunks together, merging/dedup by EventID. The ordered
+    (EventID/IngestTS) `backend/internal/btree` index is foundational — fast by
+    time/EventID, field/content by bounded scan. Field/content indexing of chunks is
+    deferred sugar, out of scope until the foundation is solid.
 35. The first choke points are cross-node, not local disk: Raft commit throughput
     for metadata, and segment-transfer bandwidth. Keep Raft metadata-only and
     batched (≈ segments × RF, never records); transfer is parallel, resumable bulk
@@ -280,6 +291,11 @@ supplies one (see the durable layer below), reusing the generic
     fixed-width EventID, then copies each frame body verbatim — attributes/raw never
     parsed (deferred to the index passes). Chunk frames come out byte-identical to
     their source segment frames: cheap (memcpy) and deterministic.
+38. Placement and holder-set live in one consensus group: the vault control plane
+    owns RF/home set/leader *and* residency, so the reconcile gap is evaluable
+    atomically. The system layer keeps only inventory (nodes, storage classes,
+    capacity, vault existence) and seeds vault-control-plane membership, since a
+    group cannot define its own initial voter set.
 
 ## From segments to chunks (the durable layer)
 
@@ -312,6 +328,18 @@ inside an already-built chunk, because the chunk is defined by its named segment
 not by a predicate over time. Cross-chunk timestamp overlap is fine — the indexes
 already merge interleaved ranges.
 
+**The vault manager owns a home's store and builds in place.** V3 gives each vault,
+on each home, a real vault manager: the component that owns that vault's chunk store
+and staging tier and performs chunk building. The control plane plans; the vault
+manager executes — it runs the plan over its pulled segments and produces the chunk
+directly in its own store, so there is no separate builder process and no hand-over
+or re-ingest step. Because the plan is byte-identical across builders (deterministic
+spans over immutable segments), there is no designated builder and no
+build-then-replicate step: every home's vault manager arrives at the same chunk.
+Build placement therefore carries no failover concern — a vault manager that crashes
+mid-build simply re-runs the deterministic plan on restart, since both the inputs
+and the output are fixed.
+
 **Replication is pull, and the holder-set is the signal.** Replication is not
 pushed; it is reconciled. The control plane holds, per segment, its desired home
 set and its holder-set — the nodes that currently hold it (origin plus any home
@@ -334,44 +362,56 @@ home pulls) and survive restarts. It is two distinct sets working together: the
 desired home set (who should hold it) and the holder-set (who does), with their
 difference as the work.
 
+**Both sets live in the vault control plane, one consensus group.** The reconcile
+loop is "drive holders toward homes," so the desired home set (placement) and the
+holder-set must sit in the same Raft group to be reasoned about and updated
+together; splitting them across consensus groups makes the gap impossible to
+evaluate atomically. The vault control plane therefore owns placement — RF, home
+set, leader — alongside residency, rather than placement living in a separate
+cluster-wide authority. The cluster-wide system layer keeps only inventory: node
+membership, storage-class definitions, available capacity, and vault existence —
+the facts a placement decision reads. One bootstrap edge remains: a vault control
+plane's own voter set is derived from placement, so it cannot define its own initial
+membership — the system layer seeds and changes group membership, after which the
+vault control plane owns steady-state placement.
+
 **Staging is a searchable tier.** Completed segments awaiting chunk construction
 are not only transport — they are a queryable store. Until a chunk is built the
 newest records live only in staged segments, so a query must read staging
 alongside chunks or it would miss the most recent data. This needs an index at two
 scopes: the control-plane metadata index already routes a query to the right
-holders by destination and IngestTS range; a per-node staging index over the held
-segments then serves record-level lookups by IngestTS/EventID. Field/content
-search over staged records is a bounded scan — staging is the small, recent tier,
-so this stays cheap, and the heavier field/token indexes are not built here. A
-query fans out to staged segments and chunks together and merges by EventID —
-which also dedups the staging→chunk transition window, where a record can
-momentarily exist in both. The staging index tracks segment lifecycle — populated
-when a segment completes, dropped when the segment is disposed after chunking —
-and is rebuildable from the self-describing segment files on restart.
+holders by destination and IngestTS range; a per-segment index then serves
+record-level lookups by IngestTS/EventID. The index is per segment, not one
+staging-wide structure: it is born with the segment and discarded with it, so there
+is nothing to prune — a single staging-wide index would instead be perpetually
+inserted into and deleted out of as segments churn. It is the same EventID-ordered
+B+ tree the build merge uses (36). Field/content search over staged records is a
+bounded scan — staging is the small, recent tier, so this stays cheap, and the
+heavier field/token indexes are not built here. A query fans out to staged segments
+and chunks together and merges by EventID — which also dedups the staging→chunk
+transition window, where a record can momentarily exist in both. Lifecycle is the
+vault control plane's existing concern (segment completion through disposal after
+chunking); the per-segment index simply rides that lifecycle and is rebuildable
+from the self-describing segment file on restart.
 
 For that ordered (EventID/IngestTS) index the machinery need not be new: a generic,
 file-backed B+ tree already lives in the internal packages
 (`backend/internal/btree` — a `Tree[K, V]` with a pluggable key codec) and can be
-pointed at staged segments directly. Advanced field/token indexing is a separate,
-chunk-build-time concern — built when the chunk is constructed, not during staging
-— and follows the indexing rewrite (`docs/advanced_indexing.md`, spiked in
-`gastrolog-jqylj`): FST term dictionaries, Roaring posting lists, and per-block
-bloom filters, emitted as sections inside the chunk rather than as sidecar files.
-So staging carries only the ordered B+ tree; the richer indexes are a property of
-built chunks.
+pointed at staged segments directly. This ordered index is foundational, not sugar:
+the build merge runs over it and it doubles as staging time/EventID search.
+Field/content indexing is a different matter and deliberately out of scope for now —
+the foundation (durable capture, deterministic chunks, replication, placement) does
+not depend on it, and whether V3 reuses the existing indexing or builds new is a
+later question, not one to settle while laying the foundation. Staged records are
+searched by field/content with a bounded scan; chunk content indexing is deferred
+sugar.
 
-This split is structural, not merely economical. An FST term dictionary is
-constructed in one pass from the complete, sorted term set and is immutable once
-built — Vellum's builder requires lexicographic insertion order and offers no
-in-place insert; extending an FST means rebuilding (or merging into a new one).
-Roaring posting lists are themselves mutable, but here they encode row IDs
-(`0..N-1`) that are positions in the finished chunk, so they are naturally built
-once the chunk's record order is frozen. Per-block bloom filters are sized from the
-cardinality of a complete fixed-size block. All three want the frozen record set a
-chunk *is* and are unsuited to a growing staging segment. The ordered B+ tree, by
-contrast, accepts the incremental inserts a live staging tier requires. The
-dividing line falls out of the data structures themselves: incremental index in
-staging, batch-built indexes on the finished chunk.
+This split is structural, not merely economical: a live staging segment needs an
+index that accepts incremental inserts (the ordered B+ tree), while indexes built
+over a finished chunk operate on a frozen record set and are batch-built in one
+pass. That dividing line — incremental in staging, batch-built on the sealed chunk
+— falls out of the data, independent of which specific structures the chunk indexer
+eventually uses.
 
 This staging tier is the system's recent, hot, queryable layer — the role that
 "active chunks" fill today. A direct consequence: chunks are always built complete
@@ -407,40 +447,17 @@ re-fetch from another holder); and a per-chunk checksum that doubles as the
 presence loop's identity check and as a cross-check that two independent
 deterministic builds agree.
 
-## Open
+## Out of scope (for now)
 
-- In-flight segment durability: the ingestion ack fires when the record is durable
-  in the origin's segment, but until those records are in a chunk the
-  chunk-replication mechanism is not yet involved. How many copies must a segment
-  have before the ack is safe — origin only, or origin plus at least one home that
-  has pulled it — and since replication is pull-driven, does the ack wait on that
-  first pull, or fire on the origin's durable write and accept a brief origin-only
-  window?
-- Build placement: does each home of a chunk build it independently from the plan
-  (safe, because builds are deterministic), or does one node build and the others
-  pull the finished chunk via the same reconciliation loop?
-- How a built chunk enters local storage / the vault manager — the same bytes the
-  builder produced, handed over directly, versus ingested into a distinct store.
-- Staging index reach: staged segments must be searchable by IngestTS/EventID now,
-  since recent data lives only in staging until chunked. The mechanism is not
-  greenfield — the generic `backend/internal/btree` is the index — so the open
-  part is the mapping: per-segment index versus per-staging-area, the key codec(s)
-  to register, how it tracks segment lifecycle, and whether it is persisted or
-  rebuilt on restart.
-- Chunk index build timing: the ordered EventID/IngestTS index can be built inline
-  during the k-way merge — the merge already emits in its key order, so it is a
-  sequential, densely-packed append essentially for free; building it in a later
-  pass would re-read the chunk to reconstruct an order already in hand. The
-  advanced field/token structures (FST term dict, Roaring postings, per-block
-  bloom) cannot be built inline at all: an FST needs the complete sorted term set,
-  which does not exist until the merge is done; Roaring postings key off final row
-  IDs (positions in the finished chunk); bloom filters are sized from the finished
-  block's cardinality — so all are necessarily batch builds over the finished body
-  (read, sort by key, bulk-load), independent, parallelizable, deferrable, and
-  cheap while the fresh chunk is still in page cache. So the shape is forced: ordered index inline
-  (or a pass), advanced structures always post-body passes. Because chunk indexes
-  are derived, rebuildable, local artifacts (only the chunk body must be
-  byte-identical across replicas), build timing is a per-holder performance choice,
-  not a correctness one, and a crash mid-build just re-runs the affected pass over
-  an already-valid body. Structures follow the indexing rewrite
-  (`docs/advanced_indexing.md`, `gastrolog-jqylj`), emitted as in-file sections.
+The priority is a solid foundation — durable capture, deterministic chunks,
+replication, placement — which is what the previous attempts failed to nail. These
+are deliberately deferred so they cannot distract from that:
+
+- Field/content indexing of chunks. Indexes are derived, rebuildable, local
+  artifacts (only the chunk body must be byte-identical across replicas), so they
+  can be added later with zero impact on the on-disk truth, and a crash mid-build
+  just re-runs over an already-valid body. The ordered EventID/IngestTS index is the
+  exception — it is foundational (the build merge runs over it; it serves staging
+  time/EventID search) and comes essentially for free from the merge. Whether to
+  reuse the existing index machinery or build new is itself a later decision; no
+  FST/Roaring/bloom choice is in scope now.
