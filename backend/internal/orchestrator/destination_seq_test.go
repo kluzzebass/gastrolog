@@ -206,7 +206,7 @@ func TestReplicaFanOutPreservesDestinationSeq(t *testing.T) {
 		t.Fatalf("H before replication = %d, want 0", leaderStore.IngestHighWatermark())
 	}
 
-	stored, err := leaderStore.ReadByVaultSeq(nil, vaultID, seq)
+	stored, err := leaderStore.ReadByVaultSeq(context.Background(), vaultID, seq)
 	if err != nil {
 		t.Fatalf("read spool: %v", err)
 	}
