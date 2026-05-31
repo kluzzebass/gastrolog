@@ -12,6 +12,140 @@ This document reasons from first principles and does not describe itself by
 contrast with any earlier design. It states only what V3 *is*, never what it
 *isn't*.
 
+## Where the thinking leans (provisional)
+
+1. Cardinal rule: once a record matches a route, it must never be lost. The only
+   valid drop is a record that matches no route — and that discard is intentional
+   and counted, surfaced as a tally in the router inspector, not a silent loss.
+2. Two separate acks: an **ingestion ack** (faced at the ingester, only some want
+   it) and a **replication ack** (internal, about durability across nodes).
+3. The pipeline is: ingest → digest → route → per-destination segment write →
+   complete + publish. Replication is downstream and pull-driven, not part of it.
+4. Ingest mints the EventID; EventID is cluster-unique from
+   `(IngesterID, NodeID, IngestTS, IngestSeq)`.
+5. Digestion (raw → record) is a worker pool. Processing out of order is fine
+   because order is carried by EventID, not by processing order.
+6. Digest workers put record pointers on a routing queue; routing workers consume
+   from the other end. Pointers only — the record is allocated once and never
+   copied between stages.
+7. A record is immutable after digestion, so one pointer can fan out to several
+   destination writers with no copy and no lock.
+8. Routing is a separate stage from digestion: per-record, in-memory rule match,
+   record → opaque destination IDs. Routing never defers.
+9. The router knows nothing about what a destination is. RF, storage class, and
+   home nodes are resolved later, at placement.
+10. Each destination has its own write path, structured as a pipeline of
+    single-step workers chained by short channels. Each worker hands off and
+    immediately takes the next record, so stages overlap.
+11. The write path is lock-free: each stage owns its step, ownership moves through
+    channels, no shared mutable state.
+12. Segments are durable on-disk files, written in the per-destination write path.
+13. The ingestion ack fires when the record is fsync'd into its destination
+    segment — one on-disk copy on the origin, replica or not. Segments are written
+    post-routing, so a routed record is durable as the immediate consequence of
+    routing: no "routed but not durable" gap, cardinal rule holds by construction.
+    That single on-disk copy is the bar (durable storage, not surviving node loss);
+    RF coverage is the background replication climb, never an ack precondition. The
+    local segment is itself the durable capture buffer — no separate durable router
+    queue is needed for ack durability.
+14. Replication is pull, not push: completing a segment publishes its metadata to
+    the vault-ctl log; home nodes roll the log, notice segments they lack, and
+    pull them from any current holder. The origin serves pulls and does not forward.
+15. One piece of cluster state decides local vs remote: a placement directory
+    mapping destination ID to its home nodes (including whether self is a home).
+16. EventID is the single key for identity, dedup, and order. It gets a
+    `Compare`/`Less`: `IngestTS`, then `NodeID`, then `IngesterID`, then
+    `IngestSeq` — a tie-free total order.
+17. Storage and merge order is EventID order. On-disk order within a segment does
+    not need to be canonical; EventID restores order at read.
+18. Query order (by `IngestTS` or `SourceTS`) is an index choice, independent of
+    storage order. `SourceTS` is carried on the record but not part of EventID.
+19. Within the ingest→segment path, local disk write is the only throughput
+    governor. Group commit (batched fsync) is the lever; everything above the write
+    is parallel and lock-free.
+20. If the disk ever fails to keep up, the bounded channels backpressure rather
+    than drop, so the cardinal rule holds under load with no special mechanism. In
+    practice sequential segment appends far outrun log ingestion rates, so this is
+    a correctness safety valve, not an operating mode to expect.
+21. Completing a segment can be as crude as moving the file from a working
+    directory to a completed directory, then publishing its metadata. Serving pulls
+    runs independently, so a slow or unreachable home just hasn't pulled yet —
+    completed segments accumulate on disk without backpressuring the writer or
+    ingest. The only backpressure is slow local disk.
+22. Segments are ephemeral build inputs; the chunk is the durable artifact.
+    Durability responsibility moves at that boundary.
+23. Two roles, paired: the vault-ctl plans chunks from segment metadata
+    alone (destination, record count, byte size, first/last IngestTS, holder); a
+    per-home vault manager executes — it owns that vault's chunk store and staging
+    tier and builds chunks in place. Segment bodies move lazily, only once a vault
+    manager is ready to build.
+24. Segment metadata is published at completion (the working→completed rename); a
+    still-growing segment's header is provisional and not yet eligible.
+25. A chunk is a deterministic, ordered list of segment spans
+    `(segmentID, startRecord, count)`, sliced on a record/size budget; a
+    partial-segment cut resumes in the next chunk. The offsets are positions in the
+    segment's EventID order (see 36), not on-disk positions.
+26. Builds are reproducible: the same plan over the same immutable segments yields
+    a byte-identical chunk on every builder. So every home builds its own chunk
+    independently — no designated builder, no build-then-replicate, no
+    leader-dies-mid-build failover (a crash just re-runs the fixed plan).
+27. Completeness is binary: a builder either holds the named segments or it does
+    not. No time-window closure, and no straggler can belong inside an
+    already-built chunk.
+28. Replication is pull/reconcile, not push: a home rolls the log, pulls segments
+    it lacks from any holder, and adds itself to the holder-set. The desired-vs-
+    holder gap is the replicate signal; `holders ⊇ homes` (or records chunked) is
+    the release signal. The holder-set is explicit and survives restarts — it gates
+    durability, so it cannot be inferred.
+29. Two layers, two mechanisms: the segment layer is transport for building chunks;
+    durability lives entirely in a separate chunk-replication mechanism.
+30. Chunk replication is the same reconciliation — desired placement vs. holder-set,
+    driven to zero by copy or delete — so segments and chunks share one model. It
+    must exist anyway for RF changes, node loss, decommission, and placement changes.
+31. Determinism (single origin per segment + dictated spans) makes replicas
+    identical by construction — no merge, read-repair, vector clocks, or
+    anti-entropy. Verification is a chunk-ID/hash equality check.
+32. Checksums are optional belt-and-suspenders against physical faults only:
+    per-record CRC in the frame, per-segment checksum at completion in the reported
+    metadata, per-chunk checksum doubling as identity and build-agreement check.
+33. Staging (completed segments awaiting chunking) is the recent, hot, queryable
+    tier — the role active chunks fill today. Chunks are therefore always built
+    complete and immutable; there is no open or growing chunk state.
+34. Queries read staging and chunks together, merging/dedup by EventID. The ordered
+    (EventID/IngestTS) `backend/internal/btree` index is per segment (born and
+    discarded with it — nothing to prune, unlike one staging-wide index) and is the
+    same index the build merge uses (36); foundational — fast by time/EventID,
+    field/content by bounded scan. Field/content indexing of chunks is deferred
+    sugar, out of scope until the foundation is solid.
+35. The first choke points are cross-node, not local disk: Raft commit throughput
+    for metadata, and segment-transfer bandwidth. Keep Raft metadata-only and
+    batched (≈ segments × RF, never records); transfer is parallel, resumable bulk
+    copy. Neither risks the cardinal rule — the record is already durable on the
+    origin, so lag only delays chunking (staged segments pile up, bounded by
+    retention; no ingest backpressure).
+36. A segment's on-disk order is arbitrary (concurrent digestion), so each carries
+    an EventID-ordered index (the staging B+ tree) and chunk building is a k-way
+    merge over it; span offsets (25) are positions in this order. Order by the full
+    EventID so equal timestamps resolve identically. Because IngestTS leads the key,
+    the same index serves IngestTS range search — one structure, not two.
+37. Chunk building is key-only: the merge decodes just the frame length and the
+    fixed-width EventID, then copies each frame body verbatim — attributes/raw never
+    parsed (deferred to the index passes). Chunk frames come out byte-identical to
+    their source segment frames: cheap (memcpy) and deterministic.
+38. Placement and holder-set live in one consensus group: the vault-ctl owns
+    RF/home set/leader *and* residency, so the reconcile gap is evaluable
+    atomically. The system layer keeps only inventory (nodes, storage classes,
+    capacity, vault existence) and seeds vault-ctl membership, since a group cannot
+    define its own initial voter set.
+39. A segment's life ends with an explicit purge, not just release (28). Once its
+    records live in chunks replicated to their home set, the segment is superseded:
+    every holder deletes its on-disk copy and the vault-ctl drops the registry entry,
+    so the segment registry — and the FSM snapshots over it — stay bounded rather than
+    growing without limit. Ordering is the safety invariant: purge only after the data
+    survives in a replicated chunk, so a returning or long-offline node never needs a
+    purged segment — it gets those records via chunk replication, not a segment
+    re-pull.
+
 ## Pipeline at a glance
 
 ```
@@ -20,12 +154,12 @@ ingest → digest → route → per-destination segment write → complete + pub
 
 A record is allocated once at digest; only its pointer travels between stages.
 Replication is not part of this pipeline: once a segment completes and its metadata
-is published, home nodes pull it (see the durable layer).
+is published, home nodes pull it (see the pull/reconcile points above).
 
 ## Pipeline (goroutines and channels)
 
 Stadiums are goroutines; parallelograms are channels. Bounded channels are what
-provide backpressure. The ingestion ack fires at the append + fsync stage.
+provide backpressure. The ingestion ack fires at the append stage.
 
 ```mermaid
 flowchart TB
@@ -65,13 +199,13 @@ flowchart TB
 
   subgraph destA["destination A — segment writer (pipelined)"]
     direction LR
-    A1(["encode"]) --> a1[/"chan"/] --> A2(["append + fsync"])
+    A1(["encode"]) --> a1[/"chan"/] --> A2(["append"])
   end
   ainq --> A1
 
   subgraph destB["destination B — segment writer (pipelined)"]
     direction LR
-    B1(["encode"]) --> b1[/"chan"/] --> B2(["append + fsync"])
+    B1(["encode"]) --> b1[/"chan"/] --> B2(["append"])
   end
   binq --> B1
 
@@ -81,11 +215,11 @@ flowchart TB
   Bwork -- "rename when complete" --> Bdone[("dest B completed/")]
 
   subgraph publish["completion — separate goroutine"]
-    PUB(["on rename: publish segment metadata to the control-plane log"])
+    PUB(["on rename: publish segment metadata to the vault-ctl log"])
   end
   Adone -. "reads" .-> PUB
   Bdone -. "reads" .-> PUB
-  PUB --> LOG[("control-plane log · Raft")]
+  PUB --> LOG[("vault-ctl log · Raft")]
 
   CONS(["home / builder: rolls the log,\npulls segments it lacks"])
   LOG -. "segment entries" .-> CONS
@@ -101,7 +235,7 @@ channel (fan-out); the same immutable record pointer is reused, never copied.
 
 The segment writer's only job is to write records into a durable segment file.
 Completing a segment can be as crude as moving the file from a working directory
-to a completed directory, then publishing its metadata to the control-plane log.
+to a completed directory, then publishing its metadata to the vault-ctl log.
 Replication is pull, not push: home nodes roll that log, notice segments they lack,
 and pull them from any current holder; the origin serves pulls and retains until
 the holders cover the home set (or the records are chunked). So a slow or
@@ -164,288 +298,14 @@ no inline type information.
 
 Each record is self-contained and length-prefixed, so records are read, skipped,
 and recovered one at a time — a truncated tail costs only the last partial
-record. A per-record CRC may live inside the frame (see the durable layer's
-checksum note); the writer encodes each record, appends it, and releases it, so
+record. A per-record CRC may live inside the frame (see the checksum point above);
+the writer encodes each record, appends it, and releases it, so
 memory stays bounded regardless of segment size, mapping straight onto the
 encode → append pipeline.
 
 Key-based query access needs a side index over the records; the staging tier
-supplies one (see the durable layer below), reusing the generic
+supplies one (see the staging points above), reusing the generic
 `backend/internal/btree`.
-
-## Where the thinking leans (provisional)
-
-1. Cardinal rule: once a record matches a route, it must never be lost. The only
-   valid drop is a record that matches no route — and that discard is intentional
-   and counted, surfaced as a tally in the router inspector, not a silent loss.
-2. Two separate acks: an **ingestion ack** (faced at the ingester, only some want
-   it) and a **replication ack** (internal, about durability across nodes).
-3. The pipeline is: ingest → digest → route → per-destination segment write →
-   complete + publish. Replication is downstream and pull-driven, not part of it.
-4. Ingest mints the EventID; EventID is cluster-unique from
-   `(IngesterID, NodeID, IngestTS, IngestSeq)`.
-5. Digestion (raw → record) is a worker pool. Processing out of order is fine
-   because order is carried by EventID, not by processing order.
-6. Digest workers put record pointers on a routing queue; routing workers consume
-   from the other end. Pointers only — the record is allocated once and never
-   copied between stages.
-7. A record is immutable after digestion, so one pointer can fan out to several
-   destination writers with no copy and no lock.
-8. Routing is a separate stage from digestion: per-record, in-memory rule match,
-   record → opaque destination IDs. Routing never defers.
-9. The router knows nothing about what a destination is. RF, storage class, and
-   home nodes are resolved later, at placement.
-10. Each destination has its own write path, structured as a pipeline of
-    single-step workers chained by short channels. Each worker hands off and
-    immediately takes the next record, so stages overlap.
-11. The write path is lock-free: each stage owns its step, ownership moves through
-    channels, no shared mutable state.
-12. Segments are durable on-disk files, written in the per-destination write path.
-13. The ingestion ack fires when the record is fsync'd into its destination
-    segment — one on-disk copy on the origin, replica or not. Segments are written
-    post-routing, so a routed record is durable as the immediate consequence of
-    routing: no "routed but not durable" gap, cardinal rule holds by construction.
-    That single on-disk copy is the bar (durable storage, not surviving node loss);
-    RF coverage is the background replication climb, never an ack precondition. The
-    local segment is itself the durable capture buffer — no separate durable router
-    queue is needed for ack durability.
-14. Replication is pull, not push: completing a segment publishes its metadata to
-    the control-plane log; home nodes roll the log, notice segments they lack, and
-    pull them from any current holder. The origin serves pulls and does not forward.
-15. One piece of cluster state decides local vs remote: a placement directory
-    mapping destination ID to its home nodes (including whether self is a home).
-16. EventID is the single key for identity, dedup, and order. It gets a
-    `Compare`/`Less`: `IngestTS`, then `NodeID`, then `IngesterID`, then
-    `IngestSeq` — a tie-free total order.
-17. Storage and merge order is EventID order. On-disk order within a segment does
-    not need to be canonical; EventID restores order at read.
-18. Query order (by `IngestTS` or `SourceTS`) is an index choice, independent of
-    storage order. `SourceTS` is carried on the record but not part of EventID.
-19. Within the ingest→segment path, local disk write is the only throughput
-    governor. Group commit (batched fsync) is the lever; everything above the write
-    is parallel and lock-free.
-20. If the disk ever fails to keep up, the bounded channels backpressure rather
-    than drop, so the cardinal rule holds under load with no special mechanism. In
-    practice sequential segment appends far outrun log ingestion rates, so this is
-    a correctness safety valve, not an operating mode to expect.
-21. Completing a segment can be as crude as moving the file from a working
-    directory to a completed directory, then publishing its metadata. Serving pulls
-    runs independently, so a slow or unreachable home just hasn't pulled yet —
-    completed segments accumulate on disk without backpressuring the writer or
-    ingest. The only backpressure is slow local disk.
-22. Segments are ephemeral build inputs; the chunk is the durable artifact.
-    Durability responsibility moves at that boundary.
-23. Two roles, paired: a vault control plane plans chunks from segment metadata
-    alone (destination, record count, byte size, first/last IngestTS, holder); a
-    per-home vault manager executes — it owns that vault's chunk store and staging
-    tier and builds chunks in place. Segment bodies move lazily, only once a vault
-    manager is ready to build.
-24. Segment metadata is published at completion (the working→completed rename); a
-    still-growing segment's header is provisional and not yet eligible.
-25. A chunk is a deterministic, ordered list of segment spans
-    `(segmentID, startRecord, count)`, sliced on a record/size budget; a
-    partial-segment cut resumes in the next chunk. The offsets are positions in the
-    segment's EventID order (see 36), not on-disk positions.
-26. Builds are reproducible: the same plan over the same immutable segments yields
-    a byte-identical chunk on every builder. So every home builds its own chunk
-    independently — no designated builder, no build-then-replicate, no
-    leader-dies-mid-build failover (a crash just re-runs the fixed plan).
-27. Completeness is binary: a builder either holds the named segments or it does
-    not. No time-window closure, and no straggler can belong inside an
-    already-built chunk.
-28. Replication is pull/reconcile, not push: a home rolls the log, pulls segments
-    it lacks from any holder, and adds itself to the holder-set. The desired-vs-
-    holder gap is the replicate signal; `holders ⊇ homes` (or records chunked) is
-    the release signal. The holder-set is explicit and survives restarts — it gates
-    durability, so it cannot be inferred.
-29. Two layers, two mechanisms: the segment layer is transport for building chunks;
-    durability lives entirely in a separate chunk-replication mechanism.
-30. Chunk replication is the same reconciliation — desired placement vs. holder-set,
-    driven to zero by copy or delete — so segments and chunks share one model. It
-    must exist anyway for RF changes, node loss, decommission, and placement changes.
-31. Determinism (single origin per segment + dictated spans) makes replicas
-    identical by construction — no merge, read-repair, vector clocks, or
-    anti-entropy. Verification is a chunk-ID/hash equality check.
-32. Checksums are optional belt-and-suspenders against physical faults only:
-    per-record CRC in the frame, per-segment checksum at completion in the reported
-    metadata, per-chunk checksum doubling as identity and build-agreement check.
-33. Staging (completed segments awaiting chunking) is the recent, hot, queryable
-    tier — the role active chunks fill today. Chunks are therefore always built
-    complete and immutable; there is no open or growing chunk state.
-34. Queries read staging and chunks together, merging/dedup by EventID. The ordered
-    (EventID/IngestTS) `backend/internal/btree` index is foundational — fast by
-    time/EventID, field/content by bounded scan. Field/content indexing of chunks is
-    deferred sugar, out of scope until the foundation is solid.
-35. The first choke points are cross-node, not local disk: Raft commit throughput
-    for metadata, and segment-transfer bandwidth. Keep Raft metadata-only and
-    batched (≈ segments × RF, never records); transfer is parallel, resumable bulk
-    copy. Neither risks the cardinal rule — the record is already durable on the
-    origin, so lag only delays chunking (staged segments pile up, bounded by
-    retention; no ingest backpressure).
-36. A segment's on-disk order is arbitrary (concurrent digestion), so each carries
-    an EventID-ordered index (the staging B+ tree) and chunk building is a k-way
-    merge over it; span offsets (25) are positions in this order. Order by the full
-    EventID so equal timestamps resolve identically. Because IngestTS leads the key,
-    the same index serves IngestTS range search — one structure, not two.
-37. Chunk building is key-only: the merge decodes just the frame length and the
-    fixed-width EventID, then copies each frame body verbatim — attributes/raw never
-    parsed (deferred to the index passes). Chunk frames come out byte-identical to
-    their source segment frames: cheap (memcpy) and deterministic.
-38. Placement and holder-set live in one consensus group: the vault control plane
-    owns RF/home set/leader *and* residency, so the reconcile gap is evaluable
-    atomically. The system layer keeps only inventory (nodes, storage classes,
-    capacity, vault existence) and seeds vault-control-plane membership, since a
-    group cannot define its own initial voter set.
-
-## From segments to chunks (the durable layer)
-
-Segments are ephemeral build inputs; the chunk is the durable artifact. The
-boundary between them is where durability responsibility moves.
-
-**The control plane plans chunks from segment metadata.** When a segment
-completes (the working→completed rename), the origin reports its metadata to a
-vault control plane: destination, record count, byte size, first/last IngestTS,
-and the holding node. The control plane never needs the segment bodies to plan —
-from the metadata index alone it decides chunk composition by record count, size,
-or time, and only pulls bodies once a builder is ready. Metadata is published for
-completed segments only; a still-growing segment's header is provisional.
-
-**Chunk plans are deterministic spans.** A chunk is not a time window that records
-fall into; it is an explicit, ordered list of segment spans, each
-`(segmentID, startRecord, count)`. A chunk needing 2000 records from 1500-record
-segments takes all of the first and the first 500 of the second; the next chunk
-resumes at record 500. Because segments are immutable and a span always yields the
-same records, the plan is fully reproducible: every node that builds a chunk from
-the same plan and the same segments produces byte-identical output. Because a
-segment's on-disk order is arbitrary, the build is a k-way merge across the plan's
-segments using a per-segment EventID-ordered index (the staging B+ tree), and the
-span offsets are positions in that EventID order — that index is what makes both
-the merge and the cuts reproducible.
-
-**Completeness is binary, not windowed.** A builder either holds the segments
-named in a chunk's plan or it does not. No straggler can retroactively belong
-inside an already-built chunk, because the chunk is defined by its named segments,
-not by a predicate over time. Cross-chunk timestamp overlap is fine — the indexes
-already merge interleaved ranges.
-
-**The vault manager owns a home's store and builds in place.** V3 gives each vault,
-on each home, a real vault manager: the component that owns that vault's chunk store
-and staging tier and performs chunk building. The control plane plans; the vault
-manager executes — it runs the plan over its pulled segments and produces the chunk
-directly in its own store, so there is no separate builder process and no hand-over
-or re-ingest step. Because the plan is byte-identical across builders (deterministic
-spans over immutable segments), there is no designated builder and no
-build-then-replicate step: every home's vault manager arrives at the same chunk.
-Build placement therefore carries no failover concern — a vault manager that crashes
-mid-build simply re-runs the deterministic plan on restart, since both the inputs
-and the output are fixed.
-
-**Replication is pull, and the holder-set is the signal.** Replication is not
-pushed; it is reconciled. The control plane holds, per segment, its desired home
-set and its holder-set — the nodes that currently hold it (origin plus any home
-that has pulled a copy). The difference is the work: a home that is in the desired
-set but not the holder-set rolls the log, notices the gap, pulls the segment from
-any current holder, and then adds itself to the holder-set. That one structure
-drives everything — the gap (`homes − holders`) is the replicate signal,
-`holders ⊇ homes` (or records chunked) is the release signal that lets the origin
-drop its copy, and the holder-set is the set to pull *from*. Steady-state
-replication, catch-up after downtime, and fetching a builder's chunk inputs are all
-the same operation: reconcile local holdings against the log. A node back from an
-hour offline is not a special case — it just has a longer backlog to roll. The
-origin retains a segment until its records are in a chunk or the holders cover the
-home set; the "suitable time" fallback covers only segments not yet built. Once the
-records are in a chunk, the segment is disposable everywhere.
-
-The holder-set is authoritative, not inferred — it gates the origin's release and
-thus durability, so it must record who actually holds a segment (updated as each
-home pulls) and survive restarts. It is two distinct sets working together: the
-desired home set (who should hold it) and the holder-set (who does), with their
-difference as the work.
-
-**Both sets live in the vault control plane, one consensus group.** The reconcile
-loop is "drive holders toward homes," so the desired home set (placement) and the
-holder-set must sit in the same Raft group to be reasoned about and updated
-together; splitting them across consensus groups makes the gap impossible to
-evaluate atomically. The vault control plane therefore owns placement — RF, home
-set, leader — alongside residency, rather than placement living in a separate
-cluster-wide authority. The cluster-wide system layer keeps only inventory: node
-membership, storage-class definitions, available capacity, and vault existence —
-the facts a placement decision reads. One bootstrap edge remains: a vault control
-plane's own voter set is derived from placement, so it cannot define its own initial
-membership — the system layer seeds and changes group membership, after which the
-vault control plane owns steady-state placement.
-
-**Staging is a searchable tier.** Completed segments awaiting chunk construction
-are not only transport — they are a queryable store. Until a chunk is built the
-newest records live only in staged segments, so a query must read staging
-alongside chunks or it would miss the most recent data. This needs an index at two
-scopes: the control-plane metadata index already routes a query to the right
-holders by destination and IngestTS range; a per-segment index then serves
-record-level lookups by IngestTS/EventID. The index is per segment, not one
-staging-wide structure: it is born with the segment and discarded with it, so there
-is nothing to prune — a single staging-wide index would instead be perpetually
-inserted into and deleted out of as segments churn. It is the same EventID-ordered
-B+ tree the build merge uses (36). Field/content search over staged records is a
-bounded scan — staging is the small, recent tier, so this stays cheap, and the
-heavier field/token indexes are not built here. A query fans out to staged segments
-and chunks together and merges by EventID — which also dedups the staging→chunk
-transition window, where a record can momentarily exist in both. Lifecycle is the
-vault control plane's existing concern (segment completion through disposal after
-chunking); the per-segment index simply rides that lifecycle and is rebuildable
-from the self-describing segment file on restart.
-
-For that ordered (EventID/IngestTS) index the machinery need not be new: a generic,
-file-backed B+ tree already lives in the internal packages
-(`backend/internal/btree` — a `Tree[K, V]` with a pluggable key codec) and can be
-pointed at staged segments directly. This ordered index is foundational, not sugar:
-the build merge runs over it and it doubles as staging time/EventID search.
-Field/content indexing is a different matter and deliberately out of scope for now —
-the foundation (durable capture, deterministic chunks, replication, placement) does
-not depend on it, and whether V3 reuses the existing indexing or builds new is a
-later question, not one to settle while laying the foundation. Staged records are
-searched by field/content with a bounded scan; chunk content indexing is deferred
-sugar.
-
-This split is structural, not merely economical: a live staging segment needs an
-index that accepts incremental inserts (the ordered B+ tree), while indexes built
-over a finished chunk operate on a frozen record set and are batch-built in one
-pass. That dividing line — incremental in staging, batch-built on the sealed chunk
-— falls out of the data, independent of which specific structures the chunk indexer
-eventually uses.
-
-This staging tier is the system's recent, hot, queryable layer — the role that
-"active chunks" fill today. A direct consequence: chunks are always built complete
-and immutable, with no open or growing chunk state. The most-recent,
-still-accumulating data lives in segments; a chunk only ever exists as a sealed,
-deterministic, replicated artifact. That collapses the active-vs-sealed chunk
-duality and reinforces presence-only replication — there is never a growing chunk
-to reconcile.
-
-**Two layers, two mechanisms.** The segment layer is transport for building
-chunks; durability lives entirely at the chunk layer, in a separate
-chunk-replication mechanism. That mechanism must exist regardless, because the
-replication factor can change after the fact — raising RF replicates existing
-chunks to more homes, lowering it drops surplus copies — and node loss,
-decommission, or a placement-policy change demand the same. So it is a continuous
-reconciliation loop: compare each chunk's actual holder-set against its desired
-placement and drive the difference to zero with plain copy or delete.
-
-**Reconciliation is over presence, not content.** Single origin per segment plus
-planner-dictated spans means replicas are identical by construction. Divergence —
-missing records, reordered records, conflicting copies — cannot arise, so there is
-no merge, read-repair, vector clock, or anti-entropy logic. The loop only ever
-answers a boolean ("does node X hold chunk C?") and acts by byte copy.
-Verification is a chunk-ID/hash equality check.
-
-**Checksums (optional belt-and-suspenders).** On top of a model already correct by
-construction, checksums guard against physical faults — bit-rot, torn writes, a
-flaky transfer — not logical divergence. Three levels: a per-record CRC in each
-frame (detect and drop a corrupt or torn record at the framing granularity); a
-per-segment checksum computed at completion and carried in the reported metadata
-(verify a transferred copy end-to-end before a builder trusts it; on mismatch,
-re-fetch from another holder); and a per-chunk checksum that doubles as the
-presence loop's identity check and as a cross-check that two independent
-deterministic builds agree.
 
 ## Out of scope (for now)
 
