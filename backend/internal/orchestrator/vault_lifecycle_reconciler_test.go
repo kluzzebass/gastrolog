@@ -1588,7 +1588,7 @@ func TestSweepStaleLeaderFSMEntriesProposesDeleteForStrandedSealingChunk(t *test
 // atomically finalizes any entries whose ExpectedFrom drained.
 //
 // Setup mirrors the live K8s incident from gastrolog-2eclw-cascade-fix
-// follow-up: hot-vault has chunks stuck retention-pending with
+// follow-up: local-vault has chunks stuck retention-pending with
 // ExpectedFrom containing only stale-node, while current placement is
 // {leader-node + follower-node}.
 func TestSweepStalePendingDeleteAcksPrunesNonPlacementNodes(t *testing.T) {

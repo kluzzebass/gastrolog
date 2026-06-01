@@ -487,7 +487,7 @@ rotation, and serves as the in-process API that RPC handlers delegate to.
   destroyed. With `disposition = route`, the records are first streamed
   through the routing engine (synthetic `_source = "retention"`), then
   the chunk is destroyed. A retention-trigger route directing records to
-  another vault is how hot/warm/cold chains are expressed.
+  another vault is how retention routing chains are expressed.
 
 - **Reconcile** — compare the vault FSM manifest against local disk;
   delete sealed chunks on disk that aren't in the manifest (orphan

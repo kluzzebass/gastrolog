@@ -6,15 +6,15 @@ Once a record has been ingested and digested, [routes](help:routing) direct it i
 
 A **vault** owns its records, indexes, retention rules, and access shape. It has one **type** (memory, file, jsonl) and — for file vaults — an optional **cloud service** binding. The vault is the storage unit, and the cluster runs each vault independently.
 
-Hot/warm/cold layering is composed by **chaining vaults via routes**. Records exit one vault when retention triggers and (with `Send records to routing engine` disposition) flow into the next vault through the routing table.
+Layered storage is composed by **chaining vaults via routes**. Records exit one vault when retention triggers and (with `Send records to routing engine` disposition) flow into the next vault through the routing table.
 
-Example: a hot/warm/cold deployment with three vaults:
+Example: a three-vault retention chain:
 
 | Vault | Type | Purpose |
 |-------|------|---------|
-| `api-hot` | [Memory](help:storage-memory) | RAM-backed. 1-minute rotation, 5-minute retention. Records eject to `api-warm` on retention. |
-| `api-warm` | [File on cloud-backed storage](help:storage-cloud) | Sealed chunks upload to S3, local cache for queries. 7-day retention, eject to `api-cold`. |
-| `api-cold` | [File on slow disk](help:storage-file) | Long retention, slow but cheap. |
+| `api-recent` | [Memory](help:storage-memory) | RAM-backed. 1-minute rotation, 5-minute retention. Records eject to `api-cloud` on retention. |
+| `api-cloud` | [File on cloud-backed storage](help:storage-cloud) | Sealed chunks upload to S3, local cache for queries. 7-day retention, eject to `api-archive`. |
+| `api-archive` | [File on slow disk](help:storage-file) | Long retention, slow but cheap. |
 
 The chain is wired with three [routes](help:routing): one per source/destination link. The retention disposition on each upstream vault must be `Send records to routing engine` for records to flow to the next vault.
 

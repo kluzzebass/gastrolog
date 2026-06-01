@@ -62,10 +62,10 @@ Conditions use union semantics — a chunk fires if **any** condition matches. T
 
 **Layered storage via retention-trigger routes:** Instead of dropping old data, re-route it to a cloud-backed vault for long-term archival:
 
-1. Create a [cloud-backed vault](help:storage-cloud) (e.g. S3) — this is your cold storage.
-2. Create a route with `Source = Retention trigger`, a `*` filter, and the cold vault as destination.
-3. On your hot vault, set a retention rule and choose `Send records to routing engine` as the disposition.
+1. Create a [cloud-backed vault](help:storage-cloud) (e.g. S3) — this is your archive vault.
+2. Create a route with `Source = Retention trigger`, a `*` filter, and the archive vault as destination.
+3. On your upstream vault (e.g. a fast local vault), set a retention rule and choose `Send records to routing engine` as the disposition.
 
-Records flow: hot vault retention fires → routing engine matches the retention-trigger route → cold vault (cloud-backed). The hot vault stays small and fast; the cold vault accumulates history in cheap cloud storage. Queries automatically search both.
+Records flow: upstream vault retention fires → routing engine matches the retention-trigger route → archive vault (cloud-backed). The upstream vault stays small and fast; the archive vault accumulates history in cheap cloud storage. Queries automatically search both.
 
 **No retention:** Omitting a retention policy means chunks accumulate forever. This is fine for testing but will eventually fill the disk in production. Always configure retention for production vaults.

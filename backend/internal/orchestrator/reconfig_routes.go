@@ -72,20 +72,20 @@ func (o *Orchestrator) reloadRoutesFromConfig(sys *system.System) error {
 
 		dests := make([]RouteDestination, 0, len(route.Destinations))
 		for _, destID := range route.Destinations {
-			hotVaultNode := resolveVaultNodeID(sys, destID)
+			destVaultNode := resolveVaultNodeID(sys, destID)
 
 			nodeID := ""
 			switch {
 			case o.draining[destID] != nil:
 				nodeID = o.draining[destID].TargetNodeID
-			case hotVaultNode == "" || hotVaultNode == o.localNodeID:
-				// Hot instance is local (or unassigned) — append locally if registered.
+			case destVaultNode == "" || destVaultNode == o.localNodeID:
+				// Destination vault leader is local (or unassigned) — append locally if registered.
 				if _, ok := o.vaults[destID]; !ok {
 					continue // not registered locally
 				}
 			case o.forwarder != nil:
-				// Hot instance is on a remote node — forward.
-				nodeID = hotVaultNode
+				// Destination vault leader is on a remote node — forward.
+				nodeID = destVaultNode
 			default:
 				continue // single-node mode, skip remote
 			}

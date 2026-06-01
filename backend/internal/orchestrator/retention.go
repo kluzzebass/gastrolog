@@ -680,8 +680,8 @@ func (r *retentionRunner) tryRetainChunk(id chunk.ChunkID, b retentionRule, alre
 	// path and must NOT re-route the records — without this guard, every
 	// retention tick re-streams the same chunk's records to the
 	// destination, multiplying storage at the route target each cycle.
-	// Operator footgun from gastrolog-2eclw-fix: hot-vault with route
-	// `_source="retention" AND _vault="<hot>"` → warm-vault grew 50-100
+	// Operator footgun from gastrolog-2eclw-fix: local-vault with route
+	// `_source="retention" AND _vault="<local>"` → cloud-vault grew 50-100
 	// MB/s with no active ingesters because every sweep re-routed the
 	// 11 stuck retention-pending chunks. Routing once + retrying only
 	// the delete is the correct shape: the chunk gets routed exactly

@@ -378,8 +378,8 @@ func mapSearchError(err error) error {
 // limit is the merge-level cap on records emitted to the client. The local
 // and remote iterators each apply q.Limit independently — without a cap
 // here, the merge would concatenate up to 2*q.Limit records, and when the
-// two sources cover non-overlapping time ranges (e.g. a hot vault with the
-// last 3min and a warm vault with retention-routed older records) the
+// two sources cover non-overlapping time ranges (e.g. a local vault with the
+// last 3min and a cloud vault with retention-routed older records) the
 // concatenation produces a visible temporal gap at the boundary between
 // the two slices. See "merge-level limit" in the design notes.
 func (s *QueryServer) mergeAndStream(
@@ -543,7 +543,7 @@ func streamLocal(ctx context.Context, sb *streamBatcher, localIter iter.Seq2[chu
 //
 // limit caps the total number of records emitted to the client across both
 // sources. Without it, when local and remote cover non-overlapping time
-// ranges (typical of hot/warm vault topologies), each iter would emit
+// ranges (typical of local/cloud retention chains), each iter would emit
 // q.Limit records and the merge would concatenate 2*q.Limit records with a
 // temporal gap at the boundary. limit=0 means unbounded.
 //

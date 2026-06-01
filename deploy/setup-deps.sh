@@ -1,6 +1,6 @@
 #!/bin/sh
 # Auto-wire CloudServices, per-node file storage, rotation/retention
-# policies, hot+warm vaults, routes, and ingesters into a freshly-
+# policies, local+cloud vaults, routes, and ingesters into a freshly-
 # deployed gastrolog cluster. Mirrors what scripts/cluster.sh sets up
 # for the dev cluster, adapted to the in-cluster service-name DNS
 # that the bundled deps expose.
@@ -99,58 +99,58 @@ echo "  file storage 'disk-1' (class 1) on $NODE_COUNT node(s): $ADDED added, $S
 
 # ── 3. Rotation / retention policies ─────────────────────────────────
 # Two rotation policies (1m + 100-row) and one retention (3m), matching
-# cluster.sh's hot/warm chain semantics.
+# cluster.sh's local→cloud chain semantics.
 glog config rotation-policy create --name 1m-rotate --max-age 1m >/dev/null
 glog config rotation-policy create --name 100-rows --max-records 100 >/dev/null
 glog config retention-policy create --name 3m-retain --max-age 3m >/dev/null
 echo "  policies: rotation [1m-rotate, 100-rows], retention [3m-retain]"
 
-# ── 4. Vaults (hot/warm chain) ───────────────────────────────────────
-# hot-vault:  file-backed on local disk-1, 100-row rotation, 3-minute
-#             retention with disposition=route — chunks past their TTL
-#             stream their records back through the routing engine
-#             tagged `_source = "retention"` instead of being dropped.
-#             The hot-retention-to-warm route below picks them up.
-# warm-vault: file-backed but cloud-served (minio). 100-row rotation
-#             carries over so chunk granularity is consistent;
-#             no retention policy means data lives forever.
+# ── 4. Vaults (local→cloud chain) ────────────────────────────────────
+# local-vault: file-backed on local disk-1, 100-row rotation, 3-minute
+#               retention with disposition=route — chunks past their TTL
+#               stream their records back through the routing engine
+#               tagged `_source = "retention"` instead of being dropped.
+#               The local-retention-to-cloud route below picks them up.
+# cloud-vault: file-backed but cloud-served (minio). 100-row rotation
+#              carries over so chunk granularity is consistent;
+#              no retention policy means data lives forever.
 # replication-factor matches the live node count so every chunk is
 # fully replicated across the cluster.
-glog config vault create --name hot-vault --type file \
+glog config vault create --name local-vault --type file \
   --storage-class 1 --replication-factor "$NODE_COUNT" \
   --rotation-policy 100-rows --retention-policy 3m-retain \
   --retention-disposition route >/dev/null
-glog config vault create --name warm-vault --type file \
+glog config vault create --name cloud-vault --type file \
   --storage-class 1 --replication-factor "$NODE_COUNT" \
   --cloud-service minio \
   --rotation-policy 100-rows >/dev/null
-echo "  vaults: hot-vault (RF=$NODE_COUNT, retention 3m → route), warm-vault (RF=$NODE_COUNT, cloud=minio)"
+echo "  vaults: local-vault (RF=$NODE_COUNT, retention 3m → route), cloud-vault (RF=$NODE_COUNT, cloud=minio)"
 
 # ── 5. Routes ────────────────────────────────────────────────────────
-# Live ingest → hot. The retention route needs hot-vault's GLID inline
+# Live ingest → local. The retention route needs local-vault's GLID inline
 # in its match expression — pull it from `vault get -o json` (single
 # proto message, so protojson camelCase: "id").
-HOT_VAULT_ID=$(glog config vault get hot-vault -o json | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
-if [ -z "$HOT_VAULT_ID" ]; then
-  echo "ERROR: failed to resolve hot-vault GLID" >&2
+LOCAL_VAULT_ID=$(glog config vault get local-vault -o json | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+if [ -z "$LOCAL_VAULT_ID" ]; then
+  echo "ERROR: failed to resolve local-vault GLID" >&2
   exit 1
 fi
 
 glog config route create \
-  --name ingest-to-hot \
+  --name ingest-to-local \
   --expression '_source = "ingest"' \
-  --destination hot-vault >/dev/null
+  --destination local-vault >/dev/null
 
-# Hot retention firing → warm. When hot-vault's 3m retention expires
+# Local retention firing → cloud. When local-vault's 3m retention expires
 # a chunk, its records stream back through the routing engine with
-# `_source = "retention"` and `_vault = "<hot-id>"`. This route picks
-# them up and lands them in warm-vault before the original chunk is
+# `_source = "retention"` and `_vault = "<local-id>"`. This route picks
+# them up and lands them in cloud-vault before the original chunk is
 # destroyed.
 glog config route create \
-  --name hot-retention-to-warm \
-  --expression "_source = \"retention\" AND _vault = \"$HOT_VAULT_ID\"" \
-  --destination warm-vault >/dev/null
-echo "  routes: ingest-to-hot, hot-retention-to-warm"
+  --name local-retention-to-cloud \
+  --expression "_source = \"retention\" AND _vault = \"$LOCAL_VAULT_ID\"" \
+  --destination cloud-vault >/dev/null
+echo "  routes: ingest-to-local, local-retention-to-cloud"
 
 # ── 6. Ingesters ─────────────────────────────────────────────────────
 # All defined and ready, assigned via --all-nodes=true so eligibility
@@ -193,4 +193,4 @@ if [ "${SKIP_RSYSLOG:-0}" != "1" ]; then
   echo "  ingesters: kafka, syslog, relp, otlp, fluentfwd, http, chatterbox, scatterbox (all disabled, all-nodes)"
 fi
 
-echo "Done. Cluster wired with hot/warm chain; enable ingesters from the UI to start landing records."
+echo "Done. Cluster wired with local→cloud chain; enable ingesters from the UI to start landing records."

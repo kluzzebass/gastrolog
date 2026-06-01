@@ -54,7 +54,7 @@ interface VaultSettingsCardProps {
 
 // The vault carries its full storage shape directly: Type, RotationPolicyID,
 // RetentionRules, RF, StorageClass, CloudServiceID, cache fields. The UI
-// edits the vault directly; inter-vault routing covers hot/warm chains.
+// edits the vault directly; inter-vault routing covers retention chains.
 
 function vaultTypeLabel(t: VaultType): VaultTypeLabel {
   switch (t) {

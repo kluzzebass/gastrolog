@@ -1258,7 +1258,7 @@ func TestMultiNode_PaginatedReverseSearchRemoteOnly(t *testing.T) {
 
 // TestMultiNode_PaginatedReverseSearchDenseMultiVault is the regression
 // guard for the "scroll jumps backward in time" symptom observed against
-// the Phase 5 hot/warm two-vault cluster: paginating reverse against a
+// the Phase 5 local/cloud two-vault cluster: paginating reverse against a
 // coordinator that is leader of one vault and reaches another via remote
 // fan-out drops records mid-merge, surfacing in the UI as the timestamp
 // suddenly jumping minutes earlier mid-scroll.
@@ -1402,8 +1402,8 @@ func TestMultiNode_PaginatedReverseSearchDenseMultiVault(t *testing.T) {
 
 // TestMultiNode_PaginatedReverseSearchNonOverlappingVaults reproduces the
 // user-reported "scroll jumps backward in time" symptom from the Phase 5
-// hot/warm two-vault topology. The setup: hot vault holds the most recent
-// 3 minutes of records (chatterbox flow), warm vault holds the older
+// local/cloud two-vault topology. The setup: the recent vault holds the most recent
+// 3 minutes of records (chatterbox flow), the archive vault holds the older
 // retention-routed records. The two ranges are CONTIGUOUS but
 // NON-OVERLAPPING — the boundary between them is the retention
 // threshold.
@@ -1411,10 +1411,10 @@ func TestMultiNode_PaginatedReverseSearchDenseMultiVault(t *testing.T) {
 // The bug surfaced only with this topology because the earlier pagination
 // tests (PaginatedReverseSearch, RemoteOnly) had both vaults span the
 // same time range, so each iter's per-q.Limit slice happened to interleave
-// contiguously with the other's. With non-overlapping ranges, hot's iter
-// emits q.Limit records (all newer than any warm record) and warm's iter
-// emits q.Limit records (all older), and the merge concatenated them with
-// a visible temporal gap at the boundary.
+// contiguously with the other's. With non-overlapping ranges, the recent
+// vault's iter emits q.Limit records (all newer than any archive record) and
+// the archive vault's iter emits q.Limit records (all older), and the merge
+// concatenated them with a visible temporal gap at the boundary.
 //
 // The test asserts that paginating reverse from "now" through the entire
 // vault produces every record exactly once with no gap larger than the
@@ -1424,12 +1424,12 @@ func TestMultiNode_PaginatedReverseSearchNonOverlappingVaults(t *testing.T) {
 	h := setupMultiNode(t, []string{"node-A", "node-B"})
 
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
-	const hotCount = 200
-	const warmCount = 300
+	const recentCount = 200
+	const olderCount = 300
 	const pageLimit = 50
 
-	// Warm vault: older block [t0..t0+299s].
-	for i := range warmCount {
+	// Archive vault: older block [t0..t0+299s].
+	for i := range olderCount {
 		ts := t0.Add(time.Duration(i) * time.Second)
 		h.Node(t, "node-B").vault.CM.Append(chunk.Record{
 			IngestTS: ts,
@@ -1437,9 +1437,9 @@ func TestMultiNode_PaginatedReverseSearchNonOverlappingVaults(t *testing.T) {
 			Raw:      fmt.Appendf(nil, "W-%04d", i),
 		})
 	}
-	// Hot vault: newer block [t0+300s..t0+499s], contiguous with warm.
-	for i := range hotCount {
-		ts := t0.Add(time.Duration(warmCount+i) * time.Second)
+	// Recent vault: newer block [t0+300s..t0+499s], contiguous with archive.
+	for i := range recentCount {
+		ts := t0.Add(time.Duration(olderCount+i) * time.Second)
 		h.Node(t, "node-A").vault.CM.Append(chunk.Record{
 			IngestTS: ts,
 			WriteTS:  ts,
@@ -1449,10 +1449,10 @@ func TestMultiNode_PaginatedReverseSearchNonOverlappingVaults(t *testing.T) {
 
 	expr := fmt.Sprintf("start=%s end=%s reverse=true limit=%d",
 		t0.Format(time.RFC3339Nano),
-		t0.Add((warmCount+hotCount+1)*time.Second).Format(time.RFC3339Nano),
+		t0.Add((olderCount+recentCount+1)*time.Second).Format(time.RFC3339Nano),
 		pageLimit)
 
-	seen := make(map[string]bool, hotCount+warmCount)
+	seen := make(map[string]bool, recentCount+olderCount)
 	var allTS []time.Time
 	var resumeToken []byte
 	for page := 1; page <= 50; page++ {
@@ -1534,16 +1534,16 @@ func TestMultiNode_PaginatedReverseSearchNonOverlappingVaults(t *testing.T) {
 		resumeToken = nextToken
 	}
 
-	const want = hotCount + warmCount
+	const want = recentCount + olderCount
 	if len(seen) != want {
 		var missing []string
-		for i := range hotCount {
+		for i := range recentCount {
 			id := fmt.Sprintf("H-%04d", i)
 			if !seen[id] {
 				missing = append(missing, id)
 			}
 		}
-		for i := range warmCount {
+		for i := range olderCount {
 			id := fmt.Sprintf("W-%04d", i)
 			if !seen[id] {
 				missing = append(missing, id)

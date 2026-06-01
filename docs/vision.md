@@ -120,7 +120,7 @@ Traditional alerting is threshold-based: "alert when error rate exceeds 5%." Thi
 
 ## Layered Storage via Routing
 
-Storage should be a budget, not a cliff. The cluster expresses hot/warm/cold layering as **multiple vaults connected by routes**. Each vault owns one storage shape; layering is the operator's choice of which vaults exist and how records flow between them.
+Storage should be a budget, not a cliff. The cluster expresses layered storage as **multiple vaults connected by routes**. Each vault owns one storage shape; layering is the operator's choice of which vaults exist and how records flow between them.
 
 ### The vault as the storage unit
 
@@ -151,18 +151,18 @@ Cloud services:
 
 **Vault** — the storage container. Its `type`, `storage_class`, optional `cloud_service_id`, rotation policy, retention rules, and replication factor fully describe how records are persisted.
 
-A typical hot/warm/cold deployment looks like three vaults wired by routes:
+A typical three-vault retention chain looks like this:
 
 ```
-Vault "api-logs-hot"
+Vault "api-logs-recent"
   type=memory  budget=4GB  rotation=size:64MB
-  retention="last 1h" disposition=route   →   feeds warm
+  retention="last 1h" disposition=route   →   feeds local
 
-Vault "api-logs-warm"
+Vault "api-logs-local"
   type=file  storage_class=1  rotation=time:1h
-  retention="last 7d" disposition=route   →   feeds cold
+  retention="last 7d" disposition=route   →   feeds archive
 
-Vault "api-logs-cold"
+Vault "api-logs-archive"
   type=file  storage_class=3  cloud_service=s3-prod  rotation=time:1d
   retention="last 90d" disposition=delete
 ```
@@ -189,40 +189,40 @@ Records flow through the cluster on a single authoritative path: the leader of t
 flowchart TB
     I([fa:fa-plug Ingester]) --> RT[Routing engine]
 
-    RT -->|route| HOT
-    HOT -->|retention=route| RT2[Routing engine<br/>_source=retention]
-    RT2 -->|route| WARM
-    WARM -->|retention=route| RT3[Routing engine<br/>_source=retention]
-    RT3 -->|route| COLD
+    RT -->|route| RECENT
+    RECENT -->|retention=route| RT2[Routing engine<br/>_source=retention]
+    RT2 -->|route| LOCAL
+    LOCAL -->|retention=route| RT3[Routing engine<br/>_source=retention]
+    RT3 -->|route| ARCHIVE
 
-    subgraph node1hot [Node-1: hot vault leader]
-        HOT[fa:fa-bolt Memory vault<br/>active + sealed chunks]
+    subgraph node1recent [Node-1: recent vault leader]
+        RECENT[fa:fa-bolt Memory vault<br/>active + sealed chunks]
     end
 
-    subgraph node2hot [Node-2: hot vault follower]
-        HOT_R[fa:fa-bolt Memory<br/>replica]
+    subgraph node2recent [Node-2: recent vault follower]
+        RECENT_R[fa:fa-bolt Memory<br/>replica]
     end
 
-    subgraph node3warm [Node-3: warm vault leader]
-        WARM[fa:fa-hard-drive File vault<br/>active + sealed chunks]
+    subgraph node3local [Node-3: local vault leader]
+        LOCAL[fa:fa-hard-drive File vault<br/>active + sealed chunks]
     end
 
-    subgraph node1warm [Node-1: warm vault follower]
-        WARM_R[fa:fa-hard-drive File<br/>replica]
+    subgraph node1local [Node-1: local vault follower]
+        LOCAL_R[fa:fa-hard-drive File<br/>replica]
     end
 
-    subgraph clouds3 [Node-N: cold vault leader]
-        COLD[fa:fa-cloud File vault<br/>cloud-backed]
+    subgraph clouds3 [Node-N: archive vault leader]
+        ARCHIVE[fa:fa-cloud File vault<br/>cloud-backed]
     end
 
-    HOT -.->|mirror writes| HOT_R
-    WARM -.->|chunk copy| WARM_R
+    RECENT -.->|mirror writes| RECENT_R
+    LOCAL -.->|chunk copy| LOCAL_R
 
-    style HOT fill:#c4956a,color:#1a1a1a
-    style WARM fill:#a07850,color:#1a1a1a
-    style COLD fill:#6a5040,color:#f0e8e0
-    style HOT_R fill:#c4956a33,color:#c4956a,stroke:#c4956a,stroke-dasharray:5
-    style WARM_R fill:#a0785033,color:#a07850,stroke:#a07850,stroke-dasharray:5
+    style RECENT fill:#c4956a,color:#1a1a1a
+    style LOCAL fill:#a07850,color:#1a1a1a
+    style ARCHIVE fill:#6a5040,color:#f0e8e0
+    style RECENT_R fill:#c4956a33,color:#c4956a,stroke:#c4956a,stroke-dasharray:5
+    style LOCAL_R fill:#a0785033,color:#a07850,stroke:#a07850,stroke-dasharray:5
 ```
 
 No duplicate writes. No coordination questions about who does what. The leader for each vault is the single decision-maker. If a leader dies, a follower is promoted and the golden thread reconnects — the new leader picks up where the old one left off.
@@ -246,15 +246,15 @@ Retention policies decide when chunks expire. Strategies can be combined; the mo
 
 - **Time-based**: chunks older than N days expire. Simple, predictable.
 - **Size-based**: when the vault exceeds N GB, the oldest chunks expire. Practical for capacity planning.
-- **Budget-based**: the cluster has a monthly storage budget; the operator distributes data across vaults to stay within it. The vault model makes per-vault budgets natural — `hot` is small and expensive, `cold` is large and cheap.
-- **Access-based**: chunks that haven't been queried in N days expire. Data that's actively used stays warm; data that's gathering dust moves cold.
+- **Budget-based**: the cluster has a monthly storage budget; the operator distributes data across vaults to stay within it. The vault model makes per-vault budgets natural — recent vaults are small and expensive, archive vaults are large and cheap.
+- **Access-based**: chunks that haven't been queried in N days expire. Actively queried data stays in fast vaults; idle data moves to cheaper vaults via retention routes.
 - **Value-based differentiation** is the routing engine's job. Sealed chunks are immutable and contain mixed severities — you can't expire half a chunk. Instead, use route forking at ingest to send high-value records (errors, traced requests) to a vault with long retention, and low-value records (debug, info) to a vault with aggressive retention. The visual route editor makes this a natural fork in the flow.
 
 ### Live storage reconfiguration
 
 Vaults can be added, retired, or rewired while the cluster is live. The principle: **reconfiguration affects the future, not the past.**
 
-**Adding a vault** (e.g. inserting a new "warm" vault between hot and cold): change the upstream vault's retention route to point at the new vault. Existing data in the cold vault stays there — no back-migration.
+**Adding a vault** (e.g. inserting a new local vault between a recent vault and an archive vault): change the upstream vault's retention route to point at the new vault. Existing data in the archive vault stays there — no back-migration.
 
 **Retiring a vault**: stop routes that send records into it; existing chunks remain queryable until they expire under the vault's retention policy. The vault drains naturally; no special wind-down state is needed because the records flowing in stop the moment the route is disabled.
 
@@ -262,7 +262,7 @@ Vaults can be added, retired, or rewired while the cluster is live. The principl
 
 ### Transparent query fan-out
 
-A query for `last=90d` scans all vaults automatically. The user doesn't know or care where the data lives. Results from warmer vaults arrive first; colder vaults stream in progressively, with a subtle loading indicator showing that older data is still arriving.
+A query for `last=90d` scans all vaults automatically. The user doesn't know or care where the data lives. Results from faster vaults arrive first; archive vaults stream in progressively, with a subtle loading indicator showing that older data is still arriving.
 
 ```mermaid
 flowchart LR
@@ -283,19 +283,19 @@ Different vaults produce different chunks from the same records. A memory vault 
 
 ```mermaid
 flowchart LR
-    subgraph node1mem [Node-1: hot vault leader]
+    subgraph node1mem [Node-1: recent vault leader]
         I([fa:fa-plug Ingester]) --> MT[Active + sealed chunks<br/>seals every ~5 min]
     end
 
     MT -->|retention=route| LT
 
-    subgraph node3local [Node-3: warm vault leader]
+    subgraph node3local [Node-3: local vault leader]
         LT[Active chunk<br/>seals every ~1h or ~500MB] -->|seal| LTS[Sealed chunks<br/>compressed · indexed]
     end
 
     LTS -->|retention=route| CT
 
-    subgraph clouds3 [Cold vault: cloud-backed]
+    subgraph clouds3 [Archive vault: cloud-backed]
         CT[Active chunk on local disk<br/>seals into large objects] -->|seal + upload| CTS[(Sealed chunks in S3)]
     end
 
@@ -369,9 +369,9 @@ Investigating incidents is a team activity, but most tools treat it as a solo on
 
 The cluster should not need an operator for steady-state operations. It should heal itself, rebalance itself, and operate within its resource budget without human intervention.
 
-**Automatic vault rebalancing.** When a node joins or leaves the cluster, vaults are redistributed across the remaining nodes to maintain even load. The rebalancing is lightweight because cold data lives in cloud-backed vaults — only the active chunk and warm cache need to migrate. Queries continue to work during rebalancing; the routing layer forwards requests to whichever node currently owns each vault.
+**Automatic vault rebalancing.** When a node joins or leaves the cluster, vaults are redistributed across the remaining nodes to maintain even load. The rebalancing is lightweight because archive data lives in cloud-backed vaults — only the active chunk and warm cache need to migrate. Queries continue to work during rebalancing; the routing layer forwards requests to whichever node currently owns each vault.
 
-**Storage pressure management.** When local storage approaches capacity, the cluster responds along the route chain automatically — accelerating retention on the hot vault so records flow into the warm vault sooner, evicting cache entries on cloud-backed vaults, and tightening rotation thresholds. The operator sets the budget; the routes-and-retention layer manages within it.
+**Storage pressure management.** When local storage approaches capacity, the cluster responds along the route chain automatically — accelerating retention on the upstream vault so records flow into the downstream vault sooner, evicting cache entries on cloud-backed vaults, and tightening rotation thresholds. The operator sets the budget; the routes-and-retention layer manages within it.
 
 **Graceful degradation.** When a node goes down, its vaults' sealed data is already durable in cloud-backed vaults further down the chain. Another node picks up ingestion for the affected vaults, and queries against cloud-backed chunks continue to work (they're in S3, not on the dead node's disk). The only data at risk is the active memory-vault chunk — minutes of records, recoverable from the peer mirror if configured, or re-ingested from source. The cluster never refuses to answer a query because a node is down — it answers with what's durable and tells you what's missing.
 

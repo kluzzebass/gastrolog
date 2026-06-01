@@ -424,9 +424,9 @@ func TestRetentionDispositionEmptyTreatedAsDelete(t *testing.T) {
 // again. Otherwise every sweep re-streams the same records to the
 // route destination, multiplying storage at the target each cycle.
 //
-// In the K8s test cluster this manifested as 11 stuck hot-vault
-// chunks re-routing through `_source="retention"` → warm-vault on
-// every 60s sweep, growing warm-vault by ~50-100 MB/s with zero
+// In the K8s test cluster this manifested as 11 stuck local-vault
+// chunks re-routing through `_source="retention"` → cloud-vault on
+// every 60s sweep, growing cloud-vault by ~50-100 MB/s with zero
 // active ingesters.
 func TestTryRetainChunkSkipsDispositionWhenAlreadyPending(t *testing.T) {
 	t.Parallel()

@@ -6,7 +6,7 @@ This document breaks the vision into epics and issues, with dependencies. Each i
 
 ## Epic 1: Layered Storage via Routing
 
-The foundation most other epics depend on. The model: each vault owns one storage shape; layered hot/warm/cold deployments are composed by chaining vaults via the routing engine. Most of this epic is **done**; remaining items are about higher-level capacity tooling.
+The foundation most other epics depend on. The model: each vault owns one storage shape; layered deployments are composed by chaining vaults via the routing engine. Most of this epic is **done**; remaining items are about higher-level capacity tooling.
 
 | # | Issue | Depends on | Vision section |
 |---|-------|-----------|----------------|
