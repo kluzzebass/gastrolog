@@ -557,7 +557,7 @@ func (x *RetentionRule) GetRetentionPolicyId() []byte {
 type VaultPlacement struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	StorageId     []byte                 `protobuf:"bytes,1,opt,name=storage_id,json=storageId,proto3" json:"storage_id,omitempty"` // references FileStorage.id
-	Leader        bool                   `protobuf:"varint,2,opt,name=leader,proto3" json:"leader,omitempty"`                       // bootstrap/residency primary; chunk_append write-path authority, not sequenced — see docs/fan-out/v2/placement-leader-migration.md
+	Leader        bool                   `protobuf:"varint,2,opt,name=leader,proto3" json:"leader,omitempty"`                       // true = this storage bootstraps the Raft group (initial leader)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -626,7 +626,6 @@ type VaultConfig struct {
 	CacheBudget          string                 `protobuf:"bytes,14,opt,name=cache_budget,json=cacheBudget,proto3" json:"cache_budget,omitempty"`                            // max cache size (e.g. "1GB", "500MB"; default: "1GiB")
 	CacheTtl             string                 `protobuf:"bytes,15,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`                                     // eviction TTL duration (e.g. "1h", "7d"); only for ttl mode
 	RetentionDisposition string                 `protobuf:"bytes,16,opt,name=retention_disposition,json=retentionDisposition,proto3" json:"retention_disposition,omitempty"` // "delete" (default) or "route" — what retention does with aged-out records
-	WriteModel           string                 `protobuf:"bytes,17,opt,name=write_model,json=writeModel,proto3" json:"write_model,omitempty"`                               // "" or "chunk_append" (default): active-chunk append; "sequenced": destination-vault sequencing + spool path
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
 }
@@ -769,13 +768,6 @@ func (x *VaultConfig) GetCacheTtl() string {
 func (x *VaultConfig) GetRetentionDisposition() string {
 	if x != nil {
 		return x.RetentionDisposition
-	}
-	return ""
-}
-
-func (x *VaultConfig) GetWriteModel() string {
-	if x != nil {
-		return x.WriteModel
 	}
 	return ""
 }
@@ -8850,7 +8842,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x0eVaultPlacement\x12\x1d\n" +
 	"\n" +
 	"storage_id\x18\x01 \x01(\fR\tstorageId\x12\x16\n" +
-	"\x06leader\x18\x02 \x01(\bR\x06leader\"\xa9\x05\n" +
+	"\x06leader\x18\x02 \x01(\bR\x06leader\"\x88\x05\n" +
 	"\vVaultConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
@@ -8870,9 +8862,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x0ecache_eviction\x18\r \x01(\tR\rcacheEviction\x12!\n" +
 	"\fcache_budget\x18\x0e \x01(\tR\vcacheBudget\x12\x1b\n" +
 	"\tcache_ttl\x18\x0f \x01(\tR\bcacheTtl\x123\n" +
-	"\x15retention_disposition\x18\x10 \x01(\tR\x14retentionDisposition\x12\x1f\n" +
-	"\vwrite_model\x18\x11 \x01(\tR\n" +
-	"writeModel\"-\n" +
+	"\x15retention_disposition\x18\x10 \x01(\tR\x14retentionDisposition\"-\n" +
 	"\x10RouteDestination\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\"\x81\x02\n" +
 	"\vRouteConfig\x12\x0e\n" +

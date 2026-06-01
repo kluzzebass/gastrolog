@@ -365,9 +365,6 @@ func (f *FSM) applyPutVault(ctx context.Context, pb *gastrologv1.PutVaultCommand
 	if err != nil {
 		return nil, err
 	}
-	if err := cfg.ValidateWriteModel(); err != nil {
-		return nil, err
-	}
 	if err := f.store.PutVault(ctx, cfg); err != nil {
 		return nil, err
 	}

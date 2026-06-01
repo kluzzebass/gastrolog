@@ -74,10 +74,6 @@ service VaultService {
   // proposes CmdRepatriateChunk to the vault-ctl FSM. Refuses if the
   // chunk is already FSM-tracked or tombstoned. See gastrolog-32bf2.
   rpc RepatriateOrphan(RepatriateOrphanRequest) returns (RepatriateOrphanResponse);
-
-  // GetSequencedVaultDiagnostics returns local sequenced write-path
-  // watermarks, allocator leases, and fence history for operator inspection.
-  rpc GetSequencedVaultDiagnostics(GetSequencedVaultDiagnosticsRequest) returns (GetSequencedVaultDiagnosticsResponse);
 }
 
 message ListVaultsRequest {}
@@ -286,19 +282,6 @@ message VaultStats {
   // has no vault-ctl group for this vault (e.g. vault placed
   // elsewhere) or Raft is not yet initialized.
   uint64 raft_applied_index = 13;
-  // ingest_high_watermark is H — highest accepted vault_seq on this
-  // node. Broadcast in NodeStats as ephemeral fence-hint evidence for
-  // vault-ctl leaders (gastrolog-4vkm2). Zero when this node has no
-  // local spool state for the vault or the vault is not sequenced.
-  uint64 ingest_high_watermark = 14;
-  // spool_watermark is S_r — highest vault_seq durably present in local spool.
-  uint64 spool_watermark = 15;
-  // fence_high_watermark is F_n — latest durable fence upper bound from vault-ctl Raft.
-  uint64 fence_high_watermark = 16;
-  // materialization_watermark is M_r — highest vault_seq fully materialized locally.
-  uint64 materialization_watermark = 17;
-  // convergence_watermark is C_r — highest fence upper bound converge-sealed locally.
-  uint64 convergence_watermark = 18;
 }
 
 message ReindexVaultRequest {
@@ -355,9 +338,6 @@ message ExportRecord {
   uint32 ingest_seq = 9;   // Per-ingester rolling sequence counter
   bytes ingester_id = 10;  // 16-byte GLID
   bytes node_id = 11;      // 16-byte GLID — emitting node, disambiguates parallel ingesters
-
-  // Destination-vault acceptance sequence (sequenced write path). Zero when unset.
-  uint64 vault_seq = 12;
 }
 
 // ImportRecords appends a batch of records to a vault.
@@ -470,46 +450,3 @@ message RepatriateOrphanRequest {
 }
 
 message RepatriateOrphanResponse {}
-
-message GetSequencedVaultDiagnosticsRequest {
-  string vault = 1;
-}
-
-message GetSequencedVaultDiagnosticsResponse {
-  string write_model = 1;
-  string node_id = 2;
-  uint64 spool_watermark = 3;
-  uint64 ingest_high_watermark = 4;
-  uint64 fence_high_watermark = 5;
-  uint64 materialization_watermark = 6;
-  uint64 convergence_watermark = 7;
-  SeqAllocatorDiagnostics allocator = 8;
-  repeated FenceRecordDiagnostics fences = 9;
-}
-
-message SeqAllocatorDiagnostics {
-  uint64 next_seq = 1;
-  uint64 epoch = 2;
-  repeated SeqActiveLeaseDiagnostics active_swaths = 3;
-  repeated SeqBurnedTailDiagnostics burned_tails = 4;
-}
-
-message SeqActiveLeaseDiagnostics {
-  string holder_id = 1;
-  uint64 epoch = 2;
-  uint64 range_start = 3;
-  uint64 range_end = 4;
-}
-
-message SeqBurnedTailDiagnostics {
-  uint64 start = 1;
-  uint64 end = 2;
-  uint64 epoch = 3;
-}
-
-message FenceRecordDiagnostics {
-  uint64 id = 1;
-  uint64 upper_bound_seq = 2;
-  uint64 prev_bound_seq = 3;
-  google.protobuf.Timestamp created_at = 4;
-}

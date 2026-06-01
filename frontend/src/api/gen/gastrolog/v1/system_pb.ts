@@ -440,7 +440,7 @@ export class VaultPlacement extends Message<VaultPlacement> {
   storageId = new Uint8Array(0);
 
   /**
-   * bootstrap/residency primary; chunk_append write-path authority, not sequenced — see docs/fan-out/v2/placement-leader-migration.md
+   * true = this storage bootstraps the Raft group (initial leader)
    *
    * @generated from field: bool leader = 2;
    */
@@ -576,13 +576,6 @@ export class VaultConfig extends Message<VaultConfig> {
    */
   retentionDisposition = "";
 
-  /**
-   * "" or "chunk_append" (default): active-chunk append; "sequenced": destination-vault sequencing + spool path
-   *
-   * @generated from field: string write_model = 17;
-   */
-  writeModel = "";
-
   constructor(data?: PartialMessage<VaultConfig>) {
     super();
     proto3.util.initPartial(data, this);
@@ -607,7 +600,6 @@ export class VaultConfig extends Message<VaultConfig> {
     { no: 14, name: "cache_budget", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 15, name: "cache_ttl", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 16, name: "retention_disposition", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 17, name: "write_model", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultConfig {

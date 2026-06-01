@@ -173,9 +173,6 @@ type Server struct {
 	// remote GetContext requests.
 	contextExecutor ContextExecutor
 
-	// spoolSeqReader reads one local spool slot for ForwardReadSpoolSeq RPCs.
-	spoolSeqReader SpoolSeqReader
-
 	// listChunksExecutor lists chunks in a local vault for remote ListChunks requests.
 	listChunksExecutor ListChunksExecutor
 

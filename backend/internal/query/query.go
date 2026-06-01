@@ -349,9 +349,6 @@ type Engine struct {
 	// Lookup enrichment resolver (optional). Set via SetLookupResolver.
 	lookupResolver lookup.Resolver
 
-	// spoolAnchorReader resolves pre-materialized anchors on sequenced vaults.
-	spoolAnchorReader SpoolAnchorReader
-
 	// Logger for this engine instance.
 	// Scoped with component="query-engine" at construction time.
 	logger *slog.Logger

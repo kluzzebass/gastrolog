@@ -86,10 +86,6 @@ type VaultInstance struct {
 	// (no FSM, no replication).
 	Reconciler *VaultLifecycleReconciler
 
-	// SpoolDir is the on-disk spool root for sequenced write-model vaults.
-	// Empty for memory vaults (orchestrator uses in-memory spool).
-	SpoolDir string
-
 	// ListManifest returns all chunk IDs in the vault-ctl FSM view — the authoritative
 	// set of chunks that should exist. Nil when no Raft group exists.
 	ListManifest func() []chunk.ChunkID

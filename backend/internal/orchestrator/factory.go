@@ -108,15 +108,12 @@ type Factories struct {
 // the orchestrator on error and create a fresh one. Do not attempt to recover
 // or retry with the same orchestrator instance.
 func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) error {
-	// Always wire cluster dependencies from factories. Joiners call ApplyConfig
-	// with sys=nil (snapshot replication path) and then ReplayConfigFromStore;
-	// sequenced writes need groupMgr even when the initial config pass is a no-op.
-	o.groupMgr = factories.GroupManager
-	o.peerConns = factories.PeerConns
-
 	if sys == nil {
 		return nil
 	}
+
+	o.groupMgr = factories.GroupManager
+	o.peerConns = factories.PeerConns
 
 	if err := o.applyVaults(sys, factories); err != nil {
 		return err
@@ -191,15 +188,7 @@ func (o *Orchestrator) initVault(sys *system.System, vaultCfg system.VaultConfig
 	vault.Name = vaultCfg.Name
 	vault.Enabled = vaultCfg.Enabled
 	vault.StorageType = string(vaultCfg.Type)
-	vault.WriteModel = vaultCfg.ResolveWriteModel()
-	vault.ReplicationFactor = vaultCfg.ReplicationFactor
-	if vault.ReplicationFactor == 0 {
-		vault.ReplicationFactor = 1
-	}
 	o.RegisterVault(vault)
-	if instance != nil {
-		o.refreshSeqFanOutTargetsLocked(vault, vaultCfg.Placements, sys.Runtime.NodeStorageConfigs)
-	}
 	if o.alerts != nil {
 		o.alerts.Clear(alertKey)
 	}

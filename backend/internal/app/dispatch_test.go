@@ -131,7 +131,6 @@ func (m *mockOrch) ApplyRotationPolicyForRole(context.Context, glid.GLID) error 
 }
 func (m *mockOrch) DisableVault(glid.GLID) error                  { return m.disableVaultErr }
 func (m *mockOrch) EnableVault(glid.GLID) error                   { return m.enableVaultErr }
-func (m *mockOrch) SyncVaultConfig(system.VaultConfig) error      { return nil }
 func (m *mockOrch) ForceRemoveVault(id glid.GLID) error {
 	m.forceRemoveIDs = append(m.forceRemoveIDs, id)
 	return m.forceRemoveErr
@@ -156,8 +155,6 @@ func (m *mockOrch) MissingVaultInstance(_ glid.GLID, _ []glid.GLID) bool { retur
 func (m *mockOrch) LocalInstanceIDs(_ glid.GLID) []glid.GLID            { return nil }
 func (m *mockOrch) AddVaultInstance(_ context.Context, _ glid.GLID, _ orchestrator.Factories) error {
 	return nil
-}
-func (m *mockOrch) RefreshSeqFanOutTargets(_ glid.GLID, _ []system.VaultPlacement, _ []system.NodeStorageConfig) {
 }
 func (m *mockOrch) DrainVault(_ context.Context, id glid.GLID, _ string) error {
 	m.drainCalls = append(m.drainCalls, id)

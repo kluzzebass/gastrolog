@@ -39,10 +39,10 @@ message VaultScopedCommand {
   VaultCtlCommand command = 2;
 }
 
-// ---------- Inner command (replaces vaultctlfsm Command opcodes 1-17) -------
+// ---------- Inner command (replaces vaultctlfsm Command opcodes 1-13) -------
 
 // VaultCtlCommand is one chunk-metadata mutation applied to a single vault's
-// manifest FSM. Field numbers match the legacy Command opcodes 1-17.
+// manifest FSM. Field numbers match the legacy Command opcodes 1-13.
 message VaultCtlCommand {
   oneof command {
     CreateChunkCommand create_chunk = 1;
@@ -60,10 +60,6 @@ message VaultCtlCommand {
     AttachOffsetsCommand attach_offsets = 11;
     BeginSealCommand begin_seal = 12;
     RepatriateChunkCommand repatriate_chunk = 13;
-    ReserveSeqRangeCommand reserve_seq_range = 14;
-    BurnSeqLeaseTailCommand burn_seq_lease_tail = 15;
-    BumpSeqAllocatorEpochCommand bump_seq_allocator_epoch = 16;
-    PublishFenceCommand publish_fence = 17;
   }
 }
 
@@ -149,25 +145,6 @@ message RepatriateChunkCommand {
   ManifestEntry entry = 1;
 }
 
-message ReserveSeqRangeCommand {
-  string holder_id = 1;
-  uint64 epoch = 2;
-  uint64 count = 3;
-}
-
-message BurnSeqLeaseTailCommand {
-  string holder_id = 1;
-  uint64 epoch = 2;
-  uint64 consumed_end = 3;
-}
-
-message BumpSeqAllocatorEpochCommand {}
-
-message PublishFenceCommand {
-  uint64 upper_bound_seq = 1;
-  int64 created_at_nanos = 2;
-}
-
 // ---------- Snapshot (replaces the 5 hand-rolled sections) ------------------
 
 // ManifestEntry is the full metadata for one chunk in a vault's manifest. The
@@ -212,46 +189,12 @@ message PendingDelete {
   repeated string expected_from = 4;
 }
 
-// SeqActiveLease is one outstanding sequence swath granted to a holder node.
-message SeqActiveLease {
-  string holder_id = 1;
-  uint64 epoch = 2;
-  uint64 range_start = 3;
-  uint64 range_end = 4;
-}
-
-// SeqBurnedTail records an unassigned gap from an abandoned lease tail.
-message SeqBurnedTail {
-  uint64 start = 1;
-  uint64 end = 2;
-  uint64 epoch = 3;
-}
-
-// SeqAllocatorSnapshot is the destination-vault sequence allocator control
-// state (gastrolog-16w8x).
-message SeqAllocatorSnapshot {
-  uint64 next_seq = 1;
-  uint64 epoch = 2;
-  repeated SeqActiveLease active_swaths = 3;
-  repeated SeqBurnedTail burned_tails = 4;
-}
-
-// FenceRecord is one immutable fence boundary for sequenced vault inclusion.
-message FenceRecord {
-  uint64 id = 1;
-  uint64 upper_bound_seq = 2;
-  uint64 prev_bound_seq = 3;
-  int64 created_at_nanos = 4;
-}
-
 // VaultCtlSnapshot is the full point-in-time state of one vault's manifest FSM
-// (replaces the 5 hand-rolled snapshot sections).
+// (replaces the hand-rolled snapshot sections).
 message VaultCtlSnapshot {
   repeated ManifestEntry entries = 1;
   repeated Tombstone tombstones = 2;
   repeated PendingDelete pending_deletes = 3;
-  SeqAllocatorSnapshot seq_allocator = 4;
-  repeated FenceRecord fences = 5;
 }
 
 // VaultGroupSnapshot is the snapshot of the whole vault-ctl Raft group: one

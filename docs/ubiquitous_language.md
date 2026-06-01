@@ -33,12 +33,6 @@ At the end, a [Consistency rules](#consistency-rules) section names every known
 synonym pair and picks the canonical side, plus conventions for timestamps, IDs,
 and cross-context identifiers.
 
-**Contracts vs design rules:** A **system contract** is a product guarantee (e.g.
-routed ingest is not lost). A **design rule** is an architectural constraint we
-impose to build a distributed system correctly (e.g. cluster-first). Do not
-present design rules as operator-facing durability promises, and do not conflate
-them with system contracts in docs or issue text.
-
 ---
 
 ## 1. Storage
@@ -231,17 +225,6 @@ a vault's active chunk".
   dispatches remote replication in background goroutines; the ingester gets
   its ack immediately.
 
-- **Router delivery queue** — persistent, node-local, pre-vault buffer owned
-  by the orchestrator. Holds digested records that matched a route but have
-  not yet completed delivery to destination vault(s). Survives restart;
-  bounded on disk with rolling eviction when full. **Not** vault spool,
-  **not** RF, **not** queryable as vault data. Satisfies the ingest
-  durability rule: **nothing ingested is lost once a route destination
-  captures the record** (no route → intentional drop, unchanged). Design:
-  [`docs/fan-out/v2/router-delivery-queue.md`](../fan-out/v2/router-delivery-queue.md).
-  **Not implemented today** — routed records are dropped after one failed
-  delivery attempt in `writeLoop`.
-
 ---
 
 ## 3. Query
@@ -408,20 +391,6 @@ gRPC transport:
 Each node has one **Orchestrator**. It is the top-level glue: holds vault
 registry, dispatches jobs, manages lifecycle, coordinates retention and
 rotation, and serves as the in-process API that RPC handlers delegate to.
-
-### System contracts and design rules
-
-- **Ingest durability (system contract)** — nothing that is ingested is lost,
-  provided a route destination captures the record. No matching route →
-  intentional drop. Once routed, transient delivery failure must not discard
-  the record. Satisfied in part by the **router delivery queue** (not
-  implemented today). See
-  [`router-delivery-queue.md`](./fan-out/v2/router-delivery-queue.md).
-
-- **Cluster-first (design rule)** — every feature must work on every node; no
-  requirement that traffic land on a specific node or vault replica holder.
-  Architectural constraint for building a fully distributed system — **not**
-  the ingest durability contract. Documented in [`CLAUDE.md`](../CLAUDE.md).
 
 ### Aggregates
 

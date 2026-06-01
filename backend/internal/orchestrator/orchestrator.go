@@ -226,12 +226,6 @@ type Orchestrator struct {
 	// Vault replicator: ordered stream per instance per follower (nil in single-node mode).
 	chunkReplicator ChunkReplicator
 
-	// spoolSlotFetcher pulls peer spool slots for assigned-missing recovery heal.
-	spoolSlotFetcher SpoolSlotFetcher
-
-	// spoolReplicaWriteFilter is a test hook to simulate dropped replica fan-out.
-	spoolReplicaWriteFilter func(vaultID glid.GLID, rec chunk.Record) bool
-
 	// replicaCircuit tracks per-node backoff for follower replication.
 	// After consecutive failures, the node is skipped until the backoff
 	// expires. Prevents log spam when a follower is down.
@@ -240,20 +234,6 @@ type Orchestrator struct {
 	// groupMgr is the shared multi-group Raft manager (system, vault ctl, …).
 	// Set from factories during ApplyConfig; used to tear down vault ctl groups.
 	groupMgr *raftgroup.GroupManager
-
-	// testSeqFSM provides local vaultctl allocator FSM state for unit tests
-	// when groupMgr is nil. Keyed by vault ID.
-	testSeqFSM map[glid.GLID]*vaultctlfsm.FSM
-
-	// testVaultCtlApplyHook, when set, replaces ApplyVaultControlPlane in tests
-	// (in-process vault-ctl forward to leader without gRPC).
-	testVaultCtlApplyHook func(vaultID glid.GLID, data []byte) error
-
-	// fenceCoords holds per-vault ephemeral hint state for the fence coordinator.
-	fenceCoords sync.Map
-
-	// materializationCoverage stores the latest local fence materialization summary.
-	materializationCoverage sync.Map
 
 	// peerConns is the shared gRPC pool for cluster peers. Set from factories
 	// during ApplyConfig; used by ApplyVaultControlPlane forwarding.
@@ -713,7 +693,6 @@ func New(cfg Config) (*Orchestrator, error) {
 	// reconciler's onPruneNode handler will then propose
 	// CmdFinalizeDelete for any chunk whose ExpectedFrom became empty.
 	o.vaultCtlLeaders.SetOnMemberRemoved(o.proposePruneNodeForVault)
-	o.vaultCtlLeaders.SetOnLeaderEpoch(o.onVaultCtlLeaderEpoch)
 
 	// Per-instance rate alerters. Thresholds are taken from gastrolog-47qyw:
 	//   rotation: warn at >1/sec, error at >5/sec, sustained over 30s
@@ -804,59 +783,6 @@ func (o *Orchestrator) SetRemoteTransferrer(t RemoteTransferrer) {
 // SetChunkReplicator injects the ordered instance replication client.
 func (o *Orchestrator) SetChunkReplicator(tr ChunkReplicator) {
 	o.chunkReplicator = tr
-}
-
-// SetVaultCtlApplyHookForTest replaces ApplyVaultControlPlane with an
-// in-process implementation (multi-node harness without gRPC peer pool).
-func (o *Orchestrator) SetVaultCtlApplyHookForTest(hook func(vaultID glid.GLID, data []byte) error) {
-	o.testVaultCtlApplyHook = hook
-}
-
-// MaterializeFenceForTest runs the sequenced materializer for tests and harnesses.
-func (o *Orchestrator) MaterializeFenceForTest(vaultID glid.GLID, fence vaultctlfsm.FenceRecord) (*FenceMaterializationCoverage, error) {
-	return o.materializeFence(vaultID, fence)
-}
-
-// SetReplicaWatermarksForTest seeds durable M_r/C_r in harness recovery scenarios.
-func (o *Orchestrator) SetReplicaWatermarksForTest(vaultID glid.GLID, mr, cr uint64) {
-	store := o.vaultSpoolStore(vaultID)
-	if mr > 0 {
-		store.setMaterializationWatermark(mr)
-	}
-	if cr > 0 {
-		store.setConvergenceWatermark(cr)
-	}
-}
-
-// ReconcileFenceForTest runs reconcile convergence for harness recovery scenarios.
-func (o *Orchestrator) ReconcileFenceForTest(vaultID glid.GLID, fence vaultctlfsm.FenceRecord) error {
-	return o.reconcileFenceConvergence(vaultID, fence)
-}
-
-// ConvergenceWatermark returns local C_r for a vault (zero when unknown).
-func (o *Orchestrator) ConvergenceWatermark(vaultID glid.GLID) uint64 {
-	return o.convergenceWatermark(vaultID)
-}
-
-// BurnActiveSeqLeaseTailForTest records a burned tail for the local holder's active
-// lease through vault-ctl allocator authority (seq assign path).
-func (o *Orchestrator) BurnActiveSeqLeaseTailForTest(vaultID glid.GLID, consumedEnd uint64) error {
-	o.mu.RLock()
-	v := o.vaults[vaultID]
-	epoch := uint64(0)
-	if v != nil {
-		epoch = v.seqLease.epoch
-	}
-	o.mu.RUnlock()
-	if epoch == 0 {
-		epoch = vaultctlfsm.InitialSeqEpoch
-	}
-	return o.burnVaultSeqLeaseTail(vaultID, epoch, consumedEnd)
-}
-
-// VaultCtlSubFSMForTest exposes vault-ctl allocator state for multinode harness tests.
-func (o *Orchestrator) VaultCtlSubFSMForTest(vaultID glid.GLID) (*vaultctlfsm.FSM, error) {
-	return o.vaultCtlSubFSM(vaultID)
 }
 
 // Logger returns a child logger scoped for a subcomponent.
@@ -967,16 +893,6 @@ type VaultSnapshot struct {
 	SealedChunks int
 	DataBytes    int64
 	Enabled      bool
-	// SpoolWatermark is S_r — highest vault_seq durably present in local spool.
-	SpoolWatermark uint64
-	// IngestHighWatermark is H — highest accepted vault_seq on this node.
-	IngestHighWatermark uint64
-	// FenceHighWatermark is F_n — latest durable fence upper bound from vault-ctl Raft.
-	FenceHighWatermark uint64
-	// MaterializationWatermark is M_r — highest vault_seq fully materialized locally.
-	MaterializationWatermark uint64
-	// ConvergenceWatermark is C_r — highest fence upper bound converge-sealed locally.
-	ConvergenceWatermark uint64
 	// RaftAppliedIndex is the local node's vault-ctl Raft applied
 	// index for this vault. Zero if this node has no vault-ctl group
 	// (or its Raft instance hasn't initialized). Broadcast in
@@ -1021,17 +937,6 @@ func (o *Orchestrator) VaultSnapshots() []VaultSnapshot {
 				}
 			}
 		}
-		o.mu.RLock()
-		if v := o.vaults[id]; v != nil && v.WriteModel == system.VaultWriteModelSequenced {
-			if ss := v.spool; ss != nil {
-				snap.SpoolWatermark = ss.SpoolDurableWatermark()
-				snap.IngestHighWatermark = ss.IngestHighWatermark()
-			}
-			snap.FenceHighWatermark = o.vaultFenceHighWatermark(id)
-			snap.MaterializationWatermark = o.materializationWatermark(id)
-			snap.ConvergenceWatermark = o.convergenceWatermark(id)
-		}
-		o.mu.RUnlock()
 		snapshots = append(snapshots, snap)
 	}
 	return snapshots

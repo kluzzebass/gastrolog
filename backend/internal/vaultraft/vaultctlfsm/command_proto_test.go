@@ -158,41 +158,6 @@ func TestCommandRoundTrip(t *testing.T) {
 			t.Errorf("node id lost")
 		}
 	})
-
-	t.Run("reserve_seq_range", func(t *testing.T) {
-		data, err := MarshalReserveSeqRange("holder-1", 3, 100)
-		if err != nil {
-			t.Fatal(err)
-		}
-		got := decodeCommand(t, data).GetReserveSeqRange()
-		if got.GetHolderId() != "holder-1" || got.GetEpoch() != 3 || got.GetCount() != 100 {
-			t.Errorf("reserve fields: %+v", got)
-		}
-	})
-
-	t.Run("burn_seq_lease_tail", func(t *testing.T) {
-		data, err := MarshalBurnSeqLeaseTail("holder-1", 3, 50)
-		if err != nil {
-			t.Fatal(err)
-		}
-		got := decodeCommand(t, data).GetBurnSeqLeaseTail()
-		if got.GetConsumedEnd() != 50 {
-			t.Errorf("consumed end: %d", got.GetConsumedEnd())
-		}
-	})
-
-	t.Run("bump_seq_allocator_epoch", func(t *testing.T) {
-		if decodeCommand(t, MarshalBumpSeqAllocatorEpoch()).GetBumpSeqAllocatorEpoch() == nil {
-			t.Errorf("wrong case")
-		}
-	})
-
-	t.Run("publish_fence", func(t *testing.T) {
-		c := decodeCommand(t, MarshalPublishFence(123, now))
-		if c.GetPublishFence().GetUpperBoundSeq() != 123 {
-			t.Errorf("upper bound: %d", c.GetPublishFence().GetUpperBoundSeq())
-		}
-	})
 }
 
 // TestApplyRejectsMalformedBytes verifies Apply returns an error (not a panic)
@@ -225,33 +190,6 @@ func TestApplyRejectsEmptyOneof(t *testing.T) {
 	result := f.Apply(&hraft.Log{Data: data})
 	if err, ok := result.(error); !ok || err == nil {
 		t.Errorf("empty oneof: expected error, got %v", result)
-	}
-}
-
-// TestSeqCommandRejectsInvalidHolder verifies holder-ID validation survives the
-// proto migration on both the marshal and apply paths (gastrolog-5lrg7 edge).
-func TestSeqCommandRejectsInvalidHolder(t *testing.T) {
-	t.Parallel()
-
-	if _, err := MarshalReserveSeqRange("", 1, 1); err == nil {
-		t.Error("empty holder: expected marshal error")
-	}
-	oversize := make([]byte, maxSeqHolderIDLen+1)
-	if _, err := MarshalReserveSeqRange(string(oversize), 1, 1); err == nil {
-		t.Error("oversize holder: expected marshal error")
-	}
-
-	// Apply path: a command that bypasses the marshal validation must still
-	// be rejected.
-	f := New()
-	data, err := proto.Marshal(&gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_ReserveSeqRange{
-		ReserveSeqRange: &gastrologv1.ReserveSeqRangeCommand{HolderId: "", Epoch: InitialSeqEpoch, Count: 1},
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result := f.Apply(&hraft.Log{Data: data}); result != ErrSeqAllocatorInvalidHolder {
-		t.Errorf("apply empty holder: got %v, want %v", result, ErrSeqAllocatorInvalidHolder)
 	}
 }
 

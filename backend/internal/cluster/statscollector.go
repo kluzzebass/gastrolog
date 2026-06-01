@@ -26,19 +26,14 @@ import (
 // breaking round-trip on the receiver. The canonical type closes
 // that hole; statscollector emits the raw proto bytes via ToProto().
 type StatsVaultSnapshot struct {
-	ID                       glid.GLID
-	Name                     string
-	RecordCount              int64
-	ChunkCount               int
-	SealedChunks             int
-	DataBytes                int64
-	Enabled                  bool
-	RaftAppliedIndex         uint64
-	IngestHighWatermark      uint64
-	SpoolWatermark           uint64
-	FenceHighWatermark       uint64
-	MaterializationWatermark uint64
-	ConvergenceWatermark     uint64
+	ID               glid.GLID
+	Name             string
+	RecordCount      int64
+	ChunkCount       int
+	SealedChunks     int
+	DataBytes        int64
+	Enabled          bool
+	RaftAppliedIndex uint64
 }
 
 // StatsRouteSnapshot captures route stats for broadcast.
@@ -277,19 +272,14 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 		// Vault snapshots.
 		for _, v := range c.cfg.Stats.VaultSnapshots() {
 			stats.Vaults = append(stats.Vaults, &gastrologv1.VaultStats{
-				Id:                       v.ID.ToProto(),
-				Name:                     v.Name,
-				RecordCount:              v.RecordCount,
-				ChunkCount:               int64(v.ChunkCount),
-				SealedChunks:             int64(v.SealedChunks),
-				DataBytes:                v.DataBytes,
-				Enabled:                  v.Enabled,
-				RaftAppliedIndex:         v.RaftAppliedIndex,
-				IngestHighWatermark:      v.IngestHighWatermark,
-				SpoolWatermark:           v.SpoolWatermark,
-				FenceHighWatermark:       v.FenceHighWatermark,
-				MaterializationWatermark: v.MaterializationWatermark,
-				ConvergenceWatermark:     v.ConvergenceWatermark,
+				Id:               v.ID.ToProto(),
+				Name:             v.Name,
+				RecordCount:      v.RecordCount,
+				ChunkCount:       int64(v.ChunkCount),
+				SealedChunks:     int64(v.SealedChunks),
+				DataBytes:        v.DataBytes,
+				Enabled:          v.Enabled,
+				RaftAppliedIndex: v.RaftAppliedIndex,
 			})
 		}
 

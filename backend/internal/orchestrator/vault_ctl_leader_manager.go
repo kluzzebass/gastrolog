@@ -111,10 +111,6 @@ type vaultCtlLeaderManager struct {
 	// node don't block finalization. See gastrolog-51gme step 10.
 	// Nil leaves the prune as a no-op (single-node tests, etc.).
 	onMemberRemoved func(vaultID glid.GLID, removedNodeID string)
-
-	// onLeaderEpoch runs once when a vault-ctl leader epoch starts (after
-	// barrier). The orchestrator wires fence coordinator evaluation here.
-	onLeaderEpoch func(vaultID glid.GLID)
 }
 
 // SetOnMemberRemoved registers a callback invoked after the leader
@@ -125,14 +121,6 @@ func (m *vaultCtlLeaderManager) SetOnMemberRemoved(fn func(vaultID glid.GLID, re
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.onMemberRemoved = fn
-}
-
-// SetOnLeaderEpoch registers a callback invoked once when a vault-ctl leader
-// epoch starts, after the initial membership reconcile pass.
-func (m *vaultCtlLeaderManager) SetOnLeaderEpoch(fn func(vaultID glid.GLID)) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.onLeaderEpoch = fn
 }
 
 // newVaultCtlLeaderManager supervises per-vault control-plane Raft leader epochs
@@ -252,7 +240,6 @@ func (o *Orchestrator) startVaultCtlMembershipReconcile() error {
 func (m *vaultCtlLeaderManager) runLeaderEpoch(ctx context.Context, vaultID glid.GLID, group *raftgroup.Group) {
 	// Initial reconcile immediately after barrier.
 	m.reconcile(vaultID, group)
-	m.fireLeaderEpoch(vaultID)
 
 	for {
 		wakeCh := m.desiredChanged.C()
@@ -269,15 +256,6 @@ func (m *vaultCtlLeaderManager) runLeaderEpoch(ctx context.Context, vaultID glid
 // Raft configuration and applies the diff via AddVoter / RemoveServer.
 // Bails on the first error (lost leadership, timeout, etc.) — the next pass
 // (or the next epoch on the new leader) will pick up where we left off.
-func (m *vaultCtlLeaderManager) fireLeaderEpoch(vaultID glid.GLID) {
-	m.mu.Lock()
-	fn := m.onLeaderEpoch
-	m.mu.Unlock()
-	if fn != nil {
-		fn(vaultID)
-	}
-}
-
 func (m *vaultCtlLeaderManager) reconcile(vaultID glid.GLID, group *raftgroup.Group) {
 	desired := m.desired.Get(vaultID)
 	if len(desired) == 0 {

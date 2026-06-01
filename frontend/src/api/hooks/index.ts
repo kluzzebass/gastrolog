@@ -7,7 +7,6 @@ export {
   useReindexVault,
   useRetryUnreadableChunks,
   useValidateVault,
-  useSequencedVaultDiagnostics,
   usePutVault,
   useDeleteVault,
   useArchiveChunk,

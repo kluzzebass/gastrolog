@@ -179,10 +179,6 @@ const (
 
 // VaultPlacement assigns one replica of a vault to a specific file storage.
 // The node is derived from the file storage's NodeStorageConfig.
-//
-// Leader marks the bootstrap/residency primary placement row. Under
-// chunk_append it is also ingest write-path authority; under sequenced
-// write model it is not — see docs/fan-out/v2/placement-leader-migration.md.
 type VaultPlacement struct {
 	StorageID string `json:"storageId"`
 	Leader    bool   `json:"leader"`

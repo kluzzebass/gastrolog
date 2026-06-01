@@ -5,7 +5,6 @@ import {
   extractKVPairs,
   formatBytes,
   formatChunkId,
-  recordRefKey,
 } from "../utils";
 import { protoToInstant, instantToISO, relativeTime } from "../utils/temporal";
 import { syntaxHighlight, type HighlightMode } from "../syntax";
@@ -464,7 +463,7 @@ function ContextList({
 }>) {
   return records?.map((rec) => (
     <ContextRecord
-      key={recordRefKey(rec.ref, `${prefix}-${rec.raw?.length ?? 0}`)}
+      key={`${prefix}-${rec.ref?.chunkId ? encode(rec.ref.chunkId) : ""}-${rec.ref?.pos}`}
       record={rec}
       isAnchor={false}
       dark={dark}

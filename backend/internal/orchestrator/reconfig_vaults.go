@@ -76,7 +76,6 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg system.VaultConfig
 	vault := NewVault(vaultCfg.ID, instance)
 	vault.Name = vaultCfg.Name
 	vault.StorageType = string(vaultCfg.Type)
-	vault.WriteModel = vaultCfg.ResolveWriteModel()
 	o.vaults[vaultCfg.ID] = vault
 
 	// Recompile the routing table immediately so the vault can receive
@@ -585,28 +584,8 @@ func (o *Orchestrator) AddVaultInstance(ctx context.Context, vaultID glid.GLID, 
 		return nil
 	}
 	vault.Instance = ti
-	o.refreshSeqFanOutTargetsLocked(vault, placements, nscs)
 	o.logger.Info("vault placement added", "vault", vaultID)
 	return nil
-}
-
-// RefreshSeqFanOutTargets recomputes sequenced replica fan-out peers from
-// current placements. Safe to call after placement reconcile or role refresh.
-func (o *Orchestrator) RefreshSeqFanOutTargets(vaultID glid.GLID, placements []system.VaultPlacement, nscs []system.NodeStorageConfig) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	v := o.vaults[vaultID]
-	if v == nil {
-		return
-	}
-	o.refreshSeqFanOutTargetsLocked(v, placements, nscs)
-}
-
-func (o *Orchestrator) refreshSeqFanOutTargetsLocked(v *Vault, placements []system.VaultPlacement, nscs []system.NodeStorageConfig) {
-	if v == nil || v.WriteModel != system.VaultWriteModelSequenced {
-		return
-	}
-	v.seqFanOutTargets = sequencedFanOutTargets(o.localNodeID, placements, nscs)
 }
 
 // UnregisterVault removes a vault from the orchestrator without deleting any
@@ -678,23 +657,6 @@ func (o *Orchestrator) VaultConfig(id glid.GLID) (system.VaultConfig, error) {
 // Every node joins every instance's Raft group regardless of storage placement
 // (gastrolog-292yi). Nodes with storage placements also get a VaultInstance with
 // a chunk manager; nodes without storage only participate in the Raft group.
-func sequencedFanOutTargets(localNodeID string, placements []system.VaultPlacement, nscs []system.NodeStorageConfig) []system.ReplicationTarget {
-	var targets []system.ReplicationTarget
-	leaderNode := system.LeaderNodeID(placements, nscs)
-	if leaderNode != "" && leaderNode != localNodeID {
-		targets = append(targets, system.ReplicationTarget{
-			NodeID:    leaderNode,
-			StorageID: system.LeaderStorageID(placements),
-		})
-	}
-	for _, tgt := range system.FollowerTargets(placements, nscs) {
-		if tgt.NodeID != localNodeID {
-			targets = append(targets, tgt)
-		}
-	}
-	return targets
-}
-
 func (o *Orchestrator) buildVaultInstance(sys *system.System, vaultCfg system.VaultConfig, factories Factories) (*VaultInstance, error) {
 	rt := &sys.Runtime
 	o.ensureVaultControlPlaneRaftGroup(vaultCfg.ID, rt.Nodes, factories)
@@ -888,12 +850,11 @@ func (o *Orchestrator) buildInstance(sys *system.System, vaultCfg system.VaultCo
 	}
 
 	ti := &VaultInstance{
-		VaultID:  vaultCfg.ID,
-		Type:     string(vaultCfg.Type),
-		Chunks:   cm,
-		Indexes:  im,
-		Query:    qe,
-		SpoolDir: vaultSpoolDir(vaultCfg, cmParams["dir"]),
+		VaultID: vaultCfg.ID,
+		Type:    string(vaultCfg.Type),
+		Chunks:  cm,
+		Indexes: im,
+		Query:   qe,
 	}
 	ti.applyRaftCallbacks(raftCB)
 	o.attachLifecycleReconciler(ti, vaultCfg.ID, vaultGroup)
@@ -1000,12 +961,11 @@ func (o *Orchestrator) buildInstanceForStorage(sys *system.System, vaultCfg syst
 	}
 
 	ti := &VaultInstance{
-		VaultID:  vaultCfg.ID,
-		Type:     string(vaultCfg.Type),
-		Chunks:   cm,
-		Indexes:  im,
-		Query:    qe,
-		SpoolDir: vaultSpoolDir(vaultCfg, cmParams["dir"]),
+		VaultID: vaultCfg.ID,
+		Type:    string(vaultCfg.Type),
+		Chunks:  cm,
+		Indexes: im,
+		Query:   qe,
 	}
 	ti.applyRaftCallbacks(raftCB)
 	o.attachLifecycleReconciler(ti, vaultCfg.ID, vaultGroup)
@@ -1596,13 +1556,6 @@ func mapVaultTypeToFactory(t system.VaultType) string {
 	default:
 		return string(t)
 	}
-}
-
-func vaultSpoolDir(vaultCfg system.VaultConfig, dataDir string) string {
-	if !vaultCfg.UsesSequencedWriteModel() || dataDir == "" {
-		return ""
-	}
-	return filepath.Join(dataDir, "spool")
 }
 
 // buildVaultParams builds a params map from a VaultConfig suitable for factory consumption.

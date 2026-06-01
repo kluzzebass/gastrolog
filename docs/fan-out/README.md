@@ -3,7 +3,16 @@
 Design set for the fan-out data-plane architecture — the leaderless
 "every Receiving replica appends + fans out" write model for vault chunks.
 
-## Status: v1 archived, v2 pending
+## Status: v1 archived, v2 abandoned, v3 active
+
+The **v2 implementation was rewound off `main`** on 2026-06-01. A large slice of
+the V2 data plane (destination-vault sequencing, spool, fence coordinator,
+sequence materialize/reconcile, the anchor query model, `write_model` config,
+and the V2 vault-ctl FSM commands) had bled into `main` before the design was
+abandoned; it was peeled back to reach a clean starting point for **v3**. The V2
+design documents below are kept as historical record, but no V2 code remains on
+`main`. Active design work now lives in
+[v3/design-notes.md](v3/design-notes.md).
 
 The **v1 implementation was rewound off `main`** on 2026-05-25. It was judged
 not salvageable: the design layered **synchronous global invariants** onto a

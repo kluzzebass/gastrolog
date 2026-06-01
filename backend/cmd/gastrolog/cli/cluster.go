@@ -13,7 +13,6 @@ import (
 	"github.com/spf13/cobra"
 
 	v1 "gastrolog/api/gen/gastrolog/v1"
-	"gastrolog/internal/server"
 )
 
 func newClusterCmd() *cobra.Command {
@@ -100,40 +99,9 @@ func newClusterStatusCmd() *cobra.Command {
 				}
 				p.kv(statPairs)
 			}
-
-			if err := printClusterSequencedWatermarks(client, msg.Nodes); err != nil {
-				return err
-			}
 			return nil
 		},
 	}
-}
-
-func printClusterSequencedWatermarks(client *server.Client, nodes []*v1.ClusterNode) error {
-	cfgResp, err := client.System.GetSystem(context.Background(), connect.NewRequest(&v1.GetSystemRequest{}))
-	if err != nil {
-		return err
-	}
-	nodeNames := nodeIDToNameMap(cfgResp.Msg.NodeConfigs)
-	var sections []string
-	for _, v := range cfgResp.Msg.Vaults {
-		if !usesSequencedWriteModel(v.WriteModel) {
-			continue
-		}
-		vaultID := glid.FromBytes(v.Id).String()
-		if section := formatClusterSequencedVaultSummary(v.Name, vaultID, nodes, nodeNames); section != "" {
-			sections = append(sections, section)
-		}
-	}
-	if len(sections) == 0 {
-		return nil
-	}
-	fmt.Println()
-	fmt.Println("Sequenced vault watermarks:")
-	for _, section := range sections {
-		fmt.Println(section)
-	}
-	return nil
 }
 
 func newClusterHealthCmd() *cobra.Command {

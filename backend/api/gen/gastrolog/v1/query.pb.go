@@ -937,14 +937,10 @@ func (x *Record) GetNodeId() []byte {
 }
 
 type RecordRef struct {
-	state   protoimpl.MessageState `protogen:"open.v1"`
-	ChunkId []byte                 `protobuf:"bytes,1,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
-	Pos     uint64                 `protobuf:"varint,2,opt,name=pos,proto3" json:"pos,omitempty"`
-	VaultId []byte                 `protobuf:"bytes,3,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"` // Vault this record belongs to
-	// Pre-materialized anchor axis (destination-vault sequence). Set when
-	// chunk_id is empty; mutual exclusion enforced server-side. See
-	// docs/fan-out/v2/anchor-model.md.
-	VaultSeq      uint64 `protobuf:"varint,4,opt,name=vault_seq,json=vaultSeq,proto3" json:"vault_seq,omitempty"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ChunkId       []byte                 `protobuf:"bytes,1,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
+	Pos           uint64                 `protobuf:"varint,2,opt,name=pos,proto3" json:"pos,omitempty"`
+	VaultId       []byte                 `protobuf:"bytes,3,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"` // Vault this record belongs to
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -998,13 +994,6 @@ func (x *RecordRef) GetVaultId() []byte {
 		return x.VaultId
 	}
 	return nil
-}
-
-func (x *RecordRef) GetVaultSeq() uint64 {
-	if x != nil {
-		return x.VaultSeq
-	}
-	return 0
 }
 
 // ResumeToken encodes pagination state for multi-vault queries.
@@ -1511,11 +1500,10 @@ func (x *PipelineStep) GetPredicate() string {
 }
 
 type GetContextRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Anchor record: materialized (chunk_id+pos) or spool (vault_seq only).
-	Ref           *RecordRef `protobuf:"bytes,1,opt,name=ref,proto3" json:"ref,omitempty"`
-	Before        int32      `protobuf:"varint,2,opt,name=before,proto3" json:"before,omitempty"` // Number of records before anchor (default 5, max 50)
-	After         int32      `protobuf:"varint,3,opt,name=after,proto3" json:"after,omitempty"`   // Number of records after anchor (default 5, max 50)
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ref           *RecordRef             `protobuf:"bytes,1,opt,name=ref,proto3" json:"ref,omitempty"`        // The anchor record
+	Before        int32                  `protobuf:"varint,2,opt,name=before,proto3" json:"before,omitempty"` // Number of records before anchor (default 5, max 50)
+	After         int32                  `protobuf:"varint,3,opt,name=after,proto3" json:"after,omitempty"`   // Number of records after anchor (default 5, max 50)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2441,12 +2429,11 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\n" +
 	"AttrsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"p\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"S\n" +
 	"\tRecordRef\x12\x19\n" +
 	"\bchunk_id\x18\x01 \x01(\fR\achunkId\x12\x10\n" +
 	"\x03pos\x18\x02 \x01(\x04R\x03pos\x12\x19\n" +
-	"\bvault_id\x18\x03 \x01(\fR\avaultId\x12\x1b\n" +
-	"\tvault_seq\x18\x04 \x01(\x04R\bvaultSeq\"\xd5\x02\n" +
+	"\bvault_id\x18\x03 \x01(\fR\avaultId\"\xd5\x02\n" +
 	"\vResumeToken\x12M\n" +
 	"\fvault_tokens\x18\x01 \x03(\v2*.gastrolog.v1.ResumeToken.VaultTokensEntryR\vvaultTokens\x12=\n" +
 	"\ffrozen_start\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vfrozenStart\x129\n" +

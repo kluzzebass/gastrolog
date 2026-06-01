@@ -145,24 +145,6 @@ describe("sameRecord", () => {
     const b = new Record({ ref: new RecordRef({ chunkId: new Uint8Array([1, 2]), pos: 5n, vaultId: new Uint8Array([5, 6]) }) });
     expect(sameRecord(a, b)).toBe(false);
   });
-  test("same spool vault_seq", () => {
-    const vaultId = new Uint8Array([3, 4]);
-    const a = new Record({ ref: new RecordRef({ vaultId, vaultSeq: 42n }) });
-    const b = new Record({ ref: new RecordRef({ vaultId, vaultSeq: 42n }) });
-    expect(sameRecord(a, b)).toBe(true);
-  });
-  test("different spool vault_seq", () => {
-    const vaultId = new Uint8Array([3, 4]);
-    const a = new Record({ ref: new RecordRef({ vaultId, vaultSeq: 42n }) });
-    const b = new Record({ ref: new RecordRef({ vaultId, vaultSeq: 43n }) });
-    expect(sameRecord(a, b)).toBe(false);
-  });
-  test("materialized vs spool ref", () => {
-    const vaultId = new Uint8Array([3, 4]);
-    const materialized = new Record({ ref: new RecordRef({ vaultId, chunkId: new Uint8Array([1]), pos: 1n }) });
-    const spool = new Record({ ref: new RecordRef({ vaultId, vaultSeq: 1n }) });
-    expect(sameRecord(materialized, spool)).toBe(false);
-  });
   test("missing ref on a", () => {
     const a = new Record({});
     const b = new Record({ ref: new RecordRef({ chunkId: new Uint8Array([1, 2]), pos: 5n, vaultId: new Uint8Array([3, 4]) }) });

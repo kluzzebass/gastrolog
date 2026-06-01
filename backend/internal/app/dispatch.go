@@ -28,12 +28,10 @@ type orchActions interface {
 	ApplyRotationPolicyForRole(ctx context.Context, vaultID glid.GLID) error
 	DisableVault(id glid.GLID) error
 	EnableVault(id glid.GLID) error
-	SyncVaultConfig(cfg system.VaultConfig) error
 	ForceRemoveVault(id glid.GLID) error
 	RemoveVaultInstance(vaultID glid.GLID) bool
 	DeleteVaultInstance(vaultID glid.GLID) bool
 	AddVaultInstance(ctx context.Context, vaultID glid.GLID, f orchestrator.Factories) error
-	RefreshSeqFanOutTargets(vaultID glid.GLID, placements []system.VaultPlacement, nscs []system.NodeStorageConfig)
 	DrainInstance(ctx context.Context, vaultID glid.GLID, mode orchestrator.DrainMode, targetNodeID string) error
 	UnregisterVault(id glid.GLID) error
 	MissingVaultInstance(vaultID glid.GLID, vaultIDs []glid.GLID) bool
@@ -281,9 +279,6 @@ func (d *configDispatcher) reconcileVaultInstance(ctx context.Context, vaultID g
 }
 
 func (d *configDispatcher) applyExistingVaultChanges(ctx context.Context, id glid.GLID, cfg *system.VaultConfig) {
-	if err := d.orch.SyncVaultConfig(*cfg); err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
-		d.logger.Error("dispatch: sync vault config", "vault", id, "error", err)
-	}
 	if err := d.orch.ReloadFilters(ctx); err != nil {
 		d.logger.Error("dispatch: reload filters", "error", err)
 	}
@@ -684,9 +679,6 @@ func (d *configDispatcher) updateInstanceRoleIfNeeded(ctx context.Context, vault
 	} else {
 		existing.LeaderNodeID = ""
 	}
-
-	placements, _ := d.cfgStore.GetVaultPlacements(ctx, vaultID)
-	d.orch.RefreshSeqFanOutTargets(vaultID, placements, nscs)
 
 	if !roleChanged {
 		return

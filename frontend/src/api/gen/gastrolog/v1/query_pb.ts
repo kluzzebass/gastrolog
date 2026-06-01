@@ -832,15 +832,6 @@ export class RecordRef extends Message<RecordRef> {
    */
   vaultId = new Uint8Array(0);
 
-  /**
-   * Pre-materialized anchor axis (destination-vault sequence). Set when
-   * chunk_id is empty; mutual exclusion enforced server-side. See
-   * docs/fan-out/v2/anchor-model.md.
-   *
-   * @generated from field: uint64 vault_seq = 4;
-   */
-  vaultSeq = protoInt64.zero;
-
   constructor(data?: PartialMessage<RecordRef>) {
     super();
     proto3.util.initPartial(data, this);
@@ -852,7 +843,6 @@ export class RecordRef extends Message<RecordRef> {
     { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "pos", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 3, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 4, name: "vault_seq", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RecordRef {
@@ -1299,7 +1289,7 @@ export class PipelineStep extends Message<PipelineStep> {
  */
 export class GetContextRequest extends Message<GetContextRequest> {
   /**
-   * Anchor record: materialized (chunk_id+pos) or spool (vault_seq only).
+   * The anchor record
    *
    * @generated from field: gastrolog.v1.RecordRef ref = 1;
    */

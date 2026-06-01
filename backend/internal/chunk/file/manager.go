@@ -295,8 +295,6 @@ type chunkMeta struct {
 	cloudBacked bool // true = chunk lives in cloud, not on local disk
 	archived    bool // true = chunk is in an offline storage class (Glacier, Azure Archive)
 
-	idxLogVersion byte // idx.log entry layout version (1 or 2)
-
 	// GLCB TOC: section offsets for embedded TS indexes (0 = none).
 	ingestIdxOffset int64
 	ingestIdxSize   int64
@@ -520,18 +518,7 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 	}
 
 	// Pre-encode idx entry using current offsets (before advancing).
-	if record.VaultSeq > 0 {
-		if err := m.ensureActiveIdxV2Locked(); err != nil {
-			m.mu.Unlock()
-			return chunk.ChunkID{}, 0, err
-		}
-	}
-	idxVersion := m.active.meta.idxLogVersion
-	if idxVersion == 0 {
-		idxVersion = IdxLogVersion
-	}
-	stride := IdxEntryStride(idxVersion)
-	var idxBuf [IdxEntrySizeV2]byte
+	var idxBuf [IdxEntrySize]byte
 	EncodeIdxEntry(IdxEntry{
 		SourceTS:   record.SourceTS,
 		IngestTS:   record.IngestTS,
@@ -543,14 +530,13 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 		IngestSeq:  record.EventID.IngestSeq,
 		IngesterID: record.EventID.IngesterID,
 		NodeID:     record.EventID.NodeID,
-		VaultSeq:   record.VaultSeq,
-	}, idxBuf[:stride])
+	}, idxBuf[:])
 
 	// Snapshot file handles and compute WriteAt positions.
 	active := m.active
 	rawPos := int64(format.HeaderSize) + int64(m.active.rawOffset)                   //nolint:gosec // G115: bounded
 	attrPos := int64(format.HeaderSize) + int64(m.active.attrOffset)                 //nolint:gosec // G115: bounded
-	idxPos := int64(IdxHeaderSize) + int64(m.active.recordCount)*int64(stride) //nolint:gosec // G115: bounded
+	idxPos := int64(IdxHeaderSize) + int64(m.active.recordCount)*int64(IdxEntrySize) //nolint:gosec // G115: bounded
 
 	// Reserve space: advance counters while holding the lock.
 	recordIndex := m.active.recordCount
@@ -588,7 +574,7 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 	if _, err := active.attrFile.WriteAt(attrBytes, attrPos); err != nil {
 		return chunk.ChunkID{}, 0, fmt.Errorf("write attr at offset %d: %w", attrPos, err)
 	}
-	if _, err := active.idxFile.WriteAt(idxBuf[:stride], idxPos); err != nil {
+	if _, err := active.idxFile.WriteAt(idxBuf[:], idxPos); err != nil {
 		return chunk.ChunkID{}, 0, fmt.Errorf("write idx at offset %d: %w", idxPos, err)
 	}
 
@@ -1332,38 +1318,35 @@ func (m *Manager) openChunkFiles(id chunk.ChunkID) (*chunkFiles, error) {
 // validateAndTruncate reads the idx.log header, computes the record count,
 // and truncates raw.log/attr.log if they have crash-orphaned data beyond
 // what the index accounts for.
-func (m *Manager) validateAndTruncate(id chunk.ChunkID, cf *chunkFiles) (recordCount uint64, rawOffset, attrOffset uint64, createdAt time.Time, idxVersion byte, err error) {
+func (m *Manager) validateAndTruncate(id chunk.ChunkID, cf *chunkFiles) (recordCount uint64, rawOffset, attrOffset uint64, createdAt time.Time, err error) {
 	// Read idx.log header including createdAt timestamp.
 	var headerBuf [IdxHeaderSize]byte
 	if _, err = cf.idx.ReadAt(headerBuf[:], 0); err != nil {
-		return 0, 0, 0, time.Time{}, 0, fmt.Errorf("read idx.log header for chunk %s: %w", id, err)
+		return 0, 0, 0, time.Time{}, fmt.Errorf("read idx.log header for chunk %s: %w", id, err)
 	}
-	idxHeader, err := DecodeIdxLogHeader(headerBuf[:format.HeaderSize])
-	if err != nil {
-		return 0, 0, 0, time.Time{}, 0, fmt.Errorf("invalid idx.log header for chunk %s: %w", id, err)
+	if _, err = format.DecodeAndValidate(headerBuf[:format.HeaderSize], format.TypeIdxLog, IdxLogVersion); err != nil {
+		return 0, 0, 0, time.Time{}, fmt.Errorf("invalid idx.log header for chunk %s: %w", id, err)
 	}
-	idxVersion = idxHeader.Version
 	createdAtNanos := binary.LittleEndian.Uint64(headerBuf[format.HeaderSize:])
 	createdAt = time.Unix(0, int64(createdAtNanos)) //nolint:gosec // G115: nanosecond timestamp fits in int64
 
 	// Compute record count from idx.log file size.
 	idxInfo, err := cf.idx.Stat()
 	if err != nil {
-		return 0, 0, 0, time.Time{}, 0, fmt.Errorf("stat idx.log for chunk %s: %w", id, err)
+		return 0, 0, 0, time.Time{}, fmt.Errorf("stat idx.log for chunk %s: %w", id, err)
 	}
-	recordCount = RecordCountForVersion(idxInfo.Size(), idxVersion)
+	recordCount = RecordCount(idxInfo.Size())
 
 	// Compute expected raw.log and attr.log sizes from idx.log.
 	// If files have extra data (crash between writes), truncate them.
 	var expectedRawSize, expectedAttrSize int64
 	if recordCount > 0 {
-		lastOffset := IdxFileOffsetForVersion(recordCount-1, idxVersion)
-		stride := IdxEntryStride(idxVersion)
-		entryBuf := make([]byte, stride)
-		if _, err = cf.idx.ReadAt(entryBuf, lastOffset); err != nil {
-			return 0, 0, 0, time.Time{}, 0, fmt.Errorf("read last idx entry for chunk %s: %w", id, err)
+		lastOffset := IdxFileOffset(recordCount - 1)
+		var entryBuf [IdxEntrySize]byte
+		if _, err = cf.idx.ReadAt(entryBuf[:], lastOffset); err != nil {
+			return 0, 0, 0, time.Time{}, fmt.Errorf("read last idx entry for chunk %s: %w", id, err)
 		}
-		lastEntry := DecodeIdxEntry(entryBuf)
+		lastEntry := DecodeIdxEntry(entryBuf[:])
 		expectedRawSize = int64(format.HeaderSize) + int64(lastEntry.RawOffset) + int64(lastEntry.RawSize)
 		expectedAttrSize = int64(format.HeaderSize) + int64(lastEntry.AttrOffset) + int64(lastEntry.AttrSize)
 	} else {
@@ -1372,15 +1355,15 @@ func (m *Manager) validateAndTruncate(id chunk.ChunkID, cf *chunkFiles) (recordC
 	}
 
 	if err = m.truncateIfNeeded(cf.raw, "raw.log", id, expectedRawSize); err != nil {
-		return 0, 0, 0, time.Time{}, 0, err
+		return 0, 0, 0, time.Time{}, err
 	}
 	if err = m.truncateIfNeeded(cf.attr, "attr.log", id, expectedAttrSize); err != nil {
-		return 0, 0, 0, time.Time{}, 0, err
+		return 0, 0, 0, time.Time{}, err
 	}
 
 	rawOffset = uint64(expectedRawSize) - uint64(format.HeaderSize)
 	attrOffset = uint64(expectedAttrSize) - uint64(format.HeaderSize)
-	return recordCount, rawOffset, attrOffset, createdAt, idxVersion, nil
+	return recordCount, rawOffset, attrOffset, createdAt, nil
 }
 
 // truncateIfNeeded truncates a file to expectedSize if it has crash-orphaned
@@ -1444,7 +1427,7 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 		}
 	}()
 
-	recordCount, rawOffset, attrOffset, createdAt, idxVersion, err := m.validateAndTruncate(id, cf)
+	recordCount, rawOffset, attrOffset, createdAt, err := m.validateAndTruncate(id, cf)
 	if err != nil {
 		return err
 	}
@@ -1454,13 +1437,11 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 		return err
 	}
 
-	meta.idxLogVersion = idxVersion
-	stride := uint64(IdxEntryStride(idxVersion)) //nolint:gosec // G115: idx stride is 74 or 82
-	dataBytes := int64(rawOffset + attrOffset + recordCount*stride) //nolint:gosec // G115: data bytes bounded by rotation policy
+	dataBytes := int64(rawOffset + attrOffset + recordCount*IdxEntrySize) //nolint:gosec // G115: data bytes bounded by rotation policy
 	meta.logicalDataBytes = dataBytes
 	meta.bytes = dataBytes
 
-	ingestBT, sourceBT, err := m.rebuildBTrees(id, cf.idx, recordCount, idxVersion)
+	ingestBT, sourceBT, err := m.rebuildBTrees(id, cf.idx, recordCount)
 	if err != nil {
 		return fmt.Errorf("rebuild btrees for chunk %s: %w", id, err)
 	}
@@ -1487,7 +1468,7 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 
 // rebuildBTrees creates fresh B+ tree indexes from idx.log entries during crash recovery.
 // Any stale B+ tree files are removed first.
-func (m *Manager) rebuildBTrees(id chunk.ChunkID, idxFile *os.File, recordCount uint64, idxVersion byte) (*btree.Tree[int64, uint32], *btree.Tree[int64, uint32], error) {
+func (m *Manager) rebuildBTrees(id chunk.ChunkID, idxFile *os.File, recordCount uint64) (*btree.Tree[int64, uint32], *btree.Tree[int64, uint32], error) {
 	// Remove stale B+ tree files if they exist from a prior run.
 	ingestPath := m.ingestBTPath(id)
 	sourcePath := m.sourceBTPath(id)
@@ -1504,16 +1485,15 @@ func (m *Manager) rebuildBTrees(id chunk.ChunkID, idxFile *os.File, recordCount 
 		return nil, nil, err
 	}
 
-	stride := IdxEntryStride(idxVersion)
-	entryBuf := make([]byte, stride)
+	var entryBuf [IdxEntrySize]byte
 	for i := range recordCount {
-		offset := IdxFileOffsetForVersion(i, idxVersion)
-		if _, err := idxFile.ReadAt(entryBuf, offset); err != nil {
+		offset := IdxFileOffset(i)
+		if _, err := idxFile.ReadAt(entryBuf[:], offset); err != nil {
 			_ = ingestBT.Close()
 			_ = sourceBT.Close()
 			return nil, nil, fmt.Errorf("read idx entry %d: %w", i, err)
 		}
-		entry := DecodeIdxEntry(entryBuf)
+		entry := DecodeIdxEntry(entryBuf[:])
 		pos := uint32(i)
 
 		if err := ingestBT.Insert(entry.IngestTS.UnixNano(), pos); err != nil {
@@ -1649,7 +1629,7 @@ func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
 	if _, err := io.ReadFull(idxFile, headerBuf[:]); err != nil {
 		return nil, fmt.Errorf("read idx.log header for chunk %s: %w", id, err)
 	}
-	header, err := DecodeIdxLogHeader(headerBuf[:format.HeaderSize])
+	header, err := format.DecodeAndValidate(headerBuf[:format.HeaderSize], format.TypeIdxLog, IdxLogVersion)
 	if err != nil {
 		return nil, fmt.Errorf("invalid idx.log header for chunk %s: %w", id, err)
 	}
@@ -1659,20 +1639,19 @@ func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
 	if err != nil {
 		return nil, fmt.Errorf("stat idx.log for chunk %s: %w", id, err)
 	}
-	recordCount := RecordCountForVersion(info.Size(), header.Version)
+	recordCount := RecordCount(info.Size())
 
 	meta := &chunkMeta{
-		id:            id,
-		recordCount:   int64(recordCount), //nolint:gosec // G115: record count fits in int64
-		sealed:        sealed,
-		idxLogVersion: header.Version,
+		id:          id,
+		recordCount: int64(recordCount), //nolint:gosec // G115: record count fits in int64
+		sealed:      sealed,
 	}
 
 	if recordCount == 0 {
 		return meta, nil
 	}
 
-	firstEntry, lastEntry, err := m.readFirstLastEntries(idxFile, recordCount, header.Version)
+	firstEntry, lastEntry, err := m.readFirstLastEntries(idxFile, recordCount)
 	if err != nil {
 		return nil, fmt.Errorf("read first/last entries for chunk %s: %w", id, err)
 	}
@@ -1694,8 +1673,7 @@ func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
 
 	rawEnd := int64(lastEntry.RawOffset) + int64(lastEntry.RawSize)
 	attrEnd := int64(lastEntry.AttrOffset) + int64(lastEntry.AttrSize)
-	entryStride := int64(IdxEntryStride(header.Version))
-	logicalDataBytes := rawEnd + attrEnd + int64(recordCount)*entryStride //nolint:gosec // G115: record count fits in int64
+	logicalDataBytes := rawEnd + attrEnd + int64(recordCount)*int64(IdxEntrySize) //nolint:gosec // G115: record count fits in int64
 	meta.logicalDataBytes = logicalDataBytes
 	meta.bytes = logicalDataBytes
 
@@ -1707,20 +1685,21 @@ func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
 	return meta, nil
 }
 
-func (m *Manager) readFirstLastEntries(idxFile *os.File, recordCount uint64, idxVersion byte) (IdxEntry, IdxEntry, error) {
-	stride := IdxEntryStride(idxVersion)
-	entryBuf := make([]byte, stride)
-	firstOffset := IdxFileOffsetForVersion(0, idxVersion)
-	if _, err := idxFile.ReadAt(entryBuf, firstOffset); err != nil {
+func (m *Manager) readFirstLastEntries(idxFile *os.File, recordCount uint64) (IdxEntry, IdxEntry, error) {
+	var entryBuf [IdxEntrySize]byte
+	if _, err := io.ReadFull(idxFile, entryBuf[:]); err != nil {
 		return IdxEntry{}, IdxEntry{}, fmt.Errorf("read first idx entry: %w", err)
 	}
-	firstEntry := DecodeIdxEntry(entryBuf)
+	firstEntry := DecodeIdxEntry(entryBuf[:])
 
-	lastOffset := IdxFileOffsetForVersion(recordCount-1, idxVersion)
-	if _, err := idxFile.ReadAt(entryBuf, lastOffset); err != nil {
-		return IdxEntry{}, IdxEntry{}, fmt.Errorf("read last idx entry (record %d): %w", recordCount-1, err)
+	lastOffset := IdxFileOffset(recordCount - 1)
+	if _, err := idxFile.Seek(lastOffset, io.SeekStart); err != nil {
+		return IdxEntry{}, IdxEntry{}, fmt.Errorf("seek to last idx entry (record %d): %w", recordCount-1, err)
 	}
-	lastEntry := DecodeIdxEntry(entryBuf)
+	if _, err := io.ReadFull(idxFile, entryBuf[:]); err != nil {
+		return IdxEntry{}, IdxEntry{}, fmt.Errorf("read last idx entry: %w", err)
+	}
+	lastEntry := DecodeIdxEntry(entryBuf[:])
 
 	return firstEntry, lastEntry, nil
 }
@@ -1739,19 +1718,15 @@ func scanTSBounds(idxFile *os.File, recordCount uint64, meta *chunkMeta) error {
 	if _, err := idxFile.Seek(IdxHeaderSize, io.SeekStart); err != nil {
 		return fmt.Errorf("seek idx start: %w", err)
 	}
-	stride := IdxEntryStride(meta.idxLogVersion)
-	if stride == 0 {
-		stride = IdxEntrySize
-	}
-	entryBuf := make([]byte, stride)
+	var entryBuf [IdxEntrySize]byte
 	var minIngest, maxIngest, minSource, maxSource time.Time
 	monotonic := true
 	var prevIngest time.Time
 	for i := range recordCount {
-		if _, err := io.ReadFull(idxFile, entryBuf); err != nil {
+		if _, err := io.ReadFull(idxFile, entryBuf[:]); err != nil {
 			return fmt.Errorf("read idx entry %d: %w", i, err)
 		}
-		e := DecodeIdxEntry(entryBuf)
+		e := DecodeIdxEntry(entryBuf[:])
 		if i == 0 || e.IngestTS.Before(minIngest) {
 			minIngest = e.IngestTS
 		}

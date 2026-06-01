@@ -223,7 +223,6 @@ type FSM struct {
 	onAckDelete      func(chunk.ChunkID, string)   // CmdAckDelete applied; (chunkID, ackingNodeID)
 	onFinalizeDelete func(chunk.ChunkID)           // CmdFinalizeDelete applied; expectedFrom was empty
 	onPruneNode      func(string, []chunk.ChunkID) // CmdPruneNode applied; (prunedNodeID, finalizableChunks)
-	onPublishFence   func(FenceRecord)             // CmdPublishFence applied
 
 	// tombstones records chunk IDs that have been deleted, with the apply
 	// timestamp of the delete. Consulted by the receive side of vault
@@ -237,25 +236,14 @@ type FSM struct {
 	// replication-job deadline, typically a few minutes, cannot still be
 	// in flight and are safe to drop).
 	tombstones map[chunk.ChunkID]time.Time
-
-	// Destination-vault sequence allocator control state (gastrolog-16w8x).
-	// Owned by vault-ctl Raft; per-record acceptance metadata lives off Raft.
-	seqNextSeq      uint64
-	seqEpoch        uint64
-	seqActiveSwaths map[string]*SeqActiveLease // holder ID -> outstanding swath
-	seqBurnedTails  []SeqBurnedTail
-
-	// Published fence history (F_1..F_n) for sequenced write-model vaults.
-	fences []FenceRecord
 }
 
 // New creates an empty chunk metadata FSM.
 func New() *FSM {
 	return &FSM{
-		chunks:          make(map[chunk.ChunkID]*ManifestEntry),
-		tombstones:      make(map[chunk.ChunkID]time.Time),
-		pendingDeletes:  make(map[chunk.ChunkID]*PendingDelete),
-		seqActiveSwaths: make(map[string]*SeqActiveLease),
+		chunks:         make(map[chunk.ChunkID]*ManifestEntry),
+		tombstones:     make(map[chunk.ChunkID]time.Time),
+		pendingDeletes: make(map[chunk.ChunkID]*PendingDelete),
 	}
 }
 
@@ -415,14 +403,6 @@ func (f *FSM) SetOnPruneNode(fn func(prunedNodeID string, finalizable []chunk.Ch
 	f.onPruneNode = fn
 }
 
-// SetOnPublishFence registers a callback invoked (outside the FSM lock)
-// after CmdPublishFence applies successfully.
-func (f *FSM) SetOnPublishFence(fn func(FenceRecord)) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.onPublishFence = fn
-}
-
 // ---------- Reads (local, no Raft) ----------
 
 // Get returns a copy of a chunk's metadata, or nil if not found.
@@ -501,7 +481,6 @@ type applyEffects struct {
 	finalizedDeleteID  *chunk.ChunkID
 	prunedNode         string
 	prunedFinalizable  []chunk.ChunkID
-	publishedFence     *FenceRecord
 
 	onCreate           func(ManifestEntry)
 	onDelete           func(chunk.ChunkID)
@@ -512,7 +491,6 @@ type applyEffects struct {
 	onAckDelete        func(chunk.ChunkID, string)
 	onFinalizeDelete   func(chunk.ChunkID)
 	onPruneNode        func(string, []chunk.ChunkID)
-	onPublishFence     func(FenceRecord)
 }
 
 func (e applyEffects) fire() {
@@ -542,9 +520,6 @@ func (e applyEffects) fire() {
 	}
 	if e.prunedNode != "" && e.onPruneNode != nil {
 		e.onPruneNode(e.prunedNode, e.prunedFinalizable)
-	}
-	if e.publishedFence != nil && e.onPublishFence != nil {
-		e.onPublishFence(*e.publishedFence)
 	}
 	// gastrolog-15fm8: applyPruneNode now finalizes drained-ExpectedFrom
 	// chunks atomically inside the same apply. Fire onFinalizeDelete
@@ -626,30 +601,6 @@ func (f *FSM) applyLocked(cmd *gastrologv1.VaultCtlCommand) (any, applyEffects) 
 		// (retention, indexes, etc.) reacts identically to a normal
 		// CmdCreateChunk path.
 		fx.createdEntry = f.captureEntry(result, chunkIDFromProto(c.RepatriateChunk.GetEntry().GetId()))
-	case *gastrologv1.VaultCtlCommand_ReserveSeqRange:
-		grant, reserveErr := f.applyReserveSeqRange(c.ReserveSeqRange)
-		if reserveErr != nil {
-			result = reserveErr
-		} else {
-			result = grant
-		}
-	case *gastrologv1.VaultCtlCommand_BurnSeqLeaseTail:
-		result = f.applyBurnSeqLeaseTail(c.BurnSeqLeaseTail)
-	case *gastrologv1.VaultCtlCommand_BumpSeqAllocatorEpoch:
-		newEpoch, bumpErr := f.applyBumpSeqAllocatorEpoch(c.BumpSeqAllocatorEpoch)
-		if bumpErr != nil {
-			result = bumpErr
-		} else {
-			result = newEpoch
-		}
-	case *gastrologv1.VaultCtlCommand_PublishFence:
-		rec, fenceErr := f.applyPublishFence(c.PublishFence)
-		if fenceErr != nil {
-			result = fenceErr
-		} else {
-			result = rec
-			fx.publishedFence = rec
-		}
 	default:
 		result = fmt.Errorf("unknown chunk FSM command: %T", cmd.GetCommand())
 	}
@@ -662,7 +613,6 @@ func (f *FSM) applyLocked(cmd *gastrologv1.VaultCtlCommand) (any, applyEffects) 
 	fx.onAckDelete = f.onAckDelete
 	fx.onFinalizeDelete = f.onFinalizeDelete
 	fx.onPruneNode = f.onPruneNode
-	fx.onPublishFence = f.onPublishFence
 	f.mu.Unlock()
 
 	return result, fx
@@ -737,8 +687,6 @@ func (f *FSM) snapshotProtoLocked() *gastrologv1.VaultCtlSnapshot {
 		snap.PendingDeletes = append(snap.PendingDeletes, pendingDeleteToProto(f.pendingDeletes[id]))
 	}
 
-	snap.SeqAllocator = seqAllocatorToProto(f.seqAllocatorSnapshotLocked())
-	snap.Fences = fenceSnapshotToProto(f.fenceSnapshotLocked())
 	return snap
 }
 
@@ -793,8 +741,6 @@ func (f *FSM) restoreFromProtoLocked(snap *gastrologv1.VaultCtlSnapshot) {
 		p := pendingDeleteFromProto(pp)
 		f.pendingDeletes[p.ChunkID] = &p
 	}
-	applySeqAllocatorSnapshotLocked(f, seqAllocatorFromProto(snap.GetSeqAllocator()))
-	applyFenceSnapshotLocked(f, fenceSnapshotFromProto(snap.GetFences()))
 	f.ready = true
 }
 

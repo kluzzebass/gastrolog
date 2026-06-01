@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"gastrolog/internal/glid"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"gastrolog/internal/chunk"
@@ -469,16 +468,6 @@ func (o *Orchestrator) AppendToVault(vaultID glid.GLID, leaderChunkID chunk.Chun
 		o.mu.RUnlock()
 		return ErrVaultDraining
 	}
-
-	if vault.WriteModel == system.VaultWriteModelSequenced && rec.VaultSeq > 0 {
-		if err := o.applySpoolReplicaWrite(vaultID, rec); err != nil {
-			o.mu.RUnlock()
-			return err
-		}
-		o.mu.RUnlock()
-		return nil
-	}
-
 	cm := vaultInst.Chunks
 
 	// Reject writes targeting a tombstoned chunk ID — a stale replication
@@ -619,7 +608,6 @@ func (o *Orchestrator) fireAndForgetRemote(targets []remoteForwardTarget, rec ch
 		return
 	}
 	var wg sync.WaitGroup
-	var remoteOK atomic.Int32
 	for _, tgt := range targets {
 		if rb := o.getReplicaBackoff(tgt.nodeID); rb != nil && rb.skipUntil.After(o.now()) {
 			continue
@@ -632,14 +620,10 @@ func (o *Orchestrator) fireAndForgetRemote(targets []remoteForwardTarget, rec ch
 				o.bumpReplicaBackoff(tgt.nodeID, err)
 			} else {
 				o.clearReplicaBackoff(tgt.nodeID)
-				remoteOK.Add(1)
 			}
 		})
 	}
 	wg.Wait()
-	if rec.VaultSeq > 0 && rec.VaultID != (glid.GLID{}) {
-		o.tryCommitSequencedAcceptance(rec.VaultID, rec, int(remoteOK.Load())+o.sequencedLocalFollowerWrites(rec.VaultID, rec))
-	}
 }
 
 // replicaBackoff tracks consecutive failures and exponential backoff for
@@ -915,10 +899,6 @@ func (o *Orchestrator) deleteFromFollowers(vaultID glid.GLID, chunkID chunk.Chun
 // cluster-forwarded records, and the ImportRecords API.
 func (o *Orchestrator) Append(vaultID glid.GLID, rec chunk.Record) (chunk.ChunkID, uint64, error) {
 	o.mu.RLock()
-	if o.vaultWriteModel(vaultID) == system.VaultWriteModelSequenced && rec.VaultSeq == 0 {
-		o.mu.RUnlock()
-		return chunk.ChunkID{}, 0, ErrSequencedChunkAppendForbidden
-	}
 	cid, pos, _, remotes, err := o.appendRecord(vaultID, rec)
 	o.mu.RUnlock()
 	o.fireAndForgetRemote(remotes, rec)

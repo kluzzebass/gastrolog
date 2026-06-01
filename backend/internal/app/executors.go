@@ -33,18 +33,13 @@ func (a *orchStatsAdapter) VaultSnapshots() []cluster.StatsVaultSnapshot {
 	out := make([]cluster.StatsVaultSnapshot, len(snaps))
 	for i, s := range snaps {
 		out[i] = cluster.StatsVaultSnapshot{
-			ID:                       s.ID,
-			RecordCount:              s.RecordCount,
-			ChunkCount:               s.ChunkCount,
-			SealedChunks:             s.SealedChunks,
-			DataBytes:                s.DataBytes,
-			Enabled:                  s.Enabled,
-			RaftAppliedIndex:         s.RaftAppliedIndex,
-			IngestHighWatermark:      s.IngestHighWatermark,
-			SpoolWatermark:           s.SpoolWatermark,
-			FenceHighWatermark:       s.FenceHighWatermark,
-			MaterializationWatermark: s.MaterializationWatermark,
-			ConvergenceWatermark:     s.ConvergenceWatermark,
+			ID:               s.ID,
+			RecordCount:      s.RecordCount,
+			ChunkCount:       s.ChunkCount,
+			SealedChunks:     s.SealedChunks,
+			DataBytes:        s.DataBytes,
+			Enabled:          s.Enabled,
+			RaftAppliedIndex: s.RaftAppliedIndex,
 		}
 	}
 	return out
@@ -299,15 +294,19 @@ func newFollowExecutor(o *orchestrator.Orchestrator) cluster.FollowExecutor {
 }
 
 func newContextExecutor(o *orchestrator.Orchestrator) cluster.ContextExecutor {
-	return func(ctx context.Context, ref query.ContextRef, before, after int) ([]chunk.Record, chunk.Record, []chunk.Record, error) {
-		eng, err := o.LeaderQueryEngineForVault(ref.VaultID)
+	return func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, pos uint64, before, after int) ([]chunk.Record, chunk.Record, []chunk.Record, error) {
+		eng, err := o.LeaderQueryEngineForVault(vaultID)
 		if err != nil {
 			return nil, chunk.Record{}, nil, err
 		}
 		if eng == nil {
-			return nil, chunk.Record{}, nil, fmt.Errorf("no leader instance for vault %s", ref.VaultID)
+			return nil, chunk.Record{}, nil, fmt.Errorf("no leader instance for vault %s", vaultID)
 		}
-		result, err := eng.GetContext(ctx, ref, before, after)
+		result, err := eng.GetContext(ctx, query.ContextRef{
+			VaultID: vaultID,
+			ChunkID: chunkID,
+			Pos:     pos,
+		}, before, after)
 		if err != nil {
 			return nil, chunk.Record{}, nil, err
 		}

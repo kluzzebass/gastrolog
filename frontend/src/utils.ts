@@ -1,5 +1,4 @@
 import { Record as ProtoRecord } from "./api/client";
-import { encode } from "./api/glid";
 
 function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
@@ -62,19 +61,6 @@ export function formatChunkId(chunkId: string): string {
   return chunkId || "N/A";
 }
 
-/** Stable React key / dedup identity for materialized and spool record refs. */
-export function recordRefKey(ref: ProtoRecord["ref"], fallback: string): string {
-  if (!ref) return fallback;
-  const vault = encode(ref.vaultId);
-  if (ref.chunkId?.length) {
-    return `${vault}:${encode(ref.chunkId)}:${ref.pos}`;
-  }
-  if (ref.vaultSeq !== 0n) {
-    return `${vault}:seq:${ref.vaultSeq}`;
-  }
-  return `${vault}:${fallback}`;
-}
-
 export function sameRecord(
   a: ProtoRecord | null,
   b: ProtoRecord | null,
@@ -84,16 +70,9 @@ export function sameRecord(
   const ar = a.ref,
     br = b.ref;
   if (!ar || !br) return false;
-  if (!bytesEqual(ar.vaultId, br.vaultId)) return false;
-  const aMaterialized = ar.chunkId?.length > 0;
-  const bMaterialized = br.chunkId?.length > 0;
-  if (aMaterialized && bMaterialized) {
-    return bytesEqual(ar.chunkId, br.chunkId) && ar.pos === br.pos;
-  }
-  if (!aMaterialized && !bMaterialized) {
-    return ar.vaultSeq === br.vaultSeq && ar.vaultSeq !== 0n;
-  }
-  return false;
+  return (
+    bytesEqual(ar.chunkId, br.chunkId) && ar.pos === br.pos && bytesEqual(ar.vaultId, br.vaultId)
+  );
 }
 
 /** Props to make a non-button element keyboard-activatable (Enter/Space). */

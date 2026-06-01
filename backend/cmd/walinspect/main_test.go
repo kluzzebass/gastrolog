@@ -32,14 +32,6 @@ func TestDecodeFSMCmd_AllCommandTypes(t *testing.T) {
 	cidStr := glid.FromBytes(cid[:]).String()
 	now := time.Unix(0, 1_700_000_000_000_000_000)
 
-	mustSeq := func(b []byte, err error) []byte {
-		t.Helper()
-		if err != nil {
-			t.Fatalf("marshal seq command: %v", err)
-		}
-		return b
-	}
-
 	cases := []struct {
 		name     string
 		data     []byte
@@ -59,10 +51,6 @@ func TestDecodeFSMCmd_AllCommandTypes(t *testing.T) {
 		{"ack_delete", wrap(vaultID, vaultctlfsm.MarshalAckDelete(cid, "node-7")), "CmdAckDelete", cidStr},
 		{"finalize_delete", wrap(vaultID, vaultctlfsm.MarshalFinalizeDelete(cid)), "CmdFinalizeDelete", cidStr},
 		{"prune_node", wrap(vaultID, vaultctlfsm.MarshalPruneNode("node-9")), "CmdPruneNode", "node-9"},
-		{"reserve_seq", mustSeq(vaultraft.MarshalVaultReserveSeqRange(vaultID, "holder-1", 1, 10)), "CmdReserveSeqRange", "holder-1"},
-		{"burn_seq", mustSeq(vaultraft.MarshalVaultBurnSeqLeaseTail(vaultID, "holder-1", 1, 5)), "CmdBurnSeqLeaseTail", "holder-1"},
-		{"bump_epoch", vaultraft.MarshalVaultBumpSeqAllocatorEpoch(vaultID), "CmdBumpSeqAllocatorEpoch", ""},
-		{"publish_fence", vaultraft.MarshalVaultPublishFence(vaultID, 100, now), "CmdPublishFence", ""},
 	}
 
 	for _, tc := range cases {

@@ -506,22 +506,25 @@ func TestIngesterMessageReachesChunkManager(t *testing.T) {
 	<-recv.started
 	time.Sleep(50 * time.Millisecond)
 
-	// Verify record reached chunk manager before Stop closes vault handles.
+	// Stop orchestrator.
+	if err := orch.Stop(); err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+
+	// Verify record reached chunk manager.
 	cursor, err := cm.OpenCursor(cm.Active().ID)
 	if err != nil {
 		t.Fatalf("OpenCursor failed: %v", err)
 	}
+	defer cursor.Close()
+
 	got, _, err := cursor.Next()
-	_ = cursor.Close()
 	if err != nil {
 		t.Fatalf("Next failed: %v", err)
 	}
+
 	if string(got.Raw) != "test message" {
 		t.Errorf("got %q, want %q", got.Raw, "test message")
-	}
-
-	if err := orch.Stop(); err != nil {
-		t.Fatalf("Stop failed: %v", err)
 	}
 }
 

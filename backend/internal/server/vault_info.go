@@ -148,17 +148,6 @@ func (s *VaultServer) buildVaultStats(ctx context.Context, vaultID glid.GLID, me
 		updateTimeBounds(&stat.OldestRecord, meta.WriteStart, (*timestamppb.Timestamp).AsTime, func(a, b time.Time) bool { return a.Before(b) })
 		updateTimeBounds(&stat.NewestRecord, meta.WriteEnd, (*timestamppb.Timestamp).AsTime, func(a, b time.Time) bool { return a.After(b) })
 	}
-	for _, snap := range s.orch.VaultSnapshots() {
-		if snap.ID != vaultID {
-			continue
-		}
-		stat.IngestHighWatermark = snap.IngestHighWatermark
-		stat.SpoolWatermark = snap.SpoolWatermark
-		stat.FenceHighWatermark = snap.FenceHighWatermark
-		stat.MaterializationWatermark = snap.MaterializationWatermark
-		stat.ConvergenceWatermark = snap.ConvergenceWatermark
-		break
-	}
 	return stat
 }
 

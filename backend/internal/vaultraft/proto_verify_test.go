@@ -5,7 +5,6 @@ package vaultraft
 //   - multi-node (5) InstallSnapshot/restore carrying every snapshot section,
 //   - WAL-replay determinism (identical proto command stream => identical FSM
 //     state and byte-identical snapshots).
-// The seq-lease-reserve benchmark lives in vaultctlfsm/bench_seq_test.go.
 
 import (
 	"bytes"
@@ -18,18 +17,31 @@ import (
 	hraft "github.com/hashicorp/raft"
 )
 
+// applyVaultCommand wraps a pre-marshaled vaultctlfsm command in the
+// vault-scoped envelope and applies it via the current leader.
+func (h *reliabilityHarness) applyVaultCommand(vaultID glid.GLID, wire []byte) {
+	h.t.Helper()
+	leader := h.leader()
+	fut := leader.raft.Apply(MarshalVaultChunkCommand(vaultID, wire), 2*time.Second)
+	if err := fut.Error(); err != nil {
+		h.t.Fatalf("apply vault command: %v", err)
+	}
+	if r, ok := fut.Response().(error); ok && r != nil {
+		h.t.Fatalf("apply vault command FSM error: %v", r)
+	}
+}
+
 // TestProtoVerify_FiveNode_InstallSnapshotAllSections seeds every snapshot
-// section (manifest entries incl. a sealed chunk, a tombstone, an in-flight
-// pending delete, an active seq lease, and a published fence) across two
-// vaults on a 5-node cluster, forces a leader snapshot, advances the log past
-// it, then wipes a follower so it can only rejoin via InstallSnapshot. The
-// restored follower must carry all five sections, not just the fingerprinted
-// subset.
+// section (manifest entries incl. a sealed chunk, a tombstone, and an
+// in-flight pending delete) on a 5-node cluster, forces a leader snapshot,
+// advances the log past it, then wipes a follower so it can only rejoin via
+// InstallSnapshot. The restored follower must carry all sections, not just the
+// fingerprinted subset.
 func TestProtoVerify_FiveNode_InstallSnapshotAllSections(t *testing.T) {
 	t.Parallel()
 	h := newReliabilityHarness(t, 5)
 
-	v1, v2 := glid.New(), glid.New()
+	v1 := glid.New()
 	now := time.Now().Truncate(time.Nanosecond)
 
 	sealedID := chunkIDWithPrefix(0x01)
@@ -41,15 +53,11 @@ func TestProtoVerify_FiveNode_InstallSnapshotAllSections(t *testing.T) {
 	// v1: a sealed chunk, an active chunk, a tombstone (via finalize-delete,
 	// the non-deprecated path), and an in-flight pending delete.
 	h.applyInstanceCreate(v1, sealedID, now)
-	h.applyVaultSeqCommand(v1, vaultctlfsm.MarshalBeginSeal(sealedID))
-	h.applyVaultSeqCommand(v1, vaultctlfsm.MarshalSealChunk(sealedID, now, 5, 500, now, now, now, false))
+	h.applyVaultCommand(v1, vaultctlfsm.MarshalBeginSeal(sealedID))
+	h.applyVaultCommand(v1, vaultctlfsm.MarshalSealChunk(sealedID, now, 5, 500, now, now, now, false))
 	h.applyInstanceCreate(v1, activeID, now)
-	h.applyVaultSeqCommand(v1, vaultctlfsm.MarshalFinalizeDelete(deadID))
-	h.applyVaultSeqCommand(v1, vaultctlfsm.MarshalRequestDelete(pendID, now, "retention-ttl", expectedAcks))
-
-	// v2: a seq lease and a published fence.
-	h.applyReserveSeqRange(v2, "node-1", vaultctlfsm.InitialSeqEpoch, 40)
-	h.applyVaultSeqCommand(v2, vaultctlfsm.MarshalPublishFence(123, now))
+	h.applyVaultCommand(v1, vaultctlfsm.MarshalFinalizeDelete(deadID))
+	h.applyVaultCommand(v1, vaultctlfsm.MarshalRequestDelete(pendID, now, "retention-ttl", expectedAcks))
 
 	h.assertAllFSMsConverged()
 
@@ -81,9 +89,9 @@ func TestProtoVerify_FiveNode_InstallSnapshotAllSections(t *testing.T) {
 
 	h.assertAllFSMsConverged()
 
-	// Fingerprint convergence does not cover tombstones, pending deletes, or
-	// fences — assert those sections survived the InstallSnapshot directly on
-	// the wiped follower.
+	// Fingerprint convergence does not cover tombstones or pending deletes —
+	// assert those sections survived the InstallSnapshot directly on the wiped
+	// follower.
 	fn := h.nodes[followerID]
 	fn.mu.Lock()
 	followerFSM := fn.fsm
@@ -102,34 +110,15 @@ func TestProtoVerify_FiveNode_InstallSnapshotAllSections(t *testing.T) {
 	if pd := sub1.PendingDelete(pendID); pd == nil || len(pd.ExpectedFrom) != len(expectedAcks) {
 		t.Errorf("pending delete not restored on follower: %+v", pd)
 	}
-
-	sub2 := followerFSM.VaultFSM(v2)
-	if sub2 == nil {
-		t.Fatal("wiped follower missing vault v2 after InstallSnapshot")
-	}
-	if got := sub2.LatestFenceUpperBound(); got != 123 {
-		t.Errorf("fence not restored on follower: upper=%d want 123", got)
-	}
-	alloc := sub2.SeqAllocatorState()
-	if len(alloc.ActiveSwaths) != 1 || alloc.ActiveSwaths[0].HolderID != "node-1" {
-		t.Errorf("seq lease not restored on follower: %+v", alloc.ActiveSwaths)
-	}
 }
 
 // protoCmdStream returns a deterministic, delete-free stream of outer
-// VaultRaftCommand byte payloads spanning entries, a pending delete, a seq
-// lease, and a fence. Deletes are intentionally excluded: applyDelete /
-// applyFinalizeDelete stamp tombstones with time.Now(), which is not
-// reproducible across independent replays. Everything here derives its
-// timestamps from the fixed `now`, so two replays must produce identical
-// bytes.
-func protoCmdStream(v1, v2 glid.GLID, now time.Time) [][]byte {
-	mustOuter := func(b []byte, err error) []byte {
-		if err != nil {
-			panic(err)
-		}
-		return b
-	}
+// VaultRaftCommand byte payloads spanning entries and a pending delete.
+// Deletes are intentionally excluded: applyDelete / applyFinalizeDelete stamp
+// tombstones with time.Now(), which is not reproducible across independent
+// replays. Everything here derives its timestamps from the fixed `now`, so two
+// replays must produce identical bytes.
+func protoCmdStream(v1 glid.GLID, now time.Time) [][]byte {
 	a := chunkIDWithPrefix(0x11)
 	c := chunkIDWithPrefix(0x12)
 	return [][]byte{
@@ -138,8 +127,6 @@ func protoCmdStream(v1, v2 glid.GLID, now time.Time) [][]byte {
 		MarshalVaultChunkCommand(v1, vaultctlfsm.MarshalSealChunk(a, now, 7, 700, now, now, now, true)),
 		MarshalVaultChunkCommand(v1, vaultctlfsm.MarshalCreateChunk(c, now, now, now)),
 		MarshalVaultChunkCommand(v1, vaultctlfsm.MarshalRequestDelete(chunkIDWithPrefix(0x13), now, "ttl", []string{"node-3", "node-1", "node-2"})),
-		mustOuter(MarshalVaultReserveSeqRange(v2, "node-1", vaultctlfsm.InitialSeqEpoch, 40)),
-		MarshalVaultPublishFence(v2, 200, now),
 	}
 }
 
@@ -149,12 +136,12 @@ func protoCmdStream(v1, v2 glid.GLID, now time.Time) [][]byte {
 // acceptance, checked at the encoding level (gastrolog-5lrg7 / gastrolog-2q1xq).
 func TestProtoVerify_WALReplayDeterministic(t *testing.T) {
 	t.Parallel()
-	v1, v2 := glid.New(), glid.New()
+	v1 := glid.New()
 	now := time.Unix(0, 1_700_000_000_123_456_789)
 
 	build := func() *FSM {
 		f := NewFSM()
-		for i, cmd := range protoCmdStream(v1, v2, now) {
+		for i, cmd := range protoCmdStream(v1, now) {
 			if r := f.Apply(&hraft.Log{Data: cmd}); r != nil {
 				if err, ok := r.(error); ok && err != nil {
 					t.Fatalf("apply cmd %d: %v", i, err)

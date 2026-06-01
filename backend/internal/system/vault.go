@@ -1,8 +1,6 @@
 package system
 
 import (
-	"fmt"
-
 	"gastrolog/internal/glid"
 )
 
@@ -56,12 +54,6 @@ type VaultConfig struct {
 	// CacheTTL is the eviction TTL duration (e.g. "1h", "7d") for ttl mode.
 	CacheTTL string `json:"cacheTtl,omitempty"`
 
-	// WriteModel selects the vault data-plane write path. Empty and
-	// chunk_append use synchronous active-chunk append (default). sequenced
-	// opts into destination-vault sequencing and spool-first accepted writes.
-	// Per-vault opt-in; see docs/fan-out/v2/implementation-plan.md.
-	WriteModel string `json:"writeModel,omitempty"`
-
 	// RetentionDisposition decides what happens to records as retention
 	// ages chunks out of this vault. "delete" (default) drops the records
 	// and frees storage immediately, never touching the routing engine.
@@ -75,50 +67,6 @@ type VaultConfig struct {
 	// the next sweep). Operators who want forwarding must opt in
 	// explicitly. See gastrolog-18du3.
 	RetentionDisposition string `json:"retentionDisposition,omitempty"`
-}
-
-// VaultWriteModel names a vault's data-plane write path.
-type VaultWriteModel string
-
-const (
-	// VaultWriteModelChunkAppend is the default: synchronous active-chunk
-	// append with leader-coordinated chunk identity on the write path.
-	VaultWriteModelChunkAppend VaultWriteModel = "chunk_append"
-	// VaultWriteModelSequenced assigns destination-vault sequences, persists
-	// spool segments, and materializes chunks asynchronously (gated per vault).
-	VaultWriteModelSequenced VaultWriteModel = "sequenced"
-)
-
-// ResolveWriteModel returns the effective write model for this vault.
-// Empty and unrecognized values resolve to chunk_append.
-func (v VaultConfig) ResolveWriteModel() VaultWriteModel {
-	switch v.WriteModel {
-	case string(VaultWriteModelSequenced):
-		return VaultWriteModelSequenced
-	case "", string(VaultWriteModelChunkAppend):
-		return VaultWriteModelChunkAppend
-	default:
-		return VaultWriteModelChunkAppend
-	}
-}
-
-// UsesSequencedWriteModel reports whether this vault is opted into the
-// sequenced write path.
-func (v VaultConfig) UsesSequencedWriteModel() bool {
-	return v.ResolveWriteModel() == VaultWriteModelSequenced
-}
-
-// ValidateWriteModel rejects unknown writeModel config values.
-func (v VaultConfig) ValidateWriteModel() error {
-	switch v.WriteModel {
-	case "",
-		string(VaultWriteModelChunkAppend),
-		string(VaultWriteModelSequenced):
-		return nil
-	default:
-		return fmt.Errorf("vault %q: invalid writeModel %q (want %q, %q, or empty)",
-			v.Name, v.WriteModel, VaultWriteModelChunkAppend, VaultWriteModelSequenced)
-	}
 }
 
 // Canonical values for VaultConfig.RetentionDisposition.

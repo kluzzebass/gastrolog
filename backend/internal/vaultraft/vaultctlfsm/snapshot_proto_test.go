@@ -6,11 +6,10 @@ import (
 	"testing"
 	"time"
 
-	hraft "github.com/hashicorp/raft"
 	"google.golang.org/protobuf/proto"
 )
 
-// buildRichFSM populates an FSM with state in all five snapshot sections plus
+// buildRichFSM populates an FSM with state in all snapshot sections plus
 // tombstones, including a chunk carrying the Hash / CloudServiceID / KeyScheme
 // fields that the legacy 123-byte entry codec dropped (gastrolog-5lrg7).
 func buildRichFSM(t *testing.T) *FSM {
@@ -39,22 +38,6 @@ func buildRichFSM(t *testing.T) *FSM {
 
 	// pending deletes: an in-flight delete with several expected-from nodes.
 	applyCmd(t, f, MarshalRequestDelete(testChunkID(14), now, "retention-ttl", []string{"n3", "n1", "n2"}))
-
-	// seq allocator: two active leases + a burned tail.
-	mustMarshalSeq := func(b []byte, err error) []byte {
-		t.Helper()
-		if err != nil {
-			t.Fatalf("marshal seq command: %v", err)
-		}
-		return b
-	}
-	applyCmd(t, f, mustMarshalSeq(MarshalReserveSeqRange("holder-b", InitialSeqEpoch, 50)))
-	applyCmd(t, f, mustMarshalSeq(MarshalReserveSeqRange("holder-a", InitialSeqEpoch, 30)))
-	applyCmd(t, f, mustMarshalSeq(MarshalBurnSeqLeaseTail("holder-b", InitialSeqEpoch, InitialSeqNext+10)))
-
-	// fences: two published fence cuts.
-	applyCmd(t, f, MarshalPublishFence(100, now))
-	applyCmd(t, f, MarshalPublishFence(250, now.Add(time.Minute)))
 
 	return f
 }
@@ -93,18 +76,13 @@ func TestSnapshotProtoRoundTripAllSections(t *testing.T) {
 	if pd == nil || len(pd.ExpectedFrom) != 3 {
 		t.Errorf("pending delete not preserved: %+v", pd)
 	}
-
-	// Fence history survives.
-	if dst.LatestFenceUpperBound() != 250 {
-		t.Errorf("latest fence upper bound: got %d want 250", dst.LatestFenceUpperBound())
-	}
 }
 
 // TestSnapshotProtoDeterministic verifies that two snapshots of equal FSM
 // state marshal to byte-identical payloads, despite the map-backed sections
-// (tombstones, pending deletes, active swaths) having nondeterministic Go
-// iteration order. InstallSnapshot does not require this, but determinism
-// keeps snapshot diffing and debugging sane (gastrolog-5lrg7 Phase C).
+// (tombstones, pending deletes) having nondeterministic Go iteration order.
+// InstallSnapshot does not require this, but determinism keeps snapshot
+// diffing and debugging sane (gastrolog-5lrg7 Phase C).
 func TestSnapshotProtoDeterministic(t *testing.T) {
 	t.Parallel()
 	f := buildRichFSM(t)
@@ -175,15 +153,5 @@ func TestRestoreEmptySnapshotIsZeroState(t *testing.T) {
 	}
 	if dst.Count() != 0 {
 		t.Errorf("expected empty FSM, got %d chunks", dst.Count())
-	}
-	// A restored FSM must accept fresh seq reservations at the initial epoch.
-	data, err := MarshalReserveSeqRange("holder", InitialSeqEpoch, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := dst.Apply(&hraft.Log{Data: data}); got != nil {
-		if _, isErr := got.(error); isErr {
-			t.Errorf("reserve after empty restore failed: %v", got)
-		}
 	}
 }

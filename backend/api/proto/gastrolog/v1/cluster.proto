@@ -332,25 +332,12 @@ message ForwardGetContextRequest {
   uint64 pos = 3;
   int32 before = 4;
   int32 after = 5;
-  // Spool anchor when chunk_id is empty (see docs/fan-out/v2/anchor-model.md).
-  uint64 vault_seq = 6;
 }
 
 message ForwardGetContextResponse {
   repeated ExportRecord before = 1;
   ExportRecord anchor = 2;
   repeated ExportRecord after = 3;
-}
-
-// ForwardReadSpoolSeqRequest fetches one accepted spool slot from a peer replica.
-message ForwardReadSpoolSeqRequest {
-  bytes vault_id = 1;
-  uint64 vault_seq = 2;
-}
-
-message ForwardReadSpoolSeqResponse {
-  bool found = 1;
-  ExportRecord record = 2;
 }
 
 // ForwardListChunksRequest asks a remote node to list chunks in one of its

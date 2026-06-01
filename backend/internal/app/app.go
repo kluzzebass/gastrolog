@@ -624,15 +624,6 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	// Vault replication: unified ordered stream per vault per follower.
 	chunkReplicator := cluster.NewChunkReplicator(peerConns, compVaultReplicator.Apply(logger))
 	orch.SetChunkReplicator(chunkReplicator)
-	spoolForwarder := cluster.NewSpoolForwarder(peerConns)
-	orch.SetSpoolSlotFetcher(spoolForwarder)
-	clusterSrv.SetSpoolSeqReader(func(_ context.Context, vaultID glid.GLID, seq uint64) (chunk.Record, bool, error) {
-		rec, err := orch.ReadVaultSpoolSeq(vaultID, seq)
-		if err != nil {
-			return chunk.Record{}, false, nil //nolint:nilerr // missing spool slot maps to RPC NOT_FOUND
-		}
-		return rec, true, nil
-	})
 
 	// Same readiness gate for bulk chunk imports.
 	clusterSrv.SetRecordImporter(func(ctx context.Context, vaultID glid.GLID, next chunk.RecordIterator) error {
@@ -748,7 +739,6 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 
 	peerJobState := cluster.NewPeerJobState(20 * time.Second)
 	clusterSrv.Subscribe(peerJobState.HandleBroadcast)
-	clusterSrv.Subscribe(newFenceHintIngestor(orch, nodeID, compCluster.Apply(logger)).HandleBroadcast)
 
 	// Write a placeholder NodeConfig for every newly admitted peer so
 	// fresh joiners never display as raw GLIDs in the UI while their

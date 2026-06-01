@@ -155,7 +155,6 @@ func (r *VaultLifecycleReconciler) Wire(fsm *vaultctlfsm.FSM) {
 	fsm.SetOnAckDelete(r.onAckDelete)
 	fsm.SetOnFinalizeDelete(r.onFinalizeDelete)
 	fsm.SetOnPruneNode(r.onPruneNode)
-	fsm.SetOnPublishFence(r.onPublishFence)
 	// Note: onDelete and onUpload remain wired by their existing call
 	// sites (file/manager.go). Migrating those into the reconciler
 	// happens during steps 4-7 alongside the path-by-path deletions.
@@ -427,15 +426,6 @@ func (r *VaultLifecycleReconciler) onSeal(e vaultctlfsm.ManifestEntry) {
 		r.logger.Warn("onSeal: EnsureSealed failed",
 			"chunk", e.ID, "error", err)
 	}
-}
-
-// onPublishFence fires when CmdPublishFence applies on this node. Schedules
-// local spool-to-chunk materialization for sequenced write-model vaults.
-func (r *VaultLifecycleReconciler) onPublishFence(rec vaultctlfsm.FenceRecord) {
-	if r.orch == nil {
-		return
-	}
-	r.orch.scheduleMaterializeFence(r.vaultID, rec)
 }
 
 func (r *VaultLifecycleReconciler) onRetentionPending(id chunk.ChunkID) {

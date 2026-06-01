@@ -306,14 +306,6 @@ func innerCommandNameAndID(cmd *gastrologv1.VaultCtlCommand) (string, string) {
 		return "CmdBeginSeal", chunkIDStr(c.BeginSeal.GetId())
 	case *gastrologv1.VaultCtlCommand_RepatriateChunk:
 		return "CmdRepatriateChunk", chunkIDStr(c.RepatriateChunk.GetEntry().GetId())
-	case *gastrologv1.VaultCtlCommand_ReserveSeqRange:
-		return "CmdReserveSeqRange", c.ReserveSeqRange.GetHolderId()
-	case *gastrologv1.VaultCtlCommand_BurnSeqLeaseTail:
-		return "CmdBurnSeqLeaseTail", c.BurnSeqLeaseTail.GetHolderId()
-	case *gastrologv1.VaultCtlCommand_BumpSeqAllocatorEpoch:
-		return "CmdBumpSeqAllocatorEpoch", ""
-	case *gastrologv1.VaultCtlCommand_PublishFence:
-		return "CmdPublishFence", ""
 	default:
 		return "CmdUnknown", ""
 	}

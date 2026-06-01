@@ -1,13 +1,10 @@
 package orchestrator
 
 import (
-	"sync"
-
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/index"
 	"gastrolog/internal/query"
-	"gastrolog/internal/system"
 )
 
 // Vault is the node-local materialization of a VaultConfig: identity plus
@@ -20,18 +17,7 @@ type Vault struct {
 	Name        string
 	Enabled     bool
 	StorageType string // mirrored from VaultConfig.Type
-	WriteModel  system.VaultWriteModel
 	Instance    *VaultInstance
-
-	// spool holds sequenced write-path spool bytes and accepted-write metadata.
-	spool *vaultSpoolStore
-	seqLease   vaultSeqLease
-	seqAssignMu sync.Mutex // serializes local swath consume + renew (not o.mu — ingest holds RLock)
-	// ReplicationFactor is the desired total replica count (leader included).
-	ReplicationFactor uint32
-	// seqFanOutTargets lists every other placement replica for sequenced
-	// ingest fan-out from this node (leader and follower ingesters).
-	seqFanOutTargets []system.ReplicationTarget
 }
 
 // NewVault creates a Vault with a single instance.

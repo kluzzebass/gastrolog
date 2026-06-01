@@ -994,7 +994,6 @@ func copyVaultConfig(st system.VaultConfig) system.VaultConfig {
 		CacheBudget:          st.CacheBudget,
 		CacheTTL:             st.CacheTTL,
 		RetentionDisposition: st.RetentionDisposition,
-		WriteModel:           st.WriteModel,
 	}
 	if st.RotationPolicyID != nil {
 		id := *st.RotationPolicyID
