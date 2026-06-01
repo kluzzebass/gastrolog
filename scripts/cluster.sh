@@ -14,8 +14,10 @@
 #   --data-dir DIR     Data directory (default: GLOG_DATA_DIR or /tmp/gastrolog)
 #   --admin-user USER  Admin username for init (default: GLOG_ADMIN_USER or "admin")
 #   --admin-pass PASS  Admin password for init (default: GLOG_ADMIN_PASS or "admin123")
+#   --auth             Enable JWT auth (default: --no-auth for local dev clusters)
 #   --base-port PORT   Base HTTP port for node 1 (default: GLOG_BASE_PORT or 4564)
 #   --pprof            Enable pprof on each node (ports 6060, 6061, ...)
+#   GLOG_NO_AUTH       Disable auth when truthy (default: true). Set false/0 to require login.
 
 set -euo pipefail
 
@@ -34,6 +36,7 @@ NODES="${GLOG_NODES:-4}"
 DATA_DIR="${GLOG_DATA_DIR:-/tmp/gastrolog}"
 ADMIN_USER="${GLOG_ADMIN_USER:-admin}"
 ADMIN_PASS="${GLOG_ADMIN_PASS:-admin123}"
+NO_AUTH="${GLOG_NO_AUTH:-true}"
 BASE_PORT="${GLOG_BASE_PORT:-4564}"
 PPROF="${GLOG_PPROF:-false}"
 # Environment banner (gastrolog-4vr0l). Tags every node in this cluster as
@@ -48,6 +51,7 @@ while [[ $# -gt 0 ]]; do
     --data-dir)   DATA_DIR="$2"; shift 2 ;;
     --admin-user) ADMIN_USER="$2"; shift 2 ;;
     --admin-pass) ADMIN_PASS="$2"; shift 2 ;;
+    --auth)       NO_AUTH=false; shift ;;
     --base-port)  BASE_PORT="$2"; shift 2 ;;
     --pprof)      PPROF=true; shift ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
@@ -68,13 +72,19 @@ cluster_port() { echo $((BASE_PORT + ($1 - 1) * 10 + 2)); }
 node_dir()     { echo "${DATA_DIR}/node${1}"; }
 node_sock()    { echo "${DATA_DIR}/node${1}/gastrolog.sock"; }
 
-# env_flags emits the --environment-label / --environment-color arguments
-# when configured. Empty values produce no output, so unflagged invocations
-# look identical to before.
+no_auth_enabled() {
+  [[ "$NO_AUTH" == true || "$NO_AUTH" == "1" || "$NO_AUTH" == "yes" || "$NO_AUTH" == "y" || "$NO_AUTH" == "on" ]]
+}
+
+# env_flags emits optional server flags from cluster env (banner, auth, etc.).
+# Empty/unset values produce no output for that flag.
 env_flags() {
   local flags=""
   [[ -n "$ENV_LABEL" ]] && flags=" --environment-label $ENV_LABEL"
   [[ -n "$ENV_COLOR" ]] && flags="${flags} --environment-color $ENV_COLOR"
+  if no_auth_enabled; then
+    flags="${flags} --no-auth"
+  fi
   echo "$flags"
 }
 
@@ -231,8 +241,12 @@ configure() {
   S="$(node_sock 1)"
 
   echo ">>> Registering admin user..."
-  $GLOG register --addr "http://localhost:$(http_port 1)" \
-    --username "$ADMIN_USER" --password "$ADMIN_PASS" 2>&1 | sed 's/^/  /'
+  if no_auth_enabled; then
+    echo "  (skipped — cluster runs with --no-auth)"
+  else
+    $GLOG register --addr "http://localhost:$(http_port 1)" \
+      --username "$ADMIN_USER" --password "$ADMIN_PASS" 2>&1 | sed 's/^/  /'
+  fi
 
   echo ">>> Creating file storage on each node..."
   for i in $(seq 1 "$NODES"); do
@@ -344,7 +358,11 @@ case "$COMMAND" in
     echo ">>> Cluster bootstrapped!"
     echo "    Nodes:    ${NODES}"
     echo "    Data dir: ${DATA_DIR}"
-    echo "    Admin:    ${ADMIN_USER}/${ADMIN_PASS}"
+    if no_auth_enabled; then
+      echo "    Auth:     disabled (--no-auth; UI skips login)"
+    else
+      echo "    Admin:    ${ADMIN_USER}/${ADMIN_PASS}"
+    fi
     echo "    Run with: $0 run --nodes ${NODES} --data-dir ${DATA_DIR}"
     ;;
   run)
