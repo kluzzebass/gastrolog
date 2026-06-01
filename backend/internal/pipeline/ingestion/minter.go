@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gastrolog/internal/chunk"
+	"gastrolog/internal/record"
 	"gastrolog/internal/glid"
 )
 
@@ -28,9 +28,9 @@ func NewMinter(ingesterID, nodeID glid.GLID) *Minter {
 }
 
 // Mint returns the next EventID. IngestTS is captured at call time (UTC).
-func (m *Minter) Mint() chunk.EventID {
+func (m *Minter) Mint() record.EventID {
 	seq := m.seq.Add(1) - 1
-	return chunk.EventID{
+	return record.EventID{
 		IngesterID: m.ingesterID,
 		NodeID:     m.nodeID,
 		IngestTS:   time.Now().UTC(),

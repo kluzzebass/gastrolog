@@ -4,14 +4,14 @@ import (
 	"context"
 	"time"
 
-	"gastrolog/internal/chunk"
 	"gastrolog/internal/chanwatch"
+	"gastrolog/internal/record"
 )
 
 // Message is emitted by IngestionManager after EventID minting. It is the
 // digestion queue element for V3.
 type Message struct {
-	EventID  chunk.EventID
+	EventID  record.EventID
 	Attrs    map[string]string
 	Raw      []byte
 	SourceTS time.Time // when the log was generated at the source (zero if unknown)
