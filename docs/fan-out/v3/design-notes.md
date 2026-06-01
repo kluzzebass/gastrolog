@@ -21,20 +21,32 @@ contrast with any earlier design. It states only what V3 *is*, never what it
    `Ack chan<- error` on the ingest message — non-nil for only one or two ingester
    types like RELP, not the norm) and a **replication ack** (internal, about
    durability across nodes).
-3. The pipeline is: ingest → digest → route → per-vault segment write →
-   complete + publish. Replication is downstream and pull-driven, not part of it.
+3. The live-ingest pipeline is: ingest → digest → route → per-vault segment write →
+   complete + publish. Retention eject (when a vault's disposition is `route`) re-enters
+   at **route** — records are already parsed, read from the chunk being destroyed, and
+   skip ingest and digest. Both paths share one routing input channel. Replication is
+   downstream and pull-driven, not part of either path.
 4. Ingest mints the EventID; EventID is cluster-unique from
    `(IngesterID, NodeID, IngestTS, IngestSeq)`. IngestSeq is a per-ingester monotonic
    counter, so uniqueness and the total order (16) hold regardless of clock movement.
 5. Digestion (raw → record) is a worker pool. Processing out of order is fine
    because order is carried by EventID, not by processing order.
-6. Digest workers put record pointers on a routing queue; routing workers consume
-   from the other end. Pointers only — the record is allocated once and never
-   copied between stages.
-7. A record is immutable after digestion, so one pointer can fan out to several
-   vault writers with no copy and no lock.
+6. Digest workers hand record pointers to the routing queue; routing workers consume
+   from the other end. The queue item is `{Record, Source}` — record pointer plus
+   routing-time origin metadata (not stored on the record). Two producers merge on
+   the same bounded channel: digest output (`Source = ingest`, ingester from
+   EventID) and retention eject (`Source = retention`, source vault ID and optional
+   reason). Pointers only — the record is allocated once and never copied between
+   stages.
+7. A record is immutable before it enters routing (after digestion for live ingest,
+   or when read from a chunk cursor on retention eject), so one pointer can fan out
+   to several vault writers with no copy and no lock.
 8. Routing is a separate stage from digestion: per-record, in-memory rule match,
-   record → vault IDs. Routing never defers.
+   record → vault IDs. Routing never defers. Match evaluation overlays synthetic
+   attrs (`_source`, `_ingester`, `_vault`, `_reason`) from `Source` for the
+   duration of the match only — same mechanism for live ingest and retention eject.
+   Routes that target retention match on `_source = "retention"` (and often
+   `_vault`); live-ingest routes match on record attrs and/or `_source = "ingest"`.
 9. The router's only target concept is the vault: a rule match yields vault IDs and
    nothing more — no RF, no storage class, no node placement. Which nodes hold a
    vault is the vault leader's call, made from live cluster state and committed to
@@ -75,9 +87,9 @@ contrast with any earlier design. It states only what V3 *is*, never what it
     not need to be canonical; EventID restores order at read.
 18. Query order (by `IngestTS` or `SourceTS`) is an index choice, independent of
     storage order. `SourceTS` is carried on the record but not part of EventID.
-19. Within the ingest→segment path, local disk write is the only throughput
-    governor. Group commit is the lever; everything above the write is parallel and
-    lock-free.
+19. Within the route→segment path (live ingest and retention eject), local disk
+    write is the only throughput governor. Group commit is the lever; everything
+    above the write is parallel and lock-free.
 20. If the disk ever fails to keep up, the bounded channels backpressure rather
     than drop, so the cardinal rule holds under load with no special mechanism. In
     practice sequential segment appends far outrun log ingestion rates, so this is
@@ -182,7 +194,9 @@ Phases, in order; each name is also the manager (`<Phase>Manager`):
 
 1. **Ingestion** — receive bytes, mint the EventID (the ingesters).
 2. **Digestion** — parse raw → record.
-3. **Routing** — match rules → vault IDs.
+3. **Routing** — match rules → vault IDs. One static worker pool and one input
+   queue; digest and retention eject are both producers (`Input{Record, Source}` in
+   `backend/internal/pipeline/routing`).
 4. **Segmentation** — write records into per-vault segments.
 5. **Distribution** — make completed segments available: publish metadata to the
    vault-ctl log and answer pull requests for segment bytes (origin/holder side).
@@ -241,14 +255,17 @@ the node's available storages (default). Two constraints:
 ## Pipeline at a glance
 
 ```
-Ingestion → Digestion → Routing → Segmentation → Distribution → Collection → Chunking
+Ingestion → Digestion ──┐
+                        ├── Routing → Segmentation → Distribution → Collection → Chunking
+Retention eject ────────┘
 ```
 
-The first four phases are one in-process pipeline: a record is allocated once at
-Digestion and only its pointer travels the channels through Routing into a
-per-vault Segmentation writer. This is the durable-capture path — by the end of
-Segmentation the record is durable in its segment, so the cardinal rule holds by
-construction.
+The first four phases are one in-process pipeline for live ingest: a record is
+allocated once at Digestion and only its pointer travels the channels through
+Routing into a per-vault Segmentation writer. Retention eject sideloads already-built
+records onto the same routing queue with `Source = retention` (source vault ID on
+the overlay). This is the durable-capture path — by the end of Segmentation the
+record is durable in its segment, so the cardinal rule holds by construction.
 
 A boundary falls after Segmentation. Distribution publishes the completed segment's
 metadata to the vault-ctl log and answers pull requests for its bytes; Collection and
@@ -284,9 +301,14 @@ flowchart TB
   dch --> D2
   dch --> Dn
 
-  D1 --> rch[/"routing queue · chan *Record"/]
+  D1 --> rch[/"routing queue · chan Input"/]
   D2 --> rch
   Dn --> rch
+
+  subgraph retain["Retention eject — vault sweep when disposition = route"]
+    EJ(["read records from chunk cursor"])
+  end
+  EJ --> rch
 
   subgraph route["Routing — M goroutines"]
     R1(["match rules to vault IDs"])
@@ -356,6 +378,16 @@ flowchart TB
 
 A record that matches multiple vaults is sent to each vault's in channel
 (fan-out); the same immutable record pointer is reused, never copied.
+
+Each routing-queue item carries a `Source` tag used only at match time: digest
+hands off `Source = ingest` (ingester ID from EventID); retention eject hands off
+`Source = retention` with the source vault ID and optional reason (`age`, `size`,
+`count`). Both producers block on the same bounded channel, so eject backpressure
+is unified with live ingest — neither path drops when the queue or downstream
+writers are slow.
+
+Cluster lifecycle for eject (who runs it, when the source chunk may be deleted)
+is **not** designed here — see [Open questions — retention eject](#open-questions--retention-eject).
 
 The segment writer's only job is to write records into a durable segment file.
 Completing a segment can be as crude as moving the file from a working directory
@@ -438,6 +470,74 @@ encode → append pipeline.
 Key-based query access needs a side index over the records; the head
 supplies one (see the head points above), reusing the generic
 `backend/internal/btree`.
+
+## Open questions — retention eject
+
+The routing stage already accepts retention eject on the shared input
+channel (`Source = retention`). What is **not** designed yet is the
+cluster lifecycle around it: who fires eject, and when the source chunk
+(or its V3 equivalent) may be destroyed. Notes only — nothing here is
+decided.
+
+### Who runs eject?
+
+Today (`backend/internal/orchestrator/retention.go`) the retention sweep
+runs on the **config placement leader** for the vault instance (not
+necessarily the vault-ctl Raft leader). That node reads records from a
+local chunk cursor and pushes them through routing, then requests chunk
+deletion via the lifecycle reconciler.
+
+V3 will need an explicit owner per vault (or per chunk) so eject fires
+**exactly once** — the current `retention-pending` flag and
+`!alreadyPending` routing gate exist precisely because re-running eject
+on every sweep duplicates records at route targets. Candidates:
+
+- **Vault leader** (vault-ctl elected leader for that vault's group) —
+  aligns with other vault-scoped decisions (holder set, chunk plans).
+  Lean, but the leader may not hold the chunk bytes locally; eject still
+  needs a defined way to read the records (local holder, pull, or
+  forward-to-leader).
+- **Any holder** with a lease/FSM flag — simpler locally, harder to
+  prove single-fire cluster-wide without vault-ctl coordination.
+- **Placement leader** (status quo) — works in the current architecture
+  but couples retention to a role that V3 is trying to move toward
+  vault-ctl.
+
+Open: which role owns the sweep, who may open the cursor, and how a
+follower learns eject already ran for chunk *C* without re-streaming.
+
+### Chunk deletion after eject
+
+Disposition `route` means: stream records through routing, **then**
+destroy the source chunk. Deletion is already coordinated cluster-wide
+today: `CmdRequestDelete` → each node in `expectedFrom` deletes its
+local copy and acks → `CmdFinalizeDelete` when the set is empty. That
+receipt protocol lives outside the routing hot path.
+
+V3 adds tension with the cardinal rule (1): routing must not drop
+**matched** records, yet today's eject path destroys the source chunk
+regardless of whether every ejected record reached a durable destination
+segment. Open questions:
+
+- **Delete gate:** may the source chunk/segment be purged only after
+  ejected records are durably captured on their destination vaults (per
+  vault segment append), or is best-effort route-then-delete acceptable
+  for retention (matching current `disposition = route` semantics)?
+- **Partial eject:** if fan-out sends to vaults A and B and B's writer
+  is slow or fails, does deletion wait, retry unrouted slots, or proceed
+  and count drops?
+- **Cross-node destinations:** eject runs on one node; matched records
+  may land in segments on other nodes. What ack or vault-ctl receipt
+  proves "safe to delete source" — per-destination, or a single
+  retention receipt on the source vault group?
+- **Idempotency vs retry:** `retention-pending` prevents re-routing on
+  delete retry; if routing succeeded but delete stalled, how does a
+  retry distinguish "already ejected, finish delete" from "never
+  ejected"?
+
+These interact with segment purge (39) and chunk replication (28–30):
+the source artifact must not disappear until downstream durability is
+either proven or explicitly abandoned (counted drop, not silent loss).
 
 ## Out of scope (for now)
 
