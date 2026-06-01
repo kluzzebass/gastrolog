@@ -63,6 +63,43 @@ func (a Attributes) Encode() ([]byte, error) {
 	return buf, nil
 }
 
+// DecodeAttributes parses the binary format produced by Encode.
+func DecodeAttributes(data []byte) (Attributes, int, error) {
+	if len(data) < 2 {
+		return nil, 0, ErrInvalidAttrsData
+	}
+	count := binary.LittleEndian.Uint16(data[0:2])
+	off := 2
+	if count == 0 {
+		if len(data) != 2 {
+			return nil, 0, ErrInvalidAttrsData
+		}
+		return Attributes{}, 2, nil
+	}
+	attrs := make(Attributes, count)
+	for range count {
+		if off+2 > len(data) {
+			return nil, 0, ErrInvalidAttrsData
+		}
+		keyLen := binary.LittleEndian.Uint16(data[off : off+2])
+		off += 2
+		if off+int(keyLen)+2 > len(data) {
+			return nil, 0, ErrInvalidAttrsData
+		}
+		key := string(data[off : off+int(keyLen)])
+		off += int(keyLen)
+		valLen := binary.LittleEndian.Uint16(data[off : off+2])
+		off += 2
+		if off+int(valLen) > len(data) {
+			return nil, 0, ErrInvalidAttrsData
+		}
+		val := string(data[off : off+int(valLen)])
+		off += int(valLen)
+		attrs[key] = val
+	}
+	return attrs, off, nil
+}
+
 // Copy returns a deep copy of the attributes.
 func (a Attributes) Copy() Attributes {
 	if a == nil {

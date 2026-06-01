@@ -27,6 +27,11 @@ const (
 	Signature  = 'i'
 	HeaderSize = 4
 
+	// On-disk primitive field sizes (little-endian wire layouts).
+	SizeU16 = 2
+	SizeU32 = 4
+	SizeU64 = 8
+
 	TypeTimeIndex      = 't'
 	TypeSourceIndex    = 's' // SourceTS timestamp index
 	TypeIngestIndex    = 'I' // IngestTS timestamp index
@@ -48,6 +53,7 @@ const (
 	TypeBTree          = 'b' // B+ tree index
 	TypeCloudBlob      = 'g' // GLCB cloud blob
 	TypeLookupTable    = 'L' // Binary lookup table (sorted key index + value data)
+	TypeSegment        = 'S' // V3 vault segment file (working/ or completed/)
 
 	// Flag bits for raw.log, idx.log, and attr.log headers.
 	FlagSealed     = 0x01

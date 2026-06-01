@@ -432,21 +432,22 @@ Header — enough to inspect a segment without reading its records:
 - SegmentID (GLID, 16 bytes)
 - vault ID (GLID, 16 bytes)
 - record count (uint32)
-- byte offset of the last written record (uint32), which also marks the end of
-  valid data
+- byte offset of the last written record (uint32)
 - first and last IngestTS (int64 nanos), the order/merge axis
-- optionally the first and last EventID
+- segment checksum (uint32 CRC32/IEEE over all committed record bytes —
+  `[HeaderSize:` *end of the frame starting at DataEnd* `)`)
 
 The header is fixed-size and lives at the front, and is rewritten in place after
-each record — count incremented, last IngestTS/EventID updated (first set on the
+each record — count incremented, last IngestTS updated (first set on the
 first record). So the header is always current: the segment is valid and
 inspectable at any point, and completion needs no finalization step — it is just
 the working→completed rename. The record is appended first, then the header
-rewritten, so the header is never ahead of the data. The recorded last-record
-position is the recovery anchor: on reopen, valid data ends at that record's
-frame, so any torn bytes from an interrupted final append are discarded and the
-writer resumes from there. Readers get the full segment metadata — and the exact
-valid extent — from the front without scanning records.
+rewritten, so the header is never ahead of the data. The recorded `DataEnd`
+offset is the recovery anchor: on reopen, read the frame that starts at
+`DataEnd`; valid data ends at the end of that frame, so any torn bytes from an
+interrupted *next* append are discarded and the writer resumes after that
+frame. Readers get segment metadata from the header; the anchor locates the
+last committed record without scanning from the front.
 
 Records: each record is `[frameLen:u32][frame body]`, frame after frame — the
 same framing as the GLCB records section. The frame body leads with the
@@ -470,6 +471,24 @@ encode → append pipeline.
 Key-based query access needs a side index over the records; the head
 supplies one (see the head points above), reusing the generic
 `backend/internal/btree`.
+
+### Wire layout coding conventions (deferred cleanup)
+
+On-disk encode/decode should use **named wire sizes**, not bare literals in
+offset arithmetic: `glid.Size` for GLIDs, shared primitives in
+`backend/internal/format` (`SizeU16`, `SizeU32`, `SizeU64`), and composite
+sizes/offsets **derived** from those (e.g. segment `HeaderSize` computed from
+field layout, not a magic number). Go has no C-style `sizeof`; `unsafe.Sizeof`
+does not apply to wire layouts and cannot be used in `const` expressions anyway.
+
+**Status:** the new V3 segment package (`backend/internal/pipeline/segment`)
+follows this pattern. Legacy writers — especially GLCB in
+`backend/internal/chunk/cloud` — still use raw `off += 4` / `8` / `16`. That
+cleanup is **deferred**: most of those paths will be replaced or bypassed as the
+V3 pipeline lands, so polishing them now would be wasted churn. Revisit when
+touching each format for V3 (segmentation, chunk build, distribution) or when
+adding a new on-disk layout — pick up the named-size convention then, and fold
+legacy callers in as they are retired.
 
 ## Open questions — retention eject
 
