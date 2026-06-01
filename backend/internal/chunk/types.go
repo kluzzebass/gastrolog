@@ -233,6 +233,33 @@ type EventID struct {
 	IngestSeq  uint32
 }
 
+// Compare returns -1, 0, or +1 comparing e to o in canonical EventID order:
+// IngestTS, then NodeID, then IngesterID, then IngestSeq. This is a total
+// order suitable for merge and dedup keys.
+func (e EventID) Compare(o EventID) int {
+	if c := e.IngestTS.Compare(o.IngestTS); c != 0 {
+		return c
+	}
+	if c := e.NodeID.Compare(o.NodeID); c != 0 {
+		return c
+	}
+	if c := e.IngesterID.Compare(o.IngesterID); c != 0 {
+		return c
+	}
+	if e.IngestSeq < o.IngestSeq {
+		return -1
+	}
+	if e.IngestSeq > o.IngestSeq {
+		return 1
+	}
+	return 0
+}
+
+// Less reports whether e precedes o in canonical EventID order.
+func (e EventID) Less(o EventID) bool {
+	return e.Compare(o) < 0
+}
+
 // Record is a single log entry.
 //
 // Timestamps:
