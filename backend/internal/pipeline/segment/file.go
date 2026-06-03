@@ -68,6 +68,11 @@ func (sf *File) Header() Header {
 	return sf.hdr
 }
 
+// EncodeFrame builds the frame body for a record (excluding the u32 length prefix).
+func EncodeFrame(rec *record.Record, writeTS time.Time) ([]byte, error) {
+	return encodeFrame(rec, writeTS)
+}
+
 // Append encodes and appends a record frame, then rewrites the header.
 // DataEnd is the byte offset where the record starts (recovery anchor).
 func (sf *File) Append(rec *record.Record, writeTS time.Time) error {
@@ -77,6 +82,14 @@ func (sf *File) Append(rec *record.Record, writeTS time.Time) error {
 	body, err := encodeFrame(rec, writeTS)
 	if err != nil {
 		return err
+	}
+	return sf.AppendFrame(rec, writeTS, body)
+}
+
+// AppendFrame appends a pre-encoded frame body and rewrites the header.
+func (sf *File) AppendFrame(rec *record.Record, _ time.Time, body []byte) error {
+	if rec == nil {
+		return errors.New("nil record")
 	}
 
 	writeOff, err := sf.appendOffset()
@@ -107,6 +120,20 @@ func (sf *File) Append(rec *record.Record, writeTS time.Time) error {
 	}
 	sf.hdr.SegmentChecksum = sum
 	return sf.writeHeader()
+}
+
+// Sync persists appended frames and header rewrites to stable storage.
+func (sf *File) Sync() error {
+	return sf.f.Sync()
+}
+
+// Size returns the current on-disk file length.
+func (sf *File) Size() (int64, error) {
+	info, err := sf.f.Stat()
+	if err != nil {
+		return 0, err
+	}
+	return info.Size(), nil
 }
 
 // MarkComplete sets the completed flag in the header (working→completed rename
