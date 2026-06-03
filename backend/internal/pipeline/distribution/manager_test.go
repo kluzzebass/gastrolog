@@ -1,0 +1,268 @@
+package distribution_test
+
+import (
+	"bytes"
+	"context"
+	"os"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+
+	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/distribution"
+	"gastrolog/internal/pipeline/segment"
+	"gastrolog/internal/pipeline/segmentation"
+	"gastrolog/internal/record"
+)
+
+type recordingPublisher struct {
+	mu        sync.Mutex
+	published []distribution.Metadata
+}
+
+func (p *recordingPublisher) Publish(_ context.Context, meta distribution.Metadata) error {
+	p.mu.Lock()
+	p.published = append(p.published, meta)
+	p.mu.Unlock()
+	return nil
+}
+
+func (p *recordingPublisher) count() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.published)
+}
+
+func (p *recordingPublisher) last() distribution.Metadata {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.published) == 0 {
+		return distribution.Metadata{}
+	}
+	return p.published[len(p.published)-1]
+}
+
+func writeCompletedSegment(t *testing.T, vaultRoot string, vaultID glid.GLID, raw string) segmentation.CompletedSegment {
+	t.Helper()
+	completedDir := filepath.Join(vaultRoot, "completed")
+	if err := os.MkdirAll(completedDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	segID := glid.New()
+	path := filepath.Join(completedDir, segID.String())
+
+	sf, err := segment.Create(path, segment.Meta{ID: segID, VaultID: vaultID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := time.Date(2024, 7, 1, 12, 0, 0, 0, time.UTC)
+	rec := &record.Record{
+		SourceTS: ts,
+		IngestTS: ts,
+		EventID: record.EventID{
+			IngesterID: glid.New(),
+			NodeID:     glid.New(),
+			IngestTS:   ts,
+			IngestSeq:  0,
+		},
+		Attrs: record.Attributes{"k": "v"},
+		Raw:   []byte(raw),
+	}
+	if err := sf.Append(rec, ts); err != nil {
+		t.Fatal(err)
+	}
+	if err := sf.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	if err := sf.MarkComplete(); err != nil {
+		t.Fatal(err)
+	}
+	hdr := sf.Header()
+	if err := sf.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return segmentation.CompletedSegment{
+		VaultID: vaultID,
+		Meta:    segment.Meta{ID: segID, VaultID: vaultID},
+		Path:    path,
+		Header:  hdr,
+	}
+}
+
+func TestMetadataFromCompletedSegment(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	root := t.TempDir()
+	seg := writeCompletedSegment(t, root, vaultID, "payload")
+
+	meta, err := distribution.MetadataFrom(seg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.SegmentID != seg.Meta.ID || meta.VaultID != vaultID {
+		t.Fatalf("meta = %+v", meta)
+	}
+	if meta.RecordCount != 1 || meta.Checksum != seg.Header.SegmentChecksum {
+		t.Fatalf("meta = %+v", meta)
+	}
+	if meta.ByteSize == 0 {
+		t.Error("expected non-zero byte size")
+	}
+}
+
+func TestPromoteToHead(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	vaultID := glid.New()
+	seg := writeCompletedSegment(t, root, vaultID, "move me")
+
+	dest, err := distribution.PromoteToHead(seg.Path, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dest); err != nil {
+		t.Fatalf("head file: %v", err)
+	}
+	if _, err := os.Stat(seg.Path); !os.IsNotExist(err) {
+		t.Fatal("completed copy should be gone after promote")
+	}
+}
+
+func TestPublishOnCompleted(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	root := t.TempDir()
+	pub := &recordingPublisher{}
+
+	mgr, _ := distribution.New(distribution.Config{})
+	if err := mgr.RegisterVault(vaultID, root, distribution.VaultConfig{
+		Publisher:   pub,
+		LocalHolder: func() bool { return false },
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	seg := writeCompletedSegment(t, root, vaultID, "published")
+	if err := mgr.PublishCompleted(context.Background(), seg); err != nil {
+		t.Fatal(err)
+	}
+
+	meta := pub.last()
+	if meta.SegmentID != seg.Meta.ID || meta.RecordCount != 1 {
+		t.Fatalf("published = %+v", meta)
+	}
+	if _, err := os.Stat(seg.Path); err != nil {
+		t.Fatal("remote holder keeps segment in completed/")
+	}
+}
+
+func TestLocalHolderPromotesToHead(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	root := t.TempDir()
+	pub := &recordingPublisher{}
+
+	mgr, _ := distribution.New(distribution.Config{})
+	if err := mgr.RegisterVault(vaultID, root, distribution.VaultConfig{
+		Publisher:   pub,
+		LocalHolder: func() bool { return true },
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	seg := writeCompletedSegment(t, root, vaultID, "local")
+	if err := mgr.PublishCompleted(context.Background(), seg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(seg.Path); !os.IsNotExist(err) {
+		t.Fatal("completed path should be empty after local promote")
+	}
+	headPath := filepath.Join(root, "head", seg.Meta.ID.String())
+	if _, err := os.Stat(headPath); err != nil {
+		t.Fatalf("head file: %v", err)
+	}
+}
+
+func TestServePullStreamsBytes(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	root := t.TempDir()
+	pub := &recordingPublisher{}
+
+	mgr, _ := distribution.New(distribution.Config{})
+	if err := mgr.RegisterVault(vaultID, root, distribution.VaultConfig{
+		Publisher: pub,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	seg := writeCompletedSegment(t, root, vaultID, "pull-bytes")
+	if err := mgr.PublishCompleted(context.Background(), seg); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	if err := mgr.ServePull(distribution.PullRequest{
+		VaultID:   vaultID,
+		SegmentID: seg.Meta.ID,
+		Dest:      &buf,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("pull-bytes")) {
+		t.Fatalf("got %q", buf.Bytes())
+	}
+}
+
+func TestServePullNotFound(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	mgr, _ := distribution.New(distribution.Config{})
+	if err := mgr.RegisterVault(vaultID, t.TempDir(), distribution.VaultConfig{
+		Publisher: &recordingPublisher{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err := mgr.ServePull(distribution.PullRequest{
+		VaultID:   vaultID,
+		SegmentID: glid.New(),
+		Dest:      &bytes.Buffer{},
+	})
+	if err != distribution.ErrSegmentNotFound {
+		t.Fatalf("ServePull() = %v, want ErrSegmentNotFound", err)
+	}
+}
+
+func TestRunConsumesCompletedChannel(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	root := t.TempDir()
+	pub := &recordingPublisher{}
+
+	mgr, _ := distribution.New(distribution.Config{})
+	if err := mgr.RegisterVault(vaultID, root, distribution.VaultConfig{
+		Publisher: pub,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	completed := make(chan segmentation.CompletedSegment, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_ = mgr.Run(ctx, completed)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	completed <- writeCompletedSegment(t, root, vaultID, "async")
+	time.Sleep(50 * time.Millisecond)
+
+	if pub.count() != 1 {
+		t.Fatalf("published %d metadata entries", pub.count())
+	}
+}

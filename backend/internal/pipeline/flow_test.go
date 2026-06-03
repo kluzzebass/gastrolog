@@ -1,15 +1,18 @@
 package pipeline_test
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/digestion"
+	"gastrolog/internal/pipeline/distribution"
 	"gastrolog/internal/pipeline/ingestion"
 	"gastrolog/internal/pipeline/routing"
 	"gastrolog/internal/pipeline/segment"
@@ -34,12 +37,13 @@ func (e *emitIngester) Run(ctx context.Context, out chan<- ingestion.IngesterMes
 	return ctx.Err()
 }
 
-// harness wires ingestion → digestion → routing → segmentation the way the
-// orchestrator will (gastrolog-214bz), without control-plane or ack semantics yet.
+// harness wires ingestion → digestion → routing → segmentation → distribution
+// the way the orchestrator will (gastrolog-214bz), without control-plane or ack semantics yet.
 type harness struct {
 	ctx    context.Context
 	cancel context.CancelFunc
-	done   chan struct{}
+	segDone   chan struct{}
+	distDone  chan struct{}
 
 	nodeID     glid.GLID
 	ingesterID glid.GLID
@@ -50,11 +54,45 @@ type harness struct {
 	route  *routing.Manager
 	digest *digestion.Manager
 	seg    *segmentation.Manager
+	dist   *distribution.Manager
+	pub    *recordingPublisher
 
 	syncs atomic.Uint32
 }
 
-func newHarness(t *testing.T, nodeID, ingesterID, vaultID glid.GLID, route *routing.Route) *harness {
+type recordingPublisher struct {
+	mu        sync.Mutex
+	published []distribution.Metadata
+}
+
+func (p *recordingPublisher) Publish(_ context.Context, meta distribution.Metadata) error {
+	p.mu.Lock()
+	p.published = append(p.published, meta)
+	p.mu.Unlock()
+	return nil
+}
+
+func (p *recordingPublisher) count() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.published)
+}
+
+func (p *recordingPublisher) first() distribution.Metadata {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.published) == 0 {
+		return distribution.Metadata{}
+	}
+	return p.published[0]
+}
+
+type harnessOpts struct {
+	closePolicy segmentation.ClosePolicy
+	localHolder bool
+}
+
+func newHarness(t *testing.T, nodeID, ingesterID, vaultID glid.GLID, route *routing.Route, opts harnessOpts) *harness {
 	t.Helper()
 
 	vaultRoot := t.TempDir()
@@ -63,14 +101,17 @@ func newHarness(t *testing.T, nodeID, ingesterID, vaultID glid.GLID, route *rout
 	h := &harness{
 		ctx:        ctx,
 		cancel:     cancel,
-		done:       make(chan struct{}),
+		segDone:    make(chan struct{}),
+		distDone:   make(chan struct{}),
 		nodeID:     nodeID,
 		ingesterID: ingesterID,
 		vaultID:    vaultID,
 		vaultRoot:  vaultRoot,
+		pub:        &recordingPublisher{},
 	}
 
-	segMgr, _ := segmentation.New(segmentation.Config{
+	segMgr, completed := segmentation.New(segmentation.Config{
+		ClosePolicy:     opts.closePolicy,
 		SyncBatchSize:   1,
 		SyncBatchWindow: time.Millisecond,
 		OnSync:          func() { h.syncs.Add(1) },
@@ -78,6 +119,14 @@ func newHarness(t *testing.T, nodeID, ingesterID, vaultID glid.GLID, route *rout
 	vaultIn, err := segMgr.RegisterVault(vaultID, vaultRoot)
 	if err != nil {
 		t.Fatalf("RegisterVault: %v", err)
+	}
+
+	distMgr, _ := distribution.New(distribution.Config{})
+	if err := distMgr.RegisterVault(vaultID, vaultRoot, distribution.VaultConfig{
+		Publisher:   h.pub,
+		LocalHolder: func() bool { return opts.localHolder },
+	}); err != nil {
+		t.Fatalf("RegisterVault distribution: %v", err)
 	}
 
 	routeMgr := routing.New(routing.Config{
@@ -104,10 +153,15 @@ func newHarness(t *testing.T, nodeID, ingesterID, vaultID glid.GLID, route *rout
 	h.route = routeMgr
 	h.digest = digestMgr
 	h.seg = segMgr
+	h.dist = distMgr
 
 	go func() {
 		_ = h.seg.Run(ctx)
-		close(h.done)
+		close(h.segDone)
+	}()
+	go func() {
+		_ = h.dist.Run(ctx, completed)
+		close(h.distDone)
 	}()
 
 	go func() {
@@ -132,7 +186,8 @@ func newHarness(t *testing.T, nodeID, ingesterID, vaultID glid.GLID, route *rout
 
 	t.Cleanup(func() {
 		cancel()
-		<-h.done
+		<-h.segDone
+		<-h.distDone
 	})
 
 	return h
@@ -163,6 +218,56 @@ func (h *harness) waitSyncs(t *testing.T, want uint32) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("fsync count = %d, want >= %d", h.syncs.Load(), want)
+}
+
+func (h *harness) waitPublished(t *testing.T, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if h.pub.count() >= want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("published %d segments, want >= %d", h.pub.count(), want)
+}
+
+func (h *harness) readCompletedRecords(t *testing.T) []record.Record {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(h.vaultRoot, "completed"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("completed segments = %d, want 1", len(entries))
+	}
+	path := filepath.Join(h.vaultRoot, "completed", entries[0].Name())
+	sf, err := segment.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sf.Close()
+	got, err := sf.ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+func (h *harness) waitCompletedEmpty(t *testing.T) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		entries, err := os.ReadDir(filepath.Join(h.vaultRoot, "completed"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) == 0 {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("completed dir not empty after local promote")
 }
 
 func (h *harness) readWorkingRecords(t *testing.T) []record.Record {
@@ -198,7 +303,7 @@ func TestPipelineIngestToSegment(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	h := newHarness(t, nodeID, ingesterID, vaultID, route)
+	h := newHarness(t, nodeID, ingesterID, vaultID, route, harnessOpts{})
 	h.runIngester(t, &emitIngester{msgs: []ingestion.IngesterMessage{
 		{Raw: []byte("first line"), Attrs: map[string]string{"env": "prod"}, SourceTS: sourceTS},
 		{Raw: []byte("second line"), Attrs: map[string]string{"env": "prod"}},
@@ -241,6 +346,101 @@ func TestPipelineIngestToSegment(t *testing.T) {
 	if first.EventID.IngestSeq >= byRaw["second line"].EventID.IngestSeq {
 		t.Fatalf("IngestSeq order = %d, %d; mint order should be preserved on EventID",
 			first.EventID.IngestSeq, byRaw["second line"].EventID.IngestSeq)
+	}
+}
+
+func TestPipelineIngestToDistribution(t *testing.T) {
+	nodeID := glid.New()
+	ingesterID := glid.New()
+	vaultID := glid.New()
+
+	route, err := routing.CompileRoute(glid.New(), "all", 0, "*", []glid.GLID{vaultID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h := newHarness(t, nodeID, ingesterID, vaultID, route, harnessOpts{
+		closePolicy: segmentation.ClosePolicy{MaxBytes: 256},
+	})
+	msgs := make([]ingestion.IngesterMessage, 8)
+	for i := range msgs {
+		msgs[i] = ingestion.IngesterMessage{
+			Raw:   []byte("line payload for segment close"),
+			Attrs: map[string]string{"env": "prod"},
+		}
+	}
+	h.runIngester(t, &emitIngester{msgs: msgs})
+
+	h.waitSyncs(t, 8)
+	h.waitPublished(t, 1)
+
+	meta := h.pub.first()
+	if meta.RecordCount == 0 {
+		t.Fatalf("published metadata = %+v", meta)
+	}
+
+	path := filepath.Join(h.vaultRoot, "completed", meta.SegmentID.String())
+	sf, err := segment.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := sf.ReadAll()
+	_ = sf.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) == 0 {
+		t.Fatal("completed segment has no records")
+	}
+
+	var buf bytes.Buffer
+	if err := h.dist.ServePull(distribution.PullRequest{
+		VaultID:   vaultID,
+		SegmentID: meta.SegmentID,
+		Dest:      &buf,
+	}); err != nil {
+		t.Fatalf("ServePull: %v", err)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("line payload")) {
+		t.Fatalf("pull payload = %q", buf.Bytes())
+	}
+}
+
+func TestPipelineIngestToDistributionLocalHolder(t *testing.T) {
+	nodeID := glid.New()
+	ingesterID := glid.New()
+	vaultID := glid.New()
+
+	route, err := routing.CompileRoute(glid.New(), "all", 0, "*", []glid.GLID{vaultID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h := newHarness(t, nodeID, ingesterID, vaultID, route, harnessOpts{
+		closePolicy: segmentation.ClosePolicy{MaxBytes: 256},
+		localHolder: true,
+	})
+	msgs := make([]ingestion.IngesterMessage, 8)
+	for i := range msgs {
+		msgs[i] = ingestion.IngesterMessage{
+			Raw:   []byte("local holder payload"),
+			Attrs: map[string]string{"env": "prod"},
+		}
+	}
+	h.runIngester(t, &emitIngester{msgs: msgs})
+
+	h.waitSyncs(t, 8)
+	h.waitCompletedEmpty(t)
+	if h.pub.count() < 1 {
+		t.Fatalf("published %d segments", h.pub.count())
+	}
+
+	headEntries, err := os.ReadDir(filepath.Join(h.vaultRoot, "head"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(headEntries) < 1 {
+		t.Fatalf("head segments = %d, want >= 1", len(headEntries))
 	}
 }
 
@@ -364,7 +564,7 @@ func TestPipelineUnmatchedNotWritten(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	h := newHarness(t, nodeID, ingesterID, vaultID, route)
+	h := newHarness(t, nodeID, ingesterID, vaultID, route, harnessOpts{})
 	h.runIngester(t, &emitIngester{msgs: []ingestion.IngesterMessage{
 		{Raw: []byte("staging"), Attrs: map[string]string{"env": "staging"}},
 	}})
