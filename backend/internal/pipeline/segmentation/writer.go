@@ -10,6 +10,7 @@ import (
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/segment"
+	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/record"
 )
 
@@ -42,7 +43,7 @@ type vaultWriter struct {
 }
 
 func newVaultWriter(vaultID glid.GLID, root string, cfg Config, completed chan<- CompletedSegment) (*vaultWriter, error) {
-	if err := ensureVaultDirs(root); err != nil {
+	if err := paths.EnsureSegmentationDirs(root); err != nil {
 		return nil, err
 	}
 	queueCap := cfg.EncodeQueueCap
@@ -236,7 +237,7 @@ func (w *vaultWriter) closeSegmentLocked() error {
 	hdr := w.seg.Header()
 	meta := segment.Meta{ID: w.segmentID, VaultID: w.vaultID}
 	working := w.workingPath
-	completed := completedPath(w.root, w.segmentID)
+	completed := paths.CompletedSegment(w.root, w.segmentID)
 	if err := w.seg.Close(); err != nil {
 		return err
 	}
@@ -266,7 +267,7 @@ func (w *vaultWriter) openNewSegment() error {
 
 func (w *vaultWriter) openNewSegmentLocked() error {
 	w.segmentID = glid.New()
-	w.workingPath = workingPath(w.root, w.segmentID)
+	w.workingPath = paths.WorkingSegment(w.root, w.segmentID)
 	w.openedAt = w.cfg.now()
 	sf, err := segment.Create(w.workingPath, segment.Meta{
 		ID:      w.segmentID,

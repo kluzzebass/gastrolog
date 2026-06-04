@@ -11,6 +11,7 @@ import (
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/segment"
 	"gastrolog/internal/pipeline/segmentation"
+	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/record"
 )
 
@@ -84,7 +85,7 @@ func TestManagerAppendsToWorkingSegment(t *testing.T) {
 	in <- sampleRecord(0, ts)
 	waitSync(t, &syncs, 1)
 
-	entries, err := os.ReadDir(filepath.Join(dir, "working"))
+	entries, err := os.ReadDir(paths.WorkingDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +93,7 @@ func TestManagerAppendsToWorkingSegment(t *testing.T) {
 		t.Fatalf("working segments = %d, want 1", len(entries))
 	}
 
-	path := filepath.Join(dir, "working", entries[0].Name())
+	path := filepath.Join(paths.WorkingDir(dir), entries[0].Name())
 	sf, err := segment.Open(path)
 	if err != nil {
 		t.Fatal(err)
@@ -177,7 +178,7 @@ func TestManagerClosesOnSize(t *testing.T) {
 		if _, err := os.Stat(seg.Path); err != nil {
 			t.Fatalf("completed path: %v", err)
 		}
-		if _, err := os.Stat(filepath.Join(dir, "working", seg.Meta.ID.String())); !os.IsNotExist(err) {
+		if _, err := os.Stat(paths.WorkingSegment(dir, seg.Meta.ID)); !os.IsNotExist(err) {
 			t.Fatalf("working copy should be gone: %v", err)
 		}
 		sf, err := segment.Open(seg.Path)
@@ -265,7 +266,7 @@ func TestManagerPerVaultIsolation(t *testing.T) {
 	waitSync(t, &syncs, 2)
 
 	for _, dir := range []string{dirA, dirB} {
-		entries, err := os.ReadDir(filepath.Join(dir, "working"))
+		entries, err := os.ReadDir(paths.WorkingDir(dir))
 		if err != nil {
 			t.Fatal(err)
 		}

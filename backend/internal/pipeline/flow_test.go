@@ -3,6 +3,7 @@ package pipeline_test
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -11,12 +12,14 @@ import (
 	"time"
 
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/collection"
 	"gastrolog/internal/pipeline/digestion"
 	"gastrolog/internal/pipeline/distribution"
 	"gastrolog/internal/pipeline/ingestion"
 	"gastrolog/internal/pipeline/routing"
 	"gastrolog/internal/pipeline/segment"
 	"gastrolog/internal/pipeline/segmentation"
+	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/record"
 )
 
@@ -38,24 +41,29 @@ func (e *emitIngester) Run(ctx context.Context, out chan<- ingestion.IngesterMes
 }
 
 // harness wires ingestion → digestion → routing → segmentation → distribution
-// the way the orchestrator will (gastrolog-214bz), without control-plane or ack semantics yet.
+// (→ collection when opts.withCollection), the way the orchestrator will
+// (gastrolog-214bz), without control-plane or ack semantics yet.
 type harness struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	segDone   chan struct{}
 	distDone  chan struct{}
+	colDone   chan struct{}
 
 	nodeID     glid.GLID
 	ingesterID glid.GLID
 	vaultID    glid.GLID
 	vaultRoot  string
+	homeRoot   string
 
-	ingest *ingestion.Manager
-	route  *routing.Manager
-	digest *digestion.Manager
-	seg    *segmentation.Manager
-	dist   *distribution.Manager
-	pub    *recordingPublisher
+	ingest   *ingestion.Manager
+	route    *routing.Manager
+	digest   *digestion.Manager
+	seg      *segmentation.Manager
+	dist     *distribution.Manager
+	collect  *collection.Manager
+	pub      *recordingPublisher
+	receipts *flowCollectionReceipts
 
 	syncs atomic.Uint32
 }
@@ -88,8 +96,9 @@ func (p *recordingPublisher) first() distribution.Metadata {
 }
 
 type harnessOpts struct {
-	closePolicy segmentation.ClosePolicy
-	localHolder bool
+	closePolicy    segmentation.ClosePolicy
+	localHolder    bool
+	withCollection bool // remote home: collection on a separate storage root
 }
 
 func newHarness(t *testing.T, nodeID, ingesterID, vaultID glid.GLID, route *routing.Route, opts harnessOpts) *harness {
@@ -108,6 +117,15 @@ func newHarness(t *testing.T, nodeID, ingesterID, vaultID glid.GLID, route *rout
 		vaultID:    vaultID,
 		vaultRoot:  vaultRoot,
 		pub:        &recordingPublisher{},
+	}
+
+	if opts.withCollection {
+		if opts.localHolder {
+			t.Fatal("withCollection and localHolder are mutually exclusive in flow tests")
+		}
+		h.homeRoot = t.TempDir()
+		h.receipts = &flowCollectionReceipts{}
+		h.colDone = make(chan struct{})
 	}
 
 	segMgr, completed := segmentation.New(segmentation.Config{
@@ -164,6 +182,22 @@ func newHarness(t *testing.T, nodeID, ingesterID, vaultID glid.GLID, route *rout
 		close(h.distDone)
 	}()
 
+	if opts.withCollection {
+		colMgr := collection.New(collection.Config{PollInterval: 10 * time.Millisecond})
+		if err := colMgr.RegisterVault(vaultID, h.homeRoot, collection.VaultConfig{
+			Log:      &publishedLog{pub: h.pub, vaultID: vaultID},
+			Pull:     &flowDistributionPull{dist: distMgr},
+			Receipts: h.receipts,
+		}); err != nil {
+			t.Fatalf("RegisterVault collection: %v", err)
+		}
+		h.collect = colMgr
+		go func() {
+			_ = h.collect.Run(ctx)
+			close(h.colDone)
+		}()
+	}
+
 	go func() {
 		defer close(routingIn)
 		for out := range digestOut {
@@ -188,6 +222,9 @@ func newHarness(t *testing.T, nodeID, ingesterID, vaultID glid.GLID, route *rout
 		cancel()
 		<-h.segDone
 		<-h.distDone
+		if h.colDone != nil {
+			<-h.colDone
+		}
 	})
 
 	return h
@@ -232,16 +269,31 @@ func (h *harness) waitPublished(t *testing.T, want int) {
 	t.Fatalf("published %d segments, want >= %d", h.pub.count(), want)
 }
 
+func (h *harness) waitCollected(t *testing.T, want int) {
+	t.Helper()
+	if h.receipts == nil {
+		t.Fatal("harness has no collection")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if h.receipts.receiptCount() >= want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("collected %d segments, want >= %d", h.receipts.receiptCount(), want)
+}
+
 func (h *harness) readCompletedRecords(t *testing.T) []record.Record {
 	t.Helper()
-	entries, err := os.ReadDir(filepath.Join(h.vaultRoot, "completed"))
+	entries, err := os.ReadDir(paths.CompletedDir(h.vaultRoot))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(entries) != 1 {
 		t.Fatalf("completed segments = %d, want 1", len(entries))
 	}
-	path := filepath.Join(h.vaultRoot, "completed", entries[0].Name())
+	path := filepath.Join(paths.CompletedDir(h.vaultRoot), entries[0].Name())
 	sf, err := segment.Open(path)
 	if err != nil {
 		t.Fatal(err)
@@ -258,7 +310,7 @@ func (h *harness) waitCompletedEmpty(t *testing.T) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		entries, err := os.ReadDir(filepath.Join(h.vaultRoot, "completed"))
+		entries, err := os.ReadDir(paths.CompletedDir(h.vaultRoot))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -272,14 +324,14 @@ func (h *harness) waitCompletedEmpty(t *testing.T) {
 
 func (h *harness) readWorkingRecords(t *testing.T) []record.Record {
 	t.Helper()
-	entries, err := os.ReadDir(filepath.Join(h.vaultRoot, "working"))
+	entries, err := os.ReadDir(paths.WorkingDir(h.vaultRoot))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(entries) != 1 {
 		t.Fatalf("working segments = %d, want 1", len(entries))
 	}
-	path := filepath.Join(h.vaultRoot, "working", entries[0].Name())
+	path := filepath.Join(paths.WorkingDir(h.vaultRoot), entries[0].Name())
 	sf, err := segment.Open(path)
 	if err != nil {
 		t.Fatal(err)
@@ -379,7 +431,7 @@ func TestPipelineIngestToDistribution(t *testing.T) {
 		t.Fatalf("published metadata = %+v", meta)
 	}
 
-	path := filepath.Join(h.vaultRoot, "completed", meta.SegmentID.String())
+	path := paths.CompletedSegment(h.vaultRoot, meta.SegmentID)
 	sf, err := segment.Open(path)
 	if err != nil {
 		t.Fatal(err)
@@ -435,13 +487,126 @@ func TestPipelineIngestToDistributionLocalHolder(t *testing.T) {
 		t.Fatalf("published %d segments", h.pub.count())
 	}
 
-	headEntries, err := os.ReadDir(filepath.Join(h.vaultRoot, "head"))
+	headEntries, err := os.ReadDir(paths.HeadDir(h.vaultRoot))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(headEntries) < 1 {
 		t.Fatalf("head segments = %d, want >= 1", len(headEntries))
 	}
+}
+
+func TestPipelineFullPath(t *testing.T) {
+	nodeID := glid.New()
+	ingesterID := glid.New()
+	vaultID := glid.New()
+
+	route, err := routing.CompileRoute(glid.New(), "all", 0, "*", []glid.GLID{vaultID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h := newHarness(t, nodeID, ingesterID, vaultID, route, harnessOpts{
+		closePolicy:    segmentation.ClosePolicy{MaxBytes: 256},
+		withCollection: true,
+	})
+	msgs := make([]ingestion.IngesterMessage, 8)
+	for i := range msgs {
+		msgs[i] = ingestion.IngesterMessage{
+			Raw:   []byte("full path payload"),
+			Attrs: map[string]string{"env": "prod"},
+		}
+	}
+	h.runIngester(t, &emitIngester{msgs: msgs})
+
+	h.waitSyncs(t, 8)
+	h.waitPublished(t, 1)
+
+	want := h.pub.count()
+	h.waitCollected(t, want)
+
+	meta := h.pub.first()
+	if meta.RecordCount == 0 {
+		t.Fatalf("published metadata = %+v", meta)
+	}
+
+	originPath := paths.CompletedSegment(h.vaultRoot, meta.SegmentID)
+	if _, err := os.Stat(originPath); err != nil {
+		t.Fatalf("origin completed segment: %v", err)
+	}
+
+	headPath := paths.HeadSegment(h.homeRoot, meta.SegmentID)
+	sf, err := segment.Open(headPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := sf.ReadAll()
+	_ = sf.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) == 0 {
+		t.Fatal("collected head segment has no records")
+	}
+	if !bytes.Contains(got[0].Raw, []byte("full path payload")) {
+		t.Fatalf("payload = %q", got[0].Raw)
+	}
+	if h.receipts.receiptCount() != want {
+		t.Fatalf("receipts = %d, want %d (published segments)", h.receipts.receiptCount(), want)
+	}
+}
+
+// publishedLog implements collection.LogReader from distribution publish metadata.
+type publishedLog struct {
+	pub     *recordingPublisher
+	vaultID glid.GLID
+}
+
+func (l *publishedLog) Roll(_ context.Context, vaultID glid.GLID) ([]collection.AssignedSegment, error) {
+	if vaultID != l.vaultID {
+		return nil, nil
+	}
+	l.pub.mu.Lock()
+	defer l.pub.mu.Unlock()
+	out := make([]collection.AssignedSegment, len(l.pub.published))
+	for i, meta := range l.pub.published {
+		out[i] = collection.AssignedSegment{
+			VaultID:   meta.VaultID,
+			SegmentID: meta.SegmentID,
+			Checksum:  meta.Checksum,
+		}
+	}
+	return out, nil
+}
+
+type flowCollectionReceipts struct {
+	mu sync.Mutex
+	n  int
+}
+
+func (r *flowCollectionReceipts) CommitHolderReceipt(_ context.Context, _ glid.GLID, _ glid.GLID) error {
+	r.mu.Lock()
+	r.n++
+	r.mu.Unlock()
+	return nil
+}
+
+func (r *flowCollectionReceipts) receiptCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.n
+}
+
+type flowDistributionPull struct {
+	dist *distribution.Manager
+}
+
+func (p *flowDistributionPull) Pull(_ context.Context, vaultID, segmentID glid.GLID, dest io.Writer) error {
+	return p.dist.ServePull(distribution.PullRequest{
+		VaultID:   vaultID,
+		SegmentID: segmentID,
+		Dest:      dest,
+	})
 }
 
 func TestPipelineFanOutTwoVaults(t *testing.T) {
@@ -531,14 +696,14 @@ func TestPipelineFanOutTwoVaults(t *testing.T) {
 	}
 
 	for _, root := range []string{rootA, rootB} {
-		entries, err := os.ReadDir(filepath.Join(root, "working"))
+		entries, err := os.ReadDir(paths.WorkingDir(root))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if len(entries) != 1 {
 			t.Fatalf("%s: working segments = %d", root, len(entries))
 		}
-		path := filepath.Join(root, "working", entries[0].Name())
+		path := filepath.Join(paths.WorkingDir(root), entries[0].Name())
 		sf, err := segment.Open(path)
 		if err != nil {
 			t.Fatal(err)
@@ -579,14 +744,14 @@ func TestPipelineUnmatchedNotWritten(t *testing.T) {
 		t.Fatalf("unexpected fsync count = %d", h.syncs.Load())
 	}
 
-	entries, err := os.ReadDir(filepath.Join(h.vaultRoot, "working"))
+	entries, err := os.ReadDir(paths.WorkingDir(h.vaultRoot))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(entries) != 1 {
 		t.Fatalf("working segments = %d", len(entries))
 	}
-	path := filepath.Join(h.vaultRoot, "working", entries[0].Name())
+	path := filepath.Join(paths.WorkingDir(h.vaultRoot), entries[0].Name())
 	sf, err := segment.Open(path)
 	if err != nil {
 		t.Fatal(err)

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"os"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"gastrolog/internal/pipeline/distribution"
 	"gastrolog/internal/pipeline/segment"
 	"gastrolog/internal/pipeline/segmentation"
+	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/record"
 )
 
@@ -45,12 +45,11 @@ func (p *recordingPublisher) last() distribution.Metadata {
 
 func writeCompletedSegment(t *testing.T, vaultRoot string, vaultID glid.GLID, raw string) segmentation.CompletedSegment {
 	t.Helper()
-	completedDir := filepath.Join(vaultRoot, "completed")
-	if err := os.MkdirAll(completedDir, 0o750); err != nil {
+	if err := paths.EnsureSegmentationDirs(vaultRoot); err != nil {
 		t.Fatal(err)
 	}
 	segID := glid.New()
-	path := filepath.Join(completedDir, segID.String())
+	path := paths.CompletedSegment(vaultRoot, segID)
 
 	sf, err := segment.Create(path, segment.Meta{ID: segID, VaultID: vaultID})
 	if err != nil {
@@ -178,7 +177,7 @@ func TestLocalHolderPromotesToHead(t *testing.T) {
 	if _, err := os.Stat(seg.Path); !os.IsNotExist(err) {
 		t.Fatal("completed path should be empty after local promote")
 	}
-	headPath := filepath.Join(root, "head", seg.Meta.ID.String())
+	headPath := paths.HeadSegment(root, seg.Meta.ID)
 	if _, err := os.Stat(headPath); err != nil {
 		t.Fatalf("head file: %v", err)
 	}
