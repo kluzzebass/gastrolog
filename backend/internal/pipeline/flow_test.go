@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/pipeline/collection"
 	"gastrolog/internal/pipeline/digestion"
 	"gastrolog/internal/pipeline/distribution"
@@ -93,6 +94,14 @@ func (p *recordingPublisher) first() distribution.Metadata {
 		return distribution.Metadata{}
 	}
 	return p.published[0]
+}
+
+func (p *recordingPublisher) all() []distribution.Metadata {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]distribution.Metadata, len(p.published))
+	copy(out, p.published)
+	return out
 }
 
 type harnessOpts struct {
@@ -269,6 +278,23 @@ func (h *harness) waitPublished(t *testing.T, want int) {
 	t.Fatalf("published %d segments, want >= %d", h.pub.count(), want)
 }
 
+func (h *harness) waitPublishedStable(t *testing.T, min int) []distribution.Metadata {
+	t.Helper()
+	h.waitPublished(t, min)
+	deadline := time.Now().Add(2 * time.Second)
+	var last int
+	for time.Now().Before(deadline) {
+		n := h.pub.count()
+		if n >= min && n == last {
+			return h.pub.all()
+		}
+		last = n
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("published count did not stabilize at >= %d (last %d)", min, last)
+	return nil
+}
+
 func (h *harness) waitCollected(t *testing.T, want int) {
 	t.Helper()
 	if h.receipts == nil {
@@ -276,12 +302,16 @@ func (h *harness) waitCollected(t *testing.T, want int) {
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if h.receipts.receiptCount() >= want {
+		n := h.receipts.receiptCount()
+		if n == want {
 			return
+		}
+		if n > want {
+			t.Fatalf("collected %d segments, want %d", n, want)
 		}
 		time.Sleep(time.Millisecond)
 	}
-	t.Fatalf("collected %d segments, want >= %d", h.receipts.receiptCount(), want)
+	t.Fatalf("collected %d segments, want %d", h.receipts.receiptCount(), want)
 }
 
 func (h *harness) readCompletedRecords(t *testing.T) []record.Record {
@@ -497,6 +527,8 @@ func TestPipelineIngestToDistributionLocalHolder(t *testing.T) {
 }
 
 func TestPipelineFullPath(t *testing.T) {
+	// Ingestion → digestion → routing → segmentation → distribution →
+	// collection (remote home) → chunking k-way merge over head spans.
 	nodeID := glid.New()
 	ingesterID := glid.New()
 	vaultID := glid.New()
@@ -520,12 +552,10 @@ func TestPipelineFullPath(t *testing.T) {
 	h.runIngester(t, &emitIngester{msgs: msgs})
 
 	h.waitSyncs(t, 8)
-	h.waitPublished(t, 1)
+	published := h.waitPublishedStable(t, 1)
+	h.waitCollected(t, len(published))
 
-	want := h.pub.count()
-	h.waitCollected(t, want)
-
-	meta := h.pub.first()
+	meta := published[0]
 	if meta.RecordCount == 0 {
 		t.Fatalf("published metadata = %+v", meta)
 	}
@@ -551,9 +581,51 @@ func TestPipelineFullPath(t *testing.T) {
 	if !bytes.Contains(got[0].Raw, []byte("full path payload")) {
 		t.Fatalf("payload = %q", got[0].Raw)
 	}
-	if h.receipts.receiptCount() != want {
-		t.Fatalf("receipts = %d, want %d (published segments)", h.receipts.receiptCount(), want)
+	if h.receipts.receiptCount() != len(published) {
+		t.Fatalf("receipts = %d, want %d (published segments)", h.receipts.receiptCount(), len(published))
 	}
+
+	merged := mergePublishedHead(t, h.homeRoot, published)
+	if len(merged) == 0 {
+		t.Fatal("merge produced no records")
+	}
+	if !chunking.IsSortedByEventID(merged) {
+		t.Fatal("merge not sorted by EventID")
+	}
+	var totalRecords uint32
+	for _, meta := range published {
+		totalRecords += meta.RecordCount
+	}
+	if uint32(len(merged)) != totalRecords {
+		t.Fatalf("merged %d records, want %d", len(merged), totalRecords)
+	}
+	for _, rec := range merged {
+		if !bytes.Contains(rec.Raw, []byte("full path payload")) {
+			t.Fatalf("merged payload = %q", rec.Raw)
+		}
+	}
+}
+
+// mergePublishedHead k-way merges head segments using full spans derived from
+// published metadata. Stand-in for vault-ctl chunk plan until plan algorithm lands.
+func mergePublishedHead(t *testing.T, homeRoot string, published []distribution.Metadata) []record.Record {
+	t.Helper()
+	refs := make([]chunking.SpanRef, 0, len(published))
+	for _, meta := range published {
+		refs = append(refs, chunking.SpanRef{
+			Path: paths.HeadSegment(homeRoot, meta.SegmentID),
+			Span: chunking.Span{
+				SegmentID: meta.SegmentID,
+				Start:     0,
+				Count:     meta.RecordCount,
+			},
+		})
+	}
+	merged, err := chunking.MergeRecords(refs)
+	if err != nil {
+		t.Fatalf("MergeRecords: %v", err)
+	}
+	return merged
 }
 
 // publishedLog implements collection.LogReader from distribution publish metadata.
