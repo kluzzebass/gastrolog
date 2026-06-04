@@ -50,7 +50,7 @@ func writeSegment(t *testing.T, segID, vaultID glid.GLID, recs []record.Record) 
 	if err := sf.Sync(); err != nil {
 		t.Fatal(err)
 	}
-	if err := sf.MarkComplete(); err != nil {
+	if err := sf.Finalize(); err != nil {
 		t.Fatal(err)
 	}
 	if err := sf.Close(); err != nil {

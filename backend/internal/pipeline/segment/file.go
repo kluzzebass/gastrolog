@@ -148,16 +148,16 @@ func (sf *File) Close() error {
 	return sf.f.Close()
 }
 
-// ReadAll decodes every valid record frame in the segment.
+// ReadAll decodes every valid record frame in the segment record region.
 func (sf *File) ReadAll() ([]record.Record, error) {
-	validEnd, err := sf.validDataEnd()
+	recEnd, err := sf.recordsEnd()
 	if err != nil {
 		return nil, err
 	}
 	var out []record.Record
 	off := uint32(HeaderSize)
-	for off < validEnd {
-		rec, n, err := readFrameAt(sf.f, int64(off), validEnd-off)
+	for off < recEnd {
+		rec, n, err := readFrameAt(sf.f, int64(off), recEnd-off)
 		if err != nil {
 			return nil, err
 		}
@@ -228,6 +228,10 @@ func (sf *File) frameAt(off uint32) (record.Record, uint32, error) {
 // picks up header lag (frame written before header rewrite). If the anchor
 // frame is bad, fall back to scanning from the front.
 func (sf *File) reconcileOnOpen() error {
+	if sf.hdr.IndexOffset > 0 {
+		return sf.verifyIndexedLayout()
+	}
+
 	info, err := sf.f.Stat()
 	if err != nil {
 		return err
@@ -326,11 +330,14 @@ func (sf *File) checksumOver(validEnd uint32) (uint32, error) {
 }
 
 func (sf *File) verifyChecksum() error {
-	validEnd, err := sf.validDataEnd()
+	recEnd, err := sf.recordsEnd()
 	if err != nil {
 		return err
 	}
-	sum, err := sf.checksumOver(validEnd)
+	if sf.hdr.IndexOffset > 0 {
+		return sf.verifyIndexedLayout()
+	}
+	sum, err := sf.checksumOver(recEnd)
 	if err != nil {
 		return err
 	}

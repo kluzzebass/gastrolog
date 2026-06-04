@@ -19,10 +19,12 @@ const (
 	headerDataEndOff     = headerRecordCountOff + format.SizeU32
 	headerFirstIngestOff = headerDataEndOff + format.SizeU32
 	headerLastIngestOff  = headerFirstIngestOff + format.SizeU64
-	headerChecksumOff    = headerLastIngestOff + format.SizeU64
+	headerIndexOffOff    = headerLastIngestOff + format.SizeU64
+	headerChecksumOff    = headerIndexOffOff + format.SizeU32
+	headerIndexCRCOff    = headerChecksumOff + format.SizeU32
 
 	// HeaderSize is the fixed on-disk segment header length (version 1).
-	HeaderSize = headerChecksumOff + format.SizeU32
+	HeaderSize = headerIndexCRCOff + format.SizeU32
 
 	// FlagComplete marks a segment that has been renamed to completed/.
 	FlagComplete = format.FlagComplete
@@ -41,8 +43,7 @@ type Meta struct {
 }
 
 // Header is the decoded fixed segment header (inspectable without scanning records).
-// Merge bounds use IngestTS only; full EventID order lives in each frame and in the
-// per-segment btree index (design-notes §36).
+// Merge bounds use IngestTS only; full EventID order lives in the index tail (see index.go).
 type Header struct {
 	format.Header
 	ID              glid.GLID
@@ -51,7 +52,9 @@ type Header struct {
 	DataEnd         uint32 // byte offset where the last written record starts
 	FirstIngestTS   time.Time
 	LastIngestTS    time.Time
-	SegmentChecksum uint32 // CRC32(IEEE) of bytes [HeaderSize:validEnd), validEnd = end of frame at DataEnd
+	IndexOffset     uint32 // byte offset where the EventID index starts; 0 while working
+	SegmentChecksum uint32 // CRC32(IEEE) of record bytes [HeaderSize:IndexOffset)
+	IndexChecksum   uint32 // CRC32(IEEE) of index bytes [IndexOffset:IndexOffset+RecordCount*IndexEntrySize)
 }
 
 func encodeHeader(h Header, buf []byte) {
@@ -64,7 +67,9 @@ func encodeHeader(h Header, buf []byte) {
 	binary.LittleEndian.PutUint32(buf[headerDataEndOff:], h.DataEnd)
 	binary.LittleEndian.PutUint64(buf[headerFirstIngestOff:], tsNanos(h.FirstIngestTS))
 	binary.LittleEndian.PutUint64(buf[headerLastIngestOff:], tsNanos(h.LastIngestTS))
+	binary.LittleEndian.PutUint32(buf[headerIndexOffOff:], h.IndexOffset)
 	binary.LittleEndian.PutUint32(buf[headerChecksumOff:], h.SegmentChecksum)
+	binary.LittleEndian.PutUint32(buf[headerIndexCRCOff:], h.IndexChecksum)
 }
 
 func decodeHeader(buf []byte) (Header, error) {
@@ -83,7 +88,9 @@ func decodeHeader(buf []byte) (Header, error) {
 	hdr.DataEnd = binary.LittleEndian.Uint32(buf[headerDataEndOff:])
 	hdr.FirstIngestTS = tsFromNanos(binary.LittleEndian.Uint64(buf[headerFirstIngestOff:]))
 	hdr.LastIngestTS = tsFromNanos(binary.LittleEndian.Uint64(buf[headerLastIngestOff:]))
+	hdr.IndexOffset = binary.LittleEndian.Uint32(buf[headerIndexOffOff:])
 	hdr.SegmentChecksum = binary.LittleEndian.Uint32(buf[headerChecksumOff:])
+	hdr.IndexChecksum = binary.LittleEndian.Uint32(buf[headerIndexCRCOff:])
 	return hdr, nil
 }
 

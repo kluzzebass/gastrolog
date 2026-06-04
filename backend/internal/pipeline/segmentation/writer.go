@@ -231,7 +231,7 @@ func (w *vaultWriter) closeSegmentLocked() error {
 	if err := w.seg.Sync(); err != nil {
 		return err
 	}
-	if err := w.seg.MarkComplete(); err != nil {
+	if err := w.seg.Finalize(); err != nil {
 		return err
 	}
 	hdr := w.seg.Header()

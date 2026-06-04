@@ -74,7 +74,7 @@ func writeCompletedSegment(t *testing.T, vaultRoot string, vaultID glid.GLID, ra
 	if err := sf.Sync(); err != nil {
 		t.Fatal(err)
 	}
-	if err := sf.MarkComplete(); err != nil {
+	if err := sf.Finalize(); err != nil {
 		t.Fatal(err)
 	}
 	hdr := sf.Header()

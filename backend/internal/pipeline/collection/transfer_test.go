@@ -43,7 +43,7 @@ func writeSegmentBytes(t *testing.T, vaultID, segID glid.GLID, raw string) []byt
 	if err := sf.Sync(); err != nil {
 		t.Fatal(err)
 	}
-	if err := sf.MarkComplete(); err != nil {
+	if err := sf.Finalize(); err != nil {
 		t.Fatal(err)
 	}
 	if err := sf.Close(); err != nil {

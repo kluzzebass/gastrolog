@@ -189,6 +189,9 @@ func TestManagerClosesOnSize(t *testing.T) {
 		if sf.Header().RecordCount == 0 {
 			t.Fatal("completed segment has no records")
 		}
+		if sf.Header().IndexOffset == 0 {
+			t.Fatal("completed segment missing EventID index")
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for completed segment")
 	}
