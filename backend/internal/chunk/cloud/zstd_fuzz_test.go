@@ -4,7 +4,7 @@ import "testing"
 
 // FuzzDecodeDictFromBuf verifies that decodeDictFromBuf never panics on
 // arbitrary byte buffers with arbitrary entry counts. This function parses
-// the string dictionary section of a cloud blob header.
+// the string dictionary section of a GLCB blob.
 func FuzzDecodeDictFromBuf(f *testing.F) {
 	f.Add([]byte{}, uint32(0))
 	f.Add([]byte{}, uint32(1))

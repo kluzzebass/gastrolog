@@ -118,7 +118,9 @@ func tsFromNanos(n uint64) time.Time {
 	return time.Unix(0, int64(n)).UTC() //nolint:gosec // G115: nanosecond timestamps are always positive in practice
 }
 
-// BlobMeta holds the metadata decoded from a cloud blob header.
+// BlobMeta holds metadata decoded from a GLCB: the front layout block
+// (IDs, bounds, record/dict/index offsets) plus TS index locations from
+// the TOC tail.
 type BlobMeta struct {
 	ChunkID     chunk.ChunkID
 	VaultID     glid.GLID
@@ -131,10 +133,10 @@ type BlobMeta struct {
 	SourceStart time.Time // zero = no source timestamps
 	SourceEnd   time.Time
 
-	// TOC fields — populated for v2 blobs with embedded TS indexes.
-	IngestIdxOffset int64 // byte offset from blob start (0 = none)
+	// TS index section locations from the TOC tail (0 = section absent).
+	IngestIdxOffset int64 // byte offset from blob start
 	IngestIdxSize   int64
-	SourceIdxOffset int64 // byte offset from blob start (0 = none)
+	SourceIdxOffset int64 // byte offset from blob start
 	SourceIdxSize   int64
 }
 
@@ -143,8 +145,7 @@ type BlobMeta struct {
 //
 // Convenience fields (IngestIdxOffset / SourceIdxSize / etc.) are populated
 // from Entries during parse for the common section magics (ITSI, STSI).
-// Callers that need to read sections introduced after this commit should
-// look them up via Entries directly.
+// Callers that need other section types should look them up via Entries.
 type BlobTOC struct {
 	Entries    []TOCEntry
 	BlobDigest [32]byte

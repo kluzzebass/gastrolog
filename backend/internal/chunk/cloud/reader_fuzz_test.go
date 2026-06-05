@@ -11,7 +11,7 @@ func FuzzNewReader(f *testing.F) {
 	// Seed corpus: empty, tiny, header-sized, and slightly larger blobs.
 	f.Add([]byte{})
 	f.Add(make([]byte, 4))
-	f.Add(make([]byte, 96))
+	f.Add(make([]byte, headerSize))
 	f.Add(make([]byte, 256))
 
 	// A plausible but still invalid header (correct signature + type + version).
