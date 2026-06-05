@@ -13,59 +13,18 @@
 //
 //	Layout (offsets are absolute from the start of the file):
 //
-//	  Header (96 bytes):
-//	    [signature:1]      0x69 ('i') — common header
-//	    [type:1]           0x67 ('g') — chunk blob
-//	    [version:1]        format version (0x01)
-//	    [flags:1]          reserved
-//	    [chunkID:16]       raw UUIDv7 bytes
-//	    [vaultID:16]       raw UUID bytes
-//	    [recordCount:u32]  total records
-//	    [writeStart:i64]   min WriteTS (nanos)
-//	    [writeEnd:i64]     max WriteTS (nanos)
-//	    [ingestStart:i64]  min IngestTS (nanos)
-//	    [ingestEnd:i64]    max IngestTS (nanos)
-//	    [sourceStart:i64]  min SourceTS, 0 = none (nanos)
-//	    [sourceEnd:i64]    max SourceTS, 0 = none (nanos)
-//	    [dictEntries:u32]  string dictionary size
-//	    [dictSize:u32]     total bytes of dictionary section
+//	  Preamble (4 bytes): common header, version 0x01
+//	  Layout metadata (128 bytes, fixed offset 4): IDs, bounds, section offsets
+//	  Records section: [frameLen:u32][frame] × recordCount
+//	  Dictionary: [len:u16][bytes] × dictEntries
+//	  Record index: recordCount × 12 bytes
+//	  TS indexes, TOC entries, 44-byte footer (magic "GTOC")
 //
-//	  Dictionary (dictSize bytes):
-//	    [len:u16][bytes] × dictEntries
+//	Write order during build: records stream to a staging file; finalize
+//	writes the fixed prefix, copies records, then appends variable sections.
 //
-//	  Record Index (recordCount × 12 bytes):
-//	    [offset:u64]       byte offset into the records section
-//	                       (relative to the records section start)
-//	    [size:u32]         frame body size (excluding the u32 frameLen
-//	                       prefix that precedes it on disk)
-//
-//	  Records section (uncompressed, frame-after-frame):
-//	    [frameLen:u32][frame bytes] × recordCount
-//
-//	TS indexes (after the records section):
-//	  IngestTS Index: [tsNano:i64][pos:u32] × recordCount, sorted by ts
-//	  SourceTS Index: [tsNano:i64][pos:u32] × N (excludes zero-TS records), sorted by ts
-//
-//	TOC entries (42 bytes each, one per section pointed to from the TOC):
-//	    [type:u8]           section type byte from format.Type
-//	                        (e.g. format.TypeIngestIndex = 'I')
-//	    [version:u8]        per-section version
-//	    [offset:u32]        byte offset from blob start
-//	    [size:u32]          byte count
-//	    [hash:32]           SHA-256 of the section's bytes
-//
-//	TOC footer (44 bytes, at the very end of the blob):
-//	    [entryCount:u32]    number of entries above
-//	    [blobDigest:32]     SHA-256 of bytes [0, fileSize - footerSize)
-//	                        — every byte of the blob except this footer
-//	    [footerVersion:u32] footer schema version
-//	    [magic:4]           "GTOC"
-//
-//	Read protocol: read the last 44 bytes as the footer, validate the
-//	magic, then read entryCount × 42 bytes immediately preceding the
-//	footer to recover all section pointers + hashes. The blob digest
-//	covers everything from the start of the file through the last
-//	entry — readers verifying integrity hash that range and compare.
+//	Read protocol: preamble + layout at bytes 0–131, then ReadAt using
+//	offsets from layout; TOC tail supplies TS index locations and digest.
 //
 // Record frame encoding (each frame's bytes, NOT including the u32
 // frameLen prefix that precedes it in the records section):
@@ -101,7 +60,6 @@ const BlobFilename = "data.glcb"
 
 const (
 	formatVersion = 0x01
-	headerSize    = 96 // fixed header before dictionary
 
 	// Record index entry: byte offset (u64) + frame size (u32).
 	indexEntrySize = 12

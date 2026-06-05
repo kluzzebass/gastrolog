@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"gastrolog/internal/chunk"
+	chunkcloud "gastrolog/internal/chunk/cloud"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/pipeline/collection"
@@ -604,12 +606,38 @@ func TestPipelineFullPath(t *testing.T) {
 			t.Fatalf("merged payload = %q", rec.Raw)
 		}
 	}
+
+	refs := publishedHeadRefs(h.homeRoot, published)
+	glcbPath := filepath.Join(t.TempDir(), chunkcloud.BlobFilename)
+	glcbResult, err := chunking.BuildGLCBFile(glcbPath, chunking.BuildGLCBInput{
+		ChunkID: chunk.NewChunkID(),
+		VaultID: vaultID,
+		Refs:    refs,
+	})
+	if err != nil {
+		t.Fatalf("BuildGLCBFile: %v", err)
+	}
+	if glcbResult.RecordCount != totalRecords {
+		t.Fatalf("GLCB record count = %d, want %d", glcbResult.RecordCount, totalRecords)
+	}
+	f, err := os.Open(glcbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	rd, err := chunkcloud.NewCacheReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rd.Close()
+	for i := range totalRecords {
+		if _, err := rd.ReadRecord(i); err != nil {
+			t.Fatalf("ReadRecord(%d): %v", i, err)
+		}
+	}
 }
 
-// mergePublishedHead k-way merges head segments using full spans derived from
-// published metadata. Stand-in for vault-ctl chunk plan until plan algorithm lands.
-func mergePublishedHead(t *testing.T, homeRoot string, published []distribution.Metadata) []record.Record {
-	t.Helper()
+func publishedHeadRefs(homeRoot string, published []distribution.Metadata) []chunking.SpanRef {
 	refs := make([]chunking.SpanRef, 0, len(published))
 	for _, meta := range published {
 		refs = append(refs, chunking.SpanRef{
@@ -621,7 +649,14 @@ func mergePublishedHead(t *testing.T, homeRoot string, published []distribution.
 			},
 		})
 	}
-	merged, err := chunking.MergeRecords(refs)
+	return refs
+}
+
+// mergePublishedHead k-way merges head segments using full spans derived from
+// published metadata. Stand-in for vault-ctl chunk plan until plan algorithm lands.
+func mergePublishedHead(t *testing.T, homeRoot string, published []distribution.Metadata) []record.Record {
+	t.Helper()
+	merged, err := chunking.MergeRecords(publishedHeadRefs(homeRoot, published))
 	if err != nil {
 		t.Fatalf("MergeRecords: %v", err)
 	}

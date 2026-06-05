@@ -35,40 +35,40 @@ func NewCacheReader(f *os.File) (*Reader, error) {
 	return rd, nil
 }
 
-// NewReader opens a GLCB from a local file. Used for local-only vaults
-// (the file is the canonical sealed chunk on disk) and for cloud-backed
-// vaults after a cloud download has unwrapped the zstd transport layer
-// and produced a plain GLCB.
+// NewReader opens a GLCB from a local file.
 func NewReader(f *os.File) (*Reader, error) {
-	// --- Header ---
-	var hdr [headerSize]byte
-	if _, err := io.ReadFull(f, hdr[:]); err != nil {
-		return nil, fmt.Errorf("read header: %w", err)
+	var pre [preambleSize]byte
+	if _, err := io.ReadFull(f, pre[:]); err != nil {
+		return nil, fmt.Errorf("read preamble: %w", err)
 	}
-	if _, err := format.DecodeAndValidate(hdr[:format.HeaderSize], format.TypeCloudBlob, formatVersion); err != nil {
-		return nil, fmt.Errorf("GLCB header: %w", err)
+	if _, err := format.DecodeAndValidate(pre[:], format.TypeCloudBlob, formatVersion); err != nil {
+		return nil, fmt.Errorf("GLCB preamble: %w", err)
 	}
 
-	meta, dictEntries := decodeHeaderCommon(hdr[:])
-	dictSize := binary.LittleEndian.Uint32(hdr[92:96])
-
-	// --- Dictionary ---
-	dictBuf := make([]byte, dictSize)
-	if _, err := io.ReadFull(f, dictBuf); err != nil {
-		return nil, fmt.Errorf("read dict: %w", err)
+	layoutBuf := make([]byte, layoutMetaSize)
+	if _, err := f.ReadAt(layoutBuf, preambleSize); err != nil {
+		return nil, fmt.Errorf("read layout meta: %w", err)
 	}
-	dict, err := decodeDictFromBuf(dictBuf, dictEntries)
+	layout, err := decodeBlobLayoutMeta(layoutBuf)
 	if err != nil {
 		return nil, err
 	}
 
-	// --- Record Index ---
-	indexBuf := make([]byte, int(meta.RecordCount)*indexEntrySize)
-	if _, err := io.ReadFull(f, indexBuf); err != nil {
+	dictBuf := make([]byte, layout.DictSize)
+	if _, err := f.ReadAt(dictBuf, int64(layout.DictOff)); err != nil {
+		return nil, fmt.Errorf("read dict: %w", err)
+	}
+	dict, err := decodeDictFromBuf(dictBuf, layout.DictEntries)
+	if err != nil {
+		return nil, err
+	}
+
+	indexBuf := make([]byte, layout.IndexSize)
+	if _, err := f.ReadAt(indexBuf, int64(layout.IndexOff)); err != nil {
 		return nil, fmt.Errorf("read index: %w", err)
 	}
-	index := make([]recordIndex, meta.RecordCount)
-	for i := range meta.RecordCount {
+	index := make([]recordIndex, layout.RecordCount)
+	for i := range layout.RecordCount {
 		off := int(i) * indexEntrySize
 		index[i] = recordIndex{
 			Offset: binary.LittleEndian.Uint64(indexBuf[off:]),
@@ -76,27 +76,20 @@ func NewReader(f *os.File) (*Reader, error) {
 		}
 	}
 
-	// --- Read TOC from end of blob to populate convenience offsets ---
-	recordsBaseOff := int64(headerSize) + int64(dictSize) + int64(meta.RecordCount)*int64(indexEntrySize)
 	fileInfo, err := f.Stat()
 	if err != nil {
 		return nil, fmt.Errorf("stat GLCB: %w", err)
 	}
-
 	toc, err := ReadTOC(f, fileInfo.Size())
 	if err != nil {
 		return nil, fmt.Errorf("read TOC: %w", err)
 	}
-	meta.IngestIdxOffset = toc.IngestIdxOffset
-	meta.IngestIdxSize = toc.IngestIdxSize
-	meta.SourceIdxOffset = toc.SourceIdxOffset
-	meta.SourceIdxSize = toc.SourceIdxSize
 
 	return &Reader{
-		meta:           meta,
+		meta:           layoutMetaToBlobMeta(layout, toc),
 		dict:           dict,
 		index:          index,
-		recordsBaseOff: recordsBaseOff,
+		recordsBaseOff: int64(layout.RecordsOff),
 		file:           f,
 	}, nil
 }
@@ -250,22 +243,6 @@ func (rd *Reader) Close() error {
 }
 
 // --- Shared helpers ---
-
-// decodeHeaderCommon parses the 96-byte header (after common header validation).
-func decodeHeaderCommon(hdr []byte) (BlobMeta, uint32) {
-	var meta BlobMeta
-	copy(meta.ChunkID[:], hdr[4:20])
-	copy(meta.VaultID[:], hdr[20:36])
-	meta.RecordCount = binary.LittleEndian.Uint32(hdr[36:40])
-	meta.WriteStart = tsFromNanos(binary.LittleEndian.Uint64(hdr[40:48]))
-	meta.WriteEnd = tsFromNanos(binary.LittleEndian.Uint64(hdr[48:56]))
-	meta.IngestStart = tsFromNanos(binary.LittleEndian.Uint64(hdr[56:64]))
-	meta.IngestEnd = tsFromNanos(binary.LittleEndian.Uint64(hdr[64:72]))
-	meta.SourceStart = tsFromNanos(binary.LittleEndian.Uint64(hdr[72:80]))
-	meta.SourceEnd = tsFromNanos(binary.LittleEndian.Uint64(hdr[80:88]))
-	dictEntries := binary.LittleEndian.Uint32(hdr[88:92])
-	return meta, dictEntries
-}
 
 // decodeDictFromBuf decodes dictionary entries from a byte buffer.
 func decodeDictFromBuf(buf []byte, dictEntries uint32) (*chunk.StringDict, error) {
