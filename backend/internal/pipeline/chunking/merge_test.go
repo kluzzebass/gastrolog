@@ -101,6 +101,34 @@ func TestBuildOrderedIndexSortsByEventID(t *testing.T) {
 	}
 }
 
+func TestBuildOrderedIndexRejectsUnindexedSegment(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	segID := glid.New()
+	vaultID := glid.New()
+	path := filepath.Join(t.TempDir(), segID.String())
+
+	sf, err := segment.Create(path, segment.Meta{ID: segID, VaultID: vaultID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := makeRecord(0, base, "x")
+	if err := sf.Append(&rec, time.Date(2024, 8, 1, 12, 1, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	if err := sf.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	if err := sf.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = chunking.BuildOrderedIndex(path)
+	if !errors.Is(err, segment.ErrNoIndex) {
+		t.Fatalf("BuildOrderedIndex() = %v, want ErrNoIndex", err)
+	}
+}
+
 func TestMergeSingleSegmentFullSpan(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)

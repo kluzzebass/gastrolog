@@ -3,8 +3,7 @@ package segment
 import (
 	"encoding/binary"
 	"errors"
-	"hash/crc32"
-	"slices"
+	"sort"
 	"syscall"
 
 	"gastrolog/internal/format"
@@ -63,24 +62,39 @@ func compareIndexEntries(a, b IndexEntry) int {
 	return 0
 }
 
-func sortIndexRegion(data []byte) error {
-	n := len(data) / IndexEntrySize
-	if n == 0 {
-		return nil
+type indexRegion struct {
+	data []byte
+}
+
+func (r indexRegion) Len() int {
+	return len(r.data) / IndexEntrySize
+}
+
+func (r indexRegion) Less(i, j int) bool {
+	ei, err := decodeIndexEntry(r.data[i*IndexEntrySize : (i+1)*IndexEntrySize])
+	if err != nil {
+		return false
 	}
-	entries := make([]IndexEntry, n)
-	for i := range n {
-		e, err := decodeIndexEntry(data[i*IndexEntrySize : (i+1)*IndexEntrySize])
-		if err != nil {
-			return err
-		}
-		entries[i] = e
+	ej, err := decodeIndexEntry(r.data[j*IndexEntrySize : (j+1)*IndexEntrySize])
+	if err != nil {
+		return false
 	}
-	slices.SortFunc(entries, compareIndexEntries)
-	for i := range entries {
-		encodeIndexEntry(data[i*IndexEntrySize:(i+1)*IndexEntrySize], entries[i])
+	return compareIndexEntries(ei, ej) < 0
+}
+
+func (r indexRegion) Swap(i, j int) {
+	ai := i * IndexEntrySize
+	aj := j * IndexEntrySize
+	for k := range IndexEntrySize {
+		r.data[ai+k], r.data[aj+k] = r.data[aj+k], r.data[ai+k]
 	}
-	return nil
+}
+
+func sortIndexRegion(data []byte) {
+	if len(data) == 0 {
+		return
+	}
+	sort.Sort(indexRegion{data: data})
 }
 
 // BuildIndex scans the record region, appends a sorted (EventID, filepos) tail,
@@ -127,9 +141,7 @@ func (sf *File) BuildIndex() error {
 	if err != nil {
 		return err
 	}
-	if err := sortIndexRegion(data[indexBase:newSize]); err != nil {
-		return err
-	}
+	sortIndexRegion(data[indexBase:newSize])
 	if err := syscall.Munmap(data); err != nil {
 		return err
 	}
@@ -141,9 +153,15 @@ func (sf *File) BuildIndex() error {
 
 	sf.hdr.IndexOffset = recordEnd
 	sf.hdr.IndexChecksum = sum
-	recSum, err := sf.checksumRange(HeaderSize, recordEnd)
-	if err != nil {
-		return err
+	var recSum uint32
+	if sf.recordCRC != nil {
+		recSum = sf.recordCRC.Sum32()
+	} else {
+		var err error
+		recSum, err = sf.initRecordCRC(recordEnd)
+		if err != nil {
+			return err
+		}
 	}
 	sf.hdr.SegmentChecksum = recSum
 	return sf.writeHeader()
@@ -159,24 +177,37 @@ func (sf *File) Finalize() error {
 	return sf.MarkComplete()
 }
 
-// RecordAtEventOrder returns the record at position pos in canonical EventID order.
-func (sf *File) RecordAtEventOrder(pos uint32) (record.Record, error) {
+// IndexEntryAt returns the index entry at position pos in EventID order.
+func (sf *File) IndexEntryAt(pos uint32) (IndexEntry, error) {
 	if sf.hdr.IndexOffset == 0 {
-		return record.Record{}, ErrNoIndex
+		return IndexEntry{}, ErrNoIndex
 	}
 	if pos >= sf.hdr.RecordCount {
-		return record.Record{}, ErrIndexBounds
+		return IndexEntry{}, ErrIndexBounds
 	}
-	entry, err := sf.readIndexEntry(pos)
-	if err != nil {
-		return record.Record{}, err
-	}
+	return sf.readIndexEntry(pos)
+}
+
+// ReadRecordAtFilePos decodes the record frame starting at filePos.
+func (sf *File) ReadRecordAtFilePos(filePos uint32) (record.Record, error) {
 	recEnd, err := sf.recordsEnd()
 	if err != nil {
 		return record.Record{}, err
 	}
-	rec, _, err := readFrameAt(sf.f, int64(entry.FilePos), recEnd-entry.FilePos)
+	if filePos < HeaderSize || filePos >= recEnd {
+		return record.Record{}, ErrFrameLength
+	}
+	rec, _, err := readFrameAt(sf.f, int64(filePos), recEnd-filePos)
 	return rec, err
+}
+
+// RecordAtEventOrder returns the record at position pos in canonical EventID order.
+func (sf *File) RecordAtEventOrder(pos uint32) (record.Record, error) {
+	entry, err := sf.IndexEntryAt(pos)
+	if err != nil {
+		return record.Record{}, err
+	}
+	return sf.ReadRecordAtFilePos(entry.FilePos)
 }
 
 func (sf *File) readIndexEntry(pos uint32) (IndexEntry, error) {
@@ -204,7 +235,7 @@ func (sf *File) verifyIndexedLayout() error {
 	if info.Size() < indexEnd {
 		return errors.New("segment index tail truncated")
 	}
-	recSum, err := sf.checksumRange(HeaderSize, sf.hdr.IndexOffset)
+	recSum, err := sf.initRecordCRC(sf.hdr.IndexOffset)
 	if err != nil {
 		return err
 	}
@@ -222,15 +253,7 @@ func (sf *File) verifyIndexedLayout() error {
 }
 
 func (sf *File) checksumRange(start, end uint32) (uint32, error) {
-	if end <= start {
-		return 0, nil
-	}
-	n := int64(end - start)
-	buf := make([]byte, n)
-	if _, err := sf.f.ReadAt(buf, int64(start)); err != nil {
-		return 0, err
-	}
-	return crc32.ChecksumIEEE(buf), nil
+	return crc32IEEEOver(sf.f, start, end)
 }
 
 func eventIDAtFrame(r interface {

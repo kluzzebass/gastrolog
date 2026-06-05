@@ -3,6 +3,7 @@ package segment
 import (
 	"encoding/binary"
 	"errors"
+	"hash"
 	"hash/crc32"
 	"io"
 	"os"
@@ -12,12 +13,15 @@ import (
 	"gastrolog/internal/record"
 )
 
+var errSegmentFinalized = errors.New("segment is finalized")
+
 // File is a durable V3 segment on disk. The fixed header is rewritten after
 // each append; record data follows the header as [frameLen:u32][frame body] frames.
 type File struct {
-	f      *os.File
-	hdr    Header
-	hdrBuf [HeaderSize]byte
+	f         *os.File
+	hdr       Header
+	hdrBuf    [HeaderSize]byte
+	recordCRC hash.Hash32 // rolling CRC32/IEEE over [HeaderSize:recordsEnd)
 }
 
 // Create initializes a new empty segment file at path.
@@ -33,6 +37,7 @@ func Create(path string, meta Meta) (*File, error) {
 			VaultID: meta.VaultID,
 			DataEnd: HeaderSize,
 		},
+		recordCRC: crc32.NewIEEE(),
 	}
 	if err := sf.writeHeader(); err != nil {
 		_ = f.Close()
@@ -91,6 +96,9 @@ func (sf *File) AppendFrame(rec *record.Record, _ time.Time, body []byte) error 
 	if rec == nil {
 		return errors.New("nil record")
 	}
+	if sf.hdr.IndexOffset > 0 {
+		return errSegmentFinalized
+	}
 
 	writeOff, err := sf.appendOffset()
 	if err != nil {
@@ -106,19 +114,20 @@ func (sf *File) AppendFrame(rec *record.Record, _ time.Time, body []byte) error 
 		return err
 	}
 
+	if sf.recordCRC == nil {
+		sf.recordCRC = crc32.NewIEEE()
+	}
+	if _, err := sf.recordCRC.Write(buf); err != nil {
+		return err
+	}
+
 	sf.hdr.RecordCount++
 	if sf.hdr.RecordCount == 1 {
 		sf.hdr.FirstIngestTS = rec.EventID.IngestTS
 	}
 	sf.hdr.LastIngestTS = rec.EventID.IngestTS
 	sf.hdr.DataEnd = writeOff
-
-	validEnd := writeOff + uint32(frameLen) //nolint:gosec // G115: segment size bounded in practice
-	sum, err := sf.checksumOver(validEnd)
-	if err != nil {
-		return err
-	}
-	sf.hdr.SegmentChecksum = sum
+	sf.hdr.SegmentChecksum = sf.recordCRC.Sum32()
 	return sf.writeHeader()
 }
 
@@ -258,7 +267,7 @@ func (sf *File) reconcileOnOpen() error {
 		sf.hdr.DataEnd = lastStart
 	}
 
-	sum, err := sf.checksumOver(validEnd)
+	sum, err := sf.initRecordCRC(validEnd)
 	if err != nil {
 		return err
 	}
@@ -317,31 +326,25 @@ func (sf *File) resyncFromFront(fileSize uint32) (validEnd, lastStart, count uin
 	return sf.scanForward(HeaderSize, fileSize, 0, time.Time{}, time.Time{})
 }
 
-func (sf *File) checksumOver(validEnd uint32) (uint32, error) {
-	if validEnd <= HeaderSize {
-		return 0, nil
+func (sf *File) initRecordCRC(recEnd uint32) (uint32, error) {
+	h := crc32.NewIEEE()
+	if recEnd > HeaderSize {
+		if err := crc32IEEEFeed(h, sf.f, HeaderSize, recEnd); err != nil {
+			return 0, err
+		}
 	}
-	n := int64(validEnd - HeaderSize)
-	buf := make([]byte, n)
-	if _, err := sf.f.ReadAt(buf, HeaderSize); err != nil {
-		return 0, err
-	}
-	return crc32.ChecksumIEEE(buf), nil
+	sf.recordCRC = h
+	return h.Sum32(), nil
 }
 
 func (sf *File) verifyChecksum() error {
-	recEnd, err := sf.recordsEnd()
-	if err != nil {
-		return err
-	}
 	if sf.hdr.IndexOffset > 0 {
-		return sf.verifyIndexedLayout()
+		return nil // verifyIndexedLayout in reconcileOnOpen already checked both regions.
 	}
-	sum, err := sf.checksumOver(recEnd)
-	if err != nil {
-		return err
+	if sf.recordCRC == nil {
+		return errors.New("segment record CRC not initialized")
 	}
-	if sum != sf.hdr.SegmentChecksum {
+	if sf.recordCRC.Sum32() != sf.hdr.SegmentChecksum {
 		return errors.New("segment checksum mismatch")
 	}
 	return nil

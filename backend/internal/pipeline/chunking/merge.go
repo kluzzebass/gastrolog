@@ -4,6 +4,7 @@ import (
 	"iter"
 	"slices"
 
+	"gastrolog/internal/pipeline/segment"
 	"gastrolog/internal/record"
 )
 
@@ -13,21 +14,21 @@ type spanCursor struct {
 	end  uint32
 }
 
-func (c *spanCursor) next() (record.Record, bool, error) {
+func (c *spanCursor) popEntry() (segment.IndexEntry, bool, error) {
 	if c.pos >= c.end {
-		return record.Record{}, false, nil
+		return segment.IndexEntry{}, false, nil
 	}
-	rec, err := c.idx.RecordAt(c.pos)
+	entry, err := c.idx.EntryAt(c.pos)
 	if err != nil {
-		return record.Record{}, false, err
+		return segment.IndexEntry{}, false, err
 	}
 	c.pos++
-	return rec, true, nil
+	return entry, true, nil
 }
 
 type mergeEntry struct {
-	rec record.Record
-	idx int
+	entry segment.IndexEntry
+	cur   int
 }
 
 func loadSpanCursors(refs []SpanRef) ([]spanCursor, error) {
@@ -55,12 +56,12 @@ func loadSpanCursors(refs []SpanRef) ([]spanCursor, error) {
 func seedMergeEntries(cursors []spanCursor) ([]mergeEntry, error) {
 	var entries []mergeEntry
 	for i := range cursors {
-		rec, ok, err := cursors[i].next()
+		entry, ok, err := cursors[i].popEntry()
 		if err != nil {
 			return nil, err
 		}
 		if ok {
-			entries = append(entries, mergeEntry{rec: rec, idx: i})
+			entries = append(entries, mergeEntry{entry: entry, cur: i})
 		}
 	}
 	return entries, nil
@@ -69,7 +70,7 @@ func seedMergeEntries(cursors []spanCursor) ([]mergeEntry, error) {
 func minMergeEntryIndex(entries []mergeEntry) int {
 	minIdx := 0
 	for i := 1; i < len(entries); i++ {
-		if entries[i].rec.EventID.Less(entries[minIdx].rec.EventID) {
+		if entries[i].entry.EventID.Less(entries[minIdx].entry.EventID) {
 			minIdx = i
 		}
 	}
@@ -77,12 +78,12 @@ func minMergeEntryIndex(entries []mergeEntry) int {
 }
 
 func advanceMergeEntry(entries []mergeEntry, at int, cursors []spanCursor) ([]mergeEntry, error) {
-	rec, ok, err := cursors[entries[at].idx].next()
+	entry, ok, err := cursors[entries[at].cur].popEntry()
 	if err != nil {
 		return nil, err
 	}
 	if ok {
-		entries[at].rec = rec
+		entries[at].entry = entry
 		return entries, nil
 	}
 	entries[at] = entries[len(entries)-1]
@@ -90,6 +91,8 @@ func advanceMergeEntry(entries []mergeEntry, at int, cursors []spanCursor) ([]me
 }
 
 // MergeSpanRefs yields records from all spans merged in canonical EventID order.
+// The k-way heap compares index entries (EventID + filepos) only; each frame is
+// decoded when its entry wins and is yielded (design-notes §37).
 func MergeSpanRefs(refs []SpanRef) iter.Seq2[record.Record, error] {
 	return func(yield func(record.Record, error) bool) {
 		if len(refs) == 0 {
@@ -110,7 +113,12 @@ func MergeSpanRefs(refs []SpanRef) iter.Seq2[record.Record, error] {
 
 		for len(entries) > 0 {
 			at := minMergeEntryIndex(entries)
-			if !yield(entries[at].rec, nil) {
+			rec, err := cursors[entries[at].cur].idx.RecordAtFilePos(entries[at].entry.FilePos)
+			if err != nil {
+				yield(record.Record{}, err)
+				return
+			}
+			if !yield(rec, nil) {
 				return
 			}
 			entries, err = advanceMergeEntry(entries, at, cursors)

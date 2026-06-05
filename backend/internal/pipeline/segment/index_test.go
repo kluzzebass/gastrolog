@@ -257,6 +257,48 @@ func TestOpenRejectsCorruptIndexChecksum(t *testing.T) {
 	}
 }
 
+func TestIndexEntryAtAndReadRecordAtFilePos(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "seg")
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	writeTS := base.Add(time.Minute)
+	ingester, node := glid.New(), glid.New()
+
+	recs := []*record.Record{
+		fixedEventRecord(ingester, node, 2, base.Add(2*time.Second), 'c'),
+		fixedEventRecord(ingester, node, 0, base, 'a'),
+		fixedEventRecord(ingester, node, 1, base.Add(time.Second), 'b'),
+	}
+	finalizeSegment(t, path, segment.Meta{ID: glid.New(), VaultID: glid.New()}, recs, writeTS)
+
+	sf, err := segment.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sf.Close()
+
+	for pos := range uint32(3) {
+		entry, err := sf.IndexEntryAt(pos)
+		if err != nil {
+			t.Fatalf("IndexEntryAt(%d): %v", pos, err)
+		}
+		viaPos, err := sf.RecordAtEventOrder(pos)
+		if err != nil {
+			t.Fatal(err)
+		}
+		viaFilePos, err := sf.ReadRecordAtFilePos(entry.FilePos)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if viaFilePos.EventID != entry.EventID || viaFilePos.EventID != viaPos.EventID {
+			t.Fatalf("pos %d: entry=%+v viaPos=%+v viaFilePos=%+v", pos, entry.EventID, viaPos.EventID, viaFilePos.EventID)
+		}
+		if viaFilePos.Raw[0] != viaPos.Raw[0] {
+			t.Fatalf("pos %d payload mismatch", pos)
+		}
+	}
+}
+
 func TestFinalizeTwiceRejected(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "seg")
