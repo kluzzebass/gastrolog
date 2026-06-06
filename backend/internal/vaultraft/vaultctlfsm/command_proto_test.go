@@ -182,6 +182,49 @@ func TestCommandRoundTrip(t *testing.T) {
 			t.Errorf("fields = %+v", got)
 		}
 	})
+
+	t.Run("open_chunk_manifest", func(t *testing.T) {
+		c := decodeCommand(t, MarshalOpenChunkManifest(id, now))
+		got := c.GetOpenChunkManifest()
+		if got == nil || string(got.GetChunkId()) != string(id[:]) {
+			t.Errorf("open chunk manifest: %+v", got)
+		}
+	})
+
+	t.Run("add_open_chunk_segment_ref", func(t *testing.T) {
+		segID := glidFromByte(0xCC)
+		ref := OpenChunkSegmentRef{
+			SegmentID:         segID,
+			FirstRecordNumber: 1,
+			LastRecordNumber:  10,
+			SliceBytes:        2048,
+			RefAddedAt:        now,
+		}
+		c := decodeCommand(t, MarshalAddOpenChunkSegmentRef(id, ref))
+		got := c.GetAddOpenChunkSegmentRef()
+		if got == nil {
+			t.Fatalf("wrong case: %T", c.GetCommand())
+		}
+		if got.GetFirstRecordNumber() != 1 || got.GetLastRecordNumber() != 10 || got.GetSliceBytes() != 2048 {
+			t.Errorf("ref fields = %+v", got)
+		}
+	})
+
+	t.Run("seal_open_chunk_manifest", func(t *testing.T) {
+		c := decodeCommand(t, MarshalSealOpenChunkManifest(id, now))
+		if c.GetSealOpenChunkManifest().GetSealedAtNanos() != now.UnixNano() {
+			t.Errorf("sealed at lost")
+		}
+	})
+
+	t.Run("release_segments", func(t *testing.T) {
+		seg := glidFromByte(0xDD)
+		c := decodeCommand(t, MarshalReleaseSegments([]glid.GLID{seg}))
+		got := c.GetReleaseSegments()
+		if len(got.GetSegmentIds()) != 1 || string(got.GetSegmentIds()[0]) != string(seg[:]) {
+			t.Errorf("release segments = %+v", got)
+		}
+	})
 }
 
 // TestApplyRejectsMalformedBytes verifies Apply returns an error (not a panic)

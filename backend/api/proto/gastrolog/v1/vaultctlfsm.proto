@@ -61,6 +61,10 @@ message VaultCtlCommand {
     BeginSealCommand begin_seal = 12;
     RepatriateChunkCommand repatriate_chunk = 13;
     PublishCompletedSegmentCommand publish_completed_segment = 14;
+    OpenChunkManifestCommand open_chunk_manifest = 15;
+    AddOpenChunkSegmentRefCommand add_open_chunk_segment_ref = 16;
+    SealOpenChunkManifestCommand seal_open_chunk_manifest = 17;
+    ReleaseSegmentsCommand release_segments = 18;
   }
 }
 
@@ -173,6 +177,61 @@ message CompletedSegmentEntry {
   int64 published_at_nanos = 8;
 }
 
+// OpenChunkSegmentRef names a partial or whole slice of one segment in the
+// open-chunk manifest (EventID-sorted record numbers, inclusive last).
+message OpenChunkSegmentRef {
+  bytes segment_id = 1;
+  uint32 first_record_number = 2;
+  uint32 last_record_number = 3;
+  uint64 slice_bytes = 4;
+  int64 ref_added_at_nanos = 5;
+}
+
+// OpenChunkManifestState is the replicated open or materialize-pending manifest.
+message OpenChunkManifestState {
+  bytes chunk_id = 1;
+  int64 opened_at_nanos = 2;
+  repeated OpenChunkSegmentRef refs = 3;
+  uint64 total_records = 4;
+  uint64 total_bytes = 5;
+  int64 sealed_at_nanos = 6;
+}
+
+// SegmentResumeRecordNumber is the next EventID-order record number to chunk
+// from a segment after partial inclusion.
+message SegmentResumeRecordNumber {
+  bytes segment_id = 1;
+  uint32 next_record_number = 2;
+}
+
+// OpenChunkManifestCommand opens a new manifest-backed active chunk.
+message OpenChunkManifestCommand {
+  bytes chunk_id = 1;
+  int64 opened_at_nanos = 2;
+}
+
+// AddOpenChunkSegmentRefCommand appends one segment slice to the open manifest.
+message AddOpenChunkSegmentRefCommand {
+  bytes chunk_id = 1;
+  bytes segment_id = 2;
+  uint32 first_record_number = 3;
+  uint32 last_record_number = 4;
+  uint64 slice_bytes = 5;
+  int64 ref_added_at_nanos = 6;
+}
+
+// SealOpenChunkManifestCommand closes the open manifest for materialization.
+message SealOpenChunkManifestCommand {
+  bytes chunk_id = 1;
+  int64 sealed_at_nanos = 2;
+}
+
+// ReleaseSegmentsCommand drops completed segment registry entries after chunk
+// replication (purge signaling). See chunking-design direction D.
+message ReleaseSegmentsCommand {
+  repeated bytes segment_ids = 1;
+}
+
 // ---------- Snapshot (replaces the 5 hand-rolled sections) ------------------
 
 // ManifestEntry is the full metadata for one chunk in a vault's manifest. The
@@ -224,6 +283,9 @@ message VaultCtlSnapshot {
   repeated Tombstone tombstones = 2;
   repeated PendingDelete pending_deletes = 3;
   repeated CompletedSegmentEntry completed_segments = 4;
+  OpenChunkManifestState open_chunk = 5;
+  OpenChunkManifestState materialize_pending = 6;
+  repeated SegmentResumeRecordNumber segment_resume = 7;
 }
 
 // VaultGroupSnapshot is the snapshot of the whole vault-ctl Raft group: one

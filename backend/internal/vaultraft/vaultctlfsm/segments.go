@@ -101,17 +101,50 @@ func (f *FSM) GetCompletedSegment(id glid.GLID) *CompletedSegmentEntry {
 func (f *FSM) ListCompletedSegments() []CompletedSegmentEntry {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	out := make([]CompletedSegmentEntry, 0, len(f.completedSegments))
-	for _, e := range f.completedSegments {
-		out = append(out, *e)
-	}
-	slices.SortFunc(out, func(a, b CompletedSegmentEntry) int {
-		if cmp := a.FirstIngestTS.Compare(b.FirstIngestTS); cmp != 0 {
-			return cmp
+	out := make([]CompletedSegmentEntry, 0, len(f.completedSegmentOrder))
+	for _, id := range f.completedSegmentOrder {
+		if e := f.completedSegments[id]; e != nil {
+			out = append(out, *e)
 		}
-		return a.SegmentID.Compare(b.SegmentID)
-	})
+	}
 	return out
+}
+
+func compareCompletedSegmentOrder(a, b CompletedSegmentEntry) int {
+	if cmp := a.FirstIngestTS.Compare(b.FirstIngestTS); cmp != 0 {
+		return cmp
+	}
+	return a.SegmentID.Compare(b.SegmentID)
+}
+
+func (f *FSM) insertCompletedSegmentOrder(entry CompletedSegmentEntry) {
+	i, _ := slices.BinarySearchFunc(f.completedSegmentOrder, entry, func(id glid.GLID, target CompletedSegmentEntry) int {
+		e := f.completedSegments[id]
+		if e == nil {
+			return 0
+		}
+		return compareCompletedSegmentOrder(*e, target)
+	})
+	f.completedSegmentOrder = slices.Insert(f.completedSegmentOrder, i, entry.SegmentID)
+}
+
+func (f *FSM) removeCompletedSegmentOrder(id glid.GLID) {
+	for i, existing := range f.completedSegmentOrder {
+		if existing == id {
+			f.completedSegmentOrder = slices.Delete(f.completedSegmentOrder, i, i+1)
+			return
+		}
+	}
+}
+
+func (f *FSM) rebuildCompletedSegmentOrderLocked() {
+	f.completedSegmentOrder = f.completedSegmentOrder[:0]
+	for id := range f.completedSegments {
+		f.completedSegmentOrder = append(f.completedSegmentOrder, id)
+	}
+	slices.SortFunc(f.completedSegmentOrder, func(a, b glid.GLID) int {
+		return compareCompletedSegmentOrder(*f.completedSegments[a], *f.completedSegments[b])
+	})
 }
 
 func (f *FSM) applyPublishCompletedSegment(c *gastrologv1.PublishCompletedSegmentCommand) error {
@@ -127,6 +160,7 @@ func (f *FSM) applyPublishCompletedSegment(c *gastrologv1.PublishCompletedSegmen
 	}
 	cp := entry
 	f.completedSegments[entry.SegmentID] = &cp
+	f.insertCompletedSegmentOrder(entry)
 	return nil
 }
 
@@ -145,6 +179,7 @@ func (f *FSM) restoreCompletedSegmentsLocked(segments []*gastrologv1.CompletedSe
 		e := completedSegmentFromProto(pe)
 		f.completedSegments[e.SegmentID] = &e
 	}
+	f.rebuildCompletedSegmentOrderLocked()
 }
 
 // NewPublishCompletedSegment builds a PublishCompletedSegment VaultCtlCommand.

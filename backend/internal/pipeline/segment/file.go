@@ -22,6 +22,7 @@ type File struct {
 	hdr       Header
 	hdrBuf    [HeaderSize]byte
 	recordCRC hash.Hash32 // rolling CRC32/IEEE over [HeaderSize:recordsEnd)
+	dataEnd   uint32      // exclusive end of committed record bytes (hot-path append anchor)
 }
 
 // Create initializes a new empty segment file at path.
@@ -38,6 +39,7 @@ func Create(path string, meta Meta) (*File, error) {
 			DataEnd: HeaderSize,
 		},
 		recordCRC: crc32.NewIEEE(),
+		dataEnd:   HeaderSize,
 	}
 	if err := sf.writeHeader(); err != nil {
 		_ = f.Close()
@@ -105,21 +107,27 @@ func (sf *File) AppendFrame(rec *record.Record, _ time.Time, body []byte) error 
 		return err
 	}
 
-	frameLen := frameLenPrefixSize + len(body)
-	buf := make([]byte, frameLen)
-	binary.LittleEndian.PutUint32(buf[0:frameLenPrefixSize], uint32(len(body))) //nolint:gosec // G115: frame bounded by encode
-	copy(buf[frameLenPrefixSize:], body)
+	var lenPrefix [frameLenPrefixSize]byte
+	binary.LittleEndian.PutUint32(lenPrefix[:], uint32(len(body))) //nolint:gosec // G115: frame bounded by encode
 
-	if _, err := sf.f.WriteAt(buf, int64(writeOff)); err != nil {
+	if _, err := sf.f.WriteAt(lenPrefix[:], int64(writeOff)); err != nil {
+		return err
+	}
+	if _, err := sf.f.WriteAt(body, int64(writeOff+frameLenPrefixSize)); err != nil {
 		return err
 	}
 
 	if sf.recordCRC == nil {
 		sf.recordCRC = crc32.NewIEEE()
 	}
-	if _, err := sf.recordCRC.Write(buf); err != nil {
+	if _, err := sf.recordCRC.Write(lenPrefix[:]); err != nil {
 		return err
 	}
+	if _, err := sf.recordCRC.Write(body); err != nil {
+		return err
+	}
+
+	frameLen := frameLenPrefixSize + len(body)
 
 	sf.hdr.RecordCount++
 	if sf.hdr.RecordCount == 1 {
@@ -128,6 +136,7 @@ func (sf *File) AppendFrame(rec *record.Record, _ time.Time, body []byte) error 
 	sf.hdr.LastIngestTS = rec.EventID.IngestTS
 	sf.hdr.DataEnd = writeOff
 	sf.hdr.SegmentChecksum = sf.recordCRC.Sum32()
+	sf.dataEnd = writeOff + uint32(frameLen) //nolint:gosec // G115: frame bounded by encode
 	return sf.writeHeader()
 }
 
@@ -164,6 +173,9 @@ func (sf *File) ReadAll() ([]record.Record, error) {
 		return nil, err
 	}
 	var out []record.Record
+	if sf.hdr.RecordCount > 0 {
+		out = make([]record.Record, 0, sf.hdr.RecordCount)
+	}
 	off := uint32(HeaderSize)
 	for off < recEnd {
 		rec, n, err := readFrameAt(sf.f, int64(off), recEnd-off)
@@ -200,17 +212,16 @@ func (sf *File) writeHeader() error {
 
 // appendOffset is the byte offset where the next frame write starts.
 func (sf *File) appendOffset() (uint32, error) {
-	end, err := sf.validDataEnd()
-	if err != nil {
-		return 0, err
-	}
-	return end, nil
+	return sf.dataEnd, nil
 }
 
 // validDataEnd is the exclusive end of committed record bytes on disk.
 func (sf *File) validDataEnd() (uint32, error) {
 	if sf.hdr.RecordCount == 0 {
 		return HeaderSize, nil
+	}
+	if sf.dataEnd > sf.hdr.DataEnd {
+		return sf.dataEnd, nil
 	}
 	_, n, err := sf.frameAt(sf.hdr.DataEnd)
 	if err != nil {
@@ -238,7 +249,11 @@ func (sf *File) frameAt(off uint32) (record.Record, uint32, error) {
 // frame is bad, fall back to scanning from the front.
 func (sf *File) reconcileOnOpen() error {
 	if sf.hdr.IndexOffset > 0 {
-		return sf.verifyIndexedLayout()
+		if err := sf.verifyIndexedLayout(); err != nil {
+			return err
+		}
+		sf.dataEnd = sf.hdr.IndexOffset
+		return nil
 	}
 
 	info, err := sf.f.Stat()
@@ -272,6 +287,7 @@ func (sf *File) reconcileOnOpen() error {
 		return err
 	}
 	sf.hdr.SegmentChecksum = sum
+	sf.dataEnd = validEnd
 	return sf.writeHeader()
 }
 

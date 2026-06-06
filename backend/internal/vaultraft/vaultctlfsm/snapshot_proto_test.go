@@ -51,6 +51,18 @@ func buildRichFSM(t *testing.T) *FSM {
 		PublishedAt:   now,
 	}))
 
+	// open-chunk manifest: sealed pending materialization.
+	openChunk := testChunkID(0x53)
+	applyCmd(t, f, MarshalOpenChunkManifest(openChunk, now))
+	applyCmd(t, f, MarshalAddOpenChunkSegmentRef(openChunk, OpenChunkSegmentRef{
+		SegmentID:         glidFromByte(0x66),
+		FirstRecordNumber: 0,
+		LastRecordNumber:  4,
+		SliceBytes:        500,
+		RefAddedAt:        now.Add(time.Second),
+	}))
+	applyCmd(t, f, MarshalSealOpenChunkManifest(openChunk, now.Add(2*time.Second)))
+
 	return f
 }
 

@@ -3,7 +3,7 @@ package segment
 import (
 	"encoding/binary"
 	"errors"
-	"sort"
+	"slices"
 	"syscall"
 
 	"gastrolog/internal/format"
@@ -62,39 +62,23 @@ func compareIndexEntries(a, b IndexEntry) int {
 	return 0
 }
 
-type indexRegion struct {
-	data []byte
-}
-
-func (r indexRegion) Len() int {
-	return len(r.data) / IndexEntrySize
-}
-
-func (r indexRegion) Less(i, j int) bool {
-	ei, err := decodeIndexEntry(r.data[i*IndexEntrySize : (i+1)*IndexEntrySize])
-	if err != nil {
-		return false
-	}
-	ej, err := decodeIndexEntry(r.data[j*IndexEntrySize : (j+1)*IndexEntrySize])
-	if err != nil {
-		return false
-	}
-	return compareIndexEntries(ei, ej) < 0
-}
-
-func (r indexRegion) Swap(i, j int) {
-	ai := i * IndexEntrySize
-	aj := j * IndexEntrySize
-	for k := range IndexEntrySize {
-		r.data[ai+k], r.data[aj+k] = r.data[aj+k], r.data[ai+k]
-	}
-}
-
 func sortIndexRegion(data []byte) {
-	if len(data) == 0 {
+	n := len(data) / IndexEntrySize
+	if n == 0 {
 		return
 	}
-	sort.Sort(indexRegion{data: data})
+	entries := make([]IndexEntry, n)
+	for i := range n {
+		e, err := decodeIndexEntry(data[i*IndexEntrySize : (i+1)*IndexEntrySize])
+		if err != nil {
+			return
+		}
+		entries[i] = e
+	}
+	slices.SortFunc(entries, compareIndexEntries)
+	for i, e := range entries {
+		encodeIndexEntry(data[i*IndexEntrySize:(i+1)*IndexEntrySize], e)
+	}
 }
 
 // BuildIndex scans the record region, appends a sorted (EventID, filepos) tail,
@@ -153,6 +137,7 @@ func (sf *File) BuildIndex() error {
 
 	sf.hdr.IndexOffset = recordEnd
 	sf.hdr.IndexChecksum = sum
+	sf.dataEnd = recordEnd
 	var recSum uint32
 	if sf.recordCRC != nil {
 		recSum = sf.recordCRC.Sum32()

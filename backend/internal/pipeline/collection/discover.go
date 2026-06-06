@@ -6,7 +6,7 @@ import (
 )
 
 func missingSegments(assigned []AssignedSegment, head, preHead map[glid.GLID]struct{}) []AssignedSegment {
-	var out []AssignedSegment
+	out := make([]AssignedSegment, 0, len(assigned))
 	for _, ref := range assigned {
 		if _, ok := head[ref.SegmentID]; ok {
 			continue

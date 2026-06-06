@@ -17,13 +17,16 @@ var (
 // Attributes represents record metadata as key-value pairs.
 type Attributes map[string]string
 
+// encodedEmptyAttrs is the shared on-wire empty attribute blob (count=0).
+var encodedEmptyAttrs = []byte{0, 0}
+
 // Encode serializes attributes to binary format.
 // Format: [count:u16][keyLen:u16][key bytes][valLen:u16][val bytes]... repeated count times
 // Keys are sorted lexicographically for deterministic output.
 // Returns error if the encoded size would exceed uint16 (65535 bytes).
 func (a Attributes) Encode() ([]byte, error) {
 	if len(a) == 0 {
-		return []byte{0, 0}, nil
+		return encodedEmptyAttrs, nil
 	}
 
 	keys := make([]string, 0, len(a))

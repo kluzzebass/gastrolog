@@ -100,6 +100,12 @@ const (
 	// vault-ctl FSM when Segmentation closes a segment (V3 pipeline). See
 	// gastrolog-5pyl3.
 	CmdPublishCompletedSegment Command = 14
+
+	// V3 open-chunk manifest (direction D). See gastrolog-53ron.
+	CmdOpenChunkManifest       Command = 15
+	CmdAddOpenChunkSegmentRef  Command = 16
+	CmdSealOpenChunkManifest   Command = 17
+	CmdReleaseSegments         Command = 18
 )
 
 // ManifestEntry holds the full metadata for one chunk in this vault's
@@ -244,6 +250,17 @@ type FSM struct {
 	// completedSegments is the V3 pipeline registry of closed segments awaiting
 	// chunking. Populated by CmdPublishCompletedSegment; see segments.go.
 	completedSegments map[glid.GLID]*CompletedSegmentEntry
+	// completedSegmentOrder is FirstIngestTS-then-ID sort order; kept in sync
+	// with completedSegments so ListCompletedSegments avoids re-sorting.
+	completedSegmentOrder []glid.GLID
+
+	// openChunk is the in-progress manifest-backed active chunk (V3). See open_chunk.go.
+	openChunk *OpenChunkManifest
+	// materializePending is the sealed manifest awaiting local GLCB build.
+	materializePending *OpenChunkManifest
+	// segmentResume maps segment ID → next EventID-order record number after
+	// a partial manifest ref.
+	segmentResume map[glid.GLID]uint32
 }
 
 // New creates an empty chunk metadata FSM.
@@ -253,6 +270,7 @@ func New() *FSM {
 		tombstones:        make(map[chunk.ChunkID]time.Time),
 		pendingDeletes:    make(map[chunk.ChunkID]*PendingDelete),
 		completedSegments: make(map[glid.GLID]*CompletedSegmentEntry),
+		segmentResume:     make(map[glid.GLID]uint32),
 	}
 }
 
@@ -612,6 +630,14 @@ func (f *FSM) applyLocked(cmd *gastrologv1.VaultCtlCommand) (any, applyEffects) 
 		fx.createdEntry = f.captureEntry(result, chunkIDFromProto(c.RepatriateChunk.GetEntry().GetId()))
 	case *gastrologv1.VaultCtlCommand_PublishCompletedSegment:
 		result = f.applyPublishCompletedSegment(c.PublishCompletedSegment)
+	case *gastrologv1.VaultCtlCommand_OpenChunkManifest:
+		result = f.applyOpenChunkManifest(c.OpenChunkManifest)
+	case *gastrologv1.VaultCtlCommand_AddOpenChunkSegmentRef:
+		result = f.applyAddOpenChunkSegmentRef(c.AddOpenChunkSegmentRef)
+	case *gastrologv1.VaultCtlCommand_SealOpenChunkManifest:
+		result = f.applySealOpenChunkManifest(c.SealOpenChunkManifest)
+	case *gastrologv1.VaultCtlCommand_ReleaseSegments:
+		result = f.applyReleaseSegments(c.ReleaseSegments)
 	default:
 		result = fmt.Errorf("unknown chunk FSM command: %T", cmd.GetCommand())
 	}
@@ -678,6 +704,9 @@ func (f *FSM) snapshotProtoLocked() *gastrologv1.VaultCtlSnapshot {
 		Tombstones:         make([]*gastrologv1.Tombstone, 0, len(f.tombstones)),
 		PendingDeletes:     make([]*gastrologv1.PendingDelete, 0, len(f.pendingDeletes)),
 		CompletedSegments:  f.snapshotCompletedSegmentsLocked(),
+		OpenChunk:          f.snapshotOpenChunkLocked(),
+		MaterializePending: f.snapshotMaterializePendingLocked(),
+		SegmentResume:      f.snapshotSegmentResumeLocked(),
 	}
 
 	entryIDs := slices.SortedFunc(maps.Keys(f.chunks), chunk.ChunkID.Compare)
@@ -748,6 +777,7 @@ func (f *FSM) restoreFromProtoLocked(snap *gastrologv1.VaultCtlSnapshot) {
 		f.pendingDeletes[p.ChunkID] = &p
 	}
 	f.restoreCompletedSegmentsLocked(snap.GetCompletedSegments())
+	f.restoreOpenChunkLocked(snap)
 	f.ready = true
 }
 

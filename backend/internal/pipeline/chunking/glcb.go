@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"os"
 	"path/filepath"
 
@@ -145,7 +144,5 @@ func toChunkAttrs(attrs record.Attributes) chunk.Attributes {
 	if len(attrs) == 0 {
 		return nil
 	}
-	out := make(chunk.Attributes, len(attrs))
-	maps.Copy(out, attrs)
-	return out
+	return chunk.Attributes(attrs)
 }
