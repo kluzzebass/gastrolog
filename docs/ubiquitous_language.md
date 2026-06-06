@@ -782,6 +782,25 @@ Error values that cross bounded contexts:
 When you see "replication" in a log line or a comment, check whether the
 subject is bytes or metadata — the operational consequences are different.
 
+### V3 pipeline (provisional)
+
+Terms for the fan-out V3 write path; see [`fan-out/v3/design-notes.md`](./fan-out/v3/design-notes.md).
+
+- **Chunk build cursor** — per-segment progress in EventID order: how far
+  prior chunks consumed that segment's index. Vault-ctl holds cursors + chunk
+  budget; the next build k-way-merges from those positions until the budget
+  is reached, then commits updated cursors.
+- **Segment span** — `(segmentID, startRecord, count)` naming a slice in
+  EventID order. Equivalent to cursor deltas for one build; **discovered during
+  merge**, not precomputed from segment metadata alone.
+- **Chunk record budget** — stop the merge after N records (rotation-policy
+  `MaxRecords` shape). Deterministic cut axis over the merge walk.
+- **Chunk byte budget** — stop when accumulated bytes (pinned unit) reach the
+  limit (`MaxBytes` shape). Same category as record count over the merge walk.
+- **Chunk time cut** — schedule-based (`Cron`) can work for chunking when
+  committed on vault-ctl; age-since-chunk-open (`MaxAge` on active chunks) does
+  not map to the segment→chunk build model.
+
 ---
 
 ## Keeping this document honest

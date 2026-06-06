@@ -101,25 +101,45 @@ contrast with any earlier design. It states only what V3 *is*, never what it
     ingest. The only backpressure is slow local disk.
 22. Segments are ephemeral build inputs; the chunk is the durable artifact.
     Durability responsibility moves at that boundary.
-23. Two roles, paired: the vault-ctl plans chunks from segment metadata
-    alone (vault, record count, byte size, first/last IngestTS, holder); a
-    per-home vault manager executes — it owns that vault's chunk store and head,
-    and builds chunks in place. Segment bodies move lazily, only once a vault
-    manager is ready to build.
+23. Two roles, paired: vault-ctl tracks completed segment metadata and **chunk-build
+    state** (record/size budget, per-segment **EventID-order cursors** — how far each
+    segment was consumed by prior chunks); the per-home ChunkingManager executes —
+    k-way merge from those cursors until the budget is reached, encodes GLCB, and
+    commits updated cursors. Segment metadata alone (count, bytes, IngestTS bounds,
+    holder) names what is *eligible*; it does not predict how records from different
+    segments interleave under the budget. Segment bodies move lazily, only once a home
+    is ready to build.
 24. A segment closes on size or age, whichever comes first (both configurable).
     Closure is the working→completed rename, at which point its metadata is published;
     a still-growing segment's header is provisional and not yet eligible.
-25. A chunk is a deterministic, ordered list of segment spans
-    `(segmentID, startRecord, count)`, sliced on a record/size budget; a
-    partial-segment cut resumes in the next chunk. The offsets are positions in the
-    segment's EventID order (see 36), not on-disk positions.
-26. Builds are reproducible: the same plan over the same immutable segments yields
-    a byte-identical chunk on every builder. So every home builds its own chunk
-    independently — no designated builder, no build-then-replicate, no
-    leader-dies-mid-build failover (a crash just re-runs the fixed plan).
-27. Completeness is binary: a builder either holds the named segments or it does
-    not. No time-window closure, and no straggler can belong inside an
-    already-built chunk.
+25. A chunk is the records yielded by a **budget-limited k-way merge** starting from
+    committed cursors. Equivalently: a deterministic list of segment spans
+    `(segmentID, startRecord, count)` in EventID order — but those spans are
+    **discovered during the build**, not precomputed from segment metadata before
+    merge. A partial-segment cut leaves a cursor inside that segment; the next chunk
+    resumes from there. Offsets are positions in the segment's EventID order (see 36),
+    not on-disk byte positions.
+    **Chunk budget (provisional lean):** **record count and byte size** are
+    deterministic cut axes — monotonic accumulators over the merged EventID stream,
+    identical on every replica given shared cursors, segment snapshot, and segment
+    bytes (pin the byte unit consistently). Segment metadata totals do not predict
+    either limit once segments interleave; the merge walk discovers the stop.
+    **Time can be deterministic too** (same segments, same merge inputs, same
+    committed cut rule) — the issue is which time semantics fit the
+    segment→chunk flow, not replayability. Today's rotation **Cron** ("switch at
+    noon") still maps: a vault-ctl-scheduled cut all replicas observe. **MaxAge**
+    ("active chunk has been open for 10 minutes") does not: V3 chunks are built
+    complete in one merge pass, not incrementally appended on each home — there is
+    no growing chunk `CreatedAt` to measure. Age/size at **segment** closure on the
+    origin (§24) stays valid; age-since-chunk-open is legacy active-chunk semantics.
+26. Builds are reproducible: the same **starting cursors**, eligible segments, and
+    budget over the same immutable segment bytes yield a byte-identical chunk on every
+    builder. So every home builds its own chunk independently — no designated builder,
+    no build-then-replicate, no leader-dies-mid-build failover (a crash just re-runs
+    from the last committed cursors).
+27. Completeness is binary: a builder either holds every segment the merge needs
+    (including any segment with a partial tail not yet fully chunked) or it does not.
+    No time-window closure, and no straggler can belong inside an already-built chunk.
 28. Replication is pull/reconcile, not push: a home rolls the log, pulls segments
     it lacks from any holder, and adds itself to the holder-set. The desired-vs-
     holder gap is the replicate signal; `holders ⊇ homes`, records chunked, or a
@@ -132,8 +152,8 @@ contrast with any earlier design. It states only what V3 *is*, never what it
 30. Chunk replication is the same reconciliation — desired placement vs. holder-set,
     driven to zero by copy or delete — so segments and chunks share one model. It
     must exist anyway for RF changes, node loss, decommission, and placement changes.
-31. Determinism (single origin per segment + dictated spans) makes replicas
-    identical by construction — no merge, read-repair, vector clocks, or
+31. Determinism (single origin per segment + shared build state + merge walk) makes
+    replicas identical by construction — no merge, read-repair, vector clocks, or
     anti-entropy. Verification is a chunk-ID/hash equality check.
 32. Checksums are mandatory, not optional: they guard against physical faults and
     gate transfer acceptance (the head invariant verifies a pulled segment before
@@ -157,14 +177,14 @@ contrast with any earlier design. It states only what V3 *is*, never what it
     retention; no ingest backpressure).
 36. A segment's on-disk order is arbitrary (concurrent digestion), so each carries
     an EventID-ordered index (the head B+ tree) and chunk building is a k-way
-    merge over it; span offsets (25) are positions in this order. Order by the full
-    EventID so equal timestamps resolve identically. Because IngestTS leads the key,
+    merge over it; span offsets and cursors (25) are positions in this order. Order by
+    the full EventID so equal timestamps resolve identically. Because IngestTS leads the key,
     the same index serves IngestTS range search — one structure, not two.
 37. Chunk building is key-only for ordering: the merge reads just the frame length
     and EventID fields to order records, and copies `raw` verbatim. Attributes are
     inline (denormalized) in segments and normalized into the chunk's string
     dictionary at build — a deterministic remap (the dictionary is a deterministic
-    function of the planned records), so chunks stay byte-identical across builders
+    function of the merged records), so chunks stay byte-identical across builders
     while ingest stays free of interning. The dictionary is normalization (a real
     space saver on repetitive log attributes), not indexing, and is kept — and being
     the canonical string table, it is the natural substrate the deferred index types
@@ -230,12 +250,13 @@ build discards. ChunkingManager is a fresh build, not an extension of it.
 **Collection and Chunking are the proactive and reactive halves of one pull.**
 Collection runs ahead — rolling the vault-ctl log, it pulls segments this home
 should hold into the head before any build needs them, which also grows the
-holder-set (durability) and backfills a returning node (catch-up). Chunking decides
-*what* to build from a vault-ctl plan and consumes the head. If the plan's named
-segments are not all present, Chunking does not build (binary completeness — never a
+holder-set (durability) and backfills a returning node (catch-up). Chunking runs
+merge+encode from vault-ctl **cursors and budget**; on success it commits build
+progress (updated cursors, chunk identity/digest). If required segments are not
+all present locally, Chunking does not build (binary completeness — never a
 short chunk): it nudges Collection with the missing IDs and waits. The wait is safe
 and terminating — the origin retains a segment until its records are chunked
-(release/purge rules), so a planned segment stays collectable from some holder until
+(release/purge rules), so a needed segment stays collectable from some holder until
 the build succeeds; an unreachable holder only delays chunking, never drops data.
 
 **Storage areas are roles bound to storage.** The phases own on-disk areas —
