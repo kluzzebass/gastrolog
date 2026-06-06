@@ -259,6 +259,22 @@ and terminating — the origin retains a segment until its records are chunked
 (release/purge rules), so a needed segment stays collectable from some holder until
 the build succeeds; an unreachable holder only delays chunking, never drops data.
 
+### Do not poll vault-ctl FSM state on a timer
+
+Collection and Chunking both read durable vault-ctl state, but that state changes only
+when Raft applies a command. **Do not** copy ingester-style tick loops or poll
+`SealedManifest()`, completed-segment registry, or assignment logs every N ms.
+
+Wire **`SetOnPublishCompletedSegment`** (Collection rolls the log and pulls when new
+segment metadata lands), **`SetOnSealedManifest`** (Chunking builds at seal), explicit
+**`Notify` / `CollectOnce` nudges** (Chunking when a manifest ref is missing locally),
+and a **one-shot catch-up on `Run` start** (manager started after replay). When holder
+assignment gets its own apply callback, hook that too — still not a blind timer.
+
+The leader chunking planner (`gastrolog-5i9e6`) must follow the same rule: react to
+segment publish, manifest edits, rotation policy inputs, and leadership changes — not
+a periodic “read FSM and maybe propose” tick. See [`chunking-design.md`](./chunking-design.md).
+
 **Storage areas are roles bound to storage.** The phases own on-disk areas —
 Segmentation's `working/` and `completed/`, Collection's **pre-head**, and the
 **head** and chunk store. Each area's location resolves either explicitly

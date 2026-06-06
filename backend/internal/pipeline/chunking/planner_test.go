@@ -48,9 +48,9 @@ func TestPlannerPartialSegmentCut(t *testing.T) {
 	now := base.Add(time.Minute)
 
 	decision := chunking.Plan(chunking.PlannerInput{
-		Manifest: chunking.ManifestSnapshot{OpenedAt: base},
-		Segments: []chunking.SegmentView{seg},
-		Policy:   chunking.ManifestRotationPolicy{MaxRecords: 2},
+		Manifest:   chunking.ManifestSnapshot{OpenedAt: base},
+		Segments:   []chunking.SegmentView{seg},
+		Policy:     chunking.ManifestRotationPolicy{MaxRecords: 2},
 		RefAddedAt: now,
 	})
 	if decision.Action != chunking.PlannerAddRef {
@@ -77,15 +77,15 @@ func TestPlannerResumeAfterPartial(t *testing.T) {
 
 	manifest := chunking.ManifestSnapshot{OpenedAt: base}
 	first := chunking.Plan(chunking.PlannerInput{
-		Manifest: manifest,
-		Segments: []chunking.SegmentView{seg},
-		Policy:   chunking.ManifestRotationPolicy{MaxRecords: 2},
+		Manifest:   manifest,
+		Segments:   []chunking.SegmentView{seg},
+		Policy:     chunking.ManifestRotationPolicy{MaxRecords: 2},
 		RefAddedAt: now,
 	})
 	applyRef(&manifest, first.Ref)
 
 	second := chunking.Plan(chunking.PlannerInput{
-		Manifest: manifest,
+		Manifest:   manifest,
 		Resume:     map[glid.GLID]uint32{segID: 2},
 		Segments:   []chunking.SegmentView{seg},
 		Policy:     chunking.ManifestRotationPolicy{MaxRecords: 4},
@@ -121,9 +121,9 @@ func TestPlannerMultiSegmentInterleave(t *testing.T) {
 	policy := chunking.ManifestRotationPolicy{MaxRecords: 2}
 
 	first := chunking.Plan(chunking.PlannerInput{
-		Manifest: manifest,
-		Segments: []chunking.SegmentView{viewA, viewB},
-		Policy:   policy,
+		Manifest:   manifest,
+		Segments:   []chunking.SegmentView{viewA, viewB},
+		Policy:     policy,
 		RefAddedAt: now,
 	})
 	if first.Action != chunking.PlannerAddRef || first.Ref.SegmentID != segA {
@@ -132,7 +132,7 @@ func TestPlannerMultiSegmentInterleave(t *testing.T) {
 	applyRef(&manifest, first.Ref)
 
 	second := chunking.Plan(chunking.PlannerInput{
-		Manifest: manifest,
+		Manifest:   manifest,
 		Resume:     map[glid.GLID]uint32{segA: 1},
 		Segments:   []chunking.SegmentView{viewA, viewB},
 		Policy:     policy,
@@ -162,9 +162,9 @@ func TestPlannerRotateAtRecordThreshold(t *testing.T) {
 		}},
 	}
 	decision := chunking.Plan(chunking.PlannerInput{
-		Manifest: manifest,
-		Segments: []chunking.SegmentView{seg},
-		Policy:   chunking.ManifestRotationPolicy{MaxRecords: 2},
+		Manifest:   manifest,
+		Segments:   []chunking.SegmentView{seg},
+		Policy:     chunking.ManifestRotationPolicy{MaxRecords: 2},
 		RefAddedAt: base.Add(time.Minute),
 	})
 	if decision.Action != chunking.PlannerRotate || decision.Trigger != "records" {
@@ -183,9 +183,9 @@ func TestPlannerRotateAtByteThreshold(t *testing.T) {
 	seg := segmentView(t, path, segID, base)
 
 	first := chunking.Plan(chunking.PlannerInput{
-		Manifest: chunking.ManifestSnapshot{OpenedAt: base},
-		Segments: []chunking.SegmentView{seg},
-		Policy:   chunking.ManifestRotationPolicy{MaxBytes: 1 << 20},
+		Manifest:   chunking.ManifestSnapshot{OpenedAt: base},
+		Segments:   []chunking.SegmentView{seg},
+		Policy:     chunking.ManifestRotationPolicy{MaxBytes: 1 << 20},
 		RefAddedAt: base,
 	})
 	if first.Action != chunking.PlannerAddRef {
@@ -193,19 +193,19 @@ func TestPlannerRotateAtByteThreshold(t *testing.T) {
 	}
 
 	manifest := chunking.ManifestSnapshot{
-		OpenedAt:   base,
-		TotalBytes: first.Ref.SliceBytes,
+		OpenedAt:     base,
+		TotalBytes:   first.Ref.SliceBytes,
 		TotalRecords: 1,
 		Refs: []chunking.ManifestRef{{
-			SegmentID: segID,
+			SegmentID:         segID,
 			FirstRecordNumber: first.Ref.FirstRecordNumber,
 			LastRecordNumber:  first.Ref.LastRecordNumber,
 		}},
 	}
 	second := chunking.Plan(chunking.PlannerInput{
-		Manifest: manifest,
-		Segments: []chunking.SegmentView{seg},
-		Policy:   chunking.ManifestRotationPolicy{MaxBytes: first.Ref.SliceBytes},
+		Manifest:   manifest,
+		Segments:   []chunking.SegmentView{seg},
+		Policy:     chunking.ManifestRotationPolicy{MaxBytes: first.Ref.SliceBytes},
 		RefAddedAt: base.Add(time.Second),
 	})
 	if second.Action != chunking.PlannerRotate || second.Trigger != "bytes" {
@@ -254,15 +254,15 @@ func TestPlannerPartialSegmentContinuesBeforeInterleave(t *testing.T) {
 
 	manifest := chunking.ManifestSnapshot{OpenedAt: base}
 	first := chunking.Plan(chunking.PlannerInput{
-		Manifest: manifest,
-		Segments: []chunking.SegmentView{viewA, viewB},
-		Policy:   chunking.ManifestRotationPolicy{MaxRecords: 1},
+		Manifest:   manifest,
+		Segments:   []chunking.SegmentView{viewA, viewB},
+		Policy:     chunking.ManifestRotationPolicy{MaxRecords: 1},
 		RefAddedAt: now,
 	})
 	applyRef(&manifest, first.Ref)
 
 	second := chunking.Plan(chunking.PlannerInput{
-		Manifest: manifest,
+		Manifest:   manifest,
 		Resume:     map[glid.GLID]uint32{segA: first.Ref.LastRecordNumber + 1},
 		Segments:   []chunking.SegmentView{viewA, viewB},
 		Policy:     chunking.ManifestRotationPolicy{MaxRecords: 2},
@@ -304,7 +304,7 @@ func TestPlannerDeterministic(t *testing.T) {
 func TestPlannerIdleWhenNoEligibleSegments(t *testing.T) {
 	t.Parallel()
 	decision := chunking.Plan(chunking.PlannerInput{
-		Manifest: chunking.ManifestSnapshot{OpenedAt: time.Unix(0, 0).UTC()},
+		Manifest:   chunking.ManifestSnapshot{OpenedAt: time.Unix(0, 0).UTC()},
 		RefAddedAt: time.Unix(0, 0).UTC(),
 	})
 	if decision.Action != chunking.PlannerIdle {

@@ -800,6 +800,9 @@ Terms for the fan-out V3 write path; see [`fan-out/v3/design-notes.md`](./fan-ou
 - **Chunk time cut** — schedule-based (`Cron`) can work for chunking when
   committed on vault-ctl; age-since-chunk-open (`MaxAge` on active chunks) does
   not map to the segment→chunk build model.
+- **Sealed manifest** — after `SealOpenChunkManifest`, the frozen segment-ref list
+  on vault-ctl awaiting per-home GLCB build (`sealed_manifest` in FSM snapshot).
+  Not the same word as V2 sequenced-write **materialization** (spool → chunk).
 
 ---
 

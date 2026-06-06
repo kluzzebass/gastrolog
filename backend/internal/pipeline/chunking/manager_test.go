@@ -1,0 +1,285 @@
+package chunking_test
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/chunk"
+	chunkcloud "gastrolog/internal/chunk/cloud"
+	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/chunking"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
+
+	hraft "github.com/hashicorp/raft"
+	"google.golang.org/protobuf/proto"
+)
+
+func TestManagerBuildOnceBuildsGLCBAndAnnouncesSeal(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	segID := glid.New()
+	vaultID := glid.New()
+	chunkID := chunk.NewChunkID()
+	home := t.TempDir()
+	writeHeadSegment(t, home, segID, vaultID, []recordForSeg{{0, base, "one"}, {1, base.Add(time.Second), "two"}})
+
+	fsm := vaultctlfsm.New()
+	openedAt := base
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
+		SegmentID:         segID,
+		FirstRecordNumber: 0,
+		LastRecordNumber:  1,
+		SliceBytes:        4096,
+		RefAddedAt:        openedAt,
+	}))
+	sealedAt := base.Add(time.Minute)
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, sealedAt))
+
+	var applied [][]byte
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot: home,
+		ChunkRoot: filepath.Join(home, "chunks"),
+		FSM:       fsm,
+		Locate:    chunking.HeadSegmentLocator{Root: home},
+		Applier:   &recordingApplier{out: &applied},
+		IsLeader:  func() bool { return true },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.BuildOnce(t.Context(), vaultID); err != nil {
+		t.Fatalf("BuildOnce: %v", err)
+	}
+	if len(applied) != 1 {
+		t.Fatalf("applied commands = %d, want 1 SealChunk", len(applied))
+	}
+
+	glcbPath := chunking.ChunkGLCBPath(filepath.Join(home, "chunks"), chunkID)
+	f, err := os.Open(glcbPath)
+	if err != nil {
+		t.Fatalf("open GLCB: %v", err)
+	}
+	defer f.Close()
+	rd, err := chunkcloud.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rd.Close()
+	if rd.Meta().RecordCount != 2 {
+		t.Fatalf("GLCB records = %d, want 2", rd.Meta().RecordCount)
+	}
+
+	entry := fsm.Get(chunkID)
+	if entry == nil || entry.State != chunk.ChunkStateSealing {
+		t.Fatalf("chunk entry before SealChunk apply = %+v", entry)
+	}
+	applyChunkCmd(t, fsm, applied[0])
+	entry = fsm.Get(chunkID)
+	if entry == nil || entry.State != chunk.ChunkStateSealed {
+		t.Fatalf("chunk entry after SealChunk apply = %+v", entry)
+	}
+	if fsm.SealedManifest() != nil {
+		t.Fatal("sealed manifest must clear after SealChunk")
+	}
+}
+
+func TestManagerMissingSegmentNudgesCollection(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	present := glid.New()
+	missing := glid.New()
+	vaultID := glid.New()
+	chunkID := chunk.NewChunkID()
+	home := t.TempDir()
+	writeHeadSegment(t, home, present, vaultID, []recordForSeg{{0, base, "ok"}})
+
+	fsm := vaultctlfsm.New()
+	openedAt := base
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
+		SegmentID:         present,
+		FirstRecordNumber: 0,
+		LastRecordNumber:  0,
+		SliceBytes:        2048,
+		RefAddedAt:        openedAt,
+	}))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
+		SegmentID:         missing,
+		FirstRecordNumber: 0,
+		LastRecordNumber:  0,
+		SliceBytes:        2048,
+		RefAddedAt:        openedAt,
+	}))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, base.Add(time.Minute)))
+
+	var nudges atomic.Int32
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot: home,
+		ChunkRoot: filepath.Join(home, "chunks"),
+		FSM:       fsm,
+		Locate:    chunking.HeadSegmentLocator{Root: home},
+		Nudge:     nudgeCounter{&nudges},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.BuildOnce(t.Context(), vaultID); err == nil {
+		t.Fatal("expected missing segment error")
+	}
+	if nudges.Load() != 1 {
+		t.Fatalf("collection nudges = %d, want 1", nudges.Load())
+	}
+}
+
+func TestManagerBuildsOnSealEvent(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	segID := glid.New()
+	vaultID := glid.New()
+	chunkID := chunk.NewChunkID()
+	home := t.TempDir()
+	writeHeadSegment(t, home, segID, vaultID, []recordForSeg{{0, base, "one"}})
+
+	fsm := vaultctlfsm.New()
+	openedAt := base
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
+		SegmentID:         segID,
+		FirstRecordNumber: 0,
+		LastRecordNumber:  0,
+		SliceBytes:        1024,
+		RefAddedAt:        openedAt,
+	}))
+
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot: home,
+		ChunkRoot: filepath.Join(home, "chunks"),
+		FSM:       fsm,
+		Locate:    chunking.HeadSegmentLocator{Root: home},
+		IsLeader:  func() bool { return false },
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	sealedAt := base.Add(time.Minute)
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, sealedAt))
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	if err := mgr.Run(ctx); err != nil && err != context.Canceled {
+		t.Fatalf("Run: %v", err)
+	}
+
+	glcbPath := chunking.ChunkGLCBPath(filepath.Join(home, "chunks"), chunkID)
+	if _, err := os.Stat(glcbPath); err != nil {
+		t.Fatalf("GLCB not built after sealed-manifest callback: %v", err)
+	}
+}
+
+func TestManagerFollowerDoesNotAnnounceSeal(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	segID := glid.New()
+	vaultID := glid.New()
+	chunkID := chunk.NewChunkID()
+	home := t.TempDir()
+	writeHeadSegment(t, home, segID, vaultID, []recordForSeg{{0, base, "one"}})
+
+	fsm := vaultctlfsm.New()
+	openedAt := base
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
+		SegmentID:         segID,
+		FirstRecordNumber: 0,
+		LastRecordNumber:  0,
+		SliceBytes:        1024,
+		RefAddedAt:        openedAt,
+	}))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, base.Add(time.Minute)))
+
+	var applied [][]byte
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot: home,
+		ChunkRoot: filepath.Join(home, "chunks"),
+		FSM:       fsm,
+		Locate:    chunking.HeadSegmentLocator{Root: home},
+		Applier:   &recordingApplier{out: &applied},
+		IsLeader:  func() bool { return false },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.BuildOnce(t.Context(), vaultID); err != nil {
+		t.Fatalf("BuildOnce: %v", err)
+	}
+	if len(applied) != 0 {
+		t.Fatalf("follower applied %d commands, want 0", len(applied))
+	}
+}
+
+type recordingApplier struct {
+	out *[][]byte
+}
+
+func (a *recordingApplier) Apply(data []byte) error {
+	cp := append([]byte(nil), data...)
+	*a.out = append(*a.out, cp)
+	return nil
+}
+
+type nudgeCounter struct {
+	n *atomic.Int32
+}
+
+func (n nudgeCounter) CollectMissing(context.Context) error {
+	n.n.Add(1)
+	return nil
+}
+
+func applyChunkCmd(t *testing.T, fsm *vaultctlfsm.FSM, data []byte) {
+	t.Helper()
+	if err := fsm.Apply(&hraft.Log{Data: data}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+}
+
+func TestSealChunkClearsSealedManifest(t *testing.T) {
+	t.Parallel()
+	fsm := vaultctlfsm.New()
+	chunkID := chunk.NewChunkID()
+	now := time.Unix(0, 1_700_000_000_000).UTC()
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, now))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, now.Add(time.Minute)))
+	if fsm.SealedManifest() == nil {
+		t.Fatal("expected sealed manifest before SealChunk")
+	}
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(chunkID, now.Add(2*time.Minute), 1, 100, now, now, now, true))
+	if fsm.SealedManifest() != nil {
+		t.Fatal("sealed manifest must clear after SealChunk")
+	}
+}
+
+func TestRecordingApplierSealChunkProto(t *testing.T) {
+	t.Parallel()
+	id := chunk.NewChunkID()
+	now := time.Unix(0, 1_700_000_000_000).UTC()
+	data := vaultctlfsm.MarshalSealChunk(id, now, 10, 500, now, now, now, true)
+	var cmd gastrologv1.VaultCtlCommand
+	if err := proto.Unmarshal(data, &cmd); err != nil {
+		t.Fatal(err)
+	}
+	if cmd.GetSealChunk() == nil {
+		t.Fatal("expected SealChunk command")
+	}
+}

@@ -6,9 +6,9 @@ import (
 	"errors"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"gastrolog/internal/glid"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
 // ErrNotRunning is returned when Run is called twice.
@@ -22,6 +22,9 @@ type VaultConfig struct {
 	Log      LogReader
 	Pull     PullClient
 	Receipts ReceiptCommitter
+	// FSM wires SetOnPublishCompletedSegment to roll the log and collect
+	// when new segment metadata is replicated. Optional when Notify is used.
+	FSM *vaultctlfsm.FSM
 }
 
 type vaultCollect struct {
@@ -30,9 +33,10 @@ type vaultCollect struct {
 	log      LogReader
 	pull     PullClient
 	receipts ReceiptCommitter
+	fsm      *vaultctlfsm.FSM
 
 	// layout caches head/pre-head segment IDs to avoid rescanning directories
-	// on every poll once warmed.
+	// on every collect pass once warmed.
 	layout struct {
 		loaded  bool
 		head    map[glid.GLID]struct{}
@@ -56,6 +60,7 @@ func newVaultCollect(vaultID glid.GLID, root string, cfg VaultConfig) (*vaultCol
 		log:      cfg.Log,
 		pull:     cfg.Pull,
 		receipts: cfg.Receipts,
+		fsm:      cfg.FSM,
 	}, nil
 }
 
@@ -126,27 +131,18 @@ func (v *vaultCollect) collectMissing(ctx context.Context) error {
 }
 
 // Config configures a CollectionManager.
-type Config struct {
-	// PollInterval is how often each vault log is rolled. Defaults to 50ms.
-	PollInterval time.Duration
-}
-
-func (c Config) pollInterval() time.Duration {
-	if c.PollInterval <= 0 {
-		return 50 * time.Millisecond
-	}
-	return c.PollInterval
-}
+type Config struct{}
 
 // Manager pulls assigned segments into pre-head, verifies, and promotes to head.
+// Collection passes are driven by vault-ctl FSM SetOnPublishCompletedSegment
+// (when FSM is wired), explicit Notify calls, and CollectOnce nudges — not by
+// polling FSM or log state on a timer.
 type Manager struct {
 	cfg Config
 
 	mu     sync.Mutex
 	vaults map[glid.GLID]*vaultCollect
 	runCtx context.Context
-
-	pollScratch []*vaultCollect
 
 	running atomic.Bool
 	wg      sync.WaitGroup
@@ -172,17 +168,36 @@ func (m *Manager) RegisterVault(vaultID glid.GLID, root string, cfg VaultConfig)
 		return err
 	}
 	m.vaults[vaultID] = v
+
+	if cfg.FSM != nil {
+		vid := vaultID
+		cfg.FSM.SetOnPublishCompletedSegment(func(vaultctlfsm.CompletedSegmentEntry) {
+			m.triggerCollect(vid)
+		})
+	}
 	return nil
 }
 
 // UnregisterVault removes a vault from collection.
 func (m *Manager) UnregisterVault(vaultID glid.GLID) {
 	m.mu.Lock()
+	v, ok := m.vaults[vaultID]
 	delete(m.vaults, vaultID)
 	m.mu.Unlock()
+	if ok && v.fsm != nil {
+		v.fsm.SetOnPublishCompletedSegment(nil)
+	}
 }
 
-// CollectOnce rolls the log and collects missing segments for one vault (for tests).
+// Notify triggers one collect pass for a vault when Run is active. Use when
+// assignment or publish signals are not wired through the vault-ctl FSM (e.g.
+// test harnesses).
+func (m *Manager) Notify(vaultID glid.GLID) {
+	m.triggerCollect(vaultID)
+}
+
+// CollectOnce rolls the log and collects missing segments for one vault (for tests
+// and ChunkingManager nudges).
 func (m *Manager) CollectOnce(ctx context.Context, vaultID glid.GLID) error {
 	m.mu.Lock()
 	v, ok := m.vaults[vaultID]
@@ -193,7 +208,8 @@ func (m *Manager) CollectOnce(ctx context.Context, vaultID glid.GLID) error {
 	return v.collectMissing(ctx)
 }
 
-// Run rolls vault logs and collects missing segments until ctx is cancelled.
+// Run blocks until ctx is cancelled. On start it catches up any assignments
+// already visible to the log reader (e.g. after Raft replay).
 func (m *Manager) Run(ctx context.Context) error {
 	if !m.running.CompareAndSwap(false, true) {
 		return ErrNotRunning
@@ -201,20 +217,18 @@ func (m *Manager) Run(ctx context.Context) error {
 
 	m.mu.Lock()
 	m.runCtx = ctx
+	vaults := make([]*vaultCollect, 0, len(m.vaults))
+	for _, v := range m.vaults {
+		vaults = append(vaults, v)
+	}
 	m.mu.Unlock()
 
-	ticker := time.NewTicker(m.cfg.pollInterval())
-	defer ticker.Stop()
+	for _, v := range vaults {
+		_ = v.collectMissing(ctx)
+	}
 
 	m.wg.Go(func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				m.poll(ctx)
-			}
-		}
+		<-ctx.Done()
 	})
 
 	m.wg.Wait()
@@ -225,16 +239,13 @@ func (m *Manager) Run(ctx context.Context) error {
 	return ctx.Err()
 }
 
-func (m *Manager) poll(ctx context.Context) {
+func (m *Manager) triggerCollect(vaultID glid.GLID) {
 	m.mu.Lock()
-	m.pollScratch = m.pollScratch[:0]
-	for _, v := range m.vaults {
-		m.pollScratch = append(m.pollScratch, v)
-	}
-	vaults := m.pollScratch
+	ctx := m.runCtx
+	v, ok := m.vaults[vaultID]
 	m.mu.Unlock()
-
-	for _, v := range vaults {
-		_ = v.collectMissing(ctx)
+	if !ok || ctx == nil {
+		return
 	}
+	_ = v.collectMissing(ctx)
 }

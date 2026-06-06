@@ -61,9 +61,9 @@ func TestOpenChunkManifestLifecycle(t *testing.T) {
 	if fsm.OpenChunk() != nil {
 		t.Fatal("open manifest must be cleared after seal")
 	}
-	pending := fsm.MaterializePending()
+	pending := fsm.SealedManifest()
 	if pending == nil || pending.ChunkID != chunkID || !pending.SealedAt.Equal(sealedAt) {
-		t.Fatalf("MaterializePending = %+v", pending)
+		t.Fatalf("SealedManifest = %+v", pending)
 	}
 	if pending.TotalRecords != 50 {
 		t.Fatalf("pending totals = %d", pending.TotalRecords)
@@ -141,7 +141,7 @@ func TestOpenChunkIdempotentReplay(t *testing.T) {
 	applyCmd(t, fsm, sealWire)
 
 	open := fsm.OpenChunk()
-	pending := fsm.MaterializePending()
+	pending := fsm.SealedManifest()
 	if open != nil || pending == nil || pending.TotalRecords != 10 {
 		t.Fatalf("open=%+v pending=%+v", open, pending)
 	}
@@ -264,7 +264,7 @@ func TestOpenChunkSnapshotRoundTrip(t *testing.T) {
 	if !proto.Equal(src.SnapshotProto(), dst.SnapshotProto()) {
 		t.Fatal("snapshot state differs after round trip")
 	}
-	pending := dst.MaterializePending()
+	pending := dst.SealedManifest()
 	if pending == nil || pending.TotalRecords != 5 || pending.TotalBytes != 999 {
 		t.Fatalf("restored pending = %+v", pending)
 	}
@@ -274,7 +274,7 @@ func TestOpenChunkSnapshotRoundTrip(t *testing.T) {
 	}
 }
 
-func TestOpenChunkManifestWhileMaterializePending(t *testing.T) {
+func TestOpenChunkManifestWhileSealedManifestPending(t *testing.T) {
 	t.Parallel()
 	fsm := New()
 	chunkID := testChunkID(0x5A)
@@ -283,7 +283,7 @@ func TestOpenChunkManifestWhileMaterializePending(t *testing.T) {
 	applyCmd(t, fsm, MarshalSealOpenChunkManifest(chunkID, now.Add(time.Minute)))
 
 	result := fsm.Apply(&hraft.Log{Data: MarshalOpenChunkManifest(testChunkID(0x5B), now)})
-	if err, ok := result.(error); !ok || !errors.Is(err, ErrMaterializePending) {
+	if err, ok := result.(error); !ok || !errors.Is(err, ErrSealedManifestPending) {
 		t.Fatalf("open while pending = %v", result)
 	}
 }

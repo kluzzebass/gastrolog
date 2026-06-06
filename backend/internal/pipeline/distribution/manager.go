@@ -52,9 +52,6 @@ func (v *vaultDist) publish(ctx context.Context, seg segmentation.CompletedSegme
 	if err != nil {
 		return err
 	}
-	if err := v.publisher.Publish(ctx, meta); err != nil {
-		return err
-	}
 
 	path := seg.Path
 	if v.localHolder() {
@@ -67,6 +64,13 @@ func (v *vaultDist) publish(ctx context.Context, seg segmentation.CompletedSegme
 	v.mu.Lock()
 	v.segments[seg.Meta.ID] = path
 	v.mu.Unlock()
+
+	if err := v.publisher.Publish(ctx, meta); err != nil {
+		v.mu.Lock()
+		delete(v.segments, seg.Meta.ID)
+		v.mu.Unlock()
+		return err
+	}
 	return nil
 }
 

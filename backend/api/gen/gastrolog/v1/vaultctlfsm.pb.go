@@ -1612,7 +1612,7 @@ func (x *OpenChunkSegmentRef) GetRefAddedAtNanos() int64 {
 	return 0
 }
 
-// OpenChunkManifestState is the replicated open or materialize-pending manifest.
+// OpenChunkManifestState is the replicated open or sealed manifest awaiting build.
 type OpenChunkManifestState struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ChunkId       []byte                 `protobuf:"bytes,1,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
@@ -2328,16 +2328,16 @@ func (x *PendingDelete) GetExpectedFrom() []string {
 // VaultCtlSnapshot is the full point-in-time state of one vault's manifest FSM
 // (replaces the hand-rolled snapshot sections).
 type VaultCtlSnapshot struct {
-	state              protoimpl.MessageState       `protogen:"open.v1"`
-	Entries            []*ManifestEntry             `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
-	Tombstones         []*Tombstone                 `protobuf:"bytes,2,rep,name=tombstones,proto3" json:"tombstones,omitempty"`
-	PendingDeletes     []*PendingDelete             `protobuf:"bytes,3,rep,name=pending_deletes,json=pendingDeletes,proto3" json:"pending_deletes,omitempty"`
-	CompletedSegments  []*CompletedSegmentEntry     `protobuf:"bytes,4,rep,name=completed_segments,json=completedSegments,proto3" json:"completed_segments,omitempty"`
-	OpenChunk          *OpenChunkManifestState      `protobuf:"bytes,5,opt,name=open_chunk,json=openChunk,proto3" json:"open_chunk,omitempty"`
-	MaterializePending *OpenChunkManifestState      `protobuf:"bytes,6,opt,name=materialize_pending,json=materializePending,proto3" json:"materialize_pending,omitempty"`
-	SegmentResume      []*SegmentResumeRecordNumber `protobuf:"bytes,7,rep,name=segment_resume,json=segmentResume,proto3" json:"segment_resume,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	state             protoimpl.MessageState       `protogen:"open.v1"`
+	Entries           []*ManifestEntry             `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
+	Tombstones        []*Tombstone                 `protobuf:"bytes,2,rep,name=tombstones,proto3" json:"tombstones,omitempty"`
+	PendingDeletes    []*PendingDelete             `protobuf:"bytes,3,rep,name=pending_deletes,json=pendingDeletes,proto3" json:"pending_deletes,omitempty"`
+	CompletedSegments []*CompletedSegmentEntry     `protobuf:"bytes,4,rep,name=completed_segments,json=completedSegments,proto3" json:"completed_segments,omitempty"`
+	OpenChunk         *OpenChunkManifestState      `protobuf:"bytes,5,opt,name=open_chunk,json=openChunk,proto3" json:"open_chunk,omitempty"`
+	SealedManifest    *OpenChunkManifestState      `protobuf:"bytes,6,opt,name=sealed_manifest,json=sealedManifest,proto3" json:"sealed_manifest,omitempty"`
+	SegmentResume     []*SegmentResumeRecordNumber `protobuf:"bytes,7,rep,name=segment_resume,json=segmentResume,proto3" json:"segment_resume,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *VaultCtlSnapshot) Reset() {
@@ -2405,9 +2405,9 @@ func (x *VaultCtlSnapshot) GetOpenChunk() *OpenChunkManifestState {
 	return nil
 }
 
-func (x *VaultCtlSnapshot) GetMaterializePending() *OpenChunkManifestState {
+func (x *VaultCtlSnapshot) GetSealedManifest() *OpenChunkManifestState {
 	if x != nil {
-		return x.MaterializePending
+		return x.SealedManifest
 	}
 	return nil
 }
@@ -2703,7 +2703,7 @@ const file_gastrolog_v1_vaultctlfsm_proto_rawDesc = "" +
 	"\bchunk_id\x18\x01 \x01(\fR\achunkId\x12\x16\n" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\x12*\n" +
 	"\x11proposed_at_nanos\x18\x03 \x01(\x03R\x0fproposedAtNanos\x12#\n" +
-	"\rexpected_from\x18\x04 \x03(\tR\fexpectedFrom\"\x88\x04\n" +
+	"\rexpected_from\x18\x04 \x03(\tR\fexpectedFrom\"\x80\x04\n" +
 	"\x10VaultCtlSnapshot\x125\n" +
 	"\aentries\x18\x01 \x03(\v2\x1b.gastrolog.v1.ManifestEntryR\aentries\x127\n" +
 	"\n" +
@@ -2712,8 +2712,8 @@ const file_gastrolog_v1_vaultctlfsm_proto_rawDesc = "" +
 	"\x0fpending_deletes\x18\x03 \x03(\v2\x1b.gastrolog.v1.PendingDeleteR\x0ependingDeletes\x12R\n" +
 	"\x12completed_segments\x18\x04 \x03(\v2#.gastrolog.v1.CompletedSegmentEntryR\x11completedSegments\x12C\n" +
 	"\n" +
-	"open_chunk\x18\x05 \x01(\v2$.gastrolog.v1.OpenChunkManifestStateR\topenChunk\x12U\n" +
-	"\x13materialize_pending\x18\x06 \x01(\v2$.gastrolog.v1.OpenChunkManifestStateR\x12materializePending\x12N\n" +
+	"open_chunk\x18\x05 \x01(\v2$.gastrolog.v1.OpenChunkManifestStateR\topenChunk\x12M\n" +
+	"\x0fsealed_manifest\x18\x06 \x01(\v2$.gastrolog.v1.OpenChunkManifestStateR\x0esealedManifest\x12N\n" +
 	"\x0esegment_resume\x18\a \x03(\v2'.gastrolog.v1.SegmentResumeRecordNumberR\rsegmentResume\"S\n" +
 	"\x12VaultGroupSnapshot\x12=\n" +
 	"\x06vaults\x18\x01 \x03(\v2%.gastrolog.v1.VaultGroupSnapshotEntryR\x06vaults\"p\n" +
@@ -2799,7 +2799,7 @@ var file_gastrolog_v1_vaultctlfsm_proto_depIdxs = []int32{
 	28, // 26: gastrolog.v1.VaultCtlSnapshot.pending_deletes:type_name -> gastrolog.v1.PendingDelete
 	18, // 27: gastrolog.v1.VaultCtlSnapshot.completed_segments:type_name -> gastrolog.v1.CompletedSegmentEntry
 	20, // 28: gastrolog.v1.VaultCtlSnapshot.open_chunk:type_name -> gastrolog.v1.OpenChunkManifestState
-	20, // 29: gastrolog.v1.VaultCtlSnapshot.materialize_pending:type_name -> gastrolog.v1.OpenChunkManifestState
+	20, // 29: gastrolog.v1.VaultCtlSnapshot.sealed_manifest:type_name -> gastrolog.v1.OpenChunkManifestState
 	21, // 30: gastrolog.v1.VaultCtlSnapshot.segment_resume:type_name -> gastrolog.v1.SegmentResumeRecordNumber
 	31, // 31: gastrolog.v1.VaultGroupSnapshot.vaults:type_name -> gastrolog.v1.VaultGroupSnapshotEntry
 	29, // 32: gastrolog.v1.VaultGroupSnapshotEntry.snapshot:type_name -> gastrolog.v1.VaultCtlSnapshot

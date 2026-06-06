@@ -230,6 +230,36 @@ export class VaultCtlCommand extends Message<VaultCtlCommand> {
      */
     value: RepatriateChunkCommand;
     case: "repatriateChunk";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.PublishCompletedSegmentCommand publish_completed_segment = 14;
+     */
+    value: PublishCompletedSegmentCommand;
+    case: "publishCompletedSegment";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.OpenChunkManifestCommand open_chunk_manifest = 15;
+     */
+    value: OpenChunkManifestCommand;
+    case: "openChunkManifest";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.AddOpenChunkSegmentRefCommand add_open_chunk_segment_ref = 16;
+     */
+    value: AddOpenChunkSegmentRefCommand;
+    case: "addOpenChunkSegmentRef";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.SealOpenChunkManifestCommand seal_open_chunk_manifest = 17;
+     */
+    value: SealOpenChunkManifestCommand;
+    case: "sealOpenChunkManifest";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.ReleaseSegmentsCommand release_segments = 18;
+     */
+    value: ReleaseSegmentsCommand;
+    case: "releaseSegments";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<VaultCtlCommand>) {
@@ -253,6 +283,11 @@ export class VaultCtlCommand extends Message<VaultCtlCommand> {
     { no: 11, name: "attach_offsets", kind: "message", T: AttachOffsetsCommand, oneof: "command" },
     { no: 12, name: "begin_seal", kind: "message", T: BeginSealCommand, oneof: "command" },
     { no: 13, name: "repatriate_chunk", kind: "message", T: RepatriateChunkCommand, oneof: "command" },
+    { no: 14, name: "publish_completed_segment", kind: "message", T: PublishCompletedSegmentCommand, oneof: "command" },
+    { no: 15, name: "open_chunk_manifest", kind: "message", T: OpenChunkManifestCommand, oneof: "command" },
+    { no: 16, name: "add_open_chunk_segment_ref", kind: "message", T: AddOpenChunkSegmentRefCommand, oneof: "command" },
+    { no: 17, name: "seal_open_chunk_manifest", kind: "message", T: SealOpenChunkManifestCommand, oneof: "command" },
+    { no: 18, name: "release_segments", kind: "message", T: ReleaseSegmentsCommand, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultCtlCommand {
@@ -921,6 +956,551 @@ export class RepatriateChunkCommand extends Message<RepatriateChunkCommand> {
 }
 
 /**
+ * PublishCompletedSegmentCommand registers a completed segment in the vault-ctl
+ * FSM (V3 pipeline). Origin publishes when Segmentation closes a segment.
+ *
+ * @generated from message gastrolog.v1.PublishCompletedSegmentCommand
+ */
+export class PublishCompletedSegmentCommand extends Message<PublishCompletedSegmentCommand> {
+  /**
+   * @generated from field: bytes segment_id = 1;
+   */
+  segmentId = new Uint8Array(0);
+
+  /**
+   * @generated from field: uint32 record_count = 2;
+   */
+  recordCount = 0;
+
+  /**
+   * @generated from field: uint64 byte_size = 3;
+   */
+  byteSize = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 first_ingest_ts_nanos = 4;
+   */
+  firstIngestTsNanos = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 last_ingest_ts_nanos = 5;
+   */
+  lastIngestTsNanos = protoInt64.zero;
+
+  /**
+   * @generated from field: uint32 checksum = 6;
+   */
+  checksum = 0;
+
+  /**
+   * Node that completed the segment (holder hint for Collection).
+   *
+   * @generated from field: string origin_node_id = 7;
+   */
+  originNodeId = "";
+
+  /**
+   * Wall time carried in the command for deterministic replay (Unix nanos).
+   *
+   * @generated from field: int64 published_at_nanos = 8;
+   */
+  publishedAtNanos = protoInt64.zero;
+
+  constructor(data?: PartialMessage<PublishCompletedSegmentCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PublishCompletedSegmentCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "segment_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "record_count", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 3, name: "byte_size", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 4, name: "first_ingest_ts_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 5, name: "last_ingest_ts_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 6, name: "checksum", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 7, name: "origin_node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 8, name: "published_at_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PublishCompletedSegmentCommand {
+    return new PublishCompletedSegmentCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PublishCompletedSegmentCommand {
+    return new PublishCompletedSegmentCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PublishCompletedSegmentCommand {
+    return new PublishCompletedSegmentCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PublishCompletedSegmentCommand | PlainMessage<PublishCompletedSegmentCommand> | undefined, b: PublishCompletedSegmentCommand | PlainMessage<PublishCompletedSegmentCommand> | undefined): boolean {
+    return proto3.util.equals(PublishCompletedSegmentCommand, a, b);
+  }
+}
+
+/**
+ * CompletedSegmentEntry is replicated registry state for one completed segment.
+ *
+ * @generated from message gastrolog.v1.CompletedSegmentEntry
+ */
+export class CompletedSegmentEntry extends Message<CompletedSegmentEntry> {
+  /**
+   * @generated from field: bytes segment_id = 1;
+   */
+  segmentId = new Uint8Array(0);
+
+  /**
+   * @generated from field: uint32 record_count = 2;
+   */
+  recordCount = 0;
+
+  /**
+   * @generated from field: uint64 byte_size = 3;
+   */
+  byteSize = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 first_ingest_ts_nanos = 4;
+   */
+  firstIngestTsNanos = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 last_ingest_ts_nanos = 5;
+   */
+  lastIngestTsNanos = protoInt64.zero;
+
+  /**
+   * @generated from field: uint32 checksum = 6;
+   */
+  checksum = 0;
+
+  /**
+   * @generated from field: string origin_node_id = 7;
+   */
+  originNodeId = "";
+
+  /**
+   * @generated from field: int64 published_at_nanos = 8;
+   */
+  publishedAtNanos = protoInt64.zero;
+
+  constructor(data?: PartialMessage<CompletedSegmentEntry>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.CompletedSegmentEntry";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "segment_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "record_count", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 3, name: "byte_size", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 4, name: "first_ingest_ts_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 5, name: "last_ingest_ts_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 6, name: "checksum", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 7, name: "origin_node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 8, name: "published_at_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CompletedSegmentEntry {
+    return new CompletedSegmentEntry().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): CompletedSegmentEntry {
+    return new CompletedSegmentEntry().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): CompletedSegmentEntry {
+    return new CompletedSegmentEntry().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: CompletedSegmentEntry | PlainMessage<CompletedSegmentEntry> | undefined, b: CompletedSegmentEntry | PlainMessage<CompletedSegmentEntry> | undefined): boolean {
+    return proto3.util.equals(CompletedSegmentEntry, a, b);
+  }
+}
+
+/**
+ * OpenChunkSegmentRef names a partial or whole slice of one segment in the
+ * open-chunk manifest (EventID-sorted record numbers, inclusive last).
+ *
+ * @generated from message gastrolog.v1.OpenChunkSegmentRef
+ */
+export class OpenChunkSegmentRef extends Message<OpenChunkSegmentRef> {
+  /**
+   * @generated from field: bytes segment_id = 1;
+   */
+  segmentId = new Uint8Array(0);
+
+  /**
+   * @generated from field: uint32 first_record_number = 2;
+   */
+  firstRecordNumber = 0;
+
+  /**
+   * @generated from field: uint32 last_record_number = 3;
+   */
+  lastRecordNumber = 0;
+
+  /**
+   * @generated from field: uint64 slice_bytes = 4;
+   */
+  sliceBytes = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 ref_added_at_nanos = 5;
+   */
+  refAddedAtNanos = protoInt64.zero;
+
+  constructor(data?: PartialMessage<OpenChunkSegmentRef>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.OpenChunkSegmentRef";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "segment_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "first_record_number", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 3, name: "last_record_number", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 4, name: "slice_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 5, name: "ref_added_at_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): OpenChunkSegmentRef {
+    return new OpenChunkSegmentRef().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): OpenChunkSegmentRef {
+    return new OpenChunkSegmentRef().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): OpenChunkSegmentRef {
+    return new OpenChunkSegmentRef().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: OpenChunkSegmentRef | PlainMessage<OpenChunkSegmentRef> | undefined, b: OpenChunkSegmentRef | PlainMessage<OpenChunkSegmentRef> | undefined): boolean {
+    return proto3.util.equals(OpenChunkSegmentRef, a, b);
+  }
+}
+
+/**
+ * OpenChunkManifestState is the replicated open or sealed manifest awaiting build.
+ *
+ * @generated from message gastrolog.v1.OpenChunkManifestState
+ */
+export class OpenChunkManifestState extends Message<OpenChunkManifestState> {
+  /**
+   * @generated from field: bytes chunk_id = 1;
+   */
+  chunkId = new Uint8Array(0);
+
+  /**
+   * @generated from field: int64 opened_at_nanos = 2;
+   */
+  openedAtNanos = protoInt64.zero;
+
+  /**
+   * @generated from field: repeated gastrolog.v1.OpenChunkSegmentRef refs = 3;
+   */
+  refs: OpenChunkSegmentRef[] = [];
+
+  /**
+   * @generated from field: uint64 total_records = 4;
+   */
+  totalRecords = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 total_bytes = 5;
+   */
+  totalBytes = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 sealed_at_nanos = 6;
+   */
+  sealedAtNanos = protoInt64.zero;
+
+  constructor(data?: PartialMessage<OpenChunkManifestState>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.OpenChunkManifestState";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "opened_at_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 3, name: "refs", kind: "message", T: OpenChunkSegmentRef, repeated: true },
+    { no: 4, name: "total_records", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 5, name: "total_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 6, name: "sealed_at_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): OpenChunkManifestState {
+    return new OpenChunkManifestState().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): OpenChunkManifestState {
+    return new OpenChunkManifestState().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): OpenChunkManifestState {
+    return new OpenChunkManifestState().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: OpenChunkManifestState | PlainMessage<OpenChunkManifestState> | undefined, b: OpenChunkManifestState | PlainMessage<OpenChunkManifestState> | undefined): boolean {
+    return proto3.util.equals(OpenChunkManifestState, a, b);
+  }
+}
+
+/**
+ * SegmentResumeRecordNumber is the next EventID-order record number to chunk
+ * from a segment after partial inclusion.
+ *
+ * @generated from message gastrolog.v1.SegmentResumeRecordNumber
+ */
+export class SegmentResumeRecordNumber extends Message<SegmentResumeRecordNumber> {
+  /**
+   * @generated from field: bytes segment_id = 1;
+   */
+  segmentId = new Uint8Array(0);
+
+  /**
+   * @generated from field: uint32 next_record_number = 2;
+   */
+  nextRecordNumber = 0;
+
+  constructor(data?: PartialMessage<SegmentResumeRecordNumber>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.SegmentResumeRecordNumber";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "segment_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "next_record_number", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SegmentResumeRecordNumber {
+    return new SegmentResumeRecordNumber().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SegmentResumeRecordNumber {
+    return new SegmentResumeRecordNumber().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SegmentResumeRecordNumber {
+    return new SegmentResumeRecordNumber().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SegmentResumeRecordNumber | PlainMessage<SegmentResumeRecordNumber> | undefined, b: SegmentResumeRecordNumber | PlainMessage<SegmentResumeRecordNumber> | undefined): boolean {
+    return proto3.util.equals(SegmentResumeRecordNumber, a, b);
+  }
+}
+
+/**
+ * OpenChunkManifestCommand opens a new manifest-backed active chunk.
+ *
+ * @generated from message gastrolog.v1.OpenChunkManifestCommand
+ */
+export class OpenChunkManifestCommand extends Message<OpenChunkManifestCommand> {
+  /**
+   * @generated from field: bytes chunk_id = 1;
+   */
+  chunkId = new Uint8Array(0);
+
+  /**
+   * @generated from field: int64 opened_at_nanos = 2;
+   */
+  openedAtNanos = protoInt64.zero;
+
+  constructor(data?: PartialMessage<OpenChunkManifestCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.OpenChunkManifestCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "opened_at_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): OpenChunkManifestCommand {
+    return new OpenChunkManifestCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): OpenChunkManifestCommand {
+    return new OpenChunkManifestCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): OpenChunkManifestCommand {
+    return new OpenChunkManifestCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: OpenChunkManifestCommand | PlainMessage<OpenChunkManifestCommand> | undefined, b: OpenChunkManifestCommand | PlainMessage<OpenChunkManifestCommand> | undefined): boolean {
+    return proto3.util.equals(OpenChunkManifestCommand, a, b);
+  }
+}
+
+/**
+ * AddOpenChunkSegmentRefCommand appends one segment slice to the open manifest.
+ *
+ * @generated from message gastrolog.v1.AddOpenChunkSegmentRefCommand
+ */
+export class AddOpenChunkSegmentRefCommand extends Message<AddOpenChunkSegmentRefCommand> {
+  /**
+   * @generated from field: bytes chunk_id = 1;
+   */
+  chunkId = new Uint8Array(0);
+
+  /**
+   * @generated from field: bytes segment_id = 2;
+   */
+  segmentId = new Uint8Array(0);
+
+  /**
+   * @generated from field: uint32 first_record_number = 3;
+   */
+  firstRecordNumber = 0;
+
+  /**
+   * @generated from field: uint32 last_record_number = 4;
+   */
+  lastRecordNumber = 0;
+
+  /**
+   * @generated from field: uint64 slice_bytes = 5;
+   */
+  sliceBytes = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 ref_added_at_nanos = 6;
+   */
+  refAddedAtNanos = protoInt64.zero;
+
+  constructor(data?: PartialMessage<AddOpenChunkSegmentRefCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.AddOpenChunkSegmentRefCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "segment_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 3, name: "first_record_number", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 4, name: "last_record_number", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 5, name: "slice_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 6, name: "ref_added_at_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): AddOpenChunkSegmentRefCommand {
+    return new AddOpenChunkSegmentRefCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): AddOpenChunkSegmentRefCommand {
+    return new AddOpenChunkSegmentRefCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): AddOpenChunkSegmentRefCommand {
+    return new AddOpenChunkSegmentRefCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: AddOpenChunkSegmentRefCommand | PlainMessage<AddOpenChunkSegmentRefCommand> | undefined, b: AddOpenChunkSegmentRefCommand | PlainMessage<AddOpenChunkSegmentRefCommand> | undefined): boolean {
+    return proto3.util.equals(AddOpenChunkSegmentRefCommand, a, b);
+  }
+}
+
+/**
+ * SealOpenChunkManifestCommand closes the open manifest for materialization.
+ *
+ * @generated from message gastrolog.v1.SealOpenChunkManifestCommand
+ */
+export class SealOpenChunkManifestCommand extends Message<SealOpenChunkManifestCommand> {
+  /**
+   * @generated from field: bytes chunk_id = 1;
+   */
+  chunkId = new Uint8Array(0);
+
+  /**
+   * @generated from field: int64 sealed_at_nanos = 2;
+   */
+  sealedAtNanos = protoInt64.zero;
+
+  constructor(data?: PartialMessage<SealOpenChunkManifestCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.SealOpenChunkManifestCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "sealed_at_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SealOpenChunkManifestCommand {
+    return new SealOpenChunkManifestCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SealOpenChunkManifestCommand {
+    return new SealOpenChunkManifestCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SealOpenChunkManifestCommand {
+    return new SealOpenChunkManifestCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SealOpenChunkManifestCommand | PlainMessage<SealOpenChunkManifestCommand> | undefined, b: SealOpenChunkManifestCommand | PlainMessage<SealOpenChunkManifestCommand> | undefined): boolean {
+    return proto3.util.equals(SealOpenChunkManifestCommand, a, b);
+  }
+}
+
+/**
+ * ReleaseSegmentsCommand drops completed segment registry entries after chunk
+ * replication (purge signaling). See chunking-design direction D.
+ *
+ * @generated from message gastrolog.v1.ReleaseSegmentsCommand
+ */
+export class ReleaseSegmentsCommand extends Message<ReleaseSegmentsCommand> {
+  /**
+   * @generated from field: repeated bytes segment_ids = 1;
+   */
+  segmentIds: Uint8Array[] = [];
+
+  constructor(data?: PartialMessage<ReleaseSegmentsCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ReleaseSegmentsCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "segment_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ReleaseSegmentsCommand {
+    return new ReleaseSegmentsCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ReleaseSegmentsCommand {
+    return new ReleaseSegmentsCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ReleaseSegmentsCommand {
+    return new ReleaseSegmentsCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ReleaseSegmentsCommand | PlainMessage<ReleaseSegmentsCommand> | undefined, b: ReleaseSegmentsCommand | PlainMessage<ReleaseSegmentsCommand> | undefined): boolean {
+    return proto3.util.equals(ReleaseSegmentsCommand, a, b);
+  }
+}
+
+/**
  * ManifestEntry is the full metadata for one chunk in a vault's manifest. The
  * proto carries every field of the Go ManifestEntry, including Hash /
  * CloudServiceID / KeyScheme which the legacy 123-byte snapshot codec dropped.
@@ -1211,6 +1791,26 @@ export class VaultCtlSnapshot extends Message<VaultCtlSnapshot> {
    */
   pendingDeletes: PendingDelete[] = [];
 
+  /**
+   * @generated from field: repeated gastrolog.v1.CompletedSegmentEntry completed_segments = 4;
+   */
+  completedSegments: CompletedSegmentEntry[] = [];
+
+  /**
+   * @generated from field: gastrolog.v1.OpenChunkManifestState open_chunk = 5;
+   */
+  openChunk?: OpenChunkManifestState;
+
+  /**
+   * @generated from field: gastrolog.v1.OpenChunkManifestState sealed_manifest = 6;
+   */
+  sealedManifest?: OpenChunkManifestState;
+
+  /**
+   * @generated from field: repeated gastrolog.v1.SegmentResumeRecordNumber segment_resume = 7;
+   */
+  segmentResume: SegmentResumeRecordNumber[] = [];
+
   constructor(data?: PartialMessage<VaultCtlSnapshot>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1222,6 +1822,10 @@ export class VaultCtlSnapshot extends Message<VaultCtlSnapshot> {
     { no: 1, name: "entries", kind: "message", T: ManifestEntry, repeated: true },
     { no: 2, name: "tombstones", kind: "message", T: Tombstone, repeated: true },
     { no: 3, name: "pending_deletes", kind: "message", T: PendingDelete, repeated: true },
+    { no: 4, name: "completed_segments", kind: "message", T: CompletedSegmentEntry, repeated: true },
+    { no: 5, name: "open_chunk", kind: "message", T: OpenChunkManifestState },
+    { no: 6, name: "sealed_manifest", kind: "message", T: OpenChunkManifestState },
+    { no: 7, name: "segment_resume", kind: "message", T: SegmentResumeRecordNumber, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultCtlSnapshot {

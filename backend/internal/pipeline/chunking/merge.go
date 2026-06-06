@@ -9,9 +9,9 @@ import (
 )
 
 type spanCursor struct {
-	idx  *OrderedIndex
-	pos  uint32
-	end  uint32
+	idx *OrderedIndex
+	pos uint32
+	end uint32
 }
 
 func (c *spanCursor) popEntry() (segment.IndexEntry, bool, error) {
@@ -171,7 +171,7 @@ func MergeSpanRefs(refs []SpanRef) iter.Seq2[record.Record, error] {
 	}
 }
 
-// MergeRecords materializes MergeSpanRefs (primarily for tests).
+// MergeRecords exhausts MergeSpanRefs (primarily for tests).
 func MergeRecords(refs []SpanRef) ([]record.Record, error) {
 	var out []record.Record
 	for rec, err := range MergeSpanRefs(refs) {

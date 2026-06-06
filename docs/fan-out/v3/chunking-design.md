@@ -8,7 +8,7 @@ design-notes once something is settled.
 
 **Parent context:** Phase 7 ChunkingManager (`gastrolog-3mndj`). Merge + GLCB encode
 are implemented on branch history (`chunking.MergeSpanRefs`, `chunking.BuildGLCB`);
-orchestration, vault-ctl feed/manifest, and materialize-at-rotate are not.
+orchestration, vault-ctl feed/manifest, and build-at-rotate are not.
 
 ---
 
@@ -17,7 +17,7 @@ orchestration, vault-ctl feed/manifest, and materialize-at-rotate are not.
 Turn completed **segments** (ephemeral, deterministic build inputs) into sealed
 **chunks** (durable GLCB artifacts) on every vault home, such that:
 
-- All replicas that materialize the same chunk produce **byte-identical** output.
+- All replicas that **build** the same chunk produce **byte-identical** output.
 - **Binary completeness** — never seal a short chunk because a segment was missing.
 - **Rotation** respects operator policy (record count, bytes, schedule, …).
 - **Query** can see recent data before it is sealed (the role active chunks fill today).
@@ -44,7 +44,7 @@ segment. Each ref must carry three fields (plus optional byte totals for size po
 not “position,” which reads like on-disk placement. `firstRecordNumber` and
 `lastRecordNumber` are ordinals in the segment’s **sorted** EventID sequence: record
 number `n` is the `n`th record when ordered by `EventID` (0-based; same order used for
-k-way merge and chunk materialization). They are **not** append-order frame numbers,
+k-way merge and chunk build). They are **not** append-order frame numbers,
 byte offsets, or `FilePos` values. A segment’s on-disk layout follows collection append
 order; EventID order can differ. Resolve refs only through the segment EventID index
 (e.g. `RecordAtEventOrder(n)`), never by scanning the file front-to-back or by raw
@@ -66,7 +66,7 @@ segment before** pulling a new segment.
 
 **Code mapping today:** `Span{Start, Count}` ↔ `firstRecordNumber = Start`,
 `lastRecordNumber = Start + Count - 1`. Manifest FSM and vault-ctl should use the
-explicit first/last form; builders convert at the materialize boundary if needed.
+explicit first/last form; builders convert at the build boundary if needed.
 
 Multiple refs may reference the same `segmentID` in one manifest only if they are
 non-overlapping contiguous slices (normally one ref per segment per manifest).
@@ -127,7 +127,7 @@ the walk runs.
 
 **Replica agreement** fails if nodes run the merge with **different segment sets**
 (e.g. one home has S3, another does not). Completeness gating must define the
-snapshot before anyone materializes.
+snapshot before anyone builds.
 
 **Rejected (straggler model):** time-window closure with per-origin watermarks — a
 “late” record cannot belong inside an already-sealed chunk because the chunk is
@@ -223,7 +223,7 @@ cluster-wide; then origin may purge.
 **Open:** pace on slowest home vs any holder; seal/purge when RF vs all homes ready;
 query on lagging `AppliedIndex`.
 
-### D. Manifest of segment refs — materialize at rotate (current leading direction)
+### D. Manifest of segment refs — build at rotate (current leading direction)
 
 Do **not** build a physical active chunk during the open phase. The “open chunk” is a
 **replicated manifest**: ordered list of segment refs `(segmentID, firstRecordNumber,
@@ -238,38 +238,38 @@ on Raft until rotation.
 
 **On rotation:**
 
-- **Materialize** once: walk manifest, read segments (index helps for partial spans
-  and byte accounting), concat / encode GLCB / seal.
-- May still be a **one-shot k-way merge at seal** over listed spans only, using
-  segment indexes as cursors — merge moves from collection phase to materialize phase.
+- **Build once** at seal: walk manifest, read segments (index helps for partial spans
+  and byte accounting), k-way merge / encode GLCB / seal.
+- One **k-way merge at seal** over listed spans only, using segment indexes as
+  cursors — merge moves from collection phase to build phase.
 
 **Pros:**
 
 - Cheap open phase (manifest only on apply).
 - Rotation predicate from **summed ref metadata** (record count; bytes if each ref
   carries slice byte total).
-- Follower lag: manifest applies without local materialize until segments present.
+- Follower lag: manifest applies without local build until segments present.
 - Same family of leader + Raft coordination as C, without incremental chunk files.
 
 **Cons / scrutiny:**
 
 - Query layer must treat open chunk as **manifest + segment index fan-out**.
 - Byte totals per ref must be computed **deterministically** when the leader adds a ref.
-- Materialize must be **idempotent** (temp GLCB + rename).
-- Seal/release gating: materialize when local holder has all manifest segments; cluster
+- Build must be **idempotent** (temp GLCB + rename).
+- Seal/release gating: build when local holder has all manifest segments; cluster
   purge when chunk sealed/replicated per holder-set rules.
 
 ---
 
 ## Comparison
 
-| | A merge-at-seal | B incremental active | C Raft feed → active | D manifest → materialize |
+| | A merge-at-seal | B incremental active | C Raft feed → active | D manifest → build at seal |
 |--|-----------------|----------------------|----------------------|---------------------------|
 | Open-phase storage | Indexed head segments | Growing active chunk | Growing active chunk | Segment files + manifest |
 | Open-phase query | Segment indexes | Active chunk B+ tree | Active chunk B+ tree | Segment indexes (listed refs) |
 | Heavy I/O | At seal | Continuous | Continuous | **At seal only** |
 | Coordination | Shared snapshot + build | Hard (divergence) | Leader Raft feed | Leader Raft manifest |
-| Segment index | Yes (head + merge) | Optional (scan on drain) | Optional | **Yes (query + materialize)** |
+| Segment index | Yes (head + merge) | Optional (scan on drain) | Optional | **Yes (query + build)** |
 | k-way merge | At seal | Dropped | Dropped | **At seal (over manifest only)** or sort at seal |
 
 ---
@@ -287,9 +287,9 @@ Open chunk (manifest on vault-ctl FSM):
 
   Rotation when committed totals satisfy policy (records / bytes / cron)
 
-Materialize:
-  Leader: CommitSeal / BeginMaterialize(manifest, chunkID)
-  Each replica: if all manifest segments local → merge/concat → GLCB → sealed chunk
+Build at seal:
+  Leader: SealOpenChunkManifest(chunkID)
+  Each replica: if all manifest segments local → merge → GLCB → SealChunk
   Verify: blob digest equality across builders
 
 Release:
@@ -300,8 +300,8 @@ Release:
 **Failure:**
 
 - Leader dies: new leader continues manifest from FSM.
-- Builder dies mid-materialize: replay or re-run idempotent materialize.
-- Replica missing segment: cannot materialize locally; does not block manifest apply;
+- Builder dies mid-build: replay or re-run idempotent build.
+- Replica missing segment: cannot build locally; does not block manifest apply;
   seal/purge predicates must define behavior for stragglers.
 
 ---
@@ -315,14 +315,15 @@ wires, does not own phase logic”).
 |---------|---------|----------------|
 | **Decisions (planner)** | `backend/internal/pipeline/chunking` | Pure functions: open manifest + resume record numbers + eligible segments + rotation policy → next `AddSegmentRef` (segmentID, first/last record number, byte total) or rotate. No Raft, no segment I/O — unit-testable. Lives beside existing `merge.go` / `glcb.go` (same span/budget semantics, different phase of the pipeline). |
 | **Leader loop** | `backend/internal/pipeline/chunking` (`ChunkingManager`) | Vault-leader-only goroutine: read FSM + segment registry, call planner, **propose** commands through a vault-ctl `Applier`. Gated on vault leadership (same class of check as other leader-only work, not on every home). |
-| **Execution (followers + leader)** | `backend/internal/pipeline/chunking` (`ChunkingManager`) | Every home: watch applied manifest, materialize on seal (`MergeSpanRefs` + `BuildGLCB`), nudge Collection for missing segments, report chunk identity/digest back to vault-ctl. Does **not** invent membership. |
+| **Execution (followers + leader)** | `backend/internal/pipeline/chunking` (`ChunkingManager`) | Every home: watch sealed manifest, build at seal (`BuildSealedChunk` / `MergeSpanRefs` + `BuildGLCB`), nudge Collection for missing segments, report chunk identity/digest back to vault-ctl. Does **not** invent membership. |
 | **Durable state** | `backend/internal/vaultraft/vaultctlfsm` | Command types and `Apply` handlers only — open manifest refs, running totals, `manifest_opened_at`, resume map, seal/release. **No** segment scans, merge simulation, or pick-order policy. |
 | **Wiring** | `backend/internal/orchestrator` | Start/stop `ChunkingManager` per vault home; inject vault-ctl `Applier`, FSM read callbacks, Collection nudge. Same supervisor role as other pipeline managers — **not** where chunk membership is decided (contrast retention/drain sweeps, which are lifecycle, not phase 7). |
 
 Suggested files under `pipeline/chunking` (names provisional):
 
 - `planner.go` — budget walk / next-ref / should-rotate
-- `manager.go` — `ChunkingManager` Run loop (leader planner tick + follower materialize)
+- `build.go` — `BuildSealedChunk` from sealed manifest
+- `manager.go` — `ChunkingManager` Run loop (leader planner on vault-ctl events + follower build at seal)
 - existing `span.go`, `merge.go`, `glcb.go`, `index.go`
 
 Proto / generated commands for `AddSegmentRef` and open-chunk manifest fields extend
@@ -336,13 +337,18 @@ simulating a cut.
 
 | Component | Status | Notes if direction D wins |
 |-----------|--------|---------------------------|
-| `pipeline/segment` index | Built | Keep — query + materialize reads. |
-| `chunking.MergeSpanRefs` | Built | Reuse at **materialize** over manifest spans. |
-| `chunking.BuildGLCB` | Built | Reuse as materialize output path. |
+| `pipeline/segment` index | Built | Keep — query + build reads. |
+| `chunking.MergeSpanRefs` | Built | Reuse at **build** over manifest spans. |
+| `chunking.BuildGLCB` | Built | Reuse as build output path. |
 | `chunking.Span` / `SpanRef` | Built | `Start`/`Count` ↔ first/last; manifest uses explicit last. |
 | `chunking` planner | Not built | Pure next-ref / rotate; see [Package layout](#package-layout). |
 | vault-ctl chunk FSM | Not built | Manifest, rotation totals, seal, release (`vaultctlfsm` Apply only). |
-| `chunking` ChunkingManager | Not built | Leader planner tick + apply manifest, materialize on seal, nudge Collection. |
+| `chunking` ChunkingManager | Partial | Leader planner on vault-ctl events; build at seal + nudge Collection. |
+
+**Warning — no FSM polling:** Collection and Chunking managers must not poll vault-ctl
+state on a timer. Use FSM apply callbacks (`SetOnPublishCompletedSegment`,
+`SetOnSealedManifest`), explicit nudges, and Run-start catch-up. See design-notes
+§ Phases & managers (“Do not poll vault-ctl FSM state on a timer”).
 | Query “virtual open chunk” | Not built | Fan-out to segment indexes for listed refs. |
 
 ---
@@ -352,12 +358,12 @@ simulating a cut.
 1. **Eligibility snapshot** — when adding refs, must every required home already hold
    the segment, or only “some holder has it” with catch-up before seal?
 
-2. **Seal / purge predicate** — all homes materialized vs replication RF vs best-effort
+2. **Seal / purge predicate** — all homes built vs replication RF vs best-effort
    with available nodes; when can origin wipe segments?
 
 3. **Ref granularity on Raft** — whole segment vs partial span per command; batch size.
 
-4. **Materialize ordering** — manifest pick order × within-segment scan vs one k-way
+4. **Build ordering** — manifest pick order × within-segment scan vs one k-way
    merge at seal; GLCB / ingest index requirements.
 
 5. **Byte accounting** — pinned unit; who computes slice bytes when adding a partial ref.
@@ -392,7 +398,7 @@ simulating a cut.
 - Tracker: `gastrolog-3mndj` (parent). Children (open):
   - `gastrolog-53ron` — vault-ctl open-chunk manifest FSM
   - `gastrolog-uffcg` — chunking planner (next ref / rotate)
-  - `gastrolog-5u73c` — ChunkingManager materialize-at-seal
+  - `gastrolog-5u73c` — ChunkingManager build-at-seal
   - `gastrolog-5i9e6` — ChunkingManager leader planner loop
   - `gastrolog-5x29i` — ChunkingManager orchestrator wiring
   - `gastrolog-6chex` — virtual open-chunk query

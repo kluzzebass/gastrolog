@@ -12,6 +12,9 @@ import (
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/collection"
 	"gastrolog/internal/pipeline/paths"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
+
+	hraft "github.com/hashicorp/raft"
 )
 
 type staticLog struct {
@@ -158,7 +161,7 @@ func TestCollectOnceSkipsSegmentAlreadyInHead(t *testing.T) {
 	}
 }
 
-func TestRunPollsUntilCancelled(t *testing.T) {
+func TestRunCollectsOnNotify(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()
 	segID := glid.New()
@@ -168,7 +171,7 @@ func TestRunPollsUntilCancelled(t *testing.T) {
 	log := &staticLog{}
 	receipts := &recordingReceipts{}
 
-	mgr := collection.New(collection.Config{PollInterval: 10 * time.Millisecond})
+	mgr := collection.New(collection.Config{})
 	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
 		Log:      log,
 		Pull:     pull,
@@ -178,36 +181,92 @@ func TestRunPollsUntilCancelled(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
 	go func() {
-		_ = mgr.Run(ctx)
-		close(done)
-	}()
-	t.Cleanup(func() {
+		time.Sleep(20 * time.Millisecond)
+		pull.Put(segID, writeSegmentBytes(t, vaultID, segID, "async collect"))
+		log.setAssigned(collection.AssignedSegment{
+			VaultID:   vaultID,
+			SegmentID: segID,
+		})
+		mgr.Notify(vaultID)
+		time.Sleep(20 * time.Millisecond)
 		cancel()
-		<-done
-	})
+	}()
 
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) && log.rollCalls == 0 {
-		time.Sleep(time.Millisecond)
+	if err := mgr.Run(ctx); err != nil && err != context.Canceled {
+		t.Fatalf("Run: %v", err)
 	}
-	if log.rollCalls == 0 {
-		t.Fatal("Run did not roll log")
+	if receipts.count() != 1 {
+		t.Fatalf("receipts = %d, want 1", receipts.count())
 	}
+}
 
-	pull.Put(segID, writeSegmentBytes(t, vaultID, segID, "async collect"))
+func TestRunCollectsOnPublishCompletedSegment(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	segID := glid.New()
+	root := t.TempDir()
+	now := time.Unix(0, 1_700_000_000_000).UTC()
+
+	fsm := vaultctlfsm.New()
+	pull := newMemoryPull()
+	pull.Put(segID, writeSegmentBytes(t, vaultID, segID, "fsm collect"))
+	log := &staticLog{}
 	log.setAssigned(collection.AssignedSegment{
 		VaultID:   vaultID,
 		SegmentID: segID,
 	})
+	receipts := &recordingReceipts{}
 
-	deadline = time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) && receipts.count() == 0 {
-		time.Sleep(time.Millisecond)
+	mgr := collection.New(collection.Config{})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log:      log,
+		Pull:     pull,
+		Receipts: receipts,
+		FSM:      fsm,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		applyPublish(t, fsm, vaultctlfsm.CompletedSegmentEntry{
+			SegmentID:     segID,
+			RecordCount:   1,
+			ByteSize:      64,
+			FirstIngestTS: now,
+			LastIngestTS:  now,
+			Checksum:      9,
+			OriginNodeID:  "origin",
+			PublishedAt:   now,
+		})
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	if err := mgr.Run(ctx); err != nil && err != context.Canceled {
+		t.Fatalf("Run: %v", err)
 	}
 	if receipts.count() != 1 {
 		t.Fatalf("receipts = %d, want 1", receipts.count())
+	}
+}
+
+func TestRunWithZeroVaults(t *testing.T) {
+	t.Parallel()
+	mgr := collection.New(collection.Config{})
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	if err := mgr.Run(ctx); err != context.DeadlineExceeded {
+		t.Fatalf("Run() = %v, want context.DeadlineExceeded", err)
+	}
+}
+
+func applyPublish(t *testing.T, fsm *vaultctlfsm.FSM, entry vaultctlfsm.CompletedSegmentEntry) {
+	t.Helper()
+	if err := fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalPublishCompletedSegment(entry)}); err != nil {
+		t.Fatalf("apply publish: %v", err)
 	}
 }
 
@@ -217,15 +276,5 @@ func TestCollectOnceUnknownVault(t *testing.T) {
 	err := mgr.CollectOnce(context.Background(), glid.New())
 	if err != collection.ErrUnknownVault {
 		t.Fatalf("CollectOnce() = %v, want ErrUnknownVault", err)
-	}
-}
-
-func TestRunWithZeroVaults(t *testing.T) {
-	t.Parallel()
-	mgr := collection.New(collection.Config{PollInterval: 5 * time.Millisecond})
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
-	defer cancel()
-	if err := mgr.Run(ctx); err != context.DeadlineExceeded {
-		t.Fatalf("Run() = %v, want context.DeadlineExceeded", err)
 	}
 }

@@ -16,9 +16,9 @@ var (
 	// ErrOpenChunkExists is returned when OpenChunkManifest is applied while
 	// a manifest is already open.
 	ErrOpenChunkExists = errors.New("open chunk manifest already exists")
-	// ErrMaterializePending is returned when OpenChunkManifest is applied while
-	// a sealed manifest awaits materialization.
-	ErrMaterializePending = errors.New("materialize-pending manifest exists")
+	// ErrSealedManifestPending is returned when OpenChunkManifest is applied while
+	// a sealed manifest awaiting build already exists.
+	ErrSealedManifestPending = errors.New("sealed manifest awaiting build exists")
 	// ErrNoOpenChunkManifest is returned when a command requires an open manifest.
 	ErrNoOpenChunkManifest = errors.New("no open chunk manifest")
 	// ErrOpenChunkChunkIDMismatch is returned when a command chunk_id does not
@@ -103,12 +103,12 @@ func (f *FSM) OpenChunk() *OpenChunkManifest {
 	return copyOpenChunkManifest(f.openChunk)
 }
 
-// MaterializePending returns a copy of the sealed manifest awaiting
-// materialization, or nil.
-func (f *FSM) MaterializePending() *OpenChunkManifest {
+// SealedManifest returns a copy of the sealed manifest awaiting local GLCB build,
+// or nil.
+func (f *FSM) SealedManifest() *OpenChunkManifest {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	return copyOpenChunkManifest(f.materializePending)
+	return copyOpenChunkManifest(f.sealedManifest)
 }
 
 // ResumeRecordNumber returns the next record number to chunk from segmentID.
@@ -149,8 +149,8 @@ func (f *FSM) applyOpenChunkManifest(c *gastrologv1.OpenChunkManifestCommand) er
 		}
 		return ErrOpenChunkExists
 	}
-	if f.materializePending != nil {
-		return ErrMaterializePending
+	if f.sealedManifest != nil {
+		return ErrSealedManifestPending
 	}
 	if _, dead := f.tombstones[id]; dead {
 		return nil
@@ -217,7 +217,7 @@ func (f *FSM) applySealOpenChunkManifest(c *gastrologv1.SealOpenChunkManifestCom
 	id := chunkIDFromProto(c.GetChunkId())
 	sealedAt := time.Unix(0, c.GetSealedAtNanos())
 	if f.openChunk == nil {
-		if pending := f.materializePending; pending != nil &&
+		if pending := f.sealedManifest; pending != nil &&
 			pending.ChunkID == id &&
 			pending.SealedAt.Equal(sealedAt) {
 			return nil
@@ -227,11 +227,11 @@ func (f *FSM) applySealOpenChunkManifest(c *gastrologv1.SealOpenChunkManifestCom
 	if id != f.openChunk.ChunkID {
 		return ErrOpenChunkChunkIDMismatch
 	}
-	if f.materializePending != nil {
-		return ErrMaterializePending
+	if f.sealedManifest != nil {
+		return ErrSealedManifestPending
 	}
 	f.openChunk.SealedAt = sealedAt
-	f.materializePending = f.openChunk
+	f.sealedManifest = f.openChunk
 	f.openChunk = nil
 	if e := f.chunks[id]; e != nil && e.State == chunk.ChunkStateActive {
 		e.State = chunk.ChunkStateSealing
@@ -308,8 +308,8 @@ func (f *FSM) snapshotOpenChunkLocked() *gastrologv1.OpenChunkManifestState {
 	return openChunkManifestToProto(f.openChunk)
 }
 
-func (f *FSM) snapshotMaterializePendingLocked() *gastrologv1.OpenChunkManifestState {
-	return openChunkManifestToProto(f.materializePending)
+func (f *FSM) snapshotSealedManifestLocked() *gastrologv1.OpenChunkManifestState {
+	return openChunkManifestToProto(f.sealedManifest)
 }
 
 func (f *FSM) snapshotSegmentResumeLocked() []*gastrologv1.SegmentResumeRecordNumber {
@@ -330,7 +330,7 @@ func (f *FSM) snapshotSegmentResumeLocked() []*gastrologv1.SegmentResumeRecordNu
 
 func (f *FSM) restoreOpenChunkLocked(snap *gastrologv1.VaultCtlSnapshot) {
 	f.openChunk = openChunkManifestFromProto(snap.GetOpenChunk())
-	f.materializePending = openChunkManifestFromProto(snap.GetMaterializePending())
+	f.sealedManifest = openChunkManifestFromProto(snap.GetSealedManifest())
 	f.segmentResume = make(map[glid.GLID]uint32, len(snap.GetSegmentResume()))
 	for _, entry := range snap.GetSegmentResume() {
 		f.segmentResume[glid.FromBytes(entry.GetSegmentId())] = entry.GetNextRecordNumber()

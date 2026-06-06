@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/glid"
 
 	hraft "github.com/hashicorp/raft"
 )
@@ -51,6 +52,61 @@ func TestOnSealCallbackFires(t *testing.T) {
 	}
 }
 
+func TestOnSealedManifestCallbackFires(t *testing.T) {
+	t.Parallel()
+
+	fsm := New()
+	chunkID := chunk.NewChunkID()
+	now := time.Now()
+
+	var mu sync.Mutex
+	var captured *OpenChunkManifest
+	fsm.SetOnSealedManifest(func(m *OpenChunkManifest) {
+		mu.Lock()
+		captured = m
+		mu.Unlock()
+	})
+
+	fsm.Apply(&hraft.Log{Data: MarshalOpenChunkManifest(chunkID, now)})
+	fsm.Apply(&hraft.Log{Data: MarshalSealOpenChunkManifest(chunkID, now.Add(time.Minute))})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if captured == nil {
+		t.Fatal("OnSealedManifest callback was not called")
+	}
+	if captured.ChunkID != chunkID {
+		t.Errorf("ChunkID = %s, want %s", captured.ChunkID, chunkID)
+	}
+}
+
+func TestOnSealedManifestCallbackNotOnIdempotentReplay(t *testing.T) {
+	t.Parallel()
+
+	fsm := New()
+	chunkID := chunk.NewChunkID()
+	now := time.Now()
+	sealedAt := now.Add(time.Minute)
+
+	var calls int
+	fsm.SetOnSealedManifest(func(*OpenChunkManifest) {
+		calls++
+	})
+
+	fsm.Apply(&hraft.Log{Data: MarshalOpenChunkManifest(chunkID, now)})
+	fsm.Apply(&hraft.Log{Data: MarshalSealOpenChunkManifest(chunkID, sealedAt)})
+	if calls != 1 {
+		t.Fatalf("callback calls = %d, want 1", calls)
+	}
+
+	if err := fsm.Apply(&hraft.Log{Data: MarshalSealOpenChunkManifest(chunkID, sealedAt)}); err != nil {
+		t.Fatalf("idempotent replay: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("callback calls after replay = %d, want 1", calls)
+	}
+}
+
 func TestOnSealCallbackNotCalledWhenChunkUnknown(t *testing.T) {
 	t.Parallel()
 
@@ -74,6 +130,77 @@ func TestOnSealCallbackNotCalledWhenChunkUnknown(t *testing.T) {
 	}
 	if called {
 		t.Error("OnSeal callback should not fire when applySeal returns an error")
+	}
+}
+
+func TestOnPublishCompletedSegmentCallbackFires(t *testing.T) {
+	t.Parallel()
+
+	fsm := New()
+	segID := glid.New()
+	now := time.Now()
+
+	var mu sync.Mutex
+	var captured *CompletedSegmentEntry
+	fsm.SetOnPublishCompletedSegment(func(e CompletedSegmentEntry) {
+		mu.Lock()
+		captured = &e
+		mu.Unlock()
+	})
+
+	entry := CompletedSegmentEntry{
+		SegmentID:     segID,
+		RecordCount:   2,
+		ByteSize:      100,
+		FirstIngestTS: now,
+		LastIngestTS:  now,
+		Checksum:      42,
+		OriginNodeID:  "node-a",
+		PublishedAt:   now,
+	}
+	fsm.Apply(&hraft.Log{Data: MarshalPublishCompletedSegment(entry)})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if captured == nil {
+		t.Fatal("OnPublishCompletedSegment callback was not called")
+	}
+	if captured.SegmentID != segID {
+		t.Errorf("SegmentID = %s, want %s", captured.SegmentID, segID)
+	}
+}
+
+func TestOnPublishCompletedSegmentCallbackNotOnIdempotentReplay(t *testing.T) {
+	t.Parallel()
+
+	fsm := New()
+	segID := glid.New()
+	now := time.Now()
+	entry := CompletedSegmentEntry{
+		SegmentID:     segID,
+		RecordCount:   1,
+		ByteSize:      50,
+		FirstIngestTS: now,
+		LastIngestTS:  now,
+		Checksum:      7,
+		OriginNodeID:  "node-a",
+		PublishedAt:   now,
+	}
+
+	var calls int
+	fsm.SetOnPublishCompletedSegment(func(CompletedSegmentEntry) {
+		calls++
+	})
+
+	fsm.Apply(&hraft.Log{Data: MarshalPublishCompletedSegment(entry)})
+	if calls != 1 {
+		t.Fatalf("callback calls = %d, want 1", calls)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: MarshalPublishCompletedSegment(entry)}); err != nil {
+		t.Fatalf("idempotent replay: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("callback calls after replay = %d, want 1", calls)
 	}
 }
 

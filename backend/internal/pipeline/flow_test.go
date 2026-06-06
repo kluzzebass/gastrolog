@@ -74,12 +74,17 @@ type harness struct {
 type recordingPublisher struct {
 	mu        sync.Mutex
 	published []distribution.Metadata
+	notify    func()
 }
 
 func (p *recordingPublisher) Publish(_ context.Context, meta distribution.Metadata) error {
 	p.mu.Lock()
 	p.published = append(p.published, meta)
+	notify := p.notify
 	p.mu.Unlock()
+	if notify != nil {
+		notify()
+	}
 	return nil
 }
 
@@ -194,7 +199,7 @@ func newHarness(t *testing.T, nodeID, ingesterID, vaultID glid.GLID, route *rout
 	}()
 
 	if opts.withCollection {
-		colMgr := collection.New(collection.Config{PollInterval: 10 * time.Millisecond})
+		colMgr := collection.New(collection.Config{})
 		if err := colMgr.RegisterVault(vaultID, h.homeRoot, collection.VaultConfig{
 			Log:      &publishedLog{pub: h.pub, vaultID: vaultID},
 			Pull:     &flowDistributionPull{dist: distMgr},
@@ -203,6 +208,7 @@ func newHarness(t *testing.T, nodeID, ingesterID, vaultID glid.GLID, route *rout
 			t.Fatalf("RegisterVault collection: %v", err)
 		}
 		h.collect = colMgr
+		h.pub.notify = func() { colMgr.Notify(vaultID) }
 		go func() {
 			_ = h.collect.Run(ctx)
 			close(h.colDone)
