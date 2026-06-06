@@ -37,18 +37,28 @@ type VaultConfig struct {
 	Nudge     CollectionNudger
 	Applier   VaultCtlApplier
 	IsLeader  func() bool
+	Policy    ManifestRotationPolicy
+	NewChunkID func() chunk.ChunkID
 }
 
 type vaultChunking struct {
 	cfg VaultConfig
 
 	mu        sync.Mutex
+	planMu    sync.Mutex
 	doneBuild buildKey
 }
 
 type buildKey struct {
 	chunkID  chunk.ChunkID
 	sealedAt time.Time
+}
+
+func (c VaultConfig) newChunkID() chunk.ChunkID {
+	if c.NewChunkID != nil {
+		return c.NewChunkID()
+	}
+	return chunk.NewChunkID()
 }
 
 func newVaultChunking(cfg VaultConfig) (*vaultChunking, error) {
@@ -70,9 +80,9 @@ func newVaultChunking(cfg VaultConfig) (*vaultChunking, error) {
 // Config configures a ChunkingManager.
 type Config struct{}
 
-// Manager runs the per-home build-at-seal executor for registered vaults.
-// Build attempts are driven by the vault-ctl FSM SetOnSealedManifest callback,
-// not by polling FSM state.
+// Manager runs per-home chunking for registered vaults. The vault leader
+// proposes manifest edits via Plan (event-driven FSM callbacks); every home
+// builds GLCB at seal via SetOnSealedManifest.
 type Manager struct {
 	cfg Config
 
@@ -92,8 +102,8 @@ func New(cfg Config) *Manager {
 	}
 }
 
-// RegisterVault adds a vault build path and wires the FSM sealed-manifest
-// callback. Safe before or during Run.
+// RegisterVault adds a vault chunking path and wires vault-ctl FSM callbacks.
+// Safe before or during Run.
 func (m *Manager) RegisterVault(vaultID glid.GLID, cfg VaultConfig) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -111,10 +121,19 @@ func (m *Manager) RegisterVault(vaultID glid.GLID, cfg VaultConfig) error {
 	cfg.FSM.SetOnSealedManifest(func(*vaultctlfsm.OpenChunkManifest) {
 		m.triggerBuild(vid)
 	})
+	cfg.FSM.SetOnPublishCompletedSegment(func(vaultctlfsm.CompletedSegmentEntry) {
+		m.triggerPlan(vid)
+	})
+	cfg.FSM.SetOnOpenChunkManifest(func(*vaultctlfsm.OpenChunkManifest) {
+		m.triggerPlan(vid)
+	})
+	cfg.FSM.SetOnOpenChunkRefAdded(func(*vaultctlfsm.OpenChunkManifest) {
+		m.triggerPlan(vid)
+	})
 	return nil
 }
 
-// UnregisterVault removes a vault from build dispatch.
+// UnregisterVault removes a vault from chunking dispatch.
 func (m *Manager) UnregisterVault(vaultID glid.GLID) {
 	m.mu.Lock()
 	v, ok := m.vaults[vaultID]
@@ -122,7 +141,21 @@ func (m *Manager) UnregisterVault(vaultID glid.GLID) {
 	m.mu.Unlock()
 	if ok {
 		v.cfg.FSM.SetOnSealedManifest(nil)
+		v.cfg.FSM.SetOnPublishCompletedSegment(nil)
+		v.cfg.FSM.SetOnOpenChunkManifest(nil)
+		v.cfg.FSM.SetOnOpenChunkRefAdded(nil)
 	}
+}
+
+// PlanOnce runs one leader planner step for a vault (for tests).
+func (m *Manager) PlanOnce(ctx context.Context, vaultID glid.GLID) error {
+	m.mu.Lock()
+	v, ok := m.vaults[vaultID]
+	m.mu.Unlock()
+	if !ok {
+		return ErrUnknownVault
+	}
+	return v.planOnce(ctx)
 }
 
 // BuildOnce runs one build pass for a vault (for tests).
@@ -136,8 +169,8 @@ func (m *Manager) BuildOnce(ctx context.Context, vaultID glid.GLID) error {
 	return v.buildOnce(ctx)
 }
 
-// Run blocks until ctx is cancelled. On start it catches up any sealed
-// manifest already present in the FSM (e.g. manager started after Raft replay).
+// Run blocks until ctx is cancelled. On start it catches up any sealed manifest
+// awaiting build and any planner work when this node is vault leader.
 func (m *Manager) Run(ctx context.Context) error {
 	if !m.running.CompareAndSwap(false, true) {
 		return ErrNotRunning
@@ -152,6 +185,7 @@ func (m *Manager) Run(ctx context.Context) error {
 	m.mu.Unlock()
 
 	for _, v := range vaults {
+		_ = v.planCatchUp(ctx)
 		_ = v.buildOnce(ctx)
 	}
 
@@ -176,6 +210,17 @@ func (m *Manager) triggerBuild(vaultID glid.GLID) {
 		return
 	}
 	_ = v.buildOnce(ctx)
+}
+
+func (m *Manager) triggerPlan(vaultID glid.GLID) {
+	m.mu.Lock()
+	ctx := m.runCtx
+	v, ok := m.vaults[vaultID]
+	m.mu.Unlock()
+	if !ok || ctx == nil {
+		return
+	}
+	_ = v.planOnce(ctx)
 }
 
 func (v *vaultChunking) buildOnce(ctx context.Context) error {

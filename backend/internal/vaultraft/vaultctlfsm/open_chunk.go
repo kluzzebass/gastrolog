@@ -239,6 +239,42 @@ func (f *FSM) applySealOpenChunkManifest(c *gastrologv1.SealOpenChunkManifestCom
 	return nil
 }
 
+// applyOpenChunkManifestLocked applies OpenChunkManifest and returns a callback
+// effect when a new manifest was created. Caller MUST hold f.mu.
+func (f *FSM) applyOpenChunkManifestLocked(c *gastrologv1.OpenChunkManifestCommand) (any, *OpenChunkManifest) {
+	hadOpen := f.openChunk != nil
+	result := f.applyOpenChunkManifest(c)
+	if result == nil && !hadOpen && f.openChunk != nil {
+		return result, copyOpenChunkManifest(f.openChunk)
+	}
+	return result, nil
+}
+
+// applyAddOpenChunkSegmentRefLocked applies AddOpenChunkSegmentRef and returns
+// a callback effect when a new ref was appended. Caller MUST hold f.mu.
+func (f *FSM) applyAddOpenChunkSegmentRefLocked(c *gastrologv1.AddOpenChunkSegmentRefCommand) (any, *OpenChunkManifest) {
+	refCount := 0
+	if f.openChunk != nil {
+		refCount = len(f.openChunk.Refs)
+	}
+	result := f.applyAddOpenChunkSegmentRef(c)
+	if result == nil && f.openChunk != nil && len(f.openChunk.Refs) > refCount {
+		return result, copyOpenChunkManifest(f.openChunk)
+	}
+	return result, nil
+}
+
+// applySealOpenChunkManifestLocked applies SealOpenChunkManifest and returns a
+// callback effect when the open manifest was sealed. Caller MUST hold f.mu.
+func (f *FSM) applySealOpenChunkManifestLocked(c *gastrologv1.SealOpenChunkManifestCommand) (any, *OpenChunkManifest) {
+	hadOpen := f.openChunk != nil
+	result := f.applySealOpenChunkManifest(c)
+	if result == nil && hadOpen {
+		return result, copyOpenChunkManifest(f.sealedManifest)
+	}
+	return result, nil
+}
+
 func (f *FSM) applyReleaseSegments(c *gastrologv1.ReleaseSegmentsCommand) error {
 	for _, raw := range c.GetSegmentIds() {
 		segID := glid.FromBytes(raw)

@@ -268,6 +268,10 @@ type FSM struct {
 	// onPublishCompletedSegment fires after a new completed segment is registered
 	// (outside the FSM lock). Idempotent replays do not fire.
 	onPublishCompletedSegment func(CompletedSegmentEntry)
+	// onOpenChunkManifest fires after a new open-chunk manifest is created.
+	onOpenChunkManifest func(*OpenChunkManifest)
+	// onOpenChunkRefAdded fires after a new segment ref is appended to the open manifest.
+	onOpenChunkRefAdded func(*OpenChunkManifest)
 }
 
 // New creates an empty chunk metadata FSM.
@@ -397,6 +401,24 @@ func (f *FSM) SetOnPublishCompletedSegment(fn func(CompletedSegmentEntry)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.onPublishCompletedSegment = fn
+}
+
+// SetOnOpenChunkManifest registers a callback invoked (outside the FSM lock)
+// after OpenChunkManifest creates a new open manifest. Idempotent replays do
+// not fire the callback.
+func (f *FSM) SetOnOpenChunkManifest(fn func(*OpenChunkManifest)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onOpenChunkManifest = fn
+}
+
+// SetOnOpenChunkRefAdded registers a callback invoked (outside the FSM lock)
+// after AddOpenChunkSegmentRef appends a new ref. Idempotent replays of the
+// same ref do not fire the callback.
+func (f *FSM) SetOnOpenChunkRefAdded(fn func(*OpenChunkManifest)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onOpenChunkRefAdded = fn
 }
 
 // SetOnRetentionPending registers a callback invoked (outside the FSM
@@ -536,6 +558,8 @@ type applyEffects struct {
 	prunedFinalizable  []chunk.ChunkID
 	sealedManifest       *OpenChunkManifest
 	publishedSegment     *CompletedSegmentEntry
+	openChunkOpened      *OpenChunkManifest
+	openChunkRefAdded    *OpenChunkManifest
 
 	onCreate                     func(ManifestEntry)
 	onDelete                     func(chunk.ChunkID)
@@ -543,6 +567,8 @@ type applyEffects struct {
 	onSeal                       func(ManifestEntry)
 	onSealedManifest             func(*OpenChunkManifest)
 	onPublishCompletedSegment    func(CompletedSegmentEntry)
+	onOpenChunkManifest          func(*OpenChunkManifest)
+	onOpenChunkRefAdded          func(*OpenChunkManifest)
 	onRetentionPending           func(chunk.ChunkID)
 	onRequestDelete    func(PendingDelete)
 	onAckDelete        func(chunk.ChunkID, string)
@@ -568,6 +594,12 @@ func (e applyEffects) fire() {
 	}
 	if e.publishedSegment != nil && e.onPublishCompletedSegment != nil {
 		e.onPublishCompletedSegment(*e.publishedSegment)
+	}
+	if e.openChunkOpened != nil && e.onOpenChunkManifest != nil {
+		e.onOpenChunkManifest(e.openChunkOpened)
+	}
+	if e.openChunkRefAdded != nil && e.onOpenChunkRefAdded != nil {
+		e.onOpenChunkRefAdded(e.openChunkRefAdded)
 	}
 	if e.retentionPendingID != nil && e.onRetentionPending != nil {
 		e.onRetentionPending(*e.retentionPendingID)
@@ -675,15 +707,11 @@ func (f *FSM) applyLocked(cmd *gastrologv1.VaultCtlCommand) (any, applyEffects) 
 			}
 		}
 	case *gastrologv1.VaultCtlCommand_OpenChunkManifest:
-		result = f.applyOpenChunkManifest(c.OpenChunkManifest)
+		result, fx.openChunkOpened = f.applyOpenChunkManifestLocked(c.OpenChunkManifest)
 	case *gastrologv1.VaultCtlCommand_AddOpenChunkSegmentRef:
-		result = f.applyAddOpenChunkSegmentRef(c.AddOpenChunkSegmentRef)
+		result, fx.openChunkRefAdded = f.applyAddOpenChunkSegmentRefLocked(c.AddOpenChunkSegmentRef)
 	case *gastrologv1.VaultCtlCommand_SealOpenChunkManifest:
-		hadOpen := f.openChunk != nil
-		result = f.applySealOpenChunkManifest(c.SealOpenChunkManifest)
-		if result == nil && hadOpen {
-			fx.sealedManifest = copyOpenChunkManifest(f.sealedManifest)
-		}
+		result, fx.sealedManifest = f.applySealOpenChunkManifestLocked(c.SealOpenChunkManifest)
 	case *gastrologv1.VaultCtlCommand_ReleaseSegments:
 		result = f.applyReleaseSegments(c.ReleaseSegments)
 	default:
@@ -695,6 +723,8 @@ func (f *FSM) applyLocked(cmd *gastrologv1.VaultCtlCommand) (any, applyEffects) 
 	fx.onSeal = f.onSeal
 	fx.onSealedManifest = f.onSealedManifest
 	fx.onPublishCompletedSegment = f.onPublishCompletedSegment
+	fx.onOpenChunkManifest = f.onOpenChunkManifest
+	fx.onOpenChunkRefAdded = f.onOpenChunkRefAdded
 	fx.onRetentionPending = f.onRetentionPending
 	fx.onRequestDelete = f.onRequestDelete
 	fx.onAckDelete = f.onAckDelete

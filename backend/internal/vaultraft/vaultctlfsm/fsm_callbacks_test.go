@@ -204,6 +204,71 @@ func TestOnPublishCompletedSegmentCallbackNotOnIdempotentReplay(t *testing.T) {
 	}
 }
 
+func TestOnOpenChunkManifestCallbackFires(t *testing.T) {
+	t.Parallel()
+
+	fsm := New()
+	chunkID := chunk.NewChunkID()
+	now := time.Now()
+
+	var mu sync.Mutex
+	var captured *OpenChunkManifest
+	fsm.SetOnOpenChunkManifest(func(m *OpenChunkManifest) {
+		mu.Lock()
+		captured = m
+		mu.Unlock()
+	})
+
+	fsm.Apply(&hraft.Log{Data: MarshalOpenChunkManifest(chunkID, now)})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if captured == nil {
+		t.Fatal("OnOpenChunkManifest callback was not called")
+	}
+	if captured.ChunkID != chunkID {
+		t.Errorf("ChunkID = %s, want %s", captured.ChunkID, chunkID)
+	}
+}
+
+func TestOnOpenChunkRefAddedCallbackFires(t *testing.T) {
+	t.Parallel()
+
+	fsm := New()
+	chunkID := chunk.NewChunkID()
+	segID := glid.New()
+	now := time.Now()
+
+	var calls int
+	fsm.SetOnOpenChunkRefAdded(func(*OpenChunkManifest) {
+		calls++
+	})
+
+	fsm.Apply(&hraft.Log{Data: MarshalOpenChunkManifest(chunkID, now)})
+	fsm.Apply(&hraft.Log{Data: MarshalAddOpenChunkSegmentRef(chunkID, OpenChunkSegmentRef{
+		SegmentID:         segID,
+		FirstRecordNumber: 0,
+		LastRecordNumber:  1,
+		SliceBytes:        100,
+		RefAddedAt:        now,
+	})})
+	if calls != 1 {
+		t.Fatalf("callback calls = %d, want 1", calls)
+	}
+	if err := fsm.Apply(&hraft.Log{Data: MarshalAddOpenChunkSegmentRef(chunkID, OpenChunkSegmentRef{
+		SegmentID:         segID,
+		FirstRecordNumber: 0,
+		LastRecordNumber:  1,
+		SliceBytes:        100,
+		RefAddedAt:        now,
+	})}); err != nil {
+		t.Fatalf("idempotent replay: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("callback calls after replay = %d, want 1", calls)
+	}
+}
+
 func TestOnRetentionPendingCallbackFires(t *testing.T) {
 	t.Parallel()
 

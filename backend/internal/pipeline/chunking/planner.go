@@ -26,6 +26,7 @@ type ManifestRef struct {
 type SegmentView struct {
 	ID            glid.GLID
 	FirstIngestTS time.Time
+	PublishedAt   time.Time
 	Index         *OrderedIndex
 }
 
@@ -115,9 +116,16 @@ func Plan(input PlannerInput) PlannerDecision {
 			FirstRecordNumber: first,
 			LastRecordNumber:  pos - 1,
 			SliceBytes:        sliceBytes,
-			RefAddedAt:        input.RefAddedAt,
+			RefAddedAt:        refAddedAtForSegment(seg, input.RefAddedAt),
 		},
 	}
+}
+
+func refAddedAtForSegment(seg SegmentView, fallback time.Time) time.Time {
+	if !seg.PublishedAt.IsZero() {
+		return seg.PublishedAt
+	}
+	return fallback
 }
 
 const (
