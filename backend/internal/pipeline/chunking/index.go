@@ -45,3 +45,29 @@ func (idx *OrderedIndex) RecordAtFilePos(filePos uint32) (record.Record, error) 
 func (idx *OrderedIndex) RecordAt(pos uint32) (record.Record, error) {
 	return idx.sf.RecordAtEventOrder(pos)
 }
+
+// Close closes the underlying segment file.
+func (idx *OrderedIndex) Close() error {
+	if idx.sf == nil {
+		return nil
+	}
+	return idx.sf.Close()
+}
+
+// FrameByteLenAt returns the on-disk frame byte length at EventID-order position pos.
+func (idx *OrderedIndex) FrameByteLenAt(pos uint32) (uint64, error) {
+	entry, err := idx.sf.IndexEntryAt(pos)
+	if err != nil {
+		return 0, err
+	}
+	n, err := idx.sf.FrameByteLen(entry.FilePos)
+	if err != nil {
+		return 0, err
+	}
+	return uint64(n), nil
+}
+
+// RecordSliceBytes returns the on-disk frame byte length for the record at pos.
+func (idx *OrderedIndex) RecordSliceBytes(pos uint32) (uint64, error) {
+	return idx.FrameByteLenAt(pos)
+}

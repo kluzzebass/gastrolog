@@ -162,6 +162,26 @@ func (sf *File) Finalize() error {
 	return sf.MarkComplete()
 }
 
+// FrameByteLen returns the on-disk byte length of the frame starting at filePos.
+func (sf *File) FrameByteLen(filePos uint32) (uint32, error) {
+	recEnd, err := sf.recordsEnd()
+	if err != nil {
+		return 0, err
+	}
+	if filePos < HeaderSize || filePos >= recEnd {
+		return 0, ErrFrameLength
+	}
+	var lenBuf [frameLenPrefixSize]byte
+	if _, err := sf.f.ReadAt(lenBuf[:], int64(filePos)); err != nil {
+		return 0, err
+	}
+	bodyLen := binary.LittleEndian.Uint32(lenBuf[:])
+	if bodyLen == 0 || filePos+frameLenPrefixSize+bodyLen > recEnd {
+		return 0, ErrFrameLength
+	}
+	return frameLenPrefixSize + bodyLen, nil
+}
+
 // IndexEntryAt returns the index entry at position pos in EventID order.
 func (sf *File) IndexEntryAt(pos uint32) (IndexEntry, error) {
 	if sf.hdr.IndexOffset == 0 {
