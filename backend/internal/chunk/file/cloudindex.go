@@ -97,7 +97,7 @@ var cloudIndexCodec = btree.Codec[chunk.ChunkID, cloudMetaValue]{
 	Key:     func(b []byte) chunk.ChunkID { var id chunk.ChunkID; copy(id[:], b); return id },
 	PutVal:  func(b []byte, v cloudMetaValue) { copy(b, v[:]) },
 	Val:     func(b []byte) cloudMetaValue { var v cloudMetaValue; copy(v[:], b); return v },
-	Compare: func(a, b chunk.ChunkID) int { return bytes.Compare(a[:], b[:]) },
+	Compare: chunk.ChunkID.Compare,
 }
 
 // cloudIndex wraps a B+ tree that caches cloud chunk metadata locally.

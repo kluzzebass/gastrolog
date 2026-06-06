@@ -60,6 +60,7 @@ message VaultCtlCommand {
     AttachOffsetsCommand attach_offsets = 11;
     BeginSealCommand begin_seal = 12;
     RepatriateChunkCommand repatriate_chunk = 13;
+    PublishCompletedSegmentCommand publish_completed_segment = 14;
   }
 }
 
@@ -145,6 +146,33 @@ message RepatriateChunkCommand {
   ManifestEntry entry = 1;
 }
 
+// PublishCompletedSegmentCommand registers a completed segment in the vault-ctl
+// FSM (V3 pipeline). Origin publishes when Segmentation closes a segment.
+message PublishCompletedSegmentCommand {
+  bytes segment_id = 1;
+  uint32 record_count = 2;
+  uint64 byte_size = 3;
+  int64 first_ingest_ts_nanos = 4;
+  int64 last_ingest_ts_nanos = 5;
+  uint32 checksum = 6;
+  // Node that completed the segment (holder hint for Collection).
+  string origin_node_id = 7;
+  // Wall time carried in the command for deterministic replay (Unix nanos).
+  int64 published_at_nanos = 8;
+}
+
+// CompletedSegmentEntry is replicated registry state for one completed segment.
+message CompletedSegmentEntry {
+  bytes segment_id = 1;
+  uint32 record_count = 2;
+  uint64 byte_size = 3;
+  int64 first_ingest_ts_nanos = 4;
+  int64 last_ingest_ts_nanos = 5;
+  uint32 checksum = 6;
+  string origin_node_id = 7;
+  int64 published_at_nanos = 8;
+}
+
 // ---------- Snapshot (replaces the 5 hand-rolled sections) ------------------
 
 // ManifestEntry is the full metadata for one chunk in a vault's manifest. The
@@ -195,6 +223,7 @@ message VaultCtlSnapshot {
   repeated ManifestEntry entries = 1;
   repeated Tombstone tombstones = 2;
   repeated PendingDelete pending_deletes = 3;
+  repeated CompletedSegmentEntry completed_segments = 4;
 }
 
 // VaultGroupSnapshot is the snapshot of the whole vault-ctl Raft group: one

@@ -1,7 +1,6 @@
 package orchestrator
 
 import (
-	"bytes"
 	"fmt"
 	"gastrolog/internal/glid"
 	"slices"
@@ -119,7 +118,7 @@ func (o *Orchestrator) ListVaults() []glid.GLID {
 	for k := range o.vaults {
 		keys = append(keys, k)
 	}
-	slices.SortFunc(keys, func(a, b glid.GLID) int { return bytes.Compare(a[:], b[:]) })
+	slices.SortFunc(keys, glid.Compare)
 	return keys
 }
 
@@ -167,7 +166,7 @@ func (o *Orchestrator) ListIngesters() []glid.GLID {
 	for k := range o.ingesters {
 		keys = append(keys, k)
 	}
-	slices.SortFunc(keys, func(a, b glid.GLID) int { return bytes.Compare(a[:], b[:]) })
+	slices.SortFunc(keys, glid.Compare)
 	return keys
 }
 
@@ -209,7 +208,7 @@ func (r *searchReadyRegistry) ListVaults() []glid.GLID {
 		}
 		keys = append(keys, k)
 	}
-	slices.SortFunc(keys, func(a, b glid.GLID) int { return bytes.Compare(a[:], b[:]) })
+	slices.SortFunc(keys, glid.Compare)
 	return keys
 }
 

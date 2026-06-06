@@ -348,7 +348,7 @@ func vaultFSMFingerprint(f *FSM) string {
 		ids = append(ids, id)
 	}
 	f.mu.Unlock()
-	slices.SortFunc(ids, compareGLID)
+	slices.SortFunc(ids, glid.Compare)
 
 	var sb fingerprintBuilder
 	for _, id := range ids {

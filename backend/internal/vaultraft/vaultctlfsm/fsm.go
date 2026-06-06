@@ -1,7 +1,6 @@
 package vaultctlfsm
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -96,6 +95,11 @@ const (
 	// inserts the entry in Sealed state, refusing if the entry
 	// already exists or is tombstoned. See gastrolog-32bf2.
 	CmdRepatriateChunk Command = 13
+
+	// CmdPublishCompletedSegment registers completed segment metadata in the
+	// vault-ctl FSM when Segmentation closes a segment (V3 pipeline). See
+	// gastrolog-5pyl3.
+	CmdPublishCompletedSegment Command = 14
 )
 
 // ManifestEntry holds the full metadata for one chunk in this vault's
@@ -236,14 +240,19 @@ type FSM struct {
 	// replication-job deadline, typically a few minutes, cannot still be
 	// in flight and are safe to drop).
 	tombstones map[chunk.ChunkID]time.Time
+
+	// completedSegments is the V3 pipeline registry of closed segments awaiting
+	// chunking. Populated by CmdPublishCompletedSegment; see segments.go.
+	completedSegments map[glid.GLID]*CompletedSegmentEntry
 }
 
 // New creates an empty chunk metadata FSM.
 func New() *FSM {
 	return &FSM{
-		chunks:         make(map[chunk.ChunkID]*ManifestEntry),
-		tombstones:     make(map[chunk.ChunkID]time.Time),
-		pendingDeletes: make(map[chunk.ChunkID]*PendingDelete),
+		chunks:            make(map[chunk.ChunkID]*ManifestEntry),
+		tombstones:        make(map[chunk.ChunkID]time.Time),
+		pendingDeletes:    make(map[chunk.ChunkID]*PendingDelete),
+		completedSegments: make(map[glid.GLID]*CompletedSegmentEntry),
 	}
 }
 
@@ -601,6 +610,8 @@ func (f *FSM) applyLocked(cmd *gastrologv1.VaultCtlCommand) (any, applyEffects) 
 		// (retention, indexes, etc.) reacts identically to a normal
 		// CmdCreateChunk path.
 		fx.createdEntry = f.captureEntry(result, chunkIDFromProto(c.RepatriateChunk.GetEntry().GetId()))
+	case *gastrologv1.VaultCtlCommand_PublishCompletedSegment:
+		result = f.applyPublishCompletedSegment(c.PublishCompletedSegment)
 	default:
 		result = fmt.Errorf("unknown chunk FSM command: %T", cmd.GetCommand())
 	}
@@ -663,17 +674,18 @@ func (f *FSM) SnapshotProto() *gastrologv1.VaultCtlSnapshot {
 // and round-trip equality checks sane (gastrolog-5lrg7).
 func (f *FSM) snapshotProtoLocked() *gastrologv1.VaultCtlSnapshot {
 	snap := &gastrologv1.VaultCtlSnapshot{
-		Entries:        make([]*gastrologv1.ManifestEntry, 0, len(f.chunks)),
-		Tombstones:     make([]*gastrologv1.Tombstone, 0, len(f.tombstones)),
-		PendingDeletes: make([]*gastrologv1.PendingDelete, 0, len(f.pendingDeletes)),
+		Entries:            make([]*gastrologv1.ManifestEntry, 0, len(f.chunks)),
+		Tombstones:         make([]*gastrologv1.Tombstone, 0, len(f.tombstones)),
+		PendingDeletes:     make([]*gastrologv1.PendingDelete, 0, len(f.pendingDeletes)),
+		CompletedSegments:  f.snapshotCompletedSegmentsLocked(),
 	}
 
-	entryIDs := slices.SortedFunc(maps.Keys(f.chunks), compareChunkID)
+	entryIDs := slices.SortedFunc(maps.Keys(f.chunks), chunk.ChunkID.Compare)
 	for _, id := range entryIDs {
 		snap.Entries = append(snap.Entries, entryToProto(f.chunks[id]))
 	}
 
-	tombIDs := slices.SortedFunc(maps.Keys(f.tombstones), compareChunkID)
+	tombIDs := slices.SortedFunc(maps.Keys(f.tombstones), chunk.ChunkID.Compare)
 	for _, id := range tombIDs {
 		idCopy := id
 		snap.Tombstones = append(snap.Tombstones, &gastrologv1.Tombstone{
@@ -682,18 +694,12 @@ func (f *FSM) snapshotProtoLocked() *gastrologv1.VaultCtlSnapshot {
 		})
 	}
 
-	pdIDs := slices.SortedFunc(maps.Keys(f.pendingDeletes), compareChunkID)
+	pdIDs := slices.SortedFunc(maps.Keys(f.pendingDeletes), chunk.ChunkID.Compare)
 	for _, id := range pdIDs {
 		snap.PendingDeletes = append(snap.PendingDeletes, pendingDeleteToProto(f.pendingDeletes[id]))
 	}
 
 	return snap
-}
-
-// compareChunkID orders chunk IDs by their raw bytes for deterministic
-// snapshot section ordering.
-func compareChunkID(a, b chunk.ChunkID) int {
-	return bytes.Compare(a[:], b[:])
 }
 
 // Snapshot returns a point-in-time snapshot of all chunk metadata.
@@ -741,6 +747,7 @@ func (f *FSM) restoreFromProtoLocked(snap *gastrologv1.VaultCtlSnapshot) {
 		p := pendingDeleteFromProto(pp)
 		f.pendingDeletes[p.ChunkID] = &p
 	}
+	f.restoreCompletedSegmentsLocked(snap.GetCompletedSegments())
 	f.ready = true
 }
 

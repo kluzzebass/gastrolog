@@ -3,7 +3,6 @@
 package memory
 
 import (
-	"bytes"
 	"cmp"
 	"context"
 	"fmt"
@@ -15,10 +14,6 @@ import (
 
 	"gastrolog/internal/system"
 )
-
-// cmpUUID compares two UUIDs lexicographically. Since gastrolog uses UUIDv7,
-// byte order equals creation order.
-func cmpUUID(a, b glid.GLID) int { return bytes.Compare(a[:], b[:]) }
 
 // collectAndSort copies values from a map, applies a per-element transform,
 // and sorts the result. Used by Load to deep-copy + sort each config entity type.
@@ -118,14 +113,14 @@ func (s *Store) Load(ctx context.Context) (*system.System, error) {
 
 	// Config: operator-controlled entities.
 	// gastrolog-4kkoo (Phase 5): Filters removed; expressions inline on routes.
-	cfg.RotationPolicies = collectAndSort(s.rotationPolicies, copyRotationPolicy, func(a, b system.RotationPolicyConfig) int { return cmpUUID(a.ID, b.ID) })
-	cfg.RetentionPolicies = collectAndSort(s.retentionPolicies, copyRetentionPolicy, func(a, b system.RetentionPolicyConfig) int { return cmpUUID(a.ID, b.ID) })
-	cfg.Vaults = collectAndSort(s.vaults, copyVaultConfig, func(a, b system.VaultConfig) int { return cmpUUID(a.ID, b.ID) })
-	cfg.Ingesters = collectAndSort(s.ingesters, copyIngesterConfig, func(a, b system.IngesterConfig) int { return cmpUUID(a.ID, b.ID) })
-	cfg.Routes = collectAndSort(s.routes, copyRouteConfig, func(a, b system.RouteConfig) int { return cmpUUID(a.ID, b.ID) })
-	cfg.ManagedFiles = collectAndSort(s.managedFiles, func(v system.ManagedFileConfig) system.ManagedFileConfig { return v }, func(a, b system.ManagedFileConfig) int { return cmpUUID(a.ID, b.ID) })
-	cfg.CloudServices = collectAndSort(s.cloudServices, copyCloudService, func(a, b system.CloudService) int { return cmpUUID(a.ID, b.ID) })
-	cfg.Certs = collectAndSort(s.certs, copyCertPEM, func(a, b system.CertPEM) int { return cmpUUID(a.ID, b.ID) })
+	cfg.RotationPolicies = collectAndSort(s.rotationPolicies, copyRotationPolicy, func(a, b system.RotationPolicyConfig) int { return glid.Compare(a.ID, b.ID) })
+	cfg.RetentionPolicies = collectAndSort(s.retentionPolicies, copyRetentionPolicy, func(a, b system.RetentionPolicyConfig) int { return glid.Compare(a.ID, b.ID) })
+	cfg.Vaults = collectAndSort(s.vaults, copyVaultConfig, func(a, b system.VaultConfig) int { return glid.Compare(a.ID, b.ID) })
+	cfg.Ingesters = collectAndSort(s.ingesters, copyIngesterConfig, func(a, b system.IngesterConfig) int { return glid.Compare(a.ID, b.ID) })
+	cfg.Routes = collectAndSort(s.routes, copyRouteConfig, func(a, b system.RouteConfig) int { return glid.Compare(a.ID, b.ID) })
+	cfg.ManagedFiles = collectAndSort(s.managedFiles, func(v system.ManagedFileConfig) system.ManagedFileConfig { return v }, func(a, b system.ManagedFileConfig) int { return glid.Compare(a.ID, b.ID) })
+	cfg.CloudServices = collectAndSort(s.cloudServices, copyCloudService, func(a, b system.CloudService) int { return glid.Compare(a.ID, b.ID) })
+	cfg.Certs = collectAndSort(s.certs, copyCertPEM, func(a, b system.CertPEM) int { return glid.Compare(a.ID, b.ID) })
 
 	// Config: server settings.
 	if s.ss.hasServerSettings {
@@ -143,7 +138,7 @@ func (s *Store) Load(ctx context.Context) (*system.System, error) {
 	}
 
 	// Runtime: cluster-managed state.
-	rt.Nodes = collectAndSort(s.nodes, func(v system.NodeConfig) system.NodeConfig { return v }, func(a, b system.NodeConfig) int { return cmpUUID(a.ID, b.ID) })
+	rt.Nodes = collectAndSort(s.nodes, func(v system.NodeConfig) system.NodeConfig { return v }, func(a, b system.NodeConfig) int { return glid.Compare(a.ID, b.ID) })
 	rt.NodeStorageConfigs = collectAndSort(s.nodeStorageConfigs, copyNodeStorageConfig, func(a, b system.NodeStorageConfig) int { return cmp.Compare(a.NodeID, b.NodeID) })
 	if s.clusterTLS != nil {
 		c := *s.clusterTLS
@@ -212,7 +207,7 @@ func (s *Store) ListRotationPolicies(ctx context.Context) ([]system.RotationPoli
 	for _, rp := range s.rotationPolicies {
 		result = append(result, copyRotationPolicy(rp))
 	}
-	slices.SortFunc(result, func(a, b system.RotationPolicyConfig) int { return cmpUUID(a.ID, b.ID) })
+	slices.SortFunc(result, func(a, b system.RotationPolicyConfig) int { return glid.Compare(a.ID, b.ID) })
 	return result, nil
 }
 
@@ -254,7 +249,7 @@ func (s *Store) ListRetentionPolicies(ctx context.Context) ([]system.RetentionPo
 	for _, rp := range s.retentionPolicies {
 		result = append(result, copyRetentionPolicy(rp))
 	}
-	slices.SortFunc(result, func(a, b system.RetentionPolicyConfig) int { return cmpUUID(a.ID, b.ID) })
+	slices.SortFunc(result, func(a, b system.RetentionPolicyConfig) int { return glid.Compare(a.ID, b.ID) })
 	return result, nil
 }
 
@@ -296,7 +291,7 @@ func (s *Store) ListVaults(ctx context.Context) ([]system.VaultConfig, error) {
 	for _, st := range s.vaults {
 		result = append(result, copyVaultConfig(st))
 	}
-	slices.SortFunc(result, func(a, b system.VaultConfig) int { return cmpUUID(a.ID, b.ID) })
+	slices.SortFunc(result, func(a, b system.VaultConfig) int { return glid.Compare(a.ID, b.ID) })
 	return result, nil
 }
 
@@ -338,7 +333,7 @@ func (s *Store) ListIngesters(ctx context.Context) ([]system.IngesterConfig, err
 	for _, ing := range s.ingesters {
 		result = append(result, copyIngesterConfig(ing))
 	}
-	slices.SortFunc(result, func(a, b system.IngesterConfig) int { return cmpUUID(a.ID, b.ID) })
+	slices.SortFunc(result, func(a, b system.IngesterConfig) int { return glid.Compare(a.ID, b.ID) })
 	return result, nil
 }
 
@@ -385,7 +380,7 @@ func (s *Store) ListRoutes(ctx context.Context) ([]system.RouteConfig, error) {
 	for _, rt := range s.routes {
 		result = append(result, copyRouteConfig(rt))
 	}
-	slices.SortFunc(result, func(a, b system.RouteConfig) int { return cmpUUID(a.ID, b.ID) })
+	slices.SortFunc(result, func(a, b system.RouteConfig) int { return glid.Compare(a.ID, b.ID) })
 	return result, nil
 }
 
@@ -426,7 +421,7 @@ func (s *Store) ListManagedFiles(ctx context.Context) ([]system.ManagedFileConfi
 	for _, lf := range s.managedFiles {
 		result = append(result, lf)
 	}
-	slices.SortFunc(result, func(a, b system.ManagedFileConfig) int { return cmpUUID(a.ID, b.ID) })
+	slices.SortFunc(result, func(a, b system.ManagedFileConfig) int { return glid.Compare(a.ID, b.ID) })
 	return result, nil
 }
 
@@ -487,7 +482,7 @@ func (s *Store) ListNodes(ctx context.Context) ([]system.NodeConfig, error) {
 	for _, n := range s.nodes {
 		result = append(result, n)
 	}
-	slices.SortFunc(result, func(a, b system.NodeConfig) int { return cmpUUID(a.ID, b.ID) })
+	slices.SortFunc(result, func(a, b system.NodeConfig) int { return glid.Compare(a.ID, b.ID) })
 	return result, nil
 }
 
@@ -627,7 +622,7 @@ func (s *Store) ListCloudServices(ctx context.Context) ([]system.CloudService, e
 	for _, cs := range s.cloudServices {
 		result = append(result, cs)
 	}
-	slices.SortFunc(result, func(a, b system.CloudService) int { return cmpUUID(a.ID, b.ID) })
+	slices.SortFunc(result, func(a, b system.CloudService) int { return glid.Compare(a.ID, b.ID) })
 	return result, nil
 }
 
@@ -693,7 +688,7 @@ func (s *Store) ListCertificates(ctx context.Context) ([]system.CertPEM, error) 
 	for _, cert := range s.certs {
 		result = append(result, copyCertPEM(cert))
 	}
-	slices.SortFunc(result, func(a, b system.CertPEM) int { return cmpUUID(a.ID, b.ID) })
+	slices.SortFunc(result, func(a, b system.CertPEM) int { return glid.Compare(a.ID, b.ID) })
 	return result, nil
 }
 
@@ -775,7 +770,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]system.User, error) {
 	for _, u := range s.users {
 		users = append(users, u)
 	}
-	slices.SortFunc(users, func(a, b system.User) int { return cmpUUID(a.ID, b.ID) })
+	slices.SortFunc(users, func(a, b system.User) int { return glid.Compare(a.ID, b.ID) })
 	return users, nil
 }
 
@@ -917,7 +912,7 @@ func (s *Store) ListRefreshTokens(ctx context.Context) ([]system.RefreshToken, e
 	for _, rt := range s.refreshTokens {
 		tokens = append(tokens, rt)
 	}
-	slices.SortFunc(tokens, func(a, b system.RefreshToken) int { return cmpUUID(a.ID, b.ID) })
+	slices.SortFunc(tokens, func(a, b system.RefreshToken) int { return glid.Compare(a.ID, b.ID) })
 	return tokens, nil
 }
 

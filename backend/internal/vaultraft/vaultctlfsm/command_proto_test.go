@@ -158,6 +158,30 @@ func TestCommandRoundTrip(t *testing.T) {
 			t.Errorf("node id lost")
 		}
 	})
+
+	t.Run("publish_completed_segment", func(t *testing.T) {
+		segID := glidFromByte(0xAB)
+		c := decodeCommand(t, MarshalPublishCompletedSegment(CompletedSegmentEntry{
+			SegmentID:     segID,
+			RecordCount:   12,
+			ByteSize:      345,
+			FirstIngestTS: now,
+			LastIngestTS:  now.Add(time.Second),
+			Checksum:      0x1234,
+			OriginNodeID:  "node-origin",
+			PublishedAt:   now,
+		}))
+		got := c.GetPublishCompletedSegment()
+		if got == nil {
+			t.Fatalf("wrong case: %T", c.GetCommand())
+		}
+		if string(got.GetSegmentId()) != string(segID[:]) {
+			t.Errorf("segment id mismatch")
+		}
+		if got.GetRecordCount() != 12 || got.GetOriginNodeId() != "node-origin" {
+			t.Errorf("fields = %+v", got)
+		}
+	})
 }
 
 // TestApplyRejectsMalformedBytes verifies Apply returns an error (not a panic)

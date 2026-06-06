@@ -124,6 +124,11 @@ func (id ChunkID) String() string {
 	return strings.ToLower(chunkIDEncoding.EncodeToString(id[:]))
 }
 
+// Compare orders two chunk IDs by raw byte order (-1, 0, 1).
+func (id ChunkID) Compare(other ChunkID) int {
+	return glid.Compare(glid.GLID(id), glid.GLID(other))
+}
+
 // Time returns the creation time encoded in the UUIDv7 ChunkID.
 // UUIDv7 stores millisecond Unix timestamp in bytes 0-5 (48 bits, big-endian).
 func (id ChunkID) Time() time.Time {
