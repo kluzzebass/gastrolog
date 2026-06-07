@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"gastrolog/internal/format"
 	"gastrolog/internal/record"
 )
 
@@ -189,14 +190,25 @@ func (sf *File) ReadAll() ([]record.Record, error) {
 }
 
 func (sf *File) readHeader() error {
-	n, err := sf.f.ReadAt(sf.hdrBuf[:], 0)
+	info, err := sf.f.Stat()
 	if err != nil {
 		return err
 	}
-	if n < HeaderSize {
+	readLen := int64(HeaderSize)
+	if info.Size() < readLen {
+		if info.Size() < int64(HeaderSizeV1) {
+			return ErrHeaderTooSmall
+		}
+		readLen = int64(HeaderSizeV1)
+	}
+	n, err := sf.f.ReadAt(sf.hdrBuf[:readLen], 0)
+	if err != nil {
+		return err
+	}
+	if int64(n) < readLen {
 		return ErrHeaderTooSmall
 	}
-	hdr, err := decodeHeader(sf.hdrBuf[:])
+	hdr, err := decodeHeader(sf.hdrBuf[:n])
 	if err != nil {
 		return err
 	}
@@ -205,6 +217,8 @@ func (sf *File) readHeader() error {
 }
 
 func (sf *File) writeHeader() error {
+	sf.hdr.Type = format.TypeSegment
+	sf.hdr.Version = formatVersion
 	encodeHeader(sf.hdr, sf.hdrBuf[:])
 	_, err := sf.f.WriteAt(sf.hdrBuf[:], 0)
 	return err

@@ -149,6 +149,9 @@ func (sf *File) BuildIndex() error {
 		}
 	}
 	sf.hdr.SegmentChecksum = recSum
+	if err := sf.buildSourceIndex(recordEnd); err != nil {
+		return err
+	}
 	return sf.writeHeader()
 }
 
@@ -253,6 +256,15 @@ func (sf *File) verifyIndexedLayout() error {
 	}
 	if idxSum != sf.hdr.IndexChecksum {
 		return errors.New("segment index checksum mismatch")
+	}
+	if sf.hdr.Version == formatVersionV2 || sf.hdr.SourceIndexCount > 0 {
+		return sf.verifySourceIndexLayout(info.Size())
+	}
+	if sf.hdr.IndexOffset > 0 {
+		eventIndexEnd := int64(sf.hdr.IndexOffset) + int64(sf.hdr.RecordCount)*IndexEntrySize
+		if info.Size() != eventIndexEnd {
+			return errors.New("segment trailing bytes after EventID index")
+		}
 	}
 	return nil
 }

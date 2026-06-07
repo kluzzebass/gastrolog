@@ -121,8 +121,9 @@ func TestBuildIndexManyRecordsAppendOrderReversed(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantIndexBytes := int64(n) * segment.IndexEntrySize
-	if info.Size() != int64(hdr.IndexOffset)+wantIndexBytes {
-		t.Fatalf("file size = %d, want %d (records + index)", info.Size(), hdr.IndexOffset+uint32(wantIndexBytes))
+	wantSourceBytes := int64(n) * segment.SourceIndexEntrySize
+	if info.Size() != int64(hdr.IndexOffset)+wantIndexBytes+wantSourceBytes {
+		t.Fatalf("file size = %d, want %d (records + indexes)", info.Size(), hdr.IndexOffset+uint32(wantIndexBytes+wantSourceBytes))
 	}
 
 	got := recordsByEventOrder(t, path)

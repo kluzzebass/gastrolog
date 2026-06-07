@@ -2,6 +2,7 @@ package chunking
 
 import (
 	"fmt"
+	"time"
 
 	"gastrolog/internal/pipeline/segment"
 	"gastrolog/internal/record"
@@ -44,6 +45,36 @@ func (idx *OrderedIndex) RecordAtFilePos(filePos uint32) (record.Record, error) 
 // RecordAt returns the record at position pos in EventID order.
 func (idx *OrderedIndex) RecordAt(pos uint32) (record.Record, error) {
 	return idx.sf.RecordAtEventOrder(pos)
+}
+
+// FindSourceStartPosition returns the first event-order position at or after start
+// in the segment's sparse SourceTS index.
+func (idx *OrderedIndex) FindSourceStartPosition(start time.Time) (uint32, bool, error) {
+	return idx.sf.FindSourceStartPosition(start)
+}
+
+// TrimSpanForSourceStart narrows span to records with SourceTS >= start when indexed.
+// When start is before all indexed sources or the index is empty, the span is unchanged.
+func TrimSpanForSourceStart(span Span, start time.Time, idx *OrderedIndex) (Span, error) {
+	pos, ok, err := idx.FindSourceStartPosition(start)
+	if err != nil {
+		return Span{}, err
+	}
+	if !ok || pos <= span.Start {
+		return span, nil
+	}
+	end, err := spanEnd(span.Start, span.Count)
+	if err != nil {
+		return Span{}, err
+	}
+	if pos >= end {
+		return Span{}, ErrEmptySpan
+	}
+	return Span{
+		SegmentID: span.SegmentID,
+		Start:     pos,
+		Count:     end - pos,
+	}, nil
 }
 
 // Close closes the underlying segment file.
