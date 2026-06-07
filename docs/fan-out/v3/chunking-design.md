@@ -317,7 +317,8 @@ wires, does not own phase logic”).
 | **Leader loop** | `backend/internal/pipeline/chunking` (`ChunkingManager`) | Vault-leader-only goroutine: read FSM + segment registry, call planner, **propose** commands through a vault-ctl `Applier`. Gated on vault leadership (same class of check as other leader-only work, not on every home). |
 | **Execution (followers + leader)** | `backend/internal/pipeline/chunking` (`ChunkingManager`) | Every home: watch sealed manifest, build at seal (`BuildSealedChunk` / `MergeSpanRefs` + `BuildGLCB`), nudge Collection for missing segments, report chunk identity/digest back to vault-ctl. Does **not** invent membership. |
 | **Durable state** | `backend/internal/vaultraft/vaultctlfsm` | Command types and `Apply` handlers only — open manifest refs, running totals, `manifest_opened_at`, resume map, seal/release. **No** segment scans, merge simulation, or pick-order policy. |
-| **Wiring** | `backend/internal/orchestrator` | Start/stop `ChunkingManager` per vault home; inject vault-ctl `Applier`, FSM read callbacks, Collection nudge. Same supervisor role as other pipeline managers — **not** where chunk membership is decided (contrast retention/drain sweeps, which are lifecycle, not phase 7). |
+| **Harness integration** | `backend/internal/pipeline/flow_test.go` | Wire `ChunkingManager` into the in-process pipeline harness with test doubles (`gastrolog-5x29i`). Proves leader loop + build-at-seal + collection nudge **before** production wiring. |
+| **Wiring (Rubicon)** | `backend/internal/orchestrator` | Start/stop `ChunkingManager` per vault home; inject real vault-ctl `Applier`, FSM callbacks, Collection nudge (`gastrolog-214bz` **only** — not before). |
 
 Suggested files under `pipeline/chunking` (names provisional):
 
@@ -400,7 +401,8 @@ state on a timer. Use FSM apply callbacks (`SetOnPublishCompletedSegment`,
   - `gastrolog-uffcg` — chunking planner (next ref / rotate)
   - `gastrolog-5u73c` — ChunkingManager build-at-seal
   - `gastrolog-5i9e6` — ChunkingManager leader planner loop
-  - `gastrolog-5x29i` — ChunkingManager orchestrator wiring
-  - `gastrolog-6chex` — virtual open-chunk query
+  - `gastrolog-5x29i` — ChunkingManager pipeline harness integration (`flow_test`)
+  - `gastrolog-6chex` — virtual open-chunk query (isolated / harness)
+  - `gastrolog-214bz` — **Rubicon:** orchestrator wiring for the full V3 stack (includes ChunkingManager lifecycle)
   - Prerequisite under Distribution: `gastrolog-5pyl3` — vault-ctl segment metadata Publisher
   - Closed: `gastrolog-4mry7`, `gastrolog-3a53d`, `gastrolog-25c02`
