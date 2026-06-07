@@ -49,7 +49,9 @@ type StatsSnapshot struct {
 type Manager struct {
 	workers int
 	table   *Table
-	vaults  map[glid.GLID]chan<- *record.Record
+
+	vmu    sync.RWMutex
+	vaults map[glid.GLID]chan<- *record.Record
 
 	matched   atomic.Uint64
 	unmatched atomic.Uint64
@@ -71,6 +73,24 @@ func New(cfg Config) *Manager {
 		table:   cfg.Table,
 		vaults:  vaults,
 	}
+}
+
+// RegisterVault sets (or replaces) the segmentation input queue a vault's
+// matched records fan out to. Safe to call before or during Run; the orchestrator
+// reconcile registers vaults as placement changes bring vault homes onto this node.
+func (m *Manager) RegisterVault(vaultID glid.GLID, in chan<- *record.Record) {
+	m.vmu.Lock()
+	m.vaults[vaultID] = in
+	m.vmu.Unlock()
+}
+
+// UnregisterVault drops a vault's fan-out target. Callers must stop upstream
+// segmentation input for the vault before closing its channel; until re-registered,
+// records matching the vault are counted as matched but not delivered.
+func (m *Manager) UnregisterVault(vaultID glid.GLID) {
+	m.vmu.Lock()
+	delete(m.vaults, vaultID)
+	m.vmu.Unlock()
 }
 
 // Stats returns current matched/unmatched counts.
@@ -149,7 +169,9 @@ func (m *Manager) route(ctx context.Context, in Input) {
 	}
 	m.matched.Add(1)
 	for _, vaultID := range vaults {
+		m.vmu.RLock()
 		out, ok := m.vaults[vaultID]
+		m.vmu.RUnlock()
 		if !ok {
 			continue
 		}
