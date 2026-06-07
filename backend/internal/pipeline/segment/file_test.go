@@ -323,3 +323,37 @@ func TestMarkComplete(t *testing.T) {
 		t.Error("expected FlagComplete set")
 	}
 }
+
+func TestEncodeFrameAndSize(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "seg")
+	writeTS := time.Date(2024, 6, 1, 12, 1, 0, 0, time.UTC)
+	rec := sampleRecord(0)
+
+	body, err := segment.EncodeFrame(rec, writeTS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body) == 0 {
+		t.Fatal("expected non-empty frame body")
+	}
+
+	sf, err := segment.Create(path, segment.Meta{ID: glid.New(), VaultID: glid.New()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sf.AppendFrame(rec, writeTS, body); err != nil {
+		t.Fatal(err)
+	}
+	size, err := sf.Size()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if size <= segment.HeaderSize {
+		t.Fatalf("Size() = %d, want > header", size)
+	}
+	if err := sf.Close(); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -17,6 +17,9 @@ func TestDirsAndSegments(t *testing.T) {
 	if got, want := paths.WorkingDir(root), filepath.Join(root, paths.Working); got != want {
 		t.Fatalf("WorkingDir = %q, want %q", got, want)
 	}
+	if got, want := paths.WorkingSegment(root, segID), filepath.Join(root, paths.Working, segID.String()); got != want {
+		t.Fatalf("WorkingSegment = %q, want %q", got, want)
+	}
 	if got, want := paths.CompletedSegment(root, segID), filepath.Join(root, paths.Completed, segID.String()); got != want {
 		t.Fatalf("CompletedSegment = %q, want %q", got, want)
 	}
@@ -25,6 +28,22 @@ func TestDirsAndSegments(t *testing.T) {
 	}
 	if got, want := paths.HeadSegment(root, segID), filepath.Join(root, paths.Head, segID.String()); got != want {
 		t.Fatalf("HeadSegment = %q, want %q", got, want)
+	}
+}
+
+func TestEnsureHeadAndPreHeadDirs(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	if err := paths.EnsurePreHeadDir(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := paths.EnsureHeadDir(root); err != nil {
+		t.Fatal(err)
+	}
+	for _, sub := range []string{paths.PreHead, paths.Head} {
+		if _, err := os.Stat(filepath.Join(root, sub)); err != nil {
+			t.Fatalf("%s: %v", sub, err)
+		}
 	}
 }
 

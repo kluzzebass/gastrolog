@@ -121,6 +121,9 @@ func TestBuildSealedChunkMissingSegment(t *testing.T) {
 	if !slices.Contains(missingErr.SegmentIDs, missing) {
 		t.Fatalf("missing IDs = %v, want %s", missingErr.SegmentIDs, missing)
 	}
+	if missingErr.Error() == "" || !errors.Is(missingErr, chunking.ErrMissingSegments) {
+		t.Fatalf("Error() = %q", missingErr.Error())
+	}
 	if _, err := os.Stat(filepath.Join(home, "chunks")); !os.IsNotExist(err) {
 		t.Fatal("GLCB must not be written when segments are missing")
 	}

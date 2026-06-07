@@ -122,6 +122,23 @@ func TestPromoteVerifiedRejectsCorruptTransfer(t *testing.T) {
 	}
 }
 
+func TestReceiveToPreHeadCopyError(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	segID := glid.New()
+	_, err := collection.ReceiveToPreHead(root, segID, &failReader{err: errors.New("transfer interrupted")})
+	if err == nil {
+		t.Fatal("expected copy error")
+	}
+	if _, err := os.Stat(paths.PreHeadSegment(root, segID)); !os.IsNotExist(err) {
+		t.Fatal("partial pre-head file should be removed")
+	}
+}
+
+type failReader struct{ err error }
+
+func (r *failReader) Read([]byte) (int, error) { return 0, r.err }
+
 func TestPreHeadDoesNotSatisfyHeadInvariant(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()

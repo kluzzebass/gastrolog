@@ -3,6 +3,7 @@ package collection_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"sync"
@@ -276,5 +277,108 @@ func TestCollectOnceUnknownVault(t *testing.T) {
 	err := mgr.CollectOnce(context.Background(), glid.New())
 	if err != collection.ErrUnknownVault {
 		t.Fatalf("CollectOnce() = %v, want ErrUnknownVault", err)
+	}
+}
+
+type errPull struct{ err error }
+
+func (p errPull) Pull(context.Context, glid.GLID, glid.GLID, io.Writer) error { return p.err }
+
+func TestCollectOncePullFailure(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	segID := glid.New()
+	root := t.TempDir()
+	log := &staticLog{}
+	log.setAssigned(collection.AssignedSegment{VaultID: vaultID, SegmentID: segID})
+	receipts := &recordingReceipts{}
+
+	mgr := collection.New(collection.Config{})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log:      log,
+		Pull:     errPull{err: errors.New("origin unreachable")},
+		Receipts: receipts,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err := mgr.CollectOnce(context.Background(), vaultID)
+	if err == nil {
+		t.Fatal("expected pull error")
+	}
+	if receipts.count() != 0 {
+		t.Fatalf("receipts = %d, want 0 on failed pull", receipts.count())
+	}
+}
+
+func TestCollectOnceSkipsSegmentInPreHead(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	segID := glid.New()
+	root := t.TempDir()
+	data := writeSegmentBytes(t, vaultID, segID, "pre-head only")
+	if _, err := collection.ReceiveToPreHead(root, segID, bytes.NewReader(data)); err != nil {
+		t.Fatal(err)
+	}
+
+	pull := newMemoryPull()
+	pull.Put(segID, data)
+	log := &staticLog{}
+	log.setAssigned(collection.AssignedSegment{VaultID: vaultID, SegmentID: segID})
+	receipts := &recordingReceipts{}
+
+	mgr := collection.New(collection.Config{})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log: log, Pull: pull, Receipts: receipts,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.CollectOnce(context.Background(), vaultID); err != nil {
+		t.Fatal(err)
+	}
+	if receipts.count() != 0 {
+		t.Fatalf("receipts = %d, want 0 while segment still in pre-head", receipts.count())
+	}
+}
+
+func TestUnregisterVaultStopsCollection(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	root := t.TempDir()
+	mgr := collection.New(collection.Config{})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log: &staticLog{}, Pull: newMemoryPull(), Receipts: &recordingReceipts{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mgr.UnregisterVault(vaultID)
+	err := mgr.CollectOnce(context.Background(), vaultID)
+	if err != collection.ErrUnknownVault {
+		t.Fatalf("CollectOnce() = %v, want ErrUnknownVault", err)
+	}
+}
+
+func TestRunTwiceReturnsErrNotRunning(t *testing.T) {
+	t.Parallel()
+	mgr := collection.New(collection.Config{})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_ = mgr.Run(ctx)
+		close(done)
+	}()
+	time.Sleep(20 * time.Millisecond)
+	if err := mgr.Run(ctx); err != collection.ErrNotRunning {
+		t.Fatalf("Run() = %v, want ErrNotRunning", err)
+	}
+	cancel()
+	<-done
+}
+
+func TestRegisterVaultRequiresDependencies(t *testing.T) {
+	t.Parallel()
+	mgr := collection.New(collection.Config{})
+	err := mgr.RegisterVault(glid.New(), t.TempDir(), collection.VaultConfig{})
+	if err == nil {
+		t.Fatal("expected error without log/pull/receipts")
 	}
 }

@@ -392,3 +392,33 @@ func TestFinalizeEmptySegmentNoIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestFrameByteLen(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "seg")
+	writeTS := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
+	meta := segment.Meta{ID: glid.New(), VaultID: glid.New()}
+	recs := []*record.Record{
+		fixedEventRecord(glid.New(), glid.New(), 0, writeTS, 'a'),
+		fixedEventRecord(glid.New(), glid.New(), 1, writeTS.Add(time.Millisecond), 'b'),
+	}
+	finalizeSegment(t, path, meta, recs, writeTS)
+
+	sf, err := segment.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sf.Close()
+
+	n, err := sf.FrameByteLen(segment.HeaderSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n == 0 {
+		t.Fatal("expected positive frame length")
+	}
+	if _, err := sf.FrameByteLen(0); !errors.Is(err, segment.ErrFrameLength) {
+		t.Fatalf("FrameByteLen(0) = %v, want ErrFrameLength", err)
+	}
+}

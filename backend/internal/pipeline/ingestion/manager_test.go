@@ -302,11 +302,20 @@ func TestManagerReconcileReplace(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
+	select {
+	case msg := <-out:
+		if string(msg.Raw) != "first" {
+			t.Fatalf("first message = %q, want first", msg.Raw)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for first ingester message")
+	}
+
 	if err := mgr.Reconcile([]ingestion.IngesterSpec{{ID: id, Ingester: second}}); err != nil {
 		t.Fatalf("Reconcile replace: %v", err)
 	}
 
-	var got []string
+	got := []string{"first"}
 	deadline := time.After(2 * time.Second)
 	for len(got) < 2 {
 		select {

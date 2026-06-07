@@ -3,6 +3,7 @@ package pipeline_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -24,6 +25,9 @@ import (
 	"gastrolog/internal/pipeline/segmentation"
 	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/record"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
+
+	hraft "github.com/hashicorp/raft"
 )
 
 // emitIngester pushes a fixed batch then blocks until cancelled.
@@ -51,7 +55,8 @@ type harness struct {
 	cancel context.CancelFunc
 	segDone   chan struct{}
 	distDone  chan struct{}
-	colDone   chan struct{}
+	colDone    chan struct{}
+	chunkDone  chan struct{}
 
 	nodeID     glid.GLID
 	ingesterID glid.GLID
@@ -64,9 +69,14 @@ type harness struct {
 	digest   *digestion.Manager
 	seg      *segmentation.Manager
 	dist     *distribution.Manager
-	collect  *collection.Manager
-	pub      *recordingPublisher
-	receipts *flowCollectionReceipts
+	collect   *collection.Manager
+	chunk     *chunking.Manager
+	pub       *recordingPublisher
+	receipts  *flowCollectionReceipts
+	fsm       *vaultctlfsm.FSM
+	chunkID   chunk.ChunkID
+	chunkRoot string
+	gatePull  *gateFlowPull
 
 	syncs atomic.Uint32
 }
@@ -115,10 +125,96 @@ type harnessOpts struct {
 	closePolicy    segmentation.ClosePolicy
 	localHolder    bool
 	withCollection bool // remote home: collection on a separate storage root
+	withChunking   bool // ChunkingManager on homeRoot via shared vault-ctl FSM
+	chunkPolicy    chunking.ManifestRotationPolicy
+	chunkLeader    func() bool // nil defaults to vault leader
+	pullFails      int         // simulate transient origin pull failures on remote home
+	gatedPull      bool        // block pulls until allowPull() (multi-node recovery tests)
+}
+
+type gateFlowPull struct {
+	inner *flowDistributionPull
+	open  atomic.Bool
+}
+
+func (p *gateFlowPull) Pull(ctx context.Context, vaultID, segmentID glid.GLID, dest io.Writer) error {
+	if !p.open.Load() {
+		return fmt.Errorf("origin unreachable")
+	}
+	return p.inner.Pull(ctx, vaultID, segmentID, dest)
+}
+
+func (p *gateFlowPull) allow() {
+	p.open.Store(true)
+}
+
+type flowFsmApplier struct {
+	fsm *vaultctlfsm.FSM
+}
+
+func (a *flowFsmApplier) Apply(data []byte) error {
+	cp := append([]byte(nil), data...)
+	if result := a.fsm.Apply(&hraft.Log{Data: cp}); result != nil {
+		if err, ok := result.(error); ok {
+			return fmt.Errorf("apply: %w", err)
+		}
+		return fmt.Errorf("apply: %v", result)
+	}
+	return nil
+}
+
+// flowVaultCtlPublisher records metadata for collection and commits segment
+// registry entries to the harness vault-ctl FSM.
+type flowVaultCtlPublisher struct {
+	rec  *recordingPublisher
+	vctl *distribution.VaultCtlPublisher
+}
+
+func (p *flowVaultCtlPublisher) Publish(ctx context.Context, meta distribution.Metadata) error {
+	if err := p.rec.Publish(ctx, meta); err != nil {
+		return err
+	}
+	return p.vctl.Publish(ctx, meta)
+}
+
+type flowCollectionNudger struct {
+	collect *collection.Manager
+	vaultID glid.GLID
+}
+
+func (n flowCollectionNudger) CollectMissing(ctx context.Context) error {
+	return n.collect.CollectOnce(ctx, n.vaultID)
+}
+
+type flakyFlowPull struct {
+	inner    *flowDistributionPull
+	attempts atomic.Int32
+	maxFail  int32
+}
+
+func (p *flakyFlowPull) Pull(ctx context.Context, vaultID, segmentID glid.GLID, dest io.Writer) error {
+	if p.attempts.Add(1) <= p.maxFail {
+		return fmt.Errorf("origin node unreachable")
+	}
+	return p.inner.Pull(ctx, vaultID, segmentID, dest)
+}
+
+func applyFlowFSM(t *testing.T, fsm *vaultctlfsm.FSM, data []byte) {
+	t.Helper()
+	if result := fsm.Apply(&hraft.Log{Data: data}); result != nil {
+		if err, ok := result.(error); ok {
+			t.Fatalf("apply: %v", err)
+		}
+		t.Fatalf("apply: %v", result)
+	}
 }
 
 func newHarness(t *testing.T, nodeID, ingesterID, vaultID glid.GLID, route *routing.Route, opts harnessOpts) *harness {
 	t.Helper()
+
+	if opts.withChunking && !opts.withCollection {
+		t.Fatal("withChunking requires withCollection")
+	}
 
 	vaultRoot := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -144,6 +240,19 @@ func newHarness(t *testing.T, nodeID, ingesterID, vaultID glid.GLID, route *rout
 		h.colDone = make(chan struct{})
 	}
 
+	var distPublisher distribution.Publisher = h.pub
+	if opts.withChunking {
+		h.fsm = vaultctlfsm.New()
+		h.chunkID = chunk.NewChunkID()
+		distPublisher = &flowVaultCtlPublisher{
+			rec: h.pub,
+			vctl: &distribution.VaultCtlPublisher{
+				Applier:      &flowFsmApplier{fsm: h.fsm},
+				OriginNodeID: nodeID.String(),
+			},
+		}
+	}
+
 	segMgr, completed := segmentation.New(segmentation.Config{
 		ClosePolicy:     opts.closePolicy,
 		SyncBatchSize:   1,
@@ -157,7 +266,7 @@ func newHarness(t *testing.T, nodeID, ingesterID, vaultID glid.GLID, route *rout
 
 	distMgr, _ := distribution.New(distribution.Config{})
 	if err := distMgr.RegisterVault(vaultID, vaultRoot, distribution.VaultConfig{
-		Publisher:   h.pub,
+		Publisher:   distPublisher,
 		LocalHolder: func() bool { return opts.localHolder },
 	}); err != nil {
 		t.Fatalf("RegisterVault distribution: %v", err)
@@ -200,9 +309,20 @@ func newHarness(t *testing.T, nodeID, ingesterID, vaultID glid.GLID, route *rout
 
 	if opts.withCollection {
 		colMgr := collection.New(collection.Config{})
+		basePull := &flowDistributionPull{dist: distMgr}
+		var pull collection.PullClient = basePull
+		if opts.gatedPull {
+			h.gatePull = &gateFlowPull{inner: basePull}
+			pull = h.gatePull
+		} else if opts.pullFails > 0 {
+			pull = &flakyFlowPull{
+				inner:   basePull,
+				maxFail: int32(opts.pullFails),
+			}
+		}
 		if err := colMgr.RegisterVault(vaultID, h.homeRoot, collection.VaultConfig{
 			Log:      &publishedLog{pub: h.pub, vaultID: vaultID},
-			Pull:     &flowDistributionPull{dist: distMgr},
+			Pull:     pull,
 			Receipts: h.receipts,
 		}); err != nil {
 			t.Fatalf("RegisterVault collection: %v", err)
@@ -212,6 +332,39 @@ func newHarness(t *testing.T, nodeID, ingesterID, vaultID glid.GLID, route *rout
 		go func() {
 			_ = h.collect.Run(ctx)
 			close(h.colDone)
+		}()
+	}
+
+	if opts.withChunking {
+		policy := opts.chunkPolicy
+		if policy.MaxRecords == 0 && policy.MaxBytes == 0 && policy.MaxAge == 0 {
+			policy = chunking.ManifestRotationPolicy{MaxRecords: 100}
+		}
+		h.chunkRoot = filepath.Join(h.homeRoot, "chunks")
+		chunkMgr := chunking.New(chunking.Config{})
+		chunkID := h.chunkID
+		isLeader := func() bool { return true }
+		if opts.chunkLeader != nil {
+			isLeader = opts.chunkLeader
+		}
+		if err := chunkMgr.RegisterVault(vaultID, chunking.VaultConfig{
+			VaultRoot:  h.homeRoot,
+			ChunkRoot:  h.chunkRoot,
+			FSM:        h.fsm,
+			Locate:     chunking.VaultSegmentLocator{Root: h.homeRoot},
+			Applier:    &flowFsmApplier{fsm: h.fsm},
+			IsLeader:   isLeader,
+			NewChunkID: func() chunk.ChunkID { return chunkID },
+			Policy:     policy,
+			Nudge:      flowCollectionNudger{collect: h.collect, vaultID: vaultID},
+		}); err != nil {
+			t.Fatalf("RegisterVault chunking: %v", err)
+		}
+		h.chunk = chunkMgr
+		h.chunkDone = make(chan struct{})
+		go func() {
+			_ = h.chunk.Run(ctx)
+			close(h.chunkDone)
 		}()
 	}
 
@@ -241,6 +394,9 @@ func newHarness(t *testing.T, nodeID, ingesterID, vaultID glid.GLID, route *rout
 		<-h.distDone
 		if h.colDone != nil {
 			<-h.colDone
+		}
+		if h.chunkDone != nil {
+			<-h.chunkDone
 		}
 	})
 
@@ -320,6 +476,66 @@ func (h *harness) waitCollected(t *testing.T, want int) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("collected %d segments, want %d", h.receipts.receiptCount(), want)
+}
+
+func (h *harness) waitCollectedWithRetry(t *testing.T, want int) {
+	t.Helper()
+	if h.collect == nil {
+		t.Fatal("harness has no collection")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		n := h.receipts.receiptCount()
+		if n == want {
+			return
+		}
+		if n > want {
+			t.Fatalf("collected %d segments, want %d", n, want)
+		}
+		h.collect.Notify(h.vaultID)
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("collected %d segments, want %d", h.receipts.receiptCount(), want)
+}
+
+func (h *harness) waitChunkGLCB(t *testing.T, wantRecords uint32) string {
+	t.Helper()
+	if h.chunk == nil {
+		t.Fatal("harness has no chunking")
+	}
+	glcbPath := chunking.ChunkGLCBPath(h.chunkRoot, h.chunkID)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(glcbPath); err == nil {
+			f, err := os.Open(glcbPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rd, err := chunkcloud.NewCacheReader(f)
+			_ = f.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rd.Meta().RecordCount != wantRecords {
+				rd.Close()
+				time.Sleep(10 * time.Millisecond)
+				continue
+			}
+			rd.Close()
+			return glcbPath
+		}
+		if err := h.chunk.PlanOnce(h.ctx, h.vaultID); err != nil {
+			t.Fatalf("PlanOnce: %v", err)
+		}
+		if h.fsm.SealedManifest() != nil {
+			if err := h.chunk.BuildOnce(h.ctx, h.vaultID); err != nil {
+				t.Fatalf("BuildOnce: %v", err)
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("GLCB not built at %s", glcbPath)
+	return ""
 }
 
 func (h *harness) readCompletedRecords(t *testing.T) []record.Record {
@@ -536,7 +752,7 @@ func TestPipelineIngestToDistributionLocalHolder(t *testing.T) {
 
 func TestPipelineFullPath(t *testing.T) {
 	// Ingestion → digestion → routing → segmentation → distribution →
-	// collection (remote home) → chunking k-way merge over head spans.
+	// collection (remote home) → ChunkingManager planner + build-at-seal.
 	nodeID := glid.New()
 	ingesterID := glid.New()
 	vaultID := glid.New()
@@ -549,6 +765,8 @@ func TestPipelineFullPath(t *testing.T) {
 	h := newHarness(t, nodeID, ingesterID, vaultID, route, harnessOpts{
 		closePolicy:    segmentation.ClosePolicy{MaxBytes: 256},
 		withCollection: true,
+		withChunking:   true,
+		chunkPolicy:    chunking.ManifestRotationPolicy{MaxRecords: 8},
 	})
 	msgs := make([]ingestion.IngesterMessage, 8)
 	for i := range msgs {
@@ -593,39 +811,16 @@ func TestPipelineFullPath(t *testing.T) {
 		t.Fatalf("receipts = %d, want %d (published segments)", h.receipts.receiptCount(), len(published))
 	}
 
-	merged := mergePublishedHead(t, h.homeRoot, published)
-	if len(merged) == 0 {
-		t.Fatal("merge produced no records")
+	if len(h.fsm.ListCompletedSegments()) != len(published) {
+		t.Fatalf("FSM completed segments = %d, want %d", len(h.fsm.ListCompletedSegments()), len(published))
 	}
-	if !chunking.IsSortedByEventID(merged) {
-		t.Fatal("merge not sorted by EventID")
-	}
+
 	var totalRecords uint32
 	for _, meta := range published {
 		totalRecords += meta.RecordCount
 	}
-	if uint32(len(merged)) != totalRecords {
-		t.Fatalf("merged %d records, want %d", len(merged), totalRecords)
-	}
-	for _, rec := range merged {
-		if !bytes.Contains(rec.Raw, []byte("full path payload")) {
-			t.Fatalf("merged payload = %q", rec.Raw)
-		}
-	}
 
-	refs := publishedHeadRefs(h.homeRoot, published)
-	glcbPath := filepath.Join(t.TempDir(), chunkcloud.BlobFilename)
-	glcbResult, err := chunking.BuildGLCBFile(glcbPath, chunking.BuildGLCBInput{
-		ChunkID: chunk.NewChunkID(),
-		VaultID: vaultID,
-		Refs:    refs,
-	})
-	if err != nil {
-		t.Fatalf("BuildGLCBFile: %v", err)
-	}
-	if glcbResult.RecordCount != totalRecords {
-		t.Fatalf("GLCB record count = %d, want %d", glcbResult.RecordCount, totalRecords)
-	}
+	glcbPath := h.waitChunkGLCB(t, totalRecords)
 	f, err := os.Open(glcbPath)
 	if err != nil {
 		t.Fatal(err)
@@ -636,37 +831,168 @@ func TestPipelineFullPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rd.Close()
+	if rd.Meta().RecordCount != totalRecords {
+		t.Fatalf("GLCB record count = %d, want %d", rd.Meta().RecordCount, totalRecords)
+	}
+	var prev chunk.EventID
 	for i := range totalRecords {
-		if _, err := rd.ReadRecord(i); err != nil {
+		rec, err := rd.ReadRecord(i)
+		if err != nil {
 			t.Fatalf("ReadRecord(%d): %v", i, err)
 		}
+		if i > 0 && prev.Compare(rec.EventID) >= 0 {
+			t.Fatalf("GLCB record %d not sorted by EventID", i)
+		}
+		prev = rec.EventID
+		if !bytes.Contains(rec.Raw, []byte("full path payload")) {
+			t.Fatalf("GLCB payload = %q", rec.Raw)
+		}
+	}
+	if h.fsm.SealedManifest() != nil {
+		t.Fatal("sealed manifest should clear after SealChunk")
+	}
+	entry := h.fsm.Get(h.chunkID)
+	if entry == nil || entry.State != chunk.ChunkStateSealed {
+		t.Fatalf("chunk entry = %+v, want sealed", entry)
 	}
 }
 
-func publishedHeadRefs(homeRoot string, published []distribution.Metadata) []chunking.SpanRef {
-	refs := make([]chunking.SpanRef, 0, len(published))
-	for _, meta := range published {
-		refs = append(refs, chunking.SpanRef{
-			Path: paths.HeadSegment(homeRoot, meta.SegmentID),
-			Span: chunking.Span{
-				SegmentID: meta.SegmentID,
-				Start:     0,
-				Count:     meta.RecordCount,
-			},
-		})
-	}
-	return refs
-}
+func TestPipelineRemotePullFailureThenRecovery(t *testing.T) {
+	// Origin holds completed segments; remote home retries collection after pull failure.
+	nodeID := glid.New()
+	ingesterID := glid.New()
+	vaultID := glid.New()
 
-// mergePublishedHead k-way merges head segments using full spans derived from
-// published metadata. Stand-in for vault-ctl chunk plan until plan algorithm lands.
-func mergePublishedHead(t *testing.T, homeRoot string, published []distribution.Metadata) []record.Record {
-	t.Helper()
-	merged, err := chunking.MergeRecords(publishedHeadRefs(homeRoot, published))
+	route, err := routing.CompileRoute(glid.New(), "all", 0, "*", []glid.GLID{vaultID})
 	if err != nil {
-		t.Fatalf("MergeRecords: %v", err)
+		t.Fatal(err)
 	}
-	return merged
+
+	h := newHarness(t, nodeID, ingesterID, vaultID, route, harnessOpts{
+		closePolicy:    segmentation.ClosePolicy{MaxBytes: 256},
+		withCollection: true,
+		pullFails:      1,
+	})
+	msgs := make([]ingestion.IngesterMessage, 8)
+	for i := range msgs {
+		msgs[i] = ingestion.IngesterMessage{
+			Raw:   []byte("retry after pull failure"),
+			Attrs: map[string]string{"env": "prod"},
+		}
+	}
+	h.runIngester(t, &emitIngester{msgs: msgs})
+
+	h.waitSyncs(t, 8)
+	published := h.waitPublishedStable(t, 1)
+	h.waitCollectedWithRetry(t, len(published))
+	headPath := paths.HeadSegment(h.homeRoot, published[0].SegmentID)
+	if _, err := os.Stat(headPath); err != nil {
+		t.Fatalf("head on remote home: %v", err)
+	}
+}
+
+func TestPipelineRemoteHomeFollowerBuildsWithoutSealChunk(t *testing.T) {
+	// Replicated sealed manifest on a follower home builds GLCB locally but does not propose SealChunk.
+	nodeID := glid.New()
+	ingesterID := glid.New()
+	vaultID := glid.New()
+
+	route, err := routing.CompileRoute(glid.New(), "all", 0, "*", []glid.GLID{vaultID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h := newHarness(t, nodeID, ingesterID, vaultID, route, harnessOpts{
+		closePolicy:    segmentation.ClosePolicy{MaxBytes: 256},
+		withCollection: true,
+		withChunking:   true,
+		chunkLeader:    func() bool { return false },
+	})
+	msgs := make([]ingestion.IngesterMessage, 8)
+	for i := range msgs {
+		msgs[i] = ingestion.IngesterMessage{
+			Raw:   []byte("follower home build"),
+			Attrs: map[string]string{"env": "prod"},
+		}
+	}
+	h.runIngester(t, &emitIngester{msgs: msgs})
+
+	h.waitSyncs(t, 8)
+	published := h.waitPublishedStable(t, 1)
+	h.waitCollected(t, len(published))
+
+	meta := published[0]
+	openedAt := time.Now().UTC()
+	applyFlowFSM(t, h.fsm, vaultctlfsm.MarshalOpenChunkManifest(h.chunkID, openedAt))
+	applyFlowFSM(t, h.fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(h.chunkID, vaultctlfsm.OpenChunkSegmentRef{
+		SegmentID:         meta.SegmentID,
+		FirstRecordNumber: 0,
+		LastRecordNumber:  meta.RecordCount - 1,
+		SliceBytes:        4096,
+		RefAddedAt:        openedAt,
+	}))
+	sealedAt := openedAt.Add(time.Minute)
+	applyFlowFSM(t, h.fsm, vaultctlfsm.MarshalSealOpenChunkManifest(h.chunkID, sealedAt))
+
+	if err := h.chunk.BuildOnce(h.ctx, h.vaultID); err != nil {
+		t.Fatalf("BuildOnce: %v", err)
+	}
+	glcbPath := chunking.ChunkGLCBPath(h.chunkRoot, h.chunkID)
+	if _, err := os.Stat(glcbPath); err != nil {
+		t.Fatalf("follower GLCB: %v", err)
+	}
+	entry := h.fsm.Get(h.chunkID)
+	if entry != nil && entry.State == chunk.ChunkStateSealed {
+		t.Fatal("follower must not apply SealChunk to vault-ctl FSM")
+	}
+	if h.fsm.SealedManifest() == nil {
+		t.Fatal("sealed manifest must remain until leader applies SealChunk")
+	}
+}
+
+func TestPipelineRemoteHomePlannerRequiresLocalHead(t *testing.T) {
+	// Vault leader planner on the remote home cannot add refs until collection lands segments locally.
+	nodeID := glid.New()
+	ingesterID := glid.New()
+	vaultID := glid.New()
+
+	route, err := routing.CompileRoute(glid.New(), "all", 0, "*", []glid.GLID{vaultID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h := newHarness(t, nodeID, ingesterID, vaultID, route, harnessOpts{
+		closePolicy:    segmentation.ClosePolicy{MaxBytes: 256},
+		withCollection: true,
+		withChunking:   true,
+		chunkPolicy:    chunking.ManifestRotationPolicy{MaxRecords: 100},
+		gatedPull:      true,
+	})
+	msgs := make([]ingestion.IngesterMessage, 8)
+	for i := range msgs {
+		msgs[i] = ingestion.IngesterMessage{Raw: []byte("plan after collect"), Attrs: map[string]string{"k": "v"}}
+	}
+	h.runIngester(t, &emitIngester{msgs: msgs})
+
+	h.waitSyncs(t, 8)
+	published := h.waitPublishedStable(t, 1)
+
+	if err := h.chunk.PlanOnce(h.ctx, h.vaultID); err != nil {
+		t.Fatal(err)
+	}
+	if h.fsm.OpenChunk() != nil {
+		t.Fatal("planner must not open manifest without local segment files")
+	}
+
+	h.gatePull.allow()
+	h.waitCollectedWithRetry(t, len(published))
+	if err := h.chunk.PlanOnce(h.ctx, h.vaultID); err != nil {
+		t.Fatal(err)
+	}
+	open := h.fsm.OpenChunk()
+	if open == nil || len(open.Refs) == 0 {
+		t.Fatal("expected open manifest with refs after collection")
+	}
 }
 
 // publishedLog implements collection.LogReader from distribution publish metadata.

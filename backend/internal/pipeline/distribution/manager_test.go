@@ -3,7 +3,9 @@ package distribution_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -263,5 +265,219 @@ func TestRunConsumesCompletedChannel(t *testing.T) {
 
 	if pub.count() != 1 {
 		t.Fatalf("published %d metadata entries", pub.count())
+	}
+}
+
+type errPublisher struct{ err error }
+
+func (p errPublisher) Publish(context.Context, distribution.Metadata) error { return p.err }
+
+func TestPublishCompletedRollsBackOnPublisherError(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	root := t.TempDir()
+	mgr, _ := distribution.New(distribution.Config{})
+	if err := mgr.RegisterVault(vaultID, root, distribution.VaultConfig{
+		Publisher: errPublisher{err: errors.New("raft unavailable")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	seg := writeCompletedSegment(t, root, vaultID, "rollback")
+	err := mgr.PublishCompleted(context.Background(), seg)
+	if err == nil {
+		t.Fatal("expected publish error")
+	}
+	err = mgr.ServePull(distribution.PullRequest{
+		VaultID: vaultID, SegmentID: seg.Meta.ID, Dest: &bytes.Buffer{},
+	})
+	if !errors.Is(err, distribution.ErrSegmentNotFound) {
+		t.Fatalf("ServePull after failed publish = %v, want ErrSegmentNotFound", err)
+	}
+}
+
+func TestPublishCompletedUnknownVault(t *testing.T) {
+	t.Parallel()
+	mgr, _ := distribution.New(distribution.Config{})
+	seg := writeCompletedSegment(t, t.TempDir(), glid.New(), "orphan")
+	err := mgr.PublishCompleted(context.Background(), seg)
+	if !errors.Is(err, distribution.ErrUnknownVault) {
+		t.Fatalf("PublishCompleted() = %v, want ErrUnknownVault", err)
+	}
+}
+
+func TestMetadataFromMissingFile(t *testing.T) {
+	t.Parallel()
+	seg := segmentation.CompletedSegment{
+		VaultID: glid.New(),
+		Meta:    segment.Meta{ID: glid.New(), VaultID: glid.New()},
+		Path:    filepath.Join(t.TempDir(), "missing"),
+	}
+	if _, err := distribution.MetadataFrom(seg); err == nil {
+		t.Fatal("expected stat error")
+	}
+}
+
+func TestRegisterVaultRequiresPublisher(t *testing.T) {
+	t.Parallel()
+	mgr, _ := distribution.New(distribution.Config{})
+	err := mgr.RegisterVault(glid.New(), t.TempDir(), distribution.VaultConfig{})
+	if err == nil {
+		t.Fatal("expected error without publisher")
+	}
+}
+
+func TestRegisterVaultDuplicate(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	mgr, _ := distribution.New(distribution.Config{})
+	cfg := distribution.VaultConfig{Publisher: &recordingPublisher{}}
+	if err := mgr.RegisterVault(vaultID, t.TempDir(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.RegisterVault(vaultID, t.TempDir(), cfg); err == nil {
+		t.Fatal("expected duplicate registration error")
+	}
+}
+
+func TestUnregisterVaultStopsServingPull(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	root := t.TempDir()
+	pub := &recordingPublisher{}
+	mgr, _ := distribution.New(distribution.Config{})
+	if err := mgr.RegisterVault(vaultID, root, distribution.VaultConfig{Publisher: pub}); err != nil {
+		t.Fatal(err)
+	}
+	seg := writeCompletedSegment(t, root, vaultID, "gone")
+	if err := mgr.PublishCompleted(context.Background(), seg); err != nil {
+		t.Fatal(err)
+	}
+	mgr.UnregisterVault(vaultID)
+	err := mgr.ServePull(distribution.PullRequest{
+		VaultID: vaultID, SegmentID: seg.Meta.ID, Dest: &bytes.Buffer{},
+	})
+	if !errors.Is(err, distribution.ErrUnknownVault) {
+		t.Fatalf("ServePull() = %v, want ErrUnknownVault", err)
+	}
+}
+
+func TestRunTwiceReturnsErrNotRunning(t *testing.T) {
+	t.Parallel()
+	mgr, _ := distribution.New(distribution.Config{})
+	completed := make(chan segmentation.CompletedSegment)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_ = mgr.Run(ctx, completed)
+		close(done)
+	}()
+	time.Sleep(20 * time.Millisecond)
+	if err := mgr.Run(ctx, completed); !errors.Is(err, distribution.ErrNotRunning) {
+		t.Fatalf("Run() = %v, want ErrNotRunning", err)
+	}
+	cancel()
+	<-done
+}
+
+func TestRunPullViaChannel(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	root := t.TempDir()
+	pub := &recordingPublisher{}
+	mgr, pullIn := distribution.New(distribution.Config{})
+	if err := mgr.RegisterVault(vaultID, root, distribution.VaultConfig{Publisher: pub}); err != nil {
+		t.Fatal(err)
+	}
+	completed := make(chan segmentation.CompletedSegment, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_ = mgr.Run(ctx, completed)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	seg := writeCompletedSegment(t, root, vaultID, "async-pull")
+	completed <- seg
+	time.Sleep(50 * time.Millisecond)
+
+	var buf bytes.Buffer
+	pullIn <- distribution.PullRequest{
+		VaultID: vaultID, SegmentID: seg.Meta.ID, Dest: &buf,
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if bytes.Contains(buf.Bytes(), []byte("async-pull")) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("pull payload = %q", buf.Bytes())
+}
+
+func TestRunPullUnknownVaultIsNoOp(t *testing.T) {
+	t.Parallel()
+	mgr, pullIn := distribution.New(distribution.Config{})
+	completed := make(chan segmentation.CompletedSegment)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_ = mgr.Run(ctx, completed)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	pullIn <- distribution.PullRequest{
+		VaultID: glid.New(), SegmentID: glid.New(), Dest: &bytes.Buffer{},
+	}
+	time.Sleep(50 * time.Millisecond)
+}
+
+func TestPromoteToHeadMissingSource(t *testing.T) {
+	t.Parallel()
+	_, err := distribution.PromoteToHead(filepath.Join(t.TempDir(), "missing"), t.TempDir())
+	if err == nil {
+		t.Fatal("expected rename error")
+	}
+}
+
+func TestServePullUnknownVault(t *testing.T) {
+	t.Parallel()
+	mgr, _ := distribution.New(distribution.Config{})
+	err := mgr.ServePull(distribution.PullRequest{
+		VaultID: glid.New(), SegmentID: glid.New(), Dest: &bytes.Buffer{},
+	})
+	if !errors.Is(err, distribution.ErrUnknownVault) {
+		t.Fatalf("ServePull() = %v, want ErrUnknownVault", err)
+	}
+}
+
+func TestStreamSegmentGoneDuringPull(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	root := t.TempDir()
+	pub := &recordingPublisher{}
+	mgr, _ := distribution.New(distribution.Config{})
+	if err := mgr.RegisterVault(vaultID, root, distribution.VaultConfig{Publisher: pub}); err != nil {
+		t.Fatal(err)
+	}
+	seg := writeCompletedSegment(t, root, vaultID, "ephemeral")
+	if err := mgr.PublishCompleted(context.Background(), seg); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(seg.Path); err != nil {
+		t.Fatal(err)
+	}
+	err := mgr.ServePull(distribution.PullRequest{
+		VaultID: vaultID, SegmentID: seg.Meta.ID, Dest: &bytes.Buffer{},
+	})
+	if !errors.Is(err, distribution.ErrSegmentGone) {
+		t.Fatalf("ServePull() = %v, want ErrSegmentGone", err)
 	}
 }

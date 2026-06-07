@@ -390,3 +390,17 @@ func TestManagerRegisterAfterRunFinished(t *testing.T) {
 		t.Fatalf("RegisterVault() = %v, want ErrNotRunning", err)
 	}
 }
+
+func TestManagerUnregisterVault(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	vaultID := glid.New()
+	mgr, _ := segmentation.New(segmentation.Config{})
+	if _, err := mgr.RegisterVault(vaultID, dir); err != nil {
+		t.Fatal(err)
+	}
+	mgr.UnregisterVault(vaultID)
+	if _, err := mgr.RegisterVault(vaultID, dir); err != nil {
+		t.Fatalf("re-register after unregister: %v", err)
+	}
+}

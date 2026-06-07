@@ -2,6 +2,7 @@ package chunking_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -281,5 +282,25 @@ func TestRecordingApplierSealChunkProto(t *testing.T) {
 	}
 	if cmd.GetSealChunk() == nil {
 		t.Fatal("expected SealChunk command")
+	}
+}
+
+func TestManagerUnregisterVault(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	fsm := vaultctlfsm.New()
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot: t.TempDir(),
+		ChunkRoot: filepath.Join(t.TempDir(), "chunks"),
+		FSM:       fsm,
+		Locate:    chunking.HeadSegmentLocator{Root: t.TempDir()},
+		IsLeader:  func() bool { return true },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mgr.UnregisterVault(vaultID)
+	if err := mgr.PlanOnce(context.Background(), vaultID); !errors.Is(err, chunking.ErrUnknownVault) {
+		t.Fatalf("PlanOnce() = %v, want ErrUnknownVault", err)
 	}
 }
