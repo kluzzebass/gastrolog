@@ -857,6 +857,80 @@ func TestPipelineFullPath(t *testing.T) {
 	}
 }
 
+func TestPipelineOpenChunkQueryBeforeSeal(t *testing.T) {
+	// Virtual open-chunk query serves manifest-listed refs before GLCB exists.
+	nodeID := glid.New()
+	ingesterID := glid.New()
+	vaultID := glid.New()
+
+	route, err := routing.CompileRoute(glid.New(), "all", 0, "*", []glid.GLID{vaultID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h := newHarness(t, nodeID, ingesterID, vaultID, route, harnessOpts{
+		closePolicy:    segmentation.ClosePolicy{MaxBytes: 256},
+		withCollection: true,
+		withChunking:   true,
+		chunkPolicy:    chunking.ManifestRotationPolicy{MaxRecords: 100},
+	})
+	msgs := make([]ingestion.IngesterMessage, 8)
+	for i := range msgs {
+		msgs[i] = ingestion.IngesterMessage{
+			Raw:   []byte("open chunk query payload"),
+			Attrs: map[string]string{"env": "prod"},
+		}
+	}
+	h.runIngester(t, &emitIngester{msgs: msgs})
+
+	h.waitSyncs(t, 8)
+	published := h.waitPublishedStable(t, 1)
+	h.waitCollected(t, len(published))
+
+	for step := 0; step < 8; step++ {
+		if open := h.fsm.OpenChunk(); open != nil && len(open.Refs) > 0 {
+			break
+		}
+		if err := h.chunk.PlanOnce(h.ctx, h.vaultID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	open := h.fsm.OpenChunk()
+	if open == nil || len(open.Refs) == 0 {
+		t.Fatal("expected open manifest with refs before seal")
+	}
+	if h.fsm.SealedManifest() != nil {
+		t.Fatal("chunk must still be open")
+	}
+
+	var totalRecords uint32
+	for _, meta := range published {
+		totalRecords += meta.RecordCount
+	}
+
+	got, report, err := chunking.CollectOpenChunk(chunking.OpenChunkQueryInput{
+		Manifest: open,
+		Locate:   chunking.VaultSegmentLocator{Root: h.homeRoot},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.MissingSegments) != 0 {
+		t.Fatalf("missing segments on home: %v", report.MissingSegments)
+	}
+	if uint32(len(got)) != totalRecords {
+		t.Fatalf("open query records = %d, want %d", len(got), totalRecords)
+	}
+	for _, rec := range got {
+		if !bytes.Contains(rec.Raw, []byte("open chunk query payload")) {
+			t.Fatalf("payload = %q", rec.Raw)
+		}
+	}
+	if _, err := os.Stat(chunking.ChunkGLCBPath(h.chunkRoot, h.chunkID)); err == nil {
+		t.Fatal("GLCB must not exist while chunk is open")
+	}
+}
+
 func TestPipelineRemotePullFailureThenRecovery(t *testing.T) {
 	// Origin holds completed segments; remote home retries collection after pull failure.
 	nodeID := glid.New()
