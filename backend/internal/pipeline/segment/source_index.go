@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"slices"
+	"syscall"
 	"time"
 
 	"gastrolog/internal/format"
@@ -40,8 +41,14 @@ func compareSourceIndexEntries(a, b sourceIndexEntry) int {
 	return 0
 }
 
-func sortSourceIndexEntries(entries []sourceIndexEntry) {
-	slices.SortStableFunc(entries, compareSourceIndexEntries)
+func decodeSourceIndexEntry(buf []byte) (sourceIndexEntry, error) {
+	if len(buf) < SourceIndexEntrySize {
+		return sourceIndexEntry{}, ErrFrameTooSmall
+	}
+	return sourceIndexEntry{
+		ts:  int64(binary.LittleEndian.Uint64(buf[0:])), //nolint:gosec // G115: nanosecond timestamps fit in int64
+		pos: binary.LittleEndian.Uint32(buf[format.SizeU64:]),
+	}, nil
 }
 
 func encodeSourceIndexEntry(buf []byte, e sourceIndexEntry) {
@@ -49,21 +56,42 @@ func encodeSourceIndexEntry(buf []byte, e sourceIndexEntry) {
 	binary.LittleEndian.PutUint32(buf[format.SizeU64:], e.pos)
 }
 
-func writeSourceIndexRegion(w io.WriterAt, base int64, entries []sourceIndexEntry) error {
-	for i, e := range entries {
-		var buf [SourceIndexEntrySize]byte
-		encodeSourceIndexEntry(buf[:], e)
-		off := base + int64(i)*SourceIndexEntrySize
-		if _, err := w.WriteAt(buf[:], off); err != nil {
-			return err
-		}
+// sortSourceIndexRegion sorts a mmap'd on-disk source index tail in place.
+func sortSourceIndexRegion(data []byte) {
+	n := len(data) / SourceIndexEntrySize
+	if n == 0 {
+		return
 	}
-	return nil
+	entries := make([]sourceIndexEntry, n)
+	for i := range n {
+		e, err := decodeSourceIndexEntry(data[i*SourceIndexEntrySize : (i+1)*SourceIndexEntrySize])
+		if err != nil {
+			return
+		}
+		entries[i] = e
+	}
+	slices.SortStableFunc(entries, compareSourceIndexEntries)
+	for i, e := range entries {
+		encodeSourceIndexEntry(data[i*SourceIndexEntrySize:(i+1)*SourceIndexEntrySize], e)
+	}
 }
 
-// FindSourceStartPosition binary-searches the source index for the first entry with
-// SourceTS >= start. Returns (event-order position, true) when found; (0, false) when
-// start is after all indexed sources or the index is empty.
+type sourceIndexReader struct {
+	r    io.ReaderAt
+	base int64
+}
+
+func (sir sourceIndexReader) readEntry(i int) (sourceIndexEntry, error) {
+	var buf [SourceIndexEntrySize]byte
+	off := sir.base + int64(i)*SourceIndexEntrySize
+	if _, err := sir.r.ReadAt(buf[:], off); err != nil {
+		return sourceIndexEntry{}, err
+	}
+	return decodeSourceIndexEntry(buf[:])
+}
+
+// FindSourceStartPosition binary-searches the on-disk source index for the first
+// entry with SourceTS >= start. Probes the file directly; does not load the tail.
 func (sf *File) FindSourceStartPosition(start time.Time) (uint32, bool, error) {
 	if sf.hdr.IndexOffset == 0 {
 		return 0, false, ErrNoIndex
@@ -71,54 +99,59 @@ func (sf *File) FindSourceStartPosition(start time.Time) (uint32, bool, error) {
 	if sf.hdr.SourceIndexCount == 0 {
 		return 0, false, nil
 	}
-	n := int(sf.hdr.SourceIndexCount)
-	data := make([]byte, n*SourceIndexEntrySize)
-	if _, err := sf.f.ReadAt(data, int64(sf.hdr.SourceIndexOffset)); err != nil {
+	pos, ok, err := findSourceStartOnDisk(sf.f, int64(sf.hdr.SourceIndexOffset), sf.hdr.SourceIndexCount, start.UnixNano())
+	if err != nil {
 		return 0, false, err
 	}
-	pos, ok := findSourceStartPosition(data, start.UnixNano())
 	return uint32(pos), ok, nil //nolint:gosec // G115: positions bounded by RecordCount
 }
 
-// findSourceStartPosition binary-searches raw sorted source index bytes.
-func findSourceStartPosition(data []byte, tsNano int64) (uint64, bool) {
-	n := len(data) / SourceIndexEntrySize
+func findSourceStartOnDisk(r io.ReaderAt, base int64, count uint32, tsNano int64) (uint64, bool, error) {
+	n := int(count)
 	if n == 0 {
-		return 0, false
+		return 0, false, nil
 	}
+	sir := sourceIndexReader{r: r, base: base}
 
-	readTS := func(i int) int64 {
-		off := i * SourceIndexEntrySize
-		return int64(binary.LittleEndian.Uint64(data[off:])) //nolint:gosec // G115: nanosecond timestamps fit in int64
+	first, err := sir.readEntry(0)
+	if err != nil {
+		return 0, false, err
 	}
-	readPos := func(i int) uint32 {
-		off := i*SourceIndexEntrySize + format.SizeU64
-		return binary.LittleEndian.Uint32(data[off:])
+	last, err := sir.readEntry(n - 1)
+	if err != nil {
+		return 0, false, err
 	}
-
-	if tsNano > readTS(n-1) {
-		return 0, false
+	if tsNano > last.ts {
+		return 0, false, nil
 	}
-	if tsNano <= readTS(0) {
-		return uint64(readPos(0)), true
+	if tsNano <= first.ts {
+		return uint64(first.pos), true, nil
 	}
 
 	lo, hi := 0, n
 	for lo < hi {
 		mid := lo + (hi-lo)/2
-		if readTS(mid) < tsNano {
+		entry, err := sir.readEntry(mid)
+		if err != nil {
+			return 0, false, err
+		}
+		if entry.ts < tsNano {
 			lo = mid + 1
 		} else {
 			hi = mid
 		}
 	}
-	return uint64(readPos(lo)), true
+	entry, err := sir.readEntry(lo)
+	if err != nil {
+		return 0, false, err
+	}
+	return uint64(entry.pos), true, nil
 }
 
 func (sf *File) buildSourceIndex(recordEnd uint32) error {
 	eventIndexEnd := sf.hdr.IndexOffset + sf.hdr.RecordCount*IndexEntrySize
 
-	var entries []sourceIndexEntry
+	var count uint32
 	var first, last time.Time
 	for pos := range sf.hdr.RecordCount {
 		entry, err := sf.readIndexEntry(pos)
@@ -132,8 +165,8 @@ func (sf *File) buildSourceIndex(recordEnd uint32) error {
 		if ts.IsZero() {
 			continue
 		}
-		entries = append(entries, sourceIndexEntry{ts: ts.UnixNano(), pos: pos})
-		if len(entries) == 1 {
+		count++
+		if count == 1 {
 			first, last = ts, ts
 		} else {
 			if ts.Before(first) {
@@ -145,27 +178,53 @@ func (sf *File) buildSourceIndex(recordEnd uint32) error {
 		}
 	}
 
-	sortSourceIndexEntries(entries)
-
 	sf.hdr.SourceIndexOffset = eventIndexEnd
-	sf.hdr.SourceIndexCount = uint32(len(entries)) //nolint:gosec // G115: bounded by RecordCount
+	sf.hdr.SourceIndexCount = count
 	sf.hdr.FirstSourceTS = first
 	sf.hdr.LastSourceTS = last
 
-	if len(entries) == 0 {
+	if count == 0 {
 		sf.hdr.SourceIndexChecksum = 0
 		return nil
 	}
 
-	sourceBytes := int64(len(entries)) * SourceIndexEntrySize
-	newSize := int64(eventIndexEnd) + sourceBytes
-	if err := sf.f.Truncate(newSize); err != nil {
+	sourceEnd := eventIndexEnd + count*SourceIndexEntrySize
+	if err := sf.f.Truncate(int64(sourceEnd)); err != nil {
 		return err
 	}
-	if err := writeSourceIndexRegion(sf.f, int64(eventIndexEnd), entries); err != nil {
+
+	var writeIdx uint32
+	for pos := range sf.hdr.RecordCount {
+		entry, err := sf.readIndexEntry(pos)
+		if err != nil {
+			return err
+		}
+		ts, err := sourceTSAtFrame(sf.f, entry.FilePos, recordEnd)
+		if err != nil {
+			return err
+		}
+		if ts.IsZero() {
+			continue
+		}
+		var buf [SourceIndexEntrySize]byte
+		encodeSourceIndexEntry(buf[:], sourceIndexEntry{ts: ts.UnixNano(), pos: pos})
+		off := int64(eventIndexEnd) + int64(writeIdx)*SourceIndexEntrySize
+		if _, err := sf.f.WriteAt(buf[:], off); err != nil {
+			return err
+		}
+		writeIdx++
+	}
+
+	data, err := syscall.Mmap(int(sf.f.Fd()), 0, int(sourceEnd), syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED) //nolint:gosec // G115: file size bounded
+	if err != nil {
 		return err
 	}
-	sum, err := sf.checksumRange(eventIndexEnd, uint32(newSize)) //nolint:gosec // G115: newSize from bounded segment file
+	sortSourceIndexRegion(data[eventIndexEnd:sourceEnd])
+	if err := syscall.Munmap(data); err != nil {
+		return err
+	}
+
+	sum, err := sf.checksumRange(eventIndexEnd, sourceEnd)
 	if err != nil {
 		return err
 	}
