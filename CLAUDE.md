@@ -39,7 +39,7 @@ When creating a **question** issue, always draft the title and description first
 
 **Always create new branches before picking up issues.** Branch names **must** include the issue ID.
 
-**Stacked branches are allowed** when a follow-up issue naturally builds on an in-review branch (e.g. you discover a related bug while validating the parent fix and don't want to wait for merge). Branch the child off the parent's HEAD, keep each branch single-issue, and either (a) merge the stack as one when both close together, or (b) merge the parent first and rebase the child onto main. What is NOT allowed is **lumping** — multiple issues' commits intermixed on a single branch with no clean revertable history. Stacking ≠ lumping: each branch still owns exactly one issue's work.
+**Stacked branches are allowed** when a follow-up issue naturally builds on an in-review branch (e.g. you discover a related bug while validating the parent fix and don't want to wait for merge). Branch the child off the parent's HEAD, keep each branch single-issue, and either (a) merge the stack as one when both close together, or (b) merge the parent into the stack branch first and rebase the child onto that stack tip. What is NOT allowed is **lumping** — multiple issues' commits intermixed on a single branch with no clean revertable history. Stacking ≠ lumping: each branch still owns exactly one issue's work.
 
 ### Closing issues
 
@@ -49,9 +49,34 @@ When creating a **question** issue, always draft the title and description first
 2. Ask the user to test
 3. Ask if we can close it
 4. Only run `dcat close` after user confirms
-5. **Upon closing:** commit (including tracker), **merge**, and **push** — in that order after `dcat close`. Do not merge to the default branch or push the merge **before** the issue is closed.
+5. **Upon closing:** commit (including tracker), **merge to the issue’s stack branch**, and **push that branch** — in that order after `dcat close`. Do not merge to the default branch or push the merge **before** the issue is closed.
 
-Do not suggest creating PRs.
+Do not open PRs for routine issue closes on a stack branch — merge the feature branch into its **stack branch** directly. PRs are **only** for landing work on **`main`**.
+
+### Main branch protection
+
+**`main` is the stable line.** Feature and stack work does **not** merge to `main` on issue close. **`main` updates only via PR** on GitHub (review + merge there).
+
+| Branch kind | Role | Examples |
+|-------------|------|----------|
+| **`main`** | Released/stable baseline. Direct push blocked. | — |
+| **Stack / integration branch** | Epic or program integration tip; **merge target on issue close** for work in that stack. | `pipeline-v3`, `feat/gastrolog-4ecqt-fan-out-v2` |
+| **Feature branch** | Single-issue work (`<type>/gastrolog-<id>-…`). Branch off the stack branch (or its parent feature branch when stacked). | `feat/gastrolog-5u73c-chunking-materialize-at-seal` |
+
+Before starting work, confirm which **stack branch** the issue belongs to (epic description, issue text, or ask the user). **Never assume `main`.**
+
+**Updating `main`:** open a PR **`<stack-branch>` → `main`** (or the relevant branch → `main`), get review approval, merge on GitHub. No direct push — GitHub requires a PR with ≥1 approval; **`enforce_admins`** applies.
+
+**Agents MUST NOT:**
+
+- `git push origin main`
+- `git merge` into `main` locally and push
+- `gh pr merge` without explicit user instruction to complete a PR **they** opened for `main`
+- Use `main` as the default merge target on `dcat close`
+
+**On issue close:** `git checkout <stack-branch> && git merge <feature-branch> && git push origin <stack-branch>`.
+
+**Enforcement:** GitHub branch protection on `main` — direct push blocked; PR with ≥1 approval required; `enforce_admins` on. Cursor hook blocks `gh pr merge` (merge in the GitHub UI).
 
 ## Cluster-First: Every Feature Must Work on Every Node
 
