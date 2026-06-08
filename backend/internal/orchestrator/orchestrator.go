@@ -20,6 +20,8 @@ import (
 	"gastrolog/internal/lifecycle"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/notify"
+	"gastrolog/internal/orchestrator/v3pipeline"
+	"gastrolog/internal/pipeline/digestion"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/system"
 	"gastrolog/internal/vaultraft"
@@ -208,6 +210,22 @@ type Orchestrator struct {
 	// Digesters (message enrichment pipeline).
 	digesters []Digester
 
+	// v3 is the V3 ingest pipeline supervisor: it owns the durable write path
+	// (ingest→digest→route→segment→distribute). The orchestrator drives its
+	// routing table, Origin vault registrations, and ingester reconcile, and
+	// starts/stops it alongside itself.
+	v3 *v3pipeline.Supervisor
+	// v3Gate is the V3 ingest-pipeline pressure signal injected into
+	// PressureAware ingesters by the supervisor's ingestion manager.
+	v3Gate *chanwatch.PressureGate
+	// segmentsDir is the base directory for per-vault V3 segment roots
+	// (OriginRoot = segmentsDir/<vaultID>).
+	segmentsDir string
+	// v3Origins tracks which vaults are currently Origin-registered in the
+	// supervisor so a route reload registers/unregisters only the delta.
+	// Guarded by o.mu.
+	v3Origins map[glid.GLID]struct{}
+
 	// Routing table — gastrolog-4kkoo (Phase 5): per-route, priority-ordered,
 	// first-match-wins. Replaces the Phase-4 per-vault FilterSet.
 	routeSet *RouteSet
@@ -253,12 +271,12 @@ type Orchestrator struct {
 	// which starved behind any long-held o.mu.Lock writer regardless of
 	// the cached replication-ready flag. Start/Stop use CompareAndSwap
 	// to preserve the prior check-then-set mutual exclusion.
-	running      atomic.Bool
-	ingesterWg   sync.WaitGroup // tracks ingester goroutines
-	digestWg     sync.WaitGroup // tracks digest goroutine
-	writeWg      sync.WaitGroup // tracks write goroutine
-	ackWg        sync.WaitGroup // tracks in-flight ack-gated replication goroutines
-	auxWg        sync.WaitGroup // tracks auxiliary goroutines (watchdog, etc.)
+	running    atomic.Bool
+	ingesterWg sync.WaitGroup // tracks ingester goroutines
+	digestWg   sync.WaitGroup // tracks digest goroutine
+	writeWg    sync.WaitGroup // tracks write goroutine
+	ackWg      sync.WaitGroup // tracks in-flight ack-gated replication goroutines
+	auxWg      sync.WaitGroup // tracks auxiliary goroutines (watchdog, etc.)
 
 	// Per-instance import mutex for serializing SetNextChunkID + ImportRecords.
 	importMu sync.Map // vaultID → *sync.Mutex
@@ -601,6 +619,19 @@ type Config struct {
 	// The app layer wires this to Raft to replicate checkpoints cluster-wide.
 	OnIngesterCheckpoint func(ingesterID glid.GLID, data []byte)
 
+	// Digesters run in order on each V3 ingestion message before the record is
+	// built. The app supplies the level/timestamp enrichers here; they used to
+	// be registered via RegisterDigester on the now-removed V0 digest loop.
+	Digesters []digestion.Digester
+
+	// SegmentsDir is the base directory under which each origin vault's V3
+	// segmentation working/ and completed/ areas live: a vault's segment
+	// OriginRoot is SegmentsDir/<vaultID>. The app passes the node home dir;
+	// when empty it defaults to "segments" relative to the working directory.
+	// TODO(gastrolog-jiwlf): make the per-vault segment root configurable via
+	// node storage config instead of a single base dir.
+	SegmentsDir string
+
 	// Phase is the shared shutdown signal. When non-nil, the orchestrator
 	// consults phase.ShuttingDown() in hot-path replication helpers so that
 	// during the drain window (after BeginShutdown) remote forwards no-op
@@ -645,7 +676,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		ingesterStats:        make(map[glid.GLID]*IngesterStats),
 		ingesterMeta:         make(map[glid.GLID]ingesterInfo),
 		draining:             make(map[glid.GLID]*drainState),
-		vaultDraining:         make(map[string]*vaultDrainState),
+		vaultDraining:        make(map[string]*vaultDrainState),
 		retention:            make(map[string]*retentionRunner),
 		scheduler:            sched,
 		cronRotation:         newCronRotationManager(sched, logger),
@@ -663,18 +694,34 @@ func New(cfg Config) (*Orchestrator, error) {
 		phase:                cfg.Phase,
 		onIngesterAlive:      cfg.OnIngesterAlive,
 		onIngesterCheckpoint: cfg.OnIngesterCheckpoint,
+		segmentsDir:          cfg.SegmentsDir,
+		v3Origins:            make(map[glid.GLID]struct{}),
 		now:                  cfg.Now,
 		logger:               logger,
-		baseLogger:          baseLogger,
-		replicationLogger:   compReplication.Apply(baseLogger),
-		drainLogger:         compDrain.Apply(baseLogger),
-		retentionLogger:     compRetention.Apply(baseLogger),
-		rotationLogger:      compRotation.Apply(baseLogger),
-		schedulerLogger:     compScheduler.Apply(baseLogger),
-		vaultOpsLogger:      compVaultOps.Apply(baseLogger),
-		cacheEvictionLogger: compCacheEviction.Apply(baseLogger),
-		cloudHealthLogger:   compCloudHealth.Apply(baseLogger),
+		baseLogger:           baseLogger,
+		replicationLogger:    compReplication.Apply(baseLogger),
+		drainLogger:          compDrain.Apply(baseLogger),
+		retentionLogger:      compRetention.Apply(baseLogger),
+		rotationLogger:       compRotation.Apply(baseLogger),
+		schedulerLogger:      compScheduler.Apply(baseLogger),
+		vaultOpsLogger:       compVaultOps.Apply(baseLogger),
+		cacheEvictionLogger:  compCacheEviction.Apply(baseLogger),
+		cloudHealthLogger:    compCloudHealth.Apply(baseLogger),
 	}
+
+	// V3 ingest pipeline. The supervisor owns the durable write path; the
+	// orchestrator publishes its routing table, registers Origin vaults, and
+	// reconciles ingesters into it (see v3.go). The pressure gate is injected
+	// into PressureAware ingesters; the orchestrator runs it and attaches
+	// queue-depth probes in Start.
+	o.v3Gate = chanwatch.NewPressureGate(chanwatch.DefaultThresholds())
+	o.v3 = v3pipeline.New(v3pipeline.Config{
+		NodeID:       o.localNodeIDGLID,
+		Logger:       baseLogger,
+		Digesters:    cfg.Digesters,
+		OnCheckpoint: cfg.OnIngesterCheckpoint,
+		PressureGate: o.v3Gate,
+	})
 
 	// Seed the cached readiness flag so /readyz reports true while the
 	// vault map is still empty (matches the legacy live-check semantics)
@@ -706,7 +753,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		WarningAt: 1.0,
 		ErrorAt:   5.0,
 		Alerts:    o.alerts,
-		VaultName:  o.vaultLabel,
+		VaultName: o.vaultLabel,
 	})
 	o.retentionRates = newRateAlerter(rateAlerterConfig{
 		Window:    30 * time.Second,
@@ -715,7 +762,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		WarningAt: 10.0,
 		ErrorAt:   0, // no error escalation per issue scope
 		Alerts:    o.alerts,
-		VaultName:  o.vaultLabel,
+		VaultName: o.vaultLabel,
 	})
 
 	// Cron rotation completes its work outside the post-seal pipeline,

@@ -330,6 +330,13 @@ func (s *Supervisor) ReconcileIngesters(specs []ingestion.IngesterSpec) error {
 	return s.ingest.Reconcile(specs)
 }
 
+// SetRoutingTable atomically replaces the routing table the routing workers
+// match against. The orchestrator recompiles the table whenever routes or vault
+// placements change and publishes it here.
+func (s *Supervisor) SetRoutingTable(t *routing.Table) {
+	s.route.SetTable(t)
+}
+
 // RegisterVault starts the managers for the roles the vault holds on this node.
 // Safe before or during Start. It is idempotent only in the sense that a second
 // registration of the same vault returns ErrVaultRegistered.

@@ -56,7 +56,10 @@ type StatsSnapshot struct {
 // Manager matches records to vaults and fans out record pointers.
 type Manager struct {
 	workers int
-	table   *Table
+	// table is swapped atomically: the orchestrator recompiles the routing
+	// table on config changes (vault add/remove, route edits) and publishes
+	// the new one via SetTable while workers match lock-free against it.
+	table atomic.Pointer[Table]
 
 	vmu    sync.RWMutex
 	vaults map[glid.GLID]chan<- segmentation.Input
@@ -76,11 +79,19 @@ func New(cfg Config) *Manager {
 	if vaults == nil {
 		vaults = make(map[glid.GLID]chan<- segmentation.Input)
 	}
-	return &Manager{
+	m := &Manager{
 		workers: cfg.Workers,
-		table:   cfg.Table,
 		vaults:  vaults,
 	}
+	m.table.Store(cfg.Table)
+	return m
+}
+
+// SetTable atomically replaces the routing table. Safe to call before or during
+// Run; in-flight and subsequent matches observe the new table. A nil table
+// matches nothing (every record is an intentional unmatched drop).
+func (m *Manager) SetTable(t *Table) {
+	m.table.Store(t)
 }
 
 // RegisterVault sets (or replaces) the segmentation input queue a vault's
@@ -170,7 +181,7 @@ func resolveSource(in Input) SourceContext {
 func (m *Manager) route(ctx context.Context, in Input) {
 	rec := in.Record
 	src := resolveSource(in)
-	vaults := m.table.Match(rec.Attrs, src)
+	vaults := m.table.Load().Match(rec.Attrs, src)
 	if len(vaults) == 0 {
 		m.unmatched.Add(1)
 		// No route matched: nothing to persist locally. This is an intentional,
