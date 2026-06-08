@@ -55,7 +55,7 @@ func (o *Orchestrator) SealActiveChunk(vaultID glid.GLID, expectedChunkID chunk.
 
 // ackAfterReplication does sync forwarding to followers and sync
 // cross-node forwarding for ack-gated records, then sends the ack.
-// Runs in a goroutine — doesn't block the writeLoop.
+// Runs in a goroutine — doesn't block the direct ingest path's caller.
 //
 // All vault follower AppendRecords and all cross-node ForwardSync calls run
 // concurrently under one deadline (cluster.ReplicationTimeout). The first

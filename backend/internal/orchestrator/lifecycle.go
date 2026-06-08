@@ -2,29 +2,21 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"gastrolog/internal/glid"
-	"math/rand/v2"
 	"time"
 
 	"gastrolog/internal/alert"
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/orchestrator/v3pipeline"
 )
 
-// digestedRecord is the intermediate type passed from digestLoop to writeLoop.
-type digestedRecord struct {
-	rec        chunk.Record
-	ack        chan<- error
-	ingesterID string
-	rawLen     int // original message raw length for stats
-}
-
-// Start launches all ingesters and the digest/write pipeline.
-// Each ingester runs in its own goroutine, emitting messages to a shared channel.
-// The digest loop receives messages, resolves identity, runs digesters, and builds
-// records. The write loop receives digested records and appends them to vaults.
-// Start returns immediately; use Stop() to shut down.
+// Start launches the V3 ingest pipeline and the orchestrator's auxiliary
+// goroutines. New live data flows ingest→digest→route→segment, acked only after
+// a durable segment write (ack-after-fsync). Start returns immediately; use
+// Stop() to shut down.
 func (o *Orchestrator) Start(ctx context.Context) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -33,14 +25,9 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 		return ErrAlreadyRunning
 	}
 
-	// Create cancellable context for all ingesters and digest loop.
+	// Create cancellable context for the pipeline and aux goroutines.
 	ctx, cancel := context.WithCancel(ctx)
 	o.cancel = cancel
-	o.done = make(chan struct{})
-
-	// Create ingest and intermediate channels.
-	o.ingestCh = make(chan IngestMessage, o.ingestSize)
-	o.digestedCh = make(chan digestedRecord, o.ingestSize)
 
 	// Log startup info.
 	o.logger.Info("starting orchestrator",
@@ -54,22 +41,16 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	// Start shared scheduler (cron rotation, retention, and future scheduled tasks).
 	o.scheduler.Start()
 
-	// Probes for chanwatch and PressureGate.
-	ingestProbe := func() (int, int) {
-		return len(o.ingestCh), cap(o.ingestCh)
-	}
-	digestedProbe := func() (int, int) {
-		return len(o.digestedCh), cap(o.digestedCh)
-	}
-
-	// Pressure gate: ingesters consult this to throttle when the pipeline
-	// is backed up. Hysteresis thresholds: elevated at 80%, critical at 95%,
-	// release at 50%. Transitions are reported via alerts — NOT slog —
-	// to avoid a feedback loop where the self-ingester captures throttle
-	// messages and adds to the pressure.
-	gate := chanwatch.NewPressureGate(chanwatch.DefaultThresholds())
-	gate.AddProbe("ingestCh", ingestProbe)
-	gate.AddProbe("digestedCh", digestedProbe)
+	// V3 pipeline pressure gate. PressureAware ingesters consult it to throttle
+	// when the pipeline backs up; the supervisor's ingestion manager injects it
+	// into each ingester. Cross-node forward channels register as probes so
+	// ingesters also throttle on remote-forward backpressure (gastrolog-27zvt).
+	// The supervisor's internal inter-phase queues are bounded and block, which
+	// is the primary backpressure mechanism for the durable write path.
+	// TODO(gastrolog-jiwlf): expose supervisor queue depths as gate probes so
+	// local-pipeline saturation (not just cross-node forward) raises pressure
+	// alerts.
+	gate := o.v3Gate
 	if ac, ok := o.alerts.(*alert.Collector); ok {
 		gate.AddOnChange(func(tr chanwatch.PressureTransition) {
 			if tr.To == chanwatch.PressureNormal {
@@ -88,44 +69,21 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 			)
 		})
 	}
-	// o.mu is already held by Start(); assign directly.
-	o.pressureGate = gate
-
-	// Include cross-node forward channels in pipeline-wide pressure
-	// classification so ingesters throttle when remote forwarding is
-	// backed up, not only when local ingest/digest buffers fill. See
-	// gastrolog-27zvt.
 	if o.forwarder != nil {
 		o.forwarder.RegisterPressureGate(gate)
 	}
 
-	// Launch ingester goroutines with per-ingester contexts. Inject the
-	// pressure gate into any ingester that implements PressureAware so it
-	// can throttle on backpressure.
-	for id, r := range o.ingesters {
-		if pa, ok := r.(PressureAware); ok {
-			pa.SetPressureGate(gate)
-		}
-		recvCtx, recvCancel := context.WithCancel(ctx)
-		o.ingesterCancels[id] = recvCancel
-		meta := o.ingesterMeta[id]
-		o.logger.Info("starting ingester", "id", id, "name", meta.Name, "type", meta.Type)
-		o.ingesterWg.Go(func() { o.runIngester(id, r, recvCtx, o.ingestCh) })
+	// Push the bootstrap-registered ingester set into the supervisor, then start
+	// the V3 pipeline (the ingestion manager launches the ingesters).
+	if err := o.pushIngestersToSupervisorLocked(); err != nil {
+		o.logger.Error("reconcile ingesters at startup", "error", err)
 	}
-
-	// Launch digest + write pipeline.
-	o.digestWg.Go(func() { o.digestLoop(ctx) })
-	o.writeWg.Go(func() { o.writeLoop() })
-
-	// Channel pressure watchdog — kept for the slog-based alerts at 90%
-	// (separate codepath from the hysteresis gate used for throttling).
-	cw := chanwatch.New(o.logger, 1*time.Second)
-	if ac, ok := o.alerts.(*alert.Collector); ok {
-		cw.SetAlerts(ac)
+	if err := o.v3.Start(ctx); err != nil {
+		o.running.Store(false)
+		cancel()
+		o.cancel = nil
+		return fmt.Errorf("start v3 pipeline: %w", err)
 	}
-	cw.Watch("ingestCh", ingestProbe, 0.9)
-	cw.Watch("digestedCh", digestedProbe, 0.9)
-	o.auxWg.Go(func() { cw.Run(ctx) })
 
 	// Start the pressure gate after everything else is wired.
 	o.auxWg.Go(func() { gate.Run(ctx, 200*time.Millisecond) })
@@ -184,60 +142,43 @@ func (o *Orchestrator) runRateAlertEvaluator(ctx context.Context, interval time.
 	}
 }
 
-// Stop cancels all ingesters, the digest/write pipeline, and in-flight index
-// builds, then waits for everything to finish.
+// Stop stops the V3 ingest pipeline and the orchestrator's auxiliary
+// goroutines, then waits for everything to finish.
 //
 // Ordered shutdown:
 //  0. BeginShutdown on the shared phase (if wired) → fast-path skip in
 //     fireAndForgetRemote / sealRemoteFollowers so the drain pipeline
 //     doesn't spam peers that are going down alongside us.
-//  1. Cancel ingester contexts → ingesterWg.Wait() → close ingestCh
-//  2. digestWg.Wait() (drains remaining messages) → close digestedCh
-//  3. writeWg.Wait() (drains remaining records) → close done
+//  1. Stop the V3 supervisor — ingestion stops first (closing the ingest
+//     queue), cascading through digest→route→segment as each queue closes,
+//     then the remaining managers are cancelled. Ingesters' alive state is
+//     cleared by the adapter as they exit.
+//  2. Cancel the orchestrator context and wait for aux goroutines.
 func (o *Orchestrator) Stop() error {
 	if !o.running.CompareAndSwap(true, false) {
 		return ErrNotRunning
 	}
 	o.mu.Lock()
 	cancel := o.cancel
-	ingestCh := o.ingestCh
-	digestedCh := o.digestedCh
 	o.mu.Unlock()
 
 	// Stage 0: flip the shutdown phase BEFORE any drain work so that
 	// fireAndForgetRemote / sealRemoteFollowers skip their remote calls
-	// while we drain buffered records through the pipeline. Idempotent
-	// if the top-level shutdown already flipped it; safe to call with a
-	// nil phase (single-node tests). See gastrolog-1e5ke.
+	// while we drain. Idempotent if the top-level shutdown already flipped
+	// it; safe to call with a nil phase (single-node tests). See gastrolog-1e5ke.
 	if o.phase != nil {
-		o.phase.BeginShutdown("orchestrator: cancelling ingesters")
+		o.phase.BeginShutdown("orchestrator: stopping v3 pipeline")
 	}
 
-	// Cancel all ingester contexts (both initial and dynamically added).
-	o.mu.Lock()
-	for _, recvCancel := range o.ingesterCancels {
-		recvCancel()
+	// Stage 1: stop the V3 pipeline and wait for all phase managers to exit.
+	if err := o.v3.Stop(); err != nil && !errors.Is(err, v3pipeline.ErrNotRunning) {
+		o.logger.Error("stop v3 pipeline", "error", err)
 	}
-	o.mu.Unlock()
 
-	// Cancel main context (for digest loop).
-	cancel()
-
-	// Stage 1: Wait for ingesters to exit, then close the ingest channel.
-	o.ingesterWg.Wait()
-	close(ingestCh)
-
-	// Stage 2: Wait for digest loop to drain, then close the intermediate channel.
-	o.digestWg.Wait()
-	close(digestedCh)
-
-	// Stage 3: Wait for write loop to drain remaining records.
-	o.writeWg.Wait()
-
-	// Stage 4: Wait for in-flight ack-gated replication goroutines.
-	o.ackWg.Wait()
-
-	// Stage 5: Wait for auxiliary goroutines (watchdog, etc.).
+	// Stage 2: cancel the orchestrator context and wait for aux goroutines.
+	if cancel != nil {
+		cancel()
+	}
 	o.auxWg.Wait()
 
 	// Stop shared scheduler — waits for running jobs (index builds,
@@ -250,11 +191,6 @@ func (o *Orchestrator) Stop() error {
 
 	o.mu.Lock()
 	o.cancel = nil
-	o.done = nil
-	o.ingestCh = nil
-	o.digestedCh = nil
-	// Clear per-ingester cancel functions.
-	o.ingesterCancels = make(map[glid.GLID]context.CancelFunc)
 	o.mu.Unlock()
 
 	return nil
@@ -267,222 +203,15 @@ func (o *Orchestrator) Close() {
 	_ = o.scheduler.Stop()
 }
 
-// runIngester executes a single ingester with panic recovery so that a
-// misbehaving ingester cannot crash the entire process.
-//
-// Passive (listener) ingesters retry on failure with 3–5s jitter — port-bind
-// errors are recoverable when another process releases the port or a
-// co-located node dies. Active ingesters exit on first error.
-func (o *Orchestrator) runIngester(id glid.GLID, r Ingester, ctx context.Context, out chan<- IngestMessage) {
-	defer func() {
-		if v := recover(); v != nil {
-			o.logger.Error("ingester panicked", "id", id, "panic", v)
-		}
-	}()
-
-	meta := o.ingesterMeta[id]
-	stats := o.ingesterStats[id]
-	for {
-		o.setIngesterAlive(id, stats, true)
-		err := o.runWithCheckpoints(ctx, id, r, out)
-		o.setIngesterAlive(id, stats, false)
-		// Non-passive ingesters do not retry; without this, a returned error
-		// clears alive in the UI but leaves no log (unlike passive retry path).
-		if err != nil && ctx.Err() == nil && !meta.Passive {
-			o.logger.Warn("ingester exited with error", "id", id, "name", meta.Name, "type", meta.Type, "error", err)
-		}
-		if ctx.Err() != nil || !meta.Passive {
-			return
-		}
-		delay := 3*time.Second + time.Duration(rand.Int64N(int64(2*time.Second))) //nolint:gosec // G404: jitter for retry delay, not security-sensitive
-		o.logger.Warn("passive ingester failed, retrying", "id", id, "name", meta.Name, "error", err, "retry_in", delay)
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(delay):
-		}
-	}
-}
-
-// runWithCheckpoints runs the ingester and, if it implements Checkpointable,
-// saves checkpoints every 5 seconds and once on exit.
-func (o *Orchestrator) runWithCheckpoints(ctx context.Context, id glid.GLID, r Ingester, out chan<- IngestMessage) error {
-	cp, isCheckpointable := r.(Checkpointable)
-	if !isCheckpointable || o.onIngesterCheckpoint == nil {
-		return r.Run(ctx, out)
-	}
-
-	errCh := make(chan error, 1)
-	go func() { errCh <- r.Run(ctx, out) }()
-
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case err := <-errCh:
-			o.saveCheckpointFrom(id, cp)
-			return err
-		case <-ticker.C:
-			o.saveCheckpointFrom(id, cp)
-		}
-	}
-}
-
-// saveCheckpointFrom saves checkpoint data from a Checkpointable ingester.
-func (o *Orchestrator) saveCheckpointFrom(id glid.GLID, cp Checkpointable) {
-	data, err := cp.SaveCheckpoint()
-	if err != nil {
-		o.logger.Error("ingester checkpoint save failed", "id", id, "error", err)
-		return
-	}
-	if len(data) > 0 {
-		o.onIngesterCheckpoint(id, data)
-	}
-}
-
 // setIngesterAlive updates both the local stats and the Raft-replicated state.
+// The V3 ingester adapter calls this around each ingester run so the cluster/UI
+// alive surface is unchanged after the V0 ingest loop's removal.
 func (o *Orchestrator) setIngesterAlive(id glid.GLID, stats *IngesterStats, alive bool) {
 	if stats != nil {
 		stats.Alive.Store(alive)
 	}
 	if o.onIngesterAlive != nil {
 		o.onIngesterAlive(id, alive)
-	}
-}
-
-// digestLoop reads IngestMessages, stamps identity, runs the digester chain,
-// builds chunk.Records, and forwards them to digestedCh.
-//
-// On context cancellation it drains remaining messages from ingestCh so that
-// every message gets digested before the channel is closed.
-func (o *Orchestrator) digestLoop(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			// Context cancelled — drain remaining messages.
-			// ingestCh will be closed after ingesters exit.
-			for msg := range o.ingestCh {
-				o.digestAndForward(msg)
-			}
-			return
-		case msg, ok := <-o.ingestCh:
-			if !ok {
-				return
-			}
-			o.digestAndForward(msg)
-		}
-	}
-}
-
-// digestAndForward digests a single message and sends the result to digestedCh.
-func (o *Orchestrator) digestAndForward(msg IngestMessage) {
-	// Apply digester pipeline (enriches attrs based on message content).
-	// NodeID lives on EventID as a first-class field (gastrolog-1k3l9);
-	// the orchestrator no longer stamps it as an attribute.
-	for _, d := range o.digesters {
-		d.Digest(&msg)
-	}
-
-	// Construct record.
-	// SourceTS comes from the ingester (parsed from log, zero if unknown).
-	// IngestTS comes from the ingester (when message was received).
-	// WriteTS is set by ChunkManager on append.
-	// Attrs may have been enriched by digesters.
-	rec := chunk.Record{
-		SourceTS:       msg.SourceTS,
-		IngestTS:       msg.IngestTS,
-		Attrs:          msg.Attrs,
-		Raw:            msg.Raw,
-		WaitForReplica: msg.Ack != nil,
-	}
-
-	// Assign EventID when ingester identity is available.
-	if msg.IngesterID != "" {
-		seq := o.ingestSeqs[msg.IngesterID]
-		o.ingestSeqs[msg.IngesterID] = seq + 1
-		ingesterUUID, err := glid.ParseUUID(msg.IngesterID)
-		if err == nil {
-			rec.EventID = chunk.EventID{
-				IngesterID: ingesterUUID,
-				NodeID:     o.localNodeIDGLID,
-				IngestTS:   msg.IngestTS,
-				IngestSeq:  seq,
-			}
-		}
-	}
-
-	o.digestedCh <- digestedRecord{
-		rec:        rec,
-		ack:        msg.Ack,
-		ingesterID: msg.IngesterID,
-		rawLen:     len(msg.Raw),
-	}
-}
-
-// writeLoop reads digested records, appends them to vaults, tracks stats,
-// and sends acks. It exits when digestedCh is closed.
-func (o *Orchestrator) writeLoop() {
-	defer close(o.done)
-
-	for dr := range o.digestedCh {
-		// gastrolog-4kkoo (Phase 5): build a SourceContext from the
-		// digested record so route expressions can match on
-		// `_source == "ingest"` and `_ingester == "<id>"`.
-		src := SourceContext{Kind: SourceIngest}
-		if dr.ingesterID != "" {
-			if id, perr := glid.ParseUUID(dr.ingesterID); perr == nil {
-				src.IngesterID = id
-			}
-		}
-		pa, err := o.ingestWithSource(dr.rec, src)
-		if fwErr := o.flushRecordRouteForwards(context.Background(), pa, dr.rec); fwErr != nil {
-			if err == nil {
-				err = fwErr
-			}
-			o.logger.Warn("record route forward failed", "error", fwErr, "ingester", dr.ingesterID)
-		}
-		if err != nil {
-			o.logger.Error("write failed", "error", err, "ingester", dr.ingesterID)
-		}
-
-		// Track per-ingester stats.
-		o.trackWriteStats(dr, err)
-
-		// Send ack if requested.
-		if dr.ack != nil {
-			if err != nil || pa.isEmpty() {
-				// Write failed or no sync work — ack immediately.
-				dr.ack <- err
-			} else {
-				// Ack-gated: run the sync work (local follower
-				// replication + cross-node forward) in a goroutine
-				// so the writeLoop isn't blocked by network round-trips.
-				o.ackWg.Go(func() {
-					o.ackAfterReplication(dr.ack, pa, dr.rec)
-				})
-			}
-		}
-	}
-}
-
-// trackWriteStats updates per-ingester counters for a written record.
-func (o *Orchestrator) trackWriteStats(dr digestedRecord, ingestErr error) {
-	if dr.ingesterID == "" {
-		return
-	}
-	id, parseErr := glid.ParseUUID(dr.ingesterID)
-	if parseErr != nil {
-		return
-	}
-	stats := o.ingesterStats[id]
-	if stats == nil {
-		return
-	}
-	stats.MessagesIngested.Add(1)
-	stats.BytesIngested.Add(int64(dr.rawLen))
-	if ingestErr != nil {
-		stats.Errors.Add(1)
 	}
 }
 

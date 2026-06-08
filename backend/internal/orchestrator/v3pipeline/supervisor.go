@@ -337,6 +337,14 @@ func (s *Supervisor) SetRoutingTable(t *routing.Table) {
 	s.route.SetTable(t)
 }
 
+// IngestQueueDepth reports the current depth of the ingestion→digestion queue,
+// the backlog of minted-but-not-yet-digested messages. It is the V3 analogue of
+// the former ingest channel depth surfaced in node/health stats.
+func (s *Supervisor) IngestQueueDepth() int { return len(s.ingestOut) }
+
+// IngestQueueCapacity reports the capacity of the ingestion→digestion queue.
+func (s *Supervisor) IngestQueueCapacity() int { return cap(s.ingestOut) }
+
 // RegisterVault starts the managers for the roles the vault holds on this node.
 // Safe before or during Start. It is idempotent only in the sense that a second
 // registration of the same vault returns ErrVaultRegistered.

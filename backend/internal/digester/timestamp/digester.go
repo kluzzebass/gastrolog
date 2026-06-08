@@ -5,7 +5,7 @@ package timestamp
 import (
 	"time"
 
-	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/ingestion"
 )
 
 // Digester extracts timestamps from raw log content and sets SourceTS.
@@ -26,18 +26,19 @@ type Digester struct{}
 // New creates a timestamp digester.
 func New() *Digester { return &Digester{} }
 
-func (d *Digester) Digest(msg *orchestrator.IngestMessage) {
+func (d *Digester) Digest(msg *ingestion.Message) error {
 	if !msg.SourceTS.IsZero() {
-		return
+		return nil
 	}
 	if len(msg.Raw) == 0 {
-		return
+		return nil
 	}
 
 	ts := extractTimestamp(msg.Raw)
 	if !ts.IsZero() {
 		msg.SourceTS = ts
 	}
+	return nil
 }
 
 // extractor tries to parse a timestamp starting at raw[pos].

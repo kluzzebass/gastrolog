@@ -78,20 +78,18 @@ type mockOrch struct {
 	drainVaultErr      error
 	cancelDrainErr     error
 	isDraining         bool
-	addIngesterErr     error
-	removeIngesterErr  error
+	reconcileErr       error
 	updateMaxJobsErr   error
 	currentMaxJobs     int
 
-	drainCalls         []glid.GLID // IDs passed to DrainVault
-	cancelDrainIDs     []glid.GLID // IDs passed to CancelDrain
-	forceRemoveIDs     []glid.GLID // IDs passed to ForceRemoveVault
-	unregisterIDs      []glid.GLID // IDs passed to UnregisterVault
+	drainCalls         []glid.GLID   // IDs passed to DrainVault
+	cancelDrainIDs     []glid.GLID   // IDs passed to CancelDrain
+	forceRemoveIDs     []glid.GLID   // IDs passed to ForceRemoveVault
+	unregisterIDs      []glid.GLID   // IDs passed to UnregisterVault
 	unregisterErr      error
-	removeIngesterIDs  []glid.GLID // IDs passed to RemoveIngester
-	addIngesterCalls   []glid.GLID // IDs passed to AddIngester
-	addVaultCalls      []glid.GLID // IDs passed to AddVault
-	reloadFiltersCalls int         // number of ReloadFilters calls
+	reconcileCalls     [][]glid.GLID // desired ID sets passed to ReconcileIngesters
+	addVaultCalls      []glid.GLID   // IDs passed to AddVault
+	reloadFiltersCalls int           // number of ReloadFilters calls
 
 	// Vault drain tracking.
 	vaultDrainCalls        []glid.GLID                                       // vault IDs passed to DrainInstance
@@ -165,18 +163,6 @@ func (m *mockOrch) CancelDrain(_ context.Context, id glid.GLID) error {
 	m.cancelDrainIDs = append(m.cancelDrainIDs, id)
 	return m.cancelDrainErr
 }
-func (m *mockOrch) RemoveIngester(id glid.GLID) error {
-	m.removeIngesterIDs = append(m.removeIngesterIDs, id)
-	if m.removeIngesterErr == nil {
-		for i, existing := range m.ingesters {
-			if existing == id {
-				m.ingesters = append(m.ingesters[:i], m.ingesters[i+1:]...)
-				break
-			}
-		}
-	}
-	return m.removeIngesterErr
-}
 func (m *mockOrch) UpdateMaxConcurrentJobs(n int) error {
 	if m.updateMaxJobsErr == nil {
 		m.currentMaxJobs = n
@@ -185,12 +171,33 @@ func (m *mockOrch) UpdateMaxConcurrentJobs(n int) error {
 }
 func (m *mockOrch) MaxConcurrentJobs() int { return m.currentMaxJobs }
 
-func (m *mockOrch) AddIngester(id glid.GLID, _, _ string, _ bool, _ orchestrator.Ingester) error {
-	m.addIngesterCalls = append(m.addIngesterCalls, id)
-	if m.addIngesterErr == nil {
-		m.ingesters = append(m.ingesters, id)
+// ReconcileIngesters records the desired ID set and, on success, reflects it
+// into m.ingesters so ListIngesters mirrors the orchestrator's converged state.
+func (m *mockOrch) ReconcileIngesters(desired []orchestrator.IngesterDesired) error {
+	ids := make([]glid.GLID, 0, len(desired))
+	for _, d := range desired {
+		ids = append(ids, d.ID)
 	}
-	return m.addIngesterErr
+	m.reconcileCalls = append(m.reconcileCalls, ids)
+	if m.reconcileErr != nil {
+		return m.reconcileErr
+	}
+	m.ingesters = ids
+	return nil
+}
+
+// lastReconcile returns the desired ID set from the most recent
+// ReconcileIngesters call, or nil if it was never called.
+func (m *mockOrch) lastReconcile() []glid.GLID {
+	if len(m.reconcileCalls) == 0 {
+		return nil
+	}
+	return m.reconcileCalls[len(m.reconcileCalls)-1]
+}
+
+// reconciledContains reports whether the most recent reconcile included id.
+func (m *mockOrch) reconciledContains(id glid.GLID) bool {
+	return slices.Contains(m.lastReconcile(), id)
 }
 
 // stubCfgStore implements system.Store with configurable returns for the
@@ -436,59 +443,59 @@ func TestHandle_VaultDeleted(t *testing.T) {
 	})
 }
 
+// reg is the test ingester registration used across ingester dispatch tests.
+func testIngesterReg() orchestrator.IngesterRegistration {
+	return orchestrator.IngesterRegistration{
+		Factory: func(glid.GLID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
+			return noopIngester{}, nil
+		},
+	}
+}
+
+// Every ingester FSM notification now recomputes the full desired set from the
+// config store and drives it through ReconcileIngesters; the orchestrator diffs
+// and only (re)builds changed ingesters. These tests assert which configs land
+// in the reconciled desired set.
 func TestHandle_IngesterPut(t *testing.T) {
 	id := glid.New()
 
-	t.Run("store_error", func(t *testing.T) {
+	t.Run("list_store_error", func(t *testing.T) {
 		h := &captureHandler{}
-		d := newTestDispatcher(&mockOrch{}, &stubCfgStore{
-			ingesterErr: errors.New("db down"),
-		}, h)
-
-		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: id})
-
-		if !h.hasMessage("dispatch: read ingester config") {
-			t.Fatal("expected error log for store read failure")
-		}
-	})
-
-	t.Run("remote_node_not_registered_skipped", func(t *testing.T) {
-		h := &captureHandler{}
-		mo := &mockOrch{} // ingester not locally registered
+		mo := &mockOrch{}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			ingester: &system.IngesterConfig{ID: id, Enabled: true},
+			ingesterListErr: errors.New("db down"),
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: id})
 
-		if len(mo.removeIngesterIDs) != 0 {
-			t.Fatal("should not call RemoveIngester when not locally registered")
+		if !h.hasMessage("dispatch: list ingesters") {
+			t.Fatal("expected error log for store list failure")
+		}
+		if len(mo.reconcileCalls) != 0 {
+			t.Fatal("should not reconcile when the config list cannot be read")
 		}
 	})
 
-	t.Run("reassignment_stops_local_ingester", func(t *testing.T) {
+	t.Run("eligible_included", func(t *testing.T) {
 		h := &captureHandler{}
-		mo := &mockOrch{
-			ingesters: []glid.GLID{id}, // locally registered
-		}
+		mo := &mockOrch{}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			ingester: &system.IngesterConfig{ID: id, Name: "chatterbox", Enabled: true},
+			ingesterList: []system.IngesterConfig{{ID: id, Type: "test", Enabled: true}},
 		}, h)
+		d.factories.IngesterTypes["test"] = testIngesterReg()
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: id})
 
-		if len(mo.removeIngesterIDs) != 1 || mo.removeIngesterIDs[0] != id {
-			t.Fatalf("expected RemoveIngester(%s) for reassigned ingester, got %v", id, mo.removeIngesterIDs)
-		}
-		if h.hasMessage("dispatch: add ingester") {
-			t.Fatal("should not add ingester on a node it's leaving")
+		if !mo.reconciledContains(id) {
+			t.Fatalf("expected eligible ingester %s in desired set, got %v", id, mo.lastReconcile())
 		}
 	})
 
-	t.Run("unknown_type", func(t *testing.T) {
+	t.Run("unknown_type_excluded", func(t *testing.T) {
 		h := &captureHandler{}
-		d := newTestDispatcher(&mockOrch{}, &stubCfgStore{
-			ingester: &system.IngesterConfig{ID: id, Enabled: true},
+		mo := &mockOrch{}
+		d := newTestDispatcher(mo, &stubCfgStore{
+			ingesterList: []system.IngesterConfig{{ID: id, Type: "missing", Enabled: true}},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: id})
@@ -496,72 +503,53 @@ func TestHandle_IngesterPut(t *testing.T) {
 		if !h.hasMessage("dispatch: unknown ingester type") {
 			t.Fatal("expected error log for unknown ingester type")
 		}
-	})
-
-	t.Run("factory_error", func(t *testing.T) {
-		h := &captureHandler{}
-		d := newTestDispatcher(&mockOrch{}, &stubCfgStore{
-			ingester: &system.IngesterConfig{ID: id, Type: "test", Enabled: true},
-		}, h)
-		d.factories.IngesterTypes["test"] = orchestrator.IngesterRegistration{Factory: func(glid.GLID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
-			return nil, errors.New("bad params")
-		}}
-
-		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: id})
-
-		if !h.hasMessage("dispatch: create ingester") {
-			t.Fatal("expected error log for factory failure")
+		if mo.reconciledContains(id) {
+			t.Fatal("unknown-type ingester must not be in the desired set")
 		}
 	})
 
-	t.Run("add_ingester_error", func(t *testing.T) {
+	t.Run("disabled_excluded", func(t *testing.T) {
 		h := &captureHandler{}
-		mo := &mockOrch{addIngesterErr: errors.New("duplicate")}
+		mo := &mockOrch{}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			ingester: &system.IngesterConfig{ID: id, Type: "test", Enabled: true},
+			ingesterList: []system.IngesterConfig{{ID: id, Type: "test", Enabled: false}},
 		}, h)
-		d.factories.IngesterTypes["test"] = orchestrator.IngesterRegistration{Factory: func(glid.GLID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
-			return noopIngester{}, nil
-		}}
+		d.factories.IngesterTypes["test"] = testIngesterReg()
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: id})
 
-		if !h.hasMessage("dispatch: add ingester") {
-			t.Fatal("expected error log for AddIngester failure")
+		if mo.reconciledContains(id) {
+			t.Fatal("disabled ingester must not be in the desired set")
 		}
 	})
 
-	t.Run("existing_ingester_remove_error", func(t *testing.T) {
+	t.Run("pinned_to_other_node_excluded", func(t *testing.T) {
 		h := &captureHandler{}
-		mo := &mockOrch{
-			ingesters:         []glid.GLID{id},
-			removeIngesterErr: errors.New("stuck"),
-		}
+		mo := &mockOrch{}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			ingester: &system.IngesterConfig{ID: id, Enabled: true},
+			ingesterList: []system.IngesterConfig{{ID: id, Type: "test", Enabled: true, NodeIDs: []string{"other-node"}}},
 		}, h)
-		d.factories.IngesterTypes["test"] = orchestrator.IngesterRegistration{Factory: func(glid.GLID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
-			return noopIngester{}, nil
-		}}
+		d.factories.IngesterTypes["test"] = testIngesterReg()
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: id})
 
-		if !h.hasMessage("dispatch: remove existing ingester") {
-			t.Fatal("expected error log for RemoveIngester failure during update")
+		if mo.reconciledContains(id) {
+			t.Fatal("ingester pinned to another node must not be in this node's desired set")
 		}
 	})
 
-	t.Run("disabled_ingester_skips_add", func(t *testing.T) {
+	t.Run("reconcile_error", func(t *testing.T) {
 		h := &captureHandler{}
-		mo := &mockOrch{addIngesterErr: errors.New("should not be called")}
+		mo := &mockOrch{reconcileErr: errors.New("build failed")}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			ingester: &system.IngesterConfig{ID: id, Enabled: false},
+			ingesterList: []system.IngesterConfig{{ID: id, Type: "test", Enabled: true}},
 		}, h)
+		d.factories.IngesterTypes["test"] = testIngesterReg()
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: id})
 
-		if h.hasMessage("dispatch: add ingester") {
-			t.Fatal("disabled ingester should not be added")
+		if !h.hasMessage("dispatch: reconcile ingesters") {
+			t.Fatal("expected error log when ReconcileIngesters fails")
 		}
 	})
 }
@@ -569,27 +557,28 @@ func TestHandle_IngesterPut(t *testing.T) {
 func TestHandle_IngesterDeleted(t *testing.T) {
 	id := glid.New()
 
-	t.Run("remove_error", func(t *testing.T) {
+	t.Run("reconciles_without_deleted_ingester", func(t *testing.T) {
 		h := &captureHandler{}
-		mo := &mockOrch{removeIngesterErr: errors.New("stuck")}
+		mo := &mockOrch{ingesters: []glid.GLID{id}}
+		// Store no longer lists the deleted ingester.
 		d := newTestDispatcher(mo, &stubCfgStore{}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterDeleted, ID: id})
 
-		if !h.hasMessage("dispatch: remove ingester") {
-			t.Fatal("expected error log for RemoveIngester failure")
+		if mo.reconciledContains(id) {
+			t.Fatal("deleted ingester must not appear in the reconciled desired set")
 		}
 	})
 
-	t.Run("not_found_suppressed", func(t *testing.T) {
+	t.Run("reconcile_error", func(t *testing.T) {
 		h := &captureHandler{}
-		mo := &mockOrch{removeIngesterErr: orchestrator.ErrIngesterNotFound}
+		mo := &mockOrch{reconcileErr: errors.New("stuck")}
 		d := newTestDispatcher(mo, &stubCfgStore{}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterDeleted, ID: id})
 
-		if h.hasMessage("dispatch: remove ingester") {
-			t.Fatal("ErrIngesterNotFound should be silently ignored")
+		if !h.hasMessage("dispatch: reconcile ingesters") {
+			t.Fatal("expected error log when ReconcileIngesters fails")
 		}
 	})
 }
@@ -1396,17 +1385,16 @@ func TestHandleIngesterAssignmentStartsLocally(t *testing.T) {
 	ing, reg := singletonTestIngester(ingID, "local")
 	mo := &mockOrch{} // not locally running yet
 	d := newTestDispatcher(mo, &stubCfgStore{
-		ingester:            ing,
+		ingesterList:        []system.IngesterConfig{*ing},
 		ingesterAssignments: map[glid.GLID]string{ingID: "local"},
 	}, h)
 	d.factories.IngesterTypes["test"] = reg
 
 	d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterAssignmentSet, ID: ingID})
 
-	// The ingester should have been added (handleIngesterPut is called internally).
-	// No error logs expected for a successful add.
-	if h.hasMessage("dispatch: remove reassigned ingester") {
-		t.Fatal("should not remove when assigned to this node")
+	// Singleton assigned to this node — included in the desired set.
+	if !mo.reconciledContains(ingID) {
+		t.Fatalf("expected singleton assigned locally in desired set, got %v", mo.lastReconcile())
 	}
 }
 
@@ -1419,15 +1407,17 @@ func TestHandleIngesterAssignmentStopsLocally(t *testing.T) {
 		ingesters: []glid.GLID{ingID}, // running locally
 	}
 	d := newTestDispatcher(mo, &stubCfgStore{
-		ingester:            ing,
+		ingesterList:        []system.IngesterConfig{*ing},
 		ingesterAssignments: map[glid.GLID]string{ingID: "other-node"},
 	}, h)
 	d.factories.IngesterTypes["test"] = reg
 
 	d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterAssignmentSet, ID: ingID})
 
-	if len(mo.removeIngesterIDs) != 1 || mo.removeIngesterIDs[0] != ingID {
-		t.Fatalf("expected RemoveIngester(%s), got %v", ingID, mo.removeIngesterIDs)
+	// Singleton reassigned to another node — dropped from the desired set so
+	// the orchestrator stops it locally.
+	if mo.reconciledContains(ingID) {
+		t.Fatalf("singleton assigned elsewhere must be excluded, got %v", mo.lastReconcile())
 	}
 }
 
@@ -1440,16 +1430,17 @@ func TestHandleIngesterAssignmentAlreadyRunning(t *testing.T) {
 		ingesters: []glid.GLID{ingID}, // already running locally
 	}
 	d := newTestDispatcher(mo, &stubCfgStore{
-		ingester:            ing,
+		ingesterList:        []system.IngesterConfig{*ing},
 		ingesterAssignments: map[glid.GLID]string{ingID: "local"},
 	}, h)
 	d.factories.IngesterTypes["test"] = reg
 
 	d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterAssignmentSet, ID: ingID})
 
-	// Already running locally, assigned here — no action needed.
-	if len(mo.removeIngesterIDs) != 0 {
-		t.Fatal("should not remove an ingester that is already running on the assigned node")
+	// Assigned here and already running — still in the desired set; the
+	// orchestrator's no-flap reconcile keeps the running instance untouched.
+	if !mo.reconciledContains(ingID) {
+		t.Fatalf("ingester assigned and running locally must stay in desired set, got %v", mo.lastReconcile())
 	}
 }
 
@@ -1460,7 +1451,7 @@ func TestHandleIngesterAssignmentIgnoresParallel(t *testing.T) {
 	// Parallel ingester (Singleton=false) with a stale assignment pointing elsewhere.
 	mo := &mockOrch{ingesters: []glid.GLID{ingID}}
 	d := newTestDispatcher(mo, &stubCfgStore{
-		ingester:            &system.IngesterConfig{ID: ingID, Type: "test", Enabled: true, NodeIDs: []string{"local"}, Singleton: false},
+		ingesterList:        []system.IngesterConfig{{ID: ingID, Type: "test", Enabled: true, NodeIDs: []string{"local"}, Singleton: false}},
 		ingesterAssignments: map[glid.GLID]string{ingID: "other-node"},
 	}, h)
 	d.factories.IngesterTypes["test"] = orchestrator.IngesterRegistration{
@@ -1472,8 +1463,10 @@ func TestHandleIngesterAssignmentIgnoresParallel(t *testing.T) {
 
 	d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterAssignmentSet, ID: ingID})
 
-	if len(mo.removeIngesterIDs) != 0 {
-		t.Fatalf("parallel ingester must not be removed on assignment change, got %v", mo.removeIngesterIDs)
+	// Parallel ingester eligible on this node (NodeIDs contains local); the
+	// stale singleton assignment is irrelevant, so it stays in the desired set.
+	if !mo.reconciledContains(ingID) {
+		t.Fatalf("parallel ingester eligible locally must stay in desired set, got %v", mo.lastReconcile())
 	}
 }
 
@@ -1514,9 +1507,9 @@ func TestReplayConfigFromStore_RegistersIngestersFromSnapshot(t *testing.T) {
 	d := dispatcherForReplay(orch, store, h)
 	d.ReplayConfigFromStore(context.Background())
 
-	if !slices.Contains(orch.addIngesterCalls, ingID) {
-		t.Fatalf("expected AddIngester for snapshot-deposited ingester %s, got %v",
-			ingID, orch.addIngesterCalls)
+	if !orch.reconciledContains(ingID) {
+		t.Fatalf("expected snapshot-deposited ingester %s in reconciled desired set, got %v",
+			ingID, orch.lastReconcile())
 	}
 }
 
@@ -1539,9 +1532,9 @@ func TestReplayConfigFromStore_SkipsIngesterPinnedToOtherNode(t *testing.T) {
 	d := dispatcherForReplay(orch, store, h)
 	d.ReplayConfigFromStore(context.Background())
 
-	if len(orch.addIngesterCalls) != 0 {
-		t.Fatalf("expected no AddIngester (pinned to %s, local=%s), got %v",
-			otherNode, d.localNodeID, orch.addIngesterCalls)
+	if orch.reconciledContains(ingID) {
+		t.Fatalf("expected ingester pinned to %s (local=%s) excluded from desired set, got %v",
+			otherNode, d.localNodeID, orch.lastReconcile())
 	}
 }
 
@@ -1563,9 +1556,9 @@ func TestReplayConfigFromStore_SkipsDisabledIngester(t *testing.T) {
 	d := dispatcherForReplay(orch, store, h)
 	d.ReplayConfigFromStore(context.Background())
 
-	if len(orch.addIngesterCalls) != 0 {
-		t.Fatalf("expected no AddIngester for disabled ingester, got %v",
-			orch.addIngesterCalls)
+	if orch.reconciledContains(ingID) {
+		t.Fatalf("expected disabled ingester excluded from desired set, got %v",
+			orch.lastReconcile())
 	}
 }
 
@@ -1604,20 +1597,15 @@ func TestReplayConfigFromStore_ReloadsRoutesAndPolicies(t *testing.T) {
 	}
 }
 
-// TestReplayConfigFromStore_SkipsAlreadyRegistered verifies that the
-// replay does NOT re-fire handleIngesterPut for ingesters the
-// orchestrator already has. This is load-bearing: re-firing trips the
-// orchestrator's remove+re-add idempotent-replace path, which races
-// the new goroutine's setIngesterAlive(true) against the old
-// goroutine's setIngesterAlive(false). Observed in k8s as "7/10
-// alive" after a scale-up where 3 joiners lost the race.
-//
-// The real-world scenario this guards against: a joiner whose
-// post-snapshot Raft log still contains the PutIngester entry — the
-// live dispatcher catches the Apply and registers the ingester before
-// awaitReplication returns. ReplayConfigFromStore then runs and must
-// see the orchestrator already has it, and NOT re-fire.
-func TestReplayConfigFromStore_SkipsAlreadyRegistered(t *testing.T) {
+// TestReplayConfigFromStore_ReconcilesAlreadyRegisteredIdempotently verifies
+// that replay reconciles the full desired set even for ingesters the
+// orchestrator already runs, listing each exactly once. The no-flap guarantee
+// (not tearing down and re-adding an unchanged ingester, which would race
+// setIngesterAlive(true) against a stale setIngesterAlive(false) — observed in
+// k8s as "7/10 alive" after a scale-up) now lives in the orchestrator's
+// ReconcileIngesters diff, exercised by ingestion.Manager's no-op reconcile
+// test. Dispatch's job is simply to hand over the correct desired set.
+func TestReplayConfigFromStore_ReconcilesAlreadyRegisteredIdempotently(t *testing.T) {
 	t.Parallel()
 	h := &captureHandler{}
 	orch := &mockOrch{}
@@ -1639,13 +1627,9 @@ func TestReplayConfigFromStore_SkipsAlreadyRegistered(t *testing.T) {
 	d := dispatcherForReplay(orch, store, h)
 	d.ReplayConfigFromStore(context.Background())
 
-	if len(orch.addIngesterCalls) != 0 {
-		t.Fatalf("expected zero AddIngester calls for pre-registered ingester (would trigger remove+re-add race), got %v",
-			orch.addIngesterCalls)
-	}
-	if len(orch.removeIngesterIDs) != 0 {
-		t.Fatalf("expected zero RemoveIngester calls (would trigger setIngesterAlive(false) race), got %v",
-			orch.removeIngesterIDs)
+	desired := orch.lastReconcile()
+	if len(desired) != 1 || desired[0] != ingID {
+		t.Fatalf("expected desired set [%s] exactly once, got %v", ingID, desired)
 	}
 }
 

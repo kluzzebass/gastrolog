@@ -2,7 +2,6 @@ package server_test
 
 import (
 	"context"
-	"errors"
 	"gastrolog/internal/glid"
 	"maps"
 	"net"
@@ -63,12 +62,8 @@ func testAfterConfigApply(orch *orchestrator.Orchestrator, cfgStore system.Store
 			if err != nil || cfg == nil {
 				return
 			}
-			if slices.Contains(orch.ListIngesters(), n.ID) {
-				if err := orch.RemoveIngester(n.ID); err != nil && !errors.Is(err, orchestrator.ErrIngesterNotFound) {
-					return
-				}
-			}
 			if !cfg.Enabled {
+				orch.UnregisterIngester(n.ID)
 				return
 			}
 			reg, ok := factories.IngesterTypes[cfg.Type]
@@ -85,9 +80,11 @@ func testAfterConfigApply(orch *orchestrator.Orchestrator, cfgStore system.Store
 			if err != nil {
 				return
 			}
-			_ = orch.AddIngester(cfg.ID, cfg.Name, cfg.Type, false, ing)
+			// RegisterIngester replaces an existing ingester of the same ID
+			// idempotently, so no explicit pre-remove is needed.
+			orch.RegisterIngester(cfg.ID, cfg.Name, cfg.Type, ing)
 		case raftfsm.NotifyIngesterDeleted:
-			_ = orch.RemoveIngester(n.ID)
+			orch.UnregisterIngester(n.ID)
 		}
 	}
 }

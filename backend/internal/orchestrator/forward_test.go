@@ -307,8 +307,8 @@ func TestAckGatedRemoteRecordUsesForwardSync(t *testing.T) {
 
 	// Verify that at ingest time, NO forward has happened yet — the
 	// task is accumulated, not dispatched. The dispatch is the job of
-	// ackAfterReplication, which runs later from the writeLoop's
-	// goroutine.
+	// ackAfterReplication, which runs later on the direct ingest path's
+	// ack goroutine.
 	if got := len(fwd.getCalls()); got != 0 {
 		t.Errorf("expected no forwarder calls during ingest (task is accumulated), got %d", got)
 	}

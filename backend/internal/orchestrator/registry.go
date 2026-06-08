@@ -18,17 +18,9 @@ func (o *Orchestrator) RegisterVault(vault *Vault) {
 	o.vaults[vault.ID] = vault
 }
 
-// RegisterDigester appends a digester to the processing pipeline.
-// Digesters run in registration order on each message before storage.
-// Must be called before Start().
-func (o *Orchestrator) RegisterDigester(d Digester) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.digesters = append(o.digesters, d)
-}
-
-// RegisterIngester adds an ingester to the registry.
-// Must be called before Start().
+// RegisterIngester adds an ingester to the registry. When the orchestrator is
+// already running the ingester is reconciled into the V3 pipeline immediately;
+// otherwise it starts when Start runs.
 func (o *Orchestrator) RegisterIngester(id glid.GLID, name, ingType string, r Ingester) {
 	o.registerIngester(id, name, ingType, false, r)
 }
@@ -36,10 +28,11 @@ func (o *Orchestrator) RegisterIngester(id glid.GLID, name, ingType string, r In
 func (o *Orchestrator) registerIngester(id glid.GLID, name, ingType string, passive bool, r Ingester) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.ingesters[id] = r
-	o.ingesterMeta[id] = ingesterInfo{Name: name, Type: ingType, Passive: passive}
-	if o.ingesterStats[id] == nil {
-		o.ingesterStats[id] = &IngesterStats{}
+	o.setIngesterLocked(id, ingesterInfo{Name: name, Type: ingType, Passive: passive}, r)
+	if o.running.Load() {
+		if err := o.pushIngestersToSupervisorLocked(); err != nil {
+			o.logger.Error("reconcile ingesters after register", "id", id, "error", err)
+		}
 	}
 }
 
@@ -54,13 +47,20 @@ func (o *Orchestrator) SetRouteSet(rs *RouteSet) {
 	o.routeSet = rs
 }
 
-// UnregisterIngester removes a ingester from the registry.
-// Must be called before Start() or after Stop().
+// UnregisterIngester removes an ingester from the registry. When the
+// orchestrator is running the ingester is stopped via a reconcile into the V3
+// pipeline; otherwise it simply leaves the desired set.
 func (o *Orchestrator) UnregisterIngester(id glid.GLID) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	delete(o.ingesters, id)
 	delete(o.ingesterMeta, id)
+	delete(o.ingesterAdapters, id)
+	if o.running.Load() {
+		if err := o.pushIngestersToSupervisorLocked(); err != nil {
+			o.logger.Error("reconcile ingesters after unregister", "id", id, "error", err)
+		}
+	}
 }
 
 // ChunkManager implements manifest.VaultRegistry: returns the vault's

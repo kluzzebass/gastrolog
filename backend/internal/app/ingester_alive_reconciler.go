@@ -11,13 +11,14 @@ import (
 
 // AliveReconciler serializes SetIngesterAlive Raft applies and retries
 // transient failures with bounded exponential backoff. Solves the gap
-// where the orchestrator's runIngester goroutine fires OnIngesterAlive
-// once and an unlucky Raft-startup race drops the apply — leaving the
-// goroutine running but the FSM alive map empty (gastrolog-1ox8z).
+// where the per-ingester run goroutine fires OnIngesterAlive once and an
+// unlucky Raft-startup race drops the apply — leaving the goroutine
+// running but the FSM alive map empty (gastrolog-1ox8z).
 //
 // Design notes:
-//   - Fire-and-forget from runIngester's perspective: OnIngesterAlive
-//     enqueues and returns. The ingester doesn't block on Raft latency.
+//   - Fire-and-forget from the ingester goroutine's perspective:
+//     OnIngesterAlive enqueues and returns. The ingester doesn't block on
+//     Raft latency.
 //   - Single-goroutine worker preserves event order: alive=true followed
 //     by alive=false applies in that sequence even with retries, so the
 //     FSM converges to the last value the orchestrator declared.

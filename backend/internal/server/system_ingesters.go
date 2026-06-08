@@ -414,12 +414,10 @@ func (s *SystemServer) DeleteIngester(
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("ingester not found"))
 	}
 
-	// Remove from local runtime. ErrIngesterNotFound is expected when the
-	// ingester belongs to another node — the owning node's FSM dispatcher
-	// handles its own cleanup.
-	if err := s.orch.RemoveIngester(id); err != nil && !errors.Is(err, orchestrator.ErrIngesterNotFound) {
-		return nil, errInternal(err)
-	}
+	// Remove from local runtime. No-op when the ingester belongs to another
+	// node — the owning node's FSM dispatcher handles its own cleanup once the
+	// config-store delete replicates.
+	s.orch.UnregisterIngester(id)
 
 	// Remove from config store.
 	if err := s.sysStore.DeleteIngester(ctx, id); err != nil {

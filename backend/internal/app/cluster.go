@@ -270,10 +270,9 @@ func cleanOrchestrator(orch *orchestrator.Orchestrator, logger *slog.Logger) {
 			logger.Warn("join cleanup: remove vault failed", "vault_id", vaultID, "error", err)
 		}
 	}
-	for _, ingesterID := range orch.ListIngesters() {
-		if err := orch.RemoveIngester(ingesterID); err != nil {
-			logger.Warn("join cleanup: remove ingester failed", "ingester_id", ingesterID, "error", err)
-		}
+	// Drop every ingester by reconciling to an empty desired set.
+	if err := orch.ReconcileIngesters(nil); err != nil {
+		logger.Warn("join cleanup: reconcile ingesters to empty failed", "error", err)
 	}
 }
 

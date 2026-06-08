@@ -33,6 +33,7 @@ import (
 	digestlevel "gastrolog/internal/digester/level"
 	digesttimestamp "gastrolog/internal/digester/timestamp"
 	"gastrolog/internal/home"
+	"gastrolog/internal/pipeline/digestion"
 	"gastrolog/internal/index"
 	indexfile "gastrolog/internal/index/file"
 	indexmem "gastrolog/internal/index/memory"
@@ -269,10 +270,10 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	shutdownPhase := lifecycle.New()
 
 	// Async reconciler for SetIngesterAlive Raft applies. Decouples the
-	// orchestrator's runIngester goroutine from Raft latency and retries
-	// transient failures (gastrolog-1ox8z). Without this, an unlucky
-	// startup race drops the apply, the error is silently swallowed, and
-	// the FSM alive map stays empty for the lifetime of the goroutine.
+	// per-ingester run goroutine (which toggles alive state) from Raft
+	// latency and retries transient failures (gastrolog-1ox8z). Without
+	// this, an unlucky startup race drops the apply, the error is silently
+	// swallowed, and the FSM alive map stays empty for the goroutine's life.
 	aliveReconciler := NewAliveReconciler(cfgStore, nodeID, logger)
 	go aliveReconciler.Run(ctx)
 
@@ -291,12 +292,13 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 			defer cancel()
 			_ = cfgStore.SetIngesterCheckpoint(ctx, ingesterID, data)
 		},
+		// V3 digestion enrichers: extract log level and parse source
+		// timestamps from raw bodies when the ingester didn't supply them.
+		Digesters: []digestion.Digester{digestlevel.New(), digesttimestamp.New()},
 	})
 	if err != nil {
 		return fmt.Errorf("create orchestrator: %w", err)
 	}
-	orch.RegisterDigester(digestlevel.New())
-	orch.RegisterDigester(digesttimestamp.New())
 
 	vaultsDir := cfg.VaultsFlag
 	if vaultsDir == "" {

@@ -133,6 +133,13 @@ func (o *Orchestrator) reloadRoutesFromConfig(sys *system.System) error {
 		o.logger.Info("routes recompiled", "count", newRouteCount)
 	}
 
+	// Republish the V3 routing table and reconcile Origin vault registrations
+	// to match the new route destinations (every destination vault is an Origin
+	// on this node so matched records always land in a local durable segment).
+	if err := o.reloadV3FromConfig(sys); err != nil {
+		return err
+	}
+
 	return nil
 }
 

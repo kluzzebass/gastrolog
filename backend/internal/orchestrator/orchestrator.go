@@ -22,6 +22,7 @@ import (
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator/v3pipeline"
 	"gastrolog/internal/pipeline/digestion"
+	"gastrolog/internal/pipeline/ingestion"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/system"
 	"gastrolog/internal/vaultraft"
@@ -92,8 +93,8 @@ type drainState struct {
 // paths such as placement redirect replays, not the ingestion hot path.
 //
 // ForwardSync blocks until each record is accepted by the per-node buffer
-// or ctx / forwarder shutdown fires. Ingestion uses this (outside o.mu) so
-// a full forward buffer applies backpressure through digestedCh instead of
+// or ctx / forwarder shutdown fires. The direct ingest path uses this (outside
+// o.mu) so a full forward buffer applies backpressure to the caller instead of
 // dropping records. Ack-gated ingestion also uses ForwardSync from
 // ackAfterReplication.
 //
@@ -203,12 +204,10 @@ type Orchestrator struct {
 
 	// Ingester management.
 	ingesters       map[glid.GLID]Ingester
-	ingesterCancels map[glid.GLID]context.CancelFunc // per-ingester cancel functions
-	ingesterStats   map[glid.GLID]*IngesterStats     // per-ingester metrics
-	ingesterMeta    map[glid.GLID]ingesterInfo       // per-ingester name/type for logging
-
-	// Digesters (message enrichment pipeline).
-	digesters []Digester
+	ingesterCancels map[glid.GLID]context.CancelFunc      // per-ingester cancel functions
+	ingesterStats   map[glid.GLID]*IngesterStats          // per-ingester metrics
+	ingesterMeta    map[glid.GLID]ingesterInfo            // per-ingester name/type for logging
+	ingesterAdapters map[glid.GLID]ingestion.Ingester     // stable V3 adapters (no-flap reconcile identity)
 
 	// v3 is the V3 ingest pipeline supervisor: it owns the durable write path
 	// (ingest→digest→route→segment→distribute). The orchestrator drives its
@@ -257,13 +256,9 @@ type Orchestrator struct {
 	// during ApplyConfig; used by ApplyVaultControlPlane forwarding.
 	peerConns *cluster.PeerConns
 
-	// Ingest channel and lifecycle.
-	ingestCh     chan IngestMessage
-	digestedCh   chan digestedRecord
-	ingestSize   int
-	pressureGate *chanwatch.PressureGate // shared signal for ingester throttling
-	cancel       context.CancelFunc
-	done         chan struct{}
+	// Pipeline lifecycle. The durable write path lives in the V3 supervisor
+	// (o.v3); cancel stops the orchestrator's aux goroutines.
+	cancel context.CancelFunc
 	// running is an atomic so IsRunning() — read by the /readyz HTTP
 	// handler on every probe — never blocks on o.mu. Holding it as a
 	// plain bool guarded by o.mu reintroduced the original gastrolog-5n6xz
@@ -271,12 +266,8 @@ type Orchestrator struct {
 	// which starved behind any long-held o.mu.Lock writer regardless of
 	// the cached replication-ready flag. Start/Stop use CompareAndSwap
 	// to preserve the prior check-then-set mutual exclusion.
-	running    atomic.Bool
-	ingesterWg sync.WaitGroup // tracks ingester goroutines
-	digestWg   sync.WaitGroup // tracks digest goroutine
-	writeWg    sync.WaitGroup // tracks write goroutine
-	ackWg      sync.WaitGroup // tracks in-flight ack-gated replication goroutines
-	auxWg      sync.WaitGroup // tracks auxiliary goroutines (watchdog, etc.)
+	running atomic.Bool
+	auxWg   sync.WaitGroup // tracks auxiliary goroutines (rate alerts, progress emitters, etc.)
 
 	// Per-instance import mutex for serializing SetNextChunkID + ImportRecords.
 	importMu sync.Map // vaultID → *sync.Mutex
@@ -311,14 +302,11 @@ type Orchestrator struct {
 
 	// Local node identity for multi-node filtering.
 	localNodeID string
-	// localNodeIDGLID is the parsed GLID form of localNodeID, pre-computed
-	// at construction for the hot EventID-stamping path in digestAndForward.
+	// localNodeIDGLID is the parsed GLID form of localNodeID, pre-computed at
+	// construction. Supplied to the V3 supervisor as the node ID used by the
+	// ingestion minter to stamp EventID.NodeID.
 	// Empty (zero GLID) for memory-config / no-node-id orchestrators.
 	localNodeIDGLID glid.GLID
-
-	// Per-ingester rolling sequence counter for EventID assignment.
-	// Only accessed from digestLoop (single goroutine), no lock needed.
-	ingestSeqs map[string]uint32
 
 	// Alert collector for runtime system alerts.
 	alerts AlertCollector
@@ -581,8 +569,8 @@ type SystemLoader interface {
 
 // Config configures an Orchestrator.
 type Config struct {
-	// IngestChannelSize is the buffer size for the ingest channel.
-	// Defaults to 1000 if not set.
+	// IngestChannelSize is the buffer size for the V3 ingestion→digestion queue
+	// (minted messages awaiting digestion). Defaults to 1000 if not set.
 	IngestChannelSize int
 
 	// MaxConcurrentJobs limits how many scheduler jobs (index builds,
@@ -620,8 +608,7 @@ type Config struct {
 	OnIngesterCheckpoint func(ingesterID glid.GLID, data []byte)
 
 	// Digesters run in order on each V3 ingestion message before the record is
-	// built. The app supplies the level/timestamp enrichers here; they used to
-	// be registered via RegisterDigester on the now-removed V0 digest loop.
+	// built. The app supplies the level/timestamp enrichers here.
 	Digesters []digestion.Digester
 
 	// SegmentsDir is the base directory under which each origin vault's V3
@@ -675,16 +662,15 @@ func New(cfg Config) (*Orchestrator, error) {
 		ingesterCancels:      make(map[glid.GLID]context.CancelFunc),
 		ingesterStats:        make(map[glid.GLID]*IngesterStats),
 		ingesterMeta:         make(map[glid.GLID]ingesterInfo),
+		ingesterAdapters:     make(map[glid.GLID]ingestion.Ingester),
 		draining:             make(map[glid.GLID]*drainState),
 		vaultDraining:        make(map[string]*vaultDrainState),
 		retention:            make(map[string]*retentionRunner),
 		scheduler:            sched,
 		cronRotation:         newCronRotationManager(sched, logger),
-		ingestSize:           cfg.IngestChannelSize,
 		sysLoader:            cfg.SystemLoader,
 		localNodeID:          cfg.LocalNodeID,
 		localNodeIDGLID:      parseNodeGLID(cfg.LocalNodeID),
-		ingestSeqs:           make(map[string]uint32),
 		alerts:               cfg.Alerts,
 		suspects:             newSuspectTracker(),
 		chunkSignal:          notify.NewSignal(),
@@ -716,11 +702,12 @@ func New(cfg Config) (*Orchestrator, error) {
 	// queue-depth probes in Start.
 	o.v3Gate = chanwatch.NewPressureGate(chanwatch.DefaultThresholds())
 	o.v3 = v3pipeline.New(v3pipeline.Config{
-		NodeID:       o.localNodeIDGLID,
-		Logger:       baseLogger,
-		Digesters:    cfg.Digesters,
-		OnCheckpoint: cfg.OnIngesterCheckpoint,
-		PressureGate: o.v3Gate,
+		NodeID:               o.localNodeIDGLID,
+		Logger:               baseLogger,
+		Digesters:            cfg.Digesters,
+		OnCheckpoint:         cfg.OnIngesterCheckpoint,
+		PressureGate:         o.v3Gate,
+		IngestionOutCapacity: cfg.IngestChannelSize,
 	})
 
 	// Seed the cached readiness flag so /readyz reports true while the
@@ -904,32 +891,31 @@ func (o *Orchestrator) PerRouteStatsList() map[glid.GLID]*PerRouteStats {
 	return result
 }
 
-// IngestQueueDepth returns the current number of messages in the ingest channel.
+// IngestQueueDepth returns the current depth of the V3 ingestion→digestion
+// queue (minted-but-not-yet-digested messages).
 func (o *Orchestrator) IngestQueueDepth() int {
-	return len(o.ingestCh)
+	return o.v3.IngestQueueDepth()
 }
 
-// IngestQueueCapacity returns the capacity of the ingest channel.
+// IngestQueueCapacity returns the capacity of the V3 ingestion→digestion queue.
 func (o *Orchestrator) IngestQueueCapacity() int {
-	return cap(o.ingestCh)
+	return o.v3.IngestQueueCapacity()
 }
 
 // IngestQueueNearFull returns true if the ingest queue is at or above 90% capacity.
 func (o *Orchestrator) IngestQueueNearFull() bool {
-	c := cap(o.ingestCh)
+	c := o.v3.IngestQueueCapacity()
 	if c == 0 {
 		return false
 	}
-	return len(o.ingestCh) >= c*9/10
+	return o.v3.IngestQueueDepth() >= c*9/10
 }
 
-// PressureGate exposes the ingest pipeline pressure signal for ingesters to
-// consult before emitting records. Returns nil if the orchestrator has not
-// been Started yet; ingesters should treat nil as "no throttling".
+// PressureGate exposes the V3 ingest-pipeline pressure signal for ingesters to
+// consult before emitting records. It is non-nil for the orchestrator's whole
+// lifetime; it only begins ticking (and elevating) once Start runs.
 func (o *Orchestrator) PressureGate() *chanwatch.PressureGate {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	return o.pressureGate
+	return o.v3Gate
 }
 
 // VaultSnapshot is a point-in-time summary of a vault's state.

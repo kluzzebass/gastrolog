@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"gastrolog/internal/glid"
@@ -28,14 +29,24 @@ func v3OriginSpec(vaultID glid.GLID, root string) v3pipeline.VaultSpec {
 // originRoot returns the V3 segmentation root for a vault: the directory that
 // holds the vault's working/ and completed/ segment areas on this node.
 //
+// When no segments base is configured (no node home / SegmentsDir, e.g. in
+// embedded tests) it lazily allocates one isolated temp base — shared across
+// the orchestrator's vaults — so origin registration never writes segments
+// into the process working directory. Production always sets SegmentsDir.
+// Callers hold o.mu (originRoot is only reached via reloadV3FromConfig), so the
+// one-time assignment to o.segmentsDir is safe.
+//
 // TODO(gastrolog-jiwlf): segment storage location is currently a single base
 // dir under the node home. Make it configurable per node/storage class.
 func (o *Orchestrator) originRoot(vaultID glid.GLID) string {
-	base := o.segmentsDir
-	if base == "" {
-		base = "segments"
+	if o.segmentsDir == "" {
+		tmp, err := os.MkdirTemp("", "gastrolog-segments-")
+		if err != nil {
+			tmp = filepath.Join(os.TempDir(), "gastrolog-segments")
+		}
+		o.segmentsDir = tmp
 	}
-	return filepath.Join(base, vaultID.String())
+	return filepath.Join(o.segmentsDir, vaultID.String())
 }
 
 // noopPublisher is the distribution publisher used while Rubicon B keeps

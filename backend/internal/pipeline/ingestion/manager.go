@@ -145,7 +145,7 @@ func (m *Manager) Stop() error {
 
 // Reconcile starts ingesters present in the snapshot and stops those absent.
 // An ingester whose spec changes (different Ingester value or metadata) is
-// replaced idempotently, matching orchestrator AddIngester semantics.
+// replaced idempotently; an unchanged spec keeps its running instance untouched.
 func (m *Manager) Reconcile(snapshot []IngesterSpec) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -324,6 +324,12 @@ func (m *Manager) runWithCheckpoints(
 			m.saveCheckpointFrom(id, cp)
 		case <-ctx.Done():
 			m.saveCheckpointFrom(id, cp)
+			// run() is the sole sender on out; it lives in a separate
+			// goroutine here (unlike the non-checkpoint path, which blocks in
+			// run() directly). Wait for it to return before we do, so no sender
+			// outlives runWithCheckpoints — otherwise ingesterWg.Wait() in Stop
+			// unblocks while run() still sends on out, racing close(out).
+			<-errCh
 			return ctx.Err()
 		}
 	}

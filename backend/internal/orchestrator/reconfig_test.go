@@ -447,52 +447,7 @@ func TestForceRemoveEmptyVault(t *testing.T) {
 	}
 }
 
-func TestAddIngesterWhileRunning(t *testing.T) {
-	s := memtest.MustNewVault(t, chunkmem.Config{
-		RotationPolicy: chunk.NewRecordCountPolicy(10000),
-	})
-
-	defaultID := glid.New()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
-
-	// gastrolog-4kkoo (Phase 5): catch-all route into the vault.
-	cr, _ := orchestrator.CompileRoute(glid.New(), "all", 0, "*",
-		[]orchestrator.RouteDestination{{VaultID: defaultID}}, "fanout")
-	orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{cr}))
-
-	// Start orchestrator.
-	if err := orch.Start(context.Background()); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	defer orch.Stop()
-
-	// Add ingester while running.
-	recv := newMockIngester([]orchestrator.IngestMessage{
-		{Attrs: map[string]string{"source": "dynamic"}, Raw: []byte("dynamic message")},
-	})
-
-	ingesterID := glid.New()
-	if err := orch.AddIngester(ingesterID, "test", "mock", false, recv); err != nil {
-		t.Fatalf("AddIngester: %v", err)
-	}
-
-	// Wait for message to be processed.
-	<-recv.started
-	time.Sleep(50 * time.Millisecond)
-
-	// Verify message was received.
-	msgs := getRecordMessages(t, s.CM)
-	found := slices.Contains(msgs, "dynamic message")
-	if !found {
-		t.Error("dynamic message not found")
-	}
-}
-
-func TestAddIngesterReplacesDuplicate(t *testing.T) {
+func TestRegisterIngesterReplacesDuplicate(t *testing.T) {
 	t.Parallel()
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
@@ -503,21 +458,16 @@ func TestAddIngesterReplacesDuplicate(t *testing.T) {
 	recv1 := newBlockingIngester()
 	recv2 := newBlockingIngester()
 
-	if err := orch.AddIngester(ingesterID, "test-1", "mock", false, recv1); err != nil {
-		t.Fatalf("AddIngester: %v", err)
-	}
-
-	// Adding with the same ID should replace, not error.
-	if err := orch.AddIngester(ingesterID, "test-2", "mock", false, recv2); err != nil {
-		t.Fatalf("AddIngester (replace): %v", err)
-	}
+	orch.RegisterIngester(ingesterID, "test-1", "mock", recv1)
+	// Registering with the same ID replaces in place, it does not duplicate.
+	orch.RegisterIngester(ingesterID, "test-2", "mock", recv2)
 
 	if ids := orch.ListIngesters(); len(ids) != 1 {
 		t.Fatalf("expected 1 ingester, got %d", len(ids))
 	}
 }
 
-func TestRemoveIngesterNotRunning(t *testing.T) {
+func TestUnregisterIngesterNotRunning(t *testing.T) {
 	t.Parallel()
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
@@ -526,25 +476,17 @@ func TestRemoveIngesterNotRunning(t *testing.T) {
 
 	ingesterID := glid.New()
 	recv := newBlockingIngester()
-	if err := orch.AddIngester(ingesterID, "test", "mock", false, recv); err != nil {
-		t.Fatalf("AddIngester: %v", err)
-	}
+	orch.RegisterIngester(ingesterID, "test", "mock", recv)
 
-	// Remove while not running should succeed.
-	if err := orch.RemoveIngester(ingesterID); err != nil {
-		t.Fatalf("RemoveIngester: %v", err)
-	}
+	// Unregister while not running just removes it from the desired set.
+	orch.UnregisterIngester(ingesterID)
 
-	// Verify removed.
-	ingesters := orch.ListIngesters()
-	for _, id := range ingesters {
-		if id == ingesterID {
-			t.Error("ingester should have been removed")
-		}
+	if slices.Contains(orch.ListIngesters(), ingesterID) {
+		t.Error("ingester should have been removed")
 	}
 }
 
-func TestRemoveIngesterWhileRunning(t *testing.T) {
+func TestUnregisterIngesterWhileRunning(t *testing.T) {
 	cm, _ := chunkmem.NewManager(chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(10000),
 	})
@@ -558,9 +500,7 @@ func TestRemoveIngesterWhileRunning(t *testing.T) {
 
 	ingesterID := glid.New()
 	recv := newBlockingIngester()
-	if err := orch.AddIngester(ingesterID, "test", "mock", false, recv); err != nil {
-		t.Fatalf("AddIngester: %v", err)
-	}
+	orch.RegisterIngester(ingesterID, "test", "mock", recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -570,38 +510,33 @@ func TestRemoveIngesterWhileRunning(t *testing.T) {
 	// Wait for ingester to start.
 	<-recv.started
 
-	// Remove while running should succeed and stop the ingester.
-	if err := orch.RemoveIngester(ingesterID); err != nil {
-		t.Fatalf("RemoveIngester: %v", err)
-	}
+	// Unregister while running stops the ingester via the V3 reconcile.
+	orch.UnregisterIngester(ingesterID)
 
 	// Verify ingester was stopped.
 	select {
 	case <-recv.stopped:
 		// Good - ingester stopped.
 	case <-time.After(time.Second):
-		t.Fatal("ingester did not stop after RemoveIngester")
+		t.Fatal("ingester did not stop after UnregisterIngester")
 	}
 
-	// Verify removed from list.
-	ingesters := orch.ListIngesters()
-	for _, id := range ingesters {
-		if id == ingesterID {
-			t.Error("ingester should have been removed from list")
-		}
+	if slices.Contains(orch.ListIngesters(), ingesterID) {
+		t.Error("ingester should have been removed from list")
 	}
 }
 
-func TestRemoveIngesterNotFound(t *testing.T) {
+func TestUnregisterIngesterUnknownIsNoOp(t *testing.T) {
 	t.Parallel()
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = orch.RemoveIngester(glid.New())
-	if err == nil {
-		t.Fatal("expected error for nonexistent ingester")
+	// Unregistering an unknown ID is a no-op (no panic, list stays empty).
+	orch.UnregisterIngester(glid.New())
+	if ids := orch.ListIngesters(); len(ids) != 0 {
+		t.Fatalf("expected 0 ingesters, got %d", len(ids))
 	}
 }
 

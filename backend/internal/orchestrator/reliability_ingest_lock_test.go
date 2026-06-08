@@ -69,7 +69,7 @@ func (m *blockingReplicator) RequestReplicaCatchup(_ context.Context, _ string, 
 //
 // The test sets up a vault with a cross-node follower target, wires a
 // blocking ChunkReplicator that never acks, ingests a record via the
-// single-threaded writeLoop path, and then races a concurrent
+// direct ingest path, and then races a concurrent
 // UnregisterVault (write lock). With the fix, UnregisterVault succeeds
 // promptly. Without it, UnregisterVault blocks until the ingest call
 // eventually times out — orders of magnitude longer.

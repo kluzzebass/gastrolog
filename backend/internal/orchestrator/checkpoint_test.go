@@ -64,8 +64,9 @@ func (m *mockCheckpointIngester) LoadCheckpoint(data []byte) error {
 	return json.Unmarshal(data, &m.state)
 }
 
-// TestCheckpointSaveAndLoad verifies that runWithCheckpoints calls
-// SaveCheckpoint periodically and on exit, and that the callback fires.
+// TestCheckpointSaveAndLoad verifies that the V3 ingestion manager (driven via
+// the orchestrator) calls SaveCheckpoint on exit and that the orchestrator's
+// OnIngesterCheckpoint callback fires with the saved data.
 func TestCheckpointSaveAndLoad(t *testing.T) {
 	t.Parallel()
 
@@ -85,17 +86,15 @@ func TestCheckpointSaveAndLoad(t *testing.T) {
 
 	ing := newMockCheckpointIngester()
 	ingID := glid.New()
-	if err := orch.AddIngester(ingID, "ckpt-test", "mock", false, ing); err != nil {
-		t.Fatalf("AddIngester: %v", err)
-	}
+	orch.RegisterIngester(ingID, "ckpt-test", "mock", ing)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
-	// Give the ingester time to emit records and the checkpoint ticker to fire.
-	// The ticker interval in runWithCheckpoints is 5s, but the exit path also
-	// saves a checkpoint. We'll stop the orchestrator which triggers the exit save.
+	// Give the ingester time to emit records. The ingestion manager's
+	// checkpoint ticker interval is long, but the exit path also saves a
+	// checkpoint — stopping the orchestrator triggers that exit save.
 	time.Sleep(100 * time.Millisecond)
 
 	if err := orch.Stop(); err != nil {
@@ -128,8 +127,8 @@ func TestCheckpointSaveAndLoad(t *testing.T) {
 }
 
 // TestCheckpointNotCalledWithoutCallback verifies that when
-// OnIngesterCheckpoint is nil, runWithCheckpoints just runs the ingester
-// without calling SaveCheckpoint.
+// OnIngesterCheckpoint is nil, the ingester just runs without SaveCheckpoint
+// being called.
 func TestCheckpointNotCalledWithoutCallback(t *testing.T) {
 	t.Parallel()
 
@@ -140,9 +139,7 @@ func TestCheckpointNotCalledWithoutCallback(t *testing.T) {
 
 	ing := newMockCheckpointIngester()
 	ingID := glid.New()
-	if err := orch.AddIngester(ingID, "no-ckpt", "mock", false, ing); err != nil {
-		t.Fatalf("AddIngester: %v", err)
-	}
+	orch.RegisterIngester(ingID, "no-ckpt", "mock", ing)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)

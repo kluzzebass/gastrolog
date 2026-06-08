@@ -6,6 +6,7 @@ import (
 	"gastrolog/internal/glid"
 	"log/slog"
 	"maps"
+	"path/filepath"
 	"slices"
 
 	"gastrolog/internal/alert"
@@ -114,6 +115,13 @@ func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) erro
 
 	o.groupMgr = factories.GroupManager
 	o.peerConns = factories.PeerConns
+
+	// Root the V3 per-vault segment areas under the node home unless already
+	// configured. Origin vaults are registered during applyVaults→route reload,
+	// so this must be set first. See originRoot.
+	if o.segmentsDir == "" && factories.HomeDir != "" {
+		o.segmentsDir = filepath.Join(factories.HomeDir, "segments")
+	}
 
 	if err := o.applyVaults(sys, factories); err != nil {
 		return err
