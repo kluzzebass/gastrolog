@@ -160,7 +160,21 @@ func (m *Manager) PlanOnce(ctx context.Context, vaultID glid.GLID) error {
 	if !ok {
 		return ErrUnknownVault
 	}
-	return v.planOnce(ctx)
+	return v.planOnce(ctx, false)
+}
+
+// RotateCron runs one leader planner step with the cron rotation trigger set,
+// sealing a non-empty open manifest on schedule. It is the entry point for the
+// orchestrator's shared scheduler; the planner no-ops for non-leaders, so the
+// job can run on every home and self-select the leader.
+func (m *Manager) RotateCron(ctx context.Context, vaultID glid.GLID) error {
+	m.mu.Lock()
+	v, ok := m.vaults[vaultID]
+	m.mu.Unlock()
+	if !ok {
+		return ErrUnknownVault
+	}
+	return v.planOnce(ctx, true)
 }
 
 // BuildOnce runs one build pass for a vault (for tests).
@@ -225,7 +239,7 @@ func (m *Manager) triggerPlan(vaultID glid.GLID) {
 	if !ok || ctx == nil {
 		return
 	}
-	_ = v.planOnce(ctx)
+	_ = v.planOnce(ctx, false)
 }
 
 func (v *vaultChunking) buildOnce(ctx context.Context) error {

@@ -89,6 +89,51 @@ func TestCreateAppendReadRoundTrip(t *testing.T) {
 	}
 }
 
+// TestEmptyAttributesRoundTrip guards a frame-decode regression: a record with
+// no attributes encodes a 2-byte empty attr blob followed by the raw payload
+// and CRC. The decoder must consume exactly those 2 bytes and continue, not
+// reject the frame. Records without attributes are common, so this must
+// round-trip for the segment to be readable (e.g. by the chunking build).
+func TestEmptyAttributesRoundTrip(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "seg")
+	meta := segment.Meta{ID: glid.New(), VaultID: glid.New()}
+
+	sf, err := segment.Create(path, meta)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	rec := sampleRecord(0)
+	rec.Attrs = nil // no attributes
+	if err := sf.Append(rec, time.Date(2024, 6, 1, 12, 1, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	if err := sf.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	sf2, err := segment.Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer sf2.Close()
+
+	got, err := sf2.ReadAll()
+	if err != nil {
+		t.Fatalf("ReadAll empty-attr segment: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d records, want 1", len(got))
+	}
+	if string(got[0].Raw) != string(rec.Raw) {
+		t.Fatalf("raw = %q, want %q", got[0].Raw, rec.Raw)
+	}
+	if len(got[0].Attrs) != 0 {
+		t.Fatalf("attrs = %v, want empty", got[0].Attrs)
+	}
+}
+
 func TestHeaderInspectableWithoutScanningRecords(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -8,7 +8,10 @@ import (
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
-func (v *vaultChunking) planOnce(ctx context.Context) error {
+// planOnce runs one leader planner step. cronDue=true forces a cron rotation
+// trigger for a non-empty open manifest (scheduler-driven sealing); the planner
+// no-ops for non-leaders regardless.
+func (v *vaultChunking) planOnce(ctx context.Context, cronDue bool) error {
 	if !v.cfg.IsLeader() || v.cfg.Applier == nil {
 		return nil
 	}
@@ -40,6 +43,7 @@ func (v *vaultChunking) planOnce(ctx context.Context) error {
 		Segments:   views,
 		Policy:     v.cfg.Policy,
 		RefAddedAt: refAddedAt,
+		CronDue:    cronDue,
 	})
 	v.planMu.Unlock()
 
@@ -92,7 +96,7 @@ func (v *vaultChunking) planCatchUp(ctx context.Context) error {
 		}
 		hadOpen := open != nil
 
-		if err := v.planOnce(ctx); err != nil {
+		if err := v.planOnce(ctx, false); err != nil {
 			return err
 		}
 

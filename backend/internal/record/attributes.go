@@ -74,9 +74,12 @@ func DecodeAttributes(data []byte) (Attributes, int, error) {
 	count := binary.LittleEndian.Uint16(data[0:2])
 	off := 2
 	if count == 0 {
-		if len(data) != 2 {
-			return nil, 0, ErrInvalidAttrsData
-		}
+		// Empty attribute blob is exactly the 2-byte count header. Return the
+		// consumed length (2) and ignore any trailing bytes: callers (e.g. the
+		// segment frame decoder) pass the remainder of a larger buffer and rely
+		// on the returned offset to continue. This mirrors the count>0 path,
+		// which also tolerates trailing data, and is required so records with no
+		// attributes decode correctly from a segment frame.
 		return Attributes{}, 2, nil
 	}
 	attrs := make(Attributes, count)

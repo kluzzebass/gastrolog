@@ -8,16 +8,20 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"time"
 
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/orchestrator/pipeline"
+	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/pipeline/distribution"
 	"gastrolog/internal/pipeline/routing"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/system"
 	"gastrolog/internal/vaultraft"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
+
+	hraft "github.com/hashicorp/raft"
 )
 
 // ServeSegmentPull streams a locally-held completed segment to w for a remote
@@ -35,12 +39,17 @@ func (o *Orchestrator) ServeSegmentPull(vaultID, segmentID glid.GLID, w io.Write
 
 // pipelineVaultReg records how a vault is currently registered in the pipeline
 // supervisor, so reloadPipelineFromConfig re-registers only when something
-// material changed: its Home role (placement membership) or whether the
-// vault-ctl handle is yet available (publisher upgraded from noop to the real
-// VaultCtlPublisher).
+// material changed: its Home role (placement membership), whether the vault-ctl
+// handle is yet available (publisher upgraded from noop to the real
+// VaultCtlPublisher), or its chunk rotation policy (the chunking manager
+// captures the policy at register, so a policy edit must re-register).
+//
+// Leadership is deliberately NOT part of this key: the chunking planner reads
+// IsLeader() live on every tick, so leadership changes need no re-registration.
 type pipelineVaultReg struct {
 	home      bool
 	hasHandle bool
+	policy    chunking.ManifestRotationPolicy
 }
 
 // buildPipelineVaultSpec builds the supervisor VaultSpec for a destination vault.
@@ -51,11 +60,18 @@ type pipelineVaultReg struct {
 // to the registry via the leader-forwarding applier; otherwise it falls back to
 // the noop publisher (single-node/memory mode with no group).
 //
-// When this node is also a placement member (Home) for the vault, it registers
-// the collection side (Rubicon C): roll the registry, pull segments it does not
-// yet hold, and commit holder receipts. LocalHolder is set so segments this node
-// originates rename straight to head/ without a self-pull.
-func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm *vaultctlfsm.FSM, applier vaultctlfsm.Applier, hasHandle bool) pipeline.VaultSpec {
+// When this node is also a placement member (Home) for the vault with a
+// vault-ctl handle, it registers the chunking side (Rubicon D): the leader
+// plans the open-chunk manifest via the applier, and every home builds the
+// sealed GLCB at seal. LocalHolder is set so segments this node originates
+// rename straight to head/ without a self-pull, giving chunking local segments
+// to build from.
+//
+// Peer collection (Rubicon C) is registered additionally only when a segment
+// puller is available (cluster mode): roll the registry, pull segments this
+// node does not yet hold, and commit holder receipts. Single-node homes have
+// no peers to pull from, so they chunk from their own head/ without collection.
+func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm *vaultctlfsm.FSM, applier vaultctlfsm.Applier, isLeader func() bool, hasHandle bool, policy chunking.ManifestRotationPolicy) pipeline.VaultSpec {
 	root := o.originRoot(vaultID)
 	spec := pipeline.VaultSpec{
 		VaultID:    vaultID,
@@ -72,12 +88,20 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 	if home && hasHandle {
 		// This node holds everything it originates locally (completed→head).
 		spec.LocalHolder = func() bool { return true }
+		// Chunking runs on every home with a vault-ctl handle, independent of
+		// the peer puller: the leader plans the manifest, all homes build the
+		// sealed GLCB. Locate resolves manifest refs under head/ then completed/.
+		spec.HomeRoot = root
+		spec.FSM = fsm
+		spec.Locate = chunking.VaultSegmentLocator{Root: root}
+		spec.ChunkRoot = filepath.Join(root, "chunks")
+		spec.Applier = applier
+		spec.IsLeader = isLeader
+		spec.ChunkPolicy = policy
 		// Full collection requires a puller to fetch segments originated on
 		// other nodes; without peers (single-node) there is nothing to pull.
 		if o.segmentPuller != nil {
 			spec.Home = true
-			spec.HomeRoot = root
-			spec.FSM = fsm
 			spec.Log = &segmentLogReader{fsm: fsm, localNodeID: o.localNodeID}
 			spec.Pull = &segmentPullClient{fsm: fsm, puller: o.segmentPuller, localNodeID: o.localNodeID}
 			spec.Receipts = &segmentReceiptCommitter{applier: applier, localNodeID: o.localNodeID}
@@ -91,14 +115,19 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 // ok=false when the vault-ctl group is not present on this node yet — every
 // cluster node is a voter in every vault-ctl group, so this is normally only
 // transient during startup or single-node/memory mode without a group manager.
-func (o *Orchestrator) vaultCtlHandle(vaultID glid.GLID) (*vaultctlfsm.FSM, vaultctlfsm.Applier, bool) {
+//
+// It also returns an isLeader closure reading the vault-CONTROL-PLANE Raft
+// leader live (g.Raft.State()==Leader) — distinct from the data-plane
+// VaultInstance.IsLeader(). The chunking planner is gated on this so only the
+// vault-ctl leader proposes manifest edits; followers apply replicated entries.
+func (o *Orchestrator) vaultCtlHandle(vaultID glid.GLID) (*vaultctlfsm.FSM, vaultctlfsm.Applier, func() bool, bool) {
 	if o.groupMgr == nil {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	gid := raftgroup.VaultControlPlaneGroupID(vaultID)
 	g := o.groupMgr.GetGroup(gid)
 	if g == nil {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	var fsm *vaultctlfsm.FSM
 	switch raw := g.FSM.(type) {
@@ -108,7 +137,7 @@ func (o *Orchestrator) vaultCtlHandle(vaultID glid.GLID) (*vaultctlfsm.FSM, vaul
 		fsm = raw.EnsureVaultFSM(vaultID)
 	}
 	if fsm == nil {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	var applier vaultctlfsm.Applier
 	if o.peerConns != nil {
@@ -116,7 +145,98 @@ func (o *Orchestrator) vaultCtlHandle(vaultID glid.GLID) (*vaultctlfsm.FSM, vaul
 	} else {
 		applier = &vaultCtlApplier{o: o, vaultID: vaultID}
 	}
-	return fsm, applier, true
+	raft := g.Raft
+	isLeader := func() bool { return raft != nil && raft.State() == hraft.Leader }
+	return fsm, applier, isLeader, true
+}
+
+// resolveChunkPolicy resolves a vault's manifest rotation policy and cron
+// expression from the system config. Returns the zero policy and an empty cron
+// string when the vault has no rotation policy configured (or the policy is
+// missing/invalid). The event-driven thresholds (MaxRecords/MaxBytes/MaxAge)
+// are captured by the chunking manager at register; cron is driven separately
+// via the shared scheduler.
+func (o *Orchestrator) resolveChunkPolicy(sys *system.System, vaultID glid.GLID) (chunking.ManifestRotationPolicy, string) {
+	if sys == nil {
+		return chunking.ManifestRotationPolicy{}, ""
+	}
+	vc := findVaultConfig(sys.Config.Vaults, vaultID)
+	if vc == nil || vc.RotationPolicyID == nil {
+		return chunking.ManifestRotationPolicy{}, ""
+	}
+	pc := findRotationPolicy(sys.Config.RotationPolicies, *vc.RotationPolicyID)
+	if pc == nil {
+		return chunking.ManifestRotationPolicy{}, ""
+	}
+	return manifestRotationPolicy(*pc)
+}
+
+// manifestRotationPolicy maps a system rotation policy config onto the pipeline
+// chunking manifest policy plus its cron expression. It reuses the same parsing
+// as system.RotationPolicyConfig.ToRotationPolicy (the legacy chunk path) so the
+// two agree on byte/duration interpretation. Invalid sub-fields are dropped
+// rather than failing the whole vault — admission already validated the policy.
+func manifestRotationPolicy(c system.RotationPolicyConfig) (chunking.ManifestRotationPolicy, string) {
+	var p chunking.ManifestRotationPolicy
+	if c.MaxRecords != nil && *c.MaxRecords > 0 {
+		p.MaxRecords = uint64(*c.MaxRecords)
+	}
+	if c.MaxBytes != nil && *c.MaxBytes != "" {
+		if b, err := system.ParseBytes(*c.MaxBytes); err == nil {
+			p.MaxBytes = b
+		}
+	}
+	if c.MaxAge != nil && *c.MaxAge != "" {
+		if d, err := time.ParseDuration(*c.MaxAge); err == nil && d > 0 {
+			p.MaxAge = d
+		}
+	}
+	cron := ""
+	if c.Cron != nil {
+		cron = *c.Cron
+	}
+	return p, cron
+}
+
+// pipelineChunkCronJobName is the scheduler job name for a vault's pipeline
+// chunk cron rotation. Distinct from the legacy cronJobName (which rotates a
+// chunk.ChunkManager) so the two rotation paths never collide.
+func pipelineChunkCronJobName(vaultID glid.GLID) string {
+	return "pipeline-chunk-cron:" + vaultID.String()
+}
+
+// reconcileChunkCron registers, updates, or removes the per-vault scheduler job
+// that drives cron-based manifest rotation for the pipeline. Only the vault-ctl
+// leader acts when the job fires (RotateChunkCron no-ops for followers), so the
+// job runs on every home and self-selects. Must be called with o.mu held.
+func (o *Orchestrator) reconcileChunkCron(vaultID glid.GLID, chunkEnabled bool, cronExpr string) {
+	if o.scheduler == nil {
+		return
+	}
+	name := pipelineChunkCronJobName(vaultID)
+	if !chunkEnabled || cronExpr == "" {
+		o.scheduler.RemoveJob(name)
+		return
+	}
+	if o.scheduler.JobSchedule(name) == cronExpr {
+		return
+	}
+	vid := vaultID
+	if err := o.scheduler.UpdateJob(name, cronExpr, func() {
+		o.mu.RLock()
+		pl := o.pipeline
+		o.mu.RUnlock()
+		if pl == nil {
+			return
+		}
+		if err := pl.RotateChunkCron(context.Background(), vid); err != nil {
+			o.logger.Warn("pipeline chunk cron rotate failed", "vault", vid, "error", err)
+		}
+	}); err != nil {
+		o.logger.Warn("pipeline chunk cron schedule failed", "vault", vid, "cron", cronExpr, "error", err)
+		return
+	}
+	o.scheduler.Describe(name, "Pipeline chunk cron rotation for vault "+vaultID.String())
 }
 
 // isVaultHome reports whether the local node is a placement member (leader or
@@ -232,32 +352,40 @@ func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 
 	desired := destinationVaults(sys)
 
-	// Unregister vaults that are no longer any route's destination.
+	// Unregister vaults that are no longer any route's destination, tearing
+	// down their cron rotation job as well.
 	for vid := range o.pipelineVaults {
 		if _, ok := desired[vid]; !ok {
 			o.pipeline.UnregisterVault(vid)
+			o.reconcileChunkCron(vid, false, "")
 			delete(o.pipelineVaults, vid)
 		}
 	}
 
 	// Register/re-register each destination vault. Re-register only when its
-	// Home role or vault-ctl handle availability changed, so unchanged vaults
-	// never flap their pipeline state.
+	// Home role, vault-ctl handle availability, or chunk rotation policy
+	// changed, so unchanged vaults never flap their pipeline state. The cron
+	// rotation job is reconciled every pass regardless (its schedule may change
+	// independent of the registration key, and it is idempotent).
 	for vid := range desired {
 		home := o.isVaultHome(sys, vid)
-		fsm, applier, hasHandle := o.vaultCtlHandle(vid)
-		want := pipelineVaultReg{home: home, hasHandle: hasHandle}
+		fsm, applier, isLeader, hasHandle := o.vaultCtlHandle(vid)
+		policy, cronExpr := o.resolveChunkPolicy(sys, vid)
+		chunkEnabled := home && hasHandle
+		want := pipelineVaultReg{home: home, hasHandle: hasHandle, policy: policy}
 		if prev, ok := o.pipelineVaults[vid]; ok {
 			if prev == want {
+				o.reconcileChunkCron(vid, chunkEnabled, cronExpr)
 				continue
 			}
 			o.pipeline.UnregisterVault(vid)
 			delete(o.pipelineVaults, vid)
 		}
-		if err := o.pipeline.RegisterVault(o.buildPipelineVaultSpec(vid, home, fsm, applier, hasHandle)); err != nil {
+		if err := o.pipeline.RegisterVault(o.buildPipelineVaultSpec(vid, home, fsm, applier, isLeader, hasHandle, policy)); err != nil {
 			return fmt.Errorf("register vault %s: %w", vid, err)
 		}
 		o.pipelineVaults[vid] = want
+		o.reconcileChunkCron(vid, chunkEnabled, cronExpr)
 	}
 
 	return nil

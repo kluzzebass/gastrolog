@@ -362,14 +362,18 @@ func (s *Supervisor) RegisterVault(spec VaultSpec) error {
 		return ErrVaultRegistered
 	}
 
-	roles := vaultRoles{origin: spec.Origin, home: spec.Home}
+	// The home side runs when this node collects (Home, with Log/Pull/Receipts)
+	// and/or chunks (Locate). Chunking is independent of collection: a single-node
+	// home chunks from its own head/ without a peer collector (Rubicon D).
+	homeSide := spec.Home || spec.Locate != nil
+	roles := vaultRoles{origin: spec.Origin, home: homeSide}
 
 	if spec.Origin {
 		if err := s.registerOrigin(spec); err != nil {
 			return err
 		}
 	}
-	if spec.Home {
+	if homeSide {
 		if err := s.registerHome(spec); err != nil {
 			if spec.Origin {
 				s.unregisterOrigin(spec.VaultID)
@@ -403,18 +407,26 @@ func (s *Supervisor) registerHome(spec VaultSpec) error {
 	// Collection subscribes to the vault-ctl publish fan-out (Rubicon C): a newly
 	// published segment fires SetOnPublishCompletedSegment → triggerCollect, so
 	// replication is event-driven, not timer-polled. The fan-out is additive, so
-	// chunking (slice D) can subscribe independently for its leader planner.
-	if err := s.col.RegisterVault(spec.VaultID, spec.HomeRoot, collection.VaultConfig{
-		Log:      spec.Log,
-		Pull:     spec.Pull,
-		Receipts: spec.Receipts,
-		FSM:      spec.FSM,
-	}); err != nil {
-		return fmt.Errorf("collection register: %w", err)
+	// chunking (slice D) subscribes independently for its leader planner.
+	//
+	// Collection only registers when this node has peers to pull from (spec.Home
+	// with Log/Pull/Receipts). A single-node home (no puller) skips collection
+	// and chunks straight from its own head/.
+	collectionRegistered := false
+	if spec.Home {
+		if err := s.col.RegisterVault(spec.VaultID, spec.HomeRoot, collection.VaultConfig{
+			Log:      spec.Log,
+			Pull:     spec.Pull,
+			Receipts: spec.Receipts,
+			FSM:      spec.FSM,
+		}); err != nil {
+			return fmt.Errorf("collection register: %w", err)
+		}
+		collectionRegistered = true
 	}
-	// Chunking is wired only when its dependencies are supplied. Rubicon C
-	// registers homes for collection/replication without chunking; slice D
-	// supplies Locate/Applier/ChunkRoot and activates the planner/builder.
+	// Chunking is wired whenever Locate is supplied (Rubicon D): every home with
+	// a vault-ctl handle plans (leader) and builds (all homes) chunks,
+	// independent of the peer collector.
 	if spec.Locate != nil {
 		if err := s.chunk.RegisterVault(spec.VaultID, chunking.VaultConfig{
 			VaultRoot:  spec.HomeRoot,
@@ -427,18 +439,41 @@ func (s *Supervisor) registerHome(spec VaultSpec) error {
 			Policy:     spec.ChunkPolicy,
 			NewChunkID: spec.NewChunkID,
 		}); err != nil {
-			s.col.UnregisterVault(spec.VaultID)
+			if collectionRegistered {
+				s.col.UnregisterVault(spec.VaultID)
+			}
 			return fmt.Errorf("chunking register: %w", err)
 		}
 	}
 	// A home registered after Start misses Run's one-shot startup catch-up, so
-	// kick an initial collect to pull any segments already in the registry
-	// (e.g. this node just became a home, or restarted with a lagging applied
-	// index). runCtx cancellation on Stop aborts in-flight pulls.
+	// kick initial passes for whatever was registered: collect any segments
+	// already in the registry, then plan/build any manifest work already sealed
+	// or pending (e.g. this node just became a home, or restarted with a lagging
+	// applied index). runCtx cancellation on Stop aborts in-flight work.
 	if s.running.Load() && s.runCtx != nil {
 		ctx := s.runCtx
 		vid := spec.VaultID
-		s.wg.Go(func() { _ = s.col.CollectOnce(ctx, vid) })
+		chunkCatchUp := spec.Locate != nil
+		s.wg.Go(func() {
+			if collectionRegistered {
+				_ = s.col.CollectOnce(ctx, vid)
+			}
+			if chunkCatchUp {
+				_ = s.chunk.PlanOnce(ctx, vid)
+				_ = s.chunk.BuildOnce(ctx, vid)
+			}
+		})
+	}
+	return nil
+}
+
+// RotateChunkCron runs one leader-gated cron rotation step for a vault's open
+// chunk manifest. It is the scheduler entry point for time-based (cron) sealing;
+// the planner no-ops for non-leaders, and an unregistered/unknown vault is a
+// no-op (the scheduler job may briefly outlive deregistration).
+func (s *Supervisor) RotateChunkCron(ctx context.Context, vaultID glid.GLID) error {
+	if err := s.chunk.RotateCron(ctx, vaultID); err != nil && !errors.Is(err, chunking.ErrUnknownVault) {
+		return err
 	}
 	return nil
 }
