@@ -1,6 +1,7 @@
 package distribution
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -94,7 +95,7 @@ func TestVaultCtlPublisherReplicatesOnFollowerFSM(t *testing.T) {
 	if len(leaderList) != 1 || len(followerList) != 1 {
 		t.Fatalf("leader=%d follower=%d entries", len(leaderList), len(followerList))
 	}
-	if leaderList[0] != followerList[0] {
+	if !reflect.DeepEqual(leaderList[0], followerList[0]) {
 		t.Fatalf("leader %+v != follower %+v", leaderList[0], followerList[0])
 	}
 }

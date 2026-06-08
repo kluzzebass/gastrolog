@@ -39,7 +39,7 @@ func buildRichFSM(t *testing.T) *FSM {
 	// pending deletes: an in-flight delete with several expected-from nodes.
 	applyCmd(t, f, MarshalRequestDelete(testChunkID(14), now, "retention-ttl", []string{"n3", "n1", "n2"}))
 
-	// completed segments: V3 pipeline registry.
+	// completed segments: pipeline registry.
 	applyCmd(t, f, MarshalPublishCompletedSegment(CompletedSegmentEntry{
 		SegmentID:     glidFromByte(0x55),
 		RecordCount:   9,

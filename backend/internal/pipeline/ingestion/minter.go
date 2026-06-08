@@ -1,5 +1,6 @@
-// Package ingestion holds V3 ingestion-phase building blocks. These types are
-// developed and tested in isolation before any orchestrator wiring.
+// Package ingestion holds the ingestion-phase building blocks of the pipeline.
+// These types are developed and tested in isolation before any orchestrator
+// wiring.
 package ingestion
 
 import (

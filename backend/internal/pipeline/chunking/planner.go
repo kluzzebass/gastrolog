@@ -30,7 +30,7 @@ type SegmentView struct {
 	Index         *OrderedIndex
 }
 
-// ManifestRotationPolicy limits open-chunk growth before seal (V3 manifest model).
+// ManifestRotationPolicy limits open-chunk growth before seal (manifest model).
 type ManifestRotationPolicy struct {
 	MaxRecords uint64
 	MaxBytes   uint64

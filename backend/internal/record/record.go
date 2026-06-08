@@ -4,14 +4,14 @@ import (
 	"time"
 )
 
-// Record is the immutable log entry carried through the V3 pipeline
+// Record is the immutable log entry carried through the pipeline
 // (ingest → digest → route → segment write). It is identified by EventID;
 // order and dedup keys use EventID, not processing order.
 //
 // Timestamps:
 //   - SourceTS: when the log was generated at the source (zero if unknown)
 //   - IngestTS: when the ingester received the message (also on EventID)
-//   - WriteTS: set when the record is durably appended (segment write in V3)
+//   - WriteTS: set when the record is durably appended (segment write)
 //
 // RecordRef and VaultID are not part of this type — they exist only on
 // query results (chunk.Record) after a record has been stored and read back.

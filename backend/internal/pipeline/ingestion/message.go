@@ -9,7 +9,7 @@ import (
 )
 
 // Message is emitted by IngestionManager after EventID minting. It is the
-// digestion queue element for V3.
+// digestion queue element.
 type Message struct {
 	EventID  record.EventID
 	Attrs    map[string]string

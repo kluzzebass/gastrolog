@@ -91,6 +91,11 @@ type ManagedFileReader func(fileID string) (name string, rc io.ReadCloser, sha25
 // ManagedFileIDsLister returns the IDs of managed files present on this node's disk.
 type ManagedFileIDsLister func() []string
 
+// SegmentPullServer streams a completed segment held locally (by the origin or
+// another holder) to w. Returns an error if the segment is unknown or not held
+// here. Wired to the orchestrator's ServePull seam (Rubicon C).
+type SegmentPullServer func(vaultID, segmentID glid.GLID, w io.Writer) error
+
 // ── ID parse helpers ────────────────────────────────────────────────
 
 func parseVaultID(raw []byte) (glid.GLID, error) {
@@ -216,6 +221,12 @@ func (s *Server) SetManagedFileReader(fn ManagedFileReader) {
 // SetManagedFileIDs injects the callback for listing local managed file IDs.
 func (s *Server) SetManagedFileIDs(fn ManagedFileIDsLister) {
 	s.managedFileIDs = fn
+}
+
+// SetSegmentPullServer injects the callback for streaming locally-held
+// completed segments to peer collectors (Rubicon C).
+func (s *Server) SetSegmentPullServer(fn SegmentPullServer) {
+	s.segmentPullServer = fn
 }
 
 // forwardRecords handles the unary ForwardRecords RPC. Used by retention
@@ -920,6 +931,50 @@ func pullManagedFileStreamHandler(srv any, stream grpc.ServerStream) error {
 	return nil
 }
 
+// segmentChunkWriter adapts the PullSegment server stream to an io.Writer so
+// the orchestrator's ServePull seam can stream segment bytes through it. Each
+// Write becomes one PullSegmentChunk frame; io.Copy's 32KB buffer keeps frames
+// comfortably under the gRPC message limit.
+type segmentChunkWriter struct {
+	stream grpc.ServerStream
+}
+
+func (w *segmentChunkWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if err := w.stream.SendMsg(&gastrologv1.PullSegmentChunk{Data: p}); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+// pullSegmentStreamHandler handles the server-streaming PullSegment RPC. Reads
+// the requested completed segment from the local distribution store and
+// streams it back in chunks (Rubicon C).
+func pullSegmentStreamHandler(srv any, stream grpc.ServerStream) error {
+	s := srv.(*Server)
+	if s.segmentPullServer == nil {
+		return status.Error(codes.Unavailable, "segment pull server not configured")
+	}
+
+	req := &gastrologv1.PullSegmentRequest{}
+	if err := stream.RecvMsg(req); err != nil {
+		return status.Errorf(codes.InvalidArgument, "receive request: %v", err)
+	}
+	vaultID, err := parseVaultID(req.GetVaultId())
+	if err != nil {
+		return status.Errorf(codes.InvalidArgument, "vault id: %v", err)
+	}
+	segmentID := glid.FromBytes(req.GetSegmentId())
+
+	w := &segmentChunkWriter{stream: stream}
+	if err := s.segmentPullServer(vaultID, segmentID, w); err != nil {
+		return status.Errorf(codes.NotFound, "serve segment %s/%s: %v", vaultID, segmentID, err)
+	}
+	return nil
+}
+
 // clusterServiceDesc is a manually-defined gRPC ServiceDesc for
 // gastrolog.v1.ClusterService. We register this manually rather than using
 // protoc-gen-go-grpc to avoid generating unused gRPC stubs for all services
@@ -1039,6 +1094,11 @@ var clusterServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "PullManagedFile",
 			Handler:       pullManagedFileStreamHandler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "PullSegment",
+			Handler:       pullSegmentStreamHandler,
 			ServerStreams: true,
 		},
 		{

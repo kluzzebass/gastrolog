@@ -782,9 +782,9 @@ Error values that cross bounded contexts:
 When you see "replication" in a log line or a comment, check whether the
 subject is bytes or metadata — the operational consequences are different.
 
-### V3 pipeline (provisional)
+### Pipeline
 
-Terms for the fan-out V3 write path; see [`fan-out/v3/design-notes.md`](./fan-out/v3/design-notes.md).
+Terms for the fan-out write path; see [the fan-out design notes](./fan-out/v3/design-notes.md).
 
 - **Chunk build cursor** — per-segment progress in EventID order: how far
   prior chunks consumed that segment's index. Vault-ctl holds cursors + chunk

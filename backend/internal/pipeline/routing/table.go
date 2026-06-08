@@ -21,7 +21,7 @@ const (
 	MatchExpr
 )
 
-// Route is a compiled routing rule: expression → vault IDs. V3 routing knows
+// Route is a compiled routing rule: expression → vault IDs. Routing knows
 // vaults only — no node placement or replication factor.
 type Route struct {
 	ID       glid.GLID

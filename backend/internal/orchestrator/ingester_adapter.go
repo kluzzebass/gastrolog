@@ -10,7 +10,7 @@ import (
 )
 
 // ingesterAdapter bridges an orchestrator.Ingester (emitting IngestMessage) to
-// the V3 ingestion.Ingester interface (emitting ingestion.IngesterMessage).
+// the ingestion.Ingester interface (emitting ingestion.IngesterMessage).
 //
 // It also rehomes the liveness and per-ingester stats the V0 live loop used to
 // produce: it toggles setIngesterAlive around each run and counts messages and
@@ -34,7 +34,7 @@ var (
 	_ ingestion.PressureAware = (*ingesterAdapter)(nil)
 )
 
-// newIngesterAdapter wraps inner for the V3 ingestion manager. The returned
+// newIngesterAdapter wraps inner for the ingestion manager. The returned
 // value additionally implements ingestion.Checkpointable when inner is
 // Checkpointable, so the manager's checkpoint ticker engages only for ingesters
 // that actually persist state.
@@ -46,7 +46,7 @@ func (o *Orchestrator) newIngesterAdapter(id glid.GLID, inner Ingester, stats *I
 	return base
 }
 
-// Run translates the inner ingester's messages onto the V3 digestion queue.
+// Run translates the inner ingester's messages onto the digestion queue.
 func (a *ingesterAdapter) Run(ctx context.Context, out chan<- ingestion.IngesterMessage) error {
 	a.o.setIngesterAlive(a.id, a.stats, true)
 	defer a.o.setIngesterAlive(a.id, a.stats, false)

@@ -19,7 +19,7 @@ func (o *Orchestrator) RegisterVault(vault *Vault) {
 }
 
 // RegisterIngester adds an ingester to the registry. When the orchestrator is
-// already running the ingester is reconciled into the V3 pipeline immediately;
+// already running the ingester is reconciled into the pipeline immediately;
 // otherwise it starts when Start runs.
 func (o *Orchestrator) RegisterIngester(id glid.GLID, name, ingType string, r Ingester) {
 	o.registerIngester(id, name, ingType, false, r)
@@ -48,7 +48,7 @@ func (o *Orchestrator) SetRouteSet(rs *RouteSet) {
 }
 
 // UnregisterIngester removes an ingester from the registry. When the
-// orchestrator is running the ingester is stopped via a reconcile into the V3
+// orchestrator is running the ingester is stopped via a reconcile into the
 // pipeline; otherwise it simply leaves the desired set.
 func (o *Orchestrator) UnregisterIngester(id glid.GLID) {
 	o.mu.Lock()

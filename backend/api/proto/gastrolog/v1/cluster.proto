@@ -522,6 +522,22 @@ message PullManagedFileChunk {
   string sha256 = 3;         // expected hash (first chunk only)
 }
 
+// --- Segment distribution (Rubicon C) ---
+
+// PullSegmentRequest asks a peer (segment origin or another holder) to stream a
+// completed segment's raw bytes for collection into a home node's head/.
+message PullSegmentRequest {
+  bytes vault_id = 1;
+  bytes segment_id = 2;
+}
+
+// PullSegmentChunk carries a chunk of completed-segment bytes during streaming
+// transfer. Unlike PullManagedFileChunk it carries no filename/hash: the
+// collector verifies against the vault-ctl registry checksum after promotion.
+message PullSegmentChunk {
+  bytes data = 1; // chunk of segment content (up to 64KB)
+}
+
 // ListPeerManagedFilesRequest asks a peer which managed files it has on disk.
 message ListPeerManagedFilesRequest {}
 

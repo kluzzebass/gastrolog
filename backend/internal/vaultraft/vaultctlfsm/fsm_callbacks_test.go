@@ -142,7 +142,7 @@ func TestOnPublishCompletedSegmentCallbackFires(t *testing.T) {
 
 	var mu sync.Mutex
 	var captured *CompletedSegmentEntry
-	fsm.SetOnPublishCompletedSegment(func(e CompletedSegmentEntry) {
+	fsm.AddOnPublishCompletedSegment(func(e CompletedSegmentEntry) {
 		mu.Lock()
 		captured = &e
 		mu.Unlock()
@@ -188,7 +188,7 @@ func TestOnPublishCompletedSegmentCallbackNotOnIdempotentReplay(t *testing.T) {
 	}
 
 	var calls int
-	fsm.SetOnPublishCompletedSegment(func(CompletedSegmentEntry) {
+	fsm.AddOnPublishCompletedSegment(func(CompletedSegmentEntry) {
 		calls++
 	})
 

@@ -292,7 +292,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 			defer cancel()
 			_ = cfgStore.SetIngesterCheckpoint(ctx, ingesterID, data)
 		},
-		// V3 digestion enrichers: extract log level and parse source
+		// digestion enrichers: extract log level and parse source
 		// timestamps from raw bodies when the ingester didn't supply them.
 		Digesters: []digestion.Digester{digestlevel.New(), digesttimestamp.New()},
 	})
@@ -659,6 +659,7 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	clusterSrv.SetReindexVaultExecutor(newReindexVaultExecutor(orch))
 	clusterSrv.SetExplainExecutor(newExplainExecutor(orch, nodeID))
 	clusterSrv.SetFollowExecutor(newFollowExecutor(orch))
+	clusterSrv.SetSegmentPullServer(orch.ServeSegmentPull)
 
 	return searchForwarder, recordForwarder
 }

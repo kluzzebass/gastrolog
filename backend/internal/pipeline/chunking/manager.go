@@ -47,6 +47,9 @@ type vaultChunking struct {
 	mu        sync.Mutex
 	planMu    sync.Mutex
 	doneBuild buildKey
+	// unsubPublish removes this vault's publish-callback subscription on the
+	// shared FSM fan-out.
+	unsubPublish func()
 }
 
 type buildKey struct {
@@ -121,7 +124,7 @@ func (m *Manager) RegisterVault(vaultID glid.GLID, cfg VaultConfig) error {
 	cfg.FSM.SetOnSealedManifest(func(*vaultctlfsm.OpenChunkManifest) {
 		m.triggerBuild(vid)
 	})
-	cfg.FSM.SetOnPublishCompletedSegment(func(vaultctlfsm.CompletedSegmentEntry) {
+	v.unsubPublish = cfg.FSM.AddOnPublishCompletedSegment(func(vaultctlfsm.CompletedSegmentEntry) {
 		m.triggerPlan(vid)
 	})
 	cfg.FSM.SetOnOpenChunkManifest(func(*vaultctlfsm.OpenChunkManifest) {
@@ -141,7 +144,9 @@ func (m *Manager) UnregisterVault(vaultID glid.GLID) {
 	m.mu.Unlock()
 	if ok {
 		v.cfg.FSM.SetOnSealedManifest(nil)
-		v.cfg.FSM.SetOnPublishCompletedSegment(nil)
+		if v.unsubPublish != nil {
+			v.unsubPublish()
+		}
 		v.cfg.FSM.SetOnOpenChunkManifest(nil)
 		v.cfg.FSM.SetOnOpenChunkRefAdded(nil)
 	}

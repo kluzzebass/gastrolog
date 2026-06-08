@@ -97,15 +97,19 @@ const (
 	CmdRepatriateChunk Command = 13
 
 	// CmdPublishCompletedSegment registers completed segment metadata in the
-	// vault-ctl FSM when Segmentation closes a segment (V3 pipeline). See
-	// gastrolog-5pyl3.
+	// vault-ctl FSM when Segmentation closes a segment. See gastrolog-5pyl3.
 	CmdPublishCompletedSegment Command = 14
 
-	// V3 open-chunk manifest (direction D). See gastrolog-53ron.
+	// Open-chunk manifest (direction D). See gastrolog-53ron.
 	CmdOpenChunkManifest      Command = 15
 	CmdAddOpenChunkSegmentRef Command = 16
 	CmdSealOpenChunkManifest  Command = 17
 	CmdReleaseSegments        Command = 18
+
+	// CmdAckSegmentHolder records that a node now holds a completed segment
+	// (Rubicon C). Appends the node to the segment registry entry's holder
+	// set; idempotent. See gastrolog-2z3oa.
+	CmdAckSegmentHolder Command = 19
 )
 
 // ManifestEntry holds the full metadata for one chunk in this vault's
@@ -247,14 +251,14 @@ type FSM struct {
 	// in flight and are safe to drop).
 	tombstones map[chunk.ChunkID]time.Time
 
-	// completedSegments is the V3 pipeline registry of closed segments awaiting
+	// completedSegments is the pipeline registry of closed segments awaiting
 	// chunking. Populated by CmdPublishCompletedSegment; see segments.go.
 	completedSegments map[glid.GLID]*CompletedSegmentEntry
 	// completedSegmentOrder is FirstIngestTS-then-ID sort order; kept in sync
 	// with completedSegments so ListCompletedSegments avoids re-sorting.
 	completedSegmentOrder []glid.GLID
 
-	// openChunk is the in-progress manifest-backed active chunk (V3). See open_chunk.go.
+	// openChunk is the in-progress manifest-backed active chunk. See open_chunk.go.
 	openChunk *OpenChunkManifest
 	// sealedManifest is the sealed open-chunk manifest awaiting local GLCB build.
 	sealedManifest *OpenChunkManifest
@@ -265,9 +269,12 @@ type FSM struct {
 	// onSealedManifest fires after SealOpenChunkManifest transitions open →
 	// sealed manifest awaiting local GLCB build (outside the FSM lock).
 	onSealedManifest func(*OpenChunkManifest)
-	// onPublishCompletedSegment fires after a new completed segment is registered
-	// (outside the FSM lock). Idempotent replays do not fire.
-	onPublishCompletedSegment func(CompletedSegmentEntry)
+	// onPublishCompletedSegment fan-out: each registered callback fires after a
+	// new completed segment is registered (outside the FSM lock). Idempotent
+	// replays do not fire. Keyed by a monotonic id so Collection and Chunking
+	// can subscribe and unsubscribe independently (gastrolog-2z3oa).
+	onPublishCompletedSegment map[int]func(CompletedSegmentEntry)
+	onPublishSeq              int
 	// onOpenChunkManifest fires after a new open-chunk manifest is created.
 	onOpenChunkManifest func(*OpenChunkManifest)
 	// onOpenChunkRefAdded fires after a new segment ref is appended to the open manifest.
@@ -394,13 +401,25 @@ func (f *FSM) SetOnSealedManifest(fn func(*OpenChunkManifest)) {
 	f.onSealedManifest = fn
 }
 
-// SetOnPublishCompletedSegment registers a callback invoked (outside the FSM
+// AddOnPublishCompletedSegment registers a callback invoked (outside the FSM
 // lock) after PublishCompletedSegment registers new segment metadata. Idempotent
-// replays of an already-present entry do not fire the callback.
-func (f *FSM) SetOnPublishCompletedSegment(fn func(CompletedSegmentEntry)) {
+// replays of an already-present entry do not fire the callback. Multiple
+// subscribers (Collection, Chunking) may register independently; the returned
+// closure removes this one. See gastrolog-2z3oa.
+func (f *FSM) AddOnPublishCompletedSegment(fn func(CompletedSegmentEntry)) (remove func()) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.onPublishCompletedSegment = fn
+	if f.onPublishCompletedSegment == nil {
+		f.onPublishCompletedSegment = make(map[int]func(CompletedSegmentEntry))
+	}
+	id := f.onPublishSeq
+	f.onPublishSeq++
+	f.onPublishCompletedSegment[id] = fn
+	return func() {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		delete(f.onPublishCompletedSegment, id)
+	}
 }
 
 // SetOnOpenChunkManifest registers a callback invoked (outside the FSM lock)
@@ -566,7 +585,7 @@ type applyEffects struct {
 	onUpload                     func(ManifestEntry)
 	onSeal                       func(ManifestEntry)
 	onSealedManifest             func(*OpenChunkManifest)
-	onPublishCompletedSegment    func(CompletedSegmentEntry)
+	onPublishCompletedSegment    []func(CompletedSegmentEntry)
 	onOpenChunkManifest          func(*OpenChunkManifest)
 	onOpenChunkRefAdded          func(*OpenChunkManifest)
 	onRetentionPending           func(chunk.ChunkID)
@@ -592,8 +611,10 @@ func (e applyEffects) fire() {
 	if e.sealedManifest != nil && e.onSealedManifest != nil {
 		e.onSealedManifest(e.sealedManifest)
 	}
-	if e.publishedSegment != nil && e.onPublishCompletedSegment != nil {
-		e.onPublishCompletedSegment(*e.publishedSegment)
+	if e.publishedSegment != nil {
+		for _, fn := range e.onPublishCompletedSegment {
+			fn(*e.publishedSegment)
+		}
 	}
 	if e.openChunkOpened != nil && e.onOpenChunkManifest != nil {
 		e.onOpenChunkManifest(e.openChunkOpened)
@@ -714,6 +735,8 @@ func (f *FSM) applyLocked(cmd *gastrologv1.VaultCtlCommand) (any, applyEffects) 
 		result, fx.sealedManifest = f.applySealOpenChunkManifestLocked(c.SealOpenChunkManifest)
 	case *gastrologv1.VaultCtlCommand_ReleaseSegments:
 		result = f.applyReleaseSegments(c.ReleaseSegments)
+	case *gastrologv1.VaultCtlCommand_AckSegmentHolder:
+		result = f.applyAckSegmentHolder(c.AckSegmentHolder)
 	default:
 		result = fmt.Errorf("unknown chunk FSM command: %T", cmd.GetCommand())
 	}
@@ -722,7 +745,12 @@ func (f *FSM) applyLocked(cmd *gastrologv1.VaultCtlCommand) (any, applyEffects) 
 	fx.onUpload = f.onUpload
 	fx.onSeal = f.onSeal
 	fx.onSealedManifest = f.onSealedManifest
-	fx.onPublishCompletedSegment = f.onPublishCompletedSegment
+	if len(f.onPublishCompletedSegment) > 0 {
+		fx.onPublishCompletedSegment = make([]func(CompletedSegmentEntry), 0, len(f.onPublishCompletedSegment))
+		for _, fn := range f.onPublishCompletedSegment {
+			fx.onPublishCompletedSegment = append(fx.onPublishCompletedSegment, fn)
+		}
+	}
 	fx.onOpenChunkManifest = f.onOpenChunkManifest
 	fx.onOpenChunkRefAdded = f.onOpenChunkRefAdded
 	fx.onRetentionPending = f.onRetentionPending

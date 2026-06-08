@@ -34,6 +34,15 @@ type vaultCollect struct {
 	pull     PullClient
 	receipts ReceiptCommitter
 	fsm      *vaultctlfsm.FSM
+	// unsubPublish removes this vault's publish-callback subscription on the
+	// shared FSM fan-out; nil when no FSM was wired.
+	unsubPublish func()
+
+	// collectMu serializes collect passes for this vault. Passes are triggered
+	// from several goroutines (Run startup, FSM publish callback, Notify,
+	// CollectOnce) and must not overlap: they share the layout cache and the
+	// receipted set, and concurrent pulls of the same segment are wasteful.
+	collectMu sync.Mutex
 
 	// layout caches head/pre-head segment IDs to avoid rescanning directories
 	// on every collect pass once warmed.
@@ -42,6 +51,12 @@ type vaultCollect struct {
 		head    map[glid.GLID]struct{}
 		preHead map[glid.GLID]struct{}
 	}
+
+	// receipted tracks segment IDs this manager has already committed a holder
+	// receipt for, so repeated passes (the production LogReader keeps assigning
+	// a segment until the receipt replicates into its holder set) do not
+	// re-commit. Bounded by the vault's live segment set; released in slice D.
+	receipted map[glid.GLID]struct{}
 }
 
 func newVaultCollect(vaultID glid.GLID, root string, cfg VaultConfig) (*vaultCollect, error) {
@@ -55,12 +70,13 @@ func newVaultCollect(vaultID glid.GLID, root string, cfg VaultConfig) (*vaultCol
 		return nil, errors.New("receipt committer required")
 	}
 	return &vaultCollect{
-		vaultID:  vaultID,
-		root:     root,
-		log:      cfg.Log,
-		pull:     cfg.Pull,
-		receipts: cfg.Receipts,
-		fsm:      cfg.FSM,
+		vaultID:   vaultID,
+		root:      root,
+		log:       cfg.Log,
+		pull:      cfg.Pull,
+		receipts:  cfg.Receipts,
+		fsm:       cfg.FSM,
+		receipted: make(map[glid.GLID]struct{}),
 	}, nil
 }
 
@@ -107,10 +123,25 @@ func (v *vaultCollect) collectOne(ctx context.Context, ref AssignedSegment) erro
 		return err
 	}
 	v.noteHead(ref.SegmentID)
-	return v.receipts.CommitHolderReceipt(ctx, ref.VaultID, ref.SegmentID)
+	return v.commitReceipt(ctx, ref)
+}
+
+// commitReceipt records that this node holds the segment and remembers it so a
+// later pass does not re-commit before the receipt replicates into the holder
+// set. Idempotent at the FSM layer too (CmdAckSegmentHolder de-dups), so a
+// crash between commit and marking is harmless.
+func (v *vaultCollect) commitReceipt(ctx context.Context, ref AssignedSegment) error {
+	if err := v.receipts.CommitHolderReceipt(ctx, ref.VaultID, ref.SegmentID); err != nil {
+		return err
+	}
+	v.receipted[ref.SegmentID] = struct{}{}
+	return nil
 }
 
 func (v *vaultCollect) collectMissing(ctx context.Context) error {
+	v.collectMu.Lock()
+	defer v.collectMu.Unlock()
+
 	assigned, err := v.log.Roll(ctx, v.vaultID)
 	if err != nil {
 		return err
@@ -122,7 +153,26 @@ func (v *vaultCollect) collectMissing(ctx context.Context) error {
 	if err := v.ensureLayout(); err != nil {
 		return err
 	}
-	for _, ref := range missingSegments(assigned, v.layout.head, v.layout.preHead) {
+	for _, ref := range assigned {
+		if _, done := v.receipted[ref.SegmentID]; done {
+			continue
+		}
+		// Already held locally but the holder receipt is not yet recorded:
+		// the origin self-assigns segments it produced (distribution promoted
+		// them straight to head/ via LocalHolder), so a home that is also the
+		// origin must still grow the holder set. Record the receipt without
+		// pulling.
+		if _, ok := v.layout.head[ref.SegmentID]; ok {
+			if err := v.commitReceipt(ctx, ref); err != nil {
+				return err
+			}
+			continue
+		}
+		// Received but not yet promoted (a prior or concurrent pass owns it):
+		// skip until it reaches head, then the next pass records the receipt.
+		if _, ok := v.layout.preHead[ref.SegmentID]; ok {
+			continue
+		}
 		if err := v.collectOne(ctx, ref); err != nil {
 			return err
 		}
@@ -171,7 +221,7 @@ func (m *Manager) RegisterVault(vaultID glid.GLID, root string, cfg VaultConfig)
 
 	if cfg.FSM != nil {
 		vid := vaultID
-		cfg.FSM.SetOnPublishCompletedSegment(func(vaultctlfsm.CompletedSegmentEntry) {
+		v.unsubPublish = cfg.FSM.AddOnPublishCompletedSegment(func(vaultctlfsm.CompletedSegmentEntry) {
 			m.triggerCollect(vid)
 		})
 	}
@@ -184,8 +234,8 @@ func (m *Manager) UnregisterVault(vaultID glid.GLID) {
 	v, ok := m.vaults[vaultID]
 	delete(m.vaults, vaultID)
 	m.mu.Unlock()
-	if ok && v.fsm != nil {
-		v.fsm.SetOnPublishCompletedSegment(nil)
+	if ok && v.unsubPublish != nil {
+		v.unsubPublish()
 	}
 }
 

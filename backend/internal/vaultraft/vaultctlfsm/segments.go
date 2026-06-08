@@ -16,7 +16,7 @@ import (
 var ErrCompletedSegmentConflict = errors.New("completed segment metadata conflict")
 
 // CompletedSegmentEntry is replicated registry metadata for one completed
-// segment awaiting chunking (V3 pipeline).
+// segment awaiting chunking.
 type CompletedSegmentEntry struct {
 	SegmentID     glid.GLID
 	RecordCount   uint32
@@ -26,8 +26,16 @@ type CompletedSegmentEntry struct {
 	Checksum      uint32
 	OriginNodeID  string
 	PublishedAt   time.Time
+	// Holders are node IDs that have pulled, verified, and committed a holder
+	// receipt for this segment (Rubicon C). Grows via CmdAckSegmentHolder
+	// toward the vault home set; not part of the publish idempotency check.
+	Holders []string
 }
 
+// completedSegmentEqual compares the published metadata of two entries. It
+// deliberately ignores Holders: the publish command never carries holders, and
+// holders grow independently via CmdAckSegmentHolder, so a re-published segment
+// must still compare equal to an entry whose holder set has already grown.
 func completedSegmentEqual(a, b CompletedSegmentEntry) bool {
 	return a.SegmentID == b.SegmentID &&
 		a.RecordCount == b.RecordCount &&
@@ -49,6 +57,7 @@ func completedSegmentToProto(e *CompletedSegmentEntry) *gastrologv1.CompletedSeg
 		Checksum:           e.Checksum,
 		OriginNodeId:       e.OriginNodeID,
 		PublishedAtNanos:   e.PublishedAt.UnixNano(),
+		Holders:            slices.Clone(e.Holders),
 	}
 }
 
@@ -62,6 +71,7 @@ func completedSegmentFromProto(p *gastrologv1.CompletedSegmentEntry) CompletedSe
 		Checksum:      p.GetChecksum(),
 		OriginNodeID:  p.GetOriginNodeId(),
 		PublishedAt:   time.Unix(0, p.GetPublishedAtNanos()),
+		Holders:       slices.Clone(p.GetHolders()),
 	}
 }
 
@@ -201,4 +211,41 @@ func NewPublishCompletedSegment(entry CompletedSegmentEntry) *gastrologv1.VaultC
 // MarshalPublishCompletedSegment builds Raft log data for PublishCompletedSegment.
 func MarshalPublishCompletedSegment(entry CompletedSegmentEntry) []byte {
 	return mustMarshalCommand(NewPublishCompletedSegment(entry))
+}
+
+// applyAckSegmentHolder records that nodeID now holds a completed segment by
+// appending it to the entry's holder set. Idempotent: a repeated ack for a node
+// already in the set is a no-op. An ack for an unknown segment is tolerated as a
+// no-op (the publish may not have replicated to this node yet, or the entry was
+// already released).
+func (f *FSM) applyAckSegmentHolder(c *gastrologv1.AckSegmentHolderCommand) error {
+	segID := glid.FromBytes(c.GetSegmentId())
+	nodeID := c.GetNodeId()
+	if nodeID == "" {
+		return errors.New("ack segment holder: node id required")
+	}
+	entry, ok := f.completedSegments[segID]
+	if !ok {
+		return nil
+	}
+	if slices.Contains(entry.Holders, nodeID) {
+		return nil
+	}
+	entry.Holders = append(entry.Holders, nodeID)
+	return nil
+}
+
+// NewAckSegmentHolder builds an AckSegmentHolder VaultCtlCommand.
+func NewAckSegmentHolder(segmentID glid.GLID, nodeID string) *gastrologv1.VaultCtlCommand {
+	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_AckSegmentHolder{
+		AckSegmentHolder: &gastrologv1.AckSegmentHolderCommand{
+			SegmentId: segmentID[:],
+			NodeId:    nodeID,
+		},
+	}}
+}
+
+// MarshalAckSegmentHolder builds Raft log data for AckSegmentHolder.
+func MarshalAckSegmentHolder(segmentID glid.GLID, nodeID string) []byte {
+	return mustMarshalCommand(NewAckSegmentHolder(segmentID, nodeID))
 }

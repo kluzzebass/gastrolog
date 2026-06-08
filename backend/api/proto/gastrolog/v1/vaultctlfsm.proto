@@ -65,6 +65,7 @@ message VaultCtlCommand {
     AddOpenChunkSegmentRefCommand add_open_chunk_segment_ref = 16;
     SealOpenChunkManifestCommand seal_open_chunk_manifest = 17;
     ReleaseSegmentsCommand release_segments = 18;
+    AckSegmentHolderCommand ack_segment_holder = 19;
   }
 }
 
@@ -151,7 +152,7 @@ message RepatriateChunkCommand {
 }
 
 // PublishCompletedSegmentCommand registers a completed segment in the vault-ctl
-// FSM (V3 pipeline). Origin publishes when Segmentation closes a segment.
+// FSM. Origin publishes when Segmentation closes a segment.
 message PublishCompletedSegmentCommand {
   bytes segment_id = 1;
   uint32 record_count = 2;
@@ -175,6 +176,9 @@ message CompletedSegmentEntry {
   uint32 checksum = 6;
   string origin_node_id = 7;
   int64 published_at_nanos = 8;
+  // Node IDs that have pulled, verified, and committed a holder receipt for
+  // this segment (Rubicon C). Grows toward the vault home set.
+  repeated string holders = 9;
 }
 
 // OpenChunkSegmentRef names a partial or whole slice of one segment in the
@@ -230,6 +234,14 @@ message SealOpenChunkManifestCommand {
 // replication (purge signaling). See chunking-design direction D.
 message ReleaseSegmentsCommand {
   repeated bytes segment_ids = 1;
+}
+
+// AckSegmentHolderCommand records that a node has pulled, verified, and now
+// holds a completed segment (Rubicon C). Appends node_id to the
+// segment registry entry's holder set; idempotent.
+message AckSegmentHolderCommand {
+  bytes segment_id = 1;
+  string node_id = 2;
 }
 
 // ---------- Snapshot (replaces the 5 hand-rolled sections) ------------------

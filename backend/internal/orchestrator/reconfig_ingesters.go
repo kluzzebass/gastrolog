@@ -86,7 +86,7 @@ func (o *Orchestrator) reconcileIngestersLocked(desired []IngesterDesired) error
 }
 
 // setIngesterLocked installs (or replaces) an ingester in the desired set and
-// (re)builds its stable V3 adapter. Caller holds o.mu.
+// (re)builds its stable pipeline adapter. Caller holds o.mu.
 func (o *Orchestrator) setIngesterLocked(id glid.GLID, meta ingesterInfo, ing Ingester) {
 	o.ingesters[id] = ing
 	o.ingesterMeta[id] = meta
@@ -103,7 +103,7 @@ func (o *Orchestrator) setIngesterLocked(id glid.GLID, meta ingesterInfo, ing In
 // newly-added ingesters immediately when running, otherwise at Start.
 // Caller holds o.mu.
 func (o *Orchestrator) pushIngestersToSupervisorLocked() error {
-	if o.v3 == nil {
+	if o.pipeline == nil {
 		return nil
 	}
 	specs := make([]ingestion.IngesterSpec, 0, len(o.ingesters))
@@ -125,5 +125,5 @@ func (o *Orchestrator) pushIngestersToSupervisorLocked() error {
 			Type:     meta.Type,
 		})
 	}
-	return o.v3.ReconcileIngesters(specs)
+	return o.pipeline.ReconcileIngesters(specs)
 }

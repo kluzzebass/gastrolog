@@ -122,7 +122,12 @@ func TestCollectOncePullsMissingSegment(t *testing.T) {
 	}
 }
 
-func TestCollectOnceSkipsSegmentAlreadyInHead(t *testing.T) {
+// TestCollectOnceReceiptsSegmentAlreadyInHead covers the origin-home case: the
+// node already holds the segment in head/ (distribution promoted it there via
+// LocalHolder), but the assignment log still lists it because the holder
+// receipt has not been recorded yet. Collection must commit the receipt without
+// pulling, and must not pull (no source needed for a segment we already hold).
+func TestCollectOnceReceiptsSegmentAlreadyInHead(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()
 	segID := glid.New()
@@ -137,7 +142,7 @@ func TestCollectOnceSkipsSegmentAlreadyInHead(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pull := newMemoryPull()
+	pull := newMemoryPull() // intentionally empty: a held segment needs no pull
 	log := &staticLog{}
 	log.setAssigned(collection.AssignedSegment{
 		VaultID:   vaultID,
@@ -157,8 +162,17 @@ func TestCollectOnceSkipsSegmentAlreadyInHead(t *testing.T) {
 	if err := mgr.CollectOnce(context.Background(), vaultID); err != nil {
 		t.Fatal(err)
 	}
-	if receipts.count() != 0 {
-		t.Fatalf("receipts = %d, want 0", receipts.count())
+	if receipts.count() != 1 {
+		t.Fatalf("receipts = %d, want 1 (held segment receipts without pulling)", receipts.count())
+	}
+
+	// A second pass must not re-commit: the receipted set dedups until the
+	// receipt replicates into the holder set and the log stops assigning it.
+	if err := mgr.CollectOnce(context.Background(), vaultID); err != nil {
+		t.Fatal(err)
+	}
+	if receipts.count() != 1 {
+		t.Fatalf("receipts = %d after second pass, want 1 (idempotent)", receipts.count())
 	}
 }
 

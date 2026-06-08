@@ -10,10 +10,10 @@ import (
 	"gastrolog/internal/alert"
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/orchestrator/v3pipeline"
+	"gastrolog/internal/orchestrator/pipeline"
 )
 
-// Start launches the V3 ingest pipeline and the orchestrator's auxiliary
+// Start launches the ingest pipeline and the orchestrator's auxiliary
 // goroutines. New live data flows ingest→digest→route→segment, acked only after
 // a durable segment write (ack-after-fsync). Start returns immediately; use
 // Stop() to shut down.
@@ -41,7 +41,7 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	// Start shared scheduler (cron rotation, retention, and future scheduled tasks).
 	o.scheduler.Start()
 
-	// V3 pipeline pressure gate. PressureAware ingesters consult it to throttle
+	// pipeline pressure gate. PressureAware ingesters consult it to throttle
 	// when the pipeline backs up; the supervisor's ingestion manager injects it
 	// into each ingester. Cross-node forward channels register as probes so
 	// ingesters also throttle on remote-forward backpressure (gastrolog-27zvt).
@@ -50,7 +50,7 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	// TODO(gastrolog-jiwlf): expose supervisor queue depths as gate probes so
 	// local-pipeline saturation (not just cross-node forward) raises pressure
 	// alerts.
-	gate := o.v3Gate
+	gate := o.pipelineGate
 	if ac, ok := o.alerts.(*alert.Collector); ok {
 		gate.AddOnChange(func(tr chanwatch.PressureTransition) {
 			if tr.To == chanwatch.PressureNormal {
@@ -74,15 +74,15 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	}
 
 	// Push the bootstrap-registered ingester set into the supervisor, then start
-	// the V3 pipeline (the ingestion manager launches the ingesters).
+	// the pipeline (the ingestion manager launches the ingesters).
 	if err := o.pushIngestersToSupervisorLocked(); err != nil {
 		o.logger.Error("reconcile ingesters at startup", "error", err)
 	}
-	if err := o.v3.Start(ctx); err != nil {
+	if err := o.pipeline.Start(ctx); err != nil {
 		o.running.Store(false)
 		cancel()
 		o.cancel = nil
-		return fmt.Errorf("start v3 pipeline: %w", err)
+		return fmt.Errorf("start pipeline: %w", err)
 	}
 
 	// Start the pressure gate after everything else is wired.
@@ -142,14 +142,14 @@ func (o *Orchestrator) runRateAlertEvaluator(ctx context.Context, interval time.
 	}
 }
 
-// Stop stops the V3 ingest pipeline and the orchestrator's auxiliary
+// Stop stops the ingest pipeline and the orchestrator's auxiliary
 // goroutines, then waits for everything to finish.
 //
 // Ordered shutdown:
 //  0. BeginShutdown on the shared phase (if wired) → fast-path skip in
 //     fireAndForgetRemote / sealRemoteFollowers so the drain pipeline
 //     doesn't spam peers that are going down alongside us.
-//  1. Stop the V3 supervisor — ingestion stops first (closing the ingest
+//  1. Stop the pipeline supervisor — ingestion stops first (closing the ingest
 //     queue), cascading through digest→route→segment as each queue closes,
 //     then the remaining managers are cancelled. Ingesters' alive state is
 //     cleared by the adapter as they exit.
@@ -167,12 +167,12 @@ func (o *Orchestrator) Stop() error {
 	// while we drain. Idempotent if the top-level shutdown already flipped
 	// it; safe to call with a nil phase (single-node tests). See gastrolog-1e5ke.
 	if o.phase != nil {
-		o.phase.BeginShutdown("orchestrator: stopping v3 pipeline")
+		o.phase.BeginShutdown("orchestrator: stopping pipeline")
 	}
 
-	// Stage 1: stop the V3 pipeline and wait for all phase managers to exit.
-	if err := o.v3.Stop(); err != nil && !errors.Is(err, v3pipeline.ErrNotRunning) {
-		o.logger.Error("stop v3 pipeline", "error", err)
+	// Stage 1: stop the pipeline and wait for all phase managers to exit.
+	if err := o.pipeline.Stop(); err != nil && !errors.Is(err, pipeline.ErrNotRunning) {
+		o.logger.Error("stop pipeline", "error", err)
 	}
 
 	// Stage 2: cancel the orchestrator context and wait for aux goroutines.
@@ -204,7 +204,7 @@ func (o *Orchestrator) Close() {
 }
 
 // setIngesterAlive updates both the local stats and the Raft-replicated state.
-// The V3 ingester adapter calls this around each ingester run so the cluster/UI
+// The ingester adapter calls this around each ingester run so the cluster/UI
 // alive surface is unchanged after the V0 ingest loop's removal.
 func (o *Orchestrator) setIngesterAlive(id glid.GLID, stats *IngesterStats, alive bool) {
 	if stats != nil {

@@ -1,4 +1,4 @@
-package v3pipeline
+package pipeline
 
 import (
 	"context"

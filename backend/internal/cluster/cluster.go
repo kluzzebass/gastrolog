@@ -209,6 +209,10 @@ type Server struct {
 	// managedFileIDs returns which managed files exist on this node.
 	managedFileIDs ManagedFileIDsLister
 
+	// segmentPullServer streams a locally-held completed segment to a peer
+	// collector (Rubicon C).
+	segmentPullServer SegmentPullServer
+
 	// internalHandler is the Connect mux used for dispatching ForwardRPC
 	// requests. It has no routing interceptor (preventing loops) and uses
 	// NoAuthInterceptor (mTLS already verified the peer). Set by the

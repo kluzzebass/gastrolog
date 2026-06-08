@@ -510,7 +510,7 @@ func TestUnregisterIngesterWhileRunning(t *testing.T) {
 	// Wait for ingester to start.
 	<-recv.started
 
-	// Unregister while running stops the ingester via the V3 reconcile.
+	// Unregister while running stops the ingester via the pipeline reconcile.
 	orch.UnregisterIngester(ingesterID)
 
 	// Verify ingester was stopped.

@@ -2,7 +2,7 @@ package ingestion_test
 
 // Unit tests cover IngestionManager in isolation. Integration coverage for
 // behaviors that need downstream pipeline or cluster context is tracked on
-// gastrolog-214bz (V3 pipeline integration):
+// gastrolog-214bz (pipeline integration):
 //   - PressureGate throttling under real digestion-queue backpressure
 //   - ingestion Ack after durable segment write (nil / error semantics)
 //   - singleton ingester reassignment across 4+ nodes

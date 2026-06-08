@@ -16,7 +16,7 @@ import (
 
 var errSegmentFinalized = errors.New("segment is finalized")
 
-// File is a durable V3 segment on disk. The fixed header is rewritten after
+// File is a durable segment on disk. The fixed header is rewritten after
 // each append; record data follows the header as [frameLen:u32][frame body] frames.
 type File struct {
 	f         *os.File

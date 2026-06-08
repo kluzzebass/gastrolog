@@ -115,8 +115,11 @@ func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) erro
 
 	o.groupMgr = factories.GroupManager
 	o.peerConns = factories.PeerConns
+	if factories.PeerConns != nil && o.segmentPuller == nil {
+		o.segmentPuller = cluster.NewSegmentPuller(factories.PeerConns)
+	}
 
-	// Root the V3 per-vault segment areas under the node home unless already
+	// Root the per-vault segment areas under the node home unless already
 	// configured. Origin vaults are registered during applyVaults→route reload,
 	// so this must be set first. See originRoot.
 	if o.segmentsDir == "" && factories.HomeDir != "" {

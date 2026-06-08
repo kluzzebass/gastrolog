@@ -1,5 +1,5 @@
-// Package v3pipeline is the orchestrator-owned supervisor shell for the V3
-// ingest pipeline. It owns the bounded inter-phase queue graph
+// Package pipeline is the orchestrator-owned supervisor shell for the ingest
+// pipeline. It owns the bounded inter-phase queue graph
 //
 //	ingest → digest → route → segment → distribute → collect → chunk
 //
@@ -7,13 +7,13 @@
 // the seven pipeline/* managers per vault home as placement changes bring vaults
 // onto or off this node.
 //
-// This is the first Rubicon slice (gastrolog-3kx8v): it establishes the
-// supervisor lifecycle and queue wiring. Real ingester factories, ack-after-durable
-// semantics, vault-ctl feeds, and the leader planner are filled in by later slices
-// (gastrolog-214bz B→E). Injection points (publishers, appliers, FSM callbacks,
-// pull/log/receipt clients, nudge hooks) are supplied per vault via VaultSpec, so
-// this package carries no opinion about how they are produced.
-package v3pipeline
+// The supervisor lifecycle and queue wiring landed first (gastrolog-3kx8v).
+// Ingester factories, ack-after-durable semantics, vault-ctl feeds, and the
+// leader planner are filled in by later Rubicon slices (gastrolog-214bz B→E).
+// Injection points (publishers, appliers, FSM callbacks, pull/log/receipt
+// clients, nudge hooks) are supplied per vault via VaultSpec, so this package
+// carries no opinion about how they are produced.
+package pipeline
 
 import (
 	"context"
@@ -38,10 +38,10 @@ import (
 )
 
 // ErrAlreadyRunning is returned when Start is called on a running supervisor.
-var ErrAlreadyRunning = errors.New("v3 pipeline supervisor already running")
+var ErrAlreadyRunning = errors.New("pipeline supervisor already running")
 
 // ErrNotRunning is returned when Stop is called on a stopped supervisor.
-var ErrNotRunning = errors.New("v3 pipeline supervisor not running")
+var ErrNotRunning = errors.New("pipeline supervisor not running")
 
 // ErrVaultRegistered is returned when a vault is registered twice.
 var ErrVaultRegistered = errors.New("vault already registered")
@@ -135,7 +135,7 @@ type vaultRoles struct {
 	home   bool
 }
 
-// Supervisor owns the V3 pipeline queue graph and the seven phase managers, and
+// Supervisor owns the pipeline queue graph and the seven phase managers, and
 // drives per-vault start/stop on placement changes.
 type Supervisor struct {
 	cfg    Config
@@ -338,7 +338,7 @@ func (s *Supervisor) SetRoutingTable(t *routing.Table) {
 }
 
 // IngestQueueDepth reports the current depth of the ingestion→digestion queue,
-// the backlog of minted-but-not-yet-digested messages. It is the V3 analogue of
+// the backlog of minted-but-not-yet-digested messages. It is the analogue of
 // the former ingest channel depth surfaced in node/health stats.
 func (s *Supervisor) IngestQueueDepth() int { return len(s.ingestOut) }
 
@@ -400,31 +400,45 @@ func (s *Supervisor) registerOrigin(spec VaultSpec) error {
 }
 
 func (s *Supervisor) registerHome(spec VaultSpec) error {
-	// Collection is registered without the FSM on purpose. The vault-ctl FSM has a
-	// single SetOnPublishCompletedSegment slot, and chunking claims it (to drive the
-	// leader planner). Collection is instead driven by the chunking build nudge
-	// (CollectMissing → CollectOnce) and explicit CollectOnce passes. A later slice
-	// (gastrolog-214bz C) introduces a publish fan-out that triggers both.
+	// Collection subscribes to the vault-ctl publish fan-out (Rubicon C): a newly
+	// published segment fires SetOnPublishCompletedSegment → triggerCollect, so
+	// replication is event-driven, not timer-polled. The fan-out is additive, so
+	// chunking (slice D) can subscribe independently for its leader planner.
 	if err := s.col.RegisterVault(spec.VaultID, spec.HomeRoot, collection.VaultConfig{
 		Log:      spec.Log,
 		Pull:     spec.Pull,
 		Receipts: spec.Receipts,
+		FSM:      spec.FSM,
 	}); err != nil {
 		return fmt.Errorf("collection register: %w", err)
 	}
-	if err := s.chunk.RegisterVault(spec.VaultID, chunking.VaultConfig{
-		VaultRoot:  spec.HomeRoot,
-		ChunkRoot:  spec.ChunkRoot,
-		FSM:        spec.FSM,
-		Locate:     spec.Locate,
-		Nudge:      collectionNudge{mgr: s.col, vaultID: spec.VaultID},
-		Applier:    spec.Applier,
-		IsLeader:   spec.IsLeader,
-		Policy:     spec.ChunkPolicy,
-		NewChunkID: spec.NewChunkID,
-	}); err != nil {
-		s.col.UnregisterVault(spec.VaultID)
-		return fmt.Errorf("chunking register: %w", err)
+	// Chunking is wired only when its dependencies are supplied. Rubicon C
+	// registers homes for collection/replication without chunking; slice D
+	// supplies Locate/Applier/ChunkRoot and activates the planner/builder.
+	if spec.Locate != nil {
+		if err := s.chunk.RegisterVault(spec.VaultID, chunking.VaultConfig{
+			VaultRoot:  spec.HomeRoot,
+			ChunkRoot:  spec.ChunkRoot,
+			FSM:        spec.FSM,
+			Locate:     spec.Locate,
+			Nudge:      collectionNudge{mgr: s.col, vaultID: spec.VaultID},
+			Applier:    spec.Applier,
+			IsLeader:   spec.IsLeader,
+			Policy:     spec.ChunkPolicy,
+			NewChunkID: spec.NewChunkID,
+		}); err != nil {
+			s.col.UnregisterVault(spec.VaultID)
+			return fmt.Errorf("chunking register: %w", err)
+		}
+	}
+	// A home registered after Start misses Run's one-shot startup catch-up, so
+	// kick an initial collect to pull any segments already in the registry
+	// (e.g. this node just became a home, or restarted with a lagging applied
+	// index). runCtx cancellation on Stop aborts in-flight pulls.
+	if s.running.Load() && s.runCtx != nil {
+		ctx := s.runCtx
+		vid := spec.VaultID
+		s.wg.Go(func() { _ = s.col.CollectOnce(ctx, vid) })
 	}
 	return nil
 }

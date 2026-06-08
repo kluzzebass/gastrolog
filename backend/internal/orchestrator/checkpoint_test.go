@@ -64,7 +64,7 @@ func (m *mockCheckpointIngester) LoadCheckpoint(data []byte) error {
 	return json.Unmarshal(data, &m.state)
 }
 
-// TestCheckpointSaveAndLoad verifies that the V3 ingestion manager (driven via
+// TestCheckpointSaveAndLoad verifies that the ingestion manager (driven via
 // the orchestrator) calls SaveCheckpoint on exit and that the orchestrator's
 // OnIngesterCheckpoint callback fires with the saved data.
 func TestCheckpointSaveAndLoad(t *testing.T) {

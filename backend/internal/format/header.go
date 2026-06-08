@@ -53,7 +53,7 @@ const (
 	TypeBTree          = 'b' // B+ tree index
 	TypeCloudBlob      = 'g' // GLCB cloud blob
 	TypeLookupTable    = 'L' // Binary lookup table (sorted key index + value data)
-	TypeSegment        = 'S' // V3 vault segment file (working/ or completed/)
+	TypeSegment        = 'S' // vault segment file (working/ or completed/)
 
 	// Flag bits for raw.log, idx.log, and attr.log headers.
 	FlagSealed     = 0x01
