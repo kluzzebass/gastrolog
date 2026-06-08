@@ -26,21 +26,52 @@ type ClosePolicy struct {
 	MaxAge time.Duration
 }
 
-// Config configures a SegmentationManager.
+// Config configures a SegmentationManager. The commit/fsync fields are the
+// node-global defaults; each vault may override them via VaultConfig at
+// RegisterVault time.
 type Config struct {
 	ClosePolicy ClosePolicy
-	// SyncBatchSize is the max appended frames between fsync calls. Defaults to 16.
+	// SyncBatchSize is the max appended frames between fsync calls for
+	// fire-and-forget (no-ack) records. Defaults to 16.
 	SyncBatchSize int
-	// SyncBatchWindow is the max wait before fsyncing a partial group. Defaults to 2ms.
+	// SyncBatchWindow is the max wait before fsyncing a partial fire-and-forget
+	// group. Defaults to 2ms.
 	SyncBatchWindow time.Duration
+	// MaxCommitDelay coalesces ack-bearing records within this window before the
+	// group-commit fsync. Zero (default) means pure group commit: an ack record
+	// triggers a sync as soon as the currently-available burst is drained.
+	MaxCommitDelay time.Duration
+	// DisableFsync turns off fsync entirely (durability falls back to the OS page
+	// cache); ack-bearing records ack after the in-memory append. Off by default.
+	DisableFsync bool
 	// EncodeQueueCap is the bounded channel between encode and append stages. Defaults to 64.
 	EncodeQueueCap int
 	// CompletedCap is the bounded completed-segment notification queue. Defaults to 16.
 	CompletedCap int
 	// Now returns the current time (for tests). Defaults to time.Now().UTC.
 	Now func() time.Time
-	// OnSync is invoked after each group fsync (for tests).
+	// OnSync is invoked after each real fsync (for tests). It is NOT called for
+	// vaults with DisableFsync set, since no fsync occurs.
 	OnSync func()
+}
+
+// VaultConfig overrides per-vault commit/fsync tuning at RegisterVault time.
+// Zero numeric fields inherit the manager-global Config defaults. DisableFsync
+// is opt-in per vault (it also takes effect if set globally on Config).
+type VaultConfig struct {
+	SyncBatchSize   int
+	SyncBatchWindow time.Duration
+	MaxCommitDelay  time.Duration
+	DisableFsync    bool
+}
+
+// Input is one record entering a vault's segmentation queue, with an optional
+// durability ack. When Ack is non-nil it receives nil after the record's
+// group-commit fsync (or after the in-memory append on a DisableFsync vault),
+// or an error if the durable write fails.
+type Input struct {
+	Record *record.Record
+	Ack    chan<- error
 }
 
 func (c Config) now() time.Time {
@@ -101,8 +132,9 @@ func New(cfg Config) (*Manager, <-chan CompletedSegment) {
 
 // RegisterVault starts a per-vault writer under root (creates working/ and completed/).
 // Safe to call before or during Run — the orchestrator can register vaults as placement
-// changes. Returns the bounded input channel routing should send records to.
-func (m *Manager) RegisterVault(vaultID glid.GLID, root string) (chan<- *record.Record, error) {
+// changes. vc overrides the manager-global commit/fsync defaults for this vault.
+// Returns the bounded input channel routing should send records to.
+func (m *Manager) RegisterVault(vaultID glid.GLID, root string, vc VaultConfig) (chan<- Input, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.running.Load() && m.runCtx == nil {
@@ -111,7 +143,7 @@ func (m *Manager) RegisterVault(vaultID glid.GLID, root string) (chan<- *record.
 	if _, ok := m.writers[vaultID]; ok {
 		return nil, errors.New("vault already registered")
 	}
-	w, err := newVaultWriter(vaultID, root, m.cfg, m.completed)
+	w, err := newVaultWriter(vaultID, root, m.cfg, vc, m.completed)
 	if err != nil {
 		return nil, err
 	}

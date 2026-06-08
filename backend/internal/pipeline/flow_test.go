@@ -259,7 +259,7 @@ func newHarness(t *testing.T, nodeID, ingesterID, vaultID glid.GLID, route *rout
 		SyncBatchWindow: time.Millisecond,
 		OnSync:          func() { h.syncs.Add(1) },
 	})
-	vaultIn, err := segMgr.RegisterVault(vaultID, vaultRoot)
+	vaultIn, err := segMgr.RegisterVault(vaultID, vaultRoot, segmentation.VaultConfig{})
 	if err != nil {
 		t.Fatalf("RegisterVault: %v", err)
 	}
@@ -275,7 +275,7 @@ func newHarness(t *testing.T, nodeID, ingesterID, vaultID glid.GLID, route *rout
 	routeMgr := routing.New(routing.Config{
 		Workers: 2,
 		Table:   routing.NewTable([]*routing.Route{route}),
-		Vaults: map[glid.GLID]chan<- *record.Record{
+		Vaults: map[glid.GLID]chan<- segmentation.Input{
 			vaultID: vaultIn,
 		},
 	})
@@ -1146,11 +1146,11 @@ func TestPipelineFanOutTwoVaults(t *testing.T) {
 		SyncBatchWindow: time.Millisecond,
 		OnSync:          func() { syncs.Add(1) },
 	})
-	inA, err := segMgr.RegisterVault(vaultA, rootA)
+	inA, err := segMgr.RegisterVault(vaultA, rootA, segmentation.VaultConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	inB, err := segMgr.RegisterVault(vaultB, rootB)
+	inB, err := segMgr.RegisterVault(vaultB, rootB, segmentation.VaultConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1167,7 +1167,7 @@ func TestPipelineFanOutTwoVaults(t *testing.T) {
 
 	routeMgr := routing.New(routing.Config{
 		Table: routing.NewTable([]*routing.Route{route}),
-		Vaults: map[glid.GLID]chan<- *record.Record{
+		Vaults: map[glid.GLID]chan<- segmentation.Input{
 			vaultA: inA,
 			vaultB: inB,
 		},

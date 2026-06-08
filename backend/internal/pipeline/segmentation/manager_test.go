@@ -67,7 +67,7 @@ func TestManagerAppendsToWorkingSegment(t *testing.T) {
 	vaultID := glid.New()
 
 	var syncs atomic.Uint32
-	var in chan<- *record.Record
+	var in chan<- segmentation.Input
 	_, _ = startManager(t, segmentation.Config{
 		SyncBatchSize:   1,
 		SyncBatchWindow: time.Hour,
@@ -75,14 +75,14 @@ func TestManagerAppendsToWorkingSegment(t *testing.T) {
 	}, func(t *testing.T, mgr *segmentation.Manager) {
 		t.Helper()
 		var err error
-		in, err = mgr.RegisterVault(vaultID, dir)
+		in, err = mgr.RegisterVault(vaultID, dir, segmentation.VaultConfig{})
 		if err != nil {
 			t.Fatal(err)
 		}
 	})
 
 	ts := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
-	in <- sampleRecord(0, ts)
+	in <- segmentation.Input{Record: sampleRecord(0, ts)}
 	waitSync(t, &syncs, 1)
 
 	entries, err := os.ReadDir(paths.WorkingDir(dir))
@@ -118,7 +118,7 @@ func TestManagerGroupSyncBatchesFsync(t *testing.T) {
 	vaultID := glid.New()
 
 	var syncs atomic.Uint32
-	var in chan<- *record.Record
+	var in chan<- segmentation.Input
 	_, _ = startManager(t, segmentation.Config{
 		SyncBatchSize:   4,
 		SyncBatchWindow: time.Hour,
@@ -126,7 +126,7 @@ func TestManagerGroupSyncBatchesFsync(t *testing.T) {
 	}, func(t *testing.T, mgr *segmentation.Manager) {
 		t.Helper()
 		var err error
-		in, err = mgr.RegisterVault(vaultID, dir)
+		in, err = mgr.RegisterVault(vaultID, dir, segmentation.VaultConfig{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -134,7 +134,7 @@ func TestManagerGroupSyncBatchesFsync(t *testing.T) {
 
 	ts := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
 	for i := range 4 {
-		in <- sampleRecord(uint32(i), ts.Add(time.Duration(i)*time.Millisecond))
+		in <- segmentation.Input{Record: sampleRecord(uint32(i), ts.Add(time.Duration(i)*time.Millisecond))}
 	}
 	waitSync(t, &syncs, 1)
 	if syncs.Load() != 1 {
@@ -147,7 +147,7 @@ func TestManagerClosesOnSize(t *testing.T) {
 	dir := t.TempDir()
 	vaultID := glid.New()
 
-	var in chan<- *record.Record
+	var in chan<- segmentation.Input
 	_, completed := startManager(t, segmentation.Config{
 		ClosePolicy:       segmentation.ClosePolicy{MaxBytes: 256},
 		SyncBatchSize:   1,
@@ -156,7 +156,7 @@ func TestManagerClosesOnSize(t *testing.T) {
 	}, func(t *testing.T, mgr *segmentation.Manager) {
 		t.Helper()
 		var err error
-		in, err = mgr.RegisterVault(vaultID, dir)
+		in, err = mgr.RegisterVault(vaultID, dir, segmentation.VaultConfig{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -164,7 +164,7 @@ func TestManagerClosesOnSize(t *testing.T) {
 
 	ts := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
 	for i := range 8 {
-		in <- sampleRecord(uint32(i), ts.Add(time.Duration(i)*time.Millisecond))
+		in <- segmentation.Input{Record: sampleRecord(uint32(i), ts.Add(time.Duration(i)*time.Millisecond))}
 	}
 
 	select {
@@ -206,7 +206,7 @@ func TestManagerClosesOnAge(t *testing.T) {
 	var clock atomic.Int64
 	clock.Store(now.UnixNano())
 
-	var in chan<- *record.Record
+	var in chan<- segmentation.Input
 	_, completed := startManager(t, segmentation.Config{
 		ClosePolicy:       segmentation.ClosePolicy{MaxAge: time.Minute},
 		SyncBatchSize:   1,
@@ -218,18 +218,18 @@ func TestManagerClosesOnAge(t *testing.T) {
 	}, func(t *testing.T, mgr *segmentation.Manager) {
 		t.Helper()
 		var err error
-		in, err = mgr.RegisterVault(vaultID, dir)
+		in, err = mgr.RegisterVault(vaultID, dir, segmentation.VaultConfig{})
 		if err != nil {
 			t.Fatal(err)
 		}
 	})
 
-	in <- sampleRecord(0, now)
+	in <- segmentation.Input{Record: sampleRecord(0, now)}
 	time.Sleep(20 * time.Millisecond)
 
 	clock.Add(int64(time.Minute))
 
-	in <- sampleRecord(1, now.Add(time.Second))
+	in <- segmentation.Input{Record: sampleRecord(1, now.Add(time.Second))}
 	select {
 	case <-completed:
 	case <-time.After(2 * time.Second):
@@ -245,7 +245,7 @@ func TestManagerPerVaultIsolation(t *testing.T) {
 	vaultB := glid.New()
 
 	var syncs atomic.Uint32
-	var inA, inB chan<- *record.Record
+	var inA, inB chan<- segmentation.Input
 	_, _ = startManager(t, segmentation.Config{
 		SyncBatchSize:   1,
 		SyncBatchWindow: time.Hour,
@@ -253,19 +253,19 @@ func TestManagerPerVaultIsolation(t *testing.T) {
 	}, func(t *testing.T, mgr *segmentation.Manager) {
 		t.Helper()
 		var err error
-		inA, err = mgr.RegisterVault(vaultA, dirA)
+		inA, err = mgr.RegisterVault(vaultA, dirA, segmentation.VaultConfig{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		inB, err = mgr.RegisterVault(vaultB, dirB)
+		inB, err = mgr.RegisterVault(vaultB, dirB, segmentation.VaultConfig{})
 		if err != nil {
 			t.Fatal(err)
 		}
 	})
 
 	ts := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
-	inA <- sampleRecord(0, ts)
-	inB <- sampleRecord(0, ts.Add(time.Second))
+	inA <- segmentation.Input{Record: sampleRecord(0, ts)}
+	inB <- segmentation.Input{Record: sampleRecord(0, ts.Add(time.Second))}
 	waitSync(t, &syncs, 2)
 
 	for _, dir := range []string{dirA, dirB} {
@@ -291,7 +291,7 @@ func TestManagerDoesNotCloseEmptySegment(t *testing.T) {
 		CompletedCap:      1,
 	}, func(t *testing.T, mgr *segmentation.Manager) {
 		t.Helper()
-		if _, err := mgr.RegisterVault(vaultID, dir); err != nil {
+		if _, err := mgr.RegisterVault(vaultID, dir, segmentation.VaultConfig{}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -310,7 +310,7 @@ func TestManagerRunTwice(t *testing.T) {
 		SyncBatchSize:   1,
 		SyncBatchWindow: time.Hour,
 	})
-	if _, err := mgr.RegisterVault(glid.New(), dir); err != nil {
+	if _, err := mgr.RegisterVault(glid.New(), dir, segmentation.VaultConfig{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -336,7 +336,7 @@ func TestManagerRegisterDuringRun(t *testing.T) {
 	vaultID := glid.New()
 
 	var syncs atomic.Uint32
-	var in chan<- *record.Record
+	var in chan<- segmentation.Input
 	mgr, _ := segmentation.New(segmentation.Config{
 		SyncBatchSize:   1,
 		SyncBatchWindow: time.Hour,
@@ -357,13 +357,13 @@ func TestManagerRegisterDuringRun(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 
 	var err error
-	in, err = mgr.RegisterVault(vaultID, dir)
+	in, err = mgr.RegisterVault(vaultID, dir, segmentation.VaultConfig{})
 	if err != nil {
 		t.Fatalf("RegisterVault during Run: %v", err)
 	}
 
 	ts := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
-	in <- sampleRecord(0, ts)
+	in <- segmentation.Input{Record: sampleRecord(0, ts)}
 	waitSync(t, &syncs, 1)
 }
 
@@ -371,7 +371,7 @@ func TestManagerRegisterAfterRunFinished(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	mgr, _ := segmentation.New(segmentation.Config{})
-	if _, err := mgr.RegisterVault(glid.New(), dir); err != nil {
+	if _, err := mgr.RegisterVault(glid.New(), dir, segmentation.VaultConfig{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -385,7 +385,7 @@ func TestManagerRegisterAfterRunFinished(t *testing.T) {
 	cancel()
 	<-done
 
-	_, err := mgr.RegisterVault(glid.New(), t.TempDir())
+	_, err := mgr.RegisterVault(glid.New(), t.TempDir(), segmentation.VaultConfig{})
 	if err != segmentation.ErrNotRunning {
 		t.Fatalf("RegisterVault() = %v, want ErrNotRunning", err)
 	}
@@ -396,11 +396,11 @@ func TestManagerUnregisterVault(t *testing.T) {
 	dir := t.TempDir()
 	vaultID := glid.New()
 	mgr, _ := segmentation.New(segmentation.Config{})
-	if _, err := mgr.RegisterVault(vaultID, dir); err != nil {
+	if _, err := mgr.RegisterVault(vaultID, dir, segmentation.VaultConfig{}); err != nil {
 		t.Fatal(err)
 	}
 	mgr.UnregisterVault(vaultID)
-	if _, err := mgr.RegisterVault(vaultID, dir); err != nil {
+	if _, err := mgr.RegisterVault(vaultID, dir, segmentation.VaultConfig{}); err != nil {
 		t.Fatalf("re-register after unregister: %v", err)
 	}
 }

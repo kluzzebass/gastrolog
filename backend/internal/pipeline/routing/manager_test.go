@@ -7,6 +7,7 @@ import (
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/pipeline/routing"
+	"gastrolog/internal/pipeline/segmentation"
 	"gastrolog/internal/record"
 )
 
@@ -31,13 +32,13 @@ func TestManagerFansOutSamePointer(t *testing.T) {
 
 	vaultA := glid.New()
 	vaultB := glid.New()
-	chA := make(chan *record.Record, 1)
-	chB := make(chan *record.Record, 1)
+	chA := make(chan segmentation.Input, 1)
+	chB := make(chan segmentation.Input, 1)
 
 	mgr := routing.New(routing.Config{
 		Workers: 2,
 		Table:   catchAllTable(vaultA, vaultB),
-		Vaults: map[glid.GLID]chan<- *record.Record{
+		Vaults: map[glid.GLID]chan<- segmentation.Input{
 			vaultA: chA,
 			vaultB: chB,
 		},
@@ -59,8 +60,8 @@ func TestManagerFansOutSamePointer(t *testing.T) {
 
 	gotA := <-chA
 	gotB := <-chB
-	if gotA != rec || gotB != rec {
-		t.Errorf("expected same pointer %p on both vaults, got %p and %p", rec, gotA, gotB)
+	if gotA.Record != rec || gotB.Record != rec {
+		t.Errorf("expected same pointer %p on both vaults, got %p and %p", rec, gotA.Record, gotB.Record)
 	}
 
 	<-done
@@ -74,12 +75,12 @@ func TestManagerCountsUnmatched(t *testing.T) {
 	t.Parallel()
 
 	vaultID := glid.New()
-	out := make(chan *record.Record, 4)
+	out := make(chan segmentation.Input, 4)
 
 	mgr := routing.New(routing.Config{
 		Workers: 1,
 		Table:   prodOnlyTable(vaultID),
-		Vaults:  map[glid.GLID]chan<- *record.Record{vaultID: out},
+		Vaults:  map[glid.GLID]chan<- segmentation.Input{vaultID: out},
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -125,12 +126,12 @@ func TestManagerWorkersProcessConcurrently(t *testing.T) {
 	t.Parallel()
 
 	vaultID := glid.New()
-	out := make(chan *record.Record, 8)
+	out := make(chan segmentation.Input, 8)
 
 	mgr := routing.New(routing.Config{
 		Workers: 4,
 		Table:   catchAllTable(vaultID),
-		Vaults:  map[glid.GLID]chan<- *record.Record{vaultID: out},
+		Vaults:  map[glid.GLID]chan<- segmentation.Input{vaultID: out},
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -159,12 +160,12 @@ func TestManagerBackpressureOnVaultChannel(t *testing.T) {
 	t.Parallel()
 
 	vaultID := glid.New()
-	out := make(chan *record.Record) // unbuffered — blocks until read
+	out := make(chan segmentation.Input) // unbuffered — blocks until read
 
 	mgr := routing.New(routing.Config{
 		Workers: 1,
 		Table:   catchAllTable(vaultID),
-		Vaults:  map[glid.GLID]chan<- *record.Record{vaultID: out},
+		Vaults:  map[glid.GLID]chan<- segmentation.Input{vaultID: out},
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -183,8 +184,8 @@ func TestManagerBackpressureOnVaultChannel(t *testing.T) {
 	}()
 
 	got1 := <-out
-	if got1 != rec1 {
-		t.Fatalf("first record = %p, want %p", got1, rec1)
+	if got1.Record != rec1 {
+		t.Fatalf("first record = %p, want %p", got1.Record, rec1)
 	}
 
 	inDone := make(chan struct{})
@@ -195,8 +196,8 @@ func TestManagerBackpressureOnVaultChannel(t *testing.T) {
 
 	select {
 	case got2 := <-out:
-		if got2 != rec2 {
-			t.Errorf("second record = %p, want %p", got2, rec2)
+		if got2.Record != rec2 {
+			t.Errorf("second record = %p, want %p", got2.Record, rec2)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("routing blocked on full vault channel — expected delivery after read")
@@ -212,12 +213,12 @@ func TestManagerSkipsUnwiredVault(t *testing.T) {
 
 	vaultA := glid.New()
 	vaultB := glid.New()
-	chA := make(chan *record.Record, 1)
+	chA := make(chan segmentation.Input, 1)
 
 	mgr := routing.New(routing.Config{
 		Workers: 1,
 		Table:   catchAllTable(vaultA, vaultB),
-		Vaults:  map[glid.GLID]chan<- *record.Record{vaultA: chA},
+		Vaults:  map[glid.GLID]chan<- segmentation.Input{vaultA: chA},
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -249,12 +250,12 @@ func TestManagerUsesIngesterFromRecord(t *testing.T) {
 		t.Fatalf("CompileRoute: %v", err)
 	}
 	table := routing.NewTable([]*routing.Route{r})
-	out := make(chan *record.Record, 1)
+	out := make(chan segmentation.Input, 1)
 
 	mgr := routing.New(routing.Config{
 		Workers: 1,
 		Table:   table,
-		Vaults:  map[glid.GLID]chan<- *record.Record{vaultID: out},
+		Vaults:  map[glid.GLID]chan<- segmentation.Input{vaultID: out},
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -286,12 +287,12 @@ func TestManagerRoutesRetentionEject(t *testing.T) {
 		t.Fatalf("CompileRoute: %v", err)
 	}
 	table := routing.NewTable([]*routing.Route{r})
-	out := make(chan *record.Record, 2)
+	out := make(chan segmentation.Input, 2)
 
 	mgr := routing.New(routing.Config{
 		Workers: 1,
 		Table:   table,
-		Vaults:  map[glid.GLID]chan<- *record.Record{archiveVault: out},
+		Vaults:  map[glid.GLID]chan<- segmentation.Input{archiveVault: out},
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -311,8 +312,8 @@ func TestManagerRoutesRetentionEject(t *testing.T) {
 	if len(out) != 1 {
 		t.Fatalf("expected 1 ejected record on archive vault, got %d; stats=%+v", len(out), mgr.Stats())
 	}
-	if got := <-out; got != rec {
-		t.Errorf("expected same pointer %p, got %p", rec, got)
+	if got := <-out; got.Record != rec {
+		t.Errorf("expected same pointer %p, got %p", rec, got.Record)
 	}
 	stats := mgr.Stats()
 	if stats.Matched != 1 || stats.Unmatched != 1 {
@@ -332,13 +333,13 @@ func TestManagerRetentionEjectSamePointerFanOut(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompileRoute: %v", err)
 	}
-	chA := make(chan *record.Record, 1)
-	chB := make(chan *record.Record, 1)
+	chA := make(chan segmentation.Input, 1)
+	chB := make(chan segmentation.Input, 1)
 
 	mgr := routing.New(routing.Config{
 		Workers: 1,
 		Table:   routing.NewTable([]*routing.Route{r}),
-		Vaults: map[glid.GLID]chan<- *record.Record{
+		Vaults: map[glid.GLID]chan<- segmentation.Input{
 			destA: chA,
 			destB: chB,
 		},
@@ -359,7 +360,7 @@ func TestManagerRetentionEjectSamePointerFanOut(t *testing.T) {
 
 	gotA := <-chA
 	gotB := <-chB
-	if gotA != rec || gotB != rec {
-		t.Errorf("expected same pointer %p on both vaults, got %p and %p", rec, gotA, gotB)
+	if gotA.Record != rec || gotB.Record != rec {
+		t.Errorf("expected same pointer %p on both vaults, got %p and %p", rec, gotA.Record, gotB.Record)
 	}
 }

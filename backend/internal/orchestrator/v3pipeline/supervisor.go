@@ -69,10 +69,13 @@ type Config struct {
 	SegmentationEncodeCap    int
 	DistributionPullQueueCap int
 
-	// Segmentation close/fsync policy.
+	// Segmentation close policy and node-global commit/fsync defaults. Per-vault
+	// overrides ride on VaultSpec.Commit.
 	SegmentClosePolicy     segmentation.ClosePolicy
 	SegmentSyncBatchSize   int
 	SegmentSyncBatchWindow time.Duration
+	SegmentMaxCommitDelay  time.Duration
+	SegmentDisableFsync    bool
 
 	// Ingestion hooks. PressureGate and OnCheckpoint are optional; the real
 	// ingester factory and pressure wiring land in a later slice.
@@ -97,6 +100,10 @@ type VaultSpec struct {
 	// LocalHolder reports whether this node holds the vault locally (completed→head
 	// rename instead of remote pull). Optional; defaults to false.
 	LocalHolder func() bool
+	// Commit overrides this vault's commit/fsync tuning (group-commit coalesce,
+	// fire-and-forget batch, DisableFsync). Zero fields inherit the node-global
+	// SegmentSyncBatchSize/Window/MaxCommitDelay/DisableFsync defaults. Origin only.
+	Commit segmentation.VaultConfig
 
 	// Home enables the collect/chunk side for this vault on this node.
 	Home bool
@@ -184,6 +191,8 @@ func New(cfg Config) *Supervisor {
 		ClosePolicy:     cfg.SegmentClosePolicy,
 		SyncBatchSize:   cfg.SegmentSyncBatchSize,
 		SyncBatchWindow: cfg.SegmentSyncBatchWindow,
+		MaxCommitDelay:  cfg.SegmentMaxCommitDelay,
+		DisableFsync:    cfg.SegmentDisableFsync,
 		EncodeQueueCap:  cfg.SegmentationEncodeCap,
 		CompletedCap:    cfg.SegmentationCompletedCap,
 	})
@@ -266,12 +275,12 @@ func (s *Supervisor) Stop() error {
 	return nil
 }
 
-// pump forwards digested records into the routing queue. Errored outputs are
-// acked with their error and dropped. On a successful enqueue the record is acked.
-//
-// NOTE(gastrolog-214bz B): acking here is provisional — it reports acceptance into
-// routing, not durability. Slice B threads the ack through to the durable segment
-// write (ack-after-fsync) and removes this early ack.
+// pump forwards digested records into the routing queue. Digest failures are
+// nacked and dropped. For successful records the source ack rides on the routing
+// Input and is fired downstream by the durable-commit path (ack-after-fsync), so
+// pump only enqueues and never acks: blocking here per record would serialize the
+// group commit and defeat batching. The ingester's ack channel must be buffered
+// so the segmentation commit loop never stalls releasing it.
 func (s *Supervisor) pump(ctx context.Context) {
 	defer close(s.routingIn)
 	for {
@@ -288,13 +297,12 @@ func (s *Supervisor) pump(ctx context.Context) {
 				}
 				continue
 			}
+			in := routing.IngestInput(out.Record)
+			in.Ack = out.Ack
 			select {
-			case s.routingIn <- routing.IngestInput(out.Record):
+			case s.routingIn <- in:
 			case <-ctx.Done():
 				return
-			}
-			if out.Ack != nil {
-				out.Ack <- nil
 			}
 		}
 	}
@@ -360,7 +368,7 @@ func (s *Supervisor) RegisterVault(spec VaultSpec) error {
 }
 
 func (s *Supervisor) registerOrigin(spec VaultSpec) error {
-	in, err := s.seg.RegisterVault(spec.VaultID, spec.OriginRoot)
+	in, err := s.seg.RegisterVault(spec.VaultID, spec.OriginRoot, spec.Commit)
 	if err != nil {
 		return fmt.Errorf("segmentation register: %w", err)
 	}

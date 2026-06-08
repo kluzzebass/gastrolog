@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/segmentation"
 	"gastrolog/internal/record"
 )
 
@@ -20,9 +21,16 @@ var ErrNotRunning = errors.New("routing manager not running")
 //   - Vault retention eject: Source from RetentionSource(sourceVaultID, reason)
 //
 // Source is routing-time metadata only — it is not stored on the record.
+//
+// Ack, when non-nil, is the source-side durability ack: routing fans the record
+// out to every matched vault and joins the per-vault commit results so Ack fires
+// nil only after all targets have durably committed (first error wins). This is
+// the cardinal ack-after-fsync path: the upstream ingester must not release a
+// record until its Ack resolves.
 type Input struct {
 	Record *record.Record
 	Source SourceContext
+	Ack    chan<- error
 }
 
 // IngestInput wraps a digested record for the live-ingest routing path.
@@ -36,7 +44,7 @@ type Config struct {
 	Workers int
 	Table   *Table
 	// Vaults maps vault ID to that vault's segmentation input queue.
-	Vaults map[glid.GLID]chan<- *record.Record
+	Vaults map[glid.GLID]chan<- segmentation.Input
 }
 
 // StatsSnapshot is a point-in-time view of routing counters.
@@ -51,7 +59,7 @@ type Manager struct {
 	table   *Table
 
 	vmu    sync.RWMutex
-	vaults map[glid.GLID]chan<- *record.Record
+	vaults map[glid.GLID]chan<- segmentation.Input
 
 	matched   atomic.Uint64
 	unmatched atomic.Uint64
@@ -66,7 +74,7 @@ func New(cfg Config) *Manager {
 	}
 	vaults := cfg.Vaults
 	if vaults == nil {
-		vaults = make(map[glid.GLID]chan<- *record.Record)
+		vaults = make(map[glid.GLID]chan<- segmentation.Input)
 	}
 	return &Manager{
 		workers: cfg.Workers,
@@ -78,7 +86,7 @@ func New(cfg Config) *Manager {
 // RegisterVault sets (or replaces) the segmentation input queue a vault's
 // matched records fan out to. Safe to call before or during Run; the orchestrator
 // reconcile registers vaults as placement changes bring vault homes onto this node.
-func (m *Manager) RegisterVault(vaultID glid.GLID, in chan<- *record.Record) {
+func (m *Manager) RegisterVault(vaultID glid.GLID, in chan<- segmentation.Input) {
 	m.vmu.Lock()
 	m.vaults[vaultID] = in
 	m.vmu.Unlock()
@@ -165,20 +173,76 @@ func (m *Manager) route(ctx context.Context, in Input) {
 	vaults := m.table.Match(rec.Attrs, src)
 	if len(vaults) == 0 {
 		m.unmatched.Add(1)
+		// No route matched: nothing to persist locally. This is an intentional,
+		// counted drop, not a failure — resolve the source ack so a synchronous
+		// sender is not left hanging.
+		sendAck(in.Ack, nil)
 		return
 	}
 	m.matched.Add(1)
+
+	// Snapshot the locally-registered fan-out targets under the read lock. Matched
+	// vaults without a local segmentation queue (e.g. a home that lives on another
+	// node) are skipped here; cross-node fan-out lands in a later slice.
+	m.vmu.RLock()
+	targets := make([]chan<- segmentation.Input, 0, len(vaults))
 	for _, vaultID := range vaults {
-		m.vmu.RLock()
-		out, ok := m.vaults[vaultID]
-		m.vmu.RUnlock()
-		if !ok {
-			continue
+		if out, ok := m.vaults[vaultID]; ok {
+			targets = append(targets, out)
 		}
-		select {
-		case out <- rec:
-		case <-ctx.Done():
+	}
+	m.vmu.RUnlock()
+
+	n := len(targets)
+	if n == 0 {
+		sendAck(in.Ack, nil)
+		return
+	}
+
+	if in.Ack == nil {
+		for _, out := range targets {
+			if !deliver(ctx, out, segmentation.Input{Record: rec}) {
+				return
+			}
+		}
+		return
+	}
+
+	if n == 1 {
+		deliver(ctx, targets[0], segmentation.Input{Record: rec, Ack: in.Ack})
+		return
+	}
+
+	// Multi-vault fan-out: join the per-vault commit acks into the single source ack.
+	children := newAckJoin(n, in.Ack)
+	for i, out := range targets {
+		if !deliver(ctx, out, segmentation.Input{Record: rec, Ack: children[i]}) {
+			// deliver already nacked children[i]; release the still-undelivered
+			// children so the join resolves instead of leaking its collector.
+			for j := i + 1; j < n; j++ {
+				children[j] <- ctx.Err()
+			}
 			return
 		}
+	}
+}
+
+// deliver enqueues item to a vault's segmentation queue, nacking item.Ack if the
+// context is cancelled before the send completes. Returns false on cancellation.
+func deliver(ctx context.Context, out chan<- segmentation.Input, item segmentation.Input) bool {
+	select {
+	case out <- item:
+		return true
+	case <-ctx.Done():
+		if item.Ack != nil {
+			item.Ack <- ctx.Err()
+		}
+		return false
+	}
+}
+
+func sendAck(ack chan<- error, err error) {
+	if ack != nil {
+		ack <- err
 	}
 }
