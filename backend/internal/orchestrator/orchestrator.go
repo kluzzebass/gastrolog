@@ -38,24 +38,22 @@ type IngesterStats struct {
 	Alive            atomic.Bool // true while Run() is executing, false during retry sleep
 }
 
-// RouteStats tracks routing metrics using atomic counters.
-// Safe for concurrent reads (from API handlers) and writes (from ingest loop).
+// RouteStats is a point-in-time snapshot of global routing counters sourced
+// from the pipeline routing manager.
 type RouteStats struct {
-	Ingested atomic.Int64 // total records entering ingest()
-	Dropped  atomic.Int64 // records matching no filter
-	Routed   atomic.Int64 // records delivered to at least one vault
+	Ingested int64 // total records that entered routing (matched + unmatched)
+	Dropped  int64 // records matching no route (intentional, counted drop)
+	Routed   int64 // records that matched a route and were fanned out
 }
 
-// VaultRouteStats tracks per-vault routing metrics.
+// VaultRouteStats is a point-in-time snapshot of per-vault routing counters.
 type VaultRouteStats struct {
-	Matched   atomic.Int64 // records routed to this vault
-	Forwarded atomic.Int64 // records sent to remote node for this vault
+	Matched int64 // records routed to this vault
 }
 
-// PerRouteStats tracks per-route routing metrics.
+// PerRouteStats is a point-in-time snapshot of per-route routing counters.
 type PerRouteStats struct {
-	Matched   atomic.Int64 // records matched by this route
-	Forwarded atomic.Int64 // records forwarded to remote node by this route
+	Matched int64 // records matched by this route
 }
 
 // ingesterInfo holds metadata about an ingester for logging purposes.
@@ -86,28 +84,6 @@ type drainState struct {
 	Cancel       context.CancelFunc
 }
 
-// RecordForwarder ships records to remote cluster nodes for vault routes
-// that target a vault on another node.
-//
-// Forward is a best-effort enqueue (drop on full) — used only for ancillary
-// paths such as placement redirect replays, not the ingestion hot path.
-//
-// ForwardSync blocks until each record is accepted by the per-node buffer
-// or ctx / forwarder shutdown fires. The direct ingest path uses this (outside
-// o.mu) so a full forward buffer applies backpressure to the caller instead of
-// dropping records. Ack-gated ingestion also uses ForwardSync from
-// ackAfterReplication.
-//
-// RegisterPressureGate wires the per-node forward channels as probes on
-// the orchestrator's shared pressure gate so ingesters throttle upstream
-// when cross-node forwarding is backed up (gastrolog-27zvt).
-type RecordForwarder interface {
-	Forward(ctx context.Context, nodeID string, vaultID glid.GLID, records []chunk.Record) error
-	ForwardSync(ctx context.Context, nodeID string, vaultID glid.GLID, records []chunk.Record) error
-	RegisterPressureGate(gate *chanwatch.PressureGate)
-	RedirectNode(fromNodeID, toNodeID string)
-}
-
 // ChunkReplicator sequences all replication commands for an instance on a single
 // ordered stream per follower. Nil in single-node mode.
 //
@@ -127,8 +103,6 @@ type RecordForwarder interface {
 // its own concern; transient follower-not-ready errors are retried by
 // higher-level catchup scheduling (see ScheduleCatchup).
 type ChunkReplicator interface {
-	AppendRecords(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error
-	SealVault(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID) error
 	ImportSealedChunk(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error
 	DeleteChunk(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID) error
 
@@ -142,21 +116,13 @@ type ChunkReplicator interface {
 }
 
 // RemoteTransferrer sends records to a remote node for cross-node chunk
-// migration. Unlike RecordForwarder (fire-and-forget for ingestion), this
-// is synchronous and reliable — the caller blocks until the remote node
-// confirms delivery.
+// migration. Synchronous and reliable — the caller blocks until the remote
+// node confirms delivery.
 type RemoteTransferrer interface {
 	// TransferRecords streams records to a remote node, which imports them
 	// as a new sealed chunk. Used by MoveChunk and DrainVault where
 	// preserving chunk boundaries is desired.
 	TransferRecords(ctx context.Context, nodeID string, vaultID glid.GLID, next chunk.RecordIterator) error
-
-	// ForwardAppend sends records to a remote node, which appends them to
-	// the destination vault's active chunk (same as live ingestion).
-	// Synchronous — blocks until the remote node confirms the append.
-	// Used by retention eject where records should flow through the
-	// destination's normal rotation lifecycle.
-	ForwardAppend(ctx context.Context, nodeID string, vaultID glid.GLID, records []chunk.Record) error
 
 	// WaitVaultReady blocks until the vault is registered and accepting
 	// records on the given node, or ctx expires. Used by DrainVault to
@@ -203,11 +169,10 @@ type Orchestrator struct {
 	vaults map[glid.GLID]*Vault
 
 	// Ingester management.
-	ingesters       map[glid.GLID]Ingester
-	ingesterCancels map[glid.GLID]context.CancelFunc      // per-ingester cancel functions
-	ingesterStats   map[glid.GLID]*IngesterStats          // per-ingester metrics
-	ingesterMeta    map[glid.GLID]ingesterInfo            // per-ingester name/type for logging
-	ingesterAdapters map[glid.GLID]ingestion.Ingester     // stable pipeline adapters (no-flap reconcile identity)
+	ingesters        map[glid.GLID]Ingester
+	ingesterStats    map[glid.GLID]*IngesterStats     // per-ingester metrics
+	ingesterMeta     map[glid.GLID]ingesterInfo       // per-ingester name/type for logging
+	ingesterAdapters map[glid.GLID]ingestion.Ingester // stable pipeline adapters (no-flap reconcile identity)
 
 	// pipeline is the ingest pipeline supervisor: it owns the durable write path
 	// (ingest→digest→route→segment→distribute). The orchestrator drives its
@@ -230,28 +195,11 @@ type Orchestrator struct {
 	// collection. Set from factories during ApplyConfig (cluster mode only).
 	segmentPuller *cluster.SegmentPuller
 
-	// Routing table — gastrolog-4kkoo (Phase 5): per-route, priority-ordered,
-	// first-match-wins. Replaces the Phase-4 per-vault FilterSet.
-	routeSet *RouteSet
-
-	// Route stats (atomic, no lock needed for reads/writes).
-	routeStats      RouteStats
-	vaultRouteStats sync.Map // glid.GLID → *VaultRouteStats
-	perRouteStats   sync.Map // glid.GLID → *PerRouteStats
-
-	// Record forwarder for cross-node delivery (nil in single-node mode).
-	forwarder RecordForwarder
-
 	// Remote transferrer for cross-node chunk migration (nil in single-node mode).
 	transferrer RemoteTransferrer
 
 	// Vault replicator: ordered stream per instance per follower (nil in single-node mode).
 	chunkReplicator ChunkReplicator
-
-	// replicaCircuit tracks per-node backoff for follower replication.
-	// After consecutive failures, the node is skipped until the backoff
-	// expires. Prevents log spam when a follower is down.
-	replicaCircuit sync.Map // nodeID (string) → *replicaBackoff
 
 	// groupMgr is the shared multi-group Raft manager (system, vault ctl, …).
 	// Set from factories during ApplyConfig; used to tear down vault ctl groups.
@@ -286,17 +234,12 @@ type Orchestrator struct {
 	// Retention runners (keyed by vaultID:storageID, invoked by the shared scheduler).
 	retention map[string]*retentionRunner
 
-	// Shared scheduler for all periodic tasks (cron rotation, retention, etc.).
+	// Shared scheduler for all periodic tasks (retention, placement reconcile, etc.).
 	scheduler *Scheduler
 
-	// Cron rotation lifecycle.
-	cronRotation *cronRotationManager
-
-	// Per-instance rate alerters that surface pathological rotation or
-	// retention configurations as operator-visible alerts. See
-	// gastrolog-47qyw. Both are initialized in New() and evaluated by
-	// a periodic goroutine in Start().
-	rotationRates  *RateAlerter
+	// Per-instance retention rate alerter that surfaces pathological retention
+	// configurations as operator-visible alerts. See gastrolog-47qyw.
+	// Initialized in New() and evaluated by a periodic goroutine in Start().
 	retentionRates *RateAlerter
 
 	// Clock for testing.
@@ -664,7 +607,6 @@ func New(cfg Config) (*Orchestrator, error) {
 	o := &Orchestrator{
 		vaults:               make(map[glid.GLID]*Vault),
 		ingesters:            make(map[glid.GLID]Ingester),
-		ingesterCancels:      make(map[glid.GLID]context.CancelFunc),
 		ingesterStats:        make(map[glid.GLID]*IngesterStats),
 		ingesterMeta:         make(map[glid.GLID]ingesterInfo),
 		ingesterAdapters:     make(map[glid.GLID]ingestion.Ingester),
@@ -672,7 +614,6 @@ func New(cfg Config) (*Orchestrator, error) {
 		vaultDraining:        make(map[string]*vaultDrainState),
 		retention:            make(map[string]*retentionRunner),
 		scheduler:            sched,
-		cronRotation:         newCronRotationManager(sched, logger),
 		sysLoader:            cfg.SystemLoader,
 		localNodeID:          cfg.LocalNodeID,
 		localNodeIDGLID:      parseNodeGLID(cfg.LocalNodeID),
@@ -721,10 +662,6 @@ func New(cfg Config) (*Orchestrator, error) {
 	// refresher starts in Start() and overwrites this on its first pass.
 	o.cachedReplicationReady.Store(true)
 
-	// Wire up post-seal callback for cron rotation so sealed chunks
-	// get compressed and indexed (same pipeline as ingest-triggered seals).
-	o.cronRotation.onSeal = o.postSealWork
-
 	// gastrolog-51gme step 10: when the vault-ctl Raft leader removes a
 	// node from the voter set, propose CmdPruneNode on every instance
 	// sub-FSM in that vault so pendingDeletes ExpectedFrom obligations
@@ -733,20 +670,9 @@ func New(cfg Config) (*Orchestrator, error) {
 	// CmdFinalizeDelete for any chunk whose ExpectedFrom became empty.
 	o.vaultCtlLeaders.SetOnMemberRemoved(o.proposePruneNodeForVault)
 
-	// Per-instance rate alerters. Thresholds are taken from gastrolog-47qyw:
-	//   rotation: warn at >1/sec, error at >5/sec, sustained over 30s
-	//   retention: warn at >10/sec sustained over 30s
-	// The orchestrator's vaultName closure looks up the human label from
-	// the current vault registry; "" is returned if the instance is unknown.
-	o.rotationRates = newRateAlerter(rateAlerterConfig{
-		Window:    30 * time.Second,
-		Kind:      "rotation",
-		Source:    "rotation",
-		WarningAt: 1.0,
-		ErrorAt:   5.0,
-		Alerts:    o.alerts,
-		VaultName: o.vaultLabel,
-	})
+	// Per-instance retention rate alerter (gastrolog-47qyw): warn at >10/sec
+	// sustained over 30s. The orchestrator's vaultName closure looks up the
+	// human label from the current vault registry; "" if the instance is unknown.
 	o.retentionRates = newRateAlerter(rateAlerterConfig{
 		Window:    30 * time.Second,
 		Kind:      "retention",
@@ -756,14 +682,6 @@ func New(cfg Config) (*Orchestrator, error) {
 		Alerts:    o.alerts,
 		VaultName: o.vaultLabel,
 	})
-
-	// Cron rotation completes its work outside the post-seal pipeline,
-	// so the rotation rate counter must be hooked from the cron manager
-	// directly. The age-based rotationsweep path increments the counter
-	// inline at its seal-trigger site.
-	o.cronRotation.onRotation = func(vaultID glid.GLID) {
-		o.rotationRates.Record(vaultID, o.now())
-	}
 
 	// Register the single retention sweep that discovers all vault instances
 	// each tick. No per-vault lifecycle management needed.
@@ -805,12 +723,6 @@ func New(cfg Config) (*Orchestrator, error) {
 	}
 
 	return o, nil
-}
-
-// SetRecordForwarder injects the cross-node record forwarder.
-// Must be called before Start(). Safe to leave nil for single-node mode.
-func (o *Orchestrator) SetRecordForwarder(f RecordForwarder) {
-	o.forwarder = f
 }
 
 // SetRemoteTransferrer injects the cross-node chunk transferrer.
@@ -859,40 +771,44 @@ func (o *Orchestrator) IsIngesterRunning(id glid.GLID) bool {
 	return stats != nil && stats.Alive.Load()
 }
 
-// GetRouteStats returns the global route stats.
+// GetRouteStats returns a snapshot of the global routing counters, sourced from
+// the pipeline routing manager (records that entered routing, were dropped as
+// unmatched, or matched a route and were fanned out).
 func (o *Orchestrator) GetRouteStats() *RouteStats {
-	return &o.routeStats
+	snap := o.pipeline.RouteStats()
+	return &RouteStats{
+		Ingested: int64(snap.Ingested), //nolint:gosec // G115: counter bounded in practice
+		Dropped:  int64(snap.Unmatched), //nolint:gosec // G115
+		Routed:   int64(snap.Matched),  //nolint:gosec // G115
+	}
 }
 
-// IsFilterSetActive reports whether a routing table is currently
-// loaded. When false, all ingested records are silently dropped.
-// gastrolog-4kkoo (Phase 5): name kept for proto/RPC stability — the
-// underlying state is now a RouteSet, not a per-vault FilterSet.
+// IsFilterSetActive reports whether a routing table is currently published to
+// the pipeline. When false, all ingested records are silently dropped. Name
+// kept for proto/RPC stability.
 func (o *Orchestrator) IsFilterSetActive() bool {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	return o.routeSet != nil
+	return o.pipeline.RoutingActive()
 }
 
-// VaultRouteStatsList returns per-vault routing stats for all vaults
-// that have received at least one record.
+// VaultRouteStatsList returns per-vault matched-record counts from the pipeline
+// routing manager (one entry per destination vault that has matched a route).
 func (o *Orchestrator) VaultRouteStatsList() map[glid.GLID]*VaultRouteStats {
-	result := make(map[glid.GLID]*VaultRouteStats)
-	o.vaultRouteStats.Range(func(key, value any) bool {
-		result[key.(glid.GLID)] = value.(*VaultRouteStats)
-		return true
-	})
+	snap := o.pipeline.RouteStats()
+	result := make(map[glid.GLID]*VaultRouteStats, len(snap.PerVault))
+	for vaultID, matched := range snap.PerVault {
+		result[vaultID] = &VaultRouteStats{Matched: int64(matched)} //nolint:gosec // G115
+	}
 	return result
 }
 
-// PerRouteStatsList returns per-route routing stats for all routes
-// that have matched at least one record.
+// PerRouteStatsList returns per-route matched-record counts from the pipeline
+// routing manager (one entry per route that has matched at least one record).
 func (o *Orchestrator) PerRouteStatsList() map[glid.GLID]*PerRouteStats {
-	result := make(map[glid.GLID]*PerRouteStats)
-	o.perRouteStats.Range(func(key, value any) bool {
-		result[key.(glid.GLID)] = value.(*PerRouteStats)
-		return true
-	})
+	snap := o.pipeline.RouteStats()
+	result := make(map[glid.GLID]*PerRouteStats, len(snap.PerRoute))
+	for routeID, matched := range snap.PerRoute {
+		result[routeID] = &PerRouteStats{Matched: int64(matched)} //nolint:gosec // G115
+	}
 	return result
 }
 

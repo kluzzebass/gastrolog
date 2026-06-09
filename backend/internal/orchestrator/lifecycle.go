@@ -34,7 +34,7 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 		"vaults", len(o.vaults),
 		"ingesters", len(o.ingesters))
 
-	if o.routeSet == nil && len(o.vaults) > 0 {
+	if !o.pipeline.RoutingActive() && len(o.vaults) > 0 {
 		o.logger.Warn("no routes configured, ingested records will be dropped")
 	}
 
@@ -43,13 +43,11 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 
 	// pipeline pressure gate. PressureAware ingesters consult it to throttle
 	// when the pipeline backs up; the supervisor's ingestion manager injects it
-	// into each ingester. Cross-node forward channels register as probes so
-	// ingesters also throttle on remote-forward backpressure (gastrolog-27zvt).
-	// The supervisor's internal inter-phase queues are bounded and block, which
-	// is the primary backpressure mechanism for the durable write path.
+	// into each ingester. The supervisor's internal inter-phase queues are
+	// bounded and block, which is the primary backpressure mechanism for the
+	// durable write path.
 	// TODO(gastrolog-jiwlf): expose supervisor queue depths as gate probes so
-	// local-pipeline saturation (not just cross-node forward) raises pressure
-	// alerts.
+	// local-pipeline saturation raises pressure alerts.
 	gate := o.pipelineGate
 	if ac, ok := o.alerts.(*alert.Collector); ok {
 		gate.AddOnChange(func(tr chanwatch.PressureTransition) {
@@ -69,9 +67,6 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 			)
 		})
 	}
-	if o.forwarder != nil {
-		o.forwarder.RegisterPressureGate(gate)
-	}
 
 	// Push the bootstrap-registered ingester set into the supervisor, then start
 	// the pipeline (the ingestion manager launches the ingesters).
@@ -89,8 +84,8 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	o.auxWg.Go(func() { gate.Run(ctx, 200*time.Millisecond) })
 
 	// Periodic per-vault rate alert evaluator (gastrolog-47qyw). Evaluates
-	// rotation and retention rates against thresholds every 5 seconds and
-	// raises/clears alerts as needed.
+	// retention rates against thresholds every 5 seconds and raises/clears
+	// alerts as needed.
 	o.auxWg.Go(func() { o.runRateAlertEvaluator(ctx, 5*time.Second) })
 
 	// Active-chunk progress throttle (gastrolog-4y03v). Append paths
@@ -120,12 +115,17 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	// kubelet's probe stays responsive when o.mu is contended by a
 	// vault-ctl AddVoter burst on K8s scale-out.
 	o.auxWg.Go(func() { o.runReadinessRefresher(ctx, readinessRefreshInterval) })
+	// Seed the cache synchronously while o.mu is held so /readyz is correct
+	// immediately after Start() — the async refresher's first tick can lag
+	// by up to readinessRefreshInterval and would otherwise leave the
+	// constructor's optimistic true seed visible (gastrolog-5n6xz).
+	o.cachedReplicationReady.Store(o.liveReplicationReadyLocked())
 
 	return nil
 }
 
-// runRateAlertEvaluator periodically evaluates rotation and retention rate
-// alerters. Exits when ctx is cancelled.
+// runRateAlertEvaluator periodically evaluates the retention rate alerter and
+// cloud health. Exits when ctx is cancelled.
 func (o *Orchestrator) runRateAlertEvaluator(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -135,7 +135,6 @@ func (o *Orchestrator) runRateAlertEvaluator(ctx context.Context, interval time.
 			return
 		case <-ticker.C:
 			now := o.now()
-			o.rotationRates.Evaluate(now)
 			o.retentionRates.Evaluate(now)
 			o.evaluateCloudHealth()
 		}
@@ -147,8 +146,8 @@ func (o *Orchestrator) runRateAlertEvaluator(ctx context.Context, interval time.
 //
 // Ordered shutdown:
 //  0. BeginShutdown on the shared phase (if wired) → fast-path skip in
-//     fireAndForgetRemote / sealRemoteFollowers so the drain pipeline
-//     doesn't spam peers that are going down alongside us.
+//     sealed-chunk replication so the drain pipeline doesn't spam peers
+//     that are going down alongside us.
 //  1. Stop the pipeline supervisor — ingestion stops first (closing the ingest
 //     queue), cascading through digest→route→segment as each queue closes,
 //     then the remaining managers are cancelled. Ingesters' alive state is
@@ -163,9 +162,9 @@ func (o *Orchestrator) Stop() error {
 	o.mu.Unlock()
 
 	// Stage 0: flip the shutdown phase BEFORE any drain work so that
-	// fireAndForgetRemote / sealRemoteFollowers skip their remote calls
-	// while we drain. Idempotent if the top-level shutdown already flipped
-	// it; safe to call with a nil phase (single-node tests). See gastrolog-1e5ke.
+	// sealed-chunk replication skips its remote calls while we drain.
+	// Idempotent if the top-level shutdown already flipped it; safe to call
+	// with a nil phase (single-node tests). See gastrolog-1e5ke.
 	if o.phase != nil {
 		o.phase.BeginShutdown("orchestrator: stopping pipeline")
 	}

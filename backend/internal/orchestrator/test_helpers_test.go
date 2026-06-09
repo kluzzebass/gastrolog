@@ -387,19 +387,6 @@ type directTransferrer struct {
 	nodes map[string]*Orchestrator
 }
 
-func (d *directTransferrer) ForwardAppend(_ context.Context, nodeID string, vaultID glid.GLID, records []chunk.Record) error {
-	orch, ok := d.nodes[nodeID]
-	if !ok {
-		return fmt.Errorf("directTransferrer: unknown node %q", nodeID)
-	}
-	for _, rec := range records {
-		if _, _, err := orch.Append(vaultID, rec); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (d *directTransferrer) TransferRecords(ctx context.Context, nodeID string, vaultID glid.GLID, next chunk.RecordIterator) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
@@ -413,7 +400,7 @@ func (d *directTransferrer) TransferRecords(ctx context.Context, nodeID string, 
 		if err != nil {
 			return err
 		}
-		if _, _, err := orch.Append(vaultID, rec); err != nil {
+		if err := orch.AppendToVault(vaultID, chunk.ChunkID{}, rec); err != nil {
 			return err
 		}
 	}

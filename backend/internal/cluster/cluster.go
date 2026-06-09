@@ -20,7 +20,6 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"gastrolog/internal/chunk"
@@ -41,7 +40,7 @@ import (
 )
 
 // maxChunkTransferBytes is the max gRPC receive message size for the cluster
-// port. Covers the unary ForwardRecords batch ingestion RPC.
+// port.
 const maxChunkTransferBytes = 128 * 1024 * 1024 // 128 MB
 
 // Config holds cluster server configuration.
@@ -131,20 +130,6 @@ type Server struct {
 	// Set by the composition root in app.go. See gastrolog-2dgvj.
 	replicaCatchupFn func(ctx context.Context, vaultID glid.GLID, chunkIDs []chunk.ChunkID, requesterNodeID string) (int, error)
 
-	// recordAppender writes forwarded records into local vaults.
-	// Set after the orchestrator is created, before forwarding starts.
-	recordAppender RecordAppender
-
-	// recordAppenderForVault writes forwarded records into a specific vault.
-	// Used for inter-vault transition when vault_id is set on ForwardRecordsRequest.
-	recordAppenderForVault VaultRecordAppender
-
-	// chunkSealExecutor seals a specific chunk on this node, used by the
-	// ChunkReplication stream handler when the leader propagates a seal
-	// command. Distinct from sealVaultExecutor which is the user-facing
-	// SealVault RPC handler with no expected-chunk gate.
-	chunkSealExecutor ChunkSealExecutor
-
 	// deleteChunkExecutor deletes a sealed chunk from a vault on this node.
 	// Invoked by the ChunkReplication stream handler.
 	deleteChunkExecutor DeleteChunkExecutor
@@ -219,9 +204,6 @@ type Server struct {
 	// composition root before Start().
 	internalHandler http.Handler
 
-	// forwardedReceived counts records received via ForwardRecords RPCs.
-	forwardedReceived atomic.Int64
-
 	// peerConns is the shared connection pool for all peer communication.
 	// Created in SetRaft once the raft instance is available.
 	peerConns *PeerConns
@@ -242,11 +224,6 @@ type Server struct {
 	// surface under Pause's full stop. Zero duration = no effect.
 	slowMu  sync.Mutex
 	slowDur time.Duration
-}
-
-// ForwardedReceived returns the number of records received via ForwardRecords RPCs.
-func (s *Server) ForwardedReceived() int64 {
-	return s.forwardedReceived.Load()
 }
 
 // New creates a new cluster Server and binds the listen port immediately.

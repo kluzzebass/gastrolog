@@ -77,12 +77,6 @@ func newVaultTestSetup(t *testing.T, recordCount int) vaultTestClients {
 
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
-	// gastrolog-4kkoo (Phase 5): catch-all route so the orchestrator
-	// knows about the vault.
-	cr, _ := orchestrator.CompileRoute(glid.New(), "all", 0, "*",
-		[]orchestrator.RouteDestination{{VaultID: defaultID}}, "fanout")
-	orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{cr}))
-
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
 	handler := srv.Handler()
 
@@ -282,6 +276,7 @@ type fullVaultTestClients struct {
 	vault     gastrologv1connect.VaultServiceClient
 	job       gastrologv1connect.JobServiceClient
 	cfgStore  system.Store
+	orch      *orchestrator.Orchestrator
 	defaultID glid.GLID
 }
 
@@ -345,8 +340,33 @@ func newFullVaultTestSetup(t *testing.T, recordCount int) fullVaultTestClients {
 		vault:     gastrologv1connect.NewVaultServiceClient(httpClient, "http://embedded"),
 		job:       gastrologv1connect.NewJobServiceClient(httpClient, "http://embedded"),
 		cfgStore:  cfgStore,
+		orch:      orch,
 		defaultID: defaultID,
 	}
+}
+
+// startImportPipeline brings the orchestrator's pipeline up so the
+// direct-to-vault submit path (ImportRecords → SubmitToVault) has a live local
+// segmentation queue to ack against. ReloadFilters runs before Start so the
+// home vault is origin-registered while the segmentation manager is not yet
+// running (registration after Start races the manager's startup window).
+//
+// This single-node memory harness has no GroupManager, so pipeline-imported
+// records land in durable segments but are not chunked into queryable GLCBs;
+// the full import→seal→query round-trip is covered at the component level by
+// orchestrator pipeline_query_test.go (Rubicon E1) and end-to-end by the
+// cluster acceptance suite (Rubicon E3). These RPC tests assert the handler's
+// submit contract: records are accepted and durably committed.
+func startImportPipeline(t *testing.T, orch *orchestrator.Orchestrator) {
+	t.Helper()
+	ctx := context.Background()
+	if err := orch.ReloadFilters(ctx); err != nil {
+		t.Fatalf("ReloadFilters: %v", err)
+	}
+	if err := orch.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = orch.Stop() })
 }
 
 func TestExportVault(t *testing.T) {
@@ -408,16 +428,15 @@ func TestExportVaultNotFound(t *testing.T) {
 func TestImportRecords(t *testing.T) {
 	t.Parallel()
 	tc := newFullVaultTestSetup(t, 0) // Empty vault.
+	startImportPipeline(t, tc.orch)
 	ctx := context.Background()
 
-	now := time.Now()
 	records := make([]*gastrologv1.ExportRecord, 10)
 	for i := range records {
 		records[i] = &gastrologv1.ExportRecord{
 			Raw:   []byte("imported-record"),
 			Attrs: map[string]string{"source": "import"},
 		}
-		_ = now // timestamps optional
 	}
 
 	resp, err := tc.vault.ImportRecords(ctx, connect.NewRequest(&gastrologv1.ImportRecordsRequest{
@@ -428,19 +447,13 @@ func TestImportRecords(t *testing.T) {
 		t.Fatalf("ImportRecords: %v", err)
 	}
 
+	// RecordsImported counts records that were durably committed to the
+	// pipeline's segmentation queue (each submit waits for its fsync ack), so a
+	// full count proves every record landed. Queryability of pipeline-imported
+	// records requires chunking (GroupManager-backed), covered elsewhere — see
+	// startImportPipeline.
 	if resp.Msg.RecordsImported != 10 {
 		t.Errorf("expected 10 records imported, got %d", resp.Msg.RecordsImported)
-	}
-
-	// Verify records exist in the vault.
-	stats, err := tc.vault.GetStats(ctx, connect.NewRequest(&gastrologv1.GetStatsRequest{
-		Vault: tc.defaultID.String(),
-	}))
-	if err != nil {
-		t.Fatalf("GetStats: %v", err)
-	}
-	if stats.Msg.TotalRecords != 10 {
-		t.Errorf("expected 10 records in vault, got %d", stats.Msg.TotalRecords)
 	}
 }
 
@@ -464,6 +477,7 @@ func TestImportRecordsVaultNotFound(t *testing.T) {
 func TestExportImportRoundTrip(t *testing.T) {
 	t.Parallel()
 	tc := newFullVaultTestSetup(t, 12)
+	startImportPipeline(t, tc.orch)
 	ctx := context.Background()
 
 	// Export from default vault.
@@ -496,19 +510,25 @@ func TestExportImportRoundTrip(t *testing.T) {
 		t.Fatalf("ImportRecords: %v", err)
 	}
 
+	// Every exported record round-trips back through the pipeline submit path
+	// and is durably committed (RecordsImported counts fsync-acked records).
+	// The original 12 stay queryable in the vault's chunk manager; the 12
+	// re-imported records land in pipeline segments and become queryable only
+	// once chunked (GroupManager-backed) — see startImportPipeline for why this
+	// harness asserts the submit contract rather than the full query round-trip.
 	if resp.Msg.RecordsImported != 12 {
 		t.Errorf("expected 12 records imported, got %d", resp.Msg.RecordsImported)
 	}
 
-	// Default vault should now have 24 records (12 original + 12 imported).
+	// The 12 originally-seeded records remain queryable in the vault.
 	stats, err := tc.vault.GetStats(ctx, connect.NewRequest(&gastrologv1.GetStatsRequest{
 		Vault: tc.defaultID.String(),
 	}))
 	if err != nil {
 		t.Fatalf("GetStats: %v", err)
 	}
-	if stats.Msg.TotalRecords != 24 {
-		t.Errorf("expected 24 records after round-trip, got %d", stats.Msg.TotalRecords)
+	if stats.Msg.TotalRecords != 12 {
+		t.Errorf("expected 12 seeded records queryable, got %d", stats.Msg.TotalRecords)
 	}
 }
 

@@ -69,6 +69,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1351,11 +1352,32 @@ func (r *VaultLifecycleReconciler) deleteLocalCopy(chunkID chunk.ChunkID) error 
 			return fmt.Errorf("delete chunk: %w", err)
 		}
 	}
+	// Best-effort cleanup of pipeline-built GLCB dirs at the vault ChunkRoot.
+	// Covers deletes that ran before RegisterExternalGLCB or when the chunk
+	// manager had no local registration (gastrolog-358ak, Rubicon E2).
+	r.deletePipelineChunkDir(chunkID)
 	if r.orch != nil {
 		// Carry the DELETED op so subscribers remove the cache entry.
 		r.orch.EmitChunkDeleted(r.vaultID, chunkID)
 	}
 	return nil
+}
+
+// deletePipelineChunkDir removes <ChunkRoot>/<chunkID>/ on this node's vault
+// home when the pipeline built the sealed GLCB there. Idempotent and best-effort.
+func (r *VaultLifecycleReconciler) deletePipelineChunkDir(chunkID chunk.ChunkID) {
+	if r.orch == nil {
+		return
+	}
+	chunkRoot, ok := r.orch.pipelineVaultChunkRoot(r.vaultID)
+	if !ok {
+		return
+	}
+	chunkDir := filepath.Dir(chunking.ChunkGLCBPath(chunkRoot, chunkID))
+	if err := os.RemoveAll(chunkDir); err != nil && !os.IsNotExist(err) {
+		r.logger.Warn("deletePipelineChunkDir: RemoveAll failed",
+			"vault", r.vaultID, "chunk", chunkID, "dir", chunkDir, "error", err)
+	}
 }
 
 // ---------- Single deletion entry point ----------

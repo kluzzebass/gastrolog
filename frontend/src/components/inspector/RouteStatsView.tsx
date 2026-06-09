@@ -3,8 +3,6 @@ import { useRouteStats } from "../../api/hooks/useRouteStats";
 import { useRoutes, useVaults } from "../../api/hooks";
 import { idFromBytes, type EntityID } from "../../api/model/id";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
-import { Badge } from "../Badge";
-
 interface RouteStatsViewProps {
   dark: boolean;
 }
@@ -92,11 +90,10 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
             className={`rounded-lg border overflow-hidden ${c("border-ink-border", "border-light-border")}`}
           >
             <div
-              className={`grid grid-cols-[1fr_7rem_7rem] gap-3 px-4 py-2 text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c("text-text-muted border-ink-border-subtle bg-ink-well", "text-light-text-muted border-light-border-subtle bg-light-well")}`}
+              className={`grid grid-cols-[1fr_7rem] gap-3 px-4 py-2 text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c("text-text-muted border-ink-border-subtle bg-ink-well", "text-light-text-muted border-light-border-subtle bg-light-well")}`}
             >
               <span>Vault</span>
               <span className="text-right">Matched</span>
-              <span className="text-right">Forwarded</span>
             </div>
             {sorted.map((vs) => {
               const vsId = idFromBytes(vs.vaultId);
@@ -104,7 +101,7 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
               return (
                 <div
                   key={vsId}
-                  className={`grid grid-cols-[1fr_7rem_7rem] gap-3 px-4 py-2.5 text-[0.85em] border-b last:border-b-0 ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
+                  className={`grid grid-cols-[1fr_7rem] gap-3 px-4 py-2.5 text-[0.85em] border-b last:border-b-0 ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
                 >
                   <span
                     className={`font-mono truncate ${c("text-text-bright", "text-light-text-bright")}`}
@@ -116,17 +113,6 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
                     className={`font-mono text-right ${c("text-text-muted", "text-light-text-muted")}`}
                   >
                     {formatCount(vs.recordsMatched)}
-                  </span>
-                  <span className="font-mono text-right">
-                    {Number(vs.recordsForwarded) > 0 ? (
-                      <Badge variant="info" dark={dark}>
-                        {formatCount(vs.recordsForwarded)}
-                      </Badge>
-                    ) : (
-                      <span className={c("text-text-muted", "text-light-text-muted")}>
-                        0
-                      </span>
-                    )}
                   </span>
                 </div>
               );
@@ -147,16 +133,15 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
             className={`rounded-lg border overflow-hidden ${c("border-ink-border", "border-light-border")}`}
           >
             <div
-              className={`grid grid-cols-[1fr_7rem_7rem] gap-3 px-4 py-2 text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c("text-text-muted border-ink-border-subtle bg-ink-well", "text-light-text-muted border-light-border-subtle bg-light-well")}`}
+              className={`grid grid-cols-[1fr_7rem] gap-3 px-4 py-2 text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c("text-text-muted border-ink-border-subtle bg-ink-well", "text-light-text-muted border-light-border-subtle bg-light-well")}`}
             >
               <span>Route</span>
               <span className="text-right">Matched</span>
-              <span className="text-right">Forwarded</span>
             </div>
             {sortedRoutes.map((route) => (
               <div
                 key={route.id}
-                className={`grid grid-cols-[1fr_7rem_7rem] gap-3 px-4 py-2.5 text-[0.85em] border-b last:border-b-0 ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
+                className={`grid grid-cols-[1fr_7rem] gap-3 px-4 py-2.5 text-[0.85em] border-b last:border-b-0 ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
               >
                 <span
                   className={`font-mono truncate ${c("text-text-bright", "text-light-text-bright")}`}
@@ -168,17 +153,6 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
                   className={`font-mono text-right ${c("text-text-muted", "text-light-text-muted")}`}
                 >
                   {formatCount(route.recordsMatched)}
-                </span>
-                <span className="font-mono text-right">
-                  {Number(route.recordsForwarded) > 0 ? (
-                    <Badge variant="info" dark={dark}>
-                      {formatCount(route.recordsForwarded)}
-                    </Badge>
-                  ) : (
-                    <span className={c("text-text-muted", "text-light-text-muted")}>
-                      0
-                    </span>
-                  )}
                 </span>
               </div>
             ))}

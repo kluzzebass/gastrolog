@@ -117,18 +117,14 @@ message NodeStats {
   repeated gastrolog.v1.VaultRouteStats route_vault_stats = 32;
   repeated gastrolog.v1.PerRouteStats route_per_route_stats = 33;
 
-  // Forwarding stats — records sent and received via ForwardRecords RPCs.
-  int64 forwarded_sent = 34;
-  int64 forwarded_received = 35;
-
   // Active system alerts on this node.
-  repeated SystemAlert alerts = 36;
+  repeated SystemAlert alerts = 34;
 
   // Per-peer inter-node gRPC transport bytes, from this node's perspective.
   // Populated from the cluster transport stats handlers — includes Raft,
   // broadcast, vault replication, query forwarding, chunk streaming, etc.
   // See gastrolog-47u85.
-  repeated PeerBytesStat peer_bytes = 37;
+  repeated PeerBytesStat peer_bytes = 35;
 }
 
 // PeerBytesStat reports cumulative gRPC wire bytes sent to and received from
@@ -180,19 +176,6 @@ message IngesterNodeStats {
   string name = 6;
 }
 
-// ForwardRecordsRequest ships a batch of records to the node that owns
-// the destination vault. Sent by retention eject to route records to a
-// remote vault. Records are appended to the destination vault's active
-// chunk.
-message ForwardRecordsRequest {
-  bytes vault_id = 1;
-  repeated ExportRecord records = 2;
-}
-
-message ForwardRecordsResponse {
-  int64 records_written = 1;
-}
-
 // ForwardVaultApplyRequest carries a pre-marshaled vault control-plane Raft
 // command for the leader to apply. group_id is the vault-ctl group
 // (vault/<vaultGLID>/ctl); command is the marshaled FSM command bytes
@@ -221,29 +204,16 @@ message ChunkReplicationCommand {
   bytes vault_id = 1;
 
   oneof command {
-    ChunkReplicationAppend append = 10;
-    ChunkReplicationSeal seal = 11;
-    ChunkReplicationDelete delete_chunk = 12;
+    ChunkReplicationDelete delete_chunk = 10;
     // Sealed-chunk import is a three-phase sequence on the same stream:
     // ImportBegin → 1..N ImportRecords frames → ImportCommit. Replaces
     // a legacy single-frame ChunkReplicationImport that packed the whole
     // chunk into one message; chunks past the gRPC receive cap wedged
     // the catchup path forever. See gastrolog-4yvhh.
-    ChunkReplicationImportBegin import_begin = 13;
-    ChunkReplicationImportRecords import_records = 14;
-    ChunkReplicationImportCommit import_commit = 15;
+    ChunkReplicationImportBegin import_begin = 11;
+    ChunkReplicationImportRecords import_records = 12;
+    ChunkReplicationImportCommit import_commit = 13;
   }
-}
-
-// ChunkReplicationAppend forwards records to the follower's active chunk.
-message ChunkReplicationAppend {
-  bytes chunk_id = 1;               // leader's active chunk ID
-  repeated ExportRecord records = 2;
-}
-
-// ChunkReplicationSeal tells the follower to seal its active chunk.
-message ChunkReplicationSeal {
-  bytes chunk_id = 1; // expected active chunk ID
 }
 
 // ChunkReplicationImportBegin opens a streaming sealed-chunk import.
@@ -505,6 +475,13 @@ message ForwardFollowResponse {
 message ImportRecordMessage {
   bytes vault_id = 1;
   ExportRecord record = 2;
+}
+
+// ForwardImportRecordsResponse reports how many records the client-streaming
+// ForwardImportRecords RPC committed into the destination vault's sealed-chunk
+// store.
+message ForwardImportRecordsResponse {
+  int64 records_written = 1;
 }
 
 // --- Managed file distribution ---

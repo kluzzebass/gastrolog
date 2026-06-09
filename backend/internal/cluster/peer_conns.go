@@ -52,7 +52,7 @@ func shouldInvalidate(err error) bool {
 const invalidateGracePeriod = 5 * time.Second
 
 // PeerConns manages a shared pool of gRPC connections to cluster peers.
-// All cluster components (Broadcaster, RecordForwarder, SearchForwarder)
+// All cluster components (Broadcaster, SearchForwarder, ChunkReplicator)
 // share a single PeerConns so that traffic to each peer is multiplexed
 // over one connection.
 type PeerConns struct {
@@ -222,8 +222,8 @@ func (p *PeerConns) PeerIDs() []string {
 // connections is deferred by invalidateGracePeriod so concurrent in-flight
 // RPCs can drain — same rationale as Invalidate.
 //
-// Components holding a *PeerConns reference (Broadcaster, RecordForwarder,
-// SearchForwarder) automatically use the new Raft instance without recreation.
+// Components holding a *PeerConns reference (Broadcaster, SearchForwarder,
+// ChunkReplicator) automatically use the new Raft instance without recreation.
 func (p *PeerConns) Reset(r *hraft.Raft) {
 	p.mu.Lock()
 	p.raft = r

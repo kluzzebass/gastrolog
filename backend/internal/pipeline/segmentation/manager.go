@@ -157,6 +157,28 @@ func (m *Manager) RegisterVault(vaultID glid.GLID, root string, vc VaultConfig) 
 	return w.input(), nil
 }
 
+// Submit enqueues a record directly into a registered vault's segmentation
+// queue, bypassing the routing table. It is the direct-to-vault entry used by
+// writers that target a specific vault and preserve the record's EventID
+// (ImportRecords, export-to-vault). The send blocks on the bounded encode queue
+// and is cancellable via ctx; when in.Ack is non-nil it resolves after the
+// vault's group-commit fsync (or with an error). Returns ErrUnknownVault when
+// the vault has no local writer on this node.
+func (m *Manager) Submit(ctx context.Context, vaultID glid.GLID, in Input) error {
+	m.mu.Lock()
+	w, ok := m.writers[vaultID]
+	m.mu.Unlock()
+	if !ok {
+		return ErrUnknownVault
+	}
+	select {
+	case w.input() <- in:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // UnregisterVault stops a vault writer and closes its input channel.
 func (m *Manager) UnregisterVault(vaultID glid.GLID) {
 	m.mu.Lock()

@@ -135,13 +135,14 @@ func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) erro
 		return err
 	}
 
-	// Schedule the rotation sweep so time-based policies (e.g., maxAge)
-	// trigger even when no records are flowing to a vault.
-	if !o.scheduler.HasJob(rotationSweepJobName) {
-		if err := o.scheduler.AddJob(rotationSweepJobName, rotationSweepSchedule, o.rotationSweep); err != nil {
-			o.logger.Warn("failed to add rotation sweep job", "error", err)
+	// Schedule the placement-reconcile sweep so sealed-chunk replication
+	// targets and the routing table self-heal even between config-change
+	// notifications.
+	if !o.scheduler.HasJob(placementSweepJobName) {
+		if err := o.scheduler.AddJob(placementSweepJobName, placementSweepSchedule, o.placementSweep); err != nil {
+			o.logger.Warn("failed to add placement-reconcile sweep job", "error", err)
 		}
-		o.scheduler.Describe(rotationSweepJobName, "Check active chunks for time-based rotation")
+		o.scheduler.Describe(placementSweepJobName, "Refresh replication targets and routing table")
 	}
 
 	return nil

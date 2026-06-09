@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"gastrolog/internal/glid"
-	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -386,114 +384,6 @@ func TestImportToInstanceIdempotent(t *testing.T) {
 
 // --- AppendToVault ---
 
-// vaultTestReplicator records AppendRecords calls on the ChunkReplicator interface.
-// Satisfies orchestrator.ChunkReplicator.
-type vaultTestReplicator struct {
-	mu    sync.Mutex
-	calls []vaultForwardCall
-}
-
-type vaultForwardCall struct {
-	NodeID  string
-	VaultID glid.GLID
-	InstanceID  glid.GLID
-	ChunkID chunk.ChunkID
-	Records []chunk.Record
-}
-
-func (r *vaultTestReplicator) AppendRecords(_ context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.calls = append(r.calls, vaultForwardCall{
-		NodeID: nodeID, VaultID: vaultID,
-		ChunkID: chunkID, Records: records,
-	})
-	return nil
-}
-
-func (r *vaultTestReplicator) SealVault(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
-	return nil
-}
-
-func (r *vaultTestReplicator) ImportSealedChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
-	return nil
-}
-
-func (r *vaultTestReplicator) DeleteChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
-	return nil
-}
-
-func (r *vaultTestReplicator) RequestReplicaCatchup(_ context.Context, _ string, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {
-	return 0, nil
-}
-
-func (r *vaultTestReplicator) getCalls() []vaultForwardCall {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return append([]vaultForwardCall(nil), r.calls...)
-}
-
-func TestAppendToInstanceLeaderForwardsToFollowers(t *testing.T) {
-	t.Parallel()
-	fwd := &vaultTestReplicator{}
-	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetChunkReplicator(fwd)
-
-	vaultID := glid.New()
-	vaultInst := newMemInstance(t, vaultID, false, []system.ReplicationTarget{{NodeID: "node-2"}, {NodeID: "node-3"}})
-	vault := NewVault(vaultID, vaultInst)
-	vault.Name = "fwd-test"
-	orch.RegisterVault(vault)
-
-	rec := testRecord("hello")
-	if err := orch.AppendToVault(vaultID, chunk.ChunkID{}, rec); err != nil {
-		t.Fatal(err)
-	}
-
-	calls := fwd.getCalls()
-	if len(calls) != 2 {
-		t.Fatalf("expected 2 AppendRecords calls (one per follower), got %d", len(calls))
-	}
-	nodes := map[string]bool{}
-	for _, c := range calls {
-		nodes[c.NodeID] = true
-		if c.VaultID != vaultID {
-			t.Errorf("call.VaultID = %s, want %s", c.VaultID, vaultID)
-		}
-		if c.ChunkID == (chunk.ChunkID{}) {
-			t.Error("call.ChunkID should be non-zero (active chunk ID)")
-		}
-		if len(c.Records) != 1 {
-			t.Errorf("expected 1 record per call, got %d", len(c.Records))
-		}
-	}
-	if !nodes["node-2"] || !nodes["node-3"] {
-		t.Errorf("expected forwards to node-2 and node-3, got %v", nodes)
-	}
-}
-
-func TestAppendToInstanceSecondaryDoesNotForward(t *testing.T) {
-	t.Parallel()
-	fwd := &vaultTestReplicator{}
-	orch := newTestOrch(t, Config{LocalNodeID: "node-2"})
-	orch.SetChunkReplicator(fwd)
-
-	vaultID := glid.New()
-	// Follower instance — should NOT re-forward.
-	vaultInst := newMemInstance(t, vaultID, true, nil)
-	vault := NewVault(vaultID, vaultInst)
-	vault.Name = "no-reforward"
-	orch.RegisterVault(vault)
-
-	if err := orch.AppendToVault(vaultID, chunk.NewChunkID(), testRecord("data")); err != nil {
-		t.Fatal(err)
-	}
-
-	if len(fwd.getCalls()) != 0 {
-		t.Error("follower should NOT forward to other nodes (prevents loops)")
-	}
-}
-
 func TestAppendToInstanceSecondaryUsesChunkID(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-2"})
@@ -758,310 +648,6 @@ func TestImportToInstanceDrainsIteratorOnSkip(t *testing.T) {
 	}
 }
 
-func TestAppendToInstanceForwardLifecycle(t *testing.T) {
-	t.Parallel()
-	fwd := &vaultTestReplicator{}
-	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetChunkReplicator(fwd)
-
-	vaultID := glid.New()
-	vaultInst := newMemInstance(t, vaultID, false, []system.ReplicationTarget{{NodeID: "node-2"}})
-	vault := NewVault(vaultID, vaultInst)
-	vault.Name = "forward-lifecycle"
-	orch.RegisterVault(vault)
-
-	// Append 3 records.
-	for i := range 3 {
-		rec := testRecord("rec-" + string(rune('a'+i)))
-		if err := orch.AppendToVault(vaultID, chunk.ChunkID{}, rec); err != nil {
-			t.Fatalf("append %d: %v", i, err)
-		}
-	}
-
-	// Verify 3 AppendRecords calls.
-	calls := fwd.getCalls()
-	if len(calls) != 3 {
-		t.Fatalf("expected 3 AppendRecords calls, got %d", len(calls))
-	}
-
-	// All calls should target the same vault, instance, and chunk ID.
-	firstChunkID := calls[0].ChunkID
-	if firstChunkID == (chunk.ChunkID{}) {
-		t.Fatal("expected non-zero chunk ID in forward calls")
-	}
-	for i, c := range calls {
-		if c.VaultID != vaultID {
-			t.Errorf("call %d: VaultID = %s, want %s", i, c.VaultID, vaultID)
-		}
-		if c.ChunkID != firstChunkID {
-			t.Errorf("call %d: ChunkID = %s, want consistent %s", i, c.ChunkID, firstChunkID)
-		}
-		if c.NodeID != "node-2" {
-			t.Errorf("call %d: NodeID = %s, want node-2", i, c.NodeID)
-		}
-	}
-
-	// Verify local instance has 3 records in active chunk.
-	active := vaultInst.Chunks.Active()
-	if active == nil {
-		t.Fatal("expected active chunk")
-	}
-	if active.RecordCount != 3 {
-		t.Errorf("expected 3 records in active chunk, got %d", active.RecordCount)
-	}
-}
-
-// ================================================================
-// ACK-GATED INGESTION TESTS
-// ================================================================
-
-// ackTestReplicator records AppendRecords calls and returns a configurable error.
-// Implements orchestrator.ChunkReplicator.
-type ackTestReplicator struct {
-	vaultAppendCalls atomic.Int32
-	vaultAppendErr   error
-}
-
-func (m *ackTestReplicator) AppendRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
-	m.vaultAppendCalls.Add(1)
-	return m.vaultAppendErr
-}
-func (m *ackTestReplicator) SealVault(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
-	return nil
-}
-func (m *ackTestReplicator) ImportSealedChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
-	return nil
-}
-func (m *ackTestReplicator) DeleteChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
-	return nil
-}
-func (m *ackTestReplicator) RequestReplicaCatchup(_ context.Context, _ string, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {
-	return 0, nil
-}
-func TestAppendRecordWaitForReplicaReturnsTask(t *testing.T) {
-	t.Parallel()
-	fwd := &vaultTestReplicator{}
-	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetChunkReplicator(fwd)
-
-	vaultID := glid.New()
-	vaultInst := newMemInstance(t, vaultID, false, []system.ReplicationTarget{{NodeID: "node-2"}})
-	vault := NewVault(vaultID, vaultInst)
-	vault.Name = "ack-gated"
-	orch.RegisterVault(vault)
-
-	rec := testRecord("ack-me")
-	rec.WaitForReplica = true
-
-	orch.mu.RLock()
-	_, _, task, _, err := orch.appendRecord(vaultID, rec)
-	orch.mu.RUnlock()
-
-	if err != nil {
-		t.Fatalf("appendRecord: %v", err)
-	}
-	if task == nil {
-		t.Fatal("expected non-nil replicationTask for WaitForReplica=true")
-	}
-	if task.vaultID != vaultID {
-		t.Errorf("task.vaultID = %s, want %s", task.vaultID, vaultID)
-	}
-	if len(task.targets) != 1 || task.targets[0].NodeID != "node-2" {
-		t.Errorf("task.targets = %v, want [node-2]", task.targets)
-	}
-
-	// Fire-and-forget must NOT have been called.
-	calls := fwd.getCalls()
-	if len(calls) != 0 {
-		t.Errorf("expected 0 fire-and-forget forward calls, got %d", len(calls))
-	}
-}
-
-func TestAppendRecordNoWaitForReplicaFiresAndForgets(t *testing.T) {
-	t.Parallel()
-	fwd := &vaultTestReplicator{}
-	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetChunkReplicator(fwd)
-
-	vaultID := glid.New()
-	vaultInst := newMemInstance(t, vaultID, false, []system.ReplicationTarget{{NodeID: "node-2"}})
-	vault := NewVault(vaultID, vaultInst)
-	vault.Name = "no-ack"
-	orch.RegisterVault(vault)
-
-	rec := testRecord("fire-and-forget")
-	rec.WaitForReplica = false
-
-	orch.mu.RLock()
-	_, _, task, remotes, err := orch.appendRecord(vaultID, rec)
-	orch.mu.RUnlock()
-
-	if err != nil {
-		t.Fatalf("appendRecord: %v", err)
-	}
-	if task != nil {
-		t.Error("expected nil replicationTask for WaitForReplica=false")
-	}
-
-	// Remote targets must have been collected (not fired yet — caller's responsibility).
-	if len(remotes) != 1 {
-		t.Fatalf("expected 1 remote forward target, got %d", len(remotes))
-	}
-	if remotes[0].nodeID != "node-2" {
-		t.Errorf("forward target nodeID = %s, want node-2", remotes[0].nodeID)
-	}
-
-	// Fire and verify the forwarder was called.
-	orch.fireAndForgetRemote(remotes, rec)
-	calls := fwd.getCalls()
-	if len(calls) != 1 {
-		t.Fatalf("expected 1 fire-and-forget forward call, got %d", len(calls))
-	}
-}
-
-func TestIngestReturnsReplicationTasks(t *testing.T) {
-	t.Parallel()
-	fwd := &vaultTestReplicator{}
-	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetChunkReplicator(fwd)
-
-	vaultID := glid.New()
-	vaultInst := newMemInstance(t, vaultID, false, []system.ReplicationTarget{{NodeID: "node-2"}})
-	vault := NewVault(vaultID, vaultInst)
-	vault.Name = "ingest-ack"
-	orch.RegisterVault(vault)
-
-	// gastrolog-4kkoo (Phase 5): catch-all route into the vault.
-	cr, err := CompileRoute(glid.New(), "all", 0, "*", []RouteDestination{{VaultID: vaultID}}, "fanout")
-	if err != nil {
-		t.Fatal(err)
-	}
-	orch.SetRouteSet(NewRouteSet([]*CompiledRoute{cr}))
-
-	rec := testRecord("ingest-me")
-	rec.WaitForReplica = true
-
-	pa, err := orch.ingest(rec)
-	if err != nil {
-		t.Fatalf("ingest: %v", err)
-	}
-	if pa.isEmpty() {
-		t.Fatal("expected non-empty pendingAcks for WaitForReplica=true")
-	}
-	if len(pa.replication) == 0 {
-		t.Fatal("expected at least one replication task for WaitForReplica=true")
-	}
-	if pa.replication[0].vaultID != vaultID {
-		t.Errorf("task[0].vaultID = %s, want %s", pa.replication[0].vaultID, vaultID)
-	}
-}
-
-func TestAckAfterReplicationSuccess(t *testing.T) {
-	t.Parallel()
-	mock := &ackTestReplicator{}
-	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetChunkReplicator(mock)
-
-	pa := &pendingAcks{
-		replication: []replicationTask{
-			{
-				vaultID: glid.New(),
-				chunkID: chunk.NewChunkID(),
-				targets: []system.ReplicationTarget{{NodeID: "node-2"}},
-			},
-		},
-	}
-
-	ack := make(chan error, 1)
-	orch.ackAfterReplication(ack, pa, testRecord("ack-ok"))
-
-	select {
-	case err := <-ack:
-		if err != nil {
-			t.Fatalf("expected nil ack error, got %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for ack")
-	}
-
-	if mock.vaultAppendCalls.Load() != 1 {
-		t.Errorf("expected 1 AppendRecords call, got %d", mock.vaultAppendCalls.Load())
-	}
-}
-
-func TestAckAfterReplicationInvokesEveryReplicationTarget(t *testing.T) {
-	t.Parallel()
-	mock := &ackTestReplicator{}
-	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetChunkReplicator(mock)
-
-	vaultID := glid.New()
-	chunkID := chunk.NewChunkID()
-	pa := &pendingAcks{
-		replication: []replicationTask{
-			{
-				vaultID: vaultID,
-				chunkID: chunkID,
-				targets: []system.ReplicationTarget{
-					{NodeID: "node-2"},
-					{NodeID: "node-3"},
-					{NodeID: "node-4"},
-				},
-			},
-		},
-	}
-
-	ack := make(chan error, 1)
-	orch.ackAfterReplication(ack, pa, testRecord("fanout"))
-
-	select {
-	case err := <-ack:
-		if err != nil {
-			t.Fatalf("expected nil ack, got %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for ack")
-	}
-
-	if got := mock.vaultAppendCalls.Load(); got != 3 {
-		t.Errorf("expected 3 AppendRecords calls (one per follower), got %d", got)
-	}
-}
-
-func TestAckAfterReplicationFailure(t *testing.T) {
-	t.Parallel()
-	mock := &ackTestReplicator{
-		vaultAppendErr: errors.New("replication failed"),
-	}
-	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetChunkReplicator(mock)
-
-	pa := &pendingAcks{
-		replication: []replicationTask{
-			{
-				vaultID: glid.New(),
-				chunkID: chunk.NewChunkID(),
-				targets: []system.ReplicationTarget{{NodeID: "node-2"}},
-			},
-		},
-	}
-
-	ack := make(chan error, 1)
-	orch.ackAfterReplication(ack, pa, testRecord("ack-fail"))
-
-	select {
-	case err := <-ack:
-		if err == nil {
-			t.Fatal("expected non-nil ack error")
-		}
-		if !strings.Contains(err.Error(), "replication failed") {
-			t.Errorf("expected error to contain 'replication failed', got %q", err.Error())
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for ack")
-	}
-}
-
 // ================================================================
 // HIGH-VOLUME STRESS TESTS
 // ================================================================
@@ -1132,93 +718,14 @@ func TestImportToInstanceReplacesIncompleteForwardedChunk(t *testing.T) {
 	}
 }
 
-// TestTransitionLocalPreservesAllRecords verifies zero record loss when
-// transitioning a large sealed chunk from instance 0 to instance 1. The 5000 records
-// may span multiple chunks in the destination instance due to rotation policy.
-
-// errorCursor is a RecordCursor that returns N records, then returns a
-// configurable error (not ErrNoMoreRecords) to simulate mid-read failures.
-type errorCursor struct {
-	records []chunk.Record
-	pos     int
-	err     error // returned after records are exhausted
-}
-
-func (c *errorCursor) Next() (chunk.Record, chunk.RecordRef, error) {
-	if c.pos < len(c.records) {
-		rec := c.records[c.pos]
-		c.pos++
-		return rec, chunk.RecordRef{Pos: uint64(c.pos)}, nil
-	}
-	return chunk.Record{}, chunk.RecordRef{}, c.err
-}
-
-func (c *errorCursor) Prev() (chunk.Record, chunk.RecordRef, error) {
-	return chunk.Record{}, chunk.RecordRef{}, errors.New("not implemented")
-}
-
-func (c *errorCursor) Seek(_ chunk.RecordRef) error {
-	return errors.New("not implemented")
-}
-
-func (c *errorCursor) Close() error { return nil }
-
-// TestTransitionLocalCursorErrorRetainsSource verifies that when a cursor
-// returns an unexpected error (not ErrNoMoreRecords), streamLocal propagates
-// it so transitionChunk does NOT call expireChunk — the source chunk is retained.
-
-// failingForwarder is a ChunkReplicator that records AppendRecords calls and
-// returns configurable errors. Used to verify fire-and-forget error handling
-// on the replication path.
-type failingForwarder struct {
-	mu        sync.Mutex
-	calls     int
-	returnErr error
-}
-
-func (f *failingForwarder) AppendRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.calls++
-	return f.returnErr
-}
-
-func (f *failingForwarder) SealVault(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
-	return nil
-}
-
-func (f *failingForwarder) ImportSealedChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
-	return nil
-}
-
-func (f *failingForwarder) RequestReplicaCatchup(_ context.Context, _ string, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {
-	return 0, nil
-}
-
-func (f *failingForwarder) DeleteChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
-	return nil
-}
-
-func (f *failingForwarder) callCount() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.calls
-}
-
 // TestAppendToInstanceForwardingDoesNotBlockOnFullChannel verifies fire-and-forget
-// semantics: AppendToVault commits the record locally and succeeds even when
-// the forwarder returns errors. The local append must not be rolled back, and
-// high-volume ingestion (exceeding typical queue capacity) must complete
-// without error regardless of forwarder failures.
+// semantics: AppendToVault commits the record locally and succeeds even with no
+// chunk replicator wired. High-volume ingestion (exceeding typical queue
+// capacity) must complete without error.
 func TestAppendToInstanceForwardingDoesNotBlockOnFullChannel(t *testing.T) {
 	t.Parallel()
 
-	fwd := &failingForwarder{
-		returnErr: errors.New("simulated network partition"),
-	}
-
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetChunkReplicator(fwd)
 
 	vaultID := glid.New()
 	vaultInst := newMemInstance(t, vaultID, false, []system.ReplicationTarget{{NodeID: "node-2"}, {NodeID: "node-3"}})
@@ -1227,7 +734,6 @@ func TestAppendToInstanceForwardingDoesNotBlockOnFullChannel(t *testing.T) {
 	orch.RegisterVault(vault)
 
 	// Append 200 records — well above typical queue capacity.
-	// Every forwarder call fails, but AppendToVault must still succeed.
 	const total = 200
 	for i := 0; i < total; i++ {
 		if err := orch.AppendToVault(vaultID, chunk.ChunkID{}, testRecord("burst")); err != nil {
@@ -1235,20 +741,12 @@ func TestAppendToInstanceForwardingDoesNotBlockOnFullChannel(t *testing.T) {
 		}
 	}
 
-	// Verify all records committed locally despite forwarder failures.
+	// Verify all records committed locally.
 	active := vaultInst.Chunks.Active()
 	if active == nil {
 		t.Fatal("expected active chunk after appends")
 	}
 	if active.RecordCount != total {
 		t.Errorf("expected %d records in active chunk, got %d", total, active.RecordCount)
-	}
-
-	// The circuit breaker stops forwarding after consecutive failures,
-	// so we expect at least 1 call per follower (to detect the failure)
-	// but not necessarily all 400. The important thing: local records
-	// are committed and the forwarder was attempted.
-	if got := fwd.callCount(); got < 2 {
-		t.Errorf("expected at least 2 AppendRecords calls (one per follower), got %d", got)
 	}
 }

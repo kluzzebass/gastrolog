@@ -2,6 +2,7 @@ package file
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -204,5 +205,41 @@ func TestRegisterExternalGLCB_RefreshesPath(t *testing.T) {
 	}
 	if got := drainCursorRaw(t, cm, chunkID); len(got) != 6 {
 		t.Fatalf("read %d records after refresh, want 6", len(got))
+	}
+}
+
+// TestDeleteSilent_RemovesExternalGLCBDir: deleting a pipeline-registered external
+// chunk removes the GLCB directory at the registered path (the vault ChunkRoot
+// layout), not just the chunk-manager metadata entry.
+func TestDeleteSilent_RemovesExternalGLCBDir(t *testing.T) {
+	t.Parallel()
+
+	base := t.TempDir()
+	chunkRoot := filepath.Join(base, "chunks")
+	builder, err := NewManager(Config{Dir: chunkRoot})
+	if err != nil {
+		t.Fatalf("new builder manager: %v", err)
+	}
+	defer func() { _ = builder.Close() }()
+	chunkID, glcbPath := buildSealedGLCB(t, builder, 5)
+	chunkDir := filepath.Dir(glcbPath)
+
+	cm, err := NewManager(Config{Dir: filepath.Join(base, "vault-chunks")})
+	if err != nil {
+		t.Fatalf("new consumer manager: %v", err)
+	}
+	defer func() { _ = cm.Close() }()
+	if err := cm.RegisterExternalGLCB(chunkID, glcbPath, chunk.ExternalGLCBInfo{RecordCount: 5}); err != nil {
+		t.Fatalf("RegisterExternalGLCB: %v", err)
+	}
+
+	if err := cm.DeleteSilent(chunkID); err != nil {
+		t.Fatalf("DeleteSilent: %v", err)
+	}
+	if _, err := os.Stat(chunkDir); !os.IsNotExist(err) {
+		t.Fatalf("pipeline chunk dir %q still exists after delete: %v", chunkDir, err)
+	}
+	if _, err := cm.Meta(chunkID); !errors.Is(err, chunk.ErrChunkNotFound) {
+		t.Fatalf("Meta after delete = %v, want ErrChunkNotFound", err)
 	}
 }

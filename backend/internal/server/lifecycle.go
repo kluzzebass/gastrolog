@@ -566,26 +566,24 @@ func (s *LifecycleServer) listLiveNodes(ctx context.Context) map[string]struct{}
 // buildRouteStats aggregates route statistics from local + peer sources.
 func (s *LifecycleServer) buildRouteStats() *apiv1.GetRouteStatsResponse {
 	rs := s.orch.GetRouteStats()
-	totalIngested := rs.Ingested.Load()
-	totalDropped := rs.Dropped.Load()
-	totalRouted := rs.Routed.Load()
+	totalIngested := rs.Ingested
+	totalDropped := rs.Dropped
+	totalRouted := rs.Routed
 	filterActive := s.orch.IsFilterSetActive()
 
 	vaultMap := make(map[string]*apiv1.VaultRouteStats)
 	for vaultID, vs := range s.orch.VaultRouteStatsList() {
 		vaultMap[vaultID.String()] = &apiv1.VaultRouteStats{
-			VaultId:          vaultID.ToProto(),
-			RecordsMatched:   vs.Matched.Load(),
-			RecordsForwarded: vs.Forwarded.Load(),
+			VaultId:        vaultID.ToProto(),
+			RecordsMatched: vs.Matched,
 		}
 	}
 
 	routeMap := make(map[string]*apiv1.PerRouteStats)
 	for routeID, ps := range s.orch.PerRouteStatsList() {
 		routeMap[routeID.String()] = &apiv1.PerRouteStats{
-			RouteId:          routeID.ToProto(),
-			RecordsMatched:   ps.Matched.Load(),
-			RecordsForwarded: ps.Forwarded.Load(),
+			RouteId:        routeID.ToProto(),
+			RecordsMatched: ps.Matched,
 		}
 	}
 

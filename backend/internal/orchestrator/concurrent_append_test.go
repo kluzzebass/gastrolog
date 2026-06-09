@@ -538,7 +538,7 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 500 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
-		if _, _, err := orchA.Append(vaultID, chunk.Record{
+		if err := orchA.AppendToVault(vaultID, chunk.ChunkID{}, chunk.Record{
 			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "pre-drain-%d", i),
 		}); err != nil {
 			t.Fatalf("pre-drain append %d: %v", i, err)

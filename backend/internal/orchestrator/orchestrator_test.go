@@ -14,6 +14,7 @@ import (
 	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/memtest"
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/routing"
 	"gastrolog/internal/query"
 )
 
@@ -60,9 +61,8 @@ func newTestSetup(t *testing.T, maxRecords int64) (*orchestrator.Orchestrator, c
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, tracker, s.QE))
 
 	// Set up a catch-all route so records are delivered to the vault.
-	cr, _ := orchestrator.CompileRoute(glid.New(), "all", 0, "*",
-		[]orchestrator.RouteDestination{{VaultID: defaultID}}, "fanout")
-	orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{cr}))
+	cr, _ := routing.CompileRoute(glid.New(), "all", 0, "*", []glid.GLID{defaultID})
+	orch.SetTestRoutingTable(routing.NewTable([]*routing.Route{cr}))
 
 	return orch, s.CM, tracker, defaultID
 }
@@ -448,9 +448,8 @@ func newIngesterTestSetup(t *testing.T) (*orchestrator.Orchestrator, chunk.Chunk
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
 	// Set up a catch-all route so records are delivered to the vault.
-	cr, _ := orchestrator.CompileRoute(glid.New(), "all", 0, "*",
-		[]orchestrator.RouteDestination{{VaultID: defaultID}}, "fanout")
-	orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{cr}))
+	cr, _ := routing.CompileRoute(glid.New(), "all", 0, "*", []glid.GLID{defaultID})
+	orch.SetTestRoutingTable(routing.NewTable([]*routing.Route{cr}))
 
 	return orch, s.CM
 }
@@ -937,28 +936,25 @@ func TestFilteringIntegration(t *testing.T) {
 	// the catch-all sits at priority 100 and absorbs everything else.
 	// Each record reaches exactly one vault (no multi-fan-out unless a
 	// single route lists multiple destinations).
-	prodRoute, err := orchestrator.CompileRoute(glid.New(), "prod", 10, "env=prod",
-		[]orchestrator.RouteDestination{{VaultID: vaults.prod}}, "fanout")
+	prodRoute, err := routing.CompileRoute(glid.New(), "prod", 10, "env=prod", []glid.GLID{vaults.prod})
 	if err != nil {
 		t.Fatalf("CompileRoute prod: %v", err)
 	}
-	stagingRoute, err := orchestrator.CompileRoute(glid.New(), "staging", 10, "env=staging",
-		[]orchestrator.RouteDestination{{VaultID: vaults.staging}}, "fanout")
+	stagingRoute, err := routing.CompileRoute(glid.New(), "staging", 10, "env=staging", []glid.GLID{vaults.staging})
 	if err != nil {
 		t.Fatalf("CompileRoute staging: %v", err)
 	}
-	archiveRoute, err := orchestrator.CompileRoute(glid.New(), "archive", 100, "*",
-		[]orchestrator.RouteDestination{{VaultID: vaults.archive}}, "fanout")
+	archiveRoute, err := routing.CompileRoute(glid.New(), "archive", 100, "*", []glid.GLID{vaults.archive})
 	if err != nil {
 		t.Fatalf("CompileRoute archive: %v", err)
 	}
 
-	rs := orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{
+	rs := routing.NewTable([]*routing.Route{
 		prodRoute,
 		stagingRoute,
 		archiveRoute,
 	})
-	orch.SetRouteSet(rs)
+	orch.SetTestRoutingTable(rs)
 
 	// Test cases: message attrs -> expected vault (first-match-wins).
 	testCases := []struct {
@@ -1063,13 +1059,11 @@ func TestFilteringEmptyFilterReceivesNothing(t *testing.T) {
 	// gastrolog-4kkoo (Phase 5): a route with an empty match expression
 	// (MatchNone) is enrolled but never fires — useful as a temporary
 	// "muted" state. prod is muted at priority 10, archive catches at 100.
-	prodRoute, _ := orchestrator.CompileRoute(glid.New(), "prod", 10, "",
-		[]orchestrator.RouteDestination{{VaultID: vaults.prod}}, "fanout")
-	archiveRoute, _ := orchestrator.CompileRoute(glid.New(), "archive", 100, "*",
-		[]orchestrator.RouteDestination{{VaultID: vaults.archive}}, "fanout")
+	prodRoute, _ := routing.CompileRoute(glid.New(), "prod", 10, "", []glid.GLID{vaults.prod})
+	archiveRoute, _ := routing.CompileRoute(glid.New(), "archive", 100, "*", []glid.GLID{vaults.archive})
 
-	rs := orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{prodRoute, archiveRoute})
-	orch.SetRouteSet(rs)
+	rs := routing.NewTable([]*routing.Route{prodRoute, archiveRoute})
+	orch.SetTestRoutingTable(rs)
 
 	rec := chunk.Record{
 		IngestTS: time.Now(),
@@ -1094,17 +1088,16 @@ func TestFilteringComplexExpression(t *testing.T) {
 
 	// gastrolog-4kkoo (Phase 5): prod route at priority 10 with a complex
 	// expression; archive catch-all at priority 100.
-	prodRoute, err := orchestrator.CompileRoute(glid.New(), "prod", 10,
+	prodRoute, err := routing.CompileRoute(glid.New(), "prod", 10,
 		"(env=prod AND level=error) OR (env=prod AND level=critical)",
-		[]orchestrator.RouteDestination{{VaultID: vaults.prod}}, "fanout")
+		[]glid.GLID{vaults.prod})
 	if err != nil {
 		t.Fatalf("CompileRoute failed: %v", err)
 	}
-	archiveRoute, _ := orchestrator.CompileRoute(glid.New(), "archive", 100, "*",
-		[]orchestrator.RouteDestination{{VaultID: vaults.archive}}, "fanout")
+	archiveRoute, _ := routing.CompileRoute(glid.New(), "archive", 100, "*", []glid.GLID{vaults.archive})
 
-	rs := orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{prodRoute, archiveRoute})
-	orch.SetRouteSet(rs)
+	rs := routing.NewTable([]*routing.Route{prodRoute, archiveRoute})
+	orch.SetTestRoutingTable(rs)
 
 	testCases := []struct {
 		attrs        chunk.Attributes

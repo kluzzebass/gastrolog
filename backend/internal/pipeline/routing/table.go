@@ -112,16 +112,24 @@ func CompileRoute(id glid.GLID, name string, priority int32, expression string, 
 // Match returns vault IDs for the first matching route, or nil when no route
 // matches (intentional drop — operators add a catch-all at lowest priority).
 func (t *Table) Match(attrs record.Attributes, src SourceContext) []glid.GLID {
+	_, vaults := t.MatchRoute(attrs, src)
+	return vaults
+}
+
+// MatchRoute returns the first matching route and a clone of its destination
+// vault IDs, or (nil, nil) when no route matches. Exposed so the routing manager
+// can attribute matched-record counters to the specific route that fired.
+func (t *Table) MatchRoute(attrs record.Attributes, src SourceContext) (*Route, []glid.GLID) {
 	if t == nil {
-		return nil
+		return nil, nil
 	}
 	enriched := enrichAttrs(attrs, src)
 	for _, r := range t.routes {
 		if routeMatches(r, enriched) {
-			return slices.Clone(r.VaultIDs)
+			return r, slices.Clone(r.VaultIDs)
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 func enrichAttrs(attrs record.Attributes, src SourceContext) record.Attributes {

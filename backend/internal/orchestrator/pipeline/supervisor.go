@@ -34,6 +34,7 @@ import (
 	"gastrolog/internal/pipeline/ingestion"
 	"gastrolog/internal/pipeline/routing"
 	"gastrolog/internal/pipeline/segmentation"
+	"gastrolog/internal/record"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
@@ -45,6 +46,10 @@ var ErrNotRunning = errors.New("pipeline supervisor not running")
 
 // ErrVaultRegistered is returned when a vault is registered twice.
 var ErrVaultRegistered = errors.New("vault already registered")
+
+// ErrVaultNotRegistered is returned by SubmitToVault when the target vault has
+// no local origin (segmentation) writer on this node.
+var ErrVaultNotRegistered = errors.New("vault not registered as origin on this node")
 
 // Config configures the supervisor and its queue graph. All sizing fields have
 // sane defaults; only Table is effectively required once records flow.
@@ -154,6 +159,12 @@ type Supervisor struct {
 	completed <-chan segmentation.CompletedSegment
 	routingIn chan routing.Input
 	pullIn    chan<- distribution.PullRequest
+
+	// sendMu guards routingIn against the multi-sender / single-close hazard:
+	// pump and Submit both feed routingIn, but only pump closes it on Stop.
+	// Senders take RLock around the closed check + send; the closer takes Lock.
+	sendMu        sync.RWMutex
+	routingClosed bool
 
 	mu     sync.Mutex
 	vaults map[glid.GLID]vaultRoles
@@ -282,7 +293,7 @@ func (s *Supervisor) Stop() error {
 // group commit and defeat batching. The ingester's ack channel must be buffered
 // so the segmentation commit loop never stalls releasing it.
 func (s *Supervisor) pump(ctx context.Context) {
-	defer close(s.routingIn)
+	defer s.closeRouting()
 	for {
 		select {
 		case <-ctx.Done():
@@ -299,13 +310,46 @@ func (s *Supervisor) pump(ctx context.Context) {
 			}
 			in := routing.IngestInput(out.Record)
 			in.Ack = out.Ack
-			select {
-			case s.routingIn <- in:
-			case <-ctx.Done():
+			if !s.sendRouting(ctx, in) {
 				return
 			}
 		}
 	}
+}
+
+// sendRouting delivers in to the routing queue, coordinating with closeRouting so
+// concurrent senders (pump and Submit) never write to a closed routingIn. It
+// returns false (nacking in.Ack) when the queue is already closed or ctx is
+// cancelled before the send completes.
+func (s *Supervisor) sendRouting(ctx context.Context, in routing.Input) bool {
+	s.sendMu.RLock()
+	defer s.sendMu.RUnlock()
+	if s.routingClosed {
+		if in.Ack != nil {
+			in.Ack <- ErrNotRunning
+		}
+		return false
+	}
+	select {
+	case s.routingIn <- in:
+		return true
+	case <-ctx.Done():
+		if in.Ack != nil {
+			in.Ack <- ctx.Err()
+		}
+		return false
+	}
+}
+
+// closeRouting closes routingIn exactly once under the write lock, after all
+// in-flight sendRouting calls have drained. Called from pump's defer on Stop.
+func (s *Supervisor) closeRouting() {
+	s.sendMu.Lock()
+	if !s.routingClosed {
+		s.routingClosed = true
+		close(s.routingIn)
+	}
+	s.sendMu.Unlock()
 }
 
 // ServePull streams a locally-held segment to a remote collector. Slice C wires
@@ -335,6 +379,66 @@ func (s *Supervisor) ReconcileIngesters(specs []ingestion.IngesterSpec) error {
 // placements change and publishes it here.
 func (s *Supervisor) SetRoutingTable(t *routing.Table) {
 	s.route.SetTable(t)
+}
+
+// Submit routes a single record through the pipeline routing stage exactly like
+// a digested ingest record, but with a caller-supplied Source. It is the
+// non-ingester entry for attr-routed writers — retention fan-out passes
+// routing.RetentionSource(sourceVaultID, reason). The record is matched against
+// the routing table and fanned out to every matched vault's segmentation queue;
+// in.Ack, when non-nil, resolves after all matched targets durably commit (an
+// unmatched record is a counted drop that still resolves the ack). Returns
+// ErrNotRunning if the supervisor is stopped.
+func (s *Supervisor) Submit(ctx context.Context, in routing.Input) error {
+	if !s.running.Load() {
+		return ErrNotRunning
+	}
+	if !s.sendRouting(ctx, in) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return ErrNotRunning
+	}
+	return nil
+}
+
+// SubmitToVault enqueues a record directly into a specific vault's segmentation
+// queue on this node, bypassing the routing table. It is the direct-to-vault
+// entry for writers that target a named vault and preserve the record's EventID
+// (ImportRecords, export-to-vault). The vault must be Origin-registered on this
+// node (reconcile origins every homed vault locally). ack, when non-nil,
+// resolves after the durable commit. Returns ErrVaultNotRegistered when the
+// vault has no local segmentation writer, or ErrNotRunning when stopped.
+func (s *Supervisor) SubmitToVault(ctx context.Context, vaultID glid.GLID, rec *record.Record, ack chan<- error) error {
+	if !s.running.Load() {
+		return ErrNotRunning
+	}
+	err := s.seg.Submit(ctx, vaultID, segmentation.Input{Record: rec, Ack: ack})
+	if errors.Is(err, segmentation.ErrUnknownVault) {
+		return ErrVaultNotRegistered
+	}
+	return err
+}
+
+// RouteStats returns a snapshot of the routing manager's counters (global
+// ingested/matched/unmatched totals plus per-vault and per-route matched counts).
+// It is the pipeline source for the node's route-stats observability surface.
+func (s *Supervisor) RouteStats() routing.StatsSnapshot {
+	return s.route.Stats()
+}
+
+// RoutingActive reports whether a routing table is currently published, the
+// pipeline analogue of the legacy "filter set active" flag.
+func (s *Supervisor) RoutingActive() bool {
+	return s.route.TableActive()
+}
+
+// RoutingTable returns the currently published routing table (nil when none has
+// been set). The table is immutable; callers treat it as read-only. Exposed for
+// observability and for tests that need to evaluate routing without driving the
+// full async pipeline.
+func (s *Supervisor) RoutingTable() *routing.Table {
+	return s.route.Table()
 }
 
 // IngestQueueDepth reports the current depth of the ingestion→digestion queue,

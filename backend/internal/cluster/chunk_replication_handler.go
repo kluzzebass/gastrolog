@@ -82,10 +82,6 @@ func (s *Server) handleReplicationCommand(ctx context.Context, msg *gastrologv1.
 	vaultID := glid.FromBytes(msg.GetVaultId())
 
 	switch cmd := msg.Command.(type) {
-	case *gastrologv1.ChunkReplicationCommand_Append:
-		return s.handleReplicationAppend(ctx, vaultID, cmd.Append)
-	case *gastrologv1.ChunkReplicationCommand_Seal:
-		return s.handleReplicationSeal(ctx, vaultID, cmd.Seal)
 	case *gastrologv1.ChunkReplicationCommand_ImportBegin:
 		return s.handleReplicationImportBegin(ctx, vaultID, cmd.ImportBegin, pending)
 	case *gastrologv1.ChunkReplicationCommand_ImportRecords:
@@ -97,60 +93,6 @@ func (s *Server) handleReplicationCommand(ctx context.Context, msg *gastrologv1.
 	default:
 		return &gastrologv1.ChunkReplicationAck{Ok: false, Error: "unknown command type"}
 	}
-}
-
-func (s *Server) handleReplicationAppend(ctx context.Context, vaultID glid.GLID, cmd *gastrologv1.ChunkReplicationAppend) *gastrologv1.ChunkReplicationAck {
-	if s.recordAppenderForVault == nil {
-		return &gastrologv1.ChunkReplicationAck{Ok: false, Error: "vault appender not configured"}
-	}
-
-	chunkID := chunk.ChunkID{}
-	if len(cmd.GetChunkId()) >= glid.Size {
-		chunkID = chunk.ChunkID(glid.FromBytes(cmd.GetChunkId()))
-	}
-
-	for _, er := range cmd.GetRecords() {
-		rec := convert.ExportToRecord(er)
-		if err := s.recordAppenderForVault(ctx, vaultID, chunkID, rec); err != nil {
-			if isTombstonedErr(err) {
-				// Chunk was deleted between the leader scheduling this
-				// append and its arrival here. Ack as success — goal
-				// (chunk absent on this node) is already achieved.
-				return &gastrologv1.ChunkReplicationAck{Ok: true, ChunkId: cmd.GetChunkId()}
-			}
-			return &gastrologv1.ChunkReplicationAck{
-				Ok:      false,
-				Error:   "append failed: " + err.Error(),
-				ChunkId: cmd.GetChunkId(),
-			}
-		}
-	}
-
-	return &gastrologv1.ChunkReplicationAck{Ok: true, ChunkId: cmd.GetChunkId()}
-}
-
-func (s *Server) handleReplicationSeal(ctx context.Context, vaultID glid.GLID, cmd *gastrologv1.ChunkReplicationSeal) *gastrologv1.ChunkReplicationAck {
-	if s.chunkSealExecutor == nil {
-		return &gastrologv1.ChunkReplicationAck{Ok: false, Error: "seal executor not configured"}
-	}
-
-	chunkID := chunk.ChunkID{}
-	if len(cmd.GetChunkId()) >= glid.Size {
-		chunkID = chunk.ChunkID(glid.FromBytes(cmd.GetChunkId()))
-	}
-
-	if err := s.chunkSealExecutor(ctx, vaultID, chunkID); err != nil {
-		if isTombstonedErr(err) {
-			return &gastrologv1.ChunkReplicationAck{Ok: true, ChunkId: cmd.GetChunkId()}
-		}
-		return &gastrologv1.ChunkReplicationAck{
-			Ok:      false,
-			Error:   "seal failed: " + err.Error(),
-			ChunkId: cmd.GetChunkId(),
-		}
-	}
-
-	return &gastrologv1.ChunkReplicationAck{Ok: true, ChunkId: cmd.GetChunkId()}
 }
 
 // isTombstonedErr reports whether err indicates the target chunk has been

@@ -49,8 +49,11 @@ type Config struct {
 
 // StatsSnapshot is a point-in-time view of routing counters.
 type StatsSnapshot struct {
-	Matched   uint64 // records that matched a route and were fanned out
-	Unmatched uint64 // records with no route match (intentional drop, counted)
+	Ingested  uint64                 // records that entered routing (matched + unmatched)
+	Matched   uint64                 // records that matched a route and were fanned out
+	Unmatched uint64                 // records with no route match (intentional drop, counted)
+	PerVault  map[glid.GLID]uint64   // matched-record count per destination vault
+	PerRoute  map[glid.GLID]uint64   // matched-record count per route ID
 }
 
 // Manager matches records to vaults and fans out record pointers.
@@ -66,8 +69,13 @@ type Manager struct {
 
 	matched   atomic.Uint64
 	unmatched atomic.Uint64
-	running   atomic.Bool
-	wg        sync.WaitGroup
+	// perVault / perRoute hold *atomic.Uint64 matched counters keyed by
+	// destination vault ID and route ID respectively. Lazily populated on the
+	// match path so the hot route() avoids a map write lock.
+	perVault sync.Map
+	perRoute sync.Map
+	running  atomic.Bool
+	wg       sync.WaitGroup
 }
 
 // New returns a routing manager.
@@ -112,12 +120,48 @@ func (m *Manager) UnregisterVault(vaultID glid.GLID) {
 	m.vmu.Unlock()
 }
 
-// Stats returns current matched/unmatched counts.
+// Stats returns a snapshot of routing counters (global totals plus per-vault and
+// per-route matched counts).
 func (m *Manager) Stats() StatsSnapshot {
+	matched := m.matched.Load()
+	unmatched := m.unmatched.Load()
 	return StatsSnapshot{
-		Matched:   m.matched.Load(),
-		Unmatched: m.unmatched.Load(),
+		Ingested:  matched + unmatched,
+		Matched:   matched,
+		Unmatched: unmatched,
+		PerVault:  drainCounterMap(&m.perVault),
+		PerRoute:  drainCounterMap(&m.perRoute),
 	}
+}
+
+// TableActive reports whether a routing table is currently published. It is the
+// pipeline analogue of the legacy "filter set active" flag.
+func (m *Manager) TableActive() bool {
+	return m.table.Load() != nil
+}
+
+// Table returns the currently published routing table (nil when none has been
+// set). The returned table is immutable; callers must treat it as read-only.
+func (m *Manager) Table() *Table {
+	return m.table.Load()
+}
+
+func incrCounter(store *sync.Map, id glid.GLID) {
+	if c, ok := store.Load(id); ok {
+		c.(*atomic.Uint64).Add(1)
+		return
+	}
+	c, _ := store.LoadOrStore(id, new(atomic.Uint64))
+	c.(*atomic.Uint64).Add(1)
+}
+
+func drainCounterMap(store *sync.Map) map[glid.GLID]uint64 {
+	out := make(map[glid.GLID]uint64)
+	store.Range(func(k, v any) bool {
+		out[k.(glid.GLID)] = v.(*atomic.Uint64).Load()
+		return true
+	})
+	return out
 }
 
 // Run consumes inputs until in is closed or ctx is cancelled.
@@ -181,8 +225,8 @@ func resolveSource(in Input) SourceContext {
 func (m *Manager) route(ctx context.Context, in Input) {
 	rec := in.Record
 	src := resolveSource(in)
-	vaults := m.table.Load().Match(rec.Attrs, src)
-	if len(vaults) == 0 {
+	matchedRoute, vaults := m.table.Load().MatchRoute(rec.Attrs, src)
+	if matchedRoute == nil {
 		m.unmatched.Add(1)
 		// No route matched: nothing to persist locally. This is an intentional,
 		// counted drop, not a failure — resolve the source ack so a synchronous
@@ -191,6 +235,10 @@ func (m *Manager) route(ctx context.Context, in Input) {
 		return
 	}
 	m.matched.Add(1)
+	incrCounter(&m.perRoute, matchedRoute.ID)
+	for _, vaultID := range vaults {
+		incrCounter(&m.perVault, vaultID)
+	}
 
 	// Snapshot the locally-registered fan-out targets under the read lock. Matched
 	// vaults without a local segmentation queue (e.g. a home that lives on another

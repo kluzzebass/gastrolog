@@ -10,6 +10,7 @@ import (
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/record"
 	"gastrolog/internal/safeutf8"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -92,4 +93,31 @@ func ExportToRecord(er *gastrologv1.ExportRecord) chunk.Record {
 	}
 	rec.EventID.IngestTS = rec.IngestTS
 	return rec
+}
+
+// ChunkToRecord converts a chunk.Record (the legacy storage/query type) to a
+// record.Record (the pipeline write type), dropping the query-only Ref/VaultID
+// fields. This is the single canonical chunk.Record → record.Record converter,
+// used by non-ingester writers (retention fan-out, ImportRecords,
+// export-to-vault) that inject records into the pipeline submit API while
+// preserving the original EventID.
+func ChunkToRecord(rec chunk.Record) record.Record {
+	out := record.Record{
+		SourceTS: rec.SourceTS,
+		IngestTS: rec.IngestTS,
+		WriteTS:  rec.WriteTS,
+		EventID: record.EventID{
+			IngesterID: rec.EventID.IngesterID,
+			NodeID:     rec.EventID.NodeID,
+			IngestTS:   rec.EventID.IngestTS,
+			IngestSeq:  rec.EventID.IngestSeq,
+		},
+		Raw:            rec.Raw,
+		WaitForReplica: rec.WaitForReplica,
+	}
+	if len(rec.Attrs) > 0 {
+		out.Attrs = make(record.Attributes, len(rec.Attrs))
+		maps.Copy(out.Attrs, rec.Attrs)
+	}
+	return out
 }

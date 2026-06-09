@@ -35,7 +35,7 @@ func appendRecords(t *testing.T, orch *orchestrator.Orchestrator, vaultID glid.G
 			IngestTS: ts,
 			Raw:      []byte("msg"),
 		}
-		if _, _, err := orch.Append(vaultID, rec); err != nil {
+		if err := orch.AppendToVault(vaultID, chunk.ChunkID{}, rec); err != nil {
 			t.Fatalf("Append record %d: %v", i, err)
 		}
 	}
@@ -158,35 +158,6 @@ func TestOpenCursor(t *testing.T) {
 	_, _, err = cursor.Next()
 	if err != nil {
 		t.Fatalf("cursor.Next: %v", err)
-	}
-}
-
-func TestAppend(t *testing.T) {
-	t.Parallel()
-	orch, id := newFacadeSetup(t)
-	rec := chunk.Record{
-		IngestTS: time.Now(),
-		Raw:      []byte("hello"),
-	}
-	chunkID, pos, err := orch.Append(id, rec)
-	if err != nil {
-		t.Fatalf("Append: %v", err)
-	}
-	if chunkID == (chunk.ChunkID{}) {
-		t.Fatal("expected non-zero chunk ID")
-	}
-	_ = pos
-}
-
-func TestAppend_UnknownVault(t *testing.T) {
-	t.Parallel()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _, err = orch.Append(glid.New(), chunk.Record{Raw: []byte("x")})
-	if !errors.Is(err, orchestrator.ErrVaultNotFound) {
-		t.Fatalf("expected ErrVaultNotFound, got %v", err)
 	}
 }
 

@@ -115,9 +115,8 @@ func (g *PressureGate) AddProbe(name string, probe Probe) {
 
 // RemoveProbe drops a previously-registered probe by name. Safe to
 // call after Run has started, and idempotent — unknown names are
-// a no-op. Used by callers that stop owning a channel (e.g.
-// RecordForwarder.Delete on peer removal) so the gate doesn't keep
-// sampling a stale channel.
+// a no-op. Used by callers that stop owning a channel so the gate
+// doesn't keep sampling a stale channel.
 func (g *PressureGate) RemoveProbe(name string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()

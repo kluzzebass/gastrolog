@@ -200,6 +200,14 @@ func (s *VaultServer) ImportRecords(
 		return nil, connErr
 	}
 
+	// Reject unknown vaults up front with NotFound, before driving the pipeline
+	// submit path (whose ErrVaultNotReady/ErrNotRunning would otherwise surface
+	// as a less precise Unavailable/Internal for a vault that simply does not
+	// exist on this node).
+	if !s.orch.VaultExists(vaultID) {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("%w: %s", orchestrator.ErrVaultNotFound, vaultID))
+	}
+
 	var imported int64
 	for _, exportRec := range req.Msg.Records {
 		rec := chunk.Record{
@@ -216,8 +224,20 @@ func (s *VaultServer) ImportRecords(
 			maps.Copy(rec.Attrs, exportRec.Attrs)
 		}
 
-		if _, _, err := s.orch.Append(vaultID, rec); err != nil {
+		// Direct-to-vault submit into the pipeline, waiting for the durable
+		// commit so the imported count reflects records that actually landed.
+		// ack is buffered so the segmentation commit loop never blocks.
+		ack := make(chan error, 1)
+		if err := s.orch.SubmitToVault(ctx, vaultID, rec, ack); err != nil {
 			return nil, mapVaultError(err)
+		}
+		select {
+		case err := <-ack:
+			if err != nil {
+				return nil, mapVaultError(err)
+			}
+		case <-ctx.Done():
+			return nil, connect.NewError(connect.CodeCanceled, ctx.Err())
 		}
 		imported++
 	}

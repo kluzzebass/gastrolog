@@ -31,6 +31,7 @@ import (
 	"gastrolog/internal/lookup"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/routing"
 	"gastrolog/internal/system"
 	"gastrolog/internal/system/raftfsm"
 )
@@ -791,22 +792,21 @@ func (s *SystemServer) GenerateName(
 // expression. gastrolog-4kkoo (Phase 5): drives live editor feedback in
 // the route filter UI.
 //
-// The check uses orchestrator.CompileRoute so the RPC's verdict is
-// identical to what PutRoute will accept at save time. A trivial route
-// is constructed with one local destination — the destination doesn't
-// affect parse/semantic validation, only the expression matters.
+// The check uses routing.CompileRoute (the pipeline route compiler) so the
+// RPC's verdict is identical to what PutRoute will accept at save time. A
+// trivial route is constructed with one destination vault — the destination
+// doesn't affect parse/semantic validation, only the expression matters.
 func (s *SystemServer) ValidateExpression(
 	_ context.Context,
 	req *connect.Request[apiv1.ValidateExpressionRequest],
 ) (*connect.Response[apiv1.ValidateExpressionResponse], error) {
 	expr := req.Msg.GetExpression()
-	_, err := orchestrator.CompileRoute(
+	_, err := routing.CompileRoute(
 		glid.New(),
 		"validate",
 		0,
 		expr,
-		[]orchestrator.RouteDestination{{VaultID: glid.New()}},
-		"fanout",
+		[]glid.GLID{glid.New()},
 	)
 	resp := &apiv1.ValidateExpressionResponse{}
 	if err != nil {

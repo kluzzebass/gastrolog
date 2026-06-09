@@ -260,6 +260,12 @@ export class VaultCtlCommand extends Message<VaultCtlCommand> {
      */
     value: ReleaseSegmentsCommand;
     case: "releaseSegments";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.AckSegmentHolderCommand ack_segment_holder = 19;
+     */
+    value: AckSegmentHolderCommand;
+    case: "ackSegmentHolder";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<VaultCtlCommand>) {
@@ -288,6 +294,7 @@ export class VaultCtlCommand extends Message<VaultCtlCommand> {
     { no: 16, name: "add_open_chunk_segment_ref", kind: "message", T: AddOpenChunkSegmentRefCommand, oneof: "command" },
     { no: 17, name: "seal_open_chunk_manifest", kind: "message", T: SealOpenChunkManifestCommand, oneof: "command" },
     { no: 18, name: "release_segments", kind: "message", T: ReleaseSegmentsCommand, oneof: "command" },
+    { no: 19, name: "ack_segment_holder", kind: "message", T: AckSegmentHolderCommand, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultCtlCommand {
@@ -957,7 +964,7 @@ export class RepatriateChunkCommand extends Message<RepatriateChunkCommand> {
 
 /**
  * PublishCompletedSegmentCommand registers a completed segment in the vault-ctl
- * FSM (V3 pipeline). Origin publishes when Segmentation closes a segment.
+ * FSM. Origin publishes when Segmentation closes a segment.
  *
  * @generated from message gastrolog.v1.PublishCompletedSegmentCommand
  */
@@ -1087,6 +1094,14 @@ export class CompletedSegmentEntry extends Message<CompletedSegmentEntry> {
    */
   publishedAtNanos = protoInt64.zero;
 
+  /**
+   * Node IDs that have pulled, verified, and committed a holder receipt for
+   * this segment (Rubicon C). Grows toward the vault home set.
+   *
+   * @generated from field: repeated string holders = 9;
+   */
+  holders: string[] = [];
+
   constructor(data?: PartialMessage<CompletedSegmentEntry>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1103,6 +1118,7 @@ export class CompletedSegmentEntry extends Message<CompletedSegmentEntry> {
     { no: 6, name: "checksum", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 7, name: "origin_node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 8, name: "published_at_nanos", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 9, name: "holders", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CompletedSegmentEntry {
@@ -1497,6 +1513,53 @@ export class ReleaseSegmentsCommand extends Message<ReleaseSegmentsCommand> {
 
   static equals(a: ReleaseSegmentsCommand | PlainMessage<ReleaseSegmentsCommand> | undefined, b: ReleaseSegmentsCommand | PlainMessage<ReleaseSegmentsCommand> | undefined): boolean {
     return proto3.util.equals(ReleaseSegmentsCommand, a, b);
+  }
+}
+
+/**
+ * AckSegmentHolderCommand records that a node has pulled, verified, and now
+ * holds a completed segment (Rubicon C). Appends node_id to the
+ * segment registry entry's holder set; idempotent.
+ *
+ * @generated from message gastrolog.v1.AckSegmentHolderCommand
+ */
+export class AckSegmentHolderCommand extends Message<AckSegmentHolderCommand> {
+  /**
+   * @generated from field: bytes segment_id = 1;
+   */
+  segmentId = new Uint8Array(0);
+
+  /**
+   * @generated from field: string node_id = 2;
+   */
+  nodeId = "";
+
+  constructor(data?: PartialMessage<AckSegmentHolderCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.AckSegmentHolderCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "segment_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): AckSegmentHolderCommand {
+    return new AckSegmentHolderCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): AckSegmentHolderCommand {
+    return new AckSegmentHolderCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): AckSegmentHolderCommand {
+    return new AckSegmentHolderCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: AckSegmentHolderCommand | PlainMessage<AckSegmentHolderCommand> | undefined, b: AckSegmentHolderCommand | PlainMessage<AckSegmentHolderCommand> | undefined): boolean {
+    return proto3.util.equals(AckSegmentHolderCommand, a, b);
   }
 }
 

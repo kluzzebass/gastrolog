@@ -195,13 +195,11 @@ func (p *PeerState) AggregateRouteStats() (ingested, dropped, routed int64, filt
 			existing, ok := vaultMap[key]
 			if !ok {
 				vaultMap[key] = &gastrologv1.VaultRouteStats{
-					VaultId:          vs.VaultId,
-					RecordsMatched:   vs.RecordsMatched,
-					RecordsForwarded: vs.RecordsForwarded,
+					VaultId:        vs.VaultId,
+					RecordsMatched: vs.RecordsMatched,
 				}
 			} else {
 				existing.RecordsMatched += vs.RecordsMatched
-				existing.RecordsForwarded += vs.RecordsForwarded
 			}
 		}
 		for _, rs := range e.stats.RoutePerRouteStats {
@@ -209,13 +207,11 @@ func (p *PeerState) AggregateRouteStats() (ingested, dropped, routed int64, filt
 			existing, ok := routeMap[rkey]
 			if !ok {
 				routeMap[rkey] = &gastrologv1.PerRouteStats{
-					RouteId:          rs.RouteId,
-					RecordsMatched:   rs.RecordsMatched,
-					RecordsForwarded: rs.RecordsForwarded,
+					RouteId:        rs.RouteId,
+					RecordsMatched: rs.RecordsMatched,
 				}
 			} else {
 				existing.RecordsMatched += rs.RecordsMatched
-				existing.RecordsForwarded += rs.RecordsForwarded
 			}
 		}
 	}

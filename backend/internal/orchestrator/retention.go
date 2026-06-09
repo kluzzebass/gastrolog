@@ -745,9 +745,11 @@ func (r *retentionRunner) applyRetentionDispositionToChunk(id chunk.ChunkID) {
 // follow-up. Routes targeting retention today match on
 // `_source = "retention"` and `_vault = "<id>"`.
 //
-// The orchestrator's IngestWithSource path applies the full ingest
-// pipeline: route evaluation, local append, replication, cross-node
-// forwarding. A record with no matching destination drops silently.
+// SubmitRetentionRecord routes each record through the pipeline: route
+// evaluation against the published table, then durable segment write on
+// every matched vault's home (cross-node delivery via segment
+// distribution/collection). A record with no matching destination is a
+// counted, silent drop.
 //
 // Operator footgun: a route that matches `_source = "retention"`
 // AND lists the source vault as a destination creates a cascade —
@@ -776,11 +778,6 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) {
 		}
 	}()
 
-	src := SourceContext{
-		Kind:    SourceRetention,
-		VaultID: r.vaultID,
-	}
-
 	fanned := 0
 	for {
 		rec, _, err := cur.Next()
@@ -793,17 +790,17 @@ func (r *retentionRunner) fireRetentionEvent(id chunk.ChunkID) {
 			return
 		}
 		// Cursor records may reference mmap'd memory that becomes
-		// invalid once we move on. Copy so the ingest path can persist
+		// invalid once we move on. Copy so the pipeline can persist
 		// independently of the cursor lifecycle.
-		if ingErr := r.orch.IngestWithSource(rec.Copy(), src); ingErr != nil {
-			r.logger.Warn("retention: fan-out ingest error",
-				"vault", r.vaultID, "chunk", id, "error", ingErr)
+		if subErr := r.orch.SubmitRetentionRecord(context.Background(), r.vaultID, rec.Copy(), ""); subErr != nil {
+			r.logger.Warn("retention: fan-out submit error",
+				"vault", r.vaultID, "chunk", id, "error", subErr)
 			// Continue — partial fan-out is acceptable; the original
 			// chunk will still be destroyed by the caller.
 		}
 		fanned++
 	}
-	r.logger.Debug("retention: fanned out chunk records via routing engine",
+	r.logger.Debug("retention: fanned out chunk records via pipeline routing",
 		"vault", r.vaultID, "chunk", id, "count", fanned)
 }
 

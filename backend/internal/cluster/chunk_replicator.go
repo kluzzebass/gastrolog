@@ -187,35 +187,6 @@ func (tr *ChunkReplicator) closeStream(vaultID glid.GLID, nodeID string) {
 	tr.mu.Unlock()
 }
 
-// AppendRecords forwards records to a follower's active chunk.
-func (tr *ChunkReplicator) AppendRecords(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
-	exports := make([]*gastrologv1.ExportRecord, len(records))
-	for i, rec := range records {
-		exports[i] = convert.RecordToExport(rec)
-	}
-	return tr.send(ctx, vaultID, nodeID, &gastrologv1.ChunkReplicationCommand{
-		VaultId: vaultID.ToProto(),
-		Command: &gastrologv1.ChunkReplicationCommand_Append{
-			Append: &gastrologv1.ChunkReplicationAppend{
-				ChunkId: glid.GLID(chunkID).ToProto(),
-				Records: exports,
-			},
-		},
-	})
-}
-
-// SealVault tells a follower to seal its active chunk for the vault.
-func (tr *ChunkReplicator) SealVault(ctx context.Context, nodeID string, vaultID glid.GLID, chunkID chunk.ChunkID) error {
-	return tr.send(ctx, vaultID, nodeID, &gastrologv1.ChunkReplicationCommand{
-		VaultId: vaultID.ToProto(),
-		Command: &gastrologv1.ChunkReplicationCommand_Seal{
-			Seal: &gastrologv1.ChunkReplicationSeal{
-				ChunkId: glid.GLID(chunkID).ToProto(),
-			},
-		},
-	})
-}
-
 // ImportSealedChunk streams a canonical sealed chunk to a follower as a
 // bounded sequence of frames: Begin → 1..N Records → Commit. The caller
 // passes a RecordIterator so the chunk is consumed lazily; nothing

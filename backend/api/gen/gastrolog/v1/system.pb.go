@@ -7066,12 +7066,11 @@ func (x *GetRouteStatsResponse) GetRouteStats() []*PerRouteStats {
 }
 
 type VaultRouteStats struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	VaultId          []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
-	RecordsMatched   int64                  `protobuf:"varint,2,opt,name=records_matched,json=recordsMatched,proto3" json:"records_matched,omitempty"`       // records routed to this vault
-	RecordsForwarded int64                  `protobuf:"varint,3,opt,name=records_forwarded,json=recordsForwarded,proto3" json:"records_forwarded,omitempty"` // subset sent to a remote node
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	VaultId        []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
+	RecordsMatched int64                  `protobuf:"varint,2,opt,name=records_matched,json=recordsMatched,proto3" json:"records_matched,omitempty"` // records routed to this vault
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *VaultRouteStats) Reset() {
@@ -7118,20 +7117,12 @@ func (x *VaultRouteStats) GetRecordsMatched() int64 {
 	return 0
 }
 
-func (x *VaultRouteStats) GetRecordsForwarded() int64 {
-	if x != nil {
-		return x.RecordsForwarded
-	}
-	return 0
-}
-
 type PerRouteStats struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	RouteId          []byte                 `protobuf:"bytes,1,opt,name=route_id,json=routeId,proto3" json:"route_id,omitempty"`
-	RecordsMatched   int64                  `protobuf:"varint,2,opt,name=records_matched,json=recordsMatched,proto3" json:"records_matched,omitempty"`       // records matched by this route
-	RecordsForwarded int64                  `protobuf:"varint,3,opt,name=records_forwarded,json=recordsForwarded,proto3" json:"records_forwarded,omitempty"` // subset sent to remote nodes
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	RouteId        []byte                 `protobuf:"bytes,1,opt,name=route_id,json=routeId,proto3" json:"route_id,omitempty"`
+	RecordsMatched int64                  `protobuf:"varint,2,opt,name=records_matched,json=recordsMatched,proto3" json:"records_matched,omitempty"` // records matched by this route
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *PerRouteStats) Reset() {
@@ -7174,13 +7165,6 @@ func (x *PerRouteStats) GetRouteId() []byte {
 func (x *PerRouteStats) GetRecordsMatched() int64 {
 	if x != nil {
 		return x.RecordsMatched
-	}
-	return 0
-}
-
-func (x *PerRouteStats) GetRecordsForwarded() int64 {
-	if x != nil {
-		return x.RecordsForwarded
 	}
 	return 0
 }
@@ -9321,15 +9305,13 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\vvault_stats\x18\x05 \x03(\v2\x1d.gastrolog.v1.VaultRouteStatsR\n" +
 	"vaultStats\x12<\n" +
 	"\vroute_stats\x18\x06 \x03(\v2\x1b.gastrolog.v1.PerRouteStatsR\n" +
-	"routeStats\"\x82\x01\n" +
+	"routeStats\"U\n" +
 	"\x0fVaultRouteStats\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12'\n" +
-	"\x0frecords_matched\x18\x02 \x01(\x03R\x0erecordsMatched\x12+\n" +
-	"\x11records_forwarded\x18\x03 \x01(\x03R\x10recordsForwarded\"\x80\x01\n" +
+	"\x0frecords_matched\x18\x02 \x01(\x03R\x0erecordsMatched\"S\n" +
 	"\rPerRouteStats\x12\x19\n" +
 	"\broute_id\x18\x01 \x01(\fR\arouteId\x12'\n" +
-	"\x0frecords_matched\x18\x02 \x01(\x03R\x0erecordsMatched\x12+\n" +
-	"\x11records_forwarded\x18\x03 \x01(\x03R\x10recordsForwarded\"\x82\x01\n" +
+	"\x0frecords_matched\x18\x02 \x01(\x03R\x0erecordsMatched\"\x82\x01\n" +
 	"\x0fManagedFileInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +

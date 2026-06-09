@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
 	"gastrolog/internal/chunk/memory"
@@ -136,7 +135,7 @@ func seedAndSeal(t *testing.T, orch *orchestrator.Orchestrator, vaultID glid.GLI
 			IngestTS: ts,
 			Raw:      []byte("test-msg"),
 		}
-		if _, _, err := orch.Append(vaultID, rec); err != nil {
+		if err := orch.AppendToVault(vaultID, chunk.ChunkID{}, rec); err != nil {
 			t.Fatalf("append: %v", err)
 		}
 	}
@@ -355,22 +354,6 @@ func TestImportRecordsEmpty(t *testing.T) {
 
 // --- Drain tests ---
 
-// noopForwarder satisfies RecordForwarder for tests that need filter routing
-// but don't actually forward anything.
-type noopForwarder struct{}
-
-func (noopForwarder) Forward(context.Context, string, glid.GLID, []chunk.Record) error { return nil }
-
-func (noopForwarder) ForwardSync(context.Context, string, glid.GLID, []chunk.Record) error {
-	return nil
-}
-
-func (noopForwarder) RegisterPressureGate(*chanwatch.PressureGate) {
-	// No-op: these tests don't exercise forward-path pressure.
-}
-
-func (noopForwarder) RedirectNode(string, string) {}
-
 // waitForJob polls the scheduler until the job completes or the timeout expires.
 func waitForJob(t *testing.T, sched *orchestrator.Scheduler, jobID string, timeout time.Duration) orchestrator.JobInfo {
 	t.Helper()
@@ -420,8 +403,6 @@ func drainSetup(t *testing.T, recordCount int) (*orchestrator.Orchestrator, glid
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	orch.SetRecordForwarder(noopForwarder{})
 
 	mock := &mockTransferrer{}
 	orch.SetRemoteTransferrer(mock)
@@ -526,8 +507,6 @@ func TestDrainVault_CancelDrain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	orch.SetRecordForwarder(noopForwarder{})
 
 	// Use a transferrer that blocks until context cancellation.
 	blockTransfer := &mockTransferrer{failErr: context.Canceled}
@@ -657,7 +636,6 @@ func TestDrainVault_NoTransferrer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	orch.SetRecordForwarder(noopForwarder{})
 	// Deliberately do NOT set a RemoteTransferrer.
 
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(vaultID, cm, nil, nil))

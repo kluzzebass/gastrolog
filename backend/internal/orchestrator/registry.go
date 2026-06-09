@@ -36,17 +36,6 @@ func (o *Orchestrator) registerIngester(id glid.GLID, name, ingType string, pass
 	}
 }
 
-// SetRouteSet installs the routing table directly. Tests use this to
-// bypass config-driven reload; production wires it through ReloadFilters.
-// gastrolog-4kkoo (Phase 5): replaces the Phase-4 SetFilterSet — the
-// hot path now walks routes in priority order with first-match-wins
-// semantics instead of fanning out across per-vault filters.
-func (o *Orchestrator) SetRouteSet(rs *RouteSet) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.routeSet = rs
-}
-
 // UnregisterIngester removes an ingester from the registry. When the
 // orchestrator is running the ingester is stopped via a reconcile into the
 // pipeline; otherwise it simply leaves the desired set.

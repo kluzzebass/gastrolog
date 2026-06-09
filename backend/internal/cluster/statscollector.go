@@ -55,17 +55,15 @@ type StatsRouteSnapshot struct {
 // round-tripping and caused the dedup map at the consumer to miss
 // (resulting in duplicate per-vault rows in the inspector).
 type StatsVaultRouteSnapshot struct {
-	VaultID   glid.GLID
-	Matched   int64
-	Forwarded int64
+	VaultID glid.GLID
+	Matched int64
 }
 
 // StatsPerRouteSnapshot captures per-route stats. Same GLID-encoding
 // note as StatsVaultRouteSnapshot.
 type StatsPerRouteSnapshot struct {
-	RouteID   glid.GLID
-	Matched   int64
-	Forwarded int64
+	RouteID glid.GLID
+	Matched int64
 }
 
 // StatsProvider abstracts the orchestrator for stats collection.
@@ -82,11 +80,6 @@ type StatsProvider interface {
 // RaftStatsProvider exposes local Raft stats for the collector.
 type RaftStatsProvider interface {
 	LocalStats() map[string]string
-}
-
-// ForwardingStatsProvider exposes record forwarding counters.
-type ForwardingStatsProvider interface {
-	ForwardingStats() (sent, received int64)
 }
 
 // PeerBytesProvider exposes cumulative per-peer inter-node gRPC byte
@@ -112,8 +105,7 @@ type StatsCollectorConfig struct {
 	Broadcaster  *Broadcaster
 	RaftStats    RaftStatsProvider
 	Stats        StatsProvider
-	Forwarding   ForwardingStatsProvider // optional; nil if no forwarding
-	PeerBytes    PeerBytesProvider       // optional; nil disables per-peer byte stats
+	PeerBytes    PeerBytesProvider // optional; nil disables per-peer byte stats
 	Alerts       AlertProvider           // optional; nil if no alert collector
 	Jobs         JobsProvider            // optional; nil in single-node mode
 	NodeID            string
@@ -304,23 +296,16 @@ func (c *StatsCollector) collectLocal(now time.Time, stepWindows bool) *gastrolo
 		stats.RouteStatsFilterActive = rs.FilterActive
 		for _, vs := range rs.VaultStats {
 			stats.RouteVaultStats = append(stats.RouteVaultStats, &gastrologv1.VaultRouteStats{
-				VaultId:          vs.VaultID.ToProto(),
-				RecordsMatched:   vs.Matched,
-				RecordsForwarded: vs.Forwarded,
+				VaultId:        vs.VaultID.ToProto(),
+				RecordsMatched: vs.Matched,
 			})
 		}
 		for _, ps := range rs.RouteStats {
 			stats.RoutePerRouteStats = append(stats.RoutePerRouteStats, &gastrologv1.PerRouteStats{
-				RouteId:          ps.RouteID.ToProto(),
-				RecordsMatched:   ps.Matched,
-				RecordsForwarded: ps.Forwarded,
+				RouteId:        ps.RouteID.ToProto(),
+				RecordsMatched: ps.Matched,
 			})
 		}
-	}
-
-	// Forwarding stats.
-	if c.cfg.Forwarding != nil {
-		stats.ForwardedSent, stats.ForwardedReceived = c.cfg.Forwarding.ForwardingStats()
 	}
 
 	// Per-peer inter-node byte counters. See gastrolog-47u85.

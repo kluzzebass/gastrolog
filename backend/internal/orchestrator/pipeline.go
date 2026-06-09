@@ -10,7 +10,9 @@ import (
 	"slices"
 	"time"
 
+	"gastrolog/internal/chunk"
 	"gastrolog/internal/cluster"
+	"gastrolog/internal/convert"
 	"gastrolog/internal/glid"
 	"gastrolog/internal/orchestrator/pipeline"
 	"gastrolog/internal/pipeline/chunking"
@@ -35,6 +37,49 @@ func (o *Orchestrator) ServeSegmentPull(vaultID, segmentID glid.GLID, w io.Write
 		return errors.New("pipeline not initialized")
 	}
 	return pl.ServePull(distribution.PullRequest{VaultID: vaultID, SegmentID: segmentID, Dest: w})
+}
+
+// SubmitRetentionRecord routes a single record ejected from a vault during a
+// retention event (disposition=route) through the pipeline routing stage with a
+// RetentionSource context, so routes matching _source="retention" / _vault=<id>
+// fan it out to their configured destinations. It is fire-and-forget (no
+// durability ack): partial fan-out is acceptable since the source chunk is
+// destroyed regardless. Returns an error only when the pipeline is unavailable
+// or the submit is cancelled.
+func (o *Orchestrator) SubmitRetentionRecord(ctx context.Context, sourceVaultID glid.GLID, rec chunk.Record, reason string) error {
+	o.mu.RLock()
+	pl := o.pipeline
+	o.mu.RUnlock()
+	if pl == nil {
+		return errors.New("pipeline not initialized")
+	}
+	prec := convert.ChunkToRecord(rec)
+	return pl.Submit(ctx, routing.Input{
+		Record: &prec,
+		Source: routing.RetentionSource(sourceVaultID, reason),
+	})
+}
+
+// SubmitToVault writes a record directly into a named vault's segmentation queue
+// on this node, bypassing routing and preserving the record's EventID. It backs
+// the direct-to-vault writers (ImportRecords, export-to-vault), which are routed
+// to the vault's home node where reconcile keeps a local origin registered.
+func (o *Orchestrator) SubmitToVault(ctx context.Context, vaultID glid.GLID, rec chunk.Record, ack chan<- error) error {
+	o.mu.RLock()
+	pl := o.pipeline
+	o.mu.RUnlock()
+	if pl == nil {
+		return errors.New("pipeline not initialized")
+	}
+	prec := convert.ChunkToRecord(rec)
+	err := pl.SubmitToVault(ctx, vaultID, &prec, ack)
+	if errors.Is(err, pipeline.ErrVaultNotRegistered) {
+		// The vault's origin is registered on its home node by reconcile; a
+		// miss is transient (placement not yet applied here). Surface it as a
+		// not-ready condition so callers/clients retry or re-target.
+		return ErrVaultNotReady
+	}
+	return err
 }
 
 // pipelineVaultReg records how a vault is currently registered in the pipeline
@@ -352,12 +397,16 @@ func destinationVaults(sys *system.System) map[glid.GLID]struct{} {
 }
 
 // reloadPipelineFromConfig republishes the routing table and reconciles the set
-// of pipeline-registered vaults to match the destinations of all enabled
-// routes. Must be called with o.mu held (it mutates o.pipelineVaults).
+// of pipeline-registered vaults. Must be called with o.mu held (it mutates
+// o.pipelineVaults).
 //
-// Every route-target vault is registered as an Origin on this node so a matched
-// record is always durably written to a local segment, regardless of where the
-// vault is homed — cross-node collection pulls those segments on home nodes.
+// The desired set is the union of (a) every enabled route's destination vaults
+// and (b) every vault homed on this node. (a) registers an Origin on this node
+// so a matched record is always durably written to a local segment, regardless
+// of where the vault is homed — cross-node collection pulls those segments on
+// home nodes. (b) guarantees that any vault this node homes also has a local
+// segmentation queue even when no route targets it, which the direct-to-vault
+// submit path (ImportRecords, export-to-vault) and retention fan-out require.
 func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 	if o.pipeline == nil {
 		return nil
@@ -370,6 +419,17 @@ func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 	o.pipeline.SetRoutingTable(table)
 
 	desired := destinationVaults(sys)
+	// Origin-register every vault homed on this node, even if no route targets
+	// it, so direct-to-vault submit always finds a local segmentation queue on
+	// the home node it is routed to.
+	if sys != nil {
+		for i := range sys.Config.Vaults {
+			vid := sys.Config.Vaults[i].ID
+			if o.isVaultHome(sys, vid) {
+				desired[vid] = struct{}{}
+			}
+		}
+	}
 
 	// Unregister vaults that are no longer any route's destination, tearing
 	// down their cron rotation job as well.

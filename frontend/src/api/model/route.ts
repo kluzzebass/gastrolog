@@ -2,8 +2,8 @@
 //
 // Joins the durable `RouteConfig` (from GetSystem) with the runtime
 // `PerRouteStats` overlay (from GetRouteStats / WatchSystemStatus) so the
-// inspector reads route-level matched/forwarded counts off the same
-// object that carries the static config.
+// inspector reads route-level matched counts off the same object that
+// carries the static config.
 
 import type { RouteConfig, RouteStage, RouteDestination, PerRouteStats } from "../gen/gastrolog/v1/system_pb";
 import { type EntityID, idFromBytes } from "./id";
@@ -37,10 +37,5 @@ export class Route {
   /** Total records matched by this route (0 when no stats overlay). */
   get recordsMatched(): bigint {
     return this.stats?.recordsMatched ?? 0n;
-  }
-
-  /** Records forwarded across nodes for this route. */
-  get recordsForwarded(): bigint {
-    return this.stats?.recordsForwarded ?? 0n;
   }
 }

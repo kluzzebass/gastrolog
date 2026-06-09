@@ -19,15 +19,6 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// RecordAppender appends a single record to a local vault.
-// Used by the ForwardRecords handler to write received records.
-type RecordAppender func(ctx context.Context, vaultID glid.GLID, rec chunk.Record) error
-
-// VaultRecordAppender appends a single record to a local vault, preserving
-// the leader's chunk-ID assignment. Used by the ForwardRecords handler for
-// per-record replication from a leader to its followers.
-type VaultRecordAppender func(ctx context.Context, vaultID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error
-
 // SearchExecutor runs a search on a local vault and returns results.
 // For regular searches, it returns an iterator over records (the caller
 // streams them as they arrive). For pipeline queries (stats, timechart),
@@ -110,17 +101,6 @@ func parseChunkID(raw []byte) (chunk.ChunkID, error) {
 		return chunk.ChunkID{}, status.Error(codes.InvalidArgument, "invalid chunk_id: too short")
 	}
 	return chunk.ChunkID(glid.FromBytes(raw)), nil
-}
-
-// SetRecordAppender injects the callback for writing forwarded records.
-// Must be called before the cluster server receives ForwardRecords RPCs.
-func (s *Server) SetRecordAppender(fn RecordAppender) {
-	s.recordAppender = fn
-}
-
-// SetVaultRecordAppender injects the callback for chunk-ID-preserving forwarding.
-func (s *Server) SetVaultRecordAppender(fn VaultRecordAppender) {
-	s.recordAppenderForVault = fn
 }
 
 // SetRecordImporter injects the callback for importing transferred records.
@@ -229,93 +209,6 @@ func (s *Server) SetSegmentPullServer(fn SegmentPullServer) {
 	s.segmentPullServer = fn
 }
 
-// forwardRecords handles the unary ForwardRecords RPC. Used by retention
-// routing to send records to the node owning the destination vault.
-// Records are appended to the vault's active chunk.
-func (s *Server) forwardRecords(ctx context.Context, req *gastrologv1.ForwardRecordsRequest) (*gastrologv1.ForwardRecordsResponse, error) {
-	if s.recordAppender == nil {
-		return nil, status.Error(codes.Unavailable, "record appender not configured")
-	}
-	vaultID, err := parseVaultID(req.GetVaultId())
-	if err != nil {
-		return nil, err
-	}
-
-	var written int64
-	for _, exportRec := range req.GetRecords() {
-		rec := convert.ExportToRecord(exportRec)
-		if appendErr := s.recordAppender(ctx, vaultID, rec); appendErr != nil {
-			if errors.Is(appendErr, ErrForwardTargetNotReady) {
-				s.cfg.Logger.Debug("forward: append failed (target not ready)",
-					"vault", vaultID, "error", appendErr)
-			} else {
-				s.cfg.Logger.Warn("forward: append failed",
-					"vault", vaultID, "error", appendErr)
-			}
-			return nil, status.Errorf(codes.Internal, "append record: %v", appendErr)
-		}
-		written++
-	}
-	s.forwardedReceived.Add(written)
-
-	return &gastrologv1.ForwardRecordsResponse{RecordsWritten: written}, nil
-}
-
-// streamForwardRecordsHandler handles the client-streaming StreamForwardRecords
-// RPC. Each message is a ForwardRecordsRequest (vault_id + batch of records).
-// This is the same payload as the unary ForwardRecords RPC, but on a persistent
-// stream — eliminating per-RPC connection overhead.
-func streamForwardRecordsHandler(srv any, stream grpc.ServerStream) error {
-	s := srv.(*Server)
-	if s.recordAppender == nil {
-		return status.Error(codes.Unavailable, "record appender not configured")
-	}
-
-	var written int64
-	for {
-		var msg gastrologv1.ForwardRecordsRequest
-		err := s.recvOrShutdown(stream, &msg)
-		if errors.Is(err, io.EOF) {
-			return stream.SendMsg(&gastrologv1.ForwardRecordsResponse{
-				RecordsWritten: written,
-			})
-		}
-		// Cluster server is shutting down — return cleanly so GracefulStop
-		// can unblock. See gastrolog-1e5ke.
-		if errors.Is(err, errShuttingDown) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-
-		vaultID, err := parseVaultID(msg.GetVaultId())
-		if err != nil {
-			continue
-		}
-
-		// StreamForwardRecords is exclusively the cross-node vault routing
-		// path since gastrolog-5c6fp — chunk-ID-preserving replication goes
-		// through ChunkReplication instead. Always append as a regular
-		// vault record.
-		for _, exportRec := range msg.GetRecords() {
-			rec := convert.ExportToRecord(exportRec)
-			if appendErr := s.recordAppender(stream.Context(), vaultID, rec); appendErr != nil {
-				if errors.Is(appendErr, ErrForwardTargetNotReady) {
-					s.logger.Debug("stream forward: append failed (target not ready)",
-						"vault", vaultID, "error", appendErr)
-				} else {
-					s.logger.Warn("stream forward: append failed",
-						"vault", vaultID, "error", appendErr)
-				}
-				continue
-			}
-			written++
-		}
-		s.forwardedReceived.Add(int64(len(msg.GetRecords())))
-	}
-}
-
 // forwardImportRecordsStreamHandler handles the client-streaming
 // ForwardImportRecords RPC. Each message carries a single record; the server
 // wraps the stream as a RecordIterator and feeds it into ImportRecords so at
@@ -331,7 +224,7 @@ func forwardImportRecordsStreamHandler(srv any, stream grpc.ServerStream) error 
 	err := s.recvOrShutdown(stream, first)
 	if errors.Is(err, io.EOF) {
 		// Empty stream — send zero-record response.
-		return stream.SendMsg(&gastrologv1.ForwardRecordsResponse{})
+		return stream.SendMsg(&gastrologv1.ForwardImportRecordsResponse{})
 	}
 	// Cluster server is shutting down — return cleanly. The iterator
 	// was never entered so no partial chunk state to worry about.
@@ -378,7 +271,7 @@ func forwardImportRecordsStreamHandler(srv any, stream grpc.ServerStream) error 
 		return status.Errorf(codes.Internal, "import records: %v", err)
 	}
 
-	return stream.SendMsg(&gastrologv1.ForwardRecordsResponse{RecordsWritten: count})
+	return stream.SendMsg(&gastrologv1.ForwardImportRecordsResponse{RecordsWritten: count})
 }
 
 // forwardFollowStreamHandler handles the server-streaming ForwardFollow RPC.
@@ -677,15 +570,6 @@ func (s *Server) forwardSealVault(ctx context.Context, req *gastrologv1.ForwardS
 		return nil, status.Errorf(codes.Internal, "seal vault: %v", err)
 	}
 	return &gastrologv1.ForwardSealVaultResponse{}, nil
-}
-
-// ChunkSealExecutor seals a specific chunk on this node, gated on the
-// expected chunk ID. Invoked by the ChunkReplication stream handler.
-type ChunkSealExecutor func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID) error
-
-// SetChunkSealExecutor injects the callback for handling ChunkReplicationSeal commands.
-func (s *Server) SetChunkSealExecutor(fn ChunkSealExecutor) {
-	s.chunkSealExecutor = fn
 }
 
 // DeleteChunkExecutor deletes a specific sealed chunk from a vault on this
@@ -996,10 +880,6 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			Handler:    broadcastHandler,
 		},
 		{
-			MethodName: "ForwardRecords",
-			Handler:    forwardRecordsHandler,
-		},
-		{
 			MethodName: "ForwardGetContext",
 			Handler:    forwardGetContextHandler,
 		},
@@ -1102,11 +982,6 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 		{
-			StreamName:    "StreamForwardRecords",
-			Handler:       streamForwardRecordsHandler,
-			ClientStreams: true,
-		},
-		{
 			StreamName:    "ForwardRPC",
 			Handler:       forwardRPCStreamHandler,
 			ServerStreams: true,
@@ -1120,7 +995,6 @@ type clusterServiceServer interface {
 	forwardApply(context.Context, *gastrologv1.ForwardApplyRequest) (*gastrologv1.ForwardApplyResponse, error)
 	enroll(context.Context, *gastrologv1.EnrollRequest) (*gastrologv1.EnrollResponse, error)
 	broadcast(context.Context, *gastrologv1.BroadcastRequest) (*gastrologv1.BroadcastResponse, error)
-	forwardRecords(context.Context, *gastrologv1.ForwardRecordsRequest) (*gastrologv1.ForwardRecordsResponse, error)
 	forwardGetContext(context.Context, *gastrologv1.ForwardGetContextRequest) (*gastrologv1.ForwardGetContextResponse, error)
 	forwardListChunks(context.Context, *gastrologv1.ForwardListChunksRequest) (*gastrologv1.ForwardListChunksResponse, error)
 	forwardGetIndexes(context.Context, *gastrologv1.ForwardGetIndexesRequest) (*gastrologv1.ForwardGetIndexesResponse, error)
@@ -1171,25 +1045,6 @@ func forwardVaultApplyHandler(srv any, ctx context.Context, dec func(any) error,
 	}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return s.forwardVaultApply(ctx, req.(*gastrologv1.ForwardVaultApplyRequest))
-	}
-	return interceptor(ctx, req, info, handler)
-}
-
-func forwardRecordsHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	req := &gastrologv1.ForwardRecordsRequest{}
-	if err := dec(req); err != nil {
-		return nil, err
-	}
-	s := srv.(*Server)
-	if interceptor == nil {
-		return s.forwardRecords(ctx, req)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/gastrolog.v1.ClusterService/ForwardRecords",
-	}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return s.forwardRecords(ctx, req.(*gastrologv1.ForwardRecordsRequest))
 	}
 	return interceptor(ctx, req, info, handler)
 }

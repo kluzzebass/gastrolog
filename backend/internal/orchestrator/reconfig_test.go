@@ -904,91 +904,13 @@ func TestRetentionSingleJobRegistered(t *testing.T) {
 
 func strPtr(s string) *string { return &s }
 
-// TestReloadRotationPolicies_AppliesSynchronously is the regression test for
-// gastrolog-1rj63: the dispatcher must hot-swap the active chunk manager's
-// rotation policy the moment the FSM commits a change, not 15 seconds later
-// on the next rotationSweep tick.
-//
-// Setup: a vault is configured with a 1000-record rotation policy and has
-// accumulated 100 records. The user then assigns a different policy with
-// max=50, which the current state already exceeds. Without the fix, the
-// chunk manager keeps the 1000-record policy and the next Append does not
-// rotate; with the fix, ReloadRotationPolicies sets the new policy and the
-// next Append seals the chunk + opens a fresh one.
-func TestReloadRotationPolicies_AppliesSynchronously(t *testing.T) {
-	t.Parallel()
-
-	vaultID := glid.New()
-	oldPolicyID := glid.New()
-	newPolicyID := glid.New()
-	oldMax := int64(1000)
-	newMax := int64(50)
-
-	loader := &fakeSystemLoader{cfg: &system.Config{
-		Vaults: []system.VaultConfig{
-			{ID: vaultID, Name: "test", Type: system.VaultTypeMemory, RotationPolicyID: &oldPolicyID, Enabled: true},
-		},
-		RotationPolicies: []system.RotationPolicyConfig{
-			{ID: oldPolicyID, Name: "loose", MaxRecords: &oldMax},
-			{ID: newPolicyID, Name: "tight", MaxRecords: &newMax},
-		},
-	}}
-
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := memtest.MustNewVault(t, chunkmem.Config{RotationPolicy: recordCountPolicy(oldMax)})
-	orch.RegisterVault(orchestrator.NewVaultFromComponents(vaultID, s.CM, s.IM, s.QE))
-
-	// Fill the chunk with 100 records — well under the 1000-record bound.
-	for i := 0; i < 100; i++ {
-		if _, _, err := s.CM.Append(chunk.Record{
-			IngestTS: time.Now(),
-			Attrs:    chunk.Attributes{},
-			Raw:      []byte("x"),
-		}); err != nil {
-			t.Fatalf("append %d: %v", i, err)
-		}
-	}
-	active := s.CM.Active()
-	if active == nil {
-		t.Fatal("expected an active chunk after 100 appends")
-	}
-	firstChunkID := active.ID
-	if active.RecordCount != 100 {
-		t.Fatalf("expected 100 records in active chunk, got %d", active.RecordCount)
-	}
-
-	// Reassign the vault to the tighter policy (max=50). Current state of
-	// 100 records already exceeds the new bound.
-	loader.cfg.Vaults[0].RotationPolicyID = &newPolicyID
-	if err := orch.ReloadRotationPolicies(context.Background()); err != nil {
-		t.Fatalf("ReloadRotationPolicies: %v", err)
-	}
-
-	// One more append must trigger rotation: ShouldRotate sees
-	// state.Records+1 = 101 > newMax (50) and seals before appending.
-	if _, _, err := s.CM.Append(chunk.Record{
-		IngestTS: time.Now(),
-		Attrs:    chunk.Attributes{},
-		Raw:      []byte("x"),
-	}); err != nil {
-		t.Fatalf("append after policy switch: %v", err)
-	}
-
-	active = s.CM.Active()
-	if active == nil {
-		t.Fatal("expected an active chunk after policy switch")
-	}
-	if active.ID == firstChunkID {
-		t.Errorf("expected rotation after policy switch; active chunk is still %s with %d records — new policy not applied",
-			active.ID, active.RecordCount)
-	}
-	if active.RecordCount != 1 {
-		t.Errorf("expected new chunk to have 1 record, got %d", active.RecordCount)
-	}
-}
+// TestReloadRotationPolicies_AppliesSynchronously was removed in Rubicon E2
+// (gastrolog-358ak): ReloadRotationPolicies no longer hot-swaps the per-instance
+// chunk manager's rotation policy (the active-chunk append path is gone). Chunk
+// rotation is now governed by the pipeline chunking manifest policy, applied at
+// pipeline vault (re)registration via reloadPipelineFromConfig. The reload path's
+// remaining effect (republish routing table + reconcile pipeline vaults) is
+// covered by the route/reconfig tests.
 
 // TestReloadRotationPolicies_SkipsFollowers verifies the reload path does not
 // stomp on follower replicas — the rotationSweep is the sole authority for
@@ -1096,118 +1018,12 @@ func TestReloadRotationPolicies_NilPolicyID(t *testing.T) {
 	}
 }
 
-// TestApplyRotationPolicyForRole_LeaderAppliesUserPolicy is the regression
-// test for gastrolog-50n4b on the follower→leader transition. After a node
-// flips from follower to leader, its chunk manager carries
-// NeverRotatePolicy (set previously by the sweep); the dispatcher now
-// calls ApplyRotationPolicyForRole to switch it to the user-configured
-// policy immediately, instead of waiting up to 15 s for the next
-// rotationSweep tick.
-func TestApplyRotationPolicyForRole_LeaderAppliesUserPolicy(t *testing.T) {
-	t.Parallel()
-
-	vaultID := glid.New()
-	policyID := glid.New()
-	maxRecs := int64(50)
-
-	loader := &fakeSystemLoader{cfg: &system.Config{
-		Vaults: []system.VaultConfig{
-			{ID: vaultID, Name: "test", Type: system.VaultTypeMemory, RotationPolicyID: &policyID, Enabled: true},
-		},
-		RotationPolicies: []system.RotationPolicyConfig{
-			{ID: policyID, Name: "tight", MaxRecords: &maxRecs},
-		},
-	}}
-
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Build a leader vault instance whose chunk manager still has
-	// NeverRotatePolicy — simulating just after a follower→leader flip
-	// (IsFollower set to false but chunk manager not yet updated).
-	s := memtest.MustNewVault(t, chunkmem.Config{RotationPolicy: chunk.NeverRotatePolicy{}})
-	orch.RegisterVault(orchestrator.NewVaultFromComponents(vaultID, s.CM, s.IM, s.QE))
-
-	if err := orch.ApplyRotationPolicyForRole(context.Background(), vaultID); err != nil {
-		t.Fatalf("ApplyRotationPolicyForRole: %v", err)
-	}
-
-	// Append 51 records; the 51st must trigger rotation (state.Records+1 > maxRecs=50).
-	for i := 0; i < 51; i++ {
-		if _, _, err := s.CM.Append(chunk.Record{
-			IngestTS: time.Now(),
-			Attrs:    chunk.Attributes{},
-			Raw:      []byte("x"),
-		}); err != nil {
-			t.Fatalf("append %d: %v", i, err)
-		}
-	}
-	active := s.CM.Active()
-	if active == nil {
-		t.Fatal("expected active chunk")
-	}
-	if active.RecordCount != 1 {
-		t.Errorf("expected rotation after 51 appends with maxRecords=50; new chunk should have 1 record, got %d — user policy not applied",
-			active.RecordCount)
-	}
-}
-
-// TestApplyRotationPolicyForRole_FollowerStampsNeverRotate is the
-// regression test for gastrolog-50n4b on the leader→follower transition.
-// After a node flips from leader to follower, its chunk manager still
-// carries the user policy until the next sweep tick (~15 s). The
-// dispatcher now stamps NeverRotatePolicy immediately so the follower's
-// manager can't rotate independently during the gap.
-func TestApplyRotationPolicyForRole_FollowerStampsNeverRotate(t *testing.T) {
-	t.Parallel()
-
-	vaultID := glid.New()
-	policyID := glid.New()
-	maxRecs := int64(50)
-
-	loader := &fakeSystemLoader{cfg: &system.Config{
-		Vaults: []system.VaultConfig{
-			{ID: vaultID, Name: "test", Type: system.VaultTypeMemory, RotationPolicyID: &policyID, Enabled: true},
-		},
-		RotationPolicies: []system.RotationPolicyConfig{
-			{ID: policyID, Name: "tight", MaxRecords: &maxRecs},
-		},
-	}}
-
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Build a follower vault instance whose chunk manager still has the
-	// user policy — simulating just after a leader→follower flip.
-	s := memtest.MustNewVault(t, chunkmem.Config{RotationPolicy: recordCountPolicy(maxRecs)})
-	v := orchestrator.NewVaultFromComponents(vaultID, s.CM, s.IM, s.QE)
-	v.Instance.IsFollower = true
-	orch.RegisterVault(v)
-
-	if err := orch.ApplyRotationPolicyForRole(context.Background(), vaultID); err != nil {
-		t.Fatalf("ApplyRotationPolicyForRole: %v", err)
-	}
-
-	// Append 101 records; with NeverRotatePolicy, none should rotate.
-	for i := 0; i < 101; i++ {
-		if _, _, err := s.CM.Append(chunk.Record{
-			IngestTS: time.Now(),
-			Attrs:    chunk.Attributes{},
-			Raw:      []byte("x"),
-		}); err != nil {
-			t.Fatalf("append %d: %v", i, err)
-		}
-	}
-	active := s.CM.Active()
-	if active.RecordCount != 101 {
-		t.Errorf("expected single chunk with 101 records (NeverRotatePolicy in effect), got %d — follower chunk manager still rotating under user policy",
-			active.RecordCount)
-	}
-}
+// The per-CM role-based rotation regression tests (gastrolog-50n4b) were
+// removed in Rubicon E2 (gastrolog-358ak): the per-instance chunk manager no
+// longer performs active-chunk rotation under a user/never policy. Chunk
+// rotation is now governed by the pipeline chunking manifest policy
+// (resolveChunkPolicy / manifestRotationPolicy), and ApplyRotationPolicyForRole
+// is a retained no-op (see TestApplyRotationPolicyForRole_NoInstanceIsNoop).
 
 // TestApplyRotationPolicyForRole_NoInstanceIsNoop covers the warm-up case
 // where a vault is registered but its Instance is still nil — the call

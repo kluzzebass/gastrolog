@@ -5977,13 +5977,6 @@ export class VaultRouteStats extends Message<VaultRouteStats> {
    */
   recordsMatched = protoInt64.zero;
 
-  /**
-   * subset sent to a remote node
-   *
-   * @generated from field: int64 records_forwarded = 3;
-   */
-  recordsForwarded = protoInt64.zero;
-
   constructor(data?: PartialMessage<VaultRouteStats>) {
     super();
     proto3.util.initPartial(data, this);
@@ -5994,7 +5987,6 @@ export class VaultRouteStats extends Message<VaultRouteStats> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "records_matched", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 3, name: "records_forwarded", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultRouteStats {
@@ -6030,13 +6022,6 @@ export class PerRouteStats extends Message<PerRouteStats> {
    */
   recordsMatched = protoInt64.zero;
 
-  /**
-   * subset sent to remote nodes
-   *
-   * @generated from field: int64 records_forwarded = 3;
-   */
-  recordsForwarded = protoInt64.zero;
-
   constructor(data?: PartialMessage<PerRouteStats>) {
     super();
     proto3.util.initPartial(data, this);
@@ -6047,7 +6032,6 @@ export class PerRouteStats extends Message<PerRouteStats> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "route_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "records_matched", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 3, name: "records_forwarded", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PerRouteStats {

@@ -139,9 +139,9 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 	// Create all nodes.
 	for _, id := range nodeIDs {
 		if cfg.noVault[id] {
-			nodes[id] = setupMNNodeNoVault(t, id)
+			nodes[id] = setupMNNodeNoVault(t, id, cfgStore)
 		} else {
-			node := setupMNNode(t, id)
+			node := setupMNNode(t, id, cfgStore)
 			// Write VaultConfig directly with all storage fields, plus a
 			// synthetic placement for this node.
 			placements := []system.VaultPlacement{
@@ -230,10 +230,10 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 	}
 }
 
-func setupMNNode(t *testing.T, nodeID string) multinodeTestNode {
+func setupMNNode(t *testing.T, nodeID string, loader system.Store) multinodeTestNode {
 	t.Helper()
 
-	orch, err := orchestrator.New(orchestrator.Config{LocalNodeID: nodeID})
+	orch, err := orchestrator.New(orchestrator.Config{LocalNodeID: nodeID, SystemLoader: loader})
 	if err != nil {
 		t.Fatalf("orchestrator.New: %v", err)
 	}
@@ -248,10 +248,10 @@ func setupMNNode(t *testing.T, nodeID string) multinodeTestNode {
 	return multinodeTestNode{nodeID: nodeID, orch: orch, vaultID: vaultID, vault: v}
 }
 
-func setupMNNodeNoVault(t *testing.T, nodeID string) multinodeTestNode {
+func setupMNNodeNoVault(t *testing.T, nodeID string, loader system.Store) multinodeTestNode {
 	t.Helper()
 
-	orch, err := orchestrator.New(orchestrator.Config{LocalNodeID: nodeID})
+	orch, err := orchestrator.New(orchestrator.Config{LocalNodeID: nodeID, SystemLoader: loader})
 	if err != nil {
 		t.Fatalf("orchestrator.New: %v", err)
 	}
@@ -287,9 +287,9 @@ func (p *mnPeerRouteStats) AggregateRouteStats() (ingested, dropped, routed int6
 	routeMap := make(map[string]*gastrologv1.PerRouteStats)
 	for _, orch := range p.nodes {
 		rs := orch.GetRouteStats()
-		ingested += rs.Ingested.Load()
-		dropped += rs.Dropped.Load()
-		routed += rs.Routed.Load()
+		ingested += rs.Ingested
+		dropped += rs.Dropped
+		routed += rs.Routed
 		if orch.IsFilterSetActive() {
 			filterActive = true
 		}
@@ -298,13 +298,11 @@ func (p *mnPeerRouteStats) AggregateRouteStats() (ingested, dropped, routed int6
 			existing, ok := vaultMap[id]
 			if !ok {
 				vaultMap[id] = &gastrologv1.VaultRouteStats{
-					VaultId:          vaultID.ToProto(),
-					RecordsMatched:   vs.Matched.Load(),
-					RecordsForwarded: vs.Forwarded.Load(),
+					VaultId:        vaultID.ToProto(),
+					RecordsMatched: vs.Matched,
 				}
 			} else {
-				existing.RecordsMatched += vs.Matched.Load()
-				existing.RecordsForwarded += vs.Forwarded.Load()
+				existing.RecordsMatched += vs.Matched
 			}
 		}
 		for routeID, ps := range orch.PerRouteStatsList() {
@@ -312,13 +310,11 @@ func (p *mnPeerRouteStats) AggregateRouteStats() (ingested, dropped, routed int6
 			existing, ok := routeMap[id]
 			if !ok {
 				routeMap[id] = &gastrologv1.PerRouteStats{
-					RouteId:          routeID.ToProto(),
-					RecordsMatched:   ps.Matched.Load(),
-					RecordsForwarded: ps.Forwarded.Load(),
+					RouteId:        routeID.ToProto(),
+					RecordsMatched: ps.Matched,
 				}
 			} else {
-				existing.RecordsMatched += ps.Matched.Load()
-				existing.RecordsForwarded += ps.Forwarded.Load()
+				existing.RecordsMatched += ps.Matched
 			}
 		}
 	}
@@ -1953,55 +1949,57 @@ func TestMultiNode_RouteStatsAggregated(t *testing.T) {
 	h := setupMultiNode(t, []string{"coord", "data-1", "data-2"}, WithoutVault("coord"))
 	ctx := context.Background()
 
-	// Set up catch-all routes on data nodes so ingest() routes records.
+	// Per-node attr routes (the cluster-wide route table is shared, so each
+	// node's records carry a distinguishing `node` attr that selects its own
+	// destination vault). Records flow through the real pipeline routing stage,
+	// which is the source of the route-stats counters.
 	d1 := h.Node(t, "data-1")
 	d2 := h.Node(t, "data-2")
 
-	// gastrolog-4kkoo (Phase 5): catch-all route per data node.
-	d1cr, _ := orchestrator.CompileRoute(glid.New(), "all", 0, "*",
-		[]orchestrator.RouteDestination{{VaultID: d1.vaultID}}, "fanout")
-	d1.orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{d1cr}))
-	d2cr, _ := orchestrator.CompileRoute(glid.New(), "all", 0, "*",
-		[]orchestrator.RouteDestination{{VaultID: d2.vaultID}}, "fanout")
-	d2.orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{d2cr}))
+	_ = h.cfgStore.PutRoute(ctx, system.RouteConfig{
+		ID:           glid.New(),
+		Name:         "route-data-1",
+		Stages:       []system.RouteStage{{Match: &system.MatchStage{Expression: "node=data-1"}}},
+		Destinations: []glid.GLID{d1.vaultID}, Enabled: true,
+	})
+	_ = h.cfgStore.PutRoute(ctx, system.RouteConfig{
+		ID:           glid.New(),
+		Name:         "route-data-2",
+		Stages:       []system.RouteStage{{Match: &system.MatchStage{Expression: "node=data-2"}}},
+		Destinations: []glid.GLID{d2.vaultID}, Enabled: true,
+	})
 
-	// Ingest records on each data node (simulating ingesters on those nodes).
-	for range 3 {
-		if err := d1.orch.Ingest(chunk.Record{Raw: []byte("from-d1")}); err != nil {
-			t.Fatalf("Ingest on data-1: %v", err)
-		}
-	}
-	for range 7 {
-		if err := d2.orch.Ingest(chunk.Record{Raw: []byte("from-d2")}); err != nil {
-			t.Fatalf("Ingest on data-2: %v", err)
-		}
-	}
+	startMNRouteStatsNode(t, d1)
+	startMNRouteStatsNode(t, d2)
+
+	// Submit records on each data node (simulating ingesters on those nodes).
+	submitMNRouteRecords(t, d1, "node", "data-1", "from-d1", 3)
+	submitMNRouteRecords(t, d2, "node", "data-2", "from-d2", 7)
 
 	// Query route stats via the coordinator — should aggregate both data nodes.
-	resp, err := h.configClient.GetRouteStats(ctx, connect.NewRequest(&gastrologv1.GetRouteStatsRequest{}))
-	if err != nil {
-		t.Fatalf("GetRouteStats: %v", err)
-	}
+	msg := waitForMNRouteStats(t, h.configClient, func(m *gastrologv1.GetRouteStatsResponse) bool {
+		return m.TotalIngested == 10
+	})
 
-	if resp.Msg.TotalIngested != 10 {
-		t.Errorf("TotalIngested = %d, want 10 (3+7)", resp.Msg.TotalIngested)
+	if msg.TotalIngested != 10 {
+		t.Errorf("TotalIngested = %d, want 10 (3+7)", msg.TotalIngested)
 	}
-	if resp.Msg.TotalRouted != 10 {
-		t.Errorf("TotalRouted = %d, want 10", resp.Msg.TotalRouted)
+	if msg.TotalRouted != 10 {
+		t.Errorf("TotalRouted = %d, want 10", msg.TotalRouted)
 	}
-	if resp.Msg.TotalDropped != 0 {
-		t.Errorf("TotalDropped = %d, want 0", resp.Msg.TotalDropped)
+	if msg.TotalDropped != 0 {
+		t.Errorf("TotalDropped = %d, want 0", msg.TotalDropped)
 	}
-	if !resp.Msg.FilterSetActive {
+	if !msg.FilterSetActive {
 		t.Error("expected FilterSetActive=true")
 	}
-	if len(resp.Msg.VaultStats) != 2 {
-		t.Fatalf("expected 2 vault stats, got %d", len(resp.Msg.VaultStats))
+	if len(msg.VaultStats) != 2 {
+		t.Fatalf("expected 2 vault stats, got %d", len(msg.VaultStats))
 	}
 
 	// Build a map for easier assertions.
 	vsMap := make(map[string]int64)
-	for _, vs := range resp.Msg.VaultStats {
+	for _, vs := range msg.VaultStats {
 		vsMap[glid.FromBytes(vs.VaultId).String()] = vs.RecordsMatched
 	}
 	if vsMap[d1.vaultID.String()] != 3 {
@@ -2009,6 +2007,55 @@ func TestMultiNode_RouteStatsAggregated(t *testing.T) {
 	}
 	if vsMap[d2.vaultID.String()] != 7 {
 		t.Errorf("data-2 vault matched = %d, want 7", vsMap[d2.vaultID.String()])
+	}
+}
+
+// startMNRouteStatsNode publishes a data node's routing table from the shared
+// config store and then starts its pipeline, so SubmitRetentionRecord drives
+// records through the real routing stage (where route-stats counters live).
+// ReloadFilters runs before Start so pipeline vault registration happens while
+// the segmentation manager is not yet running (registration after Start races
+// the manager's startup window).
+func startMNRouteStatsNode(t *testing.T, node multinodeTestNode) {
+	t.Helper()
+	ctx := context.Background()
+	if err := node.orch.ReloadFilters(ctx); err != nil {
+		t.Fatalf("ReloadFilters %s: %v", node.nodeID, err)
+	}
+	if err := node.orch.Start(ctx); err != nil {
+		t.Fatalf("Start %s: %v", node.nodeID, err)
+	}
+}
+
+// submitMNRouteRecords submits n records carrying attr=val through the node's
+// pipeline routing stage via the retention submit entry.
+func submitMNRouteRecords(t *testing.T, node multinodeTestNode, attr, val, raw string, n int) {
+	t.Helper()
+	ctx := context.Background()
+	for range n {
+		rec := chunk.Record{Attrs: chunk.Attributes{attr: val}, Raw: []byte(raw)}
+		if err := node.orch.SubmitRetentionRecord(ctx, node.vaultID, rec, ""); err != nil {
+			t.Fatalf("SubmitRetentionRecord on %s: %v", node.nodeID, err)
+		}
+	}
+}
+
+// waitForMNRouteStats polls the coordinator's GetRouteStats until cond holds or
+// the deadline expires, returning the last response message. Route-stats
+// counters increment asynchronously as records flow through the pipeline.
+func waitForMNRouteStats(t *testing.T, client gastrologv1connect.SystemServiceClient, cond func(*gastrologv1.GetRouteStatsResponse) bool) *gastrologv1.GetRouteStatsResponse {
+	t.Helper()
+	ctx := context.Background()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		resp, err := client.GetRouteStats(ctx, connect.NewRequest(&gastrologv1.GetRouteStatsRequest{}))
+		if err != nil {
+			t.Fatalf("GetRouteStats: %v", err)
+		}
+		if cond(resp.Msg) || time.Now().After(deadline) {
+			return resp.Msg
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 
@@ -2020,46 +2067,45 @@ func TestMultiNode_PerRouteStatsAggregated(t *testing.T) {
 	d1 := h.Node(t, "data-1")
 	d2 := h.Node(t, "data-2")
 
-	// Create two distinct route IDs.
+	// Two distinct route IDs so per-route stats stay attributable. Each route
+	// matches on a node-specific attr (the route table is cluster-wide).
 	routeA := glid.New()
 	routeB := glid.New()
 
-	// gastrolog-4kkoo (Phase 5): one route per node, distinct RouteIDs so
-	// per-route stats stay attributable.
-	d1cr, _ := orchestrator.CompileRoute(routeA, "route-a", 0, "*",
-		[]orchestrator.RouteDestination{{VaultID: d1.vaultID}}, "fanout")
-	d1.orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{d1cr}))
-	d2cr, _ := orchestrator.CompileRoute(routeB, "route-b", 0, "*",
-		[]orchestrator.RouteDestination{{VaultID: d2.vaultID}}, "fanout")
-	d2.orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{d2cr}))
+	_ = h.cfgStore.PutRoute(ctx, system.RouteConfig{
+		ID:           routeA,
+		Name:         "route-a",
+		Stages:       []system.RouteStage{{Match: &system.MatchStage{Expression: "node=data-1"}}},
+		Destinations: []glid.GLID{d1.vaultID}, Enabled: true,
+	})
+	_ = h.cfgStore.PutRoute(ctx, system.RouteConfig{
+		ID:           routeB,
+		Name:         "route-b",
+		Stages:       []system.RouteStage{{Match: &system.MatchStage{Expression: "node=data-2"}}},
+		Destinations: []glid.GLID{d2.vaultID}, Enabled: true,
+	})
 
-	for range 5 {
-		if err := d1.orch.Ingest(chunk.Record{Raw: []byte("from-d1")}); err != nil {
-			t.Fatalf("Ingest on data-1: %v", err)
-		}
-	}
-	for range 8 {
-		if err := d2.orch.Ingest(chunk.Record{Raw: []byte("from-d2")}); err != nil {
-			t.Fatalf("Ingest on data-2: %v", err)
-		}
-	}
+	startMNRouteStatsNode(t, d1)
+	startMNRouteStatsNode(t, d2)
 
-	resp, err := h.configClient.GetRouteStats(ctx, connect.NewRequest(&gastrologv1.GetRouteStatsRequest{}))
-	if err != nil {
-		t.Fatalf("GetRouteStats: %v", err)
-	}
+	submitMNRouteRecords(t, d1, "node", "data-1", "from-d1", 5)
+	submitMNRouteRecords(t, d2, "node", "data-2", "from-d2", 8)
 
-	if resp.Msg.TotalIngested != 13 {
-		t.Errorf("TotalIngested = %d, want 13", resp.Msg.TotalIngested)
+	msg := waitForMNRouteStats(t, h.configClient, func(m *gastrologv1.GetRouteStatsResponse) bool {
+		return m.TotalIngested == 13
+	})
+
+	if msg.TotalIngested != 13 {
+		t.Errorf("TotalIngested = %d, want 13", msg.TotalIngested)
 	}
 
 	// Should have 2 per-route entries.
-	if len(resp.Msg.RouteStats) != 2 {
-		t.Fatalf("expected 2 route stats, got %d", len(resp.Msg.RouteStats))
+	if len(msg.RouteStats) != 2 {
+		t.Fatalf("expected 2 route stats, got %d", len(msg.RouteStats))
 	}
 
 	rsMap := make(map[string]int64)
-	for _, rs := range resp.Msg.RouteStats {
+	for _, rs := range msg.RouteStats {
 		rsMap[glid.FromBytes(rs.RouteId).String()] = rs.RecordsMatched
 	}
 	if rsMap[routeA.String()] != 5 {

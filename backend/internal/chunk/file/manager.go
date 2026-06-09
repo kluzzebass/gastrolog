@@ -2972,7 +2972,14 @@ func (m *Manager) deleteInternal(id chunk.ChunkID) error {
 		// delete keeps disk usage bounded by retention.
 		_ = os.RemoveAll(m.chunkDir(id))
 	} else {
+		// Pipeline-built sealed chunks register an external data.glcb under the
+		// vault's segmentation ChunkRoot (<chunkRoot>/<id>/data.glcb), outside
+		// this manager's Dir. Remove that tree on delete so retention/archival
+		// does not leave orphan GLCBs (gastrolog-358ak, Rubicon E2).
 		dir := m.chunkDir(id)
+		if extPath, external := m.externalGLCB[id]; external {
+			dir = filepath.Dir(extPath)
+		}
 		// postSealActive was already drained at the top of deleteInternal
 		// before we acquired chunkLock — no need to wait again here.
 		if err := os.RemoveAll(dir); err != nil {

@@ -181,23 +181,34 @@ func (s *QueryServer) runExportJob(
 		slog.String("target_vault", targetVaultID.String()),
 	)
 
-	// Append each record to the target vault.
+	// Submit each record directly into the target vault's pipeline segmentation
+	// queue, waiting for the durable commit before counting it. EventID is
+	// preserved; the target's segment write assigns a fresh WriteTS.
 	for _, rec := range records {
-		// Build a clean record for append — preserve timestamps and attrs,
-		// but let the target vault assign fresh WriteTS.
-		appendRec := chunk.Record{
+		submitRec := chunk.Record{
 			Raw:      rec.Raw,
 			SourceTS: rec.SourceTS,
 			IngestTS: rec.IngestTS,
 			EventID:  rec.EventID,
 		}
 		if len(rec.Attrs) > 0 {
-			appendRec.Attrs = make(chunk.Attributes, len(rec.Attrs))
-			maps.Copy(appendRec.Attrs, rec.Attrs)
+			submitRec.Attrs = make(chunk.Attributes, len(rec.Attrs))
+			maps.Copy(submitRec.Attrs, rec.Attrs)
 		}
 
-		if _, _, err := s.orch.Append(targetVaultID, appendRec); err != nil {
-			job.Fail(s.now(), fmt.Sprintf("append to vault: %v", err))
+		ack := make(chan error, 1)
+		if err := s.orch.SubmitToVault(ctx, targetVaultID, submitRec, ack); err != nil {
+			job.Fail(s.now(), fmt.Sprintf("submit to vault: %v", err))
+			return
+		}
+		select {
+		case err := <-ack:
+			if err != nil {
+				job.Fail(s.now(), fmt.Sprintf("submit to vault: %v", err))
+				return
+			}
+		case <-ctx.Done():
+			job.Fail(s.now(), fmt.Sprintf("submit to vault: %v", ctx.Err()))
 			return
 		}
 		job.AddRecords(1)

@@ -23,16 +23,10 @@ import (
 // and surfaces as a logged error within seconds. See gastrolog-4rp6i.
 //
 // Tunings:
-//   - Unary RPCs (ForwardAppend, …) are small request/response pairs. 5s is
-//     generous for round-trip + processing.
+//   - Unary RPCs are small request/response pairs. 5s is generous for
+//     round-trip + processing.
 //   - TransferRecords streams a sealed chunk into ImportRecords on the peer.
 //     15s bounds stalled peers without tying up resources indefinitely.
-//   - Vault streaming forwards each record to the destination, and the peer
-//     runs follower replication per record (ForwardingTimeout per follower).
-//     Follower fanout is parallelized on the destination (WaitGroup per record),
-//     but each record still waits for the slowest follower before the next
-//     append — so large chunks can take minutes. CatchupTimeout keeps healthy
-//     transitions from failing as EOF / DeadlineExceeded while work completes.
 const (
 	unaryCallTimeout  = 5 * time.Second
 	streamCallTimeout = 15 * time.Second
@@ -108,40 +102,10 @@ func (ct *ChunkTransferrer) TransferRecords(ctx context.Context, nodeID string, 
 		return fmt.Errorf("close send to %s: %w", nodeID, err)
 	}
 
-	resp := &gastrologv1.ForwardRecordsResponse{}
+	resp := &gastrologv1.ForwardImportRecordsResponse{}
 	if err := stream.RecvMsg(resp); err != nil {
 		ct.peers.Invalidate(nodeID, err)
 		return fmt.Errorf("receive response from %s: %w", nodeID, err)
-	}
-	return nil
-}
-
-// ForwardAppend sends records to a remote node via the unary ForwardRecords
-// RPC, which appends them to the destination vault's active chunk (same path
-// as live ingestion forwarding). Synchronous — blocks until the remote node
-// confirms the append. Used by retention eject for remote delivery.
-func (ct *ChunkTransferrer) ForwardAppend(ctx context.Context, nodeID string, vaultID glid.GLID, records []chunk.Record) error {
-	ctx, cancel := context.WithTimeout(ctx, unaryCallTimeout)
-	defer cancel()
-
-	conn, err := ct.peers.Conn(nodeID)
-	if err != nil {
-		return fmt.Errorf("dial node %s: %w", nodeID, err)
-	}
-
-	exportRecs := make([]*gastrologv1.ExportRecord, len(records))
-	for i, rec := range records {
-		exportRecs[i] = convert.RecordToExport(rec)
-	}
-
-	req := &gastrologv1.ForwardRecordsRequest{
-		VaultId: vaultID.ToProto(),
-		Records: exportRecs,
-	}
-	resp := &gastrologv1.ForwardRecordsResponse{}
-	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardRecords", req, resp); err != nil {
-		ct.peers.Invalidate(nodeID, err)
-		return fmt.Errorf("forward append to %s: %w", nodeID, err)
 	}
 	return nil
 }

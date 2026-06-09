@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"slices"
 	"testing"
+	"time"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
@@ -145,18 +146,13 @@ func TestDeleteVaultForce(t *testing.T) {
 		t.Fatalf("PutVault: %v", err)
 	}
 
-	// gastrolog-4kkoo (Phase 5): catch-all route directly on the orchestrator
-	// (not via the config store) so the test can force-delete the vault
-	// without hitting referential-integrity checks.
-	cr, _ := orchestrator.CompileRoute(glid.New(), "all", 0, "*",
-		[]orchestrator.RouteDestination{{VaultID: vaultID}}, "fanout")
-	orch.SetRouteSet(orchestrator.NewRouteSet([]*orchestrator.CompiledRoute{cr}))
-
-	// Ingest data so the vault is non-empty.
-	if err := orch.Ingest(chunk.Record{
-		Raw: []byte("test data"),
-	}); err != nil {
-		t.Fatalf("Ingest: %v", err)
+	// Seed data directly into the vault's chunk manager so it is non-empty.
+	cm := orch.ChunkManager(vaultID)
+	if cm == nil {
+		t.Fatal("expected chunk manager for vault after PutVault")
+	}
+	if _, _, err := cm.Append(chunk.Record{Raw: []byte("test data")}); err != nil {
+		t.Fatalf("seed append: %v", err)
 	}
 
 	// Non-force delete should fail.
@@ -416,9 +412,11 @@ func TestPauseResumeVaultRPC(t *testing.T) {
 		t.Error("vault should be enabled after resume")
 	}
 
-	// Ingest should work after resume.
-	if err := orch.Ingest(chunk.Record{Raw: []byte("after resume")}); err != nil {
-		t.Fatalf("Ingest after resume: %v", err)
+	// Writes should work after resume — seed directly into the chunk manager.
+	if cm := orch.ChunkManager(vaultID); cm != nil {
+		if _, _, err := cm.Append(chunk.Record{Raw: []byte("after resume")}); err != nil {
+			t.Fatalf("append after resume: %v", err)
+		}
 	}
 }
 
@@ -1181,21 +1179,28 @@ func TestGetRouteStats(t *testing.T) {
 		Destinations: []glid.GLID{vaultID}, Enabled: true,
 	})
 
+	// Publish the routing table (registering the pipeline vault while the
+	// segmentation manager is not yet running) and then start the pipeline, so
+	// records drive through the real routing stage — the route-stats counters
+	// live in the pipeline routing manager.
 	if err := orch.ReloadFilters(ctx); err != nil {
 		t.Fatalf("ReloadFilters: %v", err)
 	}
+	if err := orch.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = orch.Stop() })
 
-	// Ingest some records.
 	for range 5 {
-		if err := orch.Ingest(chunk.Record{Raw: []byte("test")}); err != nil {
-			t.Fatalf("Ingest: %v", err)
+		if err := orch.SubmitRetentionRecord(ctx, vaultID, chunk.Record{Raw: []byte("test")}, ""); err != nil {
+			t.Fatalf("SubmitRetentionRecord: %v", err)
 		}
 	}
 
-	resp, err = client.GetRouteStats(ctx, connect.NewRequest(&gastrologv1.GetRouteStatsRequest{}))
-	if err != nil {
-		t.Fatalf("GetRouteStats: %v", err)
-	}
+	// Counters increment asynchronously as records flow through routing.
+	resp = waitForRouteStats(t, client, func(m *gastrologv1.GetRouteStatsResponse) bool {
+		return m.TotalIngested == 5
+	})
 	if resp.Msg.TotalIngested != 5 {
 		t.Errorf("expected 5 ingested, got %d", resp.Msg.TotalIngested)
 	}
@@ -1217,6 +1222,31 @@ func TestGetRouteStats(t *testing.T) {
 	}
 	if vs.RecordsMatched != 5 {
 		t.Errorf("expected 5 matched, got %d", vs.RecordsMatched)
+	}
+}
+
+// waitForRouteStats polls GetRouteStats until cond is satisfied or the deadline
+// expires, returning the last response. Route-stats counters are incremented
+// asynchronously by the pipeline routing workers, so callers poll rather than
+// read once.
+func waitForRouteStats(t *testing.T, client gastrologv1connect.SystemServiceClient, cond func(*gastrologv1.GetRouteStatsResponse) bool) *connect.Response[gastrologv1.GetRouteStatsResponse] {
+	t.Helper()
+	ctx := context.Background()
+	deadline := time.Now().Add(3 * time.Second)
+	var resp *connect.Response[gastrologv1.GetRouteStatsResponse]
+	for {
+		var err error
+		resp, err = client.GetRouteStats(ctx, connect.NewRequest(&gastrologv1.GetRouteStatsRequest{}))
+		if err != nil {
+			t.Fatalf("GetRouteStats: %v", err)
+		}
+		if cond(resp.Msg) {
+			return resp
+		}
+		if time.Now().After(deadline) {
+			return resp
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 

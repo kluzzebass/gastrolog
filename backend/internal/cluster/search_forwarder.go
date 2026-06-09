@@ -12,8 +12,8 @@ import (
 )
 
 // SearchForwarder sends search requests to remote cluster nodes.
-// Unlike RecordForwarder (fire-and-forget batching), this is synchronous
-// request-response — the caller blocks until the remote node responds.
+// This is synchronous request-response — the caller blocks until the remote
+// node responds.
 type SearchForwarder struct {
 	peers *PeerConns
 }

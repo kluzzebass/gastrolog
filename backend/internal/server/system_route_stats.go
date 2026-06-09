@@ -10,25 +10,25 @@ import (
 )
 
 // GetRouteStats returns live routing statistics aggregated across the cluster.
-// Local node stats come from atomic counters; peer stats from broadcasts.
+// Local node stats come from the pipeline routing counters; peer stats from
+// broadcasts.
 func (s *SystemServer) GetRouteStats(
 	_ context.Context,
 	_ *connect.Request[apiv1.GetRouteStatsRequest],
 ) (*connect.Response[apiv1.GetRouteStatsResponse], error) {
 	// Start with local node stats.
 	rs := s.orch.GetRouteStats()
-	totalIngested := rs.Ingested.Load()
-	totalDropped := rs.Dropped.Load()
-	totalRouted := rs.Routed.Load()
+	totalIngested := rs.Ingested
+	totalDropped := rs.Dropped
+	totalRouted := rs.Routed
 	filterActive := s.orch.IsFilterSetActive()
 
 	// Merge per-vault stats into a map for dedup across nodes.
 	vaultMap := make(map[string]*apiv1.VaultRouteStats)
 	for vaultID, vs := range s.orch.VaultRouteStatsList() {
 		vaultMap[vaultID.String()] = &apiv1.VaultRouteStats{
-			VaultId:          vaultID.ToProto(),
-			RecordsMatched:   vs.Matched.Load(),
-			RecordsForwarded: vs.Forwarded.Load(),
+			VaultId:        vaultID.ToProto(),
+			RecordsMatched: vs.Matched,
 		}
 	}
 
@@ -36,9 +36,8 @@ func (s *SystemServer) GetRouteStats(
 	routeMap := make(map[string]*apiv1.PerRouteStats)
 	for routeID, ps := range s.orch.PerRouteStatsList() {
 		routeMap[routeID.String()] = &apiv1.PerRouteStats{
-			RouteId:          routeID.ToProto(),
-			RecordsMatched:   ps.Matched.Load(),
-			RecordsForwarded: ps.Forwarded.Load(),
+			RouteId:        routeID.ToProto(),
+			RecordsMatched: ps.Matched,
 		}
 	}
 
@@ -80,7 +79,6 @@ func mergeVaultRouteStats(m map[string]*apiv1.VaultRouteStats, stats []*apiv1.Va
 			continue
 		}
 		existing.RecordsMatched += vs.RecordsMatched
-		existing.RecordsForwarded += vs.RecordsForwarded
 	}
 }
 
@@ -93,6 +91,5 @@ func mergePerRouteStats(m map[string]*apiv1.PerRouteStats, stats []*apiv1.PerRou
 			continue
 		}
 		existing.RecordsMatched += rs.RecordsMatched
-		existing.RecordsForwarded += rs.RecordsForwarded
 	}
 }

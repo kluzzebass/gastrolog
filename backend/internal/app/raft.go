@@ -370,8 +370,7 @@ func observeLeaderChanges(r *hraft.Raft, logger *slog.Logger) {
 // peerEvictor is the minimal contract the peer-removal observer needs —
 // anything with a Delete(nodeID string) method. Many cluster-local caches
 // satisfy it: PeerState, PeerJobState, PeerByteMetrics, Broadcaster (the
-// failure-suppression map), StatsCollector (per-peer rate windows), and
-// RecordForwarder (per-node goroutine + channel + alert).
+// failure-suppression map), and StatsCollector (per-peer rate windows).
 type peerEvictor interface {
 	Delete(nodeID string)
 }
@@ -417,8 +416,7 @@ func runPeerRemovalLoop(ctx context.Context, ch <-chan hraft.Observation, logger
 // peerCacheReconciler is the contract the periodic peer-cache
 // reconciler needs — a cache that can purge its own entries against
 // an authoritative membership set. Implementations: PeerState,
-// PeerJobState, PeerByteMetrics, Broadcaster, StatsCollector,
-// RecordForwarder.
+// PeerJobState, PeerByteMetrics, Broadcaster, StatsCollector.
 type peerCacheReconciler interface {
 	ReconcilePeers(keep map[string]struct{})
 }

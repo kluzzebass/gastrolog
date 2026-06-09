@@ -225,17 +225,18 @@ func (o *Orchestrator) listClusterChunkMetasLocked(vaultID glid.GLID) ([]chunk.C
 	return out, nil
 }
 
-// removeVaultJobs removes retention runners and cron rotation jobs for a vault
-// without closing managers or unregistering. Used by UnregisterVault and drain.
-func (o *Orchestrator) removeVaultJobs(id glid.GLID, vault *Vault) {
+// removeVaultJobs removes the retention runner for a vault without closing
+// managers or unregistering. Used by UnregisterVault and drain.
+func (o *Orchestrator) removeVaultJobs(_ glid.GLID, vault *Vault) {
 	if vaultInst := vault.Instance; vaultInst != nil {
 		delete(o.retention, retentionKey(vaultInst.VaultID, vaultInst.StorageID))
 	}
-	o.cronRotation.removeAllForVault(id)
 }
 
 // teardownVault performs the common cleanup for all vault removal paths:
-// cancels pending jobs, closes managers, removes from registry, rebuilds filters.
+// cancels pending jobs, closes managers, and removes from the registry. The
+// pipeline routing table and Origin registrations are reconciled separately by
+// ReloadFilters / placementSweep when the deletion lands in config.
 func (o *Orchestrator) teardownVault(id glid.GLID, vault *Vault) {
 	o.destroyVaultControlPlaneRaftGroup(id)
 
@@ -245,11 +246,10 @@ func (o *Orchestrator) teardownVault(id glid.GLID, vault *Vault) {
 	o.scheduler.RemoveJobsByPrefix("compress:" + vaultPrefix)
 	o.scheduler.RemoveJobsByPrefix("index-build:" + vaultPrefix)
 
-	// Remove per-instance retention runner and cron rotation jobs.
+	// Remove the per-instance retention runner.
 	if vaultInst := vault.Instance; vaultInst != nil {
 		delete(o.retention, retentionKey(vaultInst.VaultID, vaultInst.StorageID))
 	}
-	o.cronRotation.removeAllForVault(id)
 
 	// Close chunk/index managers to release file locks.
 	if err := vault.Close(); err != nil {
@@ -257,7 +257,6 @@ func (o *Orchestrator) teardownVault(id glid.GLID, vault *Vault) {
 	}
 
 	delete(o.vaults, id)
-	o.rebuildRouteSetLocked()
 }
 
 // DisableVault disables ingestion for a vault.
@@ -475,9 +474,8 @@ func (o *Orchestrator) removeVaultInstance(vaultID glid.GLID, deleteData bool) b
 		}
 	}
 
-	// Remove retention runner and cron rotation for this vault.
+	// Remove the retention runner for this vault.
 	delete(o.retention, retentionKey(vaultInst.VaultID, vaultInst.StorageID))
-	o.cronRotation.removeAllForVault(vaultID)
 
 	// Drop the instance from the vault.
 	vault.Instance = nil
@@ -487,7 +485,6 @@ func (o *Orchestrator) removeVaultInstance(vaultID glid.GLID, deleteData bool) b
 	// subsequent AddVaultInstance can rehydrate.
 	if deleteData {
 		delete(o.vaults, vaultID)
-		o.rebuildRouteSetLocked()
 		o.logger.Info("vault removed", "vault", vaultID)
 	}
 
@@ -618,12 +615,11 @@ func (o *Orchestrator) UnregisterVault(id glid.GLID) error {
 			"vault", id, "error", err)
 	}
 
-	// Remove per-vault retention and rotation jobs.
+	// Remove the per-vault retention runner.
 	o.removeVaultJobs(id, vault)
 
 	// Remove from registry.
 	delete(o.vaults, id)
-	o.rebuildRouteSetLocked()
 
 	o.logger.Info("vault unregistered (data preserved)", "id", id, "name", vault.Name, "type", vault.Type())
 	return nil

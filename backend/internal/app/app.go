@@ -322,10 +322,9 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// records block (instead of failing) while vaults are being registered.
 	orchReady := make(chan struct{})
 	var searchForwarder *cluster.SearchForwarder
-	var recordForwarder *cluster.RecordForwarder
 	var routingForwarder *routing.Forwarder
 	if _, ok := rawStore.(*raftClusterCtlStore); ok && clusterSrv != nil {
-		searchForwarder, recordForwarder = wireClusterForwarding(clusterSrv, orch, orchReady, nodeID, logger, alertCollector)
+		searchForwarder = wireClusterForwarding(clusterSrv, orch, orchReady, nodeID, logger, alertCollector)
 		routingForwarder = routing.NewForwarder(clusterSrv.PeerConns())
 	}
 
@@ -384,7 +383,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		go slogCW.Run(ctx)
 	}
 
-	broadcaster, peerState, peerJobState, localStatsFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, recordForwarder, alertCollector, nodeID, cfg.ServerAddr, cfg.PprofAddr, statsSignal)
+	broadcaster, peerState, peerJobState, localStatsFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, alertCollector, nodeID, cfg.ServerAddr, cfg.PprofAddr, statsSignal)
 
 	// Start vault placement manager (cluster mode only).
 	var placementReconcileFn func(ctx context.Context)
@@ -401,24 +400,6 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		}
 		disp.placementTrigger = pm.Trigger
 		placementReconcileFn = pm.Reconcile
-		if recordForwarder != nil {
-			recordForwarder.SetOnNodeUnreachable(func(nodeID string) {
-				// gastrolog-4vz40: a single forwarder EOF is NOT proof that
-				// the peer is dead. Transient conn-level teardowns (e.g.
-				// peers.Invalidate fired by a neighboring subsystem on a
-				// per-RPC error — see peer_conns.go:Invalidate) kill every
-				// persistent stream on the shared grpc.ClientConn, which
-				// the forwarder observes as EOF. Expiring the peer from
-				// LivePeers() on that signal causes placement to evict
-				// the node from its vaults, which in turn triggers
-				// RemoveVaultInstance → sealAndDeleteAllChunks — the
-				// cluster-wide data wipe. Raft heartbeats and PeerState's
-				// stats-broadcast TTL remain the canonical liveness
-				// signals; pm.Trigger() alone is idempotent when inputs
-				// have not changed, so it is harmless to keep.
-				pm.Trigger()
-			})
-		}
 		go pm.Run(ctx)
 
 		// register flattens the standard register-or-warn pattern so
@@ -563,23 +544,13 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 // wireClusterForwarding sets up cross-node record, search, context, vault,
 // and explain forwarding on the cluster server. Returns the search forwarder
 // for the HTTP server to use.
-func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, orchReady <-chan struct{}, nodeID string, logger *slog.Logger, alerts *alert.Collector) (*cluster.SearchForwarder, *cluster.RecordForwarder) {
+func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, orchReady <-chan struct{}, nodeID string, logger *slog.Logger, alerts *alert.Collector) *cluster.SearchForwarder {
 	peerConns := clusterSrv.PeerConns()
 
-	recordForwarder := cluster.NewRecordForwarder(
-		peerConns,
-		compRecordForwarder.Apply(logger),
-		alerts,
-	)
-	orch.SetRecordForwarder(recordForwarder)
-	// NOTE: recordForwarder.Close() is not deferred here because the caller
-	// manages shutdown order. The forwarder is closed when the orchestrator stops.
-
-	// The record appender waits for the orchestrator to be ready (vaults
-	// registered) before writing. Without this gate, forwarded records
+	// The record importer waits for the orchestrator to be ready (vaults
+	// registered) before writing. Without this gate, sealed-chunk imports
 	// arriving during startup hit ErrVaultNotFound, causing the sending
-	// node's forwarder to enter exponential backoff and silently buffer
-	// records for up to 2 minutes.
+	// node to enter exponential backoff.
 	var gateLogOnce sync.Once
 	waitForOrch := func(ctx context.Context) error {
 		select {
@@ -597,27 +568,6 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 			return ctx.Err()
 		}
 	}
-
-	clusterSrv.SetRecordAppender(func(ctx context.Context, vaultID glid.GLID, rec chunk.Record) error {
-		if err := waitForOrch(ctx); err != nil {
-			return err
-		}
-		_, _, err := orch.Append(vaultID, rec)
-		if err != nil && errors.Is(err, orchestrator.ErrVaultNotReady) {
-			return errors.Join(cluster.ErrForwardTargetNotReady, err)
-		}
-		return err
-	})
-	clusterSrv.SetVaultRecordAppender(func(ctx context.Context, vaultID glid.GLID, leaderChunkID chunk.ChunkID, rec chunk.Record) error {
-		if err := waitForOrch(ctx); err != nil {
-			return err
-		}
-		err := orch.AppendToVault(vaultID, leaderChunkID, rec)
-		if err != nil && errors.Is(err, orchestrator.ErrVaultNotReady) {
-			return errors.Join(cluster.ErrForwardTargetNotReady, err)
-		}
-		return err
-	})
 
 	// Wire cross-node chunk migration and replication.
 	chunkTransferrer := cluster.NewChunkTransferrer(peerConns)
@@ -650,9 +600,6 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	clusterSrv.SetAnalyzeChunkExecutor(newAnalyzeChunkExecutor(orch))
 	clusterSrv.SetChunkEventSubscriber(newChunkEventSubscriber(orch))
 	clusterSrv.SetSealVaultExecutor(newSealVaultExecutor(orch))
-	clusterSrv.SetChunkSealExecutor(func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID) error {
-		return orch.SealActiveChunk(vaultID, chunkID)
-	})
 	clusterSrv.SetDeleteChunkExecutor(func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID) error {
 		return orch.DeleteChunk(vaultID, chunkID)
 	})
@@ -661,7 +608,7 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	clusterSrv.SetFollowExecutor(newFollowExecutor(orch))
 	clusterSrv.SetSegmentPullServer(orch.ServeSegmentPull)
 
-	return searchForwarder, recordForwarder
+	return searchForwarder
 }
 
 // wireManagedFileTransfer sets up cluster-side handlers for streaming managed
@@ -713,7 +660,7 @@ func startOrchestrator(ctx context.Context, logger *slog.Logger, orch *orchestra
 
 // setupClusterStats creates the broadcaster, peer state tracker, and stats
 // collector. Returns nils for single-node mode.
-func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, recordForwarder *cluster.RecordForwarder, alerts *alert.Collector, nodeID string, apiAddr string, pprofAddr string, statsSignal *notify.Signal) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats) {
+func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, alerts *alert.Collector, nodeID string, apiAddr string, pprofAddr string, statsSignal *notify.Signal) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats) {
 	var broadcaster *cluster.Broadcaster
 	if clusterSrv != nil && clusterSrv.PeerConns() != nil {
 		broadcaster = cluster.NewBroadcaster(clusterSrv.PeerConns(), compBroadcast.Apply(logger))
@@ -754,7 +701,6 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 		Broadcaster: broadcaster,
 		RaftStats:   clusterSrv,
 		Stats:       &orchStatsAdapter{orch: orch},
-		Forwarding:  &forwardingStatsAdapter{srv: clusterSrv, fwd: recordForwarder},
 		PeerBytes:   clusterSrv.ByteMetrics(),
 		Alerts:      alerts,
 		Jobs:        &jobBroadcastAdapter{scheduler: orch.Scheduler(), nodeID: nodeID},
@@ -797,7 +743,6 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 		clusterSrv.ByteMetrics(),
 		broadcaster,
 		collector,
-		recordForwarder,
 	)
 	// Belt-and-suspenders: periodic reconcile against current Raft
 	// membership covers the edge case where a follower receives the
@@ -813,7 +758,6 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 		clusterSrv.ByteMetrics(),
 		broadcaster,
 		collector,
-		recordForwarder,
 	); err != nil {
 		logger.Warn("schedule peer-cache reconcile job", "error", err)
 	}

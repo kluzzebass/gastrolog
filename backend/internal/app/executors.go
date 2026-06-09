@@ -69,43 +69,24 @@ func (a *orchStatsAdapter) IngesterStats(id string) (name string, messages, byte
 func (a *orchStatsAdapter) RouteStats() cluster.StatsRouteSnapshot {
 	rs := a.orch.GetRouteStats()
 	snap := cluster.StatsRouteSnapshot{
-		Ingested:     rs.Ingested.Load(),
-		Dropped:      rs.Dropped.Load(),
-		Routed:       rs.Routed.Load(),
+		Ingested:     rs.Ingested,
+		Dropped:      rs.Dropped,
+		Routed:       rs.Routed,
 		FilterActive: a.orch.IsFilterSetActive(),
 	}
 	for vaultID, vs := range a.orch.VaultRouteStatsList() {
 		snap.VaultStats = append(snap.VaultStats, cluster.StatsVaultRouteSnapshot{
-			VaultID:   vaultID,
-			Matched:   vs.Matched.Load(),
-			Forwarded: vs.Forwarded.Load(),
+			VaultID: vaultID,
+			Matched: vs.Matched,
 		})
 	}
 	for routeID, rs := range a.orch.PerRouteStatsList() {
 		snap.RouteStats = append(snap.RouteStats, cluster.StatsPerRouteSnapshot{
-			RouteID:   routeID,
-			Matched:   rs.Matched.Load(),
-			Forwarded: rs.Forwarded.Load(),
+			RouteID: routeID,
+			Matched: rs.Matched,
 		})
 	}
 	return snap
-}
-
-// forwardingStatsAdapter combines the sending and receiving sides of record
-// forwarding into a single ForwardingStatsProvider.
-type forwardingStatsAdapter struct {
-	srv *cluster.Server
-	fwd *cluster.RecordForwarder // nil when forwarding is not wired
-}
-
-func (a *forwardingStatsAdapter) ForwardingStats() (sent, received int64) {
-	if a.fwd != nil {
-		sent = a.fwd.Sent()
-	}
-	if a.srv != nil {
-		received = a.srv.ForwardedReceived()
-	}
-	return
 }
 
 // jobBroadcastAdapter bridges the scheduler to the cluster.JobsProvider interface.
