@@ -179,6 +179,16 @@ type Manager struct {
 	active         *chunkState
 	metas          map[chunk.ChunkID]*chunkMeta // In-memory chunk metadata
 	closed         bool
+
+	// externalGLCB maps a chunk ID to an absolute data.glcb path that lives
+	// OUTSIDE this manager's Dir. Used for pipeline-built sealed chunks whose
+	// bytes are owned by the vault's segmentation ChunkRoot
+	// (<homeRoot>/chunks/<id>/data.glcb), not chunkDir(id). The read path
+	// (glcbPath → openLocalGLCBCursor / hasLocalGLCB) consults this map so
+	// OpenCursor serves these chunks without copying or relocating bytes.
+	// Protected by mu. See gastrolog-2kysn (Rubicon E1).
+	externalGLCB map[chunk.ChunkID]string
+
 	zstdEnc        *zstd.Encoder
 	zstdEncMu      sync.Mutex                // serializes concurrent CompressChunk calls sharing zstdEnc
 	cloudIdx       *cloudIndex               // local B+ tree cache of cloud chunk metadata (nil if no cloud store)
@@ -413,6 +423,7 @@ func NewManager(cfg Config) (*Manager, error) {
 		cfg:            cfg,
 		lockFile:       lockFile,
 		metas:          make(map[chunk.ChunkID]*chunkMeta),
+		externalGLCB:   make(map[chunk.ChunkID]string),
 		storageClasses: make(map[chunk.ChunkID]string),
 		zstdEnc:        zstdEnc,
 		chunkLocks:     make(map[chunk.ChunkID]*sync.RWMutex),
@@ -2976,6 +2987,7 @@ func (m *Manager) deleteInternal(id chunk.ChunkID) error {
 
 	delete(m.metas, id)          // no-op for cloud chunks (not in metas)
 	delete(m.storageClasses, id) // clean up storage class cache
+	delete(m.externalGLCB, id)   // clean up external pipeline GLCB path, if any
 	m.mu.Unlock()
 	return nil
 }
@@ -3138,7 +3150,7 @@ func (m *Manager) RefreshDiskSizes(id chunk.ChunkID) {
 // reader pipeline. Returns the underlying os error (typically ENOENT) when
 // data.glcb is absent so callers can fall back to a remote read.
 func (m *Manager) openLocalGLCBCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
-	path := filepath.Join(m.chunkDir(id), dataGLCBFileName)
+	path := m.glcbPath(id)
 	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return nil, err
@@ -3151,11 +3163,28 @@ func (m *Manager) openLocalGLCBCursor(id chunk.ChunkID) (chunk.RecordCursor, err
 	return chunkcloud.NewSeekableCursor(rd, id), nil
 }
 
-// hasLocalGLCB reports whether the chunk directory contains a data.glcb.
+// hasLocalGLCB reports whether the chunk's data.glcb is present on disk.
 // Used by read-path dispatch to prefer the GLCB cursor when available.
+// Resolves the externally-registered path for pipeline-built chunks.
 func (m *Manager) hasLocalGLCB(id chunk.ChunkID) bool {
-	_, err := os.Stat(filepath.Join(m.chunkDir(id), dataGLCBFileName))
+	_, err := os.Stat(m.glcbPath(id))
 	return err == nil
+}
+
+// glcbPath returns the on-disk path to a chunk's data.glcb. For chunks
+// registered with an external GLCB path (pipeline-built, living under the
+// vault ChunkRoot rather than this manager's Dir) it returns that path;
+// otherwise the canonical <chunkDir>/data.glcb. Safe to call without mu
+// held — it briefly takes mu to read the externalGLCB map and is never
+// invoked from a code path that already holds it. See gastrolog-2kysn.
+func (m *Manager) glcbPath(id chunk.ChunkID) string {
+	m.mu.Lock()
+	p, ok := m.externalGLCB[id]
+	m.mu.Unlock()
+	if ok {
+		return p
+	}
+	return filepath.Join(m.chunkDir(id), dataGLCBFileName)
 }
 
 // touchLastAccess records that the warm cache for this chunk was just hit
@@ -4291,6 +4320,56 @@ func (m *Manager) RegisterCloudChunk(id chunk.ChunkID, info chunk.CloudChunkInfo
 	m.mu.Unlock()
 
 	m.logger.Debug("registered cloud chunk from metadata", "chunk", id, "records", info.RecordCount)
+	return nil
+}
+
+// RegisterExternalGLCB registers a pipeline-built sealed chunk whose data.glcb
+// lives at glcbPath — an absolute path under the vault's segmentation ChunkRoot,
+// outside this manager's Dir. No bytes are copied: the read path resolves the
+// registered path via glcbPath(id). Records a sealed chunkMeta (so OpenCursor
+// routes to openLocalGLCBCursor and the chunk appears in List/Meta) plus the
+// external source path. Idempotent: re-registering refreshes the recorded path
+// and meta. A chunk already managed locally (in m.metas without an external
+// path, or cloud-backed) is left untouched. See gastrolog-2kysn (Rubicon E1).
+func (m *Manager) RegisterExternalGLCB(id chunk.ChunkID, glcbPath string, info chunk.ExternalGLCBInfo) error {
+	if glcbPath == "" {
+		return errors.New("external GLCB path required")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return ErrManagerClosed
+	}
+	// A chunk this manager owns locally (built/sealed here, or cloud-backed)
+	// must not be shadowed by an external registration — its bytes live under
+	// chunkDir(id) and the normal read path already serves it. Only a prior
+	// external registration may be refreshed.
+	if _, ok := m.metas[id]; ok {
+		if _, external := m.externalGLCB[id]; !external {
+			return nil
+		}
+	}
+	m.metas[id] = &chunkMeta{
+		id:                id,
+		writeStart:        info.WriteStart,
+		writeEnd:          info.WriteEnd,
+		ingestStart:       info.IngestStart,
+		ingestEnd:         info.IngestEnd,
+		sourceStart:       info.SourceStart,
+		sourceEnd:         info.SourceEnd,
+		ingestTSMonotonic: info.IngestTSMonotonic,
+		recordCount:       info.RecordCount,
+		bytes:             info.Bytes,
+		sealed:            true,
+		diskBytes:         info.DiskBytes,
+		ingestIdxOffset:   info.IngestIdxOffset,
+		ingestIdxSize:     info.IngestIdxSize,
+		sourceIdxOffset:   info.SourceIdxOffset,
+		sourceIdxSize:     info.SourceIdxSize,
+	}
+	m.externalGLCB[id] = glcbPath
+	m.logger.Debug("registered external pipeline GLCB",
+		"chunk", id, "path", glcbPath, "records", info.RecordCount)
 	return nil
 }
 

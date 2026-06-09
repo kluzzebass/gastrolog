@@ -270,6 +270,39 @@ type CloudChunkRegistrar interface {
 	RegisterCloudChunk(id ChunkID, info CloudChunkInfo) error
 }
 
+// ExternalGLCBInfo carries the metadata needed to register a sealed chunk
+// whose data.glcb bytes live OUTSIDE the chunk manager's own directory —
+// the pipeline-built case, where the GLCB is owned by the vault's
+// segmentation ChunkRoot (<homeRoot>/chunks/<id>/data.glcb). All fields come
+// from the vault-ctl FSM sealed-chunk entry. See gastrolog-2kysn (Rubicon E1).
+type ExternalGLCBInfo struct {
+	WriteStart        time.Time
+	WriteEnd          time.Time
+	IngestStart       time.Time
+	IngestEnd         time.Time
+	SourceStart       time.Time
+	SourceEnd         time.Time
+	RecordCount       int64
+	Bytes             int64
+	DiskBytes         int64
+	IngestIdxOffset   int64
+	IngestIdxSize     int64
+	SourceIdxOffset   int64
+	SourceIdxSize     int64
+
+	IngestTSMonotonic bool // see ChunkMeta.IngestTSMonotonic
+}
+
+// ExternalGLCBRegistrar extends ChunkManager with the ability to register a
+// sealed chunk built by the pipeline, whose data.glcb lives at an absolute
+// path under the vault's segmentation ChunkRoot rather than the manager's own
+// chunk dir. The bytes are NOT copied: the read path resolves the registered
+// path directly. Used by the orchestrator on seal and on reconcile so
+// pipeline-built chunks become queryable. See gastrolog-2kysn (Rubicon E1).
+type ExternalGLCBRegistrar interface {
+	RegisterExternalGLCB(id ChunkID, glcbPath string, info ExternalGLCBInfo) error
+}
+
 // RecordCursor provides bidirectional iteration over records in a chunk.
 type RecordCursor interface {
 	Next() (Record, RecordRef, error)

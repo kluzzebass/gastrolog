@@ -68,6 +68,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -75,6 +76,7 @@ import (
 	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/chunking"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
@@ -241,6 +243,11 @@ func (r *VaultLifecycleReconciler) projectAllSealedFromFSM(fsm *vaultctlfsm.FSM)
 			r.logger.Warn("reconcile-from-snapshot: EnsureSealed failed",
 				"chunk", e.ID, "error", err)
 		}
+		// Pipeline-built sealed chunks live at the vault ChunkRoot, not the
+		// chunk manager dir, so EnsureSealed is a no-op for them. Register
+		// their GLCB by path so they become queryable after a snapshot
+		// install. No-op for legacy/cloud chunks. See gastrolog-2kysn.
+		r.registerPipelineGLCB(e)
 	}
 }
 
@@ -379,6 +386,59 @@ func (r *VaultLifecycleReconciler) projectAllCloudBackedFromFSM(fsm *vaultctlfsm
 	}
 }
 
+// registerPipelineGLCB makes a pipeline-built sealed chunk queryable on this
+// node by registering its data.glcb — which lives under the vault's
+// segmentation ChunkRoot, not the chunk manager's own dir — with the local
+// chunk Manager. Discovery of pipeline chunks already works (query lists them
+// from the vault-ctl FSM); this closes the byte-access gap so OpenCursor
+// resolves the GLCB instead of returning ErrChunkNotFound.
+//
+// No-op unless: the local chunk Manager implements ExternalGLCBRegistrar, this
+// node runs the pipeline as a home for the vault (so a ChunkRoot exists), and
+// the GLCB file is present locally. A node that holds the FSM entry but not the
+// bytes (non-home, or a home that has not built this chunk yet) skips silently —
+// query there falls back to other holders. The registrar itself leaves
+// locally-owned (legacy / cloud-backed) chunks untouched. See gastrolog-2kysn.
+func (r *VaultLifecycleReconciler) registerPipelineGLCB(e vaultctlfsm.ManifestEntry) {
+	if r.vaultInst == nil || r.vaultInst.Chunks == nil || r.orch == nil {
+		return
+	}
+	registrar, ok := r.vaultInst.Chunks.(chunk.ExternalGLCBRegistrar)
+	if !ok {
+		return
+	}
+	chunkRoot, ok := r.orch.pipelineVaultChunkRoot(r.vaultID)
+	if !ok {
+		return
+	}
+	glcbPath := chunking.ChunkGLCBPath(chunkRoot, e.ID)
+	if _, err := os.Stat(glcbPath); err != nil {
+		// Bytes absent locally: this home has not built the chunk (or this
+		// node is not a holder). Query on a holder node serves it instead.
+		return
+	}
+	info := chunk.ExternalGLCBInfo{
+		WriteStart:        e.WriteStart,
+		WriteEnd:          e.WriteEnd,
+		IngestStart:       e.IngestStart,
+		IngestEnd:         e.IngestEnd,
+		SourceStart:       e.SourceStart,
+		SourceEnd:         e.SourceEnd,
+		RecordCount:       e.RecordCount,
+		Bytes:             e.Bytes,
+		DiskBytes:         e.DiskBytes,
+		IngestIdxOffset:   e.IngestIdxOffset,
+		IngestIdxSize:     e.IngestIdxSize,
+		SourceIdxOffset:   e.SourceIdxOffset,
+		SourceIdxSize:     e.SourceIdxSize,
+		IngestTSMonotonic: e.IngestTSMonotonic,
+	}
+	if err := registrar.RegisterExternalGLCB(e.ID, glcbPath, info); err != nil {
+		r.logger.Warn("registerPipelineGLCB: RegisterExternalGLCB failed",
+			"chunk", e.ID, "path", glcbPath, "error", err)
+	}
+}
+
 // ---------- FSM apply event handlers ----------
 //
 // All seven handlers run outside the FSM mutex (see Wire()). They take
@@ -426,6 +486,11 @@ func (r *VaultLifecycleReconciler) onSeal(e vaultctlfsm.ManifestEntry) {
 		r.logger.Warn("onSeal: EnsureSealed failed",
 			"chunk", e.ID, "error", err)
 	}
+	// Pipeline-built sealed chunks live at the vault ChunkRoot, not the chunk
+	// manager dir, so EnsureSealed is a no-op for them. Register their GLCB by
+	// path so a freshly-sealed pipeline chunk is queryable on this home node
+	// immediately. No-op for legacy/cloud chunks. See gastrolog-2kysn.
+	r.registerPipelineGLCB(e)
 }
 
 func (r *VaultLifecycleReconciler) onRetentionPending(id chunk.ChunkID) {

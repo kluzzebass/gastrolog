@@ -280,6 +280,25 @@ func (o *Orchestrator) originRoot(vaultID glid.GLID) string {
 	return filepath.Join(o.segmentsDir, vaultID.String())
 }
 
+// pipelineVaultChunkRoot returns the segmentation chunk root for a vault when
+// this node currently runs the pipeline as a home for it — the directory under
+// which pipeline-built sealed GLCBs land (<segmentsDir>/<vaultID>/chunks, the
+// "chunks" subdir of originRoot). ok=false when the vault is not a pipeline home
+// on this node or no segments base is configured, in which case there are no
+// pipeline GLCBs to register. Takes o.mu only to read the registration map and
+// segments base; the caller does the stat/registration I/O outside the lock.
+// Mirrors the path math in originRoot + buildPipelineVaultSpec (spec.ChunkRoot).
+// See gastrolog-2kysn (Rubicon E1).
+func (o *Orchestrator) pipelineVaultChunkRoot(vaultID glid.GLID) (string, bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	reg, ok := o.pipelineVaults[vaultID]
+	if !ok || !reg.home || o.segmentsDir == "" {
+		return "", false
+	}
+	return filepath.Join(o.segmentsDir, vaultID.String(), "chunks"), true
+}
+
 // noopPublisher is the distribution publisher used while no vault-ctl handle is
 // available (single-node/memory mode): it accepts and drops publish metadata.
 // With a handle, the VaultCtlPublisher takes over so completed segments are
