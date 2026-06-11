@@ -281,7 +281,7 @@ func (m *Manager) startWorkerLocked(v *vaultChunking) {
 			case <-tick.C:
 			}
 			ch = v.wake.C()
-			_ = v.planOnce(ctx, false)
+			_ = v.planCatchUp(ctx)
 			_ = v.buildOnce(ctx)
 		}
 	})

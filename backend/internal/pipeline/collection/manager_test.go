@@ -176,6 +176,64 @@ func TestCollectOnceReceiptsSegmentAlreadyInHead(t *testing.T) {
 	}
 }
 
+// TestCollectOnceReceiptsSegmentPromotedAfterLayoutWarm covers the production
+// race: the first collect pass warms the layout cache while head/ is still
+// sparse, then distribution promotes a new local segment to head/ before the
+// holder receipt is recorded. The next pass must receipt it without pulling.
+func TestCollectOnceReceiptsSegmentPromotedAfterLayoutWarm(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	segA := glid.New()
+	segB := glid.New()
+	root := t.TempDir()
+
+	pull := newMemoryPull()
+	pull.Put(segA, writeSegmentBytes(t, vaultID, segA, "remote-a"))
+
+	log := &staticLog{}
+	log.setAssigned(collection.AssignedSegment{
+		VaultID:   vaultID,
+		SegmentID: segA,
+	})
+	receipts := &recordingReceipts{}
+
+	mgr := collection.New(collection.Config{})
+	if err := mgr.RegisterVault(vaultID, root, collection.VaultConfig{
+		Log:      log,
+		Pull:     pull,
+		Receipts: receipts,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.CollectOnce(context.Background(), vaultID); err != nil {
+		t.Fatal(err)
+	}
+	if receipts.count() != 1 {
+		t.Fatalf("receipts after first pass = %d, want 1", receipts.count())
+	}
+
+	// Simulate LocalHolder: segment B lands in head/ after the layout cache warmed.
+	segBBytes := writeSegmentBytes(t, vaultID, segB, "local-b")
+	prePath, err := collection.ReceiveToPreHead(root, segB, bytes.NewReader(segBBytes))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := collection.PromoteVerified(prePath, root); err != nil {
+		t.Fatal(err)
+	}
+
+	log.setAssigned(collection.AssignedSegment{
+		VaultID:   vaultID,
+		SegmentID: segB,
+	})
+	if err := mgr.CollectOnce(context.Background(), vaultID); err != nil {
+		t.Fatal(err)
+	}
+	if receipts.count() != 2 {
+		t.Fatalf("receipts after second pass = %d, want 2 (promoted-after-warm segment)", receipts.count())
+	}
+}
+
 func TestRunCollectsOnNotify(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()

@@ -63,10 +63,10 @@ type vaultCollect struct {
 	// receipted set, and concurrent pulls of the same segment are wasteful.
 	collectMu sync.Mutex
 
-	// layout caches head/pre-head segment IDs to avoid rescanning directories
-	// on every collect pass once warmed.
+	// layout mirrors head/ and pre-head/ segment IDs. Refreshed at the start of
+	// every collect pass so a segment promoted to head/ by distribution
+	// (LocalHolder) after an earlier pass is visible for receipt-without-pull.
 	layout struct {
-		loaded  bool
 		head    map[glid.GLID]struct{}
 		preHead map[glid.GLID]struct{}
 	}
@@ -100,17 +100,13 @@ func newVaultCollect(vaultID glid.GLID, root string, cfg VaultConfig) (*vaultCol
 	}, nil
 }
 
-func (v *vaultCollect) ensureLayout() error {
-	if v.layout.loaded {
-		return nil
-	}
+func (v *vaultCollect) refreshLayout() error {
 	head, preHead, err := vaultSegmentLayout(v.root)
 	if err != nil {
 		return err
 	}
 	v.layout.head = head
 	v.layout.preHead = preHead
-	v.layout.loaded = true
 	return nil
 }
 
@@ -170,9 +166,10 @@ func (v *vaultCollect) collectMissing(ctx context.Context) error {
 		return nil
 	}
 
-	if err := v.ensureLayout(); err != nil {
+	if err := v.refreshLayout(); err != nil {
 		return err
 	}
+	var errs []error
 	for _, ref := range assigned {
 		if _, done := v.receipted[ref.SegmentID]; done {
 			continue
@@ -184,7 +181,7 @@ func (v *vaultCollect) collectMissing(ctx context.Context) error {
 		// pulling.
 		if _, ok := v.layout.head[ref.SegmentID]; ok {
 			if err := v.commitReceipt(ctx, ref); err != nil {
-				return err
+				errs = append(errs, err)
 			}
 			continue
 		}
@@ -194,10 +191,10 @@ func (v *vaultCollect) collectMissing(ctx context.Context) error {
 			continue
 		}
 		if err := v.collectOne(ctx, ref); err != nil {
-			return err
+			errs = append(errs, err)
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // Config configures a CollectionManager.
