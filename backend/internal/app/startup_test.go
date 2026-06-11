@@ -318,8 +318,8 @@ func TestLoadLocalConfig_JoinAddrRestartUsesLocalFSM(t *testing.T) {
 	t.Parallel()
 	existingCfg := &system.Config{
 		Vaults: []system.VaultConfig{
-			{ID: glid.New(), Name: "local-vault", Type: system.VaultTypeFile},
-			{ID: glid.New(), Name: "cloud-vault", Type: system.VaultTypeFile},
+			{ID: glid.New(), Name: "first-vault", Type: system.VaultTypeFile},
+			{ID: glid.New(), Name: "second-vault", Type: system.VaultTypeFile},
 		},
 	}
 	store := &startupStub{

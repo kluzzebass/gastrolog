@@ -545,7 +545,7 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 	}
 	_ = store.SetVaultPlacements(context.Background(), vaultID, placements)
 	_ = store.PutVault(context.Background(), system.VaultConfig{
-		ID: vaultID, Name: "cloud-vault", Type: system.VaultTypeFile, CloudServiceID: &csID,
+		ID: vaultID, Name: "second-vault", Type: system.VaultTypeFile, CloudServiceID: &csID,
 	})
 	_ = store.PutCloudService(context.Background(), system.CloudService{
 		ID:           csID,

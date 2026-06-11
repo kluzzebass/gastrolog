@@ -124,11 +124,31 @@ func (v *vaultChunking) planCatchUp(ctx context.Context) error {
 	return nil
 }
 
+// segmentExhaustedForPlanning reports whether the vault-ctl resume cursor has
+// consumed all records the registry attributes to this segment. The planner can
+// skip opening its on-disk index in that case — pickSegment would ignore it
+// anyway (start >= Len). At high ingest rates the completed-segment registry
+// grows quickly; re-indexing every segment on every planOnce step is O(n²)
+// and stalls manifest fill after the first sealed chunk.
+func segmentExhaustedForPlanning(fsm *vaultctlfsm.FSM, entry vaultctlfsm.CompletedSegmentEntry) bool {
+	if fsm == nil {
+		return false
+	}
+	n, ok := fsm.ResumeRecordNumber(entry.SegmentID)
+	if !ok {
+		return false
+	}
+	return n >= entry.RecordCount
+}
+
 func (v *vaultChunking) loadSegmentViews() ([]SegmentView, func(), error) {
 	entries := v.cfg.FSM.ListCompletedSegments()
 	views := make([]SegmentView, 0, len(entries))
 	closers := make([]func(), 0, len(entries))
 	for _, entry := range entries {
+		if segmentExhaustedForPlanning(v.cfg.FSM, entry) {
+			continue
+		}
 		path, ok := v.cfg.Locate.SegmentPath(entry.SegmentID)
 		if !ok {
 			continue

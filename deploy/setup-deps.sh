@@ -98,59 +98,60 @@ done
 echo "  file storage 'disk-1' (class 1) on $NODE_COUNT node(s): $ADDED added, $SKIPPED already present"
 
 # ── 3. Rotation / retention policies ─────────────────────────────────
-# Two rotation policies (1m + 100-row) and one retention (3m), matching
-# cluster.sh's local→cloud chain semantics.
+# Policies matching scripts/cluster.sh (first→second vault chain).
 glog config rotation-policy create --name 1m-rotate --max-age 1m >/dev/null
-glog config rotation-policy create --name 100-rows --max-records 100 >/dev/null
+glog config rotation-policy create --name 100-records --max-records 100 >/dev/null
+glog config rotation-policy create --name 10000-records --max-records 10000 >/dev/null
 glog config retention-policy create --name 3m-retain --max-age 3m >/dev/null
-echo "  policies: rotation [1m-rotate, 100-rows], retention [3m-retain]"
+glog config retention-policy create --name 1h-retain --max-age 1h >/dev/null
+echo "  policies: rotation [1m-rotate, 100-records, 10000-records], retention [3m-retain, 1h-retain]"
 
-# ── 4. Vaults (local→cloud chain) ────────────────────────────────────
-# local-vault: file-backed on local disk-1, 100-row rotation, 3-minute
-#               retention with disposition=route — chunks past their TTL
-#               stream their records back through the routing engine
-#               tagged `_source = "retention"` instead of being dropped.
-#               The local-retention-to-cloud route below picks them up.
-# cloud-vault: file-backed but cloud-served (minio). 100-row rotation
-#              carries over so chunk granularity is consistent;
-#              no retention policy means data lives forever.
+# ── 4. Vaults (first→second chain) ───────────────────────────────────
+# first-vault: file-backed on local disk-1, 10000-record rotation, 3-minute
+#              retention with disposition=route — chunks past their TTL
+#              stream their records back through the routing engine
+#              tagged `_source = "retention"` instead of being dropped.
+#              The first-retention-to-second route below picks them up.
+# second-vault: file-backed but cloud-served (minio). 10000-record rotation
+#               carries over so chunk granularity is consistent;
+#               no retention policy means data lives forever.
 # replication-factor matches the live node count so every chunk is
 # fully replicated across the cluster.
-glog config vault create --name local-vault --type file \
+glog config vault create --name first-vault --type file \
   --storage-class 1 --replication-factor "$NODE_COUNT" \
-  --rotation-policy 100-rows --retention-policy 3m-retain \
+  --rotation-policy 10000-records --retention-policy 3m-retain \
   --retention-disposition route >/dev/null
-glog config vault create --name cloud-vault --type file \
+glog config vault create --name second-vault --type file \
   --storage-class 1 --replication-factor "$NODE_COUNT" \
   --cloud-service minio \
-  --rotation-policy 100-rows >/dev/null
-echo "  vaults: local-vault (RF=$NODE_COUNT, retention 3m → route), cloud-vault (RF=$NODE_COUNT, cloud=minio)"
+  --rotation-policy 10000-records >/dev/null
+echo "  vaults: first-vault (RF=$NODE_COUNT, retention 3m → route), second-vault (RF=$NODE_COUNT, cloud=minio)"
 
 # ── 5. Routes ────────────────────────────────────────────────────────
-# Live ingest → local. The retention route needs local-vault's GLID inline
-# in its match expression — pull it from `vault get -o json` (single
+# Live ingest → first-vault. The retention route needs first-vault's GLID
+# inline in its match expression — pull it from `vault get -o json` (single
 # proto message, so protojson camelCase: "id").
-LOCAL_VAULT_ID=$(glog config vault get local-vault -o json | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
-if [ -z "$LOCAL_VAULT_ID" ]; then
-  echo "ERROR: failed to resolve local-vault GLID" >&2
+FIRST_VAULT_ID=$(glog config vault get first-vault -o json | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+if [ -z "$FIRST_VAULT_ID" ]; then
+  echo "ERROR: failed to resolve first-vault GLID" >&2
   exit 1
 fi
 
 glog config route create \
-  --name ingest-to-local \
+  --name ingest-to-first \
   --expression '_source = "ingest"' \
-  --destination local-vault >/dev/null
+  --destination first-vault >/dev/null
 
-# Local retention firing → cloud. When local-vault's 3m retention expires
-# a chunk, its records stream back through the routing engine with
-# `_source = "retention"` and `_vault = "<local-id>"`. This route picks
-# them up and lands them in cloud-vault before the original chunk is
+# First-vault retention firing → second-vault. When first-vault's 3m retention
+# expires a chunk, its records stream back through the routing engine with
+# `_source = "retention"` and `_vault = "<first-vault-id>"`. This route picks
+# them up and lands them in second-vault before the original chunk is
 # destroyed.
 glog config route create \
-  --name local-retention-to-cloud \
-  --expression "_source = \"retention\" AND _vault = \"$LOCAL_VAULT_ID\"" \
-  --destination cloud-vault >/dev/null
-echo "  routes: ingest-to-local, local-retention-to-cloud"
+  --name first-retention-to-second \
+  --expression "_source = \"retention\" AND _vault = \"$FIRST_VAULT_ID\"" \
+  --destination second-vault >/dev/null
+echo "  routes: ingest-to-first, first-retention-to-second"
 
 # ── 6. Ingesters ─────────────────────────────────────────────────────
 # All defined and ready, assigned via --all-nodes=true so eligibility

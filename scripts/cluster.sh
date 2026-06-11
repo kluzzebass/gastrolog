@@ -109,8 +109,8 @@ build_imux_cmd() {
 
 # check_dependencies probes the external services the bootstrap depends on.
 # Currently the only hard dependency is the S3-compatible object store at
-# localhost:9000, which the cloud-vault setup needs for cloud-backed
-# placement. Without it, the cloud-vault placement step blocks each node
+# localhost:9000, which the second-vault setup needs for cloud-backed
+# placement. Without it, the second-vault placement step blocks each node
 # in a 3-attempt S3 retry loop (~5s/node) and leaves nodes hung in retry
 # state at shutdown — the script appears to "take a loooong time" then
 # emits Killed: 9 messages from the SIGKILL fallback. Failing here with
@@ -122,7 +122,7 @@ check_dependencies() {
   # being installed; works on macOS and Linux out of the box.
   if ! (exec 3<>/dev/tcp/${s3_host}/${s3_port}) 2>/dev/null; then
     echo "Error: S3-compatible service not reachable at ${s3_host}:${s3_port}." >&2
-    echo "       The bootstrap creates a cloud-backed cloud-vault that needs" >&2
+    echo "       The bootstrap creates a cloud-backed second-vault that needs" >&2
     echo "       MinIO (or another S3 emulator) running on this port." >&2
     echo "       Start the local cloud emulators and try again:" >&2
     echo "         just cloud-storage-up" >&2
@@ -261,8 +261,10 @@ configure() {
 
   echo ">>> Creating policies..."
   $GLOG config rotation-policy create --addr "$S" --name "1m-rotate" --max-age 1m 2>&1 | sed 's/^/  /'
-  $GLOG config rotation-policy create --addr "$S" --name "100-rows" --max-records 100 2>&1 | sed 's/^/  /'
+  $GLOG config rotation-policy create --addr "$S" --name "100-records" --max-records 100 2>&1 | sed 's/^/  /'
+  $GLOG config rotation-policy create --addr "$S" --name "10000-records" --max-records 10000 2>&1 | sed 's/^/  /'
   $GLOG config retention-policy create --addr "$S" --name "3m-retain" --max-age 3m 2>&1 | sed 's/^/  /'
+  $GLOG config retention-policy create --addr "$S" --name "1h-retain" --max-age 1h 2>&1 | sed 's/^/  /'
 
   # gastrolog-4kkoo (Phase 5): no filter entity — match expressions live
   # inline on routes via --expression. Synthetic attributes (_source,
@@ -271,51 +273,51 @@ configure() {
 
   echo ">>> Creating vaults..."
   # Two-vault local→cloud chain wired via inter-vault routing (gastrolog-4kkoo).
-  #   - local-vault: file-backed on local disk, 100-row rotation, 3-minute
+  #   - first-vault: file-backed on local disk, 10000-records rotation, 3-minute
   #                  retention. Chunks past their TTL fire the retention
   #                  sweep, which streams their records back through the
   #                  routing engine.
-  #   - cloud-vault: file-backed but cloud-served (S3). 100-row rotation
+  #   - second-vault: file-backed but cloud-served (S3). 10000-records rotation
   #                  carries over so chunk granularity is consistent;
   #                  no retention policy means data lives forever.
-  $GLOG config vault create --addr "$S" --name "local-vault" \
+  $GLOG config vault create --addr "$S" --name "first-vault" \
     --type file --storage-class 1 --replication-factor "$NODES" \
-    --rotation-policy "100-rows" --retention-policy "3m-retain" 2>&1 | sed 's/^/  /'
-  $GLOG config vault create --addr "$S" --name "cloud-vault" \
+    --rotation-policy "10000-records" --retention-policy "3m-retain" 2>&1 | sed 's/^/  /'
+  $GLOG config vault create --addr "$S" --name "second-vault" \
     --type file --storage-class 1 --replication-factor "$NODES" \
     --cloud-service "S3" \
-    --rotation-policy "100-rows" 2>&1 | sed 's/^/  /'
+    --rotation-policy "10000-records" 2>&1 | sed 's/^/  /'
 
-  # The retention route needs the local vault's GLID inline in its
+  # The retention route needs the first vault's GLID inline in its
   # match expression — there's no name-resolution path for synthetic
   # attribute values. Pull the ID out of `vault list -o json`, which
   # emits canonical base32hex GLIDs ready to drop into a predicate.
-  local LOCAL_VAULT_ID
-  LOCAL_VAULT_ID=$(
+  local FIRST_VAULT_ID
+  FIRST_VAULT_ID=$(
     $GLOG config vault list --addr "$S" -o json 2>/dev/null \
-    | jq -r '.[] | select(.name == "local-vault") | .id'
+    | jq -r '.[] | select(.name == "first-vault") | .id'
   )
-  if [[ -z "$LOCAL_VAULT_ID" ]]; then
-    echo "Error: failed to resolve local-vault ID for retention route" >&2
+  if [[ -z "$FIRST_VAULT_ID" ]]; then
+    echo "Error: failed to resolve first-vault ID for retention route" >&2
     exit 1
   fi
 
   echo ">>> Creating routes..."
-  # Live ingest → local. `_source = "ingest"` tags every record arriving
+  # Live ingest → first-vault. `_source = "ingest"` tags every record arriving
   # from an ingester at routing-eval time.
   $GLOG config route create --addr "$S" \
-    --name "ingest-to-local" \
+    --name "ingest-to-first" \
     --expression '_source = "ingest"' \
-    --destination "local-vault" 2>&1 | sed 's/^/  /'
-  # Local retention firing → cloud. When local-vault's 3m retention expires
-  # a chunk, its records stream back through the routing engine with
-  # `_source = "retention"` and `_vault = "<local-id>"`. This route picks
-  # them up and lands them in cloud-vault before the original chunk is
+    --destination "first-vault" 2>&1 | sed 's/^/  /'
+  # First-vault retention firing → second-vault. When first-vault's 3m retention
+  # expires a chunk, its records stream back through the routing engine with
+  # `_source = "retention"` and `_vault = "<first-vault-id>"`. This route picks
+  # them up and lands them in second-vault before the original chunk is
   # destroyed.
   $GLOG config route create --addr "$S" \
-    --name "local-retention-to-cloud" \
-    --expression "_source = \"retention\" AND _vault = \"${LOCAL_VAULT_ID}\"" \
-    --destination "cloud-vault" 2>&1 | sed 's/^/  /'
+    --name "first-retention-to-second" \
+    --expression "_source = \"retention\" AND _vault = \"${FIRST_VAULT_ID}\"" \
+    --destination "second-vault" 2>&1 | sed 's/^/  /'
 
   echo ">>> Creating ingesters (disabled)..."
   local NODE_IDS=()
