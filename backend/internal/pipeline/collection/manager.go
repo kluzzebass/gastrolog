@@ -6,13 +6,21 @@ import (
 	"errors"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"gastrolog/internal/glid"
+	"gastrolog/internal/notify"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
 // ErrNotRunning is returned when Run is called twice.
 var ErrNotRunning = errors.New("collection manager not running")
+
+// recollectInterval is the worker's periodic catch-up pass. A collect pass
+// that fails transiently (origin unreachable, pull stream error) would
+// otherwise only be retried when the next segment publish fires the FSM
+// callback — which may never come on a quiet vault.
+const recollectInterval = 2 * time.Second
 
 // ErrUnknownVault is returned for an unregistered vault.
 var ErrUnknownVault = errors.New("unknown vault")
@@ -37,6 +45,17 @@ type vaultCollect struct {
 	// unsubPublish removes this vault's publish-callback subscription on the
 	// shared FSM fan-out; nil when no FSM was wired.
 	unsubPublish func()
+	// wake coalesces collect triggers for the per-vault worker goroutine.
+	// FSM publish callbacks and Notify only poke this signal — they must
+	// never run a collect pass inline, because the publish callback fires
+	// on the Raft FSM-apply goroutine and a collect pass commits holder
+	// receipts through raft.Apply on the same group. Running it inline on
+	// a node that is both home and vault-ctl leader deadlocks the FSM
+	// (the apply waits on an FSM that is busy running the callback) and
+	// wedges every Raft group sharing the node's multiraft transport.
+	wake *notify.Signal
+	// stopWorker cancels the per-vault worker; nil until the worker starts.
+	stopWorker context.CancelFunc
 
 	// collectMu serializes collect passes for this vault. Passes are triggered
 	// from several goroutines (Run startup, FSM publish callback, Notify,
@@ -76,6 +95,7 @@ func newVaultCollect(vaultID glid.GLID, root string, cfg VaultConfig) (*vaultCol
 		pull:      cfg.Pull,
 		receipts:  cfg.Receipts,
 		fsm:       cfg.FSM,
+		wake:      notify.NewSignal(),
 		receipted: make(map[glid.GLID]struct{}),
 	}, nil
 }
@@ -220,10 +240,12 @@ func (m *Manager) RegisterVault(vaultID glid.GLID, root string, cfg VaultConfig)
 	m.vaults[vaultID] = v
 
 	if cfg.FSM != nil {
-		vid := vaultID
 		v.unsubPublish = cfg.FSM.AddOnPublishCompletedSegment(func(vaultctlfsm.CompletedSegmentEntry) {
-			m.triggerCollect(vid)
+			v.wake.Notify()
 		})
+	}
+	if m.runCtx != nil {
+		m.startWorkerLocked(v)
 	}
 	return nil
 }
@@ -234,8 +256,14 @@ func (m *Manager) UnregisterVault(vaultID glid.GLID) {
 	v, ok := m.vaults[vaultID]
 	delete(m.vaults, vaultID)
 	m.mu.Unlock()
-	if ok && v.unsubPublish != nil {
+	if !ok {
+		return
+	}
+	if v.unsubPublish != nil {
 		v.unsubPublish()
+	}
+	if v.stopWorker != nil {
+		v.stopWorker()
 	}
 }
 
@@ -258,8 +286,9 @@ func (m *Manager) CollectOnce(ctx context.Context, vaultID glid.GLID) error {
 	return v.collectMissing(ctx)
 }
 
-// Run blocks until ctx is cancelled. On start it catches up any assignments
-// already visible to the log reader (e.g. after Raft replay).
+// Run blocks until ctx is cancelled. Each registered vault gets a worker
+// goroutine that runs an initial catch-up pass (assignments already visible
+// after Raft replay) and then collects on every wake signal.
 func (m *Manager) Run(ctx context.Context) error {
 	if !m.running.CompareAndSwap(false, true) {
 		return ErrNotRunning
@@ -267,15 +296,10 @@ func (m *Manager) Run(ctx context.Context) error {
 
 	m.mu.Lock()
 	m.runCtx = ctx
-	vaults := make([]*vaultCollect, 0, len(m.vaults))
 	for _, v := range m.vaults {
-		vaults = append(vaults, v)
+		m.startWorkerLocked(v)
 	}
 	m.mu.Unlock()
-
-	for _, v := range vaults {
-		_ = v.collectMissing(ctx)
-	}
 
 	m.wg.Go(func() {
 		<-ctx.Done()
@@ -291,11 +315,41 @@ func (m *Manager) Run(ctx context.Context) error {
 
 func (m *Manager) triggerCollect(vaultID glid.GLID) {
 	m.mu.Lock()
-	ctx := m.runCtx
 	v, ok := m.vaults[vaultID]
 	m.mu.Unlock()
-	if !ok || ctx == nil {
+	if !ok {
 		return
 	}
-	_ = v.collectMissing(ctx)
+	v.wake.Notify()
+}
+
+// startWorkerLocked launches the per-vault collect worker. Caller holds m.mu
+// and has verified m.runCtx is non-nil. The worker decouples collect passes
+// from their triggers: FSM publish callbacks fire on the Raft FSM-apply
+// goroutine and must never block on a pass that itself applies Raft commands
+// (holder receipts) — see the wake field comment on vaultCollect.
+func (m *Manager) startWorkerLocked(v *vaultCollect) {
+	if v.stopWorker != nil {
+		return // already running
+	}
+	ctx, cancel := context.WithCancel(m.runCtx)
+	v.stopWorker = cancel
+	m.wg.Go(func() {
+		// Capture the wake channel BEFORE each pass so a signal arriving
+		// mid-pass re-fires the loop instead of being lost.
+		ch := v.wake.C()
+		_ = v.collectMissing(ctx)
+		tick := time.NewTicker(recollectInterval)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ch:
+			case <-tick.C:
+			}
+			ch = v.wake.C()
+			_ = v.collectMissing(ctx)
+		}
+	})
 }

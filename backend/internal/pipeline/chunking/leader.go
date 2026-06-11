@@ -155,7 +155,17 @@ func (v *vaultChunking) loadSegmentViews() ([]SegmentView, func(), error) {
 }
 
 func plannerStateFromFSM(fsm *vaultctlfsm.FSM, open *vaultctlfsm.OpenChunkManifest) (ManifestSnapshot, map[glid.GLID]uint32) {
+	// Resume positions must cover EVERY registered segment, not just refs in
+	// the current open manifest: segmentResume persists across manifests, and
+	// a freshly opened manifest (open == nil after a seal) would otherwise
+	// re-chunk records that previous sealed chunks already consumed —
+	// duplicating data in every subsequent chunk.
 	resume := make(map[glid.GLID]uint32)
+	for _, entry := range fsm.ListCompletedSegments() {
+		if n, ok := fsm.ResumeRecordNumber(entry.SegmentID); ok {
+			resume[entry.SegmentID] = n
+		}
+	}
 	if open == nil {
 		return ManifestSnapshot{}, resume
 	}
@@ -170,9 +180,6 @@ func plannerStateFromFSM(fsm *vaultctlfsm.FSM, open *vaultctlfsm.OpenChunkManife
 			SegmentID:         ref.SegmentID,
 			FirstRecordNumber: ref.FirstRecordNumber,
 			LastRecordNumber:  ref.LastRecordNumber,
-		}
-		if n, ok := fsm.ResumeRecordNumber(ref.SegmentID); ok {
-			resume[ref.SegmentID] = n
 		}
 	}
 	return manifest, resume

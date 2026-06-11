@@ -10,12 +10,21 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/notify"
 	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
 // ErrNotRunning is returned when Run is called twice.
 var ErrNotRunning = errors.New("chunking manager not running")
+
+// replanInterval is the worker's periodic catch-up pass. The wake-signal
+// event chain has gaps no FSM callback covers: a collection pull finishing
+// (planner skips segments not yet in head/, and the pull is a local file
+// operation with no Raft event) and a failed/timed-out planner Apply. One
+// successful tick-driven step re-arms the event chain, so this only bounds
+// stall recovery, not steady-state latency.
+const replanInterval = 2 * time.Second
 
 // VaultCtlApplier applies marshaled vault-ctl commands for one vault.
 type VaultCtlApplier interface {
@@ -39,6 +48,12 @@ type VaultConfig struct {
 	IsLeader  func() bool
 	Policy    ManifestRotationPolicy
 	NewChunkID func() chunk.ChunkID
+	// OnBuilt fires after this node successfully builds a sealed GLCB
+	// (every home, not just the leader). Homes that finish building AFTER
+	// the leader's CmdSealChunk applied use it to register the GLCB for
+	// local queries — the FSM onSeal callback already ran and found no
+	// file on disk. Optional.
+	OnBuilt func(chunk.ChunkID)
 }
 
 type vaultChunking struct {
@@ -50,6 +65,15 @@ type vaultChunking struct {
 	// unsubPublish removes this vault's publish-callback subscription on the
 	// shared FSM fan-out.
 	unsubPublish func()
+	// wake coalesces plan/build triggers for the per-vault worker goroutine.
+	// FSM callbacks (publish, open-manifest, ref-added, sealed-manifest) fire
+	// on the Raft FSM-apply goroutine and only poke this signal — running the
+	// planner or builder inline would deadlock: both propose manifest edits
+	// through raft.Apply on the same group, and that apply cannot complete
+	// while the FSM goroutine is parked inside the callback.
+	wake *notify.Signal
+	// stopWorker cancels the per-vault worker; nil until the worker starts.
+	stopWorker context.CancelFunc
 }
 
 type buildKey struct {
@@ -77,7 +101,7 @@ func newVaultChunking(cfg VaultConfig) (*vaultChunking, error) {
 	if cfg.IsLeader == nil {
 		cfg.IsLeader = func() bool { return false }
 	}
-	return &vaultChunking{cfg: cfg}, nil
+	return &vaultChunking{cfg: cfg, wake: notify.NewSignal()}, nil
 }
 
 // Config configures a ChunkingManager.
@@ -120,19 +144,30 @@ func (m *Manager) RegisterVault(vaultID glid.GLID, cfg VaultConfig) error {
 	}
 	m.vaults[vaultID] = v
 
-	vid := vaultID
+	// All four FSM callbacks coalesce into the same wake signal; the worker
+	// runs a plan step followed by a build step on every wake, and both
+	// no-op quickly when there is nothing to do.
 	cfg.FSM.SetOnSealedManifest(func(*vaultctlfsm.OpenChunkManifest) {
-		m.triggerBuild(vid)
+		v.wake.Notify()
 	})
 	v.unsubPublish = cfg.FSM.AddOnPublishCompletedSegment(func(vaultctlfsm.CompletedSegmentEntry) {
-		m.triggerPlan(vid)
+		v.wake.Notify()
 	})
 	cfg.FSM.SetOnOpenChunkManifest(func(*vaultctlfsm.OpenChunkManifest) {
-		m.triggerPlan(vid)
+		v.wake.Notify()
 	})
 	cfg.FSM.SetOnOpenChunkRefAdded(func(*vaultctlfsm.OpenChunkManifest) {
-		m.triggerPlan(vid)
+		v.wake.Notify()
 	})
+	// Without this wake, segments published while a build was in flight
+	// are only chunked when a future publish arrives — the planner refuses
+	// to open a new manifest while a sealed one is pending.
+	cfg.FSM.SetOnSealedManifestCleared(func(chunk.ChunkID) {
+		v.wake.Notify()
+	})
+	if m.runCtx != nil {
+		m.startWorkerLocked(v)
+	}
 	return nil
 }
 
@@ -149,6 +184,10 @@ func (m *Manager) UnregisterVault(vaultID glid.GLID) {
 		}
 		v.cfg.FSM.SetOnOpenChunkManifest(nil)
 		v.cfg.FSM.SetOnOpenChunkRefAdded(nil)
+		v.cfg.FSM.SetOnSealedManifestCleared(nil)
+		if v.stopWorker != nil {
+			v.stopWorker()
+		}
 	}
 }
 
@@ -188,8 +227,10 @@ func (m *Manager) BuildOnce(ctx context.Context, vaultID glid.GLID) error {
 	return v.buildOnce(ctx)
 }
 
-// Run blocks until ctx is cancelled. On start it catches up any sealed manifest
-// awaiting build and any planner work when this node is vault leader.
+// Run blocks until ctx is cancelled. Each registered vault gets a worker
+// goroutine that first catches up any sealed manifest awaiting build and any
+// planner work (when this node is vault leader), then plans + builds on every
+// wake signal.
 func (m *Manager) Run(ctx context.Context) error {
 	if !m.running.CompareAndSwap(false, true) {
 		return ErrNotRunning
@@ -197,16 +238,10 @@ func (m *Manager) Run(ctx context.Context) error {
 
 	m.mu.Lock()
 	m.runCtx = ctx
-	vaults := make([]*vaultChunking, 0, len(m.vaults))
 	for _, v := range m.vaults {
-		vaults = append(vaults, v)
+		m.startWorkerLocked(v)
 	}
 	m.mu.Unlock()
-
-	for _, v := range vaults {
-		_ = v.planCatchUp(ctx)
-		_ = v.buildOnce(ctx)
-	}
 
 	m.wg.Go(func() {
 		<-ctx.Done()
@@ -220,26 +255,36 @@ func (m *Manager) Run(ctx context.Context) error {
 	return ctx.Err()
 }
 
-func (m *Manager) triggerBuild(vaultID glid.GLID) {
-	m.mu.Lock()
-	ctx := m.runCtx
-	v, ok := m.vaults[vaultID]
-	m.mu.Unlock()
-	if !ok || ctx == nil {
-		return
+// startWorkerLocked launches the per-vault plan/build worker. Caller holds
+// m.mu and has verified m.runCtx is non-nil. The worker decouples planner and
+// builder passes from the FSM callbacks that trigger them — see the wake
+// field comment on vaultChunking for the deadlock this prevents.
+func (m *Manager) startWorkerLocked(v *vaultChunking) {
+	if v.stopWorker != nil {
+		return // already running
 	}
-	_ = v.buildOnce(ctx)
-}
-
-func (m *Manager) triggerPlan(vaultID glid.GLID) {
-	m.mu.Lock()
-	ctx := m.runCtx
-	v, ok := m.vaults[vaultID]
-	m.mu.Unlock()
-	if !ok || ctx == nil {
-		return
-	}
-	_ = v.planOnce(ctx, false)
+	ctx, cancel := context.WithCancel(m.runCtx)
+	v.stopWorker = cancel
+	m.wg.Go(func() {
+		// Capture the wake channel BEFORE each pass so a signal arriving
+		// mid-pass re-fires the loop instead of being lost.
+		ch := v.wake.C()
+		_ = v.planCatchUp(ctx)
+		_ = v.buildOnce(ctx)
+		tick := time.NewTicker(replanInterval)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ch:
+			case <-tick.C:
+			}
+			ch = v.wake.C()
+			_ = v.planOnce(ctx, false)
+			_ = v.buildOnce(ctx)
+		}
+	})
 }
 
 func (v *vaultChunking) buildOnce(ctx context.Context) error {
@@ -264,6 +309,10 @@ func (v *vaultChunking) buildOnce(ctx context.Context) error {
 	v.mu.Lock()
 	v.doneBuild = key
 	v.mu.Unlock()
+
+	if v.cfg.OnBuilt != nil {
+		v.cfg.OnBuilt(pending.ChunkID)
+	}
 
 	if v.cfg.IsLeader() && v.cfg.Applier != nil {
 		return v.cfg.Applier.Apply(vaultctlfsm.MarshalSealChunk(

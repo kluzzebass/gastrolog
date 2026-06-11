@@ -17,6 +17,7 @@ import (
 	"gastrolog/internal/index"
 	indexfile "gastrolog/internal/index/file"
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/pipeline/segmentation"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/raftwal"
 	"gastrolog/internal/system"
@@ -57,7 +58,12 @@ type orchRelNode struct {
 	wal           *raftwal.WAL
 	groupMgr      *raftgroup.GroupManager
 	orch          *orchestrator.Orchestrator
-	cancel        context.CancelFunc
+	peerConns     *cluster.PeerConns // non-nil only with withPipelineCluster
+	// factories is the node's component-factory set as built by startNode,
+	// kept so tests can drive dispatcher-equivalent calls (AddVaultInstance)
+	// after config changes.
+	factories orchestrator.Factories
+	cancel    context.CancelFunc
 }
 
 // orchRelHarness boots N in-process nodes, each running a real orchestrator
@@ -86,6 +92,22 @@ type orchRelHarness struct {
 	vaults       []vaultSpec
 	sharedCtx    context.Context
 	sharedCancel context.CancelFunc
+
+	// pipeline, when non-nil, enables the full cross-node pipeline wiring
+	// (Rubicon E3): a static-resolver PeerConns pool per node (segment pulls
+	// + vault-ctl apply forwarding), the cluster PullSegment server, a tight
+	// segment close policy, and a record-count chunk rotation policy on every
+	// vault so ingest converges to sealed GLCBs quickly in tests.
+	pipeline *pipelineClusterOpts
+	// routeVaultIdxs lists vaults (indexes into h.vaults) that get an
+	// enabled match-all route seeded in the shared config.
+	routeVaultIdxs []int
+}
+
+// pipelineClusterOpts carries the pipeline tuning for withPipelineCluster.
+type pipelineClusterOpts struct {
+	closePolicy     segmentation.ClosePolicy
+	chunkMaxRecords int64
 }
 
 // vaultSpec identifies one vault in the harness along with which nodes
@@ -118,6 +140,28 @@ func withExtraVault(nodeIdxs []int) orchRelOption {
 			id:       id,
 			nodeIdxs: nodeIdxs,
 		})
+	}
+}
+
+// withPipelineCluster wires the real cross-node pipeline transport on every
+// node and tunes segment close / chunk rotation for fast test convergence.
+// closePolicy controls when working segments complete; chunkMaxRecords seals
+// the open-chunk manifest once it references that many records.
+func withPipelineCluster(closePolicy segmentation.ClosePolicy, chunkMaxRecords int64) orchRelOption {
+	return func(h *orchRelHarness) {
+		h.pipeline = &pipelineClusterOpts{
+			closePolicy:     closePolicy,
+			chunkMaxRecords: chunkMaxRecords,
+		}
+	}
+}
+
+// withMatchAllRoute seeds an enabled match-all ("*") route targeting the
+// vault at the given index into h.vaults (0 = default vault). Records
+// submitted through the pipeline routing path fan out to that vault.
+func withMatchAllRoute(vaultIdx int) orchRelOption {
+	return func(h *orchRelHarness) {
+		h.routeVaultIdxs = append(h.routeVaultIdxs, vaultIdx)
 	}
 }
 
@@ -261,14 +305,32 @@ func (h *orchRelHarness) seedSharedConfig() {
 		}
 	}
 
+	// Pipeline mode: one shared record-count rotation policy referenced by
+	// every vault, so the vault-ctl leader seals the open-chunk manifest
+	// after chunkMaxRecords records and homes build the sealed GLCB.
+	var rotationPolicyID *glid.GLID
+	if h.pipeline != nil && h.pipeline.chunkMaxRecords > 0 {
+		rpID := glid.New()
+		maxRecords := h.pipeline.chunkMaxRecords
+		if err := h.cfgStore.PutRotationPolicy(ctx, system.RotationPolicyConfig{
+			ID:         rpID,
+			Name:       "orch-rel-pipeline-rotation",
+			MaxRecords: &maxRecords,
+		}); err != nil {
+			h.t.Fatalf("PutRotationPolicy: %v", err)
+		}
+		rotationPolicyID = &rpID
+	}
+
 	// Register every vault + instance + placement. vaults[0] is the default;
 	// additional entries come from withExtraVault options.
 	for _, v := range h.vaults {
 		if err := h.cfgStore.PutVault(ctx, system.VaultConfig{
-			ID:           v.id,
-			Name:         "orch-rel-vault-" + v.label,
-			Type:         system.VaultTypeFile,
-			StorageClass: harnessStorageClass,
+			ID:               v.id,
+			Name:             "orch-rel-vault-" + v.label,
+			Type:             system.VaultTypeFile,
+			StorageClass:     harnessStorageClass,
+			RotationPolicyID: rotationPolicyID,
 		}); err != nil {
 			h.t.Fatalf("PutVault %s: %v", v.label, err)
 		}
@@ -286,6 +348,26 @@ func (h *orchRelHarness) seedSharedConfig() {
 		}
 		if err := h.cfgStore.SetVaultPlacements(ctx, v.id, placements); err != nil {
 			h.t.Fatalf("SetVaultPlacements %s: %v", v.label, err)
+		}
+	}
+
+	// Match-all routes (withMatchAllRoute): records entering the pipeline
+	// routing stage on any node fan out to the targeted vault.
+	for _, idx := range h.routeVaultIdxs {
+		if idx < 0 || idx >= len(h.vaults) {
+			h.t.Fatalf("withMatchAllRoute: invalid vault index %d (have %d vaults)", idx, len(h.vaults))
+		}
+		v := h.vaults[idx]
+		if err := h.cfgStore.PutRoute(ctx, system.RouteConfig{
+			ID:   glid.New(),
+			Name: "orch-rel-route-" + v.label,
+			Stages: []system.RouteStage{
+				{Match: &system.MatchStage{Expression: "*"}},
+			},
+			Destinations: []glid.GLID{v.id},
+			Enabled:      true,
+		}); err != nil {
+			h.t.Fatalf("PutRoute %s: %v", v.label, err)
 		}
 	}
 }
@@ -314,10 +396,23 @@ func (h *orchRelHarness) startNode(id string) {
 	n.groupMgr = groupMgr
 
 	logger := slog.New(slog.DiscardHandler)
-	orch, err := orchestrator.New(orchestrator.Config{
+	if os.Getenv("ORCH_REL_LOG") != "" {
+		logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})).With("node", n.label)
+	}
+	orchCfg := orchestrator.Config{
 		LocalNodeID: id,
 		Logger:      logger,
-	})
+		// Per-node segments base, mirroring production's <home>/segments.
+		SegmentsDir: filepath.Join(n.home, "segments"),
+	}
+	if h.pipeline != nil {
+		orchCfg.SegmentClosePolicy = h.pipeline.closePolicy
+		// Hot-reload paths (ReloadFilters, AddVaultInstance, placement
+		// sweep) need read access to the shared config store, exactly as
+		// production wires the system store.
+		orchCfg.SystemLoader = h.cfgStore
+	}
+	orch, err := orchestrator.New(orchCfg)
 	if err != nil {
 		h.t.Fatalf("%s: orchestrator.New: %v", id, err)
 	}
@@ -334,6 +429,28 @@ func (h *orchRelHarness) startNode(id string) {
 		},
 		Logger: logger,
 	}
+	if h.pipeline != nil {
+		// Real cross-node transport: PeerConns backs both the vault-ctl
+		// apply forwarder (origin publish from non-leader nodes) and the
+		// SegmentPuller (home-side collection). The PullSegment server
+		// closure must be rebound on every (re)start since it captures orch.
+		n.peerConns = cluster.NewStaticPeerConns(id, h.resolver())
+		factories.PeerConns = n.peerConns
+		n.clusterSrv.SetSegmentPullServer(orch.ServeSegmentPull)
+		// ForwardVaultApply receiver: applies forwarded vault-ctl commands to
+		// the local Raft group, mirroring wireClusterRaftApplies in app.go.
+		// Without it, origin publishes from non-leader nodes are rejected
+		// with "group apply function not configured" and segments never
+		// reach the registry.
+		n.clusterSrv.SetGroupApplyFn(func(_ context.Context, groupID string, data []byte) error {
+			g := groupMgr.GetGroup(groupID)
+			if g == nil {
+				return fmt.Errorf("raft group %s not found", groupID)
+			}
+			return g.Raft.Apply(data, cluster.ReplicationTimeout).Error()
+		})
+	}
+	n.factories = factories
 
 	ctx := context.Background()
 	sys, err := h.cfgStore.Load(ctx)
@@ -348,6 +465,25 @@ func (h *orchRelHarness) startNode(id string) {
 	n.cancel = cancel
 	if err := orch.Start(runCtx); err != nil {
 		h.t.Fatalf("%s: orch.Start: %v", id, err)
+	}
+}
+
+// setVaultPlacements rewrites a vault's placement list to the given node
+// indexes (first is the placement leader) in the shared config store. Callers
+// emulate the production dispatcher fan-out afterwards (AddVaultInstance /
+// RemoveVaultInstance / ReloadFilters on each node).
+func (h *orchRelHarness) setVaultPlacements(v vaultSpec, nodeIdxs []int) {
+	h.t.Helper()
+	placements := make([]system.VaultPlacement, 0, len(nodeIdxs))
+	for pos, idx := range nodeIdxs {
+		n := h.nodes[h.nodeIDs[idx]]
+		placements = append(placements, system.VaultPlacement{
+			StorageID: n.fileStorageID.String(),
+			Leader:    pos == 0,
+		})
+	}
+	if err := h.cfgStore.SetVaultPlacements(context.Background(), v.id, placements); err != nil {
+		h.t.Fatalf("SetVaultPlacements %s: %v", v.label, err)
 	}
 }
 
@@ -389,6 +525,10 @@ func (h *orchRelHarness) stopNode(id string) {
 	if n.wal != nil {
 		_ = n.wal.Close()
 		n.wal = nil
+	}
+	if n.peerConns != nil {
+		_ = n.peerConns.Close()
+		n.peerConns = nil
 	}
 }
 

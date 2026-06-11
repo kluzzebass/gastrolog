@@ -368,3 +368,70 @@ func TestLeaderPlannerFailoverContinuesManifest(t *testing.T) {
 		t.Fatalf("sealed records = %d, want 4", sealed.TotalRecords)
 	}
 }
+
+// TestLeaderPlannerSecondManifestSkipsConsumedSegments is the regression
+// test for the duplicate-chunk bug: after a manifest seals and its chunk
+// builds (CmdSealChunk clears the pending manifest), the next manifest must
+// resume from the persisted segmentResume positions — NOT re-add records the
+// sealed chunk already consumed. Before the fix the planner only consulted
+// resume positions for refs in the current open manifest, so manifest 2
+// restarted every fully-consumed segment from record 0.
+func TestLeaderPlannerSecondManifestSkipsConsumedSegments(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	pubAt := base.Add(time.Minute)
+	segA := glid.New()
+	segB := glid.New()
+	vaultID := glid.New()
+	vaultRoot := t.TempDir()
+	writeCompletedSegment(t, vaultRoot, segA, vaultID, []recordForSeg{
+		{0, base, "a0"},
+		{1, base.Add(time.Second), "a1"},
+	})
+	writeCompletedSegment(t, vaultRoot, segB, vaultID, []recordForSeg{
+		{0, base.Add(2 * time.Second), "b0"},
+		{1, base.Add(3 * time.Second), "b1"},
+	})
+
+	fsm := vaultctlfsm.New()
+	applier := &fsmApplier{fsm: fsm}
+
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot: vaultRoot,
+		ChunkRoot: filepath.Join(vaultRoot, "chunks"),
+		FSM:       fsm,
+		Locate:    chunking.VaultSegmentLocator{Root: vaultRoot},
+		Applier:   applier,
+		IsLeader:  func() bool { return true },
+		Policy:    chunking.ManifestRotationPolicy{MaxRecords: 2},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	publishSegment(t, fsm, segA, pubAt, 2, base, base.Add(time.Second))
+	publishSegment(t, fsm, segB, pubAt.Add(time.Second), 2, base.Add(2*time.Second), base.Add(3*time.Second))
+
+	first := planUntilSealed(t, mgr, vaultID, fsm)
+	if len(first.Refs) != 1 || first.Refs[0].SegmentID != segA {
+		t.Fatalf("first manifest refs = %+v, want one ref to segA", first.Refs)
+	}
+
+	// Build completes: CmdSealChunk clears the pending sealed manifest.
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealChunk(
+		first.ChunkID, base.Add(time.Minute), 2, 1024,
+		base, base.Add(time.Second), base.Add(time.Second), true,
+	))
+
+	second := planUntilSealed(t, mgr, vaultID, fsm)
+	if second.ChunkID == first.ChunkID {
+		t.Fatal("second manifest reused first chunk ID")
+	}
+	if len(second.Refs) != 1 || second.Refs[0].SegmentID != segB {
+		t.Fatalf("second manifest refs = %+v, want one ref to segB only", second.Refs)
+	}
+	if second.Refs[0].FirstRecordNumber != 0 || second.Refs[0].LastRecordNumber != 1 {
+		t.Fatalf("second manifest ref = [%d,%d], want [0,1]",
+			second.Refs[0].FirstRecordNumber, second.Refs[0].LastRecordNumber)
+	}
+}

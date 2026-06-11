@@ -268,11 +268,111 @@ func TestRunConsumesCompletedChannel(t *testing.T) {
 	}
 }
 
+func TestRescanPublishesStrandedSegments(t *testing.T) {
+	// The segmentation writer's completed-channel send is non-blocking, so a
+	// full channel (burst) or a restart strands completed segments on disk
+	// with no notification. The Run loop's periodic rescan must find and
+	// publish them.
+	t.Parallel()
+	vaultID := glid.New()
+	root := t.TempDir()
+	pub := &recordingPublisher{}
+
+	mgr, _ := distribution.New(distribution.Config{})
+	if err := mgr.RegisterVault(vaultID, root, distribution.VaultConfig{
+		Publisher: pub,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// On disk, but never sent on the channel.
+	seg := writeCompletedSegment(t, root, vaultID, "stranded")
+
+	completed := make(chan segmentation.CompletedSegment)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_ = mgr.Run(ctx, completed)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	deadline := time.Now().Add(10 * time.Second)
+	for pub.count() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("stranded segment was never published by rescan")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if got := pub.last(); got.SegmentID != seg.Meta.ID || got.RecordCount != 1 {
+		t.Fatalf("published meta = %+v", got)
+	}
+
+	// The rescanned segment must serve pulls like a channel-delivered one.
+	var buf bytes.Buffer
+	if err := mgr.ServePull(distribution.PullRequest{
+		VaultID: vaultID, SegmentID: seg.Meta.ID, Dest: &buf,
+	}); err != nil {
+		t.Fatalf("ServePull after rescan: %v", err)
+	}
+}
+
+func TestRescanSkipsChannelDeliveredSegments(t *testing.T) {
+	// A segment that arrived on the completed channel is already prepared;
+	// the rescan must not publish it a second time.
+	t.Parallel()
+	vaultID := glid.New()
+	root := t.TempDir()
+	pub := &recordingPublisher{}
+
+	mgr, _ := distribution.New(distribution.Config{})
+	if err := mgr.RegisterVault(vaultID, root, distribution.VaultConfig{
+		Publisher: pub,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	completed := make(chan segmentation.CompletedSegment, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_ = mgr.Run(ctx, completed)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	// Non-holder: the file stays in completed/ where the rescan can see it.
+	completed <- writeCompletedSegment(t, root, vaultID, "once")
+
+	// Cover at least one full rescan interval.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if n := pub.count(); n > 1 {
+			t.Fatalf("published %d times, want exactly 1", n)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if pub.count() != 1 {
+		t.Fatalf("published %d times, want 1", pub.count())
+	}
+}
+
 type errPublisher struct{ err error }
 
 func (p errPublisher) Publish(context.Context, distribution.Metadata) error { return p.err }
 
-func TestPublishCompletedRollsBackOnPublisherError(t *testing.T) {
+func TestPublishCompletedKeepsSegmentOnPublisherError(t *testing.T) {
+	// A failed vault-ctl publish is a retryable transient (election,
+	// transfer window): the segment file and its pull registration must
+	// survive so the Run loop's retry can re-announce the metadata without
+	// re-preparing. Rolling the registration back (the old behavior) would
+	// strand the segment on disk forever.
 	t.Parallel()
 	vaultID := glid.New()
 	root := t.TempDir()
@@ -282,16 +382,17 @@ func TestPublishCompletedRollsBackOnPublisherError(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	seg := writeCompletedSegment(t, root, vaultID, "rollback")
+	seg := writeCompletedSegment(t, root, vaultID, "retained")
 	err := mgr.PublishCompleted(context.Background(), seg)
 	if err == nil {
 		t.Fatal("expected publish error")
 	}
+	var buf bytes.Buffer
 	err = mgr.ServePull(distribution.PullRequest{
-		VaultID: vaultID, SegmentID: seg.Meta.ID, Dest: &bytes.Buffer{},
+		VaultID: vaultID, SegmentID: seg.Meta.ID, Dest: &buf,
 	})
-	if !errors.Is(err, distribution.ErrSegmentNotFound) {
-		t.Fatalf("ServePull after failed publish = %v, want ErrSegmentNotFound", err)
+	if err != nil {
+		t.Fatalf("ServePull after failed publish = %v, want segment still registered for retry", err)
 	}
 }
 

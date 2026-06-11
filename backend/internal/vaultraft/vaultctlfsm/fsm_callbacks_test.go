@@ -107,6 +107,72 @@ func TestOnSealedManifestCallbackNotOnIdempotentReplay(t *testing.T) {
 	}
 }
 
+func TestOnSealedManifestClearedCallbackFires(t *testing.T) {
+	t.Parallel()
+
+	fsm := New()
+	chunkID := chunk.NewChunkID()
+	now := time.Now()
+
+	var calls int
+	var captured chunk.ChunkID
+	fsm.SetOnSealedManifestCleared(func(id chunk.ChunkID) {
+		calls++
+		captured = id
+	})
+
+	// Open → seal manifest: pending sealed manifest exists, no clear yet.
+	fsm.Apply(&hraft.Log{Data: MarshalOpenChunkManifest(chunkID, now)})
+	fsm.Apply(&hraft.Log{Data: MarshalSealOpenChunkManifest(chunkID, now.Add(time.Minute))})
+	if calls != 0 {
+		t.Fatalf("callback fired before CmdSealChunk (calls=%d)", calls)
+	}
+
+	// CmdSealChunk clears the pending manifest → callback fires once.
+	sealWire := MarshalSealChunk(chunkID, now, 10, 1024, now, now, now, true)
+	if err := fsm.Apply(&hraft.Log{Data: sealWire}); err != nil {
+		t.Fatalf("SealChunk: %v", err)
+	}
+	if calls != 1 || captured != chunkID {
+		t.Fatalf("calls=%d captured=%s, want 1 call with %s", calls, captured, chunkID)
+	}
+
+	// Replay: the manifest is already cleared, so no second fire.
+	if err := fsm.Apply(&hraft.Log{Data: sealWire}); err != nil {
+		t.Fatalf("SealChunk replay: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("callback calls after replay = %d, want 1", calls)
+	}
+}
+
+func TestOnSealedManifestClearedNotForUnrelatedSeal(t *testing.T) {
+	t.Parallel()
+
+	fsm := New()
+	manifestChunk := chunk.NewChunkID()
+	otherChunk := chunk.NewChunkID()
+	now := time.Now()
+
+	var calls int
+	fsm.SetOnSealedManifestCleared(func(chunk.ChunkID) { calls++ })
+
+	fsm.Apply(&hraft.Log{Data: MarshalOpenChunkManifest(manifestChunk, now)})
+	fsm.Apply(&hraft.Log{Data: MarshalSealOpenChunkManifest(manifestChunk, now.Add(time.Minute))})
+
+	// Sealing a different chunk leaves the pending manifest in place.
+	fsm.Apply(&hraft.Log{Data: MarshalCreateChunk(otherChunk, now, now, now)})
+	if err := fsm.Apply(&hraft.Log{Data: MarshalSealChunk(otherChunk, now, 1, 1, now, now, now, false)}); err != nil {
+		t.Fatalf("SealChunk other: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("callback fired for unrelated seal (calls=%d)", calls)
+	}
+	if fsm.SealedManifest() == nil {
+		t.Fatal("pending sealed manifest must survive unrelated seal")
+	}
+}
+
 func TestOnSealCallbackNotCalledWhenChunkUnknown(t *testing.T) {
 	t.Parallel()
 

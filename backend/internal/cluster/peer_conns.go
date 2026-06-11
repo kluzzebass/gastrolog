@@ -61,6 +61,11 @@ type PeerConns struct {
 	nodeID      string
 	byteMetrics *PeerByteMetrics // optional; nil disables per-peer byte tracking
 
+	// staticResolve, when non-nil, overrides Raft-config address resolution
+	// in resolveAddr. Set by NewStaticPeerConns for in-process multi-node
+	// harnesses that run cluster gRPC servers without a system Raft.
+	staticResolve func(nodeID string) (string, bool)
+
 	mu    sync.Mutex
 	conns map[string]*grpc.ClientConn
 }
@@ -72,6 +77,19 @@ func NewPeerConns(r *hraft.Raft, clusterTLS *ClusterTLS, nodeID string) *PeerCon
 		clusterTLS: clusterTLS,
 		nodeID:     nodeID,
 		conns:      make(map[string]*grpc.ClientConn),
+	}
+}
+
+// NewStaticPeerConns creates a peer connection pool that resolves peer
+// addresses through a static lookup function instead of a system-Raft
+// configuration. Peers()/PeerIDs() are unavailable (no Raft membership to
+// enumerate); only address resolution and connection pooling work. Intended
+// for in-process multi-node test harnesses; production nodes use NewPeerConns.
+func NewStaticPeerConns(nodeID string, resolve func(nodeID string) (string, bool)) *PeerConns {
+	return &PeerConns{
+		nodeID:        nodeID,
+		staticResolve: resolve,
+		conns:         make(map[string]*grpc.ClientConn),
 	}
 }
 
@@ -191,6 +209,9 @@ func (p *PeerConns) Invalidate(nodeID string, err error) {
 
 // Peers returns all Raft servers except self.
 func (p *PeerConns) Peers() ([]hraft.Server, error) {
+	if p.raft == nil {
+		return nil, errors.New("peer conns: no raft configuration (static pool)")
+	}
 	future := p.raft.GetConfiguration()
 	if err := future.Error(); err != nil {
 		return nil, err
@@ -256,8 +277,15 @@ func (p *PeerConns) Close() error {
 	return nil
 }
 
-// resolveAddr looks up the node's address from the Raft configuration.
+// resolveAddr looks up the node's address from the static lookup when one is
+// configured (NewStaticPeerConns), otherwise from the Raft configuration.
 func (p *PeerConns) resolveAddr(nodeID string) (string, error) {
+	if p.staticResolve != nil {
+		if addr, ok := p.staticResolve(nodeID); ok {
+			return addr, nil
+		}
+		return "", fmt.Errorf("node %s not found in static peer table", nodeID)
+	}
 	future := p.raft.GetConfiguration()
 	if err := future.Error(); err != nil {
 		return "", fmt.Errorf("get raft config: %w", err)

@@ -269,6 +269,10 @@ type FSM struct {
 	// onSealedManifest fires after SealOpenChunkManifest transitions open →
 	// sealed manifest awaiting local GLCB build (outside the FSM lock).
 	onSealedManifest func(*OpenChunkManifest)
+	// onSealedManifestCleared fires after CmdSealChunk clears the pending
+	// sealed manifest, signalling the build cycle finished (outside the FSM
+	// lock). The chunking planner uses it to start the next manifest.
+	onSealedManifestCleared func(chunk.ChunkID)
 	// onPublishCompletedSegment fan-out: each registered callback fires after a
 	// new completed segment is registered (outside the FSM lock). Idempotent
 	// replays do not fire. Keyed by a monotonic id so Collection and Chunking
@@ -399,6 +403,17 @@ func (f *FSM) SetOnSealedManifest(fn func(*OpenChunkManifest)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.onSealedManifest = fn
+}
+
+// SetOnSealedManifestCleared registers a callback invoked (outside the FSM
+// lock) after CmdSealChunk clears the pending sealed manifest (GLCB build
+// completed cluster-wide). The chunking planner uses this to wake and open
+// the next manifest; without it, remaining published segments are only
+// picked up when a future segment publish happens to arrive.
+func (f *FSM) SetOnSealedManifestCleared(fn func(chunk.ChunkID)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onSealedManifestCleared = fn
 }
 
 // AddOnPublishCompletedSegment registers a callback invoked (outside the FSM
@@ -575,16 +590,18 @@ type applyEffects struct {
 	finalizedDeleteID  *chunk.ChunkID
 	prunedNode         string
 	prunedFinalizable  []chunk.ChunkID
-	sealedManifest       *OpenChunkManifest
-	publishedSegment     *CompletedSegmentEntry
-	openChunkOpened      *OpenChunkManifest
-	openChunkRefAdded    *OpenChunkManifest
+	sealedManifest          *OpenChunkManifest
+	sealedManifestClearedID *chunk.ChunkID
+	publishedSegment        *CompletedSegmentEntry
+	openChunkOpened         *OpenChunkManifest
+	openChunkRefAdded       *OpenChunkManifest
 
 	onCreate                     func(ManifestEntry)
 	onDelete                     func(chunk.ChunkID)
 	onUpload                     func(ManifestEntry)
 	onSeal                       func(ManifestEntry)
 	onSealedManifest             func(*OpenChunkManifest)
+	onSealedManifestCleared      func(chunk.ChunkID)
 	onPublishCompletedSegment    []func(CompletedSegmentEntry)
 	onOpenChunkManifest          func(*OpenChunkManifest)
 	onOpenChunkRefAdded          func(*OpenChunkManifest)
@@ -608,20 +625,7 @@ func (e applyEffects) fire() {
 	if e.sealedEntry != nil && e.onSeal != nil {
 		e.onSeal(*e.sealedEntry)
 	}
-	if e.sealedManifest != nil && e.onSealedManifest != nil {
-		e.onSealedManifest(e.sealedManifest)
-	}
-	if e.publishedSegment != nil {
-		for _, fn := range e.onPublishCompletedSegment {
-			fn(*e.publishedSegment)
-		}
-	}
-	if e.openChunkOpened != nil && e.onOpenChunkManifest != nil {
-		e.onOpenChunkManifest(e.openChunkOpened)
-	}
-	if e.openChunkRefAdded != nil && e.onOpenChunkRefAdded != nil {
-		e.onOpenChunkRefAdded(e.openChunkRefAdded)
-	}
+	e.firePipelineCallbacks()
 	if e.retentionPendingID != nil && e.onRetentionPending != nil {
 		e.onRetentionPending(*e.retentionPendingID)
 	}
@@ -637,16 +641,41 @@ func (e applyEffects) fire() {
 	if e.prunedNode != "" && e.onPruneNode != nil {
 		e.onPruneNode(e.prunedNode, e.prunedFinalizable)
 	}
+	e.firePruneFinalizeCallbacks()
+}
+
+func (e applyEffects) firePipelineCallbacks() {
+	if e.sealedManifest != nil && e.onSealedManifest != nil {
+		e.onSealedManifest(e.sealedManifest)
+	}
+	if e.sealedManifestClearedID != nil && e.onSealedManifestCleared != nil {
+		e.onSealedManifestCleared(*e.sealedManifestClearedID)
+	}
+	if e.publishedSegment != nil {
+		for _, fn := range e.onPublishCompletedSegment {
+			fn(*e.publishedSegment)
+		}
+	}
+	if e.openChunkOpened != nil && e.onOpenChunkManifest != nil {
+		e.onOpenChunkManifest(e.openChunkOpened)
+	}
+	if e.openChunkRefAdded != nil && e.onOpenChunkRefAdded != nil {
+		e.onOpenChunkRefAdded(e.openChunkRefAdded)
+	}
+}
+
+func (e applyEffects) firePruneFinalizeCallbacks() {
 	// gastrolog-15fm8: applyPruneNode now finalizes drained-ExpectedFrom
 	// chunks atomically inside the same apply. Fire onFinalizeDelete
 	// per chunk so audit / cache-eviction subscribers see the same
 	// stream of finalize signals they would have if a CmdFinalizeDelete
 	// had applied per chunk. Skip if onPruneNode was the subscriber's
 	// only hook (they get the same information through the slice).
-	if e.onFinalizeDelete != nil {
-		for _, id := range e.prunedFinalizable {
-			e.onFinalizeDelete(id)
-		}
+	if e.onFinalizeDelete == nil {
+		return
+	}
+	for _, id := range e.prunedFinalizable {
+		e.onFinalizeDelete(id)
 	}
 }
 
@@ -665,8 +694,14 @@ func (f *FSM) applyLocked(cmd *gastrologv1.VaultCtlCommand) (any, applyEffects) 
 		result = f.applyCreate(c.CreateChunk)
 		fx.createdEntry = f.captureEntry(result, chunkIDFromProto(c.CreateChunk.GetId()))
 	case *gastrologv1.VaultCtlCommand_SealChunk:
+		sealID := chunkIDFromProto(c.SealChunk.GetId())
+		hadSealedManifest := f.sealedManifest != nil && f.sealedManifest.ChunkID == sealID
 		result = f.applySeal(c.SealChunk)
-		fx.sealedEntry = f.captureEntry(result, chunkIDFromProto(c.SealChunk.GetId()))
+		fx.sealedEntry = f.captureEntry(result, sealID)
+		if result == nil && hadSealedManifest {
+			idCopy := sealID
+			fx.sealedManifestClearedID = &idCopy
+		}
 	case *gastrologv1.VaultCtlCommand_CompressChunk:
 		result = f.applyCompress(c.CompressChunk)
 	case *gastrologv1.VaultCtlCommand_UploadChunk:
@@ -745,6 +780,7 @@ func (f *FSM) applyLocked(cmd *gastrologv1.VaultCtlCommand) (any, applyEffects) 
 	fx.onUpload = f.onUpload
 	fx.onSeal = f.onSeal
 	fx.onSealedManifest = f.onSealedManifest
+	fx.onSealedManifestCleared = f.onSealedManifestCleared
 	if len(f.onPublishCompletedSegment) > 0 {
 		fx.onPublishCompletedSegment = make([]func(CompletedSegmentEntry), 0, len(f.onPublishCompletedSegment))
 		for _, fn := range f.onPublishCompletedSegment {

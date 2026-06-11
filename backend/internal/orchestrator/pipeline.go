@@ -143,6 +143,9 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 		spec.Applier = applier
 		spec.IsLeader = isLeader
 		spec.ChunkPolicy = policy
+		spec.OnChunkBuilt = func(id chunk.ChunkID) {
+			o.registerBuiltPipelineChunk(vaultID, fsm, id)
+		}
 		// Full collection requires a puller to fetch segments originated on
 		// other nodes; without peers (single-node) there is nothing to pull.
 		if o.segmentPuller != nil {
@@ -153,6 +156,26 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 		}
 	}
 	return spec
+}
+
+// registerBuiltPipelineChunk registers a freshly-built pipeline GLCB with the
+// local chunk manager when the FSM already shows the chunk Sealed. This
+// closes the build-finishes-last ordering gap: the reconciler's onSeal
+// callback registers the GLCB only when the file exists on disk, so a home
+// whose build completes AFTER CmdSealChunk applied would otherwise never
+// register it — its local queries would silently miss the chunk. When the
+// chunk is not Sealed yet (build-finishes-first ordering), this is a no-op
+// and the later onSeal registers it.
+func (o *Orchestrator) registerBuiltPipelineChunk(vaultID glid.GLID, fsm *vaultctlfsm.FSM, id chunk.ChunkID) {
+	e := fsm.Get(id)
+	if e == nil || e.State != chunk.ChunkStateSealed {
+		return
+	}
+	ti := o.findLocalVaultInstance(vaultID)
+	if ti == nil || ti.Reconciler == nil {
+		return
+	}
+	ti.Reconciler.registerPipelineGLCB(*e)
 }
 
 // vaultCtlHandle resolves the per-vault vault-ctl FSM and an applier for it
@@ -428,6 +451,20 @@ func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 			if o.isVaultHome(sys, vid) {
 				desired[vid] = struct{}{}
 			}
+		}
+	}
+
+	// Align each vault's vault-ctl Raft leadership with its placement leader.
+	// Every cluster node is a voter in every vault-ctl group, so an election
+	// can otherwise land leadership on a non-home node — and the chunking
+	// planner (home ∧ vault-ctl leader) would then run nowhere, stalling
+	// manifest planning for the vault cluster-wide. The leader epoch's
+	// reconcile pass performs the actual LeadershipTransferToServer.
+	if sys != nil && o.vaultCtlLeaders != nil {
+		for i := range sys.Config.Vaults {
+			v := &sys.Config.Vaults[i]
+			o.vaultCtlLeaders.SetDesiredLeaderID(v.ID,
+				system.LeaderNodeID(v.Placements, sys.Runtime.NodeStorageConfigs))
 		}
 	}
 

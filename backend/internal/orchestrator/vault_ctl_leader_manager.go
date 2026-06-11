@@ -201,6 +201,38 @@ func (m *vaultCtlLeaderManager) SetDesiredLeader(vaultID glid.GLID, server *hraf
 	m.desiredLeader.Set(vaultID, server)
 }
 
+// SetDesiredLeaderID sets the desired vault-ctl Raft leader by node ID,
+// resolving its address from the vault's desired member set. Every vault-ctl
+// group spans all cluster nodes (gastrolog-292yi), so without alignment an
+// election can land leadership on a node outside the vault's placement set —
+// and the pipeline chunking planner (gated on home ∧ vault-ctl leadership)
+// would then run nowhere, stalling manifest planning cluster-wide
+// (gastrolog-18f9r, Rubicon E3). Called from reloadPipelineFromConfig with
+// the placement leader on every config apply / placement sweep.
+//
+// No-ops (keeping any previous desired leader) while the node is not yet in
+// the desired member set — membership reconcile must add it first; the next
+// sweep pass retries. An empty nodeID clears the desired leader.
+func (m *vaultCtlLeaderManager) SetDesiredLeaderID(vaultID glid.GLID, nodeID string) {
+	if nodeID == "" {
+		m.desiredLeader.Set(vaultID, nil)
+		return
+	}
+	prev := m.desiredLeader.Get(vaultID)
+	if prev != nil && string(prev.ID) == nodeID {
+		return // unchanged — avoid waking every leader epoch each sweep tick
+	}
+	for _, srv := range m.desired.Get(vaultID) {
+		if string(srv.ID) == nodeID {
+			m.desiredLeader.Set(vaultID, &srv)
+			// Wake the current leader's epoch so the transfer happens
+			// promptly instead of on the 30s safety tick.
+			m.desiredChanged.Notify()
+			return
+		}
+	}
+}
+
 // safetyTick is the task fn invoked by the
 // vault-ctl-membership-reconcile scheduled job. Pokes
 // desiredChanged, which wakes every active leader epoch goroutine.

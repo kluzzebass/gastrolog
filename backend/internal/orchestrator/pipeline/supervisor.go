@@ -133,6 +133,10 @@ type VaultSpec struct {
 	ChunkPolicy chunking.ManifestRotationPolicy
 	// NewChunkID overrides chunk ID minting (for tests). Optional.
 	NewChunkID func() chunk.ChunkID
+	// OnChunkBuilt fires after this node builds a sealed GLCB locally, so the
+	// orchestrator can register it for queries when the FSM seal already
+	// applied (build-finishes-last ordering). Optional.
+	OnChunkBuilt func(chunk.ChunkID)
 }
 
 type vaultRoles struct {
@@ -542,6 +546,7 @@ func (s *Supervisor) registerHome(spec VaultSpec) error {
 			IsLeader:   spec.IsLeader,
 			Policy:     spec.ChunkPolicy,
 			NewChunkID: spec.NewChunkID,
+			OnBuilt:    spec.OnChunkBuilt,
 		}); err != nil {
 			if collectionRegistered {
 				s.col.UnregisterVault(spec.VaultID)

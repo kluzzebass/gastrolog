@@ -887,25 +887,32 @@ func TestPipelineOpenChunkQueryBeforeSeal(t *testing.T) {
 	published := h.waitPublishedStable(t, 1)
 	h.waitCollected(t, len(published))
 
-	for step := 0; step < 8; step++ {
-		if open := h.fsm.OpenChunk(); open != nil && len(open.Refs) > 0 {
+	var totalRecords uint32
+	for _, meta := range published {
+		totalRecords += meta.RecordCount
+	}
+
+	// Ref-adds are asynchronous (worker goroutine chained off FSM callbacks),
+	// so poll until the open manifest covers every published record. PlanOnce
+	// nudges the chain along in case a wake was consumed before collection
+	// finished.
+	var open *vaultctlfsm.OpenChunkManifest
+	planDeadline := time.Now().Add(10 * time.Second)
+	for {
+		open = h.fsm.OpenChunk()
+		if open != nil && open.TotalRecords == uint64(totalRecords) {
 			break
+		}
+		if time.Now().After(planDeadline) {
+			t.Fatalf("open manifest never covered %d records (open=%+v)", totalRecords, open)
 		}
 		if err := h.chunk.PlanOnce(h.ctx, h.vaultID); err != nil {
 			t.Fatal(err)
 		}
-	}
-	open := h.fsm.OpenChunk()
-	if open == nil || len(open.Refs) == 0 {
-		t.Fatal("expected open manifest with refs before seal")
+		time.Sleep(10 * time.Millisecond)
 	}
 	if h.fsm.SealedManifest() != nil {
 		t.Fatal("chunk must still be open")
-	}
-
-	var totalRecords uint32
-	for _, meta := range published {
-		totalRecords += meta.RecordCount
 	}
 
 	got, report, err := chunking.CollectOpenChunk(chunking.OpenChunkQueryInput{
@@ -1060,12 +1067,22 @@ func TestPipelineRemoteHomePlannerRequiresLocalHead(t *testing.T) {
 
 	h.gatePull.allow()
 	h.waitCollectedWithRetry(t, len(published))
-	if err := h.chunk.PlanOnce(h.ctx, h.vaultID); err != nil {
-		t.Fatal(err)
-	}
-	open := h.fsm.OpenChunk()
-	if open == nil || len(open.Refs) == 0 {
-		t.Fatal("expected open manifest with refs after collection")
+	// Each PlanOnce makes a single planner decision (open manifest, then one
+	// ref per pass); FSM callbacks wake the async chunking worker for the
+	// rest, so poll until refs land.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if err := h.chunk.PlanOnce(h.ctx, h.vaultID); err != nil {
+			t.Fatal(err)
+		}
+		open := h.fsm.OpenChunk()
+		if open != nil && len(open.Refs) > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("expected open manifest with refs after collection")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
