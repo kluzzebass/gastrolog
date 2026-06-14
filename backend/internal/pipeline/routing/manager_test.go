@@ -71,6 +71,100 @@ func TestManagerFansOutSamePointer(t *testing.T) {
 	}
 }
 
+func TestManagerUnregisterDuringDeliver(t *testing.T) {
+	t.Parallel()
+
+	vaultID := glid.New()
+	out := make(chan segmentation.Input, 2)
+
+	mgr := routing.New(routing.Config{
+		Workers: 4,
+		Table:   catchAllTable(vaultID),
+		Vaults:  map[glid.GLID]chan<- segmentation.Input{vaultID: out},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const n = 32
+	in := make(chan routing.Input, n)
+	for range n {
+		in <- routing.IngestInput(&record.Record{Attrs: record.Attributes{"n": "x"}})
+	}
+
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		for range n {
+			<-out
+		}
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		_ = mgr.Run(ctx, in)
+		close(done)
+	}()
+
+	// Let workers pile up behind the small segmentation buffer.
+	time.Sleep(20 * time.Millisecond)
+
+	mgr.UnregisterVault(vaultID)
+	close(out) // segmentation closes after routing unregisters
+
+	close(in)
+	<-done
+	<-drained
+
+	if stats := mgr.Stats(); stats.Matched != n {
+		t.Errorf("matched = %d, want %d", stats.Matched, n)
+	}
+}
+
+func TestManagerReRegisterReplacesSink(t *testing.T) {
+	t.Parallel()
+
+	vaultID := glid.New()
+	outA := make(chan segmentation.Input, 4)
+	outB := make(chan segmentation.Input, 4)
+
+	mgr := routing.New(routing.Config{
+		Workers: 2,
+		Table:   catchAllTable(vaultID),
+		Vaults:  map[glid.GLID]chan<- segmentation.Input{vaultID: outA},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	in := make(chan routing.Input, 4)
+	done := make(chan struct{})
+	go func() {
+		_ = mgr.Run(ctx, in)
+		close(done)
+	}()
+
+	in <- routing.IngestInput(&record.Record{Attrs: record.Attributes{"seq": "1"}})
+	if got := <-outA; got.Record.Attrs["seq"] != "1" {
+		t.Fatalf("first record on outA: %+v", got.Record.Attrs)
+	}
+
+	mgr.UnregisterVault(vaultID)
+	close(outA)
+
+	mgr.RegisterVault(vaultID, outB)
+	in <- routing.IngestInput(&record.Record{Attrs: record.Attributes{"seq": "2"}})
+	close(in)
+	<-done
+
+	if len(outB) != 1 {
+		t.Fatalf("expected 1 record on replacement sink, got %d", len(outB))
+	}
+	if got := <-outB; got.Record.Attrs["seq"] != "2" {
+		t.Fatalf("replacement sink record: %+v", got.Record.Attrs)
+	}
+}
+
 func TestManagerCountsUnmatched(t *testing.T) {
 	t.Parallel()
 

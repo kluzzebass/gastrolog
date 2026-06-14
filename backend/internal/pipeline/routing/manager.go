@@ -44,7 +44,7 @@ type Config struct {
 	Workers int
 	Table   *Table
 	// Vaults maps vault ID to that vault's segmentation input queue.
-	Vaults map[glid.GLID]chan<- segmentation.Input
+	Vaults map[glid.GLID]chan<- segmentation.Input // wrapped in vaultSink at New
 }
 
 // StatsSnapshot is a point-in-time view of routing counters.
@@ -65,7 +65,7 @@ type Manager struct {
 	table atomic.Pointer[Table]
 
 	vmu    sync.RWMutex
-	vaults map[glid.GLID]chan<- segmentation.Input
+	vaults map[glid.GLID]*vaultSink
 
 	matched   atomic.Uint64
 	unmatched atomic.Uint64
@@ -83,9 +83,9 @@ func New(cfg Config) *Manager {
 	if cfg.Workers <= 0 {
 		cfg.Workers = 4
 	}
-	vaults := cfg.Vaults
-	if vaults == nil {
-		vaults = make(map[glid.GLID]chan<- segmentation.Input)
+	vaults := make(map[glid.GLID]*vaultSink, len(cfg.Vaults))
+	for id, ch := range cfg.Vaults {
+		vaults[id] = newVaultSink(ch)
 	}
 	m := &Manager{
 		workers: cfg.Workers,
@@ -107,17 +107,27 @@ func (m *Manager) SetTable(t *Table) {
 // reconcile registers vaults as placement changes bring vault homes onto this node.
 func (m *Manager) RegisterVault(vaultID glid.GLID, in chan<- segmentation.Input) {
 	m.vmu.Lock()
-	m.vaults[vaultID] = in
+	old := m.vaults[vaultID]
+	m.vaults[vaultID] = newVaultSink(in)
 	m.vmu.Unlock()
+	if old != nil {
+		old.revoke()
+	}
 }
 
-// UnregisterVault drops a vault's fan-out target. Callers must stop upstream
-// segmentation input for the vault before closing its channel; until re-registered,
-// records matching the vault are counted as matched but not delivered.
+// UnregisterVault drops a vault's fan-out target and waits for in-flight routing
+// deliveries to finish. Call segmentation.UnregisterVault only after this returns
+// so workers never send on a closed input channel.
 func (m *Manager) UnregisterVault(vaultID glid.GLID) {
 	m.vmu.Lock()
-	delete(m.vaults, vaultID)
+	sink, ok := m.vaults[vaultID]
+	if ok {
+		delete(m.vaults, vaultID)
+	}
 	m.vmu.Unlock()
+	if ok {
+		sink.revoke()
+	}
 }
 
 // Stats returns a snapshot of routing counters (global totals plus per-vault and
@@ -240,14 +250,16 @@ func (m *Manager) route(ctx context.Context, in Input) {
 		incrCounter(&m.perVault, vaultID)
 	}
 
-	// Snapshot the locally-registered fan-out targets under the read lock. Matched
-	// vaults without a local segmentation queue (e.g. a home that lives on another
-	// node) are skipped here; cross-node fan-out lands in a later slice.
+	// Snapshot fan-out sinks under the read lock. Matched vaults without a local
+	// segmentation queue (e.g. a home that lives on another node) are skipped;
+	// cross-node fan-out lands in a later slice. Workers hold *vaultSink pointers
+	// so UnregisterVault can drain in-flight deliveries before segmentation closes
+	// the input channel.
 	m.vmu.RLock()
-	targets := make([]chan<- segmentation.Input, 0, len(vaults))
+	targets := make([]*vaultSink, 0, len(vaults))
 	for _, vaultID := range vaults {
-		if out, ok := m.vaults[vaultID]; ok {
-			targets = append(targets, out)
+		if sink, ok := m.vaults[vaultID]; ok {
+			targets = append(targets, sink)
 		}
 	}
 	m.vmu.RUnlock()
@@ -259,8 +271,8 @@ func (m *Manager) route(ctx context.Context, in Input) {
 	}
 
 	if in.Ack == nil {
-		for _, out := range targets {
-			if !deliver(ctx, out, segmentation.Input{Record: rec}) {
+		for _, sink := range targets {
+			if !sink.deliver(ctx, segmentation.Input{Record: rec}) {
 				return
 			}
 		}
@@ -268,14 +280,14 @@ func (m *Manager) route(ctx context.Context, in Input) {
 	}
 
 	if n == 1 {
-		deliver(ctx, targets[0], segmentation.Input{Record: rec, Ack: in.Ack})
+		targets[0].deliver(ctx, segmentation.Input{Record: rec, Ack: in.Ack})
 		return
 	}
 
 	// Multi-vault fan-out: join the per-vault commit acks into the single source ack.
 	children := newAckJoin(n, in.Ack)
-	for i, out := range targets {
-		if !deliver(ctx, out, segmentation.Input{Record: rec, Ack: children[i]}) {
+	for i, sink := range targets {
+		if !sink.deliver(ctx, segmentation.Input{Record: rec, Ack: children[i]}) {
 			// deliver already nacked children[i]; release the still-undelivered
 			// children so the join resolves instead of leaking its collector.
 			for j := i + 1; j < n; j++ {
@@ -283,20 +295,6 @@ func (m *Manager) route(ctx context.Context, in Input) {
 			}
 			return
 		}
-	}
-}
-
-// deliver enqueues item to a vault's segmentation queue, nacking item.Ack if the
-// context is cancelled before the send completes. Returns false on cancellation.
-func deliver(ctx context.Context, out chan<- segmentation.Input, item segmentation.Input) bool {
-	select {
-	case out <- item:
-		return true
-	case <-ctx.Done():
-		if item.Ack != nil {
-			item.Ack <- ctx.Err()
-		}
-		return false
 	}
 }
 
