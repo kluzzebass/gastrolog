@@ -435,3 +435,122 @@ func TestLeaderPlannerSecondManifestSkipsConsumedSegments(t *testing.T) {
 			second.Refs[0].FirstRecordNumber, second.Refs[0].LastRecordNumber)
 	}
 }
+
+// TestLoadSegmentViewsCachesIndexesAcrossPlanSteps guards gastrolog-3bn3q:
+// planOnce must not re-open every active registry segment on each step.
+func TestLoadSegmentViewsCachesIndexesAcrossPlanSteps(t *testing.T) {
+	t.Parallel()
+	const segmentCount = 20
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	pubAt := base.Add(time.Minute)
+	vaultID := glid.New()
+	vaultRoot := t.TempDir()
+	segIDs := make([]glid.GLID, segmentCount)
+	for i := range segIDs {
+		segIDs[i] = glid.New()
+		ts := base.Add(time.Duration(i) * time.Second)
+		writeCompletedSegment(t, vaultRoot, segIDs[i], vaultID, []recordForSeg{{0, ts, fmt.Sprintf("s%d", i)}})
+	}
+
+	fsm := vaultctlfsm.New()
+	applier := &fsmApplier{fsm: fsm}
+	var indexOpens atomic.Int64
+	indexOpener := func(path string) (*chunking.OrderedIndex, error) {
+		indexOpens.Add(1)
+		return chunking.BuildOrderedIndex(path)
+	}
+
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot:   vaultRoot,
+		ChunkRoot:   filepath.Join(vaultRoot, "chunks"),
+		FSM:         fsm,
+		Locate:      chunking.VaultSegmentLocator{Root: vaultRoot},
+		Applier:     applier,
+		IsLeader:    func() bool { return true },
+		Policy:      chunking.ManifestRotationPolicy{MaxRecords: 1000},
+		IndexOpener: indexOpener,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for i, segID := range segIDs {
+		ts := base.Add(time.Duration(i) * time.Second)
+		publishSegment(t, fsm, segID, pubAt.Add(time.Duration(i)*time.Millisecond), 1, ts, ts)
+	}
+
+	ctx := t.Context()
+	indexOpens.Store(0)
+	if err := mgr.PlanOnce(ctx, vaultID); err != nil {
+		t.Fatal(err)
+	}
+	if got := indexOpens.Load(); got != segmentCount {
+		t.Fatalf("first PlanOnce index opens = %d, want %d (cold cache)", got, segmentCount)
+	}
+
+	indexOpens.Store(0)
+	if err := mgr.PlanOnce(ctx, vaultID); err != nil {
+		t.Fatal(err)
+	}
+	if got := indexOpens.Load(); got != 0 {
+		t.Fatalf("second PlanOnce index opens = %d, want 0 (warm cache)", got)
+	}
+}
+
+// TestLoadSegmentViewsIndexesAllActiveSegments ensures the planner sees every
+// non-exhausted registry segment, not an arbitrary prefix cap.
+func TestLoadSegmentViewsIndexesAllActiveSegments(t *testing.T) {
+	t.Parallel()
+	const segmentCount = 40
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	pubAt := base.Add(time.Minute)
+	vaultID := glid.New()
+	vaultRoot := t.TempDir()
+	segIDs := make([]glid.GLID, segmentCount)
+	for i := range segIDs {
+		segIDs[i] = glid.New()
+		ts := base.Add(time.Duration(i) * time.Second)
+		writeCompletedSegment(t, vaultRoot, segIDs[i], vaultID, []recordForSeg{{0, ts, fmt.Sprintf("s%d", i)}})
+	}
+
+	fsm := vaultctlfsm.New()
+	chunkID := chunk.NewChunkID()
+	applier := &fsmApplier{fsm: fsm}
+
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot:  vaultRoot,
+		ChunkRoot:  filepath.Join(vaultRoot, "chunks"),
+		FSM:        fsm,
+		Locate:     chunking.VaultSegmentLocator{Root: vaultRoot},
+		Applier:    applier,
+		IsLeader:   func() bool { return true },
+		NewChunkID: func() chunk.ChunkID { return chunkID },
+		Policy:     chunking.ManifestRotationPolicy{MaxRecords: 1000},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for i, segID := range segIDs {
+		ts := base.Add(time.Duration(i) * time.Second)
+		publishSegment(t, fsm, segID, pubAt.Add(time.Duration(i)*time.Millisecond), 1, ts, ts)
+	}
+
+	ctx := t.Context()
+	if err := mgr.PlanOnce(ctx, vaultID); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.PlanOnce(ctx, vaultID); err != nil {
+		t.Fatal(err)
+	}
+	open := fsm.OpenChunk()
+	if open == nil {
+		t.Fatal("expected open manifest")
+	}
+	if len(open.Refs) != 1 {
+		t.Fatalf("refs = %d, want 1", len(open.Refs))
+	}
+	if open.Refs[0].SegmentID != segIDs[0] {
+		t.Fatalf("first ref segment = %s, want earliest EventID segment %s", open.Refs[0].SegmentID, segIDs[0])
+	}
+}

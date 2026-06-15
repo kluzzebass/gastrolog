@@ -8,11 +8,6 @@ import (
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
-// maxSegmentViewsPerPlan bounds how many on-disk segment indices loadSegmentViews
-// opens per planner step. After a large backlog, indexing every registered
-// segment on each planOnce is O(n²) and blocks the worker for minutes.
-const maxSegmentViewsPerPlan = 256
-
 // planOnce runs one leader planner step. cronDue=true forces a cron rotation
 // trigger for a non-empty open manifest (scheduler-driven sealing); the planner
 // no-ops for non-leaders regardless.
@@ -27,12 +22,11 @@ func (v *vaultChunking) planOnce(ctx context.Context, cronDue bool) error {
 	v.planMu.Lock()
 
 	open := v.cfg.FSM.OpenChunk()
-	views, closeViews, err := v.loadSegmentViews()
+	views, err := v.loadSegmentViews()
 	if err != nil {
 		v.planMu.Unlock()
 		return err
 	}
-	defer closeViews()
 
 	if open == nil && len(views) == 0 {
 		v.planMu.Unlock()
@@ -117,11 +111,12 @@ func (v *vaultChunking) planCatchUp(ctx context.Context) error {
 			newRefs = len(open.Refs)
 		}
 		if !hadOpen && open == nil {
-			views, closeViews, err := v.loadSegmentViews()
+			v.planMu.Lock()
+			views, err := v.loadSegmentViews()
+			v.planMu.Unlock()
 			if err != nil {
 				return err
 			}
-			closeViews()
 			if len(views) == 0 {
 				return nil
 			}
@@ -157,28 +152,65 @@ func segmentExhaustedForPlanning(fsm *vaultctlfsm.FSM, entry vaultctlfsm.Complet
 	return n >= entry.RecordCount
 }
 
-func (v *vaultChunking) loadSegmentViews() ([]SegmentView, func(), error) {
-	entries := v.cfg.FSM.ListCompletedSegments()
-	views := make([]SegmentView, 0, len(entries))
-	closers := make([]func(), 0, len(entries))
-	for _, entry := range entries {
-		if len(views) >= maxSegmentViewsPerPlan {
-			break
+func (v *vaultChunking) openOrderedIndex(path string) (*OrderedIndex, error) {
+	if v.cfg.IndexOpener != nil {
+		return v.cfg.IndexOpener(path)
+	}
+	return BuildOrderedIndex(path)
+}
+
+func (v *vaultChunking) closeSegmentIndexCache() {
+	v.planMu.Lock()
+	defer v.planMu.Unlock()
+	for id, idx := range v.segmentIndexCache {
+		if idx != nil {
+			_ = idx.Close()
 		}
+		delete(v.segmentIndexCache, id)
+	}
+}
+
+// loadSegmentViews returns SegmentViews for every non-exhausted registry
+// segment. Indexes are cached on the vaultChunking instance between planner
+// steps so planOnce opens each active segment at most once until it is
+// released or fully consumed.
+func (v *vaultChunking) loadSegmentViews() ([]SegmentView, error) {
+	entries := v.cfg.FSM.ListCompletedSegments()
+	active := make(map[glid.GLID]vaultctlfsm.CompletedSegmentEntry, len(entries))
+	for _, entry := range entries {
 		if segmentExhaustedForPlanning(v.cfg.FSM, entry) {
 			continue
 		}
-		path, ok := v.cfg.Locate.SegmentPath(entry.SegmentID)
+		active[entry.SegmentID] = entry
+	}
+	for id, idx := range v.segmentIndexCache {
+		if _, ok := active[id]; !ok {
+			if idx != nil {
+				_ = idx.Close()
+			}
+			delete(v.segmentIndexCache, id)
+		}
+	}
+
+	views := make([]SegmentView, 0, len(active))
+	for _, entry := range entries {
+		entry, ok := active[entry.SegmentID]
 		if !ok {
 			continue
 		}
-		idx, err := BuildOrderedIndex(path)
-		if err != nil {
-			continue
+		idx := v.segmentIndexCache[entry.SegmentID]
+		if idx == nil {
+			path, ok := v.cfg.Locate.SegmentPath(entry.SegmentID)
+			if !ok {
+				continue
+			}
+			var err error
+			idx, err = v.openOrderedIndex(path)
+			if err != nil {
+				continue
+			}
+			v.segmentIndexCache[entry.SegmentID] = idx
 		}
-		closers = append(closers, func(i *OrderedIndex) func() {
-			return func() { _ = i.Close() }
-		}(idx))
 		views = append(views, SegmentView{
 			ID:            entry.SegmentID,
 			FirstIngestTS: entry.FirstIngestTS,
@@ -186,11 +218,7 @@ func (v *vaultChunking) loadSegmentViews() ([]SegmentView, func(), error) {
 			Index:         idx,
 		})
 	}
-	return views, func() {
-		for _, closeFn := range closers {
-			closeFn()
-		}
-	}, nil
+	return views, nil
 }
 
 func plannerStateFromFSM(fsm *vaultctlfsm.FSM, open *vaultctlfsm.OpenChunkManifest) (ManifestSnapshot, map[glid.GLID]uint32) {

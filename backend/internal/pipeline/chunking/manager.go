@@ -55,6 +55,9 @@ type VaultConfig struct {
 	// local queries — the FSM onSeal callback already ran and found no
 	// file on disk. Optional.
 	OnBuilt func(chunk.ChunkID)
+	// IndexOpener opens a completed segment for planner indexing. Defaults
+	// to BuildOrderedIndex when nil (tests may inject a counting wrapper).
+	IndexOpener func(path string) (*OrderedIndex, error)
 }
 
 type vaultChunking struct {
@@ -62,7 +65,11 @@ type vaultChunking struct {
 
 	mu        sync.Mutex
 	planMu    sync.Mutex
-	doneBuild buildKey
+	// segmentIndexCache holds open EventID indexes for active registry
+	// segments between planner steps. loadSegmentViews reuses entries
+	// instead of re-opening every segment on each planOnce.
+	segmentIndexCache map[glid.GLID]*OrderedIndex
+	doneBuild         buildKey
 	// unsubPublish removes this vault's publish-callback subscription on the
 	// shared FSM fan-out.
 	unsubPublish func()
@@ -102,7 +109,11 @@ func newVaultChunking(cfg VaultConfig) (*vaultChunking, error) {
 	if cfg.IsLeader == nil {
 		cfg.IsLeader = func() bool { return false }
 	}
-	return &vaultChunking{cfg: cfg, wake: notify.NewSignal()}, nil
+	return &vaultChunking{
+		cfg:               cfg,
+		wake:              notify.NewSignal(),
+		segmentIndexCache: make(map[glid.GLID]*OrderedIndex),
+	}, nil
 }
 
 // Config configures a ChunkingManager.
@@ -189,6 +200,7 @@ func (m *Manager) UnregisterVault(vaultID glid.GLID) {
 		if v.stopWorker != nil {
 			v.stopWorker()
 		}
+		v.closeSegmentIndexCache()
 	}
 }
 
