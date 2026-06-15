@@ -73,9 +73,9 @@ just kubernetes-redeploy    # roll pods to current gastrolog:test
 **CLI setup** (from repo root, against NodePort):
 
 ```bash
-just backend build
+cd backend && go build -o ../gastrolog ./cmd/gastrolog/
 export GASTROLOG_ADDR=http://localhost:30564
-./build/gastrolog login    # interactive; or use token from login output
+./gastrolog login    # interactive; or use token from login output
 ```
 
 **Core commands for V2 parity:**
