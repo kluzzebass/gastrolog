@@ -459,3 +459,149 @@ func TestOrchPipeline_IngesterReassignmentKeepsFlowing(t *testing.T) {
 	entries := h.sealedPipelineChunks(v, h.nodeIDs[0])
 	h.waitGLCBsOnHomes(v, []int{0, 1, 2}, entries)
 }
+
+// pipelinePlannerHealth summarizes vault-ctl FSM pipeline state on the leader
+// for soak assertions (gastrolog-1cedo).
+type pipelinePlannerHealth struct {
+	RegistrySegments int
+	RegistryRecords  int64
+	PendingRecords   int64 // registry records not yet fully consumed by planner
+	OpenRecords      int64
+	OpenRefs         int
+	SealedChunks     int
+	SealedRecords    int64
+}
+
+func pipelinePlannerHealthFromFSM(sub *vaultctlfsm.FSM) pipelinePlannerHealth {
+	var h pipelinePlannerHealth
+	if sub == nil {
+		return h
+	}
+	for _, entry := range sub.ListCompletedSegments() {
+		h.RegistrySegments++
+		h.RegistryRecords += int64(entry.RecordCount)
+		if next, ok := sub.ResumeRecordNumber(entry.SegmentID); ok {
+			if next >= entry.RecordCount {
+				continue
+			}
+			h.PendingRecords += int64(entry.RecordCount) - int64(next)
+		} else {
+			h.PendingRecords += int64(entry.RecordCount)
+		}
+	}
+	if open := sub.OpenChunk(); open != nil {
+		h.OpenRecords = int64(open.TotalRecords)
+		h.OpenRefs = len(open.Refs)
+	}
+	for _, e := range sub.List() {
+		if e.State == chunk.ChunkStateSealed {
+			h.SealedChunks++
+			h.SealedRecords += e.RecordCount
+		}
+	}
+	return h
+}
+
+// TestOrchPipeline_SustainedIngestManifestKeepsPace runs steady synthetic
+// ingest through the full pipeline and asserts the vault leader's planner
+// keeps the open manifest near rotation policy instead of letting millions
+// of registry records stall behind a tiny manifest (gastrolog-1cedo /
+// regression for gastrolog-3bn3q).
+func TestOrchPipeline_SustainedIngestManifestKeepsPace(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multi-node pipeline soak test")
+	}
+
+	const (
+		warmupDuration         = 3 * time.Second
+		soakDuration           = 20 * time.Second
+		sampleInterval         = 250 * time.Millisecond
+		maxPendingRegistryFrac = 98 // percent: nearly all records stuck with no sealing
+		minRegistryForRatio    = int64(200)
+		minSealedChunksGain    = 2
+		minSealedRecordsGain   = int64(2 * pipelineChunkMaxRecords)
+	)
+
+	h := newOrchRelHarness(t, 4,
+		withExtraVault([]int{0, 1, 2}),
+		withMatchAllRoute(1),
+		withPipelineCluster(pipelineTestClosePolicy, pipelineChunkMaxRecords),
+	)
+	v := h.vaults[1]
+	leaderNode := h.nodeIDs[0]
+
+	ingID := glid.New()
+	desired := []orchestrator.IngesterDesired{{
+		ID:   ingID,
+		Name: "soak-chatter",
+		Type: "chatterbox",
+		Build: func() (orchestrator.Ingester, error) {
+			return chatterbox.NewIngester(ingID, map[string]string{
+				"minInterval": "1ms",
+				"maxInterval": "5ms",
+			}, slog.New(slog.DiscardHandler))
+		},
+	}}
+
+	ingestNode := h.nodeIDs[3]
+	if err := h.nodes[ingestNode].orch.ReconcileIngesters(desired); err != nil {
+		t.Fatalf("start ingester on %s: %v", h.nodes[ingestNode].label, err)
+	}
+	t.Cleanup(func() {
+		_ = h.nodes[ingestNode].orch.ReconcileIngesters(nil)
+	})
+
+	initial := pipelinePlannerHealthFromFSM(h.vaultCtlSubFSM(v, leaderNode))
+	initialSealedChunks := initial.SealedChunks
+	initialSealedRecords := initial.SealedRecords
+
+	maxPending := initial.PendingRecords
+	enforceAfter := time.Now().Add(warmupDuration)
+	deadline := time.Now().Add(warmupDuration + soakDuration)
+
+	for time.Now().Before(deadline) {
+		health := pipelinePlannerHealthFromFSM(h.vaultCtlSubFSM(v, leaderNode))
+		if health.PendingRecords > maxPending {
+			maxPending = health.PendingRecords
+		}
+		// Live failure mode: registry grows but sealing stalls with ~all records
+		// still pending (millions of orphans, ~1 sealed chunk). Healthy soak
+		// keeps sealing while pending/registry stays well below 100%.
+		if time.Now().After(enforceAfter) &&
+			health.RegistryRecords >= minRegistryForRatio &&
+			health.SealedChunks < initialSealedChunks+minSealedChunksGain {
+			pendingPct := health.PendingRecords * 100 / health.RegistryRecords
+			if pendingPct >= maxPendingRegistryFrac {
+				h.dumpPipelineState(v)
+				t.Fatalf("vault %s: %d%% of registry records pending (%d/%d) while sealed chunks stalled at %d; "+
+					"open_records=%d open_refs=%d",
+					v.label, pendingPct, health.PendingRecords, health.RegistryRecords, health.SealedChunks,
+					health.OpenRecords, health.OpenRefs)
+			}
+		}
+		time.Sleep(sampleInterval)
+	}
+
+	gotSealed := h.waitSealedRecordsAtLeast(v, leaderNode, initialSealedRecords+minSealedRecordsGain)
+	final := pipelinePlannerHealthFromFSM(h.vaultCtlSubFSM(v, leaderNode))
+	if gain := final.SealedChunks - initialSealedChunks; gain < minSealedChunksGain {
+		h.dumpPipelineState(v)
+		t.Fatalf("vault %s: sealed chunks gained %d in %s, want >= %d (initial=%d final=%d sealed_records=%d)",
+			v.label, gain, warmupDuration+soakDuration, minSealedChunksGain, initialSealedChunks, final.SealedChunks, gotSealed)
+	}
+	if gain := gotSealed - initialSealedRecords; gain < minSealedRecordsGain {
+		h.dumpPipelineState(v)
+		t.Fatalf("vault %s: sealed records gained %d in %s, want >= %d (initial=%d final=%d)",
+			v.label, gain, warmupDuration+soakDuration, minSealedRecordsGain, initialSealedRecords, gotSealed)
+	}
+
+	// Every sealed chunk should materialize on all homes.
+	entries := h.sealedPipelineChunks(v, leaderNode)
+	h.waitGLCBsOnHomes(v, []int{0, 1, 2}, entries)
+
+	t.Logf("vault %s soak ok: max_pending=%d sealed_chunks %d→%d sealed_records %d→%d registry_segments=%d registry_records=%d",
+		v.label, maxPending,
+		initialSealedChunks, final.SealedChunks,
+		initialSealedRecords, gotSealed,
+		final.RegistrySegments, final.RegistryRecords)
+}
