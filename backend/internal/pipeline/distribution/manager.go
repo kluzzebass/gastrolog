@@ -3,6 +3,7 @@ package distribution
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"maps"
 	"os"
 	"sync"
@@ -68,38 +69,58 @@ func newVaultDist(root string, cfg VaultConfig) (*vaultDist, error) {
 	}, nil
 }
 
-// prepare stages a completed segment for publishing: builds the metadata,
-// promotes the file to head/ when this node holds the vault locally, and
-// registers the (possibly moved) path for pull serving. Idempotent: an
-// already-prepared segment (e.g. seen by both the completed channel and the
-// directory rescan) rebuilds metadata from the registered path without
-// repeating the head/ rename.
-func (v *vaultDist) prepare(seg segmentation.CompletedSegment) (Metadata, error) {
+// prepare stages a completed segment for vault-ctl publish: builds metadata and
+// registers the on-disk path for pull serving. Local holders keep the file in
+// completed/ until publish succeeds (see finalizeAfterPublish).
+func (v *vaultDist) prepare(seg segmentation.CompletedSegment) (Metadata, string, error) {
 	v.mu.RLock()
 	registered, known := v.segments[seg.Meta.ID]
 	v.mu.RUnlock()
 	if known {
 		seg.Path = registered
-		return MetadataFrom(seg)
-	}
-
-	meta, err := MetadataFrom(seg)
-	if err != nil {
-		return Metadata{}, err
+		meta, err := metadataForPublish(seg)
+		return meta, registered, err
 	}
 
 	path := seg.Path
-	if v.localHolder() {
-		path, err = PromoteToHead(path, v.root)
-		if err != nil {
-			return Metadata{}, err
-		}
+	meta, err := metadataForPublish(seg)
+	if err != nil {
+		return Metadata{}, "", err
 	}
 
 	v.mu.Lock()
 	v.segments[seg.Meta.ID] = path
 	v.mu.Unlock()
-	return meta, nil
+	return meta, path, nil
+}
+
+// finalizeAfterPublish moves a locally-held segment into head/ after vault-ctl
+// has committed the registry entry.
+func (v *vaultDist) finalizeAfterPublish(segID glid.GLID, path string) error {
+	if !v.localHolder() {
+		return nil
+	}
+	dest, err := PromoteToHead(path, v.root)
+	if err != nil {
+		return err
+	}
+	v.mu.Lock()
+	v.segments[segID] = dest
+	v.mu.Unlock()
+	return nil
+}
+
+func metadataForPublish(seg segmentation.CompletedSegment) (Metadata, error) {
+	hdr := seg.Header
+	if seg.Path != "" && hdr.RecordCount == 0 && hdr.SegmentChecksum == 0 {
+		sf, err := segment.Open(seg.Path)
+		if err != nil {
+			return Metadata{}, err
+		}
+		hdr = sf.Header()
+		_ = sf.Close()
+	}
+	return metadataFromPath(seg.Path, seg.VaultID, seg.Meta.ID, hdr)
 }
 
 // stranded returns completed segments on disk that this manager has not
@@ -143,11 +164,14 @@ func (v *vaultDist) stranded(vaultID glid.GLID) []segmentation.CompletedSegment 
 }
 
 func (v *vaultDist) publish(ctx context.Context, seg segmentation.CompletedSegment) error {
-	meta, err := v.prepare(seg)
+	meta, path, err := v.prepare(seg)
 	if err != nil {
 		return err
 	}
-	return v.publisher.Publish(ctx, meta)
+	if err := v.publisher.Publish(ctx, meta); err != nil {
+		return err
+	}
+	return v.finalizeAfterPublish(seg.Meta.ID, path)
 }
 
 func (v *vaultDist) servePull(req PullRequest) error {
@@ -164,6 +188,7 @@ func (v *vaultDist) servePull(req PullRequest) error {
 type Config struct {
 	// PullQueueCap bounds incoming pull requests. Defaults to 16.
 	PullQueueCap int
+	Logger       *slog.Logger
 }
 
 // Manager publishes completed segment metadata and serves segment pulls.
@@ -190,6 +215,13 @@ func New(cfg Config) (*Manager, chan<- PullRequest) {
 		vaults: make(map[glid.GLID]*vaultDist),
 		pullIn: pullIn,
 	}, pullIn
+}
+
+func (m *Manager) logger() *slog.Logger {
+	if m.cfg.Logger != nil {
+		return m.cfg.Logger
+	}
+	return slog.Default()
 }
 
 // RegisterVault adds a vault distribution path. Safe before or during Run.
@@ -242,6 +274,8 @@ func (m *Manager) Run(ctx context.Context, completed <-chan segmentation.Complet
 
 type pendingPublish struct {
 	vaultID glid.GLID
+	segID   glid.GLID
+	path    string
 	meta    Metadata
 }
 
@@ -261,8 +295,13 @@ func (m *Manager) runPublishLoop(ctx context.Context, completed <-chan segmentat
 			if !ok {
 				return
 			}
-			if meta, retryable, err := m.onCompleted(ctx, seg); err != nil && retryable {
-				pending = append(pending, pendingPublish{vaultID: seg.VaultID, meta: meta})
+			if meta, path, retryable, err := m.onCompleted(ctx, seg); err != nil && retryable {
+				pending = append(pending, pendingPublish{
+					vaultID: seg.VaultID,
+					segID:   seg.Meta.ID,
+					path:    path,
+					meta:    meta,
+				})
 			}
 		case req, ok := <-m.pullIn:
 			if !ok {
@@ -280,8 +319,7 @@ func (m *Manager) runPublishLoop(ctx context.Context, completed <-chan segmentat
 func (m *Manager) drainPublishRetries(ctx context.Context, pending []pendingPublish) []pendingPublish {
 	remaining := pending[:0]
 	for _, p := range pending {
-		err := m.publishMeta(ctx, p.vaultID, p.meta)
-		if err != nil && !errors.Is(err, ErrUnknownVault) {
+		if err := m.publishMeta(ctx, p.vaultID, p.meta, p.segID, p.path); err != nil && !errors.Is(err, ErrUnknownVault) {
 			remaining = append(remaining, p)
 		}
 	}
@@ -291,33 +329,41 @@ func (m *Manager) drainPublishRetries(ctx context.Context, pending []pendingPubl
 func (m *Manager) rescanStranded(ctx context.Context, pending []pendingPublish) []pendingPublish {
 	for vaultID, v := range m.vaultsSnapshot() {
 		for _, seg := range v.stranded(vaultID) {
-			if meta, retryable, err := m.onCompleted(ctx, seg); err != nil && retryable {
-				pending = append(pending, pendingPublish{vaultID: vaultID, meta: meta})
+			if meta, path, retryable, err := m.onCompleted(ctx, seg); err != nil && retryable {
+				pending = append(pending, pendingPublish{
+					vaultID: vaultID,
+					segID:   seg.Meta.ID,
+					path:    path,
+					meta:    meta,
+				})
 			}
 		}
 	}
 	return pending
 }
 
-// onCompleted prepares and publishes one completed segment. Returns the
-// prepared metadata and retryable=true when the prepare succeeded but the
-// vault-ctl publish failed — the caller queues it for retry. Prepare failures
-// (stat/rename) and unknown vaults are not retryable.
-func (m *Manager) onCompleted(ctx context.Context, seg segmentation.CompletedSegment) (Metadata, bool, error) {
+// onCompleted stages and publishes one completed segment. Returns metadata, the
+// durable path (completed/ until publish succeeds), and retryable=true when
+// staging succeeded but vault-ctl publish failed — the file stays in completed/
+// for local holders until a retry commits the registry entry.
+func (m *Manager) onCompleted(ctx context.Context, seg segmentation.CompletedSegment) (Metadata, string, bool, error) {
 	m.mu.Lock()
 	v, ok := m.vaults[seg.VaultID]
 	m.mu.Unlock()
 	if !ok {
-		return Metadata{}, false, ErrUnknownVault
+		return Metadata{}, "", false, ErrUnknownVault
 	}
-	meta, err := v.prepare(seg)
+	meta, path, err := v.prepare(seg)
 	if err != nil {
-		return Metadata{}, false, err
+		return Metadata{}, "", false, err
 	}
 	if err := v.publisher.Publish(ctx, meta); err != nil {
-		return meta, true, err
+		return meta, path, true, err
 	}
-	return meta, false, nil
+	if err := v.finalizeAfterPublish(seg.Meta.ID, path); err != nil {
+		return meta, path, false, err
+	}
+	return meta, path, false, nil
 }
 
 // vaultsSnapshot copies the vault map for iteration outside m.mu.
@@ -329,16 +375,18 @@ func (m *Manager) vaultsSnapshot() map[glid.GLID]*vaultDist {
 	return out
 }
 
-// publishMeta re-attempts the vault-ctl publish for already-prepared segment
-// metadata. The segment file was promoted/registered by the original prepare.
-func (m *Manager) publishMeta(ctx context.Context, vaultID glid.GLID, meta Metadata) error {
+// publishMeta re-attempts vault-ctl publish and promotes to head/ on success.
+func (m *Manager) publishMeta(ctx context.Context, vaultID glid.GLID, meta Metadata, segID glid.GLID, path string) error {
 	m.mu.Lock()
 	v, ok := m.vaults[vaultID]
 	m.mu.Unlock()
 	if !ok {
 		return ErrUnknownVault
 	}
-	return v.publisher.Publish(ctx, meta)
+	if err := v.publisher.Publish(ctx, meta); err != nil {
+		return err
+	}
+	return v.finalizeAfterPublish(segID, path)
 }
 
 func (m *Manager) onPull(req PullRequest) {

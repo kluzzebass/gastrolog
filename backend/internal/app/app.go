@@ -137,6 +137,10 @@ type RunConfig struct {
 	EnvironmentLabel string
 	EnvironmentColor string
 
+	// SegmentHotPathFsync controls segmentation group-commit fsync. When false,
+	// the pipeline supervisor sets SegmentDisableFsync (load testing only).
+	SegmentHotPathFsync bool
+
 	// SlogCapture receives copies of slog records for the "self" ingester.
 	// Created by main and shared with the CaptureHandler. Nil disables capture.
 	SlogCapture <-chan logging.CapturedRecord
@@ -294,7 +298,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		},
 		// digestion enrichers: extract log level and parse source
 		// timestamps from raw bodies when the ingester didn't supply them.
-		Digesters: []digestion.Digester{digestlevel.New(), digesttimestamp.New()},
+		Digesters:             []digestion.Digester{digestlevel.New(), digesttimestamp.New()},
+		SegmentDisableFsync:   !cfg.SegmentHotPathFsync,
 	})
 	if err != nil {
 		return fmt.Errorf("create orchestrator: %w", err)
@@ -815,15 +820,12 @@ func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cf
 		// vault configs or a bootstrapped server-settings JWT secret,
 		// this is a restart — use the local state directly. Otherwise
 		// fall through to the fresh-join return.
-		if cfg.ConfigType == "raft" {
+		if cfg.ConfigType == "raft" && isRestartOfVoter(ctx, cfg, cfgStore) {
 			localCfg, _ := cfgStore.Load(ctx)
-			ss, _ := cfgStore.LoadServerSettings(ctx)
-			if localCfg != nil && (len(localCfg.Config.Vaults) > 0 || ss.Auth.JWTSecret != "") {
-				logger.Info("restart of existing voter detected; using local FSM config",
-					"vaults", len(localCfg.Config.Vaults),
-					"ingesters", len(localCfg.Config.Ingesters))
-				return localCfg, true, nil
-			}
+			logger.Info("restart of existing voter detected; using local FSM config",
+				"vaults", len(localCfg.Config.Vaults),
+				"ingesters", len(localCfg.Config.Ingesters))
+			return localCfg, true, nil
 		}
 		logger.Info("joining cluster, config will replicate from leader")
 		return nil, false, nil
@@ -837,8 +839,21 @@ func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cf
 		// after either a Barrier on the leader or a few AppendEntries rounds
 		// on a follower. Without this wait, the orchestrator reads stale
 		// state and creates vault-ctl Raft groups with incomplete member lists.
+		//
+		// cluster.sh run restarts nodes without --join-addr; a returning voter
+		// still has a snapshot-restored FSM and must take the same restart
+		// shortcut as the JoinAddr path (gastrolog-1gh5s) instead of blocking
+		// on WaitForFSMCatchup — under load the stability window may not
+		// complete within 10s while vault-ctl snapshots stream.
 		if err := waitForQuorum(ctx, cfgStore, logger); err != nil {
 			return nil, false, err
+		}
+		if isRestartOfVoter(ctx, cfg, cfgStore) {
+			localCfg, _ := cfgStore.Load(ctx)
+			logger.Info("restart of existing voter detected; using local FSM config",
+				"vaults", len(localCfg.Config.Vaults),
+				"ingesters", len(localCfg.Config.Ingesters))
+			return localCfg, true, nil
 		}
 		if err := waitForFSMCatchup(ctx, cfgStore, 10*time.Second, logger); err != nil {
 			return nil, false, err

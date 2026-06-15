@@ -121,6 +121,7 @@ func main() {
 
 				EnvironmentLabel: mustString(cmd, "environment-label"),
 				EnvironmentColor: mustString(cmd, "environment-color"),
+				SegmentHotPathFsync: resolveSegmentHotPathFsync(cmd),
 
 				SlogCapture:        slogCaptureCh,
 				SlogCaptureHandler: captureHandler,
@@ -162,6 +163,7 @@ func main() {
 	// Both are display-only metadata; empty label hides the banner entirely.
 	serverCmd.Flags().String("environment-label", "", "label rendered in the UI header banner (e.g. \"Kubernetes\", \"Development\"); empty hides the banner")
 	serverCmd.Flags().String("environment-color", "", "CSS color for the UI header banner (e.g. \"red\", \"#c4302b\"); empty uses the palette default")
+	serverCmd.Flags().Bool("segment-hot-path-fsync", true, "fsync segmentation group-commit flushes (default true); set false for load testing — also GLOG_SEGMENT_HOT_PATH_FSYNC")
 
 	versionCmd := &cobra.Command{
 		Use:   "version",
@@ -210,6 +212,28 @@ func mustString(cmd *cobra.Command, name string) string {
 func mustBool(cmd *cobra.Command, name string) bool {
 	v, _ := cmd.Flags().GetBool(name)
 	return v
+}
+
+// resolveSegmentHotPathFsync returns whether segmentation group-commit flushes
+// should fsync. The CLI flag wins when explicitly set; otherwise
+// GLOG_SEGMENT_HOT_PATH_FSYNC is read. Default true (durable).
+func resolveSegmentHotPathFsync(cmd *cobra.Command) bool {
+	if cmd.Flags().Changed("segment-hot-path-fsync") {
+		return mustBool(cmd, "segment-hot-path-fsync")
+	}
+	return envBoolDefaultTrue("GLOG_SEGMENT_HOT_PATH_FSYNC")
+}
+
+func envBoolDefaultTrue(key string) bool {
+	v := os.Getenv(key)
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", "true", "1", "yes", "y", "on":
+		return true
+	case "false", "0", "no", "n", "off":
+		return false
+	default:
+		return true
+	}
 }
 
 // getFlagFromArgs scans os.Args for "--<name>=<value>" or "--<name>

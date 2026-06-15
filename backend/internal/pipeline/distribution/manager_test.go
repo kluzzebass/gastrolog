@@ -185,6 +185,30 @@ func TestLocalHolderPromotesToHead(t *testing.T) {
 	}
 }
 
+func TestLocalHolderStaysInCompletedOnPublishFailure(t *testing.T) {
+	t.Parallel()
+	vaultID := glid.New()
+	root := t.TempDir()
+	mgr, _ := distribution.New(distribution.Config{})
+	if err := mgr.RegisterVault(vaultID, root, distribution.VaultConfig{
+		Publisher:   errPublisher{err: errors.New("no leader")},
+		LocalHolder: func() bool { return true },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	seg := writeCompletedSegment(t, root, vaultID, "held-back")
+	if err := mgr.PublishCompleted(context.Background(), seg); err == nil {
+		t.Fatal("expected publish error")
+	}
+	if _, err := os.Stat(seg.Path); err != nil {
+		t.Fatalf("completed/ file should remain: %v", err)
+	}
+	headPath := paths.HeadSegment(root, seg.Meta.ID)
+	if _, err := os.Stat(headPath); !os.IsNotExist(err) {
+		t.Fatal("head/ must be empty until publish succeeds")
+	}
+}
+
 func TestServePullStreamsBytes(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()
@@ -369,10 +393,9 @@ func (p errPublisher) Publish(context.Context, distribution.Metadata) error { re
 
 func TestPublishCompletedKeepsSegmentOnPublisherError(t *testing.T) {
 	// A failed vault-ctl publish is a retryable transient (election,
-	// transfer window): the segment file and its pull registration must
-	// survive so the Run loop's retry can re-announce the metadata without
-	// re-preparing. Rolling the registration back (the old behavior) would
-	// strand the segment on disk forever.
+	// transfer window): the segment file stays in completed/ (local holders
+	// must not promote until publish succeeds) and remains registered for
+	// pull/retry.
 	t.Parallel()
 	vaultID := glid.New()
 	root := t.TempDir()

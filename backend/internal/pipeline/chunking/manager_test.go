@@ -285,6 +285,120 @@ func TestRecordingApplierSealChunkProto(t *testing.T) {
 	}
 }
 
+func TestManagerBuildOnceAnnouncesSealAfterLeadershipGain(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	segID := glid.New()
+	vaultID := glid.New()
+	chunkID := chunk.NewChunkID()
+	home := t.TempDir()
+	writeHeadSegment(t, home, segID, vaultID, []recordForSeg{{0, base, "one"}})
+
+	fsm := vaultctlfsm.New()
+	openedAt := base
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
+		SegmentID:         segID,
+		FirstRecordNumber: 0,
+		LastRecordNumber:  0,
+		SliceBytes:        1024,
+		RefAddedAt:        openedAt,
+	}))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, base.Add(time.Minute)))
+
+	var isLeader atomic.Bool
+	applier := &flakyFSMApplier{fsm: fsm}
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot: home,
+		ChunkRoot: filepath.Join(home, "chunks"),
+		FSM:       fsm,
+		Locate:    chunking.HeadSegmentLocator{Root: home},
+		Applier:   applier,
+		IsLeader:  isLeader.Load,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.BuildOnce(t.Context(), vaultID); err != nil {
+		t.Fatalf("follower BuildOnce: %v", err)
+	}
+	if fsm.SealedManifest() == nil {
+		t.Fatal("sealed manifest must remain until the leader announces SealChunk")
+	}
+	isLeader.Store(true)
+	if err := mgr.BuildOnce(t.Context(), vaultID); err != nil {
+		t.Fatalf("leader BuildOnce: %v", err)
+	}
+	if fsm.SealedManifest() != nil {
+		t.Fatal("sealed manifest must clear after leadership gain")
+	}
+}
+
+func TestManagerBuildOnceRetriesSealApplyAfterFailure(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	segID := glid.New()
+	vaultID := glid.New()
+	chunkID := chunk.NewChunkID()
+	home := t.TempDir()
+	writeHeadSegment(t, home, segID, vaultID, []recordForSeg{{0, base, "one"}})
+
+	fsm := vaultctlfsm.New()
+	openedAt := base
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
+		SegmentID:         segID,
+		FirstRecordNumber: 0,
+		LastRecordNumber:  0,
+		SliceBytes:        1024,
+		RefAddedAt:        openedAt,
+	}))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, base.Add(time.Minute)))
+
+	applier := &flakyFSMApplier{fsm: fsm, fail: 1}
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot: home,
+		ChunkRoot: filepath.Join(home, "chunks"),
+		FSM:       fsm,
+		Locate:    chunking.HeadSegmentLocator{Root: home},
+		Applier:   applier,
+		IsLeader:  func() bool { return true },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.BuildOnce(t.Context(), vaultID); err == nil {
+		t.Fatal("expected first SealChunk apply to fail")
+	}
+	if fsm.SealedManifest() == nil {
+		t.Fatal("sealed manifest must remain until SealChunk applies")
+	}
+	if err := mgr.BuildOnce(t.Context(), vaultID); err != nil {
+		t.Fatalf("second BuildOnce: %v", err)
+	}
+	if fsm.SealedManifest() != nil {
+		t.Fatal("sealed manifest must clear after successful SealChunk retry")
+	}
+}
+
+type flakyFSMApplier struct {
+	fsm  *vaultctlfsm.FSM
+	fail int
+}
+
+func (a *flakyFSMApplier) Apply(data []byte) error {
+	if a.fail > 0 {
+		a.fail--
+		return errors.New("transient raft apply failure")
+	}
+	if result := a.fsm.Apply(&hraft.Log{Data: data}); result != nil {
+		if err, ok := result.(error); ok {
+			return err
+		}
+	}
+	return nil
+}
+
 func TestManagerUnregisterVault(t *testing.T) {
 	t.Parallel()
 	vaultID := glid.New()

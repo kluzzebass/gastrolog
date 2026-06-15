@@ -290,6 +290,10 @@ type Orchestrator struct {
 	// runs on the vault ctl Raft leader inside its leader epoch.
 	vaultCtlLeaders *vaultCtlLeaderManager
 
+	// ctlRestorePending coalesces deferred after-vault-ctl-restore passes
+	// (see scheduleAfterVaultCtlRestore). Keyed by vault ID.
+	ctlRestorePending sync.Map
+
 	// cachedReplicationReady mirrors liveReplicationReady, updated by the
 	// readiness refresher goroutine (~500 ms cadence). LocalVaultsReplicationReady
 	// reads this atomic so the /readyz HTTP handler stays responsive even
@@ -582,6 +586,11 @@ type Config struct {
 	// completes a segment, so records would stay in working/ forever and
 	// never reach a sealed GLCB (gastrolog-18f9r, Rubicon E3).
 	SegmentClosePolicy segmentation.ClosePolicy
+
+	// SegmentDisableFsync skips fsync on segmentation group-commit flushes
+	// (dev/load testing only). Segment close still syncs before rename.
+	// Wired from --segment-hot-path-fsync / GLOG_SEGMENT_HOT_PATH_FSYNC.
+	SegmentDisableFsync bool
 }
 
 // Production segment close defaults: a segment completes once it reaches
@@ -680,7 +689,11 @@ func New(cfg Config) (*Orchestrator, error) {
 		PressureGate:         o.pipelineGate,
 		IngestionOutCapacity: cfg.IngestChannelSize,
 		SegmentClosePolicy:   cfg.SegmentClosePolicy,
+		SegmentDisableFsync:  cfg.SegmentDisableFsync,
 	})
+	if cfg.SegmentDisableFsync {
+		logger.Warn("segmentation hot-path fsync disabled — group-commit flushes are not durable until segment close; dev/load testing only")
+	}
 
 	// Seed the cached readiness flag so /readyz reports true while the
 	// vault map is still empty (matches the legacy live-check semantics)

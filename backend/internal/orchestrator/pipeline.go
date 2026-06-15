@@ -105,12 +105,12 @@ type pipelineVaultReg struct {
 // to the registry via the leader-forwarding applier; otherwise it falls back to
 // the noop publisher (single-node/memory mode with no group).
 //
-// When this node is also a placement member (Home) for the vault with a
-// vault-ctl handle, it registers the chunking side (Rubicon D): the leader
-// plans the open-chunk manifest via the applier, and every home builds the
-// sealed GLCB at seal. LocalHolder is set so segments this node originates
-// rename straight to head/ without a self-pull, giving chunking local segments
-// to build from.
+	// When this node is also a placement member (Home) for the vault with a
+	// vault-ctl handle, it registers the chunking side (Rubicon D): the leader
+	// plans the open-chunk manifest via the applier, and every home builds the
+	// sealed GLCB at seal. LocalHolder marks this node as a home holder so
+	// segments promote to head/ only after vault-ctl publishes the registry
+	// entry, giving chunking local segments to build from.
 //
 // Peer collection (Rubicon C) is registered additionally only when a segment
 // puller is available (cluster mode): roll the registry, pull segments this
@@ -359,12 +359,17 @@ func (o *Orchestrator) originRoot(vaultID glid.GLID) string {
 // See gastrolog-2kysn (Rubicon E1).
 func (o *Orchestrator) pipelineVaultChunkRoot(vaultID glid.GLID) (string, bool) {
 	o.mu.Lock()
-	defer o.mu.Unlock()
-	reg, ok := o.pipelineVaults[vaultID]
-	if !ok || !reg.home || o.segmentsDir == "" {
+	segmentsDir := o.segmentsDir
+	reg, registered := o.pipelineVaults[vaultID]
+	o.mu.Unlock()
+	if segmentsDir == "" {
 		return "", false
 	}
-	return filepath.Join(o.segmentsDir, vaultID.String(), "chunks"), true
+	root := filepath.Join(segmentsDir, vaultID.String(), "chunks")
+	if registered && reg.home {
+		return root, true
+	}
+	return "", false
 }
 
 // noopPublisher is the distribution publisher used while no vault-ctl handle is

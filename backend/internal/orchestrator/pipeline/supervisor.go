@@ -140,8 +140,10 @@ type VaultSpec struct {
 }
 
 type vaultRoles struct {
-	origin bool
-	home   bool
+	origin   bool
+	home     bool
+	collects bool
+	chunking bool
 }
 
 // Supervisor owns the pipeline queue graph and the seven phase managers, and
@@ -213,6 +215,7 @@ func New(cfg Config) *Supervisor {
 	})
 	dist, pullIn := distribution.New(distribution.Config{
 		PullQueueCap: cfg.DistributionPullQueueCap,
+		Logger:       cfg.Logger,
 	})
 	col := collection.New(collection.Config{})
 	chunk := chunking.New(chunking.Config{})
@@ -474,7 +477,12 @@ func (s *Supervisor) RegisterVault(spec VaultSpec) error {
 	// and/or chunks (Locate). Chunking is independent of collection: a single-node
 	// home chunks from its own head/ without a peer collector (Rubicon D).
 	homeSide := spec.Home || spec.Locate != nil
-	roles := vaultRoles{origin: spec.Origin, home: homeSide}
+	roles := vaultRoles{
+		origin:   spec.Origin,
+		home:     homeSide,
+		collects: spec.Home,
+		chunking: spec.Locate != nil,
+	}
 
 	if spec.Origin {
 		if err := s.registerOrigin(spec); err != nil {

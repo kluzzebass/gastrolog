@@ -1021,7 +1021,18 @@ func (o *Orchestrator) destroyVaultControlPlaneRaftGroup(vaultID glid.GLID) {
 // Idempotent; safe on every reconfigure sweep.
 func (o *Orchestrator) ensureVaultControlPlaneRaftGroup(vaultID glid.GLID, clusterNodes []system.NodeConfig, factories Factories) {
 	gid := raftgroup.VaultControlPlaneGroupID(vaultID)
-	_, _ = o.tryStartClusterRaftGroup(gid, vaultraft.NewFSM(), clusterNodes, factories)
+	if factories.GroupManager == nil {
+		return
+	}
+	if g := factories.GroupManager.GetGroup(gid); g != nil {
+		if vfsm, ok := g.FSM.(*vaultraft.FSM); ok && vfsm != nil {
+			vfsm.SetOnAfterRestore(func() { o.afterVaultCtlRestore(vaultID) })
+		}
+		return
+	}
+	vfsm := vaultraft.NewFSM()
+	vfsm.SetOnAfterRestore(func() { o.afterVaultCtlRestore(vaultID) })
+	_, _ = o.tryStartClusterRaftGroup(gid, vfsm, clusterNodes, factories)
 }
 
 // tryStartClusterRaftGroup creates or returns an existing cluster-wide Raft group
@@ -1291,6 +1302,43 @@ func setVaultRaftAnnouncer(cm chunk.ChunkManager, applier vaultctlfsm.Applier, p
 		return
 	}
 	setter.SetAnnouncer(vaultctlfsm.NewAnnouncer(applier, phase, logger))
+}
+
+// rewireVaultInstanceAfterCtlRestore rebinds the vault instance's reconciler
+// and Raft-backed metadata callbacks to the live vault-ctl sub-FSM after a
+// group-level snapshot Restore. vaultraft.FSM.Restore replaces the entire
+// vaults map with freshly allocated sub-FSMs; any reconciler or callback
+// closure still pointing at the pre-restore object reads a frozen manifest
+// (SweepMissingReplicas sees missing=0 forever, overlay/tombstone checks
+// go stale). Returns the live sub-FSM, or nil when nothing to rewire.
+func (o *Orchestrator) rewireVaultInstanceAfterCtlRestore(vaultID glid.GLID, t *VaultInstance) *vaultctlfsm.FSM {
+	if o.groupMgr == nil || t == nil {
+		return nil
+	}
+	g := o.groupMgr.GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
+	if g == nil {
+		return nil
+	}
+	vfsm, ok := g.FSM.(*vaultraft.FSM)
+	if !ok || vfsm == nil {
+		return nil
+	}
+	live := vfsm.VaultFSM(vaultID)
+	if live == nil {
+		return nil
+	}
+	vaultGID := raftgroup.VaultControlPlaneGroupID(vaultID)
+	var applier vaultctlfsm.Applier
+	if o.peerConns != nil {
+		applier = cluster.NewVaultCtlChunkApplyForwarder(g.Raft, vaultGID, vaultID, o.peerConns, cluster.ReplicationTimeout)
+	} else {
+		applier = &vaultCtlApplier{o: o, vaultID: vaultID}
+	}
+	t.applyRaftCallbacks(buildVaultRaftCallbacks(g.Raft, live, applier))
+	if t.Reconciler != nil {
+		t.Reconciler.Wire(live)
+	}
+	return live
 }
 
 // clearVaultFSMChunkCallbacks clears OnDelete/OnUpload for a vault's FSM slice

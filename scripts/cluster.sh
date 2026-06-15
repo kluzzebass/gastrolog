@@ -18,6 +18,7 @@
 #   --base-port PORT   Base HTTP port for node 1 (default: GLOG_BASE_PORT or 4564)
 #   --pprof            Enable pprof on each node (ports 6060, 6061, ...)
 #   GLOG_NO_AUTH       Disable auth when truthy (default: true). Set false/0 to require login.
+#   GLOG_SEGMENT_HOT_PATH_FSYNC  Segmentation group-commit fsync (default: true; set false/0 for load testing)
 
 set -euo pipefail
 
@@ -44,6 +45,7 @@ PPROF="${GLOG_PPROF:-false}"
 # with a K8s/staging instance. Single token only (no spaces).
 ENV_LABEL="${GLOG_ENV_LABEL:-Development}"
 ENV_COLOR="${GLOG_ENV_COLOR:-limegreen}"
+SEGMENT_HOT_PATH_FSYNC="${GLOG_SEGMENT_HOT_PATH_FSYNC:-true}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -76,7 +78,7 @@ no_auth_enabled() {
   [[ "$NO_AUTH" == true || "$NO_AUTH" == "1" || "$NO_AUTH" == "yes" || "$NO_AUTH" == "y" || "$NO_AUTH" == "on" ]]
 }
 
-# env_flags emits optional server flags from cluster env (banner, auth, etc.).
+# env_flags emits optional server flags from cluster env (banner, auth, segment fsync, etc.).
 # Empty/unset values produce no output for that flag.
 env_flags() {
   local flags=""
@@ -84,6 +86,9 @@ env_flags() {
   [[ -n "$ENV_COLOR" ]] && flags="${flags} --environment-color $ENV_COLOR"
   if no_auth_enabled; then
     flags="${flags} --no-auth"
+  fi
+  if [[ "$SEGMENT_HOT_PATH_FSYNC" == false || "$SEGMENT_HOT_PATH_FSYNC" == "0" || "$SEGMENT_HOT_PATH_FSYNC" == "no" ]]; then
+    flags="${flags} --segment-hot-path-fsync=false"
   fi
   echo "$flags"
 }

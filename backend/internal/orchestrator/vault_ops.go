@@ -529,25 +529,26 @@ func replaceForwardedChunk(cm chunk.ChunkManager, chunkID chunk.ChunkID, isActiv
 // pass without needing per-vault leadership checks. See gastrolog-51gme
 // step 10.
 //
-// afterVaultCtlRestore fires (off the FSM apply pump, on the
-// vaultraft.FSM's after-restore hook goroutine) once the vault-ctl
-// FSM Restore for vaultID has completed. Walks every VaultInstance in
-// the vault and runs the receipt protocol's catchup pass: process any
-// pendingDeletes obligations this node owes, and project FSM-sealed
-// state onto the local chunk Manager.
-//
-// Without this hook, the receipt protocol's catchup mechanism is dead
-// code — pendingDeletes silently leak across snapshot install
-// boundaries and FSM-sealed-but-local-active divergences (e.g.
-// gastrolog-uccg6) don't reconcile. Wired from
-// ensureVaultCtlMetadata via vfsm.SetOnAfterRestore. See
-// gastrolog-51gme.
-//
-// Snapshot the vault's instance under the read lock and run reconciliation
-// without holding the lock — ReconcileFromSnapshot may take the chunk
-// manager mutex and propose Raft applies, neither of which should happen
-// with o.mu held.
+// afterVaultCtlRestore is wired from vaultraft.FSM.SetOnAfterRestore and
+// must return immediately — GroupManager.CreateGroup holds groupMgr.mu
+// across NewRaft→fsm.Restore, and the deferred worker calls
+// groupMgr.GetGroup. scheduleAfterVaultCtlRestore runs rewire +
+// ReconcileFromSnapshot asynchronously (gastrolog-4tadr).
 func (o *Orchestrator) afterVaultCtlRestore(vaultID glid.GLID) {
+	o.scheduleAfterVaultCtlRestore(vaultID)
+}
+
+func (o *Orchestrator) scheduleAfterVaultCtlRestore(vaultID glid.GLID) {
+	if _, loaded := o.ctlRestorePending.LoadOrStore(vaultID, struct{}{}); loaded {
+		return
+	}
+	o.auxWg.Go(func() {
+		defer o.ctlRestorePending.Delete(vaultID)
+		o.runAfterVaultCtlRestore(vaultID)
+	})
+}
+
+func (o *Orchestrator) runAfterVaultCtlRestore(vaultID glid.GLID) {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
 	var t *VaultInstance
@@ -556,8 +557,12 @@ func (o *Orchestrator) afterVaultCtlRestore(vaultID glid.GLID) {
 	}
 	o.mu.RUnlock()
 
-	if t != nil && t.Reconciler != nil && t.Reconciler.fsm != nil {
-		t.Reconciler.ReconcileFromSnapshot(t.Reconciler.fsm)
+	// Snapshot install swaps in new vaultctlfsm sub-FSM objects — rebind
+	// reconciler + instance callbacks before reconciling. See
+	// rewireVaultInstanceAfterCtlRestore.
+	liveFSM := o.rewireVaultInstanceAfterCtlRestore(vaultID, t)
+	if t != nil && t.Reconciler != nil && liveFSM != nil {
+		t.Reconciler.ReconcileFromSnapshot(liveFSM)
 	}
 	o.vaultOpsLogger.Info("vault-ctl after-restore reconcile complete",
 		"vault", vaultID, "has_instance", t != nil)

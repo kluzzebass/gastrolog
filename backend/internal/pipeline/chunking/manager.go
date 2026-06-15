@@ -3,6 +3,7 @@ package chunking
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -216,6 +217,18 @@ func (m *Manager) RotateCron(ctx context.Context, vaultID glid.GLID) error {
 	return v.planOnce(ctx, true)
 }
 
+// NotifyVault wakes the per-vault plan/build worker. Used when vault-ctl
+// leadership aligns on the placement leader so catch-up runs after startup
+// elections, not only on the first worker tick.
+func (m *Manager) NotifyVault(vaultID glid.GLID) {
+	m.mu.Lock()
+	v, ok := m.vaults[vaultID]
+	m.mu.Unlock()
+	if ok {
+		v.wake.Notify()
+	}
+}
+
 // BuildOnce runs one build pass for a vault (for tests).
 func (m *Manager) BuildOnce(ctx context.Context, vaultID glid.GLID) error {
 	m.mu.Lock()
@@ -269,8 +282,12 @@ func (m *Manager) startWorkerLocked(v *vaultChunking) {
 		// Capture the wake channel BEFORE each pass so a signal arriving
 		// mid-pass re-fires the loop instead of being lost.
 		ch := v.wake.C()
-		_ = v.planCatchUp(ctx)
-		_ = v.buildOnce(ctx)
+		if err := v.planCatchUp(ctx); err != nil && ctx.Err() == nil {
+			slog.Warn("chunking plan catch-up failed", "vault", v.cfg.VaultID, "error", err)
+		}
+		if err := v.buildOnce(ctx); err != nil && ctx.Err() == nil {
+			slog.Warn("chunking build failed", "vault", v.cfg.VaultID, "error", err)
+		}
 		tick := time.NewTicker(replanInterval)
 		defer tick.Stop()
 		for {
@@ -281,8 +298,12 @@ func (m *Manager) startWorkerLocked(v *vaultChunking) {
 			case <-tick.C:
 			}
 			ch = v.wake.C()
-			_ = v.planCatchUp(ctx)
-			_ = v.buildOnce(ctx)
+			if err := v.planCatchUp(ctx); err != nil && ctx.Err() == nil {
+				slog.Warn("chunking plan catch-up failed", "vault", v.cfg.VaultID, "error", err)
+			}
+			if err := v.buildOnce(ctx); err != nil && ctx.Err() == nil {
+				slog.Warn("chunking build failed", "vault", v.cfg.VaultID, "error", err)
+			}
 		}
 	})
 }
@@ -295,27 +316,34 @@ func (v *vaultChunking) buildOnce(ctx context.Context) error {
 
 	key := buildKey{chunkID: pending.ChunkID, sealedAt: pending.SealedAt}
 	v.mu.Lock()
-	if v.doneBuild == key {
+	alreadyBuilt := v.doneBuild == key
+	v.mu.Unlock()
+
+	var result BuildResult
+	var err error
+	switch {
+	case !alreadyBuilt:
+		result, err = v.build(ctx, pending)
+		if err != nil {
+			return err
+		}
+		v.mu.Lock()
+		v.doneBuild = key
 		v.mu.Unlock()
+	case v.cfg.IsLeader() && v.cfg.Applier != nil:
+		// Local GLCB already exists (often from a pre-election follower pass).
+		// Rebuild is idempotent and supplies SealChunk metadata for the leader
+		// to clear the replicated sealed manifest.
+		result, err = v.build(ctx, pending)
+		if err != nil {
+			return err
+		}
+	default:
 		return nil
-	}
-	v.mu.Unlock()
-
-	result, err := v.build(ctx, pending)
-	if err != nil {
-		return err
-	}
-
-	v.mu.Lock()
-	v.doneBuild = key
-	v.mu.Unlock()
-
-	if v.cfg.OnBuilt != nil {
-		v.cfg.OnBuilt(pending.ChunkID)
 	}
 
 	if v.cfg.IsLeader() && v.cfg.Applier != nil {
-		return v.cfg.Applier.Apply(vaultctlfsm.MarshalSealChunk(
+		if err := v.cfg.Applier.Apply(vaultctlfsm.MarshalSealChunk(
 			pending.ChunkID,
 			result.WriteEnd,
 			int64(result.RecordCount),
@@ -324,7 +352,13 @@ func (v *vaultChunking) buildOnce(ctx context.Context) error {
 			result.IngestEnd,
 			result.SourceEnd,
 			result.IngestTSMonotonic,
-		))
+		)); err != nil {
+			return err
+		}
+	}
+
+	if v.cfg.OnBuilt != nil {
+		v.cfg.OnBuilt(pending.ChunkID)
 	}
 	return nil
 }

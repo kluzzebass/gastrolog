@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gastrolog/internal/glid"
+	"gastrolog/internal/pipeline/segment"
 	"gastrolog/internal/pipeline/segmentation"
 )
 
@@ -27,17 +28,21 @@ type Publisher interface {
 
 // MetadataFrom builds publish metadata from a completed segment on disk.
 func MetadataFrom(seg segmentation.CompletedSegment) (Metadata, error) {
-	info, err := os.Stat(seg.Path)
+	return metadataFromPath(seg.Path, seg.VaultID, seg.Meta.ID, seg.Header)
+}
+
+func metadataFromPath(path string, vaultID, segID glid.GLID, hdr segment.Header) (Metadata, error) {
+	info, err := os.Stat(path)
 	if err != nil {
 		return Metadata{}, err
 	}
 	return Metadata{
-		SegmentID:     seg.Meta.ID,
-		VaultID:       seg.VaultID,
-		RecordCount:   seg.Header.RecordCount,
+		SegmentID:     segID,
+		VaultID:       vaultID,
+		RecordCount:   hdr.RecordCount,
 		ByteSize:      uint64(info.Size()), //nolint:gosec // G115: segment file size bounded
-		FirstIngestTS: seg.Header.FirstIngestTS,
-		LastIngestTS:  seg.Header.LastIngestTS,
-		Checksum:      seg.Header.SegmentChecksum,
+		FirstIngestTS: hdr.FirstIngestTS,
+		LastIngestTS:  hdr.LastIngestTS,
+		Checksum:      hdr.SegmentChecksum,
 	}, nil
 }

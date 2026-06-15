@@ -8,6 +8,11 @@ import (
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
+// maxSegmentViewsPerPlan bounds how many on-disk segment indices loadSegmentViews
+// opens per planner step. After a large backlog, indexing every registered
+// segment on each planOnce is O(n²) and blocks the worker for minutes.
+const maxSegmentViewsPerPlan = 256
+
 // planOnce runs one leader planner step. cronDue=true forces a cron rotation
 // trigger for a non-empty open manifest (scheduler-driven sealing); the planner
 // no-ops for non-leaders regardless.
@@ -85,6 +90,9 @@ func (v *vaultChunking) planOnce(ctx context.Context, cronDue bool) error {
 // manifest is pending. Callbacks from Apply may advance the chain; the loop
 // covers catch-up when Run starts with work already in the FSM.
 func (v *vaultChunking) planCatchUp(ctx context.Context) error {
+	if !v.cfg.IsLeader() || v.cfg.Applier == nil {
+		return nil
+	}
 	for range 32 {
 		if v.cfg.FSM.SealedManifest() != nil {
 			return nil
@@ -109,7 +117,15 @@ func (v *vaultChunking) planCatchUp(ctx context.Context) error {
 			newRefs = len(open.Refs)
 		}
 		if !hadOpen && open == nil {
-			return nil
+			views, closeViews, err := v.loadSegmentViews()
+			if err != nil {
+				return err
+			}
+			closeViews()
+			if len(views) == 0 {
+				return nil
+			}
+			continue
 		}
 		if !hadOpen && open != nil {
 			continue
@@ -146,6 +162,9 @@ func (v *vaultChunking) loadSegmentViews() ([]SegmentView, func(), error) {
 	views := make([]SegmentView, 0, len(entries))
 	closers := make([]func(), 0, len(entries))
 	for _, entry := range entries {
+		if len(views) >= maxSegmentViewsPerPlan {
+			break
+		}
 		if segmentExhaustedForPlanning(v.cfg.FSM, entry) {
 			continue
 		}
