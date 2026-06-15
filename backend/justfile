@@ -5,10 +5,16 @@ _default:
   @just --list
 
 version := `git describe --tags --always --dirty 2>/dev/null || echo dev`
+build_dir := "../build"
 
-# Builds the gastrolog binary.
+# Builds the gastrolog binary (build/gastrolog at repo root).
 build:
-  go build -ldflags "-X main.version={{version}}" -o gastrolog ./cmd/gastrolog
+  mkdir -p {{build_dir}}
+  go build -ldflags "-X main.version={{version}}" -o {{build_dir}}/gastrolog ./cmd/gastrolog
+
+# Remove build/ output.
+clean:
+  rm -rf {{build_dir}}
 
 # Runs the gastrolog backend with raft config (default).
 run-raft:
@@ -42,7 +48,8 @@ query +args:
 
 # Cross-compiles for a specific OS/arch. Usage: just build-cross linux amd64
 build-cross os arch:
-  CGO_ENABLED=0 GOOS={{os}} GOARCH={{arch}} go build -ldflags "-X main.version={{version}}" -o gastrolog-{{os}}-{{arch}} ./cmd/gastrolog
+  mkdir -p {{build_dir}}
+  CGO_ENABLED=0 GOOS={{os}} GOARCH={{arch}} go build -ldflags "-X main.version={{version}}" -o {{build_dir}}/gastrolog-{{os}}-{{arch}} ./cmd/gastrolog
 
 # Builds release binaries for all supported platforms.
 build-all:

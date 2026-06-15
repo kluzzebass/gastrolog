@@ -10,14 +10,15 @@ that runs on Linux, macOS, and Windows with no system dependencies.
 ```sh
 git clone https://github.com/kluzzebass/gastrolog
 cd gastrolog
-just build           # produces backend/bin/gastrolog
+just build           # produces build/gastrolog
 ```
 
 Or directly with Go:
 
 ```sh
+mkdir -p build
 cd backend
-go build -o gastrolog ./cmd/gastrolog
+go build -o ../build/gastrolog ./cmd/gastrolog
 ```
 
 ### From a release

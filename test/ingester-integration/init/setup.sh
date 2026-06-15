@@ -10,7 +10,7 @@
 #
 # Examples:
 #   ./setup.sh backend/data/node1/gastrolog.sock
-#   ./setup.sh backend/data/node1/gastrolog.sock ./backend/gastrolog
+#   ./setup.sh backend/data/node1/gastrolog.sock ./build/gastrolog
 
 set -eu
 

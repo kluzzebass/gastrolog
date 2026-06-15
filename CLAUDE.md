@@ -19,9 +19,20 @@ Agents lose this in fresh context; **keep it in this file** so it survives compa
 - Applies to **docs, config, and generated output** as much as code: unrelated moves, renames, and restores are especially harmful because they look intentional in history.
 - **Exception: pre-existing issues that block your progress.** If a hook, lint rule, or compile error on unrelated code in the same file stops you from landing your change, fix it — do not punt. Mention the unrelated fix in the commit body so it is not hidden. The rule against drive-by edits is about avoiding noise in history, not about leaving yourself stuck.
 
+### Building the backend binary
+
+**Never** run ad-hoc `go build -o …` to random paths (`backend/`, repo root, `/tmp`, etc.). Local builds go to **`build/gastrolog`** at the repo root only:
+
+- **`just build`** or **`just backend build`** — canonical
+- **`go run ./cmd/gastrolog …`** from `backend/` — when you do not need a binary on disk (cluster dev, CLI against a socket)
+
+To remove artifacts: **`just clean`**. Do not commit binaries; `build/` is gitignored.
+
 ### Issue tracking (dcat)
 
 This project uses **dcat** for issue tracking. Run `dcat prime --opinionated` for instructions, then `dcat list --agent-only` for the issue list. Work on bugs first, high priority first.
+
+**Issue context is live, not memorized.** Before diagnosing, planning, or citing “what’s open” / “what epic owns this” / “what’s done,” run `dcat list --agent-only` and `dcat show` on the issues you are actually working. Do **not** reason from closed, tombstoned, or superseded tracker entries, old audit deliverables, or `docs/**/obsoleted/` design docs — they describe history, not current scope. The active epic, stack branch, and spec path live on the **open** issue you are on; if unsure, ask the user or read the issue text. **Do not embed specific issue IDs in CLAUDE.md or other long-lived agent docs** — they go stale and mislead the next session.
 
 **ALWAYS** run `dcat update --status in_progress $issueId` when starting work.
 

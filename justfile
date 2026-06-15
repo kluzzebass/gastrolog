@@ -33,6 +33,10 @@ build-all:
     just backend embed-frontend
     just backend build-all
 
+# Remove build/ output.
+clean:
+    rm -rf build
+
 # Build Docker image
 docker tag="gastrolog:latest":
     docker build --build-arg VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev) -t {{tag}} .
