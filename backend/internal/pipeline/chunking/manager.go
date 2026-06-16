@@ -342,10 +342,10 @@ func (v *vaultChunking) buildOnce(ctx context.Context) error {
 		v.mu.Lock()
 		v.doneBuild = key
 		v.mu.Unlock()
-	case v.cfg.IsLeader() && v.cfg.Applier != nil:
-		// Local GLCB already exists (often from a pre-election follower pass).
-		// Rebuild is idempotent and supplies SealChunk metadata for the leader
-		// to clear the replicated sealed manifest.
+	case v.cfg.Applier != nil:
+		// Local GLCB already exists (often from a prior pass on this or another
+		// home). Rebuild is idempotent and supplies SealChunk metadata for a
+		// retry when the prior CmdSealChunk commit failed or was not attempted.
 		result, err = v.build(ctx, pending)
 		if err != nil {
 			return err
@@ -354,7 +354,11 @@ func (v *vaultChunking) buildOnce(ctx context.Context) error {
 		return nil
 	}
 
-	if v.cfg.IsLeader() && v.cfg.Applier != nil {
+	// Any home may propose CmdSealChunk after a successful build. Production
+	// Applier forwards to the vault-ctl Raft leader; the leader gate lived only
+	// on this node and left GLCBs on disk without FSM sealed entries when the
+	// Raft leader was not the home that finished building (gastrolog-4trvb).
+	if v.cfg.Applier != nil {
 		if err := v.cfg.Applier.Apply(vaultctlfsm.MarshalSealChunk(
 			pending.ChunkID,
 			result.WriteEnd,

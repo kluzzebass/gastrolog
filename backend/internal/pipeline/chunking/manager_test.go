@@ -188,7 +188,7 @@ func TestManagerBuildsOnSealEvent(t *testing.T) {
 	}
 }
 
-func TestManagerFollowerDoesNotAnnounceSeal(t *testing.T) {
+func TestManagerFollowerHomeProposesSealChunk(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
 	segID := glid.New()
@@ -224,8 +224,15 @@ func TestManagerFollowerDoesNotAnnounceSeal(t *testing.T) {
 	if err := mgr.BuildOnce(t.Context(), vaultID); err != nil {
 		t.Fatalf("BuildOnce: %v", err)
 	}
-	if len(applied) != 0 {
-		t.Fatalf("follower applied %d commands, want 0", len(applied))
+	if len(applied) != 1 {
+		t.Fatalf("follower applied %d commands, want 1 SealChunk", len(applied))
+	}
+	var cmd gastrologv1.VaultCtlCommand
+	if err := proto.Unmarshal(applied[0], &cmd); err != nil {
+		t.Fatal(err)
+	}
+	if cmd.GetSealChunk() == nil {
+		t.Fatal("expected SealChunk command from follower home build")
 	}
 }
 
@@ -285,7 +292,7 @@ func TestRecordingApplierSealChunkProto(t *testing.T) {
 	}
 }
 
-func TestManagerBuildOnceAnnouncesSealAfterLeadershipGain(t *testing.T) {
+func TestManagerBuildOnceFollowerHomeCommitsSealChunk(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
 	segID := glid.New()
@@ -306,31 +313,26 @@ func TestManagerBuildOnceAnnouncesSealAfterLeadershipGain(t *testing.T) {
 	}))
 	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, base.Add(time.Minute)))
 
-	var isLeader atomic.Bool
-	applier := &flakyFSMApplier{fsm: fsm}
 	mgr := chunking.New(chunking.Config{})
 	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
 		VaultRoot: home,
 		ChunkRoot: filepath.Join(home, "chunks"),
 		FSM:       fsm,
 		Locate:    chunking.HeadSegmentLocator{Root: home},
-		Applier:   applier,
-		IsLeader:  isLeader.Load,
+		Applier:   &flakyFSMApplier{fsm: fsm},
+		IsLeader:  func() bool { return false },
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := mgr.BuildOnce(t.Context(), vaultID); err != nil {
 		t.Fatalf("follower BuildOnce: %v", err)
 	}
-	if fsm.SealedManifest() == nil {
-		t.Fatal("sealed manifest must remain until the leader announces SealChunk")
-	}
-	isLeader.Store(true)
-	if err := mgr.BuildOnce(t.Context(), vaultID); err != nil {
-		t.Fatalf("leader BuildOnce: %v", err)
-	}
 	if fsm.SealedManifest() != nil {
-		t.Fatal("sealed manifest must clear after leadership gain")
+		t.Fatal("sealed manifest must clear after any home proposes SealChunk")
+	}
+	entry := fsm.Get(chunkID)
+	if entry == nil || entry.State != chunk.ChunkStateSealed {
+		t.Fatalf("chunk entry = %+v, want sealed", entry)
 	}
 }
 

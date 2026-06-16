@@ -263,11 +263,13 @@ func TestPipelineChunkingByteIdenticalAcrossHomes(t *testing.T) {
 	}
 	chunkID := sealed.ChunkID
 
-	// Two follower homes build from their own copies; followers do not announce
-	// SealChunk, so the sealed manifest stays put for the second build.
+	// Two follower homes build from their own copies. Use no Applier so each
+	// build does not clear the shared sealed manifest before the next home runs.
 	build := func(home string) []byte {
 		mgr := chunking.New(chunking.Config{})
-		if err := mgr.RegisterVault(vaultID, chunkingSpec(home, fsm, func() bool { return false })); err != nil {
+		spec := chunkingSpec(home, fsm, func() bool { return false })
+		spec.Applier = nil
+		if err := mgr.RegisterVault(vaultID, spec); err != nil {
 			t.Fatalf("home %s RegisterVault: %v", home, err)
 		}
 		if err := mgr.BuildOnce(ctx, vaultID); err != nil {

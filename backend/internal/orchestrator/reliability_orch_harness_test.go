@@ -816,8 +816,8 @@ func (h *orchRelHarness) appendOnLeader(rec chunk.Record) error {
 }
 
 // sealOnLeader seals the active chunk on every instance of the vault, on the
-// vault-ctl Raft leader. Sealing on a non-leader would skip the CmdSealChunk
-// announcement.
+// vault-ctl Raft leader. Legacy chunk-manager sealing still requires the leader;
+// pipeline chunking proposes CmdSealChunk from any home via the applier forwarder.
 func (h *orchRelHarness) sealOnLeader() {
 	h.t.Helper()
 	leader := h.waitForVaultCtlLeader()
