@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"text/tabwriter"
+	"unicode/utf8"
 
 	"gastrolog/internal/glid"
 
@@ -91,7 +92,13 @@ func walkJSON(v any, key string) {
 			}
 		}
 	case []any:
-		for _, item := range val {
+		for i, item := range val {
+			if s, ok := item.(string); ok && isIDField(key) {
+				if converted, ok := tryConvertGLID(s); ok {
+					val[i] = converted
+					continue
+				}
+			}
 			walkJSON(item, key)
 		}
 	}
@@ -99,10 +106,44 @@ func walkJSON(v any, key string) {
 
 func isIDField(name string) bool {
 	lower := strings.ToLower(name)
-	return lower == "id" || strings.HasSuffix(lower, "_id") ||
-		strings.HasSuffix(lower, "Id") || // camelCase from protojson
-		lower == "sender_id" || lower == "senderid" ||
-		lower == "node_id" || lower == "nodeid"
+	if lower == "id" {
+		return true
+	}
+	if strings.HasSuffix(lower, "_id") || strings.HasSuffix(lower, "_ids") {
+		return true
+	}
+	// protojson camelCase: storageId, nodeIds, vaultId, ...
+	return strings.HasSuffix(name, "Id") || strings.HasSuffix(name, "Ids")
+}
+
+// formatIDBytes renders a proto bytes ID field for CLI table/text output.
+func formatIDBytes(b []byte) string {
+	if len(b) == 0 {
+		return ""
+	}
+	if s, ok := formatIDBytesRaw(b); ok {
+		return s
+	}
+	if utf8.Valid(b) {
+		return string(b)
+	}
+	return base64.StdEncoding.EncodeToString(b)
+}
+
+func formatIDBytesRaw(b []byte) (string, bool) {
+	switch len(b) {
+	case glid.Size:
+		g := glid.FromBytes(b)
+		if g.IsZero() {
+			return "", false
+		}
+		return g.String(), true
+	case 26:
+		if g, err := glid.Parse(string(b)); err == nil && !g.IsZero() {
+			return g.String(), true
+		}
+	}
+	return "", false
 }
 
 // tryConvertGLID attempts to decode a base64 string as a GLID.
@@ -123,22 +164,10 @@ func tryConvertGLID(s string) (string, bool) {
 			return "", false
 		}
 	}
-	switch len(decoded) {
-	case glid.Size: // 16-byte raw GLID
-		g := glid.FromBytes(decoded)
-		if g.IsZero() {
-			return "", false
-		}
-		return g.String(), true
-	case 26: // base32hex string stored as []byte(string)
-		str := string(decoded)
-		if g, err := glid.Parse(str); err == nil && !g.IsZero() {
-			return g.String(), true
-		}
-		return "", false
-	default:
-		return "", false
+	if out, ok := formatIDBytesRaw(decoded); ok {
+		return out, true
 	}
+	return "", false
 }
 
 // table writes rows using tabwriter. header is the first row.

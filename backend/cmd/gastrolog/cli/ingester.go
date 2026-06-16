@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"gastrolog/internal/glid"
 	"strconv"
+	"strings"
 
 	"connectrpc.com/connect"
 	"github.com/spf13/cobra"
@@ -49,7 +50,7 @@ func newIngesterListCmd() *cobra.Command {
 				rows = append(rows, []string{
 					glid.FromBytes(ig.Id).String(), ig.Name, ig.Type,
 					strconv.FormatBool(ig.Enabled),
-					string(ig.NodeId),
+					formatIngesterNodes(ig),
 				})
 			}
 			p.table([]string{"ID", "NAME", "TYPE", "ENABLED", "NODE"}, rows)
@@ -88,7 +89,7 @@ func newIngesterGetCmd() *cobra.Command {
 						{"Name", ig.Name},
 						{"Type", ig.Type},
 						{"Enabled", strconv.FormatBool(ig.Enabled)},
-						{"Node", string(ig.NodeId)},
+						{"Node", formatIngesterNodes(ig)},
 						{"Singleton", strconv.FormatBool(ig.Singleton)},
 					}
 					for k, v := range ig.Params {
@@ -276,4 +277,20 @@ func newIngesterTestCmd() *cobra.Command {
 	cmd.Flags().StringSlice("param", nil, "key=value parameter (repeatable)")
 	_ = cmd.MarkFlagRequired("type")
 	return cmd
+}
+
+func formatIngesterNodes(ig *v1.IngesterConfig) string {
+	if ig.GetAllNodes() {
+		return "all"
+	}
+	if ids := ig.GetNodeIds(); len(ids) > 0 {
+		names := make([]string, 0, len(ids))
+		for _, id := range ids {
+			if s := formatIDBytes(id); s != "" {
+				names = append(names, s)
+			}
+		}
+		return strings.Join(names, ", ")
+	}
+	return formatIDBytes(ig.GetNodeId())
 }

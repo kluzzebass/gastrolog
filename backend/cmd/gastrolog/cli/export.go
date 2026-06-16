@@ -2,9 +2,7 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
 
 	"connectrpc.com/connect"
 	"github.com/spf13/cobra"
@@ -239,9 +237,7 @@ func newExportCmd() *cobra.Command {
 				SetupWizardDismissed: setupDismissed,
 			}
 
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			return enc.Encode(doc)
+			return newPrinter("json").json(doc)
 		},
 	}
 }

@@ -227,7 +227,7 @@ func newNodeListStorageCmd() *cobra.Command {
 				if filterNodeID != "" && string(nsc.NodeId) != filterNodeID {
 					continue
 				}
-				nscNodeStr := string(nsc.NodeId)
+				nscNodeStr := formatIDBytes(nsc.NodeId)
 				nodeName := nodeNames[nscNodeStr]
 				if nodeName == "" && len(nscNodeStr) > 16 {
 					nodeName = nscNodeStr[:7] + "…" + nscNodeStr[len(nscNodeStr)-7:]

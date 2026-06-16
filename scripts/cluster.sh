@@ -17,6 +17,11 @@
 #   --auth             Enable JWT auth (default: --no-auth for local dev clusters)
 #   --base-port PORT   Base HTTP port for node 1 (default: GLOG_BASE_PORT or 4564)
 #   --pprof            Enable pprof on each node (ports 6060, 6061, ...)
+#   --mem-limit LIMIT  Set GOMEMLIMIT per node (e.g. 512MiB). Makes the Go GC
+#                      and scavenger work harder to keep RSS near the live heap
+#                      instead of retaining a past peak's HeapSys. Default: off
+#                      (GLOG_MEM_LIMIT). Use a value well above steady-state
+#                      live heap (~150MB/node) to avoid GC thrashing.
 #   GLOG_NO_AUTH       Disable auth when truthy (default: true). Set false/0 to require login.
 #   GLOG_SEGMENT_HOT_PATH_FSYNC  Segmentation group-commit fsync (default: true; set false/0 for load testing)
 
@@ -40,6 +45,7 @@ ADMIN_PASS="${GLOG_ADMIN_PASS:-admin123}"
 NO_AUTH="${GLOG_NO_AUTH:-true}"
 BASE_PORT="${GLOG_BASE_PORT:-4564}"
 PPROF="${GLOG_PPROF:-false}"
+MEM_LIMIT="${GLOG_MEM_LIMIT:-}"
 # Environment banner (gastrolog-4vr0l). Tags every node in this cluster as
 # the local dev deployment in the UI header so operators don't confuse it
 # with a K8s/staging instance. Single token only (no spaces).
@@ -56,6 +62,7 @@ while [[ $# -gt 0 ]]; do
     --auth)       NO_AUTH=false; shift ;;
     --base-port)  BASE_PORT="$2"; shift 2 ;;
     --pprof)      PPROF=true; shift ;;
+    --mem-limit)  MEM_LIMIT="$2"; shift 2 ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
 done
@@ -78,6 +85,14 @@ no_auth_enabled() {
   [[ "$NO_AUTH" == true || "$NO_AUTH" == "1" || "$NO_AUTH" == "yes" || "$NO_AUTH" == "y" || "$NO_AUTH" == "on" ]]
 }
 
+# glog_env_prefix returns an optional GOMEMLIMIT= prefix for node commands.
+# go run propagates the environment to the gastrolog child it compiles and execs.
+glog_env_prefix() {
+  if [[ -n "$MEM_LIMIT" ]]; then
+    printf 'GOMEMLIMIT=%s ' "$MEM_LIMIT"
+  fi
+}
+
 # env_flags emits optional server flags from cluster env (banner, auth, segment fsync, etc.).
 # Empty/unset values produce no output for that flag.
 env_flags() {
@@ -97,6 +112,8 @@ env_flags() {
 build_imux_cmd() {
   local names=""
   local cmds=()
+  local mem_prefix
+  mem_prefix="$(glog_env_prefix)"
   for i in $(seq 1 "$NODES"); do
     if [[ -n "$names" ]]; then names="${names},"; fi
     names="${names}node${i}"
@@ -104,7 +121,7 @@ build_imux_cmd() {
     if [[ "$PPROF" == true ]]; then
       extra=" --pprof localhost:$((6059 + i))"
     fi
-    cmds+=("$GLOG server --home $(node_dir "$i") --listen :$(http_port "$i") --cluster-addr :$(cluster_port "$i")${extra}$(env_flags)")
+    cmds+=("${mem_prefix}$GLOG server --home $(node_dir "$i") --listen :$(http_port "$i") --cluster-addr :$(cluster_port "$i")${extra}$(env_flags)")
   done
   # TUI: plain `imux` (flags + commands). `imux run` is non-interactive batch mode.
   echo "imux --name ${names} --tee ${DATA_DIR}/cluster.log $(printf ' "%s"' "${cmds[@]}")"
@@ -169,7 +186,7 @@ enroll_nodes() {
   if [[ "$NODES" -eq 1 ]]; then
     # Single node: just start, wait for socket, done.
     echo ">>> Starting single node..."
-    $GLOG server \
+    $(glog_env_prefix)$GLOG server \
       --name "node-1" \
       --home "$(node_dir 1)" \
       --listen ":$(http_port 1)" \
@@ -186,7 +203,7 @@ enroll_nodes() {
   # Start node 1 and extract join token. tee duplicates the output so we
   # can both log it to init-1.log and scan for the token line.
   echo ">>> Starting node 1..."
-  $GLOG server \
+  $(glog_env_prefix)$GLOG server \
     --name "node-1" \
     --home "$(node_dir 1)" \
     --listen ":$(http_port 1)" \
@@ -218,7 +235,7 @@ enroll_nodes() {
   # Start and enroll nodes 2..N.
   for i in $(seq 2 "$NODES"); do
     echo ">>> Enrolling node ${i}..."
-    $GLOG server \
+    $(glog_env_prefix)$GLOG server \
       --name "node-${i}" \
       --home "$(node_dir "$i")" \
       --listen ":$(http_port "$i")" \

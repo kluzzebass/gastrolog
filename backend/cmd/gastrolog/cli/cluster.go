@@ -57,8 +57,8 @@ func newClusterStatusCmd() *cobra.Command {
 
 			pairs := [][2]string{
 				{"Cluster Enabled", strconv.FormatBool(msg.ClusterEnabled)},
-				{"Local Node", string(msg.LocalNodeId)},
-				{"Leader", string(msg.LeaderId)},
+				{"Local Node", formatIDBytes(msg.LocalNodeId)},
+				{"Leader", formatIDBytes(msg.LeaderId)},
 				{"Leader Address", msg.LeaderAddress},
 			}
 			if msg.ClusterAddress != "" {
