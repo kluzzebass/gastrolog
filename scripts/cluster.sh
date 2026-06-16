@@ -85,11 +85,29 @@ no_auth_enabled() {
   [[ "$NO_AUTH" == true || "$NO_AUTH" == "1" || "$NO_AUTH" == "yes" || "$NO_AUTH" == "y" || "$NO_AUTH" == "on" ]]
 }
 
-# glog_env_prefix returns an optional GOMEMLIMIT= prefix for node commands.
-# go run propagates the environment to the gastrolog child it compiles and execs.
-glog_env_prefix() {
+# run_glog_server starts gastrolog server with optional GOMEMLIMIT from MEM_LIMIT.
+# Do not use command-substitution env prefixes like $(glog_env_prefix)$GLOG —
+# bash treats GOMEMLIMIT=… as a command name, not an assignment.
+run_glog_server() {
   if [[ -n "$MEM_LIMIT" ]]; then
-    printf 'GOMEMLIMIT=%s ' "$MEM_LIMIT"
+    GOMEMLIMIT="$MEM_LIMIT" go run ./cmd/gastrolog server "$@"
+  else
+    go run ./cmd/gastrolog server "$@"
+  fi
+}
+
+# glog_server_cmd returns the imux command string for one node (env prefix via env(1)).
+glog_server_cmd() {
+  local i="$1"
+  local extra=""
+  if [[ "$PPROF" == true ]]; then
+    extra=" --pprof localhost:$((6059 + i))"
+  fi
+  local cmd="go run ./cmd/gastrolog server --home $(node_dir "$i") --listen :$(http_port "$i") --cluster-addr :$(cluster_port "$i")${extra}$(env_flags)"
+  if [[ -n "$MEM_LIMIT" ]]; then
+    printf 'env GOMEMLIMIT=%s %s' "$MEM_LIMIT" "$cmd"
+  else
+    printf '%s' "$cmd"
   fi
 }
 
@@ -112,16 +130,10 @@ env_flags() {
 build_imux_cmd() {
   local names=""
   local cmds=()
-  local mem_prefix
-  mem_prefix="$(glog_env_prefix)"
   for i in $(seq 1 "$NODES"); do
     if [[ -n "$names" ]]; then names="${names},"; fi
     names="${names}node${i}"
-    local extra=""
-    if [[ "$PPROF" == true ]]; then
-      extra=" --pprof localhost:$((6059 + i))"
-    fi
-    cmds+=("${mem_prefix}$GLOG server --home $(node_dir "$i") --listen :$(http_port "$i") --cluster-addr :$(cluster_port "$i")${extra}$(env_flags)")
+    cmds+=("$(glog_server_cmd "$i")")
   done
   # TUI: plain `imux` (flags + commands). `imux run` is non-interactive batch mode.
   echo "imux --name ${names} --tee ${DATA_DIR}/cluster.log $(printf ' "%s"' "${cmds[@]}")"
@@ -186,7 +198,7 @@ enroll_nodes() {
   if [[ "$NODES" -eq 1 ]]; then
     # Single node: just start, wait for socket, done.
     echo ">>> Starting single node..."
-    $(glog_env_prefix)$GLOG server \
+    run_glog_server \
       --name "node-1" \
       --home "$(node_dir 1)" \
       --listen ":$(http_port 1)" \
@@ -203,7 +215,7 @@ enroll_nodes() {
   # Start node 1 and extract join token. tee duplicates the output so we
   # can both log it to init-1.log and scan for the token line.
   echo ">>> Starting node 1..."
-  $(glog_env_prefix)$GLOG server \
+  run_glog_server \
     --name "node-1" \
     --home "$(node_dir 1)" \
     --listen ":$(http_port 1)" \
@@ -235,7 +247,7 @@ enroll_nodes() {
   # Start and enroll nodes 2..N.
   for i in $(seq 2 "$NODES"); do
     echo ">>> Enrolling node ${i}..."
-    $(glog_env_prefix)$GLOG server \
+    run_glog_server \
       --name "node-${i}" \
       --home "$(node_dir "$i")" \
       --listen ":$(http_port "$i")" \
