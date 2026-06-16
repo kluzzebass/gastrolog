@@ -2,6 +2,7 @@ package cloud_test
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"gastrolog/internal/chunk/cloud"
@@ -11,7 +12,7 @@ func TestOpenWriterRoundTrip(t *testing.T) {
 	t.Parallel()
 	chunkID, vaultID, records := testRecords()
 
-	path := t.TempDir() + "/data.glcb"
+	path := filepath.Join(t.TempDir(), "data.glcb")
 	f, err := os.Create(path)
 	if err != nil {
 		t.Fatal(err)

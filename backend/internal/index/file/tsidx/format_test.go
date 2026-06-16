@@ -89,7 +89,10 @@ func writeTestGLCB(t *testing.T, dir string, chunkID chunk.ChunkID) {
 	enc, _ := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
 	defer enc.Close()
 
-	w := cloud.NewWriter(chunkID, glid.New())
+	w, err := cloud.NewWriter(chunkID, glid.New(), chunkDir)
+	if err != nil {
+		t.Fatalf("NewWriter: %v", err)
+	}
 	now := time.Unix(0, 0)
 	for i, ts := range []time.Duration{100, 200, 300} {
 		rec := chunk.Record{

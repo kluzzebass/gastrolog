@@ -287,6 +287,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		SystemLoader:      cfgStore,
 		LocalNodeID:       nodeID,
 		Alerts:            alertCollector,
+		SegmentsDir:       hd.SegmentsDir(),
 		Phase:             shutdownPhase,
 		OnIngesterAlive: func(ingesterID glid.GLID, alive bool) {
 			aliveReconciler.Enqueue(ingesterID, alive)

@@ -40,6 +40,14 @@ func TestVaultDir(t *testing.T) {
 	}
 }
 
+func TestSegmentsDir(t *testing.T) {
+	t.Parallel()
+	d := New("/data/node1")
+	if got := d.SegmentsDir(); got != "/data/node1/segments" {
+		t.Errorf("SegmentsDir = %q, want /data/node1/segments", got)
+	}
+}
+
 func TestEnsureExists(t *testing.T) {
 	t.Parallel()
 	root := filepath.Join(t.TempDir(), "nested", "gastrolog")

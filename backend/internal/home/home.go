@@ -15,6 +15,8 @@
 //	      <vault-ctl-group-id>/        (vault metadata raft snapshots)
 //	  stores/
 //	    <vault-id>/                    (per-vault chunk + index data)
+//	  segments/
+//	    <vault-id>/                    (pipeline segment working + completed areas)
 //	  managed-files/
 //	    <file-id>/                     (managed file entity: lookups, etc.)
 package home
@@ -73,6 +75,12 @@ func (d Dir) Root() string {
 // The on-disk path is "stores/" for backward compatibility with existing data.
 func (d Dir) VaultDir(vaultID string) string {
 	return filepath.Join(d.root, "stores", vaultID)
+}
+
+// SegmentsDir returns the base directory for pipeline segment storage.
+// Each vault's origin root is SegmentsDir/<vault-id>/ (working/, completed/, chunks/).
+func (d Dir) SegmentsDir() string {
+	return filepath.Join(d.root, "segments")
 }
 
 // RaftDir returns the directory for Raft persistent state (log store, snapshots).

@@ -1,7 +1,6 @@
 package chunking_test
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
 	"slices"
@@ -46,8 +45,8 @@ func TestBuildGLCBSingleSegmentRoundTrip(t *testing.T) {
 		Span: chunking.Span{SegmentID: segID, Start: 0, Count: 2},
 	}}
 
-	var buf bytes.Buffer
-	result, err := chunking.BuildGLCB(&buf, chunking.BuildGLCBInput{
+	glcbPath := filepath.Join(t.TempDir(), chunkcloud.BlobFilename)
+	result, err := chunking.BuildGLCBFile(glcbPath, chunking.BuildGLCBInput{
 		ChunkID: chunkID,
 		VaultID: vaultID,
 		Refs:    refs,
@@ -62,10 +61,6 @@ func TestBuildGLCBSingleSegmentRoundTrip(t *testing.T) {
 		t.Fatal("empty blob digest")
 	}
 
-	glcbPath := filepath.Join(t.TempDir(), chunkcloud.BlobFilename)
-	if err := os.WriteFile(glcbPath, buf.Bytes(), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	rd := openGLCB(t, glcbPath)
 
 	for i := range uint32(2) {
@@ -147,19 +142,30 @@ func TestBuildGLCBDeterministic(t *testing.T) {
 	refsBA := slices.Clone(refsAB)
 	slices.Reverse(refsBA)
 
+	workDir := t.TempDir()
 	in := chunking.BuildGLCBInput{
 		ChunkID: chunk.NewChunkID(),
 		VaultID: vaultID,
 		Refs:    refsAB,
 	}
 
-	var bufAB, bufBA bytes.Buffer
-	resAB, err := chunking.BuildGLCB(&bufAB, in)
+	pathAB := filepath.Join(workDir, "ab.glcb")
+	resAB, err := chunking.BuildGLCBFile(pathAB, in)
 	if err != nil {
 		t.Fatal(err)
 	}
+	dataAB, err := os.ReadFile(pathAB)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	in.Refs = refsBA
-	resBA, err := chunking.BuildGLCB(&bufBA, in)
+	pathBA := filepath.Join(workDir, "ba.glcb")
+	resBA, err := chunking.BuildGLCBFile(pathBA, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataBA, err := os.ReadFile(pathBA)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,14 +173,13 @@ func TestBuildGLCBDeterministic(t *testing.T) {
 	if resAB.BlobDigest != resBA.BlobDigest {
 		t.Fatalf("digest AB=%x BA=%x", resAB.BlobDigest, resBA.BlobDigest)
 	}
-	if !bytes.Equal(bufAB.Bytes(), bufBA.Bytes()) {
+	if !slices.Equal(dataAB, dataBA) {
 		t.Fatal("GLCB bytes differ across span ref order")
 	}
 
-	// Rebuild from AB refs — same chunk ID and vault for byte-identical output.
-	var bufAgain bytes.Buffer
 	in.Refs = refsAB
-	resAgain, err := chunking.BuildGLCB(&bufAgain, in)
+	pathAgain := filepath.Join(workDir, "again.glcb")
+	resAgain, err := chunking.BuildGLCBFile(pathAgain, in)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +190,8 @@ func TestBuildGLCBDeterministic(t *testing.T) {
 
 func TestBuildGLCBRejectsEmptyMerge(t *testing.T) {
 	t.Parallel()
-	_, err := chunking.BuildGLCB(&bytes.Buffer{}, chunking.BuildGLCBInput{
+	glcbPath := filepath.Join(t.TempDir(), chunkcloud.BlobFilename)
+	_, err := chunking.BuildGLCBFile(glcbPath, chunking.BuildGLCBInput{
 		ChunkID: chunk.NewChunkID(),
 		VaultID: glid.New(),
 	})

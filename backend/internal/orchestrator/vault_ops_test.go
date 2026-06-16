@@ -19,10 +19,7 @@ func newFacadeSetup(t *testing.T) (*orchestrator.Orchestrator, glid.GLID) {
 		RotationPolicy: chunk.NewRecordCountPolicy(5),
 	})
 	id := glid.New()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(id, s.CM, s.IM, s.QE))
 	return orch, id
 }
@@ -68,11 +65,8 @@ func TestListLocalChunkMetas(t *testing.T) {
 
 func TestListLocalChunkMetas_UnknownVault(t *testing.T) {
 	t.Parallel()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = orch.ListLocalChunkMetas(glid.New())
+	orch := mustNewTestOrch(t, orchestrator.Config{})
+	_, err := orch.ListLocalChunkMetas(glid.New())
 	if !errors.Is(err, orchestrator.ErrVaultNotFound) {
 		t.Fatalf("expected ErrVaultNotFound, got %v", err)
 	}
@@ -133,11 +127,8 @@ func TestSealActive_Empty(t *testing.T) {
 
 func TestSealActive_UnknownVault(t *testing.T) {
 	t.Parallel()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = orch.SealActive(glid.New())
+	orch := mustNewTestOrch(t, orchestrator.Config{})
+	_, err := orch.SealActive(glid.New())
 	if !errors.Is(err, orchestrator.ErrVaultNotFound) {
 		t.Fatalf("expected ErrVaultNotFound, got %v", err)
 	}
@@ -261,11 +252,8 @@ func TestNewAnalyzer(t *testing.T) {
 
 func TestNewAnalyzer_UnknownVault(t *testing.T) {
 	t.Parallel()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = orch.NewAnalyzer(glid.New())
+	orch := mustNewTestOrch(t, orchestrator.Config{})
+	_, err := orch.NewAnalyzer(glid.New())
 	if !errors.Is(err, orchestrator.ErrVaultNotFound) {
 		t.Fatalf("expected ErrVaultNotFound, got %v", err)
 	}

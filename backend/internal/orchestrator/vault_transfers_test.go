@@ -170,18 +170,15 @@ func TestMoveChunkRemoteNoTransferrer(t *testing.T) {
 		},
 	}}
 
-	orch, err := orchestrator.New(orchestrator.Config{
+	orch := mustNewTestOrch(t, orchestrator.Config{
 		SystemLoader: loader,
 		LocalNodeID:  "node-A",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(srcID, srcCM, srcIM, nil))
 
 	chunkID := seedAndSeal(t, orch, srcID, 1)
 
-	err = orch.MoveChunk(context.Background(), chunkID, srcID, dstID)
+	err := orch.MoveChunk(context.Background(), chunkID, srcID, dstID)
 	if err == nil {
 		t.Fatal("expected error when transferrer is nil")
 	}
@@ -198,10 +195,7 @@ func TestMoveChunkLocalImportFallback(t *testing.T) {
 	srcCM := newMemVault(t)
 	dstCM := newMemVault(t)
 
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(srcID, srcCM, nil, nil))
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(dstID, dstCM, nil, nil))
 
@@ -396,13 +390,10 @@ func drainSetup(t *testing.T, recordCount int) (*orchestrator.Orchestrator, glid
 		},
 	}}
 
-	orch, err := orchestrator.New(orchestrator.Config{
+	orch := mustNewTestOrch(t, orchestrator.Config{
 		SystemLoader: loader,
 		LocalNodeID:  "node-A",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	mock := &mockTransferrer{}
 	orch.SetRemoteTransferrer(mock)
@@ -500,13 +491,10 @@ func TestDrainVault_CancelDrain(t *testing.T) {
 		},
 	}}
 
-	orch, err := orchestrator.New(orchestrator.Config{
+	orch := mustNewTestOrch(t, orchestrator.Config{
 		SystemLoader: loader,
 		LocalNodeID:  "node-A",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	// Use a transferrer that blocks until context cancellation.
 	blockTransfer := &mockTransferrer{failErr: context.Canceled}
@@ -628,13 +616,10 @@ func TestDrainVault_NoTransferrer(t *testing.T) {
 		},
 	}}
 
-	orch, err := orchestrator.New(orchestrator.Config{
+	orch := mustNewTestOrch(t, orchestrator.Config{
 		SystemLoader: loader,
 		LocalNodeID:  "node-A",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	// Deliberately do NOT set a RemoteTransferrer.
 

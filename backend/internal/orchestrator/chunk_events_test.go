@@ -29,10 +29,7 @@ func receiveChunkEvent(t *testing.T, ch <-chan notify.Versioned[orchestrator.Chu
 // these being filled to patch their local cache without refetching.
 func TestChunkBusEmitsCreated(t *testing.T) {
 	t.Parallel()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 	bus := orch.ChunkBus()
 	id, ch, _ := bus.Subscribe()
 	defer bus.Unsubscribe(id)
@@ -66,10 +63,7 @@ func TestChunkBusEmitsCreated(t *testing.T) {
 // drops the entry from its projection).
 func TestChunkBusEmitsSealedAndDeleted(t *testing.T) {
 	t.Parallel()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 	bus := orch.ChunkBus()
 	id, ch, _ := bus.Subscribe()
 	defer bus.Unsubscribe(id)
@@ -110,10 +104,7 @@ func TestChunkBusEmitsSealedAndDeleted(t *testing.T) {
 // so the client can just write the carried count directly.
 func TestChunkBusEmitsProgressWithRecordCount(t *testing.T) {
 	t.Parallel()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 	bus := orch.ChunkBus()
 	id, ch, _ := bus.Subscribe()
 	defer bus.Unsubscribe(id)
@@ -143,10 +134,7 @@ func TestChunkBusEmitsProgressWithRecordCount(t *testing.T) {
 // this subscriber and a cold-start resync is required.
 func TestChunkBusMonotonicVersion(t *testing.T) {
 	t.Parallel()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 	bus := orch.ChunkBus()
 	id, ch, _ := bus.Subscribe()
 	defer bus.Unsubscribe(id)

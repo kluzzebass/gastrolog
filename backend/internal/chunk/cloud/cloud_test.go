@@ -1,7 +1,6 @@
 package cloud_test
 
 import (
-	"bytes"
 	"gastrolog/internal/glid"
 	"io"
 	"os"
@@ -79,35 +78,32 @@ func assertRecord(t *testing.T, i int, got, want chunk.Record) {
 	}
 }
 
-// writeBlobToTempFile writes a blob to a temp file and returns it seeked to start.
+// writeBlobToTempFile writes a blob to a temp file in workDir and returns it seeked to start.
 func writeBlobToTempFile(t *testing.T, chunkID chunk.ChunkID, vaultID glid.GLID, records []chunk.Record) *os.File {
 	t.Helper()
 
-	enc, _ := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
-	defer enc.Close()
-	w := cloud.NewWriter(chunkID, vaultID)
+	dir := t.TempDir()
+	w, err := cloud.NewWriter(chunkID, vaultID, dir)
+	if err != nil {
+		t.Fatalf("NewWriter: %v", err)
+	}
 	for _, rec := range records {
 		if err := w.Add(rec); err != nil {
 			t.Fatalf("Add: %v", err)
 		}
 	}
 
-	var buf bytes.Buffer
-	if _, err := w.WriteTo(&buf); err != nil {
-		t.Fatalf("WriteTo: %v", err)
-	}
-	t.Logf("blob size: %d bytes (%d records)", buf.Len(), len(records))
-
-	tmp, err := os.CreateTemp(t.TempDir(), "glcb-test-*")
+	tmp, err := os.CreateTemp(dir, "glcb-test-*")
 	if err != nil {
 		t.Fatalf("create temp: %v", err)
 	}
-	if _, err := io.Copy(tmp, &buf); err != nil {
-		t.Fatalf("write temp: %v", err)
+	if _, err := w.WriteTo(tmp); err != nil {
+		t.Fatalf("WriteTo: %v", err)
 	}
 	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
 		t.Fatalf("seek: %v", err)
 	}
+	t.Logf("blob size on disk in %s", dir)
 	return tmp
 }
 
@@ -116,7 +112,10 @@ func TestRoundTrip(t *testing.T) {
 
 	enc, _ := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
 	defer enc.Close()
-	w := cloud.NewWriter(chunkID, vaultID)
+	w, err := cloud.NewWriter(chunkID, vaultID, t.TempDir())
+	if err != nil {
+		t.Fatalf("NewWriter: %v", err)
+	}
 	for _, rec := range records {
 		if err := w.Add(rec); err != nil {
 			t.Fatalf("Add: %v", err)

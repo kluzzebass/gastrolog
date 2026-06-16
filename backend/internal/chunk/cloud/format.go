@@ -20,8 +20,10 @@
 //	  Record index: recordCount × 12 bytes
 //	  TS indexes, TOC entries, 44-byte footer (magic "GTOC")
 //
-//	Write order during build: records stream to a staging file; finalize
-//	writes the fixed prefix, copies records, then appends variable sections.
+//	Write order during build: record frames accumulate in a work file in the
+//	same directory as the finished GLCB; finalize writes the fixed prefix,
+//	copies records, then appends variable sections. Atomic rename to the final
+//	name therefore never crosses filesystems.
 //
 //	Read protocol: preamble + layout at bytes 0–131, then ReadAt using
 //	offsets from layout; TOC tail supplies TS index locations and digest.

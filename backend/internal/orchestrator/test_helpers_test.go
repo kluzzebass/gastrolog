@@ -97,6 +97,9 @@ func makeRecord(raw string) chunk.Record {
 // detector overhead (168 orchestrators × background cron jobs).
 func newTestOrch(t *testing.T, cfg Config) *Orchestrator {
 	t.Helper()
+	if cfg.SegmentsDir == "" {
+		cfg.SegmentsDir = filepath.Join(t.TempDir(), "segments")
+	}
 	orch, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)

@@ -6,12 +6,12 @@ import (
 	"gastrolog/internal/glid"
 	"log/slog"
 	"maps"
-	"path/filepath"
 	"slices"
 
 	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/cluster"
+	"gastrolog/internal/home"
 	"gastrolog/internal/index"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/system"
@@ -123,7 +123,7 @@ func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) erro
 	// configured. Origin vaults are registered during applyVaults→route reload,
 	// so this must be set first. See originRoot.
 	if o.segmentsDir == "" && factories.HomeDir != "" {
-		o.segmentsDir = filepath.Join(factories.HomeDir, "segments")
+		o.segmentsDir = home.New(factories.HomeDir).SegmentsDir()
 	}
 
 	if err := o.applyVaults(sys, factories); err != nil {

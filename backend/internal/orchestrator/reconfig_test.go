@@ -148,10 +148,7 @@ func TestAddVault(t *testing.T) {
 			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "env=test"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -198,10 +195,7 @@ func TestAddVaultDuplicate(t *testing.T) {
 			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -219,7 +213,7 @@ func TestAddVaultDuplicate(t *testing.T) {
 	}
 
 	// Adding again should fail.
-	err = orch.AddVault(context.Background(), vaultCfg, factories)
+	err := orch.AddVault(context.Background(), vaultCfg, factories)
 	if err == nil {
 		t.Fatal("expected error for duplicate vault")
 	}
@@ -234,10 +228,7 @@ func TestRemoveVaultEmpty(t *testing.T) {
 			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -274,10 +265,7 @@ func TestRemoveVaultNotEmpty(t *testing.T) {
 			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -305,7 +293,7 @@ func TestRemoveVaultNotEmpty(t *testing.T) {
 	}
 
 	// Remove should fail.
-	err = orch.RemoveVault(vaultID)
+	err := orch.RemoveVault(vaultID)
 	if err == nil {
 		t.Fatal("expected error for non-empty vault")
 	}
@@ -314,12 +302,9 @@ func TestRemoveVaultNotEmpty(t *testing.T) {
 func TestRemoveVaultNotFound(t *testing.T) {
 	t.Parallel()
 	loader := &fakeSystemLoader{cfg: &system.Config{}}
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
-	err = orch.RemoveVault(glid.New())
+	err := orch.RemoveVault(glid.New())
 	if err == nil {
 		t.Fatal("expected error for nonexistent vault")
 	}
@@ -334,10 +319,7 @@ func TestForceRemoveVault(t *testing.T) {
 			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -397,12 +379,9 @@ func TestForceRemoveVault(t *testing.T) {
 func TestForceRemoveVaultNotFound(t *testing.T) {
 	t.Parallel()
 	loader := &fakeSystemLoader{cfg: &system.Config{}}
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
-	err = orch.ForceRemoveVault(glid.New())
+	err := orch.ForceRemoveVault(glid.New())
 	if err == nil {
 		t.Fatal("expected error for nonexistent vault")
 	}
@@ -417,10 +396,7 @@ func TestForceRemoveEmptyVault(t *testing.T) {
 			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -449,10 +425,7 @@ func TestForceRemoveEmptyVault(t *testing.T) {
 
 func TestRegisterIngesterReplacesDuplicate(t *testing.T) {
 	t.Parallel()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 
 	ingesterID := glid.New()
 	recv1 := newBlockingIngester()
@@ -469,10 +442,7 @@ func TestRegisterIngesterReplacesDuplicate(t *testing.T) {
 
 func TestUnregisterIngesterNotRunning(t *testing.T) {
 	t.Parallel()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 
 	ingesterID := glid.New()
 	recv := newBlockingIngester()
@@ -492,10 +462,7 @@ func TestUnregisterIngesterWhileRunning(t *testing.T) {
 	})
 
 	defaultID := glid.New()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, cm, nil, nil))
 
 	ingesterID := glid.New()
@@ -528,10 +495,7 @@ func TestUnregisterIngesterWhileRunning(t *testing.T) {
 
 func TestUnregisterIngesterUnknownIsNoOp(t *testing.T) {
 	t.Parallel()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 
 	// Unregistering an unknown ID is a no-op (no panic, list stays empty).
 	orch.UnregisterIngester(glid.New())
@@ -549,10 +513,7 @@ func TestVaultConfig(t *testing.T) {
 			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "env=prod AND level=error"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -582,12 +543,9 @@ func TestVaultConfig(t *testing.T) {
 
 func TestVaultConfigNotFound(t *testing.T) {
 	t.Parallel()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 
-	_, err = orch.VaultConfig(glid.New())
+	_, err := orch.VaultConfig(glid.New())
 	if err == nil {
 		t.Fatal("expected error for nonexistent vault")
 	}
@@ -609,10 +567,7 @@ func TestSetRotationPolicyOnVaultDirectly(t *testing.T) {
 			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	// Create a vault with default rotation policy (10000 records).
 	factories := orchestrator.Factories{
@@ -665,10 +620,7 @@ func TestPauseVault(t *testing.T) {
 			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -732,10 +684,7 @@ func TestResumeVault(t *testing.T) {
 			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -781,10 +730,7 @@ func TestResumeVault(t *testing.T) {
 
 func TestDisableVaultNotFound(t *testing.T) {
 	t.Parallel()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 
 	if err := orch.DisableVault(glid.New()); err == nil {
 		t.Fatal("expected error for nonexistent vault")
@@ -803,10 +749,7 @@ func TestDisableVaultDoesNotAffectQuery(t *testing.T) {
 			{ID: glid.New(), Stages: []system.RouteStage{{Match: &system.MatchStage{Expression: "*"}}}, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -872,10 +815,7 @@ func TestRetentionSingleJobRegistered(t *testing.T) {
 		},
 	}}
 
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{"memory": chunkmem.NewFactory()},
@@ -932,10 +872,7 @@ func TestReloadRotationPolicies_SkipsFollowers(t *testing.T) {
 		},
 	}}
 
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	// Build a follower vault: NeverRotatePolicy at the chunk manager, IsFollower
 	// flag on the orchestrator's VaultInstance.
@@ -989,10 +926,7 @@ func TestReloadRotationPolicies_NilPolicyID(t *testing.T) {
 		},
 	}}
 
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 	s := memtest.MustNewVault(t, chunkmem.Config{RotationPolicy: recordCountPolicy(10)})
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(vaultID, s.CM, s.IM, s.QE))
 
@@ -1038,10 +972,7 @@ func TestApplyRotationPolicyForRole_NoInstanceIsNoop(t *testing.T) {
 		},
 	}}
 
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 	orch.RegisterVault(orchestrator.NewVault(vaultID, nil))
 
 	if err := orch.ApplyRotationPolicyForRole(context.Background(), vaultID); err != nil {

@@ -494,13 +494,10 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 	}
 	srcIM := indexfile.NewManager(srcDir, nil, nil)
 
-	orchA, err := New(Config{
+	orchA := newTestOrch(t, Config{
 		LocalNodeID:  "node-A",
 		SystemLoader: &transitionSystemLoader{store: store},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	srcInst := &VaultInstance{VaultID: vaultID, Type: "file", Chunks: srcCM, Indexes: srcIM, Query: query.New(srcCM, srcIM, nil)}
 	orchA.RegisterVault(NewVault(vaultID, srcInst))
@@ -515,13 +512,10 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 	}
 	dstIM := indexfile.NewManager(dstDir, nil, nil)
 
-	orchB, err := New(Config{
+	orchB := newTestOrch(t, Config{
 		LocalNodeID:  "node-B",
 		SystemLoader: &transitionSystemLoader{store: store},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	dstInst := &VaultInstance{VaultID: vaultID, Type: "file", Chunks: dstCM, Indexes: dstIM, Query: query.New(dstCM, dstIM, nil)}
 	orchB.RegisterVault(NewVault(vaultID, dstInst))
 

@@ -566,10 +566,9 @@ type Config struct {
 
 	// SegmentsDir is the base directory under which each origin vault's
 	// segmentation working/ and completed/ areas live: a vault's segment
-	// OriginRoot is SegmentsDir/<vaultID>. The app passes the node home dir;
-	// when empty it defaults to "segments" relative to the working directory.
-	// TODO(gastrolog-jiwlf): make the per-vault segment root configurable via
-	// node storage config instead of a single base dir.
+	// OriginRoot is SegmentsDir/<vaultID>. Set from home.Dir.SegmentsDir() at
+	// process startup; tests may point it at t.TempDir(). There is no default
+	// under $TMPDIR or the working directory.
 	SegmentsDir string
 
 	// Phase is the shared shutdown signal. When non-nil, the orchestrator

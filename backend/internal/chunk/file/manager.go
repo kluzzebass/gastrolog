@@ -3888,12 +3888,22 @@ func (m *Manager) sealToGLCB(id chunk.ChunkID) (*chunkcloud.Writer, int64, error
 	}
 	m.mu.Unlock()
 
+	dir := m.chunkDir(id)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return nil, 0, fmt.Errorf("ensure chunk dir: %w", err)
+	}
+
 	cursor, err := m.OpenCursor(id)
 	if err != nil {
 		return nil, 0, fmt.Errorf("open cursor for GLCB seal: %w", err)
 	}
 
-	w := chunkcloud.NewWriter(id, m.cfg.VaultID)
+	w, err := chunkcloud.NewWriter(id, m.cfg.VaultID, dir)
+	if err != nil {
+		_ = cursor.Close()
+		return nil, 0, err
+	}
+	defer func() { _ = w.Close() }()
 	for {
 		rec, _, recErr := cursor.Next()
 		if errors.Is(recErr, chunk.ErrNoMoreRecords) {
@@ -3910,10 +3920,6 @@ func (m *Manager) sealToGLCB(id chunk.ChunkID) (*chunkcloud.Writer, int64, error
 	}
 	_ = cursor.Close()
 
-	dir := m.chunkDir(id)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return nil, 0, fmt.Errorf("ensure chunk dir: %w", err)
-	}
 	tmpPath := filepath.Join(dir, dataGLCBTmpFileName)
 	finalPath := filepath.Join(dir, dataGLCBFileName)
 

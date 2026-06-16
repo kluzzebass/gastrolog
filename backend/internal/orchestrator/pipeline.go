@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"slices"
 	"time"
@@ -116,8 +115,11 @@ type pipelineVaultReg struct {
 // puller is available (cluster mode): roll the registry, pull segments this
 // node does not yet hold, and commit holder receipts. Single-node homes have
 // no peers to pull from, so they chunk from their own head/ without collection.
-func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm *vaultctlfsm.FSM, applier vaultctlfsm.Applier, isLeader func() bool, hasHandle bool, policy chunking.ManifestRotationPolicy) pipeline.VaultSpec {
-	root := o.originRoot(vaultID)
+func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm *vaultctlfsm.FSM, applier vaultctlfsm.Applier, isLeader func() bool, hasHandle bool, policy chunking.ManifestRotationPolicy) (pipeline.VaultSpec, error) {
+	root, err := o.originRoot(vaultID)
+	if err != nil {
+		return pipeline.VaultSpec{}, err
+	}
 	spec := pipeline.VaultSpec{
 		VaultID:    vaultID,
 		Origin:     true,
@@ -155,7 +157,7 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 			spec.Receipts = &segmentReceiptCommitter{applier: applier, localNodeID: o.localNodeID}
 		}
 	}
-	return spec
+	return spec, nil
 }
 
 // registerBuiltPipelineChunk registers a freshly-built pipeline GLCB with the
@@ -325,27 +327,14 @@ func (o *Orchestrator) isVaultHome(sys *system.System, vaultID glid.GLID) bool {
 	return false
 }
 
-// originRoot returns the segmentation root for a vault: the directory that
-// holds the vault's working/ and completed/ segment areas on this node.
-//
-// When no segments base is configured (no node home / SegmentsDir, e.g. in
-// embedded tests) it lazily allocates one isolated temp base — shared across
-// the orchestrator's vaults — so origin registration never writes segments
-// into the process working directory. Production always sets SegmentsDir.
-// Callers hold o.mu (originRoot is only reached via reloadPipelineFromConfig),
-// so the one-time assignment to o.segmentsDir is safe.
-//
-// TODO(gastrolog-jiwlf): segment storage location is currently a single base
-// dir under the node home. Make it configurable per node/storage class.
-func (o *Orchestrator) originRoot(vaultID glid.GLID) string {
+// originRoot returns the segmentation root for a vault under the configured
+// node home (SegmentsDir/<vaultID>). Callers must set Config.SegmentsDir from
+// home.Dir.SegmentsDir() before enabling the pipeline.
+func (o *Orchestrator) originRoot(vaultID glid.GLID) (string, error) {
 	if o.segmentsDir == "" {
-		tmp, err := os.MkdirTemp("", "gastrolog-segments-")
-		if err != nil {
-			tmp = filepath.Join(os.TempDir(), "gastrolog-segments")
-		}
-		o.segmentsDir = tmp
+		return "", errors.New("segments directory unset: configure orchestrator.Config.SegmentsDir from node home")
 	}
-	return filepath.Join(o.segmentsDir, vaultID.String())
+	return filepath.Join(o.segmentsDir, vaultID.String()), nil
 }
 
 // pipelineVaultChunkRoot returns the segmentation chunk root for a vault when
@@ -502,7 +491,11 @@ func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 			o.pipeline.UnregisterVault(vid)
 			delete(o.pipelineVaults, vid)
 		}
-		if err := o.pipeline.RegisterVault(o.buildPipelineVaultSpec(vid, home, fsm, applier, isLeader, hasHandle, policy)); err != nil {
+		spec, err := o.buildPipelineVaultSpec(vid, home, fsm, applier, isLeader, hasHandle, policy)
+		if err != nil {
+			return fmt.Errorf("build pipeline vault %s: %w", vid, err)
+		}
+		if err := o.pipeline.RegisterVault(spec); err != nil {
 			return fmt.Errorf("register vault %s: %w", vid, err)
 		}
 		o.pipelineVaults[vid] = want

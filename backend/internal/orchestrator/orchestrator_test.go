@@ -3,6 +3,7 @@ package orchestrator_test
 import (
 	"context"
 	"gastrolog/internal/glid"
+	"path/filepath"
 	"slices"
 	"sync/atomic"
 	"testing"
@@ -17,6 +18,20 @@ import (
 	"gastrolog/internal/pipeline/routing"
 	"gastrolog/internal/query"
 )
+
+// mustNewTestOrch creates an orchestrator for external-package tests with a
+// segments directory under t.TempDir(), matching production's home.SegmentsDir().
+func mustNewTestOrch(t *testing.T, cfg orchestrator.Config) *orchestrator.Orchestrator {
+	t.Helper()
+	if cfg.SegmentsDir == "" {
+		cfg.SegmentsDir = filepath.Join(t.TempDir(), "segments")
+	}
+	orch, err := orchestrator.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return orch
+}
 
 // recordCountPolicy creates a rotation policy for testing that rotates at maxRecords.
 func recordCountPolicy(maxRecords int64) chunk.RotationPolicy {
@@ -54,10 +69,7 @@ func newTestSetup(t *testing.T, maxRecords int64) (*orchestrator.Orchestrator, c
 	tracker := &trackingIndexManager{IndexManager: s.IM}
 
 	defaultID := glid.New()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, tracker, s.QE))
 
 	// Set up a catch-all route so records are delivered to the vault.
@@ -307,25 +319,19 @@ func TestSearchUnknownRegistry(t *testing.T) {
 }
 
 func TestIngestNoChunkManagers(t *testing.T) {
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 
 	rec := chunk.Record{IngestTS: t1, Attrs: attrsA, Raw: []byte("test")}
-	err = orch.Ingest(rec)
+	err := orch.Ingest(rec)
 	if err != orchestrator.ErrNoChunkManagers {
 		t.Errorf("expected ErrNoChunkManagers, got %v", err)
 	}
 }
 
 func TestSearchNoQueryEngines(t *testing.T) {
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 
-	_, _, err = orch.Search(context.Background(), glid.New(), query.Query{}, nil)
+	_, _, err := orch.Search(context.Background(), glid.New(), query.Query{}, nil)
 	if err != orchestrator.ErrNoQueryEngines {
 		t.Errorf("expected ErrNoQueryEngines, got %v", err)
 	}
@@ -441,10 +447,7 @@ func newIngesterTestSetup(t *testing.T) (*orchestrator.Orchestrator, chunk.Chunk
 	})
 
 	defaultID := glid.New()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
 	// Set up a catch-all route so records are delivered to the vault.
@@ -662,10 +665,7 @@ func TestRebuildMissingIndexes(t *testing.T) {
 	s.CM.(chunk.ChunkPostSealProcessor).SetIndexBuilders([]chunk.ChunkIndexBuilder{tracker.BuildAdapter()})
 
 	defaultID := glid.New()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, tracker, nil))
 
 	// RebuildMissingIndexes should find the sealed chunk and build indexes.
@@ -728,10 +728,7 @@ func TestRebuildMissingIndexesCloudBackedWithCompleteIndexes(t *testing.T) {
 	overlay := &cloudOverlayCM{ChunkManager: s.CM}
 
 	defaultID := glid.New()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, overlay, tracker, nil))
 
 	if err := orch.RebuildMissingIndexes(context.Background()); err != nil {
@@ -771,10 +768,7 @@ func TestRebuildMissingIndexesCloudBackedWithMissingIndexes(t *testing.T) {
 	overlay := &cloudOverlayCM{ChunkManager: s.CM}
 
 	defaultID := glid.New()
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, overlay, tracker, nil))
 
 	if err := orch.RebuildMissingIndexes(context.Background()); err != nil {
@@ -827,10 +821,7 @@ func newFilteredTestSetup(t *testing.T) (*orchestrator.Orchestrator, filteredTes
 		cms:       make(map[glid.GLID]chunk.ChunkManager),
 	}
 
-	orch, err := orchestrator.New(orchestrator.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{})
 
 	for _, id := range []glid.GLID{vaults.prod, vaults.staging, vaults.archive, vaults.catchRest} {
 		s := memtest.MustNewVault(t, chunkmem.Config{
@@ -857,10 +848,7 @@ func newFilteredTestSetupWithLoader(t *testing.T, loader *fakeSystemLoader) (*or
 		cms:       make(map[glid.GLID]chunk.ChunkManager),
 	}
 
-	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := mustNewTestOrch(t, orchestrator.Config{SystemLoader: loader})
 
 	for _, id := range []glid.GLID{vaults.prod, vaults.staging, vaults.archive, vaults.catchRest} {
 		s := memtest.MustNewVault(t, chunkmem.Config{

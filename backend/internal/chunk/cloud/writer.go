@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"slices"
 
 	"gastrolog/internal/chunk"
@@ -22,12 +23,17 @@ type tsEntry struct {
 	pos uint32
 }
 
-// Writer encodes GLCB. Record frames spill to a staging file during Add;
-// finalize writes sections in on-disk order (fixed header blocks first).
+// Writer encodes GLCB. Record frames spill to a work file in workDir during
+// Add; finalize writes sections in on-disk order (fixed header blocks first).
+// workDir must be the directory where the finished blob will live so temp files
+// and atomic rename stay on one filesystem. The work file is removed on Close,
+// WriteTo, or Finish.
 type Writer struct {
 	chunkID chunk.ChunkID
 	vaultID glid.GLID
 	dict    *chunk.StringDict
+
+	workDir string
 
 	output      *os.File // optional target for Finish / WriteTo
 	staging     *os.File
@@ -43,18 +49,45 @@ type Writer struct {
 	toc           BlobTOC
 }
 
-// NewWriter creates a writer. Call WriteTo to emit the blob.
-func NewWriter(chunkID chunk.ChunkID, vaultID glid.GLID) *Writer {
+// NewWriter creates a writer. workDir is the directory where the finished
+// GLCB will reside (chunk dir or pipeline chunk root); partial files are
+// created there so rename to the final name never crosses filesystems.
+func NewWriter(chunkID chunk.ChunkID, vaultID glid.GLID, workDir string) (*Writer, error) {
+	if workDir == "" {
+		return nil, errors.New("work directory required: pass the directory where the GLCB will live")
+	}
 	return &Writer{
 		chunkID: chunkID,
 		vaultID: vaultID,
+		workDir: workDir,
 		dict:    chunk.NewStringDict(),
-	}
+	}, nil
 }
 
-// OpenWriter prepares to write a GLCB into f on Finish.
+// WorkDirForFile returns the directory where GLCB partial files must be
+// created alongside f so atomic rename to f stays on one filesystem.
+func WorkDirForFile(f *os.File) (string, error) {
+	if f == nil {
+		return "", errors.New("nil output file")
+	}
+	name := f.Name()
+	if name == "" {
+		return "", errors.New("output file has no path: open a file in its final directory")
+	}
+	return filepath.Dir(name), nil
+}
+
+// OpenWriter prepares to write a GLCB into f on Finish. Partial record
+// staging uses the same directory as f.
 func OpenWriter(f *os.File, chunkID chunk.ChunkID, vaultID glid.GLID) (*Writer, error) {
-	w := NewWriter(chunkID, vaultID)
+	workDir, err := WorkDirForFile(f)
+	if err != nil {
+		return nil, err
+	}
+	w, err := NewWriter(chunkID, vaultID, workDir)
+	if err != nil {
+		return nil, err
+	}
 	w.output = f
 	return w, nil
 }
@@ -63,7 +96,7 @@ func (w *Writer) ensureStaging() error {
 	if w.staging != nil {
 		return nil
 	}
-	f, err := os.CreateTemp("", "glcb-records-*.tmp")
+	f, err := os.CreateTemp(w.workDir, "glcb-records-*.tmp")
 	if err != nil {
 		return err
 	}
@@ -74,12 +107,17 @@ func (w *Writer) ensureStaging() error {
 
 // Close removes the record staging file.
 func (w *Writer) Close() error {
+	return w.closeStaging()
+}
+
+func (w *Writer) closeStaging() error {
 	if w.staging == nil {
 		return nil
 	}
 	path := w.stagingPath
 	err := w.staging.Close()
 	w.staging = nil
+	w.stagingPath = ""
 	if path != "" {
 		_ = os.Remove(path)
 	}
@@ -130,14 +168,38 @@ func (w *Writer) Finish() (BlobTOC, error) {
 		return BlobTOC{}, errors.New("Finish requires OpenWriter")
 	}
 	if _, err := w.emitBlob(w.output); err != nil {
+		_ = w.closeStaging()
+		return BlobTOC{}, err
+	}
+	if err := w.closeStaging(); err != nil {
 		return BlobTOC{}, err
 	}
 	return w.toc, nil
 }
 
-// WriteTo writes a complete GLCB to dst.
+// WriteTo writes a complete GLCB to dst. When dst is a named *os.File it must
+// live in workDir so the build never spans filesystems.
 func (w *Writer) WriteTo(dst io.Writer) (int64, error) {
-	return w.emitBlob(dst)
+	if err := w.checkOutputWorkDir(dst); err != nil {
+		return 0, err
+	}
+	n, err := w.emitBlob(dst)
+	if closeErr := w.closeStaging(); err == nil {
+		err = closeErr
+	}
+	return n, err
+}
+
+func (w *Writer) checkOutputWorkDir(dst io.Writer) error {
+	f, ok := dst.(*os.File)
+	if !ok || f.Name() == "" {
+		return nil
+	}
+	outDir := filepath.Dir(f.Name())
+	if outDir != w.workDir {
+		return fmt.Errorf("output directory %q != work directory %q: build GLCB in its final directory", outDir, w.workDir)
+	}
+	return nil
 }
 
 func (w *Writer) emitBlob(dst io.Writer) (int64, error) {

@@ -29,40 +29,31 @@ type BuildGLCBResult struct {
 }
 
 // BuildGLCB encodes merged span records into GLCB (design-notes §37).
-// Records stream to disk during the merge; only dictionary and index metadata
-// stay in memory. EventID and raw bytes are copied verbatim; attributes are
-// normalized into the chunk string dictionary.
+// dst must be an *os.File opened in the directory where the blob will live
+// (use BuildGLCBFile for the common atomic-rename path). EventID and raw bytes
+// are copied verbatim; attributes are normalized into the chunk string dictionary.
 func BuildGLCB(dst io.Writer, in BuildGLCBInput) (BuildGLCBResult, error) {
+	workDir, err := glcbWorkDir(dst)
+	if err != nil {
+		return BuildGLCBResult{}, err
+	}
+	return buildGLCBTo(dst, workDir, in)
+}
+
+func glcbWorkDir(dst io.Writer) (string, error) {
 	f, ok := dst.(*os.File)
 	if !ok {
-		tmp, err := os.CreateTemp("", "glcb-out-*.tmp")
-		if err != nil {
-			return BuildGLCBResult{}, err
-		}
-		tmpPath := tmp.Name()
-		defer func() { _ = os.Remove(tmpPath) }()
-		result, err := buildGLCBFile(tmp, in)
-		if err != nil {
-			_ = tmp.Close()
-			return BuildGLCBResult{}, err
-		}
-		if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-			_ = tmp.Close()
-			return BuildGLCBResult{}, err
-		}
-		if _, err := io.Copy(dst, tmp); err != nil {
-			_ = tmp.Close()
-			return BuildGLCBResult{}, err
-		}
-		_ = tmp.Close()
-		return result, nil
+		return "", errors.New("BuildGLCB requires a file in its final directory; use BuildGLCBFile")
 	}
-	return buildGLCBFile(f, in)
+	return chunkcloud.WorkDirForFile(f)
 }
 
 // BuildGLCBFile writes a GLCB to path atomically via a temp file and rename.
+// Record staging and the output temp both use filepath.Dir(path) so the build
+// never crosses filesystems.
 func BuildGLCBFile(path string, in BuildGLCBInput) (BuildGLCBResult, error) {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".glcb.tmp.*")
+	workDir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(workDir, ".glcb.tmp.*")
 	if err != nil {
 		return BuildGLCBResult{}, err
 	}
@@ -74,7 +65,7 @@ func BuildGLCBFile(path string, in BuildGLCBInput) (BuildGLCBResult, error) {
 		}
 	}()
 
-	result, err := buildGLCBFile(tmp, in)
+	result, err := buildGLCBTo(tmp, workDir, in)
 	if err != nil {
 		_ = tmp.Close()
 		return BuildGLCBResult{}, err
@@ -94,11 +85,12 @@ func BuildGLCBFile(path string, in BuildGLCBInput) (BuildGLCBResult, error) {
 	return result, nil
 }
 
-func buildGLCBFile(f *os.File, in BuildGLCBInput) (BuildGLCBResult, error) {
-	w, err := chunkcloud.OpenWriter(f, in.ChunkID, in.VaultID)
+func buildGLCBTo(dst io.Writer, workDir string, in BuildGLCBInput) (BuildGLCBResult, error) {
+	w, err := chunkcloud.NewWriter(in.ChunkID, in.VaultID, workDir)
 	if err != nil {
 		return BuildGLCBResult{}, err
 	}
+	defer func() { _ = w.Close() }()
 
 	var recordCount uint32
 	for rec, err := range MergeSpanRefs(in.Refs) {
@@ -114,10 +106,10 @@ func buildGLCBFile(f *os.File, in BuildGLCBInput) (BuildGLCBResult, error) {
 		return BuildGLCBResult{}, ErrNoMergeRecords
 	}
 
-	toc, err := w.Finish()
-	if err != nil {
-		return BuildGLCBResult{}, fmt.Errorf("finish GLCB: %w", err)
+	if _, err := w.WriteTo(dst); err != nil {
+		return BuildGLCBResult{}, fmt.Errorf("write GLCB: %w", err)
 	}
+	toc := w.TOC()
 	return BuildGLCBResult{
 		RecordCount: recordCount,
 		BlobDigest:  toc.BlobDigest,
