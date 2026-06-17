@@ -111,7 +111,7 @@ func newFileVault(t *testing.T) (chunk.ChunkManager, *indexfile.Manager) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = cm.Close() })
-	im := indexfile.NewManager(dir, nil, nil)
+	im := indexfile.NewManager(dir, nil, nil, cm)
 	return cm, im
 }
 

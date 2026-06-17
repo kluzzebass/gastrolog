@@ -172,7 +172,7 @@ func newQueryCM(t *testing.T) (*chunkfile.Manager, index.IndexManager) {
 		t.Fatalf("new chunk manager: %v", err)
 	}
 	t.Cleanup(func() { _ = cm.Close() })
-	return cm, indexfile.NewManager(dir, nil, nil)
+	return cm, indexfile.NewManager(dir, nil, nil, cm)
 }
 
 // drainSearch runs Search and collects the records (failing on any error).

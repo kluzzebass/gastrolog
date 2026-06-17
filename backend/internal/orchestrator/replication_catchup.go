@@ -12,6 +12,28 @@ import (
 	"gastrolog/internal/cluster"
 )
 
+// catchupPushKey identifies one in-flight async push batch: all chunks
+// scheduled by CatchupSelectedChunks for a single (vault, requester).
+type catchupPushKey struct {
+	vaultID   glid.GLID
+	requester string
+}
+
+// maxMissingReplicaCatchupPerSweep caps how many sealed chunks a single
+// missing-replica sweep tick asks each peer to push. Without a cap the
+// sweep requests the entire FSM-vs-disk gap every 20s from every peer,
+// spawning overlapping catchup goroutines that abort each other's imports.
+const maxMissingReplicaCatchupPerSweep = 16
+
+func (o *Orchestrator) tryBeginCatchupPush(key catchupPushKey) bool {
+	_, loaded := o.catchupPushInFlight.LoadOrStore(key, struct{}{})
+	return !loaded
+}
+
+func (o *Orchestrator) endCatchupPush(key catchupPushKey) {
+	o.catchupPushInFlight.Delete(key)
+}
+
 // ScheduleCatchup schedules catchup replication for newly added followers of
 // the given vault. Must be called on the node that holds the vault leader
 // replica — no-op if this node is a follower or does not host the vault.
@@ -243,6 +265,14 @@ func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID glid.G
 		return 0, nil
 	}
 
+	pushKey := catchupPushKey{vaultID: vaultID, requester: requesterNodeID}
+	if !o.tryBeginCatchupPush(pushKey) {
+		o.replicationLogger.Debug("replica catchup: push already in flight, skipping duplicate request",
+			"vault", vaultID, "requester", requesterNodeID,
+			"eligible", len(eligible), "requested", len(chunkIDs))
+		return 0, nil
+	}
+
 	o.replicationLogger.Info("replica catchup: scheduling pushes",
 		"vault", vaultID, "requester", requesterNodeID,
 		"scheduled", len(eligible), "requested", len(chunkIDs))
@@ -252,6 +282,7 @@ func (o *Orchestrator) CatchupSelectedChunks(ctx context.Context, vaultID glid.G
 	// as scheduleCatchupForNode — the RPC's caller-supplied ctx ends as
 	// soon as we return, which would abort transfers mid-stream.
 	go func() {
+		defer o.endCatchupPush(pushKey)
 		ctxBg, cancel := context.WithTimeout(context.Background(), cluster.CatchupTimeout)
 		defer cancel()
 		transferred := 0

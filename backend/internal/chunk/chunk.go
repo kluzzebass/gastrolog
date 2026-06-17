@@ -146,6 +146,23 @@ type ChunkManager interface {
 	Close() error
 }
 
+// GLCBBlobPathProvider is implemented by chunk managers that can resolve
+// the on-disk data.glcb path for sealed chunks (canonical dir layout or
+// external pipeline registration). IndexManager uses this to mmap embedded
+// ITSI/STSI without assuming dir/<chunkID>/data.glcb.
+type GLCBBlobPathProvider interface {
+	GLCBBlobPath(id ChunkID) (string, bool)
+}
+
+// GLCBSectionReader extends GLCBBlobPathProvider with mmap-backed section
+// access into a sealed chunk's data.glcb. WithGLCBSection holds the chunk
+// lifetime read lock and a mapping pin for the duration of fn; section bytes
+// are only valid inside fn.
+type GLCBSectionReader interface {
+	GLCBBlobPathProvider
+	WithGLCBSection(id ChunkID, sectionType byte, fn func(section []byte) error) error
+}
+
 // ChunkMover extends ChunkManager with filesystem-level chunk movement.
 // Not all ChunkManager implementations support this (e.g. memory-based ones
 // cannot). Callers should type-assert to check availability.

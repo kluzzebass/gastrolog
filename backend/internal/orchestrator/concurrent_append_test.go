@@ -37,7 +37,7 @@ func TestConcurrentAppendAttrIntegrity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	im := indexfile.NewManager(dir, nil, nil)
+	im := indexfile.NewManager(dir, nil, nil, cm)
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 
@@ -254,7 +254,7 @@ func TestImportToInstanceCursorVerified(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	im := indexfile.NewManager(dir, nil, nil)
+	im := indexfile.NewManager(dir, nil, nil, cm)
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 
@@ -492,7 +492,7 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srcIM := indexfile.NewManager(srcDir, nil, nil)
+	srcIM := indexfile.NewManager(srcDir, nil, nil, srcCM)
 
 	orchA := newTestOrch(t, Config{
 		LocalNodeID:  "node-A",
@@ -510,7 +510,7 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dstIM := indexfile.NewManager(dstDir, nil, nil)
+	dstIM := indexfile.NewManager(dstDir, nil, nil, dstCM)
 
 	orchB := newTestOrch(t, Config{
 		LocalNodeID:  "node-B",

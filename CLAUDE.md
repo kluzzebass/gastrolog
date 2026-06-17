@@ -2,6 +2,17 @@
 
 The role of this file is to describe common mistakes and confusion points that agents might encounter as they work in this project. If you ever encounter something in the project that surprises you, please alert the developer working with you and indicate that this is the case in the CLAUDE.md file to help prevent future agents from having the same issue.
 
+# DO
+# NOT
+# FUCKING
+# TOUCH
+# THE
+# CLUSTER!
+
+**Unless the user explicitly tells you to in that message — not a plan todo, not “validation,” not “finish the task.”**
+
+Never run `cluster-kill`, `cluster-run`, `pkill` on gastrolog servers, start/stop/restart nodes, or bounce the live cluster to “validate” or “recover.” Use in-process `go test` only. The user’s cluster (e.g. `/Volumes/Storage/Gastrolog`, `data/node*`) is theirs; killing it wastes soak state and trust. See [`MEMORY.md`](./MEMORY.md).
+
 ## Vocabulary
 
 Read [`docs/ubiquitous_language.md`](./docs/ubiquitous_language.md) before writing prose (commit messages, issue titles, comments, code identifiers) that names domain concepts. It defines 8 bounded contexts and ~75 canonical terms, plus a consistency-rules table naming the synonyms to phase out (`primary` → leader, `cloud chunk` → cloud-backed chunk, etc.). Use the canonical terms. Extend the doc in the same PR when introducing a new concept.
@@ -96,6 +107,8 @@ GastroLog is a fully distributed system. No node has cluster-wide authority — 
 When implementing anything new, ask: **"Does this work if the user is on a different node than the data?"** If the answer is no, redesign before proceeding.
 
 ### Local cluster nodes: Unix sockets and repo-local data
+
+**Agents: DO NOT run `cluster-kill`, `cluster-run`, or restart nodes unless the user explicitly asked. See top of this file.**
 
 When talking to **local** GastroLog processes (dev cluster, `just cluster-run`, etc.), **prefer the Unix socket**, not HTTP + JWT on `--listen`.
 

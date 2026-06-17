@@ -294,6 +294,12 @@ type Orchestrator struct {
 	// (see scheduleAfterVaultCtlRestore). Keyed by vault ID.
 	ctlRestorePending sync.Map
 
+	// catchupPushInFlight tracks async replica-catchup push batches keyed by
+	// (vault, requester). Prevents SweepMissingReplicas from stacking
+	// hundreds of overlapping CatchupSelectedChunks goroutines on the same
+	// sender→requester stream (gastrolog-2o9e9).
+	catchupPushInFlight sync.Map // catchupPushKey → struct{}
+
 	// cachedReplicationReady mirrors liveReplicationReady, updated by the
 	// readiness refresher goroutine (~500 ms cadence). LocalVaultsReplicationReady
 	// reads this atomic so the /readyz HTTP handler stays responsive even

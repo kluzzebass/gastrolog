@@ -39,7 +39,7 @@ func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition
 	if err != nil {
 		t.Fatal(err)
 	}
-	im := indexfile.NewManager(dir, nil, nil)
+	im := indexfile.NewManager(dir, nil, nil, cm)
 
 	store := sysmem.NewStore()
 	_ = store.PutVault(context.Background(), system.VaultConfig{
@@ -589,7 +589,7 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 		if err != nil {
 			t.Fatal(err)
 		}
-		im := indexfile.NewManager(dir, nil, nil)
+		im := indexfile.NewManager(dir, nil, nil, cm)
 
 		vaultInst := &VaultInstance{
 			VaultID: vaultID, Type: "cloud",

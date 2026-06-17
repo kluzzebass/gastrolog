@@ -53,6 +53,12 @@ type mergeState struct {
 	chunkPositions map[mergeKey]uint64
 	chunkResumeTS  map[mergeKey]time.Time // IngestTS-based resume for reordered chunks
 	lastRefs       *[]MultiVaultPosition
+
+	// Lazy heap priming: chunks are opened on demand instead of all at once.
+	lazyPending []vaultChunk
+	lazyNext    int
+	lazyResume  map[glid.GLID]map[chunk.ChunkID]resumeInfo
+	lazyOverlap bool // adjacent chunks overlap in order-by time
 }
 
 // cleanup stops all active scanners.
@@ -89,6 +95,70 @@ func (ms *mergeState) findScanner(vaultID glid.GLID, chunkID chunk.ChunkID) *act
 		}
 	}
 	return nil
+}
+
+func (ms *mergeState) initLazyPrime(allChunks []vaultChunk, resumeMap map[glid.GLID]map[chunk.ChunkID]resumeInfo, q Query) {
+	ms.lazyResume = resumeMap
+	ms.lazyPending = filterPendingChunks(allChunks, resumeMap, ms.chunkPositions)
+	ms.lazyNext = 0
+	ms.lazyOverlap = vaultChunksOverlap(ms.lazyPending, q.OrderBy)
+}
+
+func (ms *mergeState) peekTopTS(orderBy OrderBy) (time.Time, bool) {
+	th, ok := ms.h.(*tsHeap)
+	if !ok || th.Len() == 0 {
+		return time.Time{}, false
+	}
+	return orderBy.RecordTS(th.entries[0].rec), true
+}
+
+// filterPendingChunks drops chunks already marked exhausted in the resume token.
+func filterPendingChunks(
+	allChunks []vaultChunk,
+	resumeMap map[glid.GLID]map[chunk.ChunkID]resumeInfo,
+	chunkPositions map[mergeKey]uint64,
+) []vaultChunk {
+	pending := make([]vaultChunk, 0, len(allChunks))
+	for _, sc := range allChunks {
+		_, exhausted := lookupResumeInfo(resumeMap, sc, chunkPositions)
+		if exhausted {
+			continue
+		}
+		pending = append(pending, sc)
+	}
+	return pending
+}
+
+// vaultChunksOverlap reports whether adjacent chunks in the planner sort order
+// have overlapping order-by time ranges. When false, only one chunk can hold
+// the current merge frontier and scanners open one at a time.
+func vaultChunksOverlap(chunks []vaultChunk, orderBy OrderBy) bool {
+	if len(chunks) < 2 {
+		return false
+	}
+	startTS, endTS := chunkTimeBounds(orderBy)
+	for i := 0; i+1 < len(chunks); i++ {
+		if endTS(chunks[i+1].meta).After(startTS(chunks[i].meta)) {
+			return true
+		}
+	}
+	return false
+}
+
+func chunkTimeBounds(orderBy OrderBy) (startTS, endTS func(chunk.ChunkMeta) time.Time) {
+	switch orderBy { //nolint:exhaustive // IngestTS is the default
+	case OrderBySourceTS:
+		return func(m chunk.ChunkMeta) time.Time { return m.SourceStart },
+			func(m chunk.ChunkMeta) time.Time { return m.SourceEnd }
+	default:
+		return func(m chunk.ChunkMeta) time.Time { return m.IngestStart },
+			func(m chunk.ChunkMeta) time.Time { return m.IngestEnd }
+	}
+}
+
+func chunkTimeUpper(meta chunk.ChunkMeta, orderBy OrderBy) time.Time {
+	_, endTS := chunkTimeBounds(orderBy)
+	return endTS(meta)
 }
 
 // advanceScanner advances the scanner for the given entry, pushing the next
@@ -298,9 +368,9 @@ func (e *Engine) searchSingleChunk(
 	return true
 }
 
-// primeHeapWithResume opens iterators for each chunk, respecting resume
-// positions, and pushes the first record from each onto the heap.
-// Returns a non-nil error if any iterator fails on its first record.
+// primeHeapWithResume opens chunk iterators on demand and pushes the first
+// record from each competing chunk onto the heap. Returns a non-nil error if
+// any iterator fails on its first record.
 func (e *Engine) primeHeapWithResume(
 	ctx context.Context,
 	q Query,
@@ -308,26 +378,8 @@ func (e *Engine) primeHeapWithResume(
 	resumeMap map[glid.GLID]map[chunk.ChunkID]resumeInfo,
 	ms *mergeState,
 ) error {
-	for _, sc := range allChunks {
-		ri, exhausted := lookupResumeInfo(resumeMap, sc, ms.chunkPositions)
-		if exhausted {
-			continue
-		}
-		err := e.primeChunkWithResume(ctx, q, sc, ri, ms)
-		if err == nil {
-			continue
-		}
-		// Cloud chunks may be unreadable (corrupt blob, S3 error).
-		// Skip them with a warning rather than aborting the entire search.
-		if sc.meta.CloudBacked {
-			if err := e.handleCloudPrimeError(ctx, err, sc, ms); err != nil {
-				return err
-			}
-			continue
-		}
-		return err
-	}
-	return nil
+	ms.initLazyPrime(allChunks, resumeMap, q)
+	return e.lazyOpenCompeting(ctx, q, ms)
 }
 
 // primeChunkWithResume opens a scanner for a single chunk, handling resume
@@ -345,27 +397,57 @@ func (e *Engine) primeChunkWithResume(ctx context.Context, q Query, sc vaultChun
 	return e.openAndPrimeScanner(ctx, q, sc, startPos, ms)
 }
 
-// primeHeap opens iterators for each chunk (no resume) and pushes the first
-// record from each onto the heap. Returns a non-nil error if any iterator
-// fails on its first record.
+// primeHeap opens chunk iterators on demand (no resume) and pushes the first
+// record from each competing chunk onto the heap.
 func (e *Engine) primeHeap(
 	ctx context.Context,
 	q Query,
 	allChunks []vaultChunk,
 	ms *mergeState,
 ) error {
-	for _, sc := range allChunks {
-		if sc.meta.CloudBacked {
-			if err := e.primeCloudChunk(ctx, q, sc, ms); err != nil {
-				return err
+	ms.initLazyPrime(allChunks, nil, q)
+	return e.lazyOpenCompeting(ctx, q, ms)
+}
+
+// lazyOpenCompeting opens pending chunks that may contribute the next merge
+// record. For non-overlapping chunk time ranges only one scanner is active
+// at a time; overlapping ranges open every chunk whose upper bound can still
+// beat the current heap top.
+func (e *Engine) lazyOpenCompeting(ctx context.Context, q Query, ms *mergeState) error {
+	for ms.lazyNext < len(ms.lazyPending) {
+		if ms.h.Len() > 0 {
+			if !ms.lazyOverlap {
+				break
 			}
-			continue
+			topTS, ok := ms.peekTopTS(q.OrderBy)
+			if !ok {
+				break
+			}
+			upper := chunkTimeUpper(ms.lazyPending[ms.lazyNext].meta, q.OrderBy)
+			if !upper.IsZero() && upper.Before(topTS) {
+				break
+			}
 		}
-		if err := e.openAndPrimeScanner(ctx, q, sc, nil, ms); err != nil {
+		if err := e.lazyOpenOne(ctx, q, ms); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (e *Engine) lazyOpenOne(ctx context.Context, q Query, ms *mergeState) error {
+	sc := ms.lazyPending[ms.lazyNext]
+	ms.lazyNext++
+
+	ri, _ := lookupResumeInfo(ms.lazyResume, sc, ms.chunkPositions)
+	err := e.primeChunkWithResume(ctx, q, sc, ri, ms)
+	if err == nil {
+		return nil
+	}
+	if sc.meta.CloudBacked {
+		return e.handleCloudPrimeError(ctx, err, sc, ms)
+	}
+	return err
 }
 
 // primeCloudChunk primes a cloud-backed chunk, skipping it with a warning
@@ -481,8 +563,18 @@ func runMergeLoop(
 	ms *mergeState,
 	count int,
 	yield func(chunk.Record, error) bool,
+	e *Engine,
 ) (int, mergeLoopResult) {
-	for ms.h.Len() > 0 {
+	for {
+		if err := e.lazyOpenCompeting(ctx, q, ms); err != nil {
+			ms.buildLastRefs()
+			yield(chunk.Record{}, err)
+			return count, mergeError
+		}
+		if ms.h.Len() == 0 {
+			return count, mergeCompleted
+		}
+
 		if err := ctx.Err(); err != nil {
 			ms.buildLastRefs()
 			yield(chunk.Record{}, err)
@@ -516,7 +608,6 @@ func runMergeLoop(
 			return count, mergeError
 		}
 	}
-	return count, mergeCompleted
 }
 
 // Search returns an iterator over records matching the query, ordered by write timestamp.
@@ -619,7 +710,7 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 			return
 		}
 
-		_, result := runMergeLoop(ctx, q, ms, 0, wrappedYield)
+		_, result := runMergeLoop(ctx, q, ms, 0, wrappedYield, e)
 		if result == mergeCompleted {
 			completed = true
 		}
@@ -729,7 +820,7 @@ func (e *Engine) SearchThenFollow(ctx context.Context, q Query, resume *ResumeTo
 		}
 
 		// Merge loop for follow phase.
-		_, result := runMergeLoop(ctx, q, ms, count, yield)
+		_, result := runMergeLoop(ctx, q, ms, count, yield, e)
 		if result == mergeCompleted {
 			completed = true
 		}

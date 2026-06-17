@@ -99,18 +99,30 @@ type glcbCursor struct {
 	revIndex    uint64
 	fwdDone     bool
 	revDone     bool
+
+	// onClose, when non-nil, is invoked exactly once at the end of Close to
+	// release the per-chunk read lock and MappedBlob retain pin that
+	// openLocalGLCBCursor acquired. See gastrolog-26zu1.
+	onClose func()
 }
 
 // NewSeekableCursor creates a cursor over a local GLCB Reader.
 // Renamed from "seekable" — the cursor seeks via direct ReadAt now,
 // no zstd seekable-frame machinery involved (gastrolog-69fd5).
 func NewSeekableCursor(rd *Reader, id chunk.ChunkID) chunk.RecordCursor {
+	return NewSeekableCursorWithClose(rd, id, nil)
+}
+
+// NewSeekableCursorWithClose is like NewSeekableCursor but runs onClose once
+// when the cursor is closed (typically chunkLock.RUnlock + blob.release).
+func NewSeekableCursorWithClose(rd *Reader, id chunk.ChunkID, onClose func()) chunk.RecordCursor {
 	return &glcbCursor{
 		reader:      rd,
 		id:          id,
 		recordCount: uint64(rd.Meta().RecordCount),
 		fwdIndex:    0,
 		revIndex:    uint64(rd.Meta().RecordCount),
+		onClose:     onClose,
 	}
 }
 
@@ -155,8 +167,14 @@ func (c *glcbCursor) Seek(ref chunk.RecordRef) error {
 }
 
 func (c *glcbCursor) Close() error {
+	var err error
 	if c.reader != nil {
-		return c.reader.Close()
+		err = c.reader.Close()
+		c.reader = nil
 	}
-	return nil
+	if c.onClose != nil {
+		c.onClose()
+		c.onClose = nil
+	}
+	return err
 }

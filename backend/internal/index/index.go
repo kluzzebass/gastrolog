@@ -242,13 +242,30 @@ type IndexManager interface {
 	// FindSourceEntryIndex is the SourceTS equivalent of FindIngestEntryIndex.
 	FindSourceEntryIndex(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error)
 
+	// IngestIndexLen returns the number of entries in the ingest TS index.
+	// Returns ErrIndexNotFound if the ingest index does not exist.
+	IngestIndexLen(chunkID chunk.ChunkID) (uint64, error)
+
+	// IngestIndexEntryAt returns the (IngestTS, position) pair at the given rank
+	// in the ingest TS-sorted index. Returns ErrIndexNotFound if the index does
+	// not exist.
+	IngestIndexEntryAt(chunkID chunk.ChunkID, rank uint64) (TSEntry, error)
+
+	// SourceIndexLen returns the number of entries in the source TS index.
+	// Returns ErrIndexNotFound if the source index does not exist.
+	SourceIndexLen(chunkID chunk.ChunkID) (uint64, error)
+
+	// SourceIndexEntryAt returns the (SourceTS, position) pair at the given rank.
+	SourceIndexEntryAt(chunkID chunk.ChunkID, rank uint64) (TSEntry, error)
+
 	// LoadIngestEntries returns all (IngestTS, position) entries from the ingest index,
-	// sorted by IngestTS. Used for TS-ordered scanning.
+	// sorted by IngestTS. Prefer IngestIndexLen/IngestIndexEntryAt for search — this
+	// copies the full index onto the Go heap.
 	// Returns ErrIndexNotFound if the ingest index does not exist.
 	LoadIngestEntries(chunkID chunk.ChunkID) ([]TSEntry, error)
 
 	// LoadSourceEntries returns all (SourceTS, position) entries from the source index,
-	// sorted by SourceTS. Used for TS-ordered scanning.
+	// sorted by SourceTS. Prefer SourceIndexLen/SourceIndexEntryAt for search.
 	// Returns ErrIndexNotFound if the source index does not exist.
 	LoadSourceEntries(chunkID chunk.ChunkID) ([]TSEntry, error)
 

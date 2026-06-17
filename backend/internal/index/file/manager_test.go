@@ -59,7 +59,7 @@ func setupManager(t *testing.T, records []chunk.Record) (*Manager, chunk.ChunkMa
 	chunkMgr, chunkID := setupChunkManager(t, records)
 	indexDir := t.TempDir()
 	tokenIndexer := filetoken.NewIndexer(indexDir, chunkMgr, nil)
-	mgr := NewManager(indexDir, []index.Indexer{tokenIndexer}, nil)
+	mgr := NewManager(indexDir, []index.Indexer{tokenIndexer}, nil, chunkMgr)
 	return mgr, chunkMgr, chunkID
 }
 
@@ -111,7 +111,7 @@ func TestBuildIndexesUnsealedChunk(t *testing.T) {
 
 	indexDir := t.TempDir()
 	tokenIndexer := filetoken.NewIndexer(indexDir, chunkMgr, nil)
-	mgr := NewManager(indexDir, []index.Indexer{tokenIndexer}, nil)
+	mgr := NewManager(indexDir, []index.Indexer{tokenIndexer}, nil, chunkMgr)
 
 	err = mgr.BuildIndexes(context.Background(), chunkID)
 	if err == nil {
@@ -154,7 +154,7 @@ func TestOpenTokenIndex(t *testing.T) {
 func TestOpenTokenIndexNotBuilt(t *testing.T) {
 	t.Parallel()
 	indexDir := t.TempDir()
-	mgr := NewManager(indexDir, nil, nil)
+	mgr := NewManager(indexDir, nil, nil, nil)
 
 	_, err := mgr.OpenTokenIndex(chunk.NewChunkID())
 	if err == nil {
@@ -186,5 +186,62 @@ func TestBuildAndOpenRoundTrip(t *testing.T) {
 		if tokenEntries[i].Token < tokenEntries[i-1].Token {
 			t.Fatalf("token entries not sorted at index %d", i)
 		}
+	}
+}
+
+func TestIngestIndexMmapExternalGLCB(t *testing.T) {
+	t.Parallel()
+
+	records := testRecords()
+	srcCM, chunkID := setupChunkManager(t, records)
+
+	srcMgr, ok := srcCM.(*chunkfile.Manager)
+	if !ok {
+		t.Fatal("expected file chunk manager")
+	}
+	if err := srcMgr.PostSealProcess(context.Background(), chunkID); err != nil {
+		t.Fatalf("PostSealProcess: %v", err)
+	}
+
+	provider, ok := srcCM.(chunk.GLCBBlobPathProvider)
+	if !ok {
+		t.Fatal("source chunk manager does not implement GLCBBlobPathProvider")
+	}
+	glcbPath, ok := provider.GLCBBlobPath(chunkID)
+	if !ok {
+		t.Fatal("expected GLCB at source chunk manager")
+	}
+
+	consumerDir := t.TempDir()
+	consumerCM, err := chunkfile.NewManager(chunkfile.Config{Dir: consumerDir})
+	if err != nil {
+		t.Fatalf("new consumer manager: %v", err)
+	}
+	defer func() { _ = consumerCM.Close() }()
+
+	if err := consumerCM.RegisterExternalGLCB(chunkID, glcbPath, chunk.ExternalGLCBInfo{
+		RecordCount: int64(len(records)),
+	}); err != nil {
+		t.Fatalf("RegisterExternalGLCB: %v", err)
+	}
+
+	// Index dir is distinct from both GLCB locations — mmap must follow cm.
+	indexDir := t.TempDir()
+	im := NewManager(indexDir, nil, nil, consumerCM)
+
+	n, err := im.IngestIndexLen(chunkID)
+	if err != nil {
+		t.Fatalf("IngestIndexLen: %v", err)
+	}
+	if n != uint64(len(records)) {
+		t.Fatalf("ingest index len = %d, want %d", n, len(records))
+	}
+
+	entry, err := im.IngestIndexEntryAt(chunkID, 0)
+	if err != nil {
+		t.Fatalf("IngestIndexEntryAt(0): %v", err)
+	}
+	if entry.TS != records[0].IngestTS.UnixNano() {
+		t.Fatalf("first entry TS = %d, want %d", entry.TS, records[0].IngestTS.UnixNano())
 	}
 }

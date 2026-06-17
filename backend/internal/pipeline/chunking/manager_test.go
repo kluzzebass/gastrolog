@@ -189,6 +189,127 @@ func TestManagerBuildOncePurgesHeadStaging(t *testing.T) {
 	}
 }
 
+func TestManagerPurgesHeadWhenSealWinsElsewhere(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	segID := glid.New()
+	vaultID := glid.New()
+	chunkID := chunk.NewChunkID()
+	homeA := t.TempDir()
+	homeB := t.TempDir()
+	writeHeadSegment(t, homeA, segID, vaultID, []recordForSeg{{0, base, "one"}})
+	writeHeadSegment(t, homeB, segID, vaultID, []recordForSeg{{0, base, "one"}})
+	headB := filepath.Join(homeB, "head", segID.String())
+
+	fsm := vaultctlfsm.New()
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalPublishCompletedSegment(vaultctlfsm.CompletedSegmentEntry{
+		SegmentID: segID, RecordCount: 1, ByteSize: 1,
+		FirstIngestTS: base, LastIngestTS: base, Checksum: 1, PublishedAt: base,
+	}))
+	openedAt := base
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
+		SegmentID: segID, FirstRecordNumber: 0, LastRecordNumber: 0,
+		SliceBytes: 4096, RefAddedAt: openedAt,
+	}))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, base.Add(time.Minute)))
+
+	spec := func(home string, applier chunking.VaultCtlApplier, leader bool) chunking.VaultConfig {
+		return chunking.VaultConfig{
+			VaultRoot: home,
+			ChunkRoot: filepath.Join(home, "chunks"),
+			FSM:       fsm,
+			Locate:    chunking.HeadSegmentLocator{Root: home},
+			Applier:   applier,
+			IsLeader:  func() bool { return leader },
+		}
+	}
+
+	mgrA := chunking.New(chunking.Config{})
+	if err := mgrA.RegisterVault(vaultID, spec(homeA, &fsmApplier{fsm: fsm}, true)); err != nil {
+		t.Fatal(err)
+	}
+	mgrB := chunking.New(chunking.Config{})
+	if err := mgrB.RegisterVault(vaultID, spec(homeB, &flakyFSMApplier{fsm: fsm, fail: 1}, false)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Home B builds locally but another home will win CmdSealChunk.
+	if err := mgrB.BuildOnce(t.Context(), vaultID); err == nil {
+		t.Fatal("expected home B SealChunk apply to fail")
+	}
+	if _, err := os.Stat(headB); err != nil {
+		t.Fatalf("home B head should remain before peer seal: %v", err)
+	}
+
+	if err := mgrA.BuildOnce(t.Context(), vaultID); err != nil {
+		t.Fatalf("home A BuildOnce: %v", err)
+	}
+	if _, err := os.Stat(headB); !os.IsNotExist(err) {
+		t.Fatalf("home B head should purge when peer seals, stat err=%v", err)
+	}
+}
+
+func TestManagerBuildOnceWaitsForHoldersBeforeRelease(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	segID := glid.New()
+	vaultID := glid.New()
+	chunkID := chunk.NewChunkID()
+	home := t.TempDir()
+	writeHeadSegment(t, home, segID, vaultID, []recordForSeg{{0, base, "one"}})
+
+	fsm := vaultctlfsm.New()
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalPublishCompletedSegment(vaultctlfsm.CompletedSegmentEntry{
+		SegmentID: segID, RecordCount: 1, ByteSize: 1,
+		FirstIngestTS: base, LastIngestTS: base, Checksum: 1, PublishedAt: base,
+	}))
+	openedAt := base
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
+		SegmentID: segID, FirstRecordNumber: 0, LastRecordNumber: 0,
+		SliceBytes: 4096, RefAddedAt: openedAt,
+	}))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, base.Add(time.Minute)))
+
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot: home,
+		ChunkRoot: filepath.Join(home, "chunks"),
+		FSM:       fsm,
+		Locate:    chunking.HeadSegmentLocator{Root: home},
+		Applier:   &fsmApplier{fsm: fsm},
+		IsLeader:  func() bool { return true },
+		RequiredHolders: func() []string {
+			return []string{"home-a", "home-b"}
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.BuildOnce(t.Context(), vaultID); err != nil {
+		t.Fatalf("BuildOnce: %v", err)
+	}
+	if fsm.GetCompletedSegment(segID) == nil {
+		t.Fatal("registry entry must remain until all holders ack")
+	}
+
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAckSegmentHolder(segID, "home-a"))
+	if err := mgr.ReleaseOnce(t.Context(), vaultID); err != nil {
+		t.Fatalf("ReleaseOnce after one ack: %v", err)
+	}
+	if fsm.GetCompletedSegment(segID) == nil {
+		t.Fatal("registry entry must remain until every required holder acks")
+	}
+
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAckSegmentHolder(segID, "home-b"))
+	if err := mgr.ReleaseOnce(t.Context(), vaultID); err != nil {
+		t.Fatalf("ReleaseOnce after all acks: %v", err)
+	}
+	if fsm.GetCompletedSegment(segID) != nil {
+		t.Fatal("completed segment registry entry should be released after holder acks")
+	}
+}
+
 func TestManagerMissingSegmentNudgesCollection(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)

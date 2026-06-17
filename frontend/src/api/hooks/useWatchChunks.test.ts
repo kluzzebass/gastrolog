@@ -5,7 +5,7 @@ import {
   ChunkMeta,
   WatchChunksResponse,
 } from "../gen/gastrolog/v1/vault_pb";
-import { mergeMeta, mutateCache } from "./useWatchChunks";
+import { mergeMeta, mutateCache, shouldRefetchChunksAfterDelete } from "./useWatchChunks";
 
 function bytes(b: number): Uint8Array<ArrayBuffer> {
   const out = new Uint8Array(new ArrayBuffer(16));
@@ -163,5 +163,22 @@ describe("mutateCache — server-authoritative replica info", () => {
     if (!got) throw new Error("expected entry");
     expect(got.replicaCount).toBe(2);
     expect(got.replicaNodeIds).toEqual(["node-a", "node-b"]);
+  });
+});
+
+describe("shouldRefetchChunksAfterDelete", () => {
+  test("true when bulk delete drains a non-empty cache", () => {
+    const prev = [new ChunkMeta({ id: bytes(1) })];
+    expect(shouldRefetchChunksAfterDelete(prev, [])).toBe(true);
+  });
+
+  test("false when cache was already empty", () => {
+    expect(shouldRefetchChunksAfterDelete([], [])).toBe(false);
+    expect(shouldRefetchChunksAfterDelete(undefined, [])).toBe(false);
+  });
+
+  test("false when chunks remain", () => {
+    const prev = [new ChunkMeta({ id: bytes(1) }), new ChunkMeta({ id: bytes(2) })];
+    expect(shouldRefetchChunksAfterDelete(prev, [prev[0]!])).toBe(false);
   });
 });

@@ -122,8 +122,6 @@ func LoadSourceIndex(dir string, chunkID chunk.ChunkID) ([]Entry, error) {
 func loadFromBlob(path string, sectionType byte) ([]Entry, error) {
 	entries, err := cloud.LoadSection(path, sectionType, decodeRawEntries)
 	if err != nil {
-		// Surface "the chunk's blob isn't here" as os.IsNotExist so callers
-		// can distinguish "no chunk" from "decode failure".
 		return nil, err
 	}
 	if len(entries) == 0 {
@@ -144,6 +142,21 @@ type MmapView struct {
 	close func() error
 }
 
+// GLCBPath returns the canonical data.glcb path for a chunk under dir.
+func GLCBPath(dir string, chunkID chunk.ChunkID) string {
+	return blobPath(dir, chunkID)
+}
+
+// OpenIngestMmapAt opens the ingest TS index section inside the given GLCB.
+func OpenIngestMmapAt(glcbPath string) (MmapView, error) {
+	return openSectionMmap(glcbPath, format.TypeIngestIndex)
+}
+
+// OpenSourceMmapAt opens the source TS index section inside the given GLCB.
+func OpenSourceMmapAt(glcbPath string) (MmapView, error) {
+	return openSectionMmap(glcbPath, format.TypeSourceIndex)
+}
+
 // OpenIngestMmap opens the chunk's ingest TS index section inside
 // data.glcb, validates the section size, and returns a MmapView for
 // repeated lookups. Returns ErrIndexTooSmall if the section is empty.
@@ -154,6 +167,23 @@ func OpenIngestMmap(dir string, chunkID chunk.ChunkID) (MmapView, error) {
 // OpenSourceMmap is the SourceTS counterpart to OpenIngestMmap.
 func OpenSourceMmap(dir string, chunkID chunk.ChunkID) (MmapView, error) {
 	return openSectionMmap(blobPath(dir, chunkID), format.TypeSourceIndex)
+}
+
+// ViewFromSection wraps raw ITSI/STSI section bytes that alias a parent
+// whole-file GLCB mapping. Close is a no-op — the parent MappedBlob owns
+// the munmap.
+func ViewFromSection(data []byte) (MmapView, error) {
+	if len(data)%entrySize != 0 {
+		return MmapView{}, fmt.Errorf("tsidx: section length %d not a multiple of %d", len(data), entrySize)
+	}
+	n := len(data) / entrySize
+	if n == 0 {
+		return MmapView{}, ErrIndexTooSmall
+	}
+	return MmapView{
+		data: data,
+		n:    uint32(n), //nolint:gosec // G115: entry count bounded by chunk record count
+	}, nil
 }
 
 func openSectionMmap(path string, sectionType byte) (MmapView, error) {
@@ -209,6 +239,12 @@ func (v MmapView) SearchTS(tsNano int64) (rank uint32, pos uint32, ok bool) {
 	e := v.entryAt(lo)
 	return lo, e.Pos, true
 }
+
+// Len returns the number of (timestamp, position) entries in the mmap'd index.
+func (v MmapView) Len() uint32 { return v.n }
+
+// EntryAt returns the entry at rank i. Caller must ensure i < Len().
+func (v MmapView) EntryAt(i uint32) Entry { return v.entryAt(i) }
 
 func (v MmapView) entryAt(i uint32) Entry {
 	off := int(i) * entrySize

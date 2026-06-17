@@ -28,6 +28,7 @@ import (
 	"gastrolog/internal/ingester/chatterbox"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/pipeline/chunking"
+	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/pipeline/segmentation"
 	"gastrolog/internal/query"
 	"gastrolog/internal/raftgroup"
@@ -157,6 +158,40 @@ func (h *orchRelHarness) waitSealedRecordsAtLeast(v vaultSpec, nodeID string, wa
 func (h *orchRelHarness) pipelineGLCBPath(nodeID string, v vaultSpec, chunkID chunk.ChunkID) string {
 	chunkRoot := h.nodes[nodeID].home + "/segments/" + v.id.String() + "/chunks"
 	return chunking.ChunkGLCBPath(chunkRoot, chunkID)
+}
+
+// pipelineVaultRoot is the segment staging root for a vault on a node.
+func (h *orchRelHarness) pipelineVaultRoot(nodeID string, v vaultSpec) string {
+	return h.nodes[nodeID].home + "/segments/" + v.id.String()
+}
+
+func countHeadSegmentFiles(root string) (int, error) {
+	ids, err := paths.ListSegmentIDs(paths.HeadDir(root))
+	if err != nil {
+		return 0, err
+	}
+	return len(ids), nil
+}
+
+// assertHeadBounded checks head/ does not grow unbounded relative to the
+// vault-ctl completed-segment registry (gastrolog-3vlse).
+func (h *orchRelHarness) assertHeadBounded(v vaultSpec, homeIdxs []int, registrySegments int, allowance int) {
+	h.t.Helper()
+	for _, idx := range homeIdxs {
+		nodeID := h.nodeIDs[idx]
+		root := h.pipelineVaultRoot(nodeID, v)
+		headCount, err := countHeadSegmentFiles(root)
+		if err != nil {
+			h.t.Fatalf("vault %s home %s: list head/: %v", v.label, h.nodes[nodeID].label, err)
+		}
+		limit := registrySegments + allowance
+		if headCount > limit {
+			h.t.Fatalf("vault %s home %s: head/ has %d files, want <= registry_segments(%d)+allowance(%d)=%d",
+				v.label, h.nodes[nodeID].label, headCount, registrySegments, allowance, limit)
+		}
+		h.t.Logf("vault %s home %s: head_files=%d registry_segments=%d",
+			v.label, h.nodes[nodeID].label, headCount, registrySegments)
+	}
 }
 
 // waitGLCBsOnHomes blocks until every home node holds a GLCB file for every
@@ -598,6 +633,9 @@ func TestOrchPipeline_SustainedIngestManifestKeepsPace(t *testing.T) {
 	// Every sealed chunk should materialize on all homes.
 	entries := h.sealedPipelineChunks(v, leaderNode)
 	h.waitGLCBsOnHomes(v, []int{0, 1, 2}, entries)
+
+	const headAllowance = 8 // working/pre-head + in-flight segments
+	h.assertHeadBounded(v, []int{0, 1, 2}, final.RegistrySegments, headAllowance)
 
 	t.Logf("vault %s soak ok: max_pending=%d sealed_chunks %d→%d sealed_records %d→%d registry_segments=%d registry_records=%d",
 		v.label, maxPending,

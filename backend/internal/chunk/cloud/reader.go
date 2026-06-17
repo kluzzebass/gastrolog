@@ -19,6 +19,7 @@ type Reader struct {
 	dict            *chunk.StringDict
 	index           []recordIndex
 	recordsBaseOff  int64    // absolute offset of the records section in the file
+	mmapData        []byte   // when set, record frames are sliced from this mapping
 	file            *os.File // GLCB file; closed (and removed unless keepFile) on Close()
 	keepFile        bool     // if true, Close() does not remove the file (local cache)
 }
@@ -219,8 +220,16 @@ func (rd *Reader) ReadRecord(pos uint32) (chunk.Record, error) {
 	if idx.Offset > math.MaxInt64 {
 		return chunk.Record{}, fmt.Errorf("record %d: offset %d overflows int64", pos, idx.Offset)
 	}
+	absOff := rd.recordsBaseOff + int64(idx.Offset)
+	frameEnd := absOff + int64(idx.Size)
+	if rd.mmapData != nil {
+		if absOff < 0 || frameEnd > int64(len(rd.mmapData)) {
+			return chunk.Record{}, fmt.Errorf("record %d: frame [%d,%d) out of mmap bounds %d", pos, absOff, frameEnd, len(rd.mmapData))
+		}
+		return decodeFrame(rd.mmapData[absOff:frameEnd], rd.dict)
+	}
 	buf := make([]byte, idx.Size)
-	if _, err := rd.file.ReadAt(buf, rd.recordsBaseOff+int64(idx.Offset)); err != nil {
+	if _, err := rd.file.ReadAt(buf, absOff); err != nil {
 		return chunk.Record{}, fmt.Errorf("read record %d: %w", pos, err)
 	}
 
@@ -229,6 +238,11 @@ func (rd *Reader) ReadRecord(pos uint32) (chunk.Record, error) {
 
 // Close closes the file and (unless keepFile is set) removes it.
 func (rd *Reader) Close() error {
+	if rd.mmapData != nil {
+		// Mapping lifetime is owned by MappedBlob, not this Reader.
+		rd.mmapData = nil
+		return nil
+	}
 	var errs []error
 	if rd.file != nil {
 		name := rd.file.Name()

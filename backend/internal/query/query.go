@@ -13,7 +13,6 @@ import (
 	"log/slog"
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -697,16 +696,21 @@ func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.Reco
 // back to buffering and sorting.
 func (e *Engine) buildTSOrderedScanner(ctx context.Context, cursor chunk.RecordCursor, q Query, b *scannerBuilder, meta chunk.ChunkMeta, startPos *uint64, cm chunk.ChunkManager, im index.IndexManager) (iter.Seq2[recordWithRef, error], error) {
 	if meta.Sealed {
-		// IndexManager handles all sealed chunks — local and cloud-warm-cached
-		// alike — by mmapping the embedded ITSI/STSI section out of data.glcb.
-		// When the cloud blob isn't in the warm cache we fall through to the
-		// reorder buffer rather than fetching the index from S3 (gastrolog-1dg3i).
-		tsEntries, err := loadTSEntries(im, meta.ID, q.OrderBy)
+		// Walk the mmap'd ITSI/STSI embedded in data.glcb rank-by-rank.
+		// When the index is missing (cold cloud, no embedded section), fall
+		// through to the reorder buffer.
+		scan, err := buildMmapTSIndexScanner(ctx, cursor, q, b, meta, im)
 		if err == nil {
-			e.logger.Debug("TS index scanner activated", "chunk", meta.ID, "entries", len(tsEntries), "cloud", meta.CloudBacked)
-			return buildTSIndexScanner(ctx, cursor, q, b, meta, tsEntries)
+			e.logger.Debug("mmap TS index scanner activated", "chunk", meta.ID, "cloud", meta.CloudBacked)
+			return scan, nil
 		}
-		e.logger.Debug("TS index unavailable, falling back to reorder buffer", "chunk", meta.ID, "cloud", meta.CloudBacked, "error", err, "isNotFound", errors.Is(err, index.ErrIndexNotFound))
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		// Any index miss or read error → reorder buffer. External pipeline
+		// GLCBs may live outside im.Dir (RegisterExternalGLCB); the chunk
+		// manager cursor path still serves them sequentially.
+		e.logger.Debug("TS index unavailable, falling back to reorder buffer", "chunk", meta.ID, "cloud", meta.CloudBacked, "error", err)
 		// Fall through to buffer-and-sort if index unavailable.
 	}
 
@@ -738,85 +742,6 @@ func (e *Engine) buildTSOrderedScanner(ctx context.Context, cursor chunk.RecordC
 		return reorderByTSWithBounds(inner, q.OrderBy, q.Reverse(), lower, upper, q.ResumeTS), nil
 	}
 	return reorderByTS(inner, q.OrderBy, q.Reverse()), nil
-}
-
-// loadTSEntries loads the appropriate TS index entries based on OrderBy.
-func loadTSEntries(im index.IndexManager, chunkID chunk.ChunkID, orderBy OrderBy) ([]index.TSEntry, error) {
-	switch orderBy { //nolint:exhaustive // IngestTS is the default
-	case OrderBySourceTS:
-		return im.LoadSourceEntries(chunkID)
-	default:
-		return im.LoadIngestEntries(chunkID)
-	}
-}
-
-// buildTSIndexScanner creates a position scanner from TS-index-ordered entries.
-// It prunes entries by time bounds, intersects with any existing index positions
-// (using a set to preserve TS order), and builds a position scanner with time
-// bounds checking disabled (pruning already handled).
-func buildTSIndexScanner(ctx context.Context, cursor chunk.RecordCursor, q Query, b *scannerBuilder, meta chunk.ChunkMeta, tsEntries []index.TSEntry) (iter.Seq2[recordWithRef, error], error) {
-	// Prune by time bounds (entries are sorted by TS, use binary search).
-	tsEntries = pruneTSEntriesByBounds(tsEntries, q)
-
-	if len(tsEntries) == 0 {
-		return emptyScanner(), nil
-	}
-
-	// If we have index-narrowed positions from token/KV lookups, intersect
-	// using a set (not sorted merge) to preserve TS order.
-	var tsPositions []uint64
-	if b.positions != nil {
-		posSet := make(map[uint64]struct{}, len(b.positions))
-		for _, p := range b.positions {
-			posSet[p] = struct{}{}
-		}
-		for _, e := range tsEntries {
-			if _, ok := posSet[uint64(e.Pos)]; ok {
-				tsPositions = append(tsPositions, uint64(e.Pos))
-			}
-		}
-	} else {
-		tsPositions = make([]uint64, len(tsEntries))
-		for i, e := range tsEntries {
-			tsPositions[i] = uint64(e.Pos)
-		}
-	}
-
-	if len(tsPositions) == 0 {
-		return emptyScanner(), nil
-	}
-
-	// Replace positions with TS-ordered ones and disable time bounds checking
-	// (already handled by pruneTSEntriesByBounds).
-	b.positions = tsPositions
-	b.skipTimeBounds = true
-	return b.build(ctx, cursor, q), nil
-}
-
-// pruneTSEntriesByBounds filters TS index entries to those within the query time bounds.
-// The entries are sorted by TS, so we use binary search for lower and upper bounds.
-func pruneTSEntriesByBounds(entries []index.TSEntry, q Query) []index.TSEntry {
-	lower, upper := q.TimeBounds()
-
-	// Binary search for lower bound.
-	if !lower.IsZero() {
-		lowerNano := lower.UnixNano()
-		lo := sort.Search(len(entries), func(i int) bool {
-			return entries[i].TS >= lowerNano
-		})
-		entries = entries[lo:]
-	}
-
-	// Binary search for upper bound (exclusive).
-	if !upper.IsZero() {
-		upperNano := upper.UnixNano()
-		hi := sort.Search(len(entries), func(i int) bool {
-			return entries[i].TS >= upperNano
-		})
-		entries = entries[:hi]
-	}
-
-	return entries
 }
 
 // setMinPositionsFromBounds sets the scanner builder's minimum position from time bounds

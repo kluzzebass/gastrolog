@@ -186,25 +186,15 @@ func (s *QueryServer) searchDirect(
 	remoteIter, remoteHist, _ := s.collectRemote(ctx, q, remoteTokens)
 
 	// Histogram is computed only on the FIRST page of a paginated search.
-	// Subsequent pages return an empty histogram; the client keeps the
-	// page-1 histogram unchanged for the lifetime of the scroll. This is
-	// correct (the histogram is a function of the frozen window, which
-	// doesn't change between pages) and avoids two thorny problems:
-	//   1. Recomputing on every page burns CPU on large windows.
-	//   2. The narrowed search window would otherwise leak into the
-	//      histogram, making it report fewer records as the user scrolls.
-	var histogram []*apiv1.HistogramBucket
+	// Run it concurrently with record search so a slow level breakdown
+	// cannot block the 30s query deadline before the first row streams.
+	// The UI accepts histogram on any stream message (useSearch.ts).
+	var histCh chan []*apiv1.HistogramBucket
 	if resume == nil {
-		if s.histogramFullyLocal(ctx, histogramQ) {
-			localEng := s.orch.LocalVaultQueryEngine()
-			if s.lookupResolver != nil {
-				localEng.SetLookupResolver(s.lookupResolver)
-			}
-			histogram = HistogramToProto(localEng.ComputeHistogram(ctx, histogramQ, 50))
-		} else {
-			localHist := HistogramToProto(eng.ComputeHistogram(ctx, histogramQ, 50))
-			histogram = mergeHistogramBuckets(localHist, remoteHist)
-		}
+		histCh = make(chan []*apiv1.HistogramBucket, 1)
+		go func() {
+			histCh <- s.computePageHistogram(ctx, eng, histogramQ, remoteHist)
+		}()
 	}
 
 	localIter, getLocalToken := eng.Search(ctx, q, localResume)
@@ -235,7 +225,20 @@ func (s *QueryServer) searchDirect(
 		return token
 	}
 
-	return s.mergeAndStream(ctx, localIter, getToken, remoteIter, q.OrderBy, q.Reverse(), q.Limit, transform, histogram, serverStart, stream)
+	return s.mergeAndStream(ctx, localIter, getToken, remoteIter, q.OrderBy, q.Reverse(), q.Limit, transform, nil, serverStart, stream, histCh)
+}
+
+// computePageHistogram builds the page-1 volume histogram for a search.
+func (s *QueryServer) computePageHistogram(ctx context.Context, eng *query.Engine, histogramQ query.Query, remoteHist []*apiv1.HistogramBucket) []*apiv1.HistogramBucket {
+	if s.histogramFullyLocal(ctx, histogramQ) {
+		localEng := s.orch.LocalVaultQueryEngine()
+		if s.lookupResolver != nil {
+			localEng.SetLookupResolver(s.lookupResolver)
+		}
+		return HistogramToProto(localEng.ComputeHistogram(ctx, histogramQ, 50))
+	}
+	localHist := HistogramToProto(eng.ComputeHistogram(ctx, histogramQ, 50))
+	return mergeHistogramBuckets(localHist, remoteHist)
 }
 
 // splitResumeToken separates a unified resume token into local positions
@@ -394,6 +397,7 @@ func (s *QueryServer) mergeAndStream(
 	histogram []*apiv1.HistogramBucket,
 	serverStart time.Time,
 	stream *connect.ServerStream[apiv1.SearchResponse],
+	histCh chan []*apiv1.HistogramBucket,
 ) error {
 	sb := newStreamBatcher(stream, 100)
 	// Track the IngestTS of the last record actually emitted by this server
@@ -457,13 +461,30 @@ func (s *QueryServer) mergeAndStream(
 	synthOK := mergeInvolved && limitHit
 	tokenBytes := buildResumeTokenBytes(transform, getToken, mergeHighwater, reverse, lastLocalSet, lastLocalRec, synthOK)
 
-	return stream.Send(&apiv1.SearchResponse{
+	if err := stream.Send(&apiv1.SearchResponse{
 		Records:         sb.pending(),
 		ResumeToken:     tokenBytes,
 		HasMore:         len(tokenBytes) > 0,
 		Histogram:       histogram,
 		ServerElapsedMs: time.Since(serverStart).Milliseconds(),
-	})
+	}); err != nil {
+		return err
+	}
+
+	// Late histogram: records and resume token are already on the wire.
+	if histCh != nil {
+		select {
+		case h := <-histCh:
+			if len(h) > 0 {
+				return stream.Send(&apiv1.SearchResponse{
+					Histogram:       h,
+					ServerElapsedMs: time.Since(serverStart).Milliseconds(),
+				})
+			}
+		case <-ctx.Done():
+		}
+	}
+	return nil
 }
 
 // dedupWindow is the streaming cross-vault dedup state. Two copies of

@@ -238,6 +238,30 @@ func (m *Manager) FindSourceEntryIndex(chunkID chunk.ChunkID, ts time.Time) (uin
 	return 0, false, index.ErrIndexNotFound
 }
 
+// IngestIndexLen returns ErrIndexNotFound; memory index manager does not
+// maintain timestamp indexes.
+func (m *Manager) IngestIndexLen(chunkID chunk.ChunkID) (uint64, error) {
+	return 0, index.ErrIndexNotFound
+}
+
+// IngestIndexEntryAt returns ErrIndexNotFound; memory index manager does not
+// maintain timestamp indexes.
+func (m *Manager) IngestIndexEntryAt(chunkID chunk.ChunkID, rank uint64) (index.TSEntry, error) {
+	return index.TSEntry{}, index.ErrIndexNotFound
+}
+
+// SourceIndexLen returns ErrIndexNotFound; memory index manager does not
+// maintain timestamp indexes.
+func (m *Manager) SourceIndexLen(chunkID chunk.ChunkID) (uint64, error) {
+	return 0, index.ErrIndexNotFound
+}
+
+// SourceIndexEntryAt returns ErrIndexNotFound; memory index manager does not
+// maintain timestamp indexes.
+func (m *Manager) SourceIndexEntryAt(chunkID chunk.ChunkID, rank uint64) (index.TSEntry, error) {
+	return index.TSEntry{}, index.ErrIndexNotFound
+}
+
 // LoadIngestEntries returns ErrIndexNotFound; memory index manager does not
 // maintain timestamp indexes.
 func (m *Manager) LoadIngestEntries(chunkID chunk.ChunkID) ([]index.TSEntry, error) {

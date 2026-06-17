@@ -728,6 +728,52 @@ func TestSweepMissingReplicasRequestsOnlySealedAndAbsentEntries(t *testing.T) {
 	}
 }
 
+// SweepMissingReplicas must not request the entire missing set in one tick —
+// batching keeps catchup from storming the replication streams.
+func TestSweepMissingReplicasBatchesCatchupRequests(t *testing.T) {
+	t.Parallel()
+
+	fsm := vaultctlfsm.New()
+	cm := &reconcilerFakeChunkManager{}
+	base := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+
+	const total = maxMissingReplicaCatchupPerSweep + 4
+	ids := make([]chunk.ChunkID, total)
+	for i := range total {
+		id := chunk.NewChunkID()
+		ids[i] = id
+		sealedAt := base.Add(time.Duration(i) * time.Minute)
+		_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalCreateChunk(id, sealedAt, sealedAt, sealedAt)})
+		_ = fsm.Apply(&hraft.Log{Data: vaultctlfsm.MarshalSealChunk(id, sealedAt, 1, 1, sealedAt, sealedAt, sealedAt, false)})
+	}
+
+	orch := newTestOrch(t, Config{LocalNodeID: "node-A"})
+	fake := &captureCatchupReplicator{scheduledRet: 1}
+	orch.SetChunkReplicator(fake)
+
+	vaultInst := &VaultInstance{
+		VaultID:       glid.New(),
+		Type:         "memory",
+		Chunks:       cm,
+		IsFollower:   true,
+		LeaderNodeID: "node-leader",
+	}
+	rec := NewVaultLifecycleReconciler(orch, vaultInst.VaultID, vaultInst, "node-A", slog.Default())
+	rec.Wire(fsm)
+
+	rec.SweepMissingReplicas()
+
+	if got := len(fake.lastChunks); got != maxMissingReplicaCatchupPerSweep {
+		t.Fatalf("requested %d chunks, want batch cap %d", got, maxMissingReplicaCatchupPerSweep)
+	}
+	wantOldest := ids[:maxMissingReplicaCatchupPerSweep]
+	for i, id := range wantOldest {
+		if fake.lastChunks[i] != id {
+			t.Errorf("batch[%d] = %s, want oldest %s", i, fake.lastChunks[i], id)
+		}
+	}
+}
+
 // gastrolog-19241: when leadership transfers to a node that doesn't
 // have historical sealed chunks (e.g. a scale-out joiner that became
 // leader), SweepMissingReplicas on the LEADER must ask its follower

@@ -61,6 +61,6 @@ func NewFactory() index.ManagerFactory {
 			filejson.NewIndexer(dir, chunkManager, logger),
 		}
 
-		return NewManager(dir, indexers, logger), nil
+		return NewManager(dir, indexers, logger, chunkManager), nil
 	}
 }

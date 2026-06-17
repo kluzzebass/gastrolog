@@ -238,7 +238,7 @@ func newCloudFileInstance(t *testing.T, vaultID glid.GLID, store blobstore.Store
 	if err != nil {
 		t.Fatal(err)
 	}
-	im := indexfile.NewManager(dir, nil, nil)
+	im := indexfile.NewManager(dir, nil, nil, cm)
 	return &VaultInstance{
 		VaultID:  vaultID,
 		Type:    "cloud",
@@ -263,7 +263,7 @@ func newFileInstance(t *testing.T, vaultID glid.GLID) (*VaultInstance, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	im := indexfile.NewManager(dir, nil, nil)
+	im := indexfile.NewManager(dir, nil, nil, cm)
 	return &VaultInstance{
 		VaultID:  vaultID,
 		Type:    "file",
@@ -654,7 +654,7 @@ func setupCluster(t *testing.T, nodeIDs []string, vaultCount int, rotationRecord
 			if cmErr != nil {
 				t.Fatal(cmErr)
 			}
-			im := indexfile.NewManager(dir, nil, nil)
+			im := indexfile.NewManager(dir, nil, nil, cm)
 			vaultInst := &VaultInstance{
 				VaultID:  vaultIDs[i],
 				Type:    "file",

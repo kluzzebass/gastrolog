@@ -152,6 +152,13 @@ func (tr *ChunkReplicator) send(ctx context.Context, vaultID glid.GLID, nodeID s
 	}
 
 	if !ack.Ok {
+		// Tear down the stream so the next ImportSealedChunk opens a fresh
+		// handler on the follower. Leaving the stream up after a rejected
+		// ack left pending import state on the receiver while the sender
+		// moved on to the next chunk on the same stream — ImportBegin
+		// preempted the wedged import and spammed WARN on every catchup
+		// frame. See gastrolog-2o9e9.
+		tr.closeStream(vaultID, nodeID)
 		return fmt.Errorf("follower rejected command: %s", ack.Error)
 	}
 	return nil

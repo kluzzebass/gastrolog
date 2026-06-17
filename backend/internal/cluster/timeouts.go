@@ -5,10 +5,12 @@ import "time"
 // Operational timeouts for cross-node replication, forwarding, and consensus.
 // Grouped by the class of operation they protect.
 
-// ReplicationTimeout is the deadline for replicating data to follower nodes:
-// sealed chunk transfer and Raft consensus applies. Long enough for any
-// healthy transfer, short enough to release resources when a follower is down.
-const ReplicationTimeout = 10 * time.Second
+// ReplicationTimeout is the deadline for replicating one sealed chunk to a
+// follower: ImportBegin → ImportRecords → ImportCommit. Must cover large
+// sealed chunks (10k+ records) under ingest/replication load; 10s was
+// too short and caused mid-import abandons that cascaded into catchup
+// preempt storms (gastrolog-2o9e9).
+const ReplicationTimeout = 60 * time.Second
 
 // ForwardingTimeout is the deadline for lightweight single-command
 // operations: vault apply forwarding and other bounded single-shot

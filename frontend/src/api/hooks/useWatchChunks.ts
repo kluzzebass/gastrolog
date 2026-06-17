@@ -92,6 +92,15 @@ export function useWatchChunks() {
 
 export type ChunksCache = ChunkMeta[] | undefined;
 
+/** shouldRefetchChunksAfterDelete reports when a DELETED projection
+ * emptied the cache but ListChunks may still have entries. */
+export function shouldRefetchChunksAfterDelete(
+  prev: ChunksCache,
+  next: ChunksCache,
+): boolean {
+  return !!prev && prev.length > 0 && !!next && next.length === 0;
+}
+
 /**
  * handleEvent applies a single WatchChunksResponse to the React Query
  * cache. Each op patches the per-vault chunk list via setQueryData;
@@ -114,24 +123,44 @@ function handleEvent(
     return;
   }
 
+  const vaultId = encode(msg.vaultId);
+  const key = nodeKey(msg.nodeId);
+
+  // Don't patch the cache until the cold-start ListChunks snapshot has
+  // landed. Watch events that arrive during the initial fan-out only know
+  // about locally-replicated chunks and would replace the full list with a
+  // handful of recent seals.
+  const state = qc.getQueryState<ChunksCache>(["chunks", vaultId]);
+  if (state?.status !== "success") {
+    lastVersionByNode.set(key, msg.version);
+    return;
+  }
+
   // Version-gap drop detection per producing node: any non-contiguous
   // version step means the backend bus dropped events to this
   // subscriber for that node. Cold-start the affected vault so we
   // don't trust our local projection.
-  const key = nodeKey(msg.nodeId);
   const prevVer = lastVersionByNode.get(key) ?? 0n;
   if (prevVer > 0n && msg.version > prevVer + 1n) {
-    const vaultId = encode(msg.vaultId);
     qc.invalidateQueries({ queryKey: ["chunks", vaultId] });
     lastVersionByNode.set(key, msg.version);
     return;
   }
   lastVersionByNode.set(key, msg.version);
 
-  const vaultId = encode(msg.vaultId);
-  qc.setQueryData<ChunksCache>(["chunks", vaultId], (prev) =>
-    mutateCache(prev, msg),
-  );
+  qc.setQueryData<ChunksCache>(["chunks", vaultId], (prev) => {
+    const next = mutateCache(prev, msg);
+    // Sequential DELETED events drain the stream projection without
+    // tripping version-gap invalidation. After a bulk delete (e.g.
+    // retention during restart) the cache can sit at [] while
+    // ListChunks still returns the authoritative manifest.
+    if (msg.op === ChunkChangeOp.DELETED && shouldRefetchChunksAfterDelete(prev, next)) {
+      queueMicrotask(() => {
+        qc.invalidateQueries({ queryKey: ["chunks", vaultId] });
+      });
+    }
+    return next;
+  });
 
   // Indexes for a chunk are built by a post-seal background job on the
   // backend and surfaced via the separate GetIndexes RPC (sibling query

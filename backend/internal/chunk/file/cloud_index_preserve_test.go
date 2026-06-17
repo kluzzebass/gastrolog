@@ -38,7 +38,7 @@ func newCloudManagerWithIndexes(t *testing.T) (*Manager, string, *blobstore.Memo
 
 	// Wire file-based token indexer using the same dir as the chunk manager.
 	tokenIndexer := filetoken.NewIndexer(dir, cm, nil)
-	im := indexfile.NewManager(dir, []index.Indexer{tokenIndexer}, nil)
+	im := indexfile.NewManager(dir, []index.Indexer{tokenIndexer}, nil, cm)
 	cm.SetIndexBuilders([]chunk.ChunkIndexBuilder{im.BuildAdapter()})
 
 	t.Cleanup(func() { _ = cm.Close() })
@@ -284,7 +284,7 @@ func TestRestartPreservesCloudIndexes(t *testing.T) {
 	}
 
 	tokenIndexer := filetoken.NewIndexer(dir, cm, nil)
-	im := indexfile.NewManager(dir, []index.Indexer{tokenIndexer}, nil)
+	im := indexfile.NewManager(dir, []index.Indexer{tokenIndexer}, nil, cm)
 	cm.SetIndexBuilders([]chunk.ChunkIndexBuilder{im.BuildAdapter()})
 
 	chunkID := appendSealAndUpload(t, cm, 50)

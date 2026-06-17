@@ -120,6 +120,18 @@ func (f *retentionFakeIndexManager) FindIngestEntryIndex(chunkID chunk.ChunkID, 
 func (f *retentionFakeIndexManager) FindSourceEntryIndex(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error) {
 	return 0, false, index.ErrIndexNotFound
 }
+func (f *retentionFakeIndexManager) IngestIndexLen(chunkID chunk.ChunkID) (uint64, error) {
+	return 0, index.ErrIndexNotFound
+}
+func (f *retentionFakeIndexManager) IngestIndexEntryAt(chunkID chunk.ChunkID, rank uint64) (index.TSEntry, error) {
+	return index.TSEntry{}, index.ErrIndexNotFound
+}
+func (f *retentionFakeIndexManager) SourceIndexLen(chunkID chunk.ChunkID) (uint64, error) {
+	return 0, index.ErrIndexNotFound
+}
+func (f *retentionFakeIndexManager) SourceIndexEntryAt(chunkID chunk.ChunkID, rank uint64) (index.TSEntry, error) {
+	return index.TSEntry{}, index.ErrIndexNotFound
+}
 func (f *retentionFakeIndexManager) OpenJSONPathIndex(chunkID chunk.ChunkID) (*index.Index[index.JSONPathIndexEntry], index.JSONIndexStatus, error) {
 	return nil, index.JSONComplete, nil
 }

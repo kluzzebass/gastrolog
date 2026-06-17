@@ -245,17 +245,15 @@ func (o *Orchestrator) ListClusterChunkMetas(vaultID glid.GLID) ([]chunk.ChunkMe
 
 // ListAllChunkMetas returns chunk metadata from ALL local instances of a vault,
 // each tagged with its instance ID and type.
-// ListAllChunkMetas returns chunk metadata from all local vault instances.
-// When a vault has multiple vault instances for the same instance on the same
-// node (leader + same-node follower storages), the leader's view is preferred
-// to avoid double-counting chunks. Follower-only instances are still included
-// (the leader node is elsewhere; this node contributes replica presence).
 //
-// If this node hosts no vault instances for the vault (all placements are on
-// other nodes), this returns (nil, nil) so the server's ListChunks can still
-// fan out to peers. Writes still gate on Vault.ReadinessErr and will reject
-// that case with ErrVaultNotReady. See vault_readiness.go for the canonical
-// readiness definition.
+// Sealed chunks are projected from the vault-ctl FSM manifest
+// (VaultManifestEntriesFromCtlFSM) so every voter sees the full cluster chunk
+// set regardless of how many blobs this node's chunk manager has registered
+// yet. Without this, ListChunks fell back to Chunks.List() (local replicas
+// only) and the inspector showed a handful of chunks whenever remote fan-out
+// timed out under load. Memory-mode vaults without an FSM fall back to the
+// local chunk manager. The active head chunk is appended from the chunk
+// manager when it is not yet in the FSM snapshot.
 //
 // Caller-side deduplication across nodes happens in the server's ListChunks.
 func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]VaultChunkMeta, error) {
@@ -273,25 +271,50 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]VaultChunkMeta, e
 		return nil, err
 	}
 
-	metas, err := vaultInst.Chunks.List()
-	if err != nil {
-		return nil, fmt.Errorf("list chunks for vault %s: %w", vaultID, err)
+	vaultType := vaultInst.Type
+	overlay := vaultInst.OverlayFromFSM
+
+	var entries []vaultctlfsm.ManifestEntry
+	if fsmEntries := o.VaultManifestEntriesFromCtlFSM(vaultID); len(fsmEntries) > 0 {
+		entries = fsmEntries
+	} else {
+		entries = vaultManifestEntries(vaultInst)
 	}
-	var result []VaultChunkMeta
-	for _, m := range metas {
-		// Override CloudBacked / Archived from the vault-ctl Raft FSM
-		// (the cluster-wide source of truth). Without this, follower
-		// nodes always report CloudBacked=false because their local
-		// chunk manager has CloudStore=nil. See gastrolog-asg4l.
-		if vaultInst.OverlayFromFSM != nil {
-			m = vaultInst.OverlayFromFSM(m)
+	if len(entries) == 0 {
+		return nil, nil
+	}
+
+	result := make([]VaultChunkMeta, 0, len(entries))
+	seen := make(map[chunk.ChunkID]struct{}, len(entries))
+	for _, e := range entries {
+		m := e.ToChunkMeta()
+		if overlay != nil {
+			m = overlay(m)
 		}
 		result = append(result, VaultChunkMeta{
 			ChunkMeta: m,
-			VaultID:      vaultInst.VaultID,
-			VaultType:  vaultInst.Type,
+			VaultID:   vaultInst.VaultID,
+			VaultType: vaultType,
 		})
+		seen[m.ID] = struct{}{}
 	}
+
+	// Active chunk: chunk manager holds fresher running maxima than the last
+	// FSM apply for the open head (documented manifest exception).
+	if active := vaultInst.Chunks.Active(); active != nil {
+		if _, ok := seen[active.ID]; !ok {
+			m := *active
+			if overlay != nil {
+				m = overlay(m)
+			}
+			result = append(result, VaultChunkMeta{
+				ChunkMeta: m,
+				VaultID:   vaultInst.VaultID,
+				VaultType: vaultType,
+			})
+		}
+	}
+
 	return result, nil
 }
 

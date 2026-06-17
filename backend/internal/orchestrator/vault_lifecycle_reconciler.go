@@ -70,6 +70,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -825,7 +826,11 @@ func (r *VaultLifecycleReconciler) SweepMissingReplicas() {
 	}
 
 	// Walk the FSM manifest and collect the missing-locally subset.
-	var missing []chunk.ChunkID
+	type missingEntry struct {
+		id       chunk.ChunkID
+		writeEnd time.Time
+	}
+	var missing []missingEntry
 	for _, e := range r.fsm.List() {
 		if !e.IsSealed() {
 			continue
@@ -836,15 +841,33 @@ func (r *VaultLifecycleReconciler) SweepMissingReplicas() {
 		if have[e.ID] {
 			continue
 		}
-		missing = append(missing, e.ID)
+		missing = append(missing, missingEntry{id: e.ID, writeEnd: e.WriteEnd})
 	}
 
 	if len(missing) == 0 {
 		return
 	}
 
+	// Oldest-first so search/catchup converges on the historical tail
+	// before chasing the freshest seals still in flight on the wire.
+	sort.Slice(missing, func(i, j int) bool {
+		return missing[i].writeEnd.Before(missing[j].writeEnd)
+	})
+
+	totalMissing := len(missing)
+	if totalMissing > maxMissingReplicaCatchupPerSweep {
+		missing = missing[:maxMissingReplicaCatchupPerSweep]
+		r.logger.Info("missing-replica sweep: batching catchup request",
+			"missing_total", totalMissing, "batch", len(missing))
+	}
+
+	chunkIDs := make([]chunk.ChunkID, len(missing))
+	for i, m := range missing {
+		chunkIDs[i] = m.id
+	}
+
 	r.logger.Info("missing-replica sweep: requesting catchup",
-		"peers", peers, "missing", len(missing))
+		"peers", peers, "missing", len(chunkIDs), "missing_total", totalMissing)
 
 	// Ask every peer. Whichever peer has a given chunk schedules the
 	// push; peers that don't have it return scheduled=0 silently. The
@@ -853,7 +876,7 @@ func (r *VaultLifecycleReconciler) SweepMissingReplicas() {
 	for _, peerNodeID := range peers {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		scheduled, err := r.orch.chunkReplicator.RequestReplicaCatchup(
-			ctx, peerNodeID, r.vaultID, missing, r.localNodeID)
+			ctx, peerNodeID, r.vaultID, chunkIDs, r.localNodeID)
 		cancel()
 		if err != nil {
 			// The next sweep tick will retry. Causes: peer changed after
@@ -861,11 +884,11 @@ func (r *VaultLifecycleReconciler) SweepMissingReplicas() {
 			// warming up. None terminal — the FSM diff is local state, so
 			// we converge on the next tick.
 			r.logger.Warn("missing-replica sweep: request failed",
-				"peer", peerNodeID, "missing", len(missing), "error", err)
+				"peer", peerNodeID, "missing", len(chunkIDs), "error", err)
 			continue
 		}
 		r.logger.Info("missing-replica sweep: peer scheduled pushes",
-			"peer", peerNodeID, "scheduled", scheduled, "requested", len(missing))
+			"peer", peerNodeID, "scheduled", scheduled, "requested", len(chunkIDs))
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"gastrolog/internal/glid"
 	"log/slog"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -375,6 +376,81 @@ func TestCatchupSelectedChunksFromFollowerSucceeds(t *testing.T) {
 	if scheduled != 1 {
 		t.Errorf("scheduled = %d, want 1 (the single sealed chunk)", scheduled)
 	}
+}
+
+// blockingCatchupReplicator blocks ImportSealedChunk until release is closed
+// so tests can observe in-flight catchup deduplication.
+type blockingCatchupReplicator struct {
+	release chan struct{}
+	imports atomic.Int32
+}
+
+func (b *blockingCatchupReplicator) ImportSealedChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
+	b.imports.Add(1)
+	<-b.release
+	return nil
+}
+func (b *blockingCatchupReplicator) DeleteChunk(_ context.Context, _ string, _ glid.GLID, _ chunk.ChunkID) error {
+	return nil
+}
+func (b *blockingCatchupReplicator) RequestReplicaCatchup(_ context.Context, _ string, _ glid.GLID, _ []chunk.ChunkID, _ string) (uint32, error) {
+	return 0, nil
+}
+
+// CatchupSelectedChunks must not stack a second async push batch for the
+// same (vault, requester) while the first is still importing.
+func TestCatchupSelectedChunksSkipsDuplicateWhileInFlight(t *testing.T) {
+	t.Parallel()
+	orch := newTestOrch(t, Config{LocalNodeID: "node-peer"})
+	orch.logger = slog.Default()
+
+	vaultID := glid.New()
+	vaultInst := newReplicationInstance(t, vaultID, nil, false, "")
+	vault := NewVault(vaultID, vaultInst)
+	orch.RegisterVault(vault)
+
+	if err := orch.AppendToVault(vaultID, chunk.ChunkID{}, testRecord("rec-0")); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	active := vaultInst.Chunks.Active()
+	if err := orch.SealActiveChunk(vaultID, active.ID); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	block := make(chan struct{})
+	mock := &blockingCatchupReplicator{release: block}
+	orch.SetChunkReplicator(mock)
+
+	requester := "node-requester"
+	scheduled1, err := orch.CatchupSelectedChunks(
+		context.Background(), vaultID, requester, []chunk.ChunkID{active.ID})
+	if err != nil {
+		t.Fatalf("first catchup: %v", err)
+	}
+	if scheduled1 != 1 {
+		t.Fatalf("scheduled1 = %d, want 1", scheduled1)
+	}
+
+	deadline := time.After(2 * time.Second)
+	for mock.imports.Load() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for catchup import to start")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	scheduled2, err := orch.CatchupSelectedChunks(
+		context.Background(), vaultID, requester, []chunk.ChunkID{active.ID})
+	if err != nil {
+		t.Fatalf("second catchup: %v", err)
+	}
+	if scheduled2 != 0 {
+		t.Errorf("scheduled2 = %d, want 0 while first batch in flight", scheduled2)
+	}
+
+	close(block)
 }
 
 // ==========================================================================

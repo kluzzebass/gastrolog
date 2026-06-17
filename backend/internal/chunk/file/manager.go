@@ -189,6 +189,10 @@ type Manager struct {
 	// Protected by mu. See gastrolog-2kysn (Rubicon E1).
 	externalGLCB map[chunk.ChunkID]string
 
+	// glcbMapped holds one whole-file mmap per sealed chunk for local data.glcb.
+	// Aliased by OpenCursor, index TS lookups, and histogram paths.
+	glcbMapped sync.Map // chunk.ChunkID → *mappedGLCBEntry
+
 	zstdEnc        *zstd.Encoder
 	zstdEncMu      sync.Mutex                // serializes concurrent CompressChunk calls sharing zstdEnc
 	cloudIdx       *cloudIndex               // local B+ tree cache of cloud chunk metadata (nil if no cloud store)
@@ -857,10 +861,9 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	// Prefer data.glcb when present. After PostSealProcess (post-seal
 	// pipeline stage 7c stage 2a), every sealed chunk has a data.glcb
 	// alongside the multi-file artifacts; the GLCB cursor reads through
-	// chunkcloud's seekable-zstd path with no per-chunk mmap lock needed
-	// (the file is immutable post-rename). Multi-file remains the
-	// fallback until step 7c stage 3 deletes that path. See
-	// gastrolog-24m1t.
+	// a whole-file mmap with the same per-chunk read lock as multi-file
+	// mmap cursors (release-on-Close). Multi-file remains the fallback
+	// until step 7c stage 3 deletes that path. See gastrolog-24m1t.
 	if sealed && m.hasLocalGLCB(id) {
 		if cursor, err := m.openLocalGLCBCursor(id); err == nil {
 			return cursor, nil
@@ -2995,6 +2998,7 @@ func (m *Manager) deleteInternal(id chunk.ChunkID) error {
 	delete(m.metas, id)          // no-op for cloud chunks (not in metas)
 	delete(m.storageClasses, id) // clean up storage class cache
 	delete(m.externalGLCB, id)   // clean up external pipeline GLCB path, if any
+	m.evictMappedGLCB(id)
 	m.mu.Unlock()
 	return nil
 }
@@ -3157,25 +3161,61 @@ func (m *Manager) RefreshDiskSizes(id chunk.ChunkID) {
 // reader pipeline. Returns the underlying os error (typically ENOENT) when
 // data.glcb is absent so callers can fall back to a remote read.
 func (m *Manager) openLocalGLCBCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
-	path := m.glcbPath(id)
-	f, err := os.Open(filepath.Clean(path))
+	chunkLock := m.chunkLockFor(id)
+	chunkLock.RLock()
+
+	m.mu.Lock()
+	meta := m.lookupMeta(id)
+	m.mu.Unlock()
+	if meta == nil {
+		chunkLock.RUnlock()
+		return nil, chunk.ErrChunkNotFound
+	}
+
+	blob, err := m.mappedGLCB(id)
 	if err != nil {
+		chunkLock.RUnlock()
 		return nil, err
 	}
-	rd, err := chunkcloud.NewCacheReader(f)
-	if err != nil {
-		_ = f.Close()
-		return nil, err
-	}
-	return chunkcloud.NewSeekableCursor(rd, id), nil
+	blob.Retain()
+	rd := blob.Reader()
+	return chunkcloud.NewSeekableCursorWithClose(rd, id, func() {
+		blob.Release()
+		chunkLock.RUnlock()
+	}), nil
 }
 
 // hasLocalGLCB reports whether the chunk's data.glcb is present on disk.
 // Used by read-path dispatch to prefer the GLCB cursor when available.
 // Resolves the externally-registered path for pipeline-built chunks.
 func (m *Manager) hasLocalGLCB(id chunk.ChunkID) bool {
+	if v, ok := m.glcbMapped.Load(id); ok {
+		e := v.(*mappedGLCBEntry)
+		if _, err := os.Stat(e.path); err == nil {
+			return true
+		}
+		m.evictMappedGLCB(id)
+	}
 	_, err := os.Stat(m.glcbPath(id))
 	return err == nil
+}
+
+// GLCBBlobPath implements chunk.GLCBBlobPathProvider.
+func (m *Manager) GLCBBlobPath(id chunk.ChunkID) (string, bool) {
+	path := m.glcbPath(id)
+	if v, ok := m.glcbMapped.Load(id); ok {
+		e := v.(*mappedGLCBEntry)
+		if e.path == path {
+			if _, err := os.Stat(path); err == nil {
+				return path, true
+			}
+			m.evictMappedGLCB(id)
+		} else {
+			m.evictMappedGLCB(id)
+		}
+	}
+	_, err := os.Stat(path)
+	return path, err == nil
 }
 
 // glcbPath returns the on-disk path to a chunk's data.glcb. For chunks
@@ -3361,10 +3401,15 @@ func (m *Manager) runEvictionSweep(label string, rules []evictionRule) (int, int
 		if matched == "" {
 			continue
 		}
+		chunkLock := m.chunkLockFor(c.id)
+		chunkLock.Lock()
 		if err := os.Remove(c.path); err != nil {
+			chunkLock.Unlock()
 			m.logger.Debug("cache eviction: remove failed", "chunk", c.id, "error", err)
 			continue
 		}
+		m.evictMappedGLCB(c.id)
+		chunkLock.Unlock()
 		m.lastAccessMu.Lock()
 		delete(m.lastAccess, c.id)
 		m.lastAccessMu.Unlock()
@@ -4380,6 +4425,7 @@ func (m *Manager) RegisterExternalGLCB(id chunk.ChunkID, glcbPath string, info c
 		sourceIdxOffset:   info.SourceIdxOffset,
 		sourceIdxSize:     info.SourceIdxSize,
 	}
+	m.evictMappedGLCB(id)
 	m.externalGLCB[id] = glcbPath
 	m.logger.Debug("registered external pipeline GLCB",
 		"chunk", id, "path", glcbPath, "records", info.RecordCount)
