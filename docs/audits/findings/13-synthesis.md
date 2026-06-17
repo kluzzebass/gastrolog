@@ -58,23 +58,24 @@
 ## Remediation epics (proposed)
 
 ### Epic A — Query index unification (G1, G7)
-**Owner issue:** gastrolog-2o9e9  
+**Sub-epic:** **gastrolog-18k9l**  
+**Anchor:** gastrolog-2o9e9 (reparented from gastrolog-q9tek)  
 Unify `buildTSOrderedScanner` on `FindIngestRank` + position scanner; remove `LoadIngestEntries` from search hot path; align histogram rank-miss behavior.
 
 ### Epic B — Vault-ctl read-after-write (G4)
-Mirror `raftstore.forwardAndWait` / `ForwardApplyResponse.applied_index` for vault-ctl `ForwardVaultApply`; remove reliance on "usually catches up."
+**Sub-epic:** **gastrolog-2e3mt** — gastrolog-4l24u
 
 ### Epic C — FSM-grounded chunk metadata (G2)
-Single reader API; followers don't maintain divergent `CloudBacked`; retire `OverlayFromFSM` call sites; fix `manifest_reader` local-only rank.
+**Sub-epic:** **gastrolog-64ipe**
 
 ### Epic D — Pipeline event durability (G5)
-Blocking or durable completed-segment handoff; vault-ctl publish events for segment pull; remove sweep-001–004.
+**Sub-epic:** **gastrolog-36wys** — root-cause tasks (audit-ingestion-007, -008, …)
 
 ### Epic E — Compensator retirement program (G6, G9)
-Inventory in [`04-sweep-compensators.md`](./04-sweep-compensators.md); per sweep: fix upstream → delete tick. Start with vaultCatchup (sweep-010) and cloud backfill (sweep-013).
+**Sub-epic:** **gastrolog-8gmd0** — sweep-001–018 + gastrolog-2i62e, 5vwav, 12gue, 3fu9t, 576bm
 
-### Epic F — Layering & cluster-first transport (G8, server findings)
-Move ingester contracts; thin server handlers; ingester RPC forward; degraded-peer wire signal.
+### Epic F — Layering & cluster-first transport (G8, G10)
+**Sub-epic:** **gastrolog-3471q**
 
 ---
 
@@ -93,21 +94,10 @@ Move ingester contracts; thin server handlers; ingester RPC forward; degraded-pe
 
 ---
 
-## dcat children filed in Phase 13
+## dcat tracker (complete for P0/P1)
 
-| Finding | Issue | Priority |
-|---------|-------|----------|
-| audit-cluster-001 | gastrolog-4l24u (vault-ctl apply barrier) | 1 |
-| audit-cmd-002 | gastrolog-4gp8h (add-storage NodeId) | 1 |
-| audit-system-001/002 | gastrolog-2bv1x (storage class fallback) | 1 |
-| audit-server-001/002 | gastrolog-5kdzj (ingester RPC cluster-first) | 2 |
-| sweep-010 / audit-orch-005 | gastrolog-3fu9t (vaultCatchup compensator lattice) | 2 |
-| sweep-013 / audit-orch-008 | gastrolog-576bm (cloud backfill 5s compensator) | 2 |
+All P0/P1 findings and sweeps filed under sub-epics. See [issue-map.md](../issue-map.md). P2 remain memo-only.
 
-**Not duplicated (reference only):** gastrolog-2o9e9, 2i62e, 5vwav, 12gue, 3ukgz, 9ohip.
+## Audit epic closure
 
----
-
-## Audit complete
-
-Phases 0–13 documentation complete. Remediation is **separate epics** (A–F above). Epic gastrolog-2p313 can move to `in_review` after user validates docs.
+Phases 0–13 documentation + P0/P1 tracker complete. gastrolog-2p313 eligible for `in_review` after your review. Remediation execution is separate (sub-epics A–F).
