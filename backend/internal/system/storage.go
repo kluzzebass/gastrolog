@@ -282,6 +282,24 @@ func StorageIDForNode(nodeID string, v VaultConfig, nscs []NodeStorageConfig) st
 	return SyntheticStorageID(nodeID)
 }
 
+// PlacementNodeIDs returns the unique node ID of every vault placement member.
+func PlacementNodeIDs(placements []VaultPlacement, nscs []NodeStorageConfig) []string {
+	seen := make(map[string]struct{})
+	var out []string
+	for _, p := range placements {
+		nid := NodeIDForStorage(p.StorageID, nscs)
+		if nid == "" {
+			continue
+		}
+		if _, ok := seen[nid]; ok {
+			continue
+		}
+		seen[nid] = struct{}{}
+		out = append(out, nid)
+	}
+	return out
+}
+
 // LeaderNodeID derives the leader node from placements + storage configs.
 func LeaderNodeID(placements []VaultPlacement, nscs []NodeStorageConfig) string {
 	storageID := LeaderStorageID(placements)

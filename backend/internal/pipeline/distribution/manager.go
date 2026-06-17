@@ -52,6 +52,7 @@ type vaultDist struct {
 	localHolder func() bool
 	mu          sync.RWMutex
 	segments    map[glid.GLID]string // segment ID → on-disk path
+	retired     map[glid.GLID]struct{} // released from vault-ctl; skip rescan republish
 }
 
 func newVaultDist(root string, cfg VaultConfig) (*vaultDist, error) {
@@ -66,6 +67,7 @@ func newVaultDist(root string, cfg VaultConfig) (*vaultDist, error) {
 		publisher:   cfg.Publisher,
 		localHolder: cfg.LocalHolder,
 		segments:    make(map[glid.GLID]string),
+		retired:     make(map[glid.GLID]struct{}),
 	}, nil
 }
 
@@ -142,8 +144,9 @@ func (v *vaultDist) stranded(vaultID glid.GLID) []segmentation.CompletedSegment 
 		}
 		v.mu.RLock()
 		_, known := v.segments[segID]
+		_, retired := v.retired[segID]
 		v.mu.RUnlock()
-		if known {
+		if known || retired {
 			continue
 		}
 		path := paths.CompletedSegment(v.root, segID)
@@ -244,6 +247,27 @@ func (m *Manager) UnregisterVault(vaultID glid.GLID) {
 	m.mu.Lock()
 	delete(m.vaults, vaultID)
 	m.mu.Unlock()
+}
+
+// RetireSegments marks segments released from the vault-ctl registry so rescan
+// does not republish completed/ files that still exist on disk. Also drops
+// in-memory pull paths.
+func (m *Manager) RetireSegments(vaultID glid.GLID, segmentIDs []glid.GLID) {
+	if len(segmentIDs) == 0 {
+		return
+	}
+	m.mu.Lock()
+	v := m.vaults[vaultID]
+	m.mu.Unlock()
+	if v == nil {
+		return
+	}
+	v.mu.Lock()
+	for _, id := range segmentIDs {
+		delete(v.segments, id)
+		v.retired[id] = struct{}{}
+	}
+	v.mu.Unlock()
 }
 
 // Run consumes completed segments and pull requests until ctx is cancelled.

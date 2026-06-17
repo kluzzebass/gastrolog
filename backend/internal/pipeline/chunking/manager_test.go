@@ -90,6 +90,105 @@ func TestManagerBuildOnceBuildsGLCBAndAnnouncesSeal(t *testing.T) {
 	}
 }
 
+func TestManagerBuildOnceReleasesCompletedRegistry(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	segID := glid.New()
+	vaultID := glid.New()
+	chunkID := chunk.NewChunkID()
+	home := t.TempDir()
+	writeHeadSegment(t, home, segID, vaultID, []recordForSeg{{0, base, "one"}})
+
+	fsm := vaultctlfsm.New()
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalPublishCompletedSegment(vaultctlfsm.CompletedSegmentEntry{
+		SegmentID:     segID,
+		RecordCount:   1,
+		ByteSize:      1,
+		FirstIngestTS: base,
+		LastIngestTS:  base,
+		Checksum:      1,
+		PublishedAt:   base,
+	}))
+	openedAt := base
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
+		SegmentID:         segID,
+		FirstRecordNumber: 0,
+		LastRecordNumber:  0,
+		SliceBytes:        4096,
+		RefAddedAt:        openedAt,
+	}))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, base.Add(time.Minute)))
+
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot: home,
+		ChunkRoot: filepath.Join(home, "chunks"),
+		FSM:       fsm,
+		Locate:    chunking.HeadSegmentLocator{Root: home},
+		Applier:   &fsmApplier{fsm: fsm},
+		IsLeader:  func() bool { return true },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.BuildOnce(t.Context(), vaultID); err != nil {
+		t.Fatalf("BuildOnce: %v", err)
+	}
+	if fsm.GetCompletedSegment(segID) != nil {
+		t.Fatal("completed segment registry entry should be released")
+	}
+}
+
+func TestManagerBuildOncePurgesHeadStaging(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	segID := glid.New()
+	vaultID := glid.New()
+	chunkID := chunk.NewChunkID()
+	home := t.TempDir()
+	writeHeadSegment(t, home, segID, vaultID, []recordForSeg{{0, base, "one"}})
+	headPath := filepath.Join(home, "head", segID.String())
+
+	fsm := vaultctlfsm.New()
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalPublishCompletedSegment(vaultctlfsm.CompletedSegmentEntry{
+		SegmentID:     segID,
+		RecordCount:   1,
+		ByteSize:      1,
+		FirstIngestTS: base,
+		LastIngestTS:  base,
+		Checksum:      1,
+		PublishedAt:   base,
+	}))
+	openedAt := base
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
+		SegmentID:         segID,
+		FirstRecordNumber: 0,
+		LastRecordNumber:  0,
+		SliceBytes:        4096,
+		RefAddedAt:        openedAt,
+	}))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, base.Add(time.Minute)))
+
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot: home,
+		ChunkRoot: filepath.Join(home, "chunks"),
+		FSM:       fsm,
+		Locate:    chunking.HeadSegmentLocator{Root: home},
+		Applier:   &fsmApplier{fsm: fsm},
+		IsLeader:  func() bool { return true },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.BuildOnce(t.Context(), vaultID); err != nil {
+		t.Fatalf("BuildOnce: %v", err)
+	}
+	if _, err := os.Stat(headPath); !os.IsNotExist(err) {
+		t.Fatalf("head segment should be purged after build+seal, stat err=%v", err)
+	}
+}
+
 func TestManagerMissingSegmentNudgesCollection(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)

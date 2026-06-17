@@ -11,6 +11,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/glid"
+	"gastrolog/internal/logging"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/vaultraft/vaultctlfsm"
@@ -26,6 +27,11 @@ var ErrNotRunning = errors.New("chunking manager not running")
 // successful tick-driven step re-arms the event chain, so this only bounds
 // stall recovery, not steady-state latency.
 const replanInterval = 2 * time.Second
+
+// sealRetryInterval bounds how often a home retries CmdSealChunk after a
+// failed forward/apply. Without it every replanInterval tick on every home
+// logs and hammers the vault-ctl leader while sealedManifest is pending.
+const sealRetryInterval = 15 * time.Second
 
 // VaultCtlApplier applies marshaled vault-ctl commands for one vault.
 type VaultCtlApplier interface {
@@ -55,6 +61,10 @@ type VaultConfig struct {
 	// local queries — the FSM onSeal callback already ran and found no
 	// file on disk. Optional.
 	OnBuilt func(chunk.ChunkID)
+	// RequiredHolders returns vault placement member node IDs that must appear
+	// in each segment's holder set before the leader proposes ReleaseSegments.
+	// Nil or empty means no holder gate (single-node tests).
+	RequiredHolders func() []string
 	// IndexOpener opens a completed segment for planner indexing. Defaults
 	// to BuildOrderedIndex when nil (tests may inject a counting wrapper).
 	IndexOpener func(path string) (*OrderedIndex, error)
@@ -70,9 +80,37 @@ type vaultChunking struct {
 	// instead of re-opening every segment on each planOnce.
 	segmentIndexCache map[glid.GLID]*OrderedIndex
 	doneBuild         buildKey
+	// donePostSeal tracks head-purge + release-queue work already done for a
+	// sealed manifest so seal retries do not re-purge or re-enqueue segments.
+	donePostSeal buildKey
+	// doneSealProposed stops vault-ctl CmdSealChunk replays after the first
+	// successful Apply for a sealed manifest; without it every wake/tick on
+	// every home floods Raft while sealedManifest is still pending locally.
+	doneSealProposed buildKey
+	// sealAttemptKey/lastSealAttempt rate-limit CmdSealChunk retries after
+	// forward failures (e.g. stale vault-ctl leader) so tick loops stay quiet.
+	sealAttemptKey  buildKey
+	lastSealAttempt time.Time
+	// doneOnBuilt ensures OnBuilt fires once per sealed manifest build.
+	doneOnBuilt buildKey
+	// lastBuild caches the most recent GLCB build for seal retries without
+	// re-reading every segment on each wake/tick while sealedManifest pending.
+	lastBuild struct {
+		key    buildKey
+		result BuildResult
+		ok     bool
+	}
+	// pendingSeal is a copy of the sealed manifest retained after CmdSealChunk
+	// clears sealedManifest cluster-wide so follower homes can still build.
+	pendingSeal *vaultctlfsm.OpenChunkManifest
+	// pendingRelease holds segment IDs awaiting ReleaseSegments once every
+	// required vault home has committed a holder receipt.
+	pendingRelease []glid.GLID
 	// unsubPublish removes this vault's publish-callback subscription on the
 	// shared FSM fan-out.
 	unsubPublish func()
+	// unsubAckHolder removes the holder-ack subscription used to retry release.
+	unsubAckHolder func()
 	// wake coalesces plan/build triggers for the per-vault worker goroutine.
 	// FSM callbacks (publish, open-manifest, ref-added, sealed-manifest) fire
 	// on the Raft FSM-apply goroutine and only poke this signal — running the
@@ -80,6 +118,10 @@ type vaultChunking struct {
 	// through raft.Apply on the same group, and that apply cannot complete
 	// while the FSM goroutine is parked inside the callback.
 	wake *notify.Signal
+	// releaseWake coalesces holder-ack triggers for releaseOnce only. Holder
+	// receipts are frequent during ingest; waking the full plan/build loop on
+	// each ack rebuilds GLCBs and floods vault-ctl with duplicate proposals.
+	releaseWake *notify.Signal
 	// stopWorker cancels the per-vault worker; nil until the worker starts.
 	stopWorker context.CancelFunc
 }
@@ -112,12 +154,15 @@ func newVaultChunking(cfg VaultConfig) (*vaultChunking, error) {
 	return &vaultChunking{
 		cfg:               cfg,
 		wake:              notify.NewSignal(),
+		releaseWake:       notify.NewSignal(),
 		segmentIndexCache: make(map[glid.GLID]*OrderedIndex),
 	}, nil
 }
 
 // Config configures a ChunkingManager.
-type Config struct{}
+type Config struct {
+	Logger *slog.Logger
+}
 
 // Manager runs per-home chunking for registered vaults. The vault leader
 // proposes manifest edits via Plan (event-driven FSM callbacks); every home
@@ -135,10 +180,18 @@ type Manager struct {
 
 // New returns a chunking manager.
 func New(cfg Config) *Manager {
+	cfg.Logger = compChunking.Apply(logging.Default(cfg.Logger))
 	return &Manager{
 		cfg:    cfg,
 		vaults: make(map[glid.GLID]*vaultChunking),
 	}
+}
+
+func (m *Manager) logger() *slog.Logger {
+	if m.cfg.Logger != nil {
+		return m.cfg.Logger
+	}
+	return slog.Default()
 }
 
 // RegisterVault adds a vault chunking path and wires vault-ctl FSM callbacks.
@@ -159,11 +212,17 @@ func (m *Manager) RegisterVault(vaultID glid.GLID, cfg VaultConfig) error {
 	// All four FSM callbacks coalesce into the same wake signal; the worker
 	// runs a plan step followed by a build step on every wake, and both
 	// no-op quickly when there is nothing to do.
-	cfg.FSM.SetOnSealedManifest(func(*vaultctlfsm.OpenChunkManifest) {
+	cfg.FSM.SetOnSealedManifest(func(m *vaultctlfsm.OpenChunkManifest) {
+		v.mu.Lock()
+		v.pendingSeal = m
+		v.mu.Unlock()
 		v.wake.Notify()
 	})
 	v.unsubPublish = cfg.FSM.AddOnPublishCompletedSegment(func(vaultctlfsm.CompletedSegmentEntry) {
 		v.wake.Notify()
+	})
+	v.unsubAckHolder = cfg.FSM.AddOnAckSegmentHolder(func(glid.GLID) {
+		v.releaseWake.Notify()
 	})
 	cfg.FSM.SetOnOpenChunkManifest(func(*vaultctlfsm.OpenChunkManifest) {
 		v.wake.Notify()
@@ -174,7 +233,16 @@ func (m *Manager) RegisterVault(vaultID glid.GLID, cfg VaultConfig) error {
 	// Without this wake, segments published while a build was in flight
 	// are only chunked when a future publish arrives — the planner refuses
 	// to open a new manifest while a sealed one is pending.
-	cfg.FSM.SetOnSealedManifestCleared(func(chunk.ChunkID) {
+	cfg.FSM.SetOnSealedManifestCleared(func(id chunk.ChunkID) {
+		v.mu.Lock()
+		if v.pendingSeal != nil && v.pendingSeal.ChunkID == id {
+			v.pendingSeal = nil
+		}
+		v.doneSealProposed = buildKey{}
+		v.donePostSeal = buildKey{}
+		v.sealAttemptKey = buildKey{}
+		v.doneOnBuilt = buildKey{}
+		v.mu.Unlock()
 		v.wake.Notify()
 	})
 	if m.runCtx != nil {
@@ -193,6 +261,9 @@ func (m *Manager) UnregisterVault(vaultID glid.GLID) {
 		v.cfg.FSM.SetOnSealedManifest(nil)
 		if v.unsubPublish != nil {
 			v.unsubPublish()
+		}
+		if v.unsubAckHolder != nil {
+			v.unsubAckHolder()
 		}
 		v.cfg.FSM.SetOnOpenChunkManifest(nil)
 		v.cfg.FSM.SetOnOpenChunkRefAdded(nil)
@@ -249,7 +320,10 @@ func (m *Manager) BuildOnce(ctx context.Context, vaultID glid.GLID) error {
 	if !ok {
 		return ErrUnknownVault
 	}
-	return v.buildOnce(ctx)
+	if err := v.buildOnce(ctx); err != nil {
+		return err
+	}
+	return v.releaseOnce(ctx)
 }
 
 // Run blocks until ctx is cancelled. Each registered vault gets a worker
@@ -294,62 +368,205 @@ func (m *Manager) startWorkerLocked(v *vaultChunking) {
 		// Capture the wake channel BEFORE each pass so a signal arriving
 		// mid-pass re-fires the loop instead of being lost.
 		ch := v.wake.C()
-		if err := v.planCatchUp(ctx); err != nil && ctx.Err() == nil {
-			slog.Warn("chunking plan catch-up failed", "vault", v.cfg.VaultID, "error", err)
-		}
-		if err := v.buildOnce(ctx); err != nil && ctx.Err() == nil {
-			slog.Warn("chunking build failed", "vault", v.cfg.VaultID, "error", err)
-		}
+		log := m.logger().With("vault", v.cfg.VaultID)
+		m.runBuildPass(ctx, v, log, false)
 		tick := time.NewTicker(replanInterval)
 		defer tick.Stop()
+		releaseCh := v.releaseWake.C()
 		for {
 			select {
 			case <-ctx.Done():
 				return
+			case <-releaseCh:
+				if err := v.releaseOnce(ctx); err != nil && ctx.Err() == nil {
+					log.Warn("chunking release failed", "error", err)
+				}
+				releaseCh = v.releaseWake.C()
+				continue
 			case <-ch:
+				m.runBuildPass(ctx, v, log, false)
 			case <-tick.C:
+				if err := v.releaseOnce(ctx); err != nil && ctx.Err() == nil {
+					log.Warn("chunking release failed", "error", err)
+				}
+				m.runBuildPass(ctx, v, log, true)
 			}
 			ch = v.wake.C()
-			if err := v.planCatchUp(ctx); err != nil && ctx.Err() == nil {
-				slog.Warn("chunking plan catch-up failed", "vault", v.cfg.VaultID, "error", err)
-			}
-			if err := v.buildOnce(ctx); err != nil && ctx.Err() == nil {
-				slog.Warn("chunking build failed", "vault", v.cfg.VaultID, "error", err)
-			}
 		}
 	})
 }
 
+func (m *Manager) runBuildPass(ctx context.Context, v *vaultChunking, log *slog.Logger, onTick bool) {
+	if err := v.planCatchUp(ctx); err != nil && ctx.Err() == nil {
+		log.Warn("chunking plan catch-up failed", "error", err)
+	}
+	if !v.buildDue(time.Now(), onTick) {
+		return
+	}
+	if err := v.buildOnce(ctx); err != nil && ctx.Err() == nil {
+		log.Warn("chunking build failed", "error", err)
+	}
+}
+
+func (v *vaultChunking) buildDue(now time.Time, onTick bool) bool {
+	pending := v.sealedManifestForBuild()
+	if pending == nil {
+		return false
+	}
+	key := buildKey{chunkID: pending.ChunkID, sealedAt: pending.SealedAt}
+	if entry := v.cfg.FSM.Get(pending.ChunkID); entry != nil && entry.State == chunk.ChunkStateSealed {
+		return false
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.doneBuild != key {
+		return true
+	}
+	if v.doneSealProposed == key {
+		return false
+	}
+	if !onTick {
+		return true
+	}
+	return v.sealAttemptKey != key || now.Sub(v.lastSealAttempt) >= sealRetryInterval
+}
+
+func (v *vaultChunking) sealedManifestForBuild() *vaultctlfsm.OpenChunkManifest {
+	if pending := v.cfg.FSM.SealedManifest(); pending != nil {
+		v.mu.Lock()
+		v.pendingSeal = pending
+		v.mu.Unlock()
+		return pending
+	}
+	v.mu.Lock()
+	pending := v.pendingSeal
+	v.mu.Unlock()
+	return pending
+}
+
+func (v *vaultChunking) releaseOnce(ctx context.Context) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if !v.cfg.IsLeader() || v.cfg.Applier == nil {
+		return nil
+	}
+	v.mu.Lock()
+	pending := v.pendingRelease
+	v.pendingRelease = nil
+	v.mu.Unlock()
+	if len(pending) == 0 {
+		return nil
+	}
+	required := v.requiredHolders()
+	ready, stillPending := partitionPendingRelease(v.cfg.FSM, pending, required)
+	if len(ready) == 0 {
+		v.mu.Lock()
+		v.pendingRelease = append(stillPending, v.pendingRelease...)
+		v.mu.Unlock()
+		return nil
+	}
+	if err := v.cfg.Applier.Apply(vaultctlfsm.MarshalReleaseSegments(ready)); err != nil {
+		v.mu.Lock()
+		v.pendingRelease = append(pending, v.pendingRelease...)
+		v.mu.Unlock()
+		return err
+	}
+	v.mu.Lock()
+	v.pendingRelease = append(stillPending, v.pendingRelease...)
+	v.mu.Unlock()
+	return nil
+}
+
+func (v *vaultChunking) requiredHolders() []string {
+	if v.cfg.RequiredHolders == nil {
+		return nil
+	}
+	return v.cfg.RequiredHolders()
+}
+
+func (v *vaultChunking) afterSealBuild(pending *vaultctlfsm.OpenChunkManifest) {
+	key := buildKey{chunkID: pending.ChunkID, sealedAt: pending.SealedAt}
+	v.mu.Lock()
+	if v.donePostSeal == key {
+		v.mu.Unlock()
+		return
+	}
+	v.donePostSeal = key
+	v.mu.Unlock()
+
+	segmentIDs := releasableSegmentIDs(v.cfg.FSM, pending)
+	for _, id := range segmentIDs {
+		_ = paths.PurgeHeadStaging(v.cfg.VaultRoot, id)
+	}
+	if v.cfg.IsLeader() && len(segmentIDs) > 0 {
+		v.mu.Lock()
+		v.pendingRelease = appendUniqueGLIDs(v.pendingRelease, segmentIDs)
+		v.mu.Unlock()
+	}
+	v.mu.Lock()
+	if v.pendingSeal != nil && v.pendingSeal.ChunkID == pending.ChunkID {
+		v.pendingSeal = nil
+	}
+	v.mu.Unlock()
+}
+
 func (v *vaultChunking) buildOnce(ctx context.Context) error {
-	pending := v.cfg.FSM.SealedManifest()
+	pending := v.sealedManifestForBuild()
 	if pending == nil {
 		return nil
 	}
 
 	key := buildKey{chunkID: pending.ChunkID, sealedAt: pending.SealedAt}
+	if entry := v.cfg.FSM.Get(pending.ChunkID); entry != nil && entry.State == chunk.ChunkStateSealed {
+		v.mu.Lock()
+		if v.pendingSeal != nil && v.pendingSeal.ChunkID == pending.ChunkID {
+			v.pendingSeal = nil
+		}
+		v.mu.Unlock()
+		return nil
+	}
+
 	v.mu.Lock()
 	alreadyBuilt := v.doneBuild == key
+	cached := v.lastBuild
 	v.mu.Unlock()
 
 	var result BuildResult
 	var err error
+	builtNow := false
 	switch {
 	case !alreadyBuilt:
 		result, err = v.build(ctx, pending)
 		if err != nil {
 			return err
 		}
+		builtNow = true
 		v.mu.Lock()
 		v.doneBuild = key
+		v.lastBuild = struct {
+			key    buildKey
+			result BuildResult
+			ok     bool
+		}{key: key, result: result, ok: true}
 		v.mu.Unlock()
+	case v.cfg.Applier != nil && cached.ok && cached.key == key:
+		// Retry CmdSealChunk with the prior build output; do not re-read every
+		// segment on each wake/tick while the sealed manifest is still pending.
+		result = cached.result
 	case v.cfg.Applier != nil:
-		// Local GLCB already exists (often from a prior pass on this or another
-		// home). Rebuild is idempotent and supplies SealChunk metadata for a
-		// retry when the prior CmdSealChunk commit failed or was not attempted.
 		result, err = v.build(ctx, pending)
 		if err != nil {
 			return err
 		}
+		builtNow = true
+		v.mu.Lock()
+		v.lastBuild = struct {
+			key    buildKey
+			result BuildResult
+			ok     bool
+		}{key: key, result: result, ok: true}
+		v.mu.Unlock()
 	default:
 		return nil
 	}
@@ -359,22 +576,43 @@ func (v *vaultChunking) buildOnce(ctx context.Context) error {
 	// on this node and left GLCBs on disk without FSM sealed entries when the
 	// Raft leader was not the home that finished building (gastrolog-4trvb).
 	if v.cfg.Applier != nil {
-		if err := v.cfg.Applier.Apply(vaultctlfsm.MarshalSealChunk(
-			pending.ChunkID,
-			result.WriteEnd,
-			int64(result.RecordCount),
-			result.Bytes,
-			result.IngestStart,
-			result.IngestEnd,
-			result.SourceEnd,
-			result.IngestTSMonotonic,
-		)); err != nil {
-			return err
+		v.mu.Lock()
+		alreadyProposed := v.doneSealProposed == key
+		v.mu.Unlock()
+		if !alreadyProposed {
+			v.mu.Lock()
+			v.sealAttemptKey = key
+			v.lastSealAttempt = time.Now()
+			v.mu.Unlock()
+			if err := v.cfg.Applier.Apply(vaultctlfsm.MarshalSealChunk(
+				pending.ChunkID,
+				result.WriteEnd,
+				int64(result.RecordCount),
+				result.Bytes,
+				result.IngestStart,
+				result.IngestEnd,
+				result.SourceEnd,
+				result.IngestTSMonotonic,
+			)); err != nil {
+				return err
+			}
+			v.mu.Lock()
+			v.doneSealProposed = key
+			v.mu.Unlock()
+			v.afterSealBuild(pending)
 		}
 	}
 
-	if v.cfg.OnBuilt != nil {
-		v.cfg.OnBuilt(pending.ChunkID)
+	if builtNow && v.cfg.OnBuilt != nil {
+		v.mu.Lock()
+		fire := v.doneOnBuilt != key
+		if fire {
+			v.doneOnBuilt = key
+		}
+		v.mu.Unlock()
+		if fire {
+			v.cfg.OnBuilt(pending.ChunkID)
+		}
 	}
 	return nil
 }

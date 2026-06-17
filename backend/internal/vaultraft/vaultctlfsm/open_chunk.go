@@ -275,17 +275,21 @@ func (f *FSM) applySealOpenChunkManifestLocked(c *gastrologv1.SealOpenChunkManif
 	return result, nil
 }
 
-func (f *FSM) applyReleaseSegments(c *gastrologv1.ReleaseSegmentsCommand) error {
+func (f *FSM) applyReleaseSegments(c *gastrologv1.ReleaseSegmentsCommand) []glid.GLID {
+	var released []glid.GLID
 	for _, raw := range c.GetSegmentIds() {
 		segID := glid.FromBytes(raw)
 		if segID == glid.Nil {
 			continue
 		}
+		if f.completedSegments[segID] != nil {
+			released = append(released, segID)
+		}
 		delete(f.completedSegments, segID)
 		f.removeCompletedSegmentOrder(segID)
 		delete(f.segmentResume, segID)
 	}
-	return nil
+	return released
 }
 
 func openChunkManifestToProto(m *OpenChunkManifest) *gastrologv1.OpenChunkManifestState {

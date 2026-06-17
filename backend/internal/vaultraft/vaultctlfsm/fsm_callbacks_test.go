@@ -384,3 +384,64 @@ func TestNewCallbacksNoPanicWhenUnregistered(t *testing.T) {
 		t.Errorf("retention-pending apply unexpected error: %v", err)
 	}
 }
+
+func TestOnAckSegmentHolderCallbackFires(t *testing.T) {
+	t.Parallel()
+
+	fsm := New()
+	segID := glid.New()
+	now := time.Now()
+	fsm.Apply(&hraft.Log{Data: MarshalPublishCompletedSegment(CompletedSegmentEntry{
+		SegmentID: segID, RecordCount: 1, ByteSize: 1,
+		FirstIngestTS: now, LastIngestTS: now, Checksum: 1, PublishedAt: now,
+	})})
+
+	var mu sync.Mutex
+	var acked glid.GLID
+	fsm.AddOnAckSegmentHolder(func(id glid.GLID) {
+		mu.Lock()
+		acked = id
+		mu.Unlock()
+	})
+
+	fsm.Apply(&hraft.Log{Data: MarshalAckSegmentHolder(segID, "node-b")})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if acked != segID {
+		t.Fatalf("acked = %s, want %s", acked, segID)
+	}
+}
+
+func TestOnReleaseSegmentsCallbackFires(t *testing.T) {
+	t.Parallel()
+
+	fsm := New()
+	segA := glid.New()
+	segB := glid.New()
+	now := time.Now()
+	fsm.Apply(&hraft.Log{Data: MarshalPublishCompletedSegment(CompletedSegmentEntry{
+		SegmentID: segA, RecordCount: 1, ByteSize: 1,
+		FirstIngestTS: now, LastIngestTS: now, Checksum: 1, PublishedAt: now,
+	})})
+	fsm.Apply(&hraft.Log{Data: MarshalPublishCompletedSegment(CompletedSegmentEntry{
+		SegmentID: segB, RecordCount: 1, ByteSize: 1,
+		FirstIngestTS: now, LastIngestTS: now, Checksum: 1, PublishedAt: now,
+	})})
+
+	var mu sync.Mutex
+	var released []glid.GLID
+	fsm.AddOnReleaseSegments(func(ids []glid.GLID) {
+		mu.Lock()
+		released = append([]glid.GLID(nil), ids...)
+		mu.Unlock()
+	})
+
+	fsm.Apply(&hraft.Log{Data: MarshalReleaseSegments([]glid.GLID{segA})})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(released) != 1 || released[0] != segA {
+		t.Fatalf("released = %v, want [%s]", released, segA)
+	}
+}

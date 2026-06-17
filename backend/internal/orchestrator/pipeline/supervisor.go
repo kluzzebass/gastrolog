@@ -32,6 +32,7 @@ import (
 	"gastrolog/internal/pipeline/digestion"
 	"gastrolog/internal/pipeline/distribution"
 	"gastrolog/internal/pipeline/ingestion"
+	"gastrolog/internal/pipeline/paths"
 	"gastrolog/internal/pipeline/routing"
 	"gastrolog/internal/pipeline/segmentation"
 	"gastrolog/internal/record"
@@ -137,13 +138,17 @@ type VaultSpec struct {
 	// orchestrator can register it for queries when the FSM seal already
 	// applied (build-finishes-last ordering). Optional.
 	OnChunkBuilt func(chunk.ChunkID)
+	// ChunkRequiredHolders returns placement member node IDs that must hold each
+	// segment before the leader proposes ReleaseSegments. Optional.
+	ChunkRequiredHolders func() []string
 }
 
 type vaultRoles struct {
-	origin   bool
-	home     bool
-	collects bool
-	chunking bool
+	origin       bool
+	home         bool
+	collects     bool
+	chunking     bool
+	unsubRelease func()
 }
 
 // Supervisor owns the pipeline queue graph and the seven phase managers, and
@@ -218,7 +223,7 @@ func New(cfg Config) *Supervisor {
 		Logger:       cfg.Logger,
 	})
 	col := collection.New(collection.Config{})
-	chunk := chunking.New(chunking.Config{})
+	chunk := chunking.New(chunking.Config{Logger: cfg.Logger})
 
 	routingCap := cfg.RoutingInCapacity
 	if routingCap <= 0 {
@@ -498,6 +503,22 @@ func (s *Supervisor) RegisterVault(spec VaultSpec) error {
 		}
 	}
 
+	releaseRoot := spec.OriginRoot
+	if releaseRoot == "" {
+		releaseRoot = spec.HomeRoot
+	}
+	if spec.FSM != nil && releaseRoot != "" {
+		vaultID := spec.VaultID
+		roles.unsubRelease = spec.FSM.AddOnReleaseSegments(func(ids []glid.GLID) {
+			if spec.Origin {
+				s.dist.RetireSegments(vaultID, ids)
+				for _, id := range ids {
+					_ = paths.PurgeCompleted(releaseRoot, id)
+				}
+			}
+		})
+	}
+
 	s.vaults[spec.VaultID] = roles
 	return nil
 }
@@ -553,8 +574,9 @@ func (s *Supervisor) registerHome(spec VaultSpec) error {
 			Applier:    spec.Applier,
 			IsLeader:   spec.IsLeader,
 			Policy:     spec.ChunkPolicy,
-			NewChunkID: spec.NewChunkID,
-			OnBuilt:    spec.OnChunkBuilt,
+			NewChunkID:      spec.NewChunkID,
+			OnBuilt:         spec.OnChunkBuilt,
+			RequiredHolders: spec.ChunkRequiredHolders,
 		}); err != nil {
 			if collectionRegistered {
 				s.col.UnregisterVault(spec.VaultID)
@@ -607,6 +629,9 @@ func (s *Supervisor) UnregisterVault(vaultID glid.GLID) {
 	s.mu.Unlock()
 	if !ok {
 		return
+	}
+	if roles.unsubRelease != nil {
+		roles.unsubRelease()
 	}
 	if roles.home {
 		s.chunk.UnregisterVault(vaultID)

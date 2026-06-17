@@ -148,6 +148,9 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 		spec.OnChunkBuilt = func(id chunk.ChunkID) {
 			o.registerBuiltPipelineChunk(vaultID, fsm, id)
 		}
+		spec.ChunkRequiredHolders = func() []string {
+			return o.vaultPlacementNodeIDs(vaultID)
+		}
 		// Full collection requires a puller to fetch segments originated on
 		// other nodes; without peers (single-node) there is nothing to pull.
 		if o.segmentPuller != nil {
@@ -178,6 +181,25 @@ func (o *Orchestrator) registerBuiltPipelineChunk(vaultID glid.GLID, fsm *vaultc
 		return
 	}
 	ti.Reconciler.registerPipelineGLCB(*e)
+}
+
+// vaultPlacementNodeIDs returns the node IDs of every placement member for a
+// vault, used to gate ReleaseSegments until each home has holder receipts.
+func (o *Orchestrator) vaultPlacementNodeIDs(vaultID glid.GLID) []string {
+	if o.sysLoader == nil {
+		return nil
+	}
+	sys, err := o.sysLoader.Load(context.Background())
+	if err != nil || sys == nil {
+		return nil
+	}
+	for i := range sys.Config.Vaults {
+		v := &sys.Config.Vaults[i]
+		if v.ID == vaultID {
+			return system.PlacementNodeIDs(v.Placements, sys.Runtime.NodeStorageConfigs)
+		}
+	}
+	return nil
 }
 
 // vaultCtlHandle resolves the per-vault vault-ctl FSM and an applier for it
