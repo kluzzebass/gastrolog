@@ -564,6 +564,12 @@ func (o *Orchestrator) runAfterVaultCtlRestore(vaultID glid.GLID) {
 	if t != nil && t.Reconciler != nil && liveFSM != nil {
 		t.Reconciler.ReconcileFromSnapshot(liveFSM)
 	}
+	if o.pipeline != nil {
+		if err := o.pipeline.RecoverVault(context.Background(), vaultID); err != nil {
+			o.vaultOpsLogger.Warn("vault-ctl after-restore: pipeline recover failed",
+				"vault", vaultID, "error", err)
+		}
+	}
 	o.vaultOpsLogger.Info("vault-ctl after-restore reconcile complete",
 		"vault", vaultID, "has_instance", t != nil)
 }

@@ -279,6 +279,15 @@ func (r *VaultLifecycleReconciler) projectAllSealedFromFSM(fsm *vaultctlfsm.FSM)
 // placement the leader holding the FSM Sealing entry is the only node
 // that ever held the chunk locally, so this is the right place).
 func (r *VaultLifecycleReconciler) resumeSealingFromFSM(fsm *vaultctlfsm.FSM) {
+	if r.orch != nil {
+		if _, ok := r.orch.pipelineVaultChunkRoot(r.vaultID); ok {
+			if err := r.orch.pipeline.RecoverVault(context.Background(), r.vaultID); err != nil {
+				r.logger.Warn("reconcile-from-snapshot: pipeline recover failed",
+					"error", err)
+			}
+			return
+		}
+	}
 	if r.vaultInst == nil || r.vaultInst.Chunks == nil {
 		return
 	}
@@ -1129,6 +1138,13 @@ const idleActiveThreshold = 10 * time.Minute
 func (r *VaultLifecycleReconciler) SweepIdleActiveChunks() {
 	if r.fsm == nil || r.vaultInst == nil || r.vaultInst.Chunks == nil {
 		return
+	}
+	if r.orch != nil {
+		if _, ok := r.orch.pipelineVaultChunkRoot(r.vaultID); ok {
+			if err := r.orch.pipeline.RecoverVault(context.Background(), r.vaultID); err != nil {
+				r.logger.Warn("idle-active sweep: pipeline recover failed", "error", err)
+			}
+		}
 	}
 	announcerGetter, ok := r.vaultInst.Chunks.(chunk.AnnouncerGetter)
 	if !ok {

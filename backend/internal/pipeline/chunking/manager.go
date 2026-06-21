@@ -369,6 +369,9 @@ func (m *Manager) startWorkerLocked(v *vaultChunking) {
 		// mid-pass re-fires the loop instead of being lost.
 		ch := v.wake.C()
 		log := m.logger().With("vault", v.cfg.VaultID)
+		if err := v.recoverOnce(ctx); err != nil && ctx.Err() == nil {
+			log.Warn("chunking recover failed", "error", err)
+		}
 		m.runBuildPass(ctx, v, log, false)
 		tick := time.NewTicker(replanInterval)
 		defer tick.Stop()

@@ -598,12 +598,22 @@ func (s *Supervisor) registerHome(spec VaultSpec) error {
 				_ = s.col.CollectOnce(ctx, vid)
 			}
 			if chunkCatchUp {
+				_ = s.chunk.RecoverOnce(ctx, vid)
 				_ = s.chunk.PlanOnce(ctx, vid)
 				_ = s.chunk.BuildOnce(ctx, vid)
 			}
 		})
 	}
 	return nil
+}
+
+// RecoverVault seals pipeline chunks whose local GLCB landed before CmdSealChunk
+// applied — after controlled or uncontrolled process shutdown. Idempotent.
+func (s *Supervisor) RecoverVault(ctx context.Context, vaultID glid.GLID) error {
+	if s.chunk == nil {
+		return nil
+	}
+	return s.chunk.RecoverOnce(ctx, vaultID)
 }
 
 // RotateChunkCron runs one leader-gated cron rotation step for a vault's open
