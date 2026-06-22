@@ -197,10 +197,71 @@ func dedupChunkReports(reports []chunkReport) []*apiv1.ChunkMeta {
 // inspector UI as successive ticks flip between leader-wins and
 // follower-wins rounds. See gastrolog-1bgvm.
 func moreAuthoritative(a, b *apiv1.ChunkMeta) bool {
-	if a.Sealed != b.Sealed {
-		return a.Sealed
+	ra, rb := chunkLifecycleRank(a), chunkLifecycleRank(b)
+	if ra != rb {
+		return ra > rb
 	}
-	return a.RecordCount > b.RecordCount
+	if a.RecordCount != b.RecordCount {
+		return a.RecordCount > b.RecordCount
+	}
+	return hasBetterTimeRange(a, b)
+}
+
+func chunkLifecycleRank(c *apiv1.ChunkMeta) int {
+	if c == nil {
+		return 0
+	}
+	if c.Sealed || c.State == apiv1.ChunkState_CHUNK_STATE_SEALED {
+		return 3
+	}
+	switch c.State {
+	case apiv1.ChunkState_CHUNK_STATE_SEALING:
+		return 2
+	case apiv1.ChunkState_CHUNK_STATE_ACTIVE:
+		return 1
+	case apiv1.ChunkState_CHUNK_STATE_UNSPECIFIED:
+		return 1
+	case apiv1.ChunkState_CHUNK_STATE_SEALED:
+		return 3
+	}
+	return 1
+}
+
+func hasBetterTimeRange(a, b *apiv1.ChunkMeta) bool {
+	aEnd := chunkMetaEndNanos(a)
+	bEnd := chunkMetaEndNanos(b)
+	if aEnd != bEnd {
+		return aEnd > bEnd
+	}
+	aStart := chunkMetaStartNanos(a)
+	bStart := chunkMetaStartNanos(b)
+	return aStart > bStart
+}
+
+func chunkMetaEndNanos(c *apiv1.ChunkMeta) int64 {
+	if c == nil {
+		return 0
+	}
+	if ts := c.IngestEnd; ts != nil && ts.IsValid() && ts.AsTime().Year() >= 2000 {
+		return ts.AsTime().UnixNano()
+	}
+	if ts := c.WriteEnd; ts != nil && ts.IsValid() && ts.AsTime().Year() >= 2000 {
+		return ts.AsTime().UnixNano()
+	}
+	return 0
+}
+
+func chunkMetaStartNanos(c *apiv1.ChunkMeta) int64 {
+	if c == nil {
+		return 0
+	}
+	if ts := c.IngestStart; ts != nil && ts.IsValid() && ts.AsTime().Year() >= 2000 {
+		return ts.AsTime().UnixNano()
+	}
+	if ts := c.WriteStart; ts != nil && ts.IsValid() && ts.AsTime().Year() >= 2000 {
+		return ts.AsTime().UnixNano()
+	}
+	return 0
 }
 
 // remoteVaultNodes returns node IDs of ALL remote nodes that host this

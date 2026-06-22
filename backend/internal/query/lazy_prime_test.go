@@ -20,6 +20,32 @@ type cursorCountCM struct {
 	opens atomic.Int64
 }
 
+func (c *cursorCountCM) ingestRankView() (chunk.IngestTSRankView, bool) {
+	v, ok := c.ChunkManager.(chunk.IngestTSRankView)
+	return v, ok
+}
+
+func (c *cursorCountCM) IngestTSRankLen(id chunk.ChunkID) (uint64, error) {
+	if v, ok := c.ingestRankView(); ok {
+		return v.IngestTSRankLen(id)
+	}
+	return 0, chunk.ErrIngestTSRankIndex
+}
+
+func (c *cursorCountCM) IngestTSRankAt(id chunk.ChunkID, rank uint64) (int64, uint32, error) {
+	if v, ok := c.ingestRankView(); ok {
+		return v.IngestTSRankAt(id, rank)
+	}
+	return 0, 0, chunk.ErrIngestTSRankIndex
+}
+
+func (c *cursorCountCM) FindIngestTSRank(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+	if v, ok := c.ingestRankView(); ok {
+		return v.FindIngestTSRank(id, ts)
+	}
+	return 0, false, chunk.ErrIngestTSRankIndex
+}
+
 func (c *cursorCountCM) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	c.opens.Add(1)
 	return c.ChunkManager.OpenCursor(id)

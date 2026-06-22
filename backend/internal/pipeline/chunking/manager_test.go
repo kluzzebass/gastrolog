@@ -49,7 +49,7 @@ func TestManagerBuildOnceBuildsGLCBAndAnnouncesSeal(t *testing.T) {
 		ChunkRoot: filepath.Join(home, "chunks"),
 		FSM:       fsm,
 		Locate:    chunking.HeadSegmentLocator{Root: home},
-		Applier:   &recordingApplier{out: &applied},
+		Applier:   &recordingApplier{out: &applied, fsm: fsm},
 		IsLeader:  func() bool { return true },
 	}); err != nil {
 		t.Fatal(err)
@@ -77,13 +77,8 @@ func TestManagerBuildOnceBuildsGLCBAndAnnouncesSeal(t *testing.T) {
 	}
 
 	entry := fsm.Get(chunkID)
-	if entry == nil || entry.State != chunk.ChunkStateSealing {
-		t.Fatalf("chunk entry before SealChunk apply = %+v", entry)
-	}
-	applyChunkCmd(t, fsm, applied[0])
-	entry = fsm.Get(chunkID)
 	if entry == nil || entry.State != chunk.ChunkStateSealed {
-		t.Fatalf("chunk entry after SealChunk apply = %+v", entry)
+		t.Fatalf("chunk entry after BuildOnce = %+v", entry)
 	}
 	if fsm.SealedManifest() != nil {
 		t.Fatal("sealed manifest must clear after SealChunk")
@@ -234,12 +229,12 @@ func TestManagerPurgesHeadWhenSealWinsElsewhere(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Home B builds locally but another home will win CmdSealChunk.
-	if err := mgrB.BuildOnce(t.Context(), vaultID); err == nil {
-		t.Fatal("expected home B SealChunk apply to fail")
+	// Home B builds locally; only the vault-ctl leader proposes CmdSealChunk.
+	if err := mgrB.BuildOnce(t.Context(), vaultID); err != nil {
+		t.Fatalf("home B BuildOnce: %v", err)
 	}
 	if _, err := os.Stat(headB); err != nil {
-		t.Fatalf("home B head should remain before peer seal: %v", err)
+		t.Fatalf("home B head should remain before leader seal: %v", err)
 	}
 
 	if err := mgrA.BuildOnce(t.Context(), vaultID); err != nil {
@@ -347,11 +342,61 @@ func TestManagerMissingSegmentNudgesCollection(t *testing.T) {
 		FSM:       fsm,
 		Locate:    chunking.HeadSegmentLocator{Root: home},
 		Nudge:     nudgeCounter{&nudges},
+		IsLeader:  func() bool { return true },
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := mgr.BuildOnce(t.Context(), vaultID); err == nil {
-		t.Fatal("expected missing segment error")
+		t.Fatal("expected missing segment error on leader")
+	}
+	if nudges.Load() != 1 {
+		t.Fatalf("collection nudges = %d, want 1", nudges.Load())
+	}
+}
+
+func TestManagerFollowerSkipsQuietlyWhenSegmentsMissing(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
+	present := glid.New()
+	missing := glid.New()
+	vaultID := glid.New()
+	chunkID := chunk.NewChunkID()
+	home := t.TempDir()
+	writeHeadSegment(t, home, present, vaultID, []recordForSeg{{0, base, "ok"}})
+
+	fsm := vaultctlfsm.New()
+	openedAt := base
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalOpenChunkManifest(chunkID, openedAt))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
+		SegmentID:         present,
+		FirstRecordNumber: 0,
+		LastRecordNumber:  0,
+		SliceBytes:        2048,
+		RefAddedAt:        openedAt,
+	}))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalAddOpenChunkSegmentRef(chunkID, vaultctlfsm.OpenChunkSegmentRef{
+		SegmentID:         missing,
+		FirstRecordNumber: 0,
+		LastRecordNumber:  0,
+		SliceBytes:        2048,
+		RefAddedAt:        openedAt,
+	}))
+	applyChunkCmd(t, fsm, vaultctlfsm.MarshalSealOpenChunkManifest(chunkID, base.Add(time.Minute)))
+
+	var nudges atomic.Int32
+	mgr := chunking.New(chunking.Config{})
+	if err := mgr.RegisterVault(vaultID, chunking.VaultConfig{
+		VaultRoot: home,
+		ChunkRoot: filepath.Join(home, "chunks"),
+		FSM:       fsm,
+		Locate:    chunking.HeadSegmentLocator{Root: home},
+		Nudge:     nudgeCounter{&nudges},
+		IsLeader:  func() bool { return false },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.BuildOnce(t.Context(), vaultID); err != nil {
+		t.Fatalf("follower BuildOnce should skip quietly: %v", err)
 	}
 	if nudges.Load() != 1 {
 		t.Fatalf("collection nudges = %d, want 1", nudges.Load())
@@ -408,7 +453,7 @@ func TestManagerBuildsOnSealEvent(t *testing.T) {
 	}
 }
 
-func TestManagerFollowerHomeProposesSealChunk(t *testing.T) {
+func TestManagerFollowerHomeBuildsWithoutProposingSealChunk(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
 	segID := glid.New()
@@ -436,7 +481,7 @@ func TestManagerFollowerHomeProposesSealChunk(t *testing.T) {
 		ChunkRoot: filepath.Join(home, "chunks"),
 		FSM:       fsm,
 		Locate:    chunking.HeadSegmentLocator{Root: home},
-		Applier:   &recordingApplier{out: &applied},
+		Applier:   &recordingApplier{out: &applied, fsm: fsm},
 		IsLeader:  func() bool { return false },
 	}); err != nil {
 		t.Fatal(err)
@@ -444,25 +489,33 @@ func TestManagerFollowerHomeProposesSealChunk(t *testing.T) {
 	if err := mgr.BuildOnce(t.Context(), vaultID); err != nil {
 		t.Fatalf("BuildOnce: %v", err)
 	}
-	if len(applied) != 1 {
-		t.Fatalf("follower applied %d commands, want 1 SealChunk", len(applied))
+	if len(applied) != 0 {
+		t.Fatalf("follower applied %d commands, want 0 (leader seals)", len(applied))
 	}
-	var cmd gastrologv1.VaultCtlCommand
-	if err := proto.Unmarshal(applied[0], &cmd); err != nil {
-		t.Fatal(err)
+	glcbPath := chunking.ChunkGLCBPath(filepath.Join(home, "chunks"), chunkID)
+	if _, err := os.Stat(glcbPath); err != nil {
+		t.Fatalf("follower GLCB: %v", err)
 	}
-	if cmd.GetSealChunk() == nil {
-		t.Fatal("expected SealChunk command from follower home build")
+	if fsm.SealedManifest() == nil {
+		t.Fatal("sealed manifest must remain until vault-ctl leader seals")
 	}
 }
 
 type recordingApplier struct {
 	out *[][]byte
+	fsm *vaultctlfsm.FSM
 }
 
 func (a *recordingApplier) Apply(data []byte) error {
 	cp := append([]byte(nil), data...)
 	*a.out = append(*a.out, cp)
+	if a.fsm != nil {
+		if result := a.fsm.Apply(&hraft.Log{Data: data}); result != nil {
+			if err, ok := result.(error); ok {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
@@ -512,7 +565,7 @@ func TestRecordingApplierSealChunkProto(t *testing.T) {
 	}
 }
 
-func TestManagerBuildOnceFollowerHomeCommitsSealChunk(t *testing.T) {
+func TestManagerBuildOnceFollowerHomeBuildsGLCBWithoutSealing(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2024, 8, 1, 12, 0, 0, 0, time.UTC)
 	segID := glid.New()
@@ -547,12 +600,16 @@ func TestManagerBuildOnceFollowerHomeCommitsSealChunk(t *testing.T) {
 	if err := mgr.BuildOnce(t.Context(), vaultID); err != nil {
 		t.Fatalf("follower BuildOnce: %v", err)
 	}
-	if fsm.SealedManifest() != nil {
-		t.Fatal("sealed manifest must clear after any home proposes SealChunk")
+	if fsm.SealedManifest() == nil {
+		t.Fatal("sealed manifest must remain until vault-ctl leader seals")
+	}
+	glcbPath := chunking.ChunkGLCBPath(filepath.Join(home, "chunks"), chunkID)
+	if _, err := os.Stat(glcbPath); err != nil {
+		t.Fatalf("follower GLCB: %v", err)
 	}
 	entry := fsm.Get(chunkID)
-	if entry == nil || entry.State != chunk.ChunkStateSealed {
-		t.Fatalf("chunk entry = %+v, want sealed", entry)
+	if entry == nil || entry.State != chunk.ChunkStateSealing {
+		t.Fatalf("chunk entry = %+v, want sealing", entry)
 	}
 }
 

@@ -316,7 +316,7 @@ type recordWithRef struct {
 	VaultID   glid.GLID
 	Record    chunk.Record
 	Ref       chunk.RecordRef
-	Reordered bool // true when yielded from reorder fallback (resume by IngestTS, not position)
+	Reordered bool // true when yielded from rank-based TS index scanning (resume by TS, not position)
 }
 
 // record returns the Record with Ref and VaultID populated.
@@ -536,23 +536,27 @@ func chunkMatchesQuery(m chunk.ChunkMeta, q Query, lower, upper time.Time, chunk
 
 // sortChunks sorts chunks by the appropriate timestamp bounds based on OrderBy.
 func sortChunks(out []chunk.ChunkMeta, orderBy OrderBy, reverse bool) {
-	startTS := func(m chunk.ChunkMeta) time.Time {
-		switch orderBy { //nolint:exhaustive // IngestTS is the default
-		case OrderBySourceTS:
-			return m.SourceStart
-		default:
-			return m.IngestStart
-		}
-	}
+	startTS, endTS := chunkTimeBounds(orderBy)
 	if reverse {
 		slices.SortFunc(out, func(a, b chunk.ChunkMeta) int {
-			return startTS(b).Compare(startTS(a)) // descending
+			// Live (unsealed) chunks may hold records newer than their
+			// IngestStart meta; rank them first when scanning backward.
+			if a.Sealed != b.Sealed {
+				if !a.Sealed {
+					return -1
+				}
+				return 1
+			}
+			if c := endTS(b).Compare(endTS(a)); c != 0 {
+				return c
+			}
+			return startTS(b).Compare(startTS(a))
 		})
-	} else {
-		slices.SortFunc(out, func(a, b chunk.ChunkMeta) int {
-			return startTS(a).Compare(startTS(b)) // ascending
-		})
+		return
 	}
+	slices.SortFunc(out, func(a, b chunk.ChunkMeta) int {
+		return startTS(a).Compare(startTS(b))
+	})
 }
 
 // searchChunkWithRef returns an iterator over records in a single chunk, including their refs.
@@ -647,9 +651,8 @@ func positionCursor(cursor chunk.RecordCursor, q Query, meta chunk.ChunkMeta, st
 // It tries to use indexes when available, falling back to runtime filters when not.
 // vaultID is included in the returned recordWithRef for multi-vault queries.
 //
-// When OrderBy != OrderByWriteTS, sealed chunks use TS-index-ordered scanning:
-// the TS index is walked in timestamp order, producing positions in TS order
-// rather than physical order. For active chunks, results are buffered and sorted.
+// When OrderBy != OrderByWriteTS, chunks use TS-index-ordered scanning: the TS
+// index is walked rank-by-rank in timestamp order. There is no heap fallback.
 func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.RecordCursor, q Query, vaultID glid.GLID, meta chunk.ChunkMeta, startPos *uint64, cm chunk.ChunkManager, im index.IndexManager) (iter.Seq2[recordWithRef, error], error) {
 	b := newScannerBuilder(meta.ID)
 	b.vaultID = vaultID
@@ -691,57 +694,25 @@ func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.Reco
 }
 
 // buildTSOrderedScanner creates a scanner that yields records in TS-index order.
-// For sealed chunks with a TS index, it walks the index to produce positions in
-// timestamp order. For active chunks (or when the index is unavailable), it falls
-// back to buffering and sorting.
-func (e *Engine) buildTSOrderedScanner(ctx context.Context, cursor chunk.RecordCursor, q Query, b *scannerBuilder, meta chunk.ChunkMeta, startPos *uint64, cm chunk.ChunkManager, im index.IndexManager) (iter.Seq2[recordWithRef, error], error) {
-	if meta.Sealed {
-		// Walk the mmap'd ITSI/STSI embedded in data.glcb rank-by-rank.
-		// When the index is missing (cold cloud, no embedded section), fall
-		// through to the reorder buffer.
-		scan, err := buildMmapTSIndexScanner(ctx, cursor, q, b, meta, im)
-		if err == nil {
-			e.logger.Debug("mmap TS index scanner activated", "chunk", meta.ID, "cloud", meta.CloudBacked)
-			return scan, nil
-		}
+// Chunks must expose a rank-based TS index (mmap'd ITSI/STSI or CM IngestTSRankView).
+// There is no heap fallback.
+func (e *Engine) buildTSOrderedScanner(ctx context.Context, cursor chunk.RecordCursor, q Query, b *scannerBuilder, meta chunk.ChunkMeta, _ *uint64, cm chunk.ChunkManager, im index.IndexManager) (iter.Seq2[recordWithRef, error], error) {
+	scan, err := buildMmapTSIndexScanner(ctx, cursor, q, b, meta, cm, im)
+	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		// Any index miss or read error → reorder buffer. External pipeline
-		// GLCBs may live outside im.Dir (RegisterExternalGLCB); the chunk
-		// manager cursor path still serves them sequentially.
-		e.logger.Debug("TS index unavailable, falling back to reorder buffer", "chunk", meta.ID, "cloud", meta.CloudBacked, "error", err)
-		// Fall through to buffer-and-sort if index unavailable.
+		e.logger.Error("chunk TS index required",
+			"chunk", meta.ID,
+			"vault", b.vaultID,
+			"sealed", meta.Sealed,
+			"cloud", meta.CloudBacked,
+			"error", err,
+		)
+		return nil, fmt.Errorf("chunk %s: TS index required: %w", meta.ID, err)
 	}
-
-	// Active chunk or index unavailable: build normal scanner then buffer & sort.
-	innerQ := q
-	if meta.Sealed {
-		// For sealed chunks without a TS index, the sequential scanner reads
-		// in WriteTS order and applies IngestTS time bounds — stopping early
-		// when it hits a record with IngestTS before the lower bound. But
-		// WriteTS and IngestTS can differ (forwarded records), so the scanner
-		// misses records that are within the time range but out of WriteTS
-		// order. Strip time bounds from the inner scanner and apply them
-		// after sorting by the correct TS field.
-		// Preserve the reverse flag explicitly since Reverse() has a legacy
-		// fallback that inspects Start/End ordering.
-		innerQ.IsReverse = q.Reverse()
-		innerQ.Start = time.Time{}
-		innerQ.End = time.Time{}
-	}
-
-	if b.isSequential() && b.hasMinPos && startPos == nil && !q.Reverse() {
-		if err := cursor.Seek(chunk.RecordRef{ChunkID: meta.ID, Pos: b.minPos}); err != nil {
-			return nil, err
-		}
-	}
-	inner := b.build(ctx, cursor, innerQ)
-	if meta.Sealed {
-		lower, upper := q.TimeBounds()
-		return reorderByTSWithBounds(inner, q.OrderBy, q.Reverse(), lower, upper, q.ResumeTS), nil
-	}
-	return reorderByTS(inner, q.OrderBy, q.Reverse()), nil
+	e.logger.Debug("mmap TS index scanner activated", "chunk", meta.ID, "sealed", meta.Sealed, "cloud", meta.CloudBacked)
+	return scan, nil
 }
 
 // setMinPositionsFromBounds sets the scanner builder's minimum position from time bounds

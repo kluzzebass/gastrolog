@@ -223,6 +223,7 @@ func (f *FSM) applyAckDelete(c *gastrologv1.AckDeleteCommand) (*chunk.ChunkID, s
 	// chunk, remove the pendingDeletes entry, and remove the manifest
 	// entry. Matches applyFinalizeDelete's mutation exactly.
 	f.tombstones[id] = time.Now()
+	f.clearOpenManifestStateIfChunkIDLocked(id)
 	delete(f.pendingDeletes, id)
 	delete(f.chunks, id)
 	return &id, nodeID, true, nil
@@ -251,6 +252,7 @@ func (f *FSM) applyFinalizeDelete(c *gastrologv1.FinalizeDeleteCommand) (*chunk.
 	}
 	_, hadEntry := f.chunks[id]
 	if hadEntry {
+		f.clearOpenManifestStateIfChunkIDLocked(id)
 		delete(f.chunks, id)
 	}
 
@@ -304,6 +306,7 @@ func (f *FSM) applyPruneNode(c *gastrologv1.PruneNodeCommand) (string, []chunk.C
 	now := time.Now()
 	for _, chunkID := range finalizable {
 		f.tombstones[chunkID] = now
+		f.clearOpenManifestStateIfChunkIDLocked(chunkID)
 		delete(f.pendingDeletes, chunkID)
 		delete(f.chunks, chunkID)
 	}

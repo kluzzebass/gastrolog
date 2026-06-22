@@ -6,7 +6,7 @@ import { useChunks, useIndexes, useValidateVault, useConfig, useArchiveChunk, us
 import { useToast } from "../Toast";
 import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
 // eslint-disable-next-line no-restricted-imports -- no Chunk model yet (gastrolog-2e2qs follow-up)
-import type { ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
+import { ChunkState, type ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
 import type { Vault } from "../../api/model/vault";
 import { protoToInstant, instantToMs, instantToDate, formatDateTimeShort } from "../../utils/temporal";
 import { formatBytes } from "../../utils/units";
@@ -16,6 +16,38 @@ import { Badge } from "../Badge";
 import { CogIcon } from "../icons";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { CrossLinkBadge } from "./CrossLinkBadge";
+
+// chunkEndInstant returns the ingest/write end for display, omitting unset or
+// sentinel epoch timestamps that proto encodes for zero-value Go times.
+function chunkEndInstant(
+  chunk: ChunkMeta,
+  start: Date | undefined,
+): Date | undefined {
+  const endTs = chunk.ingestEnd ?? chunk.writeEnd;
+  if (!endTs) return undefined;
+  const end = instantToDate(protoToInstant(endTs));
+  if (end.getFullYear() < 2000) return undefined;
+  if (start && end.getTime() <= start.getTime()) return undefined;
+  return end;
+}
+
+function chunkStartInstant(chunk: ChunkMeta): Date | undefined {
+  const startTs = chunk.ingestStart ?? chunk.writeStart;
+  if (!startTs) return undefined;
+  const start = instantToDate(protoToInstant(startTs));
+  if (start.getFullYear() < 2000) return undefined;
+  return start;
+}
+
+function chunkStatusBadge(chunk: ChunkMeta, dark: boolean) {
+  if (chunk.state === ChunkState.SEALING) {
+    return <Badge variant="warn" dark={dark}>sealing</Badge>;
+  }
+  if (chunk.sealed || chunk.state === ChunkState.SEALED) {
+    return <Badge variant="copper" dark={dark}>sealed</Badge>;
+  }
+  return <Badge variant="info" dark={dark}>active</Badge>;
+}
 
 interface VaultCardProps {
   vault: Vault;
@@ -326,10 +358,8 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
                   </td>
                 </tr>
                 {sortChunks(group.chunks).map((chunk) => {
-                const startTs = chunk.ingestStart ?? chunk.writeStart;
-                const endTs = chunk.ingestEnd ?? chunk.writeEnd;
-                const start = startTs ? instantToDate(protoToInstant(startTs)) : undefined;
-                const end = endTs ? instantToDate(protoToInstant(endTs)) : undefined;
+                const start = chunkStartInstant(chunk);
+                const end = chunkEndInstant(chunk, start);
                 const isExpanded = expandedChunk === encode(chunk.id);
 
                 const replicas = chunk.replicaCount || 1;
@@ -533,11 +563,7 @@ function ChunkRow({
         </td>
         <td className="px-2 py-2">
           <span className="flex items-center gap-1 whitespace-nowrap">
-            {chunk.sealed ? (
-              <Badge variant="copper" dark={dark}>sealed</Badge>
-            ) : (
-              <Badge variant="info" dark={dark}>active</Badge>
-            )}
+            {chunkStatusBadge(chunk, dark)}
             {chunk.compressed && (
               <Badge variant="info" dark={dark}>compr</Badge>
             )}

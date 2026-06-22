@@ -401,6 +401,7 @@ func (o *Orchestrator) EmitChunkChange(ev ChunkChangeEvent) {
 
 // EmitChunkCreated emits a CREATED event with full post-open metadata.
 func (o *Orchestrator) EmitChunkCreated(vault glid.GLID, meta chunk.ChunkMeta) {
+	o.logChunkCreated(vault, meta.ID)
 	m := meta
 	o.EmitChunkChange(ChunkChangeEvent{
 		VaultID: vault, ChunkID: meta.ID, Op: ChunkChangeOpCreated, Meta: &m,
@@ -511,6 +512,24 @@ func (o *Orchestrator) vaultLabel(vaultID glid.GLID) string {
 	for _, v := range sys.Config.Vaults {
 		if v.ID == vaultID {
 			return v.Name
+		}
+	}
+	return ""
+}
+
+// nodeLabel returns the operator-friendly name for a cluster node ID, or ""
+// when unknown. Safe to call from any goroutine.
+func (o *Orchestrator) nodeLabel(nodeID string) string {
+	if nodeID == "" || o.sysLoader == nil {
+		return ""
+	}
+	sys, err := o.sysLoader.Load(context.Background())
+	if err != nil || sys == nil {
+		return ""
+	}
+	for _, n := range sys.Runtime.Nodes {
+		if n.ID.String() == nodeID {
+			return n.Name
 		}
 	}
 	return ""

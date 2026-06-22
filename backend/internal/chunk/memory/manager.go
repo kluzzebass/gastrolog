@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -57,6 +58,14 @@ type chunkState struct {
 	records   []chunk.Record
 	size      int64
 	createdAt time.Time // Wall-clock time when chunk was created
+	// ingestRank is a lazily-built IngestTS-sorted (ts, pos) slice for
+	// non-monotonic chunks. Nil while monotonic or stale after append.
+	ingestRank []ingestRankEntry
+}
+
+type ingestRankEntry struct {
+	tsNano int64
+	pos    uint32
 }
 
 func NewManager(cfg Config) (*Manager, error) {
@@ -116,6 +125,7 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 
 	offset := uint64(len(m.active.records))
 	m.active.records = append(m.active.records, record)
+	m.active.ingestRank = nil
 
 	// Approximate payload size: raw log line + attribute content.
 	recBytes := int64(len(record.Raw))
@@ -426,6 +436,100 @@ func (m *Manager) ScanActiveByIngestTS(id chunk.ChunkID, cb func(ingestTS time.T
 // IngestTSMonotonic should bypass this. See gastrolog-66b7x.
 func (m *Manager) FindIngestEntryIndex(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
 	return m.FindIngestStartPosition(id, ts)
+}
+
+var _ chunk.IngestTSRankView = (*Manager)(nil)
+
+func (m *Manager) stateForIngestRank(id chunk.ChunkID) *chunkState {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	state := m.findChunkLocked(id)
+	if state == nil || len(state.records) == 0 {
+		return nil
+	}
+	return state
+}
+
+func (state *chunkState) ensureIngestRank() {
+	if state.meta.IngestTSMonotonic {
+		return
+	}
+	if state.ingestRank != nil && len(state.ingestRank) == len(state.records) {
+		return
+	}
+	entries := make([]ingestRankEntry, len(state.records))
+	for i, r := range state.records {
+		entries[i] = ingestRankEntry{tsNano: r.IngestTS.UnixNano(), pos: uint32(i)}
+	}
+	slices.SortFunc(entries, func(a, b ingestRankEntry) int {
+		return cmp.Compare(a.tsNano, b.tsNano)
+	})
+	state.ingestRank = entries
+}
+
+// IngestTSRankLen implements chunk.IngestTSRankView.
+func (m *Manager) IngestTSRankLen(id chunk.ChunkID) (uint64, error) {
+	state := m.stateForIngestRank(id)
+	if state == nil {
+		return 0, chunk.ErrIngestTSRankIndex
+	}
+	return uint64(len(state.records)), nil
+}
+
+// IngestTSRankAt implements chunk.IngestTSRankView.
+func (m *Manager) IngestTSRankAt(id chunk.ChunkID, rank uint64) (int64, uint32, error) {
+	state := m.stateForIngestRank(id)
+	if state == nil {
+		return 0, 0, chunk.ErrIngestTSRankIndex
+	}
+	if rank >= uint64(len(state.records)) {
+		return 0, 0, chunk.ErrIngestTSRankIndex
+	}
+	if state.meta.IngestTSMonotonic {
+		rec := state.records[rank]
+		return rec.IngestTS.UnixNano(), uint32(rank), nil //nolint:gosec // G115: rank bounded by len(state.records) check above
+	}
+	state.ensureIngestRank()
+	entry := state.ingestRank[rank]
+	return entry.tsNano, entry.pos, nil
+}
+
+// FindIngestTSRank implements chunk.IngestTSRankView.
+func (m *Manager) FindIngestTSRank(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+	state := m.stateForIngestRank(id)
+	if state == nil {
+		return 0, false, nil
+	}
+	tsNano := ts.UnixNano()
+	if state.meta.IngestTSMonotonic {
+		lo, hi := 0, len(state.records)
+		for lo < hi {
+			mid := lo + (hi-lo)/2
+			if state.records[mid].IngestTS.UnixNano() < tsNano {
+				lo = mid + 1
+			} else {
+				hi = mid
+			}
+		}
+		if lo >= len(state.records) {
+			return 0, false, nil
+		}
+		return uint64(lo), true, nil
+	}
+	state.ensureIngestRank()
+	lo, hi := 0, len(state.ingestRank)
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		if state.ingestRank[mid].tsNano < tsNano {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	if lo >= len(state.ingestRank) {
+		return 0, false, nil
+	}
+	return uint64(lo), true, nil
 }
 
 // HasLocalContent always true: memory chunks are entirely in-memory.

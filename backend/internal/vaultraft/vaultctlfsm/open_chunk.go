@@ -35,6 +35,7 @@ type OpenChunkSegmentRef struct {
 	LastRecordNumber  uint32
 	SliceBytes        uint64
 	RefAddedAt        time.Time
+	Bounds            ManifestTimeBounds
 }
 
 // OpenChunkManifest is the replicated manifest of segment refs for one chunk.
@@ -45,6 +46,7 @@ type OpenChunkManifest struct {
 	TotalRecords uint64
 	TotalBytes   uint64
 	SealedAt     time.Time
+	Bounds       ManifestTimeBounds
 }
 
 // RecordCount returns the number of records in one ref.
@@ -197,6 +199,7 @@ func (f *FSM) applyAddOpenChunkSegmentRef(c *gastrologv1.AddOpenChunkSegmentRefC
 		LastRecordNumber:  c.GetLastRecordNumber(),
 		SliceBytes:        c.GetSliceBytes(),
 		RefAddedAt:        time.Unix(0, c.GetRefAddedAtNanos()),
+		Bounds:            boundsFromAddRefCommand(c),
 	}
 	if n := len(f.openChunk.Refs); n > 0 {
 		if openChunkSegmentRefEqual(f.openChunk.Refs[n-1], ref) {
@@ -206,6 +209,17 @@ func (f *FSM) applyAddOpenChunkSegmentRef(c *gastrologv1.AddOpenChunkSegmentRefC
 	f.openChunk.Refs = append(f.openChunk.Refs, ref)
 	f.openChunk.TotalRecords += count
 	f.openChunk.TotalBytes += c.GetSliceBytes()
+	sliceBounds := boundsFromAddRefCommand(c)
+	mergeManifestTimeBounds(&f.openChunk.Bounds,
+		sliceBounds.WriteStart, sliceBounds.WriteEnd,
+		sliceBounds.IngestStart, sliceBounds.IngestEnd,
+		sliceBounds.SourceStart, sliceBounds.SourceEnd,
+	)
+	if e := f.chunks[id]; e != nil {
+		e.RecordCount = int64(f.openChunk.TotalRecords) //nolint:gosec // G115: manifest totals fit in int64 for chunk metadata
+		e.Bytes = int64(f.openChunk.TotalBytes)       //nolint:gosec // G115: manifest totals fit in int64 for chunk metadata
+		applyManifestBoundsToEntry(e, f.openChunk.Bounds)
+	}
 	if f.segmentResume == nil {
 		f.segmentResume = make(map[glid.GLID]uint32)
 	}
@@ -233,10 +247,64 @@ func (f *FSM) applySealOpenChunkManifest(c *gastrologv1.SealOpenChunkManifestCom
 	f.openChunk.SealedAt = sealedAt
 	f.sealedManifest = f.openChunk
 	f.openChunk = nil
-	if e := f.chunks[id]; e != nil && e.State == chunk.ChunkStateActive {
-		e.State = chunk.ChunkStateSealing
-	}
+	f.clearStaleSealTombstoneLocked(f.sealedManifest.ChunkID)
+	f.ensureManifestChunkEntryLocked(f.sealedManifest, chunk.ChunkStateSealing)
 	return nil
+}
+
+// clearStaleSealTombstoneLocked removes a delete-protocol tombstone that blocks
+// pipeline seal completion while a sealed manifest is still pending for the same
+// chunk ID. Caller MUST hold f.mu.
+func (f *FSM) clearStaleSealTombstoneLocked(id chunk.ChunkID) {
+	if f.sealedManifest != nil && f.sealedManifest.ChunkID == id {
+		delete(f.tombstones, id)
+	}
+}
+
+// ensureManifestChunkEntryLocked guarantees f.chunks[id] exists for a chunk
+// on the open-manifest seal path. Caller MUST hold f.mu.
+func (f *FSM) ensureManifestChunkEntryLocked(m *OpenChunkManifest, state chunk.ChunkState) {
+	if m == nil {
+		return
+	}
+	id := m.ChunkID
+	f.clearStaleSealTombstoneLocked(id)
+	if e := f.chunks[id]; e != nil {
+		if e.State == chunk.ChunkStateActive && state != chunk.ChunkStateActive {
+			e.State = state
+		}
+		e.RecordCount = int64(m.TotalRecords) //nolint:gosec // G115: manifest totals fit in int64 for chunk metadata
+		e.Bytes = int64(m.TotalBytes)       //nolint:gosec // G115: manifest totals fit in int64 for chunk metadata
+		applyManifestBoundsToEntry(e, m.Bounds)
+		return
+	}
+	entry := manifestEntryFromOpenChunk(m, state)
+	f.chunks[id] = &entry
+}
+
+// clearOpenManifestStateIfChunkIDLocked drops open/sealed manifest state for id.
+// Caller MUST hold f.mu.
+func (f *FSM) clearOpenManifestStateIfChunkIDLocked(id chunk.ChunkID) {
+	if f.sealedManifest != nil && f.sealedManifest.ChunkID == id {
+		f.sealedManifest = nil
+	}
+	if f.openChunk != nil && f.openChunk.ChunkID == id {
+		f.openChunk = nil
+	}
+}
+
+// repairSealedManifestChunkEntryLocked recreates a missing manifest entry for a
+// pending sealed manifest after snapshot restore or a delete race.
+// Caller MUST hold f.mu.
+func (f *FSM) repairSealedManifestChunkEntryLocked() {
+	if f.sealedManifest == nil {
+		return
+	}
+	f.clearStaleSealTombstoneLocked(f.sealedManifest.ChunkID)
+	f.ensureManifestChunkEntryLocked(
+		f.sealedManifest,
+		chunk.ChunkStateSealing,
+	)
 }
 
 // applyOpenChunkManifestLocked applies OpenChunkManifest and returns a callback
@@ -306,6 +374,13 @@ func openChunkManifestToProto(m *OpenChunkManifest) *gastrologv1.OpenChunkManife
 	if !m.SealedAt.IsZero() {
 		out.SealedAtNanos = m.SealedAt.UnixNano()
 	}
+	ws, we, is, ie, ss, se := manifestBoundsToProto(m.Bounds)
+	out.WriteStartNanos = ws
+	out.WriteEndNanos = we
+	out.IngestStartNanos = is
+	out.IngestEndNanos = ie
+	out.SourceStartNanos = ss
+	out.SourceEndNanos = se
 	for i := range m.Refs {
 		ref := &m.Refs[i]
 		out.Refs[i] = &gastrologv1.OpenChunkSegmentRef{
@@ -332,6 +407,14 @@ func openChunkManifestFromProto(p *gastrologv1.OpenChunkManifestState) *OpenChun
 	if p.GetSealedAtNanos() != 0 {
 		m.SealedAt = time.Unix(0, p.GetSealedAtNanos())
 	}
+	m.Bounds = manifestBoundsFromProto(
+		p.GetWriteStartNanos(),
+		p.GetWriteEndNanos(),
+		p.GetIngestStartNanos(),
+		p.GetIngestEndNanos(),
+		p.GetSourceStartNanos(),
+		p.GetSourceEndNanos(),
+	)
 	for _, pr := range p.GetRefs() {
 		m.Refs = append(m.Refs, OpenChunkSegmentRef{
 			SegmentID:         glid.FromBytes(pr.GetSegmentId()),
@@ -394,6 +477,7 @@ func MarshalOpenChunkManifest(id chunk.ChunkID, openedAt time.Time) []byte {
 
 // NewAddOpenChunkSegmentRef builds an AddOpenChunkSegmentRef command.
 func NewAddOpenChunkSegmentRef(chunkID chunk.ChunkID, ref OpenChunkSegmentRef) *gastrologv1.VaultCtlCommand {
+	ws, we, is, ie, ss, se := manifestBoundsToProto(ref.Bounds)
 	return &gastrologv1.VaultCtlCommand{Command: &gastrologv1.VaultCtlCommand_AddOpenChunkSegmentRef{
 		AddOpenChunkSegmentRef: &gastrologv1.AddOpenChunkSegmentRefCommand{
 			ChunkId:            chunkID[:],
@@ -402,6 +486,12 @@ func NewAddOpenChunkSegmentRef(chunkID chunk.ChunkID, ref OpenChunkSegmentRef) *
 			LastRecordNumber:   ref.LastRecordNumber,
 			SliceBytes:         ref.SliceBytes,
 			RefAddedAtNanos:    ref.RefAddedAt.UnixNano(),
+			WriteStartNanos:    ws,
+			WriteEndNanos:      we,
+			IngestStartNanos:   is,
+			IngestEndNanos:     ie,
+			SourceStartNanos:   ss,
+			SourceEndNanos:     se,
 		},
 	}}
 }

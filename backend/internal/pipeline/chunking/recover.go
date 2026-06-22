@@ -2,6 +2,7 @@ package chunking
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"time"
 
@@ -126,6 +127,12 @@ func (v *vaultChunking) recoverBuiltGLCB(ctx context.Context, pending *vaultctlf
 	if v.cfg.Applier == nil || alreadyProposed {
 		return nil
 	}
+	if !v.cfg.IsLeader() {
+		v.mu.Lock()
+		v.doneSealProposed = key
+		v.mu.Unlock()
+		return nil
+	}
 	v.mu.Lock()
 	v.sealAttemptKey = key
 	v.lastSealAttempt = time.Now()
@@ -141,6 +148,9 @@ func (v *vaultChunking) recoverBuiltGLCB(ctx context.Context, pending *vaultctlf
 		result.IngestTSMonotonic,
 	)); err != nil {
 		return err
+	}
+	if !v.chunkSealCommitted(pending.ChunkID) {
+		return fmt.Errorf("chunking: CmdSealChunk did not commit seal for %s", pending.ChunkID)
 	}
 	v.mu.Lock()
 	v.doneSealProposed = key

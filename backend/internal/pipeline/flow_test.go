@@ -972,10 +972,9 @@ func TestPipelineRemotePullFailureThenRecovery(t *testing.T) {
 	}
 }
 
-func TestPipelineRemoteHomeFollowerBuildProposesSealChunk(t *testing.T) {
-	// Replicated sealed manifest on a follower home builds GLCB locally and
-	// proposes CmdSealChunk through the applier (forwarded to the vault-ctl
-	// Raft leader in production).
+func TestPipelineRemoteHomeFollowerBuildsGLCBWithoutSealing(t *testing.T) {
+	// Replicated sealed manifest on a follower home builds GLCB locally;
+	// only the vault-ctl leader proposes CmdSealChunk.
 	nodeID := glid.New()
 	ingesterID := glid.New()
 	vaultID := glid.New()
@@ -1025,11 +1024,11 @@ func TestPipelineRemoteHomeFollowerBuildProposesSealChunk(t *testing.T) {
 		t.Fatalf("follower GLCB: %v", err)
 	}
 	entry := h.fsm.Get(h.chunkID)
-	if entry == nil || entry.State != chunk.ChunkStateSealed {
-		t.Fatalf("chunk entry = %+v, want sealed after follower build", entry)
+	if entry == nil || entry.State != chunk.ChunkStateSealing {
+		t.Fatalf("chunk entry = %+v, want sealing after follower build", entry)
 	}
-	if h.fsm.SealedManifest() != nil {
-		t.Fatal("sealed manifest must clear after SealChunk")
+	if h.fsm.SealedManifest() == nil {
+		t.Fatal("sealed manifest must remain until vault-ctl leader seals")
 	}
 }
 

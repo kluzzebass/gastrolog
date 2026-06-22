@@ -17,9 +17,12 @@ var (
 	ErrInvalidManifestRef = errors.New("invalid manifest segment ref")
 	// ErrMissingSegments is returned when one or more manifest segments are absent locally.
 	ErrMissingSegments = errors.New("manifest segments missing locally")
+	// ErrAwaitingLocalSegments is returned when this home has not collected every
+	// manifest segment yet. Follower homes treat it as a quiet skip; the leader
+	// must still surface the underlying missing-segment error.
+	ErrAwaitingLocalSegments = errors.New("awaiting local manifest segments")
 )
 
-// SegmentLocator resolves on-disk segment paths for one vault home.
 type SegmentLocator interface {
 	SegmentPath(segmentID glid.GLID) (path string, ok bool)
 }

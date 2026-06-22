@@ -111,7 +111,7 @@ func (o *Orchestrator) VaultManifestEntriesFromCtlFSM(vaultID glid.GLID) []vault
 	}
 	var out []vaultctlfsm.ManifestEntry
 	for _, t := range vfsm.Vaults() {
-		out = append(out, t.List()...)
+		out = append(out, t.ListIncludingPipelineManifest()...)
 	}
 	return out
 }

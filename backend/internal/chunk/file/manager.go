@@ -2728,6 +2728,76 @@ func (m *Manager) FindIngestEntryIndex(id chunk.ChunkID, ts time.Time) (uint64, 
 	return uint64(it.Value()), true, nil
 }
 
+var _ chunk.IngestTSRankView = (*Manager)(nil)
+
+func (m *Manager) activeChunkForRank(id chunk.ChunkID) *chunkState {
+	m.mu.Lock()
+	active := m.active
+	m.mu.Unlock()
+	if active == nil || active.meta.id != id {
+		return nil
+	}
+	return active
+}
+
+// IngestTSRankLen implements chunk.IngestTSRankView for the active chunk only.
+// Sealed chunks are served via index.IndexManager mmap of ITSI in data.glcb.
+func (m *Manager) IngestTSRankLen(id chunk.ChunkID) (uint64, error) {
+	active := m.activeChunkForRank(id)
+	if active == nil {
+		return 0, chunk.ErrIngestTSRankIndex
+	}
+	return active.ingestBT.Count(), nil
+}
+
+// IngestTSRankAt implements chunk.IngestTSRankView for the active chunk only.
+func (m *Manager) IngestTSRankAt(id chunk.ChunkID, rank uint64) (int64, uint32, error) {
+	active := m.activeChunkForRank(id)
+	if active == nil {
+		return 0, 0, chunk.ErrIngestTSRankIndex
+	}
+	it, err := active.ingestBT.Scan()
+	if err != nil {
+		return 0, 0, err
+	}
+	for i := uint64(0); it.Valid(); it.Next() {
+		if i == rank {
+			return it.Key(), it.Value(), nil
+		}
+		i++
+	}
+	return 0, 0, chunk.ErrIngestTSRankIndex
+}
+
+// FindIngestTSRank implements chunk.IngestTSRankView for the active chunk only.
+func (m *Manager) FindIngestTSRank(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+	active := m.activeChunkForRank(id)
+	if active == nil {
+		return 0, false, nil
+	}
+	it, err := active.ingestBT.FindGE(ts.UnixNano())
+	if err != nil {
+		return 0, false, fmt.Errorf("btree ingest FindGE: %w", err)
+	}
+	if !it.Valid() {
+		return 0, false, nil
+	}
+	target := it.Key()
+	it, err = active.ingestBT.Scan()
+	if err != nil {
+		return 0, false, err
+	}
+	var rank uint64
+	for it.Valid() {
+		if it.Key() == target {
+			return rank, true, nil
+		}
+		rank++
+		it.Next()
+	}
+	return 0, false, nil
+}
+
 // HasLocalContent reports whether the chunk's content is locally readable
 // without triggering an S3 fetch. See ChunkManager.HasLocalContent.
 func (m *Manager) HasLocalContent(id chunk.ChunkID) bool {

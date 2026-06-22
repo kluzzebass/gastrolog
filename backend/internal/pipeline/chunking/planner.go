@@ -5,6 +5,7 @@ import (
 
 	"gastrolog/internal/glid"
 	"gastrolog/internal/record"
+	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
 // ManifestSnapshot is the open-chunk manifest state the planner reads.
@@ -71,6 +72,7 @@ type AddRefDecision struct {
 	LastRecordNumber  uint32
 	SliceBytes        uint64
 	RefAddedAt        time.Time
+	Bounds            vaultctlfsm.ManifestTimeBounds
 }
 
 // Plan chooses the next AddSegmentRef or rotate-now decision.
@@ -109,14 +111,21 @@ func Plan(input PlannerInput) PlannerDecision {
 		return PlannerDecision{Action: PlannerIdle}
 	}
 
+	last := pos - 1
+	bounds, err := SliceRecordBounds(seg.Index, first, last)
+	if err != nil {
+		return PlannerDecision{Action: PlannerIdle}
+	}
+
 	return PlannerDecision{
 		Action: PlannerAddRef,
 		Ref: AddRefDecision{
 			SegmentID:         seg.ID,
 			FirstRecordNumber: first,
-			LastRecordNumber:  pos - 1,
+			LastRecordNumber:  last,
 			SliceBytes:        sliceBytes,
 			RefAddedAt:        refAddedAtForSegment(seg, input.RefAddedAt),
+			Bounds:            bounds,
 		},
 	}
 }

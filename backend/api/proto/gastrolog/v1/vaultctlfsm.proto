@@ -199,6 +199,13 @@ message OpenChunkManifestState {
   uint64 total_records = 4;
   uint64 total_bytes = 5;
   int64 sealed_at_nanos = 6;
+  // Running min/max record timestamps across all refs (inspector / query bounds).
+  int64 write_start_nanos = 7;
+  int64 write_end_nanos = 8;
+  int64 ingest_start_nanos = 9;
+  int64 ingest_end_nanos = 10;
+  int64 source_start_nanos = 11;
+  int64 source_end_nanos = 12;
 }
 
 // SegmentResumeRecordNumber is the next EventID-order record number to chunk
@@ -222,6 +229,13 @@ message AddOpenChunkSegmentRefCommand {
   uint32 last_record_number = 4;
   uint64 slice_bytes = 5;
   int64 ref_added_at_nanos = 6;
+  // Min/max timestamps across this ref slice (from segment indexes at plan time).
+  int64 write_start_nanos = 7;
+  int64 write_end_nanos = 8;
+  int64 ingest_start_nanos = 9;
+  int64 ingest_end_nanos = 10;
+  int64 source_start_nanos = 11;
+  int64 source_end_nanos = 12;
 }
 
 // SealOpenChunkManifestCommand closes the open manifest for materialization.

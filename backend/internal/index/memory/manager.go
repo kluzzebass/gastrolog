@@ -262,18 +262,6 @@ func (m *Manager) SourceIndexEntryAt(chunkID chunk.ChunkID, rank uint64) (index.
 	return index.TSEntry{}, index.ErrIndexNotFound
 }
 
-// LoadIngestEntries returns ErrIndexNotFound; memory index manager does not
-// maintain timestamp indexes.
-func (m *Manager) LoadIngestEntries(chunkID chunk.ChunkID) ([]index.TSEntry, error) {
-	return nil, index.ErrIndexNotFound
-}
-
-// LoadSourceEntries returns ErrIndexNotFound; memory index manager does not
-// maintain timestamp indexes.
-func (m *Manager) LoadSourceEntries(chunkID chunk.ChunkID) ([]index.TSEntry, error) {
-	return nil, index.ErrIndexNotFound
-}
-
 // IndexSizes estimates the in-memory data footprint for each index.
 func (m *Manager) IndexSizes(chunkID chunk.ChunkID) map[string]int64 {
 	sizes := make(map[string]int64)

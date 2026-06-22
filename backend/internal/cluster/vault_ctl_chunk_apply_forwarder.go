@@ -55,6 +55,11 @@ func (f *VaultCtlChunkApplyForwarder) Apply(data []byte) error {
 		}
 		return err
 	}
+	if resp := future.Response(); resp != nil {
+		if err, ok := resp.(error); ok && err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

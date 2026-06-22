@@ -1647,8 +1647,15 @@ type OpenChunkManifestState struct {
 	TotalRecords  uint64                 `protobuf:"varint,4,opt,name=total_records,json=totalRecords,proto3" json:"total_records,omitempty"`
 	TotalBytes    uint64                 `protobuf:"varint,5,opt,name=total_bytes,json=totalBytes,proto3" json:"total_bytes,omitempty"`
 	SealedAtNanos int64                  `protobuf:"varint,6,opt,name=sealed_at_nanos,json=sealedAtNanos,proto3" json:"sealed_at_nanos,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Running min/max record timestamps across all refs (inspector / query bounds).
+	WriteStartNanos  int64 `protobuf:"varint,7,opt,name=write_start_nanos,json=writeStartNanos,proto3" json:"write_start_nanos,omitempty"`
+	WriteEndNanos    int64 `protobuf:"varint,8,opt,name=write_end_nanos,json=writeEndNanos,proto3" json:"write_end_nanos,omitempty"`
+	IngestStartNanos int64 `protobuf:"varint,9,opt,name=ingest_start_nanos,json=ingestStartNanos,proto3" json:"ingest_start_nanos,omitempty"`
+	IngestEndNanos   int64 `protobuf:"varint,10,opt,name=ingest_end_nanos,json=ingestEndNanos,proto3" json:"ingest_end_nanos,omitempty"`
+	SourceStartNanos int64 `protobuf:"varint,11,opt,name=source_start_nanos,json=sourceStartNanos,proto3" json:"source_start_nanos,omitempty"`
+	SourceEndNanos   int64 `protobuf:"varint,12,opt,name=source_end_nanos,json=sourceEndNanos,proto3" json:"source_end_nanos,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *OpenChunkManifestState) Reset() {
@@ -1719,6 +1726,48 @@ func (x *OpenChunkManifestState) GetTotalBytes() uint64 {
 func (x *OpenChunkManifestState) GetSealedAtNanos() int64 {
 	if x != nil {
 		return x.SealedAtNanos
+	}
+	return 0
+}
+
+func (x *OpenChunkManifestState) GetWriteStartNanos() int64 {
+	if x != nil {
+		return x.WriteStartNanos
+	}
+	return 0
+}
+
+func (x *OpenChunkManifestState) GetWriteEndNanos() int64 {
+	if x != nil {
+		return x.WriteEndNanos
+	}
+	return 0
+}
+
+func (x *OpenChunkManifestState) GetIngestStartNanos() int64 {
+	if x != nil {
+		return x.IngestStartNanos
+	}
+	return 0
+}
+
+func (x *OpenChunkManifestState) GetIngestEndNanos() int64 {
+	if x != nil {
+		return x.IngestEndNanos
+	}
+	return 0
+}
+
+func (x *OpenChunkManifestState) GetSourceStartNanos() int64 {
+	if x != nil {
+		return x.SourceStartNanos
+	}
+	return 0
+}
+
+func (x *OpenChunkManifestState) GetSourceEndNanos() int64 {
+	if x != nil {
+		return x.SourceEndNanos
 	}
 	return 0
 }
@@ -1839,8 +1888,15 @@ type AddOpenChunkSegmentRefCommand struct {
 	LastRecordNumber  uint32                 `protobuf:"varint,4,opt,name=last_record_number,json=lastRecordNumber,proto3" json:"last_record_number,omitempty"`
 	SliceBytes        uint64                 `protobuf:"varint,5,opt,name=slice_bytes,json=sliceBytes,proto3" json:"slice_bytes,omitempty"`
 	RefAddedAtNanos   int64                  `protobuf:"varint,6,opt,name=ref_added_at_nanos,json=refAddedAtNanos,proto3" json:"ref_added_at_nanos,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Min/max timestamps across this ref slice (from segment indexes at plan time).
+	WriteStartNanos  int64 `protobuf:"varint,7,opt,name=write_start_nanos,json=writeStartNanos,proto3" json:"write_start_nanos,omitempty"`
+	WriteEndNanos    int64 `protobuf:"varint,8,opt,name=write_end_nanos,json=writeEndNanos,proto3" json:"write_end_nanos,omitempty"`
+	IngestStartNanos int64 `protobuf:"varint,9,opt,name=ingest_start_nanos,json=ingestStartNanos,proto3" json:"ingest_start_nanos,omitempty"`
+	IngestEndNanos   int64 `protobuf:"varint,10,opt,name=ingest_end_nanos,json=ingestEndNanos,proto3" json:"ingest_end_nanos,omitempty"`
+	SourceStartNanos int64 `protobuf:"varint,11,opt,name=source_start_nanos,json=sourceStartNanos,proto3" json:"source_start_nanos,omitempty"`
+	SourceEndNanos   int64 `protobuf:"varint,12,opt,name=source_end_nanos,json=sourceEndNanos,proto3" json:"source_end_nanos,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *AddOpenChunkSegmentRefCommand) Reset() {
@@ -1911,6 +1967,48 @@ func (x *AddOpenChunkSegmentRefCommand) GetSliceBytes() uint64 {
 func (x *AddOpenChunkSegmentRefCommand) GetRefAddedAtNanos() int64 {
 	if x != nil {
 		return x.RefAddedAtNanos
+	}
+	return 0
+}
+
+func (x *AddOpenChunkSegmentRefCommand) GetWriteStartNanos() int64 {
+	if x != nil {
+		return x.WriteStartNanos
+	}
+	return 0
+}
+
+func (x *AddOpenChunkSegmentRefCommand) GetWriteEndNanos() int64 {
+	if x != nil {
+		return x.WriteEndNanos
+	}
+	return 0
+}
+
+func (x *AddOpenChunkSegmentRefCommand) GetIngestStartNanos() int64 {
+	if x != nil {
+		return x.IngestStartNanos
+	}
+	return 0
+}
+
+func (x *AddOpenChunkSegmentRefCommand) GetIngestEndNanos() int64 {
+	if x != nil {
+		return x.IngestEndNanos
+	}
+	return 0
+}
+
+func (x *AddOpenChunkSegmentRefCommand) GetSourceStartNanos() int64 {
+	if x != nil {
+		return x.SourceStartNanos
+	}
+	return 0
+}
+
+func (x *AddOpenChunkSegmentRefCommand) GetSourceEndNanos() int64 {
+	if x != nil {
+		return x.SourceEndNanos
 	}
 	return 0
 }
@@ -2722,7 +2820,7 @@ const file_gastrolog_v1_vaultctlfsm_proto_rawDesc = "" +
 	"\x12last_record_number\x18\x03 \x01(\rR\x10lastRecordNumber\x12\x1f\n" +
 	"\vslice_bytes\x18\x04 \x01(\x04R\n" +
 	"sliceBytes\x12+\n" +
-	"\x12ref_added_at_nanos\x18\x05 \x01(\x03R\x0frefAddedAtNanos\"\x80\x02\n" +
+	"\x12ref_added_at_nanos\x18\x05 \x01(\x03R\x0frefAddedAtNanos\"\x84\x04\n" +
 	"\x16OpenChunkManifestState\x12\x19\n" +
 	"\bchunk_id\x18\x01 \x01(\fR\achunkId\x12&\n" +
 	"\x0fopened_at_nanos\x18\x02 \x01(\x03R\ropenedAtNanos\x125\n" +
@@ -2730,14 +2828,21 @@ const file_gastrolog_v1_vaultctlfsm_proto_rawDesc = "" +
 	"\rtotal_records\x18\x04 \x01(\x04R\ftotalRecords\x12\x1f\n" +
 	"\vtotal_bytes\x18\x05 \x01(\x04R\n" +
 	"totalBytes\x12&\n" +
-	"\x0fsealed_at_nanos\x18\x06 \x01(\x03R\rsealedAtNanos\"h\n" +
+	"\x0fsealed_at_nanos\x18\x06 \x01(\x03R\rsealedAtNanos\x12*\n" +
+	"\x11write_start_nanos\x18\a \x01(\x03R\x0fwriteStartNanos\x12&\n" +
+	"\x0fwrite_end_nanos\x18\b \x01(\x03R\rwriteEndNanos\x12,\n" +
+	"\x12ingest_start_nanos\x18\t \x01(\x03R\x10ingestStartNanos\x12(\n" +
+	"\x10ingest_end_nanos\x18\n" +
+	" \x01(\x03R\x0eingestEndNanos\x12,\n" +
+	"\x12source_start_nanos\x18\v \x01(\x03R\x10sourceStartNanos\x12(\n" +
+	"\x10source_end_nanos\x18\f \x01(\x03R\x0esourceEndNanos\"h\n" +
 	"\x19SegmentResumeRecordNumber\x12\x1d\n" +
 	"\n" +
 	"segment_id\x18\x01 \x01(\fR\tsegmentId\x12,\n" +
 	"\x12next_record_number\x18\x02 \x01(\rR\x10nextRecordNumber\"]\n" +
 	"\x18OpenChunkManifestCommand\x12\x19\n" +
 	"\bchunk_id\x18\x01 \x01(\fR\achunkId\x12&\n" +
-	"\x0fopened_at_nanos\x18\x02 \x01(\x03R\ropenedAtNanos\"\x85\x02\n" +
+	"\x0fopened_at_nanos\x18\x02 \x01(\x03R\ropenedAtNanos\"\x89\x04\n" +
 	"\x1dAddOpenChunkSegmentRefCommand\x12\x19\n" +
 	"\bchunk_id\x18\x01 \x01(\fR\achunkId\x12\x1d\n" +
 	"\n" +
@@ -2746,7 +2851,14 @@ const file_gastrolog_v1_vaultctlfsm_proto_rawDesc = "" +
 	"\x12last_record_number\x18\x04 \x01(\rR\x10lastRecordNumber\x12\x1f\n" +
 	"\vslice_bytes\x18\x05 \x01(\x04R\n" +
 	"sliceBytes\x12+\n" +
-	"\x12ref_added_at_nanos\x18\x06 \x01(\x03R\x0frefAddedAtNanos\"a\n" +
+	"\x12ref_added_at_nanos\x18\x06 \x01(\x03R\x0frefAddedAtNanos\x12*\n" +
+	"\x11write_start_nanos\x18\a \x01(\x03R\x0fwriteStartNanos\x12&\n" +
+	"\x0fwrite_end_nanos\x18\b \x01(\x03R\rwriteEndNanos\x12,\n" +
+	"\x12ingest_start_nanos\x18\t \x01(\x03R\x10ingestStartNanos\x12(\n" +
+	"\x10ingest_end_nanos\x18\n" +
+	" \x01(\x03R\x0eingestEndNanos\x12,\n" +
+	"\x12source_start_nanos\x18\v \x01(\x03R\x10sourceStartNanos\x12(\n" +
+	"\x10source_end_nanos\x18\f \x01(\x03R\x0esourceEndNanos\"a\n" +
 	"\x1cSealOpenChunkManifestCommand\x12\x19\n" +
 	"\bchunk_id\x18\x01 \x01(\fR\achunkId\x12&\n" +
 	"\x0fsealed_at_nanos\x18\x02 \x01(\x03R\rsealedAtNanos\"9\n" +

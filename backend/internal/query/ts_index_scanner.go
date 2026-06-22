@@ -11,6 +11,53 @@ import (
 	"gastrolog/internal/index"
 )
 
+func tsIndexViewForChunk(cm chunk.ChunkManager, im index.IndexManager, orderBy OrderBy) tsIndexView {
+	imView := tsIndexViewForOrder(im, orderBy)
+	if orderBy == OrderBySourceTS {
+		return imView
+	}
+	rankCM, ok := cm.(chunk.IngestTSRankView)
+	if !ok {
+		return imView
+	}
+	return tsIndexView{
+		lenFn: func(chunkID chunk.ChunkID) (uint64, error) {
+			n, err := imView.lenFn(chunkID)
+			if err == nil {
+				return n, nil
+			}
+			if !errors.Is(err, index.ErrIndexNotFound) {
+				return 0, err
+			}
+			return rankCM.IngestTSRankLen(chunkID)
+		},
+		entryAt: func(chunkID chunk.ChunkID, rank uint64) (index.TSEntry, error) {
+			entry, err := imView.entryAt(chunkID, rank)
+			if err == nil {
+				return entry, nil
+			}
+			if !errors.Is(err, index.ErrIndexNotFound) {
+				return index.TSEntry{}, err
+			}
+			ts, pos, err := rankCM.IngestTSRankAt(chunkID, rank)
+			if err != nil {
+				return index.TSEntry{}, err
+			}
+			return index.TSEntry{TS: ts, Pos: pos}, nil
+		},
+		findRank: func(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+			rank, found, err := imView.findRank(chunkID, ts)
+			if err == nil {
+				return rank, found, nil
+			}
+			if !errors.Is(err, index.ErrIndexNotFound) {
+				return 0, false, err
+			}
+			return rankCM.FindIngestTSRank(chunkID, ts)
+		},
+	}
+}
+
 // tsIndexView provides rank-based access to a sealed chunk's mmap'd TS index.
 type tsIndexView struct {
 	lenFn    func(chunk.ChunkID) (uint64, error)
@@ -82,16 +129,17 @@ func tsIndexRankBounds(view tsIndexView, chunkID chunk.ChunkID, q Query) (start,
 
 // buildMmapTSIndexScanner walks the mmap'd TS index by rank, seeking to each
 // physical position on demand. Returns ErrIndexNotFound when the index is
-// missing so callers can fall back to the reorder buffer.
+// missing — sealed-chunk search must fail loudly; there is no heap fallback.
 func buildMmapTSIndexScanner(
 	ctx context.Context,
 	cursor chunk.RecordCursor,
 	q Query,
 	b *scannerBuilder,
 	meta chunk.ChunkMeta,
+	cm chunk.ChunkManager,
 	im index.IndexManager,
 ) (iter.Seq2[recordWithRef, error], error) {
-	view := tsIndexViewForOrder(im, q.OrderBy)
+	view := tsIndexViewForChunk(cm, im, q.OrderBy)
 	if _, err := view.lenFn(meta.ID); err != nil {
 		return nil, err
 	}
@@ -128,14 +176,14 @@ func buildMmapTSIndexRankScanner(
 	return func(yield func(recordWithRef, error) bool) {
 		if q.Reverse() {
 			for rank := end; rank > start; rank-- {
-				if err := yieldMmapTSIndexRank(ctx, yield, cursor, chunkID, vaultID, view, rank-1, filters, minPos, hasMinPos); err != nil {
+				if err := yieldMmapTSIndexRank(ctx, yield, cursor, chunkID, vaultID, view, rank-1, q, filters, minPos, hasMinPos); err != nil {
 					return
 				}
 			}
 			return
 		}
 		for rank := start; rank < end; rank++ {
-			if err := yieldMmapTSIndexRank(ctx, yield, cursor, chunkID, vaultID, view, rank, filters, minPos, hasMinPos); err != nil {
+			if err := yieldMmapTSIndexRank(ctx, yield, cursor, chunkID, vaultID, view, rank, q, filters, minPos, hasMinPos); err != nil {
 				return
 			}
 		}
@@ -165,18 +213,36 @@ func buildMmapTSIndexFilteredScanner(
 	return func(yield func(recordWithRef, error) bool) {
 		if q.Reverse() {
 			for rank := end; rank > start; rank-- {
-				if err := yieldMmapTSIndexRankFiltered(ctx, yield, cursor, chunkID, vaultID, view, rank-1, posSet, filters, minPos, hasMinPos); err != nil {
+				if err := yieldMmapTSIndexRankFiltered(ctx, yield, cursor, chunkID, vaultID, view, rank-1, q, posSet, filters, minPos, hasMinPos); err != nil {
 					return
 				}
 			}
 			return
 		}
 		for rank := start; rank < end; rank++ {
-			if err := yieldMmapTSIndexRankFiltered(ctx, yield, cursor, chunkID, vaultID, view, rank, posSet, filters, minPos, hasMinPos); err != nil {
+			if err := yieldMmapTSIndexRankFiltered(ctx, yield, cursor, chunkID, vaultID, view, rank, q, posSet, filters, minPos, hasMinPos); err != nil {
 				return
 			}
 		}
 	}
+}
+
+func mmapRecordVisible(ts, lower, upper, resumeTS time.Time, reverse bool) bool {
+	if !lower.IsZero() && ts.Before(lower) {
+		return false
+	}
+	if !upper.IsZero() && !ts.Before(upper) {
+		return false
+	}
+	if !resumeTS.IsZero() {
+		if reverse && !ts.Before(resumeTS) {
+			return false
+		}
+		if !reverse && !resumeTS.Before(ts) {
+			return false
+		}
+	}
+	return true
 }
 
 func yieldMmapTSIndexRank(
@@ -187,6 +253,7 @@ func yieldMmapTSIndexRank(
 	vaultID glid.GLID,
 	view tsIndexView,
 	rank uint64,
+	q Query,
 	filters []recordFilter,
 	minPos uint64,
 	hasMinPos bool,
@@ -217,7 +284,11 @@ func yieldMmapTSIndexRank(
 	if !applyFilters(rec, filters) {
 		return nil
 	}
-	if !yield(recordWithRef{VaultID: vaultID, Record: rec, Ref: ref}, nil) {
+	lower, upper := q.TimeBounds()
+	if !mmapRecordVisible(q.OrderBy.RecordTS(rec), lower, upper, q.ResumeTS, q.Reverse()) {
+		return nil
+	}
+	if !yield(recordWithRef{VaultID: vaultID, Record: rec, Ref: ref, Reordered: true}, nil) {
 		return errScanStopped
 	}
 	return nil
@@ -231,6 +302,7 @@ func yieldMmapTSIndexRankFiltered(
 	vaultID glid.GLID,
 	view tsIndexView,
 	rank uint64,
+	q Query,
 	posSet map[uint64]struct{},
 	filters []recordFilter,
 	minPos uint64,
@@ -245,7 +317,7 @@ func yieldMmapTSIndexRankFiltered(
 	if _, ok := posSet[pos]; !ok {
 		return nil
 	}
-	return yieldMmapTSIndexRank(ctx, yield, cursor, chunkID, vaultID, view, rank, filters, minPos, hasMinPos)
+	return yieldMmapTSIndexRank(ctx, yield, cursor, chunkID, vaultID, view, rank, q, filters, minPos, hasMinPos)
 }
 
 // errScanStopped is returned internally when yield returns false.

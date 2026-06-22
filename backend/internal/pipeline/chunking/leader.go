@@ -74,6 +74,7 @@ func (v *vaultChunking) planOnce(ctx context.Context, cronDue bool) error {
 			LastRecordNumber:  ref.LastRecordNumber,
 			SliceBytes:        ref.SliceBytes,
 			RefAddedAt:        ref.RefAddedAt,
+			Bounds:            ref.Bounds,
 		}))
 	default:
 		return nil

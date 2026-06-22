@@ -264,7 +264,7 @@ func (e *Engine) deriveTimeRange(q *Query, selectedVaults []glid.GLID) {
 
 // timechartFastPath counts records per bucket using IngestTS binary search (no record scanning).
 // For the active chunk, uses the in-memory B-tree (FindIngestStartPosition).
-// For sealed chunks, uses the persisted IngestTS index (LoadIngestEntries).
+// For sealed chunks, uses mmap'd ITSI rank lookup (FindIngestEntryIndex).
 func (e *Engine) timechartFastPath(selectedVaults []glid.GLID, start time.Time, end time.Time, bucketWidth time.Duration, numBuckets int, counts []int64, cloudFlags []bool) {
 	ir := e.indexReader()
 	for _, vaultID := range selectedVaults {

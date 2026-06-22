@@ -138,6 +138,8 @@ type VaultSpec struct {
 	// orchestrator can register it for queries when the FSM seal already
 	// applied (build-finishes-last ordering). Optional.
 	OnChunkBuilt func(chunk.ChunkID)
+	// OnManifestOpened fires when CmdOpenChunkManifest applies. Optional.
+	OnManifestOpened func(*vaultctlfsm.OpenChunkManifest)
 	// ChunkRequiredHolders returns placement member node IDs that must hold each
 	// segment before the leader proposes ReleaseSegments. Optional.
 	ChunkRequiredHolders func() []string
@@ -576,6 +578,7 @@ func (s *Supervisor) registerHome(spec VaultSpec) error {
 			Policy:     spec.ChunkPolicy,
 			NewChunkID:      spec.NewChunkID,
 			OnBuilt:         spec.OnChunkBuilt,
+			OnManifestOpened: spec.OnManifestOpened,
 			RequiredHolders: spec.ChunkRequiredHolders,
 		}); err != nil {
 			if collectionRegistered {

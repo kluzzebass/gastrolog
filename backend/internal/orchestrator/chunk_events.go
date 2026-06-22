@@ -6,6 +6,39 @@ import (
 	"gastrolog/internal/vaultraft/vaultctlfsm"
 )
 
+// chunkLogAttrs returns structured fields for operator-facing chunk lifecycle
+// logs: chunk id, vault id/name, and this node's id/name.
+func (o *Orchestrator) chunkLogAttrs(vaultID glid.GLID, chunkID chunk.ChunkID) []any {
+	attrs := []any{
+		"chunk", chunkID,
+		"vault_id", vaultID,
+	}
+	if name := o.vaultLabel(vaultID); name != "" {
+		attrs = append(attrs, "vault_name", name)
+	}
+	if o.localNodeID != "" {
+		attrs = append(attrs, "node_id", o.localNodeID)
+		if name := o.nodeLabel(o.localNodeID); name != "" {
+			attrs = append(attrs, "node_name", name)
+		}
+	}
+	return attrs
+}
+
+func (o *Orchestrator) logChunkCreated(vaultID glid.GLID, chunkID chunk.ChunkID) {
+	if o == nil || o.logger == nil {
+		return
+	}
+	o.logger.Info("chunk created", o.chunkLogAttrs(vaultID, chunkID)...)
+}
+
+func (o *Orchestrator) logChunkDeleted(vaultID glid.GLID, chunkID chunk.ChunkID) {
+	if o == nil || o.logger == nil {
+		return
+	}
+	o.logger.Info("chunk deleted", o.chunkLogAttrs(vaultID, chunkID)...)
+}
+
 // manifestEntryToChunkMeta builds a chunk.ChunkMeta from the FSM's
 // authoritative ManifestEntry. Used by the vault-ctl FSM callbacks
 // (OnCreate / OnSeal / OnUpload) to emit ChunkChangeEvents that carry
@@ -31,6 +64,7 @@ func manifestEntryToChunkMeta(e vaultctlfsm.ManifestEntry, sealed bool) chunk.Ch
 		Bytes:       e.Bytes,
 		DiskBytes:   e.DiskBytes,
 		Sealed:      sealed,
+		State:       e.State,
 		CloudBacked: e.CloudBacked,
 		Archived:    e.Archived,
 	}

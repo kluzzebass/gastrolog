@@ -572,6 +572,40 @@ func (f *FSM) Get(id chunk.ChunkID) *ManifestEntry {
 	return &cp
 }
 
+// ListIncludingPipelineManifest returns manifest entries plus synthetic
+// Active/Sealing entries from open or pending sealed manifests when the chunk
+// map is missing them (inspector / cross-node reads).
+func (f *FSM) ListIncludingPipelineManifest() []ManifestEntry {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	out := make([]ManifestEntry, 0, len(f.chunks)+2)
+	indexByID := make(map[chunk.ChunkID]int, len(f.chunks))
+	for _, e := range f.chunks {
+		cp := *e
+		out = append(out, cp)
+		indexByID[e.ID] = len(out) - 1
+	}
+	overlayManifest := func(m *OpenChunkManifest, state chunk.ChunkState) {
+		if m == nil {
+			return
+		}
+		entry := manifestEntryFromOpenChunk(m, state)
+		if i, ok := indexByID[m.ChunkID]; ok {
+			out[i] = entry
+			return
+		}
+		out = append(out, entry)
+		indexByID[m.ChunkID] = len(out) - 1
+	}
+	if oc := f.openChunk; oc != nil {
+		overlayManifest(oc, chunk.ChunkStateActive)
+	}
+	if sm := f.sealedManifest; sm != nil {
+		overlayManifest(sm, chunk.ChunkStateSealing)
+	}
+	return out
+}
+
 // List returns all chunk metadata, sorted by WriteStart ascending.
 func (f *FSM) List() []ManifestEntry {
 	f.mu.RLock()
@@ -1032,6 +1066,7 @@ func (f *FSM) restoreFromProtoLocked(snap *gastrologv1.VaultCtlSnapshot) {
 	}
 	f.restoreCompletedSegmentsLocked(snap.GetCompletedSegments())
 	f.restoreOpenChunkLocked(snap)
+	f.repairSealedManifestChunkEntryLocked()
 	f.ready = true
 }
 
@@ -1078,6 +1113,13 @@ func (f *FSM) applySeal(c *gastrologv1.SealChunkCommand) error {
 	id := chunkIDFromProto(c.GetId())
 
 	e := f.chunks[id]
+	if e == nil {
+		if f.sealedManifest != nil && f.sealedManifest.ChunkID == id {
+			f.clearStaleSealTombstoneLocked(id)
+			f.ensureManifestChunkEntryLocked(f.sealedManifest, chunk.ChunkStateSealing)
+			e = f.chunks[id]
+		}
+	}
 	if e == nil {
 		return fmt.Errorf("seal chunk: %s not found", id)
 	}
@@ -1228,6 +1270,7 @@ func (f *FSM) applyDelete(c *gastrologv1.DeleteChunkCommand) (*chunk.ChunkID, er
 	// same log entry at the same logical time and the tombstone is only
 	// used locally to short-circuit replication receivers.
 	f.tombstones[id] = time.Now()
+	f.clearOpenManifestStateIfChunkIDLocked(id)
 	if _, existed := f.chunks[id]; !existed {
 		return nil, nil
 	}

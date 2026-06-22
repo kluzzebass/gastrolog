@@ -288,6 +288,7 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID glid.GLID) ([]VaultChunkMeta, e
 	seen := make(map[chunk.ChunkID]struct{}, len(entries))
 	for _, e := range entries {
 		m := e.ToChunkMeta()
+		o.overlayPipelineChunkMetaBounds(vaultID, &m)
 		if overlay != nil {
 			m = overlay(m)
 		}

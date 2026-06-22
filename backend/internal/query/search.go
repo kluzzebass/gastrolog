@@ -344,17 +344,41 @@ func (e *Engine) searchSingleChunk(
 	lastRefs *[]MultiVaultPosition,
 	yield func(chunk.Record, error) bool,
 ) (completed bool) {
-	startPos := resolveStartPosition(resume, sc.vaultID, sc.meta.ID)
+	resumeMap := buildResumeMap(resume)
+	var ri *resumeInfo
+	if vaultEntries, ok := resumeMap[sc.vaultID]; ok {
+		if entry, ok := vaultEntries[sc.meta.ID]; ok {
+			ri = &entry
+		}
+	}
+
+	chunkQ := q
+	var startPos *uint64
+	if ri != nil {
+		if !ri.ResumeTS.IsZero() {
+			chunkQ.ResumeTS = ri.ResumeTS
+		} else {
+			startPos = &ri.Position
+		}
+	}
 
 	count := 0
-	for rr, err := range e.searchChunkWithRef(ctx, q, sc.vaultID, sc.meta, startPos) {
+	for rr, err := range e.searchChunkWithRef(ctx, chunkQ, sc.vaultID, sc.meta, startPos) {
 		if err != nil {
-			*lastRefs = []MultiVaultPosition{{VaultID: rr.VaultID, ChunkID: rr.Ref.ChunkID, Position: rr.Ref.Pos}}
+			pos := MultiVaultPosition{VaultID: rr.VaultID, ChunkID: rr.Ref.ChunkID, Position: rr.Ref.Pos}
+			if rr.Reordered {
+				pos.ResumeTS = q.OrderBy.RecordTS(rr.Record)
+			}
+			*lastRefs = []MultiVaultPosition{pos}
 			yield(chunk.Record{}, err)
 			return false
 		}
 
-		*lastRefs = []MultiVaultPosition{{VaultID: rr.VaultID, ChunkID: rr.Ref.ChunkID, Position: rr.Ref.Pos}}
+		pos := MultiVaultPosition{VaultID: rr.VaultID, ChunkID: rr.Ref.ChunkID, Position: rr.Ref.Pos}
+		if rr.Reordered {
+			pos.ResumeTS = q.OrderBy.RecordTS(rr.Record)
+		}
+		*lastRefs = []MultiVaultPosition{pos}
 
 		if !yield(rr.record(), nil) {
 			return false
@@ -584,7 +608,7 @@ func runMergeLoop(
 		entry := heap.Pop(ms.h).(*cursorEntry)
 		key := mergeKey{vaultID: entry.vaultID, chunkID: entry.chunkID}
 		if entry.reordered {
-			ms.chunkResumeTS[key] = entry.rec.IngestTS
+			ms.chunkResumeTS[key] = q.OrderBy.RecordTS(entry.rec)
 		}
 		ms.chunkPositions[key] = entry.ref.Pos
 
@@ -855,21 +879,13 @@ func (e *Engine) reopenFollowScanners(
 		heap.Pop(ms.h)
 	}
 
-	firstMatchTS := firstMatch.rec.WriteTS
+	firstMatchTS := followQuery.OrderBy.RecordTS(firstMatch.rec)
+	followQuery.ResumeTS = firstMatchTS
 
 	for _, sc := range allChunks {
 		key := mergeKey{vaultID: sc.vaultID, chunkID: sc.meta.ID}
-		isFirstMatchChunk := key.vaultID == firstMatch.vaultID && key.chunkID == firstMatch.chunkID
 
-		var startPos *uint64
-		if isFirstMatchChunk {
-			// This chunk had the first match - start from the match position.
-			// searchChunkWithRef will skip this position (since startPos means "already returned"),
-			// so we pass the match position itself, not position+1.
-			startPos = &firstMatch.ref.Pos
-		}
-
-		rr, next, stop, ok, err := e.seekFollowPosition(ctx, followQuery, sc, startPos, isFirstMatchChunk, firstMatchTS)
+		rr, next, stop, ok, err := e.seekFollowPosition(ctx, followQuery, sc)
 		if err != nil {
 			return err
 		}
@@ -879,10 +895,11 @@ func (e *Engine) reopenFollowScanners(
 		}
 
 		entry := &cursorEntry{
-			vaultID: sc.vaultID,
-			chunkID: sc.meta.ID,
-			rec:     rr.Record,
-			ref:     rr.Ref,
+			vaultID:   sc.vaultID,
+			chunkID:   sc.meta.ID,
+			rec:       rr.Record,
+			ref:       rr.Ref,
+			reordered: rr.Reordered,
 		}
 		heap.Push(ms.h, entry)
 
@@ -897,42 +914,25 @@ func (e *Engine) reopenFollowScanners(
 }
 
 // seekFollowPosition opens an iterator for a chunk in follow mode and
-// advances it past records at or before firstMatchTS (for non-first-match chunks).
-// Returns the first valid record, the pull iterator functions, and whether
-// a valid record was found.
+// returns the first record after the match timestamp.
 func (e *Engine) seekFollowPosition(
 	ctx context.Context,
 	followQuery Query,
 	sc vaultChunk,
-	startPos *uint64,
-	isFirstMatchChunk bool,
-	firstMatchTS time.Time,
 ) (recordWithRef, func() (recordWithRef, error, bool), func(), bool, error) {
-	iterSeq := e.searchChunkWithRef(ctx, followQuery, sc.vaultID, sc.meta, startPos)
+	iterSeq := e.searchChunkWithRef(ctx, followQuery, sc.vaultID, sc.meta, nil)
 	next, stop := iter.Pull2(iterSeq)
 
-	for {
-		rr, err, ok := next()
-		if !ok {
-			stop()
-			return recordWithRef{}, nil, nil, false, nil
-		}
-		if err != nil {
-			stop()
-			return recordWithRef{}, nil, nil, false, err
-		}
-
-		// For the first-match chunk, we're already positioned correctly.
-		if isFirstMatchChunk {
-			return rr, next, stop, true, nil
-		}
-
-		// For other chunks, skip records at or before firstMatchTS.
-		if rr.Record.WriteTS.After(firstMatchTS) {
-			return rr, next, stop, true, nil
-		}
-		// Continue to next record.
+	rr, err, ok := next()
+	if !ok {
+		stop()
+		return recordWithRef{}, nil, nil, false, nil
 	}
+	if err != nil {
+		stop()
+		return recordWithRef{}, nil, nil, false, err
+	}
+	return rr, next, stop, true, nil
 }
 
 // Follow tails records from all vaults, waiting for new arrivals.

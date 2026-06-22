@@ -163,6 +163,19 @@ type GLCBSectionReader interface {
 	WithGLCBSection(id ChunkID, sectionType byte, fn func(section []byte) error) error
 }
 
+// ErrIngestTSRankIndex is returned when an ingest TS rank index is unavailable.
+var ErrIngestTSRankIndex = errors.New("ingest TS rank index not found")
+
+// IngestTSRankView exposes rank-based ingest TS index lookups without
+// materializing the full index on the Go heap. Sealed production GLCB chunks
+// are served via index.IndexManager + GLCBSectionReader; active file chunks
+// via in-manager B+ trees; in-memory test vaults read ranks from record state.
+type IngestTSRankView interface {
+	IngestTSRankLen(id ChunkID) (uint64, error)
+	IngestTSRankAt(id ChunkID, rank uint64) (tsNano int64, pos uint32, err error)
+	FindIngestTSRank(id ChunkID, ts time.Time) (rank uint64, found bool, err error)
+}
+
 // ChunkMover extends ChunkManager with filesystem-level chunk movement.
 // Not all ChunkManager implementations support this (e.g. memory-based ones
 // cannot). Callers should type-assert to check availability.

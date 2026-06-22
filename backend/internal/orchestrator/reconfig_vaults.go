@@ -1410,7 +1410,7 @@ func wireVaultFSMOnDelete(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 		if o == nil {
 			return
 		}
-		o.EmitChunkCreated(vaultID, manifestEntryToChunkMeta(e, false))
+		o.EmitChunkCreated(vaultID, manifestEntryToChunkMeta(e, false)) // logs + event bus
 	})
 	silent, ok := cm.(chunk.SilentDeleter)
 	if !ok {
@@ -1424,6 +1424,7 @@ func wireVaultFSMOnDelete(g *raftgroup.Group, vaultID glid.GLID, cm chunk.ChunkM
 		// the chunk locally — they may have rendered it via the
 		// cluster-wide ListChunks fan-out. See gastrolog-2ob86.
 		if o != nil {
+			o.logChunkDeleted(vaultID, id)
 			defer o.EmitChunkDeleted(vaultID, id)
 		}
 		// Delete indexes first (they're metadata about the chunk).

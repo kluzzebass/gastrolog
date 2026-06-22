@@ -40,6 +40,32 @@ func (c *cloudBackedCM) Meta(id chunk.ChunkID) (chunk.ChunkMeta, error) {
 	return m, nil
 }
 
+func (c *cloudBackedCM) ingestRankView() (chunk.IngestTSRankView, bool) {
+	rankCM, ok := c.ChunkManager.(chunk.IngestTSRankView)
+	return rankCM, ok
+}
+
+func (c *cloudBackedCM) IngestTSRankLen(id chunk.ChunkID) (uint64, error) {
+	if rankCM, ok := c.ingestRankView(); ok {
+		return rankCM.IngestTSRankLen(id)
+	}
+	return 0, chunk.ErrIngestTSRankIndex
+}
+
+func (c *cloudBackedCM) IngestTSRankAt(id chunk.ChunkID, rank uint64) (int64, uint32, error) {
+	if rankCM, ok := c.ingestRankView(); ok {
+		return rankCM.IngestTSRankAt(id, rank)
+	}
+	return 0, 0, chunk.ErrIngestTSRankIndex
+}
+
+func (c *cloudBackedCM) FindIngestTSRank(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+	if rankCM, ok := c.ingestRankView(); ok {
+		return rankCM.FindIngestTSRank(id, ts)
+	}
+	return 0, false, nil
+}
+
 // TestCloudBackedChunksIncludedInSearch verifies that cloud-backed chunks
 // participate in search results. This is the regression test for the bug
 // where cloud chunks were "deferred" during heap priming but the lazy

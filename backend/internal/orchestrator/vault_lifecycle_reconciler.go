@@ -544,6 +544,9 @@ func (r *VaultLifecycleReconciler) onAckDelete(chunkID chunk.ChunkID, ackingNode
 }
 
 func (r *VaultLifecycleReconciler) onFinalizeDelete(chunkID chunk.ChunkID) {
+	if r.orch != nil {
+		r.orch.logChunkDeleted(r.vaultID, chunkID)
+	}
 	r.logger.Debug("onFinalizeDelete", "chunk", chunkID)
 	// Audit-only. The pending entry was removed inside applyFinalizeDelete
 	// before this callback fired.

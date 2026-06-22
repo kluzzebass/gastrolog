@@ -1943,68 +1943,6 @@ func TestSearchWithContextLimit(t *testing.T) {
 	}
 }
 
-// TestSearchSealedWithoutIndexes verifies that sealed chunks without indexes
-// fall back to sequential scanning instead of returning an error.
-func TestSearchSealedWithoutIndexes(t *testing.T) {
-	records := []chunk.Record{
-		{IngestTS: t1, Attrs: attrsA, Raw: []byte("error one")},
-		{IngestTS: t2, Attrs: attrsB, Raw: []byte("warning two")},
-		{IngestTS: t3, Attrs: attrsA, Raw: []byte("error three")},
-	}
-
-	// Create chunk manager and append records.
-	s := memtest.MustNewVault(t, chunkmem.Config{
-		RotationPolicy: chunk.NewRecordCountPolicy(10000),
-		Now:            fakeClockForBatches([][]chunk.Record{records}),
-	})
-
-	for _, rec := range records {
-		if _, _, err := s.CM.Append(rec); err != nil {
-			t.Fatalf("append: %v", err)
-		}
-	}
-
-	// Seal the chunk but DO NOT build indexes.
-	if err := s.CM.Seal(); err != nil {
-		t.Fatalf("seal: %v", err)
-	}
-	// Note: NOT calling BuildIndexes - indexes don't exist.
-
-	eng := s.QE
-
-	// Query with time filter - should fall back to sequential scan.
-	t.Run("time filter", func(t *testing.T) {
-		seq := search(eng, context.Background(), query.Query{
-			Start: t1,
-			End:   t4,
-		})
-		results, err := collect(seq)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if len(results) != 3 {
-			t.Fatalf("expected 3 results, got %d", len(results))
-		}
-	})
-
-	// Query with token filter - should fall back to sequential scan.
-	t.Run("token filter", func(t *testing.T) {
-		seq := search(eng, context.Background(), query.Query{
-			Tokens: []string{"error"},
-		})
-		results, err := collect(seq)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if len(results) != 2 {
-			t.Fatalf("expected 2 results, got %d", len(results))
-		}
-		if string(results[0].Raw) != "error one" || string(results[1].Raw) != "error three" {
-			t.Errorf("unexpected results: %v", results)
-		}
-	})
-}
-
 // TestCrossChunkOrdering verifies that records are returned in correct order
 // when spanning multiple chunks.
 func TestCrossChunkOrdering(t *testing.T) {
@@ -2700,8 +2638,10 @@ func TestSearchComparisonOperatorSealedVsActive(t *testing.T) {
 	}
 }
 
-// setupWithoutIndexes creates sealed chunks WITHOUT building indexes,
-// simulating cloud-backed chunks where no local indexes exist.
+// setupWithoutIndexes creates sealed chunks without building token/kv/json
+// indexes. Ingest TS rank lookups still come from the memory chunk manager's
+// sealed record slice (not a heap-copied index). Production GLCB chunks
+// require embedded ITSI via mmap.
 func setupWithoutIndexes(t *testing.T, batches ...[]chunk.Record) *query.Engine {
 	t.Helper()
 

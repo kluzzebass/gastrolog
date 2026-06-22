@@ -19,9 +19,9 @@ import (
 // indexMissingCM wraps a ChunkManager so that List()/Meta() report
 // CloudBacked=true and FindIngestEntryIndex returns (0, false). This
 // reproduces the production setup where a cloud-backed chunk is in the
-// FSM manifest but the local IngestTS rank index isn't cached on this
-// node — search can still stream the records from the blob, but the
-// histogram path can't resolve per-bucket ranks.
+// FSM manifest but the local IngestTS rank index isn't reachable on this
+// node — sealed-chunk search fails loudly; histogram falls back to
+// proportional distribution.
 type indexMissingCM struct {
 	chunk.ChunkManager
 }

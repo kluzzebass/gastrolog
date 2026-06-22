@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"slices"
 	"time"
@@ -147,6 +148,11 @@ func (o *Orchestrator) buildPipelineVaultSpec(vaultID glid.GLID, home bool, fsm 
 		spec.ChunkPolicy = policy
 		spec.OnChunkBuilt = func(id chunk.ChunkID) {
 			o.registerBuiltPipelineChunk(vaultID, fsm, id)
+		}
+		spec.OnManifestOpened = func(m *vaultctlfsm.OpenChunkManifest) {
+			if m != nil {
+				o.logChunkCreated(vaultID, m.ChunkID)
+			}
 		}
 		spec.ChunkRequiredHolders = func() []string {
 			return o.vaultPlacementNodeIDs(vaultID)
@@ -525,4 +531,104 @@ func (o *Orchestrator) reloadPipelineFromConfig(sys *system.System) error {
 	}
 
 	return nil
+}
+
+// overlayPipelineChunkMetaBounds fills missing timestamp bounds on active/sealing
+// pipeline chunks from a built GLCB or, when absent, by scanning local segments.
+func (o *Orchestrator) overlayPipelineChunkMetaBounds(vaultID glid.GLID, m *chunk.ChunkMeta) {
+	if m == nil || chunkMetaBoundsComplete(m) {
+		return
+	}
+	if m.State != chunk.ChunkStateActive && m.State != chunk.ChunkStateSealing {
+		return
+	}
+	if o.overlayPipelineChunkMetaBoundsFromGLCB(vaultID, m) {
+		return
+	}
+	o.overlayPipelineChunkMetaBoundsFromManifest(vaultID, m)
+}
+
+func (o *Orchestrator) overlayPipelineChunkMetaBoundsFromGLCB(vaultID glid.GLID, m *chunk.ChunkMeta) bool {
+	chunkRoot, ok := o.pipelineVaultChunkRoot(vaultID)
+	if !ok {
+		return false
+	}
+	glcbPath := chunking.ChunkGLCBPath(chunkRoot, m.ID)
+	if _, err := os.Stat(glcbPath); err != nil {
+		return false
+	}
+	result, err := chunking.BuildResultFromExistingGLCB(glcbPath, time.Time{})
+	if err != nil {
+		return false
+	}
+	if !result.WriteEnd.IsZero() {
+		m.WriteEnd = result.WriteEnd
+	}
+	if !result.IngestStart.IsZero() {
+		m.IngestStart = result.IngestStart
+	}
+	if !result.IngestEnd.IsZero() {
+		m.IngestEnd = result.IngestEnd
+	}
+	if !result.SourceEnd.IsZero() {
+		m.SourceEnd = result.SourceEnd
+	}
+	return true
+}
+
+func (o *Orchestrator) overlayPipelineChunkMetaBoundsFromManifest(vaultID glid.GLID, m *chunk.ChunkMeta) {
+	manifest := o.pipelineChunkManifest(vaultID, m.ID)
+	if manifest == nil {
+		return
+	}
+	if !manifest.Bounds.IsZero() {
+		vaultctlfsm.ApplyManifestBoundsToChunkMeta(m, manifest.Bounds)
+		return
+	}
+	root, err := o.originRoot(vaultID)
+	if err != nil {
+		return
+	}
+	bounds, err := chunking.BoundsFromManifestRefs(manifest.Refs, chunking.VaultSegmentLocator{Root: root})
+	if err != nil {
+		return
+	}
+	vaultctlfsm.ApplyManifestBoundsToChunkMeta(m, bounds)
+}
+
+func (o *Orchestrator) pipelineChunkManifest(vaultID glid.GLID, chunkID chunk.ChunkID) *vaultctlfsm.OpenChunkManifest {
+	if o.groupMgr == nil {
+		return nil
+	}
+	g := o.groupMgr.GetGroup(raftgroup.VaultControlPlaneGroupID(vaultID))
+	if g == nil {
+		return nil
+	}
+	vfsm, ok := g.FSM.(*vaultraft.FSM)
+	if !ok || vfsm == nil {
+		return nil
+	}
+	sub := vfsm.VaultFSM(vaultID)
+	if sub == nil {
+		return nil
+	}
+	if sm := sub.SealedManifest(); sm != nil && sm.ChunkID == chunkID {
+		return sm
+	}
+	if oc := sub.OpenChunk(); oc != nil && oc.ChunkID == chunkID {
+		return oc
+	}
+	return nil
+}
+
+func chunkMetaBoundsComplete(m *chunk.ChunkMeta) bool {
+	if m == nil {
+		return true
+	}
+	return saneRecordTime(m.WriteStart) && saneRecordTime(m.WriteEnd) &&
+		saneRecordTime(m.IngestStart) && saneRecordTime(m.IngestEnd)
+}
+
+func saneRecordTime(t time.Time) bool {
+	return !t.IsZero() && t.Year() >= 2000
 }

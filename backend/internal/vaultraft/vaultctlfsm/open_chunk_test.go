@@ -287,3 +287,64 @@ func TestOpenChunkManifestWhileSealedManifestPending(t *testing.T) {
 		t.Fatalf("open while pending = %v", result)
 	}
 }
+
+func TestSealChunkRepairsMissingManifestEntry(t *testing.T) {
+	t.Parallel()
+	fsm := New()
+	chunkID := testChunkID(0x99)
+	segID := glid.New()
+	now := time.Unix(0, 1_700_000_000_000).UTC()
+	applyCmd(t, fsm, MarshalOpenChunkManifest(chunkID, now))
+	applyCmd(t, fsm, MarshalAddOpenChunkSegmentRef(chunkID, OpenChunkSegmentRef{
+		SegmentID: segID, FirstRecordNumber: 0, LastRecordNumber: 9,
+		SliceBytes: 100, RefAddedAt: now,
+	}))
+	applyCmd(t, fsm, MarshalSealOpenChunkManifest(chunkID, now.Add(time.Minute)))
+
+	fsm.mu.Lock()
+	delete(fsm.chunks, chunkID)
+	fsm.mu.Unlock()
+	if fsm.Get(chunkID) != nil {
+		t.Fatal("expected missing manifest entry before repair")
+	}
+
+	applyCmd(t, fsm, MarshalSealChunk(chunkID, now.Add(2*time.Minute), 10, 500, now, now, now, true))
+	entry := fsm.Get(chunkID)
+	if entry == nil || entry.State != chunk.ChunkStateSealed {
+		t.Fatalf("entry after repair = %+v", entry)
+	}
+	if fsm.SealedManifest() != nil {
+		t.Fatal("sealed manifest must clear after SealChunk")
+	}
+}
+
+func TestSealChunkClearsStaleTombstoneForPendingManifest(t *testing.T) {
+	t.Parallel()
+	fsm := New()
+	chunkID := testChunkID(0xCC)
+	segID := glid.New()
+	now := time.Unix(0, 1_700_000_000_000).UTC()
+	applyCmd(t, fsm, MarshalOpenChunkManifest(chunkID, now))
+	applyCmd(t, fsm, MarshalAddOpenChunkSegmentRef(chunkID, OpenChunkSegmentRef{
+		SegmentID: segID, FirstRecordNumber: 0, LastRecordNumber: 9,
+		SliceBytes: 100, RefAddedAt: now,
+	}))
+	applyCmd(t, fsm, MarshalSealOpenChunkManifest(chunkID, now.Add(time.Minute)))
+
+	fsm.mu.Lock()
+	fsm.tombstones[chunkID] = time.Now()
+	delete(fsm.chunks, chunkID)
+	fsm.mu.Unlock()
+	if !fsm.IsTombstoned(chunkID) {
+		t.Fatal("expected tombstone before repair")
+	}
+
+	applyCmd(t, fsm, MarshalSealChunk(chunkID, now.Add(2*time.Minute), 10, 500, now, now, now, true))
+	if fsm.IsTombstoned(chunkID) {
+		t.Fatal("stale tombstone must clear when pending sealed manifest seals")
+	}
+	entry := fsm.Get(chunkID)
+	if entry == nil || entry.State != chunk.ChunkStateSealed {
+		t.Fatalf("entry after tombstone repair = %+v", entry)
+	}
+}
